@@ -7,6 +7,12 @@ from nexus.contracts.rule_lifecycle import (
     RuleLifecycleState,
     recommend_rule_state,
 )
+from nexus.contracts.sf_replacement import (
+    SF_REPLACEMENT_CLEANLINESS_GATE_SCHEMA,
+    SFReplacementDecision,
+    build_sf_replacement_cleanliness_gate,
+    build_sf_replacement_cleanliness_manifest,
+)
 from nexus.contracts.evidence_dataset import (
     EVIDENCE_DATASET_MANIFEST_SCHEMA,
     EVIDENCE_DATASET_RECORD_SCHEMA,
@@ -51,10 +57,12 @@ __all__ = [
     "EVIDENCE_DATASET_MANIFEST_SCHEMA",
     "EVIDENCE_DATASET_RECORD_SCHEMA",
     "EVIDENCE_RETENTION_DRY_RUN_SCHEMA",
+    "SF_REPLACEMENT_CLEANLINESS_GATE_SCHEMA",
     "EvidenceDatasetRecord",
     "ContextBudgetReceipt",
     "ContextBudgetSource",
     "EvidenceRetentionItem",
+    "SFReplacementDecision",
     "ClaimClass",
     "OptimizationReportContract",
     "ProviderTokenCleanliness",
@@ -63,6 +71,8 @@ __all__ = [
     "build_context_budget_receipt",
     "build_evidence_retention_dry_run",
     "build_optimization_report_contract",
+    "build_sf_replacement_cleanliness_gate",
+    "build_sf_replacement_cleanliness_manifest",
     "classify_evidence_retention_path",
     "current_evidence_paths_from_manifest",
     "evidence_record_from_benchmark_row",
