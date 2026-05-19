@@ -45,6 +45,10 @@ def test_build_manifest_from_benchmark_jsonl_writes_records(tmp_path):
     assert summary["public_benchmark_allowed"] is False
     assert payload["rows"][0]["provider_token_cleanliness"] == "measured"
     assert payload["rows"][1]["provider_token_cleanliness"] == "missing"
+    assert payload["evidence_sealed_record_count"] == 2
+    assert payload["rows"][0]["evidence_seal_status"] == "PASS"
+    assert payload["rows"][0]["evidence_hash_status"] == "PASS"
+    assert payload["rows"][0]["evidence_seal_ref"].startswith("sha256:")
 
 
 def test_build_manifest_from_benchmark_jsonl_can_write_read_model(tmp_path):
@@ -142,3 +146,5 @@ def test_build_manifest_from_sf_smoke_json_writes_runtime_apply_review(tmp_path)
     assert summary["runtime_update_allowed"] is True
     assert payload["claim_class"] == "RUNTIME_APPLY_REVIEW"
     assert payload["rows"][0]["skill_effect_status"] == "receipt_confirmed"
+    assert payload["rows"][0]["evidence_seal_status"] == "PASS"
+    assert payload["rows"][0]["evidence_hash_status"] == "PASS"

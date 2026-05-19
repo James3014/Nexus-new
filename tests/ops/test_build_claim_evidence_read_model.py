@@ -113,3 +113,25 @@ def test_build_read_model_returns_for_runtime_review_without_evidence_dataset_sc
     assert summary["source_manifest_schema"] == ""
     assert summary["source_manifest_status"] == "LEGACY_OR_DIAGNOSTIC"
     assert "invalid_or_missing_evidence_dataset_manifest_schema" in payload["blockers"]
+
+
+def test_build_read_model_returns_when_completion_envelope_fails(tmp_path):
+    source = tmp_path / "evidence_manifest.json"
+    output = tmp_path / "read_model.json"
+    source.write_text(
+        json.dumps(
+            _manifest(
+                completion_status="RETURN",
+                completion_envelope_ref="docs/reports/completion.json",
+            )
+        ),
+        encoding="utf-8",
+    )
+
+    summary = build_read_model_from_evidence_manifest(input_path=source, output_path=output)
+    payload = json.loads(output.read_text(encoding="utf-8"))
+
+    assert summary["status"] == "RETURN"
+    assert summary["completion_status"] == "RETURN"
+    assert summary["completion_envelope_ref"] == "docs/reports/completion.json"
+    assert "completion_envelope_not_pass" in payload["blockers"]

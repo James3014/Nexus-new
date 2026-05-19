@@ -16,6 +16,7 @@ from nexus.contracts.evidence_dataset import (
     evidence_record_from_benchmark_row,
     evidence_record_from_sf_smoke_case,
 )
+from nexus.contracts.evidence_sealing import seal_evidence
 from nexus.contracts.optimization_report import ClaimClass
 from scripts.ops.build_claim_evidence_read_model import build_read_model_from_evidence_manifest
 from scripts.ops.report_output import resolve_report_output
@@ -52,7 +53,9 @@ def build_manifest_from_benchmark_jsonl(
         evidence_record_from_benchmark_row(row, source_path=str(input_path), claim_class=claim_class)
         for row in _load_jsonl(input_path)
     ]
-    manifest = build_evidence_dataset_manifest(records, source_path=str(input_path), claim_class=claim_class)
+    manifest = _seal_manifest_rows(
+        build_evidence_dataset_manifest(records, source_path=str(input_path), claim_class=claim_class)
+    )
     if not dry_run:
         _write(output_path, manifest)
     return _summary(
@@ -83,10 +86,12 @@ def build_manifest_from_sf_smoke_json(
         for case in cases
         if isinstance(case, dict)
     ]
-    manifest = build_evidence_dataset_manifest(
-        records,
-        source_path=str(input_path),
-        claim_class=ClaimClass.RUNTIME_APPLY_REVIEW,
+    manifest = _seal_manifest_rows(
+        build_evidence_dataset_manifest(
+            records,
+            source_path=str(input_path),
+            claim_class=ClaimClass.RUNTIME_APPLY_REVIEW,
+        )
     )
     if not dry_run:
         _write(output_path, manifest)
@@ -121,6 +126,26 @@ def _summary(
         "provider_token_cleanliness_counts": dict(manifest.get("provider_token_cleanliness_counts", {}) or {}),
         "read_model": read_model_summary,
     }
+
+
+def _seal_manifest_rows(manifest: dict[str, Any]) -> dict[str, Any]:
+    rows = [row for row in manifest.get("rows", []) if isinstance(row, dict)]
+    sealed_rows: list[dict[str, Any]] = []
+    for index, row in enumerate(rows):
+        sealed = dict(row)
+        if str(sealed.get("evidence_seal_status") or "NOT_APPLICABLE").upper() == "NOT_APPLICABLE":
+            seal = seal_evidence(sealed, evidence_id=str(sealed.get("record_id") or f"record-{index}"))
+            sealed["evidence_seal_status"] = seal["evidence_seal_status"]
+            sealed["evidence_hash_status"] = seal["evidence_hash_status"]
+            sealed["evidence_sha256"] = seal["sha256"]
+            sealed["evidence_seal_ref"] = f"sha256:{seal['sha256']}"
+        sealed_rows.append(sealed)
+    manifest = dict(manifest)
+    manifest["rows"] = sealed_rows
+    manifest["evidence_sealed_record_count"] = sum(
+        1 for row in sealed_rows if str(row.get("evidence_seal_status") or "").upper() == "PASS"
+    )
+    return manifest
 
 
 def _optional_read_model(

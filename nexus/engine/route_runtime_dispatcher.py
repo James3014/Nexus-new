@@ -8,8 +8,11 @@ from typing import Any, Mapping
 class RouteRuntimeDispatcher:
     """Consume read-only route runtime plans without executing dispatch."""
 
-    def prepare(self, runtime_plan: Mapping[str, Any]) -> dict[str, Any]:
+    def prepare(self, runtime_plan: Mapping[str, Any], *, hard_gate: Mapping[str, Any] | None = None) -> dict[str, Any]:
         blockers = _blockers(runtime_plan)
+        gate = hard_gate if isinstance(hard_gate, Mapping) else {}
+        if gate:
+            blockers.extend(_hard_gate_blockers(gate))
         return {
             "schema": "nexus.route_runtime_dispatch_preparation.v1",
             "status": "PASS" if not blockers else "RETURN",
@@ -21,6 +24,7 @@ class RouteRuntimeDispatcher:
             "public_benchmark_allowed": False,
             "execution_slots": list(runtime_plan.get("execution_slots", []) or []),
             "isolated_serial_capabilities": list(runtime_plan.get("isolated_serial_capabilities", []) or []),
+            "hard_gate_status": str(gate.get("status") or "NOT_APPLICABLE"),
             "blockers": blockers,
             "claim_boundary": [
                 "Route runtime dispatcher preparation consumes plans without executing work.",
@@ -41,4 +45,15 @@ def _blockers(runtime_plan: Mapping[str, Any]) -> list[str]:
         blockers.append("runtime_update_allowed_in_runtime_plan")
     if str(runtime_plan.get("claim_verdict") or "NOT_EVALUATED") != "NOT_EVALUATED":
         blockers.append("claim_verdict_evaluated_in_runtime_plan")
+    return sorted(set(str(blocker) for blocker in blockers if str(blocker)))
+
+
+def _hard_gate_blockers(hard_gate: Mapping[str, Any]) -> list[str]:
+    blockers = list(hard_gate.get("blockers", []) or [])
+    if hard_gate.get("status") != "PASS":
+        blockers.append("hard_gate_compatibility_not_pass")
+    if bool(hard_gate.get("runtime_update_allowed", False)):
+        blockers.append("hard_gate_runtime_update_allowed")
+    if bool(hard_gate.get("public_benchmark_allowed", False)):
+        blockers.append("hard_gate_public_benchmark_allowed")
     return sorted(set(str(blocker) for blocker in blockers if str(blocker)))
