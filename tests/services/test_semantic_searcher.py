@@ -17,6 +17,20 @@ class FakeRepository:
         )
 
 
+class FallbackRepository:
+    def search_fts(self, **kwargs):
+        return pd.DataFrame(
+            [
+                {
+                    "rule_id": "r2",
+                    "condition": "docs",
+                    "action": "inspect claim boundary",
+                    "source_path": "docs/report.md",
+                }
+            ]
+        )
+
+
 def test_semantic_searcher_wraps_repository_search():
     repo = FakeRepository()
     searcher = SemanticSearcher(repo)
@@ -47,3 +61,30 @@ def test_memory_service_delegates_semantic_search_to_service_seam(tmp_path, monk
 
     assert out[0]["content"] == "run targeted pytest"
     assert repo.calls[0]["fallback_columns"] == ["condition", "action"]
+
+
+def test_semantic_searcher_builds_retrieval_receipt_with_fts_scores():
+    repo = FakeRepository()
+    searcher = SemanticSearcher(repo)
+
+    receipt = searcher.build_retrieval_receipt("bug", table_name="policy", limit=2)
+
+    assert receipt["status"] == "PASS"
+    assert receipt["query"] == "bug"
+    assert receipt["index_snapshot_id"] == "memory_index:policy:1:unknown"
+    assert receipt["chunk_hash_version"] == "sha256:v1"
+    assert receipt["results"][0]["source_id"] == "r1"
+    assert receipt["results"][0]["source_path"] == "policy"
+    assert receipt["results"][0]["score_components"] == {"fts": 0.8}
+    assert receipt["results"][0]["chunk_hash"].startswith("sha256:")
+
+
+def test_semantic_searcher_receipt_uses_fallback_rank_when_scores_are_missing():
+    searcher = SemanticSearcher(FallbackRepository())
+
+    receipt = searcher.build_retrieval_receipt("docs", table_name="policy")
+
+    assert receipt["status"] == "PASS"
+    assert receipt["results"][0]["source_id"] == "r2"
+    assert receipt["results"][0]["source_path"] == "docs/report.md"
+    assert receipt["results"][0]["score_components"] == {"fallback_rank": 1.0}

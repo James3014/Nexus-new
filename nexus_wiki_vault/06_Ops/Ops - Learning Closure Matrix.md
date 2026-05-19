@@ -2704,3 +2704,10 @@ version_scope:
 - Failure: `Path("")` became `.`, so the default path resolver wrote `NEXUS_OPTIMIZATION_ARTIFACT_INDEX_2026-05-20.md` into the repo root instead of `docs/reports`.
 - Lesson: CLI adapters that combine optional `Path` args with output-dir helpers must treat both empty string and `.` as unset.
 - Guardrail: normalize optional `Path` CLI arguments with `str(path) not in {"", "."}` before calling shared output resolution.
+
+## 2026-05-20 - validation suites must not guess neighboring test paths
+
+- Trigger: broader semantic-search verification included `tests/services/test_memory_service.py`.
+- Failure: pytest returned exit code 4 because that file does not exist, so the suite collected no tests.
+- Lesson: broadened verification commands should be assembled from `rg --files` or known test inventory, not guessed module names.
+- Guardrail: confirm expanded test paths exist before running broader suites, especially when selecting neighboring service tests.
