@@ -709,3 +709,11 @@ Lesson:
 - `PUBLIC_READY` evidence records validate seal and hash status during record construction, before manifest-level sealing can run.
 - Treat `public_ready_requires_evidence_hash` or `public_ready_requires_evidence_seal` from benchmark JSONL export as evidence-pipeline ordering drift, not as benchmark delivery failure.
 - Prevention rule: pre-seal benchmark rows before creating `EvidenceDatasetRecord` whenever the export claim class is `PUBLIC_READY`.
+
+### Failure Lesson: Public Benchmark Environment Drift
+
+Lesson:
+
+- Public benchmark preflight depends on explicit model and hidden-verifier environment variables, even when the CLI flags are otherwise unchanged.
+- Treat `nexus_model_env_missing`, `direct_model_env_missing`, or `sentinel_hidden_verifier_disabled` as command environment drift, not route or taskset readiness failure.
+- Prevention rule: keep public benchmark smoke, preflight, and full-run commands in one reusable invocation template that always exports `NEXUS_VALUE_HIDDEN_VERIFIER`, `NEXUS_GEMINI_MODEL_NAME`, and `NEXUS_DIRECT_GEMINI_MODEL`.
