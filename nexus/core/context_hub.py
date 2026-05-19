@@ -5,6 +5,7 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 from datetime import datetime
 from dataclasses import dataclass
+from nexus.contracts.context_budget import ContextBudgetSource, build_context_budget_receipt
 from nexus.core.state_contracts import NexusDiagnosis, NexusResearch, NexusState
 from nexus.core.state_io import StateIO
 from nexus.services.memory import MemoryService
@@ -296,6 +297,42 @@ class ContextHub:
         token = handoff.get("state_token", "INITIAL")
         
         return f"L1: [TASK: {task_id}] [PHASE: {phase}] [TOKEN: {token}] [AOS: 131.5]"
+
+    def build_context_budget_receipt(
+        self,
+        *,
+        task_id: str,
+        token_budget: int = 4000,
+        state_view: StateView | NexusState | None = None,
+        extra_sources: List[Dict[str, Any]] | None = None,
+    ) -> Dict[str, Any]:
+        """Build a read-only budget receipt for context assembly."""
+
+        state = state_view or self.state_io.load_global_state()
+        l0 = self._get_l0_rules()
+        l1 = self._get_l1_index()
+        history = getattr(state, "metadata", {}).get("chat_history", []) if state is not None else []
+        sources: list[ContextBudgetSource | Dict[str, Any]] = [
+            ContextBudgetSource("L0:rules", "L0", self._estimate_context_tokens(l0), priority=0, required=True),
+            ContextBudgetSource("L1:index", "L1", self._estimate_context_tokens(l1), priority=1, required=True),
+        ]
+        if history:
+            sources.append(
+                ContextBudgetSource(
+                    "history:recent",
+                    "history",
+                    self._estimate_context_tokens(str(history[-5:])),
+                    priority=20,
+                )
+            )
+        sources.extend(extra_sources or [])
+        receipt = build_context_budget_receipt(sources, token_budget=token_budget)
+        payload = receipt.to_dict()
+        payload["task_id"] = task_id
+        return payload
+
+    def _estimate_context_tokens(self, value: Any) -> int:
+        return max(1, int(len(str(value)) / 3.8))
 
     def assemble_context(self, task_id: str, layers: List[int], budget: int = 4000, bayesian_params: Optional[Dict[str, Any]] = None) -> str:
         """
