@@ -40,6 +40,13 @@ from nexus.contracts.route_dag_pregate import (
     ROUTE_DAG_PREGATE_SCHEMA,
     build_route_dag_pregate,
 )
+from nexus.contracts.retrieval_receipt import (
+    RETRIEVAL_RECEIPT_SCHEMA,
+    RetrievalReceipt,
+    RetrievalResultReceipt,
+    build_retrieval_receipt,
+    validate_retrieval_receipt,
+)
 from nexus.contracts.optimization_report import (
     ClaimClass,
     OptimizationReportContract,
@@ -62,11 +69,14 @@ __all__ = [
     "EVIDENCE_DATASET_RECORD_SCHEMA",
     "EVIDENCE_RETENTION_DRY_RUN_SCHEMA",
     "ROUTE_DAG_PREGATE_SCHEMA",
+    "RETRIEVAL_RECEIPT_SCHEMA",
     "SF_REPLACEMENT_CLEANLINESS_GATE_SCHEMA",
     "EvidenceDatasetRecord",
     "ContextBudgetReceipt",
     "ContextBudgetSource",
     "EvidenceRetentionItem",
+    "RetrievalReceipt",
+    "RetrievalResultReceipt",
     "SFReplacementDecision",
     "ClaimClass",
     "OptimizationReportContract",
@@ -77,6 +87,7 @@ __all__ = [
     "build_evidence_retention_dry_run",
     "build_optimization_report_contract",
     "build_route_dag_pregate",
+    "build_retrieval_receipt",
     "build_sf_replacement_cleanliness_gate",
     "build_sf_replacement_cleanliness_manifest",
     "classify_evidence_retention_path",
@@ -88,4 +99,5 @@ __all__ = [
     "validate_evidence_dataset_record",
     "validate_context_budget_receipt",
     "validate_optimization_report_contract",
+    "validate_retrieval_receipt",
 ]
