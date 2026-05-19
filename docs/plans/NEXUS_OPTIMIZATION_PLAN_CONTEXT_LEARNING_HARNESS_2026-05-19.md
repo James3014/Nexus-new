@@ -93,6 +93,10 @@ Task cards:
 - `OPT-G0-C`: add HallucinationGuard forecast fields to context assembly receipts so source drops cannot create silent evidence gaps.
 - `OPT-G0-D`: add a mutation assurance pregate for high-risk or public-claim-affecting optimization changes.
 - `OPT-G0-E`: add BDD harness preflight sensor consumption before route DAG acceptance.
+- `OPT-G0-F`: add a capability-contract rescue guard so `required` protected capabilities cannot receive pre-model deterministic rescue nodes.
+- `OPT-G0-G`: add a skill-tier quarantine guard before context assembly or runtime/public route tests can consume skill content.
+- `OPT-G0-H`: add a research supply gap guard that blocks live benchmark escalation unless using diagnostic-only local mock receipts.
+- `OPT-G0-I`: add an AutonomicRouter-forward DAG guard that serializes forced-swarm nodes before static parallel planning.
 
 Exit:
 
@@ -110,6 +114,10 @@ Stop conditions:
 - context slimming drops claim/evidence sources without replacement evidence refs;
 - high-risk changes skip deterministic mutation assurance;
 - BDD-required tasks proceed without `bdd_acceptance_skill`.
+- required protected capabilities receive pre-model rescue fallbacks;
+- quarantined or uncurated skills enter prompt/runtime/public context;
+- live 7R-style benchmark is requested while research supply gap is unresolved;
+- static DAG parallelism ignores an AutonomicRouter forced-swarm pre-route.
 
 ### M1: Context Assembly Contract
 
@@ -121,6 +129,7 @@ Task cards:
 - `OPT-M1-B`: make `ContextHub` consume the contract through constructor injection and `strict_deps=True`.
 - `OPT-M1-C`: emit a context budget receipt with estimated tokens, selected sources, dropped sources, and reason codes.
 - `OPT-M1-D`: annotate dropped sources with HallucinationGuard evidence-gap risk and replacement evidence refs.
+- `OPT-M1-E`: validate skill tier/source before assembling skill-derived prompt context; candidate/quarantine/vendor/worktree skills must be blocked unless explicitly diagnostic-only.
 
 Exit:
 
@@ -136,6 +145,7 @@ Stop conditions:
 - any change that makes prompt construction less traceable;
 - any budget overflow that silently truncates core boundaries.
 - any source drop that can remove claim or verification evidence without a fail-closed reason.
+- any quarantine-tier skill content entering prompt context without a diagnostic-only boundary.
 
 ### M2: Skeleton-First CodeIntel
 
@@ -225,6 +235,8 @@ Task cards:
 - `OPT-M5-D`: make `semantic_failure_sensor` emit bounded retry/fallback decisions instead of vague rerun advice.
 - `OPT-M5-E`: require hardened-router/MFP compatibility metadata for route DAG acceptance.
 - `OPT-M5-F`: consume BDD harness preflight output before accepting DAGs for tasks with Given-When-Then or business acceptance intent.
+- `OPT-M5-G`: read the capability activation contract before adding fallback nodes; `required` protected paths must not contain pre-model deterministic rescue.
+- `OPT-M5-H`: call AutonomicRouter pre-route before static DAG construction; forced-swarm nodes must be isolated as serial execution slots.
 
 Exit:
 
@@ -241,6 +253,8 @@ Stop conditions:
 - putting external tool invocation inside route policy logic;
 - unbounded retries without budget safety floor.
 - route DAGs that bypass hardened routing or BDD preflight requirements.
+- local rescue branches on required protected capability paths;
+- forced-swarm route outcomes planned as parallel standard nodes.
 
 ### M6: Claim/Evidence Gate Consolidation
 
@@ -279,6 +293,7 @@ Task cards:
 - `OPT-M7-B`: keep discovery matrix generation separate from runtime apply.
 - `OPT-M7-C`: require current-best and challenger receipt-clean PASS in the same provider-cleanliness window before replacement.
 - `OPT-M7-D`: write replacement ledger entries with `NO_REPLACEMENT` when provider/session blocks live evidence.
+- `OPT-M7-E`: add a research supply-gap diagnostic mock receipt seam for local preflight only; it must not unlock live benchmark or public claim gates.
 
 Exit:
 
@@ -294,6 +309,7 @@ Stop conditions:
 
 - metadata-only winner replacing a current skill;
 - external GitHub skill becoming runtime default without apply gate.
+- research mock receipts being counted as live skill effectiveness or public benchmark readiness.
 
 ### M8: Workspace Evidence Hygiene
 
@@ -436,6 +452,42 @@ Exit:
 
 - Given-When-Then/business acceptance tasks require `bdd_acceptance_skill`;
 - missing BDD skill returns a preflight blocker.
+
+### OPT-G0-F: Capability Contract Rescue Guard
+
+Goal: prevent M5 fallback planning from putting local deterministic rescue on required protected capability paths.
+
+Exit:
+
+- DAG nodes declare `capability_contract_type`;
+- pre-model rescue is allowed only for explicitly `cost_capped` paths and remains blocked for `required` paths.
+
+### OPT-G0-G: Skill Tier Quarantine Guard
+
+Goal: prevent context assembly and public/runtime routes from consuming uncurated or quarantined skill content.
+
+Exit:
+
+- skill-derived context records include source class/tier status;
+- candidate, auto-generated, vendor, archive, and worktree-copy skills are blocked unless diagnostic-only.
+
+### OPT-G0-H: Research Supply Gap Guard
+
+Goal: keep local optimization preflight moving without pretending research supply gaps are solved.
+
+Exit:
+
+- supply-gap state blocks live benchmark escalation;
+- optional local mock receipts are labeled diagnostic-only and cannot count toward promotion.
+
+### OPT-G0-I: AutonomicRouter-Forward DAG Guard
+
+Goal: make M5 static DAG construction respect runtime forced-swarm decisions.
+
+Exit:
+
+- route DAG builder records pre-route mode;
+- forced-swarm nodes are serialized and cannot be scheduled as parallel standard nodes.
 
 ### OPT-NEXT-2: Evidence Dataset Contract
 

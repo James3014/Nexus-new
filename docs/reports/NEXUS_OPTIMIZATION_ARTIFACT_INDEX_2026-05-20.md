@@ -10,6 +10,7 @@
 - `nexus/contracts/claim_evidence_read_model.py`
 - `nexus/contracts/context_assembly.py`
 - `nexus/contracts/route_context_seam_freeze.py`
+- `nexus/contracts/hard_gate_compatibility.py`
 - `scripts/ops/build_claim_evidence_read_model.py`
 - `scripts/ops/build_context_assembly_contract.py`
 - `scripts/ops/build_route_context_seam_freeze.py`

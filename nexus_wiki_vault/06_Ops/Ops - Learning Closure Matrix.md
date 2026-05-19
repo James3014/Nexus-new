@@ -2711,3 +2711,10 @@ version_scope:
 - Failure: pytest returned exit code 4 because that file does not exist, so the suite collected no tests.
 - Lesson: broadened verification commands should be assembled from `rg --files` or known test inventory, not guessed module names.
 - Guardrail: confirm expanded test paths exist before running broader suites, especially when selecting neighboring service tests.
+
+## 2026-05-20 - hard-gate blocker tests must follow stable sort order
+
+- Trigger: `HardGateCompatibility` returns sorted blocker codes, but the first regression expected a narrative order.
+- Failure: the contract produced the correct blocker set while the test failed on list ordering.
+- Lesson: fail-closed contract tests should either assert the documented stable order or compare sets when order is not part of the contract.
+- Guardrail: when a validator returns `sorted(set(blockers))`, write expected blocker lists in lexical order.

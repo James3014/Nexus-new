@@ -73,6 +73,10 @@ Before route/context/harness optimization changes:
 - HallucinationGuard risk is considered before dropping context/evidence sources;
 - mutation assurance is required for high-risk or public-claim-affecting changes;
 - BDD harness preflight is run when task text contains Given-When-Then or business acceptance intent.
+- route DAG fallback policy distinguishes `cost_capped` from `required` protected capabilities;
+- context assembly validates skill source/tier before any skill content can enter prompt context;
+- research supply gaps block live benchmark escalation unless a local mock receipt seam is explicitly marked diagnostic-only;
+- forced-swarm AutonomicRouter outcomes are serialized in DAG execution and never parallelized as standard nodes.
 
 ## 4. Artifact Naming Rule
 
@@ -123,6 +127,10 @@ The optimization plan must run through this `G0` compatibility layer before deep
 | `G0-C Hallucination Guard Forecast` | dropped-source risk and replacement evidence refs | context slimming that creates evidence gaps |
 | `G0-D Mutation Assurance Pregate` | mutation assurance summary when high-risk or public-claim-affecting | release/apply gates with survived deterministic mutants |
 | `G0-E BDD Harness Sensor Pregate` | harness preflight sensor output for BDD/business acceptance tasks | route DAGs missing `bdd_acceptance_skill` when required |
+| `G0-F Capability Contract Rescue Guard` | capability activation contract and rescue plan | pre-model rescue on required protected capability paths |
+| `G0-G Skill Tier Quarantine Guard` | skill tier/status validation before context assembly | candidate/quarantine/vendor/worktree skills entering public or runtime context |
+| `G0-H Research Supply Gap Guard` | research candidate readiness or diagnostic-only mock receipt | live benchmark escalation while research alternate/default is absent |
+| `G0-I AutonomicRouter-Forward DAG Guard` | pre-route mode and forced-swarm serialization status | static parallel DAG topology that conflicts with runtime swarm escalation |
 
 These gates do not approve runtime updates or public benchmark claims. They only prove that optimization artifacts remain compatible with existing Nexus hard gates.
 
