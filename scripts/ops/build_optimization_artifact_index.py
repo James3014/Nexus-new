@@ -12,7 +12,11 @@ DEFAULT_OUTPUT = Path("docs/reports/NEXUS_OPTIMIZATION_ARTIFACT_INDEX_2026-05-20
 DEFAULT_ARTIFACTS = (
     "nexus/contracts/retrieval_receipt.py",
     "nexus/contracts/claim_evidence_read_model.py",
+    "nexus/contracts/context_assembly.py",
+    "nexus/contracts/route_context_seam_freeze.py",
     "scripts/ops/build_claim_evidence_read_model.py",
+    "scripts/ops/build_context_assembly_contract.py",
+    "scripts/ops/build_route_context_seam_freeze.py",
     "scripts/ops/build_evidence_dataset_manifest.py",
     "scripts/ops/check_optimization_artifact_hygiene.py",
     "nexus/contracts/sf_replacement.py",
