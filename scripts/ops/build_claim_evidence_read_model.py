@@ -37,6 +37,7 @@ def build_read_model_from_evidence_manifest(
         records=[record for record in records if isinstance(record, dict)],
         evidence_bundle_refs=evidence_refs,
         receipt_refs=receipt_refs,
+        sealed_evidence_required=bool(manifest.get("sealed_evidence_required", claim_class == ClaimClass.PUBLIC_READY.value)),
     )
     if not dry_run:
         _write(output_path, model)
