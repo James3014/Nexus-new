@@ -27,7 +27,10 @@ def test_route_dag_pregate_exposes_dependencies_receipts_and_fallbacks() -> None
 
     assert pregate["schema"] == ROUTE_DAG_PREGATE_SCHEMA
     assert pregate["status"] == "PASS"
+    assert pregate["claim_verdict"] == "NOT_EVALUATED"
     assert pregate["claim_boundary"][0] == "Route DAG pregate is a read-only planning artifact."
+    assert all(node["claim_verdict"] == "NOT_EVALUATED" for node in pregate["demand_nodes"])
+    assert pregate["demand_nodes"][0]["decision_origin"]
     assert pregate["required_receipts"]["codeintel"] == ["code_scan", "code_impact", "related_tests"]
     assert pregate["fallback_policy_by_capability"]["artifact_gate"] == "fail_closed"
     assert pregate["retry_policy_by_capability"]["artifact_gate"] == "no_retry_fail_closed"
@@ -47,5 +50,6 @@ def test_route_dag_pregate_returns_when_selected_node_is_unknown() -> None:
     )
 
     assert pregate["status"] == "RETURN"
+    assert pregate["claim_verdict"] == "NOT_EVALUATED"
     assert "unknown_capability:missing_capability_node" in pregate["blockers"]
     assert "unknown_capability:missing_required_receipts" in pregate["blockers"]

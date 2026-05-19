@@ -17,8 +17,10 @@ def build_route_dag_pregate(
     return {
         "schema": ROUTE_DAG_PREGATE_SCHEMA,
         "status": "PASS" if not blockers else "RETURN",
+        "claim_verdict": "NOT_EVALUATED",
         "planner_mode": str(capability_plan.get("planner_mode") or ""),
         "plan_schema_version": str(capability_plan.get("schema_version") or ""),
+        "demand_nodes": _demand_nodes(nodes),
         "dependency_edges": _dependency_edges(nodes),
         "parallelizable_edges": _parallelizable_edges(nodes),
         "required_receipts": {
@@ -131,6 +133,31 @@ def _parallelizable_edges(nodes: list[dict[str, Any]]) -> list[dict[str, str]]:
             if peer in planned:
                 pairs.add(tuple(sorted((node["capability"], peer))))
     return [{"a": left, "b": right} for left, right in sorted(pairs)]
+
+
+def _demand_nodes(nodes: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    return [
+        {
+            "capability": node["capability"],
+            "state": node["state"],
+            "decision_origin": _decision_origin(node),
+            "required_receipts": node["required_receipts"],
+            "claim_verdict": "NOT_EVALUATED",
+        }
+        for node in nodes
+    ]
+
+
+def _decision_origin(node: Mapping[str, Any]) -> str:
+    state = str(node.get("state") or "")
+    category = str(node.get("category") or "")
+    if state == "required":
+        return "planner_required"
+    if category in {"governance", "validation"}:
+        return "safety_floor"
+    if state in {"conditional", "pending"}:
+        return "planner_conditional"
+    return "planner_selected"
 
 
 def _blockers(nodes: list[dict[str, Any]]) -> list[str]:
