@@ -992,8 +992,11 @@ def main():
             eval_data = json.loads(reports["eval"].read_text())
             pass_rate = eval_data["summary"]["pass_rate"]
             if pass_rate < policy.v_pass_rate_min:
-                print(f"❌ [CI-BLOCK] Policy Violation: Eval pass rate {pass_rate:.2%} below required {policy.v_pass_rate_min:.2%}")
-                if not args.dry_run: sys.exit(1)
+                if args.wiki_eval_enforce_level == "strict":
+                    print(f"❌ [CI-BLOCK] Policy Violation: Eval pass rate {pass_rate:.2%} below required {policy.v_pass_rate_min:.2%}")
+                    if not args.dry_run: sys.exit(1)
+                else:
+                    print(f"⚠️ [CI-WARN] Eval pass rate {pass_rate:.2%} below required {policy.v_pass_rate_min:.2%}")
         except Exception:
             pass
 

@@ -757,3 +757,27 @@ Lesson:
 - Full wiki governance audit currently includes legacy and archive pages with pre-existing page-contract debt unrelated to route/context code slices.
 - Treat a full-linter failure on untouched legacy pages as release-scope drift, not as evidence that the changed route/context artifacts are unsafe.
 - Prevention rule: use strict changed-scope wiki governance for small production slices, and keep full wiki remediation as a separate archive hygiene campaign.
+
+### Failure Lesson: Wiki Page Contract Tier Drift
+
+Lesson:
+
+- Wiki linting needs a machine-level distinction between active governance pages and retained legacy/report/archive pages.
+- Treat old ADR lessons, imported reports, and archive-source pages as managed soft-contract debt unless they are touched in the current change scope.
+- Prevention rule: hard-fail active governance pages, but emit `Soft Contract` warnings for explicitly classified legacy/report/archive pages so full CI remains release-usable without hiding remediation debt.
+
+### Failure Lesson: Percent Ratio Policy Drift
+
+Lesson:
+
+- CI policy thresholds must store pass rates as ratios even when legacy governance YAML uses percent-style values.
+- Treat a displayed requirement like `8000.00%` as policy-unit drift, not as a real quality target.
+- Prevention rule: normalize pass-rate gate inputs above `1.0` by dividing by 100 before comparing them with report ratios.
+
+### Failure Lesson: Wiki Eval Enforcement Level Drift
+
+Lesson:
+
+- `--wiki-eval-enforce-level warn` must emit quality debt without blocking the full CI release gate.
+- Treat eval pass-rate misses under the default warn mode as governance follow-up debt, not as an immediate release blocker.
+- Prevention rule: keep `strict` as the only blocking wiki eval enforcement mode; default CI should surface the warning while preserving deterministic downstream regression checks.

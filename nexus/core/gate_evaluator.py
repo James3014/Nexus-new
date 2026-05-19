@@ -11,7 +11,7 @@ class AcceptancePolicy:
     # [gates] 區塊
     d_risk_threshold: float = 0.5
     max_risk_prob: float = 0.8
-    v_pass_rate_min: float = 80.0
+    v_pass_rate_min: float = 0.8
     max_forecast_tokens: int = 50000
 
     # [health] 區塊
@@ -44,7 +44,7 @@ class AcceptancePolicy:
         # 🎯 物理映射：Gates
         policy.d_risk_threshold = gates.get("d_risk_threshold", policy.d_risk_threshold)
         policy.max_risk_prob = gates.get("max_risk", gates.get("max_risk_prob", policy.max_risk_prob))
-        policy.v_pass_rate_min = gates.get("v_pass_rate_min", policy.v_pass_rate_min)
+        policy.v_pass_rate_min = _ratio(gates.get("v_pass_rate_min", policy.v_pass_rate_min))
         policy.max_forecast_tokens = gates.get("max_forecast_tokens", policy.max_forecast_tokens)
 
         # 🎯 物理映射：Health
@@ -59,6 +59,11 @@ class AcceptancePolicy:
         policy.backpressure_nerve_threshold = meta.get("backpressure_nerve_threshold", policy.backpressure_nerve_threshold)
 
         return policy
+
+
+def _ratio(value: typing.Any) -> float:
+    raw = float(value)
+    return raw / 100.0 if raw > 1.0 else raw
 
 
 

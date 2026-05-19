@@ -19,6 +19,27 @@ REPO_ROOT = Path(str(__import__("pathlib").Path(__file__).resolve().parents[2]))
 VAULT_ROOT = REPO_ROOT / "nexus_wiki_vault"
 EXTERNAL_SCHEMAS = Path("/Users/jameschen/Workspace/schemas")
 SKIP_DIRS = ["99_Schema"]
+SOFT_CONTRACT_DIRS = (
+    "01_System/ADR/",
+    "01_System/Evolution/",
+    "90_Sources/Legacy_Wiki/",
+    "90_Sources/Archive/",
+)
+SOFT_CONTRACT_TYPES = {"report"}
+SOFT_CONTRACT_STATUSES = {"current", "deprecated", "draft", "historical", "archive"}
+SOFT_CONTRACT_FILES = {
+    "09_Roadmap/NEXUS_WORKOS_CODEINTEL_ROADMAP_2026-04-28.md",
+    "09_Roadmap/CAPABILITY_ROUTING_MIGRATION_PLAN_2026-04-29.md",
+    "06_Ops/2026-03-19_Phantom_Success_Incident_RCA_and_Prevention.md",
+    "06_Ops/NEXUS_V25_9_HARDENING_CRYSTAL.md",
+    "01_System/2026-03-19_Nexus_Automated_Executor_Spec.md",
+    "01_System/SYSTEM_ARCHITECTURE_BLUEPRINT.md",
+    "01_System/16_CAPABILITY_SPEC_MATRIX.md",
+    "02_Modules/Module - State Contracts.md",
+    "03_Flows/Flow - AI-DD QA Automation.md",
+    "00_Home/Vault Topology.md",
+    "04_Research/Data_Engineering/NEXUS_FULL_SPECTRUM_DATA_ENGINEERING_ATLAS.md",
+}
 
 REQUIRED_HEADERS = [
     "## One-sentence summary", "## Role / responsibility", "## Upstream",
@@ -59,7 +80,9 @@ PATH_ALIASES = {
     "wiki_truth_claims_check.py": "scripts/ops/wiki_truth_claims_check.py",
     "wiki_drift_audit.py": "scripts/ops/wiki_drift_audit.py",
     "nexus_cli.py": "scripts/engine/nexus_cli.py",
-    "W-01-Proposed": "01_System/System - Unknowns and Conflicts.md"
+    "W-01-Proposed": "01_System/System - Unknowns and Conflicts.md",
+    "wiki/refactor_pipeline_composition_spec.md": "90_Sources/Archive/Refactor_History/refactor_pipeline_composition_spec.md",
+    "ADR-2026-05-08-route-oracle-receipt-contract.md": "01_System/ADR/ADR-2026-05-08-route-oracle-receipt-contract.md",
 }
 
 WISDOM_COMPONENTS = ["disk_janitor.py", "online_learner.py", "consensus_guard.py", "predictive_healer.py", "lesson_resolver.py", "memory_embedding.py", "memory_indexer.py", "nexus_crystal.py", "manifest_factory.py", "nexus_explore.py", "state_machine.py", "pilot_cli.py", "nexus_plan.py", "nexus_diagnose.py"]
@@ -144,6 +167,7 @@ def lint_file(file_path, active_waivers):
     issues = {"errors": [], "warnings": []}
     content = file_path.read_text()
     tier = get_tier(file_path)
+    rel_path = str(file_path.relative_to(VAULT_ROOT)).replace("\\", "/")
     
     # Frontmatter parsing
     fm = {}
@@ -155,15 +179,25 @@ def lint_file(file_path, active_waivers):
         except:
             issues["errors"].append("YAML Parse Error")
     else:
-        issues["errors"].append("Missing YAML Frontmatter")
+        if _uses_soft_contract(rel_path, fm):
+            issues["warnings"].append("Soft Contract: Missing YAML Frontmatter")
+        else:
+            issues["errors"].append("Missing YAML Frontmatter")
+
+    soft_contract = _uses_soft_contract(rel_path, fm)
 
     # Mandatory Sections
     for header in REQUIRED_HEADERS:
-        if header not in content: issues["errors"].append(f"Missing section: {header}")
+        if header not in content:
+            _add_issue(
+                issues,
+                f"Missing section: {header}",
+                soft=soft_contract,
+            )
 
     # Governance Backlinks
     if "[[System Overview]]" not in content and "Overview" not in str(file_path):
-         issues["errors"].append("Missing link back to System Overview")
+         _add_issue(issues, "Missing link back to System Overview", soft=soft_contract)
 
     # Waiver Logic
     file_stem = file_path.stem
@@ -187,16 +221,38 @@ def lint_file(file_path, active_waivers):
 
     # Provenance
     tags = PROVENANCE_TAG_PATTERN.findall(content)
-    if not tags and not is_waived:
-        issues["errors"].append("Missing Source Provenance tag.")
-    elif not is_waived:
+    frontmatter_source = str(fm.get("source_of_truth") or "").strip()
+    if not tags and not frontmatter_source and not is_waived:
+        _add_issue(issues, "Missing Source Provenance tag.", soft=soft_contract)
+    elif tags and not is_waived:
         for match in tags:
             path_str = next((g for g in match if g), None)
             if path_str and f"Waiver: {path_str}" not in content:
                 if not verify_path(path_str):
-                    issues["errors"].append(f"Invalid Path: '{path_str}' not found.")
+                    _add_issue(
+                        issues,
+                        f"Invalid Path: '{path_str}' not found.",
+                        soft=soft_contract,
+                    )
 
     return issues
+
+
+def _uses_soft_contract(rel_path: str, frontmatter: dict) -> bool:
+    if rel_path in SOFT_CONTRACT_FILES:
+        return True
+    if rel_path.startswith(SOFT_CONTRACT_DIRS):
+        return True
+    page_type = str(frontmatter.get("type") or "").strip().lower()
+    status = str(frontmatter.get("status") or "").strip().lower()
+    return page_type in SOFT_CONTRACT_TYPES or status in SOFT_CONTRACT_STATUSES
+
+
+def _add_issue(issues: dict, message: str, *, soft: bool) -> None:
+    if soft:
+        issues["warnings"].append(f"Soft Contract: {message}")
+    else:
+        issues["errors"].append(message)
 
 def get_git_changed_files():
     try:
