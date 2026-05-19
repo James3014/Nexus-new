@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from collections.abc import Callable
+from dataclasses import dataclass
 from typing import Any
 
 
@@ -44,6 +45,39 @@ def build_runtime_context_payload(
         adapter_receipt=adapter_receipt,
         blockers=[],
     )
+
+
+@dataclass(frozen=True)
+class StatelessContextCoordinator:
+    """Coordinate runtime context assembly through explicit receipt seams."""
+
+    receipt_builder: Callable[..., dict[str, Any]]
+    assembler: Callable[..., str]
+
+    def assemble(
+        self,
+        *,
+        task_id: str,
+        layers: list[int],
+        budget: int,
+        bayesian_params: dict[str, Any] | None = None,
+        state_view: Any = None,
+        extra_sources: list[dict[str, Any]] | None = None,
+    ) -> dict[str, Any]:
+        receipt = self.receipt_builder(
+            task_id=task_id,
+            token_budget=budget,
+            state_view=state_view,
+            extra_sources=extra_sources,
+        )
+        return build_runtime_context_payload(
+            task_id=task_id,
+            layers=layers,
+            budget=budget,
+            adapter_receipt=receipt,
+            assembler=self.assembler,
+            bayesian_params=bayesian_params,
+        )
 
 
 def _payload(

@@ -5,7 +5,7 @@ from types import SimpleNamespace
 import pytest
 
 from nexus.core.context_hub import ContextDependencies, ContextHub
-from nexus.core.context_runtime_adapter import build_runtime_context_payload
+from nexus.core.context_runtime_adapter import StatelessContextCoordinator, build_runtime_context_payload
 
 
 def test_context_hub_strict_deps_requires_dependency_container(tmp_path):
@@ -188,3 +188,38 @@ def test_context_runtime_adapter_returns_without_calling_assembler_when_receipt_
     assert payload["status"] == "RETURN"
     assert payload["context"] == ""
     assert payload["blockers"] == ["receipt_not_pass"]
+
+
+def test_stateless_context_coordinator_wires_receipt_builder_and_assembler():
+    calls = {"receipt": False, "assemble": False}
+
+    def receipt_builder(*, task_id, token_budget, state_view=None, extra_sources=None):
+        calls["receipt"] = True
+        assert task_id == "ctx-runtime"
+        assert token_budget == 99
+        assert state_view == {"state": "view"}
+        assert extra_sources == [{"source_id": "x"}]
+        return {"status": "PASS", "blockers": []}
+
+    def assembler(*, task_id, layers, budget, bayesian_params=None):
+        calls["assemble"] = True
+        assert task_id == "ctx-runtime"
+        assert layers == [0, 1]
+        assert budget == 99
+        assert bayesian_params == {"confidence": 0.8}
+        return "context"
+
+    coordinator = StatelessContextCoordinator(receipt_builder=receipt_builder, assembler=assembler)
+
+    payload = coordinator.assemble(
+        task_id="ctx-runtime",
+        layers=[0, 1],
+        budget=99,
+        bayesian_params={"confidence": 0.8},
+        state_view={"state": "view"},
+        extra_sources=[{"source_id": "x"}],
+    )
+
+    assert calls == {"receipt": True, "assemble": True}
+    assert payload["status"] == "PASS"
+    assert payload["context"] == "context"

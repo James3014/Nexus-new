@@ -1,9 +1,14 @@
 import sqlite3
 import json
+import random
+import time
 from pathlib import Path
 from datetime import datetime
 
 from nexus.contracts.sqlite_write_guard import build_sqlite_write_guard_receipt
+
+SQLITE_BUSY_TIMEOUT_MS = 5000
+SQLITE_WRITE_RETRIES = 4
 
 class ProjectMemoryManager:
     """🧠 Nexus Project Memory: Persistent knowledge across sessions."""
@@ -14,8 +19,7 @@ class ProjectMemoryManager:
         self.init_db()
 
     def init_db(self):
-        with sqlite3.connect(self.db_path) as conn:
-            conn.execute("PRAGMA journal_mode=WAL")
+        with self._connect() as conn:
             conn.execute("""
                 CREATE TABLE IF NOT EXISTS insights (
                     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -29,7 +33,7 @@ class ProjectMemoryManager:
     def build_write_guard_receipt(self, *, concurrent_writer_count: int = 1):
         wal_status = "RETURN"
         try:
-            with sqlite3.connect(self.db_path) as conn:
+            with self._connect() as conn:
                 row = conn.execute("PRAGMA journal_mode").fetchone()
                 journal_mode = str(row[0] if row else "").lower()
                 wal_status = "PASS" if journal_mode == "wal" else "RETURN"
@@ -46,11 +50,10 @@ class ProjectMemoryManager:
         )
 
     def add_insight(self, topic: str, content: str, insight_type: str = "RCA"):
-        with sqlite3.connect(self.db_path) as conn:
-            conn.execute(
-                "INSERT INTO insights (topic, content, type) VALUES (?, ?, ?)",
-                (topic, content, insight_type)
-            )
+        self._execute_with_retry(
+            "INSERT INTO insights (topic, content, type) VALUES (?, ?, ?)",
+            (topic, content, insight_type),
+        )
 
     def add_insight_guarded(
         self,
@@ -92,9 +95,40 @@ class ProjectMemoryManager:
         }
 
     def search(self, query: str):
-        with sqlite3.connect(self.db_path) as conn:
+        with self._connect() as conn:
             cursor = conn.execute(
                 "SELECT topic, content, type, timestamp FROM insights WHERE content LIKE ?",
                 (f"%{query}%",)
             )
             return cursor.fetchall()
+
+    def _connect(self):
+        conn = sqlite3.connect(self.db_path, timeout=SQLITE_BUSY_TIMEOUT_MS / 1000)
+        conn.execute("PRAGMA journal_mode=WAL")
+        conn.execute(f"PRAGMA busy_timeout={SQLITE_BUSY_TIMEOUT_MS}")
+        return conn
+
+    def _execute_with_retry(self, sql: str, params: tuple):
+        last_error: sqlite3.OperationalError | None = None
+        for attempt in range(SQLITE_WRITE_RETRIES):
+            try:
+                with self._connect() as conn:
+                    conn.execute(sql, params)
+                return
+            except sqlite3.OperationalError as exc:
+                if not _is_retryable_sqlite_lock(exc):
+                    raise
+                last_error = exc
+                time.sleep(_sqlite_jitter_delay(attempt))
+        if last_error is not None:
+            raise last_error
+
+
+def _is_retryable_sqlite_lock(exc: sqlite3.OperationalError) -> bool:
+    message = str(exc).lower()
+    return "locked" in message or "busy" in message
+
+
+def _sqlite_jitter_delay(attempt: int) -> float:
+    base = min(0.25, 0.025 * (2 ** max(0, attempt)))
+    return base + random.uniform(0, base / 2)

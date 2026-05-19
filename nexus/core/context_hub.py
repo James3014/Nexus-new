@@ -7,7 +7,7 @@ from datetime import datetime
 from dataclasses import dataclass
 from nexus.contracts.context_assembly import build_context_assembly_contract
 from nexus.contracts.context_budget import ContextBudgetSource, build_context_budget_receipt
-from nexus.core.context_runtime_adapter import build_runtime_context_payload
+from nexus.core.context_runtime_adapter import StatelessContextCoordinator
 from nexus.core.state_contracts import NexusDiagnosis, NexusResearch, NexusState
 from nexus.core.state_io import StateIO
 from nexus.services.memory import MemoryService
@@ -383,19 +383,17 @@ class ContextHub:
         through into ordinary context assembly.
         """
 
-        receipt = self.build_runtime_context_adapter_receipt(
-            task_id=task_id,
-            token_budget=budget,
-            state_view=state_view,
-            extra_sources=extra_sources,
+        coordinator = StatelessContextCoordinator(
+            receipt_builder=self.build_runtime_context_adapter_receipt,
+            assembler=self.assemble_context,
         )
-        return build_runtime_context_payload(
+        return coordinator.assemble(
             task_id=task_id,
             layers=layers,
             budget=budget,
-            adapter_receipt=receipt,
-            assembler=self.assemble_context,
             bayesian_params=bayesian_params,
+            state_view=state_view,
+            extra_sources=extra_sources,
         )
 
     def _context_budget_sources(
