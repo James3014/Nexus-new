@@ -1,6 +1,8 @@
 from __future__ import annotations
 
-from scripts.ops.build_route_dag_pregate_manifest import build_route_dag_pregate_manifest
+import json
+
+from scripts.ops.build_route_dag_pregate_manifest import build_route_dag_pregate_manifest, main
 
 
 def test_build_route_dag_pregate_manifest_is_read_only_and_exposes_retry_policy() -> None:
@@ -26,3 +28,25 @@ def test_build_route_dag_pregate_manifest_is_read_only_and_exposes_retry_policy(
     assert manifest["retry_policy_by_capability"]["artifact_gate"] == "no_retry_fail_closed"
     assert any(edge["to"] == "codeintel" for edge in manifest["dependency_edges"])
     assert any(edge == {"a": "codeintel", "b": "research"} for edge in manifest["parallelizable_edges"])
+
+
+def test_route_dag_pregate_cli_can_write_to_output_dir(tmp_path, capsys) -> None:
+    output_dir = tmp_path / "reports"
+
+    rc = main(
+        [
+            "--task-desc",
+            "Fix a small bug with code impact",
+            "--task-type",
+            "bug",
+            "--codeintel-json",
+            '{"impact_report_present": true}',
+            "--output-dir",
+            str(output_dir),
+        ]
+    )
+    captured = json.loads(capsys.readouterr().out)
+
+    assert rc == 0
+    assert captured["output"].startswith(str(output_dir))
+    assert (output_dir / "NEXUS_OPT_ROUTE_DAG_PREGATE_2026-05-20.json").exists()

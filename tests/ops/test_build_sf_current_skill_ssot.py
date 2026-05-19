@@ -1,6 +1,8 @@
 from __future__ import annotations
 
-from scripts.ops.build_sf_current_skill_ssot import build_current_skill_ssot
+import json
+
+from scripts.ops.build_sf_current_skill_ssot import build_current_skill_ssot, main
 
 
 def _smoke_case(capability: str, skill_id: str, *, used: bool = True) -> dict:
@@ -89,3 +91,41 @@ def test_build_current_skill_ssot_returns_on_original_map_mismatch() -> None:
 
     assert manifest["status"] == "RETURN"
     assert "artifact_gate:new-artifact-skill:original_map_primary_mismatch" in manifest["blockers"]
+
+
+def test_current_skill_ssot_cli_can_write_to_output_dir(tmp_path, capsys) -> None:
+    overlay = tmp_path / "overlay.json"
+    original = tmp_path / "original.json"
+    smoke = tmp_path / "smoke.json"
+    output_dir = tmp_path / "reports"
+    overlay.write_text(
+        json.dumps(
+            {
+                "status": "PASS",
+                "runtime_update_allowed": True,
+                "summary": {"capability_count": 1},
+                "primary_skill_by_capability": {"repair_loop": "tdd"},
+            }
+        ),
+        encoding="utf-8",
+    )
+    original.write_text(json.dumps({"rows": [{"capability": "repair_loop", "primary_skill_id": "tdd"}]}), encoding="utf-8")
+    smoke.write_text(json.dumps({"status": "PASS", "cases": [_smoke_case("repair_loop", "tdd")]}), encoding="utf-8")
+
+    rc = main(
+        [
+            "--overlay",
+            str(overlay),
+            "--original-map",
+            str(original),
+            "--smoke",
+            str(smoke),
+            "--output-dir",
+            str(output_dir),
+        ]
+    )
+    captured = json.loads(capsys.readouterr().out)
+
+    assert rc == 0
+    assert captured["output"].startswith(str(output_dir))
+    assert (output_dir / "NEXUS_SF_CURRENT_SKILL_SSOT_CHECK_2026-05-20.json").exists()

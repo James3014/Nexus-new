@@ -6,6 +6,8 @@ import json
 from pathlib import Path
 from typing import Any, Mapping
 
+from scripts.ops.report_output import resolve_report_output
+
 
 DEFAULT_OVERLAY = Path("docs/reports/NEXUS_SF_RUNTIME_SKILL_POLICY_OVERLAY_CURRENT_2026-05-20.json")
 DEFAULT_ORIGINAL_MAP = Path("docs/reports/NEXUS_SF_CAPABILITY_PRIMARY_ORIGINAL_SKILL_MAP_2026-05-20.json")
@@ -147,23 +149,37 @@ def _write(path: Path, payload: dict[str, Any]) -> None:
     path.write_text(json.dumps(payload, indent=2, ensure_ascii=False, sort_keys=True) + "\n", encoding="utf-8")
 
 
-def main() -> int:
+def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description="Build the current SF capability-skill SSOT check.")
     parser.add_argument("--overlay", default=str(DEFAULT_OVERLAY), type=Path)
     parser.add_argument("--original-map", default=str(DEFAULT_ORIGINAL_MAP), type=Path)
     parser.add_argument("--smoke", default=str(DEFAULT_SMOKE), type=Path)
-    parser.add_argument("--output", default=str(DEFAULT_OUTPUT), type=Path)
+    parser.add_argument("--output", default="", type=Path)
+    parser.add_argument("--output-dir", default="", type=Path)
     parser.add_argument("--dry-run", action="store_true")
-    args = parser.parse_args()
+    args = parser.parse_args(argv)
 
     manifest = build_current_skill_ssot(
         overlay=_load_json(args.overlay),
         original_map=_load_json(args.original_map),
         smoke=_load_json(args.smoke),
     )
+    output_arg = str(args.output)
+    output_dir_arg = str(args.output_dir)
+    output = resolve_report_output(
+        DEFAULT_OUTPUT,
+        output=args.output if output_arg and output_arg != "." else None,
+        output_dir=args.output_dir if output_dir_arg and output_dir_arg != "." else None,
+    )
     if not args.dry_run:
-        _write(args.output, manifest)
-    print(json.dumps({"status": manifest["status"], **manifest["summary"]}, ensure_ascii=False, sort_keys=True))
+        _write(output, manifest)
+    print(
+        json.dumps(
+            {"status": manifest["status"], **manifest["summary"], "output": str(output)},
+            ensure_ascii=False,
+            sort_keys=True,
+        )
+    )
     return 0 if manifest["status"] == "PASS" else 1
 
 

@@ -16,6 +16,7 @@ from nexus.contracts.evidence_retention import (
     build_evidence_retention_dry_run,
     current_evidence_paths_from_manifest,
 )
+from scripts.ops.report_output import resolve_report_output
 
 
 def _json(path: Path) -> dict[str, Any]:
@@ -60,7 +61,8 @@ def main(argv: list[str] | None = None) -> int:
     )
     parser.add_argument("--catalog-pinned", action="append", default=[])
     parser.add_argument("--archive-root", default="docs/reports/archive/optimization-retention-dry-run")
-    parser.add_argument("--output", default="")
+    parser.add_argument("--output", default="", type=Path)
+    parser.add_argument("--output-dir", default="", type=Path)
     args = parser.parse_args(argv)
 
     reports_root = Path(args.reports_root)
@@ -72,8 +74,15 @@ def main(argv: list[str] | None = None) -> int:
         catalog_pinned_paths=tuple(args.catalog_pinned),
         archive_root=args.archive_root,
     )
-    if args.output:
-        _write(Path(args.output), payload)
+    output_arg = str(args.output)
+    output_dir_arg = str(args.output_dir)
+    output = resolve_report_output(
+        Path("NEXUS_OPT_EVIDENCE_RETENTION_DRY_RUN_2026-05-20.json"),
+        output=args.output if output_arg and output_arg != "." else None,
+        output_dir=args.output_dir if output_dir_arg and output_dir_arg != "." else None,
+    )
+    if (output_arg and output_arg != ".") or (output_dir_arg and output_dir_arg != "."):
+        _write(output, payload)
     print(
         json.dumps(
             {
@@ -84,7 +93,9 @@ def main(argv: list[str] | None = None) -> int:
                 "current_evidence_keep_count": payload["summary"]["current_evidence_keep_count"],
                 "pinned_by_catalog_count": payload["summary"]["pinned_by_catalog_count"],
                 "blocker_count": payload["summary"]["blocker_count"],
-                "output": args.output,
+                "output": str(output)
+                if (output_arg and output_arg != ".") or (output_dir_arg and output_dir_arg != ".")
+                else "",
             },
             ensure_ascii=False,
             sort_keys=True,

@@ -8,6 +8,7 @@ from typing import Any
 
 from nexus.contracts.route_dag_pregate import build_route_dag_pregate
 from nexus.engine.capability_planner import CapabilityPlanner, default_capability_nodes
+from scripts.ops.report_output import resolve_report_output
 
 
 DEFAULT_OUTPUT = Path("docs/reports/NEXUS_OPT_ROUTE_DAG_PREGATE_2026-05-20.json")
@@ -63,7 +64,8 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--pillars-json", default="")
     parser.add_argument("--codeintel-json", default="")
     parser.add_argument("--phase-trace-json", default="")
-    parser.add_argument("--output", default=str(DEFAULT_OUTPUT), type=Path)
+    parser.add_argument("--output", default="", type=Path)
+    parser.add_argument("--output-dir", default="", type=Path)
     parser.add_argument("--dry-run", action="store_true")
     args = parser.parse_args(argv)
 
@@ -75,8 +77,15 @@ def main(argv: list[str] | None = None) -> int:
         codeintel=_json_arg(args.codeintel_json, name="codeintel"),
         phase_trace=_json_arg(args.phase_trace_json, name="phase_trace"),
     )
+    output_arg = str(args.output)
+    output_dir_arg = str(args.output_dir)
+    output = resolve_report_output(
+        DEFAULT_OUTPUT,
+        output=args.output if output_arg and output_arg != "." else None,
+        output_dir=args.output_dir if output_dir_arg and output_dir_arg != "." else None,
+    )
     if not args.dry_run:
-        _write(args.output, manifest)
+        _write(output, manifest)
     print(
         json.dumps(
             {
@@ -85,6 +94,7 @@ def main(argv: list[str] | None = None) -> int:
                 "dependency_edge_count": len(manifest["dependency_edges"]),
                 "parallelizable_edge_count": len(manifest["parallelizable_edges"]),
                 "blocker_count": len(manifest["blockers"]),
+                "output": str(output),
                 "runtime_dispatch_changed": manifest["runtime_dispatch_changed"],
             },
             ensure_ascii=False,
