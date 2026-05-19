@@ -36,6 +36,10 @@ from nexus.contracts.evidence_retention import (
     classify_evidence_retention_path,
     current_evidence_paths_from_manifest,
 )
+from nexus.contracts.route_dag_pregate import (
+    ROUTE_DAG_PREGATE_SCHEMA,
+    build_route_dag_pregate,
+)
 from nexus.contracts.optimization_report import (
     ClaimClass,
     OptimizationReportContract,
@@ -57,6 +61,7 @@ __all__ = [
     "EVIDENCE_DATASET_MANIFEST_SCHEMA",
     "EVIDENCE_DATASET_RECORD_SCHEMA",
     "EVIDENCE_RETENTION_DRY_RUN_SCHEMA",
+    "ROUTE_DAG_PREGATE_SCHEMA",
     "SF_REPLACEMENT_CLEANLINESS_GATE_SCHEMA",
     "EvidenceDatasetRecord",
     "ContextBudgetReceipt",
@@ -71,6 +76,7 @@ __all__ = [
     "build_context_budget_receipt",
     "build_evidence_retention_dry_run",
     "build_optimization_report_contract",
+    "build_route_dag_pregate",
     "build_sf_replacement_cleanliness_gate",
     "build_sf_replacement_cleanliness_manifest",
     "classify_evidence_retention_path",
