@@ -17,6 +17,8 @@ from nexus.contracts.evidence_dataset import (
     evidence_record_from_sf_smoke_case,
 )
 from nexus.contracts.optimization_report import ClaimClass
+from scripts.ops.build_claim_evidence_read_model import build_read_model_from_evidence_manifest
+from scripts.ops.report_output import resolve_report_output
 
 
 def _load_jsonl(path: Path) -> list[dict[str, Any]]:
@@ -43,6 +45,7 @@ def build_manifest_from_benchmark_jsonl(
     input_path: Path,
     output_path: Path,
     claim_class: ClaimClass | str = ClaimClass.INTERNAL_DIAGNOSTIC,
+    read_model_output_path: Path | None = None,
     dry_run: bool = False,
 ) -> dict[str, Any]:
     records = [
@@ -52,13 +55,23 @@ def build_manifest_from_benchmark_jsonl(
     manifest = build_evidence_dataset_manifest(records, source_path=str(input_path), claim_class=claim_class)
     if not dry_run:
         _write(output_path, manifest)
-    return _summary(manifest, output_path=output_path, dry_run=dry_run)
+    return _summary(
+        manifest,
+        output_path=output_path,
+        read_model_summary=_optional_read_model(
+            output_path=output_path,
+            read_model_output_path=read_model_output_path,
+            dry_run=dry_run,
+        ),
+        dry_run=dry_run,
+    )
 
 
 def build_manifest_from_sf_smoke_json(
     *,
     input_path: Path,
     output_path: Path,
+    read_model_output_path: Path | None = None,
     dry_run: bool = False,
 ) -> dict[str, Any]:
     payload = _load_json(input_path)
@@ -77,10 +90,25 @@ def build_manifest_from_sf_smoke_json(
     )
     if not dry_run:
         _write(output_path, manifest)
-    return _summary(manifest, output_path=output_path, dry_run=dry_run)
+    return _summary(
+        manifest,
+        output_path=output_path,
+        read_model_summary=_optional_read_model(
+            output_path=output_path,
+            read_model_output_path=read_model_output_path,
+            dry_run=dry_run,
+        ),
+        dry_run=dry_run,
+    )
 
 
-def _summary(manifest: dict[str, Any], *, output_path: Path, dry_run: bool) -> dict[str, Any]:
+def _summary(
+    manifest: dict[str, Any],
+    *,
+    output_path: Path,
+    dry_run: bool,
+    read_model_summary: dict[str, Any] | None = None,
+) -> dict[str, Any]:
     return {
         "schema": "nexus_evidence_dataset_manifest_export.v1",
         "status": "PASS" if manifest.get("blocker_count", 0) == 0 else "RETURN",
@@ -91,7 +119,31 @@ def _summary(manifest: dict[str, Any], *, output_path: Path, dry_run: bool) -> d
         "runtime_update_allowed": bool(manifest.get("runtime_update_allowed")),
         "public_benchmark_allowed": bool(manifest.get("public_benchmark_allowed")),
         "provider_token_cleanliness_counts": dict(manifest.get("provider_token_cleanliness_counts", {}) or {}),
+        "read_model": read_model_summary,
     }
+
+
+def _optional_read_model(
+    *,
+    output_path: Path,
+    read_model_output_path: Path | None,
+    dry_run: bool,
+) -> dict[str, Any] | None:
+    if read_model_output_path is None:
+        return None
+    if dry_run:
+        return {
+            "schema": "nexus_claim_evidence_read_model_export.v1",
+            "status": "PASS",
+            "dry_run": True,
+            "input_path": str(output_path),
+            "output_path": str(read_model_output_path),
+        }
+    return build_read_model_from_evidence_manifest(
+        input_path=output_path,
+        output_path=read_model_output_path,
+        dry_run=False,
+    )
 
 
 def _write(path: Path, payload: dict[str, Any]) -> None:
@@ -105,8 +157,18 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--output", required=True, type=Path)
     parser.add_argument("--source-kind", choices=("benchmark-jsonl", "sf-smoke-json"), required=True)
     parser.add_argument("--claim-class", default=ClaimClass.INTERNAL_DIAGNOSTIC.value)
+    parser.add_argument("--read-model-output", default=None, type=Path)
+    parser.add_argument("--read-model-output-dir", default="", type=Path)
     parser.add_argument("--dry-run", action="store_true")
     args = parser.parse_args(argv)
+    read_model_output_dir = args.read_model_output_dir if str(args.read_model_output_dir) else None
+    read_model_output = None
+    if args.read_model_output is not None or read_model_output_dir is not None:
+        read_model_output = resolve_report_output(
+            Path("claim_evidence_read_model.json"),
+            output=args.read_model_output,
+            output_dir=read_model_output_dir or args.output.parent,
+        )
 
     try:
         if args.source_kind == "benchmark-jsonl":
@@ -114,12 +176,14 @@ def main(argv: list[str] | None = None) -> int:
                 input_path=args.input,
                 output_path=args.output,
                 claim_class=args.claim_class,
+                read_model_output_path=read_model_output,
                 dry_run=args.dry_run,
             )
         else:
             summary = build_manifest_from_sf_smoke_json(
                 input_path=args.input,
                 output_path=args.output,
+                read_model_output_path=read_model_output,
                 dry_run=args.dry_run,
             )
     except Exception as exc:  # noqa: BLE001 - CLI boundary returns structured failure.

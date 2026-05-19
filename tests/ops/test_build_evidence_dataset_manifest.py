@@ -47,6 +47,37 @@ def test_build_manifest_from_benchmark_jsonl_writes_records(tmp_path):
     assert payload["rows"][1]["provider_token_cleanliness"] == "missing"
 
 
+def test_build_manifest_from_benchmark_jsonl_can_write_read_model(tmp_path):
+    source = tmp_path / "benchmark.jsonl"
+    output = tmp_path / "evidence_manifest.json"
+    read_model = tmp_path / "read_model.json"
+    _write_jsonl(
+        source,
+        [
+            {
+                "task_id": "flash-001",
+                "capability": "repair_loop",
+                "skill_id": "tdd",
+                "status": "SUCCESS",
+                "modelcalls": 0,
+                "evidence_bundle_file": "evidence.json",
+                "receipt_file": "receipt.json",
+            }
+        ],
+    )
+
+    summary = build_manifest_from_benchmark_jsonl(
+        input_path=source,
+        output_path=output,
+        read_model_output_path=read_model,
+    )
+    payload = json.loads(read_model.read_text(encoding="utf-8"))
+
+    assert summary["read_model"]["status"] == "PASS"
+    assert payload["runtime_update_allowed"] is False
+    assert {gate["name"]: gate["status"] for gate in payload["gates"]}["claim"] == "PASS"
+
+
 def test_build_manifest_from_benchmark_jsonl_dry_run_does_not_write(tmp_path):
     source = tmp_path / "benchmark.jsonl"
     output = tmp_path / "evidence_manifest.json"
@@ -57,6 +88,24 @@ def test_build_manifest_from_benchmark_jsonl_dry_run_does_not_write(tmp_path):
     assert summary["status"] == "PASS"
     assert summary["dry_run"] is True
     assert output.exists() is False
+
+
+def test_build_manifest_dry_run_reports_read_model_without_writing(tmp_path):
+    source = tmp_path / "benchmark.jsonl"
+    output = tmp_path / "evidence_manifest.json"
+    read_model = tmp_path / "read_model.json"
+    _write_jsonl(source, [{"task_id": "flash-001", "capability": "repair_loop", "status": "SUCCESS"}])
+
+    summary = build_manifest_from_benchmark_jsonl(
+        input_path=source,
+        output_path=output,
+        read_model_output_path=read_model,
+        dry_run=True,
+    )
+
+    assert summary["read_model"]["dry_run"] is True
+    assert output.exists() is False
+    assert read_model.exists() is False
 
 
 def test_build_manifest_from_sf_smoke_json_writes_runtime_apply_review(tmp_path):
