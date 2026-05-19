@@ -19,7 +19,10 @@ DEFAULT_ARTIFACTS = (
     "scripts/ops/build_route_context_seam_freeze.py",
     "scripts/ops/build_evidence_dataset_manifest.py",
     "scripts/ops/check_optimization_artifact_hygiene.py",
+    "scripts/ops/check_route_context_seam_freeze.py",
     "nexus/contracts/sf_replacement.py",
+    "docs/plans/NEXUS_OPTIMIZATION_CONTRACT_AND_RETENTION_2026-05-19.md",
+    "docs/plans/NEXUS_OPTIMIZATION_PLAN_CONTEXT_LEARNING_HARNESS_2026-05-19.md",
 )
 
 

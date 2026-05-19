@@ -65,6 +65,15 @@ Before public benchmark:
 - provider-token telemetry is measured for model-cost rows;
 - public claim gates consume evidence bundles, not markdown summaries.
 
+Before route/context/harness optimization changes:
+
+- AutonomicRouter hardened mode compatibility is checked when route semantics change;
+- MFP thresholds are recorded, including `NEXUS_MFP_CONFIDENCE_MIN`;
+- CompletionEnvelope requirements are represented in closeout read models;
+- HallucinationGuard risk is considered before dropping context/evidence sources;
+- mutation assurance is required for high-risk or public-claim-affecting changes;
+- BDD harness preflight is run when task text contains Given-When-Then or business acceptance intent.
+
 ## 4. Artifact Naming Rule
 
 Generated evidence should use one of these prefixes:
@@ -101,13 +110,28 @@ Stop and write a lesson if:
 - a report lacks claim boundary;
 - a new optimization script writes outside allowed paths;
 - a public claim is inferred from internal smoke.
+- a route/context optimization bypasses hardened router, completion envelope, hallucination, mutation, or BDD preflight gates.
 
-## 7. Next Implementation Gate
+## 7. Hard Gate Compatibility Layer
+
+The optimization plan must run through this `G0` compatibility layer before deeper M1-M8 runtime architecture work.
+
+| Gate | Required evidence | Blocks |
+| --- | --- | --- |
+| `G0-A Hardened Router Compatibility` | route dry-run with hardened router/MFP threshold metadata | route DAG output that cannot pass hardened intent gating |
+| `G0-B Completion Envelope Closeout` | `completion_envelope_ref` or explicit completion envelope status | closeout promotion from evidence summaries only |
+| `G0-C Hallucination Guard Forecast` | dropped-source risk and replacement evidence refs | context slimming that creates evidence gaps |
+| `G0-D Mutation Assurance Pregate` | mutation assurance summary when high-risk or public-claim-affecting | release/apply gates with survived deterministic mutants |
+| `G0-E BDD Harness Sensor Pregate` | harness preflight sensor output for BDD/business acceptance tasks | route DAGs missing `bdd_acceptance_skill` when required |
+
+These gates do not approve runtime updates or public benchmark claims. They only prove that optimization artifacts remain compatible with existing Nexus hard gates.
+
+## 8. Next Implementation Gate
 
 After this contract:
 
 1. run `OPT-NEXT-1` dry-run retention only;
 2. inspect keep/archive counts;
-3. continue SF skill adjustment only after current evidence roots are classified;
-4. defer M1-M7 runtime architecture changes until SF evidence is cleaner.
-
+3. run `G0` compatibility checks before any route/context/harness runtime change;
+4. continue SF skill adjustment only after current evidence roots are classified;
+5. defer M1-M7 runtime architecture changes until SF evidence and G0 compatibility are cleaner.

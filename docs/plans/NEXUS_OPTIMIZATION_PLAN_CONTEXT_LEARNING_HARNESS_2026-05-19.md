@@ -23,6 +23,7 @@ Non-goals:
 - no `.specify` initialization while the worktree is dirty;
 - no runtime skill default changes without a separate SF apply gate;
 - no public benchmark unlock from internal smoke or single-arm evidence.
+- no route/context/harness optimization bypasses AutonomicRouter hardening, CompletionEnvelope closeout, HallucinationGuard, Mutation Assurance, or BDD harness preflight gates.
 
 ## 1. Clean Code / Linus Framing
 
@@ -81,6 +82,35 @@ Validation:
 - markdown exists;
 - paths referenced are under `docs/`, `scripts/ops/`, `nexus/`, or test paths.
 
+### G0: Existing Hard Gate Compatibility
+
+Goal: prove the optimization lane stays compatible with Nexus hard gates before deeper route/context/harness changes.
+
+Task cards:
+
+- `OPT-G0-A`: add a hardened-router compatibility check for route DAG artifacts, including `NEXUS_ROUTING_V4_HARDENED`, MFP threshold metadata, and router acceptance status.
+- `OPT-G0-B`: add CompletionEnvelope awareness to claim/evidence closeout read models through `completion_envelope_ref` or explicit `completion_status`.
+- `OPT-G0-C`: add HallucinationGuard forecast fields to context assembly receipts so source drops cannot create silent evidence gaps.
+- `OPT-G0-D`: add a mutation assurance pregate for high-risk or public-claim-affecting optimization changes.
+- `OPT-G0-E`: add BDD harness preflight sensor consumption before route DAG acceptance.
+
+Exit:
+
+- every route/context/harness optimization artifact can state whether it is compatible with existing hard gates;
+- no G0 check unlocks runtime default apply or public benchmark claims.
+
+Validation:
+
+- focused tests for hardened-router/MFP metadata, completion envelope requirement, hallucination-risk blockers, mutation assurance requirement, and BDD preflight escalation.
+
+Stop conditions:
+
+- route DAG output assumes planner intent is enough to pass hardened routing;
+- closeout/read-model output omits CompletionEnvelope state;
+- context slimming drops claim/evidence sources without replacement evidence refs;
+- high-risk changes skip deterministic mutation assurance;
+- BDD-required tasks proceed without `bdd_acceptance_skill`.
+
 ### M1: Context Assembly Contract
 
 Goal: make ContextHub assembly budgeted, dependency-injected, and auditable.
@@ -90,6 +120,7 @@ Task cards:
 - `OPT-M1-A`: introduce a `ContextAssemblyContract` module that owns L0/L1/history/research/code budget allocation.
 - `OPT-M1-B`: make `ContextHub` consume the contract through constructor injection and `strict_deps=True`.
 - `OPT-M1-C`: emit a context budget receipt with estimated tokens, selected sources, dropped sources, and reason codes.
+- `OPT-M1-D`: annotate dropped sources with HallucinationGuard evidence-gap risk and replacement evidence refs.
 
 Exit:
 
@@ -104,6 +135,7 @@ Stop conditions:
 
 - any change that makes prompt construction less traceable;
 - any budget overflow that silently truncates core boundaries.
+- any source drop that can remove claim or verification evidence without a fail-closed reason.
 
 ### M2: Skeleton-First CodeIntel
 
@@ -191,6 +223,8 @@ Task cards:
 - `OPT-M5-B`: keep Orchestrator / Agent-Extending / External layers separate in plan output.
 - `OPT-M5-C`: require `judge_panel` / `ultra_review` consensus for L3 swarm-deep or high-risk delivery.
 - `OPT-M5-D`: make `semantic_failure_sensor` emit bounded retry/fallback decisions instead of vague rerun advice.
+- `OPT-M5-E`: require hardened-router/MFP compatibility metadata for route DAG acceptance.
+- `OPT-M5-F`: consume BDD harness preflight output before accepting DAGs for tasks with Given-When-Then or business acceptance intent.
 
 Exit:
 
@@ -206,6 +240,7 @@ Stop conditions:
 
 - putting external tool invocation inside route policy logic;
 - unbounded retries without budget safety floor.
+- route DAGs that bypass hardened routing or BDD preflight requirements.
 
 ### M6: Claim/Evidence Gate Consolidation
 
@@ -216,6 +251,8 @@ Task cards:
 - `OPT-M6-A`: define one read model for delivery/artifact/claim gate status.
 - `OPT-M6-B`: ensure public claim gates consume evidence bundles, not ad hoc summary fields.
 - `OPT-M6-C`: add claim-boundary fields to every optimization report: internal-only, SF-only, public-ready, or observation-only.
+- `OPT-M6-D`: include CompletionEnvelope state in closeout read models.
+- `OPT-M6-E`: require mutation assurance summary for high-risk or public-claim-affecting changes.
 
 Exit:
 
@@ -229,6 +266,8 @@ Stop conditions:
 
 - using internal smoke as public benchmark evidence;
 - promoting a row with missing provider-token measurement.
+- closeout promotion without completion envelope status;
+- high-risk or public-claim-affecting change without mutation assurance.
 
 ### M7: Skill-Fit Lifecycle Hardening
 
@@ -284,12 +323,13 @@ Stop conditions:
 ## 4. Recommended Execution Order
 
 1. `M0` first: freeze claim boundaries and retention rules.
-2. `M8` second: reduce workspace noise before deeper work.
-3. `M4` third: normalize evidence data so later optimization has a clean denominator.
-4. `M1 + M2` next: context budget and skeleton-first codeintel.
-5. `M3` after `M2`: hybrid retrieval depends on stable chunk/symbol identity.
-6. `M5 + M6` after evidence schema stabilizes: route DAG and gates consume the same receipts.
-7. `M7` continuously: skill-fit intake/replacement should use the same evidence and claim boundaries.
+2. `G0` second: bind the plan to existing hard gates before deeper architecture work.
+3. `M8` third: reduce workspace noise before deeper work.
+4. `M4` fourth: normalize evidence data so later optimization has a clean denominator.
+5. `M1 + M2` next: context budget and skeleton-first codeintel.
+6. `M3` after `M2`: hybrid retrieval depends on stable chunk/symbol identity.
+7. `M5 + M6` after evidence schema stabilizes and G0 compatibility passes: route DAG and gates consume the same receipts.
+8. `M7` continuously: skill-fit intake/replacement should use the same evidence and claim boundaries.
 
 ## 5. Implementation Slices
 
@@ -301,19 +341,23 @@ Slice size rule:
 
 Suggested first four implementation slices:
 
-1. `EvidenceDatasetRecord`
+1. `Hard Gate Compatibility`
+   - Files: contracts or ops hooks under `nexus/` and `scripts/ops/`, tests in `tests/contracts/` or `tests/ops/`.
+   - Purpose: make hardened router, completion, hallucination, mutation, and BDD prerequisites machine-checkable.
+
+2. `EvidenceDatasetRecord`
    - Files: `nexus/learning/*` or `scripts/ops/build_autodata_manifest_from_benchmark.py`, tests in `tests/ops/`.
    - Purpose: normalize benchmark/SF evidence into a typed manifest.
 
-2. `ContextAssemblyContract`
+3. `ContextAssemblyContract`
    - Files: `nexus/core/context_hub.py`, new contract module, tests in `tests/core/`.
    - Purpose: isolate budget and L0/L1 preservation.
 
-3. `CodeSkeletonProvider`
+4. `CodeSkeletonProvider`
    - Files: `nexus/services/codeintel/context_service.py`, tests in `tests/nexus/codeintel/`.
    - Purpose: skeleton-first and symbol lookup.
 
-4. `Skill Replacement Cleanliness Gate`
+5. `Skill Replacement Cleanliness Gate`
    - Files: `nexus/learning/skill_fit_closure.py` or `skill_catalog.py`, tests in `tests/learning/`.
    - Purpose: require same-window receipt-clean current/challenger evidence.
 
@@ -324,6 +368,7 @@ Minimum verification before claiming progress:
 - context slice: `uv run pytest tests/core/test_context_hub_strict_deps.py`
 - codeintel slice: `uv run pytest tests/nexus/codeintel/test_context_service.py`
 - route slice: `uv run pytest tests/engine/test_capability_planner.py tests/engine/test_harness_route_policy.py`
+- hard-gate compatibility slice: `uv run pytest tests/engine/test_v4_routing_hardening_mvp.py tests/engine/test_completion_contract.py tests/core/test_hallucination_guard.py tests/engine/test_mutation_assurance.py tests/engine/test_harness_sensors.py -q`
 - evidence slice: `uv run pytest tests/ops/test_build_autodata_manifest_from_benchmark.py tests/benchmark/test_capability_ab_runner.py -q`
 - skill-fit slice: `uv run pytest tests/learning/test_skill_catalog.py tests/learning/test_skill_fit_closure.py tests/ops/test_evaluate_github_skill_challengers.py`
 
@@ -346,6 +391,51 @@ Exit:
 
 - retention plan with keep/archive/transient categories;
 - no file move yet.
+
+### OPT-G0-A: Hardened Router Compatibility
+
+Goal: make route DAG and route/context freeze artifacts declare hardened-router readiness.
+
+Exit:
+
+- check output includes hardened flag, MFP threshold values, and router acceptance status;
+- failed router compatibility blocks M5 route DAG acceptance only, not planning docs.
+
+### OPT-G0-B: Completion Envelope Closeout
+
+Goal: prevent claim/evidence read models from becoming closeout proxies without completion envelope state.
+
+Exit:
+
+- read model includes `completion_envelope_ref` or a fail-closed `completion_status`;
+- closeout promotion remains blocked when the envelope is missing.
+
+### OPT-G0-C: Hallucination Guard Forecast
+
+Goal: make context source drops visible to hallucination scoring before runtime audit.
+
+Exit:
+
+- dropped source entries include risk class and replacement evidence refs when relevant;
+- evidence-gap risk returns a blocker before closeout.
+
+### OPT-G0-D: Mutation Assurance Pregate
+
+Goal: require deterministic mutant evidence for high-risk or public-claim-affecting optimization changes.
+
+Exit:
+
+- mutation assurance summary is attached or explicitly not required;
+- required assurance must kill at least one deterministic mutant.
+
+### OPT-G0-E: BDD Harness Sensor Pregate
+
+Goal: ensure route DAGs consume BDD preflight for business acceptance tasks.
+
+Exit:
+
+- Given-When-Then/business acceptance tasks require `bdd_acceptance_skill`;
+- missing BDD skill returns a preflight blocker.
 
 ### OPT-NEXT-2: Evidence Dataset Contract
 
@@ -380,4 +470,3 @@ Goal: prevent replacement from provider-blocked challenger runs.
 Exit:
 
 - current-best and challenger must both be receipt-clean PASS in the same provider-cleanliness window.
-

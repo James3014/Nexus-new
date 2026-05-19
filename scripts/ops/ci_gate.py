@@ -210,6 +210,27 @@ def run_optimization_artifact_hygiene_check(
         print(f"❌ [CI-BLOCK] Optimization Artifact Hygiene Check FAILED (Return Code: {res.returncode})")
     return False
 
+
+def run_route_context_seam_freeze_check(*, freeze_path: str, dry_run: bool = False) -> bool:
+    print(f"\n🚀 [CI-Gate] Running Route/Context Seam Freeze Check {'(Dry-run)' if dry_run else ''}...")
+    cmd = [
+        str(VENV_PYTHON),
+        "scripts/ops/check_route_context_seam_freeze.py",
+        "--freeze",
+        freeze_path,
+        "--dry-run",
+    ]
+    res = subprocess.run(cmd)
+    if res.returncode == 0:
+        print("✅ Route/Context Seam Freeze Check PASSED")
+        return True
+    if dry_run:
+        print(f"❌ [DRY-RUN-BLOCK] Route/Context Seam Freeze Check FAILED (Return Code: {res.returncode})")
+    else:
+        print(f"❌ [CI-BLOCK] Route/Context Seam Freeze Check FAILED (Return Code: {res.returncode})")
+    return False
+
+
 def run_integrity_check():
     """🛡️ [CI-Gate] Physical Integrity Check (Life-Sign Scan)"""
     print("\n🚀 [CI-Gate] Running Physical Integrity Check...")
@@ -789,6 +810,7 @@ def main():
     parser.add_argument("--closeout-contract-path", default=".nexus/reports/done_contract.json", help="Path to done contract JSON")
     parser.add_argument("--optimization-read-model", default="", help="Optional claim/evidence read model JSON to validate")
     parser.add_argument("--optimization-retention-manifest", default="", help="Optional evidence retention manifest JSON to validate with the read model")
+    parser.add_argument("--route-context-freeze", default="", help="Optional route/context seam freeze JSON to validate")
     parser.add_argument("--auto-heal", action="store_true", help="Launch autonomous repair loop on failure")
     parser.add_argument("--changed-only", nargs="*", help="Run only pytest targets affected by changed paths")
     parser.add_argument("--changed-paths", nargs="*", default=[], help="Changed paths used by strict JIT preflight")
@@ -819,6 +841,13 @@ def main():
                 dry_run=True,
             )
             if not hygiene_ok:
+                dry_exit = 1
+        if getattr(args, "route_context_freeze", ""):
+            freeze_ok = run_route_context_seam_freeze_check(
+                freeze_path=args.route_context_freeze,
+                dry_run=True,
+            )
+            if not freeze_ok:
                 dry_exit = 1
         sys.exit(dry_exit)
 
@@ -858,6 +887,14 @@ def main():
             dry_run=args.dry_run,
         )
         if not hygiene_ok and not args.dry_run:
+            sys.exit(1)
+
+    if getattr(args, "route_context_freeze", ""):
+        freeze_ok = run_route_context_seam_freeze_check(
+            freeze_path=args.route_context_freeze,
+            dry_run=args.dry_run,
+        )
+        if not freeze_ok and not args.dry_run:
             sys.exit(1)
 
     if not run_report_trust_audit(dry_run=args.dry_run) and not args.dry_run:
