@@ -53,6 +53,7 @@ version_scope:
 | X-Ray observer scan stall on legacy input | `XRayObserver("path")` 以字串傳入時被逐字元掃描，導致測試/巡檢看似卡死 | Observer 入口必須接受 `str | list[str]` 並在單路徑模式保持舊版 source 格式，避免破壞舊契約 | `pytest tests/test_xray_integration.py -vv` |
 | Reference project layout assumption | 參考專案不是標準 `src/`、`dist/` 或 root `README.md` 形狀，固定路徑掃描產生假陰性或 noisy dependency 掃描 | 先做 layout probe，再只掃實際 implementation root；package-only 參考需避開 `node_modules` 泛掃並錨定 exported library files | `rg --files <reference-root>` before focused scan |
 | Evidence auto-merge poisoning | 多 Agent 並行時 evidence ledger/graph 自動合併可能吞掉 corrupt input 或超大 artifact | 只對 append-only/commutative evidence formats 啟用 union-merge，並要求 parse/schema validation、size cap、node/record cap 皆 PASS | `pytest tests/contracts/test_hard_gate_compatibility.py` |
+| Plan patch anchor drift | 計劃文件文字與記憶中的段落錨點不同，導致 patch 無法匹配 | 修改計劃前先用 heading/line range 重新定位，再用最小上下文 patch；避免靠記憶中的句子當錨點 | `sed -n '<range>p' docs/plans/<plan>.md` before patch |
 
 ## Upstream
 - `06_Ops/Ops - Wiki Drift Audit.md`: 漂移訊號來源。 [Source: 06_Ops/Ops - Wiki Drift Audit.md]

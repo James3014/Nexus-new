@@ -51,6 +51,20 @@ class HardGateCompatibility:
     context_pack_security_status: str = "NOT_APPLICABLE"
     suspicious_diff_or_log_included: bool = False
     remote_config_trust_status: str = "NOT_APPLICABLE"
+    evidence_seal_required: bool = False
+    evidence_seal_status: str = "NOT_APPLICABLE"
+    evidence_hash_status: str = "NOT_APPLICABLE"
+    partial_telemetry_detected: bool = False
+    network_fetch_required: bool = False
+    network_fetch_guard_status: str = "NOT_APPLICABLE"
+    redirect_revalidation_status: str = "NOT_APPLICABLE"
+    private_network_target_detected: bool = False
+    graph_integrity_required: bool = False
+    entity_namespace_status: str = "NOT_APPLICABLE"
+    dangling_edge_detected: bool = False
+    dedup_guard_required: bool = False
+    dedup_precision_status: str = "NOT_APPLICABLE"
+    low_entropy_merge_detected: bool = False
     runtime_update_allowed: bool = False
     public_benchmark_allowed: bool = False
     evidence_refs: tuple[str, ...] = ()
@@ -100,6 +114,20 @@ class HardGateCompatibility:
             "context_pack_security_status": _status(self.context_pack_security_status),
             "suspicious_diff_or_log_included": self.suspicious_diff_or_log_included,
             "remote_config_trust_status": _status(self.remote_config_trust_status),
+            "evidence_seal_required": self.evidence_seal_required,
+            "evidence_seal_status": _status(self.evidence_seal_status),
+            "evidence_hash_status": _status(self.evidence_hash_status),
+            "partial_telemetry_detected": self.partial_telemetry_detected,
+            "network_fetch_required": self.network_fetch_required,
+            "network_fetch_guard_status": _status(self.network_fetch_guard_status),
+            "redirect_revalidation_status": _status(self.redirect_revalidation_status),
+            "private_network_target_detected": self.private_network_target_detected,
+            "graph_integrity_required": self.graph_integrity_required,
+            "entity_namespace_status": _status(self.entity_namespace_status),
+            "dangling_edge_detected": self.dangling_edge_detected,
+            "dedup_guard_required": self.dedup_guard_required,
+            "dedup_precision_status": _status(self.dedup_precision_status),
+            "low_entropy_merge_detected": self.low_entropy_merge_detected,
             "runtime_update_allowed": self.runtime_update_allowed,
             "public_benchmark_allowed": self.public_benchmark_allowed,
             "evidence_refs": list(self.evidence_refs),
@@ -156,6 +184,20 @@ def build_hard_gate_compatibility(
     context_pack_security_status: str = "NOT_APPLICABLE",
     suspicious_diff_or_log_included: bool = False,
     remote_config_trust_status: str = "NOT_APPLICABLE",
+    evidence_seal_required: bool = False,
+    evidence_seal_status: str = "NOT_APPLICABLE",
+    evidence_hash_status: str = "NOT_APPLICABLE",
+    partial_telemetry_detected: bool = False,
+    network_fetch_required: bool = False,
+    network_fetch_guard_status: str = "NOT_APPLICABLE",
+    redirect_revalidation_status: str = "NOT_APPLICABLE",
+    private_network_target_detected: bool = False,
+    graph_integrity_required: bool = False,
+    entity_namespace_status: str = "NOT_APPLICABLE",
+    dangling_edge_detected: bool = False,
+    dedup_guard_required: bool = False,
+    dedup_precision_status: str = "NOT_APPLICABLE",
+    low_entropy_merge_detected: bool = False,
     runtime_update_allowed: bool = False,
     public_benchmark_allowed: bool = False,
     evidence_refs: list[str] | tuple[str, ...] = (),
@@ -202,6 +244,20 @@ def build_hard_gate_compatibility(
         context_pack_security_status=context_pack_security_status,
         suspicious_diff_or_log_included=bool(suspicious_diff_or_log_included),
         remote_config_trust_status=remote_config_trust_status,
+        evidence_seal_required=bool(evidence_seal_required),
+        evidence_seal_status=evidence_seal_status,
+        evidence_hash_status=evidence_hash_status,
+        partial_telemetry_detected=bool(partial_telemetry_detected),
+        network_fetch_required=bool(network_fetch_required),
+        network_fetch_guard_status=network_fetch_guard_status,
+        redirect_revalidation_status=redirect_revalidation_status,
+        private_network_target_detected=bool(private_network_target_detected),
+        graph_integrity_required=bool(graph_integrity_required),
+        entity_namespace_status=entity_namespace_status,
+        dangling_edge_detected=bool(dangling_edge_detected),
+        dedup_guard_required=bool(dedup_guard_required),
+        dedup_precision_status=dedup_precision_status,
+        low_entropy_merge_detected=bool(low_entropy_merge_detected),
         runtime_update_allowed=bool(runtime_update_allowed),
         public_benchmark_allowed=bool(public_benchmark_allowed),
         evidence_refs=tuple(str(item) for item in evidence_refs if str(item).strip()),
@@ -277,6 +333,30 @@ def validate_hard_gate_compatibility(payload: Mapping[str, Any]) -> list[str]:
         blockers.append("suspicious_diff_or_log_included")
     if _status(payload.get("remote_config_trust_status")) not in PASS_LIKE:
         blockers.append("remote_config_trust_not_pass")
+    if bool(payload.get("evidence_seal_required", False)):
+        if _status(payload.get("evidence_seal_status")) != "PASS":
+            blockers.append("evidence_seal_not_pass")
+        if _status(payload.get("evidence_hash_status")) != "PASS":
+            blockers.append("evidence_hash_not_pass")
+    if bool(payload.get("partial_telemetry_detected", False)):
+        blockers.append("partial_telemetry_detected")
+    if bool(payload.get("network_fetch_required", False)):
+        if _status(payload.get("network_fetch_guard_status")) != "PASS":
+            blockers.append("network_fetch_guard_not_pass")
+        if _status(payload.get("redirect_revalidation_status")) != "PASS":
+            blockers.append("redirect_revalidation_not_pass")
+    if bool(payload.get("private_network_target_detected", False)):
+        blockers.append("private_network_target_detected")
+    if bool(payload.get("graph_integrity_required", False)):
+        if _status(payload.get("entity_namespace_status")) != "PASS":
+            blockers.append("entity_namespace_not_pass")
+    if bool(payload.get("dangling_edge_detected", False)):
+        blockers.append("dangling_edge_detected")
+    if bool(payload.get("dedup_guard_required", False)):
+        if _status(payload.get("dedup_precision_status")) != "PASS":
+            blockers.append("dedup_precision_not_pass")
+    if bool(payload.get("low_entropy_merge_detected", False)):
+        blockers.append("low_entropy_merge_detected")
     return sorted(set(blockers))
 
 

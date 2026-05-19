@@ -1,0 +1,1170 @@
+{
+  "schema": "nexus_evidence_retention_dry_run.v1",
+  "status": "PASS",
+  "claim_class": "INTERNAL_DIAGNOSTIC",
+  "delete_allowed": false,
+  "move_allowed": false,
+  "archive_root": "docs/reports/archive/optimization-retention-dry-run",
+  "summary": {
+    "path_count": 127,
+    "retention_class_counts": {
+      "keep_tracked_source": 127
+    },
+    "archive_candidate_count": 0,
+    "tracked_keep_count": 127,
+    "current_evidence_keep_count": 15,
+    "pinned_by_catalog_count": 0,
+    "blocker_count": 0
+  },
+  "blockers": [],
+  "claim_boundary": [
+    "Retention dry-run is internal diagnostic only.",
+    "No files are moved or deleted by this manifest.",
+    "Tracked, current, catalog-pinned, and transient receipt-root artifacts are fail-closed keep rows."
+  ],
+  "items": [
+    {
+      "source_path": "docs/reports/FLASH_NEXUS_PUBLIC_CANDIDATE_REPORT_2026-05-04.md",
+      "retention_class": "keep_tracked_source",
+      "reason": "tracked_source_stays_in_place",
+      "destination_path": "",
+      "tracked": true,
+      "pinned_by_catalog": false,
+      "current_evidence": false
+    },
+    {
+      "source_path": "docs/reports/FLASH_NEXUS_PUBLIC_REPORT_2026-05-04.md",
+      "retention_class": "keep_tracked_source",
+      "reason": "tracked_source_stays_in_place",
+      "destination_path": "",
+      "tracked": true,
+      "pinned_by_catalog": false,
+      "current_evidence": false
+    },
+    {
+      "source_path": "docs/reports/GEMINI31PRO_NEXUS_VALUE_REPORT_2026-05-01.md",
+      "retention_class": "keep_tracked_source",
+      "reason": "tracked_source_stays_in_place",
+      "destination_path": "",
+      "tracked": true,
+      "pinned_by_catalog": false,
+      "current_evidence": false
+    },
+    {
+      "source_path": "docs/reports/GEMINI3FLASH_NEXUS_VALUE_REPORT_2026-04-28.md",
+      "retention_class": "keep_tracked_source",
+      "reason": "tracked_source_stays_in_place",
+      "destination_path": "",
+      "tracked": true,
+      "pinned_by_catalog": false,
+      "current_evidence": false
+    },
+    {
+      "source_path": "docs/reports/GEMINI3FLASH_NEXUS_VALUE_REPORT_2026-05-01.md",
+      "retention_class": "keep_tracked_source",
+      "reason": "tracked_source_stays_in_place",
+      "destination_path": "",
+      "tracked": true,
+      "pinned_by_catalog": false,
+      "current_evidence": false
+    },
+    {
+      "source_path": "docs/reports/GEMINI_FLASH_NEXUS_P16_P17_2026-05-05.md",
+      "retention_class": "keep_tracked_source",
+      "reason": "tracked_source_stays_in_place",
+      "destination_path": "",
+      "tracked": true,
+      "pinned_by_catalog": false,
+      "current_evidence": false
+    },
+    {
+      "source_path": "docs/reports/GEMINI_FLASH_NEXUS_P378_2026-05-06.md",
+      "retention_class": "keep_tracked_source",
+      "reason": "tracked_source_stays_in_place",
+      "destination_path": "",
+      "tracked": true,
+      "pinned_by_catalog": false,
+      "current_evidence": false
+    },
+    {
+      "source_path": "docs/reports/GPT55_NEXUS_VALUE_REPORT_2026-05-01.md",
+      "retention_class": "keep_tracked_source",
+      "reason": "tracked_source_stays_in_place",
+      "destination_path": "",
+      "tracked": true,
+      "pinned_by_catalog": false,
+      "current_evidence": false
+    },
+    {
+      "source_path": "docs/reports/IMPLEMENTATION_TRACKING_RFC_OPT_001.md",
+      "retention_class": "keep_tracked_source",
+      "reason": "tracked_source_stays_in_place",
+      "destination_path": "",
+      "tracked": true,
+      "pinned_by_catalog": false,
+      "current_evidence": false
+    },
+    {
+      "source_path": "docs/reports/IRON_NEXUS_PHASE_A_TO_G_STATUS_2026-05-05.md",
+      "retention_class": "keep_tracked_source",
+      "reason": "tracked_source_stays_in_place",
+      "destination_path": "",
+      "tracked": true,
+      "pinned_by_catalog": false,
+      "current_evidence": false
+    },
+    {
+      "source_path": "docs/reports/MAIN_HARDENED_SYNC_REPORT_2026-05-04.md",
+      "retention_class": "keep_tracked_source",
+      "reason": "tracked_source_stays_in_place",
+      "destination_path": "",
+      "tracked": true,
+      "pinned_by_catalog": false,
+      "current_evidence": false
+    },
+    {
+      "source_path": "docs/reports/NEXUS_CAPABILITY_INVOCATION_COST_P30_2026-05-10.md",
+      "retention_class": "keep_tracked_source",
+      "reason": "tracked_source_stays_in_place",
+      "destination_path": "",
+      "tracked": true,
+      "pinned_by_catalog": false,
+      "current_evidence": false
+    },
+    {
+      "source_path": "docs/reports/NEXUS_CAPABILITY_ROUTE_P44_CLOSURE_2026-05-12.md",
+      "retention_class": "keep_tracked_source",
+      "reason": "tracked_source_stays_in_place",
+      "destination_path": "",
+      "tracked": true,
+      "pinned_by_catalog": false,
+      "current_evidence": false
+    },
+    {
+      "source_path": "docs/reports/NEXUS_CAPABILITY_ROUTE_WIRING_P24_2026-05-10.md",
+      "retention_class": "keep_tracked_source",
+      "reason": "tracked_source_stays_in_place",
+      "destination_path": "",
+      "tracked": true,
+      "pinned_by_catalog": false,
+      "current_evidence": false
+    },
+    {
+      "source_path": "docs/reports/NEXUS_CLAIM_TRAINING_POSTURE_P86_5_2026-05-13.md",
+      "retention_class": "keep_tracked_source",
+      "reason": "tracked_source_stays_in_place",
+      "destination_path": "",
+      "tracked": true,
+      "pinned_by_catalog": false,
+      "current_evidence": false
+    },
+    {
+      "source_path": "docs/reports/NEXUS_CODE_REALITY_P180_2026-05-05.md",
+      "retention_class": "keep_tracked_source",
+      "reason": "tracked_source_stays_in_place",
+      "destination_path": "",
+      "tracked": true,
+      "pinned_by_catalog": false,
+      "current_evidence": false
+    },
+    {
+      "source_path": "docs/reports/NEXUS_COMMERCIAL_LANES_BENCHMARK_PLAN_2026-05-02.md",
+      "retention_class": "keep_tracked_source",
+      "reason": "tracked_source_stays_in_place",
+      "destination_path": "",
+      "tracked": true,
+      "pinned_by_catalog": false,
+      "current_evidence": false
+    },
+    {
+      "source_path": "docs/reports/NEXUS_COMMERCIAL_LANES_GEMINI3FLASH_REPORT_2026-05-02.md",
+      "retention_class": "keep_tracked_source",
+      "reason": "tracked_source_stays_in_place",
+      "destination_path": "",
+      "tracked": true,
+      "pinned_by_catalog": false,
+      "current_evidence": false
+    },
+    {
+      "source_path": "docs/reports/NEXUS_COMMERCIAL_ROUTE_COST_TUNING_2026-05-02.md",
+      "retention_class": "keep_tracked_source",
+      "reason": "tracked_source_stays_in_place",
+      "destination_path": "",
+      "tracked": true,
+      "pinned_by_catalog": false,
+      "current_evidence": false
+    },
+    {
+      "source_path": "docs/reports/NEXUS_CONTEXTPLUS_LEARNING_GUIDE_V1_2026-05-13.md",
+      "retention_class": "keep_tracked_source",
+      "reason": "tracked_source_stays_in_place",
+      "destination_path": "",
+      "tracked": true,
+      "pinned_by_catalog": false,
+      "current_evidence": false
+    },
+    {
+      "source_path": "docs/reports/NEXUS_CORE_REFACTOR_P72_2026-05-05.md",
+      "retention_class": "keep_tracked_source",
+      "reason": "tracked_source_stays_in_place",
+      "destination_path": "",
+      "tracked": true,
+      "pinned_by_catalog": false,
+      "current_evidence": false
+    },
+    {
+      "source_path": "docs/reports/NEXUS_DCI_RTIMING_ROUTE_COST_P21_2026-05-09.md",
+      "retention_class": "keep_tracked_source",
+      "reason": "tracked_source_stays_in_place",
+      "destination_path": "",
+      "tracked": true,
+      "pinned_by_catalog": false,
+      "current_evidence": false
+    },
+    {
+      "source_path": "docs/reports/NEXUS_DOCS_AUTH_EXECUTOR_SEAM_P84_2026-05-13.md",
+      "retention_class": "keep_tracked_source",
+      "reason": "tracked_source_stays_in_place",
+      "destination_path": "",
+      "tracked": true,
+      "pinned_by_catalog": false,
+      "current_evidence": false
+    },
+    {
+      "source_path": "docs/reports/NEXUS_DOCS_RECEIPT_RUBRIC_P86_2026-05-13.md",
+      "retention_class": "keep_tracked_source",
+      "reason": "tracked_source_stays_in_place",
+      "destination_path": "",
+      "tracked": true,
+      "pinned_by_catalog": false,
+      "current_evidence": false
+    },
+    {
+      "source_path": "docs/reports/NEXUS_ENGINEERING_HYGIENE_INDEX_2026-05-18.md",
+      "retention_class": "keep_tracked_source",
+      "reason": "tracked_source_stays_in_place",
+      "destination_path": "",
+      "tracked": true,
+      "pinned_by_catalog": false,
+      "current_evidence": false
+    },
+    {
+      "source_path": "docs/reports/NEXUS_FEATURE_REFLEX_P68_FLASH_3TASK_2026-05-13.md",
+      "retention_class": "keep_tracked_source",
+      "reason": "tracked_source_stays_in_place",
+      "destination_path": "",
+      "tracked": true,
+      "pinned_by_catalog": false,
+      "current_evidence": false
+    },
+    {
+      "source_path": "docs/reports/NEXUS_FEATURE_REFLEX_P74_FLASH_3TASK_3TRIAL_2026-05-13.md",
+      "retention_class": "keep_tracked_source",
+      "reason": "tracked_source_stays_in_place",
+      "destination_path": "",
+      "tracked": true,
+      "pinned_by_catalog": false,
+      "current_evidence": false
+    },
+    {
+      "source_path": "docs/reports/NEXUS_FEATURE_REFLEX_P80B_FLASH_3TASK_3TRIAL_2026-05-13.md",
+      "retention_class": "keep_tracked_source",
+      "reason": "tracked_source_stays_in_place",
+      "destination_path": "",
+      "tracked": true,
+      "pinned_by_catalog": false,
+      "current_evidence": false
+    },
+    {
+      "source_path": "docs/reports/NEXUS_FLASH_COST_OPT_P6_2026-05-03.md",
+      "retention_class": "keep_tracked_source",
+      "reason": "tracked_source_stays_in_place",
+      "destination_path": "",
+      "tracked": true,
+      "pinned_by_catalog": false,
+      "current_evidence": false
+    },
+    {
+      "source_path": "docs/reports/NEXUS_FLASH_PRO_GOVERNANCE_DECISION_2026-05-03.md",
+      "retention_class": "keep_tracked_source",
+      "reason": "tracked_source_stays_in_place",
+      "destination_path": "",
+      "tracked": true,
+      "pinned_by_catalog": false,
+      "current_evidence": false
+    },
+    {
+      "source_path": "docs/reports/NEXUS_FLASH_PRO_PUBLIC_REPORT_2026-05-03.md",
+      "retention_class": "keep_tracked_source",
+      "reason": "tracked_source_stays_in_place",
+      "destination_path": "",
+      "tracked": true,
+      "pinned_by_catalog": false,
+      "current_evidence": false
+    },
+    {
+      "source_path": "docs/reports/NEXUS_FLASH_RHYPER_P10_CLOSURE_2026-05-12.md",
+      "retention_class": "keep_tracked_source",
+      "reason": "tracked_source_stays_in_place",
+      "destination_path": "",
+      "tracked": true,
+      "pinned_by_catalog": false,
+      "current_evidence": false
+    },
+    {
+      "source_path": "docs/reports/NEXUS_GEMINI31PRO_VALUE_BENCHMARK_2026-04-28.md",
+      "retention_class": "keep_tracked_source",
+      "reason": "tracked_source_stays_in_place",
+      "destination_path": "",
+      "tracked": true,
+      "pinned_by_catalog": false,
+      "current_evidence": false
+    },
+    {
+      "source_path": "docs/reports/NEXUS_GEMINI3FLASH_AUTO_SMOKE_2026-05-02.md",
+      "retention_class": "keep_tracked_source",
+      "reason": "tracked_source_stays_in_place",
+      "destination_path": "",
+      "tracked": true,
+      "pinned_by_catalog": false,
+      "current_evidence": false
+    },
+    {
+      "source_path": "docs/reports/NEXUS_GEMINI3FLASH_VALUE_BENCHMARK_2026-04-28.md",
+      "retention_class": "keep_tracked_source",
+      "reason": "tracked_source_stays_in_place",
+      "destination_path": "",
+      "tracked": true,
+      "pinned_by_catalog": false,
+      "current_evidence": false
+    },
+    {
+      "source_path": "docs/reports/NEXUS_GPT55_TEACHER_DISTANCE_P231_P360_2026-05-08.md",
+      "retention_class": "keep_tracked_source",
+      "reason": "tracked_source_stays_in_place",
+      "destination_path": "",
+      "tracked": true,
+      "pinned_by_catalog": false,
+      "current_evidence": false
+    },
+    {
+      "source_path": "docs/reports/NEXUS_HIDDEN_LITE_PRE_RESCUE_P51_2026-05-13.md",
+      "retention_class": "keep_tracked_source",
+      "reason": "tracked_source_stays_in_place",
+      "destination_path": "",
+      "tracked": true,
+      "pinned_by_catalog": false,
+      "current_evidence": false
+    },
+    {
+      "source_path": "docs/reports/NEXUS_HIDDEN_RETRY_MINIMAL_LANE_P35_2026-05-13.md",
+      "retention_class": "keep_tracked_source",
+      "reason": "tracked_source_stays_in_place",
+      "destination_path": "",
+      "tracked": true,
+      "pinned_by_catalog": false,
+      "current_evidence": false
+    },
+    {
+      "source_path": "docs/reports/NEXUS_HIDDEN_RETRY_TELEMETRY_P34_2026-05-13.md",
+      "retention_class": "keep_tracked_source",
+      "reason": "tracked_source_stays_in_place",
+      "destination_path": "",
+      "tracked": true,
+      "pinned_by_catalog": false,
+      "current_evidence": false
+    },
+    {
+      "source_path": "docs/reports/NEXUS_LEARNING_LOOP_CLOSED_LOOP_REPORT_2026-04-03.md",
+      "retention_class": "keep_tracked_source",
+      "reason": "tracked_source_stays_in_place",
+      "destination_path": "",
+      "tracked": true,
+      "pinned_by_catalog": false,
+      "current_evidence": false
+    },
+    {
+      "source_path": "docs/reports/NEXUS_LEARNING_LOOP_NEXT_AGENT_IMPLEMENTATION_PLAN_2026-04-03.md",
+      "retention_class": "keep_tracked_source",
+      "reason": "tracked_source_stays_in_place",
+      "destination_path": "",
+      "tracked": true,
+      "pinned_by_catalog": false,
+      "current_evidence": false
+    },
+    {
+      "source_path": "docs/reports/NEXUS_LLM_AUDIT_REPORT.md",
+      "retention_class": "keep_tracked_source",
+      "reason": "tracked_source_stays_in_place",
+      "destination_path": "",
+      "tracked": true,
+      "pinned_by_catalog": false,
+      "current_evidence": false
+    },
+    {
+      "source_path": "docs/reports/NEXUS_MODEL_REQUIRED_UPLIFT_GATE_2026-05-13.md",
+      "retention_class": "keep_tracked_source",
+      "reason": "tracked_source_stays_in_place",
+      "destination_path": "",
+      "tracked": true,
+      "pinned_by_catalog": false,
+      "current_evidence": false
+    },
+    {
+      "source_path": "docs/reports/NEXUS_OPTIMIZATION_ARTIFACT_INDEX_2026-05-20.md",
+      "retention_class": "keep_tracked_source",
+      "reason": "tracked_source_stays_in_place",
+      "destination_path": "",
+      "tracked": true,
+      "pinned_by_catalog": false,
+      "current_evidence": false
+    },
+    {
+      "source_path": "docs/reports/NEXUS_P10_ROUTE_COST_EXECUTION_2026-05-09.md",
+      "retention_class": "keep_tracked_source",
+      "reason": "tracked_source_stays_in_place",
+      "destination_path": "",
+      "tracked": true,
+      "pinned_by_catalog": false,
+      "current_evidence": false
+    },
+    {
+      "source_path": "docs/reports/NEXUS_P110_LAUNCH_CANDIDATE_GATE_2026-05-10.md",
+      "retention_class": "keep_tracked_source",
+      "reason": "tracked_source_stays_in_place",
+      "destination_path": "",
+      "tracked": true,
+      "pinned_by_catalog": false,
+      "current_evidence": false
+    },
+    {
+      "source_path": "docs/reports/NEXUS_P120_LAUNCH_READY_CLOSURE_2026-05-10.md",
+      "retention_class": "keep_tracked_source",
+      "reason": "tracked_source_stays_in_place",
+      "destination_path": "",
+      "tracked": true,
+      "pinned_by_catalog": false,
+      "current_evidence": false
+    },
+    {
+      "source_path": "docs/reports/NEXUS_P12_GOAL_CAPABILITY_HEATMAP_2026-05-12.md",
+      "retention_class": "keep_tracked_source",
+      "reason": "tracked_source_stays_in_place",
+      "destination_path": "",
+      "tracked": true,
+      "pinned_by_catalog": false,
+      "current_evidence": false
+    },
+    {
+      "source_path": "docs/reports/NEXUS_P12_GOAL_CLOSURE_2026-05-12.md",
+      "retention_class": "keep_tracked_source",
+      "reason": "tracked_source_stays_in_place",
+      "destination_path": "",
+      "tracked": true,
+      "pinned_by_catalog": false,
+      "current_evidence": false
+    },
+    {
+      "source_path": "docs/reports/NEXUS_P130_GOAL_CLOSURE_2026-05-10.md",
+      "retention_class": "keep_tracked_source",
+      "reason": "tracked_source_stays_in_place",
+      "destination_path": "",
+      "tracked": true,
+      "pinned_by_catalog": false,
+      "current_evidence": false
+    },
+    {
+      "source_path": "docs/reports/NEXUS_P23_CAPABILITY_HEATMAP_2026-05-12.md",
+      "retention_class": "keep_tracked_source",
+      "reason": "tracked_source_stays_in_place",
+      "destination_path": "",
+      "tracked": true,
+      "pinned_by_catalog": false,
+      "current_evidence": false
+    },
+    {
+      "source_path": "docs/reports/NEXUS_P23_GOAL_CLOSURE_2026-05-12.md",
+      "retention_class": "keep_tracked_source",
+      "reason": "tracked_source_stays_in_place",
+      "destination_path": "",
+      "tracked": true,
+      "pinned_by_catalog": false,
+      "current_evidence": false
+    },
+    {
+      "source_path": "docs/reports/NEXUS_P28_NEXT_ROUND_MAIN_AXIS_EXECUTION_BOARD_2026-05-13.md",
+      "retention_class": "keep_tracked_source",
+      "reason": "tracked_source_stays_in_place",
+      "destination_path": "",
+      "tracked": true,
+      "pinned_by_catalog": false,
+      "current_evidence": false
+    },
+    {
+      "source_path": "docs/reports/NEXUS_PUBLIC_SAFE_BENCHMARK_MANIFEST_2026-05-02.md",
+      "retention_class": "keep_tracked_source",
+      "reason": "tracked_source_stays_in_place",
+      "destination_path": "",
+      "tracked": true,
+      "pinned_by_catalog": false,
+      "current_evidence": false
+    },
+    {
+      "source_path": "docs/reports/NEXUS_PUBLIC_VALUE_COMPARISON_2026-05-01.md",
+      "retention_class": "keep_tracked_source",
+      "reason": "tracked_source_stays_in_place",
+      "destination_path": "",
+      "tracked": true,
+      "pinned_by_catalog": false,
+      "current_evidence": false
+    },
+    {
+      "source_path": "docs/reports/NEXUS_PUBLIC_VALUE_COMPARISON_2026-05-02.md",
+      "retention_class": "keep_tracked_source",
+      "reason": "tracked_source_stays_in_place",
+      "destination_path": "",
+      "tracked": true,
+      "pinned_by_catalog": false,
+      "current_evidence": false
+    },
+    {
+      "source_path": "docs/reports/NEXUS_PUBLIC_VALUE_COMPARISON_THREE_MODEL_FINAL_2026-05-02.md",
+      "retention_class": "keep_tracked_source",
+      "reason": "tracked_source_stays_in_place",
+      "destination_path": "",
+      "tracked": true,
+      "pinned_by_catalog": false,
+      "current_evidence": false
+    },
+    {
+      "source_path": "docs/reports/NEXUS_PUBLIC_VALUE_REGRESSION_BASELINE_2026-05-02.json",
+      "retention_class": "keep_tracked_source",
+      "reason": "tracked_source_stays_in_place",
+      "destination_path": "",
+      "tracked": true,
+      "pinned_by_catalog": false,
+      "current_evidence": false
+    },
+    {
+      "source_path": "docs/reports/NEXUS_REFACTOR_CLEAN_BASELINE_PLAN_2026-05-20.md",
+      "retention_class": "keep_tracked_source",
+      "reason": "tracked_source_stays_in_place",
+      "destination_path": "",
+      "tracked": true,
+      "pinned_by_catalog": false,
+      "current_evidence": false
+    },
+    {
+      "source_path": "docs/reports/NEXUS_REFACTOR_P136_2026-05-05.md",
+      "retention_class": "keep_tracked_source",
+      "reason": "tracked_source_stays_in_place",
+      "destination_path": "",
+      "tracked": true,
+      "pinned_by_catalog": false,
+      "current_evidence": false
+    },
+    {
+      "source_path": "docs/reports/NEXUS_REFACTOR_P86_2026-05-05.md",
+      "retention_class": "keep_tracked_source",
+      "reason": "tracked_source_stays_in_place",
+      "destination_path": "",
+      "tracked": true,
+      "pinned_by_catalog": false,
+      "current_evidence": false
+    },
+    {
+      "source_path": "docs/reports/NEXUS_REFACTOR_P95_2026-05-05.md",
+      "retention_class": "keep_tracked_source",
+      "reason": "tracked_source_stays_in_place",
+      "destination_path": "",
+      "tracked": true,
+      "pinned_by_catalog": false,
+      "current_evidence": false
+    },
+    {
+      "source_path": "docs/reports/NEXUS_RESEARCH_STACK_P30_FLASH_2026-05-05.md",
+      "retention_class": "keep_tracked_source",
+      "reason": "tracked_source_stays_in_place",
+      "destination_path": "",
+      "tracked": true,
+      "pinned_by_catalog": false,
+      "current_evidence": false
+    },
+    {
+      "source_path": "docs/reports/NEXUS_ROOT_TEST_ASSET_ARCHIVE_LOG_2026-05-13.md",
+      "retention_class": "keep_tracked_source",
+      "reason": "tracked_source_stays_in_place",
+      "destination_path": "",
+      "tracked": true,
+      "pinned_by_catalog": false,
+      "current_evidence": false
+    },
+    {
+      "source_path": "docs/reports/NEXUS_ROUTE_ADJUSTMENT_PLAN_2026-05-01.md",
+      "retention_class": "keep_tracked_source",
+      "reason": "tracked_source_stays_in_place",
+      "destination_path": "",
+      "tracked": true,
+      "pinned_by_catalog": false,
+      "current_evidence": false
+    },
+    {
+      "source_path": "docs/reports/NEXUS_ROUTE_CAPABILITY_CLOSURE_P30_2026-05-10.md",
+      "retention_class": "keep_tracked_source",
+      "reason": "tracked_source_stays_in_place",
+      "destination_path": "",
+      "tracked": true,
+      "pinned_by_catalog": false,
+      "current_evidence": false
+    },
+    {
+      "source_path": "docs/reports/NEXUS_ROUTE_CAPABILITY_P90_THREE_ARM_CLOSURE_2026-05-10.md",
+      "retention_class": "keep_tracked_source",
+      "reason": "tracked_source_stays_in_place",
+      "destination_path": "",
+      "tracked": true,
+      "pinned_by_catalog": false,
+      "current_evidence": false
+    },
+    {
+      "source_path": "docs/reports/NEXUS_ROUTE_COE_P14_2026-05-04.md",
+      "retention_class": "keep_tracked_source",
+      "reason": "tracked_source_stays_in_place",
+      "destination_path": "",
+      "tracked": true,
+      "pinned_by_catalog": false,
+      "current_evidence": false
+    },
+    {
+      "source_path": "docs/reports/NEXUS_ROUTE_COST_CLOSURE_P23_2026-05-10.md",
+      "retention_class": "keep_tracked_source",
+      "reason": "tracked_source_stays_in_place",
+      "destination_path": "",
+      "tracked": true,
+      "pinned_by_catalog": false,
+      "current_evidence": false
+    },
+    {
+      "source_path": "docs/reports/NEXUS_ROUTE_COST_P45_FLASH_CLOSURE_2026-05-10.md",
+      "retention_class": "keep_tracked_source",
+      "reason": "tracked_source_stays_in_place",
+      "destination_path": "",
+      "tracked": true,
+      "pinned_by_catalog": false,
+      "current_evidence": false
+    },
+    {
+      "source_path": "docs/reports/NEXUS_ROUTE_COST_P60_GOVERNANCE_TOKEN_EVIDENCE_2026-05-10.md",
+      "retention_class": "keep_tracked_source",
+      "reason": "tracked_source_stays_in_place",
+      "destination_path": "",
+      "tracked": true,
+      "pinned_by_catalog": false,
+      "current_evidence": false
+    },
+    {
+      "source_path": "docs/reports/NEXUS_ROUTE_COST_P66_SCOPE_SUPERVISED_CLOSURE_2026-05-10.md",
+      "retention_class": "keep_tracked_source",
+      "reason": "tracked_source_stays_in_place",
+      "destination_path": "",
+      "tracked": true,
+      "pinned_by_catalog": false,
+      "current_evidence": false
+    },
+    {
+      "source_path": "docs/reports/NEXUS_ROUTE_COST_P75_LAUNCH_READINESS_2026-05-10.md",
+      "retention_class": "keep_tracked_source",
+      "reason": "tracked_source_stays_in_place",
+      "destination_path": "",
+      "tracked": true,
+      "pinned_by_catalog": false,
+      "current_evidence": false
+    },
+    {
+      "source_path": "docs/reports/NEXUS_ROUTE_COST_P90_TEACHER_REFERENCE_CLOSURE_2026-05-10.md",
+      "retention_class": "keep_tracked_source",
+      "reason": "tracked_source_stays_in_place",
+      "destination_path": "",
+      "tracked": true,
+      "pinned_by_catalog": false,
+      "current_evidence": false
+    },
+    {
+      "source_path": "docs/reports/NEXUS_ROUTE_V5_SMOKE_2026-05-02.md",
+      "retention_class": "keep_tracked_source",
+      "reason": "tracked_source_stays_in_place",
+      "destination_path": "",
+      "tracked": true,
+      "pinned_by_catalog": false,
+      "current_evidence": false
+    },
+    {
+      "source_path": "docs/reports/NEXUS_ROUTING_V5_EXECUTION_PLAN_2026-05-02.md",
+      "retention_class": "keep_tracked_source",
+      "reason": "tracked_source_stays_in_place",
+      "destination_path": "",
+      "tracked": true,
+      "pinned_by_catalog": false,
+      "current_evidence": false
+    },
+    {
+      "source_path": "docs/reports/NEXUS_ROUTING_V5_P11_GEMINI_FLASH_2026-05-02.md",
+      "retention_class": "keep_tracked_source",
+      "reason": "tracked_source_stays_in_place",
+      "destination_path": "",
+      "tracked": true,
+      "pinned_by_catalog": false,
+      "current_evidence": false
+    },
+    {
+      "source_path": "docs/reports/NEXUS_ROUTING_V5_P12_GEMINI_FLASH_LANES_2026-05-02.md",
+      "retention_class": "keep_tracked_source",
+      "reason": "tracked_source_stays_in_place",
+      "destination_path": "",
+      "tracked": true,
+      "pinned_by_catalog": false,
+      "current_evidence": false
+    },
+    {
+      "source_path": "docs/reports/NEXUS_ROUTING_V5_P13_PROGRESS_2026-05-02.md",
+      "retention_class": "keep_tracked_source",
+      "reason": "tracked_source_stays_in_place",
+      "destination_path": "",
+      "tracked": true,
+      "pinned_by_catalog": false,
+      "current_evidence": false
+    },
+    {
+      "source_path": "docs/reports/NEXUS_RUBRIC_CONTRACT_P85_5_2026-05-13.md",
+      "retention_class": "keep_tracked_source",
+      "reason": "tracked_source_stays_in_place",
+      "destination_path": "",
+      "tracked": true,
+      "pinned_by_catalog": false,
+      "current_evidence": false
+    },
+    {
+      "source_path": "docs/reports/NEXUS_R_HYPER_CRITICAL_PATH_TOPOLOGY.md",
+      "retention_class": "keep_tracked_source",
+      "reason": "tracked_source_stays_in_place",
+      "destination_path": "",
+      "tracked": true,
+      "pinned_by_catalog": false,
+      "current_evidence": false
+    },
+    {
+      "source_path": "docs/reports/NEXUS_R_HYPER_RUNNER_OVERHEAD_P20_2026-05-13.md",
+      "retention_class": "keep_tracked_source",
+      "reason": "tracked_source_stays_in_place",
+      "destination_path": "",
+      "tracked": true,
+      "pinned_by_catalog": false,
+      "current_evidence": false
+    },
+    {
+      "source_path": "docs/reports/NEXUS_R_HYPER_RUNNER_OVERHEAD_P22_2026-05-13.md",
+      "retention_class": "keep_tracked_source",
+      "reason": "tracked_source_stays_in_place",
+      "destination_path": "",
+      "tracked": true,
+      "pinned_by_catalog": false,
+      "current_evidence": false
+    },
+    {
+      "source_path": "docs/reports/NEXUS_R_HYPER_RUNNER_OVERHEAD_P24_HIDDEN_VERIFIER_FAILURE_2026-05-13.md",
+      "retention_class": "keep_tracked_source",
+      "reason": "tracked_source_stays_in_place",
+      "destination_path": "",
+      "tracked": true,
+      "pinned_by_catalog": false,
+      "current_evidence": false
+    },
+    {
+      "source_path": "docs/reports/NEXUS_R_HYPER_RUNNER_OVERHEAD_P27_FAILCLOSED_2026-05-13.md",
+      "retention_class": "keep_tracked_source",
+      "reason": "tracked_source_stays_in_place",
+      "destination_path": "",
+      "tracked": true,
+      "pinned_by_catalog": false,
+      "current_evidence": false
+    },
+    {
+      "source_path": "docs/reports/NEXUS_R_HYPER_RUNNER_OVERHEAD_P33_FLASH_AB_CLOSURE_2026-05-13.md",
+      "retention_class": "keep_tracked_source",
+      "reason": "tracked_source_stays_in_place",
+      "destination_path": "",
+      "tracked": true,
+      "pinned_by_catalog": false,
+      "current_evidence": false
+    },
+    {
+      "source_path": "docs/reports/NEXUS_SF_CAPABILITY_PRIMARY_ORIGINAL_SKILL_MAP_2026-05-20.json",
+      "retention_class": "keep_tracked_source",
+      "reason": "tracked_source_stays_in_place",
+      "destination_path": "",
+      "tracked": true,
+      "pinned_by_catalog": false,
+      "current_evidence": true
+    },
+    {
+      "source_path": "docs/reports/NEXUS_SF_CAPABILITY_PRIMARY_ORIGINAL_SKILL_MAP_2026-05-20.md",
+      "retention_class": "keep_tracked_source",
+      "reason": "tracked_source_stays_in_place",
+      "destination_path": "",
+      "tracked": true,
+      "pinned_by_catalog": false,
+      "current_evidence": true
+    },
+    {
+      "source_path": "docs/reports/NEXUS_SF_FINAL_CURRENT_STATE_2026-05-20.md",
+      "retention_class": "keep_tracked_source",
+      "reason": "tracked_source_stays_in_place",
+      "destination_path": "",
+      "tracked": true,
+      "pinned_by_catalog": false,
+      "current_evidence": true
+    },
+    {
+      "source_path": "docs/reports/NEXUS_SF_REFACTOR_REQUIRED_SKILL_MANIFEST_2026-05-20.json",
+      "retention_class": "keep_tracked_source",
+      "reason": "tracked_source_stays_in_place",
+      "destination_path": "",
+      "tracked": true,
+      "pinned_by_catalog": false,
+      "current_evidence": false
+    },
+    {
+      "source_path": "docs/reports/NEXUS_SF_RUNTIME_SKILL_POLICY_OVERLAY_CURRENT_2026-05-20.json",
+      "retention_class": "keep_tracked_source",
+      "reason": "tracked_source_stays_in_place",
+      "destination_path": "",
+      "tracked": true,
+      "pinned_by_catalog": false,
+      "current_evidence": true
+    },
+    {
+      "source_path": "docs/reports/NEXUS_SF_RUNTIME_SKILL_POLICY_OVERLAY_CURRENT_2026-05-20.md",
+      "retention_class": "keep_tracked_source",
+      "reason": "tracked_source_stays_in_place",
+      "destination_path": "",
+      "tracked": true,
+      "pinned_by_catalog": false,
+      "current_evidence": true
+    },
+    {
+      "source_path": "docs/reports/NEXUS_SF_RUNTIME_SKILL_POLICY_OVERLAY_CURRENT_SMOKE_2026-05-20.json",
+      "retention_class": "keep_tracked_source",
+      "reason": "tracked_source_stays_in_place",
+      "destination_path": "",
+      "tracked": true,
+      "pinned_by_catalog": false,
+      "current_evidence": true
+    },
+    {
+      "source_path": "docs/reports/NEXUS_SF_SYSTEMATIC_ALL_CAPABILITY_LIVE_ROLLUP_V32_2026-05-19.json",
+      "retention_class": "keep_tracked_source",
+      "reason": "tracked_source_stays_in_place",
+      "destination_path": "",
+      "tracked": true,
+      "pinned_by_catalog": false,
+      "current_evidence": true
+    },
+    {
+      "source_path": "docs/reports/NEXUS_SF_SYSTEMATIC_ALL_CAPABILITY_LIVE_ROLLUP_V32_2026-05-19.md",
+      "retention_class": "keep_tracked_source",
+      "reason": "tracked_source_stays_in_place",
+      "destination_path": "",
+      "tracked": true,
+      "pinned_by_catalog": false,
+      "current_evidence": true
+    },
+    {
+      "source_path": "docs/reports/NEXUS_SF_SYSTEMATIC_ALL_CAPABILITY_SKILL_FIT_CATALOG_V32_2026-05-19.json",
+      "retention_class": "keep_tracked_source",
+      "reason": "tracked_source_stays_in_place",
+      "destination_path": "",
+      "tracked": true,
+      "pinned_by_catalog": false,
+      "current_evidence": true
+    },
+    {
+      "source_path": "docs/reports/NEXUS_SF_SYSTEMATIC_BATCH_SKILL_STATUS_2026-05-19.json",
+      "retention_class": "keep_tracked_source",
+      "reason": "tracked_source_stays_in_place",
+      "destination_path": "",
+      "tracked": true,
+      "pinned_by_catalog": false,
+      "current_evidence": true
+    },
+    {
+      "source_path": "docs/reports/NEXUS_SF_SYSTEMATIC_COMPILED_INTERFACES_2026-05-19.json",
+      "retention_class": "keep_tracked_source",
+      "reason": "tracked_source_stays_in_place",
+      "destination_path": "",
+      "tracked": true,
+      "pinned_by_catalog": false,
+      "current_evidence": true
+    },
+    {
+      "source_path": "docs/reports/NEXUS_SF_SYSTEMATIC_FINALIZATION_V32_2026-05-19.json",
+      "retention_class": "keep_tracked_source",
+      "reason": "tracked_source_stays_in_place",
+      "destination_path": "",
+      "tracked": true,
+      "pinned_by_catalog": false,
+      "current_evidence": true
+    },
+    {
+      "source_path": "docs/reports/NEXUS_SF_SYSTEMATIC_FINALIZATION_V32_2026-05-19.md",
+      "retention_class": "keep_tracked_source",
+      "reason": "tracked_source_stays_in_place",
+      "destination_path": "",
+      "tracked": true,
+      "pinned_by_catalog": false,
+      "current_evidence": true
+    },
+    {
+      "source_path": "docs/reports/NEXUS_SF_SYSTEMATIC_RUNTIME_SLICES_2026-05-19.json",
+      "retention_class": "keep_tracked_source",
+      "reason": "tracked_source_stays_in_place",
+      "destination_path": "",
+      "tracked": true,
+      "pinned_by_catalog": false,
+      "current_evidence": true
+    },
+    {
+      "source_path": "docs/reports/NEXUS_SF_SYSTEMATIC_SUCCESSIVE_HALVING_2026-05-19.json",
+      "retention_class": "keep_tracked_source",
+      "reason": "tracked_source_stays_in_place",
+      "destination_path": "",
+      "tracked": true,
+      "pinned_by_catalog": false,
+      "current_evidence": true
+    },
+    {
+      "source_path": "docs/reports/NEXUS_SF_WORKSPACE_CLEANUP_INDEX_2026-05-19.md",
+      "retention_class": "keep_tracked_source",
+      "reason": "tracked_source_stays_in_place",
+      "destination_path": "",
+      "tracked": true,
+      "pinned_by_catalog": false,
+      "current_evidence": false
+    },
+    {
+      "source_path": "docs/reports/NEXUS_SF_WORKSPACE_RETENTION_APPLY_RESULT_CURRENT_2026-05-20.json",
+      "retention_class": "keep_tracked_source",
+      "reason": "tracked_source_stays_in_place",
+      "destination_path": "",
+      "tracked": true,
+      "pinned_by_catalog": false,
+      "current_evidence": false
+    },
+    {
+      "source_path": "docs/reports/NEXUS_SF_WORKSPACE_RETENTION_CURRENT_MANIFEST_2026-05-20.json",
+      "retention_class": "keep_tracked_source",
+      "reason": "tracked_source_stays_in_place",
+      "destination_path": "",
+      "tracked": true,
+      "pinned_by_catalog": false,
+      "current_evidence": false
+    },
+    {
+      "source_path": "docs/reports/NEXUS_SKILL_FIT_CATALOG_REPAIR_AND_CODING_2026-05-15.json",
+      "retention_class": "keep_tracked_source",
+      "reason": "tracked_source_stays_in_place",
+      "destination_path": "",
+      "tracked": true,
+      "pinned_by_catalog": false,
+      "current_evidence": false
+    },
+    {
+      "source_path": "docs/reports/NEXUS_SUPERVISED_BARE_FIRST_P52_2026-05-13.md",
+      "retention_class": "keep_tracked_source",
+      "reason": "tracked_source_stays_in_place",
+      "destination_path": "",
+      "tracked": true,
+      "pinned_by_catalog": false,
+      "current_evidence": false
+    },
+    {
+      "source_path": "docs/reports/NEXUS_SUPERVISED_BARE_FIRST_P53_PPI_2026-05-13.md",
+      "retention_class": "keep_tracked_source",
+      "reason": "tracked_source_stays_in_place",
+      "destination_path": "",
+      "tracked": true,
+      "pinned_by_catalog": false,
+      "current_evidence": false
+    },
+    {
+      "source_path": "docs/reports/NEXUS_SUPERVISED_BARE_FIRST_P61_FLASH_3TASK_2026-05-13.md",
+      "retention_class": "keep_tracked_source",
+      "reason": "tracked_source_stays_in_place",
+      "destination_path": "",
+      "tracked": true,
+      "pinned_by_catalog": false,
+      "current_evidence": false
+    },
+    {
+      "source_path": "docs/reports/NEXUS_SUPERVISED_BARE_GOVERNANCE_P32_2026-05-10.md",
+      "retention_class": "keep_tracked_source",
+      "reason": "tracked_source_stays_in_place",
+      "destination_path": "",
+      "tracked": true,
+      "pinned_by_catalog": false,
+      "current_evidence": false
+    },
+    {
+      "source_path": "docs/reports/NEXUS_TEACHER_REFERENCE_AND_EXTERNAL_BENCHMARK_P152_P230_2026-05-08.md",
+      "retention_class": "keep_tracked_source",
+      "reason": "tracked_source_stays_in_place",
+      "destination_path": "",
+      "tracked": true,
+      "pinned_by_catalog": false,
+      "current_evidence": false
+    },
+    {
+      "source_path": "docs/reports/NEXUS_TELEMETRY_DATA_STRATEGY_P75.md",
+      "retention_class": "keep_tracked_source",
+      "reason": "tracked_source_stays_in_place",
+      "destination_path": "",
+      "tracked": true,
+      "pinned_by_catalog": false,
+      "current_evidence": false
+    },
+    {
+      "source_path": "docs/reports/NEXUS_THREE_ARM_CAPABILITY_BENCH_P24_2026-05-10.md",
+      "retention_class": "keep_tracked_source",
+      "reason": "tracked_source_stays_in_place",
+      "destination_path": "",
+      "tracked": true,
+      "pinned_by_catalog": false,
+      "current_evidence": false
+    },
+    {
+      "source_path": "docs/reports/NEXUS_THREE_ARM_CAPABILITY_INVOCATION_P20_2026-05-10.md",
+      "retention_class": "keep_tracked_source",
+      "reason": "tracked_source_stays_in_place",
+      "destination_path": "",
+      "tracked": true,
+      "pinned_by_catalog": false,
+      "current_evidence": false
+    },
+    {
+      "source_path": "docs/reports/NEXUS_THREE_PILLAR_REFACTOR_P77_2026-05-05.md",
+      "retention_class": "keep_tracked_source",
+      "reason": "tracked_source_stays_in_place",
+      "destination_path": "",
+      "tracked": true,
+      "pinned_by_catalog": false,
+      "current_evidence": false
+    },
+    {
+      "source_path": "docs/reports/NEXUS_TOKEN_LEDGER_WALL_ATTRIBUTION_P83_2026-05-13.md",
+      "retention_class": "keep_tracked_source",
+      "reason": "tracked_source_stays_in_place",
+      "destination_path": "",
+      "tracked": true,
+      "pinned_by_catalog": false,
+      "current_evidence": false
+    },
+    {
+      "source_path": "docs/reports/NEXUS_TOKEN_ROI_P82_FLASH_HIDDEN_2026-05-13.md",
+      "retention_class": "keep_tracked_source",
+      "reason": "tracked_source_stays_in_place",
+      "destination_path": "",
+      "tracked": true,
+      "pinned_by_catalog": false,
+      "current_evidence": false
+    },
+    {
+      "source_path": "docs/reports/NEXUS_WORKSPACE_NON_SF_RETENTION_2026-05-19.json",
+      "retention_class": "keep_tracked_source",
+      "reason": "tracked_source_stays_in_place",
+      "destination_path": "",
+      "tracked": true,
+      "pinned_by_catalog": false,
+      "current_evidence": false
+    },
+    {
+      "source_path": "docs/reports/NIGHT_SHIFT_LOCAL_CONVERGENCE_IMPLEMENTATION_PLAN_2026-04-10.md",
+      "retention_class": "keep_tracked_source",
+      "reason": "tracked_source_stays_in_place",
+      "destination_path": "",
+      "tracked": true,
+      "pinned_by_catalog": false,
+      "current_evidence": false
+    },
+    {
+      "source_path": "docs/reports/PIPELINE_HEALTH_80_SPRINT_PLAN_2026-04-10.md",
+      "retention_class": "keep_tracked_source",
+      "reason": "tracked_source_stays_in_place",
+      "destination_path": "",
+      "tracked": true,
+      "pinned_by_catalog": false,
+      "current_evidence": false
+    },
+    {
+      "source_path": "docs/reports/RELEASE_NOTE_LEARNING_LOOP_HARDENED_V22.md",
+      "retention_class": "keep_tracked_source",
+      "reason": "tracked_source_stays_in_place",
+      "destination_path": "",
+      "tracked": true,
+      "pinned_by_catalog": false,
+      "current_evidence": false
+    },
+    {
+      "source_path": "docs/reports/ROUTING_REFACTOR_P1_P6_REPORT_2026-05-04.md",
+      "retention_class": "keep_tracked_source",
+      "reason": "tracked_source_stays_in_place",
+      "destination_path": "",
+      "tracked": true,
+      "pinned_by_catalog": false,
+      "current_evidence": false
+    },
+    {
+      "source_path": "docs/reports/ROUTING_REFACTOR_P7_P8_REPORT_2026-05-04.md",
+      "retention_class": "keep_tracked_source",
+      "reason": "tracked_source_stays_in_place",
+      "destination_path": "",
+      "tracked": true,
+      "pinned_by_catalog": false,
+      "current_evidence": false
+    },
+    {
+      "source_path": "docs/reports/SELF_CHECK_RECAP.md",
+      "retention_class": "keep_tracked_source",
+      "reason": "tracked_source_stays_in_place",
+      "destination_path": "",
+      "tracked": true,
+      "pinned_by_catalog": false,
+      "current_evidence": false
+    },
+    {
+      "source_path": "docs/reports/SWE_BENCH_Django_31505_V24_2_ACTUAL.md",
+      "retention_class": "keep_tracked_source",
+      "reason": "tracked_source_stays_in_place",
+      "destination_path": "",
+      "tracked": true,
+      "pinned_by_catalog": false,
+      "current_evidence": false
+    },
+    {
+      "source_path": "docs/reports/night_shift_20260319_150648.md",
+      "retention_class": "keep_tracked_source",
+      "reason": "tracked_source_stays_in_place",
+      "destination_path": "",
+      "tracked": true,
+      "pinned_by_catalog": false,
+      "current_evidence": false
+    },
+    {
+      "source_path": "docs/reports/night_shift_final.md",
+      "retention_class": "keep_tracked_source",
+      "reason": "tracked_source_stays_in_place",
+      "destination_path": "",
+      "tracked": true,
+      "pinned_by_catalog": false,
+      "current_evidence": false
+    }
+  ]
+}

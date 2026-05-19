@@ -38,6 +38,16 @@ def test_hard_gate_compatibility_passes_clean_g0_bundle() -> None:
         context_pack_security_required=True,
         context_pack_security_status="PASS",
         remote_config_trust_status="PASS",
+        evidence_seal_required=True,
+        evidence_seal_status="PASS",
+        evidence_hash_status="PASS",
+        network_fetch_required=True,
+        network_fetch_guard_status="PASS",
+        redirect_revalidation_status="PASS",
+        graph_integrity_required=True,
+        entity_namespace_status="PASS",
+        dedup_guard_required=True,
+        dedup_precision_status="PASS",
         evidence_refs=("route:dry-run", "completion:envelope", "mutation:claim_always_true"),
     )
 
@@ -150,4 +160,37 @@ def test_hard_gate_compatibility_blocks_rationale_merge_and_pack_gaps() -> None:
         "union_merge_cap_not_pass",
         "union_merge_driver_not_pass",
         "union_merge_schema_not_pass",
+    ]
+
+
+def test_hard_gate_compatibility_blocks_v5_deep_audit_gaps() -> None:
+    payload = build_hard_gate_compatibility(
+        evidence_seal_required=True,
+        evidence_seal_status="RETURN",
+        evidence_hash_status="FAIL",
+        partial_telemetry_detected=True,
+        network_fetch_required=True,
+        network_fetch_guard_status="RETURN",
+        redirect_revalidation_status="RETURN",
+        private_network_target_detected=True,
+        graph_integrity_required=True,
+        entity_namespace_status="RETURN",
+        dangling_edge_detected=True,
+        dedup_guard_required=True,
+        dedup_precision_status="RETURN",
+        low_entropy_merge_detected=True,
+    )
+
+    assert payload["status"] == "RETURN"
+    assert payload["blockers"] == [
+        "dangling_edge_detected",
+        "dedup_precision_not_pass",
+        "entity_namespace_not_pass",
+        "evidence_hash_not_pass",
+        "evidence_seal_not_pass",
+        "low_entropy_merge_detected",
+        "network_fetch_guard_not_pass",
+        "partial_telemetry_detected",
+        "private_network_target_detected",
+        "redirect_revalidation_not_pass",
     ]
