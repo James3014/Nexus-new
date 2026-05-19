@@ -2641,3 +2641,10 @@ version_scope:
 - Failure: an `ultra_review` smoke case planned both the dedicated `ultra_review` skill and the broad `governance_and_trust` skill even though the expected skill still passed.
 - Lesson: receipt aliases and runtime overlay selection aliases are different. Broad receipt aliases help confirmation, but broad runtime aliases can over-inject skills when every capability already has a direct primary.
 - Guardrail: keep current-overlay aliases narrow and only use them for true route-name synonyms such as `forecast_pregate -> forecast_gate/pregate/plan_quality_gate`.
+
+## 2026-05-20 - optimization report contracts must coerce enum inputs by value
+
+- Trigger: `OptimizationReportContract` tests passed enum instances into the builder.
+- Failure: the builder converted enum instances with `str(enum)`, producing strings like `ClaimClass.RUNTIME_APPLY_REVIEW` instead of the serialized value expected by the enum constructor.
+- Lesson: contract builders should accept both raw JSON strings and typed enum instances without changing their serialized meaning.
+- Guardrail: normalize enum inputs through a shared helper before validation, and keep builder tests covering both enum and string inputs.

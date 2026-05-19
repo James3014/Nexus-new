@@ -7,6 +7,15 @@ from nexus.contracts.rule_lifecycle import (
     RuleLifecycleState,
     recommend_rule_state,
 )
+from nexus.contracts.optimization_report import (
+    ClaimClass,
+    OptimizationReportContract,
+    ProviderTokenCleanliness,
+    RetentionClass,
+    build_optimization_report_contract,
+    report_contract_readout,
+    validate_optimization_report_contract,
+)
 
 __all__ = [
     "RLMBudget",
@@ -15,5 +24,12 @@ __all__ = [
     "RLMTraceWriter",
     "RuleLifecycleEvidence",
     "RuleLifecycleState",
+    "ClaimClass",
+    "OptimizationReportContract",
+    "ProviderTokenCleanliness",
+    "RetentionClass",
+    "build_optimization_report_contract",
+    "report_contract_readout",
     "recommend_rule_state",
+    "validate_optimization_report_contract",
 ]
