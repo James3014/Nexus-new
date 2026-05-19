@@ -673,3 +673,11 @@ Goal: prevent replacement from provider-blocked challenger runs.
 Exit:
 
 - current-best and challenger must both be receipt-clean PASS in the same provider-cleanliness window.
+
+### Failure Lesson: Patch Context Drift During Refactor Slices
+
+Lesson:
+
+- When extracting a seam from a large module, inspect the exact local import block and method body before applying a wide patch.
+- Treat patch context mismatch as a process failure, not a runtime behavior failure.
+- Prevention rule: keep extraction patches narrow and rerun the focused regression before committing the slice.
