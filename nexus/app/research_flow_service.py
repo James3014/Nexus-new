@@ -3249,7 +3249,16 @@ def run_auto_flow(
             and execution_profile["is_hard_task"]
             and (skip_baseline_probe_for_hard or direct_hyper)
         ):
-            baseline_probe_skipped = True
+            forced_hyper_needs_probe = (
+                forced_hyper
+                and tuned_baseline_fast_sec <= 0
+                and dynamic_timeout_multiplier > 0
+                and min_dynamic_stage1_timeout < stage1_timeout_sec
+            )
+            if forced_hyper_needs_probe:
+                baseline_probe = _run_baseline_probe()
+            else:
+                baseline_probe_skipped = True
             result = _run_hyper_apply()
             if (
                 result.get("status") != "SUCCESS"

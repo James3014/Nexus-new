@@ -180,7 +180,11 @@ def test_context_runtime_adapter_returns_without_calling_assembler_when_receipt_
         task_id="ctx-runtime",
         layers=[0, 1],
         budget=1,
-        adapter_receipt={"status": "RETURN", "blockers": ["receipt_not_pass"]},
+        adapter_receipt={
+            "schema": "nexus.runtime_context_adapter_receipt.v1",
+            "status": "RETURN",
+            "blockers": ["receipt_not_pass"],
+        },
         assembler=fail_if_called,
     )
 
@@ -188,6 +192,32 @@ def test_context_runtime_adapter_returns_without_calling_assembler_when_receipt_
     assert payload["status"] == "RETURN"
     assert payload["context"] == ""
     assert payload["blockers"] == ["receipt_not_pass"]
+
+
+def test_context_runtime_adapter_blocks_cross_boundary_receipts():
+    def fail_if_called(*args, **kwargs):
+        raise AssertionError("assembler should not run")
+
+    payload = build_runtime_context_payload(
+        task_id="ctx-runtime",
+        layers=[0, 1],
+        budget=120,
+        adapter_receipt={
+            "schema": "nexus.runtime_context_adapter_receipt.v1",
+            "status": "PASS",
+            "runtime_dispatch_changed": True,
+            "runtime_update_allowed": True,
+            "public_benchmark_allowed": True,
+            "blockers": [],
+        },
+        assembler=fail_if_called,
+    )
+
+    assert payload["status"] == "RETURN"
+    assert payload["context"] == ""
+    assert "adapter_attempted_runtime_dispatch_change" in payload["blockers"]
+    assert "adapter_attempted_runtime_update" in payload["blockers"]
+    assert "adapter_attempted_public_benchmark_unlock" in payload["blockers"]
 
 
 def test_stateless_context_coordinator_wires_receipt_builder_and_assembler():
@@ -199,7 +229,7 @@ def test_stateless_context_coordinator_wires_receipt_builder_and_assembler():
         assert token_budget == 99
         assert state_view == {"state": "view"}
         assert extra_sources == [{"source_id": "x"}]
-        return {"status": "PASS", "blockers": []}
+        return {"schema": "nexus.runtime_context_adapter_receipt.v1", "status": "PASS", "blockers": []}
 
     def assembler(*, task_id, layers, budget, bayesian_params=None):
         calls["assemble"] = True

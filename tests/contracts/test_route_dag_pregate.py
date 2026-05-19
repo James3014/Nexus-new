@@ -85,3 +85,60 @@ def test_route_dag_pregate_blocks_required_pre_model_rescue_and_serializes_swarm
     assert "artifact_gate:required_capability_pre_model_rescue_planned" in pregate["blockers"]
     assert pregate["nodes"][0]["execution_slot"] == "serial_forced_swarm"
     assert pregate["parallelizable_edges"] == []
+
+
+def test_route_dag_pregate_serializes_autonomic_router_forced_swarm() -> None:
+    pregate = build_route_dag_pregate(
+        capability_plan={
+            "schema_version": "nexus_capability_plan_v1",
+            "planner_mode": "dry_run",
+            "selected_capabilities": ["codeintel", "research"],
+        },
+        capability_nodes={
+            "codeintel": {
+                "category": "discovery",
+                "parallelizable_with": ["research"],
+                "evidence_outputs": ["code_scan"],
+            },
+            "research": {
+                "category": "discovery",
+                "parallelizable_with": ["codeintel"],
+                "evidence_outputs": ["source_receipt"],
+            },
+        },
+        autonomic_pre_route={
+            "status": "PASS",
+            "mode": "swarm",
+            "forced_swarm_capabilities": ["codeintel"],
+            "selected_capabilities": ["codeintel"],
+        },
+    )
+
+    assert pregate["status"] == "PASS"
+    assert pregate["nodes"][0]["capability"] == "codeintel"
+    assert pregate["nodes"][0]["execution_slot"] == "serial_forced_swarm"
+    assert pregate["parallelizable_edges"] == []
+
+
+def test_route_dag_pregate_blocks_autonomic_pre_route_boundary_crossing() -> None:
+    pregate = build_route_dag_pregate(
+        capability_plan={
+            "schema_version": "nexus_capability_plan_v1",
+            "planner_mode": "dry_run",
+            "selected_capabilities": ["codeintel"],
+        },
+        capability_nodes={
+            "codeintel": {"category": "discovery", "evidence_outputs": ["code_scan"]},
+        },
+        autonomic_pre_route={
+            "status": "PASS",
+            "runtime_dispatch_changed": True,
+            "runtime_update_allowed": True,
+            "public_benchmark_allowed": True,
+        },
+    )
+
+    assert pregate["status"] == "RETURN"
+    assert "autonomic_pre_route_attempted_dispatch" in pregate["blockers"]
+    assert "autonomic_pre_route_attempted_runtime_update" in pregate["blockers"]
+    assert "autonomic_pre_route_attempted_public_benchmark_unlock" in pregate["blockers"]

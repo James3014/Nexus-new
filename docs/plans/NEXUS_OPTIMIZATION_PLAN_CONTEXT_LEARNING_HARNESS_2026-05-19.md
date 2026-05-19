@@ -725,3 +725,35 @@ Lesson:
 - Long-lived test modules can rename focused test nodes while preserving the same assertion block.
 - Treat `not found: ...::test_name` as focused command drift, not as evidence that the behavior lacks coverage.
 - Prevention rule: locate the current focused node with `rg` before adding it to a multi-target regression command.
+
+### Failure Lesson: Boundary Gate Normalization Drift
+
+Lesson:
+
+- Boundary gates must preserve unsafe caller intent long enough for blockers to see it.
+- Treat normalized-away `runtime_update_allowed` or `public_benchmark_allowed` inputs as gate implementation drift, not as a safe default.
+- Prevention rule: read raw boundary-crossing fields into blockers before emitting sanitized claim-boundary defaults, and include both underscore and hyphen path variants for forbidden path probes.
+
+### Failure Lesson: Forced Hyper Probe Drift
+
+Lesson:
+
+- `force_flow=hyper_sprint` still needs the baseline probe when dynamic timeout sizing depends on probe elapsed time and baseline fast-path probing is disabled.
+- Treat `effective_stage1_timeout_sec` staying at the static default as execution-profile drift, not as a reason to weaken the timeout test.
+- Prevention rule: preserve baseline probe collection for forced Hyper runs only when the dynamic-timeout contract needs it; otherwise keep forced Hyper as direct execution.
+
+### Failure Lesson: Archived Skill Status Path Drift
+
+Lesson:
+
+- Skill catalog policy checks must tolerate the canonical status report moving into the report archive, but must not synthesize or copy a replacement report.
+- Treat `FileNotFoundError` for `docs/reports/NEXUS_SKILL_STATUS_2026-05-15.json` as report-retention path drift, not as permission to weaken mount-tier validation.
+- Prevention rule: resolve the default status report through an explicit archive fallback and keep the emitted `status_report` pointing at the actual source consumed.
+
+### Failure Lesson: Full Wiki Audit Scope Drift
+
+Lesson:
+
+- Full wiki governance audit currently includes legacy and archive pages with pre-existing page-contract debt unrelated to route/context code slices.
+- Treat a full-linter failure on untouched legacy pages as release-scope drift, not as evidence that the changed route/context artifacts are unsafe.
+- Prevention rule: use strict changed-scope wiki governance for small production slices, and keep full wiki remediation as a separate archive hygiene campaign.

@@ -21,6 +21,18 @@ from nexus.learning.skill_catalog import SkillCatalog
 
 
 DEFAULT_STATUS_REPORT = Path("docs/reports/NEXUS_SKILL_STATUS_2026-05-15.json")
+ARCHIVED_STATUS_REPORT = Path(
+    "docs/reports/archive/sf/2026-05-15/NEXUS_SKILL_STATUS_2026-05-15.json"
+)
+
+
+def resolve_status_report(path: str | Path) -> Path:
+    requested = Path(path)
+    if requested.exists():
+        return requested
+    if requested == DEFAULT_STATUS_REPORT and ARCHIVED_STATUS_REPORT.exists():
+        return ARCHIVED_STATUS_REPORT
+    return requested
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -41,14 +53,15 @@ def build_parser() -> argparse.ArgumentParser:
 
 def main(argv: list[str] | None = None) -> int:
     args = build_parser().parse_args(argv)
-    catalog = SkillCatalog.from_status_report(args.status_report)
+    status_report = resolve_status_report(args.status_report)
+    catalog = SkillCatalog.from_status_report(status_report)
     contracts = catalog.mount_contracts()
     contract_names = [contract["skill_id"] for contract in contracts]
     contract_violations = catalog.validate_requested_mounts(contract_names)
     requested_violations = catalog.validate_requested_mounts(args.requested_mount)
 
     summary = {
-        "status_report": str(args.status_report),
+        "status_report": str(status_report),
         "total_entries": len(catalog.entries),
         "runtime_candidate_count": len(catalog.runtime_candidates()),
         "reference_candidate_count": len(catalog.reference_candidates()),

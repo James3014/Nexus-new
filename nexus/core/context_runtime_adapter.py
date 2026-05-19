@@ -23,6 +23,14 @@ def build_runtime_context_payload(
     bayesian_params: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     blockers = list(adapter_receipt.get("blockers", []) or [])
+    if adapter_receipt.get("schema") != "nexus.runtime_context_adapter_receipt.v1":
+        blockers.append("invalid_runtime_context_adapter_receipt_schema")
+    if bool(adapter_receipt.get("runtime_dispatch_changed", False)):
+        blockers.append("adapter_attempted_runtime_dispatch_change")
+    if bool(adapter_receipt.get("runtime_update_allowed", False)):
+        blockers.append("adapter_attempted_runtime_update")
+    if bool(adapter_receipt.get("public_benchmark_allowed", False)):
+        blockers.append("adapter_attempted_public_benchmark_unlock")
     if adapter_receipt.get("status") != "PASS":
         return _payload(
             status="RETURN",
@@ -30,6 +38,14 @@ def build_runtime_context_payload(
             context="",
             adapter_receipt=adapter_receipt,
             blockers=blockers or ["runtime_context_adapter_not_pass"],
+        )
+    if blockers:
+        return _payload(
+            status="RETURN",
+            task_id=task_id,
+            context="",
+            adapter_receipt=adapter_receipt,
+            blockers=sorted(set(blockers)),
         )
 
     context = assembler(

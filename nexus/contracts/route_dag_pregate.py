@@ -10,16 +10,28 @@ def build_route_dag_pregate(
     *,
     capability_plan: Mapping[str, Any],
     capability_nodes: Mapping[str, Any],
+    autonomic_pre_route: Mapping[str, Any] | None = None,
 ) -> dict[str, Any]:
     planned = _planned_capabilities(capability_plan)
-    nodes = [_node_readout(capability, state, capability_nodes.get(capability)) for capability, state in planned.items()]
+    forced_swarm_caps = _forced_swarm_capabilities(autonomic_pre_route)
+    nodes = [
+        _node_readout(
+            capability,
+            state,
+            capability_nodes.get(capability),
+            forced_swarm_caps=forced_swarm_caps,
+        )
+        for capability, state in planned.items()
+    ]
     blockers = _blockers(nodes)
+    blockers.extend(_autonomic_pre_route_blockers(autonomic_pre_route))
     return {
         "schema": ROUTE_DAG_PREGATE_SCHEMA,
         "status": "PASS" if not blockers else "RETURN",
         "claim_verdict": "NOT_EVALUATED",
         "planner_mode": str(capability_plan.get("planner_mode") or ""),
         "plan_schema_version": str(capability_plan.get("schema_version") or ""),
+        "autonomic_pre_route": dict(autonomic_pre_route or {}),
         "demand_nodes": _demand_nodes(nodes),
         "dependency_edges": _dependency_edges(nodes),
         "parallelizable_edges": _parallelizable_edges(nodes),
@@ -61,10 +73,17 @@ def _planned_capabilities(plan: Mapping[str, Any]) -> dict[str, str]:
     return dict(sorted(planned.items()))
 
 
-def _node_readout(capability: str, state: str, raw_node: Any) -> dict[str, Any]:
+def _node_readout(
+    capability: str,
+    state: str,
+    raw_node: Any,
+    *,
+    forced_swarm_caps: set[str] | None = None,
+) -> dict[str, Any]:
     node = _node_dict(raw_node)
     category = str(node.get("category") or "")
     default_state = str(node.get("default_state") or "")
+    forced_swarm = bool(node.get("forced_swarm", False)) or capability in (forced_swarm_caps or set())
     return {
         "capability": capability,
         "state": state,
@@ -77,8 +96,8 @@ def _node_readout(capability: str, state: str, raw_node: Any) -> dict[str, Any]:
         "retry_policy": _retry_policy(state=state, category=category, default_state=default_state),
         "capability_contract_type": str(node.get("capability_contract_type") or default_state or ""),
         "pre_model_rescue_planned": bool(node.get("pre_model_rescue_planned", False)),
-        "forced_swarm": bool(node.get("forced_swarm", False)),
-        "execution_slot": "serial_forced_swarm" if bool(node.get("forced_swarm", False)) else "standard",
+        "forced_swarm": forced_swarm,
+        "execution_slot": "serial_forced_swarm" if forced_swarm else "standard",
         "node_present": bool(node),
     }
 
@@ -177,6 +196,30 @@ def _blockers(nodes: list[dict[str, Any]]) -> list[str]:
         if node["capability_contract_type"] == "required" and node["pre_model_rescue_planned"]:
             blockers.append(f"{node['capability']}:required_capability_pre_model_rescue_planned")
     return sorted(set(blockers))
+
+
+def _forced_swarm_capabilities(autonomic_pre_route: Mapping[str, Any] | None) -> set[str]:
+    if not isinstance(autonomic_pre_route, Mapping):
+        return set()
+    capabilities = set(_strings(autonomic_pre_route.get("forced_swarm_capabilities")))
+    if str(autonomic_pre_route.get("mode") or "").lower() == "swarm":
+        capabilities.update(_strings(autonomic_pre_route.get("selected_capabilities")))
+    return capabilities
+
+
+def _autonomic_pre_route_blockers(autonomic_pre_route: Mapping[str, Any] | None) -> list[str]:
+    if not isinstance(autonomic_pre_route, Mapping):
+        return []
+    blockers: list[str] = []
+    if str(autonomic_pre_route.get("status") or "PASS").upper() != "PASS":
+        blockers.append("autonomic_pre_route_not_pass")
+    if bool(autonomic_pre_route.get("runtime_dispatch_changed", False)):
+        blockers.append("autonomic_pre_route_attempted_dispatch")
+    if bool(autonomic_pre_route.get("public_benchmark_allowed", False)):
+        blockers.append("autonomic_pre_route_attempted_public_benchmark_unlock")
+    if bool(autonomic_pre_route.get("runtime_update_allowed", False)):
+        blockers.append("autonomic_pre_route_attempted_runtime_update")
+    return blockers
 
 
 def _strings(value: Any) -> list[str]:
