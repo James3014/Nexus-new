@@ -56,6 +56,8 @@ def test_outcome_memory_writes_learning_policy(tmp_path, monkeypatch) -> None:
     assert (tmp_path / "history.jsonl").exists()
     assert policy["promoted_capabilities"] == ["hyper"]
     assert policy["penalized_capabilities"] == []
+    assert policy["aging_window"]["records_used"] == 1
+    assert policy["capability_scores"]["hyper"] == 1.0
 
 
 def test_outcome_memory_penalizes_selected_without_invocation(tmp_path, monkeypatch) -> None:
@@ -78,6 +80,51 @@ def test_outcome_memory_penalizes_selected_without_invocation(tmp_path, monkeypa
 
     assert policy["promoted_capabilities"] == []
     assert policy["penalized_capabilities"] == ["swarm"]
+    assert policy["capability_scores"]["swarm"] == -1.0
+
+
+def test_outcome_memory_recency_aging_resolves_newer_signal(tmp_path, monkeypatch) -> None:
+    monkeypatch.setattr(OutcomeMemoryManager, "STORAGE_PATH", tmp_path / "history.jsonl")
+    monkeypatch.setattr(OutcomeMemoryManager, "POLICY_PATH", tmp_path / "policy.json")
+
+    older_penalty = EpisodeOutcomeRecord.from_task(
+        task_id="test-003",
+        task_type="bug",
+        task_desc="Older selected only route",
+        solved=False,
+        wall_duration_sec=1.0,
+        total_tokens_used=100,
+        trust_mismatch=False,
+        receipts=[{"name": "research", "selected": True, "invoked": False}],
+    )
+    newer_promotion = EpisodeOutcomeRecord.from_task(
+        task_id="test-004",
+        task_type="research",
+        task_desc="Newer receipt backed route",
+        solved=True,
+        wall_duration_sec=2.0,
+        total_tokens_used=200,
+        trust_mismatch=False,
+        receipts=[
+            {
+                "name": "research",
+                "selected": True,
+                "invoked": True,
+                "evidence_present": True,
+                "gate_passed": True,
+                "outcome_contributed": True,
+                "public_claim_safe": True,
+            }
+        ],
+    )
+
+    OutcomeMemoryManager.save_episode_and_tune_sync(older_penalty)
+    OutcomeMemoryManager.save_episode_and_tune_sync(newer_promotion)
+    policy = json.loads((tmp_path / "policy.json").read_text(encoding="utf-8"))
+
+    assert policy["promoted_capabilities"] == ["research"]
+    assert policy["penalized_capabilities"] == []
+    assert policy["capability_scores"]["research"] > 0
 
 
 def test_dynamic_outcome_policy_feeds_planner_without_runtime_default_pollution(tmp_path) -> None:

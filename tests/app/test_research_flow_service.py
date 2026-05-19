@@ -2606,6 +2606,11 @@ def test_run_auto_flow_writes_rlm_trace_when_enabled(tmp_path: Path, monkeypatch
 
     trace_path = Path(payload["nexus_usage_trace"]["rlm_trace_path"])
     assert trace_path.exists()
+    receipt = payload["nexus_usage_trace"]["rlm_runtime_decision_receipt"]
+    assert receipt["status"] == "PASS"
+    assert receipt["loop_phase"] == "R"
+    assert receipt["terminal_reason"] in {"gate_passed_high_belief", "continue_allowed"}
+    assert receipt["runtime_update_allowed"] is False
     events = [json.loads(line) for line in trace_path.read_text(encoding="utf-8").splitlines()]
     assert [event["phase"] for event in events] == ["R", "A"]
     assert events[0]["action_type"] == "research_auto_flow"
@@ -2661,6 +2666,11 @@ def test_run_auto_flow_writes_recursive_research_x_trace_when_enabled(tmp_path: 
     assert trace["rlm_x_loop_budget_summary"]["model_calls"] == 0
     assert trace["rlm_x_loop_budget_summary"]["phase_wall_sec"] >= 0
     assert trace["rlm_x_loop_budget_summary"]["exhausted"] is False
+    receipt = trace["rlm_runtime_decision_receipt"]
+    assert receipt["status"] == "PASS"
+    assert receipt["loop_phase"] == "X"
+    assert receipt["budget"]["current_x_count"] == 1
+    assert receipt["claim_boundary"] == "runtime_receipt_only_not_public_claim"
 
 
 def test_cross_module_hyper_failure_can_rescue_with_original_artifact_verification(tmp_path: Path, monkeypatch):

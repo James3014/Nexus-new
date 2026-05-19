@@ -1,6 +1,10 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from typing import Any
+
+
+RLM_RUNTIME_DECISION_RECEIPT_SCHEMA = "nexus_rlm_runtime_decision_receipt.v1"
 
 
 @dataclass
@@ -52,3 +56,58 @@ class RlmController:
         if self.budget.current_r_count >= self.budget.max_r_iterations:
             return "r_iteration_budget_exhausted"
         return "continue_allowed"
+
+
+def build_rlm_decision_receipt(
+    *,
+    loop_phase: str,
+    gate_passed: bool,
+    belief_confidence: float,
+    current_tokens: int = 0,
+    current_x_count: int = 0,
+    current_r_count: int = 0,
+    max_tokens: int = 150_000,
+    max_x_iterations: int = 3,
+    max_r_iterations: int = 4,
+    source: str = "research_flow_service",
+) -> dict[str, Any]:
+    phase = str(loop_phase or "R").upper()
+    budget = RlmBudget(
+        max_x_iterations=max(1, int(max_x_iterations or 1)),
+        max_r_iterations=max(1, int(max_r_iterations or 1)),
+        max_tokens=max(1, int(max_tokens or 1)),
+        current_tokens=max(0, int(current_tokens or 0)),
+        current_x_count=max(0, int(current_x_count or 0)),
+        current_r_count=max(0, int(current_r_count or 0)),
+    )
+    controller = RlmController(budget)
+    if phase == "X":
+        continue_allowed = controller.should_continue_x(belief_confidence)
+    else:
+        continue_allowed = controller.should_continue_r(
+            gate_passed=gate_passed,
+            belief_confidence=belief_confidence,
+        )
+    return {
+        "schema_version": RLM_RUNTIME_DECISION_RECEIPT_SCHEMA,
+        "status": "PASS",
+        "source": source,
+        "loop_phase": phase,
+        "gate_passed": bool(gate_passed),
+        "belief_confidence": float(belief_confidence or 0.0),
+        "continue_allowed": bool(continue_allowed),
+        "terminal_reason": controller.terminal_reason(
+            gate_passed=gate_passed,
+            belief_confidence=belief_confidence,
+        ),
+        "budget": {
+            "max_tokens": budget.max_tokens,
+            "current_tokens": budget.current_tokens,
+            "max_x_iterations": budget.max_x_iterations,
+            "current_x_count": budget.current_x_count,
+            "max_r_iterations": budget.max_r_iterations,
+            "current_r_count": budget.current_r_count,
+        },
+        "runtime_update_allowed": False,
+        "claim_boundary": "runtime_receipt_only_not_public_claim",
+    }

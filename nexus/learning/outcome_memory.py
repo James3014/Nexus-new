@@ -75,6 +75,7 @@ class OutcomeMemoryManager:
     STORAGE_PATH = Path(".nexus") / "memory" / "outcome_history.jsonl"
     POLICY_PATH = Path(".nexus") / "memory" / "dynamic_learning_policy.json"
     RECENT_LIMIT = 20
+    MIN_RECENCY_WEIGHT = 0.35
 
     @classmethod
     async def save_episode_and_tune(
@@ -108,9 +109,10 @@ class OutcomeMemoryManager:
     @classmethod
     def run_dynamic_autotune_sync(cls, *, project_root: Path | None = None) -> dict[str, Any]:
         records = cls.load_recent_records(project_root=project_root, limit=cls.RECENT_LIMIT)
-        promoted: set[str] = set()
-        penalized: set[str] = set()
-        for record in records:
+        promoted_scores: dict[str, float] = {}
+        penalized_scores: dict[str, float] = {}
+        weights = _recency_weights(len(records), minimum=cls.MIN_RECENCY_WEIGHT)
+        for record, weight in zip(records, weights, strict=False):
             solved = bool(record.get("solved", False))
             for receipt in record.get("receipts", []) or []:
                 if not isinstance(receipt, Mapping):
@@ -119,16 +121,26 @@ class OutcomeMemoryManager:
                 if not name:
                     continue
                 if _receipt_promotes(record_solved=solved, receipt=receipt):
-                    promoted.add(name)
+                    promoted_scores[name] = promoted_scores.get(name, 0.0) + weight
                 if _receipt_penalizes(record_solved=solved, receipt=receipt):
-                    penalized.add(name)
-        resolved_promoted = sorted(promoted - penalized)
-        resolved_penalized = sorted(penalized - promoted)
+                    penalized_scores[name] = penalized_scores.get(name, 0.0) + weight
+        capability_scores = {
+            name: round(promoted_scores.get(name, 0.0) - penalized_scores.get(name, 0.0), 4)
+            for name in sorted(set(promoted_scores) | set(penalized_scores))
+        }
+        resolved_promoted = [name for name, score in capability_scores.items() if score > 0]
+        resolved_penalized = [name for name, score in capability_scores.items() if score < 0]
         policy = {
             "schema_version": DYNAMIC_LEARNING_POLICY_SCHEMA,
             "status": "PASS",
             "source_experiences_count": len(records),
             "source_experiences": [str(record.get("task_id") or "") for record in records if record.get("task_id")],
+            "aging_window": {
+                "recent_limit": cls.RECENT_LIMIT,
+                "minimum_weight": cls.MIN_RECENCY_WEIGHT,
+                "records_used": len(records),
+            },
+            "capability_scores": capability_scores,
             "promoted_capabilities": resolved_promoted,
             "penalized_capabilities": resolved_penalized,
             "enforce_penalties": False,
@@ -178,6 +190,16 @@ def _receipt_penalizes(*, record_solved: bool, receipt: Mapping[str, Any]) -> bo
     if receipt.get("evidence_present") and not receipt.get("gate_passed"):
         return True
     return bool(not record_solved and not receipt.get("gate_passed"))
+
+
+def _recency_weights(count: int, *, minimum: float) -> list[float]:
+    if count <= 0:
+        return []
+    if count == 1:
+        return [1.0]
+    floor = max(0.0, min(1.0, float(minimum)))
+    step = (1.0 - floor) / float(count - 1)
+    return [round(floor + (step * index), 4) for index in range(count)]
 
 
 def _resolve(project_root: Path | None, path: Path) -> Path:

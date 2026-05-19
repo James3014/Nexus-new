@@ -45,6 +45,7 @@ from nexus.engine.learning_policy_loader import (
     merge_runtime_learning_policy,
     route_cost_controls_from_env,
 )
+from nexus.engine.rlm_controller import build_rlm_decision_receipt
 from nexus.learning.outcome_memory import EpisodeOutcomeRecord, OutcomeMemoryManager
 from nexus.research.architecture_scout import DistantScoutPlanner
 from nexus.research.doc_scout_adapter import DocScoutAdapter, build_external_scout_providers_from_env
@@ -3720,14 +3721,16 @@ def run_auto_flow(
         nexus_usage_trace["capabilities"]["s2t_candidate_count"] = int(s2t_trace["candidate_count"])
     recursive_research = _rlm_research_trace_enabled()
     if _rlm_trace_enabled() or recursive_research:
+        rlm_budget_summary: dict[str, Any] = {}
         if recursive_research:
             nexus_usage_trace["rlm_loop_phase"] = "X"
             nexus_usage_trace["rlm_x_loop_budget_observed"] = True
-            nexus_usage_trace["rlm_x_loop_budget_summary"] = _rlm_x_loop_budget_summary(
+            rlm_budget_summary = _rlm_x_loop_budget_summary(
                 result=result,
                 phase_wall_sec=phase_wall_sec,
                 candidate_count=candidate_count,
             )
+            nexus_usage_trace["rlm_x_loop_budget_summary"] = rlm_budget_summary
             nexus_usage_trace["rlm_required_gates"] = [
                 "rlm_trace_present",
                 "submit_not_success",
@@ -3741,6 +3744,14 @@ def run_auto_flow(
                 "submit_not_success",
                 "ac_gate_verified",
             ]
+        nexus_usage_trace["rlm_runtime_decision_receipt"] = build_rlm_decision_receipt(
+            loop_phase=str(nexus_usage_trace.get("rlm_loop_phase") or "R"),
+            gate_passed=bool(artifact_verified),
+            belief_confidence=float(route_confidence or 0.0),
+            current_tokens=int(result_report.get("total_tokens", 0) or 0),
+            current_x_count=int(rlm_budget_summary.get("iterations_observed", 0) or 0),
+            current_r_count=0 if recursive_research else 1,
+        )
         nexus_usage_trace["rlm_trace_path"] = _write_research_rlm_trace(
             repo_root=repo_root,
             task_desc=task_desc,

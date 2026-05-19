@@ -1,0 +1,27 @@
+{
+  "schema_version": "nexus_outcome_memory_retention_manifest.v1",
+  "status": "PASS",
+  "generated_at": "2026-05-20",
+  "scope": "OutcomeMemory dynamic learning artifacts produced by the routing outcome memory loop.",
+  "artifacts": [
+    {
+      "path": ".nexus/memory/outcome_history.jsonl",
+      "retention_class": "generated_current_evidence",
+      "owner": "OutcomeMemoryManager",
+      "pinned_by_catalog": true,
+      "cleanup_rule": "Keep latest active memory file; archive only after a replacement dynamic policy manifest points to a newer history file."
+    },
+    {
+      "path": ".nexus/memory/dynamic_learning_policy.json",
+      "retention_class": "generated_policy_candidate",
+      "owner": "OutcomeMemoryManager",
+      "pinned_by_catalog": true,
+      "cleanup_rule": "Keep while merge_runtime_learning_policy consumes it; never treat it as runtime default policy."
+    }
+  ],
+  "claim_boundary": {
+    "runtime_update_allowed": false,
+    "public_claim_allowed": false,
+    "allowed_use": "planner budget hint and SF/route diagnostic input only"
+  }
+}
