@@ -12,6 +12,7 @@ if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
 from nexus.contracts.claim_evidence_read_model import build_claim_evidence_read_model
+from nexus.contracts.evidence_dataset import EVIDENCE_DATASET_MANIFEST_SCHEMA
 from nexus.contracts.optimization_report import ClaimClass
 from scripts.ops.report_output import resolve_report_output
 
@@ -39,6 +40,7 @@ def build_read_model_from_evidence_manifest(
         receipt_refs=receipt_refs,
         sealed_evidence_required=bool(manifest.get("sealed_evidence_required", claim_class == ClaimClass.PUBLIC_READY.value)),
     )
+    _attach_manifest_schema_gate(model, manifest)
     if not dry_run:
         _write(output_path, model)
     return _summary(model, input_path=input_path, output_path=output_path, dry_run=dry_run)
@@ -63,6 +65,20 @@ def _refs_from_manifest(manifest: dict[str, Any], *, key: str) -> list[str]:
     return refs
 
 
+def _attach_manifest_schema_gate(model: dict[str, Any], manifest: dict[str, Any]) -> None:
+    manifest_schema = str(manifest.get("schema") or "")
+    model["source_manifest_schema"] = manifest_schema
+    model["source_manifest_status"] = (
+        "PASS" if manifest_schema == EVIDENCE_DATASET_MANIFEST_SCHEMA else "LEGACY_OR_DIAGNOSTIC"
+    )
+    if model.get("claim_class") in {ClaimClass.RUNTIME_APPLY_REVIEW.value, ClaimClass.PUBLIC_READY.value}:
+        if manifest_schema != EVIDENCE_DATASET_MANIFEST_SCHEMA:
+            blockers = list(model.get("blockers", []) or [])
+            blockers.append("invalid_or_missing_evidence_dataset_manifest_schema")
+            model["blockers"] = sorted(set(blockers))
+            model["status"] = "RETURN"
+
+
 def _summary(model: dict[str, Any], *, input_path: Path, output_path: Path, dry_run: bool) -> dict[str, Any]:
     return {
         "schema": "nexus_claim_evidence_read_model_export.v1",
@@ -70,6 +86,8 @@ def _summary(model: dict[str, Any], *, input_path: Path, output_path: Path, dry_
         "dry_run": bool(dry_run),
         "input_path": str(input_path),
         "output_path": str(output_path),
+        "source_manifest_schema": str(model.get("source_manifest_schema") or ""),
+        "source_manifest_status": str(model.get("source_manifest_status") or ""),
         "claim_class": str(model.get("claim_class") or ""),
         "gate_count": len(model.get("gates", []) or []),
         "blocker_count": len(model.get("blockers", []) or []),
