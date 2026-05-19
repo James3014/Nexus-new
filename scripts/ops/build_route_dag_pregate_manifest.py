@@ -25,6 +25,7 @@ def build_route_dag_pregate_manifest(
     phase_trace: dict[str, Any] | None = None,
     project_root: str | Path = ".",
     symbols: list[str] | None = None,
+    symbol_roots: list[str] | None = None,
 ) -> dict[str, Any]:
     plan = CapabilityPlanner().plan(
         task_desc=task_desc,
@@ -42,7 +43,7 @@ def build_route_dag_pregate_manifest(
     pregate["task_type"] = task_type
     pregate["source"] = "capability_planner_dry_run"
     pregate["code_skeleton_lookup"] = [
-        lookup_implementation(project_root, symbol).to_dict()
+        lookup_implementation(project_root, symbol, search_paths=symbol_roots or ()).to_dict()
         for symbol in (symbols or [])
         if symbol.strip()
     ]
@@ -74,6 +75,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--phase-trace-json", default="")
     parser.add_argument("--project-root", default=".")
     parser.add_argument("--symbol", action="append", default=[])
+    parser.add_argument("--symbol-root", action="append", default=[])
     parser.add_argument("--output", default="", type=Path)
     parser.add_argument("--output-dir", default="", type=Path)
     parser.add_argument("--dry-run", action="store_true")
@@ -88,6 +90,7 @@ def main(argv: list[str] | None = None) -> int:
         phase_trace=_json_arg(args.phase_trace_json, name="phase_trace"),
         project_root=args.project_root,
         symbols=list(args.symbol),
+        symbol_roots=list(args.symbol_root),
     )
     output_arg = str(args.output)
     output_dir_arg = str(args.output_dir)

@@ -48,6 +48,18 @@ def test_lookup_implementation_accepts_unqualified_symbol(tmp_path: Path) -> Non
     assert result.matches[0].end_line == 2
 
 
+def test_lookup_implementation_can_limit_search_paths(tmp_path: Path) -> None:
+    (tmp_path / "wanted.py").write_text("def target(value):\n    return value\n", encoding="utf-8")
+    (tmp_path / "ignored.py").write_text("def other(value):\n    return value\n", encoding="utf-8")
+
+    found = lookup_implementation(tmp_path, "target", search_paths=["wanted.py"])
+    missing = lookup_implementation(tmp_path, "other", search_paths=["wanted.py"])
+
+    assert found.found is True
+    assert found.matches[0].file_path == "wanted.py"
+    assert missing.found is False
+
+
 def test_lookup_implementation_returns_not_found(tmp_path: Path) -> None:
     (tmp_path / "mod.py").write_text("VALUE = 1\n", encoding="utf-8")
 

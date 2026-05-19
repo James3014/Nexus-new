@@ -8,8 +8,9 @@ from nexus.services.codeintel.models import CodeSkeletonLookupResult, CodeSkelet
 
 
 class PythonCodeSkeletonProvider:
-    def __init__(self, root: str | Path) -> None:
+    def __init__(self, root: str | Path, search_paths: Iterable[str | Path] = ()) -> None:
         self.root = Path(root).resolve()
+        self.search_paths = tuple(Path(path) for path in search_paths)
 
     def lookup_implementation(self, symbol_name: str) -> CodeSkeletonLookupResult:
         target = symbol_name.strip()
@@ -26,10 +27,16 @@ class PythonCodeSkeletonProvider:
         return CodeSkeletonLookupResult(symbol=target, found=True, matches=matches)
 
     def _python_files(self) -> Iterable[Path]:
-        for path in sorted(self.root.rglob("*.py")):
-            if _skip_path(path):
-                continue
-            yield path
+        roots = self.search_paths or (Path("."),)
+        for root in roots:
+            search_root = root if root.is_absolute() else self.root / root
+            paths = [search_root] if search_root.is_file() else sorted(search_root.rglob("*.py"))
+            for path in paths:
+                if path.suffix != ".py":
+                    continue
+                if not path.exists() or _skip_path(path):
+                    continue
+                yield path
 
     def _symbols_for_file(self, path: Path) -> list[CodeSkeletonSymbol]:
         try:
@@ -51,8 +58,13 @@ class PythonCodeSkeletonProvider:
         return symbols
 
 
-def lookup_implementation(root: str | Path, symbol_name: str) -> CodeSkeletonLookupResult:
-    return PythonCodeSkeletonProvider(root).lookup_implementation(symbol_name)
+def lookup_implementation(
+    root: str | Path,
+    symbol_name: str,
+    *,
+    search_paths: Iterable[str | Path] = (),
+) -> CodeSkeletonLookupResult:
+    return PythonCodeSkeletonProvider(root, search_paths=search_paths).lookup_implementation(symbol_name)
 
 
 def _symbol(prefix: str, node: ast.AST, relative: Path) -> CodeSkeletonSymbol:

@@ -63,6 +63,7 @@ def test_route_dag_pregate_manifest_can_include_skeleton_lookup(tmp_path) -> Non
         task_type="bug",
         project_root=tmp_path,
         symbols=["target"],
+        symbol_roots=["pkg/core.py"],
     )
 
     assert manifest["runtime_dispatch_changed"] is False
