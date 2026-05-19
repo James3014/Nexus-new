@@ -7,6 +7,7 @@ from datetime import datetime
 from dataclasses import dataclass
 from nexus.contracts.context_assembly import build_context_assembly_contract
 from nexus.contracts.context_budget import ContextBudgetSource, build_context_budget_receipt
+from nexus.core.context_runtime_adapter import build_runtime_context_payload
 from nexus.core.state_contracts import NexusDiagnosis, NexusResearch, NexusState
 from nexus.core.state_io import StateIO
 from nexus.services.memory import MemoryService
@@ -388,45 +389,14 @@ class ContextHub:
             state_view=state_view,
             extra_sources=extra_sources,
         )
-        blockers = list(receipt.get("blockers", []) or [])
-        if receipt.get("status") != "PASS":
-            return {
-                "schema": "nexus.runtime_context_payload.v1",
-                "status": "RETURN",
-                "task_id": task_id,
-                "context": "",
-                "adapter_receipt": receipt,
-                "runtime_dispatch_changed": False,
-                "public_benchmark_allowed": False,
-                "runtime_update_allowed": False,
-                "blockers": blockers or ["runtime_context_adapter_not_pass"],
-                "claim_boundary": [
-                    "Runtime context payloads may assemble context after adapter PASS only.",
-                    "They do not change route dispatch, runtime policy, or public benchmark readiness.",
-                ],
-            }
-
-        context = self.assemble_context(
+        return build_runtime_context_payload(
             task_id=task_id,
             layers=layers,
             budget=budget,
+            adapter_receipt=receipt,
+            assembler=self.assemble_context,
             bayesian_params=bayesian_params,
         )
-        return {
-            "schema": "nexus.runtime_context_payload.v1",
-            "status": "PASS",
-            "task_id": task_id,
-            "context": context,
-            "adapter_receipt": receipt,
-            "runtime_dispatch_changed": False,
-            "public_benchmark_allowed": False,
-            "runtime_update_allowed": False,
-            "blockers": [],
-            "claim_boundary": [
-                "Runtime context payloads may assemble context after adapter PASS only.",
-                "They do not change route dispatch, runtime policy, or public benchmark readiness.",
-            ],
-        }
 
     def _context_budget_sources(
         self,

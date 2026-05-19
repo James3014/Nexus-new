@@ -5,6 +5,7 @@ from types import SimpleNamespace
 import pytest
 
 from nexus.core.context_hub import ContextDependencies, ContextHub
+from nexus.core.context_runtime_adapter import build_runtime_context_payload
 
 
 def test_context_hub_strict_deps_requires_dependency_container(tmp_path):
@@ -169,3 +170,21 @@ def test_context_hub_runtime_context_payload_returns_before_assembly_when_receip
     assert payload["runtime_dispatch_changed"] is False
     assert payload["runtime_update_allowed"] is False
     assert payload["public_benchmark_allowed"] is False
+
+
+def test_context_runtime_adapter_returns_without_calling_assembler_when_receipt_fails():
+    def fail_if_called(*args, **kwargs):
+        raise AssertionError("assembler should not run")
+
+    payload = build_runtime_context_payload(
+        task_id="ctx-runtime",
+        layers=[0, 1],
+        budget=1,
+        adapter_receipt={"status": "RETURN", "blockers": ["receipt_not_pass"]},
+        assembler=fail_if_called,
+    )
+
+    assert payload["schema"] == "nexus.runtime_context_payload.v1"
+    assert payload["status"] == "RETURN"
+    assert payload["context"] == ""
+    assert payload["blockers"] == ["receipt_not_pass"]
