@@ -1,0 +1,1006 @@
+{
+  "schema": "nexus.sf_flash_pair_task_manifest.v1",
+  "version": "2026-05-18",
+  "frozen": true,
+  "benchmark_id": "nexus-sf-flash-pair-v1",
+  "description": "Internal SF Flash+Nexus vs Flash+Nexus+primary-skill paired matrix. Not a public benchmark.",
+  "status": "PASS",
+  "summary": {
+    "task_count": 33,
+    "capability_count": 33,
+    "runtime_update_allowed": false,
+    "public_benchmark_allowed": false
+  },
+  "tasks": [
+    {
+      "id": "sf-flash-pair-artifact_gate-001",
+      "task_desc": "Use Flash+Nexus to exercise capability artifact_gate. Compare this capability-only run with the paired primary-skill run.",
+      "target_file": "unused",
+      "test_file": "unused",
+      "success_criteria": "flash_nexus_skill_fit_pair_receipt_chain_complete",
+      "category": "artifact_gate",
+      "difficulty": "medium",
+      "repo_kind": "neutral_fixture",
+      "repo": "fixture://sf-flash-pair",
+      "repo_ref": "v1",
+      "fixture_kind": "sf_flash_pair",
+      "mutation_required": false,
+      "allowed_files": [
+        "unused"
+      ],
+      "forbidden_files": [
+        ".nexus/",
+        "logs/",
+        "benchmarks/"
+      ],
+      "setup_command": "python -V",
+      "verification_command": "python -V",
+      "expected_capabilities": [
+        "artifact_gate"
+      ],
+      "capability_activation_contract": "required",
+      "eligibility_class": "model_required",
+      "public_claim_allowed_metrics": []
+    },
+    {
+      "id": "sf-flash-pair-autonomic_router-001",
+      "task_desc": "Use Flash+Nexus to exercise capability autonomic_router. Compare this capability-only run with the paired primary-skill run.",
+      "target_file": "unused",
+      "test_file": "unused",
+      "success_criteria": "flash_nexus_skill_fit_pair_receipt_chain_complete",
+      "category": "autonomic_router",
+      "difficulty": "medium",
+      "repo_kind": "neutral_fixture",
+      "repo": "fixture://sf-flash-pair",
+      "repo_ref": "v1",
+      "fixture_kind": "sf_flash_pair",
+      "mutation_required": false,
+      "allowed_files": [
+        "unused"
+      ],
+      "forbidden_files": [
+        ".nexus/",
+        "logs/",
+        "benchmarks/"
+      ],
+      "setup_command": "python -V",
+      "verification_command": "python -V",
+      "expected_capabilities": [
+        "autoreason"
+      ],
+      "capability_activation_contract": "required",
+      "eligibility_class": "model_required",
+      "public_claim_allowed_metrics": []
+    },
+    {
+      "id": "sf-flash-pair-autoreason-001",
+      "task_desc": "Use Flash+Nexus to exercise capability autoreason. Compare this capability-only run with the paired primary-skill run.",
+      "target_file": "unused",
+      "test_file": "unused",
+      "success_criteria": "flash_nexus_skill_fit_pair_receipt_chain_complete",
+      "category": "autoreason",
+      "difficulty": "medium",
+      "repo_kind": "neutral_fixture",
+      "repo": "fixture://sf-flash-pair",
+      "repo_ref": "v1",
+      "fixture_kind": "sf_flash_pair",
+      "mutation_required": false,
+      "allowed_files": [
+        "unused"
+      ],
+      "forbidden_files": [
+        ".nexus/",
+        "logs/",
+        "benchmarks/"
+      ],
+      "setup_command": "python -V",
+      "verification_command": "python -V",
+      "expected_capabilities": [
+        "autoreason"
+      ],
+      "capability_activation_contract": "required",
+      "eligibility_class": "model_required",
+      "public_claim_allowed_metrics": []
+    },
+    {
+      "id": "sf-flash-pair-belief-001",
+      "task_desc": "Use Flash+Nexus to exercise capability belief. Compare this capability-only run with the paired primary-skill run.",
+      "target_file": "unused",
+      "test_file": "unused",
+      "success_criteria": "flash_nexus_skill_fit_pair_receipt_chain_complete",
+      "category": "belief",
+      "difficulty": "medium",
+      "repo_kind": "neutral_fixture",
+      "repo": "fixture://sf-flash-pair",
+      "repo_ref": "v1",
+      "fixture_kind": "sf_flash_pair",
+      "mutation_required": false,
+      "allowed_files": [
+        "unused"
+      ],
+      "forbidden_files": [
+        ".nexus/",
+        "logs/",
+        "benchmarks/"
+      ],
+      "setup_command": "python -V",
+      "verification_command": "python -V",
+      "expected_capabilities": [
+        "belief"
+      ],
+      "capability_activation_contract": "required",
+      "eligibility_class": "model_required",
+      "public_claim_allowed_metrics": []
+    },
+    {
+      "id": "sf-flash-pair-benchmark_meta_opt-001",
+      "task_desc": "Use Flash+Nexus to exercise capability benchmark_meta_opt. Compare this capability-only run with the paired primary-skill run.",
+      "target_file": "unused",
+      "test_file": "unused",
+      "success_criteria": "flash_nexus_skill_fit_pair_receipt_chain_complete",
+      "category": "benchmark_meta_opt",
+      "difficulty": "medium",
+      "repo_kind": "neutral_fixture",
+      "repo": "fixture://sf-flash-pair",
+      "repo_ref": "v1",
+      "fixture_kind": "sf_flash_pair",
+      "mutation_required": false,
+      "allowed_files": [
+        "unused"
+      ],
+      "forbidden_files": [
+        ".nexus/",
+        "logs/",
+        "benchmarks/"
+      ],
+      "setup_command": "python -V",
+      "verification_command": "python -V",
+      "expected_capabilities": [
+        "judge_panel"
+      ],
+      "capability_activation_contract": "required",
+      "eligibility_class": "model_required",
+      "public_claim_allowed_metrics": []
+    },
+    {
+      "id": "sf-flash-pair-claim_gate-001",
+      "task_desc": "Use Flash+Nexus to exercise capability claim_gate. Compare this capability-only run with the paired primary-skill run.",
+      "target_file": "unused",
+      "test_file": "unused",
+      "success_criteria": "flash_nexus_skill_fit_pair_receipt_chain_complete",
+      "category": "claim_gate",
+      "difficulty": "medium",
+      "repo_kind": "neutral_fixture",
+      "repo": "fixture://sf-flash-pair",
+      "repo_ref": "v1",
+      "fixture_kind": "sf_flash_pair",
+      "mutation_required": false,
+      "allowed_files": [
+        "unused"
+      ],
+      "forbidden_files": [
+        ".nexus/",
+        "logs/",
+        "benchmarks/"
+      ],
+      "setup_command": "python -V",
+      "verification_command": "python -V",
+      "expected_capabilities": [
+        "claim_gate"
+      ],
+      "capability_activation_contract": "required",
+      "eligibility_class": "model_required",
+      "public_claim_allowed_metrics": []
+    },
+    {
+      "id": "sf-flash-pair-codeintel-001",
+      "task_desc": "Use Flash+Nexus to exercise capability codeintel. Compare this capability-only run with the paired primary-skill run.",
+      "target_file": "unused",
+      "test_file": "unused",
+      "success_criteria": "flash_nexus_skill_fit_pair_receipt_chain_complete",
+      "category": "codeintel",
+      "difficulty": "medium",
+      "repo_kind": "neutral_fixture",
+      "repo": "fixture://sf-flash-pair",
+      "repo_ref": "v1",
+      "fixture_kind": "sf_flash_pair",
+      "mutation_required": false,
+      "allowed_files": [
+        "unused"
+      ],
+      "forbidden_files": [
+        ".nexus/",
+        "logs/",
+        "benchmarks/"
+      ],
+      "setup_command": "python -V",
+      "verification_command": "python -V",
+      "expected_capabilities": [
+        "codeintel"
+      ],
+      "capability_activation_contract": "required",
+      "eligibility_class": "model_required",
+      "public_claim_allowed_metrics": []
+    },
+    {
+      "id": "sf-flash-pair-ddtree-001",
+      "task_desc": "Use Flash+Nexus to exercise capability ddtree. Compare this capability-only run with the paired primary-skill run.",
+      "target_file": "unused",
+      "test_file": "unused",
+      "success_criteria": "flash_nexus_skill_fit_pair_receipt_chain_complete",
+      "category": "ddtree",
+      "difficulty": "medium",
+      "repo_kind": "neutral_fixture",
+      "repo": "fixture://sf-flash-pair",
+      "repo_ref": "v1",
+      "fixture_kind": "sf_flash_pair",
+      "mutation_required": false,
+      "allowed_files": [
+        "unused"
+      ],
+      "forbidden_files": [
+        ".nexus/",
+        "logs/",
+        "benchmarks/"
+      ],
+      "setup_command": "python -V",
+      "verification_command": "python -V",
+      "expected_capabilities": [
+        "ddtree"
+      ],
+      "capability_activation_contract": "required",
+      "eligibility_class": "model_required",
+      "public_claim_allowed_metrics": []
+    },
+    {
+      "id": "sf-flash-pair-delivery_acceptance_gate-001",
+      "task_desc": "Use Flash+Nexus to exercise capability delivery_acceptance_gate. Compare this capability-only run with the paired primary-skill run.",
+      "target_file": "unused",
+      "test_file": "unused",
+      "success_criteria": "flash_nexus_skill_fit_pair_receipt_chain_complete",
+      "category": "delivery_acceptance_gate",
+      "difficulty": "medium",
+      "repo_kind": "neutral_fixture",
+      "repo": "fixture://sf-flash-pair",
+      "repo_ref": "v1",
+      "fixture_kind": "sf_flash_pair",
+      "mutation_required": false,
+      "allowed_files": [
+        "unused"
+      ],
+      "forbidden_files": [
+        ".nexus/",
+        "logs/",
+        "benchmarks/"
+      ],
+      "setup_command": "python -V",
+      "verification_command": "python -V",
+      "expected_capabilities": [
+        "delivery_gate"
+      ],
+      "capability_activation_contract": "required",
+      "eligibility_class": "model_required",
+      "public_claim_allowed_metrics": []
+    },
+    {
+      "id": "sf-flash-pair-direct_master_loop-001",
+      "task_desc": "Use Flash+Nexus to exercise capability direct_master_loop. Compare this capability-only run with the paired primary-skill run.",
+      "target_file": "unused",
+      "test_file": "unused",
+      "success_criteria": "flash_nexus_skill_fit_pair_receipt_chain_complete",
+      "category": "direct_master_loop",
+      "difficulty": "medium",
+      "repo_kind": "neutral_fixture",
+      "repo": "fixture://sf-flash-pair",
+      "repo_ref": "v1",
+      "fixture_kind": "sf_flash_pair",
+      "mutation_required": false,
+      "allowed_files": [
+        "unused"
+      ],
+      "forbidden_files": [
+        ".nexus/",
+        "logs/",
+        "benchmarks/"
+      ],
+      "setup_command": "python -V",
+      "verification_command": "python -V",
+      "expected_capabilities": [
+        "hyper"
+      ],
+      "capability_activation_contract": "required",
+      "eligibility_class": "model_required",
+      "public_claim_allowed_metrics": []
+    },
+    {
+      "id": "sf-flash-pair-drone-001",
+      "task_desc": "Use Flash+Nexus to exercise capability drone. Compare this capability-only run with the paired primary-skill run.",
+      "target_file": "unused",
+      "test_file": "unused",
+      "success_criteria": "flash_nexus_skill_fit_pair_receipt_chain_complete",
+      "category": "drone",
+      "difficulty": "medium",
+      "repo_kind": "neutral_fixture",
+      "repo": "fixture://sf-flash-pair",
+      "repo_ref": "v1",
+      "fixture_kind": "sf_flash_pair",
+      "mutation_required": false,
+      "allowed_files": [
+        "unused"
+      ],
+      "forbidden_files": [
+        ".nexus/",
+        "logs/",
+        "benchmarks/"
+      ],
+      "setup_command": "python -V",
+      "verification_command": "python -V",
+      "expected_capabilities": [
+        "drone"
+      ],
+      "capability_activation_contract": "required",
+      "eligibility_class": "model_required",
+      "public_claim_allowed_metrics": []
+    },
+    {
+      "id": "sf-flash-pair-external_productivity-001",
+      "task_desc": "Use Flash+Nexus to exercise capability external_productivity. Compare this capability-only run with the paired primary-skill run.",
+      "target_file": "unused",
+      "test_file": "unused",
+      "success_criteria": "flash_nexus_skill_fit_pair_receipt_chain_complete",
+      "category": "external_productivity",
+      "difficulty": "medium",
+      "repo_kind": "neutral_fixture",
+      "repo": "fixture://sf-flash-pair",
+      "repo_ref": "v1",
+      "fixture_kind": "sf_flash_pair",
+      "mutation_required": false,
+      "allowed_files": [
+        "unused"
+      ],
+      "forbidden_files": [
+        ".nexus/",
+        "logs/",
+        "benchmarks/"
+      ],
+      "setup_command": "python -V",
+      "verification_command": "python -V",
+      "expected_capabilities": [
+        "research"
+      ],
+      "capability_activation_contract": "required",
+      "eligibility_class": "model_required",
+      "public_claim_allowed_metrics": []
+    },
+    {
+      "id": "sf-flash-pair-file_lock_security_gate-001",
+      "task_desc": "Use Flash+Nexus to exercise capability file_lock_security_gate. Compare this capability-only run with the paired primary-skill run.",
+      "target_file": "unused",
+      "test_file": "unused",
+      "success_criteria": "flash_nexus_skill_fit_pair_receipt_chain_complete",
+      "category": "file_lock_security_gate",
+      "difficulty": "medium",
+      "repo_kind": "neutral_fixture",
+      "repo": "fixture://sf-flash-pair",
+      "repo_ref": "v1",
+      "fixture_kind": "sf_flash_pair",
+      "mutation_required": false,
+      "allowed_files": [
+        "unused"
+      ],
+      "forbidden_files": [
+        ".nexus/",
+        "logs/",
+        "benchmarks/"
+      ],
+      "setup_command": "python -V",
+      "verification_command": "python -V",
+      "expected_capabilities": [
+        "ultra_review"
+      ],
+      "capability_activation_contract": "required",
+      "eligibility_class": "model_required",
+      "public_claim_allowed_metrics": []
+    },
+    {
+      "id": "sf-flash-pair-forecast_pregate-001",
+      "task_desc": "Use Flash+Nexus to exercise capability forecast_pregate. Compare this capability-only run with the paired primary-skill run.",
+      "target_file": "unused",
+      "test_file": "unused",
+      "success_criteria": "flash_nexus_skill_fit_pair_receipt_chain_complete",
+      "category": "forecast_pregate",
+      "difficulty": "medium",
+      "repo_kind": "neutral_fixture",
+      "repo": "fixture://sf-flash-pair",
+      "repo_ref": "v1",
+      "fixture_kind": "sf_flash_pair",
+      "mutation_required": false,
+      "allowed_files": [
+        "unused"
+      ],
+      "forbidden_files": [
+        ".nexus/",
+        "logs/",
+        "benchmarks/"
+      ],
+      "setup_command": "python -V",
+      "verification_command": "python -V",
+      "expected_capabilities": [
+        "autoreason"
+      ],
+      "capability_activation_contract": "required",
+      "eligibility_class": "model_required",
+      "public_claim_allowed_metrics": []
+    },
+    {
+      "id": "sf-flash-pair-hyper_sprint-001",
+      "task_desc": "Use Flash+Nexus to exercise capability hyper_sprint. Compare this capability-only run with the paired primary-skill run.",
+      "target_file": "unused",
+      "test_file": "unused",
+      "success_criteria": "flash_nexus_skill_fit_pair_receipt_chain_complete",
+      "category": "hyper_sprint",
+      "difficulty": "medium",
+      "repo_kind": "neutral_fixture",
+      "repo": "fixture://sf-flash-pair",
+      "repo_ref": "v1",
+      "fixture_kind": "sf_flash_pair",
+      "mutation_required": false,
+      "allowed_files": [
+        "unused"
+      ],
+      "forbidden_files": [
+        ".nexus/",
+        "logs/",
+        "benchmarks/"
+      ],
+      "setup_command": "python -V",
+      "verification_command": "python -V",
+      "expected_capabilities": [
+        "hyper"
+      ],
+      "capability_activation_contract": "required",
+      "eligibility_class": "model_required",
+      "public_claim_allowed_metrics": []
+    },
+    {
+      "id": "sf-flash-pair-lancedb-001",
+      "task_desc": "Use Flash+Nexus to exercise capability lancedb. Compare this capability-only run with the paired primary-skill run.",
+      "target_file": "unused",
+      "test_file": "unused",
+      "success_criteria": "flash_nexus_skill_fit_pair_receipt_chain_complete",
+      "category": "lancedb",
+      "difficulty": "medium",
+      "repo_kind": "neutral_fixture",
+      "repo": "fixture://sf-flash-pair",
+      "repo_ref": "v1",
+      "fixture_kind": "sf_flash_pair",
+      "mutation_required": false,
+      "allowed_files": [
+        "unused"
+      ],
+      "forbidden_files": [
+        ".nexus/",
+        "logs/",
+        "benchmarks/"
+      ],
+      "setup_command": "python -V",
+      "verification_command": "python -V",
+      "expected_capabilities": [
+        "lancedb"
+      ],
+      "capability_activation_contract": "required",
+      "eligibility_class": "model_required",
+      "public_claim_allowed_metrics": []
+    },
+    {
+      "id": "sf-flash-pair-learn_ask-001",
+      "task_desc": "Use Flash+Nexus to exercise capability learn_ask. Compare this capability-only run with the paired primary-skill run.",
+      "target_file": "unused",
+      "test_file": "unused",
+      "success_criteria": "flash_nexus_skill_fit_pair_receipt_chain_complete",
+      "category": "learn_ask",
+      "difficulty": "medium",
+      "repo_kind": "neutral_fixture",
+      "repo": "fixture://sf-flash-pair",
+      "repo_ref": "v1",
+      "fixture_kind": "rlm_harder_v2_semantic_searcher_refs",
+      "mutation_required": false,
+      "allowed_files": [
+        "unused"
+      ],
+      "forbidden_files": [
+        ".nexus/",
+        "logs/",
+        "benchmarks/"
+      ],
+      "setup_command": "python -V",
+      "verification_command": "python -V",
+      "expected_capabilities": [
+        "semantic_searcher"
+      ],
+      "capability_activation_contract": "required",
+      "eligibility_class": "model_required",
+      "public_claim_allowed_metrics": []
+    },
+    {
+      "id": "sf-flash-pair-learning_closure-001",
+      "task_desc": "Use Flash+Nexus to exercise capability learning_closure. Compare this capability-only run with the paired primary-skill run.",
+      "target_file": "unused",
+      "test_file": "unused",
+      "success_criteria": "flash_nexus_skill_fit_pair_receipt_chain_complete",
+      "category": "learning_closure",
+      "difficulty": "medium",
+      "repo_kind": "neutral_fixture",
+      "repo": "fixture://sf-flash-pair",
+      "repo_ref": "v1",
+      "fixture_kind": "sf_flash_pair",
+      "mutation_required": false,
+      "allowed_files": [
+        "unused"
+      ],
+      "forbidden_files": [
+        ".nexus/",
+        "logs/",
+        "benchmarks/"
+      ],
+      "setup_command": "python -V",
+      "verification_command": "python -V",
+      "expected_capabilities": [
+        "semantic_failure_sensor"
+      ],
+      "capability_activation_contract": "required",
+      "eligibility_class": "model_required",
+      "public_claim_allowed_metrics": []
+    },
+    {
+      "id": "sf-flash-pair-memory-001",
+      "task_desc": "Use Flash+Nexus to exercise capability memory. Compare this capability-only run with the paired primary-skill run.",
+      "target_file": "unused",
+      "test_file": "unused",
+      "success_criteria": "flash_nexus_skill_fit_pair_receipt_chain_complete",
+      "category": "memory",
+      "difficulty": "medium",
+      "repo_kind": "neutral_fixture",
+      "repo": "fixture://sf-flash-pair",
+      "repo_ref": "v1",
+      "fixture_kind": "sf_flash_pair",
+      "mutation_required": false,
+      "allowed_files": [
+        "unused"
+      ],
+      "forbidden_files": [
+        ".nexus/",
+        "logs/",
+        "benchmarks/"
+      ],
+      "setup_command": "python -V",
+      "verification_command": "python -V",
+      "expected_capabilities": [
+        "memory"
+      ],
+      "capability_activation_contract": "required",
+      "eligibility_class": "model_required",
+      "public_claim_allowed_metrics": []
+    },
+    {
+      "id": "sf-flash-pair-mempalace-001",
+      "task_desc": "Use Flash+Nexus to exercise capability mempalace. Compare this capability-only run with the paired primary-skill run.",
+      "target_file": "unused",
+      "test_file": "unused",
+      "success_criteria": "flash_nexus_skill_fit_pair_receipt_chain_complete",
+      "category": "mempalace",
+      "difficulty": "medium",
+      "repo_kind": "neutral_fixture",
+      "repo": "fixture://sf-flash-pair",
+      "repo_ref": "v1",
+      "fixture_kind": "sf_flash_pair",
+      "mutation_required": false,
+      "allowed_files": [
+        "unused"
+      ],
+      "forbidden_files": [
+        ".nexus/",
+        "logs/",
+        "benchmarks/"
+      ],
+      "setup_command": "python -V",
+      "verification_command": "python -V",
+      "expected_capabilities": [
+        "mempalace_gate"
+      ],
+      "capability_activation_contract": "required",
+      "eligibility_class": "model_required",
+      "public_claim_allowed_metrics": []
+    },
+    {
+      "id": "sf-flash-pair-metabolism_resume-001",
+      "task_desc": "Use Flash+Nexus to exercise capability metabolism_resume. Compare this capability-only run with the paired primary-skill run.",
+      "target_file": "unused",
+      "test_file": "unused",
+      "success_criteria": "flash_nexus_skill_fit_pair_receipt_chain_complete",
+      "category": "metabolism_resume",
+      "difficulty": "medium",
+      "repo_kind": "neutral_fixture",
+      "repo": "fixture://sf-flash-pair",
+      "repo_ref": "v1",
+      "fixture_kind": "sf_flash_pair",
+      "mutation_required": false,
+      "allowed_files": [
+        "unused"
+      ],
+      "forbidden_files": [
+        ".nexus/",
+        "logs/",
+        "benchmarks/"
+      ],
+      "setup_command": "python -V",
+      "verification_command": "python -V",
+      "expected_capabilities": [
+        "semantic_failure_sensor"
+      ],
+      "capability_activation_contract": "required",
+      "eligibility_class": "model_required",
+      "public_claim_allowed_metrics": []
+    },
+    {
+      "id": "sf-flash-pair-nightshift-001",
+      "task_desc": "Use Flash+Nexus to exercise capability nightshift. Compare this capability-only run with the paired primary-skill run.",
+      "target_file": "unused",
+      "test_file": "unused",
+      "success_criteria": "flash_nexus_skill_fit_pair_receipt_chain_complete",
+      "category": "nightshift",
+      "difficulty": "medium",
+      "repo_kind": "neutral_fixture",
+      "repo": "fixture://sf-flash-pair",
+      "repo_ref": "v1",
+      "fixture_kind": "sf_flash_pair",
+      "mutation_required": false,
+      "allowed_files": [
+        "unused"
+      ],
+      "forbidden_files": [
+        ".nexus/",
+        "logs/",
+        "benchmarks/"
+      ],
+      "setup_command": "python -V",
+      "verification_command": "python -V",
+      "expected_capabilities": [
+        "nightshift"
+      ],
+      "capability_activation_contract": "required",
+      "eligibility_class": "model_required",
+      "public_claim_allowed_metrics": []
+    },
+    {
+      "id": "sf-flash-pair-policy_capability_gate-001",
+      "task_desc": "Use Flash+Nexus to exercise capability policy_capability_gate. Compare this capability-only run with the paired primary-skill run.",
+      "target_file": "unused",
+      "test_file": "unused",
+      "success_criteria": "flash_nexus_skill_fit_pair_receipt_chain_complete",
+      "category": "policy_capability_gate",
+      "difficulty": "medium",
+      "repo_kind": "neutral_fixture",
+      "repo": "fixture://sf-flash-pair",
+      "repo_ref": "v1",
+      "fixture_kind": "sf_flash_pair",
+      "mutation_required": false,
+      "allowed_files": [
+        "unused"
+      ],
+      "forbidden_files": [
+        ".nexus/",
+        "logs/",
+        "benchmarks/"
+      ],
+      "setup_command": "python -V",
+      "verification_command": "python -V",
+      "expected_capabilities": [
+        "mempalace_gate"
+      ],
+      "capability_activation_contract": "required",
+      "eligibility_class": "model_required",
+      "public_claim_allowed_metrics": []
+    },
+    {
+      "id": "sf-flash-pair-registry_skills_sync-001",
+      "task_desc": "Use Flash+Nexus to exercise capability registry_skills_sync. Compare this capability-only run with the paired primary-skill run.",
+      "target_file": "unused",
+      "test_file": "unused",
+      "success_criteria": "flash_nexus_skill_fit_pair_receipt_chain_complete",
+      "category": "registry_skills_sync",
+      "difficulty": "medium",
+      "repo_kind": "neutral_fixture",
+      "repo": "fixture://sf-flash-pair",
+      "repo_ref": "v1",
+      "fixture_kind": "sf_flash_pair",
+      "mutation_required": false,
+      "allowed_files": [
+        "unused"
+      ],
+      "forbidden_files": [
+        ".nexus/",
+        "logs/",
+        "benchmarks/"
+      ],
+      "setup_command": "python -V",
+      "verification_command": "python -V",
+      "expected_capabilities": [
+        "semantic_searcher"
+      ],
+      "capability_activation_contract": "required",
+      "eligibility_class": "model_required",
+      "public_claim_allowed_metrics": []
+    },
+    {
+      "id": "sf-flash-pair-regression_guard-001",
+      "task_desc": "Use Flash+Nexus to exercise capability regression_guard. Compare this capability-only run with the paired primary-skill run.",
+      "target_file": "unused",
+      "test_file": "unused",
+      "success_criteria": "flash_nexus_skill_fit_pair_receipt_chain_complete",
+      "category": "regression_guard",
+      "difficulty": "medium",
+      "repo_kind": "neutral_fixture",
+      "repo": "fixture://sf-flash-pair",
+      "repo_ref": "v1",
+      "fixture_kind": "sf_flash_pair",
+      "mutation_required": false,
+      "allowed_files": [
+        "unused"
+      ],
+      "forbidden_files": [
+        ".nexus/",
+        "logs/",
+        "benchmarks/"
+      ],
+      "setup_command": "python -V",
+      "verification_command": "python -V",
+      "expected_capabilities": [
+        "semantic_failure_sensor"
+      ],
+      "capability_activation_contract": "required",
+      "eligibility_class": "model_required",
+      "public_claim_allowed_metrics": []
+    },
+    {
+      "id": "sf-flash-pair-repair_loop-001",
+      "task_desc": "Use Flash+Nexus to exercise capability repair_loop. Compare this capability-only run with the paired primary-skill run.",
+      "target_file": "unused",
+      "test_file": "unused",
+      "success_criteria": "flash_nexus_skill_fit_pair_receipt_chain_complete",
+      "category": "repair_loop",
+      "difficulty": "medium",
+      "repo_kind": "neutral_fixture",
+      "repo": "fixture://sf-flash-pair",
+      "repo_ref": "v1",
+      "fixture_kind": "sf_flash_pair",
+      "mutation_required": false,
+      "allowed_files": [
+        "unused"
+      ],
+      "forbidden_files": [
+        ".nexus/",
+        "logs/",
+        "benchmarks/"
+      ],
+      "setup_command": "python -V",
+      "verification_command": "python -V",
+      "expected_capabilities": [
+        "hyper"
+      ],
+      "capability_activation_contract": "required",
+      "eligibility_class": "model_required",
+      "public_claim_allowed_metrics": []
+    },
+    {
+      "id": "sf-flash-pair-research-001",
+      "task_desc": "Use Flash+Nexus to exercise capability research. Compare this capability-only run with the paired primary-skill run.",
+      "target_file": "unused",
+      "test_file": "unused",
+      "success_criteria": "flash_nexus_skill_fit_pair_receipt_chain_complete",
+      "category": "research",
+      "difficulty": "medium",
+      "repo_kind": "neutral_fixture",
+      "repo": "fixture://sf-flash-pair",
+      "repo_ref": "v1",
+      "fixture_kind": "sf_flash_pair",
+      "mutation_required": false,
+      "allowed_files": [
+        "unused"
+      ],
+      "forbidden_files": [
+        ".nexus/",
+        "logs/",
+        "benchmarks/"
+      ],
+      "setup_command": "python -V",
+      "verification_command": "python -V",
+      "expected_capabilities": [
+        "research"
+      ],
+      "capability_activation_contract": "required",
+      "eligibility_class": "model_required",
+      "public_claim_allowed_metrics": []
+    },
+    {
+      "id": "sf-flash-pair-research_control_plane-001",
+      "task_desc": "Use Flash+Nexus to exercise capability research_control_plane. Compare this capability-only run with the paired primary-skill run.",
+      "target_file": "unused",
+      "test_file": "unused",
+      "success_criteria": "flash_nexus_skill_fit_pair_receipt_chain_complete",
+      "category": "research_control_plane",
+      "difficulty": "medium",
+      "repo_kind": "neutral_fixture",
+      "repo": "fixture://sf-flash-pair",
+      "repo_ref": "v1",
+      "fixture_kind": "sf_flash_pair",
+      "mutation_required": false,
+      "allowed_files": [
+        "unused"
+      ],
+      "forbidden_files": [
+        ".nexus/",
+        "logs/",
+        "benchmarks/"
+      ],
+      "setup_command": "python -V",
+      "verification_command": "python -V",
+      "expected_capabilities": [
+        "research"
+      ],
+      "capability_activation_contract": "required",
+      "eligibility_class": "model_required",
+      "public_claim_allowed_metrics": []
+    },
+    {
+      "id": "sf-flash-pair-sandbox_replay-001",
+      "task_desc": "Use Flash+Nexus to exercise capability sandbox_replay. Compare this capability-only run with the paired primary-skill run.",
+      "target_file": "unused",
+      "test_file": "unused",
+      "success_criteria": "flash_nexus_skill_fit_pair_receipt_chain_complete",
+      "category": "sandbox_replay",
+      "difficulty": "medium",
+      "repo_kind": "neutral_fixture",
+      "repo": "fixture://sf-flash-pair",
+      "repo_ref": "v1",
+      "fixture_kind": "sf_flash_pair",
+      "mutation_required": false,
+      "allowed_files": [
+        "unused"
+      ],
+      "forbidden_files": [
+        ".nexus/",
+        "logs/",
+        "benchmarks/"
+      ],
+      "setup_command": "python -V",
+      "verification_command": "python -V",
+      "expected_capabilities": [
+        "harness_preflight_sensor"
+      ],
+      "capability_activation_contract": "required",
+      "eligibility_class": "model_required",
+      "public_claim_allowed_metrics": []
+    },
+    {
+      "id": "sf-flash-pair-swarm_multi_agent-001",
+      "task_desc": "Use Flash+Nexus to exercise capability swarm_multi_agent. Compare this capability-only run with the paired primary-skill run.",
+      "target_file": "unused",
+      "test_file": "unused",
+      "success_criteria": "flash_nexus_skill_fit_pair_receipt_chain_complete",
+      "category": "swarm_multi_agent",
+      "difficulty": "medium",
+      "repo_kind": "neutral_fixture",
+      "repo": "fixture://sf-flash-pair",
+      "repo_ref": "v1",
+      "fixture_kind": "sf_flash_pair",
+      "mutation_required": false,
+      "allowed_files": [
+        "unused"
+      ],
+      "forbidden_files": [
+        ".nexus/",
+        "logs/",
+        "benchmarks/"
+      ],
+      "setup_command": "python -V",
+      "verification_command": "python -V",
+      "expected_capabilities": [
+        "swarm"
+      ],
+      "capability_activation_contract": "required",
+      "eligibility_class": "model_required",
+      "public_claim_allowed_metrics": []
+    },
+    {
+      "id": "sf-flash-pair-ui_validator-001",
+      "task_desc": "Use Flash+Nexus to exercise capability ui_validator. Compare this capability-only run with the paired primary-skill run.",
+      "target_file": "unused",
+      "test_file": "unused",
+      "success_criteria": "flash_nexus_skill_fit_pair_receipt_chain_complete",
+      "category": "ui_validator",
+      "difficulty": "medium",
+      "repo_kind": "neutral_fixture",
+      "repo": "fixture://sf-flash-pair",
+      "repo_ref": "v1",
+      "fixture_kind": "sf_flash_pair",
+      "mutation_required": false,
+      "allowed_files": [
+        "unused"
+      ],
+      "forbidden_files": [
+        ".nexus/",
+        "logs/",
+        "benchmarks/"
+      ],
+      "setup_command": "python -V",
+      "verification_command": "python -V",
+      "expected_capabilities": [
+        "ultra_review"
+      ],
+      "capability_activation_contract": "required",
+      "eligibility_class": "model_required",
+      "public_claim_allowed_metrics": []
+    },
+    {
+      "id": "sf-flash-pair-ultra_review-001",
+      "task_desc": "Use Flash+Nexus to exercise capability ultra_review. Compare this capability-only run with the paired primary-skill run.",
+      "target_file": "unused",
+      "test_file": "unused",
+      "success_criteria": "flash_nexus_skill_fit_pair_receipt_chain_complete",
+      "category": "ultra_review",
+      "difficulty": "medium",
+      "repo_kind": "neutral_fixture",
+      "repo": "fixture://sf-flash-pair",
+      "repo_ref": "v1",
+      "fixture_kind": "sf_flash_pair",
+      "mutation_required": false,
+      "allowed_files": [
+        "unused"
+      ],
+      "forbidden_files": [
+        ".nexus/",
+        "logs/",
+        "benchmarks/"
+      ],
+      "setup_command": "python -V",
+      "verification_command": "python -V",
+      "expected_capabilities": [
+        "ultra_review"
+      ],
+      "capability_activation_contract": "required",
+      "eligibility_class": "model_required",
+      "public_claim_allowed_metrics": []
+    },
+    {
+      "id": "sf-flash-pair-xray-001",
+      "task_desc": "Use Flash+Nexus to exercise capability xray. Compare this capability-only run with the paired primary-skill run.",
+      "target_file": "unused",
+      "test_file": "unused",
+      "success_criteria": "flash_nexus_skill_fit_pair_receipt_chain_complete",
+      "category": "xray",
+      "difficulty": "medium",
+      "repo_kind": "neutral_fixture",
+      "repo": "fixture://sf-flash-pair",
+      "repo_ref": "v1",
+      "fixture_kind": "sf_flash_pair",
+      "mutation_required": false,
+      "allowed_files": [
+        "unused"
+      ],
+      "forbidden_files": [
+        ".nexus/",
+        "logs/",
+        "benchmarks/"
+      ],
+      "setup_command": "python -V",
+      "verification_command": "python -V",
+      "expected_capabilities": [
+        "codeintel"
+      ],
+      "capability_activation_contract": "required",
+      "eligibility_class": "model_required",
+      "public_claim_allowed_metrics": []
+    }
+  ]
+}

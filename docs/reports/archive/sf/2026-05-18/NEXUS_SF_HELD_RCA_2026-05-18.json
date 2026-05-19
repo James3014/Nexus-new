@@ -1,0 +1,270 @@
+{
+  "claim_boundary": [
+    "Held does not mean useless: all held rows had delivery and receipt help.",
+    "Held means not enough for runtime expansion because cost is mixed/regressed or catalog/live mismatch remains."
+  ],
+  "generated_at": "2026-05-18T00:00:00+08:00",
+  "held_capabilities": [
+    {
+      "capability_id": "artifact_gate",
+      "current_tested_skill": "research-citation-chain-verifier",
+      "delivery_clean": true,
+      "hold_reason": "cost_regressed",
+      "next_action": "build_three_arm_retest",
+      "receipt_chain_complete": true,
+      "token_delta": 4478,
+      "v10_priority": "high",
+      "wall_delta_sec": 22.8367
+    },
+    {
+      "capability_id": "autonomic_router",
+      "current_tested_skill": "sf2-autonomic_router-route-fit-spec",
+      "delivery_clean": true,
+      "hold_reason": "cost_regressed",
+      "next_action": "hold_catalog_only_until_new_challenger",
+      "receipt_chain_complete": true,
+      "token_delta": 5157,
+      "v10_priority": "normal",
+      "wall_delta_sec": 24.614
+    },
+    {
+      "capability_id": "autoreason",
+      "current_tested_skill": "sf2-autoreason-route-fit-spec",
+      "delivery_clean": true,
+      "hold_reason": "cost_mixed",
+      "next_action": "build_three_arm_retest",
+      "receipt_chain_complete": true,
+      "token_delta": -1247,
+      "v10_priority": "high",
+      "wall_delta_sec": 9.5293
+    },
+    {
+      "capability_id": "benchmark_meta_opt",
+      "current_tested_skill": "nexus-benchmark-continuous-optimization",
+      "delivery_clean": true,
+      "hold_reason": "cost_regressed",
+      "next_action": "hold_catalog_only_until_new_challenger",
+      "receipt_chain_complete": true,
+      "token_delta": 5185,
+      "v10_priority": "normal",
+      "wall_delta_sec": 15.1591
+    },
+    {
+      "capability_id": "codeintel",
+      "current_tested_skill": "sf2-codeintel-route-fit-spec",
+      "delivery_clean": true,
+      "hold_reason": "cost_mixed",
+      "next_action": "build_three_arm_retest",
+      "receipt_chain_complete": true,
+      "token_delta": -1312,
+      "v10_priority": "high",
+      "wall_delta_sec": 9.142
+    },
+    {
+      "capability_id": "ddtree",
+      "current_tested_skill": "sf2-ddtree-route-fit-spec",
+      "delivery_clean": true,
+      "hold_reason": "cost_regressed",
+      "next_action": "build_three_arm_retest",
+      "receipt_chain_complete": true,
+      "token_delta": 13497,
+      "v10_priority": "high",
+      "wall_delta_sec": 40.3892
+    },
+    {
+      "capability_id": "delivery_acceptance_gate",
+      "current_tested_skill": "sf2-delivery_acceptance_gate-route-fit-spec",
+      "delivery_clean": true,
+      "hold_reason": "cost_mixed",
+      "next_action": "hold_catalog_only_until_new_challenger",
+      "receipt_chain_complete": true,
+      "token_delta": 1679,
+      "v10_priority": "normal",
+      "wall_delta_sec": -0.6909
+    },
+    {
+      "capability_id": "drone",
+      "current_tested_skill": "sf2-drone-route-fit-spec",
+      "delivery_clean": true,
+      "hold_reason": "cost_regressed",
+      "next_action": "hold_catalog_only_until_new_challenger",
+      "receipt_chain_complete": true,
+      "token_delta": 624,
+      "v10_priority": "normal",
+      "wall_delta_sec": 5.42
+    },
+    {
+      "capability_id": "forecast_pregate",
+      "current_tested_skill": "sf2-forecast_pregate-route-fit-spec",
+      "delivery_clean": true,
+      "hold_reason": "cost_mixed",
+      "next_action": "hold_catalog_only_until_new_challenger",
+      "receipt_chain_complete": true,
+      "token_delta": -1554,
+      "v10_priority": "normal",
+      "wall_delta_sec": 7.6163
+    },
+    {
+      "capability_id": "lancedb",
+      "current_tested_skill": "sf2-lancedb-route-fit-spec",
+      "delivery_clean": true,
+      "hold_reason": "cost_regressed",
+      "next_action": "hold_catalog_only_until_new_challenger",
+      "receipt_chain_complete": true,
+      "token_delta": 5378,
+      "v10_priority": "normal",
+      "wall_delta_sec": 38.7981
+    },
+    {
+      "capability_id": "learning_closure",
+      "current_tested_skill": "sf2-learning_closure-route-fit-spec",
+      "delivery_clean": true,
+      "hold_reason": "cost_mixed",
+      "next_action": "hold_catalog_only_until_new_challenger",
+      "receipt_chain_complete": true,
+      "token_delta": -102,
+      "v10_priority": "normal",
+      "wall_delta_sec": 3.519
+    },
+    {
+      "capability_id": "memory",
+      "current_tested_skill": "sf2-memory-route-fit-spec",
+      "delivery_clean": true,
+      "hold_reason": "cost_regressed",
+      "next_action": "hold_catalog_only_until_new_challenger",
+      "receipt_chain_complete": true,
+      "token_delta": 6510,
+      "v10_priority": "normal",
+      "wall_delta_sec": 34.0041
+    },
+    {
+      "capability_id": "mempalace",
+      "current_tested_skill": "sf2-mempalace-route-fit-spec",
+      "delivery_clean": true,
+      "hold_reason": "cost_regressed",
+      "next_action": "hold_catalog_only_until_new_challenger",
+      "receipt_chain_complete": true,
+      "token_delta": 8378,
+      "v10_priority": "normal",
+      "wall_delta_sec": 17.6422
+    },
+    {
+      "capability_id": "metabolism_resume",
+      "current_tested_skill": "setup-matt-pocock-skills",
+      "delivery_clean": true,
+      "hold_reason": "cost_regressed",
+      "next_action": "hold_catalog_only_until_new_challenger",
+      "receipt_chain_complete": true,
+      "token_delta": 116,
+      "v10_priority": "normal",
+      "wall_delta_sec": 69.1926
+    },
+    {
+      "capability_id": "policy_capability_gate",
+      "current_tested_skill": "sf2-policy_capability_gate-route-fit-spec",
+      "delivery_clean": true,
+      "hold_reason": "cost_mixed",
+      "next_action": "hold_catalog_only_until_new_challenger",
+      "receipt_chain_complete": true,
+      "token_delta": -41236,
+      "v10_priority": "normal",
+      "wall_delta_sec": 14.9209
+    },
+    {
+      "capability_id": "registry_skills_sync",
+      "current_tested_skill": "sf2-registry_skills_sync-route-fit-spec",
+      "delivery_clean": true,
+      "hold_reason": "cost_mixed",
+      "next_action": "hold_catalog_only_until_new_challenger",
+      "receipt_chain_complete": true,
+      "token_delta": 1035,
+      "v10_priority": "normal",
+      "wall_delta_sec": -49.1376
+    },
+    {
+      "capability_id": "repair_loop",
+      "current_tested_skill": "test-driven-development",
+      "delivery_clean": true,
+      "hold_reason": "cost_regressed",
+      "next_action": "hold_catalog_only_until_new_challenger",
+      "receipt_chain_complete": true,
+      "token_delta": 562,
+      "v10_priority": "normal",
+      "wall_delta_sec": 19.1855
+    },
+    {
+      "capability_id": "research",
+      "current_tested_skill": "research-citation-chain-verifier",
+      "delivery_clean": true,
+      "hold_reason": "cost_mixed",
+      "next_action": "build_three_arm_retest",
+      "receipt_chain_complete": true,
+      "token_delta": -2222,
+      "v10_priority": "high",
+      "wall_delta_sec": 27.3049
+    },
+    {
+      "capability_id": "research_control_plane",
+      "current_tested_skill": "sf2-research_control_plane-route-fit-spec",
+      "delivery_clean": true,
+      "hold_reason": "cost_mixed",
+      "next_action": "hold_catalog_only_until_new_challenger",
+      "receipt_chain_complete": true,
+      "token_delta": 115,
+      "v10_priority": "normal",
+      "wall_delta_sec": -39.1321
+    },
+    {
+      "capability_id": "sandbox_replay",
+      "current_tested_skill": "sf2-sandbox_replay-route-fit-spec",
+      "delivery_clean": true,
+      "hold_reason": "cost_mixed",
+      "next_action": "hold_catalog_only_until_new_challenger",
+      "receipt_chain_complete": true,
+      "token_delta": -2969,
+      "v10_priority": "normal",
+      "wall_delta_sec": 4.227
+    },
+    {
+      "capability_id": "ui_validator",
+      "current_tested_skill": "sf2-ui_validator-route-fit-spec",
+      "delivery_clean": true,
+      "hold_reason": "cost_regressed",
+      "next_action": "build_three_arm_retest",
+      "receipt_chain_complete": true,
+      "token_delta": 3163,
+      "v10_priority": "high",
+      "wall_delta_sec": 14.5879
+    },
+    {
+      "capability_id": "ultra_review",
+      "current_tested_skill": "code-review-and-quality",
+      "delivery_clean": true,
+      "hold_reason": "cost_mixed",
+      "next_action": "build_three_arm_retest",
+      "receipt_chain_complete": true,
+      "token_delta": 1760,
+      "v10_priority": "high",
+      "wall_delta_sec": -13.2412
+    },
+    {
+      "capability_id": "xray",
+      "current_tested_skill": "sf2-xray-route-fit-spec",
+      "delivery_clean": true,
+      "hold_reason": "cost_regressed",
+      "next_action": "hold_catalog_only_until_new_challenger",
+      "receipt_chain_complete": true,
+      "token_delta": 3920,
+      "v10_priority": "normal",
+      "wall_delta_sec": 21.5001
+    }
+  ],
+  "schema": "nexus.sf_held_rca.v1",
+  "status": "PASS",
+  "summary": {
+    "cost_mixed_count": 11,
+    "cost_regressed_count": 12,
+    "held_count": 23,
+    "high_priority_retest_count": 7
+  }
+}

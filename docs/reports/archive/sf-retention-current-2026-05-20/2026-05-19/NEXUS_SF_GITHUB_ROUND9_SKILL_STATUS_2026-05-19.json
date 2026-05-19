@@ -1,0 +1,143 @@
+{
+  "schema": "nexus.sf_github_round9_skill_status.v1",
+  "skills": [
+    {
+      "action": "runtime_reviewed_ablation_compare",
+      "capability_mount": "ultra_review",
+      "family": "ui_validator",
+      "name": "github7-browserbase-ui-test-safe-ui-validator",
+      "path": "/Users/jameschen/Workspace/nexus/.agents/skills/github-round7-challengers/github7-browserbase-ui-test-safe-ui-validator/SKILL.md",
+      "reason_codes": [
+        "current_best",
+        "runtime_reviewed_for_ablation"
+      ],
+      "root": "current_best",
+      "skill_status": "nexus_curated_candidate",
+      "source_repo": "nexus_repo",
+      "test_level": "sf_github_round9_flash_smoke"
+    },
+    {
+      "action": "runtime_reviewed_ablation_compare",
+      "capability_mount": "ultra_review",
+      "family": "ui_validator",
+      "name": "github9-teaching-web-visual-ui-validator",
+      "path": "/Users/jameschen/Workspace/nexus/.agents/skills/github-round9-challengers/github9-teaching-web-visual-ui-validator/SKILL.md",
+      "reason_codes": [
+        "round9_generated_challenger",
+        "prompt_only_rewrite",
+        "runtime_reviewed_for_ablation"
+      ],
+      "root": "github_round9_runtime_reviewed",
+      "skill_status": "nexus_curated_candidate",
+      "source_commit": "8ef63880775765d21513a480d7aa662b30e3a0ac",
+      "source_repo": "kevintsai1202/teaching-site-skills",
+      "source_skill": "web-visual-verification/SKILL.md",
+      "test_level": "sf_github_round9_flash_smoke"
+    },
+    {
+      "action": "runtime_reviewed_ablation_compare",
+      "capability_mount": "research",
+      "family": "research_control_plane",
+      "name": "github6-repo-scout-safe-research-control-plane",
+      "path": "/Users/jameschen/Workspace/nexus/.agents/skills/github-round6-challengers/github6-repo-scout-safe-research-control-plane/SKILL.md",
+      "reason_codes": [
+        "current_best",
+        "runtime_reviewed_for_ablation"
+      ],
+      "root": "current_best",
+      "skill_status": "nexus_curated_candidate",
+      "source_repo": "nexus_repo",
+      "test_level": "sf_github_round9_flash_smoke"
+    },
+    {
+      "action": "runtime_reviewed_ablation_compare",
+      "capability_mount": "research",
+      "family": "research_control_plane",
+      "name": "github9-scientific-research-lookup-control-plane",
+      "path": "/Users/jameschen/Workspace/nexus/.agents/skills/github-round9-challengers/github9-scientific-research-lookup-control-plane/SKILL.md",
+      "reason_codes": [
+        "round9_generated_challenger",
+        "prompt_only_rewrite",
+        "runtime_reviewed_for_ablation"
+      ],
+      "root": "github_round9_runtime_reviewed",
+      "skill_status": "nexus_curated_candidate",
+      "source_commit": "044285c33a78afda10468012105b86a225f66267",
+      "source_repo": "K-Dense-AI/scientific-agent-skills",
+      "source_skill": "scientific-skills/research-lookup/SKILL.md",
+      "test_level": "sf_github_round9_flash_smoke"
+    },
+    {
+      "action": "runtime_reviewed_ablation_compare",
+      "capability_mount": "codeintel",
+      "family": "codeintel",
+      "name": "github6-agent-context-codeintel",
+      "path": "/Users/jameschen/Workspace/nexus/.agents/skills/github-round6-challengers/github6-agent-context-codeintel/SKILL.md",
+      "reason_codes": [
+        "current_best",
+        "runtime_reviewed_for_ablation"
+      ],
+      "root": "current_best",
+      "skill_status": "nexus_curated_candidate",
+      "source_repo": "nexus_repo",
+      "test_level": "sf_github_round9_flash_smoke"
+    },
+    {
+      "action": "runtime_reviewed_ablation_compare",
+      "capability_mount": "codeintel",
+      "family": "codeintel",
+      "name": "github9-complexity-optimizer-codeintel",
+      "path": "/Users/jameschen/Workspace/nexus/.agents/skills/github-round9-challengers/github9-complexity-optimizer-codeintel/SKILL.md",
+      "reason_codes": [
+        "round9_generated_challenger",
+        "prompt_only_rewrite",
+        "runtime_reviewed_for_ablation"
+      ],
+      "root": "github_round9_runtime_reviewed",
+      "skill_status": "nexus_curated_candidate",
+      "source_commit": "6a1f9674d706a06d462296e53a40f668299e8893",
+      "source_repo": "Kappaemme-git/codex-complexity-optimizer",
+      "source_skill": "complexity-optimizer/SKILL.md",
+      "test_level": "sf_github_round9_flash_smoke"
+    },
+    {
+      "action": "runtime_reviewed_ablation_compare",
+      "capability_mount": "ultra_review",
+      "family": "ultra_review",
+      "name": "acceptance-evidence-failclosed",
+      "path": "/Users/jameschen/Workspace/nexus/.agents/skills/acceptance-evidence-failclosed/SKILL.md",
+      "reason_codes": [
+        "current_best",
+        "runtime_reviewed_for_ablation"
+      ],
+      "root": "current_best",
+      "skill_status": "nexus_curated_candidate",
+      "source_repo": "nexus_repo",
+      "test_level": "sf_github_round9_flash_smoke"
+    },
+    {
+      "action": "runtime_reviewed_ablation_compare",
+      "capability_mount": "ultra_review",
+      "family": "ultra_review",
+      "name": "github9-openai-security-threat-model-ultra-review",
+      "path": "/Users/jameschen/Workspace/nexus/.agents/skills/github-round9-challengers/github9-openai-security-threat-model-ultra-review/SKILL.md",
+      "reason_codes": [
+        "round9_generated_challenger",
+        "prompt_only_rewrite",
+        "runtime_reviewed_for_ablation"
+      ],
+      "root": "github_round9_runtime_reviewed",
+      "skill_status": "nexus_curated_candidate",
+      "source_commit": "590b49edc158611a2b2ed715ae73f27eb70d251a",
+      "source_repo": "openai/skills",
+      "source_skill": "skills/.curated/security-threat-model/SKILL.md",
+      "test_level": "sf_github_round9_flash_smoke"
+    }
+  ],
+  "status": "PASS",
+  "summary": {
+    "public_benchmark_allowed": false,
+    "runtime_update_allowed": false,
+    "skill_count": 8
+  }
+}

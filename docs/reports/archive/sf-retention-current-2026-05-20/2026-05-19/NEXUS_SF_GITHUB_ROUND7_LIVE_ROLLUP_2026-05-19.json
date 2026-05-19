@@ -1,0 +1,357 @@
+{
+  "capability_rollups": [
+    {
+      "capability": "autoreason",
+      "challenger": {
+        "arm": "challenger",
+        "capability": "autoreason",
+        "clean_model_cost_evidence": true,
+        "evidence_path": ".nexus/reports/sf_github_round7_live_2026-05-19/autoreason_sf-github-round7-smoke-autoreason-001_challenger_github7-first-principles-autoreason/evidence_bundle.json",
+        "expected_capability_coverage": {
+          "all_public_safe": true,
+          "expected": [
+            "autoreason"
+          ],
+          "failure_reasons": {},
+          "missing": [],
+          "public_safe": [
+            "autoreason"
+          ]
+        },
+        "model_calls": 2,
+        "provider_token_measured": true,
+        "receipt_path": "/Users/jameschen/Workspace/nexus/.nexus/reports/sf_github_round7_live_2026-05-19/autoreason_sf-github-round7-smoke-autoreason-001_challenger_github7-first-principles-autoreason/evidence_1779170765/with_nexus__sf-github-round7-smoke-autoreason-001__trial_1.row.json",
+        "semantic_status": "VERIFIED",
+        "skill_evidence_refs": [
+          "skill_catalog:github7-first-principles-autoreason",
+          "skill_path:/Users/jameschen/Workspace/nexus/.agents/skills/github-round7-challengers/github7-first-principles-autoreason/SKILL.md",
+          "benchmark_skill_mount_request:github7-first-principles-autoreason",
+          "AB",
+          "{'judge': 'correctness', 'ranking': ['AB', 'A', 'B'], 'reason': 'ranked_by_correctness_evidence_quality', 'rubric': {'AB': {'total': 0.177, 'tests': 0.0, 'semantic_fit': 0.6, 'regression': 0.0, 'minimality': 0.97, 'base_score': 1.0, 'discriminator_penalty': 0.12, 'fatal': False}, 'A': {'total': 0.08, 'tests': 0.0, 'semantic_fit': 0.2, 'regression': 0.0, 'minimality': 1.0, 'base_score': 1.0, 'discriminator_penalty': 0.12, 'fatal': False}, 'B': {'total': 0.03, 'tests': 0.0, 'semantic_fit': 0.0, 'regression': 0.0, 'minimality': 1.0, 'base_score': 1.0, 'discriminator_penalty': 0.12, 'fatal': False}}}",
+          "{'judge': 'regression', 'ranking': ['AB', 'A', 'B'], 'reason': 'ranked_by_regression_evidence_quality', 'rubric': {'AB': {'total': 0.167, 'tests': 0.0, 'semantic_fit': 0.6, 'regression': 0.0, 'minimality': 0.97, 'base_score': 1.0, 'discriminator_penalty': 0.12, 'fatal': False}, 'A': {'total': 0.11, 'tests': 0.0, 'semantic_fit': 0.2, 'regression': 0.0, 'minimality': 1.0, 'base_score': 1.0, 'discriminator_penalty': 0.12, 'fatal': False}, 'B': {'total': 0.08, 'tests': 0.0, 'semantic_fit': 0.0, 'regression': 0.0, 'minimality': 1.0, 'base_score': 1.0, 'discriminator_penalty': 0.12, 'fatal': False}}}",
+          "{'judge': 'semantic_fit', 'ranking': ['AB', 'A', 'B'], 'reason': 'ranked_by_semantic_fit_evidence_quality', 'rubric': {'AB': {'total': 0.347, 'tests': 0.0, 'semantic_fit': 0.6, 'regression': 0.0, 'minimality': 0.97, 'base_score': 1.0, 'discriminator_penalty': 0.12, 'fatal': False}, 'A': {'total': 0.17, 'tests': 0.0, 'semantic_fit': 0.2, 'regression': 0.0, 'minimality': 1.0, 'base_score': 1.0, 'discriminator_penalty': 0.12, 'fatal': False}, 'B': {'total': 0.08, 'tests': 0.0, 'semantic_fit': 0.0, 'regression': 0.0, 'minimality': 1.0, 'base_score': 1.0, 'discriminator_penalty': 0.12, 'fatal': False}}}",
+          "stop_reason:a_streak_met",
+          "discriminator_critiques:A:1",
+          "discriminator_critiques:AB:1",
+          "discriminator_critiques:B:1",
+          "capability_receipt:autoreason"
+        ],
+        "skill_id": "github7-first-principles-autoreason",
+        "skill_mount_contract_status": "PASS",
+        "skill_outcome_contributed": true,
+        "status": "PASS",
+        "total_tokens": 41921,
+        "wall_sec": 101.6185
+      },
+      "challenger_effective": true,
+      "current_best": {
+        "arm": "current_best",
+        "capability": "autoreason",
+        "clean_model_cost_evidence": true,
+        "evidence_path": ".nexus/reports/sf_github_round7_live_2026-05-19/autoreason_sf-github-round7-smoke-autoreason-001_current_best_sf2-belief-route-fit-spec/evidence_bundle.json",
+        "expected_capability_coverage": {
+          "all_public_safe": true,
+          "expected": [
+            "autoreason"
+          ],
+          "failure_reasons": {},
+          "missing": [],
+          "public_safe": [
+            "autoreason"
+          ]
+        },
+        "model_calls": 2,
+        "provider_token_measured": true,
+        "receipt_path": "/Users/jameschen/Workspace/nexus/.nexus/reports/sf_github_round7_live_2026-05-19/autoreason_sf-github-round7-smoke-autoreason-001_current_best_sf2-belief-route-fit-spec/evidence_1779170657/with_nexus__sf-github-round7-smoke-autoreason-001__trial_1.row.json",
+        "semantic_status": "VERIFIED",
+        "skill_evidence_refs": [
+          "skill_catalog:sf2-belief-route-fit-spec",
+          "skill_path:/Users/jameschen/Workspace/nexus/.agents/skills/sf2-belief-route-fit-spec/SKILL.md",
+          "benchmark_skill_mount_request:sf2-belief-route-fit-spec",
+          "AB",
+          "{'judge': 'correctness', 'ranking': ['AB', 'A', 'B'], 'reason': 'ranked_by_correctness_evidence_quality', 'rubric': {'AB': {'total': 0.177, 'tests': 0.0, 'semantic_fit': 0.6, 'regression': 0.0, 'minimality': 0.97, 'base_score': 1.0, 'discriminator_penalty': 0.12, 'fatal': False}, 'A': {'total': 0.08, 'tests': 0.0, 'semantic_fit': 0.2, 'regression': 0.0, 'minimality': 1.0, 'base_score': 1.0, 'discriminator_penalty': 0.12, 'fatal': False}, 'B': {'total': 0.03, 'tests': 0.0, 'semantic_fit': 0.0, 'regression': 0.0, 'minimality': 1.0, 'base_score': 1.0, 'discriminator_penalty': 0.12, 'fatal': False}}}",
+          "{'judge': 'regression', 'ranking': ['AB', 'A', 'B'], 'reason': 'ranked_by_regression_evidence_quality', 'rubric': {'AB': {'total': 0.167, 'tests': 0.0, 'semantic_fit': 0.6, 'regression': 0.0, 'minimality': 0.97, 'base_score': 1.0, 'discriminator_penalty': 0.12, 'fatal': False}, 'A': {'total': 0.11, 'tests': 0.0, 'semantic_fit': 0.2, 'regression': 0.0, 'minimality': 1.0, 'base_score': 1.0, 'discriminator_penalty': 0.12, 'fatal': False}, 'B': {'total': 0.08, 'tests': 0.0, 'semantic_fit': 0.0, 'regression': 0.0, 'minimality': 1.0, 'base_score': 1.0, 'discriminator_penalty': 0.12, 'fatal': False}}}",
+          "{'judge': 'semantic_fit', 'ranking': ['AB', 'A', 'B'], 'reason': 'ranked_by_semantic_fit_evidence_quality', 'rubric': {'AB': {'total': 0.347, 'tests': 0.0, 'semantic_fit': 0.6, 'regression': 0.0, 'minimality': 0.97, 'base_score': 1.0, 'discriminator_penalty': 0.12, 'fatal': False}, 'A': {'total': 0.17, 'tests': 0.0, 'semantic_fit': 0.2, 'regression': 0.0, 'minimality': 1.0, 'base_score': 1.0, 'discriminator_penalty': 0.12, 'fatal': False}, 'B': {'total': 0.08, 'tests': 0.0, 'semantic_fit': 0.0, 'regression': 0.0, 'minimality': 1.0, 'base_score': 1.0, 'discriminator_penalty': 0.12, 'fatal': False}}}",
+          "stop_reason:a_streak_met",
+          "discriminator_critiques:A:1",
+          "discriminator_critiques:AB:1",
+          "discriminator_critiques:B:1",
+          "capability_receipt:autoreason"
+        ],
+        "skill_id": "sf2-belief-route-fit-spec",
+        "skill_mount_contract_status": "PASS",
+        "skill_outcome_contributed": true,
+        "status": "PASS",
+        "total_tokens": 40792,
+        "wall_sec": 106.8625
+      },
+      "current_effective": true,
+      "reason_codes": [
+        "challenger_token_not_lower"
+      ],
+      "token_delta_challenger_minus_current": 1129,
+      "verdict": "keep_current_best",
+      "wall_delta_sec_challenger_minus_current": -5.244
+    },
+    {
+      "capability": "direct_master_loop",
+      "challenger": {
+        "arm": "challenger",
+        "capability": "direct_master_loop",
+        "clean_model_cost_evidence": true,
+        "evidence_path": ".nexus/reports/sf_github_round7_live_2026-05-19/direct_master_loop_sf-github-round7-smoke-direct_master_loop-001_challenger_github7-fstack-implement-plan-direct-master-loop/evidence_bundle.json",
+        "expected_capability_coverage": {
+          "all_public_safe": true,
+          "expected": [
+            "hyper"
+          ],
+          "failure_reasons": {},
+          "missing": [],
+          "public_safe": [
+            "hyper"
+          ]
+        },
+        "model_calls": 2,
+        "provider_token_measured": true,
+        "receipt_path": "/Users/jameschen/Workspace/nexus/.nexus/reports/sf_github_round7_live_2026-05-19/direct_master_loop_sf-github-round7-smoke-direct_master_loop-001_challenger_github7-fstack-implement-plan-direct-master-loop/evidence_1779170976/with_nexus__sf-github-round7-smoke-direct_master_loop-001__trial_1.row.json",
+        "semantic_status": "VERIFIED",
+        "skill_evidence_refs": [
+          "skill_catalog:github7-fstack-implement-plan-direct-master-loop",
+          "skill_path:/Users/jameschen/Workspace/nexus/.agents/skills/github-round7-challengers/github7-fstack-implement-plan-direct-master-loop/SKILL.md",
+          "benchmark_skill_mount_request:github7-fstack-implement-plan-direct-master-loop",
+          "hyper_sprint",
+          "capability_receipt:hyper"
+        ],
+        "skill_id": "github7-fstack-implement-plan-direct-master-loop",
+        "skill_mount_contract_status": "PASS",
+        "skill_outcome_contributed": true,
+        "status": "PASS",
+        "total_tokens": 45154,
+        "wall_sec": 114.8053
+      },
+      "challenger_effective": true,
+      "current_best": {
+        "arm": "current_best",
+        "capability": "direct_master_loop",
+        "clean_model_cost_evidence": true,
+        "evidence_path": ".nexus/reports/sf_github_round7_live_2026-05-19/direct_master_loop_sf-github-round7-smoke-direct_master_loop-001_current_best_sf2-direct_master_loop-route-fit-spec/evidence_bundle.json",
+        "expected_capability_coverage": {
+          "all_public_safe": true,
+          "expected": [
+            "hyper"
+          ],
+          "failure_reasons": {},
+          "missing": [],
+          "public_safe": [
+            "hyper"
+          ]
+        },
+        "model_calls": 2,
+        "provider_token_measured": true,
+        "receipt_path": "/Users/jameschen/Workspace/nexus/.nexus/reports/sf_github_round7_live_2026-05-19/direct_master_loop_sf-github-round7-smoke-direct_master_loop-001_current_best_sf2-direct_master_loop-route-fit-spec/evidence_1779170867/with_nexus__sf-github-round7-smoke-direct_master_loop-001__trial_1.row.json",
+        "semantic_status": "VERIFIED",
+        "skill_evidence_refs": [
+          "skill_catalog:sf2-direct_master_loop-route-fit-spec",
+          "skill_path:/Users/jameschen/Workspace/nexus/.agents/skills/sf2-direct_master_loop-route-fit-spec/SKILL.md",
+          "benchmark_skill_mount_request:sf2-direct_master_loop-route-fit-spec",
+          "hyper_sprint",
+          "capability_receipt:hyper"
+        ],
+        "skill_id": "sf2-direct_master_loop-route-fit-spec",
+        "skill_mount_contract_status": "PASS",
+        "skill_outcome_contributed": true,
+        "status": "PASS",
+        "total_tokens": 42260,
+        "wall_sec": 108.5247
+      },
+      "current_effective": true,
+      "reason_codes": [
+        "challenger_token_not_lower",
+        "challenger_wall_not_lower"
+      ],
+      "token_delta_challenger_minus_current": 2894,
+      "verdict": "keep_current_best",
+      "wall_delta_sec_challenger_minus_current": 6.2806
+    },
+    {
+      "capability": "repair_loop",
+      "challenger": {
+        "arm": "challenger",
+        "capability": "repair_loop",
+        "clean_model_cost_evidence": true,
+        "evidence_path": ".nexus/reports/sf_github_round7_live_2026-05-19/repair_loop_sf-github-round7-smoke-repair_loop-001_challenger_github7-midudev-tdd-repair-loop/evidence_bundle.json",
+        "expected_capability_coverage": {
+          "all_public_safe": true,
+          "expected": [
+            "hyper"
+          ],
+          "failure_reasons": {},
+          "missing": [],
+          "public_safe": [
+            "hyper"
+          ]
+        },
+        "model_calls": 2,
+        "provider_token_measured": true,
+        "receipt_path": "/Users/jameschen/Workspace/nexus/.nexus/reports/sf_github_round7_live_2026-05-19/repair_loop_sf-github-round7-smoke-repair_loop-001_challenger_github7-midudev-tdd-repair-loop/evidence_1779171188/with_nexus__sf-github-round7-smoke-repair_loop-001__trial_1.row.json",
+        "semantic_status": "VERIFIED",
+        "skill_evidence_refs": [
+          "skill_catalog:github7-midudev-tdd-repair-loop",
+          "skill_path:/Users/jameschen/Workspace/nexus/.agents/skills/github-round7-challengers/github7-midudev-tdd-repair-loop/SKILL.md",
+          "benchmark_skill_mount_request:github7-midudev-tdd-repair-loop",
+          "hyper_sprint",
+          "capability_receipt:hyper"
+        ],
+        "skill_id": "github7-midudev-tdd-repair-loop",
+        "skill_mount_contract_status": "PASS",
+        "skill_outcome_contributed": true,
+        "status": "PASS",
+        "total_tokens": 39835,
+        "wall_sec": 94.4225
+      },
+      "challenger_effective": true,
+      "current_best": {
+        "arm": "current_best",
+        "capability": "repair_loop",
+        "clean_model_cost_evidence": true,
+        "evidence_path": ".nexus/reports/sf_github_round7_live_2026-05-19/repair_loop_sf-github-round7-smoke-repair_loop-001_current_best_github4-sickn33-antigravity-awesome-skills-tdd-workflows-tdd-red/evidence_bundle.json",
+        "expected_capability_coverage": {
+          "all_public_safe": true,
+          "expected": [
+            "hyper"
+          ],
+          "failure_reasons": {},
+          "missing": [],
+          "public_safe": [
+            "hyper"
+          ]
+        },
+        "model_calls": 2,
+        "provider_token_measured": true,
+        "receipt_path": "/Users/jameschen/Workspace/nexus/.nexus/reports/sf_github_round7_live_2026-05-19/repair_loop_sf-github-round7-smoke-repair_loop-001_current_best_github4-sickn33-antigravity-awesome-skills-tdd-workflows-tdd-red/evidence_1779171091/with_nexus__sf-github-round7-smoke-repair_loop-001__trial_1.row.json",
+        "semantic_status": "VERIFIED",
+        "skill_evidence_refs": [
+          "skill_catalog:github4-sickn33-antigravity-awesome-skills-tdd-workflows-tdd-red",
+          "skill_path:/Users/jameschen/Workspace/nexus/.agents/skills/github4-sickn33-antigravity-awesome-skills-tdd-workflows-tdd-red/SKILL.md",
+          "benchmark_skill_mount_request:github4-sickn33-antigravity-awesome-skills-tdd-workflows-tdd-red",
+          "hyper_sprint",
+          "capability_receipt:hyper"
+        ],
+        "skill_id": "github4-sickn33-antigravity-awesome-skills-tdd-workflows-tdd-red",
+        "skill_mount_contract_status": "PASS",
+        "skill_outcome_contributed": true,
+        "status": "PASS",
+        "total_tokens": 40155,
+        "wall_sec": 96.0634
+      },
+      "current_effective": true,
+      "reason_codes": [
+        "challenger_effective_and_token_wall_lower"
+      ],
+      "token_delta_challenger_minus_current": -320,
+      "verdict": "replace_with_challenger",
+      "wall_delta_sec_challenger_minus_current": -1.6409
+    },
+    {
+      "capability": "ui_validator",
+      "challenger": {
+        "arm": "challenger",
+        "capability": "ui_validator",
+        "clean_model_cost_evidence": true,
+        "evidence_path": ".nexus/reports/sf_github_round7_live_2026-05-19/ui_validator_sf-github-round7-smoke-ui_validator-001_challenger_github7-browserbase-ui-test-safe-ui-validator/evidence_bundle.json",
+        "expected_capability_coverage": {
+          "all_public_safe": true,
+          "expected": [
+            "ultra_review"
+          ],
+          "failure_reasons": {},
+          "missing": [],
+          "public_safe": [
+            "ultra_review"
+          ]
+        },
+        "model_calls": 2,
+        "provider_token_measured": true,
+        "receipt_path": "/Users/jameschen/Workspace/nexus/.nexus/reports/sf_github_round7_live_2026-05-19/ui_validator_sf-github-round7-smoke-ui_validator-001_challenger_github7-browserbase-ui-test-safe-ui-validator/evidence_1779170524/with_nexus__sf-github-round7-smoke-ui_validator-001__trial_1.row.json",
+        "semantic_status": "VERIFIED",
+        "skill_evidence_refs": [
+          "skill_catalog:github7-browserbase-ui-test-safe-ui-validator",
+          "skill_path:/Users/jameschen/Workspace/nexus/.agents/skills/github-round7-challengers/github7-browserbase-ui-test-safe-ui-validator/SKILL.md",
+          "benchmark_skill_mount_request:github7-browserbase-ui-test-safe-ui-validator",
+          "ultra_review:sf-github-round7-smoke-ui_validator-001:hidden_verifier",
+          "hidden_verifier:sf-github-round7-smoke-ui_validator-001",
+          "capability_receipt:ultra_review"
+        ],
+        "skill_id": "github7-browserbase-ui-test-safe-ui-validator",
+        "skill_mount_contract_status": "PASS",
+        "skill_outcome_contributed": true,
+        "status": "PASS",
+        "total_tokens": 42607,
+        "wall_sec": 132.6057
+      },
+      "challenger_effective": true,
+      "current_best": {
+        "arm": "current_best",
+        "capability": "ui_validator",
+        "clean_model_cost_evidence": true,
+        "evidence_path": ".nexus/reports/sf_github_round7_live_2026-05-19/ui_validator_sf-github-round7-smoke-ui_validator-001_current_best_github2-agent-browser-dogfood-safe-ui-validator/evidence_bundle.json",
+        "expected_capability_coverage": {
+          "all_public_safe": true,
+          "expected": [
+            "ultra_review"
+          ],
+          "failure_reasons": {},
+          "missing": [],
+          "public_safe": [
+            "ultra_review"
+          ]
+        },
+        "model_calls": 2,
+        "provider_token_measured": true,
+        "receipt_path": "/Users/jameschen/Workspace/nexus/.nexus/reports/sf_github_round7_live_2026-05-19/ui_validator_sf-github-round7-smoke-ui_validator-001_current_best_github2-agent-browser-dogfood-safe-ui-validator/evidence_1779170350/with_nexus__sf-github-round7-smoke-ui_validator-001__trial_1.row.json",
+        "semantic_status": "VERIFIED",
+        "skill_evidence_refs": [
+          "skill_catalog:github2-agent-browser-dogfood-safe-ui-validator",
+          "skill_path:/Users/jameschen/Workspace/nexus/.agents/skills/github2-agent-browser-dogfood-safe-ui-validator/SKILL.md",
+          "benchmark_skill_mount_request:github2-agent-browser-dogfood-safe-ui-validator",
+          "ultra_review:sf-github-round7-smoke-ui_validator-001:hidden_verifier",
+          "hidden_verifier:sf-github-round7-smoke-ui_validator-001",
+          "capability_receipt:ultra_review"
+        ],
+        "skill_id": "github2-agent-browser-dogfood-safe-ui-validator",
+        "skill_mount_contract_status": "PASS",
+        "skill_outcome_contributed": true,
+        "status": "PASS",
+        "total_tokens": 47136,
+        "wall_sec": 173.0984
+      },
+      "current_effective": true,
+      "reason_codes": [
+        "challenger_effective_and_token_wall_lower"
+      ],
+      "token_delta_challenger_minus_current": -4529,
+      "verdict": "replace_with_challenger",
+      "wall_delta_sec_challenger_minus_current": -40.4927
+    }
+  ],
+  "claim_boundary": [
+    "Internal SF challenger comparison only.",
+    "Replacement means overlay candidate primary update, not runtime default write.",
+    "Public benchmark remains blocked."
+  ],
+  "schema": "nexus.sf_github_round7_live_rollup.v1",
+  "source_live_summary": "/Users/jameschen/Workspace/nexus/.nexus/reports/sf_github_round7_live_2026-05-19/live_summary.json",
+  "source_matrix": "docs/reports/NEXUS_SF_GITHUB_ROUND7_FLASH_SMOKE_MATRIX_2026-05-19.json",
+  "status": "PASS",
+  "summary": {
+    "capability_count": 4,
+    "hold_count": 2,
+    "pass_count": 8,
+    "public_benchmark_allowed": false,
+    "replacement_count": 2,
+    "return_count": 0,
+    "row_count": 8,
+    "runtime_update_allowed": false
+  },
+  "version": "2026-05-19"
+}

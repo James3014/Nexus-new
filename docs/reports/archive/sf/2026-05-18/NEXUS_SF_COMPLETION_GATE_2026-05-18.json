@@ -1,0 +1,70 @@
+{
+  "schema": "nexus.skill_fit_completion_gate.v1",
+  "status": "PASS",
+  "skill_fit_complete": true,
+  "sf_catalog_complete": true,
+  "sf_promotion_policy_draft_complete": true,
+  "sf_runtime_promotion_complete": false,
+  "runtime_update_allowed": false,
+  "public_benchmark_allowed": false,
+  "capability_statuses": [
+    {
+      "capability": "repair_and_coding",
+      "recommendation_state": "alternate_candidate",
+      "default_candidates": [],
+      "alternate_candidates": [
+        "tdd"
+      ],
+      "replace_candidates": [],
+      "needs_more_data": [],
+      "rejected": [],
+      "sf_actionable": true
+    },
+    {
+      "capability": "governance_and_trust",
+      "recommendation_state": "alternate_candidate",
+      "default_candidates": [],
+      "alternate_candidates": [
+        "acceptance-evidence-failclosed",
+        "claudeosint-safe-surface-audit",
+        "cso",
+        "gbrain-soul-audit"
+      ],
+      "replace_candidates": [],
+      "needs_more_data": [],
+      "rejected": [
+        "self-audit"
+      ],
+      "sf_actionable": true
+    },
+    {
+      "capability": "research_and_source_discipline",
+      "recommendation_state": "replace_candidate",
+      "default_candidates": [],
+      "alternate_candidates": [],
+      "replace_candidates": [
+        "research-citation-chain-verifier",
+        "research-source-validation-auditor"
+      ],
+      "needs_more_data": [],
+      "rejected": [],
+      "sf_actionable": true
+    }
+  ],
+  "summary": {
+    "required_capability_count": 3,
+    "actionable_capability_count": 3,
+    "default_candidate_count": 0,
+    "alternate_candidate_count": 5,
+    "replace_candidate_count": 2,
+    "needs_more_data_count": 0,
+    "runtime_promotion_complete": false,
+    "public_benchmark_allowed": false
+  },
+  "failures": [],
+  "claim_boundary": [
+    "SF completion means capability-skill recommendations are closed for the current SF lane.",
+    "Runtime default promotion remains blocked until a separate runtime validation gate is reviewed.",
+    "Public benchmark remains blocked until runtime promotion and benchmark readiness gates are explicitly opened."
+  ]
+}

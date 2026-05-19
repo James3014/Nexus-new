@@ -1,0 +1,93 @@
+{
+  "claim_boundary": [
+    "Internal SF skill compare only; not a public benchmark.",
+    "Runtime default is not modified by this report."
+  ],
+  "decisions": [
+    {
+      "candidate_evidence_path": ".nexus/reports/sf_github_round4_live_2026-05-19/codeintel_sf-github-round4-smoke-codeintel-001_github4_wiki_qa_github4-sickn33-antigravity-awesome-skills-wiki-qa/evidence_bundle.json",
+      "candidate_receipt_path": ".nexus/reports/sf_github_round4_live_2026-05-19/codeintel_sf-github-round4-smoke-codeintel-001_github4_wiki_qa_github4-sickn33-antigravity-awesome-skills-wiki-qa",
+      "candidate_skill": "github4-sickn33-antigravity-awesome-skills-wiki-qa",
+      "candidate_total_tokens": 46073,
+      "candidate_wall_duration_sec": 118.2021,
+      "capability": "codeintel",
+      "current_evidence_path": ".nexus/reports/sf_github_round4_live_2026-05-19/codeintel_sf-github-round4-smoke-codeintel-001_current_best_github-karpathy-guidelines/evidence_bundle.json",
+      "current_receipt_path": ".nexus/reports/sf_github_round4_live_2026-05-19/codeintel_sf-github-round4-smoke-codeintel-001_current_best_github-karpathy-guidelines",
+      "current_total_tokens": 44830,
+      "current_wall_duration_sec": 133.4232,
+      "decision": "KEEP_CURRENT_SKILL",
+      "from_skill": "github-karpathy-guidelines",
+      "reason": "challenger_runtime_receipt_confirmed_but_not_cost_improved",
+      "to_skill": "github-karpathy-guidelines",
+      "token_delta": 1243,
+      "wall_delta_sec": -15.2211
+    },
+    {
+      "candidate_evidence_path": ".nexus/reports/sf_github_round4_live_2026-05-19/repair_loop_sf-github-round4-smoke-repair_loop-001_github4_tdd_red_github4-sickn33-antigravity-awesome-skills-tdd-workflows-tdd-red/evidence_bundle.json",
+      "candidate_receipt_path": ".nexus/reports/sf_github_round4_live_2026-05-19/repair_loop_sf-github-round4-smoke-repair_loop-001_github4_tdd_red_github4-sickn33-antigravity-awesome-skills-tdd-workflows-tdd-red",
+      "candidate_skill": "github4-sickn33-antigravity-awesome-skills-tdd-workflows-tdd-red",
+      "candidate_total_tokens": 39773,
+      "candidate_wall_duration_sec": 81.845,
+      "capability": "repair_loop",
+      "current_evidence_path": ".nexus/reports/sf_github_round4_live_2026-05-19/repair_loop_sf-github-round4-smoke-repair_loop-001_current_best_tdd/evidence_bundle.json",
+      "current_receipt_path": ".nexus/reports/sf_github_round4_live_2026-05-19/repair_loop_sf-github-round4-smoke-repair_loop-001_current_best_tdd",
+      "current_total_tokens": 40718,
+      "current_wall_duration_sec": 88.9135,
+      "decision": "APPROVE_RUNTIME_REPLACEMENT",
+      "from_skill": "tdd",
+      "reason": "runtime_receipt_confirmed_and_cost_improved",
+      "to_skill": "github4-sickn33-antigravity-awesome-skills-tdd-workflows-tdd-red",
+      "token_delta": -945,
+      "wall_delta_sec": -7.0685
+    }
+  ],
+  "repo_screen_decisions": [
+    {
+      "commit": "53154e93f6bcd3024ef5c4ad0d97d6a2e71eb686",
+      "decision": "NO_LIVE_CANDIDATE_SELECTED",
+      "live_candidate_selected": false,
+      "reason": "static_fit_did_not_beat_current_skill_for_a_clean_live_slot",
+      "repo": "KerberosClaw-kc_ai_skills",
+      "url": "https://github.com/KerberosClaw/kc_ai_skills"
+    },
+    {
+      "commit": "60aaae52bb2af8162732751a4332f62a5fef518b",
+      "decision": "NO_LIVE_CANDIDATE_SELECTED",
+      "live_candidate_selected": false,
+      "reason": "static_fit_did_not_beat_current_skill_for_a_clean_live_slot",
+      "repo": "MiniMax-AI-skills",
+      "url": "https://github.com/MiniMax-AI/skills"
+    },
+    {
+      "commit": "0a727bfb24aac420c5f13e136a9040c40184b79c",
+      "decision": "NO_LIVE_CANDIDATE_SELECTED",
+      "live_candidate_selected": false,
+      "reason": "static_fit_did_not_beat_current_skill_for_a_clean_live_slot",
+      "repo": "mm-demo-collection-MiniMaxSkills",
+      "url": "https://github.com/mm-demo-collection/MiniMaxSkills"
+    },
+    {
+      "commit": "9e5d4ddefa24be7b50cc83f56a2450401cdf3317",
+      "decision": "LIVE_SCREENED",
+      "live_candidate_selected": true,
+      "reason": "top_candidate_entered_round4_live",
+      "repo": "sickn33-antigravity-awesome-skills",
+      "url": "https://github.com/sickn33/antigravity-awesome-skills"
+    }
+  ],
+  "schema": "nexus.sf_github_round4_live_rollup.v1",
+  "source_live_summary": ".nexus/reports/sf_github_round4_live_2026-05-19/live_summary.json",
+  "source_static_screen": "docs/reports/NEXUS_SF_GITHUB_ROUND4_STATIC_SCREEN_2026-05-19.json",
+  "status": "PASS",
+  "summary": {
+    "completed_rows": 4,
+    "held_candidate_count": 1,
+    "pass_count": 4,
+    "planned_rows": 4,
+    "public_benchmark_allowed": false,
+    "replacement_candidate_count": 1,
+    "return_count": 0,
+    "runtime_default_written": false
+  },
+  "version": "2026-05-19"
+}

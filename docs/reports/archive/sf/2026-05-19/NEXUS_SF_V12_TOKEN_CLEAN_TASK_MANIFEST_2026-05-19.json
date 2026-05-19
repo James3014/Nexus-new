@@ -1,0 +1,76 @@
+{
+  "schema": "nexus.sf_v12_token_clean_task_manifest.v1",
+  "status": "PASS",
+  "summary": {
+    "task_count": 2,
+    "capability_count": 2,
+    "runtime_update_allowed": false,
+    "public_benchmark_allowed": false
+  },
+  "tasks": [
+    {
+      "id": "sf-v12-token-clean-ultra_review-001",
+      "task_desc": "SF V12 token-clean replay for held capability ultra_review.",
+      "target_file": "unused",
+      "test_file": "unused",
+      "success_criteria": "sf_v12_token_clean_skill_fit_receipt_chain_complete",
+      "category": "ultra_review",
+      "difficulty": "medium",
+      "repo_kind": "neutral_fixture",
+      "repo": "fixture://sf-v12-token-clean-replay",
+      "repo_ref": "v1",
+      "fixture_kind": "sf_v12_token_clean_replay",
+      "mutation_required": false,
+      "allowed_files": [
+        "unused"
+      ],
+      "forbidden_files": [
+        ".nexus/",
+        "logs/",
+        "benchmarks/"
+      ],
+      "setup_command": "python -V",
+      "verification_command": "python -V",
+      "expected_capabilities": [
+        "ultra_review"
+      ],
+      "capability_activation_contract": "required",
+      "eligibility_class": "model_required",
+      "public_claim_allowed_metrics": []
+    },
+    {
+      "id": "sf-v12-token-clean-xray-001",
+      "task_desc": "SF V12 token-clean replay for held capability xray.",
+      "target_file": "unused",
+      "test_file": "unused",
+      "success_criteria": "sf_v12_token_clean_skill_fit_receipt_chain_complete",
+      "category": "xray",
+      "difficulty": "medium",
+      "repo_kind": "neutral_fixture",
+      "repo": "fixture://sf-v12-token-clean-replay",
+      "repo_ref": "v1",
+      "fixture_kind": "sf_v12_token_clean_replay",
+      "mutation_required": false,
+      "allowed_files": [
+        "unused"
+      ],
+      "forbidden_files": [
+        ".nexus/",
+        "logs/",
+        "benchmarks/"
+      ],
+      "setup_command": "python -V",
+      "verification_command": "python -V",
+      "expected_capabilities": [
+        "codeintel"
+      ],
+      "capability_activation_contract": "required",
+      "eligibility_class": "model_required",
+      "public_claim_allowed_metrics": []
+    }
+  ],
+  "version": "2026-05-19",
+  "frozen": true,
+  "benchmark_id": "nexus-sf-v12-token-clean-replay",
+  "description": "Internal SF V12 token-clean replay for held ultra_review and xray capabilities. Not a public benchmark."
+}

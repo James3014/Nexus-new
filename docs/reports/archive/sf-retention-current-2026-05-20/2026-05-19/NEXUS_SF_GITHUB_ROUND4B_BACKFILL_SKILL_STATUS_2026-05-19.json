@@ -1,0 +1,43 @@
+{
+  "schema": "nexus.sf_github_round4b_skill_status.v1",
+  "skills": [
+    {
+      "action": "runtime_reviewed_ablation_compare",
+      "capability_mount": "judge_panel",
+      "family": "benchmark_meta_opt",
+      "name": "nexus-benchmark-continuous-optimization",
+      "path": "/Users/jameschen/Workspace/nexus/.agents/skills/nexus-benchmark-continuous-optimization/SKILL.md",
+      "reason_codes": [
+        "current_best",
+        "runtime_reviewed_for_ablation"
+      ],
+      "root": "current_best",
+      "skill_status": "nexus_curated_candidate",
+      "source_repo": "nexus_repo",
+      "test_level": "sf_github_round4b_backfill"
+    },
+    {
+      "action": "runtime_reviewed_ablation_compare",
+      "capability_mount": "judge_panel",
+      "family": "benchmark_meta_opt",
+      "name": "github4-sickn33-antigravity-awesome-skills-ad-creative",
+      "path": "/Users/jameschen/Workspace/nexus/.agents/skills/github-round4b-challengers/github4-sickn33-antigravity-awesome-skills-ad-creative/SKILL.md",
+      "reason_codes": [
+        "round4b_backfill",
+        "prompt_only_rewrite",
+        "runtime_reviewed_for_ablation"
+      ],
+      "root": "github_round4b_runtime_reviewed",
+      "skill_status": "nexus_curated_candidate",
+      "source_repo": "https://github.com/sickn33/antigravity-awesome-skills",
+      "test_level": "sf_github_round4b_backfill"
+    }
+  ],
+  "status": "PASS",
+  "summary": {
+    "public_benchmark_allowed": false,
+    "runtime_update_allowed": false,
+    "skill_count": 2
+  },
+  "version": "2026-05-19"
+}

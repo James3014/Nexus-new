@@ -1,0 +1,106 @@
+{
+  "schema": "nexus.governance_mutant_lane_contract.v1",
+  "status": "PASS",
+  "capability": "governance_and_trust",
+  "runtime_update_allowed": false,
+  "live_ready": true,
+  "summary": {
+    "selected_task_count": 15,
+    "mutant_count": 5,
+    "bucket_counts": {
+      "audit": 4,
+      "auth": 3,
+      "claim_gate": 10,
+      "evidence_review": 9,
+      "redaction": 3
+    },
+    "missing_buckets": [],
+    "min_mutants_per_bucket": 1
+  },
+  "mutants": [
+    {
+      "mutant_id": "commercial-negative-swarm-roles-001::forged_pass_without_independent_audit",
+      "source_manifest": "scripts/bench/public_benchmark_commercial_expansion_v1.json",
+      "source_task_id": "commercial-negative-swarm-roles-001",
+      "bucket": "audit",
+      "mutant_kind": "forged_pass_without_independent_audit",
+      "task_desc": "Reject audit PASS when independent repro evidence is missing.",
+      "expected_gate": "BLOCK_OR_RETURN",
+      "required_receipts": [
+        "mutant_source_task_ref",
+        "gate_decision",
+        "reason_code",
+        "evidence_path"
+      ]
+    },
+    {
+      "mutant_id": "governance-expansion-audit-003::unsupported_claim_with_green_status",
+      "source_manifest": "scripts/bench/public_benchmark_commercial_expansion_v1.json",
+      "source_task_id": "governance-expansion-audit-003",
+      "bucket": "claim_gate",
+      "mutant_kind": "unsupported_claim_with_green_status",
+      "task_desc": "Reject claim PASS when artifact and replay causality are incomplete.",
+      "expected_gate": "BLOCK_OR_RETURN",
+      "required_receipts": [
+        "mutant_source_task_ref",
+        "gate_decision",
+        "reason_code",
+        "evidence_path"
+      ]
+    },
+    {
+      "mutant_id": "nexus-value-gov-001::secret_redaction_regression",
+      "source_manifest": "scripts/bench/public_benchmark_nexus_value_v1.json",
+      "source_task_id": "nexus-value-gov-001",
+      "bucket": "redaction",
+      "mutant_kind": "secret_redaction_regression",
+      "task_desc": "Reject output that exposes token or password while preserving ordinary fields.",
+      "expected_gate": "BLOCK_OR_RETURN",
+      "required_receipts": [
+        "mutant_source_task_ref",
+        "gate_decision",
+        "reason_code",
+        "evidence_path"
+      ]
+    },
+    {
+      "mutant_id": "rlm-harder-v2-governance-001::deny_default_bypass",
+      "source_manifest": "scripts/bench/public_benchmark_rlm_harder_v2.json",
+      "source_task_id": "rlm-harder-v2-governance-001",
+      "bucket": "auth",
+      "mutant_kind": "deny_default_bypass",
+      "task_desc": "Reject unknown roles, missing scopes, and unsafe operations.",
+      "expected_gate": "BLOCK_OR_RETURN",
+      "required_receipts": [
+        "mutant_source_task_ref",
+        "gate_decision",
+        "reason_code",
+        "evidence_path"
+      ]
+    },
+    {
+      "mutant_id": "commercial-negative-swarm-roles-001::receipt_lite_incomplete",
+      "source_manifest": "scripts/bench/public_benchmark_commercial_expansion_v1.json",
+      "source_task_id": "commercial-negative-swarm-roles-001",
+      "bucket": "evidence_review",
+      "mutant_kind": "receipt_lite_incomplete",
+      "task_desc": "Reject evidence summary without source refs, replay refs, or distinct roles.",
+      "expected_gate": "BLOCK_OR_RETURN",
+      "required_receipts": [
+        "mutant_source_task_ref",
+        "gate_decision",
+        "reason_code",
+        "evidence_path"
+      ]
+    }
+  ],
+  "promotion_rule": [
+    "Governance skills cannot reach alternate/default if any mutant survives.",
+    "Mutant kill evidence must be keyed by (capability, skill_id, mutant_id).",
+    "Mutant lane is fail-closed and cannot update runtime policy directly."
+  ],
+  "claim_boundary": [
+    "This contract prepares governance anti-false-positive validation; it is not public benchmark evidence.",
+    "A normal delivery PASS does not imply mutant kill PASS."
+  ]
+}

@@ -1,0 +1,27 @@
+{
+  "schema": "nexus.sf_v11_capability_hold.v1",
+  "status": "PASS",
+  "summary": {
+    "held_capability_count": 1,
+    "held_candidate_count": 2,
+    "runtime_update_allowed": false,
+    "public_benchmark_allowed": false
+  },
+  "held_capabilities": [
+    {
+      "capability_id": "ultra_review",
+      "reason": "repeated_model_call_without_tokens_in_v11_live",
+      "action": "hold_capability_tiebreak_until_token_clean_probe",
+      "affected_candidates": [
+        "code-review-and-quality",
+        "diagnose"
+      ],
+      "not_counted_as_skill_fit_winner": true
+    }
+  ],
+  "claim_boundary": {
+    "sf_discovery_allowed": true,
+    "runtime_update_allowed": false,
+    "public_benchmark_allowed": false
+  }
+}

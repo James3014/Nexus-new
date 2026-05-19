@@ -1,0 +1,616 @@
+{
+  "schema": "nexus.sf_v11_retest_task_manifest.v1",
+  "version": "2026-05-18",
+  "frozen": true,
+  "benchmark_id": "nexus-sf-v11-retest",
+  "description": "Internal SF retest tasks for remaining route capabilities. Not a public benchmark.",
+  "status": "PASS",
+  "summary": {
+    "task_count": 20,
+    "capability_count": 20,
+    "runtime_update_allowed": false,
+    "public_benchmark_allowed": false
+  },
+  "tasks": [
+    {
+      "id": "sf-v11-retest-artifact_gate-001",
+      "task_desc": "Internal SF V11 retest for route capability artifact_gate; compare Flash+Nexus no-skill against candidate skill arms.",
+      "target_file": "unused",
+      "test_file": "unused",
+      "success_criteria": "sf_v11_skill_fit_receipt_chain_complete",
+      "category": "artifact_gate",
+      "difficulty": "medium",
+      "repo_kind": "neutral_fixture",
+      "repo": "fixture://sf-v11-skill-fit-retest",
+      "repo_ref": "v1",
+      "fixture_kind": "sf_v11_retest",
+      "mutation_required": false,
+      "allowed_files": [
+        "unused"
+      ],
+      "forbidden_files": [
+        ".nexus/",
+        "logs/",
+        "benchmarks/"
+      ],
+      "setup_command": "python -V",
+      "verification_command": "python -V",
+      "expected_capabilities": [
+        "artifact_gate"
+      ],
+      "capability_activation_contract": "required",
+      "eligibility_class": "model_required",
+      "public_claim_allowed_metrics": []
+    },
+    {
+      "id": "sf-v11-retest-autonomic_router-001",
+      "task_desc": "Internal SF V11 retest for route capability autonomic_router; compare Flash+Nexus no-skill against candidate skill arms.",
+      "target_file": "unused",
+      "test_file": "unused",
+      "success_criteria": "sf_v11_skill_fit_receipt_chain_complete",
+      "category": "autonomic_router",
+      "difficulty": "medium",
+      "repo_kind": "neutral_fixture",
+      "repo": "fixture://sf-v11-skill-fit-retest",
+      "repo_ref": "v1",
+      "fixture_kind": "sf_v11_retest",
+      "mutation_required": false,
+      "allowed_files": [
+        "unused"
+      ],
+      "forbidden_files": [
+        ".nexus/",
+        "logs/",
+        "benchmarks/"
+      ],
+      "setup_command": "python -V",
+      "verification_command": "python -V",
+      "expected_capabilities": [
+        "autoreason"
+      ],
+      "capability_activation_contract": "required",
+      "eligibility_class": "model_required",
+      "public_claim_allowed_metrics": []
+    },
+    {
+      "id": "sf-v11-retest-autoreason-001",
+      "task_desc": "Internal SF V11 retest for route capability autoreason; compare Flash+Nexus no-skill against candidate skill arms.",
+      "target_file": "unused",
+      "test_file": "unused",
+      "success_criteria": "sf_v11_skill_fit_receipt_chain_complete",
+      "category": "autoreason",
+      "difficulty": "medium",
+      "repo_kind": "neutral_fixture",
+      "repo": "fixture://sf-v11-skill-fit-retest",
+      "repo_ref": "v1",
+      "fixture_kind": "sf_v11_retest",
+      "mutation_required": false,
+      "allowed_files": [
+        "unused"
+      ],
+      "forbidden_files": [
+        ".nexus/",
+        "logs/",
+        "benchmarks/"
+      ],
+      "setup_command": "python -V",
+      "verification_command": "python -V",
+      "expected_capabilities": [
+        "autoreason"
+      ],
+      "capability_activation_contract": "required",
+      "eligibility_class": "model_required",
+      "public_claim_allowed_metrics": []
+    },
+    {
+      "id": "sf-v11-retest-benchmark_meta_opt-001",
+      "task_desc": "Internal SF V11 retest for route capability benchmark_meta_opt; compare Flash+Nexus no-skill against candidate skill arms.",
+      "target_file": "unused",
+      "test_file": "unused",
+      "success_criteria": "sf_v11_skill_fit_receipt_chain_complete",
+      "category": "benchmark_meta_opt",
+      "difficulty": "medium",
+      "repo_kind": "neutral_fixture",
+      "repo": "fixture://sf-v11-skill-fit-retest",
+      "repo_ref": "v1",
+      "fixture_kind": "sf_v11_retest",
+      "mutation_required": false,
+      "allowed_files": [
+        "unused"
+      ],
+      "forbidden_files": [
+        ".nexus/",
+        "logs/",
+        "benchmarks/"
+      ],
+      "setup_command": "python -V",
+      "verification_command": "python -V",
+      "expected_capabilities": [
+        "judge_panel"
+      ],
+      "capability_activation_contract": "required",
+      "eligibility_class": "model_required",
+      "public_claim_allowed_metrics": []
+    },
+    {
+      "id": "sf-v11-retest-ddtree-001",
+      "task_desc": "Internal SF V11 retest for route capability ddtree; compare Flash+Nexus no-skill against candidate skill arms.",
+      "target_file": "unused",
+      "test_file": "unused",
+      "success_criteria": "sf_v11_skill_fit_receipt_chain_complete",
+      "category": "ddtree",
+      "difficulty": "medium",
+      "repo_kind": "neutral_fixture",
+      "repo": "fixture://sf-v11-skill-fit-retest",
+      "repo_ref": "v1",
+      "fixture_kind": "sf_v11_retest",
+      "mutation_required": false,
+      "allowed_files": [
+        "unused"
+      ],
+      "forbidden_files": [
+        ".nexus/",
+        "logs/",
+        "benchmarks/"
+      ],
+      "setup_command": "python -V",
+      "verification_command": "python -V",
+      "expected_capabilities": [
+        "ddtree"
+      ],
+      "capability_activation_contract": "required",
+      "eligibility_class": "model_required",
+      "public_claim_allowed_metrics": []
+    },
+    {
+      "id": "sf-v11-retest-delivery_acceptance_gate-001",
+      "task_desc": "Internal SF V11 retest for route capability delivery_acceptance_gate; compare Flash+Nexus no-skill against candidate skill arms.",
+      "target_file": "unused",
+      "test_file": "unused",
+      "success_criteria": "sf_v11_skill_fit_receipt_chain_complete",
+      "category": "delivery_acceptance_gate",
+      "difficulty": "medium",
+      "repo_kind": "neutral_fixture",
+      "repo": "fixture://sf-v11-skill-fit-retest",
+      "repo_ref": "v1",
+      "fixture_kind": "sf_v11_retest",
+      "mutation_required": false,
+      "allowed_files": [
+        "unused"
+      ],
+      "forbidden_files": [
+        ".nexus/",
+        "logs/",
+        "benchmarks/"
+      ],
+      "setup_command": "python -V",
+      "verification_command": "python -V",
+      "expected_capabilities": [
+        "delivery_gate"
+      ],
+      "capability_activation_contract": "required",
+      "eligibility_class": "model_required",
+      "public_claim_allowed_metrics": []
+    },
+    {
+      "id": "sf-v11-retest-drone-001",
+      "task_desc": "Internal SF V11 retest for route capability drone; compare Flash+Nexus no-skill against candidate skill arms.",
+      "target_file": "unused",
+      "test_file": "unused",
+      "success_criteria": "sf_v11_skill_fit_receipt_chain_complete",
+      "category": "drone",
+      "difficulty": "medium",
+      "repo_kind": "neutral_fixture",
+      "repo": "fixture://sf-v11-skill-fit-retest",
+      "repo_ref": "v1",
+      "fixture_kind": "sf_v11_retest",
+      "mutation_required": false,
+      "allowed_files": [
+        "unused"
+      ],
+      "forbidden_files": [
+        ".nexus/",
+        "logs/",
+        "benchmarks/"
+      ],
+      "setup_command": "python -V",
+      "verification_command": "python -V",
+      "expected_capabilities": [
+        "drone"
+      ],
+      "capability_activation_contract": "required",
+      "eligibility_class": "model_required",
+      "public_claim_allowed_metrics": []
+    },
+    {
+      "id": "sf-v11-retest-lancedb-001",
+      "task_desc": "Internal SF V11 retest for route capability lancedb; compare Flash+Nexus no-skill against candidate skill arms.",
+      "target_file": "unused",
+      "test_file": "unused",
+      "success_criteria": "sf_v11_skill_fit_receipt_chain_complete",
+      "category": "lancedb",
+      "difficulty": "medium",
+      "repo_kind": "neutral_fixture",
+      "repo": "fixture://sf-v11-skill-fit-retest",
+      "repo_ref": "v1",
+      "fixture_kind": "sf_v11_retest",
+      "mutation_required": false,
+      "allowed_files": [
+        "unused"
+      ],
+      "forbidden_files": [
+        ".nexus/",
+        "logs/",
+        "benchmarks/"
+      ],
+      "setup_command": "python -V",
+      "verification_command": "python -V",
+      "expected_capabilities": [
+        "lancedb"
+      ],
+      "capability_activation_contract": "required",
+      "eligibility_class": "model_required",
+      "public_claim_allowed_metrics": []
+    },
+    {
+      "id": "sf-v11-retest-learning_closure-001",
+      "task_desc": "Internal SF V11 retest for route capability learning_closure; compare Flash+Nexus no-skill against candidate skill arms.",
+      "target_file": "unused",
+      "test_file": "unused",
+      "success_criteria": "sf_v11_skill_fit_receipt_chain_complete",
+      "category": "learning_closure",
+      "difficulty": "medium",
+      "repo_kind": "neutral_fixture",
+      "repo": "fixture://sf-v11-skill-fit-retest",
+      "repo_ref": "v1",
+      "fixture_kind": "sf_v11_retest",
+      "mutation_required": false,
+      "allowed_files": [
+        "unused"
+      ],
+      "forbidden_files": [
+        ".nexus/",
+        "logs/",
+        "benchmarks/"
+      ],
+      "setup_command": "python -V",
+      "verification_command": "python -V",
+      "expected_capabilities": [
+        "semantic_failure_sensor"
+      ],
+      "capability_activation_contract": "required",
+      "eligibility_class": "model_required",
+      "public_claim_allowed_metrics": []
+    },
+    {
+      "id": "sf-v11-retest-memory-001",
+      "task_desc": "Internal SF V11 retest for route capability memory; compare Flash+Nexus no-skill against candidate skill arms.",
+      "target_file": "unused",
+      "test_file": "unused",
+      "success_criteria": "sf_v11_skill_fit_receipt_chain_complete",
+      "category": "memory",
+      "difficulty": "medium",
+      "repo_kind": "neutral_fixture",
+      "repo": "fixture://sf-v11-skill-fit-retest",
+      "repo_ref": "v1",
+      "fixture_kind": "sf_v11_retest",
+      "mutation_required": false,
+      "allowed_files": [
+        "unused"
+      ],
+      "forbidden_files": [
+        ".nexus/",
+        "logs/",
+        "benchmarks/"
+      ],
+      "setup_command": "python -V",
+      "verification_command": "python -V",
+      "expected_capabilities": [
+        "memory"
+      ],
+      "capability_activation_contract": "required",
+      "eligibility_class": "model_required",
+      "public_claim_allowed_metrics": []
+    },
+    {
+      "id": "sf-v11-retest-mempalace-001",
+      "task_desc": "Internal SF V11 retest for route capability mempalace; compare Flash+Nexus no-skill against candidate skill arms.",
+      "target_file": "unused",
+      "test_file": "unused",
+      "success_criteria": "sf_v11_skill_fit_receipt_chain_complete",
+      "category": "mempalace",
+      "difficulty": "medium",
+      "repo_kind": "neutral_fixture",
+      "repo": "fixture://sf-v11-skill-fit-retest",
+      "repo_ref": "v1",
+      "fixture_kind": "sf_v11_retest",
+      "mutation_required": false,
+      "allowed_files": [
+        "unused"
+      ],
+      "forbidden_files": [
+        ".nexus/",
+        "logs/",
+        "benchmarks/"
+      ],
+      "setup_command": "python -V",
+      "verification_command": "python -V",
+      "expected_capabilities": [
+        "mempalace_gate"
+      ],
+      "capability_activation_contract": "required",
+      "eligibility_class": "model_required",
+      "public_claim_allowed_metrics": []
+    },
+    {
+      "id": "sf-v11-retest-metabolism_resume-001",
+      "task_desc": "Internal SF V11 retest for route capability metabolism_resume; compare Flash+Nexus no-skill against candidate skill arms.",
+      "target_file": "unused",
+      "test_file": "unused",
+      "success_criteria": "sf_v11_skill_fit_receipt_chain_complete",
+      "category": "metabolism_resume",
+      "difficulty": "medium",
+      "repo_kind": "neutral_fixture",
+      "repo": "fixture://sf-v11-skill-fit-retest",
+      "repo_ref": "v1",
+      "fixture_kind": "sf_v11_retest",
+      "mutation_required": false,
+      "allowed_files": [
+        "unused"
+      ],
+      "forbidden_files": [
+        ".nexus/",
+        "logs/",
+        "benchmarks/"
+      ],
+      "setup_command": "python -V",
+      "verification_command": "python -V",
+      "expected_capabilities": [
+        "semantic_failure_sensor"
+      ],
+      "capability_activation_contract": "required",
+      "eligibility_class": "model_required",
+      "public_claim_allowed_metrics": []
+    },
+    {
+      "id": "sf-v11-retest-policy_capability_gate-001",
+      "task_desc": "Internal SF V11 retest for route capability policy_capability_gate; compare Flash+Nexus no-skill against candidate skill arms.",
+      "target_file": "unused",
+      "test_file": "unused",
+      "success_criteria": "sf_v11_skill_fit_receipt_chain_complete",
+      "category": "policy_capability_gate",
+      "difficulty": "medium",
+      "repo_kind": "neutral_fixture",
+      "repo": "fixture://sf-v11-skill-fit-retest",
+      "repo_ref": "v1",
+      "fixture_kind": "sf_v11_retest",
+      "mutation_required": false,
+      "allowed_files": [
+        "unused"
+      ],
+      "forbidden_files": [
+        ".nexus/",
+        "logs/",
+        "benchmarks/"
+      ],
+      "setup_command": "python -V",
+      "verification_command": "python -V",
+      "expected_capabilities": [
+        "mempalace_gate"
+      ],
+      "capability_activation_contract": "required",
+      "eligibility_class": "model_required",
+      "public_claim_allowed_metrics": []
+    },
+    {
+      "id": "sf-v11-retest-registry_skills_sync-001",
+      "task_desc": "Internal SF V11 retest for route capability registry_skills_sync; compare Flash+Nexus no-skill against candidate skill arms.",
+      "target_file": "unused",
+      "test_file": "unused",
+      "success_criteria": "sf_v11_skill_fit_receipt_chain_complete",
+      "category": "registry_skills_sync",
+      "difficulty": "medium",
+      "repo_kind": "neutral_fixture",
+      "repo": "fixture://sf-v11-skill-fit-retest",
+      "repo_ref": "v1",
+      "fixture_kind": "sf_v11_retest",
+      "mutation_required": false,
+      "allowed_files": [
+        "unused"
+      ],
+      "forbidden_files": [
+        ".nexus/",
+        "logs/",
+        "benchmarks/"
+      ],
+      "setup_command": "python -V",
+      "verification_command": "python -V",
+      "expected_capabilities": [
+        "semantic_searcher"
+      ],
+      "capability_activation_contract": "required",
+      "eligibility_class": "model_required",
+      "public_claim_allowed_metrics": []
+    },
+    {
+      "id": "sf-v11-retest-research-001",
+      "task_desc": "Internal SF V11 retest for route capability research; compare Flash+Nexus no-skill against candidate skill arms.",
+      "target_file": "unused",
+      "test_file": "unused",
+      "success_criteria": "sf_v11_skill_fit_receipt_chain_complete",
+      "category": "research",
+      "difficulty": "medium",
+      "repo_kind": "neutral_fixture",
+      "repo": "fixture://sf-v11-skill-fit-retest",
+      "repo_ref": "v1",
+      "fixture_kind": "sf_v11_retest",
+      "mutation_required": false,
+      "allowed_files": [
+        "unused"
+      ],
+      "forbidden_files": [
+        ".nexus/",
+        "logs/",
+        "benchmarks/"
+      ],
+      "setup_command": "python -V",
+      "verification_command": "python -V",
+      "expected_capabilities": [
+        "research"
+      ],
+      "capability_activation_contract": "required",
+      "eligibility_class": "model_required",
+      "public_claim_allowed_metrics": []
+    },
+    {
+      "id": "sf-v11-retest-research_control_plane-001",
+      "task_desc": "Internal SF V11 retest for route capability research_control_plane; compare Flash+Nexus no-skill against candidate skill arms.",
+      "target_file": "unused",
+      "test_file": "unused",
+      "success_criteria": "sf_v11_skill_fit_receipt_chain_complete",
+      "category": "research_control_plane",
+      "difficulty": "medium",
+      "repo_kind": "neutral_fixture",
+      "repo": "fixture://sf-v11-skill-fit-retest",
+      "repo_ref": "v1",
+      "fixture_kind": "sf_v11_retest",
+      "mutation_required": false,
+      "allowed_files": [
+        "unused"
+      ],
+      "forbidden_files": [
+        ".nexus/",
+        "logs/",
+        "benchmarks/"
+      ],
+      "setup_command": "python -V",
+      "verification_command": "python -V",
+      "expected_capabilities": [
+        "research"
+      ],
+      "capability_activation_contract": "required",
+      "eligibility_class": "model_required",
+      "public_claim_allowed_metrics": []
+    },
+    {
+      "id": "sf-v11-retest-sandbox_replay-001",
+      "task_desc": "Internal SF V11 retest for route capability sandbox_replay; compare Flash+Nexus no-skill against candidate skill arms.",
+      "target_file": "unused",
+      "test_file": "unused",
+      "success_criteria": "sf_v11_skill_fit_receipt_chain_complete",
+      "category": "sandbox_replay",
+      "difficulty": "medium",
+      "repo_kind": "neutral_fixture",
+      "repo": "fixture://sf-v11-skill-fit-retest",
+      "repo_ref": "v1",
+      "fixture_kind": "sf_v11_retest",
+      "mutation_required": false,
+      "allowed_files": [
+        "unused"
+      ],
+      "forbidden_files": [
+        ".nexus/",
+        "logs/",
+        "benchmarks/"
+      ],
+      "setup_command": "python -V",
+      "verification_command": "python -V",
+      "expected_capabilities": [
+        "harness_preflight_sensor"
+      ],
+      "capability_activation_contract": "required",
+      "eligibility_class": "model_required",
+      "public_claim_allowed_metrics": []
+    },
+    {
+      "id": "sf-v11-retest-ui_validator-001",
+      "task_desc": "Internal SF V11 retest for route capability ui_validator; compare Flash+Nexus no-skill against candidate skill arms.",
+      "target_file": "unused",
+      "test_file": "unused",
+      "success_criteria": "sf_v11_skill_fit_receipt_chain_complete",
+      "category": "ui_validator",
+      "difficulty": "medium",
+      "repo_kind": "neutral_fixture",
+      "repo": "fixture://sf-v11-skill-fit-retest",
+      "repo_ref": "v1",
+      "fixture_kind": "sf_v11_retest",
+      "mutation_required": false,
+      "allowed_files": [
+        "unused"
+      ],
+      "forbidden_files": [
+        ".nexus/",
+        "logs/",
+        "benchmarks/"
+      ],
+      "setup_command": "python -V",
+      "verification_command": "python -V",
+      "expected_capabilities": [
+        "ultra_review"
+      ],
+      "capability_activation_contract": "required",
+      "eligibility_class": "model_required",
+      "public_claim_allowed_metrics": []
+    },
+    {
+      "id": "sf-v11-retest-ultra_review-001",
+      "task_desc": "Internal SF V11 retest for route capability ultra_review; compare Flash+Nexus no-skill against candidate skill arms.",
+      "target_file": "unused",
+      "test_file": "unused",
+      "success_criteria": "sf_v11_skill_fit_receipt_chain_complete",
+      "category": "ultra_review",
+      "difficulty": "medium",
+      "repo_kind": "neutral_fixture",
+      "repo": "fixture://sf-v11-skill-fit-retest",
+      "repo_ref": "v1",
+      "fixture_kind": "sf_v11_retest",
+      "mutation_required": false,
+      "allowed_files": [
+        "unused"
+      ],
+      "forbidden_files": [
+        ".nexus/",
+        "logs/",
+        "benchmarks/"
+      ],
+      "setup_command": "python -V",
+      "verification_command": "python -V",
+      "expected_capabilities": [
+        "ultra_review"
+      ],
+      "capability_activation_contract": "required",
+      "eligibility_class": "model_required",
+      "public_claim_allowed_metrics": []
+    },
+    {
+      "id": "sf-v11-retest-xray-001",
+      "task_desc": "Internal SF V11 retest for route capability xray; compare Flash+Nexus no-skill against candidate skill arms.",
+      "target_file": "unused",
+      "test_file": "unused",
+      "success_criteria": "sf_v11_skill_fit_receipt_chain_complete",
+      "category": "xray",
+      "difficulty": "medium",
+      "repo_kind": "neutral_fixture",
+      "repo": "fixture://sf-v11-skill-fit-retest",
+      "repo_ref": "v1",
+      "fixture_kind": "sf_v11_retest",
+      "mutation_required": false,
+      "allowed_files": [
+        "unused"
+      ],
+      "forbidden_files": [
+        ".nexus/",
+        "logs/",
+        "benchmarks/"
+      ],
+      "setup_command": "python -V",
+      "verification_command": "python -V",
+      "expected_capabilities": [
+        "codeintel"
+      ],
+      "capability_activation_contract": "required",
+      "eligibility_class": "model_required",
+      "public_claim_allowed_metrics": []
+    }
+  ]
+}

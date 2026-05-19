@@ -1,0 +1,181 @@
+{
+  "claim_boundary": [
+    "Patch plan is apply-gate input only.",
+    "Runtime defaults remain separate from public benchmark."
+  ],
+  "created_at": "2026-05-19T15:44:47.676211+00:00",
+  "planned_changes": [
+    {
+      "apply_state": "apply_ready_but_not_written",
+      "capability_id": "artifact_gate",
+      "evidence_refs": [
+        ".nexus/reports/sf_systematic_all_capability_live_v32_2026-05-19/artifact_gate_sf-systematic-batch-artifact_gate-001_challenger_sf-systematic-artifact_gate-differential-review-461fbd0c/evidence_bundle.json"
+      ],
+      "from_skill": "acceptance-evidence-failclosed",
+      "planned_action": "set_capability_primary_skill_candidate",
+      "receipt_refs": [
+        ".nexus/reports/sf_systematic_all_capability_live_v32_2026-05-19/artifact_gate_sf-systematic-batch-artifact_gate-001_challenger_sf-systematic-artifact_gate-differential-review-461fbd0c"
+      ],
+      "skill_id": "sf-systematic-artifact_gate-differential-review-461fbd0c",
+      "token_delta": -2610,
+      "wall_delta_sec": -17.8189
+    },
+    {
+      "apply_state": "apply_ready_but_not_written",
+      "capability_id": "codeintel",
+      "evidence_refs": [
+        ".nexus/reports/sf_systematic_all_capability_live_v32_2026-05-19/codeintel_sf-systematic-batch-codeintel-001_challenger_sf-systematic-codeintel-first-principles-thinking-f95019ea/evidence_bundle.json"
+      ],
+      "from_skill": "github10-code-simplification-codeintel",
+      "planned_action": "set_capability_primary_skill_candidate",
+      "receipt_refs": [
+        ".nexus/reports/sf_systematic_all_capability_live_v32_2026-05-19/codeintel_sf-systematic-batch-codeintel-001_challenger_sf-systematic-codeintel-first-principles-thinking-f95019ea"
+      ],
+      "skill_id": "sf-systematic-codeintel-first-principles-thinking-f95019ea",
+      "token_delta": -3011,
+      "wall_delta_sec": -17.312
+    },
+    {
+      "apply_state": "apply_ready_but_not_written",
+      "capability_id": "direct_master_loop",
+      "evidence_refs": [
+        ".nexus/reports/sf_systematic_all_capability_live_v32_2026-05-19/direct_master_loop_sf-systematic-batch-direct_master_loop-001_challenger_sf-systematic-direct_master_loop-build-32802a87/evidence_bundle.json"
+      ],
+      "from_skill": "sf2-direct_master_loop-route-fit-spec",
+      "planned_action": "set_capability_primary_skill_candidate",
+      "receipt_refs": [
+        ".nexus/reports/sf_systematic_all_capability_live_v32_2026-05-19/direct_master_loop_sf-systematic-batch-direct_master_loop-001_challenger_sf-systematic-direct_master_loop-build-32802a87"
+      ],
+      "skill_id": "sf-systematic-direct_master_loop-build-32802a87",
+      "token_delta": -713,
+      "wall_delta_sec": -27.9197
+    },
+    {
+      "apply_state": "apply_ready_but_not_written",
+      "capability_id": "drone",
+      "evidence_refs": [
+        ".nexus/reports/sf_systematic_all_capability_live_v32_2026-05-19/drone_sf-systematic-batch-drone-001_challenger_sf-systematic-drone-python-background-jobs-18326a62/evidence_bundle.json"
+      ],
+      "from_skill": "diagnose",
+      "planned_action": "set_capability_primary_skill_candidate",
+      "receipt_refs": [
+        ".nexus/reports/sf_systematic_all_capability_live_v32_2026-05-19/drone_sf-systematic-batch-drone-001_challenger_sf-systematic-drone-python-background-jobs-18326a62"
+      ],
+      "skill_id": "sf-systematic-drone-python-background-jobs-18326a62",
+      "token_delta": -1794,
+      "wall_delta_sec": -8.4396
+    },
+    {
+      "apply_state": "apply_ready_but_not_written",
+      "capability_id": "external_productivity",
+      "evidence_refs": [
+        ".nexus/reports/sf_systematic_all_capability_live_v32_2026-05-19/external_productivity_sf-systematic-batch-external_productivity-001_challenger_sf-systematic-external_productivity-writer-77dc7840/evidence_bundle.json"
+      ],
+      "from_skill": "github5-video-auto-dubber-safe-external-productivity",
+      "planned_action": "set_capability_primary_skill_candidate",
+      "receipt_refs": [
+        ".nexus/reports/sf_systematic_all_capability_live_v32_2026-05-19/external_productivity_sf-systematic-batch-external_productivity-001_challenger_sf-systematic-external_productivity-writer-77dc7840"
+      ],
+      "skill_id": "sf-systematic-external_productivity-writer-77dc7840",
+      "token_delta": -803,
+      "wall_delta_sec": -14.2425
+    },
+    {
+      "apply_state": "apply_ready_but_not_written",
+      "capability_id": "governance_and_trust",
+      "evidence_refs": [
+        ".nexus/reports/sf_systematic_all_capability_live_v32_2026-05-19/governance_and_trust_sf-systematic-batch-governance_and_trust-001_challenger_sf-systematic-governance_and_trust-aegisops-ai-0aa841e2/evidence_bundle.json"
+      ],
+      "from_skill": "acceptance-evidence-failclosed",
+      "planned_action": "set_capability_primary_skill_candidate",
+      "receipt_refs": [
+        ".nexus/reports/sf_systematic_all_capability_live_v32_2026-05-19/governance_and_trust_sf-systematic-batch-governance_and_trust-001_challenger_sf-systematic-governance_and_trust-aegisops-ai-0aa841e2"
+      ],
+      "skill_id": "sf-systematic-governance_and_trust-aegisops-ai-0aa841e2",
+      "token_delta": -2221,
+      "wall_delta_sec": -16.6412
+    },
+    {
+      "apply_state": "apply_ready_but_not_written",
+      "capability_id": "memory",
+      "evidence_refs": [
+        ".nexus/reports/sf_systematic_all_capability_live_v32_2026-05-19/memory_sf-systematic-batch-memory-001_challenger_sf-systematic-memory-project-skill-audit-cc8b7621/evidence_bundle.json"
+      ],
+      "from_skill": "diagnose",
+      "planned_action": "set_capability_primary_skill_candidate",
+      "receipt_refs": [
+        ".nexus/reports/sf_systematic_all_capability_live_v32_2026-05-19/memory_sf-systematic-batch-memory-001_challenger_sf-systematic-memory-project-skill-audit-cc8b7621"
+      ],
+      "skill_id": "sf-systematic-memory-project-skill-audit-cc8b7621",
+      "token_delta": -2648,
+      "wall_delta_sec": -38.8384
+    },
+    {
+      "apply_state": "apply_ready_but_not_written",
+      "capability_id": "policy_capability_gate",
+      "evidence_refs": [
+        ".nexus/reports/sf_systematic_all_capability_live_v32_2026-05-19/policy_capability_gate_sf-systematic-batch-policy_capability_gate-001_challenger_sf-systematic-policy_capability_gate-aegisops-ai-0aa841e2/evidence_bundle.json"
+      ],
+      "from_skill": "nexus-root-cause-probe",
+      "planned_action": "set_capability_primary_skill_candidate",
+      "receipt_refs": [
+        ".nexus/reports/sf_systematic_all_capability_live_v32_2026-05-19/policy_capability_gate_sf-systematic-batch-policy_capability_gate-001_challenger_sf-systematic-policy_capability_gate-aegisops-ai-0aa841e2"
+      ],
+      "skill_id": "sf-systematic-policy_capability_gate-aegisops-ai-0aa841e2",
+      "token_delta": -1496,
+      "wall_delta_sec": -44.8808
+    },
+    {
+      "apply_state": "apply_ready_but_not_written",
+      "capability_id": "regression_guard",
+      "evidence_refs": [
+        ".nexus/reports/sf_systematic_all_capability_live_v32_2026-05-19/regression_guard_sf-systematic-batch-regression_guard-001_challenger_sf-systematic-regression_guard-odoo-automated-tests-dad98433/evidence_bundle.json"
+      ],
+      "from_skill": "diagnose",
+      "planned_action": "set_capability_primary_skill_candidate",
+      "receipt_refs": [
+        ".nexus/reports/sf_systematic_all_capability_live_v32_2026-05-19/regression_guard_sf-systematic-batch-regression_guard-001_challenger_sf-systematic-regression_guard-odoo-automated-tests-dad98433"
+      ],
+      "skill_id": "sf-systematic-regression_guard-odoo-automated-tests-dad98433",
+      "token_delta": -14018,
+      "wall_delta_sec": -61.7472
+    },
+    {
+      "apply_state": "apply_ready_but_not_written",
+      "capability_id": "repair_loop",
+      "evidence_refs": [
+        ".nexus/reports/sf_systematic_all_capability_live_v32_2026-05-19/repair_loop_sf-systematic-batch-repair_loop-001_challenger_sf-systematic-repair_loop-odoo-automated-tests-dad98433/evidence_bundle.json"
+      ],
+      "from_skill": "sf-systematic-repair_loop-tailwind-v4-shadcn-7197cbbf",
+      "planned_action": "set_capability_primary_skill_candidate",
+      "receipt_refs": [
+        ".nexus/reports/sf_systematic_all_capability_live_v32_2026-05-19/repair_loop_sf-systematic-batch-repair_loop-001_challenger_sf-systematic-repair_loop-odoo-automated-tests-dad98433"
+      ],
+      "skill_id": "sf-systematic-repair_loop-odoo-automated-tests-dad98433",
+      "token_delta": -786,
+      "wall_delta_sec": -3.4459
+    },
+    {
+      "apply_state": "apply_ready_but_not_written",
+      "capability_id": "research",
+      "evidence_refs": [
+        ".nexus/reports/sf_systematic_all_capability_live_v32_2026-05-19/research_sf-systematic-batch-research-001_challenger_sf-systematic-research-research-lookup-7e6f92a0/evidence_bundle.json"
+      ],
+      "from_skill": "github8-gbrain-academic-verify-research",
+      "planned_action": "set_capability_primary_skill_candidate",
+      "receipt_refs": [
+        ".nexus/reports/sf_systematic_all_capability_live_v32_2026-05-19/research_sf-systematic-batch-research-001_challenger_sf-systematic-research-research-lookup-7e6f92a0"
+      ],
+      "skill_id": "sf-systematic-research-research-lookup-7e6f92a0",
+      "token_delta": -2041,
+      "wall_delta_sec": -27.9008
+    }
+  ],
+  "schema": "nexus.sf_systematic_runtime_policy_patch_plan.v32",
+  "status": "PASS",
+  "summary": {
+    "planned_change_count": 11,
+    "public_benchmark_allowed": false,
+    "runtime_update_allowed": false
+  }
+}

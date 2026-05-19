@@ -1,0 +1,52 @@
+{
+  "schema": "nexus.sf_final_closure.v12",
+  "status": "PASS",
+  "skill_fit_discovery_complete": true,
+  "runtime_overlay_apply_gate_complete": true,
+  "runtime_overlay_policy_smoke_complete": true,
+  "runtime_update_allowed": true,
+  "public_benchmark_allowed": false,
+  "summary": {
+    "route_capability_count": 33,
+    "state_counts": {
+      "runtime_primary": 13,
+      "catalog_candidate_ready": 20
+    },
+    "promotion_review": {
+      "review_count": 33,
+      "keep_existing_runtime_primary": 13,
+      "approve_runtime_apply_ready": 11,
+      "hold_tradeoff_or_incomplete": 9,
+      "runtime_apply_ready_count": 11
+    },
+    "apply_gate": {
+      "patch_item_count": 11,
+      "overlay_primary_count": 26,
+      "blocker_count": 0
+    },
+    "policy_smoke": {
+      "case_count": 26,
+      "pass_count": 26,
+      "return_count": 0
+    },
+    "ledger": {
+      "kept_existing_runtime_primary": 13,
+      "applied_to_overlay_candidate": 11,
+      "held_not_applied": 9
+    }
+  },
+  "artifacts": {
+    "current_state": "docs/reports/NEXUS_SF_ALL_CAPABILITY_CURRENT_STATE_2026-05-19.md",
+    "promotion_review": "docs/reports/NEXUS_SF_RUNTIME_PROMOTION_REVIEW_V12_2026-05-19.md",
+    "patch_plan": "docs/reports/NEXUS_SF_RUNTIME_POLICY_PATCH_PLAN_V12_2026-05-19.json",
+    "apply_gate": "docs/reports/NEXUS_SF_RUNTIME_POLICY_APPLY_GATE_V12_2026-05-19.json",
+    "overlay": "docs/reports/NEXUS_SF_RUNTIME_SKILL_POLICY_OVERLAY_V12_2026-05-19.json",
+    "post_apply_policy_smoke": "docs/reports/NEXUS_SF_POST_APPLY_POLICY_SMOKE_V12_2026-05-19.json",
+    "replacement_ledger": "docs/reports/NEXUS_SF_REPLACEMENT_LEDGER_V12_2026-05-19.json"
+  },
+  "claim_boundary": {
+    "sf_closed_loop_complete": true,
+    "public_benchmark_allowed": false,
+    "public_benchmark_reason": "7R remains separate and should only run after explicit public lane preflight."
+  }
+}

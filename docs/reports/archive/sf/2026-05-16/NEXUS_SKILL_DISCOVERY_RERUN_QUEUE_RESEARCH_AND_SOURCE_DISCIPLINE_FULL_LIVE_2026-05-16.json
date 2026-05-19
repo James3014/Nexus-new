@@ -1,0 +1,45 @@
+{
+  "schema": "nexus.skill_discovery_rerun_queue.v1",
+  "status": "PASS",
+  "queue_count": 0,
+  "skipped_count": 4,
+  "queue": [],
+  "skipped": [
+    {
+      "capability": "research_and_source_discipline",
+      "skill_id": "arxiv",
+      "verdict": "reject",
+      "tested_rows": 22,
+      "effective_rows": 0,
+      "reason": "skip_reject"
+    },
+    {
+      "capability": "research_and_source_discipline",
+      "skill_id": "browserbase-company-research",
+      "verdict": "reject",
+      "tested_rows": 22,
+      "effective_rows": 0,
+      "reason": "skip_reject"
+    },
+    {
+      "capability": "research_and_source_discipline",
+      "skill_id": "browserbase-search",
+      "verdict": "reject",
+      "tested_rows": 22,
+      "effective_rows": 0,
+      "reason": "skip_reject"
+    },
+    {
+      "capability": "research_and_source_discipline",
+      "skill_id": "gbrain-academic-verify",
+      "verdict": "reject",
+      "tested_rows": 22,
+      "effective_rows": 0,
+      "reason": "skip_reject"
+    }
+  ],
+  "claim_boundary": [
+    "Discovery queue schedules validation only; it must not update runtime defaults.",
+    "Rejected skills are skipped until the taskset or candidate source changes."
+  ]
+}

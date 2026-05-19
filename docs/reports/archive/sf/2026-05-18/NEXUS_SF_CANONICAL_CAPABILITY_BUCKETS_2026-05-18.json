@@ -1,0 +1,2859 @@
+{
+  "schema": "nexus.sf_canonical_capability_buckets.v1",
+  "status": "PASS",
+  "summary": {
+    "canonical_skill_count": 158,
+    "capability_bucket_count": 33,
+    "capabilities_with_candidates": 33,
+    "capabilities_without_candidates": 0,
+    "safe_delete_excluded_count": 0,
+    "safe_ignore_excluded_count": 0
+  },
+  "missing_capabilities": [],
+  "capability_buckets": [
+    {
+      "capability_id": "direct_master_loop",
+      "group": "primary_execution",
+      "pillar": "artifact",
+      "candidate_count": 9,
+      "top_candidates": [
+        {
+          "identity_id": "104c3ce8267b4affa7b6da04",
+          "skill_id": "sf2-direct_master_loop-route-fit-spec",
+          "skill_path": "/Users/jameschen/Workspace/nexus/.agents/skills/sf2/sf2-direct_master_loop-route-fit-spec/SKILL.md",
+          "sha256": "186201698442e5678cdd7fa8b4b785818cb7df450072dbf948a5c49098661cfc",
+          "source_status": "nexus_repo_local",
+          "source_priority": 100,
+          "runtime_eligible": false,
+          "ablation_eligible": true,
+          "confidence": "high",
+          "score": 13,
+          "reasons": [
+            "capability_id_match:direct_master_loop",
+            "route_keyword_score:1"
+          ]
+        },
+        {
+          "identity_id": "e4db37751731641527e34517",
+          "skill_id": "nexus-goal-closure-executor",
+          "skill_path": "/Users/jameschen/Workspace/nexus/.agents/skills/nexus-goal-closure-executor/SKILL.md",
+          "sha256": "875556e9bbc2ffae146eff45837eca37c28a5fe9900d5cc71e7a6f5553f4dc3d",
+          "source_status": "nexus_repo_local",
+          "source_priority": 100,
+          "runtime_eligible": true,
+          "ablation_eligible": true,
+          "confidence": "low",
+          "score": 2,
+          "reasons": [
+            "route_keyword_score:2"
+          ]
+        },
+        {
+          "identity_id": "240e8ba11963fe5a953a0e03",
+          "skill_id": "subagent-driven-development",
+          "skill_path": "/Users/jameschen/Workspace/hermes-agent/skills/software-development/subagent-driven-development/SKILL.md",
+          "sha256": "3fe606f9b2f5127905e06812bbff2b8708a5b0e66a8330207ce3546792b33102",
+          "source_status": "hermes_reference",
+          "source_priority": 60,
+          "runtime_eligible": false,
+          "ablation_eligible": true,
+          "confidence": "low",
+          "score": 2,
+          "reasons": [
+            "route_keyword_score:2"
+          ]
+        },
+        {
+          "identity_id": "0e81723c69e62f09698d8476",
+          "skill_id": "comfyui",
+          "skill_path": "/Users/jameschen/Workspace/hermes-agent/skills/creative/comfyui/SKILL.md",
+          "sha256": "dc23dc22f1d9f0d97fdd45af260e981ea101371d3fe9d6e6dfd21424bf65b1cb",
+          "source_status": "hermes_reference",
+          "source_priority": 60,
+          "runtime_eligible": false,
+          "ablation_eligible": true,
+          "confidence": "low",
+          "score": 1,
+          "reasons": [
+            "route_keyword_score:1"
+          ]
+        },
+        {
+          "identity_id": "ddb95748a7ff2ea763d0da37",
+          "skill_id": "touchdesigner-mcp",
+          "skill_path": "/Users/jameschen/Workspace/hermes-agent/skills/creative/touchdesigner-mcp/SKILL.md",
+          "sha256": "70a4217786c49122b76f2247fe63b18a61f4a0feaf18f4a4b5d176f2125b3641",
+          "source_status": "hermes_reference",
+          "source_priority": 60,
+          "runtime_eligible": false,
+          "ablation_eligible": true,
+          "confidence": "low",
+          "score": 1,
+          "reasons": [
+            "route_keyword_score:1"
+          ]
+        },
+        {
+          "identity_id": "2afdd894801cef61eb8be751",
+          "skill_id": "youtube-content",
+          "skill_path": "/Users/jameschen/Workspace/hermes-agent/skills/media/youtube-content/SKILL.md",
+          "sha256": "f6e573f84f3f62dadaa0839491d1558071b6e6da9db9878e7c765fe1311c66be",
+          "source_status": "hermes_reference",
+          "source_priority": 60,
+          "runtime_eligible": false,
+          "ablation_eligible": true,
+          "confidence": "low",
+          "score": 1,
+          "reasons": [
+            "route_keyword_score:1"
+          ]
+        },
+        {
+          "identity_id": "d062ee4094baaa51629e3489",
+          "skill_id": "incremental-implementation",
+          "skill_path": "/Users/jameschen/Workspace/skills_audit/skills/incremental-implementation/SKILL.md",
+          "sha256": "7ec8f20fb9b9b44370aea0cb1f4a1bf260f320e5f4f157017e87e0d4b311a15f",
+          "source_status": "audit_reference",
+          "source_priority": 55,
+          "runtime_eligible": false,
+          "ablation_eligible": true,
+          "confidence": "low",
+          "score": 1,
+          "reasons": [
+            "route_keyword_score:1"
+          ]
+        },
+        {
+          "identity_id": "2dcad9f7b0ee8ae5bcaa4aa3",
+          "skill_id": "planning-and-task-breakdown",
+          "skill_path": "/Users/jameschen/Workspace/skills_audit/skills/planning-and-task-breakdown/SKILL.md",
+          "sha256": "d9dc9a1bea50a0bb2b5c51ed59833b65969b5b0bda2c8dacefb5560275443a35",
+          "source_status": "audit_reference",
+          "source_priority": 55,
+          "runtime_eligible": false,
+          "ablation_eligible": true,
+          "confidence": "low",
+          "score": 1,
+          "reasons": [
+            "route_keyword_score:1"
+          ]
+        },
+        {
+          "identity_id": "a33a0ebea194dd9b17a58f67",
+          "skill_id": "using-agent-skills",
+          "skill_path": "/Users/jameschen/Workspace/skills_audit/skills/using-agent-skills/SKILL.md",
+          "sha256": "3a5ccff2035aed8566b73e7b84bd87e3244f6d74ec36e8843770e46ce29318e9",
+          "source_status": "audit_reference",
+          "source_priority": 55,
+          "runtime_eligible": false,
+          "ablation_eligible": true,
+          "confidence": "low",
+          "score": 1,
+          "reasons": [
+            "route_keyword_score:1"
+          ]
+        }
+      ]
+    },
+    {
+      "capability_id": "repair_loop",
+      "group": "primary_execution",
+      "pillar": "artifact",
+      "candidate_count": 20,
+      "top_candidates": [
+        {
+          "identity_id": "131534cd50b055a1d68050a2",
+          "skill_id": "tdd",
+          "skill_path": "/Users/jameschen/Workspace/nexus/.agents/skills/tdd/SKILL.md",
+          "sha256": "af059705061156fd4845ddbb736fe92b564118ac5f03551e09ef9e8f6d970638",
+          "source_status": "nexus_repo_local",
+          "source_priority": 100,
+          "runtime_eligible": true,
+          "ablation_eligible": true,
+          "confidence": "medium",
+          "score": 4,
+          "reasons": [
+            "route_keyword_score:4"
+          ]
+        },
+        {
+          "identity_id": "4d88139028d09fbdf7a8b00a",
+          "skill_id": "diagnose",
+          "skill_path": "/Users/jameschen/Workspace/nexus/.agents/skills/diagnose/SKILL.md",
+          "sha256": "28886402bbfa0470248086eab9106a103b964b76ae9496e63ff0c8a6761b6d13",
+          "source_status": "nexus_repo_local",
+          "source_priority": 100,
+          "runtime_eligible": true,
+          "ablation_eligible": true,
+          "confidence": "medium",
+          "score": 3,
+          "reasons": [
+            "route_keyword_score:3"
+          ]
+        },
+        {
+          "identity_id": "28ad53aa7397a491a1309d7e",
+          "skill_id": "test-driven-development",
+          "skill_path": "/Users/jameschen/Workspace/hermes-agent/skills/software-development/test-driven-development/SKILL.md",
+          "sha256": "6896c8f090b4bf758ddfc92c50f383da73bd8672cc39359ecaec083ec58999eb",
+          "source_status": "hermes_reference",
+          "source_priority": 60,
+          "runtime_eligible": false,
+          "ablation_eligible": true,
+          "confidence": "medium",
+          "score": 3,
+          "reasons": [
+            "route_keyword_score:3"
+          ]
+        },
+        {
+          "identity_id": "cb704c151268daecb588dda7",
+          "skill_id": "code-review-and-quality",
+          "skill_path": "/Users/jameschen/Workspace/skills_audit/skills/code-review-and-quality/SKILL.md",
+          "sha256": "e25261c399aceeafb656476d9a3c41161e3a4dcc64f5f46bfd847e5cdbed5662",
+          "source_status": "audit_reference",
+          "source_priority": 55,
+          "runtime_eligible": false,
+          "ablation_eligible": true,
+          "confidence": "medium",
+          "score": 3,
+          "reasons": [
+            "route_keyword_score:3"
+          ]
+        },
+        {
+          "identity_id": "d516578defef6841bba5c65a",
+          "skill_id": "debugging-hermes-tui-commands",
+          "skill_path": "/Users/jameschen/Workspace/hermes-agent/skills/software-development/debugging-hermes-tui-commands/SKILL.md",
+          "sha256": "55d5811c0b2d872dc59d87432720a113150dbbce2872524a36b3860a8967095d",
+          "source_status": "hermes_reference",
+          "source_priority": 60,
+          "runtime_eligible": false,
+          "ablation_eligible": true,
+          "confidence": "low",
+          "score": 2,
+          "reasons": [
+            "route_keyword_score:2"
+          ]
+        },
+        {
+          "identity_id": "cd3e7a2a50a73610cb3aed8b",
+          "skill_id": "python-debugpy",
+          "skill_path": "/Users/jameschen/Workspace/hermes-agent/skills/software-development/python-debugpy/SKILL.md",
+          "sha256": "ce7e38367ea54fb86e32d41be2fb3682482b7e3d748316cb666b3d4e3ca51a40",
+          "source_status": "hermes_reference",
+          "source_priority": 60,
+          "runtime_eligible": false,
+          "ablation_eligible": true,
+          "confidence": "low",
+          "score": 2,
+          "reasons": [
+            "route_keyword_score:2"
+          ]
+        },
+        {
+          "identity_id": "ea221eb3ca2a849b9fe8a6ce",
+          "skill_id": "grill-me",
+          "skill_path": "/Users/jameschen/Workspace/nexus/.agents/skills/grill-me/SKILL.md",
+          "sha256": "74147eb6010a65957efef2b9e0f0b3ff935c1def7fc117697151b1d0f3610556",
+          "source_status": "nexus_repo_local",
+          "source_priority": 100,
+          "runtime_eligible": true,
+          "ablation_eligible": true,
+          "confidence": "low",
+          "score": 1,
+          "reasons": [
+            "route_keyword_score:1"
+          ]
+        },
+        {
+          "identity_id": "c997f6ef6fcb66e2ea98195f",
+          "skill_id": "grill-with-docs",
+          "skill_path": "/Users/jameschen/Workspace/nexus/.agents/skills/grill-with-docs/SKILL.md",
+          "sha256": "c7176600a8bffc9f359102cb041b6686387618b8e1434ba484dd708d45df6d5e",
+          "source_status": "nexus_repo_local",
+          "source_priority": 100,
+          "runtime_eligible": true,
+          "ablation_eligible": true,
+          "confidence": "low",
+          "score": 1,
+          "reasons": [
+            "route_keyword_score:1"
+          ]
+        },
+        {
+          "identity_id": "1be51f5aa8d613c24e239705",
+          "skill_id": "nexus-capability-upgrade",
+          "skill_path": "/Users/jameschen/Workspace/nexus/.agents/skills/nexus-capability-upgrade/SKILL.md",
+          "sha256": "f1f8a77165a7e71104de25664dce23c95b7a6b817d4a888d65fbeeaa3a5e36f4",
+          "source_status": "nexus_repo_local",
+          "source_priority": 100,
+          "runtime_eligible": true,
+          "ablation_eligible": true,
+          "confidence": "low",
+          "score": 1,
+          "reasons": [
+            "route_keyword_score:1"
+          ]
+        },
+        {
+          "identity_id": "0fde9eb56de3da366a709073",
+          "skill_id": "nexus-root-cause-probe",
+          "skill_path": "/Users/jameschen/Workspace/nexus/.agents/skills/nexus-root-cause-probe/SKILL.md",
+          "sha256": "fcf80a7f615ea0d01c9ba29f0953e91a9378441846a348fed918860a498ab0c9",
+          "source_status": "nexus_repo_local",
+          "source_priority": 100,
+          "runtime_eligible": true,
+          "ablation_eligible": true,
+          "confidence": "low",
+          "score": 1,
+          "reasons": [
+            "route_keyword_score:1"
+          ]
+        },
+        {
+          "identity_id": "ef9d3260abf68228166f4677",
+          "skill_id": "setup-matt-pocock-skills",
+          "skill_path": "/Users/jameschen/Workspace/nexus/.agents/skills/setup-matt-pocock-skills/SKILL.md",
+          "sha256": "c778d4e3d86ecc9125c357279a86780657b5db23110e1f7acf4f46d2441e7204",
+          "source_status": "nexus_repo_local",
+          "source_priority": 100,
+          "runtime_eligible": true,
+          "ablation_eligible": true,
+          "confidence": "low",
+          "score": 1,
+          "reasons": [
+            "route_keyword_score:1"
+          ]
+        },
+        {
+          "identity_id": "35a8eba0019ad98ca3280aa1",
+          "skill_id": "auto-gen-4907",
+          "skill_path": "/Users/jameschen/Workspace/nexus/skills/auto-gen-4907/SKILL.md",
+          "sha256": "57a7834bf5f3d5dde2ca18c0b3a7c23ed21c7b3c5c18678bf9140b27691981ff",
+          "source_status": "nexus_workspace_skills",
+          "source_priority": 90,
+          "runtime_eligible": false,
+          "ablation_eligible": true,
+          "confidence": "low",
+          "score": 1,
+          "reasons": [
+            "route_keyword_score:1"
+          ]
+        }
+      ]
+    },
+    {
+      "capability_id": "hyper_sprint",
+      "group": "primary_execution",
+      "pillar": "belief",
+      "candidate_count": 1,
+      "top_candidates": [
+        {
+          "identity_id": "e4727ff1be14325640ccef34",
+          "skill_id": "sf2-hyper_sprint-route-fit-spec",
+          "skill_path": "/Users/jameschen/Workspace/nexus/.agents/skills/sf2/sf2-hyper_sprint-route-fit-spec/SKILL.md",
+          "sha256": "01cf5927218faa0b7deaa048311d9680ea4f70b35d352da7daa7044044801df7",
+          "source_status": "nexus_repo_local",
+          "source_priority": 100,
+          "runtime_eligible": false,
+          "ablation_eligible": true,
+          "confidence": "high",
+          "score": 14,
+          "reasons": [
+            "capability_id_match:hyper_sprint",
+            "route_keyword_score:2"
+          ]
+        }
+      ]
+    },
+    {
+      "capability_id": "nightshift",
+      "group": "primary_execution",
+      "pillar": "memory",
+      "candidate_count": 2,
+      "top_candidates": [
+        {
+          "identity_id": "74f201847cc96b58c7d5df59",
+          "skill_id": "sf2-nightshift-route-fit-spec",
+          "skill_path": "/Users/jameschen/Workspace/nexus/.agents/skills/sf2/sf2-nightshift-route-fit-spec/SKILL.md",
+          "sha256": "70e794b11be546dbd911f572d4b9d20311bf79a12aff8e72fa46837eb6204d18",
+          "source_status": "nexus_repo_local",
+          "source_priority": 100,
+          "runtime_eligible": false,
+          "ablation_eligible": true,
+          "confidence": "high",
+          "score": 13,
+          "reasons": [
+            "capability_id_match:nightshift",
+            "route_keyword_score:1"
+          ]
+        },
+        {
+          "identity_id": "1c85865c6d47c894b46be2cd",
+          "skill_id": "debugging-and-error-recovery",
+          "skill_path": "/Users/jameschen/Workspace/skills_audit/skills/debugging-and-error-recovery/SKILL.md",
+          "sha256": "2539c0078466755c192123c34758aa432da5d29529340037113eeaecb6647b0e",
+          "source_status": "audit_reference",
+          "source_priority": 55,
+          "runtime_eligible": false,
+          "ablation_eligible": true,
+          "confidence": "low",
+          "score": 1,
+          "reasons": [
+            "route_keyword_score:1"
+          ]
+        }
+      ]
+    },
+    {
+      "capability_id": "codeintel",
+      "group": "scout_context",
+      "pillar": "artifact",
+      "candidate_count": 10,
+      "top_candidates": [
+        {
+          "identity_id": "c8faa203377ffeecb82cb394",
+          "skill_id": "sf2-codeintel-route-fit-spec",
+          "skill_path": "/Users/jameschen/Workspace/nexus/.agents/skills/sf2/sf2-codeintel-route-fit-spec/SKILL.md",
+          "sha256": "88ce27abbba6158ff037aa43e4d84514077590327cf84707746057377fa9978e",
+          "source_status": "nexus_repo_local",
+          "source_priority": 100,
+          "runtime_eligible": false,
+          "ablation_eligible": true,
+          "confidence": "high",
+          "score": 13,
+          "reasons": [
+            "capability_id_match:codeintel",
+            "route_keyword_score:1"
+          ]
+        },
+        {
+          "identity_id": "2c539f642e4747c359d43165",
+          "skill_id": "api-and-interface-design",
+          "skill_path": "/Users/jameschen/Workspace/skills_audit/skills/api-and-interface-design/SKILL.md",
+          "sha256": "293db2903b41316a5109a1e0ce3e1740eeafae31735bc1f9143dafbfd1187363",
+          "source_status": "audit_reference",
+          "source_priority": 55,
+          "runtime_eligible": false,
+          "ablation_eligible": true,
+          "confidence": "low",
+          "score": 2,
+          "reasons": [
+            "route_keyword_score:2"
+          ]
+        },
+        {
+          "identity_id": "aef87220ab5316013e428719",
+          "skill_id": "improve-codebase-architecture",
+          "skill_path": "/Users/jameschen/Workspace/nexus/.agents/skills/improve-codebase-architecture/SKILL.md",
+          "sha256": "9e9b617b1c70d390e37dbfd1c031c11b3de850e2e3d01c4a2c2888bdb386a247",
+          "source_status": "nexus_repo_local",
+          "source_priority": 100,
+          "runtime_eligible": true,
+          "ablation_eligible": true,
+          "confidence": "low",
+          "score": 1,
+          "reasons": [
+            "route_keyword_score:1"
+          ]
+        },
+        {
+          "identity_id": "ef9d3260abf68228166f4677",
+          "skill_id": "setup-matt-pocock-skills",
+          "skill_path": "/Users/jameschen/Workspace/nexus/.agents/skills/setup-matt-pocock-skills/SKILL.md",
+          "sha256": "c778d4e3d86ecc9125c357279a86780657b5db23110e1f7acf4f46d2441e7204",
+          "source_status": "nexus_repo_local",
+          "source_priority": 100,
+          "runtime_eligible": true,
+          "ablation_eligible": true,
+          "confidence": "low",
+          "score": 1,
+          "reasons": [
+            "route_keyword_score:1"
+          ]
+        },
+        {
+          "identity_id": "6d2dfe8f142f7be603c0e62c",
+          "skill_id": "airtable",
+          "skill_path": "/Users/jameschen/Workspace/hermes-agent/skills/productivity/airtable/SKILL.md",
+          "sha256": "537d440df7f23c58a7c4721dadd29636bab368cddb1e322863b611288835295a",
+          "source_status": "hermes_reference",
+          "source_priority": 60,
+          "runtime_eligible": false,
+          "ablation_eligible": true,
+          "confidence": "low",
+          "score": 1,
+          "reasons": [
+            "route_keyword_score:1"
+          ]
+        },
+        {
+          "identity_id": "0811b9a00dedcde48d732775",
+          "skill_id": "architecture-diagram",
+          "skill_path": "/Users/jameschen/Workspace/hermes-agent/skills/creative/architecture-diagram/SKILL.md",
+          "sha256": "0e7e2736aafe052e409c2ad27863d51ef3007c116711e584033787ccb5d99d3f",
+          "source_status": "hermes_reference",
+          "source_priority": 60,
+          "runtime_eligible": false,
+          "ablation_eligible": true,
+          "confidence": "low",
+          "score": 1,
+          "reasons": [
+            "route_keyword_score:1"
+          ]
+        },
+        {
+          "identity_id": "0e81723c69e62f09698d8476",
+          "skill_id": "comfyui",
+          "skill_path": "/Users/jameschen/Workspace/hermes-agent/skills/creative/comfyui/SKILL.md",
+          "sha256": "dc23dc22f1d9f0d97fdd45af260e981ea101371d3fe9d6e6dfd21424bf65b1cb",
+          "source_status": "hermes_reference",
+          "source_priority": 60,
+          "runtime_eligible": false,
+          "ablation_eligible": true,
+          "confidence": "low",
+          "score": 1,
+          "reasons": [
+            "route_keyword_score:1"
+          ]
+        },
+        {
+          "identity_id": "2e2a40b2fe8546d5bf41a866",
+          "skill_id": "notion",
+          "skill_path": "/Users/jameschen/Workspace/hermes-agent/skills/productivity/notion/SKILL.md",
+          "sha256": "4c6f884920ded2956b7de3a37fe57447d84298c604576aeaffedbbbd322f6b6f",
+          "source_status": "hermes_reference",
+          "source_priority": 60,
+          "runtime_eligible": false,
+          "ablation_eligible": true,
+          "confidence": "low",
+          "score": 1,
+          "reasons": [
+            "route_keyword_score:1"
+          ]
+        },
+        {
+          "identity_id": "a320c9c3c59ac506b27d1d18",
+          "skill_id": "serving-llms-vllm",
+          "skill_path": "/Users/jameschen/Workspace/hermes-agent/skills/mlops/inference/vllm/SKILL.md",
+          "sha256": "ab72192b7aee4e6d5db617a286ef2733911eb4f38313f67e1d0fe9cdba69fb3e",
+          "source_status": "hermes_reference",
+          "source_priority": 60,
+          "runtime_eligible": false,
+          "ablation_eligible": true,
+          "confidence": "low",
+          "score": 1,
+          "reasons": [
+            "route_keyword_score:1"
+          ]
+        },
+        {
+          "identity_id": "35593e19d526bb9e3e453751",
+          "skill_id": "xurl",
+          "skill_path": "/Users/jameschen/Workspace/hermes-agent/skills/social-media/xurl/SKILL.md",
+          "sha256": "46a50c6f6d3fd233d5eaa8af829d5f78f81ad97472571fde7f233e069485a611",
+          "source_status": "hermes_reference",
+          "source_priority": 60,
+          "runtime_eligible": false,
+          "ablation_eligible": true,
+          "confidence": "low",
+          "score": 1,
+          "reasons": [
+            "route_keyword_score:1"
+          ]
+        }
+      ]
+    },
+    {
+      "capability_id": "research",
+      "group": "scout_context",
+      "pillar": "lancedb",
+      "candidate_count": 20,
+      "top_candidates": [
+        {
+          "identity_id": "d79518d14ca4f9c9859f2bc1",
+          "skill_id": "research-citation-chain-verifier",
+          "skill_path": "/Users/jameschen/Workspace/nexus/.agents/skills/research-citation-chain-verifier/SKILL.md",
+          "sha256": "8a3d1e0a8e6c79aa0cec10463eb37ed4bcfb44dac9d6de748aed02fe0e918418",
+          "source_status": "nexus_repo_local",
+          "source_priority": 100,
+          "runtime_eligible": true,
+          "ablation_eligible": true,
+          "confidence": "high",
+          "score": 15,
+          "reasons": [
+            "capability_id_match:research",
+            "route_keyword_score:3"
+          ]
+        },
+        {
+          "identity_id": "a3073e950cc3a114021c3ff1",
+          "skill_id": "arxiv",
+          "skill_path": "/Users/jameschen/Workspace/hermes-agent/skills/research/arxiv/SKILL.md",
+          "sha256": "2a6073a1ad08823dbdf26be64440b54155298db38fdee52c7b0a5d1cd0cfb05d",
+          "source_status": "hermes_reference",
+          "source_priority": 60,
+          "runtime_eligible": false,
+          "ablation_eligible": true,
+          "confidence": "high",
+          "score": 15,
+          "reasons": [
+            "capability_id_match:research",
+            "route_keyword_score:3"
+          ]
+        },
+        {
+          "identity_id": "fc4767c40e76fd46a1026994",
+          "skill_id": "research-source-conflict-resolver",
+          "skill_path": "/Users/jameschen/Workspace/nexus/.agents/skills/research-source-conflict-resolver/SKILL.md",
+          "sha256": "b1bac25d28af23a65afaddb6647580f89c66dadafdac1803e7aac24fca3e00d4",
+          "source_status": "nexus_repo_local",
+          "source_priority": 100,
+          "runtime_eligible": true,
+          "ablation_eligible": true,
+          "confidence": "high",
+          "score": 14,
+          "reasons": [
+            "capability_id_match:research",
+            "route_keyword_score:2"
+          ]
+        },
+        {
+          "identity_id": "0d737257effb37e72b288c62",
+          "skill_id": "research-source-validation-auditor",
+          "skill_path": "/Users/jameschen/Workspace/nexus/.agents/skills/research-source-validation-auditor/SKILL.md",
+          "sha256": "cbf5b0de8713f4c155902db66307d7abaf77384bea24de8cd80013fe3feb47db",
+          "source_status": "nexus_repo_local",
+          "source_priority": 100,
+          "runtime_eligible": true,
+          "ablation_eligible": true,
+          "confidence": "high",
+          "score": 14,
+          "reasons": [
+            "capability_id_match:research",
+            "route_keyword_score:2"
+          ]
+        },
+        {
+          "identity_id": "f7b2268a10a47b2f0356ff33",
+          "skill_id": "research-paper-writing",
+          "skill_path": "/Users/jameschen/Workspace/hermes-agent/skills/research/research-paper-writing/SKILL.md",
+          "sha256": "5bc92cec8357a19d71b1c10c5590ab605e846e4ddd914512511f8281a6053186",
+          "source_status": "hermes_reference",
+          "source_priority": 60,
+          "runtime_eligible": false,
+          "ablation_eligible": true,
+          "confidence": "high",
+          "score": 14,
+          "reasons": [
+            "capability_id_match:research",
+            "route_keyword_score:2"
+          ]
+        },
+        {
+          "identity_id": "398134bd845ad5315abde4d8",
+          "skill_id": "sf2-research_control_plane-route-fit-spec",
+          "skill_path": "/Users/jameschen/Workspace/nexus/.agents/skills/sf2/sf2-research_control_plane-route-fit-spec/SKILL.md",
+          "sha256": "322bafff2a44613d820415f5aac1ffd43642e3aee6c8540e1aeeea11ff72e699",
+          "source_status": "nexus_repo_local",
+          "source_priority": 100,
+          "runtime_eligible": false,
+          "ablation_eligible": true,
+          "confidence": "high",
+          "score": 13,
+          "reasons": [
+            "capability_id_match:research",
+            "route_keyword_score:1"
+          ]
+        },
+        {
+          "identity_id": "26239b424192d81645136a68",
+          "skill_id": "blogwatcher",
+          "skill_path": "/Users/jameschen/Workspace/hermes-agent/skills/research/blogwatcher/SKILL.md",
+          "sha256": "b85be5a9b86b90287266dd142a0ae9740be926298fbcb772f56b8a4d6451bb12",
+          "source_status": "hermes_reference",
+          "source_priority": 60,
+          "runtime_eligible": false,
+          "ablation_eligible": true,
+          "confidence": "high",
+          "score": 13,
+          "reasons": [
+            "capability_id_match:research",
+            "route_keyword_score:1"
+          ]
+        },
+        {
+          "identity_id": "5fc05c6c6a725fa67163d955",
+          "skill_id": "dspy",
+          "skill_path": "/Users/jameschen/Workspace/hermes-agent/skills/mlops/research/dspy/SKILL.md",
+          "sha256": "67410a6b216d79eb257eba1c5d0fa945080b98998ffc131e2cf873bee77e3dd0",
+          "source_status": "hermes_reference",
+          "source_priority": 60,
+          "runtime_eligible": false,
+          "ablation_eligible": true,
+          "confidence": "high",
+          "score": 13,
+          "reasons": [
+            "capability_id_match:research",
+            "route_keyword_score:1"
+          ]
+        },
+        {
+          "identity_id": "823280a4569bfc5e76d7cb52",
+          "skill_id": "llm-wiki",
+          "skill_path": "/Users/jameschen/Workspace/hermes-agent/skills/research/llm-wiki/SKILL.md",
+          "sha256": "eb13a2b8c654eeee8bae2d218a8131f53f199065f61c4ac29c18b8b79eb85869",
+          "source_status": "hermes_reference",
+          "source_priority": 60,
+          "runtime_eligible": false,
+          "ablation_eligible": true,
+          "confidence": "high",
+          "score": 13,
+          "reasons": [
+            "capability_id_match:research",
+            "route_keyword_score:1"
+          ]
+        },
+        {
+          "identity_id": "805d6745f5099d8d5a914a68",
+          "skill_id": "polymarket",
+          "skill_path": "/Users/jameschen/Workspace/hermes-agent/skills/research/polymarket/SKILL.md",
+          "sha256": "becfa71e730b482c3f087c4de4071fd25f0feb475aec1293aee0b845c10fa190",
+          "source_status": "hermes_reference",
+          "source_priority": 60,
+          "runtime_eligible": false,
+          "ablation_eligible": true,
+          "confidence": "high",
+          "score": 13,
+          "reasons": [
+            "capability_id_match:research",
+            "route_keyword_score:1"
+          ]
+        },
+        {
+          "identity_id": "982d2abbedb9f33bca273925",
+          "skill_id": "apple-notes",
+          "skill_path": "/Users/jameschen/Workspace/hermes-agent/skills/apple/apple-notes/SKILL.md",
+          "sha256": "c652e01e47938b8ac21c97873e0a14f5f3a773b554bd10737fbfdcc5e5c28d23",
+          "source_status": "hermes_reference",
+          "source_priority": 60,
+          "runtime_eligible": false,
+          "ablation_eligible": true,
+          "confidence": "low",
+          "score": 1,
+          "reasons": [
+            "route_keyword_score:1"
+          ]
+        },
+        {
+          "identity_id": "dd605b131601ba9191116eb5",
+          "skill_id": "dogfood",
+          "skill_path": "/Users/jameschen/Workspace/hermes-agent/skills/dogfood/SKILL.md",
+          "sha256": "36b1a710c61727c2be3c43ba20d68605cfed199afc90e27bde9746f4b80b91dd",
+          "source_status": "hermes_reference",
+          "source_priority": 60,
+          "runtime_eligible": false,
+          "ablation_eligible": true,
+          "confidence": "low",
+          "score": 1,
+          "reasons": [
+            "route_keyword_score:1"
+          ]
+        }
+      ]
+    },
+    {
+      "capability_id": "research_control_plane",
+      "group": "scout_context",
+      "pillar": "claim",
+      "candidate_count": 1,
+      "top_candidates": [
+        {
+          "identity_id": "398134bd845ad5315abde4d8",
+          "skill_id": "sf2-research_control_plane-route-fit-spec",
+          "skill_path": "/Users/jameschen/Workspace/nexus/.agents/skills/sf2/sf2-research_control_plane-route-fit-spec/SKILL.md",
+          "sha256": "322bafff2a44613d820415f5aac1ffd43642e3aee6c8540e1aeeea11ff72e699",
+          "source_status": "nexus_repo_local",
+          "source_priority": 100,
+          "runtime_eligible": false,
+          "ablation_eligible": true,
+          "confidence": "high",
+          "score": 12,
+          "reasons": [
+            "capability_id_match:research_control_plane"
+          ]
+        }
+      ]
+    },
+    {
+      "capability_id": "xray",
+      "group": "scout_context",
+      "pillar": "artifact",
+      "candidate_count": 10,
+      "top_candidates": [
+        {
+          "identity_id": "fb4d3c5e33ee057ad317328a",
+          "skill_id": "sf2-xray-route-fit-spec",
+          "skill_path": "/Users/jameschen/Workspace/nexus/.agents/skills/sf2/sf2-xray-route-fit-spec/SKILL.md",
+          "sha256": "cd3ffe7601700d55461be4eda95af406f2eb19d531dce019b2279e565c1a8e2f",
+          "source_status": "nexus_repo_local",
+          "source_priority": 100,
+          "runtime_eligible": false,
+          "ablation_eligible": true,
+          "confidence": "high",
+          "score": 13,
+          "reasons": [
+            "capability_id_match:xray",
+            "route_keyword_score:1"
+          ]
+        },
+        {
+          "identity_id": "f3061d4fa2bdcc3376fb014f",
+          "skill_id": "systematic-debugging",
+          "skill_path": "/Users/jameschen/Workspace/hermes-agent/skills/software-development/systematic-debugging/SKILL.md",
+          "sha256": "c1d66056ce0b4ec839bb69358c39e73bdde000cf3a99d2f53ab3d7e116f089ef",
+          "source_status": "hermes_reference",
+          "source_priority": 60,
+          "runtime_eligible": false,
+          "ablation_eligible": true,
+          "confidence": "medium",
+          "score": 3,
+          "reasons": [
+            "route_keyword_score:3"
+          ]
+        },
+        {
+          "identity_id": "1c85865c6d47c894b46be2cd",
+          "skill_id": "debugging-and-error-recovery",
+          "skill_path": "/Users/jameschen/Workspace/skills_audit/skills/debugging-and-error-recovery/SKILL.md",
+          "sha256": "2539c0078466755c192123c34758aa432da5d29529340037113eeaecb6647b0e",
+          "source_status": "audit_reference",
+          "source_priority": 55,
+          "runtime_eligible": false,
+          "ablation_eligible": true,
+          "confidence": "medium",
+          "score": 3,
+          "reasons": [
+            "route_keyword_score:3"
+          ]
+        },
+        {
+          "identity_id": "4d88139028d09fbdf7a8b00a",
+          "skill_id": "diagnose",
+          "skill_path": "/Users/jameschen/Workspace/nexus/.agents/skills/diagnose/SKILL.md",
+          "sha256": "28886402bbfa0470248086eab9106a103b964b76ae9496e63ff0c8a6761b6d13",
+          "source_status": "nexus_repo_local",
+          "source_priority": 100,
+          "runtime_eligible": true,
+          "ablation_eligible": true,
+          "confidence": "low",
+          "score": 1,
+          "reasons": [
+            "route_keyword_score:1"
+          ]
+        },
+        {
+          "identity_id": "0fde9eb56de3da366a709073",
+          "skill_id": "nexus-root-cause-probe",
+          "skill_path": "/Users/jameschen/Workspace/nexus/.agents/skills/nexus-root-cause-probe/SKILL.md",
+          "sha256": "fcf80a7f615ea0d01c9ba29f0953e91a9378441846a348fed918860a498ab0c9",
+          "source_status": "nexus_repo_local",
+          "source_priority": 100,
+          "runtime_eligible": true,
+          "ablation_eligible": true,
+          "confidence": "low",
+          "score": 1,
+          "reasons": [
+            "route_keyword_score:1"
+          ]
+        },
+        {
+          "identity_id": "ef9d3260abf68228166f4677",
+          "skill_id": "setup-matt-pocock-skills",
+          "skill_path": "/Users/jameschen/Workspace/nexus/.agents/skills/setup-matt-pocock-skills/SKILL.md",
+          "sha256": "c778d4e3d86ecc9125c357279a86780657b5db23110e1f7acf4f46d2441e7204",
+          "source_status": "nexus_repo_local",
+          "source_priority": 100,
+          "runtime_eligible": true,
+          "ablation_eligible": true,
+          "confidence": "low",
+          "score": 1,
+          "reasons": [
+            "route_keyword_score:1"
+          ]
+        },
+        {
+          "identity_id": "498990435cd7d274fa1b3400",
+          "skill_id": "codebase-inspection",
+          "skill_path": "/Users/jameschen/Workspace/hermes-agent/skills/github/codebase-inspection/SKILL.md",
+          "sha256": "87ddc0578d9bcbc80addb34ca045e4263689873ce02b1b73e3d57275ec6315c6",
+          "source_status": "hermes_reference",
+          "source_priority": 60,
+          "runtime_eligible": false,
+          "ablation_eligible": true,
+          "confidence": "low",
+          "score": 1,
+          "reasons": [
+            "route_keyword_score:1"
+          ]
+        },
+        {
+          "identity_id": "fa74fa5afe3912bc1620da4e",
+          "skill_id": "node-inspect-debugger",
+          "skill_path": "/Users/jameschen/Workspace/hermes-agent/skills/software-development/node-inspect-debugger/SKILL.md",
+          "sha256": "f2f72c0c9e67143effc8cb9871a242309813af72c61b8d62548ae275c86f2d08",
+          "source_status": "hermes_reference",
+          "source_priority": 60,
+          "runtime_eligible": false,
+          "ablation_eligible": true,
+          "confidence": "low",
+          "score": 1,
+          "reasons": [
+            "route_keyword_score:1"
+          ]
+        },
+        {
+          "identity_id": "b63945ea616c1b02010c17cc",
+          "skill_id": "teams-meeting-pipeline",
+          "skill_path": "/Users/jameschen/Workspace/hermes-agent/skills/productivity/teams-meeting-pipeline/SKILL.md",
+          "sha256": "472e8772146f571fadbe3ea27ff71f0be4b0946f8263a7e5419cfee818168591",
+          "source_status": "hermes_reference",
+          "source_priority": 60,
+          "runtime_eligible": false,
+          "ablation_eligible": true,
+          "confidence": "low",
+          "score": 1,
+          "reasons": [
+            "route_keyword_score:1"
+          ]
+        },
+        {
+          "identity_id": "b8ab25ca36404ff36db1169a",
+          "skill_id": "browser-testing-with-devtools",
+          "skill_path": "/Users/jameschen/Workspace/skills_audit/skills/browser-testing-with-devtools/SKILL.md",
+          "sha256": "d50505e232bf61cd51caf6d249a39e14451fea34ce1d5d064d944b6780d4f4e6",
+          "source_status": "audit_reference",
+          "source_priority": 55,
+          "runtime_eligible": false,
+          "ablation_eligible": true,
+          "confidence": "low",
+          "score": 1,
+          "reasons": [
+            "route_keyword_score:1"
+          ]
+        }
+      ]
+    },
+    {
+      "capability_id": "learn_ask",
+      "group": "scout_context",
+      "pillar": "memory",
+      "candidate_count": 4,
+      "top_candidates": [
+        {
+          "identity_id": "1be51f5aa8d613c24e239705",
+          "skill_id": "nexus-capability-upgrade",
+          "skill_path": "/Users/jameschen/Workspace/nexus/.agents/skills/nexus-capability-upgrade/SKILL.md",
+          "sha256": "f1f8a77165a7e71104de25664dce23c95b7a6b817d4a888d65fbeeaa3a5e36f4",
+          "source_status": "nexus_repo_local",
+          "source_priority": 100,
+          "runtime_eligible": true,
+          "ablation_eligible": true,
+          "confidence": "low",
+          "score": 1,
+          "reasons": [
+            "route_keyword_score:1"
+          ]
+        },
+        {
+          "identity_id": "0fde9eb56de3da366a709073",
+          "skill_id": "nexus-root-cause-probe",
+          "skill_path": "/Users/jameschen/Workspace/nexus/.agents/skills/nexus-root-cause-probe/SKILL.md",
+          "sha256": "fcf80a7f615ea0d01c9ba29f0953e91a9378441846a348fed918860a498ab0c9",
+          "source_status": "nexus_repo_local",
+          "source_priority": 100,
+          "runtime_eligible": true,
+          "ablation_eligible": true,
+          "confidence": "low",
+          "score": 1,
+          "reasons": [
+            "route_keyword_score:1"
+          ]
+        },
+        {
+          "identity_id": "0a8c59e3a9102b024a71934c",
+          "skill_id": "baoyu-comic",
+          "skill_path": "/Users/jameschen/Workspace/hermes-agent/skills/creative/baoyu-comic/SKILL.md",
+          "sha256": "39daa86a4c9737a51c2734455a4b27f3fd35eb80ae2a70820093d4354a1e2de2",
+          "source_status": "hermes_reference",
+          "source_priority": 60,
+          "runtime_eligible": false,
+          "ablation_eligible": true,
+          "confidence": "low",
+          "score": 1,
+          "reasons": [
+            "route_keyword_score:1"
+          ]
+        },
+        {
+          "identity_id": "0e004b3c0641dc611d54e2ac",
+          "skill_id": "test-driven-development",
+          "skill_path": "/Users/jameschen/Workspace/skills_audit/skills/test-driven-development/SKILL.md",
+          "sha256": "cb944cba0cd2d98e979408c3e620a06e489bdb742ecc75057491a50757245adc",
+          "source_status": "audit_reference",
+          "source_priority": 55,
+          "runtime_eligible": false,
+          "ablation_eligible": true,
+          "confidence": "low",
+          "score": 1,
+          "reasons": [
+            "route_keyword_score:1"
+          ]
+        }
+      ]
+    },
+    {
+      "capability_id": "lancedb",
+      "group": "scout_context",
+      "pillar": "lancedb",
+      "candidate_count": 3,
+      "top_candidates": [
+        {
+          "identity_id": "40fa3b6424c8ad89cc929476",
+          "skill_id": "sf2-lancedb-route-fit-spec",
+          "skill_path": "/Users/jameschen/Workspace/nexus/.agents/skills/sf2/sf2-lancedb-route-fit-spec/SKILL.md",
+          "sha256": "45abb4d3a9ab5a5351a6d9b96434640d9ebf08c1b57a86494cf29e2958b2733a",
+          "source_status": "nexus_repo_local",
+          "source_priority": 100,
+          "runtime_eligible": false,
+          "ablation_eligible": true,
+          "confidence": "high",
+          "score": 13,
+          "reasons": [
+            "capability_id_match:lancedb",
+            "route_keyword_score:1"
+          ]
+        },
+        {
+          "identity_id": "6e4fcbc3d1875d223c093d5a",
+          "skill_id": "nexus-benchmark-public-report",
+          "skill_path": "/Users/jameschen/Workspace/nexus/.agents/skills/nexus-benchmark-public-report/SKILL.md",
+          "sha256": "6ae2f3dd0bdcd049556127f3e74309d4e393dbe3f4ab176233caf29b3e980fb6",
+          "source_status": "nexus_repo_local",
+          "source_priority": 100,
+          "runtime_eligible": true,
+          "ablation_eligible": true,
+          "confidence": "low",
+          "score": 1,
+          "reasons": [
+            "route_keyword_score:1"
+          ]
+        },
+        {
+          "identity_id": "5fc05c6c6a725fa67163d955",
+          "skill_id": "dspy",
+          "skill_path": "/Users/jameschen/Workspace/hermes-agent/skills/mlops/research/dspy/SKILL.md",
+          "sha256": "67410a6b216d79eb257eba1c5d0fa945080b98998ffc131e2cf873bee77e3dd0",
+          "source_status": "hermes_reference",
+          "source_priority": 60,
+          "runtime_eligible": false,
+          "ablation_eligible": true,
+          "confidence": "low",
+          "score": 1,
+          "reasons": [
+            "route_keyword_score:1"
+          ]
+        }
+      ]
+    },
+    {
+      "capability_id": "memory",
+      "group": "memory_learning",
+      "pillar": "memory",
+      "candidate_count": 3,
+      "top_candidates": [
+        {
+          "identity_id": "e80147ccdfc20d0747e9965e",
+          "skill_id": "sf2-memory-route-fit-spec",
+          "skill_path": "/Users/jameschen/Workspace/nexus/.agents/skills/sf2/sf2-memory-route-fit-spec/SKILL.md",
+          "sha256": "902f3af5cbb35b617dbc259bf3704576bdb63116c5ac844cdf9e1abf85b32a75",
+          "source_status": "nexus_repo_local",
+          "source_priority": 100,
+          "runtime_eligible": false,
+          "ablation_eligible": true,
+          "confidence": "high",
+          "score": 13,
+          "reasons": [
+            "capability_id_match:memory",
+            "route_keyword_score:1"
+          ]
+        },
+        {
+          "identity_id": "231f3aad17f581774ae2b03f",
+          "skill_id": "logmemory",
+          "skill_path": "/Users/jameschen/Workspace/nexus/skills/logmemory/SKILL.md",
+          "sha256": "c481eccc2101064d13e88f90b66066dfc61438a98ffb7eee37b7812263cf0897",
+          "source_status": "nexus_workspace_skills",
+          "source_priority": 90,
+          "runtime_eligible": false,
+          "ablation_eligible": true,
+          "confidence": "high",
+          "score": 12,
+          "reasons": [
+            "capability_id_match:memory"
+          ]
+        },
+        {
+          "identity_id": "1fbc6cce6545c04848e338f3",
+          "skill_id": "obsidian",
+          "skill_path": "/Users/jameschen/Workspace/hermes-agent/skills/note-taking/obsidian/SKILL.md",
+          "sha256": "d2d080f82893dac86190e3885720e27acb6730cbea8bbb1dd7c25aaa53231127",
+          "source_status": "hermes_reference",
+          "source_priority": 60,
+          "runtime_eligible": false,
+          "ablation_eligible": true,
+          "confidence": "low",
+          "score": 1,
+          "reasons": [
+            "route_keyword_score:1"
+          ]
+        }
+      ]
+    },
+    {
+      "capability_id": "learning_closure",
+      "group": "memory_learning",
+      "pillar": "memory",
+      "candidate_count": 1,
+      "top_candidates": [
+        {
+          "identity_id": "dcd8d81c22c0e648112ae7e7",
+          "skill_id": "sf2-learning_closure-route-fit-spec",
+          "skill_path": "/Users/jameschen/Workspace/nexus/.agents/skills/sf2/sf2-learning_closure-route-fit-spec/SKILL.md",
+          "sha256": "965177b51c39c1af1e30f47216e3f36420f619b74ca26094d4b08211a14edfc6",
+          "source_status": "nexus_repo_local",
+          "source_priority": 100,
+          "runtime_eligible": false,
+          "ablation_eligible": true,
+          "confidence": "high",
+          "score": 12,
+          "reasons": [
+            "capability_id_match:learning_closure"
+          ]
+        }
+      ]
+    },
+    {
+      "capability_id": "autoreason",
+      "group": "reasoning_acceleration",
+      "pillar": "belief",
+      "candidate_count": 3,
+      "top_candidates": [
+        {
+          "identity_id": "c91c18d237f24d2903086eb1",
+          "skill_id": "sf2-autoreason-route-fit-spec",
+          "skill_path": "/Users/jameschen/Workspace/nexus/.agents/skills/sf2/sf2-autoreason-route-fit-spec/SKILL.md",
+          "sha256": "2eb7b209a1fd9bda67982c8b6b42da65e2ada8f296371832511bcbfe540c945b",
+          "source_status": "nexus_repo_local",
+          "source_priority": 100,
+          "runtime_eligible": false,
+          "ablation_eligible": true,
+          "confidence": "high",
+          "score": 13,
+          "reasons": [
+            "capability_id_match:autoreason",
+            "route_keyword_score:1"
+          ]
+        },
+        {
+          "identity_id": "6e4fcbc3d1875d223c093d5a",
+          "skill_id": "nexus-benchmark-public-report",
+          "skill_path": "/Users/jameschen/Workspace/nexus/.agents/skills/nexus-benchmark-public-report/SKILL.md",
+          "sha256": "6ae2f3dd0bdcd049556127f3e74309d4e393dbe3f4ab176233caf29b3e980fb6",
+          "source_status": "nexus_repo_local",
+          "source_priority": 100,
+          "runtime_eligible": true,
+          "ablation_eligible": true,
+          "confidence": "low",
+          "score": 1,
+          "reasons": [
+            "route_keyword_score:1"
+          ]
+        },
+        {
+          "identity_id": "fc4767c40e76fd46a1026994",
+          "skill_id": "research-source-conflict-resolver",
+          "skill_path": "/Users/jameschen/Workspace/nexus/.agents/skills/research-source-conflict-resolver/SKILL.md",
+          "sha256": "b1bac25d28af23a65afaddb6647580f89c66dadafdac1803e7aac24fca3e00d4",
+          "source_status": "nexus_repo_local",
+          "source_priority": 100,
+          "runtime_eligible": true,
+          "ablation_eligible": true,
+          "confidence": "low",
+          "score": 1,
+          "reasons": [
+            "route_keyword_score:1"
+          ]
+        }
+      ]
+    },
+    {
+      "capability_id": "ddtree",
+      "group": "reasoning_acceleration",
+      "pillar": "belief",
+      "candidate_count": 2,
+      "top_candidates": [
+        {
+          "identity_id": "06802b2189f103be825bd39d",
+          "skill_id": "sf2-ddtree-route-fit-spec",
+          "skill_path": "/Users/jameschen/Workspace/nexus/.agents/skills/sf2/sf2-ddtree-route-fit-spec/SKILL.md",
+          "sha256": "e212dde0c13b574dd72d013fca8284324d9feba50a5ac871f719a2fcdc0663f6",
+          "source_status": "nexus_repo_local",
+          "source_priority": 100,
+          "runtime_eligible": false,
+          "ablation_eligible": true,
+          "confidence": "high",
+          "score": 13,
+          "reasons": [
+            "capability_id_match:ddtree",
+            "route_keyword_score:1"
+          ]
+        },
+        {
+          "identity_id": "ea221eb3ca2a849b9fe8a6ce",
+          "skill_id": "grill-me",
+          "skill_path": "/Users/jameschen/Workspace/nexus/.agents/skills/grill-me/SKILL.md",
+          "sha256": "74147eb6010a65957efef2b9e0f0b3ff935c1def7fc117697151b1d0f3610556",
+          "source_status": "nexus_repo_local",
+          "source_priority": 100,
+          "runtime_eligible": true,
+          "ablation_eligible": true,
+          "confidence": "medium",
+          "score": 3,
+          "reasons": [
+            "route_keyword_score:3"
+          ]
+        }
+      ]
+    },
+    {
+      "capability_id": "belief",
+      "group": "reasoning_acceleration",
+      "pillar": "belief",
+      "candidate_count": 4,
+      "top_candidates": [
+        {
+          "identity_id": "e78d2c139d46551fd63c78e6",
+          "skill_id": "sf2-belief-route-fit-spec",
+          "skill_path": "/Users/jameschen/Workspace/nexus/.agents/skills/sf2/sf2-belief-route-fit-spec/SKILL.md",
+          "sha256": "af1c7646569d8dea802760f06757ba1968c511b475962e23e6e2e3a80cf7d95f",
+          "source_status": "nexus_repo_local",
+          "source_priority": 100,
+          "runtime_eligible": false,
+          "ablation_eligible": true,
+          "confidence": "high",
+          "score": 13,
+          "reasons": [
+            "capability_id_match:belief",
+            "route_keyword_score:1"
+          ]
+        },
+        {
+          "identity_id": "e4db37751731641527e34517",
+          "skill_id": "nexus-goal-closure-executor",
+          "skill_path": "/Users/jameschen/Workspace/nexus/.agents/skills/nexus-goal-closure-executor/SKILL.md",
+          "sha256": "875556e9bbc2ffae146eff45837eca37c28a5fe9900d5cc71e7a6f5553f4dc3d",
+          "source_status": "nexus_repo_local",
+          "source_priority": 100,
+          "runtime_eligible": true,
+          "ablation_eligible": true,
+          "confidence": "low",
+          "score": 1,
+          "reasons": [
+            "route_keyword_score:1"
+          ]
+        },
+        {
+          "identity_id": "fc4767c40e76fd46a1026994",
+          "skill_id": "research-source-conflict-resolver",
+          "skill_path": "/Users/jameschen/Workspace/nexus/.agents/skills/research-source-conflict-resolver/SKILL.md",
+          "sha256": "b1bac25d28af23a65afaddb6647580f89c66dadafdac1803e7aac24fca3e00d4",
+          "source_status": "nexus_repo_local",
+          "source_priority": 100,
+          "runtime_eligible": true,
+          "ablation_eligible": true,
+          "confidence": "low",
+          "score": 1,
+          "reasons": [
+            "route_keyword_score:1"
+          ]
+        },
+        {
+          "identity_id": "ef48e978a0f00c87417c7ae9",
+          "skill_id": "shipping-and-launch",
+          "skill_path": "/Users/jameschen/Workspace/skills_audit/skills/shipping-and-launch/SKILL.md",
+          "sha256": "abfc1869f7d5150713503a86b3c4c61bab715fe5e5e213244e3c4b65e42f7517",
+          "source_status": "audit_reference",
+          "source_priority": 55,
+          "runtime_eligible": false,
+          "ablation_eligible": true,
+          "confidence": "low",
+          "score": 1,
+          "reasons": [
+            "route_keyword_score:1"
+          ]
+        }
+      ]
+    },
+    {
+      "capability_id": "autonomic_router",
+      "group": "reasoning_acceleration",
+      "pillar": "belief",
+      "candidate_count": 23,
+      "top_candidates": [
+        {
+          "identity_id": "b9d649d12324d8fb67331216",
+          "skill_id": "sf2-autonomic_router-route-fit-spec",
+          "skill_path": "/Users/jameschen/Workspace/nexus/.agents/skills/sf2/sf2-autonomic_router-route-fit-spec/SKILL.md",
+          "sha256": "3b69e40920774cffcec2af303760f35ffd6c73e3fcb7e82e3698fb0537de3a5a",
+          "source_status": "nexus_repo_local",
+          "source_priority": 100,
+          "runtime_eligible": false,
+          "ablation_eligible": true,
+          "confidence": "high",
+          "score": 15,
+          "reasons": [
+            "capability_id_match:autonomic_router",
+            "route_keyword_score:3"
+          ]
+        },
+        {
+          "identity_id": "e52f223944c72783c43f7e72",
+          "skill_id": "sf2-policy_capability_gate-route-fit-spec",
+          "skill_path": "/Users/jameschen/Workspace/nexus/.agents/skills/sf2/sf2-policy_capability_gate-route-fit-spec/SKILL.md",
+          "sha256": "113916c7e99c1a280db80e875b2f85a75e938e710b60c96647adf5c765d3b73c",
+          "source_status": "nexus_repo_local",
+          "source_priority": 100,
+          "runtime_eligible": false,
+          "ablation_eligible": true,
+          "confidence": "low",
+          "score": 2,
+          "reasons": [
+            "route_keyword_score:2"
+          ]
+        },
+        {
+          "identity_id": "c91c18d237f24d2903086eb1",
+          "skill_id": "sf2-autoreason-route-fit-spec",
+          "skill_path": "/Users/jameschen/Workspace/nexus/.agents/skills/sf2/sf2-autoreason-route-fit-spec/SKILL.md",
+          "sha256": "2eb7b209a1fd9bda67982c8b6b42da65e2ada8f296371832511bcbfe540c945b",
+          "source_status": "nexus_repo_local",
+          "source_priority": 100,
+          "runtime_eligible": false,
+          "ablation_eligible": true,
+          "confidence": "low",
+          "score": 1,
+          "reasons": [
+            "route_keyword_score:1"
+          ]
+        },
+        {
+          "identity_id": "e78d2c139d46551fd63c78e6",
+          "skill_id": "sf2-belief-route-fit-spec",
+          "skill_path": "/Users/jameschen/Workspace/nexus/.agents/skills/sf2/sf2-belief-route-fit-spec/SKILL.md",
+          "sha256": "af1c7646569d8dea802760f06757ba1968c511b475962e23e6e2e3a80cf7d95f",
+          "source_status": "nexus_repo_local",
+          "source_priority": 100,
+          "runtime_eligible": false,
+          "ablation_eligible": true,
+          "confidence": "low",
+          "score": 1,
+          "reasons": [
+            "route_keyword_score:1"
+          ]
+        },
+        {
+          "identity_id": "c8faa203377ffeecb82cb394",
+          "skill_id": "sf2-codeintel-route-fit-spec",
+          "skill_path": "/Users/jameschen/Workspace/nexus/.agents/skills/sf2/sf2-codeintel-route-fit-spec/SKILL.md",
+          "sha256": "88ce27abbba6158ff037aa43e4d84514077590327cf84707746057377fa9978e",
+          "source_status": "nexus_repo_local",
+          "source_priority": 100,
+          "runtime_eligible": false,
+          "ablation_eligible": true,
+          "confidence": "low",
+          "score": 1,
+          "reasons": [
+            "route_keyword_score:1"
+          ]
+        },
+        {
+          "identity_id": "06802b2189f103be825bd39d",
+          "skill_id": "sf2-ddtree-route-fit-spec",
+          "skill_path": "/Users/jameschen/Workspace/nexus/.agents/skills/sf2/sf2-ddtree-route-fit-spec/SKILL.md",
+          "sha256": "e212dde0c13b574dd72d013fca8284324d9feba50a5ac871f719a2fcdc0663f6",
+          "source_status": "nexus_repo_local",
+          "source_priority": 100,
+          "runtime_eligible": false,
+          "ablation_eligible": true,
+          "confidence": "low",
+          "score": 1,
+          "reasons": [
+            "route_keyword_score:1"
+          ]
+        },
+        {
+          "identity_id": "51d70a9231a70f9d527fd043",
+          "skill_id": "sf2-delivery_acceptance_gate-route-fit-spec",
+          "skill_path": "/Users/jameschen/Workspace/nexus/.agents/skills/sf2/sf2-delivery_acceptance_gate-route-fit-spec/SKILL.md",
+          "sha256": "c6c2b8fd229245d5f4518daf69b25035e27c1e74e6dc5e02a31fc3b7825c32ec",
+          "source_status": "nexus_repo_local",
+          "source_priority": 100,
+          "runtime_eligible": false,
+          "ablation_eligible": true,
+          "confidence": "low",
+          "score": 1,
+          "reasons": [
+            "route_keyword_score:1"
+          ]
+        },
+        {
+          "identity_id": "104c3ce8267b4affa7b6da04",
+          "skill_id": "sf2-direct_master_loop-route-fit-spec",
+          "skill_path": "/Users/jameschen/Workspace/nexus/.agents/skills/sf2/sf2-direct_master_loop-route-fit-spec/SKILL.md",
+          "sha256": "186201698442e5678cdd7fa8b4b785818cb7df450072dbf948a5c49098661cfc",
+          "source_status": "nexus_repo_local",
+          "source_priority": 100,
+          "runtime_eligible": false,
+          "ablation_eligible": true,
+          "confidence": "low",
+          "score": 1,
+          "reasons": [
+            "route_keyword_score:1"
+          ]
+        },
+        {
+          "identity_id": "919ef58c7794a888211f42fa",
+          "skill_id": "sf2-drone-route-fit-spec",
+          "skill_path": "/Users/jameschen/Workspace/nexus/.agents/skills/sf2/sf2-drone-route-fit-spec/SKILL.md",
+          "sha256": "6870c9cd2b6a8815f9c7faad5f0be663d6732a4172ad60a4dd557447513c0515",
+          "source_status": "nexus_repo_local",
+          "source_priority": 100,
+          "runtime_eligible": false,
+          "ablation_eligible": true,
+          "confidence": "low",
+          "score": 1,
+          "reasons": [
+            "route_keyword_score:1"
+          ]
+        },
+        {
+          "identity_id": "4f4e1a296239a905776b2a7a",
+          "skill_id": "sf2-external_productivity-route-fit-spec",
+          "skill_path": "/Users/jameschen/Workspace/nexus/.agents/skills/sf2/sf2-external_productivity-route-fit-spec/SKILL.md",
+          "sha256": "5e4dad47a96f0a8818bf246e27c1e2a65ecddcae6b04703e25301f1810d8e6cc",
+          "source_status": "nexus_repo_local",
+          "source_priority": 100,
+          "runtime_eligible": false,
+          "ablation_eligible": true,
+          "confidence": "low",
+          "score": 1,
+          "reasons": [
+            "route_keyword_score:1"
+          ]
+        },
+        {
+          "identity_id": "19b9920bb231e2b826867067",
+          "skill_id": "sf2-file_lock_security_gate-route-fit-spec",
+          "skill_path": "/Users/jameschen/Workspace/nexus/.agents/skills/sf2/sf2-file_lock_security_gate-route-fit-spec/SKILL.md",
+          "sha256": "5b5e9cc1c64fea3d957aff7b1eb2c56846b9a62b87c13626e361e42e6acc1254",
+          "source_status": "nexus_repo_local",
+          "source_priority": 100,
+          "runtime_eligible": false,
+          "ablation_eligible": true,
+          "confidence": "low",
+          "score": 1,
+          "reasons": [
+            "route_keyword_score:1"
+          ]
+        },
+        {
+          "identity_id": "de10babf3d5c5f15f6f58701",
+          "skill_id": "sf2-forecast_pregate-route-fit-spec",
+          "skill_path": "/Users/jameschen/Workspace/nexus/.agents/skills/sf2/sf2-forecast_pregate-route-fit-spec/SKILL.md",
+          "sha256": "70409a3035519428dda94ac2d2efcf22a907f12e2e466ec7021e782ae4856256",
+          "source_status": "nexus_repo_local",
+          "source_priority": 100,
+          "runtime_eligible": false,
+          "ablation_eligible": true,
+          "confidence": "low",
+          "score": 1,
+          "reasons": [
+            "route_keyword_score:1"
+          ]
+        }
+      ]
+    },
+    {
+      "capability_id": "forecast_pregate",
+      "group": "reasoning_acceleration",
+      "pillar": "belief",
+      "candidate_count": 1,
+      "top_candidates": [
+        {
+          "identity_id": "de10babf3d5c5f15f6f58701",
+          "skill_id": "sf2-forecast_pregate-route-fit-spec",
+          "skill_path": "/Users/jameschen/Workspace/nexus/.agents/skills/sf2/sf2-forecast_pregate-route-fit-spec/SKILL.md",
+          "sha256": "70409a3035519428dda94ac2d2efcf22a907f12e2e466ec7021e782ae4856256",
+          "source_status": "nexus_repo_local",
+          "source_priority": 100,
+          "runtime_eligible": false,
+          "ablation_eligible": true,
+          "confidence": "high",
+          "score": 14,
+          "reasons": [
+            "capability_id_match:forecast_pregate",
+            "route_keyword_score:2"
+          ]
+        }
+      ]
+    },
+    {
+      "capability_id": "swarm_multi_agent",
+      "group": "collaboration",
+      "pillar": "artifact",
+      "candidate_count": 2,
+      "top_candidates": [
+        {
+          "identity_id": "2882e7cddb4aebda5d711aa1",
+          "skill_id": "sf2-swarm_multi_agent-route-fit-spec",
+          "skill_path": "/Users/jameschen/Workspace/nexus/.agents/skills/sf2/sf2-swarm_multi_agent-route-fit-spec/SKILL.md",
+          "sha256": "b67cb5379a5ed3546125468ecd4fbe682f2fab3b3d28e292d3aa3253608eb898",
+          "source_status": "nexus_repo_local",
+          "source_priority": 100,
+          "runtime_eligible": false,
+          "ablation_eligible": true,
+          "confidence": "high",
+          "score": 13,
+          "reasons": [
+            "capability_id_match:swarm_multi_agent",
+            "route_keyword_score:1"
+          ]
+        },
+        {
+          "identity_id": "f7b2268a10a47b2f0356ff33",
+          "skill_id": "research-paper-writing",
+          "skill_path": "/Users/jameschen/Workspace/hermes-agent/skills/research/research-paper-writing/SKILL.md",
+          "sha256": "5bc92cec8357a19d71b1c10c5590ab605e846e4ddd914512511f8281a6053186",
+          "source_status": "hermes_reference",
+          "source_priority": 60,
+          "runtime_eligible": false,
+          "ablation_eligible": true,
+          "confidence": "low",
+          "score": 1,
+          "reasons": [
+            "route_keyword_score:1"
+          ]
+        }
+      ]
+    },
+    {
+      "capability_id": "drone",
+      "group": "collaboration",
+      "pillar": "artifact",
+      "candidate_count": 5,
+      "top_candidates": [
+        {
+          "identity_id": "919ef58c7794a888211f42fa",
+          "skill_id": "sf2-drone-route-fit-spec",
+          "skill_path": "/Users/jameschen/Workspace/nexus/.agents/skills/sf2/sf2-drone-route-fit-spec/SKILL.md",
+          "sha256": "6870c9cd2b6a8815f9c7faad5f0be663d6732a4172ad60a4dd557447513c0515",
+          "source_status": "nexus_repo_local",
+          "source_priority": 100,
+          "runtime_eligible": false,
+          "ablation_eligible": true,
+          "confidence": "high",
+          "score": 13,
+          "reasons": [
+            "capability_id_match:drone",
+            "route_keyword_score:1"
+          ]
+        },
+        {
+          "identity_id": "153dbe3c98f0dc155b063f44",
+          "skill_id": "claude-code",
+          "skill_path": "/Users/jameschen/Workspace/hermes-agent/skills/autonomous-ai-agents/claude-code/SKILL.md",
+          "sha256": "4d195cf896e7d1a045b966216c46392d00672adc9c59b7919aa00e931ba8f762",
+          "source_status": "hermes_reference",
+          "source_priority": 60,
+          "runtime_eligible": false,
+          "ablation_eligible": true,
+          "confidence": "low",
+          "score": 1,
+          "reasons": [
+            "route_keyword_score:1"
+          ]
+        },
+        {
+          "identity_id": "af841200863d49106ddbe9e5",
+          "skill_id": "codex",
+          "skill_path": "/Users/jameschen/Workspace/hermes-agent/skills/autonomous-ai-agents/codex/SKILL.md",
+          "sha256": "55554cc334c0435752311dc116591262c75f161f96c54aa5c57829327ce31d86",
+          "source_status": "hermes_reference",
+          "source_priority": 60,
+          "runtime_eligible": false,
+          "ablation_eligible": true,
+          "confidence": "low",
+          "score": 1,
+          "reasons": [
+            "route_keyword_score:1"
+          ]
+        },
+        {
+          "identity_id": "30d82c8a8ee38be0a549b251",
+          "skill_id": "opencode",
+          "skill_path": "/Users/jameschen/Workspace/hermes-agent/skills/autonomous-ai-agents/opencode/SKILL.md",
+          "sha256": "afb3ea1f1b4300705f4a44f41ef2bb6f36c45e474b677dcb3c0aa4e6b3740595",
+          "source_status": "hermes_reference",
+          "source_priority": 60,
+          "runtime_eligible": false,
+          "ablation_eligible": true,
+          "confidence": "low",
+          "score": 1,
+          "reasons": [
+            "route_keyword_score:1"
+          ]
+        },
+        {
+          "identity_id": "240e8ba11963fe5a953a0e03",
+          "skill_id": "subagent-driven-development",
+          "skill_path": "/Users/jameschen/Workspace/hermes-agent/skills/software-development/subagent-driven-development/SKILL.md",
+          "sha256": "3fe606f9b2f5127905e06812bbff2b8708a5b0e66a8330207ce3546792b33102",
+          "source_status": "hermes_reference",
+          "source_priority": 60,
+          "runtime_eligible": false,
+          "ablation_eligible": true,
+          "confidence": "low",
+          "score": 1,
+          "reasons": [
+            "route_keyword_score:1"
+          ]
+        }
+      ]
+    },
+    {
+      "capability_id": "file_lock_security_gate",
+      "group": "collaboration",
+      "pillar": "mempalace",
+      "candidate_count": 2,
+      "top_candidates": [
+        {
+          "identity_id": "19b9920bb231e2b826867067",
+          "skill_id": "sf2-file_lock_security_gate-route-fit-spec",
+          "skill_path": "/Users/jameschen/Workspace/nexus/.agents/skills/sf2/sf2-file_lock_security_gate-route-fit-spec/SKILL.md",
+          "sha256": "5b5e9cc1c64fea3d957aff7b1eb2c56846b9a62b87c13626e361e42e6acc1254",
+          "source_status": "nexus_repo_local",
+          "source_priority": 100,
+          "runtime_eligible": false,
+          "ablation_eligible": true,
+          "confidence": "high",
+          "score": 13,
+          "reasons": [
+            "capability_id_match:file_lock_security_gate",
+            "route_keyword_score:1"
+          ]
+        },
+        {
+          "identity_id": "e52f223944c72783c43f7e72",
+          "skill_id": "sf2-policy_capability_gate-route-fit-spec",
+          "skill_path": "/Users/jameschen/Workspace/nexus/.agents/skills/sf2/sf2-policy_capability_gate-route-fit-spec/SKILL.md",
+          "sha256": "113916c7e99c1a280db80e875b2f85a75e938e710b60c96647adf5c765d3b73c",
+          "source_status": "nexus_repo_local",
+          "source_priority": 100,
+          "runtime_eligible": false,
+          "ablation_eligible": true,
+          "confidence": "low",
+          "score": 1,
+          "reasons": [
+            "route_keyword_score:1"
+          ]
+        }
+      ]
+    },
+    {
+      "capability_id": "mempalace",
+      "group": "governance_risk",
+      "pillar": "mempalace",
+      "candidate_count": 4,
+      "top_candidates": [
+        {
+          "identity_id": "01a42231b4af1ec035cae1dd",
+          "skill_id": "sf2-mempalace-route-fit-spec",
+          "skill_path": "/Users/jameschen/Workspace/nexus/.agents/skills/sf2/sf2-mempalace-route-fit-spec/SKILL.md",
+          "sha256": "e3213e78de84c629a21ecac8c39d63375804ffebc7f030127a87a5cc2321e67f",
+          "source_status": "nexus_repo_local",
+          "source_priority": 100,
+          "runtime_eligible": false,
+          "ablation_eligible": true,
+          "confidence": "high",
+          "score": 13,
+          "reasons": [
+            "capability_id_match:mempalace",
+            "route_keyword_score:1"
+          ]
+        },
+        {
+          "identity_id": "e52f223944c72783c43f7e72",
+          "skill_id": "sf2-policy_capability_gate-route-fit-spec",
+          "skill_path": "/Users/jameschen/Workspace/nexus/.agents/skills/sf2/sf2-policy_capability_gate-route-fit-spec/SKILL.md",
+          "sha256": "113916c7e99c1a280db80e875b2f85a75e938e710b60c96647adf5c765d3b73c",
+          "source_status": "nexus_repo_local",
+          "source_priority": 100,
+          "runtime_eligible": false,
+          "ablation_eligible": true,
+          "confidence": "low",
+          "score": 1,
+          "reasons": [
+            "route_keyword_score:1"
+          ]
+        },
+        {
+          "identity_id": "35a8eba0019ad98ca3280aa1",
+          "skill_id": "auto-gen-4907",
+          "skill_path": "/Users/jameschen/Workspace/nexus/skills/auto-gen-4907/SKILL.md",
+          "sha256": "57a7834bf5f3d5dde2ca18c0b3a7c23ed21c7b3c5c18678bf9140b27691981ff",
+          "source_status": "nexus_workspace_skills",
+          "source_priority": 90,
+          "runtime_eligible": false,
+          "ablation_eligible": true,
+          "confidence": "low",
+          "score": 1,
+          "reasons": [
+            "route_keyword_score:1"
+          ]
+        },
+        {
+          "identity_id": "00fc2464c3cdf349f05acee2",
+          "skill_id": "auto-gen-6715",
+          "skill_path": "/Users/jameschen/Workspace/nexus/skills/auto-gen-6715/SKILL.md",
+          "sha256": "6a96767662083fb2df5cb1375c1c7d2b0fc65bb26204da43a30c793914b7f0b2",
+          "source_status": "nexus_workspace_skills",
+          "source_priority": 90,
+          "runtime_eligible": false,
+          "ablation_eligible": true,
+          "confidence": "low",
+          "score": 1,
+          "reasons": [
+            "route_keyword_score:1"
+          ]
+        }
+      ]
+    },
+    {
+      "capability_id": "policy_capability_gate",
+      "group": "governance_risk",
+      "pillar": "mempalace",
+      "candidate_count": 1,
+      "top_candidates": [
+        {
+          "identity_id": "e52f223944c72783c43f7e72",
+          "skill_id": "sf2-policy_capability_gate-route-fit-spec",
+          "skill_path": "/Users/jameschen/Workspace/nexus/.agents/skills/sf2/sf2-policy_capability_gate-route-fit-spec/SKILL.md",
+          "sha256": "113916c7e99c1a280db80e875b2f85a75e938e710b60c96647adf5c765d3b73c",
+          "source_status": "nexus_repo_local",
+          "source_priority": 100,
+          "runtime_eligible": false,
+          "ablation_eligible": true,
+          "confidence": "high",
+          "score": 20,
+          "reasons": [
+            "capability_id_match:policy_capability_gate",
+            "route_keyword_score:8"
+          ]
+        }
+      ]
+    },
+    {
+      "capability_id": "ultra_review",
+      "group": "governance_risk",
+      "pillar": "artifact",
+      "candidate_count": 28,
+      "top_candidates": [
+        {
+          "identity_id": "8d3cde0b53a3723f0968313f",
+          "skill_id": "requesting-code-review",
+          "skill_path": "/Users/jameschen/Workspace/hermes-agent/skills/software-development/requesting-code-review/SKILL.md",
+          "sha256": "0de2bc3923c28bb2e6fdf7f60c7a745e7d7123d520e63c8b173fcbc421865f4a",
+          "source_status": "hermes_reference",
+          "source_priority": 60,
+          "runtime_eligible": false,
+          "ablation_eligible": true,
+          "confidence": "low",
+          "score": 2,
+          "reasons": [
+            "route_keyword_score:2"
+          ]
+        },
+        {
+          "identity_id": "cb704c151268daecb588dda7",
+          "skill_id": "code-review-and-quality",
+          "skill_path": "/Users/jameschen/Workspace/skills_audit/skills/code-review-and-quality/SKILL.md",
+          "sha256": "e25261c399aceeafb656476d9a3c41161e3a4dcc64f5f46bfd847e5cdbed5662",
+          "source_status": "audit_reference",
+          "source_priority": 55,
+          "runtime_eligible": false,
+          "ablation_eligible": true,
+          "confidence": "low",
+          "score": 2,
+          "reasons": [
+            "route_keyword_score:2"
+          ]
+        },
+        {
+          "identity_id": "0104708c041771593293a859",
+          "skill_id": "security-and-hardening",
+          "skill_path": "/Users/jameschen/Workspace/skills_audit/skills/security-and-hardening/SKILL.md",
+          "sha256": "2481a5c6039bb48cd346d1d0034cb374076037d77b9fad3d8e9ba0b8ba8eeedb",
+          "source_status": "audit_reference",
+          "source_priority": 55,
+          "runtime_eligible": false,
+          "ablation_eligible": true,
+          "confidence": "low",
+          "score": 2,
+          "reasons": [
+            "route_keyword_score:2"
+          ]
+        },
+        {
+          "identity_id": "4d88139028d09fbdf7a8b00a",
+          "skill_id": "diagnose",
+          "skill_path": "/Users/jameschen/Workspace/nexus/.agents/skills/diagnose/SKILL.md",
+          "sha256": "28886402bbfa0470248086eab9106a103b964b76ae9496e63ff0c8a6761b6d13",
+          "source_status": "nexus_repo_local",
+          "source_priority": 100,
+          "runtime_eligible": true,
+          "ablation_eligible": true,
+          "confidence": "low",
+          "score": 1,
+          "reasons": [
+            "route_keyword_score:1"
+          ]
+        },
+        {
+          "identity_id": "0d737257effb37e72b288c62",
+          "skill_id": "research-source-validation-auditor",
+          "skill_path": "/Users/jameschen/Workspace/nexus/.agents/skills/research-source-validation-auditor/SKILL.md",
+          "sha256": "cbf5b0de8713f4c155902db66307d7abaf77384bea24de8cd80013fe3feb47db",
+          "source_status": "nexus_repo_local",
+          "source_priority": 100,
+          "runtime_eligible": true,
+          "ablation_eligible": true,
+          "confidence": "low",
+          "score": 1,
+          "reasons": [
+            "route_keyword_score:1"
+          ]
+        },
+        {
+          "identity_id": "19b9920bb231e2b826867067",
+          "skill_id": "sf2-file_lock_security_gate-route-fit-spec",
+          "skill_path": "/Users/jameschen/Workspace/nexus/.agents/skills/sf2/sf2-file_lock_security_gate-route-fit-spec/SKILL.md",
+          "sha256": "5b5e9cc1c64fea3d957aff7b1eb2c56846b9a62b87c13626e361e42e6acc1254",
+          "source_status": "nexus_repo_local",
+          "source_priority": 100,
+          "runtime_eligible": false,
+          "ablation_eligible": true,
+          "confidence": "low",
+          "score": 1,
+          "reasons": [
+            "route_keyword_score:1"
+          ]
+        },
+        {
+          "identity_id": "184240aaa7344aabf700e4a8",
+          "skill_id": "triage",
+          "skill_path": "/Users/jameschen/Workspace/nexus/.agents/skills/triage/SKILL.md",
+          "sha256": "b819f0285e4e5814ac6472d0217f07dc9f23d2fdae3ebb0dd31d98360d8ac029",
+          "source_status": "nexus_repo_local",
+          "source_priority": 100,
+          "runtime_eligible": true,
+          "ablation_eligible": true,
+          "confidence": "low",
+          "score": 1,
+          "reasons": [
+            "route_keyword_score:1"
+          ]
+        },
+        {
+          "identity_id": "e13fd8046f0d85504ffdef81",
+          "skill_id": "github-code-review",
+          "skill_path": "/Users/jameschen/Workspace/hermes-agent/skills/github/github-code-review/SKILL.md",
+          "sha256": "3cd38e249223c801a91475b92dec39e2f0f33cb1624e321375a37f29ba6d74e6",
+          "source_status": "hermes_reference",
+          "source_priority": 60,
+          "runtime_eligible": false,
+          "ablation_eligible": true,
+          "confidence": "low",
+          "score": 1,
+          "reasons": [
+            "route_keyword_score:1"
+          ]
+        },
+        {
+          "identity_id": "30d82c8a8ee38be0a549b251",
+          "skill_id": "opencode",
+          "skill_path": "/Users/jameschen/Workspace/hermes-agent/skills/autonomous-ai-agents/opencode/SKILL.md",
+          "sha256": "afb3ea1f1b4300705f4a44f41ef2bb6f36c45e474b677dcb3c0aa4e6b3740595",
+          "source_status": "hermes_reference",
+          "source_priority": 60,
+          "runtime_eligible": false,
+          "ablation_eligible": true,
+          "confidence": "low",
+          "score": 1,
+          "reasons": [
+            "route_keyword_score:1"
+          ]
+        },
+        {
+          "identity_id": "240e8ba11963fe5a953a0e03",
+          "skill_id": "subagent-driven-development",
+          "skill_path": "/Users/jameschen/Workspace/hermes-agent/skills/software-development/subagent-driven-development/SKILL.md",
+          "sha256": "3fe606f9b2f5127905e06812bbff2b8708a5b0e66a8330207ce3546792b33102",
+          "source_status": "hermes_reference",
+          "source_priority": 60,
+          "runtime_eligible": false,
+          "ablation_eligible": true,
+          "confidence": "low",
+          "score": 1,
+          "reasons": [
+            "route_keyword_score:1"
+          ]
+        },
+        {
+          "identity_id": "2c539f642e4747c359d43165",
+          "skill_id": "api-and-interface-design",
+          "skill_path": "/Users/jameschen/Workspace/skills_audit/skills/api-and-interface-design/SKILL.md",
+          "sha256": "293db2903b41316a5109a1e0ce3e1740eeafae31735bc1f9143dafbfd1187363",
+          "source_status": "audit_reference",
+          "source_priority": 55,
+          "runtime_eligible": false,
+          "ablation_eligible": true,
+          "confidence": "low",
+          "score": 1,
+          "reasons": [
+            "route_keyword_score:1"
+          ]
+        },
+        {
+          "identity_id": "b8ab25ca36404ff36db1169a",
+          "skill_id": "browser-testing-with-devtools",
+          "skill_path": "/Users/jameschen/Workspace/skills_audit/skills/browser-testing-with-devtools/SKILL.md",
+          "sha256": "d50505e232bf61cd51caf6d249a39e14451fea34ce1d5d064d944b6780d4f4e6",
+          "source_status": "audit_reference",
+          "source_priority": 55,
+          "runtime_eligible": false,
+          "ablation_eligible": true,
+          "confidence": "low",
+          "score": 1,
+          "reasons": [
+            "route_keyword_score:1"
+          ]
+        }
+      ]
+    },
+    {
+      "capability_id": "artifact_gate",
+      "group": "delivery_validation",
+      "pillar": "artifact",
+      "candidate_count": 7,
+      "top_candidates": [
+        {
+          "identity_id": "6e4fcbc3d1875d223c093d5a",
+          "skill_id": "nexus-benchmark-public-report",
+          "skill_path": "/Users/jameschen/Workspace/nexus/.agents/skills/nexus-benchmark-public-report/SKILL.md",
+          "sha256": "6ae2f3dd0bdcd049556127f3e74309d4e393dbe3f4ab176233caf29b3e980fb6",
+          "source_status": "nexus_repo_local",
+          "source_priority": 100,
+          "runtime_eligible": true,
+          "ablation_eligible": true,
+          "confidence": "low",
+          "score": 2,
+          "reasons": [
+            "route_keyword_score:2"
+          ]
+        },
+        {
+          "identity_id": "e4db37751731641527e34517",
+          "skill_id": "nexus-goal-closure-executor",
+          "skill_path": "/Users/jameschen/Workspace/nexus/.agents/skills/nexus-goal-closure-executor/SKILL.md",
+          "sha256": "875556e9bbc2ffae146eff45837eca37c28a5fe9900d5cc71e7a6f5553f4dc3d",
+          "source_status": "nexus_repo_local",
+          "source_priority": 100,
+          "runtime_eligible": true,
+          "ablation_eligible": true,
+          "confidence": "low",
+          "score": 1,
+          "reasons": [
+            "route_keyword_score:1"
+          ]
+        },
+        {
+          "identity_id": "0fde9eb56de3da366a709073",
+          "skill_id": "nexus-root-cause-probe",
+          "skill_path": "/Users/jameschen/Workspace/nexus/.agents/skills/nexus-root-cause-probe/SKILL.md",
+          "sha256": "fcf80a7f615ea0d01c9ba29f0953e91a9378441846a348fed918860a498ab0c9",
+          "source_status": "nexus_repo_local",
+          "source_priority": 100,
+          "runtime_eligible": true,
+          "ablation_eligible": true,
+          "confidence": "low",
+          "score": 1,
+          "reasons": [
+            "route_keyword_score:1"
+          ]
+        },
+        {
+          "identity_id": "d79518d14ca4f9c9859f2bc1",
+          "skill_id": "research-citation-chain-verifier",
+          "skill_path": "/Users/jameschen/Workspace/nexus/.agents/skills/research-citation-chain-verifier/SKILL.md",
+          "sha256": "8a3d1e0a8e6c79aa0cec10463eb37ed4bcfb44dac9d6de748aed02fe0e918418",
+          "source_status": "nexus_repo_local",
+          "source_priority": 100,
+          "runtime_eligible": true,
+          "ablation_eligible": true,
+          "confidence": "low",
+          "score": 1,
+          "reasons": [
+            "route_keyword_score:1"
+          ]
+        },
+        {
+          "identity_id": "0d737257effb37e72b288c62",
+          "skill_id": "research-source-validation-auditor",
+          "skill_path": "/Users/jameschen/Workspace/nexus/.agents/skills/research-source-validation-auditor/SKILL.md",
+          "sha256": "cbf5b0de8713f4c155902db66307d7abaf77384bea24de8cd80013fe3feb47db",
+          "source_status": "nexus_repo_local",
+          "source_priority": 100,
+          "runtime_eligible": true,
+          "ablation_eligible": true,
+          "confidence": "low",
+          "score": 1,
+          "reasons": [
+            "route_keyword_score:1"
+          ]
+        },
+        {
+          "identity_id": "e52f223944c72783c43f7e72",
+          "skill_id": "sf2-policy_capability_gate-route-fit-spec",
+          "skill_path": "/Users/jameschen/Workspace/nexus/.agents/skills/sf2/sf2-policy_capability_gate-route-fit-spec/SKILL.md",
+          "sha256": "113916c7e99c1a280db80e875b2f85a75e938e710b60c96647adf5c765d3b73c",
+          "source_status": "nexus_repo_local",
+          "source_priority": 100,
+          "runtime_eligible": false,
+          "ablation_eligible": true,
+          "confidence": "low",
+          "score": 1,
+          "reasons": [
+            "route_keyword_score:1"
+          ]
+        },
+        {
+          "identity_id": "dd605b131601ba9191116eb5",
+          "skill_id": "dogfood",
+          "skill_path": "/Users/jameschen/Workspace/hermes-agent/skills/dogfood/SKILL.md",
+          "sha256": "36b1a710c61727c2be3c43ba20d68605cfed199afc90e27bde9746f4b80b91dd",
+          "source_status": "hermes_reference",
+          "source_priority": 60,
+          "runtime_eligible": false,
+          "ablation_eligible": true,
+          "confidence": "low",
+          "score": 1,
+          "reasons": [
+            "route_keyword_score:1"
+          ]
+        }
+      ]
+    },
+    {
+      "capability_id": "claim_gate",
+      "group": "delivery_validation",
+      "pillar": "claim",
+      "candidate_count": 2,
+      "top_candidates": [
+        {
+          "identity_id": "c28b58af2f9799155a58e2f3",
+          "skill_id": "nexus-benchmark-continuous-optimization",
+          "skill_path": "/Users/jameschen/Workspace/nexus/.agents/skills/nexus-benchmark-continuous-optimization/SKILL.md",
+          "sha256": "bda61624f657cf28dfcbb639afecfffc83e873e550f4731acf09194384bcc27c",
+          "source_status": "nexus_repo_local",
+          "source_priority": 100,
+          "runtime_eligible": true,
+          "ablation_eligible": true,
+          "confidence": "medium",
+          "score": 4,
+          "reasons": [
+            "route_keyword_score:4"
+          ]
+        },
+        {
+          "identity_id": "6e4fcbc3d1875d223c093d5a",
+          "skill_id": "nexus-benchmark-public-report",
+          "skill_path": "/Users/jameschen/Workspace/nexus/.agents/skills/nexus-benchmark-public-report/SKILL.md",
+          "sha256": "6ae2f3dd0bdcd049556127f3e74309d4e393dbe3f4ab176233caf29b3e980fb6",
+          "source_status": "nexus_repo_local",
+          "source_priority": 100,
+          "runtime_eligible": true,
+          "ablation_eligible": true,
+          "confidence": "low",
+          "score": 1,
+          "reasons": [
+            "route_keyword_score:1"
+          ]
+        }
+      ]
+    },
+    {
+      "capability_id": "delivery_acceptance_gate",
+      "group": "delivery_validation",
+      "pillar": "artifact",
+      "candidate_count": 4,
+      "top_candidates": [
+        {
+          "identity_id": "51d70a9231a70f9d527fd043",
+          "skill_id": "sf2-delivery_acceptance_gate-route-fit-spec",
+          "skill_path": "/Users/jameschen/Workspace/nexus/.agents/skills/sf2/sf2-delivery_acceptance_gate-route-fit-spec/SKILL.md",
+          "sha256": "c6c2b8fd229245d5f4518daf69b25035e27c1e74e6dc5e02a31fc3b7825c32ec",
+          "source_status": "nexus_repo_local",
+          "source_priority": 100,
+          "runtime_eligible": false,
+          "ablation_eligible": true,
+          "confidence": "high",
+          "score": 14,
+          "reasons": [
+            "capability_id_match:delivery_acceptance_gate",
+            "route_keyword_score:2"
+          ]
+        },
+        {
+          "identity_id": "c28b58af2f9799155a58e2f3",
+          "skill_id": "nexus-benchmark-continuous-optimization",
+          "skill_path": "/Users/jameschen/Workspace/nexus/.agents/skills/nexus-benchmark-continuous-optimization/SKILL.md",
+          "sha256": "bda61624f657cf28dfcbb639afecfffc83e873e550f4731acf09194384bcc27c",
+          "source_status": "nexus_repo_local",
+          "source_priority": 100,
+          "runtime_eligible": true,
+          "ablation_eligible": true,
+          "confidence": "low",
+          "score": 1,
+          "reasons": [
+            "route_keyword_score:1"
+          ]
+        },
+        {
+          "identity_id": "d79518d14ca4f9c9859f2bc1",
+          "skill_id": "research-citation-chain-verifier",
+          "skill_path": "/Users/jameschen/Workspace/nexus/.agents/skills/research-citation-chain-verifier/SKILL.md",
+          "sha256": "8a3d1e0a8e6c79aa0cec10463eb37ed4bcfb44dac9d6de748aed02fe0e918418",
+          "source_status": "nexus_repo_local",
+          "source_priority": 100,
+          "runtime_eligible": true,
+          "ablation_eligible": true,
+          "confidence": "low",
+          "score": 1,
+          "reasons": [
+            "route_keyword_score:1"
+          ]
+        },
+        {
+          "identity_id": "0d737257effb37e72b288c62",
+          "skill_id": "research-source-validation-auditor",
+          "skill_path": "/Users/jameschen/Workspace/nexus/.agents/skills/research-source-validation-auditor/SKILL.md",
+          "sha256": "cbf5b0de8713f4c155902db66307d7abaf77384bea24de8cd80013fe3feb47db",
+          "source_status": "nexus_repo_local",
+          "source_priority": 100,
+          "runtime_eligible": true,
+          "ablation_eligible": true,
+          "confidence": "low",
+          "score": 1,
+          "reasons": [
+            "route_keyword_score:1"
+          ]
+        }
+      ]
+    },
+    {
+      "capability_id": "sandbox_replay",
+      "group": "delivery_validation",
+      "pillar": "artifact",
+      "candidate_count": 1,
+      "top_candidates": [
+        {
+          "identity_id": "b63945ea616c1b02010c17cc",
+          "skill_id": "teams-meeting-pipeline",
+          "skill_path": "/Users/jameschen/Workspace/hermes-agent/skills/productivity/teams-meeting-pipeline/SKILL.md",
+          "sha256": "472e8772146f571fadbe3ea27ff71f0be4b0946f8263a7e5419cfee818168591",
+          "source_status": "hermes_reference",
+          "source_priority": 60,
+          "runtime_eligible": false,
+          "ablation_eligible": true,
+          "confidence": "low",
+          "score": 1,
+          "reasons": [
+            "route_keyword_score:1"
+          ]
+        }
+      ]
+    },
+    {
+      "capability_id": "benchmark_meta_opt",
+      "group": "self_evolution",
+      "pillar": "claim",
+      "candidate_count": 8,
+      "top_candidates": [
+        {
+          "identity_id": "c28b58af2f9799155a58e2f3",
+          "skill_id": "nexus-benchmark-continuous-optimization",
+          "skill_path": "/Users/jameschen/Workspace/nexus/.agents/skills/nexus-benchmark-continuous-optimization/SKILL.md",
+          "sha256": "bda61624f657cf28dfcbb639afecfffc83e873e550f4731acf09194384bcc27c",
+          "source_status": "nexus_repo_local",
+          "source_priority": 100,
+          "runtime_eligible": true,
+          "ablation_eligible": true,
+          "confidence": "low",
+          "score": 2,
+          "reasons": [
+            "route_keyword_score:2"
+          ]
+        },
+        {
+          "identity_id": "d0ab34641c24427827b1d25d",
+          "skill_id": "evaluating-llms-harness",
+          "skill_path": "/Users/jameschen/Workspace/hermes-agent/skills/mlops/evaluation/lm-evaluation-harness/SKILL.md",
+          "sha256": "5426016d51e3b49e85c0ddc53a837393463a4f77aaa52ae504b78ff5ed596a67",
+          "source_status": "hermes_reference",
+          "source_priority": 60,
+          "runtime_eligible": false,
+          "ablation_eligible": true,
+          "confidence": "low",
+          "score": 2,
+          "reasons": [
+            "route_keyword_score:2"
+          ]
+        },
+        {
+          "identity_id": "4d88139028d09fbdf7a8b00a",
+          "skill_id": "diagnose",
+          "skill_path": "/Users/jameschen/Workspace/nexus/.agents/skills/diagnose/SKILL.md",
+          "sha256": "28886402bbfa0470248086eab9106a103b964b76ae9496e63ff0c8a6761b6d13",
+          "source_status": "nexus_repo_local",
+          "source_priority": 100,
+          "runtime_eligible": true,
+          "ablation_eligible": true,
+          "confidence": "low",
+          "score": 1,
+          "reasons": [
+            "route_keyword_score:1"
+          ]
+        },
+        {
+          "identity_id": "6e4fcbc3d1875d223c093d5a",
+          "skill_id": "nexus-benchmark-public-report",
+          "skill_path": "/Users/jameschen/Workspace/nexus/.agents/skills/nexus-benchmark-public-report/SKILL.md",
+          "sha256": "6ae2f3dd0bdcd049556127f3e74309d4e393dbe3f4ab176233caf29b3e980fb6",
+          "source_status": "nexus_repo_local",
+          "source_priority": 100,
+          "runtime_eligible": true,
+          "ablation_eligible": true,
+          "confidence": "low",
+          "score": 1,
+          "reasons": [
+            "route_keyword_score:1"
+          ]
+        },
+        {
+          "identity_id": "1be51f5aa8d613c24e239705",
+          "skill_id": "nexus-capability-upgrade",
+          "skill_path": "/Users/jameschen/Workspace/nexus/.agents/skills/nexus-capability-upgrade/SKILL.md",
+          "sha256": "f1f8a77165a7e71104de25664dce23c95b7a6b817d4a888d65fbeeaa3a5e36f4",
+          "source_status": "nexus_repo_local",
+          "source_priority": 100,
+          "runtime_eligible": true,
+          "ablation_eligible": true,
+          "confidence": "low",
+          "score": 1,
+          "reasons": [
+            "route_keyword_score:1"
+          ]
+        },
+        {
+          "identity_id": "3b0afe61f836259fc937648d",
+          "skill_id": "auto-gen-2258",
+          "skill_path": "/Users/jameschen/Workspace/nexus/skills/auto-gen-2258/SKILL.md",
+          "sha256": "97d70c08e2d59dcdce26abc86b9a7fcf0699544be9ea4535318522d0194d1492",
+          "source_status": "nexus_workspace_skills",
+          "source_priority": 90,
+          "runtime_eligible": false,
+          "ablation_eligible": true,
+          "confidence": "low",
+          "score": 1,
+          "reasons": [
+            "route_keyword_score:1"
+          ]
+        },
+        {
+          "identity_id": "b8ab25ca36404ff36db1169a",
+          "skill_id": "browser-testing-with-devtools",
+          "skill_path": "/Users/jameschen/Workspace/skills_audit/skills/browser-testing-with-devtools/SKILL.md",
+          "sha256": "d50505e232bf61cd51caf6d249a39e14451fea34ce1d5d064d944b6780d4f4e6",
+          "source_status": "audit_reference",
+          "source_priority": 55,
+          "runtime_eligible": false,
+          "ablation_eligible": true,
+          "confidence": "low",
+          "score": 1,
+          "reasons": [
+            "route_keyword_score:1"
+          ]
+        },
+        {
+          "identity_id": "8245b65a9e04e04b997a27e2",
+          "skill_id": "performance-optimization",
+          "skill_path": "/Users/jameschen/Workspace/skills_audit/skills/performance-optimization/SKILL.md",
+          "sha256": "32d3eb4f59c14b8635c0259a61d915f41549abcae46e14ec349f435a74fc13e0",
+          "source_status": "audit_reference",
+          "source_priority": 55,
+          "runtime_eligible": false,
+          "ablation_eligible": true,
+          "confidence": "low",
+          "score": 1,
+          "reasons": [
+            "route_keyword_score:1"
+          ]
+        }
+      ]
+    },
+    {
+      "capability_id": "regression_guard",
+      "group": "self_evolution",
+      "pillar": "artifact",
+      "candidate_count": 3,
+      "top_candidates": [
+        {
+          "identity_id": "4d88139028d09fbdf7a8b00a",
+          "skill_id": "diagnose",
+          "skill_path": "/Users/jameschen/Workspace/nexus/.agents/skills/diagnose/SKILL.md",
+          "sha256": "28886402bbfa0470248086eab9106a103b964b76ae9496e63ff0c8a6761b6d13",
+          "source_status": "nexus_repo_local",
+          "source_priority": 100,
+          "runtime_eligible": true,
+          "ablation_eligible": true,
+          "confidence": "low",
+          "score": 1,
+          "reasons": [
+            "route_keyword_score:1"
+          ]
+        },
+        {
+          "identity_id": "ea221eb3ca2a849b9fe8a6ce",
+          "skill_id": "grill-me",
+          "skill_path": "/Users/jameschen/Workspace/nexus/.agents/skills/grill-me/SKILL.md",
+          "sha256": "74147eb6010a65957efef2b9e0f0b3ff935c1def7fc117697151b1d0f3610556",
+          "source_status": "nexus_repo_local",
+          "source_priority": 100,
+          "runtime_eligible": true,
+          "ablation_eligible": true,
+          "confidence": "low",
+          "score": 1,
+          "reasons": [
+            "route_keyword_score:1"
+          ]
+        },
+        {
+          "identity_id": "c997f6ef6fcb66e2ea98195f",
+          "skill_id": "grill-with-docs",
+          "skill_path": "/Users/jameschen/Workspace/nexus/.agents/skills/grill-with-docs/SKILL.md",
+          "sha256": "c7176600a8bffc9f359102cb041b6686387618b8e1434ba484dd708d45df6d5e",
+          "source_status": "nexus_repo_local",
+          "source_priority": 100,
+          "runtime_eligible": true,
+          "ablation_eligible": true,
+          "confidence": "low",
+          "score": 1,
+          "reasons": [
+            "route_keyword_score:1"
+          ]
+        }
+      ]
+    },
+    {
+      "capability_id": "registry_skills_sync",
+      "group": "productization",
+      "pillar": "artifact",
+      "candidate_count": 3,
+      "top_candidates": [
+        {
+          "identity_id": "802b6cba566e93c77df02318",
+          "skill_id": "sf2-registry_skills_sync-route-fit-spec",
+          "skill_path": "/Users/jameschen/Workspace/nexus/.agents/skills/sf2/sf2-registry_skills_sync-route-fit-spec/SKILL.md",
+          "sha256": "525c7bda107485a4aac2b7a475dc39e4dda014a69c7143b86bd07865494a6a42",
+          "source_status": "nexus_repo_local",
+          "source_priority": 100,
+          "runtime_eligible": false,
+          "ablation_eligible": true,
+          "confidence": "high",
+          "score": 14,
+          "reasons": [
+            "capability_id_match:registry_skills_sync",
+            "route_keyword_score:2"
+          ]
+        },
+        {
+          "identity_id": "0e81723c69e62f09698d8476",
+          "skill_id": "comfyui",
+          "skill_path": "/Users/jameschen/Workspace/hermes-agent/skills/creative/comfyui/SKILL.md",
+          "sha256": "dc23dc22f1d9f0d97fdd45af260e981ea101371d3fe9d6e6dfd21424bf65b1cb",
+          "source_status": "hermes_reference",
+          "source_priority": 60,
+          "runtime_eligible": false,
+          "ablation_eligible": true,
+          "confidence": "low",
+          "score": 1,
+          "reasons": [
+            "route_keyword_score:1"
+          ]
+        },
+        {
+          "identity_id": "5c478b2f04593eca6b707455",
+          "skill_id": "weights-and-biases",
+          "skill_path": "/Users/jameschen/Workspace/hermes-agent/skills/mlops/evaluation/weights-and-biases/SKILL.md",
+          "sha256": "7cabb8bcc00797373ada06b51fcf7b504f51d79b8816829847635bbb03bb5d9c",
+          "source_status": "hermes_reference",
+          "source_priority": 60,
+          "runtime_eligible": false,
+          "ablation_eligible": true,
+          "confidence": "low",
+          "score": 1,
+          "reasons": [
+            "route_keyword_score:1"
+          ]
+        }
+      ]
+    },
+    {
+      "capability_id": "metabolism_resume",
+      "group": "productization",
+      "pillar": "memory",
+      "candidate_count": 8,
+      "top_candidates": [
+        {
+          "identity_id": "c997f6ef6fcb66e2ea98195f",
+          "skill_id": "grill-with-docs",
+          "skill_path": "/Users/jameschen/Workspace/nexus/.agents/skills/grill-with-docs/SKILL.md",
+          "sha256": "c7176600a8bffc9f359102cb041b6686387618b8e1434ba484dd708d45df6d5e",
+          "source_status": "nexus_repo_local",
+          "source_priority": 100,
+          "runtime_eligible": true,
+          "ablation_eligible": true,
+          "confidence": "low",
+          "score": 1,
+          "reasons": [
+            "route_keyword_score:1"
+          ]
+        },
+        {
+          "identity_id": "aef87220ab5316013e428719",
+          "skill_id": "improve-codebase-architecture",
+          "skill_path": "/Users/jameschen/Workspace/nexus/.agents/skills/improve-codebase-architecture/SKILL.md",
+          "sha256": "9e9b617b1c70d390e37dbfd1c031c11b3de850e2e3d01c4a2c2888bdb386a247",
+          "source_status": "nexus_repo_local",
+          "source_priority": 100,
+          "runtime_eligible": true,
+          "ablation_eligible": true,
+          "confidence": "low",
+          "score": 1,
+          "reasons": [
+            "route_keyword_score:1"
+          ]
+        },
+        {
+          "identity_id": "f3b4bd10bc729bd698ccb467",
+          "skill_id": "notebooklm-context-bridge",
+          "skill_path": "/Users/jameschen/Workspace/nexus/.agents/skills/notebooklm-context-bridge/SKILL.md",
+          "sha256": "97e2c1fa440c93810a4ec24cafec5b1f730219010446ed213b997e6ade22f169",
+          "source_status": "nexus_repo_local",
+          "source_priority": 100,
+          "runtime_eligible": true,
+          "ablation_eligible": true,
+          "confidence": "low",
+          "score": 1,
+          "reasons": [
+            "route_keyword_score:1"
+          ]
+        },
+        {
+          "identity_id": "ef9d3260abf68228166f4677",
+          "skill_id": "setup-matt-pocock-skills",
+          "skill_path": "/Users/jameschen/Workspace/nexus/.agents/skills/setup-matt-pocock-skills/SKILL.md",
+          "sha256": "c778d4e3d86ecc9125c357279a86780657b5db23110e1f7acf4f46d2441e7204",
+          "source_status": "nexus_repo_local",
+          "source_priority": 100,
+          "runtime_eligible": true,
+          "ablation_eligible": true,
+          "confidence": "low",
+          "score": 1,
+          "reasons": [
+            "route_keyword_score:1"
+          ]
+        },
+        {
+          "identity_id": "ef894fdd97007ad1a7748414",
+          "skill_id": "to-prd",
+          "skill_path": "/Users/jameschen/Workspace/nexus/.agents/skills/to-prd/SKILL.md",
+          "sha256": "eaf4850538d3c4c0e13e6be8a5cebbec762a451fb6e0201bae7c1f599f1db1b3",
+          "source_status": "nexus_repo_local",
+          "source_priority": 100,
+          "runtime_eligible": true,
+          "ablation_eligible": true,
+          "confidence": "low",
+          "score": 1,
+          "reasons": [
+            "route_keyword_score:1"
+          ]
+        },
+        {
+          "identity_id": "61a73eaa719b7b65f80e9058",
+          "skill_id": "zoom-out",
+          "skill_path": "/Users/jameschen/Workspace/nexus/.agents/skills/zoom-out/SKILL.md",
+          "sha256": "2a6894c7f9b1c9c55f451c625a834c4f377e217b623a85280e55db5fe9cacf48",
+          "source_status": "nexus_repo_local",
+          "source_priority": 100,
+          "runtime_eligible": true,
+          "ablation_eligible": true,
+          "confidence": "low",
+          "score": 1,
+          "reasons": [
+            "route_keyword_score:1"
+          ]
+        },
+        {
+          "identity_id": "8fc177e35d3d8a600ad05b0a",
+          "skill_id": "context-engineering",
+          "skill_path": "/Users/jameschen/Workspace/skills_audit/skills/context-engineering/SKILL.md",
+          "sha256": "ff9d4e5706bdd2eb7de1bfed569f1f42d28e478979ce6fcc32e617e7861b491d",
+          "source_status": "audit_reference",
+          "source_priority": 55,
+          "runtime_eligible": false,
+          "ablation_eligible": true,
+          "confidence": "low",
+          "score": 1,
+          "reasons": [
+            "route_keyword_score:1"
+          ]
+        },
+        {
+          "identity_id": "7347504fba624b8b35ced2e2",
+          "skill_id": "documentation-and-adrs",
+          "skill_path": "/Users/jameschen/Workspace/skills_audit/skills/documentation-and-adrs/SKILL.md",
+          "sha256": "7fed35f9c5b95d8e3623ad24d78d209c3267ab62d7157fc03954c76a7e58adf4",
+          "source_status": "audit_reference",
+          "source_priority": 55,
+          "runtime_eligible": false,
+          "ablation_eligible": true,
+          "confidence": "low",
+          "score": 1,
+          "reasons": [
+            "route_keyword_score:1"
+          ]
+        }
+      ]
+    },
+    {
+      "capability_id": "ui_validator",
+      "group": "productization",
+      "pillar": "artifact",
+      "candidate_count": 6,
+      "top_candidates": [
+        {
+          "identity_id": "68f2d50cbf29a07044d40ca1",
+          "skill_id": "sf2-ui_validator-route-fit-spec",
+          "skill_path": "/Users/jameschen/Workspace/nexus/.agents/skills/sf2/sf2-ui_validator-route-fit-spec/SKILL.md",
+          "sha256": "2b44a802099f435fb50609af247d29f1bf20f3a1fd12b32920f01a36f08d263c",
+          "source_status": "nexus_repo_local",
+          "source_priority": 100,
+          "runtime_eligible": false,
+          "ablation_eligible": true,
+          "confidence": "high",
+          "score": 13,
+          "reasons": [
+            "capability_id_match:ui_validator",
+            "route_keyword_score:1"
+          ]
+        },
+        {
+          "identity_id": "b8ab25ca36404ff36db1169a",
+          "skill_id": "browser-testing-with-devtools",
+          "skill_path": "/Users/jameschen/Workspace/skills_audit/skills/browser-testing-with-devtools/SKILL.md",
+          "sha256": "d50505e232bf61cd51caf6d249a39e14451fea34ce1d5d064d944b6780d4f4e6",
+          "source_status": "audit_reference",
+          "source_priority": 55,
+          "runtime_eligible": false,
+          "ablation_eligible": true,
+          "confidence": "low",
+          "score": 2,
+          "reasons": [
+            "route_keyword_score:2"
+          ]
+        },
+        {
+          "identity_id": "056c390c6e9b6b62df23438a",
+          "skill_id": "frontend-ui-engineering",
+          "skill_path": "/Users/jameschen/Workspace/skills_audit/skills/frontend-ui-engineering/SKILL.md",
+          "sha256": "978c2c6ee0d159b6969ef8c34c8ba90821a38311ffdc8855bfaac5d510d344f4",
+          "source_status": "audit_reference",
+          "source_priority": 55,
+          "runtime_eligible": false,
+          "ablation_eligible": true,
+          "confidence": "low",
+          "score": 2,
+          "reasons": [
+            "route_keyword_score:2"
+          ]
+        },
+        {
+          "identity_id": "d516578defef6841bba5c65a",
+          "skill_id": "debugging-hermes-tui-commands",
+          "skill_path": "/Users/jameschen/Workspace/hermes-agent/skills/software-development/debugging-hermes-tui-commands/SKILL.md",
+          "sha256": "55d5811c0b2d872dc59d87432720a113150dbbce2872524a36b3860a8967095d",
+          "source_status": "hermes_reference",
+          "source_priority": 60,
+          "runtime_eligible": false,
+          "ablation_eligible": true,
+          "confidence": "low",
+          "score": 1,
+          "reasons": [
+            "route_keyword_score:1"
+          ]
+        },
+        {
+          "identity_id": "cebdd02f05f310cc27398b77",
+          "skill_id": "pretext",
+          "skill_path": "/Users/jameschen/Workspace/hermes-agent/skills/creative/pretext/SKILL.md",
+          "sha256": "532570c95d1a0bf671a5565fa3c2a6131d3579f4378dd852012b39335a7668e3",
+          "source_status": "hermes_reference",
+          "source_priority": 60,
+          "runtime_eligible": false,
+          "ablation_eligible": true,
+          "confidence": "low",
+          "score": 1,
+          "reasons": [
+            "route_keyword_score:1"
+          ]
+        },
+        {
+          "identity_id": "2c539f642e4747c359d43165",
+          "skill_id": "api-and-interface-design",
+          "skill_path": "/Users/jameschen/Workspace/skills_audit/skills/api-and-interface-design/SKILL.md",
+          "sha256": "293db2903b41316a5109a1e0ce3e1740eeafae31735bc1f9143dafbfd1187363",
+          "source_status": "audit_reference",
+          "source_priority": 55,
+          "runtime_eligible": false,
+          "ablation_eligible": true,
+          "confidence": "low",
+          "score": 1,
+          "reasons": [
+            "route_keyword_score:1"
+          ]
+        }
+      ]
+    },
+    {
+      "capability_id": "external_productivity",
+      "group": "productization",
+      "pillar": "artifact",
+      "candidate_count": 64,
+      "top_candidates": [
+        {
+          "identity_id": "4f4e1a296239a905776b2a7a",
+          "skill_id": "sf2-external_productivity-route-fit-spec",
+          "skill_path": "/Users/jameschen/Workspace/nexus/.agents/skills/sf2/sf2-external_productivity-route-fit-spec/SKILL.md",
+          "sha256": "5e4dad47a96f0a8818bf246e27c1e2a65ecddcae6b04703e25301f1810d8e6cc",
+          "source_status": "nexus_repo_local",
+          "source_priority": 100,
+          "runtime_eligible": false,
+          "ablation_eligible": true,
+          "confidence": "high",
+          "score": 12,
+          "reasons": [
+            "capability_id_match:external_productivity"
+          ]
+        },
+        {
+          "identity_id": "a4c8a24f528deff5f074b524",
+          "skill_id": "ascii-art",
+          "skill_path": "/Users/jameschen/Workspace/hermes-agent/skills/creative/ascii-art/SKILL.md",
+          "sha256": "b69fdd300045a3e68b4886c5c5c714f904c9277ac40b2da371bf9e156fd9fa88",
+          "source_status": "hermes_reference",
+          "source_priority": 60,
+          "runtime_eligible": false,
+          "ablation_eligible": true,
+          "confidence": "low",
+          "score": 2,
+          "reasons": [
+            "route_keyword_score:2"
+          ]
+        },
+        {
+          "identity_id": "e8f9724508bb2fb9ef565160",
+          "skill_id": "ascii-video",
+          "skill_path": "/Users/jameschen/Workspace/hermes-agent/skills/creative/ascii-video/SKILL.md",
+          "sha256": "1d4f84e0eacc0d8adfaee62e0f2ab947dd79302ebbf55d5cd07d94a92c92cb95",
+          "source_status": "hermes_reference",
+          "source_priority": 60,
+          "runtime_eligible": false,
+          "ablation_eligible": true,
+          "confidence": "low",
+          "score": 2,
+          "reasons": [
+            "route_keyword_score:2"
+          ]
+        },
+        {
+          "identity_id": "0e81723c69e62f09698d8476",
+          "skill_id": "comfyui",
+          "skill_path": "/Users/jameschen/Workspace/hermes-agent/skills/creative/comfyui/SKILL.md",
+          "sha256": "dc23dc22f1d9f0d97fdd45af260e981ea101371d3fe9d6e6dfd21424bf65b1cb",
+          "source_status": "hermes_reference",
+          "source_priority": 60,
+          "runtime_eligible": false,
+          "ablation_eligible": true,
+          "confidence": "low",
+          "score": 2,
+          "reasons": [
+            "route_keyword_score:2"
+          ]
+        },
+        {
+          "identity_id": "a2287410abbc75615fdc99fa",
+          "skill_id": "manim-video",
+          "skill_path": "/Users/jameschen/Workspace/hermes-agent/skills/creative/manim-video/SKILL.md",
+          "sha256": "3459a6af999f0c9bfd61eb867836c8de90b33253493eb1b6aa4118d82fd320f4",
+          "source_status": "hermes_reference",
+          "source_priority": 60,
+          "runtime_eligible": false,
+          "ablation_eligible": true,
+          "confidence": "low",
+          "score": 2,
+          "reasons": [
+            "route_keyword_score:2"
+          ]
+        },
+        {
+          "identity_id": "c997f6ef6fcb66e2ea98195f",
+          "skill_id": "grill-with-docs",
+          "skill_path": "/Users/jameschen/Workspace/nexus/.agents/skills/grill-with-docs/SKILL.md",
+          "sha256": "c7176600a8bffc9f359102cb041b6686387618b8e1434ba484dd708d45df6d5e",
+          "source_status": "nexus_repo_local",
+          "source_priority": 100,
+          "runtime_eligible": true,
+          "ablation_eligible": true,
+          "confidence": "low",
+          "score": 1,
+          "reasons": [
+            "route_keyword_score:1"
+          ]
+        },
+        {
+          "identity_id": "aef87220ab5316013e428719",
+          "skill_id": "improve-codebase-architecture",
+          "skill_path": "/Users/jameschen/Workspace/nexus/.agents/skills/improve-codebase-architecture/SKILL.md",
+          "sha256": "9e9b617b1c70d390e37dbfd1c031c11b3de850e2e3d01c4a2c2888bdb386a247",
+          "source_status": "nexus_repo_local",
+          "source_priority": 100,
+          "runtime_eligible": true,
+          "ablation_eligible": true,
+          "confidence": "low",
+          "score": 1,
+          "reasons": [
+            "route_keyword_score:1"
+          ]
+        },
+        {
+          "identity_id": "ef9d3260abf68228166f4677",
+          "skill_id": "setup-matt-pocock-skills",
+          "skill_path": "/Users/jameschen/Workspace/nexus/.agents/skills/setup-matt-pocock-skills/SKILL.md",
+          "sha256": "c778d4e3d86ecc9125c357279a86780657b5db23110e1f7acf4f46d2441e7204",
+          "source_status": "nexus_repo_local",
+          "source_priority": 100,
+          "runtime_eligible": true,
+          "ablation_eligible": true,
+          "confidence": "low",
+          "score": 1,
+          "reasons": [
+            "route_keyword_score:1"
+          ]
+        },
+        {
+          "identity_id": "6d2dfe8f142f7be603c0e62c",
+          "skill_id": "airtable",
+          "skill_path": "/Users/jameschen/Workspace/hermes-agent/skills/productivity/airtable/SKILL.md",
+          "sha256": "537d440df7f23c58a7c4721dadd29636bab368cddb1e322863b611288835295a",
+          "source_status": "hermes_reference",
+          "source_priority": 60,
+          "runtime_eligible": false,
+          "ablation_eligible": true,
+          "confidence": "low",
+          "score": 1,
+          "reasons": [
+            "route_keyword_score:1"
+          ]
+        },
+        {
+          "identity_id": "0811b9a00dedcde48d732775",
+          "skill_id": "architecture-diagram",
+          "skill_path": "/Users/jameschen/Workspace/hermes-agent/skills/creative/architecture-diagram/SKILL.md",
+          "sha256": "0e7e2736aafe052e409c2ad27863d51ef3007c116711e584033787ccb5d99d3f",
+          "source_status": "hermes_reference",
+          "source_priority": 60,
+          "runtime_eligible": false,
+          "ablation_eligible": true,
+          "confidence": "low",
+          "score": 1,
+          "reasons": [
+            "route_keyword_score:1"
+          ]
+        },
+        {
+          "identity_id": "0a8c59e3a9102b024a71934c",
+          "skill_id": "baoyu-comic",
+          "skill_path": "/Users/jameschen/Workspace/hermes-agent/skills/creative/baoyu-comic/SKILL.md",
+          "sha256": "39daa86a4c9737a51c2734455a4b27f3fd35eb80ae2a70820093d4354a1e2de2",
+          "source_status": "hermes_reference",
+          "source_priority": 60,
+          "runtime_eligible": false,
+          "ablation_eligible": true,
+          "confidence": "low",
+          "score": 1,
+          "reasons": [
+            "route_keyword_score:1"
+          ]
+        },
+        {
+          "identity_id": "dcf3bdaefa44a4643aa2a067",
+          "skill_id": "baoyu-infographic",
+          "skill_path": "/Users/jameschen/Workspace/hermes-agent/skills/creative/baoyu-infographic/SKILL.md",
+          "sha256": "89e25da6d8ea1cac79b18d9e6c4c3b8d7a522df2eef559f151f19c6ce5b2a002",
+          "source_status": "hermes_reference",
+          "source_priority": 60,
+          "runtime_eligible": false,
+          "ablation_eligible": true,
+          "confidence": "low",
+          "score": 1,
+          "reasons": [
+            "route_keyword_score:1"
+          ]
+        }
+      ]
+    }
+  ]
+}

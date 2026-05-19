@@ -1,0 +1,81 @@
+{
+  "schema": "nexus.sf2_materialization_batch_plan.v1",
+  "status": "PASS",
+  "summary": {
+    "asset_count": 17,
+    "batch_count": 3,
+    "max_assets_per_batch": 8,
+    "runtime_update_allowed": false,
+    "public_benchmark_allowed": false
+  },
+  "batches": [
+    {
+      "batch_id": "SF2-H1",
+      "status": "READY",
+      "asset_count": 8,
+      "target_paths": [
+        ".agents/skills/sf2/sf2-autonomic_router-route-fit-spec/SKILL.md",
+        ".agents/skills/sf2/sf2-autoreason-route-fit-spec/SKILL.md",
+        ".agents/skills/sf2/sf2-belief-route-fit-spec/SKILL.md",
+        ".agents/skills/sf2/sf2-delivery_acceptance_gate-route-fit-spec/SKILL.md",
+        ".agents/skills/sf2/sf2-direct_master_loop-route-fit-spec/SKILL.md",
+        ".agents/skills/sf2/sf2-drone-route-fit-spec/SKILL.md",
+        ".agents/skills/sf2/sf2-file_lock_security_gate-route-fit-spec/SKILL.md",
+        ".agents/skills/sf2/sf2-forecast_pregate-route-fit-spec/SKILL.md"
+      ],
+      "skill_ids": [
+        "sf2-autonomic_router-route-fit-spec",
+        "sf2-autoreason-route-fit-spec",
+        "sf2-belief-route-fit-spec",
+        "sf2-delivery_acceptance_gate-route-fit-spec",
+        "sf2-direct_master_loop-route-fit-spec",
+        "sf2-drone-route-fit-spec",
+        "sf2-file_lock_security_gate-route-fit-spec",
+        "sf2-forecast_pregate-route-fit-spec"
+      ],
+      "exit": "All listed candidate-only SKILL.md assets exist and keep runtime_eligible=false."
+    },
+    {
+      "batch_id": "SF2-H2",
+      "status": "READY",
+      "asset_count": 8,
+      "target_paths": [
+        ".agents/skills/sf2/sf2-hyper_sprint-route-fit-spec/SKILL.md",
+        ".agents/skills/sf2/sf2-lancedb-route-fit-spec/SKILL.md",
+        ".agents/skills/sf2/sf2-learning_closure-route-fit-spec/SKILL.md",
+        ".agents/skills/sf2/sf2-memory-route-fit-spec/SKILL.md",
+        ".agents/skills/sf2/sf2-mempalace-route-fit-spec/SKILL.md",
+        ".agents/skills/sf2/sf2-nightshift-route-fit-spec/SKILL.md",
+        ".agents/skills/sf2/sf2-registry_skills_sync-route-fit-spec/SKILL.md",
+        ".agents/skills/sf2/sf2-research_control_plane-route-fit-spec/SKILL.md"
+      ],
+      "skill_ids": [
+        "sf2-hyper_sprint-route-fit-spec",
+        "sf2-lancedb-route-fit-spec",
+        "sf2-learning_closure-route-fit-spec",
+        "sf2-memory-route-fit-spec",
+        "sf2-mempalace-route-fit-spec",
+        "sf2-nightshift-route-fit-spec",
+        "sf2-registry_skills_sync-route-fit-spec",
+        "sf2-research_control_plane-route-fit-spec"
+      ],
+      "exit": "All listed candidate-only SKILL.md assets exist and keep runtime_eligible=false."
+    },
+    {
+      "batch_id": "SF2-H3",
+      "status": "READY",
+      "asset_count": 1,
+      "target_paths": [
+        ".agents/skills/sf2/sf2-swarm_multi_agent-route-fit-spec/SKILL.md"
+      ],
+      "skill_ids": [
+        "sf2-swarm_multi_agent-route-fit-spec"
+      ],
+      "exit": "All listed candidate-only SKILL.md assets exist and keep runtime_eligible=false."
+    }
+  ],
+  "claim_boundary": [
+    "Batching exists only to satisfy file-touch and review boundaries.",
+    "A completed batch still creates candidate-only assets, not runtime defaults."
+  ]
+}

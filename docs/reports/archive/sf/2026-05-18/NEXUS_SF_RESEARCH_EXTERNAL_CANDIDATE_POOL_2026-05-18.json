@@ -1,0 +1,92 @@
+{
+  "schema": "nexus.research_external_candidate_pool.v1",
+  "status": "PASS",
+  "capability": "research_and_source_discipline",
+  "runtime_update_allowed": false,
+  "summary": {
+    "candidate_count": 3,
+    "runtime_eligible_count": 0,
+    "ablation_eligible_count": 3
+  },
+  "candidates": [
+    {
+      "skill_id": "research-citation-chain-verifier",
+      "source_root": "external_research_guard",
+      "source_type": "generated_source_discipline_spec",
+      "path": "external-candidate://research/research-citation-chain-verifier",
+      "sha256": "79a09ab984bc3704e09966a47d8bd0dd415378bc90db9a9f215631fddb159b5d",
+      "capability_candidates": [
+        "research_and_source_discipline"
+      ],
+      "runtime_eligible": false,
+      "ablation_eligible": true,
+      "safety_status": "external_candidate_pool_only",
+      "source_url": "local-spec://docs/reports/NEXUS_SF_RESEARCH_SOURCE_DISCIPLINE_SPECS_2026-05-18.json#research-citation-chain-verifier",
+      "repo": "local-spec",
+      "commit_sha": "493a956f1adb568d9821d6be1dcf43dd2a89de0a8b55db1b743d0f273590401c",
+      "license_status": "local_spec_only",
+      "security_receipt": "metadata_only_no_code_execution",
+      "workflow_scan_status": "not_applicable_no_workflow",
+      "load_when": "Load when research output must trace claims to stable source references and verify citation chains. Requires citation-chain source-validation; source refs, conflicting sources, source validation, provenance, and citation chain receipts.",
+      "evidence_refs": [
+        "claim_to_source_refs",
+        "citation_chain_status",
+        "source_validation_status"
+      ]
+    },
+    {
+      "skill_id": "research-source-conflict-resolver",
+      "source_root": "external_research_guard",
+      "source_type": "generated_source_discipline_spec",
+      "path": "external-candidate://research/research-source-conflict-resolver",
+      "sha256": "2c611908a0bec75176c7a7890c91d8b97595d14c5de19cdeaa1740f351eff6c6",
+      "capability_candidates": [
+        "research_and_source_discipline"
+      ],
+      "runtime_eligible": false,
+      "ablation_eligible": true,
+      "safety_status": "external_candidate_pool_only",
+      "source_url": "local-spec://docs/reports/NEXUS_SF_RESEARCH_SOURCE_DISCIPLINE_SPECS_2026-05-18.json#research-source-conflict-resolver",
+      "repo": "local-spec",
+      "commit_sha": "61e439494b5ed1a0aa407a627fe095967e8d3a0566dbb338556b48e01bf7b92d",
+      "license_status": "local_spec_only",
+      "security_receipt": "metadata_only_no_code_execution",
+      "workflow_scan_status": "not_applicable_no_workflow",
+      "load_when": "Load when sources disagree and the answer must preserve conflict, confidence, and provenance. Requires source-conflict source-validation; source refs, conflicting sources, source validation, provenance, and citation chain receipts.",
+      "evidence_refs": [
+        "conflicting_source_refs",
+        "resolution_reason",
+        "source_validation_status"
+      ]
+    },
+    {
+      "skill_id": "research-source-validation-auditor",
+      "source_root": "external_research_guard",
+      "source_type": "generated_source_discipline_spec",
+      "path": "external-candidate://research/research-source-validation-auditor",
+      "sha256": "7b6bd4aaec4b2c137d0bb572a9ac59f450c5f21872caff38c66d51501e142b0c",
+      "capability_candidates": [
+        "research_and_source_discipline"
+      ],
+      "runtime_eligible": false,
+      "ablation_eligible": true,
+      "safety_status": "external_candidate_pool_only",
+      "source_url": "local-spec://docs/reports/NEXUS_SF_RESEARCH_SOURCE_DISCIPLINE_SPECS_2026-05-18.json#research-source-validation-auditor",
+      "repo": "local-spec",
+      "commit_sha": "aeac38a9ab55fada71f73aa19502e4fdb70493d6811671343f3792a065d0123b",
+      "license_status": "local_spec_only",
+      "security_receipt": "metadata_only_no_code_execution",
+      "workflow_scan_status": "not_applicable_no_workflow",
+      "load_when": "Load when a research artifact needs an independent source-discipline audit before acceptance. Requires citation-chain source-conflict source-validation; source refs, conflicting sources, source validation, provenance, and citation chain receipts.",
+      "evidence_refs": [
+        "audit_findings",
+        "missing_source_refs",
+        "source_validation_status"
+      ]
+    }
+  ],
+  "claim_boundary": [
+    "Generated research candidates are metadata-only and candidate-pool-only.",
+    "They must pass v3 selection and live receipts before any runtime policy update."
+  ]
+}

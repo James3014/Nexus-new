@@ -1,0 +1,267 @@
+{
+  "capabilities": {
+    "forecast_pregate": {
+      "alternate_candidates": [],
+      "evidence_refs": [
+        "docs/reports/NEXUS_SF_COMPOSIO_AWESOME_CODEX_CHALLENGE_COMPARISON_2026-05-18.json",
+        "docs/reports/NEXUS_SF_EXTERNAL_SKILL_UPDATE_RECORD_2026-05-18.json"
+      ],
+      "external_selected_candidate": "create-plan",
+      "external_selected_source": "ComposioHQ/awesome-codex-skills",
+      "next_action": "Review for catalog primary replacement; runtime default remains blocked until promotion gate.",
+      "observed": {
+        "external_best_score": 7929.44,
+        "external_update_state": "catalog_replace_ready"
+      },
+      "replace_candidates": [
+        "create-plan"
+      ],
+      "verdict": "replace_candidate"
+    },
+    "governance_and_trust": {
+      "alternate_candidates": [
+        "acceptance-evidence-failclosed",
+        "cso",
+        "claudeosint-safe-surface-audit",
+        "gbrain-soul-audit"
+      ],
+      "curation_report": "docs/reports/NEXUS_SF_RESEARCH_TIEBREAK_AND_GOVERNANCE_CURATION_2026-05-18.json",
+      "default_candidate": null,
+      "evidence_refs": [
+        "docs/reports/NEXUS_SF_GOVERNANCE_EXPECTED_CAPABILITY_SEAL_CATALOG_2026-05-18.json",
+        "docs/reports/NEXUS_SF_GOVERNANCE_V3_SEAL_CATALOG_2026-05-18.json",
+        "docs/reports/NEXUS_SF_GOVERNANCE_V3_CANDIDATE_MUTANT_VALID_CATALOG_2026-05-18.json",
+        "docs/reports/NEXUS_SF_GOVERNANCE_V3_ROW_LEVEL_RCA_2026-05-18.json"
+      ],
+      "gap_reason": "Normal governance/evidence/second-round rows could not differentiate candidates above threshold, but candidate-bound mutant rows produced receipt-backed fail-closed alternate evidence. Runtime default remains blocked until promotion review.",
+      "needs_more_data_normal_lane": [],
+      "needs_more_data_normal_lane_closed_by": "candidate_bound_mutant_live_evidence",
+      "next_action": "Run governance runtime-review seal before runtime default promotion.",
+      "observed": {
+        "candidate_bound_mutant_pass_rows": 8,
+        "candidate_bound_mutant_rows": 8,
+        "expected_capability_seal_pass_rows": 24,
+        "expected_capability_seal_rows": 24,
+        "mutant_alternate_count": 4,
+        "mutant_kill_rate": 1,
+        "normal_lane_best_effective_rate": 0.3333,
+        "normal_lane_best_effective_rows": 2,
+        "normal_lane_best_tested_rows": 6,
+        "threshold_recommendation": "alternate_candidate_for_governance_mutant_fail_closed_lane"
+      },
+      "rejected": [
+        "self-audit"
+      ],
+      "runtime_review_candidates": [
+        "cso",
+        "acceptance-evidence-failclosed",
+        "claudeosint-safe-surface-audit",
+        "gbrain-soul-audit"
+      ],
+      "targeted_replay_report": "docs/reports/NEXUS_SF_AUTO_GOVERNANCE_TARGETED_REPLAY_2026-05-18.json",
+      "verdict": "alternate_candidate"
+    },
+    "repair_and_coding": {
+      "alternate_candidates": [
+        "tdd"
+      ],
+      "default_candidate": null,
+      "evidence_refs": [
+        "docs/reports/NEXUS_SF_TDD_SEAL_SKILL_ARM_CATALOG_2026-05-17.json",
+        "docs/reports/NEXUS_SKILL_PROMOTION_THRESHOLD_CONTRACT_REPAIR_AND_CODING_SF_TDD_SEAL_2026-05-18.json"
+      ],
+      "next_action": "Seal as catalog alternate only; do not update runtime default inside SF.",
+      "observed": {
+        "effective_rate": 0.6333,
+        "effective_rows": 19,
+        "tested_rows": 30,
+        "threshold_recommendation": "alternate_candidate"
+      },
+      "verdict": "alternate_candidate"
+    },
+    "repair_loop": {
+      "alternate_candidates": [],
+      "evidence_refs": [
+        "docs/reports/NEXUS_SF_MATTPOCOCK_CHALLENGE_COMPARISON_2026-05-18.json",
+        "docs/reports/NEXUS_SF_EXTERNAL_SKILL_UPDATE_RECORD_2026-05-18.json"
+      ],
+      "external_selected_candidate": "tdd",
+      "external_selected_source": "mattpocock/skills",
+      "next_action": "Review for catalog primary replacement; runtime default remains blocked until promotion gate.",
+      "observed": {
+        "external_best_score": 30410.32,
+        "external_update_state": "catalog_replace_ready"
+      },
+      "replace_candidates": [
+        "tdd"
+      ],
+      "verdict": "replace_candidate"
+    },
+    "research_and_source_discipline": {
+      "alternate_candidates": [
+        "research-source-validation-auditor"
+      ],
+      "candidate_assets": [
+        "research-citation-chain-verifier",
+        "research-source-conflict-resolver",
+        "research-source-validation-auditor"
+      ],
+      "default_candidate": null,
+      "evidence_refs": [
+        "docs/reports/NEXUS_SF_RESEARCH_SUPPLY_GAP_2026-05-18.json",
+        "docs/reports/NEXUS_SF_RESEARCH_SOURCE_DISCIPLINE_SPECS_2026-05-18.json",
+        "docs/reports/NEXUS_SF_RESEARCH_EXTERNAL_CANDIDATE_POOL_2026-05-18.json",
+        "docs/reports/NEXUS_SF_RESEARCH_EXTERNAL_PREFLIGHT_MATRIX_2026-05-18.json",
+        "docs/reports/NEXUS_SF_RESEARCH_MATERIALIZED_SKILL_ASSETS_2026-05-18.json",
+        "docs/reports/NEXUS_SKILL_STATUS_SF_RESEARCH_2026-05-18.json",
+        "docs/reports/NEXUS_SF_HARNESS_RCA_TOKENLESS_ROW_2026-05-18.json",
+        "docs/reports/NEXUS_SF_RESEARCH_BOUNDED_PROBE_2026-05-18.json",
+        "docs/reports/NEXUS_SF_RESEARCH_EXPECTED_CAPABILITY_ABLATION_PLAN_2026-05-18.json",
+        "docs/reports/NEXUS_SF_RESEARCH_EXPECTED_CAPABILITY_EXECUTION_MATRIX_2026-05-18.json",
+        "docs/reports/NEXUS_SF_RESEARCH_EXPECTED_CAPABILITY_PROBE4_CATALOG_2026-05-18.json",
+        "docs/reports/NEXUS_SF_RESEARCH_EXPECTED_CAPABILITY_SEAL_CATALOG_2026-05-18.json"
+      ],
+      "gap_reason": "Existing generic research skills were rejected; source-discipline candidates are materialized and status-visible. After fixing ablation-only reference reconciliation and expected-capability task selection, two source-discipline skills produced receipt-backed replace_candidate evidence. They remain non-runtime candidates until promotion review.",
+      "next_action": "Keep primary in catalog; runtime default requires separate apply gate.",
+      "observed": {
+        "bounded_probe_effective_rows": 0,
+        "bounded_probe_pass_rows": 2,
+        "bounded_probe_return_rows": 1,
+        "bounded_probe_rows": 3,
+        "expected_capability_seal_effective_rows": 6,
+        "expected_capability_seal_pass_rows": 6,
+        "expected_capability_seal_rows": 6,
+        "external_preflight_rows": 24,
+        "external_preflight_status": "PASS",
+        "materialized_candidate_assets": 3,
+        "replace_candidate_count": 2,
+        "runtime_eligible_candidates": 0,
+        "screened_live_ready_candidates": 0,
+        "status_visible_candidates": 3
+      },
+      "primary_candidate": "research-citation-chain-verifier",
+      "replace_candidates": [
+        "research-citation-chain-verifier",
+        "research-source-validation-auditor"
+      ],
+      "tie_break_report": "docs/reports/NEXUS_SF_RESEARCH_TIEBREAK_AND_GOVERNANCE_CURATION_2026-05-18.json",
+      "verdict": "replace_candidate"
+    }
+  },
+  "claim_boundary": [
+    "This record updates SF catalog intent only; it does not write runtime defaults.",
+    "Runtime promotion requires separate review after repo-local materialization and seal validation.",
+    "Public benchmark remains blocked until runtime update and benchmark readiness gates pass.",
+    "SF is closed for catalog recommendations and replacement records.",
+    "Runtime default application remains blocked until separate runtime policy review is applied.",
+    "Public benchmark remains blocked; SF evidence is not public benchmark evidence."
+  ],
+  "completion_boundary": [
+    "SF skill-fit is complete as a catalog and promotion-policy draft: all three primary capability buckets have a non-empty candidate recommendation.",
+    "SF runtime promotion is not complete: runtime defaults must not be updated from this artifact.",
+    "Public benchmark remains blocked until runtime promotion/default policy and public claim gates are reviewed separately."
+  ],
+  "evidence_refs": [
+    "docs/reports/NEXUS_SF_CAPABILITY_SKILL_PROMOTION_POLICY_DRAFT_2026-05-18.json",
+    "docs/reports/NEXUS_SF_CAPABILITY_SKILL_PROMOTION_POLICY_DRAFT_V4_2026-05-18.json",
+    "docs/reports/NEXUS_SF_RUNTIME_PROMOTION_REVIEW_V4_2026-05-18.json",
+    "docs/reports/NEXUS_SF_REPLACEMENT_LEDGER_2026-05-18.json",
+    "docs/reports/NEXUS_SF_FORECAST_CREATE_PLAN_SEAL_LIVE_REPORT_V2_2026-05-18.json",
+    "docs/reports/NEXUS_SF_RUNTIME_REVIEW_METADATA_OVERLAY_V4_2026-05-18.json",
+    "docs/reports/NEXUS_SF_RUNTIME_PROMOTION_REVIEW_V5_2026-05-18.json",
+    "docs/reports/NEXUS_SF_RUNTIME_POLICY_PATCH_PLAN_V5_2026-05-18.json"
+  ],
+  "external_update_record": "docs/reports/NEXUS_SF_EXTERNAL_SKILL_UPDATE_RECORD_2026-05-18.json",
+  "milestone_task_cards": [
+    {
+      "evidence": "docs/reports/NEXUS_SF_AUTO_GOVERNANCE_TARGETED_REPLAY_2026-05-18.json",
+      "id": "SF-AUTO-2",
+      "status": "DONE",
+      "title": "Governance Targeted Replay Closure"
+    },
+    {
+      "evidence": "docs/reports/NEXUS_SF_FINAL_CAPABILITY_SKILL_CATALOG_V6_2026-05-18.json",
+      "id": "SF-AUTO-3",
+      "status": "DONE",
+      "title": "Catalog Verdict Writer V6"
+    },
+    {
+      "evidence": "docs/reports/NEXUS_SF_SOURCE_REGISTRY_ADAPTER_2026-05-18.json",
+      "id": "SF-AUTO-1",
+      "status": "DONE",
+      "title": "Source Registry Adapter Intake Only"
+    },
+    {
+      "evidence": "pending source screen -> ablation plan -> Flash30 queue -> catalog verdict",
+      "id": "SF-AUTO-4",
+      "status": "NEXT",
+      "title": "New Skill Replacement Flow"
+    }
+  ],
+  "public_benchmark_allowed": false,
+  "runtime_policy_patch_plan": "docs/reports/NEXUS_SF_RUNTIME_POLICY_PATCH_PLAN_V5_2026-05-18.json",
+  "runtime_promotion_review": "docs/reports/NEXUS_SF_RUNTIME_PROMOTION_REVIEW_V5_2026-05-18.json",
+  "runtime_update_allowed": false,
+  "schema": "nexus.sf_final_capability_skill_catalog.v6",
+  "sf_catalog_complete": true,
+  "sf_closed_loop_complete": true,
+  "sf_complete": true,
+  "sf_completion_gate_ref": "docs/reports/NEXUS_SF_COMPLETION_GATE_2026-05-18.json",
+  "sf_completion_gate_status": "PASS",
+  "sf_promotion_complete": true,
+  "sf_promotion_policy_draft_complete": true,
+  "sf_recommendation_complete": true,
+  "sf_runtime_promotion_complete": true,
+  "sf_runtime_promotion_review_ref": "docs/reports/NEXUS_SF_RUNTIME_PROMOTION_REVIEW_2026-05-18.json",
+  "sf_runtime_promotion_review_status": "PASS",
+  "skill_fit_complete": true,
+  "status": "PASS",
+  "summary": {
+    "actionable_capability_count": 3,
+    "benchmark_lane_blocked": true,
+    "capabilities_with_alternate_or_default": 2,
+    "capabilities_with_justified_gap": 0,
+    "capability_count": 3,
+    "catalog_alternate_only_count": 4,
+    "catalog_replace_ready_count": 2,
+    "catalog_verdict_writer_status": "PASS",
+    "completion_gate_status": "PASS",
+    "external_catalog_replace_ready_count": 2,
+    "external_compared_row_count": 17,
+    "external_materialization_required_count": 5,
+    "external_project_count": 3,
+    "forecast_create_plan_keep_count": 1,
+    "forecast_create_plan_seal_status": "PASS",
+    "governance_alternate_candidate_count": 4,
+    "governance_needs_more_data_closed_count": 4,
+    "governance_runtime_review_candidate_count": 4,
+    "needs_more_data_count": 0,
+    "positive_pair_count": 7,
+    "primary_apply_ready_count": 2,
+    "promotion_policy_draft_status": "PASS",
+    "promotion_policy_draft_v4_status": "PASS",
+    "public_benchmark_allowed": false,
+    "remaining_capabilities_without_alternate_or_default": 1,
+    "remaining_capabilities_without_positive_candidate": 0,
+    "replacement_ledger_status": "PASS",
+    "repo_candidate_runtime_review_required_count": 0,
+    "research_primary_skill_id": "research-citation-chain-verifier",
+    "research_replace_candidate_count": 2,
+    "runtime_policy_apply_allowed": false,
+    "runtime_policy_patch_plan_v5_status": "PASS",
+    "runtime_promotion_review_status": "PASS",
+    "runtime_promotion_review_v4_status": "PASS",
+    "runtime_promotion_review_v5_status": "PASS",
+    "runtime_review_ready_alternate_hold_count": 2,
+    "runtime_review_ready_count": 5,
+    "runtime_update_allowed": false,
+    "sf_closed_loop_complete": true,
+    "sf_complete": true,
+    "sf_external_update_complete": true,
+    "sf_recommendation_complete": true,
+    "sf_runtime_promotion_complete": true,
+    "sf_runtime_promotion_review_complete": true,
+    "source_registry_adapter_status": "PASS",
+    "undecided_count": 0
+  }
+}

@@ -1,0 +1,3010 @@
+{
+  "schema": "nexus.sf2_capability_candidate_selection.v1",
+  "status": "PASS",
+  "summary": {
+    "capability_count": 33,
+    "capabilities_with_candidates": 32,
+    "capabilities_with_metadata_repair_candidates": 1,
+    "capabilities_without_candidates": 0,
+    "capabilities_without_ablation_candidates": 1,
+    "candidate_gap_count": 0
+  },
+  "gaps": [],
+  "selections": [
+    {
+      "capability_id": "direct_master_loop",
+      "group": "primary_execution",
+      "pillar": "artifact",
+      "phases": [
+        "S",
+        "P",
+        "X",
+        "D",
+        "R",
+        "A",
+        "C"
+      ],
+      "candidate_count": 8,
+      "candidates": [
+        {
+          "skill_id": "nexus-goal-closure-executor",
+          "path": "/Users/jameschen/Workspace/nexus/.agents/skills/nexus-goal-closure-executor/SKILL.md",
+          "source_root": "nexus_repo",
+          "source_type": "nexus_local",
+          "safety_status": "runtime_reviewed",
+          "runtime_eligible": true,
+          "ablation_eligible": true,
+          "metadata_quality": "PASS",
+          "selection_score": 192
+        },
+        {
+          "skill_id": "subagent-driven-development",
+          "path": "/Users/jameschen/Workspace/hermes-agent/skills/software-development/subagent-driven-development/SKILL.md",
+          "source_root": "hermes",
+          "source_type": "reference",
+          "safety_status": "ablation_only",
+          "runtime_eligible": false,
+          "ablation_eligible": true,
+          "metadata_quality": "PASS",
+          "selection_score": 42
+        },
+        {
+          "skill_id": "aibdd.auto.python.e2e.green",
+          "path": "/Users/jameschen/.agents/skills/aibdd.auto.python.e2e.green/SKILL.md",
+          "source_root": "agents",
+          "source_type": "reference",
+          "safety_status": "ablation_only",
+          "runtime_eligible": false,
+          "ablation_eligible": true,
+          "metadata_quality": "PASS",
+          "selection_score": 41
+        },
+        {
+          "skill_id": "aibdd.auto.python.e2e.handlers.aggregate-given",
+          "path": "/Users/jameschen/.agents/skills/aibdd.auto.python.e2e.handlers.aggregate-given/SKILL.md",
+          "source_root": "agents",
+          "source_type": "reference",
+          "safety_status": "ablation_only",
+          "runtime_eligible": false,
+          "ablation_eligible": true,
+          "metadata_quality": "PASS",
+          "selection_score": 41
+        },
+        {
+          "skill_id": "aibdd.auto.python.e2e.handlers.aggregate-then",
+          "path": "/Users/jameschen/.agents/skills/aibdd.auto.python.e2e.handlers.aggregate-then/SKILL.md",
+          "source_root": "agents",
+          "source_type": "reference",
+          "safety_status": "ablation_only",
+          "runtime_eligible": false,
+          "ablation_eligible": true,
+          "metadata_quality": "PASS",
+          "selection_score": 41
+        },
+        {
+          "skill_id": "aibdd.auto.python.e2e.handlers.command",
+          "path": "/Users/jameschen/.agents/skills/aibdd.auto.python.e2e.handlers.command/SKILL.md",
+          "source_root": "agents",
+          "source_type": "reference",
+          "safety_status": "ablation_only",
+          "runtime_eligible": false,
+          "ablation_eligible": true,
+          "metadata_quality": "PASS",
+          "selection_score": 41
+        },
+        {
+          "skill_id": "aibdd.auto.python.e2e.handlers.query",
+          "path": "/Users/jameschen/.agents/skills/aibdd.auto.python.e2e.handlers.query/SKILL.md",
+          "source_root": "agents",
+          "source_type": "reference",
+          "safety_status": "ablation_only",
+          "runtime_eligible": false,
+          "ablation_eligible": true,
+          "metadata_quality": "PASS",
+          "selection_score": 41
+        },
+        {
+          "skill_id": "aibdd.auto.python.e2e.handlers.readmodel-then",
+          "path": "/Users/jameschen/.agents/skills/aibdd.auto.python.e2e.handlers.readmodel-then/SKILL.md",
+          "source_root": "agents",
+          "source_type": "reference",
+          "safety_status": "ablation_only",
+          "runtime_eligible": false,
+          "ablation_eligible": true,
+          "metadata_quality": "PASS",
+          "selection_score": 41
+        }
+      ],
+      "metadata_repair_candidate_count": 0,
+      "metadata_repair_candidates": [],
+      "next_action": "ablation_plan_ready"
+    },
+    {
+      "capability_id": "repair_loop",
+      "group": "primary_execution",
+      "pillar": "artifact",
+      "phases": [
+        "D",
+        "R",
+        "A",
+        "C"
+      ],
+      "candidate_count": 8,
+      "candidates": [
+        {
+          "skill_id": "tdd",
+          "path": "/Users/jameschen/Workspace/nexus/.agents/skills/tdd/SKILL.md",
+          "source_root": "nexus_repo",
+          "source_type": "nexus_local",
+          "safety_status": "runtime_reviewed",
+          "runtime_eligible": true,
+          "ablation_eligible": true,
+          "metadata_quality": "PASS",
+          "selection_score": 223
+        },
+        {
+          "skill_id": "grill-me",
+          "path": "/Users/jameschen/Workspace/nexus/.agents/skills/grill-me/SKILL.md",
+          "source_root": "nexus_repo",
+          "source_type": "nexus_local",
+          "safety_status": "runtime_reviewed",
+          "runtime_eligible": true,
+          "ablation_eligible": true,
+          "metadata_quality": "PASS",
+          "selection_score": 220
+        },
+        {
+          "skill_id": "grill-with-docs",
+          "path": "/Users/jameschen/Workspace/nexus/.agents/skills/grill-with-docs/SKILL.md",
+          "source_root": "nexus_repo",
+          "source_type": "nexus_local",
+          "safety_status": "runtime_reviewed",
+          "runtime_eligible": true,
+          "ablation_eligible": true,
+          "metadata_quality": "PASS",
+          "selection_score": 220
+        },
+        {
+          "skill_id": "improve-codebase-architecture",
+          "path": "/Users/jameschen/Workspace/nexus/.agents/skills/improve-codebase-architecture/SKILL.md",
+          "source_root": "nexus_repo",
+          "source_type": "nexus_local",
+          "safety_status": "runtime_reviewed",
+          "runtime_eligible": true,
+          "ablation_eligible": true,
+          "metadata_quality": "PASS",
+          "selection_score": 219
+        },
+        {
+          "skill_id": "zoom-out",
+          "path": "/Users/jameschen/Workspace/nexus/.agents/skills/zoom-out/SKILL.md",
+          "source_root": "nexus_repo",
+          "source_type": "nexus_local",
+          "safety_status": "runtime_reviewed",
+          "runtime_eligible": true,
+          "ablation_eligible": true,
+          "metadata_quality": "PASS",
+          "selection_score": 219
+        },
+        {
+          "skill_id": "diagnose",
+          "path": "/Users/jameschen/Workspace/nexus/.agents/skills/diagnose/SKILL.md",
+          "source_root": "nexus_repo",
+          "source_type": "nexus_local",
+          "safety_status": "runtime_reviewed",
+          "runtime_eligible": true,
+          "ablation_eligible": true,
+          "metadata_quality": "PASS",
+          "selection_score": 203
+        },
+        {
+          "skill_id": "nexus-capability-upgrade",
+          "path": "/Users/jameschen/Workspace/nexus/.agents/skills/nexus-capability-upgrade/SKILL.md",
+          "source_root": "nexus_repo",
+          "source_type": "nexus_local",
+          "safety_status": "runtime_reviewed",
+          "runtime_eligible": true,
+          "ablation_eligible": true,
+          "metadata_quality": "PASS",
+          "selection_score": 191
+        },
+        {
+          "skill_id": "aibdd.auto.python.code-quality",
+          "path": "/Users/jameschen/.agents/skills/aibdd.auto.python.code-quality/SKILL.md",
+          "source_root": "agents",
+          "source_type": "reference",
+          "safety_status": "ablation_only",
+          "runtime_eligible": false,
+          "ablation_eligible": true,
+          "metadata_quality": "PASS",
+          "selection_score": 73
+        }
+      ],
+      "metadata_repair_candidate_count": 0,
+      "metadata_repair_candidates": [],
+      "next_action": "ablation_plan_ready"
+    },
+    {
+      "capability_id": "hyper_sprint",
+      "group": "primary_execution",
+      "pillar": "belief",
+      "phases": [
+        "P",
+        "X",
+        "D",
+        "R"
+      ],
+      "candidate_count": 5,
+      "candidates": [
+        {
+          "skill_id": "gstack-retro",
+          "path": "/Users/jameschen/.agents/skills/gstack-retro/SKILL.md",
+          "source_root": "agents",
+          "source_type": "reference",
+          "safety_status": "ablation_only",
+          "runtime_eligible": false,
+          "ablation_eligible": true,
+          "metadata_quality": "PASS",
+          "selection_score": 41
+        },
+        {
+          "skill_id": "retro",
+          "path": "/Users/jameschen/.agents/skills/gstack/.agents/skills/gstack-retro/SKILL.md",
+          "source_root": "agents",
+          "source_type": "reference",
+          "safety_status": "ablation_only",
+          "runtime_eligible": false,
+          "ablation_eligible": true,
+          "metadata_quality": "PASS",
+          "selection_score": 41
+        },
+        {
+          "skill_id": "wondelai-design-sprint",
+          "path": "/Users/jameschen/.agents/skills/wondelai-design-sprint/SKILL.md",
+          "source_root": "agents",
+          "source_type": "local_candidate",
+          "safety_status": "ablation_only",
+          "runtime_eligible": false,
+          "ablation_eligible": true,
+          "metadata_quality": "PASS",
+          "selection_score": 41
+        },
+        {
+          "skill_id": "wondelai-lean-startup",
+          "path": "/Users/jameschen/.agents/skills/wondelai-lean-startup/SKILL.md",
+          "source_root": "agents",
+          "source_type": "local_candidate",
+          "safety_status": "ablation_only",
+          "runtime_eligible": false,
+          "ablation_eligible": true,
+          "metadata_quality": "PASS",
+          "selection_score": 41
+        },
+        {
+          "skill_id": "wondelai-mom-test",
+          "path": "/Users/jameschen/.agents/skills/wondelai-mom-test/SKILL.md",
+          "source_root": "agents",
+          "source_type": "reference",
+          "safety_status": "ablation_only",
+          "runtime_eligible": false,
+          "ablation_eligible": true,
+          "metadata_quality": "PASS",
+          "selection_score": 41
+        }
+      ],
+      "metadata_repair_candidate_count": 0,
+      "metadata_repair_candidates": [],
+      "next_action": "ablation_plan_ready"
+    },
+    {
+      "capability_id": "nightshift",
+      "group": "primary_execution",
+      "pillar": "memory",
+      "phases": [
+        "D",
+        "R",
+        "A",
+        "C"
+      ],
+      "candidate_count": 0,
+      "candidates": [],
+      "metadata_repair_candidate_count": 3,
+      "metadata_repair_candidates": [
+        {
+          "skill_id": "agent-longrun-task-tracker",
+          "path": "/Users/jameschen/.agents/skills/devops/agent-longrun-task-tracker/SKILL.md",
+          "source_root": "agents",
+          "source_type": "reference",
+          "safety_status": "ablation_only",
+          "runtime_eligible": false,
+          "ablation_eligible": false,
+          "metadata_quality": "INCOMPLETE:capability_mount",
+          "selection_score": 1
+        },
+        {
+          "skill_id": "churn-prevention",
+          "path": "/Users/jameschen/.agents/skills/churn-prevention/SKILL.md",
+          "source_root": "agents",
+          "source_type": "local_candidate",
+          "safety_status": "ablation_only",
+          "runtime_eligible": false,
+          "ablation_eligible": false,
+          "metadata_quality": "INCOMPLETE:capability_mount",
+          "selection_score": 1
+        },
+        {
+          "skill_id": "multi-agent-go-live-gate-recovery-loop",
+          "path": "/Users/jameschen/.agents/skills/devops/multi-agent-go-live-gate-recovery-loop/SKILL.md",
+          "source_root": "agents",
+          "source_type": "reference",
+          "safety_status": "ablation_only",
+          "runtime_eligible": false,
+          "ablation_eligible": false,
+          "metadata_quality": "INCOMPLETE:capability_mount",
+          "selection_score": 1
+        }
+      ],
+      "next_action": "metadata_repair_required"
+    },
+    {
+      "capability_id": "codeintel",
+      "group": "scout_context",
+      "pillar": "artifact",
+      "phases": [
+        "S",
+        "P",
+        "X"
+      ],
+      "candidate_count": 8,
+      "candidates": [
+        {
+          "skill_id": "improve-codebase-architecture",
+          "path": "/Users/jameschen/Workspace/nexus/.agents/skills/improve-codebase-architecture/SKILL.md",
+          "source_root": "nexus_repo",
+          "source_type": "nexus_local",
+          "safety_status": "runtime_reviewed",
+          "runtime_eligible": true,
+          "ablation_eligible": true,
+          "metadata_quality": "PASS",
+          "selection_score": 191
+        },
+        {
+          "skill_id": "setup-matt-pocock-skills",
+          "path": "/Users/jameschen/Workspace/nexus/.agents/skills/setup-matt-pocock-skills/SKILL.md",
+          "source_root": "nexus_repo",
+          "source_type": "nexus_local",
+          "safety_status": "runtime_reviewed",
+          "runtime_eligible": true,
+          "ablation_eligible": true,
+          "metadata_quality": "PASS",
+          "selection_score": 191
+        },
+        {
+          "skill_id": "wondelai-software-design-philosophy",
+          "path": "/Users/jameschen/.agents/skills/wondelai-software-design-philosophy/SKILL.md",
+          "source_root": "agents",
+          "source_type": "local_candidate",
+          "safety_status": "ablation_only",
+          "runtime_eligible": false,
+          "ablation_eligible": true,
+          "metadata_quality": "PASS",
+          "selection_score": 53
+        },
+        {
+          "skill_id": "wondelai-ux-heuristics",
+          "path": "/Users/jameschen/.agents/skills/wondelai-ux-heuristics/SKILL.md",
+          "source_root": "agents",
+          "source_type": "local_candidate",
+          "safety_status": "ablation_only",
+          "runtime_eligible": false,
+          "ablation_eligible": true,
+          "metadata_quality": "PASS",
+          "selection_score": 42
+        },
+        {
+          "skill_id": "aibdd.auto.python.e2e.schema-analysis",
+          "path": "/Users/jameschen/.agents/skills/aibdd.auto.python.e2e.schema-analysis/SKILL.md",
+          "source_root": "agents",
+          "source_type": "reference",
+          "safety_status": "ablation_only",
+          "runtime_eligible": false,
+          "ablation_eligible": true,
+          "metadata_quality": "PASS",
+          "selection_score": 41
+        },
+        {
+          "skill_id": "architecture-diagram",
+          "path": "/Users/jameschen/Workspace/hermes-agent/skills/creative/architecture-diagram/SKILL.md",
+          "source_root": "hermes",
+          "source_type": "reference",
+          "safety_status": "ablation_only",
+          "runtime_eligible": false,
+          "ablation_eligible": true,
+          "metadata_quality": "PASS",
+          "selection_score": 41
+        },
+        {
+          "skill_id": "browserbase-browserbase-cli",
+          "path": "/Users/jameschen/.agents/skills/browserbase-browserbase-cli/SKILL.md",
+          "source_root": "agents",
+          "source_type": "reference",
+          "safety_status": "ablation_only",
+          "runtime_eligible": false,
+          "ablation_eligible": true,
+          "metadata_quality": "PASS",
+          "selection_score": 41
+        },
+        {
+          "skill_id": "browserbase-company-research",
+          "path": "/Users/jameschen/.agents/skills/browserbase-company-research/SKILL.md",
+          "source_root": "agents",
+          "source_type": "reference",
+          "safety_status": "ablation_only",
+          "runtime_eligible": false,
+          "ablation_eligible": true,
+          "metadata_quality": "PASS",
+          "selection_score": 41
+        }
+      ],
+      "metadata_repair_candidate_count": 0,
+      "metadata_repair_candidates": [],
+      "next_action": "ablation_plan_ready"
+    },
+    {
+      "capability_id": "research",
+      "group": "scout_context",
+      "pillar": "lancedb",
+      "phases": [
+        "S",
+        "P",
+        "X",
+        "R"
+      ],
+      "candidate_count": 8,
+      "candidates": [
+        {
+          "skill_id": "browserbase-browserbase-cli",
+          "path": "/Users/jameschen/.agents/skills/browserbase-browserbase-cli/SKILL.md",
+          "source_root": "agents",
+          "source_type": "reference",
+          "safety_status": "ablation_only",
+          "runtime_eligible": false,
+          "ablation_eligible": true,
+          "metadata_quality": "PASS",
+          "selection_score": 73
+        },
+        {
+          "skill_id": "gbrain-academic-verify",
+          "path": "/Users/jameschen/.agents/skills/gbrain-academic-verify/SKILL.md",
+          "source_root": "agents",
+          "source_type": "reference",
+          "safety_status": "ablation_only",
+          "runtime_eligible": false,
+          "ablation_eligible": true,
+          "metadata_quality": "PASS",
+          "selection_score": 73
+        },
+        {
+          "skill_id": "agent-reach",
+          "path": "/Users/jameschen/.agents/skills/agent-reach/agent_reach/skill/SKILL.md",
+          "source_root": "agents",
+          "source_type": "reference",
+          "safety_status": "ablation_only",
+          "runtime_eligible": false,
+          "ablation_eligible": true,
+          "metadata_quality": "PASS",
+          "selection_score": 72
+        },
+        {
+          "skill_id": "arxiv",
+          "path": "/Users/jameschen/Workspace/hermes-agent/skills/research/arxiv/SKILL.md",
+          "source_root": "hermes",
+          "source_type": "reference",
+          "safety_status": "ablation_only",
+          "runtime_eligible": false,
+          "ablation_eligible": true,
+          "metadata_quality": "PASS",
+          "selection_score": 72
+        },
+        {
+          "skill_id": "browserbase-browser",
+          "path": "/Users/jameschen/.agents/skills/browserbase-browser/SKILL.md",
+          "source_root": "agents",
+          "source_type": "reference",
+          "safety_status": "ablation_only",
+          "runtime_eligible": false,
+          "ablation_eligible": true,
+          "metadata_quality": "PASS",
+          "selection_score": 72
+        },
+        {
+          "skill_id": "browserbase-search",
+          "path": "/Users/jameschen/.agents/skills/browserbase-search/SKILL.md",
+          "source_root": "agents",
+          "source_type": "reference",
+          "safety_status": "ablation_only",
+          "runtime_eligible": false,
+          "ablation_eligible": true,
+          "metadata_quality": "PASS",
+          "selection_score": 72
+        },
+        {
+          "skill_id": "gbrain-perplexity-research",
+          "path": "/Users/jameschen/.agents/skills/gbrain-perplexity-research/SKILL.md",
+          "source_root": "agents",
+          "source_type": "reference",
+          "safety_status": "ablation_only",
+          "runtime_eligible": false,
+          "ablation_eligible": true,
+          "metadata_quality": "PASS",
+          "selection_score": 72
+        },
+        {
+          "skill_id": "browserbase-company-research",
+          "path": "/Users/jameschen/.agents/skills/browserbase-company-research/SKILL.md",
+          "source_root": "agents",
+          "source_type": "reference",
+          "safety_status": "ablation_only",
+          "runtime_eligible": false,
+          "ablation_eligible": true,
+          "metadata_quality": "PASS",
+          "selection_score": 71
+        }
+      ],
+      "metadata_repair_candidate_count": 0,
+      "metadata_repair_candidates": [],
+      "next_action": "ablation_plan_ready"
+    },
+    {
+      "capability_id": "research_control_plane",
+      "group": "scout_context",
+      "pillar": "claim",
+      "phases": [
+        "S",
+        "P",
+        "X",
+        "R",
+        "C"
+      ],
+      "candidate_count": 8,
+      "candidates": [
+        {
+          "skill_id": "agent-reach",
+          "path": "/Users/jameschen/.agents/skills/agent-reach/agent_reach/skill/SKILL.md",
+          "source_root": "agents",
+          "source_type": "reference",
+          "safety_status": "ablation_only",
+          "runtime_eligible": false,
+          "ablation_eligible": true,
+          "metadata_quality": "PASS",
+          "selection_score": 68
+        },
+        {
+          "skill_id": "aibdd.auto.python.e2e.green",
+          "path": "/Users/jameschen/.agents/skills/aibdd.auto.python.e2e.green/SKILL.md",
+          "source_root": "agents",
+          "source_type": "reference",
+          "safety_status": "ablation_only",
+          "runtime_eligible": false,
+          "ablation_eligible": true,
+          "metadata_quality": "PASS",
+          "selection_score": 68
+        },
+        {
+          "skill_id": "aibdd.auto.python.e2e.handlers.aggregate-given",
+          "path": "/Users/jameschen/.agents/skills/aibdd.auto.python.e2e.handlers.aggregate-given/SKILL.md",
+          "source_root": "agents",
+          "source_type": "reference",
+          "safety_status": "ablation_only",
+          "runtime_eligible": false,
+          "ablation_eligible": true,
+          "metadata_quality": "PASS",
+          "selection_score": 68
+        },
+        {
+          "skill_id": "aibdd.auto.python.e2e.handlers.aggregate-then",
+          "path": "/Users/jameschen/.agents/skills/aibdd.auto.python.e2e.handlers.aggregate-then/SKILL.md",
+          "source_root": "agents",
+          "source_type": "reference",
+          "safety_status": "ablation_only",
+          "runtime_eligible": false,
+          "ablation_eligible": true,
+          "metadata_quality": "PASS",
+          "selection_score": 68
+        },
+        {
+          "skill_id": "aibdd.auto.python.e2e.handlers.command",
+          "path": "/Users/jameschen/.agents/skills/aibdd.auto.python.e2e.handlers.command/SKILL.md",
+          "source_root": "agents",
+          "source_type": "reference",
+          "safety_status": "ablation_only",
+          "runtime_eligible": false,
+          "ablation_eligible": true,
+          "metadata_quality": "PASS",
+          "selection_score": 68
+        },
+        {
+          "skill_id": "aibdd.auto.python.e2e.handlers.query",
+          "path": "/Users/jameschen/.agents/skills/aibdd.auto.python.e2e.handlers.query/SKILL.md",
+          "source_root": "agents",
+          "source_type": "reference",
+          "safety_status": "ablation_only",
+          "runtime_eligible": false,
+          "ablation_eligible": true,
+          "metadata_quality": "PASS",
+          "selection_score": 68
+        },
+        {
+          "skill_id": "aibdd.auto.python.e2e.handlers.readmodel-then",
+          "path": "/Users/jameschen/.agents/skills/aibdd.auto.python.e2e.handlers.readmodel-then/SKILL.md",
+          "source_root": "agents",
+          "source_type": "reference",
+          "safety_status": "ablation_only",
+          "runtime_eligible": false,
+          "ablation_eligible": true,
+          "metadata_quality": "PASS",
+          "selection_score": 68
+        },
+        {
+          "skill_id": "aibdd.auto.python.e2e.handlers.success-failure",
+          "path": "/Users/jameschen/.agents/skills/aibdd.auto.python.e2e.handlers.success-failure/SKILL.md",
+          "source_root": "agents",
+          "source_type": "reference",
+          "safety_status": "ablation_only",
+          "runtime_eligible": false,
+          "ablation_eligible": true,
+          "metadata_quality": "PASS",
+          "selection_score": 68
+        }
+      ],
+      "metadata_repair_candidate_count": 0,
+      "metadata_repair_candidates": [],
+      "next_action": "ablation_plan_ready"
+    },
+    {
+      "capability_id": "xray",
+      "group": "scout_context",
+      "pillar": "artifact",
+      "phases": [
+        "S",
+        "X",
+        "R"
+      ],
+      "candidate_count": 8,
+      "candidates": [
+        {
+          "skill_id": "gstack-investigate",
+          "path": "/Users/jameschen/.agents/skills/gstack-investigate/SKILL.md",
+          "source_root": "agents",
+          "source_type": "reference",
+          "safety_status": "ablation_only",
+          "runtime_eligible": false,
+          "ablation_eligible": true,
+          "metadata_quality": "PASS",
+          "selection_score": 54
+        },
+        {
+          "skill_id": "gstack-openclaw-investigate",
+          "path": "/Users/jameschen/.agents/skills/gstack/openclaw/skills/gstack-openclaw-investigate/SKILL.md",
+          "source_root": "agents",
+          "source_type": "reference",
+          "safety_status": "ablation_only",
+          "runtime_eligible": false,
+          "ablation_eligible": true,
+          "metadata_quality": "PASS",
+          "selection_score": 54
+        },
+        {
+          "skill_id": "investigate",
+          "path": "/Users/jameschen/.agents/skills/gstack/.agents/skills/gstack-investigate/SKILL.md",
+          "source_root": "agents",
+          "source_type": "reference",
+          "safety_status": "ablation_only",
+          "runtime_eligible": false,
+          "ablation_eligible": true,
+          "metadata_quality": "PASS",
+          "selection_score": 54
+        },
+        {
+          "skill_id": "systematic-debugging",
+          "path": "/Users/jameschen/Workspace/hermes-agent/skills/software-development/systematic-debugging/SKILL.md",
+          "source_root": "hermes",
+          "source_type": "reference",
+          "safety_status": "ablation_only",
+          "runtime_eligible": false,
+          "ablation_eligible": true,
+          "metadata_quality": "PASS",
+          "selection_score": 53
+        },
+        {
+          "skill_id": "workos-live-preview-debug-loop",
+          "path": "/Users/jameschen/.agents/skills/devops/workos-live-preview-debug-loop/SKILL.md",
+          "source_root": "agents",
+          "source_type": "reference",
+          "safety_status": "ablation_only",
+          "runtime_eligible": false,
+          "ablation_eligible": true,
+          "metadata_quality": "PASS",
+          "selection_score": 53
+        },
+        {
+          "skill_id": "addy-browser-testing-with-devtools",
+          "path": "/Users/jameschen/.agents/skills/addy-browser-testing-with-devtools/SKILL.md",
+          "source_root": "agents",
+          "source_type": "reference",
+          "safety_status": "ablation_only",
+          "runtime_eligible": false,
+          "ablation_eligible": true,
+          "metadata_quality": "PASS",
+          "selection_score": 41
+        },
+        {
+          "skill_id": "browserbase-fetch",
+          "path": "/Users/jameschen/.agents/skills/browserbase-fetch/SKILL.md",
+          "source_root": "agents",
+          "source_type": "reference",
+          "safety_status": "ablation_only",
+          "runtime_eligible": false,
+          "ablation_eligible": true,
+          "metadata_quality": "PASS",
+          "selection_score": 41
+        },
+        {
+          "skill_id": "codebase-inspection",
+          "path": "/Users/jameschen/Workspace/hermes-agent/skills/github/codebase-inspection/SKILL.md",
+          "source_root": "hermes",
+          "source_type": "reference",
+          "safety_status": "ablation_only",
+          "runtime_eligible": false,
+          "ablation_eligible": true,
+          "metadata_quality": "PASS",
+          "selection_score": 41
+        }
+      ],
+      "metadata_repair_candidate_count": 0,
+      "metadata_repair_candidates": [],
+      "next_action": "ablation_plan_ready"
+    },
+    {
+      "capability_id": "learn_ask",
+      "group": "scout_context",
+      "pillar": "memory",
+      "phases": [
+        "S",
+        "P",
+        "R",
+        "C"
+      ],
+      "candidate_count": 8,
+      "candidates": [
+        {
+          "skill_id": "notebooklm-bulk-injector",
+          "path": "/Users/jameschen/Workspace/nexus/.agents/skills/notebooklm-bulk-injector/SKILL.md",
+          "source_root": "nexus_repo",
+          "source_type": "nexus_local",
+          "safety_status": "runtime_reviewed",
+          "runtime_eligible": true,
+          "ablation_eligible": true,
+          "metadata_quality": "PASS",
+          "selection_score": 220
+        },
+        {
+          "skill_id": "notebooklm-context-bridge",
+          "path": "/Users/jameschen/Workspace/nexus/.agents/skills/notebooklm-context-bridge/SKILL.md",
+          "source_root": "nexus_repo",
+          "source_type": "nexus_local",
+          "safety_status": "runtime_reviewed",
+          "runtime_eligible": true,
+          "ablation_eligible": true,
+          "metadata_quality": "PASS",
+          "selection_score": 220
+        },
+        {
+          "skill_id": "nexus-capability-upgrade",
+          "path": "/Users/jameschen/Workspace/nexus/.agents/skills/nexus-capability-upgrade/SKILL.md",
+          "source_root": "nexus_repo",
+          "source_type": "nexus_local",
+          "safety_status": "runtime_reviewed",
+          "runtime_eligible": true,
+          "ablation_eligible": true,
+          "metadata_quality": "PASS",
+          "selection_score": 191
+        },
+        {
+          "skill_id": "nexus-root-cause-probe",
+          "path": "/Users/jameschen/Workspace/nexus/.agents/skills/nexus-root-cause-probe/SKILL.md",
+          "source_root": "nexus_repo",
+          "source_type": "nexus_local",
+          "safety_status": "runtime_reviewed",
+          "runtime_eligible": true,
+          "ablation_eligible": true,
+          "metadata_quality": "PASS",
+          "selection_score": 191
+        },
+        {
+          "skill_id": "baoyu-comic",
+          "path": "/Users/jameschen/Workspace/hermes-agent/skills/creative/baoyu-comic/SKILL.md",
+          "source_root": "hermes",
+          "source_type": "reference",
+          "safety_status": "ablation_only",
+          "runtime_eligible": false,
+          "ablation_eligible": true,
+          "metadata_quality": "PASS",
+          "selection_score": 70
+        },
+        {
+          "skill_id": "gbrain-query",
+          "path": "/Users/jameschen/.agents/skills/gbrain-query/SKILL.md",
+          "source_root": "agents",
+          "source_type": "reference",
+          "safety_status": "ablation_only",
+          "runtime_eligible": false,
+          "ablation_eligible": true,
+          "metadata_quality": "PASS",
+          "selection_score": 70
+        },
+        {
+          "skill_id": "slack-gif-creator",
+          "path": "/Users/jameschen/.agents/skills/slack-gif-creator/SKILL.md",
+          "source_root": "agents",
+          "source_type": "local_candidate",
+          "safety_status": "ablation_only",
+          "runtime_eligible": false,
+          "ablation_eligible": true,
+          "metadata_quality": "PASS",
+          "selection_score": 70
+        },
+        {
+          "skill_id": "nexus-live-ask-replay-normalization-gate",
+          "path": "/Users/jameschen/.agents/skills/devops/nexus-live-ask-replay-normalization-gate/SKILL.md",
+          "source_root": "agents",
+          "source_type": "local_candidate",
+          "safety_status": "ablation_only",
+          "runtime_eligible": false,
+          "ablation_eligible": true,
+          "metadata_quality": "PASS",
+          "selection_score": 42
+        }
+      ],
+      "metadata_repair_candidate_count": 0,
+      "metadata_repair_candidates": [],
+      "next_action": "ablation_plan_ready"
+    },
+    {
+      "capability_id": "lancedb",
+      "group": "scout_context",
+      "pillar": "lancedb",
+      "phases": [
+        "S",
+        "X",
+        "R"
+      ],
+      "candidate_count": 3,
+      "candidates": [
+        {
+          "skill_id": "dspy",
+          "path": "/Users/jameschen/Workspace/hermes-agent/skills/mlops/research/dspy/SKILL.md",
+          "source_root": "hermes",
+          "source_type": "reference",
+          "safety_status": "ablation_only",
+          "runtime_eligible": false,
+          "ablation_eligible": true,
+          "metadata_quality": "PASS",
+          "selection_score": 41
+        },
+        {
+          "skill_id": "imagegen",
+          "path": "/Users/jameschen/.agents/skills/.system/imagegen/SKILL.md",
+          "source_root": "agents",
+          "source_type": "local_candidate",
+          "safety_status": "ablation_only",
+          "runtime_eligible": false,
+          "ablation_eligible": true,
+          "metadata_quality": "PASS",
+          "selection_score": 41
+        },
+        {
+          "skill_id": "nexus-live-ask-replay-normalization-gate",
+          "path": "/Users/jameschen/.agents/skills/devops/nexus-live-ask-replay-normalization-gate/SKILL.md",
+          "source_root": "agents",
+          "source_type": "local_candidate",
+          "safety_status": "ablation_only",
+          "runtime_eligible": false,
+          "ablation_eligible": true,
+          "metadata_quality": "PASS",
+          "selection_score": 41
+        }
+      ],
+      "metadata_repair_candidate_count": 0,
+      "metadata_repair_candidates": [],
+      "next_action": "ablation_plan_ready"
+    },
+    {
+      "capability_id": "memory",
+      "group": "memory_learning",
+      "pillar": "memory",
+      "phases": [
+        "S",
+        "P",
+        "R",
+        "C"
+      ],
+      "candidate_count": 4,
+      "candidates": [
+        {
+          "skill_id": "obsidian-cli",
+          "path": "/Users/jameschen/.agents/skills/obsidian-skills/skills/obsidian-cli/SKILL.md",
+          "source_root": "agents",
+          "source_type": "local_candidate",
+          "safety_status": "ablation_only",
+          "runtime_eligible": false,
+          "ablation_eligible": true,
+          "metadata_quality": "PASS",
+          "selection_score": 41
+        },
+        {
+          "skill_id": "product-self-knowledge",
+          "path": "/Users/jameschen/.agents/skills/product-self-knowledge/SKILL.md",
+          "source_root": "agents",
+          "source_type": "local_candidate",
+          "safety_status": "ablation_only",
+          "runtime_eligible": false,
+          "ablation_eligible": true,
+          "metadata_quality": "PASS",
+          "selection_score": 41
+        },
+        {
+          "skill_id": "wondelai-continuous-discovery",
+          "path": "/Users/jameschen/.agents/skills/wondelai-continuous-discovery/SKILL.md",
+          "source_root": "agents",
+          "source_type": "local_candidate",
+          "safety_status": "ablation_only",
+          "runtime_eligible": false,
+          "ablation_eligible": true,
+          "metadata_quality": "PASS",
+          "selection_score": 41
+        },
+        {
+          "skill_id": "wondelai-top-design",
+          "path": "/Users/jameschen/.agents/skills/wondelai-top-design/SKILL.md",
+          "source_root": "agents",
+          "source_type": "local_candidate",
+          "safety_status": "ablation_only",
+          "runtime_eligible": false,
+          "ablation_eligible": true,
+          "metadata_quality": "PASS",
+          "selection_score": 41
+        }
+      ],
+      "metadata_repair_candidate_count": 0,
+      "metadata_repair_candidates": [],
+      "next_action": "ablation_plan_ready"
+    },
+    {
+      "capability_id": "learning_closure",
+      "group": "memory_learning",
+      "pillar": "memory",
+      "phases": [
+        "R",
+        "A",
+        "C"
+      ],
+      "candidate_count": 1,
+      "candidates": [
+        {
+          "skill_id": "nexus-new-idea-intake-decision-tree",
+          "path": "/Users/jameschen/.agents/skills/devops/nexus-new-idea-intake-decision-tree/SKILL.md",
+          "source_root": "agents",
+          "source_type": "local_candidate",
+          "safety_status": "ablation_only",
+          "runtime_eligible": false,
+          "ablation_eligible": true,
+          "metadata_quality": "PASS",
+          "selection_score": 41
+        }
+      ],
+      "metadata_repair_candidate_count": 0,
+      "metadata_repair_candidates": [],
+      "next_action": "ablation_plan_ready"
+    },
+    {
+      "capability_id": "autoreason",
+      "group": "reasoning_acceleration",
+      "pillar": "belief",
+      "phases": [
+        "P",
+        "X",
+        "D",
+        "R"
+      ],
+      "candidate_count": 5,
+      "candidates": [
+        {
+          "skill_id": "nexus-benchmark-public-report",
+          "path": "/Users/jameschen/Workspace/nexus/.agents/skills/nexus-benchmark-public-report/SKILL.md",
+          "source_root": "nexus_repo",
+          "source_type": "nexus_local",
+          "safety_status": "runtime_reviewed",
+          "runtime_eligible": true,
+          "ablation_eligible": true,
+          "metadata_quality": "PASS",
+          "selection_score": 191
+        },
+        {
+          "skill_id": "benchmark-models",
+          "path": "/Users/jameschen/.agents/skills/gstack/.agents/skills/gstack-benchmark-models/SKILL.md",
+          "source_root": "agents",
+          "source_type": "reference",
+          "safety_status": "ablation_only",
+          "runtime_eligible": false,
+          "ablation_eligible": true,
+          "metadata_quality": "PASS",
+          "selection_score": 41
+        },
+        {
+          "skill_id": "cso",
+          "path": "/Users/jameschen/.agents/skills/gstack/.agents/skills/gstack-cso/SKILL.md",
+          "source_root": "agents",
+          "source_type": "reference",
+          "safety_status": "ablation_only",
+          "runtime_eligible": false,
+          "ablation_eligible": true,
+          "metadata_quality": "PASS",
+          "selection_score": 41
+        },
+        {
+          "skill_id": "gstack-benchmark-models",
+          "path": "/Users/jameschen/.agents/skills/gstack-benchmark-models/SKILL.md",
+          "source_root": "agents",
+          "source_type": "reference",
+          "safety_status": "ablation_only",
+          "runtime_eligible": false,
+          "ablation_eligible": true,
+          "metadata_quality": "PASS",
+          "selection_score": 41
+        },
+        {
+          "skill_id": "gstack-cso",
+          "path": "/Users/jameschen/.agents/skills/gstack-cso/SKILL.md",
+          "source_root": "agents",
+          "source_type": "reference",
+          "safety_status": "ablation_only",
+          "runtime_eligible": false,
+          "ablation_eligible": true,
+          "metadata_quality": "PASS",
+          "selection_score": 41
+        }
+      ],
+      "metadata_repair_candidate_count": 0,
+      "metadata_repair_candidates": [],
+      "next_action": "ablation_plan_ready"
+    },
+    {
+      "capability_id": "ddtree",
+      "group": "reasoning_acceleration",
+      "pillar": "belief",
+      "phases": [
+        "P",
+        "X",
+        "D"
+      ],
+      "candidate_count": 1,
+      "candidates": [
+        {
+          "skill_id": "grill-me",
+          "path": "/Users/jameschen/Workspace/nexus/.agents/skills/grill-me/SKILL.md",
+          "source_root": "nexus_repo",
+          "source_type": "nexus_local",
+          "safety_status": "runtime_reviewed",
+          "runtime_eligible": true,
+          "ablation_eligible": true,
+          "metadata_quality": "PASS",
+          "selection_score": 203
+        }
+      ],
+      "metadata_repair_candidate_count": 0,
+      "metadata_repair_candidates": [],
+      "next_action": "ablation_plan_ready"
+    },
+    {
+      "capability_id": "belief",
+      "group": "reasoning_acceleration",
+      "pillar": "belief",
+      "phases": [
+        "P",
+        "X",
+        "D",
+        "R"
+      ],
+      "candidate_count": 8,
+      "candidates": [
+        {
+          "skill_id": "wondelai-software-design-philosophy",
+          "path": "/Users/jameschen/.agents/skills/wondelai-software-design-philosophy/SKILL.md",
+          "source_root": "agents",
+          "source_type": "local_candidate",
+          "safety_status": "ablation_only",
+          "runtime_eligible": false,
+          "ablation_eligible": true,
+          "metadata_quality": "PASS",
+          "selection_score": 42
+        },
+        {
+          "skill_id": "addy-doubt-driven-development",
+          "path": "/Users/jameschen/.agents/skills/addy-doubt-driven-development/SKILL.md",
+          "source_root": "agents",
+          "source_type": "reference",
+          "safety_status": "ablation_only",
+          "runtime_eligible": false,
+          "ablation_eligible": true,
+          "metadata_quality": "PASS",
+          "selection_score": 41
+        },
+        {
+          "skill_id": "addy-shipping-and-launch",
+          "path": "/Users/jameschen/.agents/skills/addy-shipping-and-launch/SKILL.md",
+          "source_root": "agents",
+          "source_type": "reference",
+          "safety_status": "ablation_only",
+          "runtime_eligible": false,
+          "ablation_eligible": true,
+          "metadata_quality": "PASS",
+          "selection_score": 41
+        },
+        {
+          "skill_id": "browserbase-autobrowse",
+          "path": "/Users/jameschen/.agents/skills/browserbase-autobrowse/SKILL.md",
+          "source_root": "agents",
+          "source_type": "reference",
+          "safety_status": "ablation_only",
+          "runtime_eligible": false,
+          "ablation_eligible": true,
+          "metadata_quality": "PASS",
+          "selection_score": 41
+        },
+        {
+          "skill_id": "careful",
+          "path": "/Users/jameschen/.agents/skills/gstack/.agents/skills/gstack-careful/SKILL.md",
+          "source_root": "agents",
+          "source_type": "reference",
+          "safety_status": "ablation_only",
+          "runtime_eligible": false,
+          "ablation_eligible": true,
+          "metadata_quality": "PASS",
+          "selection_score": 41
+        },
+        {
+          "skill_id": "content-strategy",
+          "path": "/Users/jameschen/.agents/skills/content-strategy/SKILL.md",
+          "source_root": "agents",
+          "source_type": "reference",
+          "safety_status": "ablation_only",
+          "runtime_eligible": false,
+          "ablation_eligible": true,
+          "metadata_quality": "PASS",
+          "selection_score": 41
+        },
+        {
+          "skill_id": "free-tool-strategy",
+          "path": "/Users/jameschen/.agents/skills/free-tool-strategy/SKILL.md",
+          "source_root": "agents",
+          "source_type": "local_candidate",
+          "safety_status": "ablation_only",
+          "runtime_eligible": false,
+          "ablation_eligible": true,
+          "metadata_quality": "PASS",
+          "selection_score": 41
+        },
+        {
+          "skill_id": "gbrain-strategic-reading",
+          "path": "/Users/jameschen/.agents/skills/gbrain-strategic-reading/SKILL.md",
+          "source_root": "agents",
+          "source_type": "reference",
+          "safety_status": "ablation_only",
+          "runtime_eligible": false,
+          "ablation_eligible": true,
+          "metadata_quality": "PASS",
+          "selection_score": 41
+        }
+      ],
+      "metadata_repair_candidate_count": 0,
+      "metadata_repair_candidates": [],
+      "next_action": "ablation_plan_ready"
+    },
+    {
+      "capability_id": "autonomic_router",
+      "group": "reasoning_acceleration",
+      "pillar": "belief",
+      "phases": [
+        "S",
+        "P",
+        "X"
+      ],
+      "candidate_count": 8,
+      "candidates": [
+        {
+          "skill_id": "design-html",
+          "path": "/Users/jameschen/.agents/skills/gstack/.agents/skills/gstack-design-html/SKILL.md",
+          "source_root": "agents",
+          "source_type": "reference",
+          "safety_status": "ablation_only",
+          "runtime_eligible": false,
+          "ablation_eligible": true,
+          "metadata_quality": "PASS",
+          "selection_score": 41
+        },
+        {
+          "skill_id": "gbrain-cross-modal-review",
+          "path": "/Users/jameschen/.agents/skills/gbrain-cross-modal-review/SKILL.md",
+          "source_root": "agents",
+          "source_type": "reference",
+          "safety_status": "ablation_only",
+          "runtime_eligible": false,
+          "ablation_eligible": true,
+          "metadata_quality": "PASS",
+          "selection_score": 41
+        },
+        {
+          "skill_id": "gstack-design-html",
+          "path": "/Users/jameschen/.agents/skills/gstack-design-html/SKILL.md",
+          "source_root": "agents",
+          "source_type": "reference",
+          "safety_status": "ablation_only",
+          "runtime_eligible": false,
+          "ablation_eligible": true,
+          "metadata_quality": "PASS",
+          "selection_score": 41
+        },
+        {
+          "skill_id": "gstack-scrape",
+          "path": "/Users/jameschen/.agents/skills/gstack-scrape/SKILL.md",
+          "source_root": "agents",
+          "source_type": "reference",
+          "safety_status": "ablation_only",
+          "runtime_eligible": false,
+          "ablation_eligible": true,
+          "metadata_quality": "PASS",
+          "selection_score": 41
+        },
+        {
+          "skill_id": "nexus-agent-execution-board-failclosed",
+          "path": "/Users/jameschen/.agents/skills/devops/nexus-agent-execution-board-failclosed/SKILL.md",
+          "source_root": "agents",
+          "source_type": "local_candidate",
+          "safety_status": "ablation_only",
+          "runtime_eligible": false,
+          "ablation_eligible": true,
+          "metadata_quality": "PASS",
+          "selection_score": 41
+        },
+        {
+          "skill_id": "nexus-gemini-code-review-orchestrator",
+          "path": "/Users/jameschen/.agents/skills/devops/nexus-gemini-code-review-orchestrator/SKILL.md",
+          "source_root": "agents",
+          "source_type": "local_candidate",
+          "safety_status": "ablation_only",
+          "runtime_eligible": false,
+          "ablation_eligible": true,
+          "metadata_quality": "PASS",
+          "selection_score": 41
+        },
+        {
+          "skill_id": "nexus-new-idea-intake-decision-tree",
+          "path": "/Users/jameschen/.agents/skills/devops/nexus-new-idea-intake-decision-tree/SKILL.md",
+          "source_root": "agents",
+          "source_type": "local_candidate",
+          "safety_status": "ablation_only",
+          "runtime_eligible": false,
+          "ablation_eligible": true,
+          "metadata_quality": "PASS",
+          "selection_score": 41
+        },
+        {
+          "skill_id": "revops",
+          "path": "/Users/jameschen/.agents/skills/revops/SKILL.md",
+          "source_root": "agents",
+          "source_type": "reference",
+          "safety_status": "ablation_only",
+          "runtime_eligible": false,
+          "ablation_eligible": true,
+          "metadata_quality": "PASS",
+          "selection_score": 41
+        }
+      ],
+      "metadata_repair_candidate_count": 0,
+      "metadata_repair_candidates": [],
+      "next_action": "ablation_plan_ready"
+    },
+    {
+      "capability_id": "forecast_pregate",
+      "group": "reasoning_acceleration",
+      "pillar": "belief",
+      "phases": [
+        "S",
+        "P"
+      ],
+      "candidate_count": 8,
+      "candidates": [
+        {
+          "skill_id": "to-issues",
+          "path": "/Users/jameschen/Workspace/nexus/.agents/skills/to-issues/SKILL.md",
+          "source_root": "nexus_repo",
+          "source_type": "nexus_local",
+          "safety_status": "runtime_reviewed",
+          "runtime_eligible": true,
+          "ablation_eligible": true,
+          "metadata_quality": "PASS",
+          "selection_score": 218
+        },
+        {
+          "skill_id": "to-prd",
+          "path": "/Users/jameschen/Workspace/nexus/.agents/skills/to-prd/SKILL.md",
+          "source_root": "nexus_repo",
+          "source_type": "nexus_local",
+          "safety_status": "runtime_reviewed",
+          "runtime_eligible": true,
+          "ablation_eligible": true,
+          "metadata_quality": "PASS",
+          "selection_score": 218
+        },
+        {
+          "skill_id": "triage",
+          "path": "/Users/jameschen/Workspace/nexus/.agents/skills/triage/SKILL.md",
+          "source_root": "nexus_repo",
+          "source_type": "nexus_local",
+          "safety_status": "runtime_reviewed",
+          "runtime_eligible": true,
+          "ablation_eligible": true,
+          "metadata_quality": "PASS",
+          "selection_score": 218
+        },
+        {
+          "skill_id": "addy-shipping-and-launch",
+          "path": "/Users/jameschen/.agents/skills/addy-shipping-and-launch/SKILL.md",
+          "source_root": "agents",
+          "source_type": "reference",
+          "safety_status": "ablation_only",
+          "runtime_eligible": false,
+          "ablation_eligible": true,
+          "metadata_quality": "PASS",
+          "selection_score": 68
+        },
+        {
+          "skill_id": "aibdd.spec.prd.detail-req.gen",
+          "path": "/Users/jameschen/.agents/skills/aibdd.spec.prd.detail-req.gen/SKILL.md",
+          "source_root": "agents",
+          "source_type": "reference",
+          "safety_status": "ablation_only",
+          "runtime_eligible": false,
+          "ablation_eligible": true,
+          "metadata_quality": "PASS",
+          "selection_score": 68
+        },
+        {
+          "skill_id": "executing-plans",
+          "path": "/Users/jameschen/.agents/skills/executing-plans/SKILL.md",
+          "source_root": "agents",
+          "source_type": "local_candidate",
+          "safety_status": "ablation_only",
+          "runtime_eligible": false,
+          "ablation_eligible": true,
+          "metadata_quality": "PASS",
+          "selection_score": 68
+        },
+        {
+          "skill_id": "github-issues",
+          "path": "/Users/jameschen/Workspace/hermes-agent/skills/github/github-issues/SKILL.md",
+          "source_root": "hermes",
+          "source_type": "reference",
+          "safety_status": "ablation_only",
+          "runtime_eligible": false,
+          "ablation_eligible": true,
+          "metadata_quality": "PASS",
+          "selection_score": 68
+        },
+        {
+          "skill_id": "gstack-openclaw-ceo-review",
+          "path": "/Users/jameschen/.agents/skills/gstack/openclaw/skills/gstack-openclaw-ceo-review/SKILL.md",
+          "source_root": "agents",
+          "source_type": "reference",
+          "safety_status": "ablation_only",
+          "runtime_eligible": false,
+          "ablation_eligible": true,
+          "metadata_quality": "PASS",
+          "selection_score": 68
+        }
+      ],
+      "metadata_repair_candidate_count": 0,
+      "metadata_repair_candidates": [],
+      "next_action": "ablation_plan_ready"
+    },
+    {
+      "capability_id": "swarm_multi_agent",
+      "group": "collaboration",
+      "pillar": "artifact",
+      "phases": [
+        "P",
+        "X",
+        "D",
+        "A",
+        "C"
+      ],
+      "candidate_count": 5,
+      "candidates": [
+        {
+          "skill_id": "benepass-reimbursement",
+          "path": "/Users/jameschen/.agents/skills/benepass-reimbursement/SKILL.md",
+          "source_root": "agents",
+          "source_type": "reference",
+          "safety_status": "ablation_only",
+          "runtime_eligible": false,
+          "ablation_eligible": true,
+          "metadata_quality": "PASS",
+          "selection_score": 41
+        },
+        {
+          "skill_id": "multi-agent-handoff-governance-design",
+          "path": "/Users/jameschen/.agents/skills/devops/multi-agent-handoff-governance-design/SKILL.md",
+          "source_root": "agents",
+          "source_type": "local_candidate",
+          "safety_status": "ablation_only",
+          "runtime_eligible": false,
+          "ablation_eligible": true,
+          "metadata_quality": "PASS",
+          "selection_score": 41
+        },
+        {
+          "skill_id": "nexus-gemini-code-review-orchestrator",
+          "path": "/Users/jameschen/.agents/skills/devops/nexus-gemini-code-review-orchestrator/SKILL.md",
+          "source_root": "agents",
+          "source_type": "local_candidate",
+          "safety_status": "ablation_only",
+          "runtime_eligible": false,
+          "ablation_eligible": true,
+          "metadata_quality": "PASS",
+          "selection_score": 41
+        },
+        {
+          "skill_id": "nexus-worktree-hotfix-sync-and-verify",
+          "path": "/Users/jameschen/.agents/skills/devops/nexus-worktree-hotfix-sync-and-verify/SKILL.md",
+          "source_root": "agents",
+          "source_type": "local_candidate",
+          "safety_status": "ablation_only",
+          "runtime_eligible": false,
+          "ablation_eligible": true,
+          "metadata_quality": "PASS",
+          "selection_score": 41
+        },
+        {
+          "skill_id": "research-paper-writing",
+          "path": "/Users/jameschen/Workspace/hermes-agent/skills/research/research-paper-writing/SKILL.md",
+          "source_root": "hermes",
+          "source_type": "reference",
+          "safety_status": "ablation_only",
+          "runtime_eligible": false,
+          "ablation_eligible": true,
+          "metadata_quality": "PASS",
+          "selection_score": 41
+        }
+      ],
+      "metadata_repair_candidate_count": 0,
+      "metadata_repair_candidates": [],
+      "next_action": "ablation_plan_ready"
+    },
+    {
+      "capability_id": "drone",
+      "group": "collaboration",
+      "pillar": "artifact",
+      "phases": [
+        "X",
+        "D",
+        "R"
+      ],
+      "candidate_count": 5,
+      "candidates": [
+        {
+          "skill_id": "claude-code",
+          "path": "/Users/jameschen/Workspace/hermes-agent/skills/autonomous-ai-agents/claude-code/SKILL.md",
+          "source_root": "hermes",
+          "source_type": "reference",
+          "safety_status": "ablation_only",
+          "runtime_eligible": false,
+          "ablation_eligible": true,
+          "metadata_quality": "PASS",
+          "selection_score": 41
+        },
+        {
+          "skill_id": "codex",
+          "path": "/Users/jameschen/Workspace/hermes-agent/skills/autonomous-ai-agents/codex/SKILL.md",
+          "source_root": "hermes",
+          "source_type": "reference",
+          "safety_status": "ablation_only",
+          "runtime_eligible": false,
+          "ablation_eligible": true,
+          "metadata_quality": "PASS",
+          "selection_score": 41
+        },
+        {
+          "skill_id": "opencode",
+          "path": "/Users/jameschen/Workspace/hermes-agent/skills/autonomous-ai-agents/opencode/SKILL.md",
+          "source_root": "hermes",
+          "source_type": "reference",
+          "safety_status": "ablation_only",
+          "runtime_eligible": false,
+          "ablation_eligible": true,
+          "metadata_quality": "PASS",
+          "selection_score": 41
+        },
+        {
+          "skill_id": "subagent-driven-development",
+          "path": "/Users/jameschen/Workspace/hermes-agent/skills/software-development/subagent-driven-development/SKILL.md",
+          "source_root": "hermes",
+          "source_type": "reference",
+          "safety_status": "ablation_only",
+          "runtime_eligible": false,
+          "ablation_eligible": true,
+          "metadata_quality": "PASS",
+          "selection_score": 41
+        },
+        {
+          "skill_id": "wondelai-high-perf-browser",
+          "path": "/Users/jameschen/.agents/skills/wondelai-high-perf-browser/SKILL.md",
+          "source_root": "agents",
+          "source_type": "reference",
+          "safety_status": "ablation_only",
+          "runtime_eligible": false,
+          "ablation_eligible": true,
+          "metadata_quality": "PASS",
+          "selection_score": 41
+        }
+      ],
+      "metadata_repair_candidate_count": 0,
+      "metadata_repair_candidates": [],
+      "next_action": "ablation_plan_ready"
+    },
+    {
+      "capability_id": "file_lock_security_gate",
+      "group": "collaboration",
+      "pillar": "mempalace",
+      "phases": [
+        "P",
+        "D",
+        "A"
+      ],
+      "candidate_count": 7,
+      "candidates": [
+        {
+          "skill_id": "freeze",
+          "path": "/Users/jameschen/.agents/skills/gstack/.agents/skills/gstack-freeze/SKILL.md",
+          "source_root": "agents",
+          "source_type": "reference",
+          "safety_status": "ablation_only",
+          "runtime_eligible": false,
+          "ablation_eligible": true,
+          "metadata_quality": "PASS",
+          "selection_score": 41
+        },
+        {
+          "skill_id": "gbrain-skillify",
+          "path": "/Users/jameschen/.agents/skills/gbrain-skillify/SKILL.md",
+          "source_root": "agents",
+          "source_type": "reference",
+          "safety_status": "ablation_only",
+          "runtime_eligible": false,
+          "ablation_eligible": true,
+          "metadata_quality": "PASS",
+          "selection_score": 41
+        },
+        {
+          "skill_id": "gstack-freeze",
+          "path": "/Users/jameschen/.agents/skills/gstack-freeze/SKILL.md",
+          "source_root": "agents",
+          "source_type": "reference",
+          "safety_status": "ablation_only",
+          "runtime_eligible": false,
+          "ablation_eligible": true,
+          "metadata_quality": "PASS",
+          "selection_score": 41
+        },
+        {
+          "skill_id": "gstack-guard",
+          "path": "/Users/jameschen/.agents/skills/gstack-guard/SKILL.md",
+          "source_root": "agents",
+          "source_type": "reference",
+          "safety_status": "ablation_only",
+          "runtime_eligible": false,
+          "ablation_eligible": true,
+          "metadata_quality": "PASS",
+          "selection_score": 41
+        },
+        {
+          "skill_id": "gstack-plan-eng-review",
+          "path": "/Users/jameschen/.agents/skills/gstack-plan-eng-review/SKILL.md",
+          "source_root": "agents",
+          "source_type": "reference",
+          "safety_status": "ablation_only",
+          "runtime_eligible": false,
+          "ablation_eligible": true,
+          "metadata_quality": "PASS",
+          "selection_score": 41
+        },
+        {
+          "skill_id": "guard",
+          "path": "/Users/jameschen/.agents/skills/gstack/.agents/skills/gstack-guard/SKILL.md",
+          "source_root": "agents",
+          "source_type": "reference",
+          "safety_status": "ablation_only",
+          "runtime_eligible": false,
+          "ablation_eligible": true,
+          "metadata_quality": "PASS",
+          "selection_score": 41
+        },
+        {
+          "skill_id": "plan-eng-review",
+          "path": "/Users/jameschen/.agents/skills/gstack/.agents/skills/gstack-plan-eng-review/SKILL.md",
+          "source_root": "agents",
+          "source_type": "reference",
+          "safety_status": "ablation_only",
+          "runtime_eligible": false,
+          "ablation_eligible": true,
+          "metadata_quality": "PASS",
+          "selection_score": 41
+        }
+      ],
+      "metadata_repair_candidate_count": 0,
+      "metadata_repair_candidates": [],
+      "next_action": "ablation_plan_ready"
+    },
+    {
+      "capability_id": "mempalace",
+      "group": "governance_risk",
+      "pillar": "mempalace",
+      "phases": [
+        "S",
+        "P",
+        "A",
+        "C"
+      ],
+      "candidate_count": 8,
+      "candidates": [
+        {
+          "skill_id": "gstack-review",
+          "path": "/Users/jameschen/.agents/skills/gstack-review/SKILL.md",
+          "source_root": "agents",
+          "source_type": "reference",
+          "safety_status": "ablation_only",
+          "runtime_eligible": false,
+          "ablation_eligible": true,
+          "metadata_quality": "PASS",
+          "selection_score": 42
+        },
+        {
+          "skill_id": "review",
+          "path": "/Users/jameschen/.agents/skills/gstack/.agents/skills/gstack-review/SKILL.md",
+          "source_root": "agents",
+          "source_type": "reference",
+          "safety_status": "ablation_only",
+          "runtime_eligible": false,
+          "ablation_eligible": true,
+          "metadata_quality": "PASS",
+          "selection_score": 42
+        },
+        {
+          "skill_id": "careful",
+          "path": "/Users/jameschen/.agents/skills/gstack/.agents/skills/gstack-careful/SKILL.md",
+          "source_root": "agents",
+          "source_type": "reference",
+          "safety_status": "ablation_only",
+          "runtime_eligible": false,
+          "ablation_eligible": true,
+          "metadata_quality": "PASS",
+          "selection_score": 41
+        },
+        {
+          "skill_id": "claudeosint-safe-surface-audit",
+          "path": "/Users/jameschen/.agents/skills/claudeosint-safe-surface-audit/SKILL.md",
+          "source_root": "agents",
+          "source_type": "reference",
+          "safety_status": "ablation_only",
+          "runtime_eligible": false,
+          "ablation_eligible": true,
+          "metadata_quality": "PASS",
+          "selection_score": 41
+        },
+        {
+          "skill_id": "gbrain-soul-audit",
+          "path": "/Users/jameschen/.agents/skills/gbrain-soul-audit/SKILL.md",
+          "source_root": "agents",
+          "source_type": "reference",
+          "safety_status": "ablation_only",
+          "runtime_eligible": false,
+          "ablation_eligible": true,
+          "metadata_quality": "PASS",
+          "selection_score": 41
+        },
+        {
+          "skill_id": "gstack-careful",
+          "path": "/Users/jameschen/.agents/skills/gstack-careful/SKILL.md",
+          "source_root": "agents",
+          "source_type": "reference",
+          "safety_status": "ablation_only",
+          "runtime_eligible": false,
+          "ablation_eligible": true,
+          "metadata_quality": "PASS",
+          "selection_score": 41
+        },
+        {
+          "skill_id": "gstack-guard",
+          "path": "/Users/jameschen/.agents/skills/gstack-guard/SKILL.md",
+          "source_root": "agents",
+          "source_type": "reference",
+          "safety_status": "ablation_only",
+          "runtime_eligible": false,
+          "ablation_eligible": true,
+          "metadata_quality": "PASS",
+          "selection_score": 41
+        },
+        {
+          "skill_id": "gstack-setup-gbrain",
+          "path": "/Users/jameschen/.agents/skills/gstack-setup-gbrain/SKILL.md",
+          "source_root": "agents",
+          "source_type": "reference",
+          "safety_status": "ablation_only",
+          "runtime_eligible": false,
+          "ablation_eligible": true,
+          "metadata_quality": "PASS",
+          "selection_score": 41
+        }
+      ],
+      "metadata_repair_candidate_count": 0,
+      "metadata_repair_candidates": [],
+      "next_action": "ablation_plan_ready"
+    },
+    {
+      "capability_id": "policy_capability_gate",
+      "group": "governance_risk",
+      "pillar": "mempalace",
+      "phases": [
+        "S",
+        "P",
+        "A",
+        "C"
+      ],
+      "candidate_count": 8,
+      "candidates": [
+        {
+          "skill_id": "diagnose",
+          "path": "/Users/jameschen/Workspace/nexus/.agents/skills/diagnose/SKILL.md",
+          "source_root": "nexus_repo",
+          "source_type": "nexus_local",
+          "safety_status": "runtime_reviewed",
+          "runtime_eligible": true,
+          "ablation_eligible": true,
+          "metadata_quality": "PASS",
+          "selection_score": 220
+        },
+        {
+          "skill_id": "nexus-goal-closure-executor",
+          "path": "/Users/jameschen/Workspace/nexus/.agents/skills/nexus-goal-closure-executor/SKILL.md",
+          "source_root": "nexus_repo",
+          "source_type": "nexus_local",
+          "safety_status": "runtime_reviewed",
+          "runtime_eligible": true,
+          "ablation_eligible": true,
+          "metadata_quality": "PASS",
+          "selection_score": 220
+        },
+        {
+          "skill_id": "nexus-root-cause-probe",
+          "path": "/Users/jameschen/Workspace/nexus/.agents/skills/nexus-root-cause-probe/SKILL.md",
+          "source_root": "nexus_repo",
+          "source_type": "nexus_local",
+          "safety_status": "runtime_reviewed",
+          "runtime_eligible": true,
+          "ablation_eligible": true,
+          "metadata_quality": "PASS",
+          "selection_score": 220
+        },
+        {
+          "skill_id": "setup-matt-pocock-skills",
+          "path": "/Users/jameschen/Workspace/nexus/.agents/skills/setup-matt-pocock-skills/SKILL.md",
+          "source_root": "nexus_repo",
+          "source_type": "nexus_local",
+          "safety_status": "runtime_reviewed",
+          "runtime_eligible": true,
+          "ablation_eligible": true,
+          "metadata_quality": "PASS",
+          "selection_score": 220
+        },
+        {
+          "skill_id": "acceptance-evidence-failclosed",
+          "path": "/Users/jameschen/.agents/skills/devops/acceptance-evidence-failclosed/SKILL.md",
+          "source_root": "agents",
+          "source_type": "reference",
+          "safety_status": "ablation_only",
+          "runtime_eligible": false,
+          "ablation_eligible": true,
+          "metadata_quality": "PASS",
+          "selection_score": 70
+        },
+        {
+          "skill_id": "addy-doubt-driven-development",
+          "path": "/Users/jameschen/.agents/skills/addy-doubt-driven-development/SKILL.md",
+          "source_root": "agents",
+          "source_type": "reference",
+          "safety_status": "ablation_only",
+          "runtime_eligible": false,
+          "ablation_eligible": true,
+          "metadata_quality": "PASS",
+          "selection_score": 70
+        },
+        {
+          "skill_id": "browse",
+          "path": "/Users/jameschen/.agents/skills/gstack/.agents/skills/gstack-browse/SKILL.md",
+          "source_root": "agents",
+          "source_type": "reference",
+          "safety_status": "ablation_only",
+          "runtime_eligible": false,
+          "ablation_eligible": true,
+          "metadata_quality": "PASS",
+          "selection_score": 70
+        },
+        {
+          "skill_id": "browserbase-browser-trace",
+          "path": "/Users/jameschen/.agents/skills/browserbase-browser-trace/SKILL.md",
+          "source_root": "agents",
+          "source_type": "reference",
+          "safety_status": "ablation_only",
+          "runtime_eligible": false,
+          "ablation_eligible": true,
+          "metadata_quality": "PASS",
+          "selection_score": 70
+        }
+      ],
+      "metadata_repair_candidate_count": 0,
+      "metadata_repair_candidates": [],
+      "next_action": "ablation_plan_ready"
+    },
+    {
+      "capability_id": "ultra_review",
+      "group": "governance_risk",
+      "pillar": "artifact",
+      "phases": [
+        "A",
+        "C"
+      ],
+      "candidate_count": 8,
+      "candidates": [
+        {
+          "skill_id": "diagnose",
+          "path": "/Users/jameschen/Workspace/nexus/.agents/skills/diagnose/SKILL.md",
+          "source_root": "nexus_repo",
+          "source_type": "nexus_local",
+          "safety_status": "runtime_reviewed",
+          "runtime_eligible": true,
+          "ablation_eligible": true,
+          "metadata_quality": "PASS",
+          "selection_score": 219
+        },
+        {
+          "skill_id": "nexus-goal-closure-executor",
+          "path": "/Users/jameschen/Workspace/nexus/.agents/skills/nexus-goal-closure-executor/SKILL.md",
+          "source_root": "nexus_repo",
+          "source_type": "nexus_local",
+          "safety_status": "runtime_reviewed",
+          "runtime_eligible": true,
+          "ablation_eligible": true,
+          "metadata_quality": "PASS",
+          "selection_score": 218
+        },
+        {
+          "skill_id": "nexus-root-cause-probe",
+          "path": "/Users/jameschen/Workspace/nexus/.agents/skills/nexus-root-cause-probe/SKILL.md",
+          "source_root": "nexus_repo",
+          "source_type": "nexus_local",
+          "safety_status": "runtime_reviewed",
+          "runtime_eligible": true,
+          "ablation_eligible": true,
+          "metadata_quality": "PASS",
+          "selection_score": 218
+        },
+        {
+          "skill_id": "setup-matt-pocock-skills",
+          "path": "/Users/jameschen/Workspace/nexus/.agents/skills/setup-matt-pocock-skills/SKILL.md",
+          "source_root": "nexus_repo",
+          "source_type": "nexus_local",
+          "safety_status": "runtime_reviewed",
+          "runtime_eligible": true,
+          "ablation_eligible": true,
+          "metadata_quality": "PASS",
+          "selection_score": 218
+        },
+        {
+          "skill_id": "triage",
+          "path": "/Users/jameschen/Workspace/nexus/.agents/skills/triage/SKILL.md",
+          "source_root": "nexus_repo",
+          "source_type": "nexus_local",
+          "safety_status": "runtime_reviewed",
+          "runtime_eligible": true,
+          "ablation_eligible": true,
+          "metadata_quality": "PASS",
+          "selection_score": 191
+        },
+        {
+          "skill_id": "cso",
+          "path": "/Users/jameschen/.agents/skills/gstack/.agents/skills/gstack-cso/SKILL.md",
+          "source_root": "agents",
+          "source_type": "reference",
+          "safety_status": "ablation_only",
+          "runtime_eligible": false,
+          "ablation_eligible": true,
+          "metadata_quality": "PASS",
+          "selection_score": 71
+        },
+        {
+          "skill_id": "gstack-cso",
+          "path": "/Users/jameschen/.agents/skills/gstack-cso/SKILL.md",
+          "source_root": "agents",
+          "source_type": "reference",
+          "safety_status": "ablation_only",
+          "runtime_eligible": false,
+          "ablation_eligible": true,
+          "metadata_quality": "PASS",
+          "selection_score": 71
+        },
+        {
+          "skill_id": "addy-doubt-driven-development",
+          "path": "/Users/jameschen/.agents/skills/addy-doubt-driven-development/SKILL.md",
+          "source_root": "agents",
+          "source_type": "reference",
+          "safety_status": "ablation_only",
+          "runtime_eligible": false,
+          "ablation_eligible": true,
+          "metadata_quality": "PASS",
+          "selection_score": 70
+        }
+      ],
+      "metadata_repair_candidate_count": 0,
+      "metadata_repair_candidates": [],
+      "next_action": "ablation_plan_ready"
+    },
+    {
+      "capability_id": "artifact_gate",
+      "group": "delivery_validation",
+      "pillar": "artifact",
+      "phases": [
+        "A",
+        "C"
+      ],
+      "candidate_count": 8,
+      "candidates": [
+        {
+          "skill_id": "nexus-goal-closure-executor",
+          "path": "/Users/jameschen/Workspace/nexus/.agents/skills/nexus-goal-closure-executor/SKILL.md",
+          "source_root": "nexus_repo",
+          "source_type": "nexus_local",
+          "safety_status": "runtime_reviewed",
+          "runtime_eligible": true,
+          "ablation_eligible": true,
+          "metadata_quality": "PASS",
+          "selection_score": 219
+        },
+        {
+          "skill_id": "nexus-root-cause-probe",
+          "path": "/Users/jameschen/Workspace/nexus/.agents/skills/nexus-root-cause-probe/SKILL.md",
+          "source_root": "nexus_repo",
+          "source_type": "nexus_local",
+          "safety_status": "runtime_reviewed",
+          "runtime_eligible": true,
+          "ablation_eligible": true,
+          "metadata_quality": "PASS",
+          "selection_score": 219
+        },
+        {
+          "skill_id": "diagnose",
+          "path": "/Users/jameschen/Workspace/nexus/.agents/skills/diagnose/SKILL.md",
+          "source_root": "nexus_repo",
+          "source_type": "nexus_local",
+          "safety_status": "runtime_reviewed",
+          "runtime_eligible": true,
+          "ablation_eligible": true,
+          "metadata_quality": "PASS",
+          "selection_score": 218
+        },
+        {
+          "skill_id": "setup-matt-pocock-skills",
+          "path": "/Users/jameschen/Workspace/nexus/.agents/skills/setup-matt-pocock-skills/SKILL.md",
+          "source_root": "nexus_repo",
+          "source_type": "nexus_local",
+          "safety_status": "runtime_reviewed",
+          "runtime_eligible": true,
+          "ablation_eligible": true,
+          "metadata_quality": "PASS",
+          "selection_score": 218
+        },
+        {
+          "skill_id": "nexus-benchmark-public-report",
+          "path": "/Users/jameschen/Workspace/nexus/.agents/skills/nexus-benchmark-public-report/SKILL.md",
+          "source_root": "nexus_repo",
+          "source_type": "nexus_local",
+          "safety_status": "runtime_reviewed",
+          "runtime_eligible": true,
+          "ablation_eligible": true,
+          "metadata_quality": "PASS",
+          "selection_score": 192
+        },
+        {
+          "skill_id": "acceptance-evidence-failclosed",
+          "path": "/Users/jameschen/.agents/skills/devops/acceptance-evidence-failclosed/SKILL.md",
+          "source_root": "agents",
+          "source_type": "reference",
+          "safety_status": "ablation_only",
+          "runtime_eligible": false,
+          "ablation_eligible": true,
+          "metadata_quality": "PASS",
+          "selection_score": 69
+        },
+        {
+          "skill_id": "browse",
+          "path": "/Users/jameschen/.agents/skills/gstack/.agents/skills/gstack-browse/SKILL.md",
+          "source_root": "agents",
+          "source_type": "reference",
+          "safety_status": "ablation_only",
+          "runtime_eligible": false,
+          "ablation_eligible": true,
+          "metadata_quality": "PASS",
+          "selection_score": 69
+        },
+        {
+          "skill_id": "claudeosint-safe-methodology",
+          "path": "/Users/jameschen/.agents/skills/claudeosint-safe-methodology/SKILL.md",
+          "source_root": "agents",
+          "source_type": "reference",
+          "safety_status": "ablation_only",
+          "runtime_eligible": false,
+          "ablation_eligible": true,
+          "metadata_quality": "PASS",
+          "selection_score": 69
+        }
+      ],
+      "metadata_repair_candidate_count": 0,
+      "metadata_repair_candidates": [],
+      "next_action": "ablation_plan_ready"
+    },
+    {
+      "capability_id": "claim_gate",
+      "group": "delivery_validation",
+      "pillar": "claim",
+      "phases": [
+        "A",
+        "C"
+      ],
+      "candidate_count": 8,
+      "candidates": [
+        {
+          "skill_id": "diagnose",
+          "path": "/Users/jameschen/Workspace/nexus/.agents/skills/diagnose/SKILL.md",
+          "source_root": "nexus_repo",
+          "source_type": "nexus_local",
+          "safety_status": "runtime_reviewed",
+          "runtime_eligible": true,
+          "ablation_eligible": true,
+          "metadata_quality": "PASS",
+          "selection_score": 218
+        },
+        {
+          "skill_id": "nexus-goal-closure-executor",
+          "path": "/Users/jameschen/Workspace/nexus/.agents/skills/nexus-goal-closure-executor/SKILL.md",
+          "source_root": "nexus_repo",
+          "source_type": "nexus_local",
+          "safety_status": "runtime_reviewed",
+          "runtime_eligible": true,
+          "ablation_eligible": true,
+          "metadata_quality": "PASS",
+          "selection_score": 218
+        },
+        {
+          "skill_id": "nexus-root-cause-probe",
+          "path": "/Users/jameschen/Workspace/nexus/.agents/skills/nexus-root-cause-probe/SKILL.md",
+          "source_root": "nexus_repo",
+          "source_type": "nexus_local",
+          "safety_status": "runtime_reviewed",
+          "runtime_eligible": true,
+          "ablation_eligible": true,
+          "metadata_quality": "PASS",
+          "selection_score": 218
+        },
+        {
+          "skill_id": "setup-matt-pocock-skills",
+          "path": "/Users/jameschen/Workspace/nexus/.agents/skills/setup-matt-pocock-skills/SKILL.md",
+          "source_root": "nexus_repo",
+          "source_type": "nexus_local",
+          "safety_status": "runtime_reviewed",
+          "runtime_eligible": true,
+          "ablation_eligible": true,
+          "metadata_quality": "PASS",
+          "selection_score": 218
+        },
+        {
+          "skill_id": "nexus-benchmark-continuous-optimization",
+          "path": "/Users/jameschen/Workspace/nexus/.agents/skills/nexus-benchmark-continuous-optimization/SKILL.md",
+          "source_root": "nexus_repo",
+          "source_type": "nexus_local",
+          "safety_status": "runtime_reviewed",
+          "runtime_eligible": true,
+          "ablation_eligible": true,
+          "metadata_quality": "PASS",
+          "selection_score": 204
+        },
+        {
+          "skill_id": "nexus-benchmark-public-report",
+          "path": "/Users/jameschen/Workspace/nexus/.agents/skills/nexus-benchmark-public-report/SKILL.md",
+          "source_root": "nexus_repo",
+          "source_type": "nexus_local",
+          "safety_status": "runtime_reviewed",
+          "runtime_eligible": true,
+          "ablation_eligible": true,
+          "metadata_quality": "PASS",
+          "selection_score": 191
+        },
+        {
+          "skill_id": "verification-before-completion",
+          "path": "/Users/jameschen/.agents/skills/verification-before-completion/SKILL.md",
+          "source_root": "agents",
+          "source_type": "local_candidate",
+          "safety_status": "ablation_only",
+          "runtime_eligible": false,
+          "ablation_eligible": true,
+          "metadata_quality": "PASS",
+          "selection_score": 69
+        },
+        {
+          "skill_id": "acceptance-evidence-failclosed",
+          "path": "/Users/jameschen/.agents/skills/devops/acceptance-evidence-failclosed/SKILL.md",
+          "source_root": "agents",
+          "source_type": "reference",
+          "safety_status": "ablation_only",
+          "runtime_eligible": false,
+          "ablation_eligible": true,
+          "metadata_quality": "PASS",
+          "selection_score": 68
+        }
+      ],
+      "metadata_repair_candidate_count": 0,
+      "metadata_repair_candidates": [],
+      "next_action": "ablation_plan_ready"
+    },
+    {
+      "capability_id": "delivery_acceptance_gate",
+      "group": "delivery_validation",
+      "pillar": "artifact",
+      "phases": [
+        "A",
+        "C"
+      ],
+      "candidate_count": 8,
+      "candidates": [
+        {
+          "skill_id": "nexus-benchmark-continuous-optimization",
+          "path": "/Users/jameschen/Workspace/nexus/.agents/skills/nexus-benchmark-continuous-optimization/SKILL.md",
+          "source_root": "nexus_repo",
+          "source_type": "nexus_local",
+          "safety_status": "runtime_reviewed",
+          "runtime_eligible": true,
+          "ablation_eligible": true,
+          "metadata_quality": "PASS",
+          "selection_score": 191
+        },
+        {
+          "skill_id": "acceptance-evidence-failclosed",
+          "path": "/Users/jameschen/.agents/skills/devops/acceptance-evidence-failclosed/SKILL.md",
+          "source_root": "agents",
+          "source_type": "reference",
+          "safety_status": "ablation_only",
+          "runtime_eligible": false,
+          "ablation_eligible": true,
+          "metadata_quality": "PASS",
+          "selection_score": 41
+        },
+        {
+          "skill_id": "nexus-acceptance-evidence-gate",
+          "path": "/Users/jameschen/.agents/skills/devops/nexus-acceptance-evidence-gate/SKILL.md",
+          "source_root": "agents",
+          "source_type": "local_candidate",
+          "safety_status": "ablation_only",
+          "runtime_eligible": false,
+          "ablation_eligible": true,
+          "metadata_quality": "PASS",
+          "selection_score": 41
+        },
+        {
+          "skill_id": "nexus-new-idea-intake-decision-tree",
+          "path": "/Users/jameschen/.agents/skills/devops/nexus-new-idea-intake-decision-tree/SKILL.md",
+          "source_root": "agents",
+          "source_type": "local_candidate",
+          "safety_status": "ablation_only",
+          "runtime_eligible": false,
+          "ablation_eligible": true,
+          "metadata_quality": "PASS",
+          "selection_score": 41
+        },
+        {
+          "skill_id": "wondelai-continuous-discovery",
+          "path": "/Users/jameschen/.agents/skills/wondelai-continuous-discovery/SKILL.md",
+          "source_root": "agents",
+          "source_type": "local_candidate",
+          "safety_status": "ablation_only",
+          "runtime_eligible": false,
+          "ablation_eligible": true,
+          "metadata_quality": "PASS",
+          "selection_score": 41
+        },
+        {
+          "skill_id": "wondelai-inspired-product",
+          "path": "/Users/jameschen/.agents/skills/wondelai-inspired-product/SKILL.md",
+          "source_root": "agents",
+          "source_type": "local_candidate",
+          "safety_status": "ablation_only",
+          "runtime_eligible": false,
+          "ablation_eligible": true,
+          "metadata_quality": "PASS",
+          "selection_score": 41
+        },
+        {
+          "skill_id": "wondelai-negotiation",
+          "path": "/Users/jameschen/.agents/skills/wondelai-negotiation/SKILL.md",
+          "source_root": "agents",
+          "source_type": "reference",
+          "safety_status": "ablation_only",
+          "runtime_eligible": false,
+          "ablation_eligible": true,
+          "metadata_quality": "PASS",
+          "selection_score": 41
+        },
+        {
+          "skill_id": "wondelai-pragmatic-programmer",
+          "path": "/Users/jameschen/.agents/skills/wondelai-pragmatic-programmer/SKILL.md",
+          "source_root": "agents",
+          "source_type": "local_candidate",
+          "safety_status": "ablation_only",
+          "runtime_eligible": false,
+          "ablation_eligible": true,
+          "metadata_quality": "PASS",
+          "selection_score": 41
+        }
+      ],
+      "metadata_repair_candidate_count": 0,
+      "metadata_repair_candidates": [],
+      "next_action": "ablation_plan_ready"
+    },
+    {
+      "capability_id": "sandbox_replay",
+      "group": "delivery_validation",
+      "pillar": "artifact",
+      "phases": [
+        "D",
+        "R",
+        "A"
+      ],
+      "candidate_count": 8,
+      "candidates": [
+        {
+          "skill_id": "gstack-health",
+          "path": "/Users/jameschen/.agents/skills/gstack-health/SKILL.md",
+          "source_root": "agents",
+          "source_type": "reference",
+          "safety_status": "ablation_only",
+          "runtime_eligible": false,
+          "ablation_eligible": true,
+          "metadata_quality": "PASS",
+          "selection_score": 53
+        },
+        {
+          "skill_id": "health",
+          "path": "/Users/jameschen/.agents/skills/gstack/.agents/skills/gstack-health/SKILL.md",
+          "source_root": "agents",
+          "source_type": "reference",
+          "safety_status": "ablation_only",
+          "runtime_eligible": false,
+          "ablation_eligible": true,
+          "metadata_quality": "PASS",
+          "selection_score": 53
+        },
+        {
+          "skill_id": "aibdd.auto.java.e2e.refactor",
+          "path": "/Users/jameschen/.agents/skills/aibdd.auto.java.e2e.refactor/SKILL.md",
+          "source_root": "agents",
+          "source_type": "reference",
+          "safety_status": "ablation_only",
+          "runtime_eligible": false,
+          "ablation_eligible": true,
+          "metadata_quality": "PASS",
+          "selection_score": 41
+        },
+        {
+          "skill_id": "aibdd.auto.python.e2e.green",
+          "path": "/Users/jameschen/.agents/skills/aibdd.auto.python.e2e.green/SKILL.md",
+          "source_root": "agents",
+          "source_type": "reference",
+          "safety_status": "ablation_only",
+          "runtime_eligible": false,
+          "ablation_eligible": true,
+          "metadata_quality": "PASS",
+          "selection_score": 41
+        },
+        {
+          "skill_id": "aibdd.auto.python.e2e.handlers.aggregate-given",
+          "path": "/Users/jameschen/.agents/skills/aibdd.auto.python.e2e.handlers.aggregate-given/SKILL.md",
+          "source_root": "agents",
+          "source_type": "reference",
+          "safety_status": "ablation_only",
+          "runtime_eligible": false,
+          "ablation_eligible": true,
+          "metadata_quality": "PASS",
+          "selection_score": 41
+        },
+        {
+          "skill_id": "aibdd.auto.python.e2e.handlers.aggregate-then",
+          "path": "/Users/jameschen/.agents/skills/aibdd.auto.python.e2e.handlers.aggregate-then/SKILL.md",
+          "source_root": "agents",
+          "source_type": "reference",
+          "safety_status": "ablation_only",
+          "runtime_eligible": false,
+          "ablation_eligible": true,
+          "metadata_quality": "PASS",
+          "selection_score": 41
+        },
+        {
+          "skill_id": "aibdd.auto.python.e2e.handlers.command",
+          "path": "/Users/jameschen/.agents/skills/aibdd.auto.python.e2e.handlers.command/SKILL.md",
+          "source_root": "agents",
+          "source_type": "reference",
+          "safety_status": "ablation_only",
+          "runtime_eligible": false,
+          "ablation_eligible": true,
+          "metadata_quality": "PASS",
+          "selection_score": 41
+        },
+        {
+          "skill_id": "aibdd.auto.python.e2e.handlers.query",
+          "path": "/Users/jameschen/.agents/skills/aibdd.auto.python.e2e.handlers.query/SKILL.md",
+          "source_root": "agents",
+          "source_type": "reference",
+          "safety_status": "ablation_only",
+          "runtime_eligible": false,
+          "ablation_eligible": true,
+          "metadata_quality": "PASS",
+          "selection_score": 41
+        }
+      ],
+      "metadata_repair_candidate_count": 0,
+      "metadata_repair_candidates": [],
+      "next_action": "ablation_plan_ready"
+    },
+    {
+      "capability_id": "benchmark_meta_opt",
+      "group": "self_evolution",
+      "pillar": "claim",
+      "phases": [
+        "R",
+        "A",
+        "C"
+      ],
+      "candidate_count": 8,
+      "candidates": [
+        {
+          "skill_id": "nexus-benchmark-continuous-optimization",
+          "path": "/Users/jameschen/Workspace/nexus/.agents/skills/nexus-benchmark-continuous-optimization/SKILL.md",
+          "source_root": "nexus_repo",
+          "source_type": "nexus_local",
+          "safety_status": "runtime_reviewed",
+          "runtime_eligible": true,
+          "ablation_eligible": true,
+          "metadata_quality": "PASS",
+          "selection_score": 220
+        },
+        {
+          "skill_id": "nexus-benchmark-public-report",
+          "path": "/Users/jameschen/Workspace/nexus/.agents/skills/nexus-benchmark-public-report/SKILL.md",
+          "source_root": "nexus_repo",
+          "source_type": "nexus_local",
+          "safety_status": "runtime_reviewed",
+          "runtime_eligible": true,
+          "ablation_eligible": true,
+          "metadata_quality": "PASS",
+          "selection_score": 219
+        },
+        {
+          "skill_id": "nexus-capability-upgrade",
+          "path": "/Users/jameschen/Workspace/nexus/.agents/skills/nexus-capability-upgrade/SKILL.md",
+          "source_root": "nexus_repo",
+          "source_type": "nexus_local",
+          "safety_status": "runtime_reviewed",
+          "runtime_eligible": true,
+          "ablation_eligible": true,
+          "metadata_quality": "PASS",
+          "selection_score": 219
+        },
+        {
+          "skill_id": "benchmark-models",
+          "path": "/Users/jameschen/.agents/skills/gstack/.agents/skills/gstack-benchmark-models/SKILL.md",
+          "source_root": "agents",
+          "source_type": "reference",
+          "safety_status": "ablation_only",
+          "runtime_eligible": false,
+          "ablation_eligible": true,
+          "metadata_quality": "PASS",
+          "selection_score": 71
+        },
+        {
+          "skill_id": "gstack-benchmark-models",
+          "path": "/Users/jameschen/.agents/skills/gstack-benchmark-models/SKILL.md",
+          "source_root": "agents",
+          "source_type": "reference",
+          "safety_status": "ablation_only",
+          "runtime_eligible": false,
+          "ablation_eligible": true,
+          "metadata_quality": "PASS",
+          "selection_score": 71
+        },
+        {
+          "skill_id": "benchmark",
+          "path": "/Users/jameschen/.agents/skills/gstack/.agents/skills/gstack-benchmark/SKILL.md",
+          "source_root": "agents",
+          "source_type": "reference",
+          "safety_status": "ablation_only",
+          "runtime_eligible": false,
+          "ablation_eligible": true,
+          "metadata_quality": "PASS",
+          "selection_score": 70
+        },
+        {
+          "skill_id": "canary",
+          "path": "/Users/jameschen/.agents/skills/gstack/.agents/skills/gstack-canary/SKILL.md",
+          "source_root": "agents",
+          "source_type": "reference",
+          "safety_status": "ablation_only",
+          "runtime_eligible": false,
+          "ablation_eligible": true,
+          "metadata_quality": "PASS",
+          "selection_score": 70
+        },
+        {
+          "skill_id": "evaluating-llms-harness",
+          "path": "/Users/jameschen/Workspace/hermes-agent/skills/mlops/evaluation/lm-evaluation-harness/SKILL.md",
+          "source_root": "hermes",
+          "source_type": "reference",
+          "safety_status": "ablation_only",
+          "runtime_eligible": false,
+          "ablation_eligible": true,
+          "metadata_quality": "PASS",
+          "selection_score": 70
+        }
+      ],
+      "metadata_repair_candidate_count": 0,
+      "metadata_repair_candidates": [],
+      "next_action": "ablation_plan_ready"
+    },
+    {
+      "capability_id": "regression_guard",
+      "group": "self_evolution",
+      "pillar": "artifact",
+      "phases": [
+        "R",
+        "A",
+        "C"
+      ],
+      "candidate_count": 8,
+      "candidates": [
+        {
+          "skill_id": "nexus-benchmark-continuous-optimization",
+          "path": "/Users/jameschen/Workspace/nexus/.agents/skills/nexus-benchmark-continuous-optimization/SKILL.md",
+          "source_root": "nexus_repo",
+          "source_type": "nexus_local",
+          "safety_status": "runtime_reviewed",
+          "runtime_eligible": true,
+          "ablation_eligible": true,
+          "metadata_quality": "PASS",
+          "selection_score": 218
+        },
+        {
+          "skill_id": "nexus-benchmark-public-report",
+          "path": "/Users/jameschen/Workspace/nexus/.agents/skills/nexus-benchmark-public-report/SKILL.md",
+          "source_root": "nexus_repo",
+          "source_type": "nexus_local",
+          "safety_status": "runtime_reviewed",
+          "runtime_eligible": true,
+          "ablation_eligible": true,
+          "metadata_quality": "PASS",
+          "selection_score": 218
+        },
+        {
+          "skill_id": "nexus-capability-upgrade",
+          "path": "/Users/jameschen/Workspace/nexus/.agents/skills/nexus-capability-upgrade/SKILL.md",
+          "source_root": "nexus_repo",
+          "source_type": "nexus_local",
+          "safety_status": "runtime_reviewed",
+          "runtime_eligible": true,
+          "ablation_eligible": true,
+          "metadata_quality": "PASS",
+          "selection_score": 218
+        },
+        {
+          "skill_id": "grill-me",
+          "path": "/Users/jameschen/Workspace/nexus/.agents/skills/grill-me/SKILL.md",
+          "source_root": "nexus_repo",
+          "source_type": "nexus_local",
+          "safety_status": "runtime_reviewed",
+          "runtime_eligible": true,
+          "ablation_eligible": true,
+          "metadata_quality": "PASS",
+          "selection_score": 191
+        },
+        {
+          "skill_id": "grill-with-docs",
+          "path": "/Users/jameschen/Workspace/nexus/.agents/skills/grill-with-docs/SKILL.md",
+          "source_root": "nexus_repo",
+          "source_type": "nexus_local",
+          "safety_status": "runtime_reviewed",
+          "runtime_eligible": true,
+          "ablation_eligible": true,
+          "metadata_quality": "PASS",
+          "selection_score": 191
+        },
+        {
+          "skill_id": "benchmark",
+          "path": "/Users/jameschen/.agents/skills/gstack/.agents/skills/gstack-benchmark/SKILL.md",
+          "source_root": "agents",
+          "source_type": "reference",
+          "safety_status": "ablation_only",
+          "runtime_eligible": false,
+          "ablation_eligible": true,
+          "metadata_quality": "PASS",
+          "selection_score": 69
+        },
+        {
+          "skill_id": "gbrain-testing",
+          "path": "/Users/jameschen/.agents/skills/gbrain-testing/SKILL.md",
+          "source_root": "agents",
+          "source_type": "reference",
+          "safety_status": "ablation_only",
+          "runtime_eligible": false,
+          "ablation_eligible": true,
+          "metadata_quality": "PASS",
+          "selection_score": 69
+        },
+        {
+          "skill_id": "gstack-benchmark",
+          "path": "/Users/jameschen/.agents/skills/gstack-benchmark/SKILL.md",
+          "source_root": "agents",
+          "source_type": "reference",
+          "safety_status": "ablation_only",
+          "runtime_eligible": false,
+          "ablation_eligible": true,
+          "metadata_quality": "PASS",
+          "selection_score": 69
+        }
+      ],
+      "metadata_repair_candidate_count": 0,
+      "metadata_repair_candidates": [],
+      "next_action": "ablation_plan_ready"
+    },
+    {
+      "capability_id": "registry_skills_sync",
+      "group": "productization",
+      "pillar": "artifact",
+      "phases": [
+        "S",
+        "C"
+      ],
+      "candidate_count": 8,
+      "candidates": [
+        {
+          "skill_id": "browserbase-cookie-sync",
+          "path": "/Users/jameschen/.agents/skills/browserbase-cookie-sync/SKILL.md",
+          "source_root": "agents",
+          "source_type": "reference",
+          "safety_status": "ablation_only",
+          "runtime_eligible": false,
+          "ablation_eligible": true,
+          "metadata_quality": "PASS",
+          "selection_score": 41
+        },
+        {
+          "skill_id": "document-release",
+          "path": "/Users/jameschen/.agents/skills/gstack/.agents/skills/gstack-document-release/SKILL.md",
+          "source_root": "agents",
+          "source_type": "reference",
+          "safety_status": "ablation_only",
+          "runtime_eligible": false,
+          "ablation_eligible": true,
+          "metadata_quality": "PASS",
+          "selection_score": 41
+        },
+        {
+          "skill_id": "gbrain-cold-start",
+          "path": "/Users/jameschen/.agents/skills/gbrain-cold-start/SKILL.md",
+          "source_root": "agents",
+          "source_type": "reference",
+          "safety_status": "ablation_only",
+          "runtime_eligible": false,
+          "ablation_eligible": true,
+          "metadata_quality": "PASS",
+          "selection_score": 41
+        },
+        {
+          "skill_id": "gstack-document-release",
+          "path": "/Users/jameschen/.agents/skills/gstack-document-release/SKILL.md",
+          "source_root": "agents",
+          "source_type": "reference",
+          "safety_status": "ablation_only",
+          "runtime_eligible": false,
+          "ablation_eligible": true,
+          "metadata_quality": "PASS",
+          "selection_score": 41
+        },
+        {
+          "skill_id": "gstack-sync-gbrain",
+          "path": "/Users/jameschen/.agents/skills/gstack-sync-gbrain/SKILL.md",
+          "source_root": "agents",
+          "source_type": "reference",
+          "safety_status": "ablation_only",
+          "runtime_eligible": false,
+          "ablation_eligible": true,
+          "metadata_quality": "PASS",
+          "selection_score": 41
+        },
+        {
+          "skill_id": "gstack-upgrade",
+          "path": "/Users/jameschen/.agents/skills/gstack/.agents/skills/gstack-upgrade/SKILL.md",
+          "source_root": "agents",
+          "source_type": "reference",
+          "safety_status": "ablation_only",
+          "runtime_eligible": false,
+          "ablation_eligible": true,
+          "metadata_quality": "PASS",
+          "selection_score": 41
+        },
+        {
+          "skill_id": "nexus-worktree-hotfix-sync-and-verify",
+          "path": "/Users/jameschen/.agents/skills/devops/nexus-worktree-hotfix-sync-and-verify/SKILL.md",
+          "source_root": "agents",
+          "source_type": "local_candidate",
+          "safety_status": "ablation_only",
+          "runtime_eligible": false,
+          "ablation_eligible": true,
+          "metadata_quality": "PASS",
+          "selection_score": 41
+        },
+        {
+          "skill_id": "obsidian-cli",
+          "path": "/Users/jameschen/.agents/skills/obsidian-skills/skills/obsidian-cli/SKILL.md",
+          "source_root": "agents",
+          "source_type": "local_candidate",
+          "safety_status": "ablation_only",
+          "runtime_eligible": false,
+          "ablation_eligible": true,
+          "metadata_quality": "PASS",
+          "selection_score": 41
+        }
+      ],
+      "metadata_repair_candidate_count": 0,
+      "metadata_repair_candidates": [],
+      "next_action": "ablation_plan_ready"
+    },
+    {
+      "capability_id": "metabolism_resume",
+      "group": "productization",
+      "pillar": "memory",
+      "phases": [
+        "R",
+        "C"
+      ],
+      "candidate_count": 8,
+      "candidates": [
+        {
+          "skill_id": "to-prd",
+          "path": "/Users/jameschen/Workspace/nexus/.agents/skills/to-prd/SKILL.md",
+          "source_root": "nexus_repo",
+          "source_type": "nexus_local",
+          "safety_status": "runtime_reviewed",
+          "runtime_eligible": true,
+          "ablation_eligible": true,
+          "metadata_quality": "PASS",
+          "selection_score": 220
+        },
+        {
+          "skill_id": "to-issues",
+          "path": "/Users/jameschen/Workspace/nexus/.agents/skills/to-issues/SKILL.md",
+          "source_root": "nexus_repo",
+          "source_type": "nexus_local",
+          "safety_status": "runtime_reviewed",
+          "runtime_eligible": true,
+          "ablation_eligible": true,
+          "metadata_quality": "PASS",
+          "selection_score": 219
+        },
+        {
+          "skill_id": "triage",
+          "path": "/Users/jameschen/Workspace/nexus/.agents/skills/triage/SKILL.md",
+          "source_root": "nexus_repo",
+          "source_type": "nexus_local",
+          "safety_status": "runtime_reviewed",
+          "runtime_eligible": true,
+          "ablation_eligible": true,
+          "metadata_quality": "PASS",
+          "selection_score": 219
+        },
+        {
+          "skill_id": "grill-with-docs",
+          "path": "/Users/jameschen/Workspace/nexus/.agents/skills/grill-with-docs/SKILL.md",
+          "source_root": "nexus_repo",
+          "source_type": "nexus_local",
+          "safety_status": "runtime_reviewed",
+          "runtime_eligible": true,
+          "ablation_eligible": true,
+          "metadata_quality": "PASS",
+          "selection_score": 191
+        },
+        {
+          "skill_id": "improve-codebase-architecture",
+          "path": "/Users/jameschen/Workspace/nexus/.agents/skills/improve-codebase-architecture/SKILL.md",
+          "source_root": "nexus_repo",
+          "source_type": "nexus_local",
+          "safety_status": "runtime_reviewed",
+          "runtime_eligible": true,
+          "ablation_eligible": true,
+          "metadata_quality": "PASS",
+          "selection_score": 191
+        },
+        {
+          "skill_id": "notebooklm-context-bridge",
+          "path": "/Users/jameschen/Workspace/nexus/.agents/skills/notebooklm-context-bridge/SKILL.md",
+          "source_root": "nexus_repo",
+          "source_type": "nexus_local",
+          "safety_status": "runtime_reviewed",
+          "runtime_eligible": true,
+          "ablation_eligible": true,
+          "metadata_quality": "PASS",
+          "selection_score": 191
+        },
+        {
+          "skill_id": "zoom-out",
+          "path": "/Users/jameschen/Workspace/nexus/.agents/skills/zoom-out/SKILL.md",
+          "source_root": "nexus_repo",
+          "source_type": "nexus_local",
+          "safety_status": "runtime_reviewed",
+          "runtime_eligible": true,
+          "ablation_eligible": true,
+          "metadata_quality": "PASS",
+          "selection_score": 191
+        },
+        {
+          "skill_id": "addy-shipping-and-launch",
+          "path": "/Users/jameschen/.agents/skills/addy-shipping-and-launch/SKILL.md",
+          "source_root": "agents",
+          "source_type": "reference",
+          "safety_status": "ablation_only",
+          "runtime_eligible": false,
+          "ablation_eligible": true,
+          "metadata_quality": "PASS",
+          "selection_score": 69
+        }
+      ],
+      "metadata_repair_candidate_count": 0,
+      "metadata_repair_candidates": [],
+      "next_action": "ablation_plan_ready"
+    },
+    {
+      "capability_id": "ui_validator",
+      "group": "productization",
+      "pillar": "artifact",
+      "phases": [
+        "D",
+        "A",
+        "C"
+      ],
+      "candidate_count": 8,
+      "candidates": [
+        {
+          "skill_id": "wondelai-high-perf-browser",
+          "path": "/Users/jameschen/.agents/skills/wondelai-high-perf-browser/SKILL.md",
+          "source_root": "agents",
+          "source_type": "reference",
+          "safety_status": "ablation_only",
+          "runtime_eligible": false,
+          "ablation_eligible": true,
+          "metadata_quality": "PASS",
+          "selection_score": 53
+        },
+        {
+          "skill_id": "addy-browser-testing-with-devtools",
+          "path": "/Users/jameschen/.agents/skills/addy-browser-testing-with-devtools/SKILL.md",
+          "source_root": "agents",
+          "source_type": "reference",
+          "safety_status": "ablation_only",
+          "runtime_eligible": false,
+          "ablation_eligible": true,
+          "metadata_quality": "PASS",
+          "selection_score": 42
+        },
+        {
+          "skill_id": "browserbase-ui-test",
+          "path": "/Users/jameschen/.agents/skills/browserbase-ui-test/SKILL.md",
+          "source_root": "agents",
+          "source_type": "reference",
+          "safety_status": "ablation_only",
+          "runtime_eligible": false,
+          "ablation_eligible": true,
+          "metadata_quality": "PASS",
+          "selection_score": 42
+        },
+        {
+          "skill_id": "gstack-plan-design-review",
+          "path": "/Users/jameschen/.agents/skills/gstack-plan-design-review/SKILL.md",
+          "source_root": "agents",
+          "source_type": "reference",
+          "safety_status": "ablation_only",
+          "runtime_eligible": false,
+          "ablation_eligible": true,
+          "metadata_quality": "PASS",
+          "selection_score": 42
+        },
+        {
+          "skill_id": "gstack-setup-browser-cookies",
+          "path": "/Users/jameschen/.agents/skills/gstack-setup-browser-cookies/SKILL.md",
+          "source_root": "agents",
+          "source_type": "reference",
+          "safety_status": "ablation_only",
+          "runtime_eligible": false,
+          "ablation_eligible": true,
+          "metadata_quality": "PASS",
+          "selection_score": 42
+        },
+        {
+          "skill_id": "plan-design-review",
+          "path": "/Users/jameschen/.agents/skills/gstack/.agents/skills/gstack-plan-design-review/SKILL.md",
+          "source_root": "agents",
+          "source_type": "reference",
+          "safety_status": "ablation_only",
+          "runtime_eligible": false,
+          "ablation_eligible": true,
+          "metadata_quality": "PASS",
+          "selection_score": 42
+        },
+        {
+          "skill_id": "setup-browser-cookies",
+          "path": "/Users/jameschen/.agents/skills/gstack/.agents/skills/gstack-setup-browser-cookies/SKILL.md",
+          "source_root": "agents",
+          "source_type": "reference",
+          "safety_status": "ablation_only",
+          "runtime_eligible": false,
+          "ablation_eligible": true,
+          "metadata_quality": "PASS",
+          "selection_score": 42
+        },
+        {
+          "skill_id": "wondelai-refactoring-ui",
+          "path": "/Users/jameschen/.agents/skills/wondelai-refactoring-ui/SKILL.md",
+          "source_root": "agents",
+          "source_type": "local_candidate",
+          "safety_status": "ablation_only",
+          "runtime_eligible": false,
+          "ablation_eligible": true,
+          "metadata_quality": "PASS",
+          "selection_score": 42
+        }
+      ],
+      "metadata_repair_candidate_count": 0,
+      "metadata_repair_candidates": [],
+      "next_action": "ablation_plan_ready"
+    },
+    {
+      "capability_id": "external_productivity",
+      "group": "productization",
+      "pillar": "artifact",
+      "phases": [
+        "S",
+        "D"
+      ],
+      "candidate_count": 8,
+      "candidates": [
+        {
+          "skill_id": "grill-with-docs",
+          "path": "/Users/jameschen/Workspace/nexus/.agents/skills/grill-with-docs/SKILL.md",
+          "source_root": "nexus_repo",
+          "source_type": "nexus_local",
+          "safety_status": "runtime_reviewed",
+          "runtime_eligible": true,
+          "ablation_eligible": true,
+          "metadata_quality": "PASS",
+          "selection_score": 191
+        },
+        {
+          "skill_id": "improve-codebase-architecture",
+          "path": "/Users/jameschen/Workspace/nexus/.agents/skills/improve-codebase-architecture/SKILL.md",
+          "source_root": "nexus_repo",
+          "source_type": "nexus_local",
+          "safety_status": "runtime_reviewed",
+          "runtime_eligible": true,
+          "ablation_eligible": true,
+          "metadata_quality": "PASS",
+          "selection_score": 191
+        },
+        {
+          "skill_id": "google-workspace",
+          "path": "/Users/jameschen/Workspace/hermes-agent/skills/productivity/google-workspace/SKILL.md",
+          "source_root": "hermes",
+          "source_type": "reference",
+          "safety_status": "ablation_only",
+          "runtime_eligible": false,
+          "ablation_eligible": true,
+          "metadata_quality": "PASS",
+          "selection_score": 54
+        },
+        {
+          "skill_id": "gbrain-cold-start",
+          "path": "/Users/jameschen/.agents/skills/gbrain-cold-start/SKILL.md",
+          "source_root": "agents",
+          "source_type": "reference",
+          "safety_status": "ablation_only",
+          "runtime_eligible": false,
+          "ablation_eligible": true,
+          "metadata_quality": "PASS",
+          "selection_score": 42
+        },
+        {
+          "skill_id": "theme-factory",
+          "path": "/Users/jameschen/.agents/skills/theme-factory/SKILL.md",
+          "source_root": "agents",
+          "source_type": "reference",
+          "safety_status": "ablation_only",
+          "runtime_eligible": false,
+          "ablation_eligible": true,
+          "metadata_quality": "PASS",
+          "selection_score": 42
+        },
+        {
+          "skill_id": "architecture-diagram",
+          "path": "/Users/jameschen/Workspace/hermes-agent/skills/creative/architecture-diagram/SKILL.md",
+          "source_root": "hermes",
+          "source_type": "reference",
+          "safety_status": "ablation_only",
+          "runtime_eligible": false,
+          "ablation_eligible": true,
+          "metadata_quality": "PASS",
+          "selection_score": 41
+        },
+        {
+          "skill_id": "baoyu-comic",
+          "path": "/Users/jameschen/Workspace/hermes-agent/skills/creative/baoyu-comic/SKILL.md",
+          "source_root": "hermes",
+          "source_type": "reference",
+          "safety_status": "ablation_only",
+          "runtime_eligible": false,
+          "ablation_eligible": true,
+          "metadata_quality": "PASS",
+          "selection_score": 41
+        },
+        {
+          "skill_id": "competitor-alternatives",
+          "path": "/Users/jameschen/.agents/skills/competitor-alternatives/SKILL.md",
+          "source_root": "agents",
+          "source_type": "reference",
+          "safety_status": "ablation_only",
+          "runtime_eligible": false,
+          "ablation_eligible": true,
+          "metadata_quality": "PASS",
+          "selection_score": 41
+        }
+      ],
+      "metadata_repair_candidate_count": 0,
+      "metadata_repair_candidates": [],
+      "next_action": "ablation_plan_ready"
+    }
+  ],
+  "claim_boundary": [
+    "Candidate selection prepares SF-v2 ablation. It is not benchmark evidence.",
+    "Runtime promotion remains blocked until per-capability ablation and runtime review pass."
+  ]
+}

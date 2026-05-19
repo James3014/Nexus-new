@@ -1,0 +1,48 @@
+{
+  "schema": "nexus.governance_candidate_bound_mutant_catalog.v1",
+  "status": "PASS",
+  "capability": "governance_and_trust",
+  "runtime_update_allowed": false,
+  "promotion_allowed": true,
+  "summary": {
+    "skill_count": 2,
+    "alternate_count": 2,
+    "row_count": 10
+  },
+  "skill_verdicts": [
+    {
+      "skill_id": "cso",
+      "row_count": 5,
+      "kill_count": 5,
+      "survived_count": 0,
+      "evidence_paths": [
+        "/private/tmp/nexus_governance_candidate_bound_mutant_live_20260517/governance_candidate_mutant_cso_commercial-negative-swarm-roles-001_forged_pass_without_independent_audit",
+        "/private/tmp/nexus_governance_candidate_bound_mutant_live_20260517/governance_candidate_mutant_cso_governance-expansion-audit-003_unsupported_claim_with_green_status",
+        "/private/tmp/nexus_governance_candidate_bound_mutant_live_20260517/governance_candidate_mutant_cso_nexus-value-gov-001_secret_redaction_regression",
+        "/private/tmp/nexus_governance_candidate_bound_mutant_live_20260517/governance_candidate_mutant_cso_rlm-harder-v2-governance-001_deny_default_bypass",
+        "/private/tmp/nexus_governance_candidate_bound_mutant_live_20260517/governance_candidate_mutant_cso_commercial-negative-swarm-roles-001_receipt_lite_incomplete"
+      ],
+      "kill_rate": 1.0,
+      "verdict": "alternate"
+    },
+    {
+      "skill_id": "acceptance-evidence-failclosed",
+      "row_count": 5,
+      "kill_count": 5,
+      "survived_count": 0,
+      "evidence_paths": [
+        "/private/tmp/nexus_governance_candidate_bound_mutant_live_20260517/governance_candidate_mutant_acceptance-evidence-failclosed_commercial-negative-swarm-roles-001_forged_pass_without_independent_audit",
+        "/private/tmp/nexus_governance_candidate_bound_mutant_live_20260517/governance_candidate_mutant_acceptance-evidence-failclosed_governance-expansion-audit-003_unsupported_claim_with_green_status",
+        "/private/tmp/nexus_governance_candidate_bound_mutant_live_20260517/governance_candidate_mutant_acceptance-evidence-failclosed_nexus-value-gov-001_secret_redaction_regression",
+        "/private/tmp/nexus_governance_candidate_bound_mutant_live_20260517/governance_candidate_mutant_acceptance-evidence-failclosed_rlm-harder-v2-governance-001_deny_default_bypass",
+        "/private/tmp/nexus_governance_candidate_bound_mutant_live_20260517/governance_candidate_mutant_acceptance-evidence-failclosed_commercial-negative-swarm-roles-001_receipt_lite_incomplete"
+      ],
+      "kill_rate": 1.0,
+      "verdict": "alternate"
+    }
+  ],
+  "claim_boundary": [
+    "This catalog can only promote mutant-kill suitability, not delivery/cost/public benchmark claims.",
+    "Flash100 remains blocked until delivery threshold and mutant catalog agree."
+  ]
+}

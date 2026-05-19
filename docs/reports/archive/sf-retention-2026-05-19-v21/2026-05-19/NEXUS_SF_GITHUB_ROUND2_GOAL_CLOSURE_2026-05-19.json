@@ -1,0 +1,214 @@
+{
+  "claim_boundary": [
+    "This updates SF challenger/catalog evidence only.",
+    "Runtime default remains unchanged until runtime apply gate and receipt smoke pass.",
+    "Original agent-browser skills remain blocked for runtime tool execution; only the generated safe prompt-only candidate is a replacement candidate."
+  ],
+  "comparisons": [
+    {
+      "better_on_token_and_wall": false,
+      "capability": "repair_loop",
+      "challenger": {
+        "evidence_path": ".nexus/reports/sf_github_round2_flash_smoke_live_retry2_2026-05-19/repair_loop_sf-github-round2-smoke-repair_loop-001_github_challenger_github2-superpowers-test-driven-development/evidence_bundle.json",
+        "receipt_path": ".nexus/reports/sf_github_round2_flash_smoke_live_retry2_2026-05-19/repair_loop_sf-github-round2-smoke-repair_loop-001_github_challenger_github2-superpowers-test-driven-development",
+        "row_id": "repair_loop::sf-github-round2-smoke-repair_loop-001::github_challenger::github2-superpowers-test-driven-development",
+        "semantic_status": "VERIFIED",
+        "skill_id": "github2-superpowers-test-driven-development",
+        "status": "PASS",
+        "token_measured": true,
+        "total_tokens": 39212,
+        "wall_duration_sec": 142.5485
+      },
+      "current_best": {
+        "evidence_path": ".nexus/reports/sf_github_round2_flash_smoke_live_retry2_2026-05-19/repair_loop_sf-github-round2-smoke-repair_loop-001_current_best_tdd/evidence_bundle.json",
+        "receipt_path": ".nexus/reports/sf_github_round2_flash_smoke_live_retry2_2026-05-19/repair_loop_sf-github-round2-smoke-repair_loop-001_current_best_tdd",
+        "row_id": "repair_loop::sf-github-round2-smoke-repair_loop-001::current_best::tdd",
+        "semantic_status": "VERIFIED",
+        "skill_id": "tdd",
+        "status": "PASS",
+        "token_measured": true,
+        "total_tokens": 41035,
+        "wall_duration_sec": 102.0912
+      },
+      "decision": "KEEP_CURRENT",
+      "safety_status": "PASS_SKILL_ONLY",
+      "source": "obra/superpowers",
+      "token_delta": -1823,
+      "wall_delta_sec": 40.4573
+    },
+    {
+      "better_on_token_and_wall": true,
+      "capability": "ui_validator",
+      "challenger": {
+        "evidence_path": ".nexus/reports/sf_github_round2_flash_smoke_live_retry2_2026-05-19/ui_validator_sf-github-round2-smoke-ui_validator-001_github_challenger_github2-agent-browser-dogfood/evidence_bundle.json",
+        "receipt_path": ".nexus/reports/sf_github_round2_flash_smoke_live_retry2_2026-05-19/ui_validator_sf-github-round2-smoke-ui_validator-001_github_challenger_github2-agent-browser-dogfood",
+        "row_id": "ui_validator::sf-github-round2-smoke-ui_validator-001::github_challenger::github2-agent-browser-dogfood",
+        "semantic_status": "VERIFIED",
+        "skill_id": "github2-agent-browser-dogfood",
+        "status": "PASS",
+        "token_measured": true,
+        "total_tokens": 41288,
+        "wall_duration_sec": 162.1967
+      },
+      "current_best": {
+        "evidence_path": ".nexus/reports/sf_github_round2_flash_smoke_live_retry2_2026-05-19/ui_validator_sf-github-round2-smoke-ui_validator-001_current_best_nexus-root-cause-probe/evidence_bundle.json",
+        "receipt_path": ".nexus/reports/sf_github_round2_flash_smoke_live_retry2_2026-05-19/ui_validator_sf-github-round2-smoke-ui_validator-001_current_best_nexus-root-cause-probe",
+        "row_id": "ui_validator::sf-github-round2-smoke-ui_validator-001::current_best::nexus-root-cause-probe",
+        "semantic_status": "VERIFIED",
+        "skill_id": "nexus-root-cause-probe",
+        "status": "PASS",
+        "token_measured": true,
+        "total_tokens": 48248,
+        "wall_duration_sec": 164.1195
+      },
+      "decision": "HOLD_RUNTIME_BOUNDARY",
+      "safety_status": "REJECT_RUNTIME_KEEP_REFERENCE",
+      "source": "vercel-labs/agent-browser original dogfood",
+      "token_delta": -6960,
+      "wall_delta_sec": -1.9228
+    },
+    {
+      "better_on_token_and_wall": false,
+      "capability": "codeintel",
+      "challenger": {
+        "evidence_path": ".nexus/reports/sf_github_round2_corrected_flash_smoke_v2_live_retry2_2026-05-19/codeintel_sf-github-round2-corrected-v2-smoke-codeintel-001_github_challenger_github2-superpowers-systematic-debugging/evidence_bundle.json",
+        "receipt_path": ".nexus/reports/sf_github_round2_corrected_flash_smoke_v2_live_retry2_2026-05-19/codeintel_sf-github-round2-corrected-v2-smoke-codeintel-001_github_challenger_github2-superpowers-systematic-debugging",
+        "row_id": "codeintel::sf-github-round2-corrected-v2-smoke-codeintel-001::github_challenger::github2-superpowers-systematic-debugging",
+        "semantic_status": "VERIFIED",
+        "skill_id": "github2-superpowers-systematic-debugging",
+        "status": "PASS",
+        "token_measured": true,
+        "total_tokens": 44088,
+        "wall_duration_sec": 109.512
+      },
+      "current_best": {
+        "evidence_path": ".nexus/reports/sf_github_round2_corrected_flash_smoke_v2_live_retry2_2026-05-19/codeintel_sf-github-round2-corrected-v2-smoke-codeintel-001_current_best_sf2-codeintel-route-fit-spec/evidence_bundle.json",
+        "receipt_path": ".nexus/reports/sf_github_round2_corrected_flash_smoke_v2_live_retry2_2026-05-19/codeintel_sf-github-round2-corrected-v2-smoke-codeintel-001_current_best_sf2-codeintel-route-fit-spec",
+        "row_id": "codeintel::sf-github-round2-corrected-v2-smoke-codeintel-001::current_best::sf2-codeintel-route-fit-spec",
+        "semantic_status": "VERIFIED",
+        "skill_id": "sf2-codeintel-route-fit-spec",
+        "status": "PASS",
+        "token_measured": true,
+        "total_tokens": 40202,
+        "wall_duration_sec": 100.7524
+      },
+      "decision": "KEEP_CURRENT",
+      "safety_status": "PASS_SKILL_ONLY",
+      "source": "obra/superpowers systematic-debugging",
+      "token_delta": 3886,
+      "wall_delta_sec": 8.7596
+    },
+    {
+      "better_on_token_and_wall": false,
+      "capability": "metabolism_resume",
+      "challenger": {
+        "evidence_path": ".nexus/reports/sf_github_round2_corrected_flash_smoke_v2_live_retry2_2026-05-19/metabolism_resume_sf-github-round2-corrected-v2-smoke-metabolism_resume-001_github_challenger_github2-superpowers-executing-plans/evidence_bundle.json",
+        "receipt_path": ".nexus/reports/sf_github_round2_corrected_flash_smoke_v2_live_retry2_2026-05-19/metabolism_resume_sf-github-round2-corrected-v2-smoke-metabolism_resume-001_github_challenger_github2-superpowers-executing-plans",
+        "row_id": "metabolism_resume::sf-github-round2-corrected-v2-smoke-metabolism_resume-001::github_challenger::github2-superpowers-executing-plans",
+        "semantic_status": "VERIFIED",
+        "skill_id": "github2-superpowers-executing-plans",
+        "status": "PASS",
+        "token_measured": true,
+        "total_tokens": 52148,
+        "wall_duration_sec": 167.617
+      },
+      "current_best": {
+        "evidence_path": ".nexus/reports/sf_github_round2_corrected_flash_smoke_v2_live_retry2_2026-05-19/metabolism_resume_sf-github-round2-corrected-v2-smoke-metabolism_resume-001_current_best_nexus-goal-closure-executor/evidence_bundle.json",
+        "receipt_path": ".nexus/reports/sf_github_round2_corrected_flash_smoke_v2_live_retry2_2026-05-19/metabolism_resume_sf-github-round2-corrected-v2-smoke-metabolism_resume-001_current_best_nexus-goal-closure-executor",
+        "row_id": "metabolism_resume::sf-github-round2-corrected-v2-smoke-metabolism_resume-001::current_best::nexus-goal-closure-executor",
+        "semantic_status": "VERIFIED",
+        "skill_id": "nexus-goal-closure-executor",
+        "status": "PASS",
+        "token_measured": true,
+        "total_tokens": 50212,
+        "wall_duration_sec": 158.6917
+      },
+      "decision": "KEEP_CURRENT",
+      "safety_status": "PASS_SKILL_ONLY",
+      "source": "obra/superpowers executing-plans",
+      "token_delta": 1936,
+      "wall_delta_sec": 8.9253
+    },
+    {
+      "better_on_token_and_wall": true,
+      "capability": "ui_validator",
+      "challenger": {
+        "evidence_path": ".nexus/reports/sf_github_round2_safe_ui_validator_live_2026-05-19/ui_validator_sf-github-round2-smoke-ui_validator-001_safe_challenger_github2-agent-browser-dogfood-safe-ui-validator/evidence_bundle.json",
+        "receipt_path": ".nexus/reports/sf_github_round2_safe_ui_validator_live_2026-05-19/ui_validator_sf-github-round2-smoke-ui_validator-001_safe_challenger_github2-agent-browser-dogfood-safe-ui-validator",
+        "row_id": "ui_validator::sf-github-round2-smoke-ui_validator-001::safe_challenger::github2-agent-browser-dogfood-safe-ui-validator",
+        "semantic_status": "VERIFIED",
+        "skill_id": "github2-agent-browser-dogfood-safe-ui-validator",
+        "status": "PASS",
+        "token_measured": true,
+        "total_tokens": 43521,
+        "wall_duration_sec": 133.1861
+      },
+      "current_best": {
+        "evidence_path": ".nexus/reports/sf_github_round2_safe_ui_validator_live_2026-05-19/ui_validator_sf-github-round2-smoke-ui_validator-001_current_best_nexus-root-cause-probe/evidence_bundle.json",
+        "receipt_path": ".nexus/reports/sf_github_round2_safe_ui_validator_live_2026-05-19/ui_validator_sf-github-round2-smoke-ui_validator-001_current_best_nexus-root-cause-probe",
+        "row_id": "ui_validator::sf-github-round2-smoke-ui_validator-001::current_best::nexus-root-cause-probe",
+        "semantic_status": "VERIFIED",
+        "skill_id": "nexus-root-cause-probe",
+        "status": "PASS",
+        "token_measured": true,
+        "total_tokens": 47620,
+        "wall_duration_sec": 168.0094
+      },
+      "decision": "REPLACE_CANDIDATE_NOT_RUNTIME_DEFAULT",
+      "safety_status": "PASS_PROMPT_ONLY_GENERATED_SAFE",
+      "source": "vercel-labs/agent-browser generated safe prompt-only dogfood",
+      "token_delta": -4099,
+      "wall_delta_sec": -34.8233
+    }
+  ],
+  "goal": "safety-screen requested repos, test at least two distinct skills in Nexus route-fit, update only when challenger is stronger",
+  "live_summary": {
+    "distinct_challenger_skills_tested": 5,
+    "live_comparison_count": 5,
+    "public_benchmark_allowed": false,
+    "replacement_candidate_count": 1,
+    "runtime_update_allowed": false
+  },
+  "replacement_candidates": [
+    {
+      "better_on_token_and_wall": true,
+      "capability": "ui_validator",
+      "challenger": {
+        "evidence_path": ".nexus/reports/sf_github_round2_safe_ui_validator_live_2026-05-19/ui_validator_sf-github-round2-smoke-ui_validator-001_safe_challenger_github2-agent-browser-dogfood-safe-ui-validator/evidence_bundle.json",
+        "receipt_path": ".nexus/reports/sf_github_round2_safe_ui_validator_live_2026-05-19/ui_validator_sf-github-round2-smoke-ui_validator-001_safe_challenger_github2-agent-browser-dogfood-safe-ui-validator",
+        "row_id": "ui_validator::sf-github-round2-smoke-ui_validator-001::safe_challenger::github2-agent-browser-dogfood-safe-ui-validator",
+        "semantic_status": "VERIFIED",
+        "skill_id": "github2-agent-browser-dogfood-safe-ui-validator",
+        "status": "PASS",
+        "token_measured": true,
+        "total_tokens": 43521,
+        "wall_duration_sec": 133.1861
+      },
+      "current_best": {
+        "evidence_path": ".nexus/reports/sf_github_round2_safe_ui_validator_live_2026-05-19/ui_validator_sf-github-round2-smoke-ui_validator-001_current_best_nexus-root-cause-probe/evidence_bundle.json",
+        "receipt_path": ".nexus/reports/sf_github_round2_safe_ui_validator_live_2026-05-19/ui_validator_sf-github-round2-smoke-ui_validator-001_current_best_nexus-root-cause-probe",
+        "row_id": "ui_validator::sf-github-round2-smoke-ui_validator-001::current_best::nexus-root-cause-probe",
+        "semantic_status": "VERIFIED",
+        "skill_id": "nexus-root-cause-probe",
+        "status": "PASS",
+        "token_measured": true,
+        "total_tokens": 47620,
+        "wall_duration_sec": 168.0094
+      },
+      "decision": "REPLACE_CANDIDATE_NOT_RUNTIME_DEFAULT",
+      "safety_status": "PASS_PROMPT_ONLY_GENERATED_SAFE",
+      "source": "vercel-labs/agent-browser generated safe prompt-only dogfood",
+      "token_delta": -4099,
+      "wall_delta_sec": -34.8233
+    }
+  ],
+  "repo_safety": {
+    "Leonxlnx/taste-skill": "PASS_PROMPT_ONLY; all-capability static screen produced no live replacement candidate, so no runtime/live promotion.",
+    "VoltAgent/awesome-openclaw-skills": "NO_LOCAL_SKILL_FILES; generated/reference scout only; static screen produced no live replacement candidate.",
+    "obra/superpowers": "PASS_SKILL_ONLY; rejected always-on/forced trigger skills for runtime; tested selected prompt-only skills only.",
+    "vercel-labs/agent-browser": "ORIGINAL_REJECT_RUNTIME_KEEP_REFERENCE due agent-browser tool boundary; generated safe prompt-only ui_validator candidate and tested it."
+  },
+  "schema": "nexus.sf_github_round2_goal_closure.v1",
+  "status": "PASS",
+  "version": "2026-05-19"
+}

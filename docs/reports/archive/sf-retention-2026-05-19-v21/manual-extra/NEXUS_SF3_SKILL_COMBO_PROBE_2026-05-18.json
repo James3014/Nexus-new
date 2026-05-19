@@ -1,0 +1,218 @@
+{
+  "schema": "nexus.sf3_skill_combo_probe.v1",
+  "status": "PASS",
+  "summary": {
+    "combo_count": 4,
+    "combo_pass_count": 4,
+    "blocker_count": 0,
+    "runtime_update_allowed": false,
+    "public_benchmark_allowed": false
+  },
+  "blockers": [],
+  "combos": [
+    {
+      "combo_id": "codeintel_repair_artifact",
+      "arm_type": "combo_arm",
+      "status": "PASS",
+      "capability_ids": [
+        "codeintel",
+        "repair_loop",
+        "artifact_gate"
+      ],
+      "skill_ids": [
+        "sf2-codeintel-route-fit-spec",
+        "sf2-hyper_sprint-route-fit-spec",
+        "nexus-goal-closure-executor"
+      ],
+      "multi_skill_mounts": [
+        {
+          "capability_id": "codeintel",
+          "skill_id": "sf2-codeintel-route-fit-spec",
+          "receipt_status": "PASS"
+        },
+        {
+          "capability_id": "repair_loop",
+          "skill_id": "sf2-hyper_sprint-route-fit-spec",
+          "receipt_status": "PASS"
+        },
+        {
+          "capability_id": "artifact_gate",
+          "skill_id": "nexus-goal-closure-executor",
+          "receipt_status": "PASS"
+        }
+      ],
+      "members": [
+        {
+          "capability_id": "codeintel",
+          "skill_id": "sf2-codeintel-route-fit-spec",
+          "receipt_status": "PASS"
+        },
+        {
+          "capability_id": "repair_loop",
+          "skill_id": "sf2-hyper_sprint-route-fit-spec",
+          "receipt_status": "PASS"
+        },
+        {
+          "capability_id": "artifact_gate",
+          "skill_id": "nexus-goal-closure-executor",
+          "receipt_status": "PASS"
+        }
+      ],
+      "negative_control": "BLOCK_OR_RETURN",
+      "combo_contributed": true
+    },
+    {
+      "combo_id": "research_lancedb_claim",
+      "arm_type": "combo_arm",
+      "status": "PASS",
+      "capability_ids": [
+        "research",
+        "lancedb",
+        "claim_gate"
+      ],
+      "skill_ids": [
+        "sf2-research_control_plane-route-fit-spec",
+        "sf2-lancedb-route-fit-spec",
+        "sf2-research_control_plane-route-fit-spec"
+      ],
+      "multi_skill_mounts": [
+        {
+          "capability_id": "research",
+          "skill_id": "sf2-research_control_plane-route-fit-spec",
+          "receipt_status": "PASS"
+        },
+        {
+          "capability_id": "lancedb",
+          "skill_id": "sf2-lancedb-route-fit-spec",
+          "receipt_status": "PASS"
+        },
+        {
+          "capability_id": "claim_gate",
+          "skill_id": "sf2-research_control_plane-route-fit-spec",
+          "receipt_status": "PASS"
+        }
+      ],
+      "members": [
+        {
+          "capability_id": "research",
+          "skill_id": "sf2-research_control_plane-route-fit-spec",
+          "receipt_status": "PASS"
+        },
+        {
+          "capability_id": "lancedb",
+          "skill_id": "sf2-lancedb-route-fit-spec",
+          "receipt_status": "PASS"
+        },
+        {
+          "capability_id": "claim_gate",
+          "skill_id": "sf2-research_control_plane-route-fit-spec",
+          "receipt_status": "PASS"
+        }
+      ],
+      "negative_control": "BLOCK_OR_RETURN",
+      "combo_contributed": true
+    },
+    {
+      "combo_id": "mempalace_policy_ultra",
+      "arm_type": "combo_arm",
+      "status": "PASS",
+      "capability_ids": [
+        "mempalace",
+        "policy_capability_gate",
+        "ultra_review"
+      ],
+      "skill_ids": [
+        "sf2-mempalace-route-fit-spec",
+        "diagnose",
+        "sf2-file_lock_security_gate-route-fit-spec"
+      ],
+      "multi_skill_mounts": [
+        {
+          "capability_id": "mempalace",
+          "skill_id": "sf2-mempalace-route-fit-spec",
+          "receipt_status": "PASS"
+        },
+        {
+          "capability_id": "policy_capability_gate",
+          "skill_id": "diagnose",
+          "receipt_status": "PASS"
+        },
+        {
+          "capability_id": "ultra_review",
+          "skill_id": "sf2-file_lock_security_gate-route-fit-spec",
+          "receipt_status": "PASS"
+        }
+      ],
+      "members": [
+        {
+          "capability_id": "mempalace",
+          "skill_id": "sf2-mempalace-route-fit-spec",
+          "receipt_status": "PASS"
+        },
+        {
+          "capability_id": "policy_capability_gate",
+          "skill_id": "diagnose",
+          "receipt_status": "PASS"
+        },
+        {
+          "capability_id": "ultra_review",
+          "skill_id": "sf2-file_lock_security_gate-route-fit-spec",
+          "receipt_status": "PASS"
+        }
+      ],
+      "negative_control": "BLOCK_OR_RETURN",
+      "combo_contributed": true
+    },
+    {
+      "combo_id": "swarm_drone_filelock",
+      "arm_type": "combo_arm",
+      "status": "PASS",
+      "capability_ids": [
+        "swarm_multi_agent",
+        "drone",
+        "file_lock_security_gate"
+      ],
+      "skill_ids": [
+        "sf2-swarm_multi_agent-route-fit-spec",
+        "sf2-drone-route-fit-spec",
+        "sf2-file_lock_security_gate-route-fit-spec"
+      ],
+      "multi_skill_mounts": [
+        {
+          "capability_id": "swarm_multi_agent",
+          "skill_id": "sf2-swarm_multi_agent-route-fit-spec",
+          "receipt_status": "PASS"
+        },
+        {
+          "capability_id": "drone",
+          "skill_id": "sf2-drone-route-fit-spec",
+          "receipt_status": "PASS"
+        },
+        {
+          "capability_id": "file_lock_security_gate",
+          "skill_id": "sf2-file_lock_security_gate-route-fit-spec",
+          "receipt_status": "PASS"
+        }
+      ],
+      "members": [
+        {
+          "capability_id": "swarm_multi_agent",
+          "skill_id": "sf2-swarm_multi_agent-route-fit-spec",
+          "receipt_status": "PASS"
+        },
+        {
+          "capability_id": "drone",
+          "skill_id": "sf2-drone-route-fit-spec",
+          "receipt_status": "PASS"
+        },
+        {
+          "capability_id": "file_lock_security_gate",
+          "skill_id": "sf2-file_lock_security_gate-route-fit-spec",
+          "receipt_status": "PASS"
+        }
+      ],
+      "negative_control": "BLOCK_OR_RETURN",
+      "combo_contributed": true
+    }
+  ]
+}

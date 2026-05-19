@@ -1,0 +1,73 @@
+{
+  "dry_run_subject": {
+    "capability": "research_and_source_discipline",
+    "disposition": "candidate_intake_only",
+    "runtime_mount_allowed": false,
+    "source": "repo:HKUDS/OpenHarness"
+  },
+  "generated_at": "2026-05-18T00:00:00+08:00",
+  "new_skill_update_rules": [
+    "New skill enters source registry or local skill inventory as intake only.",
+    "Capability classifier maps it to one or more route capabilities; ambiguous mappings require bounded probe, not runtime mount.",
+    "For each capability, compare Flash+Nexus without the skill against Flash+Nexus with the skill in the same session contract when live testing is required.",
+    "Only rows with selected/injected/used/evidence/gate/outcome receipts can increase effective_rows.",
+    "Catalog may update keep/alternate/replace/reject; runtime default apply requires separate apply gate.",
+    "Any trust mismatch, tokenless model call, selected-only effective row, wrong/quarantined mount, or missing receipt fails closed."
+  ],
+  "pipeline": [
+    {
+      "gate": "source ingest must map to capability and stay non-runtime",
+      "input": "due source registry entry",
+      "output": "candidate intake item",
+      "status": "PASS",
+      "step": "source_refresh"
+    },
+    {
+      "gate": "license/source/status/security metadata required before ablation",
+      "input": "candidate intake item",
+      "output": "screened candidate or reject/quarantine",
+      "status": "PASS_DRY_RUN",
+      "step": "candidate_screen"
+    },
+    {
+      "gate": "wrong/quarantined arm must RETURN/BLOCK",
+      "input": "screened candidate",
+      "output": "capability-only + positive arm + negative control matrix",
+      "status": "PASS_DRY_RUN",
+      "step": "ablation_plan"
+    },
+    {
+      "gate": "selected-only cannot count effective; missing receipt/evidence returns",
+      "input": "matrix",
+      "output": "receipt-backed result rows",
+      "status": "PASS_DRY_RUN",
+      "step": "bounded_live_or_flash30_queue"
+    },
+    {
+      "gate": "catalog update only; runtime default unchanged",
+      "input": "receipt-backed result rows",
+      "output": "(capability, skill_id) verdict",
+      "status": "PASS_DRY_RUN",
+      "step": "catalog_verdict_writer"
+    },
+    {
+      "gate": "replacement record must cite evidence and receipt paths",
+      "input": "positive verdict",
+      "output": "replace/alternate/reject ledger",
+      "status": "PASS_DRY_RUN",
+      "step": "replacement_record"
+    }
+  ],
+  "public_benchmark_allowed": false,
+  "runtime_update_allowed": false,
+  "schema": "nexus.sf_new_skill_replacement_flow_dry_run.v1",
+  "source_intake_ref": "docs/reports/NEXUS_SF_SOURCE_REGISTRY_ADAPTER_2026-05-18.json",
+  "status": "PASS",
+  "summary": {
+    "catalog_writeback_path_defined": true,
+    "dry_run_passed": true,
+    "requires_real_live_for_actual_candidate": true,
+    "runtime_mount_bypassed": false,
+    "steps_checked": 6
+  }
+}

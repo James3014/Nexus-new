@@ -1,0 +1,128 @@
+{
+  "claim_boundary": [
+    "This is a 2-capability bounded Flash+Nexus challenger smoke, not all-capability closure.",
+    "Replacement candidates update SF challenger review only; runtime default requires promotion/apply gate.",
+    "External reference challengers remain runtime_eligible=false until curated and reviewed."
+  ],
+  "comparison_source": ".nexus/reports/sf_github_challenger_flash_smoke_live_2026-05-19/live_summary.json",
+  "comparisons": [
+    {
+      "capability": "codeintel",
+      "current_best": {
+        "chain": {
+          "evidence_present": true,
+          "gate_passed": true,
+          "injected": true,
+          "outcome_contributed": true,
+          "selected": true,
+          "used": true
+        },
+        "evidence_path": ".nexus/reports/sf_github_challenger_flash_smoke_live_2026-05-19/codeintel_sf-github-challenger-smoke-codeintel-001_current_best_sf2-codeintel-route-fit-spec/evidence_bundle.json",
+        "model_calls": 2,
+        "provider_token_measured_rate": null,
+        "receipt_path": ".nexus/reports/sf_github_challenger_flash_smoke_live_2026-05-19/codeintel_sf-github-challenger-smoke-codeintel-001_current_best_sf2-codeintel-route-fit-spec",
+        "row_id": "codeintel::sf-github-challenger-smoke-codeintel-001::current_best::sf2-codeintel-route-fit-spec",
+        "semantic_status": "VERIFIED",
+        "skill_id": "sf2-codeintel-route-fit-spec",
+        "skill_mount_contract_status": "PASS",
+        "status": "PASS",
+        "total_tokens": 41726,
+        "trust_mismatch": false,
+        "wall_duration_sec": 111.4521
+      },
+      "github_challenger": {
+        "chain": {
+          "evidence_present": true,
+          "gate_passed": true,
+          "injected": true,
+          "outcome_contributed": true,
+          "selected": true,
+          "used": true
+        },
+        "evidence_path": ".nexus/reports/sf_github_challenger_flash_smoke_live_2026-05-19/codeintel_sf-github-challenger-smoke-codeintel-001_github_challenger_github-karpathy-guidelines/evidence_bundle.json",
+        "model_calls": 2,
+        "provider_token_measured_rate": null,
+        "receipt_path": ".nexus/reports/sf_github_challenger_flash_smoke_live_2026-05-19/codeintel_sf-github-challenger-smoke-codeintel-001_github_challenger_github-karpathy-guidelines",
+        "row_id": "codeintel::sf-github-challenger-smoke-codeintel-001::github_challenger::github-karpathy-guidelines",
+        "semantic_status": "VERIFIED",
+        "skill_id": "github-karpathy-guidelines",
+        "skill_mount_contract_status": "PASS",
+        "status": "PASS",
+        "total_tokens": 41206,
+        "trust_mismatch": false,
+        "wall_duration_sec": 86.7037
+      },
+      "reason": "challenger_passed_and_lower_token_wall",
+      "token_delta": -520,
+      "verdict": "REPLACE_CANDIDATE",
+      "wall_delta_sec": -24.7484
+    },
+    {
+      "capability": "metabolism_resume",
+      "current_best": {
+        "chain": {
+          "evidence_present": true,
+          "gate_passed": true,
+          "injected": true,
+          "outcome_contributed": true,
+          "selected": true,
+          "used": true
+        },
+        "evidence_path": ".nexus/reports/sf_github_challenger_flash_smoke_live_2026-05-19/metabolism_resume_sf-github-challenger-smoke-metabolism_resume-001_current_best_nexus-goal-closure-executor/evidence_bundle.json",
+        "model_calls": 2,
+        "provider_token_measured_rate": null,
+        "receipt_path": ".nexus/reports/sf_github_challenger_flash_smoke_live_2026-05-19/metabolism_resume_sf-github-challenger-smoke-metabolism_resume-001_current_best_nexus-goal-closure-executor",
+        "row_id": "metabolism_resume::sf-github-challenger-smoke-metabolism_resume-001::current_best::nexus-goal-closure-executor",
+        "semantic_status": "VERIFIED",
+        "skill_id": "nexus-goal-closure-executor",
+        "skill_mount_contract_status": "PASS",
+        "status": "PASS",
+        "total_tokens": 46814,
+        "trust_mismatch": false,
+        "wall_duration_sec": 126.4889
+      },
+      "github_challenger": {
+        "chain": {
+          "evidence_present": true,
+          "gate_passed": true,
+          "injected": true,
+          "outcome_contributed": true,
+          "selected": true,
+          "used": true
+        },
+        "evidence_path": ".nexus/reports/sf_github_challenger_flash_smoke_live_2026-05-19/metabolism_resume_sf-github-challenger-smoke-metabolism_resume-001_github_challenger_github-auto-skill-safe-learning/evidence_bundle.json",
+        "model_calls": 2,
+        "provider_token_measured_rate": null,
+        "receipt_path": ".nexus/reports/sf_github_challenger_flash_smoke_live_2026-05-19/metabolism_resume_sf-github-challenger-smoke-metabolism_resume-001_github_challenger_github-auto-skill-safe-learning",
+        "row_id": "metabolism_resume::sf-github-challenger-smoke-metabolism_resume-001::github_challenger::github-auto-skill-safe-learning",
+        "semantic_status": "VERIFIED",
+        "skill_id": "github-auto-skill-safe-learning",
+        "skill_mount_contract_status": "PASS",
+        "status": "PASS",
+        "total_tokens": 41630,
+        "trust_mismatch": false,
+        "wall_duration_sec": 90.9825
+      },
+      "reason": "challenger_passed_and_lower_token_wall",
+      "token_delta": -5184,
+      "verdict": "REPLACE_CANDIDATE",
+      "wall_delta_sec": -35.5064
+    }
+  ],
+  "metadata_eval_source": "docs/reports/NEXUS_SF_GITHUB_SKILL_CHALLENGER_EVAL_APPLY_2026-05-19.json",
+  "public_benchmark_allowed": false,
+  "replacement_candidates": {
+    "codeintel": "github-karpathy-guidelines",
+    "metabolism_resume": "github-auto-skill-safe-learning"
+  },
+  "runtime_update_allowed": false,
+  "schema": "nexus.sf_github_challenger_flash_smoke_rollup.v1",
+  "status": "PASS",
+  "summary": {
+    "comparison_count": 2,
+    "hold_tradeoff_count": 0,
+    "keep_current_count": 0,
+    "pass_pair_count": 2,
+    "replace_candidate_count": 2
+  }
+}

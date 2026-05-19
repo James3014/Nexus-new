@@ -1,0 +1,77 @@
+{
+  "schema": "nexus.sf_runtime_skill_policy_overlay.v1",
+  "status": "PASS",
+  "runtime_update_allowed": true,
+  "public_benchmark_allowed": false,
+  "primary_skill_by_capability": {
+    "benchmark_meta_opt": "sf-systematic-benchmark_meta_opt-hugging-face-trackio-d21c6b90",
+    "learning_closure": "sf-systematic-learning_closure-memory-lint-8bdb0fca",
+    "repair_loop": "sf-systematic-repair_loop-tailwind-v4-shadcn-7197cbbf",
+    "research_control_plane": "sf-systematic-research_control_plane-research-lookup-7e6f92a0",
+    "ui_validator": "sf-systematic-ui_validator-e2e-testing-d98eb7c3"
+  },
+  "capability_aliases": {
+    "repair_loop": [
+      "repair_loop"
+    ]
+  },
+  "applied_primary": [
+    {
+      "capability_id": "benchmark_meta_opt",
+      "skill_id": "sf-systematic-benchmark_meta_opt-hugging-face-trackio-d21c6b90",
+      "source_root": ".agents/skills/sf-systematic-challengers",
+      "source_type": "repo_local_systematic_slice",
+      "path": ".agents/skills/sf-systematic-challengers/sf-systematic-benchmark_meta_opt-hugging-face-trackio-d21c6b90/SKILL.md",
+      "evidence_refs": [
+        ".nexus/reports/sf_systematic_batch_live_2026-05-19/benchmark_meta_opt_sf-systematic-batch-benchmark_meta_opt-001_challenger_sf-systematic-benchmark_meta_opt-hugging-face-trackio-d21c6b90/evidence_bundle.json"
+      ]
+    },
+    {
+      "capability_id": "learning_closure",
+      "skill_id": "sf-systematic-learning_closure-memory-lint-8bdb0fca",
+      "source_root": ".agents/skills/sf-systematic-challengers",
+      "source_type": "repo_local_systematic_slice",
+      "path": ".agents/skills/sf-systematic-challengers/sf-systematic-learning_closure-memory-lint-8bdb0fca/SKILL.md",
+      "evidence_refs": [
+        ".nexus/reports/sf_systematic_batch_live_2026-05-19/learning_closure_sf-systematic-batch-learning_closure-001_challenger_sf-systematic-learning_closure-memory-lint-8bdb0fca/evidence_bundle.json"
+      ]
+    },
+    {
+      "capability_id": "repair_loop",
+      "skill_id": "sf-systematic-repair_loop-tailwind-v4-shadcn-7197cbbf",
+      "source_root": ".agents/skills/sf-systematic-challengers",
+      "source_type": "repo_local_systematic_slice",
+      "path": ".agents/skills/sf-systematic-challengers/sf-systematic-repair_loop-tailwind-v4-shadcn-7197cbbf/SKILL.md",
+      "evidence_refs": [
+        ".nexus/reports/sf_systematic_batch_live_2026-05-19/repair_loop_sf-systematic-batch-repair_loop-001_challenger_sf-systematic-repair_loop-tailwind-v4-shadcn-7197cbbf/evidence_bundle.json"
+      ]
+    },
+    {
+      "capability_id": "research_control_plane",
+      "skill_id": "sf-systematic-research_control_plane-research-lookup-7e6f92a0",
+      "source_root": ".agents/skills/sf-systematic-challengers",
+      "source_type": "repo_local_systematic_slice",
+      "path": ".agents/skills/sf-systematic-challengers/sf-systematic-research_control_plane-research-lookup-7e6f92a0/SKILL.md",
+      "evidence_refs": [
+        ".nexus/reports/sf_systematic_batch_live_2026-05-19/research_control_plane_sf-systematic-batch-research_control_plane-001_challenger_sf-systematic-research_control_plane-research-lookup-7e6f92a0/evidence_bundle.json"
+      ]
+    },
+    {
+      "capability_id": "ui_validator",
+      "skill_id": "sf-systematic-ui_validator-e2e-testing-d98eb7c3",
+      "source_root": ".agents/skills/sf-systematic-challengers",
+      "source_type": "repo_local_systematic_slice",
+      "path": ".agents/skills/sf-systematic-challengers/sf-systematic-ui_validator-e2e-testing-d98eb7c3/SKILL.md",
+      "evidence_refs": [
+        ".nexus/reports/sf_systematic_batch_live_2026-05-19/ui_validator_sf-systematic-batch-ui_validator-001_challenger_sf-systematic-ui_validator-e2e-testing-d98eb7c3/evidence_bundle.json"
+      ]
+    }
+  ],
+  "held_items": [],
+  "blockers": [],
+  "claim_boundary": [
+    "This overlay records SF-approved capability primary skills.",
+    "Runtime consumers must still produce runtime-confirmed skill mount receipts.",
+    "Public benchmark remains a separate lane."
+  ]
+}

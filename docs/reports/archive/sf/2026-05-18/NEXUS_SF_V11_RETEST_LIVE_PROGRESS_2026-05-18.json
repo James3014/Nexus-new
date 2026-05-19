@@ -1,0 +1,105 @@
+{
+  "schema": "nexus.sf_v11_retest_live_progress.v1",
+  "status": "RETURN",
+  "summary": {
+    "completed_chunks": 8,
+    "pass_chunks": 7,
+    "return_chunks": 1,
+    "completed_rows": 68,
+    "pass_rows": 77,
+    "return_rows": 1
+  },
+  "chunks": [
+    {
+      "chunk_id": "sf-v11-chunk-01",
+      "status": "PASS",
+      "planned_rows": 10,
+      "pass_count": 10,
+      "return_count": 0
+    },
+    {
+      "chunk_id": "sf-v11-chunk-02",
+      "returncode": 0,
+      "stdout_tail": "{\"completed_rows\": 10, \"output_root\": \"/private/tmp/nexus_sf_v11_retest_live_20260518\", \"pass_count\": 10, \"planned_rows\": 10, \"return_count\": 0, \"status\": \"PASS\"}\n",
+      "stderr_tail": "",
+      "planned_rows": 10,
+      "completed_rows": 10,
+      "pass_count": 10,
+      "return_count": 0,
+      "status": "PASS",
+      "catalog_path": "/Users/jameschen/Workspace/nexus/docs/reports/NEXUS_SF_V11_RETEST_SKILL_FIT_CATALOG_SF_V11_CHUNK_02_2026-05-18.json"
+    },
+    {
+      "chunk_id": "sf-v11-chunk-03",
+      "returncode": 0,
+      "stdout_tail": "{\"completed_rows\": 10, \"output_root\": \"/private/tmp/nexus_sf_v11_retest_live_20260518\", \"pass_count\": 10, \"planned_rows\": 10, \"return_count\": 0, \"status\": \"PASS\"}\n",
+      "stderr_tail": "",
+      "planned_rows": 10,
+      "completed_rows": 10,
+      "pass_count": 10,
+      "return_count": 0,
+      "status": "PASS",
+      "catalog_path": "/Users/jameschen/Workspace/nexus/docs/reports/NEXUS_SF_V11_RETEST_SKILL_FIT_CATALOG_SF_V11_CHUNK_03_2026-05-18.json"
+    },
+    {
+      "chunk_id": "sf-v11-chunk-04",
+      "returncode": 0,
+      "stdout_tail": "{\"completed_rows\": 10, \"output_root\": \"/private/tmp/nexus_sf_v11_retest_live_20260518\", \"pass_count\": 10, \"planned_rows\": 10, \"return_count\": 0, \"status\": \"PASS\"}\n",
+      "stderr_tail": "",
+      "planned_rows": 10,
+      "completed_rows": 10,
+      "pass_count": 10,
+      "return_count": 0,
+      "status": "PASS",
+      "catalog_path": "/Users/jameschen/Workspace/nexus/docs/reports/NEXUS_SF_V11_RETEST_SKILL_FIT_CATALOG_SF_V11_CHUNK_04_2026-05-18.json"
+    },
+    {
+      "chunk_id": "sf-v11-chunk-05",
+      "returncode": 0,
+      "stdout_tail": "{\"completed_rows\": 10, \"output_root\": \"/private/tmp/nexus_sf_v11_retest_live_20260518\", \"pass_count\": 10, \"planned_rows\": 10, \"return_count\": 0, \"status\": \"PASS\"}\n",
+      "stderr_tail": "",
+      "planned_rows": 10,
+      "completed_rows": 10,
+      "pass_count": 10,
+      "return_count": 0,
+      "status": "PASS",
+      "catalog_path": "/Users/jameschen/Workspace/nexus/docs/reports/NEXUS_SF_V11_RETEST_SKILL_FIT_CATALOG_SF_V11_CHUNK_05_2026-05-18.json"
+    },
+    {
+      "chunk_id": "sf-v11-chunk-06",
+      "returncode": 0,
+      "stdout_tail": "{\"completed_rows\": 10, \"output_root\": \"/private/tmp/nexus_sf_v11_retest_live_20260518\", \"pass_count\": 10, \"planned_rows\": 10, \"return_count\": 0, \"status\": \"PASS\"}\n",
+      "stderr_tail": "",
+      "planned_rows": 10,
+      "completed_rows": 10,
+      "pass_count": 10,
+      "return_count": 0,
+      "status": "PASS",
+      "catalog_path": "/Users/jameschen/Workspace/nexus/docs/reports/NEXUS_SF_V11_RETEST_SKILL_FIT_CATALOG_SF_V11_CHUNK_06_2026-05-18.json"
+    },
+    {
+      "chunk_id": "sf-v11-chunk-07",
+      "returncode": 0,
+      "stdout_tail": "{\"completed_rows\": 10, \"output_root\": \"/private/tmp/nexus_sf_v11_retest_live_20260518\", \"pass_count\": 10, \"planned_rows\": 10, \"return_count\": 0, \"status\": \"PASS\"}\n",
+      "stderr_tail": "",
+      "planned_rows": 10,
+      "completed_rows": 10,
+      "pass_count": 10,
+      "return_count": 0,
+      "status": "PASS",
+      "catalog_path": "/Users/jameschen/Workspace/nexus/docs/reports/NEXUS_SF_V11_RETEST_SKILL_FIT_CATALOG_SF_V11_CHUNK_07_2026-05-18.json"
+    },
+    {
+      "chunk_id": "sf-v11-chunk-08",
+      "returncode": 1,
+      "stdout_tail": "{\"completed_rows\": 8, \"output_root\": \"/private/tmp/nexus_sf_v11_retest_live_20260518\", \"pass_count\": 7, \"planned_rows\": 10, \"return_count\": 1, \"status\": \"RETURN\"}\n",
+      "stderr_tail": "",
+      "planned_rows": 10,
+      "completed_rows": 8,
+      "pass_count": 7,
+      "return_count": 1,
+      "status": "RETURN",
+      "catalog_path": "/Users/jameschen/Workspace/nexus/docs/reports/NEXUS_SF_V11_RETEST_SKILL_FIT_CATALOG_SF_V11_CHUNK_08_2026-05-18.json"
+    }
+  ]
+}

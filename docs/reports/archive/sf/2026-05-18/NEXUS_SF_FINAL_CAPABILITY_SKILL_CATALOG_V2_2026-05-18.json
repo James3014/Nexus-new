@@ -1,0 +1,508 @@
+{
+  "schema": "nexus.sf_final_capability_skill_catalog_v2.v1",
+  "status": "PASS",
+  "summary": {
+    "capability_count": 33,
+    "capability_with_primary_count": 33,
+    "blocker_count": 0,
+    "flash_compare_required_count": 0,
+    "public_benchmark_allowed": false,
+    "evidence_gate_schema": "nexus.sf_evidence_gate_schema.v1"
+  },
+  "blockers": [],
+  "capability_skill_catalog": [
+    {
+      "capability_id": "artifact_gate",
+      "primary_default": "research-citation-chain-verifier",
+      "primary_identity_id": "d79518d14ca4f9c9859f2bc1",
+      "alternate": [
+        "research-source-validation-auditor",
+        "nexus-root-cause-probe",
+        "nexus-goal-closure-executor",
+        "nexus-benchmark-public-report"
+      ],
+      "combo_support": [],
+      "reject": [],
+      "evidence_level": "bounded_probe_pass",
+      "needs_flash_compare": false,
+      "next_review_trigger": "new_skill_ingest_or_primary_regression"
+    },
+    {
+      "capability_id": "autonomic_router",
+      "primary_default": "sf2-autonomic_router-route-fit-spec",
+      "primary_identity_id": "b9d649d12324d8fb67331216",
+      "alternate": [
+        "sf2-policy_capability_gate-route-fit-spec",
+        "sf2-autoreason-route-fit-spec",
+        "sf2-belief-route-fit-spec"
+      ],
+      "combo_support": [],
+      "reject": [],
+      "evidence_level": "bounded_probe_pass",
+      "needs_flash_compare": false,
+      "next_review_trigger": "new_skill_ingest_or_primary_regression"
+    },
+    {
+      "capability_id": "autoreason",
+      "primary_default": "sf2-autoreason-route-fit-spec",
+      "primary_identity_id": "c91c18d237f24d2903086eb1",
+      "alternate": [
+        "research-source-conflict-resolver",
+        "nexus-benchmark-public-report"
+      ],
+      "combo_support": [],
+      "reject": [],
+      "evidence_level": "bounded_probe_pass",
+      "needs_flash_compare": false,
+      "next_review_trigger": "new_skill_ingest_or_primary_regression"
+    },
+    {
+      "capability_id": "belief",
+      "primary_default": "sf2-belief-route-fit-spec",
+      "primary_identity_id": "e78d2c139d46551fd63c78e6",
+      "alternate": [
+        "nexus-goal-closure-executor",
+        "shipping-and-launch",
+        "sf2-autoreason-route-fit-spec",
+        "research-source-conflict-resolver"
+      ],
+      "combo_support": [],
+      "reject": [],
+      "evidence_level": "bounded_probe_pass",
+      "needs_flash_compare": false,
+      "next_review_trigger": "new_skill_ingest_or_primary_regression"
+    },
+    {
+      "capability_id": "benchmark_meta_opt",
+      "primary_default": "nexus-benchmark-continuous-optimization",
+      "primary_identity_id": "c28b58af2f9799155a58e2f3",
+      "alternate": [
+        "nexus-benchmark-public-report",
+        "evaluating-llms-harness",
+        "diagnose"
+      ],
+      "combo_support": [],
+      "reject": [],
+      "evidence_level": "bounded_probe_pass",
+      "needs_flash_compare": false,
+      "next_review_trigger": "new_skill_ingest_or_primary_regression"
+    },
+    {
+      "capability_id": "claim_gate",
+      "primary_default": "nexus-benchmark-continuous-optimization",
+      "primary_identity_id": "c28b58af2f9799155a58e2f3",
+      "alternate": [
+        "nexus-benchmark-public-report",
+        "diagnose"
+      ],
+      "combo_support": [],
+      "reject": [],
+      "evidence_level": "bounded_probe_pass",
+      "needs_flash_compare": false,
+      "next_review_trigger": "new_skill_ingest_or_primary_regression"
+    },
+    {
+      "capability_id": "codeintel",
+      "primary_default": "sf2-codeintel-route-fit-spec",
+      "primary_identity_id": "c8faa203377ffeecb82cb394",
+      "alternate": [
+        "api-and-interface-design",
+        "setup-matt-pocock-skills"
+      ],
+      "combo_support": [],
+      "reject": [
+        "improve-codebase-architecture"
+      ],
+      "evidence_level": "bounded_probe_pass",
+      "needs_flash_compare": false,
+      "next_review_trigger": "new_skill_ingest_or_primary_regression"
+    },
+    {
+      "capability_id": "ddtree",
+      "primary_default": "sf2-ddtree-route-fit-spec",
+      "primary_identity_id": "06802b2189f103be825bd39d",
+      "alternate": [],
+      "combo_support": [],
+      "reject": [
+        "grill-me"
+      ],
+      "evidence_level": "bounded_probe_pass",
+      "needs_flash_compare": false,
+      "next_review_trigger": "new_skill_ingest_or_primary_regression"
+    },
+    {
+      "capability_id": "delivery_acceptance_gate",
+      "primary_default": "sf2-delivery_acceptance_gate-route-fit-spec",
+      "primary_identity_id": "51d70a9231a70f9d527fd043",
+      "alternate": [
+        "research-citation-chain-verifier",
+        "research-source-validation-auditor",
+        "nexus-benchmark-continuous-optimization"
+      ],
+      "combo_support": [],
+      "reject": [],
+      "evidence_level": "bounded_probe_pass",
+      "needs_flash_compare": false,
+      "next_review_trigger": "new_skill_ingest_or_primary_regression"
+    },
+    {
+      "capability_id": "direct_master_loop",
+      "primary_default": "sf2-direct_master_loop-route-fit-spec",
+      "primary_identity_id": "104c3ce8267b4affa7b6da04",
+      "alternate": [
+        "nexus-goal-closure-executor",
+        "touchdesigner-mcp",
+        "subagent-driven-development",
+        "comfyui"
+      ],
+      "combo_support": [],
+      "reject": [],
+      "evidence_level": "bounded_probe_pass",
+      "needs_flash_compare": false,
+      "next_review_trigger": "new_skill_ingest_or_primary_regression"
+    },
+    {
+      "capability_id": "drone",
+      "primary_default": "sf2-drone-route-fit-spec",
+      "primary_identity_id": "919ef58c7794a888211f42fa",
+      "alternate": [
+        "claude-code",
+        "opencode"
+      ],
+      "combo_support": [],
+      "reject": [
+        "codex"
+      ],
+      "evidence_level": "bounded_probe_pass",
+      "needs_flash_compare": false,
+      "next_review_trigger": "new_skill_ingest_or_primary_regression"
+    },
+    {
+      "capability_id": "external_productivity",
+      "primary_default": "sf2-external_productivity-route-fit-spec",
+      "primary_identity_id": "4f4e1a296239a905776b2a7a",
+      "alternate": [
+        "comfyui",
+        "ascii-video",
+        "ascii-art"
+      ],
+      "combo_support": [],
+      "reject": [],
+      "evidence_level": "bounded_probe_pass",
+      "needs_flash_compare": false,
+      "next_review_trigger": "new_skill_ingest_or_primary_regression"
+    },
+    {
+      "capability_id": "file_lock_security_gate",
+      "primary_default": "sf2-file_lock_security_gate-route-fit-spec",
+      "primary_identity_id": "19b9920bb231e2b826867067",
+      "alternate": [
+        "sf2-policy_capability_gate-route-fit-spec"
+      ],
+      "combo_support": [],
+      "reject": [],
+      "evidence_level": "bounded_probe_pass",
+      "needs_flash_compare": false,
+      "next_review_trigger": "new_skill_ingest_or_primary_regression"
+    },
+    {
+      "capability_id": "forecast_pregate",
+      "primary_default": "sf2-forecast_pregate-route-fit-spec",
+      "primary_identity_id": "de10babf3d5c5f15f6f58701",
+      "alternate": [
+        "triage"
+      ],
+      "combo_support": [],
+      "reject": [],
+      "evidence_level": "bounded_probe_pass",
+      "needs_flash_compare": false,
+      "next_review_trigger": "new_skill_ingest_or_primary_regression"
+    },
+    {
+      "capability_id": "hyper_sprint",
+      "primary_default": "sf2-hyper_sprint-route-fit-spec",
+      "primary_identity_id": "e4727ff1be14325640ccef34",
+      "alternate": [],
+      "combo_support": [],
+      "reject": [],
+      "evidence_level": "bounded_probe_pass",
+      "needs_flash_compare": false,
+      "next_review_trigger": "new_skill_ingest_or_primary_regression"
+    },
+    {
+      "capability_id": "lancedb",
+      "primary_default": "sf2-lancedb-route-fit-spec",
+      "primary_identity_id": "40fa3b6424c8ad89cc929476",
+      "alternate": [
+        "nexus-benchmark-public-report"
+      ],
+      "combo_support": [],
+      "reject": [
+        "dspy"
+      ],
+      "evidence_level": "bounded_probe_pass",
+      "needs_flash_compare": false,
+      "next_review_trigger": "new_skill_ingest_or_primary_regression"
+    },
+    {
+      "capability_id": "learn_ask",
+      "primary_default": "nexus-capability-upgrade",
+      "primary_identity_id": "1be51f5aa8d613c24e239705",
+      "alternate": [
+        "nexus-root-cause-probe",
+        "test-driven-development",
+        "baoyu-comic",
+        "notebooklm-context-bridge"
+      ],
+      "combo_support": [],
+      "reject": [],
+      "evidence_level": "bounded_probe_pass",
+      "needs_flash_compare": false,
+      "next_review_trigger": "new_skill_ingest_or_primary_regression"
+    },
+    {
+      "capability_id": "learning_closure",
+      "primary_default": "sf2-learning_closure-route-fit-spec",
+      "primary_identity_id": "dcd8d81c22c0e648112ae7e7",
+      "alternate": [],
+      "combo_support": [],
+      "reject": [],
+      "evidence_level": "bounded_probe_pass",
+      "needs_flash_compare": false,
+      "next_review_trigger": "new_skill_ingest_or_primary_regression"
+    },
+    {
+      "capability_id": "memory",
+      "primary_default": "sf2-memory-route-fit-spec",
+      "primary_identity_id": "e80147ccdfc20d0747e9965e",
+      "alternate": [
+        "obsidian"
+      ],
+      "combo_support": [],
+      "reject": [
+        "logmemory"
+      ],
+      "evidence_level": "bounded_probe_pass",
+      "needs_flash_compare": false,
+      "next_review_trigger": "new_skill_ingest_or_primary_regression"
+    },
+    {
+      "capability_id": "mempalace",
+      "primary_default": "sf2-mempalace-route-fit-spec",
+      "primary_identity_id": "01a42231b4af1ec035cae1dd",
+      "alternate": [
+        "sf2-policy_capability_gate-route-fit-spec"
+      ],
+      "combo_support": [],
+      "reject": [
+        "auto-gen-4907",
+        "auto-gen-6715"
+      ],
+      "evidence_level": "bounded_probe_pass",
+      "needs_flash_compare": false,
+      "next_review_trigger": "new_skill_ingest_or_primary_regression"
+    },
+    {
+      "capability_id": "metabolism_resume",
+      "primary_default": "setup-matt-pocock-skills",
+      "primary_identity_id": "ef9d3260abf68228166f4677",
+      "alternate": [
+        "triage",
+        "notebooklm-context-bridge"
+      ],
+      "combo_support": [],
+      "reject": [
+        "grill-with-docs",
+        "improve-codebase-architecture"
+      ],
+      "evidence_level": "bounded_probe_pass",
+      "needs_flash_compare": false,
+      "next_review_trigger": "new_skill_ingest_or_primary_regression"
+    },
+    {
+      "capability_id": "nightshift",
+      "primary_default": "sf2-nightshift-route-fit-spec",
+      "primary_identity_id": "74f201847cc96b58c7d5df59",
+      "alternate": [
+        "debugging-and-error-recovery",
+        "sf2-learning_closure-route-fit-spec"
+      ],
+      "combo_support": [],
+      "reject": [],
+      "evidence_level": "bounded_probe_pass",
+      "needs_flash_compare": false,
+      "next_review_trigger": "new_skill_ingest_or_primary_regression"
+    },
+    {
+      "capability_id": "policy_capability_gate",
+      "primary_default": "sf2-policy_capability_gate-route-fit-spec",
+      "primary_identity_id": "e52f223944c72783c43f7e72",
+      "alternate": [
+        "diagnose"
+      ],
+      "combo_support": [],
+      "reject": [],
+      "evidence_level": "bounded_probe_pass",
+      "needs_flash_compare": false,
+      "next_review_trigger": "new_skill_ingest_or_primary_regression"
+    },
+    {
+      "capability_id": "registry_skills_sync",
+      "primary_default": "sf2-registry_skills_sync-route-fit-spec",
+      "primary_identity_id": "802b6cba566e93c77df02318",
+      "alternate": [
+        "comfyui"
+      ],
+      "combo_support": [],
+      "reject": [
+        "weights-and-biases"
+      ],
+      "evidence_level": "bounded_probe_pass",
+      "needs_flash_compare": false,
+      "next_review_trigger": "new_skill_ingest_or_primary_regression"
+    },
+    {
+      "capability_id": "regression_guard",
+      "primary_default": "diagnose",
+      "primary_identity_id": "4d88139028d09fbdf7a8b00a",
+      "alternate": [
+        "nexus-benchmark-continuous-optimization"
+      ],
+      "combo_support": [],
+      "reject": [
+        "grill-me",
+        "grill-with-docs"
+      ],
+      "evidence_level": "bounded_probe_pass",
+      "needs_flash_compare": false,
+      "next_review_trigger": "new_skill_ingest_or_primary_regression"
+    },
+    {
+      "capability_id": "repair_loop",
+      "primary_default": "test-driven-development",
+      "primary_identity_id": "28ad53aa7397a491a1309d7e",
+      "alternate": [
+        "code-review-and-quality",
+        "diagnose",
+        "tdd"
+      ],
+      "combo_support": [],
+      "reject": [],
+      "evidence_level": "bounded_probe_pass",
+      "needs_flash_compare": false,
+      "next_review_trigger": "new_skill_ingest_or_primary_regression"
+    },
+    {
+      "capability_id": "research",
+      "primary_default": "research-citation-chain-verifier",
+      "primary_identity_id": "d79518d14ca4f9c9859f2bc1",
+      "alternate": [
+        "research-source-validation-auditor",
+        "research-source-conflict-resolver",
+        "sf2-research_control_plane-route-fit-spec"
+      ],
+      "combo_support": [],
+      "reject": [
+        "arxiv"
+      ],
+      "evidence_level": "bounded_probe_pass",
+      "needs_flash_compare": false,
+      "next_review_trigger": "new_skill_ingest_or_primary_regression"
+    },
+    {
+      "capability_id": "research_control_plane",
+      "primary_default": "sf2-research_control_plane-route-fit-spec",
+      "primary_identity_id": "398134bd845ad5315abde4d8",
+      "alternate": [],
+      "combo_support": [],
+      "reject": [],
+      "evidence_level": "bounded_probe_pass",
+      "needs_flash_compare": false,
+      "next_review_trigger": "new_skill_ingest_or_primary_regression"
+    },
+    {
+      "capability_id": "sandbox_replay",
+      "primary_default": "sf2-file_lock_security_gate-route-fit-spec",
+      "primary_identity_id": "19b9920bb231e2b826867067",
+      "alternate": [
+        "teams-meeting-pipeline"
+      ],
+      "combo_support": [],
+      "reject": [],
+      "evidence_level": "bounded_probe_pass",
+      "needs_flash_compare": false,
+      "next_review_trigger": "new_skill_ingest_or_primary_regression"
+    },
+    {
+      "capability_id": "swarm_multi_agent",
+      "primary_default": "sf2-swarm_multi_agent-route-fit-spec",
+      "primary_identity_id": "2882e7cddb4aebda5d711aa1",
+      "alternate": [
+        "research-paper-writing"
+      ],
+      "combo_support": [],
+      "reject": [],
+      "evidence_level": "bounded_probe_pass",
+      "needs_flash_compare": false,
+      "next_review_trigger": "new_skill_ingest_or_primary_regression"
+    },
+    {
+      "capability_id": "ui_validator",
+      "primary_default": "sf2-ui_validator-route-fit-spec",
+      "primary_identity_id": "68f2d50cbf29a07044d40ca1",
+      "alternate": [
+        "frontend-ui-engineering",
+        "browser-testing-with-devtools",
+        "debugging-hermes-tui-commands"
+      ],
+      "combo_support": [],
+      "reject": [],
+      "evidence_level": "bounded_probe_pass",
+      "needs_flash_compare": false,
+      "next_review_trigger": "new_skill_ingest_or_primary_regression"
+    },
+    {
+      "capability_id": "ultra_review",
+      "primary_default": "code-review-and-quality",
+      "primary_identity_id": "cb704c151268daecb588dda7",
+      "alternate": [
+        "requesting-code-review",
+        "security-and-hardening",
+        "research-source-validation-auditor",
+        "diagnose"
+      ],
+      "combo_support": [],
+      "reject": [],
+      "evidence_level": "bounded_probe_pass",
+      "needs_flash_compare": false,
+      "next_review_trigger": "new_skill_ingest_or_primary_regression"
+    },
+    {
+      "capability_id": "xray",
+      "primary_default": "sf2-xray-route-fit-spec",
+      "primary_identity_id": "fb4d3c5e33ee057ad317328a",
+      "alternate": [
+        "diagnose",
+        "systematic-debugging",
+        "debugging-and-error-recovery"
+      ],
+      "combo_support": [],
+      "reject": [],
+      "evidence_level": "bounded_probe_pass",
+      "needs_flash_compare": false,
+      "next_review_trigger": "new_skill_ingest_or_primary_regression"
+    }
+  ],
+  "future_replacement_flow": [
+    "ingest_new_skill",
+    "dedup_by_root_relative_path_skill_id_sha256",
+    "classify_into_route_capability_buckets",
+    "run_capability_local_bounded_probe_against_current_primary",
+    "promote_to_primary_only_when_evidence_chain_and_delta_pass",
+    "otherwise_mark_alternate_reject_or_quarantine"
+  ],
+  "claim_boundary": [
+    "This catalog completes SF pairing selection for bounded-probe evidence.",
+    "It does not allow public benchmark until live route/policy gates explicitly pass."
+  ]
+}

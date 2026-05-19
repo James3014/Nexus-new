@@ -1,0 +1,49 @@
+{
+  "schema": "nexus.sf_research_bounded_probe.v1",
+  "status": "RETURN",
+  "date": "2026-05-18",
+  "scope": "research_and_source_discipline",
+  "purpose": "Continue SF after harness repair without resuming the full 24-row research live matrix.",
+  "inputs": {
+    "matrix": "docs/reports/NEXUS_SF_RESEARCH_STATUS_VISIBLE_EXECUTION_MATRIX_2026-05-18.json",
+    "blocked_resume_manifest": "docs/reports/NEXUS_SF_RESEARCH_STATUS_VISIBLE_LIVE_RESUME_MANIFEST_2026-05-18.json"
+  },
+  "probe_results": [
+    {
+      "id": "SF-4A-replay-conflict-resolver",
+      "output_root": ".nexus/reports/sf_research_status_visible_replay_20260518",
+      "catalog": "docs/reports/NEXUS_SF_RESEARCH_STATUS_VISIBLE_REPLAY_CATALOG_2026-05-18.json",
+      "rows": 1,
+      "pass_count": 0,
+      "return_count": 1,
+      "finding": "research-source-conflict-resolver repeated model_call_without_tokens and skill_mount_contract_status=RETURN.",
+      "decision": "Do not include this candidate in the next research live set."
+    },
+    {
+      "id": "SF-4A-probe2-token-clean-candidates",
+      "output_root": ".nexus/reports/sf_research_status_visible_probe2_20260518",
+      "catalog": "docs/reports/NEXUS_SF_RESEARCH_STATUS_VISIBLE_PROBE2_CATALOG_2026-05-18.json",
+      "rows": 2,
+      "pass_count": 2,
+      "return_count": 0,
+      "finding": "research-citation-chain-verifier and research-source-validation-auditor completed token-clean rows, but both had effective_rows=0 because selected/injected/used/evidence/outcome contribution did not materialize.",
+      "decision": "Do not promote. Next fix the candidate-only skill mount/selector/evidence contract before larger live ablation."
+    }
+  ],
+  "clean_code_linus_readout": {
+    "small_next_cut": "Fix the candidate mount/evidence contract before adding more live rows.",
+    "separation_of_concerns": "A candidate skill asset being present is not the same as a mounted skill, and a delivery PASS is not outcome contribution.",
+    "decoupling": "Keep candidate supply, runtime mount, ablation evidence, and promotion verdict as separate lifecycle states.",
+    "no_benchmark": "Public benchmark remains blocked until research/governance have receipt-backed alternate/default evidence."
+  },
+  "next_task_card": {
+    "id": "SF-4B",
+    "goal": "Repair research candidate mount/evidence contract so candidate-only skills can be ablated without selected-only or unmounted false negatives.",
+    "exit": [
+      "candidate skill rows show selected/injected/used/evidence_present fields from runtime-confirmed skill mount when intended",
+      "unmounted candidates RETURN with explicit mount_contract_missing reason",
+      "bounded probe can distinguish unmounted candidate from ineffective mounted candidate"
+    ],
+    "blocked_full_live": true
+  }
+}

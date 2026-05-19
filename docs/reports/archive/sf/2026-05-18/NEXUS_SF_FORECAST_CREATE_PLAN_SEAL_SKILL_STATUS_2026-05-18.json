@@ -1,0 +1,32 @@
+{
+  "schema": "nexus.skill_status_report.v1",
+  "status": "PASS",
+  "summary": {
+    "skill_count": 1,
+    "capability_count": 1,
+    "runtime_update_allowed": false,
+    "public_benchmark_allowed": false
+  },
+  "skills": [
+    {
+      "name": "create-plan",
+      "path": "/Users/jameschen/Workspace/nexus/.agents/skills/create-plan/SKILL.md",
+      "root": "/Users/jameschen/Workspace/nexus/.agents/skills",
+      "sha256": "b1f7b3147c8057eab694fadf8dd3cb7091702c5667e9d158bc2dd829ecf5f204",
+      "skill_status": "nexus_repo_local_candidate",
+      "test_level": "sf_forecast_pregate_create_plan_promotion_seal",
+      "action": "ablation_only_promotion_seal",
+      "capability_mount": "reference:autoreason",
+      "family": "forecast_pregate",
+      "reason_codes": [
+        "forecast_pregate_replace_candidate",
+        "repo_local_materialized_external_skill",
+        "runner_capability:autoreason"
+      ],
+      "runtime_eligible": false,
+      "ablation_eligible": true,
+      "source_url": "https://github.com/ComposioHQ/awesome-codex-skills",
+      "source_commit": "9c9da64cf1bbea611d43dd14a10788d55369b353"
+    }
+  ]
+}

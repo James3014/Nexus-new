@@ -1,0 +1,62 @@
+{
+  "schema": "nexus.sf_research_materialized_skill_assets.v1",
+  "status": "PASS",
+  "capability": "research_and_source_discipline",
+  "runtime_update_allowed": false,
+  "research_live_allowed": false,
+  "source_specs": "docs/reports/NEXUS_SF_RESEARCH_SOURCE_DISCIPLINE_SPECS_2026-05-18.json",
+  "external_candidate_pool": "docs/reports/NEXUS_SF_RESEARCH_EXTERNAL_CANDIDATE_POOL_2026-05-18.json",
+  "summary": {
+    "materialized_asset_count": 3,
+    "runtime_eligible_count": 0,
+    "ablation_eligible_count": 3,
+    "candidate_only": true
+  },
+  "assets": [
+    {
+      "skill_id": "research-citation-chain-verifier",
+      "path": ".agents/skills/research-citation-chain-verifier/SKILL.md",
+      "behavior_groups": [
+        "citation_chain",
+        "source_validation"
+      ],
+      "required_receipts": [
+        "claim_to_source_refs",
+        "citation_chain_status",
+        "source_validation_status"
+      ]
+    },
+    {
+      "skill_id": "research-source-conflict-resolver",
+      "path": ".agents/skills/research-source-conflict-resolver/SKILL.md",
+      "behavior_groups": [
+        "source_conflict",
+        "source_validation"
+      ],
+      "required_receipts": [
+        "conflicting_source_refs",
+        "resolution_reason",
+        "source_validation_status"
+      ]
+    },
+    {
+      "skill_id": "research-source-validation-auditor",
+      "path": ".agents/skills/research-source-validation-auditor/SKILL.md",
+      "behavior_groups": [
+        "citation_chain",
+        "source_conflict",
+        "source_validation"
+      ],
+      "required_receipts": [
+        "audit_findings",
+        "missing_source_refs",
+        "source_validation_status"
+      ]
+    }
+  ],
+  "claim_boundary": [
+    "Materialized assets are candidate-only and do not update runtime defaults.",
+    "Research live remains blocked until the skill inventory/status layer recognizes these candidates and SF live receipts prove outcome contribution.",
+    "This report closes the research supply-side gap for SF cataloging, not the research promotion gate."
+  ]
+}

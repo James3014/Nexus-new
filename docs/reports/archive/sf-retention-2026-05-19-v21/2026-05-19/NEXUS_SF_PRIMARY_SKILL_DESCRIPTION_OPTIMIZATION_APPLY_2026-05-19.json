@@ -1,0 +1,194 @@
+{
+  "applied_skills": [
+    "diagnose",
+    "acceptance-evidence-failclosed",
+    "nexus-root-cause-probe",
+    "research-citation-chain-verifier",
+    "sf2-belief-route-fit-spec",
+    "nexus-benchmark-continuous-optimization"
+  ],
+  "claim_boundary": [
+    "This optimizes skill routing metadata only.",
+    "It does not replace runtime skill pairings.",
+    "Functional replacement still requires SF ablation evidence."
+  ],
+  "items": [
+    {
+      "after": {
+        "evidence_hits": 5,
+        "length_ok": 1,
+        "negative_boundary": 1,
+        "positive_hits": 18,
+        "score": 68
+      },
+      "applied": true,
+      "before": {
+        "evidence_hits": 0,
+        "length_ok": 1,
+        "negative_boundary": 0,
+        "positive_hits": 2,
+        "score": 7
+      },
+      "candidate_description": "Use when Nexus route capability is drone, memory, regression_guard, xray and the task needs debugging failures, regressions, root cause isolation, and runtime evidence checks; return receipt/evidence/gate/outcome-backed guidance for SF or runtime review. Do not use for unrelated one-off writing or tasks without runtime evidence needs.",
+      "capabilities": [
+        "drone",
+        "memory",
+        "regression_guard",
+        "xray"
+      ],
+      "capability_count": 4,
+      "improved": true,
+      "old_description": "Disciplined diagnosis loop for hard bugs and performance regressions. Reproduce → minimise → hypothesise → instrument → fix → regression-test. Use when user says \"diagnose this\" / \"debug this\", reports a bug, says something is broken/throwing/failing, or describes a performance regression.",
+      "path": "/Users/jameschen/Workspace/nexus/.agents/skills/diagnose/SKILL.md",
+      "skill_id": "diagnose"
+    },
+    {
+      "after": {
+        "evidence_hits": 5,
+        "length_ok": 1,
+        "negative_boundary": 1,
+        "positive_hits": 16,
+        "score": 62
+      },
+      "applied": true,
+      "before": {
+        "evidence_hits": 2,
+        "length_ok": 1,
+        "negative_boundary": 0,
+        "positive_hits": 4,
+        "score": 17
+      },
+      "candidate_description": "Use when Nexus route capability is artifact_gate, governance_and_trust, ultra_review and the task needs rejecting unsupported acceptance, delivery, claim, artifact, and governance evidence; return receipt/evidence/gate/outcome-backed guidance for SF or runtime review. Do not use for unrelated one-off writing or tasks without runtime evidence needs.",
+      "capabilities": [
+        "artifact_gate",
+        "governance_and_trust",
+        "ultra_review"
+      ],
+      "capability_count": 3,
+      "improved": true,
+      "old_description": "Load when a governance route must reject acceptance claims that lack complete evidence, receipts, or gate status.",
+      "path": "/Users/jameschen/Workspace/nexus/.agents/skills/acceptance-evidence-failclosed/SKILL.md",
+      "skill_id": "acceptance-evidence-failclosed"
+    },
+    {
+      "after": {
+        "evidence_hits": 5,
+        "length_ok": 1,
+        "negative_boundary": 1,
+        "positive_hits": 17,
+        "score": 65
+      },
+      "applied": true,
+      "before": {
+        "evidence_hits": 2,
+        "length_ok": 1,
+        "negative_boundary": 0,
+        "positive_hits": 4,
+        "score": 17
+      },
+      "candidate_description": "Use when Nexus route capability is ddtree, policy_capability_gate, ui_validator and the task needs Nexus route, policy, gate, report, and runtime receipt root-cause diagnosis; return receipt/evidence/gate/outcome-backed guidance for SF or runtime review. Do not use for unrelated one-off writing or tasks without runtime evidence needs.",
+      "capabilities": [
+        "ddtree",
+        "policy_capability_gate",
+        "ui_validator"
+      ],
+      "capability_count": 3,
+      "improved": true,
+      "old_description": "用於診斷 Nexus「看似完成但回報不可信、agent 與 gate 結果不一致、或任務被治理狀態卡住」的問題。當需要直接穿 Nexus 跑真實流程、檢查 evidence/report/gate 的因果鏈、先用 TDD 鎖定缺陷再修最小邊界時使用。",
+      "path": "/Users/jameschen/Workspace/nexus/.agents/skills/nexus-root-cause-probe/SKILL.md",
+      "skill_id": "nexus-root-cause-probe"
+    },
+    {
+      "after": {
+        "evidence_hits": 5,
+        "length_ok": 1,
+        "negative_boundary": 1,
+        "positive_hits": 17,
+        "score": 65
+      },
+      "applied": true,
+      "before": {
+        "evidence_hits": 0,
+        "length_ok": 1,
+        "negative_boundary": 0,
+        "positive_hits": 4,
+        "score": 13
+      },
+      "candidate_description": "Use when Nexus route capability is research, research_and_source_discipline, research_control_plane and the task needs research claim-to-source tracing, citation chain verification, and source-discipline receipts; return receipt/evidence/gate/outcome-backed guidance for SF or runtime review. Do not use for unrelated one-off writing or tasks without runtime evidence needs.",
+      "capabilities": [
+        "research",
+        "research_and_source_discipline",
+        "research_control_plane"
+      ],
+      "capability_count": 3,
+      "improved": true,
+      "old_description": "Load when research output must trace claims to stable source references and verify citation chains before acceptance.",
+      "path": "/Users/jameschen/Workspace/nexus/.agents/skills/research-citation-chain-verifier/SKILL.md",
+      "skill_id": "research-citation-chain-verifier"
+    },
+    {
+      "after": {
+        "evidence_hits": 5,
+        "length_ok": 1,
+        "negative_boundary": 1,
+        "positive_hits": 14,
+        "score": 56
+      },
+      "applied": true,
+      "before": {
+        "evidence_hits": 0,
+        "length_ok": 0,
+        "negative_boundary": 0,
+        "positive_hits": 2,
+        "score": 6
+      },
+      "candidate_description": "Use when Nexus route capability is autoreason, belief and the task needs belief, autoreason confidence state, subjective route assessment, and decision evidence; return receipt/evidence/gate/outcome-backed guidance for SF or runtime review. Do not use for unrelated one-off writing or tasks without runtime evidence needs.",
+      "capabilities": [
+        "autoreason",
+        "belief"
+      ],
+      "capability_count": 2,
+      "improved": true,
+      "old_description": "Candidate-only SF2 route-fit skill for belief.",
+      "path": "/Users/jameschen/Workspace/nexus/.agents/skills/sf2/sf2-belief-route-fit-spec/SKILL.md",
+      "skill_id": "sf2-belief-route-fit-spec"
+    },
+    {
+      "after": {
+        "evidence_hits": 5,
+        "length_ok": 1,
+        "negative_boundary": 1,
+        "positive_hits": 16,
+        "score": 62
+      },
+      "applied": true,
+      "before": {
+        "evidence_hits": 1,
+        "length_ok": 1,
+        "negative_boundary": 0,
+        "positive_hits": 5,
+        "score": 18
+      },
+      "candidate_description": "Use when Nexus route capability is benchmark_meta_opt, claim_gate and the task needs benchmark, route-cost, claim-boundary, and continuous optimization review; return receipt/evidence/gate/outcome-backed guidance for SF or runtime review. Do not use for unrelated one-off writing or tasks without runtime evidence needs.",
+      "capabilities": [
+        "benchmark_meta_opt",
+        "claim_gate"
+      ],
+      "capability_count": 2,
+      "improved": true,
+      "old_description": "Use when optimizing Nexus and needing a repeatable before/after benchmark loop that compares the same model bare vs the same model wearing Nexus, tracks verified delivery, cost, friction, public claim gate, and rule lifecycle decisions.",
+      "path": "/Users/jameschen/Workspace/nexus/.agents/skills/nexus-benchmark-continuous-optimization/SKILL.md",
+      "skill_id": "nexus-benchmark-continuous-optimization"
+    }
+  ],
+  "public_benchmark_allowed": false,
+  "runtime_update_allowed": false,
+  "schema": "nexus.sf_primary_skill_description_optimization.v1",
+  "status": "PASS",
+  "summary": {
+    "applied_count": 6,
+    "improved_candidate_count": 6,
+    "max_apply": 6,
+    "primary_skill_count": 23
+  }
+}

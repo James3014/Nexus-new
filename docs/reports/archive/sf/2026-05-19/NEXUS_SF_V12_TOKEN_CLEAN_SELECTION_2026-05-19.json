@@ -1,0 +1,87 @@
+{
+  "schema": "nexus.sf_v12_token_clean_selection.v1",
+  "status": "PASS",
+  "summary": {
+    "capability_count": 2,
+    "pass_capabilities": 2,
+    "runtime_update_allowed": false,
+    "public_benchmark_allowed": false
+  },
+  "rankings": [
+    {
+      "capability_id": "ultra_review",
+      "status": "PASS",
+      "baseline_clean": true,
+      "baseline_tokens": 38707,
+      "baseline_wall_sec": 166.7508,
+      "best_skill": "acceptance-evidence-failclosed",
+      "candidates": [
+        {
+          "skill_id": "acceptance-evidence-failclosed",
+          "effective": true,
+          "verdict": "effective_candidate",
+          "token_delta": 448,
+          "wall_delta_sec": -28.8263,
+          "tokens": 39155,
+          "wall_sec": 137.9245,
+          "skill_mount_contract_status": "PASS",
+          "reason": ""
+        },
+        {
+          "skill_id": "cso",
+          "effective": true,
+          "verdict": "effective_candidate",
+          "token_delta": 5426,
+          "wall_delta_sec": -5.3484,
+          "tokens": 44133,
+          "wall_sec": 161.4024,
+          "skill_mount_contract_status": "PASS",
+          "reason": ""
+        }
+      ]
+    },
+    {
+      "capability_id": "xray",
+      "status": "PASS",
+      "baseline_clean": true,
+      "baseline_tokens": 47817,
+      "baseline_wall_sec": 178.3877,
+      "best_skill": "diagnose",
+      "candidates": [
+        {
+          "skill_id": "diagnose",
+          "effective": true,
+          "verdict": "effective_candidate",
+          "token_delta": -6764,
+          "wall_delta_sec": -56.658,
+          "tokens": 41053,
+          "wall_sec": 121.7297,
+          "skill_mount_contract_status": "PASS",
+          "reason": ""
+        },
+        {
+          "skill_id": "sf2-codeintel-route-fit-spec",
+          "effective": true,
+          "verdict": "effective_candidate",
+          "token_delta": -4120,
+          "wall_delta_sec": -46.023,
+          "tokens": 43697,
+          "wall_sec": 132.3647,
+          "skill_mount_contract_status": "PASS",
+          "reason": ""
+        },
+        {
+          "skill_id": "sf2-xray-route-fit-spec",
+          "effective": true,
+          "verdict": "effective_candidate",
+          "token_delta": 144,
+          "wall_delta_sec": -17.5833,
+          "tokens": 47961,
+          "wall_sec": 160.8044,
+          "skill_mount_contract_status": "PASS",
+          "reason": ""
+        }
+      ]
+    }
+  ]
+}

@@ -1,0 +1,142 @@
+{
+  "rows": [
+    {
+      "ablation_eligible": true,
+      "anonymous_label": "current_best",
+      "arm_id": "current_best",
+      "arm_type": "skill_ablation",
+      "capability": "claim_gate",
+      "expected_outcome": "flash_nexus_with_current_best_skill_mount",
+      "model": "gemini-3-flash-preview",
+      "row_id": "claim_gate::sf-github-challenger-smoke-claim_gate-001::current_best::nexus-benchmark-continuous-optimization",
+      "runner_args": [
+        "uv",
+        "run",
+        "python",
+        "scripts/bench/capability_ab_runner.py",
+        "--tasks-file",
+        "docs/reports/NEXUS_SF_GITHUB_CHALLENGER_CLAIM_GATE_FLASH_SMOKE_TASKS_2026-05-19.json",
+        "--task-id-filter",
+        "sf-github-challenger-smoke-claim_gate-001",
+        "--max-tasks",
+        "1",
+        "--timeout-sec",
+        "300",
+        "--per-task-stop-loss-sec",
+        "600",
+        "--stop-loss-sec",
+        "600",
+        "--nexus-only",
+        "--gemini-model",
+        "gemini-3-flash-preview",
+        "--with-nexus-runner",
+        "subprocess",
+        "--with-llm-mode",
+        "all",
+        "--without-mode",
+        "gemini",
+        "--enable-autoreason-executor",
+        "--enable-ddtree-executor",
+        "--enable-ultra-review-dry-gate",
+        "--llm-candidate-cap",
+        "3",
+        "--evidence-bundle",
+        "--no-progress-log"
+      ],
+      "runner_capability_id": "claim_gate",
+      "runner_env": {
+        "NEXUS_BENCH_ALLOW_ABLATION_SKILL_MOUNTS": "1",
+        "NEXUS_BENCH_SKILL_MOUNT_REQUESTS": "[\"nexus-benchmark-continuous-optimization\"]",
+        "NEXUS_BENCH_SKILL_STATUS_REPORT": "docs/reports/NEXUS_SF_GITHUB_CHALLENGER_CLAIM_GATE_FLASH_SMOKE_SKILL_STATUS_2026-05-19.json",
+        "NEXUS_CAPABILITY_RECEIPT_FIRST": "1",
+        "NEXUS_DIRECT_GEMINI_MODEL": "gemini-3-flash-preview",
+        "NEXUS_VALUE_HIDDEN_VERIFIER": "1"
+      },
+      "runtime_eligible": false,
+      "sf_route_capability_id": "claim_gate",
+      "skill_id": "nexus-benchmark-continuous-optimization",
+      "skill_mount_requests": [
+        "nexus-benchmark-continuous-optimization"
+      ],
+      "source_root": "current_best",
+      "source_type": "nexus_curated_candidate",
+      "task_ref": {
+        "manifest": "docs/reports/NEXUS_SF_GITHUB_CHALLENGER_CLAIM_GATE_FLASH_SMOKE_TASKS_2026-05-19.json",
+        "task_id": "sf-github-challenger-smoke-claim_gate-001"
+      }
+    },
+    {
+      "ablation_eligible": true,
+      "anonymous_label": "github_challenger",
+      "arm_id": "github_challenger",
+      "arm_type": "skill_ablation",
+      "capability": "claim_gate",
+      "expected_outcome": "flash_nexus_with_github_challenger_skill_mount",
+      "model": "gemini-3-flash-preview",
+      "row_id": "claim_gate::sf-github-challenger-smoke-claim_gate-001::github_challenger::github-auto-skill-safe-learning",
+      "runner_args": [
+        "uv",
+        "run",
+        "python",
+        "scripts/bench/capability_ab_runner.py",
+        "--tasks-file",
+        "docs/reports/NEXUS_SF_GITHUB_CHALLENGER_CLAIM_GATE_FLASH_SMOKE_TASKS_2026-05-19.json",
+        "--task-id-filter",
+        "sf-github-challenger-smoke-claim_gate-001",
+        "--max-tasks",
+        "1",
+        "--timeout-sec",
+        "300",
+        "--per-task-stop-loss-sec",
+        "600",
+        "--stop-loss-sec",
+        "600",
+        "--nexus-only",
+        "--gemini-model",
+        "gemini-3-flash-preview",
+        "--with-nexus-runner",
+        "subprocess",
+        "--with-llm-mode",
+        "all",
+        "--without-mode",
+        "gemini",
+        "--enable-autoreason-executor",
+        "--enable-ddtree-executor",
+        "--enable-ultra-review-dry-gate",
+        "--llm-candidate-cap",
+        "3",
+        "--evidence-bundle",
+        "--no-progress-log"
+      ],
+      "runner_capability_id": "claim_gate",
+      "runner_env": {
+        "NEXUS_BENCH_ALLOW_ABLATION_SKILL_MOUNTS": "1",
+        "NEXUS_BENCH_SKILL_MOUNT_REQUESTS": "[\"github-auto-skill-safe-learning\"]",
+        "NEXUS_BENCH_SKILL_STATUS_REPORT": "docs/reports/NEXUS_SF_GITHUB_CHALLENGER_CLAIM_GATE_FLASH_SMOKE_SKILL_STATUS_2026-05-19.json",
+        "NEXUS_CAPABILITY_RECEIPT_FIRST": "1",
+        "NEXUS_DIRECT_GEMINI_MODEL": "gemini-3-flash-preview",
+        "NEXUS_VALUE_HIDDEN_VERIFIER": "1"
+      },
+      "runtime_eligible": false,
+      "sf_route_capability_id": "claim_gate",
+      "skill_id": "github-auto-skill-safe-learning",
+      "skill_mount_requests": [
+        "github-auto-skill-safe-learning"
+      ],
+      "source_root": "github_challenger",
+      "source_type": "external_reference_candidate",
+      "task_ref": {
+        "manifest": "docs/reports/NEXUS_SF_GITHUB_CHALLENGER_CLAIM_GATE_FLASH_SMOKE_TASKS_2026-05-19.json",
+        "task_id": "sf-github-challenger-smoke-claim_gate-001"
+      }
+    }
+  ],
+  "schema": "nexus.sf_github_challenger_claim_gate_flash_smoke_matrix.v1",
+  "status": "PASS",
+  "summary": {
+    "comparison_count": 1,
+    "public_benchmark_allowed": false,
+    "row_count": 2,
+    "runtime_update_allowed": false
+  }
+}

@@ -1,0 +1,247 @@
+{
+  "schema": "nexus.sf_flash_pair_live_report.v1",
+  "status": "RETURN",
+  "summary": {
+    "comparison_count": 5,
+    "keep_count": 0,
+    "return_count": 5,
+    "same_runner_pair_artifact_count": 5,
+    "session_worker_clean_count": 5,
+    "runtime_update_allowed": false,
+    "public_benchmark_allowed": false
+  },
+  "blockers": [
+    "codeintel:sf-flash-pair-codeintel-001:flash_pair_not_keep",
+    "direct_master_loop:sf-flash-pair-direct_master_loop-001:flash_pair_not_keep",
+    "hyper_sprint:sf-flash-pair-hyper_sprint-001:flash_pair_not_keep",
+    "repair_loop:sf-flash-pair-repair_loop-001:flash_pair_not_keep",
+    "ultra_review:sf-flash-pair-ultra_review-001:flash_pair_not_keep"
+  ],
+  "comparisons": [
+    {
+      "capability_id": "codeintel",
+      "task_id": "sf-flash-pair-codeintel-001",
+      "baseline_row_id": "codeintel::sf-flash-pair-codeintel-001::flash_nexus::doggy8088_karpathy_baseline",
+      "with_skill_row_id": "codeintel::sf-flash-pair-codeintel-001::flash_nexus_with_skill::karpathy-guidelines",
+      "skill_id": "karpathy-guidelines",
+      "same_runner_pair_artifacts": true,
+      "session_worker_clean": true,
+      "baseline": {
+        "status": "PASS",
+        "benchmark_status": "SUCCESS",
+        "semantic_status": "VERIFIED",
+        "trust_mismatch": false,
+        "model_calls": 2,
+        "total_tokens": 38418,
+        "phase_wall_total_sec": 81.5411,
+        "output_dir": "/private/tmp/nexus_sf_doggy8088_karpathy_challenge_live_20260518/codeintel_sf-flash-pair-codeintel-001_flash_nexus_doggy8088_karpathy_baseline"
+      },
+      "with_skill": {
+        "status": "PASS",
+        "benchmark_status": "SUCCESS",
+        "semantic_status": "VERIFIED",
+        "trust_mismatch": false,
+        "model_calls": 2,
+        "total_tokens": 40993,
+        "phase_wall_total_sec": 105.896,
+        "output_dir": "/private/tmp/nexus_sf_doggy8088_karpathy_challenge_live_20260518/codeintel_sf-flash-pair-codeintel-001_flash_nexus_with_skill_karpathy-guidelines",
+        "skill_mount_contract_status": "RETURN",
+        "selected": false,
+        "injected": false,
+        "used": false,
+        "evidence_present": false,
+        "gate_passed": false,
+        "outcome_contributed": false
+      },
+      "delta": {
+        "token_delta": 2575,
+        "phase_wall_total_delta_sec": 24.3549,
+        "skill_causality_delta": "missing_skill_chain",
+        "delivery_delta": "paired_delivery_equal_or_clean",
+        "cost_delta_status": "observation_only_not_promotion_gate"
+      },
+      "verdict": "RETURN"
+    },
+    {
+      "capability_id": "direct_master_loop",
+      "task_id": "sf-flash-pair-direct_master_loop-001",
+      "baseline_row_id": "direct_master_loop::sf-flash-pair-direct_master_loop-001::flash_nexus::doggy8088_karpathy_baseline",
+      "with_skill_row_id": "direct_master_loop::sf-flash-pair-direct_master_loop-001::flash_nexus_with_skill::karpathy-guidelines",
+      "skill_id": "karpathy-guidelines",
+      "same_runner_pair_artifacts": true,
+      "session_worker_clean": true,
+      "baseline": {
+        "status": "PASS",
+        "benchmark_status": "SUCCESS",
+        "semantic_status": "VERIFIED",
+        "trust_mismatch": false,
+        "model_calls": 2,
+        "total_tokens": 39199,
+        "phase_wall_total_sec": 96.4537,
+        "output_dir": "/private/tmp/nexus_sf_doggy8088_karpathy_challenge_live_20260518/direct_master_loop_sf-flash-pair-direct_master_loop-001_flash_nexus_doggy8088_karpathy_baseline"
+      },
+      "with_skill": {
+        "status": "PASS",
+        "benchmark_status": "SUCCESS",
+        "semantic_status": "VERIFIED",
+        "trust_mismatch": false,
+        "model_calls": 2,
+        "total_tokens": 45510,
+        "phase_wall_total_sec": 142.5614,
+        "output_dir": "/private/tmp/nexus_sf_doggy8088_karpathy_challenge_live_20260518/direct_master_loop_sf-flash-pair-direct_master_loop-001_flash_nexus_with_skill_karpathy-guidelines",
+        "skill_mount_contract_status": "RETURN",
+        "selected": false,
+        "injected": false,
+        "used": false,
+        "evidence_present": false,
+        "gate_passed": false,
+        "outcome_contributed": false
+      },
+      "delta": {
+        "token_delta": 6311,
+        "phase_wall_total_delta_sec": 46.1077,
+        "skill_causality_delta": "missing_skill_chain",
+        "delivery_delta": "paired_delivery_equal_or_clean",
+        "cost_delta_status": "observation_only_not_promotion_gate"
+      },
+      "verdict": "RETURN"
+    },
+    {
+      "capability_id": "hyper_sprint",
+      "task_id": "sf-flash-pair-hyper_sprint-001",
+      "baseline_row_id": "hyper_sprint::sf-flash-pair-hyper_sprint-001::flash_nexus::doggy8088_karpathy_baseline",
+      "with_skill_row_id": "hyper_sprint::sf-flash-pair-hyper_sprint-001::flash_nexus_with_skill::karpathy-guidelines",
+      "skill_id": "karpathy-guidelines",
+      "same_runner_pair_artifacts": true,
+      "session_worker_clean": true,
+      "baseline": {
+        "status": "PASS",
+        "benchmark_status": "SUCCESS",
+        "semantic_status": "VERIFIED",
+        "trust_mismatch": false,
+        "model_calls": 2,
+        "total_tokens": 54601,
+        "phase_wall_total_sec": 163.9478,
+        "output_dir": "/private/tmp/nexus_sf_doggy8088_karpathy_challenge_live_20260518/hyper_sprint_sf-flash-pair-hyper_sprint-001_flash_nexus_doggy8088_karpathy_baseline"
+      },
+      "with_skill": {
+        "status": "PASS",
+        "benchmark_status": "SUCCESS",
+        "semantic_status": "VERIFIED",
+        "trust_mismatch": false,
+        "model_calls": 2,
+        "total_tokens": 38450,
+        "phase_wall_total_sec": 92.5446,
+        "output_dir": "/private/tmp/nexus_sf_doggy8088_karpathy_challenge_live_20260518/hyper_sprint_sf-flash-pair-hyper_sprint-001_flash_nexus_with_skill_karpathy-guidelines",
+        "skill_mount_contract_status": "RETURN",
+        "selected": false,
+        "injected": false,
+        "used": false,
+        "evidence_present": false,
+        "gate_passed": false,
+        "outcome_contributed": false
+      },
+      "delta": {
+        "token_delta": -16151,
+        "phase_wall_total_delta_sec": -71.4032,
+        "skill_causality_delta": "missing_skill_chain",
+        "delivery_delta": "paired_delivery_equal_or_clean",
+        "cost_delta_status": "observation_only_not_promotion_gate"
+      },
+      "verdict": "RETURN"
+    },
+    {
+      "capability_id": "repair_loop",
+      "task_id": "sf-flash-pair-repair_loop-001",
+      "baseline_row_id": "repair_loop::sf-flash-pair-repair_loop-001::flash_nexus::doggy8088_karpathy_baseline",
+      "with_skill_row_id": "repair_loop::sf-flash-pair-repair_loop-001::flash_nexus_with_skill::karpathy-guidelines",
+      "skill_id": "karpathy-guidelines",
+      "same_runner_pair_artifacts": true,
+      "session_worker_clean": true,
+      "baseline": {
+        "status": "PASS",
+        "benchmark_status": "SUCCESS",
+        "semantic_status": "VERIFIED",
+        "trust_mismatch": false,
+        "model_calls": 2,
+        "total_tokens": 39448,
+        "phase_wall_total_sec": 102.8264,
+        "output_dir": "/private/tmp/nexus_sf_doggy8088_karpathy_challenge_live_20260518/repair_loop_sf-flash-pair-repair_loop-001_flash_nexus_doggy8088_karpathy_baseline"
+      },
+      "with_skill": {
+        "status": "PASS",
+        "benchmark_status": "SUCCESS",
+        "semantic_status": "VERIFIED",
+        "trust_mismatch": false,
+        "model_calls": 2,
+        "total_tokens": 37753,
+        "phase_wall_total_sec": 83.7374,
+        "output_dir": "/private/tmp/nexus_sf_doggy8088_karpathy_challenge_live_20260518/repair_loop_sf-flash-pair-repair_loop-001_flash_nexus_with_skill_karpathy-guidelines",
+        "skill_mount_contract_status": "RETURN",
+        "selected": false,
+        "injected": false,
+        "used": false,
+        "evidence_present": false,
+        "gate_passed": false,
+        "outcome_contributed": false
+      },
+      "delta": {
+        "token_delta": -1695,
+        "phase_wall_total_delta_sec": -19.089,
+        "skill_causality_delta": "missing_skill_chain",
+        "delivery_delta": "paired_delivery_equal_or_clean",
+        "cost_delta_status": "observation_only_not_promotion_gate"
+      },
+      "verdict": "RETURN"
+    },
+    {
+      "capability_id": "ultra_review",
+      "task_id": "sf-flash-pair-ultra_review-001",
+      "baseline_row_id": "ultra_review::sf-flash-pair-ultra_review-001::flash_nexus::doggy8088_karpathy_baseline",
+      "with_skill_row_id": "ultra_review::sf-flash-pair-ultra_review-001::flash_nexus_with_skill::karpathy-guidelines",
+      "skill_id": "karpathy-guidelines",
+      "same_runner_pair_artifacts": true,
+      "session_worker_clean": true,
+      "baseline": {
+        "status": "PASS",
+        "benchmark_status": "SUCCESS",
+        "semantic_status": "VERIFIED",
+        "trust_mismatch": false,
+        "model_calls": 2,
+        "total_tokens": 40810,
+        "phase_wall_total_sec": 113.8216,
+        "output_dir": "/private/tmp/nexus_sf_doggy8088_karpathy_challenge_live_20260518/ultra_review_sf-flash-pair-ultra_review-001_flash_nexus_doggy8088_karpathy_baseline"
+      },
+      "with_skill": {
+        "status": "PASS",
+        "benchmark_status": "SUCCESS",
+        "semantic_status": "VERIFIED",
+        "trust_mismatch": false,
+        "model_calls": 2,
+        "total_tokens": 39270,
+        "phase_wall_total_sec": 108.5152,
+        "output_dir": "/private/tmp/nexus_sf_doggy8088_karpathy_challenge_live_20260518/ultra_review_sf-flash-pair-ultra_review-001_flash_nexus_with_skill_karpathy-guidelines",
+        "skill_mount_contract_status": "RETURN",
+        "selected": false,
+        "injected": false,
+        "used": false,
+        "evidence_present": false,
+        "gate_passed": false,
+        "outcome_contributed": false
+      },
+      "delta": {
+        "token_delta": -1540,
+        "phase_wall_total_delta_sec": -5.3064,
+        "skill_causality_delta": "missing_skill_chain",
+        "delivery_delta": "paired_delivery_equal_or_clean",
+        "cost_delta_status": "observation_only_not_promotion_gate"
+      },
+      "verdict": "RETURN"
+    }
+  ],
+  "claim_boundary": [
+    "This is SF live evidence for Flash+Nexus versus Flash+Nexus+skill.",
+    "Rows are paired by capability and task in the same runner artifact shape.",
+    "Token and wall deltas are observation-only and do not unlock public benchmark claims."
+  ]
+}

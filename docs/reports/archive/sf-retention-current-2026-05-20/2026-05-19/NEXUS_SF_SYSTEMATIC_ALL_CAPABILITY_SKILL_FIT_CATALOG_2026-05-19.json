@@ -1,0 +1,1315 @@
+{
+  "schema": "nexus.skill_fit_catalog.v1",
+  "status": "PASS",
+  "mode": "live",
+  "matrix_path": "docs/reports/NEXUS_SF_SYSTEMATIC_BATCH_FLASH_SMOKE_MATRIX_2026-05-19.json",
+  "summary": {
+    "planned_rows": 68,
+    "completed_rows": 68,
+    "matrix_complete": true,
+    "capability_only_rows": 0,
+    "skill_count": 64,
+    "negative_control_rows": 0,
+    "negative_control_blocked_rows": 0,
+    "keep_count": 34,
+    "replace_candidate_count": 30,
+    "reject_count": 0,
+    "needs_more_data_count": 0
+  },
+  "failures": [],
+  "claim_boundary": [
+    "Catalog verdicts are valid only for this capability, task set, model, and matrix version.",
+    "replace_candidate means import/review candidate, not runtime promotion.",
+    "runtime policy changes require a later Flash 50/100 regression gate."
+  ],
+  "skill_verdicts": [
+    {
+      "skill_id": "acceptance-evidence-failclosed",
+      "capability": "artifact_gate",
+      "anonymous_label": "current_best",
+      "source_root": "current_best",
+      "runtime_eligible": true,
+      "tested_rows": 1,
+      "effective_rows": 1,
+      "trust_clean_rows": 1,
+      "verdict": "keep",
+      "evidence_refs": [
+        ".nexus/reports/sf_systematic_all_capability_live_2026-05-19/artifact_gate_sf-systematic-batch-artifact_gate-001_current_best_acceptance-evidence-failclosed/evidence_bundle.json"
+      ],
+      "receipt_refs": [
+        ".nexus/reports/sf_systematic_all_capability_live_2026-05-19/artifact_gate_sf-systematic-batch-artifact_gate-001_current_best_acceptance-evidence-failclosed"
+      ],
+      "task_buckets": [
+        "artifact_gate"
+      ]
+    },
+    {
+      "skill_id": "sf-systematic-artifact_gate-differential-review-461fbd0c",
+      "capability": "artifact_gate",
+      "anonymous_label": "challenger",
+      "source_root": "sf_systematic_compiled_interface",
+      "runtime_eligible": false,
+      "tested_rows": 1,
+      "effective_rows": 1,
+      "trust_clean_rows": 1,
+      "verdict": "replace_candidate",
+      "evidence_refs": [
+        ".nexus/reports/sf_systematic_all_capability_live_2026-05-19/artifact_gate_sf-systematic-batch-artifact_gate-001_challenger_sf-systematic-artifact_gate-differential-review-461fbd0c/evidence_bundle.json"
+      ],
+      "receipt_refs": [
+        ".nexus/reports/sf_systematic_all_capability_live_2026-05-19/artifact_gate_sf-systematic-batch-artifact_gate-001_challenger_sf-systematic-artifact_gate-differential-review-461fbd0c"
+      ],
+      "task_buckets": [
+        "artifact_gate"
+      ]
+    },
+    {
+      "skill_id": "sf-systematic-autonomic_router-nuxt-1022ec1d",
+      "capability": "autonomic_router",
+      "anonymous_label": "challenger",
+      "source_root": "sf_systematic_compiled_interface",
+      "runtime_eligible": false,
+      "tested_rows": 1,
+      "effective_rows": 1,
+      "trust_clean_rows": 1,
+      "verdict": "replace_candidate",
+      "evidence_refs": [
+        ".nexus/reports/sf_systematic_all_capability_live_2026-05-19/autonomic_router_sf-systematic-batch-autonomic_router-001_challenger_sf-systematic-autonomic_router-nuxt-1022ec1d/evidence_bundle.json"
+      ],
+      "receipt_refs": [
+        ".nexus/reports/sf_systematic_all_capability_live_2026-05-19/autonomic_router_sf-systematic-batch-autonomic_router-001_challenger_sf-systematic-autonomic_router-nuxt-1022ec1d"
+      ],
+      "task_buckets": [
+        "autonomic_router"
+      ]
+    },
+    {
+      "skill_id": "sf2-autonomic_router-route-fit-spec",
+      "capability": "autonomic_router",
+      "anonymous_label": "current_best",
+      "source_root": "current_best",
+      "runtime_eligible": true,
+      "tested_rows": 1,
+      "effective_rows": 1,
+      "trust_clean_rows": 1,
+      "verdict": "keep",
+      "evidence_refs": [
+        ".nexus/reports/sf_systematic_all_capability_live_2026-05-19/autonomic_router_sf-systematic-batch-autonomic_router-001_current_best_sf2-autonomic_router-route-fit-spec/evidence_bundle.json"
+      ],
+      "receipt_refs": [
+        ".nexus/reports/sf_systematic_all_capability_live_2026-05-19/autonomic_router_sf-systematic-batch-autonomic_router-001_current_best_sf2-autonomic_router-route-fit-spec"
+      ],
+      "task_buckets": [
+        "autonomic_router"
+      ]
+    },
+    {
+      "skill_id": "sf-systematic-autoreason-first-principles-thinking-f95019ea",
+      "capability": "autoreason",
+      "anonymous_label": "challenger",
+      "source_root": "sf_systematic_compiled_interface",
+      "runtime_eligible": false,
+      "tested_rows": 1,
+      "effective_rows": 1,
+      "trust_clean_rows": 1,
+      "verdict": "replace_candidate",
+      "evidence_refs": [
+        ".nexus/reports/sf_systematic_all_capability_live_2026-05-19/autoreason_sf-systematic-batch-autoreason-001_challenger_sf-systematic-autoreason-first-principles-thinking-f95019ea/evidence_bundle.json"
+      ],
+      "receipt_refs": [
+        ".nexus/reports/sf_systematic_all_capability_live_2026-05-19/autoreason_sf-systematic-batch-autoreason-001_challenger_sf-systematic-autoreason-first-principles-thinking-f95019ea"
+      ],
+      "task_buckets": [
+        "autoreason"
+      ]
+    },
+    {
+      "skill_id": "sf2-belief-route-fit-spec",
+      "capability": "autoreason",
+      "anonymous_label": "current_best",
+      "source_root": "current_best",
+      "runtime_eligible": true,
+      "tested_rows": 1,
+      "effective_rows": 1,
+      "trust_clean_rows": 1,
+      "verdict": "keep",
+      "evidence_refs": [
+        ".nexus/reports/sf_systematic_all_capability_live_2026-05-19/autoreason_sf-systematic-batch-autoreason-001_current_best_sf2-belief-route-fit-spec/evidence_bundle.json"
+      ],
+      "receipt_refs": [
+        ".nexus/reports/sf_systematic_all_capability_live_2026-05-19/autoreason_sf-systematic-batch-autoreason-001_current_best_sf2-belief-route-fit-spec"
+      ],
+      "task_buckets": [
+        "autoreason"
+      ]
+    },
+    {
+      "skill_id": "sf-systematic-belief-diffdock-e75e5687",
+      "capability": "belief",
+      "anonymous_label": "challenger",
+      "source_root": "sf_systematic_compiled_interface",
+      "runtime_eligible": false,
+      "tested_rows": 1,
+      "effective_rows": 1,
+      "trust_clean_rows": 1,
+      "verdict": "replace_candidate",
+      "evidence_refs": [
+        ".nexus/reports/sf_systematic_all_capability_live_2026-05-19/belief_sf-systematic-batch-belief-001_challenger_sf-systematic-belief-diffdock-e75e5687/evidence_bundle.json"
+      ],
+      "receipt_refs": [
+        ".nexus/reports/sf_systematic_all_capability_live_2026-05-19/belief_sf-systematic-batch-belief-001_challenger_sf-systematic-belief-diffdock-e75e5687"
+      ],
+      "task_buckets": [
+        "belief"
+      ]
+    },
+    {
+      "skill_id": "sf2-belief-route-fit-spec",
+      "capability": "belief",
+      "anonymous_label": "current_best",
+      "source_root": "current_best",
+      "runtime_eligible": true,
+      "tested_rows": 1,
+      "effective_rows": 1,
+      "trust_clean_rows": 1,
+      "verdict": "keep",
+      "evidence_refs": [
+        ".nexus/reports/sf_systematic_all_capability_live_2026-05-19/belief_sf-systematic-batch-belief-001_current_best_sf2-belief-route-fit-spec/evidence_bundle.json"
+      ],
+      "receipt_refs": [
+        ".nexus/reports/sf_systematic_all_capability_live_2026-05-19/belief_sf-systematic-batch-belief-001_current_best_sf2-belief-route-fit-spec"
+      ],
+      "task_buckets": [
+        "belief"
+      ]
+    },
+    {
+      "skill_id": "sf-systematic-benchmark_meta_opt-hugging-face-trackio-d21c6b90",
+      "capability": "benchmark_meta_opt",
+      "anonymous_label": "current_best",
+      "source_root": "current_best",
+      "runtime_eligible": true,
+      "tested_rows": 2,
+      "effective_rows": 2,
+      "trust_clean_rows": 2,
+      "verdict": "keep",
+      "evidence_refs": [
+        ".nexus/reports/sf_systematic_all_capability_live_2026-05-19/benchmark_meta_opt_sf-systematic-batch-benchmark_meta_opt-001_current_best_sf-systematic-benchmark_meta_opt-hugging-face-trackio-d21c6b90/evidence_bundle.json",
+        ".nexus/reports/sf_systematic_all_capability_live_2026-05-19/benchmark_meta_opt_sf-systematic-batch-benchmark_meta_opt-001_challenger_sf-systematic-benchmark_meta_opt-hugging-face-trackio-d21c6b90/evidence_bundle.json"
+      ],
+      "receipt_refs": [
+        ".nexus/reports/sf_systematic_all_capability_live_2026-05-19/benchmark_meta_opt_sf-systematic-batch-benchmark_meta_opt-001_current_best_sf-systematic-benchmark_meta_opt-hugging-face-trackio-d21c6b90",
+        ".nexus/reports/sf_systematic_all_capability_live_2026-05-19/benchmark_meta_opt_sf-systematic-batch-benchmark_meta_opt-001_challenger_sf-systematic-benchmark_meta_opt-hugging-face-trackio-d21c6b90"
+      ],
+      "task_buckets": [
+        "benchmark_meta_opt"
+      ]
+    },
+    {
+      "skill_id": "nexus-benchmark-continuous-optimization",
+      "capability": "claim_gate",
+      "anonymous_label": "current_best",
+      "source_root": "current_best",
+      "runtime_eligible": true,
+      "tested_rows": 1,
+      "effective_rows": 1,
+      "trust_clean_rows": 1,
+      "verdict": "keep",
+      "evidence_refs": [
+        ".nexus/reports/sf_systematic_all_capability_live_2026-05-19/claim_gate_sf-systematic-batch-claim_gate-001_current_best_nexus-benchmark-continuous-optimization/evidence_bundle.json"
+      ],
+      "receipt_refs": [
+        ".nexus/reports/sf_systematic_all_capability_live_2026-05-19/claim_gate_sf-systematic-batch-claim_gate-001_current_best_nexus-benchmark-continuous-optimization"
+      ],
+      "task_buckets": [
+        "claim_gate"
+      ]
+    },
+    {
+      "skill_id": "sf-systematic-claim_gate-citation-management-9813e12c",
+      "capability": "claim_gate",
+      "anonymous_label": "challenger",
+      "source_root": "sf_systematic_compiled_interface",
+      "runtime_eligible": false,
+      "tested_rows": 1,
+      "effective_rows": 1,
+      "trust_clean_rows": 1,
+      "verdict": "replace_candidate",
+      "evidence_refs": [
+        ".nexus/reports/sf_systematic_all_capability_live_2026-05-19/claim_gate_sf-systematic-batch-claim_gate-001_challenger_sf-systematic-claim_gate-citation-management-9813e12c/evidence_bundle.json"
+      ],
+      "receipt_refs": [
+        ".nexus/reports/sf_systematic_all_capability_live_2026-05-19/claim_gate_sf-systematic-batch-claim_gate-001_challenger_sf-systematic-claim_gate-citation-management-9813e12c"
+      ],
+      "task_buckets": [
+        "claim_gate"
+      ]
+    },
+    {
+      "skill_id": "github10-code-simplification-codeintel",
+      "capability": "codeintel",
+      "anonymous_label": "current_best",
+      "source_root": "current_best",
+      "runtime_eligible": true,
+      "tested_rows": 1,
+      "effective_rows": 1,
+      "trust_clean_rows": 1,
+      "verdict": "keep",
+      "evidence_refs": [
+        ".nexus/reports/sf_systematic_all_capability_live_2026-05-19/codeintel_sf-systematic-batch-codeintel-001_current_best_github10-code-simplification-codeintel/evidence_bundle.json"
+      ],
+      "receipt_refs": [
+        ".nexus/reports/sf_systematic_all_capability_live_2026-05-19/codeintel_sf-systematic-batch-codeintel-001_current_best_github10-code-simplification-codeintel"
+      ],
+      "task_buckets": [
+        "codeintel"
+      ]
+    },
+    {
+      "skill_id": "sf-systematic-codeintel-first-principles-thinking-f95019ea",
+      "capability": "codeintel",
+      "anonymous_label": "challenger",
+      "source_root": "sf_systematic_compiled_interface",
+      "runtime_eligible": false,
+      "tested_rows": 1,
+      "effective_rows": 1,
+      "trust_clean_rows": 1,
+      "verdict": "replace_candidate",
+      "evidence_refs": [
+        ".nexus/reports/sf_systematic_all_capability_live_2026-05-19/codeintel_sf-systematic-batch-codeintel-001_challenger_sf-systematic-codeintel-first-principles-thinking-f95019ea/evidence_bundle.json"
+      ],
+      "receipt_refs": [
+        ".nexus/reports/sf_systematic_all_capability_live_2026-05-19/codeintel_sf-systematic-batch-codeintel-001_challenger_sf-systematic-codeintel-first-principles-thinking-f95019ea"
+      ],
+      "task_buckets": [
+        "codeintel"
+      ]
+    },
+    {
+      "skill_id": "nexus-root-cause-probe",
+      "capability": "ddtree",
+      "anonymous_label": "current_best",
+      "source_root": "current_best",
+      "runtime_eligible": true,
+      "tested_rows": 1,
+      "effective_rows": 1,
+      "trust_clean_rows": 1,
+      "verdict": "keep",
+      "evidence_refs": [
+        ".nexus/reports/sf_systematic_all_capability_live_2026-05-19/ddtree_sf-systematic-batch-ddtree-001_current_best_nexus-root-cause-probe/evidence_bundle.json"
+      ],
+      "receipt_refs": [
+        ".nexus/reports/sf_systematic_all_capability_live_2026-05-19/ddtree_sf-systematic-batch-ddtree-001_current_best_nexus-root-cause-probe"
+      ],
+      "task_buckets": [
+        "ddtree"
+      ]
+    },
+    {
+      "skill_id": "sf-systematic-ddtree-voice-note-ingest-69181602",
+      "capability": "ddtree",
+      "anonymous_label": "challenger",
+      "source_root": "sf_systematic_compiled_interface",
+      "runtime_eligible": false,
+      "tested_rows": 1,
+      "effective_rows": 1,
+      "trust_clean_rows": 1,
+      "verdict": "replace_candidate",
+      "evidence_refs": [
+        ".nexus/reports/sf_systematic_all_capability_live_2026-05-19/ddtree_sf-systematic-batch-ddtree-001_challenger_sf-systematic-ddtree-voice-note-ingest-69181602/evidence_bundle.json"
+      ],
+      "receipt_refs": [
+        ".nexus/reports/sf_systematic_all_capability_live_2026-05-19/ddtree_sf-systematic-batch-ddtree-001_challenger_sf-systematic-ddtree-voice-note-ingest-69181602"
+      ],
+      "task_buckets": [
+        "ddtree"
+      ]
+    },
+    {
+      "skill_id": "sf-systematic-direct_master_loop-build-32802a87",
+      "capability": "direct_master_loop",
+      "anonymous_label": "challenger",
+      "source_root": "sf_systematic_compiled_interface",
+      "runtime_eligible": false,
+      "tested_rows": 1,
+      "effective_rows": 1,
+      "trust_clean_rows": 1,
+      "verdict": "replace_candidate",
+      "evidence_refs": [
+        ".nexus/reports/sf_systematic_all_capability_live_2026-05-19/direct_master_loop_sf-systematic-batch-direct_master_loop-001_challenger_sf-systematic-direct_master_loop-build-32802a87/evidence_bundle.json"
+      ],
+      "receipt_refs": [
+        ".nexus/reports/sf_systematic_all_capability_live_2026-05-19/direct_master_loop_sf-systematic-batch-direct_master_loop-001_challenger_sf-systematic-direct_master_loop-build-32802a87"
+      ],
+      "task_buckets": [
+        "direct_master_loop"
+      ]
+    },
+    {
+      "skill_id": "sf2-direct_master_loop-route-fit-spec",
+      "capability": "direct_master_loop",
+      "anonymous_label": "current_best",
+      "source_root": "current_best",
+      "runtime_eligible": true,
+      "tested_rows": 1,
+      "effective_rows": 1,
+      "trust_clean_rows": 1,
+      "verdict": "keep",
+      "evidence_refs": [
+        ".nexus/reports/sf_systematic_all_capability_live_2026-05-19/direct_master_loop_sf-systematic-batch-direct_master_loop-001_current_best_sf2-direct_master_loop-route-fit-spec/evidence_bundle.json"
+      ],
+      "receipt_refs": [
+        ".nexus/reports/sf_systematic_all_capability_live_2026-05-19/direct_master_loop_sf-systematic-batch-direct_master_loop-001_current_best_sf2-direct_master_loop-route-fit-spec"
+      ],
+      "task_buckets": [
+        "direct_master_loop"
+      ]
+    },
+    {
+      "skill_id": "diagnose",
+      "capability": "drone",
+      "anonymous_label": "current_best",
+      "source_root": "current_best",
+      "runtime_eligible": true,
+      "tested_rows": 1,
+      "effective_rows": 1,
+      "trust_clean_rows": 1,
+      "verdict": "keep",
+      "evidence_refs": [
+        ".nexus/reports/sf_systematic_all_capability_live_2026-05-19/drone_sf-systematic-batch-drone-001_current_best_diagnose/evidence_bundle.json"
+      ],
+      "receipt_refs": [
+        ".nexus/reports/sf_systematic_all_capability_live_2026-05-19/drone_sf-systematic-batch-drone-001_current_best_diagnose"
+      ],
+      "task_buckets": [
+        "drone"
+      ]
+    },
+    {
+      "skill_id": "sf-systematic-drone-python-background-jobs-18326a62",
+      "capability": "drone",
+      "anonymous_label": "challenger",
+      "source_root": "sf_systematic_compiled_interface",
+      "runtime_eligible": false,
+      "tested_rows": 1,
+      "effective_rows": 1,
+      "trust_clean_rows": 1,
+      "verdict": "replace_candidate",
+      "evidence_refs": [
+        ".nexus/reports/sf_systematic_all_capability_live_2026-05-19/drone_sf-systematic-batch-drone-001_challenger_sf-systematic-drone-python-background-jobs-18326a62/evidence_bundle.json"
+      ],
+      "receipt_refs": [
+        ".nexus/reports/sf_systematic_all_capability_live_2026-05-19/drone_sf-systematic-batch-drone-001_challenger_sf-systematic-drone-python-background-jobs-18326a62"
+      ],
+      "task_buckets": [
+        "drone"
+      ]
+    },
+    {
+      "skill_id": "github5-video-auto-dubber-safe-external-productivity",
+      "capability": "external_productivity",
+      "anonymous_label": "current_best",
+      "source_root": "current_best",
+      "runtime_eligible": true,
+      "tested_rows": 1,
+      "effective_rows": 1,
+      "trust_clean_rows": 1,
+      "verdict": "keep",
+      "evidence_refs": [
+        ".nexus/reports/sf_systematic_all_capability_live_2026-05-19/external_productivity_sf-systematic-batch-external_productivity-001_current_best_github5-video-auto-dubber-safe-external-productivity/evidence_bundle.json"
+      ],
+      "receipt_refs": [
+        ".nexus/reports/sf_systematic_all_capability_live_2026-05-19/external_productivity_sf-systematic-batch-external_productivity-001_current_best_github5-video-auto-dubber-safe-external-productivity"
+      ],
+      "task_buckets": [
+        "external_productivity"
+      ]
+    },
+    {
+      "skill_id": "sf-systematic-external_productivity-writer-77dc7840",
+      "capability": "external_productivity",
+      "anonymous_label": "challenger",
+      "source_root": "sf_systematic_compiled_interface",
+      "runtime_eligible": false,
+      "tested_rows": 1,
+      "effective_rows": 1,
+      "trust_clean_rows": 1,
+      "verdict": "replace_candidate",
+      "evidence_refs": [
+        ".nexus/reports/sf_systematic_all_capability_live_2026-05-19/external_productivity_sf-systematic-batch-external_productivity-001_challenger_sf-systematic-external_productivity-writer-77dc7840/evidence_bundle.json"
+      ],
+      "receipt_refs": [
+        ".nexus/reports/sf_systematic_all_capability_live_2026-05-19/external_productivity_sf-systematic-batch-external_productivity-001_challenger_sf-systematic-external_productivity-writer-77dc7840"
+      ],
+      "task_buckets": [
+        "external_productivity"
+      ]
+    },
+    {
+      "skill_id": "sf-systematic-file_lock_security_gate-azure-diagnostics-e9330260",
+      "capability": "file_lock_security_gate",
+      "anonymous_label": "challenger",
+      "source_root": "sf_systematic_compiled_interface",
+      "runtime_eligible": false,
+      "tested_rows": 1,
+      "effective_rows": 1,
+      "trust_clean_rows": 1,
+      "verdict": "replace_candidate",
+      "evidence_refs": [
+        ".nexus/reports/sf_systematic_all_capability_live_2026-05-19/file_lock_security_gate_sf-systematic-batch-file_lock_security_gate-001_challenger_sf-systematic-file_lock_security_gate-azure-diagnostics-e9330260/evidence_bundle.json"
+      ],
+      "receipt_refs": [
+        ".nexus/reports/sf_systematic_all_capability_live_2026-05-19/file_lock_security_gate_sf-systematic-batch-file_lock_security_gate-001_challenger_sf-systematic-file_lock_security_gate-azure-diagnostics-e9330260"
+      ],
+      "task_buckets": [
+        "file_lock_security_gate"
+      ]
+    },
+    {
+      "skill_id": "sf2-file_lock_security_gate-route-fit-spec",
+      "capability": "file_lock_security_gate",
+      "anonymous_label": "current_best",
+      "source_root": "current_best",
+      "runtime_eligible": true,
+      "tested_rows": 1,
+      "effective_rows": 1,
+      "trust_clean_rows": 1,
+      "verdict": "keep",
+      "evidence_refs": [
+        ".nexus/reports/sf_systematic_all_capability_live_2026-05-19/file_lock_security_gate_sf-systematic-batch-file_lock_security_gate-001_current_best_sf2-file_lock_security_gate-route-fit-spec/evidence_bundle.json"
+      ],
+      "receipt_refs": [
+        ".nexus/reports/sf_systematic_all_capability_live_2026-05-19/file_lock_security_gate_sf-systematic-batch-file_lock_security_gate-001_current_best_sf2-file_lock_security_gate-route-fit-spec"
+      ],
+      "task_buckets": [
+        "file_lock_security_gate"
+      ]
+    },
+    {
+      "skill_id": "create-plan",
+      "capability": "forecast_pregate",
+      "anonymous_label": "current_best",
+      "source_root": "current_best",
+      "runtime_eligible": true,
+      "tested_rows": 1,
+      "effective_rows": 1,
+      "trust_clean_rows": 1,
+      "verdict": "keep",
+      "evidence_refs": [
+        ".nexus/reports/sf_systematic_all_capability_live_2026-05-19/forecast_pregate_sf-systematic-batch-forecast_pregate-001_current_best_create-plan/evidence_bundle.json"
+      ],
+      "receipt_refs": [
+        ".nexus/reports/sf_systematic_all_capability_live_2026-05-19/forecast_pregate_sf-systematic-batch-forecast_pregate-001_current_best_create-plan"
+      ],
+      "task_buckets": [
+        "forecast_pregate"
+      ]
+    },
+    {
+      "skill_id": "sf-systematic-forecast_pregate-mobile-security-coder-14647d4e",
+      "capability": "forecast_pregate",
+      "anonymous_label": "challenger",
+      "source_root": "sf_systematic_compiled_interface",
+      "runtime_eligible": false,
+      "tested_rows": 1,
+      "effective_rows": 1,
+      "trust_clean_rows": 1,
+      "verdict": "replace_candidate",
+      "evidence_refs": [
+        ".nexus/reports/sf_systematic_all_capability_live_2026-05-19/forecast_pregate_sf-systematic-batch-forecast_pregate-001_challenger_sf-systematic-forecast_pregate-mobile-security-coder-14647d4e/evidence_bundle.json"
+      ],
+      "receipt_refs": [
+        ".nexus/reports/sf_systematic_all_capability_live_2026-05-19/forecast_pregate_sf-systematic-batch-forecast_pregate-001_challenger_sf-systematic-forecast_pregate-mobile-security-coder-14647d4e"
+      ],
+      "task_buckets": [
+        "forecast_pregate"
+      ]
+    },
+    {
+      "skill_id": "acceptance-evidence-failclosed",
+      "capability": "governance_and_trust",
+      "anonymous_label": "current_best",
+      "source_root": "current_best",
+      "runtime_eligible": true,
+      "tested_rows": 1,
+      "effective_rows": 1,
+      "trust_clean_rows": 1,
+      "verdict": "keep",
+      "evidence_refs": [
+        ".nexus/reports/sf_systematic_all_capability_live_2026-05-19/governance_and_trust_sf-systematic-batch-governance_and_trust-001_current_best_acceptance-evidence-failclosed/evidence_bundle.json"
+      ],
+      "receipt_refs": [
+        ".nexus/reports/sf_systematic_all_capability_live_2026-05-19/governance_and_trust_sf-systematic-batch-governance_and_trust-001_current_best_acceptance-evidence-failclosed"
+      ],
+      "task_buckets": [
+        "governance_and_trust"
+      ]
+    },
+    {
+      "skill_id": "sf-systematic-governance_and_trust-aegisops-ai-0aa841e2",
+      "capability": "governance_and_trust",
+      "anonymous_label": "challenger",
+      "source_root": "sf_systematic_compiled_interface",
+      "runtime_eligible": false,
+      "tested_rows": 1,
+      "effective_rows": 1,
+      "trust_clean_rows": 1,
+      "verdict": "replace_candidate",
+      "evidence_refs": [
+        ".nexus/reports/sf_systematic_all_capability_live_2026-05-19/governance_and_trust_sf-systematic-batch-governance_and_trust-001_challenger_sf-systematic-governance_and_trust-aegisops-ai-0aa841e2/evidence_bundle.json"
+      ],
+      "receipt_refs": [
+        ".nexus/reports/sf_systematic_all_capability_live_2026-05-19/governance_and_trust_sf-systematic-batch-governance_and_trust-001_challenger_sf-systematic-governance_and_trust-aegisops-ai-0aa841e2"
+      ],
+      "task_buckets": [
+        "governance_and_trust"
+      ]
+    },
+    {
+      "skill_id": "sf-systematic-hyper_sprint-sql-optimization-patterns-6b52f067",
+      "capability": "hyper_sprint",
+      "anonymous_label": "challenger",
+      "source_root": "sf_systematic_compiled_interface",
+      "runtime_eligible": false,
+      "tested_rows": 1,
+      "effective_rows": 1,
+      "trust_clean_rows": 1,
+      "verdict": "replace_candidate",
+      "evidence_refs": [
+        ".nexus/reports/sf_systematic_all_capability_live_2026-05-19/hyper_sprint_sf-systematic-batch-hyper_sprint-001_challenger_sf-systematic-hyper_sprint-sql-optimization-patterns-6b52f067/evidence_bundle.json"
+      ],
+      "receipt_refs": [
+        ".nexus/reports/sf_systematic_all_capability_live_2026-05-19/hyper_sprint_sf-systematic-batch-hyper_sprint-001_challenger_sf-systematic-hyper_sprint-sql-optimization-patterns-6b52f067"
+      ],
+      "task_buckets": [
+        "hyper_sprint"
+      ]
+    },
+    {
+      "skill_id": "sf2-hyper_sprint-route-fit-spec",
+      "capability": "hyper_sprint",
+      "anonymous_label": "current_best",
+      "source_root": "current_best",
+      "runtime_eligible": true,
+      "tested_rows": 1,
+      "effective_rows": 1,
+      "trust_clean_rows": 1,
+      "verdict": "keep",
+      "evidence_refs": [
+        ".nexus/reports/sf_systematic_all_capability_live_2026-05-19/hyper_sprint_sf-systematic-batch-hyper_sprint-001_current_best_sf2-hyper_sprint-route-fit-spec/evidence_bundle.json"
+      ],
+      "receipt_refs": [
+        ".nexus/reports/sf_systematic_all_capability_live_2026-05-19/hyper_sprint_sf-systematic-batch-hyper_sprint-001_current_best_sf2-hyper_sprint-route-fit-spec"
+      ],
+      "task_buckets": [
+        "hyper_sprint"
+      ]
+    },
+    {
+      "skill_id": "research-source-validation-auditor",
+      "capability": "lancedb",
+      "anonymous_label": "current_best",
+      "source_root": "current_best",
+      "runtime_eligible": true,
+      "tested_rows": 1,
+      "effective_rows": 1,
+      "trust_clean_rows": 1,
+      "verdict": "keep",
+      "evidence_refs": [
+        ".nexus/reports/sf_systematic_all_capability_live_2026-05-19/lancedb_sf-systematic-batch-lancedb-001_current_best_research-source-validation-auditor/evidence_bundle.json"
+      ],
+      "receipt_refs": [
+        ".nexus/reports/sf_systematic_all_capability_live_2026-05-19/lancedb_sf-systematic-batch-lancedb-001_current_best_research-source-validation-auditor"
+      ],
+      "task_buckets": [
+        "lancedb"
+      ]
+    },
+    {
+      "skill_id": "sf-systematic-lancedb-rag-implementation-087496c0",
+      "capability": "lancedb",
+      "anonymous_label": "challenger",
+      "source_root": "sf_systematic_compiled_interface",
+      "runtime_eligible": false,
+      "tested_rows": 1,
+      "effective_rows": 1,
+      "trust_clean_rows": 1,
+      "verdict": "replace_candidate",
+      "evidence_refs": [
+        ".nexus/reports/sf_systematic_all_capability_live_2026-05-19/lancedb_sf-systematic-batch-lancedb-001_challenger_sf-systematic-lancedb-rag-implementation-087496c0/evidence_bundle.json"
+      ],
+      "receipt_refs": [
+        ".nexus/reports/sf_systematic_all_capability_live_2026-05-19/lancedb_sf-systematic-batch-lancedb-001_challenger_sf-systematic-lancedb-rag-implementation-087496c0"
+      ],
+      "task_buckets": [
+        "lancedb"
+      ]
+    },
+    {
+      "skill_id": "github8-skilless-deep-research-learn-ask",
+      "capability": "learn_ask",
+      "anonymous_label": "current_best",
+      "source_root": "current_best",
+      "runtime_eligible": true,
+      "tested_rows": 1,
+      "effective_rows": 1,
+      "trust_clean_rows": 1,
+      "verdict": "keep",
+      "evidence_refs": [
+        ".nexus/reports/sf_systematic_all_capability_live_2026-05-19/learn_ask_sf-systematic-batch-learn_ask-001_current_best_github8-skilless-deep-research-learn-ask/evidence_bundle.json"
+      ],
+      "receipt_refs": [
+        ".nexus/reports/sf_systematic_all_capability_live_2026-05-19/learn_ask_sf-systematic-batch-learn_ask-001_current_best_github8-skilless-deep-research-learn-ask"
+      ],
+      "task_buckets": [
+        "learn_ask"
+      ]
+    },
+    {
+      "skill_id": "sf-systematic-learn_ask-deno-expert-a1d20baf",
+      "capability": "learn_ask",
+      "anonymous_label": "challenger",
+      "source_root": "sf_systematic_compiled_interface",
+      "runtime_eligible": false,
+      "tested_rows": 1,
+      "effective_rows": 1,
+      "trust_clean_rows": 1,
+      "verdict": "replace_candidate",
+      "evidence_refs": [
+        ".nexus/reports/sf_systematic_all_capability_live_2026-05-19/learn_ask_sf-systematic-batch-learn_ask-001_challenger_sf-systematic-learn_ask-deno-expert-a1d20baf/evidence_bundle.json"
+      ],
+      "receipt_refs": [
+        ".nexus/reports/sf_systematic_all_capability_live_2026-05-19/learn_ask_sf-systematic-batch-learn_ask-001_challenger_sf-systematic-learn_ask-deno-expert-a1d20baf"
+      ],
+      "task_buckets": [
+        "learn_ask"
+      ]
+    },
+    {
+      "skill_id": "sf-systematic-learning_closure-memory-lint-8bdb0fca",
+      "capability": "learning_closure",
+      "anonymous_label": "current_best",
+      "source_root": "current_best",
+      "runtime_eligible": true,
+      "tested_rows": 2,
+      "effective_rows": 2,
+      "trust_clean_rows": 2,
+      "verdict": "keep",
+      "evidence_refs": [
+        ".nexus/reports/sf_systematic_all_capability_live_2026-05-19/learning_closure_sf-systematic-batch-learning_closure-001_current_best_sf-systematic-learning_closure-memory-lint-8bdb0fca/evidence_bundle.json",
+        ".nexus/reports/sf_systematic_all_capability_live_2026-05-19/learning_closure_sf-systematic-batch-learning_closure-001_challenger_sf-systematic-learning_closure-memory-lint-8bdb0fca/evidence_bundle.json"
+      ],
+      "receipt_refs": [
+        ".nexus/reports/sf_systematic_all_capability_live_2026-05-19/learning_closure_sf-systematic-batch-learning_closure-001_current_best_sf-systematic-learning_closure-memory-lint-8bdb0fca",
+        ".nexus/reports/sf_systematic_all_capability_live_2026-05-19/learning_closure_sf-systematic-batch-learning_closure-001_challenger_sf-systematic-learning_closure-memory-lint-8bdb0fca"
+      ],
+      "task_buckets": [
+        "learning_closure"
+      ]
+    },
+    {
+      "skill_id": "diagnose",
+      "capability": "memory",
+      "anonymous_label": "current_best",
+      "source_root": "current_best",
+      "runtime_eligible": true,
+      "tested_rows": 1,
+      "effective_rows": 1,
+      "trust_clean_rows": 1,
+      "verdict": "keep",
+      "evidence_refs": [
+        ".nexus/reports/sf_systematic_all_capability_live_2026-05-19/memory_sf-systematic-batch-memory-001_current_best_diagnose/evidence_bundle.json"
+      ],
+      "receipt_refs": [
+        ".nexus/reports/sf_systematic_all_capability_live_2026-05-19/memory_sf-systematic-batch-memory-001_current_best_diagnose"
+      ],
+      "task_buckets": [
+        "memory"
+      ]
+    },
+    {
+      "skill_id": "sf-systematic-memory-project-skill-audit-cc8b7621",
+      "capability": "memory",
+      "anonymous_label": "challenger",
+      "source_root": "sf_systematic_compiled_interface",
+      "runtime_eligible": false,
+      "tested_rows": 1,
+      "effective_rows": 1,
+      "trust_clean_rows": 1,
+      "verdict": "replace_candidate",
+      "evidence_refs": [
+        ".nexus/reports/sf_systematic_all_capability_live_2026-05-19/memory_sf-systematic-batch-memory-001_challenger_sf-systematic-memory-project-skill-audit-cc8b7621/evidence_bundle.json"
+      ],
+      "receipt_refs": [
+        ".nexus/reports/sf_systematic_all_capability_live_2026-05-19/memory_sf-systematic-batch-memory-001_challenger_sf-systematic-memory-project-skill-audit-cc8b7621"
+      ],
+      "task_buckets": [
+        "memory"
+      ]
+    },
+    {
+      "skill_id": "sf-systematic-mempalace-protect-mcp-governance-2e595e69",
+      "capability": "mempalace",
+      "anonymous_label": "challenger",
+      "source_root": "sf_systematic_compiled_interface",
+      "runtime_eligible": false,
+      "tested_rows": 1,
+      "effective_rows": 1,
+      "trust_clean_rows": 1,
+      "verdict": "replace_candidate",
+      "evidence_refs": [
+        ".nexus/reports/sf_systematic_all_capability_live_2026-05-19/mempalace_sf-systematic-batch-mempalace-001_challenger_sf-systematic-mempalace-protect-mcp-governance-2e595e69/evidence_bundle.json"
+      ],
+      "receipt_refs": [
+        ".nexus/reports/sf_systematic_all_capability_live_2026-05-19/mempalace_sf-systematic-batch-mempalace-001_challenger_sf-systematic-mempalace-protect-mcp-governance-2e595e69"
+      ],
+      "task_buckets": [
+        "mempalace"
+      ]
+    },
+    {
+      "skill_id": "sf2-mempalace-route-fit-spec",
+      "capability": "mempalace",
+      "anonymous_label": "current_best",
+      "source_root": "current_best",
+      "runtime_eligible": true,
+      "tested_rows": 1,
+      "effective_rows": 1,
+      "trust_clean_rows": 1,
+      "verdict": "keep",
+      "evidence_refs": [
+        ".nexus/reports/sf_systematic_all_capability_live_2026-05-19/mempalace_sf-systematic-batch-mempalace-001_current_best_sf2-mempalace-route-fit-spec/evidence_bundle.json"
+      ],
+      "receipt_refs": [
+        ".nexus/reports/sf_systematic_all_capability_live_2026-05-19/mempalace_sf-systematic-batch-mempalace-001_current_best_sf2-mempalace-route-fit-spec"
+      ],
+      "task_buckets": [
+        "mempalace"
+      ]
+    },
+    {
+      "skill_id": "github-auto-skill-safe-learning",
+      "capability": "metabolism_resume",
+      "anonymous_label": "current_best",
+      "source_root": "current_best",
+      "runtime_eligible": true,
+      "tested_rows": 1,
+      "effective_rows": 1,
+      "trust_clean_rows": 1,
+      "verdict": "keep",
+      "evidence_refs": [
+        ".nexus/reports/sf_systematic_all_capability_live_2026-05-19/metabolism_resume_sf-systematic-batch-metabolism_resume-001_current_best_github-auto-skill-safe-learning/evidence_bundle.json"
+      ],
+      "receipt_refs": [
+        ".nexus/reports/sf_systematic_all_capability_live_2026-05-19/metabolism_resume_sf-systematic-batch-metabolism_resume-001_current_best_github-auto-skill-safe-learning"
+      ],
+      "task_buckets": [
+        "metabolism_resume"
+      ]
+    },
+    {
+      "skill_id": "sf-systematic-metabolism_resume-resume-handoff-e28989b3",
+      "capability": "metabolism_resume",
+      "anonymous_label": "challenger",
+      "source_root": "sf_systematic_compiled_interface",
+      "runtime_eligible": false,
+      "tested_rows": 1,
+      "effective_rows": 1,
+      "trust_clean_rows": 1,
+      "verdict": "replace_candidate",
+      "evidence_refs": [
+        ".nexus/reports/sf_systematic_all_capability_live_2026-05-19/metabolism_resume_sf-systematic-batch-metabolism_resume-001_challenger_sf-systematic-metabolism_resume-resume-handoff-e28989b3/evidence_bundle.json"
+      ],
+      "receipt_refs": [
+        ".nexus/reports/sf_systematic_all_capability_live_2026-05-19/metabolism_resume_sf-systematic-batch-metabolism_resume-001_challenger_sf-systematic-metabolism_resume-resume-handoff-e28989b3"
+      ],
+      "task_buckets": [
+        "metabolism_resume"
+      ]
+    },
+    {
+      "skill_id": "sf-systematic-nightshift-debugging-and-error-recovery-2539c007",
+      "capability": "nightshift",
+      "anonymous_label": "challenger",
+      "source_root": "sf_systematic_compiled_interface",
+      "runtime_eligible": false,
+      "tested_rows": 1,
+      "effective_rows": 1,
+      "trust_clean_rows": 1,
+      "verdict": "replace_candidate",
+      "evidence_refs": [
+        ".nexus/reports/sf_systematic_all_capability_live_2026-05-19/nightshift_sf-systematic-batch-nightshift-001_challenger_sf-systematic-nightshift-debugging-and-error-recovery-2539c007/evidence_bundle.json"
+      ],
+      "receipt_refs": [
+        ".nexus/reports/sf_systematic_all_capability_live_2026-05-19/nightshift_sf-systematic-batch-nightshift-001_challenger_sf-systematic-nightshift-debugging-and-error-recovery-2539c007"
+      ],
+      "task_buckets": [
+        "nightshift"
+      ]
+    },
+    {
+      "skill_id": "sf2-nightshift-route-fit-spec",
+      "capability": "nightshift",
+      "anonymous_label": "current_best",
+      "source_root": "current_best",
+      "runtime_eligible": true,
+      "tested_rows": 1,
+      "effective_rows": 1,
+      "trust_clean_rows": 1,
+      "verdict": "keep",
+      "evidence_refs": [
+        ".nexus/reports/sf_systematic_all_capability_live_2026-05-19/nightshift_sf-systematic-batch-nightshift-001_current_best_sf2-nightshift-route-fit-spec/evidence_bundle.json"
+      ],
+      "receipt_refs": [
+        ".nexus/reports/sf_systematic_all_capability_live_2026-05-19/nightshift_sf-systematic-batch-nightshift-001_current_best_sf2-nightshift-route-fit-spec"
+      ],
+      "task_buckets": [
+        "nightshift"
+      ]
+    },
+    {
+      "skill_id": "nexus-root-cause-probe",
+      "capability": "policy_capability_gate",
+      "anonymous_label": "current_best",
+      "source_root": "current_best",
+      "runtime_eligible": true,
+      "tested_rows": 1,
+      "effective_rows": 1,
+      "trust_clean_rows": 1,
+      "verdict": "keep",
+      "evidence_refs": [
+        ".nexus/reports/sf_systematic_all_capability_live_2026-05-19/policy_capability_gate_sf-systematic-batch-policy_capability_gate-001_current_best_nexus-root-cause-probe/evidence_bundle.json"
+      ],
+      "receipt_refs": [
+        ".nexus/reports/sf_systematic_all_capability_live_2026-05-19/policy_capability_gate_sf-systematic-batch-policy_capability_gate-001_current_best_nexus-root-cause-probe"
+      ],
+      "task_buckets": [
+        "policy_capability_gate"
+      ]
+    },
+    {
+      "skill_id": "sf-systematic-policy_capability_gate-aegisops-ai-0aa841e2",
+      "capability": "policy_capability_gate",
+      "anonymous_label": "challenger",
+      "source_root": "sf_systematic_compiled_interface",
+      "runtime_eligible": false,
+      "tested_rows": 1,
+      "effective_rows": 1,
+      "trust_clean_rows": 1,
+      "verdict": "replace_candidate",
+      "evidence_refs": [
+        ".nexus/reports/sf_systematic_all_capability_live_2026-05-19/policy_capability_gate_sf-systematic-batch-policy_capability_gate-001_challenger_sf-systematic-policy_capability_gate-aegisops-ai-0aa841e2/evidence_bundle.json"
+      ],
+      "receipt_refs": [
+        ".nexus/reports/sf_systematic_all_capability_live_2026-05-19/policy_capability_gate_sf-systematic-batch-policy_capability_gate-001_challenger_sf-systematic-policy_capability_gate-aegisops-ai-0aa841e2"
+      ],
+      "task_buckets": [
+        "policy_capability_gate"
+      ]
+    },
+    {
+      "skill_id": "github5-skill-seekers-safe-registry-builder",
+      "capability": "registry_skills_sync",
+      "anonymous_label": "current_best",
+      "source_root": "current_best",
+      "runtime_eligible": true,
+      "tested_rows": 1,
+      "effective_rows": 1,
+      "trust_clean_rows": 1,
+      "verdict": "keep",
+      "evidence_refs": [
+        ".nexus/reports/sf_systematic_all_capability_live_2026-05-19/registry_skills_sync_sf-systematic-batch-registry_skills_sync-001_current_best_github5-skill-seekers-safe-registry-builder/evidence_bundle.json"
+      ],
+      "receipt_refs": [
+        ".nexus/reports/sf_systematic_all_capability_live_2026-05-19/registry_skills_sync_sf-systematic-batch-registry_skills_sync-001_current_best_github5-skill-seekers-safe-registry-builder"
+      ],
+      "task_buckets": [
+        "registry_skills_sync"
+      ]
+    },
+    {
+      "skill_id": "sf-systematic-registry_skills_sync-wiki-architect-9b87d55a",
+      "capability": "registry_skills_sync",
+      "anonymous_label": "challenger",
+      "source_root": "sf_systematic_compiled_interface",
+      "runtime_eligible": false,
+      "tested_rows": 1,
+      "effective_rows": 1,
+      "trust_clean_rows": 1,
+      "verdict": "replace_candidate",
+      "evidence_refs": [
+        ".nexus/reports/sf_systematic_all_capability_live_2026-05-19/registry_skills_sync_sf-systematic-batch-registry_skills_sync-001_challenger_sf-systematic-registry_skills_sync-wiki-architect-9b87d55a/evidence_bundle.json"
+      ],
+      "receipt_refs": [
+        ".nexus/reports/sf_systematic_all_capability_live_2026-05-19/registry_skills_sync_sf-systematic-batch-registry_skills_sync-001_challenger_sf-systematic-registry_skills_sync-wiki-architect-9b87d55a"
+      ],
+      "task_buckets": [
+        "registry_skills_sync"
+      ]
+    },
+    {
+      "skill_id": "diagnose",
+      "capability": "regression_guard",
+      "anonymous_label": "current_best",
+      "source_root": "current_best",
+      "runtime_eligible": true,
+      "tested_rows": 1,
+      "effective_rows": 1,
+      "trust_clean_rows": 1,
+      "verdict": "keep",
+      "evidence_refs": [
+        ".nexus/reports/sf_systematic_all_capability_live_2026-05-19/regression_guard_sf-systematic-batch-regression_guard-001_current_best_diagnose/evidence_bundle.json"
+      ],
+      "receipt_refs": [
+        ".nexus/reports/sf_systematic_all_capability_live_2026-05-19/regression_guard_sf-systematic-batch-regression_guard-001_current_best_diagnose"
+      ],
+      "task_buckets": [
+        "regression_guard"
+      ]
+    },
+    {
+      "skill_id": "sf-systematic-regression_guard-odoo-automated-tests-dad98433",
+      "capability": "regression_guard",
+      "anonymous_label": "challenger",
+      "source_root": "sf_systematic_compiled_interface",
+      "runtime_eligible": false,
+      "tested_rows": 1,
+      "effective_rows": 1,
+      "trust_clean_rows": 1,
+      "verdict": "replace_candidate",
+      "evidence_refs": [
+        ".nexus/reports/sf_systematic_all_capability_live_2026-05-19/regression_guard_sf-systematic-batch-regression_guard-001_challenger_sf-systematic-regression_guard-odoo-automated-tests-dad98433/evidence_bundle.json"
+      ],
+      "receipt_refs": [
+        ".nexus/reports/sf_systematic_all_capability_live_2026-05-19/regression_guard_sf-systematic-batch-regression_guard-001_challenger_sf-systematic-regression_guard-odoo-automated-tests-dad98433"
+      ],
+      "task_buckets": [
+        "regression_guard"
+      ]
+    },
+    {
+      "skill_id": "sf-systematic-repair_loop-odoo-automated-tests-dad98433",
+      "capability": "repair_loop",
+      "anonymous_label": "challenger",
+      "source_root": "sf_systematic_compiled_interface",
+      "runtime_eligible": false,
+      "tested_rows": 1,
+      "effective_rows": 1,
+      "trust_clean_rows": 1,
+      "verdict": "replace_candidate",
+      "evidence_refs": [
+        ".nexus/reports/sf_systematic_all_capability_live_2026-05-19/repair_loop_sf-systematic-batch-repair_loop-001_challenger_sf-systematic-repair_loop-odoo-automated-tests-dad98433/evidence_bundle.json"
+      ],
+      "receipt_refs": [
+        ".nexus/reports/sf_systematic_all_capability_live_2026-05-19/repair_loop_sf-systematic-batch-repair_loop-001_challenger_sf-systematic-repair_loop-odoo-automated-tests-dad98433"
+      ],
+      "task_buckets": [
+        "repair_loop"
+      ]
+    },
+    {
+      "skill_id": "sf-systematic-repair_loop-tailwind-v4-shadcn-7197cbbf",
+      "capability": "repair_loop",
+      "anonymous_label": "current_best",
+      "source_root": "current_best",
+      "runtime_eligible": true,
+      "tested_rows": 1,
+      "effective_rows": 1,
+      "trust_clean_rows": 1,
+      "verdict": "keep",
+      "evidence_refs": [
+        ".nexus/reports/sf_systematic_all_capability_live_2026-05-19/repair_loop_sf-systematic-batch-repair_loop-001_current_best_sf-systematic-repair_loop-tailwind-v4-shadcn-7197cbbf/evidence_bundle.json"
+      ],
+      "receipt_refs": [
+        ".nexus/reports/sf_systematic_all_capability_live_2026-05-19/repair_loop_sf-systematic-batch-repair_loop-001_current_best_sf-systematic-repair_loop-tailwind-v4-shadcn-7197cbbf"
+      ],
+      "task_buckets": [
+        "repair_loop"
+      ]
+    },
+    {
+      "skill_id": "github8-gbrain-academic-verify-research",
+      "capability": "research",
+      "anonymous_label": "current_best",
+      "source_root": "current_best",
+      "runtime_eligible": true,
+      "tested_rows": 1,
+      "effective_rows": 1,
+      "trust_clean_rows": 1,
+      "verdict": "keep",
+      "evidence_refs": [
+        ".nexus/reports/sf_systematic_all_capability_live_2026-05-19/research_sf-systematic-batch-research-001_current_best_github8-gbrain-academic-verify-research/evidence_bundle.json"
+      ],
+      "receipt_refs": [
+        ".nexus/reports/sf_systematic_all_capability_live_2026-05-19/research_sf-systematic-batch-research-001_current_best_github8-gbrain-academic-verify-research"
+      ],
+      "task_buckets": [
+        "research"
+      ]
+    },
+    {
+      "skill_id": "sf-systematic-research-research-lookup-7e6f92a0",
+      "capability": "research",
+      "anonymous_label": "challenger",
+      "source_root": "sf_systematic_compiled_interface",
+      "runtime_eligible": false,
+      "tested_rows": 1,
+      "effective_rows": 1,
+      "trust_clean_rows": 1,
+      "verdict": "replace_candidate",
+      "evidence_refs": [
+        ".nexus/reports/sf_systematic_all_capability_live_2026-05-19/research_sf-systematic-batch-research-001_challenger_sf-systematic-research-research-lookup-7e6f92a0/evidence_bundle.json"
+      ],
+      "receipt_refs": [
+        ".nexus/reports/sf_systematic_all_capability_live_2026-05-19/research_sf-systematic-batch-research-001_challenger_sf-systematic-research-research-lookup-7e6f92a0"
+      ],
+      "task_buckets": [
+        "research"
+      ]
+    },
+    {
+      "skill_id": "research-citation-chain-verifier",
+      "capability": "research_and_source_discipline",
+      "anonymous_label": "current_best",
+      "source_root": "current_best",
+      "runtime_eligible": true,
+      "tested_rows": 1,
+      "effective_rows": 1,
+      "trust_clean_rows": 1,
+      "verdict": "keep",
+      "evidence_refs": [
+        ".nexus/reports/sf_systematic_all_capability_live_2026-05-19/research_and_source_discipline_sf-systematic-batch-research_and_source_discipline-001_current_best_research-citation-chain-verifier/evidence_bundle.json"
+      ],
+      "receipt_refs": [
+        ".nexus/reports/sf_systematic_all_capability_live_2026-05-19/research_and_source_discipline_sf-systematic-batch-research_and_source_discipline-001_current_best_research-citation-chain-verifier"
+      ],
+      "task_buckets": [
+        "research_and_source_discipline"
+      ]
+    },
+    {
+      "skill_id": "sf-systematic-research_and_source_discipline-citation-management-9813e12c",
+      "capability": "research_and_source_discipline",
+      "anonymous_label": "challenger",
+      "source_root": "sf_systematic_compiled_interface",
+      "runtime_eligible": false,
+      "tested_rows": 1,
+      "effective_rows": 1,
+      "trust_clean_rows": 1,
+      "verdict": "replace_candidate",
+      "evidence_refs": [
+        ".nexus/reports/sf_systematic_all_capability_live_2026-05-19/research_and_source_discipline_sf-systematic-batch-research_and_source_discipline-001_challenger_sf-systematic-research_and_source_discipline-citation-managemen/evidence_bundle.json"
+      ],
+      "receipt_refs": [
+        ".nexus/reports/sf_systematic_all_capability_live_2026-05-19/research_and_source_discipline_sf-systematic-batch-research_and_source_discipline-001_challenger_sf-systematic-research_and_source_discipline-citation-managemen"
+      ],
+      "task_buckets": [
+        "research_and_source_discipline"
+      ]
+    },
+    {
+      "skill_id": "sf-systematic-research_control_plane-research-lookup-7e6f92a0",
+      "capability": "research_control_plane",
+      "anonymous_label": "current_best",
+      "source_root": "current_best",
+      "runtime_eligible": true,
+      "tested_rows": 2,
+      "effective_rows": 2,
+      "trust_clean_rows": 2,
+      "verdict": "keep",
+      "evidence_refs": [
+        ".nexus/reports/sf_systematic_all_capability_live_2026-05-19/research_control_plane_sf-systematic-batch-research_control_plane-001_current_best_sf-systematic-research_control_plane-research-lookup-7e6f92a0/evidence_bundle.json",
+        ".nexus/reports/sf_systematic_all_capability_live_2026-05-19/research_control_plane_sf-systematic-batch-research_control_plane-001_challenger_sf-systematic-research_control_plane-research-lookup-7e6f92a0/evidence_bundle.json"
+      ],
+      "receipt_refs": [
+        ".nexus/reports/sf_systematic_all_capability_live_2026-05-19/research_control_plane_sf-systematic-batch-research_control_plane-001_current_best_sf-systematic-research_control_plane-research-lookup-7e6f92a0",
+        ".nexus/reports/sf_systematic_all_capability_live_2026-05-19/research_control_plane_sf-systematic-batch-research_control_plane-001_challenger_sf-systematic-research_control_plane-research-lookup-7e6f92a0"
+      ],
+      "task_buckets": [
+        "research_control_plane"
+      ]
+    },
+    {
+      "skill_id": "sf-systematic-sandbox_replay-odoo-automated-tests-dad98433",
+      "capability": "sandbox_replay",
+      "anonymous_label": "challenger",
+      "source_root": "sf_systematic_compiled_interface",
+      "runtime_eligible": false,
+      "tested_rows": 1,
+      "effective_rows": 1,
+      "trust_clean_rows": 1,
+      "verdict": "replace_candidate",
+      "evidence_refs": [
+        ".nexus/reports/sf_systematic_all_capability_live_2026-05-19/sandbox_replay_sf-systematic-batch-sandbox_replay-001_challenger_sf-systematic-sandbox_replay-odoo-automated-tests-dad98433/evidence_bundle.json"
+      ],
+      "receipt_refs": [
+        ".nexus/reports/sf_systematic_all_capability_live_2026-05-19/sandbox_replay_sf-systematic-batch-sandbox_replay-001_challenger_sf-systematic-sandbox_replay-odoo-automated-tests-dad98433"
+      ],
+      "task_buckets": [
+        "sandbox_replay"
+      ]
+    },
+    {
+      "skill_id": "sf2-sandbox_replay-route-fit-spec",
+      "capability": "sandbox_replay",
+      "anonymous_label": "current_best",
+      "source_root": "current_best",
+      "runtime_eligible": true,
+      "tested_rows": 1,
+      "effective_rows": 1,
+      "trust_clean_rows": 1,
+      "verdict": "keep",
+      "evidence_refs": [
+        ".nexus/reports/sf_systematic_all_capability_live_2026-05-19/sandbox_replay_sf-systematic-batch-sandbox_replay-001_current_best_sf2-sandbox_replay-route-fit-spec/evidence_bundle.json"
+      ],
+      "receipt_refs": [
+        ".nexus/reports/sf_systematic_all_capability_live_2026-05-19/sandbox_replay_sf-systematic-batch-sandbox_replay-001_current_best_sf2-sandbox_replay-route-fit-spec"
+      ],
+      "task_buckets": [
+        "sandbox_replay"
+      ]
+    },
+    {
+      "skill_id": "sf-systematic-swarm_multi_agent-tdd-orchestrator-80970a3c",
+      "capability": "swarm_multi_agent",
+      "anonymous_label": "challenger",
+      "source_root": "sf_systematic_compiled_interface",
+      "runtime_eligible": false,
+      "tested_rows": 1,
+      "effective_rows": 1,
+      "trust_clean_rows": 1,
+      "verdict": "replace_candidate",
+      "evidence_refs": [
+        ".nexus/reports/sf_systematic_all_capability_live_2026-05-19/swarm_multi_agent_sf-systematic-batch-swarm_multi_agent-001_challenger_sf-systematic-swarm_multi_agent-tdd-orchestrator-80970a3c/evidence_bundle.json"
+      ],
+      "receipt_refs": [
+        ".nexus/reports/sf_systematic_all_capability_live_2026-05-19/swarm_multi_agent_sf-systematic-batch-swarm_multi_agent-001_challenger_sf-systematic-swarm_multi_agent-tdd-orchestrator-80970a3c"
+      ],
+      "task_buckets": [
+        "swarm_multi_agent"
+      ]
+    },
+    {
+      "skill_id": "sf2-swarm_multi_agent-route-fit-spec",
+      "capability": "swarm_multi_agent",
+      "anonymous_label": "current_best",
+      "source_root": "current_best",
+      "runtime_eligible": true,
+      "tested_rows": 1,
+      "effective_rows": 1,
+      "trust_clean_rows": 1,
+      "verdict": "keep",
+      "evidence_refs": [
+        ".nexus/reports/sf_systematic_all_capability_live_2026-05-19/swarm_multi_agent_sf-systematic-batch-swarm_multi_agent-001_current_best_sf2-swarm_multi_agent-route-fit-spec/evidence_bundle.json"
+      ],
+      "receipt_refs": [
+        ".nexus/reports/sf_systematic_all_capability_live_2026-05-19/swarm_multi_agent_sf-systematic-batch-swarm_multi_agent-001_current_best_sf2-swarm_multi_agent-route-fit-spec"
+      ],
+      "task_buckets": [
+        "swarm_multi_agent"
+      ]
+    },
+    {
+      "skill_id": "sf-systematic-ui_validator-e2e-testing-d98eb7c3",
+      "capability": "ui_validator",
+      "anonymous_label": "current_best",
+      "source_root": "current_best",
+      "runtime_eligible": true,
+      "tested_rows": 2,
+      "effective_rows": 2,
+      "trust_clean_rows": 2,
+      "verdict": "keep",
+      "evidence_refs": [
+        ".nexus/reports/sf_systematic_all_capability_live_2026-05-19/ui_validator_sf-systematic-batch-ui_validator-001_current_best_sf-systematic-ui_validator-e2e-testing-d98eb7c3/evidence_bundle.json",
+        ".nexus/reports/sf_systematic_all_capability_live_2026-05-19/ui_validator_sf-systematic-batch-ui_validator-001_challenger_sf-systematic-ui_validator-e2e-testing-d98eb7c3/evidence_bundle.json"
+      ],
+      "receipt_refs": [
+        ".nexus/reports/sf_systematic_all_capability_live_2026-05-19/ui_validator_sf-systematic-batch-ui_validator-001_current_best_sf-systematic-ui_validator-e2e-testing-d98eb7c3",
+        ".nexus/reports/sf_systematic_all_capability_live_2026-05-19/ui_validator_sf-systematic-batch-ui_validator-001_challenger_sf-systematic-ui_validator-e2e-testing-d98eb7c3"
+      ],
+      "task_buckets": [
+        "ui_validator"
+      ]
+    },
+    {
+      "skill_id": "github11-vulnerability-scanner-ultra-review",
+      "capability": "ultra_review",
+      "anonymous_label": "current_best",
+      "source_root": "current_best",
+      "runtime_eligible": true,
+      "tested_rows": 1,
+      "effective_rows": 1,
+      "trust_clean_rows": 1,
+      "verdict": "keep",
+      "evidence_refs": [
+        ".nexus/reports/sf_systematic_all_capability_live_2026-05-19/ultra_review_sf-systematic-batch-ultra_review-001_current_best_github11-vulnerability-scanner-ultra-review/evidence_bundle.json"
+      ],
+      "receipt_refs": [
+        ".nexus/reports/sf_systematic_all_capability_live_2026-05-19/ultra_review_sf-systematic-batch-ultra_review-001_current_best_github11-vulnerability-scanner-ultra-review"
+      ],
+      "task_buckets": [
+        "ultra_review"
+      ]
+    },
+    {
+      "skill_id": "sf-systematic-ultra_review-mobile-security-coder-14647d4e",
+      "capability": "ultra_review",
+      "anonymous_label": "challenger",
+      "source_root": "sf_systematic_compiled_interface",
+      "runtime_eligible": false,
+      "tested_rows": 1,
+      "effective_rows": 1,
+      "trust_clean_rows": 1,
+      "verdict": "replace_candidate",
+      "evidence_refs": [
+        ".nexus/reports/sf_systematic_all_capability_live_2026-05-19/ultra_review_sf-systematic-batch-ultra_review-001_challenger_sf-systematic-ultra_review-mobile-security-coder-14647d4e/evidence_bundle.json"
+      ],
+      "receipt_refs": [
+        ".nexus/reports/sf_systematic_all_capability_live_2026-05-19/ultra_review_sf-systematic-batch-ultra_review-001_challenger_sf-systematic-ultra_review-mobile-security-coder-14647d4e"
+      ],
+      "task_buckets": [
+        "ultra_review"
+      ]
+    },
+    {
+      "skill_id": "diagnose",
+      "capability": "xray",
+      "anonymous_label": "current_best",
+      "source_root": "current_best",
+      "runtime_eligible": true,
+      "tested_rows": 1,
+      "effective_rows": 1,
+      "trust_clean_rows": 1,
+      "verdict": "keep",
+      "evidence_refs": [
+        ".nexus/reports/sf_systematic_all_capability_live_2026-05-19/xray_sf-systematic-batch-xray-001_current_best_diagnose/evidence_bundle.json"
+      ],
+      "receipt_refs": [
+        ".nexus/reports/sf_systematic_all_capability_live_2026-05-19/xray_sf-systematic-batch-xray-001_current_best_diagnose"
+      ],
+      "task_buckets": [
+        "xray"
+      ]
+    },
+    {
+      "skill_id": "sf-systematic-xray-varlock-47ccfd5a",
+      "capability": "xray",
+      "anonymous_label": "challenger",
+      "source_root": "sf_systematic_compiled_interface",
+      "runtime_eligible": false,
+      "tested_rows": 1,
+      "effective_rows": 1,
+      "trust_clean_rows": 1,
+      "verdict": "replace_candidate",
+      "evidence_refs": [
+        ".nexus/reports/sf_systematic_all_capability_live_2026-05-19/xray_sf-systematic-batch-xray-001_challenger_sf-systematic-xray-varlock-47ccfd5a/evidence_bundle.json"
+      ],
+      "receipt_refs": [
+        ".nexus/reports/sf_systematic_all_capability_live_2026-05-19/xray_sf-systematic-batch-xray-001_challenger_sf-systematic-xray-varlock-47ccfd5a"
+      ],
+      "task_buckets": [
+        "xray"
+      ]
+    }
+  ]
+}

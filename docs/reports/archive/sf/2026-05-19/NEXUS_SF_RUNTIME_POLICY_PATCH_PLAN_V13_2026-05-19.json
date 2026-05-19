@@ -1,0 +1,365 @@
+{
+  "schema": "nexus.sf_runtime_policy_patch_plan.v13",
+  "status": "PASS",
+  "runtime_update_allowed": false,
+  "public_benchmark_allowed": false,
+  "summary": {
+    "patch_item_count": 13,
+    "apply_ready_count": 13
+  },
+  "patch_items": [
+    {
+      "operation": "set_capability_primary_skill_candidate",
+      "capability_id": "research",
+      "skill_id": "research-citation-chain-verifier",
+      "skill_path": ".agents/skills/research-citation-chain-verifier/SKILL.md",
+      "source_root": "nexus_repo",
+      "source_type": "nexus_curated_candidate",
+      "runtime_eligible": true,
+      "safety_status": "runtime_reviewed",
+      "evidence_refs": [
+        "docs/reports/NEXUS_SF_RUNTIME_PROMOTION_REVIEW_V13_2026-05-19.json",
+        "docs/reports/NEXUS_SF_V13_TRADEOFF_TIEBREAK_ROLLUP_2026-05-19.json"
+      ],
+      "token_delta": -2275,
+      "wall_delta_sec": -38.1098,
+      "promotion_reason": "strict_receipt_token_wall_pass"
+    },
+    {
+      "operation": "set_capability_primary_skill_candidate",
+      "capability_id": "research_control_plane",
+      "skill_id": "research-citation-chain-verifier",
+      "skill_path": ".agents/skills/research-citation-chain-verifier/SKILL.md",
+      "source_root": "nexus_repo",
+      "source_type": "nexus_curated_candidate",
+      "runtime_eligible": true,
+      "safety_status": "runtime_reviewed",
+      "evidence_refs": [
+        "docs/reports/NEXUS_SF_RUNTIME_PROMOTION_REVIEW_V13_2026-05-19.json",
+        "docs/reports/NEXUS_SF_V13_TRADEOFF_TIEBREAK_ROLLUP_2026-05-19.json"
+      ],
+      "token_delta": -3122,
+      "wall_delta_sec": -77.2095,
+      "promotion_reason": "strict_receipt_token_wall_pass"
+    },
+    {
+      "operation": "set_capability_primary_skill_candidate",
+      "capability_id": "xray",
+      "skill_id": "diagnose",
+      "skill_path": ".agents/skills/diagnose/SKILL.md",
+      "source_root": "nexus_repo",
+      "source_type": "nexus_curated_candidate",
+      "runtime_eligible": true,
+      "safety_status": "runtime_reviewed",
+      "evidence_refs": [
+        "docs/reports/NEXUS_SF_RUNTIME_PROMOTION_REVIEW_V13_2026-05-19.json",
+        "docs/reports/NEXUS_SF_V13_TRADEOFF_TIEBREAK_ROLLUP_2026-05-19.json"
+      ],
+      "token_delta": -6764,
+      "wall_delta_sec": -56.658,
+      "promotion_reason": "strict_receipt_token_wall_pass"
+    },
+    {
+      "operation": "set_capability_primary_skill_candidate",
+      "capability_id": "lancedb",
+      "skill_id": "research-source-validation-auditor",
+      "skill_path": ".agents/skills/research-source-validation-auditor/SKILL.md",
+      "source_root": "nexus_repo",
+      "source_type": "nexus_curated_candidate",
+      "runtime_eligible": true,
+      "safety_status": "runtime_reviewed",
+      "evidence_refs": [
+        "docs/reports/NEXUS_SF_RUNTIME_PROMOTION_REVIEW_V13_2026-05-19.json",
+        "docs/reports/NEXUS_SF_V13_TRADEOFF_TIEBREAK_ROLLUP_2026-05-19.json"
+      ],
+      "token_delta": -1403,
+      "wall_delta_sec": -9.4065,
+      "promotion_reason": "strict_receipt_token_wall_pass"
+    },
+    {
+      "operation": "set_capability_primary_skill_candidate",
+      "capability_id": "memory",
+      "skill_id": "diagnose",
+      "skill_path": ".agents/skills/diagnose/SKILL.md",
+      "source_root": "nexus_repo",
+      "source_type": "nexus_curated_candidate",
+      "runtime_eligible": true,
+      "safety_status": "runtime_reviewed",
+      "evidence_refs": [
+        "docs/reports/NEXUS_SF_RUNTIME_PROMOTION_REVIEW_V13_2026-05-19.json",
+        "docs/reports/NEXUS_SF_V13_TRADEOFF_TIEBREAK_ROLLUP_2026-05-19.json"
+      ],
+      "token_delta": -1732,
+      "wall_delta_sec": -36.6634,
+      "promotion_reason": "strict_receipt_token_wall_pass"
+    },
+    {
+      "operation": "set_capability_primary_skill_candidate",
+      "capability_id": "learning_closure",
+      "skill_id": "sf2-learning_closure-route-fit-spec",
+      "skill_path": ".agents/skills/sf2/sf2-learning_closure-route-fit-spec/SKILL.md",
+      "source_root": "nexus_repo",
+      "source_type": "nexus_curated_candidate",
+      "runtime_eligible": true,
+      "safety_status": "runtime_reviewed",
+      "evidence_refs": [
+        "docs/reports/NEXUS_SF_RUNTIME_PROMOTION_REVIEW_V13_2026-05-19.json",
+        "docs/reports/NEXUS_SF_V13_TRADEOFF_TIEBREAK_ROLLUP_2026-05-19.json"
+      ],
+      "token_delta": -1134,
+      "wall_delta_sec": -10.0439,
+      "promotion_reason": "strict_receipt_token_wall_pass"
+    },
+    {
+      "operation": "set_capability_primary_skill_candidate",
+      "capability_id": "autoreason",
+      "skill_id": "sf2-belief-route-fit-spec",
+      "skill_path": ".agents/skills/sf2/sf2-belief-route-fit-spec/SKILL.md",
+      "source_root": "nexus_repo",
+      "source_type": "nexus_curated_candidate",
+      "runtime_eligible": true,
+      "safety_status": "runtime_reviewed",
+      "evidence_refs": [
+        "docs/reports/NEXUS_SF_RUNTIME_PROMOTION_REVIEW_V13_2026-05-19.json",
+        "docs/reports/NEXUS_SF_V13_TRADEOFF_TIEBREAK_ROLLUP_2026-05-19.json"
+      ],
+      "token_delta": -850,
+      "wall_delta_sec": -34.2891,
+      "promotion_reason": "strict_receipt_token_wall_pass"
+    },
+    {
+      "operation": "set_capability_primary_skill_candidate",
+      "capability_id": "ddtree",
+      "skill_id": "nexus-root-cause-probe",
+      "skill_path": ".agents/skills/nexus-root-cause-probe/SKILL.md",
+      "source_root": "nexus_repo",
+      "source_type": "nexus_curated_candidate",
+      "runtime_eligible": true,
+      "safety_status": "runtime_reviewed",
+      "evidence_refs": [
+        "docs/reports/NEXUS_SF_RUNTIME_PROMOTION_REVIEW_V13_2026-05-19.json",
+        "docs/reports/NEXUS_SF_V13_TRADEOFF_TIEBREAK_ROLLUP_2026-05-19.json"
+      ],
+      "token_delta": -11138,
+      "wall_delta_sec": -53.7268,
+      "promotion_reason": "strict_receipt_token_wall_pass"
+    },
+    {
+      "operation": "set_capability_primary_skill_candidate",
+      "capability_id": "drone",
+      "skill_id": "diagnose",
+      "skill_path": ".agents/skills/diagnose/SKILL.md",
+      "source_root": "nexus_repo",
+      "source_type": "nexus_curated_candidate",
+      "runtime_eligible": true,
+      "safety_status": "runtime_reviewed",
+      "evidence_refs": [
+        "docs/reports/NEXUS_SF_RUNTIME_PROMOTION_REVIEW_V13_2026-05-19.json",
+        "docs/reports/NEXUS_SF_V13_TRADEOFF_TIEBREAK_ROLLUP_2026-05-19.json"
+      ],
+      "token_delta": -459,
+      "wall_delta_sec": -8.7376,
+      "promotion_reason": "strict_receipt_token_wall_pass"
+    },
+    {
+      "operation": "set_capability_primary_skill_candidate",
+      "capability_id": "ultra_review",
+      "skill_id": "acceptance-evidence-failclosed",
+      "skill_path": ".agents/skills/acceptance-evidence-failclosed/SKILL.md",
+      "source_root": "nexus_repo",
+      "source_type": "nexus_curated_candidate",
+      "runtime_eligible": true,
+      "safety_status": "runtime_reviewed",
+      "evidence_refs": [
+        "docs/reports/NEXUS_SF_RUNTIME_PROMOTION_REVIEW_V13_2026-05-19.json",
+        "docs/reports/NEXUS_SF_V13_TRADEOFF_TIEBREAK_ROLLUP_2026-05-19.json"
+      ],
+      "token_delta": -4030.5,
+      "wall_delta_sec": -27.7493,
+      "promotion_reason": "two_run_strict_pass"
+    },
+    {
+      "operation": "set_capability_primary_skill_candidate",
+      "capability_id": "artifact_gate",
+      "skill_id": "acceptance-evidence-failclosed",
+      "skill_path": ".agents/skills/acceptance-evidence-failclosed/SKILL.md",
+      "source_root": "nexus_repo",
+      "source_type": "nexus_curated_candidate",
+      "runtime_eligible": true,
+      "safety_status": "runtime_reviewed",
+      "evidence_refs": [
+        "docs/reports/NEXUS_SF_RUNTIME_PROMOTION_REVIEW_V13_2026-05-19.json",
+        "docs/reports/NEXUS_SF_V13_TRADEOFF_TIEBREAK_ROLLUP_2026-05-19.json"
+      ],
+      "token_delta": -257,
+      "wall_delta_sec": -25.2579,
+      "promotion_reason": "strict_receipt_token_wall_pass"
+    },
+    {
+      "operation": "set_capability_primary_skill_candidate",
+      "capability_id": "metabolism_resume",
+      "skill_id": "nexus-goal-closure-executor",
+      "skill_path": ".agents/skills/nexus-goal-closure-executor/SKILL.md",
+      "source_root": "nexus_repo",
+      "source_type": "nexus_curated_candidate",
+      "runtime_eligible": true,
+      "safety_status": "runtime_reviewed",
+      "evidence_refs": [
+        "docs/reports/NEXUS_SF_RUNTIME_PROMOTION_REVIEW_V13_2026-05-19.json",
+        "docs/reports/NEXUS_SF_V13_TRADEOFF_TIEBREAK_ROLLUP_2026-05-19.json"
+      ],
+      "token_delta": -1322,
+      "wall_delta_sec": -1.6853,
+      "promotion_reason": "strict_receipt_token_wall_pass"
+    },
+    {
+      "operation": "set_capability_primary_skill_candidate",
+      "capability_id": "ui_validator",
+      "skill_id": "nexus-root-cause-probe",
+      "skill_path": ".agents/skills/nexus-root-cause-probe/SKILL.md",
+      "source_root": "nexus_repo",
+      "source_type": "nexus_curated_candidate",
+      "runtime_eligible": true,
+      "safety_status": "runtime_reviewed",
+      "evidence_refs": [
+        "docs/reports/NEXUS_SF_RUNTIME_PROMOTION_REVIEW_V13_2026-05-19.json",
+        "docs/reports/NEXUS_SF_V13_TRADEOFF_TIEBREAK_ROLLUP_2026-05-19.json"
+      ],
+      "token_delta": -403.0,
+      "wall_delta_sec": -10.1258,
+      "promotion_reason": "two_run_strict_pass"
+    }
+  ],
+  "held_reviews": [
+    {
+      "capability_id": "autonomic_router",
+      "skill_id": "sf2-autonomic_router-route-fit-spec",
+      "disposition": "hold_tradeoff_after_tiebreak",
+      "reason": "hold_after_two_run_tradeoff",
+      "runtime_apply_ready": false,
+      "source_ok": true,
+      "path_ok": true,
+      "effective": true,
+      "token_delta": 1865.5,
+      "wall_delta_sec": -16.1499,
+      "skill_status": "nexus_curated_candidate",
+      "skill_path": ".agents/skills/sf2/sf2-autonomic_router-route-fit-spec/SKILL.md",
+      "v13_token_delta": 3450,
+      "v13_wall_delta_sec": -23.4596,
+      "avg_token_delta": 1865.5,
+      "avg_wall_delta_sec": -16.1499
+    },
+    {
+      "capability_id": "mempalace",
+      "skill_id": "sf2-mempalace-route-fit-spec",
+      "disposition": "hold_tradeoff_after_tiebreak",
+      "reason": "hold_after_two_run_tradeoff",
+      "runtime_apply_ready": false,
+      "source_ok": true,
+      "path_ok": true,
+      "effective": true,
+      "token_delta": 1478.5,
+      "wall_delta_sec": 33.6374,
+      "skill_status": "nexus_curated_candidate",
+      "skill_path": ".agents/skills/sf2/sf2-mempalace-route-fit-spec/SKILL.md",
+      "v13_token_delta": 4447,
+      "v13_wall_delta_sec": 27.321,
+      "avg_token_delta": 1478.5,
+      "avg_wall_delta_sec": 33.6374
+    },
+    {
+      "capability_id": "policy_capability_gate",
+      "skill_id": "acceptance-evidence-failclosed",
+      "disposition": "hold_tradeoff_after_tiebreak",
+      "reason": "hold_after_two_run_tradeoff",
+      "runtime_apply_ready": false,
+      "source_ok": true,
+      "path_ok": true,
+      "effective": true,
+      "token_delta": 1823.5,
+      "wall_delta_sec": 21.8674,
+      "skill_status": "nexus_curated_candidate",
+      "skill_path": ".agents/skills/acceptance-evidence-failclosed/SKILL.md",
+      "v13_token_delta": 3740,
+      "v13_wall_delta_sec": 31.4175,
+      "avg_token_delta": 1823.5,
+      "avg_wall_delta_sec": 21.8674
+    },
+    {
+      "capability_id": "delivery_acceptance_gate",
+      "skill_id": "acceptance-evidence-failclosed",
+      "disposition": "hold_tradeoff_after_tiebreak",
+      "reason": "hold_after_two_run_tradeoff",
+      "runtime_apply_ready": false,
+      "source_ok": true,
+      "path_ok": true,
+      "effective": true,
+      "token_delta": 742.0,
+      "wall_delta_sec": -14.2599,
+      "skill_status": "nexus_curated_candidate",
+      "skill_path": ".agents/skills/acceptance-evidence-failclosed/SKILL.md",
+      "v13_token_delta": -2181,
+      "v13_wall_delta_sec": -34.2663,
+      "avg_token_delta": 742.0,
+      "avg_wall_delta_sec": -14.2599
+    },
+    {
+      "capability_id": "sandbox_replay",
+      "skill_id": "sf2-sandbox_replay-route-fit-spec",
+      "disposition": "hold_tradeoff_after_tiebreak",
+      "reason": "hold_after_two_run_tradeoff",
+      "runtime_apply_ready": false,
+      "source_ok": true,
+      "path_ok": true,
+      "effective": true,
+      "token_delta": 387.5,
+      "wall_delta_sec": -15.4845,
+      "skill_status": "nexus_curated_candidate",
+      "skill_path": ".agents/skills/sf2/sf2-sandbox_replay-route-fit-spec/SKILL.md",
+      "v13_token_delta": -57,
+      "v13_wall_delta_sec": -3.5305,
+      "avg_token_delta": 387.5,
+      "avg_wall_delta_sec": -15.4845
+    },
+    {
+      "capability_id": "benchmark_meta_opt",
+      "skill_id": "nexus-benchmark-continuous-optimization",
+      "disposition": "hold_tradeoff_after_tiebreak",
+      "reason": "hold_after_two_run_tradeoff",
+      "runtime_apply_ready": false,
+      "source_ok": true,
+      "path_ok": true,
+      "effective": true,
+      "token_delta": 1845.5,
+      "wall_delta_sec": -11.9155,
+      "skill_status": "nexus_curated_candidate",
+      "skill_path": ".agents/skills/nexus-benchmark-continuous-optimization/SKILL.md",
+      "v13_token_delta": 158,
+      "v13_wall_delta_sec": -2.1333,
+      "avg_token_delta": 1845.5,
+      "avg_wall_delta_sec": -11.9155
+    },
+    {
+      "capability_id": "registry_skills_sync",
+      "skill_id": "sf2-registry_skills_sync-route-fit-spec",
+      "disposition": "hold_tradeoff_after_tiebreak",
+      "reason": "hold_after_two_run_tradeoff",
+      "runtime_apply_ready": false,
+      "source_ok": true,
+      "path_ok": true,
+      "effective": true,
+      "token_delta": -868.0,
+      "wall_delta_sec": 27.9905,
+      "skill_status": "nexus_curated_candidate",
+      "skill_path": ".agents/skills/sf2/sf2-registry_skills_sync-route-fit-spec/SKILL.md",
+      "v13_token_delta": -4005,
+      "v13_wall_delta_sec": 1.5027,
+      "avg_token_delta": -868.0,
+      "avg_wall_delta_sec": 27.9905
+    }
+  ],
+  "claim_boundary": {
+    "does_not_apply_runtime": true,
+    "public_benchmark_allowed": false
+  }
+}

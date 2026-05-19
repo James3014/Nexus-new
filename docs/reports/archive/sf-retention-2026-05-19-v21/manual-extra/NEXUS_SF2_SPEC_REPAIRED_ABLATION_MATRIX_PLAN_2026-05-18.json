@@ -1,0 +1,2134 @@
+{
+  "schema": "nexus.sf2_ablation_matrix_plan.v1",
+  "status": "PASS",
+  "summary": {
+    "capability_count": 33,
+    "ready_capability_count": 33,
+    "blocked_capability_count": 0,
+    "planned_row_count": 192,
+    "negative_control_count": 33,
+    "metadata_repair_overlay_allowed": true,
+    "metadata_repair_overlay_row_count": 0,
+    "runtime_update_allowed": false,
+    "public_benchmark_allowed": false
+  },
+  "blocked_capabilities": [],
+  "plans": [
+    {
+      "capability_id": "direct_master_loop",
+      "status": "READY",
+      "candidate_count": 4,
+      "planned_row_count": 6,
+      "rows": [
+        {
+          "row_id": "direct_master_loop::capability_only",
+          "capability_id": "direct_master_loop",
+          "arm_type": "capability_only",
+          "skill_id": null,
+          "expected_verdict": "baseline"
+        },
+        {
+          "row_id": "direct_master_loop::skill_arm_001::sf2-direct_master_loop-route-fit-spec",
+          "capability_id": "direct_master_loop",
+          "arm_type": "skill_arm",
+          "skill_id": "sf2-direct_master_loop-route-fit-spec",
+          "expected_verdict": "measure_outcome_contribution",
+          "runtime_eligible": false,
+          "ablation_eligible": true,
+          "safety_status": "ablation_only",
+          "metadata_repaired_overlay": false
+        },
+        {
+          "row_id": "direct_master_loop::skill_arm_002::sf2-nightshift-route-fit-spec",
+          "capability_id": "direct_master_loop",
+          "arm_type": "skill_arm",
+          "skill_id": "sf2-nightshift-route-fit-spec",
+          "expected_verdict": "measure_outcome_contribution",
+          "runtime_eligible": false,
+          "ablation_eligible": true,
+          "safety_status": "ablation_only",
+          "metadata_repaired_overlay": false
+        },
+        {
+          "row_id": "direct_master_loop::skill_arm_003::nexus-goal-closure-executor",
+          "capability_id": "direct_master_loop",
+          "arm_type": "skill_arm",
+          "skill_id": "nexus-goal-closure-executor",
+          "expected_verdict": "measure_outcome_contribution",
+          "runtime_eligible": true,
+          "ablation_eligible": true,
+          "safety_status": "runtime_reviewed",
+          "metadata_repaired_overlay": false
+        },
+        {
+          "row_id": "direct_master_loop::skill_arm_004::subagent-driven-development",
+          "capability_id": "direct_master_loop",
+          "arm_type": "skill_arm",
+          "skill_id": "subagent-driven-development",
+          "expected_verdict": "measure_outcome_contribution",
+          "runtime_eligible": false,
+          "ablation_eligible": true,
+          "safety_status": "ablation_only",
+          "metadata_repaired_overlay": false
+        },
+        {
+          "row_id": "direct_master_loop::negative_control",
+          "capability_id": "direct_master_loop",
+          "arm_type": "negative_control",
+          "skill_id": "wrong_or_quarantined_skill",
+          "expected_verdict": "BLOCK_OR_RETURN"
+        }
+      ]
+    },
+    {
+      "capability_id": "repair_loop",
+      "status": "READY",
+      "candidate_count": 4,
+      "planned_row_count": 6,
+      "rows": [
+        {
+          "row_id": "repair_loop::capability_only",
+          "capability_id": "repair_loop",
+          "arm_type": "capability_only",
+          "skill_id": null,
+          "expected_verdict": "baseline"
+        },
+        {
+          "row_id": "repair_loop::skill_arm_001::sf2-hyper_sprint-route-fit-spec",
+          "capability_id": "repair_loop",
+          "arm_type": "skill_arm",
+          "skill_id": "sf2-hyper_sprint-route-fit-spec",
+          "expected_verdict": "measure_outcome_contribution",
+          "runtime_eligible": false,
+          "ablation_eligible": true,
+          "safety_status": "ablation_only",
+          "metadata_repaired_overlay": false
+        },
+        {
+          "row_id": "repair_loop::skill_arm_002::sf2-nightshift-route-fit-spec",
+          "capability_id": "repair_loop",
+          "arm_type": "skill_arm",
+          "skill_id": "sf2-nightshift-route-fit-spec",
+          "expected_verdict": "measure_outcome_contribution",
+          "runtime_eligible": false,
+          "ablation_eligible": true,
+          "safety_status": "ablation_only",
+          "metadata_repaired_overlay": false
+        },
+        {
+          "row_id": "repair_loop::skill_arm_003::tdd",
+          "capability_id": "repair_loop",
+          "arm_type": "skill_arm",
+          "skill_id": "tdd",
+          "expected_verdict": "measure_outcome_contribution",
+          "runtime_eligible": true,
+          "ablation_eligible": true,
+          "safety_status": "runtime_reviewed",
+          "metadata_repaired_overlay": false
+        },
+        {
+          "row_id": "repair_loop::skill_arm_004::grill-me",
+          "capability_id": "repair_loop",
+          "arm_type": "skill_arm",
+          "skill_id": "grill-me",
+          "expected_verdict": "measure_outcome_contribution",
+          "runtime_eligible": true,
+          "ablation_eligible": true,
+          "safety_status": "runtime_reviewed",
+          "metadata_repaired_overlay": false
+        },
+        {
+          "row_id": "repair_loop::negative_control",
+          "capability_id": "repair_loop",
+          "arm_type": "negative_control",
+          "skill_id": "wrong_or_quarantined_skill",
+          "expected_verdict": "BLOCK_OR_RETURN"
+        }
+      ]
+    },
+    {
+      "capability_id": "hyper_sprint",
+      "status": "READY",
+      "candidate_count": 4,
+      "planned_row_count": 6,
+      "rows": [
+        {
+          "row_id": "hyper_sprint::capability_only",
+          "capability_id": "hyper_sprint",
+          "arm_type": "capability_only",
+          "skill_id": null,
+          "expected_verdict": "baseline"
+        },
+        {
+          "row_id": "hyper_sprint::skill_arm_001::sf2-hyper_sprint-route-fit-spec",
+          "capability_id": "hyper_sprint",
+          "arm_type": "skill_arm",
+          "skill_id": "sf2-hyper_sprint-route-fit-spec",
+          "expected_verdict": "measure_outcome_contribution",
+          "runtime_eligible": false,
+          "ablation_eligible": true,
+          "safety_status": "ablation_only",
+          "metadata_repaired_overlay": false
+        },
+        {
+          "row_id": "hyper_sprint::skill_arm_002::gstack-retro",
+          "capability_id": "hyper_sprint",
+          "arm_type": "skill_arm",
+          "skill_id": "gstack-retro",
+          "expected_verdict": "measure_outcome_contribution",
+          "runtime_eligible": false,
+          "ablation_eligible": true,
+          "safety_status": "ablation_only",
+          "metadata_repaired_overlay": false
+        },
+        {
+          "row_id": "hyper_sprint::skill_arm_003::retro",
+          "capability_id": "hyper_sprint",
+          "arm_type": "skill_arm",
+          "skill_id": "retro",
+          "expected_verdict": "measure_outcome_contribution",
+          "runtime_eligible": false,
+          "ablation_eligible": true,
+          "safety_status": "ablation_only",
+          "metadata_repaired_overlay": false
+        },
+        {
+          "row_id": "hyper_sprint::skill_arm_004::wondelai-design-sprint",
+          "capability_id": "hyper_sprint",
+          "arm_type": "skill_arm",
+          "skill_id": "wondelai-design-sprint",
+          "expected_verdict": "measure_outcome_contribution",
+          "runtime_eligible": false,
+          "ablation_eligible": true,
+          "safety_status": "ablation_only",
+          "metadata_repaired_overlay": false
+        },
+        {
+          "row_id": "hyper_sprint::negative_control",
+          "capability_id": "hyper_sprint",
+          "arm_type": "negative_control",
+          "skill_id": "wrong_or_quarantined_skill",
+          "expected_verdict": "BLOCK_OR_RETURN"
+        }
+      ]
+    },
+    {
+      "capability_id": "nightshift",
+      "status": "READY",
+      "candidate_count": 2,
+      "planned_row_count": 4,
+      "rows": [
+        {
+          "row_id": "nightshift::capability_only",
+          "capability_id": "nightshift",
+          "arm_type": "capability_only",
+          "skill_id": null,
+          "expected_verdict": "baseline"
+        },
+        {
+          "row_id": "nightshift::skill_arm_001::sf2-nightshift-route-fit-spec",
+          "capability_id": "nightshift",
+          "arm_type": "skill_arm",
+          "skill_id": "sf2-nightshift-route-fit-spec",
+          "expected_verdict": "measure_outcome_contribution",
+          "runtime_eligible": false,
+          "ablation_eligible": true,
+          "safety_status": "ablation_only",
+          "metadata_repaired_overlay": false
+        },
+        {
+          "row_id": "nightshift::skill_arm_002::sf2-learning_closure-route-fit-spec",
+          "capability_id": "nightshift",
+          "arm_type": "skill_arm",
+          "skill_id": "sf2-learning_closure-route-fit-spec",
+          "expected_verdict": "measure_outcome_contribution",
+          "runtime_eligible": false,
+          "ablation_eligible": true,
+          "safety_status": "ablation_only",
+          "metadata_repaired_overlay": false
+        },
+        {
+          "row_id": "nightshift::negative_control",
+          "capability_id": "nightshift",
+          "arm_type": "negative_control",
+          "skill_id": "wrong_or_quarantined_skill",
+          "expected_verdict": "BLOCK_OR_RETURN"
+        }
+      ]
+    },
+    {
+      "capability_id": "codeintel",
+      "status": "READY",
+      "candidate_count": 4,
+      "planned_row_count": 6,
+      "rows": [
+        {
+          "row_id": "codeintel::capability_only",
+          "capability_id": "codeintel",
+          "arm_type": "capability_only",
+          "skill_id": null,
+          "expected_verdict": "baseline"
+        },
+        {
+          "row_id": "codeintel::skill_arm_001::improve-codebase-architecture",
+          "capability_id": "codeintel",
+          "arm_type": "skill_arm",
+          "skill_id": "improve-codebase-architecture",
+          "expected_verdict": "measure_outcome_contribution",
+          "runtime_eligible": true,
+          "ablation_eligible": true,
+          "safety_status": "runtime_reviewed",
+          "metadata_repaired_overlay": false
+        },
+        {
+          "row_id": "codeintel::skill_arm_002::setup-matt-pocock-skills",
+          "capability_id": "codeintel",
+          "arm_type": "skill_arm",
+          "skill_id": "setup-matt-pocock-skills",
+          "expected_verdict": "measure_outcome_contribution",
+          "runtime_eligible": true,
+          "ablation_eligible": true,
+          "safety_status": "runtime_reviewed",
+          "metadata_repaired_overlay": false
+        },
+        {
+          "row_id": "codeintel::skill_arm_003::wondelai-software-design-philosophy",
+          "capability_id": "codeintel",
+          "arm_type": "skill_arm",
+          "skill_id": "wondelai-software-design-philosophy",
+          "expected_verdict": "measure_outcome_contribution",
+          "runtime_eligible": false,
+          "ablation_eligible": true,
+          "safety_status": "ablation_only",
+          "metadata_repaired_overlay": false
+        },
+        {
+          "row_id": "codeintel::skill_arm_004::wondelai-ux-heuristics",
+          "capability_id": "codeintel",
+          "arm_type": "skill_arm",
+          "skill_id": "wondelai-ux-heuristics",
+          "expected_verdict": "measure_outcome_contribution",
+          "runtime_eligible": false,
+          "ablation_eligible": true,
+          "safety_status": "ablation_only",
+          "metadata_repaired_overlay": false
+        },
+        {
+          "row_id": "codeintel::negative_control",
+          "capability_id": "codeintel",
+          "arm_type": "negative_control",
+          "skill_id": "wrong_or_quarantined_skill",
+          "expected_verdict": "BLOCK_OR_RETURN"
+        }
+      ]
+    },
+    {
+      "capability_id": "research",
+      "status": "READY",
+      "candidate_count": 4,
+      "planned_row_count": 6,
+      "rows": [
+        {
+          "row_id": "research::capability_only",
+          "capability_id": "research",
+          "arm_type": "capability_only",
+          "skill_id": null,
+          "expected_verdict": "baseline"
+        },
+        {
+          "row_id": "research::skill_arm_001::sf2-research_control_plane-route-fit-spec",
+          "capability_id": "research",
+          "arm_type": "skill_arm",
+          "skill_id": "sf2-research_control_plane-route-fit-spec",
+          "expected_verdict": "measure_outcome_contribution",
+          "runtime_eligible": false,
+          "ablation_eligible": true,
+          "safety_status": "ablation_only",
+          "metadata_repaired_overlay": false
+        },
+        {
+          "row_id": "research::skill_arm_002::sf2-lancedb-route-fit-spec",
+          "capability_id": "research",
+          "arm_type": "skill_arm",
+          "skill_id": "sf2-lancedb-route-fit-spec",
+          "expected_verdict": "measure_outcome_contribution",
+          "runtime_eligible": false,
+          "ablation_eligible": true,
+          "safety_status": "ablation_only",
+          "metadata_repaired_overlay": false
+        },
+        {
+          "row_id": "research::skill_arm_003::browserbase-browserbase-cli",
+          "capability_id": "research",
+          "arm_type": "skill_arm",
+          "skill_id": "browserbase-browserbase-cli",
+          "expected_verdict": "measure_outcome_contribution",
+          "runtime_eligible": false,
+          "ablation_eligible": true,
+          "safety_status": "ablation_only",
+          "metadata_repaired_overlay": false
+        },
+        {
+          "row_id": "research::skill_arm_004::gbrain-academic-verify",
+          "capability_id": "research",
+          "arm_type": "skill_arm",
+          "skill_id": "gbrain-academic-verify",
+          "expected_verdict": "measure_outcome_contribution",
+          "runtime_eligible": false,
+          "ablation_eligible": true,
+          "safety_status": "ablation_only",
+          "metadata_repaired_overlay": false
+        },
+        {
+          "row_id": "research::negative_control",
+          "capability_id": "research",
+          "arm_type": "negative_control",
+          "skill_id": "wrong_or_quarantined_skill",
+          "expected_verdict": "BLOCK_OR_RETURN"
+        }
+      ]
+    },
+    {
+      "capability_id": "research_control_plane",
+      "status": "READY",
+      "candidate_count": 4,
+      "planned_row_count": 6,
+      "rows": [
+        {
+          "row_id": "research_control_plane::capability_only",
+          "capability_id": "research_control_plane",
+          "arm_type": "capability_only",
+          "skill_id": null,
+          "expected_verdict": "baseline"
+        },
+        {
+          "row_id": "research_control_plane::skill_arm_001::sf2-research_control_plane-route-fit-spec",
+          "capability_id": "research_control_plane",
+          "arm_type": "skill_arm",
+          "skill_id": "sf2-research_control_plane-route-fit-spec",
+          "expected_verdict": "measure_outcome_contribution",
+          "runtime_eligible": false,
+          "ablation_eligible": true,
+          "safety_status": "ablation_only",
+          "metadata_repaired_overlay": false
+        },
+        {
+          "row_id": "research_control_plane::skill_arm_002::agent-reach",
+          "capability_id": "research_control_plane",
+          "arm_type": "skill_arm",
+          "skill_id": "agent-reach",
+          "expected_verdict": "measure_outcome_contribution",
+          "runtime_eligible": false,
+          "ablation_eligible": true,
+          "safety_status": "ablation_only",
+          "metadata_repaired_overlay": false
+        },
+        {
+          "row_id": "research_control_plane::skill_arm_003::aibdd.auto.python.e2e.green",
+          "capability_id": "research_control_plane",
+          "arm_type": "skill_arm",
+          "skill_id": "aibdd.auto.python.e2e.green",
+          "expected_verdict": "measure_outcome_contribution",
+          "runtime_eligible": false,
+          "ablation_eligible": true,
+          "safety_status": "ablation_only",
+          "metadata_repaired_overlay": false
+        },
+        {
+          "row_id": "research_control_plane::skill_arm_004::aibdd.auto.python.e2e.handlers.aggregate-given",
+          "capability_id": "research_control_plane",
+          "arm_type": "skill_arm",
+          "skill_id": "aibdd.auto.python.e2e.handlers.aggregate-given",
+          "expected_verdict": "measure_outcome_contribution",
+          "runtime_eligible": false,
+          "ablation_eligible": true,
+          "safety_status": "ablation_only",
+          "metadata_repaired_overlay": false
+        },
+        {
+          "row_id": "research_control_plane::negative_control",
+          "capability_id": "research_control_plane",
+          "arm_type": "negative_control",
+          "skill_id": "wrong_or_quarantined_skill",
+          "expected_verdict": "BLOCK_OR_RETURN"
+        }
+      ]
+    },
+    {
+      "capability_id": "xray",
+      "status": "READY",
+      "candidate_count": 4,
+      "planned_row_count": 6,
+      "rows": [
+        {
+          "row_id": "xray::capability_only",
+          "capability_id": "xray",
+          "arm_type": "capability_only",
+          "skill_id": null,
+          "expected_verdict": "baseline"
+        },
+        {
+          "row_id": "xray::skill_arm_001::gstack-investigate",
+          "capability_id": "xray",
+          "arm_type": "skill_arm",
+          "skill_id": "gstack-investigate",
+          "expected_verdict": "measure_outcome_contribution",
+          "runtime_eligible": false,
+          "ablation_eligible": true,
+          "safety_status": "ablation_only",
+          "metadata_repaired_overlay": false
+        },
+        {
+          "row_id": "xray::skill_arm_002::gstack-openclaw-investigate",
+          "capability_id": "xray",
+          "arm_type": "skill_arm",
+          "skill_id": "gstack-openclaw-investigate",
+          "expected_verdict": "measure_outcome_contribution",
+          "runtime_eligible": false,
+          "ablation_eligible": true,
+          "safety_status": "ablation_only",
+          "metadata_repaired_overlay": false
+        },
+        {
+          "row_id": "xray::skill_arm_003::investigate",
+          "capability_id": "xray",
+          "arm_type": "skill_arm",
+          "skill_id": "investigate",
+          "expected_verdict": "measure_outcome_contribution",
+          "runtime_eligible": false,
+          "ablation_eligible": true,
+          "safety_status": "ablation_only",
+          "metadata_repaired_overlay": false
+        },
+        {
+          "row_id": "xray::skill_arm_004::systematic-debugging",
+          "capability_id": "xray",
+          "arm_type": "skill_arm",
+          "skill_id": "systematic-debugging",
+          "expected_verdict": "measure_outcome_contribution",
+          "runtime_eligible": false,
+          "ablation_eligible": true,
+          "safety_status": "ablation_only",
+          "metadata_repaired_overlay": false
+        },
+        {
+          "row_id": "xray::negative_control",
+          "capability_id": "xray",
+          "arm_type": "negative_control",
+          "skill_id": "wrong_or_quarantined_skill",
+          "expected_verdict": "BLOCK_OR_RETURN"
+        }
+      ]
+    },
+    {
+      "capability_id": "learn_ask",
+      "status": "READY",
+      "candidate_count": 4,
+      "planned_row_count": 6,
+      "rows": [
+        {
+          "row_id": "learn_ask::capability_only",
+          "capability_id": "learn_ask",
+          "arm_type": "capability_only",
+          "skill_id": null,
+          "expected_verdict": "baseline"
+        },
+        {
+          "row_id": "learn_ask::skill_arm_001::notebooklm-bulk-injector",
+          "capability_id": "learn_ask",
+          "arm_type": "skill_arm",
+          "skill_id": "notebooklm-bulk-injector",
+          "expected_verdict": "measure_outcome_contribution",
+          "runtime_eligible": true,
+          "ablation_eligible": true,
+          "safety_status": "runtime_reviewed",
+          "metadata_repaired_overlay": false
+        },
+        {
+          "row_id": "learn_ask::skill_arm_002::notebooklm-context-bridge",
+          "capability_id": "learn_ask",
+          "arm_type": "skill_arm",
+          "skill_id": "notebooklm-context-bridge",
+          "expected_verdict": "measure_outcome_contribution",
+          "runtime_eligible": true,
+          "ablation_eligible": true,
+          "safety_status": "runtime_reviewed",
+          "metadata_repaired_overlay": false
+        },
+        {
+          "row_id": "learn_ask::skill_arm_003::nexus-capability-upgrade",
+          "capability_id": "learn_ask",
+          "arm_type": "skill_arm",
+          "skill_id": "nexus-capability-upgrade",
+          "expected_verdict": "measure_outcome_contribution",
+          "runtime_eligible": true,
+          "ablation_eligible": true,
+          "safety_status": "runtime_reviewed",
+          "metadata_repaired_overlay": false
+        },
+        {
+          "row_id": "learn_ask::skill_arm_004::nexus-root-cause-probe",
+          "capability_id": "learn_ask",
+          "arm_type": "skill_arm",
+          "skill_id": "nexus-root-cause-probe",
+          "expected_verdict": "measure_outcome_contribution",
+          "runtime_eligible": true,
+          "ablation_eligible": true,
+          "safety_status": "runtime_reviewed",
+          "metadata_repaired_overlay": false
+        },
+        {
+          "row_id": "learn_ask::negative_control",
+          "capability_id": "learn_ask",
+          "arm_type": "negative_control",
+          "skill_id": "wrong_or_quarantined_skill",
+          "expected_verdict": "BLOCK_OR_RETURN"
+        }
+      ]
+    },
+    {
+      "capability_id": "lancedb",
+      "status": "READY",
+      "candidate_count": 4,
+      "planned_row_count": 6,
+      "rows": [
+        {
+          "row_id": "lancedb::capability_only",
+          "capability_id": "lancedb",
+          "arm_type": "capability_only",
+          "skill_id": null,
+          "expected_verdict": "baseline"
+        },
+        {
+          "row_id": "lancedb::skill_arm_001::sf2-lancedb-route-fit-spec",
+          "capability_id": "lancedb",
+          "arm_type": "skill_arm",
+          "skill_id": "sf2-lancedb-route-fit-spec",
+          "expected_verdict": "measure_outcome_contribution",
+          "runtime_eligible": false,
+          "ablation_eligible": true,
+          "safety_status": "ablation_only",
+          "metadata_repaired_overlay": false
+        },
+        {
+          "row_id": "lancedb::skill_arm_002::sf2-autoreason-route-fit-spec",
+          "capability_id": "lancedb",
+          "arm_type": "skill_arm",
+          "skill_id": "sf2-autoreason-route-fit-spec",
+          "expected_verdict": "measure_outcome_contribution",
+          "runtime_eligible": false,
+          "ablation_eligible": true,
+          "safety_status": "ablation_only",
+          "metadata_repaired_overlay": false
+        },
+        {
+          "row_id": "lancedb::skill_arm_003::dspy",
+          "capability_id": "lancedb",
+          "arm_type": "skill_arm",
+          "skill_id": "dspy",
+          "expected_verdict": "measure_outcome_contribution",
+          "runtime_eligible": false,
+          "ablation_eligible": true,
+          "safety_status": "ablation_only",
+          "metadata_repaired_overlay": false
+        },
+        {
+          "row_id": "lancedb::skill_arm_004::imagegen",
+          "capability_id": "lancedb",
+          "arm_type": "skill_arm",
+          "skill_id": "imagegen",
+          "expected_verdict": "measure_outcome_contribution",
+          "runtime_eligible": false,
+          "ablation_eligible": true,
+          "safety_status": "ablation_only",
+          "metadata_repaired_overlay": false
+        },
+        {
+          "row_id": "lancedb::negative_control",
+          "capability_id": "lancedb",
+          "arm_type": "negative_control",
+          "skill_id": "wrong_or_quarantined_skill",
+          "expected_verdict": "BLOCK_OR_RETURN"
+        }
+      ]
+    },
+    {
+      "capability_id": "memory",
+      "status": "READY",
+      "candidate_count": 4,
+      "planned_row_count": 6,
+      "rows": [
+        {
+          "row_id": "memory::capability_only",
+          "capability_id": "memory",
+          "arm_type": "capability_only",
+          "skill_id": null,
+          "expected_verdict": "baseline"
+        },
+        {
+          "row_id": "memory::skill_arm_001::sf2-memory-route-fit-spec",
+          "capability_id": "memory",
+          "arm_type": "skill_arm",
+          "skill_id": "sf2-memory-route-fit-spec",
+          "expected_verdict": "measure_outcome_contribution",
+          "runtime_eligible": false,
+          "ablation_eligible": true,
+          "safety_status": "ablation_only",
+          "metadata_repaired_overlay": false
+        },
+        {
+          "row_id": "memory::skill_arm_002::sf2-lancedb-route-fit-spec",
+          "capability_id": "memory",
+          "arm_type": "skill_arm",
+          "skill_id": "sf2-lancedb-route-fit-spec",
+          "expected_verdict": "measure_outcome_contribution",
+          "runtime_eligible": false,
+          "ablation_eligible": true,
+          "safety_status": "ablation_only",
+          "metadata_repaired_overlay": false
+        },
+        {
+          "row_id": "memory::skill_arm_003::sf2-mempalace-route-fit-spec",
+          "capability_id": "memory",
+          "arm_type": "skill_arm",
+          "skill_id": "sf2-mempalace-route-fit-spec",
+          "expected_verdict": "measure_outcome_contribution",
+          "runtime_eligible": false,
+          "ablation_eligible": true,
+          "safety_status": "ablation_only",
+          "metadata_repaired_overlay": false
+        },
+        {
+          "row_id": "memory::skill_arm_004::obsidian-cli",
+          "capability_id": "memory",
+          "arm_type": "skill_arm",
+          "skill_id": "obsidian-cli",
+          "expected_verdict": "measure_outcome_contribution",
+          "runtime_eligible": false,
+          "ablation_eligible": true,
+          "safety_status": "ablation_only",
+          "metadata_repaired_overlay": false
+        },
+        {
+          "row_id": "memory::negative_control",
+          "capability_id": "memory",
+          "arm_type": "negative_control",
+          "skill_id": "wrong_or_quarantined_skill",
+          "expected_verdict": "BLOCK_OR_RETURN"
+        }
+      ]
+    },
+    {
+      "capability_id": "learning_closure",
+      "status": "READY",
+      "candidate_count": 3,
+      "planned_row_count": 5,
+      "rows": [
+        {
+          "row_id": "learning_closure::capability_only",
+          "capability_id": "learning_closure",
+          "arm_type": "capability_only",
+          "skill_id": null,
+          "expected_verdict": "baseline"
+        },
+        {
+          "row_id": "learning_closure::skill_arm_001::sf2-learning_closure-route-fit-spec",
+          "capability_id": "learning_closure",
+          "arm_type": "skill_arm",
+          "skill_id": "sf2-learning_closure-route-fit-spec",
+          "expected_verdict": "measure_outcome_contribution",
+          "runtime_eligible": false,
+          "ablation_eligible": true,
+          "safety_status": "ablation_only",
+          "metadata_repaired_overlay": false
+        },
+        {
+          "row_id": "learning_closure::skill_arm_002::sf2-nightshift-route-fit-spec",
+          "capability_id": "learning_closure",
+          "arm_type": "skill_arm",
+          "skill_id": "sf2-nightshift-route-fit-spec",
+          "expected_verdict": "measure_outcome_contribution",
+          "runtime_eligible": false,
+          "ablation_eligible": true,
+          "safety_status": "ablation_only",
+          "metadata_repaired_overlay": false
+        },
+        {
+          "row_id": "learning_closure::skill_arm_003::nexus-new-idea-intake-decision-tree",
+          "capability_id": "learning_closure",
+          "arm_type": "skill_arm",
+          "skill_id": "nexus-new-idea-intake-decision-tree",
+          "expected_verdict": "measure_outcome_contribution",
+          "runtime_eligible": false,
+          "ablation_eligible": true,
+          "safety_status": "ablation_only",
+          "metadata_repaired_overlay": false
+        },
+        {
+          "row_id": "learning_closure::negative_control",
+          "capability_id": "learning_closure",
+          "arm_type": "negative_control",
+          "skill_id": "wrong_or_quarantined_skill",
+          "expected_verdict": "BLOCK_OR_RETURN"
+        }
+      ]
+    },
+    {
+      "capability_id": "autoreason",
+      "status": "READY",
+      "candidate_count": 4,
+      "planned_row_count": 6,
+      "rows": [
+        {
+          "row_id": "autoreason::capability_only",
+          "capability_id": "autoreason",
+          "arm_type": "capability_only",
+          "skill_id": null,
+          "expected_verdict": "baseline"
+        },
+        {
+          "row_id": "autoreason::skill_arm_001::sf2-autoreason-route-fit-spec",
+          "capability_id": "autoreason",
+          "arm_type": "skill_arm",
+          "skill_id": "sf2-autoreason-route-fit-spec",
+          "expected_verdict": "measure_outcome_contribution",
+          "runtime_eligible": false,
+          "ablation_eligible": true,
+          "safety_status": "ablation_only",
+          "metadata_repaired_overlay": false
+        },
+        {
+          "row_id": "autoreason::skill_arm_002::sf2-belief-route-fit-spec",
+          "capability_id": "autoreason",
+          "arm_type": "skill_arm",
+          "skill_id": "sf2-belief-route-fit-spec",
+          "expected_verdict": "measure_outcome_contribution",
+          "runtime_eligible": false,
+          "ablation_eligible": true,
+          "safety_status": "ablation_only",
+          "metadata_repaired_overlay": false
+        },
+        {
+          "row_id": "autoreason::skill_arm_003::sf2-lancedb-route-fit-spec",
+          "capability_id": "autoreason",
+          "arm_type": "skill_arm",
+          "skill_id": "sf2-lancedb-route-fit-spec",
+          "expected_verdict": "measure_outcome_contribution",
+          "runtime_eligible": false,
+          "ablation_eligible": true,
+          "safety_status": "ablation_only",
+          "metadata_repaired_overlay": false
+        },
+        {
+          "row_id": "autoreason::skill_arm_004::nexus-benchmark-public-report",
+          "capability_id": "autoreason",
+          "arm_type": "skill_arm",
+          "skill_id": "nexus-benchmark-public-report",
+          "expected_verdict": "measure_outcome_contribution",
+          "runtime_eligible": true,
+          "ablation_eligible": true,
+          "safety_status": "runtime_reviewed",
+          "metadata_repaired_overlay": false
+        },
+        {
+          "row_id": "autoreason::negative_control",
+          "capability_id": "autoreason",
+          "arm_type": "negative_control",
+          "skill_id": "wrong_or_quarantined_skill",
+          "expected_verdict": "BLOCK_OR_RETURN"
+        }
+      ]
+    },
+    {
+      "capability_id": "ddtree",
+      "status": "READY",
+      "candidate_count": 1,
+      "planned_row_count": 3,
+      "rows": [
+        {
+          "row_id": "ddtree::capability_only",
+          "capability_id": "ddtree",
+          "arm_type": "capability_only",
+          "skill_id": null,
+          "expected_verdict": "baseline"
+        },
+        {
+          "row_id": "ddtree::skill_arm_001::grill-me",
+          "capability_id": "ddtree",
+          "arm_type": "skill_arm",
+          "skill_id": "grill-me",
+          "expected_verdict": "measure_outcome_contribution",
+          "runtime_eligible": true,
+          "ablation_eligible": true,
+          "safety_status": "runtime_reviewed",
+          "metadata_repaired_overlay": false
+        },
+        {
+          "row_id": "ddtree::negative_control",
+          "capability_id": "ddtree",
+          "arm_type": "negative_control",
+          "skill_id": "wrong_or_quarantined_skill",
+          "expected_verdict": "BLOCK_OR_RETURN"
+        }
+      ]
+    },
+    {
+      "capability_id": "belief",
+      "status": "READY",
+      "candidate_count": 4,
+      "planned_row_count": 6,
+      "rows": [
+        {
+          "row_id": "belief::capability_only",
+          "capability_id": "belief",
+          "arm_type": "capability_only",
+          "skill_id": null,
+          "expected_verdict": "baseline"
+        },
+        {
+          "row_id": "belief::skill_arm_001::sf2-belief-route-fit-spec",
+          "capability_id": "belief",
+          "arm_type": "skill_arm",
+          "skill_id": "sf2-belief-route-fit-spec",
+          "expected_verdict": "measure_outcome_contribution",
+          "runtime_eligible": false,
+          "ablation_eligible": true,
+          "safety_status": "ablation_only",
+          "metadata_repaired_overlay": false
+        },
+        {
+          "row_id": "belief::skill_arm_002::sf2-autoreason-route-fit-spec",
+          "capability_id": "belief",
+          "arm_type": "skill_arm",
+          "skill_id": "sf2-autoreason-route-fit-spec",
+          "expected_verdict": "measure_outcome_contribution",
+          "runtime_eligible": false,
+          "ablation_eligible": true,
+          "safety_status": "ablation_only",
+          "metadata_repaired_overlay": false
+        },
+        {
+          "row_id": "belief::skill_arm_003::wondelai-software-design-philosophy",
+          "capability_id": "belief",
+          "arm_type": "skill_arm",
+          "skill_id": "wondelai-software-design-philosophy",
+          "expected_verdict": "measure_outcome_contribution",
+          "runtime_eligible": false,
+          "ablation_eligible": true,
+          "safety_status": "ablation_only",
+          "metadata_repaired_overlay": false
+        },
+        {
+          "row_id": "belief::skill_arm_004::addy-doubt-driven-development",
+          "capability_id": "belief",
+          "arm_type": "skill_arm",
+          "skill_id": "addy-doubt-driven-development",
+          "expected_verdict": "measure_outcome_contribution",
+          "runtime_eligible": false,
+          "ablation_eligible": true,
+          "safety_status": "ablation_only",
+          "metadata_repaired_overlay": false
+        },
+        {
+          "row_id": "belief::negative_control",
+          "capability_id": "belief",
+          "arm_type": "negative_control",
+          "skill_id": "wrong_or_quarantined_skill",
+          "expected_verdict": "BLOCK_OR_RETURN"
+        }
+      ]
+    },
+    {
+      "capability_id": "autonomic_router",
+      "status": "READY",
+      "candidate_count": 4,
+      "planned_row_count": 6,
+      "rows": [
+        {
+          "row_id": "autonomic_router::capability_only",
+          "capability_id": "autonomic_router",
+          "arm_type": "capability_only",
+          "skill_id": null,
+          "expected_verdict": "baseline"
+        },
+        {
+          "row_id": "autonomic_router::skill_arm_001::sf2-autonomic_router-route-fit-spec",
+          "capability_id": "autonomic_router",
+          "arm_type": "skill_arm",
+          "skill_id": "sf2-autonomic_router-route-fit-spec",
+          "expected_verdict": "measure_outcome_contribution",
+          "runtime_eligible": false,
+          "ablation_eligible": true,
+          "safety_status": "ablation_only",
+          "metadata_repaired_overlay": false
+        },
+        {
+          "row_id": "autonomic_router::skill_arm_002::sf2-autoreason-route-fit-spec",
+          "capability_id": "autonomic_router",
+          "arm_type": "skill_arm",
+          "skill_id": "sf2-autoreason-route-fit-spec",
+          "expected_verdict": "measure_outcome_contribution",
+          "runtime_eligible": false,
+          "ablation_eligible": true,
+          "safety_status": "ablation_only",
+          "metadata_repaired_overlay": false
+        },
+        {
+          "row_id": "autonomic_router::skill_arm_003::sf2-belief-route-fit-spec",
+          "capability_id": "autonomic_router",
+          "arm_type": "skill_arm",
+          "skill_id": "sf2-belief-route-fit-spec",
+          "expected_verdict": "measure_outcome_contribution",
+          "runtime_eligible": false,
+          "ablation_eligible": true,
+          "safety_status": "ablation_only",
+          "metadata_repaired_overlay": false
+        },
+        {
+          "row_id": "autonomic_router::skill_arm_004::sf2-delivery_acceptance_gate-route-fit-spec",
+          "capability_id": "autonomic_router",
+          "arm_type": "skill_arm",
+          "skill_id": "sf2-delivery_acceptance_gate-route-fit-spec",
+          "expected_verdict": "measure_outcome_contribution",
+          "runtime_eligible": false,
+          "ablation_eligible": true,
+          "safety_status": "ablation_only",
+          "metadata_repaired_overlay": false
+        },
+        {
+          "row_id": "autonomic_router::negative_control",
+          "capability_id": "autonomic_router",
+          "arm_type": "negative_control",
+          "skill_id": "wrong_or_quarantined_skill",
+          "expected_verdict": "BLOCK_OR_RETURN"
+        }
+      ]
+    },
+    {
+      "capability_id": "forecast_pregate",
+      "status": "READY",
+      "candidate_count": 4,
+      "planned_row_count": 6,
+      "rows": [
+        {
+          "row_id": "forecast_pregate::capability_only",
+          "capability_id": "forecast_pregate",
+          "arm_type": "capability_only",
+          "skill_id": null,
+          "expected_verdict": "baseline"
+        },
+        {
+          "row_id": "forecast_pregate::skill_arm_001::sf2-forecast_pregate-route-fit-spec",
+          "capability_id": "forecast_pregate",
+          "arm_type": "skill_arm",
+          "skill_id": "sf2-forecast_pregate-route-fit-spec",
+          "expected_verdict": "measure_outcome_contribution",
+          "runtime_eligible": false,
+          "ablation_eligible": true,
+          "safety_status": "ablation_only",
+          "metadata_repaired_overlay": false
+        },
+        {
+          "row_id": "forecast_pregate::skill_arm_002::to-issues",
+          "capability_id": "forecast_pregate",
+          "arm_type": "skill_arm",
+          "skill_id": "to-issues",
+          "expected_verdict": "measure_outcome_contribution",
+          "runtime_eligible": true,
+          "ablation_eligible": true,
+          "safety_status": "runtime_reviewed",
+          "metadata_repaired_overlay": false
+        },
+        {
+          "row_id": "forecast_pregate::skill_arm_003::to-prd",
+          "capability_id": "forecast_pregate",
+          "arm_type": "skill_arm",
+          "skill_id": "to-prd",
+          "expected_verdict": "measure_outcome_contribution",
+          "runtime_eligible": true,
+          "ablation_eligible": true,
+          "safety_status": "runtime_reviewed",
+          "metadata_repaired_overlay": false
+        },
+        {
+          "row_id": "forecast_pregate::skill_arm_004::triage",
+          "capability_id": "forecast_pregate",
+          "arm_type": "skill_arm",
+          "skill_id": "triage",
+          "expected_verdict": "measure_outcome_contribution",
+          "runtime_eligible": true,
+          "ablation_eligible": true,
+          "safety_status": "runtime_reviewed",
+          "metadata_repaired_overlay": false
+        },
+        {
+          "row_id": "forecast_pregate::negative_control",
+          "capability_id": "forecast_pregate",
+          "arm_type": "negative_control",
+          "skill_id": "wrong_or_quarantined_skill",
+          "expected_verdict": "BLOCK_OR_RETURN"
+        }
+      ]
+    },
+    {
+      "capability_id": "swarm_multi_agent",
+      "status": "READY",
+      "candidate_count": 4,
+      "planned_row_count": 6,
+      "rows": [
+        {
+          "row_id": "swarm_multi_agent::capability_only",
+          "capability_id": "swarm_multi_agent",
+          "arm_type": "capability_only",
+          "skill_id": null,
+          "expected_verdict": "baseline"
+        },
+        {
+          "row_id": "swarm_multi_agent::skill_arm_001::sf2-swarm_multi_agent-route-fit-spec",
+          "capability_id": "swarm_multi_agent",
+          "arm_type": "skill_arm",
+          "skill_id": "sf2-swarm_multi_agent-route-fit-spec",
+          "expected_verdict": "measure_outcome_contribution",
+          "runtime_eligible": false,
+          "ablation_eligible": true,
+          "safety_status": "ablation_only",
+          "metadata_repaired_overlay": false
+        },
+        {
+          "row_id": "swarm_multi_agent::skill_arm_002::benepass-reimbursement",
+          "capability_id": "swarm_multi_agent",
+          "arm_type": "skill_arm",
+          "skill_id": "benepass-reimbursement",
+          "expected_verdict": "measure_outcome_contribution",
+          "runtime_eligible": false,
+          "ablation_eligible": true,
+          "safety_status": "ablation_only",
+          "metadata_repaired_overlay": false
+        },
+        {
+          "row_id": "swarm_multi_agent::skill_arm_003::multi-agent-handoff-governance-design",
+          "capability_id": "swarm_multi_agent",
+          "arm_type": "skill_arm",
+          "skill_id": "multi-agent-handoff-governance-design",
+          "expected_verdict": "measure_outcome_contribution",
+          "runtime_eligible": false,
+          "ablation_eligible": true,
+          "safety_status": "ablation_only",
+          "metadata_repaired_overlay": false
+        },
+        {
+          "row_id": "swarm_multi_agent::skill_arm_004::nexus-gemini-code-review-orchestrator",
+          "capability_id": "swarm_multi_agent",
+          "arm_type": "skill_arm",
+          "skill_id": "nexus-gemini-code-review-orchestrator",
+          "expected_verdict": "measure_outcome_contribution",
+          "runtime_eligible": false,
+          "ablation_eligible": true,
+          "safety_status": "ablation_only",
+          "metadata_repaired_overlay": false
+        },
+        {
+          "row_id": "swarm_multi_agent::negative_control",
+          "capability_id": "swarm_multi_agent",
+          "arm_type": "negative_control",
+          "skill_id": "wrong_or_quarantined_skill",
+          "expected_verdict": "BLOCK_OR_RETURN"
+        }
+      ]
+    },
+    {
+      "capability_id": "drone",
+      "status": "READY",
+      "candidate_count": 4,
+      "planned_row_count": 6,
+      "rows": [
+        {
+          "row_id": "drone::capability_only",
+          "capability_id": "drone",
+          "arm_type": "capability_only",
+          "skill_id": null,
+          "expected_verdict": "baseline"
+        },
+        {
+          "row_id": "drone::skill_arm_001::sf2-drone-route-fit-spec",
+          "capability_id": "drone",
+          "arm_type": "skill_arm",
+          "skill_id": "sf2-drone-route-fit-spec",
+          "expected_verdict": "measure_outcome_contribution",
+          "runtime_eligible": false,
+          "ablation_eligible": true,
+          "safety_status": "ablation_only",
+          "metadata_repaired_overlay": false
+        },
+        {
+          "row_id": "drone::skill_arm_002::claude-code",
+          "capability_id": "drone",
+          "arm_type": "skill_arm",
+          "skill_id": "claude-code",
+          "expected_verdict": "measure_outcome_contribution",
+          "runtime_eligible": false,
+          "ablation_eligible": true,
+          "safety_status": "ablation_only",
+          "metadata_repaired_overlay": false
+        },
+        {
+          "row_id": "drone::skill_arm_003::codex",
+          "capability_id": "drone",
+          "arm_type": "skill_arm",
+          "skill_id": "codex",
+          "expected_verdict": "measure_outcome_contribution",
+          "runtime_eligible": false,
+          "ablation_eligible": true,
+          "safety_status": "ablation_only",
+          "metadata_repaired_overlay": false
+        },
+        {
+          "row_id": "drone::skill_arm_004::opencode",
+          "capability_id": "drone",
+          "arm_type": "skill_arm",
+          "skill_id": "opencode",
+          "expected_verdict": "measure_outcome_contribution",
+          "runtime_eligible": false,
+          "ablation_eligible": true,
+          "safety_status": "ablation_only",
+          "metadata_repaired_overlay": false
+        },
+        {
+          "row_id": "drone::negative_control",
+          "capability_id": "drone",
+          "arm_type": "negative_control",
+          "skill_id": "wrong_or_quarantined_skill",
+          "expected_verdict": "BLOCK_OR_RETURN"
+        }
+      ]
+    },
+    {
+      "capability_id": "file_lock_security_gate",
+      "status": "READY",
+      "candidate_count": 4,
+      "planned_row_count": 6,
+      "rows": [
+        {
+          "row_id": "file_lock_security_gate::capability_only",
+          "capability_id": "file_lock_security_gate",
+          "arm_type": "capability_only",
+          "skill_id": null,
+          "expected_verdict": "baseline"
+        },
+        {
+          "row_id": "file_lock_security_gate::skill_arm_001::sf2-file_lock_security_gate-route-fit-spec",
+          "capability_id": "file_lock_security_gate",
+          "arm_type": "skill_arm",
+          "skill_id": "sf2-file_lock_security_gate-route-fit-spec",
+          "expected_verdict": "measure_outcome_contribution",
+          "runtime_eligible": false,
+          "ablation_eligible": true,
+          "safety_status": "ablation_only",
+          "metadata_repaired_overlay": false
+        },
+        {
+          "row_id": "file_lock_security_gate::skill_arm_002::freeze",
+          "capability_id": "file_lock_security_gate",
+          "arm_type": "skill_arm",
+          "skill_id": "freeze",
+          "expected_verdict": "measure_outcome_contribution",
+          "runtime_eligible": false,
+          "ablation_eligible": true,
+          "safety_status": "ablation_only",
+          "metadata_repaired_overlay": false
+        },
+        {
+          "row_id": "file_lock_security_gate::skill_arm_003::gbrain-skillify",
+          "capability_id": "file_lock_security_gate",
+          "arm_type": "skill_arm",
+          "skill_id": "gbrain-skillify",
+          "expected_verdict": "measure_outcome_contribution",
+          "runtime_eligible": false,
+          "ablation_eligible": true,
+          "safety_status": "ablation_only",
+          "metadata_repaired_overlay": false
+        },
+        {
+          "row_id": "file_lock_security_gate::skill_arm_004::gstack-freeze",
+          "capability_id": "file_lock_security_gate",
+          "arm_type": "skill_arm",
+          "skill_id": "gstack-freeze",
+          "expected_verdict": "measure_outcome_contribution",
+          "runtime_eligible": false,
+          "ablation_eligible": true,
+          "safety_status": "ablation_only",
+          "metadata_repaired_overlay": false
+        },
+        {
+          "row_id": "file_lock_security_gate::negative_control",
+          "capability_id": "file_lock_security_gate",
+          "arm_type": "negative_control",
+          "skill_id": "wrong_or_quarantined_skill",
+          "expected_verdict": "BLOCK_OR_RETURN"
+        }
+      ]
+    },
+    {
+      "capability_id": "mempalace",
+      "status": "READY",
+      "candidate_count": 4,
+      "planned_row_count": 6,
+      "rows": [
+        {
+          "row_id": "mempalace::capability_only",
+          "capability_id": "mempalace",
+          "arm_type": "capability_only",
+          "skill_id": null,
+          "expected_verdict": "baseline"
+        },
+        {
+          "row_id": "mempalace::skill_arm_001::sf2-mempalace-route-fit-spec",
+          "capability_id": "mempalace",
+          "arm_type": "skill_arm",
+          "skill_id": "sf2-mempalace-route-fit-spec",
+          "expected_verdict": "measure_outcome_contribution",
+          "runtime_eligible": false,
+          "ablation_eligible": true,
+          "safety_status": "ablation_only",
+          "metadata_repaired_overlay": false
+        },
+        {
+          "row_id": "mempalace::skill_arm_002::sf2-file_lock_security_gate-route-fit-spec",
+          "capability_id": "mempalace",
+          "arm_type": "skill_arm",
+          "skill_id": "sf2-file_lock_security_gate-route-fit-spec",
+          "expected_verdict": "measure_outcome_contribution",
+          "runtime_eligible": false,
+          "ablation_eligible": true,
+          "safety_status": "ablation_only",
+          "metadata_repaired_overlay": false
+        },
+        {
+          "row_id": "mempalace::skill_arm_003::gstack-review",
+          "capability_id": "mempalace",
+          "arm_type": "skill_arm",
+          "skill_id": "gstack-review",
+          "expected_verdict": "measure_outcome_contribution",
+          "runtime_eligible": false,
+          "ablation_eligible": true,
+          "safety_status": "ablation_only",
+          "metadata_repaired_overlay": false
+        },
+        {
+          "row_id": "mempalace::skill_arm_004::review",
+          "capability_id": "mempalace",
+          "arm_type": "skill_arm",
+          "skill_id": "review",
+          "expected_verdict": "measure_outcome_contribution",
+          "runtime_eligible": false,
+          "ablation_eligible": true,
+          "safety_status": "ablation_only",
+          "metadata_repaired_overlay": false
+        },
+        {
+          "row_id": "mempalace::negative_control",
+          "capability_id": "mempalace",
+          "arm_type": "negative_control",
+          "skill_id": "wrong_or_quarantined_skill",
+          "expected_verdict": "BLOCK_OR_RETURN"
+        }
+      ]
+    },
+    {
+      "capability_id": "policy_capability_gate",
+      "status": "READY",
+      "candidate_count": 4,
+      "planned_row_count": 6,
+      "rows": [
+        {
+          "row_id": "policy_capability_gate::capability_only",
+          "capability_id": "policy_capability_gate",
+          "arm_type": "capability_only",
+          "skill_id": null,
+          "expected_verdict": "baseline"
+        },
+        {
+          "row_id": "policy_capability_gate::skill_arm_001::diagnose",
+          "capability_id": "policy_capability_gate",
+          "arm_type": "skill_arm",
+          "skill_id": "diagnose",
+          "expected_verdict": "measure_outcome_contribution",
+          "runtime_eligible": true,
+          "ablation_eligible": true,
+          "safety_status": "runtime_reviewed",
+          "metadata_repaired_overlay": false
+        },
+        {
+          "row_id": "policy_capability_gate::skill_arm_002::nexus-goal-closure-executor",
+          "capability_id": "policy_capability_gate",
+          "arm_type": "skill_arm",
+          "skill_id": "nexus-goal-closure-executor",
+          "expected_verdict": "measure_outcome_contribution",
+          "runtime_eligible": true,
+          "ablation_eligible": true,
+          "safety_status": "runtime_reviewed",
+          "metadata_repaired_overlay": false
+        },
+        {
+          "row_id": "policy_capability_gate::skill_arm_003::nexus-root-cause-probe",
+          "capability_id": "policy_capability_gate",
+          "arm_type": "skill_arm",
+          "skill_id": "nexus-root-cause-probe",
+          "expected_verdict": "measure_outcome_contribution",
+          "runtime_eligible": true,
+          "ablation_eligible": true,
+          "safety_status": "runtime_reviewed",
+          "metadata_repaired_overlay": false
+        },
+        {
+          "row_id": "policy_capability_gate::skill_arm_004::setup-matt-pocock-skills",
+          "capability_id": "policy_capability_gate",
+          "arm_type": "skill_arm",
+          "skill_id": "setup-matt-pocock-skills",
+          "expected_verdict": "measure_outcome_contribution",
+          "runtime_eligible": true,
+          "ablation_eligible": true,
+          "safety_status": "runtime_reviewed",
+          "metadata_repaired_overlay": false
+        },
+        {
+          "row_id": "policy_capability_gate::negative_control",
+          "capability_id": "policy_capability_gate",
+          "arm_type": "negative_control",
+          "skill_id": "wrong_or_quarantined_skill",
+          "expected_verdict": "BLOCK_OR_RETURN"
+        }
+      ]
+    },
+    {
+      "capability_id": "ultra_review",
+      "status": "READY",
+      "candidate_count": 4,
+      "planned_row_count": 6,
+      "rows": [
+        {
+          "row_id": "ultra_review::capability_only",
+          "capability_id": "ultra_review",
+          "arm_type": "capability_only",
+          "skill_id": null,
+          "expected_verdict": "baseline"
+        },
+        {
+          "row_id": "ultra_review::skill_arm_001::sf2-file_lock_security_gate-route-fit-spec",
+          "capability_id": "ultra_review",
+          "arm_type": "skill_arm",
+          "skill_id": "sf2-file_lock_security_gate-route-fit-spec",
+          "expected_verdict": "measure_outcome_contribution",
+          "runtime_eligible": false,
+          "ablation_eligible": true,
+          "safety_status": "ablation_only",
+          "metadata_repaired_overlay": false
+        },
+        {
+          "row_id": "ultra_review::skill_arm_002::diagnose",
+          "capability_id": "ultra_review",
+          "arm_type": "skill_arm",
+          "skill_id": "diagnose",
+          "expected_verdict": "measure_outcome_contribution",
+          "runtime_eligible": true,
+          "ablation_eligible": true,
+          "safety_status": "runtime_reviewed",
+          "metadata_repaired_overlay": false
+        },
+        {
+          "row_id": "ultra_review::skill_arm_003::nexus-goal-closure-executor",
+          "capability_id": "ultra_review",
+          "arm_type": "skill_arm",
+          "skill_id": "nexus-goal-closure-executor",
+          "expected_verdict": "measure_outcome_contribution",
+          "runtime_eligible": true,
+          "ablation_eligible": true,
+          "safety_status": "runtime_reviewed",
+          "metadata_repaired_overlay": false
+        },
+        {
+          "row_id": "ultra_review::skill_arm_004::nexus-root-cause-probe",
+          "capability_id": "ultra_review",
+          "arm_type": "skill_arm",
+          "skill_id": "nexus-root-cause-probe",
+          "expected_verdict": "measure_outcome_contribution",
+          "runtime_eligible": true,
+          "ablation_eligible": true,
+          "safety_status": "runtime_reviewed",
+          "metadata_repaired_overlay": false
+        },
+        {
+          "row_id": "ultra_review::negative_control",
+          "capability_id": "ultra_review",
+          "arm_type": "negative_control",
+          "skill_id": "wrong_or_quarantined_skill",
+          "expected_verdict": "BLOCK_OR_RETURN"
+        }
+      ]
+    },
+    {
+      "capability_id": "artifact_gate",
+      "status": "READY",
+      "candidate_count": 4,
+      "planned_row_count": 6,
+      "rows": [
+        {
+          "row_id": "artifact_gate::capability_only",
+          "capability_id": "artifact_gate",
+          "arm_type": "capability_only",
+          "skill_id": null,
+          "expected_verdict": "baseline"
+        },
+        {
+          "row_id": "artifact_gate::skill_arm_001::nexus-goal-closure-executor",
+          "capability_id": "artifact_gate",
+          "arm_type": "skill_arm",
+          "skill_id": "nexus-goal-closure-executor",
+          "expected_verdict": "measure_outcome_contribution",
+          "runtime_eligible": true,
+          "ablation_eligible": true,
+          "safety_status": "runtime_reviewed",
+          "metadata_repaired_overlay": false
+        },
+        {
+          "row_id": "artifact_gate::skill_arm_002::nexus-root-cause-probe",
+          "capability_id": "artifact_gate",
+          "arm_type": "skill_arm",
+          "skill_id": "nexus-root-cause-probe",
+          "expected_verdict": "measure_outcome_contribution",
+          "runtime_eligible": true,
+          "ablation_eligible": true,
+          "safety_status": "runtime_reviewed",
+          "metadata_repaired_overlay": false
+        },
+        {
+          "row_id": "artifact_gate::skill_arm_003::diagnose",
+          "capability_id": "artifact_gate",
+          "arm_type": "skill_arm",
+          "skill_id": "diagnose",
+          "expected_verdict": "measure_outcome_contribution",
+          "runtime_eligible": true,
+          "ablation_eligible": true,
+          "safety_status": "runtime_reviewed",
+          "metadata_repaired_overlay": false
+        },
+        {
+          "row_id": "artifact_gate::skill_arm_004::setup-matt-pocock-skills",
+          "capability_id": "artifact_gate",
+          "arm_type": "skill_arm",
+          "skill_id": "setup-matt-pocock-skills",
+          "expected_verdict": "measure_outcome_contribution",
+          "runtime_eligible": true,
+          "ablation_eligible": true,
+          "safety_status": "runtime_reviewed",
+          "metadata_repaired_overlay": false
+        },
+        {
+          "row_id": "artifact_gate::negative_control",
+          "capability_id": "artifact_gate",
+          "arm_type": "negative_control",
+          "skill_id": "wrong_or_quarantined_skill",
+          "expected_verdict": "BLOCK_OR_RETURN"
+        }
+      ]
+    },
+    {
+      "capability_id": "claim_gate",
+      "status": "READY",
+      "candidate_count": 4,
+      "planned_row_count": 6,
+      "rows": [
+        {
+          "row_id": "claim_gate::capability_only",
+          "capability_id": "claim_gate",
+          "arm_type": "capability_only",
+          "skill_id": null,
+          "expected_verdict": "baseline"
+        },
+        {
+          "row_id": "claim_gate::skill_arm_001::sf2-research_control_plane-route-fit-spec",
+          "capability_id": "claim_gate",
+          "arm_type": "skill_arm",
+          "skill_id": "sf2-research_control_plane-route-fit-spec",
+          "expected_verdict": "measure_outcome_contribution",
+          "runtime_eligible": false,
+          "ablation_eligible": true,
+          "safety_status": "ablation_only",
+          "metadata_repaired_overlay": false
+        },
+        {
+          "row_id": "claim_gate::skill_arm_002::diagnose",
+          "capability_id": "claim_gate",
+          "arm_type": "skill_arm",
+          "skill_id": "diagnose",
+          "expected_verdict": "measure_outcome_contribution",
+          "runtime_eligible": true,
+          "ablation_eligible": true,
+          "safety_status": "runtime_reviewed",
+          "metadata_repaired_overlay": false
+        },
+        {
+          "row_id": "claim_gate::skill_arm_003::nexus-goal-closure-executor",
+          "capability_id": "claim_gate",
+          "arm_type": "skill_arm",
+          "skill_id": "nexus-goal-closure-executor",
+          "expected_verdict": "measure_outcome_contribution",
+          "runtime_eligible": true,
+          "ablation_eligible": true,
+          "safety_status": "runtime_reviewed",
+          "metadata_repaired_overlay": false
+        },
+        {
+          "row_id": "claim_gate::skill_arm_004::nexus-root-cause-probe",
+          "capability_id": "claim_gate",
+          "arm_type": "skill_arm",
+          "skill_id": "nexus-root-cause-probe",
+          "expected_verdict": "measure_outcome_contribution",
+          "runtime_eligible": true,
+          "ablation_eligible": true,
+          "safety_status": "runtime_reviewed",
+          "metadata_repaired_overlay": false
+        },
+        {
+          "row_id": "claim_gate::negative_control",
+          "capability_id": "claim_gate",
+          "arm_type": "negative_control",
+          "skill_id": "wrong_or_quarantined_skill",
+          "expected_verdict": "BLOCK_OR_RETURN"
+        }
+      ]
+    },
+    {
+      "capability_id": "delivery_acceptance_gate",
+      "status": "READY",
+      "candidate_count": 4,
+      "planned_row_count": 6,
+      "rows": [
+        {
+          "row_id": "delivery_acceptance_gate::capability_only",
+          "capability_id": "delivery_acceptance_gate",
+          "arm_type": "capability_only",
+          "skill_id": null,
+          "expected_verdict": "baseline"
+        },
+        {
+          "row_id": "delivery_acceptance_gate::skill_arm_001::sf2-delivery_acceptance_gate-route-fit-spec",
+          "capability_id": "delivery_acceptance_gate",
+          "arm_type": "skill_arm",
+          "skill_id": "sf2-delivery_acceptance_gate-route-fit-spec",
+          "expected_verdict": "measure_outcome_contribution",
+          "runtime_eligible": false,
+          "ablation_eligible": true,
+          "safety_status": "ablation_only",
+          "metadata_repaired_overlay": false
+        },
+        {
+          "row_id": "delivery_acceptance_gate::skill_arm_002::nexus-benchmark-continuous-optimization",
+          "capability_id": "delivery_acceptance_gate",
+          "arm_type": "skill_arm",
+          "skill_id": "nexus-benchmark-continuous-optimization",
+          "expected_verdict": "measure_outcome_contribution",
+          "runtime_eligible": true,
+          "ablation_eligible": true,
+          "safety_status": "runtime_reviewed",
+          "metadata_repaired_overlay": false
+        },
+        {
+          "row_id": "delivery_acceptance_gate::skill_arm_003::acceptance-evidence-failclosed",
+          "capability_id": "delivery_acceptance_gate",
+          "arm_type": "skill_arm",
+          "skill_id": "acceptance-evidence-failclosed",
+          "expected_verdict": "measure_outcome_contribution",
+          "runtime_eligible": false,
+          "ablation_eligible": true,
+          "safety_status": "ablation_only",
+          "metadata_repaired_overlay": false
+        },
+        {
+          "row_id": "delivery_acceptance_gate::skill_arm_004::nexus-acceptance-evidence-gate",
+          "capability_id": "delivery_acceptance_gate",
+          "arm_type": "skill_arm",
+          "skill_id": "nexus-acceptance-evidence-gate",
+          "expected_verdict": "measure_outcome_contribution",
+          "runtime_eligible": false,
+          "ablation_eligible": true,
+          "safety_status": "ablation_only",
+          "metadata_repaired_overlay": false
+        },
+        {
+          "row_id": "delivery_acceptance_gate::negative_control",
+          "capability_id": "delivery_acceptance_gate",
+          "arm_type": "negative_control",
+          "skill_id": "wrong_or_quarantined_skill",
+          "expected_verdict": "BLOCK_OR_RETURN"
+        }
+      ]
+    },
+    {
+      "capability_id": "sandbox_replay",
+      "status": "READY",
+      "candidate_count": 4,
+      "planned_row_count": 6,
+      "rows": [
+        {
+          "row_id": "sandbox_replay::capability_only",
+          "capability_id": "sandbox_replay",
+          "arm_type": "capability_only",
+          "skill_id": null,
+          "expected_verdict": "baseline"
+        },
+        {
+          "row_id": "sandbox_replay::skill_arm_001::sf2-file_lock_security_gate-route-fit-spec",
+          "capability_id": "sandbox_replay",
+          "arm_type": "skill_arm",
+          "skill_id": "sf2-file_lock_security_gate-route-fit-spec",
+          "expected_verdict": "measure_outcome_contribution",
+          "runtime_eligible": false,
+          "ablation_eligible": true,
+          "safety_status": "ablation_only",
+          "metadata_repaired_overlay": false
+        },
+        {
+          "row_id": "sandbox_replay::skill_arm_002::gstack-health",
+          "capability_id": "sandbox_replay",
+          "arm_type": "skill_arm",
+          "skill_id": "gstack-health",
+          "expected_verdict": "measure_outcome_contribution",
+          "runtime_eligible": false,
+          "ablation_eligible": true,
+          "safety_status": "ablation_only",
+          "metadata_repaired_overlay": false
+        },
+        {
+          "row_id": "sandbox_replay::skill_arm_003::health",
+          "capability_id": "sandbox_replay",
+          "arm_type": "skill_arm",
+          "skill_id": "health",
+          "expected_verdict": "measure_outcome_contribution",
+          "runtime_eligible": false,
+          "ablation_eligible": true,
+          "safety_status": "ablation_only",
+          "metadata_repaired_overlay": false
+        },
+        {
+          "row_id": "sandbox_replay::skill_arm_004::aibdd.auto.java.e2e.refactor",
+          "capability_id": "sandbox_replay",
+          "arm_type": "skill_arm",
+          "skill_id": "aibdd.auto.java.e2e.refactor",
+          "expected_verdict": "measure_outcome_contribution",
+          "runtime_eligible": false,
+          "ablation_eligible": true,
+          "safety_status": "ablation_only",
+          "metadata_repaired_overlay": false
+        },
+        {
+          "row_id": "sandbox_replay::negative_control",
+          "capability_id": "sandbox_replay",
+          "arm_type": "negative_control",
+          "skill_id": "wrong_or_quarantined_skill",
+          "expected_verdict": "BLOCK_OR_RETURN"
+        }
+      ]
+    },
+    {
+      "capability_id": "benchmark_meta_opt",
+      "status": "READY",
+      "candidate_count": 4,
+      "planned_row_count": 6,
+      "rows": [
+        {
+          "row_id": "benchmark_meta_opt::capability_only",
+          "capability_id": "benchmark_meta_opt",
+          "arm_type": "capability_only",
+          "skill_id": null,
+          "expected_verdict": "baseline"
+        },
+        {
+          "row_id": "benchmark_meta_opt::skill_arm_001::nexus-benchmark-continuous-optimization",
+          "capability_id": "benchmark_meta_opt",
+          "arm_type": "skill_arm",
+          "skill_id": "nexus-benchmark-continuous-optimization",
+          "expected_verdict": "measure_outcome_contribution",
+          "runtime_eligible": true,
+          "ablation_eligible": true,
+          "safety_status": "runtime_reviewed",
+          "metadata_repaired_overlay": false
+        },
+        {
+          "row_id": "benchmark_meta_opt::skill_arm_002::nexus-benchmark-public-report",
+          "capability_id": "benchmark_meta_opt",
+          "arm_type": "skill_arm",
+          "skill_id": "nexus-benchmark-public-report",
+          "expected_verdict": "measure_outcome_contribution",
+          "runtime_eligible": true,
+          "ablation_eligible": true,
+          "safety_status": "runtime_reviewed",
+          "metadata_repaired_overlay": false
+        },
+        {
+          "row_id": "benchmark_meta_opt::skill_arm_003::nexus-capability-upgrade",
+          "capability_id": "benchmark_meta_opt",
+          "arm_type": "skill_arm",
+          "skill_id": "nexus-capability-upgrade",
+          "expected_verdict": "measure_outcome_contribution",
+          "runtime_eligible": true,
+          "ablation_eligible": true,
+          "safety_status": "runtime_reviewed",
+          "metadata_repaired_overlay": false
+        },
+        {
+          "row_id": "benchmark_meta_opt::skill_arm_004::benchmark-models",
+          "capability_id": "benchmark_meta_opt",
+          "arm_type": "skill_arm",
+          "skill_id": "benchmark-models",
+          "expected_verdict": "measure_outcome_contribution",
+          "runtime_eligible": false,
+          "ablation_eligible": true,
+          "safety_status": "ablation_only",
+          "metadata_repaired_overlay": false
+        },
+        {
+          "row_id": "benchmark_meta_opt::negative_control",
+          "capability_id": "benchmark_meta_opt",
+          "arm_type": "negative_control",
+          "skill_id": "wrong_or_quarantined_skill",
+          "expected_verdict": "BLOCK_OR_RETURN"
+        }
+      ]
+    },
+    {
+      "capability_id": "regression_guard",
+      "status": "READY",
+      "candidate_count": 4,
+      "planned_row_count": 6,
+      "rows": [
+        {
+          "row_id": "regression_guard::capability_only",
+          "capability_id": "regression_guard",
+          "arm_type": "capability_only",
+          "skill_id": null,
+          "expected_verdict": "baseline"
+        },
+        {
+          "row_id": "regression_guard::skill_arm_001::nexus-benchmark-continuous-optimization",
+          "capability_id": "regression_guard",
+          "arm_type": "skill_arm",
+          "skill_id": "nexus-benchmark-continuous-optimization",
+          "expected_verdict": "measure_outcome_contribution",
+          "runtime_eligible": true,
+          "ablation_eligible": true,
+          "safety_status": "runtime_reviewed",
+          "metadata_repaired_overlay": false
+        },
+        {
+          "row_id": "regression_guard::skill_arm_002::nexus-benchmark-public-report",
+          "capability_id": "regression_guard",
+          "arm_type": "skill_arm",
+          "skill_id": "nexus-benchmark-public-report",
+          "expected_verdict": "measure_outcome_contribution",
+          "runtime_eligible": true,
+          "ablation_eligible": true,
+          "safety_status": "runtime_reviewed",
+          "metadata_repaired_overlay": false
+        },
+        {
+          "row_id": "regression_guard::skill_arm_003::nexus-capability-upgrade",
+          "capability_id": "regression_guard",
+          "arm_type": "skill_arm",
+          "skill_id": "nexus-capability-upgrade",
+          "expected_verdict": "measure_outcome_contribution",
+          "runtime_eligible": true,
+          "ablation_eligible": true,
+          "safety_status": "runtime_reviewed",
+          "metadata_repaired_overlay": false
+        },
+        {
+          "row_id": "regression_guard::skill_arm_004::grill-me",
+          "capability_id": "regression_guard",
+          "arm_type": "skill_arm",
+          "skill_id": "grill-me",
+          "expected_verdict": "measure_outcome_contribution",
+          "runtime_eligible": true,
+          "ablation_eligible": true,
+          "safety_status": "runtime_reviewed",
+          "metadata_repaired_overlay": false
+        },
+        {
+          "row_id": "regression_guard::negative_control",
+          "capability_id": "regression_guard",
+          "arm_type": "negative_control",
+          "skill_id": "wrong_or_quarantined_skill",
+          "expected_verdict": "BLOCK_OR_RETURN"
+        }
+      ]
+    },
+    {
+      "capability_id": "registry_skills_sync",
+      "status": "READY",
+      "candidate_count": 4,
+      "planned_row_count": 6,
+      "rows": [
+        {
+          "row_id": "registry_skills_sync::capability_only",
+          "capability_id": "registry_skills_sync",
+          "arm_type": "capability_only",
+          "skill_id": null,
+          "expected_verdict": "baseline"
+        },
+        {
+          "row_id": "registry_skills_sync::skill_arm_001::sf2-registry_skills_sync-route-fit-spec",
+          "capability_id": "registry_skills_sync",
+          "arm_type": "skill_arm",
+          "skill_id": "sf2-registry_skills_sync-route-fit-spec",
+          "expected_verdict": "measure_outcome_contribution",
+          "runtime_eligible": false,
+          "ablation_eligible": true,
+          "safety_status": "ablation_only",
+          "metadata_repaired_overlay": false
+        },
+        {
+          "row_id": "registry_skills_sync::skill_arm_002::browserbase-cookie-sync",
+          "capability_id": "registry_skills_sync",
+          "arm_type": "skill_arm",
+          "skill_id": "browserbase-cookie-sync",
+          "expected_verdict": "measure_outcome_contribution",
+          "runtime_eligible": false,
+          "ablation_eligible": true,
+          "safety_status": "ablation_only",
+          "metadata_repaired_overlay": false
+        },
+        {
+          "row_id": "registry_skills_sync::skill_arm_003::document-release",
+          "capability_id": "registry_skills_sync",
+          "arm_type": "skill_arm",
+          "skill_id": "document-release",
+          "expected_verdict": "measure_outcome_contribution",
+          "runtime_eligible": false,
+          "ablation_eligible": true,
+          "safety_status": "ablation_only",
+          "metadata_repaired_overlay": false
+        },
+        {
+          "row_id": "registry_skills_sync::skill_arm_004::gbrain-cold-start",
+          "capability_id": "registry_skills_sync",
+          "arm_type": "skill_arm",
+          "skill_id": "gbrain-cold-start",
+          "expected_verdict": "measure_outcome_contribution",
+          "runtime_eligible": false,
+          "ablation_eligible": true,
+          "safety_status": "ablation_only",
+          "metadata_repaired_overlay": false
+        },
+        {
+          "row_id": "registry_skills_sync::negative_control",
+          "capability_id": "registry_skills_sync",
+          "arm_type": "negative_control",
+          "skill_id": "wrong_or_quarantined_skill",
+          "expected_verdict": "BLOCK_OR_RETURN"
+        }
+      ]
+    },
+    {
+      "capability_id": "metabolism_resume",
+      "status": "READY",
+      "candidate_count": 4,
+      "planned_row_count": 6,
+      "rows": [
+        {
+          "row_id": "metabolism_resume::capability_only",
+          "capability_id": "metabolism_resume",
+          "arm_type": "capability_only",
+          "skill_id": null,
+          "expected_verdict": "baseline"
+        },
+        {
+          "row_id": "metabolism_resume::skill_arm_001::to-prd",
+          "capability_id": "metabolism_resume",
+          "arm_type": "skill_arm",
+          "skill_id": "to-prd",
+          "expected_verdict": "measure_outcome_contribution",
+          "runtime_eligible": true,
+          "ablation_eligible": true,
+          "safety_status": "runtime_reviewed",
+          "metadata_repaired_overlay": false
+        },
+        {
+          "row_id": "metabolism_resume::skill_arm_002::to-issues",
+          "capability_id": "metabolism_resume",
+          "arm_type": "skill_arm",
+          "skill_id": "to-issues",
+          "expected_verdict": "measure_outcome_contribution",
+          "runtime_eligible": true,
+          "ablation_eligible": true,
+          "safety_status": "runtime_reviewed",
+          "metadata_repaired_overlay": false
+        },
+        {
+          "row_id": "metabolism_resume::skill_arm_003::triage",
+          "capability_id": "metabolism_resume",
+          "arm_type": "skill_arm",
+          "skill_id": "triage",
+          "expected_verdict": "measure_outcome_contribution",
+          "runtime_eligible": true,
+          "ablation_eligible": true,
+          "safety_status": "runtime_reviewed",
+          "metadata_repaired_overlay": false
+        },
+        {
+          "row_id": "metabolism_resume::skill_arm_004::grill-with-docs",
+          "capability_id": "metabolism_resume",
+          "arm_type": "skill_arm",
+          "skill_id": "grill-with-docs",
+          "expected_verdict": "measure_outcome_contribution",
+          "runtime_eligible": true,
+          "ablation_eligible": true,
+          "safety_status": "runtime_reviewed",
+          "metadata_repaired_overlay": false
+        },
+        {
+          "row_id": "metabolism_resume::negative_control",
+          "capability_id": "metabolism_resume",
+          "arm_type": "negative_control",
+          "skill_id": "wrong_or_quarantined_skill",
+          "expected_verdict": "BLOCK_OR_RETURN"
+        }
+      ]
+    },
+    {
+      "capability_id": "ui_validator",
+      "status": "READY",
+      "candidate_count": 4,
+      "planned_row_count": 6,
+      "rows": [
+        {
+          "row_id": "ui_validator::capability_only",
+          "capability_id": "ui_validator",
+          "arm_type": "capability_only",
+          "skill_id": null,
+          "expected_verdict": "baseline"
+        },
+        {
+          "row_id": "ui_validator::skill_arm_001::wondelai-high-perf-browser",
+          "capability_id": "ui_validator",
+          "arm_type": "skill_arm",
+          "skill_id": "wondelai-high-perf-browser",
+          "expected_verdict": "measure_outcome_contribution",
+          "runtime_eligible": false,
+          "ablation_eligible": true,
+          "safety_status": "ablation_only",
+          "metadata_repaired_overlay": false
+        },
+        {
+          "row_id": "ui_validator::skill_arm_002::addy-browser-testing-with-devtools",
+          "capability_id": "ui_validator",
+          "arm_type": "skill_arm",
+          "skill_id": "addy-browser-testing-with-devtools",
+          "expected_verdict": "measure_outcome_contribution",
+          "runtime_eligible": false,
+          "ablation_eligible": true,
+          "safety_status": "ablation_only",
+          "metadata_repaired_overlay": false
+        },
+        {
+          "row_id": "ui_validator::skill_arm_003::browserbase-ui-test",
+          "capability_id": "ui_validator",
+          "arm_type": "skill_arm",
+          "skill_id": "browserbase-ui-test",
+          "expected_verdict": "measure_outcome_contribution",
+          "runtime_eligible": false,
+          "ablation_eligible": true,
+          "safety_status": "ablation_only",
+          "metadata_repaired_overlay": false
+        },
+        {
+          "row_id": "ui_validator::skill_arm_004::gstack-plan-design-review",
+          "capability_id": "ui_validator",
+          "arm_type": "skill_arm",
+          "skill_id": "gstack-plan-design-review",
+          "expected_verdict": "measure_outcome_contribution",
+          "runtime_eligible": false,
+          "ablation_eligible": true,
+          "safety_status": "ablation_only",
+          "metadata_repaired_overlay": false
+        },
+        {
+          "row_id": "ui_validator::negative_control",
+          "capability_id": "ui_validator",
+          "arm_type": "negative_control",
+          "skill_id": "wrong_or_quarantined_skill",
+          "expected_verdict": "BLOCK_OR_RETURN"
+        }
+      ]
+    },
+    {
+      "capability_id": "external_productivity",
+      "status": "READY",
+      "candidate_count": 4,
+      "planned_row_count": 6,
+      "rows": [
+        {
+          "row_id": "external_productivity::capability_only",
+          "capability_id": "external_productivity",
+          "arm_type": "capability_only",
+          "skill_id": null,
+          "expected_verdict": "baseline"
+        },
+        {
+          "row_id": "external_productivity::skill_arm_001::grill-with-docs",
+          "capability_id": "external_productivity",
+          "arm_type": "skill_arm",
+          "skill_id": "grill-with-docs",
+          "expected_verdict": "measure_outcome_contribution",
+          "runtime_eligible": true,
+          "ablation_eligible": true,
+          "safety_status": "runtime_reviewed",
+          "metadata_repaired_overlay": false
+        },
+        {
+          "row_id": "external_productivity::skill_arm_002::improve-codebase-architecture",
+          "capability_id": "external_productivity",
+          "arm_type": "skill_arm",
+          "skill_id": "improve-codebase-architecture",
+          "expected_verdict": "measure_outcome_contribution",
+          "runtime_eligible": true,
+          "ablation_eligible": true,
+          "safety_status": "runtime_reviewed",
+          "metadata_repaired_overlay": false
+        },
+        {
+          "row_id": "external_productivity::skill_arm_003::google-workspace",
+          "capability_id": "external_productivity",
+          "arm_type": "skill_arm",
+          "skill_id": "google-workspace",
+          "expected_verdict": "measure_outcome_contribution",
+          "runtime_eligible": false,
+          "ablation_eligible": true,
+          "safety_status": "ablation_only",
+          "metadata_repaired_overlay": false
+        },
+        {
+          "row_id": "external_productivity::skill_arm_004::gbrain-cold-start",
+          "capability_id": "external_productivity",
+          "arm_type": "skill_arm",
+          "skill_id": "gbrain-cold-start",
+          "expected_verdict": "measure_outcome_contribution",
+          "runtime_eligible": false,
+          "ablation_eligible": true,
+          "safety_status": "ablation_only",
+          "metadata_repaired_overlay": false
+        },
+        {
+          "row_id": "external_productivity::negative_control",
+          "capability_id": "external_productivity",
+          "arm_type": "negative_control",
+          "skill_id": "wrong_or_quarantined_skill",
+          "expected_verdict": "BLOCK_OR_RETURN"
+        }
+      ]
+    }
+  ],
+  "claim_boundary": [
+    "This matrix is a preflight contract for SF-v2 skill-fit ablation, not a live benchmark result.",
+    "Each READY capability still requires capability-only, skill-arm, and negative-control evidence before catalog update."
+  ]
+}

@@ -1,0 +1,147 @@
+{
+  "claim_boundary": [
+    "Internal SF backfill only; not public benchmark.",
+    "Requires paired current/challenger receipts before replacement."
+  ],
+  "rows": [
+    {
+      "ablation_eligible": true,
+      "anonymous_label": "current_best",
+      "arm_id": "current_best",
+      "arm_type": "skill_ablation",
+      "capability": "benchmark_meta_opt",
+      "expected_outcome": "github_round4b_backfill_receipt_chain_complete",
+      "model": "gemini-3-flash-preview",
+      "row_id": "benchmark_meta_opt::sf-github-round4b-backfill-benchmark_meta_opt-001::current_best::nexus-benchmark-continuous-optimization",
+      "runner_args": [
+        "uv",
+        "run",
+        "python",
+        "scripts/bench/capability_ab_runner.py",
+        "--tasks-file",
+        "docs/reports/NEXUS_SF_GITHUB_ROUND4B_BACKFILL_TASKS_2026-05-19.json",
+        "--task-id-filter",
+        "sf-github-round4b-backfill-benchmark_meta_opt-001",
+        "--max-tasks",
+        "1",
+        "--timeout-sec",
+        "300",
+        "--per-task-stop-loss-sec",
+        "600",
+        "--stop-loss-sec",
+        "600",
+        "--nexus-only",
+        "--gemini-model",
+        "gemini-3-flash-preview",
+        "--with-nexus-runner",
+        "subprocess",
+        "--with-llm-mode",
+        "all",
+        "--without-mode",
+        "gemini",
+        "--enable-autoreason-executor",
+        "--enable-ddtree-executor",
+        "--enable-ultra-review-dry-gate",
+        "--llm-candidate-cap",
+        "3",
+        "--evidence-bundle",
+        "--no-progress-log"
+      ],
+      "runner_capability_id": "judge_panel",
+      "runner_env": {
+        "NEXUS_BENCH_ALLOW_ABLATION_SKILL_MOUNTS": "1",
+        "NEXUS_BENCH_SKILL_MOUNT_REQUESTS": "[\"nexus-benchmark-continuous-optimization\"]",
+        "NEXUS_BENCH_SKILL_STATUS_REPORT": "docs/reports/NEXUS_SF_GITHUB_ROUND4B_BACKFILL_SKILL_STATUS_2026-05-19.json",
+        "NEXUS_CAPABILITY_RECEIPT_FIRST": "1",
+        "NEXUS_DIRECT_GEMINI_MODEL": "gemini-3-flash-preview",
+        "NEXUS_VALUE_HIDDEN_VERIFIER": "1"
+      },
+      "runtime_eligible": true,
+      "sf_route_capability_id": "benchmark_meta_opt",
+      "skill_id": "nexus-benchmark-continuous-optimization",
+      "skill_mount_requests": [
+        "nexus-benchmark-continuous-optimization"
+      ],
+      "source_root": "current_best",
+      "source_type": "nexus_curated_candidate",
+      "task_ref": {
+        "manifest": "docs/reports/NEXUS_SF_GITHUB_ROUND4B_BACKFILL_TASKS_2026-05-19.json",
+        "task_id": "sf-github-round4b-backfill-benchmark_meta_opt-001"
+      }
+    },
+    {
+      "ablation_eligible": true,
+      "anonymous_label": "github4_ad_creative",
+      "arm_id": "github4_ad_creative",
+      "arm_type": "skill_ablation",
+      "capability": "benchmark_meta_opt",
+      "expected_outcome": "github_round4b_backfill_receipt_chain_complete",
+      "model": "gemini-3-flash-preview",
+      "row_id": "benchmark_meta_opt::sf-github-round4b-backfill-benchmark_meta_opt-001::github4_ad_creative::github4-sickn33-antigravity-awesome-skills-ad-creative",
+      "runner_args": [
+        "uv",
+        "run",
+        "python",
+        "scripts/bench/capability_ab_runner.py",
+        "--tasks-file",
+        "docs/reports/NEXUS_SF_GITHUB_ROUND4B_BACKFILL_TASKS_2026-05-19.json",
+        "--task-id-filter",
+        "sf-github-round4b-backfill-benchmark_meta_opt-001",
+        "--max-tasks",
+        "1",
+        "--timeout-sec",
+        "300",
+        "--per-task-stop-loss-sec",
+        "600",
+        "--stop-loss-sec",
+        "600",
+        "--nexus-only",
+        "--gemini-model",
+        "gemini-3-flash-preview",
+        "--with-nexus-runner",
+        "subprocess",
+        "--with-llm-mode",
+        "all",
+        "--without-mode",
+        "gemini",
+        "--enable-autoreason-executor",
+        "--enable-ddtree-executor",
+        "--enable-ultra-review-dry-gate",
+        "--llm-candidate-cap",
+        "3",
+        "--evidence-bundle",
+        "--no-progress-log"
+      ],
+      "runner_capability_id": "judge_panel",
+      "runner_env": {
+        "NEXUS_BENCH_ALLOW_ABLATION_SKILL_MOUNTS": "1",
+        "NEXUS_BENCH_SKILL_MOUNT_REQUESTS": "[\"github4-sickn33-antigravity-awesome-skills-ad-creative\"]",
+        "NEXUS_BENCH_SKILL_STATUS_REPORT": "docs/reports/NEXUS_SF_GITHUB_ROUND4B_BACKFILL_SKILL_STATUS_2026-05-19.json",
+        "NEXUS_CAPABILITY_RECEIPT_FIRST": "1",
+        "NEXUS_DIRECT_GEMINI_MODEL": "gemini-3-flash-preview",
+        "NEXUS_VALUE_HIDDEN_VERIFIER": "1"
+      },
+      "runtime_eligible": true,
+      "sf_route_capability_id": "benchmark_meta_opt",
+      "skill_id": "github4-sickn33-antigravity-awesome-skills-ad-creative",
+      "skill_mount_requests": [
+        "github4-sickn33-antigravity-awesome-skills-ad-creative"
+      ],
+      "source_root": "github_round4b_runtime_reviewed",
+      "source_type": "nexus_curated_candidate",
+      "task_ref": {
+        "manifest": "docs/reports/NEXUS_SF_GITHUB_ROUND4B_BACKFILL_TASKS_2026-05-19.json",
+        "task_id": "sf-github-round4b-backfill-benchmark_meta_opt-001"
+      }
+    }
+  ],
+  "schema": "nexus.sf_github_round4b_backfill_matrix.v1",
+  "source_backfill_audit": "docs/reports/NEXUS_SF_BACKFILL_GAP_AUDIT_2026-05-19.json",
+  "status": "PASS",
+  "summary": {
+    "public_benchmark_allowed": false,
+    "row_count": 2,
+    "skill_count": 2
+  },
+  "version": "2026-05-19"
+}

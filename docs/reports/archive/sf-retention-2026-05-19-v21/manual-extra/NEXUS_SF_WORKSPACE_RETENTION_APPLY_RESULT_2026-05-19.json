@@ -1,0 +1,12 @@
+{
+  "schema": "nexus.sf_workspace_retention_apply_result.v1",
+  "status": "PASS",
+  "summary": {
+    "mode": "dry-run",
+    "result_count": 0,
+    "status_counts": {},
+    "blocker_count": 0
+  },
+  "blockers": [],
+  "results": []
+}

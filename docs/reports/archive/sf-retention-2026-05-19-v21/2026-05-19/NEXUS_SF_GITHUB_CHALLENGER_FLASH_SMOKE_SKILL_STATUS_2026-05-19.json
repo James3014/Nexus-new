@@ -1,0 +1,62 @@
+{
+  "schema": "nexus.sf_github_challenger_flash_smoke_skill_status.v1",
+  "skills": [
+    {
+      "action": "ablation_only_compare",
+      "capability_mount": "codeintel",
+      "family": "codeintel",
+      "name": "sf2-codeintel-route-fit-spec",
+      "path": "/Users/jameschen/Workspace/nexus/.agents/skills/sf2/sf2-codeintel-route-fit-spec/SKILL.md",
+      "reason_codes": [
+        "sf_github_challenger_current_best"
+      ],
+      "root": "nexus_current_best",
+      "skill_status": "nexus_curated_candidate",
+      "test_level": "sf_github_challenger_flash_smoke"
+    },
+    {
+      "action": "ablation_only_compare",
+      "capability_mount": "codeintel",
+      "family": "codeintel",
+      "name": "github-karpathy-guidelines",
+      "path": "",
+      "reason_codes": [
+        "sf_github_challenger_github_challenger"
+      ],
+      "root": "github_challenger",
+      "skill_status": "external_reference_candidate",
+      "test_level": "sf_github_challenger_flash_smoke"
+    },
+    {
+      "action": "ablation_only_compare",
+      "capability_mount": "semantic_failure_sensor",
+      "family": "metabolism_resume",
+      "name": "nexus-goal-closure-executor",
+      "path": "/Users/jameschen/Workspace/nexus/.agents/skills/nexus-goal-closure-executor/SKILL.md",
+      "reason_codes": [
+        "sf_github_challenger_current_best"
+      ],
+      "root": "nexus_current_best",
+      "skill_status": "nexus_curated_candidate",
+      "test_level": "sf_github_challenger_flash_smoke"
+    },
+    {
+      "action": "ablation_only_compare",
+      "capability_mount": "semantic_failure_sensor",
+      "family": "metabolism_resume",
+      "name": "github-auto-skill-safe-learning",
+      "path": "",
+      "reason_codes": [
+        "sf_github_challenger_github_challenger"
+      ],
+      "root": "github_challenger",
+      "skill_status": "external_reference_candidate",
+      "test_level": "sf_github_challenger_flash_smoke"
+    }
+  ],
+  "summary": {
+    "public_benchmark_allowed": false,
+    "runtime_update_allowed": false,
+    "skill_count": 4
+  }
+}

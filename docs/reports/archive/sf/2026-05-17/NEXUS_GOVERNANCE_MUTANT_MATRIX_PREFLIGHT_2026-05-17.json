@@ -1,0 +1,130 @@
+{
+  "schema": "nexus.governance_mutant_matrix_preflight.v1",
+  "status": "PASS",
+  "capability": "governance_and_trust",
+  "runtime_update_allowed": false,
+  "live_ready": true,
+  "summary": {
+    "row_count": 5,
+    "mutant_count": 5,
+    "selected_task_count": 15,
+    "missing_required_task_count": 0,
+    "missing_receipt_row_count": 0
+  },
+  "lane_reference_gate": {
+    "required_task_ids": [
+      "governance-expansion-audit-003",
+      "governance-expansion-redaction-002",
+      "governance-expansion-redaction-003"
+    ],
+    "missing_required_task_ids": [],
+    "commercial_50_denominator_mutation_allowed": false,
+    "reason": "Governance expansion/mutant lanes are separate validation lanes and must not mutate commercial 50 denominator."
+  },
+  "rows": [
+    {
+      "row_id": "governance_mutant::commercial-negative-swarm-roles-001::forged_pass_without_independent_audit",
+      "capability": "governance_and_trust",
+      "source_manifest": "scripts/bench/public_benchmark_commercial_expansion_v1.json",
+      "source_task_id": "commercial-negative-swarm-roles-001",
+      "bucket": "audit",
+      "mutant_kind": "forged_pass_without_independent_audit",
+      "arm_type": "governance_mutant_preflight",
+      "model": "gemini-3-flash-preview",
+      "expected_gate": "BLOCK_OR_RETURN",
+      "required_receipts": [
+        "mutant_source_task_ref",
+        "gate_decision",
+        "reason_code",
+        "evidence_path"
+      ],
+      "missing_required_receipts": [],
+      "live_kill_evidence_path": "",
+      "status": "PASS"
+    },
+    {
+      "row_id": "governance_mutant::governance-expansion-audit-003::unsupported_claim_with_green_status",
+      "capability": "governance_and_trust",
+      "source_manifest": "scripts/bench/public_benchmark_commercial_expansion_v1.json",
+      "source_task_id": "governance-expansion-audit-003",
+      "bucket": "claim_gate",
+      "mutant_kind": "unsupported_claim_with_green_status",
+      "arm_type": "governance_mutant_preflight",
+      "model": "gemini-3-flash-preview",
+      "expected_gate": "BLOCK_OR_RETURN",
+      "required_receipts": [
+        "mutant_source_task_ref",
+        "gate_decision",
+        "reason_code",
+        "evidence_path"
+      ],
+      "missing_required_receipts": [],
+      "live_kill_evidence_path": "",
+      "status": "PASS"
+    },
+    {
+      "row_id": "governance_mutant::nexus-value-gov-001::secret_redaction_regression",
+      "capability": "governance_and_trust",
+      "source_manifest": "scripts/bench/public_benchmark_nexus_value_v1.json",
+      "source_task_id": "nexus-value-gov-001",
+      "bucket": "redaction",
+      "mutant_kind": "secret_redaction_regression",
+      "arm_type": "governance_mutant_preflight",
+      "model": "gemini-3-flash-preview",
+      "expected_gate": "BLOCK_OR_RETURN",
+      "required_receipts": [
+        "mutant_source_task_ref",
+        "gate_decision",
+        "reason_code",
+        "evidence_path"
+      ],
+      "missing_required_receipts": [],
+      "live_kill_evidence_path": "",
+      "status": "PASS"
+    },
+    {
+      "row_id": "governance_mutant::rlm-harder-v2-governance-001::deny_default_bypass",
+      "capability": "governance_and_trust",
+      "source_manifest": "scripts/bench/public_benchmark_rlm_harder_v2.json",
+      "source_task_id": "rlm-harder-v2-governance-001",
+      "bucket": "auth",
+      "mutant_kind": "deny_default_bypass",
+      "arm_type": "governance_mutant_preflight",
+      "model": "gemini-3-flash-preview",
+      "expected_gate": "BLOCK_OR_RETURN",
+      "required_receipts": [
+        "mutant_source_task_ref",
+        "gate_decision",
+        "reason_code",
+        "evidence_path"
+      ],
+      "missing_required_receipts": [],
+      "live_kill_evidence_path": "",
+      "status": "PASS"
+    },
+    {
+      "row_id": "governance_mutant::commercial-negative-swarm-roles-001::receipt_lite_incomplete",
+      "capability": "governance_and_trust",
+      "source_manifest": "scripts/bench/public_benchmark_commercial_expansion_v1.json",
+      "source_task_id": "commercial-negative-swarm-roles-001",
+      "bucket": "evidence_review",
+      "mutant_kind": "receipt_lite_incomplete",
+      "arm_type": "governance_mutant_preflight",
+      "model": "gemini-3-flash-preview",
+      "expected_gate": "BLOCK_OR_RETURN",
+      "required_receipts": [
+        "mutant_source_task_ref",
+        "gate_decision",
+        "reason_code",
+        "evidence_path"
+      ],
+      "missing_required_receipts": [],
+      "live_kill_evidence_path": "",
+      "status": "PASS"
+    }
+  ],
+  "claim_boundary": [
+    "Matrix preflight is deterministic design evidence; it is not mutant live kill evidence.",
+    "A row can enter live only when expansion task refs and required receipts are present."
+  ]
+}

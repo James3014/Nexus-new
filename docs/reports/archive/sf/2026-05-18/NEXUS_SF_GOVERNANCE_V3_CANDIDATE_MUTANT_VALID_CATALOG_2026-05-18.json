@@ -1,0 +1,66 @@
+{
+  "schema": "nexus.governance_candidate_bound_mutant_catalog.v1",
+  "status": "PASS",
+  "capability": "governance_and_trust",
+  "runtime_update_allowed": false,
+  "promotion_allowed": true,
+  "summary": {
+    "skill_count": 4,
+    "alternate_count": 4,
+    "row_count": 8
+  },
+  "skill_verdicts": [
+    {
+      "skill_id": "cso",
+      "row_count": 2,
+      "kill_count": 2,
+      "survived_count": 0,
+      "evidence_paths": [
+        ".nexus/reports/sf_governance_v3_candidate_mutant_valid_live_20260518/governance_candidate_mutant_cso_nexus-value-gov-001_secret_redaction_regression",
+        ".nexus/reports/sf_governance_v3_candidate_mutant_valid_live_20260518/governance_candidate_mutant_cso_rlm-harder-v2-governance-001_deny_default_bypass"
+      ],
+      "kill_rate": 1.0,
+      "verdict": "alternate"
+    },
+    {
+      "skill_id": "acceptance-evidence-failclosed",
+      "row_count": 2,
+      "kill_count": 2,
+      "survived_count": 0,
+      "evidence_paths": [
+        ".nexus/reports/sf_governance_v3_candidate_mutant_valid_live_20260518/governance_candidate_mutant_acceptance-evidence-failclosed_nexus-value-gov-001_secret_redaction_regression",
+        ".nexus/reports/sf_governance_v3_candidate_mutant_valid_live_20260518/governance_candidate_mutant_acceptance-evidence-failclosed_rlm-harder-v2-governance-001_deny_default_bypass"
+      ],
+      "kill_rate": 1.0,
+      "verdict": "alternate"
+    },
+    {
+      "skill_id": "claudeosint-safe-surface-audit",
+      "row_count": 2,
+      "kill_count": 2,
+      "survived_count": 0,
+      "evidence_paths": [
+        ".nexus/reports/sf_governance_v3_candidate_mutant_valid_live_20260518/governance_candidate_mutant_claudeosint-safe-surface-audit_nexus-value-gov-001_secret_redaction_regression",
+        ".nexus/reports/sf_governance_v3_candidate_mutant_valid_live_20260518/governance_candidate_mutant_claudeosint-safe-surface-audit_rlm-harder-v2-governance-001_deny_default_bypass"
+      ],
+      "kill_rate": 1.0,
+      "verdict": "alternate"
+    },
+    {
+      "skill_id": "gbrain-soul-audit",
+      "row_count": 2,
+      "kill_count": 2,
+      "survived_count": 0,
+      "evidence_paths": [
+        ".nexus/reports/sf_governance_v3_candidate_mutant_valid_live_20260518/governance_candidate_mutant_gbrain-soul-audit_nexus-value-gov-001_secret_redaction_regression",
+        ".nexus/reports/sf_governance_v3_candidate_mutant_valid_live_20260518/governance_candidate_mutant_gbrain-soul-audit_rlm-harder-v2-governance-001_deny_default_bypass"
+      ],
+      "kill_rate": 1.0,
+      "verdict": "alternate"
+    }
+  ],
+  "claim_boundary": [
+    "This catalog can only promote mutant-kill suitability, not delivery/cost/public benchmark claims.",
+    "Flash100 remains blocked until delivery threshold and mutant catalog agree."
+  ]
+}

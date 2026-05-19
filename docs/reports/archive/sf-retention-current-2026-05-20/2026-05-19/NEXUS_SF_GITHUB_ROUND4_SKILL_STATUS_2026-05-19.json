@@ -1,0 +1,76 @@
+{
+  "schema": "nexus.sf_github_round4_skill_status.v1",
+  "skills": [
+    {
+      "action": "runtime_reviewed_ablation_compare",
+      "capability_mount": "codeintel",
+      "family": "codeintel",
+      "name": "github-karpathy-guidelines",
+      "path": "/Users/jameschen/Workspace/nexus/.agents/skills/github-challengers/github-karpathy-guidelines/SKILL.md",
+      "reason_codes": [
+        "sf_github_round4_current_best",
+        "safe_prompt_only",
+        "runtime_reviewed_for_ablation"
+      ],
+      "root": "current_best",
+      "skill_status": "nexus_curated_candidate",
+      "source_repo": "nexus_repo",
+      "test_level": "sf_github_round4_flash_smoke"
+    },
+    {
+      "action": "runtime_reviewed_ablation_compare",
+      "capability_mount": "codeintel",
+      "family": "codeintel",
+      "name": "github4-sickn33-antigravity-awesome-skills-wiki-qa",
+      "path": "/Users/jameschen/Workspace/nexus/.agents/skills/github-round4-challengers/github4-sickn33-antigravity-awesome-skills-wiki-qa/SKILL.md",
+      "reason_codes": [
+        "sf_github_round4_challenger",
+        "safe_prompt_only",
+        "runtime_reviewed_for_ablation"
+      ],
+      "root": "github_round4_runtime_reviewed",
+      "skill_status": "nexus_curated_candidate",
+      "source_repo": "https://github.com/sickn33/antigravity-awesome-skills",
+      "test_level": "sf_github_round4_flash_smoke"
+    },
+    {
+      "action": "runtime_reviewed_ablation_compare",
+      "capability_mount": "hyper",
+      "family": "repair_loop",
+      "name": "tdd",
+      "path": "/Users/jameschen/Workspace/nexus/.agents/skills/tdd/SKILL.md",
+      "reason_codes": [
+        "sf_github_round4_current_best",
+        "safe_prompt_only",
+        "runtime_reviewed_for_ablation"
+      ],
+      "root": "current_best",
+      "skill_status": "nexus_curated_candidate",
+      "source_repo": "nexus_repo",
+      "test_level": "sf_github_round4_flash_smoke"
+    },
+    {
+      "action": "runtime_reviewed_ablation_compare",
+      "capability_mount": "hyper",
+      "family": "repair_loop",
+      "name": "github4-sickn33-antigravity-awesome-skills-tdd-workflows-tdd-red",
+      "path": "/Users/jameschen/Workspace/nexus/.agents/skills/github-round4-challengers/github4-sickn33-antigravity-awesome-skills-tdd-workflows-tdd-red/SKILL.md",
+      "reason_codes": [
+        "sf_github_round4_challenger",
+        "safe_prompt_only",
+        "runtime_reviewed_for_ablation"
+      ],
+      "root": "github_round4_runtime_reviewed",
+      "skill_status": "nexus_curated_candidate",
+      "source_repo": "https://github.com/sickn33/antigravity-awesome-skills",
+      "test_level": "sf_github_round4_flash_smoke"
+    }
+  ],
+  "status": "PASS",
+  "summary": {
+    "public_benchmark_allowed": false,
+    "runtime_update_allowed": false,
+    "skill_count": 4
+  },
+  "version": "2026-05-19"
+}

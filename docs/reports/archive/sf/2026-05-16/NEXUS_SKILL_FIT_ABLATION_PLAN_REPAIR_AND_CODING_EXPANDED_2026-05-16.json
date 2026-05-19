@@ -1,0 +1,131 @@
+{
+  "schema": "nexus.skill_fit_ablation_plan.v1",
+  "status": "PASS",
+  "capability": "repair_and_coding",
+  "summary": {
+    "arm_count": 6,
+    "skill_arm_count": 4,
+    "negative_control_count": 1,
+    "runtime_eligible_skill_arm_count": 0
+  },
+  "claim_boundary": [
+    "Capability-only is the baseline; selected skill arms are not value evidence.",
+    "A skill arm is effective only with selected, injected, used, evidence_present, gate_passed, and outcome_contributed receipts.",
+    "Wrong or quarantined skills must return or block; adopting them is a fail-closed violation.",
+    "Skill verdicts must bind evidence_path and receipt_path before promotion, replacement, or rejection claims."
+  ],
+  "arms": [
+    {
+      "arm_id": "capability_only",
+      "arm_type": "capability_only",
+      "capability": "repair_and_coding",
+      "anonymous_label": "capability_only",
+      "expected_outcome": "baseline_without_skill_mount",
+      "skill_id": "",
+      "source_root": "",
+      "source_type": "",
+      "path": "",
+      "sha256": "",
+      "runtime_eligible": false,
+      "ablation_eligible": false,
+      "evidence_refs": [
+        "candidate_pool:nexus.fair_skill_candidate_pool.v1"
+      ]
+    },
+    {
+      "arm_id": "skill_arm_001_c687701f35e6",
+      "arm_type": "skill_ablation",
+      "capability": "repair_and_coding",
+      "anonymous_label": "candidate_001",
+      "expected_outcome": "must_prove_selected_injected_used_evidence_gate_outcome",
+      "skill_id": "test-driven-development",
+      "source_root": "hermes",
+      "source_type": "reference",
+      "path": "/Users/jameschen/Workspace/hermes-agent/skills/software-development/test-driven-development/SKILL.md",
+      "sha256": "6896c8f090b4bf758ddfc92c50f383da73bd8672cc39359ecaec083ec58999eb",
+      "runtime_eligible": false,
+      "ablation_eligible": true,
+      "evidence_refs": [
+        "skill_status_report:nexus.skill_status.v1",
+        "skill_path:/Users/jameschen/Workspace/hermes-agent/skills/software-development/test-driven-development/SKILL.md",
+        "skill_sha256:6896c8f090b4bf758ddfc92c50f383da73bd8672cc39359ecaec083ec58999eb"
+      ]
+    },
+    {
+      "arm_id": "skill_arm_002_bfadd32efe23",
+      "arm_type": "skill_ablation",
+      "capability": "repair_and_coding",
+      "anonymous_label": "candidate_002",
+      "expected_outcome": "must_prove_selected_injected_used_evidence_gate_outcome",
+      "skill_id": "gstack-investigate",
+      "source_root": "agents",
+      "source_type": "reference",
+      "path": "/Users/jameschen/.agents/skills/gstack-investigate/SKILL.md",
+      "sha256": "00d96819525286805fcc1e69ad0eb8b3c081b7fb7bca0f6d0e501026be12ba21",
+      "runtime_eligible": false,
+      "ablation_eligible": true,
+      "evidence_refs": [
+        "skill_status_report:nexus.skill_status.v1",
+        "skill_path:/Users/jameschen/.agents/skills/gstack-investigate/SKILL.md",
+        "skill_sha256:00d96819525286805fcc1e69ad0eb8b3c081b7fb7bca0f6d0e501026be12ba21"
+      ]
+    },
+    {
+      "arm_id": "skill_arm_003_5496007ac839",
+      "arm_type": "skill_ablation",
+      "capability": "repair_and_coding",
+      "anonymous_label": "candidate_003",
+      "expected_outcome": "must_prove_selected_injected_used_evidence_gate_outcome",
+      "skill_id": "addy-code-simplification",
+      "source_root": "agents",
+      "source_type": "local_candidate",
+      "path": "/Users/jameschen/.agents/skills/addy-code-simplification/SKILL.md",
+      "sha256": "85ec2815c4183f3c8d0db4fb8faac370673ddd14baae2faec13bd5df2b4882db",
+      "runtime_eligible": false,
+      "ablation_eligible": true,
+      "evidence_refs": [
+        "skill_status_report:nexus.skill_status.v1",
+        "skill_path:/Users/jameschen/.agents/skills/addy-code-simplification/SKILL.md",
+        "skill_sha256:85ec2815c4183f3c8d0db4fb8faac370673ddd14baae2faec13bd5df2b4882db"
+      ]
+    },
+    {
+      "arm_id": "skill_arm_004_42bfbcbd1ff1",
+      "arm_type": "skill_ablation",
+      "capability": "repair_and_coding",
+      "anonymous_label": "candidate_004",
+      "expected_outcome": "must_prove_selected_injected_used_evidence_gate_outcome",
+      "skill_id": "aibdd.auto.java.e2e.refactor",
+      "source_root": "agents",
+      "source_type": "reference",
+      "path": "/Users/jameschen/.agents/skills/aibdd.auto.java.e2e.refactor/SKILL.md",
+      "sha256": "6a6965538d1925c7f7cd65c936bace6d0592be82b4fb8c2fd3ed0646e747bd40",
+      "runtime_eligible": false,
+      "ablation_eligible": true,
+      "evidence_refs": [
+        "skill_status_report:nexus.skill_status.v1",
+        "skill_path:/Users/jameschen/.agents/skills/aibdd.auto.java.e2e.refactor/SKILL.md",
+        "skill_sha256:6a6965538d1925c7f7cd65c936bace6d0592be82b4fb8c2fd3ed0646e747bd40"
+      ]
+    },
+    {
+      "arm_id": "wrong_or_quarantined_27873bbca1cb",
+      "arm_type": "wrong_or_quarantined_skill",
+      "capability": "repair_and_coding",
+      "anonymous_label": "negative_control",
+      "expected_outcome": "must_return_or_block",
+      "skill_id": "candidate-skill-from-gemini-session-215",
+      "source_root": "agents",
+      "source_type": "quarantine",
+      "path": "/Users/jameschen/.agents/skills/devops/candidate-skill-from-gemini-session-215/SKILL.md",
+      "sha256": "004bd76bacd6c5dc79588e6e544d37557af6c64b058b2ab050c13cdcb69a76a8",
+      "runtime_eligible": false,
+      "ablation_eligible": false,
+      "evidence_refs": [
+        "skill_status_report:nexus.skill_status.v1",
+        "skill_path:/Users/jameschen/.agents/skills/devops/candidate-skill-from-gemini-session-215/SKILL.md",
+        "skill_sha256:004bd76bacd6c5dc79588e6e544d37557af6c64b058b2ab050c13cdcb69a76a8"
+      ]
+    }
+  ]
+}

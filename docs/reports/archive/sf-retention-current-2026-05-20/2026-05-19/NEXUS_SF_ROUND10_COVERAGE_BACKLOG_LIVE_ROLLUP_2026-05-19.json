@@ -1,0 +1,192 @@
+{
+  "schema": "nexus.sf_round10_coverage_backlog_live_rollup.v1",
+  "version": "2026-05-19",
+  "status": "PASS",
+  "source_live_summary": ".nexus/reports/sf_round10_coverage_backlog_live_2026-05-19/live_summary.json",
+  "source_matrix": "docs/reports/NEXUS_SF_ROUND10_COVERAGE_BACKLOG_FLASH_SMOKE_MATRIX_2026-05-19.json",
+  "summary": {
+    "capability_count": 4,
+    "replacement_count": 2,
+    "hold_count": 2,
+    "runtime_update_allowed": false,
+    "public_benchmark_allowed": false
+  },
+  "capability_rollups": [
+    {
+      "capability": "autoreason",
+      "current_best": {
+        "skill_id": "sf2-belief-route-fit-spec",
+        "status": "PASS",
+        "total_tokens": 41113,
+        "wall_sec": 149.2905,
+        "receipt_path": ".nexus/reports/sf_round10_coverage_backlog_live_2026-05-19/autoreason_sf-round10-coverage-autoreason-001_current_best_sf2-belief-route-fit-spec",
+        "evidence_path": ".nexus/reports/sf_round10_coverage_backlog_live_2026-05-19/autoreason_sf-round10-coverage-autoreason-001_current_best_sf2-belief-route-fit-spec/evidence_bundle.json",
+        "selected": true,
+        "injected": true,
+        "used": true,
+        "evidence_present": true,
+        "gate_passed": true,
+        "outcome_contributed": true,
+        "provider_token_measured": true,
+        "skill_mount_contract_status": "PASS"
+      },
+      "challenger": {
+        "skill_id": "github10-first-principles-autoreason",
+        "status": "PASS",
+        "total_tokens": 41342,
+        "wall_sec": 117.9342,
+        "receipt_path": ".nexus/reports/sf_round10_coverage_backlog_live_2026-05-19/autoreason_sf-round10-coverage-autoreason-001_challenger_github10-first-principles-autoreason",
+        "evidence_path": ".nexus/reports/sf_round10_coverage_backlog_live_2026-05-19/autoreason_sf-round10-coverage-autoreason-001_challenger_github10-first-principles-autoreason/evidence_bundle.json",
+        "selected": true,
+        "injected": true,
+        "used": true,
+        "evidence_present": true,
+        "gate_passed": true,
+        "outcome_contributed": true,
+        "provider_token_measured": true,
+        "skill_mount_contract_status": "PASS"
+      },
+      "current_effective": true,
+      "challenger_effective": true,
+      "token_delta_challenger_minus_current": 229,
+      "wall_delta_sec_challenger_minus_current": -31.3563,
+      "verdict": "keep_current_best",
+      "reason_codes": [
+        "challenger_token_not_lower"
+      ]
+    },
+    {
+      "capability": "codeintel",
+      "current_best": {
+        "skill_id": "github6-agent-context-codeintel",
+        "status": "PASS",
+        "total_tokens": 40936,
+        "wall_sec": 146.843,
+        "receipt_path": ".nexus/reports/sf_round10_coverage_backlog_live_2026-05-19/codeintel_sf-round10-coverage-codeintel-001_current_best_github6-agent-context-codeintel",
+        "evidence_path": ".nexus/reports/sf_round10_coverage_backlog_live_2026-05-19/codeintel_sf-round10-coverage-codeintel-001_current_best_github6-agent-context-codeintel/evidence_bundle.json",
+        "selected": true,
+        "injected": true,
+        "used": true,
+        "evidence_present": true,
+        "gate_passed": true,
+        "outcome_contributed": true,
+        "provider_token_measured": true,
+        "skill_mount_contract_status": "PASS"
+      },
+      "challenger": {
+        "skill_id": "github10-code-simplification-codeintel",
+        "status": "PASS",
+        "total_tokens": 39640,
+        "wall_sec": 119.0589,
+        "receipt_path": ".nexus/reports/sf_round10_coverage_backlog_live_2026-05-19/codeintel_sf-round10-coverage-codeintel-001_challenger_github10-code-simplification-codeintel",
+        "evidence_path": ".nexus/reports/sf_round10_coverage_backlog_live_2026-05-19/codeintel_sf-round10-coverage-codeintel-001_challenger_github10-code-simplification-codeintel/evidence_bundle.json",
+        "selected": true,
+        "injected": true,
+        "used": true,
+        "evidence_present": true,
+        "gate_passed": true,
+        "outcome_contributed": true,
+        "provider_token_measured": true,
+        "skill_mount_contract_status": "PASS"
+      },
+      "current_effective": true,
+      "challenger_effective": true,
+      "token_delta_challenger_minus_current": -1296,
+      "wall_delta_sec_challenger_minus_current": -27.7841,
+      "verdict": "replace_with_challenger",
+      "reason_codes": [
+        "challenger_effective_and_token_wall_lower"
+      ]
+    },
+    {
+      "capability": "research_control_plane",
+      "current_best": {
+        "skill_id": "github6-repo-scout-safe-research-control-plane",
+        "status": "PASS",
+        "total_tokens": 43294,
+        "wall_sec": 155.3487,
+        "receipt_path": ".nexus/reports/sf_round10_coverage_backlog_live_2026-05-19/research_control_plane_sf-round10-coverage-research_control_plane-001_current_best_github6-repo-scout-safe-research-control-plane",
+        "evidence_path": ".nexus/reports/sf_round10_coverage_backlog_live_2026-05-19/research_control_plane_sf-round10-coverage-research_control_plane-001_current_best_github6-repo-scout-safe-research-control-plane/evidence_bundle.json",
+        "selected": true,
+        "injected": true,
+        "used": true,
+        "evidence_present": true,
+        "gate_passed": true,
+        "outcome_contributed": true,
+        "provider_token_measured": true,
+        "skill_mount_contract_status": "PASS"
+      },
+      "challenger": {
+        "skill_id": "github10-paper-lookup-research-control-plane",
+        "status": "PASS",
+        "total_tokens": 40586,
+        "wall_sec": 130.91,
+        "receipt_path": ".nexus/reports/sf_round10_coverage_backlog_live_2026-05-19/research_control_plane_sf-round10-coverage-research_control_plane-001_challenger_github10-paper-lookup-research-control-plane",
+        "evidence_path": ".nexus/reports/sf_round10_coverage_backlog_live_2026-05-19/research_control_plane_sf-round10-coverage-research_control_plane-001_challenger_github10-paper-lookup-research-control-plane/evidence_bundle.json",
+        "selected": true,
+        "injected": true,
+        "used": true,
+        "evidence_present": true,
+        "gate_passed": true,
+        "outcome_contributed": true,
+        "provider_token_measured": true,
+        "skill_mount_contract_status": "PASS"
+      },
+      "current_effective": true,
+      "challenger_effective": true,
+      "token_delta_challenger_minus_current": -2708,
+      "wall_delta_sec_challenger_minus_current": -24.4387,
+      "verdict": "replace_with_challenger",
+      "reason_codes": [
+        "challenger_effective_and_token_wall_lower"
+      ]
+    },
+    {
+      "capability": "ui_validator",
+      "current_best": {
+        "skill_id": "github7-browserbase-ui-test-safe-ui-validator",
+        "status": "PASS",
+        "total_tokens": 43798,
+        "wall_sec": 171.6946,
+        "receipt_path": ".nexus/reports/sf_round10_coverage_backlog_live_2026-05-19/ui_validator_sf-round10-coverage-ui_validator-001_current_best_github7-browserbase-ui-test-safe-ui-validator",
+        "evidence_path": ".nexus/reports/sf_round10_coverage_backlog_live_2026-05-19/ui_validator_sf-round10-coverage-ui_validator-001_current_best_github7-browserbase-ui-test-safe-ui-validator/evidence_bundle.json",
+        "selected": true,
+        "injected": true,
+        "used": true,
+        "evidence_present": true,
+        "gate_passed": true,
+        "outcome_contributed": true,
+        "provider_token_measured": true,
+        "skill_mount_contract_status": "PASS"
+      },
+      "challenger": {
+        "skill_id": "github10-openai-playwright-ui-validator",
+        "status": "PASS",
+        "total_tokens": 43349,
+        "wall_sec": 177.7513,
+        "receipt_path": ".nexus/reports/sf_round10_coverage_backlog_live_2026-05-19/ui_validator_sf-round10-coverage-ui_validator-001_challenger_github10-openai-playwright-ui-validator",
+        "evidence_path": ".nexus/reports/sf_round10_coverage_backlog_live_2026-05-19/ui_validator_sf-round10-coverage-ui_validator-001_challenger_github10-openai-playwright-ui-validator/evidence_bundle.json",
+        "selected": true,
+        "injected": true,
+        "used": true,
+        "evidence_present": true,
+        "gate_passed": true,
+        "outcome_contributed": true,
+        "provider_token_measured": true,
+        "skill_mount_contract_status": "PASS"
+      },
+      "current_effective": true,
+      "challenger_effective": true,
+      "token_delta_challenger_minus_current": -449,
+      "wall_delta_sec_challenger_minus_current": 6.0567,
+      "verdict": "keep_current_best",
+      "reason_codes": [
+        "challenger_wall_not_lower"
+      ]
+    }
+  ],
+  "claim_boundary": [
+    "Replacement means overlay candidate primary update, not runtime default write.",
+    "Both current_best and challenger must be receipt/evidence PASS before comparison."
+  ]
+}

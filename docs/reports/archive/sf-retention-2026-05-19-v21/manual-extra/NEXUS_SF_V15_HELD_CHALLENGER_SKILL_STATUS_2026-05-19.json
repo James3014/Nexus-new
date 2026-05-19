@@ -1,0 +1,177 @@
+{
+  "schema": "nexus.skill_status.v1",
+  "status": "PASS",
+  "runtime_update_allowed": false,
+  "public_benchmark_allowed": false,
+  "skills": [
+    {
+      "name": "sf2-autonomic_router-route-fit-spec",
+      "path": ".agents/skills/sf2/sf2-autonomic_router-route-fit-spec/SKILL.md",
+      "root": "nexus_repo",
+      "skill_status": "nexus_curated_candidate",
+      "test_level": "sf_v13_tiebreak",
+      "action": "ablation_only_compare",
+      "capability_mount": "autoreason",
+      "family": "autonomic_router",
+      "reason_codes": [
+        "sf_v13_tradeoff_tiebreak"
+      ]
+    },
+    {
+      "name": "sf2-mempalace-route-fit-spec",
+      "path": ".agents/skills/sf2/sf2-mempalace-route-fit-spec/SKILL.md",
+      "root": "nexus_repo",
+      "skill_status": "nexus_curated_candidate",
+      "test_level": "sf_v13_tiebreak",
+      "action": "ablation_only_compare",
+      "capability_mount": "mempalace_gate",
+      "family": "mempalace",
+      "reason_codes": [
+        "sf_v13_tradeoff_tiebreak"
+      ]
+    },
+    {
+      "name": "acceptance-evidence-failclosed",
+      "path": ".agents/skills/acceptance-evidence-failclosed/SKILL.md",
+      "root": "nexus_repo",
+      "skill_status": "nexus_curated_candidate",
+      "test_level": "sf_v13_tiebreak",
+      "action": "ablation_only_compare",
+      "capability_mount": "ultra_review",
+      "family": "ultra_review",
+      "reason_codes": [
+        "sf_v13_tradeoff_tiebreak"
+      ]
+    },
+    {
+      "name": "sf2-sandbox_replay-route-fit-spec",
+      "path": ".agents/skills/sf2/sf2-sandbox_replay-route-fit-spec/SKILL.md",
+      "root": "nexus_repo",
+      "skill_status": "nexus_curated_candidate",
+      "test_level": "sf_v13_tiebreak",
+      "action": "ablation_only_compare",
+      "capability_mount": "harness_preflight_sensor",
+      "family": "sandbox_replay",
+      "reason_codes": [
+        "sf_v13_tradeoff_tiebreak"
+      ]
+    },
+    {
+      "name": "nexus-benchmark-continuous-optimization",
+      "path": ".agents/skills/nexus-benchmark-continuous-optimization/SKILL.md",
+      "root": "nexus_repo",
+      "skill_status": "nexus_curated_candidate",
+      "test_level": "sf_v13_tiebreak",
+      "action": "ablation_only_compare",
+      "capability_mount": "judge_panel",
+      "family": "benchmark_meta_opt",
+      "reason_codes": [
+        "sf_v13_tradeoff_tiebreak"
+      ]
+    },
+    {
+      "name": "sf2-registry_skills_sync-route-fit-spec",
+      "path": ".agents/skills/sf2/sf2-registry_skills_sync-route-fit-spec/SKILL.md",
+      "root": "nexus_repo",
+      "skill_status": "nexus_curated_candidate",
+      "test_level": "sf_v13_tiebreak",
+      "action": "ablation_only_compare",
+      "capability_mount": "semantic_searcher",
+      "family": "registry_skills_sync",
+      "reason_codes": [
+        "sf_v13_tradeoff_tiebreak"
+      ]
+    },
+    {
+      "name": "nexus-root-cause-probe",
+      "path": ".agents/skills/nexus-root-cause-probe/SKILL.md",
+      "root": "nexus_repo",
+      "skill_status": "nexus_curated_candidate",
+      "test_level": "sf_v15_held_challenger",
+      "action": "ablation_only_compare",
+      "capability_mount": "autonomic_router",
+      "family": "autonomic_router",
+      "reason_codes": [
+        "sf_v15_held_challenger"
+      ]
+    },
+    {
+      "name": "nexus-benchmark-public-report",
+      "path": ".agents/skills/nexus-benchmark-public-report/SKILL.md",
+      "root": "nexus_repo",
+      "skill_status": "nexus_curated_candidate",
+      "test_level": "sf_v15_held_challenger",
+      "action": "ablation_only_compare",
+      "capability_mount": "benchmark_meta_opt",
+      "family": "benchmark_meta_opt",
+      "reason_codes": [
+        "sf_v15_held_challenger"
+      ]
+    },
+    {
+      "name": "nexus-goal-closure-executor",
+      "path": ".agents/skills/nexus-goal-closure-executor/SKILL.md",
+      "root": "nexus_repo",
+      "skill_status": "nexus_curated_candidate",
+      "test_level": "sf_v15_held_challenger",
+      "action": "ablation_only_compare",
+      "capability_mount": "delivery_acceptance_gate",
+      "family": "delivery_acceptance_gate",
+      "reason_codes": [
+        "sf_v15_held_challenger"
+      ]
+    },
+    {
+      "name": "gbrain-soul-audit",
+      "path": ".agents/skills/gbrain-soul-audit/SKILL.md",
+      "root": "nexus_repo",
+      "skill_status": "nexus_curated_candidate",
+      "test_level": "sf_v15_held_challenger",
+      "action": "ablation_only_compare",
+      "capability_mount": "mempalace",
+      "family": "mempalace",
+      "reason_codes": [
+        "sf_v15_held_challenger"
+      ]
+    },
+    {
+      "name": "cso",
+      "path": ".agents/skills/cso/SKILL.md",
+      "root": "nexus_repo",
+      "skill_status": "nexus_curated_candidate",
+      "test_level": "sf_v15_held_challenger",
+      "action": "ablation_only_compare",
+      "capability_mount": "policy_capability_gate",
+      "family": "policy_capability_gate",
+      "reason_codes": [
+        "sf_v15_held_challenger"
+      ]
+    },
+    {
+      "name": "setup-matt-pocock-skills",
+      "path": ".agents/skills/setup-matt-pocock-skills/SKILL.md",
+      "root": "nexus_repo",
+      "skill_status": "nexus_curated_candidate",
+      "test_level": "sf_v15_held_challenger",
+      "action": "ablation_only_compare",
+      "capability_mount": "registry_skills_sync",
+      "family": "registry_skills_sync",
+      "reason_codes": [
+        "sf_v15_held_challenger"
+      ]
+    },
+    {
+      "name": "diagnose",
+      "path": ".agents/skills/diagnose/SKILL.md",
+      "root": "nexus_repo",
+      "skill_status": "nexus_curated_candidate",
+      "test_level": "sf_v15_held_challenger",
+      "action": "ablation_only_compare",
+      "capability_mount": "sandbox_replay",
+      "family": "sandbox_replay",
+      "reason_codes": [
+        "sf_v15_held_challenger"
+      ]
+    }
+  ]
+}

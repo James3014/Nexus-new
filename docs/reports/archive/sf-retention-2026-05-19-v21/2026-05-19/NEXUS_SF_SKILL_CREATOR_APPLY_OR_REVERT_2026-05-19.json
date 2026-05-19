@@ -1,0 +1,34 @@
+{
+  "kept_after": [
+    "acceptance-evidence-failclosed",
+    "diagnose",
+    "nexus-capability-upgrade",
+    "nexus-root-cause-probe",
+    "research-citation-chain-verifier",
+    "research-source-validation-auditor",
+    "sf2-autonomic_router-route-fit-spec",
+    "sf2-belief-route-fit-spec",
+    "sf2-direct_master_loop-route-fit-spec",
+    "sf2-file_lock_security_gate-route-fit-spec",
+    "sf2-hyper_sprint-route-fit-spec",
+    "sf2-learning_closure-route-fit-spec",
+    "sf2-mempalace-route-fit-spec",
+    "sf2-nightshift-route-fit-spec",
+    "sf2-registry_skills_sync-route-fit-spec",
+    "sf2-sandbox_replay-route-fit-spec",
+    "sf2-swarm_multi_agent-route-fit-spec"
+  ],
+  "kept_after_count": 17,
+  "reverted_before": [
+    "create-plan",
+    "nexus-benchmark-continuous-optimization",
+    "nexus-goal-closure-executor",
+    "sf2-codeintel-route-fit-spec",
+    "sf2-external_productivity-route-fit-spec",
+    "tdd"
+  ],
+  "reverted_before_count": 6,
+  "schema": "nexus.sf_skill_creator_apply_or_revert.v1",
+  "source_eval": "docs/reports/NEXUS_SF_SKILL_CREATOR_BEFORE_AFTER_TRIGGER_EVAL_V4_2026-05-19.json",
+  "status": "PASS"
+}

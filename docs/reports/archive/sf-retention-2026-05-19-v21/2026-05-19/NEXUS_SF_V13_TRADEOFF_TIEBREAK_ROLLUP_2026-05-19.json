@@ -1,0 +1,225 @@
+{
+  "schema": "nexus.sf_v13_tradeoff_tiebreak_rollup.v1",
+  "status": "PASS",
+  "runtime_update_allowed": false,
+  "public_benchmark_allowed": false,
+  "summary": {
+    "hold_tradeoff_after_tiebreak": 7,
+    "approve_runtime_apply_ready": 2
+  },
+  "v13_rows": [
+    {
+      "capability_id": "autonomic_router",
+      "skill_id": "sf2-autonomic_router-route-fit-spec",
+      "status": "PASS",
+      "token_delta": 3450,
+      "wall_delta_sec": -23.4596,
+      "baseline_tokens": 40869,
+      "skill_tokens": 44319,
+      "baseline_wall_sec": 167.4936,
+      "skill_wall_sec": 144.034
+    },
+    {
+      "capability_id": "benchmark_meta_opt",
+      "skill_id": "nexus-benchmark-continuous-optimization",
+      "status": "PASS",
+      "token_delta": 158,
+      "wall_delta_sec": -2.1333,
+      "baseline_tokens": 40812,
+      "skill_tokens": 40970,
+      "baseline_wall_sec": 127.4717,
+      "skill_wall_sec": 125.3384
+    },
+    {
+      "capability_id": "delivery_acceptance_gate",
+      "skill_id": "acceptance-evidence-failclosed",
+      "status": "RETURN",
+      "token_delta": -2181,
+      "wall_delta_sec": -34.2663,
+      "baseline_tokens": 42083,
+      "skill_tokens": 39902,
+      "baseline_wall_sec": 154.384,
+      "skill_wall_sec": 120.1177
+    },
+    {
+      "capability_id": "mempalace",
+      "skill_id": "sf2-mempalace-route-fit-spec",
+      "status": "PASS",
+      "token_delta": 4447,
+      "wall_delta_sec": 27.321,
+      "baseline_tokens": 42231,
+      "skill_tokens": 46678,
+      "baseline_wall_sec": 121.843,
+      "skill_wall_sec": 149.164
+    },
+    {
+      "capability_id": "policy_capability_gate",
+      "skill_id": "acceptance-evidence-failclosed",
+      "status": "RETURN",
+      "token_delta": 3740,
+      "wall_delta_sec": 31.4175,
+      "baseline_tokens": 43229,
+      "skill_tokens": 46969,
+      "baseline_wall_sec": 135.7273,
+      "skill_wall_sec": 167.1448
+    },
+    {
+      "capability_id": "registry_skills_sync",
+      "skill_id": "sf2-registry_skills_sync-route-fit-spec",
+      "status": "PASS",
+      "token_delta": -4005,
+      "wall_delta_sec": 1.5027,
+      "baseline_tokens": 42396,
+      "skill_tokens": 38391,
+      "baseline_wall_sec": 135.2104,
+      "skill_wall_sec": 136.7131
+    },
+    {
+      "capability_id": "sandbox_replay",
+      "skill_id": "sf2-sandbox_replay-route-fit-spec",
+      "status": "PASS",
+      "token_delta": -57,
+      "wall_delta_sec": -3.5305,
+      "baseline_tokens": 41172,
+      "skill_tokens": 41115,
+      "baseline_wall_sec": 126.1159,
+      "skill_wall_sec": 122.5854
+    },
+    {
+      "capability_id": "ui_validator",
+      "skill_id": "nexus-root-cause-probe",
+      "status": "PASS",
+      "token_delta": -795,
+      "wall_delta_sec": -26.5705,
+      "baseline_tokens": 40800,
+      "skill_tokens": 40005,
+      "baseline_wall_sec": 175.1309,
+      "skill_wall_sec": 148.5604
+    },
+    {
+      "capability_id": "ultra_review",
+      "skill_id": "acceptance-evidence-failclosed",
+      "status": "PASS",
+      "token_delta": -8509,
+      "wall_delta_sec": -26.6723,
+      "baseline_tokens": 50100,
+      "skill_tokens": 41591,
+      "baseline_wall_sec": 189.4095,
+      "skill_wall_sec": 162.7372
+    }
+  ],
+  "decisions": [
+    {
+      "capability_id": "autonomic_router",
+      "skill_id": "sf2-autonomic_router-route-fit-spec",
+      "previous_token_delta": 281,
+      "previous_wall_delta_sec": -8.8402,
+      "v13_token_delta": 3450,
+      "v13_wall_delta_sec": -23.4596,
+      "avg_token_delta": 1865.5,
+      "avg_wall_delta_sec": -16.1499,
+      "decision": "hold_tradeoff_after_tiebreak",
+      "reason": "hold_after_two_run_tradeoff"
+    },
+    {
+      "capability_id": "benchmark_meta_opt",
+      "skill_id": "nexus-benchmark-continuous-optimization",
+      "previous_token_delta": 3533,
+      "previous_wall_delta_sec": -21.6978,
+      "v13_token_delta": 158,
+      "v13_wall_delta_sec": -2.1333,
+      "avg_token_delta": 1845.5,
+      "avg_wall_delta_sec": -11.9155,
+      "decision": "hold_tradeoff_after_tiebreak",
+      "reason": "hold_after_two_run_tradeoff"
+    },
+    {
+      "capability_id": "delivery_acceptance_gate",
+      "skill_id": "acceptance-evidence-failclosed",
+      "previous_token_delta": 3665,
+      "previous_wall_delta_sec": 5.7466,
+      "v13_token_delta": -2181,
+      "v13_wall_delta_sec": -34.2663,
+      "avg_token_delta": 742.0,
+      "avg_wall_delta_sec": -14.2599,
+      "decision": "hold_tradeoff_after_tiebreak",
+      "reason": "hold_after_two_run_tradeoff"
+    },
+    {
+      "capability_id": "mempalace",
+      "skill_id": "sf2-mempalace-route-fit-spec",
+      "previous_token_delta": -1490,
+      "previous_wall_delta_sec": 39.9538,
+      "v13_token_delta": 4447,
+      "v13_wall_delta_sec": 27.321,
+      "avg_token_delta": 1478.5,
+      "avg_wall_delta_sec": 33.6374,
+      "decision": "hold_tradeoff_after_tiebreak",
+      "reason": "hold_after_two_run_tradeoff"
+    },
+    {
+      "capability_id": "policy_capability_gate",
+      "skill_id": "acceptance-evidence-failclosed",
+      "previous_token_delta": -93,
+      "previous_wall_delta_sec": 12.3174,
+      "v13_token_delta": 3740,
+      "v13_wall_delta_sec": 31.4175,
+      "avg_token_delta": 1823.5,
+      "avg_wall_delta_sec": 21.8674,
+      "decision": "hold_tradeoff_after_tiebreak",
+      "reason": "hold_after_two_run_tradeoff"
+    },
+    {
+      "capability_id": "registry_skills_sync",
+      "skill_id": "sf2-registry_skills_sync-route-fit-spec",
+      "previous_token_delta": 2269,
+      "previous_wall_delta_sec": 54.4783,
+      "v13_token_delta": -4005,
+      "v13_wall_delta_sec": 1.5027,
+      "avg_token_delta": -868.0,
+      "avg_wall_delta_sec": 27.9905,
+      "decision": "hold_tradeoff_after_tiebreak",
+      "reason": "hold_after_two_run_tradeoff"
+    },
+    {
+      "capability_id": "sandbox_replay",
+      "skill_id": "sf2-sandbox_replay-route-fit-spec",
+      "previous_token_delta": 832,
+      "previous_wall_delta_sec": -27.4385,
+      "v13_token_delta": -57,
+      "v13_wall_delta_sec": -3.5305,
+      "avg_token_delta": 387.5,
+      "avg_wall_delta_sec": -15.4845,
+      "decision": "hold_tradeoff_after_tiebreak",
+      "reason": "hold_after_two_run_tradeoff"
+    },
+    {
+      "capability_id": "ui_validator",
+      "skill_id": "nexus-root-cause-probe",
+      "previous_token_delta": -11,
+      "previous_wall_delta_sec": 6.3189,
+      "v13_token_delta": -795,
+      "v13_wall_delta_sec": -26.5705,
+      "avg_token_delta": -403.0,
+      "avg_wall_delta_sec": -10.1258,
+      "decision": "approve_runtime_apply_ready",
+      "reason": "two_run_strict_pass"
+    },
+    {
+      "capability_id": "ultra_review",
+      "skill_id": "acceptance-evidence-failclosed",
+      "previous_token_delta": 448,
+      "previous_wall_delta_sec": -28.8263,
+      "v13_token_delta": -8509,
+      "v13_wall_delta_sec": -26.6723,
+      "avg_token_delta": -4030.5,
+      "avg_wall_delta_sec": -27.7493,
+      "decision": "approve_runtime_apply_ready",
+      "reason": "two_run_strict_pass"
+    }
+  ],
+  "policy": {
+    "strict": "avg_token_delta<=0 and avg_wall_delta_sec<=0",
+    "capability_preserving_tradeoff": "avg_wall_delta_sec<-20 and avg_token_delta<=1000 OR avg_token_delta<-1000 and avg_wall_delta_sec<=10"
+  }
+}

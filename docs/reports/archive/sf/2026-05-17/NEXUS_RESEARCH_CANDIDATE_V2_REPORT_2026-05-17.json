@@ -1,0 +1,795 @@
+{
+  "schema": "nexus.research_candidate_v2_report.v1",
+  "status": "PASS",
+  "capability": "research_and_source_discipline",
+  "runtime_update_allowed": false,
+  "summary": {
+    "previous_reject_count": 4,
+    "selected_candidate_count": 4,
+    "skipped_count": 23,
+    "max_candidates": 4
+  },
+  "selection_policy": {
+    "requires_ablation_eligible": true,
+    "excludes_previous_rejects": true,
+    "requires_source_discipline_score_gt_platform_penalty": true,
+    "strong_signals": [
+      "citation",
+      "citations",
+      "source",
+      "sources",
+      "source validation",
+      "evidence",
+      "raw source",
+      "raw sources",
+      "methodology",
+      "replication",
+      "conflict",
+      "research",
+      "retrieval",
+      "synthesis",
+      "semantic",
+      "academic",
+      "canonical tracker",
+      "structured data",
+      "perplexity"
+    ],
+    "platform_only_penalty_signals": [
+      "browserbase",
+      "company",
+      "sales",
+      "icp",
+      "deploy",
+      "browser automation",
+      "cookie",
+      "event prospecting",
+      "cli",
+      "functions"
+    ]
+  },
+  "selected_candidates": [
+    {
+      "skill_id": "gbrain-data-research",
+      "source_root": "agents",
+      "source_type": "reference",
+      "path": "/Users/jameschen/.agents/skills/gbrain-data-research/SKILL.md",
+      "sha256": "b93fa75105f612768b8b40646a5d2062fa4698a31c9436e83c55e02cd26702fd",
+      "runtime_eligible": false,
+      "ablation_eligible": true,
+      "safety_status": "ablation_only",
+      "source_discipline_score": 12,
+      "platform_only_penalty": 1,
+      "candidate_decision": "include_v2",
+      "semantic_cluster_id": "gbrain-data-research",
+      "dedup_similarity": 1.0,
+      "kept_reason": "source_discipline_signal",
+      "evidence_refs": [
+        "skill_status_report:nexus.skill_status.v1",
+        "skill_path:/Users/jameschen/.agents/skills/gbrain-data-research/SKILL.md",
+        "skill_sha256:b93fa75105f612768b8b40646a5d2062fa4698a31c9436e83c55e02cd26702fd"
+      ]
+    },
+    {
+      "skill_id": "gbrain-perplexity-research",
+      "source_root": "agents",
+      "source_type": "reference",
+      "path": "/Users/jameschen/.agents/skills/gbrain-perplexity-research/SKILL.md",
+      "sha256": "a74529e2713e81440d758e6ce26b98d86d1531a84714c7a5829bc60c79e5c8fc",
+      "runtime_eligible": false,
+      "ablation_eligible": true,
+      "safety_status": "ablation_only",
+      "source_discipline_score": 8,
+      "platform_only_penalty": 0,
+      "candidate_decision": "include_v2",
+      "semantic_cluster_id": "gbrain-perplexity-research",
+      "dedup_similarity": 1.0,
+      "kept_reason": "source_discipline_signal",
+      "evidence_refs": [
+        "skill_status_report:nexus.skill_status.v1",
+        "skill_path:/Users/jameschen/.agents/skills/gbrain-perplexity-research/SKILL.md",
+        "skill_sha256:a74529e2713e81440d758e6ce26b98d86d1531a84714c7a5829bc60c79e5c8fc"
+      ]
+    },
+    {
+      "skill_id": "gbrain-concept-synthesis",
+      "source_root": "agents",
+      "source_type": "reference",
+      "path": "/Users/jameschen/.agents/skills/gbrain-concept-synthesis/SKILL.md",
+      "sha256": "be682f5b0fba791e3dbb9fe1164f8fb81b96dd70fb9a02053eceee2f5c2bb193",
+      "runtime_eligible": false,
+      "ablation_eligible": true,
+      "safety_status": "ablation_only",
+      "source_discipline_score": 4,
+      "platform_only_penalty": 0,
+      "candidate_decision": "include_v2",
+      "semantic_cluster_id": "gbrain-concept-synthesis",
+      "dedup_similarity": 1.0,
+      "kept_reason": "source_discipline_signal",
+      "evidence_refs": [
+        "skill_status_report:nexus.skill_status.v1",
+        "skill_path:/Users/jameschen/.agents/skills/gbrain-concept-synthesis/SKILL.md",
+        "skill_sha256:be682f5b0fba791e3dbb9fe1164f8fb81b96dd70fb9a02053eceee2f5c2bb193"
+      ]
+    },
+    {
+      "skill_id": "research-paper-writing",
+      "source_root": "hermes",
+      "source_type": "reference",
+      "path": "/Users/jameschen/Workspace/hermes-agent/skills/research/research-paper-writing/SKILL.md",
+      "sha256": "5bc92cec8357a19d71b1c10c5590ab605e846e4ddd914512511f8281a6053186",
+      "runtime_eligible": false,
+      "ablation_eligible": true,
+      "safety_status": "ablation_only",
+      "source_discipline_score": 3,
+      "platform_only_penalty": 0,
+      "candidate_decision": "include_v2",
+      "semantic_cluster_id": "research-paper-writing",
+      "dedup_similarity": 1.0,
+      "kept_reason": "source_discipline_signal",
+      "evidence_refs": [
+        "skill_status_report:nexus.skill_status.v1",
+        "skill_path:/Users/jameschen/Workspace/hermes-agent/skills/research/research-paper-writing/SKILL.md",
+        "skill_sha256:5bc92cec8357a19d71b1c10c5590ab605e846e4ddd914512511f8281a6053186"
+      ]
+    }
+  ],
+  "skipped_candidates": [
+    {
+      "skill_id": "benepass-reimbursement",
+      "source_root": "agents",
+      "source_type": "reference",
+      "path": "/Users/jameschen/.agents/skills/benepass-reimbursement/SKILL.md",
+      "sha256": "8bb4ac08bb9969e48d5ea7f7844c57fd7f369cac89e155a72fdb66e08f08b3d0",
+      "runtime_eligible": false,
+      "ablation_eligible": true,
+      "safety_status": "ablation_only",
+      "source_discipline_score": 0,
+      "platform_only_penalty": 0,
+      "candidate_decision": "skip_no_source_discipline_signal",
+      "semantic_cluster_id": "benepass-reimbursement",
+      "dedup_similarity": 1.0,
+      "kept_reason": "",
+      "evidence_refs": [
+        "skill_status_report:nexus.skill_status.v1",
+        "skill_path:/Users/jameschen/.agents/skills/benepass-reimbursement/SKILL.md",
+        "skill_sha256:8bb4ac08bb9969e48d5ea7f7844c57fd7f369cac89e155a72fdb66e08f08b3d0"
+      ]
+    },
+    {
+      "skill_id": "browserbase-autobrowse",
+      "source_root": "agents",
+      "source_type": "reference",
+      "path": "/Users/jameschen/.agents/skills/browserbase-autobrowse/SKILL.md",
+      "sha256": "bb3879bb3bd2f6e3d484df48e1b6655f6b4cd8fdf39f9b989df27d59b8e031e0",
+      "runtime_eligible": false,
+      "ablation_eligible": true,
+      "safety_status": "ablation_only",
+      "source_discipline_score": 1,
+      "platform_only_penalty": 4,
+      "candidate_decision": "skip_platform_or_sales_heavy",
+      "semantic_cluster_id": "browserbase-autobrowse",
+      "dedup_similarity": 1.0,
+      "kept_reason": "",
+      "evidence_refs": [
+        "skill_status_report:nexus.skill_status.v1",
+        "skill_path:/Users/jameschen/.agents/skills/browserbase-autobrowse/SKILL.md",
+        "skill_sha256:bb3879bb3bd2f6e3d484df48e1b6655f6b4cd8fdf39f9b989df27d59b8e031e0"
+      ]
+    },
+    {
+      "skill_id": "browserbase-browser",
+      "source_root": "agents",
+      "source_type": "reference",
+      "path": "/Users/jameschen/.agents/skills/browserbase-browser/SKILL.md",
+      "sha256": "992a38060e20f87bb2e7f542bfdfb01e94ff8059e0d098be1b91bc1e7e67d783",
+      "runtime_eligible": false,
+      "ablation_eligible": true,
+      "safety_status": "ablation_only",
+      "source_discipline_score": 0,
+      "platform_only_penalty": 5,
+      "candidate_decision": "skip_no_source_discipline_signal",
+      "semantic_cluster_id": "browserbase-browser",
+      "dedup_similarity": 1.0,
+      "kept_reason": "",
+      "evidence_refs": [
+        "skill_status_report:nexus.skill_status.v1",
+        "skill_path:/Users/jameschen/.agents/skills/browserbase-browser/SKILL.md",
+        "skill_sha256:992a38060e20f87bb2e7f542bfdfb01e94ff8059e0d098be1b91bc1e7e67d783"
+      ]
+    },
+    {
+      "skill_id": "browserbase-browserbase-cli",
+      "source_root": "agents",
+      "source_type": "reference",
+      "path": "/Users/jameschen/.agents/skills/browserbase-browserbase-cli/SKILL.md",
+      "sha256": "acc873b2d6c92e13916e4725879ec38bb0fd4d22db057a840f36126cab3e669f",
+      "runtime_eligible": false,
+      "ablation_eligible": true,
+      "safety_status": "ablation_only",
+      "source_discipline_score": 0,
+      "platform_only_penalty": 16,
+      "candidate_decision": "skip_no_source_discipline_signal",
+      "semantic_cluster_id": "browserbase-browserbase-cli",
+      "dedup_similarity": 1.0,
+      "kept_reason": "",
+      "evidence_refs": [
+        "skill_status_report:nexus.skill_status.v1",
+        "skill_path:/Users/jameschen/.agents/skills/browserbase-browserbase-cli/SKILL.md",
+        "skill_sha256:acc873b2d6c92e13916e4725879ec38bb0fd4d22db057a840f36126cab3e669f"
+      ]
+    },
+    {
+      "skill_id": "browserbase-company-research",
+      "source_root": "agents",
+      "source_type": "reference",
+      "path": "/Users/jameschen/.agents/skills/browserbase-company-research/SKILL.md",
+      "sha256": "37f011d4eaedb6a646cc05d9b550e921088b9c69ea81009ed86fe1fa01773fa3",
+      "runtime_eligible": false,
+      "ablation_eligible": true,
+      "safety_status": "ablation_only",
+      "source_discipline_score": 0,
+      "platform_only_penalty": 0,
+      "candidate_decision": "skip_previously_rejected",
+      "semantic_cluster_id": "browserbase-company-research",
+      "dedup_similarity": 1.0,
+      "kept_reason": "",
+      "evidence_refs": [
+        "skill_status_report:nexus.skill_status.v1",
+        "skill_path:/Users/jameschen/.agents/skills/browserbase-company-research/SKILL.md",
+        "skill_sha256:37f011d4eaedb6a646cc05d9b550e921088b9c69ea81009ed86fe1fa01773fa3"
+      ]
+    },
+    {
+      "skill_id": "browserbase-cookie-sync",
+      "source_root": "agents",
+      "source_type": "reference",
+      "path": "/Users/jameschen/.agents/skills/browserbase-cookie-sync/SKILL.md",
+      "sha256": "780b302a184b4e882d3da3947f0f84c7a23a846783d71662c4325f66fdd4268b",
+      "runtime_eligible": false,
+      "ablation_eligible": true,
+      "safety_status": "ablation_only",
+      "source_discipline_score": 0,
+      "platform_only_penalty": 9,
+      "candidate_decision": "skip_no_source_discipline_signal",
+      "semantic_cluster_id": "browserbase-cookie-sync",
+      "dedup_similarity": 1.0,
+      "kept_reason": "",
+      "evidence_refs": [
+        "skill_status_report:nexus.skill_status.v1",
+        "skill_path:/Users/jameschen/.agents/skills/browserbase-cookie-sync/SKILL.md",
+        "skill_sha256:780b302a184b4e882d3da3947f0f84c7a23a846783d71662c4325f66fdd4268b"
+      ]
+    },
+    {
+      "skill_id": "browserbase-event-prospecting",
+      "source_root": "agents",
+      "source_type": "reference",
+      "path": "/Users/jameschen/.agents/skills/browserbase-event-prospecting/SKILL.md",
+      "sha256": "f4db3e2e9520bec7f4de64988ee46069af2bb64b26e6580f5a92974b45ad4dd4",
+      "runtime_eligible": false,
+      "ablation_eligible": true,
+      "safety_status": "ablation_only",
+      "source_discipline_score": 3,
+      "platform_only_penalty": 8,
+      "candidate_decision": "skip_platform_or_sales_heavy",
+      "semantic_cluster_id": "browserbase-event-prospecting",
+      "dedup_similarity": 1.0,
+      "kept_reason": "",
+      "evidence_refs": [
+        "skill_status_report:nexus.skill_status.v1",
+        "skill_path:/Users/jameschen/.agents/skills/browserbase-event-prospecting/SKILL.md",
+        "skill_sha256:f4db3e2e9520bec7f4de64988ee46069af2bb64b26e6580f5a92974b45ad4dd4"
+      ]
+    },
+    {
+      "skill_id": "browserbase-functions",
+      "source_root": "agents",
+      "source_type": "reference",
+      "path": "/Users/jameschen/.agents/skills/browserbase-functions/SKILL.md",
+      "sha256": "66d3a3f7d74327bccf276da60e11e61539b613a5e002c0624fb0da80ac088448",
+      "runtime_eligible": false,
+      "ablation_eligible": true,
+      "safety_status": "ablation_only",
+      "source_discipline_score": 0,
+      "platform_only_penalty": 12,
+      "candidate_decision": "skip_no_source_discipline_signal",
+      "semantic_cluster_id": "browserbase-functions",
+      "dedup_similarity": 1.0,
+      "kept_reason": "",
+      "evidence_refs": [
+        "skill_status_report:nexus.skill_status.v1",
+        "skill_path:/Users/jameschen/.agents/skills/browserbase-functions/SKILL.md",
+        "skill_sha256:66d3a3f7d74327bccf276da60e11e61539b613a5e002c0624fb0da80ac088448"
+      ]
+    },
+    {
+      "skill_id": "browserbase-safe-browser",
+      "source_root": "agents",
+      "source_type": "reference",
+      "path": "/Users/jameschen/.agents/skills/browserbase-safe-browser/SKILL.md",
+      "sha256": "383104f47b16310f1a822d075a8f2c6a430e12fff76a47af8beab06dd38b29e1",
+      "runtime_eligible": false,
+      "ablation_eligible": true,
+      "safety_status": "ablation_only",
+      "source_discipline_score": 0,
+      "platform_only_penalty": 3,
+      "candidate_decision": "skip_no_source_discipline_signal",
+      "semantic_cluster_id": "browserbase-safe-browser",
+      "dedup_similarity": 1.0,
+      "kept_reason": "",
+      "evidence_refs": [
+        "skill_status_report:nexus.skill_status.v1",
+        "skill_path:/Users/jameschen/.agents/skills/browserbase-safe-browser/SKILL.md",
+        "skill_sha256:383104f47b16310f1a822d075a8f2c6a430e12fff76a47af8beab06dd38b29e1"
+      ]
+    },
+    {
+      "skill_id": "browserbase-search",
+      "source_root": "agents",
+      "source_type": "reference",
+      "path": "/Users/jameschen/.agents/skills/browserbase-search/SKILL.md",
+      "sha256": "b783e08f19dc82a723a6d44b7b04ea7af40e8e9a834f4cf437c264bde80127ef",
+      "runtime_eligible": false,
+      "ablation_eligible": true,
+      "safety_status": "ablation_only",
+      "source_discipline_score": 0,
+      "platform_only_penalty": 0,
+      "candidate_decision": "skip_previously_rejected",
+      "semantic_cluster_id": "browserbase-search",
+      "dedup_similarity": 1.0,
+      "kept_reason": "",
+      "evidence_refs": [
+        "skill_status_report:nexus.skill_status.v1",
+        "skill_path:/Users/jameschen/.agents/skills/browserbase-search/SKILL.md",
+        "skill_sha256:b783e08f19dc82a723a6d44b7b04ea7af40e8e9a834f4cf437c264bde80127ef"
+      ]
+    },
+    {
+      "skill_id": "competitor-alternatives",
+      "source_root": "agents",
+      "source_type": "reference",
+      "path": "/Users/jameschen/.agents/skills/competitor-alternatives/SKILL.md",
+      "sha256": "a521e16fd9dad7b0e6dbe6ab6b4530c67e45047add4417dedd5360ff4a17135c",
+      "runtime_eligible": false,
+      "ablation_eligible": true,
+      "safety_status": "ablation_only",
+      "source_discipline_score": 0,
+      "platform_only_penalty": 3,
+      "candidate_decision": "skip_no_source_discipline_signal",
+      "semantic_cluster_id": "competitor-alternatives",
+      "dedup_similarity": 1.0,
+      "kept_reason": "",
+      "evidence_refs": [
+        "skill_status_report:nexus.skill_status.v1",
+        "skill_path:/Users/jameschen/.agents/skills/competitor-alternatives/SKILL.md",
+        "skill_sha256:a521e16fd9dad7b0e6dbe6ab6b4530c67e45047add4417dedd5360ff4a17135c"
+      ]
+    },
+    {
+      "skill_id": "doc-coauthoring",
+      "source_root": "agents",
+      "source_type": "local_candidate",
+      "path": "/Users/jameschen/.agents/skills/doc-coauthoring/SKILL.md",
+      "sha256": "2e47d78846faeea4a56e9809c52700087a15a2155a3f293a3efbaded81398ef4",
+      "runtime_eligible": false,
+      "ablation_eligible": true,
+      "safety_status": "ablation_only",
+      "source_discipline_score": 0,
+      "platform_only_penalty": 0,
+      "candidate_decision": "skip_no_source_discipline_signal",
+      "semantic_cluster_id": "doc-coauthoring",
+      "dedup_similarity": 1.0,
+      "kept_reason": "",
+      "evidence_refs": [
+        "skill_status_report:nexus.skill_status.v1",
+        "skill_path:/Users/jameschen/.agents/skills/doc-coauthoring/SKILL.md",
+        "skill_sha256:2e47d78846faeea4a56e9809c52700087a15a2155a3f293a3efbaded81398ef4"
+      ]
+    },
+    {
+      "skill_id": "docx",
+      "source_root": "agents",
+      "source_type": "reference",
+      "path": "/Users/jameschen/.agents/skills/docx/SKILL.md",
+      "sha256": "04b34bae47bfc78ae78c18a9a6eaba6584fbfa0a562ddce11b7f84db7c60c340",
+      "runtime_eligible": false,
+      "ablation_eligible": true,
+      "safety_status": "ablation_only",
+      "source_discipline_score": 0,
+      "platform_only_penalty": 0,
+      "candidate_decision": "skip_no_source_discipline_signal",
+      "semantic_cluster_id": "docx",
+      "dedup_similarity": 1.0,
+      "kept_reason": "",
+      "evidence_refs": [
+        "skill_status_report:nexus.skill_status.v1",
+        "skill_path:/Users/jameschen/.agents/skills/docx/SKILL.md",
+        "skill_sha256:04b34bae47bfc78ae78c18a9a6eaba6584fbfa0a562ddce11b7f84db7c60c340"
+      ]
+    },
+    {
+      "skill_id": "gbrain-academic-verify",
+      "source_root": "agents",
+      "source_type": "reference",
+      "path": "/Users/jameschen/.agents/skills/gbrain-academic-verify/SKILL.md",
+      "sha256": "c3afb246a04999f350525030ec975fad426a6fa1311366a353e6e809e43162fd",
+      "runtime_eligible": false,
+      "ablation_eligible": true,
+      "safety_status": "ablation_only",
+      "source_discipline_score": 0,
+      "platform_only_penalty": 0,
+      "candidate_decision": "skip_previously_rejected",
+      "semantic_cluster_id": "gbrain-academic-verify",
+      "dedup_similarity": 1.0,
+      "kept_reason": "",
+      "evidence_refs": [
+        "skill_status_report:nexus.skill_status.v1",
+        "skill_path:/Users/jameschen/.agents/skills/gbrain-academic-verify/SKILL.md",
+        "skill_sha256:c3afb246a04999f350525030ec975fad426a6fa1311366a353e6e809e43162fd"
+      ]
+    },
+    {
+      "skill_id": "open-gstack-browser",
+      "source_root": "agents",
+      "source_type": "reference",
+      "path": "/Users/jameschen/.agents/skills/gstack/.agents/skills/gstack-open-gstack-browser/SKILL.md",
+      "sha256": "ff88a45db83b5303ee3597819c514f10d7337aa6a4e56ca56ec37c2d509873e2",
+      "runtime_eligible": false,
+      "ablation_eligible": true,
+      "safety_status": "ablation_only",
+      "source_discipline_score": 0,
+      "platform_only_penalty": 0,
+      "candidate_decision": "skip_no_source_discipline_signal",
+      "semantic_cluster_id": "open-gstack-browser",
+      "dedup_similarity": 1.0,
+      "kept_reason": "",
+      "evidence_refs": [
+        "skill_status_report:nexus.skill_status.v1",
+        "skill_path:/Users/jameschen/.agents/skills/gstack/.agents/skills/gstack-open-gstack-browser/SKILL.md",
+        "skill_sha256:ff88a45db83b5303ee3597819c514f10d7337aa6a4e56ca56ec37c2d509873e2"
+      ]
+    },
+    {
+      "skill_id": "scrape",
+      "source_root": "agents",
+      "source_type": "reference",
+      "path": "/Users/jameschen/.agents/skills/gstack/.agents/skills/gstack-scrape/SKILL.md",
+      "sha256": "980505b2aa7ba748a822f1833567b904a8153205a3e143a0f549b3d8fc762547",
+      "runtime_eligible": false,
+      "ablation_eligible": true,
+      "safety_status": "ablation_only",
+      "source_discipline_score": 0,
+      "platform_only_penalty": 1,
+      "candidate_decision": "skip_no_source_discipline_signal",
+      "semantic_cluster_id": "scrape",
+      "dedup_similarity": 1.0,
+      "kept_reason": "",
+      "evidence_refs": [
+        "skill_status_report:nexus.skill_status.v1",
+        "skill_path:/Users/jameschen/.agents/skills/gstack/.agents/skills/gstack-scrape/SKILL.md",
+        "skill_sha256:980505b2aa7ba748a822f1833567b904a8153205a3e143a0f549b3d8fc762547"
+      ]
+    },
+    {
+      "skill_id": "internal-comms",
+      "source_root": "agents",
+      "source_type": "reference",
+      "path": "/Users/jameschen/.agents/skills/internal-comms/SKILL.md",
+      "sha256": "067b7587a344a928fc6534ef66b1bcd591fc7c26d207ea7ca3334aeb678d6475",
+      "runtime_eligible": false,
+      "ablation_eligible": true,
+      "safety_status": "ablation_only",
+      "source_discipline_score": 2,
+      "platform_only_penalty": 2,
+      "candidate_decision": "skip_platform_or_sales_heavy",
+      "semantic_cluster_id": "internal-comms",
+      "dedup_similarity": 1.0,
+      "kept_reason": "",
+      "evidence_refs": [
+        "skill_status_report:nexus.skill_status.v1",
+        "skill_path:/Users/jameschen/.agents/skills/internal-comms/SKILL.md",
+        "skill_sha256:067b7587a344a928fc6534ef66b1bcd591fc7c26d207ea7ca3334aeb678d6475"
+      ]
+    },
+    {
+      "skill_id": "sales-enablement",
+      "source_root": "agents",
+      "source_type": "reference",
+      "path": "/Users/jameschen/.agents/skills/sales-enablement/SKILL.md",
+      "sha256": "2c46ec0971c952436127ec63e5883c214c6854a4a002532f0d930227c617ea2d",
+      "runtime_eligible": false,
+      "ablation_eligible": true,
+      "safety_status": "ablation_only",
+      "source_discipline_score": 0,
+      "platform_only_penalty": 9,
+      "candidate_decision": "skip_no_source_discipline_signal",
+      "semantic_cluster_id": "sales-enablement",
+      "dedup_similarity": 1.0,
+      "kept_reason": "",
+      "evidence_refs": [
+        "skill_status_report:nexus.skill_status.v1",
+        "skill_path:/Users/jameschen/.agents/skills/sales-enablement/SKILL.md",
+        "skill_sha256:2c46ec0971c952436127ec63e5883c214c6854a4a002532f0d930227c617ea2d"
+      ]
+    },
+    {
+      "skill_id": "theme-factory",
+      "source_root": "agents",
+      "source_type": "reference",
+      "path": "/Users/jameschen/.agents/skills/theme-factory/SKILL.md",
+      "sha256": "c35893e221e28895c52143cc11bf30e41a44817796b39d4b15727dadc9796552",
+      "runtime_eligible": false,
+      "ablation_eligible": true,
+      "safety_status": "ablation_only",
+      "source_discipline_score": 0,
+      "platform_only_penalty": 0,
+      "candidate_decision": "skip_no_source_discipline_signal",
+      "semantic_cluster_id": "theme-factory",
+      "dedup_similarity": 1.0,
+      "kept_reason": "",
+      "evidence_refs": [
+        "skill_status_report:nexus.skill_status.v1",
+        "skill_path:/Users/jameschen/.agents/skills/theme-factory/SKILL.md",
+        "skill_sha256:c35893e221e28895c52143cc11bf30e41a44817796b39d4b15727dadc9796552"
+      ]
+    },
+    {
+      "skill_id": "pretext",
+      "source_root": "hermes",
+      "source_type": "reference",
+      "path": "/Users/jameschen/Workspace/hermes-agent/skills/creative/pretext/SKILL.md",
+      "sha256": "532570c95d1a0bf671a5565fa3c2a6131d3579f4378dd852012b39335a7668e3",
+      "runtime_eligible": false,
+      "ablation_eligible": true,
+      "safety_status": "ablation_only",
+      "source_discipline_score": 0,
+      "platform_only_penalty": 0,
+      "candidate_decision": "skip_no_source_discipline_signal",
+      "semantic_cluster_id": "pretext",
+      "dedup_similarity": 1.0,
+      "kept_reason": "",
+      "evidence_refs": [
+        "skill_status_report:nexus.skill_status.v1",
+        "skill_path:/Users/jameschen/Workspace/hermes-agent/skills/creative/pretext/SKILL.md",
+        "skill_sha256:532570c95d1a0bf671a5565fa3c2a6131d3579f4378dd852012b39335a7668e3"
+      ]
+    },
+    {
+      "skill_id": "google-workspace",
+      "source_root": "hermes",
+      "source_type": "reference",
+      "path": "/Users/jameschen/Workspace/hermes-agent/skills/productivity/google-workspace/SKILL.md",
+      "sha256": "014a4818ee1b363d11fafa2353bcea4fd4f8e0c0802322708023d3cd2e3f43b6",
+      "runtime_eligible": false,
+      "ablation_eligible": true,
+      "safety_status": "ablation_only",
+      "source_discipline_score": 0,
+      "platform_only_penalty": 1,
+      "candidate_decision": "skip_no_source_discipline_signal",
+      "semantic_cluster_id": "google-workspace",
+      "dedup_similarity": 1.0,
+      "kept_reason": "",
+      "evidence_refs": [
+        "skill_status_report:nexus.skill_status.v1",
+        "skill_path:/Users/jameschen/Workspace/hermes-agent/skills/productivity/google-workspace/SKILL.md",
+        "skill_sha256:014a4818ee1b363d11fafa2353bcea4fd4f8e0c0802322708023d3cd2e3f43b6"
+      ]
+    },
+    {
+      "skill_id": "arxiv",
+      "source_root": "hermes",
+      "source_type": "reference",
+      "path": "/Users/jameschen/Workspace/hermes-agent/skills/research/arxiv/SKILL.md",
+      "sha256": "2a6073a1ad08823dbdf26be64440b54155298db38fdee52c7b0a5d1cd0cfb05d",
+      "runtime_eligible": false,
+      "ablation_eligible": true,
+      "safety_status": "ablation_only",
+      "source_discipline_score": 0,
+      "platform_only_penalty": 0,
+      "candidate_decision": "skip_previously_rejected",
+      "semantic_cluster_id": "arxiv",
+      "dedup_similarity": 1.0,
+      "kept_reason": "",
+      "evidence_refs": [
+        "skill_status_report:nexus.skill_status.v1",
+        "skill_path:/Users/jameschen/Workspace/hermes-agent/skills/research/arxiv/SKILL.md",
+        "skill_sha256:2a6073a1ad08823dbdf26be64440b54155298db38fdee52c7b0a5d1cd0cfb05d"
+      ]
+    },
+    {
+      "skill_id": "blogwatcher",
+      "source_root": "hermes",
+      "source_type": "reference",
+      "path": "/Users/jameschen/Workspace/hermes-agent/skills/research/blogwatcher/SKILL.md",
+      "sha256": "b85be5a9b86b90287266dd142a0ae9740be926298fbcb772f56b8a4d6451bb12",
+      "runtime_eligible": false,
+      "ablation_eligible": true,
+      "safety_status": "ablation_only",
+      "source_discipline_score": 1,
+      "platform_only_penalty": 1,
+      "candidate_decision": "skip_platform_or_sales_heavy",
+      "semantic_cluster_id": "blogwatcher",
+      "dedup_similarity": 1.0,
+      "kept_reason": "",
+      "evidence_refs": [
+        "skill_status_report:nexus.skill_status.v1",
+        "skill_path:/Users/jameschen/Workspace/hermes-agent/skills/research/blogwatcher/SKILL.md",
+        "skill_sha256:b85be5a9b86b90287266dd142a0ae9740be926298fbcb772f56b8a4d6451bb12"
+      ]
+    }
+  ],
+  "candidate_pool_v2": {
+    "schema": "nexus.fair_skill_candidate_pool.v2.slice",
+    "status": "PASS",
+    "source_status_report_schema": "nexus.skill_status.v1",
+    "summary": {
+      "total_candidates": 5,
+      "selected_candidate_count": 4,
+      "negative_control_count": 1,
+      "capability": "research_and_source_discipline",
+      "source_root_counts": {
+        "agents": 4,
+        "hermes": 1
+      }
+    },
+    "claim_boundary": [
+      "This v2 pool is ablation-only and cannot update runtime policy.",
+      "Rejected v1 candidates are excluded until source or taskset changes."
+    ],
+    "candidates": [
+      {
+        "skill_id": "gbrain-concept-synthesis",
+        "source_root": "agents",
+        "source_type": "reference",
+        "path": "/Users/jameschen/.agents/skills/gbrain-concept-synthesis/SKILL.md",
+        "sha256": "be682f5b0fba791e3dbb9fe1164f8fb81b96dd70fb9a02053eceee2f5c2bb193",
+        "capability_candidates": [
+          "research_and_source_discipline"
+        ],
+        "load_when": "Deduplicate and synthesize raw concept stubs into a tiered intellectual map (T1 Canon to T4 Riff), tracing idea evolution across sources over time. Transforms thousands of raw concept pages into a curated intellectual fingerprint.",
+        "forbidden_when": [
+          "runtime_mount",
+          "agents_root_non_candidate_reference_family"
+        ],
+        "metadata_quality": "PASS",
+        "safety_status": "ablation_only",
+        "ablation_eligible": true,
+        "runtime_eligible": false,
+        "quarantine_reason": "",
+        "evidence_refs": [
+          "skill_status_report:nexus.skill_status.v1",
+          "skill_path:/Users/jameschen/.agents/skills/gbrain-concept-synthesis/SKILL.md",
+          "skill_sha256:be682f5b0fba791e3dbb9fe1164f8fb81b96dd70fb9a02053eceee2f5c2bb193"
+        ],
+        "shadow_policy": {
+          "duplicate_count": 1,
+          "shadowed": false,
+          "canonical_path": "/Users/jameschen/.agents/skills/gbrain-concept-synthesis/SKILL.md"
+        }
+      },
+      {
+        "skill_id": "gbrain-data-research",
+        "source_root": "agents",
+        "source_type": "reference",
+        "path": "/Users/jameschen/.agents/skills/gbrain-data-research/SKILL.md",
+        "sha256": "b93fa75105f612768b8b40646a5d2062fa4698a31c9436e83c55e02cd26702fd",
+        "capability_candidates": [
+          "research_and_source_discipline"
+        ],
+        "load_when": "| Structured data research: search sources, extract structured data, archive raw sources, maintain canonical tracker pages, deduplicate. Parameterized via YAML recipes for investor updates, donations, company updates, or any email-to-structured-data pipeline.",
+        "forbidden_when": [
+          "runtime_mount",
+          "agents_root_non_candidate_reference_family"
+        ],
+        "metadata_quality": "PASS",
+        "safety_status": "ablation_only",
+        "ablation_eligible": true,
+        "runtime_eligible": false,
+        "quarantine_reason": "",
+        "evidence_refs": [
+          "skill_status_report:nexus.skill_status.v1",
+          "skill_path:/Users/jameschen/.agents/skills/gbrain-data-research/SKILL.md",
+          "skill_sha256:b93fa75105f612768b8b40646a5d2062fa4698a31c9436e83c55e02cd26702fd"
+        ],
+        "shadow_policy": {
+          "duplicate_count": 1,
+          "shadowed": false,
+          "canonical_path": "/Users/jameschen/.agents/skills/gbrain-data-research/SKILL.md"
+        }
+      },
+      {
+        "skill_id": "gbrain-perplexity-research",
+        "source_root": "agents",
+        "source_type": "reference",
+        "path": "/Users/jameschen/.agents/skills/gbrain-perplexity-research/SKILL.md",
+        "sha256": "a74529e2713e81440d758e6ce26b98d86d1531a84714c7a5829bc60c79e5c8fc",
+        "capability_candidates": [
+          "research_and_source_discipline"
+        ],
+        "load_when": "Brain-augmented web research. Sends brain context about a topic to Perplexity, which searches the web with citations and returns what is NEW vs what the brain already knows. Use for entity enrichment, current-state checks, deal monitoring, and freshness deltas. NOT for simple URL fetches (use web_fetch) or brain-only queries (use gbrain query).",
+        "forbidden_when": [
+          "runtime_mount",
+          "agents_root_non_candidate_reference_family"
+        ],
+        "metadata_quality": "PASS",
+        "safety_status": "ablation_only",
+        "ablation_eligible": true,
+        "runtime_eligible": false,
+        "quarantine_reason": "",
+        "evidence_refs": [
+          "skill_status_report:nexus.skill_status.v1",
+          "skill_path:/Users/jameschen/.agents/skills/gbrain-perplexity-research/SKILL.md",
+          "skill_sha256:a74529e2713e81440d758e6ce26b98d86d1531a84714c7a5829bc60c79e5c8fc"
+        ],
+        "shadow_policy": {
+          "duplicate_count": 1,
+          "shadowed": false,
+          "canonical_path": "/Users/jameschen/.agents/skills/gbrain-perplexity-research/SKILL.md"
+        }
+      },
+      {
+        "skill_id": "research-paper-writing",
+        "source_root": "hermes",
+        "source_type": "reference",
+        "path": "/Users/jameschen/Workspace/hermes-agent/skills/research/research-paper-writing/SKILL.md",
+        "sha256": "5bc92cec8357a19d71b1c10c5590ab605e846e4ddd914512511f8281a6053186",
+        "capability_candidates": [
+          "research_and_source_discipline"
+        ],
+        "load_when": "Write ML papers for NeurIPS/ICML/ICLR: design→submit.",
+        "forbidden_when": [
+          "runtime_mount",
+          "structured_hermes_reference_catalog"
+        ],
+        "metadata_quality": "PASS",
+        "safety_status": "ablation_only",
+        "ablation_eligible": true,
+        "runtime_eligible": false,
+        "quarantine_reason": "",
+        "evidence_refs": [
+          "skill_status_report:nexus.skill_status.v1",
+          "skill_path:/Users/jameschen/Workspace/hermes-agent/skills/research/research-paper-writing/SKILL.md",
+          "skill_sha256:5bc92cec8357a19d71b1c10c5590ab605e846e4ddd914512511f8281a6053186"
+        ],
+        "shadow_policy": {
+          "duplicate_count": 1,
+          "shadowed": false,
+          "canonical_path": "/Users/jameschen/Workspace/hermes-agent/skills/research/research-paper-writing/SKILL.md"
+        }
+      },
+      {
+        "skill_id": "candidate-skill-from-gemini-session-215",
+        "source_root": "agents",
+        "source_type": "quarantine",
+        "path": "/Users/jameschen/.agents/skills/devops/candidate-skill-from-gemini-session-215/SKILL.md",
+        "sha256": "004bd76bacd6c5dc79588e6e544d37557af6c64b058b2ab050c13cdcb69a76a8",
+        "capability_candidates": [],
+        "load_when": "Use when handling workflow patterns similar to 'Candidate Skill from Gemini Session' auto-promoted from inbox candidate.",
+        "forbidden_when": [
+          "runtime_mount",
+          "ablation_arm",
+          "generated_or_candidate_inbox"
+        ],
+        "metadata_quality": "INCOMPLETE:capability_mount",
+        "safety_status": "quarantined",
+        "ablation_eligible": false,
+        "runtime_eligible": false,
+        "quarantine_reason": "status:candidate_quarantine",
+        "evidence_refs": [
+          "skill_status_report:nexus.skill_status.v1",
+          "skill_path:/Users/jameschen/.agents/skills/devops/candidate-skill-from-gemini-session-215/SKILL.md",
+          "skill_sha256:004bd76bacd6c5dc79588e6e544d37557af6c64b058b2ab050c13cdcb69a76a8"
+        ],
+        "shadow_policy": {
+          "duplicate_count": 1,
+          "shadowed": false,
+          "canonical_path": "/Users/jameschen/.agents/skills/devops/candidate-skill-from-gemini-session-215/SKILL.md"
+        }
+      }
+    ]
+  },
+  "claim_boundary": [
+    "Candidate v2 changes discovery inputs only; it does not prove skill value.",
+    "Selected candidates still require live ablation, receipt paths, and threshold contracts."
+  ]
+}

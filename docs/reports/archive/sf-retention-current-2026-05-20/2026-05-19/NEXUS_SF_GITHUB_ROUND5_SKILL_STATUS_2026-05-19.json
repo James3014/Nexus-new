@@ -1,0 +1,136 @@
+{
+  "schema": "nexus.sf_github_round5_skill_status.v1",
+  "skills": [
+    {
+      "action": "runtime_reviewed_ablation_compare",
+      "capability_mount": "research",
+      "family": "research_control_plane",
+      "name": "research-citation-chain-verifier",
+      "path": "/Users/jameschen/Workspace/nexus/.agents/skills/research-citation-chain-verifier/SKILL.md",
+      "reason_codes": [
+        "current_best",
+        "runtime_reviewed_for_ablation"
+      ],
+      "root": "current_best",
+      "skill_status": "nexus_curated_candidate",
+      "source_repo": "nexus_repo",
+      "test_level": "sf_github_round5_flash_smoke"
+    },
+    {
+      "action": "runtime_reviewed_ablation_compare",
+      "capability_mount": "research",
+      "family": "research_control_plane",
+      "name": "github5-last30days-research-relevance",
+      "path": "/Users/jameschen/Workspace/nexus/.agents/skills/github-round5-challengers/github5-last30days-research-relevance/SKILL.md",
+      "reason_codes": [
+        "round5_generated_challenger",
+        "prompt_only_rewrite",
+        "runtime_reviewed_for_ablation"
+      ],
+      "root": "github_round5_runtime_reviewed",
+      "skill_status": "nexus_curated_candidate",
+      "source_repo": "github_round5_generated",
+      "test_level": "sf_github_round5_flash_smoke"
+    },
+    {
+      "action": "runtime_reviewed_ablation_compare",
+      "capability_mount": "semantic_searcher",
+      "family": "registry_skills_sync",
+      "name": "github3-openai-skill-creator-safe-registry-sync",
+      "path": "/Users/jameschen/Workspace/nexus/.agents/skills/github3-openai-skill-creator-safe-registry-sync/SKILL.md",
+      "reason_codes": [
+        "current_best",
+        "runtime_reviewed_for_ablation"
+      ],
+      "root": "current_best",
+      "skill_status": "nexus_curated_candidate",
+      "source_repo": "nexus_repo",
+      "test_level": "sf_github_round5_flash_smoke"
+    },
+    {
+      "action": "runtime_reviewed_ablation_compare",
+      "capability_mount": "semantic_searcher",
+      "family": "registry_skills_sync",
+      "name": "github5-skill-seekers-safe-registry-builder",
+      "path": "/Users/jameschen/Workspace/nexus/.agents/skills/github-round5-challengers/github5-skill-seekers-safe-registry-builder/SKILL.md",
+      "reason_codes": [
+        "round5_generated_challenger",
+        "prompt_only_rewrite",
+        "runtime_reviewed_for_ablation"
+      ],
+      "root": "github_round5_runtime_reviewed",
+      "skill_status": "nexus_curated_candidate",
+      "source_repo": "github_round5_generated",
+      "test_level": "sf_github_round5_flash_smoke"
+    },
+    {
+      "action": "runtime_reviewed_ablation_compare",
+      "capability_mount": "autoreason",
+      "family": "forecast_pregate",
+      "name": "create-plan",
+      "path": "/Users/jameschen/Workspace/nexus/.agents/skills/create-plan/SKILL.md",
+      "reason_codes": [
+        "current_best",
+        "runtime_reviewed_for_ablation"
+      ],
+      "root": "current_best",
+      "skill_status": "nexus_curated_candidate",
+      "source_repo": "nexus_repo",
+      "test_level": "sf_github_round5_flash_smoke"
+    },
+    {
+      "action": "runtime_reviewed_ablation_compare",
+      "capability_mount": "autoreason",
+      "family": "forecast_pregate",
+      "name": "github5-slavingia-minimalist-forecast",
+      "path": "/Users/jameschen/Workspace/nexus/.agents/skills/github-round5-challengers/github5-slavingia-minimalist-forecast/SKILL.md",
+      "reason_codes": [
+        "round5_generated_challenger",
+        "prompt_only_rewrite",
+        "runtime_reviewed_for_ablation"
+      ],
+      "root": "github_round5_runtime_reviewed",
+      "skill_status": "nexus_curated_candidate",
+      "source_repo": "github_round5_generated",
+      "test_level": "sf_github_round5_flash_smoke"
+    },
+    {
+      "action": "runtime_reviewed_ablation_compare",
+      "capability_mount": "research",
+      "family": "external_productivity",
+      "name": "sf2-external_productivity-route-fit-spec",
+      "path": "/Users/jameschen/Workspace/nexus/.agents/skills/sf2-external_productivity-route-fit-spec/SKILL.md",
+      "reason_codes": [
+        "current_best",
+        "runtime_reviewed_for_ablation"
+      ],
+      "root": "current_best",
+      "skill_status": "nexus_curated_candidate",
+      "source_repo": "nexus_repo",
+      "test_level": "sf_github_round5_flash_smoke"
+    },
+    {
+      "action": "runtime_reviewed_ablation_compare",
+      "capability_mount": "research",
+      "family": "external_productivity",
+      "name": "github5-video-auto-dubber-safe-external-productivity",
+      "path": "/Users/jameschen/Workspace/nexus/.agents/skills/github-round5-challengers/github5-video-auto-dubber-safe-external-productivity/SKILL.md",
+      "reason_codes": [
+        "round5_generated_challenger",
+        "prompt_only_rewrite",
+        "runtime_reviewed_for_ablation"
+      ],
+      "root": "github_round5_runtime_reviewed",
+      "skill_status": "nexus_curated_candidate",
+      "source_repo": "github_round5_generated",
+      "test_level": "sf_github_round5_flash_smoke"
+    }
+  ],
+  "status": "PASS",
+  "summary": {
+    "public_benchmark_allowed": false,
+    "runtime_update_allowed": false,
+    "skill_count": 8
+  },
+  "version": "2026-05-19"
+}

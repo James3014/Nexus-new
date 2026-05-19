@@ -1,0 +1,90 @@
+{
+  "schema": "nexus.sf_runtime_policy_patch_plan.v5",
+  "status": "PASS",
+  "generated_at": "2026-05-18",
+  "planned_changes": [
+    {
+      "capability_id": "forecast_pregate",
+      "skill_id": "create-plan",
+      "planned_action": "set_capability_primary_skill_candidate",
+      "apply_state": "apply_ready_but_not_written",
+      "evidence_refs": [
+        "docs/reports/NEXUS_SF_COMPOSIO_AWESOME_CODEX_CHALLENGE_COMPARISON_2026-05-18.json",
+        "docs/reports/NEXUS_SF_FORECAST_CREATE_PLAN_SEAL_LIVE_REPORT_V2_2026-05-18.json",
+        "docs/reports/NEXUS_SF_FORECAST_CREATE_PLAN_SEAL_CATALOG_V2_2026-05-18.json",
+        "docs/reports/NEXUS_SF_EXTERNAL_SKILL_UPDATE_RECORD_2026-05-18.json"
+      ]
+    },
+    {
+      "capability_id": "repair_loop",
+      "skill_id": "tdd",
+      "planned_action": "set_capability_primary_skill_candidate",
+      "apply_state": "apply_ready_but_not_written",
+      "evidence_refs": [
+        "docs/reports/NEXUS_SF_TDD_SEAL_SKILL_ARM_CATALOG_2026-05-17.json",
+        "docs/reports/NEXUS_SKILL_PROMOTION_THRESHOLD_CONTRACT_REPAIR_AND_CODING_SF_TDD_SEAL_2026-05-18.json",
+        "docs/reports/NEXUS_SF_MATTPOCOCK_CHALLENGE_COMPARISON_2026-05-18.json"
+      ]
+    },
+    {
+      "capability_id": "research_and_source_discipline",
+      "skill_id": "research-citation-chain-verifier",
+      "planned_action": "keep_as_runtime_review_ready_alternate_until_research_tiebreak",
+      "apply_state": "hold_primary_default",
+      "evidence_refs": [
+        "docs/reports/NEXUS_SF_RESEARCH_EXPECTED_CAPABILITY_SEAL_CATALOG_2026-05-18.json"
+      ]
+    },
+    {
+      "capability_id": "research_and_source_discipline",
+      "skill_id": "research-source-validation-auditor",
+      "planned_action": "keep_as_runtime_review_ready_alternate_until_research_tiebreak",
+      "apply_state": "hold_primary_default",
+      "evidence_refs": [
+        "docs/reports/NEXUS_SF_RESEARCH_EXPECTED_CAPABILITY_SEAL_CATALOG_2026-05-18.json"
+      ]
+    },
+    {
+      "capability_id": "governance_and_trust",
+      "skill_id": "acceptance-evidence-failclosed",
+      "planned_action": "catalog_alternate_only",
+      "apply_state": "not_runtime_patchable"
+    },
+    {
+      "capability_id": "governance_and_trust",
+      "skill_id": "claudeosint-safe-surface-audit",
+      "planned_action": "catalog_alternate_only",
+      "apply_state": "not_runtime_patchable"
+    },
+    {
+      "capability_id": "governance_and_trust",
+      "skill_id": "cso",
+      "planned_action": "catalog_alternate_only",
+      "apply_state": "not_runtime_patchable"
+    },
+    {
+      "capability_id": "governance_and_trust",
+      "skill_id": "gbrain-soul-audit",
+      "planned_action": "catalog_alternate_only",
+      "apply_state": "not_runtime_patchable"
+    }
+  ],
+  "summary": {
+    "planned_change_count": 9,
+    "primary_apply_ready_count": 2,
+    "runtime_review_ready_alternate_hold_count": 2,
+    "catalog_alternate_only_count": 4,
+    "runtime_policy_apply_allowed": false,
+    "runtime_update_allowed": false,
+    "public_benchmark_allowed": false
+  },
+  "blockers": [
+    "runtime defaults were not written in this SF pass",
+    "research has two runtime-review-ready replace candidates and still needs a primary tie-break before default mount"
+  ],
+  "claim_boundary": [
+    "This patch plan records what can be updated and what remains held.",
+    "It does not modify runtime policy files.",
+    "Only repair_loop/tdd and forecast_pregate/create-plan are primary-apply-ready from this evidence set."
+  ]
+}

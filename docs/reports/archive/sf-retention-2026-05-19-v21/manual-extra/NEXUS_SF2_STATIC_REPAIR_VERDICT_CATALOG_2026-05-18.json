@@ -1,0 +1,196 @@
+{
+  "schema": "nexus.sf2_route_skill_verdict_catalog.v1",
+  "status": "PASS",
+  "summary": {
+    "capability_count": 5,
+    "capabilities_with_static_fit_candidate": 5,
+    "blocked_capability_count": 0,
+    "runtime_update_allowed": false,
+    "public_benchmark_allowed": false
+  },
+  "blocked_capabilities": [],
+  "capabilities": [
+    {
+      "capability_id": "codeintel",
+      "candidate_count": 1,
+      "static_fit_candidate_count": 1,
+      "candidates": [
+        {
+          "skill_id": "sf2-codeintel-route-fit-spec",
+          "verdict": "static_fit_candidate",
+          "status": "PASS",
+          "reason": "static_route_fit_pass",
+          "skill_path": "/Users/jameschen/Workspace/nexus/.agents/skills/sf2/sf2-codeintel-route-fit-spec/SKILL.md",
+          "route_overlap": [
+            "analysis",
+            "api",
+            "architecture",
+            "ast",
+            "code",
+            "codeintel",
+            "dependency",
+            "fit",
+            "for",
+            "graph",
+            "impact",
+            "interface",
+            "repo",
+            "route",
+            "scan",
+            "schema",
+            "sf2",
+            "simplification",
+            "symbol"
+          ],
+          "evidence_overlap": [
+            "contract",
+            "evidence",
+            "gate",
+            "outcome",
+            "receipt"
+          ]
+        }
+      ]
+    },
+    {
+      "capability_id": "ddtree",
+      "candidate_count": 1,
+      "static_fit_candidate_count": 1,
+      "candidates": [
+        {
+          "skill_id": "sf2-ddtree-route-fit-spec",
+          "verdict": "static_fit_candidate",
+          "status": "PASS",
+          "reason": "static_route_fit_pass",
+          "skill_path": "/Users/jameschen/Workspace/nexus/.agents/skills/sf2/sf2-ddtree-route-fit-spec/SKILL.md",
+          "route_overlap": [
+            "candidate",
+            "ddtree",
+            "decision",
+            "fit",
+            "for",
+            "prune",
+            "route",
+            "selection",
+            "sf2",
+            "tree"
+          ],
+          "evidence_overlap": [
+            "contract",
+            "evidence",
+            "gate",
+            "outcome",
+            "receipt"
+          ]
+        }
+      ]
+    },
+    {
+      "capability_id": "external_productivity",
+      "candidate_count": 1,
+      "static_fit_candidate_count": 1,
+      "candidates": [
+        {
+          "skill_id": "sf2-external_productivity-route-fit-spec",
+          "verdict": "static_fit_candidate",
+          "status": "PASS",
+          "reason": "static_route_fit_pass",
+          "skill_path": "/Users/jameschen/Workspace/nexus/.agents/skills/sf2/sf2-external_productivity-route-fit-spec/SKILL.md",
+          "route_overlap": [
+            "airtable",
+            "calendar",
+            "creative",
+            "docs",
+            "external_productivity",
+            "fit",
+            "for",
+            "gmail",
+            "image",
+            "route",
+            "sf2",
+            "sheets",
+            "slides",
+            "video"
+          ],
+          "evidence_overlap": [
+            "contract",
+            "evidence",
+            "gate",
+            "outcome",
+            "receipt"
+          ]
+        }
+      ]
+    },
+    {
+      "capability_id": "ui_validator",
+      "candidate_count": 1,
+      "static_fit_candidate_count": 1,
+      "candidates": [
+        {
+          "skill_id": "sf2-ui_validator-route-fit-spec",
+          "verdict": "static_fit_candidate",
+          "status": "PASS",
+          "reason": "static_route_fit_pass",
+          "skill_path": "/Users/jameschen/Workspace/nexus/.agents/skills/sf2/sf2-ui_validator-route-fit-spec/SKILL.md",
+          "route_overlap": [
+            "browser",
+            "fit",
+            "for",
+            "frontend",
+            "playwright",
+            "route",
+            "sf2",
+            "ui_validator",
+            "visual"
+          ],
+          "evidence_overlap": [
+            "contract",
+            "evidence",
+            "gate",
+            "outcome",
+            "receipt"
+          ]
+        }
+      ]
+    },
+    {
+      "capability_id": "xray",
+      "candidate_count": 1,
+      "static_fit_candidate_count": 1,
+      "candidates": [
+        {
+          "skill_id": "sf2-xray-route-fit-spec",
+          "verdict": "static_fit_candidate",
+          "status": "PASS",
+          "reason": "static_route_fit_pass",
+          "skill_path": "/Users/jameschen/Workspace/nexus/.agents/skills/sf2/sf2-xray-route-fit-spec/SKILL.md",
+          "route_overlap": [
+            "cause",
+            "diagnose",
+            "fit",
+            "for",
+            "inspect",
+            "investigate",
+            "probe",
+            "root",
+            "route",
+            "sf2",
+            "xray"
+          ],
+          "evidence_overlap": [
+            "contract",
+            "evidence",
+            "gate",
+            "outcome",
+            "receipt"
+          ]
+        }
+      ]
+    }
+  ],
+  "claim_boundary": [
+    "Static fit candidates can enter bounded live validation.",
+    "This catalog does not update runtime defaults or unlock public benchmark."
+  ]
+}

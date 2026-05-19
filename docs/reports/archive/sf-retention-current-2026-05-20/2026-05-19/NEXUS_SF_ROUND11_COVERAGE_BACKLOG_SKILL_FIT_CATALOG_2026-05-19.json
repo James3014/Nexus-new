@@ -1,0 +1,187 @@
+{
+  "schema": "nexus.skill_fit_catalog.v1",
+  "status": "PASS",
+  "mode": "live",
+  "matrix_path": "docs/reports/NEXUS_SF_ROUND11_COVERAGE_BACKLOG_FLASH_SMOKE_MATRIX_2026-05-19.json",
+  "summary": {
+    "planned_rows": 8,
+    "completed_rows": 8,
+    "matrix_complete": true,
+    "capability_only_rows": 0,
+    "skill_count": 8,
+    "negative_control_rows": 0,
+    "negative_control_blocked_rows": 0,
+    "keep_count": 4,
+    "replace_candidate_count": 4,
+    "reject_count": 0,
+    "needs_more_data_count": 0
+  },
+  "failures": [],
+  "claim_boundary": [
+    "Catalog verdicts are valid only for this capability, task set, model, and matrix version.",
+    "replace_candidate means import/review candidate, not runtime promotion.",
+    "runtime policy changes require a later Flash 50/100 regression gate."
+  ],
+  "skill_verdicts": [
+    {
+      "skill_id": "github11-ab-test-analysis-benchmark-meta-opt",
+      "capability": "benchmark_meta_opt",
+      "anonymous_label": "challenger",
+      "source_root": "github_round11_coverage_backlog",
+      "runtime_eligible": false,
+      "tested_rows": 1,
+      "effective_rows": 1,
+      "trust_clean_rows": 1,
+      "verdict": "replace_candidate",
+      "evidence_refs": [
+        ".nexus/reports/sf_round11_coverage_backlog_live_2026-05-19/benchmark_meta_opt_sf-round11-coverage-benchmark_meta_opt-001_challenger_github11-ab-test-analysis-benchmark-meta-opt/evidence_bundle.json"
+      ],
+      "receipt_refs": [
+        ".nexus/reports/sf_round11_coverage_backlog_live_2026-05-19/benchmark_meta_opt_sf-round11-coverage-benchmark_meta_opt-001_challenger_github11-ab-test-analysis-benchmark-meta-opt"
+      ],
+      "task_buckets": [
+        "benchmark_meta_opt"
+      ]
+    },
+    {
+      "skill_id": "github4-sickn33-antigravity-awesome-skills-ad-creative",
+      "capability": "benchmark_meta_opt",
+      "anonymous_label": "current_best",
+      "source_root": "current_best",
+      "runtime_eligible": true,
+      "tested_rows": 1,
+      "effective_rows": 1,
+      "trust_clean_rows": 1,
+      "verdict": "keep",
+      "evidence_refs": [
+        ".nexus/reports/sf_round11_coverage_backlog_live_2026-05-19/benchmark_meta_opt_sf-round11-coverage-benchmark_meta_opt-001_current_best_github4-sickn33-antigravity-awesome-skills-ad-creative/evidence_bundle.json"
+      ],
+      "receipt_refs": [
+        ".nexus/reports/sf_round11_coverage_backlog_live_2026-05-19/benchmark_meta_opt_sf-round11-coverage-benchmark_meta_opt-001_current_best_github4-sickn33-antigravity-awesome-skills-ad-creative"
+      ],
+      "task_buckets": [
+        "benchmark_meta_opt"
+      ]
+    },
+    {
+      "skill_id": "create-plan",
+      "capability": "forecast_pregate",
+      "anonymous_label": "current_best",
+      "source_root": "current_best",
+      "runtime_eligible": true,
+      "tested_rows": 1,
+      "effective_rows": 1,
+      "trust_clean_rows": 1,
+      "verdict": "keep",
+      "evidence_refs": [
+        ".nexus/reports/sf_round11_coverage_backlog_live_2026-05-19/forecast_pregate_sf-round11-coverage-forecast_pregate-001_current_best_create-plan/evidence_bundle.json"
+      ],
+      "receipt_refs": [
+        ".nexus/reports/sf_round11_coverage_backlog_live_2026-05-19/forecast_pregate_sf-round11-coverage-forecast_pregate-001_current_best_create-plan"
+      ],
+      "task_buckets": [
+        "forecast_pregate"
+      ]
+    },
+    {
+      "skill_id": "github11-notion-spec-to-implementation-forecast-pregate",
+      "capability": "forecast_pregate",
+      "anonymous_label": "challenger",
+      "source_root": "github_round11_coverage_backlog",
+      "runtime_eligible": false,
+      "tested_rows": 1,
+      "effective_rows": 1,
+      "trust_clean_rows": 1,
+      "verdict": "replace_candidate",
+      "evidence_refs": [
+        ".nexus/reports/sf_round11_coverage_backlog_live_2026-05-19/forecast_pregate_sf-round11-coverage-forecast_pregate-001_challenger_github11-notion-spec-to-implementation-forecast-pregate/evidence_bundle.json"
+      ],
+      "receipt_refs": [
+        ".nexus/reports/sf_round11_coverage_backlog_live_2026-05-19/forecast_pregate_sf-round11-coverage-forecast_pregate-001_challenger_github11-notion-spec-to-implementation-forecast-pregate"
+      ],
+      "task_buckets": [
+        "forecast_pregate"
+      ]
+    },
+    {
+      "skill_id": "github11-bug-hunter-repair-loop",
+      "capability": "repair_loop",
+      "anonymous_label": "challenger",
+      "source_root": "github_round11_coverage_backlog",
+      "runtime_eligible": false,
+      "tested_rows": 1,
+      "effective_rows": 1,
+      "trust_clean_rows": 1,
+      "verdict": "replace_candidate",
+      "evidence_refs": [
+        ".nexus/reports/sf_round11_coverage_backlog_live_2026-05-19/repair_loop_sf-round11-coverage-repair_loop-001_challenger_github11-bug-hunter-repair-loop/evidence_bundle.json"
+      ],
+      "receipt_refs": [
+        ".nexus/reports/sf_round11_coverage_backlog_live_2026-05-19/repair_loop_sf-round11-coverage-repair_loop-001_challenger_github11-bug-hunter-repair-loop"
+      ],
+      "task_buckets": [
+        "repair_loop"
+      ]
+    },
+    {
+      "skill_id": "github7-midudev-tdd-repair-loop",
+      "capability": "repair_loop",
+      "anonymous_label": "current_best",
+      "source_root": "current_best",
+      "runtime_eligible": true,
+      "tested_rows": 1,
+      "effective_rows": 1,
+      "trust_clean_rows": 1,
+      "verdict": "keep",
+      "evidence_refs": [
+        ".nexus/reports/sf_round11_coverage_backlog_live_2026-05-19/repair_loop_sf-round11-coverage-repair_loop-001_current_best_github7-midudev-tdd-repair-loop/evidence_bundle.json"
+      ],
+      "receipt_refs": [
+        ".nexus/reports/sf_round11_coverage_backlog_live_2026-05-19/repair_loop_sf-round11-coverage-repair_loop-001_current_best_github7-midudev-tdd-repair-loop"
+      ],
+      "task_buckets": [
+        "repair_loop"
+      ]
+    },
+    {
+      "skill_id": "github11-vulnerability-scanner-ultra-review",
+      "capability": "ultra_review",
+      "anonymous_label": "challenger",
+      "source_root": "github_round11_coverage_backlog",
+      "runtime_eligible": false,
+      "tested_rows": 1,
+      "effective_rows": 1,
+      "trust_clean_rows": 1,
+      "verdict": "replace_candidate",
+      "evidence_refs": [
+        ".nexus/reports/sf_round11_coverage_backlog_live_2026-05-19/ultra_review_sf-round11-coverage-ultra_review-001_challenger_github11-vulnerability-scanner-ultra-review/evidence_bundle.json"
+      ],
+      "receipt_refs": [
+        ".nexus/reports/sf_round11_coverage_backlog_live_2026-05-19/ultra_review_sf-round11-coverage-ultra_review-001_challenger_github11-vulnerability-scanner-ultra-review"
+      ],
+      "task_buckets": [
+        "ultra_review"
+      ]
+    },
+    {
+      "skill_id": "github9-openai-security-threat-model-ultra-review",
+      "capability": "ultra_review",
+      "anonymous_label": "current_best",
+      "source_root": "current_best",
+      "runtime_eligible": true,
+      "tested_rows": 1,
+      "effective_rows": 1,
+      "trust_clean_rows": 1,
+      "verdict": "keep",
+      "evidence_refs": [
+        ".nexus/reports/sf_round11_coverage_backlog_live_2026-05-19/ultra_review_sf-round11-coverage-ultra_review-001_current_best_github9-openai-security-threat-model-ultra-review/evidence_bundle.json"
+      ],
+      "receipt_refs": [
+        ".nexus/reports/sf_round11_coverage_backlog_live_2026-05-19/ultra_review_sf-round11-coverage-ultra_review-001_current_best_github9-openai-security-threat-model-ultra-review"
+      ],
+      "task_buckets": [
+        "ultra_review"
+      ]
+    }
+  ]
+}

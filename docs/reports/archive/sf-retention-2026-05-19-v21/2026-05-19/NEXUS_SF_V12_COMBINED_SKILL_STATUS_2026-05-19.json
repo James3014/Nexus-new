@@ -1,0 +1,414 @@
+{
+  "schema": "nexus.sf_v12_combined_skill_status.v1",
+  "status": "PASS",
+  "summary": {
+    "skill_count": 31,
+    "runtime_update_allowed": false,
+    "public_benchmark_allowed": false
+  },
+  "skills": [
+    {
+      "name": "research-citation-chain-verifier",
+      "path": ".agents/skills/research-citation-chain-verifier/SKILL.md",
+      "root": "nexus_repo",
+      "skill_status": "nexus_curated_candidate",
+      "test_level": "sf_v11_retest",
+      "action": "ablation_only_compare",
+      "capability_mount": "artifact_gate",
+      "family": "artifact_gate",
+      "reason_codes": [
+        "sf_v11_retest_candidate"
+      ]
+    },
+    {
+      "name": "nexus-goal-closure-executor",
+      "path": ".agents/skills/nexus-goal-closure-executor/SKILL.md",
+      "root": "nexus_repo",
+      "skill_status": "nexus_curated_candidate",
+      "test_level": "sf_v11_retest",
+      "action": "ablation_only_compare",
+      "capability_mount": "artifact_gate",
+      "family": "artifact_gate",
+      "reason_codes": [
+        "sf_v11_retest_candidate"
+      ]
+    },
+    {
+      "name": "acceptance-evidence-failclosed",
+      "path": ".agents/skills/acceptance-evidence-failclosed/SKILL.md",
+      "root": "nexus_repo",
+      "skill_status": "nexus_curated_candidate",
+      "test_level": "sf_v12_token_clean",
+      "action": "ablation_only_compare",
+      "capability_mount": "ultra_review",
+      "family": "ultra_review",
+      "reason_codes": [
+        "sf_v12_token_clean_replay"
+      ]
+    },
+    {
+      "name": "cso",
+      "path": ".agents/skills/cso/SKILL.md",
+      "root": "nexus_repo",
+      "skill_status": "nexus_curated_candidate",
+      "test_level": "sf_v12_token_clean",
+      "action": "ablation_only_compare",
+      "capability_mount": "ultra_review",
+      "family": "ultra_review",
+      "reason_codes": [
+        "sf_v12_token_clean_replay"
+      ]
+    },
+    {
+      "name": "sf2-autonomic_router-route-fit-spec",
+      "path": ".agents/skills/sf2/sf2-autonomic_router-route-fit-spec/SKILL.md",
+      "root": "nexus_repo",
+      "skill_status": "nexus_curated_candidate",
+      "test_level": "sf_v11_retest",
+      "action": "ablation_only_compare",
+      "capability_mount": "autoreason",
+      "family": "autonomic_router",
+      "reason_codes": [
+        "sf_v11_retest_candidate"
+      ]
+    },
+    {
+      "name": "diagnose",
+      "path": ".agents/skills/diagnose/SKILL.md",
+      "root": "nexus_repo",
+      "skill_status": "nexus_curated_candidate",
+      "test_level": "sf_v12_token_clean",
+      "action": "ablation_only_compare",
+      "capability_mount": "codeintel",
+      "family": "xray",
+      "reason_codes": [
+        "sf_v12_token_clean_replay"
+      ]
+    },
+    {
+      "name": "nexus-root-cause-probe",
+      "path": ".agents/skills/nexus-root-cause-probe/SKILL.md",
+      "root": "nexus_repo",
+      "skill_status": "nexus_curated_candidate",
+      "test_level": "sf_v11_retest",
+      "action": "ablation_only_compare",
+      "capability_mount": "autoreason",
+      "family": "autonomic_router",
+      "reason_codes": [
+        "sf_v11_retest_candidate"
+      ]
+    },
+    {
+      "name": "sf2-autoreason-route-fit-spec",
+      "path": ".agents/skills/sf2/sf2-autoreason-route-fit-spec/SKILL.md",
+      "root": "nexus_repo",
+      "skill_status": "nexus_curated_candidate",
+      "test_level": "sf_v11_retest",
+      "action": "ablation_only_compare",
+      "capability_mount": "autoreason",
+      "family": "autoreason",
+      "reason_codes": [
+        "sf_v11_retest_candidate"
+      ]
+    },
+    {
+      "name": "nexus-benchmark-public-report",
+      "path": ".agents/skills/nexus-benchmark-public-report/SKILL.md",
+      "root": "nexus_repo",
+      "skill_status": "nexus_curated_candidate",
+      "test_level": "sf_v11_retest",
+      "action": "ablation_only_compare",
+      "capability_mount": "autoreason",
+      "family": "autoreason",
+      "reason_codes": [
+        "sf_v11_retest_candidate"
+      ]
+    },
+    {
+      "name": "sf2-belief-route-fit-spec",
+      "path": ".agents/skills/sf2/sf2-belief-route-fit-spec/SKILL.md",
+      "root": "nexus_repo",
+      "skill_status": "nexus_curated_candidate",
+      "test_level": "sf_v11_retest",
+      "action": "ablation_only_compare",
+      "capability_mount": "autoreason",
+      "family": "autoreason",
+      "reason_codes": [
+        "sf_v11_retest_candidate"
+      ]
+    },
+    {
+      "name": "nexus-benchmark-continuous-optimization",
+      "path": ".agents/skills/nexus-benchmark-continuous-optimization/SKILL.md",
+      "root": "nexus_repo",
+      "skill_status": "nexus_curated_candidate",
+      "test_level": "sf_v11_retest",
+      "action": "ablation_only_compare",
+      "capability_mount": "judge_panel",
+      "family": "benchmark_meta_opt",
+      "reason_codes": [
+        "sf_v11_retest_candidate"
+      ]
+    },
+    {
+      "name": "sf2-ddtree-route-fit-spec",
+      "path": ".agents/skills/sf2/sf2-ddtree-route-fit-spec/SKILL.md",
+      "root": "nexus_repo",
+      "skill_status": "nexus_curated_candidate",
+      "test_level": "sf_v11_retest",
+      "action": "ablation_only_compare",
+      "capability_mount": "ddtree",
+      "family": "ddtree",
+      "reason_codes": [
+        "sf_v11_retest_candidate"
+      ]
+    },
+    {
+      "name": "sf2-delivery_acceptance_gate-route-fit-spec",
+      "path": ".agents/skills/sf2/sf2-delivery_acceptance_gate-route-fit-spec/SKILL.md",
+      "root": "nexus_repo",
+      "skill_status": "nexus_curated_candidate",
+      "test_level": "sf_v11_retest",
+      "action": "ablation_only_compare",
+      "capability_mount": "delivery_gate",
+      "family": "delivery_acceptance_gate",
+      "reason_codes": [
+        "sf_v11_retest_candidate"
+      ]
+    },
+    {
+      "name": "sf2-drone-route-fit-spec",
+      "path": ".agents/skills/sf2/sf2-drone-route-fit-spec/SKILL.md",
+      "root": "nexus_repo",
+      "skill_status": "nexus_curated_candidate",
+      "test_level": "sf_v11_retest",
+      "action": "ablation_only_compare",
+      "capability_mount": "drone",
+      "family": "drone",
+      "reason_codes": [
+        "sf_v11_retest_candidate"
+      ]
+    },
+    {
+      "name": "sf2-lancedb-route-fit-spec",
+      "path": ".agents/skills/sf2/sf2-lancedb-route-fit-spec/SKILL.md",
+      "root": "nexus_repo",
+      "skill_status": "nexus_curated_candidate",
+      "test_level": "sf_v11_retest",
+      "action": "ablation_only_compare",
+      "capability_mount": "lancedb",
+      "family": "lancedb",
+      "reason_codes": [
+        "sf_v11_retest_candidate"
+      ]
+    },
+    {
+      "name": "nexus-capability-upgrade",
+      "path": ".agents/skills/nexus-capability-upgrade/SKILL.md",
+      "root": "nexus_repo",
+      "skill_status": "nexus_curated_candidate",
+      "test_level": "sf_v11_retest",
+      "action": "ablation_only_compare",
+      "capability_mount": "lancedb",
+      "family": "lancedb",
+      "reason_codes": [
+        "sf_v11_retest_candidate"
+      ]
+    },
+    {
+      "name": "research-source-validation-auditor",
+      "path": ".agents/skills/research-source-validation-auditor/SKILL.md",
+      "root": "nexus_repo",
+      "skill_status": "nexus_curated_candidate",
+      "test_level": "sf_v11_retest",
+      "action": "ablation_only_compare",
+      "capability_mount": "lancedb",
+      "family": "lancedb",
+      "reason_codes": [
+        "sf_v11_retest_candidate"
+      ]
+    },
+    {
+      "name": "sf2-learning_closure-route-fit-spec",
+      "path": ".agents/skills/sf2/sf2-learning_closure-route-fit-spec/SKILL.md",
+      "root": "nexus_repo",
+      "skill_status": "nexus_curated_candidate",
+      "test_level": "sf_v11_retest",
+      "action": "ablation_only_compare",
+      "capability_mount": "semantic_failure_sensor",
+      "family": "learning_closure",
+      "reason_codes": [
+        "sf_v11_retest_candidate"
+      ]
+    },
+    {
+      "name": "sf2-memory-route-fit-spec",
+      "path": ".agents/skills/sf2/sf2-memory-route-fit-spec/SKILL.md",
+      "root": "nexus_repo",
+      "skill_status": "nexus_curated_candidate",
+      "test_level": "sf_v11_retest",
+      "action": "ablation_only_compare",
+      "capability_mount": "memory",
+      "family": "memory",
+      "reason_codes": [
+        "sf_v11_retest_candidate"
+      ]
+    },
+    {
+      "name": "sf2-mempalace-route-fit-spec",
+      "path": ".agents/skills/sf2/sf2-mempalace-route-fit-spec/SKILL.md",
+      "root": "nexus_repo",
+      "skill_status": "nexus_curated_candidate",
+      "test_level": "sf_v11_retest",
+      "action": "ablation_only_compare",
+      "capability_mount": "mempalace_gate",
+      "family": "mempalace",
+      "reason_codes": [
+        "sf_v11_retest_candidate"
+      ]
+    },
+    {
+      "name": "gbrain-soul-audit",
+      "path": ".agents/skills/gbrain-soul-audit/SKILL.md",
+      "root": "nexus_repo",
+      "skill_status": "nexus_curated_candidate",
+      "test_level": "sf_v11_retest",
+      "action": "ablation_only_compare",
+      "capability_mount": "mempalace_gate",
+      "family": "mempalace",
+      "reason_codes": [
+        "sf_v11_retest_candidate"
+      ]
+    },
+    {
+      "name": "setup-matt-pocock-skills",
+      "path": ".agents/skills/setup-matt-pocock-skills/SKILL.md",
+      "root": "nexus_repo",
+      "skill_status": "nexus_curated_candidate",
+      "test_level": "sf_v11_retest",
+      "action": "ablation_only_compare",
+      "capability_mount": "semantic_failure_sensor",
+      "family": "metabolism_resume",
+      "reason_codes": [
+        "sf_v11_retest_candidate"
+      ]
+    },
+    {
+      "name": "sf2-policy_capability_gate-route-fit-spec",
+      "path": ".agents/skills/sf2/sf2-policy_capability_gate-route-fit-spec/SKILL.md",
+      "root": "nexus_repo",
+      "skill_status": "nexus_curated_candidate",
+      "test_level": "sf_v11_retest",
+      "action": "ablation_only_compare",
+      "capability_mount": "mempalace_gate",
+      "family": "policy_capability_gate",
+      "reason_codes": [
+        "sf_v11_retest_candidate"
+      ]
+    },
+    {
+      "name": "sf2-registry_skills_sync-route-fit-spec",
+      "path": ".agents/skills/sf2/sf2-registry_skills_sync-route-fit-spec/SKILL.md",
+      "root": "nexus_repo",
+      "skill_status": "nexus_curated_candidate",
+      "test_level": "sf_v11_retest",
+      "action": "ablation_only_compare",
+      "capability_mount": "semantic_searcher",
+      "family": "registry_skills_sync",
+      "reason_codes": [
+        "sf_v11_retest_candidate"
+      ]
+    },
+    {
+      "name": "research-source-conflict-resolver",
+      "path": ".agents/skills/research-source-conflict-resolver/SKILL.md",
+      "root": "nexus_repo",
+      "skill_status": "nexus_curated_candidate",
+      "test_level": "sf_v11_retest",
+      "action": "ablation_only_compare",
+      "capability_mount": "research",
+      "family": "research",
+      "reason_codes": [
+        "sf_v11_retest_candidate"
+      ]
+    },
+    {
+      "name": "sf2-research_control_plane-route-fit-spec",
+      "path": ".agents/skills/sf2/sf2-research_control_plane-route-fit-spec/SKILL.md",
+      "root": "nexus_repo",
+      "skill_status": "nexus_curated_candidate",
+      "test_level": "sf_v11_retest",
+      "action": "ablation_only_compare",
+      "capability_mount": "research",
+      "family": "research",
+      "reason_codes": [
+        "sf_v11_retest_candidate"
+      ]
+    },
+    {
+      "name": "sf2-sandbox_replay-route-fit-spec",
+      "path": ".agents/skills/sf2/sf2-sandbox_replay-route-fit-spec/SKILL.md",
+      "root": "nexus_repo",
+      "skill_status": "nexus_curated_candidate",
+      "test_level": "sf_v11_retest",
+      "action": "ablation_only_compare",
+      "capability_mount": "harness_preflight_sensor",
+      "family": "sandbox_replay",
+      "reason_codes": [
+        "sf_v11_retest_candidate"
+      ]
+    },
+    {
+      "name": "sf2-ui_validator-route-fit-spec",
+      "path": ".agents/skills/sf2/sf2-ui_validator-route-fit-spec/SKILL.md",
+      "root": "nexus_repo",
+      "skill_status": "nexus_curated_candidate",
+      "test_level": "sf_v11_retest",
+      "action": "ablation_only_compare",
+      "capability_mount": "ultra_review",
+      "family": "ui_validator",
+      "reason_codes": [
+        "sf_v11_retest_candidate"
+      ]
+    },
+    {
+      "name": "code-review-and-quality",
+      "path": "/Users/jameschen/Workspace/skills_audit/skills/code-review-and-quality/SKILL.md",
+      "root": "external_reference",
+      "skill_status": "external_reference_candidate",
+      "test_level": "sf_v11_retest",
+      "action": "ablation_only_compare",
+      "capability_mount": "ultra_review",
+      "family": "ultra_review",
+      "reason_codes": [
+        "sf_v11_retest_candidate"
+      ]
+    },
+    {
+      "name": "sf2-xray-route-fit-spec",
+      "path": ".agents/skills/sf2/sf2-xray-route-fit-spec/SKILL.md",
+      "root": "nexus_repo",
+      "skill_status": "nexus_curated_candidate",
+      "test_level": "sf_v12_token_clean",
+      "action": "ablation_only_compare",
+      "capability_mount": "codeintel",
+      "family": "xray",
+      "reason_codes": [
+        "sf_v12_token_clean_replay"
+      ]
+    },
+    {
+      "name": "sf2-codeintel-route-fit-spec",
+      "path": ".agents/skills/sf2/sf2-codeintel-route-fit-spec/SKILL.md",
+      "root": "nexus_repo",
+      "skill_status": "nexus_curated_candidate",
+      "test_level": "sf_v12_token_clean",
+      "action": "ablation_only_compare",
+      "capability_mount": "codeintel",
+      "family": "xray",
+      "reason_codes": [
+        "sf_v12_token_clean_replay"
+      ]
+    }
+  ]
+}

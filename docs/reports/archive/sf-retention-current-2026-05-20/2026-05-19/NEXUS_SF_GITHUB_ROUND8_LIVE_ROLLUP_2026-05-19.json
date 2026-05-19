@@ -1,0 +1,348 @@
+{
+  "capability_rollups": [
+    {
+      "capability": "claim_gate",
+      "challenger": {
+        "arm": "challenger",
+        "capability": "claim_gate",
+        "clean_model_cost_evidence": true,
+        "evidence_path": ".nexus/reports/sf_github_round8_live_2026-05-19/claim_gate_sf-github-round8-smoke-claim_gate-001_challenger_github8-geo-optimizer-claim-gate/evidence_bundle.json",
+        "expected_capability_coverage": {
+          "all_public_safe": true,
+          "expected": [
+            "claim_gate"
+          ],
+          "failure_reasons": {},
+          "missing": [],
+          "public_safe": [
+            "claim_gate"
+          ]
+        },
+        "model_calls": 2,
+        "provider_token_measured": true,
+        "receipt_path": "/Users/jameschen/Workspace/nexus/.nexus/reports/sf_github_round8_live_2026-05-19/claim_gate_sf-github-round8-smoke-claim_gate-001_challenger_github8-geo-optimizer-claim-gate/evidence_1779172086/with_nexus__sf-github-round8-smoke-claim_gate-001__trial_1.row.json",
+        "semantic_status": "VERIFIED",
+        "skill_evidence_refs": [
+          "skill_catalog:github8-geo-optimizer-claim-gate",
+          "skill_path:/Users/jameschen/Workspace/nexus/.agents/skills/github-round8-challengers/github8-geo-optimizer-claim-gate/SKILL.md",
+          "benchmark_skill_mount_request:github8-geo-optimizer-claim-gate",
+          "claim:sf-github-round8-smoke-claim_gate-001:verified_delivery",
+          "capability_receipt:claim_gate"
+        ],
+        "skill_id": "github8-geo-optimizer-claim-gate",
+        "skill_mount_contract_status": "PASS",
+        "skill_outcome_contributed": true,
+        "status": "PASS",
+        "total_tokens": 41653,
+        "wall_sec": 90.9725
+      },
+      "challenger_effective": true,
+      "current_best": {
+        "arm": "current_best",
+        "capability": "claim_gate",
+        "clean_model_cost_evidence": true,
+        "evidence_path": ".nexus/reports/sf_github_round8_live_2026-05-19/claim_gate_sf-github-round8-smoke-claim_gate-001_current_best_nexus-benchmark-continuous-optimization/evidence_bundle.json",
+        "expected_capability_coverage": {
+          "all_public_safe": true,
+          "expected": [
+            "claim_gate"
+          ],
+          "failure_reasons": {},
+          "missing": [],
+          "public_safe": [
+            "claim_gate"
+          ]
+        },
+        "model_calls": 2,
+        "provider_token_measured": true,
+        "receipt_path": "/Users/jameschen/Workspace/nexus/.nexus/reports/sf_github_round8_live_2026-05-19/claim_gate_sf-github-round8-smoke-claim_gate-001_current_best_nexus-benchmark-continuous-optimization/evidence_1779171990/with_nexus__sf-github-round8-smoke-claim_gate-001__trial_1.row.json",
+        "semantic_status": "VERIFIED",
+        "skill_evidence_refs": [
+          "skill_catalog:nexus-benchmark-continuous-optimization",
+          "skill_path:/Users/jameschen/Workspace/nexus/.agents/skills/nexus-benchmark-continuous-optimization/SKILL.md",
+          "benchmark_skill_mount_request:nexus-benchmark-continuous-optimization",
+          "claim:sf-github-round8-smoke-claim_gate-001:verified_delivery",
+          "capability_receipt:claim_gate"
+        ],
+        "skill_id": "nexus-benchmark-continuous-optimization",
+        "skill_mount_contract_status": "PASS",
+        "skill_outcome_contributed": true,
+        "status": "PASS",
+        "total_tokens": 40919,
+        "wall_sec": 96.2695
+      },
+      "current_effective": true,
+      "reason_codes": [
+        "challenger_token_not_lower"
+      ],
+      "token_delta_challenger_minus_current": 734,
+      "verdict": "keep_current_best",
+      "wall_delta_sec_challenger_minus_current": -5.297
+    },
+    {
+      "capability": "learn_ask",
+      "challenger": {
+        "arm": "challenger",
+        "capability": "learn_ask",
+        "clean_model_cost_evidence": true,
+        "evidence_path": ".nexus/reports/sf_github_round8_live_2026-05-19/learn_ask_sf-github-round8-smoke-learn_ask-001_challenger_github8-skilless-deep-research-learn-ask/evidence_bundle.json",
+        "expected_capability_coverage": {
+          "all_public_safe": true,
+          "expected": [
+            "semantic_searcher"
+          ],
+          "failure_reasons": {},
+          "missing": [],
+          "public_safe": [
+            "semantic_searcher"
+          ]
+        },
+        "model_calls": 2,
+        "provider_token_measured": true,
+        "receipt_path": "/Users/jameschen/Workspace/nexus/.nexus/reports/sf_github_round8_live_2026-05-19/learn_ask_sf-github-round8-smoke-learn_ask-001_challenger_github8-skilless-deep-research-learn-ask/evidence_1779172478/with_nexus__sf-github-round8-smoke-learn_ask-001__trial_1.row.json",
+        "semantic_status": "VERIFIED",
+        "skill_evidence_refs": [
+          "skill_catalog:github8-skilless-deep-research-learn-ask",
+          "skill_path:/Users/jameschen/Workspace/nexus/.agents/skills/github-round8-challengers/github8-skilless-deep-research-learn-ask/SKILL.md",
+          "benchmark_skill_mount_request:github8-skilless-deep-research-learn-ask",
+          "semantic:sf-github-round8-smoke-learn_ask-001:source_id",
+          "capability_receipt:semantic_searcher"
+        ],
+        "skill_id": "github8-skilless-deep-research-learn-ask",
+        "skill_mount_contract_status": "PASS",
+        "skill_outcome_contributed": true,
+        "status": "PASS",
+        "total_tokens": 41663,
+        "wall_sec": 93.5389
+      },
+      "challenger_effective": true,
+      "current_best": {
+        "arm": "current_best",
+        "capability": "learn_ask",
+        "clean_model_cost_evidence": true,
+        "evidence_path": ".nexus/reports/sf_github_round8_live_2026-05-19/learn_ask_sf-github-round8-smoke-learn_ask-001_current_best_nexus-capability-upgrade/evidence_bundle.json",
+        "expected_capability_coverage": {
+          "all_public_safe": true,
+          "expected": [
+            "semantic_searcher"
+          ],
+          "failure_reasons": {},
+          "missing": [],
+          "public_safe": [
+            "semantic_searcher"
+          ]
+        },
+        "model_calls": 2,
+        "provider_token_measured": true,
+        "receipt_path": "/Users/jameschen/Workspace/nexus/.nexus/reports/sf_github_round8_live_2026-05-19/learn_ask_sf-github-round8-smoke-learn_ask-001_current_best_nexus-capability-upgrade/evidence_1779172374/with_nexus__sf-github-round8-smoke-learn_ask-001__trial_1.row.json",
+        "semantic_status": "VERIFIED",
+        "skill_evidence_refs": [
+          "skill_catalog:nexus-capability-upgrade",
+          "skill_path:/Users/jameschen/Workspace/nexus/.agents/skills/nexus-capability-upgrade/SKILL.md",
+          "benchmark_skill_mount_request:nexus-capability-upgrade",
+          "semantic:sf-github-round8-smoke-learn_ask-001:source_id",
+          "capability_receipt:semantic_searcher"
+        ],
+        "skill_id": "nexus-capability-upgrade",
+        "skill_mount_contract_status": "PASS",
+        "skill_outcome_contributed": true,
+        "status": "PASS",
+        "total_tokens": 42750,
+        "wall_sec": 102.9738
+      },
+      "current_effective": true,
+      "reason_codes": [
+        "challenger_effective_and_token_wall_lower"
+      ],
+      "token_delta_challenger_minus_current": -1087,
+      "verdict": "replace_with_challenger",
+      "wall_delta_sec_challenger_minus_current": -9.4349
+    },
+    {
+      "capability": "research",
+      "challenger": {
+        "arm": "challenger",
+        "capability": "research",
+        "clean_model_cost_evidence": true,
+        "evidence_path": ".nexus/reports/sf_github_round8_live_2026-05-19/research_sf-github-round8-smoke-research-001_challenger_github8-gbrain-academic-verify-research/evidence_bundle.json",
+        "expected_capability_coverage": {
+          "all_public_safe": true,
+          "expected": [
+            "research"
+          ],
+          "failure_reasons": {},
+          "missing": [],
+          "public_safe": [
+            "research"
+          ]
+        },
+        "model_calls": 2,
+        "provider_token_measured": true,
+        "receipt_path": "/Users/jameschen/Workspace/nexus/.nexus/reports/sf_github_round8_live_2026-05-19/research_sf-github-round8-smoke-research-001_challenger_github8-gbrain-academic-verify-research/evidence_1779172279/with_nexus__sf-github-round8-smoke-research-001__trial_1.row.json",
+        "semantic_status": "VERIFIED",
+        "skill_evidence_refs": [
+          "skill_catalog:github8-gbrain-academic-verify-research",
+          "skill_path:/Users/jameschen/Workspace/nexus/.agents/skills/github-round8-challengers/github8-gbrain-academic-verify-research/SKILL.md",
+          "benchmark_skill_mount_request:github8-gbrain-academic-verify-research",
+          "doc:Ops - Learning Closure Matrix.md",
+          "doc:NEXUS_OPTIMIZATION_PLAN_CONTEXT_LEARNING_HARNESS_2026-05-19.md",
+          "doc:README.md",
+          "capability_receipt:research"
+        ],
+        "skill_id": "github8-gbrain-academic-verify-research",
+        "skill_mount_contract_status": "PASS",
+        "skill_outcome_contributed": true,
+        "status": "PASS",
+        "total_tokens": 41568,
+        "wall_sec": 94.3127
+      },
+      "challenger_effective": true,
+      "current_best": {
+        "arm": "current_best",
+        "capability": "research",
+        "clean_model_cost_evidence": true,
+        "evidence_path": ".nexus/reports/sf_github_round8_live_2026-05-19/research_sf-github-round8-smoke-research-001_current_best_research-citation-chain-verifier/evidence_bundle.json",
+        "expected_capability_coverage": {
+          "all_public_safe": true,
+          "expected": [
+            "research"
+          ],
+          "failure_reasons": {},
+          "missing": [],
+          "public_safe": [
+            "research"
+          ]
+        },
+        "model_calls": 2,
+        "provider_token_measured": true,
+        "receipt_path": "/Users/jameschen/Workspace/nexus/.nexus/reports/sf_github_round8_live_2026-05-19/research_sf-github-round8-smoke-research-001_current_best_research-citation-chain-verifier/evidence_1779172178/with_nexus__sf-github-round8-smoke-research-001__trial_1.row.json",
+        "semantic_status": "VERIFIED",
+        "skill_evidence_refs": [
+          "skill_catalog:research-citation-chain-verifier",
+          "skill_path:/Users/jameschen/Workspace/nexus/.agents/skills/research-citation-chain-verifier/SKILL.md",
+          "benchmark_skill_mount_request:research-citation-chain-verifier",
+          "doc:Ops - Learning Closure Matrix.md",
+          "doc:NEXUS_OPTIMIZATION_PLAN_CONTEXT_LEARNING_HARNESS_2026-05-19.md",
+          "doc:README.md",
+          "capability_receipt:research"
+        ],
+        "skill_id": "research-citation-chain-verifier",
+        "skill_mount_contract_status": "PASS",
+        "skill_outcome_contributed": true,
+        "status": "PASS",
+        "total_tokens": 42177,
+        "wall_sec": 100.6269
+      },
+      "current_effective": true,
+      "reason_codes": [
+        "challenger_effective_and_token_wall_lower"
+      ],
+      "token_delta_challenger_minus_current": -609,
+      "verdict": "replace_with_challenger",
+      "wall_delta_sec_challenger_minus_current": -6.3142
+    },
+    {
+      "capability": "research_control_plane",
+      "challenger": {
+        "arm": "challenger",
+        "capability": "research_control_plane",
+        "clean_model_cost_evidence": true,
+        "evidence_path": ".nexus/reports/sf_github_round8_live_2026-05-19/research_control_plane_sf-github-round8-smoke-research_control_plane-001_challenger_github8-claude-osint-research-control-plane/evidence_bundle.json",
+        "expected_capability_coverage": {
+          "all_public_safe": true,
+          "expected": [
+            "research"
+          ],
+          "failure_reasons": {},
+          "missing": [],
+          "public_safe": [
+            "research"
+          ]
+        },
+        "model_calls": 2,
+        "provider_token_measured": true,
+        "receipt_path": "/Users/jameschen/Workspace/nexus/.nexus/reports/sf_github_round8_live_2026-05-19/research_control_plane_sf-github-round8-smoke-research_control_plane-001_challenger_github8-claude-osint-research-control-plane/evidence_1779171899/with_nexus__sf-github-round8-smoke-research_control_plane-001__trial_1.row.json",
+        "semantic_status": "VERIFIED",
+        "skill_evidence_refs": [
+          "skill_catalog:github8-claude-osint-research-control-plane",
+          "skill_path:/Users/jameschen/Workspace/nexus/.agents/skills/github-round8-challengers/github8-claude-osint-research-control-plane/SKILL.md",
+          "benchmark_skill_mount_request:github8-claude-osint-research-control-plane",
+          "doc:Ops - Learning Closure Matrix.md",
+          "doc:NEXUS_OPTIMIZATION_PLAN_CONTEXT_LEARNING_HARNESS_2026-05-19.md",
+          "doc:DEVELOPER.md",
+          "capability_receipt:research"
+        ],
+        "skill_id": "github8-claude-osint-research-control-plane",
+        "skill_mount_contract_status": "PASS",
+        "skill_outcome_contributed": true,
+        "status": "PASS",
+        "total_tokens": 41369,
+        "wall_sec": 89.8349
+      },
+      "challenger_effective": true,
+      "current_best": {
+        "arm": "current_best",
+        "capability": "research_control_plane",
+        "clean_model_cost_evidence": true,
+        "evidence_path": ".nexus/reports/sf_github_round8_live_2026-05-19/research_control_plane_sf-github-round8-smoke-research_control_plane-001_current_best_github6-repo-scout-safe-research-control-plane/evidence_bundle.json",
+        "expected_capability_coverage": {
+          "all_public_safe": true,
+          "expected": [
+            "research"
+          ],
+          "failure_reasons": {},
+          "missing": [],
+          "public_safe": [
+            "research"
+          ]
+        },
+        "model_calls": 2,
+        "provider_token_measured": true,
+        "receipt_path": "/Users/jameschen/Workspace/nexus/.nexus/reports/sf_github_round8_live_2026-05-19/research_control_plane_sf-github-round8-smoke-research_control_plane-001_current_best_github6-repo-scout-safe-research-control-plane/evidence_1779171791/with_nexus__sf-github-round8-smoke-research_control_plane-001__trial_1.row.json",
+        "semantic_status": "VERIFIED",
+        "skill_evidence_refs": [
+          "skill_catalog:github6-repo-scout-safe-research-control-plane",
+          "skill_path:/Users/jameschen/Workspace/nexus/.agents/skills/github6-repo-scout-safe-research-control-plane/SKILL.md",
+          "benchmark_skill_mount_request:github6-repo-scout-safe-research-control-plane",
+          "doc:Ops - Learning Closure Matrix.md",
+          "doc:NEXUS_OPTIMIZATION_PLAN_CONTEXT_LEARNING_HARNESS_2026-05-19.md",
+          "doc:DEVELOPER.md",
+          "capability_receipt:research"
+        ],
+        "skill_id": "github6-repo-scout-safe-research-control-plane",
+        "skill_mount_contract_status": "PASS",
+        "skill_outcome_contributed": true,
+        "status": "PASS",
+        "total_tokens": 39185,
+        "wall_sec": 107.37
+      },
+      "current_effective": true,
+      "reason_codes": [
+        "challenger_token_not_lower"
+      ],
+      "token_delta_challenger_minus_current": 2184,
+      "verdict": "keep_current_best",
+      "wall_delta_sec_challenger_minus_current": -17.5351
+    }
+  ],
+  "claim_boundary": [
+    "Internal SF challenger comparison only.",
+    "Replacement means overlay candidate primary update, not runtime default write.",
+    "Public benchmark remains blocked."
+  ],
+  "schema": "nexus.sf_github_round8_live_rollup.v1",
+  "source_live_summary": "/Users/jameschen/Workspace/nexus/.nexus/reports/sf_github_round8_live_2026-05-19/live_summary.json",
+  "source_matrix": "docs/reports/NEXUS_SF_GITHUB_ROUND8_FLASH_SMOKE_MATRIX_2026-05-19.json",
+  "status": "PASS",
+  "summary": {
+    "capability_count": 4,
+    "hold_count": 2,
+    "pass_count": 8,
+    "public_benchmark_allowed": false,
+    "replacement_count": 2,
+    "return_count": 0,
+    "row_count": 8,
+    "runtime_update_allowed": false
+  },
+  "version": "2026-05-19"
+}

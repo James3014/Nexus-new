@@ -1,0 +1,33 @@
+{
+  "schema": "nexus.sf_final_closure.v16",
+  "status": "PASS",
+  "sf_closed": true,
+  "runtime_update_allowed": true,
+  "public_benchmark_allowed": false,
+  "source_rollup": "/Users/jameschen/Workspace/nexus/docs/reports/NEXUS_SF_V16_RESIDUAL_SELECTION_ROLLUP_2026-05-19.json",
+  "source_overlay": "/Users/jameschen/Workspace/nexus/docs/reports/NEXUS_SF_RUNTIME_SKILL_POLICY_OVERLAY_V16_2026-05-19.json",
+  "summary": {
+    "runtime_primary_capability_count": 32,
+    "v16_new_primary_additions": 0,
+    "residual_held": 3,
+    "all_capabilities_have_runtime_primary_candidate": true,
+    "all_capabilities_have_measured_ablation_or_documented_hold": true
+  },
+  "held_items": [
+    {
+      "capability_id": "benchmark_meta_opt",
+      "best_non_promoted_skill": "nexus-benchmark-continuous-optimization",
+      "reason": "no candidate satisfied effective plus token/wall gate"
+    },
+    {
+      "capability_id": "delivery_acceptance_gate",
+      "best_non_promoted_skill": "acceptance-evidence-failclosed",
+      "reason": "no candidate satisfied effective plus token/wall gate"
+    },
+    {
+      "capability_id": "policy_capability_gate",
+      "best_non_promoted_skill": "nexus-root-cause-probe",
+      "reason": "no candidate satisfied effective plus token/wall gate"
+    }
+  ]
+}

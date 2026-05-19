@@ -1,0 +1,372 @@
+{
+  "schema": "nexus.skill_fit_cost_phase_contract.v1",
+  "status": "PASS",
+  "capability": "governance_and_trust",
+  "runtime_update_allowed": false,
+  "summary": {
+    "row_count": 30,
+    "skill_count": 4,
+    "total_wall_sec": 1667.9133,
+    "total_tokens": 645906,
+    "total_model_calls": 14,
+    "skills_with_effective_rows": 0
+  },
+  "skill_costs": [
+    {
+      "capability": "governance_and_trust",
+      "skill_id": "acceptance-evidence-failclosed",
+      "verdict": "reject",
+      "tested_rows": 5,
+      "effective_rows": 0,
+      "effective_rate": 0.0,
+      "wall_sec": 431.2785,
+      "tokens": 132215,
+      "model_calls": 4,
+      "cost_per_effective_row": {
+        "wall_sec": null,
+        "tokens": null,
+        "model_calls": null
+      },
+      "phase_cost_share": {
+        "A": 0.0,
+        "C": 0.0,
+        "D": 0.0,
+        "P": 0.0441,
+        "R": 0.9558,
+        "X": 0.0
+      },
+      "dominant_phase": "R",
+      "top_wall_rows": [
+        {
+          "row_id": "governance_and_trust::pub-feat-003::skill_arm_001_8c2953c96e5b",
+          "task_ref": {
+            "manifest": "scripts/bench/public_benchmark_pilot_v1.json",
+            "task_id": "pub-feat-003"
+          },
+          "effective": false,
+          "wall_sec": 147.3129,
+          "tokens": 65199,
+          "model_calls": 1,
+          "dominant_phase": "R"
+        },
+        {
+          "row_id": "governance_and_trust::pub-feat-002::skill_arm_001_8c2953c96e5b",
+          "task_ref": {
+            "manifest": "scripts/bench/public_benchmark_pilot_v1.json",
+            "task_id": "pub-feat-002"
+          },
+          "effective": false,
+          "wall_sec": 142.718,
+          "tokens": 66193,
+          "model_calls": 1,
+          "dominant_phase": "R"
+        },
+        {
+          "row_id": "governance_and_trust::pub-ref-003::skill_arm_001_8c2953c96e5b",
+          "task_ref": {
+            "manifest": "scripts/bench/public_benchmark_pilot_v1.json",
+            "task_id": "pub-ref-003"
+          },
+          "effective": false,
+          "wall_sec": 139.5548,
+          "tokens": 823,
+          "model_calls": 2,
+          "dominant_phase": "R"
+        },
+        {
+          "row_id": "governance_and_trust::pub-feat-004::skill_arm_001_8c2953c96e5b",
+          "task_ref": {
+            "manifest": "scripts/bench/public_benchmark_pilot_v1.json",
+            "task_id": "pub-feat-004"
+          },
+          "effective": false,
+          "wall_sec": 0.8475,
+          "tokens": 0,
+          "model_calls": 0,
+          "dominant_phase": ""
+        },
+        {
+          "row_id": "governance_and_trust::pub-ref-004::skill_arm_001_8c2953c96e5b",
+          "task_ref": {
+            "manifest": "scripts/bench/public_benchmark_pilot_v1.json",
+            "task_id": "pub-ref-004"
+          },
+          "effective": false,
+          "wall_sec": 0.8453,
+          "tokens": 0,
+          "model_calls": 0,
+          "dominant_phase": ""
+        }
+      ],
+      "claim_boundary": "Cost RCA is diagnostic and must not be merged into delivery improvement claims."
+    },
+    {
+      "capability": "governance_and_trust",
+      "skill_id": "cso",
+      "verdict": "reject",
+      "tested_rows": 5,
+      "effective_rows": 0,
+      "effective_rate": 0.0,
+      "wall_sec": 399.7377,
+      "tokens": 191208,
+      "model_calls": 4,
+      "cost_per_effective_row": {
+        "wall_sec": null,
+        "tokens": null,
+        "model_calls": null
+      },
+      "phase_cost_share": {
+        "A": 0.0,
+        "C": 0.0,
+        "D": 0.0,
+        "P": 0.0547,
+        "R": 0.9452,
+        "X": 0.0
+      },
+      "dominant_phase": "R",
+      "top_wall_rows": [
+        {
+          "row_id": "governance_and_trust::pub-feat-002::skill_arm_002_e36dcda7b600",
+          "task_ref": {
+            "manifest": "scripts/bench/public_benchmark_pilot_v1.json",
+            "task_id": "pub-feat-002"
+          },
+          "effective": false,
+          "wall_sec": 160.93,
+          "tokens": 69307,
+          "model_calls": 1,
+          "dominant_phase": "R"
+        },
+        {
+          "row_id": "governance_and_trust::pub-ref-003::skill_arm_002_e36dcda7b600",
+          "task_ref": {
+            "manifest": "scripts/bench/public_benchmark_pilot_v1.json",
+            "task_id": "pub-ref-003"
+          },
+          "effective": false,
+          "wall_sec": 141.7325,
+          "tokens": 63535,
+          "model_calls": 2,
+          "dominant_phase": "R"
+        },
+        {
+          "row_id": "governance_and_trust::pub-feat-003::skill_arm_002_e36dcda7b600",
+          "task_ref": {
+            "manifest": "scripts/bench/public_benchmark_pilot_v1.json",
+            "task_id": "pub-feat-003"
+          },
+          "effective": false,
+          "wall_sec": 95.3823,
+          "tokens": 58366,
+          "model_calls": 1,
+          "dominant_phase": "R"
+        },
+        {
+          "row_id": "governance_and_trust::pub-feat-004::skill_arm_002_e36dcda7b600",
+          "task_ref": {
+            "manifest": "scripts/bench/public_benchmark_pilot_v1.json",
+            "task_id": "pub-feat-004"
+          },
+          "effective": false,
+          "wall_sec": 0.8489,
+          "tokens": 0,
+          "model_calls": 0,
+          "dominant_phase": ""
+        },
+        {
+          "row_id": "governance_and_trust::pub-ref-004::skill_arm_002_e36dcda7b600",
+          "task_ref": {
+            "manifest": "scripts/bench/public_benchmark_pilot_v1.json",
+            "task_id": "pub-ref-004"
+          },
+          "effective": false,
+          "wall_sec": 0.844,
+          "tokens": 0,
+          "model_calls": 0,
+          "dominant_phase": ""
+        }
+      ],
+      "claim_boundary": "Cost RCA is diagnostic and must not be merged into delivery improvement claims."
+    },
+    {
+      "capability": "governance_and_trust",
+      "skill_id": "multi-agent-handoff-v15-execution-and-validation",
+      "verdict": "reject",
+      "tested_rows": 5,
+      "effective_rows": 0,
+      "effective_rate": 0.0,
+      "wall_sec": 425.4098,
+      "tokens": 127144,
+      "model_calls": 3,
+      "cost_per_effective_row": {
+        "wall_sec": null,
+        "tokens": null,
+        "model_calls": null
+      },
+      "phase_cost_share": {
+        "A": 0.0,
+        "C": 0.0,
+        "D": 0.0,
+        "P": 0.0519,
+        "R": 0.948,
+        "X": 0.0
+      },
+      "dominant_phase": "R",
+      "top_wall_rows": [
+        {
+          "row_id": "governance_and_trust::pub-feat-003::skill_arm_003_d9751d964da7",
+          "task_ref": {
+            "manifest": "scripts/bench/public_benchmark_pilot_v1.json",
+            "task_id": "pub-feat-003"
+          },
+          "effective": false,
+          "wall_sec": 165.715,
+          "tokens": 791,
+          "model_calls": 1,
+          "dominant_phase": "R"
+        },
+        {
+          "row_id": "governance_and_trust::pub-feat-002::skill_arm_003_d9751d964da7",
+          "task_ref": {
+            "manifest": "scripts/bench/public_benchmark_pilot_v1.json",
+            "task_id": "pub-feat-002"
+          },
+          "effective": false,
+          "wall_sec": 136.6266,
+          "tokens": 68008,
+          "model_calls": 1,
+          "dominant_phase": "R"
+        },
+        {
+          "row_id": "governance_and_trust::pub-ref-003::skill_arm_003_d9751d964da7",
+          "task_ref": {
+            "manifest": "scripts/bench/public_benchmark_pilot_v1.json",
+            "task_id": "pub-ref-003"
+          },
+          "effective": false,
+          "wall_sec": 121.3658,
+          "tokens": 58345,
+          "model_calls": 1,
+          "dominant_phase": "R"
+        },
+        {
+          "row_id": "governance_and_trust::pub-feat-004::skill_arm_003_d9751d964da7",
+          "task_ref": {
+            "manifest": "scripts/bench/public_benchmark_pilot_v1.json",
+            "task_id": "pub-feat-004"
+          },
+          "effective": false,
+          "wall_sec": 0.8529,
+          "tokens": 0,
+          "model_calls": 0,
+          "dominant_phase": ""
+        },
+        {
+          "row_id": "governance_and_trust::pub-ref-004::skill_arm_003_d9751d964da7",
+          "task_ref": {
+            "manifest": "scripts/bench/public_benchmark_pilot_v1.json",
+            "task_id": "pub-ref-004"
+          },
+          "effective": false,
+          "wall_sec": 0.8495,
+          "tokens": 0,
+          "model_calls": 0,
+          "dominant_phase": ""
+        }
+      ],
+      "claim_boundary": "Cost RCA is diagnostic and must not be merged into delivery improvement claims."
+    },
+    {
+      "capability": "governance_and_trust",
+      "skill_id": "self-audit",
+      "verdict": "reject",
+      "tested_rows": 5,
+      "effective_rows": 0,
+      "effective_rate": 0.0,
+      "wall_sec": 411.4873,
+      "tokens": 195339,
+      "model_calls": 3,
+      "cost_per_effective_row": {
+        "wall_sec": null,
+        "tokens": null,
+        "model_calls": null
+      },
+      "phase_cost_share": {
+        "A": 0.0,
+        "C": 0.0,
+        "D": 0.0,
+        "P": 0.0526,
+        "R": 0.9474,
+        "X": 0.0
+      },
+      "dominant_phase": "R",
+      "top_wall_rows": [
+        {
+          "row_id": "governance_and_trust::pub-ref-003::skill_arm_004_f0f00bb84882",
+          "task_ref": {
+            "manifest": "scripts/bench/public_benchmark_pilot_v1.json",
+            "task_id": "pub-ref-003"
+          },
+          "effective": false,
+          "wall_sec": 175.6989,
+          "tokens": 68383,
+          "model_calls": 1,
+          "dominant_phase": "R"
+        },
+        {
+          "row_id": "governance_and_trust::pub-feat-003::skill_arm_004_f0f00bb84882",
+          "task_ref": {
+            "manifest": "scripts/bench/public_benchmark_pilot_v1.json",
+            "task_id": "pub-feat-003"
+          },
+          "effective": false,
+          "wall_sec": 119.8897,
+          "tokens": 61433,
+          "model_calls": 1,
+          "dominant_phase": "R"
+        },
+        {
+          "row_id": "governance_and_trust::pub-feat-002::skill_arm_004_f0f00bb84882",
+          "task_ref": {
+            "manifest": "scripts/bench/public_benchmark_pilot_v1.json",
+            "task_id": "pub-feat-002"
+          },
+          "effective": false,
+          "wall_sec": 114.2114,
+          "tokens": 65523,
+          "model_calls": 1,
+          "dominant_phase": "R"
+        },
+        {
+          "row_id": "governance_and_trust::pub-feat-004::skill_arm_004_f0f00bb84882",
+          "task_ref": {
+            "manifest": "scripts/bench/public_benchmark_pilot_v1.json",
+            "task_id": "pub-feat-004"
+          },
+          "effective": false,
+          "wall_sec": 0.8444,
+          "tokens": 0,
+          "model_calls": 0,
+          "dominant_phase": ""
+        },
+        {
+          "row_id": "governance_and_trust::pub-ref-004::skill_arm_004_f0f00bb84882",
+          "task_ref": {
+            "manifest": "scripts/bench/public_benchmark_pilot_v1.json",
+            "task_id": "pub-ref-004"
+          },
+          "effective": false,
+          "wall_sec": 0.8429,
+          "tokens": 0,
+          "model_calls": 0,
+          "dominant_phase": ""
+        }
+      ],
+      "claim_boundary": "Cost RCA is diagnostic and must not be merged into delivery improvement claims."
+    }
+  ],
+  "claim_boundary": [
+    "This contract explains cost and phase concentration only.",
+    "Cost observations must not be merged into delivery improvement claims, promotion claims, or public cost-efficiency claims."
+  ]
+}

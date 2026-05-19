@@ -1,0 +1,78 @@
+{
+  "approved_primary": [
+    {
+      "capability_id": "repair_loop",
+      "evidence_refs": [
+        "docs/reports/NEXUS_SF_TDD_SEAL_SKILL_ARM_CATALOG_2026-05-17.json",
+        "docs/reports/NEXUS_SKILL_PROMOTION_THRESHOLD_CONTRACT_REPAIR_AND_CODING_SF_TDD_SEAL_2026-05-18.json",
+        "docs/reports/NEXUS_SF_MATTPOCOCK_CHALLENGE_COMPARISON_2026-05-18.json",
+        "docs/reports/NEXUS_SF_RUNTIME_RECEIPT_SMOKE_2026-05-18.json"
+      ],
+      "path": "/Users/jameschen/Workspace/nexus/.agents/skills/tdd/SKILL.md",
+      "skill_id": "tdd",
+      "source_root": "nexus_repo",
+      "source_type": "nexus_local"
+    },
+    {
+      "capability_id": "forecast_pregate",
+      "evidence_refs": [
+        "docs/reports/NEXUS_SF_COMPOSIO_AWESOME_CODEX_CHALLENGE_COMPARISON_2026-05-18.json",
+        "docs/reports/NEXUS_SF_FORECAST_CREATE_PLAN_SEAL_LIVE_REPORT_V2_2026-05-18.json",
+        "docs/reports/NEXUS_SF_FORECAST_CREATE_PLAN_SEAL_CATALOG_V2_2026-05-18.json",
+        "docs/reports/NEXUS_SF_RUNTIME_RECEIPT_SMOKE_2026-05-18.json"
+      ],
+      "path": "/Users/jameschen/Workspace/nexus/.agents/skills/create-plan/SKILL.md",
+      "skill_id": "create-plan",
+      "source_root": "nexus_repo",
+      "source_type": "repo_local_materialized_external"
+    },
+    {
+      "capability_id": "research_and_source_discipline",
+      "evidence_refs": [
+        "docs/reports/NEXUS_SF_RESEARCH_EXPECTED_CAPABILITY_SEAL_CATALOG_2026-05-18.json",
+        "docs/reports/NEXUS_SF_RESEARCH_TIEBREAK_AND_GOVERNANCE_CURATION_2026-05-18.json",
+        "docs/reports/NEXUS_SKILL_STATUS_SF_RESEARCH_2026-05-18.json"
+      ],
+      "path": "/Users/jameschen/Workspace/nexus/.agents/skills/research-citation-chain-verifier/SKILL.md",
+      "skill_id": "research-citation-chain-verifier",
+      "source_root": "nexus_repo",
+      "source_type": "repo_local_materialized_research_candidate"
+    },
+    {
+      "capability_id": "governance_and_trust",
+      "evidence_refs": [
+        "docs/reports/NEXUS_SF_GOVERNANCE_EXPECTED_CAPABILITY_SEAL_CATALOG_2026-05-18.json",
+        "docs/reports/NEXUS_SF_GOVERNANCE_V3_CANDIDATE_MUTANT_VALID_CATALOG_2026-05-18.json",
+        "docs/reports/NEXUS_SF_GOVERNANCE_PRIMARY_TIEBREAK_2026-05-18.json",
+        "docs/reports/NEXUS_SF_GOVERNANCE_RUNTIME_REVIEW_SEAL_2026-05-18.json"
+      ],
+      "path": "/Users/jameschen/Workspace/nexus/.agents/skills/acceptance-evidence-failclosed/SKILL.md",
+      "skill_id": "acceptance-evidence-failclosed",
+      "source_root": "nexus_repo",
+      "source_type": "repo_local_curated_governance_candidate"
+    }
+  ],
+  "approved_primary_count": 4,
+  "decision_rule": "approve only candidates with paired or seal evidence plus runtime receipt smoke or runtime-review seal; keep public benchmark blocked",
+  "generated_at": "2026-05-18T00:00:00+08:00",
+  "held_alternates": {
+    "governance_and_trust": [
+      "cso",
+      "claudeosint-safe-surface-audit",
+      "gbrain-soul-audit"
+    ],
+    "repair_and_coding": [
+      "tdd"
+    ],
+    "research_and_source_discipline": [
+      "research-source-validation-auditor",
+      "research-source-conflict-resolver"
+    ]
+  },
+  "manual_choice_required": false,
+  "public_benchmark_allowed": false,
+  "runtime_update_allowed": true,
+  "schema": "nexus.sf_runtime_apply_review.v8",
+  "status": "PASS",
+  "verdict": "EVIDENCE_APPROVED_RUNTIME_OVERLAY_APPLY"
+}

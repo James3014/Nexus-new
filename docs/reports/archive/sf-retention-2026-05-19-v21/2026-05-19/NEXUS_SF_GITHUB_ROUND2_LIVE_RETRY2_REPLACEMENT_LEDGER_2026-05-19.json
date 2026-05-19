@@ -1,0 +1,20 @@
+{
+  "blocked_replacements": [
+    {
+      "capability": "codeintel",
+      "challenger": "github2-superpowers-systematic-debugging",
+      "reason": "challenger_not_better_on_token_and_wall"
+    },
+    {
+      "capability": "metabolism_resume",
+      "challenger": "github2-superpowers-executing-plans",
+      "reason": "challenger_not_better_on_token_and_wall"
+    }
+  ],
+  "entries": [],
+  "public_benchmark_allowed": false,
+  "runtime_update_allowed": false,
+  "schema": "nexus.sf_github_round2_live_retry2_replacement_ledger.v1",
+  "status": "NO_REPLACEMENT",
+  "version": "2026-05-19"
+}

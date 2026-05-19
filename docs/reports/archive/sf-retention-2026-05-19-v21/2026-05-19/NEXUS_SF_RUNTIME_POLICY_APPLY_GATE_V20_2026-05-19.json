@@ -1,0 +1,63 @@
+{
+  "apply_scope": [
+    "registry_skills_sync",
+    "ultra_review"
+  ],
+  "blocking_reasons": [
+    {
+      "capability": "registry_skills_sync",
+      "missing": [
+        "selected",
+        "injected",
+        "used",
+        "evidence_present",
+        "gate_passed",
+        "outcome_contributed",
+        "skill_mount_contract_status_pass"
+      ],
+      "reason": "runtime_receipt_not_confirmed",
+      "skill_id": "github3-openclaw-map-registry-sync"
+    },
+    {
+      "capability": "registry_skills_sync",
+      "missing": [
+        "selected",
+        "injected",
+        "used",
+        "evidence_present",
+        "gate_passed",
+        "outcome_contributed",
+        "skill_mount_contract_status_pass"
+      ],
+      "reason": "runtime_receipt_not_confirmed",
+      "skill_id": "github3-openai-skill-creator-safe-registry-sync"
+    },
+    {
+      "capability": "ultra_review",
+      "missing": [
+        "selected",
+        "injected",
+        "used",
+        "evidence_present",
+        "gate_passed",
+        "outcome_contributed",
+        "skill_mount_contract_status_pass"
+      ],
+      "reason": "runtime_receipt_not_confirmed",
+      "skill_id": "github3-claude-security-scan-safe-ultra-review"
+    }
+  ],
+  "candidate_overlay_update_allowed": true,
+  "decision_rules": [
+    "Do not replace runtime default from delivery PASS alone.",
+    "Require runtime_eligible true and selected/injected/used/evidence/gate/outcome true.",
+    "External/generated challenger skills remain catalog candidates until runtime-reviewed materialization passes."
+  ],
+  "public_benchmark_allowed": false,
+  "runtime_update_allowed": false,
+  "schema": "nexus.sf_runtime_policy_apply_gate.v20",
+  "source_overlay": "docs/reports/NEXUS_SF_GITHUB_ROUND3_CANDIDATE_OVERLAY_V20_2026-05-19.json",
+  "source_receipt_smoke": "docs/reports/NEXUS_SF_CANDIDATE_RECEIPT_SMOKE_V20_2026-05-19.json",
+  "status": "HOLD_RUNTIME_REVIEW_REQUIRED",
+  "version": "2026-05-19"
+}

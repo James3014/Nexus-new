@@ -1,0 +1,55 @@
+{
+  "schema": "nexus.skill_promotion_threshold_contract.v1",
+  "status": "PASS",
+  "runtime_update_allowed": false,
+  "flash100_allowed": true,
+  "promotion_allowed": false,
+  "thresholds": {
+    "min_tested_rows_per_skill": 30,
+    "min_seal_runs_before_runtime": 2,
+    "default_min_effective_rate": 0.8,
+    "alternate_min_effective_rate": 0.6,
+    "min_task_buckets_for_alternate": 2,
+    "required_validation_lanes": [
+      "Flash50",
+      "Flash100"
+    ],
+    "requires_repeated_denominator": true,
+    "requires_trust_mismatch_zero": true,
+    "requires_evidence_and_receipt_refs": true
+  },
+  "summary": {
+    "skill_count": 1,
+    "promotion_ready_count": 1,
+    "needs_targeted_replay_count": 0,
+    "default_candidate_count": 0,
+    "alternate_candidate_count": 1,
+    "queue_count": 3,
+    "matrix_complete": true
+  },
+  "failures": [],
+  "capability_skill_thresholds": [
+    {
+      "capability": "repair_and_coding",
+      "skill_id": "tdd",
+      "verdict": "needs_more_data",
+      "tested_rows": 30,
+      "effective_rows": 19,
+      "effective_rate": 0.6333,
+      "task_bucket_count": 5,
+      "evidence_complete": true,
+      "observed_rows_ok": true,
+      "threshold_status": "validation_required",
+      "threshold_recommendation": "alternate_candidate",
+      "required_validation_lanes": [
+        "Flash50",
+        "Flash100"
+      ]
+    }
+  ],
+  "claim_boundary": [
+    "This contract freezes promotion thresholds; it does not update runtime policy.",
+    "A single diagnostic Flash180 run can schedule targeted replay but cannot by itself promote runtime defaults.",
+    "Flash100 is allowed only after at least one capability/skill pair has receipt-backed positive verdict evidence."
+  ]
+}

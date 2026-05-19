@@ -1,0 +1,493 @@
+{
+  "schema": "nexus.sf_runtime_skill_policy_overlay.v12",
+  "status": "PASS",
+  "generated_at": "2026-05-19T00:00:00+08:00",
+  "formalized_from": "docs/reports/NEXUS_SF_RUNTIME_POLICY_PATCH_PLAN_V12_2026-05-19.json",
+  "source_review": "docs/reports/NEXUS_SF_RUNTIME_PROMOTION_REVIEW_V12_2026-05-19.json",
+  "runtime_update_allowed": true,
+  "public_benchmark_allowed": false,
+  "primary_skill_by_capability": {
+    "belief": "sf2-belief-route-fit-spec",
+    "claim_gate": "nexus-benchmark-continuous-optimization",
+    "codeintel": "sf2-codeintel-route-fit-spec",
+    "direct_master_loop": "sf2-direct_master_loop-route-fit-spec",
+    "external_productivity": "sf2-external_productivity-route-fit-spec",
+    "file_lock_security_gate": "sf2-file_lock_security_gate-route-fit-spec",
+    "forecast_pregate": "create-plan",
+    "governance_and_trust": "acceptance-evidence-failclosed",
+    "hyper_sprint": "sf2-hyper_sprint-route-fit-spec",
+    "learn_ask": "nexus-capability-upgrade",
+    "nightshift": "sf2-nightshift-route-fit-spec",
+    "regression_guard": "diagnose",
+    "repair_loop": "tdd",
+    "research_and_source_discipline": "research-citation-chain-verifier",
+    "swarm_multi_agent": "sf2-swarm_multi_agent-route-fit-spec",
+    "research": "research-citation-chain-verifier",
+    "research_control_plane": "research-citation-chain-verifier",
+    "xray": "diagnose",
+    "lancedb": "research-source-validation-auditor",
+    "memory": "diagnose",
+    "learning_closure": "sf2-learning_closure-route-fit-spec",
+    "autoreason": "sf2-belief-route-fit-spec",
+    "ddtree": "nexus-root-cause-probe",
+    "drone": "diagnose",
+    "artifact_gate": "acceptance-evidence-failclosed",
+    "metabolism_resume": "nexus-goal-closure-executor"
+  },
+  "capability_aliases": {
+    "belief": [
+      "belief"
+    ],
+    "claim_gate": [
+      "claim_gate"
+    ],
+    "direct_master_loop": [
+      "direct_master_loop",
+      "hyper",
+      "delivery_gate",
+      "artifact_gate"
+    ],
+    "external_productivity": [
+      "external_productivity",
+      "research_route",
+      "research",
+      "artifact_gate"
+    ],
+    "file_lock_security_gate": [
+      "file_lock_security_gate",
+      "ultra_review",
+      "mempalace_gate",
+      "sandbox"
+    ],
+    "forecast_pregate": [
+      "forecast_pregate",
+      "pregate",
+      "forecast_gate",
+      "plan_quality_gate"
+    ],
+    "governance_and_trust": [
+      "governance_and_trust",
+      "claim_gate",
+      "pregate",
+      "ultra_review",
+      "mempalace",
+      "mempalace_gate"
+    ],
+    "hyper_sprint": [
+      "hyper_sprint",
+      "hyper"
+    ],
+    "learn_ask": [
+      "learn_ask",
+      "learn_mode",
+      "research_route"
+    ],
+    "nightshift": [
+      "nightshift"
+    ],
+    "regression_guard": [
+      "regression_guard",
+      "semantic_failure_sensor",
+      "jit_validation",
+      "delivery_gate",
+      "artifact_gate"
+    ],
+    "repair_loop": [
+      "repair_loop",
+      "repair_and_coding",
+      "hyper",
+      "codeintel",
+      "jit_validation",
+      "semantic_failure_sensor"
+    ],
+    "research_and_source_discipline": [
+      "research_and_source_discipline",
+      "research",
+      "research_route",
+      "lancedb",
+      "semantic_searcher"
+    ],
+    "swarm_multi_agent": [
+      "swarm_multi_agent",
+      "swarm"
+    ],
+    "codeintel": [
+      "codeintel"
+    ],
+    "research": [
+      "research"
+    ],
+    "research_control_plane": [
+      "research_control_plane",
+      "research"
+    ],
+    "xray": [
+      "xray",
+      "codeintel"
+    ],
+    "lancedb": [
+      "lancedb"
+    ],
+    "memory": [
+      "memory"
+    ],
+    "learning_closure": [
+      "learning_closure",
+      "semantic_failure_sensor"
+    ],
+    "autoreason": [
+      "autoreason"
+    ],
+    "ddtree": [
+      "ddtree"
+    ],
+    "drone": [
+      "drone"
+    ],
+    "artifact_gate": [
+      "artifact_gate"
+    ],
+    "metabolism_resume": [
+      "metabolism_resume",
+      "semantic_failure_sensor"
+    ]
+  },
+  "applied_primary": [
+    {
+      "capability_id": "belief",
+      "evidence_refs": [
+        "docs/reports/NEXUS_SF_SKILL_HELP_CONFIRMATION_2026-05-18.json"
+      ],
+      "path": "/Users/jameschen/Workspace/nexus/.agents/skills/sf2/sf2-belief-route-fit-spec/SKILL.md",
+      "skill_id": "sf2-belief-route-fit-spec",
+      "source_root": "nexus_repo",
+      "source_type": "sf_runtime_expand_strong_help"
+    },
+    {
+      "capability_id": "claim_gate",
+      "evidence_refs": [
+        "docs/reports/NEXUS_SF_SKILL_HELP_CONFIRMATION_2026-05-18.json"
+      ],
+      "path": "/Users/jameschen/Workspace/nexus/.agents/skills/nexus-benchmark-continuous-optimization/SKILL.md",
+      "skill_id": "nexus-benchmark-continuous-optimization",
+      "source_root": "nexus_repo",
+      "source_type": "sf_runtime_expand_strong_help"
+    },
+    {
+      "capability_id": "codeintel",
+      "skill_id": "sf2-codeintel-route-fit-spec",
+      "path": "/Users/jameschen/Workspace/nexus/.agents/skills/sf2/sf2-codeintel-route-fit-spec/SKILL.md",
+      "source_root": "nexus_repo",
+      "source_type": "sf_v10_strict_retest_primary",
+      "runtime_eligible": true,
+      "evidence_refs": [
+        "/private/tmp/nexus_sf_v10_retest_live_20260518/live_summary.json",
+        "docs/reports/NEXUS_SF_V10_RETEST_ROLLUP_2026-05-18.json"
+      ],
+      "promotion_reason": "v10_strict_delivery_receipt_token_wall_pass",
+      "token_delta": -9134,
+      "wall_delta_sec": -20.8284
+    },
+    {
+      "capability_id": "direct_master_loop",
+      "evidence_refs": [
+        "docs/reports/NEXUS_SF_SKILL_HELP_CONFIRMATION_2026-05-18.json"
+      ],
+      "path": "/Users/jameschen/Workspace/nexus/.agents/skills/sf2/sf2-direct_master_loop-route-fit-spec/SKILL.md",
+      "skill_id": "sf2-direct_master_loop-route-fit-spec",
+      "source_root": "nexus_repo",
+      "source_type": "sf_runtime_expand_strong_help"
+    },
+    {
+      "capability_id": "external_productivity",
+      "evidence_refs": [
+        "docs/reports/NEXUS_SF_SKILL_HELP_CONFIRMATION_2026-05-18.json"
+      ],
+      "path": "/Users/jameschen/Workspace/nexus/.agents/skills/sf2/sf2-external_productivity-route-fit-spec/SKILL.md",
+      "skill_id": "sf2-external_productivity-route-fit-spec",
+      "source_root": "nexus_repo",
+      "source_type": "sf_runtime_expand_strong_help"
+    },
+    {
+      "capability_id": "file_lock_security_gate",
+      "evidence_refs": [
+        "docs/reports/NEXUS_SF_SKILL_HELP_CONFIRMATION_2026-05-18.json"
+      ],
+      "path": "/Users/jameschen/Workspace/nexus/.agents/skills/sf2/sf2-file_lock_security_gate-route-fit-spec/SKILL.md",
+      "skill_id": "sf2-file_lock_security_gate-route-fit-spec",
+      "source_root": "nexus_repo",
+      "source_type": "sf_runtime_expand_strong_help"
+    },
+    {
+      "capability_id": "forecast_pregate",
+      "evidence_refs": [
+        "docs/reports/NEXUS_SF_RUNTIME_APPLY_RESULT_V8_2026-05-18.json"
+      ],
+      "path": "/Users/jameschen/Workspace/nexus/.agents/skills/create-plan/SKILL.md",
+      "skill_id": "create-plan",
+      "source_root": "nexus_repo",
+      "source_type": "sf_v8_primary"
+    },
+    {
+      "capability_id": "governance_and_trust",
+      "evidence_refs": [
+        "docs/reports/NEXUS_SF_RUNTIME_APPLY_RESULT_V8_2026-05-18.json"
+      ],
+      "path": "/Users/jameschen/Workspace/nexus/.agents/skills/acceptance-evidence-failclosed/SKILL.md",
+      "skill_id": "acceptance-evidence-failclosed",
+      "source_root": "nexus_repo",
+      "source_type": "sf_v8_primary"
+    },
+    {
+      "capability_id": "hyper_sprint",
+      "evidence_refs": [
+        "docs/reports/NEXUS_SF_SKILL_HELP_CONFIRMATION_2026-05-18.json"
+      ],
+      "path": "/Users/jameschen/Workspace/nexus/.agents/skills/sf2/sf2-hyper_sprint-route-fit-spec/SKILL.md",
+      "skill_id": "sf2-hyper_sprint-route-fit-spec",
+      "source_root": "nexus_repo",
+      "source_type": "sf_runtime_expand_strong_help"
+    },
+    {
+      "capability_id": "learn_ask",
+      "evidence_refs": [
+        "docs/reports/NEXUS_SF_SKILL_HELP_CONFIRMATION_2026-05-18.json"
+      ],
+      "path": "/Users/jameschen/Workspace/nexus/.agents/skills/nexus-capability-upgrade/SKILL.md",
+      "skill_id": "nexus-capability-upgrade",
+      "source_root": "nexus_repo",
+      "source_type": "sf_runtime_expand_strong_help"
+    },
+    {
+      "capability_id": "nightshift",
+      "evidence_refs": [
+        "docs/reports/NEXUS_SF_SKILL_HELP_CONFIRMATION_2026-05-18.json"
+      ],
+      "path": "/Users/jameschen/Workspace/nexus/.agents/skills/sf2/sf2-nightshift-route-fit-spec/SKILL.md",
+      "skill_id": "sf2-nightshift-route-fit-spec",
+      "source_root": "nexus_repo",
+      "source_type": "sf_runtime_expand_strong_help"
+    },
+    {
+      "capability_id": "regression_guard",
+      "evidence_refs": [
+        "docs/reports/NEXUS_SF_SKILL_HELP_CONFIRMATION_2026-05-18.json"
+      ],
+      "path": "/Users/jameschen/Workspace/nexus/.agents/skills/diagnose/SKILL.md",
+      "skill_id": "diagnose",
+      "source_root": "nexus_repo",
+      "source_type": "sf_runtime_expand_strong_help"
+    },
+    {
+      "capability_id": "repair_loop",
+      "evidence_refs": [
+        "docs/reports/NEXUS_SF_RUNTIME_APPLY_RESULT_V8_2026-05-18.json"
+      ],
+      "path": "/Users/jameschen/Workspace/nexus/.agents/skills/tdd/SKILL.md",
+      "skill_id": "tdd",
+      "source_root": "nexus_repo",
+      "source_type": "sf_v8_primary"
+    },
+    {
+      "capability_id": "research_and_source_discipline",
+      "evidence_refs": [
+        "docs/reports/NEXUS_SF_RUNTIME_APPLY_RESULT_V8_2026-05-18.json"
+      ],
+      "path": "/Users/jameschen/Workspace/nexus/.agents/skills/research-citation-chain-verifier/SKILL.md",
+      "skill_id": "research-citation-chain-verifier",
+      "source_root": "nexus_repo",
+      "source_type": "sf_v8_primary"
+    },
+    {
+      "capability_id": "swarm_multi_agent",
+      "evidence_refs": [
+        "docs/reports/NEXUS_SF_SKILL_HELP_CONFIRMATION_2026-05-18.json"
+      ],
+      "path": "/Users/jameschen/Workspace/nexus/.agents/skills/sf2/sf2-swarm_multi_agent-route-fit-spec/SKILL.md",
+      "skill_id": "sf2-swarm_multi_agent-route-fit-spec",
+      "source_root": "nexus_repo",
+      "source_type": "sf_runtime_expand_strong_help"
+    },
+    {
+      "capability_id": "research",
+      "skill_id": "research-citation-chain-verifier",
+      "path": "/Users/jameschen/Workspace/nexus/.agents/skills/research-citation-chain-verifier/SKILL.md",
+      "source_root": "nexus_repo",
+      "source_type": "sf_v12_strict_runtime_review",
+      "runtime_eligible": true,
+      "safety_status": "runtime_reviewed",
+      "evidence_refs": [
+        "docs/reports/NEXUS_SF_ALL_CAPABILITY_CURRENT_STATE_2026-05-19.json",
+        "docs/reports/NEXUS_SF_V12_COMBINED_SKILL_STATUS_2026-05-19.json"
+      ],
+      "promotion_reason": "sf_v12_strict_receipt_token_wall_pass",
+      "token_delta": -2275,
+      "wall_delta_sec": -38.1098
+    },
+    {
+      "capability_id": "research_control_plane",
+      "skill_id": "research-citation-chain-verifier",
+      "path": "/Users/jameschen/Workspace/nexus/.agents/skills/research-citation-chain-verifier/SKILL.md",
+      "source_root": "nexus_repo",
+      "source_type": "sf_v12_strict_runtime_review",
+      "runtime_eligible": true,
+      "safety_status": "runtime_reviewed",
+      "evidence_refs": [
+        "docs/reports/NEXUS_SF_ALL_CAPABILITY_CURRENT_STATE_2026-05-19.json",
+        "docs/reports/NEXUS_SF_V12_COMBINED_SKILL_STATUS_2026-05-19.json"
+      ],
+      "promotion_reason": "sf_v12_strict_receipt_token_wall_pass",
+      "token_delta": -3122,
+      "wall_delta_sec": -77.2095
+    },
+    {
+      "capability_id": "xray",
+      "skill_id": "diagnose",
+      "path": "/Users/jameschen/Workspace/nexus/.agents/skills/diagnose/SKILL.md",
+      "source_root": "nexus_repo",
+      "source_type": "sf_v12_strict_runtime_review",
+      "runtime_eligible": true,
+      "safety_status": "runtime_reviewed",
+      "evidence_refs": [
+        "docs/reports/NEXUS_SF_ALL_CAPABILITY_CURRENT_STATE_2026-05-19.json",
+        "docs/reports/NEXUS_SF_V12_COMBINED_SKILL_STATUS_2026-05-19.json"
+      ],
+      "promotion_reason": "sf_v12_strict_receipt_token_wall_pass",
+      "token_delta": -6764,
+      "wall_delta_sec": -56.658
+    },
+    {
+      "capability_id": "lancedb",
+      "skill_id": "research-source-validation-auditor",
+      "path": "/Users/jameschen/Workspace/nexus/.agents/skills/research-source-validation-auditor/SKILL.md",
+      "source_root": "nexus_repo",
+      "source_type": "sf_v12_strict_runtime_review",
+      "runtime_eligible": true,
+      "safety_status": "runtime_reviewed",
+      "evidence_refs": [
+        "docs/reports/NEXUS_SF_ALL_CAPABILITY_CURRENT_STATE_2026-05-19.json",
+        "docs/reports/NEXUS_SF_V12_COMBINED_SKILL_STATUS_2026-05-19.json"
+      ],
+      "promotion_reason": "sf_v12_strict_receipt_token_wall_pass",
+      "token_delta": -1403,
+      "wall_delta_sec": -9.4065
+    },
+    {
+      "capability_id": "memory",
+      "skill_id": "diagnose",
+      "path": "/Users/jameschen/Workspace/nexus/.agents/skills/diagnose/SKILL.md",
+      "source_root": "nexus_repo",
+      "source_type": "sf_v12_strict_runtime_review",
+      "runtime_eligible": true,
+      "safety_status": "runtime_reviewed",
+      "evidence_refs": [
+        "docs/reports/NEXUS_SF_ALL_CAPABILITY_CURRENT_STATE_2026-05-19.json",
+        "docs/reports/NEXUS_SF_V12_COMBINED_SKILL_STATUS_2026-05-19.json"
+      ],
+      "promotion_reason": "sf_v12_strict_receipt_token_wall_pass",
+      "token_delta": -1732,
+      "wall_delta_sec": -36.6634
+    },
+    {
+      "capability_id": "learning_closure",
+      "skill_id": "sf2-learning_closure-route-fit-spec",
+      "path": "/Users/jameschen/Workspace/nexus/.agents/skills/sf2/sf2-learning_closure-route-fit-spec/SKILL.md",
+      "source_root": "nexus_repo",
+      "source_type": "sf_v12_strict_runtime_review",
+      "runtime_eligible": true,
+      "safety_status": "runtime_reviewed",
+      "evidence_refs": [
+        "docs/reports/NEXUS_SF_ALL_CAPABILITY_CURRENT_STATE_2026-05-19.json",
+        "docs/reports/NEXUS_SF_V12_COMBINED_SKILL_STATUS_2026-05-19.json"
+      ],
+      "promotion_reason": "sf_v12_strict_receipt_token_wall_pass",
+      "token_delta": -1134,
+      "wall_delta_sec": -10.0439
+    },
+    {
+      "capability_id": "autoreason",
+      "skill_id": "sf2-belief-route-fit-spec",
+      "path": "/Users/jameschen/Workspace/nexus/.agents/skills/sf2/sf2-belief-route-fit-spec/SKILL.md",
+      "source_root": "nexus_repo",
+      "source_type": "sf_v12_strict_runtime_review",
+      "runtime_eligible": true,
+      "safety_status": "runtime_reviewed",
+      "evidence_refs": [
+        "docs/reports/NEXUS_SF_ALL_CAPABILITY_CURRENT_STATE_2026-05-19.json",
+        "docs/reports/NEXUS_SF_V12_COMBINED_SKILL_STATUS_2026-05-19.json"
+      ],
+      "promotion_reason": "sf_v12_strict_receipt_token_wall_pass",
+      "token_delta": -850,
+      "wall_delta_sec": -34.2891
+    },
+    {
+      "capability_id": "ddtree",
+      "skill_id": "nexus-root-cause-probe",
+      "path": "/Users/jameschen/Workspace/nexus/.agents/skills/nexus-root-cause-probe/SKILL.md",
+      "source_root": "nexus_repo",
+      "source_type": "sf_v12_strict_runtime_review",
+      "runtime_eligible": true,
+      "safety_status": "runtime_reviewed",
+      "evidence_refs": [
+        "docs/reports/NEXUS_SF_ALL_CAPABILITY_CURRENT_STATE_2026-05-19.json",
+        "docs/reports/NEXUS_SF_V12_COMBINED_SKILL_STATUS_2026-05-19.json"
+      ],
+      "promotion_reason": "sf_v12_strict_receipt_token_wall_pass",
+      "token_delta": -11138,
+      "wall_delta_sec": -53.7268
+    },
+    {
+      "capability_id": "drone",
+      "skill_id": "diagnose",
+      "path": "/Users/jameschen/Workspace/nexus/.agents/skills/diagnose/SKILL.md",
+      "source_root": "nexus_repo",
+      "source_type": "sf_v12_strict_runtime_review",
+      "runtime_eligible": true,
+      "safety_status": "runtime_reviewed",
+      "evidence_refs": [
+        "docs/reports/NEXUS_SF_ALL_CAPABILITY_CURRENT_STATE_2026-05-19.json",
+        "docs/reports/NEXUS_SF_V12_COMBINED_SKILL_STATUS_2026-05-19.json"
+      ],
+      "promotion_reason": "sf_v12_strict_receipt_token_wall_pass",
+      "token_delta": -459,
+      "wall_delta_sec": -8.7376
+    },
+    {
+      "capability_id": "artifact_gate",
+      "skill_id": "acceptance-evidence-failclosed",
+      "path": "/Users/jameschen/Workspace/nexus/.agents/skills/acceptance-evidence-failclosed/SKILL.md",
+      "source_root": "nexus_repo",
+      "source_type": "sf_v12_strict_runtime_review",
+      "runtime_eligible": true,
+      "safety_status": "runtime_reviewed",
+      "evidence_refs": [
+        "docs/reports/NEXUS_SF_ALL_CAPABILITY_CURRENT_STATE_2026-05-19.json",
+        "docs/reports/NEXUS_SF_V12_COMBINED_SKILL_STATUS_2026-05-19.json"
+      ],
+      "promotion_reason": "sf_v12_strict_receipt_token_wall_pass",
+      "token_delta": -257,
+      "wall_delta_sec": -25.2579
+    },
+    {
+      "capability_id": "metabolism_resume",
+      "skill_id": "nexus-goal-closure-executor",
+      "path": "/Users/jameschen/Workspace/nexus/.agents/skills/nexus-goal-closure-executor/SKILL.md",
+      "source_root": "nexus_repo",
+      "source_type": "sf_v12_strict_runtime_review",
+      "runtime_eligible": true,
+      "safety_status": "runtime_reviewed",
+      "evidence_refs": [
+        "docs/reports/NEXUS_SF_ALL_CAPABILITY_CURRENT_STATE_2026-05-19.json",
+        "docs/reports/NEXUS_SF_V12_COMBINED_SKILL_STATUS_2026-05-19.json"
+      ],
+      "promotion_reason": "sf_v12_strict_receipt_token_wall_pass",
+      "token_delta": -1322,
+      "wall_delta_sec": -1.6853
+    }
+  ],
+  "blockers": [],
+  "claim_boundary": {
+    "runtime_overlay_candidate": true,
+    "public_benchmark_allowed": false
+  }
+}

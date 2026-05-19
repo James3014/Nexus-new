@@ -1,0 +1,197 @@
+{
+  "claim_boundary": [
+    "V10 retests only high-value held capabilities.",
+    "No blind 21-capability rerun.",
+    "No runtime expansion until V10 paired evidence and post-apply smoke pass."
+  ],
+  "generated_at": "2026-05-18T00:00:00+08:00",
+  "queue": [
+    {
+      "arms": [
+        {
+          "arm_id": "flash_nexus_no_skill",
+          "skill_id": null
+        },
+        {
+          "arm_id": "flash_nexus_current_best",
+          "skill_id": "research-citation-chain-verifier"
+        },
+        {
+          "arm_id": "flash_nexus_challenger",
+          "skill_id": "nexus-goal-closure-executor"
+        }
+      ],
+      "candidate_pool": [
+        "research-citation-chain-verifier",
+        "nexus-goal-closure-executor",
+        "diagnose",
+        "nexus-root-cause-probe"
+      ],
+      "capability_id": "artifact_gate",
+      "exit_condition": "promote only if delivery/receipt PASS and token_delta<=0 and wall_delta<=0 against no-skill; otherwise remain held",
+      "reason": "cost_regressed",
+      "token_delta": 4478,
+      "wall_delta_sec": 22.8367
+    },
+    {
+      "arms": [
+        {
+          "arm_id": "flash_nexus_no_skill",
+          "skill_id": null
+        },
+        {
+          "arm_id": "flash_nexus_current_best",
+          "skill_id": "sf2-autoreason-route-fit-spec"
+        },
+        {
+          "arm_id": "flash_nexus_challenger",
+          "skill_id": "nexus-benchmark-public-report"
+        }
+      ],
+      "candidate_pool": [
+        "sf2-autoreason-route-fit-spec",
+        "nexus-benchmark-public-report",
+        "sf2-belief-route-fit-spec",
+        "sf2-lancedb-route-fit-spec"
+      ],
+      "capability_id": "autoreason",
+      "exit_condition": "promote only if delivery/receipt PASS and token_delta<=0 and wall_delta<=0 against no-skill; otherwise remain held",
+      "reason": "cost_mixed",
+      "token_delta": -1247,
+      "wall_delta_sec": 9.5293
+    },
+    {
+      "arms": [
+        {
+          "arm_id": "flash_nexus_no_skill",
+          "skill_id": null
+        },
+        {
+          "arm_id": "flash_nexus_current_best",
+          "skill_id": "sf2-codeintel-route-fit-spec"
+        },
+        {
+          "arm_id": "flash_nexus_challenger",
+          "skill_id": null
+        }
+      ],
+      "candidate_pool": [
+        "sf2-codeintel-route-fit-spec"
+      ],
+      "capability_id": "codeintel",
+      "exit_condition": "promote only if delivery/receipt PASS and token_delta<=0 and wall_delta<=0 against no-skill; otherwise remain held",
+      "reason": "cost_mixed",
+      "token_delta": -1312,
+      "wall_delta_sec": 9.142
+    },
+    {
+      "arms": [
+        {
+          "arm_id": "flash_nexus_no_skill",
+          "skill_id": null
+        },
+        {
+          "arm_id": "flash_nexus_current_best",
+          "skill_id": "sf2-ddtree-route-fit-spec"
+        },
+        {
+          "arm_id": "flash_nexus_challenger",
+          "skill_id": null
+        }
+      ],
+      "candidate_pool": [
+        "sf2-ddtree-route-fit-spec"
+      ],
+      "capability_id": "ddtree",
+      "exit_condition": "promote only if delivery/receipt PASS and token_delta<=0 and wall_delta<=0 against no-skill; otherwise remain held",
+      "reason": "cost_regressed",
+      "token_delta": 13497,
+      "wall_delta_sec": 40.3892
+    },
+    {
+      "arms": [
+        {
+          "arm_id": "flash_nexus_no_skill",
+          "skill_id": null
+        },
+        {
+          "arm_id": "flash_nexus_current_best",
+          "skill_id": "research-citation-chain-verifier"
+        },
+        {
+          "arm_id": "flash_nexus_challenger",
+          "skill_id": "sf2-research_control_plane-route-fit-spec"
+        }
+      ],
+      "candidate_pool": [
+        "research-citation-chain-verifier",
+        "sf2-research_control_plane-route-fit-spec",
+        "sf2-lancedb-route-fit-spec"
+      ],
+      "capability_id": "research",
+      "exit_condition": "promote only if delivery/receipt PASS and token_delta<=0 and wall_delta<=0 against no-skill; otherwise remain held",
+      "reason": "cost_mixed",
+      "token_delta": -2222,
+      "wall_delta_sec": 27.3049
+    },
+    {
+      "arms": [
+        {
+          "arm_id": "flash_nexus_no_skill",
+          "skill_id": null
+        },
+        {
+          "arm_id": "flash_nexus_current_best",
+          "skill_id": "sf2-ui_validator-route-fit-spec"
+        },
+        {
+          "arm_id": "flash_nexus_challenger",
+          "skill_id": null
+        }
+      ],
+      "candidate_pool": [
+        "sf2-ui_validator-route-fit-spec"
+      ],
+      "capability_id": "ui_validator",
+      "exit_condition": "promote only if delivery/receipt PASS and token_delta<=0 and wall_delta<=0 against no-skill; otherwise remain held",
+      "reason": "cost_regressed",
+      "token_delta": 3163,
+      "wall_delta_sec": 14.5879
+    },
+    {
+      "arms": [
+        {
+          "arm_id": "flash_nexus_no_skill",
+          "skill_id": null
+        },
+        {
+          "arm_id": "flash_nexus_current_best",
+          "skill_id": "code-review-and-quality"
+        },
+        {
+          "arm_id": "flash_nexus_challenger",
+          "skill_id": "diagnose"
+        }
+      ],
+      "candidate_pool": [
+        "code-review-and-quality",
+        "diagnose",
+        "nexus-goal-closure-executor",
+        "nexus-root-cause-probe"
+      ],
+      "capability_id": "ultra_review",
+      "exit_condition": "promote only if delivery/receipt PASS and token_delta<=0 and wall_delta<=0 against no-skill; otherwise remain held",
+      "reason": "cost_mixed",
+      "token_delta": 1760,
+      "wall_delta_sec": -13.2412
+    }
+  ],
+  "schema": "nexus.sf_v10_retest_queue.v1",
+  "status": "PASS",
+  "summary": {
+    "arm_count": 21,
+    "public_benchmark_allowed": false,
+    "queue_count": 7,
+    "runtime_update_allowed": false
+  }
+}

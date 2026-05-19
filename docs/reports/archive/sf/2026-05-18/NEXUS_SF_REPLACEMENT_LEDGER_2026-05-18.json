@@ -1,0 +1,67 @@
+{
+  "schema": "nexus.sf_replacement_ledger.v1",
+  "status": "PASS",
+  "generated_at": "2026-05-18",
+  "replacement_count": 2,
+  "records": [
+    {
+      "capability_id": "repair_loop",
+      "legacy_capability_id": "repair_and_coding",
+      "selected_skill_id": "tdd",
+      "source": "nexus_repo / mattpocock challenge corroborated",
+      "disposition": "catalog_replace_ready",
+      "runtime_policy_action": "review_for_runtime_default_not_applied",
+      "evidence_state": {
+        "tested_rows": 30,
+        "effective_rows": 19,
+        "effective_rate": 0.6333,
+        "threshold_recommendation": "alternate_candidate",
+        "threshold_status": "validation_required"
+      },
+      "evidence_refs": [
+        "docs/reports/NEXUS_SF_TDD_SEAL_SKILL_ARM_CATALOG_2026-05-17.json",
+        "docs/reports/NEXUS_SKILL_PROMOTION_THRESHOLD_CONTRACT_REPAIR_AND_CODING_SF_TDD_SEAL_2026-05-18.json",
+        "docs/reports/NEXUS_SF_MATTPOCOCK_CHALLENGE_COMPARISON_2026-05-18.json"
+      ]
+    },
+    {
+      "capability_id": "forecast_pregate",
+      "selected_skill_id": "create-plan",
+      "source": "ComposioHQ/awesome-codex-skills materialized as repo-local candidate",
+      "source_commit": "9c9da64cf1bbea611d43dd14a10788d55369b353",
+      "disposition": "catalog_replace_ready",
+      "runtime_policy_action": "review_for_runtime_default_not_applied",
+      "evidence_state": {
+        "live_report_status": "PASS",
+        "verdict": "KEEP",
+        "selected": true,
+        "injected": true,
+        "used": true,
+        "evidence_present": true,
+        "gate_passed": true,
+        "outcome_contributed": true,
+        "token_delta": -2224,
+        "phase_wall_total_delta_sec": -3.6484,
+        "catalog_verdict": "replace_candidate"
+      },
+      "evidence_refs": [
+        "docs/reports/NEXUS_SF_COMPOSIO_AWESOME_CODEX_CHALLENGE_COMPARISON_2026-05-18.json",
+        "docs/reports/NEXUS_SF_FORECAST_CREATE_PLAN_SEAL_LIVE_REPORT_V2_2026-05-18.json",
+        "docs/reports/NEXUS_SF_FORECAST_CREATE_PLAN_SEAL_CATALOG_V2_2026-05-18.json",
+        "docs/reports/NEXUS_SF_EXTERNAL_SKILL_UPDATE_RECORD_2026-05-18.json"
+      ]
+    }
+  ],
+  "summary": {
+    "catalog_replace_ready_count": 2,
+    "runtime_update_allowed": false,
+    "public_benchmark_allowed": false,
+    "external_project_count": 3,
+    "external_compared_row_count": 17
+  },
+  "claim_boundary": [
+    "This ledger records SF replacement evidence and catalog-update readiness.",
+    "It does not write runtime defaults.",
+    "Runtime updates require a separate reviewed policy patch and post-apply regression."
+  ]
+}

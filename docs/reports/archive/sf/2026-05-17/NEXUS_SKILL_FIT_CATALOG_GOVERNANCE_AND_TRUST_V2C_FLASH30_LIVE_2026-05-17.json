@@ -1,0 +1,143 @@
+{
+  "schema": "nexus.skill_fit_catalog.v1",
+  "status": "PASS",
+  "mode": "live",
+  "matrix_path": "docs/reports/NEXUS_SKILL_FIT_EXECUTION_MATRIX_GOVERNANCE_AND_TRUST_V2C_FLASH30_2026-05-17.json",
+  "summary": {
+    "planned_rows": 30,
+    "completed_rows": 30,
+    "matrix_complete": true,
+    "capability_only_rows": 5,
+    "skill_count": 4,
+    "negative_control_rows": 5,
+    "negative_control_blocked_rows": 5,
+    "keep_count": 0,
+    "replace_candidate_count": 0,
+    "reject_count": 4,
+    "needs_more_data_count": 0
+  },
+  "failures": [],
+  "claim_boundary": [
+    "Catalog verdicts are valid only for this capability, task set, model, and matrix version.",
+    "replace_candidate means import/review candidate, not runtime promotion.",
+    "runtime policy changes require a later Flash 50/100 regression gate."
+  ],
+  "skill_verdicts": [
+    {
+      "skill_id": "acceptance-evidence-failclosed",
+      "capability": "governance_and_trust",
+      "anonymous_label": "candidate_001",
+      "source_root": "agents",
+      "runtime_eligible": false,
+      "tested_rows": 5,
+      "effective_rows": 0,
+      "trust_clean_rows": 5,
+      "verdict": "reject",
+      "evidence_refs": [
+        "/private/tmp/nexus_skill_fit_governance_v2c_flash30_live_20260517/governance_and_trust_pub-ref-003_skill_arm_001_8c2953c96e5b/evidence_bundle.json",
+        "/private/tmp/nexus_skill_fit_governance_v2c_flash30_live_20260517/governance_and_trust_pub-ref-004_skill_arm_001_8c2953c96e5b/evidence_bundle.json",
+        "/private/tmp/nexus_skill_fit_governance_v2c_flash30_live_20260517/governance_and_trust_pub-feat-002_skill_arm_001_8c2953c96e5b/evidence_bundle.json",
+        "/private/tmp/nexus_skill_fit_governance_v2c_flash30_live_20260517/governance_and_trust_pub-feat-003_skill_arm_001_8c2953c96e5b/evidence_bundle.json",
+        "/private/tmp/nexus_skill_fit_governance_v2c_flash30_live_20260517/governance_and_trust_pub-feat-004_skill_arm_001_8c2953c96e5b/evidence_bundle.json"
+      ],
+      "receipt_refs": [
+        "/private/tmp/nexus_skill_fit_governance_v2c_flash30_live_20260517/governance_and_trust_pub-ref-003_skill_arm_001_8c2953c96e5b",
+        "/private/tmp/nexus_skill_fit_governance_v2c_flash30_live_20260517/governance_and_trust_pub-ref-004_skill_arm_001_8c2953c96e5b",
+        "/private/tmp/nexus_skill_fit_governance_v2c_flash30_live_20260517/governance_and_trust_pub-feat-002_skill_arm_001_8c2953c96e5b",
+        "/private/tmp/nexus_skill_fit_governance_v2c_flash30_live_20260517/governance_and_trust_pub-feat-003_skill_arm_001_8c2953c96e5b",
+        "/private/tmp/nexus_skill_fit_governance_v2c_flash30_live_20260517/governance_and_trust_pub-feat-004_skill_arm_001_8c2953c96e5b"
+      ],
+      "task_buckets": [
+        "feature",
+        "refactor"
+      ]
+    },
+    {
+      "skill_id": "cso",
+      "capability": "governance_and_trust",
+      "anonymous_label": "candidate_002",
+      "source_root": "agents",
+      "runtime_eligible": false,
+      "tested_rows": 5,
+      "effective_rows": 0,
+      "trust_clean_rows": 5,
+      "verdict": "reject",
+      "evidence_refs": [
+        "/private/tmp/nexus_skill_fit_governance_v2c_flash30_live_20260517/governance_and_trust_pub-ref-003_skill_arm_002_e36dcda7b600/evidence_bundle.json",
+        "/private/tmp/nexus_skill_fit_governance_v2c_flash30_live_20260517/governance_and_trust_pub-ref-004_skill_arm_002_e36dcda7b600/evidence_bundle.json",
+        "/private/tmp/nexus_skill_fit_governance_v2c_flash30_live_20260517/governance_and_trust_pub-feat-002_skill_arm_002_e36dcda7b600/evidence_bundle.json",
+        "/private/tmp/nexus_skill_fit_governance_v2c_flash30_live_20260517/governance_and_trust_pub-feat-003_skill_arm_002_e36dcda7b600/evidence_bundle.json",
+        "/private/tmp/nexus_skill_fit_governance_v2c_flash30_live_20260517/governance_and_trust_pub-feat-004_skill_arm_002_e36dcda7b600/evidence_bundle.json"
+      ],
+      "receipt_refs": [
+        "/private/tmp/nexus_skill_fit_governance_v2c_flash30_live_20260517/governance_and_trust_pub-ref-003_skill_arm_002_e36dcda7b600",
+        "/private/tmp/nexus_skill_fit_governance_v2c_flash30_live_20260517/governance_and_trust_pub-ref-004_skill_arm_002_e36dcda7b600",
+        "/private/tmp/nexus_skill_fit_governance_v2c_flash30_live_20260517/governance_and_trust_pub-feat-002_skill_arm_002_e36dcda7b600",
+        "/private/tmp/nexus_skill_fit_governance_v2c_flash30_live_20260517/governance_and_trust_pub-feat-003_skill_arm_002_e36dcda7b600",
+        "/private/tmp/nexus_skill_fit_governance_v2c_flash30_live_20260517/governance_and_trust_pub-feat-004_skill_arm_002_e36dcda7b600"
+      ],
+      "task_buckets": [
+        "feature",
+        "refactor"
+      ]
+    },
+    {
+      "skill_id": "multi-agent-handoff-v15-execution-and-validation",
+      "capability": "governance_and_trust",
+      "anonymous_label": "candidate_003",
+      "source_root": "agents",
+      "runtime_eligible": false,
+      "tested_rows": 5,
+      "effective_rows": 0,
+      "trust_clean_rows": 5,
+      "verdict": "reject",
+      "evidence_refs": [
+        "/private/tmp/nexus_skill_fit_governance_v2c_flash30_live_20260517/governance_and_trust_pub-ref-003_skill_arm_003_d9751d964da7/evidence_bundle.json",
+        "/private/tmp/nexus_skill_fit_governance_v2c_flash30_live_20260517/governance_and_trust_pub-ref-004_skill_arm_003_d9751d964da7/evidence_bundle.json",
+        "/private/tmp/nexus_skill_fit_governance_v2c_flash30_live_20260517/governance_and_trust_pub-feat-002_skill_arm_003_d9751d964da7/evidence_bundle.json",
+        "/private/tmp/nexus_skill_fit_governance_v2c_flash30_live_20260517/governance_and_trust_pub-feat-003_skill_arm_003_d9751d964da7/evidence_bundle.json",
+        "/private/tmp/nexus_skill_fit_governance_v2c_flash30_live_20260517/governance_and_trust_pub-feat-004_skill_arm_003_d9751d964da7/evidence_bundle.json"
+      ],
+      "receipt_refs": [
+        "/private/tmp/nexus_skill_fit_governance_v2c_flash30_live_20260517/governance_and_trust_pub-ref-003_skill_arm_003_d9751d964da7",
+        "/private/tmp/nexus_skill_fit_governance_v2c_flash30_live_20260517/governance_and_trust_pub-ref-004_skill_arm_003_d9751d964da7",
+        "/private/tmp/nexus_skill_fit_governance_v2c_flash30_live_20260517/governance_and_trust_pub-feat-002_skill_arm_003_d9751d964da7",
+        "/private/tmp/nexus_skill_fit_governance_v2c_flash30_live_20260517/governance_and_trust_pub-feat-003_skill_arm_003_d9751d964da7",
+        "/private/tmp/nexus_skill_fit_governance_v2c_flash30_live_20260517/governance_and_trust_pub-feat-004_skill_arm_003_d9751d964da7"
+      ],
+      "task_buckets": [
+        "feature",
+        "refactor"
+      ]
+    },
+    {
+      "skill_id": "self-audit",
+      "capability": "governance_and_trust",
+      "anonymous_label": "candidate_004",
+      "source_root": "agents",
+      "runtime_eligible": false,
+      "tested_rows": 5,
+      "effective_rows": 0,
+      "trust_clean_rows": 5,
+      "verdict": "reject",
+      "evidence_refs": [
+        "/private/tmp/nexus_skill_fit_governance_v2c_flash30_live_20260517/governance_and_trust_pub-ref-003_skill_arm_004_f0f00bb84882/evidence_bundle.json",
+        "/private/tmp/nexus_skill_fit_governance_v2c_flash30_live_20260517/governance_and_trust_pub-ref-004_skill_arm_004_f0f00bb84882/evidence_bundle.json",
+        "/private/tmp/nexus_skill_fit_governance_v2c_flash30_live_20260517/governance_and_trust_pub-feat-002_skill_arm_004_f0f00bb84882/evidence_bundle.json",
+        "/private/tmp/nexus_skill_fit_governance_v2c_flash30_live_20260517/governance_and_trust_pub-feat-003_skill_arm_004_f0f00bb84882/evidence_bundle.json",
+        "/private/tmp/nexus_skill_fit_governance_v2c_flash30_live_20260517/governance_and_trust_pub-feat-004_skill_arm_004_f0f00bb84882/evidence_bundle.json"
+      ],
+      "receipt_refs": [
+        "/private/tmp/nexus_skill_fit_governance_v2c_flash30_live_20260517/governance_and_trust_pub-ref-003_skill_arm_004_f0f00bb84882",
+        "/private/tmp/nexus_skill_fit_governance_v2c_flash30_live_20260517/governance_and_trust_pub-ref-004_skill_arm_004_f0f00bb84882",
+        "/private/tmp/nexus_skill_fit_governance_v2c_flash30_live_20260517/governance_and_trust_pub-feat-002_skill_arm_004_f0f00bb84882",
+        "/private/tmp/nexus_skill_fit_governance_v2c_flash30_live_20260517/governance_and_trust_pub-feat-003_skill_arm_004_f0f00bb84882",
+        "/private/tmp/nexus_skill_fit_governance_v2c_flash30_live_20260517/governance_and_trust_pub-feat-004_skill_arm_004_f0f00bb84882"
+      ],
+      "task_buckets": [
+        "feature",
+        "refactor"
+      ]
+    }
+  ]
+}

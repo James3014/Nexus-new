@@ -1,0 +1,142 @@
+{
+  "all_capability_screen": {
+    "candidate_count": 34,
+    "capability_count": 34,
+    "comparison_count": 1156,
+    "metadata_replace_signal_count": 0,
+    "path": "docs/reports/NEXUS_SF_GITHUB_ROUND2_ALL_CAPABILITY_SCREEN_2026-05-19.json"
+  },
+  "artifacts": {
+    "corrected_matrix_v2": "docs/reports/NEXUS_SF_GITHUB_ROUND2_CORRECTED_FLASH_SMOKE_V2_MATRIX_2026-05-19.json",
+    "final_rollup": "docs/reports/NEXUS_SF_GITHUB_ROUND2_FINAL_ROLLUP_2026-05-19.json",
+    "materialization": "docs/reports/NEXUS_SF_GITHUB_ROUND2_MATERIALIZATION_2026-05-19.json",
+    "replacement_ledger": "docs/reports/NEXUS_SF_GITHUB_ROUND2_REPLACEMENT_LEDGER_2026-05-19.json",
+    "screen": "docs/reports/NEXUS_SF_GITHUB_ROUND2_ALL_CAPABILITY_SCREEN_2026-05-19.json"
+  },
+  "goal_boundary": [
+    "Safety screening and skill inventory completed for the four requested repos.",
+    "At least two different challenger skills were materialized and targeted through Flash+Nexus live rows.",
+    "No replacement is allowed unless challenger and current-best controls both have receipt-clean PASS evidence.",
+    "Runtime default remains unchanged."
+  ],
+  "inventory_summary": {
+    "agent_browser_skill_count": 7,
+    "awesome_openclaw_skill_count": 0,
+    "superpowers_skill_count": 14,
+    "taste_skill_count": 12,
+    "total_external_skill_files_found": 33
+  },
+  "live_evidence": {
+    "challenger_rows_tested": [
+      {
+        "evidence_path": ".nexus/reports/sf_github_round2_targeted_challenger_systematic_debugging_2026-05-19/codeintel_sf-github-round2-corrected-v2-smoke-codeintel-001_github_challenger_github2-superpowers-systematic-debugging/evidence_bundle.json",
+        "gateway_error_category": "gateway_error",
+        "model_calls": 2,
+        "nexus_error_codes": [
+          "llm_error",
+          "model_required_local_support_not_delivery",
+          "model_required_model_delivery_failed"
+        ],
+        "nexus_failure_reason": "model_required_model_delivery_failed",
+        "receipt_path": ".nexus/reports/sf_github_round2_targeted_challenger_systematic_debugging_2026-05-19/codeintel_sf-github-round2-corrected-v2-smoke-codeintel-001_github_challenger_github2-superpowers-systematic-debugging",
+        "root": ".nexus/reports/sf_github_round2_targeted_challenger_systematic_debugging_2026-05-19",
+        "row_id": "codeintel::sf-github-round2-corrected-v2-smoke-codeintel-001::github_challenger::github2-superpowers-systematic-debugging",
+        "semantic_status": "UNVERIFIED",
+        "skill_mount_contract_status": null,
+        "skill_mount_violations": [],
+        "status": "RETURN",
+        "token_capture_status": "estimated",
+        "token_measured": false,
+        "total_tokens": 1201
+      },
+      {
+        "evidence_path": ".nexus/reports/sf_github_round2_targeted_challenger_executing_plans_2026-05-19/metabolism_resume_sf-github-round2-corrected-v2-smoke-metabolism_resume-001_github_challenger_github2-superpowers-executing-plans/evidence_bundle.json",
+        "gateway_error_category": "gateway_error",
+        "model_calls": 2,
+        "nexus_error_codes": [
+          "llm_error",
+          "model_required_local_support_not_delivery",
+          "model_required_model_delivery_failed"
+        ],
+        "nexus_failure_reason": "model_required_model_delivery_failed",
+        "receipt_path": ".nexus/reports/sf_github_round2_targeted_challenger_executing_plans_2026-05-19/metabolism_resume_sf-github-round2-corrected-v2-smoke-metabolism_resume-001_github_challenger_github2-superpowers-executing-plans",
+        "root": ".nexus/reports/sf_github_round2_targeted_challenger_executing_plans_2026-05-19",
+        "row_id": "metabolism_resume::sf-github-round2-corrected-v2-smoke-metabolism_resume-001::github_challenger::github2-superpowers-executing-plans",
+        "semantic_status": "UNVERIFIED",
+        "skill_mount_contract_status": null,
+        "skill_mount_violations": [],
+        "status": "RETURN",
+        "token_capture_status": "estimated",
+        "token_measured": false,
+        "total_tokens": 1213
+      }
+    ],
+    "invalid_fixture_first_attempt": {
+      "evidence_path": ".nexus/reports/sf_github_round2_corrected_flash_smoke_live_2026-05-19/codeintel_sf-github-round2-corrected-smoke-codeintel-001_current_best_github-karpathy-guidelines/evidence_bundle.json",
+      "gateway_error_category": "gateway_error",
+      "model_calls": 2,
+      "nexus_error_codes": [
+        "llm_error",
+        "model_required_local_support_not_delivery",
+        "model_required_model_delivery_failed"
+      ],
+      "nexus_failure_reason": "model_required_model_delivery_failed",
+      "receipt_path": ".nexus/reports/sf_github_round2_corrected_flash_smoke_live_2026-05-19/codeintel_sf-github-round2-corrected-smoke-codeintel-001_current_best_github-karpathy-guidelines",
+      "root": ".nexus/reports/sf_github_round2_corrected_flash_smoke_live_2026-05-19",
+      "row_id": "codeintel::sf-github-round2-corrected-smoke-codeintel-001::current_best::github-karpathy-guidelines",
+      "semantic_status": "UNVERIFIED",
+      "skill_mount_contract_status": null,
+      "skill_mount_violations": [],
+      "status": "RETURN",
+      "token_capture_status": "estimated",
+      "token_measured": false,
+      "total_tokens": 1201
+    },
+    "runtime_control_sanity_retry": {
+      "evidence_path": ".nexus/reports/sf_github_round2_provider_sanity_retry_2026-05-19/codeintel_sf-github-challenger-smoke-codeintel-001_current_best_sf2-codeintel-route-fit-spec/evidence_bundle.json",
+      "gateway_error_category": "gateway_error",
+      "model_calls": 2,
+      "nexus_error_codes": [
+        "llm_error",
+        "model_required_local_support_not_delivery",
+        "model_required_model_delivery_failed"
+      ],
+      "nexus_failure_reason": "model_required_model_delivery_failed",
+      "receipt_path": ".nexus/reports/sf_github_round2_provider_sanity_retry_2026-05-19/codeintel_sf-github-challenger-smoke-codeintel-001_current_best_sf2-codeintel-route-fit-spec",
+      "root": ".nexus/reports/sf_github_round2_provider_sanity_retry_2026-05-19",
+      "row_id": "codeintel::sf-github-challenger-smoke-codeintel-001::current_best::sf2-codeintel-route-fit-spec",
+      "semantic_status": "UNVERIFIED",
+      "skill_mount_contract_status": null,
+      "skill_mount_violations": [],
+      "status": "RETURN",
+      "token_capture_status": "estimated",
+      "token_measured": false,
+      "total_tokens": 1197
+    }
+  },
+  "materialized_candidates": [],
+  "replacement_decision": {
+    "catalog_overlay_update_allowed": false,
+    "next_action": "Retry the same V2 matrix only after Flash provider/session token cleanliness is PASS; do not change current skill pairings from round2 evidence.",
+    "reason": "No round2 challenger produced receipt-clean PASS evidence today; provider returned gateway_error/model_required_model_delivery_failed even on prior known-good control row.",
+    "replacement_count": 0,
+    "runtime_update_allowed": false
+  },
+  "repo_safety": {
+    "Leonxlnx/taste-skill": "PASS_PROMPT_ONLY; prompt/design skills only, no runtime promotion.",
+    "VoltAgent/awesome-openclaw-skills": "NO_LOCAL_SKILL_FILES; generated catalog-scout candidate from project principle and marked runtime_eligible=false.",
+    "obra/superpowers": "PASS_SKILL_ONLY; repo scripts contain destructive cleanup patterns, so only skill docs were adapted and no repo scripts were executed.",
+    "vercel-labs/agent-browser": "PASS_WITH_RUNTIME_TOOL_BOUNDARY; browser automation/runtime install surface is candidate-only, no tool install or runtime promotion."
+  },
+  "schema": "nexus.sf_github_round2_final_rollup.v1",
+  "status": "PASS_WITH_PROVIDER_BLOCKED_LIVE_REPLACEMENT",
+  "validated_candidates": [
+    "github2-superpowers-test-driven-development",
+    "github2-agent-browser-dogfood",
+    "github2-awesome-openclaw-catalog-scout",
+    "github2-superpowers-systematic-debugging",
+    "github2-superpowers-verification-before-completion",
+    "github2-superpowers-executing-plans"
+  ],
+  "version": "2026-05-19"
+}

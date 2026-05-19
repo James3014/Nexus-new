@@ -1,0 +1,2448 @@
+{
+  "schema": "nexus.sf2_route_skill_verdict_catalog.v1",
+  "status": "PARTIAL",
+  "summary": {
+    "capability_count": 33,
+    "capabilities_with_static_fit_candidate": 28,
+    "blocked_capability_count": 5,
+    "runtime_update_allowed": false,
+    "public_benchmark_allowed": false
+  },
+  "blocked_capabilities": [
+    "codeintel",
+    "ddtree",
+    "external_productivity",
+    "ui_validator",
+    "xray"
+  ],
+  "capabilities": [
+    {
+      "capability_id": "artifact_gate",
+      "candidate_count": 4,
+      "static_fit_candidate_count": 3,
+      "candidates": [
+        {
+          "skill_id": "nexus-goal-closure-executor",
+          "verdict": "static_fit_candidate",
+          "status": "PASS",
+          "reason": "static_route_fit_pass",
+          "skill_path": "/Users/jameschen/Workspace/nexus/.agents/skills/nexus-goal-closure-executor/SKILL.md",
+          "route_overlap": [
+            "declared",
+            "evidence",
+            "its",
+            "route",
+            "runtime",
+            "skill",
+            "without"
+          ],
+          "evidence_overlap": [
+            "contract",
+            "evidence",
+            "gate",
+            "verification",
+            "verify"
+          ]
+        },
+        {
+          "skill_id": "nexus-root-cause-probe",
+          "verdict": "static_fit_candidate",
+          "status": "PASS",
+          "reason": "static_route_fit_pass",
+          "skill_path": "/Users/jameschen/Workspace/nexus/.agents/skills/nexus-root-cause-probe/SKILL.md",
+          "route_overlap": [
+            "artifact",
+            "evidence",
+            "runtime",
+            "verifier"
+          ],
+          "evidence_overlap": [
+            "contract",
+            "evidence",
+            "gate"
+          ]
+        },
+        {
+          "skill_id": "diagnose",
+          "verdict": "static_fit_candidate",
+          "status": "PASS",
+          "reason": "static_route_fit_pass",
+          "skill_path": "/Users/jameschen/Workspace/nexus/.agents/skills/diagnose/SKILL.md",
+          "route_overlap": [
+            "artifact",
+            "skill",
+            "then",
+            "without"
+          ],
+          "evidence_overlap": [
+            "verify"
+          ]
+        },
+        {
+          "skill_id": "setup-matt-pocock-skills",
+          "verdict": "reject",
+          "status": "RETURN",
+          "reason": "static_route_fit_insufficient",
+          "skill_path": "/Users/jameschen/Workspace/nexus/.agents/skills/setup-matt-pocock-skills/SKILL.md",
+          "route_overlap": [
+            "its",
+            "role",
+            "skill",
+            "then",
+            "using",
+            "without"
+          ],
+          "evidence_overlap": []
+        }
+      ]
+    },
+    {
+      "capability_id": "autonomic_router",
+      "candidate_count": 4,
+      "static_fit_candidate_count": 4,
+      "candidates": [
+        {
+          "skill_id": "sf2-autonomic_router-route-fit-spec",
+          "verdict": "static_fit_candidate",
+          "status": "PASS",
+          "reason": "static_route_fit_pass",
+          "skill_path": "/Users/jameschen/Workspace/nexus/.agents/skills/sf2/sf2-autonomic_router-route-fit-spec/SKILL.md",
+          "route_overlap": [
+            "autonomic",
+            "autonomic_router",
+            "capability",
+            "declared",
+            "evidence",
+            "fit",
+            "promotion",
+            "receipt",
+            "route",
+            "router",
+            "routing",
+            "runtime",
+            "skill"
+          ],
+          "evidence_overlap": [
+            "evidence",
+            "outcome",
+            "receipt"
+          ]
+        },
+        {
+          "skill_id": "sf2-autoreason-route-fit-spec",
+          "verdict": "static_fit_candidate",
+          "status": "PASS",
+          "reason": "static_route_fit_pass",
+          "skill_path": "/Users/jameschen/Workspace/nexus/.agents/skills/sf2/sf2-autoreason-route-fit-spec/SKILL.md",
+          "route_overlap": [
+            "capability",
+            "declared",
+            "evidence",
+            "fit",
+            "promotion",
+            "receipt",
+            "route",
+            "runtime",
+            "skill"
+          ],
+          "evidence_overlap": [
+            "evidence",
+            "outcome",
+            "receipt"
+          ]
+        },
+        {
+          "skill_id": "sf2-belief-route-fit-spec",
+          "verdict": "static_fit_candidate",
+          "status": "PASS",
+          "reason": "static_route_fit_pass",
+          "skill_path": "/Users/jameschen/Workspace/nexus/.agents/skills/sf2/sf2-belief-route-fit-spec/SKILL.md",
+          "route_overlap": [
+            "belief",
+            "capability",
+            "declared",
+            "evidence",
+            "fit",
+            "promotion",
+            "receipt",
+            "route",
+            "runtime",
+            "skill"
+          ],
+          "evidence_overlap": [
+            "evidence",
+            "outcome",
+            "receipt"
+          ]
+        },
+        {
+          "skill_id": "sf2-delivery_acceptance_gate-route-fit-spec",
+          "verdict": "static_fit_candidate",
+          "status": "PASS",
+          "reason": "static_route_fit_pass",
+          "skill_path": "/Users/jameschen/Workspace/nexus/.agents/skills/sf2/sf2-delivery_acceptance_gate-route-fit-spec/SKILL.md",
+          "route_overlap": [
+            "capability",
+            "declared",
+            "evidence",
+            "fit",
+            "promotion",
+            "receipt",
+            "route",
+            "runtime",
+            "skill"
+          ],
+          "evidence_overlap": [
+            "contract",
+            "evidence",
+            "gate",
+            "outcome",
+            "receipt"
+          ]
+        }
+      ]
+    },
+    {
+      "capability_id": "autoreason",
+      "candidate_count": 4,
+      "static_fit_candidate_count": 4,
+      "candidates": [
+        {
+          "skill_id": "sf2-autoreason-route-fit-spec",
+          "verdict": "static_fit_candidate",
+          "status": "PASS",
+          "reason": "static_route_fit_pass",
+          "skill_path": "/Users/jameschen/Workspace/nexus/.agents/skills/sf2/sf2-autoreason-route-fit-spec/SKILL.md",
+          "route_overlap": [
+            "autoreason",
+            "capability",
+            "confidence",
+            "declared",
+            "evidence",
+            "fit",
+            "judge",
+            "promotion",
+            "reason",
+            "receipt",
+            "route",
+            "runtime",
+            "semantic",
+            "skill"
+          ],
+          "evidence_overlap": [
+            "evidence",
+            "outcome",
+            "receipt"
+          ]
+        },
+        {
+          "skill_id": "sf2-belief-route-fit-spec",
+          "verdict": "static_fit_candidate",
+          "status": "PASS",
+          "reason": "static_route_fit_pass",
+          "skill_path": "/Users/jameschen/Workspace/nexus/.agents/skills/sf2/sf2-belief-route-fit-spec/SKILL.md",
+          "route_overlap": [
+            "belief",
+            "capability",
+            "confidence",
+            "declared",
+            "evidence",
+            "fit",
+            "promotion",
+            "receipt",
+            "route",
+            "runtime",
+            "skill"
+          ],
+          "evidence_overlap": [
+            "evidence",
+            "outcome",
+            "receipt"
+          ]
+        },
+        {
+          "skill_id": "sf2-lancedb-route-fit-spec",
+          "verdict": "static_fit_candidate",
+          "status": "PASS",
+          "reason": "static_route_fit_pass",
+          "skill_path": "/Users/jameschen/Workspace/nexus/.agents/skills/sf2/sf2-lancedb-route-fit-spec/SKILL.md",
+          "route_overlap": [
+            "capability",
+            "declared",
+            "evidence",
+            "fit",
+            "promotion",
+            "receipt",
+            "route",
+            "runtime",
+            "semantic",
+            "skill"
+          ],
+          "evidence_overlap": [
+            "evidence",
+            "outcome",
+            "receipt"
+          ]
+        },
+        {
+          "skill_id": "nexus-benchmark-public-report",
+          "verdict": "static_fit_candidate",
+          "status": "PASS",
+          "reason": "static_route_fit_pass",
+          "skill_path": "/Users/jameschen/Workspace/nexus/.agents/skills/nexus-benchmark-public-report/SKILL.md",
+          "route_overlap": [
+            "evidence",
+            "semantic",
+            "using",
+            "without"
+          ],
+          "evidence_overlap": [
+            "evidence",
+            "gate",
+            "verification"
+          ]
+        }
+      ]
+    },
+    {
+      "capability_id": "belief",
+      "candidate_count": 4,
+      "static_fit_candidate_count": 2,
+      "candidates": [
+        {
+          "skill_id": "sf2-belief-route-fit-spec",
+          "verdict": "static_fit_candidate",
+          "status": "PASS",
+          "reason": "static_route_fit_pass",
+          "skill_path": "/Users/jameschen/Workspace/nexus/.agents/skills/sf2/sf2-belief-route-fit-spec/SKILL.md",
+          "route_overlap": [
+            "belief",
+            "budget",
+            "capability",
+            "careful",
+            "confidence",
+            "declared",
+            "doubt",
+            "evidence",
+            "fit",
+            "prior",
+            "promotion",
+            "receipt",
+            "route",
+            "runtime",
+            "skill",
+            "strategic",
+            "strategy"
+          ],
+          "evidence_overlap": [
+            "evidence",
+            "outcome",
+            "receipt"
+          ]
+        },
+        {
+          "skill_id": "sf2-autoreason-route-fit-spec",
+          "verdict": "static_fit_candidate",
+          "status": "PASS",
+          "reason": "static_route_fit_pass",
+          "skill_path": "/Users/jameschen/Workspace/nexus/.agents/skills/sf2/sf2-autoreason-route-fit-spec/SKILL.md",
+          "route_overlap": [
+            "capability",
+            "confidence",
+            "declared",
+            "evidence",
+            "fit",
+            "promotion",
+            "receipt",
+            "route",
+            "runtime",
+            "skill"
+          ],
+          "evidence_overlap": [
+            "evidence",
+            "outcome",
+            "receipt"
+          ]
+        },
+        {
+          "skill_id": "wondelai-software-design-philosophy",
+          "verdict": "reject",
+          "status": "RETURN",
+          "reason": "skill_asset_missing",
+          "skill_path": "",
+          "route_overlap": [],
+          "evidence_overlap": []
+        },
+        {
+          "skill_id": "addy-doubt-driven-development",
+          "verdict": "reject",
+          "status": "RETURN",
+          "reason": "skill_asset_missing",
+          "skill_path": "",
+          "route_overlap": [],
+          "evidence_overlap": []
+        }
+      ]
+    },
+    {
+      "capability_id": "benchmark_meta_opt",
+      "candidate_count": 4,
+      "static_fit_candidate_count": 3,
+      "candidates": [
+        {
+          "skill_id": "nexus-benchmark-continuous-optimization",
+          "verdict": "static_fit_candidate",
+          "status": "PASS",
+          "reason": "static_route_fit_pass",
+          "skill_path": "/Users/jameschen/Workspace/nexus/.agents/skills/nexus-benchmark-continuous-optimization/SKILL.md",
+          "route_overlap": [
+            "benchmark",
+            "claim",
+            "cost",
+            "evidence",
+            "its",
+            "promotion",
+            "route",
+            "without"
+          ],
+          "evidence_overlap": [
+            "evidence",
+            "gate",
+            "verification"
+          ]
+        },
+        {
+          "skill_id": "nexus-benchmark-public-report",
+          "verdict": "static_fit_candidate",
+          "status": "PASS",
+          "reason": "static_route_fit_pass",
+          "skill_path": "/Users/jameschen/Workspace/nexus/.agents/skills/nexus-benchmark-public-report/SKILL.md",
+          "route_overlap": [
+            "benchmark",
+            "claim",
+            "cost",
+            "evidence",
+            "using",
+            "without"
+          ],
+          "evidence_overlap": [
+            "evidence",
+            "gate",
+            "verification"
+          ]
+        },
+        {
+          "skill_id": "nexus-capability-upgrade",
+          "verdict": "static_fit_candidate",
+          "status": "PASS",
+          "reason": "static_route_fit_pass",
+          "skill_path": "/Users/jameschen/Workspace/nexus/.agents/skills/nexus-capability-upgrade/SKILL.md",
+          "route_overlap": [
+            "benchmark",
+            "capability",
+            "claim",
+            "cost",
+            "eval",
+            "evidence",
+            "route",
+            "runtime",
+            "using",
+            "without"
+          ],
+          "evidence_overlap": [
+            "contract",
+            "evidence",
+            "gate",
+            "verify"
+          ]
+        },
+        {
+          "skill_id": "benchmark-models",
+          "verdict": "reject",
+          "status": "RETURN",
+          "reason": "skill_asset_missing",
+          "skill_path": "",
+          "route_overlap": [],
+          "evidence_overlap": []
+        }
+      ]
+    },
+    {
+      "capability_id": "claim_gate",
+      "candidate_count": 4,
+      "static_fit_candidate_count": 4,
+      "candidates": [
+        {
+          "skill_id": "sf2-research_control_plane-route-fit-spec",
+          "verdict": "static_fit_candidate",
+          "status": "PASS",
+          "reason": "static_route_fit_pass",
+          "skill_path": "/Users/jameschen/Workspace/nexus/.agents/skills/sf2/sf2-research_control_plane-route-fit-spec/SKILL.md",
+          "route_overlap": [
+            "capability",
+            "claim",
+            "declared",
+            "evidence",
+            "fit",
+            "promotion",
+            "public",
+            "receipt",
+            "route",
+            "runtime",
+            "skill",
+            "source"
+          ],
+          "evidence_overlap": [
+            "evidence",
+            "outcome",
+            "receipt",
+            "verification",
+            "verify"
+          ]
+        },
+        {
+          "skill_id": "diagnose",
+          "verdict": "static_fit_candidate",
+          "status": "PASS",
+          "reason": "static_route_fit_pass",
+          "skill_path": "/Users/jameschen/Workspace/nexus/.agents/skills/diagnose/SKILL.md",
+          "route_overlap": [
+            "skill",
+            "then",
+            "without"
+          ],
+          "evidence_overlap": [
+            "verify"
+          ]
+        },
+        {
+          "skill_id": "nexus-goal-closure-executor",
+          "verdict": "static_fit_candidate",
+          "status": "PASS",
+          "reason": "static_route_fit_pass",
+          "skill_path": "/Users/jameschen/Workspace/nexus/.agents/skills/nexus-goal-closure-executor/SKILL.md",
+          "route_overlap": [
+            "claim",
+            "declared",
+            "evidence",
+            "its",
+            "public",
+            "route",
+            "runtime",
+            "skill",
+            "without"
+          ],
+          "evidence_overlap": [
+            "contract",
+            "evidence",
+            "gate",
+            "verification",
+            "verify"
+          ]
+        },
+        {
+          "skill_id": "nexus-root-cause-probe",
+          "verdict": "static_fit_candidate",
+          "status": "PASS",
+          "reason": "static_route_fit_pass",
+          "skill_path": "/Users/jameschen/Workspace/nexus/.agents/skills/nexus-root-cause-probe/SKILL.md",
+          "route_overlap": [
+            "evidence",
+            "runtime"
+          ],
+          "evidence_overlap": [
+            "contract",
+            "evidence",
+            "gate"
+          ]
+        }
+      ]
+    },
+    {
+      "capability_id": "codeintel",
+      "candidate_count": 4,
+      "static_fit_candidate_count": 0,
+      "candidates": [
+        {
+          "skill_id": "improve-codebase-architecture",
+          "verdict": "reject",
+          "status": "RETURN",
+          "reason": "static_route_fit_insufficient",
+          "skill_path": "/Users/jameschen/Workspace/nexus/.agents/skills/improve-codebase-architecture/SKILL.md",
+          "route_overlap": [
+            "api",
+            "architecture",
+            "code",
+            "interface",
+            "its",
+            "require",
+            "skill",
+            "then",
+            "without"
+          ],
+          "evidence_overlap": []
+        },
+        {
+          "skill_id": "setup-matt-pocock-skills",
+          "verdict": "reject",
+          "status": "RETURN",
+          "reason": "static_route_fit_insufficient",
+          "skill_path": "/Users/jameschen/Workspace/nexus/.agents/skills/setup-matt-pocock-skills/SKILL.md",
+          "route_overlap": [
+            "architecture",
+            "its",
+            "repo",
+            "role",
+            "skill",
+            "then",
+            "using",
+            "without"
+          ],
+          "evidence_overlap": []
+        },
+        {
+          "skill_id": "wondelai-software-design-philosophy",
+          "verdict": "reject",
+          "status": "RETURN",
+          "reason": "skill_asset_missing",
+          "skill_path": "",
+          "route_overlap": [],
+          "evidence_overlap": []
+        },
+        {
+          "skill_id": "wondelai-ux-heuristics",
+          "verdict": "reject",
+          "status": "RETURN",
+          "reason": "skill_asset_missing",
+          "skill_path": "",
+          "route_overlap": [],
+          "evidence_overlap": []
+        }
+      ]
+    },
+    {
+      "capability_id": "ddtree",
+      "candidate_count": 1,
+      "static_fit_candidate_count": 0,
+      "candidates": [
+        {
+          "skill_id": "grill-me",
+          "verdict": "reject",
+          "status": "RETURN",
+          "reason": "static_route_fit_insufficient",
+          "skill_path": "/Users/jameschen/Workspace/nexus/.agents/skills/grill-me/SKILL.md",
+          "route_overlap": [
+            "decision",
+            "tree"
+          ],
+          "evidence_overlap": []
+        }
+      ]
+    },
+    {
+      "capability_id": "delivery_acceptance_gate",
+      "candidate_count": 4,
+      "static_fit_candidate_count": 2,
+      "candidates": [
+        {
+          "skill_id": "sf2-delivery_acceptance_gate-route-fit-spec",
+          "verdict": "static_fit_candidate",
+          "status": "PASS",
+          "reason": "static_route_fit_pass",
+          "skill_path": "/Users/jameschen/Workspace/nexus/.agents/skills/sf2/sf2-delivery_acceptance_gate-route-fit-spec/SKILL.md",
+          "route_overlap": [
+            "acceptance",
+            "capability",
+            "contract",
+            "criteria",
+            "declared",
+            "delivery",
+            "delivery_acceptance_gate",
+            "done",
+            "evidence",
+            "fit",
+            "promotion",
+            "receipt",
+            "route",
+            "runtime",
+            "skill"
+          ],
+          "evidence_overlap": [
+            "contract",
+            "evidence",
+            "gate",
+            "outcome",
+            "receipt"
+          ]
+        },
+        {
+          "skill_id": "nexus-benchmark-continuous-optimization",
+          "verdict": "static_fit_candidate",
+          "status": "PASS",
+          "reason": "static_route_fit_pass",
+          "skill_path": "/Users/jameschen/Workspace/nexus/.agents/skills/nexus-benchmark-continuous-optimization/SKILL.md",
+          "route_overlap": [
+            "delivery",
+            "evidence",
+            "its",
+            "promotion",
+            "route",
+            "without"
+          ],
+          "evidence_overlap": [
+            "evidence",
+            "gate",
+            "verification"
+          ]
+        },
+        {
+          "skill_id": "acceptance-evidence-failclosed",
+          "verdict": "reject",
+          "status": "RETURN",
+          "reason": "skill_asset_missing",
+          "skill_path": "",
+          "route_overlap": [],
+          "evidence_overlap": []
+        },
+        {
+          "skill_id": "nexus-acceptance-evidence-gate",
+          "verdict": "reject",
+          "status": "RETURN",
+          "reason": "skill_asset_missing",
+          "skill_path": "",
+          "route_overlap": [],
+          "evidence_overlap": []
+        }
+      ]
+    },
+    {
+      "capability_id": "direct_master_loop",
+      "candidate_count": 4,
+      "static_fit_candidate_count": 3,
+      "candidates": [
+        {
+          "skill_id": "sf2-direct_master_loop-route-fit-spec",
+          "verdict": "static_fit_candidate",
+          "status": "PASS",
+          "reason": "static_route_fit_pass",
+          "skill_path": "/Users/jameschen/Workspace/nexus/.agents/skills/sf2/sf2-direct_master_loop-route-fit-spec/SKILL.md",
+          "route_overlap": [
+            "capability",
+            "content",
+            "declared",
+            "direct",
+            "direct_master_loop",
+            "evidence",
+            "execute",
+            "fit",
+            "loop",
+            "master",
+            "promotion",
+            "receipt",
+            "rewrite",
+            "route",
+            "runtime",
+            "skill",
+            "task"
+          ],
+          "evidence_overlap": [
+            "evidence",
+            "outcome",
+            "receipt"
+          ]
+        },
+        {
+          "skill_id": "sf2-nightshift-route-fit-spec",
+          "verdict": "static_fit_candidate",
+          "status": "PASS",
+          "reason": "static_route_fit_pass",
+          "skill_path": "/Users/jameschen/Workspace/nexus/.agents/skills/sf2/sf2-nightshift-route-fit-spec/SKILL.md",
+          "route_overlap": [
+            "capability",
+            "declared",
+            "evidence",
+            "fit",
+            "promotion",
+            "receipt",
+            "route",
+            "runtime",
+            "skill",
+            "task"
+          ],
+          "evidence_overlap": [
+            "evidence",
+            "outcome",
+            "receipt"
+          ]
+        },
+        {
+          "skill_id": "nexus-goal-closure-executor",
+          "verdict": "static_fit_candidate",
+          "status": "PASS",
+          "reason": "static_route_fit_pass",
+          "skill_path": "/Users/jameschen/Workspace/nexus/.agents/skills/nexus-goal-closure-executor/SKILL.md",
+          "route_overlap": [
+            "declared",
+            "evidence",
+            "execute",
+            "its",
+            "loop",
+            "route",
+            "runtime",
+            "skill",
+            "task",
+            "without"
+          ],
+          "evidence_overlap": [
+            "contract",
+            "evidence",
+            "gate",
+            "verification",
+            "verify"
+          ]
+        },
+        {
+          "skill_id": "subagent-driven-development",
+          "verdict": "reject",
+          "status": "RETURN",
+          "reason": "skill_asset_missing",
+          "skill_path": "",
+          "route_overlap": [],
+          "evidence_overlap": []
+        }
+      ]
+    },
+    {
+      "capability_id": "drone",
+      "candidate_count": 4,
+      "static_fit_candidate_count": 1,
+      "candidates": [
+        {
+          "skill_id": "sf2-drone-route-fit-spec",
+          "verdict": "static_fit_candidate",
+          "status": "PASS",
+          "reason": "static_route_fit_pass",
+          "skill_path": "/Users/jameschen/Workspace/nexus/.agents/skills/sf2/sf2-drone-route-fit-spec/SKILL.md",
+          "route_overlap": [
+            "capability",
+            "declared",
+            "delegate",
+            "drone",
+            "evidence",
+            "fit",
+            "hud",
+            "promotion",
+            "receipt",
+            "route",
+            "runtime",
+            "skill",
+            "worker"
+          ],
+          "evidence_overlap": [
+            "evidence",
+            "outcome",
+            "receipt"
+          ]
+        },
+        {
+          "skill_id": "claude-code",
+          "verdict": "reject",
+          "status": "RETURN",
+          "reason": "skill_asset_missing",
+          "skill_path": "",
+          "route_overlap": [],
+          "evidence_overlap": []
+        },
+        {
+          "skill_id": "codex",
+          "verdict": "reject",
+          "status": "RETURN",
+          "reason": "skill_asset_missing",
+          "skill_path": "",
+          "route_overlap": [],
+          "evidence_overlap": []
+        },
+        {
+          "skill_id": "opencode",
+          "verdict": "reject",
+          "status": "RETURN",
+          "reason": "skill_asset_missing",
+          "skill_path": "",
+          "route_overlap": [],
+          "evidence_overlap": []
+        }
+      ]
+    },
+    {
+      "capability_id": "external_productivity",
+      "candidate_count": 4,
+      "static_fit_candidate_count": 0,
+      "candidates": [
+        {
+          "skill_id": "grill-with-docs",
+          "verdict": "reject",
+          "status": "RETURN",
+          "reason": "static_route_fit_insufficient",
+          "skill_path": "/Users/jameschen/Workspace/nexus/.agents/skills/grill-with-docs/SKILL.md",
+          "route_overlap": [
+            "docs",
+            "without"
+          ],
+          "evidence_overlap": []
+        },
+        {
+          "skill_id": "improve-codebase-architecture",
+          "verdict": "reject",
+          "status": "RETURN",
+          "reason": "static_route_fit_insufficient",
+          "skill_path": "/Users/jameschen/Workspace/nexus/.agents/skills/improve-codebase-architecture/SKILL.md",
+          "route_overlap": [
+            "docs",
+            "its",
+            "require",
+            "skill",
+            "then",
+            "without"
+          ],
+          "evidence_overlap": []
+        },
+        {
+          "skill_id": "google-workspace",
+          "verdict": "reject",
+          "status": "RETURN",
+          "reason": "skill_asset_missing",
+          "skill_path": "",
+          "route_overlap": [],
+          "evidence_overlap": []
+        },
+        {
+          "skill_id": "gbrain-cold-start",
+          "verdict": "reject",
+          "status": "RETURN",
+          "reason": "skill_asset_missing",
+          "skill_path": "",
+          "route_overlap": [],
+          "evidence_overlap": []
+        }
+      ]
+    },
+    {
+      "capability_id": "file_lock_security_gate",
+      "candidate_count": 4,
+      "static_fit_candidate_count": 1,
+      "candidates": [
+        {
+          "skill_id": "sf2-file_lock_security_gate-route-fit-spec",
+          "verdict": "static_fit_candidate",
+          "status": "PASS",
+          "reason": "static_route_fit_pass",
+          "skill_path": "/Users/jameschen/Workspace/nexus/.agents/skills/sf2/sf2-file_lock_security_gate-route-fit-spec/SKILL.md",
+          "route_overlap": [
+            "capability",
+            "declared",
+            "evidence",
+            "file",
+            "file_lock_security_gate",
+            "fit",
+            "gate",
+            "lock",
+            "permission",
+            "promotion",
+            "receipt",
+            "route",
+            "runtime",
+            "sandbox",
+            "security",
+            "skill"
+          ],
+          "evidence_overlap": [
+            "evidence",
+            "gate",
+            "outcome",
+            "receipt"
+          ]
+        },
+        {
+          "skill_id": "freeze",
+          "verdict": "reject",
+          "status": "RETURN",
+          "reason": "skill_asset_missing",
+          "skill_path": "",
+          "route_overlap": [],
+          "evidence_overlap": []
+        },
+        {
+          "skill_id": "gbrain-skillify",
+          "verdict": "reject",
+          "status": "RETURN",
+          "reason": "skill_asset_missing",
+          "skill_path": "",
+          "route_overlap": [],
+          "evidence_overlap": []
+        },
+        {
+          "skill_id": "gstack-freeze",
+          "verdict": "reject",
+          "status": "RETURN",
+          "reason": "skill_asset_missing",
+          "skill_path": "",
+          "route_overlap": [],
+          "evidence_overlap": []
+        }
+      ]
+    },
+    {
+      "capability_id": "forecast_pregate",
+      "candidate_count": 4,
+      "static_fit_candidate_count": 2,
+      "candidates": [
+        {
+          "skill_id": "sf2-forecast_pregate-route-fit-spec",
+          "verdict": "static_fit_candidate",
+          "status": "PASS",
+          "reason": "static_route_fit_pass",
+          "skill_path": "/Users/jameschen/Workspace/nexus/.agents/skills/sf2/sf2-forecast_pregate-route-fit-spec/SKILL.md",
+          "route_overlap": [
+            "capability",
+            "declared",
+            "evidence",
+            "fit",
+            "forecast",
+            "forecast_pregate",
+            "plan",
+            "planner",
+            "pregate",
+            "promotion",
+            "quality",
+            "receipt",
+            "risk",
+            "route",
+            "runtime",
+            "skill"
+          ],
+          "evidence_overlap": [
+            "evidence",
+            "outcome",
+            "receipt"
+          ]
+        },
+        {
+          "skill_id": "to-issues",
+          "verdict": "reject",
+          "status": "RETURN",
+          "reason": "static_route_fit_insufficient",
+          "skill_path": "/Users/jameschen/Workspace/nexus/.agents/skills/to-issues/SKILL.md",
+          "route_overlap": [
+            "its",
+            "plan",
+            "require",
+            "using",
+            "without"
+          ],
+          "evidence_overlap": []
+        },
+        {
+          "skill_id": "to-prd",
+          "verdict": "reject",
+          "status": "RETURN",
+          "reason": "static_route_fit_insufficient",
+          "skill_path": "/Users/jameschen/Workspace/nexus/.agents/skills/to-prd/SKILL.md",
+          "route_overlap": [
+            "skill",
+            "then",
+            "using"
+          ],
+          "evidence_overlap": []
+        },
+        {
+          "skill_id": "triage",
+          "verdict": "static_fit_candidate",
+          "status": "PASS",
+          "reason": "static_route_fit_pass",
+          "skill_path": "/Users/jameschen/Workspace/nexus/.agents/skills/triage/SKILL.md",
+          "route_overlap": [
+            "role",
+            "then",
+            "using",
+            "without"
+          ],
+          "evidence_overlap": [
+            "outcome"
+          ]
+        }
+      ]
+    },
+    {
+      "capability_id": "hyper_sprint",
+      "candidate_count": 4,
+      "static_fit_candidate_count": 1,
+      "candidates": [
+        {
+          "skill_id": "sf2-hyper_sprint-route-fit-spec",
+          "verdict": "static_fit_candidate",
+          "status": "PASS",
+          "reason": "static_route_fit_pass",
+          "skill_path": "/Users/jameschen/Workspace/nexus/.agents/skills/sf2/sf2-hyper_sprint-route-fit-spec/SKILL.md",
+          "route_overlap": [
+            "candidate",
+            "capability",
+            "declared",
+            "evidence",
+            "fast",
+            "fit",
+            "fix",
+            "hyper",
+            "hyper_sprint",
+            "multi",
+            "path",
+            "promotion",
+            "quick",
+            "receipt",
+            "route",
+            "runtime",
+            "skill",
+            "sprint"
+          ],
+          "evidence_overlap": [
+            "evidence",
+            "outcome",
+            "receipt"
+          ]
+        },
+        {
+          "skill_id": "gstack-retro",
+          "verdict": "reject",
+          "status": "RETURN",
+          "reason": "skill_asset_missing",
+          "skill_path": "",
+          "route_overlap": [],
+          "evidence_overlap": []
+        },
+        {
+          "skill_id": "retro",
+          "verdict": "reject",
+          "status": "RETURN",
+          "reason": "skill_asset_missing",
+          "skill_path": "",
+          "route_overlap": [],
+          "evidence_overlap": []
+        },
+        {
+          "skill_id": "wondelai-design-sprint",
+          "verdict": "reject",
+          "status": "RETURN",
+          "reason": "skill_asset_missing",
+          "skill_path": "",
+          "route_overlap": [],
+          "evidence_overlap": []
+        }
+      ]
+    },
+    {
+      "capability_id": "lancedb",
+      "candidate_count": 4,
+      "static_fit_candidate_count": 2,
+      "candidates": [
+        {
+          "skill_id": "sf2-lancedb-route-fit-spec",
+          "verdict": "static_fit_candidate",
+          "status": "PASS",
+          "reason": "static_route_fit_pass",
+          "skill_path": "/Users/jameschen/Workspace/nexus/.agents/skills/sf2/sf2-lancedb-route-fit-spec/SKILL.md",
+          "route_overlap": [
+            "capability",
+            "declared",
+            "embedding",
+            "evidence",
+            "fit",
+            "lancedb",
+            "promotion",
+            "rag",
+            "receipt",
+            "retrieval",
+            "route",
+            "runtime",
+            "semantic",
+            "skill",
+            "vector"
+          ],
+          "evidence_overlap": [
+            "evidence",
+            "outcome",
+            "receipt"
+          ]
+        },
+        {
+          "skill_id": "sf2-autoreason-route-fit-spec",
+          "verdict": "static_fit_candidate",
+          "status": "PASS",
+          "reason": "static_route_fit_pass",
+          "skill_path": "/Users/jameschen/Workspace/nexus/.agents/skills/sf2/sf2-autoreason-route-fit-spec/SKILL.md",
+          "route_overlap": [
+            "capability",
+            "declared",
+            "evidence",
+            "fit",
+            "promotion",
+            "receipt",
+            "route",
+            "runtime",
+            "semantic",
+            "skill"
+          ],
+          "evidence_overlap": [
+            "evidence",
+            "outcome",
+            "receipt"
+          ]
+        },
+        {
+          "skill_id": "dspy",
+          "verdict": "reject",
+          "status": "RETURN",
+          "reason": "skill_asset_missing",
+          "skill_path": "",
+          "route_overlap": [],
+          "evidence_overlap": []
+        },
+        {
+          "skill_id": "imagegen",
+          "verdict": "reject",
+          "status": "RETURN",
+          "reason": "skill_asset_missing",
+          "skill_path": "",
+          "route_overlap": [],
+          "evidence_overlap": []
+        }
+      ]
+    },
+    {
+      "capability_id": "learn_ask",
+      "candidate_count": 4,
+      "static_fit_candidate_count": 3,
+      "candidates": [
+        {
+          "skill_id": "notebooklm-bulk-injector",
+          "verdict": "reject",
+          "status": "RETURN",
+          "reason": "static_route_fit_insufficient",
+          "skill_path": "/Users/jameschen/Workspace/nexus/.agents/skills/notebooklm-bulk-injector/SKILL.md",
+          "route_overlap": [
+            "ingest"
+          ],
+          "evidence_overlap": []
+        },
+        {
+          "skill_id": "notebooklm-context-bridge",
+          "verdict": "static_fit_candidate",
+          "status": "PASS",
+          "reason": "static_route_fit_pass",
+          "skill_path": "/Users/jameschen/Workspace/nexus/.agents/skills/notebooklm-context-bridge/SKILL.md",
+          "route_overlap": [
+            "notebook"
+          ],
+          "evidence_overlap": [
+            "verification"
+          ]
+        },
+        {
+          "skill_id": "nexus-capability-upgrade",
+          "verdict": "static_fit_candidate",
+          "status": "PASS",
+          "reason": "static_route_fit_pass",
+          "skill_path": "/Users/jameschen/Workspace/nexus/.agents/skills/nexus-capability-upgrade/SKILL.md",
+          "route_overlap": [
+            "capability",
+            "evidence",
+            "learn",
+            "memory",
+            "report",
+            "route",
+            "runtime",
+            "using",
+            "without"
+          ],
+          "evidence_overlap": [
+            "contract",
+            "evidence",
+            "gate",
+            "verify"
+          ]
+        },
+        {
+          "skill_id": "nexus-root-cause-probe",
+          "verdict": "static_fit_candidate",
+          "status": "PASS",
+          "reason": "static_route_fit_pass",
+          "skill_path": "/Users/jameschen/Workspace/nexus/.agents/skills/nexus-root-cause-probe/SKILL.md",
+          "route_overlap": [
+            "evidence",
+            "ingest",
+            "learn",
+            "report",
+            "runtime"
+          ],
+          "evidence_overlap": [
+            "contract",
+            "evidence",
+            "gate"
+          ]
+        }
+      ]
+    },
+    {
+      "capability_id": "learning_closure",
+      "candidate_count": 3,
+      "static_fit_candidate_count": 2,
+      "candidates": [
+        {
+          "skill_id": "sf2-learning_closure-route-fit-spec",
+          "verdict": "static_fit_candidate",
+          "status": "PASS",
+          "reason": "static_route_fit_pass",
+          "skill_path": "/Users/jameschen/Workspace/nexus/.agents/skills/sf2/sf2-learning_closure-route-fit-spec/SKILL.md",
+          "route_overlap": [
+            "autotune",
+            "capability",
+            "closure",
+            "continuous",
+            "declared",
+            "evidence",
+            "executor",
+            "fit",
+            "goal",
+            "kpi",
+            "learning",
+            "learning_closure",
+            "lesson",
+            "matrix",
+            "optimization",
+            "promotion",
+            "receipt",
+            "route",
+            "runtime",
+            "skill"
+          ],
+          "evidence_overlap": [
+            "evidence",
+            "outcome",
+            "receipt"
+          ]
+        },
+        {
+          "skill_id": "sf2-nightshift-route-fit-spec",
+          "verdict": "static_fit_candidate",
+          "status": "PASS",
+          "reason": "static_route_fit_pass",
+          "skill_path": "/Users/jameschen/Workspace/nexus/.agents/skills/sf2/sf2-nightshift-route-fit-spec/SKILL.md",
+          "route_overlap": [
+            "capability",
+            "continuous",
+            "declared",
+            "evidence",
+            "fit",
+            "optimization",
+            "promotion",
+            "receipt",
+            "route",
+            "runtime",
+            "skill"
+          ],
+          "evidence_overlap": [
+            "evidence",
+            "outcome",
+            "receipt"
+          ]
+        },
+        {
+          "skill_id": "nexus-new-idea-intake-decision-tree",
+          "verdict": "reject",
+          "status": "RETURN",
+          "reason": "skill_asset_missing",
+          "skill_path": "",
+          "route_overlap": [],
+          "evidence_overlap": []
+        }
+      ]
+    },
+    {
+      "capability_id": "memory",
+      "candidate_count": 4,
+      "static_fit_candidate_count": 3,
+      "candidates": [
+        {
+          "skill_id": "sf2-memory-route-fit-spec",
+          "verdict": "static_fit_candidate",
+          "status": "PASS",
+          "reason": "static_route_fit_pass",
+          "skill_path": "/Users/jameschen/Workspace/nexus/.agents/skills/sf2/sf2-memory-route-fit-spec/SKILL.md",
+          "route_overlap": [
+            "capability",
+            "declared",
+            "evidence",
+            "experience",
+            "findings",
+            "fit",
+            "memory",
+            "promotion",
+            "recall",
+            "receipt",
+            "remember",
+            "route",
+            "runtime",
+            "skill",
+            "vault"
+          ],
+          "evidence_overlap": [
+            "evidence",
+            "outcome",
+            "receipt"
+          ]
+        },
+        {
+          "skill_id": "sf2-lancedb-route-fit-spec",
+          "verdict": "static_fit_candidate",
+          "status": "PASS",
+          "reason": "static_route_fit_pass",
+          "skill_path": "/Users/jameschen/Workspace/nexus/.agents/skills/sf2/sf2-lancedb-route-fit-spec/SKILL.md",
+          "route_overlap": [
+            "capability",
+            "declared",
+            "evidence",
+            "findings",
+            "fit",
+            "promotion",
+            "receipt",
+            "route",
+            "runtime",
+            "skill"
+          ],
+          "evidence_overlap": [
+            "evidence",
+            "outcome",
+            "receipt"
+          ]
+        },
+        {
+          "skill_id": "sf2-mempalace-route-fit-spec",
+          "verdict": "static_fit_candidate",
+          "status": "PASS",
+          "reason": "static_route_fit_pass",
+          "skill_path": "/Users/jameschen/Workspace/nexus/.agents/skills/sf2/sf2-mempalace-route-fit-spec/SKILL.md",
+          "route_overlap": [
+            "capability",
+            "declared",
+            "evidence",
+            "fit",
+            "memory",
+            "promotion",
+            "receipt",
+            "route",
+            "runtime",
+            "skill"
+          ],
+          "evidence_overlap": [
+            "evidence",
+            "outcome",
+            "receipt"
+          ]
+        },
+        {
+          "skill_id": "obsidian-cli",
+          "verdict": "reject",
+          "status": "RETURN",
+          "reason": "skill_asset_missing",
+          "skill_path": "",
+          "route_overlap": [],
+          "evidence_overlap": []
+        }
+      ]
+    },
+    {
+      "capability_id": "mempalace",
+      "candidate_count": 4,
+      "static_fit_candidate_count": 2,
+      "candidates": [
+        {
+          "skill_id": "sf2-mempalace-route-fit-spec",
+          "verdict": "static_fit_candidate",
+          "status": "PASS",
+          "reason": "static_route_fit_pass",
+          "skill_path": "/Users/jameschen/Workspace/nexus/.agents/skills/sf2/sf2-mempalace-route-fit-spec/SKILL.md",
+          "route_overlap": [
+            "boundary",
+            "capability",
+            "declared",
+            "ethic",
+            "evidence",
+            "fit",
+            "guardrail",
+            "mempalace",
+            "policy",
+            "promotion",
+            "receipt",
+            "route",
+            "runtime",
+            "safety",
+            "skill"
+          ],
+          "evidence_overlap": [
+            "evidence",
+            "outcome",
+            "receipt"
+          ]
+        },
+        {
+          "skill_id": "sf2-file_lock_security_gate-route-fit-spec",
+          "verdict": "static_fit_candidate",
+          "status": "PASS",
+          "reason": "static_route_fit_pass",
+          "skill_path": "/Users/jameschen/Workspace/nexus/.agents/skills/sf2/sf2-file_lock_security_gate-route-fit-spec/SKILL.md",
+          "route_overlap": [
+            "boundary",
+            "capability",
+            "declared",
+            "evidence",
+            "fit",
+            "policy",
+            "promotion",
+            "receipt",
+            "route",
+            "runtime",
+            "safety",
+            "skill"
+          ],
+          "evidence_overlap": [
+            "evidence",
+            "gate",
+            "outcome",
+            "receipt"
+          ]
+        },
+        {
+          "skill_id": "gstack-review",
+          "verdict": "reject",
+          "status": "RETURN",
+          "reason": "skill_asset_missing",
+          "skill_path": "",
+          "route_overlap": [],
+          "evidence_overlap": []
+        },
+        {
+          "skill_id": "review",
+          "verdict": "reject",
+          "status": "RETURN",
+          "reason": "skill_asset_missing",
+          "skill_path": "",
+          "route_overlap": [],
+          "evidence_overlap": []
+        }
+      ]
+    },
+    {
+      "capability_id": "metabolism_resume",
+      "candidate_count": 4,
+      "static_fit_candidate_count": 1,
+      "candidates": [
+        {
+          "skill_id": "to-prd",
+          "verdict": "reject",
+          "status": "RETURN",
+          "reason": "static_route_fit_insufficient",
+          "skill_path": "/Users/jameschen/Workspace/nexus/.agents/skills/to-prd/SKILL.md",
+          "route_overlap": [
+            "context",
+            "skill",
+            "then",
+            "using"
+          ],
+          "evidence_overlap": []
+        },
+        {
+          "skill_id": "to-issues",
+          "verdict": "reject",
+          "status": "RETURN",
+          "reason": "static_route_fit_insufficient",
+          "skill_path": "/Users/jameschen/Workspace/nexus/.agents/skills/to-issues/SKILL.md",
+          "route_overlap": [
+            "context",
+            "its",
+            "require",
+            "using",
+            "without"
+          ],
+          "evidence_overlap": []
+        },
+        {
+          "skill_id": "triage",
+          "verdict": "static_fit_candidate",
+          "status": "PASS",
+          "reason": "static_route_fit_pass",
+          "skill_path": "/Users/jameschen/Workspace/nexus/.agents/skills/triage/SKILL.md",
+          "route_overlap": [
+            "context",
+            "role",
+            "then",
+            "using",
+            "without"
+          ],
+          "evidence_overlap": [
+            "outcome"
+          ]
+        },
+        {
+          "skill_id": "grill-with-docs",
+          "verdict": "reject",
+          "status": "RETURN",
+          "reason": "static_route_fit_insufficient",
+          "skill_path": "/Users/jameschen/Workspace/nexus/.agents/skills/grill-with-docs/SKILL.md",
+          "route_overlap": [
+            "context",
+            "without"
+          ],
+          "evidence_overlap": []
+        }
+      ]
+    },
+    {
+      "capability_id": "nightshift",
+      "candidate_count": 2,
+      "static_fit_candidate_count": 2,
+      "candidates": [
+        {
+          "skill_id": "sf2-nightshift-route-fit-spec",
+          "verdict": "static_fit_candidate",
+          "status": "PASS",
+          "reason": "static_route_fit_pass",
+          "skill_path": "/Users/jameschen/Workspace/nexus/.agents/skills/sf2/sf2-nightshift-route-fit-spec/SKILL.md",
+          "route_overlap": [
+            "autonomous",
+            "capability",
+            "continuous",
+            "declared",
+            "emergency",
+            "evidence",
+            "fit",
+            "long",
+            "longrun",
+            "night",
+            "nightshift",
+            "optimization",
+            "promotion",
+            "receipt",
+            "recovery",
+            "route",
+            "running",
+            "runtime",
+            "shift",
+            "skill"
+          ],
+          "evidence_overlap": [
+            "evidence",
+            "outcome",
+            "receipt"
+          ]
+        },
+        {
+          "skill_id": "sf2-learning_closure-route-fit-spec",
+          "verdict": "static_fit_candidate",
+          "status": "PASS",
+          "reason": "static_route_fit_pass",
+          "skill_path": "/Users/jameschen/Workspace/nexus/.agents/skills/sf2/sf2-learning_closure-route-fit-spec/SKILL.md",
+          "route_overlap": [
+            "capability",
+            "continuous",
+            "declared",
+            "evidence",
+            "fit",
+            "optimization",
+            "promotion",
+            "receipt",
+            "route",
+            "runtime",
+            "skill",
+            "task"
+          ],
+          "evidence_overlap": [
+            "evidence",
+            "outcome",
+            "receipt"
+          ]
+        }
+      ]
+    },
+    {
+      "capability_id": "policy_capability_gate",
+      "candidate_count": 4,
+      "static_fit_candidate_count": 3,
+      "candidates": [
+        {
+          "skill_id": "diagnose",
+          "verdict": "static_fit_candidate",
+          "status": "PASS",
+          "reason": "static_route_fit_pass",
+          "skill_path": "/Users/jameschen/Workspace/nexus/.agents/skills/diagnose/SKILL.md",
+          "route_overlap": [
+            "skill",
+            "then",
+            "without"
+          ],
+          "evidence_overlap": [
+            "verify"
+          ]
+        },
+        {
+          "skill_id": "nexus-goal-closure-executor",
+          "verdict": "static_fit_candidate",
+          "status": "PASS",
+          "reason": "static_route_fit_pass",
+          "skill_path": "/Users/jameschen/Workspace/nexus/.agents/skills/nexus-goal-closure-executor/SKILL.md",
+          "route_overlap": [
+            "declared",
+            "evidence",
+            "gate",
+            "governance",
+            "its",
+            "learning",
+            "policy",
+            "route",
+            "runtime",
+            "skill",
+            "trust",
+            "without"
+          ],
+          "evidence_overlap": [
+            "contract",
+            "evidence",
+            "gate",
+            "verification",
+            "verify"
+          ]
+        },
+        {
+          "skill_id": "nexus-root-cause-probe",
+          "verdict": "static_fit_candidate",
+          "status": "PASS",
+          "reason": "static_route_fit_pass",
+          "skill_path": "/Users/jameschen/Workspace/nexus/.agents/skills/nexus-root-cause-probe/SKILL.md",
+          "route_overlap": [
+            "evidence",
+            "gate",
+            "governance",
+            "policy",
+            "runtime",
+            "trust"
+          ],
+          "evidence_overlap": [
+            "contract",
+            "evidence",
+            "gate"
+          ]
+        },
+        {
+          "skill_id": "setup-matt-pocock-skills",
+          "verdict": "reject",
+          "status": "RETURN",
+          "reason": "static_route_fit_insufficient",
+          "skill_path": "/Users/jameschen/Workspace/nexus/.agents/skills/setup-matt-pocock-skills/SKILL.md",
+          "route_overlap": [
+            "its",
+            "role",
+            "skill",
+            "then",
+            "using",
+            "without"
+          ],
+          "evidence_overlap": []
+        }
+      ]
+    },
+    {
+      "capability_id": "registry_skills_sync",
+      "candidate_count": 4,
+      "static_fit_candidate_count": 1,
+      "candidates": [
+        {
+          "skill_id": "sf2-registry_skills_sync-route-fit-spec",
+          "verdict": "static_fit_candidate",
+          "status": "PASS",
+          "reason": "static_route_fit_pass",
+          "skill_path": "/Users/jameschen/Workspace/nexus/.agents/skills/sf2/sf2-registry_skills_sync-route-fit-spec/SKILL.md",
+          "route_overlap": [
+            "capability",
+            "catalog",
+            "declared",
+            "evidence",
+            "fit",
+            "install",
+            "plugin",
+            "promotion",
+            "receipt",
+            "registry",
+            "registry_skills_sync",
+            "route",
+            "runtime",
+            "skill",
+            "sync"
+          ],
+          "evidence_overlap": [
+            "evidence",
+            "outcome",
+            "receipt"
+          ]
+        },
+        {
+          "skill_id": "browserbase-cookie-sync",
+          "verdict": "reject",
+          "status": "RETURN",
+          "reason": "skill_asset_missing",
+          "skill_path": "",
+          "route_overlap": [],
+          "evidence_overlap": []
+        },
+        {
+          "skill_id": "document-release",
+          "verdict": "reject",
+          "status": "RETURN",
+          "reason": "skill_asset_missing",
+          "skill_path": "",
+          "route_overlap": [],
+          "evidence_overlap": []
+        },
+        {
+          "skill_id": "gbrain-cold-start",
+          "verdict": "reject",
+          "status": "RETURN",
+          "reason": "skill_asset_missing",
+          "skill_path": "",
+          "route_overlap": [],
+          "evidence_overlap": []
+        }
+      ]
+    },
+    {
+      "capability_id": "regression_guard",
+      "candidate_count": 4,
+      "static_fit_candidate_count": 3,
+      "candidates": [
+        {
+          "skill_id": "nexus-benchmark-continuous-optimization",
+          "verdict": "static_fit_candidate",
+          "status": "PASS",
+          "reason": "static_route_fit_pass",
+          "skill_path": "/Users/jameschen/Workspace/nexus/.agents/skills/nexus-benchmark-continuous-optimization/SKILL.md",
+          "route_overlap": [
+            "evidence",
+            "its",
+            "promotion",
+            "route",
+            "without"
+          ],
+          "evidence_overlap": [
+            "evidence",
+            "gate",
+            "verification"
+          ]
+        },
+        {
+          "skill_id": "nexus-benchmark-public-report",
+          "verdict": "static_fit_candidate",
+          "status": "PASS",
+          "reason": "static_route_fit_pass",
+          "skill_path": "/Users/jameschen/Workspace/nexus/.agents/skills/nexus-benchmark-public-report/SKILL.md",
+          "route_overlap": [
+            "evidence",
+            "guard",
+            "using",
+            "without"
+          ],
+          "evidence_overlap": [
+            "evidence",
+            "gate",
+            "verification"
+          ]
+        },
+        {
+          "skill_id": "nexus-capability-upgrade",
+          "verdict": "static_fit_candidate",
+          "status": "PASS",
+          "reason": "static_route_fit_pass",
+          "skill_path": "/Users/jameschen/Workspace/nexus/.agents/skills/nexus-capability-upgrade/SKILL.md",
+          "route_overlap": [
+            "artifact",
+            "capability",
+            "evidence",
+            "guard",
+            "regression",
+            "route",
+            "runtime",
+            "test",
+            "using",
+            "without"
+          ],
+          "evidence_overlap": [
+            "contract",
+            "evidence",
+            "gate",
+            "verify"
+          ]
+        },
+        {
+          "skill_id": "grill-me",
+          "verdict": "reject",
+          "status": "RETURN",
+          "reason": "static_route_fit_insufficient",
+          "skill_path": "/Users/jameschen/Workspace/nexus/.agents/skills/grill-me/SKILL.md",
+          "route_overlap": [
+            "stress",
+            "test"
+          ],
+          "evidence_overlap": []
+        }
+      ]
+    },
+    {
+      "capability_id": "repair_loop",
+      "candidate_count": 4,
+      "static_fit_candidate_count": 3,
+      "candidates": [
+        {
+          "skill_id": "sf2-hyper_sprint-route-fit-spec",
+          "verdict": "static_fit_candidate",
+          "status": "PASS",
+          "reason": "static_route_fit_pass",
+          "skill_path": "/Users/jameschen/Workspace/nexus/.agents/skills/sf2/sf2-hyper_sprint-route-fit-spec/SKILL.md",
+          "route_overlap": [
+            "capability",
+            "declared",
+            "evidence",
+            "fit",
+            "fix",
+            "promotion",
+            "receipt",
+            "repair",
+            "route",
+            "runtime",
+            "skill"
+          ],
+          "evidence_overlap": [
+            "evidence",
+            "outcome",
+            "receipt"
+          ]
+        },
+        {
+          "skill_id": "sf2-nightshift-route-fit-spec",
+          "verdict": "static_fit_candidate",
+          "status": "PASS",
+          "reason": "static_route_fit_pass",
+          "skill_path": "/Users/jameschen/Workspace/nexus/.agents/skills/sf2/sf2-nightshift-route-fit-spec/SKILL.md",
+          "route_overlap": [
+            "capability",
+            "declared",
+            "evidence",
+            "fit",
+            "promotion",
+            "receipt",
+            "repair",
+            "route",
+            "runtime",
+            "skill"
+          ],
+          "evidence_overlap": [
+            "evidence",
+            "outcome",
+            "receipt"
+          ]
+        },
+        {
+          "skill_id": "tdd",
+          "verdict": "static_fit_candidate",
+          "status": "PASS",
+          "reason": "static_route_fit_pass",
+          "skill_path": "/Users/jameschen/Workspace/nexus/.agents/skills/tdd/SKILL.md",
+          "route_overlap": [
+            "capability",
+            "code",
+            "exercise",
+            "fix",
+            "refactor",
+            "tdd",
+            "test",
+            "then",
+            "using"
+          ],
+          "evidence_overlap": [
+            "verify"
+          ]
+        },
+        {
+          "skill_id": "grill-me",
+          "verdict": "reject",
+          "status": "RETURN",
+          "reason": "static_route_fit_insufficient",
+          "skill_path": "/Users/jameschen/Workspace/nexus/.agents/skills/grill-me/SKILL.md",
+          "route_overlap": [
+            "test"
+          ],
+          "evidence_overlap": []
+        }
+      ]
+    },
+    {
+      "capability_id": "research",
+      "candidate_count": 4,
+      "static_fit_candidate_count": 2,
+      "candidates": [
+        {
+          "skill_id": "sf2-research_control_plane-route-fit-spec",
+          "verdict": "static_fit_candidate",
+          "status": "PASS",
+          "reason": "static_route_fit_pass",
+          "skill_path": "/Users/jameschen/Workspace/nexus/.agents/skills/sf2/sf2-research_control_plane-route-fit-spec/SKILL.md",
+          "route_overlap": [
+            "capability",
+            "citation",
+            "declared",
+            "evidence",
+            "fit",
+            "promotion",
+            "receipt",
+            "research",
+            "route",
+            "runtime",
+            "skill",
+            "source"
+          ],
+          "evidence_overlap": [
+            "evidence",
+            "outcome",
+            "receipt",
+            "verification",
+            "verify"
+          ]
+        },
+        {
+          "skill_id": "sf2-lancedb-route-fit-spec",
+          "verdict": "static_fit_candidate",
+          "status": "PASS",
+          "reason": "static_route_fit_pass",
+          "skill_path": "/Users/jameschen/Workspace/nexus/.agents/skills/sf2/sf2-lancedb-route-fit-spec/SKILL.md",
+          "route_overlap": [
+            "capability",
+            "declared",
+            "evidence",
+            "fit",
+            "lancedb",
+            "promotion",
+            "receipt",
+            "route",
+            "runtime",
+            "search",
+            "skill"
+          ],
+          "evidence_overlap": [
+            "evidence",
+            "outcome",
+            "receipt"
+          ]
+        },
+        {
+          "skill_id": "browserbase-browserbase-cli",
+          "verdict": "reject",
+          "status": "RETURN",
+          "reason": "skill_asset_missing",
+          "skill_path": "",
+          "route_overlap": [],
+          "evidence_overlap": []
+        },
+        {
+          "skill_id": "gbrain-academic-verify",
+          "verdict": "reject",
+          "status": "RETURN",
+          "reason": "skill_asset_missing",
+          "skill_path": "",
+          "route_overlap": [],
+          "evidence_overlap": []
+        }
+      ]
+    },
+    {
+      "capability_id": "research_control_plane",
+      "candidate_count": 4,
+      "static_fit_candidate_count": 1,
+      "candidates": [
+        {
+          "skill_id": "sf2-research_control_plane-route-fit-spec",
+          "verdict": "static_fit_candidate",
+          "status": "PASS",
+          "reason": "static_route_fit_pass",
+          "skill_path": "/Users/jameschen/Workspace/nexus/.agents/skills/sf2/sf2-research_control_plane-route-fit-spec/SKILL.md",
+          "route_overlap": [
+            "academic",
+            "capability",
+            "chain",
+            "citation",
+            "claim",
+            "conflict",
+            "declared",
+            "evidence",
+            "fit",
+            "promotion",
+            "receipt",
+            "research_control_plane",
+            "route",
+            "runtime",
+            "skill",
+            "source",
+            "validation",
+            "verification",
+            "verify"
+          ],
+          "evidence_overlap": [
+            "evidence",
+            "outcome",
+            "receipt",
+            "verification",
+            "verify"
+          ]
+        },
+        {
+          "skill_id": "agent-reach",
+          "verdict": "reject",
+          "status": "RETURN",
+          "reason": "skill_asset_missing",
+          "skill_path": "",
+          "route_overlap": [],
+          "evidence_overlap": []
+        },
+        {
+          "skill_id": "aibdd.auto.python.e2e.green",
+          "verdict": "reject",
+          "status": "RETURN",
+          "reason": "skill_asset_missing",
+          "skill_path": "",
+          "route_overlap": [],
+          "evidence_overlap": []
+        },
+        {
+          "skill_id": "aibdd.auto.python.e2e.handlers.aggregate-given",
+          "verdict": "reject",
+          "status": "RETURN",
+          "reason": "skill_asset_missing",
+          "skill_path": "",
+          "route_overlap": [],
+          "evidence_overlap": []
+        }
+      ]
+    },
+    {
+      "capability_id": "sandbox_replay",
+      "candidate_count": 4,
+      "static_fit_candidate_count": 1,
+      "candidates": [
+        {
+          "skill_id": "sf2-file_lock_security_gate-route-fit-spec",
+          "verdict": "static_fit_candidate",
+          "status": "PASS",
+          "reason": "static_route_fit_pass",
+          "skill_path": "/Users/jameschen/Workspace/nexus/.agents/skills/sf2/sf2-file_lock_security_gate-route-fit-spec/SKILL.md",
+          "route_overlap": [
+            "capability",
+            "declared",
+            "evidence",
+            "fit",
+            "promotion",
+            "receipt",
+            "route",
+            "runtime",
+            "sandbox",
+            "skill"
+          ],
+          "evidence_overlap": [
+            "evidence",
+            "gate",
+            "outcome",
+            "receipt"
+          ]
+        },
+        {
+          "skill_id": "gstack-health",
+          "verdict": "reject",
+          "status": "RETURN",
+          "reason": "skill_asset_missing",
+          "skill_path": "",
+          "route_overlap": [],
+          "evidence_overlap": []
+        },
+        {
+          "skill_id": "health",
+          "verdict": "reject",
+          "status": "RETURN",
+          "reason": "skill_asset_missing",
+          "skill_path": "",
+          "route_overlap": [],
+          "evidence_overlap": []
+        },
+        {
+          "skill_id": "aibdd.auto.java.e2e.refactor",
+          "verdict": "reject",
+          "status": "RETURN",
+          "reason": "skill_asset_missing",
+          "skill_path": "",
+          "route_overlap": [],
+          "evidence_overlap": []
+        }
+      ]
+    },
+    {
+      "capability_id": "swarm_multi_agent",
+      "candidate_count": 4,
+      "static_fit_candidate_count": 1,
+      "candidates": [
+        {
+          "skill_id": "sf2-swarm_multi_agent-route-fit-spec",
+          "verdict": "static_fit_candidate",
+          "status": "PASS",
+          "reason": "static_route_fit_pass",
+          "skill_path": "/Users/jameschen/Workspace/nexus/.agents/skills/sf2/sf2-swarm_multi_agent-route-fit-spec/SKILL.md",
+          "route_overlap": [
+            "agent",
+            "capability",
+            "declared",
+            "evidence",
+            "fit",
+            "fleet",
+            "integrate",
+            "multi",
+            "promotion",
+            "receipt",
+            "route",
+            "runtime",
+            "skill",
+            "submit",
+            "swarm",
+            "swarm_multi_agent",
+            "worktree"
+          ],
+          "evidence_overlap": [
+            "evidence",
+            "outcome",
+            "receipt",
+            "verify"
+          ]
+        },
+        {
+          "skill_id": "benepass-reimbursement",
+          "verdict": "reject",
+          "status": "RETURN",
+          "reason": "skill_asset_missing",
+          "skill_path": "",
+          "route_overlap": [],
+          "evidence_overlap": []
+        },
+        {
+          "skill_id": "multi-agent-handoff-governance-design",
+          "verdict": "reject",
+          "status": "RETURN",
+          "reason": "skill_asset_missing",
+          "skill_path": "",
+          "route_overlap": [],
+          "evidence_overlap": []
+        },
+        {
+          "skill_id": "nexus-gemini-code-review-orchestrator",
+          "verdict": "reject",
+          "status": "RETURN",
+          "reason": "skill_asset_missing",
+          "skill_path": "",
+          "route_overlap": [],
+          "evidence_overlap": []
+        }
+      ]
+    },
+    {
+      "capability_id": "ui_validator",
+      "candidate_count": 4,
+      "static_fit_candidate_count": 0,
+      "candidates": [
+        {
+          "skill_id": "wondelai-high-perf-browser",
+          "verdict": "reject",
+          "status": "RETURN",
+          "reason": "skill_asset_missing",
+          "skill_path": "",
+          "route_overlap": [],
+          "evidence_overlap": []
+        },
+        {
+          "skill_id": "addy-browser-testing-with-devtools",
+          "verdict": "reject",
+          "status": "RETURN",
+          "reason": "skill_asset_missing",
+          "skill_path": "",
+          "route_overlap": [],
+          "evidence_overlap": []
+        },
+        {
+          "skill_id": "browserbase-ui-test",
+          "verdict": "reject",
+          "status": "RETURN",
+          "reason": "skill_asset_missing",
+          "skill_path": "",
+          "route_overlap": [],
+          "evidence_overlap": []
+        },
+        {
+          "skill_id": "gstack-plan-design-review",
+          "verdict": "reject",
+          "status": "RETURN",
+          "reason": "skill_asset_missing",
+          "skill_path": "",
+          "route_overlap": [],
+          "evidence_overlap": []
+        }
+      ]
+    },
+    {
+      "capability_id": "ultra_review",
+      "candidate_count": 4,
+      "static_fit_candidate_count": 4,
+      "candidates": [
+        {
+          "skill_id": "sf2-file_lock_security_gate-route-fit-spec",
+          "verdict": "static_fit_candidate",
+          "status": "PASS",
+          "reason": "static_route_fit_pass",
+          "skill_path": "/Users/jameschen/Workspace/nexus/.agents/skills/sf2/sf2-file_lock_security_gate-route-fit-spec/SKILL.md",
+          "route_overlap": [
+            "capability",
+            "declared",
+            "evidence",
+            "fit",
+            "promotion",
+            "receipt",
+            "review",
+            "route",
+            "runtime",
+            "security",
+            "skill"
+          ],
+          "evidence_overlap": [
+            "evidence",
+            "gate",
+            "outcome",
+            "receipt"
+          ]
+        },
+        {
+          "skill_id": "diagnose",
+          "verdict": "static_fit_candidate",
+          "status": "PASS",
+          "reason": "static_route_fit_pass",
+          "skill_path": "/Users/jameschen/Workspace/nexus/.agents/skills/diagnose/SKILL.md",
+          "route_overlap": [
+            "artifact",
+            "regression",
+            "skill",
+            "then",
+            "without"
+          ],
+          "evidence_overlap": [
+            "verify"
+          ]
+        },
+        {
+          "skill_id": "nexus-goal-closure-executor",
+          "verdict": "static_fit_candidate",
+          "status": "PASS",
+          "reason": "static_route_fit_pass",
+          "skill_path": "/Users/jameschen/Workspace/nexus/.agents/skills/nexus-goal-closure-executor/SKILL.md",
+          "route_overlap": [
+            "declared",
+            "evidence",
+            "its",
+            "regression",
+            "route",
+            "runtime",
+            "skill",
+            "without"
+          ],
+          "evidence_overlap": [
+            "contract",
+            "evidence",
+            "gate",
+            "verification",
+            "verify"
+          ]
+        },
+        {
+          "skill_id": "nexus-root-cause-probe",
+          "verdict": "static_fit_candidate",
+          "status": "PASS",
+          "reason": "static_route_fit_pass",
+          "skill_path": "/Users/jameschen/Workspace/nexus/.agents/skills/nexus-root-cause-probe/SKILL.md",
+          "route_overlap": [
+            "artifact",
+            "audit",
+            "evidence",
+            "regression",
+            "runtime"
+          ],
+          "evidence_overlap": [
+            "contract",
+            "evidence",
+            "gate"
+          ]
+        }
+      ]
+    },
+    {
+      "capability_id": "xray",
+      "candidate_count": 4,
+      "static_fit_candidate_count": 0,
+      "candidates": [
+        {
+          "skill_id": "gstack-investigate",
+          "verdict": "reject",
+          "status": "RETURN",
+          "reason": "skill_asset_missing",
+          "skill_path": "",
+          "route_overlap": [],
+          "evidence_overlap": []
+        },
+        {
+          "skill_id": "gstack-openclaw-investigate",
+          "verdict": "reject",
+          "status": "RETURN",
+          "reason": "skill_asset_missing",
+          "skill_path": "",
+          "route_overlap": [],
+          "evidence_overlap": []
+        },
+        {
+          "skill_id": "investigate",
+          "verdict": "reject",
+          "status": "RETURN",
+          "reason": "skill_asset_missing",
+          "skill_path": "",
+          "route_overlap": [],
+          "evidence_overlap": []
+        },
+        {
+          "skill_id": "systematic-debugging",
+          "verdict": "reject",
+          "status": "RETURN",
+          "reason": "skill_asset_missing",
+          "skill_path": "",
+          "route_overlap": [],
+          "evidence_overlap": []
+        }
+      ]
+    }
+  ],
+  "claim_boundary": [
+    "Static fit candidates can enter bounded live validation.",
+    "This catalog does not update runtime defaults or unlock public benchmark."
+  ]
+}

@@ -1,0 +1,29 @@
+{
+  "held_decisions": [],
+  "public_benchmark_allowed": false,
+  "replacement_decisions": [
+    {
+      "candidate_evidence_path": ".nexus/reports/sf_github_round4b_backfill_live_2026-05-19/benchmark_meta_opt_sf-github-round4b-backfill-benchmark_meta_opt-001_github4_ad_creative_github4-sickn33-antigravity-awesome-skills-ad-creative/evidence_bundle.json",
+      "candidate_receipt_path": ".nexus/reports/sf_github_round4b_backfill_live_2026-05-19/benchmark_meta_opt_sf-github-round4b-backfill-benchmark_meta_opt-001_github4_ad_creative_github4-sickn33-antigravity-awesome-skills-ad-creative",
+      "candidate_skill": "github4-sickn33-antigravity-awesome-skills-ad-creative",
+      "candidate_total_tokens": 40166,
+      "candidate_wall_duration_sec": 81.8399,
+      "capability": "benchmark_meta_opt",
+      "current_evidence_path": ".nexus/reports/sf_github_round4b_backfill_live_2026-05-19/benchmark_meta_opt_sf-github-round4b-backfill-benchmark_meta_opt-001_current_best_nexus-benchmark-continuous-optimization/evidence_bundle.json",
+      "current_receipt_path": ".nexus/reports/sf_github_round4b_backfill_live_2026-05-19/benchmark_meta_opt_sf-github-round4b-backfill-benchmark_meta_opt-001_current_best_nexus-benchmark-continuous-optimization",
+      "current_total_tokens": 45698,
+      "current_wall_duration_sec": 134.9882,
+      "decision": "APPROVE_RUNTIME_REPLACEMENT",
+      "from_skill": "nexus-benchmark-continuous-optimization",
+      "reason": "runtime_receipt_confirmed_and_cost_improved",
+      "to_skill": "github4-sickn33-antigravity-awesome-skills-ad-creative",
+      "token_delta": -5532,
+      "wall_delta_sec": -53.1483
+    }
+  ],
+  "runtime_default_written": false,
+  "schema": "nexus.sf_github_round4b_backfill_replacement_ledger.v1",
+  "source_rollup": "docs/reports/NEXUS_SF_GITHUB_ROUND4B_BACKFILL_LIVE_ROLLUP_2026-05-19.json",
+  "status": "PASS",
+  "version": "2026-05-19"
+}

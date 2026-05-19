@@ -1,0 +1,101 @@
+{
+  "claim_boundary": [
+    "Static safety screen only; no untrusted repo code executed.",
+    "External repo material is prompt-only rewritten before SF ablation.",
+    "No runtime default or public benchmark promotion in this round."
+  ],
+  "repos": [
+    {
+      "commit_sha": "ea42241d068e8112da0e4e28006207125c835c2e",
+      "intake_decision": "prompt_only_rewrite_required",
+      "repo": "elementalsouls/Claude-OSINT",
+      "runtime_mount_allowed": false,
+      "skill_md_count": 2,
+      "source_url": "https://github.com/elementalsouls/Claude-OSINT",
+      "static_red_flags": [
+        "docker",
+        "secret-handling"
+      ]
+    },
+    {
+      "commit_sha": "650f3ed310489e8c8a255b2d7454f8935be503a4",
+      "intake_decision": "prompt_only_or_reference_allowed",
+      "repo": "Auriti-Labs/geo-optimizer-skill",
+      "runtime_mount_allowed": false,
+      "skill_md_count": 1,
+      "source_url": "https://github.com/Auriti-Labs/geo-optimizer-skill",
+      "static_red_flags": []
+    },
+    {
+      "commit_sha": "1d5f69fe7afb26222e69674bed08d200a3f7f0a3",
+      "intake_decision": "prompt_only_rewrite_required",
+      "repo": "garrytan/gbrain",
+      "runtime_mount_allowed": false,
+      "skill_md_count": 48,
+      "source_url": "https://github.com/garrytan/gbrain",
+      "static_red_flags": [
+        "destructive-rm",
+        "mcp-integration",
+        "media-transform-tool",
+        "npm-install",
+        "secret-handling"
+      ]
+    },
+    {
+      "commit_sha": "5fe27b67631a76e27b61eb542b9e909cf4ca6e73",
+      "intake_decision": "prompt_only_rewrite_required",
+      "repo": "BrikerMan/skilless.ai",
+      "runtime_mount_allowed": false,
+      "skill_md_count": 4,
+      "source_url": "https://github.com/BrikerMan/skilless.ai",
+      "static_red_flags": [
+        "media-download-tool",
+        "media-transform-tool"
+      ]
+    }
+  ],
+  "schema": "nexus.sf_github_round8_static_screen.v1",
+  "selected_challengers": [
+    {
+      "candidate_path": "/Users/jameschen/Workspace/nexus/.agents/skills/github-round8-challengers/github8-claude-osint-research-control-plane/SKILL.md",
+      "candidate_skill": "github8-claude-osint-research-control-plane",
+      "capability": "research_control_plane",
+      "reason": "OSINT methodology maps to scoped research control, confidence and source hygiene.",
+      "repo": "elementalsouls/Claude-OSINT",
+      "source_skill": "skills/osint-methodology/SKILL.md"
+    },
+    {
+      "candidate_path": "/Users/jameschen/Workspace/nexus/.agents/skills/github-round8-challengers/github8-geo-optimizer-claim-gate/SKILL.md",
+      "candidate_skill": "github8-geo-optimizer-claim-gate",
+      "capability": "claim_gate",
+      "reason": "GEO claim/citability checks map to claim gate evidence readiness.",
+      "repo": "Auriti-Labs/geo-optimizer-skill",
+      "source_skill": "SKILL.md"
+    },
+    {
+      "candidate_path": "/Users/jameschen/Workspace/nexus/.agents/skills/github-round8-challengers/github8-gbrain-academic-verify-research/SKILL.md",
+      "candidate_skill": "github8-gbrain-academic-verify-research",
+      "capability": "research",
+      "reason": "Academic verify maps to research claim/source chain verification.",
+      "repo": "garrytan/gbrain",
+      "source_skill": "skills/academic-verify/SKILL.md"
+    },
+    {
+      "candidate_path": "/Users/jameschen/Workspace/nexus/.agents/skills/github-round8-challengers/github8-skilless-deep-research-learn-ask/SKILL.md",
+      "candidate_skill": "github8-skilless-deep-research-learn-ask",
+      "capability": "learn_ask",
+      "reason": "Skilless research maps to scoped learn/ask synthesis and uncertainty handling.",
+      "repo": "BrikerMan/skilless.ai",
+      "source_skill": "src/skilless.ai-research/SKILL.md"
+    }
+  ],
+  "status": "PASS",
+  "summary": {
+    "public_benchmark_allowed": false,
+    "repo_count": 4,
+    "runtime_update_allowed": false,
+    "selected_challenger_count": 4,
+    "total_skill_md_count": 55
+  },
+  "version": "2026-05-19"
+}

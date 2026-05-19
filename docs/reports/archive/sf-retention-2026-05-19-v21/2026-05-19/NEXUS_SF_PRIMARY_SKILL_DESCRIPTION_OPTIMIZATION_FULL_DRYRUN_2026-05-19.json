@@ -1,0 +1,631 @@
+{
+  "applied_skills": [],
+  "claim_boundary": [
+    "This optimizes skill routing metadata only.",
+    "It does not replace runtime skill pairings.",
+    "Functional replacement still requires SF ablation evidence."
+  ],
+  "items": [
+    {
+      "after": {
+        "evidence_hits": 5,
+        "length_ok": 1,
+        "negative_boundary": 1,
+        "positive_hits": 18,
+        "score": 68
+      },
+      "applied": false,
+      "before": {
+        "evidence_hits": 5,
+        "length_ok": 1,
+        "negative_boundary": 1,
+        "positive_hits": 18,
+        "score": 68
+      },
+      "candidate_description": "Use when Nexus route capability is drone, memory, regression_guard, xray and the task needs debugging failures, regressions, root cause isolation, and runtime evidence checks; return receipt/evidence/gate/outcome-backed guidance for SF or runtime review. Do not use for unrelated one-off writing or tasks without runtime evidence needs.",
+      "capabilities": [
+        "drone",
+        "memory",
+        "regression_guard",
+        "xray"
+      ],
+      "capability_count": 4,
+      "improved": false,
+      "old_description": "Use when Nexus route capability is drone, memory, regression_guard, xray and the task needs debugging failures, regressions, root cause isolation, and runtime evidence checks; return receipt/evidence/gate/outcome-backed guidance for SF or runtime review. Do not use for unrelated one-off writing or tasks without runtime evidence needs.",
+      "path": "/Users/jameschen/Workspace/nexus/.agents/skills/diagnose/SKILL.md",
+      "skill_id": "diagnose"
+    },
+    {
+      "after": {
+        "evidence_hits": 5,
+        "length_ok": 1,
+        "negative_boundary": 1,
+        "positive_hits": 16,
+        "score": 62
+      },
+      "applied": false,
+      "before": {
+        "evidence_hits": 5,
+        "length_ok": 1,
+        "negative_boundary": 1,
+        "positive_hits": 16,
+        "score": 62
+      },
+      "candidate_description": "Use when Nexus route capability is artifact_gate, governance_and_trust, ultra_review and the task needs rejecting unsupported acceptance, delivery, claim, artifact, and governance evidence; return receipt/evidence/gate/outcome-backed guidance for SF or runtime review. Do not use for unrelated one-off writing or tasks without runtime evidence needs.",
+      "capabilities": [
+        "artifact_gate",
+        "governance_and_trust",
+        "ultra_review"
+      ],
+      "capability_count": 3,
+      "improved": false,
+      "old_description": "Use when Nexus route capability is artifact_gate, governance_and_trust, ultra_review and the task needs rejecting unsupported acceptance, delivery, claim, artifact, and governance evidence; return receipt/evidence/gate/outcome-backed guidance for SF or runtime review. Do not use for unrelated one-off writing or tasks without runtime evidence needs.",
+      "path": "/Users/jameschen/Workspace/nexus/.agents/skills/acceptance-evidence-failclosed/SKILL.md",
+      "skill_id": "acceptance-evidence-failclosed"
+    },
+    {
+      "after": {
+        "evidence_hits": 5,
+        "length_ok": 1,
+        "negative_boundary": 1,
+        "positive_hits": 17,
+        "score": 65
+      },
+      "applied": false,
+      "before": {
+        "evidence_hits": 5,
+        "length_ok": 1,
+        "negative_boundary": 1,
+        "positive_hits": 17,
+        "score": 65
+      },
+      "candidate_description": "Use when Nexus route capability is ddtree, policy_capability_gate, ui_validator and the task needs Nexus route, policy, gate, report, and runtime receipt root-cause diagnosis; return receipt/evidence/gate/outcome-backed guidance for SF or runtime review. Do not use for unrelated one-off writing or tasks without runtime evidence needs.",
+      "capabilities": [
+        "ddtree",
+        "policy_capability_gate",
+        "ui_validator"
+      ],
+      "capability_count": 3,
+      "improved": false,
+      "old_description": "Use when Nexus route capability is ddtree, policy_capability_gate, ui_validator and the task needs Nexus route, policy, gate, report, and runtime receipt root-cause diagnosis; return receipt/evidence/gate/outcome-backed guidance for SF or runtime review. Do not use for unrelated one-off writing or tasks without runtime evidence needs.",
+      "path": "/Users/jameschen/Workspace/nexus/.agents/skills/nexus-root-cause-probe/SKILL.md",
+      "skill_id": "nexus-root-cause-probe"
+    },
+    {
+      "after": {
+        "evidence_hits": 5,
+        "length_ok": 1,
+        "negative_boundary": 1,
+        "positive_hits": 17,
+        "score": 65
+      },
+      "applied": false,
+      "before": {
+        "evidence_hits": 5,
+        "length_ok": 1,
+        "negative_boundary": 1,
+        "positive_hits": 17,
+        "score": 65
+      },
+      "candidate_description": "Use when Nexus route capability is research, research_and_source_discipline, research_control_plane and the task needs research claim-to-source tracing, citation chain verification, and source-discipline receipts; return receipt/evidence/gate/outcome-backed guidance for SF or runtime review. Do not use for unrelated one-off writing or tasks without runtime evidence needs.",
+      "capabilities": [
+        "research",
+        "research_and_source_discipline",
+        "research_control_plane"
+      ],
+      "capability_count": 3,
+      "improved": false,
+      "old_description": "Use when Nexus route capability is research, research_and_source_discipline, research_control_plane and the task needs research claim-to-source tracing, citation chain verification, and source-discipline receipts; return receipt/evidence/gate/outcome-backed guidance for SF or runtime review. Do not use for unrelated one-off writing or tasks without runtime evidence needs.",
+      "path": "/Users/jameschen/Workspace/nexus/.agents/skills/research-citation-chain-verifier/SKILL.md",
+      "skill_id": "research-citation-chain-verifier"
+    },
+    {
+      "after": {
+        "evidence_hits": 5,
+        "length_ok": 1,
+        "negative_boundary": 1,
+        "positive_hits": 14,
+        "score": 56
+      },
+      "applied": false,
+      "before": {
+        "evidence_hits": 5,
+        "length_ok": 1,
+        "negative_boundary": 1,
+        "positive_hits": 14,
+        "score": 56
+      },
+      "candidate_description": "Use when Nexus route capability is autoreason, belief and the task needs belief, autoreason confidence state, subjective route assessment, and decision evidence; return receipt/evidence/gate/outcome-backed guidance for SF or runtime review. Do not use for unrelated one-off writing or tasks without runtime evidence needs.",
+      "capabilities": [
+        "autoreason",
+        "belief"
+      ],
+      "capability_count": 2,
+      "improved": false,
+      "old_description": "Use when Nexus route capability is autoreason, belief and the task needs belief, autoreason confidence state, subjective route assessment, and decision evidence; return receipt/evidence/gate/outcome-backed guidance for SF or runtime review. Do not use for unrelated one-off writing or tasks without runtime evidence needs.",
+      "path": "/Users/jameschen/Workspace/nexus/.agents/skills/sf2/sf2-belief-route-fit-spec/SKILL.md",
+      "skill_id": "sf2-belief-route-fit-spec"
+    },
+    {
+      "after": {
+        "evidence_hits": 5,
+        "length_ok": 1,
+        "negative_boundary": 1,
+        "positive_hits": 16,
+        "score": 62
+      },
+      "applied": false,
+      "before": {
+        "evidence_hits": 5,
+        "length_ok": 1,
+        "negative_boundary": 1,
+        "positive_hits": 16,
+        "score": 62
+      },
+      "candidate_description": "Use when Nexus route capability is benchmark_meta_opt, claim_gate and the task needs benchmark, route-cost, claim-boundary, and continuous optimization review; return receipt/evidence/gate/outcome-backed guidance for SF or runtime review. Do not use for unrelated one-off writing or tasks without runtime evidence needs.",
+      "capabilities": [
+        "benchmark_meta_opt",
+        "claim_gate"
+      ],
+      "capability_count": 2,
+      "improved": false,
+      "old_description": "Use when Nexus route capability is benchmark_meta_opt, claim_gate and the task needs benchmark, route-cost, claim-boundary, and continuous optimization review; return receipt/evidence/gate/outcome-backed guidance for SF or runtime review. Do not use for unrelated one-off writing or tasks without runtime evidence needs.",
+      "path": "/Users/jameschen/Workspace/nexus/.agents/skills/nexus-benchmark-continuous-optimization/SKILL.md",
+      "skill_id": "nexus-benchmark-continuous-optimization"
+    },
+    {
+      "after": {
+        "evidence_hits": 5,
+        "length_ok": 1,
+        "negative_boundary": 1,
+        "positive_hits": 16,
+        "score": 62
+      },
+      "applied": false,
+      "before": {
+        "evidence_hits": 0,
+        "length_ok": 0,
+        "negative_boundary": 0,
+        "positive_hits": 3,
+        "score": 9
+      },
+      "candidate_description": "Use when Nexus route capability is autonomic_router and the task needs autonomic route selection, route evolution, routing policy feedback, and route-fit receipts; return receipt/evidence/gate/outcome-backed guidance for SF or runtime review. Do not use for unrelated one-off writing or tasks without runtime evidence needs.",
+      "capabilities": [
+        "autonomic_router"
+      ],
+      "capability_count": 1,
+      "improved": true,
+      "old_description": "Candidate-only SF2 route-fit skill for autonomic_router.",
+      "path": "/Users/jameschen/Workspace/nexus/.agents/skills/sf2/sf2-autonomic_router-route-fit-spec/SKILL.md",
+      "skill_id": "sf2-autonomic_router-route-fit-spec"
+    },
+    {
+      "after": {
+        "evidence_hits": 5,
+        "length_ok": 1,
+        "negative_boundary": 1,
+        "positive_hits": 17,
+        "score": 65
+      },
+      "applied": false,
+      "before": {
+        "evidence_hits": 0,
+        "length_ok": 0,
+        "negative_boundary": 0,
+        "positive_hits": 0,
+        "score": 0
+      },
+      "candidate_description": "Use when Nexus route capability is codeintel and the task needs code scanning, impact analysis, symbol context, dependency graph, and code intelligence receipts; return receipt/evidence/gate/outcome-backed guidance for SF or runtime review. Do not use for unrelated one-off writing or tasks without runtime evidence needs.",
+      "capabilities": [
+        "codeintel"
+      ],
+      "capability_count": 1,
+      "improved": true,
+      "old_description": "",
+      "path": "/Users/jameschen/Workspace/nexus/.agents/skills/sf2/sf2-codeintel-route-fit-spec/SKILL.md",
+      "skill_id": "sf2-codeintel-route-fit-spec"
+    },
+    {
+      "after": {
+        "evidence_hits": 5,
+        "length_ok": 1,
+        "negative_boundary": 1,
+        "positive_hits": 17,
+        "score": 65
+      },
+      "applied": false,
+      "before": {
+        "evidence_hits": 0,
+        "length_ok": 0,
+        "negative_boundary": 0,
+        "positive_hits": 1,
+        "score": 3
+      },
+      "candidate_description": "Use when Nexus route capability is direct_master_loop and the task needs direct master loop execution, default task control, content rewrite, and execution receipts; return receipt/evidence/gate/outcome-backed guidance for SF or runtime review. Do not use for unrelated one-off writing or tasks without runtime evidence needs.",
+      "capabilities": [
+        "direct_master_loop"
+      ],
+      "capability_count": 1,
+      "improved": true,
+      "old_description": "Candidate-only SF2 route-fit skill for direct_master_loop.",
+      "path": "/Users/jameschen/Workspace/nexus/.agents/skills/sf2/sf2-direct_master_loop-route-fit-spec/SKILL.md",
+      "skill_id": "sf2-direct_master_loop-route-fit-spec"
+    },
+    {
+      "after": {
+        "evidence_hits": 5,
+        "length_ok": 1,
+        "negative_boundary": 1,
+        "positive_hits": 17,
+        "score": 65
+      },
+      "applied": false,
+      "before": {
+        "evidence_hits": 0,
+        "length_ok": 0,
+        "negative_boundary": 0,
+        "positive_hits": 0,
+        "score": 0
+      },
+      "candidate_description": "Use when Nexus route capability is external_productivity and the task needs external productivity tools, docs, sheets, calendar, mail, and connector-safe receipts; return receipt/evidence/gate/outcome-backed guidance for SF or runtime review. Do not use for unrelated one-off writing or tasks without runtime evidence needs.",
+      "capabilities": [
+        "external_productivity"
+      ],
+      "capability_count": 1,
+      "improved": true,
+      "old_description": "",
+      "path": "/Users/jameschen/Workspace/nexus/.agents/skills/sf2/sf2-external_productivity-route-fit-spec/SKILL.md",
+      "skill_id": "sf2-external_productivity-route-fit-spec"
+    },
+    {
+      "after": {
+        "evidence_hits": 5,
+        "length_ok": 1,
+        "negative_boundary": 1,
+        "positive_hits": 15,
+        "score": 59
+      },
+      "applied": false,
+      "before": {
+        "evidence_hits": 0,
+        "length_ok": 0,
+        "negative_boundary": 0,
+        "positive_hits": 1,
+        "score": 3
+      },
+      "candidate_description": "Use when Nexus route capability is file_lock_security_gate and the task needs file lock, delegated execution safety, sandbox permission, and security gate evidence; return receipt/evidence/gate/outcome-backed guidance for SF or runtime review. Do not use for unrelated one-off writing or tasks without runtime evidence needs.",
+      "capabilities": [
+        "file_lock_security_gate"
+      ],
+      "capability_count": 1,
+      "improved": true,
+      "old_description": "Candidate-only SF2 route-fit skill for file_lock_security_gate.",
+      "path": "/Users/jameschen/Workspace/nexus/.agents/skills/sf2/sf2-file_lock_security_gate-route-fit-spec/SKILL.md",
+      "skill_id": "sf2-file_lock_security_gate-route-fit-spec"
+    },
+    {
+      "after": {
+        "evidence_hits": 5,
+        "length_ok": 1,
+        "negative_boundary": 1,
+        "positive_hits": 16,
+        "score": 62
+      },
+      "applied": false,
+      "before": {
+        "evidence_hits": 1,
+        "length_ok": 1,
+        "negative_boundary": 0,
+        "positive_hits": 9,
+        "score": 30
+      },
+      "candidate_description": "Use when Nexus route capability is forecast_pregate and the task needs forecast pregate planning, risk forecast, implementation sequencing, and plan quality review; return receipt/evidence/gate/outcome-backed guidance for SF or runtime review. Do not use for unrelated one-off writing or tasks without runtime evidence needs.",
+      "capabilities": [
+        "forecast_pregate"
+      ],
+      "capability_count": 1,
+      "improved": true,
+      "old_description": "Create a concise, execution-ready plan for a coding task. Use when the route capability is forecast_pregate, plan quality, risk forecast, or implementation pregate review.",
+      "path": "/Users/jameschen/Workspace/nexus/.agents/skills/create-plan/SKILL.md",
+      "skill_id": "create-plan"
+    },
+    {
+      "after": {
+        "evidence_hits": 5,
+        "length_ok": 1,
+        "negative_boundary": 1,
+        "positive_hits": 17,
+        "score": 65
+      },
+      "applied": false,
+      "before": {
+        "evidence_hits": 0,
+        "length_ok": 0,
+        "negative_boundary": 0,
+        "positive_hits": 2,
+        "score": 6
+      },
+      "candidate_description": "Use when Nexus route capability is hyper_sprint and the task needs hyper sprint repair, fast multi-candidate fixes, quick local recovery, and sprint evidence; return receipt/evidence/gate/outcome-backed guidance for SF or runtime review. Do not use for unrelated one-off writing or tasks without runtime evidence needs.",
+      "capabilities": [
+        "hyper_sprint"
+      ],
+      "capability_count": 1,
+      "improved": true,
+      "old_description": "Candidate-only SF2 route-fit skill for hyper_sprint.",
+      "path": "/Users/jameschen/Workspace/nexus/.agents/skills/sf2/sf2-hyper_sprint-route-fit-spec/SKILL.md",
+      "skill_id": "sf2-hyper_sprint-route-fit-spec"
+    },
+    {
+      "after": {
+        "evidence_hits": 5,
+        "length_ok": 1,
+        "negative_boundary": 1,
+        "positive_hits": 14,
+        "score": 56
+      },
+      "applied": false,
+      "before": {
+        "evidence_hits": 0,
+        "length_ok": 1,
+        "negative_boundary": 0,
+        "positive_hits": 3,
+        "score": 10
+      },
+      "candidate_description": "Use when Nexus route capability is lancedb and the task needs LanceDB-backed source validation, missing-source audit, and retrieval evidence discipline; return receipt/evidence/gate/outcome-backed guidance for SF or runtime review. Do not use for unrelated one-off writing or tasks without runtime evidence needs.",
+      "capabilities": [
+        "lancedb"
+      ],
+      "capability_count": 1,
+      "improved": true,
+      "old_description": "Load when a research artifact needs an independent source-discipline audit before acceptance.",
+      "path": "/Users/jameschen/Workspace/nexus/.agents/skills/research-source-validation-auditor/SKILL.md",
+      "skill_id": "research-source-validation-auditor"
+    },
+    {
+      "after": {
+        "evidence_hits": 5,
+        "length_ok": 1,
+        "negative_boundary": 1,
+        "positive_hits": 14,
+        "score": 56
+      },
+      "applied": false,
+      "before": {
+        "evidence_hits": 1,
+        "length_ok": 1,
+        "negative_boundary": 0,
+        "positive_hits": 1,
+        "score": 6
+      },
+      "candidate_description": "Use when Nexus route capability is learn_ask and the task needs learn/ask capability upgrade, fixed evaluation, A/B evidence, and capability improvement closure; return receipt/evidence/gate/outcome-backed guidance for SF or runtime review. Do not use for unrelated one-off writing or tasks without runtime evidence needs.",
+      "capabilities": [
+        "learn_ask"
+      ],
+      "capability_count": 1,
+      "improved": true,
+      "old_description": "用於系統化提升 Nexus 解題能力。聚焦「穿 Nexus vs 不穿 Nexus」可量化對比，透過固定 benchmark、A/B 評測、TDD 漸進調參，提升 solve rate 並維持 report/gate 信任一致性。",
+      "path": "/Users/jameschen/Workspace/nexus/.agents/skills/nexus-capability-upgrade/SKILL.md",
+      "skill_id": "nexus-capability-upgrade"
+    },
+    {
+      "after": {
+        "evidence_hits": 5,
+        "length_ok": 1,
+        "negative_boundary": 1,
+        "positive_hits": 15,
+        "score": 59
+      },
+      "applied": false,
+      "before": {
+        "evidence_hits": 0,
+        "length_ok": 0,
+        "negative_boundary": 0,
+        "positive_hits": 1,
+        "score": 3
+      },
+      "candidate_description": "Use when Nexus route capability is learning_closure and the task needs learning closure, lesson writeback, SLO/KPI closure matrix, and policy writeback evidence; return receipt/evidence/gate/outcome-backed guidance for SF or runtime review. Do not use for unrelated one-off writing or tasks without runtime evidence needs.",
+      "capabilities": [
+        "learning_closure"
+      ],
+      "capability_count": 1,
+      "improved": true,
+      "old_description": "Candidate-only SF2 route-fit skill for learning_closure.",
+      "path": "/Users/jameschen/Workspace/nexus/.agents/skills/sf2/sf2-learning_closure-route-fit-spec/SKILL.md",
+      "skill_id": "sf2-learning_closure-route-fit-spec"
+    },
+    {
+      "after": {
+        "evidence_hits": 5,
+        "length_ok": 1,
+        "negative_boundary": 1,
+        "positive_hits": 15,
+        "score": 59
+      },
+      "applied": false,
+      "before": {
+        "evidence_hits": 0,
+        "length_ok": 0,
+        "negative_boundary": 0,
+        "positive_hits": 1,
+        "score": 3
+      },
+      "candidate_description": "Use when Nexus route capability is mempalace and the task needs MemPalace ethics, policy boundaries, forbidden-action checks, and governance guardrail evidence; return receipt/evidence/gate/outcome-backed guidance for SF or runtime review. Do not use for unrelated one-off writing or tasks without runtime evidence needs.",
+      "capabilities": [
+        "mempalace"
+      ],
+      "capability_count": 1,
+      "improved": true,
+      "old_description": "Candidate-only SF2 route-fit skill for mempalace.",
+      "path": "/Users/jameschen/Workspace/nexus/.agents/skills/sf2/sf2-mempalace-route-fit-spec/SKILL.md",
+      "skill_id": "sf2-mempalace-route-fit-spec"
+    },
+    {
+      "after": {
+        "evidence_hits": 5,
+        "length_ok": 1,
+        "negative_boundary": 1,
+        "positive_hits": 17,
+        "score": 65
+      },
+      "applied": false,
+      "before": {
+        "evidence_hits": 1,
+        "length_ok": 1,
+        "negative_boundary": 0,
+        "positive_hits": 8,
+        "score": 27
+      },
+      "candidate_description": "Use when Nexus route capability is metabolism_resume and the task needs metabolism/resume execution, long-goal closure, dynamic replanning, and evidence-backed completion; return receipt/evidence/gate/outcome-backed guidance for SF or runtime review. Do not use for unrelated one-off writing or tasks without runtime evidence needs.",
+      "capabilities": [
+        "metabolism_resume"
+      ],
+      "capability_count": 1,
+      "improved": true,
+      "old_description": "Use when a Nexus task must be driven from a declared final goal through a long plan, dynamic replanning, failure triage, implementation, testing, and evidence-backed closure without stopping at incomplete phase labels. Especially useful when the user asks to \"execute until the goal is complete\", \"do not stop until validation\", \"self-adjust the plan\", \"run to P/N/phase X only if each item is actually done\", or complains that prior plans stopped before the target was achieved.",
+      "path": "/Users/jameschen/Workspace/nexus/.agents/skills/nexus-goal-closure-executor/SKILL.md",
+      "skill_id": "nexus-goal-closure-executor"
+    },
+    {
+      "after": {
+        "evidence_hits": 5,
+        "length_ok": 1,
+        "negative_boundary": 1,
+        "positive_hits": 15,
+        "score": 59
+      },
+      "applied": false,
+      "before": {
+        "evidence_hits": 0,
+        "length_ok": 0,
+        "negative_boundary": 0,
+        "positive_hits": 1,
+        "score": 3
+      },
+      "candidate_description": "Use when Nexus route capability is nightshift and the task needs nightshift long-running recovery, autonomous repair continuation, and delayed evidence closure; return receipt/evidence/gate/outcome-backed guidance for SF or runtime review. Do not use for unrelated one-off writing or tasks without runtime evidence needs.",
+      "capabilities": [
+        "nightshift"
+      ],
+      "capability_count": 1,
+      "improved": true,
+      "old_description": "Candidate-only SF2 route-fit skill for nightshift.",
+      "path": "/Users/jameschen/Workspace/nexus/.agents/skills/sf2/sf2-nightshift-route-fit-spec/SKILL.md",
+      "skill_id": "sf2-nightshift-route-fit-spec"
+    },
+    {
+      "after": {
+        "evidence_hits": 5,
+        "length_ok": 1,
+        "negative_boundary": 1,
+        "positive_hits": 17,
+        "score": 65
+      },
+      "applied": false,
+      "before": {
+        "evidence_hits": 0,
+        "length_ok": 0,
+        "negative_boundary": 0,
+        "positive_hits": 3,
+        "score": 9
+      },
+      "candidate_description": "Use when Nexus route capability is registry_skills_sync and the task needs skill registry sync, catalog maintenance, plugin/source refresh, and candidate intake evidence; return receipt/evidence/gate/outcome-backed guidance for SF or runtime review. Do not use for unrelated one-off writing or tasks without runtime evidence needs.",
+      "capabilities": [
+        "registry_skills_sync"
+      ],
+      "capability_count": 1,
+      "improved": true,
+      "old_description": "Candidate-only SF2 route-fit skill for registry_skills_sync.",
+      "path": "/Users/jameschen/Workspace/nexus/.agents/skills/sf2/sf2-registry_skills_sync-route-fit-spec/SKILL.md",
+      "skill_id": "sf2-registry_skills_sync-route-fit-spec"
+    },
+    {
+      "after": {
+        "evidence_hits": 5,
+        "length_ok": 1,
+        "negative_boundary": 1,
+        "positive_hits": 19,
+        "score": 71
+      },
+      "applied": false,
+      "before": {
+        "evidence_hits": 0,
+        "length_ok": 1,
+        "negative_boundary": 0,
+        "positive_hits": 6,
+        "score": 19
+      },
+      "candidate_description": "Use when Nexus route capability is repair_loop and the task needs repair loop test-first implementation, red-green-refactor, regression protection, and behavior-level evidence; return receipt/evidence/gate/outcome-backed guidance for SF or runtime review. Do not use for unrelated one-off writing or tasks without runtime evidence needs.",
+      "capabilities": [
+        "repair_loop"
+      ],
+      "capability_count": 1,
+      "improved": true,
+      "old_description": "Test-driven development with red-green-refactor loop. Use when user wants to build features or fix bugs using TDD, mentions \"red-green-refactor\", wants integration tests, or asks for test-first development.",
+      "path": "/Users/jameschen/Workspace/nexus/.agents/skills/tdd/SKILL.md",
+      "skill_id": "tdd"
+    },
+    {
+      "after": {
+        "evidence_hits": 5,
+        "length_ok": 1,
+        "negative_boundary": 1,
+        "positive_hits": 16,
+        "score": 62
+      },
+      "applied": false,
+      "before": {
+        "evidence_hits": 0,
+        "length_ok": 0,
+        "negative_boundary": 0,
+        "positive_hits": 1,
+        "score": 3
+      },
+      "candidate_description": "Use when Nexus route capability is sandbox_replay and the task needs sandboxed execution, replay validation, isolation checks, rerun evidence, and trace receipts; return receipt/evidence/gate/outcome-backed guidance for SF or runtime review. Do not use for unrelated one-off writing or tasks without runtime evidence needs.",
+      "capabilities": [
+        "sandbox_replay"
+      ],
+      "capability_count": 1,
+      "improved": true,
+      "old_description": "Candidate-only SF2 route-fit skill for sandbox_replay.",
+      "path": "/Users/jameschen/Workspace/nexus/.agents/skills/sf2/sf2-sandbox_replay-route-fit-spec/SKILL.md",
+      "skill_id": "sf2-sandbox_replay-route-fit-spec"
+    },
+    {
+      "after": {
+        "evidence_hits": 5,
+        "length_ok": 1,
+        "negative_boundary": 1,
+        "positive_hits": 17,
+        "score": 65
+      },
+      "applied": false,
+      "before": {
+        "evidence_hits": 0,
+        "length_ok": 0,
+        "negative_boundary": 0,
+        "positive_hits": 1,
+        "score": 3
+      },
+      "candidate_description": "Use when Nexus route capability is swarm_multi_agent and the task needs swarm and multi-agent orchestration, worktree delegation, submit/verify/integrate receipts; return receipt/evidence/gate/outcome-backed guidance for SF or runtime review. Do not use for unrelated one-off writing or tasks without runtime evidence needs.",
+      "capabilities": [
+        "swarm_multi_agent"
+      ],
+      "capability_count": 1,
+      "improved": true,
+      "old_description": "Candidate-only SF2 route-fit skill for swarm_multi_agent.",
+      "path": "/Users/jameschen/Workspace/nexus/.agents/skills/sf2/sf2-swarm_multi_agent-route-fit-spec/SKILL.md",
+      "skill_id": "sf2-swarm_multi_agent-route-fit-spec"
+    }
+  ],
+  "public_benchmark_allowed": false,
+  "runtime_update_allowed": false,
+  "schema": "nexus.sf_primary_skill_description_optimization.v1",
+  "status": "PASS",
+  "summary": {
+    "applied_count": 0,
+    "evaluated_candidate_count": 23,
+    "improved_candidate_count": 17,
+    "max_apply": 10,
+    "primary_skill_count": 23,
+    "skipped_no_domain_hint_count": 0
+  }
+}

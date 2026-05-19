@@ -1,0 +1,365 @@
+{
+  "schema": "nexus.sf_all_capability_pairing_v11.v1",
+  "status": "PASS",
+  "summary": {
+    "capability_count": 33,
+    "runtime_primary_count": 15,
+    "remaining_count": 20,
+    "public_benchmark_allowed": false
+  },
+  "pairings": [
+    {
+      "capability_id": "artifact_gate",
+      "skill_id": "research-citation-chain-verifier",
+      "state": "v10_high_priority_hold",
+      "reason": "v10_strict_gate_not_met",
+      "skill_path": ".agents/skills/research-citation-chain-verifier/SKILL.md",
+      "token_delta": 4478,
+      "wall_delta_sec": 22.8367,
+      "evidence": "docs/reports/NEXUS_SF_FLASH_PAIR_LIVE_ROLLUP_2026-05-18.json"
+    },
+    {
+      "capability_id": "autonomic_router",
+      "skill_id": "sf2-autonomic_router-route-fit-spec",
+      "state": "catalog_primary_hold",
+      "reason": "initial_pair_delivery_receipt_pass_but_cost_not_strict",
+      "skill_path": ".agents/skills/sf2/sf2-autonomic_router-route-fit-spec/SKILL.md",
+      "token_delta": 5157,
+      "wall_delta_sec": 24.614,
+      "evidence": "docs/reports/NEXUS_SF_FLASH_PAIR_LIVE_ROLLUP_2026-05-18.json"
+    },
+    {
+      "capability_id": "autoreason",
+      "skill_id": "sf2-autoreason-route-fit-spec",
+      "state": "v10_high_priority_hold",
+      "reason": "v10_strict_gate_not_met",
+      "skill_path": ".agents/skills/sf2/sf2-autoreason-route-fit-spec/SKILL.md",
+      "token_delta": -1247,
+      "wall_delta_sec": 9.5293,
+      "evidence": "docs/reports/NEXUS_SF_FLASH_PAIR_LIVE_ROLLUP_2026-05-18.json"
+    },
+    {
+      "capability_id": "belief",
+      "skill_id": "sf2-belief-route-fit-spec",
+      "state": "runtime_primary_v10",
+      "reason": "strict_delivery_receipt_token_wall_pass",
+      "skill_path": ".agents/skills/sf2/sf2-belief-route-fit-spec/SKILL.md",
+      "token_delta": -3166,
+      "wall_delta_sec": -5.4113,
+      "evidence": "docs/reports/NEXUS_SF_RUNTIME_EXPAND_APPLY_RESULT_V10_2026-05-18.json"
+    },
+    {
+      "capability_id": "benchmark_meta_opt",
+      "skill_id": "nexus-benchmark-continuous-optimization",
+      "state": "catalog_primary_hold",
+      "reason": "initial_pair_delivery_receipt_pass_but_cost_not_strict",
+      "skill_path": ".agents/skills/nexus-benchmark-continuous-optimization/SKILL.md",
+      "token_delta": 5185,
+      "wall_delta_sec": 15.1591,
+      "evidence": "docs/reports/NEXUS_SF_FLASH_PAIR_LIVE_ROLLUP_2026-05-18.json"
+    },
+    {
+      "capability_id": "claim_gate",
+      "skill_id": "nexus-benchmark-continuous-optimization",
+      "state": "runtime_primary_v10",
+      "reason": "strict_delivery_receipt_token_wall_pass",
+      "skill_path": ".agents/skills/nexus-benchmark-continuous-optimization/SKILL.md",
+      "token_delta": -2839,
+      "wall_delta_sec": -23.9404,
+      "evidence": "docs/reports/NEXUS_SF_RUNTIME_EXPAND_APPLY_RESULT_V10_2026-05-18.json"
+    },
+    {
+      "capability_id": "codeintel",
+      "skill_id": "sf2-codeintel-route-fit-spec",
+      "state": "runtime_primary_v10",
+      "reason": "strict_delivery_receipt_token_wall_pass",
+      "skill_path": ".agents/skills/sf2/sf2-codeintel-route-fit-spec/SKILL.md",
+      "token_delta": -1312,
+      "wall_delta_sec": 9.142,
+      "evidence": "docs/reports/NEXUS_SF_RUNTIME_EXPAND_APPLY_RESULT_V10_2026-05-18.json"
+    },
+    {
+      "capability_id": "ddtree",
+      "skill_id": "sf2-ddtree-route-fit-spec",
+      "state": "v10_high_priority_hold",
+      "reason": "v10_strict_gate_not_met",
+      "skill_path": ".agents/skills/sf2/sf2-ddtree-route-fit-spec/SKILL.md",
+      "token_delta": 13497,
+      "wall_delta_sec": 40.3892,
+      "evidence": "docs/reports/NEXUS_SF_FLASH_PAIR_LIVE_ROLLUP_2026-05-18.json"
+    },
+    {
+      "capability_id": "delivery_acceptance_gate",
+      "skill_id": "sf2-delivery_acceptance_gate-route-fit-spec",
+      "state": "catalog_primary_hold",
+      "reason": "initial_pair_delivery_receipt_pass_but_cost_not_strict",
+      "skill_path": ".agents/skills/sf2/sf2-delivery_acceptance_gate-route-fit-spec/SKILL.md",
+      "token_delta": 1679,
+      "wall_delta_sec": -0.6909,
+      "evidence": "docs/reports/NEXUS_SF_FLASH_PAIR_LIVE_ROLLUP_2026-05-18.json"
+    },
+    {
+      "capability_id": "direct_master_loop",
+      "skill_id": "sf2-direct_master_loop-route-fit-spec",
+      "state": "runtime_primary_v10",
+      "reason": "strict_delivery_receipt_token_wall_pass",
+      "skill_path": ".agents/skills/sf2/sf2-direct_master_loop-route-fit-spec/SKILL.md",
+      "token_delta": -6314,
+      "wall_delta_sec": -78.7746,
+      "evidence": "docs/reports/NEXUS_SF_RUNTIME_EXPAND_APPLY_RESULT_V10_2026-05-18.json"
+    },
+    {
+      "capability_id": "drone",
+      "skill_id": "sf2-drone-route-fit-spec",
+      "state": "catalog_primary_hold",
+      "reason": "initial_pair_delivery_receipt_pass_but_cost_not_strict",
+      "skill_path": ".agents/skills/sf2/sf2-drone-route-fit-spec/SKILL.md",
+      "token_delta": 624,
+      "wall_delta_sec": 5.42,
+      "evidence": "docs/reports/NEXUS_SF_FLASH_PAIR_LIVE_ROLLUP_2026-05-18.json"
+    },
+    {
+      "capability_id": "external_productivity",
+      "skill_id": "sf2-external_productivity-route-fit-spec",
+      "state": "runtime_primary_v10",
+      "reason": "strict_delivery_receipt_token_wall_pass",
+      "skill_path": ".agents/skills/sf2/sf2-external_productivity-route-fit-spec/SKILL.md",
+      "token_delta": -1327,
+      "wall_delta_sec": -4.2671,
+      "evidence": "docs/reports/NEXUS_SF_RUNTIME_EXPAND_APPLY_RESULT_V10_2026-05-18.json"
+    },
+    {
+      "capability_id": "file_lock_security_gate",
+      "skill_id": "sf2-file_lock_security_gate-route-fit-spec",
+      "state": "runtime_primary_v10",
+      "reason": "strict_delivery_receipt_token_wall_pass",
+      "skill_path": ".agents/skills/sf2/sf2-file_lock_security_gate-route-fit-spec/SKILL.md",
+      "token_delta": -3122,
+      "wall_delta_sec": -27.2381,
+      "evidence": "docs/reports/NEXUS_SF_RUNTIME_EXPAND_APPLY_RESULT_V10_2026-05-18.json"
+    },
+    {
+      "capability_id": "forecast_pregate",
+      "skill_id": "create-plan",
+      "state": "runtime_primary_v10",
+      "reason": "strict_delivery_receipt_token_wall_pass",
+      "skill_path": ".agents/skills/create-plan/SKILL.md",
+      "token_delta": -1554,
+      "wall_delta_sec": 7.6163,
+      "evidence": "docs/reports/NEXUS_SF_RUNTIME_EXPAND_APPLY_RESULT_V10_2026-05-18.json"
+    },
+    {
+      "capability_id": "hyper_sprint",
+      "skill_id": "sf2-hyper_sprint-route-fit-spec",
+      "state": "runtime_primary_v10",
+      "reason": "strict_delivery_receipt_token_wall_pass",
+      "skill_path": ".agents/skills/sf2/sf2-hyper_sprint-route-fit-spec/SKILL.md",
+      "token_delta": -360,
+      "wall_delta_sec": -11.9126,
+      "evidence": "docs/reports/NEXUS_SF_RUNTIME_EXPAND_APPLY_RESULT_V10_2026-05-18.json"
+    },
+    {
+      "capability_id": "lancedb",
+      "skill_id": "sf2-lancedb-route-fit-spec",
+      "state": "catalog_primary_hold",
+      "reason": "initial_pair_delivery_receipt_pass_but_cost_not_strict",
+      "skill_path": ".agents/skills/sf2/sf2-lancedb-route-fit-spec/SKILL.md",
+      "token_delta": 5378,
+      "wall_delta_sec": 38.7981,
+      "evidence": "docs/reports/NEXUS_SF_FLASH_PAIR_LIVE_ROLLUP_2026-05-18.json"
+    },
+    {
+      "capability_id": "learn_ask",
+      "skill_id": "nexus-capability-upgrade",
+      "state": "runtime_primary_v10",
+      "reason": "strict_delivery_receipt_token_wall_pass",
+      "skill_path": ".agents/skills/nexus-capability-upgrade/SKILL.md",
+      "token_delta": -796,
+      "wall_delta_sec": -5.3544,
+      "evidence": "docs/reports/NEXUS_SF_RUNTIME_EXPAND_APPLY_RESULT_V10_2026-05-18.json"
+    },
+    {
+      "capability_id": "learning_closure",
+      "skill_id": "sf2-learning_closure-route-fit-spec",
+      "state": "catalog_primary_hold",
+      "reason": "initial_pair_delivery_receipt_pass_but_cost_not_strict",
+      "skill_path": ".agents/skills/sf2/sf2-learning_closure-route-fit-spec/SKILL.md",
+      "token_delta": -102,
+      "wall_delta_sec": 3.519,
+      "evidence": "docs/reports/NEXUS_SF_FLASH_PAIR_LIVE_ROLLUP_2026-05-18.json"
+    },
+    {
+      "capability_id": "memory",
+      "skill_id": "sf2-memory-route-fit-spec",
+      "state": "catalog_primary_hold",
+      "reason": "initial_pair_delivery_receipt_pass_but_cost_not_strict",
+      "skill_path": ".agents/skills/sf2/sf2-memory-route-fit-spec/SKILL.md",
+      "token_delta": 6510,
+      "wall_delta_sec": 34.0041,
+      "evidence": "docs/reports/NEXUS_SF_FLASH_PAIR_LIVE_ROLLUP_2026-05-18.json"
+    },
+    {
+      "capability_id": "mempalace",
+      "skill_id": "sf2-mempalace-route-fit-spec",
+      "state": "catalog_primary_hold",
+      "reason": "initial_pair_delivery_receipt_pass_but_cost_not_strict",
+      "skill_path": ".agents/skills/sf2/sf2-mempalace-route-fit-spec/SKILL.md",
+      "token_delta": 8378,
+      "wall_delta_sec": 17.6422,
+      "evidence": "docs/reports/NEXUS_SF_FLASH_PAIR_LIVE_ROLLUP_2026-05-18.json"
+    },
+    {
+      "capability_id": "metabolism_resume",
+      "skill_id": "setup-matt-pocock-skills",
+      "state": "catalog_primary_hold",
+      "reason": "initial_pair_delivery_receipt_pass_but_cost_not_strict",
+      "skill_path": ".agents/skills/setup-matt-pocock-skills/SKILL.md",
+      "token_delta": 116,
+      "wall_delta_sec": 69.1926,
+      "evidence": "docs/reports/NEXUS_SF_FLASH_PAIR_LIVE_ROLLUP_2026-05-18.json"
+    },
+    {
+      "capability_id": "nightshift",
+      "skill_id": "sf2-nightshift-route-fit-spec",
+      "state": "runtime_primary_v10",
+      "reason": "strict_delivery_receipt_token_wall_pass",
+      "skill_path": ".agents/skills/sf2/sf2-nightshift-route-fit-spec/SKILL.md",
+      "token_delta": -9501,
+      "wall_delta_sec": -53.0616,
+      "evidence": "docs/reports/NEXUS_SF_RUNTIME_EXPAND_APPLY_RESULT_V10_2026-05-18.json"
+    },
+    {
+      "capability_id": "policy_capability_gate",
+      "skill_id": "sf2-policy_capability_gate-route-fit-spec",
+      "state": "catalog_primary_hold",
+      "reason": "initial_pair_delivery_receipt_pass_but_cost_not_strict",
+      "skill_path": ".agents/skills/sf2/sf2-policy_capability_gate-route-fit-spec/SKILL.md",
+      "token_delta": -41236,
+      "wall_delta_sec": 14.9209,
+      "evidence": "docs/reports/NEXUS_SF_FLASH_PAIR_LIVE_ROLLUP_2026-05-18.json"
+    },
+    {
+      "capability_id": "registry_skills_sync",
+      "skill_id": "sf2-registry_skills_sync-route-fit-spec",
+      "state": "catalog_primary_hold",
+      "reason": "initial_pair_delivery_receipt_pass_but_cost_not_strict",
+      "skill_path": ".agents/skills/sf2/sf2-registry_skills_sync-route-fit-spec/SKILL.md",
+      "token_delta": 1035,
+      "wall_delta_sec": -49.1376,
+      "evidence": "docs/reports/NEXUS_SF_FLASH_PAIR_LIVE_ROLLUP_2026-05-18.json"
+    },
+    {
+      "capability_id": "regression_guard",
+      "skill_id": "diagnose",
+      "state": "runtime_primary_v10",
+      "reason": "strict_delivery_receipt_token_wall_pass",
+      "skill_path": ".agents/skills/diagnose/SKILL.md",
+      "token_delta": -9784,
+      "wall_delta_sec": -33.5622,
+      "evidence": "docs/reports/NEXUS_SF_RUNTIME_EXPAND_APPLY_RESULT_V10_2026-05-18.json"
+    },
+    {
+      "capability_id": "repair_loop",
+      "skill_id": "tdd",
+      "state": "runtime_primary_v10",
+      "reason": "strict_delivery_receipt_token_wall_pass",
+      "skill_path": ".agents/skills/tdd/SKILL.md",
+      "token_delta": 562,
+      "wall_delta_sec": 19.1855,
+      "evidence": "docs/reports/NEXUS_SF_RUNTIME_EXPAND_APPLY_RESULT_V10_2026-05-18.json"
+    },
+    {
+      "capability_id": "research",
+      "skill_id": "research-citation-chain-verifier",
+      "state": "v10_high_priority_hold",
+      "reason": "v10_strict_gate_not_met",
+      "skill_path": ".agents/skills/research-citation-chain-verifier/SKILL.md",
+      "token_delta": -2222,
+      "wall_delta_sec": 27.3049,
+      "evidence": "docs/reports/NEXUS_SF_FLASH_PAIR_LIVE_ROLLUP_2026-05-18.json"
+    },
+    {
+      "capability_id": "research_control_plane",
+      "skill_id": "sf2-research_control_plane-route-fit-spec",
+      "state": "catalog_primary_hold",
+      "reason": "initial_pair_delivery_receipt_pass_but_cost_not_strict",
+      "skill_path": ".agents/skills/sf2/sf2-research_control_plane-route-fit-spec/SKILL.md",
+      "token_delta": 115,
+      "wall_delta_sec": -39.1321,
+      "evidence": "docs/reports/NEXUS_SF_FLASH_PAIR_LIVE_ROLLUP_2026-05-18.json"
+    },
+    {
+      "capability_id": "sandbox_replay",
+      "skill_id": "sf2-sandbox_replay-route-fit-spec",
+      "state": "catalog_primary_hold",
+      "reason": "initial_pair_delivery_receipt_pass_but_cost_not_strict",
+      "skill_path": ".agents/skills/sf2/sf2-sandbox_replay-route-fit-spec/SKILL.md",
+      "token_delta": -2969,
+      "wall_delta_sec": 4.227,
+      "evidence": "docs/reports/NEXUS_SF_FLASH_PAIR_LIVE_ROLLUP_2026-05-18.json"
+    },
+    {
+      "capability_id": "swarm_multi_agent",
+      "skill_id": "sf2-swarm_multi_agent-route-fit-spec",
+      "state": "runtime_primary_v10",
+      "reason": "strict_delivery_receipt_token_wall_pass",
+      "skill_path": ".agents/skills/sf2/sf2-swarm_multi_agent-route-fit-spec/SKILL.md",
+      "token_delta": -2961,
+      "wall_delta_sec": -15.5213,
+      "evidence": "docs/reports/NEXUS_SF_RUNTIME_EXPAND_APPLY_RESULT_V10_2026-05-18.json"
+    },
+    {
+      "capability_id": "ui_validator",
+      "skill_id": "sf2-ui_validator-route-fit-spec",
+      "state": "v10_high_priority_hold",
+      "reason": "v10_strict_gate_not_met",
+      "skill_path": ".agents/skills/sf2/sf2-ui_validator-route-fit-spec/SKILL.md",
+      "token_delta": 3163,
+      "wall_delta_sec": 14.5879,
+      "evidence": "docs/reports/NEXUS_SF_FLASH_PAIR_LIVE_ROLLUP_2026-05-18.json"
+    },
+    {
+      "capability_id": "ultra_review",
+      "skill_id": "code-review-and-quality",
+      "state": "v10_high_priority_hold",
+      "reason": "v10_strict_gate_not_met",
+      "skill_path": "/Users/jameschen/Workspace/skills_audit/skills/code-review-and-quality/SKILL.md",
+      "token_delta": 1760,
+      "wall_delta_sec": -13.2412,
+      "evidence": "docs/reports/NEXUS_SF_FLASH_PAIR_LIVE_ROLLUP_2026-05-18.json"
+    },
+    {
+      "capability_id": "xray",
+      "skill_id": "sf2-xray-route-fit-spec",
+      "state": "catalog_primary_hold",
+      "reason": "initial_pair_delivery_receipt_pass_but_cost_not_strict",
+      "skill_path": ".agents/skills/sf2/sf2-xray-route-fit-spec/SKILL.md",
+      "token_delta": 3920,
+      "wall_delta_sec": 21.5001,
+      "evidence": "docs/reports/NEXUS_SF_FLASH_PAIR_LIVE_ROLLUP_2026-05-18.json"
+    }
+  ],
+  "remaining_capabilities": [
+    "artifact_gate",
+    "autonomic_router",
+    "autoreason",
+    "benchmark_meta_opt",
+    "ddtree",
+    "delivery_acceptance_gate",
+    "drone",
+    "lancedb",
+    "learning_closure",
+    "memory",
+    "mempalace",
+    "metabolism_resume",
+    "policy_capability_gate",
+    "registry_skills_sync",
+    "research",
+    "research_control_plane",
+    "sandbox_replay",
+    "ui_validator",
+    "ultra_review",
+    "xray"
+  ],
+  "blockers": []
+}

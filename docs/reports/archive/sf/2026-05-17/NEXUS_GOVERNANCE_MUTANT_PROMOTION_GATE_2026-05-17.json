@@ -1,0 +1,30 @@
+{
+  "schema": "nexus.governance_mutant_promotion_gate.v1",
+  "status": "PASS",
+  "gate_verdict": "RETURN",
+  "capability": "governance_and_trust",
+  "runtime_update_allowed": false,
+  "promotion_allowed": false,
+  "flash100_allowed": false,
+  "summary": {
+    "matrix_status": "PASS",
+    "row_count": 5,
+    "missing_live_kill_evidence_count": 5
+  },
+  "missing_live_kill_rows": [
+    "governance_mutant::commercial-negative-swarm-roles-001::forged_pass_without_independent_audit",
+    "governance_mutant::governance-expansion-audit-003::unsupported_claim_with_green_status",
+    "governance_mutant::nexus-value-gov-001::secret_redaction_regression",
+    "governance_mutant::rlm-harder-v2-governance-001::deny_default_bypass",
+    "governance_mutant::commercial-negative-swarm-roles-001::receipt_lite_incomplete"
+  ],
+  "fail_closed_conditions": [
+    "mutant_matrix_status_not_pass",
+    "mutant_live_kill_evidence_missing",
+    "survived_mutant_present"
+  ],
+  "claim_boundary": [
+    "No governance skill may become alternate/default until mutant kill evidence exists for every mutant row.",
+    "Normal delivery PASS cannot satisfy this gate."
+  ]
+}

@@ -1,0 +1,1063 @@
+{
+  "schema": "nexus.sf3_best_candidate_search.v1",
+  "status": "PASS",
+  "summary": {
+    "capability_count": 33,
+    "capability_with_default_count": 33,
+    "blocker_count": 0,
+    "runtime_update_allowed": false,
+    "public_benchmark_allowed": false
+  },
+  "blockers": [],
+  "capabilities": [
+    {
+      "capability_id": "artifact_gate",
+      "default_candidate": {
+        "skill_id": "nexus-goal-closure-executor",
+        "score": 16,
+        "score_components": {
+          "route_fit": 3,
+          "metadata_completeness": 2,
+          "live_outcome": 5,
+          "combo_bonus": 2,
+          "overlap_penalty": -1
+        },
+        "disposition": "runtime_review_required",
+        "recommendation": "default_candidate"
+      },
+      "alternates": [
+        {
+          "skill_id": "diagnose",
+          "score": 14,
+          "score_components": {
+            "route_fit": 3,
+            "metadata_completeness": 2,
+            "live_outcome": 5,
+            "combo_bonus": 0,
+            "overlap_penalty": -1
+          },
+          "disposition": "runtime_review_required",
+          "recommendation": "default_candidate"
+        },
+        {
+          "skill_id": "nexus-root-cause-probe",
+          "score": 14,
+          "score_components": {
+            "route_fit": 3,
+            "metadata_completeness": 2,
+            "live_outcome": 5,
+            "combo_bonus": 0,
+            "overlap_penalty": -1
+          },
+          "disposition": "runtime_review_required",
+          "recommendation": "default_candidate"
+        }
+      ]
+    },
+    {
+      "capability_id": "autonomic_router",
+      "default_candidate": {
+        "skill_id": "sf2-autonomic_router-route-fit-spec",
+        "score": 10,
+        "score_components": {
+          "route_fit": 3,
+          "metadata_completeness": 2,
+          "live_outcome": 5,
+          "combo_bonus": 0,
+          "overlap_penalty": 0
+        },
+        "disposition": "candidate_only_catalog_alternate",
+        "recommendation": "alternate"
+      },
+      "alternates": [
+        {
+          "skill_id": "sf2-autoreason-route-fit-spec",
+          "score": 9,
+          "score_components": {
+            "route_fit": 3,
+            "metadata_completeness": 2,
+            "live_outcome": 5,
+            "combo_bonus": 0,
+            "overlap_penalty": -1
+          },
+          "disposition": "candidate_only_catalog_alternate",
+          "recommendation": "alternate"
+        },
+        {
+          "skill_id": "sf2-belief-route-fit-spec",
+          "score": 9,
+          "score_components": {
+            "route_fit": 3,
+            "metadata_completeness": 2,
+            "live_outcome": 5,
+            "combo_bonus": 0,
+            "overlap_penalty": -1
+          },
+          "disposition": "candidate_only_catalog_alternate",
+          "recommendation": "alternate"
+        },
+        {
+          "skill_id": "sf2-delivery_acceptance_gate-route-fit-spec",
+          "score": 9,
+          "score_components": {
+            "route_fit": 3,
+            "metadata_completeness": 2,
+            "live_outcome": 5,
+            "combo_bonus": 0,
+            "overlap_penalty": -1
+          },
+          "disposition": "candidate_only_catalog_alternate",
+          "recommendation": "alternate"
+        }
+      ]
+    },
+    {
+      "capability_id": "autoreason",
+      "default_candidate": {
+        "skill_id": "nexus-benchmark-public-report",
+        "score": 14,
+        "score_components": {
+          "route_fit": 3,
+          "metadata_completeness": 2,
+          "live_outcome": 5,
+          "combo_bonus": 0,
+          "overlap_penalty": -1
+        },
+        "disposition": "runtime_review_required",
+        "recommendation": "default_candidate"
+      },
+      "alternates": [
+        {
+          "skill_id": "sf2-autoreason-route-fit-spec",
+          "score": 9,
+          "score_components": {
+            "route_fit": 3,
+            "metadata_completeness": 2,
+            "live_outcome": 5,
+            "combo_bonus": 0,
+            "overlap_penalty": -1
+          },
+          "disposition": "candidate_only_catalog_alternate",
+          "recommendation": "alternate"
+        },
+        {
+          "skill_id": "sf2-belief-route-fit-spec",
+          "score": 9,
+          "score_components": {
+            "route_fit": 3,
+            "metadata_completeness": 2,
+            "live_outcome": 5,
+            "combo_bonus": 0,
+            "overlap_penalty": -1
+          },
+          "disposition": "candidate_only_catalog_alternate",
+          "recommendation": "alternate"
+        },
+        {
+          "skill_id": "sf2-lancedb-route-fit-spec",
+          "score": 9,
+          "score_components": {
+            "route_fit": 3,
+            "metadata_completeness": 2,
+            "live_outcome": 5,
+            "combo_bonus": 0,
+            "overlap_penalty": -1
+          },
+          "disposition": "candidate_only_catalog_alternate",
+          "recommendation": "alternate"
+        }
+      ]
+    },
+    {
+      "capability_id": "belief",
+      "default_candidate": {
+        "skill_id": "sf2-autoreason-route-fit-spec",
+        "score": 9,
+        "score_components": {
+          "route_fit": 3,
+          "metadata_completeness": 2,
+          "live_outcome": 5,
+          "combo_bonus": 0,
+          "overlap_penalty": -1
+        },
+        "disposition": "candidate_only_catalog_alternate",
+        "recommendation": "alternate"
+      },
+      "alternates": [
+        {
+          "skill_id": "sf2-belief-route-fit-spec",
+          "score": 9,
+          "score_components": {
+            "route_fit": 3,
+            "metadata_completeness": 2,
+            "live_outcome": 5,
+            "combo_bonus": 0,
+            "overlap_penalty": -1
+          },
+          "disposition": "candidate_only_catalog_alternate",
+          "recommendation": "alternate"
+        }
+      ]
+    },
+    {
+      "capability_id": "benchmark_meta_opt",
+      "default_candidate": {
+        "skill_id": "nexus-benchmark-continuous-optimization",
+        "score": 14,
+        "score_components": {
+          "route_fit": 3,
+          "metadata_completeness": 2,
+          "live_outcome": 5,
+          "combo_bonus": 0,
+          "overlap_penalty": -1
+        },
+        "disposition": "runtime_review_required",
+        "recommendation": "default_candidate"
+      },
+      "alternates": [
+        {
+          "skill_id": "nexus-benchmark-public-report",
+          "score": 14,
+          "score_components": {
+            "route_fit": 3,
+            "metadata_completeness": 2,
+            "live_outcome": 5,
+            "combo_bonus": 0,
+            "overlap_penalty": -1
+          },
+          "disposition": "runtime_review_required",
+          "recommendation": "default_candidate"
+        },
+        {
+          "skill_id": "nexus-capability-upgrade",
+          "score": 14,
+          "score_components": {
+            "route_fit": 3,
+            "metadata_completeness": 2,
+            "live_outcome": 5,
+            "combo_bonus": 0,
+            "overlap_penalty": -1
+          },
+          "disposition": "runtime_review_required",
+          "recommendation": "default_candidate"
+        }
+      ]
+    },
+    {
+      "capability_id": "claim_gate",
+      "default_candidate": {
+        "skill_id": "diagnose",
+        "score": 14,
+        "score_components": {
+          "route_fit": 3,
+          "metadata_completeness": 2,
+          "live_outcome": 5,
+          "combo_bonus": 0,
+          "overlap_penalty": -1
+        },
+        "disposition": "runtime_review_required",
+        "recommendation": "default_candidate"
+      },
+      "alternates": [
+        {
+          "skill_id": "nexus-goal-closure-executor",
+          "score": 14,
+          "score_components": {
+            "route_fit": 3,
+            "metadata_completeness": 2,
+            "live_outcome": 5,
+            "combo_bonus": 0,
+            "overlap_penalty": -1
+          },
+          "disposition": "runtime_review_required",
+          "recommendation": "default_candidate"
+        },
+        {
+          "skill_id": "nexus-root-cause-probe",
+          "score": 14,
+          "score_components": {
+            "route_fit": 3,
+            "metadata_completeness": 2,
+            "live_outcome": 5,
+            "combo_bonus": 0,
+            "overlap_penalty": -1
+          },
+          "disposition": "runtime_review_required",
+          "recommendation": "default_candidate"
+        },
+        {
+          "skill_id": "sf2-research_control_plane-route-fit-spec",
+          "score": 11,
+          "score_components": {
+            "route_fit": 3,
+            "metadata_completeness": 2,
+            "live_outcome": 5,
+            "combo_bonus": 2,
+            "overlap_penalty": -1
+          },
+          "disposition": "candidate_only_catalog_alternate",
+          "recommendation": "alternate"
+        }
+      ]
+    },
+    {
+      "capability_id": "codeintel",
+      "default_candidate": {
+        "skill_id": "sf2-codeintel-route-fit-spec",
+        "score": 12,
+        "score_components": {
+          "route_fit": 3,
+          "metadata_completeness": 2,
+          "live_outcome": 5,
+          "combo_bonus": 2,
+          "overlap_penalty": 0
+        },
+        "disposition": "candidate_only_catalog_alternate",
+        "recommendation": "alternate"
+      },
+      "alternates": []
+    },
+    {
+      "capability_id": "ddtree",
+      "default_candidate": {
+        "skill_id": "sf2-ddtree-route-fit-spec",
+        "score": 10,
+        "score_components": {
+          "route_fit": 3,
+          "metadata_completeness": 2,
+          "live_outcome": 5,
+          "combo_bonus": 0,
+          "overlap_penalty": 0
+        },
+        "disposition": "candidate_only_catalog_alternate",
+        "recommendation": "alternate"
+      },
+      "alternates": []
+    },
+    {
+      "capability_id": "delivery_acceptance_gate",
+      "default_candidate": {
+        "skill_id": "nexus-benchmark-continuous-optimization",
+        "score": 14,
+        "score_components": {
+          "route_fit": 3,
+          "metadata_completeness": 2,
+          "live_outcome": 5,
+          "combo_bonus": 0,
+          "overlap_penalty": -1
+        },
+        "disposition": "runtime_review_required",
+        "recommendation": "default_candidate"
+      },
+      "alternates": [
+        {
+          "skill_id": "sf2-delivery_acceptance_gate-route-fit-spec",
+          "score": 9,
+          "score_components": {
+            "route_fit": 3,
+            "metadata_completeness": 2,
+            "live_outcome": 5,
+            "combo_bonus": 0,
+            "overlap_penalty": -1
+          },
+          "disposition": "candidate_only_catalog_alternate",
+          "recommendation": "alternate"
+        }
+      ]
+    },
+    {
+      "capability_id": "direct_master_loop",
+      "default_candidate": {
+        "skill_id": "nexus-goal-closure-executor",
+        "score": 14,
+        "score_components": {
+          "route_fit": 3,
+          "metadata_completeness": 2,
+          "live_outcome": 5,
+          "combo_bonus": 0,
+          "overlap_penalty": -1
+        },
+        "disposition": "runtime_review_required",
+        "recommendation": "default_candidate"
+      },
+      "alternates": [
+        {
+          "skill_id": "sf2-direct_master_loop-route-fit-spec",
+          "score": 10,
+          "score_components": {
+            "route_fit": 3,
+            "metadata_completeness": 2,
+            "live_outcome": 5,
+            "combo_bonus": 0,
+            "overlap_penalty": 0
+          },
+          "disposition": "candidate_only_catalog_alternate",
+          "recommendation": "alternate"
+        },
+        {
+          "skill_id": "sf2-nightshift-route-fit-spec",
+          "score": 9,
+          "score_components": {
+            "route_fit": 3,
+            "metadata_completeness": 2,
+            "live_outcome": 5,
+            "combo_bonus": 0,
+            "overlap_penalty": -1
+          },
+          "disposition": "candidate_only_catalog_alternate",
+          "recommendation": "alternate"
+        }
+      ]
+    },
+    {
+      "capability_id": "drone",
+      "default_candidate": {
+        "skill_id": "sf2-drone-route-fit-spec",
+        "score": 12,
+        "score_components": {
+          "route_fit": 3,
+          "metadata_completeness": 2,
+          "live_outcome": 5,
+          "combo_bonus": 2,
+          "overlap_penalty": 0
+        },
+        "disposition": "candidate_only_catalog_alternate",
+        "recommendation": "alternate"
+      },
+      "alternates": []
+    },
+    {
+      "capability_id": "external_productivity",
+      "default_candidate": {
+        "skill_id": "sf2-external_productivity-route-fit-spec",
+        "score": 10,
+        "score_components": {
+          "route_fit": 3,
+          "metadata_completeness": 2,
+          "live_outcome": 5,
+          "combo_bonus": 0,
+          "overlap_penalty": 0
+        },
+        "disposition": "candidate_only_catalog_alternate",
+        "recommendation": "alternate"
+      },
+      "alternates": []
+    },
+    {
+      "capability_id": "file_lock_security_gate",
+      "default_candidate": {
+        "skill_id": "sf2-file_lock_security_gate-route-fit-spec",
+        "score": 11,
+        "score_components": {
+          "route_fit": 3,
+          "metadata_completeness": 2,
+          "live_outcome": 5,
+          "combo_bonus": 2,
+          "overlap_penalty": -1
+        },
+        "disposition": "candidate_only_catalog_alternate",
+        "recommendation": "alternate"
+      },
+      "alternates": []
+    },
+    {
+      "capability_id": "forecast_pregate",
+      "default_candidate": {
+        "skill_id": "triage",
+        "score": 14,
+        "score_components": {
+          "route_fit": 3,
+          "metadata_completeness": 2,
+          "live_outcome": 5,
+          "combo_bonus": 0,
+          "overlap_penalty": -1
+        },
+        "disposition": "runtime_review_required",
+        "recommendation": "default_candidate"
+      },
+      "alternates": [
+        {
+          "skill_id": "sf2-forecast_pregate-route-fit-spec",
+          "score": 10,
+          "score_components": {
+            "route_fit": 3,
+            "metadata_completeness": 2,
+            "live_outcome": 5,
+            "combo_bonus": 0,
+            "overlap_penalty": 0
+          },
+          "disposition": "candidate_only_catalog_alternate",
+          "recommendation": "alternate"
+        }
+      ]
+    },
+    {
+      "capability_id": "hyper_sprint",
+      "default_candidate": {
+        "skill_id": "sf2-hyper_sprint-route-fit-spec",
+        "score": 9,
+        "score_components": {
+          "route_fit": 3,
+          "metadata_completeness": 2,
+          "live_outcome": 5,
+          "combo_bonus": 0,
+          "overlap_penalty": -1
+        },
+        "disposition": "candidate_only_catalog_alternate",
+        "recommendation": "alternate"
+      },
+      "alternates": []
+    },
+    {
+      "capability_id": "lancedb",
+      "default_candidate": {
+        "skill_id": "sf2-lancedb-route-fit-spec",
+        "score": 11,
+        "score_components": {
+          "route_fit": 3,
+          "metadata_completeness": 2,
+          "live_outcome": 5,
+          "combo_bonus": 2,
+          "overlap_penalty": -1
+        },
+        "disposition": "candidate_only_catalog_alternate",
+        "recommendation": "alternate"
+      },
+      "alternates": [
+        {
+          "skill_id": "sf2-autoreason-route-fit-spec",
+          "score": 9,
+          "score_components": {
+            "route_fit": 3,
+            "metadata_completeness": 2,
+            "live_outcome": 5,
+            "combo_bonus": 0,
+            "overlap_penalty": -1
+          },
+          "disposition": "candidate_only_catalog_alternate",
+          "recommendation": "alternate"
+        }
+      ]
+    },
+    {
+      "capability_id": "learn_ask",
+      "default_candidate": {
+        "skill_id": "notebooklm-context-bridge",
+        "score": 15,
+        "score_components": {
+          "route_fit": 3,
+          "metadata_completeness": 2,
+          "live_outcome": 5,
+          "combo_bonus": 0,
+          "overlap_penalty": 0
+        },
+        "disposition": "runtime_review_required",
+        "recommendation": "default_candidate"
+      },
+      "alternates": [
+        {
+          "skill_id": "nexus-capability-upgrade",
+          "score": 14,
+          "score_components": {
+            "route_fit": 3,
+            "metadata_completeness": 2,
+            "live_outcome": 5,
+            "combo_bonus": 0,
+            "overlap_penalty": -1
+          },
+          "disposition": "runtime_review_required",
+          "recommendation": "default_candidate"
+        },
+        {
+          "skill_id": "nexus-root-cause-probe",
+          "score": 14,
+          "score_components": {
+            "route_fit": 3,
+            "metadata_completeness": 2,
+            "live_outcome": 5,
+            "combo_bonus": 0,
+            "overlap_penalty": -1
+          },
+          "disposition": "runtime_review_required",
+          "recommendation": "default_candidate"
+        }
+      ]
+    },
+    {
+      "capability_id": "learning_closure",
+      "default_candidate": {
+        "skill_id": "sf2-learning_closure-route-fit-spec",
+        "score": 9,
+        "score_components": {
+          "route_fit": 3,
+          "metadata_completeness": 2,
+          "live_outcome": 5,
+          "combo_bonus": 0,
+          "overlap_penalty": -1
+        },
+        "disposition": "candidate_only_catalog_alternate",
+        "recommendation": "alternate"
+      },
+      "alternates": [
+        {
+          "skill_id": "sf2-nightshift-route-fit-spec",
+          "score": 9,
+          "score_components": {
+            "route_fit": 3,
+            "metadata_completeness": 2,
+            "live_outcome": 5,
+            "combo_bonus": 0,
+            "overlap_penalty": -1
+          },
+          "disposition": "candidate_only_catalog_alternate",
+          "recommendation": "alternate"
+        }
+      ]
+    },
+    {
+      "capability_id": "memory",
+      "default_candidate": {
+        "skill_id": "sf2-memory-route-fit-spec",
+        "score": 10,
+        "score_components": {
+          "route_fit": 3,
+          "metadata_completeness": 2,
+          "live_outcome": 5,
+          "combo_bonus": 0,
+          "overlap_penalty": 0
+        },
+        "disposition": "candidate_only_catalog_alternate",
+        "recommendation": "alternate"
+      },
+      "alternates": [
+        {
+          "skill_id": "sf2-lancedb-route-fit-spec",
+          "score": 9,
+          "score_components": {
+            "route_fit": 3,
+            "metadata_completeness": 2,
+            "live_outcome": 5,
+            "combo_bonus": 0,
+            "overlap_penalty": -1
+          },
+          "disposition": "candidate_only_catalog_alternate",
+          "recommendation": "alternate"
+        },
+        {
+          "skill_id": "sf2-mempalace-route-fit-spec",
+          "score": 9,
+          "score_components": {
+            "route_fit": 3,
+            "metadata_completeness": 2,
+            "live_outcome": 5,
+            "combo_bonus": 0,
+            "overlap_penalty": -1
+          },
+          "disposition": "candidate_only_catalog_alternate",
+          "recommendation": "alternate"
+        }
+      ]
+    },
+    {
+      "capability_id": "mempalace",
+      "default_candidate": {
+        "skill_id": "sf2-mempalace-route-fit-spec",
+        "score": 11,
+        "score_components": {
+          "route_fit": 3,
+          "metadata_completeness": 2,
+          "live_outcome": 5,
+          "combo_bonus": 2,
+          "overlap_penalty": -1
+        },
+        "disposition": "candidate_only_catalog_alternate",
+        "recommendation": "alternate"
+      },
+      "alternates": [
+        {
+          "skill_id": "sf2-file_lock_security_gate-route-fit-spec",
+          "score": 9,
+          "score_components": {
+            "route_fit": 3,
+            "metadata_completeness": 2,
+            "live_outcome": 5,
+            "combo_bonus": 0,
+            "overlap_penalty": -1
+          },
+          "disposition": "candidate_only_catalog_alternate",
+          "recommendation": "alternate"
+        }
+      ]
+    },
+    {
+      "capability_id": "metabolism_resume",
+      "default_candidate": {
+        "skill_id": "triage",
+        "score": 14,
+        "score_components": {
+          "route_fit": 3,
+          "metadata_completeness": 2,
+          "live_outcome": 5,
+          "combo_bonus": 0,
+          "overlap_penalty": -1
+        },
+        "disposition": "runtime_review_required",
+        "recommendation": "default_candidate"
+      },
+      "alternates": []
+    },
+    {
+      "capability_id": "nightshift",
+      "default_candidate": {
+        "skill_id": "sf2-learning_closure-route-fit-spec",
+        "score": 9,
+        "score_components": {
+          "route_fit": 3,
+          "metadata_completeness": 2,
+          "live_outcome": 5,
+          "combo_bonus": 0,
+          "overlap_penalty": -1
+        },
+        "disposition": "candidate_only_catalog_alternate",
+        "recommendation": "alternate"
+      },
+      "alternates": [
+        {
+          "skill_id": "sf2-nightshift-route-fit-spec",
+          "score": 9,
+          "score_components": {
+            "route_fit": 3,
+            "metadata_completeness": 2,
+            "live_outcome": 5,
+            "combo_bonus": 0,
+            "overlap_penalty": -1
+          },
+          "disposition": "candidate_only_catalog_alternate",
+          "recommendation": "alternate"
+        }
+      ]
+    },
+    {
+      "capability_id": "policy_capability_gate",
+      "default_candidate": {
+        "skill_id": "diagnose",
+        "score": 16,
+        "score_components": {
+          "route_fit": 3,
+          "metadata_completeness": 2,
+          "live_outcome": 5,
+          "combo_bonus": 2,
+          "overlap_penalty": -1
+        },
+        "disposition": "runtime_review_required",
+        "recommendation": "default_candidate"
+      },
+      "alternates": [
+        {
+          "skill_id": "nexus-goal-closure-executor",
+          "score": 14,
+          "score_components": {
+            "route_fit": 3,
+            "metadata_completeness": 2,
+            "live_outcome": 5,
+            "combo_bonus": 0,
+            "overlap_penalty": -1
+          },
+          "disposition": "runtime_review_required",
+          "recommendation": "default_candidate"
+        },
+        {
+          "skill_id": "nexus-root-cause-probe",
+          "score": 14,
+          "score_components": {
+            "route_fit": 3,
+            "metadata_completeness": 2,
+            "live_outcome": 5,
+            "combo_bonus": 0,
+            "overlap_penalty": -1
+          },
+          "disposition": "runtime_review_required",
+          "recommendation": "default_candidate"
+        }
+      ]
+    },
+    {
+      "capability_id": "registry_skills_sync",
+      "default_candidate": {
+        "skill_id": "sf2-registry_skills_sync-route-fit-spec",
+        "score": 10,
+        "score_components": {
+          "route_fit": 3,
+          "metadata_completeness": 2,
+          "live_outcome": 5,
+          "combo_bonus": 0,
+          "overlap_penalty": 0
+        },
+        "disposition": "candidate_only_catalog_alternate",
+        "recommendation": "alternate"
+      },
+      "alternates": []
+    },
+    {
+      "capability_id": "regression_guard",
+      "default_candidate": {
+        "skill_id": "nexus-benchmark-continuous-optimization",
+        "score": 14,
+        "score_components": {
+          "route_fit": 3,
+          "metadata_completeness": 2,
+          "live_outcome": 5,
+          "combo_bonus": 0,
+          "overlap_penalty": -1
+        },
+        "disposition": "runtime_review_required",
+        "recommendation": "default_candidate"
+      },
+      "alternates": [
+        {
+          "skill_id": "nexus-benchmark-public-report",
+          "score": 14,
+          "score_components": {
+            "route_fit": 3,
+            "metadata_completeness": 2,
+            "live_outcome": 5,
+            "combo_bonus": 0,
+            "overlap_penalty": -1
+          },
+          "disposition": "runtime_review_required",
+          "recommendation": "default_candidate"
+        },
+        {
+          "skill_id": "nexus-capability-upgrade",
+          "score": 14,
+          "score_components": {
+            "route_fit": 3,
+            "metadata_completeness": 2,
+            "live_outcome": 5,
+            "combo_bonus": 0,
+            "overlap_penalty": -1
+          },
+          "disposition": "runtime_review_required",
+          "recommendation": "default_candidate"
+        }
+      ]
+    },
+    {
+      "capability_id": "repair_loop",
+      "default_candidate": {
+        "skill_id": "tdd",
+        "score": 15,
+        "score_components": {
+          "route_fit": 3,
+          "metadata_completeness": 2,
+          "live_outcome": 5,
+          "combo_bonus": 0,
+          "overlap_penalty": 0
+        },
+        "disposition": "runtime_review_required",
+        "recommendation": "default_candidate"
+      },
+      "alternates": [
+        {
+          "skill_id": "sf2-hyper_sprint-route-fit-spec",
+          "score": 11,
+          "score_components": {
+            "route_fit": 3,
+            "metadata_completeness": 2,
+            "live_outcome": 5,
+            "combo_bonus": 2,
+            "overlap_penalty": -1
+          },
+          "disposition": "candidate_only_catalog_alternate",
+          "recommendation": "alternate"
+        },
+        {
+          "skill_id": "sf2-nightshift-route-fit-spec",
+          "score": 9,
+          "score_components": {
+            "route_fit": 3,
+            "metadata_completeness": 2,
+            "live_outcome": 5,
+            "combo_bonus": 0,
+            "overlap_penalty": -1
+          },
+          "disposition": "candidate_only_catalog_alternate",
+          "recommendation": "alternate"
+        }
+      ]
+    },
+    {
+      "capability_id": "research",
+      "default_candidate": {
+        "skill_id": "sf2-research_control_plane-route-fit-spec",
+        "score": 11,
+        "score_components": {
+          "route_fit": 3,
+          "metadata_completeness": 2,
+          "live_outcome": 5,
+          "combo_bonus": 2,
+          "overlap_penalty": -1
+        },
+        "disposition": "candidate_only_catalog_alternate",
+        "recommendation": "alternate"
+      },
+      "alternates": [
+        {
+          "skill_id": "sf2-lancedb-route-fit-spec",
+          "score": 9,
+          "score_components": {
+            "route_fit": 3,
+            "metadata_completeness": 2,
+            "live_outcome": 5,
+            "combo_bonus": 0,
+            "overlap_penalty": -1
+          },
+          "disposition": "candidate_only_catalog_alternate",
+          "recommendation": "alternate"
+        }
+      ]
+    },
+    {
+      "capability_id": "research_control_plane",
+      "default_candidate": {
+        "skill_id": "sf2-research_control_plane-route-fit-spec",
+        "score": 9,
+        "score_components": {
+          "route_fit": 3,
+          "metadata_completeness": 2,
+          "live_outcome": 5,
+          "combo_bonus": 0,
+          "overlap_penalty": -1
+        },
+        "disposition": "candidate_only_catalog_alternate",
+        "recommendation": "alternate"
+      },
+      "alternates": []
+    },
+    {
+      "capability_id": "sandbox_replay",
+      "default_candidate": {
+        "skill_id": "sf2-file_lock_security_gate-route-fit-spec",
+        "score": 9,
+        "score_components": {
+          "route_fit": 3,
+          "metadata_completeness": 2,
+          "live_outcome": 5,
+          "combo_bonus": 0,
+          "overlap_penalty": -1
+        },
+        "disposition": "candidate_only_catalog_alternate",
+        "recommendation": "alternate"
+      },
+      "alternates": []
+    },
+    {
+      "capability_id": "swarm_multi_agent",
+      "default_candidate": {
+        "skill_id": "sf2-swarm_multi_agent-route-fit-spec",
+        "score": 12,
+        "score_components": {
+          "route_fit": 3,
+          "metadata_completeness": 2,
+          "live_outcome": 5,
+          "combo_bonus": 2,
+          "overlap_penalty": 0
+        },
+        "disposition": "candidate_only_catalog_alternate",
+        "recommendation": "alternate"
+      },
+      "alternates": []
+    },
+    {
+      "capability_id": "ui_validator",
+      "default_candidate": {
+        "skill_id": "sf2-ui_validator-route-fit-spec",
+        "score": 10,
+        "score_components": {
+          "route_fit": 3,
+          "metadata_completeness": 2,
+          "live_outcome": 5,
+          "combo_bonus": 0,
+          "overlap_penalty": 0
+        },
+        "disposition": "candidate_only_catalog_alternate",
+        "recommendation": "alternate"
+      },
+      "alternates": []
+    },
+    {
+      "capability_id": "ultra_review",
+      "default_candidate": {
+        "skill_id": "diagnose",
+        "score": 14,
+        "score_components": {
+          "route_fit": 3,
+          "metadata_completeness": 2,
+          "live_outcome": 5,
+          "combo_bonus": 0,
+          "overlap_penalty": -1
+        },
+        "disposition": "runtime_review_required",
+        "recommendation": "default_candidate"
+      },
+      "alternates": [
+        {
+          "skill_id": "nexus-goal-closure-executor",
+          "score": 14,
+          "score_components": {
+            "route_fit": 3,
+            "metadata_completeness": 2,
+            "live_outcome": 5,
+            "combo_bonus": 0,
+            "overlap_penalty": -1
+          },
+          "disposition": "runtime_review_required",
+          "recommendation": "default_candidate"
+        },
+        {
+          "skill_id": "nexus-root-cause-probe",
+          "score": 14,
+          "score_components": {
+            "route_fit": 3,
+            "metadata_completeness": 2,
+            "live_outcome": 5,
+            "combo_bonus": 0,
+            "overlap_penalty": -1
+          },
+          "disposition": "runtime_review_required",
+          "recommendation": "default_candidate"
+        },
+        {
+          "skill_id": "sf2-file_lock_security_gate-route-fit-spec",
+          "score": 11,
+          "score_components": {
+            "route_fit": 3,
+            "metadata_completeness": 2,
+            "live_outcome": 5,
+            "combo_bonus": 2,
+            "overlap_penalty": -1
+          },
+          "disposition": "candidate_only_catalog_alternate",
+          "recommendation": "alternate"
+        }
+      ]
+    },
+    {
+      "capability_id": "xray",
+      "default_candidate": {
+        "skill_id": "sf2-xray-route-fit-spec",
+        "score": 10,
+        "score_components": {
+          "route_fit": 3,
+          "metadata_completeness": 2,
+          "live_outcome": 5,
+          "combo_bonus": 0,
+          "overlap_penalty": 0
+        },
+        "disposition": "candidate_only_catalog_alternate",
+        "recommendation": "alternate"
+      },
+      "alternates": []
+    }
+  ]
+}

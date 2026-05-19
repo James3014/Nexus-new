@@ -1,0 +1,161 @@
+{
+  "schema": "nexus.sf_v11_retest_chunk_plan.v1",
+  "status": "PASS",
+  "summary": {
+    "chunk_size": 10,
+    "chunk_count": 9,
+    "row_count": 85,
+    "runtime_update_allowed": false,
+    "public_benchmark_allowed": false
+  },
+  "chunks": [
+    {
+      "chunk_id": "sf-v11-chunk-01",
+      "row_ids": [
+        "artifact_gate::sf-v11-retest-artifact_gate-001::flash_nexus_no_skill",
+        "artifact_gate::sf-v11-retest-artifact_gate-001::candidate::research-citation-chain-verifier",
+        "artifact_gate::sf-v11-retest-artifact_gate-001::candidate::nexus-goal-closure-executor",
+        "artifact_gate::sf-v11-retest-artifact_gate-001::candidate::acceptance-evidence-failclosed",
+        "artifact_gate::sf-v11-retest-artifact_gate-001::candidate::cso",
+        "autonomic_router::sf-v11-retest-autonomic_router-001::flash_nexus_no_skill",
+        "autonomic_router::sf-v11-retest-autonomic_router-001::candidate::sf2-autonomic_router-route-fit-spec",
+        "autonomic_router::sf-v11-retest-autonomic_router-001::candidate::diagnose",
+        "autonomic_router::sf-v11-retest-autonomic_router-001::candidate::nexus-root-cause-probe",
+        "autoreason::sf-v11-retest-autoreason-001::flash_nexus_no_skill"
+      ],
+      "row_count": 10,
+      "status": "PENDING"
+    },
+    {
+      "chunk_id": "sf-v11-chunk-02",
+      "row_ids": [
+        "autoreason::sf-v11-retest-autoreason-001::candidate::sf2-autoreason-route-fit-spec",
+        "autoreason::sf-v11-retest-autoreason-001::candidate::nexus-benchmark-public-report",
+        "autoreason::sf-v11-retest-autoreason-001::candidate::sf2-belief-route-fit-spec",
+        "autoreason::sf-v11-retest-autoreason-001::candidate::diagnose",
+        "benchmark_meta_opt::sf-v11-retest-benchmark_meta_opt-001::flash_nexus_no_skill",
+        "benchmark_meta_opt::sf-v11-retest-benchmark_meta_opt-001::candidate::nexus-benchmark-continuous-optimization",
+        "benchmark_meta_opt::sf-v11-retest-benchmark_meta_opt-001::candidate::nexus-benchmark-public-report",
+        "benchmark_meta_opt::sf-v11-retest-benchmark_meta_opt-001::candidate::diagnose",
+        "ddtree::sf-v11-retest-ddtree-001::flash_nexus_no_skill",
+        "ddtree::sf-v11-retest-ddtree-001::candidate::sf2-ddtree-route-fit-spec"
+      ],
+      "row_count": 10,
+      "status": "PENDING"
+    },
+    {
+      "chunk_id": "sf-v11-chunk-03",
+      "row_ids": [
+        "ddtree::sf-v11-retest-ddtree-001::candidate::diagnose",
+        "ddtree::sf-v11-retest-ddtree-001::candidate::nexus-root-cause-probe",
+        "delivery_acceptance_gate::sf-v11-retest-delivery_acceptance_gate-001::flash_nexus_no_skill",
+        "delivery_acceptance_gate::sf-v11-retest-delivery_acceptance_gate-001::candidate::sf2-delivery_acceptance_gate-route-fit-spec",
+        "delivery_acceptance_gate::sf-v11-retest-delivery_acceptance_gate-001::candidate::acceptance-evidence-failclosed",
+        "delivery_acceptance_gate::sf-v11-retest-delivery_acceptance_gate-001::candidate::nexus-goal-closure-executor",
+        "drone::sf-v11-retest-drone-001::flash_nexus_no_skill",
+        "drone::sf-v11-retest-drone-001::candidate::sf2-drone-route-fit-spec",
+        "drone::sf-v11-retest-drone-001::candidate::nexus-goal-closure-executor",
+        "drone::sf-v11-retest-drone-001::candidate::diagnose"
+      ],
+      "row_count": 10,
+      "status": "PENDING"
+    },
+    {
+      "chunk_id": "sf-v11-chunk-04",
+      "row_ids": [
+        "lancedb::sf-v11-retest-lancedb-001::flash_nexus_no_skill",
+        "lancedb::sf-v11-retest-lancedb-001::candidate::sf2-lancedb-route-fit-spec",
+        "lancedb::sf-v11-retest-lancedb-001::candidate::nexus-capability-upgrade",
+        "lancedb::sf-v11-retest-lancedb-001::candidate::research-source-validation-auditor",
+        "learning_closure::sf-v11-retest-learning_closure-001::flash_nexus_no_skill",
+        "learning_closure::sf-v11-retest-learning_closure-001::candidate::sf2-learning_closure-route-fit-spec",
+        "learning_closure::sf-v11-retest-learning_closure-001::candidate::nexus-capability-upgrade",
+        "learning_closure::sf-v11-retest-learning_closure-001::candidate::nexus-goal-closure-executor",
+        "memory::sf-v11-retest-memory-001::flash_nexus_no_skill",
+        "memory::sf-v11-retest-memory-001::candidate::sf2-memory-route-fit-spec"
+      ],
+      "row_count": 10,
+      "status": "PENDING"
+    },
+    {
+      "chunk_id": "sf-v11-chunk-05",
+      "row_ids": [
+        "memory::sf-v11-retest-memory-001::candidate::nexus-capability-upgrade",
+        "memory::sf-v11-retest-memory-001::candidate::diagnose",
+        "mempalace::sf-v11-retest-mempalace-001::flash_nexus_no_skill",
+        "mempalace::sf-v11-retest-mempalace-001::candidate::sf2-mempalace-route-fit-spec",
+        "mempalace::sf-v11-retest-mempalace-001::candidate::acceptance-evidence-failclosed",
+        "mempalace::sf-v11-retest-mempalace-001::candidate::gbrain-soul-audit",
+        "metabolism_resume::sf-v11-retest-metabolism_resume-001::flash_nexus_no_skill",
+        "metabolism_resume::sf-v11-retest-metabolism_resume-001::candidate::setup-matt-pocock-skills",
+        "metabolism_resume::sf-v11-retest-metabolism_resume-001::candidate::nexus-goal-closure-executor",
+        "metabolism_resume::sf-v11-retest-metabolism_resume-001::candidate::diagnose"
+      ],
+      "row_count": 10,
+      "status": "PENDING"
+    },
+    {
+      "chunk_id": "sf-v11-chunk-06",
+      "row_ids": [
+        "metabolism_resume::sf-v11-retest-metabolism_resume-001::candidate::nexus-capability-upgrade",
+        "policy_capability_gate::sf-v11-retest-policy_capability_gate-001::flash_nexus_no_skill",
+        "policy_capability_gate::sf-v11-retest-policy_capability_gate-001::candidate::sf2-policy_capability_gate-route-fit-spec",
+        "policy_capability_gate::sf-v11-retest-policy_capability_gate-001::candidate::acceptance-evidence-failclosed",
+        "policy_capability_gate::sf-v11-retest-policy_capability_gate-001::candidate::cso",
+        "registry_skills_sync::sf-v11-retest-registry_skills_sync-001::flash_nexus_no_skill",
+        "registry_skills_sync::sf-v11-retest-registry_skills_sync-001::candidate::sf2-registry_skills_sync-route-fit-spec",
+        "registry_skills_sync::sf-v11-retest-registry_skills_sync-001::candidate::nexus-capability-upgrade",
+        "registry_skills_sync::sf-v11-retest-registry_skills_sync-001::candidate::setup-matt-pocock-skills",
+        "research::sf-v11-retest-research-001::flash_nexus_no_skill"
+      ],
+      "row_count": 10,
+      "status": "PENDING"
+    },
+    {
+      "chunk_id": "sf-v11-chunk-07",
+      "row_ids": [
+        "research::sf-v11-retest-research-001::candidate::research-citation-chain-verifier",
+        "research::sf-v11-retest-research-001::candidate::research-source-validation-auditor",
+        "research::sf-v11-retest-research-001::candidate::research-source-conflict-resolver",
+        "research::sf-v11-retest-research-001::candidate::sf2-research_control_plane-route-fit-spec",
+        "research_control_plane::sf-v11-retest-research_control_plane-001::flash_nexus_no_skill",
+        "research_control_plane::sf-v11-retest-research_control_plane-001::candidate::sf2-research_control_plane-route-fit-spec",
+        "research_control_plane::sf-v11-retest-research_control_plane-001::candidate::research-citation-chain-verifier",
+        "research_control_plane::sf-v11-retest-research_control_plane-001::candidate::research-source-validation-auditor",
+        "sandbox_replay::sf-v11-retest-sandbox_replay-001::flash_nexus_no_skill",
+        "sandbox_replay::sf-v11-retest-sandbox_replay-001::candidate::sf2-sandbox_replay-route-fit-spec"
+      ],
+      "row_count": 10,
+      "status": "PENDING"
+    },
+    {
+      "chunk_id": "sf-v11-chunk-08",
+      "row_ids": [
+        "sandbox_replay::sf-v11-retest-sandbox_replay-001::candidate::diagnose",
+        "sandbox_replay::sf-v11-retest-sandbox_replay-001::candidate::acceptance-evidence-failclosed",
+        "ui_validator::sf-v11-retest-ui_validator-001::flash_nexus_no_skill",
+        "ui_validator::sf-v11-retest-ui_validator-001::candidate::sf2-ui_validator-route-fit-spec",
+        "ui_validator::sf-v11-retest-ui_validator-001::candidate::diagnose",
+        "ui_validator::sf-v11-retest-ui_validator-001::candidate::nexus-root-cause-probe",
+        "ultra_review::sf-v11-retest-ultra_review-001::flash_nexus_no_skill",
+        "ultra_review::sf-v11-retest-ultra_review-001::candidate::code-review-and-quality",
+        "ultra_review::sf-v11-retest-ultra_review-001::candidate::diagnose",
+        "ultra_review::sf-v11-retest-ultra_review-001::candidate::acceptance-evidence-failclosed"
+      ],
+      "row_count": 10,
+      "status": "PENDING"
+    },
+    {
+      "chunk_id": "sf-v11-chunk-09",
+      "row_ids": [
+        "ultra_review::sf-v11-retest-ultra_review-001::candidate::cso",
+        "xray::sf-v11-retest-xray-001::flash_nexus_no_skill",
+        "xray::sf-v11-retest-xray-001::candidate::sf2-xray-route-fit-spec",
+        "xray::sf-v11-retest-xray-001::candidate::sf2-codeintel-route-fit-spec",
+        "xray::sf-v11-retest-xray-001::candidate::diagnose"
+      ],
+      "row_count": 5,
+      "status": "PENDING"
+    }
+  ]
+}

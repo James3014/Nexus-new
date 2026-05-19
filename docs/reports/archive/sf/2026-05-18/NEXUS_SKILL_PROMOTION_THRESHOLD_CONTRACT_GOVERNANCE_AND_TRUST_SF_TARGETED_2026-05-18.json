@@ -1,0 +1,94 @@
+{
+  "schema": "nexus.skill_promotion_threshold_contract.v1",
+  "status": "PASS",
+  "runtime_update_allowed": false,
+  "flash100_allowed": false,
+  "promotion_allowed": false,
+  "thresholds": {
+    "min_tested_rows_per_skill": 30,
+    "min_seal_runs_before_runtime": 2,
+    "default_min_effective_rate": 0.8,
+    "alternate_min_effective_rate": 0.6,
+    "min_task_buckets_for_alternate": 2,
+    "required_validation_lanes": [
+      "Flash50",
+      "Flash100"
+    ],
+    "requires_repeated_denominator": true,
+    "requires_trust_mismatch_zero": true,
+    "requires_evidence_and_receipt_refs": true
+  },
+  "summary": {
+    "skill_count": 4,
+    "promotion_ready_count": 0,
+    "needs_targeted_replay_count": 0,
+    "default_candidate_count": 0,
+    "alternate_candidate_count": 0,
+    "queue_count": 3,
+    "matrix_complete": true
+  },
+  "failures": [],
+  "capability_skill_thresholds": [
+    {
+      "capability": "governance_and_trust",
+      "skill_id": "acceptance-evidence-failclosed",
+      "verdict": "needs_more_data",
+      "tested_rows": 12,
+      "effective_rows": 1,
+      "effective_rate": 0.0833,
+      "task_bucket_count": 5,
+      "evidence_complete": true,
+      "observed_rows_ok": false,
+      "threshold_status": "queue_missing",
+      "threshold_recommendation": "needs_more_data",
+      "required_validation_lanes": []
+    },
+    {
+      "capability": "governance_and_trust",
+      "skill_id": "cso",
+      "verdict": "needs_more_data",
+      "tested_rows": 12,
+      "effective_rows": 1,
+      "effective_rate": 0.0833,
+      "task_bucket_count": 5,
+      "evidence_complete": true,
+      "observed_rows_ok": false,
+      "threshold_status": "queue_missing",
+      "threshold_recommendation": "needs_more_data",
+      "required_validation_lanes": []
+    },
+    {
+      "capability": "governance_and_trust",
+      "skill_id": "nexus-acceptance-evidence-gate",
+      "verdict": "reject",
+      "tested_rows": 12,
+      "effective_rows": 0,
+      "effective_rate": 0.0,
+      "task_bucket_count": 5,
+      "evidence_complete": true,
+      "observed_rows_ok": false,
+      "threshold_status": "reject",
+      "threshold_recommendation": "reject",
+      "required_validation_lanes": []
+    },
+    {
+      "capability": "governance_and_trust",
+      "skill_id": "nexus-root-cause-probe",
+      "verdict": "needs_more_data",
+      "tested_rows": 12,
+      "effective_rows": 5,
+      "effective_rate": 0.4167,
+      "task_bucket_count": 5,
+      "evidence_complete": true,
+      "observed_rows_ok": false,
+      "threshold_status": "queue_missing",
+      "threshold_recommendation": "needs_more_data",
+      "required_validation_lanes": []
+    }
+  ],
+  "claim_boundary": [
+    "This contract freezes promotion thresholds; it does not update runtime policy.",
+    "A single diagnostic Flash180 run can schedule targeted replay but cannot by itself promote runtime defaults.",
+    "Flash100 is allowed only after at least one capability/skill pair has receipt-backed positive verdict evidence."
+  ]
+}

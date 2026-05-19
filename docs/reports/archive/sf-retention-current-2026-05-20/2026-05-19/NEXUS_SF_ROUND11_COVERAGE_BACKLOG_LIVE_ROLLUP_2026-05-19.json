@@ -1,0 +1,185 @@
+{
+  "schema": "nexus.sf_round11_coverage_backlog_live_rollup.v1",
+  "version": "2026-05-19",
+  "status": "PASS",
+  "source_live_summary": ".nexus/reports/sf_round11_coverage_backlog_live_2026-05-19/live_summary.json",
+  "source_matrix": "docs/reports/NEXUS_SF_ROUND11_COVERAGE_BACKLOG_FLASH_SMOKE_MATRIX_2026-05-19.json",
+  "summary": {
+    "capability_count": 4,
+    "replacement_count": 1,
+    "hold_count": 3,
+    "runtime_update_allowed": false,
+    "public_benchmark_allowed": false
+  },
+  "capability_rollups": [
+    {
+      "capability": "benchmark_meta_opt",
+      "current_best": {
+        "skill_id": "github4-sickn33-antigravity-awesome-skills-ad-creative",
+        "status": "PASS",
+        "total_tokens": 41171,
+        "wall_sec": 132.148,
+        "receipt_path": ".nexus/reports/sf_round11_coverage_backlog_live_2026-05-19/benchmark_meta_opt_sf-round11-coverage-benchmark_meta_opt-001_current_best_github4-sickn33-antigravity-awesome-skills-ad-creative",
+        "evidence_path": ".nexus/reports/sf_round11_coverage_backlog_live_2026-05-19/benchmark_meta_opt_sf-round11-coverage-benchmark_meta_opt-001_current_best_github4-sickn33-antigravity-awesome-skills-ad-creative/evidence_bundle.json",
+        "selected": true,
+        "injected": true,
+        "used": true,
+        "evidence_present": true,
+        "gate_passed": true,
+        "outcome_contributed": true,
+        "skill_mount_contract_status": "PASS"
+      },
+      "challenger": {
+        "skill_id": "github11-ab-test-analysis-benchmark-meta-opt",
+        "status": "PASS",
+        "total_tokens": 44577,
+        "wall_sec": 136.4222,
+        "receipt_path": ".nexus/reports/sf_round11_coverage_backlog_live_2026-05-19/benchmark_meta_opt_sf-round11-coverage-benchmark_meta_opt-001_challenger_github11-ab-test-analysis-benchmark-meta-opt",
+        "evidence_path": ".nexus/reports/sf_round11_coverage_backlog_live_2026-05-19/benchmark_meta_opt_sf-round11-coverage-benchmark_meta_opt-001_challenger_github11-ab-test-analysis-benchmark-meta-opt/evidence_bundle.json",
+        "selected": true,
+        "injected": true,
+        "used": true,
+        "evidence_present": true,
+        "gate_passed": true,
+        "outcome_contributed": true,
+        "skill_mount_contract_status": "PASS"
+      },
+      "current_effective": true,
+      "challenger_effective": true,
+      "token_delta_challenger_minus_current": 3406,
+      "wall_delta_sec_challenger_minus_current": 4.2742,
+      "verdict": "keep_current_best",
+      "reason_codes": [
+        "challenger_token_not_lower",
+        "challenger_wall_not_lower"
+      ]
+    },
+    {
+      "capability": "forecast_pregate",
+      "current_best": {
+        "skill_id": "create-plan",
+        "status": "PASS",
+        "total_tokens": 43015,
+        "wall_sec": 132.1655,
+        "receipt_path": ".nexus/reports/sf_round11_coverage_backlog_live_2026-05-19/forecast_pregate_sf-round11-coverage-forecast_pregate-001_current_best_create-plan",
+        "evidence_path": ".nexus/reports/sf_round11_coverage_backlog_live_2026-05-19/forecast_pregate_sf-round11-coverage-forecast_pregate-001_current_best_create-plan/evidence_bundle.json",
+        "selected": true,
+        "injected": true,
+        "used": true,
+        "evidence_present": true,
+        "gate_passed": true,
+        "outcome_contributed": true,
+        "skill_mount_contract_status": "PASS"
+      },
+      "challenger": {
+        "skill_id": "github11-notion-spec-to-implementation-forecast-pregate",
+        "status": "PASS",
+        "total_tokens": 44030,
+        "wall_sec": 128.2736,
+        "receipt_path": ".nexus/reports/sf_round11_coverage_backlog_live_2026-05-19/forecast_pregate_sf-round11-coverage-forecast_pregate-001_challenger_github11-notion-spec-to-implementation-forecast-pregate",
+        "evidence_path": ".nexus/reports/sf_round11_coverage_backlog_live_2026-05-19/forecast_pregate_sf-round11-coverage-forecast_pregate-001_challenger_github11-notion-spec-to-implementation-forecast-pregate/evidence_bundle.json",
+        "selected": true,
+        "injected": true,
+        "used": true,
+        "evidence_present": true,
+        "gate_passed": true,
+        "outcome_contributed": true,
+        "skill_mount_contract_status": "PASS"
+      },
+      "current_effective": true,
+      "challenger_effective": true,
+      "token_delta_challenger_minus_current": 1015,
+      "wall_delta_sec_challenger_minus_current": -3.8919,
+      "verdict": "keep_current_best",
+      "reason_codes": [
+        "challenger_token_not_lower"
+      ]
+    },
+    {
+      "capability": "repair_loop",
+      "current_best": {
+        "skill_id": "github7-midudev-tdd-repair-loop",
+        "status": "PASS",
+        "total_tokens": 39921,
+        "wall_sec": 148.7326,
+        "receipt_path": ".nexus/reports/sf_round11_coverage_backlog_live_2026-05-19/repair_loop_sf-round11-coverage-repair_loop-001_current_best_github7-midudev-tdd-repair-loop",
+        "evidence_path": ".nexus/reports/sf_round11_coverage_backlog_live_2026-05-19/repair_loop_sf-round11-coverage-repair_loop-001_current_best_github7-midudev-tdd-repair-loop/evidence_bundle.json",
+        "selected": true,
+        "injected": true,
+        "used": true,
+        "evidence_present": true,
+        "gate_passed": true,
+        "outcome_contributed": true,
+        "skill_mount_contract_status": "PASS"
+      },
+      "challenger": {
+        "skill_id": "github11-bug-hunter-repair-loop",
+        "status": "PASS",
+        "total_tokens": 43834,
+        "wall_sec": 140.9425,
+        "receipt_path": ".nexus/reports/sf_round11_coverage_backlog_live_2026-05-19/repair_loop_sf-round11-coverage-repair_loop-001_challenger_github11-bug-hunter-repair-loop",
+        "evidence_path": ".nexus/reports/sf_round11_coverage_backlog_live_2026-05-19/repair_loop_sf-round11-coverage-repair_loop-001_challenger_github11-bug-hunter-repair-loop/evidence_bundle.json",
+        "selected": true,
+        "injected": true,
+        "used": true,
+        "evidence_present": true,
+        "gate_passed": true,
+        "outcome_contributed": true,
+        "skill_mount_contract_status": "PASS"
+      },
+      "current_effective": true,
+      "challenger_effective": true,
+      "token_delta_challenger_minus_current": 3913,
+      "wall_delta_sec_challenger_minus_current": -7.7901,
+      "verdict": "keep_current_best",
+      "reason_codes": [
+        "challenger_token_not_lower"
+      ]
+    },
+    {
+      "capability": "ultra_review",
+      "current_best": {
+        "skill_id": "github9-openai-security-threat-model-ultra-review",
+        "status": "PASS",
+        "total_tokens": 39875,
+        "wall_sec": 194.9008,
+        "receipt_path": ".nexus/reports/sf_round11_coverage_backlog_live_2026-05-19/ultra_review_sf-round11-coverage-ultra_review-001_current_best_github9-openai-security-threat-model-ultra-review",
+        "evidence_path": ".nexus/reports/sf_round11_coverage_backlog_live_2026-05-19/ultra_review_sf-round11-coverage-ultra_review-001_current_best_github9-openai-security-threat-model-ultra-review/evidence_bundle.json",
+        "selected": true,
+        "injected": true,
+        "used": true,
+        "evidence_present": true,
+        "gate_passed": true,
+        "outcome_contributed": true,
+        "skill_mount_contract_status": "PASS"
+      },
+      "challenger": {
+        "skill_id": "github11-vulnerability-scanner-ultra-review",
+        "status": "PASS",
+        "total_tokens": 39402,
+        "wall_sec": 144.8122,
+        "receipt_path": ".nexus/reports/sf_round11_coverage_backlog_live_2026-05-19/ultra_review_sf-round11-coverage-ultra_review-001_challenger_github11-vulnerability-scanner-ultra-review",
+        "evidence_path": ".nexus/reports/sf_round11_coverage_backlog_live_2026-05-19/ultra_review_sf-round11-coverage-ultra_review-001_challenger_github11-vulnerability-scanner-ultra-review/evidence_bundle.json",
+        "selected": true,
+        "injected": true,
+        "used": true,
+        "evidence_present": true,
+        "gate_passed": true,
+        "outcome_contributed": true,
+        "skill_mount_contract_status": "PASS"
+      },
+      "current_effective": true,
+      "challenger_effective": true,
+      "token_delta_challenger_minus_current": -473,
+      "wall_delta_sec_challenger_minus_current": -50.0886,
+      "verdict": "replace_with_challenger",
+      "reason_codes": [
+        "challenger_effective_and_token_wall_lower"
+      ]
+    }
+  ],
+  "claim_boundary": [
+    "Replacement means overlay candidate primary update, not runtime default write.",
+    "Both current_best and challenger must be receipt/evidence PASS before comparison."
+  ]
+}

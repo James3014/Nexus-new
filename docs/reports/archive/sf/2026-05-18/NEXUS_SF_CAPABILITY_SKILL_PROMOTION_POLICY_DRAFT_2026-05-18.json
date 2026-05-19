@@ -1,0 +1,34 @@
+{
+  "schema": "nexus.capability_skill_promotion_policy_draft.v1",
+  "status": "PASS",
+  "runtime_update_allowed": false,
+  "defaults": {},
+  "alternates": {
+    "governance_and_trust": [
+      "acceptance-evidence-failclosed",
+      "claudeosint-safe-surface-audit",
+      "cso",
+      "gbrain-soul-audit"
+    ],
+    "repair_and_coding": [
+      "tdd"
+    ]
+  },
+  "replace_candidates": {
+    "research_and_source_discipline": [
+      "research-citation-chain-verifier",
+      "research-source-validation-auditor"
+    ]
+  },
+  "needs_more_data": {},
+  "rejected": {
+    "governance_and_trust": [
+      "self-audit"
+    ]
+  },
+  "failures": [],
+  "claim_boundary": [
+    "This is a promotion draft, not a runtime policy write.",
+    "Runtime defaults require a later Flash50/100 validation gate."
+  ]
+}

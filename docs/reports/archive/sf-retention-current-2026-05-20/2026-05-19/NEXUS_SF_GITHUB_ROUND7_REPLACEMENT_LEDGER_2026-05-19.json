@@ -1,0 +1,62 @@
+{
+  "holds": [
+    {
+      "capability": "autoreason",
+      "challenger_evidence_path": ".nexus/reports/sf_github_round7_live_2026-05-19/autoreason_sf-github-round7-smoke-autoreason-001_challenger_github7-first-principles-autoreason/evidence_bundle.json",
+      "challenger_skill": "github7-first-principles-autoreason",
+      "current_skill": "sf2-belief-route-fit-spec",
+      "decision": "hold_current_best",
+      "reason_codes": [
+        "challenger_token_not_lower"
+      ],
+      "token_delta": 1129,
+      "wall_delta_sec": -5.244
+    },
+    {
+      "capability": "direct_master_loop",
+      "challenger_evidence_path": ".nexus/reports/sf_github_round7_live_2026-05-19/direct_master_loop_sf-github-round7-smoke-direct_master_loop-001_challenger_github7-fstack-implement-plan-direct-master-loop/evidence_bundle.json",
+      "challenger_skill": "github7-fstack-implement-plan-direct-master-loop",
+      "current_skill": "sf2-direct_master_loop-route-fit-spec",
+      "decision": "hold_current_best",
+      "reason_codes": [
+        "challenger_token_not_lower",
+        "challenger_wall_not_lower"
+      ],
+      "token_delta": 2894,
+      "wall_delta_sec": 6.2806
+    }
+  ],
+  "replacements": [
+    {
+      "capability": "ui_validator",
+      "decision": "update_overlay_candidate_primary",
+      "evidence_path": ".nexus/reports/sf_github_round7_live_2026-05-19/ui_validator_sf-github-round7-smoke-ui_validator-001_challenger_github7-browserbase-ui-test-safe-ui-validator/evidence_bundle.json",
+      "from_skill": "github2-agent-browser-dogfood-safe-ui-validator",
+      "receipt_path": "/Users/jameschen/Workspace/nexus/.nexus/reports/sf_github_round7_live_2026-05-19/ui_validator_sf-github-round7-smoke-ui_validator-001_challenger_github7-browserbase-ui-test-safe-ui-validator/evidence_1779170524/with_nexus__sf-github-round7-smoke-ui_validator-001__trial_1.row.json",
+      "runtime_default_written": false,
+      "to_skill": "github7-browserbase-ui-test-safe-ui-validator",
+      "token_delta": -4529,
+      "wall_delta_sec": -40.4927
+    },
+    {
+      "capability": "repair_loop",
+      "decision": "update_overlay_candidate_primary",
+      "evidence_path": ".nexus/reports/sf_github_round7_live_2026-05-19/repair_loop_sf-github-round7-smoke-repair_loop-001_challenger_github7-midudev-tdd-repair-loop/evidence_bundle.json",
+      "from_skill": "github4-sickn33-antigravity-awesome-skills-tdd-workflows-tdd-red",
+      "receipt_path": "/Users/jameschen/Workspace/nexus/.nexus/reports/sf_github_round7_live_2026-05-19/repair_loop_sf-github-round7-smoke-repair_loop-001_challenger_github7-midudev-tdd-repair-loop/evidence_1779171188/with_nexus__sf-github-round7-smoke-repair_loop-001__trial_1.row.json",
+      "runtime_default_written": false,
+      "to_skill": "github7-midudev-tdd-repair-loop",
+      "token_delta": -320,
+      "wall_delta_sec": -1.6409
+    }
+  ],
+  "schema": "nexus.sf_github_round7_replacement_ledger.v1",
+  "source_rollup": "docs/reports/NEXUS_SF_GITHUB_ROUND7_LIVE_ROLLUP_2026-05-19.json",
+  "status": "PASS",
+  "summary": {
+    "hold_count": 2,
+    "replacement_count": 2,
+    "runtime_default_written": false
+  },
+  "version": "2026-05-19"
+}

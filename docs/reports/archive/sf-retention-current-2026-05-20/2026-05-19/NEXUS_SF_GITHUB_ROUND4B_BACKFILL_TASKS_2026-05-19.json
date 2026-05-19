@@ -1,0 +1,46 @@
+{
+  "benchmark_id": "nexus-sf-github-round4b-backfill-v1",
+  "description": "Internal SF round4b backfill Flash+Nexus skill challenger smoke. Not a public benchmark.",
+  "frozen": true,
+  "schema": "nexus.sf_github_round4b_backfill_tasks.v1",
+  "status": "PASS",
+  "summary": {
+    "capability_count": 1,
+    "public_benchmark_allowed": false,
+    "runtime_update_allowed": false,
+    "task_count": 1
+  },
+  "tasks": [
+    {
+      "allowed_files": [
+        "unused"
+      ],
+      "capability_activation_contract": "required",
+      "category": "benchmark_meta_opt",
+      "difficulty": "medium",
+      "eligibility_class": "model_required",
+      "expected_capabilities": [
+        "judge_panel"
+      ],
+      "fixture_kind": "sf_v13_tiebreak",
+      "forbidden_files": [
+        ".nexus/",
+        "logs/",
+        "benchmarks/"
+      ],
+      "id": "sf-github-round4b-backfill-benchmark_meta_opt-001",
+      "mutation_required": false,
+      "public_claim_allowed_metrics": [],
+      "repo": "fixture://sf-v13-tiebreak",
+      "repo_kind": "neutral_fixture",
+      "repo_ref": "v1",
+      "setup_command": "python -V",
+      "success_criteria": "github_round4b_backfill_receipt_chain_complete",
+      "target_file": "unused",
+      "task_desc": "SF round4b backfill for benchmark_meta_opt. Compare current best skill against ad-creative external prompt-only challenger with runtime receipt evidence.",
+      "test_file": "unused",
+      "verification_command": "python -V"
+    }
+  ],
+  "version": "2026-05-19"
+}

@@ -1,0 +1,352 @@
+{
+  "schema": "nexus.sf_replacement_ledger.v12",
+  "status": "PASS",
+  "summary": {
+    "kept_existing_runtime_primary": 13,
+    "applied_to_overlay_candidate": 11,
+    "held_not_applied": 9
+  },
+  "runtime_update_allowed": false,
+  "public_benchmark_allowed": false,
+  "items": [
+    {
+      "capability_id": "direct_master_loop",
+      "new_primary_skill": "sf2-direct_master_loop-route-fit-spec",
+      "status": "kept_existing_runtime_primary",
+      "rollback_target": "existing_primary_unchanged",
+      "evidence_refs": [
+        "docs/reports/NEXUS_SF_RUNTIME_EXPAND_APPLY_RESULT_V10_2026-05-18.json"
+      ]
+    },
+    {
+      "capability_id": "repair_loop",
+      "new_primary_skill": "tdd",
+      "status": "kept_existing_runtime_primary",
+      "rollback_target": "existing_primary_unchanged",
+      "evidence_refs": [
+        "docs/reports/NEXUS_SF_RUNTIME_EXPAND_APPLY_RESULT_V10_2026-05-18.json"
+      ]
+    },
+    {
+      "capability_id": "hyper_sprint",
+      "new_primary_skill": "sf2-hyper_sprint-route-fit-spec",
+      "status": "kept_existing_runtime_primary",
+      "rollback_target": "existing_primary_unchanged",
+      "evidence_refs": [
+        "docs/reports/NEXUS_SF_RUNTIME_EXPAND_APPLY_RESULT_V10_2026-05-18.json"
+      ]
+    },
+    {
+      "capability_id": "nightshift",
+      "new_primary_skill": "sf2-nightshift-route-fit-spec",
+      "status": "kept_existing_runtime_primary",
+      "rollback_target": "existing_primary_unchanged",
+      "evidence_refs": [
+        "docs/reports/NEXUS_SF_RUNTIME_EXPAND_APPLY_RESULT_V10_2026-05-18.json"
+      ]
+    },
+    {
+      "capability_id": "codeintel",
+      "new_primary_skill": "sf2-codeintel-route-fit-spec",
+      "status": "kept_existing_runtime_primary",
+      "rollback_target": "existing_primary_unchanged",
+      "evidence_refs": [
+        "docs/reports/NEXUS_SF_RUNTIME_EXPAND_APPLY_RESULT_V10_2026-05-18.json"
+      ]
+    },
+    {
+      "capability_id": "research",
+      "new_primary_skill": "research-citation-chain-verifier",
+      "status": "applied_to_overlay_candidate",
+      "token_delta": -2275,
+      "wall_delta_sec": -38.1098,
+      "rollback_target": "remove_overlay_entry_or_revert_to_no_runtime_primary_for_capability",
+      "evidence_refs": [
+        "docs/reports/NEXUS_SF_RUNTIME_PROMOTION_REVIEW_V12_2026-05-19.json",
+        "docs/reports/NEXUS_SF_POST_APPLY_POLICY_SMOKE_V12_2026-05-19.json"
+      ]
+    },
+    {
+      "capability_id": "research_control_plane",
+      "new_primary_skill": "research-citation-chain-verifier",
+      "status": "applied_to_overlay_candidate",
+      "token_delta": -3122,
+      "wall_delta_sec": -77.2095,
+      "rollback_target": "remove_overlay_entry_or_revert_to_no_runtime_primary_for_capability",
+      "evidence_refs": [
+        "docs/reports/NEXUS_SF_RUNTIME_PROMOTION_REVIEW_V12_2026-05-19.json",
+        "docs/reports/NEXUS_SF_POST_APPLY_POLICY_SMOKE_V12_2026-05-19.json"
+      ]
+    },
+    {
+      "capability_id": "xray",
+      "new_primary_skill": "diagnose",
+      "status": "applied_to_overlay_candidate",
+      "token_delta": -6764,
+      "wall_delta_sec": -56.658,
+      "rollback_target": "remove_overlay_entry_or_revert_to_no_runtime_primary_for_capability",
+      "evidence_refs": [
+        "docs/reports/NEXUS_SF_RUNTIME_PROMOTION_REVIEW_V12_2026-05-19.json",
+        "docs/reports/NEXUS_SF_POST_APPLY_POLICY_SMOKE_V12_2026-05-19.json"
+      ]
+    },
+    {
+      "capability_id": "learn_ask",
+      "new_primary_skill": "nexus-capability-upgrade",
+      "status": "kept_existing_runtime_primary",
+      "rollback_target": "existing_primary_unchanged",
+      "evidence_refs": [
+        "docs/reports/NEXUS_SF_RUNTIME_EXPAND_APPLY_RESULT_V10_2026-05-18.json"
+      ]
+    },
+    {
+      "capability_id": "lancedb",
+      "new_primary_skill": "research-source-validation-auditor",
+      "status": "applied_to_overlay_candidate",
+      "token_delta": -1403,
+      "wall_delta_sec": -9.4065,
+      "rollback_target": "remove_overlay_entry_or_revert_to_no_runtime_primary_for_capability",
+      "evidence_refs": [
+        "docs/reports/NEXUS_SF_RUNTIME_PROMOTION_REVIEW_V12_2026-05-19.json",
+        "docs/reports/NEXUS_SF_POST_APPLY_POLICY_SMOKE_V12_2026-05-19.json"
+      ]
+    },
+    {
+      "capability_id": "memory",
+      "new_primary_skill": "diagnose",
+      "status": "applied_to_overlay_candidate",
+      "token_delta": -1732,
+      "wall_delta_sec": -36.6634,
+      "rollback_target": "remove_overlay_entry_or_revert_to_no_runtime_primary_for_capability",
+      "evidence_refs": [
+        "docs/reports/NEXUS_SF_RUNTIME_PROMOTION_REVIEW_V12_2026-05-19.json",
+        "docs/reports/NEXUS_SF_POST_APPLY_POLICY_SMOKE_V12_2026-05-19.json"
+      ]
+    },
+    {
+      "capability_id": "learning_closure",
+      "new_primary_skill": "sf2-learning_closure-route-fit-spec",
+      "status": "applied_to_overlay_candidate",
+      "token_delta": -1134,
+      "wall_delta_sec": -10.0439,
+      "rollback_target": "remove_overlay_entry_or_revert_to_no_runtime_primary_for_capability",
+      "evidence_refs": [
+        "docs/reports/NEXUS_SF_RUNTIME_PROMOTION_REVIEW_V12_2026-05-19.json",
+        "docs/reports/NEXUS_SF_POST_APPLY_POLICY_SMOKE_V12_2026-05-19.json"
+      ]
+    },
+    {
+      "capability_id": "autoreason",
+      "new_primary_skill": "sf2-belief-route-fit-spec",
+      "status": "applied_to_overlay_candidate",
+      "token_delta": -850,
+      "wall_delta_sec": -34.2891,
+      "rollback_target": "remove_overlay_entry_or_revert_to_no_runtime_primary_for_capability",
+      "evidence_refs": [
+        "docs/reports/NEXUS_SF_RUNTIME_PROMOTION_REVIEW_V12_2026-05-19.json",
+        "docs/reports/NEXUS_SF_POST_APPLY_POLICY_SMOKE_V12_2026-05-19.json"
+      ]
+    },
+    {
+      "capability_id": "ddtree",
+      "new_primary_skill": "nexus-root-cause-probe",
+      "status": "applied_to_overlay_candidate",
+      "token_delta": -11138,
+      "wall_delta_sec": -53.7268,
+      "rollback_target": "remove_overlay_entry_or_revert_to_no_runtime_primary_for_capability",
+      "evidence_refs": [
+        "docs/reports/NEXUS_SF_RUNTIME_PROMOTION_REVIEW_V12_2026-05-19.json",
+        "docs/reports/NEXUS_SF_POST_APPLY_POLICY_SMOKE_V12_2026-05-19.json"
+      ]
+    },
+    {
+      "capability_id": "belief",
+      "new_primary_skill": "sf2-belief-route-fit-spec",
+      "status": "kept_existing_runtime_primary",
+      "rollback_target": "existing_primary_unchanged",
+      "evidence_refs": [
+        "docs/reports/NEXUS_SF_RUNTIME_EXPAND_APPLY_RESULT_V10_2026-05-18.json"
+      ]
+    },
+    {
+      "capability_id": "autonomic_router",
+      "new_primary_skill": "sf2-autonomic_router-route-fit-spec",
+      "status": "held_not_applied",
+      "reason": "token_regressed_wall_improved",
+      "rollback_target": "not_applicable_not_applied",
+      "evidence_refs": [
+        "docs/reports/NEXUS_SF_RUNTIME_PROMOTION_REVIEW_V12_2026-05-19.json"
+      ]
+    },
+    {
+      "capability_id": "forecast_pregate",
+      "new_primary_skill": "create-plan",
+      "status": "kept_existing_runtime_primary",
+      "rollback_target": "existing_primary_unchanged",
+      "evidence_refs": [
+        "docs/reports/NEXUS_SF_RUNTIME_EXPAND_APPLY_RESULT_V10_2026-05-18.json"
+      ]
+    },
+    {
+      "capability_id": "swarm_multi_agent",
+      "new_primary_skill": "sf2-swarm_multi_agent-route-fit-spec",
+      "status": "kept_existing_runtime_primary",
+      "rollback_target": "existing_primary_unchanged",
+      "evidence_refs": [
+        "docs/reports/NEXUS_SF_RUNTIME_EXPAND_APPLY_RESULT_V10_2026-05-18.json"
+      ]
+    },
+    {
+      "capability_id": "drone",
+      "new_primary_skill": "diagnose",
+      "status": "applied_to_overlay_candidate",
+      "token_delta": -459,
+      "wall_delta_sec": -8.7376,
+      "rollback_target": "remove_overlay_entry_or_revert_to_no_runtime_primary_for_capability",
+      "evidence_refs": [
+        "docs/reports/NEXUS_SF_RUNTIME_PROMOTION_REVIEW_V12_2026-05-19.json",
+        "docs/reports/NEXUS_SF_POST_APPLY_POLICY_SMOKE_V12_2026-05-19.json"
+      ]
+    },
+    {
+      "capability_id": "file_lock_security_gate",
+      "new_primary_skill": "sf2-file_lock_security_gate-route-fit-spec",
+      "status": "kept_existing_runtime_primary",
+      "rollback_target": "existing_primary_unchanged",
+      "evidence_refs": [
+        "docs/reports/NEXUS_SF_RUNTIME_EXPAND_APPLY_RESULT_V10_2026-05-18.json"
+      ]
+    },
+    {
+      "capability_id": "mempalace",
+      "new_primary_skill": "sf2-mempalace-route-fit-spec",
+      "status": "held_not_applied",
+      "reason": "wall_regressed_token_improved",
+      "rollback_target": "not_applicable_not_applied",
+      "evidence_refs": [
+        "docs/reports/NEXUS_SF_RUNTIME_PROMOTION_REVIEW_V12_2026-05-19.json"
+      ]
+    },
+    {
+      "capability_id": "policy_capability_gate",
+      "new_primary_skill": "acceptance-evidence-failclosed",
+      "status": "held_not_applied",
+      "reason": "wall_regressed_token_improved",
+      "rollback_target": "not_applicable_not_applied",
+      "evidence_refs": [
+        "docs/reports/NEXUS_SF_RUNTIME_PROMOTION_REVIEW_V12_2026-05-19.json"
+      ]
+    },
+    {
+      "capability_id": "ultra_review",
+      "new_primary_skill": "acceptance-evidence-failclosed",
+      "status": "held_not_applied",
+      "reason": "token_regressed_wall_improved",
+      "rollback_target": "not_applicable_not_applied",
+      "evidence_refs": [
+        "docs/reports/NEXUS_SF_RUNTIME_PROMOTION_REVIEW_V12_2026-05-19.json"
+      ]
+    },
+    {
+      "capability_id": "artifact_gate",
+      "new_primary_skill": "acceptance-evidence-failclosed",
+      "status": "applied_to_overlay_candidate",
+      "token_delta": -257,
+      "wall_delta_sec": -25.2579,
+      "rollback_target": "remove_overlay_entry_or_revert_to_no_runtime_primary_for_capability",
+      "evidence_refs": [
+        "docs/reports/NEXUS_SF_RUNTIME_PROMOTION_REVIEW_V12_2026-05-19.json",
+        "docs/reports/NEXUS_SF_POST_APPLY_POLICY_SMOKE_V12_2026-05-19.json"
+      ]
+    },
+    {
+      "capability_id": "claim_gate",
+      "new_primary_skill": "nexus-benchmark-continuous-optimization",
+      "status": "kept_existing_runtime_primary",
+      "rollback_target": "existing_primary_unchanged",
+      "evidence_refs": [
+        "docs/reports/NEXUS_SF_RUNTIME_EXPAND_APPLY_RESULT_V10_2026-05-18.json"
+      ]
+    },
+    {
+      "capability_id": "delivery_acceptance_gate",
+      "new_primary_skill": "acceptance-evidence-failclosed",
+      "status": "held_not_applied",
+      "reason": "token_and_wall_regressed",
+      "rollback_target": "not_applicable_not_applied",
+      "evidence_refs": [
+        "docs/reports/NEXUS_SF_RUNTIME_PROMOTION_REVIEW_V12_2026-05-19.json"
+      ]
+    },
+    {
+      "capability_id": "sandbox_replay",
+      "new_primary_skill": "sf2-sandbox_replay-route-fit-spec",
+      "status": "held_not_applied",
+      "reason": "token_regressed_wall_improved",
+      "rollback_target": "not_applicable_not_applied",
+      "evidence_refs": [
+        "docs/reports/NEXUS_SF_RUNTIME_PROMOTION_REVIEW_V12_2026-05-19.json"
+      ]
+    },
+    {
+      "capability_id": "benchmark_meta_opt",
+      "new_primary_skill": "nexus-benchmark-continuous-optimization",
+      "status": "held_not_applied",
+      "reason": "token_regressed_wall_improved",
+      "rollback_target": "not_applicable_not_applied",
+      "evidence_refs": [
+        "docs/reports/NEXUS_SF_RUNTIME_PROMOTION_REVIEW_V12_2026-05-19.json"
+      ]
+    },
+    {
+      "capability_id": "regression_guard",
+      "new_primary_skill": "diagnose",
+      "status": "kept_existing_runtime_primary",
+      "rollback_target": "existing_primary_unchanged",
+      "evidence_refs": [
+        "docs/reports/NEXUS_SF_RUNTIME_EXPAND_APPLY_RESULT_V10_2026-05-18.json"
+      ]
+    },
+    {
+      "capability_id": "registry_skills_sync",
+      "new_primary_skill": "sf2-registry_skills_sync-route-fit-spec",
+      "status": "held_not_applied",
+      "reason": "token_and_wall_regressed",
+      "rollback_target": "not_applicable_not_applied",
+      "evidence_refs": [
+        "docs/reports/NEXUS_SF_RUNTIME_PROMOTION_REVIEW_V12_2026-05-19.json"
+      ]
+    },
+    {
+      "capability_id": "metabolism_resume",
+      "new_primary_skill": "nexus-goal-closure-executor",
+      "status": "applied_to_overlay_candidate",
+      "token_delta": -1322,
+      "wall_delta_sec": -1.6853,
+      "rollback_target": "remove_overlay_entry_or_revert_to_no_runtime_primary_for_capability",
+      "evidence_refs": [
+        "docs/reports/NEXUS_SF_RUNTIME_PROMOTION_REVIEW_V12_2026-05-19.json",
+        "docs/reports/NEXUS_SF_POST_APPLY_POLICY_SMOKE_V12_2026-05-19.json"
+      ]
+    },
+    {
+      "capability_id": "ui_validator",
+      "new_primary_skill": "nexus-root-cause-probe",
+      "status": "held_not_applied",
+      "reason": "wall_regressed_token_improved",
+      "rollback_target": "not_applicable_not_applied",
+      "evidence_refs": [
+        "docs/reports/NEXUS_SF_RUNTIME_PROMOTION_REVIEW_V12_2026-05-19.json"
+      ]
+    },
+    {
+      "capability_id": "external_productivity",
+      "new_primary_skill": "sf2-external_productivity-route-fit-spec",
+      "status": "kept_existing_runtime_primary",
+      "rollback_target": "existing_primary_unchanged",
+      "evidence_refs": [
+        "docs/reports/NEXUS_SF_RUNTIME_EXPAND_APPLY_RESULT_V10_2026-05-18.json"
+      ]
+    }
+  ]
+}

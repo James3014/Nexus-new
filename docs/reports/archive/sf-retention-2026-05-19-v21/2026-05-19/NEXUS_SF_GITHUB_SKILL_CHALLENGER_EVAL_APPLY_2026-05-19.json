@@ -1,0 +1,1578 @@
+{
+  "claim_boundary": [
+    "External GitHub skills are challenger candidates only.",
+    "A replacement candidate here updates the SF candidate overlay, not runtime default.",
+    "Runtime apply still requires SF ablation receipt and apply gate."
+  ],
+  "comparisons": [
+    {
+      "avg_challenger_margin": -6.090349,
+      "capability": "repair_loop",
+      "challenger_skill": "github-karpathy-guidelines",
+      "challenger_wins": 0,
+      "current_skill": "tdd",
+      "current_wins": 3,
+      "decision": "KEEP_CURRENT",
+      "rows": [
+        {
+          "challenger_minus_current": -5.621861,
+          "challenger_score": 4.216395,
+          "current_score": 9.838256,
+          "query": "Nexus route capability repair_loop: handle a task requiring repair loop repair loop TDD red green refactor behavior test with receipt-backed evidence.",
+          "ranked": [
+            {
+              "overlap": [
+                "green",
+                "loop",
+                "red",
+                "refactor",
+                "tdd",
+                "test",
+                "with"
+              ],
+              "score": 9.838256,
+              "skill_id": "tdd"
+            },
+            {
+              "overlap": [
+                "nexus",
+                "repair_loop",
+                "task"
+              ],
+              "score": 4.216395,
+              "skill_id": "github-karpathy-guidelines"
+            }
+          ],
+          "top": "tdd"
+        },
+        {
+          "challenger_minus_current": -7.027326,
+          "challenger_score": 2.81093,
+          "current_score": 9.838256,
+          "query": "Choose the best skill for repair loop repair loop TDD red green refactor behavior test; return selected, used, evidence, gate, and outcome details.",
+          "ranked": [
+            {
+              "overlap": [
+                "for",
+                "green",
+                "loop",
+                "red",
+                "refactor",
+                "tdd",
+                "test"
+              ],
+              "score": 9.838256,
+              "skill_id": "tdd"
+            },
+            {
+              "overlap": [
+                "and",
+                "the"
+              ],
+              "score": 2.81093,
+              "skill_id": "github-karpathy-guidelines"
+            }
+          ],
+          "top": "tdd"
+        },
+        {
+          "challenger_minus_current": -5.621861,
+          "challenger_score": 2.81093,
+          "current_score": 8.432791,
+          "query": "請用 repair_loop 能力處理，重點是 repair loop repair loop TDD red green refactor behavior test，需要 runtime receipt 和 fail-closed gate。",
+          "ranked": [
+            {
+              "overlap": [
+                "green",
+                "loop",
+                "red",
+                "refactor",
+                "tdd",
+                "test"
+              ],
+              "score": 8.432791,
+              "skill_id": "tdd"
+            },
+            {
+              "overlap": [
+                "repair_loop",
+                "runtime"
+              ],
+              "score": 2.81093,
+              "skill_id": "github-karpathy-guidelines"
+            }
+          ],
+          "top": "tdd"
+        }
+      ]
+    },
+    {
+      "avg_challenger_margin": -15.460116,
+      "capability": "direct_master_loop",
+      "challenger_skill": "github-karpathy-guidelines",
+      "challenger_wins": 0,
+      "current_skill": "sf2-direct_master_loop-route-fit-spec",
+      "current_wins": 3,
+      "decision": "KEEP_CURRENT",
+      "rows": [
+        {
+          "challenger_minus_current": -16.865581,
+          "challenger_score": 3.0,
+          "current_score": 19.865581,
+          "query": "Nexus route capability direct_master_loop: handle a task requiring direct master loop direct master loop execution content rewrite task control with receipt-backed evidence.",
+          "ranked": [
+            {
+              "overlap": [
+                "backed",
+                "capability",
+                "content",
+                "control",
+                "direct",
+                "direct_master_loop",
+                "evidence",
+                "execution",
+                "loop",
+                "master",
+                "nexus",
+                "receipt",
+                "rewrite",
+                "route",
+                "task"
+              ],
+              "score": 19.865581,
+              "skill_id": "sf2-direct_master_loop-route-fit-spec"
+            },
+            {
+              "overlap": [
+                "direct_master_loop",
+                "nexus",
+                "task"
+              ],
+              "score": 3.0,
+              "skill_id": "github-karpathy-guidelines"
+            }
+          ],
+          "top": "sf2-direct_master_loop-route-fit-spec"
+        },
+        {
+          "challenger_minus_current": -16.865581,
+          "challenger_score": 3.0,
+          "current_score": 19.865581,
+          "query": "Choose the best skill for direct master loop direct master loop execution content rewrite task control; return selected, used, evidence, gate, and outcome details.",
+          "ranked": [
+            {
+              "overlap": [
+                "and",
+                "content",
+                "control",
+                "direct",
+                "evidence",
+                "execution",
+                "for",
+                "gate",
+                "loop",
+                "master",
+                "outcome",
+                "return",
+                "rewrite",
+                "task",
+                "the"
+              ],
+              "score": 19.865581,
+              "skill_id": "sf2-direct_master_loop-route-fit-spec"
+            },
+            {
+              "overlap": [
+                "and",
+                "task",
+                "the"
+              ],
+              "score": 3.0,
+              "skill_id": "github-karpathy-guidelines"
+            }
+          ],
+          "top": "sf2-direct_master_loop-route-fit-spec"
+        },
+        {
+          "challenger_minus_current": -12.649186,
+          "challenger_score": 3.0,
+          "current_score": 15.649186,
+          "query": "請用 direct_master_loop 能力處理，重點是 direct master loop direct master loop execution content rewrite task control，需要 runtime receipt 和 fail-closed gate。",
+          "ranked": [
+            {
+              "overlap": [
+                "content",
+                "control",
+                "direct",
+                "direct_master_loop",
+                "execution",
+                "gate",
+                "loop",
+                "master",
+                "receipt",
+                "rewrite",
+                "runtime",
+                "task"
+              ],
+              "score": 15.649186,
+              "skill_id": "sf2-direct_master_loop-route-fit-spec"
+            },
+            {
+              "overlap": [
+                "direct_master_loop",
+                "runtime",
+                "task"
+              ],
+              "score": 3.0,
+              "skill_id": "github-karpathy-guidelines"
+            }
+          ],
+          "top": "sf2-direct_master_loop-route-fit-spec"
+        }
+      ]
+    },
+    {
+      "avg_challenger_margin": -14.054651,
+      "capability": "codeintel",
+      "challenger_skill": "github-karpathy-guidelines",
+      "challenger_wins": 0,
+      "current_skill": "sf2-codeintel-route-fit-spec",
+      "current_wins": 3,
+      "decision": "KEEP_CURRENT",
+      "rows": [
+        {
+          "challenger_minus_current": -15.460116,
+          "challenger_score": 3.0,
+          "current_score": 18.460116,
+          "query": "Nexus route capability codeintel: handle a task requiring codeintel code scan impact symbol dependency graph repository context with receipt-backed evidence.",
+          "ranked": [
+            {
+              "overlap": [
+                "backed",
+                "capability",
+                "code",
+                "codeintel",
+                "context",
+                "dependency",
+                "evidence",
+                "graph",
+                "impact",
+                "nexus",
+                "receipt",
+                "route",
+                "symbol",
+                "task"
+              ],
+              "score": 18.460116,
+              "skill_id": "sf2-codeintel-route-fit-spec"
+            },
+            {
+              "overlap": [
+                "codeintel",
+                "nexus",
+                "task"
+              ],
+              "score": 3.0,
+              "skill_id": "github-karpathy-guidelines"
+            }
+          ],
+          "top": "sf2-codeintel-route-fit-spec"
+        },
+        {
+          "challenger_minus_current": -15.460116,
+          "challenger_score": 3.0,
+          "current_score": 18.460116,
+          "query": "Choose the best skill for codeintel code scan impact symbol dependency graph repository context; return selected, used, evidence, gate, and outcome details.",
+          "ranked": [
+            {
+              "overlap": [
+                "and",
+                "code",
+                "codeintel",
+                "context",
+                "dependency",
+                "evidence",
+                "for",
+                "gate",
+                "graph",
+                "impact",
+                "outcome",
+                "return",
+                "symbol",
+                "the"
+              ],
+              "score": 18.460116,
+              "skill_id": "sf2-codeintel-route-fit-spec"
+            },
+            {
+              "overlap": [
+                "and",
+                "codeintel",
+                "the"
+              ],
+              "score": 3.0,
+              "skill_id": "github-karpathy-guidelines"
+            }
+          ],
+          "top": "sf2-codeintel-route-fit-spec"
+        },
+        {
+          "challenger_minus_current": -11.243721,
+          "challenger_score": 2.0,
+          "current_score": 13.243721,
+          "query": "請用 codeintel 能力處理，重點是 codeintel code scan impact symbol dependency graph repository context，需要 runtime receipt 和 fail-closed gate。",
+          "ranked": [
+            {
+              "overlap": [
+                "code",
+                "codeintel",
+                "context",
+                "dependency",
+                "gate",
+                "graph",
+                "impact",
+                "receipt",
+                "runtime",
+                "symbol"
+              ],
+              "score": 13.243721,
+              "skill_id": "sf2-codeintel-route-fit-spec"
+            },
+            {
+              "overlap": [
+                "codeintel",
+                "runtime"
+              ],
+              "score": 2.0,
+              "skill_id": "github-karpathy-guidelines"
+            }
+          ],
+          "top": "sf2-codeintel-route-fit-spec"
+        }
+      ]
+    },
+    {
+      "avg_challenger_margin": -8.432791,
+      "capability": "governance_and_trust",
+      "challenger_skill": "github-skills-security-check",
+      "challenger_wins": 0,
+      "current_skill": "acceptance-evidence-failclosed",
+      "current_wins": 3,
+      "decision": "KEEP_CURRENT",
+      "rows": [
+        {
+          "challenger_minus_current": -9.838256,
+          "challenger_score": 3.0,
+          "current_score": 12.838256,
+          "query": "Nexus route capability governance_and_trust: handle a task requiring governance and trust governance trust mismatch evidence fail closed with receipt-backed evidence.",
+          "ranked": [
+            {
+              "overlap": [
+                "and",
+                "backed",
+                "capability",
+                "evidence",
+                "governance",
+                "governance_and_trust",
+                "nexus",
+                "receipt",
+                "route",
+                "task"
+              ],
+              "score": 12.838256,
+              "skill_id": "acceptance-evidence-failclosed"
+            },
+            {
+              "overlap": [
+                "and",
+                "governance_and_trust",
+                "nexus"
+              ],
+              "score": 3.0,
+              "skill_id": "github-skills-security-check"
+            }
+          ],
+          "top": "acceptance-evidence-failclosed"
+        },
+        {
+          "challenger_minus_current": -8.432791,
+          "challenger_score": 2.405465,
+          "current_score": 10.838256,
+          "query": "Choose the best skill for governance and trust governance trust mismatch evidence fail closed; return selected, used, evidence, gate, and outcome details.",
+          "ranked": [
+            {
+              "overlap": [
+                "and",
+                "evidence",
+                "for",
+                "gate",
+                "governance",
+                "outcome",
+                "return",
+                "the"
+              ],
+              "score": 10.838256,
+              "skill_id": "acceptance-evidence-failclosed"
+            },
+            {
+              "overlap": [
+                "and",
+                "skill"
+              ],
+              "score": 2.405465,
+              "skill_id": "github-skills-security-check"
+            }
+          ],
+          "top": "acceptance-evidence-failclosed"
+        },
+        {
+          "challenger_minus_current": -7.027326,
+          "challenger_score": 2.0,
+          "current_score": 9.027326,
+          "query": "請用 governance_and_trust 能力處理，重點是 governance and trust governance trust mismatch evidence fail closed，需要 runtime receipt 和 fail-closed gate。",
+          "ranked": [
+            {
+              "overlap": [
+                "and",
+                "evidence",
+                "gate",
+                "governance",
+                "governance_and_trust",
+                "receipt",
+                "runtime"
+              ],
+              "score": 9.027326,
+              "skill_id": "acceptance-evidence-failclosed"
+            },
+            {
+              "overlap": [
+                "and",
+                "governance_and_trust"
+              ],
+              "score": 2.0,
+              "skill_id": "github-skills-security-check"
+            }
+          ],
+          "top": "acceptance-evidence-failclosed"
+        }
+      ]
+    },
+    {
+      "avg_challenger_margin": -10.775233,
+      "capability": "artifact_gate",
+      "challenger_skill": "github-skills-security-check",
+      "challenger_wins": 0,
+      "current_skill": "acceptance-evidence-failclosed",
+      "current_wins": 3,
+      "decision": "KEEP_CURRENT",
+      "rows": [
+        {
+          "challenger_minus_current": -12.649186,
+          "challenger_score": 2.0,
+          "current_score": 14.649186,
+          "query": "Nexus route capability artifact_gate: handle a task requiring artifact gate artifact evidence acceptance verifier receipt with receipt-backed evidence.",
+          "ranked": [
+            {
+              "overlap": [
+                "acceptance",
+                "artifact",
+                "artifact_gate",
+                "backed",
+                "capability",
+                "evidence",
+                "gate",
+                "nexus",
+                "receipt",
+                "route",
+                "task"
+              ],
+              "score": 14.649186,
+              "skill_id": "acceptance-evidence-failclosed"
+            },
+            {
+              "overlap": [
+                "artifact_gate",
+                "nexus"
+              ],
+              "score": 2.0,
+              "skill_id": "github-skills-security-check"
+            }
+          ],
+          "top": "acceptance-evidence-failclosed"
+        },
+        {
+          "challenger_minus_current": -11.243721,
+          "challenger_score": 2.405465,
+          "current_score": 13.649186,
+          "query": "Choose the best skill for artifact gate artifact evidence acceptance verifier receipt; return selected, used, evidence, gate, and outcome details.",
+          "ranked": [
+            {
+              "overlap": [
+                "acceptance",
+                "and",
+                "artifact",
+                "evidence",
+                "for",
+                "gate",
+                "outcome",
+                "receipt",
+                "return",
+                "the"
+              ],
+              "score": 13.649186,
+              "skill_id": "acceptance-evidence-failclosed"
+            },
+            {
+              "overlap": [
+                "and",
+                "skill"
+              ],
+              "score": 2.405465,
+              "skill_id": "github-skills-security-check"
+            }
+          ],
+          "top": "acceptance-evidence-failclosed"
+        },
+        {
+          "challenger_minus_current": -8.432791,
+          "challenger_score": 1.0,
+          "current_score": 9.432791,
+          "query": "請用 artifact_gate 能力處理，重點是 artifact gate artifact evidence acceptance verifier receipt，需要 runtime receipt 和 fail-closed gate。",
+          "ranked": [
+            {
+              "overlap": [
+                "acceptance",
+                "artifact",
+                "artifact_gate",
+                "evidence",
+                "gate",
+                "receipt",
+                "runtime"
+              ],
+              "score": 9.432791,
+              "skill_id": "acceptance-evidence-failclosed"
+            },
+            {
+              "overlap": [
+                "artifact_gate"
+              ],
+              "score": 1.0,
+              "skill_id": "github-skills-security-check"
+            }
+          ],
+          "top": "acceptance-evidence-failclosed"
+        }
+      ]
+    },
+    {
+      "avg_challenger_margin": -7.964302,
+      "capability": "ultra_review",
+      "challenger_skill": "github-skills-security-check",
+      "challenger_wins": 0,
+      "current_skill": "acceptance-evidence-failclosed",
+      "current_wins": 3,
+      "decision": "KEEP_CURRENT",
+      "rows": [
+        {
+          "challenger_minus_current": -9.838256,
+          "challenger_score": 2.0,
+          "current_score": 11.838256,
+          "query": "Nexus route capability ultra_review: handle a task requiring ultra review ultra review sandbox fleet security logic regression with receipt-backed evidence.",
+          "ranked": [
+            {
+              "overlap": [
+                "backed",
+                "capability",
+                "evidence",
+                "nexus",
+                "receipt",
+                "review",
+                "route",
+                "task",
+                "ultra_review"
+              ],
+              "score": 11.838256,
+              "skill_id": "acceptance-evidence-failclosed"
+            },
+            {
+              "overlap": [
+                "nexus",
+                "ultra_review"
+              ],
+              "score": 2.0,
+              "skill_id": "github-skills-security-check"
+            }
+          ],
+          "top": "acceptance-evidence-failclosed"
+        },
+        {
+          "challenger_minus_current": -8.432791,
+          "challenger_score": 2.405465,
+          "current_score": 10.838256,
+          "query": "Choose the best skill for ultra review ultra review sandbox fleet security logic regression; return selected, used, evidence, gate, and outcome details.",
+          "ranked": [
+            {
+              "overlap": [
+                "and",
+                "evidence",
+                "for",
+                "gate",
+                "outcome",
+                "return",
+                "review",
+                "the"
+              ],
+              "score": 10.838256,
+              "skill_id": "acceptance-evidence-failclosed"
+            },
+            {
+              "overlap": [
+                "and",
+                "skill"
+              ],
+              "score": 2.405465,
+              "skill_id": "github-skills-security-check"
+            }
+          ],
+          "top": "acceptance-evidence-failclosed"
+        },
+        {
+          "challenger_minus_current": -5.62186,
+          "challenger_score": 1.0,
+          "current_score": 6.62186,
+          "query": "請用 ultra_review 能力處理，重點是 ultra review ultra review sandbox fleet security logic regression，需要 runtime receipt 和 fail-closed gate。",
+          "ranked": [
+            {
+              "overlap": [
+                "gate",
+                "receipt",
+                "review",
+                "runtime",
+                "ultra_review"
+              ],
+              "score": 6.62186,
+              "skill_id": "acceptance-evidence-failclosed"
+            },
+            {
+              "overlap": [
+                "ultra_review"
+              ],
+              "score": 1.0,
+              "skill_id": "github-skills-security-check"
+            }
+          ],
+          "top": "acceptance-evidence-failclosed"
+        }
+      ]
+    },
+    {
+      "avg_challenger_margin": -9.369768,
+      "capability": "learning_closure",
+      "challenger_skill": "github-auto-skill-safe-learning",
+      "challenger_wins": 0,
+      "current_skill": "sf2-learning_closure-route-fit-spec",
+      "current_wins": 3,
+      "decision": "KEEP_CURRENT",
+      "rows": [
+        {
+          "challenger_minus_current": -11.243721,
+          "challenger_score": 7.0,
+          "current_score": 18.243721,
+          "query": "Nexus route capability learning_closure: handle a task requiring learning closure learning closure lesson writeback SLO KPI matrix with receipt-backed evidence.",
+          "ranked": [
+            {
+              "overlap": [
+                "backed",
+                "capability",
+                "closure",
+                "evidence",
+                "kpi",
+                "learning",
+                "learning_closure",
+                "lesson",
+                "matrix",
+                "nexus",
+                "receipt",
+                "route",
+                "slo",
+                "task",
+                "writeback"
+              ],
+              "score": 18.243721,
+              "skill_id": "sf2-learning_closure-route-fit-spec"
+            },
+            {
+              "overlap": [
+                "backed",
+                "evidence",
+                "learning",
+                "learning_closure",
+                "nexus",
+                "receipt",
+                "writeback"
+              ],
+              "score": 7.0,
+              "skill_id": "github-auto-skill-safe-learning"
+            }
+          ],
+          "top": "sf2-learning_closure-route-fit-spec"
+        },
+        {
+          "challenger_minus_current": -8.432791,
+          "challenger_score": 8.405465,
+          "current_score": 16.838256,
+          "query": "Choose the best skill for learning closure learning closure lesson writeback SLO KPI matrix; return selected, used, evidence, gate, and outcome details.",
+          "ranked": [
+            {
+              "overlap": [
+                "and",
+                "closure",
+                "evidence",
+                "for",
+                "gate",
+                "kpi",
+                "learning",
+                "lesson",
+                "matrix",
+                "outcome",
+                "return",
+                "slo",
+                "the",
+                "writeback"
+              ],
+              "score": 16.838256,
+              "skill_id": "sf2-learning_closure-route-fit-spec"
+            },
+            {
+              "overlap": [
+                "evidence",
+                "for",
+                "gate",
+                "learning",
+                "outcome",
+                "return",
+                "skill",
+                "writeback"
+              ],
+              "score": 8.405465,
+              "skill_id": "github-auto-skill-safe-learning"
+            }
+          ],
+          "top": "sf2-learning_closure-route-fit-spec"
+        },
+        {
+          "challenger_minus_current": -8.432791,
+          "challenger_score": 5.0,
+          "current_score": 13.432791,
+          "query": "請用 learning_closure 能力處理，重點是 learning closure learning closure lesson writeback SLO KPI matrix，需要 runtime receipt 和 fail-closed gate。",
+          "ranked": [
+            {
+              "overlap": [
+                "closure",
+                "gate",
+                "kpi",
+                "learning",
+                "learning_closure",
+                "lesson",
+                "matrix",
+                "receipt",
+                "runtime",
+                "slo",
+                "writeback"
+              ],
+              "score": 13.432791,
+              "skill_id": "sf2-learning_closure-route-fit-spec"
+            },
+            {
+              "overlap": [
+                "gate",
+                "learning",
+                "learning_closure",
+                "receipt",
+                "writeback"
+              ],
+              "score": 5.0,
+              "skill_id": "github-auto-skill-safe-learning"
+            }
+          ],
+          "top": "sf2-learning_closure-route-fit-spec"
+        }
+      ]
+    },
+    {
+      "avg_challenger_margin": -0.936977,
+      "capability": "metabolism_resume",
+      "challenger_skill": "github-auto-skill-safe-learning",
+      "challenger_wins": 2,
+      "current_skill": "nexus-goal-closure-executor",
+      "current_wins": 1,
+      "decision": "KEEP_CURRENT",
+      "rows": [
+        {
+          "challenger_minus_current": -2.81093,
+          "challenger_score": 5.81093,
+          "current_score": 8.62186,
+          "query": "Nexus route capability metabolism_resume: handle a task requiring metabolism resume metabolism resume long goal closure continuation with receipt-backed evidence.",
+          "ranked": [
+            {
+              "overlap": [
+                "backed",
+                "closure",
+                "evidence",
+                "goal",
+                "long",
+                "nexus",
+                "task"
+              ],
+              "score": 8.62186,
+              "skill_id": "nexus-goal-closure-executor"
+            },
+            {
+              "overlap": [
+                "backed",
+                "evidence",
+                "metabolism_resume",
+                "nexus",
+                "receipt"
+              ],
+              "score": 5.81093,
+              "skill_id": "github-auto-skill-safe-learning"
+            }
+          ],
+          "top": "nexus-goal-closure-executor"
+        },
+        {
+          "challenger_minus_current": 0.0,
+          "challenger_score": 8.027326,
+          "current_score": 8.027326,
+          "query": "Choose the best skill for metabolism resume metabolism resume long goal closure continuation; return selected, used, evidence, gate, and outcome details.",
+          "ranked": [
+            {
+              "overlap": [
+                "evidence",
+                "for",
+                "gate",
+                "outcome",
+                "return",
+                "skill"
+              ],
+              "score": 8.027326,
+              "skill_id": "github-auto-skill-safe-learning"
+            },
+            {
+              "overlap": [
+                "and",
+                "closure",
+                "evidence",
+                "goal",
+                "long",
+                "the"
+              ],
+              "score": 8.027326,
+              "skill_id": "nexus-goal-closure-executor"
+            }
+          ],
+          "top": "github-auto-skill-safe-learning"
+        },
+        {
+          "challenger_minus_current": 0.0,
+          "challenger_score": 4.216395,
+          "current_score": 4.216395,
+          "query": "請用 metabolism_resume 能力處理，重點是 metabolism resume metabolism resume long goal closure continuation，需要 runtime receipt 和 fail-closed gate。",
+          "ranked": [
+            {
+              "overlap": [
+                "gate",
+                "metabolism_resume",
+                "receipt"
+              ],
+              "score": 4.216395,
+              "skill_id": "github-auto-skill-safe-learning"
+            },
+            {
+              "overlap": [
+                "closure",
+                "goal",
+                "long"
+              ],
+              "score": 4.216395,
+              "skill_id": "nexus-goal-closure-executor"
+            }
+          ],
+          "top": "github-auto-skill-safe-learning"
+        }
+      ]
+    },
+    {
+      "avg_challenger_margin": -9.838256,
+      "capability": "registry_skills_sync",
+      "challenger_skill": "github-auto-skill-safe-learning",
+      "challenger_wins": 0,
+      "current_skill": "sf2-registry_skills_sync-route-fit-spec",
+      "current_wins": 3,
+      "decision": "KEEP_CURRENT",
+      "rows": [
+        {
+          "challenger_minus_current": -11.243721,
+          "challenger_score": 7.0,
+          "current_score": 18.243721,
+          "query": "Nexus route capability registry_skills_sync: handle a task requiring registry skills sync skill registry catalog sync plugin source refresh with receipt-backed evidence.",
+          "ranked": [
+            {
+              "overlap": [
+                "backed",
+                "capability",
+                "catalog",
+                "evidence",
+                "nexus",
+                "plugin",
+                "receipt",
+                "refresh",
+                "registry",
+                "registry_skills_sync",
+                "route",
+                "skill",
+                "source",
+                "sync",
+                "task"
+              ],
+              "score": 18.243721,
+              "skill_id": "sf2-registry_skills_sync-route-fit-spec"
+            },
+            {
+              "overlap": [
+                "backed",
+                "evidence",
+                "nexus",
+                "receipt",
+                "registry",
+                "registry_skills_sync",
+                "skill"
+              ],
+              "score": 7.0,
+              "skill_id": "github-auto-skill-safe-learning"
+            }
+          ],
+          "top": "sf2-registry_skills_sync-route-fit-spec"
+        },
+        {
+          "challenger_minus_current": -9.838256,
+          "challenger_score": 7.0,
+          "current_score": 16.838256,
+          "query": "Choose the best skill for registry skills sync skill registry catalog sync plugin source refresh; return selected, used, evidence, gate, and outcome details.",
+          "ranked": [
+            {
+              "overlap": [
+                "and",
+                "catalog",
+                "evidence",
+                "for",
+                "gate",
+                "outcome",
+                "plugin",
+                "refresh",
+                "registry",
+                "return",
+                "skill",
+                "source",
+                "sync",
+                "the"
+              ],
+              "score": 16.838256,
+              "skill_id": "sf2-registry_skills_sync-route-fit-spec"
+            },
+            {
+              "overlap": [
+                "evidence",
+                "for",
+                "gate",
+                "outcome",
+                "registry",
+                "return",
+                "skill"
+              ],
+              "score": 7.0,
+              "skill_id": "github-auto-skill-safe-learning"
+            }
+          ],
+          "top": "sf2-registry_skills_sync-route-fit-spec"
+        },
+        {
+          "challenger_minus_current": -8.432791,
+          "challenger_score": 5.0,
+          "current_score": 13.432791,
+          "query": "請用 registry_skills_sync 能力處理，重點是 registry skills sync skill registry catalog sync plugin source refresh，需要 runtime receipt 和 fail-closed gate。",
+          "ranked": [
+            {
+              "overlap": [
+                "catalog",
+                "gate",
+                "plugin",
+                "receipt",
+                "refresh",
+                "registry",
+                "registry_skills_sync",
+                "runtime",
+                "skill",
+                "source",
+                "sync"
+              ],
+              "score": 13.432791,
+              "skill_id": "sf2-registry_skills_sync-route-fit-spec"
+            },
+            {
+              "overlap": [
+                "gate",
+                "receipt",
+                "registry",
+                "registry_skills_sync",
+                "skill"
+              ],
+              "score": 5.0,
+              "skill_id": "github-auto-skill-safe-learning"
+            }
+          ],
+          "top": "sf2-registry_skills_sync-route-fit-spec"
+        }
+      ]
+    },
+    {
+      "avg_challenger_margin": -7.964303,
+      "capability": "forecast_pregate",
+      "challenger_skill": "github-idea-reality-check",
+      "challenger_wins": 0,
+      "current_skill": "create-plan",
+      "current_wins": 3,
+      "decision": "KEEP_CURRENT",
+      "rows": [
+        {
+          "challenger_minus_current": -9.838256,
+          "challenger_score": 2.405465,
+          "current_score": 12.243721,
+          "query": "Nexus route capability forecast_pregate: handle a task requiring forecast pregate forecast pregate plan quality risk prediction with receipt-backed evidence.",
+          "ranked": [
+            {
+              "overlap": [
+                "capability",
+                "forecast",
+                "forecast_pregate",
+                "plan",
+                "pregate",
+                "quality",
+                "risk",
+                "route",
+                "task"
+              ],
+              "score": 12.243721,
+              "skill_id": "create-plan"
+            },
+            {
+              "overlap": [
+                "forecast_pregate",
+                "nexus"
+              ],
+              "score": 2.405465,
+              "skill_id": "github-idea-reality-check"
+            }
+          ],
+          "top": "create-plan"
+        },
+        {
+          "challenger_minus_current": -8.432791,
+          "challenger_score": 1.405465,
+          "current_score": 9.838256,
+          "query": "Choose the best skill for forecast pregate forecast pregate plan quality risk prediction; return selected, used, evidence, gate, and outcome details.",
+          "ranked": [
+            {
+              "overlap": [
+                "for",
+                "forecast",
+                "plan",
+                "pregate",
+                "quality",
+                "risk",
+                "the"
+              ],
+              "score": 9.838256,
+              "skill_id": "create-plan"
+            },
+            {
+              "overlap": [
+                "and"
+              ],
+              "score": 1.405465,
+              "skill_id": "github-idea-reality-check"
+            }
+          ],
+          "top": "create-plan"
+        },
+        {
+          "challenger_minus_current": -5.621861,
+          "challenger_score": 2.405465,
+          "current_score": 8.027326,
+          "query": "請用 forecast_pregate 能力處理，重點是 forecast pregate forecast pregate plan quality risk prediction，需要 runtime receipt 和 fail-closed gate。",
+          "ranked": [
+            {
+              "overlap": [
+                "forecast",
+                "forecast_pregate",
+                "plan",
+                "pregate",
+                "quality",
+                "risk"
+              ],
+              "score": 8.027326,
+              "skill_id": "create-plan"
+            },
+            {
+              "overlap": [
+                "forecast_pregate",
+                "runtime"
+              ],
+              "score": 2.405465,
+              "skill_id": "github-idea-reality-check"
+            }
+          ],
+          "top": "create-plan"
+        }
+      ]
+    },
+    {
+      "avg_challenger_margin": -10.775233,
+      "capability": "research",
+      "challenger_skill": "github-idea-reality-check",
+      "challenger_wins": 0,
+      "current_skill": "research-citation-chain-verifier",
+      "current_wins": 3,
+      "decision": "KEEP_CURRENT",
+      "rows": [
+        {
+          "challenger_minus_current": -12.649186,
+          "challenger_score": 2.0,
+          "current_score": 14.649186,
+          "query": "Nexus route capability research: handle a task requiring research research source citation claim source report with receipt-backed evidence.",
+          "ranked": [
+            {
+              "overlap": [
+                "backed",
+                "capability",
+                "citation",
+                "claim",
+                "evidence",
+                "nexus",
+                "receipt",
+                "research",
+                "route",
+                "source",
+                "task"
+              ],
+              "score": 14.649186,
+              "skill_id": "research-citation-chain-verifier"
+            },
+            {
+              "overlap": [
+                "nexus",
+                "research"
+              ],
+              "score": 2.0,
+              "skill_id": "github-idea-reality-check"
+            }
+          ],
+          "top": "research-citation-chain-verifier"
+        },
+        {
+          "challenger_minus_current": -12.649186,
+          "challenger_score": 2.0,
+          "current_score": 14.649186,
+          "query": "Choose the best skill for research research source citation claim source report; return selected, used, evidence, gate, and outcome details.",
+          "ranked": [
+            {
+              "overlap": [
+                "and",
+                "citation",
+                "claim",
+                "evidence",
+                "for",
+                "gate",
+                "outcome",
+                "research",
+                "return",
+                "source",
+                "the"
+              ],
+              "score": 14.649186,
+              "skill_id": "research-citation-chain-verifier"
+            },
+            {
+              "overlap": [
+                "and",
+                "research"
+              ],
+              "score": 2.0,
+              "skill_id": "github-idea-reality-check"
+            }
+          ],
+          "top": "research-citation-chain-verifier"
+        },
+        {
+          "challenger_minus_current": -7.027326,
+          "challenger_score": 2.0,
+          "current_score": 9.027326,
+          "query": "請用 research 能力處理，重點是 research research source citation claim source report，需要 runtime receipt 和 fail-closed gate。",
+          "ranked": [
+            {
+              "overlap": [
+                "citation",
+                "claim",
+                "gate",
+                "receipt",
+                "research",
+                "runtime",
+                "source"
+              ],
+              "score": 9.027326,
+              "skill_id": "research-citation-chain-verifier"
+            },
+            {
+              "overlap": [
+                "research",
+                "runtime"
+              ],
+              "score": 2.0,
+              "skill_id": "github-idea-reality-check"
+            }
+          ],
+          "top": "research-citation-chain-verifier"
+        }
+      ]
+    },
+    {
+      "avg_challenger_margin": -6.558837,
+      "capability": "research_control_plane",
+      "challenger_skill": "github-idea-reality-check",
+      "challenger_wins": 0,
+      "current_skill": "research-citation-chain-verifier",
+      "current_wins": 3,
+      "decision": "KEEP_CURRENT",
+      "rows": [
+        {
+          "challenger_minus_current": -8.432791,
+          "challenger_score": 3.0,
+          "current_score": 11.432791,
+          "query": "Nexus route capability research_control_plane: handle a task requiring research control plane research control plane ingest refresh converge questions with receipt-backed evidence.",
+          "ranked": [
+            {
+              "overlap": [
+                "backed",
+                "capability",
+                "evidence",
+                "nexus",
+                "receipt",
+                "research",
+                "research_control_plane",
+                "route",
+                "task"
+              ],
+              "score": 11.432791,
+              "skill_id": "research-citation-chain-verifier"
+            },
+            {
+              "overlap": [
+                "nexus",
+                "research",
+                "research_control_plane"
+              ],
+              "score": 3.0,
+              "skill_id": "github-idea-reality-check"
+            }
+          ],
+          "top": "research-citation-chain-verifier"
+        },
+        {
+          "challenger_minus_current": -8.432791,
+          "challenger_score": 2.0,
+          "current_score": 10.432791,
+          "query": "Choose the best skill for research control plane research control plane ingest refresh converge questions; return selected, used, evidence, gate, and outcome details.",
+          "ranked": [
+            {
+              "overlap": [
+                "and",
+                "evidence",
+                "for",
+                "gate",
+                "outcome",
+                "research",
+                "return",
+                "the"
+              ],
+              "score": 10.432791,
+              "skill_id": "research-citation-chain-verifier"
+            },
+            {
+              "overlap": [
+                "and",
+                "research"
+              ],
+              "score": 2.0,
+              "skill_id": "github-idea-reality-check"
+            }
+          ],
+          "top": "research-citation-chain-verifier"
+        },
+        {
+          "challenger_minus_current": -2.81093,
+          "challenger_score": 3.0,
+          "current_score": 5.81093,
+          "query": "請用 research_control_plane 能力處理，重點是 research control plane research control plane ingest refresh converge questions，需要 runtime receipt 和 fail-closed gate。",
+          "ranked": [
+            {
+              "overlap": [
+                "gate",
+                "receipt",
+                "research",
+                "research_control_plane",
+                "runtime"
+              ],
+              "score": 5.81093,
+              "skill_id": "research-citation-chain-verifier"
+            },
+            {
+              "overlap": [
+                "research",
+                "research_control_plane",
+                "runtime"
+              ],
+              "score": 3.0,
+              "skill_id": "github-idea-reality-check"
+            }
+          ],
+          "top": "research-citation-chain-verifier"
+        }
+      ]
+    },
+    {
+      "avg_challenger_margin": -5.621861,
+      "capability": "benchmark_meta_opt",
+      "challenger_skill": "github-idea-reality-check",
+      "challenger_wins": 0,
+      "current_skill": "nexus-benchmark-continuous-optimization",
+      "current_wins": 3,
+      "decision": "KEEP_CURRENT",
+      "rows": [
+        {
+          "challenger_minus_current": -4.216395,
+          "challenger_score": 2.405465,
+          "current_score": 6.62186,
+          "query": "Nexus route capability benchmark_meta_opt: handle a task requiring benchmark meta opt benchmark route cost meta optimization public claim boundary with receipt-backed evidence.",
+          "ranked": [
+            {
+              "overlap": [
+                "benchmark",
+                "claim",
+                "cost",
+                "nexus",
+                "public"
+              ],
+              "score": 6.62186,
+              "skill_id": "nexus-benchmark-continuous-optimization"
+            },
+            {
+              "overlap": [
+                "benchmark_meta_opt",
+                "nexus"
+              ],
+              "score": 2.405465,
+              "skill_id": "github-idea-reality-check"
+            }
+          ],
+          "top": "nexus-benchmark-continuous-optimization"
+        },
+        {
+          "challenger_minus_current": -8.432791,
+          "challenger_score": 1.0,
+          "current_score": 9.432791,
+          "query": "Choose the best skill for benchmark meta opt benchmark route cost meta optimization public claim boundary; return selected, used, evidence, gate, and outcome details.",
+          "ranked": [
+            {
+              "overlap": [
+                "and",
+                "benchmark",
+                "claim",
+                "cost",
+                "gate",
+                "public",
+                "the"
+              ],
+              "score": 9.432791,
+              "skill_id": "nexus-benchmark-continuous-optimization"
+            },
+            {
+              "overlap": [
+                "and"
+              ],
+              "score": 1.0,
+              "skill_id": "github-idea-reality-check"
+            }
+          ],
+          "top": "nexus-benchmark-continuous-optimization"
+        },
+        {
+          "challenger_minus_current": -4.216396,
+          "challenger_score": 2.81093,
+          "current_score": 7.027326,
+          "query": "請用 benchmark_meta_opt 能力處理，重點是 benchmark meta opt benchmark route cost meta optimization public claim boundary，需要 runtime receipt 和 fail-closed gate。",
+          "ranked": [
+            {
+              "overlap": [
+                "benchmark",
+                "claim",
+                "cost",
+                "gate",
+                "public"
+              ],
+              "score": 7.027326,
+              "skill_id": "nexus-benchmark-continuous-optimization"
+            },
+            {
+              "overlap": [
+                "benchmark_meta_opt",
+                "runtime"
+              ],
+              "score": 2.81093,
+              "skill_id": "github-idea-reality-check"
+            }
+          ],
+          "top": "nexus-benchmark-continuous-optimization"
+        }
+      ]
+    }
+  ],
+  "materialized": [
+    {
+      "path": "/Users/jameschen/Workspace/nexus/.agents/skills/github-challengers/github-karpathy-guidelines/SKILL.md",
+      "skill_id": "github-karpathy-guidelines"
+    },
+    {
+      "path": "/Users/jameschen/Workspace/nexus/.agents/skills/github-challengers/github-skills-security-check/SKILL.md",
+      "skill_id": "github-skills-security-check"
+    },
+    {
+      "path": "/Users/jameschen/Workspace/nexus/.agents/skills/github-challengers/github-auto-skill-safe-learning/SKILL.md",
+      "skill_id": "github-auto-skill-safe-learning"
+    },
+    {
+      "path": "/Users/jameschen/Workspace/nexus/.agents/skills/github-challengers/github-idea-reality-check/SKILL.md",
+      "skill_id": "github-idea-reality-check"
+    }
+  ],
+  "overlay_candidate_primary_skill_by_capability": {
+    "artifact_gate": "acceptance-evidence-failclosed",
+    "autonomic_router": "sf2-autonomic_router-route-fit-spec",
+    "autoreason": "sf2-belief-route-fit-spec",
+    "belief": "sf2-belief-route-fit-spec",
+    "benchmark_meta_opt": "nexus-benchmark-continuous-optimization",
+    "claim_gate": "nexus-benchmark-continuous-optimization",
+    "codeintel": "sf2-codeintel-route-fit-spec",
+    "ddtree": "nexus-root-cause-probe",
+    "direct_master_loop": "sf2-direct_master_loop-route-fit-spec",
+    "drone": "diagnose",
+    "external_productivity": "sf2-external_productivity-route-fit-spec",
+    "file_lock_security_gate": "sf2-file_lock_security_gate-route-fit-spec",
+    "forecast_pregate": "create-plan",
+    "governance_and_trust": "acceptance-evidence-failclosed",
+    "hyper_sprint": "sf2-hyper_sprint-route-fit-spec",
+    "lancedb": "research-source-validation-auditor",
+    "learn_ask": "nexus-capability-upgrade",
+    "learning_closure": "sf2-learning_closure-route-fit-spec",
+    "memory": "diagnose",
+    "mempalace": "sf2-mempalace-route-fit-spec",
+    "metabolism_resume": "nexus-goal-closure-executor",
+    "nightshift": "sf2-nightshift-route-fit-spec",
+    "policy_capability_gate": "nexus-root-cause-probe",
+    "registry_skills_sync": "sf2-registry_skills_sync-route-fit-spec",
+    "regression_guard": "diagnose",
+    "repair_loop": "tdd",
+    "research": "research-citation-chain-verifier",
+    "research_and_source_discipline": "research-citation-chain-verifier",
+    "research_control_plane": "research-citation-chain-verifier",
+    "sandbox_replay": "sf2-sandbox_replay-route-fit-spec",
+    "swarm_multi_agent": "sf2-swarm_multi_agent-route-fit-spec",
+    "ui_validator": "nexus-root-cause-probe",
+    "ultra_review": "acceptance-evidence-failclosed",
+    "xray": "diagnose"
+  },
+  "public_benchmark_allowed": false,
+  "replacement_candidates": {},
+  "repo_reports": [
+    {
+      "candidate_skill": "github-karpathy-guidelines",
+      "commit": "2c606141936f1eeef17fa3043a72095b4765b9c2",
+      "notes": "No install-time code in the skill; README contains curl install examples only.",
+      "repo": "andrej-karpathy-skills",
+      "safety": "PASS",
+      "source_skill": "/private/tmp/nexus_github_skill_challenge_20260519/andrej-karpathy-skills/skills/karpathy-guidelines/SKILL.md",
+      "target_capabilities": [
+        "repair_loop",
+        "direct_master_loop",
+        "codeintel"
+      ],
+      "url": "https://github.com/multica-ai/andrej-karpathy-skills"
+    },
+    {
+      "candidate_skill": "github-skills-security-check",
+      "commit": "35238a9b25ad47e570a9889edab29f717e5a83bc",
+      "notes": "Static scanner skill; script uses regex scanning and does not execute scanned skills.",
+      "repo": "Skills-Security-Check",
+      "safety": "PASS",
+      "source_skill": "/private/tmp/nexus_github_skill_challenge_20260519/Skills-Security-Check/SKILL.md",
+      "target_capabilities": [
+        "governance_and_trust",
+        "artifact_gate",
+        "ultra_review"
+      ],
+      "url": "https://github.com/Toolsai/Skills-Security-Check"
+    },
+    {
+      "candidate_skill": "github-auto-skill-safe-learning",
+      "commit": "636a2696f686e382877e941280723c9b5327a85c",
+      "generated_safe_candidate": "github-auto-skill-safe-learning",
+      "notes": "Original skill self-modifies global IDE rules and mandates itself for all tasks; use only a generated safe candidate.",
+      "original_rejected": true,
+      "repo": "auto-skill",
+      "safety": "REJECT_OR_REWRITE",
+      "source_skill": "/private/tmp/nexus_github_skill_challenge_20260519/auto-skill/SKILL.md",
+      "target_capabilities": [
+        "learning_closure",
+        "metabolism_resume",
+        "registry_skills_sync"
+      ],
+      "url": "https://github.com/Toolsai/auto-skill"
+    },
+    {
+      "candidate_skill": "github-idea-reality-check",
+      "commit": "6929fe531a28ca11957628f805beb07aeae9968b",
+      "notes": "Skill is useful for prior-art checks; MCP/API code uses optional tokens and external network, so keep as candidate-only unless runtime tool boundary is reviewed.",
+      "repo": "idea-reality-mcp",
+      "safety": "PASS_WITH_RUNTIME_BOUNDARY",
+      "source_skill": "/private/tmp/nexus_github_skill_challenge_20260519/idea-reality-mcp/skills/idea-check/SKILL.md",
+      "target_capabilities": [
+        "forecast_pregate",
+        "research",
+        "research_control_plane",
+        "benchmark_meta_opt"
+      ],
+      "url": "https://github.com/mnemox-ai/idea-reality-mcp"
+    }
+  ],
+  "runtime_update_allowed": false,
+  "schema": "nexus.github_skill_challenger_eval.v1",
+  "source_root": "/private/tmp/nexus_github_skill_challenge_20260519",
+  "status": "PASS",
+  "summary": {
+    "candidate_count": 4,
+    "comparison_count": 13,
+    "materialized_candidate_count": 4,
+    "replacement_candidate_count": 0,
+    "repo_count": 4
+  }
+}

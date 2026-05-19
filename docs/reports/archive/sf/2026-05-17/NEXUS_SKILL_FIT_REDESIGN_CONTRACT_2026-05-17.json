@@ -1,0 +1,37 @@
+{
+  "schema": "nexus.skill_fit_redesign_contract.v1",
+  "status": "PASS",
+  "runtime_update_allowed": false,
+  "flash100_allowed": false,
+  "summary": {
+    "capability_count": 2,
+    "blocked_capability_count": 2,
+    "positive_capability_count": 0
+  },
+  "capability_actions": [
+    {
+      "catalog": "governance",
+      "capability": "governance_and_trust",
+      "positive_count": 0,
+      "needs_more_data_count": 0,
+      "reject_count": 4,
+      "task_count": 5,
+      "recommended_action": "governance_taskset_expansion_required",
+      "flash_spend_allowed": false
+    },
+    {
+      "catalog": "research",
+      "capability": "research_and_source_discipline",
+      "positive_count": 0,
+      "needs_more_data_count": 0,
+      "reject_count": 4,
+      "task_count": 22,
+      "recommended_action": "research_candidate_v3_required",
+      "flash_spend_allowed": false
+    }
+  ],
+  "claim_boundary": [
+    "This contract redirects discovery; it does not lower promotion thresholds.",
+    "More Flash spend is blocked for capabilities without positive receipt-backed skill verdicts."
+  ]
+}

@@ -1,0 +1,32 @@
+{
+  "capability_skill_updates": [
+    {
+      "candidate_skill": "github4-sickn33-antigravity-awesome-skills-wiki-qa",
+      "capability": "codeintel",
+      "evidence_path": ".nexus/reports/sf_github_round4_live_2026-05-19/codeintel_sf-github-round4-smoke-codeintel-001_github4_wiki_qa_github4-sickn33-antigravity-awesome-skills-wiki-qa/evidence_bundle.json",
+      "primary_skill_after_update": "github-karpathy-guidelines",
+      "reason": "challenger_runtime_receipt_confirmed_but_not_cost_improved",
+      "receipt_path": ".nexus/reports/sf_github_round4_live_2026-05-19/codeintel_sf-github-round4-smoke-codeintel-001_github4_wiki_qa_github4-sickn33-antigravity-awesome-skills-wiki-qa",
+      "token_delta": 1243,
+      "verdict": "KEEP_CURRENT_SKILL",
+      "wall_delta_sec": -15.2211
+    },
+    {
+      "candidate_skill": "github4-sickn33-antigravity-awesome-skills-tdd-workflows-tdd-red",
+      "capability": "repair_loop",
+      "evidence_path": ".nexus/reports/sf_github_round4_live_2026-05-19/repair_loop_sf-github-round4-smoke-repair_loop-001_github4_tdd_red_github4-sickn33-antigravity-awesome-skills-tdd-workflows-tdd-red/evidence_bundle.json",
+      "primary_skill_after_update": "github4-sickn33-antigravity-awesome-skills-tdd-workflows-tdd-red",
+      "reason": "runtime_receipt_confirmed_and_cost_improved",
+      "receipt_path": ".nexus/reports/sf_github_round4_live_2026-05-19/repair_loop_sf-github-round4-smoke-repair_loop-001_github4_tdd_red_github4-sickn33-antigravity-awesome-skills-tdd-workflows-tdd-red",
+      "token_delta": -945,
+      "verdict": "APPROVE_RUNTIME_REPLACEMENT",
+      "wall_delta_sec": -7.0685
+    }
+  ],
+  "public_benchmark_allowed": false,
+  "runtime_default_written": false,
+  "schema": "nexus.sf_github_round4_catalog_update.v1",
+  "source_rollup": "docs/reports/NEXUS_SF_GITHUB_ROUND4_LIVE_ROLLUP_2026-05-19.json",
+  "status": "PASS",
+  "version": "2026-05-19"
+}

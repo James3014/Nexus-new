@@ -1,0 +1,143 @@
+{
+  "schema": "nexus.sf_github_round8_skill_status.v1",
+  "skills": [
+    {
+      "action": "runtime_reviewed_ablation_compare",
+      "capability_mount": "research",
+      "family": "research_control_plane",
+      "name": "github6-repo-scout-safe-research-control-plane",
+      "path": "/Users/jameschen/Workspace/nexus/.agents/skills/github6-repo-scout-safe-research-control-plane/SKILL.md",
+      "reason_codes": [
+        "current_best",
+        "runtime_reviewed_for_ablation"
+      ],
+      "root": "current_best",
+      "skill_status": "nexus_curated_candidate",
+      "source_repo": "nexus_repo",
+      "test_level": "sf_github_round8_flash_smoke"
+    },
+    {
+      "action": "runtime_reviewed_ablation_compare",
+      "capability_mount": "research",
+      "family": "research_control_plane",
+      "name": "github8-claude-osint-research-control-plane",
+      "path": "/Users/jameschen/Workspace/nexus/.agents/skills/github-round8-challengers/github8-claude-osint-research-control-plane/SKILL.md",
+      "reason_codes": [
+        "round8_generated_challenger",
+        "prompt_only_rewrite",
+        "runtime_reviewed_for_ablation"
+      ],
+      "root": "github_round8_runtime_reviewed",
+      "skill_status": "nexus_curated_candidate",
+      "source_commit": "ea42241d068e8112da0e4e28006207125c835c2e",
+      "source_repo": "elementalsouls/Claude-OSINT",
+      "source_skill": "skills/osint-methodology/SKILL.md",
+      "test_level": "sf_github_round8_flash_smoke"
+    },
+    {
+      "action": "runtime_reviewed_ablation_compare",
+      "capability_mount": "claim_gate",
+      "family": "claim_gate",
+      "name": "nexus-benchmark-continuous-optimization",
+      "path": "/Users/jameschen/Workspace/nexus/.agents/skills/nexus-benchmark-continuous-optimization/SKILL.md",
+      "reason_codes": [
+        "current_best",
+        "runtime_reviewed_for_ablation"
+      ],
+      "root": "current_best",
+      "skill_status": "nexus_curated_candidate",
+      "source_repo": "nexus_repo",
+      "test_level": "sf_github_round8_flash_smoke"
+    },
+    {
+      "action": "runtime_reviewed_ablation_compare",
+      "capability_mount": "claim_gate",
+      "family": "claim_gate",
+      "name": "github8-geo-optimizer-claim-gate",
+      "path": "/Users/jameschen/Workspace/nexus/.agents/skills/github-round8-challengers/github8-geo-optimizer-claim-gate/SKILL.md",
+      "reason_codes": [
+        "round8_generated_challenger",
+        "prompt_only_rewrite",
+        "runtime_reviewed_for_ablation"
+      ],
+      "root": "github_round8_runtime_reviewed",
+      "skill_status": "nexus_curated_candidate",
+      "source_commit": "650f3ed310489e8c8a255b2d7454f8935be503a4",
+      "source_repo": "Auriti-Labs/geo-optimizer-skill",
+      "source_skill": "SKILL.md",
+      "test_level": "sf_github_round8_flash_smoke"
+    },
+    {
+      "action": "runtime_reviewed_ablation_compare",
+      "capability_mount": "research",
+      "family": "research",
+      "name": "research-citation-chain-verifier",
+      "path": "/Users/jameschen/Workspace/nexus/.agents/skills/research-citation-chain-verifier/SKILL.md",
+      "reason_codes": [
+        "current_best",
+        "runtime_reviewed_for_ablation"
+      ],
+      "root": "current_best",
+      "skill_status": "nexus_curated_candidate",
+      "source_repo": "nexus_repo",
+      "test_level": "sf_github_round8_flash_smoke"
+    },
+    {
+      "action": "runtime_reviewed_ablation_compare",
+      "capability_mount": "research",
+      "family": "research",
+      "name": "github8-gbrain-academic-verify-research",
+      "path": "/Users/jameschen/Workspace/nexus/.agents/skills/github-round8-challengers/github8-gbrain-academic-verify-research/SKILL.md",
+      "reason_codes": [
+        "round8_generated_challenger",
+        "prompt_only_rewrite",
+        "runtime_reviewed_for_ablation"
+      ],
+      "root": "github_round8_runtime_reviewed",
+      "skill_status": "nexus_curated_candidate",
+      "source_commit": "1d5f69fe7afb26222e69674bed08d200a3f7f0a3",
+      "source_repo": "garrytan/gbrain",
+      "source_skill": "skills/academic-verify/SKILL.md",
+      "test_level": "sf_github_round8_flash_smoke"
+    },
+    {
+      "action": "runtime_reviewed_ablation_compare",
+      "capability_mount": "semantic_searcher",
+      "family": "learn_ask",
+      "name": "nexus-capability-upgrade",
+      "path": "/Users/jameschen/Workspace/nexus/.agents/skills/nexus-capability-upgrade/SKILL.md",
+      "reason_codes": [
+        "current_best",
+        "runtime_reviewed_for_ablation"
+      ],
+      "root": "current_best",
+      "skill_status": "nexus_curated_candidate",
+      "source_repo": "nexus_repo",
+      "test_level": "sf_github_round8_flash_smoke"
+    },
+    {
+      "action": "runtime_reviewed_ablation_compare",
+      "capability_mount": "semantic_searcher",
+      "family": "learn_ask",
+      "name": "github8-skilless-deep-research-learn-ask",
+      "path": "/Users/jameschen/Workspace/nexus/.agents/skills/github-round8-challengers/github8-skilless-deep-research-learn-ask/SKILL.md",
+      "reason_codes": [
+        "round8_generated_challenger",
+        "prompt_only_rewrite",
+        "runtime_reviewed_for_ablation"
+      ],
+      "root": "github_round8_runtime_reviewed",
+      "skill_status": "nexus_curated_candidate",
+      "source_commit": "5fe27b67631a76e27b61eb542b9e909cf4ca6e73",
+      "source_repo": "BrikerMan/skilless.ai",
+      "source_skill": "src/skilless.ai-research/SKILL.md",
+      "test_level": "sf_github_round8_flash_smoke"
+    }
+  ],
+  "status": "PASS",
+  "summary": {
+    "public_benchmark_allowed": false,
+    "runtime_update_allowed": false,
+    "skill_count": 8
+  }
+}

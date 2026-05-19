@@ -1,0 +1,70 @@
+{
+  "claim_boundary": [
+    "V27 is an SF catalog/overlay update only.",
+    "Runtime default apply requires separate apply gate.",
+    "Public benchmark is not unlocked by this internal SF live smoke."
+  ],
+  "hold_decisions": [
+    {
+      "capability": "research_control_plane",
+      "challenger_evidence_path": ".nexus/reports/sf_github_round8_live_2026-05-19/research_control_plane_sf-github-round8-smoke-research_control_plane-001_challenger_github8-claude-osint-research-control-plane/evidence_bundle.json",
+      "challenger_skill": "github8-claude-osint-research-control-plane",
+      "current_skill": "github6-repo-scout-safe-research-control-plane",
+      "decision": "hold_current_best",
+      "reason_codes": [
+        "challenger_token_not_lower"
+      ],
+      "token_delta": 2184,
+      "wall_delta_sec": -17.5351
+    },
+    {
+      "capability": "claim_gate",
+      "challenger_evidence_path": ".nexus/reports/sf_github_round8_live_2026-05-19/claim_gate_sf-github-round8-smoke-claim_gate-001_challenger_github8-geo-optimizer-claim-gate/evidence_bundle.json",
+      "challenger_skill": "github8-geo-optimizer-claim-gate",
+      "current_skill": "nexus-benchmark-continuous-optimization",
+      "decision": "hold_current_best",
+      "reason_codes": [
+        "challenger_token_not_lower"
+      ],
+      "token_delta": 734,
+      "wall_delta_sec": -5.297
+    }
+  ],
+  "replacement_decisions": [
+    {
+      "capability": "research",
+      "decision": "update_overlay_candidate_primary",
+      "evidence_path": ".nexus/reports/sf_github_round8_live_2026-05-19/research_sf-github-round8-smoke-research-001_challenger_github8-gbrain-academic-verify-research/evidence_bundle.json",
+      "from_skill": "research-citation-chain-verifier",
+      "receipt_path": "/Users/jameschen/Workspace/nexus/.nexus/reports/sf_github_round8_live_2026-05-19/research_sf-github-round8-smoke-research-001_challenger_github8-gbrain-academic-verify-research/evidence_1779172279/with_nexus__sf-github-round8-smoke-research-001__trial_1.row.json",
+      "runtime_default_written": false,
+      "to_skill": "github8-gbrain-academic-verify-research",
+      "token_delta": -609,
+      "wall_delta_sec": -6.3142
+    },
+    {
+      "capability": "learn_ask",
+      "decision": "update_overlay_candidate_primary",
+      "evidence_path": ".nexus/reports/sf_github_round8_live_2026-05-19/learn_ask_sf-github-round8-smoke-learn_ask-001_challenger_github8-skilless-deep-research-learn-ask/evidence_bundle.json",
+      "from_skill": "nexus-capability-upgrade",
+      "receipt_path": "/Users/jameschen/Workspace/nexus/.nexus/reports/sf_github_round8_live_2026-05-19/learn_ask_sf-github-round8-smoke-learn_ask-001_challenger_github8-skilless-deep-research-learn-ask/evidence_1779172478/with_nexus__sf-github-round8-smoke-learn_ask-001__trial_1.row.json",
+      "runtime_default_written": false,
+      "to_skill": "github8-skilless-deep-research-learn-ask",
+      "token_delta": -1087,
+      "wall_delta_sec": -9.4349
+    }
+  ],
+  "schema": "nexus.sf_skill_finalization.v27",
+  "source_overlay": "docs/reports/NEXUS_SF_RUNTIME_SKILL_POLICY_OVERLAY_V27_2026-05-19.json",
+  "source_rollup": "docs/reports/NEXUS_SF_GITHUB_ROUND8_LIVE_ROLLUP_2026-05-19.json",
+  "source_static_screen": "docs/reports/NEXUS_SF_GITHUB_ROUND8_STATIC_SCREEN_2026-05-19.json",
+  "status": "PASS",
+  "summary": {
+    "capability_count": 34,
+    "public_benchmark_allowed": false,
+    "round8_replacements": 2,
+    "runtime_default_written": false,
+    "runtime_update_allowed": false
+  },
+  "version": "2026-05-19"
+}

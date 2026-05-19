@@ -1,0 +1,21 @@
+{
+  "schema": "nexus.sf_final_closure.v15",
+  "status": "PASS",
+  "runtime_update_allowed": true,
+  "public_benchmark_allowed": false,
+  "runtime_overlay_policy_smoke_required": true,
+  "source_rollup": "/Users/jameschen/Workspace/nexus/docs/reports/NEXUS_SF_V15_HELD_CHALLENGER_ROLLUP_2026-05-19.json",
+  "source_apply_gate": "/Users/jameschen/Workspace/nexus/docs/reports/NEXUS_SF_RUNTIME_POLICY_APPLY_GATE_V15_2026-05-19.json",
+  "summary": {
+    "sf_closed": true,
+    "runtime_primary_capability_count": 32,
+    "new_v15_primary_additions": 4,
+    "residual_tradeoff_or_no_effective_capabilities": 3,
+    "public_benchmark_hold_reason": "SF internal runtime overlay updated; public benchmark still needs separate same-model paired claim gate"
+  },
+  "next_required": [
+    "run V15 overlay policy smoke",
+    "run focused tests",
+    "keep public benchmark blocked until explicit 7R gate"
+  ]
+}

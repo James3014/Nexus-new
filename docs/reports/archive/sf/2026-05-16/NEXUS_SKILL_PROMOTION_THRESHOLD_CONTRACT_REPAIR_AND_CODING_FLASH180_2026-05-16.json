@@ -1,0 +1,97 @@
+{
+  "schema": "nexus.skill_promotion_threshold_contract.v1",
+  "status": "RETURN",
+  "runtime_update_allowed": false,
+  "flash100_allowed": false,
+  "promotion_allowed": false,
+  "thresholds": {
+    "min_tested_rows_per_skill": 30,
+    "min_seal_runs_before_runtime": 2,
+    "default_min_effective_rate": 0.8,
+    "alternate_min_effective_rate": 0.6,
+    "min_task_buckets_for_alternate": 2,
+    "required_validation_lanes": [
+      "Flash50",
+      "Flash100"
+    ],
+    "requires_repeated_denominator": true,
+    "requires_trust_mismatch_zero": true,
+    "requires_evidence_and_receipt_refs": true
+  },
+  "summary": {
+    "skill_count": 4,
+    "promotion_ready_count": 0,
+    "needs_targeted_replay_count": 1,
+    "default_candidate_count": 0,
+    "alternate_candidate_count": 0,
+    "queue_count": 3,
+    "matrix_complete": false
+  },
+  "failures": [
+    "matrix_not_complete",
+    "repair_and_coding:tdd:insufficient_tested_rows"
+  ],
+  "capability_skill_thresholds": [
+    {
+      "capability": "repair_and_coding",
+      "skill_id": "systematic-debugging",
+      "verdict": "needs_more_data",
+      "tested_rows": 11,
+      "effective_rows": 1,
+      "effective_rate": 0.0909,
+      "task_bucket_count": 0,
+      "evidence_complete": true,
+      "observed_rows_ok": false,
+      "threshold_status": "queue_missing",
+      "threshold_recommendation": "needs_more_data",
+      "required_validation_lanes": []
+    },
+    {
+      "capability": "repair_and_coding",
+      "skill_id": "tdd",
+      "verdict": "keep",
+      "tested_rows": 11,
+      "effective_rows": 11,
+      "effective_rate": 1.0,
+      "task_bucket_count": 0,
+      "evidence_complete": true,
+      "observed_rows_ok": false,
+      "threshold_status": "reject",
+      "threshold_recommendation": "reject",
+      "required_validation_lanes": []
+    },
+    {
+      "capability": "repair_and_coding",
+      "skill_id": "test-driven-development",
+      "verdict": "needs_more_data",
+      "tested_rows": 11,
+      "effective_rows": 1,
+      "effective_rate": 0.0909,
+      "task_bucket_count": 0,
+      "evidence_complete": true,
+      "observed_rows_ok": false,
+      "threshold_status": "targeted_replay_required",
+      "threshold_recommendation": "needs_more_data",
+      "required_validation_lanes": []
+    },
+    {
+      "capability": "repair_and_coding",
+      "skill_id": "wondelai-clean-code",
+      "verdict": "needs_more_data",
+      "tested_rows": 11,
+      "effective_rows": 1,
+      "effective_rate": 0.0909,
+      "task_bucket_count": 0,
+      "evidence_complete": true,
+      "observed_rows_ok": false,
+      "threshold_status": "queue_missing",
+      "threshold_recommendation": "needs_more_data",
+      "required_validation_lanes": []
+    }
+  ],
+  "claim_boundary": [
+    "This contract freezes promotion thresholds; it does not update runtime policy.",
+    "A single diagnostic Flash180 run can schedule targeted replay but cannot by itself promote runtime defaults.",
+    "Flash100 is allowed only after at least one capability/skill pair has receipt-backed positive verdict evidence."
+  ]
+}

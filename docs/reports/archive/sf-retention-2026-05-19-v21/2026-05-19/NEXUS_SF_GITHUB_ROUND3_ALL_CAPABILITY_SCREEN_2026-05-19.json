@@ -1,0 +1,1375 @@
+{
+  "claim_boundary": [
+    "Static screen only; live replacement requires Flash+Nexus receipt-clean comparison."
+  ],
+  "comparisons": [
+    {
+      "candidate_minus_current": -4,
+      "candidate_score": 6,
+      "candidate_skill": "github3-openclaw-map-registry-sync",
+      "capability": "artifact_gate",
+      "current_score": 10,
+      "current_skill": "acceptance-evidence-failclosed",
+      "static_decision": "not_target_capability",
+      "target_capability": "registry_skills_sync"
+    },
+    {
+      "candidate_minus_current": -4,
+      "candidate_score": 6,
+      "candidate_skill": "github3-openai-skill-creator-safe-registry-sync",
+      "capability": "artifact_gate",
+      "current_score": 10,
+      "current_skill": "acceptance-evidence-failclosed",
+      "static_decision": "not_target_capability",
+      "target_capability": "registry_skills_sync"
+    },
+    {
+      "candidate_minus_current": -5,
+      "candidate_score": 5,
+      "candidate_skill": "github3-claude-security-scan-safe-ultra-review",
+      "capability": "artifact_gate",
+      "current_score": 10,
+      "current_skill": "acceptance-evidence-failclosed",
+      "static_decision": "not_target_capability",
+      "target_capability": "ultra_review"
+    },
+    {
+      "candidate_minus_current": -5,
+      "candidate_score": 5,
+      "candidate_skill": "github3-marketing-ab-testing-safe-benchmark",
+      "capability": "artifact_gate",
+      "current_score": 10,
+      "current_skill": "acceptance-evidence-failclosed",
+      "static_decision": "not_target_capability",
+      "target_capability": "benchmark_meta_opt"
+    },
+    {
+      "candidate_minus_current": -4,
+      "candidate_score": 6,
+      "candidate_skill": "github3-openclaw-map-registry-sync",
+      "capability": "autonomic_router",
+      "current_score": 10,
+      "current_skill": "sf2-autonomic_router-route-fit-spec",
+      "static_decision": "not_target_capability",
+      "target_capability": "registry_skills_sync"
+    },
+    {
+      "candidate_minus_current": -4,
+      "candidate_score": 6,
+      "candidate_skill": "github3-openai-skill-creator-safe-registry-sync",
+      "capability": "autonomic_router",
+      "current_score": 10,
+      "current_skill": "sf2-autonomic_router-route-fit-spec",
+      "static_decision": "not_target_capability",
+      "target_capability": "registry_skills_sync"
+    },
+    {
+      "candidate_minus_current": -5,
+      "candidate_score": 5,
+      "candidate_skill": "github3-claude-security-scan-safe-ultra-review",
+      "capability": "autonomic_router",
+      "current_score": 10,
+      "current_skill": "sf2-autonomic_router-route-fit-spec",
+      "static_decision": "not_target_capability",
+      "target_capability": "ultra_review"
+    },
+    {
+      "candidate_minus_current": -5,
+      "candidate_score": 5,
+      "candidate_skill": "github3-marketing-ab-testing-safe-benchmark",
+      "capability": "autonomic_router",
+      "current_score": 10,
+      "current_skill": "sf2-autonomic_router-route-fit-spec",
+      "static_decision": "not_target_capability",
+      "target_capability": "benchmark_meta_opt"
+    },
+    {
+      "candidate_minus_current": -3,
+      "candidate_score": 6,
+      "candidate_skill": "github3-openclaw-map-registry-sync",
+      "capability": "autoreason",
+      "current_score": 9,
+      "current_skill": "sf2-belief-route-fit-spec",
+      "static_decision": "not_target_capability",
+      "target_capability": "registry_skills_sync"
+    },
+    {
+      "candidate_minus_current": -3,
+      "candidate_score": 6,
+      "candidate_skill": "github3-openai-skill-creator-safe-registry-sync",
+      "capability": "autoreason",
+      "current_score": 9,
+      "current_skill": "sf2-belief-route-fit-spec",
+      "static_decision": "not_target_capability",
+      "target_capability": "registry_skills_sync"
+    },
+    {
+      "candidate_minus_current": -4,
+      "candidate_score": 5,
+      "candidate_skill": "github3-claude-security-scan-safe-ultra-review",
+      "capability": "autoreason",
+      "current_score": 9,
+      "current_skill": "sf2-belief-route-fit-spec",
+      "static_decision": "not_target_capability",
+      "target_capability": "ultra_review"
+    },
+    {
+      "candidate_minus_current": -4,
+      "candidate_score": 5,
+      "candidate_skill": "github3-marketing-ab-testing-safe-benchmark",
+      "capability": "autoreason",
+      "current_score": 9,
+      "current_skill": "sf2-belief-route-fit-spec",
+      "static_decision": "not_target_capability",
+      "target_capability": "benchmark_meta_opt"
+    },
+    {
+      "candidate_minus_current": -3,
+      "candidate_score": 6,
+      "candidate_skill": "github3-openclaw-map-registry-sync",
+      "capability": "belief",
+      "current_score": 9,
+      "current_skill": "sf2-belief-route-fit-spec",
+      "static_decision": "not_target_capability",
+      "target_capability": "registry_skills_sync"
+    },
+    {
+      "candidate_minus_current": -3,
+      "candidate_score": 6,
+      "candidate_skill": "github3-openai-skill-creator-safe-registry-sync",
+      "capability": "belief",
+      "current_score": 9,
+      "current_skill": "sf2-belief-route-fit-spec",
+      "static_decision": "not_target_capability",
+      "target_capability": "registry_skills_sync"
+    },
+    {
+      "candidate_minus_current": -4,
+      "candidate_score": 5,
+      "candidate_skill": "github3-claude-security-scan-safe-ultra-review",
+      "capability": "belief",
+      "current_score": 9,
+      "current_skill": "sf2-belief-route-fit-spec",
+      "static_decision": "not_target_capability",
+      "target_capability": "ultra_review"
+    },
+    {
+      "candidate_minus_current": -4,
+      "candidate_score": 5,
+      "candidate_skill": "github3-marketing-ab-testing-safe-benchmark",
+      "capability": "belief",
+      "current_score": 9,
+      "current_skill": "sf2-belief-route-fit-spec",
+      "static_decision": "not_target_capability",
+      "target_capability": "benchmark_meta_opt"
+    },
+    {
+      "candidate_minus_current": 3,
+      "candidate_score": 6,
+      "candidate_skill": "github3-openclaw-map-registry-sync",
+      "capability": "benchmark_meta_opt",
+      "current_score": 3,
+      "current_skill": "nexus-benchmark-continuous-optimization",
+      "static_decision": "not_target_capability",
+      "target_capability": "registry_skills_sync"
+    },
+    {
+      "candidate_minus_current": 3,
+      "candidate_score": 6,
+      "candidate_skill": "github3-openai-skill-creator-safe-registry-sync",
+      "capability": "benchmark_meta_opt",
+      "current_score": 3,
+      "current_skill": "nexus-benchmark-continuous-optimization",
+      "static_decision": "not_target_capability",
+      "target_capability": "registry_skills_sync"
+    },
+    {
+      "candidate_minus_current": 2,
+      "candidate_score": 5,
+      "candidate_skill": "github3-claude-security-scan-safe-ultra-review",
+      "capability": "benchmark_meta_opt",
+      "current_score": 3,
+      "current_skill": "nexus-benchmark-continuous-optimization",
+      "static_decision": "not_target_capability",
+      "target_capability": "ultra_review"
+    },
+    {
+      "candidate_minus_current": 4,
+      "candidate_score": 7,
+      "candidate_skill": "github3-marketing-ab-testing-safe-benchmark",
+      "capability": "benchmark_meta_opt",
+      "current_score": 3,
+      "current_skill": "nexus-benchmark-continuous-optimization",
+      "static_decision": "candidate_target_match",
+      "target_capability": "benchmark_meta_opt"
+    },
+    {
+      "candidate_minus_current": 3,
+      "candidate_score": 6,
+      "candidate_skill": "github3-openclaw-map-registry-sync",
+      "capability": "claim_gate",
+      "current_score": 3,
+      "current_skill": "nexus-benchmark-continuous-optimization",
+      "static_decision": "not_target_capability",
+      "target_capability": "registry_skills_sync"
+    },
+    {
+      "candidate_minus_current": 3,
+      "candidate_score": 6,
+      "candidate_skill": "github3-openai-skill-creator-safe-registry-sync",
+      "capability": "claim_gate",
+      "current_score": 3,
+      "current_skill": "nexus-benchmark-continuous-optimization",
+      "static_decision": "not_target_capability",
+      "target_capability": "registry_skills_sync"
+    },
+    {
+      "candidate_minus_current": 2,
+      "candidate_score": 5,
+      "candidate_skill": "github3-claude-security-scan-safe-ultra-review",
+      "capability": "claim_gate",
+      "current_score": 3,
+      "current_skill": "nexus-benchmark-continuous-optimization",
+      "static_decision": "not_target_capability",
+      "target_capability": "ultra_review"
+    },
+    {
+      "candidate_minus_current": 3,
+      "candidate_score": 6,
+      "candidate_skill": "github3-marketing-ab-testing-safe-benchmark",
+      "capability": "claim_gate",
+      "current_score": 3,
+      "current_skill": "nexus-benchmark-continuous-optimization",
+      "static_decision": "not_target_capability",
+      "target_capability": "benchmark_meta_opt"
+    },
+    {
+      "candidate_minus_current": 6,
+      "candidate_score": 6,
+      "candidate_skill": "github3-openclaw-map-registry-sync",
+      "capability": "codeintel",
+      "current_score": 0,
+      "current_skill": "github-karpathy-guidelines",
+      "static_decision": "not_target_capability",
+      "target_capability": "registry_skills_sync"
+    },
+    {
+      "candidate_minus_current": 6,
+      "candidate_score": 6,
+      "candidate_skill": "github3-openai-skill-creator-safe-registry-sync",
+      "capability": "codeintel",
+      "current_score": 0,
+      "current_skill": "github-karpathy-guidelines",
+      "static_decision": "not_target_capability",
+      "target_capability": "registry_skills_sync"
+    },
+    {
+      "candidate_minus_current": 5,
+      "candidate_score": 5,
+      "candidate_skill": "github3-claude-security-scan-safe-ultra-review",
+      "capability": "codeintel",
+      "current_score": 0,
+      "current_skill": "github-karpathy-guidelines",
+      "static_decision": "not_target_capability",
+      "target_capability": "ultra_review"
+    },
+    {
+      "candidate_minus_current": 5,
+      "candidate_score": 5,
+      "candidate_skill": "github3-marketing-ab-testing-safe-benchmark",
+      "capability": "codeintel",
+      "current_score": 0,
+      "current_skill": "github-karpathy-guidelines",
+      "static_decision": "not_target_capability",
+      "target_capability": "benchmark_meta_opt"
+    },
+    {
+      "candidate_minus_current": -3,
+      "candidate_score": 6,
+      "candidate_skill": "github3-openclaw-map-registry-sync",
+      "capability": "ddtree",
+      "current_score": 9,
+      "current_skill": "nexus-root-cause-probe",
+      "static_decision": "not_target_capability",
+      "target_capability": "registry_skills_sync"
+    },
+    {
+      "candidate_minus_current": -3,
+      "candidate_score": 6,
+      "candidate_skill": "github3-openai-skill-creator-safe-registry-sync",
+      "capability": "ddtree",
+      "current_score": 9,
+      "current_skill": "nexus-root-cause-probe",
+      "static_decision": "not_target_capability",
+      "target_capability": "registry_skills_sync"
+    },
+    {
+      "candidate_minus_current": -4,
+      "candidate_score": 5,
+      "candidate_skill": "github3-claude-security-scan-safe-ultra-review",
+      "capability": "ddtree",
+      "current_score": 9,
+      "current_skill": "nexus-root-cause-probe",
+      "static_decision": "not_target_capability",
+      "target_capability": "ultra_review"
+    },
+    {
+      "candidate_minus_current": -4,
+      "candidate_score": 5,
+      "candidate_skill": "github3-marketing-ab-testing-safe-benchmark",
+      "capability": "ddtree",
+      "current_score": 9,
+      "current_skill": "nexus-root-cause-probe",
+      "static_decision": "not_target_capability",
+      "target_capability": "benchmark_meta_opt"
+    },
+    {
+      "candidate_minus_current": -6,
+      "candidate_score": 6,
+      "candidate_skill": "github3-openclaw-map-registry-sync",
+      "capability": "direct_master_loop",
+      "current_score": 12,
+      "current_skill": "sf2-direct_master_loop-route-fit-spec",
+      "static_decision": "not_target_capability",
+      "target_capability": "registry_skills_sync"
+    },
+    {
+      "candidate_minus_current": -6,
+      "candidate_score": 6,
+      "candidate_skill": "github3-openai-skill-creator-safe-registry-sync",
+      "capability": "direct_master_loop",
+      "current_score": 12,
+      "current_skill": "sf2-direct_master_loop-route-fit-spec",
+      "static_decision": "not_target_capability",
+      "target_capability": "registry_skills_sync"
+    },
+    {
+      "candidate_minus_current": -7,
+      "candidate_score": 5,
+      "candidate_skill": "github3-claude-security-scan-safe-ultra-review",
+      "capability": "direct_master_loop",
+      "current_score": 12,
+      "current_skill": "sf2-direct_master_loop-route-fit-spec",
+      "static_decision": "not_target_capability",
+      "target_capability": "ultra_review"
+    },
+    {
+      "candidate_minus_current": -7,
+      "candidate_score": 5,
+      "candidate_skill": "github3-marketing-ab-testing-safe-benchmark",
+      "capability": "direct_master_loop",
+      "current_score": 12,
+      "current_skill": "sf2-direct_master_loop-route-fit-spec",
+      "static_decision": "not_target_capability",
+      "target_capability": "benchmark_meta_opt"
+    },
+    {
+      "candidate_minus_current": -3,
+      "candidate_score": 6,
+      "candidate_skill": "github3-openclaw-map-registry-sync",
+      "capability": "drone",
+      "current_score": 9,
+      "current_skill": "diagnose",
+      "static_decision": "not_target_capability",
+      "target_capability": "registry_skills_sync"
+    },
+    {
+      "candidate_minus_current": -3,
+      "candidate_score": 6,
+      "candidate_skill": "github3-openai-skill-creator-safe-registry-sync",
+      "capability": "drone",
+      "current_score": 9,
+      "current_skill": "diagnose",
+      "static_decision": "not_target_capability",
+      "target_capability": "registry_skills_sync"
+    },
+    {
+      "candidate_minus_current": -4,
+      "candidate_score": 5,
+      "candidate_skill": "github3-claude-security-scan-safe-ultra-review",
+      "capability": "drone",
+      "current_score": 9,
+      "current_skill": "diagnose",
+      "static_decision": "not_target_capability",
+      "target_capability": "ultra_review"
+    },
+    {
+      "candidate_minus_current": -4,
+      "candidate_score": 5,
+      "candidate_skill": "github3-marketing-ab-testing-safe-benchmark",
+      "capability": "drone",
+      "current_score": 9,
+      "current_skill": "diagnose",
+      "static_decision": "not_target_capability",
+      "target_capability": "benchmark_meta_opt"
+    },
+    {
+      "candidate_minus_current": -4,
+      "candidate_score": 7,
+      "candidate_skill": "github3-openclaw-map-registry-sync",
+      "capability": "external_productivity",
+      "current_score": 11,
+      "current_skill": "sf2-external_productivity-route-fit-spec",
+      "static_decision": "not_target_capability",
+      "target_capability": "registry_skills_sync"
+    },
+    {
+      "candidate_minus_current": -5,
+      "candidate_score": 6,
+      "candidate_skill": "github3-openai-skill-creator-safe-registry-sync",
+      "capability": "external_productivity",
+      "current_score": 11,
+      "current_skill": "sf2-external_productivity-route-fit-spec",
+      "static_decision": "not_target_capability",
+      "target_capability": "registry_skills_sync"
+    },
+    {
+      "candidate_minus_current": -6,
+      "candidate_score": 5,
+      "candidate_skill": "github3-claude-security-scan-safe-ultra-review",
+      "capability": "external_productivity",
+      "current_score": 11,
+      "current_skill": "sf2-external_productivity-route-fit-spec",
+      "static_decision": "not_target_capability",
+      "target_capability": "ultra_review"
+    },
+    {
+      "candidate_minus_current": -5,
+      "candidate_score": 6,
+      "candidate_skill": "github3-marketing-ab-testing-safe-benchmark",
+      "capability": "external_productivity",
+      "current_score": 11,
+      "current_skill": "sf2-external_productivity-route-fit-spec",
+      "static_decision": "not_target_capability",
+      "target_capability": "benchmark_meta_opt"
+    },
+    {
+      "candidate_minus_current": -6,
+      "candidate_score": 6,
+      "candidate_skill": "github3-openclaw-map-registry-sync",
+      "capability": "file_lock_security_gate",
+      "current_score": 12,
+      "current_skill": "sf2-file_lock_security_gate-route-fit-spec",
+      "static_decision": "not_target_capability",
+      "target_capability": "registry_skills_sync"
+    },
+    {
+      "candidate_minus_current": -6,
+      "candidate_score": 6,
+      "candidate_skill": "github3-openai-skill-creator-safe-registry-sync",
+      "capability": "file_lock_security_gate",
+      "current_score": 12,
+      "current_skill": "sf2-file_lock_security_gate-route-fit-spec",
+      "static_decision": "not_target_capability",
+      "target_capability": "registry_skills_sync"
+    },
+    {
+      "candidate_minus_current": -6,
+      "candidate_score": 6,
+      "candidate_skill": "github3-claude-security-scan-safe-ultra-review",
+      "capability": "file_lock_security_gate",
+      "current_score": 12,
+      "current_skill": "sf2-file_lock_security_gate-route-fit-spec",
+      "static_decision": "not_target_capability",
+      "target_capability": "ultra_review"
+    },
+    {
+      "candidate_minus_current": -7,
+      "candidate_score": 5,
+      "candidate_skill": "github3-marketing-ab-testing-safe-benchmark",
+      "capability": "file_lock_security_gate",
+      "current_score": 12,
+      "current_skill": "sf2-file_lock_security_gate-route-fit-spec",
+      "static_decision": "not_target_capability",
+      "target_capability": "benchmark_meta_opt"
+    },
+    {
+      "candidate_minus_current": 0,
+      "candidate_score": 6,
+      "candidate_skill": "github3-openclaw-map-registry-sync",
+      "capability": "forecast_pregate",
+      "current_score": 6,
+      "current_skill": "create-plan",
+      "static_decision": "not_target_capability",
+      "target_capability": "registry_skills_sync"
+    },
+    {
+      "candidate_minus_current": 0,
+      "candidate_score": 6,
+      "candidate_skill": "github3-openai-skill-creator-safe-registry-sync",
+      "capability": "forecast_pregate",
+      "current_score": 6,
+      "current_skill": "create-plan",
+      "static_decision": "not_target_capability",
+      "target_capability": "registry_skills_sync"
+    },
+    {
+      "candidate_minus_current": -1,
+      "candidate_score": 5,
+      "candidate_skill": "github3-claude-security-scan-safe-ultra-review",
+      "capability": "forecast_pregate",
+      "current_score": 6,
+      "current_skill": "create-plan",
+      "static_decision": "not_target_capability",
+      "target_capability": "ultra_review"
+    },
+    {
+      "candidate_minus_current": -1,
+      "candidate_score": 5,
+      "candidate_skill": "github3-marketing-ab-testing-safe-benchmark",
+      "capability": "forecast_pregate",
+      "current_score": 6,
+      "current_skill": "create-plan",
+      "static_decision": "not_target_capability",
+      "target_capability": "benchmark_meta_opt"
+    },
+    {
+      "candidate_minus_current": -5,
+      "candidate_score": 6,
+      "candidate_skill": "github3-openclaw-map-registry-sync",
+      "capability": "governance_and_trust",
+      "current_score": 11,
+      "current_skill": "acceptance-evidence-failclosed",
+      "static_decision": "not_target_capability",
+      "target_capability": "registry_skills_sync"
+    },
+    {
+      "candidate_minus_current": -4,
+      "candidate_score": 7,
+      "candidate_skill": "github3-openai-skill-creator-safe-registry-sync",
+      "capability": "governance_and_trust",
+      "current_score": 11,
+      "current_skill": "acceptance-evidence-failclosed",
+      "static_decision": "not_target_capability",
+      "target_capability": "registry_skills_sync"
+    },
+    {
+      "candidate_minus_current": -5,
+      "candidate_score": 6,
+      "candidate_skill": "github3-claude-security-scan-safe-ultra-review",
+      "capability": "governance_and_trust",
+      "current_score": 11,
+      "current_skill": "acceptance-evidence-failclosed",
+      "static_decision": "not_target_capability",
+      "target_capability": "ultra_review"
+    },
+    {
+      "candidate_minus_current": -6,
+      "candidate_score": 5,
+      "candidate_skill": "github3-marketing-ab-testing-safe-benchmark",
+      "capability": "governance_and_trust",
+      "current_score": 11,
+      "current_skill": "acceptance-evidence-failclosed",
+      "static_decision": "not_target_capability",
+      "target_capability": "benchmark_meta_opt"
+    },
+    {
+      "candidate_minus_current": -5,
+      "candidate_score": 6,
+      "candidate_skill": "github3-openclaw-map-registry-sync",
+      "capability": "hyper_sprint",
+      "current_score": 11,
+      "current_skill": "sf2-hyper_sprint-route-fit-spec",
+      "static_decision": "not_target_capability",
+      "target_capability": "registry_skills_sync"
+    },
+    {
+      "candidate_minus_current": -5,
+      "candidate_score": 6,
+      "candidate_skill": "github3-openai-skill-creator-safe-registry-sync",
+      "capability": "hyper_sprint",
+      "current_score": 11,
+      "current_skill": "sf2-hyper_sprint-route-fit-spec",
+      "static_decision": "not_target_capability",
+      "target_capability": "registry_skills_sync"
+    },
+    {
+      "candidate_minus_current": -6,
+      "candidate_score": 5,
+      "candidate_skill": "github3-claude-security-scan-safe-ultra-review",
+      "capability": "hyper_sprint",
+      "current_score": 11,
+      "current_skill": "sf2-hyper_sprint-route-fit-spec",
+      "static_decision": "not_target_capability",
+      "target_capability": "ultra_review"
+    },
+    {
+      "candidate_minus_current": -6,
+      "candidate_score": 5,
+      "candidate_skill": "github3-marketing-ab-testing-safe-benchmark",
+      "capability": "hyper_sprint",
+      "current_score": 11,
+      "current_skill": "sf2-hyper_sprint-route-fit-spec",
+      "static_decision": "not_target_capability",
+      "target_capability": "benchmark_meta_opt"
+    },
+    {
+      "candidate_minus_current": -3,
+      "candidate_score": 6,
+      "candidate_skill": "github3-openclaw-map-registry-sync",
+      "capability": "lancedb",
+      "current_score": 9,
+      "current_skill": "research-source-validation-auditor",
+      "static_decision": "not_target_capability",
+      "target_capability": "registry_skills_sync"
+    },
+    {
+      "candidate_minus_current": -3,
+      "candidate_score": 6,
+      "candidate_skill": "github3-openai-skill-creator-safe-registry-sync",
+      "capability": "lancedb",
+      "current_score": 9,
+      "current_skill": "research-source-validation-auditor",
+      "static_decision": "not_target_capability",
+      "target_capability": "registry_skills_sync"
+    },
+    {
+      "candidate_minus_current": -4,
+      "candidate_score": 5,
+      "candidate_skill": "github3-claude-security-scan-safe-ultra-review",
+      "capability": "lancedb",
+      "current_score": 9,
+      "current_skill": "research-source-validation-auditor",
+      "static_decision": "not_target_capability",
+      "target_capability": "ultra_review"
+    },
+    {
+      "candidate_minus_current": -4,
+      "candidate_score": 5,
+      "candidate_skill": "github3-marketing-ab-testing-safe-benchmark",
+      "capability": "lancedb",
+      "current_score": 9,
+      "current_skill": "research-source-validation-auditor",
+      "static_decision": "not_target_capability",
+      "target_capability": "benchmark_meta_opt"
+    },
+    {
+      "candidate_minus_current": -5,
+      "candidate_score": 6,
+      "candidate_skill": "github3-openclaw-map-registry-sync",
+      "capability": "learn_ask",
+      "current_score": 11,
+      "current_skill": "nexus-capability-upgrade",
+      "static_decision": "not_target_capability",
+      "target_capability": "registry_skills_sync"
+    },
+    {
+      "candidate_minus_current": -5,
+      "candidate_score": 6,
+      "candidate_skill": "github3-openai-skill-creator-safe-registry-sync",
+      "capability": "learn_ask",
+      "current_score": 11,
+      "current_skill": "nexus-capability-upgrade",
+      "static_decision": "not_target_capability",
+      "target_capability": "registry_skills_sync"
+    },
+    {
+      "candidate_minus_current": -6,
+      "candidate_score": 5,
+      "candidate_skill": "github3-claude-security-scan-safe-ultra-review",
+      "capability": "learn_ask",
+      "current_score": 11,
+      "current_skill": "nexus-capability-upgrade",
+      "static_decision": "not_target_capability",
+      "target_capability": "ultra_review"
+    },
+    {
+      "candidate_minus_current": -6,
+      "candidate_score": 5,
+      "candidate_skill": "github3-marketing-ab-testing-safe-benchmark",
+      "capability": "learn_ask",
+      "current_score": 11,
+      "current_skill": "nexus-capability-upgrade",
+      "static_decision": "not_target_capability",
+      "target_capability": "benchmark_meta_opt"
+    },
+    {
+      "candidate_minus_current": -5,
+      "candidate_score": 6,
+      "candidate_skill": "github3-openclaw-map-registry-sync",
+      "capability": "learning_closure",
+      "current_score": 11,
+      "current_skill": "sf2-learning_closure-route-fit-spec",
+      "static_decision": "not_target_capability",
+      "target_capability": "registry_skills_sync"
+    },
+    {
+      "candidate_minus_current": -5,
+      "candidate_score": 6,
+      "candidate_skill": "github3-openai-skill-creator-safe-registry-sync",
+      "capability": "learning_closure",
+      "current_score": 11,
+      "current_skill": "sf2-learning_closure-route-fit-spec",
+      "static_decision": "not_target_capability",
+      "target_capability": "registry_skills_sync"
+    },
+    {
+      "candidate_minus_current": -6,
+      "candidate_score": 5,
+      "candidate_skill": "github3-claude-security-scan-safe-ultra-review",
+      "capability": "learning_closure",
+      "current_score": 11,
+      "current_skill": "sf2-learning_closure-route-fit-spec",
+      "static_decision": "not_target_capability",
+      "target_capability": "ultra_review"
+    },
+    {
+      "candidate_minus_current": -6,
+      "candidate_score": 5,
+      "candidate_skill": "github3-marketing-ab-testing-safe-benchmark",
+      "capability": "learning_closure",
+      "current_score": 11,
+      "current_skill": "sf2-learning_closure-route-fit-spec",
+      "static_decision": "not_target_capability",
+      "target_capability": "benchmark_meta_opt"
+    },
+    {
+      "candidate_minus_current": -3,
+      "candidate_score": 6,
+      "candidate_skill": "github3-openclaw-map-registry-sync",
+      "capability": "memory",
+      "current_score": 9,
+      "current_skill": "diagnose",
+      "static_decision": "not_target_capability",
+      "target_capability": "registry_skills_sync"
+    },
+    {
+      "candidate_minus_current": -3,
+      "candidate_score": 6,
+      "candidate_skill": "github3-openai-skill-creator-safe-registry-sync",
+      "capability": "memory",
+      "current_score": 9,
+      "current_skill": "diagnose",
+      "static_decision": "not_target_capability",
+      "target_capability": "registry_skills_sync"
+    },
+    {
+      "candidate_minus_current": -4,
+      "candidate_score": 5,
+      "candidate_skill": "github3-claude-security-scan-safe-ultra-review",
+      "capability": "memory",
+      "current_score": 9,
+      "current_skill": "diagnose",
+      "static_decision": "not_target_capability",
+      "target_capability": "ultra_review"
+    },
+    {
+      "candidate_minus_current": -4,
+      "candidate_score": 5,
+      "candidate_skill": "github3-marketing-ab-testing-safe-benchmark",
+      "capability": "memory",
+      "current_score": 9,
+      "current_skill": "diagnose",
+      "static_decision": "not_target_capability",
+      "target_capability": "benchmark_meta_opt"
+    },
+    {
+      "candidate_minus_current": -3,
+      "candidate_score": 6,
+      "candidate_skill": "github3-openclaw-map-registry-sync",
+      "capability": "mempalace",
+      "current_score": 9,
+      "current_skill": "sf2-mempalace-route-fit-spec",
+      "static_decision": "not_target_capability",
+      "target_capability": "registry_skills_sync"
+    },
+    {
+      "candidate_minus_current": -3,
+      "candidate_score": 6,
+      "candidate_skill": "github3-openai-skill-creator-safe-registry-sync",
+      "capability": "mempalace",
+      "current_score": 9,
+      "current_skill": "sf2-mempalace-route-fit-spec",
+      "static_decision": "not_target_capability",
+      "target_capability": "registry_skills_sync"
+    },
+    {
+      "candidate_minus_current": -4,
+      "candidate_score": 5,
+      "candidate_skill": "github3-claude-security-scan-safe-ultra-review",
+      "capability": "mempalace",
+      "current_score": 9,
+      "current_skill": "sf2-mempalace-route-fit-spec",
+      "static_decision": "not_target_capability",
+      "target_capability": "ultra_review"
+    },
+    {
+      "candidate_minus_current": -4,
+      "candidate_score": 5,
+      "candidate_skill": "github3-marketing-ab-testing-safe-benchmark",
+      "capability": "mempalace",
+      "current_score": 9,
+      "current_skill": "sf2-mempalace-route-fit-spec",
+      "static_decision": "not_target_capability",
+      "target_capability": "benchmark_meta_opt"
+    },
+    {
+      "candidate_minus_current": 6,
+      "candidate_score": 6,
+      "candidate_skill": "github3-openclaw-map-registry-sync",
+      "capability": "metabolism_resume",
+      "current_score": 0,
+      "current_skill": "github-auto-skill-safe-learning",
+      "static_decision": "not_target_capability",
+      "target_capability": "registry_skills_sync"
+    },
+    {
+      "candidate_minus_current": 6,
+      "candidate_score": 6,
+      "candidate_skill": "github3-openai-skill-creator-safe-registry-sync",
+      "capability": "metabolism_resume",
+      "current_score": 0,
+      "current_skill": "github-auto-skill-safe-learning",
+      "static_decision": "not_target_capability",
+      "target_capability": "registry_skills_sync"
+    },
+    {
+      "candidate_minus_current": 5,
+      "candidate_score": 5,
+      "candidate_skill": "github3-claude-security-scan-safe-ultra-review",
+      "capability": "metabolism_resume",
+      "current_score": 0,
+      "current_skill": "github-auto-skill-safe-learning",
+      "static_decision": "not_target_capability",
+      "target_capability": "ultra_review"
+    },
+    {
+      "candidate_minus_current": 5,
+      "candidate_score": 5,
+      "candidate_skill": "github3-marketing-ab-testing-safe-benchmark",
+      "capability": "metabolism_resume",
+      "current_score": 0,
+      "current_skill": "github-auto-skill-safe-learning",
+      "static_decision": "not_target_capability",
+      "target_capability": "benchmark_meta_opt"
+    },
+    {
+      "candidate_minus_current": -3,
+      "candidate_score": 6,
+      "candidate_skill": "github3-openclaw-map-registry-sync",
+      "capability": "nightshift",
+      "current_score": 9,
+      "current_skill": "sf2-nightshift-route-fit-spec",
+      "static_decision": "not_target_capability",
+      "target_capability": "registry_skills_sync"
+    },
+    {
+      "candidate_minus_current": -3,
+      "candidate_score": 6,
+      "candidate_skill": "github3-openai-skill-creator-safe-registry-sync",
+      "capability": "nightshift",
+      "current_score": 9,
+      "current_skill": "sf2-nightshift-route-fit-spec",
+      "static_decision": "not_target_capability",
+      "target_capability": "registry_skills_sync"
+    },
+    {
+      "candidate_minus_current": -4,
+      "candidate_score": 5,
+      "candidate_skill": "github3-claude-security-scan-safe-ultra-review",
+      "capability": "nightshift",
+      "current_score": 9,
+      "current_skill": "sf2-nightshift-route-fit-spec",
+      "static_decision": "not_target_capability",
+      "target_capability": "ultra_review"
+    },
+    {
+      "candidate_minus_current": -4,
+      "candidate_score": 5,
+      "candidate_skill": "github3-marketing-ab-testing-safe-benchmark",
+      "capability": "nightshift",
+      "current_score": 9,
+      "current_skill": "sf2-nightshift-route-fit-spec",
+      "static_decision": "not_target_capability",
+      "target_capability": "benchmark_meta_opt"
+    },
+    {
+      "candidate_minus_current": -4,
+      "candidate_score": 6,
+      "candidate_skill": "github3-openclaw-map-registry-sync",
+      "capability": "policy_capability_gate",
+      "current_score": 10,
+      "current_skill": "nexus-root-cause-probe",
+      "static_decision": "not_target_capability",
+      "target_capability": "registry_skills_sync"
+    },
+    {
+      "candidate_minus_current": -4,
+      "candidate_score": 6,
+      "candidate_skill": "github3-openai-skill-creator-safe-registry-sync",
+      "capability": "policy_capability_gate",
+      "current_score": 10,
+      "current_skill": "nexus-root-cause-probe",
+      "static_decision": "not_target_capability",
+      "target_capability": "registry_skills_sync"
+    },
+    {
+      "candidate_minus_current": -5,
+      "candidate_score": 5,
+      "candidate_skill": "github3-claude-security-scan-safe-ultra-review",
+      "capability": "policy_capability_gate",
+      "current_score": 10,
+      "current_skill": "nexus-root-cause-probe",
+      "static_decision": "not_target_capability",
+      "target_capability": "ultra_review"
+    },
+    {
+      "candidate_minus_current": -5,
+      "candidate_score": 5,
+      "candidate_skill": "github3-marketing-ab-testing-safe-benchmark",
+      "capability": "policy_capability_gate",
+      "current_score": 10,
+      "current_skill": "nexus-root-cause-probe",
+      "static_decision": "not_target_capability",
+      "target_capability": "benchmark_meta_opt"
+    },
+    {
+      "candidate_minus_current": -4,
+      "candidate_score": 8,
+      "candidate_skill": "github3-openclaw-map-registry-sync",
+      "capability": "registry_skills_sync",
+      "current_score": 12,
+      "current_skill": "sf2-registry_skills_sync-route-fit-spec",
+      "static_decision": "candidate_target_match",
+      "target_capability": "registry_skills_sync"
+    },
+    {
+      "candidate_minus_current": -4,
+      "candidate_score": 8,
+      "candidate_skill": "github3-openai-skill-creator-safe-registry-sync",
+      "capability": "registry_skills_sync",
+      "current_score": 12,
+      "current_skill": "sf2-registry_skills_sync-route-fit-spec",
+      "static_decision": "candidate_target_match",
+      "target_capability": "registry_skills_sync"
+    },
+    {
+      "candidate_minus_current": -7,
+      "candidate_score": 5,
+      "candidate_skill": "github3-claude-security-scan-safe-ultra-review",
+      "capability": "registry_skills_sync",
+      "current_score": 12,
+      "current_skill": "sf2-registry_skills_sync-route-fit-spec",
+      "static_decision": "not_target_capability",
+      "target_capability": "ultra_review"
+    },
+    {
+      "candidate_minus_current": -7,
+      "candidate_score": 5,
+      "candidate_skill": "github3-marketing-ab-testing-safe-benchmark",
+      "capability": "registry_skills_sync",
+      "current_score": 12,
+      "current_skill": "sf2-registry_skills_sync-route-fit-spec",
+      "static_decision": "not_target_capability",
+      "target_capability": "benchmark_meta_opt"
+    },
+    {
+      "candidate_minus_current": -3,
+      "candidate_score": 6,
+      "candidate_skill": "github3-openclaw-map-registry-sync",
+      "capability": "regression_guard",
+      "current_score": 9,
+      "current_skill": "diagnose",
+      "static_decision": "not_target_capability",
+      "target_capability": "registry_skills_sync"
+    },
+    {
+      "candidate_minus_current": -3,
+      "candidate_score": 6,
+      "candidate_skill": "github3-openai-skill-creator-safe-registry-sync",
+      "capability": "regression_guard",
+      "current_score": 9,
+      "current_skill": "diagnose",
+      "static_decision": "not_target_capability",
+      "target_capability": "registry_skills_sync"
+    },
+    {
+      "candidate_minus_current": -4,
+      "candidate_score": 5,
+      "candidate_skill": "github3-claude-security-scan-safe-ultra-review",
+      "capability": "regression_guard",
+      "current_score": 9,
+      "current_skill": "diagnose",
+      "static_decision": "not_target_capability",
+      "target_capability": "ultra_review"
+    },
+    {
+      "candidate_minus_current": -4,
+      "candidate_score": 5,
+      "candidate_skill": "github3-marketing-ab-testing-safe-benchmark",
+      "capability": "regression_guard",
+      "current_score": 9,
+      "current_skill": "diagnose",
+      "static_decision": "not_target_capability",
+      "target_capability": "benchmark_meta_opt"
+    },
+    {
+      "candidate_minus_current": 3,
+      "candidate_score": 6,
+      "candidate_skill": "github3-openclaw-map-registry-sync",
+      "capability": "repair_loop",
+      "current_score": 3,
+      "current_skill": "tdd",
+      "static_decision": "not_target_capability",
+      "target_capability": "registry_skills_sync"
+    },
+    {
+      "candidate_minus_current": 3,
+      "candidate_score": 6,
+      "candidate_skill": "github3-openai-skill-creator-safe-registry-sync",
+      "capability": "repair_loop",
+      "current_score": 3,
+      "current_skill": "tdd",
+      "static_decision": "not_target_capability",
+      "target_capability": "registry_skills_sync"
+    },
+    {
+      "candidate_minus_current": 2,
+      "candidate_score": 5,
+      "candidate_skill": "github3-claude-security-scan-safe-ultra-review",
+      "capability": "repair_loop",
+      "current_score": 3,
+      "current_skill": "tdd",
+      "static_decision": "not_target_capability",
+      "target_capability": "ultra_review"
+    },
+    {
+      "candidate_minus_current": 2,
+      "candidate_score": 5,
+      "candidate_skill": "github3-marketing-ab-testing-safe-benchmark",
+      "capability": "repair_loop",
+      "current_score": 3,
+      "current_skill": "tdd",
+      "static_decision": "not_target_capability",
+      "target_capability": "benchmark_meta_opt"
+    },
+    {
+      "candidate_minus_current": -3,
+      "candidate_score": 6,
+      "candidate_skill": "github3-openclaw-map-registry-sync",
+      "capability": "research",
+      "current_score": 9,
+      "current_skill": "research-citation-chain-verifier",
+      "static_decision": "not_target_capability",
+      "target_capability": "registry_skills_sync"
+    },
+    {
+      "candidate_minus_current": -3,
+      "candidate_score": 6,
+      "candidate_skill": "github3-openai-skill-creator-safe-registry-sync",
+      "capability": "research",
+      "current_score": 9,
+      "current_skill": "research-citation-chain-verifier",
+      "static_decision": "not_target_capability",
+      "target_capability": "registry_skills_sync"
+    },
+    {
+      "candidate_minus_current": -4,
+      "candidate_score": 5,
+      "candidate_skill": "github3-claude-security-scan-safe-ultra-review",
+      "capability": "research",
+      "current_score": 9,
+      "current_skill": "research-citation-chain-verifier",
+      "static_decision": "not_target_capability",
+      "target_capability": "ultra_review"
+    },
+    {
+      "candidate_minus_current": -4,
+      "candidate_score": 5,
+      "candidate_skill": "github3-marketing-ab-testing-safe-benchmark",
+      "capability": "research",
+      "current_score": 9,
+      "current_skill": "research-citation-chain-verifier",
+      "static_decision": "not_target_capability",
+      "target_capability": "benchmark_meta_opt"
+    },
+    {
+      "candidate_minus_current": -7,
+      "candidate_score": 6,
+      "candidate_skill": "github3-openclaw-map-registry-sync",
+      "capability": "research_and_source_discipline",
+      "current_score": 13,
+      "current_skill": "research-citation-chain-verifier",
+      "static_decision": "not_target_capability",
+      "target_capability": "registry_skills_sync"
+    },
+    {
+      "candidate_minus_current": -6,
+      "candidate_score": 7,
+      "candidate_skill": "github3-openai-skill-creator-safe-registry-sync",
+      "capability": "research_and_source_discipline",
+      "current_score": 13,
+      "current_skill": "research-citation-chain-verifier",
+      "static_decision": "not_target_capability",
+      "target_capability": "registry_skills_sync"
+    },
+    {
+      "candidate_minus_current": -8,
+      "candidate_score": 5,
+      "candidate_skill": "github3-claude-security-scan-safe-ultra-review",
+      "capability": "research_and_source_discipline",
+      "current_score": 13,
+      "current_skill": "research-citation-chain-verifier",
+      "static_decision": "not_target_capability",
+      "target_capability": "ultra_review"
+    },
+    {
+      "candidate_minus_current": -8,
+      "candidate_score": 5,
+      "candidate_skill": "github3-marketing-ab-testing-safe-benchmark",
+      "capability": "research_and_source_discipline",
+      "current_score": 13,
+      "current_skill": "research-citation-chain-verifier",
+      "static_decision": "not_target_capability",
+      "target_capability": "benchmark_meta_opt"
+    },
+    {
+      "candidate_minus_current": -4,
+      "candidate_score": 6,
+      "candidate_skill": "github3-openclaw-map-registry-sync",
+      "capability": "research_control_plane",
+      "current_score": 10,
+      "current_skill": "research-citation-chain-verifier",
+      "static_decision": "not_target_capability",
+      "target_capability": "registry_skills_sync"
+    },
+    {
+      "candidate_minus_current": -4,
+      "candidate_score": 6,
+      "candidate_skill": "github3-openai-skill-creator-safe-registry-sync",
+      "capability": "research_control_plane",
+      "current_score": 10,
+      "current_skill": "research-citation-chain-verifier",
+      "static_decision": "not_target_capability",
+      "target_capability": "registry_skills_sync"
+    },
+    {
+      "candidate_minus_current": -5,
+      "candidate_score": 5,
+      "candidate_skill": "github3-claude-security-scan-safe-ultra-review",
+      "capability": "research_control_plane",
+      "current_score": 10,
+      "current_skill": "research-citation-chain-verifier",
+      "static_decision": "not_target_capability",
+      "target_capability": "ultra_review"
+    },
+    {
+      "candidate_minus_current": -5,
+      "candidate_score": 5,
+      "candidate_skill": "github3-marketing-ab-testing-safe-benchmark",
+      "capability": "research_control_plane",
+      "current_score": 10,
+      "current_skill": "research-citation-chain-verifier",
+      "static_decision": "not_target_capability",
+      "target_capability": "benchmark_meta_opt"
+    },
+    {
+      "candidate_minus_current": -4,
+      "candidate_score": 6,
+      "candidate_skill": "github3-openclaw-map-registry-sync",
+      "capability": "sandbox_replay",
+      "current_score": 10,
+      "current_skill": "sf2-sandbox_replay-route-fit-spec",
+      "static_decision": "not_target_capability",
+      "target_capability": "registry_skills_sync"
+    },
+    {
+      "candidate_minus_current": -4,
+      "candidate_score": 6,
+      "candidate_skill": "github3-openai-skill-creator-safe-registry-sync",
+      "capability": "sandbox_replay",
+      "current_score": 10,
+      "current_skill": "sf2-sandbox_replay-route-fit-spec",
+      "static_decision": "not_target_capability",
+      "target_capability": "registry_skills_sync"
+    },
+    {
+      "candidate_minus_current": -5,
+      "candidate_score": 5,
+      "candidate_skill": "github3-claude-security-scan-safe-ultra-review",
+      "capability": "sandbox_replay",
+      "current_score": 10,
+      "current_skill": "sf2-sandbox_replay-route-fit-spec",
+      "static_decision": "not_target_capability",
+      "target_capability": "ultra_review"
+    },
+    {
+      "candidate_minus_current": -5,
+      "candidate_score": 5,
+      "candidate_skill": "github3-marketing-ab-testing-safe-benchmark",
+      "capability": "sandbox_replay",
+      "current_score": 10,
+      "current_skill": "sf2-sandbox_replay-route-fit-spec",
+      "static_decision": "not_target_capability",
+      "target_capability": "benchmark_meta_opt"
+    },
+    {
+      "candidate_minus_current": -6,
+      "candidate_score": 6,
+      "candidate_skill": "github3-openclaw-map-registry-sync",
+      "capability": "swarm_multi_agent",
+      "current_score": 12,
+      "current_skill": "sf2-swarm_multi_agent-route-fit-spec",
+      "static_decision": "not_target_capability",
+      "target_capability": "registry_skills_sync"
+    },
+    {
+      "candidate_minus_current": -6,
+      "candidate_score": 6,
+      "candidate_skill": "github3-openai-skill-creator-safe-registry-sync",
+      "capability": "swarm_multi_agent",
+      "current_score": 12,
+      "current_skill": "sf2-swarm_multi_agent-route-fit-spec",
+      "static_decision": "not_target_capability",
+      "target_capability": "registry_skills_sync"
+    },
+    {
+      "candidate_minus_current": -7,
+      "candidate_score": 5,
+      "candidate_skill": "github3-claude-security-scan-safe-ultra-review",
+      "capability": "swarm_multi_agent",
+      "current_score": 12,
+      "current_skill": "sf2-swarm_multi_agent-route-fit-spec",
+      "static_decision": "not_target_capability",
+      "target_capability": "ultra_review"
+    },
+    {
+      "candidate_minus_current": -7,
+      "candidate_score": 5,
+      "candidate_skill": "github3-marketing-ab-testing-safe-benchmark",
+      "capability": "swarm_multi_agent",
+      "current_score": 12,
+      "current_skill": "sf2-swarm_multi_agent-route-fit-spec",
+      "static_decision": "not_target_capability",
+      "target_capability": "benchmark_meta_opt"
+    },
+    {
+      "candidate_minus_current": 6,
+      "candidate_score": 6,
+      "candidate_skill": "github3-openclaw-map-registry-sync",
+      "capability": "ui_validator",
+      "current_score": 0,
+      "current_skill": "github2-agent-browser-dogfood-safe-ui-validator",
+      "static_decision": "not_target_capability",
+      "target_capability": "registry_skills_sync"
+    },
+    {
+      "candidate_minus_current": 6,
+      "candidate_score": 6,
+      "candidate_skill": "github3-openai-skill-creator-safe-registry-sync",
+      "capability": "ui_validator",
+      "current_score": 0,
+      "current_skill": "github2-agent-browser-dogfood-safe-ui-validator",
+      "static_decision": "not_target_capability",
+      "target_capability": "registry_skills_sync"
+    },
+    {
+      "candidate_minus_current": 5,
+      "candidate_score": 5,
+      "candidate_skill": "github3-claude-security-scan-safe-ultra-review",
+      "capability": "ui_validator",
+      "current_score": 0,
+      "current_skill": "github2-agent-browser-dogfood-safe-ui-validator",
+      "static_decision": "not_target_capability",
+      "target_capability": "ultra_review"
+    },
+    {
+      "candidate_minus_current": 5,
+      "candidate_score": 5,
+      "candidate_skill": "github3-marketing-ab-testing-safe-benchmark",
+      "capability": "ui_validator",
+      "current_score": 0,
+      "current_skill": "github2-agent-browser-dogfood-safe-ui-validator",
+      "static_decision": "not_target_capability",
+      "target_capability": "benchmark_meta_opt"
+    },
+    {
+      "candidate_minus_current": -4,
+      "candidate_score": 6,
+      "candidate_skill": "github3-openclaw-map-registry-sync",
+      "capability": "ultra_review",
+      "current_score": 10,
+      "current_skill": "acceptance-evidence-failclosed",
+      "static_decision": "not_target_capability",
+      "target_capability": "registry_skills_sync"
+    },
+    {
+      "candidate_minus_current": -4,
+      "candidate_score": 6,
+      "candidate_skill": "github3-openai-skill-creator-safe-registry-sync",
+      "capability": "ultra_review",
+      "current_score": 10,
+      "current_skill": "acceptance-evidence-failclosed",
+      "static_decision": "not_target_capability",
+      "target_capability": "registry_skills_sync"
+    },
+    {
+      "candidate_minus_current": -3,
+      "candidate_score": 7,
+      "candidate_skill": "github3-claude-security-scan-safe-ultra-review",
+      "capability": "ultra_review",
+      "current_score": 10,
+      "current_skill": "acceptance-evidence-failclosed",
+      "static_decision": "candidate_target_match",
+      "target_capability": "ultra_review"
+    },
+    {
+      "candidate_minus_current": -5,
+      "candidate_score": 5,
+      "candidate_skill": "github3-marketing-ab-testing-safe-benchmark",
+      "capability": "ultra_review",
+      "current_score": 10,
+      "current_skill": "acceptance-evidence-failclosed",
+      "static_decision": "not_target_capability",
+      "target_capability": "benchmark_meta_opt"
+    },
+    {
+      "candidate_minus_current": -3,
+      "candidate_score": 6,
+      "candidate_skill": "github3-openclaw-map-registry-sync",
+      "capability": "xray",
+      "current_score": 9,
+      "current_skill": "diagnose",
+      "static_decision": "not_target_capability",
+      "target_capability": "registry_skills_sync"
+    },
+    {
+      "candidate_minus_current": -3,
+      "candidate_score": 6,
+      "candidate_skill": "github3-openai-skill-creator-safe-registry-sync",
+      "capability": "xray",
+      "current_score": 9,
+      "current_skill": "diagnose",
+      "static_decision": "not_target_capability",
+      "target_capability": "registry_skills_sync"
+    },
+    {
+      "candidate_minus_current": -4,
+      "candidate_score": 5,
+      "candidate_skill": "github3-claude-security-scan-safe-ultra-review",
+      "capability": "xray",
+      "current_score": 9,
+      "current_skill": "diagnose",
+      "static_decision": "not_target_capability",
+      "target_capability": "ultra_review"
+    },
+    {
+      "candidate_minus_current": -4,
+      "candidate_score": 5,
+      "candidate_skill": "github3-marketing-ab-testing-safe-benchmark",
+      "capability": "xray",
+      "current_score": 9,
+      "current_skill": "diagnose",
+      "static_decision": "not_target_capability",
+      "target_capability": "benchmark_meta_opt"
+    }
+  ],
+  "schema": "nexus.sf_github_round3_all_capability_static_screen.v1",
+  "status": "PASS",
+  "summary": {
+    "candidate_count": 4,
+    "capability_count": 34,
+    "comparison_count": 136
+  },
+  "version": "2026-05-19"
+}

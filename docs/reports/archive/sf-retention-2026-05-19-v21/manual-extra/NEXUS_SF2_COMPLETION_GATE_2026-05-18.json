@@ -1,0 +1,14 @@
+{
+  "schema": "nexus.sf2_completion_gate.v1",
+  "status": "PASS",
+  "summary": {
+    "sf2_closed_loop_complete": true,
+    "sf_discovery_closed": true,
+    "receipt_validation_status": "PASS",
+    "promotion_review_status": "PASS",
+    "runtime_update_allowed": false,
+    "public_benchmark_allowed": false
+  },
+  "blockers": [],
+  "next_gate": "runtime_promotion_review_manual"
+}

@@ -1,0 +1,524 @@
+{
+  "schema": "nexus.sf_v11_challenger_supply.v1",
+  "status": "PASS",
+  "summary": {
+    "remaining_count": 20,
+    "queued_capability_count": 20,
+    "candidate_total": 65,
+    "public_benchmark_allowed": false,
+    "runtime_update_allowed": false
+  },
+  "queue": [
+    {
+      "capability_id": "artifact_gate",
+      "current_best": "research-citation-chain-verifier",
+      "state": "needs_v11_retest",
+      "reason": "not_runtime_primary_after_v10",
+      "candidate_count": 4,
+      "candidates": [
+        {
+          "skill_id": "research-citation-chain-verifier",
+          "skill_path": ".agents/skills/research-citation-chain-verifier/SKILL.md",
+          "source": "nexus_repo"
+        },
+        {
+          "skill_id": "nexus-goal-closure-executor",
+          "skill_path": ".agents/skills/nexus-goal-closure-executor/SKILL.md",
+          "source": "nexus_repo"
+        },
+        {
+          "skill_id": "acceptance-evidence-failclosed",
+          "skill_path": ".agents/skills/acceptance-evidence-failclosed/SKILL.md",
+          "source": "nexus_repo"
+        },
+        {
+          "skill_id": "cso",
+          "skill_path": ".agents/skills/cso/SKILL.md",
+          "source": "nexus_repo"
+        }
+      ]
+    },
+    {
+      "capability_id": "autonomic_router",
+      "current_best": "sf2-autonomic_router-route-fit-spec",
+      "state": "needs_v11_retest",
+      "reason": "not_runtime_primary_after_v10",
+      "candidate_count": 3,
+      "candidates": [
+        {
+          "skill_id": "sf2-autonomic_router-route-fit-spec",
+          "skill_path": ".agents/skills/sf2/sf2-autonomic_router-route-fit-spec/SKILL.md",
+          "source": "nexus_repo"
+        },
+        {
+          "skill_id": "diagnose",
+          "skill_path": ".agents/skills/diagnose/SKILL.md",
+          "source": "nexus_repo"
+        },
+        {
+          "skill_id": "nexus-root-cause-probe",
+          "skill_path": ".agents/skills/nexus-root-cause-probe/SKILL.md",
+          "source": "nexus_repo"
+        }
+      ]
+    },
+    {
+      "capability_id": "autoreason",
+      "current_best": "sf2-autoreason-route-fit-spec",
+      "state": "needs_v11_retest",
+      "reason": "not_runtime_primary_after_v10",
+      "candidate_count": 4,
+      "candidates": [
+        {
+          "skill_id": "sf2-autoreason-route-fit-spec",
+          "skill_path": ".agents/skills/sf2/sf2-autoreason-route-fit-spec/SKILL.md",
+          "source": "nexus_repo"
+        },
+        {
+          "skill_id": "nexus-benchmark-public-report",
+          "skill_path": ".agents/skills/nexus-benchmark-public-report/SKILL.md",
+          "source": "nexus_repo"
+        },
+        {
+          "skill_id": "sf2-belief-route-fit-spec",
+          "skill_path": ".agents/skills/sf2/sf2-belief-route-fit-spec/SKILL.md",
+          "source": "nexus_repo"
+        },
+        {
+          "skill_id": "diagnose",
+          "skill_path": ".agents/skills/diagnose/SKILL.md",
+          "source": "nexus_repo"
+        }
+      ]
+    },
+    {
+      "capability_id": "benchmark_meta_opt",
+      "current_best": "nexus-benchmark-continuous-optimization",
+      "state": "needs_v11_retest",
+      "reason": "not_runtime_primary_after_v10",
+      "candidate_count": 3,
+      "candidates": [
+        {
+          "skill_id": "nexus-benchmark-continuous-optimization",
+          "skill_path": ".agents/skills/nexus-benchmark-continuous-optimization/SKILL.md",
+          "source": "nexus_repo"
+        },
+        {
+          "skill_id": "nexus-benchmark-public-report",
+          "skill_path": ".agents/skills/nexus-benchmark-public-report/SKILL.md",
+          "source": "nexus_repo"
+        },
+        {
+          "skill_id": "diagnose",
+          "skill_path": ".agents/skills/diagnose/SKILL.md",
+          "source": "nexus_repo"
+        }
+      ]
+    },
+    {
+      "capability_id": "ddtree",
+      "current_best": "sf2-ddtree-route-fit-spec",
+      "state": "needs_v11_retest",
+      "reason": "not_runtime_primary_after_v10",
+      "candidate_count": 3,
+      "candidates": [
+        {
+          "skill_id": "sf2-ddtree-route-fit-spec",
+          "skill_path": ".agents/skills/sf2/sf2-ddtree-route-fit-spec/SKILL.md",
+          "source": "nexus_repo"
+        },
+        {
+          "skill_id": "diagnose",
+          "skill_path": ".agents/skills/diagnose/SKILL.md",
+          "source": "nexus_repo"
+        },
+        {
+          "skill_id": "nexus-root-cause-probe",
+          "skill_path": ".agents/skills/nexus-root-cause-probe/SKILL.md",
+          "source": "nexus_repo"
+        }
+      ]
+    },
+    {
+      "capability_id": "delivery_acceptance_gate",
+      "current_best": "sf2-delivery_acceptance_gate-route-fit-spec",
+      "state": "needs_v11_retest",
+      "reason": "not_runtime_primary_after_v10",
+      "candidate_count": 3,
+      "candidates": [
+        {
+          "skill_id": "sf2-delivery_acceptance_gate-route-fit-spec",
+          "skill_path": ".agents/skills/sf2/sf2-delivery_acceptance_gate-route-fit-spec/SKILL.md",
+          "source": "nexus_repo"
+        },
+        {
+          "skill_id": "acceptance-evidence-failclosed",
+          "skill_path": ".agents/skills/acceptance-evidence-failclosed/SKILL.md",
+          "source": "nexus_repo"
+        },
+        {
+          "skill_id": "nexus-goal-closure-executor",
+          "skill_path": ".agents/skills/nexus-goal-closure-executor/SKILL.md",
+          "source": "nexus_repo"
+        }
+      ]
+    },
+    {
+      "capability_id": "drone",
+      "current_best": "sf2-drone-route-fit-spec",
+      "state": "needs_v11_retest",
+      "reason": "not_runtime_primary_after_v10",
+      "candidate_count": 3,
+      "candidates": [
+        {
+          "skill_id": "sf2-drone-route-fit-spec",
+          "skill_path": ".agents/skills/sf2/sf2-drone-route-fit-spec/SKILL.md",
+          "source": "nexus_repo"
+        },
+        {
+          "skill_id": "nexus-goal-closure-executor",
+          "skill_path": ".agents/skills/nexus-goal-closure-executor/SKILL.md",
+          "source": "nexus_repo"
+        },
+        {
+          "skill_id": "diagnose",
+          "skill_path": ".agents/skills/diagnose/SKILL.md",
+          "source": "nexus_repo"
+        }
+      ]
+    },
+    {
+      "capability_id": "lancedb",
+      "current_best": "sf2-lancedb-route-fit-spec",
+      "state": "needs_v11_retest",
+      "reason": "not_runtime_primary_after_v10",
+      "candidate_count": 3,
+      "candidates": [
+        {
+          "skill_id": "sf2-lancedb-route-fit-spec",
+          "skill_path": ".agents/skills/sf2/sf2-lancedb-route-fit-spec/SKILL.md",
+          "source": "nexus_repo"
+        },
+        {
+          "skill_id": "nexus-capability-upgrade",
+          "skill_path": ".agents/skills/nexus-capability-upgrade/SKILL.md",
+          "source": "nexus_repo"
+        },
+        {
+          "skill_id": "research-source-validation-auditor",
+          "skill_path": ".agents/skills/research-source-validation-auditor/SKILL.md",
+          "source": "nexus_repo"
+        }
+      ]
+    },
+    {
+      "capability_id": "learning_closure",
+      "current_best": "sf2-learning_closure-route-fit-spec",
+      "state": "needs_v11_retest",
+      "reason": "not_runtime_primary_after_v10",
+      "candidate_count": 3,
+      "candidates": [
+        {
+          "skill_id": "sf2-learning_closure-route-fit-spec",
+          "skill_path": ".agents/skills/sf2/sf2-learning_closure-route-fit-spec/SKILL.md",
+          "source": "nexus_repo"
+        },
+        {
+          "skill_id": "nexus-capability-upgrade",
+          "skill_path": ".agents/skills/nexus-capability-upgrade/SKILL.md",
+          "source": "nexus_repo"
+        },
+        {
+          "skill_id": "nexus-goal-closure-executor",
+          "skill_path": ".agents/skills/nexus-goal-closure-executor/SKILL.md",
+          "source": "nexus_repo"
+        }
+      ]
+    },
+    {
+      "capability_id": "memory",
+      "current_best": "sf2-memory-route-fit-spec",
+      "state": "needs_v11_retest",
+      "reason": "not_runtime_primary_after_v10",
+      "candidate_count": 3,
+      "candidates": [
+        {
+          "skill_id": "sf2-memory-route-fit-spec",
+          "skill_path": ".agents/skills/sf2/sf2-memory-route-fit-spec/SKILL.md",
+          "source": "nexus_repo"
+        },
+        {
+          "skill_id": "nexus-capability-upgrade",
+          "skill_path": ".agents/skills/nexus-capability-upgrade/SKILL.md",
+          "source": "nexus_repo"
+        },
+        {
+          "skill_id": "diagnose",
+          "skill_path": ".agents/skills/diagnose/SKILL.md",
+          "source": "nexus_repo"
+        }
+      ]
+    },
+    {
+      "capability_id": "mempalace",
+      "current_best": "sf2-mempalace-route-fit-spec",
+      "state": "needs_v11_retest",
+      "reason": "not_runtime_primary_after_v10",
+      "candidate_count": 3,
+      "candidates": [
+        {
+          "skill_id": "sf2-mempalace-route-fit-spec",
+          "skill_path": ".agents/skills/sf2/sf2-mempalace-route-fit-spec/SKILL.md",
+          "source": "nexus_repo"
+        },
+        {
+          "skill_id": "acceptance-evidence-failclosed",
+          "skill_path": ".agents/skills/acceptance-evidence-failclosed/SKILL.md",
+          "source": "nexus_repo"
+        },
+        {
+          "skill_id": "gbrain-soul-audit",
+          "skill_path": ".agents/skills/gbrain-soul-audit/SKILL.md",
+          "source": "nexus_repo"
+        }
+      ]
+    },
+    {
+      "capability_id": "metabolism_resume",
+      "current_best": "setup-matt-pocock-skills",
+      "state": "needs_v11_retest",
+      "reason": "not_runtime_primary_after_v10",
+      "candidate_count": 4,
+      "candidates": [
+        {
+          "skill_id": "setup-matt-pocock-skills",
+          "skill_path": ".agents/skills/setup-matt-pocock-skills/SKILL.md",
+          "source": "nexus_repo"
+        },
+        {
+          "skill_id": "nexus-goal-closure-executor",
+          "skill_path": ".agents/skills/nexus-goal-closure-executor/SKILL.md",
+          "source": "nexus_repo"
+        },
+        {
+          "skill_id": "diagnose",
+          "skill_path": ".agents/skills/diagnose/SKILL.md",
+          "source": "nexus_repo"
+        },
+        {
+          "skill_id": "nexus-capability-upgrade",
+          "skill_path": ".agents/skills/nexus-capability-upgrade/SKILL.md",
+          "source": "nexus_repo"
+        }
+      ]
+    },
+    {
+      "capability_id": "policy_capability_gate",
+      "current_best": "sf2-policy_capability_gate-route-fit-spec",
+      "state": "needs_v11_retest",
+      "reason": "not_runtime_primary_after_v10",
+      "candidate_count": 3,
+      "candidates": [
+        {
+          "skill_id": "sf2-policy_capability_gate-route-fit-spec",
+          "skill_path": ".agents/skills/sf2/sf2-policy_capability_gate-route-fit-spec/SKILL.md",
+          "source": "nexus_repo"
+        },
+        {
+          "skill_id": "acceptance-evidence-failclosed",
+          "skill_path": ".agents/skills/acceptance-evidence-failclosed/SKILL.md",
+          "source": "nexus_repo"
+        },
+        {
+          "skill_id": "cso",
+          "skill_path": ".agents/skills/cso/SKILL.md",
+          "source": "nexus_repo"
+        }
+      ]
+    },
+    {
+      "capability_id": "registry_skills_sync",
+      "current_best": "sf2-registry_skills_sync-route-fit-spec",
+      "state": "needs_v11_retest",
+      "reason": "not_runtime_primary_after_v10",
+      "candidate_count": 3,
+      "candidates": [
+        {
+          "skill_id": "sf2-registry_skills_sync-route-fit-spec",
+          "skill_path": ".agents/skills/sf2/sf2-registry_skills_sync-route-fit-spec/SKILL.md",
+          "source": "nexus_repo"
+        },
+        {
+          "skill_id": "nexus-capability-upgrade",
+          "skill_path": ".agents/skills/nexus-capability-upgrade/SKILL.md",
+          "source": "nexus_repo"
+        },
+        {
+          "skill_id": "setup-matt-pocock-skills",
+          "skill_path": ".agents/skills/setup-matt-pocock-skills/SKILL.md",
+          "source": "nexus_repo"
+        }
+      ]
+    },
+    {
+      "capability_id": "research",
+      "current_best": "research-citation-chain-verifier",
+      "state": "needs_v11_retest",
+      "reason": "not_runtime_primary_after_v10",
+      "candidate_count": 4,
+      "candidates": [
+        {
+          "skill_id": "research-citation-chain-verifier",
+          "skill_path": ".agents/skills/research-citation-chain-verifier/SKILL.md",
+          "source": "nexus_repo"
+        },
+        {
+          "skill_id": "research-source-validation-auditor",
+          "skill_path": ".agents/skills/research-source-validation-auditor/SKILL.md",
+          "source": "nexus_repo"
+        },
+        {
+          "skill_id": "research-source-conflict-resolver",
+          "skill_path": ".agents/skills/research-source-conflict-resolver/SKILL.md",
+          "source": "nexus_repo"
+        },
+        {
+          "skill_id": "sf2-research_control_plane-route-fit-spec",
+          "skill_path": ".agents/skills/sf2/sf2-research_control_plane-route-fit-spec/SKILL.md",
+          "source": "nexus_repo"
+        }
+      ]
+    },
+    {
+      "capability_id": "research_control_plane",
+      "current_best": "sf2-research_control_plane-route-fit-spec",
+      "state": "needs_v11_retest",
+      "reason": "not_runtime_primary_after_v10",
+      "candidate_count": 3,
+      "candidates": [
+        {
+          "skill_id": "sf2-research_control_plane-route-fit-spec",
+          "skill_path": ".agents/skills/sf2/sf2-research_control_plane-route-fit-spec/SKILL.md",
+          "source": "nexus_repo"
+        },
+        {
+          "skill_id": "research-citation-chain-verifier",
+          "skill_path": ".agents/skills/research-citation-chain-verifier/SKILL.md",
+          "source": "nexus_repo"
+        },
+        {
+          "skill_id": "research-source-validation-auditor",
+          "skill_path": ".agents/skills/research-source-validation-auditor/SKILL.md",
+          "source": "nexus_repo"
+        }
+      ]
+    },
+    {
+      "capability_id": "sandbox_replay",
+      "current_best": "sf2-sandbox_replay-route-fit-spec",
+      "state": "needs_v11_retest",
+      "reason": "not_runtime_primary_after_v10",
+      "candidate_count": 3,
+      "candidates": [
+        {
+          "skill_id": "sf2-sandbox_replay-route-fit-spec",
+          "skill_path": ".agents/skills/sf2/sf2-sandbox_replay-route-fit-spec/SKILL.md",
+          "source": "nexus_repo"
+        },
+        {
+          "skill_id": "diagnose",
+          "skill_path": ".agents/skills/diagnose/SKILL.md",
+          "source": "nexus_repo"
+        },
+        {
+          "skill_id": "acceptance-evidence-failclosed",
+          "skill_path": ".agents/skills/acceptance-evidence-failclosed/SKILL.md",
+          "source": "nexus_repo"
+        }
+      ]
+    },
+    {
+      "capability_id": "ui_validator",
+      "current_best": "sf2-ui_validator-route-fit-spec",
+      "state": "needs_v11_retest",
+      "reason": "not_runtime_primary_after_v10",
+      "candidate_count": 3,
+      "candidates": [
+        {
+          "skill_id": "sf2-ui_validator-route-fit-spec",
+          "skill_path": ".agents/skills/sf2/sf2-ui_validator-route-fit-spec/SKILL.md",
+          "source": "nexus_repo"
+        },
+        {
+          "skill_id": "diagnose",
+          "skill_path": ".agents/skills/diagnose/SKILL.md",
+          "source": "nexus_repo"
+        },
+        {
+          "skill_id": "nexus-root-cause-probe",
+          "skill_path": ".agents/skills/nexus-root-cause-probe/SKILL.md",
+          "source": "nexus_repo"
+        }
+      ]
+    },
+    {
+      "capability_id": "ultra_review",
+      "current_best": "code-review-and-quality",
+      "state": "needs_v11_retest",
+      "reason": "not_runtime_primary_after_v10",
+      "candidate_count": 4,
+      "candidates": [
+        {
+          "skill_id": "code-review-and-quality",
+          "skill_path": "/Users/jameschen/Workspace/skills_audit/skills/code-review-and-quality/SKILL.md",
+          "source": "external_reference"
+        },
+        {
+          "skill_id": "diagnose",
+          "skill_path": ".agents/skills/diagnose/SKILL.md",
+          "source": "nexus_repo"
+        },
+        {
+          "skill_id": "acceptance-evidence-failclosed",
+          "skill_path": ".agents/skills/acceptance-evidence-failclosed/SKILL.md",
+          "source": "nexus_repo"
+        },
+        {
+          "skill_id": "cso",
+          "skill_path": ".agents/skills/cso/SKILL.md",
+          "source": "nexus_repo"
+        }
+      ]
+    },
+    {
+      "capability_id": "xray",
+      "current_best": "sf2-xray-route-fit-spec",
+      "state": "needs_v11_retest",
+      "reason": "not_runtime_primary_after_v10",
+      "candidate_count": 3,
+      "candidates": [
+        {
+          "skill_id": "sf2-xray-route-fit-spec",
+          "skill_path": ".agents/skills/sf2/sf2-xray-route-fit-spec/SKILL.md",
+          "source": "nexus_repo"
+        },
+        {
+          "skill_id": "sf2-codeintel-route-fit-spec",
+          "skill_path": ".agents/skills/sf2/sf2-codeintel-route-fit-spec/SKILL.md",
+          "source": "nexus_repo"
+        },
+        {
+          "skill_id": "diagnose",
+          "skill_path": ".agents/skills/diagnose/SKILL.md",
+          "source": "nexus_repo"
+        }
+      ]
+    }
+  ],
+  "blockers": [],
+  "claim_boundary": [
+    "V11 supplies challengers only for non-runtime-primary capabilities.",
+    "No public benchmark.",
+    "Runtime replacement requires paired live strict gate and post-apply smoke."
+  ]
+}

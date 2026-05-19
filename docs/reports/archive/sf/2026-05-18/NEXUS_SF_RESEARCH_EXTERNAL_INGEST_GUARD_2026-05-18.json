@@ -1,0 +1,55 @@
+{
+  "schema": "nexus.research_external_ingest_guard.v1",
+  "status": "PASS",
+  "capability": "research_and_source_discipline",
+  "runtime_update_allowed": false,
+  "candidate_pool_update_allowed": true,
+  "network_fetch_performed": false,
+  "summary": {
+    "required_field_count": 7,
+    "required_check_count": 6,
+    "ingested_candidate_count": 0,
+    "runtime_mount_allowed": false
+  },
+  "candidate_schema": {
+    "required_fields": [
+      "source_url",
+      "repo",
+      "commit_sha",
+      "license",
+      "skill_manifest_path",
+      "ingest_receipt",
+      "security_receipt"
+    ],
+    "required_checks": [
+      "commit_sha_pinned",
+      "license_allowlist_pass",
+      "dependency_review_pass",
+      "code_scanning_or_static_scan_pass",
+      "workflow_scan_pass",
+      "observable_source_discipline_behavior_present"
+    ],
+    "required_behavior_groups": [
+      "citation_chain",
+      "source_conflict",
+      "source_validation"
+    ]
+  },
+  "allowlist_policy": {
+    "source_url_required": true,
+    "commit_sha_required": true,
+    "license_status_required": true,
+    "security_receipt_required": true,
+    "workflow_scan_status_required": true
+  },
+  "fail_fast": [
+    "unversioned_external_source",
+    "unknown_or_disallowed_license",
+    "missing_security_receipt",
+    "runtime_policy_update_attempt"
+  ],
+  "claim_boundary": [
+    "This guard validates external candidate metadata only; it does not fetch or mount skills.",
+    "External candidates remain candidate-pool-only until source, license, security, workflow, and behavior receipts pass."
+  ]
+}

@@ -1,0 +1,66 @@
+{
+  "schema": "nexus.sf_round10_coverage_backlog_replacement_ledger.v1",
+  "version": "2026-05-19",
+  "status": "PASS",
+  "summary": {
+    "replacement_count": 2,
+    "hold_count": 2,
+    "runtime_update_allowed": false,
+    "public_benchmark_allowed": false
+  },
+  "replacements": [
+    {
+      "capability": "codeintel",
+      "previous_skill": "github6-agent-context-codeintel",
+      "candidate_skill": "github10-code-simplification-codeintel",
+      "candidate_total_tokens": 39640,
+      "previous_total_tokens": 40936,
+      "token_delta": -1296,
+      "candidate_wall_sec": 119.0589,
+      "previous_wall_sec": 146.843,
+      "wall_delta_sec": -27.7841,
+      "candidate_receipt_path": ".nexus/reports/sf_round10_coverage_backlog_live_2026-05-19/codeintel_sf-round10-coverage-codeintel-001_challenger_github10-code-simplification-codeintel",
+      "candidate_evidence_path": ".nexus/reports/sf_round10_coverage_backlog_live_2026-05-19/codeintel_sf-round10-coverage-codeintel-001_challenger_github10-code-simplification-codeintel/evidence_bundle.json",
+      "decision": "update_overlay_candidate_primary"
+    },
+    {
+      "capability": "research_control_plane",
+      "previous_skill": "github6-repo-scout-safe-research-control-plane",
+      "candidate_skill": "github10-paper-lookup-research-control-plane",
+      "candidate_total_tokens": 40586,
+      "previous_total_tokens": 43294,
+      "token_delta": -2708,
+      "candidate_wall_sec": 130.91,
+      "previous_wall_sec": 155.3487,
+      "wall_delta_sec": -24.4387,
+      "candidate_receipt_path": ".nexus/reports/sf_round10_coverage_backlog_live_2026-05-19/research_control_plane_sf-round10-coverage-research_control_plane-001_challenger_github10-paper-lookup-research-control-plane",
+      "candidate_evidence_path": ".nexus/reports/sf_round10_coverage_backlog_live_2026-05-19/research_control_plane_sf-round10-coverage-research_control_plane-001_challenger_github10-paper-lookup-research-control-plane/evidence_bundle.json",
+      "decision": "update_overlay_candidate_primary"
+    }
+  ],
+  "holds": [
+    {
+      "capability": "autoreason",
+      "current_skill": "sf2-belief-route-fit-spec",
+      "candidate_skill": "github10-first-principles-autoreason",
+      "reason_codes": [
+        "challenger_token_not_lower"
+      ],
+      "token_delta": 229,
+      "wall_delta_sec": -31.3563
+    },
+    {
+      "capability": "ui_validator",
+      "current_skill": "github7-browserbase-ui-test-safe-ui-validator",
+      "candidate_skill": "github10-openai-playwright-ui-validator",
+      "reason_codes": [
+        "challenger_wall_not_lower"
+      ],
+      "token_delta": -449,
+      "wall_delta_sec": 6.0567
+    }
+  ],
+  "claim_boundary": [
+    "Ledger records SF internal replacement evidence only. Runtime default apply remains gated."
+  ]
+}

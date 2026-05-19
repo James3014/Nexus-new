@@ -1,0 +1,5198 @@
+{
+  "schema": "nexus.sf2_candidate_quality_screen.v1",
+  "status": "PASS",
+  "summary": {
+    "screened_candidate_count": 236,
+    "pass_candidate_count": 62,
+    "review_candidate_count": 174,
+    "capabilities_with_review_candidates": 31,
+    "capabilities_with_clean_candidates": 33,
+    "capabilities_without_clean_candidates": 0,
+    "sf2_live_probe_allowed": true,
+    "runtime_update_allowed": false,
+    "public_benchmark_allowed": false
+  },
+  "review_capabilities": [
+    "artifact_gate",
+    "autonomic_router",
+    "autoreason",
+    "belief",
+    "benchmark_meta_opt",
+    "claim_gate",
+    "codeintel",
+    "delivery_acceptance_gate",
+    "direct_master_loop",
+    "drone",
+    "external_productivity",
+    "file_lock_security_gate",
+    "forecast_pregate",
+    "hyper_sprint",
+    "lancedb",
+    "learn_ask",
+    "learning_closure",
+    "memory",
+    "mempalace",
+    "metabolism_resume",
+    "policy_capability_gate",
+    "registry_skills_sync",
+    "regression_guard",
+    "repair_loop",
+    "research",
+    "research_control_plane",
+    "sandbox_replay",
+    "swarm_multi_agent",
+    "ui_validator",
+    "ultra_review",
+    "xray"
+  ],
+  "capabilities_without_clean_candidates": [],
+  "clean_shortlists": [
+    {
+      "capability_id": "artifact_gate",
+      "candidate_count": 3,
+      "candidates": [
+        {
+          "skill_id": "acceptance-evidence-failclosed",
+          "confidence": "high",
+          "score": 9,
+          "route_keyword_score": 1,
+          "selection_score": 69,
+          "runtime_eligible": false,
+          "ablation_eligible": true,
+          "safety_status": "ablation_only"
+        },
+        {
+          "skill_id": "browse",
+          "confidence": "high",
+          "score": 9,
+          "route_keyword_score": 1,
+          "selection_score": 69,
+          "runtime_eligible": false,
+          "ablation_eligible": true,
+          "safety_status": "ablation_only"
+        },
+        {
+          "skill_id": "claudeosint-safe-methodology",
+          "confidence": "high",
+          "score": 9,
+          "route_keyword_score": 1,
+          "selection_score": 69,
+          "runtime_eligible": false,
+          "ablation_eligible": true,
+          "safety_status": "ablation_only"
+        }
+      ],
+      "next_action": "sf2_bounded_probe_ready"
+    },
+    {
+      "capability_id": "autonomic_router",
+      "candidate_count": 1,
+      "candidates": [
+        {
+          "skill_id": "sf2-autonomic_router-route-fit-spec",
+          "confidence": "medium",
+          "score": 4,
+          "route_keyword_score": 4,
+          "selection_score": 254,
+          "runtime_eligible": false,
+          "ablation_eligible": true,
+          "safety_status": "ablation_only"
+        }
+      ],
+      "next_action": "sf2_bounded_probe_ready"
+    },
+    {
+      "capability_id": "autoreason",
+      "candidate_count": 1,
+      "candidates": [
+        {
+          "skill_id": "sf2-autoreason-route-fit-spec",
+          "confidence": "medium",
+          "score": 5,
+          "route_keyword_score": 5,
+          "selection_score": 255,
+          "runtime_eligible": false,
+          "ablation_eligible": true,
+          "safety_status": "ablation_only"
+        }
+      ],
+      "next_action": "sf2_bounded_probe_ready"
+    },
+    {
+      "capability_id": "belief",
+      "candidate_count": 1,
+      "candidates": [
+        {
+          "skill_id": "sf2-belief-route-fit-spec",
+          "confidence": "high",
+          "score": 8,
+          "route_keyword_score": 8,
+          "selection_score": 268,
+          "runtime_eligible": false,
+          "ablation_eligible": true,
+          "safety_status": "ablation_only"
+        }
+      ],
+      "next_action": "sf2_bounded_probe_ready"
+    },
+    {
+      "capability_id": "benchmark_meta_opt",
+      "candidate_count": 5,
+      "candidates": [
+        {
+          "skill_id": "benchmark-models",
+          "confidence": "high",
+          "score": 11,
+          "route_keyword_score": 3,
+          "selection_score": 71,
+          "runtime_eligible": false,
+          "ablation_eligible": true,
+          "safety_status": "ablation_only"
+        },
+        {
+          "skill_id": "gstack-benchmark-models",
+          "confidence": "high",
+          "score": 11,
+          "route_keyword_score": 3,
+          "selection_score": 71,
+          "runtime_eligible": false,
+          "ablation_eligible": true,
+          "safety_status": "ablation_only"
+        },
+        {
+          "skill_id": "benchmark",
+          "confidence": "high",
+          "score": 10,
+          "route_keyword_score": 2,
+          "selection_score": 70,
+          "runtime_eligible": false,
+          "ablation_eligible": true,
+          "safety_status": "ablation_only"
+        },
+        {
+          "skill_id": "canary",
+          "confidence": "high",
+          "score": 10,
+          "route_keyword_score": 2,
+          "selection_score": 70,
+          "runtime_eligible": false,
+          "ablation_eligible": true,
+          "safety_status": "ablation_only"
+        },
+        {
+          "skill_id": "evaluating-llms-harness",
+          "confidence": "high",
+          "score": 10,
+          "route_keyword_score": 2,
+          "selection_score": 70,
+          "runtime_eligible": false,
+          "ablation_eligible": true,
+          "safety_status": "ablation_only"
+        }
+      ],
+      "next_action": "sf2_bounded_probe_ready"
+    },
+    {
+      "capability_id": "claim_gate",
+      "candidate_count": 2,
+      "candidates": [
+        {
+          "skill_id": "nexus-benchmark-continuous-optimization",
+          "confidence": "medium",
+          "score": 4,
+          "route_keyword_score": 4,
+          "selection_score": 204,
+          "runtime_eligible": true,
+          "ablation_eligible": true,
+          "safety_status": "runtime_reviewed"
+        },
+        {
+          "skill_id": "verification-before-completion",
+          "confidence": "high",
+          "score": 9,
+          "route_keyword_score": 1,
+          "selection_score": 69,
+          "runtime_eligible": false,
+          "ablation_eligible": true,
+          "safety_status": "ablation_only"
+        }
+      ],
+      "next_action": "sf2_bounded_probe_ready"
+    },
+    {
+      "capability_id": "codeintel",
+      "candidate_count": 1,
+      "candidates": [
+        {
+          "skill_id": "wondelai-software-design-philosophy",
+          "confidence": "medium",
+          "score": 3,
+          "route_keyword_score": 3,
+          "selection_score": 53,
+          "runtime_eligible": false,
+          "ablation_eligible": true,
+          "safety_status": "ablation_only"
+        }
+      ],
+      "next_action": "sf2_bounded_probe_ready"
+    },
+    {
+      "capability_id": "ddtree",
+      "candidate_count": 1,
+      "candidates": [
+        {
+          "skill_id": "grill-me",
+          "confidence": "medium",
+          "score": 3,
+          "route_keyword_score": 3,
+          "selection_score": 203,
+          "runtime_eligible": true,
+          "ablation_eligible": true,
+          "safety_status": "runtime_reviewed"
+        }
+      ],
+      "next_action": "sf2_bounded_probe_ready"
+    },
+    {
+      "capability_id": "delivery_acceptance_gate",
+      "candidate_count": 1,
+      "candidates": [
+        {
+          "skill_id": "sf2-delivery_acceptance_gate-route-fit-spec",
+          "confidence": "medium",
+          "score": 6,
+          "route_keyword_score": 6,
+          "selection_score": 256,
+          "runtime_eligible": false,
+          "ablation_eligible": true,
+          "safety_status": "ablation_only"
+        }
+      ],
+      "next_action": "sf2_bounded_probe_ready"
+    },
+    {
+      "capability_id": "direct_master_loop",
+      "candidate_count": 1,
+      "candidates": [
+        {
+          "skill_id": "sf2-direct_master_loop-route-fit-spec",
+          "confidence": "high",
+          "score": 8,
+          "route_keyword_score": 8,
+          "selection_score": 268,
+          "runtime_eligible": false,
+          "ablation_eligible": true,
+          "safety_status": "ablation_only"
+        }
+      ],
+      "next_action": "sf2_bounded_probe_ready"
+    },
+    {
+      "capability_id": "drone",
+      "candidate_count": 1,
+      "candidates": [
+        {
+          "skill_id": "sf2-drone-route-fit-spec",
+          "confidence": "medium",
+          "score": 4,
+          "route_keyword_score": 4,
+          "selection_score": 254,
+          "runtime_eligible": false,
+          "ablation_eligible": true,
+          "safety_status": "ablation_only"
+        }
+      ],
+      "next_action": "sf2_bounded_probe_ready"
+    },
+    {
+      "capability_id": "external_productivity",
+      "candidate_count": 1,
+      "candidates": [
+        {
+          "skill_id": "google-workspace",
+          "confidence": "medium",
+          "score": 4,
+          "route_keyword_score": 4,
+          "selection_score": 54,
+          "runtime_eligible": false,
+          "ablation_eligible": true,
+          "safety_status": "ablation_only"
+        }
+      ],
+      "next_action": "sf2_bounded_probe_ready"
+    },
+    {
+      "capability_id": "file_lock_security_gate",
+      "candidate_count": 1,
+      "candidates": [
+        {
+          "skill_id": "sf2-file_lock_security_gate-route-fit-spec",
+          "confidence": "high",
+          "score": 11,
+          "route_keyword_score": 11,
+          "selection_score": 271,
+          "runtime_eligible": false,
+          "ablation_eligible": true,
+          "safety_status": "ablation_only"
+        }
+      ],
+      "next_action": "sf2_bounded_probe_ready"
+    },
+    {
+      "capability_id": "forecast_pregate",
+      "candidate_count": 1,
+      "candidates": [
+        {
+          "skill_id": "sf2-forecast_pregate-route-fit-spec",
+          "confidence": "medium",
+          "score": 7,
+          "route_keyword_score": 7,
+          "selection_score": 257,
+          "runtime_eligible": false,
+          "ablation_eligible": true,
+          "safety_status": "ablation_only"
+        }
+      ],
+      "next_action": "sf2_bounded_probe_ready"
+    },
+    {
+      "capability_id": "hyper_sprint",
+      "candidate_count": 1,
+      "candidates": [
+        {
+          "skill_id": "sf2-hyper_sprint-route-fit-spec",
+          "confidence": "high",
+          "score": 9,
+          "route_keyword_score": 9,
+          "selection_score": 269,
+          "runtime_eligible": false,
+          "ablation_eligible": true,
+          "safety_status": "ablation_only"
+        }
+      ],
+      "next_action": "sf2_bounded_probe_ready"
+    },
+    {
+      "capability_id": "lancedb",
+      "candidate_count": 1,
+      "candidates": [
+        {
+          "skill_id": "sf2-lancedb-route-fit-spec",
+          "confidence": "medium",
+          "score": 6,
+          "route_keyword_score": 6,
+          "selection_score": 256,
+          "runtime_eligible": false,
+          "ablation_eligible": true,
+          "safety_status": "ablation_only"
+        }
+      ],
+      "next_action": "sf2_bounded_probe_ready"
+    },
+    {
+      "capability_id": "learn_ask",
+      "candidate_count": 3,
+      "candidates": [
+        {
+          "skill_id": "baoyu-comic",
+          "confidence": "high",
+          "score": 10,
+          "route_keyword_score": 2,
+          "selection_score": 70,
+          "runtime_eligible": false,
+          "ablation_eligible": true,
+          "safety_status": "ablation_only"
+        },
+        {
+          "skill_id": "gbrain-query",
+          "confidence": "high",
+          "score": 10,
+          "route_keyword_score": 2,
+          "selection_score": 70,
+          "runtime_eligible": false,
+          "ablation_eligible": true,
+          "safety_status": "ablation_only"
+        },
+        {
+          "skill_id": "slack-gif-creator",
+          "confidence": "high",
+          "score": 10,
+          "route_keyword_score": 2,
+          "selection_score": 70,
+          "runtime_eligible": false,
+          "ablation_eligible": true,
+          "safety_status": "ablation_only"
+        }
+      ],
+      "next_action": "sf2_bounded_probe_ready"
+    },
+    {
+      "capability_id": "learning_closure",
+      "candidate_count": 2,
+      "candidates": [
+        {
+          "skill_id": "sf2-learning_closure-route-fit-spec",
+          "confidence": "high",
+          "score": 20,
+          "route_keyword_score": 20,
+          "selection_score": 280,
+          "runtime_eligible": false,
+          "ablation_eligible": true,
+          "safety_status": "ablation_only"
+        },
+        {
+          "skill_id": "sf2-nightshift-route-fit-spec",
+          "confidence": "medium",
+          "score": 3,
+          "route_keyword_score": 3,
+          "selection_score": 253,
+          "runtime_eligible": false,
+          "ablation_eligible": true,
+          "safety_status": "ablation_only"
+        }
+      ],
+      "next_action": "sf2_bounded_probe_ready"
+    },
+    {
+      "capability_id": "memory",
+      "candidate_count": 1,
+      "candidates": [
+        {
+          "skill_id": "sf2-memory-route-fit-spec",
+          "confidence": "medium",
+          "score": 6,
+          "route_keyword_score": 6,
+          "selection_score": 256,
+          "runtime_eligible": false,
+          "ablation_eligible": true,
+          "safety_status": "ablation_only"
+        }
+      ],
+      "next_action": "sf2_bounded_probe_ready"
+    },
+    {
+      "capability_id": "mempalace",
+      "candidate_count": 1,
+      "candidates": [
+        {
+          "skill_id": "sf2-mempalace-route-fit-spec",
+          "confidence": "medium",
+          "score": 6,
+          "route_keyword_score": 6,
+          "selection_score": 256,
+          "runtime_eligible": false,
+          "ablation_eligible": true,
+          "safety_status": "ablation_only"
+        }
+      ],
+      "next_action": "sf2_bounded_probe_ready"
+    },
+    {
+      "capability_id": "metabolism_resume",
+      "candidate_count": 1,
+      "candidates": [
+        {
+          "skill_id": "addy-shipping-and-launch",
+          "confidence": "high",
+          "score": 9,
+          "route_keyword_score": 1,
+          "selection_score": 69,
+          "runtime_eligible": false,
+          "ablation_eligible": true,
+          "safety_status": "ablation_only"
+        }
+      ],
+      "next_action": "sf2_bounded_probe_ready"
+    },
+    {
+      "capability_id": "nightshift",
+      "candidate_count": 2,
+      "candidates": [
+        {
+          "skill_id": "sf2-nightshift-route-fit-spec",
+          "confidence": "high",
+          "score": 16,
+          "route_keyword_score": 16,
+          "selection_score": 276,
+          "runtime_eligible": false,
+          "ablation_eligible": true,
+          "safety_status": "ablation_only"
+        },
+        {
+          "skill_id": "sf2-learning_closure-route-fit-spec",
+          "confidence": "medium",
+          "score": 3,
+          "route_keyword_score": 3,
+          "selection_score": 253,
+          "runtime_eligible": false,
+          "ablation_eligible": true,
+          "safety_status": "ablation_only"
+        }
+      ],
+      "next_action": "sf2_bounded_probe_ready"
+    },
+    {
+      "capability_id": "policy_capability_gate",
+      "candidate_count": 4,
+      "candidates": [
+        {
+          "skill_id": "acceptance-evidence-failclosed",
+          "confidence": "high",
+          "score": 10,
+          "route_keyword_score": 2,
+          "selection_score": 70,
+          "runtime_eligible": false,
+          "ablation_eligible": true,
+          "safety_status": "ablation_only"
+        },
+        {
+          "skill_id": "addy-doubt-driven-development",
+          "confidence": "high",
+          "score": 10,
+          "route_keyword_score": 2,
+          "selection_score": 70,
+          "runtime_eligible": false,
+          "ablation_eligible": true,
+          "safety_status": "ablation_only"
+        },
+        {
+          "skill_id": "browse",
+          "confidence": "high",
+          "score": 10,
+          "route_keyword_score": 2,
+          "selection_score": 70,
+          "runtime_eligible": false,
+          "ablation_eligible": true,
+          "safety_status": "ablation_only"
+        },
+        {
+          "skill_id": "browserbase-browser-trace",
+          "confidence": "high",
+          "score": 10,
+          "route_keyword_score": 2,
+          "selection_score": 70,
+          "runtime_eligible": false,
+          "ablation_eligible": true,
+          "safety_status": "ablation_only"
+        }
+      ],
+      "next_action": "sf2_bounded_probe_ready"
+    },
+    {
+      "capability_id": "registry_skills_sync",
+      "candidate_count": 1,
+      "candidates": [
+        {
+          "skill_id": "sf2-registry_skills_sync-route-fit-spec",
+          "confidence": "high",
+          "score": 8,
+          "route_keyword_score": 8,
+          "selection_score": 268,
+          "runtime_eligible": false,
+          "ablation_eligible": true,
+          "safety_status": "ablation_only"
+        }
+      ],
+      "next_action": "sf2_bounded_probe_ready"
+    },
+    {
+      "capability_id": "regression_guard",
+      "candidate_count": 3,
+      "candidates": [
+        {
+          "skill_id": "benchmark",
+          "confidence": "high",
+          "score": 9,
+          "route_keyword_score": 1,
+          "selection_score": 69,
+          "runtime_eligible": false,
+          "ablation_eligible": true,
+          "safety_status": "ablation_only"
+        },
+        {
+          "skill_id": "gbrain-testing",
+          "confidence": "high",
+          "score": 9,
+          "route_keyword_score": 1,
+          "selection_score": 69,
+          "runtime_eligible": false,
+          "ablation_eligible": true,
+          "safety_status": "ablation_only"
+        },
+        {
+          "skill_id": "gstack-benchmark",
+          "confidence": "high",
+          "score": 9,
+          "route_keyword_score": 1,
+          "selection_score": 69,
+          "runtime_eligible": false,
+          "ablation_eligible": true,
+          "safety_status": "ablation_only"
+        }
+      ],
+      "next_action": "sf2_bounded_probe_ready"
+    },
+    {
+      "capability_id": "repair_loop",
+      "candidate_count": 2,
+      "candidates": [
+        {
+          "skill_id": "tdd",
+          "confidence": "medium",
+          "score": 4,
+          "route_keyword_score": 4,
+          "selection_score": 223,
+          "runtime_eligible": true,
+          "ablation_eligible": true,
+          "safety_status": "runtime_reviewed"
+        },
+        {
+          "skill_id": "diagnose",
+          "confidence": "medium",
+          "score": 3,
+          "route_keyword_score": 3,
+          "selection_score": 203,
+          "runtime_eligible": true,
+          "ablation_eligible": true,
+          "safety_status": "runtime_reviewed"
+        }
+      ],
+      "next_action": "sf2_bounded_probe_ready"
+    },
+    {
+      "capability_id": "research",
+      "candidate_count": 7,
+      "candidates": [
+        {
+          "skill_id": "sf2-research_control_plane-route-fit-spec",
+          "confidence": "medium",
+          "score": 3,
+          "route_keyword_score": 3,
+          "selection_score": 253,
+          "runtime_eligible": false,
+          "ablation_eligible": true,
+          "safety_status": "ablation_only"
+        },
+        {
+          "skill_id": "browserbase-browserbase-cli",
+          "confidence": "high",
+          "score": 13,
+          "route_keyword_score": 5,
+          "selection_score": 73,
+          "runtime_eligible": false,
+          "ablation_eligible": true,
+          "safety_status": "ablation_only"
+        },
+        {
+          "skill_id": "gbrain-academic-verify",
+          "confidence": "high",
+          "score": 13,
+          "route_keyword_score": 5,
+          "selection_score": 73,
+          "runtime_eligible": false,
+          "ablation_eligible": true,
+          "safety_status": "ablation_only"
+        },
+        {
+          "skill_id": "agent-reach",
+          "confidence": "high",
+          "score": 12,
+          "route_keyword_score": 4,
+          "selection_score": 72,
+          "runtime_eligible": false,
+          "ablation_eligible": true,
+          "safety_status": "ablation_only"
+        },
+        {
+          "skill_id": "arxiv",
+          "confidence": "high",
+          "score": 12,
+          "route_keyword_score": 4,
+          "selection_score": 72,
+          "runtime_eligible": false,
+          "ablation_eligible": true,
+          "safety_status": "ablation_only"
+        },
+        {
+          "skill_id": "browserbase-browser",
+          "confidence": "high",
+          "score": 12,
+          "route_keyword_score": 4,
+          "selection_score": 72,
+          "runtime_eligible": false,
+          "ablation_eligible": true,
+          "safety_status": "ablation_only"
+        },
+        {
+          "skill_id": "browserbase-search",
+          "confidence": "high",
+          "score": 12,
+          "route_keyword_score": 4,
+          "selection_score": 72,
+          "runtime_eligible": false,
+          "ablation_eligible": true,
+          "safety_status": "ablation_only"
+        }
+      ],
+      "next_action": "sf2_bounded_probe_ready"
+    },
+    {
+      "capability_id": "research_control_plane",
+      "candidate_count": 1,
+      "candidates": [
+        {
+          "skill_id": "sf2-research_control_plane-route-fit-spec",
+          "confidence": "high",
+          "score": 15,
+          "route_keyword_score": 15,
+          "selection_score": 275,
+          "runtime_eligible": false,
+          "ablation_eligible": true,
+          "safety_status": "ablation_only"
+        }
+      ],
+      "next_action": "sf2_bounded_probe_ready"
+    },
+    {
+      "capability_id": "sandbox_replay",
+      "candidate_count": 2,
+      "candidates": [
+        {
+          "skill_id": "gstack-health",
+          "confidence": "medium",
+          "score": 3,
+          "route_keyword_score": 3,
+          "selection_score": 53,
+          "runtime_eligible": false,
+          "ablation_eligible": true,
+          "safety_status": "ablation_only"
+        },
+        {
+          "skill_id": "health",
+          "confidence": "medium",
+          "score": 3,
+          "route_keyword_score": 3,
+          "selection_score": 53,
+          "runtime_eligible": false,
+          "ablation_eligible": true,
+          "safety_status": "ablation_only"
+        }
+      ],
+      "next_action": "sf2_bounded_probe_ready"
+    },
+    {
+      "capability_id": "swarm_multi_agent",
+      "candidate_count": 1,
+      "candidates": [
+        {
+          "skill_id": "sf2-swarm_multi_agent-route-fit-spec",
+          "confidence": "medium",
+          "score": 6,
+          "route_keyword_score": 6,
+          "selection_score": 256,
+          "runtime_eligible": false,
+          "ablation_eligible": true,
+          "safety_status": "ablation_only"
+        }
+      ],
+      "next_action": "sf2_bounded_probe_ready"
+    },
+    {
+      "capability_id": "ui_validator",
+      "candidate_count": 1,
+      "candidates": [
+        {
+          "skill_id": "wondelai-high-perf-browser",
+          "confidence": "medium",
+          "score": 3,
+          "route_keyword_score": 3,
+          "selection_score": 53,
+          "runtime_eligible": false,
+          "ablation_eligible": true,
+          "safety_status": "ablation_only"
+        }
+      ],
+      "next_action": "sf2_bounded_probe_ready"
+    },
+    {
+      "capability_id": "ultra_review",
+      "candidate_count": 2,
+      "candidates": [
+        {
+          "skill_id": "cso",
+          "confidence": "high",
+          "score": 11,
+          "route_keyword_score": 3,
+          "selection_score": 71,
+          "runtime_eligible": false,
+          "ablation_eligible": true,
+          "safety_status": "ablation_only"
+        },
+        {
+          "skill_id": "gstack-cso",
+          "confidence": "high",
+          "score": 11,
+          "route_keyword_score": 3,
+          "selection_score": 71,
+          "runtime_eligible": false,
+          "ablation_eligible": true,
+          "safety_status": "ablation_only"
+        }
+      ],
+      "next_action": "sf2_bounded_probe_ready"
+    },
+    {
+      "capability_id": "xray",
+      "candidate_count": 5,
+      "candidates": [
+        {
+          "skill_id": "gstack-investigate",
+          "confidence": "medium",
+          "score": 4,
+          "route_keyword_score": 4,
+          "selection_score": 54,
+          "runtime_eligible": false,
+          "ablation_eligible": true,
+          "safety_status": "ablation_only"
+        },
+        {
+          "skill_id": "gstack-openclaw-investigate",
+          "confidence": "medium",
+          "score": 4,
+          "route_keyword_score": 4,
+          "selection_score": 54,
+          "runtime_eligible": false,
+          "ablation_eligible": true,
+          "safety_status": "ablation_only"
+        },
+        {
+          "skill_id": "investigate",
+          "confidence": "medium",
+          "score": 4,
+          "route_keyword_score": 4,
+          "selection_score": 54,
+          "runtime_eligible": false,
+          "ablation_eligible": true,
+          "safety_status": "ablation_only"
+        },
+        {
+          "skill_id": "systematic-debugging",
+          "confidence": "medium",
+          "score": 3,
+          "route_keyword_score": 3,
+          "selection_score": 53,
+          "runtime_eligible": false,
+          "ablation_eligible": true,
+          "safety_status": "ablation_only"
+        },
+        {
+          "skill_id": "workos-live-preview-debug-loop",
+          "confidence": "medium",
+          "score": 3,
+          "route_keyword_score": 3,
+          "selection_score": 53,
+          "runtime_eligible": false,
+          "ablation_eligible": true,
+          "safety_status": "ablation_only"
+        }
+      ],
+      "next_action": "sf2_bounded_probe_ready"
+    }
+  ],
+  "blocked_shortlists": [],
+  "candidates": [
+    {
+      "capability_id": "direct_master_loop",
+      "skill_id": "sf2-direct_master_loop-route-fit-spec",
+      "status": "PASS",
+      "confidence": "high",
+      "score": 8,
+      "route_keyword_score": 8,
+      "match_reasons": [
+        "route_keyword_score:8"
+      ],
+      "review_reasons": [],
+      "selection_score": 268,
+      "runtime_eligible": false,
+      "ablation_eligible": true,
+      "safety_status": "ablation_only"
+    },
+    {
+      "capability_id": "direct_master_loop",
+      "skill_id": "sf2-nightshift-route-fit-spec",
+      "status": "REVIEW_REQUIRED",
+      "confidence": "low",
+      "score": 1,
+      "route_keyword_score": 1,
+      "match_reasons": [
+        "route_keyword_score:1"
+      ],
+      "review_reasons": [
+        "weak_match_confidence:low",
+        "weak_match_score:1"
+      ],
+      "selection_score": 241,
+      "runtime_eligible": false,
+      "ablation_eligible": true,
+      "safety_status": "ablation_only"
+    },
+    {
+      "capability_id": "direct_master_loop",
+      "skill_id": "nexus-goal-closure-executor",
+      "status": "REVIEW_REQUIRED",
+      "confidence": "low",
+      "score": 2,
+      "route_keyword_score": 2,
+      "match_reasons": [
+        "route_keyword_score:2"
+      ],
+      "review_reasons": [
+        "weak_match_confidence:low",
+        "weak_match_score:2"
+      ],
+      "selection_score": 192,
+      "runtime_eligible": true,
+      "ablation_eligible": true,
+      "safety_status": "runtime_reviewed"
+    },
+    {
+      "capability_id": "direct_master_loop",
+      "skill_id": "subagent-driven-development",
+      "status": "REVIEW_REQUIRED",
+      "confidence": "low",
+      "score": 2,
+      "route_keyword_score": 2,
+      "match_reasons": [
+        "route_keyword_score:2"
+      ],
+      "review_reasons": [
+        "weak_match_confidence:low",
+        "weak_match_score:2"
+      ],
+      "selection_score": 42,
+      "runtime_eligible": false,
+      "ablation_eligible": true,
+      "safety_status": "ablation_only"
+    },
+    {
+      "capability_id": "direct_master_loop",
+      "skill_id": "aibdd.auto.python.e2e.green",
+      "status": "REVIEW_REQUIRED",
+      "confidence": "low",
+      "score": 1,
+      "route_keyword_score": 1,
+      "match_reasons": [
+        "route_keyword_score:1"
+      ],
+      "review_reasons": [
+        "weak_match_confidence:low",
+        "weak_match_score:1"
+      ],
+      "selection_score": 41,
+      "runtime_eligible": false,
+      "ablation_eligible": true,
+      "safety_status": "ablation_only"
+    },
+    {
+      "capability_id": "direct_master_loop",
+      "skill_id": "aibdd.auto.python.e2e.handlers.aggregate-given",
+      "status": "REVIEW_REQUIRED",
+      "confidence": "low",
+      "score": 1,
+      "route_keyword_score": 1,
+      "match_reasons": [
+        "route_keyword_score:1"
+      ],
+      "review_reasons": [
+        "weak_match_confidence:low",
+        "weak_match_score:1"
+      ],
+      "selection_score": 41,
+      "runtime_eligible": false,
+      "ablation_eligible": true,
+      "safety_status": "ablation_only"
+    },
+    {
+      "capability_id": "direct_master_loop",
+      "skill_id": "aibdd.auto.python.e2e.handlers.aggregate-then",
+      "status": "REVIEW_REQUIRED",
+      "confidence": "low",
+      "score": 1,
+      "route_keyword_score": 1,
+      "match_reasons": [
+        "route_keyword_score:1"
+      ],
+      "review_reasons": [
+        "weak_match_confidence:low",
+        "weak_match_score:1"
+      ],
+      "selection_score": 41,
+      "runtime_eligible": false,
+      "ablation_eligible": true,
+      "safety_status": "ablation_only"
+    },
+    {
+      "capability_id": "direct_master_loop",
+      "skill_id": "aibdd.auto.python.e2e.handlers.command",
+      "status": "REVIEW_REQUIRED",
+      "confidence": "low",
+      "score": 1,
+      "route_keyword_score": 1,
+      "match_reasons": [
+        "route_keyword_score:1"
+      ],
+      "review_reasons": [
+        "weak_match_confidence:low",
+        "weak_match_score:1"
+      ],
+      "selection_score": 41,
+      "runtime_eligible": false,
+      "ablation_eligible": true,
+      "safety_status": "ablation_only"
+    },
+    {
+      "capability_id": "repair_loop",
+      "skill_id": "sf2-hyper_sprint-route-fit-spec",
+      "status": "REVIEW_REQUIRED",
+      "confidence": "low",
+      "score": 2,
+      "route_keyword_score": 2,
+      "match_reasons": [
+        "route_keyword_score:2"
+      ],
+      "review_reasons": [
+        "weak_match_confidence:low",
+        "weak_match_score:2"
+      ],
+      "selection_score": 242,
+      "runtime_eligible": false,
+      "ablation_eligible": true,
+      "safety_status": "ablation_only"
+    },
+    {
+      "capability_id": "repair_loop",
+      "skill_id": "sf2-nightshift-route-fit-spec",
+      "status": "REVIEW_REQUIRED",
+      "confidence": "low",
+      "score": 1,
+      "route_keyword_score": 1,
+      "match_reasons": [
+        "route_keyword_score:1"
+      ],
+      "review_reasons": [
+        "weak_match_confidence:low",
+        "weak_match_score:1"
+      ],
+      "selection_score": 241,
+      "runtime_eligible": false,
+      "ablation_eligible": true,
+      "safety_status": "ablation_only"
+    },
+    {
+      "capability_id": "repair_loop",
+      "skill_id": "tdd",
+      "status": "PASS",
+      "confidence": "medium",
+      "score": 4,
+      "route_keyword_score": 4,
+      "match_reasons": [
+        "route_keyword_score:4"
+      ],
+      "review_reasons": [],
+      "selection_score": 223,
+      "runtime_eligible": true,
+      "ablation_eligible": true,
+      "safety_status": "runtime_reviewed"
+    },
+    {
+      "capability_id": "repair_loop",
+      "skill_id": "grill-me",
+      "status": "REVIEW_REQUIRED",
+      "confidence": "low",
+      "score": 1,
+      "route_keyword_score": 1,
+      "match_reasons": [
+        "route_keyword_score:1"
+      ],
+      "review_reasons": [
+        "weak_match_confidence:low",
+        "weak_match_score:1"
+      ],
+      "selection_score": 220,
+      "runtime_eligible": true,
+      "ablation_eligible": true,
+      "safety_status": "runtime_reviewed"
+    },
+    {
+      "capability_id": "repair_loop",
+      "skill_id": "grill-with-docs",
+      "status": "REVIEW_REQUIRED",
+      "confidence": "low",
+      "score": 1,
+      "route_keyword_score": 1,
+      "match_reasons": [
+        "route_keyword_score:1"
+      ],
+      "review_reasons": [
+        "weak_match_confidence:low",
+        "weak_match_score:1"
+      ],
+      "selection_score": 220,
+      "runtime_eligible": true,
+      "ablation_eligible": true,
+      "safety_status": "runtime_reviewed"
+    },
+    {
+      "capability_id": "repair_loop",
+      "skill_id": "improve-codebase-architecture",
+      "status": "REVIEW_REQUIRED",
+      "confidence": "missing",
+      "score": 0,
+      "route_keyword_score": 0,
+      "match_reasons": [],
+      "review_reasons": [
+        "weak_match_confidence:missing",
+        "weak_match_score:0",
+        "insufficient_route_keyword_score:0"
+      ],
+      "selection_score": 219,
+      "runtime_eligible": true,
+      "ablation_eligible": true,
+      "safety_status": "runtime_reviewed"
+    },
+    {
+      "capability_id": "repair_loop",
+      "skill_id": "zoom-out",
+      "status": "REVIEW_REQUIRED",
+      "confidence": "missing",
+      "score": 0,
+      "route_keyword_score": 0,
+      "match_reasons": [],
+      "review_reasons": [
+        "weak_match_confidence:missing",
+        "weak_match_score:0",
+        "insufficient_route_keyword_score:0"
+      ],
+      "selection_score": 219,
+      "runtime_eligible": true,
+      "ablation_eligible": true,
+      "safety_status": "runtime_reviewed"
+    },
+    {
+      "capability_id": "repair_loop",
+      "skill_id": "diagnose",
+      "status": "PASS",
+      "confidence": "medium",
+      "score": 3,
+      "route_keyword_score": 3,
+      "match_reasons": [
+        "route_keyword_score:3"
+      ],
+      "review_reasons": [],
+      "selection_score": 203,
+      "runtime_eligible": true,
+      "ablation_eligible": true,
+      "safety_status": "runtime_reviewed"
+    },
+    {
+      "capability_id": "hyper_sprint",
+      "skill_id": "sf2-hyper_sprint-route-fit-spec",
+      "status": "PASS",
+      "confidence": "high",
+      "score": 9,
+      "route_keyword_score": 9,
+      "match_reasons": [
+        "route_keyword_score:9"
+      ],
+      "review_reasons": [],
+      "selection_score": 269,
+      "runtime_eligible": false,
+      "ablation_eligible": true,
+      "safety_status": "ablation_only"
+    },
+    {
+      "capability_id": "hyper_sprint",
+      "skill_id": "gstack-retro",
+      "status": "REVIEW_REQUIRED",
+      "confidence": "low",
+      "score": 1,
+      "route_keyword_score": 1,
+      "match_reasons": [
+        "route_keyword_score:1"
+      ],
+      "review_reasons": [
+        "weak_match_confidence:low",
+        "weak_match_score:1"
+      ],
+      "selection_score": 41,
+      "runtime_eligible": false,
+      "ablation_eligible": true,
+      "safety_status": "ablation_only"
+    },
+    {
+      "capability_id": "hyper_sprint",
+      "skill_id": "retro",
+      "status": "REVIEW_REQUIRED",
+      "confidence": "low",
+      "score": 1,
+      "route_keyword_score": 1,
+      "match_reasons": [
+        "route_keyword_score:1"
+      ],
+      "review_reasons": [
+        "weak_match_confidence:low",
+        "weak_match_score:1"
+      ],
+      "selection_score": 41,
+      "runtime_eligible": false,
+      "ablation_eligible": true,
+      "safety_status": "ablation_only"
+    },
+    {
+      "capability_id": "hyper_sprint",
+      "skill_id": "wondelai-design-sprint",
+      "status": "REVIEW_REQUIRED",
+      "confidence": "low",
+      "score": 1,
+      "route_keyword_score": 1,
+      "match_reasons": [
+        "route_keyword_score:1"
+      ],
+      "review_reasons": [
+        "weak_match_confidence:low",
+        "weak_match_score:1"
+      ],
+      "selection_score": 41,
+      "runtime_eligible": false,
+      "ablation_eligible": true,
+      "safety_status": "ablation_only"
+    },
+    {
+      "capability_id": "hyper_sprint",
+      "skill_id": "wondelai-lean-startup",
+      "status": "REVIEW_REQUIRED",
+      "confidence": "low",
+      "score": 1,
+      "route_keyword_score": 1,
+      "match_reasons": [
+        "route_keyword_score:1"
+      ],
+      "review_reasons": [
+        "weak_match_confidence:low",
+        "weak_match_score:1"
+      ],
+      "selection_score": 41,
+      "runtime_eligible": false,
+      "ablation_eligible": true,
+      "safety_status": "ablation_only"
+    },
+    {
+      "capability_id": "hyper_sprint",
+      "skill_id": "wondelai-mom-test",
+      "status": "REVIEW_REQUIRED",
+      "confidence": "low",
+      "score": 1,
+      "route_keyword_score": 1,
+      "match_reasons": [
+        "route_keyword_score:1"
+      ],
+      "review_reasons": [
+        "weak_match_confidence:low",
+        "weak_match_score:1"
+      ],
+      "selection_score": 41,
+      "runtime_eligible": false,
+      "ablation_eligible": true,
+      "safety_status": "ablation_only"
+    },
+    {
+      "capability_id": "nightshift",
+      "skill_id": "sf2-nightshift-route-fit-spec",
+      "status": "PASS",
+      "confidence": "high",
+      "score": 16,
+      "route_keyword_score": 16,
+      "match_reasons": [
+        "route_keyword_score:16"
+      ],
+      "review_reasons": [],
+      "selection_score": 276,
+      "runtime_eligible": false,
+      "ablation_eligible": true,
+      "safety_status": "ablation_only"
+    },
+    {
+      "capability_id": "nightshift",
+      "skill_id": "sf2-learning_closure-route-fit-spec",
+      "status": "PASS",
+      "confidence": "medium",
+      "score": 3,
+      "route_keyword_score": 3,
+      "match_reasons": [
+        "route_keyword_score:3"
+      ],
+      "review_reasons": [],
+      "selection_score": 253,
+      "runtime_eligible": false,
+      "ablation_eligible": true,
+      "safety_status": "ablation_only"
+    },
+    {
+      "capability_id": "codeintel",
+      "skill_id": "improve-codebase-architecture",
+      "status": "REVIEW_REQUIRED",
+      "confidence": "low",
+      "score": 1,
+      "route_keyword_score": 1,
+      "match_reasons": [
+        "route_keyword_score:1"
+      ],
+      "review_reasons": [
+        "weak_match_confidence:low",
+        "weak_match_score:1"
+      ],
+      "selection_score": 191,
+      "runtime_eligible": true,
+      "ablation_eligible": true,
+      "safety_status": "runtime_reviewed"
+    },
+    {
+      "capability_id": "codeintel",
+      "skill_id": "setup-matt-pocock-skills",
+      "status": "REVIEW_REQUIRED",
+      "confidence": "low",
+      "score": 1,
+      "route_keyword_score": 1,
+      "match_reasons": [
+        "route_keyword_score:1"
+      ],
+      "review_reasons": [
+        "weak_match_confidence:low",
+        "weak_match_score:1"
+      ],
+      "selection_score": 191,
+      "runtime_eligible": true,
+      "ablation_eligible": true,
+      "safety_status": "runtime_reviewed"
+    },
+    {
+      "capability_id": "codeintel",
+      "skill_id": "wondelai-software-design-philosophy",
+      "status": "PASS",
+      "confidence": "medium",
+      "score": 3,
+      "route_keyword_score": 3,
+      "match_reasons": [
+        "route_keyword_score:3"
+      ],
+      "review_reasons": [],
+      "selection_score": 53,
+      "runtime_eligible": false,
+      "ablation_eligible": true,
+      "safety_status": "ablation_only"
+    },
+    {
+      "capability_id": "codeintel",
+      "skill_id": "wondelai-ux-heuristics",
+      "status": "REVIEW_REQUIRED",
+      "confidence": "low",
+      "score": 2,
+      "route_keyword_score": 2,
+      "match_reasons": [
+        "route_keyword_score:2"
+      ],
+      "review_reasons": [
+        "weak_match_confidence:low",
+        "weak_match_score:2"
+      ],
+      "selection_score": 42,
+      "runtime_eligible": false,
+      "ablation_eligible": true,
+      "safety_status": "ablation_only"
+    },
+    {
+      "capability_id": "codeintel",
+      "skill_id": "aibdd.auto.python.e2e.schema-analysis",
+      "status": "REVIEW_REQUIRED",
+      "confidence": "low",
+      "score": 1,
+      "route_keyword_score": 1,
+      "match_reasons": [
+        "route_keyword_score:1"
+      ],
+      "review_reasons": [
+        "weak_match_confidence:low",
+        "weak_match_score:1"
+      ],
+      "selection_score": 41,
+      "runtime_eligible": false,
+      "ablation_eligible": true,
+      "safety_status": "ablation_only"
+    },
+    {
+      "capability_id": "codeintel",
+      "skill_id": "architecture-diagram",
+      "status": "REVIEW_REQUIRED",
+      "confidence": "low",
+      "score": 1,
+      "route_keyword_score": 1,
+      "match_reasons": [
+        "route_keyword_score:1"
+      ],
+      "review_reasons": [
+        "weak_match_confidence:low",
+        "weak_match_score:1"
+      ],
+      "selection_score": 41,
+      "runtime_eligible": false,
+      "ablation_eligible": true,
+      "safety_status": "ablation_only"
+    },
+    {
+      "capability_id": "codeintel",
+      "skill_id": "browserbase-browserbase-cli",
+      "status": "REVIEW_REQUIRED",
+      "confidence": "low",
+      "score": 1,
+      "route_keyword_score": 1,
+      "match_reasons": [
+        "route_keyword_score:1"
+      ],
+      "review_reasons": [
+        "weak_match_confidence:low",
+        "weak_match_score:1"
+      ],
+      "selection_score": 41,
+      "runtime_eligible": false,
+      "ablation_eligible": true,
+      "safety_status": "ablation_only"
+    },
+    {
+      "capability_id": "codeintel",
+      "skill_id": "browserbase-company-research",
+      "status": "REVIEW_REQUIRED",
+      "confidence": "low",
+      "score": 1,
+      "route_keyword_score": 1,
+      "match_reasons": [
+        "route_keyword_score:1"
+      ],
+      "review_reasons": [
+        "weak_match_confidence:low",
+        "weak_match_score:1"
+      ],
+      "selection_score": 41,
+      "runtime_eligible": false,
+      "ablation_eligible": true,
+      "safety_status": "ablation_only"
+    },
+    {
+      "capability_id": "research",
+      "skill_id": "sf2-research_control_plane-route-fit-spec",
+      "status": "PASS",
+      "confidence": "medium",
+      "score": 3,
+      "route_keyword_score": 3,
+      "match_reasons": [
+        "route_keyword_score:3"
+      ],
+      "review_reasons": [],
+      "selection_score": 253,
+      "runtime_eligible": false,
+      "ablation_eligible": true,
+      "safety_status": "ablation_only"
+    },
+    {
+      "capability_id": "research",
+      "skill_id": "sf2-lancedb-route-fit-spec",
+      "status": "REVIEW_REQUIRED",
+      "confidence": "low",
+      "score": 1,
+      "route_keyword_score": 1,
+      "match_reasons": [
+        "route_keyword_score:1"
+      ],
+      "review_reasons": [
+        "weak_match_confidence:low",
+        "weak_match_score:1"
+      ],
+      "selection_score": 241,
+      "runtime_eligible": false,
+      "ablation_eligible": true,
+      "safety_status": "ablation_only"
+    },
+    {
+      "capability_id": "research",
+      "skill_id": "browserbase-browserbase-cli",
+      "status": "PASS",
+      "confidence": "high",
+      "score": 13,
+      "route_keyword_score": 5,
+      "match_reasons": [
+        "route_keyword_score:5",
+        "legacy_hint:research_and_source_discipline"
+      ],
+      "review_reasons": [],
+      "selection_score": 73,
+      "runtime_eligible": false,
+      "ablation_eligible": true,
+      "safety_status": "ablation_only"
+    },
+    {
+      "capability_id": "research",
+      "skill_id": "gbrain-academic-verify",
+      "status": "PASS",
+      "confidence": "high",
+      "score": 13,
+      "route_keyword_score": 5,
+      "match_reasons": [
+        "route_keyword_score:5",
+        "legacy_hint:research_and_source_discipline"
+      ],
+      "review_reasons": [],
+      "selection_score": 73,
+      "runtime_eligible": false,
+      "ablation_eligible": true,
+      "safety_status": "ablation_only"
+    },
+    {
+      "capability_id": "research",
+      "skill_id": "agent-reach",
+      "status": "PASS",
+      "confidence": "high",
+      "score": 12,
+      "route_keyword_score": 4,
+      "match_reasons": [
+        "route_keyword_score:4",
+        "legacy_hint:research_and_source_discipline"
+      ],
+      "review_reasons": [],
+      "selection_score": 72,
+      "runtime_eligible": false,
+      "ablation_eligible": true,
+      "safety_status": "ablation_only"
+    },
+    {
+      "capability_id": "research",
+      "skill_id": "arxiv",
+      "status": "PASS",
+      "confidence": "high",
+      "score": 12,
+      "route_keyword_score": 4,
+      "match_reasons": [
+        "route_keyword_score:4",
+        "legacy_hint:research_and_source_discipline"
+      ],
+      "review_reasons": [],
+      "selection_score": 72,
+      "runtime_eligible": false,
+      "ablation_eligible": true,
+      "safety_status": "ablation_only"
+    },
+    {
+      "capability_id": "research",
+      "skill_id": "browserbase-browser",
+      "status": "PASS",
+      "confidence": "high",
+      "score": 12,
+      "route_keyword_score": 4,
+      "match_reasons": [
+        "route_keyword_score:4",
+        "legacy_hint:research_and_source_discipline"
+      ],
+      "review_reasons": [],
+      "selection_score": 72,
+      "runtime_eligible": false,
+      "ablation_eligible": true,
+      "safety_status": "ablation_only"
+    },
+    {
+      "capability_id": "research",
+      "skill_id": "browserbase-search",
+      "status": "PASS",
+      "confidence": "high",
+      "score": 12,
+      "route_keyword_score": 4,
+      "match_reasons": [
+        "route_keyword_score:4",
+        "legacy_hint:research_and_source_discipline"
+      ],
+      "review_reasons": [],
+      "selection_score": 72,
+      "runtime_eligible": false,
+      "ablation_eligible": true,
+      "safety_status": "ablation_only"
+    },
+    {
+      "capability_id": "research_control_plane",
+      "skill_id": "sf2-research_control_plane-route-fit-spec",
+      "status": "PASS",
+      "confidence": "high",
+      "score": 15,
+      "route_keyword_score": 15,
+      "match_reasons": [
+        "route_keyword_score:15"
+      ],
+      "review_reasons": [],
+      "selection_score": 275,
+      "runtime_eligible": false,
+      "ablation_eligible": true,
+      "safety_status": "ablation_only"
+    },
+    {
+      "capability_id": "research_control_plane",
+      "skill_id": "agent-reach",
+      "status": "REVIEW_REQUIRED",
+      "confidence": "high",
+      "score": 8,
+      "route_keyword_score": 0,
+      "match_reasons": [
+        "legacy_hint:research_and_source_discipline"
+      ],
+      "review_reasons": [
+        "insufficient_route_keyword_score:0"
+      ],
+      "selection_score": 68,
+      "runtime_eligible": false,
+      "ablation_eligible": true,
+      "safety_status": "ablation_only"
+    },
+    {
+      "capability_id": "research_control_plane",
+      "skill_id": "aibdd.auto.python.e2e.green",
+      "status": "REVIEW_REQUIRED",
+      "confidence": "high",
+      "score": 8,
+      "route_keyword_score": 0,
+      "match_reasons": [
+        "legacy_hint:research_and_source_discipline"
+      ],
+      "review_reasons": [
+        "insufficient_route_keyword_score:0"
+      ],
+      "selection_score": 68,
+      "runtime_eligible": false,
+      "ablation_eligible": true,
+      "safety_status": "ablation_only"
+    },
+    {
+      "capability_id": "research_control_plane",
+      "skill_id": "aibdd.auto.python.e2e.handlers.aggregate-given",
+      "status": "REVIEW_REQUIRED",
+      "confidence": "high",
+      "score": 8,
+      "route_keyword_score": 0,
+      "match_reasons": [
+        "legacy_hint:research_and_source_discipline"
+      ],
+      "review_reasons": [
+        "insufficient_route_keyword_score:0"
+      ],
+      "selection_score": 68,
+      "runtime_eligible": false,
+      "ablation_eligible": true,
+      "safety_status": "ablation_only"
+    },
+    {
+      "capability_id": "research_control_plane",
+      "skill_id": "aibdd.auto.python.e2e.handlers.aggregate-then",
+      "status": "REVIEW_REQUIRED",
+      "confidence": "high",
+      "score": 8,
+      "route_keyword_score": 0,
+      "match_reasons": [
+        "legacy_hint:research_and_source_discipline"
+      ],
+      "review_reasons": [
+        "insufficient_route_keyword_score:0"
+      ],
+      "selection_score": 68,
+      "runtime_eligible": false,
+      "ablation_eligible": true,
+      "safety_status": "ablation_only"
+    },
+    {
+      "capability_id": "research_control_plane",
+      "skill_id": "aibdd.auto.python.e2e.handlers.command",
+      "status": "REVIEW_REQUIRED",
+      "confidence": "high",
+      "score": 8,
+      "route_keyword_score": 0,
+      "match_reasons": [
+        "legacy_hint:research_and_source_discipline"
+      ],
+      "review_reasons": [
+        "insufficient_route_keyword_score:0"
+      ],
+      "selection_score": 68,
+      "runtime_eligible": false,
+      "ablation_eligible": true,
+      "safety_status": "ablation_only"
+    },
+    {
+      "capability_id": "research_control_plane",
+      "skill_id": "aibdd.auto.python.e2e.handlers.query",
+      "status": "REVIEW_REQUIRED",
+      "confidence": "high",
+      "score": 8,
+      "route_keyword_score": 0,
+      "match_reasons": [
+        "legacy_hint:research_and_source_discipline"
+      ],
+      "review_reasons": [
+        "insufficient_route_keyword_score:0"
+      ],
+      "selection_score": 68,
+      "runtime_eligible": false,
+      "ablation_eligible": true,
+      "safety_status": "ablation_only"
+    },
+    {
+      "capability_id": "research_control_plane",
+      "skill_id": "aibdd.auto.python.e2e.handlers.readmodel-then",
+      "status": "REVIEW_REQUIRED",
+      "confidence": "high",
+      "score": 8,
+      "route_keyword_score": 0,
+      "match_reasons": [
+        "legacy_hint:research_and_source_discipline"
+      ],
+      "review_reasons": [
+        "insufficient_route_keyword_score:0"
+      ],
+      "selection_score": 68,
+      "runtime_eligible": false,
+      "ablation_eligible": true,
+      "safety_status": "ablation_only"
+    },
+    {
+      "capability_id": "xray",
+      "skill_id": "gstack-investigate",
+      "status": "PASS",
+      "confidence": "medium",
+      "score": 4,
+      "route_keyword_score": 4,
+      "match_reasons": [
+        "route_keyword_score:4"
+      ],
+      "review_reasons": [],
+      "selection_score": 54,
+      "runtime_eligible": false,
+      "ablation_eligible": true,
+      "safety_status": "ablation_only"
+    },
+    {
+      "capability_id": "xray",
+      "skill_id": "gstack-openclaw-investigate",
+      "status": "PASS",
+      "confidence": "medium",
+      "score": 4,
+      "route_keyword_score": 4,
+      "match_reasons": [
+        "route_keyword_score:4"
+      ],
+      "review_reasons": [],
+      "selection_score": 54,
+      "runtime_eligible": false,
+      "ablation_eligible": true,
+      "safety_status": "ablation_only"
+    },
+    {
+      "capability_id": "xray",
+      "skill_id": "investigate",
+      "status": "PASS",
+      "confidence": "medium",
+      "score": 4,
+      "route_keyword_score": 4,
+      "match_reasons": [
+        "route_keyword_score:4"
+      ],
+      "review_reasons": [],
+      "selection_score": 54,
+      "runtime_eligible": false,
+      "ablation_eligible": true,
+      "safety_status": "ablation_only"
+    },
+    {
+      "capability_id": "xray",
+      "skill_id": "systematic-debugging",
+      "status": "PASS",
+      "confidence": "medium",
+      "score": 3,
+      "route_keyword_score": 3,
+      "match_reasons": [
+        "route_keyword_score:3"
+      ],
+      "review_reasons": [],
+      "selection_score": 53,
+      "runtime_eligible": false,
+      "ablation_eligible": true,
+      "safety_status": "ablation_only"
+    },
+    {
+      "capability_id": "xray",
+      "skill_id": "workos-live-preview-debug-loop",
+      "status": "PASS",
+      "confidence": "medium",
+      "score": 3,
+      "route_keyword_score": 3,
+      "match_reasons": [
+        "route_keyword_score:3"
+      ],
+      "review_reasons": [],
+      "selection_score": 53,
+      "runtime_eligible": false,
+      "ablation_eligible": true,
+      "safety_status": "ablation_only"
+    },
+    {
+      "capability_id": "xray",
+      "skill_id": "addy-browser-testing-with-devtools",
+      "status": "REVIEW_REQUIRED",
+      "confidence": "low",
+      "score": 1,
+      "route_keyword_score": 1,
+      "match_reasons": [
+        "route_keyword_score:1"
+      ],
+      "review_reasons": [
+        "weak_match_confidence:low",
+        "weak_match_score:1"
+      ],
+      "selection_score": 41,
+      "runtime_eligible": false,
+      "ablation_eligible": true,
+      "safety_status": "ablation_only"
+    },
+    {
+      "capability_id": "xray",
+      "skill_id": "browserbase-fetch",
+      "status": "REVIEW_REQUIRED",
+      "confidence": "low",
+      "score": 1,
+      "route_keyword_score": 1,
+      "match_reasons": [
+        "route_keyword_score:1"
+      ],
+      "review_reasons": [
+        "weak_match_confidence:low",
+        "weak_match_score:1"
+      ],
+      "selection_score": 41,
+      "runtime_eligible": false,
+      "ablation_eligible": true,
+      "safety_status": "ablation_only"
+    },
+    {
+      "capability_id": "xray",
+      "skill_id": "codebase-inspection",
+      "status": "REVIEW_REQUIRED",
+      "confidence": "low",
+      "score": 1,
+      "route_keyword_score": 1,
+      "match_reasons": [
+        "route_keyword_score:1"
+      ],
+      "review_reasons": [
+        "weak_match_confidence:low",
+        "weak_match_score:1"
+      ],
+      "selection_score": 41,
+      "runtime_eligible": false,
+      "ablation_eligible": true,
+      "safety_status": "ablation_only"
+    },
+    {
+      "capability_id": "learn_ask",
+      "skill_id": "notebooklm-bulk-injector",
+      "status": "REVIEW_REQUIRED",
+      "confidence": "missing",
+      "score": 0,
+      "route_keyword_score": 0,
+      "match_reasons": [],
+      "review_reasons": [
+        "weak_match_confidence:missing",
+        "weak_match_score:0",
+        "insufficient_route_keyword_score:0"
+      ],
+      "selection_score": 220,
+      "runtime_eligible": true,
+      "ablation_eligible": true,
+      "safety_status": "runtime_reviewed"
+    },
+    {
+      "capability_id": "learn_ask",
+      "skill_id": "notebooklm-context-bridge",
+      "status": "REVIEW_REQUIRED",
+      "confidence": "missing",
+      "score": 0,
+      "route_keyword_score": 0,
+      "match_reasons": [],
+      "review_reasons": [
+        "weak_match_confidence:missing",
+        "weak_match_score:0",
+        "insufficient_route_keyword_score:0"
+      ],
+      "selection_score": 220,
+      "runtime_eligible": true,
+      "ablation_eligible": true,
+      "safety_status": "runtime_reviewed"
+    },
+    {
+      "capability_id": "learn_ask",
+      "skill_id": "nexus-capability-upgrade",
+      "status": "REVIEW_REQUIRED",
+      "confidence": "low",
+      "score": 1,
+      "route_keyword_score": 1,
+      "match_reasons": [
+        "route_keyword_score:1"
+      ],
+      "review_reasons": [
+        "weak_match_confidence:low",
+        "weak_match_score:1"
+      ],
+      "selection_score": 191,
+      "runtime_eligible": true,
+      "ablation_eligible": true,
+      "safety_status": "runtime_reviewed"
+    },
+    {
+      "capability_id": "learn_ask",
+      "skill_id": "nexus-root-cause-probe",
+      "status": "REVIEW_REQUIRED",
+      "confidence": "low",
+      "score": 1,
+      "route_keyword_score": 1,
+      "match_reasons": [
+        "route_keyword_score:1"
+      ],
+      "review_reasons": [
+        "weak_match_confidence:low",
+        "weak_match_score:1"
+      ],
+      "selection_score": 191,
+      "runtime_eligible": true,
+      "ablation_eligible": true,
+      "safety_status": "runtime_reviewed"
+    },
+    {
+      "capability_id": "learn_ask",
+      "skill_id": "baoyu-comic",
+      "status": "PASS",
+      "confidence": "high",
+      "score": 10,
+      "route_keyword_score": 2,
+      "match_reasons": [
+        "route_keyword_score:2",
+        "legacy_hint:notebook_and_knowledge_injection"
+      ],
+      "review_reasons": [],
+      "selection_score": 70,
+      "runtime_eligible": false,
+      "ablation_eligible": true,
+      "safety_status": "ablation_only"
+    },
+    {
+      "capability_id": "learn_ask",
+      "skill_id": "gbrain-query",
+      "status": "PASS",
+      "confidence": "high",
+      "score": 10,
+      "route_keyword_score": 2,
+      "match_reasons": [
+        "route_keyword_score:2",
+        "legacy_hint:notebook_and_knowledge_injection"
+      ],
+      "review_reasons": [],
+      "selection_score": 70,
+      "runtime_eligible": false,
+      "ablation_eligible": true,
+      "safety_status": "ablation_only"
+    },
+    {
+      "capability_id": "learn_ask",
+      "skill_id": "slack-gif-creator",
+      "status": "PASS",
+      "confidence": "high",
+      "score": 10,
+      "route_keyword_score": 2,
+      "match_reasons": [
+        "route_keyword_score:2",
+        "legacy_hint:notebook_and_knowledge_injection"
+      ],
+      "review_reasons": [],
+      "selection_score": 70,
+      "runtime_eligible": false,
+      "ablation_eligible": true,
+      "safety_status": "ablation_only"
+    },
+    {
+      "capability_id": "learn_ask",
+      "skill_id": "nexus-live-ask-replay-normalization-gate",
+      "status": "REVIEW_REQUIRED",
+      "confidence": "low",
+      "score": 2,
+      "route_keyword_score": 2,
+      "match_reasons": [
+        "route_keyword_score:2"
+      ],
+      "review_reasons": [
+        "weak_match_confidence:low",
+        "weak_match_score:2"
+      ],
+      "selection_score": 42,
+      "runtime_eligible": false,
+      "ablation_eligible": true,
+      "safety_status": "ablation_only"
+    },
+    {
+      "capability_id": "lancedb",
+      "skill_id": "sf2-lancedb-route-fit-spec",
+      "status": "PASS",
+      "confidence": "medium",
+      "score": 6,
+      "route_keyword_score": 6,
+      "match_reasons": [
+        "route_keyword_score:6"
+      ],
+      "review_reasons": [],
+      "selection_score": 256,
+      "runtime_eligible": false,
+      "ablation_eligible": true,
+      "safety_status": "ablation_only"
+    },
+    {
+      "capability_id": "lancedb",
+      "skill_id": "sf2-autoreason-route-fit-spec",
+      "status": "REVIEW_REQUIRED",
+      "confidence": "low",
+      "score": 1,
+      "route_keyword_score": 1,
+      "match_reasons": [
+        "route_keyword_score:1"
+      ],
+      "review_reasons": [
+        "weak_match_confidence:low",
+        "weak_match_score:1"
+      ],
+      "selection_score": 241,
+      "runtime_eligible": false,
+      "ablation_eligible": true,
+      "safety_status": "ablation_only"
+    },
+    {
+      "capability_id": "lancedb",
+      "skill_id": "dspy",
+      "status": "REVIEW_REQUIRED",
+      "confidence": "low",
+      "score": 1,
+      "route_keyword_score": 1,
+      "match_reasons": [
+        "route_keyword_score:1"
+      ],
+      "review_reasons": [
+        "weak_match_confidence:low",
+        "weak_match_score:1"
+      ],
+      "selection_score": 41,
+      "runtime_eligible": false,
+      "ablation_eligible": true,
+      "safety_status": "ablation_only"
+    },
+    {
+      "capability_id": "lancedb",
+      "skill_id": "imagegen",
+      "status": "REVIEW_REQUIRED",
+      "confidence": "low",
+      "score": 1,
+      "route_keyword_score": 1,
+      "match_reasons": [
+        "route_keyword_score:1"
+      ],
+      "review_reasons": [
+        "weak_match_confidence:low",
+        "weak_match_score:1"
+      ],
+      "selection_score": 41,
+      "runtime_eligible": false,
+      "ablation_eligible": true,
+      "safety_status": "ablation_only"
+    },
+    {
+      "capability_id": "lancedb",
+      "skill_id": "nexus-live-ask-replay-normalization-gate",
+      "status": "REVIEW_REQUIRED",
+      "confidence": "low",
+      "score": 1,
+      "route_keyword_score": 1,
+      "match_reasons": [
+        "route_keyword_score:1"
+      ],
+      "review_reasons": [
+        "weak_match_confidence:low",
+        "weak_match_score:1"
+      ],
+      "selection_score": 41,
+      "runtime_eligible": false,
+      "ablation_eligible": true,
+      "safety_status": "ablation_only"
+    },
+    {
+      "capability_id": "memory",
+      "skill_id": "sf2-memory-route-fit-spec",
+      "status": "PASS",
+      "confidence": "medium",
+      "score": 6,
+      "route_keyword_score": 6,
+      "match_reasons": [
+        "route_keyword_score:6"
+      ],
+      "review_reasons": [],
+      "selection_score": 256,
+      "runtime_eligible": false,
+      "ablation_eligible": true,
+      "safety_status": "ablation_only"
+    },
+    {
+      "capability_id": "memory",
+      "skill_id": "sf2-lancedb-route-fit-spec",
+      "status": "REVIEW_REQUIRED",
+      "confidence": "low",
+      "score": 1,
+      "route_keyword_score": 1,
+      "match_reasons": [
+        "route_keyword_score:1"
+      ],
+      "review_reasons": [
+        "weak_match_confidence:low",
+        "weak_match_score:1"
+      ],
+      "selection_score": 241,
+      "runtime_eligible": false,
+      "ablation_eligible": true,
+      "safety_status": "ablation_only"
+    },
+    {
+      "capability_id": "memory",
+      "skill_id": "sf2-mempalace-route-fit-spec",
+      "status": "REVIEW_REQUIRED",
+      "confidence": "low",
+      "score": 1,
+      "route_keyword_score": 1,
+      "match_reasons": [
+        "route_keyword_score:1"
+      ],
+      "review_reasons": [
+        "weak_match_confidence:low",
+        "weak_match_score:1"
+      ],
+      "selection_score": 241,
+      "runtime_eligible": false,
+      "ablation_eligible": true,
+      "safety_status": "ablation_only"
+    },
+    {
+      "capability_id": "memory",
+      "skill_id": "obsidian-cli",
+      "status": "REVIEW_REQUIRED",
+      "confidence": "low",
+      "score": 1,
+      "route_keyword_score": 1,
+      "match_reasons": [
+        "route_keyword_score:1"
+      ],
+      "review_reasons": [
+        "weak_match_confidence:low",
+        "weak_match_score:1"
+      ],
+      "selection_score": 41,
+      "runtime_eligible": false,
+      "ablation_eligible": true,
+      "safety_status": "ablation_only"
+    },
+    {
+      "capability_id": "memory",
+      "skill_id": "product-self-knowledge",
+      "status": "REVIEW_REQUIRED",
+      "confidence": "low",
+      "score": 1,
+      "route_keyword_score": 1,
+      "match_reasons": [
+        "route_keyword_score:1"
+      ],
+      "review_reasons": [
+        "weak_match_confidence:low",
+        "weak_match_score:1"
+      ],
+      "selection_score": 41,
+      "runtime_eligible": false,
+      "ablation_eligible": true,
+      "safety_status": "ablation_only"
+    },
+    {
+      "capability_id": "memory",
+      "skill_id": "wondelai-continuous-discovery",
+      "status": "REVIEW_REQUIRED",
+      "confidence": "low",
+      "score": 1,
+      "route_keyword_score": 1,
+      "match_reasons": [
+        "route_keyword_score:1"
+      ],
+      "review_reasons": [
+        "weak_match_confidence:low",
+        "weak_match_score:1"
+      ],
+      "selection_score": 41,
+      "runtime_eligible": false,
+      "ablation_eligible": true,
+      "safety_status": "ablation_only"
+    },
+    {
+      "capability_id": "memory",
+      "skill_id": "wondelai-top-design",
+      "status": "REVIEW_REQUIRED",
+      "confidence": "low",
+      "score": 1,
+      "route_keyword_score": 1,
+      "match_reasons": [
+        "route_keyword_score:1"
+      ],
+      "review_reasons": [
+        "weak_match_confidence:low",
+        "weak_match_score:1"
+      ],
+      "selection_score": 41,
+      "runtime_eligible": false,
+      "ablation_eligible": true,
+      "safety_status": "ablation_only"
+    },
+    {
+      "capability_id": "learning_closure",
+      "skill_id": "sf2-learning_closure-route-fit-spec",
+      "status": "PASS",
+      "confidence": "high",
+      "score": 20,
+      "route_keyword_score": 20,
+      "match_reasons": [
+        "route_keyword_score:20"
+      ],
+      "review_reasons": [],
+      "selection_score": 280,
+      "runtime_eligible": false,
+      "ablation_eligible": true,
+      "safety_status": "ablation_only"
+    },
+    {
+      "capability_id": "learning_closure",
+      "skill_id": "sf2-nightshift-route-fit-spec",
+      "status": "PASS",
+      "confidence": "medium",
+      "score": 3,
+      "route_keyword_score": 3,
+      "match_reasons": [
+        "route_keyword_score:3"
+      ],
+      "review_reasons": [],
+      "selection_score": 253,
+      "runtime_eligible": false,
+      "ablation_eligible": true,
+      "safety_status": "ablation_only"
+    },
+    {
+      "capability_id": "learning_closure",
+      "skill_id": "nexus-new-idea-intake-decision-tree",
+      "status": "REVIEW_REQUIRED",
+      "confidence": "low",
+      "score": 1,
+      "route_keyword_score": 1,
+      "match_reasons": [
+        "route_keyword_score:1"
+      ],
+      "review_reasons": [
+        "weak_match_confidence:low",
+        "weak_match_score:1"
+      ],
+      "selection_score": 41,
+      "runtime_eligible": false,
+      "ablation_eligible": true,
+      "safety_status": "ablation_only"
+    },
+    {
+      "capability_id": "autoreason",
+      "skill_id": "sf2-autoreason-route-fit-spec",
+      "status": "PASS",
+      "confidence": "medium",
+      "score": 5,
+      "route_keyword_score": 5,
+      "match_reasons": [
+        "route_keyword_score:5"
+      ],
+      "review_reasons": [],
+      "selection_score": 255,
+      "runtime_eligible": false,
+      "ablation_eligible": true,
+      "safety_status": "ablation_only"
+    },
+    {
+      "capability_id": "autoreason",
+      "skill_id": "sf2-belief-route-fit-spec",
+      "status": "REVIEW_REQUIRED",
+      "confidence": "low",
+      "score": 1,
+      "route_keyword_score": 1,
+      "match_reasons": [
+        "route_keyword_score:1"
+      ],
+      "review_reasons": [
+        "weak_match_confidence:low",
+        "weak_match_score:1"
+      ],
+      "selection_score": 241,
+      "runtime_eligible": false,
+      "ablation_eligible": true,
+      "safety_status": "ablation_only"
+    },
+    {
+      "capability_id": "autoreason",
+      "skill_id": "sf2-lancedb-route-fit-spec",
+      "status": "REVIEW_REQUIRED",
+      "confidence": "low",
+      "score": 1,
+      "route_keyword_score": 1,
+      "match_reasons": [
+        "route_keyword_score:1"
+      ],
+      "review_reasons": [
+        "weak_match_confidence:low",
+        "weak_match_score:1"
+      ],
+      "selection_score": 241,
+      "runtime_eligible": false,
+      "ablation_eligible": true,
+      "safety_status": "ablation_only"
+    },
+    {
+      "capability_id": "autoreason",
+      "skill_id": "nexus-benchmark-public-report",
+      "status": "REVIEW_REQUIRED",
+      "confidence": "low",
+      "score": 1,
+      "route_keyword_score": 1,
+      "match_reasons": [
+        "route_keyword_score:1"
+      ],
+      "review_reasons": [
+        "weak_match_confidence:low",
+        "weak_match_score:1"
+      ],
+      "selection_score": 191,
+      "runtime_eligible": true,
+      "ablation_eligible": true,
+      "safety_status": "runtime_reviewed"
+    },
+    {
+      "capability_id": "autoreason",
+      "skill_id": "benchmark-models",
+      "status": "REVIEW_REQUIRED",
+      "confidence": "low",
+      "score": 1,
+      "route_keyword_score": 1,
+      "match_reasons": [
+        "route_keyword_score:1"
+      ],
+      "review_reasons": [
+        "weak_match_confidence:low",
+        "weak_match_score:1"
+      ],
+      "selection_score": 41,
+      "runtime_eligible": false,
+      "ablation_eligible": true,
+      "safety_status": "ablation_only"
+    },
+    {
+      "capability_id": "autoreason",
+      "skill_id": "cso",
+      "status": "REVIEW_REQUIRED",
+      "confidence": "low",
+      "score": 1,
+      "route_keyword_score": 1,
+      "match_reasons": [
+        "route_keyword_score:1"
+      ],
+      "review_reasons": [
+        "weak_match_confidence:low",
+        "weak_match_score:1"
+      ],
+      "selection_score": 41,
+      "runtime_eligible": false,
+      "ablation_eligible": true,
+      "safety_status": "ablation_only"
+    },
+    {
+      "capability_id": "autoreason",
+      "skill_id": "gstack-benchmark-models",
+      "status": "REVIEW_REQUIRED",
+      "confidence": "low",
+      "score": 1,
+      "route_keyword_score": 1,
+      "match_reasons": [
+        "route_keyword_score:1"
+      ],
+      "review_reasons": [
+        "weak_match_confidence:low",
+        "weak_match_score:1"
+      ],
+      "selection_score": 41,
+      "runtime_eligible": false,
+      "ablation_eligible": true,
+      "safety_status": "ablation_only"
+    },
+    {
+      "capability_id": "autoreason",
+      "skill_id": "gstack-cso",
+      "status": "REVIEW_REQUIRED",
+      "confidence": "low",
+      "score": 1,
+      "route_keyword_score": 1,
+      "match_reasons": [
+        "route_keyword_score:1"
+      ],
+      "review_reasons": [
+        "weak_match_confidence:low",
+        "weak_match_score:1"
+      ],
+      "selection_score": 41,
+      "runtime_eligible": false,
+      "ablation_eligible": true,
+      "safety_status": "ablation_only"
+    },
+    {
+      "capability_id": "ddtree",
+      "skill_id": "grill-me",
+      "status": "PASS",
+      "confidence": "medium",
+      "score": 3,
+      "route_keyword_score": 3,
+      "match_reasons": [
+        "route_keyword_score:3"
+      ],
+      "review_reasons": [],
+      "selection_score": 203,
+      "runtime_eligible": true,
+      "ablation_eligible": true,
+      "safety_status": "runtime_reviewed"
+    },
+    {
+      "capability_id": "belief",
+      "skill_id": "sf2-belief-route-fit-spec",
+      "status": "PASS",
+      "confidence": "high",
+      "score": 8,
+      "route_keyword_score": 8,
+      "match_reasons": [
+        "route_keyword_score:8"
+      ],
+      "review_reasons": [],
+      "selection_score": 268,
+      "runtime_eligible": false,
+      "ablation_eligible": true,
+      "safety_status": "ablation_only"
+    },
+    {
+      "capability_id": "belief",
+      "skill_id": "sf2-autoreason-route-fit-spec",
+      "status": "REVIEW_REQUIRED",
+      "confidence": "low",
+      "score": 1,
+      "route_keyword_score": 1,
+      "match_reasons": [
+        "route_keyword_score:1"
+      ],
+      "review_reasons": [
+        "weak_match_confidence:low",
+        "weak_match_score:1"
+      ],
+      "selection_score": 241,
+      "runtime_eligible": false,
+      "ablation_eligible": true,
+      "safety_status": "ablation_only"
+    },
+    {
+      "capability_id": "belief",
+      "skill_id": "wondelai-software-design-philosophy",
+      "status": "REVIEW_REQUIRED",
+      "confidence": "low",
+      "score": 2,
+      "route_keyword_score": 2,
+      "match_reasons": [
+        "route_keyword_score:2"
+      ],
+      "review_reasons": [
+        "weak_match_confidence:low",
+        "weak_match_score:2"
+      ],
+      "selection_score": 42,
+      "runtime_eligible": false,
+      "ablation_eligible": true,
+      "safety_status": "ablation_only"
+    },
+    {
+      "capability_id": "belief",
+      "skill_id": "addy-doubt-driven-development",
+      "status": "REVIEW_REQUIRED",
+      "confidence": "low",
+      "score": 1,
+      "route_keyword_score": 1,
+      "match_reasons": [
+        "route_keyword_score:1"
+      ],
+      "review_reasons": [
+        "weak_match_confidence:low",
+        "weak_match_score:1"
+      ],
+      "selection_score": 41,
+      "runtime_eligible": false,
+      "ablation_eligible": true,
+      "safety_status": "ablation_only"
+    },
+    {
+      "capability_id": "belief",
+      "skill_id": "addy-shipping-and-launch",
+      "status": "REVIEW_REQUIRED",
+      "confidence": "low",
+      "score": 1,
+      "route_keyword_score": 1,
+      "match_reasons": [
+        "route_keyword_score:1"
+      ],
+      "review_reasons": [
+        "weak_match_confidence:low",
+        "weak_match_score:1"
+      ],
+      "selection_score": 41,
+      "runtime_eligible": false,
+      "ablation_eligible": true,
+      "safety_status": "ablation_only"
+    },
+    {
+      "capability_id": "belief",
+      "skill_id": "browserbase-autobrowse",
+      "status": "REVIEW_REQUIRED",
+      "confidence": "low",
+      "score": 1,
+      "route_keyword_score": 1,
+      "match_reasons": [
+        "route_keyword_score:1"
+      ],
+      "review_reasons": [
+        "weak_match_confidence:low",
+        "weak_match_score:1"
+      ],
+      "selection_score": 41,
+      "runtime_eligible": false,
+      "ablation_eligible": true,
+      "safety_status": "ablation_only"
+    },
+    {
+      "capability_id": "belief",
+      "skill_id": "careful",
+      "status": "REVIEW_REQUIRED",
+      "confidence": "low",
+      "score": 1,
+      "route_keyword_score": 1,
+      "match_reasons": [
+        "route_keyword_score:1"
+      ],
+      "review_reasons": [
+        "weak_match_confidence:low",
+        "weak_match_score:1"
+      ],
+      "selection_score": 41,
+      "runtime_eligible": false,
+      "ablation_eligible": true,
+      "safety_status": "ablation_only"
+    },
+    {
+      "capability_id": "belief",
+      "skill_id": "content-strategy",
+      "status": "REVIEW_REQUIRED",
+      "confidence": "low",
+      "score": 1,
+      "route_keyword_score": 1,
+      "match_reasons": [
+        "route_keyword_score:1"
+      ],
+      "review_reasons": [
+        "weak_match_confidence:low",
+        "weak_match_score:1"
+      ],
+      "selection_score": 41,
+      "runtime_eligible": false,
+      "ablation_eligible": true,
+      "safety_status": "ablation_only"
+    },
+    {
+      "capability_id": "autonomic_router",
+      "skill_id": "sf2-autonomic_router-route-fit-spec",
+      "status": "PASS",
+      "confidence": "medium",
+      "score": 4,
+      "route_keyword_score": 4,
+      "match_reasons": [
+        "route_keyword_score:4"
+      ],
+      "review_reasons": [],
+      "selection_score": 254,
+      "runtime_eligible": false,
+      "ablation_eligible": true,
+      "safety_status": "ablation_only"
+    },
+    {
+      "capability_id": "autonomic_router",
+      "skill_id": "sf2-autoreason-route-fit-spec",
+      "status": "REVIEW_REQUIRED",
+      "confidence": "low",
+      "score": 1,
+      "route_keyword_score": 1,
+      "match_reasons": [
+        "route_keyword_score:1"
+      ],
+      "review_reasons": [
+        "weak_match_confidence:low",
+        "weak_match_score:1"
+      ],
+      "selection_score": 241,
+      "runtime_eligible": false,
+      "ablation_eligible": true,
+      "safety_status": "ablation_only"
+    },
+    {
+      "capability_id": "autonomic_router",
+      "skill_id": "sf2-belief-route-fit-spec",
+      "status": "REVIEW_REQUIRED",
+      "confidence": "low",
+      "score": 1,
+      "route_keyword_score": 1,
+      "match_reasons": [
+        "route_keyword_score:1"
+      ],
+      "review_reasons": [
+        "weak_match_confidence:low",
+        "weak_match_score:1"
+      ],
+      "selection_score": 241,
+      "runtime_eligible": false,
+      "ablation_eligible": true,
+      "safety_status": "ablation_only"
+    },
+    {
+      "capability_id": "autonomic_router",
+      "skill_id": "sf2-delivery_acceptance_gate-route-fit-spec",
+      "status": "REVIEW_REQUIRED",
+      "confidence": "low",
+      "score": 1,
+      "route_keyword_score": 1,
+      "match_reasons": [
+        "route_keyword_score:1"
+      ],
+      "review_reasons": [
+        "weak_match_confidence:low",
+        "weak_match_score:1"
+      ],
+      "selection_score": 241,
+      "runtime_eligible": false,
+      "ablation_eligible": true,
+      "safety_status": "ablation_only"
+    },
+    {
+      "capability_id": "autonomic_router",
+      "skill_id": "sf2-direct_master_loop-route-fit-spec",
+      "status": "REVIEW_REQUIRED",
+      "confidence": "low",
+      "score": 1,
+      "route_keyword_score": 1,
+      "match_reasons": [
+        "route_keyword_score:1"
+      ],
+      "review_reasons": [
+        "weak_match_confidence:low",
+        "weak_match_score:1"
+      ],
+      "selection_score": 241,
+      "runtime_eligible": false,
+      "ablation_eligible": true,
+      "safety_status": "ablation_only"
+    },
+    {
+      "capability_id": "autonomic_router",
+      "skill_id": "sf2-drone-route-fit-spec",
+      "status": "REVIEW_REQUIRED",
+      "confidence": "low",
+      "score": 1,
+      "route_keyword_score": 1,
+      "match_reasons": [
+        "route_keyword_score:1"
+      ],
+      "review_reasons": [
+        "weak_match_confidence:low",
+        "weak_match_score:1"
+      ],
+      "selection_score": 241,
+      "runtime_eligible": false,
+      "ablation_eligible": true,
+      "safety_status": "ablation_only"
+    },
+    {
+      "capability_id": "autonomic_router",
+      "skill_id": "sf2-file_lock_security_gate-route-fit-spec",
+      "status": "REVIEW_REQUIRED",
+      "confidence": "low",
+      "score": 1,
+      "route_keyword_score": 1,
+      "match_reasons": [
+        "route_keyword_score:1"
+      ],
+      "review_reasons": [
+        "weak_match_confidence:low",
+        "weak_match_score:1"
+      ],
+      "selection_score": 241,
+      "runtime_eligible": false,
+      "ablation_eligible": true,
+      "safety_status": "ablation_only"
+    },
+    {
+      "capability_id": "autonomic_router",
+      "skill_id": "sf2-forecast_pregate-route-fit-spec",
+      "status": "REVIEW_REQUIRED",
+      "confidence": "low",
+      "score": 1,
+      "route_keyword_score": 1,
+      "match_reasons": [
+        "route_keyword_score:1"
+      ],
+      "review_reasons": [
+        "weak_match_confidence:low",
+        "weak_match_score:1"
+      ],
+      "selection_score": 241,
+      "runtime_eligible": false,
+      "ablation_eligible": true,
+      "safety_status": "ablation_only"
+    },
+    {
+      "capability_id": "forecast_pregate",
+      "skill_id": "sf2-forecast_pregate-route-fit-spec",
+      "status": "PASS",
+      "confidence": "medium",
+      "score": 7,
+      "route_keyword_score": 7,
+      "match_reasons": [
+        "route_keyword_score:7"
+      ],
+      "review_reasons": [],
+      "selection_score": 257,
+      "runtime_eligible": false,
+      "ablation_eligible": true,
+      "safety_status": "ablation_only"
+    },
+    {
+      "capability_id": "forecast_pregate",
+      "skill_id": "to-issues",
+      "status": "REVIEW_REQUIRED",
+      "confidence": "missing",
+      "score": 0,
+      "route_keyword_score": 0,
+      "match_reasons": [],
+      "review_reasons": [
+        "weak_match_confidence:missing",
+        "weak_match_score:0",
+        "insufficient_route_keyword_score:0"
+      ],
+      "selection_score": 218,
+      "runtime_eligible": true,
+      "ablation_eligible": true,
+      "safety_status": "runtime_reviewed"
+    },
+    {
+      "capability_id": "forecast_pregate",
+      "skill_id": "to-prd",
+      "status": "REVIEW_REQUIRED",
+      "confidence": "missing",
+      "score": 0,
+      "route_keyword_score": 0,
+      "match_reasons": [],
+      "review_reasons": [
+        "weak_match_confidence:missing",
+        "weak_match_score:0",
+        "insufficient_route_keyword_score:0"
+      ],
+      "selection_score": 218,
+      "runtime_eligible": true,
+      "ablation_eligible": true,
+      "safety_status": "runtime_reviewed"
+    },
+    {
+      "capability_id": "forecast_pregate",
+      "skill_id": "triage",
+      "status": "REVIEW_REQUIRED",
+      "confidence": "missing",
+      "score": 0,
+      "route_keyword_score": 0,
+      "match_reasons": [],
+      "review_reasons": [
+        "weak_match_confidence:missing",
+        "weak_match_score:0",
+        "insufficient_route_keyword_score:0"
+      ],
+      "selection_score": 218,
+      "runtime_eligible": true,
+      "ablation_eligible": true,
+      "safety_status": "runtime_reviewed"
+    },
+    {
+      "capability_id": "forecast_pregate",
+      "skill_id": "addy-shipping-and-launch",
+      "status": "REVIEW_REQUIRED",
+      "confidence": "high",
+      "score": 8,
+      "route_keyword_score": 0,
+      "match_reasons": [
+        "legacy_hint:planning_and_handoff"
+      ],
+      "review_reasons": [
+        "insufficient_route_keyword_score:0"
+      ],
+      "selection_score": 68,
+      "runtime_eligible": false,
+      "ablation_eligible": true,
+      "safety_status": "ablation_only"
+    },
+    {
+      "capability_id": "forecast_pregate",
+      "skill_id": "aibdd.spec.prd.detail-req.gen",
+      "status": "REVIEW_REQUIRED",
+      "confidence": "high",
+      "score": 8,
+      "route_keyword_score": 0,
+      "match_reasons": [
+        "legacy_hint:planning_and_handoff"
+      ],
+      "review_reasons": [
+        "insufficient_route_keyword_score:0"
+      ],
+      "selection_score": 68,
+      "runtime_eligible": false,
+      "ablation_eligible": true,
+      "safety_status": "ablation_only"
+    },
+    {
+      "capability_id": "forecast_pregate",
+      "skill_id": "executing-plans",
+      "status": "REVIEW_REQUIRED",
+      "confidence": "high",
+      "score": 8,
+      "route_keyword_score": 0,
+      "match_reasons": [
+        "legacy_hint:planning_and_handoff"
+      ],
+      "review_reasons": [
+        "insufficient_route_keyword_score:0"
+      ],
+      "selection_score": 68,
+      "runtime_eligible": false,
+      "ablation_eligible": true,
+      "safety_status": "ablation_only"
+    },
+    {
+      "capability_id": "forecast_pregate",
+      "skill_id": "github-issues",
+      "status": "REVIEW_REQUIRED",
+      "confidence": "high",
+      "score": 8,
+      "route_keyword_score": 0,
+      "match_reasons": [
+        "legacy_hint:planning_and_handoff"
+      ],
+      "review_reasons": [
+        "insufficient_route_keyword_score:0"
+      ],
+      "selection_score": 68,
+      "runtime_eligible": false,
+      "ablation_eligible": true,
+      "safety_status": "ablation_only"
+    },
+    {
+      "capability_id": "swarm_multi_agent",
+      "skill_id": "sf2-swarm_multi_agent-route-fit-spec",
+      "status": "PASS",
+      "confidence": "medium",
+      "score": 6,
+      "route_keyword_score": 6,
+      "match_reasons": [
+        "route_keyword_score:6"
+      ],
+      "review_reasons": [],
+      "selection_score": 256,
+      "runtime_eligible": false,
+      "ablation_eligible": true,
+      "safety_status": "ablation_only"
+    },
+    {
+      "capability_id": "swarm_multi_agent",
+      "skill_id": "benepass-reimbursement",
+      "status": "REVIEW_REQUIRED",
+      "confidence": "low",
+      "score": 1,
+      "route_keyword_score": 1,
+      "match_reasons": [
+        "route_keyword_score:1"
+      ],
+      "review_reasons": [
+        "weak_match_confidence:low",
+        "weak_match_score:1"
+      ],
+      "selection_score": 41,
+      "runtime_eligible": false,
+      "ablation_eligible": true,
+      "safety_status": "ablation_only"
+    },
+    {
+      "capability_id": "swarm_multi_agent",
+      "skill_id": "multi-agent-handoff-governance-design",
+      "status": "REVIEW_REQUIRED",
+      "confidence": "low",
+      "score": 1,
+      "route_keyword_score": 1,
+      "match_reasons": [
+        "route_keyword_score:1"
+      ],
+      "review_reasons": [
+        "weak_match_confidence:low",
+        "weak_match_score:1"
+      ],
+      "selection_score": 41,
+      "runtime_eligible": false,
+      "ablation_eligible": true,
+      "safety_status": "ablation_only"
+    },
+    {
+      "capability_id": "swarm_multi_agent",
+      "skill_id": "nexus-gemini-code-review-orchestrator",
+      "status": "REVIEW_REQUIRED",
+      "confidence": "low",
+      "score": 1,
+      "route_keyword_score": 1,
+      "match_reasons": [
+        "route_keyword_score:1"
+      ],
+      "review_reasons": [
+        "weak_match_confidence:low",
+        "weak_match_score:1"
+      ],
+      "selection_score": 41,
+      "runtime_eligible": false,
+      "ablation_eligible": true,
+      "safety_status": "ablation_only"
+    },
+    {
+      "capability_id": "swarm_multi_agent",
+      "skill_id": "nexus-worktree-hotfix-sync-and-verify",
+      "status": "REVIEW_REQUIRED",
+      "confidence": "low",
+      "score": 1,
+      "route_keyword_score": 1,
+      "match_reasons": [
+        "route_keyword_score:1"
+      ],
+      "review_reasons": [
+        "weak_match_confidence:low",
+        "weak_match_score:1"
+      ],
+      "selection_score": 41,
+      "runtime_eligible": false,
+      "ablation_eligible": true,
+      "safety_status": "ablation_only"
+    },
+    {
+      "capability_id": "swarm_multi_agent",
+      "skill_id": "research-paper-writing",
+      "status": "REVIEW_REQUIRED",
+      "confidence": "low",
+      "score": 1,
+      "route_keyword_score": 1,
+      "match_reasons": [
+        "route_keyword_score:1"
+      ],
+      "review_reasons": [
+        "weak_match_confidence:low",
+        "weak_match_score:1"
+      ],
+      "selection_score": 41,
+      "runtime_eligible": false,
+      "ablation_eligible": true,
+      "safety_status": "ablation_only"
+    },
+    {
+      "capability_id": "drone",
+      "skill_id": "sf2-drone-route-fit-spec",
+      "status": "PASS",
+      "confidence": "medium",
+      "score": 4,
+      "route_keyword_score": 4,
+      "match_reasons": [
+        "route_keyword_score:4"
+      ],
+      "review_reasons": [],
+      "selection_score": 254,
+      "runtime_eligible": false,
+      "ablation_eligible": true,
+      "safety_status": "ablation_only"
+    },
+    {
+      "capability_id": "drone",
+      "skill_id": "claude-code",
+      "status": "REVIEW_REQUIRED",
+      "confidence": "low",
+      "score": 1,
+      "route_keyword_score": 1,
+      "match_reasons": [
+        "route_keyword_score:1"
+      ],
+      "review_reasons": [
+        "weak_match_confidence:low",
+        "weak_match_score:1"
+      ],
+      "selection_score": 41,
+      "runtime_eligible": false,
+      "ablation_eligible": true,
+      "safety_status": "ablation_only"
+    },
+    {
+      "capability_id": "drone",
+      "skill_id": "codex",
+      "status": "REVIEW_REQUIRED",
+      "confidence": "missing",
+      "score": 0,
+      "route_keyword_score": 0,
+      "match_reasons": [],
+      "review_reasons": [
+        "weak_match_confidence:missing",
+        "weak_match_score:0",
+        "insufficient_route_keyword_score:0"
+      ],
+      "selection_score": 41,
+      "runtime_eligible": false,
+      "ablation_eligible": true,
+      "safety_status": "ablation_only"
+    },
+    {
+      "capability_id": "drone",
+      "skill_id": "opencode",
+      "status": "REVIEW_REQUIRED",
+      "confidence": "low",
+      "score": 1,
+      "route_keyword_score": 1,
+      "match_reasons": [
+        "route_keyword_score:1"
+      ],
+      "review_reasons": [
+        "weak_match_confidence:low",
+        "weak_match_score:1"
+      ],
+      "selection_score": 41,
+      "runtime_eligible": false,
+      "ablation_eligible": true,
+      "safety_status": "ablation_only"
+    },
+    {
+      "capability_id": "drone",
+      "skill_id": "subagent-driven-development",
+      "status": "REVIEW_REQUIRED",
+      "confidence": "low",
+      "score": 1,
+      "route_keyword_score": 1,
+      "match_reasons": [
+        "route_keyword_score:1"
+      ],
+      "review_reasons": [
+        "weak_match_confidence:low",
+        "weak_match_score:1"
+      ],
+      "selection_score": 41,
+      "runtime_eligible": false,
+      "ablation_eligible": true,
+      "safety_status": "ablation_only"
+    },
+    {
+      "capability_id": "drone",
+      "skill_id": "wondelai-high-perf-browser",
+      "status": "REVIEW_REQUIRED",
+      "confidence": "low",
+      "score": 1,
+      "route_keyword_score": 1,
+      "match_reasons": [
+        "route_keyword_score:1"
+      ],
+      "review_reasons": [
+        "weak_match_confidence:low",
+        "weak_match_score:1"
+      ],
+      "selection_score": 41,
+      "runtime_eligible": false,
+      "ablation_eligible": true,
+      "safety_status": "ablation_only"
+    },
+    {
+      "capability_id": "file_lock_security_gate",
+      "skill_id": "sf2-file_lock_security_gate-route-fit-spec",
+      "status": "PASS",
+      "confidence": "high",
+      "score": 11,
+      "route_keyword_score": 11,
+      "match_reasons": [
+        "route_keyword_score:11"
+      ],
+      "review_reasons": [],
+      "selection_score": 271,
+      "runtime_eligible": false,
+      "ablation_eligible": true,
+      "safety_status": "ablation_only"
+    },
+    {
+      "capability_id": "file_lock_security_gate",
+      "skill_id": "freeze",
+      "status": "REVIEW_REQUIRED",
+      "confidence": "low",
+      "score": 1,
+      "route_keyword_score": 1,
+      "match_reasons": [
+        "route_keyword_score:1"
+      ],
+      "review_reasons": [
+        "weak_match_confidence:low",
+        "weak_match_score:1"
+      ],
+      "selection_score": 41,
+      "runtime_eligible": false,
+      "ablation_eligible": true,
+      "safety_status": "ablation_only"
+    },
+    {
+      "capability_id": "file_lock_security_gate",
+      "skill_id": "gbrain-skillify",
+      "status": "REVIEW_REQUIRED",
+      "confidence": "low",
+      "score": 1,
+      "route_keyword_score": 1,
+      "match_reasons": [
+        "route_keyword_score:1"
+      ],
+      "review_reasons": [
+        "weak_match_confidence:low",
+        "weak_match_score:1"
+      ],
+      "selection_score": 41,
+      "runtime_eligible": false,
+      "ablation_eligible": true,
+      "safety_status": "ablation_only"
+    },
+    {
+      "capability_id": "file_lock_security_gate",
+      "skill_id": "gstack-freeze",
+      "status": "REVIEW_REQUIRED",
+      "confidence": "low",
+      "score": 1,
+      "route_keyword_score": 1,
+      "match_reasons": [
+        "route_keyword_score:1"
+      ],
+      "review_reasons": [
+        "weak_match_confidence:low",
+        "weak_match_score:1"
+      ],
+      "selection_score": 41,
+      "runtime_eligible": false,
+      "ablation_eligible": true,
+      "safety_status": "ablation_only"
+    },
+    {
+      "capability_id": "file_lock_security_gate",
+      "skill_id": "gstack-guard",
+      "status": "REVIEW_REQUIRED",
+      "confidence": "low",
+      "score": 1,
+      "route_keyword_score": 1,
+      "match_reasons": [
+        "route_keyword_score:1"
+      ],
+      "review_reasons": [
+        "weak_match_confidence:low",
+        "weak_match_score:1"
+      ],
+      "selection_score": 41,
+      "runtime_eligible": false,
+      "ablation_eligible": true,
+      "safety_status": "ablation_only"
+    },
+    {
+      "capability_id": "file_lock_security_gate",
+      "skill_id": "gstack-plan-eng-review",
+      "status": "REVIEW_REQUIRED",
+      "confidence": "low",
+      "score": 1,
+      "route_keyword_score": 1,
+      "match_reasons": [
+        "route_keyword_score:1"
+      ],
+      "review_reasons": [
+        "weak_match_confidence:low",
+        "weak_match_score:1"
+      ],
+      "selection_score": 41,
+      "runtime_eligible": false,
+      "ablation_eligible": true,
+      "safety_status": "ablation_only"
+    },
+    {
+      "capability_id": "file_lock_security_gate",
+      "skill_id": "guard",
+      "status": "REVIEW_REQUIRED",
+      "confidence": "low",
+      "score": 1,
+      "route_keyword_score": 1,
+      "match_reasons": [
+        "route_keyword_score:1"
+      ],
+      "review_reasons": [
+        "weak_match_confidence:low",
+        "weak_match_score:1"
+      ],
+      "selection_score": 41,
+      "runtime_eligible": false,
+      "ablation_eligible": true,
+      "safety_status": "ablation_only"
+    },
+    {
+      "capability_id": "file_lock_security_gate",
+      "skill_id": "plan-eng-review",
+      "status": "REVIEW_REQUIRED",
+      "confidence": "low",
+      "score": 1,
+      "route_keyword_score": 1,
+      "match_reasons": [
+        "route_keyword_score:1"
+      ],
+      "review_reasons": [
+        "weak_match_confidence:low",
+        "weak_match_score:1"
+      ],
+      "selection_score": 41,
+      "runtime_eligible": false,
+      "ablation_eligible": true,
+      "safety_status": "ablation_only"
+    },
+    {
+      "capability_id": "mempalace",
+      "skill_id": "sf2-mempalace-route-fit-spec",
+      "status": "PASS",
+      "confidence": "medium",
+      "score": 6,
+      "route_keyword_score": 6,
+      "match_reasons": [
+        "route_keyword_score:6"
+      ],
+      "review_reasons": [],
+      "selection_score": 256,
+      "runtime_eligible": false,
+      "ablation_eligible": true,
+      "safety_status": "ablation_only"
+    },
+    {
+      "capability_id": "mempalace",
+      "skill_id": "sf2-file_lock_security_gate-route-fit-spec",
+      "status": "REVIEW_REQUIRED",
+      "confidence": "low",
+      "score": 1,
+      "route_keyword_score": 1,
+      "match_reasons": [
+        "route_keyword_score:1"
+      ],
+      "review_reasons": [
+        "weak_match_confidence:low",
+        "weak_match_score:1"
+      ],
+      "selection_score": 241,
+      "runtime_eligible": false,
+      "ablation_eligible": true,
+      "safety_status": "ablation_only"
+    },
+    {
+      "capability_id": "mempalace",
+      "skill_id": "gstack-review",
+      "status": "REVIEW_REQUIRED",
+      "confidence": "low",
+      "score": 2,
+      "route_keyword_score": 2,
+      "match_reasons": [
+        "route_keyword_score:2"
+      ],
+      "review_reasons": [
+        "weak_match_confidence:low",
+        "weak_match_score:2"
+      ],
+      "selection_score": 42,
+      "runtime_eligible": false,
+      "ablation_eligible": true,
+      "safety_status": "ablation_only"
+    },
+    {
+      "capability_id": "mempalace",
+      "skill_id": "review",
+      "status": "REVIEW_REQUIRED",
+      "confidence": "low",
+      "score": 2,
+      "route_keyword_score": 2,
+      "match_reasons": [
+        "route_keyword_score:2"
+      ],
+      "review_reasons": [
+        "weak_match_confidence:low",
+        "weak_match_score:2"
+      ],
+      "selection_score": 42,
+      "runtime_eligible": false,
+      "ablation_eligible": true,
+      "safety_status": "ablation_only"
+    },
+    {
+      "capability_id": "mempalace",
+      "skill_id": "careful",
+      "status": "REVIEW_REQUIRED",
+      "confidence": "low",
+      "score": 1,
+      "route_keyword_score": 1,
+      "match_reasons": [
+        "route_keyword_score:1"
+      ],
+      "review_reasons": [
+        "weak_match_confidence:low",
+        "weak_match_score:1"
+      ],
+      "selection_score": 41,
+      "runtime_eligible": false,
+      "ablation_eligible": true,
+      "safety_status": "ablation_only"
+    },
+    {
+      "capability_id": "mempalace",
+      "skill_id": "claudeosint-safe-surface-audit",
+      "status": "REVIEW_REQUIRED",
+      "confidence": "low",
+      "score": 1,
+      "route_keyword_score": 1,
+      "match_reasons": [
+        "route_keyword_score:1"
+      ],
+      "review_reasons": [
+        "weak_match_confidence:low",
+        "weak_match_score:1"
+      ],
+      "selection_score": 41,
+      "runtime_eligible": false,
+      "ablation_eligible": true,
+      "safety_status": "ablation_only"
+    },
+    {
+      "capability_id": "mempalace",
+      "skill_id": "gbrain-soul-audit",
+      "status": "REVIEW_REQUIRED",
+      "confidence": "low",
+      "score": 1,
+      "route_keyword_score": 1,
+      "match_reasons": [
+        "route_keyword_score:1"
+      ],
+      "review_reasons": [
+        "weak_match_confidence:low",
+        "weak_match_score:1"
+      ],
+      "selection_score": 41,
+      "runtime_eligible": false,
+      "ablation_eligible": true,
+      "safety_status": "ablation_only"
+    },
+    {
+      "capability_id": "mempalace",
+      "skill_id": "gstack-careful",
+      "status": "REVIEW_REQUIRED",
+      "confidence": "low",
+      "score": 1,
+      "route_keyword_score": 1,
+      "match_reasons": [
+        "route_keyword_score:1"
+      ],
+      "review_reasons": [
+        "weak_match_confidence:low",
+        "weak_match_score:1"
+      ],
+      "selection_score": 41,
+      "runtime_eligible": false,
+      "ablation_eligible": true,
+      "safety_status": "ablation_only"
+    },
+    {
+      "capability_id": "policy_capability_gate",
+      "skill_id": "diagnose",
+      "status": "REVIEW_REQUIRED",
+      "confidence": "missing",
+      "score": 0,
+      "route_keyword_score": 0,
+      "match_reasons": [],
+      "review_reasons": [
+        "weak_match_confidence:missing",
+        "weak_match_score:0",
+        "insufficient_route_keyword_score:0"
+      ],
+      "selection_score": 220,
+      "runtime_eligible": true,
+      "ablation_eligible": true,
+      "safety_status": "runtime_reviewed"
+    },
+    {
+      "capability_id": "policy_capability_gate",
+      "skill_id": "nexus-goal-closure-executor",
+      "status": "REVIEW_REQUIRED",
+      "confidence": "missing",
+      "score": 0,
+      "route_keyword_score": 0,
+      "match_reasons": [],
+      "review_reasons": [
+        "weak_match_confidence:missing",
+        "weak_match_score:0",
+        "insufficient_route_keyword_score:0"
+      ],
+      "selection_score": 220,
+      "runtime_eligible": true,
+      "ablation_eligible": true,
+      "safety_status": "runtime_reviewed"
+    },
+    {
+      "capability_id": "policy_capability_gate",
+      "skill_id": "nexus-root-cause-probe",
+      "status": "REVIEW_REQUIRED",
+      "confidence": "missing",
+      "score": 0,
+      "route_keyword_score": 0,
+      "match_reasons": [],
+      "review_reasons": [
+        "weak_match_confidence:missing",
+        "weak_match_score:0",
+        "insufficient_route_keyword_score:0"
+      ],
+      "selection_score": 220,
+      "runtime_eligible": true,
+      "ablation_eligible": true,
+      "safety_status": "runtime_reviewed"
+    },
+    {
+      "capability_id": "policy_capability_gate",
+      "skill_id": "setup-matt-pocock-skills",
+      "status": "REVIEW_REQUIRED",
+      "confidence": "missing",
+      "score": 0,
+      "route_keyword_score": 0,
+      "match_reasons": [],
+      "review_reasons": [
+        "weak_match_confidence:missing",
+        "weak_match_score:0",
+        "insufficient_route_keyword_score:0"
+      ],
+      "selection_score": 220,
+      "runtime_eligible": true,
+      "ablation_eligible": true,
+      "safety_status": "runtime_reviewed"
+    },
+    {
+      "capability_id": "policy_capability_gate",
+      "skill_id": "acceptance-evidence-failclosed",
+      "status": "PASS",
+      "confidence": "high",
+      "score": 10,
+      "route_keyword_score": 2,
+      "match_reasons": [
+        "route_keyword_score:2",
+        "legacy_hint:governance_and_trust"
+      ],
+      "review_reasons": [],
+      "selection_score": 70,
+      "runtime_eligible": false,
+      "ablation_eligible": true,
+      "safety_status": "ablation_only"
+    },
+    {
+      "capability_id": "policy_capability_gate",
+      "skill_id": "addy-doubt-driven-development",
+      "status": "PASS",
+      "confidence": "high",
+      "score": 10,
+      "route_keyword_score": 2,
+      "match_reasons": [
+        "route_keyword_score:2",
+        "legacy_hint:governance_and_trust"
+      ],
+      "review_reasons": [],
+      "selection_score": 70,
+      "runtime_eligible": false,
+      "ablation_eligible": true,
+      "safety_status": "ablation_only"
+    },
+    {
+      "capability_id": "policy_capability_gate",
+      "skill_id": "browse",
+      "status": "PASS",
+      "confidence": "high",
+      "score": 10,
+      "route_keyword_score": 2,
+      "match_reasons": [
+        "route_keyword_score:2",
+        "legacy_hint:governance_and_trust"
+      ],
+      "review_reasons": [],
+      "selection_score": 70,
+      "runtime_eligible": false,
+      "ablation_eligible": true,
+      "safety_status": "ablation_only"
+    },
+    {
+      "capability_id": "policy_capability_gate",
+      "skill_id": "browserbase-browser-trace",
+      "status": "PASS",
+      "confidence": "high",
+      "score": 10,
+      "route_keyword_score": 2,
+      "match_reasons": [
+        "route_keyword_score:2",
+        "legacy_hint:governance_and_trust"
+      ],
+      "review_reasons": [],
+      "selection_score": 70,
+      "runtime_eligible": false,
+      "ablation_eligible": true,
+      "safety_status": "ablation_only"
+    },
+    {
+      "capability_id": "ultra_review",
+      "skill_id": "sf2-file_lock_security_gate-route-fit-spec",
+      "status": "REVIEW_REQUIRED",
+      "confidence": "low",
+      "score": 1,
+      "route_keyword_score": 1,
+      "match_reasons": [
+        "route_keyword_score:1"
+      ],
+      "review_reasons": [
+        "weak_match_confidence:low",
+        "weak_match_score:1"
+      ],
+      "selection_score": 241,
+      "runtime_eligible": false,
+      "ablation_eligible": true,
+      "safety_status": "ablation_only"
+    },
+    {
+      "capability_id": "ultra_review",
+      "skill_id": "diagnose",
+      "status": "REVIEW_REQUIRED",
+      "confidence": "low",
+      "score": 1,
+      "route_keyword_score": 1,
+      "match_reasons": [
+        "route_keyword_score:1"
+      ],
+      "review_reasons": [
+        "weak_match_confidence:low",
+        "weak_match_score:1"
+      ],
+      "selection_score": 219,
+      "runtime_eligible": true,
+      "ablation_eligible": true,
+      "safety_status": "runtime_reviewed"
+    },
+    {
+      "capability_id": "ultra_review",
+      "skill_id": "nexus-goal-closure-executor",
+      "status": "REVIEW_REQUIRED",
+      "confidence": "missing",
+      "score": 0,
+      "route_keyword_score": 0,
+      "match_reasons": [],
+      "review_reasons": [
+        "weak_match_confidence:missing",
+        "weak_match_score:0",
+        "insufficient_route_keyword_score:0"
+      ],
+      "selection_score": 218,
+      "runtime_eligible": true,
+      "ablation_eligible": true,
+      "safety_status": "runtime_reviewed"
+    },
+    {
+      "capability_id": "ultra_review",
+      "skill_id": "nexus-root-cause-probe",
+      "status": "REVIEW_REQUIRED",
+      "confidence": "missing",
+      "score": 0,
+      "route_keyword_score": 0,
+      "match_reasons": [],
+      "review_reasons": [
+        "weak_match_confidence:missing",
+        "weak_match_score:0",
+        "insufficient_route_keyword_score:0"
+      ],
+      "selection_score": 218,
+      "runtime_eligible": true,
+      "ablation_eligible": true,
+      "safety_status": "runtime_reviewed"
+    },
+    {
+      "capability_id": "ultra_review",
+      "skill_id": "setup-matt-pocock-skills",
+      "status": "REVIEW_REQUIRED",
+      "confidence": "missing",
+      "score": 0,
+      "route_keyword_score": 0,
+      "match_reasons": [],
+      "review_reasons": [
+        "weak_match_confidence:missing",
+        "weak_match_score:0",
+        "insufficient_route_keyword_score:0"
+      ],
+      "selection_score": 218,
+      "runtime_eligible": true,
+      "ablation_eligible": true,
+      "safety_status": "runtime_reviewed"
+    },
+    {
+      "capability_id": "ultra_review",
+      "skill_id": "triage",
+      "status": "REVIEW_REQUIRED",
+      "confidence": "low",
+      "score": 1,
+      "route_keyword_score": 1,
+      "match_reasons": [
+        "route_keyword_score:1"
+      ],
+      "review_reasons": [
+        "weak_match_confidence:low",
+        "weak_match_score:1"
+      ],
+      "selection_score": 191,
+      "runtime_eligible": true,
+      "ablation_eligible": true,
+      "safety_status": "runtime_reviewed"
+    },
+    {
+      "capability_id": "ultra_review",
+      "skill_id": "cso",
+      "status": "PASS",
+      "confidence": "high",
+      "score": 11,
+      "route_keyword_score": 3,
+      "match_reasons": [
+        "route_keyword_score:3",
+        "legacy_hint:governance_and_trust"
+      ],
+      "review_reasons": [],
+      "selection_score": 71,
+      "runtime_eligible": false,
+      "ablation_eligible": true,
+      "safety_status": "ablation_only"
+    },
+    {
+      "capability_id": "ultra_review",
+      "skill_id": "gstack-cso",
+      "status": "PASS",
+      "confidence": "high",
+      "score": 11,
+      "route_keyword_score": 3,
+      "match_reasons": [
+        "route_keyword_score:3",
+        "legacy_hint:governance_and_trust"
+      ],
+      "review_reasons": [],
+      "selection_score": 71,
+      "runtime_eligible": false,
+      "ablation_eligible": true,
+      "safety_status": "ablation_only"
+    },
+    {
+      "capability_id": "artifact_gate",
+      "skill_id": "nexus-goal-closure-executor",
+      "status": "REVIEW_REQUIRED",
+      "confidence": "low",
+      "score": 1,
+      "route_keyword_score": 1,
+      "match_reasons": [
+        "route_keyword_score:1"
+      ],
+      "review_reasons": [
+        "weak_match_confidence:low",
+        "weak_match_score:1"
+      ],
+      "selection_score": 219,
+      "runtime_eligible": true,
+      "ablation_eligible": true,
+      "safety_status": "runtime_reviewed"
+    },
+    {
+      "capability_id": "artifact_gate",
+      "skill_id": "nexus-root-cause-probe",
+      "status": "REVIEW_REQUIRED",
+      "confidence": "low",
+      "score": 1,
+      "route_keyword_score": 1,
+      "match_reasons": [
+        "route_keyword_score:1"
+      ],
+      "review_reasons": [
+        "weak_match_confidence:low",
+        "weak_match_score:1"
+      ],
+      "selection_score": 219,
+      "runtime_eligible": true,
+      "ablation_eligible": true,
+      "safety_status": "runtime_reviewed"
+    },
+    {
+      "capability_id": "artifact_gate",
+      "skill_id": "diagnose",
+      "status": "REVIEW_REQUIRED",
+      "confidence": "missing",
+      "score": 0,
+      "route_keyword_score": 0,
+      "match_reasons": [],
+      "review_reasons": [
+        "weak_match_confidence:missing",
+        "weak_match_score:0",
+        "insufficient_route_keyword_score:0"
+      ],
+      "selection_score": 218,
+      "runtime_eligible": true,
+      "ablation_eligible": true,
+      "safety_status": "runtime_reviewed"
+    },
+    {
+      "capability_id": "artifact_gate",
+      "skill_id": "setup-matt-pocock-skills",
+      "status": "REVIEW_REQUIRED",
+      "confidence": "missing",
+      "score": 0,
+      "route_keyword_score": 0,
+      "match_reasons": [],
+      "review_reasons": [
+        "weak_match_confidence:missing",
+        "weak_match_score:0",
+        "insufficient_route_keyword_score:0"
+      ],
+      "selection_score": 218,
+      "runtime_eligible": true,
+      "ablation_eligible": true,
+      "safety_status": "runtime_reviewed"
+    },
+    {
+      "capability_id": "artifact_gate",
+      "skill_id": "nexus-benchmark-public-report",
+      "status": "REVIEW_REQUIRED",
+      "confidence": "low",
+      "score": 2,
+      "route_keyword_score": 2,
+      "match_reasons": [
+        "route_keyword_score:2"
+      ],
+      "review_reasons": [
+        "weak_match_confidence:low",
+        "weak_match_score:2"
+      ],
+      "selection_score": 192,
+      "runtime_eligible": true,
+      "ablation_eligible": true,
+      "safety_status": "runtime_reviewed"
+    },
+    {
+      "capability_id": "artifact_gate",
+      "skill_id": "acceptance-evidence-failclosed",
+      "status": "PASS",
+      "confidence": "high",
+      "score": 9,
+      "route_keyword_score": 1,
+      "match_reasons": [
+        "route_keyword_score:1",
+        "legacy_hint:governance_and_trust"
+      ],
+      "review_reasons": [],
+      "selection_score": 69,
+      "runtime_eligible": false,
+      "ablation_eligible": true,
+      "safety_status": "ablation_only"
+    },
+    {
+      "capability_id": "artifact_gate",
+      "skill_id": "browse",
+      "status": "PASS",
+      "confidence": "high",
+      "score": 9,
+      "route_keyword_score": 1,
+      "match_reasons": [
+        "route_keyword_score:1",
+        "legacy_hint:governance_and_trust"
+      ],
+      "review_reasons": [],
+      "selection_score": 69,
+      "runtime_eligible": false,
+      "ablation_eligible": true,
+      "safety_status": "ablation_only"
+    },
+    {
+      "capability_id": "artifact_gate",
+      "skill_id": "claudeosint-safe-methodology",
+      "status": "PASS",
+      "confidence": "high",
+      "score": 9,
+      "route_keyword_score": 1,
+      "match_reasons": [
+        "route_keyword_score:1",
+        "legacy_hint:governance_and_trust"
+      ],
+      "review_reasons": [],
+      "selection_score": 69,
+      "runtime_eligible": false,
+      "ablation_eligible": true,
+      "safety_status": "ablation_only"
+    },
+    {
+      "capability_id": "claim_gate",
+      "skill_id": "sf2-research_control_plane-route-fit-spec",
+      "status": "REVIEW_REQUIRED",
+      "confidence": "low",
+      "score": 1,
+      "route_keyword_score": 1,
+      "match_reasons": [
+        "route_keyword_score:1"
+      ],
+      "review_reasons": [
+        "weak_match_confidence:low",
+        "weak_match_score:1"
+      ],
+      "selection_score": 241,
+      "runtime_eligible": false,
+      "ablation_eligible": true,
+      "safety_status": "ablation_only"
+    },
+    {
+      "capability_id": "claim_gate",
+      "skill_id": "diagnose",
+      "status": "REVIEW_REQUIRED",
+      "confidence": "missing",
+      "score": 0,
+      "route_keyword_score": 0,
+      "match_reasons": [],
+      "review_reasons": [
+        "weak_match_confidence:missing",
+        "weak_match_score:0",
+        "insufficient_route_keyword_score:0"
+      ],
+      "selection_score": 218,
+      "runtime_eligible": true,
+      "ablation_eligible": true,
+      "safety_status": "runtime_reviewed"
+    },
+    {
+      "capability_id": "claim_gate",
+      "skill_id": "nexus-goal-closure-executor",
+      "status": "REVIEW_REQUIRED",
+      "confidence": "missing",
+      "score": 0,
+      "route_keyword_score": 0,
+      "match_reasons": [],
+      "review_reasons": [
+        "weak_match_confidence:missing",
+        "weak_match_score:0",
+        "insufficient_route_keyword_score:0"
+      ],
+      "selection_score": 218,
+      "runtime_eligible": true,
+      "ablation_eligible": true,
+      "safety_status": "runtime_reviewed"
+    },
+    {
+      "capability_id": "claim_gate",
+      "skill_id": "nexus-root-cause-probe",
+      "status": "REVIEW_REQUIRED",
+      "confidence": "missing",
+      "score": 0,
+      "route_keyword_score": 0,
+      "match_reasons": [],
+      "review_reasons": [
+        "weak_match_confidence:missing",
+        "weak_match_score:0",
+        "insufficient_route_keyword_score:0"
+      ],
+      "selection_score": 218,
+      "runtime_eligible": true,
+      "ablation_eligible": true,
+      "safety_status": "runtime_reviewed"
+    },
+    {
+      "capability_id": "claim_gate",
+      "skill_id": "setup-matt-pocock-skills",
+      "status": "REVIEW_REQUIRED",
+      "confidence": "missing",
+      "score": 0,
+      "route_keyword_score": 0,
+      "match_reasons": [],
+      "review_reasons": [
+        "weak_match_confidence:missing",
+        "weak_match_score:0",
+        "insufficient_route_keyword_score:0"
+      ],
+      "selection_score": 218,
+      "runtime_eligible": true,
+      "ablation_eligible": true,
+      "safety_status": "runtime_reviewed"
+    },
+    {
+      "capability_id": "claim_gate",
+      "skill_id": "nexus-benchmark-continuous-optimization",
+      "status": "PASS",
+      "confidence": "medium",
+      "score": 4,
+      "route_keyword_score": 4,
+      "match_reasons": [
+        "route_keyword_score:4"
+      ],
+      "review_reasons": [],
+      "selection_score": 204,
+      "runtime_eligible": true,
+      "ablation_eligible": true,
+      "safety_status": "runtime_reviewed"
+    },
+    {
+      "capability_id": "claim_gate",
+      "skill_id": "nexus-benchmark-public-report",
+      "status": "REVIEW_REQUIRED",
+      "confidence": "low",
+      "score": 1,
+      "route_keyword_score": 1,
+      "match_reasons": [
+        "route_keyword_score:1"
+      ],
+      "review_reasons": [
+        "weak_match_confidence:low",
+        "weak_match_score:1"
+      ],
+      "selection_score": 191,
+      "runtime_eligible": true,
+      "ablation_eligible": true,
+      "safety_status": "runtime_reviewed"
+    },
+    {
+      "capability_id": "claim_gate",
+      "skill_id": "verification-before-completion",
+      "status": "PASS",
+      "confidence": "high",
+      "score": 9,
+      "route_keyword_score": 1,
+      "match_reasons": [
+        "route_keyword_score:1",
+        "legacy_hint:governance_and_trust"
+      ],
+      "review_reasons": [],
+      "selection_score": 69,
+      "runtime_eligible": false,
+      "ablation_eligible": true,
+      "safety_status": "ablation_only"
+    },
+    {
+      "capability_id": "delivery_acceptance_gate",
+      "skill_id": "sf2-delivery_acceptance_gate-route-fit-spec",
+      "status": "PASS",
+      "confidence": "medium",
+      "score": 6,
+      "route_keyword_score": 6,
+      "match_reasons": [
+        "route_keyword_score:6"
+      ],
+      "review_reasons": [],
+      "selection_score": 256,
+      "runtime_eligible": false,
+      "ablation_eligible": true,
+      "safety_status": "ablation_only"
+    },
+    {
+      "capability_id": "delivery_acceptance_gate",
+      "skill_id": "nexus-benchmark-continuous-optimization",
+      "status": "REVIEW_REQUIRED",
+      "confidence": "low",
+      "score": 1,
+      "route_keyword_score": 1,
+      "match_reasons": [
+        "route_keyword_score:1"
+      ],
+      "review_reasons": [
+        "weak_match_confidence:low",
+        "weak_match_score:1"
+      ],
+      "selection_score": 191,
+      "runtime_eligible": true,
+      "ablation_eligible": true,
+      "safety_status": "runtime_reviewed"
+    },
+    {
+      "capability_id": "delivery_acceptance_gate",
+      "skill_id": "acceptance-evidence-failclosed",
+      "status": "REVIEW_REQUIRED",
+      "confidence": "low",
+      "score": 1,
+      "route_keyword_score": 1,
+      "match_reasons": [
+        "route_keyword_score:1"
+      ],
+      "review_reasons": [
+        "weak_match_confidence:low",
+        "weak_match_score:1"
+      ],
+      "selection_score": 41,
+      "runtime_eligible": false,
+      "ablation_eligible": true,
+      "safety_status": "ablation_only"
+    },
+    {
+      "capability_id": "delivery_acceptance_gate",
+      "skill_id": "nexus-acceptance-evidence-gate",
+      "status": "REVIEW_REQUIRED",
+      "confidence": "low",
+      "score": 1,
+      "route_keyword_score": 1,
+      "match_reasons": [
+        "route_keyword_score:1"
+      ],
+      "review_reasons": [
+        "weak_match_confidence:low",
+        "weak_match_score:1"
+      ],
+      "selection_score": 41,
+      "runtime_eligible": false,
+      "ablation_eligible": true,
+      "safety_status": "ablation_only"
+    },
+    {
+      "capability_id": "delivery_acceptance_gate",
+      "skill_id": "nexus-new-idea-intake-decision-tree",
+      "status": "REVIEW_REQUIRED",
+      "confidence": "low",
+      "score": 1,
+      "route_keyword_score": 1,
+      "match_reasons": [
+        "route_keyword_score:1"
+      ],
+      "review_reasons": [
+        "weak_match_confidence:low",
+        "weak_match_score:1"
+      ],
+      "selection_score": 41,
+      "runtime_eligible": false,
+      "ablation_eligible": true,
+      "safety_status": "ablation_only"
+    },
+    {
+      "capability_id": "delivery_acceptance_gate",
+      "skill_id": "wondelai-continuous-discovery",
+      "status": "REVIEW_REQUIRED",
+      "confidence": "low",
+      "score": 1,
+      "route_keyword_score": 1,
+      "match_reasons": [
+        "route_keyword_score:1"
+      ],
+      "review_reasons": [
+        "weak_match_confidence:low",
+        "weak_match_score:1"
+      ],
+      "selection_score": 41,
+      "runtime_eligible": false,
+      "ablation_eligible": true,
+      "safety_status": "ablation_only"
+    },
+    {
+      "capability_id": "delivery_acceptance_gate",
+      "skill_id": "wondelai-inspired-product",
+      "status": "REVIEW_REQUIRED",
+      "confidence": "low",
+      "score": 1,
+      "route_keyword_score": 1,
+      "match_reasons": [
+        "route_keyword_score:1"
+      ],
+      "review_reasons": [
+        "weak_match_confidence:low",
+        "weak_match_score:1"
+      ],
+      "selection_score": 41,
+      "runtime_eligible": false,
+      "ablation_eligible": true,
+      "safety_status": "ablation_only"
+    },
+    {
+      "capability_id": "delivery_acceptance_gate",
+      "skill_id": "wondelai-negotiation",
+      "status": "REVIEW_REQUIRED",
+      "confidence": "low",
+      "score": 1,
+      "route_keyword_score": 1,
+      "match_reasons": [
+        "route_keyword_score:1"
+      ],
+      "review_reasons": [
+        "weak_match_confidence:low",
+        "weak_match_score:1"
+      ],
+      "selection_score": 41,
+      "runtime_eligible": false,
+      "ablation_eligible": true,
+      "safety_status": "ablation_only"
+    },
+    {
+      "capability_id": "sandbox_replay",
+      "skill_id": "sf2-file_lock_security_gate-route-fit-spec",
+      "status": "REVIEW_REQUIRED",
+      "confidence": "low",
+      "score": 1,
+      "route_keyword_score": 1,
+      "match_reasons": [
+        "route_keyword_score:1"
+      ],
+      "review_reasons": [
+        "weak_match_confidence:low",
+        "weak_match_score:1"
+      ],
+      "selection_score": 241,
+      "runtime_eligible": false,
+      "ablation_eligible": true,
+      "safety_status": "ablation_only"
+    },
+    {
+      "capability_id": "sandbox_replay",
+      "skill_id": "gstack-health",
+      "status": "PASS",
+      "confidence": "medium",
+      "score": 3,
+      "route_keyword_score": 3,
+      "match_reasons": [
+        "route_keyword_score:3"
+      ],
+      "review_reasons": [],
+      "selection_score": 53,
+      "runtime_eligible": false,
+      "ablation_eligible": true,
+      "safety_status": "ablation_only"
+    },
+    {
+      "capability_id": "sandbox_replay",
+      "skill_id": "health",
+      "status": "PASS",
+      "confidence": "medium",
+      "score": 3,
+      "route_keyword_score": 3,
+      "match_reasons": [
+        "route_keyword_score:3"
+      ],
+      "review_reasons": [],
+      "selection_score": 53,
+      "runtime_eligible": false,
+      "ablation_eligible": true,
+      "safety_status": "ablation_only"
+    },
+    {
+      "capability_id": "sandbox_replay",
+      "skill_id": "aibdd.auto.java.e2e.refactor",
+      "status": "REVIEW_REQUIRED",
+      "confidence": "low",
+      "score": 1,
+      "route_keyword_score": 1,
+      "match_reasons": [
+        "route_keyword_score:1"
+      ],
+      "review_reasons": [
+        "weak_match_confidence:low",
+        "weak_match_score:1"
+      ],
+      "selection_score": 41,
+      "runtime_eligible": false,
+      "ablation_eligible": true,
+      "safety_status": "ablation_only"
+    },
+    {
+      "capability_id": "sandbox_replay",
+      "skill_id": "aibdd.auto.python.e2e.green",
+      "status": "REVIEW_REQUIRED",
+      "confidence": "low",
+      "score": 1,
+      "route_keyword_score": 1,
+      "match_reasons": [
+        "route_keyword_score:1"
+      ],
+      "review_reasons": [
+        "weak_match_confidence:low",
+        "weak_match_score:1"
+      ],
+      "selection_score": 41,
+      "runtime_eligible": false,
+      "ablation_eligible": true,
+      "safety_status": "ablation_only"
+    },
+    {
+      "capability_id": "sandbox_replay",
+      "skill_id": "aibdd.auto.python.e2e.handlers.aggregate-given",
+      "status": "REVIEW_REQUIRED",
+      "confidence": "low",
+      "score": 1,
+      "route_keyword_score": 1,
+      "match_reasons": [
+        "route_keyword_score:1"
+      ],
+      "review_reasons": [
+        "weak_match_confidence:low",
+        "weak_match_score:1"
+      ],
+      "selection_score": 41,
+      "runtime_eligible": false,
+      "ablation_eligible": true,
+      "safety_status": "ablation_only"
+    },
+    {
+      "capability_id": "sandbox_replay",
+      "skill_id": "aibdd.auto.python.e2e.handlers.aggregate-then",
+      "status": "REVIEW_REQUIRED",
+      "confidence": "low",
+      "score": 1,
+      "route_keyword_score": 1,
+      "match_reasons": [
+        "route_keyword_score:1"
+      ],
+      "review_reasons": [
+        "weak_match_confidence:low",
+        "weak_match_score:1"
+      ],
+      "selection_score": 41,
+      "runtime_eligible": false,
+      "ablation_eligible": true,
+      "safety_status": "ablation_only"
+    },
+    {
+      "capability_id": "sandbox_replay",
+      "skill_id": "aibdd.auto.python.e2e.handlers.command",
+      "status": "REVIEW_REQUIRED",
+      "confidence": "low",
+      "score": 1,
+      "route_keyword_score": 1,
+      "match_reasons": [
+        "route_keyword_score:1"
+      ],
+      "review_reasons": [
+        "weak_match_confidence:low",
+        "weak_match_score:1"
+      ],
+      "selection_score": 41,
+      "runtime_eligible": false,
+      "ablation_eligible": true,
+      "safety_status": "ablation_only"
+    },
+    {
+      "capability_id": "benchmark_meta_opt",
+      "skill_id": "nexus-benchmark-continuous-optimization",
+      "status": "REVIEW_REQUIRED",
+      "confidence": "low",
+      "score": 2,
+      "route_keyword_score": 2,
+      "match_reasons": [
+        "route_keyword_score:2"
+      ],
+      "review_reasons": [
+        "weak_match_confidence:low",
+        "weak_match_score:2"
+      ],
+      "selection_score": 220,
+      "runtime_eligible": true,
+      "ablation_eligible": true,
+      "safety_status": "runtime_reviewed"
+    },
+    {
+      "capability_id": "benchmark_meta_opt",
+      "skill_id": "nexus-benchmark-public-report",
+      "status": "REVIEW_REQUIRED",
+      "confidence": "low",
+      "score": 1,
+      "route_keyword_score": 1,
+      "match_reasons": [
+        "route_keyword_score:1"
+      ],
+      "review_reasons": [
+        "weak_match_confidence:low",
+        "weak_match_score:1"
+      ],
+      "selection_score": 219,
+      "runtime_eligible": true,
+      "ablation_eligible": true,
+      "safety_status": "runtime_reviewed"
+    },
+    {
+      "capability_id": "benchmark_meta_opt",
+      "skill_id": "nexus-capability-upgrade",
+      "status": "REVIEW_REQUIRED",
+      "confidence": "low",
+      "score": 1,
+      "route_keyword_score": 1,
+      "match_reasons": [
+        "route_keyword_score:1"
+      ],
+      "review_reasons": [
+        "weak_match_confidence:low",
+        "weak_match_score:1"
+      ],
+      "selection_score": 219,
+      "runtime_eligible": true,
+      "ablation_eligible": true,
+      "safety_status": "runtime_reviewed"
+    },
+    {
+      "capability_id": "benchmark_meta_opt",
+      "skill_id": "benchmark-models",
+      "status": "PASS",
+      "confidence": "high",
+      "score": 11,
+      "route_keyword_score": 3,
+      "match_reasons": [
+        "route_keyword_score:3",
+        "legacy_hint:benchmark_and_promotion"
+      ],
+      "review_reasons": [],
+      "selection_score": 71,
+      "runtime_eligible": false,
+      "ablation_eligible": true,
+      "safety_status": "ablation_only"
+    },
+    {
+      "capability_id": "benchmark_meta_opt",
+      "skill_id": "gstack-benchmark-models",
+      "status": "PASS",
+      "confidence": "high",
+      "score": 11,
+      "route_keyword_score": 3,
+      "match_reasons": [
+        "route_keyword_score:3",
+        "legacy_hint:benchmark_and_promotion"
+      ],
+      "review_reasons": [],
+      "selection_score": 71,
+      "runtime_eligible": false,
+      "ablation_eligible": true,
+      "safety_status": "ablation_only"
+    },
+    {
+      "capability_id": "benchmark_meta_opt",
+      "skill_id": "benchmark",
+      "status": "PASS",
+      "confidence": "high",
+      "score": 10,
+      "route_keyword_score": 2,
+      "match_reasons": [
+        "route_keyword_score:2",
+        "legacy_hint:benchmark_and_promotion"
+      ],
+      "review_reasons": [],
+      "selection_score": 70,
+      "runtime_eligible": false,
+      "ablation_eligible": true,
+      "safety_status": "ablation_only"
+    },
+    {
+      "capability_id": "benchmark_meta_opt",
+      "skill_id": "canary",
+      "status": "PASS",
+      "confidence": "high",
+      "score": 10,
+      "route_keyword_score": 2,
+      "match_reasons": [
+        "route_keyword_score:2",
+        "legacy_hint:benchmark_and_promotion"
+      ],
+      "review_reasons": [],
+      "selection_score": 70,
+      "runtime_eligible": false,
+      "ablation_eligible": true,
+      "safety_status": "ablation_only"
+    },
+    {
+      "capability_id": "benchmark_meta_opt",
+      "skill_id": "evaluating-llms-harness",
+      "status": "PASS",
+      "confidence": "high",
+      "score": 10,
+      "route_keyword_score": 2,
+      "match_reasons": [
+        "route_keyword_score:2",
+        "legacy_hint:benchmark_and_promotion"
+      ],
+      "review_reasons": [],
+      "selection_score": 70,
+      "runtime_eligible": false,
+      "ablation_eligible": true,
+      "safety_status": "ablation_only"
+    },
+    {
+      "capability_id": "regression_guard",
+      "skill_id": "nexus-benchmark-continuous-optimization",
+      "status": "REVIEW_REQUIRED",
+      "confidence": "missing",
+      "score": 0,
+      "route_keyword_score": 0,
+      "match_reasons": [],
+      "review_reasons": [
+        "weak_match_confidence:missing",
+        "weak_match_score:0",
+        "insufficient_route_keyword_score:0"
+      ],
+      "selection_score": 218,
+      "runtime_eligible": true,
+      "ablation_eligible": true,
+      "safety_status": "runtime_reviewed"
+    },
+    {
+      "capability_id": "regression_guard",
+      "skill_id": "nexus-benchmark-public-report",
+      "status": "REVIEW_REQUIRED",
+      "confidence": "missing",
+      "score": 0,
+      "route_keyword_score": 0,
+      "match_reasons": [],
+      "review_reasons": [
+        "weak_match_confidence:missing",
+        "weak_match_score:0",
+        "insufficient_route_keyword_score:0"
+      ],
+      "selection_score": 218,
+      "runtime_eligible": true,
+      "ablation_eligible": true,
+      "safety_status": "runtime_reviewed"
+    },
+    {
+      "capability_id": "regression_guard",
+      "skill_id": "nexus-capability-upgrade",
+      "status": "REVIEW_REQUIRED",
+      "confidence": "missing",
+      "score": 0,
+      "route_keyword_score": 0,
+      "match_reasons": [],
+      "review_reasons": [
+        "weak_match_confidence:missing",
+        "weak_match_score:0",
+        "insufficient_route_keyword_score:0"
+      ],
+      "selection_score": 218,
+      "runtime_eligible": true,
+      "ablation_eligible": true,
+      "safety_status": "runtime_reviewed"
+    },
+    {
+      "capability_id": "regression_guard",
+      "skill_id": "grill-me",
+      "status": "REVIEW_REQUIRED",
+      "confidence": "low",
+      "score": 1,
+      "route_keyword_score": 1,
+      "match_reasons": [
+        "route_keyword_score:1"
+      ],
+      "review_reasons": [
+        "weak_match_confidence:low",
+        "weak_match_score:1"
+      ],
+      "selection_score": 191,
+      "runtime_eligible": true,
+      "ablation_eligible": true,
+      "safety_status": "runtime_reviewed"
+    },
+    {
+      "capability_id": "regression_guard",
+      "skill_id": "grill-with-docs",
+      "status": "REVIEW_REQUIRED",
+      "confidence": "low",
+      "score": 1,
+      "route_keyword_score": 1,
+      "match_reasons": [
+        "route_keyword_score:1"
+      ],
+      "review_reasons": [
+        "weak_match_confidence:low",
+        "weak_match_score:1"
+      ],
+      "selection_score": 191,
+      "runtime_eligible": true,
+      "ablation_eligible": true,
+      "safety_status": "runtime_reviewed"
+    },
+    {
+      "capability_id": "regression_guard",
+      "skill_id": "benchmark",
+      "status": "PASS",
+      "confidence": "high",
+      "score": 9,
+      "route_keyword_score": 1,
+      "match_reasons": [
+        "route_keyword_score:1",
+        "legacy_hint:benchmark_and_promotion"
+      ],
+      "review_reasons": [],
+      "selection_score": 69,
+      "runtime_eligible": false,
+      "ablation_eligible": true,
+      "safety_status": "ablation_only"
+    },
+    {
+      "capability_id": "regression_guard",
+      "skill_id": "gbrain-testing",
+      "status": "PASS",
+      "confidence": "high",
+      "score": 9,
+      "route_keyword_score": 1,
+      "match_reasons": [
+        "route_keyword_score:1",
+        "legacy_hint:benchmark_and_promotion"
+      ],
+      "review_reasons": [],
+      "selection_score": 69,
+      "runtime_eligible": false,
+      "ablation_eligible": true,
+      "safety_status": "ablation_only"
+    },
+    {
+      "capability_id": "regression_guard",
+      "skill_id": "gstack-benchmark",
+      "status": "PASS",
+      "confidence": "high",
+      "score": 9,
+      "route_keyword_score": 1,
+      "match_reasons": [
+        "route_keyword_score:1",
+        "legacy_hint:benchmark_and_promotion"
+      ],
+      "review_reasons": [],
+      "selection_score": 69,
+      "runtime_eligible": false,
+      "ablation_eligible": true,
+      "safety_status": "ablation_only"
+    },
+    {
+      "capability_id": "registry_skills_sync",
+      "skill_id": "sf2-registry_skills_sync-route-fit-spec",
+      "status": "PASS",
+      "confidence": "high",
+      "score": 8,
+      "route_keyword_score": 8,
+      "match_reasons": [
+        "route_keyword_score:8"
+      ],
+      "review_reasons": [],
+      "selection_score": 268,
+      "runtime_eligible": false,
+      "ablation_eligible": true,
+      "safety_status": "ablation_only"
+    },
+    {
+      "capability_id": "registry_skills_sync",
+      "skill_id": "browserbase-cookie-sync",
+      "status": "REVIEW_REQUIRED",
+      "confidence": "low",
+      "score": 1,
+      "route_keyword_score": 1,
+      "match_reasons": [
+        "route_keyword_score:1"
+      ],
+      "review_reasons": [
+        "weak_match_confidence:low",
+        "weak_match_score:1"
+      ],
+      "selection_score": 41,
+      "runtime_eligible": false,
+      "ablation_eligible": true,
+      "safety_status": "ablation_only"
+    },
+    {
+      "capability_id": "registry_skills_sync",
+      "skill_id": "document-release",
+      "status": "REVIEW_REQUIRED",
+      "confidence": "low",
+      "score": 1,
+      "route_keyword_score": 1,
+      "match_reasons": [
+        "route_keyword_score:1"
+      ],
+      "review_reasons": [
+        "weak_match_confidence:low",
+        "weak_match_score:1"
+      ],
+      "selection_score": 41,
+      "runtime_eligible": false,
+      "ablation_eligible": true,
+      "safety_status": "ablation_only"
+    },
+    {
+      "capability_id": "registry_skills_sync",
+      "skill_id": "gbrain-cold-start",
+      "status": "REVIEW_REQUIRED",
+      "confidence": "low",
+      "score": 1,
+      "route_keyword_score": 1,
+      "match_reasons": [
+        "route_keyword_score:1"
+      ],
+      "review_reasons": [
+        "weak_match_confidence:low",
+        "weak_match_score:1"
+      ],
+      "selection_score": 41,
+      "runtime_eligible": false,
+      "ablation_eligible": true,
+      "safety_status": "ablation_only"
+    },
+    {
+      "capability_id": "registry_skills_sync",
+      "skill_id": "gstack-document-release",
+      "status": "REVIEW_REQUIRED",
+      "confidence": "low",
+      "score": 1,
+      "route_keyword_score": 1,
+      "match_reasons": [
+        "route_keyword_score:1"
+      ],
+      "review_reasons": [
+        "weak_match_confidence:low",
+        "weak_match_score:1"
+      ],
+      "selection_score": 41,
+      "runtime_eligible": false,
+      "ablation_eligible": true,
+      "safety_status": "ablation_only"
+    },
+    {
+      "capability_id": "registry_skills_sync",
+      "skill_id": "gstack-sync-gbrain",
+      "status": "REVIEW_REQUIRED",
+      "confidence": "low",
+      "score": 1,
+      "route_keyword_score": 1,
+      "match_reasons": [
+        "route_keyword_score:1"
+      ],
+      "review_reasons": [
+        "weak_match_confidence:low",
+        "weak_match_score:1"
+      ],
+      "selection_score": 41,
+      "runtime_eligible": false,
+      "ablation_eligible": true,
+      "safety_status": "ablation_only"
+    },
+    {
+      "capability_id": "registry_skills_sync",
+      "skill_id": "gstack-upgrade",
+      "status": "REVIEW_REQUIRED",
+      "confidence": "low",
+      "score": 1,
+      "route_keyword_score": 1,
+      "match_reasons": [
+        "route_keyword_score:1"
+      ],
+      "review_reasons": [
+        "weak_match_confidence:low",
+        "weak_match_score:1"
+      ],
+      "selection_score": 41,
+      "runtime_eligible": false,
+      "ablation_eligible": true,
+      "safety_status": "ablation_only"
+    },
+    {
+      "capability_id": "registry_skills_sync",
+      "skill_id": "nexus-worktree-hotfix-sync-and-verify",
+      "status": "REVIEW_REQUIRED",
+      "confidence": "low",
+      "score": 1,
+      "route_keyword_score": 1,
+      "match_reasons": [
+        "route_keyword_score:1"
+      ],
+      "review_reasons": [
+        "weak_match_confidence:low",
+        "weak_match_score:1"
+      ],
+      "selection_score": 41,
+      "runtime_eligible": false,
+      "ablation_eligible": true,
+      "safety_status": "ablation_only"
+    },
+    {
+      "capability_id": "metabolism_resume",
+      "skill_id": "to-prd",
+      "status": "REVIEW_REQUIRED",
+      "confidence": "low",
+      "score": 1,
+      "route_keyword_score": 1,
+      "match_reasons": [
+        "route_keyword_score:1"
+      ],
+      "review_reasons": [
+        "weak_match_confidence:low",
+        "weak_match_score:1"
+      ],
+      "selection_score": 220,
+      "runtime_eligible": true,
+      "ablation_eligible": true,
+      "safety_status": "runtime_reviewed"
+    },
+    {
+      "capability_id": "metabolism_resume",
+      "skill_id": "to-issues",
+      "status": "REVIEW_REQUIRED",
+      "confidence": "missing",
+      "score": 0,
+      "route_keyword_score": 0,
+      "match_reasons": [],
+      "review_reasons": [
+        "weak_match_confidence:missing",
+        "weak_match_score:0",
+        "insufficient_route_keyword_score:0"
+      ],
+      "selection_score": 219,
+      "runtime_eligible": true,
+      "ablation_eligible": true,
+      "safety_status": "runtime_reviewed"
+    },
+    {
+      "capability_id": "metabolism_resume",
+      "skill_id": "triage",
+      "status": "REVIEW_REQUIRED",
+      "confidence": "missing",
+      "score": 0,
+      "route_keyword_score": 0,
+      "match_reasons": [],
+      "review_reasons": [
+        "weak_match_confidence:missing",
+        "weak_match_score:0",
+        "insufficient_route_keyword_score:0"
+      ],
+      "selection_score": 219,
+      "runtime_eligible": true,
+      "ablation_eligible": true,
+      "safety_status": "runtime_reviewed"
+    },
+    {
+      "capability_id": "metabolism_resume",
+      "skill_id": "grill-with-docs",
+      "status": "REVIEW_REQUIRED",
+      "confidence": "low",
+      "score": 1,
+      "route_keyword_score": 1,
+      "match_reasons": [
+        "route_keyword_score:1"
+      ],
+      "review_reasons": [
+        "weak_match_confidence:low",
+        "weak_match_score:1"
+      ],
+      "selection_score": 191,
+      "runtime_eligible": true,
+      "ablation_eligible": true,
+      "safety_status": "runtime_reviewed"
+    },
+    {
+      "capability_id": "metabolism_resume",
+      "skill_id": "improve-codebase-architecture",
+      "status": "REVIEW_REQUIRED",
+      "confidence": "low",
+      "score": 1,
+      "route_keyword_score": 1,
+      "match_reasons": [
+        "route_keyword_score:1"
+      ],
+      "review_reasons": [
+        "weak_match_confidence:low",
+        "weak_match_score:1"
+      ],
+      "selection_score": 191,
+      "runtime_eligible": true,
+      "ablation_eligible": true,
+      "safety_status": "runtime_reviewed"
+    },
+    {
+      "capability_id": "metabolism_resume",
+      "skill_id": "notebooklm-context-bridge",
+      "status": "REVIEW_REQUIRED",
+      "confidence": "low",
+      "score": 1,
+      "route_keyword_score": 1,
+      "match_reasons": [
+        "route_keyword_score:1"
+      ],
+      "review_reasons": [
+        "weak_match_confidence:low",
+        "weak_match_score:1"
+      ],
+      "selection_score": 191,
+      "runtime_eligible": true,
+      "ablation_eligible": true,
+      "safety_status": "runtime_reviewed"
+    },
+    {
+      "capability_id": "metabolism_resume",
+      "skill_id": "zoom-out",
+      "status": "REVIEW_REQUIRED",
+      "confidence": "low",
+      "score": 1,
+      "route_keyword_score": 1,
+      "match_reasons": [
+        "route_keyword_score:1"
+      ],
+      "review_reasons": [
+        "weak_match_confidence:low",
+        "weak_match_score:1"
+      ],
+      "selection_score": 191,
+      "runtime_eligible": true,
+      "ablation_eligible": true,
+      "safety_status": "runtime_reviewed"
+    },
+    {
+      "capability_id": "metabolism_resume",
+      "skill_id": "addy-shipping-and-launch",
+      "status": "PASS",
+      "confidence": "high",
+      "score": 9,
+      "route_keyword_score": 1,
+      "match_reasons": [
+        "route_keyword_score:1",
+        "legacy_hint:planning_and_handoff"
+      ],
+      "review_reasons": [],
+      "selection_score": 69,
+      "runtime_eligible": false,
+      "ablation_eligible": true,
+      "safety_status": "ablation_only"
+    },
+    {
+      "capability_id": "ui_validator",
+      "skill_id": "wondelai-high-perf-browser",
+      "status": "PASS",
+      "confidence": "medium",
+      "score": 3,
+      "route_keyword_score": 3,
+      "match_reasons": [
+        "route_keyword_score:3"
+      ],
+      "review_reasons": [],
+      "selection_score": 53,
+      "runtime_eligible": false,
+      "ablation_eligible": true,
+      "safety_status": "ablation_only"
+    },
+    {
+      "capability_id": "ui_validator",
+      "skill_id": "addy-browser-testing-with-devtools",
+      "status": "REVIEW_REQUIRED",
+      "confidence": "low",
+      "score": 2,
+      "route_keyword_score": 2,
+      "match_reasons": [
+        "route_keyword_score:2"
+      ],
+      "review_reasons": [
+        "weak_match_confidence:low",
+        "weak_match_score:2"
+      ],
+      "selection_score": 42,
+      "runtime_eligible": false,
+      "ablation_eligible": true,
+      "safety_status": "ablation_only"
+    },
+    {
+      "capability_id": "ui_validator",
+      "skill_id": "browserbase-ui-test",
+      "status": "REVIEW_REQUIRED",
+      "confidence": "low",
+      "score": 2,
+      "route_keyword_score": 2,
+      "match_reasons": [
+        "route_keyword_score:2"
+      ],
+      "review_reasons": [
+        "weak_match_confidence:low",
+        "weak_match_score:2"
+      ],
+      "selection_score": 42,
+      "runtime_eligible": false,
+      "ablation_eligible": true,
+      "safety_status": "ablation_only"
+    },
+    {
+      "capability_id": "ui_validator",
+      "skill_id": "gstack-plan-design-review",
+      "status": "REVIEW_REQUIRED",
+      "confidence": "low",
+      "score": 2,
+      "route_keyword_score": 2,
+      "match_reasons": [
+        "route_keyword_score:2"
+      ],
+      "review_reasons": [
+        "weak_match_confidence:low",
+        "weak_match_score:2"
+      ],
+      "selection_score": 42,
+      "runtime_eligible": false,
+      "ablation_eligible": true,
+      "safety_status": "ablation_only"
+    },
+    {
+      "capability_id": "ui_validator",
+      "skill_id": "gstack-setup-browser-cookies",
+      "status": "REVIEW_REQUIRED",
+      "confidence": "low",
+      "score": 2,
+      "route_keyword_score": 2,
+      "match_reasons": [
+        "route_keyword_score:2"
+      ],
+      "review_reasons": [
+        "weak_match_confidence:low",
+        "weak_match_score:2"
+      ],
+      "selection_score": 42,
+      "runtime_eligible": false,
+      "ablation_eligible": true,
+      "safety_status": "ablation_only"
+    },
+    {
+      "capability_id": "ui_validator",
+      "skill_id": "plan-design-review",
+      "status": "REVIEW_REQUIRED",
+      "confidence": "low",
+      "score": 2,
+      "route_keyword_score": 2,
+      "match_reasons": [
+        "route_keyword_score:2"
+      ],
+      "review_reasons": [
+        "weak_match_confidence:low",
+        "weak_match_score:2"
+      ],
+      "selection_score": 42,
+      "runtime_eligible": false,
+      "ablation_eligible": true,
+      "safety_status": "ablation_only"
+    },
+    {
+      "capability_id": "ui_validator",
+      "skill_id": "setup-browser-cookies",
+      "status": "REVIEW_REQUIRED",
+      "confidence": "low",
+      "score": 2,
+      "route_keyword_score": 2,
+      "match_reasons": [
+        "route_keyword_score:2"
+      ],
+      "review_reasons": [
+        "weak_match_confidence:low",
+        "weak_match_score:2"
+      ],
+      "selection_score": 42,
+      "runtime_eligible": false,
+      "ablation_eligible": true,
+      "safety_status": "ablation_only"
+    },
+    {
+      "capability_id": "ui_validator",
+      "skill_id": "wondelai-refactoring-ui",
+      "status": "REVIEW_REQUIRED",
+      "confidence": "low",
+      "score": 2,
+      "route_keyword_score": 2,
+      "match_reasons": [
+        "route_keyword_score:2"
+      ],
+      "review_reasons": [
+        "weak_match_confidence:low",
+        "weak_match_score:2"
+      ],
+      "selection_score": 42,
+      "runtime_eligible": false,
+      "ablation_eligible": true,
+      "safety_status": "ablation_only"
+    },
+    {
+      "capability_id": "external_productivity",
+      "skill_id": "grill-with-docs",
+      "status": "REVIEW_REQUIRED",
+      "confidence": "low",
+      "score": 1,
+      "route_keyword_score": 1,
+      "match_reasons": [
+        "route_keyword_score:1"
+      ],
+      "review_reasons": [
+        "weak_match_confidence:low",
+        "weak_match_score:1"
+      ],
+      "selection_score": 191,
+      "runtime_eligible": true,
+      "ablation_eligible": true,
+      "safety_status": "runtime_reviewed"
+    },
+    {
+      "capability_id": "external_productivity",
+      "skill_id": "improve-codebase-architecture",
+      "status": "REVIEW_REQUIRED",
+      "confidence": "low",
+      "score": 1,
+      "route_keyword_score": 1,
+      "match_reasons": [
+        "route_keyword_score:1"
+      ],
+      "review_reasons": [
+        "weak_match_confidence:low",
+        "weak_match_score:1"
+      ],
+      "selection_score": 191,
+      "runtime_eligible": true,
+      "ablation_eligible": true,
+      "safety_status": "runtime_reviewed"
+    },
+    {
+      "capability_id": "external_productivity",
+      "skill_id": "google-workspace",
+      "status": "PASS",
+      "confidence": "medium",
+      "score": 4,
+      "route_keyword_score": 4,
+      "match_reasons": [
+        "route_keyword_score:4"
+      ],
+      "review_reasons": [],
+      "selection_score": 54,
+      "runtime_eligible": false,
+      "ablation_eligible": true,
+      "safety_status": "ablation_only"
+    },
+    {
+      "capability_id": "external_productivity",
+      "skill_id": "gbrain-cold-start",
+      "status": "REVIEW_REQUIRED",
+      "confidence": "low",
+      "score": 2,
+      "route_keyword_score": 2,
+      "match_reasons": [
+        "route_keyword_score:2"
+      ],
+      "review_reasons": [
+        "weak_match_confidence:low",
+        "weak_match_score:2"
+      ],
+      "selection_score": 42,
+      "runtime_eligible": false,
+      "ablation_eligible": true,
+      "safety_status": "ablation_only"
+    },
+    {
+      "capability_id": "external_productivity",
+      "skill_id": "theme-factory",
+      "status": "REVIEW_REQUIRED",
+      "confidence": "low",
+      "score": 2,
+      "route_keyword_score": 2,
+      "match_reasons": [
+        "route_keyword_score:2"
+      ],
+      "review_reasons": [
+        "weak_match_confidence:low",
+        "weak_match_score:2"
+      ],
+      "selection_score": 42,
+      "runtime_eligible": false,
+      "ablation_eligible": true,
+      "safety_status": "ablation_only"
+    },
+    {
+      "capability_id": "external_productivity",
+      "skill_id": "architecture-diagram",
+      "status": "REVIEW_REQUIRED",
+      "confidence": "low",
+      "score": 1,
+      "route_keyword_score": 1,
+      "match_reasons": [
+        "route_keyword_score:1"
+      ],
+      "review_reasons": [
+        "weak_match_confidence:low",
+        "weak_match_score:1"
+      ],
+      "selection_score": 41,
+      "runtime_eligible": false,
+      "ablation_eligible": true,
+      "safety_status": "ablation_only"
+    },
+    {
+      "capability_id": "external_productivity",
+      "skill_id": "baoyu-comic",
+      "status": "REVIEW_REQUIRED",
+      "confidence": "low",
+      "score": 1,
+      "route_keyword_score": 1,
+      "match_reasons": [
+        "route_keyword_score:1"
+      ],
+      "review_reasons": [
+        "weak_match_confidence:low",
+        "weak_match_score:1"
+      ],
+      "selection_score": 41,
+      "runtime_eligible": false,
+      "ablation_eligible": true,
+      "safety_status": "ablation_only"
+    },
+    {
+      "capability_id": "external_productivity",
+      "skill_id": "competitor-alternatives",
+      "status": "REVIEW_REQUIRED",
+      "confidence": "low",
+      "score": 1,
+      "route_keyword_score": 1,
+      "match_reasons": [
+        "route_keyword_score:1"
+      ],
+      "review_reasons": [
+        "weak_match_confidence:low",
+        "weak_match_score:1"
+      ],
+      "selection_score": 41,
+      "runtime_eligible": false,
+      "ablation_eligible": true,
+      "safety_status": "ablation_only"
+    }
+  ],
+  "claim_boundary": [
+    "Quality screen checks route-fit metadata before live skill-fit ablation.",
+    "A PASS candidate is only allowed into SF-v2 ablation; it is not a runtime recommendation."
+  ]
+}

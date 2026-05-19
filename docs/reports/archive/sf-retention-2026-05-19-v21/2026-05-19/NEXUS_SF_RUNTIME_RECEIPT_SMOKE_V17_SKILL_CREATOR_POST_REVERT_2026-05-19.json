@@ -1,0 +1,849 @@
+{
+  "cases": [
+    {
+      "blocking_skill_mount_violations": [],
+      "capability_receipts": [
+        {
+          "evidence_present": false,
+          "evidence_refs": [],
+          "executor_id": "artifact_gate",
+          "failure_reason": "selected_without_invocation",
+          "gate_passed": false,
+          "invoked": false,
+          "name": "artifact_gate",
+          "outcome_contributed": false,
+          "public_claim_safe": false,
+          "selected": true,
+          "selection_source": "planner"
+        },
+        {
+          "evidence_present": false,
+          "evidence_refs": [],
+          "executor_id": "claim_gate",
+          "failure_reason": "invoked_without_evidence",
+          "gate_passed": false,
+          "invoked": true,
+          "name": "claim_gate",
+          "outcome_contributed": false,
+          "public_claim_safe": false,
+          "selected": true,
+          "selection_source": "planner"
+        },
+        {
+          "evidence_present": false,
+          "evidence_refs": [],
+          "executor_id": "codeintel",
+          "failure_reason": "selected_without_invocation",
+          "gate_passed": false,
+          "invoked": false,
+          "name": "codeintel",
+          "outcome_contributed": false,
+          "public_claim_safe": false,
+          "selected": true,
+          "selection_source": "planner"
+        },
+        {
+          "evidence_present": false,
+          "evidence_refs": [],
+          "executor_id": "delivery_gate",
+          "failure_reason": "invoked_without_evidence",
+          "gate_passed": false,
+          "invoked": true,
+          "name": "delivery_gate",
+          "outcome_contributed": false,
+          "public_claim_safe": false,
+          "selected": true,
+          "selection_source": "planner"
+        },
+        {
+          "evidence_present": false,
+          "evidence_refs": [],
+          "executor_id": "drone",
+          "failure_reason": "selected_without_invocation",
+          "gate_passed": false,
+          "invoked": false,
+          "name": "drone",
+          "outcome_contributed": false,
+          "public_claim_safe": false,
+          "selected": true,
+          "selection_source": "planner"
+        },
+        {
+          "evidence_present": false,
+          "evidence_refs": [],
+          "executor_id": "forecast_gate",
+          "failure_reason": "selected_without_invocation",
+          "gate_passed": false,
+          "invoked": false,
+          "name": "forecast_gate",
+          "outcome_contributed": false,
+          "public_claim_safe": false,
+          "selected": true,
+          "selection_source": "planner"
+        },
+        {
+          "evidence_present": false,
+          "evidence_refs": [],
+          "executor_id": "harness_preflight_sensor",
+          "failure_reason": "selected_without_invocation",
+          "gate_passed": false,
+          "invoked": false,
+          "name": "harness_preflight_sensor",
+          "outcome_contributed": false,
+          "public_claim_safe": false,
+          "selected": true,
+          "selection_source": "planner"
+        },
+        {
+          "evidence_present": false,
+          "evidence_refs": [],
+          "executor_id": "hyper_sprint",
+          "failure_reason": "selected_without_invocation",
+          "gate_passed": false,
+          "invoked": false,
+          "name": "hyper",
+          "outcome_contributed": false,
+          "public_claim_safe": false,
+          "selected": true,
+          "selection_source": "planner"
+        },
+        {
+          "evidence_present": false,
+          "evidence_refs": [],
+          "executor_id": "mempalace_gate",
+          "failure_reason": "selected_without_invocation",
+          "gate_passed": false,
+          "invoked": false,
+          "name": "mempalace_gate",
+          "outcome_contributed": false,
+          "public_claim_safe": false,
+          "selected": true,
+          "selection_source": "planner"
+        },
+        {
+          "evidence_present": false,
+          "evidence_refs": [],
+          "executor_id": "nightshift",
+          "failure_reason": "selected_without_invocation",
+          "gate_passed": false,
+          "invoked": false,
+          "name": "nightshift",
+          "outcome_contributed": false,
+          "public_claim_safe": false,
+          "selected": true,
+          "selection_source": "planner"
+        },
+        {
+          "evidence_present": false,
+          "evidence_refs": [],
+          "executor_id": "plan_quality_gate",
+          "failure_reason": "selected_without_invocation",
+          "gate_passed": false,
+          "invoked": false,
+          "name": "plan_quality_gate",
+          "outcome_contributed": false,
+          "public_claim_safe": false,
+          "selected": true,
+          "selection_source": "planner"
+        },
+        {
+          "evidence_present": false,
+          "evidence_refs": [],
+          "executor_id": "pregate",
+          "failure_reason": "selected_without_invocation",
+          "gate_passed": false,
+          "invoked": false,
+          "name": "pregate",
+          "outcome_contributed": false,
+          "public_claim_safe": false,
+          "selected": true,
+          "selection_source": "planner"
+        },
+        {
+          "evidence_present": true,
+          "evidence_refs": [
+            "docs/reports/NEXUS_SF_RUNTIME_RECEIPT_SMOKE_V17_SKILL_CREATOR_POST_REVERT_2026-05-19_repair_loop_trace.jsonl",
+            "rlm_attempt:sf-runtime-receipt-smoke",
+            "rlm_trace_status:readable_jsonl"
+          ],
+          "executor_id": "rlm_trace_bridge",
+          "failure_reason": "",
+          "gate_passed": true,
+          "invoked": true,
+          "name": "repair_loop",
+          "outcome_contributed": true,
+          "public_claim_safe": true,
+          "selected": true,
+          "selection_source": "planner"
+        },
+        {
+          "evidence_present": false,
+          "evidence_refs": [],
+          "executor_id": "research_route",
+          "failure_reason": "selected_without_invocation",
+          "gate_passed": false,
+          "invoked": false,
+          "name": "research_route",
+          "outcome_contributed": false,
+          "public_claim_safe": false,
+          "selected": true,
+          "selection_source": "planner"
+        },
+        {
+          "evidence_present": false,
+          "evidence_refs": [],
+          "executor_id": "sandbox",
+          "failure_reason": "selected_without_invocation",
+          "gate_passed": false,
+          "invoked": false,
+          "name": "sandbox",
+          "outcome_contributed": false,
+          "public_claim_safe": false,
+          "selected": true,
+          "selection_source": "planner"
+        },
+        {
+          "evidence_present": false,
+          "evidence_refs": [],
+          "executor_id": "swarm",
+          "failure_reason": "selected_without_invocation",
+          "gate_passed": false,
+          "invoked": false,
+          "name": "swarm",
+          "outcome_contributed": false,
+          "public_claim_safe": false,
+          "selected": true,
+          "selection_source": "planner"
+        },
+        {
+          "evidence_present": false,
+          "evidence_refs": [],
+          "executor_id": "ultra_review",
+          "failure_reason": "selected_without_invocation",
+          "gate_passed": false,
+          "invoked": false,
+          "name": "ultra_review",
+          "outcome_contributed": false,
+          "public_claim_safe": false,
+          "selected": true,
+          "selection_source": "planner"
+        }
+      ],
+      "expected_skill": "tdd",
+      "non_blocking_unscoped_violations": [
+        {
+          "path": "",
+          "reason": "skill_mount_not_confirmed_by_runtime_receipt",
+          "skill_name": "acceptance-evidence-failclosed"
+        },
+        {
+          "path": "",
+          "reason": "skill_mount_not_confirmed_by_runtime_receipt",
+          "skill_name": "nexus-benchmark-continuous-optimization"
+        },
+        {
+          "path": "",
+          "reason": "skill_mount_not_confirmed_by_runtime_receipt",
+          "skill_name": "diagnose"
+        },
+        {
+          "path": "",
+          "reason": "skill_mount_not_confirmed_by_runtime_receipt",
+          "skill_name": "acceptance-evidence-failclosed"
+        },
+        {
+          "path": "",
+          "reason": "skill_mount_not_confirmed_by_runtime_receipt",
+          "skill_name": "nexus-capability-upgrade"
+        },
+        {
+          "path": "",
+          "reason": "skill_mount_not_confirmed_by_runtime_receipt",
+          "skill_name": "diagnose"
+        },
+        {
+          "path": "",
+          "reason": "skill_mount_not_confirmed_by_runtime_receipt",
+          "skill_name": "nexus-root-cause-probe"
+        },
+        {
+          "path": "",
+          "reason": "skill_mount_not_confirmed_by_runtime_receipt",
+          "skill_name": "acceptance-evidence-failclosed"
+        },
+        {
+          "path": "",
+          "reason": "skill_mount_not_confirmed_by_runtime_receipt",
+          "skill_name": "diagnose"
+        }
+      ],
+      "planned_skill_mount_contracts": [
+        {
+          "capability": "ultra_review",
+          "capability_mount": "ultra_review",
+          "evidence_refs": [
+            "skill_catalog:acceptance-evidence-failclosed",
+            "skill_path:/Users/jameschen/.agents/skills/devops/acceptance-evidence-failclosed/SKILL.md"
+          ],
+          "load_reason_codes": [
+            "capability_planner_skill_signal",
+            "catalog_status:external_reference_candidate",
+            "sf_runtime_policy_overlay"
+          ],
+          "planner_selected_capability": true,
+          "skill_id": "acceptance-evidence-failclosed",
+          "skill_status": "external_reference_candidate"
+        },
+        {
+          "capability": "claim_gate",
+          "capability_mount": "claim_gate",
+          "evidence_refs": [
+            "skill_catalog:nexus-benchmark-continuous-optimization",
+            "skill_path:/Users/jameschen/Workspace/nexus/.agents/skills/nexus-benchmark-continuous-optimization/SKILL.md"
+          ],
+          "load_reason_codes": [
+            "capability_planner_skill_signal",
+            "catalog_status:nexus_curated_candidate",
+            "sf_runtime_policy_overlay"
+          ],
+          "planner_selected_capability": true,
+          "skill_id": "nexus-benchmark-continuous-optimization",
+          "skill_status": "nexus_curated_candidate"
+        },
+        {
+          "capability": "xray",
+          "capability_mount": "xray",
+          "evidence_refs": [
+            "skill_catalog:diagnose",
+            "skill_path:/Users/jameschen/Workspace/nexus/.agents/skills/diagnose/SKILL.md"
+          ],
+          "load_reason_codes": [
+            "capability_planner_skill_signal",
+            "catalog_status:nexus_curated_candidate",
+            "sf_runtime_policy_overlay"
+          ],
+          "planner_selected_capability": true,
+          "skill_id": "diagnose",
+          "skill_status": "nexus_curated_candidate"
+        },
+        {
+          "capability": "ultra_review",
+          "capability_mount": "ultra_review",
+          "evidence_refs": [
+            "skill_catalog:acceptance-evidence-failclosed",
+            "skill_path:/Users/jameschen/.agents/skills/devops/acceptance-evidence-failclosed/SKILL.md"
+          ],
+          "load_reason_codes": [
+            "capability_planner_skill_signal",
+            "catalog_status:external_reference_candidate",
+            "sf_runtime_policy_overlay"
+          ],
+          "planner_selected_capability": true,
+          "skill_id": "acceptance-evidence-failclosed",
+          "skill_status": "external_reference_candidate"
+        },
+        {
+          "capability": "learn_ask",
+          "capability_mount": "learn_ask",
+          "evidence_refs": [
+            "skill_catalog:nexus-capability-upgrade",
+            "skill_path:/Users/jameschen/Workspace/nexus/.agents/skills/nexus-capability-upgrade/SKILL.md"
+          ],
+          "load_reason_codes": [
+            "capability_planner_skill_signal",
+            "catalog_status:nexus_curated_candidate",
+            "sf_runtime_policy_overlay"
+          ],
+          "planner_selected_capability": true,
+          "skill_id": "nexus-capability-upgrade",
+          "skill_status": "nexus_curated_candidate"
+        },
+        {
+          "capability": "xray",
+          "capability_mount": "xray",
+          "evidence_refs": [
+            "skill_catalog:diagnose",
+            "skill_path:/Users/jameschen/Workspace/nexus/.agents/skills/diagnose/SKILL.md"
+          ],
+          "load_reason_codes": [
+            "capability_planner_skill_signal",
+            "catalog_status:nexus_curated_candidate",
+            "sf_runtime_policy_overlay"
+          ],
+          "planner_selected_capability": true,
+          "skill_id": "diagnose",
+          "skill_status": "nexus_curated_candidate"
+        },
+        {
+          "capability": "repair_loop",
+          "capability_mount": "repair_loop",
+          "evidence_refs": [
+            "skill_catalog:tdd",
+            "skill_path:/Users/jameschen/Workspace/nexus/.agents/skills/tdd/SKILL.md"
+          ],
+          "load_reason_codes": [
+            "capability_planner_skill_signal",
+            "catalog_status:nexus_curated_candidate",
+            "sf_runtime_policy_overlay"
+          ],
+          "planner_selected_capability": true,
+          "skill_id": "tdd",
+          "skill_status": "nexus_curated_candidate"
+        },
+        {
+          "capability": "ui_validator",
+          "capability_mount": "ui_validator",
+          "evidence_refs": [
+            "skill_catalog:nexus-root-cause-probe",
+            "skill_path:/Users/jameschen/Workspace/nexus/.agents/skills/nexus-root-cause-probe/SKILL.md"
+          ],
+          "load_reason_codes": [
+            "capability_planner_skill_signal",
+            "catalog_status:nexus_curated_candidate",
+            "sf_runtime_policy_overlay"
+          ],
+          "planner_selected_capability": true,
+          "skill_id": "nexus-root-cause-probe",
+          "skill_status": "nexus_curated_candidate"
+        },
+        {
+          "capability": "ultra_review",
+          "capability_mount": "ultra_review",
+          "evidence_refs": [
+            "skill_catalog:acceptance-evidence-failclosed",
+            "skill_path:/Users/jameschen/.agents/skills/devops/acceptance-evidence-failclosed/SKILL.md"
+          ],
+          "load_reason_codes": [
+            "capability_planner_skill_signal",
+            "catalog_status:external_reference_candidate",
+            "sf_runtime_policy_overlay"
+          ],
+          "planner_selected_capability": true,
+          "skill_id": "acceptance-evidence-failclosed",
+          "skill_status": "external_reference_candidate"
+        },
+        {
+          "capability": "xray",
+          "capability_mount": "xray",
+          "evidence_refs": [
+            "skill_catalog:diagnose",
+            "skill_path:/Users/jameschen/Workspace/nexus/.agents/skills/diagnose/SKILL.md"
+          ],
+          "load_reason_codes": [
+            "capability_planner_skill_signal",
+            "catalog_status:nexus_curated_candidate",
+            "sf_runtime_policy_overlay"
+          ],
+          "planner_selected_capability": true,
+          "skill_id": "diagnose",
+          "skill_status": "nexus_curated_candidate"
+        }
+      ],
+      "runtime_final_receipt_chain": {
+        "evidence_present": true,
+        "gate_passed": true,
+        "injected": true,
+        "outcome_contributed": true,
+        "selected": true,
+        "used": true
+      },
+      "selected_capabilities": [
+        "harness_preflight_sensor",
+        "codeintel",
+        "hyper",
+        "nightshift",
+        "swarm",
+        "drone",
+        "ultra_review",
+        "repair_loop",
+        "research_route",
+        "sandbox",
+        "delivery_gate",
+        "pregate",
+        "forecast_gate",
+        "plan_quality_gate",
+        "mempalace_gate",
+        "artifact_gate",
+        "claim_gate"
+      ],
+      "skill_mount_contracts": [
+        {
+          "capability": "repair_loop",
+          "capability_mount": "repair_loop",
+          "evidence_refs": [
+            "skill_catalog:tdd",
+            "skill_path:/Users/jameschen/Workspace/nexus/.agents/skills/tdd/SKILL.md",
+            "docs/reports/NEXUS_SF_RUNTIME_RECEIPT_SMOKE_V17_SKILL_CREATOR_POST_REVERT_2026-05-19_repair_loop_trace.jsonl",
+            "rlm_attempt:sf-runtime-receipt-smoke",
+            "rlm_trace_status:readable_jsonl",
+            "route_decision:sf-runtime-receipt-smoke-repair-loop",
+            "capability_receipt:repair_loop"
+          ],
+          "load_reason_codes": [
+            "capability_planner_skill_signal",
+            "catalog_status:nexus_curated_candidate",
+            "sf_runtime_policy_overlay",
+            "runtime_capability_receipt_confirmed"
+          ],
+          "outcome_contributed": true,
+          "skill_id": "tdd",
+          "skill_status": "nexus_curated_candidate"
+        }
+      ],
+      "skill_mount_violations": [
+        {
+          "path": "",
+          "reason": "skill_mount_not_confirmed_by_runtime_receipt",
+          "skill_name": "acceptance-evidence-failclosed"
+        },
+        {
+          "path": "",
+          "reason": "skill_mount_not_confirmed_by_runtime_receipt",
+          "skill_name": "nexus-benchmark-continuous-optimization"
+        },
+        {
+          "path": "",
+          "reason": "skill_mount_not_confirmed_by_runtime_receipt",
+          "skill_name": "diagnose"
+        },
+        {
+          "path": "",
+          "reason": "skill_mount_not_confirmed_by_runtime_receipt",
+          "skill_name": "acceptance-evidence-failclosed"
+        },
+        {
+          "path": "",
+          "reason": "skill_mount_not_confirmed_by_runtime_receipt",
+          "skill_name": "nexus-capability-upgrade"
+        },
+        {
+          "path": "",
+          "reason": "skill_mount_not_confirmed_by_runtime_receipt",
+          "skill_name": "diagnose"
+        },
+        {
+          "path": "",
+          "reason": "skill_mount_not_confirmed_by_runtime_receipt",
+          "skill_name": "nexus-root-cause-probe"
+        },
+        {
+          "path": "",
+          "reason": "skill_mount_not_confirmed_by_runtime_receipt",
+          "skill_name": "acceptance-evidence-failclosed"
+        },
+        {
+          "path": "",
+          "reason": "skill_mount_not_confirmed_by_runtime_receipt",
+          "skill_name": "diagnose"
+        }
+      ],
+      "status": "PASS",
+      "task_id": "sf-runtime-receipt-smoke-repair-loop"
+    },
+    {
+      "blocking_skill_mount_violations": [],
+      "capability_receipts": [
+        {
+          "evidence_present": false,
+          "evidence_refs": [],
+          "executor_id": "artifact_gate",
+          "failure_reason": "selected_without_invocation",
+          "gate_passed": false,
+          "invoked": false,
+          "name": "artifact_gate",
+          "outcome_contributed": false,
+          "public_claim_safe": false,
+          "selected": true,
+          "selection_source": "planner"
+        },
+        {
+          "evidence_present": false,
+          "evidence_refs": [],
+          "executor_id": "claim_gate",
+          "failure_reason": "invoked_without_evidence",
+          "gate_passed": false,
+          "invoked": true,
+          "name": "claim_gate",
+          "outcome_contributed": false,
+          "public_claim_safe": false,
+          "selected": true,
+          "selection_source": "planner"
+        },
+        {
+          "evidence_present": false,
+          "evidence_refs": [],
+          "executor_id": "codeintel",
+          "failure_reason": "selected_without_invocation",
+          "gate_passed": false,
+          "invoked": false,
+          "name": "codeintel",
+          "outcome_contributed": false,
+          "public_claim_safe": false,
+          "selected": true,
+          "selection_source": "planner"
+        },
+        {
+          "evidence_present": false,
+          "evidence_refs": [],
+          "executor_id": "delivery_gate",
+          "failure_reason": "invoked_without_evidence",
+          "gate_passed": false,
+          "invoked": true,
+          "name": "delivery_gate",
+          "outcome_contributed": false,
+          "public_claim_safe": false,
+          "selected": true,
+          "selection_source": "planner"
+        },
+        {
+          "evidence_present": false,
+          "evidence_refs": [],
+          "executor_id": "drone",
+          "failure_reason": "selected_without_invocation",
+          "gate_passed": false,
+          "invoked": false,
+          "name": "drone",
+          "outcome_contributed": false,
+          "public_claim_safe": false,
+          "selected": true,
+          "selection_source": "planner"
+        },
+        {
+          "evidence_present": true,
+          "evidence_refs": [
+            "forecast:sf-runtime-receipt-smoke"
+          ],
+          "executor_id": "forecast_gate",
+          "failure_reason": "evidence_without_gate_pass",
+          "gate_passed": false,
+          "invoked": true,
+          "name": "forecast_gate",
+          "outcome_contributed": false,
+          "public_claim_safe": false,
+          "selected": true,
+          "selection_source": "planner"
+        },
+        {
+          "evidence_present": false,
+          "evidence_refs": [],
+          "executor_id": "harness_preflight_sensor",
+          "failure_reason": "selected_without_invocation",
+          "gate_passed": false,
+          "invoked": false,
+          "name": "harness_preflight_sensor",
+          "outcome_contributed": false,
+          "public_claim_safe": false,
+          "selected": true,
+          "selection_source": "planner"
+        },
+        {
+          "evidence_present": false,
+          "evidence_refs": [],
+          "executor_id": "hyper_sprint",
+          "failure_reason": "selected_without_invocation",
+          "gate_passed": false,
+          "invoked": false,
+          "name": "hyper",
+          "outcome_contributed": false,
+          "public_claim_safe": false,
+          "selected": true,
+          "selection_source": "planner"
+        },
+        {
+          "evidence_present": false,
+          "evidence_refs": [],
+          "executor_id": "mempalace_gate",
+          "failure_reason": "selected_without_invocation",
+          "gate_passed": false,
+          "invoked": false,
+          "name": "mempalace_gate",
+          "outcome_contributed": false,
+          "public_claim_safe": false,
+          "selected": true,
+          "selection_source": "planner"
+        },
+        {
+          "evidence_present": false,
+          "evidence_refs": [],
+          "executor_id": "nightshift",
+          "failure_reason": "selected_without_invocation",
+          "gate_passed": false,
+          "invoked": false,
+          "name": "nightshift",
+          "outcome_contributed": false,
+          "public_claim_safe": false,
+          "selected": true,
+          "selection_source": "planner"
+        },
+        {
+          "evidence_present": true,
+          "evidence_refs": [
+            "plan_quality:sf-runtime-receipt-smoke"
+          ],
+          "executor_id": "plan_quality_gate",
+          "failure_reason": "evidence_without_gate_pass",
+          "gate_passed": false,
+          "invoked": true,
+          "name": "plan_quality_gate",
+          "outcome_contributed": false,
+          "public_claim_safe": false,
+          "selected": true,
+          "selection_source": "planner"
+        },
+        {
+          "evidence_present": true,
+          "evidence_refs": [
+            "pregate:sf-runtime-receipt-smoke"
+          ],
+          "executor_id": "pregate",
+          "failure_reason": "",
+          "gate_passed": true,
+          "invoked": true,
+          "name": "pregate",
+          "outcome_contributed": true,
+          "public_claim_safe": true,
+          "selected": true,
+          "selection_source": "planner"
+        },
+        {
+          "evidence_present": false,
+          "evidence_refs": [],
+          "executor_id": "research_route",
+          "failure_reason": "selected_without_invocation",
+          "gate_passed": false,
+          "invoked": false,
+          "name": "research_route",
+          "outcome_contributed": false,
+          "public_claim_safe": false,
+          "selected": true,
+          "selection_source": "planner"
+        },
+        {
+          "evidence_present": false,
+          "evidence_refs": [],
+          "executor_id": "sandbox",
+          "failure_reason": "selected_without_invocation",
+          "gate_passed": false,
+          "invoked": false,
+          "name": "sandbox",
+          "outcome_contributed": false,
+          "public_claim_safe": false,
+          "selected": true,
+          "selection_source": "planner"
+        },
+        {
+          "evidence_present": false,
+          "evidence_refs": [],
+          "executor_id": "swarm",
+          "failure_reason": "selected_without_invocation",
+          "gate_passed": false,
+          "invoked": false,
+          "name": "swarm",
+          "outcome_contributed": false,
+          "public_claim_safe": false,
+          "selected": true,
+          "selection_source": "planner"
+        },
+        {
+          "evidence_present": false,
+          "evidence_refs": [],
+          "executor_id": "ultra_review",
+          "failure_reason": "selected_without_invocation",
+          "gate_passed": false,
+          "invoked": false,
+          "name": "ultra_review",
+          "outcome_contributed": false,
+          "public_claim_safe": false,
+          "selected": true,
+          "selection_source": "planner"
+        }
+      ],
+      "expected_skill": "create-plan",
+      "non_blocking_unscoped_violations": [],
+      "planned_skill_mount_contracts": [
+        {
+          "capability": "forecast_pregate",
+          "capability_mount": "forecast_pregate",
+          "evidence_refs": [
+            "skill_catalog:create-plan",
+            "skill_path:/Users/jameschen/Workspace/nexus/.agents/skills/create-plan/SKILL.md"
+          ],
+          "load_reason_codes": [
+            "capability_planner_skill_signal",
+            "catalog_status:nexus_repo_local_candidate",
+            "sf_runtime_policy_overlay"
+          ],
+          "planner_selected_capability": true,
+          "skill_id": "create-plan",
+          "skill_status": "nexus_repo_local_candidate"
+        }
+      ],
+      "runtime_final_receipt_chain": {
+        "evidence_present": true,
+        "gate_passed": true,
+        "injected": true,
+        "outcome_contributed": true,
+        "selected": true,
+        "used": true
+      },
+      "selected_capabilities": [
+        "harness_preflight_sensor",
+        "codeintel",
+        "hyper",
+        "nightshift",
+        "swarm",
+        "drone",
+        "ultra_review",
+        "research_route",
+        "sandbox",
+        "delivery_gate",
+        "pregate",
+        "forecast_gate",
+        "plan_quality_gate",
+        "mempalace_gate",
+        "artifact_gate",
+        "claim_gate"
+      ],
+      "skill_mount_contracts": [
+        {
+          "capability": "pregate",
+          "capability_mount": "forecast_pregate",
+          "evidence_refs": [
+            "skill_catalog:create-plan",
+            "skill_path:/Users/jameschen/Workspace/nexus/.agents/skills/create-plan/SKILL.md",
+            "pregate:sf-runtime-receipt-smoke",
+            "route_decision:sf-runtime-receipt-smoke-forecast-pregate",
+            "capability_receipt:pregate"
+          ],
+          "load_reason_codes": [
+            "capability_planner_skill_signal",
+            "catalog_status:nexus_repo_local_candidate",
+            "sf_runtime_policy_overlay",
+            "runtime_capability_receipt_confirmed"
+          ],
+          "outcome_contributed": true,
+          "skill_id": "create-plan",
+          "skill_status": "nexus_repo_local_candidate"
+        }
+      ],
+      "skill_mount_violations": [],
+      "status": "PASS",
+      "task_id": "sf-runtime-receipt-smoke-forecast-pregate"
+    }
+  ],
+  "claim_boundary": {
+    "not_public_benchmark": true,
+    "runtime_default_change": false,
+    "scope": "runtime_receipt_smoke_only"
+  },
+  "overlay_path": "docs/reports/NEXUS_SF_RUNTIME_SKILL_POLICY_OVERLAY_V17_2026-05-19.json",
+  "public_benchmark_allowed": false,
+  "runtime_update_allowed": false,
+  "schema": "nexus_sf_runtime_receipt_smoke_v1",
+  "status": "PASS",
+  "summary": {
+    "case_count": 2,
+    "pass_count": 2,
+    "return_count": 0
+  }
+}

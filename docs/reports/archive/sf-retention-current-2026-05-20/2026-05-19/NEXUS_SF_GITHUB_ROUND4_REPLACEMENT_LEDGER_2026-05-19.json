@@ -1,0 +1,48 @@
+{
+  "held_decisions": [
+    {
+      "candidate_evidence_path": ".nexus/reports/sf_github_round4_live_2026-05-19/codeintel_sf-github-round4-smoke-codeintel-001_github4_wiki_qa_github4-sickn33-antigravity-awesome-skills-wiki-qa/evidence_bundle.json",
+      "candidate_receipt_path": ".nexus/reports/sf_github_round4_live_2026-05-19/codeintel_sf-github-round4-smoke-codeintel-001_github4_wiki_qa_github4-sickn33-antigravity-awesome-skills-wiki-qa",
+      "candidate_skill": "github4-sickn33-antigravity-awesome-skills-wiki-qa",
+      "candidate_total_tokens": 46073,
+      "candidate_wall_duration_sec": 118.2021,
+      "capability": "codeintel",
+      "current_evidence_path": ".nexus/reports/sf_github_round4_live_2026-05-19/codeintel_sf-github-round4-smoke-codeintel-001_current_best_github-karpathy-guidelines/evidence_bundle.json",
+      "current_receipt_path": ".nexus/reports/sf_github_round4_live_2026-05-19/codeintel_sf-github-round4-smoke-codeintel-001_current_best_github-karpathy-guidelines",
+      "current_total_tokens": 44830,
+      "current_wall_duration_sec": 133.4232,
+      "decision": "KEEP_CURRENT_SKILL",
+      "from_skill": "github-karpathy-guidelines",
+      "reason": "challenger_runtime_receipt_confirmed_but_not_cost_improved",
+      "to_skill": "github-karpathy-guidelines",
+      "token_delta": 1243,
+      "wall_delta_sec": -15.2211
+    }
+  ],
+  "public_benchmark_allowed": false,
+  "replacement_decisions": [
+    {
+      "candidate_evidence_path": ".nexus/reports/sf_github_round4_live_2026-05-19/repair_loop_sf-github-round4-smoke-repair_loop-001_github4_tdd_red_github4-sickn33-antigravity-awesome-skills-tdd-workflows-tdd-red/evidence_bundle.json",
+      "candidate_receipt_path": ".nexus/reports/sf_github_round4_live_2026-05-19/repair_loop_sf-github-round4-smoke-repair_loop-001_github4_tdd_red_github4-sickn33-antigravity-awesome-skills-tdd-workflows-tdd-red",
+      "candidate_skill": "github4-sickn33-antigravity-awesome-skills-tdd-workflows-tdd-red",
+      "candidate_total_tokens": 39773,
+      "candidate_wall_duration_sec": 81.845,
+      "capability": "repair_loop",
+      "current_evidence_path": ".nexus/reports/sf_github_round4_live_2026-05-19/repair_loop_sf-github-round4-smoke-repair_loop-001_current_best_tdd/evidence_bundle.json",
+      "current_receipt_path": ".nexus/reports/sf_github_round4_live_2026-05-19/repair_loop_sf-github-round4-smoke-repair_loop-001_current_best_tdd",
+      "current_total_tokens": 40718,
+      "current_wall_duration_sec": 88.9135,
+      "decision": "APPROVE_RUNTIME_REPLACEMENT",
+      "from_skill": "tdd",
+      "reason": "runtime_receipt_confirmed_and_cost_improved",
+      "to_skill": "github4-sickn33-antigravity-awesome-skills-tdd-workflows-tdd-red",
+      "token_delta": -945,
+      "wall_delta_sec": -7.0685
+    }
+  ],
+  "runtime_default_written": false,
+  "schema": "nexus.sf_github_round4_replacement_ledger.v1",
+  "source_rollup": "docs/reports/NEXUS_SF_GITHUB_ROUND4_LIVE_ROLLUP_2026-05-19.json",
+  "status": "PASS",
+  "version": "2026-05-19"
+}

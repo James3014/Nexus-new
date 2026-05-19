@@ -1,0 +1,147 @@
+{
+  "schema": "nexus.skill_fit_catalog.v1",
+  "status": "PASS",
+  "mode": "live",
+  "matrix_path": "docs/reports/NEXUS_SF_MATTPOCOCK_CHALLENGE_MATRIX_2026-05-18.json",
+  "summary": {
+    "planned_rows": 12,
+    "completed_rows": 12,
+    "matrix_complete": true,
+    "capability_only_rows": 6,
+    "skill_count": 6,
+    "negative_control_rows": 0,
+    "negative_control_blocked_rows": 0,
+    "keep_count": 0,
+    "replace_candidate_count": 6,
+    "reject_count": 0,
+    "needs_more_data_count": 0
+  },
+  "failures": [],
+  "claim_boundary": [
+    "Catalog verdicts are valid only for this capability, task set, model, and matrix version.",
+    "replace_candidate means import/review candidate, not runtime promotion.",
+    "runtime policy changes require a later Flash 50/100 regression gate."
+  ],
+  "skill_verdicts": [
+    {
+      "skill_id": "improve-codebase-architecture",
+      "capability": "codeintel",
+      "anonymous_label": "flash_nexus_with_mattpocock_skill",
+      "source_root": "mattpocock_external",
+      "runtime_eligible": false,
+      "tested_rows": 1,
+      "effective_rows": 1,
+      "trust_clean_rows": 1,
+      "verdict": "replace_candidate",
+      "evidence_refs": [
+        "/private/tmp/nexus_sf_mattpocock_challenge_live_20260518/codeintel_sf-flash-pair-codeintel-001_flash_nexus_with_matt_skill_improve-codebase-architecture/evidence_bundle.json"
+      ],
+      "receipt_refs": [
+        "/private/tmp/nexus_sf_mattpocock_challenge_live_20260518/codeintel_sf-flash-pair-codeintel-001_flash_nexus_with_matt_skill_improve-codebase-architecture"
+      ],
+      "task_buckets": [
+        "codeintel"
+      ]
+    },
+    {
+      "skill_id": "to-prd",
+      "capability": "forecast_pregate",
+      "anonymous_label": "flash_nexus_with_mattpocock_skill",
+      "source_root": "mattpocock_external",
+      "runtime_eligible": false,
+      "tested_rows": 1,
+      "effective_rows": 1,
+      "trust_clean_rows": 1,
+      "verdict": "replace_candidate",
+      "evidence_refs": [
+        "/private/tmp/nexus_sf_mattpocock_challenge_live_20260518/forecast_pregate_sf-flash-pair-forecast_pregate-001_flash_nexus_with_matt_skill_to-prd/evidence_bundle.json"
+      ],
+      "receipt_refs": [
+        "/private/tmp/nexus_sf_mattpocock_challenge_live_20260518/forecast_pregate_sf-flash-pair-forecast_pregate-001_flash_nexus_with_matt_skill_to-prd"
+      ],
+      "task_buckets": [
+        "forecast_pregate"
+      ]
+    },
+    {
+      "skill_id": "write-a-skill",
+      "capability": "registry_skills_sync",
+      "anonymous_label": "flash_nexus_with_mattpocock_skill",
+      "source_root": "mattpocock_external",
+      "runtime_eligible": false,
+      "tested_rows": 1,
+      "effective_rows": 1,
+      "trust_clean_rows": 1,
+      "verdict": "replace_candidate",
+      "evidence_refs": [
+        "/private/tmp/nexus_sf_mattpocock_challenge_live_20260518/registry_skills_sync_sf-flash-pair-registry_skills_sync-001_flash_nexus_with_matt_skill_write-a-skill/evidence_bundle.json"
+      ],
+      "receipt_refs": [
+        "/private/tmp/nexus_sf_mattpocock_challenge_live_20260518/registry_skills_sync_sf-flash-pair-registry_skills_sync-001_flash_nexus_with_matt_skill_write-a-skill"
+      ],
+      "task_buckets": [
+        "registry_skills_sync"
+      ]
+    },
+    {
+      "skill_id": "tdd",
+      "capability": "repair_loop",
+      "anonymous_label": "flash_nexus_with_mattpocock_skill",
+      "source_root": "mattpocock_external",
+      "runtime_eligible": false,
+      "tested_rows": 1,
+      "effective_rows": 1,
+      "trust_clean_rows": 1,
+      "verdict": "replace_candidate",
+      "evidence_refs": [
+        "/private/tmp/nexus_sf_mattpocock_challenge_live_20260518/repair_loop_sf-flash-pair-repair_loop-001_flash_nexus_with_matt_skill_tdd/evidence_bundle.json"
+      ],
+      "receipt_refs": [
+        "/private/tmp/nexus_sf_mattpocock_challenge_live_20260518/repair_loop_sf-flash-pair-repair_loop-001_flash_nexus_with_matt_skill_tdd"
+      ],
+      "task_buckets": [
+        "repair_loop"
+      ]
+    },
+    {
+      "skill_id": "grill-with-docs",
+      "capability": "research_control_plane",
+      "anonymous_label": "flash_nexus_with_mattpocock_skill",
+      "source_root": "mattpocock_external",
+      "runtime_eligible": false,
+      "tested_rows": 1,
+      "effective_rows": 1,
+      "trust_clean_rows": 1,
+      "verdict": "replace_candidate",
+      "evidence_refs": [
+        "/private/tmp/nexus_sf_mattpocock_challenge_live_20260518/research_control_plane_sf-flash-pair-research_control_plane-001_flash_nexus_with_matt_skill_grill-with-docs/evidence_bundle.json"
+      ],
+      "receipt_refs": [
+        "/private/tmp/nexus_sf_mattpocock_challenge_live_20260518/research_control_plane_sf-flash-pair-research_control_plane-001_flash_nexus_with_matt_skill_grill-with-docs"
+      ],
+      "task_buckets": [
+        "research_control_plane"
+      ]
+    },
+    {
+      "skill_id": "diagnose",
+      "capability": "xray",
+      "anonymous_label": "flash_nexus_with_mattpocock_skill",
+      "source_root": "mattpocock_external",
+      "runtime_eligible": false,
+      "tested_rows": 1,
+      "effective_rows": 1,
+      "trust_clean_rows": 1,
+      "verdict": "replace_candidate",
+      "evidence_refs": [
+        "/private/tmp/nexus_sf_mattpocock_challenge_live_20260518/xray_sf-flash-pair-xray-001_flash_nexus_with_matt_skill_diagnose/evidence_bundle.json"
+      ],
+      "receipt_refs": [
+        "/private/tmp/nexus_sf_mattpocock_challenge_live_20260518/xray_sf-flash-pair-xray-001_flash_nexus_with_matt_skill_diagnose"
+      ],
+      "task_buckets": [
+        "xray"
+      ]
+    }
+  ]
+}

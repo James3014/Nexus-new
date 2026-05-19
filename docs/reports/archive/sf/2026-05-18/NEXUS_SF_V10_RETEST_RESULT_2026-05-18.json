@@ -1,0 +1,15 @@
+{
+  "schema": "nexus.sf_v10_retest_result.v1",
+  "status": "PASS",
+  "summary": {
+    "live_rows": 18,
+    "pass_count": 18,
+    "return_count": 0,
+    "promote_ready_count": 1,
+    "hold_count": 6,
+    "v10_overlay_candidate": "docs/reports/NEXUS_SF_RUNTIME_SKILL_POLICY_OVERLAY_V10_CANDIDATE_2026-05-18.json",
+    "public_benchmark_allowed": false
+  },
+  "rollup": "docs/reports/NEXUS_SF_V10_RETEST_ROLLUP_2026-05-18.json",
+  "markdown": "docs/reports/NEXUS_SF_V10_RETEST_ROLLUP_2026-05-18.md"
+}

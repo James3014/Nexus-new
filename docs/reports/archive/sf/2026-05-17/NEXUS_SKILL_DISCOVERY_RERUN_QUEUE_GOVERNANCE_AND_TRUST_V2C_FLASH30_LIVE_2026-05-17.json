@@ -1,0 +1,45 @@
+{
+  "schema": "nexus.skill_discovery_rerun_queue.v1",
+  "status": "PASS",
+  "queue_count": 0,
+  "skipped_count": 4,
+  "queue": [],
+  "skipped": [
+    {
+      "capability": "governance_and_trust",
+      "skill_id": "acceptance-evidence-failclosed",
+      "verdict": "reject",
+      "tested_rows": 5,
+      "effective_rows": 0,
+      "reason": "skip_reject"
+    },
+    {
+      "capability": "governance_and_trust",
+      "skill_id": "cso",
+      "verdict": "reject",
+      "tested_rows": 5,
+      "effective_rows": 0,
+      "reason": "skip_reject"
+    },
+    {
+      "capability": "governance_and_trust",
+      "skill_id": "multi-agent-handoff-v15-execution-and-validation",
+      "verdict": "reject",
+      "tested_rows": 5,
+      "effective_rows": 0,
+      "reason": "skip_reject"
+    },
+    {
+      "capability": "governance_and_trust",
+      "skill_id": "self-audit",
+      "verdict": "reject",
+      "tested_rows": 5,
+      "effective_rows": 0,
+      "reason": "skip_reject"
+    }
+  ],
+  "claim_boundary": [
+    "Discovery queue schedules validation only; it must not update runtime defaults.",
+    "Rejected skills are skipped until the taskset or candidate source changes."
+  ]
+}

@@ -1,0 +1,51 @@
+{
+  "schema": "nexus.sf_round11_coverage_backlog_materialization.v1",
+  "status": "PASS",
+  "runtime_update_allowed": false,
+  "public_benchmark_allowed": false,
+  "summary": {
+    "candidate_count": 4
+  },
+  "materialized": [
+    {
+      "capability": "benchmark_meta_opt",
+      "runner_capability": "judge_panel",
+      "candidate_skill": "github11-ab-test-analysis-benchmark-meta-opt",
+      "source": "/private/tmp/nexus-sf-round6/phuryn-pm-skills/pm-data-analytics/skills/ab-test-analysis/SKILL.md",
+      "desc": "Use for benchmark_meta_opt tasks that need A/B test analysis, experiment comparison, metric interpretation, and evidence-backed benchmark decision traces.",
+      "target": ".agents/skills/github-round11-challengers/github11-ab-test-analysis-benchmark-meta-opt/SKILL.md",
+      "current_best": "github4-sickn33-antigravity-awesome-skills-ad-creative"
+    },
+    {
+      "capability": "ultra_review",
+      "runner_capability": "ultra_review",
+      "candidate_skill": "github11-vulnerability-scanner-ultra-review",
+      "source": "/private/tmp/nexus-sf-round4/sickn33-antigravity-awesome-skills/skills/vulnerability-scanner/SKILL.md",
+      "desc": "Use for ultra_review tasks that need vulnerability scanning, security review, exploit/risk triage, and fail-closed evidence-backed review receipts.",
+      "target": ".agents/skills/github-round11-challengers/github11-vulnerability-scanner-ultra-review/SKILL.md",
+      "current_best": "github9-openai-security-threat-model-ultra-review"
+    },
+    {
+      "capability": "repair_loop",
+      "runner_capability": "hyper",
+      "candidate_skill": "github11-bug-hunter-repair-loop",
+      "source": "/private/tmp/nexus-sf-round4/sickn33-antigravity-awesome-skills/skills/bug-hunter/SKILL.md",
+      "desc": "Use for repair_loop tasks that need bug hunting, reproduction-first diagnosis, test-backed fixes, and explicit repair evidence/outcome traces.",
+      "target": ".agents/skills/github-round11-challengers/github11-bug-hunter-repair-loop/SKILL.md",
+      "current_best": "github7-midudev-tdd-repair-loop"
+    },
+    {
+      "capability": "forecast_pregate",
+      "runner_capability": "autoreason",
+      "candidate_skill": "github11-notion-spec-to-implementation-forecast-pregate",
+      "source": "/private/tmp/nexus-sf-round9/openai-skills/skills/.curated/notion-spec-to-implementation/SKILL.md",
+      "desc": "Use for forecast_pregate tasks that need spec-to-implementation planning, risk prediction, plan quality checks, and handoff-ready implementation gates.",
+      "target": ".agents/skills/github-round11-challengers/github11-notion-spec-to-implementation-forecast-pregate/SKILL.md",
+      "current_best": "create-plan"
+    }
+  ],
+  "claim_boundary": [
+    "candidate-only materialization from deduped SF coverage backlog",
+    "does not update runtime default"
+  ]
+}

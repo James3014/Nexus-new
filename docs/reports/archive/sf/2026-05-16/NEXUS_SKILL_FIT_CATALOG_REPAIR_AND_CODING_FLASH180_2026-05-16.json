@@ -1,0 +1,168 @@
+{
+  "schema": "nexus.skill_fit_catalog.v1",
+  "status": "PASS",
+  "mode": "live",
+  "matrix_path": "docs/reports/NEXUS_SKILL_FIT_EXECUTION_MATRIX_REPAIR_AND_CODING_FLASH180_2026-05-16.json",
+  "summary": {
+    "capability_only_rows": 12,
+    "skill_count": 4,
+    "negative_control_rows": 11,
+    "negative_control_blocked_rows": 11,
+    "keep_count": 1,
+    "replace_candidate_count": 0,
+    "reject_count": 0,
+    "needs_more_data_count": 3
+  },
+  "failures": [],
+  "claim_boundary": [
+    "Catalog verdicts are valid only for this capability, task set, model, and matrix version.",
+    "replace_candidate means import/review candidate, not runtime promotion.",
+    "runtime policy changes require a later Flash 50/100 regression gate."
+  ],
+  "skill_verdicts": [
+    {
+      "skill_id": "systematic-debugging",
+      "anonymous_label": "candidate_003",
+      "source_root": "hermes",
+      "runtime_eligible": false,
+      "tested_rows": 11,
+      "effective_rows": 1,
+      "trust_clean_rows": 11,
+      "verdict": "needs_more_data",
+      "evidence_refs": [
+        "/private/tmp/nexus_skill_fit_flash180_live_20260516/nexus-value-repair-001_skill_arm_003_3866a8bfb73d/evidence_bundle.json",
+        "/private/tmp/nexus_skill_fit_flash180_live_20260516/nexus-value-repair-002_skill_arm_003_3866a8bfb73d/evidence_bundle.json",
+        "/private/tmp/nexus_skill_fit_flash180_live_20260516/rlm-harder-v2-second-round-001_skill_arm_003_3866a8bfb73d/evidence_bundle.json",
+        "/private/tmp/nexus_skill_fit_flash180_live_20260516/rlm-harder-v2-second-round-002_skill_arm_003_3866a8bfb73d/evidence_bundle.json",
+        "/private/tmp/nexus_skill_fit_flash180_live_20260516/model-required-repair-001_skill_arm_003_3866a8bfb73d/evidence_bundle.json",
+        "/private/tmp/nexus_skill_fit_flash180_live_20260516/model-required-refactor-001_skill_arm_003_3866a8bfb73d/evidence_bundle.json",
+        "/private/tmp/nexus_skill_fit_flash180_live_20260516/model-required-docs-001_skill_arm_003_3866a8bfb73d/evidence_bundle.json",
+        "/private/tmp/nexus_skill_fit_flash180_live_20260516/model-required-context-001_skill_arm_003_3866a8bfb73d/evidence_bundle.json",
+        "/private/tmp/nexus_skill_fit_flash180_live_20260516/docs-lane-public-field-contract-001_skill_arm_003_3866a8bfb73d/evidence_bundle.json",
+        "/private/tmp/nexus_skill_fit_flash180_live_20260516/docs-lane-contextual-evidence-contract-001_skill_arm_003_3866a8bfb73d/evidence_bundle.json",
+        "/private/tmp/nexus_skill_fit_flash180_live_20260516/docs-lane-config-contract-001_skill_arm_003_3866a8bfb73d/evidence_bundle.json"
+      ],
+      "receipt_refs": [
+        "/private/tmp/nexus_skill_fit_flash180_live_20260516/nexus-value-repair-001_skill_arm_003_3866a8bfb73d",
+        "/private/tmp/nexus_skill_fit_flash180_live_20260516/nexus-value-repair-002_skill_arm_003_3866a8bfb73d",
+        "/private/tmp/nexus_skill_fit_flash180_live_20260516/rlm-harder-v2-second-round-001_skill_arm_003_3866a8bfb73d",
+        "/private/tmp/nexus_skill_fit_flash180_live_20260516/rlm-harder-v2-second-round-002_skill_arm_003_3866a8bfb73d",
+        "/private/tmp/nexus_skill_fit_flash180_live_20260516/model-required-repair-001_skill_arm_003_3866a8bfb73d",
+        "/private/tmp/nexus_skill_fit_flash180_live_20260516/model-required-refactor-001_skill_arm_003_3866a8bfb73d",
+        "/private/tmp/nexus_skill_fit_flash180_live_20260516/model-required-docs-001_skill_arm_003_3866a8bfb73d",
+        "/private/tmp/nexus_skill_fit_flash180_live_20260516/model-required-context-001_skill_arm_003_3866a8bfb73d",
+        "/private/tmp/nexus_skill_fit_flash180_live_20260516/docs-lane-public-field-contract-001_skill_arm_003_3866a8bfb73d",
+        "/private/tmp/nexus_skill_fit_flash180_live_20260516/docs-lane-contextual-evidence-contract-001_skill_arm_003_3866a8bfb73d",
+        "/private/tmp/nexus_skill_fit_flash180_live_20260516/docs-lane-config-contract-001_skill_arm_003_3866a8bfb73d"
+      ]
+    },
+    {
+      "skill_id": "tdd",
+      "anonymous_label": "candidate_001",
+      "source_root": "nexus_repo",
+      "runtime_eligible": true,
+      "tested_rows": 11,
+      "effective_rows": 11,
+      "trust_clean_rows": 11,
+      "verdict": "keep",
+      "evidence_refs": [
+        "/private/tmp/nexus_skill_fit_flash180_live_20260516/nexus-value-repair-001_skill_arm_001_1b9277d6d9ad/evidence_bundle.json",
+        "/private/tmp/nexus_skill_fit_flash180_live_20260516/nexus-value-repair-002_skill_arm_001_1b9277d6d9ad/evidence_bundle.json",
+        "/private/tmp/nexus_skill_fit_flash180_live_20260516/rlm-harder-v2-second-round-001_skill_arm_001_1b9277d6d9ad/evidence_bundle.json",
+        "/private/tmp/nexus_skill_fit_flash180_live_20260516/rlm-harder-v2-second-round-002_skill_arm_001_1b9277d6d9ad/evidence_bundle.json",
+        "/private/tmp/nexus_skill_fit_flash180_live_20260516/model-required-repair-001_skill_arm_001_1b9277d6d9ad/evidence_bundle.json",
+        "/private/tmp/nexus_skill_fit_flash180_live_20260516/model-required-refactor-001_skill_arm_001_1b9277d6d9ad/evidence_bundle.json",
+        "/private/tmp/nexus_skill_fit_flash180_live_20260516/model-required-docs-001_skill_arm_001_1b9277d6d9ad/evidence_bundle.json",
+        "/private/tmp/nexus_skill_fit_flash180_live_20260516/model-required-context-001_skill_arm_001_1b9277d6d9ad/evidence_bundle.json",
+        "/private/tmp/nexus_skill_fit_flash180_live_20260516/docs-lane-public-field-contract-001_skill_arm_001_1b9277d6d9ad/evidence_bundle.json",
+        "/private/tmp/nexus_skill_fit_flash180_live_20260516/docs-lane-contextual-evidence-contract-001_skill_arm_001_1b9277d6d9ad/evidence_bundle.json",
+        "/private/tmp/nexus_skill_fit_flash180_live_20260516/docs-lane-config-contract-001_skill_arm_001_1b9277d6d9ad/evidence_bundle.json"
+      ],
+      "receipt_refs": [
+        "/private/tmp/nexus_skill_fit_flash180_live_20260516/nexus-value-repair-001_skill_arm_001_1b9277d6d9ad",
+        "/private/tmp/nexus_skill_fit_flash180_live_20260516/nexus-value-repair-002_skill_arm_001_1b9277d6d9ad",
+        "/private/tmp/nexus_skill_fit_flash180_live_20260516/rlm-harder-v2-second-round-001_skill_arm_001_1b9277d6d9ad",
+        "/private/tmp/nexus_skill_fit_flash180_live_20260516/rlm-harder-v2-second-round-002_skill_arm_001_1b9277d6d9ad",
+        "/private/tmp/nexus_skill_fit_flash180_live_20260516/model-required-repair-001_skill_arm_001_1b9277d6d9ad",
+        "/private/tmp/nexus_skill_fit_flash180_live_20260516/model-required-refactor-001_skill_arm_001_1b9277d6d9ad",
+        "/private/tmp/nexus_skill_fit_flash180_live_20260516/model-required-docs-001_skill_arm_001_1b9277d6d9ad",
+        "/private/tmp/nexus_skill_fit_flash180_live_20260516/model-required-context-001_skill_arm_001_1b9277d6d9ad",
+        "/private/tmp/nexus_skill_fit_flash180_live_20260516/docs-lane-public-field-contract-001_skill_arm_001_1b9277d6d9ad",
+        "/private/tmp/nexus_skill_fit_flash180_live_20260516/docs-lane-contextual-evidence-contract-001_skill_arm_001_1b9277d6d9ad",
+        "/private/tmp/nexus_skill_fit_flash180_live_20260516/docs-lane-config-contract-001_skill_arm_001_1b9277d6d9ad"
+      ]
+    },
+    {
+      "skill_id": "test-driven-development",
+      "anonymous_label": "candidate_002",
+      "source_root": "hermes",
+      "runtime_eligible": false,
+      "tested_rows": 11,
+      "effective_rows": 1,
+      "trust_clean_rows": 11,
+      "verdict": "needs_more_data",
+      "evidence_refs": [
+        "/private/tmp/nexus_skill_fit_flash180_live_20260516/nexus-value-repair-001_skill_arm_002_c687701f35e6/evidence_bundle.json",
+        "/private/tmp/nexus_skill_fit_flash180_live_20260516/nexus-value-repair-002_skill_arm_002_c687701f35e6/evidence_bundle.json",
+        "/private/tmp/nexus_skill_fit_flash180_live_20260516/rlm-harder-v2-second-round-001_skill_arm_002_c687701f35e6/evidence_bundle.json",
+        "/private/tmp/nexus_skill_fit_flash180_live_20260516/rlm-harder-v2-second-round-002_skill_arm_002_c687701f35e6/evidence_bundle.json",
+        "/private/tmp/nexus_skill_fit_flash180_live_20260516/model-required-repair-001_skill_arm_002_c687701f35e6/evidence_bundle.json",
+        "/private/tmp/nexus_skill_fit_flash180_live_20260516/model-required-refactor-001_skill_arm_002_c687701f35e6/evidence_bundle.json",
+        "/private/tmp/nexus_skill_fit_flash180_live_20260516/model-required-docs-001_skill_arm_002_c687701f35e6/evidence_bundle.json",
+        "/private/tmp/nexus_skill_fit_flash180_live_20260516/model-required-context-001_skill_arm_002_c687701f35e6/evidence_bundle.json",
+        "/private/tmp/nexus_skill_fit_flash180_live_20260516/docs-lane-public-field-contract-001_skill_arm_002_c687701f35e6/evidence_bundle.json",
+        "/private/tmp/nexus_skill_fit_flash180_live_20260516/docs-lane-contextual-evidence-contract-001_skill_arm_002_c687701f35e6/evidence_bundle.json",
+        "/private/tmp/nexus_skill_fit_flash180_live_20260516/docs-lane-config-contract-001_skill_arm_002_c687701f35e6/evidence_bundle.json"
+      ],
+      "receipt_refs": [
+        "/private/tmp/nexus_skill_fit_flash180_live_20260516/nexus-value-repair-001_skill_arm_002_c687701f35e6",
+        "/private/tmp/nexus_skill_fit_flash180_live_20260516/nexus-value-repair-002_skill_arm_002_c687701f35e6",
+        "/private/tmp/nexus_skill_fit_flash180_live_20260516/rlm-harder-v2-second-round-001_skill_arm_002_c687701f35e6",
+        "/private/tmp/nexus_skill_fit_flash180_live_20260516/rlm-harder-v2-second-round-002_skill_arm_002_c687701f35e6",
+        "/private/tmp/nexus_skill_fit_flash180_live_20260516/model-required-repair-001_skill_arm_002_c687701f35e6",
+        "/private/tmp/nexus_skill_fit_flash180_live_20260516/model-required-refactor-001_skill_arm_002_c687701f35e6",
+        "/private/tmp/nexus_skill_fit_flash180_live_20260516/model-required-docs-001_skill_arm_002_c687701f35e6",
+        "/private/tmp/nexus_skill_fit_flash180_live_20260516/model-required-context-001_skill_arm_002_c687701f35e6",
+        "/private/tmp/nexus_skill_fit_flash180_live_20260516/docs-lane-public-field-contract-001_skill_arm_002_c687701f35e6",
+        "/private/tmp/nexus_skill_fit_flash180_live_20260516/docs-lane-contextual-evidence-contract-001_skill_arm_002_c687701f35e6",
+        "/private/tmp/nexus_skill_fit_flash180_live_20260516/docs-lane-config-contract-001_skill_arm_002_c687701f35e6"
+      ]
+    },
+    {
+      "skill_id": "wondelai-clean-code",
+      "anonymous_label": "candidate_004",
+      "source_root": "agents",
+      "runtime_eligible": false,
+      "tested_rows": 11,
+      "effective_rows": 1,
+      "trust_clean_rows": 11,
+      "verdict": "needs_more_data",
+      "evidence_refs": [
+        "/private/tmp/nexus_skill_fit_flash180_live_20260516/nexus-value-repair-001_skill_arm_004_cc4d505b5160/evidence_bundle.json",
+        "/private/tmp/nexus_skill_fit_flash180_live_20260516/nexus-value-repair-002_skill_arm_004_cc4d505b5160/evidence_bundle.json",
+        "/private/tmp/nexus_skill_fit_flash180_live_20260516/rlm-harder-v2-second-round-001_skill_arm_004_cc4d505b5160/evidence_bundle.json",
+        "/private/tmp/nexus_skill_fit_flash180_live_20260516/rlm-harder-v2-second-round-002_skill_arm_004_cc4d505b5160/evidence_bundle.json",
+        "/private/tmp/nexus_skill_fit_flash180_live_20260516/model-required-repair-001_skill_arm_004_cc4d505b5160/evidence_bundle.json",
+        "/private/tmp/nexus_skill_fit_flash180_live_20260516/model-required-refactor-001_skill_arm_004_cc4d505b5160/evidence_bundle.json",
+        "/private/tmp/nexus_skill_fit_flash180_live_20260516/model-required-docs-001_skill_arm_004_cc4d505b5160/evidence_bundle.json",
+        "/private/tmp/nexus_skill_fit_flash180_live_20260516/model-required-context-001_skill_arm_004_cc4d505b5160/evidence_bundle.json",
+        "/private/tmp/nexus_skill_fit_flash180_live_20260516/docs-lane-public-field-contract-001_skill_arm_004_cc4d505b5160/evidence_bundle.json",
+        "/private/tmp/nexus_skill_fit_flash180_live_20260516/docs-lane-contextual-evidence-contract-001_skill_arm_004_cc4d505b5160/evidence_bundle.json",
+        "/private/tmp/nexus_skill_fit_flash180_live_20260516/docs-lane-config-contract-001_skill_arm_004_cc4d505b5160/evidence_bundle.json"
+      ],
+      "receipt_refs": [
+        "/private/tmp/nexus_skill_fit_flash180_live_20260516/nexus-value-repair-001_skill_arm_004_cc4d505b5160",
+        "/private/tmp/nexus_skill_fit_flash180_live_20260516/nexus-value-repair-002_skill_arm_004_cc4d505b5160",
+        "/private/tmp/nexus_skill_fit_flash180_live_20260516/rlm-harder-v2-second-round-001_skill_arm_004_cc4d505b5160",
+        "/private/tmp/nexus_skill_fit_flash180_live_20260516/rlm-harder-v2-second-round-002_skill_arm_004_cc4d505b5160",
+        "/private/tmp/nexus_skill_fit_flash180_live_20260516/model-required-repair-001_skill_arm_004_cc4d505b5160",
+        "/private/tmp/nexus_skill_fit_flash180_live_20260516/model-required-refactor-001_skill_arm_004_cc4d505b5160",
+        "/private/tmp/nexus_skill_fit_flash180_live_20260516/model-required-docs-001_skill_arm_004_cc4d505b5160",
+        "/private/tmp/nexus_skill_fit_flash180_live_20260516/model-required-context-001_skill_arm_004_cc4d505b5160",
+        "/private/tmp/nexus_skill_fit_flash180_live_20260516/docs-lane-public-field-contract-001_skill_arm_004_cc4d505b5160",
+        "/private/tmp/nexus_skill_fit_flash180_live_20260516/docs-lane-contextual-evidence-contract-001_skill_arm_004_cc4d505b5160",
+        "/private/tmp/nexus_skill_fit_flash180_live_20260516/docs-lane-config-contract-001_skill_arm_004_cc4d505b5160"
+      ]
+    }
+  ]
+}

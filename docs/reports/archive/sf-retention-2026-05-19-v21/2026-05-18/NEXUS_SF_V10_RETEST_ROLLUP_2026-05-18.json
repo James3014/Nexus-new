@@ -1,0 +1,280 @@
+{
+  "schema": "nexus.sf_v10_retest_rollup.v1",
+  "status": "PASS",
+  "source_live_summary": "/private/tmp/nexus_sf_v10_retest_live_20260518/live_summary.json",
+  "summary": {
+    "capability_count": 7,
+    "comparison_count": 7,
+    "promote_ready_count": 1,
+    "hold_count": 6,
+    "blocker_count": 0,
+    "public_benchmark_allowed": false,
+    "runtime_update_allowed": false
+  },
+  "blockers": [],
+  "promote_ready": [
+    {
+      "capability_id": "codeintel",
+      "skill_id": "sf2-codeintel-route-fit-spec",
+      "reason": "v10_strict_delivery_receipt_token_wall_pass",
+      "token_delta": -9134,
+      "wall_delta_sec": -20.8284
+    }
+  ],
+  "held": [
+    {
+      "capability_id": "artifact_gate",
+      "reason": "no_v10_candidate_met_strict_token_and_wall_gate",
+      "best_observed_skill": "nexus-goal-closure-executor",
+      "best_observed_token_delta": 1785,
+      "best_observed_wall_delta_sec": 8.7264
+    },
+    {
+      "capability_id": "autoreason",
+      "reason": "no_v10_candidate_met_strict_token_and_wall_gate",
+      "best_observed_skill": "nexus-benchmark-public-report",
+      "best_observed_token_delta": 887,
+      "best_observed_wall_delta_sec": 20.667
+    },
+    {
+      "capability_id": "ddtree",
+      "reason": "no_v10_candidate_met_strict_token_and_wall_gate",
+      "best_observed_skill": "sf2-ddtree-route-fit-spec",
+      "best_observed_token_delta": 1928,
+      "best_observed_wall_delta_sec": 19.7687
+    },
+    {
+      "capability_id": "research",
+      "reason": "no_v10_candidate_met_strict_token_and_wall_gate",
+      "best_observed_skill": "research-citation-chain-verifier",
+      "best_observed_token_delta": -338,
+      "best_observed_wall_delta_sec": 44.2734
+    },
+    {
+      "capability_id": "ui_validator",
+      "reason": "no_v10_candidate_met_strict_token_and_wall_gate",
+      "best_observed_skill": "sf2-ui_validator-route-fit-spec",
+      "best_observed_token_delta": 299,
+      "best_observed_wall_delta_sec": -29.1258
+    },
+    {
+      "capability_id": "ultra_review",
+      "reason": "no_v10_candidate_met_strict_token_and_wall_gate",
+      "best_observed_skill": "code-review-and-quality",
+      "best_observed_token_delta": -1251,
+      "best_observed_wall_delta_sec": 15.843
+    }
+  ],
+  "comparisons": [
+    {
+      "capability_id": "artifact_gate",
+      "baseline": {
+        "row_id": "artifact_gate::sf-v10-retest-artifact_gate-001::flash_nexus_no_skill",
+        "status": "PASS",
+        "tokens": 40302.0,
+        "wall_sec": 65.8371
+      },
+      "candidate_results": [
+        {
+          "arm_id": "flash_nexus_current_best",
+          "skill_id": "research-citation-chain-verifier",
+          "status": "HOLD",
+          "token_delta": 5009,
+          "wall_delta_sec": 26.9261,
+          "receipt_chain_pass": true,
+          "delivery_pair_pass": true,
+          "tokens": 45311.0,
+          "wall_sec": 92.7632
+        },
+        {
+          "arm_id": "flash_nexus_challenger",
+          "skill_id": "nexus-goal-closure-executor",
+          "status": "HOLD",
+          "token_delta": 1785,
+          "wall_delta_sec": 8.7264,
+          "receipt_chain_pass": true,
+          "delivery_pair_pass": true,
+          "tokens": 42087.0,
+          "wall_sec": 74.5635
+        }
+      ],
+      "verdict": "HOLD"
+    },
+    {
+      "capability_id": "autoreason",
+      "baseline": {
+        "row_id": "autoreason::sf-v10-retest-autoreason-001::flash_nexus_no_skill",
+        "status": "PASS",
+        "tokens": 39943.0,
+        "wall_sec": 109.2438
+      },
+      "candidate_results": [
+        {
+          "arm_id": "flash_nexus_current_best",
+          "skill_id": "sf2-autoreason-route-fit-spec",
+          "status": "HOLD",
+          "token_delta": 6002,
+          "wall_delta_sec": 80.2453,
+          "receipt_chain_pass": true,
+          "delivery_pair_pass": true,
+          "tokens": 45945.0,
+          "wall_sec": 189.4891
+        },
+        {
+          "arm_id": "flash_nexus_challenger",
+          "skill_id": "nexus-benchmark-public-report",
+          "status": "HOLD",
+          "token_delta": 887,
+          "wall_delta_sec": 20.667,
+          "receipt_chain_pass": true,
+          "delivery_pair_pass": true,
+          "tokens": 40830.0,
+          "wall_sec": 129.9108
+        }
+      ],
+      "verdict": "HOLD"
+    },
+    {
+      "capability_id": "codeintel",
+      "baseline": {
+        "row_id": "codeintel::sf-v10-retest-codeintel-001::flash_nexus_no_skill",
+        "status": "PASS",
+        "tokens": 51301.0,
+        "wall_sec": 160.7429
+      },
+      "candidate_results": [
+        {
+          "arm_id": "flash_nexus_current_best",
+          "skill_id": "sf2-codeintel-route-fit-spec",
+          "status": "PROMOTE_READY",
+          "token_delta": -9134,
+          "wall_delta_sec": -20.8284,
+          "receipt_chain_pass": true,
+          "delivery_pair_pass": true,
+          "tokens": 42167.0,
+          "wall_sec": 139.9145
+        }
+      ],
+      "verdict": "PROMOTE_READY"
+    },
+    {
+      "capability_id": "ddtree",
+      "baseline": {
+        "row_id": "ddtree::sf-v10-retest-ddtree-001::flash_nexus_no_skill",
+        "status": "PASS",
+        "tokens": 65543.0,
+        "wall_sec": 173.1233
+      },
+      "candidate_results": [
+        {
+          "arm_id": "flash_nexus_current_best",
+          "skill_id": "sf2-ddtree-route-fit-spec",
+          "status": "HOLD",
+          "token_delta": 1928,
+          "wall_delta_sec": 19.7687,
+          "receipt_chain_pass": true,
+          "delivery_pair_pass": true,
+          "tokens": 67471.0,
+          "wall_sec": 192.892
+        }
+      ],
+      "verdict": "HOLD"
+    },
+    {
+      "capability_id": "research",
+      "baseline": {
+        "row_id": "research::sf-v10-retest-research-001::flash_nexus_no_skill",
+        "status": "PASS",
+        "tokens": 39307.0,
+        "wall_sec": 79.5338
+      },
+      "candidate_results": [
+        {
+          "arm_id": "flash_nexus_current_best",
+          "skill_id": "research-citation-chain-verifier",
+          "status": "HOLD",
+          "token_delta": -338,
+          "wall_delta_sec": 44.2734,
+          "receipt_chain_pass": true,
+          "delivery_pair_pass": true,
+          "tokens": 38969.0,
+          "wall_sec": 123.8072
+        },
+        {
+          "arm_id": "flash_nexus_challenger",
+          "skill_id": "sf2-research_control_plane-route-fit-spec",
+          "status": "HOLD",
+          "token_delta": 2996,
+          "wall_delta_sec": 40.7502,
+          "receipt_chain_pass": true,
+          "delivery_pair_pass": true,
+          "tokens": 42303.0,
+          "wall_sec": 120.284
+        }
+      ],
+      "verdict": "HOLD"
+    },
+    {
+      "capability_id": "ui_validator",
+      "baseline": {
+        "row_id": "ui_validator::sf-v10-retest-ui_validator-001::flash_nexus_no_skill",
+        "status": "PASS",
+        "tokens": 39301.0,
+        "wall_sec": 123.667
+      },
+      "candidate_results": [
+        {
+          "arm_id": "flash_nexus_current_best",
+          "skill_id": "sf2-ui_validator-route-fit-spec",
+          "status": "HOLD",
+          "token_delta": 299,
+          "wall_delta_sec": -29.1258,
+          "receipt_chain_pass": true,
+          "delivery_pair_pass": true,
+          "tokens": 39600.0,
+          "wall_sec": 94.5412
+        }
+      ],
+      "verdict": "HOLD"
+    },
+    {
+      "capability_id": "ultra_review",
+      "baseline": {
+        "row_id": "ultra_review::sf-v10-retest-ultra_review-001::flash_nexus_no_skill",
+        "status": "PASS",
+        "tokens": 40511.0,
+        "wall_sec": 121.3031
+      },
+      "candidate_results": [
+        {
+          "arm_id": "flash_nexus_current_best",
+          "skill_id": "code-review-and-quality",
+          "status": "HOLD",
+          "token_delta": -1251,
+          "wall_delta_sec": 15.843,
+          "receipt_chain_pass": true,
+          "delivery_pair_pass": true,
+          "tokens": 39260.0,
+          "wall_sec": 137.1461
+        },
+        {
+          "arm_id": "flash_nexus_challenger",
+          "skill_id": "diagnose",
+          "status": "HOLD",
+          "token_delta": 432,
+          "wall_delta_sec": 18.3858,
+          "receipt_chain_pass": true,
+          "delivery_pair_pass": true,
+          "tokens": 40943.0,
+          "wall_sec": 139.6889
+        }
+      ],
+      "verdict": "HOLD"
+    }
+  ],
+  "claim_boundary": [
+    "V10 is internal SF retest evidence, not a public benchmark.",
+    "A skill is promote-ready only when delivery and receipt chain pass and token/wall deltas are both non-positive versus no-skill.",
+    "Runtime overlay candidate still requires post-apply smoke."
+  ]
+}

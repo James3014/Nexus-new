@@ -1,0 +1,96 @@
+{
+  "claim_boundary": [
+    "uses existing candidate-bound mutant live evidence",
+    "does not update runtime overlay",
+    "does not open public benchmark"
+  ],
+  "items": [
+    {
+      "capability": "governance_and_trust",
+      "closure_mode": "candidate_bound_mutant_live_evidence",
+      "effective_rows": 2,
+      "kill_rate": 1.0,
+      "previous_state": "needs_more_data_normal_lane",
+      "receipt_paths": [
+        ".nexus/reports/sf_governance_v3_candidate_mutant_valid_live_20260518/governance_candidate_mutant_cso_nexus-value-gov-001_secret_redaction_regression",
+        ".nexus/reports/sf_governance_v3_candidate_mutant_valid_live_20260518/governance_candidate_mutant_cso_rlm-harder-v2-governance-001_deny_default_bypass"
+      ],
+      "row_ids": [
+        "governance_candidate_mutant::cso::nexus-value-gov-001::secret_redaction_regression",
+        "governance_candidate_mutant::cso::rlm-harder-v2-governance-001::deny_default_bypass"
+      ],
+      "runtime_update_allowed": false,
+      "skill_id": "cso",
+      "tested_rows": 2,
+      "verdict_delta": "needs_more_data_to_runtime_review_candidate"
+    },
+    {
+      "capability": "governance_and_trust",
+      "closure_mode": "candidate_bound_mutant_live_evidence",
+      "effective_rows": 2,
+      "kill_rate": 1.0,
+      "previous_state": "needs_more_data_normal_lane",
+      "receipt_paths": [
+        ".nexus/reports/sf_governance_v3_candidate_mutant_valid_live_20260518/governance_candidate_mutant_acceptance-evidence-failclosed_nexus-value-gov-001_secret_redaction_regression",
+        ".nexus/reports/sf_governance_v3_candidate_mutant_valid_live_20260518/governance_candidate_mutant_acceptance-evidence-failclosed_rlm-harder-v2-governance-001_deny_default_bypass"
+      ],
+      "row_ids": [
+        "governance_candidate_mutant::acceptance-evidence-failclosed::nexus-value-gov-001::secret_redaction_regression",
+        "governance_candidate_mutant::acceptance-evidence-failclosed::rlm-harder-v2-governance-001::deny_default_bypass"
+      ],
+      "runtime_update_allowed": false,
+      "skill_id": "acceptance-evidence-failclosed",
+      "tested_rows": 2,
+      "verdict_delta": "needs_more_data_to_runtime_review_candidate"
+    },
+    {
+      "capability": "governance_and_trust",
+      "closure_mode": "candidate_bound_mutant_live_evidence",
+      "effective_rows": 2,
+      "kill_rate": 1.0,
+      "previous_state": "needs_more_data_normal_lane",
+      "receipt_paths": [
+        ".nexus/reports/sf_governance_v3_candidate_mutant_valid_live_20260518/governance_candidate_mutant_claudeosint-safe-surface-audit_nexus-value-gov-001_secret_redaction_regression",
+        ".nexus/reports/sf_governance_v3_candidate_mutant_valid_live_20260518/governance_candidate_mutant_claudeosint-safe-surface-audit_rlm-harder-v2-governance-001_deny_default_bypass"
+      ],
+      "row_ids": [
+        "governance_candidate_mutant::claudeosint-safe-surface-audit::nexus-value-gov-001::secret_redaction_regression",
+        "governance_candidate_mutant::claudeosint-safe-surface-audit::rlm-harder-v2-governance-001::deny_default_bypass"
+      ],
+      "runtime_update_allowed": false,
+      "skill_id": "claudeosint-safe-surface-audit",
+      "tested_rows": 2,
+      "verdict_delta": "needs_more_data_to_runtime_review_candidate"
+    },
+    {
+      "capability": "governance_and_trust",
+      "closure_mode": "candidate_bound_mutant_live_evidence",
+      "effective_rows": 2,
+      "kill_rate": 1.0,
+      "previous_state": "needs_more_data_normal_lane",
+      "receipt_paths": [
+        ".nexus/reports/sf_governance_v3_candidate_mutant_valid_live_20260518/governance_candidate_mutant_gbrain-soul-audit_nexus-value-gov-001_secret_redaction_regression",
+        ".nexus/reports/sf_governance_v3_candidate_mutant_valid_live_20260518/governance_candidate_mutant_gbrain-soul-audit_rlm-harder-v2-governance-001_deny_default_bypass"
+      ],
+      "row_ids": [
+        "governance_candidate_mutant::gbrain-soul-audit::nexus-value-gov-001::secret_redaction_regression",
+        "governance_candidate_mutant::gbrain-soul-audit::rlm-harder-v2-governance-001::deny_default_bypass"
+      ],
+      "runtime_update_allowed": false,
+      "skill_id": "gbrain-soul-audit",
+      "tested_rows": 2,
+      "verdict_delta": "needs_more_data_to_runtime_review_candidate"
+    }
+  ],
+  "public_benchmark_allowed": false,
+  "runtime_update_allowed": false,
+  "schema": "nexus.sf_auto_governance_targeted_replay.v1",
+  "status": "PASS",
+  "summary": {
+    "capability": "governance_and_trust",
+    "closed_needs_more_data_count": 4,
+    "live_row_count": 8,
+    "receipt_backed_item_count": 4,
+    "replay_item_count": 4
+  }
+}

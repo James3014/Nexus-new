@@ -1,0 +1,109 @@
+{
+  "schema": "nexus.sf_flash_pair_live_report.v1",
+  "status": "PASS",
+  "summary": {
+    "comparison_count": 2,
+    "keep_count": 2,
+    "return_count": 0,
+    "same_runner_pair_artifact_count": 2,
+    "session_worker_clean_count": 2,
+    "runtime_update_allowed": false,
+    "public_benchmark_allowed": false
+  },
+  "blockers": [],
+  "comparisons": [
+    {
+      "capability_id": "nightshift",
+      "task_id": "sf-flash-pair-nightshift-001",
+      "baseline_row_id": "nightshift::sf-flash-pair-nightshift-001::flash_nexus",
+      "with_skill_row_id": "nightshift::sf-flash-pair-nightshift-001::flash_nexus_with_skill::sf2-nightshift-route-fit-spec",
+      "skill_id": "sf2-nightshift-route-fit-spec",
+      "same_runner_pair_artifacts": true,
+      "session_worker_clean": true,
+      "baseline": {
+        "status": "PASS",
+        "benchmark_status": "SUCCESS",
+        "semantic_status": "VERIFIED",
+        "trust_mismatch": false,
+        "model_calls": 2,
+        "total_tokens": 51555,
+        "phase_wall_total_sec": 132.4058,
+        "output_dir": "/private/tmp/nexus_sf_flash_pair_live_chunk12_20260518/nightshift_sf-flash-pair-nightshift-001_flash_nexus"
+      },
+      "with_skill": {
+        "status": "PASS",
+        "benchmark_status": "SUCCESS",
+        "semantic_status": "VERIFIED",
+        "trust_mismatch": false,
+        "model_calls": 2,
+        "total_tokens": 42054,
+        "phase_wall_total_sec": 79.3442,
+        "output_dir": "/private/tmp/nexus_sf_flash_pair_live_chunk12_20260518/nightshift_sf-flash-pair-nightshift-001_flash_nexus_with_skill_sf2-nightshift-route-fit-spec",
+        "skill_mount_contract_status": "PASS",
+        "selected": true,
+        "injected": true,
+        "used": true,
+        "evidence_present": true,
+        "gate_passed": true,
+        "outcome_contributed": true
+      },
+      "delta": {
+        "token_delta": -9501,
+        "phase_wall_total_delta_sec": -53.0616,
+        "skill_causality_delta": "receipt_backed_skill_chain_present",
+        "delivery_delta": "paired_delivery_equal_or_clean",
+        "cost_delta_status": "observation_only_not_promotion_gate"
+      },
+      "verdict": "KEEP"
+    },
+    {
+      "capability_id": "policy_capability_gate",
+      "task_id": "sf-flash-pair-policy_capability_gate-001",
+      "baseline_row_id": "policy_capability_gate::sf-flash-pair-policy_capability_gate-001::flash_nexus",
+      "with_skill_row_id": "policy_capability_gate::sf-flash-pair-policy_capability_gate-001::flash_nexus_with_skill::sf2-policy_capability_gate-route-fit-spec",
+      "skill_id": "sf2-policy_capability_gate-route-fit-spec",
+      "same_runner_pair_artifacts": true,
+      "session_worker_clean": true,
+      "baseline": {
+        "status": "PASS",
+        "benchmark_status": "SUCCESS",
+        "semantic_status": "VERIFIED",
+        "trust_mismatch": false,
+        "model_calls": 2,
+        "total_tokens": 41933,
+        "phase_wall_total_sec": 115.3625,
+        "output_dir": "/private/tmp/nexus_sf_flash_pair_live_chunk12_20260518/policy_capability_gate_sf-flash-pair-policy_capability_gate-001_flash_nexus"
+      },
+      "with_skill": {
+        "status": "PASS",
+        "benchmark_status": "SUCCESS",
+        "semantic_status": "VERIFIED",
+        "trust_mismatch": false,
+        "model_calls": 1,
+        "total_tokens": 697,
+        "phase_wall_total_sec": 130.2834,
+        "output_dir": "/private/tmp/nexus_sf_flash_pair_live_chunk12_20260518/policy_capability_gate_sf-flash-pair-policy_capability_gate-001_flash_nexus_with_skill_sf2-policy_capability_gate-route-fit-spec",
+        "skill_mount_contract_status": "PASS",
+        "selected": true,
+        "injected": true,
+        "used": true,
+        "evidence_present": true,
+        "gate_passed": true,
+        "outcome_contributed": true
+      },
+      "delta": {
+        "token_delta": -41236,
+        "phase_wall_total_delta_sec": 14.9209,
+        "skill_causality_delta": "receipt_backed_skill_chain_present",
+        "delivery_delta": "paired_delivery_equal_or_clean",
+        "cost_delta_status": "observation_only_not_promotion_gate"
+      },
+      "verdict": "KEEP"
+    }
+  ],
+  "claim_boundary": [
+    "This is SF live evidence for Flash+Nexus versus Flash+Nexus+skill.",
+    "Rows are paired by capability and task in the same runner artifact shape.",
+    "Token and wall deltas are observation-only and do not unlock public benchmark claims."
+  ]
+}

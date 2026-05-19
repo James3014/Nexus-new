@@ -1,0 +1,217 @@
+{
+  "schema": "nexus.skill_promotion_threshold_rca.multi_capability.v1",
+  "status": "PASS",
+  "root_cause": "no_receipt_backed_skill_reached_alternate_or_default_threshold_and_research_candidates_all_rejected",
+  "flash100_allowed": false,
+  "promotion_allowed": false,
+  "runtime_update_allowed": false,
+  "summary": {
+    "capability_count": 3,
+    "capabilities_with_default_or_alternate": 0,
+    "capabilities_with_needs_more_data": 2,
+    "capabilities_all_rejected": 1,
+    "flash100_allowed": false,
+    "blocked_cards": [
+      "7R Flash100 Route-Cost Regression",
+      "8R Pro18 Sanity",
+      "9 GPT-5.5 Paired Baseline"
+    ]
+  },
+  "capability_results": [
+    {
+      "capability": "repair_and_coding",
+      "catalog_path": "docs/reports/NEXUS_SKILL_FIT_CATALOG_REPAIR_AND_CODING_TARGETED_REPLAY_2026-05-16.json",
+      "threshold_path": "docs/reports/NEXUS_SKILL_PROMOTION_THRESHOLD_CONTRACT_REPAIR_AND_CODING_TARGETED_REPLAY_2026-05-16.json",
+      "catalog_status": "PASS",
+      "catalog_summary": {
+        "planned_rows": 90,
+        "completed_rows": 90,
+        "matrix_complete": true,
+        "capability_only_rows": 0,
+        "skill_count": 3,
+        "negative_control_rows": 0,
+        "negative_control_blocked_rows": 0,
+        "keep_count": 0,
+        "replace_candidate_count": 0,
+        "reject_count": 0,
+        "needs_more_data_count": 3
+      },
+      "threshold_status": "PASS",
+      "flash100_allowed": false,
+      "threshold_summary": {
+        "skill_count": 3,
+        "promotion_ready_count": 0,
+        "needs_targeted_replay_count": 3,
+        "default_candidate_count": 0,
+        "alternate_candidate_count": 0,
+        "queue_count": 3,
+        "matrix_complete": true
+      },
+      "skill_verdicts": [
+        {
+          "skill_id": "aibdd.auto.java.e2e.refactor",
+          "verdict": "needs_more_data",
+          "tested_rows": 30,
+          "effective_rows": 12,
+          "effective_rate": 0.4,
+          "task_bucket_count": 7
+        },
+        {
+          "skill_id": "gstack-investigate",
+          "verdict": "needs_more_data",
+          "tested_rows": 30,
+          "effective_rows": 11,
+          "effective_rate": 0.3667,
+          "task_bucket_count": 7
+        },
+        {
+          "skill_id": "test-driven-development",
+          "verdict": "needs_more_data",
+          "tested_rows": 30,
+          "effective_rows": 10,
+          "effective_rate": 0.3333,
+          "task_bucket_count": 7
+        }
+      ]
+    },
+    {
+      "capability": "governance_and_trust",
+      "catalog_path": "docs/reports/NEXUS_SKILL_FIT_CATALOG_GOVERNANCE_AND_TRUST_FULL_LIVE_2026-05-16.json",
+      "threshold_path": "docs/reports/NEXUS_SKILL_PROMOTION_THRESHOLD_CONTRACT_GOVERNANCE_AND_TRUST_FULL_LIVE_2026-05-16.json",
+      "catalog_status": "PASS",
+      "catalog_summary": {
+        "planned_rows": 180,
+        "completed_rows": 180,
+        "matrix_complete": true,
+        "capability_only_rows": 30,
+        "skill_count": 4,
+        "negative_control_rows": 30,
+        "negative_control_blocked_rows": 30,
+        "keep_count": 0,
+        "replace_candidate_count": 0,
+        "reject_count": 1,
+        "needs_more_data_count": 3
+      },
+      "threshold_status": "PASS",
+      "flash100_allowed": false,
+      "threshold_summary": {
+        "skill_count": 4,
+        "promotion_ready_count": 0,
+        "needs_targeted_replay_count": 3,
+        "default_candidate_count": 0,
+        "alternate_candidate_count": 0,
+        "queue_count": 3,
+        "matrix_complete": true
+      },
+      "skill_verdicts": [
+        {
+          "skill_id": "acceptance-evidence-failclosed",
+          "verdict": "needs_more_data",
+          "tested_rows": 30,
+          "effective_rows": 4,
+          "effective_rate": 0.1333,
+          "task_bucket_count": 5
+        },
+        {
+          "skill_id": "cso",
+          "verdict": "needs_more_data",
+          "tested_rows": 30,
+          "effective_rows": 1,
+          "effective_rate": 0.0333,
+          "task_bucket_count": 5
+        },
+        {
+          "skill_id": "nexus-acceptance-evidence-gate",
+          "verdict": "reject",
+          "tested_rows": 30,
+          "effective_rows": 0,
+          "effective_rate": 0.0,
+          "task_bucket_count": 5
+        },
+        {
+          "skill_id": "nexus-root-cause-probe",
+          "verdict": "needs_more_data",
+          "tested_rows": 30,
+          "effective_rows": 15,
+          "effective_rate": 0.5,
+          "task_bucket_count": 5
+        }
+      ]
+    },
+    {
+      "capability": "research_and_source_discipline",
+      "catalog_path": "docs/reports/NEXUS_SKILL_FIT_CATALOG_RESEARCH_AND_SOURCE_DISCIPLINE_FULL_LIVE_2026-05-16.json",
+      "threshold_path": "docs/reports/NEXUS_SKILL_PROMOTION_THRESHOLD_CONTRACT_RESEARCH_AND_SOURCE_DISCIPLINE_FULL_LIVE_2026-05-16.json",
+      "catalog_status": "PASS",
+      "catalog_summary": {
+        "planned_rows": 132,
+        "completed_rows": 132,
+        "matrix_complete": true,
+        "capability_only_rows": 22,
+        "skill_count": 4,
+        "negative_control_rows": 22,
+        "negative_control_blocked_rows": 22,
+        "keep_count": 0,
+        "replace_candidate_count": 0,
+        "reject_count": 4,
+        "needs_more_data_count": 0
+      },
+      "threshold_status": "PASS",
+      "flash100_allowed": false,
+      "threshold_summary": {
+        "skill_count": 4,
+        "promotion_ready_count": 0,
+        "needs_targeted_replay_count": 0,
+        "default_candidate_count": 0,
+        "alternate_candidate_count": 0,
+        "queue_count": 0,
+        "matrix_complete": true
+      },
+      "skill_verdicts": [
+        {
+          "skill_id": "arxiv",
+          "verdict": "reject",
+          "tested_rows": 22,
+          "effective_rows": 0,
+          "effective_rate": 0.0,
+          "task_bucket_count": 4
+        },
+        {
+          "skill_id": "browserbase-company-research",
+          "verdict": "reject",
+          "tested_rows": 22,
+          "effective_rows": 0,
+          "effective_rate": 0.0,
+          "task_bucket_count": 4
+        },
+        {
+          "skill_id": "browserbase-search",
+          "verdict": "reject",
+          "tested_rows": 22,
+          "effective_rows": 0,
+          "effective_rate": 0.0,
+          "task_bucket_count": 4
+        },
+        {
+          "skill_id": "gbrain-academic-verify",
+          "verdict": "reject",
+          "tested_rows": 22,
+          "effective_rows": 0,
+          "effective_rate": 0.0,
+          "task_bucket_count": 4
+        }
+      ]
+    }
+  ],
+  "decision": {
+    "run_flash100": false,
+    "run_pro18": false,
+    "run_gpt55_paired_baseline": false,
+    "next_action": "skill_candidate_pool_v2_or_targeted_replay_for_governance_needs_more_data"
+  },
+  "claim_boundary": [
+    "Full live sealing PASS proves matrix execution and fail-closed controls, not skill promotion.",
+    "Flash100 remains blocked until at least one capability/skill pair reaches alternate/default threshold.",
+    "Runtime policy update remains disabled."
+  ]
+}

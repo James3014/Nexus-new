@@ -1,0 +1,113 @@
+{
+  "schema": "nexus.skill_fit_ablation_plan.v1",
+  "status": "PASS",
+  "capability": "governance_and_trust",
+  "summary": {
+    "arm_count": 5,
+    "skill_arm_count": 4,
+    "negative_control_count": 0,
+    "runtime_eligible_skill_arm_count": 0
+  },
+  "claim_boundary": [
+    "Capability-only is the baseline; selected skill arms are not value evidence.",
+    "A skill arm is effective only with selected, injected, used, evidence_present, gate_passed, and outcome_contributed receipts.",
+    "Wrong or quarantined skills must return or block; adopting them is a fail-closed violation.",
+    "Skill verdicts must bind evidence_path and receipt_path before promotion, replacement, or rejection claims.",
+    "Explicit skill ids are allowed only for seal validation of already-found skills; they do not bypass runtime promotion gates."
+  ],
+  "arms": [
+    {
+      "arm_id": "capability_only",
+      "arm_type": "capability_only",
+      "capability": "governance_and_trust",
+      "anonymous_label": "capability_only",
+      "expected_outcome": "baseline_without_skill_mount",
+      "skill_id": "",
+      "source_root": "",
+      "source_type": "",
+      "path": "",
+      "sha256": "",
+      "runtime_eligible": false,
+      "ablation_eligible": false,
+      "evidence_refs": [
+        "candidate_pool:nexus.fair_skill_candidate_pool.v2.slice"
+      ]
+    },
+    {
+      "arm_id": "skill_arm_001_8c2953c96e5b",
+      "arm_type": "skill_ablation",
+      "capability": "governance_and_trust",
+      "anonymous_label": "candidate_001",
+      "expected_outcome": "must_prove_selected_injected_used_evidence_gate_outcome",
+      "skill_id": "acceptance-evidence-failclosed",
+      "source_root": "agents",
+      "source_type": "reference",
+      "path": "/Users/jameschen/.agents/skills/devops/acceptance-evidence-failclosed/SKILL.md",
+      "sha256": "69886273967b4f0dbd6554686ca255bfdd317bfe4a10b90ff1fdfda23d5f68c7",
+      "runtime_eligible": false,
+      "ablation_eligible": true,
+      "evidence_refs": [
+        "skill_status_report:nexus.skill_status.v1",
+        "skill_path:/Users/jameschen/.agents/skills/devops/acceptance-evidence-failclosed/SKILL.md",
+        "skill_sha256:69886273967b4f0dbd6554686ca255bfdd317bfe4a10b90ff1fdfda23d5f68c7"
+      ]
+    },
+    {
+      "arm_id": "skill_arm_002_e36dcda7b600",
+      "arm_type": "skill_ablation",
+      "capability": "governance_and_trust",
+      "anonymous_label": "candidate_002",
+      "expected_outcome": "must_prove_selected_injected_used_evidence_gate_outcome",
+      "skill_id": "cso",
+      "source_root": "agents",
+      "source_type": "reference",
+      "path": "/Users/jameschen/.agents/skills/gstack/.agents/skills/gstack-cso/SKILL.md",
+      "sha256": "efea8674cf6e00cb4583dba93362230f54d72a3b54d3a0e99575bda04a73b10b",
+      "runtime_eligible": false,
+      "ablation_eligible": true,
+      "evidence_refs": [
+        "skill_status_report:nexus.skill_status.v1",
+        "skill_path:/Users/jameschen/.agents/skills/gstack/.agents/skills/gstack-cso/SKILL.md",
+        "skill_sha256:efea8674cf6e00cb4583dba93362230f54d72a3b54d3a0e99575bda04a73b10b"
+      ]
+    },
+    {
+      "arm_id": "skill_arm_003_d9751d964da7",
+      "arm_type": "skill_ablation",
+      "capability": "governance_and_trust",
+      "anonymous_label": "candidate_003",
+      "expected_outcome": "must_prove_selected_injected_used_evidence_gate_outcome",
+      "skill_id": "multi-agent-handoff-v15-execution-and-validation",
+      "source_root": "agents",
+      "source_type": "reference",
+      "path": "/Users/jameschen/.agents/skills/devops/multi-agent-handoff-v15-execution-and-validation/SKILL.md",
+      "sha256": "5c364dd64efe9e88dddb96c44d2b33df5503d7fced5dc8d8bd3c9081e43b6239",
+      "runtime_eligible": false,
+      "ablation_eligible": true,
+      "evidence_refs": [
+        "skill_status_report:nexus.skill_status.v1",
+        "skill_path:/Users/jameschen/.agents/skills/devops/multi-agent-handoff-v15-execution-and-validation/SKILL.md",
+        "skill_sha256:5c364dd64efe9e88dddb96c44d2b33df5503d7fced5dc8d8bd3c9081e43b6239"
+      ]
+    },
+    {
+      "arm_id": "skill_arm_004_f0f00bb84882",
+      "arm_type": "skill_ablation",
+      "capability": "governance_and_trust",
+      "anonymous_label": "candidate_004",
+      "expected_outcome": "must_prove_selected_injected_used_evidence_gate_outcome",
+      "skill_id": "self-audit",
+      "source_root": "agents",
+      "source_type": "local_candidate",
+      "path": "/Users/jameschen/.agents/skills/self-audit/SKILL.md",
+      "sha256": "2186d49e8766bbe548da681375adbf73dd8dbfd6983779e2a4875189e2677657",
+      "runtime_eligible": false,
+      "ablation_eligible": true,
+      "evidence_refs": [
+        "skill_status_report:nexus.skill_status.v1",
+        "skill_path:/Users/jameschen/.agents/skills/self-audit/SKILL.md",
+        "skill_sha256:2186d49e8766bbe548da681375adbf73dd8dbfd6983779e2a4875189e2677657"
+      ]
+    }
+  ]
+}

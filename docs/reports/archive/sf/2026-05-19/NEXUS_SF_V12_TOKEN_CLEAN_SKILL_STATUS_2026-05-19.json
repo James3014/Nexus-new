@@ -1,0 +1,76 @@
+{
+  "schema": "nexus.sf_v12_token_clean_skill_status.v1",
+  "status": "PASS",
+  "summary": {
+    "skill_count": 5,
+    "runtime_update_allowed": false,
+    "public_benchmark_allowed": false
+  },
+  "skills": [
+    {
+      "name": "acceptance-evidence-failclosed",
+      "path": ".agents/skills/acceptance-evidence-failclosed/SKILL.md",
+      "root": "nexus_repo",
+      "skill_status": "nexus_curated_candidate",
+      "test_level": "sf_v12_token_clean",
+      "action": "ablation_only_compare",
+      "capability_mount": "ultra_review",
+      "family": "ultra_review",
+      "reason_codes": [
+        "sf_v12_token_clean_replay"
+      ]
+    },
+    {
+      "name": "cso",
+      "path": ".agents/skills/cso/SKILL.md",
+      "root": "nexus_repo",
+      "skill_status": "nexus_curated_candidate",
+      "test_level": "sf_v12_token_clean",
+      "action": "ablation_only_compare",
+      "capability_mount": "ultra_review",
+      "family": "ultra_review",
+      "reason_codes": [
+        "sf_v12_token_clean_replay"
+      ]
+    },
+    {
+      "name": "sf2-xray-route-fit-spec",
+      "path": ".agents/skills/sf2/sf2-xray-route-fit-spec/SKILL.md",
+      "root": "nexus_repo",
+      "skill_status": "nexus_curated_candidate",
+      "test_level": "sf_v12_token_clean",
+      "action": "ablation_only_compare",
+      "capability_mount": "codeintel",
+      "family": "xray",
+      "reason_codes": [
+        "sf_v12_token_clean_replay"
+      ]
+    },
+    {
+      "name": "sf2-codeintel-route-fit-spec",
+      "path": ".agents/skills/sf2/sf2-codeintel-route-fit-spec/SKILL.md",
+      "root": "nexus_repo",
+      "skill_status": "nexus_curated_candidate",
+      "test_level": "sf_v12_token_clean",
+      "action": "ablation_only_compare",
+      "capability_mount": "codeintel",
+      "family": "xray",
+      "reason_codes": [
+        "sf_v12_token_clean_replay"
+      ]
+    },
+    {
+      "name": "diagnose",
+      "path": ".agents/skills/diagnose/SKILL.md",
+      "root": "nexus_repo",
+      "skill_status": "nexus_curated_candidate",
+      "test_level": "sf_v12_token_clean",
+      "action": "ablation_only_compare",
+      "capability_mount": "codeintel",
+      "family": "xray",
+      "reason_codes": [
+        "sf_v12_token_clean_replay"
+      ]
+    }
+  ]
+}

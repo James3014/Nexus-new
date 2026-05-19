@@ -1,0 +1,23 @@
+{
+  "claim_boundary": [
+    "Prompt-only rewritten candidates. Upstream scripts/tools not executed."
+  ],
+  "materialized": [
+    {
+      "path": ".agents/skills/github-round4-challengers/github4-sickn33-antigravity-awesome-skills-wiki-qa/SKILL.md",
+      "skill_id": "github4-sickn33-antigravity-awesome-skills-wiki-qa",
+      "source_path": "/private/tmp/nexus-sf-round4/sickn33-antigravity-awesome-skills/skills/wiki-qa/SKILL.md"
+    },
+    {
+      "path": ".agents/skills/github-round4-challengers/github4-sickn33-antigravity-awesome-skills-tdd-workflows-tdd-red/SKILL.md",
+      "skill_id": "github4-sickn33-antigravity-awesome-skills-tdd-workflows-tdd-red",
+      "source_path": "/private/tmp/nexus-sf-round4/sickn33-antigravity-awesome-skills/skills/tdd-workflows-tdd-red/SKILL.md"
+    }
+  ],
+  "matrix": "docs/reports/NEXUS_SF_GITHUB_ROUND4_FLASH_SMOKE_MATRIX_2026-05-19.json",
+  "schema": "nexus.sf_github_round4_materialization.v1",
+  "skill_status": "docs/reports/NEXUS_SF_GITHUB_ROUND4_SKILL_STATUS_2026-05-19.json",
+  "status": "PASS",
+  "task_manifest": "docs/reports/NEXUS_SF_GITHUB_ROUND4_FLASH_SMOKE_TASKS_2026-05-19.json",
+  "version": "2026-05-19"
+}

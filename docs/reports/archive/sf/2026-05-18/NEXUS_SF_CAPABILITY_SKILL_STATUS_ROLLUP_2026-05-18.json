@@ -1,0 +1,97 @@
+{
+  "schema": "nexus.skill_fit_status_rollup.v1",
+  "status": "PASS",
+  "has_found_skill": true,
+  "promotion_ready": true,
+  "benchmark_allowed": true,
+  "summary": {
+    "capability_count": 3,
+    "found_skill_pair_count": 1,
+    "promotion_ready_pair_count": 1
+  },
+  "capabilities": {
+    "repair_and_coding": {
+      "default_candidates": [],
+      "alternate_candidates": [
+        "tdd"
+      ],
+      "needs_more_data": [
+        "tdd"
+      ],
+      "rejected": [],
+      "blockers": []
+    },
+    "governance_and_trust": {
+      "default_candidates": [],
+      "alternate_candidates": [],
+      "needs_more_data": [
+        "acceptance-evidence-failclosed",
+        "cso",
+        "nexus-root-cause-probe"
+      ],
+      "rejected": [
+        "acceptance-evidence-failclosed",
+        "cso",
+        "multi-agent-handoff-v15-execution-and-validation",
+        "nexus-acceptance-evidence-gate",
+        "self-audit"
+      ],
+      "blockers": []
+    },
+    "research_and_source_discipline": {
+      "default_candidates": [],
+      "alternate_candidates": [],
+      "needs_more_data": [],
+      "rejected": [
+        "gbrain-concept-synthesis",
+        "gbrain-data-research",
+        "gbrain-perplexity-research",
+        "research-paper-writing"
+      ],
+      "blockers": []
+    }
+  },
+  "found_skill_pairs": [
+    {
+      "capability": "repair_and_coding",
+      "skill_id": "tdd",
+      "promotion_blockers": [],
+      "tested_rows": 30,
+      "effective_rows": 19,
+      "effective_rate": 0.6333,
+      "threshold_recommendation": "alternate_candidate"
+    }
+  ],
+  "promotion_ready_pairs": [
+    {
+      "capability": "repair_and_coding",
+      "skill_id": "tdd",
+      "promotion_blockers": [],
+      "tested_rows": 30,
+      "effective_rows": 19,
+      "effective_rate": 0.6333,
+      "threshold_recommendation": "alternate_candidate"
+    }
+  ],
+  "next_task_cards": [
+    {
+      "id": "SF-SEAL",
+      "goal": "Run deterministic seal checks for promotion-ready capability-skill pairs before any benchmark lane.",
+      "exit": "Every pair has clean threshold recommendation, receipt refs, and no promotion blockers."
+    },
+    {
+      "id": "SF-governance_and_trust-TARGETED-REPLAY",
+      "goal": "Continue capability-local targeted replay for needs_more_data skills; do not open public benchmark.",
+      "exit": "Each queued skill reaches alternate/default threshold or is demoted with receipt-backed reason."
+    },
+    {
+      "id": "SF-research_and_source_discipline-DISCOVERY",
+      "goal": "Refresh the capability-local candidate bucket and preflight only source-safe candidates.",
+      "exit": "The capability has at least one receipt-backed candidate or a supply-gap report."
+    }
+  ],
+  "claim_boundary": [
+    "This rollup is skill-fit evidence control only; it must not run or unlock public benchmark by itself.",
+    "A found skill is not runtime promotion until threshold, repeated validation, and receipt gates are clean."
+  ]
+}

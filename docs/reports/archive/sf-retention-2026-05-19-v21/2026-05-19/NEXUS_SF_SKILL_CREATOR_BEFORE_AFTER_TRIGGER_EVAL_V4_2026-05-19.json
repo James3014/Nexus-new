@@ -1,0 +1,4233 @@
+{
+  "after_rows": [
+    {
+      "capability": "artifact_gate",
+      "expected_rank": 1,
+      "expected_score": 18.45472,
+      "expected_skill": "acceptance-evidence-failclosed",
+      "fixture_id": "artifact_gate:obvious",
+      "kind": "should_trigger",
+      "query": "Nexus route capability artifact_gate: handle a task requiring artifact gate artifact evidence acceptance verifier receipt with receipt-backed evidence.",
+      "top3": [
+        "acceptance-evidence-failclosed",
+        "create-plan",
+        "diagnose"
+      ],
+      "top_score": 18.45472,
+      "version": "after"
+    },
+    {
+      "capability": "artifact_gate",
+      "expected_rank": 1,
+      "expected_score": 14.969813,
+      "expected_skill": "acceptance-evidence-failclosed",
+      "fixture_id": "artifact_gate:paraphrase",
+      "kind": "should_trigger",
+      "query": "Choose the best skill for artifact gate artifact evidence acceptance verifier receipt; return selected, used, evidence, gate, and outcome details.",
+      "top3": [
+        "acceptance-evidence-failclosed",
+        "sf2-registry_skills_sync-route-fit-spec",
+        "create-plan"
+      ],
+      "top_score": 14.969813,
+      "version": "after"
+    },
+    {
+      "capability": "artifact_gate",
+      "expected_rank": 1,
+      "expected_score": 14.45472,
+      "expected_skill": "acceptance-evidence-failclosed",
+      "fixture_id": "artifact_gate:mixed",
+      "kind": "should_trigger",
+      "query": "請用 artifact_gate 能力處理，重點是 artifact gate artifact evidence acceptance verifier receipt，需要 runtime receipt 和 fail-closed gate。",
+      "top3": [
+        "acceptance-evidence-failclosed",
+        "create-plan",
+        "diagnose"
+      ],
+      "top_score": 14.45472,
+      "version": "after"
+    },
+    {
+      "capability": "artifact_gate",
+      "expected_rank": 4,
+      "expected_score": 8.791759,
+      "expected_skill": "acceptance-evidence-failclosed",
+      "fixture_id": "artifact_gate:near_miss:claim_gate",
+      "kind": "should_not_trigger",
+      "query": "This task needs claim_gate: claim gate claim gate claim verification public readiness. Select the skill for that neighboring capability.",
+      "top3": [
+        "nexus-benchmark-continuous-optimization",
+        "research-citation-chain-verifier",
+        "sf2-registry_skills_sync-route-fit-spec"
+      ],
+      "top_score": 12.276666,
+      "version": "after"
+    },
+    {
+      "capability": "autonomic_router",
+      "expected_rank": 1,
+      "expected_score": 23.508243,
+      "expected_skill": "sf2-autonomic_router-route-fit-spec",
+      "fixture_id": "autonomic_router:obvious",
+      "kind": "should_trigger",
+      "query": "Nexus route capability autonomic_router: handle a task requiring autonomic router autonomic router route selection policy feedback with receipt-backed evidence.",
+      "top3": [
+        "sf2-autonomic_router-route-fit-spec",
+        "nexus-root-cause-probe",
+        "sf2-learning_closure-route-fit-spec"
+      ],
+      "top_score": 23.508243,
+      "version": "after"
+    },
+    {
+      "capability": "autonomic_router",
+      "expected_rank": 1,
+      "expected_score": 21.023336,
+      "expected_skill": "sf2-autonomic_router-route-fit-spec",
+      "fixture_id": "autonomic_router:paraphrase",
+      "kind": "should_trigger",
+      "query": "Choose the best skill for autonomic router autonomic router route selection policy feedback; return selected, used, evidence, gate, and outcome details.",
+      "top3": [
+        "sf2-autonomic_router-route-fit-spec",
+        "sf2-registry_skills_sync-route-fit-spec",
+        "nexus-root-cause-probe"
+      ],
+      "top_score": 21.023336,
+      "version": "after"
+    },
+    {
+      "capability": "autonomic_router",
+      "expected_rank": 1,
+      "expected_score": 20.508243,
+      "expected_skill": "sf2-autonomic_router-route-fit-spec",
+      "fixture_id": "autonomic_router:mixed",
+      "kind": "should_trigger",
+      "query": "請用 autonomic_router 能力處理，重點是 autonomic router autonomic router route selection policy feedback，需要 runtime receipt 和 fail-closed gate。",
+      "top3": [
+        "sf2-autonomic_router-route-fit-spec",
+        "nexus-root-cause-probe",
+        "sf2-learning_closure-route-fit-spec"
+      ],
+      "top_score": 20.508243,
+      "version": "after"
+    },
+    {
+      "capability": "autoreason",
+      "expected_rank": 1,
+      "expected_score": 14.969813,
+      "expected_skill": "sf2-belief-route-fit-spec",
+      "fixture_id": "autoreason:obvious",
+      "kind": "should_trigger",
+      "query": "Nexus route capability autoreason: handle a task requiring autoreason autoreason confidence semantic judgment candidate review with receipt-backed evidence.",
+      "top3": [
+        "sf2-belief-route-fit-spec",
+        "sf2-hyper_sprint-route-fit-spec",
+        "sf2-registry_skills_sync-route-fit-spec"
+      ],
+      "top_score": 14.969813,
+      "version": "after"
+    },
+    {
+      "capability": "autoreason",
+      "expected_rank": 1,
+      "expected_score": 14.969813,
+      "expected_skill": "sf2-belief-route-fit-spec",
+      "fixture_id": "autoreason:paraphrase",
+      "kind": "should_trigger",
+      "query": "Choose the best skill for autoreason autoreason confidence semantic judgment candidate review; return selected, used, evidence, gate, and outcome details.",
+      "top3": [
+        "sf2-belief-route-fit-spec",
+        "sf2-registry_skills_sync-route-fit-spec",
+        "sf2-hyper_sprint-route-fit-spec"
+      ],
+      "top_score": 14.969813,
+      "version": "after"
+    },
+    {
+      "capability": "autoreason",
+      "expected_rank": 1,
+      "expected_score": 10.969813,
+      "expected_skill": "sf2-belief-route-fit-spec",
+      "fixture_id": "autoreason:mixed",
+      "kind": "should_trigger",
+      "query": "請用 autoreason 能力處理，重點是 autoreason autoreason confidence semantic judgment candidate review，需要 runtime receipt 和 fail-closed gate。",
+      "top3": [
+        "sf2-belief-route-fit-spec",
+        "sf2-hyper_sprint-route-fit-spec",
+        "sf2-registry_skills_sync-route-fit-spec"
+      ],
+      "top_score": 10.969813,
+      "version": "after"
+    },
+    {
+      "capability": "belief",
+      "expected_rank": 1,
+      "expected_score": 17.45472,
+      "expected_skill": "sf2-belief-route-fit-spec",
+      "fixture_id": "belief:obvious",
+      "kind": "should_trigger",
+      "query": "Nexus route capability belief: handle a task requiring belief belief confidence prior budget doubt route assessment with receipt-backed evidence.",
+      "top3": [
+        "sf2-belief-route-fit-spec",
+        "acceptance-evidence-failclosed",
+        "create-plan"
+      ],
+      "top_score": 17.45472,
+      "version": "after"
+    },
+    {
+      "capability": "belief",
+      "expected_rank": 1,
+      "expected_score": 18.45472,
+      "expected_skill": "sf2-belief-route-fit-spec",
+      "fixture_id": "belief:paraphrase",
+      "kind": "should_trigger",
+      "query": "Choose the best skill for belief belief confidence prior budget doubt route assessment; return selected, used, evidence, gate, and outcome details.",
+      "top3": [
+        "sf2-belief-route-fit-spec",
+        "sf2-registry_skills_sync-route-fit-spec",
+        "acceptance-evidence-failclosed"
+      ],
+      "top_score": 18.45472,
+      "version": "after"
+    },
+    {
+      "capability": "belief",
+      "expected_rank": 1,
+      "expected_score": 14.45472,
+      "expected_skill": "sf2-belief-route-fit-spec",
+      "fixture_id": "belief:mixed",
+      "kind": "should_trigger",
+      "query": "請用 belief 能力處理，重點是 belief belief confidence prior budget doubt route assessment，需要 runtime receipt 和 fail-closed gate。",
+      "top3": [
+        "sf2-belief-route-fit-spec",
+        "acceptance-evidence-failclosed",
+        "create-plan"
+      ],
+      "top_score": 14.45472,
+      "version": "after"
+    },
+    {
+      "capability": "benchmark_meta_opt",
+      "expected_rank": 1,
+      "expected_score": 27.216293,
+      "expected_skill": "nexus-benchmark-continuous-optimization",
+      "fixture_id": "benchmark_meta_opt:obvious",
+      "kind": "should_trigger",
+      "query": "Nexus route capability benchmark_meta_opt: handle a task requiring benchmark meta opt benchmark route cost meta optimization public claim boundary with receipt-backed evidence.",
+      "top3": [
+        "nexus-benchmark-continuous-optimization",
+        "acceptance-evidence-failclosed",
+        "research-citation-chain-verifier"
+      ],
+      "top_score": 27.216293,
+      "version": "after"
+    },
+    {
+      "capability": "benchmark_meta_opt",
+      "expected_rank": 1,
+      "expected_score": 24.731386,
+      "expected_skill": "nexus-benchmark-continuous-optimization",
+      "fixture_id": "benchmark_meta_opt:paraphrase",
+      "kind": "should_trigger",
+      "query": "Choose the best skill for benchmark meta opt benchmark route cost meta optimization public claim boundary; return selected, used, evidence, gate, and outcome details.",
+      "top3": [
+        "nexus-benchmark-continuous-optimization",
+        "sf2-registry_skills_sync-route-fit-spec",
+        "acceptance-evidence-failclosed"
+      ],
+      "top_score": 24.731386,
+      "version": "after"
+    },
+    {
+      "capability": "benchmark_meta_opt",
+      "expected_rank": 1,
+      "expected_score": 24.216293,
+      "expected_skill": "nexus-benchmark-continuous-optimization",
+      "fixture_id": "benchmark_meta_opt:mixed",
+      "kind": "should_trigger",
+      "query": "請用 benchmark_meta_opt 能力處理，重點是 benchmark meta opt benchmark route cost meta optimization public claim boundary，需要 runtime receipt 和 fail-closed gate。",
+      "top3": [
+        "nexus-benchmark-continuous-optimization",
+        "acceptance-evidence-failclosed",
+        "research-citation-chain-verifier"
+      ],
+      "top_score": 24.216293,
+      "version": "after"
+    },
+    {
+      "capability": "claim_gate",
+      "expected_rank": 1,
+      "expected_score": 14.276666,
+      "expected_skill": "nexus-benchmark-continuous-optimization",
+      "fixture_id": "claim_gate:obvious",
+      "kind": "should_trigger",
+      "query": "Nexus route capability claim_gate: handle a task requiring claim gate claim gate claim verification public readiness with receipt-backed evidence.",
+      "top3": [
+        "nexus-benchmark-continuous-optimization",
+        "research-citation-chain-verifier",
+        "acceptance-evidence-failclosed"
+      ],
+      "top_score": 14.276666,
+      "version": "after"
+    },
+    {
+      "capability": "claim_gate",
+      "expected_rank": 4,
+      "expected_score": 9.791759,
+      "expected_skill": "nexus-benchmark-continuous-optimization",
+      "fixture_id": "claim_gate:paraphrase",
+      "kind": "should_trigger",
+      "query": "Choose the best skill for claim gate claim gate claim verification public readiness; return selected, used, evidence, gate, and outcome details.",
+      "top3": [
+        "research-citation-chain-verifier",
+        "sf2-registry_skills_sync-route-fit-spec",
+        "acceptance-evidence-failclosed"
+      ],
+      "top_score": 13.276666,
+      "version": "after"
+    },
+    {
+      "capability": "claim_gate",
+      "expected_rank": 1,
+      "expected_score": 9.276666,
+      "expected_skill": "nexus-benchmark-continuous-optimization",
+      "fixture_id": "claim_gate:mixed",
+      "kind": "should_trigger",
+      "query": "請用 claim_gate 能力處理，重點是 claim gate claim gate claim verification public readiness，需要 runtime receipt 和 fail-closed gate。",
+      "top3": [
+        "nexus-benchmark-continuous-optimization",
+        "research-citation-chain-verifier",
+        "acceptance-evidence-failclosed"
+      ],
+      "top_score": 9.276666,
+      "version": "after"
+    },
+    {
+      "capability": "claim_gate",
+      "expected_rank": 5,
+      "expected_score": 8.0,
+      "expected_skill": "nexus-benchmark-continuous-optimization",
+      "fixture_id": "claim_gate:near_miss:artifact_gate",
+      "kind": "should_not_trigger",
+      "query": "This task needs artifact_gate: artifact gate artifact evidence acceptance verifier receipt. Select the skill for that neighboring capability.",
+      "top3": [
+        "acceptance-evidence-failclosed",
+        "sf2-registry_skills_sync-route-fit-spec",
+        "create-plan"
+      ],
+      "top_score": 18.45472,
+      "version": "after"
+    },
+    {
+      "capability": "codeintel",
+      "expected_rank": 1,
+      "expected_score": 31.394347,
+      "expected_skill": "sf2-codeintel-route-fit-spec",
+      "fixture_id": "codeintel:obvious",
+      "kind": "should_trigger",
+      "query": "Nexus route capability codeintel: handle a task requiring codeintel code scan impact symbol dependency graph repository context with receipt-backed evidence.",
+      "top3": [
+        "sf2-codeintel-route-fit-spec",
+        "acceptance-evidence-failclosed",
+        "create-plan"
+      ],
+      "top_score": 31.394347,
+      "version": "after"
+    },
+    {
+      "capability": "codeintel",
+      "expected_rank": 1,
+      "expected_score": 31.394347,
+      "expected_skill": "sf2-codeintel-route-fit-spec",
+      "fixture_id": "codeintel:paraphrase",
+      "kind": "should_trigger",
+      "query": "Choose the best skill for codeintel code scan impact symbol dependency graph repository context; return selected, used, evidence, gate, and outcome details.",
+      "top3": [
+        "sf2-codeintel-route-fit-spec",
+        "sf2-registry_skills_sync-route-fit-spec",
+        "acceptance-evidence-failclosed"
+      ],
+      "top_score": 31.394347,
+      "version": "after"
+    },
+    {
+      "capability": "codeintel",
+      "expected_rank": 1,
+      "expected_score": 27.394347,
+      "expected_skill": "sf2-codeintel-route-fit-spec",
+      "fixture_id": "codeintel:mixed",
+      "kind": "should_trigger",
+      "query": "請用 codeintel 能力處理，重點是 codeintel code scan impact symbol dependency graph repository context，需要 runtime receipt 和 fail-closed gate。",
+      "top3": [
+        "sf2-codeintel-route-fit-spec",
+        "acceptance-evidence-failclosed",
+        "create-plan"
+      ],
+      "top_score": 27.394347,
+      "version": "after"
+    },
+    {
+      "capability": "ddtree",
+      "expected_rank": 1,
+      "expected_score": 13.969813,
+      "expected_skill": "nexus-root-cause-probe",
+      "fixture_id": "ddtree:obvious",
+      "kind": "should_trigger",
+      "query": "Nexus route capability ddtree: handle a task requiring ddtree decision tree candidate pruning diagnosis acceleration with receipt-backed evidence.",
+      "top3": [
+        "nexus-root-cause-probe",
+        "sf2-belief-route-fit-spec",
+        "sf2-hyper_sprint-route-fit-spec"
+      ],
+      "top_score": 13.969813,
+      "version": "after"
+    },
+    {
+      "capability": "ddtree",
+      "expected_rank": 1,
+      "expected_score": 13.969813,
+      "expected_skill": "nexus-root-cause-probe",
+      "fixture_id": "ddtree:paraphrase",
+      "kind": "should_trigger",
+      "query": "Choose the best skill for ddtree decision tree candidate pruning diagnosis acceleration; return selected, used, evidence, gate, and outcome details.",
+      "top3": [
+        "nexus-root-cause-probe",
+        "sf2-registry_skills_sync-route-fit-spec",
+        "sf2-belief-route-fit-spec"
+      ],
+      "top_score": 13.969813,
+      "version": "after"
+    },
+    {
+      "capability": "ddtree",
+      "expected_rank": 1,
+      "expected_score": 9.969813,
+      "expected_skill": "nexus-root-cause-probe",
+      "fixture_id": "ddtree:mixed",
+      "kind": "should_trigger",
+      "query": "請用 ddtree 能力處理，重點是 ddtree decision tree candidate pruning diagnosis acceleration，需要 runtime receipt 和 fail-closed gate。",
+      "top3": [
+        "nexus-root-cause-probe",
+        "sf2-belief-route-fit-spec",
+        "sf2-hyper_sprint-route-fit-spec"
+      ],
+      "top_score": 9.969813,
+      "version": "after"
+    },
+    {
+      "capability": "direct_master_loop",
+      "expected_rank": 1,
+      "expected_score": 33.557497,
+      "expected_skill": "sf2-direct_master_loop-route-fit-spec",
+      "fixture_id": "direct_master_loop:obvious",
+      "kind": "should_trigger",
+      "query": "Nexus route capability direct_master_loop: handle a task requiring direct master loop direct master loop execution content rewrite task control with receipt-backed evidence.",
+      "top3": [
+        "sf2-direct_master_loop-route-fit-spec",
+        "tdd",
+        "nexus-goal-closure-executor"
+      ],
+      "top_score": 33.557497,
+      "version": "after"
+    },
+    {
+      "capability": "direct_master_loop",
+      "expected_rank": 1,
+      "expected_score": 31.072591,
+      "expected_skill": "sf2-direct_master_loop-route-fit-spec",
+      "fixture_id": "direct_master_loop:paraphrase",
+      "kind": "should_trigger",
+      "query": "Choose the best skill for direct master loop direct master loop execution content rewrite task control; return selected, used, evidence, gate, and outcome details.",
+      "top3": [
+        "sf2-direct_master_loop-route-fit-spec",
+        "sf2-registry_skills_sync-route-fit-spec",
+        "tdd"
+      ],
+      "top_score": 31.072591,
+      "version": "after"
+    },
+    {
+      "capability": "direct_master_loop",
+      "expected_rank": 1,
+      "expected_score": 30.557497,
+      "expected_skill": "sf2-direct_master_loop-route-fit-spec",
+      "fixture_id": "direct_master_loop:mixed",
+      "kind": "should_trigger",
+      "query": "請用 direct_master_loop 能力處理，重點是 direct master loop direct master loop execution content rewrite task control，需要 runtime receipt 和 fail-closed gate。",
+      "top3": [
+        "sf2-direct_master_loop-route-fit-spec",
+        "tdd",
+        "nexus-goal-closure-executor"
+      ],
+      "top_score": 30.557497,
+      "version": "after"
+    },
+    {
+      "capability": "drone",
+      "expected_rank": 2,
+      "expected_score": 10.484907,
+      "expected_skill": "diagnose",
+      "fixture_id": "drone:obvious",
+      "kind": "should_trigger",
+      "query": "Nexus route capability drone: handle a task requiring drone drone delegated worker tactical execution status with receipt-backed evidence.",
+      "top3": [
+        "sf2-file_lock_security_gate-route-fit-spec",
+        "diagnose",
+        "nexus-goal-closure-executor"
+      ],
+      "top_score": 13.053523,
+      "version": "after"
+    },
+    {
+      "capability": "drone",
+      "expected_rank": 2,
+      "expected_score": 10.484907,
+      "expected_skill": "diagnose",
+      "fixture_id": "drone:paraphrase",
+      "kind": "should_trigger",
+      "query": "Choose the best skill for drone drone delegated worker tactical execution status; return selected, used, evidence, gate, and outcome details.",
+      "top3": [
+        "sf2-file_lock_security_gate-route-fit-spec",
+        "diagnose",
+        "sf2-registry_skills_sync-route-fit-spec"
+      ],
+      "top_score": 13.053523,
+      "version": "after"
+    },
+    {
+      "capability": "drone",
+      "expected_rank": 2,
+      "expected_score": 6.484907,
+      "expected_skill": "diagnose",
+      "fixture_id": "drone:mixed",
+      "kind": "should_trigger",
+      "query": "請用 drone 能力處理，重點是 drone drone delegated worker tactical execution status，需要 runtime receipt 和 fail-closed gate。",
+      "top3": [
+        "sf2-file_lock_security_gate-route-fit-spec",
+        "diagnose",
+        "nexus-goal-closure-executor"
+      ],
+      "top_score": 9.053523,
+      "version": "after"
+    },
+    {
+      "capability": "external_productivity",
+      "expected_rank": 1,
+      "expected_score": 31.394347,
+      "expected_skill": "sf2-external_productivity-route-fit-spec",
+      "fixture_id": "external_productivity:obvious",
+      "kind": "should_trigger",
+      "query": "Nexus route capability external_productivity: handle a task requiring external productivity gmail calendar sheets docs slides airtable connector with receipt-backed evidence.",
+      "top3": [
+        "sf2-external_productivity-route-fit-spec",
+        "acceptance-evidence-failclosed",
+        "create-plan"
+      ],
+      "top_score": 31.394347,
+      "version": "after"
+    },
+    {
+      "capability": "external_productivity",
+      "expected_rank": 1,
+      "expected_score": 27.90944,
+      "expected_skill": "sf2-external_productivity-route-fit-spec",
+      "fixture_id": "external_productivity:paraphrase",
+      "kind": "should_trigger",
+      "query": "Choose the best skill for external productivity gmail calendar sheets docs slides airtable connector; return selected, used, evidence, gate, and outcome details.",
+      "top3": [
+        "sf2-external_productivity-route-fit-spec",
+        "sf2-registry_skills_sync-route-fit-spec",
+        "acceptance-evidence-failclosed"
+      ],
+      "top_score": 27.90944,
+      "version": "after"
+    },
+    {
+      "capability": "external_productivity",
+      "expected_rank": 1,
+      "expected_score": 27.394347,
+      "expected_skill": "sf2-external_productivity-route-fit-spec",
+      "fixture_id": "external_productivity:mixed",
+      "kind": "should_trigger",
+      "query": "請用 external_productivity 能力處理，重點是 external productivity gmail calendar sheets docs slides airtable connector，需要 runtime receipt 和 fail-closed gate。",
+      "top3": [
+        "sf2-external_productivity-route-fit-spec",
+        "acceptance-evidence-failclosed",
+        "create-plan"
+      ],
+      "top_score": 27.394347,
+      "version": "after"
+    },
+    {
+      "capability": "file_lock_security_gate",
+      "expected_rank": 1,
+      "expected_score": 28.90944,
+      "expected_skill": "sf2-file_lock_security_gate-route-fit-spec",
+      "fixture_id": "file_lock_security_gate:obvious",
+      "kind": "should_trigger",
+      "query": "Nexus route capability file_lock_security_gate: handle a task requiring file lock security gate file lock security gate worktree permission sandbox with receipt-backed evidence.",
+      "top3": [
+        "sf2-file_lock_security_gate-route-fit-spec",
+        "sf2-swarm_multi_agent-route-fit-spec",
+        "acceptance-evidence-failclosed"
+      ],
+      "top_score": 28.90944,
+      "version": "after"
+    },
+    {
+      "capability": "file_lock_security_gate",
+      "expected_rank": 1,
+      "expected_score": 24.424533,
+      "expected_skill": "sf2-file_lock_security_gate-route-fit-spec",
+      "fixture_id": "file_lock_security_gate:paraphrase",
+      "kind": "should_trigger",
+      "query": "Choose the best skill for file lock security gate file lock security gate worktree permission sandbox; return selected, used, evidence, gate, and outcome details.",
+      "top3": [
+        "sf2-file_lock_security_gate-route-fit-spec",
+        "sf2-registry_skills_sync-route-fit-spec",
+        "sf2-swarm_multi_agent-route-fit-spec"
+      ],
+      "top_score": 24.424533,
+      "version": "after"
+    },
+    {
+      "capability": "file_lock_security_gate",
+      "expected_rank": 1,
+      "expected_score": 23.90944,
+      "expected_skill": "sf2-file_lock_security_gate-route-fit-spec",
+      "fixture_id": "file_lock_security_gate:mixed",
+      "kind": "should_trigger",
+      "query": "請用 file_lock_security_gate 能力處理，重點是 file lock security gate file lock security gate worktree permission sandbox，需要 runtime receipt 和 fail-closed gate。",
+      "top3": [
+        "sf2-file_lock_security_gate-route-fit-spec",
+        "sf2-swarm_multi_agent-route-fit-spec",
+        "acceptance-evidence-failclosed"
+      ],
+      "top_score": 23.90944,
+      "version": "after"
+    },
+    {
+      "capability": "forecast_pregate",
+      "expected_rank": 1,
+      "expected_score": 27.90944,
+      "expected_skill": "create-plan",
+      "fixture_id": "forecast_pregate:obvious",
+      "kind": "should_trigger",
+      "query": "Nexus route capability forecast_pregate: handle a task requiring forecast pregate forecast pregate plan quality risk prediction with receipt-backed evidence.",
+      "top3": [
+        "create-plan",
+        "acceptance-evidence-failclosed",
+        "diagnose"
+      ],
+      "top_score": 27.90944,
+      "version": "after"
+    },
+    {
+      "capability": "forecast_pregate",
+      "expected_rank": 1,
+      "expected_score": 24.424533,
+      "expected_skill": "create-plan",
+      "fixture_id": "forecast_pregate:paraphrase",
+      "kind": "should_trigger",
+      "query": "Choose the best skill for forecast pregate forecast pregate plan quality risk prediction; return selected, used, evidence, gate, and outcome details.",
+      "top3": [
+        "create-plan",
+        "sf2-registry_skills_sync-route-fit-spec",
+        "acceptance-evidence-failclosed"
+      ],
+      "top_score": 24.424533,
+      "version": "after"
+    },
+    {
+      "capability": "forecast_pregate",
+      "expected_rank": 1,
+      "expected_score": 23.90944,
+      "expected_skill": "create-plan",
+      "fixture_id": "forecast_pregate:mixed",
+      "kind": "should_trigger",
+      "query": "請用 forecast_pregate 能力處理，重點是 forecast pregate forecast pregate plan quality risk prediction，需要 runtime receipt 和 fail-closed gate。",
+      "top3": [
+        "create-plan",
+        "acceptance-evidence-failclosed",
+        "diagnose"
+      ],
+      "top_score": 23.90944,
+      "version": "after"
+    },
+    {
+      "capability": "governance_and_trust",
+      "expected_rank": 1,
+      "expected_score": 14.564348,
+      "expected_skill": "acceptance-evidence-failclosed",
+      "fixture_id": "governance_and_trust:obvious",
+      "kind": "should_trigger",
+      "query": "Nexus route capability governance_and_trust: handle a task requiring governance and trust governance trust mismatch evidence fail closed with receipt-backed evidence.",
+      "top3": [
+        "acceptance-evidence-failclosed",
+        "sf2-mempalace-route-fit-spec",
+        "create-plan"
+      ],
+      "top_score": 14.564348,
+      "version": "after"
+    },
+    {
+      "capability": "governance_and_trust",
+      "expected_rank": 2,
+      "expected_score": 10.079442,
+      "expected_skill": "acceptance-evidence-failclosed",
+      "fixture_id": "governance_and_trust:paraphrase",
+      "kind": "should_trigger",
+      "query": "Choose the best skill for governance and trust governance trust mismatch evidence fail closed; return selected, used, evidence, gate, and outcome details.",
+      "top3": [
+        "sf2-registry_skills_sync-route-fit-spec",
+        "acceptance-evidence-failclosed",
+        "sf2-mempalace-route-fit-spec"
+      ],
+      "top_score": 10.484907,
+      "version": "after"
+    },
+    {
+      "capability": "governance_and_trust",
+      "expected_rank": 1,
+      "expected_score": 11.564348,
+      "expected_skill": "acceptance-evidence-failclosed",
+      "fixture_id": "governance_and_trust:mixed",
+      "kind": "should_trigger",
+      "query": "請用 governance_and_trust 能力處理，重點是 governance and trust governance trust mismatch evidence fail closed，需要 runtime receipt 和 fail-closed gate。",
+      "top3": [
+        "acceptance-evidence-failclosed",
+        "sf2-mempalace-route-fit-spec",
+        "create-plan"
+      ],
+      "top_score": 11.564348,
+      "version": "after"
+    },
+    {
+      "capability": "governance_and_trust",
+      "expected_rank": 5,
+      "expected_score": 10.079442,
+      "expected_skill": "acceptance-evidence-failclosed",
+      "fixture_id": "governance_and_trust:near_miss:policy_capability_gate",
+      "kind": "should_not_trigger",
+      "query": "This task needs policy_capability_gate: policy capability gate policy capability gate route governance permission. Select the skill for that neighboring capability.",
+      "top3": [
+        "nexus-root-cause-probe",
+        "sf2-mempalace-route-fit-spec",
+        "sf2-file_lock_security_gate-route-fit-spec"
+      ],
+      "top_score": 13.053523,
+      "version": "after"
+    },
+    {
+      "capability": "hyper_sprint",
+      "expected_rank": 1,
+      "expected_score": 33.375176,
+      "expected_skill": "sf2-hyper_sprint-route-fit-spec",
+      "fixture_id": "hyper_sprint:obvious",
+      "kind": "should_trigger",
+      "query": "Nexus route capability hyper_sprint: handle a task requiring hyper sprint hyper sprint fast multi candidate local repair with receipt-backed evidence.",
+      "top3": [
+        "sf2-hyper_sprint-route-fit-spec",
+        "sf2-registry_skills_sync-route-fit-spec",
+        "sf2-swarm_multi_agent-route-fit-spec"
+      ],
+      "top_score": 33.375176,
+      "version": "after"
+    },
+    {
+      "capability": "hyper_sprint",
+      "expected_rank": 1,
+      "expected_score": 29.890269,
+      "expected_skill": "sf2-hyper_sprint-route-fit-spec",
+      "fixture_id": "hyper_sprint:paraphrase",
+      "kind": "should_trigger",
+      "query": "Choose the best skill for hyper sprint hyper sprint fast multi candidate local repair; return selected, used, evidence, gate, and outcome details.",
+      "top3": [
+        "sf2-hyper_sprint-route-fit-spec",
+        "sf2-registry_skills_sync-route-fit-spec",
+        "sf2-swarm_multi_agent-route-fit-spec"
+      ],
+      "top_score": 29.890269,
+      "version": "after"
+    },
+    {
+      "capability": "hyper_sprint",
+      "expected_rank": 1,
+      "expected_score": 29.375176,
+      "expected_skill": "sf2-hyper_sprint-route-fit-spec",
+      "fixture_id": "hyper_sprint:mixed",
+      "kind": "should_trigger",
+      "query": "請用 hyper_sprint 能力處理，重點是 hyper sprint hyper sprint fast multi candidate local repair，需要 runtime receipt 和 fail-closed gate。",
+      "top3": [
+        "sf2-hyper_sprint-route-fit-spec",
+        "sf2-registry_skills_sync-route-fit-spec",
+        "sf2-swarm_multi_agent-route-fit-spec"
+      ],
+      "top_score": 29.375176,
+      "version": "after"
+    },
+    {
+      "capability": "hyper_sprint",
+      "expected_rank": 2,
+      "expected_score": 10.871201,
+      "expected_skill": "sf2-hyper_sprint-route-fit-spec",
+      "fixture_id": "hyper_sprint:near_miss:nightshift",
+      "kind": "should_not_trigger",
+      "query": "This task needs nightshift: nightshift nightshift long running recovery delayed repair. Select the skill for that neighboring capability.",
+      "top3": [
+        "sf2-nightshift-route-fit-spec",
+        "sf2-hyper_sprint-route-fit-spec",
+        "sf2-registry_skills_sync-route-fit-spec"
+      ],
+      "top_score": 24.405363,
+      "version": "after"
+    },
+    {
+      "capability": "lancedb",
+      "expected_rank": 1,
+      "expected_score": 19.841014,
+      "expected_skill": "research-source-validation-auditor",
+      "fixture_id": "lancedb:obvious",
+      "kind": "should_trigger",
+      "query": "Nexus route capability lancedb: handle a task requiring lancedb LanceDB retrieval vector source validation context with receipt-backed evidence.",
+      "top3": [
+        "research-source-validation-auditor",
+        "sf2-codeintel-route-fit-spec",
+        "sf2-sandbox_replay-route-fit-spec"
+      ],
+      "top_score": 19.841014,
+      "version": "after"
+    },
+    {
+      "capability": "lancedb",
+      "expected_rank": 1,
+      "expected_score": 19.841014,
+      "expected_skill": "research-source-validation-auditor",
+      "fixture_id": "lancedb:paraphrase",
+      "kind": "should_trigger",
+      "query": "Choose the best skill for lancedb LanceDB retrieval vector source validation context; return selected, used, evidence, gate, and outcome details.",
+      "top3": [
+        "research-source-validation-auditor",
+        "sf2-registry_skills_sync-route-fit-spec",
+        "sf2-codeintel-route-fit-spec"
+      ],
+      "top_score": 19.841014,
+      "version": "after"
+    },
+    {
+      "capability": "lancedb",
+      "expected_rank": 1,
+      "expected_score": 15.841014,
+      "expected_skill": "research-source-validation-auditor",
+      "fixture_id": "lancedb:mixed",
+      "kind": "should_trigger",
+      "query": "請用 lancedb 能力處理，重點是 lancedb LanceDB retrieval vector source validation context，需要 runtime receipt 和 fail-closed gate。",
+      "top3": [
+        "research-source-validation-auditor",
+        "sf2-codeintel-route-fit-spec",
+        "sf2-sandbox_replay-route-fit-spec"
+      ],
+      "top_score": 15.841014,
+      "version": "after"
+    },
+    {
+      "capability": "lancedb",
+      "expected_rank": 2,
+      "expected_score": 8.484907,
+      "expected_skill": "research-source-validation-auditor",
+      "fixture_id": "lancedb:near_miss:memory",
+      "kind": "should_not_trigger",
+      "query": "This task needs memory: memory memory long term findings retrieval prior fix. Select the skill for that neighboring capability.",
+      "top3": [
+        "diagnose",
+        "research-source-validation-auditor",
+        "sf2-registry_skills_sync-route-fit-spec"
+      ],
+      "top_score": 8.484907,
+      "version": "after"
+    },
+    {
+      "capability": "learn_ask",
+      "expected_rank": 1,
+      "expected_score": 20.939627,
+      "expected_skill": "nexus-capability-upgrade",
+      "fixture_id": "learn_ask:obvious",
+      "kind": "should_trigger",
+      "query": "Nexus route capability learn_ask: handle a task requiring learn ask learn ask capability upgrade research ingest report with receipt-backed evidence.",
+      "top3": [
+        "nexus-capability-upgrade",
+        "nexus-root-cause-probe",
+        "research-citation-chain-verifier"
+      ],
+      "top_score": 20.939627,
+      "version": "after"
+    },
+    {
+      "capability": "learn_ask",
+      "expected_rank": 1,
+      "expected_score": 18.45472,
+      "expected_skill": "nexus-capability-upgrade",
+      "fixture_id": "learn_ask:paraphrase",
+      "kind": "should_trigger",
+      "query": "Choose the best skill for learn ask learn ask capability upgrade research ingest report; return selected, used, evidence, gate, and outcome details.",
+      "top3": [
+        "nexus-capability-upgrade",
+        "nexus-root-cause-probe",
+        "research-citation-chain-verifier"
+      ],
+      "top_score": 18.45472,
+      "version": "after"
+    },
+    {
+      "capability": "learn_ask",
+      "expected_rank": 1,
+      "expected_score": 17.939627,
+      "expected_skill": "nexus-capability-upgrade",
+      "fixture_id": "learn_ask:mixed",
+      "kind": "should_trigger",
+      "query": "請用 learn_ask 能力處理，重點是 learn ask learn ask capability upgrade research ingest report，需要 runtime receipt 和 fail-closed gate。",
+      "top3": [
+        "nexus-capability-upgrade",
+        "nexus-root-cause-probe",
+        "research-citation-chain-verifier"
+      ],
+      "top_score": 17.939627,
+      "version": "after"
+    },
+    {
+      "capability": "learning_closure",
+      "expected_rank": 1,
+      "expected_score": 33.962962,
+      "expected_skill": "sf2-learning_closure-route-fit-spec",
+      "fixture_id": "learning_closure:obvious",
+      "kind": "should_trigger",
+      "query": "Nexus route capability learning_closure: handle a task requiring learning closure learning closure lesson writeback SLO KPI matrix with receipt-backed evidence.",
+      "top3": [
+        "sf2-learning_closure-route-fit-spec",
+        "nexus-capability-upgrade",
+        "nexus-goal-closure-executor"
+      ],
+      "top_score": 33.962962,
+      "version": "after"
+    },
+    {
+      "capability": "learning_closure",
+      "expected_rank": 1,
+      "expected_score": 30.478056,
+      "expected_skill": "sf2-learning_closure-route-fit-spec",
+      "fixture_id": "learning_closure:paraphrase",
+      "kind": "should_trigger",
+      "query": "Choose the best skill for learning closure learning closure lesson writeback SLO KPI matrix; return selected, used, evidence, gate, and outcome details.",
+      "top3": [
+        "sf2-learning_closure-route-fit-spec",
+        "sf2-registry_skills_sync-route-fit-spec",
+        "nexus-capability-upgrade"
+      ],
+      "top_score": 30.478056,
+      "version": "after"
+    },
+    {
+      "capability": "learning_closure",
+      "expected_rank": 1,
+      "expected_score": 29.962962,
+      "expected_skill": "sf2-learning_closure-route-fit-spec",
+      "fixture_id": "learning_closure:mixed",
+      "kind": "should_trigger",
+      "query": "請用 learning_closure 能力處理，重點是 learning closure learning closure lesson writeback SLO KPI matrix，需要 runtime receipt 和 fail-closed gate。",
+      "top3": [
+        "sf2-learning_closure-route-fit-spec",
+        "nexus-capability-upgrade",
+        "nexus-goal-closure-executor"
+      ],
+      "top_score": 29.962962,
+      "version": "after"
+    },
+    {
+      "capability": "memory",
+      "expected_rank": 1,
+      "expected_score": 10.484907,
+      "expected_skill": "diagnose",
+      "fixture_id": "memory:obvious",
+      "kind": "should_trigger",
+      "query": "Nexus route capability memory: handle a task requiring memory memory long term findings retrieval prior fix with receipt-backed evidence.",
+      "top3": [
+        "diagnose",
+        "research-source-validation-auditor",
+        "nexus-goal-closure-executor"
+      ],
+      "top_score": 10.484907,
+      "version": "after"
+    },
+    {
+      "capability": "memory",
+      "expected_rank": 1,
+      "expected_score": 10.484907,
+      "expected_skill": "diagnose",
+      "fixture_id": "memory:paraphrase",
+      "kind": "should_trigger",
+      "query": "Choose the best skill for memory memory long term findings retrieval prior fix; return selected, used, evidence, gate, and outcome details.",
+      "top3": [
+        "diagnose",
+        "research-source-validation-auditor",
+        "sf2-registry_skills_sync-route-fit-spec"
+      ],
+      "top_score": 10.484907,
+      "version": "after"
+    },
+    {
+      "capability": "memory",
+      "expected_rank": 1,
+      "expected_score": 6.484907,
+      "expected_skill": "diagnose",
+      "fixture_id": "memory:mixed",
+      "kind": "should_trigger",
+      "query": "請用 memory 能力處理，重點是 memory memory long term findings retrieval prior fix，需要 runtime receipt 和 fail-closed gate。",
+      "top3": [
+        "diagnose",
+        "research-source-validation-auditor",
+        "nexus-goal-closure-executor"
+      ],
+      "top_score": 6.484907,
+      "version": "after"
+    },
+    {
+      "capability": "memory",
+      "expected_rank": 8,
+      "expected_score": 5.0,
+      "expected_skill": "diagnose",
+      "fixture_id": "memory:near_miss:lancedb",
+      "kind": "should_not_trigger",
+      "query": "This task needs lancedb: lancedb LanceDB retrieval vector source validation context. Select the skill for that neighboring capability.",
+      "top3": [
+        "research-source-validation-auditor",
+        "sf2-registry_skills_sync-route-fit-spec",
+        "sf2-codeintel-route-fit-spec"
+      ],
+      "top_score": 17.841014,
+      "version": "after"
+    },
+    {
+      "capability": "mempalace",
+      "expected_rank": 1,
+      "expected_score": 23.508243,
+      "expected_skill": "sf2-mempalace-route-fit-spec",
+      "fixture_id": "mempalace:obvious",
+      "kind": "should_trigger",
+      "query": "Nexus route capability mempalace: handle a task requiring mempalace MemPalace ethical boundary policy guardrail forbidden action with receipt-backed evidence.",
+      "top3": [
+        "sf2-mempalace-route-fit-spec",
+        "nexus-benchmark-continuous-optimization",
+        "nexus-root-cause-probe"
+      ],
+      "top_score": 23.508243,
+      "version": "after"
+    },
+    {
+      "capability": "mempalace",
+      "expected_rank": 1,
+      "expected_score": 23.508243,
+      "expected_skill": "sf2-mempalace-route-fit-spec",
+      "fixture_id": "mempalace:paraphrase",
+      "kind": "should_trigger",
+      "query": "Choose the best skill for mempalace MemPalace ethical boundary policy guardrail forbidden action; return selected, used, evidence, gate, and outcome details.",
+      "top3": [
+        "sf2-mempalace-route-fit-spec",
+        "nexus-benchmark-continuous-optimization",
+        "sf2-registry_skills_sync-route-fit-spec"
+      ],
+      "top_score": 23.508243,
+      "version": "after"
+    },
+    {
+      "capability": "mempalace",
+      "expected_rank": 1,
+      "expected_score": 19.508243,
+      "expected_skill": "sf2-mempalace-route-fit-spec",
+      "fixture_id": "mempalace:mixed",
+      "kind": "should_trigger",
+      "query": "請用 mempalace 能力處理，重點是 mempalace MemPalace ethical boundary policy guardrail forbidden action，需要 runtime receipt 和 fail-closed gate。",
+      "top3": [
+        "sf2-mempalace-route-fit-spec",
+        "nexus-benchmark-continuous-optimization",
+        "nexus-root-cause-probe"
+      ],
+      "top_score": 19.508243,
+      "version": "after"
+    },
+    {
+      "capability": "metabolism_resume",
+      "expected_rank": 1,
+      "expected_score": 26.587684,
+      "expected_skill": "nexus-goal-closure-executor",
+      "fixture_id": "metabolism_resume:obvious",
+      "kind": "should_trigger",
+      "query": "Nexus route capability metabolism_resume: handle a task requiring metabolism resume metabolism resume long goal closure continuation with receipt-backed evidence.",
+      "top3": [
+        "nexus-goal-closure-executor",
+        "sf2-nightshift-route-fit-spec",
+        "nexus-capability-upgrade"
+      ],
+      "top_score": 26.587684,
+      "version": "after"
+    },
+    {
+      "capability": "metabolism_resume",
+      "expected_rank": 1,
+      "expected_score": 23.102777,
+      "expected_skill": "nexus-goal-closure-executor",
+      "fixture_id": "metabolism_resume:paraphrase",
+      "kind": "should_trigger",
+      "query": "Choose the best skill for metabolism resume metabolism resume long goal closure continuation; return selected, used, evidence, gate, and outcome details.",
+      "top3": [
+        "nexus-goal-closure-executor",
+        "sf2-nightshift-route-fit-spec",
+        "sf2-registry_skills_sync-route-fit-spec"
+      ],
+      "top_score": 23.102777,
+      "version": "after"
+    },
+    {
+      "capability": "metabolism_resume",
+      "expected_rank": 1,
+      "expected_score": 22.587684,
+      "expected_skill": "nexus-goal-closure-executor",
+      "fixture_id": "metabolism_resume:mixed",
+      "kind": "should_trigger",
+      "query": "請用 metabolism_resume 能力處理，重點是 metabolism resume metabolism resume long goal closure continuation，需要 runtime receipt 和 fail-closed gate。",
+      "top3": [
+        "nexus-goal-closure-executor",
+        "sf2-nightshift-route-fit-spec",
+        "nexus-capability-upgrade"
+      ],
+      "top_score": 22.587684,
+      "version": "after"
+    },
+    {
+      "capability": "nightshift",
+      "expected_rank": 1,
+      "expected_score": 26.405363,
+      "expected_skill": "sf2-nightshift-route-fit-spec",
+      "fixture_id": "nightshift:obvious",
+      "kind": "should_trigger",
+      "query": "Nexus route capability nightshift: handle a task requiring nightshift nightshift long running recovery delayed repair with receipt-backed evidence.",
+      "top3": [
+        "sf2-nightshift-route-fit-spec",
+        "sf2-hyper_sprint-route-fit-spec",
+        "nexus-goal-closure-executor"
+      ],
+      "top_score": 26.405363,
+      "version": "after"
+    },
+    {
+      "capability": "nightshift",
+      "expected_rank": 1,
+      "expected_score": 26.405363,
+      "expected_skill": "sf2-nightshift-route-fit-spec",
+      "fixture_id": "nightshift:paraphrase",
+      "kind": "should_trigger",
+      "query": "Choose the best skill for nightshift nightshift long running recovery delayed repair; return selected, used, evidence, gate, and outcome details.",
+      "top3": [
+        "sf2-nightshift-route-fit-spec",
+        "sf2-hyper_sprint-route-fit-spec",
+        "sf2-registry_skills_sync-route-fit-spec"
+      ],
+      "top_score": 26.405363,
+      "version": "after"
+    },
+    {
+      "capability": "nightshift",
+      "expected_rank": 1,
+      "expected_score": 22.405363,
+      "expected_skill": "sf2-nightshift-route-fit-spec",
+      "fixture_id": "nightshift:mixed",
+      "kind": "should_trigger",
+      "query": "請用 nightshift 能力處理，重點是 nightshift nightshift long running recovery delayed repair，需要 runtime receipt 和 fail-closed gate。",
+      "top3": [
+        "sf2-nightshift-route-fit-spec",
+        "sf2-hyper_sprint-route-fit-spec",
+        "nexus-goal-closure-executor"
+      ],
+      "top_score": 22.405363,
+      "version": "after"
+    },
+    {
+      "capability": "nightshift",
+      "expected_rank": 4,
+      "expected_score": 7.791759,
+      "expected_skill": "sf2-nightshift-route-fit-spec",
+      "fixture_id": "nightshift:near_miss:hyper_sprint",
+      "kind": "should_not_trigger",
+      "query": "This task needs hyper_sprint: hyper sprint hyper sprint fast multi candidate local repair. Select the skill for that neighboring capability.",
+      "top3": [
+        "sf2-hyper_sprint-route-fit-spec",
+        "sf2-registry_skills_sync-route-fit-spec",
+        "sf2-swarm_multi_agent-route-fit-spec"
+      ],
+      "top_score": 31.375176,
+      "version": "after"
+    },
+    {
+      "capability": "policy_capability_gate",
+      "expected_rank": 1,
+      "expected_score": 14.053523,
+      "expected_skill": "nexus-root-cause-probe",
+      "fixture_id": "policy_capability_gate:obvious",
+      "kind": "should_trigger",
+      "query": "Nexus route capability policy_capability_gate: handle a task requiring policy capability gate policy capability gate route governance permission with receipt-backed evidence.",
+      "top3": [
+        "nexus-root-cause-probe",
+        "sf2-mempalace-route-fit-spec",
+        "sf2-file_lock_security_gate-route-fit-spec"
+      ],
+      "top_score": 14.053523,
+      "version": "after"
+    },
+    {
+      "capability": "policy_capability_gate",
+      "expected_rank": 5,
+      "expected_score": 11.568616,
+      "expected_skill": "nexus-root-cause-probe",
+      "fixture_id": "policy_capability_gate:paraphrase",
+      "kind": "should_trigger",
+      "query": "Choose the best skill for policy capability gate policy capability gate route governance permission; return selected, used, evidence, gate, and outcome details.",
+      "top3": [
+        "sf2-mempalace-route-fit-spec",
+        "sf2-file_lock_security_gate-route-fit-spec",
+        "sf2-registry_skills_sync-route-fit-spec"
+      ],
+      "top_score": 14.648057,
+      "version": "after"
+    },
+    {
+      "capability": "policy_capability_gate",
+      "expected_rank": 1,
+      "expected_score": 11.053523,
+      "expected_skill": "nexus-root-cause-probe",
+      "fixture_id": "policy_capability_gate:mixed",
+      "kind": "should_trigger",
+      "query": "請用 policy_capability_gate 能力處理，重點是 policy capability gate policy capability gate route governance permission，需要 runtime receipt 和 fail-closed gate。",
+      "top3": [
+        "nexus-root-cause-probe",
+        "sf2-mempalace-route-fit-spec",
+        "sf2-file_lock_security_gate-route-fit-spec"
+      ],
+      "top_score": 11.053523,
+      "version": "after"
+    },
+    {
+      "capability": "policy_capability_gate",
+      "expected_rank": 9,
+      "expected_score": 7.0,
+      "expected_skill": "nexus-root-cause-probe",
+      "fixture_id": "policy_capability_gate:near_miss:governance_and_trust",
+      "kind": "should_not_trigger",
+      "query": "This task needs governance_and_trust: governance and trust governance trust mismatch evidence fail closed. Select the skill for that neighboring capability.",
+      "top3": [
+        "acceptance-evidence-failclosed",
+        "sf2-registry_skills_sync-route-fit-spec",
+        "sf2-mempalace-route-fit-spec"
+      ],
+      "top_score": 13.564348,
+      "version": "after"
+    },
+    {
+      "capability": "registry_skills_sync",
+      "expected_rank": 1,
+      "expected_score": 34.186106,
+      "expected_skill": "sf2-registry_skills_sync-route-fit-spec",
+      "fixture_id": "registry_skills_sync:obvious",
+      "kind": "should_trigger",
+      "query": "Nexus route capability registry_skills_sync: handle a task requiring registry skills sync skill registry catalog sync plugin source refresh with receipt-backed evidence.",
+      "top3": [
+        "sf2-registry_skills_sync-route-fit-spec",
+        "research-citation-chain-verifier",
+        "research-source-validation-auditor"
+      ],
+      "top_score": 34.186106,
+      "version": "after"
+    },
+    {
+      "capability": "registry_skills_sync",
+      "expected_rank": 1,
+      "expected_score": 30.701199,
+      "expected_skill": "sf2-registry_skills_sync-route-fit-spec",
+      "fixture_id": "registry_skills_sync:paraphrase",
+      "kind": "should_trigger",
+      "query": "Choose the best skill for registry skills sync skill registry catalog sync plugin source refresh; return selected, used, evidence, gate, and outcome details.",
+      "top3": [
+        "sf2-registry_skills_sync-route-fit-spec",
+        "research-citation-chain-verifier",
+        "research-source-validation-auditor"
+      ],
+      "top_score": 30.701199,
+      "version": "after"
+    },
+    {
+      "capability": "registry_skills_sync",
+      "expected_rank": 1,
+      "expected_score": 30.186106,
+      "expected_skill": "sf2-registry_skills_sync-route-fit-spec",
+      "fixture_id": "registry_skills_sync:mixed",
+      "kind": "should_trigger",
+      "query": "請用 registry_skills_sync 能力處理，重點是 registry skills sync skill registry catalog sync plugin source refresh，需要 runtime receipt 和 fail-closed gate。",
+      "top3": [
+        "sf2-registry_skills_sync-route-fit-spec",
+        "research-citation-chain-verifier",
+        "research-source-validation-auditor"
+      ],
+      "top_score": 30.186106,
+      "version": "after"
+    },
+    {
+      "capability": "regression_guard",
+      "expected_rank": 2,
+      "expected_score": 10.484907,
+      "expected_skill": "diagnose",
+      "fixture_id": "regression_guard:obvious",
+      "kind": "should_trigger",
+      "query": "Nexus route capability regression_guard: handle a task requiring regression guard regression guard failing test reproduce bug with receipt-backed evidence.",
+      "top3": [
+        "tdd",
+        "diagnose",
+        "acceptance-evidence-failclosed"
+      ],
+      "top_score": 13.969813,
+      "version": "after"
+    },
+    {
+      "capability": "regression_guard",
+      "expected_rank": 5,
+      "expected_score": 7.0,
+      "expected_skill": "diagnose",
+      "fixture_id": "regression_guard:paraphrase",
+      "kind": "should_trigger",
+      "query": "Choose the best skill for regression guard regression guard failing test reproduce bug; return selected, used, evidence, gate, and outcome details.",
+      "top3": [
+        "tdd",
+        "sf2-registry_skills_sync-route-fit-spec",
+        "acceptance-evidence-failclosed"
+      ],
+      "top_score": 13.969813,
+      "version": "after"
+    },
+    {
+      "capability": "regression_guard",
+      "expected_rank": 2,
+      "expected_score": 6.484907,
+      "expected_skill": "diagnose",
+      "fixture_id": "regression_guard:mixed",
+      "kind": "should_trigger",
+      "query": "請用 regression_guard 能力處理，重點是 regression guard regression guard failing test reproduce bug，需要 runtime receipt 和 fail-closed gate。",
+      "top3": [
+        "tdd",
+        "diagnose",
+        "acceptance-evidence-failclosed"
+      ],
+      "top_score": 9.969813,
+      "version": "after"
+    },
+    {
+      "capability": "repair_loop",
+      "expected_rank": 1,
+      "expected_score": 33.780641,
+      "expected_skill": "tdd",
+      "fixture_id": "repair_loop:obvious",
+      "kind": "should_trigger",
+      "query": "Nexus route capability repair_loop: handle a task requiring repair loop repair loop TDD red green refactor behavior test with receipt-backed evidence.",
+      "top3": [
+        "tdd",
+        "sf2-direct_master_loop-route-fit-spec",
+        "sf2-hyper_sprint-route-fit-spec"
+      ],
+      "top_score": 33.780641,
+      "version": "after"
+    },
+    {
+      "capability": "repair_loop",
+      "expected_rank": 1,
+      "expected_score": 30.295734,
+      "expected_skill": "tdd",
+      "fixture_id": "repair_loop:paraphrase",
+      "kind": "should_trigger",
+      "query": "Choose the best skill for repair loop repair loop TDD red green refactor behavior test; return selected, used, evidence, gate, and outcome details.",
+      "top3": [
+        "tdd",
+        "sf2-registry_skills_sync-route-fit-spec",
+        "sf2-direct_master_loop-route-fit-spec"
+      ],
+      "top_score": 30.295734,
+      "version": "after"
+    },
+    {
+      "capability": "repair_loop",
+      "expected_rank": 1,
+      "expected_score": 29.780641,
+      "expected_skill": "tdd",
+      "fixture_id": "repair_loop:mixed",
+      "kind": "should_trigger",
+      "query": "請用 repair_loop 能力處理，重點是 repair loop repair loop TDD red green refactor behavior test，需要 runtime receipt 和 fail-closed gate。",
+      "top3": [
+        "tdd",
+        "sf2-direct_master_loop-route-fit-spec",
+        "sf2-hyper_sprint-route-fit-spec"
+      ],
+      "top_score": 29.780641,
+      "version": "after"
+    },
+    {
+      "capability": "repair_loop",
+      "expected_rank": 23,
+      "expected_score": 5.0,
+      "expected_skill": "tdd",
+      "fixture_id": "repair_loop:near_miss:codeintel",
+      "kind": "should_not_trigger",
+      "query": "This task needs codeintel: codeintel code scan impact symbol dependency graph repository context. Select the skill for that neighboring capability.",
+      "top3": [
+        "sf2-codeintel-route-fit-spec",
+        "sf2-registry_skills_sync-route-fit-spec",
+        "acceptance-evidence-failclosed"
+      ],
+      "top_score": 29.394347,
+      "version": "after"
+    },
+    {
+      "capability": "research",
+      "expected_rank": 1,
+      "expected_score": 19.553332,
+      "expected_skill": "research-citation-chain-verifier",
+      "fixture_id": "research:obvious",
+      "kind": "should_trigger",
+      "query": "Nexus route capability research: handle a task requiring research research source citation claim source report with receipt-backed evidence.",
+      "top3": [
+        "research-citation-chain-verifier",
+        "nexus-root-cause-probe",
+        "acceptance-evidence-failclosed"
+      ],
+      "top_score": 19.553332,
+      "version": "after"
+    },
+    {
+      "capability": "research",
+      "expected_rank": 1,
+      "expected_score": 19.553332,
+      "expected_skill": "research-citation-chain-verifier",
+      "fixture_id": "research:paraphrase",
+      "kind": "should_trigger",
+      "query": "Choose the best skill for research research source citation claim source report; return selected, used, evidence, gate, and outcome details.",
+      "top3": [
+        "research-citation-chain-verifier",
+        "sf2-registry_skills_sync-route-fit-spec",
+        "nexus-root-cause-probe"
+      ],
+      "top_score": 19.553332,
+      "version": "after"
+    },
+    {
+      "capability": "research",
+      "expected_rank": 1,
+      "expected_score": 15.553332,
+      "expected_skill": "research-citation-chain-verifier",
+      "fixture_id": "research:mixed",
+      "kind": "should_trigger",
+      "query": "請用 research 能力處理，重點是 research research source citation claim source report，需要 runtime receipt 和 fail-closed gate。",
+      "top3": [
+        "research-citation-chain-verifier",
+        "nexus-root-cause-probe",
+        "acceptance-evidence-failclosed"
+      ],
+      "top_score": 15.553332,
+      "version": "after"
+    },
+    {
+      "capability": "research_and_source_discipline",
+      "expected_rank": 1,
+      "expected_score": 27.810828,
+      "expected_skill": "research-citation-chain-verifier",
+      "fixture_id": "research_and_source_discipline:obvious",
+      "kind": "should_trigger",
+      "query": "Nexus route capability research_and_source_discipline: handle a task requiring research and source discipline source discipline citation chain validation evidence with receipt-backed evidence.",
+      "top3": [
+        "research-citation-chain-verifier",
+        "research-source-validation-auditor",
+        "sf2-sandbox_replay-route-fit-spec"
+      ],
+      "top_score": 27.810828,
+      "version": "after"
+    },
+    {
+      "capability": "research_and_source_discipline",
+      "expected_rank": 1,
+      "expected_score": 23.325921,
+      "expected_skill": "research-citation-chain-verifier",
+      "fixture_id": "research_and_source_discipline:paraphrase",
+      "kind": "should_trigger",
+      "query": "Choose the best skill for research and source discipline source discipline citation chain validation evidence; return selected, used, evidence, gate, and outcome details.",
+      "top3": [
+        "research-citation-chain-verifier",
+        "research-source-validation-auditor",
+        "sf2-registry_skills_sync-route-fit-spec"
+      ],
+      "top_score": 23.325921,
+      "version": "after"
+    },
+    {
+      "capability": "research_and_source_discipline",
+      "expected_rank": 1,
+      "expected_score": 24.810828,
+      "expected_skill": "research-citation-chain-verifier",
+      "fixture_id": "research_and_source_discipline:mixed",
+      "kind": "should_trigger",
+      "query": "請用 research_and_source_discipline 能力處理，重點是 research and source discipline source discipline citation chain validation evidence，需要 runtime receipt 和 fail-closed gate。",
+      "top3": [
+        "research-citation-chain-verifier",
+        "research-source-validation-auditor",
+        "sf2-sandbox_replay-route-fit-spec"
+      ],
+      "top_score": 24.810828,
+      "version": "after"
+    },
+    {
+      "capability": "research_control_plane",
+      "expected_rank": 1,
+      "expected_score": 13.969813,
+      "expected_skill": "research-citation-chain-verifier",
+      "fixture_id": "research_control_plane:obvious",
+      "kind": "should_trigger",
+      "query": "Nexus route capability research_control_plane: handle a task requiring research control plane research control plane ingest refresh converge questions with receipt-backed evidence.",
+      "top3": [
+        "research-citation-chain-verifier",
+        "sf2-direct_master_loop-route-fit-spec",
+        "sf2-registry_skills_sync-route-fit-spec"
+      ],
+      "top_score": 13.969813,
+      "version": "after"
+    },
+    {
+      "capability": "research_control_plane",
+      "expected_rank": 2,
+      "expected_score": 10.484907,
+      "expected_skill": "research-citation-chain-verifier",
+      "fixture_id": "research_control_plane:paraphrase",
+      "kind": "should_trigger",
+      "query": "Choose the best skill for research control plane research control plane ingest refresh converge questions; return selected, used, evidence, gate, and outcome details.",
+      "top3": [
+        "sf2-registry_skills_sync-route-fit-spec",
+        "research-citation-chain-verifier",
+        "sf2-direct_master_loop-route-fit-spec"
+      ],
+      "top_score": 13.969813,
+      "version": "after"
+    },
+    {
+      "capability": "research_control_plane",
+      "expected_rank": 1,
+      "expected_score": 9.969813,
+      "expected_skill": "research-citation-chain-verifier",
+      "fixture_id": "research_control_plane:mixed",
+      "kind": "should_trigger",
+      "query": "請用 research_control_plane 能力處理，重點是 research control plane research control plane ingest refresh converge questions，需要 runtime receipt 和 fail-closed gate。",
+      "top3": [
+        "research-citation-chain-verifier",
+        "sf2-direct_master_loop-route-fit-spec",
+        "sf2-registry_skills_sync-route-fit-spec"
+      ],
+      "top_score": 9.969813,
+      "version": "after"
+    },
+    {
+      "capability": "sandbox_replay",
+      "expected_rank": 1,
+      "expected_score": 26.587684,
+      "expected_skill": "sf2-sandbox_replay-route-fit-spec",
+      "fixture_id": "sandbox_replay:obvious",
+      "kind": "should_trigger",
+      "query": "Nexus route capability sandbox_replay: handle a task requiring sandbox replay sandbox replay isolation rerun execution trace with receipt-backed evidence.",
+      "top3": [
+        "sf2-sandbox_replay-route-fit-spec",
+        "sf2-file_lock_security_gate-route-fit-spec",
+        "diagnose"
+      ],
+      "top_score": 26.587684,
+      "version": "after"
+    },
+    {
+      "capability": "sandbox_replay",
+      "expected_rank": 1,
+      "expected_score": 23.102777,
+      "expected_skill": "sf2-sandbox_replay-route-fit-spec",
+      "fixture_id": "sandbox_replay:paraphrase",
+      "kind": "should_trigger",
+      "query": "Choose the best skill for sandbox replay sandbox replay isolation rerun execution trace; return selected, used, evidence, gate, and outcome details.",
+      "top3": [
+        "sf2-sandbox_replay-route-fit-spec",
+        "sf2-file_lock_security_gate-route-fit-spec",
+        "sf2-registry_skills_sync-route-fit-spec"
+      ],
+      "top_score": 23.102777,
+      "version": "after"
+    },
+    {
+      "capability": "sandbox_replay",
+      "expected_rank": 1,
+      "expected_score": 22.587684,
+      "expected_skill": "sf2-sandbox_replay-route-fit-spec",
+      "fixture_id": "sandbox_replay:mixed",
+      "kind": "should_trigger",
+      "query": "請用 sandbox_replay 能力處理，重點是 sandbox replay sandbox replay isolation rerun execution trace，需要 runtime receipt 和 fail-closed gate。",
+      "top3": [
+        "sf2-sandbox_replay-route-fit-spec",
+        "sf2-file_lock_security_gate-route-fit-spec",
+        "diagnose"
+      ],
+      "top_score": 22.587684,
+      "version": "after"
+    },
+    {
+      "capability": "sandbox_replay",
+      "expected_rank": 21,
+      "expected_score": 6.0,
+      "expected_skill": "sf2-sandbox_replay-route-fit-spec",
+      "fixture_id": "sandbox_replay:near_miss:delivery_acceptance_gate",
+      "kind": "should_not_trigger",
+      "query": "This task needs delivery_acceptance_gate: delivery acceptance gate. Select the skill for that neighboring capability.",
+      "top3": [
+        "acceptance-evidence-failclosed",
+        "sf2-registry_skills_sync-route-fit-spec",
+        "create-plan"
+      ],
+      "top_score": 12.969813,
+      "version": "after"
+    },
+    {
+      "capability": "swarm_multi_agent",
+      "expected_rank": 1,
+      "expected_score": 34.473788,
+      "expected_skill": "sf2-swarm_multi_agent-route-fit-spec",
+      "fixture_id": "swarm_multi_agent:obvious",
+      "kind": "should_trigger",
+      "query": "Nexus route capability swarm_multi_agent: handle a task requiring swarm multi agent swarm multi agent worktree submit verify integrate with receipt-backed evidence.",
+      "top3": [
+        "sf2-swarm_multi_agent-route-fit-spec",
+        "sf2-hyper_sprint-route-fit-spec",
+        "acceptance-evidence-failclosed"
+      ],
+      "top_score": 34.473788,
+      "version": "after"
+    },
+    {
+      "capability": "swarm_multi_agent",
+      "expected_rank": 1,
+      "expected_score": 30.988881,
+      "expected_skill": "sf2-swarm_multi_agent-route-fit-spec",
+      "fixture_id": "swarm_multi_agent:paraphrase",
+      "kind": "should_trigger",
+      "query": "Choose the best skill for swarm multi agent swarm multi agent worktree submit verify integrate; return selected, used, evidence, gate, and outcome details.",
+      "top3": [
+        "sf2-swarm_multi_agent-route-fit-spec",
+        "sf2-registry_skills_sync-route-fit-spec",
+        "sf2-hyper_sprint-route-fit-spec"
+      ],
+      "top_score": 30.988881,
+      "version": "after"
+    },
+    {
+      "capability": "swarm_multi_agent",
+      "expected_rank": 1,
+      "expected_score": 30.473788,
+      "expected_skill": "sf2-swarm_multi_agent-route-fit-spec",
+      "fixture_id": "swarm_multi_agent:mixed",
+      "kind": "should_trigger",
+      "query": "請用 swarm_multi_agent 能力處理，重點是 swarm multi agent swarm multi agent worktree submit verify integrate，需要 runtime receipt 和 fail-closed gate。",
+      "top3": [
+        "sf2-swarm_multi_agent-route-fit-spec",
+        "sf2-hyper_sprint-route-fit-spec",
+        "acceptance-evidence-failclosed"
+      ],
+      "top_score": 30.473788,
+      "version": "after"
+    },
+    {
+      "capability": "ui_validator",
+      "expected_rank": 1,
+      "expected_score": 11.484907,
+      "expected_skill": "nexus-root-cause-probe",
+      "fixture_id": "ui_validator:obvious",
+      "kind": "should_trigger",
+      "query": "Nexus route capability ui_validator: handle a task requiring ui validator UI validator browser screenshot interaction visual gate with receipt-backed evidence.",
+      "top3": [
+        "nexus-root-cause-probe",
+        "acceptance-evidence-failclosed",
+        "create-plan"
+      ],
+      "top_score": 11.484907,
+      "version": "after"
+    },
+    {
+      "capability": "ui_validator",
+      "expected_rank": 8,
+      "expected_score": 7.0,
+      "expected_skill": "nexus-root-cause-probe",
+      "fixture_id": "ui_validator:paraphrase",
+      "kind": "should_trigger",
+      "query": "Choose the best skill for ui validator UI validator browser screenshot interaction visual gate; return selected, used, evidence, gate, and outcome details.",
+      "top3": [
+        "sf2-registry_skills_sync-route-fit-spec",
+        "acceptance-evidence-failclosed",
+        "create-plan"
+      ],
+      "top_score": 10.484907,
+      "version": "after"
+    },
+    {
+      "capability": "ui_validator",
+      "expected_rank": 1,
+      "expected_score": 6.484907,
+      "expected_skill": "nexus-root-cause-probe",
+      "fixture_id": "ui_validator:mixed",
+      "kind": "should_trigger",
+      "query": "請用 ui_validator 能力處理，重點是 ui validator UI validator browser screenshot interaction visual gate，需要 runtime receipt 和 fail-closed gate。",
+      "top3": [
+        "nexus-root-cause-probe",
+        "acceptance-evidence-failclosed",
+        "create-plan"
+      ],
+      "top_score": 6.484907,
+      "version": "after"
+    },
+    {
+      "capability": "ultra_review",
+      "expected_rank": 2,
+      "expected_score": 11.484907,
+      "expected_skill": "acceptance-evidence-failclosed",
+      "fixture_id": "ultra_review:obvious",
+      "kind": "should_trigger",
+      "query": "Nexus route capability ultra_review: handle a task requiring ultra review ultra review sandbox fleet security logic regression with receipt-backed evidence.",
+      "top3": [
+        "sf2-file_lock_security_gate-route-fit-spec",
+        "acceptance-evidence-failclosed",
+        "tdd"
+      ],
+      "top_score": 14.969813,
+      "version": "after"
+    },
+    {
+      "capability": "ultra_review",
+      "expected_rank": 4,
+      "expected_score": 8.0,
+      "expected_skill": "acceptance-evidence-failclosed",
+      "fixture_id": "ultra_review:paraphrase",
+      "kind": "should_trigger",
+      "query": "Choose the best skill for ultra review ultra review sandbox fleet security logic regression; return selected, used, evidence, gate, and outcome details.",
+      "top3": [
+        "sf2-file_lock_security_gate-route-fit-spec",
+        "sf2-registry_skills_sync-route-fit-spec",
+        "tdd"
+      ],
+      "top_score": 14.969813,
+      "version": "after"
+    },
+    {
+      "capability": "ultra_review",
+      "expected_rank": 2,
+      "expected_score": 7.484907,
+      "expected_skill": "acceptance-evidence-failclosed",
+      "fixture_id": "ultra_review:mixed",
+      "kind": "should_trigger",
+      "query": "請用 ultra_review 能力處理，重點是 ultra review ultra review sandbox fleet security logic regression，需要 runtime receipt 和 fail-closed gate。",
+      "top3": [
+        "sf2-file_lock_security_gate-route-fit-spec",
+        "acceptance-evidence-failclosed",
+        "tdd"
+      ],
+      "top_score": 10.969813,
+      "version": "after"
+    },
+    {
+      "capability": "xray",
+      "expected_rank": 1,
+      "expected_score": 10.484907,
+      "expected_skill": "diagnose",
+      "fixture_id": "xray:obvious",
+      "kind": "should_trigger",
+      "query": "Nexus route capability xray: handle a task requiring xray xray deep inspection hidden context diagnosis with receipt-backed evidence.",
+      "top3": [
+        "diagnose",
+        "nexus-root-cause-probe",
+        "sf2-codeintel-route-fit-spec"
+      ],
+      "top_score": 10.484907,
+      "version": "after"
+    },
+    {
+      "capability": "xray",
+      "expected_rank": 1,
+      "expected_score": 10.484907,
+      "expected_skill": "diagnose",
+      "fixture_id": "xray:paraphrase",
+      "kind": "should_trigger",
+      "query": "Choose the best skill for xray xray deep inspection hidden context diagnosis; return selected, used, evidence, gate, and outcome details.",
+      "top3": [
+        "diagnose",
+        "nexus-root-cause-probe",
+        "sf2-codeintel-route-fit-spec"
+      ],
+      "top_score": 10.484907,
+      "version": "after"
+    },
+    {
+      "capability": "xray",
+      "expected_rank": 1,
+      "expected_score": 6.484907,
+      "expected_skill": "diagnose",
+      "fixture_id": "xray:mixed",
+      "kind": "should_trigger",
+      "query": "請用 xray 能力處理，重點是 xray xray deep inspection hidden context diagnosis，需要 runtime receipt 和 fail-closed gate。",
+      "top3": [
+        "diagnose",
+        "nexus-root-cause-probe",
+        "sf2-codeintel-route-fit-spec"
+      ],
+      "top_score": 6.484907,
+      "version": "after"
+    }
+  ],
+  "before_rows": [
+    {
+      "capability": "artifact_gate",
+      "expected_rank": 4,
+      "expected_score": 8.815663,
+      "expected_skill": "acceptance-evidence-failclosed",
+      "fixture_id": "artifact_gate:obvious",
+      "kind": "should_trigger",
+      "query": "Nexus route capability artifact_gate: handle a task requiring artifact gate artifact evidence acceptance verifier receipt with receipt-backed evidence.",
+      "top3": [
+        "sf2-codeintel-route-fit-spec",
+        "sf2-external_productivity-route-fit-spec",
+        "nexus-goal-closure-executor"
+      ],
+      "top_score": 19.487623,
+      "version": "before"
+    },
+    {
+      "capability": "artifact_gate",
+      "expected_rank": 3,
+      "expected_score": 7.410198,
+      "expected_skill": "acceptance-evidence-failclosed",
+      "fixture_id": "artifact_gate:paraphrase",
+      "kind": "should_trigger",
+      "query": "Choose the best skill for artifact gate artifact evidence acceptance verifier receipt; return selected, used, evidence, gate, and outcome details.",
+      "top3": [
+        "sf2-codeintel-route-fit-spec",
+        "sf2-external_productivity-route-fit-spec",
+        "acceptance-evidence-failclosed"
+      ],
+      "top_score": 19.820041,
+      "version": "before"
+    },
+    {
+      "capability": "artifact_gate",
+      "expected_rank": 3,
+      "expected_score": 7.410198,
+      "expected_skill": "acceptance-evidence-failclosed",
+      "fixture_id": "artifact_gate:mixed",
+      "kind": "should_trigger",
+      "query": "請用 artifact_gate 能力處理，重點是 artifact gate artifact evidence acceptance verifier receipt，需要 runtime receipt 和 fail-closed gate。",
+      "top3": [
+        "sf2-codeintel-route-fit-spec",
+        "sf2-external_productivity-route-fit-spec",
+        "acceptance-evidence-failclosed"
+      ],
+      "top_score": 10.777321,
+      "version": "before"
+    },
+    {
+      "capability": "artifact_gate",
+      "expected_rank": 6,
+      "expected_score": 5.023903,
+      "expected_skill": "acceptance-evidence-failclosed",
+      "fixture_id": "artifact_gate:near_miss:claim_gate",
+      "kind": "should_not_trigger",
+      "query": "This task needs claim_gate: claim gate claim gate claim verification public readiness. Select the skill for that neighboring capability.",
+      "top3": [
+        "nexus-benchmark-continuous-optimization",
+        "sf2-codeintel-route-fit-spec",
+        "sf2-external_productivity-route-fit-spec"
+      ],
+      "top_score": 14.380011,
+      "version": "before"
+    },
+    {
+      "capability": "autonomic_router",
+      "expected_rank": 5,
+      "expected_score": 4.890372,
+      "expected_skill": "sf2-autonomic_router-route-fit-spec",
+      "fixture_id": "autonomic_router:obvious",
+      "kind": "should_trigger",
+      "query": "Nexus route capability autonomic_router: handle a task requiring autonomic router autonomic router route selection policy feedback with receipt-backed evidence.",
+      "top3": [
+        "sf2-codeintel-route-fit-spec",
+        "sf2-external_productivity-route-fit-spec",
+        "nexus-goal-closure-executor"
+      ],
+      "top_score": 17.25548,
+      "version": "before"
+    },
+    {
+      "capability": "autonomic_router",
+      "expected_rank": 8,
+      "expected_score": 4.443453,
+      "expected_skill": "sf2-autonomic_router-route-fit-spec",
+      "fixture_id": "autonomic_router:paraphrase",
+      "kind": "should_trigger",
+      "query": "Choose the best skill for autonomic router autonomic router route selection policy feedback; return selected, used, evidence, gate, and outcome details.",
+      "top3": [
+        "sf2-codeintel-route-fit-spec",
+        "sf2-external_productivity-route-fit-spec",
+        "nexus-goal-closure-executor"
+      ],
+      "top_score": 18.146065,
+      "version": "before"
+    },
+    {
+      "capability": "autonomic_router",
+      "expected_rank": 3,
+      "expected_score": 4.890372,
+      "expected_skill": "sf2-autonomic_router-route-fit-spec",
+      "fixture_id": "autonomic_router:mixed",
+      "kind": "should_trigger",
+      "query": "請用 autonomic_router 能力處理，重點是 autonomic router autonomic router route selection policy feedback，需要 runtime receipt 和 fail-closed gate。",
+      "top3": [
+        "sf2-codeintel-route-fit-spec",
+        "sf2-external_productivity-route-fit-spec",
+        "sf2-autonomic_router-route-fit-spec"
+      ],
+      "top_score": 9.796492,
+      "version": "before"
+    },
+    {
+      "capability": "autoreason",
+      "expected_rank": 9,
+      "expected_score": 3.098612,
+      "expected_skill": "sf2-belief-route-fit-spec",
+      "fixture_id": "autoreason:obvious",
+      "kind": "should_trigger",
+      "query": "Nexus route capability autoreason: handle a task requiring autoreason autoreason confidence semantic judgment candidate review with receipt-backed evidence.",
+      "top3": [
+        "sf2-codeintel-route-fit-spec",
+        "sf2-external_productivity-route-fit-spec",
+        "nexus-goal-closure-executor"
+      ],
+      "top_score": 20.047239,
+      "version": "before"
+    },
+    {
+      "capability": "autoreason",
+      "expected_rank": 7,
+      "expected_score": 4.731135,
+      "expected_skill": "sf2-belief-route-fit-spec",
+      "fixture_id": "autoreason:paraphrase",
+      "kind": "should_trigger",
+      "query": "Choose the best skill for autoreason autoreason confidence semantic judgment candidate review; return selected, used, evidence, gate, and outcome details.",
+      "top3": [
+        "sf2-codeintel-route-fit-spec",
+        "sf2-external_productivity-route-fit-spec",
+        "nexus-goal-closure-executor"
+      ],
+      "top_score": 19.532359,
+      "version": "before"
+    },
+    {
+      "capability": "autoreason",
+      "expected_rank": 9,
+      "expected_score": 1.693147,
+      "expected_skill": "sf2-belief-route-fit-spec",
+      "fixture_id": "autoreason:mixed",
+      "kind": "should_trigger",
+      "query": "請用 autoreason 能力處理，重點是 autoreason autoreason confidence semantic judgment candidate review，需要 runtime receipt 和 fail-closed gate。",
+      "top3": [
+        "sf2-codeintel-route-fit-spec",
+        "sf2-external_productivity-route-fit-spec",
+        "create-plan"
+      ],
+      "top_score": 11.182786,
+      "version": "before"
+    },
+    {
+      "capability": "belief",
+      "expected_rank": 5,
+      "expected_score": 4.890372,
+      "expected_skill": "sf2-belief-route-fit-spec",
+      "fixture_id": "belief:obvious",
+      "kind": "should_trigger",
+      "query": "Nexus route capability belief: handle a task requiring belief belief confidence prior budget doubt route assessment with receipt-backed evidence.",
+      "top3": [
+        "sf2-codeintel-route-fit-spec",
+        "sf2-external_productivity-route-fit-spec",
+        "nexus-goal-closure-executor"
+      ],
+      "top_score": 17.25548,
+      "version": "before"
+    },
+    {
+      "capability": "belief",
+      "expected_rank": 4,
+      "expected_score": 7.928359,
+      "expected_skill": "sf2-belief-route-fit-spec",
+      "fixture_id": "belief:paraphrase",
+      "kind": "should_trigger",
+      "query": "Choose the best skill for belief belief confidence prior budget doubt route assessment; return selected, used, evidence, gate, and outcome details.",
+      "top3": [
+        "sf2-codeintel-route-fit-spec",
+        "sf2-external_productivity-route-fit-spec",
+        "nexus-goal-closure-executor"
+      ],
+      "top_score": 18.146065,
+      "version": "before"
+    },
+    {
+      "capability": "belief",
+      "expected_rank": 3,
+      "expected_score": 4.890372,
+      "expected_skill": "sf2-belief-route-fit-spec",
+      "fixture_id": "belief:mixed",
+      "kind": "should_trigger",
+      "query": "請用 belief 能力處理，重點是 belief belief confidence prior budget doubt route assessment，需要 runtime receipt 和 fail-closed gate。",
+      "top3": [
+        "sf2-codeintel-route-fit-spec",
+        "sf2-external_productivity-route-fit-spec",
+        "sf2-belief-route-fit-spec"
+      ],
+      "top_score": 9.796492,
+      "version": "before"
+    },
+    {
+      "capability": "benchmark_meta_opt",
+      "expected_rank": 3,
+      "expected_score": 15.766305,
+      "expected_skill": "nexus-benchmark-continuous-optimization",
+      "fixture_id": "benchmark_meta_opt:obvious",
+      "kind": "should_trigger",
+      "query": "Nexus route capability benchmark_meta_opt: handle a task requiring benchmark meta opt benchmark route cost meta optimization public claim boundary with receipt-backed evidence.",
+      "top3": [
+        "sf2-codeintel-route-fit-spec",
+        "sf2-external_productivity-route-fit-spec",
+        "nexus-benchmark-continuous-optimization"
+      ],
+      "top_score": 17.25548,
+      "version": "before"
+    },
+    {
+      "capability": "benchmark_meta_opt",
+      "expected_rank": 1,
+      "expected_score": 20.384743,
+      "expected_skill": "nexus-benchmark-continuous-optimization",
+      "fixture_id": "benchmark_meta_opt:paraphrase",
+      "kind": "should_trigger",
+      "query": "Choose the best skill for benchmark meta opt benchmark route cost meta optimization public claim boundary; return selected, used, evidence, gate, and outcome details.",
+      "top3": [
+        "nexus-benchmark-continuous-optimization",
+        "sf2-codeintel-route-fit-spec",
+        "sf2-external_productivity-route-fit-spec"
+      ],
+      "top_score": 20.384743,
+      "version": "before"
+    },
+    {
+      "capability": "benchmark_meta_opt",
+      "expected_rank": 1,
+      "expected_score": 15.766305,
+      "expected_skill": "nexus-benchmark-continuous-optimization",
+      "fixture_id": "benchmark_meta_opt:mixed",
+      "kind": "should_trigger",
+      "query": "請用 benchmark_meta_opt 能力處理，重點是 benchmark meta opt benchmark route cost meta optimization public claim boundary，需要 runtime receipt 和 fail-closed gate。",
+      "top3": [
+        "nexus-benchmark-continuous-optimization",
+        "sf2-codeintel-route-fit-spec",
+        "sf2-external_productivity-route-fit-spec"
+      ],
+      "top_score": 15.766305,
+      "version": "before"
+    },
+    {
+      "capability": "claim_gate",
+      "expected_rank": 3,
+      "expected_score": 11.434101,
+      "expected_skill": "nexus-benchmark-continuous-optimization",
+      "fixture_id": "claim_gate:obvious",
+      "kind": "should_trigger",
+      "query": "Nexus route capability claim_gate: handle a task requiring claim gate claim gate claim verification public readiness with receipt-backed evidence.",
+      "top3": [
+        "sf2-codeintel-route-fit-spec",
+        "sf2-external_productivity-route-fit-spec",
+        "nexus-benchmark-continuous-optimization"
+      ],
+      "top_score": 19.487623,
+      "version": "before"
+    },
+    {
+      "capability": "claim_gate",
+      "expected_rank": 3,
+      "expected_score": 13.820395,
+      "expected_skill": "nexus-benchmark-continuous-optimization",
+      "fixture_id": "claim_gate:paraphrase",
+      "kind": "should_trigger",
+      "query": "Choose the best skill for claim gate claim gate claim verification public readiness; return selected, used, evidence, gate, and outcome details.",
+      "top3": [
+        "sf2-codeintel-route-fit-spec",
+        "sf2-external_productivity-route-fit-spec",
+        "nexus-benchmark-continuous-optimization"
+      ],
+      "top_score": 16.7406,
+      "version": "before"
+    },
+    {
+      "capability": "claim_gate",
+      "expected_rank": 1,
+      "expected_score": 9.201957,
+      "expected_skill": "nexus-benchmark-continuous-optimization",
+      "fixture_id": "claim_gate:mixed",
+      "kind": "should_trigger",
+      "query": "請用 claim_gate 能力處理，重點是 claim gate claim gate claim verification public readiness，需要 runtime receipt 和 fail-closed gate。",
+      "top3": [
+        "nexus-benchmark-continuous-optimization",
+        "sf2-codeintel-route-fit-spec",
+        "sf2-external_productivity-route-fit-spec"
+      ],
+      "top_score": 9.201957,
+      "version": "before"
+    },
+    {
+      "capability": "claim_gate",
+      "expected_rank": 7,
+      "expected_score": 7.410198,
+      "expected_skill": "nexus-benchmark-continuous-optimization",
+      "fixture_id": "claim_gate:near_miss:artifact_gate",
+      "kind": "should_not_trigger",
+      "query": "This task needs artifact_gate: artifact gate artifact evidence acceptance verifier receipt. Select the skill for that neighboring capability.",
+      "top3": [
+        "sf2-codeintel-route-fit-spec",
+        "sf2-external_productivity-route-fit-spec",
+        "acceptance-evidence-failclosed"
+      ],
+      "top_score": 19.581149,
+      "version": "before"
+    },
+    {
+      "capability": "codeintel",
+      "expected_rank": 1,
+      "expected_score": 41.649826,
+      "expected_skill": "sf2-codeintel-route-fit-spec",
+      "fixture_id": "codeintel:obvious",
+      "kind": "should_trigger",
+      "query": "Nexus route capability codeintel: handle a task requiring codeintel code scan impact symbol dependency graph repository context with receipt-backed evidence.",
+      "top3": [
+        "sf2-codeintel-route-fit-spec",
+        "sf2-external_productivity-route-fit-spec",
+        "nexus-goal-closure-executor"
+      ],
+      "top_score": 41.649826,
+      "version": "before"
+    },
+    {
+      "capability": "codeintel",
+      "expected_rank": 1,
+      "expected_score": 41.134946,
+      "expected_skill": "sf2-codeintel-route-fit-spec",
+      "fixture_id": "codeintel:paraphrase",
+      "kind": "should_trigger",
+      "query": "Choose the best skill for codeintel code scan impact symbol dependency graph repository context; return selected, used, evidence, gate, and outcome details.",
+      "top3": [
+        "sf2-codeintel-route-fit-spec",
+        "sf2-external_productivity-route-fit-spec",
+        "nexus-goal-closure-executor"
+      ],
+      "top_score": 41.134946,
+      "version": "before"
+    },
+    {
+      "capability": "codeintel",
+      "expected_rank": 1,
+      "expected_score": 32.785373,
+      "expected_skill": "sf2-codeintel-route-fit-spec",
+      "fixture_id": "codeintel:mixed",
+      "kind": "should_trigger",
+      "query": "請用 codeintel 能力處理，重點是 codeintel code scan impact symbol dependency graph repository context，需要 runtime receipt 和 fail-closed gate。",
+      "top3": [
+        "sf2-codeintel-route-fit-spec",
+        "sf2-external_productivity-route-fit-spec",
+        "acceptance-evidence-failclosed"
+      ],
+      "top_score": 32.785373,
+      "version": "before"
+    },
+    {
+      "capability": "ddtree",
+      "expected_rank": 5,
+      "expected_score": 4.618438,
+      "expected_skill": "nexus-root-cause-probe",
+      "fixture_id": "ddtree:obvious",
+      "kind": "should_trigger",
+      "query": "Nexus route capability ddtree: handle a task requiring ddtree decision tree candidate pruning diagnosis acceleration with receipt-backed evidence.",
+      "top3": [
+        "sf2-codeintel-route-fit-spec",
+        "sf2-external_productivity-route-fit-spec",
+        "nexus-goal-closure-executor"
+      ],
+      "top_score": 17.25548,
+      "version": "before"
+    },
+    {
+      "capability": "ddtree",
+      "expected_rank": 18,
+      "expected_score": 4.618438,
+      "expected_skill": "nexus-root-cause-probe",
+      "fixture_id": "ddtree:paraphrase",
+      "kind": "should_trigger",
+      "query": "Choose the best skill for ddtree decision tree candidate pruning diagnosis acceleration; return selected, used, evidence, gate, and outcome details.",
+      "top3": [
+        "sf2-codeintel-route-fit-spec",
+        "sf2-external_productivity-route-fit-spec",
+        "diagnose"
+      ],
+      "top_score": 16.7406,
+      "version": "before"
+    },
+    {
+      "capability": "ddtree",
+      "expected_rank": 7,
+      "expected_score": 2.232144,
+      "expected_skill": "nexus-root-cause-probe",
+      "fixture_id": "ddtree:mixed",
+      "kind": "should_trigger",
+      "query": "請用 ddtree 能力處理，重點是 ddtree decision tree candidate pruning diagnosis acceleration，需要 runtime receipt 和 fail-closed gate。",
+      "top3": [
+        "sf2-codeintel-route-fit-spec",
+        "sf2-external_productivity-route-fit-spec",
+        "diagnose"
+      ],
+      "top_score": 8.391027,
+      "version": "before"
+    },
+    {
+      "capability": "direct_master_loop",
+      "expected_rank": 7,
+      "expected_score": 4.890372,
+      "expected_skill": "sf2-direct_master_loop-route-fit-spec",
+      "fixture_id": "direct_master_loop:obvious",
+      "kind": "should_trigger",
+      "query": "Nexus route capability direct_master_loop: handle a task requiring direct master loop direct master loop execution content rewrite task control with receipt-backed evidence.",
+      "top3": [
+        "sf2-codeintel-route-fit-spec",
+        "sf2-external_productivity-route-fit-spec",
+        "create-plan"
+      ],
+      "top_score": 17.25548,
+      "version": "before"
+    },
+    {
+      "capability": "direct_master_loop",
+      "expected_rank": 12,
+      "expected_score": 3.037988,
+      "expected_skill": "sf2-direct_master_loop-route-fit-spec",
+      "fixture_id": "direct_master_loop:paraphrase",
+      "kind": "should_trigger",
+      "query": "Choose the best skill for direct master loop direct master loop execution content rewrite task control; return selected, used, evidence, gate, and outcome details.",
+      "top3": [
+        "sf2-codeintel-route-fit-spec",
+        "sf2-external_productivity-route-fit-spec",
+        "create-plan"
+      ],
+      "top_score": 19.309216,
+      "version": "before"
+    },
+    {
+      "capability": "direct_master_loop",
+      "expected_rank": 5,
+      "expected_score": 3.484907,
+      "expected_skill": "sf2-direct_master_loop-route-fit-spec",
+      "fixture_id": "direct_master_loop:mixed",
+      "kind": "should_trigger",
+      "query": "請用 direct_master_loop 能力處理，重點是 direct master loop direct master loop execution content rewrite task control，需要 runtime receipt 和 fail-closed gate。",
+      "top3": [
+        "sf2-codeintel-route-fit-spec",
+        "sf2-external_productivity-route-fit-spec",
+        "create-plan"
+      ],
+      "top_score": 10.959643,
+      "version": "before"
+    },
+    {
+      "capability": "drone",
+      "expected_rank": 21,
+      "expected_score": 0,
+      "expected_skill": "diagnose",
+      "fixture_id": "drone:obvious",
+      "kind": "should_trigger",
+      "query": "Nexus route capability drone: handle a task requiring drone drone delegated worker tactical execution status with receipt-backed evidence.",
+      "top3": [
+        "sf2-codeintel-route-fit-spec",
+        "sf2-external_productivity-route-fit-spec",
+        "create-plan"
+      ],
+      "top_score": 17.25548,
+      "version": "before"
+    },
+    {
+      "capability": "drone",
+      "expected_rank": 8,
+      "expected_score": 3.576984,
+      "expected_skill": "diagnose",
+      "fixture_id": "drone:paraphrase",
+      "kind": "should_trigger",
+      "query": "Choose the best skill for drone drone delegated worker tactical execution status; return selected, used, evidence, gate, and outcome details.",
+      "top3": [
+        "sf2-codeintel-route-fit-spec",
+        "sf2-external_productivity-route-fit-spec",
+        "acceptance-evidence-failclosed"
+      ],
+      "top_score": 16.7406,
+      "version": "before"
+    },
+    {
+      "capability": "drone",
+      "expected_rank": 8,
+      "expected_score": 0,
+      "expected_skill": "diagnose",
+      "fixture_id": "drone:mixed",
+      "kind": "should_trigger",
+      "query": "請用 drone 能力處理，重點是 drone drone delegated worker tactical execution status，需要 runtime receipt 和 fail-closed gate。",
+      "top3": [
+        "sf2-codeintel-route-fit-spec",
+        "sf2-external_productivity-route-fit-spec",
+        "acceptance-evidence-failclosed"
+      ],
+      "top_score": 8.391027,
+      "version": "before"
+    },
+    {
+      "capability": "external_productivity",
+      "expected_rank": 1,
+      "expected_score": 41.649826,
+      "expected_skill": "sf2-external_productivity-route-fit-spec",
+      "fixture_id": "external_productivity:obvious",
+      "kind": "should_trigger",
+      "query": "Nexus route capability external_productivity: handle a task requiring external productivity gmail calendar sheets docs slides airtable connector with receipt-backed evidence.",
+      "top3": [
+        "sf2-external_productivity-route-fit-spec",
+        "sf2-codeintel-route-fit-spec",
+        "nexus-goal-closure-executor"
+      ],
+      "top_score": 41.649826,
+      "version": "before"
+    },
+    {
+      "capability": "external_productivity",
+      "expected_rank": 1,
+      "expected_score": 37.65004,
+      "expected_skill": "sf2-external_productivity-route-fit-spec",
+      "fixture_id": "external_productivity:paraphrase",
+      "kind": "should_trigger",
+      "query": "Choose the best skill for external productivity gmail calendar sheets docs slides airtable connector; return selected, used, evidence, gate, and outcome details.",
+      "top3": [
+        "sf2-external_productivity-route-fit-spec",
+        "sf2-codeintel-route-fit-spec",
+        "nexus-goal-closure-executor"
+      ],
+      "top_score": 37.65004,
+      "version": "before"
+    },
+    {
+      "capability": "external_productivity",
+      "expected_rank": 1,
+      "expected_score": 32.785373,
+      "expected_skill": "sf2-external_productivity-route-fit-spec",
+      "fixture_id": "external_productivity:mixed",
+      "kind": "should_trigger",
+      "query": "請用 external_productivity 能力處理，重點是 external productivity gmail calendar sheets docs slides airtable connector，需要 runtime receipt 和 fail-closed gate。",
+      "top3": [
+        "sf2-external_productivity-route-fit-spec",
+        "sf2-codeintel-route-fit-spec",
+        "acceptance-evidence-failclosed"
+      ],
+      "top_score": 32.785373,
+      "version": "before"
+    },
+    {
+      "capability": "file_lock_security_gate",
+      "expected_rank": 7,
+      "expected_score": 4.890372,
+      "expected_skill": "sf2-file_lock_security_gate-route-fit-spec",
+      "fixture_id": "file_lock_security_gate:obvious",
+      "kind": "should_trigger",
+      "query": "Nexus route capability file_lock_security_gate: handle a task requiring file lock security gate file lock security gate worktree permission sandbox with receipt-backed evidence.",
+      "top3": [
+        "sf2-codeintel-route-fit-spec",
+        "sf2-external_productivity-route-fit-spec",
+        "nexus-goal-closure-executor"
+      ],
+      "top_score": 19.487623,
+      "version": "before"
+    },
+    {
+      "capability": "file_lock_security_gate",
+      "expected_rank": 12,
+      "expected_score": 3.037988,
+      "expected_skill": "sf2-file_lock_security_gate-route-fit-spec",
+      "fixture_id": "file_lock_security_gate:paraphrase",
+      "kind": "should_trigger",
+      "query": "Choose the best skill for file lock security gate file lock security gate worktree permission sandbox; return selected, used, evidence, gate, and outcome details.",
+      "top3": [
+        "sf2-codeintel-route-fit-spec",
+        "sf2-external_productivity-route-fit-spec",
+        "nexus-goal-closure-executor"
+      ],
+      "top_score": 16.7406,
+      "version": "before"
+    },
+    {
+      "capability": "file_lock_security_gate",
+      "expected_rank": 3,
+      "expected_score": 3.484907,
+      "expected_skill": "sf2-file_lock_security_gate-route-fit-spec",
+      "fixture_id": "file_lock_security_gate:mixed",
+      "kind": "should_trigger",
+      "query": "請用 file_lock_security_gate 能力處理，重點是 file lock security gate file lock security gate worktree permission sandbox，需要 runtime receipt 和 fail-closed gate。",
+      "top3": [
+        "sf2-codeintel-route-fit-spec",
+        "sf2-external_productivity-route-fit-spec",
+        "sf2-file_lock_security_gate-route-fit-spec"
+      ],
+      "top_score": 8.391027,
+      "version": "before"
+    },
+    {
+      "capability": "forecast_pregate",
+      "expected_rank": 1,
+      "expected_score": 27.269815,
+      "expected_skill": "create-plan",
+      "fixture_id": "forecast_pregate:obvious",
+      "kind": "should_trigger",
+      "query": "Nexus route capability forecast_pregate: handle a task requiring forecast pregate forecast pregate plan quality risk prediction with receipt-backed evidence.",
+      "top3": [
+        "create-plan",
+        "sf2-codeintel-route-fit-spec",
+        "sf2-external_productivity-route-fit-spec"
+      ],
+      "top_score": 27.269815,
+      "version": "before"
+    },
+    {
+      "capability": "forecast_pregate",
+      "expected_rank": 1,
+      "expected_score": 20.750203,
+      "expected_skill": "create-plan",
+      "fixture_id": "forecast_pregate:paraphrase",
+      "kind": "should_trigger",
+      "query": "Choose the best skill for forecast pregate forecast pregate plan quality risk prediction; return selected, used, evidence, gate, and outcome details.",
+      "top3": [
+        "create-plan",
+        "sf2-codeintel-route-fit-spec",
+        "sf2-external_productivity-route-fit-spec"
+      ],
+      "top_score": 20.750203,
+      "version": "before"
+    },
+    {
+      "capability": "forecast_pregate",
+      "expected_rank": 1,
+      "expected_score": 20.503975,
+      "expected_skill": "create-plan",
+      "fixture_id": "forecast_pregate:mixed",
+      "kind": "should_trigger",
+      "query": "請用 forecast_pregate 能力處理，重點是 forecast pregate forecast pregate plan quality risk prediction，需要 runtime receipt 和 fail-closed gate。",
+      "top3": [
+        "create-plan",
+        "sf2-codeintel-route-fit-spec",
+        "sf2-external_productivity-route-fit-spec"
+      ],
+      "top_score": 20.503975,
+      "version": "before"
+    },
+    {
+      "capability": "governance_and_trust",
+      "expected_rank": 4,
+      "expected_score": 7.276666,
+      "expected_skill": "acceptance-evidence-failclosed",
+      "fixture_id": "governance_and_trust:obvious",
+      "kind": "should_trigger",
+      "query": "Nexus route capability governance_and_trust: handle a task requiring governance and trust governance trust mismatch evidence fail closed with receipt-backed evidence.",
+      "top3": [
+        "sf2-codeintel-route-fit-spec",
+        "sf2-external_productivity-route-fit-spec",
+        "nexus-goal-closure-executor"
+      ],
+      "top_score": 19.487623,
+      "version": "before"
+    },
+    {
+      "capability": "governance_and_trust",
+      "expected_rank": 3,
+      "expected_score": 8.103345,
+      "expected_skill": "acceptance-evidence-failclosed",
+      "fixture_id": "governance_and_trust:paraphrase",
+      "kind": "should_trigger",
+      "query": "Choose the best skill for governance and trust governance trust mismatch evidence fail closed; return selected, used, evidence, gate, and outcome details.",
+      "top3": [
+        "sf2-codeintel-route-fit-spec",
+        "sf2-external_productivity-route-fit-spec",
+        "acceptance-evidence-failclosed"
+      ],
+      "top_score": 16.7406,
+      "version": "before"
+    },
+    {
+      "capability": "governance_and_trust",
+      "expected_rank": 3,
+      "expected_score": 8.103345,
+      "expected_skill": "acceptance-evidence-failclosed",
+      "fixture_id": "governance_and_trust:mixed",
+      "kind": "should_trigger",
+      "query": "請用 governance_and_trust 能力處理，重點是 governance and trust governance trust mismatch evidence fail closed，需要 runtime receipt 和 fail-closed gate。",
+      "top3": [
+        "sf2-codeintel-route-fit-spec",
+        "sf2-external_productivity-route-fit-spec",
+        "acceptance-evidence-failclosed"
+      ],
+      "top_score": 13.009465,
+      "version": "before"
+    },
+    {
+      "capability": "governance_and_trust",
+      "expected_rank": 4,
+      "expected_score": 9.914275,
+      "expected_skill": "acceptance-evidence-failclosed",
+      "fixture_id": "governance_and_trust:near_miss:policy_capability_gate",
+      "kind": "should_not_trigger",
+      "query": "This task needs policy_capability_gate: policy capability gate policy capability gate route governance permission. Select the skill for that neighboring capability.",
+      "top3": [
+        "sf2-codeintel-route-fit-spec",
+        "sf2-external_productivity-route-fit-spec",
+        "create-plan"
+      ],
+      "top_score": 15.520878,
+      "version": "before"
+    },
+    {
+      "capability": "hyper_sprint",
+      "expected_rank": 5,
+      "expected_score": 6.583519,
+      "expected_skill": "sf2-hyper_sprint-route-fit-spec",
+      "fixture_id": "hyper_sprint:obvious",
+      "kind": "should_trigger",
+      "query": "Nexus route capability hyper_sprint: handle a task requiring hyper sprint hyper sprint fast multi candidate local repair with receipt-backed evidence.",
+      "top3": [
+        "sf2-codeintel-route-fit-spec",
+        "sf2-external_productivity-route-fit-spec",
+        "nexus-goal-closure-executor"
+      ],
+      "top_score": 17.25548,
+      "version": "before"
+    },
+    {
+      "capability": "hyper_sprint",
+      "expected_rank": 9,
+      "expected_score": 4.731135,
+      "expected_skill": "sf2-hyper_sprint-route-fit-spec",
+      "fixture_id": "hyper_sprint:paraphrase",
+      "kind": "should_trigger",
+      "query": "Choose the best skill for hyper sprint hyper sprint fast multi candidate local repair; return selected, used, evidence, gate, and outcome details.",
+      "top3": [
+        "sf2-codeintel-route-fit-spec",
+        "sf2-external_productivity-route-fit-spec",
+        "nexus-goal-closure-executor"
+      ],
+      "top_score": 16.7406,
+      "version": "before"
+    },
+    {
+      "capability": "hyper_sprint",
+      "expected_rank": 3,
+      "expected_score": 5.178054,
+      "expected_skill": "sf2-hyper_sprint-route-fit-spec",
+      "fixture_id": "hyper_sprint:mixed",
+      "kind": "should_trigger",
+      "query": "請用 hyper_sprint 能力處理，重點是 hyper sprint hyper sprint fast multi candidate local repair，需要 runtime receipt 和 fail-closed gate。",
+      "top3": [
+        "sf2-codeintel-route-fit-spec",
+        "sf2-external_productivity-route-fit-spec",
+        "sf2-hyper_sprint-route-fit-spec"
+      ],
+      "top_score": 8.391027,
+      "version": "before"
+    },
+    {
+      "capability": "hyper_sprint",
+      "expected_rank": 12,
+      "expected_score": 3.037988,
+      "expected_skill": "sf2-hyper_sprint-route-fit-spec",
+      "fixture_id": "hyper_sprint:near_miss:nightshift",
+      "kind": "should_not_trigger",
+      "query": "This task needs nightshift: nightshift nightshift long running recovery delayed repair. Select the skill for that neighboring capability.",
+      "top3": [
+        "sf2-codeintel-route-fit-spec",
+        "sf2-external_productivity-route-fit-spec",
+        "nexus-goal-closure-executor"
+      ],
+      "top_score": 11.88327,
+      "version": "before"
+    },
+    {
+      "capability": "lancedb",
+      "expected_rank": 9,
+      "expected_score": 3.079442,
+      "expected_skill": "research-source-validation-auditor",
+      "fixture_id": "lancedb:obvious",
+      "kind": "should_trigger",
+      "query": "Nexus route capability lancedb: handle a task requiring lancedb LanceDB retrieval vector source validation context with receipt-backed evidence.",
+      "top3": [
+        "sf2-codeintel-route-fit-spec",
+        "sf2-external_productivity-route-fit-spec",
+        "nexus-goal-closure-executor"
+      ],
+      "top_score": 20.740386,
+      "version": "before"
+    },
+    {
+      "capability": "lancedb",
+      "expected_rank": 10,
+      "expected_score": 3.079442,
+      "expected_skill": "research-source-validation-auditor",
+      "fixture_id": "lancedb:paraphrase",
+      "kind": "should_trigger",
+      "query": "Choose the best skill for lancedb LanceDB retrieval vector source validation context; return selected, used, evidence, gate, and outcome details.",
+      "top3": [
+        "sf2-codeintel-route-fit-spec",
+        "sf2-external_productivity-route-fit-spec",
+        "nexus-goal-closure-executor"
+      ],
+      "top_score": 20.225506,
+      "version": "before"
+    },
+    {
+      "capability": "lancedb",
+      "expected_rank": 5,
+      "expected_score": 3.079442,
+      "expected_skill": "research-source-validation-auditor",
+      "fixture_id": "lancedb:mixed",
+      "kind": "should_trigger",
+      "query": "請用 lancedb 能力處理，重點是 lancedb LanceDB retrieval vector source validation context，需要 runtime receipt 和 fail-closed gate。",
+      "top3": [
+        "sf2-codeintel-route-fit-spec",
+        "sf2-external_productivity-route-fit-spec",
+        "nexus-goal-closure-executor"
+      ],
+      "top_score": 11.875933,
+      "version": "before"
+    },
+    {
+      "capability": "lancedb",
+      "expected_rank": 20,
+      "expected_score": 2.791759,
+      "expected_skill": "research-source-validation-auditor",
+      "fixture_id": "lancedb:near_miss:memory",
+      "kind": "should_not_trigger",
+      "query": "This task needs memory: memory memory long term findings retrieval prior fix. Select the skill for that neighboring capability.",
+      "top3": [
+        "nexus-goal-closure-executor",
+        "sf2-codeintel-route-fit-spec",
+        "sf2-external_productivity-route-fit-spec"
+      ],
+      "top_score": 14.716483,
+      "version": "before"
+    },
+    {
+      "capability": "learn_ask",
+      "expected_rank": 6,
+      "expected_score": 5.311585,
+      "expected_skill": "nexus-capability-upgrade",
+      "fixture_id": "learn_ask:obvious",
+      "kind": "should_trigger",
+      "query": "Nexus route capability learn_ask: handle a task requiring learn ask learn ask capability upgrade research ingest report with receipt-backed evidence.",
+      "top3": [
+        "sf2-codeintel-route-fit-spec",
+        "sf2-external_productivity-route-fit-spec",
+        "nexus-goal-closure-executor"
+      ],
+      "top_score": 17.25548,
+      "version": "before"
+    },
+    {
+      "capability": "learn_ask",
+      "expected_rank": 7,
+      "expected_score": 5.311585,
+      "expected_skill": "nexus-capability-upgrade",
+      "fixture_id": "learn_ask:paraphrase",
+      "kind": "should_trigger",
+      "query": "Choose the best skill for learn ask learn ask capability upgrade research ingest report; return selected, used, evidence, gate, and outcome details.",
+      "top3": [
+        "sf2-codeintel-route-fit-spec",
+        "sf2-external_productivity-route-fit-spec",
+        "nexus-root-cause-probe"
+      ],
+      "top_score": 19.532359,
+      "version": "before"
+    },
+    {
+      "capability": "learn_ask",
+      "expected_rank": 3,
+      "expected_score": 5.311585,
+      "expected_skill": "nexus-capability-upgrade",
+      "fixture_id": "learn_ask:mixed",
+      "kind": "should_trigger",
+      "query": "請用 learn_ask 能力處理，重點是 learn ask learn ask capability upgrade research ingest report，需要 runtime receipt 和 fail-closed gate。",
+      "top3": [
+        "sf2-codeintel-route-fit-spec",
+        "sf2-external_productivity-route-fit-spec",
+        "nexus-capability-upgrade"
+      ],
+      "top_score": 11.182786,
+      "version": "before"
+    },
+    {
+      "capability": "learning_closure",
+      "expected_rank": 5,
+      "expected_score": 4.890372,
+      "expected_skill": "sf2-learning_closure-route-fit-spec",
+      "fixture_id": "learning_closure:obvious",
+      "kind": "should_trigger",
+      "query": "Nexus route capability learning_closure: handle a task requiring learning closure learning closure lesson writeback SLO KPI matrix with receipt-backed evidence.",
+      "top3": [
+        "sf2-codeintel-route-fit-spec",
+        "sf2-external_productivity-route-fit-spec",
+        "nexus-goal-closure-executor"
+      ],
+      "top_score": 17.25548,
+      "version": "before"
+    },
+    {
+      "capability": "learning_closure",
+      "expected_rank": 14,
+      "expected_score": 3.037988,
+      "expected_skill": "sf2-learning_closure-route-fit-spec",
+      "fixture_id": "learning_closure:paraphrase",
+      "kind": "should_trigger",
+      "query": "Choose the best skill for learning closure learning closure lesson writeback SLO KPI matrix; return selected, used, evidence, gate, and outcome details.",
+      "top3": [
+        "sf2-codeintel-route-fit-spec",
+        "sf2-external_productivity-route-fit-spec",
+        "nexus-goal-closure-executor"
+      ],
+      "top_score": 16.7406,
+      "version": "before"
+    },
+    {
+      "capability": "learning_closure",
+      "expected_rank": 4,
+      "expected_score": 3.484907,
+      "expected_skill": "sf2-learning_closure-route-fit-spec",
+      "fixture_id": "learning_closure:mixed",
+      "kind": "should_trigger",
+      "query": "請用 learning_closure 能力處理，重點是 learning closure learning closure lesson writeback SLO KPI matrix，需要 runtime receipt 和 fail-closed gate。",
+      "top3": [
+        "sf2-codeintel-route-fit-spec",
+        "sf2-external_productivity-route-fit-spec",
+        "nexus-goal-closure-executor"
+      ],
+      "top_score": 8.391027,
+      "version": "before"
+    },
+    {
+      "capability": "memory",
+      "expected_rank": 8,
+      "expected_score": 3.079442,
+      "expected_skill": "diagnose",
+      "fixture_id": "memory:obvious",
+      "kind": "should_trigger",
+      "query": "Nexus route capability memory: handle a task requiring memory memory long term findings retrieval prior fix with receipt-backed evidence.",
+      "top3": [
+        "sf2-codeintel-route-fit-spec",
+        "sf2-external_productivity-route-fit-spec",
+        "nexus-goal-closure-executor"
+      ],
+      "top_score": 17.25548,
+      "version": "before"
+    },
+    {
+      "capability": "memory",
+      "expected_rank": 5,
+      "expected_score": 6.656426,
+      "expected_skill": "diagnose",
+      "fixture_id": "memory:paraphrase",
+      "kind": "should_trigger",
+      "query": "Choose the best skill for memory memory long term findings retrieval prior fix; return selected, used, evidence, gate, and outcome details.",
+      "top3": [
+        "sf2-codeintel-route-fit-spec",
+        "sf2-external_productivity-route-fit-spec",
+        "nexus-goal-closure-executor"
+      ],
+      "top_score": 16.7406,
+      "version": "before"
+    },
+    {
+      "capability": "memory",
+      "expected_rank": 4,
+      "expected_score": 3.079442,
+      "expected_skill": "diagnose",
+      "fixture_id": "memory:mixed",
+      "kind": "should_trigger",
+      "query": "請用 memory 能力處理，重點是 memory memory long term findings retrieval prior fix，需要 runtime receipt 和 fail-closed gate。",
+      "top3": [
+        "sf2-codeintel-route-fit-spec",
+        "sf2-external_productivity-route-fit-spec",
+        "nexus-goal-closure-executor"
+      ],
+      "top_score": 8.391027,
+      "version": "before"
+    },
+    {
+      "capability": "memory",
+      "expected_rank": 7,
+      "expected_score": 4.829747,
+      "expected_skill": "diagnose",
+      "fixture_id": "memory:near_miss:lancedb",
+      "kind": "should_not_trigger",
+      "query": "This task needs lancedb: lancedb LanceDB retrieval vector source validation context. Select the skill for that neighboring capability.",
+      "top3": [
+        "sf2-codeintel-route-fit-spec",
+        "sf2-external_productivity-route-fit-spec",
+        "nexus-goal-closure-executor"
+      ],
+      "top_score": 15.368176,
+      "version": "before"
+    },
+    {
+      "capability": "mempalace",
+      "expected_rank": 5,
+      "expected_score": 4.890372,
+      "expected_skill": "sf2-mempalace-route-fit-spec",
+      "fixture_id": "mempalace:obvious",
+      "kind": "should_trigger",
+      "query": "Nexus route capability mempalace: handle a task requiring mempalace MemPalace ethical boundary policy guardrail forbidden action with receipt-backed evidence.",
+      "top3": [
+        "sf2-codeintel-route-fit-spec",
+        "sf2-external_productivity-route-fit-spec",
+        "nexus-goal-closure-executor"
+      ],
+      "top_score": 17.25548,
+      "version": "before"
+    },
+    {
+      "capability": "mempalace",
+      "expected_rank": 5,
+      "expected_score": 6.522894,
+      "expected_skill": "sf2-mempalace-route-fit-spec",
+      "fixture_id": "mempalace:paraphrase",
+      "kind": "should_trigger",
+      "query": "Choose the best skill for mempalace MemPalace ethical boundary policy guardrail forbidden action; return selected, used, evidence, gate, and outcome details.",
+      "top3": [
+        "sf2-codeintel-route-fit-spec",
+        "sf2-external_productivity-route-fit-spec",
+        "nexus-goal-closure-executor"
+      ],
+      "top_score": 16.7406,
+      "version": "before"
+    },
+    {
+      "capability": "mempalace",
+      "expected_rank": 3,
+      "expected_score": 3.484907,
+      "expected_skill": "sf2-mempalace-route-fit-spec",
+      "fixture_id": "mempalace:mixed",
+      "kind": "should_trigger",
+      "query": "請用 mempalace 能力處理，重點是 mempalace MemPalace ethical boundary policy guardrail forbidden action，需要 runtime receipt 和 fail-closed gate。",
+      "top3": [
+        "sf2-codeintel-route-fit-spec",
+        "sf2-external_productivity-route-fit-spec",
+        "sf2-mempalace-route-fit-spec"
+      ],
+      "top_score": 8.391027,
+      "version": "before"
+    },
+    {
+      "capability": "metabolism_resume",
+      "expected_rank": 1,
+      "expected_score": 20.433533,
+      "expected_skill": "nexus-goal-closure-executor",
+      "fixture_id": "metabolism_resume:obvious",
+      "kind": "should_trigger",
+      "query": "Nexus route capability metabolism_resume: handle a task requiring metabolism resume metabolism resume long goal closure continuation with receipt-backed evidence.",
+      "top3": [
+        "nexus-goal-closure-executor",
+        "sf2-codeintel-route-fit-spec",
+        "sf2-external_productivity-route-fit-spec"
+      ],
+      "top_score": 20.433533,
+      "version": "before"
+    },
+    {
+      "capability": "metabolism_resume",
+      "expected_rank": 1,
+      "expected_score": 17.459452,
+      "expected_skill": "nexus-goal-closure-executor",
+      "fixture_id": "metabolism_resume:paraphrase",
+      "kind": "should_trigger",
+      "query": "Choose the best skill for metabolism resume metabolism resume long goal closure continuation; return selected, used, evidence, gate, and outcome details.",
+      "top3": [
+        "nexus-goal-closure-executor",
+        "sf2-codeintel-route-fit-spec",
+        "sf2-external_productivity-route-fit-spec"
+      ],
+      "top_score": 17.459452,
+      "version": "before"
+    },
+    {
+      "capability": "metabolism_resume",
+      "expected_rank": 1,
+      "expected_score": 10.45472,
+      "expected_skill": "nexus-goal-closure-executor",
+      "fixture_id": "metabolism_resume:mixed",
+      "kind": "should_trigger",
+      "query": "請用 metabolism_resume 能力處理，重點是 metabolism resume metabolism resume long goal closure continuation，需要 runtime receipt 和 fail-closed gate。",
+      "top3": [
+        "nexus-goal-closure-executor",
+        "sf2-codeintel-route-fit-spec",
+        "sf2-external_productivity-route-fit-spec"
+      ],
+      "top_score": 10.45472,
+      "version": "before"
+    },
+    {
+      "capability": "nightshift",
+      "expected_rank": 5,
+      "expected_score": 4.890372,
+      "expected_skill": "sf2-nightshift-route-fit-spec",
+      "fixture_id": "nightshift:obvious",
+      "kind": "should_trigger",
+      "query": "Nexus route capability nightshift: handle a task requiring nightshift nightshift long running recovery delayed repair with receipt-backed evidence.",
+      "top3": [
+        "sf2-codeintel-route-fit-spec",
+        "sf2-external_productivity-route-fit-spec",
+        "nexus-goal-closure-executor"
+      ],
+      "top_score": 17.25548,
+      "version": "before"
+    },
+    {
+      "capability": "nightshift",
+      "expected_rank": 5,
+      "expected_score": 6.522894,
+      "expected_skill": "sf2-nightshift-route-fit-spec",
+      "fixture_id": "nightshift:paraphrase",
+      "kind": "should_trigger",
+      "query": "Choose the best skill for nightshift nightshift long running recovery delayed repair; return selected, used, evidence, gate, and outcome details.",
+      "top3": [
+        "sf2-codeintel-route-fit-spec",
+        "sf2-external_productivity-route-fit-spec",
+        "nexus-goal-closure-executor"
+      ],
+      "top_score": 16.7406,
+      "version": "before"
+    },
+    {
+      "capability": "nightshift",
+      "expected_rank": 4,
+      "expected_score": 3.484907,
+      "expected_skill": "sf2-nightshift-route-fit-spec",
+      "fixture_id": "nightshift:mixed",
+      "kind": "should_trigger",
+      "query": "請用 nightshift 能力處理，重點是 nightshift nightshift long running recovery delayed repair，需要 runtime receipt 和 fail-closed gate。",
+      "top3": [
+        "sf2-codeintel-route-fit-spec",
+        "sf2-external_productivity-route-fit-spec",
+        "nexus-goal-closure-executor"
+      ],
+      "top_score": 8.391027,
+      "version": "before"
+    },
+    {
+      "capability": "nightshift",
+      "expected_rank": 14,
+      "expected_score": 4.731135,
+      "expected_skill": "sf2-nightshift-route-fit-spec",
+      "fixture_id": "nightshift:near_miss:hyper_sprint",
+      "kind": "should_not_trigger",
+      "query": "This task needs hyper_sprint: hyper sprint hyper sprint fast multi candidate local repair. Select the skill for that neighboring capability.",
+      "top3": [
+        "sf2-codeintel-route-fit-spec",
+        "sf2-external_productivity-route-fit-spec",
+        "create-plan"
+      ],
+      "top_score": 11.88327,
+      "version": "before"
+    },
+    {
+      "capability": "policy_capability_gate",
+      "expected_rank": 5,
+      "expected_score": 6.850582,
+      "expected_skill": "nexus-root-cause-probe",
+      "fixture_id": "policy_capability_gate:obvious",
+      "kind": "should_trigger",
+      "query": "Nexus route capability policy_capability_gate: handle a task requiring policy capability gate policy capability gate route governance permission with receipt-backed evidence.",
+      "top3": [
+        "sf2-codeintel-route-fit-spec",
+        "sf2-external_productivity-route-fit-spec",
+        "nexus-goal-closure-executor"
+      ],
+      "top_score": 19.487623,
+      "version": "before"
+    },
+    {
+      "capability": "policy_capability_gate",
+      "expected_rank": 7,
+      "expected_score": 4.618438,
+      "expected_skill": "nexus-root-cause-probe",
+      "fixture_id": "policy_capability_gate:paraphrase",
+      "kind": "should_trigger",
+      "query": "Choose the best skill for policy capability gate policy capability gate route governance permission; return selected, used, evidence, gate, and outcome details.",
+      "top3": [
+        "sf2-codeintel-route-fit-spec",
+        "sf2-external_productivity-route-fit-spec",
+        "acceptance-evidence-failclosed"
+      ],
+      "top_score": 20.937824,
+      "version": "before"
+    },
+    {
+      "capability": "policy_capability_gate",
+      "expected_rank": 7,
+      "expected_score": 2.232144,
+      "expected_skill": "nexus-root-cause-probe",
+      "fixture_id": "policy_capability_gate:mixed",
+      "kind": "should_trigger",
+      "query": "請用 policy_capability_gate 能力處理，重點是 policy capability gate policy capability gate route governance permission，需要 runtime receipt 和 fail-closed gate。",
+      "top3": [
+        "sf2-codeintel-route-fit-spec",
+        "sf2-external_productivity-route-fit-spec",
+        "acceptance-evidence-failclosed"
+      ],
+      "top_score": 12.588251,
+      "version": "before"
+    },
+    {
+      "capability": "policy_capability_gate",
+      "expected_rank": 20,
+      "expected_score": 2.386294,
+      "expected_skill": "nexus-root-cause-probe",
+      "fixture_id": "policy_capability_gate:near_miss:governance_and_trust",
+      "kind": "should_not_trigger",
+      "query": "This task needs governance_and_trust: governance and trust governance trust mismatch evidence fail closed. Select the skill for that neighboring capability.",
+      "top3": [
+        "sf2-codeintel-route-fit-spec",
+        "sf2-external_productivity-route-fit-spec",
+        "nexus-goal-closure-executor"
+      ],
+      "top_score": 16.501708,
+      "version": "before"
+    },
+    {
+      "capability": "registry_skills_sync",
+      "expected_rank": 5,
+      "expected_score": 6.583519,
+      "expected_skill": "sf2-registry_skills_sync-route-fit-spec",
+      "fixture_id": "registry_skills_sync:obvious",
+      "kind": "should_trigger",
+      "query": "Nexus route capability registry_skills_sync: handle a task requiring registry skills sync skill registry catalog sync plugin source refresh with receipt-backed evidence.",
+      "top3": [
+        "sf2-codeintel-route-fit-spec",
+        "sf2-external_productivity-route-fit-spec",
+        "nexus-goal-closure-executor"
+      ],
+      "top_score": 17.25548,
+      "version": "before"
+    },
+    {
+      "capability": "registry_skills_sync",
+      "expected_rank": 19,
+      "expected_score": 3.037988,
+      "expected_skill": "sf2-registry_skills_sync-route-fit-spec",
+      "fixture_id": "registry_skills_sync:paraphrase",
+      "kind": "should_trigger",
+      "query": "Choose the best skill for registry skills sync skill registry catalog sync plugin source refresh; return selected, used, evidence, gate, and outcome details.",
+      "top3": [
+        "sf2-codeintel-route-fit-spec",
+        "sf2-external_productivity-route-fit-spec",
+        "nexus-goal-closure-executor"
+      ],
+      "top_score": 16.7406,
+      "version": "before"
+    },
+    {
+      "capability": "registry_skills_sync",
+      "expected_rank": 3,
+      "expected_score": 5.178054,
+      "expected_skill": "sf2-registry_skills_sync-route-fit-spec",
+      "fixture_id": "registry_skills_sync:mixed",
+      "kind": "should_trigger",
+      "query": "請用 registry_skills_sync 能力處理，重點是 registry skills sync skill registry catalog sync plugin source refresh，需要 runtime receipt 和 fail-closed gate。",
+      "top3": [
+        "sf2-codeintel-route-fit-spec",
+        "sf2-external_productivity-route-fit-spec",
+        "sf2-registry_skills_sync-route-fit-spec"
+      ],
+      "top_score": 8.391027,
+      "version": "before"
+    },
+    {
+      "capability": "regression_guard",
+      "expected_rank": 3,
+      "expected_score": 17.019068,
+      "expected_skill": "diagnose",
+      "fixture_id": "regression_guard:obvious",
+      "kind": "should_trigger",
+      "query": "Nexus route capability regression_guard: handle a task requiring regression guard regression guard failing test reproduce bug with receipt-backed evidence.",
+      "top3": [
+        "sf2-codeintel-route-fit-spec",
+        "sf2-external_productivity-route-fit-spec",
+        "diagnose"
+      ],
+      "top_score": 17.25548,
+      "version": "before"
+    },
+    {
+      "capability": "regression_guard",
+      "expected_rank": 1,
+      "expected_score": 20.596052,
+      "expected_skill": "diagnose",
+      "fixture_id": "regression_guard:paraphrase",
+      "kind": "should_trigger",
+      "query": "Choose the best skill for regression guard regression guard failing test reproduce bug; return selected, used, evidence, gate, and outcome details.",
+      "top3": [
+        "diagnose",
+        "sf2-codeintel-route-fit-spec",
+        "sf2-external_productivity-route-fit-spec"
+      ],
+      "top_score": 20.596052,
+      "version": "before"
+    },
+    {
+      "capability": "regression_guard",
+      "expected_rank": 1,
+      "expected_score": 17.019068,
+      "expected_skill": "diagnose",
+      "fixture_id": "regression_guard:mixed",
+      "kind": "should_trigger",
+      "query": "請用 regression_guard 能力處理，重點是 regression guard regression guard failing test reproduce bug，需要 runtime receipt 和 fail-closed gate。",
+      "top3": [
+        "diagnose",
+        "sf2-codeintel-route-fit-spec",
+        "sf2-external_productivity-route-fit-spec"
+      ],
+      "top_score": 17.019068,
+      "version": "before"
+    },
+    {
+      "capability": "repair_loop",
+      "expected_rank": 1,
+      "expected_score": 22.602587,
+      "expected_skill": "tdd",
+      "fixture_id": "repair_loop:obvious",
+      "kind": "should_trigger",
+      "query": "Nexus route capability repair_loop: handle a task requiring repair loop repair loop TDD red green refactor behavior test with receipt-backed evidence.",
+      "top3": [
+        "tdd",
+        "sf2-codeintel-route-fit-spec",
+        "sf2-external_productivity-route-fit-spec"
+      ],
+      "top_score": 22.602587,
+      "version": "before"
+    },
+    {
+      "capability": "repair_loop",
+      "expected_rank": 1,
+      "expected_score": 20.462521,
+      "expected_skill": "tdd",
+      "fixture_id": "repair_loop:paraphrase",
+      "kind": "should_trigger",
+      "query": "Choose the best skill for repair loop repair loop TDD red green refactor behavior test; return selected, used, evidence, gate, and outcome details.",
+      "top3": [
+        "tdd",
+        "sf2-codeintel-route-fit-spec",
+        "sf2-external_productivity-route-fit-spec"
+      ],
+      "top_score": 20.462521,
+      "version": "before"
+    },
+    {
+      "capability": "repair_loop",
+      "expected_rank": 1,
+      "expected_score": 19.11768,
+      "expected_skill": "tdd",
+      "fixture_id": "repair_loop:mixed",
+      "kind": "should_trigger",
+      "query": "請用 repair_loop 能力處理，重點是 repair loop repair loop TDD red green refactor behavior test，需要 runtime receipt 和 fail-closed gate。",
+      "top3": [
+        "tdd",
+        "sf2-codeintel-route-fit-spec",
+        "sf2-external_productivity-route-fit-spec"
+      ],
+      "top_score": 19.11768,
+      "version": "before"
+    },
+    {
+      "capability": "repair_loop",
+      "expected_rank": 20,
+      "expected_score": 1.34484,
+      "expected_skill": "tdd",
+      "fixture_id": "repair_loop:near_miss:codeintel",
+      "kind": "should_not_trigger",
+      "query": "This task needs codeintel: codeintel code scan impact symbol dependency graph repository context. Select the skill for that neighboring capability.",
+      "top3": [
+        "sf2-codeintel-route-fit-spec",
+        "sf2-external_productivity-route-fit-spec",
+        "create-plan"
+      ],
+      "top_score": 36.277616,
+      "version": "before"
+    },
+    {
+      "capability": "research",
+      "expected_rank": 4,
+      "expected_score": 9.64379,
+      "expected_skill": "research-citation-chain-verifier",
+      "fixture_id": "research:obvious",
+      "kind": "should_trigger",
+      "query": "Nexus route capability research: handle a task requiring research research source citation claim source report with receipt-backed evidence.",
+      "top3": [
+        "sf2-codeintel-route-fit-spec",
+        "sf2-external_productivity-route-fit-spec",
+        "nexus-goal-closure-executor"
+      ],
+      "top_score": 17.25548,
+      "version": "before"
+    },
+    {
+      "capability": "research",
+      "expected_rank": 3,
+      "expected_score": 11.875933,
+      "expected_skill": "research-citation-chain-verifier",
+      "fixture_id": "research:paraphrase",
+      "kind": "should_trigger",
+      "query": "Choose the best skill for research research source citation claim source report; return selected, used, evidence, gate, and outcome details.",
+      "top3": [
+        "sf2-codeintel-route-fit-spec",
+        "sf2-external_productivity-route-fit-spec",
+        "research-citation-chain-verifier"
+      ],
+      "top_score": 16.7406,
+      "version": "before"
+    },
+    {
+      "capability": "research",
+      "expected_rank": 1,
+      "expected_score": 9.64379,
+      "expected_skill": "research-citation-chain-verifier",
+      "fixture_id": "research:mixed",
+      "kind": "should_trigger",
+      "query": "請用 research 能力處理，重點是 research research source citation claim source report，需要 runtime receipt 和 fail-closed gate。",
+      "top3": [
+        "research-citation-chain-verifier",
+        "sf2-codeintel-route-fit-spec",
+        "sf2-external_productivity-route-fit-spec"
+      ],
+      "top_score": 9.64379,
+      "version": "before"
+    },
+    {
+      "capability": "research_and_source_discipline",
+      "expected_rank": 4,
+      "expected_score": 11.875933,
+      "expected_skill": "research-citation-chain-verifier",
+      "fixture_id": "research_and_source_discipline:obvious",
+      "kind": "should_trigger",
+      "query": "Nexus route capability research_and_source_discipline: handle a task requiring research and source discipline source discipline citation chain validation evidence with receipt-backed evidence.",
+      "top3": [
+        "sf2-codeintel-route-fit-spec",
+        "sf2-external_productivity-route-fit-spec",
+        "nexus-goal-closure-executor"
+      ],
+      "top_score": 19.487623,
+      "version": "before"
+    },
+    {
+      "capability": "research_and_source_discipline",
+      "expected_rank": 3,
+      "expected_score": 11.875933,
+      "expected_skill": "research-citation-chain-verifier",
+      "fixture_id": "research_and_source_discipline:paraphrase",
+      "kind": "should_trigger",
+      "query": "Choose the best skill for research and source discipline source discipline citation chain validation evidence; return selected, used, evidence, gate, and outcome details.",
+      "top3": [
+        "sf2-codeintel-route-fit-spec",
+        "sf2-external_productivity-route-fit-spec",
+        "research-citation-chain-verifier"
+      ],
+      "top_score": 16.7406,
+      "version": "before"
+    },
+    {
+      "capability": "research_and_source_discipline",
+      "expected_rank": 3,
+      "expected_score": 11.875933,
+      "expected_skill": "research-citation-chain-verifier",
+      "fixture_id": "research_and_source_discipline:mixed",
+      "kind": "should_trigger",
+      "query": "請用 research_and_source_discipline 能力處理，重點是 research and source discipline source discipline citation chain validation evidence，需要 runtime receipt 和 fail-closed gate。",
+      "top3": [
+        "sf2-codeintel-route-fit-spec",
+        "sf2-external_productivity-route-fit-spec",
+        "research-citation-chain-verifier"
+      ],
+      "top_score": 13.009465,
+      "version": "before"
+    },
+    {
+      "capability": "research_control_plane",
+      "expected_rank": 8,
+      "expected_score": 3.079442,
+      "expected_skill": "research-citation-chain-verifier",
+      "fixture_id": "research_control_plane:obvious",
+      "kind": "should_trigger",
+      "query": "Nexus route capability research_control_plane: handle a task requiring research control plane research control plane ingest refresh converge questions with receipt-backed evidence.",
+      "top3": [
+        "sf2-codeintel-route-fit-spec",
+        "sf2-external_productivity-route-fit-spec",
+        "nexus-goal-closure-executor"
+      ],
+      "top_score": 17.25548,
+      "version": "before"
+    },
+    {
+      "capability": "research_control_plane",
+      "expected_rank": 5,
+      "expected_score": 5.311585,
+      "expected_skill": "research-citation-chain-verifier",
+      "fixture_id": "research_control_plane:paraphrase",
+      "kind": "should_trigger",
+      "query": "Choose the best skill for research control plane research control plane ingest refresh converge questions; return selected, used, evidence, gate, and outcome details.",
+      "top3": [
+        "sf2-codeintel-route-fit-spec",
+        "sf2-external_productivity-route-fit-spec",
+        "nexus-goal-closure-executor"
+      ],
+      "top_score": 16.7406,
+      "version": "before"
+    },
+    {
+      "capability": "research_control_plane",
+      "expected_rank": 3,
+      "expected_score": 3.079442,
+      "expected_skill": "research-citation-chain-verifier",
+      "fixture_id": "research_control_plane:mixed",
+      "kind": "should_trigger",
+      "query": "請用 research_control_plane 能力處理，重點是 research control plane research control plane ingest refresh converge questions，需要 runtime receipt 和 fail-closed gate。",
+      "top3": [
+        "sf2-codeintel-route-fit-spec",
+        "sf2-external_productivity-route-fit-spec",
+        "research-citation-chain-verifier"
+      ],
+      "top_score": 8.391027,
+      "version": "before"
+    },
+    {
+      "capability": "sandbox_replay",
+      "expected_rank": 5,
+      "expected_score": 4.890372,
+      "expected_skill": "sf2-sandbox_replay-route-fit-spec",
+      "fixture_id": "sandbox_replay:obvious",
+      "kind": "should_trigger",
+      "query": "Nexus route capability sandbox_replay: handle a task requiring sandbox replay sandbox replay isolation rerun execution trace with receipt-backed evidence.",
+      "top3": [
+        "sf2-codeintel-route-fit-spec",
+        "sf2-external_productivity-route-fit-spec",
+        "create-plan"
+      ],
+      "top_score": 17.25548,
+      "version": "before"
+    },
+    {
+      "capability": "sandbox_replay",
+      "expected_rank": 19,
+      "expected_score": 3.037988,
+      "expected_skill": "sf2-sandbox_replay-route-fit-spec",
+      "fixture_id": "sandbox_replay:paraphrase",
+      "kind": "should_trigger",
+      "query": "Choose the best skill for sandbox replay sandbox replay isolation rerun execution trace; return selected, used, evidence, gate, and outcome details.",
+      "top3": [
+        "sf2-codeintel-route-fit-spec",
+        "sf2-external_productivity-route-fit-spec",
+        "create-plan"
+      ],
+      "top_score": 16.7406,
+      "version": "before"
+    },
+    {
+      "capability": "sandbox_replay",
+      "expected_rank": 5,
+      "expected_score": 3.484907,
+      "expected_skill": "sf2-sandbox_replay-route-fit-spec",
+      "fixture_id": "sandbox_replay:mixed",
+      "kind": "should_trigger",
+      "query": "請用 sandbox_replay 能力處理，重點是 sandbox replay sandbox replay isolation rerun execution trace，需要 runtime receipt 和 fail-closed gate。",
+      "top3": [
+        "sf2-codeintel-route-fit-spec",
+        "sf2-external_productivity-route-fit-spec",
+        "create-plan"
+      ],
+      "top_score": 8.391027,
+      "version": "before"
+    },
+    {
+      "capability": "sandbox_replay",
+      "expected_rank": 18,
+      "expected_score": 3.037988,
+      "expected_skill": "sf2-sandbox_replay-route-fit-spec",
+      "fixture_id": "sandbox_replay:near_miss:delivery_acceptance_gate",
+      "kind": "should_not_trigger",
+      "query": "This task needs delivery_acceptance_gate: delivery acceptance gate. Select the skill for that neighboring capability.",
+      "top3": [
+        "sf2-codeintel-route-fit-spec",
+        "sf2-external_productivity-route-fit-spec",
+        "nexus-benchmark-continuous-optimization"
+      ],
+      "top_score": 14.115413,
+      "version": "before"
+    },
+    {
+      "capability": "swarm_multi_agent",
+      "expected_rank": 6,
+      "expected_score": 4.890372,
+      "expected_skill": "sf2-swarm_multi_agent-route-fit-spec",
+      "fixture_id": "swarm_multi_agent:obvious",
+      "kind": "should_trigger",
+      "query": "Nexus route capability swarm_multi_agent: handle a task requiring swarm multi agent swarm multi agent worktree submit verify integrate with receipt-backed evidence.",
+      "top3": [
+        "sf2-codeintel-route-fit-spec",
+        "sf2-external_productivity-route-fit-spec",
+        "nexus-goal-closure-executor"
+      ],
+      "top_score": 17.25548,
+      "version": "before"
+    },
+    {
+      "capability": "swarm_multi_agent",
+      "expected_rank": 20,
+      "expected_score": 3.037988,
+      "expected_skill": "sf2-swarm_multi_agent-route-fit-spec",
+      "fixture_id": "swarm_multi_agent:paraphrase",
+      "kind": "should_trigger",
+      "query": "Choose the best skill for swarm multi agent swarm multi agent worktree submit verify integrate; return selected, used, evidence, gate, and outcome details.",
+      "top3": [
+        "sf2-codeintel-route-fit-spec",
+        "sf2-external_productivity-route-fit-spec",
+        "nexus-root-cause-probe"
+      ],
+      "top_score": 16.7406,
+      "version": "before"
+    },
+    {
+      "capability": "swarm_multi_agent",
+      "expected_rank": 5,
+      "expected_score": 3.484907,
+      "expected_skill": "sf2-swarm_multi_agent-route-fit-spec",
+      "fixture_id": "swarm_multi_agent:mixed",
+      "kind": "should_trigger",
+      "query": "請用 swarm_multi_agent 能力處理，重點是 swarm multi agent swarm multi agent worktree submit verify integrate，需要 runtime receipt 和 fail-closed gate。",
+      "top3": [
+        "sf2-codeintel-route-fit-spec",
+        "sf2-external_productivity-route-fit-spec",
+        "nexus-root-cause-probe"
+      ],
+      "top_score": 8.391027,
+      "version": "before"
+    },
+    {
+      "capability": "ui_validator",
+      "expected_rank": 4,
+      "expected_score": 6.850582,
+      "expected_skill": "nexus-root-cause-probe",
+      "fixture_id": "ui_validator:obvious",
+      "kind": "should_trigger",
+      "query": "Nexus route capability ui_validator: handle a task requiring ui validator UI validator browser screenshot interaction visual gate with receipt-backed evidence.",
+      "top3": [
+        "sf2-codeintel-route-fit-spec",
+        "sf2-external_productivity-route-fit-spec",
+        "nexus-goal-closure-executor"
+      ],
+      "top_score": 19.487623,
+      "version": "before"
+    },
+    {
+      "capability": "ui_validator",
+      "expected_rank": 6,
+      "expected_score": 4.618438,
+      "expected_skill": "nexus-root-cause-probe",
+      "fixture_id": "ui_validator:paraphrase",
+      "kind": "should_trigger",
+      "query": "Choose the best skill for ui validator UI validator browser screenshot interaction visual gate; return selected, used, evidence, gate, and outcome details.",
+      "top3": [
+        "sf2-codeintel-route-fit-spec",
+        "sf2-external_productivity-route-fit-spec",
+        "nexus-goal-closure-executor"
+      ],
+      "top_score": 16.7406,
+      "version": "before"
+    },
+    {
+      "capability": "ui_validator",
+      "expected_rank": 6,
+      "expected_score": 2.232144,
+      "expected_skill": "nexus-root-cause-probe",
+      "fixture_id": "ui_validator:mixed",
+      "kind": "should_trigger",
+      "query": "請用 ui_validator 能力處理，重點是 ui validator UI validator browser screenshot interaction visual gate，需要 runtime receipt 和 fail-closed gate。",
+      "top3": [
+        "sf2-codeintel-route-fit-spec",
+        "sf2-external_productivity-route-fit-spec",
+        "acceptance-evidence-failclosed"
+      ],
+      "top_score": 8.391027,
+      "version": "before"
+    },
+    {
+      "capability": "ultra_review",
+      "expected_rank": 6,
+      "expected_score": 3.791759,
+      "expected_skill": "acceptance-evidence-failclosed",
+      "fixture_id": "ultra_review:obvious",
+      "kind": "should_trigger",
+      "query": "Nexus route capability ultra_review: handle a task requiring ultra review ultra review sandbox fleet security logic regression with receipt-backed evidence.",
+      "top3": [
+        "sf2-codeintel-route-fit-spec",
+        "sf2-external_productivity-route-fit-spec",
+        "nexus-goal-closure-executor"
+      ],
+      "top_score": 20.047239,
+      "version": "before"
+    },
+    {
+      "capability": "ultra_review",
+      "expected_rank": 7,
+      "expected_score": 4.618438,
+      "expected_skill": "acceptance-evidence-failclosed",
+      "fixture_id": "ultra_review:paraphrase",
+      "kind": "should_trigger",
+      "query": "Choose the best skill for ultra review ultra review sandbox fleet security logic regression; return selected, used, evidence, gate, and outcome details.",
+      "top3": [
+        "sf2-codeintel-route-fit-spec",
+        "sf2-external_productivity-route-fit-spec",
+        "diagnose"
+      ],
+      "top_score": 19.532359,
+      "version": "before"
+    },
+    {
+      "capability": "ultra_review",
+      "expected_rank": 5,
+      "expected_score": 2.232144,
+      "expected_skill": "acceptance-evidence-failclosed",
+      "fixture_id": "ultra_review:mixed",
+      "kind": "should_trigger",
+      "query": "請用 ultra_review 能力處理，重點是 ultra review ultra review sandbox fleet security logic regression，需要 runtime receipt 和 fail-closed gate。",
+      "top3": [
+        "sf2-codeintel-route-fit-spec",
+        "sf2-external_productivity-route-fit-spec",
+        "diagnose"
+      ],
+      "top_score": 11.182786,
+      "version": "before"
+    },
+    {
+      "capability": "xray",
+      "expected_rank": 7,
+      "expected_score": 3.484907,
+      "expected_skill": "diagnose",
+      "fixture_id": "xray:obvious",
+      "kind": "should_trigger",
+      "query": "Nexus route capability xray: handle a task requiring xray xray deep inspection hidden context diagnosis with receipt-backed evidence.",
+      "top3": [
+        "sf2-codeintel-route-fit-spec",
+        "sf2-external_productivity-route-fit-spec",
+        "nexus-goal-closure-executor"
+      ],
+      "top_score": 20.740386,
+      "version": "before"
+    },
+    {
+      "capability": "xray",
+      "expected_rank": 3,
+      "expected_score": 7.061891,
+      "expected_skill": "diagnose",
+      "fixture_id": "xray:paraphrase",
+      "kind": "should_trigger",
+      "query": "Choose the best skill for xray xray deep inspection hidden context diagnosis; return selected, used, evidence, gate, and outcome details.",
+      "top3": [
+        "sf2-codeintel-route-fit-spec",
+        "sf2-external_productivity-route-fit-spec",
+        "diagnose"
+      ],
+      "top_score": 20.225506,
+      "version": "before"
+    },
+    {
+      "capability": "xray",
+      "expected_rank": 3,
+      "expected_score": 3.484907,
+      "expected_skill": "diagnose",
+      "fixture_id": "xray:mixed",
+      "kind": "should_trigger",
+      "query": "請用 xray 能力處理，重點是 xray xray deep inspection hidden context diagnosis，需要 runtime receipt 和 fail-closed gate。",
+      "top3": [
+        "sf2-codeintel-route-fit-spec",
+        "sf2-external_productivity-route-fit-spec",
+        "diagnose"
+      ],
+      "top_score": 11.875933,
+      "version": "before"
+    }
+  ],
+  "claim_boundary": [
+    "This compares before-skill vs after-skill trigger routing for the same SF primary skills.",
+    "It is not a no-skill baseline.",
+    "It is not a public benchmark or runtime default apply gate."
+  ],
+  "decision": "REVERT_SOME_OR_ALL",
+  "schema": "nexus.sf_skill_creator_before_after_trigger_eval.v1",
+  "skill_decisions": [
+    {
+      "after": {
+        "avg_expected_minus_top": -1.593899,
+        "false_positive": 0,
+        "hit1": 5,
+        "hit3": 8,
+        "negative_count": 2,
+        "trigger_count": 9
+      },
+      "before": {
+        "avg_expected_minus_top": -10.258145,
+        "false_positive": 0,
+        "hit1": 0,
+        "hit3": 4,
+        "negative_count": 2,
+        "trigger_count": 9
+      },
+      "decision": "KEEP_AFTER",
+      "delta": {
+        "avg_expected_minus_top_delta": 8.664246,
+        "false_positive_delta": 0,
+        "hit1_delta": 5,
+        "hit3_delta": 4
+      },
+      "skill_id": "acceptance-evidence-failclosed"
+    },
+    {
+      "after": {
+        "avg_expected_minus_top": 0.0,
+        "false_positive": 0,
+        "hit1": 3,
+        "hit3": 3,
+        "negative_count": 0,
+        "trigger_count": 3
+      },
+      "before": {
+        "avg_expected_minus_top": 0.0,
+        "false_positive": 0,
+        "hit1": 3,
+        "hit3": 3,
+        "negative_count": 0,
+        "trigger_count": 3
+      },
+      "decision": "REVERT_BEFORE",
+      "delta": {
+        "avg_expected_minus_top_delta": 0.0,
+        "false_positive_delta": 0,
+        "hit1_delta": 0,
+        "hit3_delta": 0
+      },
+      "skill_id": "create-plan"
+    },
+    {
+      "after": {
+        "avg_expected_minus_top": -1.803789,
+        "false_positive": 0,
+        "hit1": 6,
+        "hit3": 11,
+        "negative_count": 1,
+        "trigger_count": 12
+      },
+      "before": {
+        "avg_expected_minus_top": -8.952371,
+        "false_positive": 0,
+        "hit1": 2,
+        "hit3": 5,
+        "negative_count": 1,
+        "trigger_count": 12
+      },
+      "decision": "KEEP_AFTER",
+      "delta": {
+        "avg_expected_minus_top_delta": 7.148582,
+        "false_positive_delta": 0,
+        "hit1_delta": 4,
+        "hit3_delta": 6
+      },
+      "skill_id": "diagnose"
+    },
+    {
+      "after": {
+        "avg_expected_minus_top": -0.580818,
+        "false_positive": 0,
+        "hit1": 5,
+        "hit3": 5,
+        "negative_count": 1,
+        "trigger_count": 6
+      },
+      "before": {
+        "avg_expected_minus_top": -2.07715,
+        "false_positive": 0,
+        "hit1": 3,
+        "hit3": 6,
+        "negative_count": 1,
+        "trigger_count": 6
+      },
+      "decision": "REVERT_BEFORE",
+      "delta": {
+        "avg_expected_minus_top_delta": 1.496332,
+        "false_positive_delta": 0,
+        "hit1_delta": 2,
+        "hit3_delta": -1
+      },
+      "skill_id": "nexus-benchmark-continuous-optimization"
+    },
+    {
+      "after": {
+        "avg_expected_minus_top": 0.0,
+        "false_positive": 0,
+        "hit1": 3,
+        "hit3": 3,
+        "negative_count": 0,
+        "trigger_count": 3
+      },
+      "before": {
+        "avg_expected_minus_top": -10.678623,
+        "false_positive": 0,
+        "hit1": 0,
+        "hit3": 1,
+        "negative_count": 0,
+        "trigger_count": 3
+      },
+      "decision": "KEEP_AFTER",
+      "delta": {
+        "avg_expected_minus_top_delta": 10.678623,
+        "false_positive_delta": 0,
+        "hit1_delta": 3,
+        "hit3_delta": 2
+      },
+      "skill_id": "nexus-capability-upgrade"
+    },
+    {
+      "after": {
+        "avg_expected_minus_top": 0.0,
+        "false_positive": 0,
+        "hit1": 3,
+        "hit3": 3,
+        "negative_count": 0,
+        "trigger_count": 3
+      },
+      "before": {
+        "avg_expected_minus_top": 0.0,
+        "false_positive": 0,
+        "hit1": 3,
+        "hit3": 3,
+        "negative_count": 0,
+        "trigger_count": 3
+      },
+      "decision": "REVERT_BEFORE",
+      "delta": {
+        "avg_expected_minus_top_delta": 0.0,
+        "false_positive_delta": 0,
+        "hit1_delta": 0,
+        "hit3_delta": 0
+      },
+      "skill_id": "nexus-goal-closure-executor"
+    },
+    {
+      "after": {
+        "avg_expected_minus_top": -0.729372,
+        "false_positive": 0,
+        "hit1": 7,
+        "hit3": 7,
+        "negative_count": 1,
+        "trigger_count": 9
+      },
+      "before": {
+        "avg_expected_minus_top": -11.238745,
+        "false_positive": 0,
+        "hit1": 0,
+        "hit3": 0,
+        "negative_count": 1,
+        "trigger_count": 9
+      },
+      "decision": "KEEP_AFTER",
+      "delta": {
+        "avg_expected_minus_top_delta": 10.509373,
+        "false_positive_delta": 0,
+        "hit1_delta": 7,
+        "hit3_delta": 7
+      },
+      "skill_id": "nexus-root-cause-probe"
+    },
+    {
+      "after": {
+        "avg_expected_minus_top": -0.387212,
+        "false_positive": 0,
+        "hit1": 8,
+        "hit3": 9,
+        "negative_count": 0,
+        "trigger_count": 9
+      },
+      "before": {
+        "avg_expected_minus_top": -6.333654,
+        "false_positive": 0,
+        "hit1": 1,
+        "hit3": 5,
+        "negative_count": 0,
+        "trigger_count": 9
+      },
+      "decision": "KEEP_AFTER",
+      "delta": {
+        "avg_expected_minus_top_delta": 5.946442,
+        "false_positive_delta": 0,
+        "hit1_delta": 7,
+        "hit3_delta": 4
+      },
+      "skill_id": "research-citation-chain-verifier"
+    },
+    {
+      "after": {
+        "avg_expected_minus_top": 0.0,
+        "false_positive": 0,
+        "hit1": 3,
+        "hit3": 3,
+        "negative_count": 1,
+        "trigger_count": 3
+      },
+      "before": {
+        "avg_expected_minus_top": -14.5345,
+        "false_positive": 0,
+        "hit1": 0,
+        "hit3": 0,
+        "negative_count": 1,
+        "trigger_count": 3
+      },
+      "decision": "KEEP_AFTER",
+      "delta": {
+        "avg_expected_minus_top_delta": 14.5345,
+        "false_positive_delta": 0,
+        "hit1_delta": 3,
+        "hit3_delta": 3
+      },
+      "skill_id": "research-source-validation-auditor"
+    },
+    {
+      "after": {
+        "avg_expected_minus_top": 0.0,
+        "false_positive": 0,
+        "hit1": 3,
+        "hit3": 3,
+        "negative_count": 0,
+        "trigger_count": 3
+      },
+      "before": {
+        "avg_expected_minus_top": -10.324613,
+        "false_positive": 0,
+        "hit1": 0,
+        "hit3": 1,
+        "negative_count": 0,
+        "trigger_count": 3
+      },
+      "decision": "KEEP_AFTER",
+      "delta": {
+        "avg_expected_minus_top_delta": 10.324613,
+        "false_positive_delta": 0,
+        "hit1_delta": 3,
+        "hit3_delta": 2
+      },
+      "skill_id": "sf2-autonomic_router-route-fit-spec"
+    },
+    {
+      "after": {
+        "avg_expected_minus_top": 0.0,
+        "false_positive": 0,
+        "hit1": 6,
+        "hit3": 6,
+        "negative_count": 0,
+        "trigger_count": 6
+      },
+      "before": {
+        "avg_expected_minus_top": -11.454737,
+        "false_positive": 0,
+        "hit1": 0,
+        "hit3": 1,
+        "negative_count": 0,
+        "trigger_count": 6
+      },
+      "decision": "KEEP_AFTER",
+      "delta": {
+        "avg_expected_minus_top_delta": 11.454737,
+        "false_positive_delta": 0,
+        "hit1_delta": 6,
+        "hit3_delta": 5
+      },
+      "skill_id": "sf2-belief-route-fit-spec"
+    },
+    {
+      "after": {
+        "avg_expected_minus_top": 0.0,
+        "false_positive": 0,
+        "hit1": 3,
+        "hit3": 3,
+        "negative_count": 0,
+        "trigger_count": 3
+      },
+      "before": {
+        "avg_expected_minus_top": 0.0,
+        "false_positive": 0,
+        "hit1": 3,
+        "hit3": 3,
+        "negative_count": 0,
+        "trigger_count": 3
+      },
+      "decision": "REVERT_BEFORE",
+      "delta": {
+        "avg_expected_minus_top_delta": 0.0,
+        "false_positive_delta": 0,
+        "hit1_delta": 0,
+        "hit3_delta": 0
+      },
+      "skill_id": "sf2-codeintel-route-fit-spec"
+    },
+    {
+      "after": {
+        "avg_expected_minus_top": 0.0,
+        "false_positive": 0,
+        "hit1": 3,
+        "hit3": 3,
+        "negative_count": 0,
+        "trigger_count": 3
+      },
+      "before": {
+        "avg_expected_minus_top": -12.037024,
+        "false_positive": 0,
+        "hit1": 0,
+        "hit3": 0,
+        "negative_count": 0,
+        "trigger_count": 3
+      },
+      "decision": "KEEP_AFTER",
+      "delta": {
+        "avg_expected_minus_top_delta": 12.037024,
+        "false_positive_delta": 0,
+        "hit1_delta": 3,
+        "hit3_delta": 3
+      },
+      "skill_id": "sf2-direct_master_loop-route-fit-spec"
+    },
+    {
+      "after": {
+        "avg_expected_minus_top": 0.0,
+        "false_positive": 0,
+        "hit1": 3,
+        "hit3": 3,
+        "negative_count": 0,
+        "trigger_count": 3
+      },
+      "before": {
+        "avg_expected_minus_top": 0.0,
+        "false_positive": 0,
+        "hit1": 3,
+        "hit3": 3,
+        "negative_count": 0,
+        "trigger_count": 3
+      },
+      "decision": "REVERT_BEFORE",
+      "delta": {
+        "avg_expected_minus_top_delta": 0.0,
+        "false_positive_delta": 0,
+        "hit1_delta": 0,
+        "hit3_delta": 0
+      },
+      "skill_id": "sf2-external_productivity-route-fit-spec"
+    },
+    {
+      "after": {
+        "avg_expected_minus_top": 0.0,
+        "false_positive": 0,
+        "hit1": 3,
+        "hit3": 3,
+        "negative_count": 0,
+        "trigger_count": 3
+      },
+      "before": {
+        "avg_expected_minus_top": -11.068661,
+        "false_positive": 0,
+        "hit1": 0,
+        "hit3": 1,
+        "negative_count": 0,
+        "trigger_count": 3
+      },
+      "decision": "KEEP_AFTER",
+      "delta": {
+        "avg_expected_minus_top_delta": 11.068661,
+        "false_positive_delta": 0,
+        "hit1_delta": 3,
+        "hit3_delta": 2
+      },
+      "skill_id": "sf2-file_lock_security_gate-route-fit-spec"
+    },
+    {
+      "after": {
+        "avg_expected_minus_top": 0.0,
+        "false_positive": 0,
+        "hit1": 3,
+        "hit3": 3,
+        "negative_count": 1,
+        "trigger_count": 3
+      },
+      "before": {
+        "avg_expected_minus_top": -8.631466,
+        "false_positive": 0,
+        "hit1": 0,
+        "hit3": 1,
+        "negative_count": 1,
+        "trigger_count": 3
+      },
+      "decision": "KEEP_AFTER",
+      "delta": {
+        "avg_expected_minus_top_delta": 8.631466,
+        "false_positive_delta": 0,
+        "hit1_delta": 3,
+        "hit3_delta": 2
+      },
+      "skill_id": "sf2-hyper_sprint-route-fit-spec"
+    },
+    {
+      "after": {
+        "avg_expected_minus_top": 0.0,
+        "false_positive": 0,
+        "hit1": 3,
+        "hit3": 3,
+        "negative_count": 0,
+        "trigger_count": 3
+      },
+      "before": {
+        "avg_expected_minus_top": -10.324613,
+        "false_positive": 0,
+        "hit1": 0,
+        "hit3": 0,
+        "negative_count": 0,
+        "trigger_count": 3
+      },
+      "decision": "KEEP_AFTER",
+      "delta": {
+        "avg_expected_minus_top_delta": 10.324613,
+        "false_positive_delta": 0,
+        "hit1_delta": 3,
+        "hit3_delta": 3
+      },
+      "skill_id": "sf2-learning_closure-route-fit-spec"
+    },
+    {
+      "after": {
+        "avg_expected_minus_top": 0.0,
+        "false_positive": 0,
+        "hit1": 3,
+        "hit3": 3,
+        "negative_count": 0,
+        "trigger_count": 3
+      },
+      "before": {
+        "avg_expected_minus_top": -9.162978,
+        "false_positive": 0,
+        "hit1": 0,
+        "hit3": 1,
+        "negative_count": 0,
+        "trigger_count": 3
+      },
+      "decision": "KEEP_AFTER",
+      "delta": {
+        "avg_expected_minus_top_delta": 9.162978,
+        "false_positive_delta": 0,
+        "hit1_delta": 3,
+        "hit3_delta": 2
+      },
+      "skill_id": "sf2-mempalace-route-fit-spec"
+    },
+    {
+      "after": {
+        "avg_expected_minus_top": 0.0,
+        "false_positive": 0,
+        "hit1": 3,
+        "hit3": 3,
+        "negative_count": 1,
+        "trigger_count": 3
+      },
+      "before": {
+        "avg_expected_minus_top": -9.162978,
+        "false_positive": 0,
+        "hit1": 0,
+        "hit3": 0,
+        "negative_count": 1,
+        "trigger_count": 3
+      },
+      "decision": "KEEP_AFTER",
+      "delta": {
+        "avg_expected_minus_top_delta": 9.162978,
+        "false_positive_delta": 0,
+        "hit1_delta": 3,
+        "hit3_delta": 3
+      },
+      "skill_id": "sf2-nightshift-route-fit-spec"
+    },
+    {
+      "after": {
+        "avg_expected_minus_top": 0.0,
+        "false_positive": 0,
+        "hit1": 3,
+        "hit3": 3,
+        "negative_count": 0,
+        "trigger_count": 3
+      },
+      "before": {
+        "avg_expected_minus_top": -9.195849,
+        "false_positive": 0,
+        "hit1": 0,
+        "hit3": 1,
+        "negative_count": 0,
+        "trigger_count": 3
+      },
+      "decision": "KEEP_AFTER",
+      "delta": {
+        "avg_expected_minus_top_delta": 9.195849,
+        "false_positive_delta": 0,
+        "hit1_delta": 3,
+        "hit3_delta": 2
+      },
+      "skill_id": "sf2-registry_skills_sync-route-fit-spec"
+    },
+    {
+      "after": {
+        "avg_expected_minus_top": 0.0,
+        "false_positive": 0,
+        "hit1": 3,
+        "hit3": 3,
+        "negative_count": 1,
+        "trigger_count": 3
+      },
+      "before": {
+        "avg_expected_minus_top": -10.324613,
+        "false_positive": 0,
+        "hit1": 0,
+        "hit3": 0,
+        "negative_count": 1,
+        "trigger_count": 3
+      },
+      "decision": "KEEP_AFTER",
+      "delta": {
+        "avg_expected_minus_top_delta": 10.324613,
+        "false_positive_delta": 0,
+        "hit1_delta": 3,
+        "hit3_delta": 3
+      },
+      "skill_id": "sf2-sandbox_replay-route-fit-spec"
+    },
+    {
+      "after": {
+        "avg_expected_minus_top": 0.0,
+        "false_positive": 0,
+        "hit1": 3,
+        "hit3": 3,
+        "negative_count": 0,
+        "trigger_count": 3
+      },
+      "before": {
+        "avg_expected_minus_top": -10.324613,
+        "false_positive": 0,
+        "hit1": 0,
+        "hit3": 0,
+        "negative_count": 0,
+        "trigger_count": 3
+      },
+      "decision": "KEEP_AFTER",
+      "delta": {
+        "avg_expected_minus_top_delta": 10.324613,
+        "false_positive_delta": 0,
+        "hit1_delta": 3,
+        "hit3_delta": 3
+      },
+      "skill_id": "sf2-swarm_multi_agent-route-fit-spec"
+    },
+    {
+      "after": {
+        "avg_expected_minus_top": 0.0,
+        "false_positive": 0,
+        "hit1": 3,
+        "hit3": 3,
+        "negative_count": 1,
+        "trigger_count": 3
+      },
+      "before": {
+        "avg_expected_minus_top": 0.0,
+        "false_positive": 0,
+        "hit1": 3,
+        "hit3": 3,
+        "negative_count": 1,
+        "trigger_count": 3
+      },
+      "decision": "REVERT_BEFORE",
+      "delta": {
+        "avg_expected_minus_top_delta": 0.0,
+        "false_positive_delta": 0,
+        "hit1_delta": 0,
+        "hit3_delta": 0
+      },
+      "skill_id": "tdd"
+    }
+  ],
+  "status": "RETURN",
+  "summary": {
+    "after": {
+      "avg_margin": 10.017489,
+      "false_positive": 0,
+      "false_positive_rate": 0.0,
+      "hit1": 88,
+      "hit1_rate": 0.862745,
+      "hit3": 97,
+      "hit3_rate": 0.95098,
+      "negative_count": 10,
+      "trigger_count": 102
+    },
+    "before": {
+      "avg_margin": -5.871336,
+      "false_positive": 0,
+      "false_positive_rate": 0.0,
+      "hit1": 21,
+      "hit1_rate": 0.205882,
+      "hit3": 42,
+      "hit3_rate": 0.411765,
+      "negative_count": 10,
+      "trigger_count": 102
+    },
+    "capability_count": 34,
+    "delta": {
+      "avg_margin_delta": 15.888825,
+      "false_positive_delta": 0,
+      "hit1_delta": 67,
+      "hit3_delta": 55
+    },
+    "fixture_count_per_version": 112,
+    "keep_after_skill_count": 17,
+    "revert_before_skill_count": 6,
+    "unique_skill_count": 23
+  }
+}

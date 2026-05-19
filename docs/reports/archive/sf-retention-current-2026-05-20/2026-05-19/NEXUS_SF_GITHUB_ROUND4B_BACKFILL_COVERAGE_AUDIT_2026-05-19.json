@@ -1,0 +1,92 @@
+{
+  "backfill_candidates": [
+    {
+      "avg_margin": -2.342442,
+      "candidate_id": "github4b-sickn33-antigravity-awesome-skills-seo",
+      "candidate_name": "seo",
+      "capability": "claim_gate",
+      "challenger_wins": 1,
+      "current_skill": "nexus-benchmark-continuous-optimization",
+      "current_wins": 2,
+      "description": "Run a broad SEO audit across technical SEO, on-page SEO, schema, sitemaps, content quality, AI search readiness, and GEO. Use as the umbrella skill when the user asks for a full SEO analysis or strategy.",
+      "repo": "sickn33-antigravity-awesome-skills",
+      "risk_flags": [
+        {
+          "category": "network_or_api",
+          "hits": [
+            "https://"
+          ]
+        }
+      ],
+      "safety": "PASS_PROMPT_ONLY_REWRITE_REQUIRED",
+      "source_path": "skills/seo/SKILL.md",
+      "text_sha256": "ea114abb2f03784afb587a494a90f699e3ce05c7c42e7a125d1dd5a7047b5e83",
+      "url": "https://github.com/sickn33/antigravity-awesome-skills"
+    },
+    {
+      "avg_margin": -2.342442,
+      "candidate_id": "github4b-sickn33-antigravity-awesome-skills-seo",
+      "candidate_name": "seo",
+      "capability": "claim_gate",
+      "challenger_wins": 1,
+      "current_skill": "nexus-benchmark-continuous-optimization",
+      "current_wins": 2,
+      "description": "Run a broad SEO audit across technical SEO, on-page SEO, schema, sitemaps, content quality, AI search readiness, and GEO. Use as the umbrella skill when the user asks for a full SEO analysis or strategy.",
+      "repo": "sickn33-antigravity-awesome-skills",
+      "risk_flags": [
+        {
+          "category": "network_or_api",
+          "hits": [
+            "https://"
+          ]
+        }
+      ],
+      "safety": "PASS_PROMPT_ONLY_REWRITE_REQUIRED",
+      "source_path": "plugins/antigravity-awesome-skills/skills/seo/SKILL.md",
+      "text_sha256": "ea114abb2f03784afb587a494a90f699e3ce05c7c42e7a125d1dd5a7047b5e83",
+      "url": "https://github.com/sickn33/antigravity-awesome-skills"
+    },
+    {
+      "avg_margin": -2.342442,
+      "candidate_id": "github4b-sickn33-antigravity-awesome-skills-seo",
+      "candidate_name": "seo",
+      "capability": "claim_gate",
+      "challenger_wins": 1,
+      "current_skill": "nexus-benchmark-continuous-optimization",
+      "current_wins": 2,
+      "description": "Run a broad SEO audit across technical SEO, on-page SEO, schema, sitemaps, content quality, AI search readiness, and GEO. Use as the umbrella skill when the user asks for a full SEO analysis or strategy.",
+      "repo": "sickn33-antigravity-awesome-skills",
+      "risk_flags": [
+        {
+          "category": "network_or_api",
+          "hits": [
+            "https://"
+          ]
+        }
+      ],
+      "safety": "PASS_PROMPT_ONLY_REWRITE_REQUIRED",
+      "source_path": "plugins/antigravity-awesome-skills-claude/skills/seo/SKILL.md",
+      "text_sha256": "ea114abb2f03784afb587a494a90f699e3ce05c7c42e7a125d1dd5a7047b5e83",
+      "url": "https://github.com/sickn33/antigravity-awesome-skills"
+    }
+  ],
+  "claim_boundary": [
+    "Coverage backfill only; candidates do not update runtime without paired Flash+Nexus live receipts.",
+    "Per-repo fairness prevents large repos from hiding smaller repo candidates."
+  ],
+  "repo_signal_counts": {
+    "KerberosClaw-kc_ai_skills": 0,
+    "MiniMax-AI-skills": 0,
+    "mm-demo-collection-MiniMaxSkills": 0,
+    "sickn33-antigravity-awesome-skills": 18
+  },
+  "schema": "nexus.sf_github_round4b_backfill_coverage_audit.v1",
+  "status": "PASS",
+  "summary": {
+    "backfill_candidate_count": 3,
+    "candidate_count": 4427,
+    "repo_count": 4,
+    "screened_signal_count": 18
+  },
+  "version": "2026-05-19"
+}

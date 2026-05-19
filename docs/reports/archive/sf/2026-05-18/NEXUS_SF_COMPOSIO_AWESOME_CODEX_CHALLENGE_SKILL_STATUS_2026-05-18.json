@@ -1,0 +1,126 @@
+{
+  "schema": "nexus.sf.skill_status.external_challenge.v1",
+  "status": "PASS",
+  "source": {
+    "repo_url": "https://github.com/ComposioHQ/awesome-codex-skills",
+    "commit_sha": "9c9da64cf1bbea611d43dd14a10788d55369b353",
+    "acquisition": "git_clone_depth_1",
+    "license": "mixed_or_per_skill; top-level SKILL docs reviewed for ablation-only"
+  },
+  "summary": {
+    "skill_count": 6,
+    "capability_count": 6,
+    "runtime_update_allowed": false,
+    "public_benchmark_allowed": false
+  },
+  "skills": [
+    {
+      "name": "codebase-migrate",
+      "path": "/private/tmp/composio-awesome-codex-skills-20260518/codebase-migrate/SKILL.md",
+      "root": "/private/tmp/composio-awesome-codex-skills-20260518",
+      "sha256": "30f03cd88236d911fdd0090e00f4479edf620d2a35f830c13262caa265ab9aeb",
+      "skill_status": "external_reference_candidate",
+      "test_level": "sf_composio_awesome_codex_challenge",
+      "action": "ablation_only_compare",
+      "capability_mount": "reference:hyper",
+      "family": "repair_loop",
+      "reason_codes": [
+        "composio_awesome_codex_external_challenger",
+        "large_codebase_migrations_multi_file_refactors",
+        "runner_capability:hyper"
+      ],
+      "runtime_eligible": false,
+      "ablation_eligible": true
+    },
+    {
+      "name": "pr-review-ci-fix",
+      "path": "/private/tmp/composio-awesome-codex-skills-20260518/pr-review-ci-fix/SKILL.md",
+      "root": "/private/tmp/composio-awesome-codex-skills-20260518",
+      "sha256": "8dba012bf5a62e574c090587d18774ccd0883300ac8f4c06b91297c39020a00a",
+      "skill_status": "external_reference_candidate",
+      "test_level": "sf_composio_awesome_codex_challenge",
+      "action": "ablation_only_compare",
+      "capability_mount": "reference:ultra_review",
+      "family": "ultra_review",
+      "reason_codes": [
+        "composio_awesome_codex_external_challenger",
+        "pr_review_ci_auto_fix_review_gate",
+        "runner_capability:ultra_review"
+      ],
+      "runtime_eligible": false,
+      "ablation_eligible": true
+    },
+    {
+      "name": "webapp-testing",
+      "path": "/private/tmp/composio-awesome-codex-skills-20260518/webapp-testing/SKILL.md",
+      "root": "/private/tmp/composio-awesome-codex-skills-20260518",
+      "sha256": "51b7349e77ec63b7744a6f63647e7566a0b4d2e301121cc10e8c2113af6556a2",
+      "skill_status": "external_reference_candidate",
+      "test_level": "sf_composio_awesome_codex_challenge",
+      "action": "ablation_only_compare",
+      "capability_mount": "reference:ultra_review",
+      "family": "ui_validator",
+      "reason_codes": [
+        "composio_awesome_codex_external_challenger",
+        "playwright_local_webapp_testing",
+        "runner_capability:ultra_review"
+      ],
+      "runtime_eligible": false,
+      "ablation_eligible": true
+    },
+    {
+      "name": "create-plan",
+      "path": "/private/tmp/composio-awesome-codex-skills-20260518/create-plan/SKILL.md",
+      "root": "/private/tmp/composio-awesome-codex-skills-20260518",
+      "sha256": "e3c1af59fe8fc6a040f50504babb5003c4489eee4fcfd987794227758f7291a3",
+      "skill_status": "external_reference_candidate",
+      "test_level": "sf_composio_awesome_codex_challenge",
+      "action": "ablation_only_compare",
+      "capability_mount": "reference:autoreason",
+      "family": "forecast_pregate",
+      "reason_codes": [
+        "composio_awesome_codex_external_challenger",
+        "plan_quality_forecast_pregate",
+        "runner_capability:autoreason"
+      ],
+      "runtime_eligible": false,
+      "ablation_eligible": true
+    },
+    {
+      "name": "content-research-writer",
+      "path": "/private/tmp/composio-awesome-codex-skills-20260518/content-research-writer/SKILL.md",
+      "root": "/private/tmp/composio-awesome-codex-skills-20260518",
+      "sha256": "27eb5c1a0a88a9c1c64f6fcd9c28782e6a6e70d5da43233c4e99ade946f74825",
+      "skill_status": "external_reference_candidate",
+      "test_level": "sf_composio_awesome_codex_challenge",
+      "action": "ablation_only_compare",
+      "capability_mount": "reference:research",
+      "family": "research_control_plane",
+      "reason_codes": [
+        "composio_awesome_codex_external_challenger",
+        "research_citation_writing_discipline",
+        "runner_capability:research"
+      ],
+      "runtime_eligible": false,
+      "ablation_eligible": true
+    },
+    {
+      "name": "skill-creator",
+      "path": "/private/tmp/composio-awesome-codex-skills-20260518/skill-creator/SKILL.md",
+      "root": "/private/tmp/composio-awesome-codex-skills-20260518",
+      "sha256": "31b0010a4e1f30d8bfe06486996bbaf28973053cdc405a4ff29cebe5ddbaf77e",
+      "skill_status": "external_reference_candidate",
+      "test_level": "sf_composio_awesome_codex_challenge",
+      "action": "ablation_only_compare",
+      "capability_mount": "reference:semantic_searcher",
+      "family": "registry_skills_sync",
+      "reason_codes": [
+        "composio_awesome_codex_external_challenger",
+        "skill_authoring_registry_sync",
+        "runner_capability:semantic_searcher"
+      ],
+      "runtime_eligible": false,
+      "ablation_eligible": true
+    }
+  ]
+}

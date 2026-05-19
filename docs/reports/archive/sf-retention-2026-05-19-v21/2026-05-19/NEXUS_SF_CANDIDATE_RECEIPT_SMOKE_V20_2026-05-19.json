@@ -1,0 +1,150 @@
+{
+  "blocking_reasons": [
+    {
+      "capability": "registry_skills_sync",
+      "missing": [
+        "selected",
+        "injected",
+        "used",
+        "evidence_present",
+        "gate_passed",
+        "outcome_contributed",
+        "skill_mount_contract_status_pass"
+      ],
+      "reason": "runtime_receipt_not_confirmed",
+      "skill_id": "github3-openclaw-map-registry-sync"
+    },
+    {
+      "capability": "registry_skills_sync",
+      "missing": [
+        "selected",
+        "injected",
+        "used",
+        "evidence_present",
+        "gate_passed",
+        "outcome_contributed",
+        "skill_mount_contract_status_pass"
+      ],
+      "reason": "runtime_receipt_not_confirmed",
+      "skill_id": "github3-openai-skill-creator-safe-registry-sync"
+    },
+    {
+      "capability": "ultra_review",
+      "missing": [
+        "selected",
+        "injected",
+        "used",
+        "evidence_present",
+        "gate_passed",
+        "outcome_contributed",
+        "skill_mount_contract_status_pass"
+      ],
+      "reason": "runtime_receipt_not_confirmed",
+      "skill_id": "github3-claude-security-scan-safe-ultra-review"
+    }
+  ],
+  "checks": [
+    {
+      "capability": "registry_skills_sync",
+      "delivery_status": "PASS",
+      "evidence_path": ".nexus/reports/sf_github_round3_live_2026-05-19/registry_skills_sync_sf-github-round3-smoke-registry_skills_sync-001_github3_openclaw_map_github3-openclaw-map-registry-sync/evidence_bundle.json",
+      "evidence_present": false,
+      "gate_passed": false,
+      "injected": false,
+      "missing_runtime_receipt_fields": [
+        "selected",
+        "injected",
+        "used",
+        "evidence_present",
+        "gate_passed",
+        "outcome_contributed",
+        "skill_mount_contract_status_pass"
+      ],
+      "outcome_contributed": false,
+      "receipt_path": ".nexus/reports/sf_github_round3_live_2026-05-19/registry_skills_sync_sf-github-round3-smoke-registry_skills_sync-001_github3_openclaw_map_github3-openclaw-map-registry-sync",
+      "runtime_eligible": false,
+      "selected": false,
+      "semantic_status": "VERIFIED",
+      "skill_id": "github3-openclaw-map-registry-sync",
+      "skill_mount_contract_status": "RETURN",
+      "source_decision": "REPLACE_CANDIDATE_NOT_RUNTIME_DEFAULT",
+      "status": "RETURN_RUNTIME_RECEIPT_NOT_CONFIRMED",
+      "token_delta": -2919,
+      "used": false,
+      "wall_delta_sec": -5.8455
+    },
+    {
+      "capability": "registry_skills_sync",
+      "delivery_status": "PASS",
+      "evidence_path": ".nexus/reports/sf_github_round3_live_2026-05-19/registry_skills_sync_sf-github-round3-smoke-registry_skills_sync-001_github3_openai_skill_creator_github3-openai-skill-creator-safe-registry-sync/evidence_bundle.json",
+      "evidence_present": false,
+      "gate_passed": false,
+      "injected": false,
+      "missing_runtime_receipt_fields": [
+        "selected",
+        "injected",
+        "used",
+        "evidence_present",
+        "gate_passed",
+        "outcome_contributed",
+        "skill_mount_contract_status_pass"
+      ],
+      "outcome_contributed": false,
+      "receipt_path": ".nexus/reports/sf_github_round3_live_2026-05-19/registry_skills_sync_sf-github-round3-smoke-registry_skills_sync-001_github3_openai_skill_creator_github3-openai-skill-creator-safe-registry-sync",
+      "runtime_eligible": false,
+      "selected": false,
+      "semantic_status": "VERIFIED",
+      "skill_id": "github3-openai-skill-creator-safe-registry-sync",
+      "skill_mount_contract_status": "RETURN",
+      "source_decision": "REPLACE_CANDIDATE_NOT_RUNTIME_DEFAULT",
+      "status": "RETURN_RUNTIME_RECEIPT_NOT_CONFIRMED",
+      "token_delta": -2836,
+      "used": false,
+      "wall_delta_sec": -11.5308
+    },
+    {
+      "capability": "ultra_review",
+      "delivery_status": "PASS",
+      "evidence_path": ".nexus/reports/sf_github_round3_live_2026-05-19/ultra_review_sf-github-round3-smoke-ultra_review-001_github3_claude_security_scan_github3-claude-security-scan-safe-ultra-review/evidence_bundle.json",
+      "evidence_present": false,
+      "gate_passed": false,
+      "injected": false,
+      "missing_runtime_receipt_fields": [
+        "selected",
+        "injected",
+        "used",
+        "evidence_present",
+        "gate_passed",
+        "outcome_contributed",
+        "skill_mount_contract_status_pass"
+      ],
+      "outcome_contributed": false,
+      "receipt_path": ".nexus/reports/sf_github_round3_live_2026-05-19/ultra_review_sf-github-round3-smoke-ultra_review-001_github3_claude_security_scan_github3-claude-security-scan-safe-ultra-review",
+      "runtime_eligible": false,
+      "selected": false,
+      "semantic_status": "VERIFIED",
+      "skill_id": "github3-claude-security-scan-safe-ultra-review",
+      "skill_mount_contract_status": "RETURN",
+      "source_decision": "REPLACE_CANDIDATE_NOT_RUNTIME_DEFAULT",
+      "status": "RETURN_RUNTIME_RECEIPT_NOT_CONFIRMED",
+      "token_delta": -947,
+      "used": false,
+      "wall_delta_sec": -17.6549
+    }
+  ],
+  "claim_boundary": [
+    "Delivery/cost improvement is insufficient for runtime replacement unless selected/injected/used/evidence/gate/outcome are all true.",
+    "This report validates candidate live receipts; it does not update runtime defaults."
+  ],
+  "schema": "nexus.sf_candidate_receipt_smoke.v20",
+  "source_live_summary": ".nexus/reports/sf_github_round3_live_2026-05-19/live_summary.json",
+  "source_overlay": "docs/reports/NEXUS_SF_GITHUB_ROUND3_CANDIDATE_OVERLAY_V20_2026-05-19.json",
+  "source_replacement_ledger": "docs/reports/NEXUS_SF_GITHUB_ROUND3_REPLACEMENT_LEDGER_2026-05-19.json",
+  "status": "RETURN_RUNTIME_RECEIPT_NOT_CONFIRMED",
+  "summary": {
+    "candidate_count": 3,
+    "confirmed_runtime_receipt_count": 0,
+    "return_count": 3
+  },
+  "version": "2026-05-19"
+}

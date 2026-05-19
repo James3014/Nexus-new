@@ -1,0 +1,43 @@
+{
+  "schema": "nexus.sf_coverage_round5_selected_fix.v1",
+  "version": "2026-05-19",
+  "status": "PASS",
+  "source_static_screen": "/Users/jameschen/Workspace/nexus/docs/reports/NEXUS_SF_GITHUB_ROUND5_STATIC_SCREEN_2026-05-19.json",
+  "source_matrix": "/Users/jameschen/Workspace/nexus/docs/reports/NEXUS_SF_GITHUB_ROUND5_FLASH_SMOKE_MATRIX_2026-05-19.json",
+  "issue": "round5 static summary selected_live_candidate_count=0 while flash smoke matrix contains challenger rows",
+  "static_summary": {
+    "capability_count": 28,
+    "pass_prompt_only_count": 14,
+    "reject_or_review_count": 0,
+    "repo_count": 4,
+    "selected_live_candidate_count": 0,
+    "skill_count": 14
+  },
+  "corrected_selected_live_candidate_count": 4,
+  "corrected_selected_for_live": [
+    {
+      "capability": "research_control_plane",
+      "skill_id": "github5-last30days-research-relevance",
+      "row_id": "research_control_plane::sf-github-round5-smoke-research_control_plane-001::challenger::github5-last30days-research-relevance"
+    },
+    {
+      "capability": "registry_skills_sync",
+      "skill_id": "github5-skill-seekers-safe-registry-builder",
+      "row_id": "registry_skills_sync::sf-github-round5-smoke-registry_skills_sync-001::challenger::github5-skill-seekers-safe-registry-builder"
+    },
+    {
+      "capability": "forecast_pregate",
+      "skill_id": "github5-slavingia-minimalist-forecast",
+      "row_id": "forecast_pregate::sf-github-round5-smoke-forecast_pregate-001::challenger::github5-slavingia-minimalist-forecast"
+    },
+    {
+      "capability": "external_productivity",
+      "skill_id": "github5-video-auto-dubber-safe-external-productivity",
+      "row_id": "external_productivity::sf-github-round5-smoke-external_productivity-001::challenger::github5-video-auto-dubber-safe-external-productivity"
+    }
+  ],
+  "claim_boundary": [
+    "correction artifact only; does not mutate historical static screen",
+    "does not create runtime update eligibility"
+  ]
+}

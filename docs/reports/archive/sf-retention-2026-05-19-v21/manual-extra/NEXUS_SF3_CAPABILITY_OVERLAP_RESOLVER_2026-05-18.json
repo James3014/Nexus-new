@@ -1,0 +1,415 @@
+{
+  "schema": "nexus.sf3_capability_overlap_resolver.v1",
+  "status": "PASS",
+  "summary": {
+    "skill_count": 31,
+    "multi_capability_skill_count": 17,
+    "runtime_update_allowed": false,
+    "public_benchmark_allowed": false
+  },
+  "overlaps": [
+    {
+      "skill_id": "diagnose",
+      "overlap_group_id": "overlap::diagnose",
+      "canonical_candidate_id": "artifact_gate::diagnose",
+      "suppressed_by": [
+        "claim_gate::diagnose",
+        "policy_capability_gate::diagnose",
+        "ultra_review::diagnose"
+      ],
+      "capability_ids": [
+        "artifact_gate",
+        "claim_gate",
+        "policy_capability_gate",
+        "ultra_review"
+      ],
+      "reason_code": "multi_capability_candidate"
+    },
+    {
+      "skill_id": "nexus-benchmark-continuous-optimization",
+      "overlap_group_id": "overlap::nexus-benchmark-continuous-optimization",
+      "canonical_candidate_id": "benchmark_meta_opt::nexus-benchmark-continuous-optimization",
+      "suppressed_by": [
+        "delivery_acceptance_gate::nexus-benchmark-continuous-optimization",
+        "regression_guard::nexus-benchmark-continuous-optimization"
+      ],
+      "capability_ids": [
+        "benchmark_meta_opt",
+        "delivery_acceptance_gate",
+        "regression_guard"
+      ],
+      "reason_code": "multi_capability_candidate"
+    },
+    {
+      "skill_id": "nexus-benchmark-public-report",
+      "overlap_group_id": "overlap::nexus-benchmark-public-report",
+      "canonical_candidate_id": "autoreason::nexus-benchmark-public-report",
+      "suppressed_by": [
+        "benchmark_meta_opt::nexus-benchmark-public-report",
+        "regression_guard::nexus-benchmark-public-report"
+      ],
+      "capability_ids": [
+        "autoreason",
+        "benchmark_meta_opt",
+        "regression_guard"
+      ],
+      "reason_code": "multi_capability_candidate"
+    },
+    {
+      "skill_id": "nexus-capability-upgrade",
+      "overlap_group_id": "overlap::nexus-capability-upgrade",
+      "canonical_candidate_id": "benchmark_meta_opt::nexus-capability-upgrade",
+      "suppressed_by": [
+        "learn_ask::nexus-capability-upgrade",
+        "regression_guard::nexus-capability-upgrade"
+      ],
+      "capability_ids": [
+        "benchmark_meta_opt",
+        "learn_ask",
+        "regression_guard"
+      ],
+      "reason_code": "multi_capability_candidate"
+    },
+    {
+      "skill_id": "nexus-goal-closure-executor",
+      "overlap_group_id": "overlap::nexus-goal-closure-executor",
+      "canonical_candidate_id": "artifact_gate::nexus-goal-closure-executor",
+      "suppressed_by": [
+        "claim_gate::nexus-goal-closure-executor",
+        "direct_master_loop::nexus-goal-closure-executor",
+        "policy_capability_gate::nexus-goal-closure-executor",
+        "ultra_review::nexus-goal-closure-executor"
+      ],
+      "capability_ids": [
+        "artifact_gate",
+        "claim_gate",
+        "direct_master_loop",
+        "policy_capability_gate",
+        "ultra_review"
+      ],
+      "reason_code": "multi_capability_candidate"
+    },
+    {
+      "skill_id": "nexus-root-cause-probe",
+      "overlap_group_id": "overlap::nexus-root-cause-probe",
+      "canonical_candidate_id": "artifact_gate::nexus-root-cause-probe",
+      "suppressed_by": [
+        "claim_gate::nexus-root-cause-probe",
+        "learn_ask::nexus-root-cause-probe",
+        "policy_capability_gate::nexus-root-cause-probe",
+        "ultra_review::nexus-root-cause-probe"
+      ],
+      "capability_ids": [
+        "artifact_gate",
+        "claim_gate",
+        "learn_ask",
+        "policy_capability_gate",
+        "ultra_review"
+      ],
+      "reason_code": "multi_capability_candidate"
+    },
+    {
+      "skill_id": "notebooklm-context-bridge",
+      "overlap_group_id": "overlap::notebooklm-context-bridge",
+      "canonical_candidate_id": "learn_ask::notebooklm-context-bridge",
+      "suppressed_by": [],
+      "capability_ids": [
+        "learn_ask"
+      ],
+      "reason_code": "capability_specific_candidate"
+    },
+    {
+      "skill_id": "sf2-autonomic_router-route-fit-spec",
+      "overlap_group_id": "overlap::sf2-autonomic_router-route-fit-spec",
+      "canonical_candidate_id": "autonomic_router::sf2-autonomic_router-route-fit-spec",
+      "suppressed_by": [],
+      "capability_ids": [
+        "autonomic_router"
+      ],
+      "reason_code": "capability_specific_candidate"
+    },
+    {
+      "skill_id": "sf2-autoreason-route-fit-spec",
+      "overlap_group_id": "overlap::sf2-autoreason-route-fit-spec",
+      "canonical_candidate_id": "autonomic_router::sf2-autoreason-route-fit-spec",
+      "suppressed_by": [
+        "autoreason::sf2-autoreason-route-fit-spec",
+        "belief::sf2-autoreason-route-fit-spec",
+        "lancedb::sf2-autoreason-route-fit-spec"
+      ],
+      "capability_ids": [
+        "autonomic_router",
+        "autoreason",
+        "belief",
+        "lancedb"
+      ],
+      "reason_code": "multi_capability_candidate"
+    },
+    {
+      "skill_id": "sf2-belief-route-fit-spec",
+      "overlap_group_id": "overlap::sf2-belief-route-fit-spec",
+      "canonical_candidate_id": "autonomic_router::sf2-belief-route-fit-spec",
+      "suppressed_by": [
+        "autoreason::sf2-belief-route-fit-spec",
+        "belief::sf2-belief-route-fit-spec"
+      ],
+      "capability_ids": [
+        "autonomic_router",
+        "autoreason",
+        "belief"
+      ],
+      "reason_code": "multi_capability_candidate"
+    },
+    {
+      "skill_id": "sf2-codeintel-route-fit-spec",
+      "overlap_group_id": "overlap::sf2-codeintel-route-fit-spec",
+      "canonical_candidate_id": "codeintel::sf2-codeintel-route-fit-spec",
+      "suppressed_by": [],
+      "capability_ids": [
+        "codeintel"
+      ],
+      "reason_code": "capability_specific_candidate"
+    },
+    {
+      "skill_id": "sf2-ddtree-route-fit-spec",
+      "overlap_group_id": "overlap::sf2-ddtree-route-fit-spec",
+      "canonical_candidate_id": "ddtree::sf2-ddtree-route-fit-spec",
+      "suppressed_by": [],
+      "capability_ids": [
+        "ddtree"
+      ],
+      "reason_code": "capability_specific_candidate"
+    },
+    {
+      "skill_id": "sf2-delivery_acceptance_gate-route-fit-spec",
+      "overlap_group_id": "overlap::sf2-delivery_acceptance_gate-route-fit-spec",
+      "canonical_candidate_id": "autonomic_router::sf2-delivery_acceptance_gate-route-fit-spec",
+      "suppressed_by": [
+        "delivery_acceptance_gate::sf2-delivery_acceptance_gate-route-fit-spec"
+      ],
+      "capability_ids": [
+        "autonomic_router",
+        "delivery_acceptance_gate"
+      ],
+      "reason_code": "multi_capability_candidate"
+    },
+    {
+      "skill_id": "sf2-direct_master_loop-route-fit-spec",
+      "overlap_group_id": "overlap::sf2-direct_master_loop-route-fit-spec",
+      "canonical_candidate_id": "direct_master_loop::sf2-direct_master_loop-route-fit-spec",
+      "suppressed_by": [],
+      "capability_ids": [
+        "direct_master_loop"
+      ],
+      "reason_code": "capability_specific_candidate"
+    },
+    {
+      "skill_id": "sf2-drone-route-fit-spec",
+      "overlap_group_id": "overlap::sf2-drone-route-fit-spec",
+      "canonical_candidate_id": "drone::sf2-drone-route-fit-spec",
+      "suppressed_by": [],
+      "capability_ids": [
+        "drone"
+      ],
+      "reason_code": "capability_specific_candidate"
+    },
+    {
+      "skill_id": "sf2-external_productivity-route-fit-spec",
+      "overlap_group_id": "overlap::sf2-external_productivity-route-fit-spec",
+      "canonical_candidate_id": "external_productivity::sf2-external_productivity-route-fit-spec",
+      "suppressed_by": [],
+      "capability_ids": [
+        "external_productivity"
+      ],
+      "reason_code": "capability_specific_candidate"
+    },
+    {
+      "skill_id": "sf2-file_lock_security_gate-route-fit-spec",
+      "overlap_group_id": "overlap::sf2-file_lock_security_gate-route-fit-spec",
+      "canonical_candidate_id": "file_lock_security_gate::sf2-file_lock_security_gate-route-fit-spec",
+      "suppressed_by": [
+        "mempalace::sf2-file_lock_security_gate-route-fit-spec",
+        "sandbox_replay::sf2-file_lock_security_gate-route-fit-spec",
+        "ultra_review::sf2-file_lock_security_gate-route-fit-spec"
+      ],
+      "capability_ids": [
+        "file_lock_security_gate",
+        "mempalace",
+        "sandbox_replay",
+        "ultra_review"
+      ],
+      "reason_code": "multi_capability_candidate"
+    },
+    {
+      "skill_id": "sf2-forecast_pregate-route-fit-spec",
+      "overlap_group_id": "overlap::sf2-forecast_pregate-route-fit-spec",
+      "canonical_candidate_id": "forecast_pregate::sf2-forecast_pregate-route-fit-spec",
+      "suppressed_by": [],
+      "capability_ids": [
+        "forecast_pregate"
+      ],
+      "reason_code": "capability_specific_candidate"
+    },
+    {
+      "skill_id": "sf2-hyper_sprint-route-fit-spec",
+      "overlap_group_id": "overlap::sf2-hyper_sprint-route-fit-spec",
+      "canonical_candidate_id": "hyper_sprint::sf2-hyper_sprint-route-fit-spec",
+      "suppressed_by": [
+        "repair_loop::sf2-hyper_sprint-route-fit-spec"
+      ],
+      "capability_ids": [
+        "hyper_sprint",
+        "repair_loop"
+      ],
+      "reason_code": "multi_capability_candidate"
+    },
+    {
+      "skill_id": "sf2-lancedb-route-fit-spec",
+      "overlap_group_id": "overlap::sf2-lancedb-route-fit-spec",
+      "canonical_candidate_id": "autoreason::sf2-lancedb-route-fit-spec",
+      "suppressed_by": [
+        "lancedb::sf2-lancedb-route-fit-spec",
+        "memory::sf2-lancedb-route-fit-spec",
+        "research::sf2-lancedb-route-fit-spec"
+      ],
+      "capability_ids": [
+        "autoreason",
+        "lancedb",
+        "memory",
+        "research"
+      ],
+      "reason_code": "multi_capability_candidate"
+    },
+    {
+      "skill_id": "sf2-learning_closure-route-fit-spec",
+      "overlap_group_id": "overlap::sf2-learning_closure-route-fit-spec",
+      "canonical_candidate_id": "learning_closure::sf2-learning_closure-route-fit-spec",
+      "suppressed_by": [
+        "nightshift::sf2-learning_closure-route-fit-spec"
+      ],
+      "capability_ids": [
+        "learning_closure",
+        "nightshift"
+      ],
+      "reason_code": "multi_capability_candidate"
+    },
+    {
+      "skill_id": "sf2-memory-route-fit-spec",
+      "overlap_group_id": "overlap::sf2-memory-route-fit-spec",
+      "canonical_candidate_id": "memory::sf2-memory-route-fit-spec",
+      "suppressed_by": [],
+      "capability_ids": [
+        "memory"
+      ],
+      "reason_code": "capability_specific_candidate"
+    },
+    {
+      "skill_id": "sf2-mempalace-route-fit-spec",
+      "overlap_group_id": "overlap::sf2-mempalace-route-fit-spec",
+      "canonical_candidate_id": "memory::sf2-mempalace-route-fit-spec",
+      "suppressed_by": [
+        "mempalace::sf2-mempalace-route-fit-spec"
+      ],
+      "capability_ids": [
+        "memory",
+        "mempalace"
+      ],
+      "reason_code": "multi_capability_candidate"
+    },
+    {
+      "skill_id": "sf2-nightshift-route-fit-spec",
+      "overlap_group_id": "overlap::sf2-nightshift-route-fit-spec",
+      "canonical_candidate_id": "direct_master_loop::sf2-nightshift-route-fit-spec",
+      "suppressed_by": [
+        "learning_closure::sf2-nightshift-route-fit-spec",
+        "nightshift::sf2-nightshift-route-fit-spec",
+        "repair_loop::sf2-nightshift-route-fit-spec"
+      ],
+      "capability_ids": [
+        "direct_master_loop",
+        "learning_closure",
+        "nightshift",
+        "repair_loop"
+      ],
+      "reason_code": "multi_capability_candidate"
+    },
+    {
+      "skill_id": "sf2-registry_skills_sync-route-fit-spec",
+      "overlap_group_id": "overlap::sf2-registry_skills_sync-route-fit-spec",
+      "canonical_candidate_id": "registry_skills_sync::sf2-registry_skills_sync-route-fit-spec",
+      "suppressed_by": [],
+      "capability_ids": [
+        "registry_skills_sync"
+      ],
+      "reason_code": "capability_specific_candidate"
+    },
+    {
+      "skill_id": "sf2-research_control_plane-route-fit-spec",
+      "overlap_group_id": "overlap::sf2-research_control_plane-route-fit-spec",
+      "canonical_candidate_id": "claim_gate::sf2-research_control_plane-route-fit-spec",
+      "suppressed_by": [
+        "research::sf2-research_control_plane-route-fit-spec",
+        "research_control_plane::sf2-research_control_plane-route-fit-spec"
+      ],
+      "capability_ids": [
+        "claim_gate",
+        "research",
+        "research_control_plane"
+      ],
+      "reason_code": "multi_capability_candidate"
+    },
+    {
+      "skill_id": "sf2-swarm_multi_agent-route-fit-spec",
+      "overlap_group_id": "overlap::sf2-swarm_multi_agent-route-fit-spec",
+      "canonical_candidate_id": "swarm_multi_agent::sf2-swarm_multi_agent-route-fit-spec",
+      "suppressed_by": [],
+      "capability_ids": [
+        "swarm_multi_agent"
+      ],
+      "reason_code": "capability_specific_candidate"
+    },
+    {
+      "skill_id": "sf2-ui_validator-route-fit-spec",
+      "overlap_group_id": "overlap::sf2-ui_validator-route-fit-spec",
+      "canonical_candidate_id": "ui_validator::sf2-ui_validator-route-fit-spec",
+      "suppressed_by": [],
+      "capability_ids": [
+        "ui_validator"
+      ],
+      "reason_code": "capability_specific_candidate"
+    },
+    {
+      "skill_id": "sf2-xray-route-fit-spec",
+      "overlap_group_id": "overlap::sf2-xray-route-fit-spec",
+      "canonical_candidate_id": "xray::sf2-xray-route-fit-spec",
+      "suppressed_by": [],
+      "capability_ids": [
+        "xray"
+      ],
+      "reason_code": "capability_specific_candidate"
+    },
+    {
+      "skill_id": "tdd",
+      "overlap_group_id": "overlap::tdd",
+      "canonical_candidate_id": "repair_loop::tdd",
+      "suppressed_by": [],
+      "capability_ids": [
+        "repair_loop"
+      ],
+      "reason_code": "capability_specific_candidate"
+    },
+    {
+      "skill_id": "triage",
+      "overlap_group_id": "overlap::triage",
+      "canonical_candidate_id": "forecast_pregate::triage",
+      "suppressed_by": [
+        "metabolism_resume::triage"
+      ],
+      "capability_ids": [
+        "forecast_pregate",
+        "metabolism_resume"
+      ],
+      "reason_code": "multi_capability_candidate"
+    }
+  ]
+}

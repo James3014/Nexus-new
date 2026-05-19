@@ -1,0 +1,515 @@
+{
+  "schema": "nexus.sf3_metadata_bias_rescue.v1",
+  "status": "PASS",
+  "summary": {
+    "rescued_candidate_count": 42,
+    "runtime_update_allowed": false,
+    "public_benchmark_allowed": false
+  },
+  "rescued_candidates": [
+    {
+      "capability_id": "autonomic_router",
+      "skill_id": "sf2-autonomic_router-route-fit-spec",
+      "rescue_status": "rescued_candidate",
+      "required_metadata": [
+        "load_when",
+        "do_not_load_when",
+        "expected_evidence",
+        "cost_tier"
+      ],
+      "runtime_update_allowed": false
+    },
+    {
+      "capability_id": "autonomic_router",
+      "skill_id": "sf2-autoreason-route-fit-spec",
+      "rescue_status": "rescued_candidate",
+      "required_metadata": [
+        "load_when",
+        "do_not_load_when",
+        "expected_evidence",
+        "cost_tier"
+      ],
+      "runtime_update_allowed": false
+    },
+    {
+      "capability_id": "autonomic_router",
+      "skill_id": "sf2-belief-route-fit-spec",
+      "rescue_status": "rescued_candidate",
+      "required_metadata": [
+        "load_when",
+        "do_not_load_when",
+        "expected_evidence",
+        "cost_tier"
+      ],
+      "runtime_update_allowed": false
+    },
+    {
+      "capability_id": "autonomic_router",
+      "skill_id": "sf2-delivery_acceptance_gate-route-fit-spec",
+      "rescue_status": "rescued_candidate",
+      "required_metadata": [
+        "load_when",
+        "do_not_load_when",
+        "expected_evidence",
+        "cost_tier"
+      ],
+      "runtime_update_allowed": false
+    },
+    {
+      "capability_id": "autoreason",
+      "skill_id": "sf2-autoreason-route-fit-spec",
+      "rescue_status": "rescued_candidate",
+      "required_metadata": [
+        "load_when",
+        "do_not_load_when",
+        "expected_evidence",
+        "cost_tier"
+      ],
+      "runtime_update_allowed": false
+    },
+    {
+      "capability_id": "autoreason",
+      "skill_id": "sf2-belief-route-fit-spec",
+      "rescue_status": "rescued_candidate",
+      "required_metadata": [
+        "load_when",
+        "do_not_load_when",
+        "expected_evidence",
+        "cost_tier"
+      ],
+      "runtime_update_allowed": false
+    },
+    {
+      "capability_id": "autoreason",
+      "skill_id": "sf2-lancedb-route-fit-spec",
+      "rescue_status": "rescued_candidate",
+      "required_metadata": [
+        "load_when",
+        "do_not_load_when",
+        "expected_evidence",
+        "cost_tier"
+      ],
+      "runtime_update_allowed": false
+    },
+    {
+      "capability_id": "belief",
+      "skill_id": "sf2-belief-route-fit-spec",
+      "rescue_status": "rescued_candidate",
+      "required_metadata": [
+        "load_when",
+        "do_not_load_when",
+        "expected_evidence",
+        "cost_tier"
+      ],
+      "runtime_update_allowed": false
+    },
+    {
+      "capability_id": "belief",
+      "skill_id": "sf2-autoreason-route-fit-spec",
+      "rescue_status": "rescued_candidate",
+      "required_metadata": [
+        "load_when",
+        "do_not_load_when",
+        "expected_evidence",
+        "cost_tier"
+      ],
+      "runtime_update_allowed": false
+    },
+    {
+      "capability_id": "claim_gate",
+      "skill_id": "sf2-research_control_plane-route-fit-spec",
+      "rescue_status": "rescued_candidate",
+      "required_metadata": [
+        "load_when",
+        "do_not_load_when",
+        "expected_evidence",
+        "cost_tier"
+      ],
+      "runtime_update_allowed": false
+    },
+    {
+      "capability_id": "codeintel",
+      "skill_id": "sf2-codeintel-route-fit-spec",
+      "rescue_status": "rescued_candidate",
+      "required_metadata": [
+        "load_when",
+        "do_not_load_when",
+        "expected_evidence",
+        "cost_tier"
+      ],
+      "runtime_update_allowed": false
+    },
+    {
+      "capability_id": "ddtree",
+      "skill_id": "sf2-ddtree-route-fit-spec",
+      "rescue_status": "rescued_candidate",
+      "required_metadata": [
+        "load_when",
+        "do_not_load_when",
+        "expected_evidence",
+        "cost_tier"
+      ],
+      "runtime_update_allowed": false
+    },
+    {
+      "capability_id": "delivery_acceptance_gate",
+      "skill_id": "sf2-delivery_acceptance_gate-route-fit-spec",
+      "rescue_status": "rescued_candidate",
+      "required_metadata": [
+        "load_when",
+        "do_not_load_when",
+        "expected_evidence",
+        "cost_tier"
+      ],
+      "runtime_update_allowed": false
+    },
+    {
+      "capability_id": "direct_master_loop",
+      "skill_id": "sf2-direct_master_loop-route-fit-spec",
+      "rescue_status": "rescued_candidate",
+      "required_metadata": [
+        "load_when",
+        "do_not_load_when",
+        "expected_evidence",
+        "cost_tier"
+      ],
+      "runtime_update_allowed": false
+    },
+    {
+      "capability_id": "direct_master_loop",
+      "skill_id": "sf2-nightshift-route-fit-spec",
+      "rescue_status": "rescued_candidate",
+      "required_metadata": [
+        "load_when",
+        "do_not_load_when",
+        "expected_evidence",
+        "cost_tier"
+      ],
+      "runtime_update_allowed": false
+    },
+    {
+      "capability_id": "drone",
+      "skill_id": "sf2-drone-route-fit-spec",
+      "rescue_status": "rescued_candidate",
+      "required_metadata": [
+        "load_when",
+        "do_not_load_when",
+        "expected_evidence",
+        "cost_tier"
+      ],
+      "runtime_update_allowed": false
+    },
+    {
+      "capability_id": "external_productivity",
+      "skill_id": "sf2-external_productivity-route-fit-spec",
+      "rescue_status": "rescued_candidate",
+      "required_metadata": [
+        "load_when",
+        "do_not_load_when",
+        "expected_evidence",
+        "cost_tier"
+      ],
+      "runtime_update_allowed": false
+    },
+    {
+      "capability_id": "file_lock_security_gate",
+      "skill_id": "sf2-file_lock_security_gate-route-fit-spec",
+      "rescue_status": "rescued_candidate",
+      "required_metadata": [
+        "load_when",
+        "do_not_load_when",
+        "expected_evidence",
+        "cost_tier"
+      ],
+      "runtime_update_allowed": false
+    },
+    {
+      "capability_id": "forecast_pregate",
+      "skill_id": "sf2-forecast_pregate-route-fit-spec",
+      "rescue_status": "rescued_candidate",
+      "required_metadata": [
+        "load_when",
+        "do_not_load_when",
+        "expected_evidence",
+        "cost_tier"
+      ],
+      "runtime_update_allowed": false
+    },
+    {
+      "capability_id": "hyper_sprint",
+      "skill_id": "sf2-hyper_sprint-route-fit-spec",
+      "rescue_status": "rescued_candidate",
+      "required_metadata": [
+        "load_when",
+        "do_not_load_when",
+        "expected_evidence",
+        "cost_tier"
+      ],
+      "runtime_update_allowed": false
+    },
+    {
+      "capability_id": "lancedb",
+      "skill_id": "sf2-lancedb-route-fit-spec",
+      "rescue_status": "rescued_candidate",
+      "required_metadata": [
+        "load_when",
+        "do_not_load_when",
+        "expected_evidence",
+        "cost_tier"
+      ],
+      "runtime_update_allowed": false
+    },
+    {
+      "capability_id": "lancedb",
+      "skill_id": "sf2-autoreason-route-fit-spec",
+      "rescue_status": "rescued_candidate",
+      "required_metadata": [
+        "load_when",
+        "do_not_load_when",
+        "expected_evidence",
+        "cost_tier"
+      ],
+      "runtime_update_allowed": false
+    },
+    {
+      "capability_id": "learning_closure",
+      "skill_id": "sf2-learning_closure-route-fit-spec",
+      "rescue_status": "rescued_candidate",
+      "required_metadata": [
+        "load_when",
+        "do_not_load_when",
+        "expected_evidence",
+        "cost_tier"
+      ],
+      "runtime_update_allowed": false
+    },
+    {
+      "capability_id": "learning_closure",
+      "skill_id": "sf2-nightshift-route-fit-spec",
+      "rescue_status": "rescued_candidate",
+      "required_metadata": [
+        "load_when",
+        "do_not_load_when",
+        "expected_evidence",
+        "cost_tier"
+      ],
+      "runtime_update_allowed": false
+    },
+    {
+      "capability_id": "memory",
+      "skill_id": "sf2-memory-route-fit-spec",
+      "rescue_status": "rescued_candidate",
+      "required_metadata": [
+        "load_when",
+        "do_not_load_when",
+        "expected_evidence",
+        "cost_tier"
+      ],
+      "runtime_update_allowed": false
+    },
+    {
+      "capability_id": "memory",
+      "skill_id": "sf2-lancedb-route-fit-spec",
+      "rescue_status": "rescued_candidate",
+      "required_metadata": [
+        "load_when",
+        "do_not_load_when",
+        "expected_evidence",
+        "cost_tier"
+      ],
+      "runtime_update_allowed": false
+    },
+    {
+      "capability_id": "memory",
+      "skill_id": "sf2-mempalace-route-fit-spec",
+      "rescue_status": "rescued_candidate",
+      "required_metadata": [
+        "load_when",
+        "do_not_load_when",
+        "expected_evidence",
+        "cost_tier"
+      ],
+      "runtime_update_allowed": false
+    },
+    {
+      "capability_id": "mempalace",
+      "skill_id": "sf2-mempalace-route-fit-spec",
+      "rescue_status": "rescued_candidate",
+      "required_metadata": [
+        "load_when",
+        "do_not_load_when",
+        "expected_evidence",
+        "cost_tier"
+      ],
+      "runtime_update_allowed": false
+    },
+    {
+      "capability_id": "mempalace",
+      "skill_id": "sf2-file_lock_security_gate-route-fit-spec",
+      "rescue_status": "rescued_candidate",
+      "required_metadata": [
+        "load_when",
+        "do_not_load_when",
+        "expected_evidence",
+        "cost_tier"
+      ],
+      "runtime_update_allowed": false
+    },
+    {
+      "capability_id": "nightshift",
+      "skill_id": "sf2-nightshift-route-fit-spec",
+      "rescue_status": "rescued_candidate",
+      "required_metadata": [
+        "load_when",
+        "do_not_load_when",
+        "expected_evidence",
+        "cost_tier"
+      ],
+      "runtime_update_allowed": false
+    },
+    {
+      "capability_id": "nightshift",
+      "skill_id": "sf2-learning_closure-route-fit-spec",
+      "rescue_status": "rescued_candidate",
+      "required_metadata": [
+        "load_when",
+        "do_not_load_when",
+        "expected_evidence",
+        "cost_tier"
+      ],
+      "runtime_update_allowed": false
+    },
+    {
+      "capability_id": "registry_skills_sync",
+      "skill_id": "sf2-registry_skills_sync-route-fit-spec",
+      "rescue_status": "rescued_candidate",
+      "required_metadata": [
+        "load_when",
+        "do_not_load_when",
+        "expected_evidence",
+        "cost_tier"
+      ],
+      "runtime_update_allowed": false
+    },
+    {
+      "capability_id": "repair_loop",
+      "skill_id": "sf2-hyper_sprint-route-fit-spec",
+      "rescue_status": "rescued_candidate",
+      "required_metadata": [
+        "load_when",
+        "do_not_load_when",
+        "expected_evidence",
+        "cost_tier"
+      ],
+      "runtime_update_allowed": false
+    },
+    {
+      "capability_id": "repair_loop",
+      "skill_id": "sf2-nightshift-route-fit-spec",
+      "rescue_status": "rescued_candidate",
+      "required_metadata": [
+        "load_when",
+        "do_not_load_when",
+        "expected_evidence",
+        "cost_tier"
+      ],
+      "runtime_update_allowed": false
+    },
+    {
+      "capability_id": "research",
+      "skill_id": "sf2-research_control_plane-route-fit-spec",
+      "rescue_status": "rescued_candidate",
+      "required_metadata": [
+        "load_when",
+        "do_not_load_when",
+        "expected_evidence",
+        "cost_tier"
+      ],
+      "runtime_update_allowed": false
+    },
+    {
+      "capability_id": "research",
+      "skill_id": "sf2-lancedb-route-fit-spec",
+      "rescue_status": "rescued_candidate",
+      "required_metadata": [
+        "load_when",
+        "do_not_load_when",
+        "expected_evidence",
+        "cost_tier"
+      ],
+      "runtime_update_allowed": false
+    },
+    {
+      "capability_id": "research_control_plane",
+      "skill_id": "sf2-research_control_plane-route-fit-spec",
+      "rescue_status": "rescued_candidate",
+      "required_metadata": [
+        "load_when",
+        "do_not_load_when",
+        "expected_evidence",
+        "cost_tier"
+      ],
+      "runtime_update_allowed": false
+    },
+    {
+      "capability_id": "sandbox_replay",
+      "skill_id": "sf2-file_lock_security_gate-route-fit-spec",
+      "rescue_status": "rescued_candidate",
+      "required_metadata": [
+        "load_when",
+        "do_not_load_when",
+        "expected_evidence",
+        "cost_tier"
+      ],
+      "runtime_update_allowed": false
+    },
+    {
+      "capability_id": "swarm_multi_agent",
+      "skill_id": "sf2-swarm_multi_agent-route-fit-spec",
+      "rescue_status": "rescued_candidate",
+      "required_metadata": [
+        "load_when",
+        "do_not_load_when",
+        "expected_evidence",
+        "cost_tier"
+      ],
+      "runtime_update_allowed": false
+    },
+    {
+      "capability_id": "ui_validator",
+      "skill_id": "sf2-ui_validator-route-fit-spec",
+      "rescue_status": "rescued_candidate",
+      "required_metadata": [
+        "load_when",
+        "do_not_load_when",
+        "expected_evidence",
+        "cost_tier"
+      ],
+      "runtime_update_allowed": false
+    },
+    {
+      "capability_id": "ultra_review",
+      "skill_id": "sf2-file_lock_security_gate-route-fit-spec",
+      "rescue_status": "rescued_candidate",
+      "required_metadata": [
+        "load_when",
+        "do_not_load_when",
+        "expected_evidence",
+        "cost_tier"
+      ],
+      "runtime_update_allowed": false
+    },
+    {
+      "capability_id": "xray",
+      "skill_id": "sf2-xray-route-fit-spec",
+      "rescue_status": "rescued_candidate",
+      "required_metadata": [
+        "load_when",
+        "do_not_load_when",
+        "expected_evidence",
+        "cost_tier"
+      ],
+      "runtime_update_allowed": false
+    }
+  ]
+}

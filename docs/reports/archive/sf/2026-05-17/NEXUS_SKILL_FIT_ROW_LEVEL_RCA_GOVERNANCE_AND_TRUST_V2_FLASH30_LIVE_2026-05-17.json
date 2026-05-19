@@ -1,0 +1,452 @@
+{
+  "schema": "nexus.skill_fit_row_level_rca.v1",
+  "status": "PASS",
+  "capability": "governance_and_trust",
+  "summary": {
+    "row_count": 30,
+    "baseline_task_count": 5,
+    "skill_count": 4,
+    "eligible_for_threshold_review_count": 0,
+    "targeted_replay_count": 0,
+    "runtime_update_allowed": false,
+    "flash100_allowed": false
+  },
+  "root_cause": "skill_outcome_contribution_below_threshold",
+  "skill_analyses": [
+    {
+      "skill_id": "acceptance-evidence-failclosed",
+      "verdict": "needs_more_data",
+      "tested_rows": 5,
+      "effective_rows": 1,
+      "effective_rate": 0.2,
+      "task_bucket_counts": {
+        "feature": 2,
+        "refactor": 3
+      },
+      "effective_task_bucket_counts": {
+        "refactor": 1
+      },
+      "recommendation": "candidate_pool_v2_or_taskset_expansion",
+      "targeted_replay_row_ids": [],
+      "rows": [
+        {
+          "row_id": "governance_and_trust::pub-ref-002::skill_arm_001_8c2953c96e5b",
+          "task_key": "scripts/bench/public_benchmark_pilot_v1.json::pub-ref-002",
+          "task_ref": {
+            "manifest": "scripts/bench/public_benchmark_pilot_v1.json",
+            "task_id": "pub-ref-002"
+          },
+          "task_bucket": "refactor",
+          "baseline_status": "PASS",
+          "skill_status": "PASS",
+          "gate_status": "PASS",
+          "gate_row_status": "KEEP",
+          "effective": true,
+          "missing_effective_fields": [],
+          "trust_mismatch": false,
+          "evidence_path": "/private/tmp/nexus_skill_fit_governance_v2_flash30_live_20260517/governance_and_trust_pub-ref-002_skill_arm_001_8c2953c96e5b/evidence_bundle.json",
+          "receipt_path": "/private/tmp/nexus_skill_fit_governance_v2_flash30_live_20260517/governance_and_trust_pub-ref-002_skill_arm_001_8c2953c96e5b"
+        },
+        {
+          "row_id": "governance_and_trust::pub-ref-003::skill_arm_001_8c2953c96e5b",
+          "task_key": "scripts/bench/public_benchmark_pilot_v1.json::pub-ref-003",
+          "task_ref": {
+            "manifest": "scripts/bench/public_benchmark_pilot_v1.json",
+            "task_id": "pub-ref-003"
+          },
+          "task_bucket": "refactor",
+          "baseline_status": "PASS",
+          "skill_status": "PASS",
+          "gate_status": "PASS",
+          "gate_row_status": "RETURN",
+          "effective": false,
+          "missing_effective_fields": [],
+          "trust_mismatch": false,
+          "evidence_path": "/private/tmp/nexus_skill_fit_governance_v2_flash30_live_20260517/governance_and_trust_pub-ref-003_skill_arm_001_8c2953c96e5b/evidence_bundle.json",
+          "receipt_path": "/private/tmp/nexus_skill_fit_governance_v2_flash30_live_20260517/governance_and_trust_pub-ref-003_skill_arm_001_8c2953c96e5b"
+        },
+        {
+          "row_id": "governance_and_trust::pub-ref-004::skill_arm_001_8c2953c96e5b",
+          "task_key": "scripts/bench/public_benchmark_pilot_v1.json::pub-ref-004",
+          "task_ref": {
+            "manifest": "scripts/bench/public_benchmark_pilot_v1.json",
+            "task_id": "pub-ref-004"
+          },
+          "task_bucket": "refactor",
+          "baseline_status": "PASS",
+          "skill_status": "PASS",
+          "gate_status": "PASS",
+          "gate_row_status": "RETURN",
+          "effective": false,
+          "missing_effective_fields": [],
+          "trust_mismatch": false,
+          "evidence_path": "/private/tmp/nexus_skill_fit_governance_v2_flash30_live_20260517/governance_and_trust_pub-ref-004_skill_arm_001_8c2953c96e5b/evidence_bundle.json",
+          "receipt_path": "/private/tmp/nexus_skill_fit_governance_v2_flash30_live_20260517/governance_and_trust_pub-ref-004_skill_arm_001_8c2953c96e5b"
+        },
+        {
+          "row_id": "governance_and_trust::pub-feat-002::skill_arm_001_8c2953c96e5b",
+          "task_key": "scripts/bench/public_benchmark_pilot_v1.json::pub-feat-002",
+          "task_ref": {
+            "manifest": "scripts/bench/public_benchmark_pilot_v1.json",
+            "task_id": "pub-feat-002"
+          },
+          "task_bucket": "feature",
+          "baseline_status": "PASS",
+          "skill_status": "PASS",
+          "gate_status": "PASS",
+          "gate_row_status": "RETURN",
+          "effective": false,
+          "missing_effective_fields": [],
+          "trust_mismatch": false,
+          "evidence_path": "/private/tmp/nexus_skill_fit_governance_v2_flash30_live_20260517/governance_and_trust_pub-feat-002_skill_arm_001_8c2953c96e5b/evidence_bundle.json",
+          "receipt_path": "/private/tmp/nexus_skill_fit_governance_v2_flash30_live_20260517/governance_and_trust_pub-feat-002_skill_arm_001_8c2953c96e5b"
+        },
+        {
+          "row_id": "governance_and_trust::pub-feat-003::skill_arm_001_8c2953c96e5b",
+          "task_key": "scripts/bench/public_benchmark_pilot_v1.json::pub-feat-003",
+          "task_ref": {
+            "manifest": "scripts/bench/public_benchmark_pilot_v1.json",
+            "task_id": "pub-feat-003"
+          },
+          "task_bucket": "feature",
+          "baseline_status": "PASS",
+          "skill_status": "PASS",
+          "gate_status": "PASS",
+          "gate_row_status": "RETURN",
+          "effective": false,
+          "missing_effective_fields": [],
+          "trust_mismatch": false,
+          "evidence_path": "/private/tmp/nexus_skill_fit_governance_v2_flash30_live_20260517/governance_and_trust_pub-feat-003_skill_arm_001_8c2953c96e5b/evidence_bundle.json",
+          "receipt_path": "/private/tmp/nexus_skill_fit_governance_v2_flash30_live_20260517/governance_and_trust_pub-feat-003_skill_arm_001_8c2953c96e5b"
+        }
+      ]
+    },
+    {
+      "skill_id": "claudeosint-safe-surface-audit",
+      "verdict": "needs_more_data",
+      "tested_rows": 5,
+      "effective_rows": 1,
+      "effective_rate": 0.2,
+      "task_bucket_counts": {
+        "feature": 2,
+        "refactor": 3
+      },
+      "effective_task_bucket_counts": {
+        "refactor": 1
+      },
+      "recommendation": "candidate_pool_v2_or_taskset_expansion",
+      "targeted_replay_row_ids": [],
+      "rows": [
+        {
+          "row_id": "governance_and_trust::pub-ref-002::skill_arm_003_f897a2ef2cf4",
+          "task_key": "scripts/bench/public_benchmark_pilot_v1.json::pub-ref-002",
+          "task_ref": {
+            "manifest": "scripts/bench/public_benchmark_pilot_v1.json",
+            "task_id": "pub-ref-002"
+          },
+          "task_bucket": "refactor",
+          "baseline_status": "PASS",
+          "skill_status": "PASS",
+          "gate_status": "PASS",
+          "gate_row_status": "KEEP",
+          "effective": true,
+          "missing_effective_fields": [],
+          "trust_mismatch": false,
+          "evidence_path": "/private/tmp/nexus_skill_fit_governance_v2_flash30_live_20260517/governance_and_trust_pub-ref-002_skill_arm_003_f897a2ef2cf4/evidence_bundle.json",
+          "receipt_path": "/private/tmp/nexus_skill_fit_governance_v2_flash30_live_20260517/governance_and_trust_pub-ref-002_skill_arm_003_f897a2ef2cf4"
+        },
+        {
+          "row_id": "governance_and_trust::pub-ref-003::skill_arm_003_f897a2ef2cf4",
+          "task_key": "scripts/bench/public_benchmark_pilot_v1.json::pub-ref-003",
+          "task_ref": {
+            "manifest": "scripts/bench/public_benchmark_pilot_v1.json",
+            "task_id": "pub-ref-003"
+          },
+          "task_bucket": "refactor",
+          "baseline_status": "PASS",
+          "skill_status": "PASS",
+          "gate_status": "PASS",
+          "gate_row_status": "RETURN",
+          "effective": false,
+          "missing_effective_fields": [],
+          "trust_mismatch": false,
+          "evidence_path": "/private/tmp/nexus_skill_fit_governance_v2_flash30_live_20260517/governance_and_trust_pub-ref-003_skill_arm_003_f897a2ef2cf4/evidence_bundle.json",
+          "receipt_path": "/private/tmp/nexus_skill_fit_governance_v2_flash30_live_20260517/governance_and_trust_pub-ref-003_skill_arm_003_f897a2ef2cf4"
+        },
+        {
+          "row_id": "governance_and_trust::pub-ref-004::skill_arm_003_f897a2ef2cf4",
+          "task_key": "scripts/bench/public_benchmark_pilot_v1.json::pub-ref-004",
+          "task_ref": {
+            "manifest": "scripts/bench/public_benchmark_pilot_v1.json",
+            "task_id": "pub-ref-004"
+          },
+          "task_bucket": "refactor",
+          "baseline_status": "PASS",
+          "skill_status": "PASS",
+          "gate_status": "PASS",
+          "gate_row_status": "RETURN",
+          "effective": false,
+          "missing_effective_fields": [],
+          "trust_mismatch": false,
+          "evidence_path": "/private/tmp/nexus_skill_fit_governance_v2_flash30_live_20260517/governance_and_trust_pub-ref-004_skill_arm_003_f897a2ef2cf4/evidence_bundle.json",
+          "receipt_path": "/private/tmp/nexus_skill_fit_governance_v2_flash30_live_20260517/governance_and_trust_pub-ref-004_skill_arm_003_f897a2ef2cf4"
+        },
+        {
+          "row_id": "governance_and_trust::pub-feat-002::skill_arm_003_f897a2ef2cf4",
+          "task_key": "scripts/bench/public_benchmark_pilot_v1.json::pub-feat-002",
+          "task_ref": {
+            "manifest": "scripts/bench/public_benchmark_pilot_v1.json",
+            "task_id": "pub-feat-002"
+          },
+          "task_bucket": "feature",
+          "baseline_status": "PASS",
+          "skill_status": "PASS",
+          "gate_status": "PASS",
+          "gate_row_status": "RETURN",
+          "effective": false,
+          "missing_effective_fields": [],
+          "trust_mismatch": false,
+          "evidence_path": "/private/tmp/nexus_skill_fit_governance_v2_flash30_live_20260517/governance_and_trust_pub-feat-002_skill_arm_003_f897a2ef2cf4/evidence_bundle.json",
+          "receipt_path": "/private/tmp/nexus_skill_fit_governance_v2_flash30_live_20260517/governance_and_trust_pub-feat-002_skill_arm_003_f897a2ef2cf4"
+        },
+        {
+          "row_id": "governance_and_trust::pub-feat-003::skill_arm_003_f897a2ef2cf4",
+          "task_key": "scripts/bench/public_benchmark_pilot_v1.json::pub-feat-003",
+          "task_ref": {
+            "manifest": "scripts/bench/public_benchmark_pilot_v1.json",
+            "task_id": "pub-feat-003"
+          },
+          "task_bucket": "feature",
+          "baseline_status": "PASS",
+          "skill_status": "PASS",
+          "gate_status": "PASS",
+          "gate_row_status": "RETURN",
+          "effective": false,
+          "missing_effective_fields": [],
+          "trust_mismatch": false,
+          "evidence_path": "/private/tmp/nexus_skill_fit_governance_v2_flash30_live_20260517/governance_and_trust_pub-feat-003_skill_arm_003_f897a2ef2cf4/evidence_bundle.json",
+          "receipt_path": "/private/tmp/nexus_skill_fit_governance_v2_flash30_live_20260517/governance_and_trust_pub-feat-003_skill_arm_003_f897a2ef2cf4"
+        }
+      ]
+    },
+    {
+      "skill_id": "cso",
+      "verdict": "needs_more_data",
+      "tested_rows": 5,
+      "effective_rows": 1,
+      "effective_rate": 0.2,
+      "task_bucket_counts": {
+        "feature": 2,
+        "refactor": 3
+      },
+      "effective_task_bucket_counts": {
+        "refactor": 1
+      },
+      "recommendation": "candidate_pool_v2_or_taskset_expansion",
+      "targeted_replay_row_ids": [],
+      "rows": [
+        {
+          "row_id": "governance_and_trust::pub-ref-002::skill_arm_002_e36dcda7b600",
+          "task_key": "scripts/bench/public_benchmark_pilot_v1.json::pub-ref-002",
+          "task_ref": {
+            "manifest": "scripts/bench/public_benchmark_pilot_v1.json",
+            "task_id": "pub-ref-002"
+          },
+          "task_bucket": "refactor",
+          "baseline_status": "PASS",
+          "skill_status": "PASS",
+          "gate_status": "PASS",
+          "gate_row_status": "KEEP",
+          "effective": true,
+          "missing_effective_fields": [],
+          "trust_mismatch": false,
+          "evidence_path": "/private/tmp/nexus_skill_fit_governance_v2_flash30_live_20260517/governance_and_trust_pub-ref-002_skill_arm_002_e36dcda7b600/evidence_bundle.json",
+          "receipt_path": "/private/tmp/nexus_skill_fit_governance_v2_flash30_live_20260517/governance_and_trust_pub-ref-002_skill_arm_002_e36dcda7b600"
+        },
+        {
+          "row_id": "governance_and_trust::pub-ref-003::skill_arm_002_e36dcda7b600",
+          "task_key": "scripts/bench/public_benchmark_pilot_v1.json::pub-ref-003",
+          "task_ref": {
+            "manifest": "scripts/bench/public_benchmark_pilot_v1.json",
+            "task_id": "pub-ref-003"
+          },
+          "task_bucket": "refactor",
+          "baseline_status": "PASS",
+          "skill_status": "PASS",
+          "gate_status": "PASS",
+          "gate_row_status": "RETURN",
+          "effective": false,
+          "missing_effective_fields": [],
+          "trust_mismatch": false,
+          "evidence_path": "/private/tmp/nexus_skill_fit_governance_v2_flash30_live_20260517/governance_and_trust_pub-ref-003_skill_arm_002_e36dcda7b600/evidence_bundle.json",
+          "receipt_path": "/private/tmp/nexus_skill_fit_governance_v2_flash30_live_20260517/governance_and_trust_pub-ref-003_skill_arm_002_e36dcda7b600"
+        },
+        {
+          "row_id": "governance_and_trust::pub-ref-004::skill_arm_002_e36dcda7b600",
+          "task_key": "scripts/bench/public_benchmark_pilot_v1.json::pub-ref-004",
+          "task_ref": {
+            "manifest": "scripts/bench/public_benchmark_pilot_v1.json",
+            "task_id": "pub-ref-004"
+          },
+          "task_bucket": "refactor",
+          "baseline_status": "PASS",
+          "skill_status": "PASS",
+          "gate_status": "PASS",
+          "gate_row_status": "RETURN",
+          "effective": false,
+          "missing_effective_fields": [],
+          "trust_mismatch": false,
+          "evidence_path": "/private/tmp/nexus_skill_fit_governance_v2_flash30_live_20260517/governance_and_trust_pub-ref-004_skill_arm_002_e36dcda7b600/evidence_bundle.json",
+          "receipt_path": "/private/tmp/nexus_skill_fit_governance_v2_flash30_live_20260517/governance_and_trust_pub-ref-004_skill_arm_002_e36dcda7b600"
+        },
+        {
+          "row_id": "governance_and_trust::pub-feat-002::skill_arm_002_e36dcda7b600",
+          "task_key": "scripts/bench/public_benchmark_pilot_v1.json::pub-feat-002",
+          "task_ref": {
+            "manifest": "scripts/bench/public_benchmark_pilot_v1.json",
+            "task_id": "pub-feat-002"
+          },
+          "task_bucket": "feature",
+          "baseline_status": "PASS",
+          "skill_status": "PASS",
+          "gate_status": "PASS",
+          "gate_row_status": "RETURN",
+          "effective": false,
+          "missing_effective_fields": [],
+          "trust_mismatch": false,
+          "evidence_path": "/private/tmp/nexus_skill_fit_governance_v2_flash30_live_20260517/governance_and_trust_pub-feat-002_skill_arm_002_e36dcda7b600/evidence_bundle.json",
+          "receipt_path": "/private/tmp/nexus_skill_fit_governance_v2_flash30_live_20260517/governance_and_trust_pub-feat-002_skill_arm_002_e36dcda7b600"
+        },
+        {
+          "row_id": "governance_and_trust::pub-feat-003::skill_arm_002_e36dcda7b600",
+          "task_key": "scripts/bench/public_benchmark_pilot_v1.json::pub-feat-003",
+          "task_ref": {
+            "manifest": "scripts/bench/public_benchmark_pilot_v1.json",
+            "task_id": "pub-feat-003"
+          },
+          "task_bucket": "feature",
+          "baseline_status": "PASS",
+          "skill_status": "PASS",
+          "gate_status": "PASS",
+          "gate_row_status": "RETURN",
+          "effective": false,
+          "missing_effective_fields": [],
+          "trust_mismatch": false,
+          "evidence_path": "/private/tmp/nexus_skill_fit_governance_v2_flash30_live_20260517/governance_and_trust_pub-feat-003_skill_arm_002_e36dcda7b600/evidence_bundle.json",
+          "receipt_path": "/private/tmp/nexus_skill_fit_governance_v2_flash30_live_20260517/governance_and_trust_pub-feat-003_skill_arm_002_e36dcda7b600"
+        }
+      ]
+    },
+    {
+      "skill_id": "gbrain-soul-audit",
+      "verdict": "reject",
+      "tested_rows": 5,
+      "effective_rows": 0,
+      "effective_rate": 0.0,
+      "task_bucket_counts": {
+        "feature": 2,
+        "refactor": 3
+      },
+      "effective_task_bucket_counts": {},
+      "recommendation": "skip_until_candidate_or_taskset_changes",
+      "targeted_replay_row_ids": [],
+      "rows": [
+        {
+          "row_id": "governance_and_trust::pub-ref-002::skill_arm_004_bc316b7777b8",
+          "task_key": "scripts/bench/public_benchmark_pilot_v1.json::pub-ref-002",
+          "task_ref": {
+            "manifest": "scripts/bench/public_benchmark_pilot_v1.json",
+            "task_id": "pub-ref-002"
+          },
+          "task_bucket": "refactor",
+          "baseline_status": "PASS",
+          "skill_status": "PASS",
+          "gate_status": "PASS",
+          "gate_row_status": "RETURN",
+          "effective": false,
+          "missing_effective_fields": [],
+          "trust_mismatch": false,
+          "evidence_path": "/private/tmp/nexus_skill_fit_governance_v2_flash30_live_20260517/governance_and_trust_pub-ref-002_skill_arm_004_bc316b7777b8/evidence_bundle.json",
+          "receipt_path": "/private/tmp/nexus_skill_fit_governance_v2_flash30_live_20260517/governance_and_trust_pub-ref-002_skill_arm_004_bc316b7777b8"
+        },
+        {
+          "row_id": "governance_and_trust::pub-ref-003::skill_arm_004_bc316b7777b8",
+          "task_key": "scripts/bench/public_benchmark_pilot_v1.json::pub-ref-003",
+          "task_ref": {
+            "manifest": "scripts/bench/public_benchmark_pilot_v1.json",
+            "task_id": "pub-ref-003"
+          },
+          "task_bucket": "refactor",
+          "baseline_status": "PASS",
+          "skill_status": "PASS",
+          "gate_status": "PASS",
+          "gate_row_status": "RETURN",
+          "effective": false,
+          "missing_effective_fields": [],
+          "trust_mismatch": false,
+          "evidence_path": "/private/tmp/nexus_skill_fit_governance_v2_flash30_live_20260517/governance_and_trust_pub-ref-003_skill_arm_004_bc316b7777b8/evidence_bundle.json",
+          "receipt_path": "/private/tmp/nexus_skill_fit_governance_v2_flash30_live_20260517/governance_and_trust_pub-ref-003_skill_arm_004_bc316b7777b8"
+        },
+        {
+          "row_id": "governance_and_trust::pub-ref-004::skill_arm_004_bc316b7777b8",
+          "task_key": "scripts/bench/public_benchmark_pilot_v1.json::pub-ref-004",
+          "task_ref": {
+            "manifest": "scripts/bench/public_benchmark_pilot_v1.json",
+            "task_id": "pub-ref-004"
+          },
+          "task_bucket": "refactor",
+          "baseline_status": "PASS",
+          "skill_status": "PASS",
+          "gate_status": "PASS",
+          "gate_row_status": "RETURN",
+          "effective": false,
+          "missing_effective_fields": [],
+          "trust_mismatch": false,
+          "evidence_path": "/private/tmp/nexus_skill_fit_governance_v2_flash30_live_20260517/governance_and_trust_pub-ref-004_skill_arm_004_bc316b7777b8/evidence_bundle.json",
+          "receipt_path": "/private/tmp/nexus_skill_fit_governance_v2_flash30_live_20260517/governance_and_trust_pub-ref-004_skill_arm_004_bc316b7777b8"
+        },
+        {
+          "row_id": "governance_and_trust::pub-feat-002::skill_arm_004_bc316b7777b8",
+          "task_key": "scripts/bench/public_benchmark_pilot_v1.json::pub-feat-002",
+          "task_ref": {
+            "manifest": "scripts/bench/public_benchmark_pilot_v1.json",
+            "task_id": "pub-feat-002"
+          },
+          "task_bucket": "feature",
+          "baseline_status": "PASS",
+          "skill_status": "PASS",
+          "gate_status": "PASS",
+          "gate_row_status": "RETURN",
+          "effective": false,
+          "missing_effective_fields": [],
+          "trust_mismatch": false,
+          "evidence_path": "/private/tmp/nexus_skill_fit_governance_v2_flash30_live_20260517/governance_and_trust_pub-feat-002_skill_arm_004_bc316b7777b8/evidence_bundle.json",
+          "receipt_path": "/private/tmp/nexus_skill_fit_governance_v2_flash30_live_20260517/governance_and_trust_pub-feat-002_skill_arm_004_bc316b7777b8"
+        },
+        {
+          "row_id": "governance_and_trust::pub-feat-003::skill_arm_004_bc316b7777b8",
+          "task_key": "scripts/bench/public_benchmark_pilot_v1.json::pub-feat-003",
+          "task_ref": {
+            "manifest": "scripts/bench/public_benchmark_pilot_v1.json",
+            "task_id": "pub-feat-003"
+          },
+          "task_bucket": "feature",
+          "baseline_status": "PASS",
+          "skill_status": "PASS",
+          "gate_status": "PASS",
+          "gate_row_status": "RETURN",
+          "effective": false,
+          "missing_effective_fields": [],
+          "trust_mismatch": false,
+          "evidence_path": "/private/tmp/nexus_skill_fit_governance_v2_flash30_live_20260517/governance_and_trust_pub-feat-003_skill_arm_004_bc316b7777b8/evidence_bundle.json",
+          "receipt_path": "/private/tmp/nexus_skill_fit_governance_v2_flash30_live_20260517/governance_and_trust_pub-feat-003_skill_arm_004_bc316b7777b8"
+        }
+      ]
+    }
+  ],
+  "claim_boundary": [
+    "Row-level RCA explains discovery evidence; it does not promote runtime defaults.",
+    "Targeted replay is allowed only for receipt-backed needs_more_data skills.",
+    "Flash100 remains blocked until a threshold contract reports alternate/default readiness."
+  ]
+}

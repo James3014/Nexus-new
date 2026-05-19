@@ -1,0 +1,1181 @@
+{
+  "schema": "nexus.sf2_bounded_probe_task_manifest.v1",
+  "status": "PASS",
+  "summary": {
+    "task_count": 33,
+    "capability_count": 33,
+    "runtime_update_allowed": false,
+    "public_benchmark_allowed": false
+  },
+  "tasks": [
+    {
+      "id": "sf2-route-fit-direct_master_loop-001",
+      "task_id": "sf2-route-fit-direct_master_loop-001",
+      "capability_id": "direct_master_loop",
+      "group": "primary_execution",
+      "pillar": "artifact",
+      "phases": [
+        "S",
+        "P",
+        "X",
+        "D",
+        "R",
+        "A",
+        "C"
+      ],
+      "difficulty": "medium",
+      "task_type": "sf2_route_fit",
+      "task_desc": "Exercise route capability direct_master_loop using its declared role, then require skill-fit receipt evidence without runtime promotion.",
+      "prompt": "Exercise route capability direct_master_loop using its declared role, then require skill-fit receipt evidence without runtime promotion.",
+      "target_file": "unused",
+      "test_file": "unused",
+      "success_criteria": "sf2_bounded_probe_receipt_chain_complete",
+      "category": "direct_master_loop",
+      "repo_kind": "neutral_fixture",
+      "fixture_kind": "sf2_route_fit",
+      "expected_capabilities": [
+        "direct_master_loop"
+      ],
+      "capability_activation_contract": "sf2_bounded_probe",
+      "eligibility_class": "sf2_internal",
+      "expected_evidence": [
+        "capability_only_baseline",
+        "skill_arm_receipt",
+        "negative_control_block_or_return",
+        "outcome_contribution_decision"
+      ],
+      "runtime_update_allowed": false,
+      "public_benchmark_allowed": false
+    },
+    {
+      "id": "sf2-route-fit-repair_loop-001",
+      "task_id": "sf2-route-fit-repair_loop-001",
+      "capability_id": "repair_loop",
+      "group": "primary_execution",
+      "pillar": "artifact",
+      "phases": [
+        "D",
+        "R",
+        "A",
+        "C"
+      ],
+      "difficulty": "medium",
+      "task_type": "sf2_route_fit",
+      "task_desc": "Exercise route capability repair_loop using its declared role, then require skill-fit receipt evidence without runtime promotion.",
+      "prompt": "Exercise route capability repair_loop using its declared role, then require skill-fit receipt evidence without runtime promotion.",
+      "target_file": "unused",
+      "test_file": "unused",
+      "success_criteria": "sf2_bounded_probe_receipt_chain_complete",
+      "category": "repair_loop",
+      "repo_kind": "neutral_fixture",
+      "fixture_kind": "sf2_route_fit",
+      "expected_capabilities": [
+        "repair_loop"
+      ],
+      "capability_activation_contract": "sf2_bounded_probe",
+      "eligibility_class": "sf2_internal",
+      "expected_evidence": [
+        "capability_only_baseline",
+        "skill_arm_receipt",
+        "negative_control_block_or_return",
+        "outcome_contribution_decision"
+      ],
+      "runtime_update_allowed": false,
+      "public_benchmark_allowed": false
+    },
+    {
+      "id": "sf2-route-fit-hyper_sprint-001",
+      "task_id": "sf2-route-fit-hyper_sprint-001",
+      "capability_id": "hyper_sprint",
+      "group": "primary_execution",
+      "pillar": "belief",
+      "phases": [
+        "P",
+        "X",
+        "D",
+        "R"
+      ],
+      "difficulty": "medium",
+      "task_type": "sf2_route_fit",
+      "task_desc": "Exercise route capability hyper_sprint using its declared role, then require skill-fit receipt evidence without runtime promotion.",
+      "prompt": "Exercise route capability hyper_sprint using its declared role, then require skill-fit receipt evidence without runtime promotion.",
+      "target_file": "unused",
+      "test_file": "unused",
+      "success_criteria": "sf2_bounded_probe_receipt_chain_complete",
+      "category": "hyper_sprint",
+      "repo_kind": "neutral_fixture",
+      "fixture_kind": "sf2_route_fit",
+      "expected_capabilities": [
+        "hyper_sprint"
+      ],
+      "capability_activation_contract": "sf2_bounded_probe",
+      "eligibility_class": "sf2_internal",
+      "expected_evidence": [
+        "capability_only_baseline",
+        "skill_arm_receipt",
+        "negative_control_block_or_return",
+        "outcome_contribution_decision"
+      ],
+      "runtime_update_allowed": false,
+      "public_benchmark_allowed": false
+    },
+    {
+      "id": "sf2-route-fit-nightshift-001",
+      "task_id": "sf2-route-fit-nightshift-001",
+      "capability_id": "nightshift",
+      "group": "primary_execution",
+      "pillar": "memory",
+      "phases": [
+        "D",
+        "R",
+        "A",
+        "C"
+      ],
+      "difficulty": "medium",
+      "task_type": "sf2_route_fit",
+      "task_desc": "Exercise route capability nightshift using its declared role, then require skill-fit receipt evidence without runtime promotion.",
+      "prompt": "Exercise route capability nightshift using its declared role, then require skill-fit receipt evidence without runtime promotion.",
+      "target_file": "unused",
+      "test_file": "unused",
+      "success_criteria": "sf2_bounded_probe_receipt_chain_complete",
+      "category": "nightshift",
+      "repo_kind": "neutral_fixture",
+      "fixture_kind": "sf2_route_fit",
+      "expected_capabilities": [
+        "nightshift"
+      ],
+      "capability_activation_contract": "sf2_bounded_probe",
+      "eligibility_class": "sf2_internal",
+      "expected_evidence": [
+        "capability_only_baseline",
+        "skill_arm_receipt",
+        "negative_control_block_or_return",
+        "outcome_contribution_decision"
+      ],
+      "runtime_update_allowed": false,
+      "public_benchmark_allowed": false
+    },
+    {
+      "id": "sf2-route-fit-codeintel-001",
+      "task_id": "sf2-route-fit-codeintel-001",
+      "capability_id": "codeintel",
+      "group": "scout_context",
+      "pillar": "artifact",
+      "phases": [
+        "S",
+        "P",
+        "X"
+      ],
+      "difficulty": "medium",
+      "task_type": "sf2_route_fit",
+      "task_desc": "Exercise route capability codeintel using its declared role, then require skill-fit receipt evidence without runtime promotion.",
+      "prompt": "Exercise route capability codeintel using its declared role, then require skill-fit receipt evidence without runtime promotion.",
+      "target_file": "unused",
+      "test_file": "unused",
+      "success_criteria": "sf2_bounded_probe_receipt_chain_complete",
+      "category": "codeintel",
+      "repo_kind": "neutral_fixture",
+      "fixture_kind": "sf2_route_fit",
+      "expected_capabilities": [
+        "codeintel"
+      ],
+      "capability_activation_contract": "sf2_bounded_probe",
+      "eligibility_class": "sf2_internal",
+      "expected_evidence": [
+        "capability_only_baseline",
+        "skill_arm_receipt",
+        "negative_control_block_or_return",
+        "outcome_contribution_decision"
+      ],
+      "runtime_update_allowed": false,
+      "public_benchmark_allowed": false
+    },
+    {
+      "id": "sf2-route-fit-research-001",
+      "task_id": "sf2-route-fit-research-001",
+      "capability_id": "research",
+      "group": "scout_context",
+      "pillar": "lancedb",
+      "phases": [
+        "S",
+        "P",
+        "X",
+        "R"
+      ],
+      "difficulty": "medium",
+      "task_type": "sf2_route_fit",
+      "task_desc": "Exercise route capability research using its declared role, then require skill-fit receipt evidence without runtime promotion.",
+      "prompt": "Exercise route capability research using its declared role, then require skill-fit receipt evidence without runtime promotion.",
+      "target_file": "unused",
+      "test_file": "unused",
+      "success_criteria": "sf2_bounded_probe_receipt_chain_complete",
+      "category": "research",
+      "repo_kind": "neutral_fixture",
+      "fixture_kind": "sf2_route_fit",
+      "expected_capabilities": [
+        "research"
+      ],
+      "capability_activation_contract": "sf2_bounded_probe",
+      "eligibility_class": "sf2_internal",
+      "expected_evidence": [
+        "capability_only_baseline",
+        "skill_arm_receipt",
+        "negative_control_block_or_return",
+        "outcome_contribution_decision"
+      ],
+      "runtime_update_allowed": false,
+      "public_benchmark_allowed": false
+    },
+    {
+      "id": "sf2-route-fit-research_control_plane-001",
+      "task_id": "sf2-route-fit-research_control_plane-001",
+      "capability_id": "research_control_plane",
+      "group": "scout_context",
+      "pillar": "claim",
+      "phases": [
+        "S",
+        "P",
+        "X",
+        "R",
+        "C"
+      ],
+      "difficulty": "medium",
+      "task_type": "sf2_route_fit",
+      "task_desc": "Exercise route capability research_control_plane using its declared role, then require skill-fit receipt evidence without runtime promotion.",
+      "prompt": "Exercise route capability research_control_plane using its declared role, then require skill-fit receipt evidence without runtime promotion.",
+      "target_file": "unused",
+      "test_file": "unused",
+      "success_criteria": "sf2_bounded_probe_receipt_chain_complete",
+      "category": "research_control_plane",
+      "repo_kind": "neutral_fixture",
+      "fixture_kind": "sf2_route_fit",
+      "expected_capabilities": [
+        "research_control_plane"
+      ],
+      "capability_activation_contract": "sf2_bounded_probe",
+      "eligibility_class": "sf2_internal",
+      "expected_evidence": [
+        "capability_only_baseline",
+        "skill_arm_receipt",
+        "negative_control_block_or_return",
+        "outcome_contribution_decision"
+      ],
+      "runtime_update_allowed": false,
+      "public_benchmark_allowed": false
+    },
+    {
+      "id": "sf2-route-fit-xray-001",
+      "task_id": "sf2-route-fit-xray-001",
+      "capability_id": "xray",
+      "group": "scout_context",
+      "pillar": "artifact",
+      "phases": [
+        "S",
+        "X",
+        "R"
+      ],
+      "difficulty": "medium",
+      "task_type": "sf2_route_fit",
+      "task_desc": "Exercise route capability xray using its declared role, then require skill-fit receipt evidence without runtime promotion.",
+      "prompt": "Exercise route capability xray using its declared role, then require skill-fit receipt evidence without runtime promotion.",
+      "target_file": "unused",
+      "test_file": "unused",
+      "success_criteria": "sf2_bounded_probe_receipt_chain_complete",
+      "category": "xray",
+      "repo_kind": "neutral_fixture",
+      "fixture_kind": "sf2_route_fit",
+      "expected_capabilities": [
+        "xray"
+      ],
+      "capability_activation_contract": "sf2_bounded_probe",
+      "eligibility_class": "sf2_internal",
+      "expected_evidence": [
+        "capability_only_baseline",
+        "skill_arm_receipt",
+        "negative_control_block_or_return",
+        "outcome_contribution_decision"
+      ],
+      "runtime_update_allowed": false,
+      "public_benchmark_allowed": false
+    },
+    {
+      "id": "sf2-route-fit-learn_ask-001",
+      "task_id": "sf2-route-fit-learn_ask-001",
+      "capability_id": "learn_ask",
+      "group": "scout_context",
+      "pillar": "memory",
+      "phases": [
+        "S",
+        "P",
+        "R",
+        "C"
+      ],
+      "difficulty": "medium",
+      "task_type": "sf2_route_fit",
+      "task_desc": "Exercise route capability learn_ask using its declared role, then require skill-fit receipt evidence without runtime promotion.",
+      "prompt": "Exercise route capability learn_ask using its declared role, then require skill-fit receipt evidence without runtime promotion.",
+      "target_file": "unused",
+      "test_file": "unused",
+      "success_criteria": "sf2_bounded_probe_receipt_chain_complete",
+      "category": "learn_ask",
+      "repo_kind": "neutral_fixture",
+      "fixture_kind": "sf2_route_fit",
+      "expected_capabilities": [
+        "learn_ask"
+      ],
+      "capability_activation_contract": "sf2_bounded_probe",
+      "eligibility_class": "sf2_internal",
+      "expected_evidence": [
+        "capability_only_baseline",
+        "skill_arm_receipt",
+        "negative_control_block_or_return",
+        "outcome_contribution_decision"
+      ],
+      "runtime_update_allowed": false,
+      "public_benchmark_allowed": false
+    },
+    {
+      "id": "sf2-route-fit-lancedb-001",
+      "task_id": "sf2-route-fit-lancedb-001",
+      "capability_id": "lancedb",
+      "group": "scout_context",
+      "pillar": "lancedb",
+      "phases": [
+        "S",
+        "X",
+        "R"
+      ],
+      "difficulty": "medium",
+      "task_type": "sf2_route_fit",
+      "task_desc": "Exercise route capability lancedb using its declared role, then require skill-fit receipt evidence without runtime promotion.",
+      "prompt": "Exercise route capability lancedb using its declared role, then require skill-fit receipt evidence without runtime promotion.",
+      "target_file": "unused",
+      "test_file": "unused",
+      "success_criteria": "sf2_bounded_probe_receipt_chain_complete",
+      "category": "lancedb",
+      "repo_kind": "neutral_fixture",
+      "fixture_kind": "sf2_route_fit",
+      "expected_capabilities": [
+        "lancedb"
+      ],
+      "capability_activation_contract": "sf2_bounded_probe",
+      "eligibility_class": "sf2_internal",
+      "expected_evidence": [
+        "capability_only_baseline",
+        "skill_arm_receipt",
+        "negative_control_block_or_return",
+        "outcome_contribution_decision"
+      ],
+      "runtime_update_allowed": false,
+      "public_benchmark_allowed": false
+    },
+    {
+      "id": "sf2-route-fit-memory-001",
+      "task_id": "sf2-route-fit-memory-001",
+      "capability_id": "memory",
+      "group": "memory_learning",
+      "pillar": "memory",
+      "phases": [
+        "S",
+        "P",
+        "R",
+        "C"
+      ],
+      "difficulty": "medium",
+      "task_type": "sf2_route_fit",
+      "task_desc": "Exercise route capability memory using its declared role, then require skill-fit receipt evidence without runtime promotion.",
+      "prompt": "Exercise route capability memory using its declared role, then require skill-fit receipt evidence without runtime promotion.",
+      "target_file": "unused",
+      "test_file": "unused",
+      "success_criteria": "sf2_bounded_probe_receipt_chain_complete",
+      "category": "memory",
+      "repo_kind": "neutral_fixture",
+      "fixture_kind": "sf2_route_fit",
+      "expected_capabilities": [
+        "memory"
+      ],
+      "capability_activation_contract": "sf2_bounded_probe",
+      "eligibility_class": "sf2_internal",
+      "expected_evidence": [
+        "capability_only_baseline",
+        "skill_arm_receipt",
+        "negative_control_block_or_return",
+        "outcome_contribution_decision"
+      ],
+      "runtime_update_allowed": false,
+      "public_benchmark_allowed": false
+    },
+    {
+      "id": "sf2-route-fit-learning_closure-001",
+      "task_id": "sf2-route-fit-learning_closure-001",
+      "capability_id": "learning_closure",
+      "group": "memory_learning",
+      "pillar": "memory",
+      "phases": [
+        "R",
+        "A",
+        "C"
+      ],
+      "difficulty": "medium",
+      "task_type": "sf2_route_fit",
+      "task_desc": "Exercise route capability learning_closure using its declared role, then require skill-fit receipt evidence without runtime promotion.",
+      "prompt": "Exercise route capability learning_closure using its declared role, then require skill-fit receipt evidence without runtime promotion.",
+      "target_file": "unused",
+      "test_file": "unused",
+      "success_criteria": "sf2_bounded_probe_receipt_chain_complete",
+      "category": "learning_closure",
+      "repo_kind": "neutral_fixture",
+      "fixture_kind": "sf2_route_fit",
+      "expected_capabilities": [
+        "learning_closure"
+      ],
+      "capability_activation_contract": "sf2_bounded_probe",
+      "eligibility_class": "sf2_internal",
+      "expected_evidence": [
+        "capability_only_baseline",
+        "skill_arm_receipt",
+        "negative_control_block_or_return",
+        "outcome_contribution_decision"
+      ],
+      "runtime_update_allowed": false,
+      "public_benchmark_allowed": false
+    },
+    {
+      "id": "sf2-route-fit-autoreason-001",
+      "task_id": "sf2-route-fit-autoreason-001",
+      "capability_id": "autoreason",
+      "group": "reasoning_acceleration",
+      "pillar": "belief",
+      "phases": [
+        "P",
+        "X",
+        "D",
+        "R"
+      ],
+      "difficulty": "medium",
+      "task_type": "sf2_route_fit",
+      "task_desc": "Exercise route capability autoreason using its declared role, then require skill-fit receipt evidence without runtime promotion.",
+      "prompt": "Exercise route capability autoreason using its declared role, then require skill-fit receipt evidence without runtime promotion.",
+      "target_file": "unused",
+      "test_file": "unused",
+      "success_criteria": "sf2_bounded_probe_receipt_chain_complete",
+      "category": "autoreason",
+      "repo_kind": "neutral_fixture",
+      "fixture_kind": "sf2_route_fit",
+      "expected_capabilities": [
+        "autoreason"
+      ],
+      "capability_activation_contract": "sf2_bounded_probe",
+      "eligibility_class": "sf2_internal",
+      "expected_evidence": [
+        "capability_only_baseline",
+        "skill_arm_receipt",
+        "negative_control_block_or_return",
+        "outcome_contribution_decision"
+      ],
+      "runtime_update_allowed": false,
+      "public_benchmark_allowed": false
+    },
+    {
+      "id": "sf2-route-fit-ddtree-001",
+      "task_id": "sf2-route-fit-ddtree-001",
+      "capability_id": "ddtree",
+      "group": "reasoning_acceleration",
+      "pillar": "belief",
+      "phases": [
+        "P",
+        "X",
+        "D"
+      ],
+      "difficulty": "medium",
+      "task_type": "sf2_route_fit",
+      "task_desc": "Exercise route capability ddtree using its declared role, then require skill-fit receipt evidence without runtime promotion.",
+      "prompt": "Exercise route capability ddtree using its declared role, then require skill-fit receipt evidence without runtime promotion.",
+      "target_file": "unused",
+      "test_file": "unused",
+      "success_criteria": "sf2_bounded_probe_receipt_chain_complete",
+      "category": "ddtree",
+      "repo_kind": "neutral_fixture",
+      "fixture_kind": "sf2_route_fit",
+      "expected_capabilities": [
+        "ddtree"
+      ],
+      "capability_activation_contract": "sf2_bounded_probe",
+      "eligibility_class": "sf2_internal",
+      "expected_evidence": [
+        "capability_only_baseline",
+        "skill_arm_receipt",
+        "negative_control_block_or_return",
+        "outcome_contribution_decision"
+      ],
+      "runtime_update_allowed": false,
+      "public_benchmark_allowed": false
+    },
+    {
+      "id": "sf2-route-fit-belief-001",
+      "task_id": "sf2-route-fit-belief-001",
+      "capability_id": "belief",
+      "group": "reasoning_acceleration",
+      "pillar": "belief",
+      "phases": [
+        "P",
+        "X",
+        "D",
+        "R"
+      ],
+      "difficulty": "medium",
+      "task_type": "sf2_route_fit",
+      "task_desc": "Exercise route capability belief using its declared role, then require skill-fit receipt evidence without runtime promotion.",
+      "prompt": "Exercise route capability belief using its declared role, then require skill-fit receipt evidence without runtime promotion.",
+      "target_file": "unused",
+      "test_file": "unused",
+      "success_criteria": "sf2_bounded_probe_receipt_chain_complete",
+      "category": "belief",
+      "repo_kind": "neutral_fixture",
+      "fixture_kind": "sf2_route_fit",
+      "expected_capabilities": [
+        "belief"
+      ],
+      "capability_activation_contract": "sf2_bounded_probe",
+      "eligibility_class": "sf2_internal",
+      "expected_evidence": [
+        "capability_only_baseline",
+        "skill_arm_receipt",
+        "negative_control_block_or_return",
+        "outcome_contribution_decision"
+      ],
+      "runtime_update_allowed": false,
+      "public_benchmark_allowed": false
+    },
+    {
+      "id": "sf2-route-fit-autonomic_router-001",
+      "task_id": "sf2-route-fit-autonomic_router-001",
+      "capability_id": "autonomic_router",
+      "group": "reasoning_acceleration",
+      "pillar": "belief",
+      "phases": [
+        "S",
+        "P",
+        "X"
+      ],
+      "difficulty": "medium",
+      "task_type": "sf2_route_fit",
+      "task_desc": "Exercise route capability autonomic_router using its declared role, then require skill-fit receipt evidence without runtime promotion.",
+      "prompt": "Exercise route capability autonomic_router using its declared role, then require skill-fit receipt evidence without runtime promotion.",
+      "target_file": "unused",
+      "test_file": "unused",
+      "success_criteria": "sf2_bounded_probe_receipt_chain_complete",
+      "category": "autonomic_router",
+      "repo_kind": "neutral_fixture",
+      "fixture_kind": "sf2_route_fit",
+      "expected_capabilities": [
+        "autonomic_router"
+      ],
+      "capability_activation_contract": "sf2_bounded_probe",
+      "eligibility_class": "sf2_internal",
+      "expected_evidence": [
+        "capability_only_baseline",
+        "skill_arm_receipt",
+        "negative_control_block_or_return",
+        "outcome_contribution_decision"
+      ],
+      "runtime_update_allowed": false,
+      "public_benchmark_allowed": false
+    },
+    {
+      "id": "sf2-route-fit-forecast_pregate-001",
+      "task_id": "sf2-route-fit-forecast_pregate-001",
+      "capability_id": "forecast_pregate",
+      "group": "reasoning_acceleration",
+      "pillar": "belief",
+      "phases": [
+        "S",
+        "P"
+      ],
+      "difficulty": "medium",
+      "task_type": "sf2_route_fit",
+      "task_desc": "Exercise route capability forecast_pregate using its declared role, then require skill-fit receipt evidence without runtime promotion.",
+      "prompt": "Exercise route capability forecast_pregate using its declared role, then require skill-fit receipt evidence without runtime promotion.",
+      "target_file": "unused",
+      "test_file": "unused",
+      "success_criteria": "sf2_bounded_probe_receipt_chain_complete",
+      "category": "forecast_pregate",
+      "repo_kind": "neutral_fixture",
+      "fixture_kind": "sf2_route_fit",
+      "expected_capabilities": [
+        "forecast_pregate"
+      ],
+      "capability_activation_contract": "sf2_bounded_probe",
+      "eligibility_class": "sf2_internal",
+      "expected_evidence": [
+        "capability_only_baseline",
+        "skill_arm_receipt",
+        "negative_control_block_or_return",
+        "outcome_contribution_decision"
+      ],
+      "runtime_update_allowed": false,
+      "public_benchmark_allowed": false
+    },
+    {
+      "id": "sf2-route-fit-swarm_multi_agent-001",
+      "task_id": "sf2-route-fit-swarm_multi_agent-001",
+      "capability_id": "swarm_multi_agent",
+      "group": "collaboration",
+      "pillar": "artifact",
+      "phases": [
+        "P",
+        "X",
+        "D",
+        "A",
+        "C"
+      ],
+      "difficulty": "medium",
+      "task_type": "sf2_route_fit",
+      "task_desc": "Exercise route capability swarm_multi_agent using its declared role, then require skill-fit receipt evidence without runtime promotion.",
+      "prompt": "Exercise route capability swarm_multi_agent using its declared role, then require skill-fit receipt evidence without runtime promotion.",
+      "target_file": "unused",
+      "test_file": "unused",
+      "success_criteria": "sf2_bounded_probe_receipt_chain_complete",
+      "category": "swarm_multi_agent",
+      "repo_kind": "neutral_fixture",
+      "fixture_kind": "sf2_route_fit",
+      "expected_capabilities": [
+        "swarm_multi_agent"
+      ],
+      "capability_activation_contract": "sf2_bounded_probe",
+      "eligibility_class": "sf2_internal",
+      "expected_evidence": [
+        "capability_only_baseline",
+        "skill_arm_receipt",
+        "negative_control_block_or_return",
+        "outcome_contribution_decision"
+      ],
+      "runtime_update_allowed": false,
+      "public_benchmark_allowed": false
+    },
+    {
+      "id": "sf2-route-fit-drone-001",
+      "task_id": "sf2-route-fit-drone-001",
+      "capability_id": "drone",
+      "group": "collaboration",
+      "pillar": "artifact",
+      "phases": [
+        "X",
+        "D",
+        "R"
+      ],
+      "difficulty": "medium",
+      "task_type": "sf2_route_fit",
+      "task_desc": "Exercise route capability drone using its declared role, then require skill-fit receipt evidence without runtime promotion.",
+      "prompt": "Exercise route capability drone using its declared role, then require skill-fit receipt evidence without runtime promotion.",
+      "target_file": "unused",
+      "test_file": "unused",
+      "success_criteria": "sf2_bounded_probe_receipt_chain_complete",
+      "category": "drone",
+      "repo_kind": "neutral_fixture",
+      "fixture_kind": "sf2_route_fit",
+      "expected_capabilities": [
+        "drone"
+      ],
+      "capability_activation_contract": "sf2_bounded_probe",
+      "eligibility_class": "sf2_internal",
+      "expected_evidence": [
+        "capability_only_baseline",
+        "skill_arm_receipt",
+        "negative_control_block_or_return",
+        "outcome_contribution_decision"
+      ],
+      "runtime_update_allowed": false,
+      "public_benchmark_allowed": false
+    },
+    {
+      "id": "sf2-route-fit-file_lock_security_gate-001",
+      "task_id": "sf2-route-fit-file_lock_security_gate-001",
+      "capability_id": "file_lock_security_gate",
+      "group": "collaboration",
+      "pillar": "mempalace",
+      "phases": [
+        "P",
+        "D",
+        "A"
+      ],
+      "difficulty": "medium",
+      "task_type": "sf2_route_fit",
+      "task_desc": "Exercise route capability file_lock_security_gate using its declared role, then require skill-fit receipt evidence without runtime promotion.",
+      "prompt": "Exercise route capability file_lock_security_gate using its declared role, then require skill-fit receipt evidence without runtime promotion.",
+      "target_file": "unused",
+      "test_file": "unused",
+      "success_criteria": "sf2_bounded_probe_receipt_chain_complete",
+      "category": "file_lock_security_gate",
+      "repo_kind": "neutral_fixture",
+      "fixture_kind": "sf2_route_fit",
+      "expected_capabilities": [
+        "file_lock_security_gate"
+      ],
+      "capability_activation_contract": "sf2_bounded_probe",
+      "eligibility_class": "sf2_internal",
+      "expected_evidence": [
+        "capability_only_baseline",
+        "skill_arm_receipt",
+        "negative_control_block_or_return",
+        "outcome_contribution_decision"
+      ],
+      "runtime_update_allowed": false,
+      "public_benchmark_allowed": false
+    },
+    {
+      "id": "sf2-route-fit-mempalace-001",
+      "task_id": "sf2-route-fit-mempalace-001",
+      "capability_id": "mempalace",
+      "group": "governance_risk",
+      "pillar": "mempalace",
+      "phases": [
+        "S",
+        "P",
+        "A",
+        "C"
+      ],
+      "difficulty": "medium",
+      "task_type": "sf2_route_fit",
+      "task_desc": "Exercise route capability mempalace using its declared role, then require skill-fit receipt evidence without runtime promotion.",
+      "prompt": "Exercise route capability mempalace using its declared role, then require skill-fit receipt evidence without runtime promotion.",
+      "target_file": "unused",
+      "test_file": "unused",
+      "success_criteria": "sf2_bounded_probe_receipt_chain_complete",
+      "category": "mempalace",
+      "repo_kind": "neutral_fixture",
+      "fixture_kind": "sf2_route_fit",
+      "expected_capabilities": [
+        "mempalace"
+      ],
+      "capability_activation_contract": "sf2_bounded_probe",
+      "eligibility_class": "sf2_internal",
+      "expected_evidence": [
+        "capability_only_baseline",
+        "skill_arm_receipt",
+        "negative_control_block_or_return",
+        "outcome_contribution_decision"
+      ],
+      "runtime_update_allowed": false,
+      "public_benchmark_allowed": false
+    },
+    {
+      "id": "sf2-route-fit-policy_capability_gate-001",
+      "task_id": "sf2-route-fit-policy_capability_gate-001",
+      "capability_id": "policy_capability_gate",
+      "group": "governance_risk",
+      "pillar": "mempalace",
+      "phases": [
+        "S",
+        "P",
+        "A",
+        "C"
+      ],
+      "difficulty": "medium",
+      "task_type": "sf2_route_fit",
+      "task_desc": "Exercise route capability policy_capability_gate using its declared role, then require skill-fit receipt evidence without runtime promotion.",
+      "prompt": "Exercise route capability policy_capability_gate using its declared role, then require skill-fit receipt evidence without runtime promotion.",
+      "target_file": "unused",
+      "test_file": "unused",
+      "success_criteria": "sf2_bounded_probe_receipt_chain_complete",
+      "category": "policy_capability_gate",
+      "repo_kind": "neutral_fixture",
+      "fixture_kind": "sf2_route_fit",
+      "expected_capabilities": [
+        "policy_capability_gate"
+      ],
+      "capability_activation_contract": "sf2_bounded_probe",
+      "eligibility_class": "sf2_internal",
+      "expected_evidence": [
+        "capability_only_baseline",
+        "skill_arm_receipt",
+        "negative_control_block_or_return",
+        "outcome_contribution_decision"
+      ],
+      "runtime_update_allowed": false,
+      "public_benchmark_allowed": false
+    },
+    {
+      "id": "sf2-route-fit-ultra_review-001",
+      "task_id": "sf2-route-fit-ultra_review-001",
+      "capability_id": "ultra_review",
+      "group": "governance_risk",
+      "pillar": "artifact",
+      "phases": [
+        "A",
+        "C"
+      ],
+      "difficulty": "medium",
+      "task_type": "sf2_route_fit",
+      "task_desc": "Exercise route capability ultra_review using its declared role, then require skill-fit receipt evidence without runtime promotion.",
+      "prompt": "Exercise route capability ultra_review using its declared role, then require skill-fit receipt evidence without runtime promotion.",
+      "target_file": "unused",
+      "test_file": "unused",
+      "success_criteria": "sf2_bounded_probe_receipt_chain_complete",
+      "category": "ultra_review",
+      "repo_kind": "neutral_fixture",
+      "fixture_kind": "sf2_route_fit",
+      "expected_capabilities": [
+        "ultra_review"
+      ],
+      "capability_activation_contract": "sf2_bounded_probe",
+      "eligibility_class": "sf2_internal",
+      "expected_evidence": [
+        "capability_only_baseline",
+        "skill_arm_receipt",
+        "negative_control_block_or_return",
+        "outcome_contribution_decision"
+      ],
+      "runtime_update_allowed": false,
+      "public_benchmark_allowed": false
+    },
+    {
+      "id": "sf2-route-fit-artifact_gate-001",
+      "task_id": "sf2-route-fit-artifact_gate-001",
+      "capability_id": "artifact_gate",
+      "group": "delivery_validation",
+      "pillar": "artifact",
+      "phases": [
+        "A",
+        "C"
+      ],
+      "difficulty": "medium",
+      "task_type": "sf2_route_fit",
+      "task_desc": "Exercise route capability artifact_gate using its declared role, then require skill-fit receipt evidence without runtime promotion.",
+      "prompt": "Exercise route capability artifact_gate using its declared role, then require skill-fit receipt evidence without runtime promotion.",
+      "target_file": "unused",
+      "test_file": "unused",
+      "success_criteria": "sf2_bounded_probe_receipt_chain_complete",
+      "category": "artifact_gate",
+      "repo_kind": "neutral_fixture",
+      "fixture_kind": "sf2_route_fit",
+      "expected_capabilities": [
+        "artifact_gate"
+      ],
+      "capability_activation_contract": "sf2_bounded_probe",
+      "eligibility_class": "sf2_internal",
+      "expected_evidence": [
+        "capability_only_baseline",
+        "skill_arm_receipt",
+        "negative_control_block_or_return",
+        "outcome_contribution_decision"
+      ],
+      "runtime_update_allowed": false,
+      "public_benchmark_allowed": false
+    },
+    {
+      "id": "sf2-route-fit-claim_gate-001",
+      "task_id": "sf2-route-fit-claim_gate-001",
+      "capability_id": "claim_gate",
+      "group": "delivery_validation",
+      "pillar": "claim",
+      "phases": [
+        "A",
+        "C"
+      ],
+      "difficulty": "medium",
+      "task_type": "sf2_route_fit",
+      "task_desc": "Exercise route capability claim_gate using its declared role, then require skill-fit receipt evidence without runtime promotion.",
+      "prompt": "Exercise route capability claim_gate using its declared role, then require skill-fit receipt evidence without runtime promotion.",
+      "target_file": "unused",
+      "test_file": "unused",
+      "success_criteria": "sf2_bounded_probe_receipt_chain_complete",
+      "category": "claim_gate",
+      "repo_kind": "neutral_fixture",
+      "fixture_kind": "sf2_route_fit",
+      "expected_capabilities": [
+        "claim_gate"
+      ],
+      "capability_activation_contract": "sf2_bounded_probe",
+      "eligibility_class": "sf2_internal",
+      "expected_evidence": [
+        "capability_only_baseline",
+        "skill_arm_receipt",
+        "negative_control_block_or_return",
+        "outcome_contribution_decision"
+      ],
+      "runtime_update_allowed": false,
+      "public_benchmark_allowed": false
+    },
+    {
+      "id": "sf2-route-fit-delivery_acceptance_gate-001",
+      "task_id": "sf2-route-fit-delivery_acceptance_gate-001",
+      "capability_id": "delivery_acceptance_gate",
+      "group": "delivery_validation",
+      "pillar": "artifact",
+      "phases": [
+        "A",
+        "C"
+      ],
+      "difficulty": "medium",
+      "task_type": "sf2_route_fit",
+      "task_desc": "Exercise route capability delivery_acceptance_gate using its declared role, then require skill-fit receipt evidence without runtime promotion.",
+      "prompt": "Exercise route capability delivery_acceptance_gate using its declared role, then require skill-fit receipt evidence without runtime promotion.",
+      "target_file": "unused",
+      "test_file": "unused",
+      "success_criteria": "sf2_bounded_probe_receipt_chain_complete",
+      "category": "delivery_acceptance_gate",
+      "repo_kind": "neutral_fixture",
+      "fixture_kind": "sf2_route_fit",
+      "expected_capabilities": [
+        "delivery_acceptance_gate"
+      ],
+      "capability_activation_contract": "sf2_bounded_probe",
+      "eligibility_class": "sf2_internal",
+      "expected_evidence": [
+        "capability_only_baseline",
+        "skill_arm_receipt",
+        "negative_control_block_or_return",
+        "outcome_contribution_decision"
+      ],
+      "runtime_update_allowed": false,
+      "public_benchmark_allowed": false
+    },
+    {
+      "id": "sf2-route-fit-sandbox_replay-001",
+      "task_id": "sf2-route-fit-sandbox_replay-001",
+      "capability_id": "sandbox_replay",
+      "group": "delivery_validation",
+      "pillar": "artifact",
+      "phases": [
+        "D",
+        "R",
+        "A"
+      ],
+      "difficulty": "medium",
+      "task_type": "sf2_route_fit",
+      "task_desc": "Exercise route capability sandbox_replay using its declared role, then require skill-fit receipt evidence without runtime promotion.",
+      "prompt": "Exercise route capability sandbox_replay using its declared role, then require skill-fit receipt evidence without runtime promotion.",
+      "target_file": "unused",
+      "test_file": "unused",
+      "success_criteria": "sf2_bounded_probe_receipt_chain_complete",
+      "category": "sandbox_replay",
+      "repo_kind": "neutral_fixture",
+      "fixture_kind": "sf2_route_fit",
+      "expected_capabilities": [
+        "sandbox_replay"
+      ],
+      "capability_activation_contract": "sf2_bounded_probe",
+      "eligibility_class": "sf2_internal",
+      "expected_evidence": [
+        "capability_only_baseline",
+        "skill_arm_receipt",
+        "negative_control_block_or_return",
+        "outcome_contribution_decision"
+      ],
+      "runtime_update_allowed": false,
+      "public_benchmark_allowed": false
+    },
+    {
+      "id": "sf2-route-fit-benchmark_meta_opt-001",
+      "task_id": "sf2-route-fit-benchmark_meta_opt-001",
+      "capability_id": "benchmark_meta_opt",
+      "group": "self_evolution",
+      "pillar": "claim",
+      "phases": [
+        "R",
+        "A",
+        "C"
+      ],
+      "difficulty": "medium",
+      "task_type": "sf2_route_fit",
+      "task_desc": "Exercise route capability benchmark_meta_opt using its declared role, then require skill-fit receipt evidence without runtime promotion.",
+      "prompt": "Exercise route capability benchmark_meta_opt using its declared role, then require skill-fit receipt evidence without runtime promotion.",
+      "target_file": "unused",
+      "test_file": "unused",
+      "success_criteria": "sf2_bounded_probe_receipt_chain_complete",
+      "category": "benchmark_meta_opt",
+      "repo_kind": "neutral_fixture",
+      "fixture_kind": "sf2_route_fit",
+      "expected_capabilities": [
+        "benchmark_meta_opt"
+      ],
+      "capability_activation_contract": "sf2_bounded_probe",
+      "eligibility_class": "sf2_internal",
+      "expected_evidence": [
+        "capability_only_baseline",
+        "skill_arm_receipt",
+        "negative_control_block_or_return",
+        "outcome_contribution_decision"
+      ],
+      "runtime_update_allowed": false,
+      "public_benchmark_allowed": false
+    },
+    {
+      "id": "sf2-route-fit-regression_guard-001",
+      "task_id": "sf2-route-fit-regression_guard-001",
+      "capability_id": "regression_guard",
+      "group": "self_evolution",
+      "pillar": "artifact",
+      "phases": [
+        "R",
+        "A",
+        "C"
+      ],
+      "difficulty": "medium",
+      "task_type": "sf2_route_fit",
+      "task_desc": "Exercise route capability regression_guard using its declared role, then require skill-fit receipt evidence without runtime promotion.",
+      "prompt": "Exercise route capability regression_guard using its declared role, then require skill-fit receipt evidence without runtime promotion.",
+      "target_file": "unused",
+      "test_file": "unused",
+      "success_criteria": "sf2_bounded_probe_receipt_chain_complete",
+      "category": "regression_guard",
+      "repo_kind": "neutral_fixture",
+      "fixture_kind": "sf2_route_fit",
+      "expected_capabilities": [
+        "regression_guard"
+      ],
+      "capability_activation_contract": "sf2_bounded_probe",
+      "eligibility_class": "sf2_internal",
+      "expected_evidence": [
+        "capability_only_baseline",
+        "skill_arm_receipt",
+        "negative_control_block_or_return",
+        "outcome_contribution_decision"
+      ],
+      "runtime_update_allowed": false,
+      "public_benchmark_allowed": false
+    },
+    {
+      "id": "sf2-route-fit-registry_skills_sync-001",
+      "task_id": "sf2-route-fit-registry_skills_sync-001",
+      "capability_id": "registry_skills_sync",
+      "group": "productization",
+      "pillar": "artifact",
+      "phases": [
+        "S",
+        "C"
+      ],
+      "difficulty": "medium",
+      "task_type": "sf2_route_fit",
+      "task_desc": "Exercise route capability registry_skills_sync using its declared role, then require skill-fit receipt evidence without runtime promotion.",
+      "prompt": "Exercise route capability registry_skills_sync using its declared role, then require skill-fit receipt evidence without runtime promotion.",
+      "target_file": "unused",
+      "test_file": "unused",
+      "success_criteria": "sf2_bounded_probe_receipt_chain_complete",
+      "category": "registry_skills_sync",
+      "repo_kind": "neutral_fixture",
+      "fixture_kind": "sf2_route_fit",
+      "expected_capabilities": [
+        "registry_skills_sync"
+      ],
+      "capability_activation_contract": "sf2_bounded_probe",
+      "eligibility_class": "sf2_internal",
+      "expected_evidence": [
+        "capability_only_baseline",
+        "skill_arm_receipt",
+        "negative_control_block_or_return",
+        "outcome_contribution_decision"
+      ],
+      "runtime_update_allowed": false,
+      "public_benchmark_allowed": false
+    },
+    {
+      "id": "sf2-route-fit-metabolism_resume-001",
+      "task_id": "sf2-route-fit-metabolism_resume-001",
+      "capability_id": "metabolism_resume",
+      "group": "productization",
+      "pillar": "memory",
+      "phases": [
+        "R",
+        "C"
+      ],
+      "difficulty": "medium",
+      "task_type": "sf2_route_fit",
+      "task_desc": "Exercise route capability metabolism_resume using its declared role, then require skill-fit receipt evidence without runtime promotion.",
+      "prompt": "Exercise route capability metabolism_resume using its declared role, then require skill-fit receipt evidence without runtime promotion.",
+      "target_file": "unused",
+      "test_file": "unused",
+      "success_criteria": "sf2_bounded_probe_receipt_chain_complete",
+      "category": "metabolism_resume",
+      "repo_kind": "neutral_fixture",
+      "fixture_kind": "sf2_route_fit",
+      "expected_capabilities": [
+        "metabolism_resume"
+      ],
+      "capability_activation_contract": "sf2_bounded_probe",
+      "eligibility_class": "sf2_internal",
+      "expected_evidence": [
+        "capability_only_baseline",
+        "skill_arm_receipt",
+        "negative_control_block_or_return",
+        "outcome_contribution_decision"
+      ],
+      "runtime_update_allowed": false,
+      "public_benchmark_allowed": false
+    },
+    {
+      "id": "sf2-route-fit-ui_validator-001",
+      "task_id": "sf2-route-fit-ui_validator-001",
+      "capability_id": "ui_validator",
+      "group": "productization",
+      "pillar": "artifact",
+      "phases": [
+        "D",
+        "A",
+        "C"
+      ],
+      "difficulty": "medium",
+      "task_type": "sf2_route_fit",
+      "task_desc": "Exercise route capability ui_validator using its declared role, then require skill-fit receipt evidence without runtime promotion.",
+      "prompt": "Exercise route capability ui_validator using its declared role, then require skill-fit receipt evidence without runtime promotion.",
+      "target_file": "unused",
+      "test_file": "unused",
+      "success_criteria": "sf2_bounded_probe_receipt_chain_complete",
+      "category": "ui_validator",
+      "repo_kind": "neutral_fixture",
+      "fixture_kind": "sf2_route_fit",
+      "expected_capabilities": [
+        "ui_validator"
+      ],
+      "capability_activation_contract": "sf2_bounded_probe",
+      "eligibility_class": "sf2_internal",
+      "expected_evidence": [
+        "capability_only_baseline",
+        "skill_arm_receipt",
+        "negative_control_block_or_return",
+        "outcome_contribution_decision"
+      ],
+      "runtime_update_allowed": false,
+      "public_benchmark_allowed": false
+    },
+    {
+      "id": "sf2-route-fit-external_productivity-001",
+      "task_id": "sf2-route-fit-external_productivity-001",
+      "capability_id": "external_productivity",
+      "group": "productization",
+      "pillar": "artifact",
+      "phases": [
+        "S",
+        "D"
+      ],
+      "difficulty": "medium",
+      "task_type": "sf2_route_fit",
+      "task_desc": "Exercise route capability external_productivity using its declared role, then require skill-fit receipt evidence without runtime promotion.",
+      "prompt": "Exercise route capability external_productivity using its declared role, then require skill-fit receipt evidence without runtime promotion.",
+      "target_file": "unused",
+      "test_file": "unused",
+      "success_criteria": "sf2_bounded_probe_receipt_chain_complete",
+      "category": "external_productivity",
+      "repo_kind": "neutral_fixture",
+      "fixture_kind": "sf2_route_fit",
+      "expected_capabilities": [
+        "external_productivity"
+      ],
+      "capability_activation_contract": "sf2_bounded_probe",
+      "eligibility_class": "sf2_internal",
+      "expected_evidence": [
+        "capability_only_baseline",
+        "skill_arm_receipt",
+        "negative_control_block_or_return",
+        "outcome_contribution_decision"
+      ],
+      "runtime_update_allowed": false,
+      "public_benchmark_allowed": false
+    }
+  ],
+  "claim_boundary": [
+    "These are SF2 bounded-probe tasks, not public benchmark tasks.",
+    "They only establish a fixed denominator for route-skill fit evidence."
+  ]
+}

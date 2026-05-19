@@ -1,0 +1,57 @@
+{
+  "final_decisions": [
+    {
+      "candidate_evidence_path": ".nexus/reports/sf_github_round4_live_2026-05-19/codeintel_sf-github-round4-smoke-codeintel-001_github4_wiki_qa_github4-sickn33-antigravity-awesome-skills-wiki-qa/evidence_bundle.json",
+      "candidate_receipt_path": ".nexus/reports/sf_github_round4_live_2026-05-19/codeintel_sf-github-round4-smoke-codeintel-001_github4_wiki_qa_github4-sickn33-antigravity-awesome-skills-wiki-qa",
+      "candidate_skill": "github4-sickn33-antigravity-awesome-skills-wiki-qa",
+      "candidate_total_tokens": 46073,
+      "candidate_wall_duration_sec": 118.2021,
+      "capability": "codeintel",
+      "current_evidence_path": ".nexus/reports/sf_github_round4_live_2026-05-19/codeintel_sf-github-round4-smoke-codeintel-001_current_best_github-karpathy-guidelines/evidence_bundle.json",
+      "current_receipt_path": ".nexus/reports/sf_github_round4_live_2026-05-19/codeintel_sf-github-round4-smoke-codeintel-001_current_best_github-karpathy-guidelines",
+      "current_total_tokens": 44830,
+      "current_wall_duration_sec": 133.4232,
+      "decision": "KEEP_CURRENT_SKILL",
+      "from_skill": "github-karpathy-guidelines",
+      "reason": "challenger_runtime_receipt_confirmed_but_not_cost_improved",
+      "to_skill": "github-karpathy-guidelines",
+      "token_delta": 1243,
+      "wall_delta_sec": -15.2211
+    },
+    {
+      "candidate_evidence_path": ".nexus/reports/sf_github_round4_live_2026-05-19/repair_loop_sf-github-round4-smoke-repair_loop-001_github4_tdd_red_github4-sickn33-antigravity-awesome-skills-tdd-workflows-tdd-red/evidence_bundle.json",
+      "candidate_receipt_path": ".nexus/reports/sf_github_round4_live_2026-05-19/repair_loop_sf-github-round4-smoke-repair_loop-001_github4_tdd_red_github4-sickn33-antigravity-awesome-skills-tdd-workflows-tdd-red",
+      "candidate_skill": "github4-sickn33-antigravity-awesome-skills-tdd-workflows-tdd-red",
+      "candidate_total_tokens": 39773,
+      "candidate_wall_duration_sec": 81.845,
+      "capability": "repair_loop",
+      "current_evidence_path": ".nexus/reports/sf_github_round4_live_2026-05-19/repair_loop_sf-github-round4-smoke-repair_loop-001_current_best_tdd/evidence_bundle.json",
+      "current_receipt_path": ".nexus/reports/sf_github_round4_live_2026-05-19/repair_loop_sf-github-round4-smoke-repair_loop-001_current_best_tdd",
+      "current_total_tokens": 40718,
+      "current_wall_duration_sec": 88.9135,
+      "decision": "APPROVE_RUNTIME_REPLACEMENT",
+      "from_skill": "tdd",
+      "reason": "runtime_receipt_confirmed_and_cost_improved",
+      "to_skill": "github4-sickn33-antigravity-awesome-skills-tdd-workflows-tdd-red",
+      "token_delta": -945,
+      "wall_delta_sec": -7.0685
+    }
+  ],
+  "human_summary": [
+    "repair_loop replaces tdd with github4-sickn33-antigravity-awesome-skills-tdd-workflows-tdd-red in the V22 overlay candidate because both token and wall deltas improved under paired Flash+Nexus receipts.",
+    "codeintel keeps github-karpathy-guidelines because github4-sickn33-antigravity-awesome-skills-wiki-qa improved wall time but regressed token use.",
+    "MiniMax-AI/skills, mm-demo-collection/MiniMaxSkills, and KerberosClaw/kc_ai_skills produced no round4 live-selected replacement candidate from the static screen.",
+    "Public benchmark remains held; runtime default was not written by this internal SF artifact."
+  ],
+  "public_benchmark_allowed": false,
+  "runtime_default_written": false,
+  "runtime_overlay_finalized": true,
+  "runtime_update_allowed": true,
+  "schema": "nexus.sf_skill_finalization.v22",
+  "skill_pairing_finalized": true,
+  "source_ledger": "docs/reports/NEXUS_SF_GITHUB_ROUND4_REPLACEMENT_LEDGER_2026-05-19.json",
+  "source_overlay": "docs/reports/NEXUS_SF_RUNTIME_SKILL_POLICY_OVERLAY_V22_2026-05-19.json",
+  "source_rollup": "docs/reports/NEXUS_SF_GITHUB_ROUND4_LIVE_ROLLUP_2026-05-19.json",
+  "status": "PASS_SKILL_FINALIZED",
+  "version": "2026-05-19"
+}

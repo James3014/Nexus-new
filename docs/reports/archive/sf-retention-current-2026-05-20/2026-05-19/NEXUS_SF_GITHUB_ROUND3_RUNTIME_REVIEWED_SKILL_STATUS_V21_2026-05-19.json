@@ -1,0 +1,101 @@
+{
+  "schema": "nexus.sf_github_round3_runtime_reviewed_skill_status.v21",
+  "skills": [
+    {
+      "action": "ablation_only_compare",
+      "capability_mount": "semantic_searcher",
+      "family": "registry_skills_sync",
+      "name": "sf2-registry_skills_sync-route-fit-spec",
+      "path": "/Users/jameschen/Workspace/nexus/.agents/skills/sf2/sf2-registry_skills_sync-route-fit-spec/SKILL.md",
+      "reason_codes": [
+        "sf_github_round3_current_best"
+      ],
+      "root": "current_best",
+      "skill_status": "nexus_curated_candidate",
+      "source_repo": "nexus_repo",
+      "test_level": "sf_github_round3_flash_smoke"
+    },
+    {
+      "action": "ablation_only_compare",
+      "capability_mount": "semantic_searcher",
+      "family": "registry_skills_sync",
+      "name": "github3-openclaw-map-registry-sync",
+      "path": "/Users/jameschen/Workspace/nexus/.agents/skills/github-round3-challengers/github3-openclaw-map-registry-sync/SKILL.md",
+      "reason_codes": [
+        "sf_github_round3_challenger"
+      ],
+      "root": "github_round3",
+      "skill_status": "external_reference_candidate_generated_safe",
+      "source_repo": "https://github.com/wsxqaza12/skill-openclaw-map",
+      "test_level": "sf_github_round3_flash_smoke"
+    },
+    {
+      "action": "runtime_reviewed_ablation_compare",
+      "capability_mount": "semantic_searcher",
+      "family": "registry_skills_sync",
+      "name": "github3-openai-skill-creator-safe-registry-sync",
+      "path": "/Users/jameschen/Workspace/nexus/.agents/skills/github-round3-challengers/github3-openai-skill-creator-safe-registry-sync/SKILL.md",
+      "reason_codes": [
+        "sf_github_round3_challenger",
+        "sf_v21_runtime_reviewed_prompt_only",
+        "safe_no_external_execution"
+      ],
+      "root": "github_round3_runtime_reviewed",
+      "skill_status": "nexus_curated_candidate",
+      "source_repo": "https://github.com/openai/skills",
+      "test_level": "sf_github_round3_flash_smoke"
+    },
+    {
+      "action": "ablation_only_compare",
+      "capability_mount": "ultra_review",
+      "family": "ultra_review",
+      "name": "acceptance-evidence-failclosed",
+      "path": "/Users/jameschen/Workspace/nexus/.agents/skills/acceptance-evidence-failclosed/SKILL.md",
+      "reason_codes": [
+        "sf_github_round3_current_best"
+      ],
+      "root": "current_best",
+      "skill_status": "nexus_curated_candidate",
+      "source_repo": "nexus_repo",
+      "test_level": "sf_github_round3_flash_smoke"
+    },
+    {
+      "action": "runtime_reviewed_ablation_compare",
+      "capability_mount": "ultra_review",
+      "family": "ultra_review",
+      "name": "github3-claude-security-scan-safe-ultra-review",
+      "path": "/Users/jameschen/Workspace/nexus/.agents/skills/github-round3-challengers/github3-claude-security-scan-safe-ultra-review/SKILL.md",
+      "reason_codes": [
+        "sf_github_round3_challenger",
+        "sf_v21_runtime_reviewed_prompt_only",
+        "safe_no_external_execution"
+      ],
+      "root": "github_round3_runtime_reviewed",
+      "skill_status": "nexus_curated_candidate",
+      "source_repo": "https://github.com/andrew54068/claude-plugins",
+      "test_level": "sf_github_round3_flash_smoke"
+    },
+    {
+      "action": "ablation_only_compare",
+      "capability_mount": "benchmark_meta_opt",
+      "family": "benchmark_meta_opt",
+      "name": "github3-marketing-ab-testing-safe-benchmark",
+      "path": "/Users/jameschen/Workspace/nexus/.agents/skills/github-round3-challengers/github3-marketing-ab-testing-safe-benchmark/SKILL.md",
+      "reason_codes": [
+        "sf_github_round3_challenger"
+      ],
+      "root": "github_round3",
+      "skill_status": "external_reference_candidate_generated_safe",
+      "source_repo": "https://github.com/coreyhaines31/marketingskills",
+      "test_level": "sf_github_round3_flash_smoke"
+    }
+  ],
+  "status": "PASS_RUNTIME_REVIEWED_CANDIDATES_READY",
+  "summary": {
+    "public_benchmark_allowed": false,
+    "runtime_reviewed_candidate_count": 2,
+    "runtime_update_allowed": false,
+    "skill_count": 6
+  },
+  "version": "2026-05-19"
+}

@@ -1,0 +1,116 @@
+{
+  "schema": "nexus.sf.skill_status.external_challenge.v1",
+  "status": "PASS",
+  "source": {
+    "repo_url": "https://github.com/doggy8088/andrej-karpathy-skills",
+    "commit_sha": "0bf99012a4e63f3370e8027215a715f1bed91059",
+    "license": "MIT"
+  },
+  "summary": {
+    "canonical_skill_count": 1,
+    "virtual_alias_count": 5,
+    "runtime_update_allowed": false,
+    "public_benchmark_allowed": false
+  },
+  "skills": [
+    {
+      "name": "karpathy-guidelines__direct_master_loop",
+      "canonical_skill_id": "karpathy-guidelines",
+      "path": "/private/tmp/doggy8088-andrej-karpathy-skills-20260518/skills/karpathy-guidelines/SKILL.md",
+      "root": "/private/tmp/doggy8088-andrej-karpathy-skills-20260518",
+      "sha256": "6e22cc54cb02a5e98ae42d06d9d7292db0c1b43894831b32879beb0166b2aea7",
+      "skill_status": "external_reference_candidate",
+      "test_level": "sf_doggy8088_karpathy_challenge_v2_alias",
+      "action": "ablation_only_compare",
+      "capability_mount": "reference:hyper",
+      "family": "direct_master_loop",
+      "reason_codes": [
+        "doggy8088_karpathy_external_challenger",
+        "per_capability_virtual_alias",
+        "runner_capability:hyper"
+      ],
+      "runtime_eligible": false,
+      "ablation_eligible": true
+    },
+    {
+      "name": "karpathy-guidelines__repair_loop",
+      "canonical_skill_id": "karpathy-guidelines",
+      "path": "/private/tmp/doggy8088-andrej-karpathy-skills-20260518/skills/karpathy-guidelines/SKILL.md",
+      "root": "/private/tmp/doggy8088-andrej-karpathy-skills-20260518",
+      "sha256": "6e22cc54cb02a5e98ae42d06d9d7292db0c1b43894831b32879beb0166b2aea7",
+      "skill_status": "external_reference_candidate",
+      "test_level": "sf_doggy8088_karpathy_challenge_v2_alias",
+      "action": "ablation_only_compare",
+      "capability_mount": "reference:hyper",
+      "family": "repair_loop",
+      "reason_codes": [
+        "doggy8088_karpathy_external_challenger",
+        "per_capability_virtual_alias",
+        "runner_capability:hyper"
+      ],
+      "runtime_eligible": false,
+      "ablation_eligible": true
+    },
+    {
+      "name": "karpathy-guidelines__hyper_sprint",
+      "canonical_skill_id": "karpathy-guidelines",
+      "path": "/private/tmp/doggy8088-andrej-karpathy-skills-20260518/skills/karpathy-guidelines/SKILL.md",
+      "root": "/private/tmp/doggy8088-andrej-karpathy-skills-20260518",
+      "sha256": "6e22cc54cb02a5e98ae42d06d9d7292db0c1b43894831b32879beb0166b2aea7",
+      "skill_status": "external_reference_candidate",
+      "test_level": "sf_doggy8088_karpathy_challenge_v2_alias",
+      "action": "ablation_only_compare",
+      "capability_mount": "reference:hyper",
+      "family": "hyper_sprint",
+      "reason_codes": [
+        "doggy8088_karpathy_external_challenger",
+        "per_capability_virtual_alias",
+        "runner_capability:hyper"
+      ],
+      "runtime_eligible": false,
+      "ablation_eligible": true
+    },
+    {
+      "name": "karpathy-guidelines__codeintel",
+      "canonical_skill_id": "karpathy-guidelines",
+      "path": "/private/tmp/doggy8088-andrej-karpathy-skills-20260518/skills/karpathy-guidelines/SKILL.md",
+      "root": "/private/tmp/doggy8088-andrej-karpathy-skills-20260518",
+      "sha256": "6e22cc54cb02a5e98ae42d06d9d7292db0c1b43894831b32879beb0166b2aea7",
+      "skill_status": "external_reference_candidate",
+      "test_level": "sf_doggy8088_karpathy_challenge_v2_alias",
+      "action": "ablation_only_compare",
+      "capability_mount": "reference:codeintel",
+      "family": "codeintel",
+      "reason_codes": [
+        "doggy8088_karpathy_external_challenger",
+        "per_capability_virtual_alias",
+        "runner_capability:codeintel"
+      ],
+      "runtime_eligible": false,
+      "ablation_eligible": true
+    },
+    {
+      "name": "karpathy-guidelines__ultra_review",
+      "canonical_skill_id": "karpathy-guidelines",
+      "path": "/private/tmp/doggy8088-andrej-karpathy-skills-20260518/skills/karpathy-guidelines/SKILL.md",
+      "root": "/private/tmp/doggy8088-andrej-karpathy-skills-20260518",
+      "sha256": "6e22cc54cb02a5e98ae42d06d9d7292db0c1b43894831b32879beb0166b2aea7",
+      "skill_status": "external_reference_candidate",
+      "test_level": "sf_doggy8088_karpathy_challenge_v2_alias",
+      "action": "ablation_only_compare",
+      "capability_mount": "reference:ultra_review",
+      "family": "ultra_review",
+      "reason_codes": [
+        "doggy8088_karpathy_external_challenger",
+        "per_capability_virtual_alias",
+        "runner_capability:ultra_review"
+      ],
+      "runtime_eligible": false,
+      "ablation_eligible": true
+    }
+  ],
+  "claim_boundary": {
+    "virtual_aliases": "ablation_only_to_bind_one_external_skill_to_one_capability_receipt",
+    "runtime_update_allowed": false
+  }
+}

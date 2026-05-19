@@ -1,0 +1,54 @@
+{
+  "schema": "nexus.skill_discovery_rerun_queue.v2.row_level_rca",
+  "status": "PASS",
+  "source_rca": "docs/reports/NEXUS_SKILL_FIT_ROW_LEVEL_RCA_GOVERNANCE_AND_TRUST_2026-05-17.json",
+  "queue_count": 1,
+  "skipped_count": 3,
+  "queue": [
+    {
+      "capability": "governance_and_trust",
+      "skill_id": "nexus-root-cause-probe",
+      "verdict": "needs_more_data",
+      "tested_rows": 30,
+      "effective_rows": 15,
+      "effective_rate": 0.5,
+      "recommendation": "targeted_replay",
+      "reason": "row_level_rca_promising_needs_more_data"
+    }
+  ],
+  "skipped": [
+    {
+      "capability": "governance_and_trust",
+      "skill_id": "acceptance-evidence-failclosed",
+      "verdict": "needs_more_data",
+      "tested_rows": 30,
+      "effective_rows": 4,
+      "effective_rate": 0.1333,
+      "recommendation": "candidate_pool_v2_or_taskset_expansion",
+      "reason": "skip_candidate_pool_v2_or_taskset_expansion"
+    },
+    {
+      "capability": "governance_and_trust",
+      "skill_id": "cso",
+      "verdict": "needs_more_data",
+      "tested_rows": 30,
+      "effective_rows": 1,
+      "effective_rate": 0.0333,
+      "recommendation": "candidate_pool_v2_or_taskset_expansion",
+      "reason": "skip_candidate_pool_v2_or_taskset_expansion"
+    },
+    {
+      "capability": "governance_and_trust",
+      "skill_id": "nexus-acceptance-evidence-gate",
+      "verdict": "reject",
+      "tested_rows": 30,
+      "effective_rows": 0,
+      "effective_rate": 0.0,
+      "recommendation": "skip_until_candidate_or_taskset_changes",
+      "reason": "skip_skip_until_candidate_or_taskset_changes"
+    }
+  ],
+  "claim_boundary": [
+    "This queue schedules targeted replay only; it must not update runtime policy."
+  ]
+}

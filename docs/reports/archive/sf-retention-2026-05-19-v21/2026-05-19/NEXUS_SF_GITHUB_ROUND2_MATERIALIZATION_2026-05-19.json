@@ -1,0 +1,23 @@
+{
+  "materialized": [
+    {
+      "path": "/Users/jameschen/Workspace/nexus/.agents/skills/github-round2-challengers/github2-superpowers-test-driven-development/SKILL.md",
+      "skill_id": "github2-superpowers-test-driven-development"
+    },
+    {
+      "path": "/Users/jameschen/Workspace/nexus/.agents/skills/github-round2-challengers/github2-agent-browser-dogfood/SKILL.md",
+      "skill_id": "github2-agent-browser-dogfood"
+    },
+    {
+      "path": "/Users/jameschen/Workspace/nexus/.agents/skills/github-round2-challengers/github2-awesome-openclaw-catalog-scout/SKILL.md",
+      "skill_id": "github2-awesome-openclaw-catalog-scout"
+    }
+  ],
+  "public_benchmark_allowed": false,
+  "runtime_update_allowed": false,
+  "schema": "nexus.sf_github_round2_materialization.v1",
+  "status": "PASS",
+  "summary": {
+    "materialized_count": 3
+  }
+}

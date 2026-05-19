@@ -1,0 +1,136 @@
+{
+  "benchmark_id": "nexus-sf-round10-coverage-backlog-v1",
+  "description": "Internal SF Round10 coverage-backlog Flash+Nexus current_best vs challenger matrix. Not a public benchmark.",
+  "frozen": true,
+  "schema": "nexus.sf_round10_coverage_backlog_tasks.v1",
+  "status": "PASS",
+  "summary": {
+    "task_count": 4,
+    "capability_count": 4,
+    "runtime_update_allowed": false,
+    "public_benchmark_allowed": false
+  },
+  "tasks": [
+    {
+      "id": "sf-round10-coverage-research_control_plane-001",
+      "task_desc": "Round10 coverage backlog compare for research_control_plane: current_best vs missed challenger.",
+      "target_file": "unused",
+      "test_file": "unused",
+      "success_criteria": "sf_round10_coverage_backlog_receipt_chain_complete",
+      "category": "research_control_plane",
+      "difficulty": "medium",
+      "repo_kind": "neutral_fixture",
+      "repo": "fixture://sf-round10-coverage-backlog",
+      "repo_ref": "v1",
+      "fixture_kind": "sf_round10_coverage_backlog",
+      "mutation_required": false,
+      "allowed_files": [
+        "unused"
+      ],
+      "forbidden_files": [
+        ".nexus/",
+        "logs/",
+        "benchmarks/"
+      ],
+      "setup_command": "python -V",
+      "verification_command": "python -V",
+      "expected_capabilities": [
+        "research"
+      ],
+      "capability_activation_contract": "required",
+      "eligibility_class": "model_required",
+      "public_claim_allowed_metrics": []
+    },
+    {
+      "id": "sf-round10-coverage-ui_validator-001",
+      "task_desc": "Round10 coverage backlog compare for ui_validator: current_best vs missed challenger.",
+      "target_file": "unused",
+      "test_file": "unused",
+      "success_criteria": "sf_round10_coverage_backlog_receipt_chain_complete",
+      "category": "ui_validator",
+      "difficulty": "medium",
+      "repo_kind": "neutral_fixture",
+      "repo": "fixture://sf-round10-coverage-backlog",
+      "repo_ref": "v1",
+      "fixture_kind": "sf_round10_coverage_backlog",
+      "mutation_required": false,
+      "allowed_files": [
+        "unused"
+      ],
+      "forbidden_files": [
+        ".nexus/",
+        "logs/",
+        "benchmarks/"
+      ],
+      "setup_command": "python -V",
+      "verification_command": "python -V",
+      "expected_capabilities": [
+        "ultra_review"
+      ],
+      "capability_activation_contract": "required",
+      "eligibility_class": "model_required",
+      "public_claim_allowed_metrics": []
+    },
+    {
+      "id": "sf-round10-coverage-codeintel-001",
+      "task_desc": "Round10 coverage backlog compare for codeintel: current_best vs missed challenger.",
+      "target_file": "unused",
+      "test_file": "unused",
+      "success_criteria": "sf_round10_coverage_backlog_receipt_chain_complete",
+      "category": "codeintel",
+      "difficulty": "medium",
+      "repo_kind": "neutral_fixture",
+      "repo": "fixture://sf-round10-coverage-backlog",
+      "repo_ref": "v1",
+      "fixture_kind": "sf_round10_coverage_backlog",
+      "mutation_required": false,
+      "allowed_files": [
+        "unused"
+      ],
+      "forbidden_files": [
+        ".nexus/",
+        "logs/",
+        "benchmarks/"
+      ],
+      "setup_command": "python -V",
+      "verification_command": "python -V",
+      "expected_capabilities": [
+        "codeintel"
+      ],
+      "capability_activation_contract": "required",
+      "eligibility_class": "model_required",
+      "public_claim_allowed_metrics": []
+    },
+    {
+      "id": "sf-round10-coverage-autoreason-001",
+      "task_desc": "Round10 coverage backlog compare for autoreason: current_best vs missed challenger.",
+      "target_file": "unused",
+      "test_file": "unused",
+      "success_criteria": "sf_round10_coverage_backlog_receipt_chain_complete",
+      "category": "autoreason",
+      "difficulty": "medium",
+      "repo_kind": "neutral_fixture",
+      "repo": "fixture://sf-round10-coverage-backlog",
+      "repo_ref": "v1",
+      "fixture_kind": "sf_round10_coverage_backlog",
+      "mutation_required": false,
+      "allowed_files": [
+        "unused"
+      ],
+      "forbidden_files": [
+        ".nexus/",
+        "logs/",
+        "benchmarks/"
+      ],
+      "setup_command": "python -V",
+      "verification_command": "python -V",
+      "expected_capabilities": [
+        "autoreason"
+      ],
+      "capability_activation_contract": "required",
+      "eligibility_class": "model_required",
+      "public_claim_allowed_metrics": []
+    }
+  ],
+  "version": "2026-05-19"
+}

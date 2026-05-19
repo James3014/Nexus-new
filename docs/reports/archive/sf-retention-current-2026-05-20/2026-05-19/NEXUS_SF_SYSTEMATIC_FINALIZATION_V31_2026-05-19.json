@@ -1,0 +1,162 @@
+{
+  "applied_primary": [
+    {
+      "capability": "benchmark_meta_opt",
+      "evidence_path": ".nexus/reports/sf_systematic_batch_live_2026-05-19/benchmark_meta_opt_sf-systematic-batch-benchmark_meta_opt-001_challenger_sf-systematic-benchmark_meta_opt-hugging-face-trackio-d21c6b90/evidence_bundle.json",
+      "from_skill": "github4-sickn33-antigravity-awesome-skills-ad-creative",
+      "receipt_path": ".nexus/reports/sf_systematic_batch_live_2026-05-19/benchmark_meta_opt_sf-systematic-batch-benchmark_meta_opt-001_challenger_sf-systematic-benchmark_meta_opt-hugging-face-trackio-d21c6b90",
+      "to_skill": "sf-systematic-benchmark_meta_opt-hugging-face-trackio-d21c6b90",
+      "token_delta": -4574,
+      "wall_delta_sec": -33.2371
+    },
+    {
+      "capability": "learning_closure",
+      "evidence_path": ".nexus/reports/sf_systematic_batch_live_2026-05-19/learning_closure_sf-systematic-batch-learning_closure-001_challenger_sf-systematic-learning_closure-memory-lint-8bdb0fca/evidence_bundle.json",
+      "from_skill": "sf2-learning_closure-route-fit-spec",
+      "receipt_path": ".nexus/reports/sf_systematic_batch_live_2026-05-19/learning_closure_sf-systematic-batch-learning_closure-001_challenger_sf-systematic-learning_closure-memory-lint-8bdb0fca",
+      "to_skill": "sf-systematic-learning_closure-memory-lint-8bdb0fca",
+      "token_delta": -2003,
+      "wall_delta_sec": -39.4723
+    },
+    {
+      "capability": "repair_loop",
+      "evidence_path": ".nexus/reports/sf_systematic_batch_live_2026-05-19/repair_loop_sf-systematic-batch-repair_loop-001_challenger_sf-systematic-repair_loop-tailwind-v4-shadcn-7197cbbf/evidence_bundle.json",
+      "from_skill": "github7-midudev-tdd-repair-loop",
+      "receipt_path": ".nexus/reports/sf_systematic_batch_live_2026-05-19/repair_loop_sf-systematic-batch-repair_loop-001_challenger_sf-systematic-repair_loop-tailwind-v4-shadcn-7197cbbf",
+      "to_skill": "sf-systematic-repair_loop-tailwind-v4-shadcn-7197cbbf",
+      "token_delta": -2272,
+      "wall_delta_sec": -16.1279
+    },
+    {
+      "capability": "research_control_plane",
+      "evidence_path": ".nexus/reports/sf_systematic_batch_live_2026-05-19/research_control_plane_sf-systematic-batch-research_control_plane-001_challenger_sf-systematic-research_control_plane-research-lookup-7e6f92a0/evidence_bundle.json",
+      "from_skill": "github10-paper-lookup-research-control-plane",
+      "receipt_path": ".nexus/reports/sf_systematic_batch_live_2026-05-19/research_control_plane_sf-systematic-batch-research_control_plane-001_challenger_sf-systematic-research_control_plane-research-lookup-7e6f92a0",
+      "to_skill": "sf-systematic-research_control_plane-research-lookup-7e6f92a0",
+      "token_delta": -3171,
+      "wall_delta_sec": -16.6247
+    },
+    {
+      "capability": "ui_validator",
+      "evidence_path": ".nexus/reports/sf_systematic_batch_live_2026-05-19/ui_validator_sf-systematic-batch-ui_validator-001_challenger_sf-systematic-ui_validator-e2e-testing-d98eb7c3/evidence_bundle.json",
+      "from_skill": "github7-browserbase-ui-test-safe-ui-validator",
+      "receipt_path": ".nexus/reports/sf_systematic_batch_live_2026-05-19/ui_validator_sf-systematic-batch-ui_validator-001_challenger_sf-systematic-ui_validator-e2e-testing-d98eb7c3",
+      "to_skill": "sf-systematic-ui_validator-e2e-testing-d98eb7c3",
+      "token_delta": -1959,
+      "wall_delta_sec": -64.7312
+    }
+  ],
+  "artifacts": {
+    "apply_gate": "docs/reports/NEXUS_SF_SYSTEMATIC_RUNTIME_POLICY_APPLY_GATE_V31_2026-05-19.json",
+    "gap_audit": "docs/reports/NEXUS_SF_SYSTEMATIC_LIVE_GAP_AUDIT_2026-05-19.json",
+    "overlay": "docs/reports/NEXUS_SF_SYSTEMATIC_RUNTIME_SKILL_POLICY_OVERLAY_APPLIED_V31_2026-05-19.json",
+    "post_apply_smoke": "docs/reports/NEXUS_SF_SYSTEMATIC_POST_APPLY_SMOKE_V31_2026-05-19.json",
+    "rollup": "docs/reports/NEXUS_SF_SYSTEMATIC_BATCH_LIVE_ROLLUP_2026-05-19.json"
+  },
+  "claim_boundary": [
+    "SF V31定案只覆蓋已 live 的 13 個 capability。",
+    "5 個 capability 已可套用 internal runtime overlay primary。",
+    "剩餘 21 個 capability 已有 offline shortlist，但仍需 runner alias/fixture 才能 live 定案。",
+    "Public benchmark remains blocked."
+  ],
+  "created_at": "2026-05-19T10:29:47.721299+00:00",
+  "held_current_best": [
+    {
+      "capability": "autoreason",
+      "challenger_skill": "sf-systematic-autoreason-first-principles-thinking-f95019ea",
+      "current_skill": "sf2-belief-route-fit-spec",
+      "reason": "challenger_not_better_on_both_token_and_wall",
+      "token_delta": 1945,
+      "wall_delta_sec": 5.0379
+    },
+    {
+      "capability": "claim_gate",
+      "challenger_skill": "sf-systematic-claim_gate-citation-management-9813e12c",
+      "current_skill": "nexus-benchmark-continuous-optimization",
+      "reason": "challenger_not_better_on_both_token_and_wall",
+      "token_delta": 456,
+      "wall_delta_sec": -10.2495
+    },
+    {
+      "capability": "codeintel",
+      "challenger_skill": "sf-systematic-codeintel-first-principles-thinking-f95019ea",
+      "current_skill": "github10-code-simplification-codeintel",
+      "reason": "challenger_not_better_on_both_token_and_wall",
+      "token_delta": 41341,
+      "wall_delta_sec": -57.5156
+    },
+    {
+      "capability": "direct_master_loop",
+      "challenger_skill": "sf-systematic-direct_master_loop-build-32802a87",
+      "current_skill": "sf2-direct_master_loop-route-fit-spec",
+      "reason": "challenger_not_better_on_both_token_and_wall",
+      "token_delta": 910,
+      "wall_delta_sec": 11.9099
+    },
+    {
+      "capability": "external_productivity",
+      "challenger_skill": "sf-systematic-external_productivity-writer-77dc7840",
+      "current_skill": "github5-video-auto-dubber-safe-external-productivity",
+      "reason": "challenger_not_better_on_both_token_and_wall",
+      "token_delta": 196,
+      "wall_delta_sec": -12.0618
+    },
+    {
+      "capability": "forecast_pregate",
+      "challenger_skill": "sf-systematic-forecast_pregate-mobile-security-coder-14647d4e",
+      "current_skill": "create-plan",
+      "reason": "challenger_not_better_on_both_token_and_wall",
+      "token_delta": -1568,
+      "wall_delta_sec": 0.2931
+    },
+    {
+      "capability": "registry_skills_sync",
+      "challenger_skill": "sf-systematic-registry_skills_sync-wiki-architect-9b87d55a",
+      "current_skill": "github5-skill-seekers-safe-registry-builder",
+      "reason": "challenger_not_better_on_both_token_and_wall",
+      "token_delta": -1408,
+      "wall_delta_sec": 0.1276
+    },
+    {
+      "capability": "ultra_review",
+      "challenger_skill": "sf-systematic-ultra_review-mobile-security-coder-14647d4e",
+      "current_skill": "github11-vulnerability-scanner-ultra-review",
+      "reason": "challenger_not_better_on_both_token_and_wall",
+      "token_delta": 64,
+      "wall_delta_sec": 34.5594
+    }
+  ],
+  "missing_live_capabilities": [
+    "artifact_gate",
+    "autonomic_router",
+    "belief",
+    "ddtree",
+    "drone",
+    "file_lock_security_gate",
+    "governance_and_trust",
+    "hyper_sprint",
+    "lancedb",
+    "learn_ask",
+    "memory",
+    "mempalace",
+    "metabolism_resume",
+    "nightshift",
+    "policy_capability_gate",
+    "regression_guard",
+    "research",
+    "research_and_source_discipline",
+    "sandbox_replay",
+    "swarm_multi_agent",
+    "xray"
+  ],
+  "schema": "nexus.sf_systematic_finalization.v31",
+  "status": "PASS",
+  "summary": {
+    "applied_primary_count": 5,
+    "held_current_count": 8,
+    "live_capability_count": 13,
+    "missing_live_capability_count": 21,
+    "public_benchmark_allowed": false,
+    "runtime_update_allowed": true
+  }
+}

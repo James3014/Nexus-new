@@ -1,0 +1,54 @@
+{
+  "blocked_or_kept": [
+    {
+      "capability": "repair_loop",
+      "challenger": "github2-superpowers-test-driven-development",
+      "decision": "KEEP_CURRENT",
+      "safety_status": "PASS_SKILL_ONLY",
+      "token_delta": -1823,
+      "wall_delta_sec": 40.4573
+    },
+    {
+      "capability": "ui_validator",
+      "challenger": "github2-agent-browser-dogfood",
+      "decision": "HOLD_RUNTIME_BOUNDARY",
+      "safety_status": "REJECT_RUNTIME_KEEP_REFERENCE",
+      "token_delta": -6960,
+      "wall_delta_sec": -1.9228
+    },
+    {
+      "capability": "codeintel",
+      "challenger": "github2-superpowers-systematic-debugging",
+      "decision": "KEEP_CURRENT",
+      "safety_status": "PASS_SKILL_ONLY",
+      "token_delta": 3886,
+      "wall_delta_sec": 8.7596
+    },
+    {
+      "capability": "metabolism_resume",
+      "challenger": "github2-superpowers-executing-plans",
+      "decision": "KEEP_CURRENT",
+      "safety_status": "PASS_SKILL_ONLY",
+      "token_delta": 1936,
+      "wall_delta_sec": 8.9253
+    }
+  ],
+  "entries": [
+    {
+      "after_candidate_skill": "github2-agent-browser-dogfood-safe-ui-validator",
+      "before_skill": "nexus-root-cause-probe",
+      "capability": "ui_validator",
+      "decision": "REPLACE_CANDIDATE_NOT_RUNTIME_DEFAULT",
+      "evidence_path": ".nexus/reports/sf_github_round2_safe_ui_validator_live_2026-05-19/ui_validator_sf-github-round2-smoke-ui_validator-001_safe_challenger_github2-agent-browser-dogfood-safe-ui-validator/evidence_bundle.json",
+      "receipt_path": ".nexus/reports/sf_github_round2_safe_ui_validator_live_2026-05-19/ui_validator_sf-github-round2-smoke-ui_validator-001_safe_challenger_github2-agent-browser-dogfood-safe-ui-validator",
+      "safety_status": "PASS_PROMPT_ONLY_GENERATED_SAFE",
+      "token_delta": -4099,
+      "wall_delta_sec": -34.8233
+    }
+  ],
+  "public_benchmark_allowed": false,
+  "runtime_update_allowed": false,
+  "schema": "nexus.sf_github_round2_goal_replacement_ledger.v1",
+  "status": "REPLACEMENT_CANDIDATE_FOUND",
+  "version": "2026-05-19"
+}

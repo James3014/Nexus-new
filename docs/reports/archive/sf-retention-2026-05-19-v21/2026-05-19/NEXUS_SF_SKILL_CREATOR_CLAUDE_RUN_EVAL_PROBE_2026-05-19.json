@@ -1,0 +1,23 @@
+{
+  "decision": "do_not_use_claude_run_eval_as_sf_replacement_gate_in_this_environment",
+  "fallback_used": "NEXUS_SF_SKILL_CREATOR_BEFORE_AFTER_TRIGGER_EVAL_V4_2026-05-19.json paired local trigger-ranking eval",
+  "probe_dir": "/private/tmp/nexus_skill_creator_actual_probe",
+  "reason": "claude_cli_stream_json_emitted_no_stdout",
+  "run_eval_summary": {
+    "failed": 1,
+    "passed": 0,
+    "run_level": {
+      "accuracy": 0.0,
+      "false_negative": 3,
+      "false_positive": 0,
+      "precision": 1.0,
+      "recall": 0.0,
+      "total_runs": 3,
+      "true_negative": 0,
+      "true_positive": 0
+    },
+    "total": 1
+  },
+  "schema": "nexus.sf_skill_creator_actual_cli_probe.v1",
+  "status": "RETURN"
+}

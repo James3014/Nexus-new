@@ -1,0 +1,1678 @@
+{
+  "schema": "nexus.skill_fit_row_level_rca.v1",
+  "status": "PASS",
+  "capability": "research_and_source_discipline",
+  "summary": {
+    "row_count": 132,
+    "baseline_task_count": 22,
+    "skill_count": 4,
+    "eligible_for_threshold_review_count": 0,
+    "targeted_replay_count": 0,
+    "runtime_update_allowed": false,
+    "flash100_allowed": false
+  },
+  "root_cause": "skill_outcome_contribution_below_threshold",
+  "skill_analyses": [
+    {
+      "skill_id": "gbrain-concept-synthesis",
+      "verdict": "reject",
+      "tested_rows": 22,
+      "effective_rows": 0,
+      "effective_rate": 0.0,
+      "task_bucket_counts": {
+        "bugfix": 1,
+        "docs_code_sync": 14,
+        "feature": 1,
+        "ops_research": 6
+      },
+      "effective_task_bucket_counts": {},
+      "recommendation": "skip_until_candidate_or_taskset_changes",
+      "targeted_replay_row_ids": [],
+      "rows": [
+        {
+          "row_id": "research_and_source_discipline::rlm-harder-v2-memory-001::skill_arm_003_d5dff0905f17",
+          "task_key": "scripts/bench/public_benchmark_rlm_harder_v2.json::rlm-harder-v2-memory-001",
+          "task_ref": {
+            "manifest": "scripts/bench/public_benchmark_rlm_harder_v2.json",
+            "task_id": "rlm-harder-v2-memory-001"
+          },
+          "task_bucket": "bugfix",
+          "baseline_status": "PASS",
+          "skill_status": "PASS",
+          "gate_status": "PASS",
+          "gate_row_status": "RETURN",
+          "effective": false,
+          "missing_effective_fields": [],
+          "trust_mismatch": false,
+          "evidence_path": "/private/tmp/nexus_skill_fit_research_v2_full_live_20260517/research_and_source_discipline_rlm-harder-v2-memory-001_skill_arm_003_d5dff0905f17/evidence_bundle.json",
+          "receipt_path": "/private/tmp/nexus_skill_fit_research_v2_full_live_20260517/research_and_source_discipline_rlm-harder-v2-memory-001_skill_arm_003_d5dff0905f17"
+        },
+        {
+          "row_id": "research_and_source_discipline::route-oracle-semantic-searcher-001::skill_arm_003_d5dff0905f17",
+          "task_key": "scripts/bench/public_benchmark_route_oracles_v1.json::route-oracle-semantic-searcher-001",
+          "task_ref": {
+            "manifest": "scripts/bench/public_benchmark_route_oracles_v1.json",
+            "task_id": "route-oracle-semantic-searcher-001"
+          },
+          "task_bucket": "docs_code_sync",
+          "baseline_status": "PASS",
+          "skill_status": "PASS",
+          "gate_status": "PASS",
+          "gate_row_status": "RETURN",
+          "effective": false,
+          "missing_effective_fields": [],
+          "trust_mismatch": false,
+          "evidence_path": "/private/tmp/nexus_skill_fit_research_v2_full_live_20260517/research_and_source_discipline_route-oracle-semantic-searcher-001_skill_arm_003_d5dff0905f17/evidence_bundle.json",
+          "receipt_path": "/private/tmp/nexus_skill_fit_research_v2_full_live_20260517/research_and_source_discipline_route-oracle-semantic-searcher-001_skill_arm_003_d5dff0905f17"
+        },
+        {
+          "row_id": "research_and_source_discipline::model-required-docs-001::skill_arm_003_d5dff0905f17",
+          "task_key": "scripts/bench/public_benchmark_model_required_uplift_v1.json::model-required-docs-001",
+          "task_ref": {
+            "manifest": "scripts/bench/public_benchmark_model_required_uplift_v1.json",
+            "task_id": "model-required-docs-001"
+          },
+          "task_bucket": "docs_code_sync",
+          "baseline_status": "PASS",
+          "skill_status": "PASS",
+          "gate_status": "PASS",
+          "gate_row_status": "RETURN",
+          "effective": false,
+          "missing_effective_fields": [],
+          "trust_mismatch": false,
+          "evidence_path": "/private/tmp/nexus_skill_fit_research_v2_full_live_20260517/research_and_source_discipline_model-required-docs-001_skill_arm_003_d5dff0905f17/evidence_bundle.json",
+          "receipt_path": "/private/tmp/nexus_skill_fit_research_v2_full_live_20260517/research_and_source_discipline_model-required-docs-001_skill_arm_003_d5dff0905f17"
+        },
+        {
+          "row_id": "research_and_source_discipline::model-required-context-001::skill_arm_003_d5dff0905f17",
+          "task_key": "scripts/bench/public_benchmark_model_required_uplift_v1.json::model-required-context-001",
+          "task_ref": {
+            "manifest": "scripts/bench/public_benchmark_model_required_uplift_v1.json",
+            "task_id": "model-required-context-001"
+          },
+          "task_bucket": "docs_code_sync",
+          "baseline_status": "PASS",
+          "skill_status": "PASS",
+          "gate_status": "PASS",
+          "gate_row_status": "RETURN",
+          "effective": false,
+          "missing_effective_fields": [],
+          "trust_mismatch": false,
+          "evidence_path": "/private/tmp/nexus_skill_fit_research_v2_full_live_20260517/research_and_source_discipline_model-required-context-001_skill_arm_003_d5dff0905f17/evidence_bundle.json",
+          "receipt_path": "/private/tmp/nexus_skill_fit_research_v2_full_live_20260517/research_and_source_discipline_model-required-context-001_skill_arm_003_d5dff0905f17"
+        },
+        {
+          "row_id": "research_and_source_discipline::docs-lane-public-field-contract-001::skill_arm_003_d5dff0905f17",
+          "task_key": "scripts/bench/public_benchmark_docs_lane_v1.json::docs-lane-public-field-contract-001",
+          "task_ref": {
+            "manifest": "scripts/bench/public_benchmark_docs_lane_v1.json",
+            "task_id": "docs-lane-public-field-contract-001"
+          },
+          "task_bucket": "docs_code_sync",
+          "baseline_status": "PASS",
+          "skill_status": "PASS",
+          "gate_status": "PASS",
+          "gate_row_status": "RETURN",
+          "effective": false,
+          "missing_effective_fields": [],
+          "trust_mismatch": false,
+          "evidence_path": "/private/tmp/nexus_skill_fit_research_v2_full_live_20260517/research_and_source_discipline_docs-lane-public-field-contract-001_skill_arm_003_d5dff0905f17/evidence_bundle.json",
+          "receipt_path": "/private/tmp/nexus_skill_fit_research_v2_full_live_20260517/research_and_source_discipline_docs-lane-public-field-contract-001_skill_arm_003_d5dff0905f17"
+        },
+        {
+          "row_id": "research_and_source_discipline::docs-lane-contextual-evidence-contract-001::skill_arm_003_d5dff0905f17",
+          "task_key": "scripts/bench/public_benchmark_docs_lane_v1.json::docs-lane-contextual-evidence-contract-001",
+          "task_ref": {
+            "manifest": "scripts/bench/public_benchmark_docs_lane_v1.json",
+            "task_id": "docs-lane-contextual-evidence-contract-001"
+          },
+          "task_bucket": "docs_code_sync",
+          "baseline_status": "PASS",
+          "skill_status": "PASS",
+          "gate_status": "PASS",
+          "gate_row_status": "RETURN",
+          "effective": false,
+          "missing_effective_fields": [],
+          "trust_mismatch": false,
+          "evidence_path": "/private/tmp/nexus_skill_fit_research_v2_full_live_20260517/research_and_source_discipline_docs-lane-contextual-evidence-contract-001_skill_arm_003_d5dff0905f17/evidence_bundle.json",
+          "receipt_path": "/private/tmp/nexus_skill_fit_research_v2_full_live_20260517/research_and_source_discipline_docs-lane-contextual-evidence-contract-001_skill_arm_003_d5dff0905f17"
+        },
+        {
+          "row_id": "research_and_source_discipline::docs-lane-config-contract-001::skill_arm_003_d5dff0905f17",
+          "task_key": "scripts/bench/public_benchmark_docs_lane_v1.json::docs-lane-config-contract-001",
+          "task_ref": {
+            "manifest": "scripts/bench/public_benchmark_docs_lane_v1.json",
+            "task_id": "docs-lane-config-contract-001"
+          },
+          "task_bucket": "docs_code_sync",
+          "baseline_status": "PASS",
+          "skill_status": "PASS",
+          "gate_status": "PASS",
+          "gate_row_status": "RETURN",
+          "effective": false,
+          "missing_effective_fields": [],
+          "trust_mismatch": false,
+          "evidence_path": "/private/tmp/nexus_skill_fit_research_v2_full_live_20260517/research_and_source_discipline_docs-lane-config-contract-001_skill_arm_003_d5dff0905f17/evidence_bundle.json",
+          "receipt_path": "/private/tmp/nexus_skill_fit_research_v2_full_live_20260517/research_and_source_discipline_docs-lane-config-contract-001_skill_arm_003_d5dff0905f17"
+        },
+        {
+          "row_id": "research_and_source_discipline::commercial-reasoning-research-002::skill_arm_003_d5dff0905f17",
+          "task_key": "scripts/bench/public_benchmark_commercial_expansion_v1.json::commercial-reasoning-research-002",
+          "task_ref": {
+            "manifest": "scripts/bench/public_benchmark_commercial_expansion_v1.json",
+            "task_id": "commercial-reasoning-research-002"
+          },
+          "task_bucket": "docs_code_sync",
+          "baseline_status": "PASS",
+          "skill_status": "PASS",
+          "gate_status": "PASS",
+          "gate_row_status": "RETURN",
+          "effective": false,
+          "missing_effective_fields": [],
+          "trust_mismatch": false,
+          "evidence_path": "/private/tmp/nexus_skill_fit_research_v2_full_live_20260517/research_and_source_discipline_commercial-reasoning-research-002_skill_arm_003_d5dff0905f17/evidence_bundle.json",
+          "receipt_path": "/private/tmp/nexus_skill_fit_research_v2_full_live_20260517/research_and_source_discipline_commercial-reasoning-research-002_skill_arm_003_d5dff0905f17"
+        },
+        {
+          "row_id": "research_and_source_discipline::commercial-retrieval-lancedb-002::skill_arm_003_d5dff0905f17",
+          "task_key": "scripts/bench/public_benchmark_commercial_expansion_v1.json::commercial-retrieval-lancedb-002",
+          "task_ref": {
+            "manifest": "scripts/bench/public_benchmark_commercial_expansion_v1.json",
+            "task_id": "commercial-retrieval-lancedb-002"
+          },
+          "task_bucket": "docs_code_sync",
+          "baseline_status": "PASS",
+          "skill_status": "PASS",
+          "gate_status": "PASS",
+          "gate_row_status": "RETURN",
+          "effective": false,
+          "missing_effective_fields": [],
+          "trust_mismatch": false,
+          "evidence_path": "/private/tmp/nexus_skill_fit_research_v2_full_live_20260517/research_and_source_discipline_commercial-retrieval-lancedb-002_skill_arm_003_d5dff0905f17/evidence_bundle.json",
+          "receipt_path": "/private/tmp/nexus_skill_fit_research_v2_full_live_20260517/research_and_source_discipline_commercial-retrieval-lancedb-002_skill_arm_003_d5dff0905f17"
+        },
+        {
+          "row_id": "research_and_source_discipline::pub-doc-002::skill_arm_003_d5dff0905f17",
+          "task_key": "scripts/bench/public_benchmark_pilot_v1.json::pub-doc-002",
+          "task_ref": {
+            "manifest": "scripts/bench/public_benchmark_pilot_v1.json",
+            "task_id": "pub-doc-002"
+          },
+          "task_bucket": "docs_code_sync",
+          "baseline_status": "PASS",
+          "skill_status": "PASS",
+          "gate_status": "PASS",
+          "gate_row_status": "RETURN",
+          "effective": false,
+          "missing_effective_fields": [],
+          "trust_mismatch": false,
+          "evidence_path": "/private/tmp/nexus_skill_fit_research_v2_full_live_20260517/research_and_source_discipline_pub-doc-002_skill_arm_003_d5dff0905f17/evidence_bundle.json",
+          "receipt_path": "/private/tmp/nexus_skill_fit_research_v2_full_live_20260517/research_and_source_discipline_pub-doc-002_skill_arm_003_d5dff0905f17"
+        },
+        {
+          "row_id": "research_and_source_discipline::pub-doc-003::skill_arm_003_d5dff0905f17",
+          "task_key": "scripts/bench/public_benchmark_pilot_v1.json::pub-doc-003",
+          "task_ref": {
+            "manifest": "scripts/bench/public_benchmark_pilot_v1.json",
+            "task_id": "pub-doc-003"
+          },
+          "task_bucket": "docs_code_sync",
+          "baseline_status": "PASS",
+          "skill_status": "PASS",
+          "gate_status": "PASS",
+          "gate_row_status": "RETURN",
+          "effective": false,
+          "missing_effective_fields": [],
+          "trust_mismatch": false,
+          "evidence_path": "/private/tmp/nexus_skill_fit_research_v2_full_live_20260517/research_and_source_discipline_pub-doc-003_skill_arm_003_d5dff0905f17/evidence_bundle.json",
+          "receipt_path": "/private/tmp/nexus_skill_fit_research_v2_full_live_20260517/research_and_source_discipline_pub-doc-003_skill_arm_003_d5dff0905f17"
+        },
+        {
+          "row_id": "research_and_source_discipline::pub-doc-004::skill_arm_003_d5dff0905f17",
+          "task_key": "scripts/bench/public_benchmark_pilot_v1.json::pub-doc-004",
+          "task_ref": {
+            "manifest": "scripts/bench/public_benchmark_pilot_v1.json",
+            "task_id": "pub-doc-004"
+          },
+          "task_bucket": "docs_code_sync",
+          "baseline_status": "PASS",
+          "skill_status": "PASS",
+          "gate_status": "PASS",
+          "gate_row_status": "RETURN",
+          "effective": false,
+          "missing_effective_fields": [],
+          "trust_mismatch": false,
+          "evidence_path": "/private/tmp/nexus_skill_fit_research_v2_full_live_20260517/research_and_source_discipline_pub-doc-004_skill_arm_003_d5dff0905f17/evidence_bundle.json",
+          "receipt_path": "/private/tmp/nexus_skill_fit_research_v2_full_live_20260517/research_and_source_discipline_pub-doc-004_skill_arm_003_d5dff0905f17"
+        },
+        {
+          "row_id": "research_and_source_discipline::pub-ops-002::skill_arm_003_d5dff0905f17",
+          "task_key": "scripts/bench/public_benchmark_pilot_v1.json::pub-ops-002",
+          "task_ref": {
+            "manifest": "scripts/bench/public_benchmark_pilot_v1.json",
+            "task_id": "pub-ops-002"
+          },
+          "task_bucket": "ops_research",
+          "baseline_status": "PASS",
+          "skill_status": "PASS",
+          "gate_status": "PASS",
+          "gate_row_status": "RETURN",
+          "effective": false,
+          "missing_effective_fields": [],
+          "trust_mismatch": false,
+          "evidence_path": "/private/tmp/nexus_skill_fit_research_v2_full_live_20260517/research_and_source_discipline_pub-ops-002_skill_arm_003_d5dff0905f17/evidence_bundle.json",
+          "receipt_path": "/private/tmp/nexus_skill_fit_research_v2_full_live_20260517/research_and_source_discipline_pub-ops-002_skill_arm_003_d5dff0905f17"
+        },
+        {
+          "row_id": "research_and_source_discipline::pub-ops-003::skill_arm_003_d5dff0905f17",
+          "task_key": "scripts/bench/public_benchmark_pilot_v1.json::pub-ops-003",
+          "task_ref": {
+            "manifest": "scripts/bench/public_benchmark_pilot_v1.json",
+            "task_id": "pub-ops-003"
+          },
+          "task_bucket": "ops_research",
+          "baseline_status": "PASS",
+          "skill_status": "PASS",
+          "gate_status": "PASS",
+          "gate_row_status": "RETURN",
+          "effective": false,
+          "missing_effective_fields": [],
+          "trust_mismatch": false,
+          "evidence_path": "/private/tmp/nexus_skill_fit_research_v2_full_live_20260517/research_and_source_discipline_pub-ops-003_skill_arm_003_d5dff0905f17/evidence_bundle.json",
+          "receipt_path": "/private/tmp/nexus_skill_fit_research_v2_full_live_20260517/research_and_source_discipline_pub-ops-003_skill_arm_003_d5dff0905f17"
+        },
+        {
+          "row_id": "research_and_source_discipline::pub-ops-004::skill_arm_003_d5dff0905f17",
+          "task_key": "scripts/bench/public_benchmark_pilot_v1.json::pub-ops-004",
+          "task_ref": {
+            "manifest": "scripts/bench/public_benchmark_pilot_v1.json",
+            "task_id": "pub-ops-004"
+          },
+          "task_bucket": "ops_research",
+          "baseline_status": "PASS",
+          "skill_status": "PASS",
+          "gate_status": "PASS",
+          "gate_row_status": "RETURN",
+          "effective": false,
+          "missing_effective_fields": [],
+          "trust_mismatch": false,
+          "evidence_path": "/private/tmp/nexus_skill_fit_research_v2_full_live_20260517/research_and_source_discipline_pub-ops-004_skill_arm_003_d5dff0905f17/evidence_bundle.json",
+          "receipt_path": "/private/tmp/nexus_skill_fit_research_v2_full_live_20260517/research_and_source_discipline_pub-ops-004_skill_arm_003_d5dff0905f17"
+        },
+        {
+          "row_id": "research_and_source_discipline::hard-neutral-doc-001::skill_arm_003_d5dff0905f17",
+          "task_key": "scripts/bench/public_benchmark_hard_neutral_v2.json::hard-neutral-doc-001",
+          "task_ref": {
+            "manifest": "scripts/bench/public_benchmark_hard_neutral_v2.json",
+            "task_id": "hard-neutral-doc-001"
+          },
+          "task_bucket": "docs_code_sync",
+          "baseline_status": "PASS",
+          "skill_status": "PASS",
+          "gate_status": "PASS",
+          "gate_row_status": "RETURN",
+          "effective": false,
+          "missing_effective_fields": [],
+          "trust_mismatch": false,
+          "evidence_path": "/private/tmp/nexus_skill_fit_research_v2_full_live_20260517/research_and_source_discipline_hard-neutral-doc-001_skill_arm_003_d5dff0905f17/evidence_bundle.json",
+          "receipt_path": "/private/tmp/nexus_skill_fit_research_v2_full_live_20260517/research_and_source_discipline_hard-neutral-doc-001_skill_arm_003_d5dff0905f17"
+        },
+        {
+          "row_id": "research_and_source_discipline::hard-neutral-doc-002::skill_arm_003_d5dff0905f17",
+          "task_key": "scripts/bench/public_benchmark_hard_neutral_v2.json::hard-neutral-doc-002",
+          "task_ref": {
+            "manifest": "scripts/bench/public_benchmark_hard_neutral_v2.json",
+            "task_id": "hard-neutral-doc-002"
+          },
+          "task_bucket": "docs_code_sync",
+          "baseline_status": "PASS",
+          "skill_status": "PASS",
+          "gate_status": "PASS",
+          "gate_row_status": "RETURN",
+          "effective": false,
+          "missing_effective_fields": [],
+          "trust_mismatch": false,
+          "evidence_path": "/private/tmp/nexus_skill_fit_research_v2_full_live_20260517/research_and_source_discipline_hard-neutral-doc-002_skill_arm_003_d5dff0905f17/evidence_bundle.json",
+          "receipt_path": "/private/tmp/nexus_skill_fit_research_v2_full_live_20260517/research_and_source_discipline_hard-neutral-doc-002_skill_arm_003_d5dff0905f17"
+        },
+        {
+          "row_id": "research_and_source_discipline::hard-neutral-ops-001::skill_arm_003_d5dff0905f17",
+          "task_key": "scripts/bench/public_benchmark_hard_neutral_v2.json::hard-neutral-ops-001",
+          "task_ref": {
+            "manifest": "scripts/bench/public_benchmark_hard_neutral_v2.json",
+            "task_id": "hard-neutral-ops-001"
+          },
+          "task_bucket": "ops_research",
+          "baseline_status": "PASS",
+          "skill_status": "PASS",
+          "gate_status": "PASS",
+          "gate_row_status": "RETURN",
+          "effective": false,
+          "missing_effective_fields": [],
+          "trust_mismatch": false,
+          "evidence_path": "/private/tmp/nexus_skill_fit_research_v2_full_live_20260517/research_and_source_discipline_hard-neutral-ops-001_skill_arm_003_d5dff0905f17/evidence_bundle.json",
+          "receipt_path": "/private/tmp/nexus_skill_fit_research_v2_full_live_20260517/research_and_source_discipline_hard-neutral-ops-001_skill_arm_003_d5dff0905f17"
+        },
+        {
+          "row_id": "research_and_source_discipline::hard-neutral-ops-002::skill_arm_003_d5dff0905f17",
+          "task_key": "scripts/bench/public_benchmark_hard_neutral_v2.json::hard-neutral-ops-002",
+          "task_ref": {
+            "manifest": "scripts/bench/public_benchmark_hard_neutral_v2.json",
+            "task_id": "hard-neutral-ops-002"
+          },
+          "task_bucket": "ops_research",
+          "baseline_status": "PASS",
+          "skill_status": "PASS",
+          "gate_status": "PASS",
+          "gate_row_status": "RETURN",
+          "effective": false,
+          "missing_effective_fields": [],
+          "trust_mismatch": false,
+          "evidence_path": "/private/tmp/nexus_skill_fit_research_v2_full_live_20260517/research_and_source_discipline_hard-neutral-ops-002_skill_arm_003_d5dff0905f17/evidence_bundle.json",
+          "receipt_path": "/private/tmp/nexus_skill_fit_research_v2_full_live_20260517/research_and_source_discipline_hard-neutral-ops-002_skill_arm_003_d5dff0905f17"
+        },
+        {
+          "row_id": "research_and_source_discipline::rlm-harder-multifile-001::skill_arm_003_d5dff0905f17",
+          "task_key": "scripts/bench/public_benchmark_rlm_harder_v1.json::rlm-harder-multifile-001",
+          "task_ref": {
+            "manifest": "scripts/bench/public_benchmark_rlm_harder_v1.json",
+            "task_id": "rlm-harder-multifile-001"
+          },
+          "task_bucket": "docs_code_sync",
+          "baseline_status": "PASS",
+          "skill_status": "PASS",
+          "gate_status": "PASS",
+          "gate_row_status": "RETURN",
+          "effective": false,
+          "missing_effective_fields": [],
+          "trust_mismatch": false,
+          "evidence_path": "/private/tmp/nexus_skill_fit_research_v2_full_live_20260517/research_and_source_discipline_rlm-harder-multifile-001_skill_arm_003_d5dff0905f17/evidence_bundle.json",
+          "receipt_path": "/private/tmp/nexus_skill_fit_research_v2_full_live_20260517/research_and_source_discipline_rlm-harder-multifile-001_skill_arm_003_d5dff0905f17"
+        },
+        {
+          "row_id": "research_and_source_discipline::rlm-harder-long-context-001::skill_arm_003_d5dff0905f17",
+          "task_key": "scripts/bench/public_benchmark_rlm_harder_v1.json::rlm-harder-long-context-001",
+          "task_ref": {
+            "manifest": "scripts/bench/public_benchmark_rlm_harder_v1.json",
+            "task_id": "rlm-harder-long-context-001"
+          },
+          "task_bucket": "feature",
+          "baseline_status": "PASS",
+          "skill_status": "PASS",
+          "gate_status": "PASS",
+          "gate_row_status": "RETURN",
+          "effective": false,
+          "missing_effective_fields": [],
+          "trust_mismatch": false,
+          "evidence_path": "/private/tmp/nexus_skill_fit_research_v2_full_live_20260517/research_and_source_discipline_rlm-harder-long-context-001_skill_arm_003_d5dff0905f17/evidence_bundle.json",
+          "receipt_path": "/private/tmp/nexus_skill_fit_research_v2_full_live_20260517/research_and_source_discipline_rlm-harder-long-context-001_skill_arm_003_d5dff0905f17"
+        },
+        {
+          "row_id": "research_and_source_discipline::rlm-harder-misleading-tests-001::skill_arm_003_d5dff0905f17",
+          "task_key": "scripts/bench/public_benchmark_rlm_harder_v1.json::rlm-harder-misleading-tests-001",
+          "task_ref": {
+            "manifest": "scripts/bench/public_benchmark_rlm_harder_v1.json",
+            "task_id": "rlm-harder-misleading-tests-001"
+          },
+          "task_bucket": "ops_research",
+          "baseline_status": "PASS",
+          "skill_status": "PASS",
+          "gate_status": "PASS",
+          "gate_row_status": "RETURN",
+          "effective": false,
+          "missing_effective_fields": [],
+          "trust_mismatch": false,
+          "evidence_path": "/private/tmp/nexus_skill_fit_research_v2_full_live_20260517/research_and_source_discipline_rlm-harder-misleading-tests-001_skill_arm_003_d5dff0905f17/evidence_bundle.json",
+          "receipt_path": "/private/tmp/nexus_skill_fit_research_v2_full_live_20260517/research_and_source_discipline_rlm-harder-misleading-tests-001_skill_arm_003_d5dff0905f17"
+        }
+      ]
+    },
+    {
+      "skill_id": "gbrain-data-research",
+      "verdict": "reject",
+      "tested_rows": 22,
+      "effective_rows": 0,
+      "effective_rate": 0.0,
+      "task_bucket_counts": {
+        "bugfix": 1,
+        "docs_code_sync": 14,
+        "feature": 1,
+        "ops_research": 6
+      },
+      "effective_task_bucket_counts": {},
+      "recommendation": "skip_until_candidate_or_taskset_changes",
+      "targeted_replay_row_ids": [],
+      "rows": [
+        {
+          "row_id": "research_and_source_discipline::rlm-harder-v2-memory-001::skill_arm_001_a9955636ba8f",
+          "task_key": "scripts/bench/public_benchmark_rlm_harder_v2.json::rlm-harder-v2-memory-001",
+          "task_ref": {
+            "manifest": "scripts/bench/public_benchmark_rlm_harder_v2.json",
+            "task_id": "rlm-harder-v2-memory-001"
+          },
+          "task_bucket": "bugfix",
+          "baseline_status": "PASS",
+          "skill_status": "PASS",
+          "gate_status": "PASS",
+          "gate_row_status": "RETURN",
+          "effective": false,
+          "missing_effective_fields": [],
+          "trust_mismatch": false,
+          "evidence_path": "/private/tmp/nexus_skill_fit_research_v2_full_live_20260517/research_and_source_discipline_rlm-harder-v2-memory-001_skill_arm_001_a9955636ba8f/evidence_bundle.json",
+          "receipt_path": "/private/tmp/nexus_skill_fit_research_v2_full_live_20260517/research_and_source_discipline_rlm-harder-v2-memory-001_skill_arm_001_a9955636ba8f"
+        },
+        {
+          "row_id": "research_and_source_discipline::route-oracle-semantic-searcher-001::skill_arm_001_a9955636ba8f",
+          "task_key": "scripts/bench/public_benchmark_route_oracles_v1.json::route-oracle-semantic-searcher-001",
+          "task_ref": {
+            "manifest": "scripts/bench/public_benchmark_route_oracles_v1.json",
+            "task_id": "route-oracle-semantic-searcher-001"
+          },
+          "task_bucket": "docs_code_sync",
+          "baseline_status": "PASS",
+          "skill_status": "PASS",
+          "gate_status": "PASS",
+          "gate_row_status": "RETURN",
+          "effective": false,
+          "missing_effective_fields": [],
+          "trust_mismatch": false,
+          "evidence_path": "/private/tmp/nexus_skill_fit_research_v2_full_live_20260517/research_and_source_discipline_route-oracle-semantic-searcher-001_skill_arm_001_a9955636ba8f/evidence_bundle.json",
+          "receipt_path": "/private/tmp/nexus_skill_fit_research_v2_full_live_20260517/research_and_source_discipline_route-oracle-semantic-searcher-001_skill_arm_001_a9955636ba8f"
+        },
+        {
+          "row_id": "research_and_source_discipline::model-required-docs-001::skill_arm_001_a9955636ba8f",
+          "task_key": "scripts/bench/public_benchmark_model_required_uplift_v1.json::model-required-docs-001",
+          "task_ref": {
+            "manifest": "scripts/bench/public_benchmark_model_required_uplift_v1.json",
+            "task_id": "model-required-docs-001"
+          },
+          "task_bucket": "docs_code_sync",
+          "baseline_status": "PASS",
+          "skill_status": "PASS",
+          "gate_status": "PASS",
+          "gate_row_status": "RETURN",
+          "effective": false,
+          "missing_effective_fields": [],
+          "trust_mismatch": false,
+          "evidence_path": "/private/tmp/nexus_skill_fit_research_v2_full_live_20260517/research_and_source_discipline_model-required-docs-001_skill_arm_001_a9955636ba8f/evidence_bundle.json",
+          "receipt_path": "/private/tmp/nexus_skill_fit_research_v2_full_live_20260517/research_and_source_discipline_model-required-docs-001_skill_arm_001_a9955636ba8f"
+        },
+        {
+          "row_id": "research_and_source_discipline::model-required-context-001::skill_arm_001_a9955636ba8f",
+          "task_key": "scripts/bench/public_benchmark_model_required_uplift_v1.json::model-required-context-001",
+          "task_ref": {
+            "manifest": "scripts/bench/public_benchmark_model_required_uplift_v1.json",
+            "task_id": "model-required-context-001"
+          },
+          "task_bucket": "docs_code_sync",
+          "baseline_status": "PASS",
+          "skill_status": "PASS",
+          "gate_status": "PASS",
+          "gate_row_status": "RETURN",
+          "effective": false,
+          "missing_effective_fields": [],
+          "trust_mismatch": false,
+          "evidence_path": "/private/tmp/nexus_skill_fit_research_v2_full_live_20260517/research_and_source_discipline_model-required-context-001_skill_arm_001_a9955636ba8f/evidence_bundle.json",
+          "receipt_path": "/private/tmp/nexus_skill_fit_research_v2_full_live_20260517/research_and_source_discipline_model-required-context-001_skill_arm_001_a9955636ba8f"
+        },
+        {
+          "row_id": "research_and_source_discipline::docs-lane-public-field-contract-001::skill_arm_001_a9955636ba8f",
+          "task_key": "scripts/bench/public_benchmark_docs_lane_v1.json::docs-lane-public-field-contract-001",
+          "task_ref": {
+            "manifest": "scripts/bench/public_benchmark_docs_lane_v1.json",
+            "task_id": "docs-lane-public-field-contract-001"
+          },
+          "task_bucket": "docs_code_sync",
+          "baseline_status": "PASS",
+          "skill_status": "PASS",
+          "gate_status": "PASS",
+          "gate_row_status": "RETURN",
+          "effective": false,
+          "missing_effective_fields": [],
+          "trust_mismatch": false,
+          "evidence_path": "/private/tmp/nexus_skill_fit_research_v2_full_live_20260517/research_and_source_discipline_docs-lane-public-field-contract-001_skill_arm_001_a9955636ba8f/evidence_bundle.json",
+          "receipt_path": "/private/tmp/nexus_skill_fit_research_v2_full_live_20260517/research_and_source_discipline_docs-lane-public-field-contract-001_skill_arm_001_a9955636ba8f"
+        },
+        {
+          "row_id": "research_and_source_discipline::docs-lane-contextual-evidence-contract-001::skill_arm_001_a9955636ba8f",
+          "task_key": "scripts/bench/public_benchmark_docs_lane_v1.json::docs-lane-contextual-evidence-contract-001",
+          "task_ref": {
+            "manifest": "scripts/bench/public_benchmark_docs_lane_v1.json",
+            "task_id": "docs-lane-contextual-evidence-contract-001"
+          },
+          "task_bucket": "docs_code_sync",
+          "baseline_status": "PASS",
+          "skill_status": "PASS",
+          "gate_status": "PASS",
+          "gate_row_status": "RETURN",
+          "effective": false,
+          "missing_effective_fields": [],
+          "trust_mismatch": false,
+          "evidence_path": "/private/tmp/nexus_skill_fit_research_v2_full_live_20260517/research_and_source_discipline_docs-lane-contextual-evidence-contract-001_skill_arm_001_a9955636ba8f/evidence_bundle.json",
+          "receipt_path": "/private/tmp/nexus_skill_fit_research_v2_full_live_20260517/research_and_source_discipline_docs-lane-contextual-evidence-contract-001_skill_arm_001_a9955636ba8f"
+        },
+        {
+          "row_id": "research_and_source_discipline::docs-lane-config-contract-001::skill_arm_001_a9955636ba8f",
+          "task_key": "scripts/bench/public_benchmark_docs_lane_v1.json::docs-lane-config-contract-001",
+          "task_ref": {
+            "manifest": "scripts/bench/public_benchmark_docs_lane_v1.json",
+            "task_id": "docs-lane-config-contract-001"
+          },
+          "task_bucket": "docs_code_sync",
+          "baseline_status": "PASS",
+          "skill_status": "PASS",
+          "gate_status": "PASS",
+          "gate_row_status": "RETURN",
+          "effective": false,
+          "missing_effective_fields": [],
+          "trust_mismatch": false,
+          "evidence_path": "/private/tmp/nexus_skill_fit_research_v2_full_live_20260517/research_and_source_discipline_docs-lane-config-contract-001_skill_arm_001_a9955636ba8f/evidence_bundle.json",
+          "receipt_path": "/private/tmp/nexus_skill_fit_research_v2_full_live_20260517/research_and_source_discipline_docs-lane-config-contract-001_skill_arm_001_a9955636ba8f"
+        },
+        {
+          "row_id": "research_and_source_discipline::commercial-reasoning-research-002::skill_arm_001_a9955636ba8f",
+          "task_key": "scripts/bench/public_benchmark_commercial_expansion_v1.json::commercial-reasoning-research-002",
+          "task_ref": {
+            "manifest": "scripts/bench/public_benchmark_commercial_expansion_v1.json",
+            "task_id": "commercial-reasoning-research-002"
+          },
+          "task_bucket": "docs_code_sync",
+          "baseline_status": "PASS",
+          "skill_status": "PASS",
+          "gate_status": "PASS",
+          "gate_row_status": "RETURN",
+          "effective": false,
+          "missing_effective_fields": [],
+          "trust_mismatch": false,
+          "evidence_path": "/private/tmp/nexus_skill_fit_research_v2_full_live_20260517/research_and_source_discipline_commercial-reasoning-research-002_skill_arm_001_a9955636ba8f/evidence_bundle.json",
+          "receipt_path": "/private/tmp/nexus_skill_fit_research_v2_full_live_20260517/research_and_source_discipline_commercial-reasoning-research-002_skill_arm_001_a9955636ba8f"
+        },
+        {
+          "row_id": "research_and_source_discipline::commercial-retrieval-lancedb-002::skill_arm_001_a9955636ba8f",
+          "task_key": "scripts/bench/public_benchmark_commercial_expansion_v1.json::commercial-retrieval-lancedb-002",
+          "task_ref": {
+            "manifest": "scripts/bench/public_benchmark_commercial_expansion_v1.json",
+            "task_id": "commercial-retrieval-lancedb-002"
+          },
+          "task_bucket": "docs_code_sync",
+          "baseline_status": "PASS",
+          "skill_status": "PASS",
+          "gate_status": "PASS",
+          "gate_row_status": "RETURN",
+          "effective": false,
+          "missing_effective_fields": [],
+          "trust_mismatch": false,
+          "evidence_path": "/private/tmp/nexus_skill_fit_research_v2_full_live_20260517/research_and_source_discipline_commercial-retrieval-lancedb-002_skill_arm_001_a9955636ba8f/evidence_bundle.json",
+          "receipt_path": "/private/tmp/nexus_skill_fit_research_v2_full_live_20260517/research_and_source_discipline_commercial-retrieval-lancedb-002_skill_arm_001_a9955636ba8f"
+        },
+        {
+          "row_id": "research_and_source_discipline::pub-doc-002::skill_arm_001_a9955636ba8f",
+          "task_key": "scripts/bench/public_benchmark_pilot_v1.json::pub-doc-002",
+          "task_ref": {
+            "manifest": "scripts/bench/public_benchmark_pilot_v1.json",
+            "task_id": "pub-doc-002"
+          },
+          "task_bucket": "docs_code_sync",
+          "baseline_status": "PASS",
+          "skill_status": "PASS",
+          "gate_status": "PASS",
+          "gate_row_status": "RETURN",
+          "effective": false,
+          "missing_effective_fields": [],
+          "trust_mismatch": false,
+          "evidence_path": "/private/tmp/nexus_skill_fit_research_v2_full_live_20260517/research_and_source_discipline_pub-doc-002_skill_arm_001_a9955636ba8f/evidence_bundle.json",
+          "receipt_path": "/private/tmp/nexus_skill_fit_research_v2_full_live_20260517/research_and_source_discipline_pub-doc-002_skill_arm_001_a9955636ba8f"
+        },
+        {
+          "row_id": "research_and_source_discipline::pub-doc-003::skill_arm_001_a9955636ba8f",
+          "task_key": "scripts/bench/public_benchmark_pilot_v1.json::pub-doc-003",
+          "task_ref": {
+            "manifest": "scripts/bench/public_benchmark_pilot_v1.json",
+            "task_id": "pub-doc-003"
+          },
+          "task_bucket": "docs_code_sync",
+          "baseline_status": "PASS",
+          "skill_status": "PASS",
+          "gate_status": "PASS",
+          "gate_row_status": "RETURN",
+          "effective": false,
+          "missing_effective_fields": [],
+          "trust_mismatch": false,
+          "evidence_path": "/private/tmp/nexus_skill_fit_research_v2_full_live_20260517/research_and_source_discipline_pub-doc-003_skill_arm_001_a9955636ba8f/evidence_bundle.json",
+          "receipt_path": "/private/tmp/nexus_skill_fit_research_v2_full_live_20260517/research_and_source_discipline_pub-doc-003_skill_arm_001_a9955636ba8f"
+        },
+        {
+          "row_id": "research_and_source_discipline::pub-doc-004::skill_arm_001_a9955636ba8f",
+          "task_key": "scripts/bench/public_benchmark_pilot_v1.json::pub-doc-004",
+          "task_ref": {
+            "manifest": "scripts/bench/public_benchmark_pilot_v1.json",
+            "task_id": "pub-doc-004"
+          },
+          "task_bucket": "docs_code_sync",
+          "baseline_status": "PASS",
+          "skill_status": "PASS",
+          "gate_status": "PASS",
+          "gate_row_status": "RETURN",
+          "effective": false,
+          "missing_effective_fields": [],
+          "trust_mismatch": false,
+          "evidence_path": "/private/tmp/nexus_skill_fit_research_v2_full_live_20260517/research_and_source_discipline_pub-doc-004_skill_arm_001_a9955636ba8f/evidence_bundle.json",
+          "receipt_path": "/private/tmp/nexus_skill_fit_research_v2_full_live_20260517/research_and_source_discipline_pub-doc-004_skill_arm_001_a9955636ba8f"
+        },
+        {
+          "row_id": "research_and_source_discipline::pub-ops-002::skill_arm_001_a9955636ba8f",
+          "task_key": "scripts/bench/public_benchmark_pilot_v1.json::pub-ops-002",
+          "task_ref": {
+            "manifest": "scripts/bench/public_benchmark_pilot_v1.json",
+            "task_id": "pub-ops-002"
+          },
+          "task_bucket": "ops_research",
+          "baseline_status": "PASS",
+          "skill_status": "PASS",
+          "gate_status": "PASS",
+          "gate_row_status": "RETURN",
+          "effective": false,
+          "missing_effective_fields": [],
+          "trust_mismatch": false,
+          "evidence_path": "/private/tmp/nexus_skill_fit_research_v2_full_live_20260517/research_and_source_discipline_pub-ops-002_skill_arm_001_a9955636ba8f/evidence_bundle.json",
+          "receipt_path": "/private/tmp/nexus_skill_fit_research_v2_full_live_20260517/research_and_source_discipline_pub-ops-002_skill_arm_001_a9955636ba8f"
+        },
+        {
+          "row_id": "research_and_source_discipline::pub-ops-003::skill_arm_001_a9955636ba8f",
+          "task_key": "scripts/bench/public_benchmark_pilot_v1.json::pub-ops-003",
+          "task_ref": {
+            "manifest": "scripts/bench/public_benchmark_pilot_v1.json",
+            "task_id": "pub-ops-003"
+          },
+          "task_bucket": "ops_research",
+          "baseline_status": "PASS",
+          "skill_status": "PASS",
+          "gate_status": "PASS",
+          "gate_row_status": "RETURN",
+          "effective": false,
+          "missing_effective_fields": [],
+          "trust_mismatch": false,
+          "evidence_path": "/private/tmp/nexus_skill_fit_research_v2_full_live_20260517/research_and_source_discipline_pub-ops-003_skill_arm_001_a9955636ba8f/evidence_bundle.json",
+          "receipt_path": "/private/tmp/nexus_skill_fit_research_v2_full_live_20260517/research_and_source_discipline_pub-ops-003_skill_arm_001_a9955636ba8f"
+        },
+        {
+          "row_id": "research_and_source_discipline::pub-ops-004::skill_arm_001_a9955636ba8f",
+          "task_key": "scripts/bench/public_benchmark_pilot_v1.json::pub-ops-004",
+          "task_ref": {
+            "manifest": "scripts/bench/public_benchmark_pilot_v1.json",
+            "task_id": "pub-ops-004"
+          },
+          "task_bucket": "ops_research",
+          "baseline_status": "PASS",
+          "skill_status": "PASS",
+          "gate_status": "PASS",
+          "gate_row_status": "RETURN",
+          "effective": false,
+          "missing_effective_fields": [],
+          "trust_mismatch": false,
+          "evidence_path": "/private/tmp/nexus_skill_fit_research_v2_full_live_20260517/research_and_source_discipline_pub-ops-004_skill_arm_001_a9955636ba8f/evidence_bundle.json",
+          "receipt_path": "/private/tmp/nexus_skill_fit_research_v2_full_live_20260517/research_and_source_discipline_pub-ops-004_skill_arm_001_a9955636ba8f"
+        },
+        {
+          "row_id": "research_and_source_discipline::hard-neutral-doc-001::skill_arm_001_a9955636ba8f",
+          "task_key": "scripts/bench/public_benchmark_hard_neutral_v2.json::hard-neutral-doc-001",
+          "task_ref": {
+            "manifest": "scripts/bench/public_benchmark_hard_neutral_v2.json",
+            "task_id": "hard-neutral-doc-001"
+          },
+          "task_bucket": "docs_code_sync",
+          "baseline_status": "PASS",
+          "skill_status": "PASS",
+          "gate_status": "PASS",
+          "gate_row_status": "RETURN",
+          "effective": false,
+          "missing_effective_fields": [],
+          "trust_mismatch": false,
+          "evidence_path": "/private/tmp/nexus_skill_fit_research_v2_full_live_20260517/research_and_source_discipline_hard-neutral-doc-001_skill_arm_001_a9955636ba8f/evidence_bundle.json",
+          "receipt_path": "/private/tmp/nexus_skill_fit_research_v2_full_live_20260517/research_and_source_discipline_hard-neutral-doc-001_skill_arm_001_a9955636ba8f"
+        },
+        {
+          "row_id": "research_and_source_discipline::hard-neutral-doc-002::skill_arm_001_a9955636ba8f",
+          "task_key": "scripts/bench/public_benchmark_hard_neutral_v2.json::hard-neutral-doc-002",
+          "task_ref": {
+            "manifest": "scripts/bench/public_benchmark_hard_neutral_v2.json",
+            "task_id": "hard-neutral-doc-002"
+          },
+          "task_bucket": "docs_code_sync",
+          "baseline_status": "PASS",
+          "skill_status": "PASS",
+          "gate_status": "PASS",
+          "gate_row_status": "RETURN",
+          "effective": false,
+          "missing_effective_fields": [],
+          "trust_mismatch": false,
+          "evidence_path": "/private/tmp/nexus_skill_fit_research_v2_full_live_20260517/research_and_source_discipline_hard-neutral-doc-002_skill_arm_001_a9955636ba8f/evidence_bundle.json",
+          "receipt_path": "/private/tmp/nexus_skill_fit_research_v2_full_live_20260517/research_and_source_discipline_hard-neutral-doc-002_skill_arm_001_a9955636ba8f"
+        },
+        {
+          "row_id": "research_and_source_discipline::hard-neutral-ops-001::skill_arm_001_a9955636ba8f",
+          "task_key": "scripts/bench/public_benchmark_hard_neutral_v2.json::hard-neutral-ops-001",
+          "task_ref": {
+            "manifest": "scripts/bench/public_benchmark_hard_neutral_v2.json",
+            "task_id": "hard-neutral-ops-001"
+          },
+          "task_bucket": "ops_research",
+          "baseline_status": "PASS",
+          "skill_status": "PASS",
+          "gate_status": "PASS",
+          "gate_row_status": "RETURN",
+          "effective": false,
+          "missing_effective_fields": [],
+          "trust_mismatch": false,
+          "evidence_path": "/private/tmp/nexus_skill_fit_research_v2_full_live_20260517/research_and_source_discipline_hard-neutral-ops-001_skill_arm_001_a9955636ba8f/evidence_bundle.json",
+          "receipt_path": "/private/tmp/nexus_skill_fit_research_v2_full_live_20260517/research_and_source_discipline_hard-neutral-ops-001_skill_arm_001_a9955636ba8f"
+        },
+        {
+          "row_id": "research_and_source_discipline::hard-neutral-ops-002::skill_arm_001_a9955636ba8f",
+          "task_key": "scripts/bench/public_benchmark_hard_neutral_v2.json::hard-neutral-ops-002",
+          "task_ref": {
+            "manifest": "scripts/bench/public_benchmark_hard_neutral_v2.json",
+            "task_id": "hard-neutral-ops-002"
+          },
+          "task_bucket": "ops_research",
+          "baseline_status": "PASS",
+          "skill_status": "PASS",
+          "gate_status": "PASS",
+          "gate_row_status": "RETURN",
+          "effective": false,
+          "missing_effective_fields": [],
+          "trust_mismatch": false,
+          "evidence_path": "/private/tmp/nexus_skill_fit_research_v2_full_live_20260517/research_and_source_discipline_hard-neutral-ops-002_skill_arm_001_a9955636ba8f/evidence_bundle.json",
+          "receipt_path": "/private/tmp/nexus_skill_fit_research_v2_full_live_20260517/research_and_source_discipline_hard-neutral-ops-002_skill_arm_001_a9955636ba8f"
+        },
+        {
+          "row_id": "research_and_source_discipline::rlm-harder-multifile-001::skill_arm_001_a9955636ba8f",
+          "task_key": "scripts/bench/public_benchmark_rlm_harder_v1.json::rlm-harder-multifile-001",
+          "task_ref": {
+            "manifest": "scripts/bench/public_benchmark_rlm_harder_v1.json",
+            "task_id": "rlm-harder-multifile-001"
+          },
+          "task_bucket": "docs_code_sync",
+          "baseline_status": "PASS",
+          "skill_status": "PASS",
+          "gate_status": "PASS",
+          "gate_row_status": "RETURN",
+          "effective": false,
+          "missing_effective_fields": [],
+          "trust_mismatch": false,
+          "evidence_path": "/private/tmp/nexus_skill_fit_research_v2_full_live_20260517/research_and_source_discipline_rlm-harder-multifile-001_skill_arm_001_a9955636ba8f/evidence_bundle.json",
+          "receipt_path": "/private/tmp/nexus_skill_fit_research_v2_full_live_20260517/research_and_source_discipline_rlm-harder-multifile-001_skill_arm_001_a9955636ba8f"
+        },
+        {
+          "row_id": "research_and_source_discipline::rlm-harder-long-context-001::skill_arm_001_a9955636ba8f",
+          "task_key": "scripts/bench/public_benchmark_rlm_harder_v1.json::rlm-harder-long-context-001",
+          "task_ref": {
+            "manifest": "scripts/bench/public_benchmark_rlm_harder_v1.json",
+            "task_id": "rlm-harder-long-context-001"
+          },
+          "task_bucket": "feature",
+          "baseline_status": "PASS",
+          "skill_status": "PASS",
+          "gate_status": "PASS",
+          "gate_row_status": "RETURN",
+          "effective": false,
+          "missing_effective_fields": [],
+          "trust_mismatch": false,
+          "evidence_path": "/private/tmp/nexus_skill_fit_research_v2_full_live_20260517/research_and_source_discipline_rlm-harder-long-context-001_skill_arm_001_a9955636ba8f/evidence_bundle.json",
+          "receipt_path": "/private/tmp/nexus_skill_fit_research_v2_full_live_20260517/research_and_source_discipline_rlm-harder-long-context-001_skill_arm_001_a9955636ba8f"
+        },
+        {
+          "row_id": "research_and_source_discipline::rlm-harder-misleading-tests-001::skill_arm_001_a9955636ba8f",
+          "task_key": "scripts/bench/public_benchmark_rlm_harder_v1.json::rlm-harder-misleading-tests-001",
+          "task_ref": {
+            "manifest": "scripts/bench/public_benchmark_rlm_harder_v1.json",
+            "task_id": "rlm-harder-misleading-tests-001"
+          },
+          "task_bucket": "ops_research",
+          "baseline_status": "PASS",
+          "skill_status": "PASS",
+          "gate_status": "PASS",
+          "gate_row_status": "RETURN",
+          "effective": false,
+          "missing_effective_fields": [],
+          "trust_mismatch": false,
+          "evidence_path": "/private/tmp/nexus_skill_fit_research_v2_full_live_20260517/research_and_source_discipline_rlm-harder-misleading-tests-001_skill_arm_001_a9955636ba8f/evidence_bundle.json",
+          "receipt_path": "/private/tmp/nexus_skill_fit_research_v2_full_live_20260517/research_and_source_discipline_rlm-harder-misleading-tests-001_skill_arm_001_a9955636ba8f"
+        }
+      ]
+    },
+    {
+      "skill_id": "gbrain-perplexity-research",
+      "verdict": "reject",
+      "tested_rows": 22,
+      "effective_rows": 0,
+      "effective_rate": 0.0,
+      "task_bucket_counts": {
+        "bugfix": 1,
+        "docs_code_sync": 14,
+        "feature": 1,
+        "ops_research": 6
+      },
+      "effective_task_bucket_counts": {},
+      "recommendation": "skip_until_candidate_or_taskset_changes",
+      "targeted_replay_row_ids": [],
+      "rows": [
+        {
+          "row_id": "research_and_source_discipline::rlm-harder-v2-memory-001::skill_arm_002_35b651f6a42e",
+          "task_key": "scripts/bench/public_benchmark_rlm_harder_v2.json::rlm-harder-v2-memory-001",
+          "task_ref": {
+            "manifest": "scripts/bench/public_benchmark_rlm_harder_v2.json",
+            "task_id": "rlm-harder-v2-memory-001"
+          },
+          "task_bucket": "bugfix",
+          "baseline_status": "PASS",
+          "skill_status": "PASS",
+          "gate_status": "PASS",
+          "gate_row_status": "RETURN",
+          "effective": false,
+          "missing_effective_fields": [],
+          "trust_mismatch": false,
+          "evidence_path": "/private/tmp/nexus_skill_fit_research_v2_full_live_20260517/research_and_source_discipline_rlm-harder-v2-memory-001_skill_arm_002_35b651f6a42e/evidence_bundle.json",
+          "receipt_path": "/private/tmp/nexus_skill_fit_research_v2_full_live_20260517/research_and_source_discipline_rlm-harder-v2-memory-001_skill_arm_002_35b651f6a42e"
+        },
+        {
+          "row_id": "research_and_source_discipline::route-oracle-semantic-searcher-001::skill_arm_002_35b651f6a42e",
+          "task_key": "scripts/bench/public_benchmark_route_oracles_v1.json::route-oracle-semantic-searcher-001",
+          "task_ref": {
+            "manifest": "scripts/bench/public_benchmark_route_oracles_v1.json",
+            "task_id": "route-oracle-semantic-searcher-001"
+          },
+          "task_bucket": "docs_code_sync",
+          "baseline_status": "PASS",
+          "skill_status": "PASS",
+          "gate_status": "PASS",
+          "gate_row_status": "RETURN",
+          "effective": false,
+          "missing_effective_fields": [],
+          "trust_mismatch": false,
+          "evidence_path": "/private/tmp/nexus_skill_fit_research_v2_full_live_20260517/research_and_source_discipline_route-oracle-semantic-searcher-001_skill_arm_002_35b651f6a42e/evidence_bundle.json",
+          "receipt_path": "/private/tmp/nexus_skill_fit_research_v2_full_live_20260517/research_and_source_discipline_route-oracle-semantic-searcher-001_skill_arm_002_35b651f6a42e"
+        },
+        {
+          "row_id": "research_and_source_discipline::model-required-docs-001::skill_arm_002_35b651f6a42e",
+          "task_key": "scripts/bench/public_benchmark_model_required_uplift_v1.json::model-required-docs-001",
+          "task_ref": {
+            "manifest": "scripts/bench/public_benchmark_model_required_uplift_v1.json",
+            "task_id": "model-required-docs-001"
+          },
+          "task_bucket": "docs_code_sync",
+          "baseline_status": "PASS",
+          "skill_status": "PASS",
+          "gate_status": "PASS",
+          "gate_row_status": "RETURN",
+          "effective": false,
+          "missing_effective_fields": [],
+          "trust_mismatch": false,
+          "evidence_path": "/private/tmp/nexus_skill_fit_research_v2_full_live_20260517/research_and_source_discipline_model-required-docs-001_skill_arm_002_35b651f6a42e/evidence_bundle.json",
+          "receipt_path": "/private/tmp/nexus_skill_fit_research_v2_full_live_20260517/research_and_source_discipline_model-required-docs-001_skill_arm_002_35b651f6a42e"
+        },
+        {
+          "row_id": "research_and_source_discipline::model-required-context-001::skill_arm_002_35b651f6a42e",
+          "task_key": "scripts/bench/public_benchmark_model_required_uplift_v1.json::model-required-context-001",
+          "task_ref": {
+            "manifest": "scripts/bench/public_benchmark_model_required_uplift_v1.json",
+            "task_id": "model-required-context-001"
+          },
+          "task_bucket": "docs_code_sync",
+          "baseline_status": "PASS",
+          "skill_status": "PASS",
+          "gate_status": "PASS",
+          "gate_row_status": "RETURN",
+          "effective": false,
+          "missing_effective_fields": [],
+          "trust_mismatch": false,
+          "evidence_path": "/private/tmp/nexus_skill_fit_research_v2_full_live_20260517/research_and_source_discipline_model-required-context-001_skill_arm_002_35b651f6a42e/evidence_bundle.json",
+          "receipt_path": "/private/tmp/nexus_skill_fit_research_v2_full_live_20260517/research_and_source_discipline_model-required-context-001_skill_arm_002_35b651f6a42e"
+        },
+        {
+          "row_id": "research_and_source_discipline::docs-lane-public-field-contract-001::skill_arm_002_35b651f6a42e",
+          "task_key": "scripts/bench/public_benchmark_docs_lane_v1.json::docs-lane-public-field-contract-001",
+          "task_ref": {
+            "manifest": "scripts/bench/public_benchmark_docs_lane_v1.json",
+            "task_id": "docs-lane-public-field-contract-001"
+          },
+          "task_bucket": "docs_code_sync",
+          "baseline_status": "PASS",
+          "skill_status": "PASS",
+          "gate_status": "PASS",
+          "gate_row_status": "RETURN",
+          "effective": false,
+          "missing_effective_fields": [],
+          "trust_mismatch": false,
+          "evidence_path": "/private/tmp/nexus_skill_fit_research_v2_full_live_20260517/research_and_source_discipline_docs-lane-public-field-contract-001_skill_arm_002_35b651f6a42e/evidence_bundle.json",
+          "receipt_path": "/private/tmp/nexus_skill_fit_research_v2_full_live_20260517/research_and_source_discipline_docs-lane-public-field-contract-001_skill_arm_002_35b651f6a42e"
+        },
+        {
+          "row_id": "research_and_source_discipline::docs-lane-contextual-evidence-contract-001::skill_arm_002_35b651f6a42e",
+          "task_key": "scripts/bench/public_benchmark_docs_lane_v1.json::docs-lane-contextual-evidence-contract-001",
+          "task_ref": {
+            "manifest": "scripts/bench/public_benchmark_docs_lane_v1.json",
+            "task_id": "docs-lane-contextual-evidence-contract-001"
+          },
+          "task_bucket": "docs_code_sync",
+          "baseline_status": "PASS",
+          "skill_status": "PASS",
+          "gate_status": "PASS",
+          "gate_row_status": "RETURN",
+          "effective": false,
+          "missing_effective_fields": [],
+          "trust_mismatch": false,
+          "evidence_path": "/private/tmp/nexus_skill_fit_research_v2_full_live_20260517/research_and_source_discipline_docs-lane-contextual-evidence-contract-001_skill_arm_002_35b651f6a42e/evidence_bundle.json",
+          "receipt_path": "/private/tmp/nexus_skill_fit_research_v2_full_live_20260517/research_and_source_discipline_docs-lane-contextual-evidence-contract-001_skill_arm_002_35b651f6a42e"
+        },
+        {
+          "row_id": "research_and_source_discipline::docs-lane-config-contract-001::skill_arm_002_35b651f6a42e",
+          "task_key": "scripts/bench/public_benchmark_docs_lane_v1.json::docs-lane-config-contract-001",
+          "task_ref": {
+            "manifest": "scripts/bench/public_benchmark_docs_lane_v1.json",
+            "task_id": "docs-lane-config-contract-001"
+          },
+          "task_bucket": "docs_code_sync",
+          "baseline_status": "PASS",
+          "skill_status": "PASS",
+          "gate_status": "PASS",
+          "gate_row_status": "RETURN",
+          "effective": false,
+          "missing_effective_fields": [],
+          "trust_mismatch": false,
+          "evidence_path": "/private/tmp/nexus_skill_fit_research_v2_full_live_20260517/research_and_source_discipline_docs-lane-config-contract-001_skill_arm_002_35b651f6a42e/evidence_bundle.json",
+          "receipt_path": "/private/tmp/nexus_skill_fit_research_v2_full_live_20260517/research_and_source_discipline_docs-lane-config-contract-001_skill_arm_002_35b651f6a42e"
+        },
+        {
+          "row_id": "research_and_source_discipline::commercial-reasoning-research-002::skill_arm_002_35b651f6a42e",
+          "task_key": "scripts/bench/public_benchmark_commercial_expansion_v1.json::commercial-reasoning-research-002",
+          "task_ref": {
+            "manifest": "scripts/bench/public_benchmark_commercial_expansion_v1.json",
+            "task_id": "commercial-reasoning-research-002"
+          },
+          "task_bucket": "docs_code_sync",
+          "baseline_status": "PASS",
+          "skill_status": "PASS",
+          "gate_status": "PASS",
+          "gate_row_status": "RETURN",
+          "effective": false,
+          "missing_effective_fields": [],
+          "trust_mismatch": false,
+          "evidence_path": "/private/tmp/nexus_skill_fit_research_v2_full_live_20260517/research_and_source_discipline_commercial-reasoning-research-002_skill_arm_002_35b651f6a42e/evidence_bundle.json",
+          "receipt_path": "/private/tmp/nexus_skill_fit_research_v2_full_live_20260517/research_and_source_discipline_commercial-reasoning-research-002_skill_arm_002_35b651f6a42e"
+        },
+        {
+          "row_id": "research_and_source_discipline::commercial-retrieval-lancedb-002::skill_arm_002_35b651f6a42e",
+          "task_key": "scripts/bench/public_benchmark_commercial_expansion_v1.json::commercial-retrieval-lancedb-002",
+          "task_ref": {
+            "manifest": "scripts/bench/public_benchmark_commercial_expansion_v1.json",
+            "task_id": "commercial-retrieval-lancedb-002"
+          },
+          "task_bucket": "docs_code_sync",
+          "baseline_status": "PASS",
+          "skill_status": "PASS",
+          "gate_status": "PASS",
+          "gate_row_status": "RETURN",
+          "effective": false,
+          "missing_effective_fields": [],
+          "trust_mismatch": false,
+          "evidence_path": "/private/tmp/nexus_skill_fit_research_v2_full_live_20260517/research_and_source_discipline_commercial-retrieval-lancedb-002_skill_arm_002_35b651f6a42e/evidence_bundle.json",
+          "receipt_path": "/private/tmp/nexus_skill_fit_research_v2_full_live_20260517/research_and_source_discipline_commercial-retrieval-lancedb-002_skill_arm_002_35b651f6a42e"
+        },
+        {
+          "row_id": "research_and_source_discipline::pub-doc-002::skill_arm_002_35b651f6a42e",
+          "task_key": "scripts/bench/public_benchmark_pilot_v1.json::pub-doc-002",
+          "task_ref": {
+            "manifest": "scripts/bench/public_benchmark_pilot_v1.json",
+            "task_id": "pub-doc-002"
+          },
+          "task_bucket": "docs_code_sync",
+          "baseline_status": "PASS",
+          "skill_status": "PASS",
+          "gate_status": "PASS",
+          "gate_row_status": "RETURN",
+          "effective": false,
+          "missing_effective_fields": [],
+          "trust_mismatch": false,
+          "evidence_path": "/private/tmp/nexus_skill_fit_research_v2_full_live_20260517/research_and_source_discipline_pub-doc-002_skill_arm_002_35b651f6a42e/evidence_bundle.json",
+          "receipt_path": "/private/tmp/nexus_skill_fit_research_v2_full_live_20260517/research_and_source_discipline_pub-doc-002_skill_arm_002_35b651f6a42e"
+        },
+        {
+          "row_id": "research_and_source_discipline::pub-doc-003::skill_arm_002_35b651f6a42e",
+          "task_key": "scripts/bench/public_benchmark_pilot_v1.json::pub-doc-003",
+          "task_ref": {
+            "manifest": "scripts/bench/public_benchmark_pilot_v1.json",
+            "task_id": "pub-doc-003"
+          },
+          "task_bucket": "docs_code_sync",
+          "baseline_status": "PASS",
+          "skill_status": "PASS",
+          "gate_status": "PASS",
+          "gate_row_status": "RETURN",
+          "effective": false,
+          "missing_effective_fields": [],
+          "trust_mismatch": false,
+          "evidence_path": "/private/tmp/nexus_skill_fit_research_v2_full_live_20260517/research_and_source_discipline_pub-doc-003_skill_arm_002_35b651f6a42e/evidence_bundle.json",
+          "receipt_path": "/private/tmp/nexus_skill_fit_research_v2_full_live_20260517/research_and_source_discipline_pub-doc-003_skill_arm_002_35b651f6a42e"
+        },
+        {
+          "row_id": "research_and_source_discipline::pub-doc-004::skill_arm_002_35b651f6a42e",
+          "task_key": "scripts/bench/public_benchmark_pilot_v1.json::pub-doc-004",
+          "task_ref": {
+            "manifest": "scripts/bench/public_benchmark_pilot_v1.json",
+            "task_id": "pub-doc-004"
+          },
+          "task_bucket": "docs_code_sync",
+          "baseline_status": "PASS",
+          "skill_status": "PASS",
+          "gate_status": "PASS",
+          "gate_row_status": "RETURN",
+          "effective": false,
+          "missing_effective_fields": [],
+          "trust_mismatch": false,
+          "evidence_path": "/private/tmp/nexus_skill_fit_research_v2_full_live_20260517/research_and_source_discipline_pub-doc-004_skill_arm_002_35b651f6a42e/evidence_bundle.json",
+          "receipt_path": "/private/tmp/nexus_skill_fit_research_v2_full_live_20260517/research_and_source_discipline_pub-doc-004_skill_arm_002_35b651f6a42e"
+        },
+        {
+          "row_id": "research_and_source_discipline::pub-ops-002::skill_arm_002_35b651f6a42e",
+          "task_key": "scripts/bench/public_benchmark_pilot_v1.json::pub-ops-002",
+          "task_ref": {
+            "manifest": "scripts/bench/public_benchmark_pilot_v1.json",
+            "task_id": "pub-ops-002"
+          },
+          "task_bucket": "ops_research",
+          "baseline_status": "PASS",
+          "skill_status": "PASS",
+          "gate_status": "PASS",
+          "gate_row_status": "RETURN",
+          "effective": false,
+          "missing_effective_fields": [],
+          "trust_mismatch": false,
+          "evidence_path": "/private/tmp/nexus_skill_fit_research_v2_full_live_20260517/research_and_source_discipline_pub-ops-002_skill_arm_002_35b651f6a42e/evidence_bundle.json",
+          "receipt_path": "/private/tmp/nexus_skill_fit_research_v2_full_live_20260517/research_and_source_discipline_pub-ops-002_skill_arm_002_35b651f6a42e"
+        },
+        {
+          "row_id": "research_and_source_discipline::pub-ops-003::skill_arm_002_35b651f6a42e",
+          "task_key": "scripts/bench/public_benchmark_pilot_v1.json::pub-ops-003",
+          "task_ref": {
+            "manifest": "scripts/bench/public_benchmark_pilot_v1.json",
+            "task_id": "pub-ops-003"
+          },
+          "task_bucket": "ops_research",
+          "baseline_status": "PASS",
+          "skill_status": "PASS",
+          "gate_status": "PASS",
+          "gate_row_status": "RETURN",
+          "effective": false,
+          "missing_effective_fields": [],
+          "trust_mismatch": false,
+          "evidence_path": "/private/tmp/nexus_skill_fit_research_v2_full_live_20260517/research_and_source_discipline_pub-ops-003_skill_arm_002_35b651f6a42e/evidence_bundle.json",
+          "receipt_path": "/private/tmp/nexus_skill_fit_research_v2_full_live_20260517/research_and_source_discipline_pub-ops-003_skill_arm_002_35b651f6a42e"
+        },
+        {
+          "row_id": "research_and_source_discipline::pub-ops-004::skill_arm_002_35b651f6a42e",
+          "task_key": "scripts/bench/public_benchmark_pilot_v1.json::pub-ops-004",
+          "task_ref": {
+            "manifest": "scripts/bench/public_benchmark_pilot_v1.json",
+            "task_id": "pub-ops-004"
+          },
+          "task_bucket": "ops_research",
+          "baseline_status": "PASS",
+          "skill_status": "PASS",
+          "gate_status": "PASS",
+          "gate_row_status": "RETURN",
+          "effective": false,
+          "missing_effective_fields": [],
+          "trust_mismatch": false,
+          "evidence_path": "/private/tmp/nexus_skill_fit_research_v2_full_live_20260517/research_and_source_discipline_pub-ops-004_skill_arm_002_35b651f6a42e/evidence_bundle.json",
+          "receipt_path": "/private/tmp/nexus_skill_fit_research_v2_full_live_20260517/research_and_source_discipline_pub-ops-004_skill_arm_002_35b651f6a42e"
+        },
+        {
+          "row_id": "research_and_source_discipline::hard-neutral-doc-001::skill_arm_002_35b651f6a42e",
+          "task_key": "scripts/bench/public_benchmark_hard_neutral_v2.json::hard-neutral-doc-001",
+          "task_ref": {
+            "manifest": "scripts/bench/public_benchmark_hard_neutral_v2.json",
+            "task_id": "hard-neutral-doc-001"
+          },
+          "task_bucket": "docs_code_sync",
+          "baseline_status": "PASS",
+          "skill_status": "PASS",
+          "gate_status": "PASS",
+          "gate_row_status": "RETURN",
+          "effective": false,
+          "missing_effective_fields": [],
+          "trust_mismatch": false,
+          "evidence_path": "/private/tmp/nexus_skill_fit_research_v2_full_live_20260517/research_and_source_discipline_hard-neutral-doc-001_skill_arm_002_35b651f6a42e/evidence_bundle.json",
+          "receipt_path": "/private/tmp/nexus_skill_fit_research_v2_full_live_20260517/research_and_source_discipline_hard-neutral-doc-001_skill_arm_002_35b651f6a42e"
+        },
+        {
+          "row_id": "research_and_source_discipline::hard-neutral-doc-002::skill_arm_002_35b651f6a42e",
+          "task_key": "scripts/bench/public_benchmark_hard_neutral_v2.json::hard-neutral-doc-002",
+          "task_ref": {
+            "manifest": "scripts/bench/public_benchmark_hard_neutral_v2.json",
+            "task_id": "hard-neutral-doc-002"
+          },
+          "task_bucket": "docs_code_sync",
+          "baseline_status": "PASS",
+          "skill_status": "PASS",
+          "gate_status": "PASS",
+          "gate_row_status": "RETURN",
+          "effective": false,
+          "missing_effective_fields": [],
+          "trust_mismatch": false,
+          "evidence_path": "/private/tmp/nexus_skill_fit_research_v2_full_live_20260517/research_and_source_discipline_hard-neutral-doc-002_skill_arm_002_35b651f6a42e/evidence_bundle.json",
+          "receipt_path": "/private/tmp/nexus_skill_fit_research_v2_full_live_20260517/research_and_source_discipline_hard-neutral-doc-002_skill_arm_002_35b651f6a42e"
+        },
+        {
+          "row_id": "research_and_source_discipline::hard-neutral-ops-001::skill_arm_002_35b651f6a42e",
+          "task_key": "scripts/bench/public_benchmark_hard_neutral_v2.json::hard-neutral-ops-001",
+          "task_ref": {
+            "manifest": "scripts/bench/public_benchmark_hard_neutral_v2.json",
+            "task_id": "hard-neutral-ops-001"
+          },
+          "task_bucket": "ops_research",
+          "baseline_status": "PASS",
+          "skill_status": "PASS",
+          "gate_status": "PASS",
+          "gate_row_status": "RETURN",
+          "effective": false,
+          "missing_effective_fields": [],
+          "trust_mismatch": false,
+          "evidence_path": "/private/tmp/nexus_skill_fit_research_v2_full_live_20260517/research_and_source_discipline_hard-neutral-ops-001_skill_arm_002_35b651f6a42e/evidence_bundle.json",
+          "receipt_path": "/private/tmp/nexus_skill_fit_research_v2_full_live_20260517/research_and_source_discipline_hard-neutral-ops-001_skill_arm_002_35b651f6a42e"
+        },
+        {
+          "row_id": "research_and_source_discipline::hard-neutral-ops-002::skill_arm_002_35b651f6a42e",
+          "task_key": "scripts/bench/public_benchmark_hard_neutral_v2.json::hard-neutral-ops-002",
+          "task_ref": {
+            "manifest": "scripts/bench/public_benchmark_hard_neutral_v2.json",
+            "task_id": "hard-neutral-ops-002"
+          },
+          "task_bucket": "ops_research",
+          "baseline_status": "PASS",
+          "skill_status": "PASS",
+          "gate_status": "PASS",
+          "gate_row_status": "RETURN",
+          "effective": false,
+          "missing_effective_fields": [],
+          "trust_mismatch": false,
+          "evidence_path": "/private/tmp/nexus_skill_fit_research_v2_full_live_20260517/research_and_source_discipline_hard-neutral-ops-002_skill_arm_002_35b651f6a42e/evidence_bundle.json",
+          "receipt_path": "/private/tmp/nexus_skill_fit_research_v2_full_live_20260517/research_and_source_discipline_hard-neutral-ops-002_skill_arm_002_35b651f6a42e"
+        },
+        {
+          "row_id": "research_and_source_discipline::rlm-harder-multifile-001::skill_arm_002_35b651f6a42e",
+          "task_key": "scripts/bench/public_benchmark_rlm_harder_v1.json::rlm-harder-multifile-001",
+          "task_ref": {
+            "manifest": "scripts/bench/public_benchmark_rlm_harder_v1.json",
+            "task_id": "rlm-harder-multifile-001"
+          },
+          "task_bucket": "docs_code_sync",
+          "baseline_status": "PASS",
+          "skill_status": "PASS",
+          "gate_status": "PASS",
+          "gate_row_status": "RETURN",
+          "effective": false,
+          "missing_effective_fields": [],
+          "trust_mismatch": false,
+          "evidence_path": "/private/tmp/nexus_skill_fit_research_v2_full_live_20260517/research_and_source_discipline_rlm-harder-multifile-001_skill_arm_002_35b651f6a42e/evidence_bundle.json",
+          "receipt_path": "/private/tmp/nexus_skill_fit_research_v2_full_live_20260517/research_and_source_discipline_rlm-harder-multifile-001_skill_arm_002_35b651f6a42e"
+        },
+        {
+          "row_id": "research_and_source_discipline::rlm-harder-long-context-001::skill_arm_002_35b651f6a42e",
+          "task_key": "scripts/bench/public_benchmark_rlm_harder_v1.json::rlm-harder-long-context-001",
+          "task_ref": {
+            "manifest": "scripts/bench/public_benchmark_rlm_harder_v1.json",
+            "task_id": "rlm-harder-long-context-001"
+          },
+          "task_bucket": "feature",
+          "baseline_status": "PASS",
+          "skill_status": "PASS",
+          "gate_status": "PASS",
+          "gate_row_status": "RETURN",
+          "effective": false,
+          "missing_effective_fields": [],
+          "trust_mismatch": false,
+          "evidence_path": "/private/tmp/nexus_skill_fit_research_v2_full_live_20260517/research_and_source_discipline_rlm-harder-long-context-001_skill_arm_002_35b651f6a42e/evidence_bundle.json",
+          "receipt_path": "/private/tmp/nexus_skill_fit_research_v2_full_live_20260517/research_and_source_discipline_rlm-harder-long-context-001_skill_arm_002_35b651f6a42e"
+        },
+        {
+          "row_id": "research_and_source_discipline::rlm-harder-misleading-tests-001::skill_arm_002_35b651f6a42e",
+          "task_key": "scripts/bench/public_benchmark_rlm_harder_v1.json::rlm-harder-misleading-tests-001",
+          "task_ref": {
+            "manifest": "scripts/bench/public_benchmark_rlm_harder_v1.json",
+            "task_id": "rlm-harder-misleading-tests-001"
+          },
+          "task_bucket": "ops_research",
+          "baseline_status": "PASS",
+          "skill_status": "PASS",
+          "gate_status": "PASS",
+          "gate_row_status": "RETURN",
+          "effective": false,
+          "missing_effective_fields": [],
+          "trust_mismatch": false,
+          "evidence_path": "/private/tmp/nexus_skill_fit_research_v2_full_live_20260517/research_and_source_discipline_rlm-harder-misleading-tests-001_skill_arm_002_35b651f6a42e/evidence_bundle.json",
+          "receipt_path": "/private/tmp/nexus_skill_fit_research_v2_full_live_20260517/research_and_source_discipline_rlm-harder-misleading-tests-001_skill_arm_002_35b651f6a42e"
+        }
+      ]
+    },
+    {
+      "skill_id": "research-paper-writing",
+      "verdict": "reject",
+      "tested_rows": 22,
+      "effective_rows": 0,
+      "effective_rate": 0.0,
+      "task_bucket_counts": {
+        "bugfix": 1,
+        "docs_code_sync": 14,
+        "feature": 1,
+        "ops_research": 6
+      },
+      "effective_task_bucket_counts": {},
+      "recommendation": "skip_until_candidate_or_taskset_changes",
+      "targeted_replay_row_ids": [],
+      "rows": [
+        {
+          "row_id": "research_and_source_discipline::rlm-harder-v2-memory-001::skill_arm_004_c6053349d414",
+          "task_key": "scripts/bench/public_benchmark_rlm_harder_v2.json::rlm-harder-v2-memory-001",
+          "task_ref": {
+            "manifest": "scripts/bench/public_benchmark_rlm_harder_v2.json",
+            "task_id": "rlm-harder-v2-memory-001"
+          },
+          "task_bucket": "bugfix",
+          "baseline_status": "PASS",
+          "skill_status": "PASS",
+          "gate_status": "PASS",
+          "gate_row_status": "RETURN",
+          "effective": false,
+          "missing_effective_fields": [],
+          "trust_mismatch": false,
+          "evidence_path": "/private/tmp/nexus_skill_fit_research_v2_full_live_20260517/research_and_source_discipline_rlm-harder-v2-memory-001_skill_arm_004_c6053349d414/evidence_bundle.json",
+          "receipt_path": "/private/tmp/nexus_skill_fit_research_v2_full_live_20260517/research_and_source_discipline_rlm-harder-v2-memory-001_skill_arm_004_c6053349d414"
+        },
+        {
+          "row_id": "research_and_source_discipline::route-oracle-semantic-searcher-001::skill_arm_004_c6053349d414",
+          "task_key": "scripts/bench/public_benchmark_route_oracles_v1.json::route-oracle-semantic-searcher-001",
+          "task_ref": {
+            "manifest": "scripts/bench/public_benchmark_route_oracles_v1.json",
+            "task_id": "route-oracle-semantic-searcher-001"
+          },
+          "task_bucket": "docs_code_sync",
+          "baseline_status": "PASS",
+          "skill_status": "PASS",
+          "gate_status": "PASS",
+          "gate_row_status": "RETURN",
+          "effective": false,
+          "missing_effective_fields": [],
+          "trust_mismatch": false,
+          "evidence_path": "/private/tmp/nexus_skill_fit_research_v2_full_live_20260517/research_and_source_discipline_route-oracle-semantic-searcher-001_skill_arm_004_c6053349d414/evidence_bundle.json",
+          "receipt_path": "/private/tmp/nexus_skill_fit_research_v2_full_live_20260517/research_and_source_discipline_route-oracle-semantic-searcher-001_skill_arm_004_c6053349d414"
+        },
+        {
+          "row_id": "research_and_source_discipline::model-required-docs-001::skill_arm_004_c6053349d414",
+          "task_key": "scripts/bench/public_benchmark_model_required_uplift_v1.json::model-required-docs-001",
+          "task_ref": {
+            "manifest": "scripts/bench/public_benchmark_model_required_uplift_v1.json",
+            "task_id": "model-required-docs-001"
+          },
+          "task_bucket": "docs_code_sync",
+          "baseline_status": "PASS",
+          "skill_status": "PASS",
+          "gate_status": "PASS",
+          "gate_row_status": "RETURN",
+          "effective": false,
+          "missing_effective_fields": [],
+          "trust_mismatch": false,
+          "evidence_path": "/private/tmp/nexus_skill_fit_research_v2_full_live_20260517/research_and_source_discipline_model-required-docs-001_skill_arm_004_c6053349d414/evidence_bundle.json",
+          "receipt_path": "/private/tmp/nexus_skill_fit_research_v2_full_live_20260517/research_and_source_discipline_model-required-docs-001_skill_arm_004_c6053349d414"
+        },
+        {
+          "row_id": "research_and_source_discipline::model-required-context-001::skill_arm_004_c6053349d414",
+          "task_key": "scripts/bench/public_benchmark_model_required_uplift_v1.json::model-required-context-001",
+          "task_ref": {
+            "manifest": "scripts/bench/public_benchmark_model_required_uplift_v1.json",
+            "task_id": "model-required-context-001"
+          },
+          "task_bucket": "docs_code_sync",
+          "baseline_status": "PASS",
+          "skill_status": "PASS",
+          "gate_status": "PASS",
+          "gate_row_status": "RETURN",
+          "effective": false,
+          "missing_effective_fields": [],
+          "trust_mismatch": false,
+          "evidence_path": "/private/tmp/nexus_skill_fit_research_v2_full_live_20260517/research_and_source_discipline_model-required-context-001_skill_arm_004_c6053349d414/evidence_bundle.json",
+          "receipt_path": "/private/tmp/nexus_skill_fit_research_v2_full_live_20260517/research_and_source_discipline_model-required-context-001_skill_arm_004_c6053349d414"
+        },
+        {
+          "row_id": "research_and_source_discipline::docs-lane-public-field-contract-001::skill_arm_004_c6053349d414",
+          "task_key": "scripts/bench/public_benchmark_docs_lane_v1.json::docs-lane-public-field-contract-001",
+          "task_ref": {
+            "manifest": "scripts/bench/public_benchmark_docs_lane_v1.json",
+            "task_id": "docs-lane-public-field-contract-001"
+          },
+          "task_bucket": "docs_code_sync",
+          "baseline_status": "PASS",
+          "skill_status": "PASS",
+          "gate_status": "PASS",
+          "gate_row_status": "RETURN",
+          "effective": false,
+          "missing_effective_fields": [],
+          "trust_mismatch": false,
+          "evidence_path": "/private/tmp/nexus_skill_fit_research_v2_full_live_20260517/research_and_source_discipline_docs-lane-public-field-contract-001_skill_arm_004_c6053349d414/evidence_bundle.json",
+          "receipt_path": "/private/tmp/nexus_skill_fit_research_v2_full_live_20260517/research_and_source_discipline_docs-lane-public-field-contract-001_skill_arm_004_c6053349d414"
+        },
+        {
+          "row_id": "research_and_source_discipline::docs-lane-contextual-evidence-contract-001::skill_arm_004_c6053349d414",
+          "task_key": "scripts/bench/public_benchmark_docs_lane_v1.json::docs-lane-contextual-evidence-contract-001",
+          "task_ref": {
+            "manifest": "scripts/bench/public_benchmark_docs_lane_v1.json",
+            "task_id": "docs-lane-contextual-evidence-contract-001"
+          },
+          "task_bucket": "docs_code_sync",
+          "baseline_status": "PASS",
+          "skill_status": "PASS",
+          "gate_status": "PASS",
+          "gate_row_status": "RETURN",
+          "effective": false,
+          "missing_effective_fields": [],
+          "trust_mismatch": false,
+          "evidence_path": "/private/tmp/nexus_skill_fit_research_v2_full_live_20260517/research_and_source_discipline_docs-lane-contextual-evidence-contract-001_skill_arm_004_c6053349d414/evidence_bundle.json",
+          "receipt_path": "/private/tmp/nexus_skill_fit_research_v2_full_live_20260517/research_and_source_discipline_docs-lane-contextual-evidence-contract-001_skill_arm_004_c6053349d414"
+        },
+        {
+          "row_id": "research_and_source_discipline::docs-lane-config-contract-001::skill_arm_004_c6053349d414",
+          "task_key": "scripts/bench/public_benchmark_docs_lane_v1.json::docs-lane-config-contract-001",
+          "task_ref": {
+            "manifest": "scripts/bench/public_benchmark_docs_lane_v1.json",
+            "task_id": "docs-lane-config-contract-001"
+          },
+          "task_bucket": "docs_code_sync",
+          "baseline_status": "PASS",
+          "skill_status": "PASS",
+          "gate_status": "PASS",
+          "gate_row_status": "RETURN",
+          "effective": false,
+          "missing_effective_fields": [],
+          "trust_mismatch": false,
+          "evidence_path": "/private/tmp/nexus_skill_fit_research_v2_full_live_20260517/research_and_source_discipline_docs-lane-config-contract-001_skill_arm_004_c6053349d414/evidence_bundle.json",
+          "receipt_path": "/private/tmp/nexus_skill_fit_research_v2_full_live_20260517/research_and_source_discipline_docs-lane-config-contract-001_skill_arm_004_c6053349d414"
+        },
+        {
+          "row_id": "research_and_source_discipline::commercial-reasoning-research-002::skill_arm_004_c6053349d414",
+          "task_key": "scripts/bench/public_benchmark_commercial_expansion_v1.json::commercial-reasoning-research-002",
+          "task_ref": {
+            "manifest": "scripts/bench/public_benchmark_commercial_expansion_v1.json",
+            "task_id": "commercial-reasoning-research-002"
+          },
+          "task_bucket": "docs_code_sync",
+          "baseline_status": "PASS",
+          "skill_status": "PASS",
+          "gate_status": "PASS",
+          "gate_row_status": "RETURN",
+          "effective": false,
+          "missing_effective_fields": [],
+          "trust_mismatch": false,
+          "evidence_path": "/private/tmp/nexus_skill_fit_research_v2_full_live_20260517/research_and_source_discipline_commercial-reasoning-research-002_skill_arm_004_c6053349d414/evidence_bundle.json",
+          "receipt_path": "/private/tmp/nexus_skill_fit_research_v2_full_live_20260517/research_and_source_discipline_commercial-reasoning-research-002_skill_arm_004_c6053349d414"
+        },
+        {
+          "row_id": "research_and_source_discipline::commercial-retrieval-lancedb-002::skill_arm_004_c6053349d414",
+          "task_key": "scripts/bench/public_benchmark_commercial_expansion_v1.json::commercial-retrieval-lancedb-002",
+          "task_ref": {
+            "manifest": "scripts/bench/public_benchmark_commercial_expansion_v1.json",
+            "task_id": "commercial-retrieval-lancedb-002"
+          },
+          "task_bucket": "docs_code_sync",
+          "baseline_status": "PASS",
+          "skill_status": "PASS",
+          "gate_status": "PASS",
+          "gate_row_status": "RETURN",
+          "effective": false,
+          "missing_effective_fields": [],
+          "trust_mismatch": false,
+          "evidence_path": "/private/tmp/nexus_skill_fit_research_v2_full_live_20260517/research_and_source_discipline_commercial-retrieval-lancedb-002_skill_arm_004_c6053349d414/evidence_bundle.json",
+          "receipt_path": "/private/tmp/nexus_skill_fit_research_v2_full_live_20260517/research_and_source_discipline_commercial-retrieval-lancedb-002_skill_arm_004_c6053349d414"
+        },
+        {
+          "row_id": "research_and_source_discipline::pub-doc-002::skill_arm_004_c6053349d414",
+          "task_key": "scripts/bench/public_benchmark_pilot_v1.json::pub-doc-002",
+          "task_ref": {
+            "manifest": "scripts/bench/public_benchmark_pilot_v1.json",
+            "task_id": "pub-doc-002"
+          },
+          "task_bucket": "docs_code_sync",
+          "baseline_status": "PASS",
+          "skill_status": "PASS",
+          "gate_status": "PASS",
+          "gate_row_status": "RETURN",
+          "effective": false,
+          "missing_effective_fields": [],
+          "trust_mismatch": false,
+          "evidence_path": "/private/tmp/nexus_skill_fit_research_v2_full_live_20260517/research_and_source_discipline_pub-doc-002_skill_arm_004_c6053349d414/evidence_bundle.json",
+          "receipt_path": "/private/tmp/nexus_skill_fit_research_v2_full_live_20260517/research_and_source_discipline_pub-doc-002_skill_arm_004_c6053349d414"
+        },
+        {
+          "row_id": "research_and_source_discipline::pub-doc-003::skill_arm_004_c6053349d414",
+          "task_key": "scripts/bench/public_benchmark_pilot_v1.json::pub-doc-003",
+          "task_ref": {
+            "manifest": "scripts/bench/public_benchmark_pilot_v1.json",
+            "task_id": "pub-doc-003"
+          },
+          "task_bucket": "docs_code_sync",
+          "baseline_status": "PASS",
+          "skill_status": "PASS",
+          "gate_status": "PASS",
+          "gate_row_status": "RETURN",
+          "effective": false,
+          "missing_effective_fields": [],
+          "trust_mismatch": false,
+          "evidence_path": "/private/tmp/nexus_skill_fit_research_v2_full_live_20260517/research_and_source_discipline_pub-doc-003_skill_arm_004_c6053349d414/evidence_bundle.json",
+          "receipt_path": "/private/tmp/nexus_skill_fit_research_v2_full_live_20260517/research_and_source_discipline_pub-doc-003_skill_arm_004_c6053349d414"
+        },
+        {
+          "row_id": "research_and_source_discipline::pub-doc-004::skill_arm_004_c6053349d414",
+          "task_key": "scripts/bench/public_benchmark_pilot_v1.json::pub-doc-004",
+          "task_ref": {
+            "manifest": "scripts/bench/public_benchmark_pilot_v1.json",
+            "task_id": "pub-doc-004"
+          },
+          "task_bucket": "docs_code_sync",
+          "baseline_status": "PASS",
+          "skill_status": "PASS",
+          "gate_status": "PASS",
+          "gate_row_status": "RETURN",
+          "effective": false,
+          "missing_effective_fields": [],
+          "trust_mismatch": false,
+          "evidence_path": "/private/tmp/nexus_skill_fit_research_v2_full_live_20260517/research_and_source_discipline_pub-doc-004_skill_arm_004_c6053349d414/evidence_bundle.json",
+          "receipt_path": "/private/tmp/nexus_skill_fit_research_v2_full_live_20260517/research_and_source_discipline_pub-doc-004_skill_arm_004_c6053349d414"
+        },
+        {
+          "row_id": "research_and_source_discipline::pub-ops-002::skill_arm_004_c6053349d414",
+          "task_key": "scripts/bench/public_benchmark_pilot_v1.json::pub-ops-002",
+          "task_ref": {
+            "manifest": "scripts/bench/public_benchmark_pilot_v1.json",
+            "task_id": "pub-ops-002"
+          },
+          "task_bucket": "ops_research",
+          "baseline_status": "PASS",
+          "skill_status": "PASS",
+          "gate_status": "PASS",
+          "gate_row_status": "RETURN",
+          "effective": false,
+          "missing_effective_fields": [],
+          "trust_mismatch": false,
+          "evidence_path": "/private/tmp/nexus_skill_fit_research_v2_full_live_20260517/research_and_source_discipline_pub-ops-002_skill_arm_004_c6053349d414/evidence_bundle.json",
+          "receipt_path": "/private/tmp/nexus_skill_fit_research_v2_full_live_20260517/research_and_source_discipline_pub-ops-002_skill_arm_004_c6053349d414"
+        },
+        {
+          "row_id": "research_and_source_discipline::pub-ops-003::skill_arm_004_c6053349d414",
+          "task_key": "scripts/bench/public_benchmark_pilot_v1.json::pub-ops-003",
+          "task_ref": {
+            "manifest": "scripts/bench/public_benchmark_pilot_v1.json",
+            "task_id": "pub-ops-003"
+          },
+          "task_bucket": "ops_research",
+          "baseline_status": "PASS",
+          "skill_status": "PASS",
+          "gate_status": "PASS",
+          "gate_row_status": "RETURN",
+          "effective": false,
+          "missing_effective_fields": [],
+          "trust_mismatch": false,
+          "evidence_path": "/private/tmp/nexus_skill_fit_research_v2_full_live_20260517/research_and_source_discipline_pub-ops-003_skill_arm_004_c6053349d414/evidence_bundle.json",
+          "receipt_path": "/private/tmp/nexus_skill_fit_research_v2_full_live_20260517/research_and_source_discipline_pub-ops-003_skill_arm_004_c6053349d414"
+        },
+        {
+          "row_id": "research_and_source_discipline::pub-ops-004::skill_arm_004_c6053349d414",
+          "task_key": "scripts/bench/public_benchmark_pilot_v1.json::pub-ops-004",
+          "task_ref": {
+            "manifest": "scripts/bench/public_benchmark_pilot_v1.json",
+            "task_id": "pub-ops-004"
+          },
+          "task_bucket": "ops_research",
+          "baseline_status": "PASS",
+          "skill_status": "PASS",
+          "gate_status": "PASS",
+          "gate_row_status": "RETURN",
+          "effective": false,
+          "missing_effective_fields": [],
+          "trust_mismatch": false,
+          "evidence_path": "/private/tmp/nexus_skill_fit_research_v2_full_live_20260517/research_and_source_discipline_pub-ops-004_skill_arm_004_c6053349d414/evidence_bundle.json",
+          "receipt_path": "/private/tmp/nexus_skill_fit_research_v2_full_live_20260517/research_and_source_discipline_pub-ops-004_skill_arm_004_c6053349d414"
+        },
+        {
+          "row_id": "research_and_source_discipline::hard-neutral-doc-001::skill_arm_004_c6053349d414",
+          "task_key": "scripts/bench/public_benchmark_hard_neutral_v2.json::hard-neutral-doc-001",
+          "task_ref": {
+            "manifest": "scripts/bench/public_benchmark_hard_neutral_v2.json",
+            "task_id": "hard-neutral-doc-001"
+          },
+          "task_bucket": "docs_code_sync",
+          "baseline_status": "PASS",
+          "skill_status": "PASS",
+          "gate_status": "PASS",
+          "gate_row_status": "RETURN",
+          "effective": false,
+          "missing_effective_fields": [],
+          "trust_mismatch": false,
+          "evidence_path": "/private/tmp/nexus_skill_fit_research_v2_full_live_20260517/research_and_source_discipline_hard-neutral-doc-001_skill_arm_004_c6053349d414/evidence_bundle.json",
+          "receipt_path": "/private/tmp/nexus_skill_fit_research_v2_full_live_20260517/research_and_source_discipline_hard-neutral-doc-001_skill_arm_004_c6053349d414"
+        },
+        {
+          "row_id": "research_and_source_discipline::hard-neutral-doc-002::skill_arm_004_c6053349d414",
+          "task_key": "scripts/bench/public_benchmark_hard_neutral_v2.json::hard-neutral-doc-002",
+          "task_ref": {
+            "manifest": "scripts/bench/public_benchmark_hard_neutral_v2.json",
+            "task_id": "hard-neutral-doc-002"
+          },
+          "task_bucket": "docs_code_sync",
+          "baseline_status": "PASS",
+          "skill_status": "PASS",
+          "gate_status": "PASS",
+          "gate_row_status": "RETURN",
+          "effective": false,
+          "missing_effective_fields": [],
+          "trust_mismatch": false,
+          "evidence_path": "/private/tmp/nexus_skill_fit_research_v2_full_live_20260517/research_and_source_discipline_hard-neutral-doc-002_skill_arm_004_c6053349d414/evidence_bundle.json",
+          "receipt_path": "/private/tmp/nexus_skill_fit_research_v2_full_live_20260517/research_and_source_discipline_hard-neutral-doc-002_skill_arm_004_c6053349d414"
+        },
+        {
+          "row_id": "research_and_source_discipline::hard-neutral-ops-001::skill_arm_004_c6053349d414",
+          "task_key": "scripts/bench/public_benchmark_hard_neutral_v2.json::hard-neutral-ops-001",
+          "task_ref": {
+            "manifest": "scripts/bench/public_benchmark_hard_neutral_v2.json",
+            "task_id": "hard-neutral-ops-001"
+          },
+          "task_bucket": "ops_research",
+          "baseline_status": "PASS",
+          "skill_status": "PASS",
+          "gate_status": "PASS",
+          "gate_row_status": "RETURN",
+          "effective": false,
+          "missing_effective_fields": [],
+          "trust_mismatch": false,
+          "evidence_path": "/private/tmp/nexus_skill_fit_research_v2_full_live_20260517/research_and_source_discipline_hard-neutral-ops-001_skill_arm_004_c6053349d414/evidence_bundle.json",
+          "receipt_path": "/private/tmp/nexus_skill_fit_research_v2_full_live_20260517/research_and_source_discipline_hard-neutral-ops-001_skill_arm_004_c6053349d414"
+        },
+        {
+          "row_id": "research_and_source_discipline::hard-neutral-ops-002::skill_arm_004_c6053349d414",
+          "task_key": "scripts/bench/public_benchmark_hard_neutral_v2.json::hard-neutral-ops-002",
+          "task_ref": {
+            "manifest": "scripts/bench/public_benchmark_hard_neutral_v2.json",
+            "task_id": "hard-neutral-ops-002"
+          },
+          "task_bucket": "ops_research",
+          "baseline_status": "PASS",
+          "skill_status": "PASS",
+          "gate_status": "PASS",
+          "gate_row_status": "RETURN",
+          "effective": false,
+          "missing_effective_fields": [],
+          "trust_mismatch": false,
+          "evidence_path": "/private/tmp/nexus_skill_fit_research_v2_full_live_20260517/research_and_source_discipline_hard-neutral-ops-002_skill_arm_004_c6053349d414/evidence_bundle.json",
+          "receipt_path": "/private/tmp/nexus_skill_fit_research_v2_full_live_20260517/research_and_source_discipline_hard-neutral-ops-002_skill_arm_004_c6053349d414"
+        },
+        {
+          "row_id": "research_and_source_discipline::rlm-harder-multifile-001::skill_arm_004_c6053349d414",
+          "task_key": "scripts/bench/public_benchmark_rlm_harder_v1.json::rlm-harder-multifile-001",
+          "task_ref": {
+            "manifest": "scripts/bench/public_benchmark_rlm_harder_v1.json",
+            "task_id": "rlm-harder-multifile-001"
+          },
+          "task_bucket": "docs_code_sync",
+          "baseline_status": "PASS",
+          "skill_status": "PASS",
+          "gate_status": "PASS",
+          "gate_row_status": "RETURN",
+          "effective": false,
+          "missing_effective_fields": [],
+          "trust_mismatch": false,
+          "evidence_path": "/private/tmp/nexus_skill_fit_research_v2_full_live_20260517/research_and_source_discipline_rlm-harder-multifile-001_skill_arm_004_c6053349d414/evidence_bundle.json",
+          "receipt_path": "/private/tmp/nexus_skill_fit_research_v2_full_live_20260517/research_and_source_discipline_rlm-harder-multifile-001_skill_arm_004_c6053349d414"
+        },
+        {
+          "row_id": "research_and_source_discipline::rlm-harder-long-context-001::skill_arm_004_c6053349d414",
+          "task_key": "scripts/bench/public_benchmark_rlm_harder_v1.json::rlm-harder-long-context-001",
+          "task_ref": {
+            "manifest": "scripts/bench/public_benchmark_rlm_harder_v1.json",
+            "task_id": "rlm-harder-long-context-001"
+          },
+          "task_bucket": "feature",
+          "baseline_status": "PASS",
+          "skill_status": "PASS",
+          "gate_status": "PASS",
+          "gate_row_status": "RETURN",
+          "effective": false,
+          "missing_effective_fields": [],
+          "trust_mismatch": false,
+          "evidence_path": "/private/tmp/nexus_skill_fit_research_v2_full_live_20260517/research_and_source_discipline_rlm-harder-long-context-001_skill_arm_004_c6053349d414/evidence_bundle.json",
+          "receipt_path": "/private/tmp/nexus_skill_fit_research_v2_full_live_20260517/research_and_source_discipline_rlm-harder-long-context-001_skill_arm_004_c6053349d414"
+        },
+        {
+          "row_id": "research_and_source_discipline::rlm-harder-misleading-tests-001::skill_arm_004_c6053349d414",
+          "task_key": "scripts/bench/public_benchmark_rlm_harder_v1.json::rlm-harder-misleading-tests-001",
+          "task_ref": {
+            "manifest": "scripts/bench/public_benchmark_rlm_harder_v1.json",
+            "task_id": "rlm-harder-misleading-tests-001"
+          },
+          "task_bucket": "ops_research",
+          "baseline_status": "PASS",
+          "skill_status": "PASS",
+          "gate_status": "PASS",
+          "gate_row_status": "RETURN",
+          "effective": false,
+          "missing_effective_fields": [],
+          "trust_mismatch": false,
+          "evidence_path": "/private/tmp/nexus_skill_fit_research_v2_full_live_20260517/research_and_source_discipline_rlm-harder-misleading-tests-001_skill_arm_004_c6053349d414/evidence_bundle.json",
+          "receipt_path": "/private/tmp/nexus_skill_fit_research_v2_full_live_20260517/research_and_source_discipline_rlm-harder-misleading-tests-001_skill_arm_004_c6053349d414"
+        }
+      ]
+    }
+  ],
+  "claim_boundary": [
+    "Row-level RCA explains discovery evidence; it does not promote runtime defaults.",
+    "Targeted replay is allowed only for receipt-backed needs_more_data skills.",
+    "Flash100 remains blocked until a threshold contract reports alternate/default readiness."
+  ]
+}

@@ -1,0 +1,24 @@
+{
+  "schema": "nexus.capability_skill_promotion_policy_draft.v1",
+  "status": "PASS",
+  "runtime_update_allowed": false,
+  "defaults": {},
+  "alternates": {},
+  "needs_more_data": {
+    "governance_and_trust": [
+      "acceptance-evidence-failclosed",
+      "claudeosint-safe-surface-audit",
+      "cso"
+    ]
+  },
+  "rejected": {
+    "governance_and_trust": [
+      "gbrain-soul-audit"
+    ]
+  },
+  "failures": [],
+  "claim_boundary": [
+    "This is a promotion draft, not a runtime policy write.",
+    "Runtime defaults require a later Flash50/100 validation gate."
+  ]
+}

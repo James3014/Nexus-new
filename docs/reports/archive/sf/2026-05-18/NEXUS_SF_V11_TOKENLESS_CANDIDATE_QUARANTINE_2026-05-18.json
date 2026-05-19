@@ -1,0 +1,25 @@
+{
+  "schema": "nexus.sf_v11_tokenless_candidate_quarantine.v1",
+  "status": "PASS",
+  "summary": {
+    "quarantine_count": 1,
+    "runtime_update_allowed": false,
+    "public_benchmark_allowed": false
+  },
+  "quarantined_candidates": [
+    {
+      "capability_id": "ultra_review",
+      "skill_id": "code-review-and-quality",
+      "row_id": "ultra_review::sf-v11-retest-ultra_review-001::candidate::code-review-and-quality",
+      "reason": "model_call_without_tokens_reproduced_on_targeted_replay",
+      "classification": "provider_token_ineligible",
+      "action": "hold_candidate_for_current_sf_lane_and_continue_other_candidates",
+      "delivery_status": "SUCCESS_VERIFIED_BUT_COST_INELIGIBLE"
+    }
+  ],
+  "claim_boundary": {
+    "sf_discovery_allowed": true,
+    "runtime_update_allowed": false,
+    "public_benchmark_allowed": false
+  }
+}

@@ -1,0 +1,104 @@
+{
+  "schema": "nexus.sf.external_challenge_comparison.v1",
+  "status": "PASS",
+  "summary": {
+    "challenger_count": 6,
+    "replace_candidate_count": 1,
+    "alternate_candidate_count": 4,
+    "keep_current_count": 1,
+    "reject_count": 0,
+    "runtime_update_allowed": false,
+    "public_benchmark_allowed": false
+  },
+  "rows": [
+    {
+      "capability_id": "forecast_pregate",
+      "current_skill_id": "sf2-forecast_pregate-route-fit-spec",
+      "challenger_skill_id": "create-plan",
+      "challenger_source": "https://github.com/ComposioHQ/awesome-codex-skills",
+      "challenger_commit_sha": "9c9da64cf1bbea611d43dd14a10788d55369b353",
+      "current_token_delta": -1554,
+      "challenger_token_delta": -6785,
+      "current_wall_delta_sec": 7.6163,
+      "challenger_wall_delta_sec": -19.3681,
+      "skill_chain": "receipt_backed_skill_chain_present",
+      "verdict": "replace_candidate",
+      "claim_boundary": "observation_only_external_challenge_not_runtime_promotion"
+    },
+    {
+      "capability_id": "registry_skills_sync",
+      "current_skill_id": "sf2-registry_skills_sync-route-fit-spec",
+      "challenger_skill_id": "skill-creator",
+      "challenger_source": "https://github.com/ComposioHQ/awesome-codex-skills",
+      "challenger_commit_sha": "9c9da64cf1bbea611d43dd14a10788d55369b353",
+      "current_token_delta": 1035,
+      "challenger_token_delta": 750,
+      "current_wall_delta_sec": -49.1376,
+      "challenger_wall_delta_sec": -33.7727,
+      "skill_chain": "receipt_backed_skill_chain_present",
+      "verdict": "alternate_candidate",
+      "claim_boundary": "observation_only_external_challenge_not_runtime_promotion"
+    },
+    {
+      "capability_id": "repair_loop",
+      "current_skill_id": "test-driven-development",
+      "challenger_skill_id": "codebase-migrate",
+      "challenger_source": "https://github.com/ComposioHQ/awesome-codex-skills",
+      "challenger_commit_sha": "9c9da64cf1bbea611d43dd14a10788d55369b353",
+      "current_token_delta": 562,
+      "challenger_token_delta": 1464,
+      "current_wall_delta_sec": 19.1855,
+      "challenger_wall_delta_sec": 13.4121,
+      "skill_chain": "receipt_backed_skill_chain_present",
+      "verdict": "alternate_candidate",
+      "claim_boundary": "observation_only_external_challenge_not_runtime_promotion"
+    },
+    {
+      "capability_id": "research_control_plane",
+      "current_skill_id": "sf2-research_control_plane-route-fit-spec",
+      "challenger_skill_id": "content-research-writer",
+      "challenger_source": "https://github.com/ComposioHQ/awesome-codex-skills",
+      "challenger_commit_sha": "9c9da64cf1bbea611d43dd14a10788d55369b353",
+      "current_token_delta": 115,
+      "challenger_token_delta": -1414,
+      "current_wall_delta_sec": -39.1321,
+      "challenger_wall_delta_sec": -19.2867,
+      "skill_chain": "receipt_backed_skill_chain_present",
+      "verdict": "alternate_candidate",
+      "claim_boundary": "observation_only_external_challenge_not_runtime_promotion"
+    },
+    {
+      "capability_id": "ui_validator",
+      "current_skill_id": "sf2-ui_validator-route-fit-spec",
+      "challenger_skill_id": "webapp-testing",
+      "challenger_source": "https://github.com/ComposioHQ/awesome-codex-skills",
+      "challenger_commit_sha": "9c9da64cf1bbea611d43dd14a10788d55369b353",
+      "current_token_delta": 3163,
+      "challenger_token_delta": -4621,
+      "current_wall_delta_sec": 14.5879,
+      "challenger_wall_delta_sec": 19.9203,
+      "skill_chain": "receipt_backed_skill_chain_present",
+      "verdict": "alternate_candidate",
+      "claim_boundary": "observation_only_external_challenge_not_runtime_promotion"
+    },
+    {
+      "capability_id": "ultra_review",
+      "current_skill_id": "code-review-and-quality",
+      "challenger_skill_id": "pr-review-ci-fix",
+      "challenger_source": "https://github.com/ComposioHQ/awesome-codex-skills",
+      "challenger_commit_sha": "9c9da64cf1bbea611d43dd14a10788d55369b353",
+      "current_token_delta": 1760,
+      "challenger_token_delta": 1929,
+      "current_wall_delta_sec": -13.2412,
+      "challenger_wall_delta_sec": 26.8824,
+      "skill_chain": "receipt_backed_skill_chain_present",
+      "verdict": "keep_current",
+      "claim_boundary": "observation_only_external_challenge_not_runtime_promotion"
+    }
+  ],
+  "claim_boundary": {
+    "runtime_update_allowed": false,
+    "public_benchmark_allowed": false,
+    "note": "External challenge can only propose replace/alternate candidates; runtime promotion requires separate review."
+  }
+}

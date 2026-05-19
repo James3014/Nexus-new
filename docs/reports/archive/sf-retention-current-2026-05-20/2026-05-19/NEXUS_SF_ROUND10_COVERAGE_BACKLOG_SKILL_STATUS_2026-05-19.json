@@ -1,0 +1,114 @@
+{
+  "schema": "nexus.sf_round10_coverage_backlog_skill_status.v1",
+  "summary": {
+    "skill_count": 8,
+    "runtime_update_allowed": false,
+    "public_benchmark_allowed": false
+  },
+  "skills": [
+    {
+      "name": "github6-repo-scout-safe-research-control-plane",
+      "path": "",
+      "root": "current_best",
+      "skill_status": "nexus_curated_candidate",
+      "test_level": "sf_round10_coverage_backlog",
+      "action": "ablation_only_compare",
+      "capability_mount": "research",
+      "family": "research_control_plane",
+      "reason_codes": [
+        "sf_round10_current_best"
+      ]
+    },
+    {
+      "name": "github10-paper-lookup-research-control-plane",
+      "path": ".agents/skills/github-round10-challengers/github10-paper-lookup-research-control-plane/SKILL.md",
+      "root": "github_round10_coverage_backlog",
+      "skill_status": "external_reference_candidate",
+      "test_level": "sf_round10_coverage_backlog",
+      "action": "ablation_only_compare",
+      "capability_mount": "research",
+      "family": "research_control_plane",
+      "reason_codes": [
+        "sf_round10_challenger"
+      ]
+    },
+    {
+      "name": "github7-browserbase-ui-test-safe-ui-validator",
+      "path": "",
+      "root": "current_best",
+      "skill_status": "nexus_curated_candidate",
+      "test_level": "sf_round10_coverage_backlog",
+      "action": "ablation_only_compare",
+      "capability_mount": "ultra_review",
+      "family": "ui_validator",
+      "reason_codes": [
+        "sf_round10_current_best"
+      ]
+    },
+    {
+      "name": "github10-openai-playwright-ui-validator",
+      "path": ".agents/skills/github-round10-challengers/github10-openai-playwright-ui-validator/SKILL.md",
+      "root": "github_round10_coverage_backlog",
+      "skill_status": "external_reference_candidate",
+      "test_level": "sf_round10_coverage_backlog",
+      "action": "ablation_only_compare",
+      "capability_mount": "ultra_review",
+      "family": "ui_validator",
+      "reason_codes": [
+        "sf_round10_challenger"
+      ]
+    },
+    {
+      "name": "github6-agent-context-codeintel",
+      "path": "",
+      "root": "current_best",
+      "skill_status": "nexus_curated_candidate",
+      "test_level": "sf_round10_coverage_backlog",
+      "action": "ablation_only_compare",
+      "capability_mount": "codeintel",
+      "family": "codeintel",
+      "reason_codes": [
+        "sf_round10_current_best"
+      ]
+    },
+    {
+      "name": "github10-code-simplification-codeintel",
+      "path": ".agents/skills/github-round10-challengers/github10-code-simplification-codeintel/SKILL.md",
+      "root": "github_round10_coverage_backlog",
+      "skill_status": "external_reference_candidate",
+      "test_level": "sf_round10_coverage_backlog",
+      "action": "ablation_only_compare",
+      "capability_mount": "codeintel",
+      "family": "codeintel",
+      "reason_codes": [
+        "sf_round10_challenger"
+      ]
+    },
+    {
+      "name": "sf2-belief-route-fit-spec",
+      "path": ".agents/skills/sf2/sf2-belief-route-fit-spec/SKILL.md",
+      "root": "current_best",
+      "skill_status": "nexus_curated_candidate",
+      "test_level": "sf_round10_coverage_backlog",
+      "action": "ablation_only_compare",
+      "capability_mount": "autoreason",
+      "family": "autoreason",
+      "reason_codes": [
+        "sf_round10_current_best"
+      ]
+    },
+    {
+      "name": "github10-first-principles-autoreason",
+      "path": ".agents/skills/github-round10-challengers/github10-first-principles-autoreason/SKILL.md",
+      "root": "github_round10_coverage_backlog",
+      "skill_status": "external_reference_candidate",
+      "test_level": "sf_round10_coverage_backlog",
+      "action": "ablation_only_compare",
+      "capability_mount": "autoreason",
+      "family": "autoreason",
+      "reason_codes": [
+        "sf_round10_challenger"
+      ]
+    }
+  ]
+}

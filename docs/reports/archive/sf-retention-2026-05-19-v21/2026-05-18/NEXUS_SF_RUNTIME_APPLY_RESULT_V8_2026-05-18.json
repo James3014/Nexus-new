@@ -1,0 +1,76 @@
+{
+  "claim_boundary": [
+    "SF runtime replacement is complete through V8 overlay plus post-apply smoke.",
+    "This is not a public benchmark claim.",
+    "Future new skills must enter source screen -> paired compare -> seal -> catalog -> V8-style overlay apply -> post-apply smoke."
+  ],
+  "generated_at": "2026-05-18T00:00:00+08:00",
+  "milestone_task_cards": [
+    {
+      "evidence": "docs/reports/NEXUS_SF_RUNTIME_REPLACEMENT_FLOW_V8_2026-05-18.md",
+      "id": "SF-REPLACE-1",
+      "status": "DONE",
+      "title": "Replacement flow contract"
+    },
+    {
+      "evidence": "docs/reports/NEXUS_SF_RUNTIME_APPLY_REVIEW_V8_2026-05-18.json",
+      "id": "SF-REPLACE-2",
+      "status": "DONE",
+      "title": "Evidence-approved runtime apply review"
+    },
+    {
+      "evidence": "docs/reports/NEXUS_SF_RUNTIME_SKILL_POLICY_OVERLAY_V8_2026-05-18.json",
+      "id": "SF-REPLACE-3",
+      "status": "DONE",
+      "title": "Runtime overlay V8 with four primary skills"
+    },
+    {
+      "evidence": "docs/reports/NEXUS_SF_RUNTIME_POST_APPLY_SMOKE_V8_2026-05-18.json",
+      "id": "SF-REPLACE-4",
+      "status": "DONE",
+      "title": "Post-apply runtime receipt smoke"
+    },
+    {
+      "evidence": "docs/reports/NEXUS_SF_RUNTIME_REPLACEMENT_LEDGER_V8_2026-05-18.json",
+      "id": "SF-REPLACE-5",
+      "status": "DONE",
+      "title": "Replacement ledger and pairing table"
+    },
+    {
+      "evidence": "Current runtime seam loads overlay through env/config budget; no public benchmark opened.",
+      "id": "SF-NEXT-1",
+      "status": "OPTIONAL_HOLD",
+      "title": "Persistent production config write, if desired"
+    }
+  ],
+  "pairing_table": "docs/reports/NEXUS_SF_CAPABILITY_SKILL_PAIRING_TABLE_V8_2026-05-18.md",
+  "post_apply_smoke": {
+    "path": "docs/reports/NEXUS_SF_RUNTIME_POST_APPLY_SMOKE_V8_2026-05-18.json",
+    "status": "PASS",
+    "summary": {
+      "expected_primary_count": 4,
+      "pass_count": 4,
+      "planned_contract_count": 4,
+      "return_count": 0,
+      "runtime_contract_count": 4,
+      "violation_count": 0
+    }
+  },
+  "primary_skill_by_capability": {
+    "forecast_pregate": "create-plan",
+    "governance_and_trust": "acceptance-evidence-failclosed",
+    "repair_loop": "tdd",
+    "research_and_source_discipline": "research-citation-chain-verifier"
+  },
+  "public_benchmark_allowed": false,
+  "replacement_ledger": "docs/reports/NEXUS_SF_RUNTIME_REPLACEMENT_LEDGER_V8_2026-05-18.json",
+  "runtime_load_env": {
+    "NEXUS_RUNTIME_SKILL_POLICY_OVERLAY": "docs/reports/NEXUS_SF_RUNTIME_SKILL_POLICY_OVERLAY_V8_2026-05-18.json",
+    "NEXUS_SF_RUNTIME_SKILL_POLICY_OVERLAY": "docs/reports/NEXUS_SF_RUNTIME_SKILL_POLICY_OVERLAY_V8_2026-05-18.json"
+  },
+  "runtime_overlay_path": "docs/reports/NEXUS_SF_RUNTIME_SKILL_POLICY_OVERLAY_V8_2026-05-18.json",
+  "runtime_update_allowed": true,
+  "schema": "nexus.sf_runtime_apply_result.v8",
+  "sf_runtime_replacement_complete": true,
+  "status": "PASS"
+}

@@ -1,0 +1,37 @@
+{
+  "schema": "nexus.skill_discovery_rerun_queue.v1",
+  "status": "PASS",
+  "queue_count": 3,
+  "skipped_count": 0,
+  "queue": [
+    {
+      "capability": "repair_and_coding",
+      "skill_id": "aibdd.auto.java.e2e.refactor",
+      "verdict": "needs_more_data",
+      "tested_rows": 30,
+      "effective_rows": 12,
+      "reason": "needs_more_data"
+    },
+    {
+      "capability": "repair_and_coding",
+      "skill_id": "gstack-investigate",
+      "verdict": "needs_more_data",
+      "tested_rows": 30,
+      "effective_rows": 11,
+      "reason": "needs_more_data"
+    },
+    {
+      "capability": "repair_and_coding",
+      "skill_id": "test-driven-development",
+      "verdict": "needs_more_data",
+      "tested_rows": 30,
+      "effective_rows": 10,
+      "reason": "needs_more_data"
+    }
+  ],
+  "skipped": [],
+  "claim_boundary": [
+    "Discovery queue schedules validation only; it must not update runtime defaults.",
+    "Rejected skills are skipped until the taskset or candidate source changes."
+  ]
+}

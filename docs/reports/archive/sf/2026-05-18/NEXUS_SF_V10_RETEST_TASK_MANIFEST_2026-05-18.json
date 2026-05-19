@@ -1,0 +1,244 @@
+{
+  "schema": "nexus.sf_v10_retest_task_manifest.v1",
+  "version": "2026-05-18",
+  "frozen": true,
+  "benchmark_id": "nexus-sf-v10-retest-v1",
+  "description": "Internal SF V10 held retest. Not public benchmark.",
+  "status": "PASS",
+  "summary": {
+    "task_count": 7,
+    "capability_count": 7,
+    "runtime_update_allowed": false,
+    "public_benchmark_allowed": false
+  },
+  "tasks": [
+    {
+      "id": "sf-v10-retest-artifact_gate-001",
+      "task_desc": "Use Flash+Nexus to retest held capability artifact_gate across available no-skill/current-best/challenger arms.",
+      "target_file": "unused",
+      "test_file": "unused",
+      "success_criteria": "sf_v10_retest_receipt_chain_complete",
+      "category": "artifact_gate",
+      "difficulty": "medium",
+      "repo_kind": "neutral_fixture",
+      "repo": "fixture://sf-v10-retest",
+      "repo_ref": "v1",
+      "fixture_kind": "sf_flash_pair",
+      "mutation_required": false,
+      "allowed_files": [
+        "unused"
+      ],
+      "forbidden_files": [
+        ".nexus/",
+        "logs/",
+        "benchmarks/"
+      ],
+      "setup_command": "python -V",
+      "verification_command": "python -V",
+      "expected_capabilities": [
+        "artifact_gate"
+      ],
+      "capability_activation_contract": "required",
+      "eligibility_class": "model_required",
+      "public_claim_allowed_metrics": []
+    },
+    {
+      "id": "sf-v10-retest-autoreason-001",
+      "task_desc": "Use Flash+Nexus to retest held capability autoreason across available no-skill/current-best/challenger arms.",
+      "target_file": "unused",
+      "test_file": "unused",
+      "success_criteria": "sf_v10_retest_receipt_chain_complete",
+      "category": "autoreason",
+      "difficulty": "medium",
+      "repo_kind": "neutral_fixture",
+      "repo": "fixture://sf-v10-retest",
+      "repo_ref": "v1",
+      "fixture_kind": "sf_flash_pair",
+      "mutation_required": false,
+      "allowed_files": [
+        "unused"
+      ],
+      "forbidden_files": [
+        ".nexus/",
+        "logs/",
+        "benchmarks/"
+      ],
+      "setup_command": "python -V",
+      "verification_command": "python -V",
+      "expected_capabilities": [
+        "autoreason"
+      ],
+      "capability_activation_contract": "required",
+      "eligibility_class": "model_required",
+      "public_claim_allowed_metrics": []
+    },
+    {
+      "id": "sf-v10-retest-codeintel-001",
+      "task_desc": "Use Flash+Nexus to retest held capability codeintel across available no-skill/current-best/challenger arms.",
+      "target_file": "unused",
+      "test_file": "unused",
+      "success_criteria": "sf_v10_retest_receipt_chain_complete",
+      "category": "codeintel",
+      "difficulty": "medium",
+      "repo_kind": "neutral_fixture",
+      "repo": "fixture://sf-v10-retest",
+      "repo_ref": "v1",
+      "fixture_kind": "sf_flash_pair",
+      "mutation_required": false,
+      "allowed_files": [
+        "unused"
+      ],
+      "forbidden_files": [
+        ".nexus/",
+        "logs/",
+        "benchmarks/"
+      ],
+      "setup_command": "python -V",
+      "verification_command": "python -V",
+      "expected_capabilities": [
+        "codeintel"
+      ],
+      "capability_activation_contract": "required",
+      "eligibility_class": "model_required",
+      "public_claim_allowed_metrics": []
+    },
+    {
+      "id": "sf-v10-retest-ddtree-001",
+      "task_desc": "Use Flash+Nexus to retest held capability ddtree across available no-skill/current-best/challenger arms.",
+      "target_file": "unused",
+      "test_file": "unused",
+      "success_criteria": "sf_v10_retest_receipt_chain_complete",
+      "category": "ddtree",
+      "difficulty": "medium",
+      "repo_kind": "neutral_fixture",
+      "repo": "fixture://sf-v10-retest",
+      "repo_ref": "v1",
+      "fixture_kind": "sf_flash_pair",
+      "mutation_required": false,
+      "allowed_files": [
+        "unused"
+      ],
+      "forbidden_files": [
+        ".nexus/",
+        "logs/",
+        "benchmarks/"
+      ],
+      "setup_command": "python -V",
+      "verification_command": "python -V",
+      "expected_capabilities": [
+        "ddtree"
+      ],
+      "capability_activation_contract": "required",
+      "eligibility_class": "model_required",
+      "public_claim_allowed_metrics": []
+    },
+    {
+      "id": "sf-v10-retest-research-001",
+      "task_desc": "Use Flash+Nexus to retest held capability research across available no-skill/current-best/challenger arms.",
+      "target_file": "unused",
+      "test_file": "unused",
+      "success_criteria": "sf_v10_retest_receipt_chain_complete",
+      "category": "research",
+      "difficulty": "medium",
+      "repo_kind": "neutral_fixture",
+      "repo": "fixture://sf-v10-retest",
+      "repo_ref": "v1",
+      "fixture_kind": "sf_flash_pair",
+      "mutation_required": false,
+      "allowed_files": [
+        "unused"
+      ],
+      "forbidden_files": [
+        ".nexus/",
+        "logs/",
+        "benchmarks/"
+      ],
+      "setup_command": "python -V",
+      "verification_command": "python -V",
+      "expected_capabilities": [
+        "research"
+      ],
+      "capability_activation_contract": "required",
+      "eligibility_class": "model_required",
+      "public_claim_allowed_metrics": []
+    },
+    {
+      "id": "sf-v10-retest-ui_validator-001",
+      "task_desc": "Use Flash+Nexus to retest held capability ui_validator across available no-skill/current-best/challenger arms.",
+      "target_file": "unused",
+      "test_file": "unused",
+      "success_criteria": "sf_v10_retest_receipt_chain_complete",
+      "category": "ui_validator",
+      "difficulty": "medium",
+      "repo_kind": "neutral_fixture",
+      "repo": "fixture://sf-v10-retest",
+      "repo_ref": "v1",
+      "fixture_kind": "sf_flash_pair",
+      "mutation_required": false,
+      "allowed_files": [
+        "unused"
+      ],
+      "forbidden_files": [
+        ".nexus/",
+        "logs/",
+        "benchmarks/"
+      ],
+      "setup_command": "python -V",
+      "verification_command": "python -V",
+      "expected_capabilities": [
+        "ultra_review"
+      ],
+      "capability_activation_contract": "required",
+      "eligibility_class": "model_required",
+      "public_claim_allowed_metrics": []
+    },
+    {
+      "id": "sf-v10-retest-ultra_review-001",
+      "task_desc": "Use Flash+Nexus to retest held capability ultra_review across available no-skill/current-best/challenger arms.",
+      "target_file": "unused",
+      "test_file": "unused",
+      "success_criteria": "sf_v10_retest_receipt_chain_complete",
+      "category": "ultra_review",
+      "difficulty": "medium",
+      "repo_kind": "neutral_fixture",
+      "repo": "fixture://sf-v10-retest",
+      "repo_ref": "v1",
+      "fixture_kind": "sf_flash_pair",
+      "mutation_required": false,
+      "allowed_files": [
+        "unused"
+      ],
+      "forbidden_files": [
+        ".nexus/",
+        "logs/",
+        "benchmarks/"
+      ],
+      "setup_command": "python -V",
+      "verification_command": "python -V",
+      "expected_capabilities": [
+        "ultra_review"
+      ],
+      "capability_activation_contract": "required",
+      "eligibility_class": "model_required",
+      "public_claim_allowed_metrics": []
+    }
+  ],
+  "blockers": [],
+  "skipped_arms": [
+    {
+      "capability_id": "codeintel",
+      "arm_id": "flash_nexus_challenger",
+      "reason": "no_challenger_available"
+    },
+    {
+      "capability_id": "ddtree",
+      "arm_id": "flash_nexus_challenger",
+      "reason": "no_challenger_available"
+    },
+    {
+      "capability_id": "ui_validator",
+      "arm_id": "flash_nexus_challenger",
+      "reason": "no_challenger_available"
+    }
+  ]
+}

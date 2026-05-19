@@ -1,0 +1,32 @@
+{
+  "schema": "nexus.sf2_closure_gate.v1",
+  "status": "PASS",
+  "summary": {
+    "quality_ready": true,
+    "matrix_ready": true,
+    "materialization_ready": true,
+    "bounded_probe_allowed": true,
+    "runtime_update_allowed": false,
+    "public_benchmark_allowed": false,
+    "blocker_count": 0
+  },
+  "blockers": [],
+  "next_task_cards": [
+    {
+      "id": "SF2-H",
+      "title": "Materialize Candidate-Only Skill Assets",
+      "status": "READY",
+      "exit": "17 candidate-only SKILL.md assets exist under .agents/skills/sf2 with runtime_eligible=false."
+    },
+    {
+      "id": "SF2-I",
+      "title": "Bounded SF2 Probe",
+      "status": "READY_AFTER_SF2_H",
+      "exit": "33 route capabilities have capability-only, skill-arm, and negative-control evidence."
+    }
+  ],
+  "claim_boundary": [
+    "SF2 closure gate only allows bounded skill-fit probes.",
+    "Runtime promotion and public benchmark remain blocked."
+  ]
+}

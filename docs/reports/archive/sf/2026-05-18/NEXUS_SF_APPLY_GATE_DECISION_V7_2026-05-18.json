@@ -1,0 +1,68 @@
+{
+  "apply_gate_verdict": "READY_FOR_MANUAL_RUNTIME_APPLY_REVIEW",
+  "blockers_for_auto_apply": [
+    "SF artifacts are discovery/catalog evidence, not direct runtime policy mutation authority",
+    "public benchmark remains blocked until runtime apply smoke and separate benchmark gate",
+    "manual apply review required before changing runtime defaults"
+  ],
+  "catalog_primary_updates_ready": [
+    {
+      "capability": "repair_loop",
+      "evidence": "docs/reports/NEXUS_SF_RUNTIME_RECEIPT_SMOKE_2026-05-18.json",
+      "primary_skill_id": "tdd"
+    },
+    {
+      "capability": "forecast_pregate",
+      "evidence": "docs/reports/NEXUS_SF_RUNTIME_RECEIPT_SMOKE_2026-05-18.json",
+      "primary_skill_id": "create-plan"
+    },
+    {
+      "capability": "research_and_source_discipline",
+      "evidence": "docs/reports/NEXUS_SF_RESEARCH_TIEBREAK_AND_GOVERNANCE_CURATION_2026-05-18.json",
+      "primary_skill_id": "research-citation-chain-verifier"
+    },
+    {
+      "capability": "governance_and_trust",
+      "evidence": "docs/reports/NEXUS_SF_GOVERNANCE_PRIMARY_TIEBREAK_2026-05-18.json",
+      "primary_skill_id": "acceptance-evidence-failclosed"
+    }
+  ],
+  "evidence_refs": [
+    "docs/reports/NEXUS_SF_FINAL_CAPABILITY_SKILL_CATALOG_V7_2026-05-18.json",
+    "docs/reports/NEXUS_SF_GOVERNANCE_PRIMARY_TIEBREAK_2026-05-18.json",
+    "docs/reports/NEXUS_SF_RUNTIME_RECEIPT_SMOKE_2026-05-18.json",
+    "docs/reports/NEXUS_SF_SOURCE_REGISTRY_ADAPTER_2026-05-18.json"
+  ],
+  "generated_at": "2026-05-18T00:00:00+08:00",
+  "held_alternates": {
+    "governance_and_trust": [
+      "cso",
+      "claudeosint-safe-surface-audit",
+      "gbrain-soul-audit"
+    ],
+    "repair_and_coding": [
+      "tdd"
+    ],
+    "research_and_source_discipline": [
+      "research-source-validation-auditor"
+    ]
+  },
+  "manual_apply_review_required": true,
+  "passed_conditions": [
+    "all SF V7 catalog buckets have primary or alternate recommendation",
+    "runtime receipt smoke passed for repair_loop/tdd and forecast_pregate/create-plan",
+    "research tie-break selected primary and alternate",
+    "governance primary tie-break selected acceptance-evidence-failclosed",
+    "source registry adapter remains intake-only and does not bypass runtime mount review"
+  ],
+  "public_benchmark_allowed": false,
+  "runtime_update_allowed": false,
+  "schema": "nexus.sf_apply_gate_decision.v7",
+  "status": "PASS",
+  "summary": {
+    "auto_runtime_apply_allowed": false,
+    "catalog_primary_ready_count": 4,
+    "manual_runtime_apply_review_ready": true,
+    "public_benchmark_allowed": false
+  }
+}

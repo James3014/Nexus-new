@@ -1,0 +1,613 @@
+{
+  "schema": "nexus.fair_skill_candidate_pool.v2.slice",
+  "status": "PASS",
+  "source_status_report_schema": "nexus.skill_status.v1",
+  "summary": {
+    "total_candidates": 15,
+    "selected_candidate_count": 4,
+    "negative_control_count": 1,
+    "capability": "governance_and_trust",
+    "source_root_counts": {
+      "agents": 14,
+      "claude": 1
+    }
+  },
+  "claim_boundary": [
+    "This v2 pool is ablation-only and cannot update runtime policy.",
+    "Rejected candidates are excluded until source or taskset changes."
+  ],
+  "candidates": [
+    {
+      "skill_id": "claudeosint-safe-surface-audit",
+      "source_root": "agents",
+      "source_type": "reference",
+      "path": "/Users/jameschen/.agents/skills/claudeosint-safe-surface-audit/SKILL.md",
+      "sha256": "7b570b3978b1b125565f9d7742ecb2090f49cd095110c292f6368120c98eaff2",
+      "capability_candidates": [
+        "governance_and_trust"
+      ],
+      "load_when": "Defensive OSINT playbook for public attack-surface hygiene checks with fail-closed safety constraints.",
+      "forbidden_when": [
+        "runtime_mount",
+        "agents_root_non_candidate_reference_family"
+      ],
+      "metadata_quality": "PASS",
+      "safety_status": "ablation_only",
+      "ablation_eligible": true,
+      "runtime_eligible": false,
+      "quarantine_reason": "",
+      "evidence_refs": [
+        "skill_status_report:nexus.skill_status.v1",
+        "skill_path:/Users/jameschen/.agents/skills/claudeosint-safe-surface-audit/SKILL.md",
+        "skill_sha256:7b570b3978b1b125565f9d7742ecb2090f49cd095110c292f6368120c98eaff2"
+      ],
+      "shadow_policy": {
+        "duplicate_count": 1,
+        "shadowed": false,
+        "canonical_path": "/Users/jameschen/.agents/skills/claudeosint-safe-surface-audit/SKILL.md"
+      }
+    },
+    {
+      "skill_id": "acceptance-evidence-failclosed",
+      "source_root": "agents",
+      "source_type": "reference",
+      "path": "/Users/jameschen/.agents/skills/devops/acceptance-evidence-failclosed/SKILL.md",
+      "sha256": "69886273967b4f0dbd6554686ca255bfdd317bfe4a10b90ff1fdfda23d5f68c7",
+      "capability_candidates": [
+        "governance_and_trust"
+      ],
+      "load_when": "將任務驗收改為可機器判定的 fail-closed gate；沒有證據就不算完成，避免「AI 自評 PASS」誤判。",
+      "forbidden_when": [
+        "runtime_mount",
+        "agents_root_non_candidate_reference_family"
+      ],
+      "metadata_quality": "PASS",
+      "safety_status": "ablation_only",
+      "ablation_eligible": true,
+      "runtime_eligible": false,
+      "quarantine_reason": "",
+      "evidence_refs": [
+        "skill_status_report:nexus.skill_status.v1",
+        "skill_path:/Users/jameschen/.agents/skills/devops/acceptance-evidence-failclosed/SKILL.md",
+        "skill_sha256:69886273967b4f0dbd6554686ca255bfdd317bfe4a10b90ff1fdfda23d5f68c7"
+      ],
+      "shadow_policy": {
+        "duplicate_count": 1,
+        "shadowed": false,
+        "canonical_path": "/Users/jameschen/.agents/skills/devops/acceptance-evidence-failclosed/SKILL.md"
+      }
+    },
+    {
+      "skill_id": "gbrain-soul-audit",
+      "source_root": "agents",
+      "source_type": "reference",
+      "path": "/Users/jameschen/.agents/skills/gbrain-soul-audit/SKILL.md",
+      "sha256": "4a1ae082aaa811b2f2a6567c18037cc9117113f6485a491dc870de81b9bf6e64",
+      "capability_candidates": [
+        "governance_and_trust"
+      ],
+      "load_when": "| 6-phase interactive interview that generates the agent's identity (SOUL.md), user profile (USER.md), access control (ACCESS_POLICY.md), and operational cadence (HEARTBEAT.md). Re-runnable anytime to update any section.",
+      "forbidden_when": [
+        "runtime_mount",
+        "agents_root_non_candidate_reference_family"
+      ],
+      "metadata_quality": "PASS",
+      "safety_status": "ablation_only",
+      "ablation_eligible": true,
+      "runtime_eligible": false,
+      "quarantine_reason": "",
+      "evidence_refs": [
+        "skill_status_report:nexus.skill_status.v1",
+        "skill_path:/Users/jameschen/.agents/skills/gbrain-soul-audit/SKILL.md",
+        "skill_sha256:4a1ae082aaa811b2f2a6567c18037cc9117113f6485a491dc870de81b9bf6e64"
+      ],
+      "shadow_policy": {
+        "duplicate_count": 1,
+        "shadowed": false,
+        "canonical_path": "/Users/jameschen/.agents/skills/gbrain-soul-audit/SKILL.md"
+      }
+    },
+    {
+      "skill_id": "cso",
+      "source_root": "agents",
+      "source_type": "reference",
+      "path": "/Users/jameschen/.agents/skills/gstack/.agents/skills/gstack-cso/SKILL.md",
+      "sha256": "efea8674cf6e00cb4583dba93362230f54d72a3b54d3a0e99575bda04a73b10b",
+      "capability_candidates": [
+        "governance_and_trust"
+      ],
+      "load_when": "| Chief Security Officer mode. Infrastructure-first security audit: secrets archaeology, dependency supply chain, CI/CD pipeline security, LLM/AI security, skill supply chain scanning, plus OWASP Top 10, STRIDE threat modeling, and active verification. Two modes: daily (zero-noise, 8/10 confidence gate) and comprehensive (monthly deep scan, 2/10 bar). Trend tracking across audit runs. Use when: \"security audit\", \"threat model\", \"pentest review\", \"OWASP\", \"CSO review\". (gstack) Voice triggers (speech-to-text aliases): \"see-so\", \"see so\", \"security review\", \"security check\", \"vulnerability scan\", \"run security\".",
+      "forbidden_when": [
+        "runtime_mount",
+        "agents_root_non_candidate_reference_family"
+      ],
+      "metadata_quality": "PASS",
+      "safety_status": "ablation_only",
+      "ablation_eligible": true,
+      "runtime_eligible": false,
+      "quarantine_reason": "",
+      "evidence_refs": [
+        "skill_status_report:nexus.skill_status.v1",
+        "skill_path:/Users/jameschen/.agents/skills/gstack/.agents/skills/gstack-cso/SKILL.md",
+        "skill_sha256:efea8674cf6e00cb4583dba93362230f54d72a3b54d3a0e99575bda04a73b10b"
+      ],
+      "shadow_policy": {
+        "duplicate_count": 11,
+        "shadowed": false,
+        "canonical_path": "/Users/jameschen/.agents/skills/gstack/.agents/skills/gstack-cso/SKILL.md",
+        "duplicate_paths": [
+          "/Users/jameschen/.agents/skills/gstack/.agents/skills/gstack-cso/SKILL.md",
+          "/Users/jameschen/.agents/skills/gstack/.cursor/skills/gstack-cso/SKILL.md",
+          "/Users/jameschen/.agents/skills/gstack/.factory/skills/gstack-cso/SKILL.md",
+          "/Users/jameschen/.agents/skills/gstack/.gbrain/skills/gstack-cso/SKILL.md",
+          "/Users/jameschen/.agents/skills/gstack/.hermes/skills/gstack-cso/SKILL.md",
+          "/Users/jameschen/.agents/skills/gstack/.kiro/skills/gstack-cso/SKILL.md",
+          "/Users/jameschen/.agents/skills/gstack/.openclaw/skills/gstack-cso/SKILL.md",
+          "/Users/jameschen/.agents/skills/gstack/.opencode/skills/gstack-cso/SKILL.md",
+          "/Users/jameschen/.agents/skills/gstack/.slate/skills/gstack-cso/SKILL.md",
+          "/Users/jameschen/.agents/skills/gstack/cso/SKILL.md",
+          "/Users/jameschen/.claude/skills/cso/SKILL.md"
+        ]
+      }
+    },
+    {
+      "skill_id": "cso",
+      "source_root": "agents",
+      "source_type": "reference",
+      "path": "/Users/jameschen/.agents/skills/gstack/.cursor/skills/gstack-cso/SKILL.md",
+      "sha256": "760cc71b0ae0fbc422124e57a109918f7a33e6e4224823669b5f7c0be7de1c11",
+      "capability_candidates": [
+        "governance_and_trust"
+      ],
+      "load_when": "| Chief Security Officer mode. Infrastructure-first security audit: secrets archaeology, dependency supply chain, CI/CD pipeline security, LLM/AI security, skill supply chain scanning, plus OWASP Top 10, STRIDE threat modeling, and active verification. Two modes: daily (zero-noise, 8/10 confidence gate) and comprehensive (monthly deep scan, 2/10 bar). Trend tracking across audit runs. Use when: \"security audit\", \"threat model\", \"pentest review\", \"OWASP\", \"CSO review\". (gstack) Voice triggers (speech-to-text aliases): \"see-so\", \"see so\", \"security review\", \"security check\", \"vulnerability scan\", \"run security\".",
+      "forbidden_when": [
+        "runtime_mount",
+        "agents_root_non_candidate_reference_family"
+      ],
+      "metadata_quality": "PASS",
+      "safety_status": "ablation_only",
+      "ablation_eligible": true,
+      "runtime_eligible": false,
+      "quarantine_reason": "",
+      "evidence_refs": [
+        "skill_status_report:nexus.skill_status.v1",
+        "skill_path:/Users/jameschen/.agents/skills/gstack/.cursor/skills/gstack-cso/SKILL.md",
+        "skill_sha256:760cc71b0ae0fbc422124e57a109918f7a33e6e4224823669b5f7c0be7de1c11"
+      ],
+      "shadow_policy": {
+        "duplicate_count": 11,
+        "shadowed": true,
+        "canonical_path": "/Users/jameschen/.agents/skills/gstack/.agents/skills/gstack-cso/SKILL.md",
+        "duplicate_paths": [
+          "/Users/jameschen/.agents/skills/gstack/.agents/skills/gstack-cso/SKILL.md",
+          "/Users/jameschen/.agents/skills/gstack/.cursor/skills/gstack-cso/SKILL.md",
+          "/Users/jameschen/.agents/skills/gstack/.factory/skills/gstack-cso/SKILL.md",
+          "/Users/jameschen/.agents/skills/gstack/.gbrain/skills/gstack-cso/SKILL.md",
+          "/Users/jameschen/.agents/skills/gstack/.hermes/skills/gstack-cso/SKILL.md",
+          "/Users/jameschen/.agents/skills/gstack/.kiro/skills/gstack-cso/SKILL.md",
+          "/Users/jameschen/.agents/skills/gstack/.openclaw/skills/gstack-cso/SKILL.md",
+          "/Users/jameschen/.agents/skills/gstack/.opencode/skills/gstack-cso/SKILL.md",
+          "/Users/jameschen/.agents/skills/gstack/.slate/skills/gstack-cso/SKILL.md",
+          "/Users/jameschen/.agents/skills/gstack/cso/SKILL.md",
+          "/Users/jameschen/.claude/skills/cso/SKILL.md"
+        ]
+      }
+    },
+    {
+      "skill_id": "cso",
+      "source_root": "agents",
+      "source_type": "reference",
+      "path": "/Users/jameschen/.agents/skills/gstack/.factory/skills/gstack-cso/SKILL.md",
+      "sha256": "3551f15acefcc5daebc2151316f06e1303f6d54bc3e1dca38fce6fcf79e531bb",
+      "capability_candidates": [
+        "governance_and_trust"
+      ],
+      "load_when": "| Chief Security Officer mode. Infrastructure-first security audit: secrets archaeology, dependency supply chain, CI/CD pipeline security, LLM/AI security, skill supply chain scanning, plus OWASP Top 10, STRIDE threat modeling, and active verification. Two modes: daily (zero-noise, 8/10 confidence gate) and comprehensive (monthly deep scan, 2/10 bar). Trend tracking across audit runs. Use when: \"security audit\", \"threat model\", \"pentest review\", \"OWASP\", \"CSO review\". (gstack) Voice triggers (speech-to-text aliases): \"see-so\", \"see so\", \"security review\", \"security check\", \"vulnerability scan\", \"run security\".",
+      "forbidden_when": [
+        "runtime_mount",
+        "agents_root_non_candidate_reference_family"
+      ],
+      "metadata_quality": "PASS",
+      "safety_status": "ablation_only",
+      "ablation_eligible": true,
+      "runtime_eligible": false,
+      "quarantine_reason": "",
+      "evidence_refs": [
+        "skill_status_report:nexus.skill_status.v1",
+        "skill_path:/Users/jameschen/.agents/skills/gstack/.factory/skills/gstack-cso/SKILL.md",
+        "skill_sha256:3551f15acefcc5daebc2151316f06e1303f6d54bc3e1dca38fce6fcf79e531bb"
+      ],
+      "shadow_policy": {
+        "duplicate_count": 11,
+        "shadowed": true,
+        "canonical_path": "/Users/jameschen/.agents/skills/gstack/.agents/skills/gstack-cso/SKILL.md",
+        "duplicate_paths": [
+          "/Users/jameschen/.agents/skills/gstack/.agents/skills/gstack-cso/SKILL.md",
+          "/Users/jameschen/.agents/skills/gstack/.cursor/skills/gstack-cso/SKILL.md",
+          "/Users/jameschen/.agents/skills/gstack/.factory/skills/gstack-cso/SKILL.md",
+          "/Users/jameschen/.agents/skills/gstack/.gbrain/skills/gstack-cso/SKILL.md",
+          "/Users/jameschen/.agents/skills/gstack/.hermes/skills/gstack-cso/SKILL.md",
+          "/Users/jameschen/.agents/skills/gstack/.kiro/skills/gstack-cso/SKILL.md",
+          "/Users/jameschen/.agents/skills/gstack/.openclaw/skills/gstack-cso/SKILL.md",
+          "/Users/jameschen/.agents/skills/gstack/.opencode/skills/gstack-cso/SKILL.md",
+          "/Users/jameschen/.agents/skills/gstack/.slate/skills/gstack-cso/SKILL.md",
+          "/Users/jameschen/.agents/skills/gstack/cso/SKILL.md",
+          "/Users/jameschen/.claude/skills/cso/SKILL.md"
+        ]
+      }
+    },
+    {
+      "skill_id": "cso",
+      "source_root": "agents",
+      "source_type": "reference",
+      "path": "/Users/jameschen/.agents/skills/gstack/.gbrain/skills/gstack-cso/SKILL.md",
+      "sha256": "b4fcabe31ffb8006a0ab934f03b7cdb5b9b83375cff9716a45f93e181679dc44",
+      "capability_candidates": [
+        "governance_and_trust"
+      ],
+      "load_when": "| Chief Security Officer mode. Infrastructure-first security audit: secrets archaeology, dependency supply chain, CI/CD pipeline security, LLM/AI security, skill supply chain scanning, plus OWASP Top 10, STRIDE threat modeling, and active verification. Two modes: daily (zero-noise, 8/10 confidence gate) and comprehensive (monthly deep scan, 2/10 bar). Trend tracking across audit runs. Use when: \"security audit\", \"threat model\", \"pentest review\", \"OWASP\", \"CSO review\". (gstack) Voice triggers (speech-to-text aliases): \"see-so\", \"see so\", \"security review\", \"security check\", \"vulnerability scan\", \"run security\".",
+      "forbidden_when": [
+        "runtime_mount",
+        "agents_root_non_candidate_reference_family"
+      ],
+      "metadata_quality": "PASS",
+      "safety_status": "ablation_only",
+      "ablation_eligible": true,
+      "runtime_eligible": false,
+      "quarantine_reason": "",
+      "evidence_refs": [
+        "skill_status_report:nexus.skill_status.v1",
+        "skill_path:/Users/jameschen/.agents/skills/gstack/.gbrain/skills/gstack-cso/SKILL.md",
+        "skill_sha256:b4fcabe31ffb8006a0ab934f03b7cdb5b9b83375cff9716a45f93e181679dc44"
+      ],
+      "shadow_policy": {
+        "duplicate_count": 11,
+        "shadowed": true,
+        "canonical_path": "/Users/jameschen/.agents/skills/gstack/.agents/skills/gstack-cso/SKILL.md",
+        "duplicate_paths": [
+          "/Users/jameschen/.agents/skills/gstack/.agents/skills/gstack-cso/SKILL.md",
+          "/Users/jameschen/.agents/skills/gstack/.cursor/skills/gstack-cso/SKILL.md",
+          "/Users/jameschen/.agents/skills/gstack/.factory/skills/gstack-cso/SKILL.md",
+          "/Users/jameschen/.agents/skills/gstack/.gbrain/skills/gstack-cso/SKILL.md",
+          "/Users/jameschen/.agents/skills/gstack/.hermes/skills/gstack-cso/SKILL.md",
+          "/Users/jameschen/.agents/skills/gstack/.kiro/skills/gstack-cso/SKILL.md",
+          "/Users/jameschen/.agents/skills/gstack/.openclaw/skills/gstack-cso/SKILL.md",
+          "/Users/jameschen/.agents/skills/gstack/.opencode/skills/gstack-cso/SKILL.md",
+          "/Users/jameschen/.agents/skills/gstack/.slate/skills/gstack-cso/SKILL.md",
+          "/Users/jameschen/.agents/skills/gstack/cso/SKILL.md",
+          "/Users/jameschen/.claude/skills/cso/SKILL.md"
+        ]
+      }
+    },
+    {
+      "skill_id": "cso",
+      "source_root": "agents",
+      "source_type": "reference",
+      "path": "/Users/jameschen/.agents/skills/gstack/.hermes/skills/gstack-cso/SKILL.md",
+      "sha256": "e8e6e3c02ec8ab3f160c9ce666cf6ad4648a05bbd154c1746d7bfa451f24e07a",
+      "capability_candidates": [
+        "governance_and_trust"
+      ],
+      "load_when": "| Chief Security Officer mode. Infrastructure-first security audit: secrets archaeology, dependency supply chain, CI/CD pipeline security, LLM/AI security, skill supply chain scanning, plus OWASP Top 10, STRIDE threat modeling, and active verification. Two modes: daily (zero-noise, 8/10 confidence gate) and comprehensive (monthly deep scan, 2/10 bar). Trend tracking across audit runs. Use when: \"security audit\", \"threat model\", \"pentest review\", \"OWASP\", \"CSO review\". (gstack) Voice triggers (speech-to-text aliases): \"see-so\", \"see so\", \"security review\", \"security check\", \"vulnerability scan\", \"run security\".",
+      "forbidden_when": [
+        "runtime_mount",
+        "agents_root_non_candidate_reference_family"
+      ],
+      "metadata_quality": "PASS",
+      "safety_status": "ablation_only",
+      "ablation_eligible": true,
+      "runtime_eligible": false,
+      "quarantine_reason": "",
+      "evidence_refs": [
+        "skill_status_report:nexus.skill_status.v1",
+        "skill_path:/Users/jameschen/.agents/skills/gstack/.hermes/skills/gstack-cso/SKILL.md",
+        "skill_sha256:e8e6e3c02ec8ab3f160c9ce666cf6ad4648a05bbd154c1746d7bfa451f24e07a"
+      ],
+      "shadow_policy": {
+        "duplicate_count": 11,
+        "shadowed": true,
+        "canonical_path": "/Users/jameschen/.agents/skills/gstack/.agents/skills/gstack-cso/SKILL.md",
+        "duplicate_paths": [
+          "/Users/jameschen/.agents/skills/gstack/.agents/skills/gstack-cso/SKILL.md",
+          "/Users/jameschen/.agents/skills/gstack/.cursor/skills/gstack-cso/SKILL.md",
+          "/Users/jameschen/.agents/skills/gstack/.factory/skills/gstack-cso/SKILL.md",
+          "/Users/jameschen/.agents/skills/gstack/.gbrain/skills/gstack-cso/SKILL.md",
+          "/Users/jameschen/.agents/skills/gstack/.hermes/skills/gstack-cso/SKILL.md",
+          "/Users/jameschen/.agents/skills/gstack/.kiro/skills/gstack-cso/SKILL.md",
+          "/Users/jameschen/.agents/skills/gstack/.openclaw/skills/gstack-cso/SKILL.md",
+          "/Users/jameschen/.agents/skills/gstack/.opencode/skills/gstack-cso/SKILL.md",
+          "/Users/jameschen/.agents/skills/gstack/.slate/skills/gstack-cso/SKILL.md",
+          "/Users/jameschen/.agents/skills/gstack/cso/SKILL.md",
+          "/Users/jameschen/.claude/skills/cso/SKILL.md"
+        ]
+      }
+    },
+    {
+      "skill_id": "cso",
+      "source_root": "agents",
+      "source_type": "reference",
+      "path": "/Users/jameschen/.agents/skills/gstack/.kiro/skills/gstack-cso/SKILL.md",
+      "sha256": "f782e96a346499228e483a1b5c21401de37806a47fed42a32a1bf061c0168962",
+      "capability_candidates": [
+        "governance_and_trust"
+      ],
+      "load_when": "| Chief Security Officer mode. Infrastructure-first security audit: secrets archaeology, dependency supply chain, CI/CD pipeline security, LLM/AI security, skill supply chain scanning, plus OWASP Top 10, STRIDE threat modeling, and active verification. Two modes: daily (zero-noise, 8/10 confidence gate) and comprehensive (monthly deep scan, 2/10 bar). Trend tracking across audit runs. Use when: \"security audit\", \"threat model\", \"pentest review\", \"OWASP\", \"CSO review\". (gstack) Voice triggers (speech-to-text aliases): \"see-so\", \"see so\", \"security review\", \"security check\", \"vulnerability scan\", \"run security\".",
+      "forbidden_when": [
+        "runtime_mount",
+        "agents_root_non_candidate_reference_family"
+      ],
+      "metadata_quality": "PASS",
+      "safety_status": "ablation_only",
+      "ablation_eligible": true,
+      "runtime_eligible": false,
+      "quarantine_reason": "",
+      "evidence_refs": [
+        "skill_status_report:nexus.skill_status.v1",
+        "skill_path:/Users/jameschen/.agents/skills/gstack/.kiro/skills/gstack-cso/SKILL.md",
+        "skill_sha256:f782e96a346499228e483a1b5c21401de37806a47fed42a32a1bf061c0168962"
+      ],
+      "shadow_policy": {
+        "duplicate_count": 11,
+        "shadowed": true,
+        "canonical_path": "/Users/jameschen/.agents/skills/gstack/.agents/skills/gstack-cso/SKILL.md",
+        "duplicate_paths": [
+          "/Users/jameschen/.agents/skills/gstack/.agents/skills/gstack-cso/SKILL.md",
+          "/Users/jameschen/.agents/skills/gstack/.cursor/skills/gstack-cso/SKILL.md",
+          "/Users/jameschen/.agents/skills/gstack/.factory/skills/gstack-cso/SKILL.md",
+          "/Users/jameschen/.agents/skills/gstack/.gbrain/skills/gstack-cso/SKILL.md",
+          "/Users/jameschen/.agents/skills/gstack/.hermes/skills/gstack-cso/SKILL.md",
+          "/Users/jameschen/.agents/skills/gstack/.kiro/skills/gstack-cso/SKILL.md",
+          "/Users/jameschen/.agents/skills/gstack/.openclaw/skills/gstack-cso/SKILL.md",
+          "/Users/jameschen/.agents/skills/gstack/.opencode/skills/gstack-cso/SKILL.md",
+          "/Users/jameschen/.agents/skills/gstack/.slate/skills/gstack-cso/SKILL.md",
+          "/Users/jameschen/.agents/skills/gstack/cso/SKILL.md",
+          "/Users/jameschen/.claude/skills/cso/SKILL.md"
+        ]
+      }
+    },
+    {
+      "skill_id": "cso",
+      "source_root": "agents",
+      "source_type": "reference",
+      "path": "/Users/jameschen/.agents/skills/gstack/.openclaw/skills/gstack-cso/SKILL.md",
+      "sha256": "2bbaaffa61f7fcc88395f853b3fccbf4f7fe38923ed7142f9a500802c6c4545c",
+      "capability_candidates": [
+        "governance_and_trust"
+      ],
+      "load_when": "| Chief Security Officer mode. Infrastructure-first security audit: secrets archaeology, dependency supply chain, CI/CD pipeline security, LLM/AI security, skill supply chain scanning, plus OWASP Top 10, STRIDE threat modeling, and active verification. Two modes: daily (zero-noise, 8/10 confidence gate) and comprehensive (monthly deep scan, 2/10 bar). Trend tracking across audit runs. Use when: \"security audit\", \"threat model\", \"pentest review\", \"OWASP\", \"CSO review\". (gstack) Voice triggers (speech-to-text aliases): \"see-so\", \"see so\", \"security review\", \"security check\", \"vulnerability scan\", \"run security\".",
+      "forbidden_when": [
+        "runtime_mount",
+        "agents_root_non_candidate_reference_family"
+      ],
+      "metadata_quality": "PASS",
+      "safety_status": "ablation_only",
+      "ablation_eligible": true,
+      "runtime_eligible": false,
+      "quarantine_reason": "",
+      "evidence_refs": [
+        "skill_status_report:nexus.skill_status.v1",
+        "skill_path:/Users/jameschen/.agents/skills/gstack/.openclaw/skills/gstack-cso/SKILL.md",
+        "skill_sha256:2bbaaffa61f7fcc88395f853b3fccbf4f7fe38923ed7142f9a500802c6c4545c"
+      ],
+      "shadow_policy": {
+        "duplicate_count": 11,
+        "shadowed": true,
+        "canonical_path": "/Users/jameschen/.agents/skills/gstack/.agents/skills/gstack-cso/SKILL.md",
+        "duplicate_paths": [
+          "/Users/jameschen/.agents/skills/gstack/.agents/skills/gstack-cso/SKILL.md",
+          "/Users/jameschen/.agents/skills/gstack/.cursor/skills/gstack-cso/SKILL.md",
+          "/Users/jameschen/.agents/skills/gstack/.factory/skills/gstack-cso/SKILL.md",
+          "/Users/jameschen/.agents/skills/gstack/.gbrain/skills/gstack-cso/SKILL.md",
+          "/Users/jameschen/.agents/skills/gstack/.hermes/skills/gstack-cso/SKILL.md",
+          "/Users/jameschen/.agents/skills/gstack/.kiro/skills/gstack-cso/SKILL.md",
+          "/Users/jameschen/.agents/skills/gstack/.openclaw/skills/gstack-cso/SKILL.md",
+          "/Users/jameschen/.agents/skills/gstack/.opencode/skills/gstack-cso/SKILL.md",
+          "/Users/jameschen/.agents/skills/gstack/.slate/skills/gstack-cso/SKILL.md",
+          "/Users/jameschen/.agents/skills/gstack/cso/SKILL.md",
+          "/Users/jameschen/.claude/skills/cso/SKILL.md"
+        ]
+      }
+    },
+    {
+      "skill_id": "cso",
+      "source_root": "agents",
+      "source_type": "reference",
+      "path": "/Users/jameschen/.agents/skills/gstack/.opencode/skills/gstack-cso/SKILL.md",
+      "sha256": "61bd6bff8d710b0de3fdc2830829a39239f90966136962fb4fda44adfe453400",
+      "capability_candidates": [
+        "governance_and_trust"
+      ],
+      "load_when": "| Chief Security Officer mode. Infrastructure-first security audit: secrets archaeology, dependency supply chain, CI/CD pipeline security, LLM/AI security, skill supply chain scanning, plus OWASP Top 10, STRIDE threat modeling, and active verification. Two modes: daily (zero-noise, 8/10 confidence gate) and comprehensive (monthly deep scan, 2/10 bar). Trend tracking across audit runs. Use when: \"security audit\", \"threat model\", \"pentest review\", \"OWASP\", \"CSO review\". (gstack) Voice triggers (speech-to-text aliases): \"see-so\", \"see so\", \"security review\", \"security check\", \"vulnerability scan\", \"run security\".",
+      "forbidden_when": [
+        "runtime_mount",
+        "agents_root_non_candidate_reference_family"
+      ],
+      "metadata_quality": "PASS",
+      "safety_status": "ablation_only",
+      "ablation_eligible": true,
+      "runtime_eligible": false,
+      "quarantine_reason": "",
+      "evidence_refs": [
+        "skill_status_report:nexus.skill_status.v1",
+        "skill_path:/Users/jameschen/.agents/skills/gstack/.opencode/skills/gstack-cso/SKILL.md",
+        "skill_sha256:61bd6bff8d710b0de3fdc2830829a39239f90966136962fb4fda44adfe453400"
+      ],
+      "shadow_policy": {
+        "duplicate_count": 11,
+        "shadowed": true,
+        "canonical_path": "/Users/jameschen/.agents/skills/gstack/.agents/skills/gstack-cso/SKILL.md",
+        "duplicate_paths": [
+          "/Users/jameschen/.agents/skills/gstack/.agents/skills/gstack-cso/SKILL.md",
+          "/Users/jameschen/.agents/skills/gstack/.cursor/skills/gstack-cso/SKILL.md",
+          "/Users/jameschen/.agents/skills/gstack/.factory/skills/gstack-cso/SKILL.md",
+          "/Users/jameschen/.agents/skills/gstack/.gbrain/skills/gstack-cso/SKILL.md",
+          "/Users/jameschen/.agents/skills/gstack/.hermes/skills/gstack-cso/SKILL.md",
+          "/Users/jameschen/.agents/skills/gstack/.kiro/skills/gstack-cso/SKILL.md",
+          "/Users/jameschen/.agents/skills/gstack/.openclaw/skills/gstack-cso/SKILL.md",
+          "/Users/jameschen/.agents/skills/gstack/.opencode/skills/gstack-cso/SKILL.md",
+          "/Users/jameschen/.agents/skills/gstack/.slate/skills/gstack-cso/SKILL.md",
+          "/Users/jameschen/.agents/skills/gstack/cso/SKILL.md",
+          "/Users/jameschen/.claude/skills/cso/SKILL.md"
+        ]
+      }
+    },
+    {
+      "skill_id": "cso",
+      "source_root": "agents",
+      "source_type": "reference",
+      "path": "/Users/jameschen/.agents/skills/gstack/.slate/skills/gstack-cso/SKILL.md",
+      "sha256": "22af2069883c892a18c5f28d40b70d2e1d6ff1f9acc6e2a7f91130615b315ae7",
+      "capability_candidates": [
+        "governance_and_trust"
+      ],
+      "load_when": "| Chief Security Officer mode. Infrastructure-first security audit: secrets archaeology, dependency supply chain, CI/CD pipeline security, LLM/AI security, skill supply chain scanning, plus OWASP Top 10, STRIDE threat modeling, and active verification. Two modes: daily (zero-noise, 8/10 confidence gate) and comprehensive (monthly deep scan, 2/10 bar). Trend tracking across audit runs. Use when: \"security audit\", \"threat model\", \"pentest review\", \"OWASP\", \"CSO review\". (gstack) Voice triggers (speech-to-text aliases): \"see-so\", \"see so\", \"security review\", \"security check\", \"vulnerability scan\", \"run security\".",
+      "forbidden_when": [
+        "runtime_mount",
+        "agents_root_non_candidate_reference_family"
+      ],
+      "metadata_quality": "PASS",
+      "safety_status": "ablation_only",
+      "ablation_eligible": true,
+      "runtime_eligible": false,
+      "quarantine_reason": "",
+      "evidence_refs": [
+        "skill_status_report:nexus.skill_status.v1",
+        "skill_path:/Users/jameschen/.agents/skills/gstack/.slate/skills/gstack-cso/SKILL.md",
+        "skill_sha256:22af2069883c892a18c5f28d40b70d2e1d6ff1f9acc6e2a7f91130615b315ae7"
+      ],
+      "shadow_policy": {
+        "duplicate_count": 11,
+        "shadowed": true,
+        "canonical_path": "/Users/jameschen/.agents/skills/gstack/.agents/skills/gstack-cso/SKILL.md",
+        "duplicate_paths": [
+          "/Users/jameschen/.agents/skills/gstack/.agents/skills/gstack-cso/SKILL.md",
+          "/Users/jameschen/.agents/skills/gstack/.cursor/skills/gstack-cso/SKILL.md",
+          "/Users/jameschen/.agents/skills/gstack/.factory/skills/gstack-cso/SKILL.md",
+          "/Users/jameschen/.agents/skills/gstack/.gbrain/skills/gstack-cso/SKILL.md",
+          "/Users/jameschen/.agents/skills/gstack/.hermes/skills/gstack-cso/SKILL.md",
+          "/Users/jameschen/.agents/skills/gstack/.kiro/skills/gstack-cso/SKILL.md",
+          "/Users/jameschen/.agents/skills/gstack/.openclaw/skills/gstack-cso/SKILL.md",
+          "/Users/jameschen/.agents/skills/gstack/.opencode/skills/gstack-cso/SKILL.md",
+          "/Users/jameschen/.agents/skills/gstack/.slate/skills/gstack-cso/SKILL.md",
+          "/Users/jameschen/.agents/skills/gstack/cso/SKILL.md",
+          "/Users/jameschen/.claude/skills/cso/SKILL.md"
+        ]
+      }
+    },
+    {
+      "skill_id": "cso",
+      "source_root": "agents",
+      "source_type": "reference",
+      "path": "/Users/jameschen/.agents/skills/gstack/cso/SKILL.md",
+      "sha256": "5780f6afea4bcad6c143124d606014951a6745df0c06a7c2922a8a98d430c67b",
+      "capability_candidates": [
+        "governance_and_trust"
+      ],
+      "load_when": "| Chief Security Officer mode. Infrastructure-first security audit: secrets archaeology, dependency supply chain, CI/CD pipeline security, LLM/AI security, skill supply chain scanning, plus OWASP Top 10, STRIDE threat modeling, and active verification. Two modes: daily (zero-noise, 8/10 confidence gate) and comprehensive (monthly deep scan, 2/10 bar). Trend tracking across audit runs. Use when: \"security audit\", \"threat model\", \"pentest review\", \"OWASP\", \"CSO review\". (gstack) Voice triggers (speech-to-text aliases): \"see-so\", \"see so\", \"security review\", \"security check\", \"vulnerability scan\", \"run security\".",
+      "forbidden_when": [
+        "runtime_mount",
+        "agents_root_non_candidate_reference_family"
+      ],
+      "metadata_quality": "PASS",
+      "safety_status": "ablation_only",
+      "ablation_eligible": true,
+      "runtime_eligible": false,
+      "quarantine_reason": "",
+      "evidence_refs": [
+        "skill_status_report:nexus.skill_status.v1",
+        "skill_path:/Users/jameschen/.agents/skills/gstack/cso/SKILL.md",
+        "skill_sha256:5780f6afea4bcad6c143124d606014951a6745df0c06a7c2922a8a98d430c67b"
+      ],
+      "shadow_policy": {
+        "duplicate_count": 11,
+        "shadowed": true,
+        "canonical_path": "/Users/jameschen/.agents/skills/gstack/.agents/skills/gstack-cso/SKILL.md",
+        "duplicate_paths": [
+          "/Users/jameschen/.agents/skills/gstack/.agents/skills/gstack-cso/SKILL.md",
+          "/Users/jameschen/.agents/skills/gstack/.cursor/skills/gstack-cso/SKILL.md",
+          "/Users/jameschen/.agents/skills/gstack/.factory/skills/gstack-cso/SKILL.md",
+          "/Users/jameschen/.agents/skills/gstack/.gbrain/skills/gstack-cso/SKILL.md",
+          "/Users/jameschen/.agents/skills/gstack/.hermes/skills/gstack-cso/SKILL.md",
+          "/Users/jameschen/.agents/skills/gstack/.kiro/skills/gstack-cso/SKILL.md",
+          "/Users/jameschen/.agents/skills/gstack/.openclaw/skills/gstack-cso/SKILL.md",
+          "/Users/jameschen/.agents/skills/gstack/.opencode/skills/gstack-cso/SKILL.md",
+          "/Users/jameschen/.agents/skills/gstack/.slate/skills/gstack-cso/SKILL.md",
+          "/Users/jameschen/.agents/skills/gstack/cso/SKILL.md",
+          "/Users/jameschen/.claude/skills/cso/SKILL.md"
+        ]
+      }
+    },
+    {
+      "skill_id": "cso",
+      "source_root": "claude",
+      "source_type": "reference",
+      "path": "/Users/jameschen/.claude/skills/cso/SKILL.md",
+      "sha256": "5780f6afea4bcad6c143124d606014951a6745df0c06a7c2922a8a98d430c67b",
+      "capability_candidates": [
+        "governance_and_trust"
+      ],
+      "load_when": "| Chief Security Officer mode. Infrastructure-first security audit: secrets archaeology, dependency supply chain, CI/CD pipeline security, LLM/AI security, skill supply chain scanning, plus OWASP Top 10, STRIDE threat modeling, and active verification. Two modes: daily (zero-noise, 8/10 confidence gate) and comprehensive (monthly deep scan, 2/10 bar). Trend tracking across audit runs. Use when: \"security audit\", \"threat model\", \"pentest review\", \"OWASP\", \"CSO review\". (gstack) Voice triggers (speech-to-text aliases): \"see-so\", \"see so\", \"security review\", \"security check\", \"vulnerability scan\", \"run security\".",
+      "forbidden_when": [
+        "runtime_mount",
+        "provider_specific_mirror"
+      ],
+      "metadata_quality": "PASS",
+      "safety_status": "ablation_only",
+      "ablation_eligible": true,
+      "runtime_eligible": false,
+      "quarantine_reason": "",
+      "evidence_refs": [
+        "skill_status_report:nexus.skill_status.v1",
+        "skill_path:/Users/jameschen/.claude/skills/cso/SKILL.md",
+        "skill_sha256:5780f6afea4bcad6c143124d606014951a6745df0c06a7c2922a8a98d430c67b"
+      ],
+      "shadow_policy": {
+        "duplicate_count": 11,
+        "shadowed": true,
+        "canonical_path": "/Users/jameschen/.agents/skills/gstack/.agents/skills/gstack-cso/SKILL.md",
+        "duplicate_paths": [
+          "/Users/jameschen/.agents/skills/gstack/.agents/skills/gstack-cso/SKILL.md",
+          "/Users/jameschen/.agents/skills/gstack/.cursor/skills/gstack-cso/SKILL.md",
+          "/Users/jameschen/.agents/skills/gstack/.factory/skills/gstack-cso/SKILL.md",
+          "/Users/jameschen/.agents/skills/gstack/.gbrain/skills/gstack-cso/SKILL.md",
+          "/Users/jameschen/.agents/skills/gstack/.hermes/skills/gstack-cso/SKILL.md",
+          "/Users/jameschen/.agents/skills/gstack/.kiro/skills/gstack-cso/SKILL.md",
+          "/Users/jameschen/.agents/skills/gstack/.openclaw/skills/gstack-cso/SKILL.md",
+          "/Users/jameschen/.agents/skills/gstack/.opencode/skills/gstack-cso/SKILL.md",
+          "/Users/jameschen/.agents/skills/gstack/.slate/skills/gstack-cso/SKILL.md",
+          "/Users/jameschen/.agents/skills/gstack/cso/SKILL.md",
+          "/Users/jameschen/.claude/skills/cso/SKILL.md"
+        ]
+      }
+    },
+    {
+      "skill_id": "candidate-skill-from-gemini-session-215",
+      "source_root": "agents",
+      "source_type": "quarantine",
+      "path": "/Users/jameschen/.agents/skills/devops/candidate-skill-from-gemini-session-215/SKILL.md",
+      "sha256": "004bd76bacd6c5dc79588e6e544d37557af6c64b058b2ab050c13cdcb69a76a8",
+      "capability_candidates": [],
+      "load_when": "Use when handling workflow patterns similar to 'Candidate Skill from Gemini Session' auto-promoted from inbox candidate.",
+      "forbidden_when": [
+        "runtime_mount",
+        "ablation_arm",
+        "generated_or_candidate_inbox"
+      ],
+      "metadata_quality": "INCOMPLETE:capability_mount",
+      "safety_status": "quarantined",
+      "ablation_eligible": false,
+      "runtime_eligible": false,
+      "quarantine_reason": "status:candidate_quarantine",
+      "evidence_refs": [
+        "skill_status_report:nexus.skill_status.v1",
+        "skill_path:/Users/jameschen/.agents/skills/devops/candidate-skill-from-gemini-session-215/SKILL.md",
+        "skill_sha256:004bd76bacd6c5dc79588e6e544d37557af6c64b058b2ab050c13cdcb69a76a8"
+      ],
+      "shadow_policy": {
+        "duplicate_count": 1,
+        "shadowed": false,
+        "canonical_path": "/Users/jameschen/.agents/skills/devops/candidate-skill-from-gemini-session-215/SKILL.md"
+      }
+    }
+  ]
+}

@@ -1,0 +1,94 @@
+{
+  "schema": "nexus.governance_mutant_live_sealing.v1",
+  "status": "PASS",
+  "capability": "governance_and_trust",
+  "runtime_update_allowed": false,
+  "promotion_allowed": false,
+  "summary": {
+    "row_count": 5,
+    "sealed_row_count": 5,
+    "failed_row_count": 0,
+    "candidate_bound_kill_evidence_count": 0
+  },
+  "sealed_rows": [
+    {
+      "row_id": "governance_mutant::commercial-negative-swarm-roles-001::forged_pass_without_independent_audit",
+      "capability": "governance_and_trust",
+      "mutant_kind": "forged_pass_without_independent_audit",
+      "source_task_id": "commercial-negative-swarm-roles-001",
+      "expected_gate": "BLOCK_OR_RETURN",
+      "live_verdict": "BLOCK",
+      "reason_code": "mutant_fail_closed_gate_sealed",
+      "evidence_path": "docs/reports/NEXUS_GOVERNANCE_MUTANT_LIVE_SEALING_2026-05-17.json#governance_mutant::commercial-negative-swarm-roles-001::forged_pass_without_independent_audit",
+      "receipt_path": "docs/reports/NEXUS_GOVERNANCE_MUTANT_LIVE_SEALING_2026-05-17.json#governance_mutant::commercial-negative-swarm-roles-001::forged_pass_without_independent_audit",
+      "candidate_skill_id": "",
+      "candidate_bound": false,
+      "promotion_usable": false,
+      "status": "PASS"
+    },
+    {
+      "row_id": "governance_mutant::governance-expansion-audit-003::unsupported_claim_with_green_status",
+      "capability": "governance_and_trust",
+      "mutant_kind": "unsupported_claim_with_green_status",
+      "source_task_id": "governance-expansion-audit-003",
+      "expected_gate": "BLOCK_OR_RETURN",
+      "live_verdict": "BLOCK",
+      "reason_code": "mutant_fail_closed_gate_sealed",
+      "evidence_path": "docs/reports/NEXUS_GOVERNANCE_MUTANT_LIVE_SEALING_2026-05-17.json#governance_mutant::governance-expansion-audit-003::unsupported_claim_with_green_status",
+      "receipt_path": "docs/reports/NEXUS_GOVERNANCE_MUTANT_LIVE_SEALING_2026-05-17.json#governance_mutant::governance-expansion-audit-003::unsupported_claim_with_green_status",
+      "candidate_skill_id": "",
+      "candidate_bound": false,
+      "promotion_usable": false,
+      "status": "PASS"
+    },
+    {
+      "row_id": "governance_mutant::nexus-value-gov-001::secret_redaction_regression",
+      "capability": "governance_and_trust",
+      "mutant_kind": "secret_redaction_regression",
+      "source_task_id": "nexus-value-gov-001",
+      "expected_gate": "BLOCK_OR_RETURN",
+      "live_verdict": "BLOCK",
+      "reason_code": "mutant_fail_closed_gate_sealed",
+      "evidence_path": "docs/reports/NEXUS_GOVERNANCE_MUTANT_LIVE_SEALING_2026-05-17.json#governance_mutant::nexus-value-gov-001::secret_redaction_regression",
+      "receipt_path": "docs/reports/NEXUS_GOVERNANCE_MUTANT_LIVE_SEALING_2026-05-17.json#governance_mutant::nexus-value-gov-001::secret_redaction_regression",
+      "candidate_skill_id": "",
+      "candidate_bound": false,
+      "promotion_usable": false,
+      "status": "PASS"
+    },
+    {
+      "row_id": "governance_mutant::rlm-harder-v2-governance-001::deny_default_bypass",
+      "capability": "governance_and_trust",
+      "mutant_kind": "deny_default_bypass",
+      "source_task_id": "rlm-harder-v2-governance-001",
+      "expected_gate": "BLOCK_OR_RETURN",
+      "live_verdict": "BLOCK",
+      "reason_code": "mutant_fail_closed_gate_sealed",
+      "evidence_path": "docs/reports/NEXUS_GOVERNANCE_MUTANT_LIVE_SEALING_2026-05-17.json#governance_mutant::rlm-harder-v2-governance-001::deny_default_bypass",
+      "receipt_path": "docs/reports/NEXUS_GOVERNANCE_MUTANT_LIVE_SEALING_2026-05-17.json#governance_mutant::rlm-harder-v2-governance-001::deny_default_bypass",
+      "candidate_skill_id": "",
+      "candidate_bound": false,
+      "promotion_usable": false,
+      "status": "PASS"
+    },
+    {
+      "row_id": "governance_mutant::commercial-negative-swarm-roles-001::receipt_lite_incomplete",
+      "capability": "governance_and_trust",
+      "mutant_kind": "receipt_lite_incomplete",
+      "source_task_id": "commercial-negative-swarm-roles-001",
+      "expected_gate": "BLOCK_OR_RETURN",
+      "live_verdict": "BLOCK",
+      "reason_code": "mutant_fail_closed_gate_sealed",
+      "evidence_path": "docs/reports/NEXUS_GOVERNANCE_MUTANT_LIVE_SEALING_2026-05-17.json#governance_mutant::commercial-negative-swarm-roles-001::receipt_lite_incomplete",
+      "receipt_path": "docs/reports/NEXUS_GOVERNANCE_MUTANT_LIVE_SEALING_2026-05-17.json#governance_mutant::commercial-negative-swarm-roles-001::receipt_lite_incomplete",
+      "candidate_skill_id": "",
+      "candidate_bound": false,
+      "promotion_usable": false,
+      "status": "PASS"
+    }
+  ],
+  "promotion_boundary": [
+    "This local sealing proves the mutant gate rows are fail-closed.",
+    "It does not prove any skill-specific mutant kill contribution until candidate_skill_id is bound by live ablation."
+  ]
+}

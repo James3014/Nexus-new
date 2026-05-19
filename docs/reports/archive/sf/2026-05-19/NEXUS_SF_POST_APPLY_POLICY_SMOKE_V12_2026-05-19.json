@@ -1,0 +1,511 @@
+{
+  "schema": "nexus.sf_runtime_overlay_policy_smoke.v12",
+  "status": "PASS",
+  "runtime_update_allowed": false,
+  "public_benchmark_allowed": false,
+  "overlay_path": "docs/reports/NEXUS_SF_RUNTIME_SKILL_POLICY_OVERLAY_V12_2026-05-19.json",
+  "summary": {
+    "case_count": 26,
+    "pass_count": 26,
+    "return_count": 0
+  },
+  "cases": [
+    {
+      "capability_id": "artifact_gate",
+      "expected_skill": "acceptance-evidence-failclosed",
+      "selected_capabilities": [
+        "artifact_gate"
+      ],
+      "aliases": [
+        "artifact_gate"
+      ],
+      "emitted_skill_ids": [
+        "sf2-direct_master_loop-route-fit-spec",
+        "sf2-external_productivity-route-fit-spec",
+        "diagnose",
+        "acceptance-evidence-failclosed"
+      ],
+      "path": "/Users/jameschen/Workspace/nexus/.agents/skills/acceptance-evidence-failclosed/SKILL.md",
+      "path_ok": true,
+      "status": "PASS"
+    },
+    {
+      "capability_id": "autoreason",
+      "expected_skill": "sf2-belief-route-fit-spec",
+      "selected_capabilities": [
+        "autoreason"
+      ],
+      "aliases": [
+        "autoreason"
+      ],
+      "emitted_skill_ids": [
+        "sf2-belief-route-fit-spec"
+      ],
+      "path": "/Users/jameschen/Workspace/nexus/.agents/skills/sf2/sf2-belief-route-fit-spec/SKILL.md",
+      "path_ok": true,
+      "status": "PASS"
+    },
+    {
+      "capability_id": "belief",
+      "expected_skill": "sf2-belief-route-fit-spec",
+      "selected_capabilities": [
+        "belief"
+      ],
+      "aliases": [
+        "belief"
+      ],
+      "emitted_skill_ids": [
+        "sf2-belief-route-fit-spec"
+      ],
+      "path": "/Users/jameschen/Workspace/nexus/.agents/skills/sf2/sf2-belief-route-fit-spec/SKILL.md",
+      "path_ok": true,
+      "status": "PASS"
+    },
+    {
+      "capability_id": "claim_gate",
+      "expected_skill": "nexus-benchmark-continuous-optimization",
+      "selected_capabilities": [
+        "claim_gate"
+      ],
+      "aliases": [
+        "claim_gate"
+      ],
+      "emitted_skill_ids": [
+        "nexus-benchmark-continuous-optimization",
+        "acceptance-evidence-failclosed"
+      ],
+      "path": "/Users/jameschen/Workspace/nexus/.agents/skills/nexus-benchmark-continuous-optimization/SKILL.md",
+      "path_ok": true,
+      "status": "PASS"
+    },
+    {
+      "capability_id": "codeintel",
+      "expected_skill": "sf2-codeintel-route-fit-spec",
+      "selected_capabilities": [
+        "codeintel"
+      ],
+      "aliases": [
+        "codeintel"
+      ],
+      "emitted_skill_ids": [
+        "sf2-codeintel-route-fit-spec",
+        "tdd",
+        "diagnose"
+      ],
+      "path": "/Users/jameschen/Workspace/nexus/.agents/skills/sf2/sf2-codeintel-route-fit-spec/SKILL.md",
+      "path_ok": true,
+      "status": "PASS"
+    },
+    {
+      "capability_id": "ddtree",
+      "expected_skill": "nexus-root-cause-probe",
+      "selected_capabilities": [
+        "ddtree"
+      ],
+      "aliases": [
+        "ddtree"
+      ],
+      "emitted_skill_ids": [
+        "nexus-root-cause-probe"
+      ],
+      "path": "/Users/jameschen/Workspace/nexus/.agents/skills/nexus-root-cause-probe/SKILL.md",
+      "path_ok": true,
+      "status": "PASS"
+    },
+    {
+      "capability_id": "direct_master_loop",
+      "expected_skill": "sf2-direct_master_loop-route-fit-spec",
+      "selected_capabilities": [
+        "artifact_gate"
+      ],
+      "aliases": [
+        "direct_master_loop",
+        "hyper",
+        "delivery_gate",
+        "artifact_gate"
+      ],
+      "emitted_skill_ids": [
+        "sf2-direct_master_loop-route-fit-spec",
+        "sf2-external_productivity-route-fit-spec",
+        "diagnose",
+        "acceptance-evidence-failclosed"
+      ],
+      "path": "/Users/jameschen/Workspace/nexus/.agents/skills/sf2/sf2-direct_master_loop-route-fit-spec/SKILL.md",
+      "path_ok": true,
+      "status": "PASS"
+    },
+    {
+      "capability_id": "drone",
+      "expected_skill": "diagnose",
+      "selected_capabilities": [
+        "drone"
+      ],
+      "aliases": [
+        "drone"
+      ],
+      "emitted_skill_ids": [
+        "diagnose"
+      ],
+      "path": "/Users/jameschen/Workspace/nexus/.agents/skills/diagnose/SKILL.md",
+      "path_ok": true,
+      "status": "PASS"
+    },
+    {
+      "capability_id": "external_productivity",
+      "expected_skill": "sf2-external_productivity-route-fit-spec",
+      "selected_capabilities": [
+        "artifact_gate"
+      ],
+      "aliases": [
+        "external_productivity",
+        "research_route",
+        "research",
+        "artifact_gate"
+      ],
+      "emitted_skill_ids": [
+        "sf2-direct_master_loop-route-fit-spec",
+        "sf2-external_productivity-route-fit-spec",
+        "diagnose",
+        "acceptance-evidence-failclosed"
+      ],
+      "path": "/Users/jameschen/Workspace/nexus/.agents/skills/sf2/sf2-external_productivity-route-fit-spec/SKILL.md",
+      "path_ok": true,
+      "status": "PASS"
+    },
+    {
+      "capability_id": "file_lock_security_gate",
+      "expected_skill": "sf2-file_lock_security_gate-route-fit-spec",
+      "selected_capabilities": [
+        "sandbox"
+      ],
+      "aliases": [
+        "file_lock_security_gate",
+        "ultra_review",
+        "mempalace_gate",
+        "sandbox"
+      ],
+      "emitted_skill_ids": [
+        "sf2-file_lock_security_gate-route-fit-spec"
+      ],
+      "path": "/Users/jameschen/Workspace/nexus/.agents/skills/sf2/sf2-file_lock_security_gate-route-fit-spec/SKILL.md",
+      "path_ok": true,
+      "status": "PASS"
+    },
+    {
+      "capability_id": "forecast_pregate",
+      "expected_skill": "create-plan",
+      "selected_capabilities": [
+        "plan_quality_gate"
+      ],
+      "aliases": [
+        "forecast_pregate",
+        "pregate",
+        "forecast_gate",
+        "plan_quality_gate"
+      ],
+      "emitted_skill_ids": [
+        "create-plan"
+      ],
+      "path": "/Users/jameschen/Workspace/nexus/.agents/skills/create-plan/SKILL.md",
+      "path_ok": true,
+      "status": "PASS"
+    },
+    {
+      "capability_id": "governance_and_trust",
+      "expected_skill": "acceptance-evidence-failclosed",
+      "selected_capabilities": [
+        "mempalace_gate"
+      ],
+      "aliases": [
+        "governance_and_trust",
+        "claim_gate",
+        "pregate",
+        "ultra_review",
+        "mempalace",
+        "mempalace_gate"
+      ],
+      "emitted_skill_ids": [
+        "sf2-file_lock_security_gate-route-fit-spec",
+        "acceptance-evidence-failclosed"
+      ],
+      "path": "/Users/jameschen/Workspace/nexus/.agents/skills/acceptance-evidence-failclosed/SKILL.md",
+      "path_ok": true,
+      "status": "PASS"
+    },
+    {
+      "capability_id": "hyper_sprint",
+      "expected_skill": "sf2-hyper_sprint-route-fit-spec",
+      "selected_capabilities": [
+        "hyper"
+      ],
+      "aliases": [
+        "hyper_sprint",
+        "hyper"
+      ],
+      "emitted_skill_ids": [
+        "sf2-direct_master_loop-route-fit-spec",
+        "sf2-hyper_sprint-route-fit-spec",
+        "tdd"
+      ],
+      "path": "/Users/jameschen/Workspace/nexus/.agents/skills/sf2/sf2-hyper_sprint-route-fit-spec/SKILL.md",
+      "path_ok": true,
+      "status": "PASS"
+    },
+    {
+      "capability_id": "lancedb",
+      "expected_skill": "research-source-validation-auditor",
+      "selected_capabilities": [
+        "lancedb"
+      ],
+      "aliases": [
+        "lancedb"
+      ],
+      "emitted_skill_ids": [
+        "research-citation-chain-verifier",
+        "research-source-validation-auditor"
+      ],
+      "path": "/Users/jameschen/Workspace/nexus/.agents/skills/research-source-validation-auditor/SKILL.md",
+      "path_ok": true,
+      "status": "PASS"
+    },
+    {
+      "capability_id": "learn_ask",
+      "expected_skill": "nexus-capability-upgrade",
+      "selected_capabilities": [
+        "research_route"
+      ],
+      "aliases": [
+        "learn_ask",
+        "learn_mode",
+        "research_route"
+      ],
+      "emitted_skill_ids": [
+        "sf2-external_productivity-route-fit-spec",
+        "nexus-capability-upgrade",
+        "research-citation-chain-verifier"
+      ],
+      "path": "/Users/jameschen/Workspace/nexus/.agents/skills/nexus-capability-upgrade/SKILL.md",
+      "path_ok": true,
+      "status": "PASS"
+    },
+    {
+      "capability_id": "learning_closure",
+      "expected_skill": "sf2-learning_closure-route-fit-spec",
+      "selected_capabilities": [
+        "semantic_failure_sensor"
+      ],
+      "aliases": [
+        "learning_closure",
+        "semantic_failure_sensor"
+      ],
+      "emitted_skill_ids": [
+        "diagnose",
+        "tdd",
+        "sf2-learning_closure-route-fit-spec",
+        "nexus-goal-closure-executor"
+      ],
+      "path": "/Users/jameschen/Workspace/nexus/.agents/skills/sf2/sf2-learning_closure-route-fit-spec/SKILL.md",
+      "path_ok": true,
+      "status": "PASS"
+    },
+    {
+      "capability_id": "memory",
+      "expected_skill": "diagnose",
+      "selected_capabilities": [
+        "memory"
+      ],
+      "aliases": [
+        "memory"
+      ],
+      "emitted_skill_ids": [
+        "diagnose"
+      ],
+      "path": "/Users/jameschen/Workspace/nexus/.agents/skills/diagnose/SKILL.md",
+      "path_ok": true,
+      "status": "PASS"
+    },
+    {
+      "capability_id": "metabolism_resume",
+      "expected_skill": "nexus-goal-closure-executor",
+      "selected_capabilities": [
+        "semantic_failure_sensor"
+      ],
+      "aliases": [
+        "metabolism_resume",
+        "semantic_failure_sensor"
+      ],
+      "emitted_skill_ids": [
+        "diagnose",
+        "tdd",
+        "sf2-learning_closure-route-fit-spec",
+        "nexus-goal-closure-executor"
+      ],
+      "path": "/Users/jameschen/Workspace/nexus/.agents/skills/nexus-goal-closure-executor/SKILL.md",
+      "path_ok": true,
+      "status": "PASS"
+    },
+    {
+      "capability_id": "nightshift",
+      "expected_skill": "sf2-nightshift-route-fit-spec",
+      "selected_capabilities": [
+        "nightshift"
+      ],
+      "aliases": [
+        "nightshift"
+      ],
+      "emitted_skill_ids": [
+        "sf2-nightshift-route-fit-spec"
+      ],
+      "path": "/Users/jameschen/Workspace/nexus/.agents/skills/sf2/sf2-nightshift-route-fit-spec/SKILL.md",
+      "path_ok": true,
+      "status": "PASS"
+    },
+    {
+      "capability_id": "regression_guard",
+      "expected_skill": "diagnose",
+      "selected_capabilities": [
+        "artifact_gate"
+      ],
+      "aliases": [
+        "regression_guard",
+        "semantic_failure_sensor",
+        "jit_validation",
+        "delivery_gate",
+        "artifact_gate"
+      ],
+      "emitted_skill_ids": [
+        "sf2-direct_master_loop-route-fit-spec",
+        "sf2-external_productivity-route-fit-spec",
+        "diagnose",
+        "acceptance-evidence-failclosed"
+      ],
+      "path": "/Users/jameschen/Workspace/nexus/.agents/skills/diagnose/SKILL.md",
+      "path_ok": true,
+      "status": "PASS"
+    },
+    {
+      "capability_id": "repair_loop",
+      "expected_skill": "tdd",
+      "selected_capabilities": [
+        "semantic_failure_sensor"
+      ],
+      "aliases": [
+        "repair_loop",
+        "repair_and_coding",
+        "hyper",
+        "codeintel",
+        "jit_validation",
+        "semantic_failure_sensor"
+      ],
+      "emitted_skill_ids": [
+        "diagnose",
+        "tdd",
+        "sf2-learning_closure-route-fit-spec",
+        "nexus-goal-closure-executor"
+      ],
+      "path": "/Users/jameschen/Workspace/nexus/.agents/skills/tdd/SKILL.md",
+      "path_ok": true,
+      "status": "PASS"
+    },
+    {
+      "capability_id": "research",
+      "expected_skill": "research-citation-chain-verifier",
+      "selected_capabilities": [
+        "research"
+      ],
+      "aliases": [
+        "research"
+      ],
+      "emitted_skill_ids": [
+        "sf2-external_productivity-route-fit-spec",
+        "research-citation-chain-verifier",
+        "research-citation-chain-verifier",
+        "research-citation-chain-verifier"
+      ],
+      "path": "/Users/jameschen/Workspace/nexus/.agents/skills/research-citation-chain-verifier/SKILL.md",
+      "path_ok": true,
+      "status": "PASS"
+    },
+    {
+      "capability_id": "research_and_source_discipline",
+      "expected_skill": "research-citation-chain-verifier",
+      "selected_capabilities": [
+        "semantic_searcher"
+      ],
+      "aliases": [
+        "research_and_source_discipline",
+        "research",
+        "research_route",
+        "lancedb",
+        "semantic_searcher"
+      ],
+      "emitted_skill_ids": [
+        "research-citation-chain-verifier"
+      ],
+      "path": "/Users/jameschen/Workspace/nexus/.agents/skills/research-citation-chain-verifier/SKILL.md",
+      "path_ok": true,
+      "status": "PASS"
+    },
+    {
+      "capability_id": "research_control_plane",
+      "expected_skill": "research-citation-chain-verifier",
+      "selected_capabilities": [
+        "research"
+      ],
+      "aliases": [
+        "research_control_plane",
+        "research"
+      ],
+      "emitted_skill_ids": [
+        "sf2-external_productivity-route-fit-spec",
+        "research-citation-chain-verifier",
+        "research-citation-chain-verifier",
+        "research-citation-chain-verifier"
+      ],
+      "path": "/Users/jameschen/Workspace/nexus/.agents/skills/research-citation-chain-verifier/SKILL.md",
+      "path_ok": true,
+      "status": "PASS"
+    },
+    {
+      "capability_id": "swarm_multi_agent",
+      "expected_skill": "sf2-swarm_multi_agent-route-fit-spec",
+      "selected_capabilities": [
+        "swarm"
+      ],
+      "aliases": [
+        "swarm_multi_agent",
+        "swarm"
+      ],
+      "emitted_skill_ids": [
+        "sf2-swarm_multi_agent-route-fit-spec"
+      ],
+      "path": "/Users/jameschen/Workspace/nexus/.agents/skills/sf2/sf2-swarm_multi_agent-route-fit-spec/SKILL.md",
+      "path_ok": true,
+      "status": "PASS"
+    },
+    {
+      "capability_id": "xray",
+      "expected_skill": "diagnose",
+      "selected_capabilities": [
+        "codeintel"
+      ],
+      "aliases": [
+        "xray",
+        "codeintel"
+      ],
+      "emitted_skill_ids": [
+        "sf2-codeintel-route-fit-spec",
+        "tdd",
+        "diagnose"
+      ],
+      "path": "/Users/jameschen/Workspace/nexus/.agents/skills/diagnose/SKILL.md",
+      "path_ok": true,
+      "status": "PASS"
+    }
+  ],
+  "claim_boundary": {
+    "scope": "overlay_alias_policy_smoke",
+    "not_public_benchmark": true,
+    "runtime_default_change": false
+  }
+}

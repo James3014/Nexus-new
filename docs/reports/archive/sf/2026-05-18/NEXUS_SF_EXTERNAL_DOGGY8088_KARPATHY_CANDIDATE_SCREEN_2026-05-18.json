@@ -1,0 +1,75 @@
+{
+  "schema": "nexus.sf.external_candidate_screen.v1",
+  "status": "PASS",
+  "source": {
+    "repo_url": "https://github.com/doggy8088/andrej-karpathy-skills",
+    "commit_sha": "0bf99012a4e63f3370e8027215a715f1bed91059",
+    "acquisition": "git_clone_depth_1",
+    "license": "MIT"
+  },
+  "summary": {
+    "skill_count": 1,
+    "routed_candidate_count": 1,
+    "challenge_capability_count": 5,
+    "runtime_update_allowed": false,
+    "public_benchmark_allowed": false
+  },
+  "candidates": [
+    {
+      "skill_id": "karpathy-guidelines",
+      "name": "karpathy-guidelines",
+      "path": "/private/tmp/doggy8088-andrej-karpathy-skills-20260518/skills/karpathy-guidelines/SKILL.md",
+      "sha256": "6e22cc54cb02a5e98ae42d06d9d7292db0c1b43894831b32879beb0166b2aea7",
+      "source_type": "external_reference_candidate",
+      "ablation_eligible": true,
+      "runtime_eligible": false,
+      "code_execution_risk": "low",
+      "operational_use_risk": "low",
+      "candidate_capabilities": [
+        "direct_master_loop",
+        "repair_loop",
+        "hyper_sprint",
+        "codeintel",
+        "ultra_review"
+      ],
+      "capability_reason_codes": {
+        "direct_master_loop": [
+          "goal_driven_execution",
+          "surgical_changes",
+          "assumption_surface"
+        ],
+        "repair_loop": [
+          "verifiable_success_criteria",
+          "tests_first_guidance",
+          "minimal_fix_bias"
+        ],
+        "hyper_sprint": [
+          "avoid_overcomplication",
+          "small_surgical_change_bias",
+          "fast_repair_guardrail"
+        ],
+        "codeintel": [
+          "context_before_coding",
+          "surface_assumptions",
+          "avoid_unrelated_refactors"
+        ],
+        "ultra_review": [
+          "review_quality",
+          "diff_minimality",
+          "success_criteria_audit"
+        ]
+      },
+      "screening_notes": [
+        "single_SKILL_md_documentation_only",
+        "no_scripts_or_executable_entrypoints",
+        "coding_behavior_guidelines_only",
+        "ablation_only_no_runtime_mount"
+      ]
+    }
+  ],
+  "claim_boundary": {
+    "runtime_update_allowed": false,
+    "public_benchmark_allowed": false,
+    "reason": "external reference candidates require ablation evidence and separate promotion review"
+  }
+}

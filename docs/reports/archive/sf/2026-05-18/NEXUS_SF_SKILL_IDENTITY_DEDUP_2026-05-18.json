@@ -1,0 +1,396 @@
+{
+  "schema": "nexus.sf_skill_identity_dedup.v1",
+  "status": "PASS",
+  "summary": {
+    "skill_file_count": 316,
+    "duplicate_skill_id_group_count": 18,
+    "byte_identical_content_group_count": 0,
+    "safe_delete_candidate_count": 0,
+    "safe_ignore_count": 0,
+    "manual_review_required_count": 18
+  },
+  "duplicate_groups": [
+    {
+      "skill_id": "apple-notes",
+      "record_count": 2,
+      "content_variant_count": 2,
+      "canonical_identity_id": "982d2abbedb9f33bca273925",
+      "canonical_path": "/Users/jameschen/Workspace/hermes-agent/skills/apple/apple-notes/SKILL.md",
+      "source_statuses": [
+        "archived_reference",
+        "hermes_reference"
+      ]
+    },
+    {
+      "skill_id": "apple-reminders",
+      "record_count": 2,
+      "content_variant_count": 2,
+      "canonical_identity_id": "005c1bd87057c642c5042c5f",
+      "canonical_path": "/Users/jameschen/Workspace/hermes-agent/skills/apple/apple-reminders/SKILL.md",
+      "source_statuses": [
+        "archived_reference",
+        "hermes_reference"
+      ]
+    },
+    {
+      "skill_id": "audit",
+      "record_count": 2,
+      "content_variant_count": 2,
+      "canonical_identity_id": "878fd0b37464909faa8abb7e",
+      "canonical_path": "/Users/jameschen/.agents/skills.archived-20260426-context-budget/audit/SKILL.md",
+      "source_statuses": [
+        "archived_reference"
+      ]
+    },
+    {
+      "skill_id": "auto-skill",
+      "record_count": 2,
+      "content_variant_count": 2,
+      "canonical_identity_id": "78fd296b4418217ba2b0fb68",
+      "canonical_path": "/Users/jameschen/.agents/skills.archived-20260426-context-budget/auto-skill/SKILL.md",
+      "source_statuses": [
+        "archived_reference",
+        "legacy_old"
+      ]
+    },
+    {
+      "skill_id": "critique",
+      "record_count": 2,
+      "content_variant_count": 2,
+      "canonical_identity_id": "c1d7ab337cfca7d7ab75f3ea",
+      "canonical_path": "/Users/jameschen/.agents/skills.archived-20260426-context-budget/critique/SKILL.md",
+      "source_statuses": [
+        "archived_reference"
+      ]
+    },
+    {
+      "skill_id": "distill",
+      "record_count": 2,
+      "content_variant_count": 2,
+      "canonical_identity_id": "3213a3e042bbbbc9ff6e37b6",
+      "canonical_path": "/Users/jameschen/.agents/skills.archived-20260426-context-budget/distill/SKILL.md",
+      "source_statuses": [
+        "archived_reference"
+      ]
+    },
+    {
+      "skill_id": "extract",
+      "record_count": 2,
+      "content_variant_count": 2,
+      "canonical_identity_id": "32dafa270ca2571b805cb6d5",
+      "canonical_path": "/Users/jameschen/.agents/skills.archived-20260426-context-budget/extract/SKILL.md",
+      "source_statuses": [
+        "archived_reference"
+      ]
+    },
+    {
+      "skill_id": "frontend-design",
+      "record_count": 2,
+      "content_variant_count": 2,
+      "canonical_identity_id": "d1c91b120aa7310b23d08f71",
+      "canonical_path": "/Users/jameschen/.agents/skills.archived-20260426-context-budget/frontend-design/SKILL.md",
+      "source_statuses": [
+        "archived_reference"
+      ]
+    },
+    {
+      "skill_id": "gstack",
+      "record_count": 2,
+      "content_variant_count": 2,
+      "canonical_identity_id": "cd8d93c42560158e0ad8da7d",
+      "canonical_path": "/Users/jameschen/.agents/skills.archived-20260426-context-budget/gstack/.agents/skills/gstack/SKILL.md",
+      "source_statuses": [
+        "archived_reference"
+      ]
+    },
+    {
+      "skill_id": "gstack-upgrade",
+      "record_count": 2,
+      "content_variant_count": 2,
+      "canonical_identity_id": "28761dea46b1062f31d7e04a",
+      "canonical_path": "/Users/jameschen/.agents/skills.archived-20260426-context-budget/gstack/.agents/skills/gstack-upgrade/SKILL.md",
+      "source_statuses": [
+        "archived_reference"
+      ]
+    },
+    {
+      "skill_id": "harden",
+      "record_count": 2,
+      "content_variant_count": 2,
+      "canonical_identity_id": "2935b8ea896608b3fc4c9abb",
+      "canonical_path": "/Users/jameschen/.agents/skills.archived-20260426-context-budget/harden/SKILL.md",
+      "source_statuses": [
+        "archived_reference"
+      ]
+    },
+    {
+      "skill_id": "nexus-yang-ding-yi-eternal-v5",
+      "record_count": 2,
+      "content_variant_count": 2,
+      "canonical_identity_id": "584f1de42c09538e68ea5cab",
+      "canonical_path": "/Users/jameschen/Workspace/nexus/.agents/skills/yang-ding-yi-nexus-eternal/SKILL.md",
+      "source_statuses": [
+        "archived_reference",
+        "nexus_repo_local"
+      ]
+    },
+    {
+      "skill_id": "obsidian",
+      "record_count": 3,
+      "content_variant_count": 3,
+      "canonical_identity_id": "1fbc6cce6545c04848e338f3",
+      "canonical_path": "/Users/jameschen/Workspace/hermes-agent/skills/note-taking/obsidian/SKILL.md",
+      "source_statuses": [
+        "archived_reference",
+        "hermes_reference",
+        "legacy_old"
+      ]
+    },
+    {
+      "skill_id": "requesting-code-review",
+      "record_count": 2,
+      "content_variant_count": 2,
+      "canonical_identity_id": "8d3cde0b53a3723f0968313f",
+      "canonical_path": "/Users/jameschen/Workspace/hermes-agent/skills/software-development/requesting-code-review/SKILL.md",
+      "source_statuses": [
+        "archived_reference",
+        "hermes_reference"
+      ]
+    },
+    {
+      "skill_id": "subagent-driven-development",
+      "record_count": 2,
+      "content_variant_count": 2,
+      "canonical_identity_id": "240e8ba11963fe5a953a0e03",
+      "canonical_path": "/Users/jameschen/Workspace/hermes-agent/skills/software-development/subagent-driven-development/SKILL.md",
+      "source_statuses": [
+        "archived_reference",
+        "hermes_reference"
+      ]
+    },
+    {
+      "skill_id": "systematic-debugging",
+      "record_count": 2,
+      "content_variant_count": 2,
+      "canonical_identity_id": "f3061d4fa2bdcc3376fb014f",
+      "canonical_path": "/Users/jameschen/Workspace/hermes-agent/skills/software-development/systematic-debugging/SKILL.md",
+      "source_statuses": [
+        "archived_reference",
+        "hermes_reference"
+      ]
+    },
+    {
+      "skill_id": "test-driven-development",
+      "record_count": 3,
+      "content_variant_count": 3,
+      "canonical_identity_id": "28ad53aa7397a491a1309d7e",
+      "canonical_path": "/Users/jameschen/Workspace/hermes-agent/skills/software-development/test-driven-development/SKILL.md",
+      "source_statuses": [
+        "archived_reference",
+        "audit_reference",
+        "hermes_reference"
+      ]
+    },
+    {
+      "skill_id": "writing-plans",
+      "record_count": 2,
+      "content_variant_count": 2,
+      "canonical_identity_id": "ae504576e478ed280303f543",
+      "canonical_path": "/Users/jameschen/Workspace/hermes-agent/skills/software-development/writing-plans/SKILL.md",
+      "source_statuses": [
+        "archived_reference",
+        "hermes_reference"
+      ]
+    }
+  ],
+  "safe_delete_candidates": [],
+  "safe_ignore": [],
+  "manual_review_required": [
+    {
+      "skill_id": "apple-notes",
+      "reason": "same_skill_id_different_content",
+      "canonical_path": "/Users/jameschen/Workspace/hermes-agent/skills/apple/apple-notes/SKILL.md",
+      "variant_count": 2,
+      "paths": [
+        "/Users/jameschen/.agents/skills.archived-20260426-context-budget/apple-notes/SKILL.md",
+        "/Users/jameschen/Workspace/hermes-agent/skills/apple/apple-notes/SKILL.md"
+      ]
+    },
+    {
+      "skill_id": "apple-reminders",
+      "reason": "same_skill_id_different_content",
+      "canonical_path": "/Users/jameschen/Workspace/hermes-agent/skills/apple/apple-reminders/SKILL.md",
+      "variant_count": 2,
+      "paths": [
+        "/Users/jameschen/.agents/skills.archived-20260426-context-budget/apple-reminders/SKILL.md",
+        "/Users/jameschen/Workspace/hermes-agent/skills/apple/apple-reminders/SKILL.md"
+      ]
+    },
+    {
+      "skill_id": "audit",
+      "reason": "same_skill_id_different_content",
+      "canonical_path": "/Users/jameschen/.agents/skills.archived-20260426-context-budget/audit/SKILL.md",
+      "variant_count": 2,
+      "paths": [
+        "/Users/jameschen/.agents/skills.archived-20260426-context-budget/audit/SKILL.md",
+        "/Users/jameschen/.agents/skills.archived-20260426-context-budget/audit/audit/SKILL.md"
+      ]
+    },
+    {
+      "skill_id": "auto-skill",
+      "reason": "same_skill_id_different_content",
+      "canonical_path": "/Users/jameschen/.agents/skills.archived-20260426-context-budget/auto-skill/SKILL.md",
+      "variant_count": 2,
+      "paths": [
+        "/Users/jameschen/.agents/skills.archived-20260426-context-budget/auto-skill/SKILL.md",
+        "/Users/jameschen/.gemini/skills_OLD/auto-skill/SKILL.md"
+      ]
+    },
+    {
+      "skill_id": "critique",
+      "reason": "same_skill_id_different_content",
+      "canonical_path": "/Users/jameschen/.agents/skills.archived-20260426-context-budget/critique/SKILL.md",
+      "variant_count": 2,
+      "paths": [
+        "/Users/jameschen/.agents/skills.archived-20260426-context-budget/critique/SKILL.md",
+        "/Users/jameschen/.agents/skills.archived-20260426-context-budget/critique/critique/SKILL.md"
+      ]
+    },
+    {
+      "skill_id": "distill",
+      "reason": "same_skill_id_different_content",
+      "canonical_path": "/Users/jameschen/.agents/skills.archived-20260426-context-budget/distill/SKILL.md",
+      "variant_count": 2,
+      "paths": [
+        "/Users/jameschen/.agents/skills.archived-20260426-context-budget/distill/SKILL.md",
+        "/Users/jameschen/.agents/skills.archived-20260426-context-budget/distill/distill/SKILL.md"
+      ]
+    },
+    {
+      "skill_id": "extract",
+      "reason": "same_skill_id_different_content",
+      "canonical_path": "/Users/jameschen/.agents/skills.archived-20260426-context-budget/extract/SKILL.md",
+      "variant_count": 2,
+      "paths": [
+        "/Users/jameschen/.agents/skills.archived-20260426-context-budget/extract/SKILL.md",
+        "/Users/jameschen/.agents/skills.archived-20260426-context-budget/extract/extract/SKILL.md"
+      ]
+    },
+    {
+      "skill_id": "frontend-design",
+      "reason": "same_skill_id_different_content",
+      "canonical_path": "/Users/jameschen/.agents/skills.archived-20260426-context-budget/frontend-design/SKILL.md",
+      "variant_count": 2,
+      "paths": [
+        "/Users/jameschen/.agents/skills.archived-20260426-context-budget/frontend-design/SKILL.md",
+        "/Users/jameschen/.agents/skills.archived-20260426-context-budget/frontend-design/frontend-design/SKILL.md"
+      ]
+    },
+    {
+      "skill_id": "gstack",
+      "reason": "same_skill_id_different_content",
+      "canonical_path": "/Users/jameschen/.agents/skills.archived-20260426-context-budget/gstack/.agents/skills/gstack/SKILL.md",
+      "variant_count": 2,
+      "paths": [
+        "/Users/jameschen/.agents/skills.archived-20260426-context-budget/gstack/.agents/skills/gstack/SKILL.md",
+        "/Users/jameschen/.agents/skills.archived-20260426-context-budget/gstack/SKILL.md"
+      ]
+    },
+    {
+      "skill_id": "gstack-upgrade",
+      "reason": "same_skill_id_different_content",
+      "canonical_path": "/Users/jameschen/.agents/skills.archived-20260426-context-budget/gstack/.agents/skills/gstack-upgrade/SKILL.md",
+      "variant_count": 2,
+      "paths": [
+        "/Users/jameschen/.agents/skills.archived-20260426-context-budget/gstack/.agents/skills/gstack-upgrade/SKILL.md",
+        "/Users/jameschen/.agents/skills.archived-20260426-context-budget/gstack/gstack-upgrade/SKILL.md"
+      ]
+    },
+    {
+      "skill_id": "harden",
+      "reason": "same_skill_id_different_content",
+      "canonical_path": "/Users/jameschen/.agents/skills.archived-20260426-context-budget/harden/SKILL.md",
+      "variant_count": 2,
+      "paths": [
+        "/Users/jameschen/.agents/skills.archived-20260426-context-budget/harden/SKILL.md",
+        "/Users/jameschen/.agents/skills.archived-20260426-context-budget/harden/harden/SKILL.md"
+      ]
+    },
+    {
+      "skill_id": "nexus-yang-ding-yi-eternal-v5",
+      "reason": "same_skill_id_different_content",
+      "canonical_path": "/Users/jameschen/Workspace/nexus/.agents/skills/yang-ding-yi-nexus-eternal/SKILL.md",
+      "variant_count": 2,
+      "paths": [
+        "/Users/jameschen/.agents/skills.archived-20260426-context-budget/yang-ding-yi-nexus-eternal/SKILL.md",
+        "/Users/jameschen/Workspace/nexus/.agents/skills/yang-ding-yi-nexus-eternal/SKILL.md"
+      ]
+    },
+    {
+      "skill_id": "obsidian",
+      "reason": "same_skill_id_different_content",
+      "canonical_path": "/Users/jameschen/Workspace/hermes-agent/skills/note-taking/obsidian/SKILL.md",
+      "variant_count": 3,
+      "paths": [
+        "/Users/jameschen/.agents/skills.archived-20260426-context-budget/obsidian/SKILL.md",
+        "/Users/jameschen/.gemini/skills_OLD/obsidian/SKILL.md",
+        "/Users/jameschen/Workspace/hermes-agent/skills/note-taking/obsidian/SKILL.md"
+      ]
+    },
+    {
+      "skill_id": "requesting-code-review",
+      "reason": "same_skill_id_different_content",
+      "canonical_path": "/Users/jameschen/Workspace/hermes-agent/skills/software-development/requesting-code-review/SKILL.md",
+      "variant_count": 2,
+      "paths": [
+        "/Users/jameschen/.agents/skills.archived-20260426-context-budget/requesting-code-review/SKILL.md",
+        "/Users/jameschen/Workspace/hermes-agent/skills/software-development/requesting-code-review/SKILL.md"
+      ]
+    },
+    {
+      "skill_id": "subagent-driven-development",
+      "reason": "same_skill_id_different_content",
+      "canonical_path": "/Users/jameschen/Workspace/hermes-agent/skills/software-development/subagent-driven-development/SKILL.md",
+      "variant_count": 2,
+      "paths": [
+        "/Users/jameschen/.agents/skills.archived-20260426-context-budget/subagent-driven-development/SKILL.md",
+        "/Users/jameschen/Workspace/hermes-agent/skills/software-development/subagent-driven-development/SKILL.md"
+      ]
+    },
+    {
+      "skill_id": "systematic-debugging",
+      "reason": "same_skill_id_different_content",
+      "canonical_path": "/Users/jameschen/Workspace/hermes-agent/skills/software-development/systematic-debugging/SKILL.md",
+      "variant_count": 2,
+      "paths": [
+        "/Users/jameschen/.agents/skills.archived-20260426-context-budget/systematic-debugging/SKILL.md",
+        "/Users/jameschen/Workspace/hermes-agent/skills/software-development/systematic-debugging/SKILL.md"
+      ]
+    },
+    {
+      "skill_id": "test-driven-development",
+      "reason": "same_skill_id_different_content",
+      "canonical_path": "/Users/jameschen/Workspace/hermes-agent/skills/software-development/test-driven-development/SKILL.md",
+      "variant_count": 3,
+      "paths": [
+        "/Users/jameschen/.agents/skills.archived-20260426-context-budget/test-driven-development/SKILL.md",
+        "/Users/jameschen/Workspace/hermes-agent/skills/software-development/test-driven-development/SKILL.md",
+        "/Users/jameschen/Workspace/skills_audit/skills/test-driven-development/SKILL.md"
+      ]
+    },
+    {
+      "skill_id": "writing-plans",
+      "reason": "same_skill_id_different_content",
+      "canonical_path": "/Users/jameschen/Workspace/hermes-agent/skills/software-development/writing-plans/SKILL.md",
+      "variant_count": 2,
+      "paths": [
+        "/Users/jameschen/.agents/skills.archived-20260426-context-budget/writing-plans/SKILL.md",
+        "/Users/jameschen/Workspace/hermes-agent/skills/software-development/writing-plans/SKILL.md"
+      ]
+    }
+  ],
+  "claim_boundary": [
+    "safe_delete_candidates are byte-identical lower-priority duplicates only.",
+    "same-id different-content records require review and must not be deleted automatically."
+  ]
+}

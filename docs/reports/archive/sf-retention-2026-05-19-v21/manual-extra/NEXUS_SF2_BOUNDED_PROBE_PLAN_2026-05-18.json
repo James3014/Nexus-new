@@ -1,0 +1,300 @@
+{
+  "schema": "nexus.sf2_bounded_probe_plan.v1",
+  "status": "PASS",
+  "summary": {
+    "capability_count": 33,
+    "ready_capability_count": 33,
+    "planned_row_count": 192,
+    "status_visible_asset_count": 17,
+    "asset_count": 17,
+    "bounded_probe_allowed": true,
+    "runtime_update_allowed": false,
+    "public_benchmark_allowed": false,
+    "blocker_count": 0
+  },
+  "blockers": [],
+  "capabilities": [
+    {
+      "capability_id": "direct_master_loop",
+      "status": "READY",
+      "row_count": 6,
+      "capability_only_count": 1,
+      "skill_arm_count": 4,
+      "negative_control_count": 1
+    },
+    {
+      "capability_id": "repair_loop",
+      "status": "READY",
+      "row_count": 6,
+      "capability_only_count": 1,
+      "skill_arm_count": 4,
+      "negative_control_count": 1
+    },
+    {
+      "capability_id": "hyper_sprint",
+      "status": "READY",
+      "row_count": 6,
+      "capability_only_count": 1,
+      "skill_arm_count": 4,
+      "negative_control_count": 1
+    },
+    {
+      "capability_id": "nightshift",
+      "status": "READY",
+      "row_count": 4,
+      "capability_only_count": 1,
+      "skill_arm_count": 2,
+      "negative_control_count": 1
+    },
+    {
+      "capability_id": "codeintel",
+      "status": "READY",
+      "row_count": 6,
+      "capability_only_count": 1,
+      "skill_arm_count": 4,
+      "negative_control_count": 1
+    },
+    {
+      "capability_id": "research",
+      "status": "READY",
+      "row_count": 6,
+      "capability_only_count": 1,
+      "skill_arm_count": 4,
+      "negative_control_count": 1
+    },
+    {
+      "capability_id": "research_control_plane",
+      "status": "READY",
+      "row_count": 6,
+      "capability_only_count": 1,
+      "skill_arm_count": 4,
+      "negative_control_count": 1
+    },
+    {
+      "capability_id": "xray",
+      "status": "READY",
+      "row_count": 6,
+      "capability_only_count": 1,
+      "skill_arm_count": 4,
+      "negative_control_count": 1
+    },
+    {
+      "capability_id": "learn_ask",
+      "status": "READY",
+      "row_count": 6,
+      "capability_only_count": 1,
+      "skill_arm_count": 4,
+      "negative_control_count": 1
+    },
+    {
+      "capability_id": "lancedb",
+      "status": "READY",
+      "row_count": 6,
+      "capability_only_count": 1,
+      "skill_arm_count": 4,
+      "negative_control_count": 1
+    },
+    {
+      "capability_id": "memory",
+      "status": "READY",
+      "row_count": 6,
+      "capability_only_count": 1,
+      "skill_arm_count": 4,
+      "negative_control_count": 1
+    },
+    {
+      "capability_id": "learning_closure",
+      "status": "READY",
+      "row_count": 5,
+      "capability_only_count": 1,
+      "skill_arm_count": 3,
+      "negative_control_count": 1
+    },
+    {
+      "capability_id": "autoreason",
+      "status": "READY",
+      "row_count": 6,
+      "capability_only_count": 1,
+      "skill_arm_count": 4,
+      "negative_control_count": 1
+    },
+    {
+      "capability_id": "ddtree",
+      "status": "READY",
+      "row_count": 3,
+      "capability_only_count": 1,
+      "skill_arm_count": 1,
+      "negative_control_count": 1
+    },
+    {
+      "capability_id": "belief",
+      "status": "READY",
+      "row_count": 6,
+      "capability_only_count": 1,
+      "skill_arm_count": 4,
+      "negative_control_count": 1
+    },
+    {
+      "capability_id": "autonomic_router",
+      "status": "READY",
+      "row_count": 6,
+      "capability_only_count": 1,
+      "skill_arm_count": 4,
+      "negative_control_count": 1
+    },
+    {
+      "capability_id": "forecast_pregate",
+      "status": "READY",
+      "row_count": 6,
+      "capability_only_count": 1,
+      "skill_arm_count": 4,
+      "negative_control_count": 1
+    },
+    {
+      "capability_id": "swarm_multi_agent",
+      "status": "READY",
+      "row_count": 6,
+      "capability_only_count": 1,
+      "skill_arm_count": 4,
+      "negative_control_count": 1
+    },
+    {
+      "capability_id": "drone",
+      "status": "READY",
+      "row_count": 6,
+      "capability_only_count": 1,
+      "skill_arm_count": 4,
+      "negative_control_count": 1
+    },
+    {
+      "capability_id": "file_lock_security_gate",
+      "status": "READY",
+      "row_count": 6,
+      "capability_only_count": 1,
+      "skill_arm_count": 4,
+      "negative_control_count": 1
+    },
+    {
+      "capability_id": "mempalace",
+      "status": "READY",
+      "row_count": 6,
+      "capability_only_count": 1,
+      "skill_arm_count": 4,
+      "negative_control_count": 1
+    },
+    {
+      "capability_id": "policy_capability_gate",
+      "status": "READY",
+      "row_count": 6,
+      "capability_only_count": 1,
+      "skill_arm_count": 4,
+      "negative_control_count": 1
+    },
+    {
+      "capability_id": "ultra_review",
+      "status": "READY",
+      "row_count": 6,
+      "capability_only_count": 1,
+      "skill_arm_count": 4,
+      "negative_control_count": 1
+    },
+    {
+      "capability_id": "artifact_gate",
+      "status": "READY",
+      "row_count": 6,
+      "capability_only_count": 1,
+      "skill_arm_count": 4,
+      "negative_control_count": 1
+    },
+    {
+      "capability_id": "claim_gate",
+      "status": "READY",
+      "row_count": 6,
+      "capability_only_count": 1,
+      "skill_arm_count": 4,
+      "negative_control_count": 1
+    },
+    {
+      "capability_id": "delivery_acceptance_gate",
+      "status": "READY",
+      "row_count": 6,
+      "capability_only_count": 1,
+      "skill_arm_count": 4,
+      "negative_control_count": 1
+    },
+    {
+      "capability_id": "sandbox_replay",
+      "status": "READY",
+      "row_count": 6,
+      "capability_only_count": 1,
+      "skill_arm_count": 4,
+      "negative_control_count": 1
+    },
+    {
+      "capability_id": "benchmark_meta_opt",
+      "status": "READY",
+      "row_count": 6,
+      "capability_only_count": 1,
+      "skill_arm_count": 4,
+      "negative_control_count": 1
+    },
+    {
+      "capability_id": "regression_guard",
+      "status": "READY",
+      "row_count": 6,
+      "capability_only_count": 1,
+      "skill_arm_count": 4,
+      "negative_control_count": 1
+    },
+    {
+      "capability_id": "registry_skills_sync",
+      "status": "READY",
+      "row_count": 6,
+      "capability_only_count": 1,
+      "skill_arm_count": 4,
+      "negative_control_count": 1
+    },
+    {
+      "capability_id": "metabolism_resume",
+      "status": "READY",
+      "row_count": 6,
+      "capability_only_count": 1,
+      "skill_arm_count": 4,
+      "negative_control_count": 1
+    },
+    {
+      "capability_id": "ui_validator",
+      "status": "READY",
+      "row_count": 6,
+      "capability_only_count": 1,
+      "skill_arm_count": 4,
+      "negative_control_count": 1
+    },
+    {
+      "capability_id": "external_productivity",
+      "status": "READY",
+      "row_count": 6,
+      "capability_only_count": 1,
+      "skill_arm_count": 4,
+      "negative_control_count": 1
+    }
+  ],
+  "next_task_cards": [
+    {
+      "id": "SF2-I2",
+      "title": "Execute Bounded Probe",
+      "status": "READY",
+      "exit": "Each route capability has capability-only, skill-arm, and negative-control evidence."
+    },
+    {
+      "id": "SF2-J",
+      "title": "Route-Skill Verdict Catalog",
+      "status": "READY_AFTER_SF2-I2",
+      "exit": "Capability-to-skill verdicts are generated without opening runtime/public benchmark lanes."
+    }
+  ],
+  "claim_boundary": [
+    "This is a bounded skill-fit probe plan, not a public benchmark plan.",
+    "Runtime promotion remains blocked until receipt-backed verdicts are reviewed."
+  ]
+}

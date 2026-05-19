@@ -1,0 +1,306 @@
+{
+  "schema": "nexus.sf_workspace_manual_extra_retention.v1",
+  "status": "PASS",
+  "summary": {
+    "moved_count": 70,
+    "blocked_count": 0,
+    "kept_count": 11,
+    "archive_root": "docs/reports/archive/sf-retention-2026-05-19-v21/manual-extra"
+  },
+  "kept_names": [
+    "NEXUS_SF_GITHUB_ROUND3_CANDIDATE_OVERLAY_V20_2026-05-19.json",
+    "NEXUS_SF_GITHUB_ROUND3_RUNTIME_REVIEWED_MATRIX_V21_2026-05-19.json",
+    "NEXUS_SF_GITHUB_ROUND3_RUNTIME_REVIEWED_SKILL_STATUS_V21_2026-05-19.json",
+    "NEXUS_SF_RUNTIME_POLICY_APPLY_GATE_V21_2026-05-19.json",
+    "NEXUS_SF_RUNTIME_REVIEWED_ROLLUP_V21_2026-05-19.json",
+    "NEXUS_SF_RUNTIME_SKILL_POLICY_OVERLAY_V21_2026-05-19.json",
+    "NEXUS_SF_SKILL_FINALIZATION_V21_2026-05-19.json",
+    "NEXUS_SF_SKILL_FINALIZATION_V21_2026-05-19.md",
+    "NEXUS_SF_WORKSPACE_CLEANUP_INDEX_2026-05-19.md",
+    "NEXUS_SF_WORKSPACE_RETENTION_APPLY_RESULT_V21_2026-05-19.json",
+    "NEXUS_SF_WORKSPACE_RETENTION_PLAN_V21_2026-05-19.json"
+  ],
+  "moved": [
+    {
+      "source": "docs/reports/NEXUS_SF2_ABLATION_MATRIX_PLAN_2026-05-18.json",
+      "destination": "docs/reports/archive/sf-retention-2026-05-19-v21/manual-extra/NEXUS_SF2_ABLATION_MATRIX_PLAN_2026-05-18.json"
+    },
+    {
+      "source": "docs/reports/NEXUS_SF2_BOUNDED_PROBE_CHUNK_PLAN_2026-05-18.json",
+      "destination": "docs/reports/archive/sf-retention-2026-05-19-v21/manual-extra/NEXUS_SF2_BOUNDED_PROBE_CHUNK_PLAN_2026-05-18.json"
+    },
+    {
+      "source": "docs/reports/NEXUS_SF2_BOUNDED_PROBE_EXECUTION_MANIFEST_2026-05-18.json",
+      "destination": "docs/reports/archive/sf-retention-2026-05-19-v21/manual-extra/NEXUS_SF2_BOUNDED_PROBE_EXECUTION_MANIFEST_2026-05-18.json"
+    },
+    {
+      "source": "docs/reports/NEXUS_SF2_BOUNDED_PROBE_PLAN_2026-05-18.json",
+      "destination": "docs/reports/archive/sf-retention-2026-05-19-v21/manual-extra/NEXUS_SF2_BOUNDED_PROBE_PLAN_2026-05-18.json"
+    },
+    {
+      "source": "docs/reports/NEXUS_SF2_BOUNDED_PROBE_PREFLIGHT_2026-05-18.json",
+      "destination": "docs/reports/archive/sf-retention-2026-05-19-v21/manual-extra/NEXUS_SF2_BOUNDED_PROBE_PREFLIGHT_2026-05-18.json"
+    },
+    {
+      "source": "docs/reports/NEXUS_SF2_BOUNDED_PROBE_TASK_MANIFEST_2026-05-18.json",
+      "destination": "docs/reports/archive/sf-retention-2026-05-19-v21/manual-extra/NEXUS_SF2_BOUNDED_PROBE_TASK_MANIFEST_2026-05-18.json"
+    },
+    {
+      "source": "docs/reports/NEXUS_SF2_CANDIDATE_ASSET_STATUS_2026-05-18.json",
+      "destination": "docs/reports/archive/sf-retention-2026-05-19-v21/manual-extra/NEXUS_SF2_CANDIDATE_ASSET_STATUS_2026-05-18.json"
+    },
+    {
+      "source": "docs/reports/NEXUS_SF2_CANDIDATE_MATERIALIZATION_BUNDLE_2026-05-18.json",
+      "destination": "docs/reports/archive/sf-retention-2026-05-19-v21/manual-extra/NEXUS_SF2_CANDIDATE_MATERIALIZATION_BUNDLE_2026-05-18.json"
+    },
+    {
+      "source": "docs/reports/NEXUS_SF2_CANDIDATE_QUALITY_SCREEN_2026-05-18.json",
+      "destination": "docs/reports/archive/sf-retention-2026-05-19-v21/manual-extra/NEXUS_SF2_CANDIDATE_QUALITY_SCREEN_2026-05-18.json"
+    },
+    {
+      "source": "docs/reports/NEXUS_SF2_CANDIDATE_SPEC_OVERLAY_2026-05-18.json",
+      "destination": "docs/reports/archive/sf-retention-2026-05-19-v21/manual-extra/NEXUS_SF2_CANDIDATE_SPEC_OVERLAY_2026-05-18.json"
+    },
+    {
+      "source": "docs/reports/NEXUS_SF2_CAPABILITY_CANDIDATE_SELECTION_2026-05-18.json",
+      "destination": "docs/reports/archive/sf-retention-2026-05-19-v21/manual-extra/NEXUS_SF2_CAPABILITY_CANDIDATE_SELECTION_2026-05-18.json"
+    },
+    {
+      "source": "docs/reports/NEXUS_SF2_CLOSURE_GATE_2026-05-18.json",
+      "destination": "docs/reports/archive/sf-retention-2026-05-19-v21/manual-extra/NEXUS_SF2_CLOSURE_GATE_2026-05-18.json"
+    },
+    {
+      "source": "docs/reports/NEXUS_SF2_COMPLETION_GATE_2026-05-18.json",
+      "destination": "docs/reports/archive/sf-retention-2026-05-19-v21/manual-extra/NEXUS_SF2_COMPLETION_GATE_2026-05-18.json"
+    },
+    {
+      "source": "docs/reports/NEXUS_SF2_FINAL_ROUTE_SKILL_VERDICT_CATALOG_2026-05-18.json",
+      "destination": "docs/reports/archive/sf-retention-2026-05-19-v21/manual-extra/NEXUS_SF2_FINAL_ROUTE_SKILL_VERDICT_CATALOG_2026-05-18.json"
+    },
+    {
+      "source": "docs/reports/NEXUS_SF2_LIVE_RECEIPT_VALIDATION_2026-05-18.json",
+      "destination": "docs/reports/archive/sf-retention-2026-05-19-v21/manual-extra/NEXUS_SF2_LIVE_RECEIPT_VALIDATION_2026-05-18.json"
+    },
+    {
+      "source": "docs/reports/NEXUS_SF2_MATERIALIZATION_BATCH_PLAN_2026-05-18.json",
+      "destination": "docs/reports/archive/sf-retention-2026-05-19-v21/manual-extra/NEXUS_SF2_MATERIALIZATION_BATCH_PLAN_2026-05-18.json"
+    },
+    {
+      "source": "docs/reports/NEXUS_SF2_METADATA_REPAIR_PLAN_2026-05-18.json",
+      "destination": "docs/reports/archive/sf-retention-2026-05-19-v21/manual-extra/NEXUS_SF2_METADATA_REPAIR_PLAN_2026-05-18.json"
+    },
+    {
+      "source": "docs/reports/NEXUS_SF2_PROMOTION_REVIEW_2026-05-18.json",
+      "destination": "docs/reports/archive/sf-retention-2026-05-19-v21/manual-extra/NEXUS_SF2_PROMOTION_REVIEW_2026-05-18.json"
+    },
+    {
+      "source": "docs/reports/NEXUS_SF2_ROUTE_CAPABILITY_TAXONOMY_2026-05-18.json",
+      "destination": "docs/reports/archive/sf-retention-2026-05-19-v21/manual-extra/NEXUS_SF2_ROUTE_CAPABILITY_TAXONOMY_2026-05-18.json"
+    },
+    {
+      "source": "docs/reports/NEXUS_SF2_ROUTE_SKILL_VERDICT_CATALOG_2026-05-18.json",
+      "destination": "docs/reports/archive/sf-retention-2026-05-19-v21/manual-extra/NEXUS_SF2_ROUTE_SKILL_VERDICT_CATALOG_2026-05-18.json"
+    },
+    {
+      "source": "docs/reports/NEXUS_SF2_SKILL_RECLASSIFICATION_2026-05-18.json",
+      "destination": "docs/reports/archive/sf-retention-2026-05-19-v21/manual-extra/NEXUS_SF2_SKILL_RECLASSIFICATION_2026-05-18.json"
+    },
+    {
+      "source": "docs/reports/NEXUS_SF2_SPEC_REPAIRED_ABLATION_MATRIX_PLAN_2026-05-18.json",
+      "destination": "docs/reports/archive/sf-retention-2026-05-19-v21/manual-extra/NEXUS_SF2_SPEC_REPAIRED_ABLATION_MATRIX_PLAN_2026-05-18.json"
+    },
+    {
+      "source": "docs/reports/NEXUS_SF2_SPEC_REPAIRED_CANDIDATE_POOL_2026-05-18.json",
+      "destination": "docs/reports/archive/sf-retention-2026-05-19-v21/manual-extra/NEXUS_SF2_SPEC_REPAIRED_CANDIDATE_POOL_2026-05-18.json"
+    },
+    {
+      "source": "docs/reports/NEXUS_SF2_SPEC_REPAIRED_QUALITY_SCREEN_2026-05-18.json",
+      "destination": "docs/reports/archive/sf-retention-2026-05-19-v21/manual-extra/NEXUS_SF2_SPEC_REPAIRED_QUALITY_SCREEN_2026-05-18.json"
+    },
+    {
+      "source": "docs/reports/NEXUS_SF2_STATIC_REPAIR_CHUNK_PLAN_2026-05-18.json",
+      "destination": "docs/reports/archive/sf-retention-2026-05-19-v21/manual-extra/NEXUS_SF2_STATIC_REPAIR_CHUNK_PLAN_2026-05-18.json"
+    },
+    {
+      "source": "docs/reports/NEXUS_SF2_STATIC_REPAIR_EXECUTION_MANIFEST_2026-05-18.json",
+      "destination": "docs/reports/archive/sf-retention-2026-05-19-v21/manual-extra/NEXUS_SF2_STATIC_REPAIR_EXECUTION_MANIFEST_2026-05-18.json"
+    },
+    {
+      "source": "docs/reports/NEXUS_SF2_STATIC_REPAIR_TASK_MANIFEST_2026-05-18.json",
+      "destination": "docs/reports/archive/sf-retention-2026-05-19-v21/manual-extra/NEXUS_SF2_STATIC_REPAIR_TASK_MANIFEST_2026-05-18.json"
+    },
+    {
+      "source": "docs/reports/NEXUS_SF2_STATIC_REPAIR_VERDICT_CATALOG_2026-05-18.json",
+      "destination": "docs/reports/archive/sf-retention-2026-05-19-v21/manual-extra/NEXUS_SF2_STATIC_REPAIR_VERDICT_CATALOG_2026-05-18.json"
+    },
+    {
+      "source": "docs/reports/NEXUS_SF3_BEST_CANDIDATE_SEARCH_2026-05-18.json",
+      "destination": "docs/reports/archive/sf-retention-2026-05-19-v21/manual-extra/NEXUS_SF3_BEST_CANDIDATE_SEARCH_2026-05-18.json"
+    },
+    {
+      "source": "docs/reports/NEXUS_SF3_CANDIDATE_METADATA_OVERLAY_2026-05-18.json",
+      "destination": "docs/reports/archive/sf-retention-2026-05-19-v21/manual-extra/NEXUS_SF3_CANDIDATE_METADATA_OVERLAY_2026-05-18.json"
+    },
+    {
+      "source": "docs/reports/NEXUS_SF3_CANDIDATE_ONLY_HARDENING_PLAN_2026-05-18.json",
+      "destination": "docs/reports/archive/sf-retention-2026-05-19-v21/manual-extra/NEXUS_SF3_CANDIDATE_ONLY_HARDENING_PLAN_2026-05-18.json"
+    },
+    {
+      "source": "docs/reports/NEXUS_SF3_CAPABILITY_OVERLAP_RESOLVER_2026-05-18.json",
+      "destination": "docs/reports/archive/sf-retention-2026-05-19-v21/manual-extra/NEXUS_SF3_CAPABILITY_OVERLAP_RESOLVER_2026-05-18.json"
+    },
+    {
+      "source": "docs/reports/NEXUS_SF3_EVIDENCE_BASED_APPROVAL_ARTIFACT_2026-05-18.json",
+      "destination": "docs/reports/archive/sf-retention-2026-05-19-v21/manual-extra/NEXUS_SF3_EVIDENCE_BASED_APPROVAL_ARTIFACT_2026-05-18.json"
+    },
+    {
+      "source": "docs/reports/NEXUS_SF3_LIVE_CAUSALITY_PROBE_2026-05-18.json",
+      "destination": "docs/reports/archive/sf-retention-2026-05-19-v21/manual-extra/NEXUS_SF3_LIVE_CAUSALITY_PROBE_2026-05-18.json"
+    },
+    {
+      "source": "docs/reports/NEXUS_SF3_MANUAL_APPROVAL_PACKET_2026-05-18.json",
+      "destination": "docs/reports/archive/sf-retention-2026-05-19-v21/manual-extra/NEXUS_SF3_MANUAL_APPROVAL_PACKET_2026-05-18.json"
+    },
+    {
+      "source": "docs/reports/NEXUS_SF3_MANUAL_APPROVAL_TEMPLATE_2026-05-18.json",
+      "destination": "docs/reports/archive/sf-retention-2026-05-19-v21/manual-extra/NEXUS_SF3_MANUAL_APPROVAL_TEMPLATE_2026-05-18.json"
+    },
+    {
+      "source": "docs/reports/NEXUS_SF3_MANUAL_APPROVAL_VALIDATION_2026-05-18.json",
+      "destination": "docs/reports/archive/sf-retention-2026-05-19-v21/manual-extra/NEXUS_SF3_MANUAL_APPROVAL_VALIDATION_2026-05-18.json"
+    },
+    {
+      "source": "docs/reports/NEXUS_SF3_MANUAL_RUNTIME_POLICY_REVIEW_2026-05-18.json",
+      "destination": "docs/reports/archive/sf-retention-2026-05-19-v21/manual-extra/NEXUS_SF3_MANUAL_RUNTIME_POLICY_REVIEW_2026-05-18.json"
+    },
+    {
+      "source": "docs/reports/NEXUS_SF3_METADATA_BIAS_RESCUE_2026-05-18.json",
+      "destination": "docs/reports/archive/sf-retention-2026-05-19-v21/manual-extra/NEXUS_SF3_METADATA_BIAS_RESCUE_2026-05-18.json"
+    },
+    {
+      "source": "docs/reports/NEXUS_SF3_POST_REVIEW_GATE_2026-05-18.json",
+      "destination": "docs/reports/archive/sf-retention-2026-05-19-v21/manual-extra/NEXUS_SF3_POST_REVIEW_GATE_2026-05-18.json"
+    },
+    {
+      "source": "docs/reports/NEXUS_SF3_RUNTIME_POLICY_APPLY_GATE_2026-05-18.json",
+      "destination": "docs/reports/archive/sf-retention-2026-05-19-v21/manual-extra/NEXUS_SF3_RUNTIME_POLICY_APPLY_GATE_2026-05-18.json"
+    },
+    {
+      "source": "docs/reports/NEXUS_SF3_RUNTIME_POLICY_APPROVAL_DRAFT_2026-05-18.json",
+      "destination": "docs/reports/archive/sf-retention-2026-05-19-v21/manual-extra/NEXUS_SF3_RUNTIME_POLICY_APPROVAL_DRAFT_2026-05-18.json"
+    },
+    {
+      "source": "docs/reports/NEXUS_SF3_RUNTIME_POLICY_PATCH_PLAN_2026-05-18.json",
+      "destination": "docs/reports/archive/sf-retention-2026-05-19-v21/manual-extra/NEXUS_SF3_RUNTIME_POLICY_PATCH_PLAN_2026-05-18.json"
+    },
+    {
+      "source": "docs/reports/NEXUS_SF3_RUNTIME_REVIEW_GATE_2026-05-18.json",
+      "destination": "docs/reports/archive/sf-retention-2026-05-19-v21/manual-extra/NEXUS_SF3_RUNTIME_REVIEW_GATE_2026-05-18.json"
+    },
+    {
+      "source": "docs/reports/NEXUS_SF3_SKILL_COMBO_PROBE_2026-05-18.json",
+      "destination": "docs/reports/archive/sf-retention-2026-05-19-v21/manual-extra/NEXUS_SF3_SKILL_COMBO_PROBE_2026-05-18.json"
+    },
+    {
+      "source": "docs/reports/NEXUS_SF_FINAL_CLOSURE_V16_2026-05-19.json",
+      "destination": "docs/reports/archive/sf-retention-2026-05-19-v21/manual-extra/NEXUS_SF_FINAL_CLOSURE_V16_2026-05-19.json"
+    },
+    {
+      "source": "docs/reports/NEXUS_SF_FINAL_CLOSURE_V16_2026-05-19.md",
+      "destination": "docs/reports/archive/sf-retention-2026-05-19-v21/manual-extra/NEXUS_SF_FINAL_CLOSURE_V16_2026-05-19.md"
+    },
+    {
+      "source": "docs/reports/NEXUS_SF_POST_APPLY_POLICY_SMOKE_V16_2026-05-19.json",
+      "destination": "docs/reports/archive/sf-retention-2026-05-19-v21/manual-extra/NEXUS_SF_POST_APPLY_POLICY_SMOKE_V16_2026-05-19.json"
+    },
+    {
+      "source": "docs/reports/NEXUS_SF_RUNTIME_POLICY_APPLY_GATE_V15_2026-05-19.json",
+      "destination": "docs/reports/archive/sf-retention-2026-05-19-v21/manual-extra/NEXUS_SF_RUNTIME_POLICY_APPLY_GATE_V15_2026-05-19.json"
+    },
+    {
+      "source": "docs/reports/NEXUS_SF_RUNTIME_POLICY_PATCH_PLAN_V15_2026-05-19.json",
+      "destination": "docs/reports/archive/sf-retention-2026-05-19-v21/manual-extra/NEXUS_SF_RUNTIME_POLICY_PATCH_PLAN_V15_2026-05-19.json"
+    },
+    {
+      "source": "docs/reports/NEXUS_SF_RUNTIME_PROMOTION_REVIEW_V15_2026-05-19.json",
+      "destination": "docs/reports/archive/sf-retention-2026-05-19-v21/manual-extra/NEXUS_SF_RUNTIME_PROMOTION_REVIEW_V15_2026-05-19.json"
+    },
+    {
+      "source": "docs/reports/NEXUS_SF_RUNTIME_RECEIPT_SMOKE_V16_2026-05-19.json",
+      "destination": "docs/reports/archive/sf-retention-2026-05-19-v21/manual-extra/NEXUS_SF_RUNTIME_RECEIPT_SMOKE_V16_2026-05-19.json"
+    },
+    {
+      "source": "docs/reports/NEXUS_SF_RUNTIME_RECEIPT_SMOKE_V16_2026-05-19_repair_loop_trace.jsonl",
+      "destination": "docs/reports/archive/sf-retention-2026-05-19-v21/manual-extra/NEXUS_SF_RUNTIME_RECEIPT_SMOKE_V16_2026-05-19_repair_loop_trace.jsonl"
+    },
+    {
+      "source": "docs/reports/NEXUS_SF_RUNTIME_SKILL_POLICY_OVERLAY_V15_2026-05-19.json",
+      "destination": "docs/reports/archive/sf-retention-2026-05-19-v21/manual-extra/NEXUS_SF_RUNTIME_SKILL_POLICY_OVERLAY_V15_2026-05-19.json"
+    },
+    {
+      "source": "docs/reports/NEXUS_SF_RUNTIME_SKILL_POLICY_OVERLAY_V16_2026-05-19.json",
+      "destination": "docs/reports/archive/sf-retention-2026-05-19-v21/manual-extra/NEXUS_SF_RUNTIME_SKILL_POLICY_OVERLAY_V16_2026-05-19.json"
+    },
+    {
+      "source": "docs/reports/NEXUS_SF_V15_HELD_CHALLENGER_EXECUTION_MATRIX_2026-05-19.json",
+      "destination": "docs/reports/archive/sf-retention-2026-05-19-v21/manual-extra/NEXUS_SF_V15_HELD_CHALLENGER_EXECUTION_MATRIX_2026-05-19.json"
+    },
+    {
+      "source": "docs/reports/NEXUS_SF_V15_HELD_CHALLENGER_ROLLUP_2026-05-19.json",
+      "destination": "docs/reports/archive/sf-retention-2026-05-19-v21/manual-extra/NEXUS_SF_V15_HELD_CHALLENGER_ROLLUP_2026-05-19.json"
+    },
+    {
+      "source": "docs/reports/NEXUS_SF_V15_HELD_CHALLENGER_ROLLUP_2026-05-19.md",
+      "destination": "docs/reports/archive/sf-retention-2026-05-19-v21/manual-extra/NEXUS_SF_V15_HELD_CHALLENGER_ROLLUP_2026-05-19.md"
+    },
+    {
+      "source": "docs/reports/NEXUS_SF_V15_HELD_CHALLENGER_SKILL_FIT_CATALOG_2026-05-19.json",
+      "destination": "docs/reports/archive/sf-retention-2026-05-19-v21/manual-extra/NEXUS_SF_V15_HELD_CHALLENGER_SKILL_FIT_CATALOG_2026-05-19.json"
+    },
+    {
+      "source": "docs/reports/NEXUS_SF_V15_HELD_CHALLENGER_SKILL_STATUS_2026-05-19.json",
+      "destination": "docs/reports/archive/sf-retention-2026-05-19-v21/manual-extra/NEXUS_SF_V15_HELD_CHALLENGER_SKILL_STATUS_2026-05-19.json"
+    },
+    {
+      "source": "docs/reports/NEXUS_SF_V15_HELD_CHALLENGER_TASK_MANIFEST_2026-05-19.json",
+      "destination": "docs/reports/archive/sf-retention-2026-05-19-v21/manual-extra/NEXUS_SF_V15_HELD_CHALLENGER_TASK_MANIFEST_2026-05-19.json"
+    },
+    {
+      "source": "docs/reports/NEXUS_SF_V16_RESIDUAL_SELECTION_EXECUTION_MATRIX_2026-05-19.json",
+      "destination": "docs/reports/archive/sf-retention-2026-05-19-v21/manual-extra/NEXUS_SF_V16_RESIDUAL_SELECTION_EXECUTION_MATRIX_2026-05-19.json"
+    },
+    {
+      "source": "docs/reports/NEXUS_SF_V16_RESIDUAL_SELECTION_ROLLUP_2026-05-19.json",
+      "destination": "docs/reports/archive/sf-retention-2026-05-19-v21/manual-extra/NEXUS_SF_V16_RESIDUAL_SELECTION_ROLLUP_2026-05-19.json"
+    },
+    {
+      "source": "docs/reports/NEXUS_SF_V16_RESIDUAL_SELECTION_ROLLUP_2026-05-19.md",
+      "destination": "docs/reports/archive/sf-retention-2026-05-19-v21/manual-extra/NEXUS_SF_V16_RESIDUAL_SELECTION_ROLLUP_2026-05-19.md"
+    },
+    {
+      "source": "docs/reports/NEXUS_SF_V16_RESIDUAL_SELECTION_SKILL_FIT_CATALOG_2026-05-19.json",
+      "destination": "docs/reports/archive/sf-retention-2026-05-19-v21/manual-extra/NEXUS_SF_V16_RESIDUAL_SELECTION_SKILL_FIT_CATALOG_2026-05-19.json"
+    },
+    {
+      "source": "docs/reports/NEXUS_SF_V16_RESIDUAL_SELECTION_SKILL_STATUS_2026-05-19.json",
+      "destination": "docs/reports/archive/sf-retention-2026-05-19-v21/manual-extra/NEXUS_SF_V16_RESIDUAL_SELECTION_SKILL_STATUS_2026-05-19.json"
+    },
+    {
+      "source": "docs/reports/NEXUS_SF_WORKSPACE_RETENTION_APPLY_RESULT_2026-05-19.json",
+      "destination": "docs/reports/archive/sf-retention-2026-05-19-v21/manual-extra/NEXUS_SF_WORKSPACE_RETENTION_APPLY_RESULT_2026-05-19.json"
+    },
+    {
+      "source": "docs/reports/NEXUS_SF_WORKSPACE_RETENTION_PLAN_2026-05-19.json",
+      "destination": "docs/reports/archive/sf-retention-2026-05-19-v21/manual-extra/NEXUS_SF_WORKSPACE_RETENTION_PLAN_2026-05-19.json"
+    },
+    {
+      "source": "docs/reports/sf2_bounded_probe_chunks_2026-05-18",
+      "destination": "docs/reports/archive/sf-retention-2026-05-19-v21/manual-extra/sf2_bounded_probe_chunks_2026-05-18"
+    },
+    {
+      "source": "docs/reports/sf2_static_repair_chunks_2026-05-18",
+      "destination": "docs/reports/archive/sf-retention-2026-05-19-v21/manual-extra/sf2_static_repair_chunks_2026-05-18"
+    }
+  ],
+  "blocked": []
+}

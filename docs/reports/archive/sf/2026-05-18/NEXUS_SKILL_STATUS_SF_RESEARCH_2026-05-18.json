@@ -1,0 +1,73 @@
+{
+  "schema": "nexus.skill_status.v1",
+  "status": "PASS",
+  "source": "sf_research_materialized_candidate_assets",
+  "runtime_update_allowed": false,
+  "summary": {
+    "skill_count": 3,
+    "runtime_eligible_count": 0,
+    "ablation_eligible_count": 3,
+    "candidate_only": true
+  },
+  "skills": [
+    {
+      "name": "research-citation-chain-verifier",
+      "dir_name": "research-citation-chain-verifier",
+      "path": ".agents/skills/research-citation-chain-verifier/SKILL.md",
+      "root": "nexus_repo",
+      "skill_status": "external_reference_candidate",
+      "test_level": "sf_ablation_candidate",
+      "action": "candidate_only_until_live_receipts",
+      "capability_mount": "reference:research_and_source_discipline",
+      "family": "research",
+      "source_status": "materialized_candidate_only",
+      "description": "Load when research output must trace claims to stable source references and verify citation chains before acceptance.",
+      "sha256": "79a09ab984bc3704e09966a47d8bd0dd415378bc90db9a9f215631fddb159b5d",
+      "reason_codes": [
+        "sf_materialized_source_discipline_candidate",
+        "runtime_update_allowed_false"
+      ]
+    },
+    {
+      "name": "research-source-conflict-resolver",
+      "dir_name": "research-source-conflict-resolver",
+      "path": ".agents/skills/research-source-conflict-resolver/SKILL.md",
+      "root": "nexus_repo",
+      "skill_status": "external_reference_candidate",
+      "test_level": "sf_ablation_candidate",
+      "action": "candidate_only_until_live_receipts",
+      "capability_mount": "reference:research_and_source_discipline",
+      "family": "research",
+      "source_status": "materialized_candidate_only",
+      "description": "Load when sources disagree and the answer must preserve conflict, confidence, and provenance instead of flattening uncertainty.",
+      "sha256": "2c611908a0bec75176c7a7890c91d8b97595d14c5de19cdeaa1740f351eff6c6",
+      "reason_codes": [
+        "sf_materialized_source_discipline_candidate",
+        "runtime_update_allowed_false"
+      ]
+    },
+    {
+      "name": "research-source-validation-auditor",
+      "dir_name": "research-source-validation-auditor",
+      "path": ".agents/skills/research-source-validation-auditor/SKILL.md",
+      "root": "nexus_repo",
+      "skill_status": "external_reference_candidate",
+      "test_level": "sf_ablation_candidate",
+      "action": "candidate_only_until_live_receipts",
+      "capability_mount": "reference:research_and_source_discipline",
+      "family": "research",
+      "source_status": "materialized_candidate_only",
+      "description": "Load when a research artifact needs an independent source-discipline audit before acceptance.",
+      "sha256": "7b6bd4aaec4b2c137d0bb572a9ac59f450c5f21872caff38c66d51501e142b0c",
+      "reason_codes": [
+        "sf_materialized_source_discipline_candidate",
+        "runtime_update_allowed_false"
+      ]
+    }
+  ],
+  "claim_boundary": [
+    "This status report is for SF ablation only.",
+    "All entries are reference-only for runtime policy and may be mounted only when allow_ablation is true.",
+    "Do not merge this report into the default runtime skill status without live receipts and promotion approval."
+  ]
+}

@@ -1,0 +1,36 @@
+{
+  "final_decisions": [
+    {
+      "capabilities": [
+        "codeintel",
+        "research_control_plane"
+      ],
+      "count": 2,
+      "decision": "APPROVE_OVERLAY_REPLACEMENTS"
+    },
+    {
+      "capabilities": [
+        "forecast_pregate",
+        "learning_closure"
+      ],
+      "count": 2,
+      "decision": "KEEP_CURRENT"
+    }
+  ],
+  "human_summary": [
+    "Round6 live completed 8/8 PASS with 0 RETURN.",
+    "Approved overlay replacements: 2; held current skills: 2.",
+    "Runtime default was not written; public benchmark remains blocked."
+  ],
+  "public_benchmark_allowed": false,
+  "runtime_default_written": false,
+  "runtime_overlay_finalized": true,
+  "runtime_update_allowed": true,
+  "schema": "nexus.sf_skill_finalization.v25",
+  "skill_pairing_finalized": true,
+  "source_ledger": "docs/reports/NEXUS_SF_GITHUB_ROUND6_REPLACEMENT_LEDGER_2026-05-19.json",
+  "source_overlay": "docs/reports/NEXUS_SF_RUNTIME_SKILL_POLICY_OVERLAY_V25_2026-05-19.json",
+  "source_rollup": "docs/reports/NEXUS_SF_GITHUB_ROUND6_LIVE_ROLLUP_2026-05-19.json",
+  "status": "PASS",
+  "version": "2026-05-19"
+}

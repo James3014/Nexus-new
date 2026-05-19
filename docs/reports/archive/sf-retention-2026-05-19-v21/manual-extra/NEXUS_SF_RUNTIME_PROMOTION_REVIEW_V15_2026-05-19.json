@@ -1,0 +1,89 @@
+{
+  "schema": "nexus.sf_runtime_promotion_review.v15",
+  "status": "PASS",
+  "runtime_update_allowed": true,
+  "public_benchmark_allowed": false,
+  "source_rollup": "/Users/jameschen/Workspace/nexus/docs/reports/NEXUS_SF_V15_HELD_CHALLENGER_ROLLUP_2026-05-19.json",
+  "summary": {
+    "reviewed_held_capabilities": 7,
+    "approve_runtime_apply_ready": 4,
+    "hold_or_block": 3
+  },
+  "approved": [
+    {
+      "capability_id": "autonomic_router",
+      "skill_id": "sf2-autonomic_router-route-fit-spec",
+      "promotion_reason": "current_best_effective_and_cost_dominates_no_skill",
+      "token_delta": -8572,
+      "wall_delta_sec": -54.6421,
+      "evidence_refs": [
+        "/private/tmp/nexus_sf_v15_held_live_20260519/autonomic_router_sf-v15-held-autonomic_router-001_current_best_sf2-autonomic_router-route-fit-spec/evidence_bundle.json"
+      ],
+      "receipt_refs": [
+        "/private/tmp/nexus_sf_v15_held_live_20260519/autonomic_router_sf-v15-held-autonomic_router-001_current_best_sf2-autonomic_router-route-fit-spec"
+      ]
+    },
+    {
+      "capability_id": "mempalace",
+      "skill_id": "sf2-mempalace-route-fit-spec",
+      "promotion_reason": "current_best_effective_and_cost_dominates_no_skill",
+      "token_delta": -3670,
+      "wall_delta_sec": -57.1491,
+      "evidence_refs": [
+        "/private/tmp/nexus_sf_v15_held_live_20260519/mempalace_sf-v15-held-mempalace-001_current_best_sf2-mempalace-route-fit-spec/evidence_bundle.json"
+      ],
+      "receipt_refs": [
+        "/private/tmp/nexus_sf_v15_held_live_20260519/mempalace_sf-v15-held-mempalace-001_current_best_sf2-mempalace-route-fit-spec"
+      ]
+    },
+    {
+      "capability_id": "registry_skills_sync",
+      "skill_id": "sf2-registry_skills_sync-route-fit-spec",
+      "promotion_reason": "current_best_effective_and_cost_dominates_no_skill",
+      "token_delta": -10393,
+      "wall_delta_sec": -75.0396,
+      "evidence_refs": [
+        "/private/tmp/nexus_sf_v15_held_live_20260519/registry_skills_sync_sf-v15-held-registry_skills_sync-001_current_best_sf2-registry_skills_sync-route-fit-spec/evidence_bundle.json"
+      ],
+      "receipt_refs": [
+        "/private/tmp/nexus_sf_v15_held_live_20260519/registry_skills_sync_sf-v15-held-registry_skills_sync-001_current_best_sf2-registry_skills_sync-route-fit-spec"
+      ]
+    },
+    {
+      "capability_id": "sandbox_replay",
+      "skill_id": "sf2-sandbox_replay-route-fit-spec",
+      "promotion_reason": "current_best_effective_and_cost_dominates_no_skill",
+      "token_delta": -7784,
+      "wall_delta_sec": -37.9476,
+      "evidence_refs": [
+        "/private/tmp/nexus_sf_v15_held_live_20260519/sandbox_replay_sf-v15-held-sandbox_replay-001_current_best_sf2-sandbox_replay-route-fit-spec/evidence_bundle.json"
+      ],
+      "receipt_refs": [
+        "/private/tmp/nexus_sf_v15_held_live_20260519/sandbox_replay_sf-v15-held-sandbox_replay-001_current_best_sf2-sandbox_replay-route-fit-spec"
+      ]
+    }
+  ],
+  "held": [
+    {
+      "capability_id": "benchmark_meta_opt",
+      "decision": "hold_tradeoff",
+      "reason": "effective_skill_has_token_or_wall_tradeoff",
+      "current_best": "nexus-benchmark-continuous-optimization",
+      "challenger": "nexus-benchmark-public-report"
+    },
+    {
+      "capability_id": "delivery_acceptance_gate",
+      "decision": "blocked_no_effective_skill",
+      "reason": "no_skill_arm_reached_effective_outcome_contribution",
+      "current_best": "acceptance-evidence-failclosed",
+      "challenger": "nexus-goal-closure-executor"
+    },
+    {
+      "capability_id": "policy_capability_gate",
+      "decision": "blocked_no_effective_skill",
+      "reason": "no_skill_arm_reached_effective_outcome_contribution",
+      "current_best": "acceptance-evidence-failclosed",
+      "challenger": "cso"
+    }
+  ]
+}

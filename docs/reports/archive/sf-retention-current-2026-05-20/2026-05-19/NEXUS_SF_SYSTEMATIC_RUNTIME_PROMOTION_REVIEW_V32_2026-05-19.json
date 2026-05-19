@@ -1,0 +1,227 @@
+{
+  "claim_boundary": [
+    "All V32 review items have live receipt-backed evidence and lower token/wall cost than current_best.",
+    "This review does not unlock public benchmark."
+  ],
+  "public_benchmark_allowed": false,
+  "runtime_review_items": [
+    {
+      "capability": "artifact_gate",
+      "disposition": "runtime_review_ready",
+      "evidence_refs": [
+        ".nexus/reports/sf_systematic_all_capability_live_v32_2026-05-19/artifact_gate_sf-systematic-batch-artifact_gate-001_challenger_sf-systematic-artifact_gate-differential-review-461fbd0c/evidence_bundle.json"
+      ],
+      "path": ".agents/skills/sf-systematic-challengers/sf-systematic-artifact_gate-differential-review-461fbd0c/SKILL.md",
+      "receipt_refs": [
+        ".nexus/reports/sf_systematic_all_capability_live_v32_2026-05-19/artifact_gate_sf-systematic-batch-artifact_gate-001_challenger_sf-systematic-artifact_gate-differential-review-461fbd0c"
+      ],
+      "runtime_eligible": true,
+      "runtime_review_ready": true,
+      "safety_status": "runtime_reviewed",
+      "skill_id": "sf-systematic-artifact_gate-differential-review-461fbd0c",
+      "source_root": ".agents/skills/sf-systematic-challengers",
+      "source_type": "repo_local_systematic_slice",
+      "token_delta": -2610,
+      "wall_delta_sec": -17.8189
+    },
+    {
+      "capability": "codeintel",
+      "disposition": "runtime_review_ready",
+      "evidence_refs": [
+        ".nexus/reports/sf_systematic_all_capability_live_v32_2026-05-19/codeintel_sf-systematic-batch-codeintel-001_challenger_sf-systematic-codeintel-first-principles-thinking-f95019ea/evidence_bundle.json"
+      ],
+      "path": ".agents/skills/sf-systematic-challengers/sf-systematic-codeintel-first-principles-thinking-f95019ea/SKILL.md",
+      "receipt_refs": [
+        ".nexus/reports/sf_systematic_all_capability_live_v32_2026-05-19/codeintel_sf-systematic-batch-codeintel-001_challenger_sf-systematic-codeintel-first-principles-thinking-f95019ea"
+      ],
+      "runtime_eligible": true,
+      "runtime_review_ready": true,
+      "safety_status": "runtime_reviewed",
+      "skill_id": "sf-systematic-codeintel-first-principles-thinking-f95019ea",
+      "source_root": ".agents/skills/sf-systematic-challengers",
+      "source_type": "repo_local_systematic_slice",
+      "token_delta": -3011,
+      "wall_delta_sec": -17.312
+    },
+    {
+      "capability": "direct_master_loop",
+      "disposition": "runtime_review_ready",
+      "evidence_refs": [
+        ".nexus/reports/sf_systematic_all_capability_live_v32_2026-05-19/direct_master_loop_sf-systematic-batch-direct_master_loop-001_challenger_sf-systematic-direct_master_loop-build-32802a87/evidence_bundle.json"
+      ],
+      "path": ".agents/skills/sf-systematic-challengers/sf-systematic-direct_master_loop-build-32802a87/SKILL.md",
+      "receipt_refs": [
+        ".nexus/reports/sf_systematic_all_capability_live_v32_2026-05-19/direct_master_loop_sf-systematic-batch-direct_master_loop-001_challenger_sf-systematic-direct_master_loop-build-32802a87"
+      ],
+      "runtime_eligible": true,
+      "runtime_review_ready": true,
+      "safety_status": "runtime_reviewed",
+      "skill_id": "sf-systematic-direct_master_loop-build-32802a87",
+      "source_root": ".agents/skills/sf-systematic-challengers",
+      "source_type": "repo_local_systematic_slice",
+      "token_delta": -713,
+      "wall_delta_sec": -27.9197
+    },
+    {
+      "capability": "drone",
+      "disposition": "runtime_review_ready",
+      "evidence_refs": [
+        ".nexus/reports/sf_systematic_all_capability_live_v32_2026-05-19/drone_sf-systematic-batch-drone-001_challenger_sf-systematic-drone-python-background-jobs-18326a62/evidence_bundle.json"
+      ],
+      "path": ".agents/skills/sf-systematic-challengers/sf-systematic-drone-python-background-jobs-18326a62/SKILL.md",
+      "receipt_refs": [
+        ".nexus/reports/sf_systematic_all_capability_live_v32_2026-05-19/drone_sf-systematic-batch-drone-001_challenger_sf-systematic-drone-python-background-jobs-18326a62"
+      ],
+      "runtime_eligible": true,
+      "runtime_review_ready": true,
+      "safety_status": "runtime_reviewed",
+      "skill_id": "sf-systematic-drone-python-background-jobs-18326a62",
+      "source_root": ".agents/skills/sf-systematic-challengers",
+      "source_type": "repo_local_systematic_slice",
+      "token_delta": -1794,
+      "wall_delta_sec": -8.4396
+    },
+    {
+      "capability": "external_productivity",
+      "disposition": "runtime_review_ready",
+      "evidence_refs": [
+        ".nexus/reports/sf_systematic_all_capability_live_v32_2026-05-19/external_productivity_sf-systematic-batch-external_productivity-001_challenger_sf-systematic-external_productivity-writer-77dc7840/evidence_bundle.json"
+      ],
+      "path": ".agents/skills/sf-systematic-challengers/sf-systematic-external_productivity-writer-77dc7840/SKILL.md",
+      "receipt_refs": [
+        ".nexus/reports/sf_systematic_all_capability_live_v32_2026-05-19/external_productivity_sf-systematic-batch-external_productivity-001_challenger_sf-systematic-external_productivity-writer-77dc7840"
+      ],
+      "runtime_eligible": true,
+      "runtime_review_ready": true,
+      "safety_status": "runtime_reviewed",
+      "skill_id": "sf-systematic-external_productivity-writer-77dc7840",
+      "source_root": ".agents/skills/sf-systematic-challengers",
+      "source_type": "repo_local_systematic_slice",
+      "token_delta": -803,
+      "wall_delta_sec": -14.2425
+    },
+    {
+      "capability": "governance_and_trust",
+      "disposition": "runtime_review_ready",
+      "evidence_refs": [
+        ".nexus/reports/sf_systematic_all_capability_live_v32_2026-05-19/governance_and_trust_sf-systematic-batch-governance_and_trust-001_challenger_sf-systematic-governance_and_trust-aegisops-ai-0aa841e2/evidence_bundle.json"
+      ],
+      "path": ".agents/skills/sf-systematic-challengers/sf-systematic-governance_and_trust-aegisops-ai-0aa841e2/SKILL.md",
+      "receipt_refs": [
+        ".nexus/reports/sf_systematic_all_capability_live_v32_2026-05-19/governance_and_trust_sf-systematic-batch-governance_and_trust-001_challenger_sf-systematic-governance_and_trust-aegisops-ai-0aa841e2"
+      ],
+      "runtime_eligible": true,
+      "runtime_review_ready": true,
+      "safety_status": "runtime_reviewed",
+      "skill_id": "sf-systematic-governance_and_trust-aegisops-ai-0aa841e2",
+      "source_root": ".agents/skills/sf-systematic-challengers",
+      "source_type": "repo_local_systematic_slice",
+      "token_delta": -2221,
+      "wall_delta_sec": -16.6412
+    },
+    {
+      "capability": "memory",
+      "disposition": "runtime_review_ready",
+      "evidence_refs": [
+        ".nexus/reports/sf_systematic_all_capability_live_v32_2026-05-19/memory_sf-systematic-batch-memory-001_challenger_sf-systematic-memory-project-skill-audit-cc8b7621/evidence_bundle.json"
+      ],
+      "path": ".agents/skills/sf-systematic-challengers/sf-systematic-memory-project-skill-audit-cc8b7621/SKILL.md",
+      "receipt_refs": [
+        ".nexus/reports/sf_systematic_all_capability_live_v32_2026-05-19/memory_sf-systematic-batch-memory-001_challenger_sf-systematic-memory-project-skill-audit-cc8b7621"
+      ],
+      "runtime_eligible": true,
+      "runtime_review_ready": true,
+      "safety_status": "runtime_reviewed",
+      "skill_id": "sf-systematic-memory-project-skill-audit-cc8b7621",
+      "source_root": ".agents/skills/sf-systematic-challengers",
+      "source_type": "repo_local_systematic_slice",
+      "token_delta": -2648,
+      "wall_delta_sec": -38.8384
+    },
+    {
+      "capability": "policy_capability_gate",
+      "disposition": "runtime_review_ready",
+      "evidence_refs": [
+        ".nexus/reports/sf_systematic_all_capability_live_v32_2026-05-19/policy_capability_gate_sf-systematic-batch-policy_capability_gate-001_challenger_sf-systematic-policy_capability_gate-aegisops-ai-0aa841e2/evidence_bundle.json"
+      ],
+      "path": ".agents/skills/sf-systematic-challengers/sf-systematic-policy_capability_gate-aegisops-ai-0aa841e2/SKILL.md",
+      "receipt_refs": [
+        ".nexus/reports/sf_systematic_all_capability_live_v32_2026-05-19/policy_capability_gate_sf-systematic-batch-policy_capability_gate-001_challenger_sf-systematic-policy_capability_gate-aegisops-ai-0aa841e2"
+      ],
+      "runtime_eligible": true,
+      "runtime_review_ready": true,
+      "safety_status": "runtime_reviewed",
+      "skill_id": "sf-systematic-policy_capability_gate-aegisops-ai-0aa841e2",
+      "source_root": ".agents/skills/sf-systematic-challengers",
+      "source_type": "repo_local_systematic_slice",
+      "token_delta": -1496,
+      "wall_delta_sec": -44.8808
+    },
+    {
+      "capability": "regression_guard",
+      "disposition": "runtime_review_ready",
+      "evidence_refs": [
+        ".nexus/reports/sf_systematic_all_capability_live_v32_2026-05-19/regression_guard_sf-systematic-batch-regression_guard-001_challenger_sf-systematic-regression_guard-odoo-automated-tests-dad98433/evidence_bundle.json"
+      ],
+      "path": ".agents/skills/sf-systematic-challengers/sf-systematic-regression_guard-odoo-automated-tests-dad98433/SKILL.md",
+      "receipt_refs": [
+        ".nexus/reports/sf_systematic_all_capability_live_v32_2026-05-19/regression_guard_sf-systematic-batch-regression_guard-001_challenger_sf-systematic-regression_guard-odoo-automated-tests-dad98433"
+      ],
+      "runtime_eligible": true,
+      "runtime_review_ready": true,
+      "safety_status": "runtime_reviewed",
+      "skill_id": "sf-systematic-regression_guard-odoo-automated-tests-dad98433",
+      "source_root": ".agents/skills/sf-systematic-challengers",
+      "source_type": "repo_local_systematic_slice",
+      "token_delta": -14018,
+      "wall_delta_sec": -61.7472
+    },
+    {
+      "capability": "repair_loop",
+      "disposition": "runtime_review_ready",
+      "evidence_refs": [
+        ".nexus/reports/sf_systematic_all_capability_live_v32_2026-05-19/repair_loop_sf-systematic-batch-repair_loop-001_challenger_sf-systematic-repair_loop-odoo-automated-tests-dad98433/evidence_bundle.json"
+      ],
+      "path": ".agents/skills/sf-systematic-challengers/sf-systematic-repair_loop-odoo-automated-tests-dad98433/SKILL.md",
+      "receipt_refs": [
+        ".nexus/reports/sf_systematic_all_capability_live_v32_2026-05-19/repair_loop_sf-systematic-batch-repair_loop-001_challenger_sf-systematic-repair_loop-odoo-automated-tests-dad98433"
+      ],
+      "runtime_eligible": true,
+      "runtime_review_ready": true,
+      "safety_status": "runtime_reviewed",
+      "skill_id": "sf-systematic-repair_loop-odoo-automated-tests-dad98433",
+      "source_root": ".agents/skills/sf-systematic-challengers",
+      "source_type": "repo_local_systematic_slice",
+      "token_delta": -786,
+      "wall_delta_sec": -3.4459
+    },
+    {
+      "capability": "research",
+      "disposition": "runtime_review_ready",
+      "evidence_refs": [
+        ".nexus/reports/sf_systematic_all_capability_live_v32_2026-05-19/research_sf-systematic-batch-research-001_challenger_sf-systematic-research-research-lookup-7e6f92a0/evidence_bundle.json"
+      ],
+      "path": ".agents/skills/sf-systematic-challengers/sf-systematic-research-research-lookup-7e6f92a0/SKILL.md",
+      "receipt_refs": [
+        ".nexus/reports/sf_systematic_all_capability_live_v32_2026-05-19/research_sf-systematic-batch-research-001_challenger_sf-systematic-research-research-lookup-7e6f92a0"
+      ],
+      "runtime_eligible": true,
+      "runtime_review_ready": true,
+      "safety_status": "runtime_reviewed",
+      "skill_id": "sf-systematic-research-research-lookup-7e6f92a0",
+      "source_root": ".agents/skills/sf-systematic-challengers",
+      "source_type": "repo_local_systematic_slice",
+      "token_delta": -2041,
+      "wall_delta_sec": -27.9008
+    }
+  ],
+  "runtime_update_allowed": false,
+  "schema": "nexus.sf_systematic_runtime_promotion_review.v32",
+  "sf_closed_loop_complete": true,
+  "status": "PASS",
+  "summary": {
+    "review_item_count": 11,
+    "runtime_review_ready_count": 11,
+    "undecided_count": 0
+  }
+}

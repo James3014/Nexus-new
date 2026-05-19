@@ -1,0 +1,21 @@
+{
+  "capability": "claim_gate",
+  "challenger_skill": "github-auto-skill-safe-learning",
+  "current_skill": "nexus-benchmark-continuous-optimization",
+  "decision": "do_not_replace_from_metadata_screen_without_clean_pair",
+  "hard_fail_reasons": [
+    "missing_required_capability_receipts",
+    "receipt_data_contract_violation",
+    "semantic_not_verified"
+  ],
+  "missing_expected_capability_receipts": [
+    "claim_gate"
+  ],
+  "next_action": "build a claim_gate-specific valid fixture before retesting this metadata signal",
+  "public_benchmark_allowed": false,
+  "reason": "current_best_fixture_returned_before_challenger_row",
+  "runtime_update_allowed": false,
+  "schema": "nexus.sf_github_challenger_claim_gate_hold_rca.v1",
+  "source_live_summary": ".nexus/reports/sf_github_challenger_claim_gate_flash_smoke_live_2026-05-19/live_summary.json",
+  "status": "HOLD"
+}

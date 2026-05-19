@@ -1,0 +1,135 @@
+{
+  "benchmark_id": "nexus-sf-github-round9-flash-smoke-v1",
+  "description": "Internal SF round9 Flash+Nexus generated skill challenger smoke. Not a public benchmark.",
+  "frozen": true,
+  "schema": "nexus.sf_github_round9_flash_smoke_tasks.v1",
+  "status": "PASS",
+  "summary": {
+    "capability_count": 4,
+    "public_benchmark_allowed": false,
+    "runtime_update_allowed": false,
+    "task_count": 4
+  },
+  "tasks": [
+    {
+      "allowed_files": [
+        "unused"
+      ],
+      "capability_activation_contract": "required",
+      "category": "ui_validator",
+      "difficulty": "medium",
+      "eligibility_class": "model_required",
+      "expected_capabilities": [
+        "ultra_review"
+      ],
+      "fixture_kind": "sf_github_round9_smoke",
+      "forbidden_files": [
+        ".nexus/",
+        "logs/",
+        "benchmarks/"
+      ],
+      "id": "sf-github-round9-smoke-ui_validator-001",
+      "mutation_required": false,
+      "public_claim_allowed_metrics": [],
+      "repo": "fixture://sf-flash-pair",
+      "repo_kind": "neutral_fixture",
+      "repo_ref": "v1",
+      "setup_command": "python -V",
+      "success_criteria": "github_round9_skill_fit_receipt_chain_complete",
+      "target_file": "unused",
+      "task_desc": "SF round9 generated-challenger smoke for ui_validator. Compare V27 current best skill against prompt-only GitHub-derived challenger with runtime receipt evidence.",
+      "test_file": "unused",
+      "verification_command": "python -V"
+    },
+    {
+      "allowed_files": [
+        "unused"
+      ],
+      "capability_activation_contract": "required",
+      "category": "research_control_plane",
+      "difficulty": "medium",
+      "eligibility_class": "model_required",
+      "expected_capabilities": [
+        "research"
+      ],
+      "fixture_kind": "sf_github_round9_smoke",
+      "forbidden_files": [
+        ".nexus/",
+        "logs/",
+        "benchmarks/"
+      ],
+      "id": "sf-github-round9-smoke-research_control_plane-001",
+      "mutation_required": false,
+      "public_claim_allowed_metrics": [],
+      "repo": "fixture://sf-flash-pair",
+      "repo_kind": "neutral_fixture",
+      "repo_ref": "v1",
+      "setup_command": "python -V",
+      "success_criteria": "github_round9_skill_fit_receipt_chain_complete",
+      "target_file": "unused",
+      "task_desc": "SF round9 generated-challenger smoke for research_control_plane. Compare V27 current best skill against prompt-only GitHub-derived challenger with runtime receipt evidence.",
+      "test_file": "unused",
+      "verification_command": "python -V"
+    },
+    {
+      "allowed_files": [
+        "unused"
+      ],
+      "capability_activation_contract": "required",
+      "category": "codeintel",
+      "difficulty": "medium",
+      "eligibility_class": "model_required",
+      "expected_capabilities": [
+        "codeintel"
+      ],
+      "fixture_kind": "sf_github_round9_smoke",
+      "forbidden_files": [
+        ".nexus/",
+        "logs/",
+        "benchmarks/"
+      ],
+      "id": "sf-github-round9-smoke-codeintel-001",
+      "mutation_required": false,
+      "public_claim_allowed_metrics": [],
+      "repo": "fixture://sf-flash-pair",
+      "repo_kind": "neutral_fixture",
+      "repo_ref": "v1",
+      "setup_command": "python -V",
+      "success_criteria": "github_round9_skill_fit_receipt_chain_complete",
+      "target_file": "unused",
+      "task_desc": "SF round9 generated-challenger smoke for codeintel. Compare V27 current best skill against prompt-only GitHub-derived challenger with runtime receipt evidence.",
+      "test_file": "unused",
+      "verification_command": "python -V"
+    },
+    {
+      "allowed_files": [
+        "unused"
+      ],
+      "capability_activation_contract": "required",
+      "category": "ultra_review",
+      "difficulty": "medium",
+      "eligibility_class": "model_required",
+      "expected_capabilities": [
+        "ultra_review"
+      ],
+      "fixture_kind": "sf_github_round9_smoke",
+      "forbidden_files": [
+        ".nexus/",
+        "logs/",
+        "benchmarks/"
+      ],
+      "id": "sf-github-round9-smoke-ultra_review-001",
+      "mutation_required": false,
+      "public_claim_allowed_metrics": [],
+      "repo": "fixture://sf-flash-pair",
+      "repo_kind": "neutral_fixture",
+      "repo_ref": "v1",
+      "setup_command": "python -V",
+      "success_criteria": "github_round9_skill_fit_receipt_chain_complete",
+      "target_file": "unused",
+      "task_desc": "SF round9 generated-challenger smoke for ultra_review. Compare V27 current best skill against prompt-only GitHub-derived challenger with runtime receipt evidence.",
+      "test_file": "unused",
+      "verification_command": "python -V"
+    }
+  ]
+}

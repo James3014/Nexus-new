@@ -1,0 +1,14 @@
+{
+  "generated_at": "2026-05-18T00:00:00+08:00",
+  "held_rca": "docs/reports/NEXUS_SF_HELD_RCA_2026-05-18.json",
+  "schema": "nexus.sf_v9_finalization_result.v1",
+  "status": "PASS",
+  "summary": {
+    "held_count": 23,
+    "public_benchmark_allowed": false,
+    "v10_queue_count": 7,
+    "v9_primary_count": 14
+  },
+  "v10_retest_queue": "docs/reports/NEXUS_SF_V10_RETEST_QUEUE_2026-05-18.json",
+  "v9_overlay": "docs/reports/NEXUS_SF_RUNTIME_SKILL_POLICY_OVERLAY_V9_2026-05-18.json"
+}

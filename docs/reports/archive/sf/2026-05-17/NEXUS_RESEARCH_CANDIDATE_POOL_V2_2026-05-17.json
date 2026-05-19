@@ -1,0 +1,170 @@
+{
+  "schema": "nexus.fair_skill_candidate_pool.v2.slice",
+  "status": "PASS",
+  "source_status_report_schema": "nexus.skill_status.v1",
+  "summary": {
+    "total_candidates": 5,
+    "selected_candidate_count": 4,
+    "negative_control_count": 1,
+    "capability": "research_and_source_discipline",
+    "source_root_counts": {
+      "agents": 4,
+      "hermes": 1
+    }
+  },
+  "claim_boundary": [
+    "This v2 pool is ablation-only and cannot update runtime policy.",
+    "Rejected v1 candidates are excluded until source or taskset changes."
+  ],
+  "candidates": [
+    {
+      "skill_id": "gbrain-concept-synthesis",
+      "source_root": "agents",
+      "source_type": "reference",
+      "path": "/Users/jameschen/.agents/skills/gbrain-concept-synthesis/SKILL.md",
+      "sha256": "be682f5b0fba791e3dbb9fe1164f8fb81b96dd70fb9a02053eceee2f5c2bb193",
+      "capability_candidates": [
+        "research_and_source_discipline"
+      ],
+      "load_when": "Deduplicate and synthesize raw concept stubs into a tiered intellectual map (T1 Canon to T4 Riff), tracing idea evolution across sources over time. Transforms thousands of raw concept pages into a curated intellectual fingerprint.",
+      "forbidden_when": [
+        "runtime_mount",
+        "agents_root_non_candidate_reference_family"
+      ],
+      "metadata_quality": "PASS",
+      "safety_status": "ablation_only",
+      "ablation_eligible": true,
+      "runtime_eligible": false,
+      "quarantine_reason": "",
+      "evidence_refs": [
+        "skill_status_report:nexus.skill_status.v1",
+        "skill_path:/Users/jameschen/.agents/skills/gbrain-concept-synthesis/SKILL.md",
+        "skill_sha256:be682f5b0fba791e3dbb9fe1164f8fb81b96dd70fb9a02053eceee2f5c2bb193"
+      ],
+      "shadow_policy": {
+        "duplicate_count": 1,
+        "shadowed": false,
+        "canonical_path": "/Users/jameschen/.agents/skills/gbrain-concept-synthesis/SKILL.md"
+      }
+    },
+    {
+      "skill_id": "gbrain-data-research",
+      "source_root": "agents",
+      "source_type": "reference",
+      "path": "/Users/jameschen/.agents/skills/gbrain-data-research/SKILL.md",
+      "sha256": "b93fa75105f612768b8b40646a5d2062fa4698a31c9436e83c55e02cd26702fd",
+      "capability_candidates": [
+        "research_and_source_discipline"
+      ],
+      "load_when": "| Structured data research: search sources, extract structured data, archive raw sources, maintain canonical tracker pages, deduplicate. Parameterized via YAML recipes for investor updates, donations, company updates, or any email-to-structured-data pipeline.",
+      "forbidden_when": [
+        "runtime_mount",
+        "agents_root_non_candidate_reference_family"
+      ],
+      "metadata_quality": "PASS",
+      "safety_status": "ablation_only",
+      "ablation_eligible": true,
+      "runtime_eligible": false,
+      "quarantine_reason": "",
+      "evidence_refs": [
+        "skill_status_report:nexus.skill_status.v1",
+        "skill_path:/Users/jameschen/.agents/skills/gbrain-data-research/SKILL.md",
+        "skill_sha256:b93fa75105f612768b8b40646a5d2062fa4698a31c9436e83c55e02cd26702fd"
+      ],
+      "shadow_policy": {
+        "duplicate_count": 1,
+        "shadowed": false,
+        "canonical_path": "/Users/jameschen/.agents/skills/gbrain-data-research/SKILL.md"
+      }
+    },
+    {
+      "skill_id": "gbrain-perplexity-research",
+      "source_root": "agents",
+      "source_type": "reference",
+      "path": "/Users/jameschen/.agents/skills/gbrain-perplexity-research/SKILL.md",
+      "sha256": "a74529e2713e81440d758e6ce26b98d86d1531a84714c7a5829bc60c79e5c8fc",
+      "capability_candidates": [
+        "research_and_source_discipline"
+      ],
+      "load_when": "Brain-augmented web research. Sends brain context about a topic to Perplexity, which searches the web with citations and returns what is NEW vs what the brain already knows. Use for entity enrichment, current-state checks, deal monitoring, and freshness deltas. NOT for simple URL fetches (use web_fetch) or brain-only queries (use gbrain query).",
+      "forbidden_when": [
+        "runtime_mount",
+        "agents_root_non_candidate_reference_family"
+      ],
+      "metadata_quality": "PASS",
+      "safety_status": "ablation_only",
+      "ablation_eligible": true,
+      "runtime_eligible": false,
+      "quarantine_reason": "",
+      "evidence_refs": [
+        "skill_status_report:nexus.skill_status.v1",
+        "skill_path:/Users/jameschen/.agents/skills/gbrain-perplexity-research/SKILL.md",
+        "skill_sha256:a74529e2713e81440d758e6ce26b98d86d1531a84714c7a5829bc60c79e5c8fc"
+      ],
+      "shadow_policy": {
+        "duplicate_count": 1,
+        "shadowed": false,
+        "canonical_path": "/Users/jameschen/.agents/skills/gbrain-perplexity-research/SKILL.md"
+      }
+    },
+    {
+      "skill_id": "research-paper-writing",
+      "source_root": "hermes",
+      "source_type": "reference",
+      "path": "/Users/jameschen/Workspace/hermes-agent/skills/research/research-paper-writing/SKILL.md",
+      "sha256": "5bc92cec8357a19d71b1c10c5590ab605e846e4ddd914512511f8281a6053186",
+      "capability_candidates": [
+        "research_and_source_discipline"
+      ],
+      "load_when": "Write ML papers for NeurIPS/ICML/ICLR: design→submit.",
+      "forbidden_when": [
+        "runtime_mount",
+        "structured_hermes_reference_catalog"
+      ],
+      "metadata_quality": "PASS",
+      "safety_status": "ablation_only",
+      "ablation_eligible": true,
+      "runtime_eligible": false,
+      "quarantine_reason": "",
+      "evidence_refs": [
+        "skill_status_report:nexus.skill_status.v1",
+        "skill_path:/Users/jameschen/Workspace/hermes-agent/skills/research/research-paper-writing/SKILL.md",
+        "skill_sha256:5bc92cec8357a19d71b1c10c5590ab605e846e4ddd914512511f8281a6053186"
+      ],
+      "shadow_policy": {
+        "duplicate_count": 1,
+        "shadowed": false,
+        "canonical_path": "/Users/jameschen/Workspace/hermes-agent/skills/research/research-paper-writing/SKILL.md"
+      }
+    },
+    {
+      "skill_id": "candidate-skill-from-gemini-session-215",
+      "source_root": "agents",
+      "source_type": "quarantine",
+      "path": "/Users/jameschen/.agents/skills/devops/candidate-skill-from-gemini-session-215/SKILL.md",
+      "sha256": "004bd76bacd6c5dc79588e6e544d37557af6c64b058b2ab050c13cdcb69a76a8",
+      "capability_candidates": [],
+      "load_when": "Use when handling workflow patterns similar to 'Candidate Skill from Gemini Session' auto-promoted from inbox candidate.",
+      "forbidden_when": [
+        "runtime_mount",
+        "ablation_arm",
+        "generated_or_candidate_inbox"
+      ],
+      "metadata_quality": "INCOMPLETE:capability_mount",
+      "safety_status": "quarantined",
+      "ablation_eligible": false,
+      "runtime_eligible": false,
+      "quarantine_reason": "status:candidate_quarantine",
+      "evidence_refs": [
+        "skill_status_report:nexus.skill_status.v1",
+        "skill_path:/Users/jameschen/.agents/skills/devops/candidate-skill-from-gemini-session-215/SKILL.md",
+        "skill_sha256:004bd76bacd6c5dc79588e6e544d37557af6c64b058b2ab050c13cdcb69a76a8"
+      ],
+      "shadow_policy": {
+        "duplicate_count": 1,
+        "shadowed": false,
+        "canonical_path": "/Users/jameschen/.agents/skills/devops/candidate-skill-from-gemini-session-215/SKILL.md"
+      }
+    }
+  ]
+}

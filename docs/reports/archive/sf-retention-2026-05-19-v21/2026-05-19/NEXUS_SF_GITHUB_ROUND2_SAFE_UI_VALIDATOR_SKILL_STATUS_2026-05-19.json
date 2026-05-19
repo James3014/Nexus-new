@@ -1,0 +1,37 @@
+{
+  "schema": "nexus.sf_github_round2_safe_ui_validator_skill_status.v1",
+  "skills": [
+    {
+      "action": "ablation_only_compare",
+      "capability_mount": "ultra_review",
+      "family": "ui_validator",
+      "name": "nexus-root-cause-probe",
+      "path": "/Users/jameschen/Workspace/nexus/.agents/skills/nexus-root-cause-probe/SKILL.md",
+      "reason_codes": [
+        "sf_github_round2_current_best"
+      ],
+      "root": "current_best",
+      "skill_status": "nexus_curated_candidate",
+      "test_level": "sf_github_round2_flash_smoke"
+    },
+    {
+      "action": "ablation_only_compare",
+      "capability_mount": "ultra_review",
+      "family": "ui_validator",
+      "name": "github2-agent-browser-dogfood-safe-ui-validator",
+      "path": "/Users/jameschen/Workspace/nexus/.agents/skills/github-round2-challengers/github2-agent-browser-dogfood-safe-ui-validator/SKILL.md",
+      "reason_codes": [
+        "sf_github_round2_safe_prompt_only_generated_challenger",
+        "source_runtime_tool_boundary_removed"
+      ],
+      "root": "github_challenger_safe_generated",
+      "skill_status": "external_reference_candidate_generated_safe",
+      "test_level": "sf_github_round2_safe_ui_validator_flash_smoke"
+    }
+  ],
+  "summary": {
+    "public_benchmark_allowed": false,
+    "runtime_update_allowed": false,
+    "skill_count": 2
+  }
+}

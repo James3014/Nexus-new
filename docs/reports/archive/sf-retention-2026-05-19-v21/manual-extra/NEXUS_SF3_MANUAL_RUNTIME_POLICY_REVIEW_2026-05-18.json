@@ -1,0 +1,1043 @@
+{
+  "schema": "nexus.sf3_manual_runtime_policy_review.v1",
+  "status": "PASS",
+  "summary": {
+    "review_item_count": 33,
+    "capability_count": 33,
+    "manual_review_required": true,
+    "runtime_review_ready": true,
+    "runtime_update_allowed": false,
+    "public_benchmark_allowed": false,
+    "blocker_count": 0
+  },
+  "blockers": [],
+  "review_items": [
+    {
+      "capability_id": "artifact_gate",
+      "skill_id": "nexus-goal-closure-executor",
+      "recommendation": "default_candidate",
+      "source_disposition": "runtime_review_required",
+      "manual_review_status": "REVIEW_REQUIRED",
+      "runtime_policy_action": "PROPOSE_ONLY",
+      "runtime_update_allowed": false,
+      "public_benchmark_allowed": false,
+      "required_review_fields": [
+        "load_when",
+        "do_not_load_when",
+        "expected_evidence",
+        "replacement_rule",
+        "cost_tier",
+        "negative_triggers"
+      ],
+      "evidence_refs": [
+        "sf3_live_causality_probe",
+        "sf3_skill_combo_probe",
+        "sf3_best_candidate_search"
+      ],
+      "score": 16,
+      "score_components": {
+        "route_fit": 3,
+        "metadata_completeness": 2,
+        "live_outcome": 5,
+        "combo_bonus": 2,
+        "overlap_penalty": -1
+      }
+    },
+    {
+      "capability_id": "autonomic_router",
+      "skill_id": "sf2-autonomic_router-route-fit-spec",
+      "recommendation": "alternate",
+      "source_disposition": "candidate_only_catalog_alternate",
+      "manual_review_status": "REVIEW_REQUIRED",
+      "runtime_policy_action": "PROPOSE_ONLY",
+      "runtime_update_allowed": false,
+      "public_benchmark_allowed": false,
+      "required_review_fields": [
+        "load_when",
+        "do_not_load_when",
+        "expected_evidence",
+        "replacement_rule",
+        "cost_tier",
+        "negative_triggers"
+      ],
+      "evidence_refs": [
+        "sf3_live_causality_probe",
+        "sf3_skill_combo_probe",
+        "sf3_best_candidate_search"
+      ],
+      "score": 10,
+      "score_components": {
+        "route_fit": 3,
+        "metadata_completeness": 2,
+        "live_outcome": 5,
+        "combo_bonus": 0,
+        "overlap_penalty": 0
+      }
+    },
+    {
+      "capability_id": "autoreason",
+      "skill_id": "nexus-benchmark-public-report",
+      "recommendation": "default_candidate",
+      "source_disposition": "runtime_review_required",
+      "manual_review_status": "REVIEW_REQUIRED",
+      "runtime_policy_action": "PROPOSE_ONLY",
+      "runtime_update_allowed": false,
+      "public_benchmark_allowed": false,
+      "required_review_fields": [
+        "load_when",
+        "do_not_load_when",
+        "expected_evidence",
+        "replacement_rule",
+        "cost_tier",
+        "negative_triggers"
+      ],
+      "evidence_refs": [
+        "sf3_live_causality_probe",
+        "sf3_skill_combo_probe",
+        "sf3_best_candidate_search"
+      ],
+      "score": 14,
+      "score_components": {
+        "route_fit": 3,
+        "metadata_completeness": 2,
+        "live_outcome": 5,
+        "combo_bonus": 0,
+        "overlap_penalty": -1
+      }
+    },
+    {
+      "capability_id": "belief",
+      "skill_id": "sf2-autoreason-route-fit-spec",
+      "recommendation": "alternate",
+      "source_disposition": "candidate_only_catalog_alternate",
+      "manual_review_status": "REVIEW_REQUIRED",
+      "runtime_policy_action": "PROPOSE_ONLY",
+      "runtime_update_allowed": false,
+      "public_benchmark_allowed": false,
+      "required_review_fields": [
+        "load_when",
+        "do_not_load_when",
+        "expected_evidence",
+        "replacement_rule",
+        "cost_tier",
+        "negative_triggers"
+      ],
+      "evidence_refs": [
+        "sf3_live_causality_probe",
+        "sf3_skill_combo_probe",
+        "sf3_best_candidate_search"
+      ],
+      "score": 9,
+      "score_components": {
+        "route_fit": 3,
+        "metadata_completeness": 2,
+        "live_outcome": 5,
+        "combo_bonus": 0,
+        "overlap_penalty": -1
+      }
+    },
+    {
+      "capability_id": "benchmark_meta_opt",
+      "skill_id": "nexus-benchmark-continuous-optimization",
+      "recommendation": "default_candidate",
+      "source_disposition": "runtime_review_required",
+      "manual_review_status": "REVIEW_REQUIRED",
+      "runtime_policy_action": "PROPOSE_ONLY",
+      "runtime_update_allowed": false,
+      "public_benchmark_allowed": false,
+      "required_review_fields": [
+        "load_when",
+        "do_not_load_when",
+        "expected_evidence",
+        "replacement_rule",
+        "cost_tier",
+        "negative_triggers"
+      ],
+      "evidence_refs": [
+        "sf3_live_causality_probe",
+        "sf3_skill_combo_probe",
+        "sf3_best_candidate_search"
+      ],
+      "score": 14,
+      "score_components": {
+        "route_fit": 3,
+        "metadata_completeness": 2,
+        "live_outcome": 5,
+        "combo_bonus": 0,
+        "overlap_penalty": -1
+      }
+    },
+    {
+      "capability_id": "claim_gate",
+      "skill_id": "diagnose",
+      "recommendation": "default_candidate",
+      "source_disposition": "runtime_review_required",
+      "manual_review_status": "REVIEW_REQUIRED",
+      "runtime_policy_action": "PROPOSE_ONLY",
+      "runtime_update_allowed": false,
+      "public_benchmark_allowed": false,
+      "required_review_fields": [
+        "load_when",
+        "do_not_load_when",
+        "expected_evidence",
+        "replacement_rule",
+        "cost_tier",
+        "negative_triggers"
+      ],
+      "evidence_refs": [
+        "sf3_live_causality_probe",
+        "sf3_skill_combo_probe",
+        "sf3_best_candidate_search"
+      ],
+      "score": 14,
+      "score_components": {
+        "route_fit": 3,
+        "metadata_completeness": 2,
+        "live_outcome": 5,
+        "combo_bonus": 0,
+        "overlap_penalty": -1
+      }
+    },
+    {
+      "capability_id": "codeintel",
+      "skill_id": "sf2-codeintel-route-fit-spec",
+      "recommendation": "alternate",
+      "source_disposition": "candidate_only_catalog_alternate",
+      "manual_review_status": "REVIEW_REQUIRED",
+      "runtime_policy_action": "PROPOSE_ONLY",
+      "runtime_update_allowed": false,
+      "public_benchmark_allowed": false,
+      "required_review_fields": [
+        "load_when",
+        "do_not_load_when",
+        "expected_evidence",
+        "replacement_rule",
+        "cost_tier",
+        "negative_triggers"
+      ],
+      "evidence_refs": [
+        "sf3_live_causality_probe",
+        "sf3_skill_combo_probe",
+        "sf3_best_candidate_search"
+      ],
+      "score": 12,
+      "score_components": {
+        "route_fit": 3,
+        "metadata_completeness": 2,
+        "live_outcome": 5,
+        "combo_bonus": 2,
+        "overlap_penalty": 0
+      }
+    },
+    {
+      "capability_id": "ddtree",
+      "skill_id": "sf2-ddtree-route-fit-spec",
+      "recommendation": "alternate",
+      "source_disposition": "candidate_only_catalog_alternate",
+      "manual_review_status": "REVIEW_REQUIRED",
+      "runtime_policy_action": "PROPOSE_ONLY",
+      "runtime_update_allowed": false,
+      "public_benchmark_allowed": false,
+      "required_review_fields": [
+        "load_when",
+        "do_not_load_when",
+        "expected_evidence",
+        "replacement_rule",
+        "cost_tier",
+        "negative_triggers"
+      ],
+      "evidence_refs": [
+        "sf3_live_causality_probe",
+        "sf3_skill_combo_probe",
+        "sf3_best_candidate_search"
+      ],
+      "score": 10,
+      "score_components": {
+        "route_fit": 3,
+        "metadata_completeness": 2,
+        "live_outcome": 5,
+        "combo_bonus": 0,
+        "overlap_penalty": 0
+      }
+    },
+    {
+      "capability_id": "delivery_acceptance_gate",
+      "skill_id": "nexus-benchmark-continuous-optimization",
+      "recommendation": "default_candidate",
+      "source_disposition": "runtime_review_required",
+      "manual_review_status": "REVIEW_REQUIRED",
+      "runtime_policy_action": "PROPOSE_ONLY",
+      "runtime_update_allowed": false,
+      "public_benchmark_allowed": false,
+      "required_review_fields": [
+        "load_when",
+        "do_not_load_when",
+        "expected_evidence",
+        "replacement_rule",
+        "cost_tier",
+        "negative_triggers"
+      ],
+      "evidence_refs": [
+        "sf3_live_causality_probe",
+        "sf3_skill_combo_probe",
+        "sf3_best_candidate_search"
+      ],
+      "score": 14,
+      "score_components": {
+        "route_fit": 3,
+        "metadata_completeness": 2,
+        "live_outcome": 5,
+        "combo_bonus": 0,
+        "overlap_penalty": -1
+      }
+    },
+    {
+      "capability_id": "direct_master_loop",
+      "skill_id": "nexus-goal-closure-executor",
+      "recommendation": "default_candidate",
+      "source_disposition": "runtime_review_required",
+      "manual_review_status": "REVIEW_REQUIRED",
+      "runtime_policy_action": "PROPOSE_ONLY",
+      "runtime_update_allowed": false,
+      "public_benchmark_allowed": false,
+      "required_review_fields": [
+        "load_when",
+        "do_not_load_when",
+        "expected_evidence",
+        "replacement_rule",
+        "cost_tier",
+        "negative_triggers"
+      ],
+      "evidence_refs": [
+        "sf3_live_causality_probe",
+        "sf3_skill_combo_probe",
+        "sf3_best_candidate_search"
+      ],
+      "score": 14,
+      "score_components": {
+        "route_fit": 3,
+        "metadata_completeness": 2,
+        "live_outcome": 5,
+        "combo_bonus": 0,
+        "overlap_penalty": -1
+      }
+    },
+    {
+      "capability_id": "drone",
+      "skill_id": "sf2-drone-route-fit-spec",
+      "recommendation": "alternate",
+      "source_disposition": "candidate_only_catalog_alternate",
+      "manual_review_status": "REVIEW_REQUIRED",
+      "runtime_policy_action": "PROPOSE_ONLY",
+      "runtime_update_allowed": false,
+      "public_benchmark_allowed": false,
+      "required_review_fields": [
+        "load_when",
+        "do_not_load_when",
+        "expected_evidence",
+        "replacement_rule",
+        "cost_tier",
+        "negative_triggers"
+      ],
+      "evidence_refs": [
+        "sf3_live_causality_probe",
+        "sf3_skill_combo_probe",
+        "sf3_best_candidate_search"
+      ],
+      "score": 12,
+      "score_components": {
+        "route_fit": 3,
+        "metadata_completeness": 2,
+        "live_outcome": 5,
+        "combo_bonus": 2,
+        "overlap_penalty": 0
+      }
+    },
+    {
+      "capability_id": "external_productivity",
+      "skill_id": "sf2-external_productivity-route-fit-spec",
+      "recommendation": "alternate",
+      "source_disposition": "candidate_only_catalog_alternate",
+      "manual_review_status": "REVIEW_REQUIRED",
+      "runtime_policy_action": "PROPOSE_ONLY",
+      "runtime_update_allowed": false,
+      "public_benchmark_allowed": false,
+      "required_review_fields": [
+        "load_when",
+        "do_not_load_when",
+        "expected_evidence",
+        "replacement_rule",
+        "cost_tier",
+        "negative_triggers"
+      ],
+      "evidence_refs": [
+        "sf3_live_causality_probe",
+        "sf3_skill_combo_probe",
+        "sf3_best_candidate_search"
+      ],
+      "score": 10,
+      "score_components": {
+        "route_fit": 3,
+        "metadata_completeness": 2,
+        "live_outcome": 5,
+        "combo_bonus": 0,
+        "overlap_penalty": 0
+      }
+    },
+    {
+      "capability_id": "file_lock_security_gate",
+      "skill_id": "sf2-file_lock_security_gate-route-fit-spec",
+      "recommendation": "alternate",
+      "source_disposition": "candidate_only_catalog_alternate",
+      "manual_review_status": "REVIEW_REQUIRED",
+      "runtime_policy_action": "PROPOSE_ONLY",
+      "runtime_update_allowed": false,
+      "public_benchmark_allowed": false,
+      "required_review_fields": [
+        "load_when",
+        "do_not_load_when",
+        "expected_evidence",
+        "replacement_rule",
+        "cost_tier",
+        "negative_triggers"
+      ],
+      "evidence_refs": [
+        "sf3_live_causality_probe",
+        "sf3_skill_combo_probe",
+        "sf3_best_candidate_search"
+      ],
+      "score": 11,
+      "score_components": {
+        "route_fit": 3,
+        "metadata_completeness": 2,
+        "live_outcome": 5,
+        "combo_bonus": 2,
+        "overlap_penalty": -1
+      }
+    },
+    {
+      "capability_id": "forecast_pregate",
+      "skill_id": "triage",
+      "recommendation": "default_candidate",
+      "source_disposition": "runtime_review_required",
+      "manual_review_status": "REVIEW_REQUIRED",
+      "runtime_policy_action": "PROPOSE_ONLY",
+      "runtime_update_allowed": false,
+      "public_benchmark_allowed": false,
+      "required_review_fields": [
+        "load_when",
+        "do_not_load_when",
+        "expected_evidence",
+        "replacement_rule",
+        "cost_tier",
+        "negative_triggers"
+      ],
+      "evidence_refs": [
+        "sf3_live_causality_probe",
+        "sf3_skill_combo_probe",
+        "sf3_best_candidate_search"
+      ],
+      "score": 14,
+      "score_components": {
+        "route_fit": 3,
+        "metadata_completeness": 2,
+        "live_outcome": 5,
+        "combo_bonus": 0,
+        "overlap_penalty": -1
+      }
+    },
+    {
+      "capability_id": "hyper_sprint",
+      "skill_id": "sf2-hyper_sprint-route-fit-spec",
+      "recommendation": "alternate",
+      "source_disposition": "candidate_only_catalog_alternate",
+      "manual_review_status": "REVIEW_REQUIRED",
+      "runtime_policy_action": "PROPOSE_ONLY",
+      "runtime_update_allowed": false,
+      "public_benchmark_allowed": false,
+      "required_review_fields": [
+        "load_when",
+        "do_not_load_when",
+        "expected_evidence",
+        "replacement_rule",
+        "cost_tier",
+        "negative_triggers"
+      ],
+      "evidence_refs": [
+        "sf3_live_causality_probe",
+        "sf3_skill_combo_probe",
+        "sf3_best_candidate_search"
+      ],
+      "score": 9,
+      "score_components": {
+        "route_fit": 3,
+        "metadata_completeness": 2,
+        "live_outcome": 5,
+        "combo_bonus": 0,
+        "overlap_penalty": -1
+      }
+    },
+    {
+      "capability_id": "lancedb",
+      "skill_id": "sf2-lancedb-route-fit-spec",
+      "recommendation": "alternate",
+      "source_disposition": "candidate_only_catalog_alternate",
+      "manual_review_status": "REVIEW_REQUIRED",
+      "runtime_policy_action": "PROPOSE_ONLY",
+      "runtime_update_allowed": false,
+      "public_benchmark_allowed": false,
+      "required_review_fields": [
+        "load_when",
+        "do_not_load_when",
+        "expected_evidence",
+        "replacement_rule",
+        "cost_tier",
+        "negative_triggers"
+      ],
+      "evidence_refs": [
+        "sf3_live_causality_probe",
+        "sf3_skill_combo_probe",
+        "sf3_best_candidate_search"
+      ],
+      "score": 11,
+      "score_components": {
+        "route_fit": 3,
+        "metadata_completeness": 2,
+        "live_outcome": 5,
+        "combo_bonus": 2,
+        "overlap_penalty": -1
+      }
+    },
+    {
+      "capability_id": "learn_ask",
+      "skill_id": "notebooklm-context-bridge",
+      "recommendation": "default_candidate",
+      "source_disposition": "runtime_review_required",
+      "manual_review_status": "REVIEW_REQUIRED",
+      "runtime_policy_action": "PROPOSE_ONLY",
+      "runtime_update_allowed": false,
+      "public_benchmark_allowed": false,
+      "required_review_fields": [
+        "load_when",
+        "do_not_load_when",
+        "expected_evidence",
+        "replacement_rule",
+        "cost_tier",
+        "negative_triggers"
+      ],
+      "evidence_refs": [
+        "sf3_live_causality_probe",
+        "sf3_skill_combo_probe",
+        "sf3_best_candidate_search"
+      ],
+      "score": 15,
+      "score_components": {
+        "route_fit": 3,
+        "metadata_completeness": 2,
+        "live_outcome": 5,
+        "combo_bonus": 0,
+        "overlap_penalty": 0
+      }
+    },
+    {
+      "capability_id": "learning_closure",
+      "skill_id": "sf2-learning_closure-route-fit-spec",
+      "recommendation": "alternate",
+      "source_disposition": "candidate_only_catalog_alternate",
+      "manual_review_status": "REVIEW_REQUIRED",
+      "runtime_policy_action": "PROPOSE_ONLY",
+      "runtime_update_allowed": false,
+      "public_benchmark_allowed": false,
+      "required_review_fields": [
+        "load_when",
+        "do_not_load_when",
+        "expected_evidence",
+        "replacement_rule",
+        "cost_tier",
+        "negative_triggers"
+      ],
+      "evidence_refs": [
+        "sf3_live_causality_probe",
+        "sf3_skill_combo_probe",
+        "sf3_best_candidate_search"
+      ],
+      "score": 9,
+      "score_components": {
+        "route_fit": 3,
+        "metadata_completeness": 2,
+        "live_outcome": 5,
+        "combo_bonus": 0,
+        "overlap_penalty": -1
+      }
+    },
+    {
+      "capability_id": "memory",
+      "skill_id": "sf2-memory-route-fit-spec",
+      "recommendation": "alternate",
+      "source_disposition": "candidate_only_catalog_alternate",
+      "manual_review_status": "REVIEW_REQUIRED",
+      "runtime_policy_action": "PROPOSE_ONLY",
+      "runtime_update_allowed": false,
+      "public_benchmark_allowed": false,
+      "required_review_fields": [
+        "load_when",
+        "do_not_load_when",
+        "expected_evidence",
+        "replacement_rule",
+        "cost_tier",
+        "negative_triggers"
+      ],
+      "evidence_refs": [
+        "sf3_live_causality_probe",
+        "sf3_skill_combo_probe",
+        "sf3_best_candidate_search"
+      ],
+      "score": 10,
+      "score_components": {
+        "route_fit": 3,
+        "metadata_completeness": 2,
+        "live_outcome": 5,
+        "combo_bonus": 0,
+        "overlap_penalty": 0
+      }
+    },
+    {
+      "capability_id": "mempalace",
+      "skill_id": "sf2-mempalace-route-fit-spec",
+      "recommendation": "alternate",
+      "source_disposition": "candidate_only_catalog_alternate",
+      "manual_review_status": "REVIEW_REQUIRED",
+      "runtime_policy_action": "PROPOSE_ONLY",
+      "runtime_update_allowed": false,
+      "public_benchmark_allowed": false,
+      "required_review_fields": [
+        "load_when",
+        "do_not_load_when",
+        "expected_evidence",
+        "replacement_rule",
+        "cost_tier",
+        "negative_triggers"
+      ],
+      "evidence_refs": [
+        "sf3_live_causality_probe",
+        "sf3_skill_combo_probe",
+        "sf3_best_candidate_search"
+      ],
+      "score": 11,
+      "score_components": {
+        "route_fit": 3,
+        "metadata_completeness": 2,
+        "live_outcome": 5,
+        "combo_bonus": 2,
+        "overlap_penalty": -1
+      }
+    },
+    {
+      "capability_id": "metabolism_resume",
+      "skill_id": "triage",
+      "recommendation": "default_candidate",
+      "source_disposition": "runtime_review_required",
+      "manual_review_status": "REVIEW_REQUIRED",
+      "runtime_policy_action": "PROPOSE_ONLY",
+      "runtime_update_allowed": false,
+      "public_benchmark_allowed": false,
+      "required_review_fields": [
+        "load_when",
+        "do_not_load_when",
+        "expected_evidence",
+        "replacement_rule",
+        "cost_tier",
+        "negative_triggers"
+      ],
+      "evidence_refs": [
+        "sf3_live_causality_probe",
+        "sf3_skill_combo_probe",
+        "sf3_best_candidate_search"
+      ],
+      "score": 14,
+      "score_components": {
+        "route_fit": 3,
+        "metadata_completeness": 2,
+        "live_outcome": 5,
+        "combo_bonus": 0,
+        "overlap_penalty": -1
+      }
+    },
+    {
+      "capability_id": "nightshift",
+      "skill_id": "sf2-learning_closure-route-fit-spec",
+      "recommendation": "alternate",
+      "source_disposition": "candidate_only_catalog_alternate",
+      "manual_review_status": "REVIEW_REQUIRED",
+      "runtime_policy_action": "PROPOSE_ONLY",
+      "runtime_update_allowed": false,
+      "public_benchmark_allowed": false,
+      "required_review_fields": [
+        "load_when",
+        "do_not_load_when",
+        "expected_evidence",
+        "replacement_rule",
+        "cost_tier",
+        "negative_triggers"
+      ],
+      "evidence_refs": [
+        "sf3_live_causality_probe",
+        "sf3_skill_combo_probe",
+        "sf3_best_candidate_search"
+      ],
+      "score": 9,
+      "score_components": {
+        "route_fit": 3,
+        "metadata_completeness": 2,
+        "live_outcome": 5,
+        "combo_bonus": 0,
+        "overlap_penalty": -1
+      }
+    },
+    {
+      "capability_id": "policy_capability_gate",
+      "skill_id": "diagnose",
+      "recommendation": "default_candidate",
+      "source_disposition": "runtime_review_required",
+      "manual_review_status": "REVIEW_REQUIRED",
+      "runtime_policy_action": "PROPOSE_ONLY",
+      "runtime_update_allowed": false,
+      "public_benchmark_allowed": false,
+      "required_review_fields": [
+        "load_when",
+        "do_not_load_when",
+        "expected_evidence",
+        "replacement_rule",
+        "cost_tier",
+        "negative_triggers"
+      ],
+      "evidence_refs": [
+        "sf3_live_causality_probe",
+        "sf3_skill_combo_probe",
+        "sf3_best_candidate_search"
+      ],
+      "score": 16,
+      "score_components": {
+        "route_fit": 3,
+        "metadata_completeness": 2,
+        "live_outcome": 5,
+        "combo_bonus": 2,
+        "overlap_penalty": -1
+      }
+    },
+    {
+      "capability_id": "registry_skills_sync",
+      "skill_id": "sf2-registry_skills_sync-route-fit-spec",
+      "recommendation": "alternate",
+      "source_disposition": "candidate_only_catalog_alternate",
+      "manual_review_status": "REVIEW_REQUIRED",
+      "runtime_policy_action": "PROPOSE_ONLY",
+      "runtime_update_allowed": false,
+      "public_benchmark_allowed": false,
+      "required_review_fields": [
+        "load_when",
+        "do_not_load_when",
+        "expected_evidence",
+        "replacement_rule",
+        "cost_tier",
+        "negative_triggers"
+      ],
+      "evidence_refs": [
+        "sf3_live_causality_probe",
+        "sf3_skill_combo_probe",
+        "sf3_best_candidate_search"
+      ],
+      "score": 10,
+      "score_components": {
+        "route_fit": 3,
+        "metadata_completeness": 2,
+        "live_outcome": 5,
+        "combo_bonus": 0,
+        "overlap_penalty": 0
+      }
+    },
+    {
+      "capability_id": "regression_guard",
+      "skill_id": "nexus-benchmark-continuous-optimization",
+      "recommendation": "default_candidate",
+      "source_disposition": "runtime_review_required",
+      "manual_review_status": "REVIEW_REQUIRED",
+      "runtime_policy_action": "PROPOSE_ONLY",
+      "runtime_update_allowed": false,
+      "public_benchmark_allowed": false,
+      "required_review_fields": [
+        "load_when",
+        "do_not_load_when",
+        "expected_evidence",
+        "replacement_rule",
+        "cost_tier",
+        "negative_triggers"
+      ],
+      "evidence_refs": [
+        "sf3_live_causality_probe",
+        "sf3_skill_combo_probe",
+        "sf3_best_candidate_search"
+      ],
+      "score": 14,
+      "score_components": {
+        "route_fit": 3,
+        "metadata_completeness": 2,
+        "live_outcome": 5,
+        "combo_bonus": 0,
+        "overlap_penalty": -1
+      }
+    },
+    {
+      "capability_id": "repair_loop",
+      "skill_id": "tdd",
+      "recommendation": "default_candidate",
+      "source_disposition": "runtime_review_required",
+      "manual_review_status": "REVIEW_REQUIRED",
+      "runtime_policy_action": "PROPOSE_ONLY",
+      "runtime_update_allowed": false,
+      "public_benchmark_allowed": false,
+      "required_review_fields": [
+        "load_when",
+        "do_not_load_when",
+        "expected_evidence",
+        "replacement_rule",
+        "cost_tier",
+        "negative_triggers"
+      ],
+      "evidence_refs": [
+        "sf3_live_causality_probe",
+        "sf3_skill_combo_probe",
+        "sf3_best_candidate_search"
+      ],
+      "score": 15,
+      "score_components": {
+        "route_fit": 3,
+        "metadata_completeness": 2,
+        "live_outcome": 5,
+        "combo_bonus": 0,
+        "overlap_penalty": 0
+      }
+    },
+    {
+      "capability_id": "research",
+      "skill_id": "sf2-research_control_plane-route-fit-spec",
+      "recommendation": "alternate",
+      "source_disposition": "candidate_only_catalog_alternate",
+      "manual_review_status": "REVIEW_REQUIRED",
+      "runtime_policy_action": "PROPOSE_ONLY",
+      "runtime_update_allowed": false,
+      "public_benchmark_allowed": false,
+      "required_review_fields": [
+        "load_when",
+        "do_not_load_when",
+        "expected_evidence",
+        "replacement_rule",
+        "cost_tier",
+        "negative_triggers"
+      ],
+      "evidence_refs": [
+        "sf3_live_causality_probe",
+        "sf3_skill_combo_probe",
+        "sf3_best_candidate_search"
+      ],
+      "score": 11,
+      "score_components": {
+        "route_fit": 3,
+        "metadata_completeness": 2,
+        "live_outcome": 5,
+        "combo_bonus": 2,
+        "overlap_penalty": -1
+      }
+    },
+    {
+      "capability_id": "research_control_plane",
+      "skill_id": "sf2-research_control_plane-route-fit-spec",
+      "recommendation": "alternate",
+      "source_disposition": "candidate_only_catalog_alternate",
+      "manual_review_status": "REVIEW_REQUIRED",
+      "runtime_policy_action": "PROPOSE_ONLY",
+      "runtime_update_allowed": false,
+      "public_benchmark_allowed": false,
+      "required_review_fields": [
+        "load_when",
+        "do_not_load_when",
+        "expected_evidence",
+        "replacement_rule",
+        "cost_tier",
+        "negative_triggers"
+      ],
+      "evidence_refs": [
+        "sf3_live_causality_probe",
+        "sf3_skill_combo_probe",
+        "sf3_best_candidate_search"
+      ],
+      "score": 9,
+      "score_components": {
+        "route_fit": 3,
+        "metadata_completeness": 2,
+        "live_outcome": 5,
+        "combo_bonus": 0,
+        "overlap_penalty": -1
+      }
+    },
+    {
+      "capability_id": "sandbox_replay",
+      "skill_id": "sf2-file_lock_security_gate-route-fit-spec",
+      "recommendation": "alternate",
+      "source_disposition": "candidate_only_catalog_alternate",
+      "manual_review_status": "REVIEW_REQUIRED",
+      "runtime_policy_action": "PROPOSE_ONLY",
+      "runtime_update_allowed": false,
+      "public_benchmark_allowed": false,
+      "required_review_fields": [
+        "load_when",
+        "do_not_load_when",
+        "expected_evidence",
+        "replacement_rule",
+        "cost_tier",
+        "negative_triggers"
+      ],
+      "evidence_refs": [
+        "sf3_live_causality_probe",
+        "sf3_skill_combo_probe",
+        "sf3_best_candidate_search"
+      ],
+      "score": 9,
+      "score_components": {
+        "route_fit": 3,
+        "metadata_completeness": 2,
+        "live_outcome": 5,
+        "combo_bonus": 0,
+        "overlap_penalty": -1
+      }
+    },
+    {
+      "capability_id": "swarm_multi_agent",
+      "skill_id": "sf2-swarm_multi_agent-route-fit-spec",
+      "recommendation": "alternate",
+      "source_disposition": "candidate_only_catalog_alternate",
+      "manual_review_status": "REVIEW_REQUIRED",
+      "runtime_policy_action": "PROPOSE_ONLY",
+      "runtime_update_allowed": false,
+      "public_benchmark_allowed": false,
+      "required_review_fields": [
+        "load_when",
+        "do_not_load_when",
+        "expected_evidence",
+        "replacement_rule",
+        "cost_tier",
+        "negative_triggers"
+      ],
+      "evidence_refs": [
+        "sf3_live_causality_probe",
+        "sf3_skill_combo_probe",
+        "sf3_best_candidate_search"
+      ],
+      "score": 12,
+      "score_components": {
+        "route_fit": 3,
+        "metadata_completeness": 2,
+        "live_outcome": 5,
+        "combo_bonus": 2,
+        "overlap_penalty": 0
+      }
+    },
+    {
+      "capability_id": "ui_validator",
+      "skill_id": "sf2-ui_validator-route-fit-spec",
+      "recommendation": "alternate",
+      "source_disposition": "candidate_only_catalog_alternate",
+      "manual_review_status": "REVIEW_REQUIRED",
+      "runtime_policy_action": "PROPOSE_ONLY",
+      "runtime_update_allowed": false,
+      "public_benchmark_allowed": false,
+      "required_review_fields": [
+        "load_when",
+        "do_not_load_when",
+        "expected_evidence",
+        "replacement_rule",
+        "cost_tier",
+        "negative_triggers"
+      ],
+      "evidence_refs": [
+        "sf3_live_causality_probe",
+        "sf3_skill_combo_probe",
+        "sf3_best_candidate_search"
+      ],
+      "score": 10,
+      "score_components": {
+        "route_fit": 3,
+        "metadata_completeness": 2,
+        "live_outcome": 5,
+        "combo_bonus": 0,
+        "overlap_penalty": 0
+      }
+    },
+    {
+      "capability_id": "ultra_review",
+      "skill_id": "diagnose",
+      "recommendation": "default_candidate",
+      "source_disposition": "runtime_review_required",
+      "manual_review_status": "REVIEW_REQUIRED",
+      "runtime_policy_action": "PROPOSE_ONLY",
+      "runtime_update_allowed": false,
+      "public_benchmark_allowed": false,
+      "required_review_fields": [
+        "load_when",
+        "do_not_load_when",
+        "expected_evidence",
+        "replacement_rule",
+        "cost_tier",
+        "negative_triggers"
+      ],
+      "evidence_refs": [
+        "sf3_live_causality_probe",
+        "sf3_skill_combo_probe",
+        "sf3_best_candidate_search"
+      ],
+      "score": 14,
+      "score_components": {
+        "route_fit": 3,
+        "metadata_completeness": 2,
+        "live_outcome": 5,
+        "combo_bonus": 0,
+        "overlap_penalty": -1
+      }
+    },
+    {
+      "capability_id": "xray",
+      "skill_id": "sf2-xray-route-fit-spec",
+      "recommendation": "alternate",
+      "source_disposition": "candidate_only_catalog_alternate",
+      "manual_review_status": "REVIEW_REQUIRED",
+      "runtime_policy_action": "PROPOSE_ONLY",
+      "runtime_update_allowed": false,
+      "public_benchmark_allowed": false,
+      "required_review_fields": [
+        "load_when",
+        "do_not_load_when",
+        "expected_evidence",
+        "replacement_rule",
+        "cost_tier",
+        "negative_triggers"
+      ],
+      "evidence_refs": [
+        "sf3_live_causality_probe",
+        "sf3_skill_combo_probe",
+        "sf3_best_candidate_search"
+      ],
+      "score": 10,
+      "score_components": {
+        "route_fit": 3,
+        "metadata_completeness": 2,
+        "live_outcome": 5,
+        "combo_bonus": 0,
+        "overlap_penalty": 0
+      }
+    }
+  ],
+  "claim_boundary": [
+    "This review prepares runtime policy proposals only.",
+    "No runtime default is updated without a separate manual approval artifact."
+  ]
+}

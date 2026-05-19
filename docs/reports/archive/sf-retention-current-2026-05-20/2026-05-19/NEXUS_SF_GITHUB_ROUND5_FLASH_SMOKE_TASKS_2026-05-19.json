@@ -1,0 +1,136 @@
+{
+  "benchmark_id": "nexus-sf-github-round5-flash-smoke-v1",
+  "description": "Internal SF round5 Flash+Nexus generated skill challenger smoke. Not a public benchmark.",
+  "frozen": true,
+  "schema": "nexus.sf_github_round5_flash_smoke_tasks.v1",
+  "status": "PASS",
+  "summary": {
+    "capability_count": 4,
+    "public_benchmark_allowed": false,
+    "runtime_update_allowed": false,
+    "task_count": 4
+  },
+  "tasks": [
+    {
+      "allowed_files": [
+        "unused"
+      ],
+      "capability_activation_contract": "required",
+      "category": "research_control_plane",
+      "difficulty": "medium",
+      "eligibility_class": "model_required",
+      "expected_capabilities": [
+        "research"
+      ],
+      "fixture_kind": "sf_github_round5_smoke",
+      "forbidden_files": [
+        ".nexus/",
+        "logs/",
+        "benchmarks/"
+      ],
+      "id": "sf-github-round5-smoke-research_control_plane-001",
+      "mutation_required": false,
+      "public_claim_allowed_metrics": [],
+      "repo": "fixture://sf-flash-pair",
+      "repo_kind": "neutral_fixture",
+      "repo_ref": "v1",
+      "setup_command": "python -V",
+      "success_criteria": "github_round5_skill_fit_receipt_chain_complete",
+      "target_file": "unused",
+      "task_desc": "SF round5 generated-challenger smoke for research_control_plane. Compare V23 current best skill against prompt-only GitHub-derived challenger with runtime receipt evidence.",
+      "test_file": "unused",
+      "verification_command": "python -V"
+    },
+    {
+      "allowed_files": [
+        "unused"
+      ],
+      "capability_activation_contract": "required",
+      "category": "registry_skills_sync",
+      "difficulty": "medium",
+      "eligibility_class": "model_required",
+      "expected_capabilities": [
+        "semantic_searcher"
+      ],
+      "fixture_kind": "sf_github_round5_smoke",
+      "forbidden_files": [
+        ".nexus/",
+        "logs/",
+        "benchmarks/"
+      ],
+      "id": "sf-github-round5-smoke-registry_skills_sync-001",
+      "mutation_required": false,
+      "public_claim_allowed_metrics": [],
+      "repo": "fixture://sf-flash-pair",
+      "repo_kind": "neutral_fixture",
+      "repo_ref": "v1",
+      "setup_command": "python -V",
+      "success_criteria": "github_round5_skill_fit_receipt_chain_complete",
+      "target_file": "unused",
+      "task_desc": "SF round5 generated-challenger smoke for registry_skills_sync. Compare V23 current best skill against prompt-only GitHub-derived challenger with runtime receipt evidence.",
+      "test_file": "unused",
+      "verification_command": "python -V"
+    },
+    {
+      "allowed_files": [
+        "unused"
+      ],
+      "capability_activation_contract": "required",
+      "category": "forecast_pregate",
+      "difficulty": "medium",
+      "eligibility_class": "model_required",
+      "expected_capabilities": [
+        "autoreason"
+      ],
+      "fixture_kind": "sf_github_round5_smoke",
+      "forbidden_files": [
+        ".nexus/",
+        "logs/",
+        "benchmarks/"
+      ],
+      "id": "sf-github-round5-smoke-forecast_pregate-001",
+      "mutation_required": false,
+      "public_claim_allowed_metrics": [],
+      "repo": "fixture://sf-flash-pair",
+      "repo_kind": "neutral_fixture",
+      "repo_ref": "v1",
+      "setup_command": "python -V",
+      "success_criteria": "github_round5_skill_fit_receipt_chain_complete",
+      "target_file": "unused",
+      "task_desc": "SF round5 generated-challenger smoke for forecast_pregate. Compare V23 current best skill against prompt-only GitHub-derived challenger with runtime receipt evidence.",
+      "test_file": "unused",
+      "verification_command": "python -V"
+    },
+    {
+      "allowed_files": [
+        "unused"
+      ],
+      "capability_activation_contract": "required",
+      "category": "external_productivity",
+      "difficulty": "medium",
+      "eligibility_class": "model_required",
+      "expected_capabilities": [
+        "research"
+      ],
+      "fixture_kind": "sf_github_round5_smoke",
+      "forbidden_files": [
+        ".nexus/",
+        "logs/",
+        "benchmarks/"
+      ],
+      "id": "sf-github-round5-smoke-external_productivity-001",
+      "mutation_required": false,
+      "public_claim_allowed_metrics": [],
+      "repo": "fixture://sf-flash-pair",
+      "repo_kind": "neutral_fixture",
+      "repo_ref": "v1",
+      "setup_command": "python -V",
+      "success_criteria": "github_round5_skill_fit_receipt_chain_complete",
+      "target_file": "unused",
+      "task_desc": "SF round5 generated-challenger smoke for external_productivity. Compare V23 current best skill against prompt-only GitHub-derived challenger with runtime receipt evidence.",
+      "test_file": "unused",
+      "verification_command": "python -V"
+    }
+  ],
+  "version": "2026-05-19"
+}

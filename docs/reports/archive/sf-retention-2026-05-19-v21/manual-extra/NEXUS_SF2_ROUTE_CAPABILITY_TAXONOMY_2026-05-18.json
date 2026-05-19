@@ -1,0 +1,738 @@
+{
+  "schema": "nexus.sf2_route_capability_taxonomy.v1",
+  "status": "PASS",
+  "summary": {
+    "capability_count": 33,
+    "group_counts": {
+      "collaboration": 3,
+      "delivery_validation": 4,
+      "governance_risk": 3,
+      "memory_learning": 2,
+      "primary_execution": 4,
+      "productization": 4,
+      "reasoning_acceleration": 5,
+      "scout_context": 6,
+      "self_evolution": 2
+    },
+    "pillar_counts": {
+      "artifact": 14,
+      "belief": 6,
+      "claim": 3,
+      "lancedb": 2,
+      "memory": 5,
+      "mempalace": 3
+    },
+    "phase_counts": {
+      "A": 16,
+      "C": 19,
+      "D": 13,
+      "P": 16,
+      "R": 18,
+      "S": 14,
+      "X": 13
+    }
+  },
+  "capabilities": [
+    {
+      "capability_id": "direct_master_loop",
+      "group": "primary_execution",
+      "pillar": "artifact",
+      "phases": [
+        "S",
+        "P",
+        "X",
+        "D",
+        "R",
+        "A",
+        "C"
+      ],
+      "role": "default execution loop and content/rewrite control",
+      "keywords": [
+        "direct",
+        "master loop",
+        "rewrite",
+        "content",
+        "execute",
+        "task"
+      ],
+      "legacy_hints": []
+    },
+    {
+      "capability_id": "repair_loop",
+      "group": "primary_execution",
+      "pillar": "artifact",
+      "phases": [
+        "D",
+        "R",
+        "A",
+        "C"
+      ],
+      "role": "coding, debugging, refactor, and repair execution",
+      "keywords": [
+        "repair",
+        "debug",
+        "tdd",
+        "test",
+        "refactor",
+        "code quality",
+        "fix",
+        "python",
+        "java"
+      ],
+      "legacy_hints": [
+        "repair_and_coding"
+      ]
+    },
+    {
+      "capability_id": "hyper_sprint",
+      "group": "primary_execution",
+      "pillar": "belief",
+      "phases": [
+        "P",
+        "X",
+        "D",
+        "R"
+      ],
+      "role": "fast multi-candidate local repair and sprint execution",
+      "keywords": [
+        "hyper",
+        "sprint",
+        "multi-candidate",
+        "quick fix",
+        "fast path"
+      ],
+      "legacy_hints": []
+    },
+    {
+      "capability_id": "nightshift",
+      "group": "primary_execution",
+      "pillar": "memory",
+      "phases": [
+        "D",
+        "R",
+        "A",
+        "C"
+      ],
+      "role": "long-running recovery after normal repair fails",
+      "keywords": [
+        "nightshift",
+        "night shift",
+        "longrun",
+        "long-running",
+        "recovery",
+        "emergency recovery",
+        "autonomous task",
+        "continuous optimization"
+      ],
+      "legacy_hints": []
+    },
+    {
+      "capability_id": "codeintel",
+      "group": "scout_context",
+      "pillar": "artifact",
+      "phases": [
+        "S",
+        "P",
+        "X"
+      ],
+      "role": "code graph, impact analysis, and repository context",
+      "keywords": [
+        "codeintel",
+        "code scan",
+        "impact",
+        "symbol",
+        "ast",
+        "repo graph",
+        "dependency graph",
+        "architecture",
+        "api",
+        "interface",
+        "schema-analysis",
+        "code simplification"
+      ],
+      "legacy_hints": []
+    },
+    {
+      "capability_id": "research",
+      "group": "scout_context",
+      "pillar": "lancedb",
+      "phases": [
+        "S",
+        "P",
+        "X",
+        "R"
+      ],
+      "role": "source discovery, citation, claim tracing, and research routes",
+      "keywords": [
+        "research",
+        "source",
+        "citation",
+        "arxiv",
+        "paper",
+        "browse",
+        "web",
+        "perplexity",
+        "search"
+      ],
+      "legacy_hints": [
+        "research_and_source_discipline"
+      ]
+    },
+    {
+      "capability_id": "research_control_plane",
+      "group": "scout_context",
+      "pillar": "claim",
+      "phases": [
+        "S",
+        "P",
+        "X",
+        "R",
+        "C"
+      ],
+      "role": "research planning, source conflict handling, and research gates",
+      "keywords": [
+        "source conflict",
+        "source validation",
+        "citation chain",
+        "claim verification",
+        "academic verify"
+      ],
+      "legacy_hints": [
+        "research_and_source_discipline"
+      ]
+    },
+    {
+      "capability_id": "xray",
+      "group": "scout_context",
+      "pillar": "artifact",
+      "phases": [
+        "S",
+        "X",
+        "R"
+      ],
+      "role": "deep inspection and hidden-state diagnostics",
+      "keywords": [
+        "xray",
+        "inspect",
+        "diagnose",
+        "root cause",
+        "probe",
+        "investigate"
+      ],
+      "legacy_hints": []
+    },
+    {
+      "capability_id": "learn_ask",
+      "group": "scout_context",
+      "pillar": "memory",
+      "phases": [
+        "S",
+        "P",
+        "R",
+        "C"
+      ],
+      "role": "learn, ask, ingest, and report workflows",
+      "keywords": [
+        "learn",
+        "ingest",
+        "ask",
+        "report",
+        "knowledge",
+        "notebook"
+      ],
+      "legacy_hints": [
+        "notebook_and_knowledge_injection"
+      ]
+    },
+    {
+      "capability_id": "lancedb",
+      "group": "scout_context",
+      "pillar": "lancedb",
+      "phases": [
+        "S",
+        "X",
+        "R"
+      ],
+      "role": "vector search, semantic retrieval, and findings lookup",
+      "keywords": [
+        "lancedb",
+        "vector",
+        "embedding",
+        "semantic",
+        "rag",
+        "retrieval"
+      ],
+      "legacy_hints": []
+    },
+    {
+      "capability_id": "memory",
+      "group": "memory_learning",
+      "pillar": "memory",
+      "phases": [
+        "S",
+        "P",
+        "R",
+        "C"
+      ],
+      "role": "long-term memory and durable experience reuse",
+      "keywords": [
+        "memory",
+        "findings",
+        "remember",
+        "recall",
+        "experience",
+        "vault"
+      ],
+      "legacy_hints": []
+    },
+    {
+      "capability_id": "learning_closure",
+      "group": "memory_learning",
+      "pillar": "memory",
+      "phases": [
+        "R",
+        "A",
+        "C"
+      ],
+      "role": "lesson writeback, closure matrices, and learning KPI/SLO",
+      "keywords": [
+        "learning closure",
+        "lesson",
+        "writeback",
+        "slo",
+        "kpi",
+        "closure matrix",
+        "goal closure",
+        "closure executor",
+        "continuous optimization",
+        "autotune"
+      ],
+      "legacy_hints": []
+    },
+    {
+      "capability_id": "autoreason",
+      "group": "reasoning_acceleration",
+      "pillar": "belief",
+      "phases": [
+        "P",
+        "X",
+        "D",
+        "R"
+      ],
+      "role": "candidate evaluation, semantic confidence, and reasoned selection",
+      "keywords": [
+        "autoreason",
+        "reason",
+        "judge",
+        "confidence",
+        "semantic"
+      ],
+      "legacy_hints": []
+    },
+    {
+      "capability_id": "ddtree",
+      "group": "reasoning_acceleration",
+      "pillar": "belief",
+      "phases": [
+        "P",
+        "X",
+        "D"
+      ],
+      "role": "candidate pruning and decision-tree acceleration",
+      "keywords": [
+        "ddtree",
+        "decision tree",
+        "prune",
+        "candidate selection"
+      ],
+      "legacy_hints": []
+    },
+    {
+      "capability_id": "belief",
+      "group": "reasoning_acceleration",
+      "pillar": "belief",
+      "phases": [
+        "P",
+        "X",
+        "D",
+        "R"
+      ],
+      "role": "belief state, subjective confidence, and route priors",
+      "keywords": [
+        "belief",
+        "confidence",
+        "prior",
+        "budget",
+        "doubt",
+        "careful",
+        "strategy",
+        "strategic"
+      ],
+      "legacy_hints": []
+    },
+    {
+      "capability_id": "autonomic_router",
+      "group": "reasoning_acceleration",
+      "pillar": "belief",
+      "phases": [
+        "S",
+        "P",
+        "X"
+      ],
+      "role": "autonomic route selection and route evolution",
+      "keywords": [
+        "autonomic",
+        "router",
+        "routing",
+        "route"
+      ],
+      "legacy_hints": []
+    },
+    {
+      "capability_id": "forecast_pregate",
+      "group": "reasoning_acceleration",
+      "pillar": "belief",
+      "phases": [
+        "S",
+        "P"
+      ],
+      "role": "forecast, pregate, plan quality, and risk prediction",
+      "keywords": [
+        "forecast",
+        "pregate",
+        "plan quality",
+        "risk",
+        "planner"
+      ],
+      "legacy_hints": [
+        "planning_and_handoff"
+      ]
+    },
+    {
+      "capability_id": "swarm_multi_agent",
+      "group": "collaboration",
+      "pillar": "artifact",
+      "phases": [
+        "P",
+        "X",
+        "D",
+        "A",
+        "C"
+      ],
+      "role": "swarm, multi-agent, worktree, submit, verify, integrate",
+      "keywords": [
+        "swarm",
+        "multi-agent",
+        "worktree",
+        "fleet",
+        "integrate",
+        "submit"
+      ],
+      "legacy_hints": []
+    },
+    {
+      "capability_id": "drone",
+      "group": "collaboration",
+      "pillar": "artifact",
+      "phases": [
+        "X",
+        "D",
+        "R"
+      ],
+      "role": "delegated worker tactical execution and HUD monitoring",
+      "keywords": [
+        "drone",
+        "hud",
+        "delegate",
+        "worker"
+      ],
+      "legacy_hints": []
+    },
+    {
+      "capability_id": "file_lock_security_gate",
+      "group": "collaboration",
+      "pillar": "mempalace",
+      "phases": [
+        "P",
+        "D",
+        "A"
+      ],
+      "role": "file-lock and delegated execution safety boundaries",
+      "keywords": [
+        "file lock",
+        "lock",
+        "security gate",
+        "permission",
+        "sandbox permission"
+      ],
+      "legacy_hints": []
+    },
+    {
+      "capability_id": "mempalace",
+      "group": "governance_risk",
+      "pillar": "mempalace",
+      "phases": [
+        "S",
+        "P",
+        "A",
+        "C"
+      ],
+      "role": "ethical boundary, memory palace, and forbidden action constraints",
+      "keywords": [
+        "mempalace",
+        "ethic",
+        "policy",
+        "guardrail",
+        "safety",
+        "boundary"
+      ],
+      "legacy_hints": []
+    },
+    {
+      "capability_id": "policy_capability_gate",
+      "group": "governance_risk",
+      "pillar": "mempalace",
+      "phases": [
+        "S",
+        "P",
+        "A",
+        "C"
+      ],
+      "role": "policy, capability, and learning gates",
+      "keywords": [
+        "policy gate",
+        "capability gate",
+        "learning gate",
+        "governance",
+        "trust"
+      ],
+      "legacy_hints": [
+        "governance_and_trust"
+      ]
+    },
+    {
+      "capability_id": "ultra_review",
+      "group": "governance_risk",
+      "pillar": "artifact",
+      "phases": [
+        "A",
+        "C"
+      ],
+      "role": "fleet review, security, logic, and regression review",
+      "keywords": [
+        "ultra review",
+        "review",
+        "audit",
+        "security",
+        "regression"
+      ],
+      "legacy_hints": [
+        "governance_and_trust"
+      ]
+    },
+    {
+      "capability_id": "artifact_gate",
+      "group": "delivery_validation",
+      "pillar": "artifact",
+      "phases": [
+        "A",
+        "C"
+      ],
+      "role": "objective evidence and artifact validation",
+      "keywords": [
+        "artifact",
+        "evidence",
+        "verifier",
+        "receipt"
+      ],
+      "legacy_hints": [
+        "governance_and_trust"
+      ]
+    },
+    {
+      "capability_id": "claim_gate",
+      "group": "delivery_validation",
+      "pillar": "claim",
+      "phases": [
+        "A",
+        "C"
+      ],
+      "role": "claim checks, public claims, and mismatch prevention",
+      "keywords": [
+        "claim",
+        "public claim",
+        "assertion",
+        "source refs"
+      ],
+      "legacy_hints": [
+        "governance_and_trust"
+      ]
+    },
+    {
+      "capability_id": "delivery_acceptance_gate",
+      "group": "delivery_validation",
+      "pillar": "artifact",
+      "phases": [
+        "A",
+        "C"
+      ],
+      "role": "delivery gate, acceptance check, and contract checks",
+      "keywords": [
+        "delivery",
+        "acceptance",
+        "contract",
+        "done criteria"
+      ],
+      "legacy_hints": []
+    },
+    {
+      "capability_id": "sandbox_replay",
+      "group": "delivery_validation",
+      "pillar": "artifact",
+      "phases": [
+        "D",
+        "R",
+        "A"
+      ],
+      "role": "sandboxed execution and replay validation",
+      "keywords": [
+        "sandbox",
+        "replay",
+        "isolation",
+        "rerun",
+        "browser testing",
+        "e2e",
+        "unittest",
+        "test runner"
+      ],
+      "legacy_hints": []
+    },
+    {
+      "capability_id": "benchmark_meta_opt",
+      "group": "self_evolution",
+      "pillar": "claim",
+      "phases": [
+        "R",
+        "A",
+        "C"
+      ],
+      "role": "benchmark, meta optimization, ROI, and route cost validation",
+      "keywords": [
+        "benchmark",
+        "eval",
+        "meta-opt",
+        "roi",
+        "cost",
+        "performance"
+      ],
+      "legacy_hints": [
+        "benchmark_and_promotion"
+      ]
+    },
+    {
+      "capability_id": "regression_guard",
+      "group": "self_evolution",
+      "pillar": "artifact",
+      "phases": [
+        "R",
+        "A",
+        "C"
+      ],
+      "role": "regression guard, stress, and continuity checks",
+      "keywords": [
+        "regression",
+        "stress",
+        "load test",
+        "performance test",
+        "guard"
+      ],
+      "legacy_hints": [
+        "benchmark_and_promotion"
+      ]
+    },
+    {
+      "capability_id": "registry_skills_sync",
+      "group": "productization",
+      "pillar": "artifact",
+      "phases": [
+        "S",
+        "C"
+      ],
+      "role": "skill registry, plugin sync, and catalog maintenance",
+      "keywords": [
+        "skill registry",
+        "registry",
+        "plugin",
+        "install",
+        "catalog",
+        "sync"
+      ],
+      "legacy_hints": []
+    },
+    {
+      "capability_id": "metabolism_resume",
+      "group": "productization",
+      "pillar": "memory",
+      "phases": [
+        "R",
+        "C"
+      ],
+      "role": "metabolism, distill, resume, and handoff continuity",
+      "keywords": [
+        "metabolism",
+        "distill",
+        "resume",
+        "handoff",
+        "context"
+      ],
+      "legacy_hints": [
+        "planning_and_handoff"
+      ]
+    },
+    {
+      "capability_id": "ui_validator",
+      "group": "productization",
+      "pillar": "artifact",
+      "phases": [
+        "D",
+        "A",
+        "C"
+      ],
+      "role": "UI validation and browser-driven checks",
+      "keywords": [
+        "ui",
+        "browser",
+        "frontend",
+        "visual",
+        "playwright"
+      ],
+      "legacy_hints": []
+    },
+    {
+      "capability_id": "external_productivity",
+      "group": "productization",
+      "pillar": "artifact",
+      "phases": [
+        "S",
+        "D"
+      ],
+      "role": "documents, calendars, sheets, email, creative and productivity tools",
+      "keywords": [
+        "gmail",
+        "calendar",
+        "sheets",
+        "docs",
+        "slides",
+        "airtable",
+        "creative",
+        "image",
+        "video"
+      ],
+      "legacy_hints": []
+    }
+  ],
+  "claim_boundary": [
+    "This taxonomy classifies skill-fit candidates for SF-v2; it does not mount skills at runtime.",
+    "Capability routing remains the primary router; skills are subordinate capability-local modules."
+  ]
+}

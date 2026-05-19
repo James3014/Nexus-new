@@ -1,0 +1,393 @@
+{
+  "schema": "nexus.sf_workspace_retention_apply_result.v1",
+  "status": "PASS",
+  "summary": {
+    "mode": "dry-run",
+    "result_count": 54,
+    "status_counts": {
+      "WOULD_MOVE": 54
+    },
+    "blocker_count": 0
+  },
+  "blockers": [],
+  "results": [
+    {
+      "source": "docs/reports/NEXUS_SF_FINAL_CLOSURE_V17_2026-05-19.md",
+      "destination": "docs/reports/archive/opt-pre-sf-2026-05-19/2026-05-19/NEXUS_SF_FINAL_CLOSURE_V17_2026-05-19.md",
+      "mode": "dry-run",
+      "status": "WOULD_MOVE",
+      "reason": "dry_run"
+    },
+    {
+      "source": "docs/reports/NEXUS_SF_GITHUB_CHALLENGER_CLAIM_GATE_FLASH_SMOKE_MATRIX_2026-05-19.json",
+      "destination": "docs/reports/archive/opt-pre-sf-2026-05-19/2026-05-19/NEXUS_SF_GITHUB_CHALLENGER_CLAIM_GATE_FLASH_SMOKE_MATRIX_2026-05-19.json",
+      "mode": "dry-run",
+      "status": "WOULD_MOVE",
+      "reason": "dry_run"
+    },
+    {
+      "source": "docs/reports/NEXUS_SF_GITHUB_CHALLENGER_CLAIM_GATE_FLASH_SMOKE_SKILL_STATUS_2026-05-19.json",
+      "destination": "docs/reports/archive/opt-pre-sf-2026-05-19/2026-05-19/NEXUS_SF_GITHUB_CHALLENGER_CLAIM_GATE_FLASH_SMOKE_SKILL_STATUS_2026-05-19.json",
+      "mode": "dry-run",
+      "status": "WOULD_MOVE",
+      "reason": "dry_run"
+    },
+    {
+      "source": "docs/reports/NEXUS_SF_GITHUB_CHALLENGER_CLAIM_GATE_FLASH_SMOKE_TASKS_2026-05-19.json",
+      "destination": "docs/reports/archive/opt-pre-sf-2026-05-19/2026-05-19/NEXUS_SF_GITHUB_CHALLENGER_CLAIM_GATE_FLASH_SMOKE_TASKS_2026-05-19.json",
+      "mode": "dry-run",
+      "status": "WOULD_MOVE",
+      "reason": "dry_run"
+    },
+    {
+      "source": "docs/reports/NEXUS_SF_GITHUB_CHALLENGER_CLAIM_GATE_HOLD_RCA_2026-05-19.json",
+      "destination": "docs/reports/archive/opt-pre-sf-2026-05-19/2026-05-19/NEXUS_SF_GITHUB_CHALLENGER_CLAIM_GATE_HOLD_RCA_2026-05-19.json",
+      "mode": "dry-run",
+      "status": "WOULD_MOVE",
+      "reason": "dry_run"
+    },
+    {
+      "source": "docs/reports/NEXUS_SF_GITHUB_CHALLENGER_FLASH_SMOKE_MATRIX_2026-05-19.json",
+      "destination": "docs/reports/archive/opt-pre-sf-2026-05-19/2026-05-19/NEXUS_SF_GITHUB_CHALLENGER_FLASH_SMOKE_MATRIX_2026-05-19.json",
+      "mode": "dry-run",
+      "status": "WOULD_MOVE",
+      "reason": "dry_run"
+    },
+    {
+      "source": "docs/reports/NEXUS_SF_GITHUB_CHALLENGER_FLASH_SMOKE_SKILL_STATUS_2026-05-19.json",
+      "destination": "docs/reports/archive/opt-pre-sf-2026-05-19/2026-05-19/NEXUS_SF_GITHUB_CHALLENGER_FLASH_SMOKE_SKILL_STATUS_2026-05-19.json",
+      "mode": "dry-run",
+      "status": "WOULD_MOVE",
+      "reason": "dry_run"
+    },
+    {
+      "source": "docs/reports/NEXUS_SF_GITHUB_CHALLENGER_FLASH_SMOKE_TASKS_2026-05-19.json",
+      "destination": "docs/reports/archive/opt-pre-sf-2026-05-19/2026-05-19/NEXUS_SF_GITHUB_CHALLENGER_FLASH_SMOKE_TASKS_2026-05-19.json",
+      "mode": "dry-run",
+      "status": "WOULD_MOVE",
+      "reason": "dry_run"
+    },
+    {
+      "source": "docs/reports/NEXUS_SF_GITHUB_CHALLENGER_REPLACEMENT_LEDGER_2026-05-19.json",
+      "destination": "docs/reports/archive/opt-pre-sf-2026-05-19/2026-05-19/NEXUS_SF_GITHUB_CHALLENGER_REPLACEMENT_LEDGER_2026-05-19.json",
+      "mode": "dry-run",
+      "status": "WOULD_MOVE",
+      "reason": "dry_run"
+    },
+    {
+      "source": "docs/reports/NEXUS_SF_GITHUB_ROUND2_ALL_CAPABILITY_SCREEN_2026-05-19.json",
+      "destination": "docs/reports/archive/opt-pre-sf-2026-05-19/2026-05-19/NEXUS_SF_GITHUB_ROUND2_ALL_CAPABILITY_SCREEN_2026-05-19.json",
+      "mode": "dry-run",
+      "status": "WOULD_MOVE",
+      "reason": "dry_run"
+    },
+    {
+      "source": "docs/reports/NEXUS_SF_GITHUB_ROUND2_CORRECTED_FLASH_SMOKE_MATRIX_2026-05-19.json",
+      "destination": "docs/reports/archive/opt-pre-sf-2026-05-19/2026-05-19/NEXUS_SF_GITHUB_ROUND2_CORRECTED_FLASH_SMOKE_MATRIX_2026-05-19.json",
+      "mode": "dry-run",
+      "status": "WOULD_MOVE",
+      "reason": "dry_run"
+    },
+    {
+      "source": "docs/reports/NEXUS_SF_GITHUB_ROUND2_CORRECTED_FLASH_SMOKE_SKILL_STATUS_2026-05-19.json",
+      "destination": "docs/reports/archive/opt-pre-sf-2026-05-19/2026-05-19/NEXUS_SF_GITHUB_ROUND2_CORRECTED_FLASH_SMOKE_SKILL_STATUS_2026-05-19.json",
+      "mode": "dry-run",
+      "status": "WOULD_MOVE",
+      "reason": "dry_run"
+    },
+    {
+      "source": "docs/reports/NEXUS_SF_GITHUB_ROUND2_CORRECTED_FLASH_SMOKE_TASKS_2026-05-19.json",
+      "destination": "docs/reports/archive/opt-pre-sf-2026-05-19/2026-05-19/NEXUS_SF_GITHUB_ROUND2_CORRECTED_FLASH_SMOKE_TASKS_2026-05-19.json",
+      "mode": "dry-run",
+      "status": "WOULD_MOVE",
+      "reason": "dry_run"
+    },
+    {
+      "source": "docs/reports/NEXUS_SF_GITHUB_ROUND2_CORRECTED_FLASH_SMOKE_V2_MATRIX_2026-05-19.json",
+      "destination": "docs/reports/archive/opt-pre-sf-2026-05-19/2026-05-19/NEXUS_SF_GITHUB_ROUND2_CORRECTED_FLASH_SMOKE_V2_MATRIX_2026-05-19.json",
+      "mode": "dry-run",
+      "status": "WOULD_MOVE",
+      "reason": "dry_run"
+    },
+    {
+      "source": "docs/reports/NEXUS_SF_GITHUB_ROUND2_CORRECTED_FLASH_SMOKE_V2_SKILL_STATUS_2026-05-19.json",
+      "destination": "docs/reports/archive/opt-pre-sf-2026-05-19/2026-05-19/NEXUS_SF_GITHUB_ROUND2_CORRECTED_FLASH_SMOKE_V2_SKILL_STATUS_2026-05-19.json",
+      "mode": "dry-run",
+      "status": "WOULD_MOVE",
+      "reason": "dry_run"
+    },
+    {
+      "source": "docs/reports/NEXUS_SF_GITHUB_ROUND2_CORRECTED_FLASH_SMOKE_V2_TASKS_2026-05-19.json",
+      "destination": "docs/reports/archive/opt-pre-sf-2026-05-19/2026-05-19/NEXUS_SF_GITHUB_ROUND2_CORRECTED_FLASH_SMOKE_V2_TASKS_2026-05-19.json",
+      "mode": "dry-run",
+      "status": "WOULD_MOVE",
+      "reason": "dry_run"
+    },
+    {
+      "source": "docs/reports/NEXUS_SF_GITHUB_ROUND2_CORRECTED_FLASH_SMOKE_V3_MATRIX_2026-05-19.json",
+      "destination": "docs/reports/archive/opt-pre-sf-2026-05-19/2026-05-19/NEXUS_SF_GITHUB_ROUND2_CORRECTED_FLASH_SMOKE_V3_MATRIX_2026-05-19.json",
+      "mode": "dry-run",
+      "status": "WOULD_MOVE",
+      "reason": "dry_run"
+    },
+    {
+      "source": "docs/reports/NEXUS_SF_GITHUB_ROUND2_CORRECTED_FLASH_SMOKE_V3_SKILL_STATUS_2026-05-19.json",
+      "destination": "docs/reports/archive/opt-pre-sf-2026-05-19/2026-05-19/NEXUS_SF_GITHUB_ROUND2_CORRECTED_FLASH_SMOKE_V3_SKILL_STATUS_2026-05-19.json",
+      "mode": "dry-run",
+      "status": "WOULD_MOVE",
+      "reason": "dry_run"
+    },
+    {
+      "source": "docs/reports/NEXUS_SF_GITHUB_ROUND2_CORRECTED_FLASH_SMOKE_V3_TASKS_2026-05-19.json",
+      "destination": "docs/reports/archive/opt-pre-sf-2026-05-19/2026-05-19/NEXUS_SF_GITHUB_ROUND2_CORRECTED_FLASH_SMOKE_V3_TASKS_2026-05-19.json",
+      "mode": "dry-run",
+      "status": "WOULD_MOVE",
+      "reason": "dry_run"
+    },
+    {
+      "source": "docs/reports/NEXUS_SF_GITHUB_ROUND2_FINAL_ROLLUP_2026-05-19.json",
+      "destination": "docs/reports/archive/opt-pre-sf-2026-05-19/2026-05-19/NEXUS_SF_GITHUB_ROUND2_FINAL_ROLLUP_2026-05-19.json",
+      "mode": "dry-run",
+      "status": "WOULD_MOVE",
+      "reason": "dry_run"
+    },
+    {
+      "source": "docs/reports/NEXUS_SF_GITHUB_ROUND2_FLASH_SMOKE_MATRIX_2026-05-19.json",
+      "destination": "docs/reports/archive/opt-pre-sf-2026-05-19/2026-05-19/NEXUS_SF_GITHUB_ROUND2_FLASH_SMOKE_MATRIX_2026-05-19.json",
+      "mode": "dry-run",
+      "status": "WOULD_MOVE",
+      "reason": "dry_run"
+    },
+    {
+      "source": "docs/reports/NEXUS_SF_GITHUB_ROUND2_FLASH_SMOKE_SKILL_STATUS_2026-05-19.json",
+      "destination": "docs/reports/archive/opt-pre-sf-2026-05-19/2026-05-19/NEXUS_SF_GITHUB_ROUND2_FLASH_SMOKE_SKILL_STATUS_2026-05-19.json",
+      "mode": "dry-run",
+      "status": "WOULD_MOVE",
+      "reason": "dry_run"
+    },
+    {
+      "source": "docs/reports/NEXUS_SF_GITHUB_ROUND2_FLASH_SMOKE_TASKS_2026-05-19.json",
+      "destination": "docs/reports/archive/opt-pre-sf-2026-05-19/2026-05-19/NEXUS_SF_GITHUB_ROUND2_FLASH_SMOKE_TASKS_2026-05-19.json",
+      "mode": "dry-run",
+      "status": "WOULD_MOVE",
+      "reason": "dry_run"
+    },
+    {
+      "source": "docs/reports/NEXUS_SF_GITHUB_ROUND2_MATERIALIZATION_2026-05-19.json",
+      "destination": "docs/reports/archive/opt-pre-sf-2026-05-19/2026-05-19/NEXUS_SF_GITHUB_ROUND2_MATERIALIZATION_2026-05-19.json",
+      "mode": "dry-run",
+      "status": "WOULD_MOVE",
+      "reason": "dry_run"
+    },
+    {
+      "source": "docs/reports/NEXUS_SF_GITHUB_ROUND2_REPLACEMENT_LEDGER_2026-05-19.json",
+      "destination": "docs/reports/archive/opt-pre-sf-2026-05-19/2026-05-19/NEXUS_SF_GITHUB_ROUND2_REPLACEMENT_LEDGER_2026-05-19.json",
+      "mode": "dry-run",
+      "status": "WOULD_MOVE",
+      "reason": "dry_run"
+    },
+    {
+      "source": "docs/reports/NEXUS_SF_GITHUB_SKILL_CHALLENGER_ALL_CAPABILITY_SCREEN_2026-05-19.json",
+      "destination": "docs/reports/archive/opt-pre-sf-2026-05-19/2026-05-19/NEXUS_SF_GITHUB_SKILL_CHALLENGER_ALL_CAPABILITY_SCREEN_2026-05-19.json",
+      "mode": "dry-run",
+      "status": "WOULD_MOVE",
+      "reason": "dry_run"
+    },
+    {
+      "source": "docs/reports/NEXUS_SF_GITHUB_SKILL_CHALLENGER_EVAL_APPLY_2026-05-19.json",
+      "destination": "docs/reports/archive/opt-pre-sf-2026-05-19/2026-05-19/NEXUS_SF_GITHUB_SKILL_CHALLENGER_EVAL_APPLY_2026-05-19.json",
+      "mode": "dry-run",
+      "status": "WOULD_MOVE",
+      "reason": "dry_run"
+    },
+    {
+      "source": "docs/reports/NEXUS_SF_GITHUB_SKILL_CHALLENGER_EVAL_DRYRUN_2026-05-19.json",
+      "destination": "docs/reports/archive/opt-pre-sf-2026-05-19/2026-05-19/NEXUS_SF_GITHUB_SKILL_CHALLENGER_EVAL_DRYRUN_2026-05-19.json",
+      "mode": "dry-run",
+      "status": "WOULD_MOVE",
+      "reason": "dry_run"
+    },
+    {
+      "source": "docs/reports/NEXUS_SF_PRIMARY_SKILL_DESCRIPTION_OPTIMIZATION_APPLY_2026-05-19.json",
+      "destination": "docs/reports/archive/opt-pre-sf-2026-05-19/2026-05-19/NEXUS_SF_PRIMARY_SKILL_DESCRIPTION_OPTIMIZATION_APPLY_2026-05-19.json",
+      "mode": "dry-run",
+      "status": "WOULD_MOVE",
+      "reason": "dry_run"
+    },
+    {
+      "source": "docs/reports/NEXUS_SF_PRIMARY_SKILL_DESCRIPTION_OPTIMIZATION_DRYRUN_2026-05-19.json",
+      "destination": "docs/reports/archive/opt-pre-sf-2026-05-19/2026-05-19/NEXUS_SF_PRIMARY_SKILL_DESCRIPTION_OPTIMIZATION_DRYRUN_2026-05-19.json",
+      "mode": "dry-run",
+      "status": "WOULD_MOVE",
+      "reason": "dry_run"
+    },
+    {
+      "source": "docs/reports/NEXUS_SF_PRIMARY_SKILL_DESCRIPTION_OPTIMIZATION_FULL_APPLY_2026-05-19.json",
+      "destination": "docs/reports/archive/opt-pre-sf-2026-05-19/2026-05-19/NEXUS_SF_PRIMARY_SKILL_DESCRIPTION_OPTIMIZATION_FULL_APPLY_2026-05-19.json",
+      "mode": "dry-run",
+      "status": "WOULD_MOVE",
+      "reason": "dry_run"
+    },
+    {
+      "source": "docs/reports/NEXUS_SF_PRIMARY_SKILL_DESCRIPTION_OPTIMIZATION_FULL_DRYRUN_2026-05-19.json",
+      "destination": "docs/reports/archive/opt-pre-sf-2026-05-19/2026-05-19/NEXUS_SF_PRIMARY_SKILL_DESCRIPTION_OPTIMIZATION_FULL_DRYRUN_2026-05-19.json",
+      "mode": "dry-run",
+      "status": "WOULD_MOVE",
+      "reason": "dry_run"
+    },
+    {
+      "source": "docs/reports/NEXUS_SF_PRIMARY_SKILL_DESCRIPTION_OPTIMIZATION_FULL_RECHECK_2026-05-19.json",
+      "destination": "docs/reports/archive/opt-pre-sf-2026-05-19/2026-05-19/NEXUS_SF_PRIMARY_SKILL_DESCRIPTION_OPTIMIZATION_FULL_RECHECK_2026-05-19.json",
+      "mode": "dry-run",
+      "status": "WOULD_MOVE",
+      "reason": "dry_run"
+    },
+    {
+      "source": "docs/reports/NEXUS_SF_PRIMARY_SKILL_DESCRIPTION_OPTIMIZATION_FULL_VALIDATION_2026-05-19.json",
+      "destination": "docs/reports/archive/opt-pre-sf-2026-05-19/2026-05-19/NEXUS_SF_PRIMARY_SKILL_DESCRIPTION_OPTIMIZATION_FULL_VALIDATION_2026-05-19.json",
+      "mode": "dry-run",
+      "status": "WOULD_MOVE",
+      "reason": "dry_run"
+    },
+    {
+      "source": "docs/reports/NEXUS_SF_PRIMARY_SKILL_DESCRIPTION_OPTIMIZATION_RECHECK_2026-05-19.json",
+      "destination": "docs/reports/archive/opt-pre-sf-2026-05-19/2026-05-19/NEXUS_SF_PRIMARY_SKILL_DESCRIPTION_OPTIMIZATION_RECHECK_2026-05-19.json",
+      "mode": "dry-run",
+      "status": "WOULD_MOVE",
+      "reason": "dry_run"
+    },
+    {
+      "source": "docs/reports/NEXUS_SF_RUNTIME_RECEIPT_SMOKE_V17_2026-05-19.json",
+      "destination": "docs/reports/archive/opt-pre-sf-2026-05-19/2026-05-19/NEXUS_SF_RUNTIME_RECEIPT_SMOKE_V17_2026-05-19.json",
+      "mode": "dry-run",
+      "status": "WOULD_MOVE",
+      "reason": "dry_run"
+    },
+    {
+      "source": "docs/reports/NEXUS_SF_RUNTIME_RECEIPT_SMOKE_V17_2026-05-19_repair_loop_trace.jsonl",
+      "destination": "docs/reports/archive/opt-pre-sf-2026-05-19/2026-05-19/NEXUS_SF_RUNTIME_RECEIPT_SMOKE_V17_2026-05-19_repair_loop_trace.jsonl",
+      "mode": "dry-run",
+      "status": "WOULD_MOVE",
+      "reason": "dry_run"
+    },
+    {
+      "source": "docs/reports/NEXUS_SF_RUNTIME_RECEIPT_SMOKE_V17_FULL_OPT_RECHECK_2026-05-19.json",
+      "destination": "docs/reports/archive/opt-pre-sf-2026-05-19/2026-05-19/NEXUS_SF_RUNTIME_RECEIPT_SMOKE_V17_FULL_OPT_RECHECK_2026-05-19.json",
+      "mode": "dry-run",
+      "status": "WOULD_MOVE",
+      "reason": "dry_run"
+    },
+    {
+      "source": "docs/reports/NEXUS_SF_RUNTIME_RECEIPT_SMOKE_V17_FULL_OPT_RECHECK_2026-05-19_repair_loop_trace.jsonl",
+      "destination": "docs/reports/archive/opt-pre-sf-2026-05-19/2026-05-19/NEXUS_SF_RUNTIME_RECEIPT_SMOKE_V17_FULL_OPT_RECHECK_2026-05-19_repair_loop_trace.jsonl",
+      "mode": "dry-run",
+      "status": "WOULD_MOVE",
+      "reason": "dry_run"
+    },
+    {
+      "source": "docs/reports/NEXUS_SF_RUNTIME_RECEIPT_SMOKE_V17_POST_OPT_2026-05-19.json",
+      "destination": "docs/reports/archive/opt-pre-sf-2026-05-19/2026-05-19/NEXUS_SF_RUNTIME_RECEIPT_SMOKE_V17_POST_OPT_2026-05-19.json",
+      "mode": "dry-run",
+      "status": "WOULD_MOVE",
+      "reason": "dry_run"
+    },
+    {
+      "source": "docs/reports/NEXUS_SF_RUNTIME_RECEIPT_SMOKE_V17_POST_OPT_2026-05-19_repair_loop_trace.jsonl",
+      "destination": "docs/reports/archive/opt-pre-sf-2026-05-19/2026-05-19/NEXUS_SF_RUNTIME_RECEIPT_SMOKE_V17_POST_OPT_2026-05-19_repair_loop_trace.jsonl",
+      "mode": "dry-run",
+      "status": "WOULD_MOVE",
+      "reason": "dry_run"
+    },
+    {
+      "source": "docs/reports/NEXUS_SF_RUNTIME_RECEIPT_SMOKE_V17_POST_OPT_RECHECK_2026-05-19.json",
+      "destination": "docs/reports/archive/opt-pre-sf-2026-05-19/2026-05-19/NEXUS_SF_RUNTIME_RECEIPT_SMOKE_V17_POST_OPT_RECHECK_2026-05-19.json",
+      "mode": "dry-run",
+      "status": "WOULD_MOVE",
+      "reason": "dry_run"
+    },
+    {
+      "source": "docs/reports/NEXUS_SF_RUNTIME_RECEIPT_SMOKE_V17_POST_OPT_RECHECK_2026-05-19_repair_loop_trace.jsonl",
+      "destination": "docs/reports/archive/opt-pre-sf-2026-05-19/2026-05-19/NEXUS_SF_RUNTIME_RECEIPT_SMOKE_V17_POST_OPT_RECHECK_2026-05-19_repair_loop_trace.jsonl",
+      "mode": "dry-run",
+      "status": "WOULD_MOVE",
+      "reason": "dry_run"
+    },
+    {
+      "source": "docs/reports/NEXUS_SF_RUNTIME_RECEIPT_SMOKE_V17_SKILL_CREATOR_POST_REVERT_2026-05-19.json",
+      "destination": "docs/reports/archive/opt-pre-sf-2026-05-19/2026-05-19/NEXUS_SF_RUNTIME_RECEIPT_SMOKE_V17_SKILL_CREATOR_POST_REVERT_2026-05-19.json",
+      "mode": "dry-run",
+      "status": "WOULD_MOVE",
+      "reason": "dry_run"
+    },
+    {
+      "source": "docs/reports/NEXUS_SF_RUNTIME_RECEIPT_SMOKE_V17_SKILL_CREATOR_POST_REVERT_2026-05-19_repair_loop_trace.jsonl",
+      "destination": "docs/reports/archive/opt-pre-sf-2026-05-19/2026-05-19/NEXUS_SF_RUNTIME_RECEIPT_SMOKE_V17_SKILL_CREATOR_POST_REVERT_2026-05-19_repair_loop_trace.jsonl",
+      "mode": "dry-run",
+      "status": "WOULD_MOVE",
+      "reason": "dry_run"
+    },
+    {
+      "source": "docs/reports/NEXUS_SF_SKILL_CREATOR_APPLY_OR_REVERT_2026-05-19.json",
+      "destination": "docs/reports/archive/opt-pre-sf-2026-05-19/2026-05-19/NEXUS_SF_SKILL_CREATOR_APPLY_OR_REVERT_2026-05-19.json",
+      "mode": "dry-run",
+      "status": "WOULD_MOVE",
+      "reason": "dry_run"
+    },
+    {
+      "source": "docs/reports/NEXUS_SF_SKILL_CREATOR_BEFORE_AFTER_TRIGGER_EVAL_2026-05-19.json",
+      "destination": "docs/reports/archive/opt-pre-sf-2026-05-19/2026-05-19/NEXUS_SF_SKILL_CREATOR_BEFORE_AFTER_TRIGGER_EVAL_2026-05-19.json",
+      "mode": "dry-run",
+      "status": "WOULD_MOVE",
+      "reason": "dry_run"
+    },
+    {
+      "source": "docs/reports/NEXUS_SF_SKILL_CREATOR_BEFORE_AFTER_TRIGGER_EVAL_POST_REVERT_2026-05-19.json",
+      "destination": "docs/reports/archive/opt-pre-sf-2026-05-19/2026-05-19/NEXUS_SF_SKILL_CREATOR_BEFORE_AFTER_TRIGGER_EVAL_POST_REVERT_2026-05-19.json",
+      "mode": "dry-run",
+      "status": "WOULD_MOVE",
+      "reason": "dry_run"
+    },
+    {
+      "source": "docs/reports/NEXUS_SF_SKILL_CREATOR_BEFORE_AFTER_TRIGGER_EVAL_V2_2026-05-19.json",
+      "destination": "docs/reports/archive/opt-pre-sf-2026-05-19/2026-05-19/NEXUS_SF_SKILL_CREATOR_BEFORE_AFTER_TRIGGER_EVAL_V2_2026-05-19.json",
+      "mode": "dry-run",
+      "status": "WOULD_MOVE",
+      "reason": "dry_run"
+    },
+    {
+      "source": "docs/reports/NEXUS_SF_SKILL_CREATOR_BEFORE_AFTER_TRIGGER_EVAL_V3_2026-05-19.json",
+      "destination": "docs/reports/archive/opt-pre-sf-2026-05-19/2026-05-19/NEXUS_SF_SKILL_CREATOR_BEFORE_AFTER_TRIGGER_EVAL_V3_2026-05-19.json",
+      "mode": "dry-run",
+      "status": "WOULD_MOVE",
+      "reason": "dry_run"
+    },
+    {
+      "source": "docs/reports/NEXUS_SF_SKILL_CREATOR_BEFORE_AFTER_TRIGGER_EVAL_V4_2026-05-19.json",
+      "destination": "docs/reports/archive/opt-pre-sf-2026-05-19/2026-05-19/NEXUS_SF_SKILL_CREATOR_BEFORE_AFTER_TRIGGER_EVAL_V4_2026-05-19.json",
+      "mode": "dry-run",
+      "status": "WOULD_MOVE",
+      "reason": "dry_run"
+    },
+    {
+      "source": "docs/reports/NEXUS_SF_SKILL_CREATOR_CLAUDE_RUN_EVAL_PROBE_2026-05-19.json",
+      "destination": "docs/reports/archive/opt-pre-sf-2026-05-19/2026-05-19/NEXUS_SF_SKILL_CREATOR_CLAUDE_RUN_EVAL_PROBE_2026-05-19.json",
+      "mode": "dry-run",
+      "status": "WOULD_MOVE",
+      "reason": "dry_run"
+    },
+    {
+      "source": "docs/reports/NEXUS_SF_SKILL_CREATOR_POST_REVERT_VALIDATION_2026-05-19.json",
+      "destination": "docs/reports/archive/opt-pre-sf-2026-05-19/2026-05-19/NEXUS_SF_SKILL_CREATOR_POST_REVERT_VALIDATION_2026-05-19.json",
+      "mode": "dry-run",
+      "status": "WOULD_MOVE",
+      "reason": "dry_run"
+    },
+    {
+      "source": "docs/reports/NEXUS_SKILL_FIT_CATALOG_REPAIR_AND_CODING_2026-05-15.json",
+      "destination": "docs/reports/archive/opt-pre-sf-2026-05-19/2026-05-15/NEXUS_SKILL_FIT_CATALOG_REPAIR_AND_CODING_2026-05-15.json",
+      "mode": "dry-run",
+      "status": "WOULD_MOVE",
+      "reason": "dry_run"
+    }
+  ]
+}

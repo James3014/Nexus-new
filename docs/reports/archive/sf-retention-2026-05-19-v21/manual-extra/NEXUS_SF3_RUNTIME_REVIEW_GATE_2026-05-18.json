@@ -1,0 +1,14 @@
+{
+  "schema": "nexus.sf3_runtime_review_gate.v1",
+  "status": "PASS",
+  "summary": {
+    "sf3_closed_loop_complete": true,
+    "live_causality_status": "PASS",
+    "combo_probe_status": "PASS",
+    "best_candidate_search_status": "PASS",
+    "runtime_update_allowed": false,
+    "public_benchmark_allowed": false
+  },
+  "blockers": [],
+  "next_gate": "manual_runtime_policy_review"
+}

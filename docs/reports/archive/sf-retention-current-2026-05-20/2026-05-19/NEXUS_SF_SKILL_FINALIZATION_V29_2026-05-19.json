@@ -1,0 +1,71 @@
+{
+  "schema": "nexus.sf_skill_finalization.v29",
+  "version": "2026-05-19",
+  "status": "PASS",
+  "summary": {
+    "round10_capability_count": 4,
+    "round10_replacement_count": 2,
+    "round10_hold_count": 2,
+    "overlay_version": "v29",
+    "runtime_update_allowed": false,
+    "public_benchmark_allowed": false
+  },
+  "replacements": [
+    {
+      "capability": "codeintel",
+      "previous_skill": "github6-agent-context-codeintel",
+      "candidate_skill": "github10-code-simplification-codeintel",
+      "candidate_total_tokens": 39640,
+      "previous_total_tokens": 40936,
+      "token_delta": -1296,
+      "candidate_wall_sec": 119.0589,
+      "previous_wall_sec": 146.843,
+      "wall_delta_sec": -27.7841,
+      "candidate_receipt_path": ".nexus/reports/sf_round10_coverage_backlog_live_2026-05-19/codeintel_sf-round10-coverage-codeintel-001_challenger_github10-code-simplification-codeintel",
+      "candidate_evidence_path": ".nexus/reports/sf_round10_coverage_backlog_live_2026-05-19/codeintel_sf-round10-coverage-codeintel-001_challenger_github10-code-simplification-codeintel/evidence_bundle.json",
+      "decision": "update_overlay_candidate_primary"
+    },
+    {
+      "capability": "research_control_plane",
+      "previous_skill": "github6-repo-scout-safe-research-control-plane",
+      "candidate_skill": "github10-paper-lookup-research-control-plane",
+      "candidate_total_tokens": 40586,
+      "previous_total_tokens": 43294,
+      "token_delta": -2708,
+      "candidate_wall_sec": 130.91,
+      "previous_wall_sec": 155.3487,
+      "wall_delta_sec": -24.4387,
+      "candidate_receipt_path": ".nexus/reports/sf_round10_coverage_backlog_live_2026-05-19/research_control_plane_sf-round10-coverage-research_control_plane-001_challenger_github10-paper-lookup-research-control-plane",
+      "candidate_evidence_path": ".nexus/reports/sf_round10_coverage_backlog_live_2026-05-19/research_control_plane_sf-round10-coverage-research_control_plane-001_challenger_github10-paper-lookup-research-control-plane/evidence_bundle.json",
+      "decision": "update_overlay_candidate_primary"
+    }
+  ],
+  "holds": [
+    {
+      "capability": "autoreason",
+      "current_skill": "sf2-belief-route-fit-spec",
+      "candidate_skill": "github10-first-principles-autoreason",
+      "reason_codes": [
+        "challenger_token_not_lower"
+      ],
+      "token_delta": 229,
+      "wall_delta_sec": -31.3563
+    },
+    {
+      "capability": "ui_validator",
+      "current_skill": "github7-browserbase-ui-test-safe-ui-validator",
+      "candidate_skill": "github10-openai-playwright-ui-validator",
+      "reason_codes": [
+        "challenger_wall_not_lower"
+      ],
+      "token_delta": -449,
+      "wall_delta_sec": 6.0567
+    }
+  ],
+  "source_rollup": "docs/reports/NEXUS_SF_ROUND10_COVERAGE_BACKLOG_LIVE_ROLLUP_2026-05-19.json",
+  "source_overlay": "docs/reports/NEXUS_SF_RUNTIME_SKILL_POLICY_OVERLAY_V29_2026-05-19.json",
+  "claim_boundary": [
+    "SF goal: missed 9-round skills compared and better skills update overlay candidate.",
+    "This does not directly write runtime defaults or public benchmark claims."
+  ]
+}

@@ -1,0 +1,214 @@
+{
+  "schema": "nexus.sf_workspace_retention_plan.v1",
+  "status": "PASS",
+  "summary": {
+    "reports_scanned": 32,
+    "keep_current_evidence": 32,
+    "archive_candidate": 0,
+    "blocker_count": 0,
+    "destructive_delete_allowed": false
+  },
+  "latest_closure": "docs/reports/NEXUS_SF_FINAL_CLOSURE_V16_2026-05-19.json",
+  "latest_overlay": "docs/reports/NEXUS_SF_RUNTIME_SKILL_POLICY_OVERLAY_V16_2026-05-19.json",
+  "archive_root": "docs/reports/archive/sf",
+  "blockers": [],
+  "items": [
+    {
+      "source": "docs/reports/NEXUS_RESEARCH_STACK_P30_FLASH_2026-05-05.md",
+      "destination": "",
+      "disposition": "keep_current_evidence",
+      "reason": "tracked_report_not_moved_by_retention_plan"
+    },
+    {
+      "source": "docs/reports/NEXUS_SF_ALL_CAPABILITY_CURRENT_STATE_2026-05-19.json",
+      "destination": "",
+      "disposition": "keep_current_evidence",
+      "reason": "current_closure_or_direct_reference"
+    },
+    {
+      "source": "docs/reports/NEXUS_SF_FINAL_CLOSURE_V16_2026-05-19.json",
+      "destination": "",
+      "disposition": "keep_current_evidence",
+      "reason": "current_closure_or_direct_reference"
+    },
+    {
+      "source": "docs/reports/NEXUS_SF_FINAL_CLOSURE_V16_2026-05-19.md",
+      "destination": "",
+      "disposition": "keep_current_evidence",
+      "reason": "current_closure_or_direct_reference"
+    },
+    {
+      "source": "docs/reports/NEXUS_SF_POST_APPLY_POLICY_SMOKE_V16_2026-05-19.json",
+      "destination": "",
+      "disposition": "keep_current_evidence",
+      "reason": "current_closure_or_direct_reference"
+    },
+    {
+      "source": "docs/reports/NEXUS_SF_RUNTIME_APPLY_RESULT_V8_2026-05-18.json",
+      "destination": "",
+      "disposition": "keep_current_evidence",
+      "reason": "current_closure_or_direct_reference"
+    },
+    {
+      "source": "docs/reports/NEXUS_SF_RUNTIME_POLICY_APPLY_GATE_V15_2026-05-19.json",
+      "destination": "",
+      "disposition": "keep_current_evidence",
+      "reason": "current_closure_or_direct_reference"
+    },
+    {
+      "source": "docs/reports/NEXUS_SF_RUNTIME_POLICY_PATCH_PLAN_V15_2026-05-19.json",
+      "destination": "",
+      "disposition": "keep_current_evidence",
+      "reason": "current_closure_or_direct_reference"
+    },
+    {
+      "source": "docs/reports/NEXUS_SF_RUNTIME_PROMOTION_REVIEW_V13_2026-05-19.json",
+      "destination": "",
+      "disposition": "keep_current_evidence",
+      "reason": "current_closure_or_direct_reference"
+    },
+    {
+      "source": "docs/reports/NEXUS_SF_RUNTIME_PROMOTION_REVIEW_V15_2026-05-19.json",
+      "destination": "",
+      "disposition": "keep_current_evidence",
+      "reason": "current_closure_or_direct_reference"
+    },
+    {
+      "source": "docs/reports/NEXUS_SF_RUNTIME_RECEIPT_SMOKE_V16_2026-05-19.json",
+      "destination": "",
+      "disposition": "keep_current_evidence",
+      "reason": "current_closure_or_direct_reference"
+    },
+    {
+      "source": "docs/reports/NEXUS_SF_RUNTIME_RECEIPT_SMOKE_V16_2026-05-19_repair_loop_trace.jsonl",
+      "destination": "",
+      "disposition": "keep_current_evidence",
+      "reason": "current_closure_or_direct_reference"
+    },
+    {
+      "source": "docs/reports/NEXUS_SF_RUNTIME_SKILL_POLICY_OVERLAY_V15_2026-05-19.json",
+      "destination": "",
+      "disposition": "keep_current_evidence",
+      "reason": "current_closure_or_direct_reference"
+    },
+    {
+      "source": "docs/reports/NEXUS_SF_RUNTIME_SKILL_POLICY_OVERLAY_V16_2026-05-19.json",
+      "destination": "",
+      "disposition": "keep_current_evidence",
+      "reason": "current_closure_or_direct_reference"
+    },
+    {
+      "source": "docs/reports/NEXUS_SF_SKILL_HELP_CONFIRMATION_2026-05-18.json",
+      "destination": "",
+      "disposition": "keep_current_evidence",
+      "reason": "current_closure_or_direct_reference"
+    },
+    {
+      "source": "docs/reports/NEXUS_SF_V10_RETEST_ROLLUP_2026-05-18.json",
+      "destination": "",
+      "disposition": "keep_current_evidence",
+      "reason": "current_closure_or_direct_reference"
+    },
+    {
+      "source": "docs/reports/NEXUS_SF_V12_COMBINED_SKILL_STATUS_2026-05-19.json",
+      "destination": "",
+      "disposition": "keep_current_evidence",
+      "reason": "current_closure_or_direct_reference"
+    },
+    {
+      "source": "docs/reports/NEXUS_SF_V13_TRADEOFF_TIEBREAK_ROLLUP_2026-05-19.json",
+      "destination": "",
+      "disposition": "keep_current_evidence",
+      "reason": "current_closure_or_direct_reference"
+    },
+    {
+      "source": "docs/reports/NEXUS_SF_V15_HELD_CHALLENGER_EXECUTION_MATRIX_2026-05-19.json",
+      "destination": "",
+      "disposition": "keep_current_evidence",
+      "reason": "current_closure_or_direct_reference"
+    },
+    {
+      "source": "docs/reports/NEXUS_SF_V15_HELD_CHALLENGER_ROLLUP_2026-05-19.json",
+      "destination": "",
+      "disposition": "keep_current_evidence",
+      "reason": "current_closure_or_direct_reference"
+    },
+    {
+      "source": "docs/reports/NEXUS_SF_V15_HELD_CHALLENGER_ROLLUP_2026-05-19.md",
+      "destination": "",
+      "disposition": "keep_current_evidence",
+      "reason": "current_closure_or_direct_reference"
+    },
+    {
+      "source": "docs/reports/NEXUS_SF_V15_HELD_CHALLENGER_SKILL_FIT_CATALOG_2026-05-19.json",
+      "destination": "",
+      "disposition": "keep_current_evidence",
+      "reason": "current_closure_or_direct_reference"
+    },
+    {
+      "source": "docs/reports/NEXUS_SF_V15_HELD_CHALLENGER_SKILL_STATUS_2026-05-19.json",
+      "destination": "",
+      "disposition": "keep_current_evidence",
+      "reason": "current_closure_or_direct_reference"
+    },
+    {
+      "source": "docs/reports/NEXUS_SF_V15_HELD_CHALLENGER_TASK_MANIFEST_2026-05-19.json",
+      "destination": "",
+      "disposition": "keep_current_evidence",
+      "reason": "current_closure_or_direct_reference"
+    },
+    {
+      "source": "docs/reports/NEXUS_SF_V16_RESIDUAL_SELECTION_EXECUTION_MATRIX_2026-05-19.json",
+      "destination": "",
+      "disposition": "keep_current_evidence",
+      "reason": "current_closure_or_direct_reference"
+    },
+    {
+      "source": "docs/reports/NEXUS_SF_V16_RESIDUAL_SELECTION_ROLLUP_2026-05-19.json",
+      "destination": "",
+      "disposition": "keep_current_evidence",
+      "reason": "current_closure_or_direct_reference"
+    },
+    {
+      "source": "docs/reports/NEXUS_SF_V16_RESIDUAL_SELECTION_ROLLUP_2026-05-19.md",
+      "destination": "",
+      "disposition": "keep_current_evidence",
+      "reason": "current_closure_or_direct_reference"
+    },
+    {
+      "source": "docs/reports/NEXUS_SF_V16_RESIDUAL_SELECTION_SKILL_FIT_CATALOG_2026-05-19.json",
+      "destination": "",
+      "disposition": "keep_current_evidence",
+      "reason": "current_closure_or_direct_reference"
+    },
+    {
+      "source": "docs/reports/NEXUS_SF_V16_RESIDUAL_SELECTION_SKILL_STATUS_2026-05-19.json",
+      "destination": "",
+      "disposition": "keep_current_evidence",
+      "reason": "current_closure_or_direct_reference"
+    },
+    {
+      "source": "docs/reports/NEXUS_SF_WORKSPACE_CLEANUP_INDEX_2026-05-19.md",
+      "destination": "",
+      "disposition": "keep_current_evidence",
+      "reason": "current_closure_or_direct_reference"
+    },
+    {
+      "source": "docs/reports/NEXUS_SF_WORKSPACE_RETENTION_APPLY_RESULT_2026-05-19.json",
+      "destination": "",
+      "disposition": "keep_current_evidence",
+      "reason": "current_closure_or_direct_reference"
+    },
+    {
+      "source": "docs/reports/NEXUS_SF_WORKSPACE_RETENTION_PLAN_2026-05-19.json",
+      "destination": "",
+      "disposition": "keep_current_evidence",
+      "reason": "current_closure_or_direct_reference"
+    }
+  ],
+  "claim_boundary": [
+    "This plan never deletes SF evidence.",
+    "Archive mode only moves superseded docs/reports files that are not directly referenced by the latest closure or overlay.",
+    "Private tmp receipt roots are not moved by this report-retention plan."
+  ]
+}

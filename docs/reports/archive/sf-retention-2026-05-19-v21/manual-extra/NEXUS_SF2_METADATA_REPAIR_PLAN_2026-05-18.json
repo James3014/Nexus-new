@@ -1,0 +1,76 @@
+{
+  "schema": "nexus.sf2_metadata_repair_plan.v1",
+  "status": "PASS",
+  "summary": {
+    "repair_capability_count": 1,
+    "repair_item_count": 3,
+    "runtime_update_allowed": false,
+    "ablation_after_repair_allowed": true
+  },
+  "repair_capabilities": [
+    "nightshift"
+  ],
+  "repair_items": [
+    {
+      "capability_id": "nightshift",
+      "skill_id": "agent-longrun-task-tracker",
+      "path": "/Users/jameschen/.agents/skills/devops/agent-longrun-task-tracker/SKILL.md",
+      "source_root": "agents",
+      "source_type": "reference",
+      "safety_status": "ablation_only",
+      "current_metadata_quality": "INCOMPLETE:capability_mount",
+      "required_metadata_fields": [
+        "capability_mount",
+        "load_when",
+        "do_not_load_when",
+        "evidence_required"
+      ],
+      "proposed_capability_mount": "reference:nightshift",
+      "post_repair_ablation_eligible": true,
+      "post_repair_runtime_eligible": false,
+      "runtime_policy": "blocked_from_runtime_until_curated_review"
+    },
+    {
+      "capability_id": "nightshift",
+      "skill_id": "churn-prevention",
+      "path": "/Users/jameschen/.agents/skills/churn-prevention/SKILL.md",
+      "source_root": "agents",
+      "source_type": "local_candidate",
+      "safety_status": "ablation_only",
+      "current_metadata_quality": "INCOMPLETE:capability_mount",
+      "required_metadata_fields": [
+        "capability_mount",
+        "load_when",
+        "do_not_load_when",
+        "evidence_required"
+      ],
+      "proposed_capability_mount": "reference:nightshift",
+      "post_repair_ablation_eligible": true,
+      "post_repair_runtime_eligible": false,
+      "runtime_policy": "blocked_from_runtime_until_curated_review"
+    },
+    {
+      "capability_id": "nightshift",
+      "skill_id": "multi-agent-go-live-gate-recovery-loop",
+      "path": "/Users/jameschen/.agents/skills/devops/multi-agent-go-live-gate-recovery-loop/SKILL.md",
+      "source_root": "agents",
+      "source_type": "reference",
+      "safety_status": "ablation_only",
+      "current_metadata_quality": "INCOMPLETE:capability_mount",
+      "required_metadata_fields": [
+        "capability_mount",
+        "load_when",
+        "do_not_load_when",
+        "evidence_required"
+      ],
+      "proposed_capability_mount": "reference:nightshift",
+      "post_repair_ablation_eligible": true,
+      "post_repair_runtime_eligible": false,
+      "runtime_policy": "blocked_from_runtime_until_curated_review"
+    }
+  ],
+  "claim_boundary": [
+    "Metadata repair only makes a candidate eligible for SF-v2 ablation review.",
+    "Metadata repair never promotes external or local candidate skills into runtime defaults."
+  ]
+}

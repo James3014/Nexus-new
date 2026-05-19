@@ -1,0 +1,1596 @@
+{
+  "schema": "nexus.sf3_live_causality_probe.v1",
+  "status": "PASS",
+  "summary": {
+    "capability_count": 33,
+    "live_effective_capability_count": 33,
+    "blocker_count": 0,
+    "runtime_update_allowed": false,
+    "public_benchmark_allowed": false
+  },
+  "blockers": [],
+  "capabilities": [
+    {
+      "capability_id": "artifact_gate",
+      "live_effective_candidate_count": 3,
+      "candidates": [
+        {
+          "skill_id": "nexus-goal-closure-executor",
+          "verdict": "live_effective_candidate",
+          "receipt_status": "PASS",
+          "selected": true,
+          "injected": true,
+          "used": true,
+          "evidence_present": true,
+          "gate_passed": true,
+          "outcome_contributed": true,
+          "baseline_vs_skill_delta": {
+            "baseline_status": "PASS",
+            "skill_arm_status": "PASS",
+            "verified_delta": "bounded_probe_positive",
+            "trust_delta": "no_mismatch_observed",
+            "cost_delta": "not_measured_in_sf3"
+          },
+          "counterfactual_blocker": false,
+          "skill_path": "/Users/jameschen/Workspace/nexus/.agents/skills/nexus-goal-closure-executor/SKILL.md"
+        },
+        {
+          "skill_id": "nexus-root-cause-probe",
+          "verdict": "live_effective_candidate",
+          "receipt_status": "PASS",
+          "selected": true,
+          "injected": true,
+          "used": true,
+          "evidence_present": true,
+          "gate_passed": true,
+          "outcome_contributed": true,
+          "baseline_vs_skill_delta": {
+            "baseline_status": "PASS",
+            "skill_arm_status": "PASS",
+            "verified_delta": "bounded_probe_positive",
+            "trust_delta": "no_mismatch_observed",
+            "cost_delta": "not_measured_in_sf3"
+          },
+          "counterfactual_blocker": false,
+          "skill_path": "/Users/jameschen/Workspace/nexus/.agents/skills/nexus-root-cause-probe/SKILL.md"
+        },
+        {
+          "skill_id": "diagnose",
+          "verdict": "live_effective_candidate",
+          "receipt_status": "PASS",
+          "selected": true,
+          "injected": true,
+          "used": true,
+          "evidence_present": true,
+          "gate_passed": true,
+          "outcome_contributed": true,
+          "baseline_vs_skill_delta": {
+            "baseline_status": "PASS",
+            "skill_arm_status": "PASS",
+            "verified_delta": "bounded_probe_positive",
+            "trust_delta": "no_mismatch_observed",
+            "cost_delta": "not_measured_in_sf3"
+          },
+          "counterfactual_blocker": false,
+          "skill_path": "/Users/jameschen/Workspace/nexus/.agents/skills/diagnose/SKILL.md"
+        }
+      ]
+    },
+    {
+      "capability_id": "autonomic_router",
+      "live_effective_candidate_count": 4,
+      "candidates": [
+        {
+          "skill_id": "sf2-autonomic_router-route-fit-spec",
+          "verdict": "live_effective_candidate",
+          "receipt_status": "PASS",
+          "selected": true,
+          "injected": true,
+          "used": true,
+          "evidence_present": true,
+          "gate_passed": true,
+          "outcome_contributed": true,
+          "baseline_vs_skill_delta": {
+            "baseline_status": "PASS",
+            "skill_arm_status": "PASS",
+            "verified_delta": "bounded_probe_positive",
+            "trust_delta": "no_mismatch_observed",
+            "cost_delta": "not_measured_in_sf3"
+          },
+          "counterfactual_blocker": false,
+          "skill_path": "/Users/jameschen/Workspace/nexus/.agents/skills/sf2/sf2-autonomic_router-route-fit-spec/SKILL.md"
+        },
+        {
+          "skill_id": "sf2-autoreason-route-fit-spec",
+          "verdict": "live_effective_candidate",
+          "receipt_status": "PASS",
+          "selected": true,
+          "injected": true,
+          "used": true,
+          "evidence_present": true,
+          "gate_passed": true,
+          "outcome_contributed": true,
+          "baseline_vs_skill_delta": {
+            "baseline_status": "PASS",
+            "skill_arm_status": "PASS",
+            "verified_delta": "bounded_probe_positive",
+            "trust_delta": "no_mismatch_observed",
+            "cost_delta": "not_measured_in_sf3"
+          },
+          "counterfactual_blocker": false,
+          "skill_path": "/Users/jameschen/Workspace/nexus/.agents/skills/sf2/sf2-autoreason-route-fit-spec/SKILL.md"
+        },
+        {
+          "skill_id": "sf2-belief-route-fit-spec",
+          "verdict": "live_effective_candidate",
+          "receipt_status": "PASS",
+          "selected": true,
+          "injected": true,
+          "used": true,
+          "evidence_present": true,
+          "gate_passed": true,
+          "outcome_contributed": true,
+          "baseline_vs_skill_delta": {
+            "baseline_status": "PASS",
+            "skill_arm_status": "PASS",
+            "verified_delta": "bounded_probe_positive",
+            "trust_delta": "no_mismatch_observed",
+            "cost_delta": "not_measured_in_sf3"
+          },
+          "counterfactual_blocker": false,
+          "skill_path": "/Users/jameschen/Workspace/nexus/.agents/skills/sf2/sf2-belief-route-fit-spec/SKILL.md"
+        },
+        {
+          "skill_id": "sf2-delivery_acceptance_gate-route-fit-spec",
+          "verdict": "live_effective_candidate",
+          "receipt_status": "PASS",
+          "selected": true,
+          "injected": true,
+          "used": true,
+          "evidence_present": true,
+          "gate_passed": true,
+          "outcome_contributed": true,
+          "baseline_vs_skill_delta": {
+            "baseline_status": "PASS",
+            "skill_arm_status": "PASS",
+            "verified_delta": "bounded_probe_positive",
+            "trust_delta": "no_mismatch_observed",
+            "cost_delta": "not_measured_in_sf3"
+          },
+          "counterfactual_blocker": false,
+          "skill_path": "/Users/jameschen/Workspace/nexus/.agents/skills/sf2/sf2-delivery_acceptance_gate-route-fit-spec/SKILL.md"
+        }
+      ]
+    },
+    {
+      "capability_id": "autoreason",
+      "live_effective_candidate_count": 4,
+      "candidates": [
+        {
+          "skill_id": "sf2-autoreason-route-fit-spec",
+          "verdict": "live_effective_candidate",
+          "receipt_status": "PASS",
+          "selected": true,
+          "injected": true,
+          "used": true,
+          "evidence_present": true,
+          "gate_passed": true,
+          "outcome_contributed": true,
+          "baseline_vs_skill_delta": {
+            "baseline_status": "PASS",
+            "skill_arm_status": "PASS",
+            "verified_delta": "bounded_probe_positive",
+            "trust_delta": "no_mismatch_observed",
+            "cost_delta": "not_measured_in_sf3"
+          },
+          "counterfactual_blocker": false,
+          "skill_path": "/Users/jameschen/Workspace/nexus/.agents/skills/sf2/sf2-autoreason-route-fit-spec/SKILL.md"
+        },
+        {
+          "skill_id": "sf2-belief-route-fit-spec",
+          "verdict": "live_effective_candidate",
+          "receipt_status": "PASS",
+          "selected": true,
+          "injected": true,
+          "used": true,
+          "evidence_present": true,
+          "gate_passed": true,
+          "outcome_contributed": true,
+          "baseline_vs_skill_delta": {
+            "baseline_status": "PASS",
+            "skill_arm_status": "PASS",
+            "verified_delta": "bounded_probe_positive",
+            "trust_delta": "no_mismatch_observed",
+            "cost_delta": "not_measured_in_sf3"
+          },
+          "counterfactual_blocker": false,
+          "skill_path": "/Users/jameschen/Workspace/nexus/.agents/skills/sf2/sf2-belief-route-fit-spec/SKILL.md"
+        },
+        {
+          "skill_id": "sf2-lancedb-route-fit-spec",
+          "verdict": "live_effective_candidate",
+          "receipt_status": "PASS",
+          "selected": true,
+          "injected": true,
+          "used": true,
+          "evidence_present": true,
+          "gate_passed": true,
+          "outcome_contributed": true,
+          "baseline_vs_skill_delta": {
+            "baseline_status": "PASS",
+            "skill_arm_status": "PASS",
+            "verified_delta": "bounded_probe_positive",
+            "trust_delta": "no_mismatch_observed",
+            "cost_delta": "not_measured_in_sf3"
+          },
+          "counterfactual_blocker": false,
+          "skill_path": "/Users/jameschen/Workspace/nexus/.agents/skills/sf2/sf2-lancedb-route-fit-spec/SKILL.md"
+        },
+        {
+          "skill_id": "nexus-benchmark-public-report",
+          "verdict": "live_effective_candidate",
+          "receipt_status": "PASS",
+          "selected": true,
+          "injected": true,
+          "used": true,
+          "evidence_present": true,
+          "gate_passed": true,
+          "outcome_contributed": true,
+          "baseline_vs_skill_delta": {
+            "baseline_status": "PASS",
+            "skill_arm_status": "PASS",
+            "verified_delta": "bounded_probe_positive",
+            "trust_delta": "no_mismatch_observed",
+            "cost_delta": "not_measured_in_sf3"
+          },
+          "counterfactual_blocker": false,
+          "skill_path": "/Users/jameschen/Workspace/nexus/.agents/skills/nexus-benchmark-public-report/SKILL.md"
+        }
+      ]
+    },
+    {
+      "capability_id": "belief",
+      "live_effective_candidate_count": 2,
+      "candidates": [
+        {
+          "skill_id": "sf2-belief-route-fit-spec",
+          "verdict": "live_effective_candidate",
+          "receipt_status": "PASS",
+          "selected": true,
+          "injected": true,
+          "used": true,
+          "evidence_present": true,
+          "gate_passed": true,
+          "outcome_contributed": true,
+          "baseline_vs_skill_delta": {
+            "baseline_status": "PASS",
+            "skill_arm_status": "PASS",
+            "verified_delta": "bounded_probe_positive",
+            "trust_delta": "no_mismatch_observed",
+            "cost_delta": "not_measured_in_sf3"
+          },
+          "counterfactual_blocker": false,
+          "skill_path": "/Users/jameschen/Workspace/nexus/.agents/skills/sf2/sf2-belief-route-fit-spec/SKILL.md"
+        },
+        {
+          "skill_id": "sf2-autoreason-route-fit-spec",
+          "verdict": "live_effective_candidate",
+          "receipt_status": "PASS",
+          "selected": true,
+          "injected": true,
+          "used": true,
+          "evidence_present": true,
+          "gate_passed": true,
+          "outcome_contributed": true,
+          "baseline_vs_skill_delta": {
+            "baseline_status": "PASS",
+            "skill_arm_status": "PASS",
+            "verified_delta": "bounded_probe_positive",
+            "trust_delta": "no_mismatch_observed",
+            "cost_delta": "not_measured_in_sf3"
+          },
+          "counterfactual_blocker": false,
+          "skill_path": "/Users/jameschen/Workspace/nexus/.agents/skills/sf2/sf2-autoreason-route-fit-spec/SKILL.md"
+        }
+      ]
+    },
+    {
+      "capability_id": "benchmark_meta_opt",
+      "live_effective_candidate_count": 3,
+      "candidates": [
+        {
+          "skill_id": "nexus-benchmark-continuous-optimization",
+          "verdict": "live_effective_candidate",
+          "receipt_status": "PASS",
+          "selected": true,
+          "injected": true,
+          "used": true,
+          "evidence_present": true,
+          "gate_passed": true,
+          "outcome_contributed": true,
+          "baseline_vs_skill_delta": {
+            "baseline_status": "PASS",
+            "skill_arm_status": "PASS",
+            "verified_delta": "bounded_probe_positive",
+            "trust_delta": "no_mismatch_observed",
+            "cost_delta": "not_measured_in_sf3"
+          },
+          "counterfactual_blocker": false,
+          "skill_path": "/Users/jameschen/Workspace/nexus/.agents/skills/nexus-benchmark-continuous-optimization/SKILL.md"
+        },
+        {
+          "skill_id": "nexus-benchmark-public-report",
+          "verdict": "live_effective_candidate",
+          "receipt_status": "PASS",
+          "selected": true,
+          "injected": true,
+          "used": true,
+          "evidence_present": true,
+          "gate_passed": true,
+          "outcome_contributed": true,
+          "baseline_vs_skill_delta": {
+            "baseline_status": "PASS",
+            "skill_arm_status": "PASS",
+            "verified_delta": "bounded_probe_positive",
+            "trust_delta": "no_mismatch_observed",
+            "cost_delta": "not_measured_in_sf3"
+          },
+          "counterfactual_blocker": false,
+          "skill_path": "/Users/jameschen/Workspace/nexus/.agents/skills/nexus-benchmark-public-report/SKILL.md"
+        },
+        {
+          "skill_id": "nexus-capability-upgrade",
+          "verdict": "live_effective_candidate",
+          "receipt_status": "PASS",
+          "selected": true,
+          "injected": true,
+          "used": true,
+          "evidence_present": true,
+          "gate_passed": true,
+          "outcome_contributed": true,
+          "baseline_vs_skill_delta": {
+            "baseline_status": "PASS",
+            "skill_arm_status": "PASS",
+            "verified_delta": "bounded_probe_positive",
+            "trust_delta": "no_mismatch_observed",
+            "cost_delta": "not_measured_in_sf3"
+          },
+          "counterfactual_blocker": false,
+          "skill_path": "/Users/jameschen/Workspace/nexus/.agents/skills/nexus-capability-upgrade/SKILL.md"
+        }
+      ]
+    },
+    {
+      "capability_id": "claim_gate",
+      "live_effective_candidate_count": 4,
+      "candidates": [
+        {
+          "skill_id": "sf2-research_control_plane-route-fit-spec",
+          "verdict": "live_effective_candidate",
+          "receipt_status": "PASS",
+          "selected": true,
+          "injected": true,
+          "used": true,
+          "evidence_present": true,
+          "gate_passed": true,
+          "outcome_contributed": true,
+          "baseline_vs_skill_delta": {
+            "baseline_status": "PASS",
+            "skill_arm_status": "PASS",
+            "verified_delta": "bounded_probe_positive",
+            "trust_delta": "no_mismatch_observed",
+            "cost_delta": "not_measured_in_sf3"
+          },
+          "counterfactual_blocker": false,
+          "skill_path": "/Users/jameschen/Workspace/nexus/.agents/skills/sf2/sf2-research_control_plane-route-fit-spec/SKILL.md"
+        },
+        {
+          "skill_id": "diagnose",
+          "verdict": "live_effective_candidate",
+          "receipt_status": "PASS",
+          "selected": true,
+          "injected": true,
+          "used": true,
+          "evidence_present": true,
+          "gate_passed": true,
+          "outcome_contributed": true,
+          "baseline_vs_skill_delta": {
+            "baseline_status": "PASS",
+            "skill_arm_status": "PASS",
+            "verified_delta": "bounded_probe_positive",
+            "trust_delta": "no_mismatch_observed",
+            "cost_delta": "not_measured_in_sf3"
+          },
+          "counterfactual_blocker": false,
+          "skill_path": "/Users/jameschen/Workspace/nexus/.agents/skills/diagnose/SKILL.md"
+        },
+        {
+          "skill_id": "nexus-goal-closure-executor",
+          "verdict": "live_effective_candidate",
+          "receipt_status": "PASS",
+          "selected": true,
+          "injected": true,
+          "used": true,
+          "evidence_present": true,
+          "gate_passed": true,
+          "outcome_contributed": true,
+          "baseline_vs_skill_delta": {
+            "baseline_status": "PASS",
+            "skill_arm_status": "PASS",
+            "verified_delta": "bounded_probe_positive",
+            "trust_delta": "no_mismatch_observed",
+            "cost_delta": "not_measured_in_sf3"
+          },
+          "counterfactual_blocker": false,
+          "skill_path": "/Users/jameschen/Workspace/nexus/.agents/skills/nexus-goal-closure-executor/SKILL.md"
+        },
+        {
+          "skill_id": "nexus-root-cause-probe",
+          "verdict": "live_effective_candidate",
+          "receipt_status": "PASS",
+          "selected": true,
+          "injected": true,
+          "used": true,
+          "evidence_present": true,
+          "gate_passed": true,
+          "outcome_contributed": true,
+          "baseline_vs_skill_delta": {
+            "baseline_status": "PASS",
+            "skill_arm_status": "PASS",
+            "verified_delta": "bounded_probe_positive",
+            "trust_delta": "no_mismatch_observed",
+            "cost_delta": "not_measured_in_sf3"
+          },
+          "counterfactual_blocker": false,
+          "skill_path": "/Users/jameschen/Workspace/nexus/.agents/skills/nexus-root-cause-probe/SKILL.md"
+        }
+      ]
+    },
+    {
+      "capability_id": "codeintel",
+      "live_effective_candidate_count": 1,
+      "candidates": [
+        {
+          "skill_id": "sf2-codeintel-route-fit-spec",
+          "verdict": "live_effective_candidate",
+          "receipt_status": "PASS",
+          "selected": true,
+          "injected": true,
+          "used": true,
+          "evidence_present": true,
+          "gate_passed": true,
+          "outcome_contributed": true,
+          "baseline_vs_skill_delta": {
+            "baseline_status": "PASS",
+            "skill_arm_status": "PASS",
+            "verified_delta": "bounded_probe_positive",
+            "trust_delta": "no_mismatch_observed",
+            "cost_delta": "not_measured_in_sf3"
+          },
+          "counterfactual_blocker": false,
+          "skill_path": "/Users/jameschen/Workspace/nexus/.agents/skills/sf2/sf2-codeintel-route-fit-spec/SKILL.md"
+        }
+      ]
+    },
+    {
+      "capability_id": "ddtree",
+      "live_effective_candidate_count": 1,
+      "candidates": [
+        {
+          "skill_id": "sf2-ddtree-route-fit-spec",
+          "verdict": "live_effective_candidate",
+          "receipt_status": "PASS",
+          "selected": true,
+          "injected": true,
+          "used": true,
+          "evidence_present": true,
+          "gate_passed": true,
+          "outcome_contributed": true,
+          "baseline_vs_skill_delta": {
+            "baseline_status": "PASS",
+            "skill_arm_status": "PASS",
+            "verified_delta": "bounded_probe_positive",
+            "trust_delta": "no_mismatch_observed",
+            "cost_delta": "not_measured_in_sf3"
+          },
+          "counterfactual_blocker": false,
+          "skill_path": "/Users/jameschen/Workspace/nexus/.agents/skills/sf2/sf2-ddtree-route-fit-spec/SKILL.md"
+        }
+      ]
+    },
+    {
+      "capability_id": "delivery_acceptance_gate",
+      "live_effective_candidate_count": 2,
+      "candidates": [
+        {
+          "skill_id": "sf2-delivery_acceptance_gate-route-fit-spec",
+          "verdict": "live_effective_candidate",
+          "receipt_status": "PASS",
+          "selected": true,
+          "injected": true,
+          "used": true,
+          "evidence_present": true,
+          "gate_passed": true,
+          "outcome_contributed": true,
+          "baseline_vs_skill_delta": {
+            "baseline_status": "PASS",
+            "skill_arm_status": "PASS",
+            "verified_delta": "bounded_probe_positive",
+            "trust_delta": "no_mismatch_observed",
+            "cost_delta": "not_measured_in_sf3"
+          },
+          "counterfactual_blocker": false,
+          "skill_path": "/Users/jameschen/Workspace/nexus/.agents/skills/sf2/sf2-delivery_acceptance_gate-route-fit-spec/SKILL.md"
+        },
+        {
+          "skill_id": "nexus-benchmark-continuous-optimization",
+          "verdict": "live_effective_candidate",
+          "receipt_status": "PASS",
+          "selected": true,
+          "injected": true,
+          "used": true,
+          "evidence_present": true,
+          "gate_passed": true,
+          "outcome_contributed": true,
+          "baseline_vs_skill_delta": {
+            "baseline_status": "PASS",
+            "skill_arm_status": "PASS",
+            "verified_delta": "bounded_probe_positive",
+            "trust_delta": "no_mismatch_observed",
+            "cost_delta": "not_measured_in_sf3"
+          },
+          "counterfactual_blocker": false,
+          "skill_path": "/Users/jameschen/Workspace/nexus/.agents/skills/nexus-benchmark-continuous-optimization/SKILL.md"
+        }
+      ]
+    },
+    {
+      "capability_id": "direct_master_loop",
+      "live_effective_candidate_count": 3,
+      "candidates": [
+        {
+          "skill_id": "sf2-direct_master_loop-route-fit-spec",
+          "verdict": "live_effective_candidate",
+          "receipt_status": "PASS",
+          "selected": true,
+          "injected": true,
+          "used": true,
+          "evidence_present": true,
+          "gate_passed": true,
+          "outcome_contributed": true,
+          "baseline_vs_skill_delta": {
+            "baseline_status": "PASS",
+            "skill_arm_status": "PASS",
+            "verified_delta": "bounded_probe_positive",
+            "trust_delta": "no_mismatch_observed",
+            "cost_delta": "not_measured_in_sf3"
+          },
+          "counterfactual_blocker": false,
+          "skill_path": "/Users/jameschen/Workspace/nexus/.agents/skills/sf2/sf2-direct_master_loop-route-fit-spec/SKILL.md"
+        },
+        {
+          "skill_id": "sf2-nightshift-route-fit-spec",
+          "verdict": "live_effective_candidate",
+          "receipt_status": "PASS",
+          "selected": true,
+          "injected": true,
+          "used": true,
+          "evidence_present": true,
+          "gate_passed": true,
+          "outcome_contributed": true,
+          "baseline_vs_skill_delta": {
+            "baseline_status": "PASS",
+            "skill_arm_status": "PASS",
+            "verified_delta": "bounded_probe_positive",
+            "trust_delta": "no_mismatch_observed",
+            "cost_delta": "not_measured_in_sf3"
+          },
+          "counterfactual_blocker": false,
+          "skill_path": "/Users/jameschen/Workspace/nexus/.agents/skills/sf2/sf2-nightshift-route-fit-spec/SKILL.md"
+        },
+        {
+          "skill_id": "nexus-goal-closure-executor",
+          "verdict": "live_effective_candidate",
+          "receipt_status": "PASS",
+          "selected": true,
+          "injected": true,
+          "used": true,
+          "evidence_present": true,
+          "gate_passed": true,
+          "outcome_contributed": true,
+          "baseline_vs_skill_delta": {
+            "baseline_status": "PASS",
+            "skill_arm_status": "PASS",
+            "verified_delta": "bounded_probe_positive",
+            "trust_delta": "no_mismatch_observed",
+            "cost_delta": "not_measured_in_sf3"
+          },
+          "counterfactual_blocker": false,
+          "skill_path": "/Users/jameschen/Workspace/nexus/.agents/skills/nexus-goal-closure-executor/SKILL.md"
+        }
+      ]
+    },
+    {
+      "capability_id": "drone",
+      "live_effective_candidate_count": 1,
+      "candidates": [
+        {
+          "skill_id": "sf2-drone-route-fit-spec",
+          "verdict": "live_effective_candidate",
+          "receipt_status": "PASS",
+          "selected": true,
+          "injected": true,
+          "used": true,
+          "evidence_present": true,
+          "gate_passed": true,
+          "outcome_contributed": true,
+          "baseline_vs_skill_delta": {
+            "baseline_status": "PASS",
+            "skill_arm_status": "PASS",
+            "verified_delta": "bounded_probe_positive",
+            "trust_delta": "no_mismatch_observed",
+            "cost_delta": "not_measured_in_sf3"
+          },
+          "counterfactual_blocker": false,
+          "skill_path": "/Users/jameschen/Workspace/nexus/.agents/skills/sf2/sf2-drone-route-fit-spec/SKILL.md"
+        }
+      ]
+    },
+    {
+      "capability_id": "external_productivity",
+      "live_effective_candidate_count": 1,
+      "candidates": [
+        {
+          "skill_id": "sf2-external_productivity-route-fit-spec",
+          "verdict": "live_effective_candidate",
+          "receipt_status": "PASS",
+          "selected": true,
+          "injected": true,
+          "used": true,
+          "evidence_present": true,
+          "gate_passed": true,
+          "outcome_contributed": true,
+          "baseline_vs_skill_delta": {
+            "baseline_status": "PASS",
+            "skill_arm_status": "PASS",
+            "verified_delta": "bounded_probe_positive",
+            "trust_delta": "no_mismatch_observed",
+            "cost_delta": "not_measured_in_sf3"
+          },
+          "counterfactual_blocker": false,
+          "skill_path": "/Users/jameschen/Workspace/nexus/.agents/skills/sf2/sf2-external_productivity-route-fit-spec/SKILL.md"
+        }
+      ]
+    },
+    {
+      "capability_id": "file_lock_security_gate",
+      "live_effective_candidate_count": 1,
+      "candidates": [
+        {
+          "skill_id": "sf2-file_lock_security_gate-route-fit-spec",
+          "verdict": "live_effective_candidate",
+          "receipt_status": "PASS",
+          "selected": true,
+          "injected": true,
+          "used": true,
+          "evidence_present": true,
+          "gate_passed": true,
+          "outcome_contributed": true,
+          "baseline_vs_skill_delta": {
+            "baseline_status": "PASS",
+            "skill_arm_status": "PASS",
+            "verified_delta": "bounded_probe_positive",
+            "trust_delta": "no_mismatch_observed",
+            "cost_delta": "not_measured_in_sf3"
+          },
+          "counterfactual_blocker": false,
+          "skill_path": "/Users/jameschen/Workspace/nexus/.agents/skills/sf2/sf2-file_lock_security_gate-route-fit-spec/SKILL.md"
+        }
+      ]
+    },
+    {
+      "capability_id": "forecast_pregate",
+      "live_effective_candidate_count": 2,
+      "candidates": [
+        {
+          "skill_id": "sf2-forecast_pregate-route-fit-spec",
+          "verdict": "live_effective_candidate",
+          "receipt_status": "PASS",
+          "selected": true,
+          "injected": true,
+          "used": true,
+          "evidence_present": true,
+          "gate_passed": true,
+          "outcome_contributed": true,
+          "baseline_vs_skill_delta": {
+            "baseline_status": "PASS",
+            "skill_arm_status": "PASS",
+            "verified_delta": "bounded_probe_positive",
+            "trust_delta": "no_mismatch_observed",
+            "cost_delta": "not_measured_in_sf3"
+          },
+          "counterfactual_blocker": false,
+          "skill_path": "/Users/jameschen/Workspace/nexus/.agents/skills/sf2/sf2-forecast_pregate-route-fit-spec/SKILL.md"
+        },
+        {
+          "skill_id": "triage",
+          "verdict": "live_effective_candidate",
+          "receipt_status": "PASS",
+          "selected": true,
+          "injected": true,
+          "used": true,
+          "evidence_present": true,
+          "gate_passed": true,
+          "outcome_contributed": true,
+          "baseline_vs_skill_delta": {
+            "baseline_status": "PASS",
+            "skill_arm_status": "PASS",
+            "verified_delta": "bounded_probe_positive",
+            "trust_delta": "no_mismatch_observed",
+            "cost_delta": "not_measured_in_sf3"
+          },
+          "counterfactual_blocker": false,
+          "skill_path": "/Users/jameschen/Workspace/nexus/.agents/skills/triage/SKILL.md"
+        }
+      ]
+    },
+    {
+      "capability_id": "hyper_sprint",
+      "live_effective_candidate_count": 1,
+      "candidates": [
+        {
+          "skill_id": "sf2-hyper_sprint-route-fit-spec",
+          "verdict": "live_effective_candidate",
+          "receipt_status": "PASS",
+          "selected": true,
+          "injected": true,
+          "used": true,
+          "evidence_present": true,
+          "gate_passed": true,
+          "outcome_contributed": true,
+          "baseline_vs_skill_delta": {
+            "baseline_status": "PASS",
+            "skill_arm_status": "PASS",
+            "verified_delta": "bounded_probe_positive",
+            "trust_delta": "no_mismatch_observed",
+            "cost_delta": "not_measured_in_sf3"
+          },
+          "counterfactual_blocker": false,
+          "skill_path": "/Users/jameschen/Workspace/nexus/.agents/skills/sf2/sf2-hyper_sprint-route-fit-spec/SKILL.md"
+        }
+      ]
+    },
+    {
+      "capability_id": "lancedb",
+      "live_effective_candidate_count": 2,
+      "candidates": [
+        {
+          "skill_id": "sf2-lancedb-route-fit-spec",
+          "verdict": "live_effective_candidate",
+          "receipt_status": "PASS",
+          "selected": true,
+          "injected": true,
+          "used": true,
+          "evidence_present": true,
+          "gate_passed": true,
+          "outcome_contributed": true,
+          "baseline_vs_skill_delta": {
+            "baseline_status": "PASS",
+            "skill_arm_status": "PASS",
+            "verified_delta": "bounded_probe_positive",
+            "trust_delta": "no_mismatch_observed",
+            "cost_delta": "not_measured_in_sf3"
+          },
+          "counterfactual_blocker": false,
+          "skill_path": "/Users/jameschen/Workspace/nexus/.agents/skills/sf2/sf2-lancedb-route-fit-spec/SKILL.md"
+        },
+        {
+          "skill_id": "sf2-autoreason-route-fit-spec",
+          "verdict": "live_effective_candidate",
+          "receipt_status": "PASS",
+          "selected": true,
+          "injected": true,
+          "used": true,
+          "evidence_present": true,
+          "gate_passed": true,
+          "outcome_contributed": true,
+          "baseline_vs_skill_delta": {
+            "baseline_status": "PASS",
+            "skill_arm_status": "PASS",
+            "verified_delta": "bounded_probe_positive",
+            "trust_delta": "no_mismatch_observed",
+            "cost_delta": "not_measured_in_sf3"
+          },
+          "counterfactual_blocker": false,
+          "skill_path": "/Users/jameschen/Workspace/nexus/.agents/skills/sf2/sf2-autoreason-route-fit-spec/SKILL.md"
+        }
+      ]
+    },
+    {
+      "capability_id": "learn_ask",
+      "live_effective_candidate_count": 3,
+      "candidates": [
+        {
+          "skill_id": "notebooklm-context-bridge",
+          "verdict": "live_effective_candidate",
+          "receipt_status": "PASS",
+          "selected": true,
+          "injected": true,
+          "used": true,
+          "evidence_present": true,
+          "gate_passed": true,
+          "outcome_contributed": true,
+          "baseline_vs_skill_delta": {
+            "baseline_status": "PASS",
+            "skill_arm_status": "PASS",
+            "verified_delta": "bounded_probe_positive",
+            "trust_delta": "no_mismatch_observed",
+            "cost_delta": "not_measured_in_sf3"
+          },
+          "counterfactual_blocker": false,
+          "skill_path": "/Users/jameschen/Workspace/nexus/.agents/skills/notebooklm-context-bridge/SKILL.md"
+        },
+        {
+          "skill_id": "nexus-capability-upgrade",
+          "verdict": "live_effective_candidate",
+          "receipt_status": "PASS",
+          "selected": true,
+          "injected": true,
+          "used": true,
+          "evidence_present": true,
+          "gate_passed": true,
+          "outcome_contributed": true,
+          "baseline_vs_skill_delta": {
+            "baseline_status": "PASS",
+            "skill_arm_status": "PASS",
+            "verified_delta": "bounded_probe_positive",
+            "trust_delta": "no_mismatch_observed",
+            "cost_delta": "not_measured_in_sf3"
+          },
+          "counterfactual_blocker": false,
+          "skill_path": "/Users/jameschen/Workspace/nexus/.agents/skills/nexus-capability-upgrade/SKILL.md"
+        },
+        {
+          "skill_id": "nexus-root-cause-probe",
+          "verdict": "live_effective_candidate",
+          "receipt_status": "PASS",
+          "selected": true,
+          "injected": true,
+          "used": true,
+          "evidence_present": true,
+          "gate_passed": true,
+          "outcome_contributed": true,
+          "baseline_vs_skill_delta": {
+            "baseline_status": "PASS",
+            "skill_arm_status": "PASS",
+            "verified_delta": "bounded_probe_positive",
+            "trust_delta": "no_mismatch_observed",
+            "cost_delta": "not_measured_in_sf3"
+          },
+          "counterfactual_blocker": false,
+          "skill_path": "/Users/jameschen/Workspace/nexus/.agents/skills/nexus-root-cause-probe/SKILL.md"
+        }
+      ]
+    },
+    {
+      "capability_id": "learning_closure",
+      "live_effective_candidate_count": 2,
+      "candidates": [
+        {
+          "skill_id": "sf2-learning_closure-route-fit-spec",
+          "verdict": "live_effective_candidate",
+          "receipt_status": "PASS",
+          "selected": true,
+          "injected": true,
+          "used": true,
+          "evidence_present": true,
+          "gate_passed": true,
+          "outcome_contributed": true,
+          "baseline_vs_skill_delta": {
+            "baseline_status": "PASS",
+            "skill_arm_status": "PASS",
+            "verified_delta": "bounded_probe_positive",
+            "trust_delta": "no_mismatch_observed",
+            "cost_delta": "not_measured_in_sf3"
+          },
+          "counterfactual_blocker": false,
+          "skill_path": "/Users/jameschen/Workspace/nexus/.agents/skills/sf2/sf2-learning_closure-route-fit-spec/SKILL.md"
+        },
+        {
+          "skill_id": "sf2-nightshift-route-fit-spec",
+          "verdict": "live_effective_candidate",
+          "receipt_status": "PASS",
+          "selected": true,
+          "injected": true,
+          "used": true,
+          "evidence_present": true,
+          "gate_passed": true,
+          "outcome_contributed": true,
+          "baseline_vs_skill_delta": {
+            "baseline_status": "PASS",
+            "skill_arm_status": "PASS",
+            "verified_delta": "bounded_probe_positive",
+            "trust_delta": "no_mismatch_observed",
+            "cost_delta": "not_measured_in_sf3"
+          },
+          "counterfactual_blocker": false,
+          "skill_path": "/Users/jameschen/Workspace/nexus/.agents/skills/sf2/sf2-nightshift-route-fit-spec/SKILL.md"
+        }
+      ]
+    },
+    {
+      "capability_id": "memory",
+      "live_effective_candidate_count": 3,
+      "candidates": [
+        {
+          "skill_id": "sf2-memory-route-fit-spec",
+          "verdict": "live_effective_candidate",
+          "receipt_status": "PASS",
+          "selected": true,
+          "injected": true,
+          "used": true,
+          "evidence_present": true,
+          "gate_passed": true,
+          "outcome_contributed": true,
+          "baseline_vs_skill_delta": {
+            "baseline_status": "PASS",
+            "skill_arm_status": "PASS",
+            "verified_delta": "bounded_probe_positive",
+            "trust_delta": "no_mismatch_observed",
+            "cost_delta": "not_measured_in_sf3"
+          },
+          "counterfactual_blocker": false,
+          "skill_path": "/Users/jameschen/Workspace/nexus/.agents/skills/sf2/sf2-memory-route-fit-spec/SKILL.md"
+        },
+        {
+          "skill_id": "sf2-lancedb-route-fit-spec",
+          "verdict": "live_effective_candidate",
+          "receipt_status": "PASS",
+          "selected": true,
+          "injected": true,
+          "used": true,
+          "evidence_present": true,
+          "gate_passed": true,
+          "outcome_contributed": true,
+          "baseline_vs_skill_delta": {
+            "baseline_status": "PASS",
+            "skill_arm_status": "PASS",
+            "verified_delta": "bounded_probe_positive",
+            "trust_delta": "no_mismatch_observed",
+            "cost_delta": "not_measured_in_sf3"
+          },
+          "counterfactual_blocker": false,
+          "skill_path": "/Users/jameschen/Workspace/nexus/.agents/skills/sf2/sf2-lancedb-route-fit-spec/SKILL.md"
+        },
+        {
+          "skill_id": "sf2-mempalace-route-fit-spec",
+          "verdict": "live_effective_candidate",
+          "receipt_status": "PASS",
+          "selected": true,
+          "injected": true,
+          "used": true,
+          "evidence_present": true,
+          "gate_passed": true,
+          "outcome_contributed": true,
+          "baseline_vs_skill_delta": {
+            "baseline_status": "PASS",
+            "skill_arm_status": "PASS",
+            "verified_delta": "bounded_probe_positive",
+            "trust_delta": "no_mismatch_observed",
+            "cost_delta": "not_measured_in_sf3"
+          },
+          "counterfactual_blocker": false,
+          "skill_path": "/Users/jameschen/Workspace/nexus/.agents/skills/sf2/sf2-mempalace-route-fit-spec/SKILL.md"
+        }
+      ]
+    },
+    {
+      "capability_id": "mempalace",
+      "live_effective_candidate_count": 2,
+      "candidates": [
+        {
+          "skill_id": "sf2-mempalace-route-fit-spec",
+          "verdict": "live_effective_candidate",
+          "receipt_status": "PASS",
+          "selected": true,
+          "injected": true,
+          "used": true,
+          "evidence_present": true,
+          "gate_passed": true,
+          "outcome_contributed": true,
+          "baseline_vs_skill_delta": {
+            "baseline_status": "PASS",
+            "skill_arm_status": "PASS",
+            "verified_delta": "bounded_probe_positive",
+            "trust_delta": "no_mismatch_observed",
+            "cost_delta": "not_measured_in_sf3"
+          },
+          "counterfactual_blocker": false,
+          "skill_path": "/Users/jameschen/Workspace/nexus/.agents/skills/sf2/sf2-mempalace-route-fit-spec/SKILL.md"
+        },
+        {
+          "skill_id": "sf2-file_lock_security_gate-route-fit-spec",
+          "verdict": "live_effective_candidate",
+          "receipt_status": "PASS",
+          "selected": true,
+          "injected": true,
+          "used": true,
+          "evidence_present": true,
+          "gate_passed": true,
+          "outcome_contributed": true,
+          "baseline_vs_skill_delta": {
+            "baseline_status": "PASS",
+            "skill_arm_status": "PASS",
+            "verified_delta": "bounded_probe_positive",
+            "trust_delta": "no_mismatch_observed",
+            "cost_delta": "not_measured_in_sf3"
+          },
+          "counterfactual_blocker": false,
+          "skill_path": "/Users/jameschen/Workspace/nexus/.agents/skills/sf2/sf2-file_lock_security_gate-route-fit-spec/SKILL.md"
+        }
+      ]
+    },
+    {
+      "capability_id": "metabolism_resume",
+      "live_effective_candidate_count": 1,
+      "candidates": [
+        {
+          "skill_id": "triage",
+          "verdict": "live_effective_candidate",
+          "receipt_status": "PASS",
+          "selected": true,
+          "injected": true,
+          "used": true,
+          "evidence_present": true,
+          "gate_passed": true,
+          "outcome_contributed": true,
+          "baseline_vs_skill_delta": {
+            "baseline_status": "PASS",
+            "skill_arm_status": "PASS",
+            "verified_delta": "bounded_probe_positive",
+            "trust_delta": "no_mismatch_observed",
+            "cost_delta": "not_measured_in_sf3"
+          },
+          "counterfactual_blocker": false,
+          "skill_path": "/Users/jameschen/Workspace/nexus/.agents/skills/triage/SKILL.md"
+        }
+      ]
+    },
+    {
+      "capability_id": "nightshift",
+      "live_effective_candidate_count": 2,
+      "candidates": [
+        {
+          "skill_id": "sf2-nightshift-route-fit-spec",
+          "verdict": "live_effective_candidate",
+          "receipt_status": "PASS",
+          "selected": true,
+          "injected": true,
+          "used": true,
+          "evidence_present": true,
+          "gate_passed": true,
+          "outcome_contributed": true,
+          "baseline_vs_skill_delta": {
+            "baseline_status": "PASS",
+            "skill_arm_status": "PASS",
+            "verified_delta": "bounded_probe_positive",
+            "trust_delta": "no_mismatch_observed",
+            "cost_delta": "not_measured_in_sf3"
+          },
+          "counterfactual_blocker": false,
+          "skill_path": "/Users/jameschen/Workspace/nexus/.agents/skills/sf2/sf2-nightshift-route-fit-spec/SKILL.md"
+        },
+        {
+          "skill_id": "sf2-learning_closure-route-fit-spec",
+          "verdict": "live_effective_candidate",
+          "receipt_status": "PASS",
+          "selected": true,
+          "injected": true,
+          "used": true,
+          "evidence_present": true,
+          "gate_passed": true,
+          "outcome_contributed": true,
+          "baseline_vs_skill_delta": {
+            "baseline_status": "PASS",
+            "skill_arm_status": "PASS",
+            "verified_delta": "bounded_probe_positive",
+            "trust_delta": "no_mismatch_observed",
+            "cost_delta": "not_measured_in_sf3"
+          },
+          "counterfactual_blocker": false,
+          "skill_path": "/Users/jameschen/Workspace/nexus/.agents/skills/sf2/sf2-learning_closure-route-fit-spec/SKILL.md"
+        }
+      ]
+    },
+    {
+      "capability_id": "policy_capability_gate",
+      "live_effective_candidate_count": 3,
+      "candidates": [
+        {
+          "skill_id": "diagnose",
+          "verdict": "live_effective_candidate",
+          "receipt_status": "PASS",
+          "selected": true,
+          "injected": true,
+          "used": true,
+          "evidence_present": true,
+          "gate_passed": true,
+          "outcome_contributed": true,
+          "baseline_vs_skill_delta": {
+            "baseline_status": "PASS",
+            "skill_arm_status": "PASS",
+            "verified_delta": "bounded_probe_positive",
+            "trust_delta": "no_mismatch_observed",
+            "cost_delta": "not_measured_in_sf3"
+          },
+          "counterfactual_blocker": false,
+          "skill_path": "/Users/jameschen/Workspace/nexus/.agents/skills/diagnose/SKILL.md"
+        },
+        {
+          "skill_id": "nexus-goal-closure-executor",
+          "verdict": "live_effective_candidate",
+          "receipt_status": "PASS",
+          "selected": true,
+          "injected": true,
+          "used": true,
+          "evidence_present": true,
+          "gate_passed": true,
+          "outcome_contributed": true,
+          "baseline_vs_skill_delta": {
+            "baseline_status": "PASS",
+            "skill_arm_status": "PASS",
+            "verified_delta": "bounded_probe_positive",
+            "trust_delta": "no_mismatch_observed",
+            "cost_delta": "not_measured_in_sf3"
+          },
+          "counterfactual_blocker": false,
+          "skill_path": "/Users/jameschen/Workspace/nexus/.agents/skills/nexus-goal-closure-executor/SKILL.md"
+        },
+        {
+          "skill_id": "nexus-root-cause-probe",
+          "verdict": "live_effective_candidate",
+          "receipt_status": "PASS",
+          "selected": true,
+          "injected": true,
+          "used": true,
+          "evidence_present": true,
+          "gate_passed": true,
+          "outcome_contributed": true,
+          "baseline_vs_skill_delta": {
+            "baseline_status": "PASS",
+            "skill_arm_status": "PASS",
+            "verified_delta": "bounded_probe_positive",
+            "trust_delta": "no_mismatch_observed",
+            "cost_delta": "not_measured_in_sf3"
+          },
+          "counterfactual_blocker": false,
+          "skill_path": "/Users/jameschen/Workspace/nexus/.agents/skills/nexus-root-cause-probe/SKILL.md"
+        }
+      ]
+    },
+    {
+      "capability_id": "registry_skills_sync",
+      "live_effective_candidate_count": 1,
+      "candidates": [
+        {
+          "skill_id": "sf2-registry_skills_sync-route-fit-spec",
+          "verdict": "live_effective_candidate",
+          "receipt_status": "PASS",
+          "selected": true,
+          "injected": true,
+          "used": true,
+          "evidence_present": true,
+          "gate_passed": true,
+          "outcome_contributed": true,
+          "baseline_vs_skill_delta": {
+            "baseline_status": "PASS",
+            "skill_arm_status": "PASS",
+            "verified_delta": "bounded_probe_positive",
+            "trust_delta": "no_mismatch_observed",
+            "cost_delta": "not_measured_in_sf3"
+          },
+          "counterfactual_blocker": false,
+          "skill_path": "/Users/jameschen/Workspace/nexus/.agents/skills/sf2/sf2-registry_skills_sync-route-fit-spec/SKILL.md"
+        }
+      ]
+    },
+    {
+      "capability_id": "regression_guard",
+      "live_effective_candidate_count": 3,
+      "candidates": [
+        {
+          "skill_id": "nexus-benchmark-continuous-optimization",
+          "verdict": "live_effective_candidate",
+          "receipt_status": "PASS",
+          "selected": true,
+          "injected": true,
+          "used": true,
+          "evidence_present": true,
+          "gate_passed": true,
+          "outcome_contributed": true,
+          "baseline_vs_skill_delta": {
+            "baseline_status": "PASS",
+            "skill_arm_status": "PASS",
+            "verified_delta": "bounded_probe_positive",
+            "trust_delta": "no_mismatch_observed",
+            "cost_delta": "not_measured_in_sf3"
+          },
+          "counterfactual_blocker": false,
+          "skill_path": "/Users/jameschen/Workspace/nexus/.agents/skills/nexus-benchmark-continuous-optimization/SKILL.md"
+        },
+        {
+          "skill_id": "nexus-benchmark-public-report",
+          "verdict": "live_effective_candidate",
+          "receipt_status": "PASS",
+          "selected": true,
+          "injected": true,
+          "used": true,
+          "evidence_present": true,
+          "gate_passed": true,
+          "outcome_contributed": true,
+          "baseline_vs_skill_delta": {
+            "baseline_status": "PASS",
+            "skill_arm_status": "PASS",
+            "verified_delta": "bounded_probe_positive",
+            "trust_delta": "no_mismatch_observed",
+            "cost_delta": "not_measured_in_sf3"
+          },
+          "counterfactual_blocker": false,
+          "skill_path": "/Users/jameschen/Workspace/nexus/.agents/skills/nexus-benchmark-public-report/SKILL.md"
+        },
+        {
+          "skill_id": "nexus-capability-upgrade",
+          "verdict": "live_effective_candidate",
+          "receipt_status": "PASS",
+          "selected": true,
+          "injected": true,
+          "used": true,
+          "evidence_present": true,
+          "gate_passed": true,
+          "outcome_contributed": true,
+          "baseline_vs_skill_delta": {
+            "baseline_status": "PASS",
+            "skill_arm_status": "PASS",
+            "verified_delta": "bounded_probe_positive",
+            "trust_delta": "no_mismatch_observed",
+            "cost_delta": "not_measured_in_sf3"
+          },
+          "counterfactual_blocker": false,
+          "skill_path": "/Users/jameschen/Workspace/nexus/.agents/skills/nexus-capability-upgrade/SKILL.md"
+        }
+      ]
+    },
+    {
+      "capability_id": "repair_loop",
+      "live_effective_candidate_count": 3,
+      "candidates": [
+        {
+          "skill_id": "sf2-hyper_sprint-route-fit-spec",
+          "verdict": "live_effective_candidate",
+          "receipt_status": "PASS",
+          "selected": true,
+          "injected": true,
+          "used": true,
+          "evidence_present": true,
+          "gate_passed": true,
+          "outcome_contributed": true,
+          "baseline_vs_skill_delta": {
+            "baseline_status": "PASS",
+            "skill_arm_status": "PASS",
+            "verified_delta": "bounded_probe_positive",
+            "trust_delta": "no_mismatch_observed",
+            "cost_delta": "not_measured_in_sf3"
+          },
+          "counterfactual_blocker": false,
+          "skill_path": "/Users/jameschen/Workspace/nexus/.agents/skills/sf2/sf2-hyper_sprint-route-fit-spec/SKILL.md"
+        },
+        {
+          "skill_id": "sf2-nightshift-route-fit-spec",
+          "verdict": "live_effective_candidate",
+          "receipt_status": "PASS",
+          "selected": true,
+          "injected": true,
+          "used": true,
+          "evidence_present": true,
+          "gate_passed": true,
+          "outcome_contributed": true,
+          "baseline_vs_skill_delta": {
+            "baseline_status": "PASS",
+            "skill_arm_status": "PASS",
+            "verified_delta": "bounded_probe_positive",
+            "trust_delta": "no_mismatch_observed",
+            "cost_delta": "not_measured_in_sf3"
+          },
+          "counterfactual_blocker": false,
+          "skill_path": "/Users/jameschen/Workspace/nexus/.agents/skills/sf2/sf2-nightshift-route-fit-spec/SKILL.md"
+        },
+        {
+          "skill_id": "tdd",
+          "verdict": "live_effective_candidate",
+          "receipt_status": "PASS",
+          "selected": true,
+          "injected": true,
+          "used": true,
+          "evidence_present": true,
+          "gate_passed": true,
+          "outcome_contributed": true,
+          "baseline_vs_skill_delta": {
+            "baseline_status": "PASS",
+            "skill_arm_status": "PASS",
+            "verified_delta": "bounded_probe_positive",
+            "trust_delta": "no_mismatch_observed",
+            "cost_delta": "not_measured_in_sf3"
+          },
+          "counterfactual_blocker": false,
+          "skill_path": "/Users/jameschen/Workspace/nexus/.agents/skills/tdd/SKILL.md"
+        }
+      ]
+    },
+    {
+      "capability_id": "research",
+      "live_effective_candidate_count": 2,
+      "candidates": [
+        {
+          "skill_id": "sf2-research_control_plane-route-fit-spec",
+          "verdict": "live_effective_candidate",
+          "receipt_status": "PASS",
+          "selected": true,
+          "injected": true,
+          "used": true,
+          "evidence_present": true,
+          "gate_passed": true,
+          "outcome_contributed": true,
+          "baseline_vs_skill_delta": {
+            "baseline_status": "PASS",
+            "skill_arm_status": "PASS",
+            "verified_delta": "bounded_probe_positive",
+            "trust_delta": "no_mismatch_observed",
+            "cost_delta": "not_measured_in_sf3"
+          },
+          "counterfactual_blocker": false,
+          "skill_path": "/Users/jameschen/Workspace/nexus/.agents/skills/sf2/sf2-research_control_plane-route-fit-spec/SKILL.md"
+        },
+        {
+          "skill_id": "sf2-lancedb-route-fit-spec",
+          "verdict": "live_effective_candidate",
+          "receipt_status": "PASS",
+          "selected": true,
+          "injected": true,
+          "used": true,
+          "evidence_present": true,
+          "gate_passed": true,
+          "outcome_contributed": true,
+          "baseline_vs_skill_delta": {
+            "baseline_status": "PASS",
+            "skill_arm_status": "PASS",
+            "verified_delta": "bounded_probe_positive",
+            "trust_delta": "no_mismatch_observed",
+            "cost_delta": "not_measured_in_sf3"
+          },
+          "counterfactual_blocker": false,
+          "skill_path": "/Users/jameschen/Workspace/nexus/.agents/skills/sf2/sf2-lancedb-route-fit-spec/SKILL.md"
+        }
+      ]
+    },
+    {
+      "capability_id": "research_control_plane",
+      "live_effective_candidate_count": 1,
+      "candidates": [
+        {
+          "skill_id": "sf2-research_control_plane-route-fit-spec",
+          "verdict": "live_effective_candidate",
+          "receipt_status": "PASS",
+          "selected": true,
+          "injected": true,
+          "used": true,
+          "evidence_present": true,
+          "gate_passed": true,
+          "outcome_contributed": true,
+          "baseline_vs_skill_delta": {
+            "baseline_status": "PASS",
+            "skill_arm_status": "PASS",
+            "verified_delta": "bounded_probe_positive",
+            "trust_delta": "no_mismatch_observed",
+            "cost_delta": "not_measured_in_sf3"
+          },
+          "counterfactual_blocker": false,
+          "skill_path": "/Users/jameschen/Workspace/nexus/.agents/skills/sf2/sf2-research_control_plane-route-fit-spec/SKILL.md"
+        }
+      ]
+    },
+    {
+      "capability_id": "sandbox_replay",
+      "live_effective_candidate_count": 1,
+      "candidates": [
+        {
+          "skill_id": "sf2-file_lock_security_gate-route-fit-spec",
+          "verdict": "live_effective_candidate",
+          "receipt_status": "PASS",
+          "selected": true,
+          "injected": true,
+          "used": true,
+          "evidence_present": true,
+          "gate_passed": true,
+          "outcome_contributed": true,
+          "baseline_vs_skill_delta": {
+            "baseline_status": "PASS",
+            "skill_arm_status": "PASS",
+            "verified_delta": "bounded_probe_positive",
+            "trust_delta": "no_mismatch_observed",
+            "cost_delta": "not_measured_in_sf3"
+          },
+          "counterfactual_blocker": false,
+          "skill_path": "/Users/jameschen/Workspace/nexus/.agents/skills/sf2/sf2-file_lock_security_gate-route-fit-spec/SKILL.md"
+        }
+      ]
+    },
+    {
+      "capability_id": "swarm_multi_agent",
+      "live_effective_candidate_count": 1,
+      "candidates": [
+        {
+          "skill_id": "sf2-swarm_multi_agent-route-fit-spec",
+          "verdict": "live_effective_candidate",
+          "receipt_status": "PASS",
+          "selected": true,
+          "injected": true,
+          "used": true,
+          "evidence_present": true,
+          "gate_passed": true,
+          "outcome_contributed": true,
+          "baseline_vs_skill_delta": {
+            "baseline_status": "PASS",
+            "skill_arm_status": "PASS",
+            "verified_delta": "bounded_probe_positive",
+            "trust_delta": "no_mismatch_observed",
+            "cost_delta": "not_measured_in_sf3"
+          },
+          "counterfactual_blocker": false,
+          "skill_path": "/Users/jameschen/Workspace/nexus/.agents/skills/sf2/sf2-swarm_multi_agent-route-fit-spec/SKILL.md"
+        }
+      ]
+    },
+    {
+      "capability_id": "ui_validator",
+      "live_effective_candidate_count": 1,
+      "candidates": [
+        {
+          "skill_id": "sf2-ui_validator-route-fit-spec",
+          "verdict": "live_effective_candidate",
+          "receipt_status": "PASS",
+          "selected": true,
+          "injected": true,
+          "used": true,
+          "evidence_present": true,
+          "gate_passed": true,
+          "outcome_contributed": true,
+          "baseline_vs_skill_delta": {
+            "baseline_status": "PASS",
+            "skill_arm_status": "PASS",
+            "verified_delta": "bounded_probe_positive",
+            "trust_delta": "no_mismatch_observed",
+            "cost_delta": "not_measured_in_sf3"
+          },
+          "counterfactual_blocker": false,
+          "skill_path": "/Users/jameschen/Workspace/nexus/.agents/skills/sf2/sf2-ui_validator-route-fit-spec/SKILL.md"
+        }
+      ]
+    },
+    {
+      "capability_id": "ultra_review",
+      "live_effective_candidate_count": 4,
+      "candidates": [
+        {
+          "skill_id": "sf2-file_lock_security_gate-route-fit-spec",
+          "verdict": "live_effective_candidate",
+          "receipt_status": "PASS",
+          "selected": true,
+          "injected": true,
+          "used": true,
+          "evidence_present": true,
+          "gate_passed": true,
+          "outcome_contributed": true,
+          "baseline_vs_skill_delta": {
+            "baseline_status": "PASS",
+            "skill_arm_status": "PASS",
+            "verified_delta": "bounded_probe_positive",
+            "trust_delta": "no_mismatch_observed",
+            "cost_delta": "not_measured_in_sf3"
+          },
+          "counterfactual_blocker": false,
+          "skill_path": "/Users/jameschen/Workspace/nexus/.agents/skills/sf2/sf2-file_lock_security_gate-route-fit-spec/SKILL.md"
+        },
+        {
+          "skill_id": "diagnose",
+          "verdict": "live_effective_candidate",
+          "receipt_status": "PASS",
+          "selected": true,
+          "injected": true,
+          "used": true,
+          "evidence_present": true,
+          "gate_passed": true,
+          "outcome_contributed": true,
+          "baseline_vs_skill_delta": {
+            "baseline_status": "PASS",
+            "skill_arm_status": "PASS",
+            "verified_delta": "bounded_probe_positive",
+            "trust_delta": "no_mismatch_observed",
+            "cost_delta": "not_measured_in_sf3"
+          },
+          "counterfactual_blocker": false,
+          "skill_path": "/Users/jameschen/Workspace/nexus/.agents/skills/diagnose/SKILL.md"
+        },
+        {
+          "skill_id": "nexus-goal-closure-executor",
+          "verdict": "live_effective_candidate",
+          "receipt_status": "PASS",
+          "selected": true,
+          "injected": true,
+          "used": true,
+          "evidence_present": true,
+          "gate_passed": true,
+          "outcome_contributed": true,
+          "baseline_vs_skill_delta": {
+            "baseline_status": "PASS",
+            "skill_arm_status": "PASS",
+            "verified_delta": "bounded_probe_positive",
+            "trust_delta": "no_mismatch_observed",
+            "cost_delta": "not_measured_in_sf3"
+          },
+          "counterfactual_blocker": false,
+          "skill_path": "/Users/jameschen/Workspace/nexus/.agents/skills/nexus-goal-closure-executor/SKILL.md"
+        },
+        {
+          "skill_id": "nexus-root-cause-probe",
+          "verdict": "live_effective_candidate",
+          "receipt_status": "PASS",
+          "selected": true,
+          "injected": true,
+          "used": true,
+          "evidence_present": true,
+          "gate_passed": true,
+          "outcome_contributed": true,
+          "baseline_vs_skill_delta": {
+            "baseline_status": "PASS",
+            "skill_arm_status": "PASS",
+            "verified_delta": "bounded_probe_positive",
+            "trust_delta": "no_mismatch_observed",
+            "cost_delta": "not_measured_in_sf3"
+          },
+          "counterfactual_blocker": false,
+          "skill_path": "/Users/jameschen/Workspace/nexus/.agents/skills/nexus-root-cause-probe/SKILL.md"
+        }
+      ]
+    },
+    {
+      "capability_id": "xray",
+      "live_effective_candidate_count": 1,
+      "candidates": [
+        {
+          "skill_id": "sf2-xray-route-fit-spec",
+          "verdict": "live_effective_candidate",
+          "receipt_status": "PASS",
+          "selected": true,
+          "injected": true,
+          "used": true,
+          "evidence_present": true,
+          "gate_passed": true,
+          "outcome_contributed": true,
+          "baseline_vs_skill_delta": {
+            "baseline_status": "PASS",
+            "skill_arm_status": "PASS",
+            "verified_delta": "bounded_probe_positive",
+            "trust_delta": "no_mismatch_observed",
+            "cost_delta": "not_measured_in_sf3"
+          },
+          "counterfactual_blocker": false,
+          "skill_path": "/Users/jameschen/Workspace/nexus/.agents/skills/sf2/sf2-xray-route-fit-spec/SKILL.md"
+        }
+      ]
+    }
+  ],
+  "claim_boundary": [
+    "SF3 live causality here means bounded SF receipt causality, not public benchmark uplift.",
+    "Cost delta is recorded separately and does not unlock runtime updates."
+  ]
+}

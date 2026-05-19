@@ -1,0 +1,403 @@
+{
+  "candidates": [
+    {
+      "candidate_id": "github5-mvanhorn-last30days-skill-last30days",
+      "candidate_name": "last30days",
+      "commit": "850c7e01857bd1b429b902af53d8dc60c6815f4e",
+      "description": "Research what people actually say about any topic in the last 30 days. Pulls posts and engagement from Reddit, X, YouTube, TikTok, Hacker News, Polymarket, GitHub, and the web.",
+      "repo": "mvanhorn-last30days-skill",
+      "risk_flags": [
+        {
+          "category": "network_or_api",
+          "hits": [
+            "https://",
+            "api_key",
+            "token",
+            "oauth"
+          ]
+        },
+        {
+          "category": "shell_or_install",
+          "hits": [
+            "python "
+          ]
+        },
+        {
+          "category": "persistence_or_hooks",
+          "hits": [
+            "hook"
+          ]
+        }
+      ],
+      "safety": "PASS_PROMPT_ONLY_REWRITE_REQUIRED",
+      "source_path": "skills/last30days/SKILL.md",
+      "text_sha256": "534f0347f304ec51254a7d3a210e07c86cc252175cc6a588e97d32ce94f0f745",
+      "url": "https://github.com/mvanhorn/last30days-skill"
+    },
+    {
+      "candidate_id": "github5-p8552015-lab-video-auto-dubber-p8552015-lab-video-auto-dubber",
+      "candidate_name": "p8552015-lab-video-auto-dubber",
+      "commit": "4428ad5dda7cf9d131b9b9121cdef2da82b50b7c",
+      "description": "Use when a screen recording needs privacy-safe oral subtitles, macOS voiceover, and fast preview/final video exports.",
+      "repo": "p8552015-lab-video-auto-dubber",
+      "risk_flags": [],
+      "safety": "PASS_PROMPT_ONLY",
+      "source_path": "SKILL.md",
+      "text_sha256": "508d52f776d92269bdab556dc85fc85a0e50aa7c54c3233e32614fa6ffabae68",
+      "url": "https://github.com/p8552015-lab/video-auto-dubber"
+    },
+    {
+      "candidate_id": "github5-slavingia-skills-mvp",
+      "candidate_name": "mvp",
+      "commit": "eb9f57fba03ddb0382ed3bfe6654d3d7df128c70",
+      "description": "Guide building a minimum viable product the minimalist entrepreneur way \u2014 manual first, then processized, then productized. Use when someone is ready to build their first product or struggling with scope.",
+      "repo": "slavingia-skills",
+      "risk_flags": [],
+      "safety": "PASS_PROMPT_ONLY",
+      "source_path": "skills/mvp/SKILL.md",
+      "text_sha256": "0546a592044bf2ada0f61507991cc41ab10507f7131b666a25caca10e6c2339a",
+      "url": "https://github.com/slavingia/skills"
+    },
+    {
+      "candidate_id": "github5-slavingia-skills-find-community",
+      "candidate_name": "find-community",
+      "commit": "eb9f57fba03ddb0382ed3bfe6654d3d7df128c70",
+      "description": "Help identify and evaluate communities to build a minimalist business around. Use when someone is looking for a business idea, trying to find their community, or wondering where to start as an entrepreneur.",
+      "repo": "slavingia-skills",
+      "risk_flags": [],
+      "safety": "PASS_PROMPT_ONLY",
+      "source_path": "skills/find-community/SKILL.md",
+      "text_sha256": "74725186bcad409520a59edffa14689bcbbfc213c4dc5dae4dffce97fd5183dc",
+      "url": "https://github.com/slavingia/skills"
+    },
+    {
+      "candidate_id": "github5-slavingia-skills-company-values",
+      "candidate_name": "company-values",
+      "commit": "eb9f57fba03ddb0382ed3bfe6654d3d7df128c70",
+      "description": "Help define company values and culture for a minimalist business. Use when someone is setting up their company culture, preparing to hire, or wanting to codify what their company stands for.",
+      "repo": "slavingia-skills",
+      "risk_flags": [
+        {
+          "category": "network_or_api",
+          "hits": [
+            "secret"
+          ]
+        }
+      ],
+      "safety": "PASS_PROMPT_ONLY_REWRITE_REQUIRED",
+      "source_path": "skills/company-values/SKILL.md",
+      "text_sha256": "d8c017eb5ad222630fbf503320ead27c9ef39909db5752c8a38b0e96428d19ad",
+      "url": "https://github.com/slavingia/skills"
+    },
+    {
+      "candidate_id": "github5-slavingia-skills-validate-idea",
+      "candidate_name": "validate-idea",
+      "commit": "eb9f57fba03ddb0382ed3bfe6654d3d7df128c70",
+      "description": "Validate a business idea using the minimalist entrepreneur framework. Use when someone has a business idea and wants to test if it's worth pursuing before building anything.",
+      "repo": "slavingia-skills",
+      "risk_flags": [],
+      "safety": "PASS_PROMPT_ONLY",
+      "source_path": "skills/validate-idea/SKILL.md",
+      "text_sha256": "46d931aaef8e74c358253161d3950ea0c18525778b3b0286a925bf42917d6b03",
+      "url": "https://github.com/slavingia/skills"
+    },
+    {
+      "candidate_id": "github5-slavingia-skills-processize",
+      "candidate_name": "processize",
+      "commit": "eb9f57fba03ddb0382ed3bfe6654d3d7df128c70",
+      "description": "Turn a product idea into a manual-first process you can start delivering today. Use when you have an idea and want to figure out how to deliver value by hand before writing any code.",
+      "repo": "slavingia-skills",
+      "risk_flags": [],
+      "safety": "PASS_PROMPT_ONLY",
+      "source_path": "skills/processize/SKILL.md",
+      "text_sha256": "a5a6888ce36d56a63b0abeff06256e64642b79f4f35309993ea80f243f078560",
+      "url": "https://github.com/slavingia/skills"
+    },
+    {
+      "candidate_id": "github5-slavingia-skills-minimalist-review",
+      "candidate_name": "minimalist-review",
+      "commit": "eb9f57fba03ddb0382ed3bfe6654d3d7df128c70",
+      "description": "Review any business decision, plan, or strategy through the minimalist entrepreneur lens. Use when someone wants a gut-check on a business decision, wants to simplify their approach, or needs to decide between options.",
+      "repo": "slavingia-skills",
+      "risk_flags": [],
+      "safety": "PASS_PROMPT_ONLY",
+      "source_path": "skills/minimalist-review/SKILL.md",
+      "text_sha256": "113e74edc80297635748df6b425efcd4c04e493a5a11c392486e76917c101619",
+      "url": "https://github.com/slavingia/skills"
+    },
+    {
+      "candidate_id": "github5-slavingia-skills-grow-sustainably",
+      "candidate_name": "grow-sustainably",
+      "commit": "eb9f57fba03ddb0382ed3bfe6654d3d7df128c70",
+      "description": "Evaluate business decisions through the lens of sustainable, profitable growth. Use when someone is making decisions about spending, hiring, fundraising, or scaling their business.",
+      "repo": "slavingia-skills",
+      "risk_flags": [],
+      "safety": "PASS_PROMPT_ONLY",
+      "source_path": "skills/grow-sustainably/SKILL.md",
+      "text_sha256": "55e382834d6e2416c26a2a869af52e23f4c6e30ead40703864114321ee92f6b5",
+      "url": "https://github.com/slavingia/skills"
+    },
+    {
+      "candidate_id": "github5-slavingia-skills-marketing-plan",
+      "candidate_name": "marketing-plan",
+      "commit": "eb9f57fba03ddb0382ed3bfe6654d3d7df128c70",
+      "description": "Create a minimalist marketing plan focused on building an audience through content, not ads. Use when someone has product-market fit (~100 customers) and wants to scale with marketing, or needs a content strategy.",
+      "repo": "slavingia-skills",
+      "risk_flags": [
+        {
+          "category": "persistence_or_hooks",
+          "hits": [
+            "startup"
+          ]
+        }
+      ],
+      "safety": "PASS_PROMPT_ONLY_REWRITE_REQUIRED",
+      "source_path": "skills/marketing-plan/SKILL.md",
+      "text_sha256": "f0776f808cba0afde645919d3f33682f89d5104513627dfcc2b0b1055f2ed5f6",
+      "url": "https://github.com/slavingia/skills"
+    },
+    {
+      "candidate_id": "github5-slavingia-skills-first-customers",
+      "candidate_name": "first-customers",
+      "commit": "eb9f57fba03ddb0382ed3bfe6654d3d7df128c70",
+      "description": "Create a strategy for selling to your first 100 customers using the minimalist entrepreneur playbook. Use when someone has a product and needs to find customers, or is struggling with early sales.",
+      "repo": "slavingia-skills",
+      "risk_flags": [],
+      "safety": "PASS_PROMPT_ONLY",
+      "source_path": "skills/first-customers/SKILL.md",
+      "text_sha256": "da4bfe33a52b6911388561e752691bb51f544c7965715c78ce16e33c47d84b64",
+      "url": "https://github.com/slavingia/skills"
+    },
+    {
+      "candidate_id": "github5-slavingia-skills-pricing",
+      "candidate_name": "pricing",
+      "commit": "eb9f57fba03ddb0382ed3bfe6654d3d7df128c70",
+      "description": "Help figure out pricing for a product or service using minimalist entrepreneur principles. Use when someone is setting prices, considering price changes, or struggling with what to charge.",
+      "repo": "slavingia-skills",
+      "risk_flags": [],
+      "safety": "PASS_PROMPT_ONLY",
+      "source_path": "skills/pricing/SKILL.md",
+      "text_sha256": "120d0c341219051bf9b769d288ad47c0cf104602213e05dc612303c0468a2d1d",
+      "url": "https://github.com/slavingia/skills"
+    },
+    {
+      "candidate_id": "github5-yusufkaraaslan-skill-seekers-skill-seekers",
+      "candidate_name": "skill-seekers",
+      "commit": "ff0f832febc8db931e88d401a8d0896aac134159",
+      "description": "Automatically detect source types and build AI skills using Skill Seekers. Use when the user wants to create skills from documentation, repos, PDFs, videos, or other knowledge sources.",
+      "repo": "yusufkaraaslan-Skill_Seekers",
+      "risk_flags": [
+        {
+          "category": "network_or_api",
+          "hits": [
+            "https://"
+          ]
+        }
+      ],
+      "safety": "PASS_PROMPT_ONLY_REWRITE_REQUIRED",
+      "source_path": "skills/skill-seekers/SKILL.md",
+      "text_sha256": "b30c8d664b36ef6c711d3200802779ab2c73866ac0fcc8ad7f0b97fd0e599e60",
+      "url": "https://github.com/yusufkaraaslan/Skill_Seekers"
+    },
+    {
+      "candidate_id": "github5-yusufkaraaslan-skill-seekers-skill-builder",
+      "candidate_name": "skill-builder",
+      "commit": "ff0f832febc8db931e88d401a8d0896aac134159",
+      "description": "Automatically detect source types and build AI skills using Skill Seekers. Use when the user wants to create skills from documentation, repos, PDFs, videos, or other knowledge sources.",
+      "repo": "yusufkaraaslan-Skill_Seekers",
+      "risk_flags": [
+        {
+          "category": "network_or_api",
+          "hits": [
+            "https://"
+          ]
+        }
+      ],
+      "safety": "PASS_PROMPT_ONLY_REWRITE_REQUIRED",
+      "source_path": "distribution/claude-plugin/skills/skill-builder/SKILL.md",
+      "text_sha256": "b30c8d664b36ef6c711d3200802779ab2c73866ac0fcc8ad7f0b97fd0e599e60",
+      "url": "https://github.com/yusufkaraaslan/Skill_Seekers"
+    }
+  ],
+  "capability_results": [
+    {
+      "capability": "artifact_gate",
+      "current_skill": "acceptance-evidence-failclosed",
+      "top_candidates": []
+    },
+    {
+      "capability": "autonomic_router",
+      "current_skill": "sf2-autonomic_router-route-fit-spec",
+      "top_candidates": []
+    },
+    {
+      "capability": "autoreason",
+      "current_skill": "sf2-belief-route-fit-spec",
+      "top_candidates": []
+    },
+    {
+      "capability": "belief",
+      "current_skill": "sf2-belief-route-fit-spec",
+      "top_candidates": []
+    },
+    {
+      "capability": "claim_gate",
+      "current_skill": "nexus-benchmark-continuous-optimization",
+      "top_candidates": []
+    },
+    {
+      "capability": "ddtree",
+      "current_skill": "nexus-root-cause-probe",
+      "top_candidates": []
+    },
+    {
+      "capability": "direct_master_loop",
+      "current_skill": "sf2-direct_master_loop-route-fit-spec",
+      "top_candidates": []
+    },
+    {
+      "capability": "drone",
+      "current_skill": "diagnose",
+      "top_candidates": []
+    },
+    {
+      "capability": "external_productivity",
+      "current_skill": "sf2-external_productivity-route-fit-spec",
+      "top_candidates": []
+    },
+    {
+      "capability": "file_lock_security_gate",
+      "current_skill": "sf2-file_lock_security_gate-route-fit-spec",
+      "top_candidates": []
+    },
+    {
+      "capability": "forecast_pregate",
+      "current_skill": "create-plan",
+      "top_candidates": []
+    },
+    {
+      "capability": "governance_and_trust",
+      "current_skill": "acceptance-evidence-failclosed",
+      "top_candidates": []
+    },
+    {
+      "capability": "hyper_sprint",
+      "current_skill": "sf2-hyper_sprint-route-fit-spec",
+      "top_candidates": []
+    },
+    {
+      "capability": "lancedb",
+      "current_skill": "research-source-validation-auditor",
+      "top_candidates": []
+    },
+    {
+      "capability": "learn_ask",
+      "current_skill": "nexus-capability-upgrade",
+      "top_candidates": []
+    },
+    {
+      "capability": "learning_closure",
+      "current_skill": "sf2-learning_closure-route-fit-spec",
+      "top_candidates": []
+    },
+    {
+      "capability": "memory",
+      "current_skill": "diagnose",
+      "top_candidates": []
+    },
+    {
+      "capability": "mempalace",
+      "current_skill": "sf2-mempalace-route-fit-spec",
+      "top_candidates": []
+    },
+    {
+      "capability": "nightshift",
+      "current_skill": "sf2-nightshift-route-fit-spec",
+      "top_candidates": []
+    },
+    {
+      "capability": "policy_capability_gate",
+      "current_skill": "nexus-root-cause-probe",
+      "top_candidates": []
+    },
+    {
+      "capability": "regression_guard",
+      "current_skill": "diagnose",
+      "top_candidates": []
+    },
+    {
+      "capability": "research",
+      "current_skill": "research-citation-chain-verifier",
+      "top_candidates": []
+    },
+    {
+      "capability": "research_and_source_discipline",
+      "current_skill": "research-citation-chain-verifier",
+      "top_candidates": []
+    },
+    {
+      "capability": "research_control_plane",
+      "current_skill": "research-citation-chain-verifier",
+      "top_candidates": []
+    },
+    {
+      "capability": "sandbox_replay",
+      "current_skill": "sf2-sandbox_replay-route-fit-spec",
+      "top_candidates": []
+    },
+    {
+      "capability": "swarm_multi_agent",
+      "current_skill": "sf2-swarm_multi_agent-route-fit-spec",
+      "top_candidates": []
+    },
+    {
+      "capability": "ultra_review",
+      "current_skill": "acceptance-evidence-failclosed",
+      "top_candidates": []
+    },
+    {
+      "capability": "xray",
+      "current_skill": "diagnose",
+      "top_candidates": []
+    }
+  ],
+  "claim_boundary": [
+    "Static safety and capability-fit screen only.",
+    "Does not execute upstream code.",
+    "Does not update runtime policy."
+  ],
+  "repos": {
+    "mvanhorn-last30days-skill": {
+      "commit": "850c7e01857bd1b429b902af53d8dc60c6815f4e",
+      "snapshot_dir": "/private/tmp/nexus-sf-round5/mvanhorn-last30days-skill",
+      "url": "https://github.com/mvanhorn/last30days-skill"
+    },
+    "p8552015-lab-video-auto-dubber": {
+      "commit": "4428ad5dda7cf9d131b9b9121cdef2da82b50b7c",
+      "snapshot_dir": "/private/tmp/nexus-sf-round5/p8552015-lab-video-auto-dubber",
+      "url": "https://github.com/p8552015-lab/video-auto-dubber"
+    },
+    "slavingia-skills": {
+      "commit": "eb9f57fba03ddb0382ed3bfe6654d3d7df128c70",
+      "snapshot_dir": "/private/tmp/nexus-sf-round5/slavingia-skills",
+      "url": "https://github.com/slavingia/skills"
+    },
+    "yusufkaraaslan-Skill_Seekers": {
+      "commit": "ff0f832febc8db931e88d401a8d0896aac134159",
+      "snapshot_dir": "/private/tmp/nexus-sf-round5/yusufkaraaslan-Skill_Seekers",
+      "url": "https://github.com/yusufkaraaslan/Skill_Seekers"
+    }
+  },
+  "schema": "nexus.sf_github_round5_static_screen.v1",
+  "selected_for_live": [],
+  "status": "PASS",
+  "summary": {
+    "capability_count": 28,
+    "pass_prompt_only_count": 14,
+    "reject_or_review_count": 0,
+    "repo_count": 4,
+    "selected_live_candidate_count": 0,
+    "skill_count": 14
+  },
+  "version": "2026-05-19"
+}

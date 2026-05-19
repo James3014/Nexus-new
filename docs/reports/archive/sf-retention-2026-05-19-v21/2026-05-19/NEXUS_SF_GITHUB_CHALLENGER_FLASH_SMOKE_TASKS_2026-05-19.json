@@ -1,0 +1,76 @@
+{
+  "benchmark_id": "nexus-sf-github-challenger-flash-smoke-v1",
+  "description": "Internal SF Flash+Nexus current-best skill versus GitHub challenger skill smoke. Not a public benchmark.",
+  "frozen": true,
+  "schema": "nexus.sf_github_challenger_flash_smoke_tasks.v1",
+  "status": "PASS",
+  "summary": {
+    "capability_count": 2,
+    "public_benchmark_allowed": false,
+    "runtime_update_allowed": false,
+    "task_count": 2
+  },
+  "tasks": [
+    {
+      "allowed_files": [
+        "unused"
+      ],
+      "capability_activation_contract": "required",
+      "category": "codeintel",
+      "difficulty": "medium",
+      "eligibility_class": "model_required",
+      "expected_capabilities": [
+        "codeintel"
+      ],
+      "fixture_kind": "sf_github_challenger_smoke",
+      "forbidden_files": [
+        ".nexus/",
+        "logs/",
+        "benchmarks/"
+      ],
+      "id": "sf-github-challenger-smoke-codeintel-001",
+      "mutation_required": false,
+      "public_claim_allowed_metrics": [],
+      "repo": "fixture://sf-github-challenger-smoke",
+      "repo_kind": "neutral_fixture",
+      "repo_ref": "v1",
+      "setup_command": "python -V",
+      "success_criteria": "github_challenger_skill_fit_receipt_chain_complete",
+      "target_file": "unused",
+      "task_desc": "Use Flash+Nexus to exercise capability codeintel. Compare current best skill against a GitHub challenger skill with runtime receipt evidence.",
+      "test_file": "unused",
+      "verification_command": "python -V"
+    },
+    {
+      "allowed_files": [
+        "unused"
+      ],
+      "capability_activation_contract": "required",
+      "category": "metabolism_resume",
+      "difficulty": "medium",
+      "eligibility_class": "model_required",
+      "expected_capabilities": [
+        "semantic_failure_sensor"
+      ],
+      "fixture_kind": "sf_github_challenger_smoke",
+      "forbidden_files": [
+        ".nexus/",
+        "logs/",
+        "benchmarks/"
+      ],
+      "id": "sf-github-challenger-smoke-metabolism_resume-001",
+      "mutation_required": false,
+      "public_claim_allowed_metrics": [],
+      "repo": "fixture://sf-github-challenger-smoke",
+      "repo_kind": "neutral_fixture",
+      "repo_ref": "v1",
+      "setup_command": "python -V",
+      "success_criteria": "github_challenger_skill_fit_receipt_chain_complete",
+      "target_file": "unused",
+      "task_desc": "Use Flash+Nexus to exercise capability metabolism_resume. Compare current best skill against a GitHub challenger skill with runtime receipt evidence.",
+      "test_file": "unused",
+      "verification_command": "python -V"
+    }
+  ],
+  "version": "2026-05-19"
+}

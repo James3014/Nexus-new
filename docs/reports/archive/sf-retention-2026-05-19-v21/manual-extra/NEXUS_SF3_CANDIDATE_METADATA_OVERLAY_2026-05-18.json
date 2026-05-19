@@ -1,0 +1,1276 @@
+{
+  "schema": "nexus.sf3_candidate_metadata_overlay.v1",
+  "status": "PASS",
+  "summary": {
+    "overlay_count": 42,
+    "capability_count": 27,
+    "runtime_update_allowed": false,
+    "public_benchmark_allowed": false
+  },
+  "overlays": [
+    {
+      "batch_id": "SF3-HARDEN-01",
+      "capability_id": "autonomic_router",
+      "skill_id": "sf2-autonomic_router-route-fit-spec",
+      "metadata_overlay_status": "READY",
+      "load_when": "Load only for autonomic_router tasks when SF receipt evidence requires sf2-autonomic_router-route-fit-spec.",
+      "do_not_load_when": [
+        "capability_mismatch",
+        "runtime_receipt_missing",
+        "negative_control_or_quarantine_arm"
+      ],
+      "expected_evidence": [
+        "selected",
+        "injected",
+        "used",
+        "evidence_present",
+        "gate_passed",
+        "outcome_contributed"
+      ],
+      "replacement_rule": "replace_only_after_receipt_backed_better_candidate_for_same_capability",
+      "cost_tier": "unknown_until_live_measured",
+      "negative_triggers": [
+        "selected_only",
+        "missing_receipt_path",
+        "trust_mismatch",
+        "model_call_without_tokens"
+      ],
+      "runtime_update_allowed": false,
+      "public_benchmark_allowed": false
+    },
+    {
+      "batch_id": "SF3-HARDEN-01",
+      "capability_id": "autonomic_router",
+      "skill_id": "sf2-autoreason-route-fit-spec",
+      "metadata_overlay_status": "READY",
+      "load_when": "Load only for autonomic_router tasks when SF receipt evidence requires sf2-autoreason-route-fit-spec.",
+      "do_not_load_when": [
+        "capability_mismatch",
+        "runtime_receipt_missing",
+        "negative_control_or_quarantine_arm"
+      ],
+      "expected_evidence": [
+        "selected",
+        "injected",
+        "used",
+        "evidence_present",
+        "gate_passed",
+        "outcome_contributed"
+      ],
+      "replacement_rule": "replace_only_after_receipt_backed_better_candidate_for_same_capability",
+      "cost_tier": "unknown_until_live_measured",
+      "negative_triggers": [
+        "selected_only",
+        "missing_receipt_path",
+        "trust_mismatch",
+        "model_call_without_tokens"
+      ],
+      "runtime_update_allowed": false,
+      "public_benchmark_allowed": false
+    },
+    {
+      "batch_id": "SF3-HARDEN-01",
+      "capability_id": "autonomic_router",
+      "skill_id": "sf2-belief-route-fit-spec",
+      "metadata_overlay_status": "READY",
+      "load_when": "Load only for autonomic_router tasks when SF receipt evidence requires sf2-belief-route-fit-spec.",
+      "do_not_load_when": [
+        "capability_mismatch",
+        "runtime_receipt_missing",
+        "negative_control_or_quarantine_arm"
+      ],
+      "expected_evidence": [
+        "selected",
+        "injected",
+        "used",
+        "evidence_present",
+        "gate_passed",
+        "outcome_contributed"
+      ],
+      "replacement_rule": "replace_only_after_receipt_backed_better_candidate_for_same_capability",
+      "cost_tier": "unknown_until_live_measured",
+      "negative_triggers": [
+        "selected_only",
+        "missing_receipt_path",
+        "trust_mismatch",
+        "model_call_without_tokens"
+      ],
+      "runtime_update_allowed": false,
+      "public_benchmark_allowed": false
+    },
+    {
+      "batch_id": "SF3-HARDEN-01",
+      "capability_id": "autonomic_router",
+      "skill_id": "sf2-delivery_acceptance_gate-route-fit-spec",
+      "metadata_overlay_status": "READY",
+      "load_when": "Load only for autonomic_router tasks when SF receipt evidence requires sf2-delivery_acceptance_gate-route-fit-spec.",
+      "do_not_load_when": [
+        "capability_mismatch",
+        "runtime_receipt_missing",
+        "negative_control_or_quarantine_arm"
+      ],
+      "expected_evidence": [
+        "selected",
+        "injected",
+        "used",
+        "evidence_present",
+        "gate_passed",
+        "outcome_contributed"
+      ],
+      "replacement_rule": "replace_only_after_receipt_backed_better_candidate_for_same_capability",
+      "cost_tier": "unknown_until_live_measured",
+      "negative_triggers": [
+        "selected_only",
+        "missing_receipt_path",
+        "trust_mismatch",
+        "model_call_without_tokens"
+      ],
+      "runtime_update_allowed": false,
+      "public_benchmark_allowed": false
+    },
+    {
+      "batch_id": "SF3-HARDEN-01",
+      "capability_id": "autoreason",
+      "skill_id": "sf2-autoreason-route-fit-spec",
+      "metadata_overlay_status": "READY",
+      "load_when": "Load only for autoreason tasks when SF receipt evidence requires sf2-autoreason-route-fit-spec.",
+      "do_not_load_when": [
+        "capability_mismatch",
+        "runtime_receipt_missing",
+        "negative_control_or_quarantine_arm"
+      ],
+      "expected_evidence": [
+        "selected",
+        "injected",
+        "used",
+        "evidence_present",
+        "gate_passed",
+        "outcome_contributed"
+      ],
+      "replacement_rule": "replace_only_after_receipt_backed_better_candidate_for_same_capability",
+      "cost_tier": "unknown_until_live_measured",
+      "negative_triggers": [
+        "selected_only",
+        "missing_receipt_path",
+        "trust_mismatch",
+        "model_call_without_tokens"
+      ],
+      "runtime_update_allowed": false,
+      "public_benchmark_allowed": false
+    },
+    {
+      "batch_id": "SF3-HARDEN-01",
+      "capability_id": "autoreason",
+      "skill_id": "sf2-belief-route-fit-spec",
+      "metadata_overlay_status": "READY",
+      "load_when": "Load only for autoreason tasks when SF receipt evidence requires sf2-belief-route-fit-spec.",
+      "do_not_load_when": [
+        "capability_mismatch",
+        "runtime_receipt_missing",
+        "negative_control_or_quarantine_arm"
+      ],
+      "expected_evidence": [
+        "selected",
+        "injected",
+        "used",
+        "evidence_present",
+        "gate_passed",
+        "outcome_contributed"
+      ],
+      "replacement_rule": "replace_only_after_receipt_backed_better_candidate_for_same_capability",
+      "cost_tier": "unknown_until_live_measured",
+      "negative_triggers": [
+        "selected_only",
+        "missing_receipt_path",
+        "trust_mismatch",
+        "model_call_without_tokens"
+      ],
+      "runtime_update_allowed": false,
+      "public_benchmark_allowed": false
+    },
+    {
+      "batch_id": "SF3-HARDEN-01",
+      "capability_id": "autoreason",
+      "skill_id": "sf2-lancedb-route-fit-spec",
+      "metadata_overlay_status": "READY",
+      "load_when": "Load only for autoreason tasks when SF receipt evidence requires sf2-lancedb-route-fit-spec.",
+      "do_not_load_when": [
+        "capability_mismatch",
+        "runtime_receipt_missing",
+        "negative_control_or_quarantine_arm"
+      ],
+      "expected_evidence": [
+        "selected",
+        "injected",
+        "used",
+        "evidence_present",
+        "gate_passed",
+        "outcome_contributed"
+      ],
+      "replacement_rule": "replace_only_after_receipt_backed_better_candidate_for_same_capability",
+      "cost_tier": "unknown_until_live_measured",
+      "negative_triggers": [
+        "selected_only",
+        "missing_receipt_path",
+        "trust_mismatch",
+        "model_call_without_tokens"
+      ],
+      "runtime_update_allowed": false,
+      "public_benchmark_allowed": false
+    },
+    {
+      "batch_id": "SF3-HARDEN-01",
+      "capability_id": "belief",
+      "skill_id": "sf2-belief-route-fit-spec",
+      "metadata_overlay_status": "READY",
+      "load_when": "Load only for belief tasks when SF receipt evidence requires sf2-belief-route-fit-spec.",
+      "do_not_load_when": [
+        "capability_mismatch",
+        "runtime_receipt_missing",
+        "negative_control_or_quarantine_arm"
+      ],
+      "expected_evidence": [
+        "selected",
+        "injected",
+        "used",
+        "evidence_present",
+        "gate_passed",
+        "outcome_contributed"
+      ],
+      "replacement_rule": "replace_only_after_receipt_backed_better_candidate_for_same_capability",
+      "cost_tier": "unknown_until_live_measured",
+      "negative_triggers": [
+        "selected_only",
+        "missing_receipt_path",
+        "trust_mismatch",
+        "model_call_without_tokens"
+      ],
+      "runtime_update_allowed": false,
+      "public_benchmark_allowed": false
+    },
+    {
+      "batch_id": "SF3-HARDEN-01",
+      "capability_id": "belief",
+      "skill_id": "sf2-autoreason-route-fit-spec",
+      "metadata_overlay_status": "READY",
+      "load_when": "Load only for belief tasks when SF receipt evidence requires sf2-autoreason-route-fit-spec.",
+      "do_not_load_when": [
+        "capability_mismatch",
+        "runtime_receipt_missing",
+        "negative_control_or_quarantine_arm"
+      ],
+      "expected_evidence": [
+        "selected",
+        "injected",
+        "used",
+        "evidence_present",
+        "gate_passed",
+        "outcome_contributed"
+      ],
+      "replacement_rule": "replace_only_after_receipt_backed_better_candidate_for_same_capability",
+      "cost_tier": "unknown_until_live_measured",
+      "negative_triggers": [
+        "selected_only",
+        "missing_receipt_path",
+        "trust_mismatch",
+        "model_call_without_tokens"
+      ],
+      "runtime_update_allowed": false,
+      "public_benchmark_allowed": false
+    },
+    {
+      "batch_id": "SF3-HARDEN-01",
+      "capability_id": "claim_gate",
+      "skill_id": "sf2-research_control_plane-route-fit-spec",
+      "metadata_overlay_status": "READY",
+      "load_when": "Load only for claim_gate tasks when SF receipt evidence requires sf2-research_control_plane-route-fit-spec.",
+      "do_not_load_when": [
+        "capability_mismatch",
+        "runtime_receipt_missing",
+        "negative_control_or_quarantine_arm"
+      ],
+      "expected_evidence": [
+        "selected",
+        "injected",
+        "used",
+        "evidence_present",
+        "gate_passed",
+        "outcome_contributed"
+      ],
+      "replacement_rule": "replace_only_after_receipt_backed_better_candidate_for_same_capability",
+      "cost_tier": "unknown_until_live_measured",
+      "negative_triggers": [
+        "selected_only",
+        "missing_receipt_path",
+        "trust_mismatch",
+        "model_call_without_tokens"
+      ],
+      "runtime_update_allowed": false,
+      "public_benchmark_allowed": false
+    },
+    {
+      "batch_id": "SF3-HARDEN-01",
+      "capability_id": "codeintel",
+      "skill_id": "sf2-codeintel-route-fit-spec",
+      "metadata_overlay_status": "READY",
+      "load_when": "Load only for codeintel tasks when SF receipt evidence requires sf2-codeintel-route-fit-spec.",
+      "do_not_load_when": [
+        "capability_mismatch",
+        "runtime_receipt_missing",
+        "negative_control_or_quarantine_arm"
+      ],
+      "expected_evidence": [
+        "selected",
+        "injected",
+        "used",
+        "evidence_present",
+        "gate_passed",
+        "outcome_contributed"
+      ],
+      "replacement_rule": "replace_only_after_receipt_backed_better_candidate_for_same_capability",
+      "cost_tier": "unknown_until_live_measured",
+      "negative_triggers": [
+        "selected_only",
+        "missing_receipt_path",
+        "trust_mismatch",
+        "model_call_without_tokens"
+      ],
+      "runtime_update_allowed": false,
+      "public_benchmark_allowed": false
+    },
+    {
+      "batch_id": "SF3-HARDEN-01",
+      "capability_id": "ddtree",
+      "skill_id": "sf2-ddtree-route-fit-spec",
+      "metadata_overlay_status": "READY",
+      "load_when": "Load only for ddtree tasks when SF receipt evidence requires sf2-ddtree-route-fit-spec.",
+      "do_not_load_when": [
+        "capability_mismatch",
+        "runtime_receipt_missing",
+        "negative_control_or_quarantine_arm"
+      ],
+      "expected_evidence": [
+        "selected",
+        "injected",
+        "used",
+        "evidence_present",
+        "gate_passed",
+        "outcome_contributed"
+      ],
+      "replacement_rule": "replace_only_after_receipt_backed_better_candidate_for_same_capability",
+      "cost_tier": "unknown_until_live_measured",
+      "negative_triggers": [
+        "selected_only",
+        "missing_receipt_path",
+        "trust_mismatch",
+        "model_call_without_tokens"
+      ],
+      "runtime_update_allowed": false,
+      "public_benchmark_allowed": false
+    },
+    {
+      "batch_id": "SF3-HARDEN-01",
+      "capability_id": "delivery_acceptance_gate",
+      "skill_id": "sf2-delivery_acceptance_gate-route-fit-spec",
+      "metadata_overlay_status": "READY",
+      "load_when": "Load only for delivery_acceptance_gate tasks when SF receipt evidence requires sf2-delivery_acceptance_gate-route-fit-spec.",
+      "do_not_load_when": [
+        "capability_mismatch",
+        "runtime_receipt_missing",
+        "negative_control_or_quarantine_arm"
+      ],
+      "expected_evidence": [
+        "selected",
+        "injected",
+        "used",
+        "evidence_present",
+        "gate_passed",
+        "outcome_contributed"
+      ],
+      "replacement_rule": "replace_only_after_receipt_backed_better_candidate_for_same_capability",
+      "cost_tier": "unknown_until_live_measured",
+      "negative_triggers": [
+        "selected_only",
+        "missing_receipt_path",
+        "trust_mismatch",
+        "model_call_without_tokens"
+      ],
+      "runtime_update_allowed": false,
+      "public_benchmark_allowed": false
+    },
+    {
+      "batch_id": "SF3-HARDEN-01",
+      "capability_id": "direct_master_loop",
+      "skill_id": "sf2-direct_master_loop-route-fit-spec",
+      "metadata_overlay_status": "READY",
+      "load_when": "Load only for direct_master_loop tasks when SF receipt evidence requires sf2-direct_master_loop-route-fit-spec.",
+      "do_not_load_when": [
+        "capability_mismatch",
+        "runtime_receipt_missing",
+        "negative_control_or_quarantine_arm"
+      ],
+      "expected_evidence": [
+        "selected",
+        "injected",
+        "used",
+        "evidence_present",
+        "gate_passed",
+        "outcome_contributed"
+      ],
+      "replacement_rule": "replace_only_after_receipt_backed_better_candidate_for_same_capability",
+      "cost_tier": "unknown_until_live_measured",
+      "negative_triggers": [
+        "selected_only",
+        "missing_receipt_path",
+        "trust_mismatch",
+        "model_call_without_tokens"
+      ],
+      "runtime_update_allowed": false,
+      "public_benchmark_allowed": false
+    },
+    {
+      "batch_id": "SF3-HARDEN-01",
+      "capability_id": "direct_master_loop",
+      "skill_id": "sf2-nightshift-route-fit-spec",
+      "metadata_overlay_status": "READY",
+      "load_when": "Load only for direct_master_loop tasks when SF receipt evidence requires sf2-nightshift-route-fit-spec.",
+      "do_not_load_when": [
+        "capability_mismatch",
+        "runtime_receipt_missing",
+        "negative_control_or_quarantine_arm"
+      ],
+      "expected_evidence": [
+        "selected",
+        "injected",
+        "used",
+        "evidence_present",
+        "gate_passed",
+        "outcome_contributed"
+      ],
+      "replacement_rule": "replace_only_after_receipt_backed_better_candidate_for_same_capability",
+      "cost_tier": "unknown_until_live_measured",
+      "negative_triggers": [
+        "selected_only",
+        "missing_receipt_path",
+        "trust_mismatch",
+        "model_call_without_tokens"
+      ],
+      "runtime_update_allowed": false,
+      "public_benchmark_allowed": false
+    },
+    {
+      "batch_id": "SF3-HARDEN-02",
+      "capability_id": "drone",
+      "skill_id": "sf2-drone-route-fit-spec",
+      "metadata_overlay_status": "READY",
+      "load_when": "Load only for drone tasks when SF receipt evidence requires sf2-drone-route-fit-spec.",
+      "do_not_load_when": [
+        "capability_mismatch",
+        "runtime_receipt_missing",
+        "negative_control_or_quarantine_arm"
+      ],
+      "expected_evidence": [
+        "selected",
+        "injected",
+        "used",
+        "evidence_present",
+        "gate_passed",
+        "outcome_contributed"
+      ],
+      "replacement_rule": "replace_only_after_receipt_backed_better_candidate_for_same_capability",
+      "cost_tier": "unknown_until_live_measured",
+      "negative_triggers": [
+        "selected_only",
+        "missing_receipt_path",
+        "trust_mismatch",
+        "model_call_without_tokens"
+      ],
+      "runtime_update_allowed": false,
+      "public_benchmark_allowed": false
+    },
+    {
+      "batch_id": "SF3-HARDEN-02",
+      "capability_id": "external_productivity",
+      "skill_id": "sf2-external_productivity-route-fit-spec",
+      "metadata_overlay_status": "READY",
+      "load_when": "Load only for external_productivity tasks when SF receipt evidence requires sf2-external_productivity-route-fit-spec.",
+      "do_not_load_when": [
+        "capability_mismatch",
+        "runtime_receipt_missing",
+        "negative_control_or_quarantine_arm"
+      ],
+      "expected_evidence": [
+        "selected",
+        "injected",
+        "used",
+        "evidence_present",
+        "gate_passed",
+        "outcome_contributed"
+      ],
+      "replacement_rule": "replace_only_after_receipt_backed_better_candidate_for_same_capability",
+      "cost_tier": "unknown_until_live_measured",
+      "negative_triggers": [
+        "selected_only",
+        "missing_receipt_path",
+        "trust_mismatch",
+        "model_call_without_tokens"
+      ],
+      "runtime_update_allowed": false,
+      "public_benchmark_allowed": false
+    },
+    {
+      "batch_id": "SF3-HARDEN-02",
+      "capability_id": "file_lock_security_gate",
+      "skill_id": "sf2-file_lock_security_gate-route-fit-spec",
+      "metadata_overlay_status": "READY",
+      "load_when": "Load only for file_lock_security_gate tasks when SF receipt evidence requires sf2-file_lock_security_gate-route-fit-spec.",
+      "do_not_load_when": [
+        "capability_mismatch",
+        "runtime_receipt_missing",
+        "negative_control_or_quarantine_arm"
+      ],
+      "expected_evidence": [
+        "selected",
+        "injected",
+        "used",
+        "evidence_present",
+        "gate_passed",
+        "outcome_contributed"
+      ],
+      "replacement_rule": "replace_only_after_receipt_backed_better_candidate_for_same_capability",
+      "cost_tier": "unknown_until_live_measured",
+      "negative_triggers": [
+        "selected_only",
+        "missing_receipt_path",
+        "trust_mismatch",
+        "model_call_without_tokens"
+      ],
+      "runtime_update_allowed": false,
+      "public_benchmark_allowed": false
+    },
+    {
+      "batch_id": "SF3-HARDEN-02",
+      "capability_id": "forecast_pregate",
+      "skill_id": "sf2-forecast_pregate-route-fit-spec",
+      "metadata_overlay_status": "READY",
+      "load_when": "Load only for forecast_pregate tasks when SF receipt evidence requires sf2-forecast_pregate-route-fit-spec.",
+      "do_not_load_when": [
+        "capability_mismatch",
+        "runtime_receipt_missing",
+        "negative_control_or_quarantine_arm"
+      ],
+      "expected_evidence": [
+        "selected",
+        "injected",
+        "used",
+        "evidence_present",
+        "gate_passed",
+        "outcome_contributed"
+      ],
+      "replacement_rule": "replace_only_after_receipt_backed_better_candidate_for_same_capability",
+      "cost_tier": "unknown_until_live_measured",
+      "negative_triggers": [
+        "selected_only",
+        "missing_receipt_path",
+        "trust_mismatch",
+        "model_call_without_tokens"
+      ],
+      "runtime_update_allowed": false,
+      "public_benchmark_allowed": false
+    },
+    {
+      "batch_id": "SF3-HARDEN-02",
+      "capability_id": "hyper_sprint",
+      "skill_id": "sf2-hyper_sprint-route-fit-spec",
+      "metadata_overlay_status": "READY",
+      "load_when": "Load only for hyper_sprint tasks when SF receipt evidence requires sf2-hyper_sprint-route-fit-spec.",
+      "do_not_load_when": [
+        "capability_mismatch",
+        "runtime_receipt_missing",
+        "negative_control_or_quarantine_arm"
+      ],
+      "expected_evidence": [
+        "selected",
+        "injected",
+        "used",
+        "evidence_present",
+        "gate_passed",
+        "outcome_contributed"
+      ],
+      "replacement_rule": "replace_only_after_receipt_backed_better_candidate_for_same_capability",
+      "cost_tier": "unknown_until_live_measured",
+      "negative_triggers": [
+        "selected_only",
+        "missing_receipt_path",
+        "trust_mismatch",
+        "model_call_without_tokens"
+      ],
+      "runtime_update_allowed": false,
+      "public_benchmark_allowed": false
+    },
+    {
+      "batch_id": "SF3-HARDEN-02",
+      "capability_id": "lancedb",
+      "skill_id": "sf2-lancedb-route-fit-spec",
+      "metadata_overlay_status": "READY",
+      "load_when": "Load only for lancedb tasks when SF receipt evidence requires sf2-lancedb-route-fit-spec.",
+      "do_not_load_when": [
+        "capability_mismatch",
+        "runtime_receipt_missing",
+        "negative_control_or_quarantine_arm"
+      ],
+      "expected_evidence": [
+        "selected",
+        "injected",
+        "used",
+        "evidence_present",
+        "gate_passed",
+        "outcome_contributed"
+      ],
+      "replacement_rule": "replace_only_after_receipt_backed_better_candidate_for_same_capability",
+      "cost_tier": "unknown_until_live_measured",
+      "negative_triggers": [
+        "selected_only",
+        "missing_receipt_path",
+        "trust_mismatch",
+        "model_call_without_tokens"
+      ],
+      "runtime_update_allowed": false,
+      "public_benchmark_allowed": false
+    },
+    {
+      "batch_id": "SF3-HARDEN-02",
+      "capability_id": "lancedb",
+      "skill_id": "sf2-autoreason-route-fit-spec",
+      "metadata_overlay_status": "READY",
+      "load_when": "Load only for lancedb tasks when SF receipt evidence requires sf2-autoreason-route-fit-spec.",
+      "do_not_load_when": [
+        "capability_mismatch",
+        "runtime_receipt_missing",
+        "negative_control_or_quarantine_arm"
+      ],
+      "expected_evidence": [
+        "selected",
+        "injected",
+        "used",
+        "evidence_present",
+        "gate_passed",
+        "outcome_contributed"
+      ],
+      "replacement_rule": "replace_only_after_receipt_backed_better_candidate_for_same_capability",
+      "cost_tier": "unknown_until_live_measured",
+      "negative_triggers": [
+        "selected_only",
+        "missing_receipt_path",
+        "trust_mismatch",
+        "model_call_without_tokens"
+      ],
+      "runtime_update_allowed": false,
+      "public_benchmark_allowed": false
+    },
+    {
+      "batch_id": "SF3-HARDEN-02",
+      "capability_id": "learning_closure",
+      "skill_id": "sf2-learning_closure-route-fit-spec",
+      "metadata_overlay_status": "READY",
+      "load_when": "Load only for learning_closure tasks when SF receipt evidence requires sf2-learning_closure-route-fit-spec.",
+      "do_not_load_when": [
+        "capability_mismatch",
+        "runtime_receipt_missing",
+        "negative_control_or_quarantine_arm"
+      ],
+      "expected_evidence": [
+        "selected",
+        "injected",
+        "used",
+        "evidence_present",
+        "gate_passed",
+        "outcome_contributed"
+      ],
+      "replacement_rule": "replace_only_after_receipt_backed_better_candidate_for_same_capability",
+      "cost_tier": "unknown_until_live_measured",
+      "negative_triggers": [
+        "selected_only",
+        "missing_receipt_path",
+        "trust_mismatch",
+        "model_call_without_tokens"
+      ],
+      "runtime_update_allowed": false,
+      "public_benchmark_allowed": false
+    },
+    {
+      "batch_id": "SF3-HARDEN-02",
+      "capability_id": "learning_closure",
+      "skill_id": "sf2-nightshift-route-fit-spec",
+      "metadata_overlay_status": "READY",
+      "load_when": "Load only for learning_closure tasks when SF receipt evidence requires sf2-nightshift-route-fit-spec.",
+      "do_not_load_when": [
+        "capability_mismatch",
+        "runtime_receipt_missing",
+        "negative_control_or_quarantine_arm"
+      ],
+      "expected_evidence": [
+        "selected",
+        "injected",
+        "used",
+        "evidence_present",
+        "gate_passed",
+        "outcome_contributed"
+      ],
+      "replacement_rule": "replace_only_after_receipt_backed_better_candidate_for_same_capability",
+      "cost_tier": "unknown_until_live_measured",
+      "negative_triggers": [
+        "selected_only",
+        "missing_receipt_path",
+        "trust_mismatch",
+        "model_call_without_tokens"
+      ],
+      "runtime_update_allowed": false,
+      "public_benchmark_allowed": false
+    },
+    {
+      "batch_id": "SF3-HARDEN-02",
+      "capability_id": "memory",
+      "skill_id": "sf2-memory-route-fit-spec",
+      "metadata_overlay_status": "READY",
+      "load_when": "Load only for memory tasks when SF receipt evidence requires sf2-memory-route-fit-spec.",
+      "do_not_load_when": [
+        "capability_mismatch",
+        "runtime_receipt_missing",
+        "negative_control_or_quarantine_arm"
+      ],
+      "expected_evidence": [
+        "selected",
+        "injected",
+        "used",
+        "evidence_present",
+        "gate_passed",
+        "outcome_contributed"
+      ],
+      "replacement_rule": "replace_only_after_receipt_backed_better_candidate_for_same_capability",
+      "cost_tier": "unknown_until_live_measured",
+      "negative_triggers": [
+        "selected_only",
+        "missing_receipt_path",
+        "trust_mismatch",
+        "model_call_without_tokens"
+      ],
+      "runtime_update_allowed": false,
+      "public_benchmark_allowed": false
+    },
+    {
+      "batch_id": "SF3-HARDEN-02",
+      "capability_id": "memory",
+      "skill_id": "sf2-lancedb-route-fit-spec",
+      "metadata_overlay_status": "READY",
+      "load_when": "Load only for memory tasks when SF receipt evidence requires sf2-lancedb-route-fit-spec.",
+      "do_not_load_when": [
+        "capability_mismatch",
+        "runtime_receipt_missing",
+        "negative_control_or_quarantine_arm"
+      ],
+      "expected_evidence": [
+        "selected",
+        "injected",
+        "used",
+        "evidence_present",
+        "gate_passed",
+        "outcome_contributed"
+      ],
+      "replacement_rule": "replace_only_after_receipt_backed_better_candidate_for_same_capability",
+      "cost_tier": "unknown_until_live_measured",
+      "negative_triggers": [
+        "selected_only",
+        "missing_receipt_path",
+        "trust_mismatch",
+        "model_call_without_tokens"
+      ],
+      "runtime_update_allowed": false,
+      "public_benchmark_allowed": false
+    },
+    {
+      "batch_id": "SF3-HARDEN-02",
+      "capability_id": "memory",
+      "skill_id": "sf2-mempalace-route-fit-spec",
+      "metadata_overlay_status": "READY",
+      "load_when": "Load only for memory tasks when SF receipt evidence requires sf2-mempalace-route-fit-spec.",
+      "do_not_load_when": [
+        "capability_mismatch",
+        "runtime_receipt_missing",
+        "negative_control_or_quarantine_arm"
+      ],
+      "expected_evidence": [
+        "selected",
+        "injected",
+        "used",
+        "evidence_present",
+        "gate_passed",
+        "outcome_contributed"
+      ],
+      "replacement_rule": "replace_only_after_receipt_backed_better_candidate_for_same_capability",
+      "cost_tier": "unknown_until_live_measured",
+      "negative_triggers": [
+        "selected_only",
+        "missing_receipt_path",
+        "trust_mismatch",
+        "model_call_without_tokens"
+      ],
+      "runtime_update_allowed": false,
+      "public_benchmark_allowed": false
+    },
+    {
+      "batch_id": "SF3-HARDEN-02",
+      "capability_id": "mempalace",
+      "skill_id": "sf2-mempalace-route-fit-spec",
+      "metadata_overlay_status": "READY",
+      "load_when": "Load only for mempalace tasks when SF receipt evidence requires sf2-mempalace-route-fit-spec.",
+      "do_not_load_when": [
+        "capability_mismatch",
+        "runtime_receipt_missing",
+        "negative_control_or_quarantine_arm"
+      ],
+      "expected_evidence": [
+        "selected",
+        "injected",
+        "used",
+        "evidence_present",
+        "gate_passed",
+        "outcome_contributed"
+      ],
+      "replacement_rule": "replace_only_after_receipt_backed_better_candidate_for_same_capability",
+      "cost_tier": "unknown_until_live_measured",
+      "negative_triggers": [
+        "selected_only",
+        "missing_receipt_path",
+        "trust_mismatch",
+        "model_call_without_tokens"
+      ],
+      "runtime_update_allowed": false,
+      "public_benchmark_allowed": false
+    },
+    {
+      "batch_id": "SF3-HARDEN-02",
+      "capability_id": "mempalace",
+      "skill_id": "sf2-file_lock_security_gate-route-fit-spec",
+      "metadata_overlay_status": "READY",
+      "load_when": "Load only for mempalace tasks when SF receipt evidence requires sf2-file_lock_security_gate-route-fit-spec.",
+      "do_not_load_when": [
+        "capability_mismatch",
+        "runtime_receipt_missing",
+        "negative_control_or_quarantine_arm"
+      ],
+      "expected_evidence": [
+        "selected",
+        "injected",
+        "used",
+        "evidence_present",
+        "gate_passed",
+        "outcome_contributed"
+      ],
+      "replacement_rule": "replace_only_after_receipt_backed_better_candidate_for_same_capability",
+      "cost_tier": "unknown_until_live_measured",
+      "negative_triggers": [
+        "selected_only",
+        "missing_receipt_path",
+        "trust_mismatch",
+        "model_call_without_tokens"
+      ],
+      "runtime_update_allowed": false,
+      "public_benchmark_allowed": false
+    },
+    {
+      "batch_id": "SF3-HARDEN-02",
+      "capability_id": "nightshift",
+      "skill_id": "sf2-nightshift-route-fit-spec",
+      "metadata_overlay_status": "READY",
+      "load_when": "Load only for nightshift tasks when SF receipt evidence requires sf2-nightshift-route-fit-spec.",
+      "do_not_load_when": [
+        "capability_mismatch",
+        "runtime_receipt_missing",
+        "negative_control_or_quarantine_arm"
+      ],
+      "expected_evidence": [
+        "selected",
+        "injected",
+        "used",
+        "evidence_present",
+        "gate_passed",
+        "outcome_contributed"
+      ],
+      "replacement_rule": "replace_only_after_receipt_backed_better_candidate_for_same_capability",
+      "cost_tier": "unknown_until_live_measured",
+      "negative_triggers": [
+        "selected_only",
+        "missing_receipt_path",
+        "trust_mismatch",
+        "model_call_without_tokens"
+      ],
+      "runtime_update_allowed": false,
+      "public_benchmark_allowed": false
+    },
+    {
+      "batch_id": "SF3-HARDEN-03",
+      "capability_id": "nightshift",
+      "skill_id": "sf2-learning_closure-route-fit-spec",
+      "metadata_overlay_status": "READY",
+      "load_when": "Load only for nightshift tasks when SF receipt evidence requires sf2-learning_closure-route-fit-spec.",
+      "do_not_load_when": [
+        "capability_mismatch",
+        "runtime_receipt_missing",
+        "negative_control_or_quarantine_arm"
+      ],
+      "expected_evidence": [
+        "selected",
+        "injected",
+        "used",
+        "evidence_present",
+        "gate_passed",
+        "outcome_contributed"
+      ],
+      "replacement_rule": "replace_only_after_receipt_backed_better_candidate_for_same_capability",
+      "cost_tier": "unknown_until_live_measured",
+      "negative_triggers": [
+        "selected_only",
+        "missing_receipt_path",
+        "trust_mismatch",
+        "model_call_without_tokens"
+      ],
+      "runtime_update_allowed": false,
+      "public_benchmark_allowed": false
+    },
+    {
+      "batch_id": "SF3-HARDEN-03",
+      "capability_id": "registry_skills_sync",
+      "skill_id": "sf2-registry_skills_sync-route-fit-spec",
+      "metadata_overlay_status": "READY",
+      "load_when": "Load only for registry_skills_sync tasks when SF receipt evidence requires sf2-registry_skills_sync-route-fit-spec.",
+      "do_not_load_when": [
+        "capability_mismatch",
+        "runtime_receipt_missing",
+        "negative_control_or_quarantine_arm"
+      ],
+      "expected_evidence": [
+        "selected",
+        "injected",
+        "used",
+        "evidence_present",
+        "gate_passed",
+        "outcome_contributed"
+      ],
+      "replacement_rule": "replace_only_after_receipt_backed_better_candidate_for_same_capability",
+      "cost_tier": "unknown_until_live_measured",
+      "negative_triggers": [
+        "selected_only",
+        "missing_receipt_path",
+        "trust_mismatch",
+        "model_call_without_tokens"
+      ],
+      "runtime_update_allowed": false,
+      "public_benchmark_allowed": false
+    },
+    {
+      "batch_id": "SF3-HARDEN-03",
+      "capability_id": "repair_loop",
+      "skill_id": "sf2-hyper_sprint-route-fit-spec",
+      "metadata_overlay_status": "READY",
+      "load_when": "Load only for repair_loop tasks when SF receipt evidence requires sf2-hyper_sprint-route-fit-spec.",
+      "do_not_load_when": [
+        "capability_mismatch",
+        "runtime_receipt_missing",
+        "negative_control_or_quarantine_arm"
+      ],
+      "expected_evidence": [
+        "selected",
+        "injected",
+        "used",
+        "evidence_present",
+        "gate_passed",
+        "outcome_contributed"
+      ],
+      "replacement_rule": "replace_only_after_receipt_backed_better_candidate_for_same_capability",
+      "cost_tier": "unknown_until_live_measured",
+      "negative_triggers": [
+        "selected_only",
+        "missing_receipt_path",
+        "trust_mismatch",
+        "model_call_without_tokens"
+      ],
+      "runtime_update_allowed": false,
+      "public_benchmark_allowed": false
+    },
+    {
+      "batch_id": "SF3-HARDEN-03",
+      "capability_id": "repair_loop",
+      "skill_id": "sf2-nightshift-route-fit-spec",
+      "metadata_overlay_status": "READY",
+      "load_when": "Load only for repair_loop tasks when SF receipt evidence requires sf2-nightshift-route-fit-spec.",
+      "do_not_load_when": [
+        "capability_mismatch",
+        "runtime_receipt_missing",
+        "negative_control_or_quarantine_arm"
+      ],
+      "expected_evidence": [
+        "selected",
+        "injected",
+        "used",
+        "evidence_present",
+        "gate_passed",
+        "outcome_contributed"
+      ],
+      "replacement_rule": "replace_only_after_receipt_backed_better_candidate_for_same_capability",
+      "cost_tier": "unknown_until_live_measured",
+      "negative_triggers": [
+        "selected_only",
+        "missing_receipt_path",
+        "trust_mismatch",
+        "model_call_without_tokens"
+      ],
+      "runtime_update_allowed": false,
+      "public_benchmark_allowed": false
+    },
+    {
+      "batch_id": "SF3-HARDEN-03",
+      "capability_id": "research",
+      "skill_id": "sf2-research_control_plane-route-fit-spec",
+      "metadata_overlay_status": "READY",
+      "load_when": "Load only for research tasks when SF receipt evidence requires sf2-research_control_plane-route-fit-spec.",
+      "do_not_load_when": [
+        "capability_mismatch",
+        "runtime_receipt_missing",
+        "negative_control_or_quarantine_arm"
+      ],
+      "expected_evidence": [
+        "selected",
+        "injected",
+        "used",
+        "evidence_present",
+        "gate_passed",
+        "outcome_contributed"
+      ],
+      "replacement_rule": "replace_only_after_receipt_backed_better_candidate_for_same_capability",
+      "cost_tier": "unknown_until_live_measured",
+      "negative_triggers": [
+        "selected_only",
+        "missing_receipt_path",
+        "trust_mismatch",
+        "model_call_without_tokens"
+      ],
+      "runtime_update_allowed": false,
+      "public_benchmark_allowed": false
+    },
+    {
+      "batch_id": "SF3-HARDEN-03",
+      "capability_id": "research",
+      "skill_id": "sf2-lancedb-route-fit-spec",
+      "metadata_overlay_status": "READY",
+      "load_when": "Load only for research tasks when SF receipt evidence requires sf2-lancedb-route-fit-spec.",
+      "do_not_load_when": [
+        "capability_mismatch",
+        "runtime_receipt_missing",
+        "negative_control_or_quarantine_arm"
+      ],
+      "expected_evidence": [
+        "selected",
+        "injected",
+        "used",
+        "evidence_present",
+        "gate_passed",
+        "outcome_contributed"
+      ],
+      "replacement_rule": "replace_only_after_receipt_backed_better_candidate_for_same_capability",
+      "cost_tier": "unknown_until_live_measured",
+      "negative_triggers": [
+        "selected_only",
+        "missing_receipt_path",
+        "trust_mismatch",
+        "model_call_without_tokens"
+      ],
+      "runtime_update_allowed": false,
+      "public_benchmark_allowed": false
+    },
+    {
+      "batch_id": "SF3-HARDEN-03",
+      "capability_id": "research_control_plane",
+      "skill_id": "sf2-research_control_plane-route-fit-spec",
+      "metadata_overlay_status": "READY",
+      "load_when": "Load only for research_control_plane tasks when SF receipt evidence requires sf2-research_control_plane-route-fit-spec.",
+      "do_not_load_when": [
+        "capability_mismatch",
+        "runtime_receipt_missing",
+        "negative_control_or_quarantine_arm"
+      ],
+      "expected_evidence": [
+        "selected",
+        "injected",
+        "used",
+        "evidence_present",
+        "gate_passed",
+        "outcome_contributed"
+      ],
+      "replacement_rule": "replace_only_after_receipt_backed_better_candidate_for_same_capability",
+      "cost_tier": "unknown_until_live_measured",
+      "negative_triggers": [
+        "selected_only",
+        "missing_receipt_path",
+        "trust_mismatch",
+        "model_call_without_tokens"
+      ],
+      "runtime_update_allowed": false,
+      "public_benchmark_allowed": false
+    },
+    {
+      "batch_id": "SF3-HARDEN-03",
+      "capability_id": "sandbox_replay",
+      "skill_id": "sf2-file_lock_security_gate-route-fit-spec",
+      "metadata_overlay_status": "READY",
+      "load_when": "Load only for sandbox_replay tasks when SF receipt evidence requires sf2-file_lock_security_gate-route-fit-spec.",
+      "do_not_load_when": [
+        "capability_mismatch",
+        "runtime_receipt_missing",
+        "negative_control_or_quarantine_arm"
+      ],
+      "expected_evidence": [
+        "selected",
+        "injected",
+        "used",
+        "evidence_present",
+        "gate_passed",
+        "outcome_contributed"
+      ],
+      "replacement_rule": "replace_only_after_receipt_backed_better_candidate_for_same_capability",
+      "cost_tier": "unknown_until_live_measured",
+      "negative_triggers": [
+        "selected_only",
+        "missing_receipt_path",
+        "trust_mismatch",
+        "model_call_without_tokens"
+      ],
+      "runtime_update_allowed": false,
+      "public_benchmark_allowed": false
+    },
+    {
+      "batch_id": "SF3-HARDEN-03",
+      "capability_id": "swarm_multi_agent",
+      "skill_id": "sf2-swarm_multi_agent-route-fit-spec",
+      "metadata_overlay_status": "READY",
+      "load_when": "Load only for swarm_multi_agent tasks when SF receipt evidence requires sf2-swarm_multi_agent-route-fit-spec.",
+      "do_not_load_when": [
+        "capability_mismatch",
+        "runtime_receipt_missing",
+        "negative_control_or_quarantine_arm"
+      ],
+      "expected_evidence": [
+        "selected",
+        "injected",
+        "used",
+        "evidence_present",
+        "gate_passed",
+        "outcome_contributed"
+      ],
+      "replacement_rule": "replace_only_after_receipt_backed_better_candidate_for_same_capability",
+      "cost_tier": "unknown_until_live_measured",
+      "negative_triggers": [
+        "selected_only",
+        "missing_receipt_path",
+        "trust_mismatch",
+        "model_call_without_tokens"
+      ],
+      "runtime_update_allowed": false,
+      "public_benchmark_allowed": false
+    },
+    {
+      "batch_id": "SF3-HARDEN-03",
+      "capability_id": "ui_validator",
+      "skill_id": "sf2-ui_validator-route-fit-spec",
+      "metadata_overlay_status": "READY",
+      "load_when": "Load only for ui_validator tasks when SF receipt evidence requires sf2-ui_validator-route-fit-spec.",
+      "do_not_load_when": [
+        "capability_mismatch",
+        "runtime_receipt_missing",
+        "negative_control_or_quarantine_arm"
+      ],
+      "expected_evidence": [
+        "selected",
+        "injected",
+        "used",
+        "evidence_present",
+        "gate_passed",
+        "outcome_contributed"
+      ],
+      "replacement_rule": "replace_only_after_receipt_backed_better_candidate_for_same_capability",
+      "cost_tier": "unknown_until_live_measured",
+      "negative_triggers": [
+        "selected_only",
+        "missing_receipt_path",
+        "trust_mismatch",
+        "model_call_without_tokens"
+      ],
+      "runtime_update_allowed": false,
+      "public_benchmark_allowed": false
+    },
+    {
+      "batch_id": "SF3-HARDEN-03",
+      "capability_id": "ultra_review",
+      "skill_id": "sf2-file_lock_security_gate-route-fit-spec",
+      "metadata_overlay_status": "READY",
+      "load_when": "Load only for ultra_review tasks when SF receipt evidence requires sf2-file_lock_security_gate-route-fit-spec.",
+      "do_not_load_when": [
+        "capability_mismatch",
+        "runtime_receipt_missing",
+        "negative_control_or_quarantine_arm"
+      ],
+      "expected_evidence": [
+        "selected",
+        "injected",
+        "used",
+        "evidence_present",
+        "gate_passed",
+        "outcome_contributed"
+      ],
+      "replacement_rule": "replace_only_after_receipt_backed_better_candidate_for_same_capability",
+      "cost_tier": "unknown_until_live_measured",
+      "negative_triggers": [
+        "selected_only",
+        "missing_receipt_path",
+        "trust_mismatch",
+        "model_call_without_tokens"
+      ],
+      "runtime_update_allowed": false,
+      "public_benchmark_allowed": false
+    },
+    {
+      "batch_id": "SF3-HARDEN-03",
+      "capability_id": "xray",
+      "skill_id": "sf2-xray-route-fit-spec",
+      "metadata_overlay_status": "READY",
+      "load_when": "Load only for xray tasks when SF receipt evidence requires sf2-xray-route-fit-spec.",
+      "do_not_load_when": [
+        "capability_mismatch",
+        "runtime_receipt_missing",
+        "negative_control_or_quarantine_arm"
+      ],
+      "expected_evidence": [
+        "selected",
+        "injected",
+        "used",
+        "evidence_present",
+        "gate_passed",
+        "outcome_contributed"
+      ],
+      "replacement_rule": "replace_only_after_receipt_backed_better_candidate_for_same_capability",
+      "cost_tier": "unknown_until_live_measured",
+      "negative_triggers": [
+        "selected_only",
+        "missing_receipt_path",
+        "trust_mismatch",
+        "model_call_without_tokens"
+      ],
+      "runtime_update_allowed": false,
+      "public_benchmark_allowed": false
+    }
+  ],
+  "claim_boundary": [
+    "Metadata overlays harden candidate-only catalog entries without changing SKILL.md files.",
+    "Runtime policy remains blocked until separate manual approval."
+  ]
+}

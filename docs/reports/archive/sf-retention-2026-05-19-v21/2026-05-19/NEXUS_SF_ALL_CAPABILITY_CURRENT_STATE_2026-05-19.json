@@ -1,0 +1,333 @@
+{
+  "schema": "nexus.sf_all_capability_current_state.v1",
+  "status": "PASS",
+  "summary": {
+    "route_capability_count": 33,
+    "state_counts": {
+      "runtime_primary": 13,
+      "catalog_candidate_ready": 20
+    },
+    "runtime_update_allowed": false,
+    "public_benchmark_allowed": false
+  },
+  "capabilities": [
+    {
+      "capability_id": "direct_master_loop",
+      "state": "runtime_primary",
+      "primary_skill": "sf2-direct_master_loop-route-fit-spec",
+      "evidence": "V10 apply smoke PASS",
+      "next_action": "keep_runtime_primary"
+    },
+    {
+      "capability_id": "repair_loop",
+      "state": "runtime_primary",
+      "primary_skill": "tdd",
+      "evidence": "V10 apply smoke PASS",
+      "next_action": "keep_runtime_primary"
+    },
+    {
+      "capability_id": "hyper_sprint",
+      "state": "runtime_primary",
+      "primary_skill": "sf2-hyper_sprint-route-fit-spec",
+      "evidence": "V10 apply smoke PASS",
+      "next_action": "keep_runtime_primary"
+    },
+    {
+      "capability_id": "nightshift",
+      "state": "runtime_primary",
+      "primary_skill": "sf2-nightshift-route-fit-spec",
+      "evidence": "V10 apply smoke PASS",
+      "next_action": "keep_runtime_primary"
+    },
+    {
+      "capability_id": "codeintel",
+      "state": "runtime_primary",
+      "primary_skill": "sf2-codeintel-route-fit-spec",
+      "evidence": "V10 apply smoke PASS",
+      "next_action": "keep_runtime_primary"
+    },
+    {
+      "capability_id": "research",
+      "state": "catalog_candidate_ready",
+      "primary_skill": "research-citation-chain-verifier",
+      "alternates": [
+        "sf2-research_control_plane-route-fit-spec",
+        "research-source-conflict-resolver"
+      ],
+      "evidence": "V11 live token/wall delta ranking PASS",
+      "next_action": "promotion_review_or_tiebreak"
+    },
+    {
+      "capability_id": "research_control_plane",
+      "state": "catalog_candidate_ready",
+      "primary_skill": "research-citation-chain-verifier",
+      "alternates": [
+        "sf2-research_control_plane-route-fit-spec"
+      ],
+      "evidence": "V11 live token/wall delta ranking PASS",
+      "next_action": "promotion_review_or_tiebreak"
+    },
+    {
+      "capability_id": "xray",
+      "state": "catalog_candidate_ready",
+      "primary_skill": "diagnose",
+      "alternates": [
+        "sf2-codeintel-route-fit-spec",
+        "sf2-xray-route-fit-spec"
+      ],
+      "evidence": "V12 token-clean replay PASS",
+      "next_action": "promotion_review_or_tiebreak"
+    },
+    {
+      "capability_id": "learn_ask",
+      "state": "runtime_primary",
+      "primary_skill": "nexus-capability-upgrade",
+      "evidence": "V10 apply smoke PASS",
+      "next_action": "keep_runtime_primary"
+    },
+    {
+      "capability_id": "lancedb",
+      "state": "catalog_candidate_ready",
+      "primary_skill": "research-source-validation-auditor",
+      "alternates": [
+        "sf2-lancedb-route-fit-spec",
+        "nexus-capability-upgrade"
+      ],
+      "evidence": "V11 live token/wall delta ranking PASS",
+      "next_action": "promotion_review_or_tiebreak"
+    },
+    {
+      "capability_id": "memory",
+      "state": "catalog_candidate_ready",
+      "primary_skill": "diagnose",
+      "alternates": [
+        "sf2-memory-route-fit-spec"
+      ],
+      "evidence": "V11 live token/wall delta ranking PASS",
+      "next_action": "promotion_review_or_tiebreak"
+    },
+    {
+      "capability_id": "learning_closure",
+      "state": "catalog_candidate_ready",
+      "primary_skill": "sf2-learning_closure-route-fit-spec",
+      "alternates": [
+        "nexus-goal-closure-executor"
+      ],
+      "evidence": "V11 live token/wall delta ranking PASS",
+      "next_action": "promotion_review_or_tiebreak"
+    },
+    {
+      "capability_id": "autoreason",
+      "state": "catalog_candidate_ready",
+      "primary_skill": "sf2-belief-route-fit-spec",
+      "alternates": [
+        "diagnose",
+        "sf2-autoreason-route-fit-spec",
+        "nexus-benchmark-public-report"
+      ],
+      "evidence": "V11 live token/wall delta ranking PASS",
+      "next_action": "promotion_review_or_tiebreak"
+    },
+    {
+      "capability_id": "ddtree",
+      "state": "catalog_candidate_ready",
+      "primary_skill": "nexus-root-cause-probe",
+      "alternates": [
+        "diagnose",
+        "sf2-ddtree-route-fit-spec"
+      ],
+      "evidence": "V11 live token/wall delta ranking PASS",
+      "next_action": "promotion_review_or_tiebreak"
+    },
+    {
+      "capability_id": "belief",
+      "state": "runtime_primary",
+      "primary_skill": "sf2-belief-route-fit-spec",
+      "evidence": "V10 apply smoke PASS",
+      "next_action": "keep_runtime_primary"
+    },
+    {
+      "capability_id": "autonomic_router",
+      "state": "catalog_candidate_ready",
+      "primary_skill": "sf2-autonomic_router-route-fit-spec",
+      "alternates": [
+        "nexus-root-cause-probe",
+        "diagnose"
+      ],
+      "evidence": "V11 live token/wall delta ranking PASS",
+      "next_action": "promotion_review_or_tiebreak"
+    },
+    {
+      "capability_id": "forecast_pregate",
+      "state": "runtime_primary",
+      "primary_skill": "create-plan",
+      "evidence": "V10 apply smoke PASS",
+      "next_action": "keep_runtime_primary"
+    },
+    {
+      "capability_id": "swarm_multi_agent",
+      "state": "runtime_primary",
+      "primary_skill": "sf2-swarm_multi_agent-route-fit-spec",
+      "evidence": "V10 apply smoke PASS",
+      "next_action": "keep_runtime_primary"
+    },
+    {
+      "capability_id": "drone",
+      "state": "catalog_candidate_ready",
+      "primary_skill": "diagnose",
+      "alternates": [
+        "nexus-goal-closure-executor",
+        "sf2-drone-route-fit-spec"
+      ],
+      "evidence": "V11 live token/wall delta ranking PASS",
+      "next_action": "promotion_review_or_tiebreak"
+    },
+    {
+      "capability_id": "file_lock_security_gate",
+      "state": "runtime_primary",
+      "primary_skill": "sf2-file_lock_security_gate-route-fit-spec",
+      "evidence": "V10 apply smoke PASS",
+      "next_action": "keep_runtime_primary"
+    },
+    {
+      "capability_id": "mempalace",
+      "state": "catalog_candidate_ready",
+      "primary_skill": "sf2-mempalace-route-fit-spec",
+      "alternates": [
+        "acceptance-evidence-failclosed",
+        "gbrain-soul-audit"
+      ],
+      "evidence": "V11 live token/wall delta ranking PASS",
+      "next_action": "promotion_review_or_tiebreak"
+    },
+    {
+      "capability_id": "policy_capability_gate",
+      "state": "catalog_candidate_ready",
+      "primary_skill": "acceptance-evidence-failclosed",
+      "alternates": [
+        "cso",
+        "sf2-policy_capability_gate-route-fit-spec"
+      ],
+      "evidence": "V11 live token/wall delta ranking PASS",
+      "next_action": "promotion_review_or_tiebreak"
+    },
+    {
+      "capability_id": "ultra_review",
+      "state": "catalog_candidate_ready",
+      "primary_skill": "acceptance-evidence-failclosed",
+      "alternates": [
+        "cso"
+      ],
+      "evidence": "V12 token-clean replay PASS",
+      "next_action": "promotion_review_or_tiebreak"
+    },
+    {
+      "capability_id": "artifact_gate",
+      "state": "catalog_candidate_ready",
+      "primary_skill": "acceptance-evidence-failclosed",
+      "alternates": [
+        "nexus-goal-closure-executor",
+        "research-citation-chain-verifier",
+        "cso"
+      ],
+      "evidence": "V11 live token/wall delta ranking PASS",
+      "next_action": "promotion_review_or_tiebreak"
+    },
+    {
+      "capability_id": "claim_gate",
+      "state": "runtime_primary",
+      "primary_skill": "nexus-benchmark-continuous-optimization",
+      "evidence": "V10 apply smoke PASS",
+      "next_action": "keep_runtime_primary"
+    },
+    {
+      "capability_id": "delivery_acceptance_gate",
+      "state": "catalog_candidate_ready",
+      "primary_skill": "acceptance-evidence-failclosed",
+      "alternates": [
+        "sf2-delivery_acceptance_gate-route-fit-spec",
+        "nexus-goal-closure-executor"
+      ],
+      "evidence": "V11 live token/wall delta ranking PASS",
+      "next_action": "promotion_review_or_tiebreak"
+    },
+    {
+      "capability_id": "sandbox_replay",
+      "state": "catalog_candidate_ready",
+      "primary_skill": "sf2-sandbox_replay-route-fit-spec",
+      "alternates": [
+        "acceptance-evidence-failclosed",
+        "diagnose"
+      ],
+      "evidence": "V11 live token/wall delta ranking PASS",
+      "next_action": "promotion_review_or_tiebreak"
+    },
+    {
+      "capability_id": "benchmark_meta_opt",
+      "state": "catalog_candidate_ready",
+      "primary_skill": "nexus-benchmark-continuous-optimization",
+      "alternates": [
+        "nexus-benchmark-public-report",
+        "diagnose"
+      ],
+      "evidence": "V11 live token/wall delta ranking PASS",
+      "next_action": "promotion_review_or_tiebreak"
+    },
+    {
+      "capability_id": "regression_guard",
+      "state": "runtime_primary",
+      "primary_skill": "diagnose",
+      "evidence": "V10 apply smoke PASS",
+      "next_action": "keep_runtime_primary"
+    },
+    {
+      "capability_id": "registry_skills_sync",
+      "state": "catalog_candidate_ready",
+      "primary_skill": "sf2-registry_skills_sync-route-fit-spec",
+      "alternates": [],
+      "evidence": "V11 live token/wall delta ranking PASS",
+      "next_action": "promotion_review_or_tiebreak"
+    },
+    {
+      "capability_id": "metabolism_resume",
+      "state": "catalog_candidate_ready",
+      "primary_skill": "nexus-goal-closure-executor",
+      "alternates": [
+        "setup-matt-pocock-skills",
+        "diagnose"
+      ],
+      "evidence": "V11 live token/wall delta ranking PASS",
+      "next_action": "promotion_review_or_tiebreak"
+    },
+    {
+      "capability_id": "ui_validator",
+      "state": "catalog_candidate_ready",
+      "primary_skill": "nexus-root-cause-probe",
+      "alternates": [
+        "sf2-ui_validator-route-fit-spec",
+        "diagnose"
+      ],
+      "evidence": "V11 live token/wall delta ranking PASS",
+      "next_action": "promotion_review_or_tiebreak"
+    },
+    {
+      "capability_id": "external_productivity",
+      "state": "runtime_primary",
+      "primary_skill": "sf2-external_productivity-route-fit-spec",
+      "evidence": "V10 apply smoke PASS",
+      "next_action": "keep_runtime_primary"
+    }
+  ],
+  "new_skill_update_flow": [
+    "ingest_or_materialize_skill_source",
+    "classify_source_and_quarantine_noncanonical",
+    "map_to_route_capability_bucket",
+    "build_no_skill_vs_candidate_matrix",
+    "run_preflight",
+    "run_flash_nexus_chunked_live_fail_fast",
+    "write_selection_rollup_and_catalog_verdict",
+    "promotion_review_for_runtime_primary_only_after_receipt_and_token_cleanliness",
+    "post_apply_smoke",
+    "ledger_and_learning_closure_writeback"
+  ]
+}

@@ -1,0 +1,63 @@
+{
+  "schema": "nexus.sf_round11_coverage_backlog_replacement_ledger.v1",
+  "version": "2026-05-19",
+  "status": "PASS",
+  "summary": {
+    "replacement_count": 1,
+    "hold_count": 3,
+    "runtime_update_allowed": false,
+    "public_benchmark_allowed": false
+  },
+  "replacements": [
+    {
+      "capability": "ultra_review",
+      "previous_skill": "github9-openai-security-threat-model-ultra-review",
+      "candidate_skill": "github11-vulnerability-scanner-ultra-review",
+      "previous_total_tokens": 39875,
+      "candidate_total_tokens": 39402,
+      "token_delta": -473,
+      "previous_wall_sec": 194.9008,
+      "candidate_wall_sec": 144.8122,
+      "wall_delta_sec": -50.0886,
+      "candidate_receipt_path": ".nexus/reports/sf_round11_coverage_backlog_live_2026-05-19/ultra_review_sf-round11-coverage-ultra_review-001_challenger_github11-vulnerability-scanner-ultra-review",
+      "candidate_evidence_path": ".nexus/reports/sf_round11_coverage_backlog_live_2026-05-19/ultra_review_sf-round11-coverage-ultra_review-001_challenger_github11-vulnerability-scanner-ultra-review/evidence_bundle.json",
+      "decision": "update_overlay_candidate_primary"
+    }
+  ],
+  "holds": [
+    {
+      "capability": "benchmark_meta_opt",
+      "current_skill": "github4-sickn33-antigravity-awesome-skills-ad-creative",
+      "candidate_skill": "github11-ab-test-analysis-benchmark-meta-opt",
+      "reason_codes": [
+        "challenger_token_not_lower",
+        "challenger_wall_not_lower"
+      ],
+      "token_delta": 3406,
+      "wall_delta_sec": 4.2742
+    },
+    {
+      "capability": "forecast_pregate",
+      "current_skill": "create-plan",
+      "candidate_skill": "github11-notion-spec-to-implementation-forecast-pregate",
+      "reason_codes": [
+        "challenger_token_not_lower"
+      ],
+      "token_delta": 1015,
+      "wall_delta_sec": -3.8919
+    },
+    {
+      "capability": "repair_loop",
+      "current_skill": "github7-midudev-tdd-repair-loop",
+      "candidate_skill": "github11-bug-hunter-repair-loop",
+      "reason_codes": [
+        "challenger_token_not_lower"
+      ],
+      "token_delta": 3913,
+      "wall_delta_sec": -7.7901
+    }
+  ],
+  "claim_boundary": [
+    "Ledger records SF internal replacement evidence only. Runtime default apply remains gated."
+  ]
+}

@@ -1,0 +1,38 @@
+{
+  "claim_boundary": [
+    "source registry feeds discovery scheduler only",
+    "reference/quarantine/worktree copies remain non-runtime",
+    "catalog verdict requires receipt-backed ablation evidence"
+  ],
+  "due_source_intake": [
+    {
+      "capability_id": "research_and_source_discipline",
+      "intake_disposition": "candidate_intake_only",
+      "reason": "due_source_refresh_must_not_bypass_skill_catalog",
+      "requires_screening": true,
+      "runtime_mount_allowed": false,
+      "source": "repo:HKUDS/OpenHarness",
+      "topic": "openharness"
+    },
+    {
+      "capability_id": "research_and_source_discipline",
+      "intake_disposition": "candidate_intake_only",
+      "reason": "due_source_refresh_must_not_bypass_skill_catalog",
+      "requires_screening": true,
+      "runtime_mount_allowed": false,
+      "source": "repo:HKUDS/OpenHarness",
+      "topic": "openharness"
+    }
+  ],
+  "public_benchmark_allowed": false,
+  "runtime_update_allowed": false,
+  "schema": "nexus.sf_source_registry_adapter.v1",
+  "source_refresh_plan": ".nexus/reports/learn/learn_refresh_plan.json",
+  "status": "PASS",
+  "summary": {
+    "candidate_intake_only_count": 2,
+    "due_source_count": 2,
+    "runtime_mount_allowed_count": 0,
+    "unmapped_due_source_count": 0
+  }
+}

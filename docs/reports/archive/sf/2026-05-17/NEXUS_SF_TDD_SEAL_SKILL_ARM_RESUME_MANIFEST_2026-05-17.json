@@ -1,0 +1,51 @@
+{
+  "schema": "nexus.skill_fit_resume_manifest.v1",
+  "status": "RESUME_REQUIRED",
+  "matrix_path": "docs/reports/NEXUS_SF_TDD_SEAL_EXECUTION_MATRIX_2026-05-17.json",
+  "output_root": ".nexus/reports/sf_tdd_seal_live_20260517",
+  "abort_reason": "sf_tdd_skill_arm_live_planned",
+  "summary": {
+    "planned_rows": 30,
+    "completed_rows": 0,
+    "remaining_rows": 30
+  },
+  "last_completed_row_id": "",
+  "next_row_id": "repair_and_coding::model-required-refactor-001::skill_arm_001_1b9277d6d9ad",
+  "completed_row_ids": [],
+  "remaining_row_ids": [
+    "repair_and_coding::model-required-refactor-001::skill_arm_001_1b9277d6d9ad",
+    "repair_and_coding::model-required-docs-001::skill_arm_001_1b9277d6d9ad",
+    "repair_and_coding::model-required-context-001::skill_arm_001_1b9277d6d9ad",
+    "repair_and_coding::docs-lane-public-field-contract-001::skill_arm_001_1b9277d6d9ad",
+    "repair_and_coding::docs-lane-contextual-evidence-contract-001::skill_arm_001_1b9277d6d9ad",
+    "repair_and_coding::docs-lane-config-contract-001::skill_arm_001_1b9277d6d9ad",
+    "repair_and_coding::pub-bug-003::skill_arm_001_1b9277d6d9ad",
+    "repair_and_coding::pub-ref-003::skill_arm_001_1b9277d6d9ad",
+    "repair_and_coding::pub-ref-004::skill_arm_001_1b9277d6d9ad",
+    "repair_and_coding::pub-feat-002::skill_arm_001_1b9277d6d9ad",
+    "repair_and_coding::pub-feat-003::skill_arm_001_1b9277d6d9ad",
+    "repair_and_coding::pub-feat-004::skill_arm_001_1b9277d6d9ad",
+    "repair_and_coding::pub-doc-002::skill_arm_001_1b9277d6d9ad",
+    "repair_and_coding::pub-doc-003::skill_arm_001_1b9277d6d9ad",
+    "repair_and_coding::pub-doc-004::skill_arm_001_1b9277d6d9ad",
+    "repair_and_coding::pub-ops-002::skill_arm_001_1b9277d6d9ad",
+    "repair_and_coding::pub-ops-003::skill_arm_001_1b9277d6d9ad",
+    "repair_and_coding::pub-ops-004::skill_arm_001_1b9277d6d9ad",
+    "repair_and_coding::hard-neutral-bug-001::skill_arm_001_1b9277d6d9ad",
+    "repair_and_coding::hard-neutral-bug-002::skill_arm_001_1b9277d6d9ad",
+    "repair_and_coding::hard-neutral-ref-001::skill_arm_001_1b9277d6d9ad",
+    "repair_and_coding::hard-neutral-ref-002::skill_arm_001_1b9277d6d9ad",
+    "repair_and_coding::hard-neutral-feat-001::skill_arm_001_1b9277d6d9ad",
+    "repair_and_coding::hard-neutral-feat-002::skill_arm_001_1b9277d6d9ad",
+    "repair_and_coding::hard-neutral-doc-001::skill_arm_001_1b9277d6d9ad",
+    "repair_and_coding::hard-neutral-doc-002::skill_arm_001_1b9277d6d9ad",
+    "repair_and_coding::hard-neutral-ops-001::skill_arm_001_1b9277d6d9ad",
+    "repair_and_coding::hard-neutral-ops-002::skill_arm_001_1b9277d6d9ad",
+    "repair_and_coding::rlm-harder-multifile-001::skill_arm_001_1b9277d6d9ad",
+    "repair_and_coding::rlm-harder-long-context-001::skill_arm_001_1b9277d6d9ad"
+  ],
+  "claim_boundary": [
+    "This manifest resumes execution only; it is not a sealed live summary.",
+    "Completed rows remain diagnostic until a full live seal emits catalog evidence."
+  ]
+}

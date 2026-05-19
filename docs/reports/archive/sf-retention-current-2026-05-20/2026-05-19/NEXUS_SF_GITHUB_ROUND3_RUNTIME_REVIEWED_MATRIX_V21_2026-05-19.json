@@ -1,0 +1,147 @@
+{
+  "claim_boundary": [
+    "runtime-reviewed ablation compare only",
+    "runtime default not updated by this matrix"
+  ],
+  "rows": [
+    {
+      "ablation_eligible": true,
+      "anonymous_label": "github3_openai_skill_creator",
+      "arm_id": "github3_openai_skill_creator",
+      "arm_type": "skill_ablation",
+      "capability": "registry_skills_sync",
+      "expected_outcome": "sf_github_round3_skill_fit_receipt_chain_complete",
+      "model": "gemini-3-flash-preview",
+      "row_id": "registry_skills_sync::sf-github-round3-v21-runtime-reviewed-registry_skills_sync-001::github3_openai_skill_creator::github3-openai-skill-creator-safe-registry-sync",
+      "runner_args": [
+        "uv",
+        "run",
+        "python",
+        "scripts/bench/capability_ab_runner.py",
+        "--tasks-file",
+        "docs/reports/NEXUS_SF_V15_HELD_CHALLENGER_TASK_MANIFEST_2026-05-19.json",
+        "--task-id-filter",
+        "sf-v15-held-registry_skills_sync-001",
+        "--max-tasks",
+        "1",
+        "--timeout-sec",
+        "300",
+        "--per-task-stop-loss-sec",
+        "600",
+        "--stop-loss-sec",
+        "600",
+        "--nexus-only",
+        "--gemini-model",
+        "gemini-3-flash-preview",
+        "--with-nexus-runner",
+        "subprocess",
+        "--with-llm-mode",
+        "all",
+        "--without-mode",
+        "gemini",
+        "--enable-autoreason-executor",
+        "--enable-ddtree-executor",
+        "--enable-ultra-review-dry-gate",
+        "--llm-candidate-cap",
+        "3",
+        "--evidence-bundle",
+        "--no-progress-log"
+      ],
+      "runner_capability_id": "semantic_searcher",
+      "runner_env": {
+        "NEXUS_BENCH_ALLOW_ABLATION_SKILL_MOUNTS": "1",
+        "NEXUS_BENCH_SKILL_MOUNT_REQUESTS": "[\"github3-openai-skill-creator-safe-registry-sync\"]",
+        "NEXUS_BENCH_SKILL_STATUS_REPORT": "docs/reports/NEXUS_SF_GITHUB_ROUND3_RUNTIME_REVIEWED_SKILL_STATUS_V21_2026-05-19.json",
+        "NEXUS_CAPABILITY_RECEIPT_FIRST": "1",
+        "NEXUS_DIRECT_GEMINI_MODEL": "gemini-3-flash-preview",
+        "NEXUS_VALUE_HIDDEN_VERIFIER": "1"
+      },
+      "runtime_eligible": true,
+      "sf_route_capability_id": "registry_skills_sync",
+      "skill_id": "github3-openai-skill-creator-safe-registry-sync",
+      "skill_mount_requests": [
+        "github3-openai-skill-creator-safe-registry-sync"
+      ],
+      "source_root": "github_round3_runtime_reviewed",
+      "source_type": "nexus_curated_candidate",
+      "task_ref": {
+        "manifest": "docs/reports/NEXUS_SF_V15_HELD_CHALLENGER_TASK_MANIFEST_2026-05-19.json",
+        "task_id": "sf-v15-held-registry_skills_sync-001"
+      }
+    },
+    {
+      "ablation_eligible": true,
+      "anonymous_label": "github3_claude_security_scan",
+      "arm_id": "github3_claude_security_scan",
+      "arm_type": "skill_ablation",
+      "capability": "ultra_review",
+      "expected_outcome": "sf_github_round3_skill_fit_receipt_chain_complete",
+      "model": "gemini-3-flash-preview",
+      "row_id": "ultra_review::sf-github-round3-v21-runtime-reviewed-ultra_review-001::github3_claude_security_scan::github3-claude-security-scan-safe-ultra-review",
+      "runner_args": [
+        "uv",
+        "run",
+        "python",
+        "scripts/bench/capability_ab_runner.py",
+        "--tasks-file",
+        "docs/reports/NEXUS_SF_GITHUB_ROUND2_CORRECTED_FLASH_SMOKE_TASKS_2026-05-19.json",
+        "--task-id-filter",
+        "sf-github-round2-corrected-smoke-ultra_review-001",
+        "--max-tasks",
+        "1",
+        "--timeout-sec",
+        "300",
+        "--per-task-stop-loss-sec",
+        "600",
+        "--stop-loss-sec",
+        "600",
+        "--nexus-only",
+        "--gemini-model",
+        "gemini-3-flash-preview",
+        "--with-nexus-runner",
+        "subprocess",
+        "--with-llm-mode",
+        "all",
+        "--without-mode",
+        "gemini",
+        "--enable-autoreason-executor",
+        "--enable-ddtree-executor",
+        "--enable-ultra-review-dry-gate",
+        "--llm-candidate-cap",
+        "3",
+        "--evidence-bundle",
+        "--no-progress-log"
+      ],
+      "runner_capability_id": "ultra_review",
+      "runner_env": {
+        "NEXUS_BENCH_ALLOW_ABLATION_SKILL_MOUNTS": "1",
+        "NEXUS_BENCH_SKILL_MOUNT_REQUESTS": "[\"github3-claude-security-scan-safe-ultra-review\"]",
+        "NEXUS_BENCH_SKILL_STATUS_REPORT": "docs/reports/NEXUS_SF_GITHUB_ROUND3_RUNTIME_REVIEWED_SKILL_STATUS_V21_2026-05-19.json",
+        "NEXUS_CAPABILITY_RECEIPT_FIRST": "1",
+        "NEXUS_DIRECT_GEMINI_MODEL": "gemini-3-flash-preview",
+        "NEXUS_VALUE_HIDDEN_VERIFIER": "1"
+      },
+      "runtime_eligible": true,
+      "sf_route_capability_id": "ultra_review",
+      "skill_id": "github3-claude-security-scan-safe-ultra-review",
+      "skill_mount_requests": [
+        "github3-claude-security-scan-safe-ultra-review"
+      ],
+      "source_root": "github_round3_runtime_reviewed",
+      "source_type": "nexus_curated_candidate",
+      "task_ref": {
+        "manifest": "docs/reports/NEXUS_SF_GITHUB_ROUND2_CORRECTED_FLASH_SMOKE_TASKS_2026-05-19.json",
+        "task_id": "sf-github-round2-corrected-smoke-ultra_review-001"
+      }
+    }
+  ],
+  "schema": "nexus.sf_github_round3_runtime_reviewed_matrix.v21",
+  "source_matrix": "docs/reports/NEXUS_SF_GITHUB_ROUND3_MATRIX_2026-05-19.json",
+  "source_skill_status": "docs/reports/NEXUS_SF_GITHUB_ROUND3_RUNTIME_REVIEWED_SKILL_STATUS_V21_2026-05-19.json",
+  "status": "PASS",
+  "summary": {
+    "row_count": 2,
+    "runtime_reviewed_candidate_count": 2
+  },
+  "version": "2026-05-19"
+}

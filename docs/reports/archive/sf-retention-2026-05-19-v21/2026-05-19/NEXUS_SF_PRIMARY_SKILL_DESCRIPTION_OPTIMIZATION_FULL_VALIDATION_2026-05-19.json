@@ -1,0 +1,335 @@
+{
+  "accepted_exception_policy": "SF2 route-fit skill ids intentionally preserve Nexus capability ids with underscores; do not rename without migrating overlay/catalog/evidence ids.",
+  "items": [
+    {
+      "accepted_exception": false,
+      "format_check_exit": 0,
+      "format_check_summary": [
+        "Summary: 0 error(s), 1 warning(s)."
+      ],
+      "path": "/Users/jameschen/Workspace/nexus/.agents/skills/acceptance-evidence-failclosed",
+      "quick_validate_exit": 0,
+      "quick_validate_tail": [
+        "Skill is valid!"
+      ],
+      "skill_id": "acceptance-evidence-failclosed",
+      "status": "PASS"
+    },
+    {
+      "accepted_exception": false,
+      "format_check_exit": 0,
+      "format_check_summary": [
+        "Summary: 0 error(s), 1 warning(s)."
+      ],
+      "path": "/Users/jameschen/Workspace/nexus/.agents/skills/create-plan",
+      "quick_validate_exit": 0,
+      "quick_validate_tail": [
+        "Skill is valid!"
+      ],
+      "skill_id": "create-plan",
+      "status": "PASS"
+    },
+    {
+      "accepted_exception": false,
+      "format_check_exit": 0,
+      "format_check_summary": [
+        "Summary: 0 error(s), 1 warning(s)."
+      ],
+      "path": "/Users/jameschen/Workspace/nexus/.agents/skills/diagnose",
+      "quick_validate_exit": 0,
+      "quick_validate_tail": [
+        "Skill is valid!"
+      ],
+      "skill_id": "diagnose",
+      "status": "PASS"
+    },
+    {
+      "accepted_exception": false,
+      "format_check_exit": 0,
+      "format_check_summary": [
+        "Summary: 0 error(s), 1 warning(s)."
+      ],
+      "path": "/Users/jameschen/Workspace/nexus/.agents/skills/nexus-benchmark-continuous-optimization",
+      "quick_validate_exit": 0,
+      "quick_validate_tail": [
+        "Skill is valid!"
+      ],
+      "skill_id": "nexus-benchmark-continuous-optimization",
+      "status": "PASS"
+    },
+    {
+      "accepted_exception": false,
+      "format_check_exit": 0,
+      "format_check_summary": [
+        "Summary: 0 error(s), 1 warning(s)."
+      ],
+      "path": "/Users/jameschen/Workspace/nexus/.agents/skills/nexus-capability-upgrade",
+      "quick_validate_exit": 0,
+      "quick_validate_tail": [
+        "Skill is valid!"
+      ],
+      "skill_id": "nexus-capability-upgrade",
+      "status": "PASS"
+    },
+    {
+      "accepted_exception": false,
+      "format_check_exit": 0,
+      "format_check_summary": [
+        "Summary: 0 error(s), 1 warning(s)."
+      ],
+      "path": "/Users/jameschen/Workspace/nexus/.agents/skills/nexus-goal-closure-executor",
+      "quick_validate_exit": 0,
+      "quick_validate_tail": [
+        "Skill is valid!"
+      ],
+      "skill_id": "nexus-goal-closure-executor",
+      "status": "PASS"
+    },
+    {
+      "accepted_exception": false,
+      "format_check_exit": 0,
+      "format_check_summary": [
+        "Summary: 0 error(s), 1 warning(s)."
+      ],
+      "path": "/Users/jameschen/Workspace/nexus/.agents/skills/nexus-root-cause-probe",
+      "quick_validate_exit": 0,
+      "quick_validate_tail": [
+        "Skill is valid!"
+      ],
+      "skill_id": "nexus-root-cause-probe",
+      "status": "PASS"
+    },
+    {
+      "accepted_exception": false,
+      "format_check_exit": 0,
+      "format_check_summary": [
+        "Summary: 0 error(s), 1 warning(s)."
+      ],
+      "path": "/Users/jameschen/Workspace/nexus/.agents/skills/research-citation-chain-verifier",
+      "quick_validate_exit": 0,
+      "quick_validate_tail": [
+        "Skill is valid!"
+      ],
+      "skill_id": "research-citation-chain-verifier",
+      "status": "PASS"
+    },
+    {
+      "accepted_exception": false,
+      "format_check_exit": 0,
+      "format_check_summary": [
+        "Summary: 0 error(s), 1 warning(s)."
+      ],
+      "path": "/Users/jameschen/Workspace/nexus/.agents/skills/research-source-validation-auditor",
+      "quick_validate_exit": 0,
+      "quick_validate_tail": [
+        "Skill is valid!"
+      ],
+      "skill_id": "research-source-validation-auditor",
+      "status": "PASS"
+    },
+    {
+      "accepted_exception": true,
+      "format_check_exit": 1,
+      "format_check_summary": [
+        "Summary: 2 error(s), 1 warning(s)."
+      ],
+      "path": "/Users/jameschen/Workspace/nexus/.agents/skills/sf2/sf2-autonomic_router-route-fit-spec",
+      "quick_validate_exit": 1,
+      "quick_validate_tail": [
+        "Name 'sf2-autonomic_router-route-fit-spec' should be kebab-case (lowercase letters, digits, and hyphens only)"
+      ],
+      "skill_id": "sf2-autonomic_router-route-fit-spec",
+      "status": "PASS_WITH_NEXUS_ROUTE_ID_EXCEPTION"
+    },
+    {
+      "accepted_exception": false,
+      "format_check_exit": 0,
+      "format_check_summary": [
+        "Summary: 0 error(s), 1 warning(s)."
+      ],
+      "path": "/Users/jameschen/Workspace/nexus/.agents/skills/sf2/sf2-belief-route-fit-spec",
+      "quick_validate_exit": 0,
+      "quick_validate_tail": [
+        "Skill is valid!"
+      ],
+      "skill_id": "sf2-belief-route-fit-spec",
+      "status": "PASS"
+    },
+    {
+      "accepted_exception": false,
+      "format_check_exit": 0,
+      "format_check_summary": [
+        "Summary: 0 error(s), 1 warning(s)."
+      ],
+      "path": "/Users/jameschen/Workspace/nexus/.agents/skills/sf2/sf2-codeintel-route-fit-spec",
+      "quick_validate_exit": 0,
+      "quick_validate_tail": [
+        "Skill is valid!"
+      ],
+      "skill_id": "sf2-codeintel-route-fit-spec",
+      "status": "PASS"
+    },
+    {
+      "accepted_exception": true,
+      "format_check_exit": 1,
+      "format_check_summary": [
+        "Summary: 2 error(s), 1 warning(s)."
+      ],
+      "path": "/Users/jameschen/Workspace/nexus/.agents/skills/sf2/sf2-direct_master_loop-route-fit-spec",
+      "quick_validate_exit": 1,
+      "quick_validate_tail": [
+        "Name 'sf2-direct_master_loop-route-fit-spec' should be kebab-case (lowercase letters, digits, and hyphens only)"
+      ],
+      "skill_id": "sf2-direct_master_loop-route-fit-spec",
+      "status": "PASS_WITH_NEXUS_ROUTE_ID_EXCEPTION"
+    },
+    {
+      "accepted_exception": true,
+      "format_check_exit": 1,
+      "format_check_summary": [
+        "Summary: 2 error(s), 1 warning(s)."
+      ],
+      "path": "/Users/jameschen/Workspace/nexus/.agents/skills/sf2/sf2-external_productivity-route-fit-spec",
+      "quick_validate_exit": 1,
+      "quick_validate_tail": [
+        "Name 'sf2-external_productivity-route-fit-spec' should be kebab-case (lowercase letters, digits, and hyphens only)"
+      ],
+      "skill_id": "sf2-external_productivity-route-fit-spec",
+      "status": "PASS_WITH_NEXUS_ROUTE_ID_EXCEPTION"
+    },
+    {
+      "accepted_exception": true,
+      "format_check_exit": 1,
+      "format_check_summary": [
+        "Summary: 2 error(s), 1 warning(s)."
+      ],
+      "path": "/Users/jameschen/Workspace/nexus/.agents/skills/sf2/sf2-file_lock_security_gate-route-fit-spec",
+      "quick_validate_exit": 1,
+      "quick_validate_tail": [
+        "Name 'sf2-file_lock_security_gate-route-fit-spec' should be kebab-case (lowercase letters, digits, and hyphens only)"
+      ],
+      "skill_id": "sf2-file_lock_security_gate-route-fit-spec",
+      "status": "PASS_WITH_NEXUS_ROUTE_ID_EXCEPTION"
+    },
+    {
+      "accepted_exception": true,
+      "format_check_exit": 1,
+      "format_check_summary": [
+        "Summary: 2 error(s), 1 warning(s)."
+      ],
+      "path": "/Users/jameschen/Workspace/nexus/.agents/skills/sf2/sf2-hyper_sprint-route-fit-spec",
+      "quick_validate_exit": 1,
+      "quick_validate_tail": [
+        "Name 'sf2-hyper_sprint-route-fit-spec' should be kebab-case (lowercase letters, digits, and hyphens only)"
+      ],
+      "skill_id": "sf2-hyper_sprint-route-fit-spec",
+      "status": "PASS_WITH_NEXUS_ROUTE_ID_EXCEPTION"
+    },
+    {
+      "accepted_exception": true,
+      "format_check_exit": 1,
+      "format_check_summary": [
+        "Summary: 2 error(s), 1 warning(s)."
+      ],
+      "path": "/Users/jameschen/Workspace/nexus/.agents/skills/sf2/sf2-learning_closure-route-fit-spec",
+      "quick_validate_exit": 1,
+      "quick_validate_tail": [
+        "Name 'sf2-learning_closure-route-fit-spec' should be kebab-case (lowercase letters, digits, and hyphens only)"
+      ],
+      "skill_id": "sf2-learning_closure-route-fit-spec",
+      "status": "PASS_WITH_NEXUS_ROUTE_ID_EXCEPTION"
+    },
+    {
+      "accepted_exception": false,
+      "format_check_exit": 0,
+      "format_check_summary": [
+        "Summary: 0 error(s), 1 warning(s)."
+      ],
+      "path": "/Users/jameschen/Workspace/nexus/.agents/skills/sf2/sf2-mempalace-route-fit-spec",
+      "quick_validate_exit": 0,
+      "quick_validate_tail": [
+        "Skill is valid!"
+      ],
+      "skill_id": "sf2-mempalace-route-fit-spec",
+      "status": "PASS"
+    },
+    {
+      "accepted_exception": false,
+      "format_check_exit": 0,
+      "format_check_summary": [
+        "Summary: 0 error(s), 1 warning(s)."
+      ],
+      "path": "/Users/jameschen/Workspace/nexus/.agents/skills/sf2/sf2-nightshift-route-fit-spec",
+      "quick_validate_exit": 0,
+      "quick_validate_tail": [
+        "Skill is valid!"
+      ],
+      "skill_id": "sf2-nightshift-route-fit-spec",
+      "status": "PASS"
+    },
+    {
+      "accepted_exception": true,
+      "format_check_exit": 1,
+      "format_check_summary": [
+        "Summary: 2 error(s), 1 warning(s)."
+      ],
+      "path": "/Users/jameschen/Workspace/nexus/.agents/skills/sf2/sf2-registry_skills_sync-route-fit-spec",
+      "quick_validate_exit": 1,
+      "quick_validate_tail": [
+        "Name 'sf2-registry_skills_sync-route-fit-spec' should be kebab-case (lowercase letters, digits, and hyphens only)"
+      ],
+      "skill_id": "sf2-registry_skills_sync-route-fit-spec",
+      "status": "PASS_WITH_NEXUS_ROUTE_ID_EXCEPTION"
+    },
+    {
+      "accepted_exception": true,
+      "format_check_exit": 1,
+      "format_check_summary": [
+        "Summary: 2 error(s), 1 warning(s)."
+      ],
+      "path": "/Users/jameschen/Workspace/nexus/.agents/skills/sf2/sf2-sandbox_replay-route-fit-spec",
+      "quick_validate_exit": 1,
+      "quick_validate_tail": [
+        "Name 'sf2-sandbox_replay-route-fit-spec' should be kebab-case (lowercase letters, digits, and hyphens only)"
+      ],
+      "skill_id": "sf2-sandbox_replay-route-fit-spec",
+      "status": "PASS_WITH_NEXUS_ROUTE_ID_EXCEPTION"
+    },
+    {
+      "accepted_exception": true,
+      "format_check_exit": 1,
+      "format_check_summary": [
+        "Summary: 2 error(s), 1 warning(s)."
+      ],
+      "path": "/Users/jameschen/Workspace/nexus/.agents/skills/sf2/sf2-swarm_multi_agent-route-fit-spec",
+      "quick_validate_exit": 1,
+      "quick_validate_tail": [
+        "Name 'sf2-swarm_multi_agent-route-fit-spec' should be kebab-case (lowercase letters, digits, and hyphens only)"
+      ],
+      "skill_id": "sf2-swarm_multi_agent-route-fit-spec",
+      "status": "PASS_WITH_NEXUS_ROUTE_ID_EXCEPTION"
+    },
+    {
+      "accepted_exception": false,
+      "format_check_exit": 0,
+      "format_check_summary": [
+        "Summary: 0 error(s), 1 warning(s)."
+      ],
+      "path": "/Users/jameschen/Workspace/nexus/.agents/skills/tdd",
+      "quick_validate_exit": 0,
+      "quick_validate_tail": [
+        "Skill is valid!"
+      ],
+      "skill_id": "tdd",
+      "status": "PASS"
+    }
+  ],
+  "schema": "nexus.sf_primary_skill_description_optimization_validation.v1",
+  "status": "PASS",
+  "summary": {
+    "accepted_exception_count": 9,
+    "checked_count": 23,
+    "pass_count": 14,
+    "return_count": 0
+  }
+}

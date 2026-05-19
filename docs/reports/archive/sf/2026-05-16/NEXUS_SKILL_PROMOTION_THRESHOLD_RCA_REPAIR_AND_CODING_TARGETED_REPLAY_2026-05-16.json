@@ -1,0 +1,86 @@
+{
+  "schema": "nexus.skill_promotion_threshold_rca.v1",
+  "status": "PASS",
+  "catalog_path": "docs/reports/NEXUS_SKILL_FIT_CATALOG_REPAIR_AND_CODING_TARGETED_REPLAY_2026-05-16.json",
+  "threshold_path": "docs/reports/NEXUS_SKILL_PROMOTION_THRESHOLD_CONTRACT_REPAIR_AND_CODING_TARGETED_REPLAY_2026-05-16.json",
+  "summary": {
+    "tested_skill_count": 3,
+    "default_candidate_count": 0,
+    "alternate_candidate_count": 0,
+    "promotion_ready_count": 0,
+    "flash100_allowed": false,
+    "root_cause": "delivery_passed_but_skill_outcome_contribution_below_threshold"
+  },
+  "findings": [
+    {
+      "capability": "repair_and_coding",
+      "skill_id": "aibdd.auto.java.e2e.refactor",
+      "verdict": "needs_more_data",
+      "tested_rows": 30,
+      "effective_rows": 12,
+      "effective_rate": 0.4,
+      "task_buckets": [
+        "ambiguous_bug_report",
+        "bugfix",
+        "docs_code_sync",
+        "feature",
+        "multi_file_refactor",
+        "ops_research",
+        "refactor"
+      ],
+      "threshold_status": "targeted_replay_required",
+      "threshold_recommendation": "needs_more_data",
+      "blocker": "effective_rate_below_alternate_threshold"
+    },
+    {
+      "capability": "repair_and_coding",
+      "skill_id": "gstack-investigate",
+      "verdict": "needs_more_data",
+      "tested_rows": 30,
+      "effective_rows": 11,
+      "effective_rate": 0.3667,
+      "task_buckets": [
+        "ambiguous_bug_report",
+        "bugfix",
+        "docs_code_sync",
+        "feature",
+        "multi_file_refactor",
+        "ops_research",
+        "refactor"
+      ],
+      "threshold_status": "targeted_replay_required",
+      "threshold_recommendation": "needs_more_data",
+      "blocker": "effective_rate_below_alternate_threshold"
+    },
+    {
+      "capability": "repair_and_coding",
+      "skill_id": "test-driven-development",
+      "verdict": "needs_more_data",
+      "tested_rows": 30,
+      "effective_rows": 10,
+      "effective_rate": 0.3333,
+      "task_buckets": [
+        "ambiguous_bug_report",
+        "bugfix",
+        "docs_code_sync",
+        "feature",
+        "multi_file_refactor",
+        "ops_research",
+        "refactor"
+      ],
+      "threshold_status": "targeted_replay_required",
+      "threshold_recommendation": "needs_more_data",
+      "blocker": "effective_rate_below_alternate_threshold"
+    }
+  ],
+  "decision": {
+    "run_flash100": false,
+    "run_pro18": false,
+    "lower_threshold": false,
+    "next_action": "complete_6R_full_live_sealing_after_flash_quota_recovers_and_review_skill_causality_signals"
+  },
+  "claim_boundary": [
+    "RCA explains promotion blocking only; it does not lower promotion gates.",
+    "Row delivery PASS is not equivalent to skill outcome contribution."
+  ]
+}

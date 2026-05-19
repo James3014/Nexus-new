@@ -1,0 +1,29 @@
+{
+  "apply_gate_verdict": "HOLD_RUNTIME_DEFAULT_APPLY",
+  "blockers": [
+    "governance_primary_tiebreak_not_selected_for_runtime_default"
+  ],
+  "checks": {
+    "catalog_v6_present": true,
+    "pairing_table_present": true,
+    "public_benchmark_blocked": true,
+    "runtime_receipt_complete": true,
+    "single_arm_public_claim_blocked": true
+  },
+  "claim_boundary": [
+    "recheck only",
+    "does not write runtime overlay",
+    "does not unlock public benchmark"
+  ],
+  "public_benchmark_allowed": false,
+  "runtime_update_allowed": false,
+  "schema": "nexus.sf_auto_apply_gate_recheck.v1",
+  "status": "PASS",
+  "summary": {
+    "blocker_count": 1,
+    "governance_runtime_review_seal_status": "PASS",
+    "governance_sealed_candidate_count": 4,
+    "v5_primary_apply_ready_count": 2,
+    "v6_catalog_status": "PASS"
+  }
+}

@@ -1,0 +1,140 @@
+{
+  "schema": "nexus.skill_fit_runtime_promotion_review.v1",
+  "status": "PASS",
+  "sf_closed_loop_complete": true,
+  "sf_completion_gate_status": "PASS",
+  "runtime_update_allowed": false,
+  "public_benchmark_allowed": false,
+  "runtime_review_items": [
+    {
+      "capability": "forecast_pregate",
+      "skill_id": "create-plan",
+      "recommendation_kind": "replace_candidate",
+      "disposition": "runtime_review_ready",
+      "runtime_review_ready": true,
+      "source_root": "nexus_repo",
+      "source_type": "repo_local_materialized_external",
+      "path": "/Users/jameschen/Workspace/nexus/.agents/skills/create-plan/SKILL.md",
+      "safety_status": "runtime_reviewed",
+      "runtime_eligible": true,
+      "follow_up": "review_for_runtime_default_or_capability_local_auto_mount"
+    },
+    {
+      "capability": "governance_and_trust",
+      "skill_id": "acceptance-evidence-failclosed",
+      "recommendation_kind": "alternate_candidate",
+      "disposition": "catalog_alternate_only",
+      "runtime_review_ready": false,
+      "source_root": "agents",
+      "source_type": "reference",
+      "path": "/Users/jameschen/.agents/skills/devops/acceptance-evidence-failclosed/SKILL.md",
+      "safety_status": "ablation_only",
+      "runtime_eligible": false,
+      "follow_up": "materialize_or_curate_repo_local_skill_before_runtime_promotion"
+    },
+    {
+      "capability": "governance_and_trust",
+      "skill_id": "claudeosint-safe-surface-audit",
+      "recommendation_kind": "alternate_candidate",
+      "disposition": "catalog_alternate_only",
+      "runtime_review_ready": false,
+      "source_root": "agents",
+      "source_type": "reference",
+      "path": "/Users/jameschen/.agents/skills/claudeosint-safe-surface-audit/SKILL.md",
+      "safety_status": "ablation_only",
+      "runtime_eligible": false,
+      "follow_up": "materialize_or_curate_repo_local_skill_before_runtime_promotion"
+    },
+    {
+      "capability": "governance_and_trust",
+      "skill_id": "cso",
+      "recommendation_kind": "alternate_candidate",
+      "disposition": "catalog_alternate_only",
+      "runtime_review_ready": false,
+      "source_root": "agents",
+      "source_type": "reference",
+      "path": "/Users/jameschen/.agents/skills/gstack/.agents/skills/gstack-cso/SKILL.md",
+      "safety_status": "ablation_only",
+      "runtime_eligible": false,
+      "follow_up": "materialize_or_curate_repo_local_skill_before_runtime_promotion"
+    },
+    {
+      "capability": "governance_and_trust",
+      "skill_id": "gbrain-soul-audit",
+      "recommendation_kind": "alternate_candidate",
+      "disposition": "catalog_alternate_only",
+      "runtime_review_ready": false,
+      "source_root": "agents",
+      "source_type": "reference",
+      "path": "/Users/jameschen/.agents/skills/gbrain-soul-audit/SKILL.md",
+      "safety_status": "ablation_only",
+      "runtime_eligible": false,
+      "follow_up": "materialize_or_curate_repo_local_skill_before_runtime_promotion"
+    },
+    {
+      "capability": "repair_and_coding",
+      "skill_id": "tdd",
+      "recommendation_kind": "alternate_candidate",
+      "disposition": "runtime_review_ready",
+      "runtime_review_ready": true,
+      "source_root": "nexus_repo",
+      "source_type": "nexus_local",
+      "path": "/Users/jameschen/Workspace/nexus/.agents/skills/tdd/SKILL.md",
+      "safety_status": "runtime_reviewed",
+      "runtime_eligible": true,
+      "follow_up": "review_for_runtime_default_or_capability_local_auto_mount"
+    },
+    {
+      "capability": "repair_loop",
+      "skill_id": "tdd",
+      "recommendation_kind": "replace_candidate",
+      "disposition": "runtime_review_ready",
+      "runtime_review_ready": true,
+      "source_root": "nexus_repo",
+      "source_type": "nexus_local",
+      "path": "/Users/jameschen/Workspace/nexus/.agents/skills/tdd/SKILL.md",
+      "safety_status": "runtime_reviewed",
+      "runtime_eligible": true,
+      "follow_up": "review_for_runtime_default_or_capability_local_auto_mount"
+    },
+    {
+      "capability": "research_and_source_discipline",
+      "skill_id": "research-citation-chain-verifier",
+      "recommendation_kind": "replace_candidate",
+      "disposition": "runtime_review_ready",
+      "runtime_review_ready": true,
+      "source_root": "nexus_repo",
+      "source_type": "repo_local_sf_candidate",
+      "path": ".agents/skills/research-citation-chain-verifier/SKILL.md",
+      "safety_status": "runtime_reviewed",
+      "runtime_eligible": true,
+      "follow_up": "review_for_runtime_default_or_capability_local_auto_mount"
+    },
+    {
+      "capability": "research_and_source_discipline",
+      "skill_id": "research-source-validation-auditor",
+      "recommendation_kind": "replace_candidate",
+      "disposition": "runtime_review_ready",
+      "runtime_review_ready": true,
+      "source_root": "nexus_repo",
+      "source_type": "repo_local_sf_candidate",
+      "path": ".agents/skills/research-source-validation-auditor/SKILL.md",
+      "safety_status": "runtime_reviewed",
+      "runtime_eligible": true,
+      "follow_up": "review_for_runtime_default_or_capability_local_auto_mount"
+    }
+  ],
+  "summary": {
+    "review_item_count": 9,
+    "runtime_review_ready_count": 5,
+    "repo_candidate_runtime_review_required_count": 0,
+    "catalog_alternate_only_count": 4,
+    "undecided_count": 0
+  },
+  "failures": [],
+  "claim_boundary": [
+    "This review closes SF by assigning every recommended skill a runtime-promotion disposition.",
+    "It does not write runtime defaults.",
+    "External/reference alternates remain catalog-only until they are materialized or curated as repo-local skills."
+  ]
+}

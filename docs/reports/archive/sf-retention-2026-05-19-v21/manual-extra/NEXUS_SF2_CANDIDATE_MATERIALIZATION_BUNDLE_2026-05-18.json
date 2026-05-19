@@ -1,0 +1,563 @@
+{
+  "schema": "nexus.sf2_candidate_materialization_bundle.v1",
+  "status": "PASS",
+  "summary": {
+    "asset_count": 17,
+    "runtime_update_allowed": false,
+    "public_benchmark_allowed": false,
+    "ready_to_write_candidate_assets": true
+  },
+  "assets": [
+    {
+      "skill_id": "sf2-autonomic_router-route-fit-spec",
+      "capability_id": "autonomic_router",
+      "target_path": ".agents/skills/sf2/sf2-autonomic_router-route-fit-spec/SKILL.md",
+      "node_layer": "agent_extending",
+      "dependencies": [],
+      "parallelizable_with": [
+        "repair_loop",
+        "nightshift",
+        "learning_closure",
+        "ultra_review",
+        "artifact_gate"
+      ],
+      "runtime_eligible": false,
+      "ablation_eligible_after_materialization": true,
+      "public_benchmark_allowed": false,
+      "evidence_outputs_required": [
+        "capability_only_baseline",
+        "skill_arm_receipt",
+        "negative_control_verdict",
+        "prompt_hashes",
+        "forbidden_literal_hits"
+      ],
+      "retry_policy": {
+        "max_attempts": 1,
+        "fallback": "human_review_or_lite_mode",
+        "budget_safety_floor_preserved": true
+      },
+      "context_policy": {
+        "format": "json_ld_ready",
+        "requires_context_compactor_when_cnr_gt": 0.6
+      },
+      "skill_md": "---\nname: sf2-autonomic_router-route-fit-spec\ndescription: Candidate-only SF2 route-fit skill for autonomic_router.\nmetadata:\n  capability_id: autonomic_router\n  sf2_candidate_only: true\n  runtime_eligible: false\n  public_benchmark_allowed: false\n---\n\n# sf2-autonomic_router-route-fit-spec\n\n## Load when\nSF2 spec candidate for autonomic_router: autonomic route selection and route evolution. Use when route capability is autonomic_router. Required route terms: autonomic, router, routing, route.\n\n## Do not load when\n- Runtime default mounting is requested.\n- Public benchmark or production policy update is requested.\n- The task does not match the declared capability_id.\n\n## Evidence required\n- Capability-only baseline row.\n- Skill-arm row with selected/injected/used/evidence/outcome receipt.\n- Negative-control row that BLOCKs or RETURNs.\n- Runtime promotion review after SF2 verdict.\n\n## Boundary\nThis asset is candidate-only. It may be used for SF2 ablation planning, but it must not be treated as a runtime skill default.\n"
+    },
+    {
+      "skill_id": "sf2-autoreason-route-fit-spec",
+      "capability_id": "autoreason",
+      "target_path": ".agents/skills/sf2/sf2-autoreason-route-fit-spec/SKILL.md",
+      "node_layer": "agent_extending",
+      "dependencies": [],
+      "parallelizable_with": [
+        "ultra_review",
+        "artifact_gate",
+        "claim_gate",
+        "delivery_acceptance_gate",
+        "registry_skills_sync"
+      ],
+      "runtime_eligible": false,
+      "ablation_eligible_after_materialization": true,
+      "public_benchmark_allowed": false,
+      "evidence_outputs_required": [
+        "capability_only_baseline",
+        "skill_arm_receipt",
+        "negative_control_verdict",
+        "prompt_hashes",
+        "forbidden_literal_hits"
+      ],
+      "retry_policy": {
+        "max_attempts": 1,
+        "fallback": "human_review_or_lite_mode",
+        "budget_safety_floor_preserved": true
+      },
+      "context_policy": {
+        "format": "json_ld_ready",
+        "requires_context_compactor_when_cnr_gt": 0.6
+      },
+      "skill_md": "---\nname: sf2-autoreason-route-fit-spec\ndescription: Candidate-only SF2 route-fit skill for autoreason.\nmetadata:\n  capability_id: autoreason\n  sf2_candidate_only: true\n  runtime_eligible: false\n  public_benchmark_allowed: false\n---\n\n# sf2-autoreason-route-fit-spec\n\n## Load when\nSF2 spec candidate for autoreason: candidate evaluation, semantic confidence, and reasoned selection. Use when route capability is autoreason. Required route terms: autoreason, reason, judge, confidence, semantic.\n\n## Do not load when\n- Runtime default mounting is requested.\n- Public benchmark or production policy update is requested.\n- The task does not match the declared capability_id.\n\n## Evidence required\n- Capability-only baseline row.\n- Skill-arm row with selected/injected/used/evidence/outcome receipt.\n- Negative-control row that BLOCKs or RETURNs.\n- Runtime promotion review after SF2 verdict.\n\n## Boundary\nThis asset is candidate-only. It may be used for SF2 ablation planning, but it must not be treated as a runtime skill default.\n"
+    },
+    {
+      "skill_id": "sf2-belief-route-fit-spec",
+      "capability_id": "belief",
+      "target_path": ".agents/skills/sf2/sf2-belief-route-fit-spec/SKILL.md",
+      "node_layer": "agent_extending",
+      "dependencies": [],
+      "parallelizable_with": [
+        "ultra_review",
+        "artifact_gate",
+        "claim_gate",
+        "delivery_acceptance_gate",
+        "registry_skills_sync"
+      ],
+      "runtime_eligible": false,
+      "ablation_eligible_after_materialization": true,
+      "public_benchmark_allowed": false,
+      "evidence_outputs_required": [
+        "capability_only_baseline",
+        "skill_arm_receipt",
+        "negative_control_verdict",
+        "prompt_hashes",
+        "forbidden_literal_hits"
+      ],
+      "retry_policy": {
+        "max_attempts": 1,
+        "fallback": "human_review_or_lite_mode",
+        "budget_safety_floor_preserved": true
+      },
+      "context_policy": {
+        "format": "json_ld_ready",
+        "requires_context_compactor_when_cnr_gt": 0.6
+      },
+      "skill_md": "---\nname: sf2-belief-route-fit-spec\ndescription: Candidate-only SF2 route-fit skill for belief.\nmetadata:\n  capability_id: belief\n  sf2_candidate_only: true\n  runtime_eligible: false\n  public_benchmark_allowed: false\n---\n\n# sf2-belief-route-fit-spec\n\n## Load when\nSF2 spec candidate for belief: belief state, subjective confidence, and route priors. Use when route capability is belief. Required route terms: belief, confidence, prior, budget, doubt, careful, strategy, strategic.\n\n## Do not load when\n- Runtime default mounting is requested.\n- Public benchmark or production policy update is requested.\n- The task does not match the declared capability_id.\n\n## Evidence required\n- Capability-only baseline row.\n- Skill-arm row with selected/injected/used/evidence/outcome receipt.\n- Negative-control row that BLOCKs or RETURNs.\n- Runtime promotion review after SF2 verdict.\n\n## Boundary\nThis asset is candidate-only. It may be used for SF2 ablation planning, but it must not be treated as a runtime skill default.\n"
+    },
+    {
+      "skill_id": "sf2-delivery_acceptance_gate-route-fit-spec",
+      "capability_id": "delivery_acceptance_gate",
+      "target_path": ".agents/skills/sf2/sf2-delivery_acceptance_gate-route-fit-spec/SKILL.md",
+      "node_layer": "agent_extending",
+      "dependencies": [],
+      "parallelizable_with": [
+        "hyper_sprint",
+        "codeintel",
+        "research",
+        "xray",
+        "lancedb"
+      ],
+      "runtime_eligible": false,
+      "ablation_eligible_after_materialization": true,
+      "public_benchmark_allowed": false,
+      "evidence_outputs_required": [
+        "capability_only_baseline",
+        "skill_arm_receipt",
+        "negative_control_verdict",
+        "prompt_hashes",
+        "forbidden_literal_hits"
+      ],
+      "retry_policy": {
+        "max_attempts": 1,
+        "fallback": "human_review_or_lite_mode",
+        "budget_safety_floor_preserved": true
+      },
+      "context_policy": {
+        "format": "json_ld_ready",
+        "requires_context_compactor_when_cnr_gt": 0.6
+      },
+      "skill_md": "---\nname: sf2-delivery_acceptance_gate-route-fit-spec\ndescription: Candidate-only SF2 route-fit skill for delivery_acceptance_gate.\nmetadata:\n  capability_id: delivery_acceptance_gate\n  sf2_candidate_only: true\n  runtime_eligible: false\n  public_benchmark_allowed: false\n---\n\n# sf2-delivery_acceptance_gate-route-fit-spec\n\n## Load when\nSF2 spec candidate for delivery_acceptance_gate: delivery gate, acceptance check, and contract checks. Use when route capability is delivery_acceptance_gate. Required route terms: delivery, acceptance, contract, done criteria.\n\n## Do not load when\n- Runtime default mounting is requested.\n- Public benchmark or production policy update is requested.\n- The task does not match the declared capability_id.\n\n## Evidence required\n- Capability-only baseline row.\n- Skill-arm row with selected/injected/used/evidence/outcome receipt.\n- Negative-control row that BLOCKs or RETURNs.\n- Runtime promotion review after SF2 verdict.\n\n## Boundary\nThis asset is candidate-only. It may be used for SF2 ablation planning, but it must not be treated as a runtime skill default.\n"
+    },
+    {
+      "skill_id": "sf2-direct_master_loop-route-fit-spec",
+      "capability_id": "direct_master_loop",
+      "target_path": ".agents/skills/sf2/sf2-direct_master_loop-route-fit-spec/SKILL.md",
+      "node_layer": "agent_extending",
+      "dependencies": [],
+      "parallelizable_with": [],
+      "runtime_eligible": false,
+      "ablation_eligible_after_materialization": true,
+      "public_benchmark_allowed": false,
+      "evidence_outputs_required": [
+        "capability_only_baseline",
+        "skill_arm_receipt",
+        "negative_control_verdict",
+        "prompt_hashes",
+        "forbidden_literal_hits"
+      ],
+      "retry_policy": {
+        "max_attempts": 1,
+        "fallback": "human_review_or_lite_mode",
+        "budget_safety_floor_preserved": true
+      },
+      "context_policy": {
+        "format": "json_ld_ready",
+        "requires_context_compactor_when_cnr_gt": 0.6
+      },
+      "skill_md": "---\nname: sf2-direct_master_loop-route-fit-spec\ndescription: Candidate-only SF2 route-fit skill for direct_master_loop.\nmetadata:\n  capability_id: direct_master_loop\n  sf2_candidate_only: true\n  runtime_eligible: false\n  public_benchmark_allowed: false\n---\n\n# sf2-direct_master_loop-route-fit-spec\n\n## Load when\nSF2 spec candidate for direct_master_loop: default execution loop and content/rewrite control. Use when route capability is direct_master_loop. Required route terms: direct, master loop, rewrite, content, execute, task.\n\n## Do not load when\n- Runtime default mounting is requested.\n- Public benchmark or production policy update is requested.\n- The task does not match the declared capability_id.\n\n## Evidence required\n- Capability-only baseline row.\n- Skill-arm row with selected/injected/used/evidence/outcome receipt.\n- Negative-control row that BLOCKs or RETURNs.\n- Runtime promotion review after SF2 verdict.\n\n## Boundary\nThis asset is candidate-only. It may be used for SF2 ablation planning, but it must not be treated as a runtime skill default.\n"
+    },
+    {
+      "skill_id": "sf2-drone-route-fit-spec",
+      "capability_id": "drone",
+      "target_path": ".agents/skills/sf2/sf2-drone-route-fit-spec/SKILL.md",
+      "node_layer": "agent_extending",
+      "dependencies": [],
+      "parallelizable_with": [
+        "forecast_pregate",
+        "mempalace",
+        "policy_capability_gate",
+        "ultra_review",
+        "artifact_gate"
+      ],
+      "runtime_eligible": false,
+      "ablation_eligible_after_materialization": true,
+      "public_benchmark_allowed": false,
+      "evidence_outputs_required": [
+        "capability_only_baseline",
+        "skill_arm_receipt",
+        "negative_control_verdict",
+        "prompt_hashes",
+        "forbidden_literal_hits"
+      ],
+      "retry_policy": {
+        "max_attempts": 1,
+        "fallback": "human_review_or_lite_mode",
+        "budget_safety_floor_preserved": true
+      },
+      "context_policy": {
+        "format": "json_ld_ready",
+        "requires_context_compactor_when_cnr_gt": 0.6
+      },
+      "skill_md": "---\nname: sf2-drone-route-fit-spec\ndescription: Candidate-only SF2 route-fit skill for drone.\nmetadata:\n  capability_id: drone\n  sf2_candidate_only: true\n  runtime_eligible: false\n  public_benchmark_allowed: false\n---\n\n# sf2-drone-route-fit-spec\n\n## Load when\nSF2 spec candidate for drone: delegated worker tactical execution and HUD monitoring. Use when route capability is drone. Required route terms: drone, hud, delegate, worker.\n\n## Do not load when\n- Runtime default mounting is requested.\n- Public benchmark or production policy update is requested.\n- The task does not match the declared capability_id.\n\n## Evidence required\n- Capability-only baseline row.\n- Skill-arm row with selected/injected/used/evidence/outcome receipt.\n- Negative-control row that BLOCKs or RETURNs.\n- Runtime promotion review after SF2 verdict.\n\n## Boundary\nThis asset is candidate-only. It may be used for SF2 ablation planning, but it must not be treated as a runtime skill default.\n"
+    },
+    {
+      "skill_id": "sf2-file_lock_security_gate-route-fit-spec",
+      "capability_id": "file_lock_security_gate",
+      "target_path": ".agents/skills/sf2/sf2-file_lock_security_gate-route-fit-spec/SKILL.md",
+      "node_layer": "agent_extending",
+      "dependencies": [],
+      "parallelizable_with": [
+        "xray",
+        "lancedb",
+        "registry_skills_sync",
+        "metabolism_resume"
+      ],
+      "runtime_eligible": false,
+      "ablation_eligible_after_materialization": true,
+      "public_benchmark_allowed": false,
+      "evidence_outputs_required": [
+        "capability_only_baseline",
+        "skill_arm_receipt",
+        "negative_control_verdict",
+        "prompt_hashes",
+        "forbidden_literal_hits"
+      ],
+      "retry_policy": {
+        "max_attempts": 1,
+        "fallback": "human_review_or_lite_mode",
+        "budget_safety_floor_preserved": true
+      },
+      "context_policy": {
+        "format": "json_ld_ready",
+        "requires_context_compactor_when_cnr_gt": 0.6
+      },
+      "skill_md": "---\nname: sf2-file_lock_security_gate-route-fit-spec\ndescription: Candidate-only SF2 route-fit skill for file_lock_security_gate.\nmetadata:\n  capability_id: file_lock_security_gate\n  sf2_candidate_only: true\n  runtime_eligible: false\n  public_benchmark_allowed: false\n---\n\n# sf2-file_lock_security_gate-route-fit-spec\n\n## Load when\nSF2 spec candidate for file_lock_security_gate: file-lock and delegated execution safety boundaries. Use when route capability is file_lock_security_gate. Required route terms: file lock, lock, security gate, permission, sandbox permission.\n\n## Do not load when\n- Runtime default mounting is requested.\n- Public benchmark or production policy update is requested.\n- The task does not match the declared capability_id.\n\n## Evidence required\n- Capability-only baseline row.\n- Skill-arm row with selected/injected/used/evidence/outcome receipt.\n- Negative-control row that BLOCKs or RETURNs.\n- Runtime promotion review after SF2 verdict.\n\n## Boundary\nThis asset is candidate-only. It may be used for SF2 ablation planning, but it must not be treated as a runtime skill default.\n"
+    },
+    {
+      "skill_id": "sf2-forecast_pregate-route-fit-spec",
+      "capability_id": "forecast_pregate",
+      "target_path": ".agents/skills/sf2/sf2-forecast_pregate-route-fit-spec/SKILL.md",
+      "node_layer": "agent_extending",
+      "dependencies": [],
+      "parallelizable_with": [
+        "repair_loop",
+        "nightshift",
+        "learning_closure",
+        "drone",
+        "ultra_review"
+      ],
+      "runtime_eligible": false,
+      "ablation_eligible_after_materialization": true,
+      "public_benchmark_allowed": false,
+      "evidence_outputs_required": [
+        "capability_only_baseline",
+        "skill_arm_receipt",
+        "negative_control_verdict",
+        "prompt_hashes",
+        "forbidden_literal_hits"
+      ],
+      "retry_policy": {
+        "max_attempts": 1,
+        "fallback": "human_review_or_lite_mode",
+        "budget_safety_floor_preserved": true
+      },
+      "context_policy": {
+        "format": "json_ld_ready",
+        "requires_context_compactor_when_cnr_gt": 0.6
+      },
+      "skill_md": "---\nname: sf2-forecast_pregate-route-fit-spec\ndescription: Candidate-only SF2 route-fit skill for forecast_pregate.\nmetadata:\n  capability_id: forecast_pregate\n  sf2_candidate_only: true\n  runtime_eligible: false\n  public_benchmark_allowed: false\n---\n\n# sf2-forecast_pregate-route-fit-spec\n\n## Load when\nSF2 spec candidate for forecast_pregate: forecast, pregate, plan quality, and risk prediction. Use when route capability is forecast_pregate. Required route terms: forecast, pregate, plan quality, risk, planner.\n\n## Do not load when\n- Runtime default mounting is requested.\n- Public benchmark or production policy update is requested.\n- The task does not match the declared capability_id.\n\n## Evidence required\n- Capability-only baseline row.\n- Skill-arm row with selected/injected/used/evidence/outcome receipt.\n- Negative-control row that BLOCKs or RETURNs.\n- Runtime promotion review after SF2 verdict.\n\n## Boundary\nThis asset is candidate-only. It may be used for SF2 ablation planning, but it must not be treated as a runtime skill default.\n"
+    },
+    {
+      "skill_id": "sf2-hyper_sprint-route-fit-spec",
+      "capability_id": "hyper_sprint",
+      "target_path": ".agents/skills/sf2/sf2-hyper_sprint-route-fit-spec/SKILL.md",
+      "node_layer": "agent_extending",
+      "dependencies": [],
+      "parallelizable_with": [
+        "ultra_review",
+        "artifact_gate",
+        "claim_gate",
+        "delivery_acceptance_gate",
+        "registry_skills_sync"
+      ],
+      "runtime_eligible": false,
+      "ablation_eligible_after_materialization": true,
+      "public_benchmark_allowed": false,
+      "evidence_outputs_required": [
+        "capability_only_baseline",
+        "skill_arm_receipt",
+        "negative_control_verdict",
+        "prompt_hashes",
+        "forbidden_literal_hits"
+      ],
+      "retry_policy": {
+        "max_attempts": 1,
+        "fallback": "human_review_or_lite_mode",
+        "budget_safety_floor_preserved": true
+      },
+      "context_policy": {
+        "format": "json_ld_ready",
+        "requires_context_compactor_when_cnr_gt": 0.6
+      },
+      "skill_md": "---\nname: sf2-hyper_sprint-route-fit-spec\ndescription: Candidate-only SF2 route-fit skill for hyper_sprint.\nmetadata:\n  capability_id: hyper_sprint\n  sf2_candidate_only: true\n  runtime_eligible: false\n  public_benchmark_allowed: false\n---\n\n# sf2-hyper_sprint-route-fit-spec\n\n## Load when\nSF2 spec candidate for hyper_sprint: fast multi-candidate local repair and sprint execution. Use when route capability is hyper_sprint. Required route terms: hyper, sprint, multi-candidate, quick fix, fast path.\n\n## Do not load when\n- Runtime default mounting is requested.\n- Public benchmark or production policy update is requested.\n- The task does not match the declared capability_id.\n\n## Evidence required\n- Capability-only baseline row.\n- Skill-arm row with selected/injected/used/evidence/outcome receipt.\n- Negative-control row that BLOCKs or RETURNs.\n- Runtime promotion review after SF2 verdict.\n\n## Boundary\nThis asset is candidate-only. It may be used for SF2 ablation planning, but it must not be treated as a runtime skill default.\n"
+    },
+    {
+      "skill_id": "sf2-lancedb-route-fit-spec",
+      "capability_id": "lancedb",
+      "target_path": ".agents/skills/sf2/sf2-lancedb-route-fit-spec/SKILL.md",
+      "node_layer": "agent_extending",
+      "dependencies": [],
+      "parallelizable_with": [
+        "file_lock_security_gate",
+        "ultra_review",
+        "artifact_gate",
+        "claim_gate",
+        "delivery_acceptance_gate"
+      ],
+      "runtime_eligible": false,
+      "ablation_eligible_after_materialization": true,
+      "public_benchmark_allowed": false,
+      "evidence_outputs_required": [
+        "capability_only_baseline",
+        "skill_arm_receipt",
+        "negative_control_verdict",
+        "prompt_hashes",
+        "forbidden_literal_hits"
+      ],
+      "retry_policy": {
+        "max_attempts": 1,
+        "fallback": "human_review_or_lite_mode",
+        "budget_safety_floor_preserved": true
+      },
+      "context_policy": {
+        "format": "json_ld_ready",
+        "requires_context_compactor_when_cnr_gt": 0.6
+      },
+      "skill_md": "---\nname: sf2-lancedb-route-fit-spec\ndescription: Candidate-only SF2 route-fit skill for lancedb.\nmetadata:\n  capability_id: lancedb\n  sf2_candidate_only: true\n  runtime_eligible: false\n  public_benchmark_allowed: false\n---\n\n# sf2-lancedb-route-fit-spec\n\n## Load when\nSF2 spec candidate for lancedb: vector search, semantic retrieval, and findings lookup. Use when route capability is lancedb. Required route terms: lancedb, vector, embedding, semantic, rag, retrieval.\n\n## Do not load when\n- Runtime default mounting is requested.\n- Public benchmark or production policy update is requested.\n- The task does not match the declared capability_id.\n\n## Evidence required\n- Capability-only baseline row.\n- Skill-arm row with selected/injected/used/evidence/outcome receipt.\n- Negative-control row that BLOCKs or RETURNs.\n- Runtime promotion review after SF2 verdict.\n\n## Boundary\nThis asset is candidate-only. It may be used for SF2 ablation planning, but it must not be treated as a runtime skill default.\n"
+    },
+    {
+      "skill_id": "sf2-learning_closure-route-fit-spec",
+      "capability_id": "learning_closure",
+      "target_path": ".agents/skills/sf2/sf2-learning_closure-route-fit-spec/SKILL.md",
+      "node_layer": "agent_extending",
+      "dependencies": [],
+      "parallelizable_with": [
+        "codeintel",
+        "ddtree",
+        "autonomic_router",
+        "forecast_pregate",
+        "external_productivity"
+      ],
+      "runtime_eligible": false,
+      "ablation_eligible_after_materialization": true,
+      "public_benchmark_allowed": false,
+      "evidence_outputs_required": [
+        "capability_only_baseline",
+        "skill_arm_receipt",
+        "negative_control_verdict",
+        "prompt_hashes",
+        "forbidden_literal_hits"
+      ],
+      "retry_policy": {
+        "max_attempts": 1,
+        "fallback": "human_review_or_lite_mode",
+        "budget_safety_floor_preserved": true
+      },
+      "context_policy": {
+        "format": "json_ld_ready",
+        "requires_context_compactor_when_cnr_gt": 0.6
+      },
+      "skill_md": "---\nname: sf2-learning_closure-route-fit-spec\ndescription: Candidate-only SF2 route-fit skill for learning_closure.\nmetadata:\n  capability_id: learning_closure\n  sf2_candidate_only: true\n  runtime_eligible: false\n  public_benchmark_allowed: false\n---\n\n# sf2-learning_closure-route-fit-spec\n\n## Load when\nSF2 spec candidate for learning_closure: lesson writeback, closure matrices, and learning KPI/SLO. Use when route capability is learning_closure. Required route terms: learning closure, lesson, writeback, slo, kpi, closure matrix, goal closure, closure executor, continuous optimization, autotune.\n\n## Do not load when\n- Runtime default mounting is requested.\n- Public benchmark or production policy update is requested.\n- The task does not match the declared capability_id.\n\n## Evidence required\n- Capability-only baseline row.\n- Skill-arm row with selected/injected/used/evidence/outcome receipt.\n- Negative-control row that BLOCKs or RETURNs.\n- Runtime promotion review after SF2 verdict.\n\n## Boundary\nThis asset is candidate-only. It may be used for SF2 ablation planning, but it must not be treated as a runtime skill default.\n"
+    },
+    {
+      "skill_id": "sf2-memory-route-fit-spec",
+      "capability_id": "memory",
+      "target_path": ".agents/skills/sf2/sf2-memory-route-fit-spec/SKILL.md",
+      "node_layer": "agent_extending",
+      "dependencies": [],
+      "parallelizable_with": [],
+      "runtime_eligible": false,
+      "ablation_eligible_after_materialization": true,
+      "public_benchmark_allowed": false,
+      "evidence_outputs_required": [
+        "capability_only_baseline",
+        "skill_arm_receipt",
+        "negative_control_verdict",
+        "prompt_hashes",
+        "forbidden_literal_hits"
+      ],
+      "retry_policy": {
+        "max_attempts": 1,
+        "fallback": "human_review_or_lite_mode",
+        "budget_safety_floor_preserved": true
+      },
+      "context_policy": {
+        "format": "json_ld_ready",
+        "requires_context_compactor_when_cnr_gt": 0.6
+      },
+      "skill_md": "---\nname: sf2-memory-route-fit-spec\ndescription: Candidate-only SF2 route-fit skill for memory.\nmetadata:\n  capability_id: memory\n  sf2_candidate_only: true\n  runtime_eligible: false\n  public_benchmark_allowed: false\n---\n\n# sf2-memory-route-fit-spec\n\n## Load when\nSF2 spec candidate for memory: long-term memory and durable experience reuse. Use when route capability is memory. Required route terms: memory, findings, remember, recall, experience, vault.\n\n## Do not load when\n- Runtime default mounting is requested.\n- Public benchmark or production policy update is requested.\n- The task does not match the declared capability_id.\n\n## Evidence required\n- Capability-only baseline row.\n- Skill-arm row with selected/injected/used/evidence/outcome receipt.\n- Negative-control row that BLOCKs or RETURNs.\n- Runtime promotion review after SF2 verdict.\n\n## Boundary\nThis asset is candidate-only. It may be used for SF2 ablation planning, but it must not be treated as a runtime skill default.\n"
+    },
+    {
+      "skill_id": "sf2-mempalace-route-fit-spec",
+      "capability_id": "mempalace",
+      "target_path": ".agents/skills/sf2/sf2-mempalace-route-fit-spec/SKILL.md",
+      "node_layer": "agent_extending",
+      "dependencies": [],
+      "parallelizable_with": [
+        "drone"
+      ],
+      "runtime_eligible": false,
+      "ablation_eligible_after_materialization": true,
+      "public_benchmark_allowed": false,
+      "evidence_outputs_required": [
+        "capability_only_baseline",
+        "skill_arm_receipt",
+        "negative_control_verdict",
+        "prompt_hashes",
+        "forbidden_literal_hits"
+      ],
+      "retry_policy": {
+        "max_attempts": 1,
+        "fallback": "human_review_or_lite_mode",
+        "budget_safety_floor_preserved": true
+      },
+      "context_policy": {
+        "format": "json_ld_ready",
+        "requires_context_compactor_when_cnr_gt": 0.6
+      },
+      "skill_md": "---\nname: sf2-mempalace-route-fit-spec\ndescription: Candidate-only SF2 route-fit skill for mempalace.\nmetadata:\n  capability_id: mempalace\n  sf2_candidate_only: true\n  runtime_eligible: false\n  public_benchmark_allowed: false\n---\n\n# sf2-mempalace-route-fit-spec\n\n## Load when\nSF2 spec candidate for mempalace: ethical boundary, memory palace, and forbidden action constraints. Use when route capability is mempalace. Required route terms: mempalace, ethic, policy, guardrail, safety, boundary.\n\n## Do not load when\n- Runtime default mounting is requested.\n- Public benchmark or production policy update is requested.\n- The task does not match the declared capability_id.\n\n## Evidence required\n- Capability-only baseline row.\n- Skill-arm row with selected/injected/used/evidence/outcome receipt.\n- Negative-control row that BLOCKs or RETURNs.\n- Runtime promotion review after SF2 verdict.\n\n## Boundary\nThis asset is candidate-only. It may be used for SF2 ablation planning, but it must not be treated as a runtime skill default.\n"
+    },
+    {
+      "skill_id": "sf2-nightshift-route-fit-spec",
+      "capability_id": "nightshift",
+      "target_path": ".agents/skills/sf2/sf2-nightshift-route-fit-spec/SKILL.md",
+      "node_layer": "agent_extending",
+      "dependencies": [],
+      "parallelizable_with": [
+        "codeintel",
+        "autonomic_router",
+        "forecast_pregate"
+      ],
+      "runtime_eligible": false,
+      "ablation_eligible_after_materialization": true,
+      "public_benchmark_allowed": false,
+      "evidence_outputs_required": [
+        "capability_only_baseline",
+        "skill_arm_receipt",
+        "negative_control_verdict",
+        "prompt_hashes",
+        "forbidden_literal_hits"
+      ],
+      "retry_policy": {
+        "max_attempts": 1,
+        "fallback": "human_review_or_lite_mode",
+        "budget_safety_floor_preserved": true
+      },
+      "context_policy": {
+        "format": "json_ld_ready",
+        "requires_context_compactor_when_cnr_gt": 0.6
+      },
+      "skill_md": "---\nname: sf2-nightshift-route-fit-spec\ndescription: Candidate-only SF2 route-fit skill for nightshift.\nmetadata:\n  capability_id: nightshift\n  sf2_candidate_only: true\n  runtime_eligible: false\n  public_benchmark_allowed: false\n---\n\n# sf2-nightshift-route-fit-spec\n\n## Load when\nSF2 spec candidate for nightshift: long-running recovery after normal repair fails. Use when route capability is nightshift. Required route terms: nightshift, night shift, longrun, long-running, recovery, emergency recovery, autonomous task, continuous optimization.\n\n## Do not load when\n- Runtime default mounting is requested.\n- Public benchmark or production policy update is requested.\n- The task does not match the declared capability_id.\n\n## Evidence required\n- Capability-only baseline row.\n- Skill-arm row with selected/injected/used/evidence/outcome receipt.\n- Negative-control row that BLOCKs or RETURNs.\n- Runtime promotion review after SF2 verdict.\n\n## Boundary\nThis asset is candidate-only. It may be used for SF2 ablation planning, but it must not be treated as a runtime skill default.\n"
+    },
+    {
+      "skill_id": "sf2-registry_skills_sync-route-fit-spec",
+      "capability_id": "registry_skills_sync",
+      "target_path": ".agents/skills/sf2/sf2-registry_skills_sync-route-fit-spec/SKILL.md",
+      "node_layer": "agent_extending",
+      "dependencies": [],
+      "parallelizable_with": [
+        "hyper_sprint",
+        "autoreason",
+        "ddtree",
+        "belief",
+        "drone"
+      ],
+      "runtime_eligible": false,
+      "ablation_eligible_after_materialization": true,
+      "public_benchmark_allowed": false,
+      "evidence_outputs_required": [
+        "capability_only_baseline",
+        "skill_arm_receipt",
+        "negative_control_verdict",
+        "prompt_hashes",
+        "forbidden_literal_hits"
+      ],
+      "retry_policy": {
+        "max_attempts": 1,
+        "fallback": "human_review_or_lite_mode",
+        "budget_safety_floor_preserved": true
+      },
+      "context_policy": {
+        "format": "json_ld_ready",
+        "requires_context_compactor_when_cnr_gt": 0.6
+      },
+      "skill_md": "---\nname: sf2-registry_skills_sync-route-fit-spec\ndescription: Candidate-only SF2 route-fit skill for registry_skills_sync.\nmetadata:\n  capability_id: registry_skills_sync\n  sf2_candidate_only: true\n  runtime_eligible: false\n  public_benchmark_allowed: false\n---\n\n# sf2-registry_skills_sync-route-fit-spec\n\n## Load when\nSF2 spec candidate for registry_skills_sync: skill registry, plugin sync, and catalog maintenance. Use when route capability is registry_skills_sync. Required route terms: skill registry, registry, plugin, install, catalog, sync.\n\n## Do not load when\n- Runtime default mounting is requested.\n- Public benchmark or production policy update is requested.\n- The task does not match the declared capability_id.\n\n## Evidence required\n- Capability-only baseline row.\n- Skill-arm row with selected/injected/used/evidence/outcome receipt.\n- Negative-control row that BLOCKs or RETURNs.\n- Runtime promotion review after SF2 verdict.\n\n## Boundary\nThis asset is candidate-only. It may be used for SF2 ablation planning, but it must not be treated as a runtime skill default.\n"
+    },
+    {
+      "skill_id": "sf2-research_control_plane-route-fit-spec",
+      "capability_id": "research_control_plane",
+      "target_path": ".agents/skills/sf2/sf2-research_control_plane-route-fit-spec/SKILL.md",
+      "node_layer": "agent_extending",
+      "dependencies": [],
+      "parallelizable_with": [],
+      "runtime_eligible": false,
+      "ablation_eligible_after_materialization": true,
+      "public_benchmark_allowed": false,
+      "evidence_outputs_required": [
+        "capability_only_baseline",
+        "skill_arm_receipt",
+        "negative_control_verdict",
+        "prompt_hashes",
+        "forbidden_literal_hits"
+      ],
+      "retry_policy": {
+        "max_attempts": 1,
+        "fallback": "human_review_or_lite_mode",
+        "budget_safety_floor_preserved": true
+      },
+      "context_policy": {
+        "format": "json_ld_ready",
+        "requires_context_compactor_when_cnr_gt": 0.6
+      },
+      "skill_md": "---\nname: sf2-research_control_plane-route-fit-spec\ndescription: Candidate-only SF2 route-fit skill for research_control_plane.\nmetadata:\n  capability_id: research_control_plane\n  sf2_candidate_only: true\n  runtime_eligible: false\n  public_benchmark_allowed: false\n---\n\n# sf2-research_control_plane-route-fit-spec\n\n## Load when\nSF2 spec candidate for research_control_plane: research planning, source conflict handling, and research gates. Use when route capability is research_control_plane. Required route terms: source conflict, source validation, citation chain, claim verification, academic verify.\n\n## Do not load when\n- Runtime default mounting is requested.\n- Public benchmark or production policy update is requested.\n- The task does not match the declared capability_id.\n\n## Evidence required\n- Capability-only baseline row.\n- Skill-arm row with selected/injected/used/evidence/outcome receipt.\n- Negative-control row that BLOCKs or RETURNs.\n- Runtime promotion review after SF2 verdict.\n\n## Boundary\nThis asset is candidate-only. It may be used for SF2 ablation planning, but it must not be treated as a runtime skill default.\n"
+    },
+    {
+      "skill_id": "sf2-swarm_multi_agent-route-fit-spec",
+      "capability_id": "swarm_multi_agent",
+      "target_path": ".agents/skills/sf2/sf2-swarm_multi_agent-route-fit-spec/SKILL.md",
+      "node_layer": "agent_extending",
+      "dependencies": [],
+      "parallelizable_with": [],
+      "runtime_eligible": false,
+      "ablation_eligible_after_materialization": true,
+      "public_benchmark_allowed": false,
+      "evidence_outputs_required": [
+        "capability_only_baseline",
+        "skill_arm_receipt",
+        "negative_control_verdict",
+        "prompt_hashes",
+        "forbidden_literal_hits"
+      ],
+      "retry_policy": {
+        "max_attempts": 1,
+        "fallback": "human_review_or_lite_mode",
+        "budget_safety_floor_preserved": true
+      },
+      "context_policy": {
+        "format": "json_ld_ready",
+        "requires_context_compactor_when_cnr_gt": 0.6
+      },
+      "skill_md": "---\nname: sf2-swarm_multi_agent-route-fit-spec\ndescription: Candidate-only SF2 route-fit skill for swarm_multi_agent.\nmetadata:\n  capability_id: swarm_multi_agent\n  sf2_candidate_only: true\n  runtime_eligible: false\n  public_benchmark_allowed: false\n---\n\n# sf2-swarm_multi_agent-route-fit-spec\n\n## Load when\nSF2 spec candidate for swarm_multi_agent: swarm, multi-agent, worktree, submit, verify, integrate. Use when route capability is swarm_multi_agent. Required route terms: swarm, multi-agent, worktree, fleet, integrate, submit.\n\n## Do not load when\n- Runtime default mounting is requested.\n- Public benchmark or production policy update is requested.\n- The task does not match the declared capability_id.\n\n## Evidence required\n- Capability-only baseline row.\n- Skill-arm row with selected/injected/used/evidence/outcome receipt.\n- Negative-control row that BLOCKs or RETURNs.\n- Runtime promotion review after SF2 verdict.\n\n## Boundary\nThis asset is candidate-only. It may be used for SF2 ablation planning, but it must not be treated as a runtime skill default.\n"
+    }
+  ],
+  "claim_boundary": [
+    "Materialization bundle is a write plan for candidate-only skill assets.",
+    "Writing these assets does not promote them to runtime defaults."
+  ]
+}

@@ -1,0 +1,59 @@
+{
+  "schema": "nexus.sf_github_round2_corrected_flash_smoke_skill_status.v2",
+  "skills": [
+    {
+      "action": "ablation_only_compare",
+      "capability_mount": "codeintel",
+      "family": "codeintel",
+      "name": "sf2-codeintel-route-fit-spec",
+      "path": ".agents/skills/sf2/sf2-codeintel-route-fit-spec/SKILL.md",
+      "reason_codes": [
+        "sf_github_round2_v2_current_best"
+      ],
+      "root": "current_best",
+      "skill_status": "nexus_curated_candidate",
+      "test_level": "sf_github_round2_corrected_flash_smoke_v2"
+    },
+    {
+      "action": "ablation_only_compare",
+      "capability_mount": "codeintel",
+      "family": "codeintel",
+      "name": "github2-superpowers-systematic-debugging",
+      "path": ".agents/skills/github-round2-challengers/github2-superpowers-systematic-debugging/SKILL.md",
+      "reason_codes": [
+        "sf_github_round2_v2_github_challenger"
+      ],
+      "root": "github_challenger",
+      "skill_status": "external_reference_candidate",
+      "test_level": "sf_github_round2_corrected_flash_smoke_v2"
+    },
+    {
+      "action": "ablation_only_compare",
+      "capability_mount": "semantic_failure_sensor",
+      "family": "metabolism_resume",
+      "name": "nexus-goal-closure-executor",
+      "path": ".agents/skills/nexus-goal-closure-executor/SKILL.md",
+      "reason_codes": [
+        "sf_github_round2_v2_current_best"
+      ],
+      "root": "current_best",
+      "skill_status": "nexus_curated_candidate",
+      "test_level": "sf_github_round2_corrected_flash_smoke_v2"
+    },
+    {
+      "action": "ablation_only_compare",
+      "capability_mount": "semantic_failure_sensor",
+      "family": "metabolism_resume",
+      "name": "github2-superpowers-executing-plans",
+      "path": ".agents/skills/github-round2-challengers/github2-superpowers-executing-plans/SKILL.md",
+      "reason_codes": [
+        "sf_github_round2_v2_github_challenger"
+      ],
+      "root": "github_challenger",
+      "skill_status": "external_reference_candidate",
+      "test_level": "sf_github_round2_corrected_flash_smoke_v2"
+    }
+  ],
+  "status": "PASS",
+  "version": "2026-05-19"
+}

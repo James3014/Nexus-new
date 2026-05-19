@@ -1,0 +1,853 @@
+{
+  "schema": "nexus.sf_v11_live_partial_rollup.v1",
+  "status": "RETURN_WITH_HOLDS",
+  "summary": {
+    "planned_rows": 85,
+    "pass_count": 70,
+    "return_count": 10,
+    "missing_artifact_count": 5,
+    "held_capability_count": 8,
+    "runtime_update_allowed": false,
+    "public_benchmark_allowed": false
+  },
+  "held_capabilities": [
+    {
+      "capability_id": "learning_closure",
+      "status_counts": {
+        "PASS": 3,
+        "RETURN": 1
+      },
+      "hold_reason": "incomplete_or_token_ineligible_v11_live"
+    },
+    {
+      "capability_id": "memory",
+      "status_counts": {
+        "PASS": 3,
+        "RETURN": 1
+      },
+      "hold_reason": "incomplete_or_token_ineligible_v11_live"
+    },
+    {
+      "capability_id": "metabolism_resume",
+      "status_counts": {
+        "PASS": 4,
+        "RETURN": 1
+      },
+      "hold_reason": "incomplete_or_token_ineligible_v11_live"
+    },
+    {
+      "capability_id": "registry_skills_sync",
+      "status_counts": {
+        "PASS": 2,
+        "RETURN": 2
+      },
+      "hold_reason": "incomplete_or_token_ineligible_v11_live"
+    },
+    {
+      "capability_id": "research",
+      "status_counts": {
+        "PASS": 4,
+        "RETURN": 1
+      },
+      "hold_reason": "incomplete_or_token_ineligible_v11_live"
+    },
+    {
+      "capability_id": "research_control_plane",
+      "status_counts": {
+        "PASS": 3,
+        "RETURN": 1
+      },
+      "hold_reason": "incomplete_or_token_ineligible_v11_live"
+    },
+    {
+      "capability_id": "ultra_review",
+      "status_counts": {
+        "PASS": 1,
+        "RETURN": 2,
+        "MISSING_ARTIFACT": 2
+      },
+      "hold_reason": "incomplete_or_token_ineligible_v11_live"
+    },
+    {
+      "capability_id": "xray",
+      "status_counts": {
+        "RETURN": 1,
+        "MISSING_ARTIFACT": 3
+      },
+      "hold_reason": "incomplete_or_token_ineligible_v11_live"
+    }
+  ],
+  "results": [
+    {
+      "row_id": "artifact_gate::sf-v11-retest-artifact_gate-001::flash_nexus_no_skill",
+      "capability": "artifact_gate",
+      "arm_type": "capability_only",
+      "skill_id": "",
+      "status": "PASS",
+      "reason": "",
+      "output_dir": "/private/tmp/nexus_sf_v11_retest_live_20260518/artifact_gate_sf-v11-retest-artifact_gate-001_flash_nexus_no_skill"
+    },
+    {
+      "row_id": "artifact_gate::sf-v11-retest-artifact_gate-001::candidate::research-citation-chain-verifier",
+      "capability": "artifact_gate",
+      "arm_type": "skill_ablation",
+      "skill_id": "research-citation-chain-verifier",
+      "status": "PASS",
+      "reason": "",
+      "output_dir": "/private/tmp/nexus_sf_v11_retest_live_20260518/artifact_gate_sf-v11-retest-artifact_gate-001_candidate_research-citation-chain-verifier"
+    },
+    {
+      "row_id": "artifact_gate::sf-v11-retest-artifact_gate-001::candidate::nexus-goal-closure-executor",
+      "capability": "artifact_gate",
+      "arm_type": "skill_ablation",
+      "skill_id": "nexus-goal-closure-executor",
+      "status": "PASS",
+      "reason": "",
+      "output_dir": "/private/tmp/nexus_sf_v11_retest_live_20260518/artifact_gate_sf-v11-retest-artifact_gate-001_candidate_nexus-goal-closure-executor"
+    },
+    {
+      "row_id": "artifact_gate::sf-v11-retest-artifact_gate-001::candidate::acceptance-evidence-failclosed",
+      "capability": "artifact_gate",
+      "arm_type": "skill_ablation",
+      "skill_id": "acceptance-evidence-failclosed",
+      "status": "PASS",
+      "reason": "",
+      "output_dir": "/private/tmp/nexus_sf_v11_retest_live_20260518/artifact_gate_sf-v11-retest-artifact_gate-001_candidate_acceptance-evidence-failclosed"
+    },
+    {
+      "row_id": "artifact_gate::sf-v11-retest-artifact_gate-001::candidate::cso",
+      "capability": "artifact_gate",
+      "arm_type": "skill_ablation",
+      "skill_id": "cso",
+      "status": "PASS",
+      "reason": "",
+      "output_dir": "/private/tmp/nexus_sf_v11_retest_live_20260518/artifact_gate_sf-v11-retest-artifact_gate-001_candidate_cso"
+    },
+    {
+      "row_id": "autonomic_router::sf-v11-retest-autonomic_router-001::flash_nexus_no_skill",
+      "capability": "autonomic_router",
+      "arm_type": "capability_only",
+      "skill_id": "",
+      "status": "PASS",
+      "reason": "",
+      "output_dir": "/private/tmp/nexus_sf_v11_retest_live_20260518/autonomic_router_sf-v11-retest-autonomic_router-001_flash_nexus_no_skill"
+    },
+    {
+      "row_id": "autonomic_router::sf-v11-retest-autonomic_router-001::candidate::sf2-autonomic_router-route-fit-spec",
+      "capability": "autonomic_router",
+      "arm_type": "skill_ablation",
+      "skill_id": "sf2-autonomic_router-route-fit-spec",
+      "status": "PASS",
+      "reason": "",
+      "output_dir": "/private/tmp/nexus_sf_v11_retest_live_20260518/autonomic_router_sf-v11-retest-autonomic_router-001_candidate_sf2-autonomic_router-route-fit-spec"
+    },
+    {
+      "row_id": "autonomic_router::sf-v11-retest-autonomic_router-001::candidate::diagnose",
+      "capability": "autonomic_router",
+      "arm_type": "skill_ablation",
+      "skill_id": "diagnose",
+      "status": "PASS",
+      "reason": "",
+      "output_dir": "/private/tmp/nexus_sf_v11_retest_live_20260518/autonomic_router_sf-v11-retest-autonomic_router-001_candidate_diagnose"
+    },
+    {
+      "row_id": "autonomic_router::sf-v11-retest-autonomic_router-001::candidate::nexus-root-cause-probe",
+      "capability": "autonomic_router",
+      "arm_type": "skill_ablation",
+      "skill_id": "nexus-root-cause-probe",
+      "status": "PASS",
+      "reason": "",
+      "output_dir": "/private/tmp/nexus_sf_v11_retest_live_20260518/autonomic_router_sf-v11-retest-autonomic_router-001_candidate_nexus-root-cause-probe"
+    },
+    {
+      "row_id": "autoreason::sf-v11-retest-autoreason-001::flash_nexus_no_skill",
+      "capability": "autoreason",
+      "arm_type": "capability_only",
+      "skill_id": "",
+      "status": "PASS",
+      "reason": "",
+      "output_dir": "/private/tmp/nexus_sf_v11_retest_live_20260518/autoreason_sf-v11-retest-autoreason-001_flash_nexus_no_skill"
+    },
+    {
+      "row_id": "autoreason::sf-v11-retest-autoreason-001::candidate::sf2-autoreason-route-fit-spec",
+      "capability": "autoreason",
+      "arm_type": "skill_ablation",
+      "skill_id": "sf2-autoreason-route-fit-spec",
+      "status": "PASS",
+      "reason": "",
+      "output_dir": "/private/tmp/nexus_sf_v11_retest_live_20260518/autoreason_sf-v11-retest-autoreason-001_candidate_sf2-autoreason-route-fit-spec"
+    },
+    {
+      "row_id": "autoreason::sf-v11-retest-autoreason-001::candidate::nexus-benchmark-public-report",
+      "capability": "autoreason",
+      "arm_type": "skill_ablation",
+      "skill_id": "nexus-benchmark-public-report",
+      "status": "PASS",
+      "reason": "",
+      "output_dir": "/private/tmp/nexus_sf_v11_retest_live_20260518/autoreason_sf-v11-retest-autoreason-001_candidate_nexus-benchmark-public-report"
+    },
+    {
+      "row_id": "autoreason::sf-v11-retest-autoreason-001::candidate::sf2-belief-route-fit-spec",
+      "capability": "autoreason",
+      "arm_type": "skill_ablation",
+      "skill_id": "sf2-belief-route-fit-spec",
+      "status": "PASS",
+      "reason": "",
+      "output_dir": "/private/tmp/nexus_sf_v11_retest_live_20260518/autoreason_sf-v11-retest-autoreason-001_candidate_sf2-belief-route-fit-spec"
+    },
+    {
+      "row_id": "autoreason::sf-v11-retest-autoreason-001::candidate::diagnose",
+      "capability": "autoreason",
+      "arm_type": "skill_ablation",
+      "skill_id": "diagnose",
+      "status": "PASS",
+      "reason": "",
+      "output_dir": "/private/tmp/nexus_sf_v11_retest_live_20260518/autoreason_sf-v11-retest-autoreason-001_candidate_diagnose"
+    },
+    {
+      "row_id": "benchmark_meta_opt::sf-v11-retest-benchmark_meta_opt-001::flash_nexus_no_skill",
+      "capability": "benchmark_meta_opt",
+      "arm_type": "capability_only",
+      "skill_id": "",
+      "status": "PASS",
+      "reason": "",
+      "output_dir": "/private/tmp/nexus_sf_v11_retest_live_20260518/benchmark_meta_opt_sf-v11-retest-benchmark_meta_opt-001_flash_nexus_no_skill"
+    },
+    {
+      "row_id": "benchmark_meta_opt::sf-v11-retest-benchmark_meta_opt-001::candidate::nexus-benchmark-continuous-optimization",
+      "capability": "benchmark_meta_opt",
+      "arm_type": "skill_ablation",
+      "skill_id": "nexus-benchmark-continuous-optimization",
+      "status": "PASS",
+      "reason": "",
+      "output_dir": "/private/tmp/nexus_sf_v11_retest_live_20260518/benchmark_meta_opt_sf-v11-retest-benchmark_meta_opt-001_candidate_nexus-benchmark-continuous-optimization"
+    },
+    {
+      "row_id": "benchmark_meta_opt::sf-v11-retest-benchmark_meta_opt-001::candidate::nexus-benchmark-public-report",
+      "capability": "benchmark_meta_opt",
+      "arm_type": "skill_ablation",
+      "skill_id": "nexus-benchmark-public-report",
+      "status": "PASS",
+      "reason": "",
+      "output_dir": "/private/tmp/nexus_sf_v11_retest_live_20260518/benchmark_meta_opt_sf-v11-retest-benchmark_meta_opt-001_candidate_nexus-benchmark-public-report"
+    },
+    {
+      "row_id": "benchmark_meta_opt::sf-v11-retest-benchmark_meta_opt-001::candidate::diagnose",
+      "capability": "benchmark_meta_opt",
+      "arm_type": "skill_ablation",
+      "skill_id": "diagnose",
+      "status": "PASS",
+      "reason": "",
+      "output_dir": "/private/tmp/nexus_sf_v11_retest_live_20260518/benchmark_meta_opt_sf-v11-retest-benchmark_meta_opt-001_candidate_diagnose"
+    },
+    {
+      "row_id": "ddtree::sf-v11-retest-ddtree-001::flash_nexus_no_skill",
+      "capability": "ddtree",
+      "arm_type": "capability_only",
+      "skill_id": "",
+      "status": "PASS",
+      "reason": "",
+      "output_dir": "/private/tmp/nexus_sf_v11_retest_live_20260518/ddtree_sf-v11-retest-ddtree-001_flash_nexus_no_skill"
+    },
+    {
+      "row_id": "ddtree::sf-v11-retest-ddtree-001::candidate::sf2-ddtree-route-fit-spec",
+      "capability": "ddtree",
+      "arm_type": "skill_ablation",
+      "skill_id": "sf2-ddtree-route-fit-spec",
+      "status": "PASS",
+      "reason": "",
+      "output_dir": "/private/tmp/nexus_sf_v11_retest_live_20260518/ddtree_sf-v11-retest-ddtree-001_candidate_sf2-ddtree-route-fit-spec"
+    },
+    {
+      "row_id": "ddtree::sf-v11-retest-ddtree-001::candidate::diagnose",
+      "capability": "ddtree",
+      "arm_type": "skill_ablation",
+      "skill_id": "diagnose",
+      "status": "PASS",
+      "reason": "",
+      "output_dir": "/private/tmp/nexus_sf_v11_retest_live_20260518/ddtree_sf-v11-retest-ddtree-001_candidate_diagnose"
+    },
+    {
+      "row_id": "ddtree::sf-v11-retest-ddtree-001::candidate::nexus-root-cause-probe",
+      "capability": "ddtree",
+      "arm_type": "skill_ablation",
+      "skill_id": "nexus-root-cause-probe",
+      "status": "PASS",
+      "reason": "",
+      "output_dir": "/private/tmp/nexus_sf_v11_retest_live_20260518/ddtree_sf-v11-retest-ddtree-001_candidate_nexus-root-cause-probe"
+    },
+    {
+      "row_id": "delivery_acceptance_gate::sf-v11-retest-delivery_acceptance_gate-001::flash_nexus_no_skill",
+      "capability": "delivery_acceptance_gate",
+      "arm_type": "capability_only",
+      "skill_id": "",
+      "status": "PASS",
+      "reason": "",
+      "output_dir": "/private/tmp/nexus_sf_v11_retest_live_20260518/delivery_acceptance_gate_sf-v11-retest-delivery_acceptance_gate-001_flash_nexus_no_skill"
+    },
+    {
+      "row_id": "delivery_acceptance_gate::sf-v11-retest-delivery_acceptance_gate-001::candidate::sf2-delivery_acceptance_gate-route-fit-spec",
+      "capability": "delivery_acceptance_gate",
+      "arm_type": "skill_ablation",
+      "skill_id": "sf2-delivery_acceptance_gate-route-fit-spec",
+      "status": "PASS",
+      "reason": "",
+      "output_dir": "/private/tmp/nexus_sf_v11_retest_live_20260518/delivery_acceptance_gate_sf-v11-retest-delivery_acceptance_gate-001_candidate_sf2-delivery_acceptance_gate-route-fit-spec"
+    },
+    {
+      "row_id": "delivery_acceptance_gate::sf-v11-retest-delivery_acceptance_gate-001::candidate::acceptance-evidence-failclosed",
+      "capability": "delivery_acceptance_gate",
+      "arm_type": "skill_ablation",
+      "skill_id": "acceptance-evidence-failclosed",
+      "status": "PASS",
+      "reason": "",
+      "output_dir": "/private/tmp/nexus_sf_v11_retest_live_20260518/delivery_acceptance_gate_sf-v11-retest-delivery_acceptance_gate-001_candidate_acceptance-evidence-failclosed"
+    },
+    {
+      "row_id": "delivery_acceptance_gate::sf-v11-retest-delivery_acceptance_gate-001::candidate::nexus-goal-closure-executor",
+      "capability": "delivery_acceptance_gate",
+      "arm_type": "skill_ablation",
+      "skill_id": "nexus-goal-closure-executor",
+      "status": "PASS",
+      "reason": "",
+      "output_dir": "/private/tmp/nexus_sf_v11_retest_live_20260518/delivery_acceptance_gate_sf-v11-retest-delivery_acceptance_gate-001_candidate_nexus-goal-closure-executor"
+    },
+    {
+      "row_id": "drone::sf-v11-retest-drone-001::flash_nexus_no_skill",
+      "capability": "drone",
+      "arm_type": "capability_only",
+      "skill_id": "",
+      "status": "PASS",
+      "reason": "",
+      "output_dir": "/private/tmp/nexus_sf_v11_retest_live_20260518/drone_sf-v11-retest-drone-001_flash_nexus_no_skill"
+    },
+    {
+      "row_id": "drone::sf-v11-retest-drone-001::candidate::sf2-drone-route-fit-spec",
+      "capability": "drone",
+      "arm_type": "skill_ablation",
+      "skill_id": "sf2-drone-route-fit-spec",
+      "status": "PASS",
+      "reason": "",
+      "output_dir": "/private/tmp/nexus_sf_v11_retest_live_20260518/drone_sf-v11-retest-drone-001_candidate_sf2-drone-route-fit-spec"
+    },
+    {
+      "row_id": "drone::sf-v11-retest-drone-001::candidate::nexus-goal-closure-executor",
+      "capability": "drone",
+      "arm_type": "skill_ablation",
+      "skill_id": "nexus-goal-closure-executor",
+      "status": "PASS",
+      "reason": "",
+      "output_dir": "/private/tmp/nexus_sf_v11_retest_live_20260518/drone_sf-v11-retest-drone-001_candidate_nexus-goal-closure-executor"
+    },
+    {
+      "row_id": "drone::sf-v11-retest-drone-001::candidate::diagnose",
+      "capability": "drone",
+      "arm_type": "skill_ablation",
+      "skill_id": "diagnose",
+      "status": "PASS",
+      "reason": "",
+      "output_dir": "/private/tmp/nexus_sf_v11_retest_live_20260518/drone_sf-v11-retest-drone-001_candidate_diagnose"
+    },
+    {
+      "row_id": "lancedb::sf-v11-retest-lancedb-001::flash_nexus_no_skill",
+      "capability": "lancedb",
+      "arm_type": "capability_only",
+      "skill_id": "",
+      "status": "PASS",
+      "reason": "",
+      "output_dir": "/private/tmp/nexus_sf_v11_retest_live_20260518/lancedb_sf-v11-retest-lancedb-001_flash_nexus_no_skill"
+    },
+    {
+      "row_id": "lancedb::sf-v11-retest-lancedb-001::candidate::sf2-lancedb-route-fit-spec",
+      "capability": "lancedb",
+      "arm_type": "skill_ablation",
+      "skill_id": "sf2-lancedb-route-fit-spec",
+      "status": "PASS",
+      "reason": "",
+      "output_dir": "/private/tmp/nexus_sf_v11_retest_live_20260518/lancedb_sf-v11-retest-lancedb-001_candidate_sf2-lancedb-route-fit-spec"
+    },
+    {
+      "row_id": "lancedb::sf-v11-retest-lancedb-001::candidate::nexus-capability-upgrade",
+      "capability": "lancedb",
+      "arm_type": "skill_ablation",
+      "skill_id": "nexus-capability-upgrade",
+      "status": "PASS",
+      "reason": "",
+      "output_dir": "/private/tmp/nexus_sf_v11_retest_live_20260518/lancedb_sf-v11-retest-lancedb-001_candidate_nexus-capability-upgrade"
+    },
+    {
+      "row_id": "lancedb::sf-v11-retest-lancedb-001::candidate::research-source-validation-auditor",
+      "capability": "lancedb",
+      "arm_type": "skill_ablation",
+      "skill_id": "research-source-validation-auditor",
+      "status": "PASS",
+      "reason": "",
+      "output_dir": "/private/tmp/nexus_sf_v11_retest_live_20260518/lancedb_sf-v11-retest-lancedb-001_candidate_research-source-validation-auditor"
+    },
+    {
+      "row_id": "learning_closure::sf-v11-retest-learning_closure-001::flash_nexus_no_skill",
+      "capability": "learning_closure",
+      "arm_type": "capability_only",
+      "skill_id": "",
+      "status": "PASS",
+      "reason": "",
+      "output_dir": "/private/tmp/nexus_sf_v11_retest_live_20260518/learning_closure_sf-v11-retest-learning_closure-001_flash_nexus_no_skill"
+    },
+    {
+      "row_id": "learning_closure::sf-v11-retest-learning_closure-001::candidate::sf2-learning_closure-route-fit-spec",
+      "capability": "learning_closure",
+      "arm_type": "skill_ablation",
+      "skill_id": "sf2-learning_closure-route-fit-spec",
+      "status": "PASS",
+      "reason": "",
+      "output_dir": "/private/tmp/nexus_sf_v11_retest_live_20260518/learning_closure_sf-v11-retest-learning_closure-001_candidate_sf2-learning_closure-route-fit-spec"
+    },
+    {
+      "row_id": "learning_closure::sf-v11-retest-learning_closure-001::candidate::nexus-capability-upgrade",
+      "capability": "learning_closure",
+      "arm_type": "skill_ablation",
+      "skill_id": "nexus-capability-upgrade",
+      "status": "RETURN",
+      "reason": "skill_mount_contract_RETURN",
+      "output_dir": "/private/tmp/nexus_sf_v11_retest_live_20260518/learning_closure_sf-v11-retest-learning_closure-001_candidate_nexus-capability-upgrade"
+    },
+    {
+      "row_id": "learning_closure::sf-v11-retest-learning_closure-001::candidate::nexus-goal-closure-executor",
+      "capability": "learning_closure",
+      "arm_type": "skill_ablation",
+      "skill_id": "nexus-goal-closure-executor",
+      "status": "PASS",
+      "reason": "",
+      "output_dir": "/private/tmp/nexus_sf_v11_retest_live_20260518/learning_closure_sf-v11-retest-learning_closure-001_candidate_nexus-goal-closure-executor"
+    },
+    {
+      "row_id": "memory::sf-v11-retest-memory-001::flash_nexus_no_skill",
+      "capability": "memory",
+      "arm_type": "capability_only",
+      "skill_id": "",
+      "status": "PASS",
+      "reason": "",
+      "output_dir": "/private/tmp/nexus_sf_v11_retest_live_20260518/memory_sf-v11-retest-memory-001_flash_nexus_no_skill"
+    },
+    {
+      "row_id": "memory::sf-v11-retest-memory-001::candidate::sf2-memory-route-fit-spec",
+      "capability": "memory",
+      "arm_type": "skill_ablation",
+      "skill_id": "sf2-memory-route-fit-spec",
+      "status": "PASS",
+      "reason": "",
+      "output_dir": "/private/tmp/nexus_sf_v11_retest_live_20260518/memory_sf-v11-retest-memory-001_candidate_sf2-memory-route-fit-spec"
+    },
+    {
+      "row_id": "memory::sf-v11-retest-memory-001::candidate::nexus-capability-upgrade",
+      "capability": "memory",
+      "arm_type": "skill_ablation",
+      "skill_id": "nexus-capability-upgrade",
+      "status": "RETURN",
+      "reason": "skill_mount_contract_RETURN",
+      "output_dir": "/private/tmp/nexus_sf_v11_retest_live_20260518/memory_sf-v11-retest-memory-001_candidate_nexus-capability-upgrade"
+    },
+    {
+      "row_id": "memory::sf-v11-retest-memory-001::candidate::diagnose",
+      "capability": "memory",
+      "arm_type": "skill_ablation",
+      "skill_id": "diagnose",
+      "status": "PASS",
+      "reason": "",
+      "output_dir": "/private/tmp/nexus_sf_v11_retest_live_20260518/memory_sf-v11-retest-memory-001_candidate_diagnose"
+    },
+    {
+      "row_id": "mempalace::sf-v11-retest-mempalace-001::flash_nexus_no_skill",
+      "capability": "mempalace",
+      "arm_type": "capability_only",
+      "skill_id": "",
+      "status": "PASS",
+      "reason": "",
+      "output_dir": "/private/tmp/nexus_sf_v11_retest_live_20260518/mempalace_sf-v11-retest-mempalace-001_flash_nexus_no_skill"
+    },
+    {
+      "row_id": "mempalace::sf-v11-retest-mempalace-001::candidate::sf2-mempalace-route-fit-spec",
+      "capability": "mempalace",
+      "arm_type": "skill_ablation",
+      "skill_id": "sf2-mempalace-route-fit-spec",
+      "status": "PASS",
+      "reason": "",
+      "output_dir": "/private/tmp/nexus_sf_v11_retest_live_20260518/mempalace_sf-v11-retest-mempalace-001_candidate_sf2-mempalace-route-fit-spec"
+    },
+    {
+      "row_id": "mempalace::sf-v11-retest-mempalace-001::candidate::acceptance-evidence-failclosed",
+      "capability": "mempalace",
+      "arm_type": "skill_ablation",
+      "skill_id": "acceptance-evidence-failclosed",
+      "status": "PASS",
+      "reason": "",
+      "output_dir": "/private/tmp/nexus_sf_v11_retest_live_20260518/mempalace_sf-v11-retest-mempalace-001_candidate_acceptance-evidence-failclosed"
+    },
+    {
+      "row_id": "mempalace::sf-v11-retest-mempalace-001::candidate::gbrain-soul-audit",
+      "capability": "mempalace",
+      "arm_type": "skill_ablation",
+      "skill_id": "gbrain-soul-audit",
+      "status": "PASS",
+      "reason": "",
+      "output_dir": "/private/tmp/nexus_sf_v11_retest_live_20260518/mempalace_sf-v11-retest-mempalace-001_candidate_gbrain-soul-audit"
+    },
+    {
+      "row_id": "metabolism_resume::sf-v11-retest-metabolism_resume-001::flash_nexus_no_skill",
+      "capability": "metabolism_resume",
+      "arm_type": "capability_only",
+      "skill_id": "",
+      "status": "PASS",
+      "reason": "",
+      "output_dir": "/private/tmp/nexus_sf_v11_retest_live_20260518/metabolism_resume_sf-v11-retest-metabolism_resume-001_flash_nexus_no_skill"
+    },
+    {
+      "row_id": "metabolism_resume::sf-v11-retest-metabolism_resume-001::candidate::setup-matt-pocock-skills",
+      "capability": "metabolism_resume",
+      "arm_type": "skill_ablation",
+      "skill_id": "setup-matt-pocock-skills",
+      "status": "PASS",
+      "reason": "",
+      "output_dir": "/private/tmp/nexus_sf_v11_retest_live_20260518/metabolism_resume_sf-v11-retest-metabolism_resume-001_candidate_setup-matt-pocock-skills"
+    },
+    {
+      "row_id": "metabolism_resume::sf-v11-retest-metabolism_resume-001::candidate::nexus-goal-closure-executor",
+      "capability": "metabolism_resume",
+      "arm_type": "skill_ablation",
+      "skill_id": "nexus-goal-closure-executor",
+      "status": "PASS",
+      "reason": "",
+      "output_dir": "/private/tmp/nexus_sf_v11_retest_live_20260518/metabolism_resume_sf-v11-retest-metabolism_resume-001_candidate_nexus-goal-closure-executor"
+    },
+    {
+      "row_id": "metabolism_resume::sf-v11-retest-metabolism_resume-001::candidate::diagnose",
+      "capability": "metabolism_resume",
+      "arm_type": "skill_ablation",
+      "skill_id": "diagnose",
+      "status": "PASS",
+      "reason": "",
+      "output_dir": "/private/tmp/nexus_sf_v11_retest_live_20260518/metabolism_resume_sf-v11-retest-metabolism_resume-001_candidate_diagnose"
+    },
+    {
+      "row_id": "metabolism_resume::sf-v11-retest-metabolism_resume-001::candidate::nexus-capability-upgrade",
+      "capability": "metabolism_resume",
+      "arm_type": "skill_ablation",
+      "skill_id": "nexus-capability-upgrade",
+      "status": "RETURN",
+      "reason": "skill_mount_contract_RETURN",
+      "output_dir": "/private/tmp/nexus_sf_v11_retest_live_20260518/metabolism_resume_sf-v11-retest-metabolism_resume-001_candidate_nexus-capability-upgrade"
+    },
+    {
+      "row_id": "policy_capability_gate::sf-v11-retest-policy_capability_gate-001::flash_nexus_no_skill",
+      "capability": "policy_capability_gate",
+      "arm_type": "capability_only",
+      "skill_id": "",
+      "status": "PASS",
+      "reason": "",
+      "output_dir": "/private/tmp/nexus_sf_v11_retest_live_20260518/policy_capability_gate_sf-v11-retest-policy_capability_gate-001_flash_nexus_no_skill"
+    },
+    {
+      "row_id": "policy_capability_gate::sf-v11-retest-policy_capability_gate-001::candidate::sf2-policy_capability_gate-route-fit-spec",
+      "capability": "policy_capability_gate",
+      "arm_type": "skill_ablation",
+      "skill_id": "sf2-policy_capability_gate-route-fit-spec",
+      "status": "PASS",
+      "reason": "",
+      "output_dir": "/private/tmp/nexus_sf_v11_retest_live_20260518/policy_capability_gate_sf-v11-retest-policy_capability_gate-001_candidate_sf2-policy_capability_gate-route-fit-spec"
+    },
+    {
+      "row_id": "policy_capability_gate::sf-v11-retest-policy_capability_gate-001::candidate::acceptance-evidence-failclosed",
+      "capability": "policy_capability_gate",
+      "arm_type": "skill_ablation",
+      "skill_id": "acceptance-evidence-failclosed",
+      "status": "PASS",
+      "reason": "",
+      "output_dir": "/private/tmp/nexus_sf_v11_retest_live_20260518/policy_capability_gate_sf-v11-retest-policy_capability_gate-001_candidate_acceptance-evidence-failclosed"
+    },
+    {
+      "row_id": "policy_capability_gate::sf-v11-retest-policy_capability_gate-001::candidate::cso",
+      "capability": "policy_capability_gate",
+      "arm_type": "skill_ablation",
+      "skill_id": "cso",
+      "status": "PASS",
+      "reason": "",
+      "output_dir": "/private/tmp/nexus_sf_v11_retest_live_20260518/policy_capability_gate_sf-v11-retest-policy_capability_gate-001_candidate_cso"
+    },
+    {
+      "row_id": "registry_skills_sync::sf-v11-retest-registry_skills_sync-001::flash_nexus_no_skill",
+      "capability": "registry_skills_sync",
+      "arm_type": "capability_only",
+      "skill_id": "",
+      "status": "PASS",
+      "reason": "",
+      "output_dir": "/private/tmp/nexus_sf_v11_retest_live_20260518/registry_skills_sync_sf-v11-retest-registry_skills_sync-001_flash_nexus_no_skill"
+    },
+    {
+      "row_id": "registry_skills_sync::sf-v11-retest-registry_skills_sync-001::candidate::sf2-registry_skills_sync-route-fit-spec",
+      "capability": "registry_skills_sync",
+      "arm_type": "skill_ablation",
+      "skill_id": "sf2-registry_skills_sync-route-fit-spec",
+      "status": "PASS",
+      "reason": "",
+      "output_dir": "/private/tmp/nexus_sf_v11_retest_live_20260518/registry_skills_sync_sf-v11-retest-registry_skills_sync-001_candidate_sf2-registry_skills_sync-route-fit-spec"
+    },
+    {
+      "row_id": "registry_skills_sync::sf-v11-retest-registry_skills_sync-001::candidate::nexus-capability-upgrade",
+      "capability": "registry_skills_sync",
+      "arm_type": "skill_ablation",
+      "skill_id": "nexus-capability-upgrade",
+      "status": "RETURN",
+      "reason": "skill_mount_contract_RETURN",
+      "output_dir": "/private/tmp/nexus_sf_v11_retest_live_20260518/registry_skills_sync_sf-v11-retest-registry_skills_sync-001_candidate_nexus-capability-upgrade"
+    },
+    {
+      "row_id": "registry_skills_sync::sf-v11-retest-registry_skills_sync-001::candidate::setup-matt-pocock-skills",
+      "capability": "registry_skills_sync",
+      "arm_type": "skill_ablation",
+      "skill_id": "setup-matt-pocock-skills",
+      "status": "RETURN",
+      "reason": "skill_mount_contract_RETURN",
+      "output_dir": "/private/tmp/nexus_sf_v11_retest_live_20260518/registry_skills_sync_sf-v11-retest-registry_skills_sync-001_candidate_setup-matt-pocock-skills"
+    },
+    {
+      "row_id": "research::sf-v11-retest-research-001::flash_nexus_no_skill",
+      "capability": "research",
+      "arm_type": "capability_only",
+      "skill_id": "",
+      "status": "PASS",
+      "reason": "",
+      "output_dir": "/private/tmp/nexus_sf_v11_retest_live_20260518/research_sf-v11-retest-research-001_flash_nexus_no_skill"
+    },
+    {
+      "row_id": "research::sf-v11-retest-research-001::candidate::research-citation-chain-verifier",
+      "capability": "research",
+      "arm_type": "skill_ablation",
+      "skill_id": "research-citation-chain-verifier",
+      "status": "PASS",
+      "reason": "",
+      "output_dir": "/private/tmp/nexus_sf_v11_retest_live_20260518/research_sf-v11-retest-research-001_candidate_research-citation-chain-verifier"
+    },
+    {
+      "row_id": "research::sf-v11-retest-research-001::candidate::research-source-validation-auditor",
+      "capability": "research",
+      "arm_type": "skill_ablation",
+      "skill_id": "research-source-validation-auditor",
+      "status": "RETURN",
+      "reason": "skill_mount_contract_RETURN",
+      "output_dir": "/private/tmp/nexus_sf_v11_retest_live_20260518/research_sf-v11-retest-research-001_candidate_research-source-validation-auditor"
+    },
+    {
+      "row_id": "research::sf-v11-retest-research-001::candidate::research-source-conflict-resolver",
+      "capability": "research",
+      "arm_type": "skill_ablation",
+      "skill_id": "research-source-conflict-resolver",
+      "status": "PASS",
+      "reason": "",
+      "output_dir": "/private/tmp/nexus_sf_v11_retest_live_20260518/research_sf-v11-retest-research-001_candidate_research-source-conflict-resolver"
+    },
+    {
+      "row_id": "research::sf-v11-retest-research-001::candidate::sf2-research_control_plane-route-fit-spec",
+      "capability": "research",
+      "arm_type": "skill_ablation",
+      "skill_id": "sf2-research_control_plane-route-fit-spec",
+      "status": "PASS",
+      "reason": "",
+      "output_dir": "/private/tmp/nexus_sf_v11_retest_live_20260518/research_sf-v11-retest-research-001_candidate_sf2-research_control_plane-route-fit-spec"
+    },
+    {
+      "row_id": "research_control_plane::sf-v11-retest-research_control_plane-001::flash_nexus_no_skill",
+      "capability": "research_control_plane",
+      "arm_type": "capability_only",
+      "skill_id": "",
+      "status": "PASS",
+      "reason": "",
+      "output_dir": "/private/tmp/nexus_sf_v11_retest_live_20260518/research_control_plane_sf-v11-retest-research_control_plane-001_flash_nexus_no_skill"
+    },
+    {
+      "row_id": "research_control_plane::sf-v11-retest-research_control_plane-001::candidate::sf2-research_control_plane-route-fit-spec",
+      "capability": "research_control_plane",
+      "arm_type": "skill_ablation",
+      "skill_id": "sf2-research_control_plane-route-fit-spec",
+      "status": "PASS",
+      "reason": "",
+      "output_dir": "/private/tmp/nexus_sf_v11_retest_live_20260518/research_control_plane_sf-v11-retest-research_control_plane-001_candidate_sf2-research_control_plane-route-fit-spec"
+    },
+    {
+      "row_id": "research_control_plane::sf-v11-retest-research_control_plane-001::candidate::research-citation-chain-verifier",
+      "capability": "research_control_plane",
+      "arm_type": "skill_ablation",
+      "skill_id": "research-citation-chain-verifier",
+      "status": "PASS",
+      "reason": "",
+      "output_dir": "/private/tmp/nexus_sf_v11_retest_live_20260518/research_control_plane_sf-v11-retest-research_control_plane-001_candidate_research-citation-chain-verifier"
+    },
+    {
+      "row_id": "research_control_plane::sf-v11-retest-research_control_plane-001::candidate::research-source-validation-auditor",
+      "capability": "research_control_plane",
+      "arm_type": "skill_ablation",
+      "skill_id": "research-source-validation-auditor",
+      "status": "RETURN",
+      "reason": "skill_mount_contract_RETURN",
+      "output_dir": "/private/tmp/nexus_sf_v11_retest_live_20260518/research_control_plane_sf-v11-retest-research_control_plane-001_candidate_research-source-validation-auditor"
+    },
+    {
+      "row_id": "sandbox_replay::sf-v11-retest-sandbox_replay-001::flash_nexus_no_skill",
+      "capability": "sandbox_replay",
+      "arm_type": "capability_only",
+      "skill_id": "",
+      "status": "PASS",
+      "reason": "",
+      "output_dir": "/private/tmp/nexus_sf_v11_retest_live_20260518/sandbox_replay_sf-v11-retest-sandbox_replay-001_flash_nexus_no_skill"
+    },
+    {
+      "row_id": "sandbox_replay::sf-v11-retest-sandbox_replay-001::candidate::sf2-sandbox_replay-route-fit-spec",
+      "capability": "sandbox_replay",
+      "arm_type": "skill_ablation",
+      "skill_id": "sf2-sandbox_replay-route-fit-spec",
+      "status": "PASS",
+      "reason": "",
+      "output_dir": "/private/tmp/nexus_sf_v11_retest_live_20260518/sandbox_replay_sf-v11-retest-sandbox_replay-001_candidate_sf2-sandbox_replay-route-fit-spec"
+    },
+    {
+      "row_id": "sandbox_replay::sf-v11-retest-sandbox_replay-001::candidate::diagnose",
+      "capability": "sandbox_replay",
+      "arm_type": "skill_ablation",
+      "skill_id": "diagnose",
+      "status": "PASS",
+      "reason": "",
+      "output_dir": "/private/tmp/nexus_sf_v11_retest_live_20260518/sandbox_replay_sf-v11-retest-sandbox_replay-001_candidate_diagnose"
+    },
+    {
+      "row_id": "sandbox_replay::sf-v11-retest-sandbox_replay-001::candidate::acceptance-evidence-failclosed",
+      "capability": "sandbox_replay",
+      "arm_type": "skill_ablation",
+      "skill_id": "acceptance-evidence-failclosed",
+      "status": "PASS",
+      "reason": "",
+      "output_dir": "/private/tmp/nexus_sf_v11_retest_live_20260518/sandbox_replay_sf-v11-retest-sandbox_replay-001_candidate_acceptance-evidence-failclosed"
+    },
+    {
+      "row_id": "ui_validator::sf-v11-retest-ui_validator-001::flash_nexus_no_skill",
+      "capability": "ui_validator",
+      "arm_type": "capability_only",
+      "skill_id": "",
+      "status": "PASS",
+      "reason": "",
+      "output_dir": "/private/tmp/nexus_sf_v11_retest_live_20260518/ui_validator_sf-v11-retest-ui_validator-001_flash_nexus_no_skill"
+    },
+    {
+      "row_id": "ui_validator::sf-v11-retest-ui_validator-001::candidate::sf2-ui_validator-route-fit-spec",
+      "capability": "ui_validator",
+      "arm_type": "skill_ablation",
+      "skill_id": "sf2-ui_validator-route-fit-spec",
+      "status": "PASS",
+      "reason": "",
+      "output_dir": "/private/tmp/nexus_sf_v11_retest_live_20260518/ui_validator_sf-v11-retest-ui_validator-001_candidate_sf2-ui_validator-route-fit-spec"
+    },
+    {
+      "row_id": "ui_validator::sf-v11-retest-ui_validator-001::candidate::diagnose",
+      "capability": "ui_validator",
+      "arm_type": "skill_ablation",
+      "skill_id": "diagnose",
+      "status": "PASS",
+      "reason": "",
+      "output_dir": "/private/tmp/nexus_sf_v11_retest_live_20260518/ui_validator_sf-v11-retest-ui_validator-001_candidate_diagnose"
+    },
+    {
+      "row_id": "ui_validator::sf-v11-retest-ui_validator-001::candidate::nexus-root-cause-probe",
+      "capability": "ui_validator",
+      "arm_type": "skill_ablation",
+      "skill_id": "nexus-root-cause-probe",
+      "status": "PASS",
+      "reason": "",
+      "output_dir": "/private/tmp/nexus_sf_v11_retest_live_20260518/ui_validator_sf-v11-retest-ui_validator-001_candidate_nexus-root-cause-probe"
+    },
+    {
+      "row_id": "ultra_review::sf-v11-retest-ultra_review-001::flash_nexus_no_skill",
+      "capability": "ultra_review",
+      "arm_type": "capability_only",
+      "skill_id": "",
+      "status": "PASS",
+      "reason": "",
+      "output_dir": "/private/tmp/nexus_sf_v11_retest_live_20260518/ultra_review_sf-v11-retest-ultra_review-001_flash_nexus_no_skill"
+    },
+    {
+      "row_id": "ultra_review::sf-v11-retest-ultra_review-001::candidate::code-review-and-quality",
+      "capability": "ultra_review",
+      "arm_type": "skill_ablation",
+      "skill_id": "code-review-and-quality",
+      "status": "RETURN",
+      "reason": "model_call_without_tokens",
+      "output_dir": "/private/tmp/nexus_sf_v11_retest_live_20260518/ultra_review_sf-v11-retest-ultra_review-001_candidate_code-review-and-quality"
+    },
+    {
+      "row_id": "ultra_review::sf-v11-retest-ultra_review-001::candidate::diagnose",
+      "capability": "ultra_review",
+      "arm_type": "skill_ablation",
+      "skill_id": "diagnose",
+      "status": "RETURN",
+      "reason": "model_call_without_tokens",
+      "output_dir": "/private/tmp/nexus_sf_v11_retest_live_20260518/ultra_review_sf-v11-retest-ultra_review-001_candidate_diagnose"
+    },
+    {
+      "row_id": "ultra_review::sf-v11-retest-ultra_review-001::candidate::acceptance-evidence-failclosed",
+      "capability": "ultra_review",
+      "arm_type": "skill_ablation",
+      "skill_id": "acceptance-evidence-failclosed",
+      "status": "MISSING_ARTIFACT",
+      "reason": "missing_with_nexus_artifact",
+      "output_dir": "/private/tmp/nexus_sf_v11_retest_live_20260518/ultra_review_sf-v11-retest-ultra_review-001_candidate_acceptance-evidence-failclosed"
+    },
+    {
+      "row_id": "ultra_review::sf-v11-retest-ultra_review-001::candidate::cso",
+      "capability": "ultra_review",
+      "arm_type": "skill_ablation",
+      "skill_id": "cso",
+      "status": "MISSING_ARTIFACT",
+      "reason": "missing_with_nexus_artifact",
+      "output_dir": "/private/tmp/nexus_sf_v11_retest_live_20260518/ultra_review_sf-v11-retest-ultra_review-001_candidate_cso"
+    },
+    {
+      "row_id": "xray::sf-v11-retest-xray-001::flash_nexus_no_skill",
+      "capability": "xray",
+      "arm_type": "capability_only",
+      "skill_id": "",
+      "status": "RETURN",
+      "reason": "model_call_without_tokens",
+      "output_dir": "/private/tmp/nexus_sf_v11_retest_live_20260518/xray_sf-v11-retest-xray-001_flash_nexus_no_skill"
+    },
+    {
+      "row_id": "xray::sf-v11-retest-xray-001::candidate::sf2-xray-route-fit-spec",
+      "capability": "xray",
+      "arm_type": "skill_ablation",
+      "skill_id": "sf2-xray-route-fit-spec",
+      "status": "MISSING_ARTIFACT",
+      "reason": "missing_with_nexus_artifact",
+      "output_dir": "/private/tmp/nexus_sf_v11_retest_live_20260518/xray_sf-v11-retest-xray-001_candidate_sf2-xray-route-fit-spec"
+    },
+    {
+      "row_id": "xray::sf-v11-retest-xray-001::candidate::sf2-codeintel-route-fit-spec",
+      "capability": "xray",
+      "arm_type": "skill_ablation",
+      "skill_id": "sf2-codeintel-route-fit-spec",
+      "status": "MISSING_ARTIFACT",
+      "reason": "missing_with_nexus_artifact",
+      "output_dir": "/private/tmp/nexus_sf_v11_retest_live_20260518/xray_sf-v11-retest-xray-001_candidate_sf2-codeintel-route-fit-spec"
+    },
+    {
+      "row_id": "xray::sf-v11-retest-xray-001::candidate::diagnose",
+      "capability": "xray",
+      "arm_type": "skill_ablation",
+      "skill_id": "diagnose",
+      "status": "MISSING_ARTIFACT",
+      "reason": "missing_with_nexus_artifact",
+      "output_dir": "/private/tmp/nexus_sf_v11_retest_live_20260518/xray_sf-v11-retest-xray-001_candidate_diagnose"
+    }
+  ],
+  "claim_boundary": {
+    "sf_discovery_partial_evidence_allowed": true,
+    "runtime_update_allowed": false,
+    "public_benchmark_allowed": false,
+    "reason": "V11 stopped fail-closed after repeated model_call_without_tokens including xray baseline."
+  }
+}

@@ -1,0 +1,88 @@
+{
+  "schema": "nexus.sf_mattpocock_skill_status.v1",
+  "summary": {
+    "skill_count": 6,
+    "runtime_update_allowed": false,
+    "public_benchmark_allowed": false
+  },
+  "skills": [
+    {
+      "name": "tdd",
+      "path": "/private/tmp/mattpocock-skills-20260518/skills/engineering/tdd/SKILL.md",
+      "root": "mattpocock_external",
+      "skill_status": "external_reference_candidate",
+      "test_level": "sf_mattpocock_challenge",
+      "action": "ablation_only_compare",
+      "capability_mount": "hyper",
+      "family": "repair_loop",
+      "reason_codes": [
+        "mattpocock_external_challenger"
+      ]
+    },
+    {
+      "name": "improve-codebase-architecture",
+      "path": "/private/tmp/mattpocock-skills-20260518/skills/engineering/improve-codebase-architecture/SKILL.md",
+      "root": "mattpocock_external",
+      "skill_status": "external_reference_candidate",
+      "test_level": "sf_mattpocock_challenge",
+      "action": "ablation_only_compare",
+      "capability_mount": "codeintel",
+      "family": "codeintel",
+      "reason_codes": [
+        "mattpocock_external_challenger"
+      ]
+    },
+    {
+      "name": "diagnose",
+      "path": "/private/tmp/mattpocock-skills-20260518/skills/engineering/diagnose/SKILL.md",
+      "root": "mattpocock_external",
+      "skill_status": "external_reference_candidate",
+      "test_level": "sf_mattpocock_challenge",
+      "action": "ablation_only_compare",
+      "capability_mount": "codeintel",
+      "family": "xray",
+      "reason_codes": [
+        "mattpocock_external_challenger"
+      ]
+    },
+    {
+      "name": "to-prd",
+      "path": "/private/tmp/mattpocock-skills-20260518/skills/engineering/to-prd/SKILL.md",
+      "root": "mattpocock_external",
+      "skill_status": "external_reference_candidate",
+      "test_level": "sf_mattpocock_challenge",
+      "action": "ablation_only_compare",
+      "capability_mount": "autoreason",
+      "family": "forecast_pregate",
+      "reason_codes": [
+        "mattpocock_external_challenger"
+      ]
+    },
+    {
+      "name": "grill-with-docs",
+      "path": "/private/tmp/mattpocock-skills-20260518/skills/engineering/grill-with-docs/SKILL.md",
+      "root": "mattpocock_external",
+      "skill_status": "external_reference_candidate",
+      "test_level": "sf_mattpocock_challenge",
+      "action": "ablation_only_compare",
+      "capability_mount": "research",
+      "family": "research_control_plane",
+      "reason_codes": [
+        "mattpocock_external_challenger"
+      ]
+    },
+    {
+      "name": "write-a-skill",
+      "path": "/private/tmp/mattpocock-skills-20260518/skills/productivity/write-a-skill/SKILL.md",
+      "root": "mattpocock_external",
+      "skill_status": "external_reference_candidate",
+      "test_level": "sf_mattpocock_challenge",
+      "action": "ablation_only_compare",
+      "capability_mount": "semantic_searcher",
+      "family": "registry_skills_sync",
+      "reason_codes": [
+        "mattpocock_external_challenger"
+      ]
+    }
+  ]
+}

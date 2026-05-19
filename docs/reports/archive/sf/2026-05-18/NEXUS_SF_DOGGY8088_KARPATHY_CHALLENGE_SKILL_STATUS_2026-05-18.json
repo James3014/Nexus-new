@@ -1,0 +1,40 @@
+{
+  "schema": "nexus.sf.skill_status.external_challenge.v1",
+  "status": "PASS",
+  "source": {
+    "repo_url": "https://github.com/doggy8088/andrej-karpathy-skills",
+    "commit_sha": "0bf99012a4e63f3370e8027215a715f1bed91059",
+    "acquisition": "git_clone_depth_1",
+    "license": "MIT"
+  },
+  "summary": {
+    "skill_count": 1,
+    "capability_count": 5,
+    "runtime_update_allowed": false,
+    "public_benchmark_allowed": false
+  },
+  "skills": [
+    {
+      "name": "karpathy-guidelines",
+      "path": "/private/tmp/doggy8088-andrej-karpathy-skills-20260518/skills/karpathy-guidelines/SKILL.md",
+      "root": "/private/tmp/doggy8088-andrej-karpathy-skills-20260518",
+      "sha256": "6e22cc54cb02a5e98ae42d06d9d7292db0c1b43894831b32879beb0166b2aea7",
+      "skill_status": "external_reference_candidate",
+      "test_level": "sf_doggy8088_karpathy_challenge",
+      "action": "ablation_only_compare",
+      "capability_mounts": [
+        "direct_master_loop",
+        "repair_loop",
+        "hyper_sprint",
+        "codeintel",
+        "ultra_review"
+      ],
+      "reason_codes": [
+        "doggy8088_karpathy_external_challenger",
+        "coding_behavior_guidelines"
+      ],
+      "runtime_eligible": false,
+      "ablation_eligible": true
+    }
+  ]
+}

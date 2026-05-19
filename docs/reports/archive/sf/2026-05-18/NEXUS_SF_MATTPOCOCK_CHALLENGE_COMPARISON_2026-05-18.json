@@ -1,0 +1,108 @@
+{
+  "schema": "nexus.sf_mattpocock_challenge_comparison.v1",
+  "status": "PASS",
+  "summary": {
+    "challenger_count": 6,
+    "replace_candidate_count": 2,
+    "alternate_candidate_count": 2,
+    "keep_current_count": 2,
+    "runtime_update_allowed": false,
+    "public_benchmark_allowed": false
+  },
+  "rows": [
+    {
+      "capability_id": "codeintel",
+      "current_skill_id": "sf2-codeintel-route-fit-spec",
+      "candidate_skill_id": "improve-codebase-architecture",
+      "current_verdict": "KEEP",
+      "candidate_verdict": "KEEP",
+      "current_token_delta": -1312,
+      "candidate_token_delta": -192,
+      "current_wall_delta_sec": 9.142,
+      "candidate_wall_delta_sec": 22.3514,
+      "candidate_better_tokens": false,
+      "candidate_better_wall": false,
+      "recommendation": "keep_current",
+      "evidence": "receipt_backed_pair_clean"
+    },
+    {
+      "capability_id": "forecast_pregate",
+      "current_skill_id": "sf2-forecast_pregate-route-fit-spec",
+      "candidate_skill_id": "to-prd",
+      "current_verdict": "KEEP",
+      "candidate_verdict": "KEEP",
+      "current_token_delta": -1554,
+      "candidate_token_delta": -2876,
+      "current_wall_delta_sec": 7.6163,
+      "candidate_wall_delta_sec": 0.9027,
+      "candidate_better_tokens": true,
+      "candidate_better_wall": true,
+      "recommendation": "replace_candidate",
+      "evidence": "receipt_backed_pair_clean"
+    },
+    {
+      "capability_id": "registry_skills_sync",
+      "current_skill_id": "sf2-registry_skills_sync-route-fit-spec",
+      "candidate_skill_id": "write-a-skill",
+      "current_verdict": "KEEP",
+      "candidate_verdict": "KEEP",
+      "current_token_delta": 1035,
+      "candidate_token_delta": 999,
+      "current_wall_delta_sec": -49.1376,
+      "candidate_wall_delta_sec": -18.6293,
+      "candidate_better_tokens": true,
+      "candidate_better_wall": false,
+      "recommendation": "alternate_candidate",
+      "evidence": "receipt_backed_pair_clean"
+    },
+    {
+      "capability_id": "repair_loop",
+      "current_skill_id": "test-driven-development",
+      "candidate_skill_id": "tdd",
+      "current_verdict": "KEEP",
+      "candidate_verdict": "KEEP",
+      "current_token_delta": 562,
+      "candidate_token_delta": -21155,
+      "current_wall_delta_sec": 19.1855,
+      "candidate_wall_delta_sec": -67.7477,
+      "candidate_better_tokens": true,
+      "candidate_better_wall": true,
+      "recommendation": "replace_candidate",
+      "evidence": "receipt_backed_pair_clean"
+    },
+    {
+      "capability_id": "research_control_plane",
+      "current_skill_id": "sf2-research_control_plane-route-fit-spec",
+      "candidate_skill_id": "grill-with-docs",
+      "current_verdict": "KEEP",
+      "candidate_verdict": "KEEP",
+      "current_token_delta": 115,
+      "candidate_token_delta": -702,
+      "current_wall_delta_sec": -39.1321,
+      "candidate_wall_delta_sec": -23.0889,
+      "candidate_better_tokens": true,
+      "candidate_better_wall": false,
+      "recommendation": "alternate_candidate",
+      "evidence": "receipt_backed_pair_clean"
+    },
+    {
+      "capability_id": "xray",
+      "current_skill_id": "sf2-xray-route-fit-spec",
+      "candidate_skill_id": "diagnose",
+      "current_verdict": "KEEP",
+      "candidate_verdict": "KEEP",
+      "current_token_delta": 3920,
+      "candidate_token_delta": 5869,
+      "current_wall_delta_sec": 21.5001,
+      "candidate_wall_delta_sec": 36.7877,
+      "candidate_better_tokens": false,
+      "candidate_better_wall": false,
+      "recommendation": "keep_current",
+      "evidence": "receipt_backed_pair_clean"
+    }
+  ],
+  "claim_boundary": [
+    "Cost deltas are observation-only; replacement requires follow-up seal before runtime promotion.",
+    "This report tests mattpocock candidates against current SF pairing, not public benchmark claims."
+  ]
+}

@@ -1,0 +1,1824 @@
+{
+  "candidates_sample": [
+    {
+      "candidate_id": "github4-sickn33-antigravity-awesome-skills-javascript-typescript-typescript-scaffold",
+      "commit": "9e5d4ddefa24be7b50cc83f56a2450401cdf3317",
+      "description": "You are a TypeScript project architecture expert specializing in scaffolding production-ready Node.js and frontend applications. Generate complete project structures with modern tooling (pnpm, Vite, N",
+      "name": "javascript-typescript-typescript-scaffold",
+      "repo": "sickn33-antigravity-awesome-skills",
+      "risk_flags": [
+        {
+          "category": "network_or_api",
+          "hits": [
+            "secret"
+          ]
+        },
+        {
+          "category": "shell_or_install",
+          "hits": [
+            "npm install"
+          ]
+        },
+        {
+          "category": "persistence_or_hooks",
+          "hits": [
+            "hook"
+          ]
+        }
+      ],
+      "safety": "PASS_PROMPT_ONLY_REWRITE_REQUIRED",
+      "source_path": "skills/javascript-typescript-typescript-scaffold/SKILL.md",
+      "text_sha256": "b1b7f340504a844c421da9f836275cd5a16b2aee6694628b10a231918774831d",
+      "url": "https://github.com/sickn33/antigravity-awesome-skills"
+    },
+    {
+      "candidate_id": "github4-sickn33-antigravity-awesome-skills-azure-monitor-opentelemetry-ts",
+      "commit": "9e5d4ddefa24be7b50cc83f56a2450401cdf3317",
+      "description": "Auto-instrument Node.js applications with distributed tracing, metrics, and logs.",
+      "name": "azure-monitor-opentelemetry-ts",
+      "repo": "sickn33-antigravity-awesome-skills",
+      "risk_flags": [
+        {
+          "category": "network_or_api",
+          "hits": [
+            "https://"
+          ]
+        },
+        {
+          "category": "shell_or_install",
+          "hits": [
+            "npm install",
+            "sh "
+          ]
+        }
+      ],
+      "safety": "PASS_PROMPT_ONLY_REWRITE_REQUIRED",
+      "source_path": "skills/azure-monitor-opentelemetry-ts/SKILL.md",
+      "text_sha256": "c4ff113940cc207dc0db8fd184fd236a3ae5c1bb782a4362eb0e8b350d8ce1cf",
+      "url": "https://github.com/sickn33/antigravity-awesome-skills"
+    },
+    {
+      "candidate_id": "github4-sickn33-antigravity-awesome-skills-steve-jobs",
+      "commit": "9e5d4ddefa24be7b50cc83f56a2450401cdf3317",
+      "description": "Agente que simula Steve Jobs — cofundador da Apple, CEO da Pixar, fundador da NeXT, o maior designer de produtos tecnologicos da historia e o mais influente apresentador de produtos do mundo.",
+      "name": "steve-jobs",
+      "repo": "sickn33-antigravity-awesome-skills",
+      "risk_flags": [
+        {
+          "category": "shell_or_install",
+          "hits": [
+            "sh "
+          ]
+        },
+        {
+          "category": "persistence_or_hooks",
+          "hits": [
+            "hook"
+          ]
+        }
+      ],
+      "safety": "PASS_PROMPT_ONLY_REWRITE_REQUIRED",
+      "source_path": "skills/steve-jobs/SKILL.md",
+      "text_sha256": "24d110fc59966b0cd47cd675c4e84e0a807b82d563e5744e30e70a84b80da14e",
+      "url": "https://github.com/sickn33/antigravity-awesome-skills"
+    },
+    {
+      "candidate_id": "github4-sickn33-antigravity-awesome-skills-cal-com-automation",
+      "commit": "9e5d4ddefa24be7b50cc83f56a2450401cdf3317",
+      "description": "Automate Cal.com tasks via Rube MCP (Composio): manage bookings, check availability, configure webhooks, and handle teams. Always search tools first for current schemas.",
+      "name": "cal-com-automation",
+      "repo": "sickn33-antigravity-awesome-skills",
+      "risk_flags": [
+        {
+          "category": "network_or_api",
+          "hits": [
+            "api key",
+            "secret",
+            "webhook",
+            "https://"
+          ]
+        },
+        {
+          "category": "offensive_security",
+          "hits": [
+            "payload"
+          ]
+        },
+        {
+          "category": "persistence_or_hooks",
+          "hits": [
+            "hook"
+          ]
+        }
+      ],
+      "safety": "REJECT_OR_MANUAL_REVIEW",
+      "source_path": "skills/cal-com-automation/SKILL.md",
+      "text_sha256": "49f89a6767ab2d5035b6ddac632e0964a24cc4d05e865ac78f54b1c09b814681",
+      "url": "https://github.com/sickn33/antigravity-awesome-skills"
+    },
+    {
+      "candidate_id": "github4-sickn33-antigravity-awesome-skills-kaizen",
+      "commit": "9e5d4ddefa24be7b50cc83f56a2450401cdf3317",
+      "description": "Guide for continuous improvement, error proofing, and standardization. Use this skill when the user wants to improve code quality, refactor, or discuss process improvements.",
+      "name": "kaizen",
+      "repo": "sickn33-antigravity-awesome-skills",
+      "risk_flags": [
+        {
+          "category": "network_or_api",
+          "hits": [
+            "apikey",
+            "https://"
+          ]
+        }
+      ],
+      "safety": "PASS_PROMPT_ONLY_REWRITE_REQUIRED",
+      "source_path": "skills/kaizen/SKILL.md",
+      "text_sha256": "c1ed4aa3cc0b80becc5dd977151d5313e1d902a7595d334eea2e70301b7da370",
+      "url": "https://github.com/sickn33/antigravity-awesome-skills"
+    },
+    {
+      "candidate_id": "github4-sickn33-antigravity-awesome-skills-react-component-performance",
+      "commit": "9e5d4ddefa24be7b50cc83f56a2450401cdf3317",
+      "description": "Diagnose slow React components and suggest targeted performance fixes.",
+      "name": "react-component-performance",
+      "repo": "sickn33-antigravity-awesome-skills",
+      "risk_flags": [
+        {
+          "category": "shell_or_install",
+          "hits": [
+            "sh "
+          ]
+        }
+      ],
+      "safety": "PASS_PROMPT_ONLY_REWRITE_REQUIRED",
+      "source_path": "skills/react-component-performance/SKILL.md",
+      "text_sha256": "e5ed04f3693f9ab303dd66b5c241134781bf1b10dfac23aa386d10cbd93a6d1a",
+      "url": "https://github.com/sickn33/antigravity-awesome-skills"
+    },
+    {
+      "candidate_id": "github4-sickn33-antigravity-awesome-skills-bug-hunter",
+      "commit": "9e5d4ddefa24be7b50cc83f56a2450401cdf3317",
+      "description": "Systematically finds and fixes bugs using proven debugging techniques. Traces from symptoms to root cause, implements fixes, and prevents regression.",
+      "name": "bug-hunter",
+      "repo": "sickn33-antigravity-awesome-skills",
+      "risk_flags": [],
+      "safety": "PASS_PROMPT_ONLY",
+      "source_path": "skills/bug-hunter/SKILL.md",
+      "text_sha256": "b3e9b84416d0e1638b85deb451cb576c2e9416f399f89e718c34695b33ec51ec",
+      "url": "https://github.com/sickn33/antigravity-awesome-skills"
+    },
+    {
+      "candidate_id": "github4-sickn33-antigravity-awesome-skills-saas-mvp-launcher",
+      "commit": "9e5d4ddefa24be7b50cc83f56a2450401cdf3317",
+      "description": "Use when planning or building a SaaS MVP from scratch. Provides a structured roadmap covering tech stack, architecture, auth, payments, and launch checklist.",
+      "name": "saas-mvp-launcher",
+      "repo": "sickn33-antigravity-awesome-skills",
+      "risk_flags": [
+        {
+          "category": "network_or_api",
+          "hits": [
+            "secret",
+            "webhook"
+          ]
+        },
+        {
+          "category": "persistence_or_hooks",
+          "hits": [
+            "hook"
+          ]
+        }
+      ],
+      "safety": "PASS_PROMPT_ONLY_REWRITE_REQUIRED",
+      "source_path": "skills/saas-mvp-launcher/SKILL.md",
+      "text_sha256": "146980ffa353903e41166bb71876a5da46b1289fec7f287b3167f2365005f28d",
+      "url": "https://github.com/sickn33/antigravity-awesome-skills"
+    },
+    {
+      "candidate_id": "github4-sickn33-antigravity-awesome-skills-supabase-automation",
+      "commit": "9e5d4ddefa24be7b50cc83f56a2450401cdf3317",
+      "description": "Automate Supabase database queries, table management, project administration, storage, edge functions, and SQL execution via Rube MCP (Composio). Always search tools first for current schemas.",
+      "name": "supabase-automation",
+      "repo": "sickn33-antigravity-awesome-skills",
+      "risk_flags": [
+        {
+          "category": "network_or_api",
+          "hits": [
+            "api key",
+            "token",
+            "secret",
+            "https://"
+          ]
+        }
+      ],
+      "safety": "PASS_PROMPT_ONLY_REWRITE_REQUIRED",
+      "source_path": "skills/supabase-automation/SKILL.md",
+      "text_sha256": "a6b784b07ea2216809edd643644201c7c37bccfaf6786617546412f696b65786",
+      "url": "https://github.com/sickn33/antigravity-awesome-skills"
+    },
+    {
+      "candidate_id": "github4-sickn33-antigravity-awesome-skills-langfuse",
+      "commit": "9e5d4ddefa24be7b50cc83f56a2450401cdf3317",
+      "description": "Expert in Langfuse - the open-source LLM observability platform.",
+      "name": "langfuse",
+      "repo": "sickn33-antigravity-awesome-skills",
+      "risk_flags": [
+        {
+          "category": "network_or_api",
+          "hits": [
+            "api key",
+            "token",
+            "secret",
+            "https://"
+          ]
+        },
+        {
+          "category": "shell_or_install",
+          "hits": [
+            "sh "
+          ]
+        }
+      ],
+      "safety": "PASS_PROMPT_ONLY_REWRITE_REQUIRED",
+      "source_path": "skills/langfuse/SKILL.md",
+      "text_sha256": "40848e6849412ba1de1fccc193b0305b2da86d110ca44e3c53c3c0675aa280b3",
+      "url": "https://github.com/sickn33/antigravity-awesome-skills"
+    },
+    {
+      "candidate_id": "github4-sickn33-antigravity-awesome-skills-cc-skill-coding-standards",
+      "commit": "9e5d4ddefa24be7b50cc83f56a2450401cdf3317",
+      "description": "Universal coding standards, best practices, and patterns for TypeScript, JavaScript, React, and Node.js development.",
+      "name": "cc-skill-coding-standards",
+      "repo": "sickn33-antigravity-awesome-skills",
+      "risk_flags": [
+        {
+          "category": "network_or_api",
+          "hits": [
+            "api key"
+          ]
+        },
+        {
+          "category": "persistence_or_hooks",
+          "hits": [
+            "hook"
+          ]
+        }
+      ],
+      "safety": "PASS_PROMPT_ONLY_REWRITE_REQUIRED",
+      "source_path": "skills/cc-skill-coding-standards/SKILL.md",
+      "text_sha256": "ab9e7feeaa942dc732b611efed2b56364474be4a3ac6fe3e73d74a86c03f4997",
+      "url": "https://github.com/sickn33/antigravity-awesome-skills"
+    },
+    {
+      "candidate_id": "github4-sickn33-antigravity-awesome-skills-track-management",
+      "commit": "9e5d4ddefa24be7b50cc83f56a2450401cdf3317",
+      "description": "Use this skill when creating, managing, or working with Conductor tracks - the logical work units for features, bugs, and refactors. Applies to spec.md, plan.md, and track lifecycle operations.",
+      "name": "track-management",
+      "repo": "sickn33-antigravity-awesome-skills",
+      "risk_flags": [],
+      "safety": "PASS_PROMPT_ONLY",
+      "source_path": "skills/track-management/SKILL.md",
+      "text_sha256": "e91a7a98c87c39b2e9c1697ca3d78b7a8f3eea556890ebb7d1cdf1536f504a50",
+      "url": "https://github.com/sickn33/antigravity-awesome-skills"
+    },
+    {
+      "candidate_id": "github4-sickn33-antigravity-awesome-skills-metasploit-framework",
+      "commit": "9e5d4ddefa24be7b50cc83f56a2450401cdf3317",
+      "description": "⚠️ AUTHORIZED USE ONLY > This skill is for educational purposes or authorized security assessments only. > You must have explicit, written permission from the system owner before using this tool. > Misuse of this tool is illegal and strictly prohibited.",
+      "name": "metasploit-framework",
+      "repo": "sickn33-antigravity-awesome-skills",
+      "risk_flags": [
+        {
+          "category": "network_or_api",
+          "hits": [
+            "secret"
+          ]
+        },
+        {
+          "category": "shell_or_install",
+          "hits": [
+            "sudo ",
+            "sh "
+          ]
+        },
+        {
+          "category": "offensive_security",
+          "hits": [
+            "metasploit",
+            "exploit",
+            "payload",
+            "reverse shell",
+            "nmap"
+          ]
+        }
+      ],
+      "safety": "REJECT_HIGH_RISK_DOMAIN",
+      "source_path": "skills/metasploit-framework/SKILL.md",
+      "text_sha256": "38e4a2d2993357521b9937fd4ba81134c55be597ad761654ff2c544e094d4d38",
+      "url": "https://github.com/sickn33/antigravity-awesome-skills"
+    },
+    {
+      "candidate_id": "github4-sickn33-antigravity-awesome-skills-mailchimp-automation",
+      "commit": "9e5d4ddefa24be7b50cc83f56a2450401cdf3317",
+      "description": "Automate Mailchimp email marketing including campaigns, audiences, subscribers, segments, and analytics via Rube MCP (Composio). Always search tools first for current schemas.",
+      "name": "mailchimp-automation",
+      "repo": "sickn33-antigravity-awesome-skills",
+      "risk_flags": [
+        {
+          "category": "network_or_api",
+          "hits": [
+            "api key",
+            "oauth",
+            "https://"
+          ]
+        },
+        {
+          "category": "shell_or_install",
+          "hits": [
+            "sh "
+          ]
+        }
+      ],
+      "safety": "PASS_PROMPT_ONLY_REWRITE_REQUIRED",
+      "source_path": "skills/mailchimp-automation/SKILL.md",
+      "text_sha256": "b80aa7d39b59ae384161a7a71758db249648188e329433f9b6619a1d521abdcc",
+      "url": "https://github.com/sickn33/antigravity-awesome-skills"
+    },
+    {
+      "candidate_id": "github4-sickn33-antigravity-awesome-skills-customer-support",
+      "commit": "9e5d4ddefa24be7b50cc83f56a2450401cdf3317",
+      "description": "Elite AI-powered customer support specialist mastering conversational AI, automated ticketing, sentiment analysis, and omnichannel support experiences.",
+      "name": "customer-support",
+      "repo": "sickn33-antigravity-awesome-skills",
+      "risk_flags": [
+        {
+          "category": "network_or_api",
+          "hits": [
+            "webhook"
+          ]
+        },
+        {
+          "category": "persistence_or_hooks",
+          "hits": [
+            "hook"
+          ]
+        }
+      ],
+      "safety": "PASS_PROMPT_ONLY_REWRITE_REQUIRED",
+      "source_path": "skills/customer-support/SKILL.md",
+      "text_sha256": "57c45bbf348adefd8385f4d11d378da482ea49f37d0dca205e502f9deaf50add",
+      "url": "https://github.com/sickn33/antigravity-awesome-skills"
+    },
+    {
+      "candidate_id": "github4-sickn33-antigravity-awesome-skills-expo-dev-client",
+      "commit": "9e5d4ddefa24be7b50cc83f56a2450401cdf3317",
+      "description": "Build and distribute Expo development clients locally or via TestFlight",
+      "name": "expo-dev-client",
+      "repo": "sickn33-antigravity-awesome-skills",
+      "risk_flags": [],
+      "safety": "PASS_PROMPT_ONLY",
+      "source_path": "skills/expo-dev-client/SKILL.md",
+      "text_sha256": "c7eec2e48868992a69e34b56111e6ab22ff3adc9f4e7291209da8e4cb2e1a365",
+      "url": "https://github.com/sickn33/antigravity-awesome-skills"
+    },
+    {
+      "candidate_id": "github4-sickn33-antigravity-awesome-skills-mobile-design",
+      "commit": "9e5d4ddefa24be7b50cc83f56a2450401cdf3317",
+      "description": "(Mobile-First · Touch-First · Platform-Respectful)",
+      "name": "mobile-design",
+      "repo": "sickn33-antigravity-awesome-skills",
+      "risk_flags": [
+        {
+          "category": "network_or_api",
+          "hits": [
+            "token",
+            "secret"
+          ]
+        },
+        {
+          "category": "shell_or_install",
+          "hits": [
+            "sh "
+          ]
+        },
+        {
+          "category": "offensive_security",
+          "hits": [
+            "ctf"
+          ]
+        }
+      ],
+      "safety": "REJECT_OR_MANUAL_REVIEW",
+      "source_path": "skills/mobile-design/SKILL.md",
+      "text_sha256": "036425128be36cfaeb34c61c7200035c954a6181ff6d049a8daeb742843de9d0",
+      "url": "https://github.com/sickn33/antigravity-awesome-skills"
+    },
+    {
+      "candidate_id": "github4-sickn33-antigravity-awesome-skills-task-intelligence",
+      "commit": "9e5d4ddefa24be7b50cc83f56a2450401cdf3317",
+      "description": "Protocolo de Inteligência Pré-Tarefa — ativa TODOS os agentes relevantes do ecossistema ANTES de executar qualquer tarefa solicitada pelo usuário.",
+      "name": "task-intelligence",
+      "repo": "sickn33-antigravity-awesome-skills",
+      "risk_flags": [
+        {
+          "category": "network_or_api",
+          "hits": [
+            "api key",
+            "webhook"
+          ]
+        },
+        {
+          "category": "persistence_or_hooks",
+          "hits": [
+            "hook"
+          ]
+        }
+      ],
+      "safety": "PASS_PROMPT_ONLY_REWRITE_REQUIRED",
+      "source_path": "skills/task-intelligence/SKILL.md",
+      "text_sha256": "d5c9fe274865a3f5de2b070638d691f3818d27b9207ceb6ba805c89dbea61a83",
+      "url": "https://github.com/sickn33/antigravity-awesome-skills"
+    },
+    {
+      "candidate_id": "github4-sickn33-antigravity-awesome-skills-seo-plan",
+      "commit": "9e5d4ddefa24be7b50cc83f56a2450401cdf3317",
+      "description": ">",
+      "name": "seo-plan",
+      "repo": "sickn33-antigravity-awesome-skills",
+      "risk_flags": [
+        {
+          "category": "network_or_api",
+          "hits": [
+            "https://"
+          ]
+        }
+      ],
+      "safety": "PASS_PROMPT_ONLY_REWRITE_REQUIRED",
+      "source_path": "skills/seo-plan/SKILL.md",
+      "text_sha256": "595e16bff6e4d9451f74dc2cfb33f9ad25066d0bcd1b6f3dfd849cf3ce32699a",
+      "url": "https://github.com/sickn33/antigravity-awesome-skills"
+    },
+    {
+      "candidate_id": "github4-sickn33-antigravity-awesome-skills-dwarf-expert",
+      "commit": "9e5d4ddefa24be7b50cc83f56a2450401cdf3317",
+      "description": "Provides expertise for analyzing DWARF debug files and understanding the DWARF debug format/standard (v3-v5). Triggers when understanding DWARF information, interacting with DWARF files, answering DWARF-related questions, or working with code that parses DWARF data.",
+      "name": "dwarf-expert",
+      "repo": "sickn33-antigravity-awesome-skills",
+      "risk_flags": [],
+      "safety": "PASS_PROMPT_ONLY",
+      "source_path": "skills/dwarf-expert/SKILL.md",
+      "text_sha256": "ab7657c38b79154a2d194e5220643d9191dfeacf5a76c87847396ae3ba8c9718",
+      "url": "https://github.com/sickn33/antigravity-awesome-skills"
+    },
+    {
+      "candidate_id": "github4-sickn33-antigravity-awesome-skills-ask-questions-if-underspecified",
+      "commit": "9e5d4ddefa24be7b50cc83f56a2450401cdf3317",
+      "description": "Clarify requirements before implementing. Use when serious doubts arise.",
+      "name": "ask-questions-if-underspecified",
+      "repo": "sickn33-antigravity-awesome-skills",
+      "risk_flags": [],
+      "safety": "PASS_PROMPT_ONLY",
+      "source_path": "skills/ask-questions-if-underspecified/SKILL.md",
+      "text_sha256": "42690ce0d2adcb2377503246d15469ccaed60f6a32ce404016432f012050f737",
+      "url": "https://github.com/sickn33/antigravity-awesome-skills"
+    },
+    {
+      "candidate_id": "github4-sickn33-antigravity-awesome-skills-azure-storage-blob-ts",
+      "commit": "9e5d4ddefa24be7b50cc83f56a2450401cdf3317",
+      "description": "Azure Blob Storage JavaScript/TypeScript SDK (@azure/storage-blob) for blob operations. Use for uploading, downloading, listing, and managing blobs and containers.",
+      "name": "azure-storage-blob-ts",
+      "repo": "sickn33-antigravity-awesome-skills",
+      "risk_flags": [
+        {
+          "category": "network_or_api",
+          "hits": [
+            "token",
+            "https://"
+          ]
+        },
+        {
+          "category": "shell_or_install",
+          "hits": [
+            "npm install"
+          ]
+        }
+      ],
+      "safety": "PASS_PROMPT_ONLY_REWRITE_REQUIRED",
+      "source_path": "skills/azure-storage-blob-ts/SKILL.md",
+      "text_sha256": "28474e372585407cace9d4fda0a69f154a49c5ccdccb552472ab014aedeb14c2",
+      "url": "https://github.com/sickn33/antigravity-awesome-skills"
+    },
+    {
+      "candidate_id": "github4-sickn33-antigravity-awesome-skills-hugging-face-tool-builder",
+      "commit": "9e5d4ddefa24be7b50cc83f56a2450401cdf3317",
+      "description": "Your purpose is now is to create reusable command line scripts and utilities for using the Hugging Face API, allowing chaining, piping and intermediate processing where helpful. You can access the API directly, as well as use the hf command line tool.",
+      "name": "hugging-face-tool-builder",
+      "repo": "sickn33-antigravity-awesome-skills",
+      "risk_flags": [
+        {
+          "category": "network_or_api",
+          "hits": [
+            "token",
+            "bearer",
+            "oauth",
+            "curl ",
+            "https://"
+          ]
+        },
+        {
+          "category": "shell_or_install",
+          "hits": [
+            "sh "
+          ]
+        }
+      ],
+      "safety": "PASS_PROMPT_ONLY_REWRITE_REQUIRED",
+      "source_path": "skills/hugging-face-tool-builder/SKILL.md",
+      "text_sha256": "7b12df8a8337a58aefb232be55952a4a12aca17798434386685303be954b1fcb",
+      "url": "https://github.com/sickn33/antigravity-awesome-skills"
+    },
+    {
+      "candidate_id": "github4-sickn33-antigravity-awesome-skills-planning-with-files",
+      "commit": "9e5d4ddefa24be7b50cc83f56a2450401cdf3317",
+      "description": "Work like Manus: Use persistent markdown files as your \\\"working memory on disk.\\",
+      "name": "planning-with-files",
+      "repo": "sickn33-antigravity-awesome-skills",
+      "risk_flags": [],
+      "safety": "PASS_PROMPT_ONLY",
+      "source_path": "skills/planning-with-files/SKILL.md",
+      "text_sha256": "6f5b17ee6ed56e02771ef2c91368019b596bc38a87f65d55e2fd325b525b59e2",
+      "url": "https://github.com/sickn33/antigravity-awesome-skills"
+    },
+    {
+      "candidate_id": "github4-sickn33-antigravity-awesome-skills-react-patterns",
+      "commit": "9e5d4ddefa24be7b50cc83f56a2450401cdf3317",
+      "description": "Modern React patterns and principles. Hooks, composition, performance, TypeScript best practices.",
+      "name": "react-patterns",
+      "repo": "sickn33-antigravity-awesome-skills",
+      "risk_flags": [
+        {
+          "category": "network_or_api",
+          "hits": [
+            "https://"
+          ]
+        },
+        {
+          "category": "persistence_or_hooks",
+          "hits": [
+            "hook"
+          ]
+        }
+      ],
+      "safety": "PASS_PROMPT_ONLY_REWRITE_REQUIRED",
+      "source_path": "skills/react-patterns/SKILL.md",
+      "text_sha256": "faf194b1a81ee8fb7693c85479f271ed9de2dfb82f57bdd49af35c9ef7cafdcf",
+      "url": "https://github.com/sickn33/antigravity-awesome-skills"
+    },
+    {
+      "candidate_id": "github4-sickn33-antigravity-awesome-skills-pentest-checklist",
+      "commit": "9e5d4ddefa24be7b50cc83f56a2450401cdf3317",
+      "description": "Provide a comprehensive checklist for planning, executing, and following up on penetration tests. Ensure thorough preparation, proper scoping, and effective remediation of discovered vulnerabilities.",
+      "name": "pentest-checklist",
+      "repo": "sickn33-antigravity-awesome-skills",
+      "risk_flags": [
+        {
+          "category": "network_or_api",
+          "hits": [
+            "http://",
+            "https://"
+          ]
+        },
+        {
+          "category": "shell_or_install",
+          "hits": [
+            "sudo ",
+            "sh "
+          ]
+        },
+        {
+          "category": "offensive_security",
+          "hits": [
+            "pentest",
+            "nmap"
+          ]
+        }
+      ],
+      "safety": "REJECT_HIGH_RISK_DOMAIN",
+      "source_path": "skills/pentest-checklist/SKILL.md",
+      "text_sha256": "8b357d9b20a16265a12ef9eab735307dce156f8cb07e811fc7e1d91fb1fcf210",
+      "url": "https://github.com/sickn33/antigravity-awesome-skills"
+    },
+    {
+      "candidate_id": "github4-sickn33-antigravity-awesome-skills-threejs-skills",
+      "commit": "9e5d4ddefa24be7b50cc83f56a2450401cdf3317",
+      "description": "Create 3D scenes, interactive experiences, and visual effects using Three.js. Use when user requests 3D graphics, WebGL experiences, 3D visualizations, animations, or interactive 3D elements.",
+      "name": "threejs-skills",
+      "repo": "sickn33-antigravity-awesome-skills",
+      "risk_flags": [
+        {
+          "category": "network_or_api",
+          "hits": [
+            "https://"
+          ]
+        },
+        {
+          "category": "shell_or_install",
+          "hits": [
+            "sh "
+          ]
+        }
+      ],
+      "safety": "PASS_PROMPT_ONLY_REWRITE_REQUIRED",
+      "source_path": "skills/threejs-skills/SKILL.md",
+      "text_sha256": "f9ea0dd2b50709ef83b52f87a6aacd69f3f5b36a98d01218a6308e1ad9286b0e",
+      "url": "https://github.com/sickn33/antigravity-awesome-skills"
+    },
+    {
+      "candidate_id": "github4-sickn33-antigravity-awesome-skills-network-engineer",
+      "commit": "9e5d4ddefa24be7b50cc83f56a2450401cdf3317",
+      "description": "Expert network engineer specializing in modern cloud networking, security architectures, and performance optimization.",
+      "name": "network-engineer",
+      "repo": "sickn33-antigravity-awesome-skills",
+      "risk_flags": [
+        {
+          "category": "shell_or_install",
+          "hits": [
+            "docker ",
+            "sh "
+          ]
+        },
+        {
+          "category": "offensive_security",
+          "hits": [
+            "nmap"
+          ]
+        }
+      ],
+      "safety": "REJECT_OR_MANUAL_REVIEW",
+      "source_path": "skills/network-engineer/SKILL.md",
+      "text_sha256": "284345d56133fc2d19edae4c1ea1fbaa31c43c5805b66d80d94aaed80fb8ddfe",
+      "url": "https://github.com/sickn33/antigravity-awesome-skills"
+    },
+    {
+      "candidate_id": "github4-sickn33-antigravity-awesome-skills-playwright-skill",
+      "commit": "9e5d4ddefa24be7b50cc83f56a2450401cdf3317",
+      "description": "IMPORTANT - Path Resolution: This skill can be installed in different locations (plugin system, manual installation, global, or project-specific). Before executing any commands, determine the skill directory based on where you loaded this SKILL.md file, and use that path in all commands below.",
+      "name": "playwright-skill",
+      "repo": "sickn33-antigravity-awesome-skills",
+      "risk_flags": [
+        {
+          "category": "network_or_api",
+          "hits": [
+            "token",
+            "http://"
+          ]
+        }
+      ],
+      "safety": "PASS_PROMPT_ONLY_REWRITE_REQUIRED",
+      "source_path": "skills/playwright-skill/SKILL.md",
+      "text_sha256": "47291c4891287075d2e07de0155dc501d4d111caf74b322629a4c7cd527a0790",
+      "url": "https://github.com/sickn33/antigravity-awesome-skills"
+    },
+    {
+      "candidate_id": "github4-sickn33-antigravity-awesome-skills-antigravity-design-expert",
+      "commit": "9e5d4ddefa24be7b50cc83f56a2450401cdf3317",
+      "description": "name: antigravity-design-expert",
+      "name": "antigravity-design-expert",
+      "repo": "sickn33-antigravity-awesome-skills",
+      "risk_flags": [],
+      "safety": "PASS_PROMPT_ONLY",
+      "source_path": "skills/antigravity-design-expert/SKILL.md",
+      "text_sha256": "44dd8ad715d368a451c04503b60108aeb25b41c655dc0cdf3a3590c8f7e24f5c",
+      "url": "https://github.com/sickn33/antigravity-awesome-skills"
+    },
+    {
+      "candidate_id": "github4-sickn33-antigravity-awesome-skills-commit",
+      "commit": "9e5d4ddefa24be7b50cc83f56a2450401cdf3317",
+      "description": "ALWAYS use this skill when committing code changes — never commit directly without it. Creates commits following Sentry conventions with proper conventional commit format and issue references. Trigger on any commit, git commit, save changes, or commit message task.",
+      "name": "commit",
+      "repo": "sickn33-antigravity-awesome-skills",
+      "risk_flags": [
+        {
+          "category": "network_or_api",
+          "hits": [
+            "https://"
+          ]
+        }
+      ],
+      "safety": "PASS_PROMPT_ONLY_REWRITE_REQUIRED",
+      "source_path": "skills/commit/SKILL.md",
+      "text_sha256": "7be5124cd7edfa76b20dbf8b503edc295fbc0650816bd192dbe0f7b8574963d6",
+      "url": "https://github.com/sickn33/antigravity-awesome-skills"
+    },
+    {
+      "candidate_id": "github4-sickn33-antigravity-awesome-skills-azure-ai-formrecognizer-java",
+      "commit": "9e5d4ddefa24be7b50cc83f56a2450401cdf3317",
+      "description": "Build document analysis applications using the Azure AI Document Intelligence SDK for Java.",
+      "name": "azure-ai-formrecognizer-java",
+      "repo": "sickn33-antigravity-awesome-skills",
+      "risk_flags": [
+        {
+          "category": "network_or_api",
+          "hits": [
+            "https://"
+          ]
+        }
+      ],
+      "safety": "PASS_PROMPT_ONLY_REWRITE_REQUIRED",
+      "source_path": "skills/azure-ai-formrecognizer-java/SKILL.md",
+      "text_sha256": "fe2b0346473342a13f67f080e94364a1d01be9d01795fba774b9b6f58c57bbf1",
+      "url": "https://github.com/sickn33/antigravity-awesome-skills"
+    },
+    {
+      "candidate_id": "github4-sickn33-antigravity-awesome-skills-ui-ux-pro-max",
+      "commit": "9e5d4ddefa24be7b50cc83f56a2450401cdf3317",
+      "description": "Comprehensive design guide for web and mobile applications. Use when designing new UI components or pages, choosing color palettes and typography, or reviewing code for UX issues.",
+      "name": "ui-ux-pro-max",
+      "repo": "sickn33-antigravity-awesome-skills",
+      "risk_flags": [
+        {
+          "category": "shell_or_install",
+          "hits": [
+            "sudo ",
+            "brew install"
+          ]
+        },
+        {
+          "category": "persistence_or_hooks",
+          "hits": [
+            "hook"
+          ]
+        }
+      ],
+      "safety": "PASS_PROMPT_ONLY_REWRITE_REQUIRED",
+      "source_path": "skills/ui-ux-pro-max/SKILL.md",
+      "text_sha256": "2e48567ad740cc6ef2f433174804aa89afa51f36e2b7edc6c1479d7a935ffe2b",
+      "url": "https://github.com/sickn33/antigravity-awesome-skills"
+    },
+    {
+      "candidate_id": "github4-sickn33-antigravity-awesome-skills-marketing-psychology",
+      "commit": "9e5d4ddefa24be7b50cc83f56a2450401cdf3317",
+      "description": "Apply behavioral science and mental models to marketing decisions, prioritized using a psychological leverage and feasibility scoring system.",
+      "name": "marketing-psychology",
+      "repo": "sickn33-antigravity-awesome-skills",
+      "risk_flags": [
+        {
+          "category": "offensive_security",
+          "hits": [
+            "exploit"
+          ]
+        }
+      ],
+      "safety": "REJECT_OR_MANUAL_REVIEW",
+      "source_path": "skills/marketing-psychology/SKILL.md",
+      "text_sha256": "896fe045f9d35366e62665e87af736098745359cce3d24b681a636d0242a37af",
+      "url": "https://github.com/sickn33/antigravity-awesome-skills"
+    },
+    {
+      "candidate_id": "github4-sickn33-antigravity-awesome-skills-10-andruia-skill-smith",
+      "commit": "9e5d4ddefa24be7b50cc83f56a2450401cdf3317",
+      "description": "Ingeniero de Sistemas de Andru.ia. Diseña, redacta y despliega nuevas habilidades (skills) dentro del repositorio siguiendo el Estándar de Diamante.",
+      "name": "10-andruia-skill-smith",
+      "repo": "sickn33-antigravity-awesome-skills",
+      "risk_flags": [],
+      "safety": "PASS_PROMPT_ONLY",
+      "source_path": "skills/10-andruia-skill-smith/SKILL.md",
+      "text_sha256": "b63cf2a31196aa683542e571d6f13dc64cd9db168e3b99897ff72697f012bf35",
+      "url": "https://github.com/sickn33/antigravity-awesome-skills"
+    },
+    {
+      "candidate_id": "github4-sickn33-antigravity-awesome-skills-indexing-issue-auditor",
+      "commit": "9e5d4ddefa24be7b50cc83f56a2450401cdf3317",
+      "description": "High-level technical SEO and site architecture auditor. Invoke to scan local or live environments for indexing, crawl budget, and structural errors.",
+      "name": "indexing-issue-auditor",
+      "repo": "sickn33-antigravity-awesome-skills",
+      "risk_flags": [],
+      "safety": "PASS_PROMPT_ONLY",
+      "source_path": "skills/indexing-issue-auditor/SKILL.md",
+      "text_sha256": "d921f615d9e477bc1f0ed7c27ce4845f24dcf788f01cff4017a6bfd1d50aff84",
+      "url": "https://github.com/sickn33/antigravity-awesome-skills"
+    },
+    {
+      "candidate_id": "github4-sickn33-antigravity-awesome-skills-startup-business-analyst-market-opportunity",
+      "commit": "9e5d4ddefa24be7b50cc83f56a2450401cdf3317",
+      "description": "'Generate comprehensive market opportunity analysis with TAM/SAM/SOM",
+      "name": "startup-business-analyst-market-opportunity",
+      "repo": "sickn33-antigravity-awesome-skills",
+      "risk_flags": [],
+      "safety": "PASS_PROMPT_ONLY",
+      "source_path": "skills/startup-business-analyst-market-opportunity/SKILL.md",
+      "text_sha256": "260ba6891a5340873a61556975730aebfd3d6c486803b01ae8eed68d144fb01a",
+      "url": "https://github.com/sickn33/antigravity-awesome-skills"
+    },
+    {
+      "candidate_id": "github4-sickn33-antigravity-awesome-skills-seo-fundamentals",
+      "commit": "9e5d4ddefa24be7b50cc83f56a2450401cdf3317",
+      "description": "Core principles of SEO including E-E-A-T, Core Web Vitals, technical foundations, content quality, and how modern search engines evaluate pages.",
+      "name": "seo-fundamentals",
+      "repo": "sickn33-antigravity-awesome-skills",
+      "risk_flags": [],
+      "safety": "PASS_PROMPT_ONLY",
+      "source_path": "skills/seo-fundamentals/SKILL.md",
+      "text_sha256": "d8e077ffa660993c1e1cc8364a852c62bf9a2400513d0c3ea0605cf409938378",
+      "url": "https://github.com/sickn33/antigravity-awesome-skills"
+    },
+    {
+      "candidate_id": "github4-sickn33-antigravity-awesome-skills-linear-claude-skill",
+      "commit": "9e5d4ddefa24be7b50cc83f56a2450401cdf3317",
+      "description": "Manage Linear issues, projects, and teams",
+      "name": "linear-claude-skill",
+      "repo": "sickn33-antigravity-awesome-skills",
+      "risk_flags": [
+        {
+          "category": "network_or_api",
+          "hits": [
+            "api key",
+            "secret",
+            "https://"
+          ]
+        }
+      ],
+      "safety": "PASS_PROMPT_ONLY_REWRITE_REQUIRED",
+      "source_path": "skills/linear-claude-skill/SKILL.md",
+      "text_sha256": "09bb8503b8c7cfb56c01840c2c2d82f93307fcdcdfecfc592cdb73cf832b24e3",
+      "url": "https://github.com/sickn33/antigravity-awesome-skills"
+    },
+    {
+      "candidate_id": "github4-sickn33-antigravity-awesome-skills-cc-skill-project-guidelines-example",
+      "commit": "9e5d4ddefa24be7b50cc83f56a2450401cdf3317",
+      "description": "Project Guidelines Skill (Example)",
+      "name": "cc-skill-project-guidelines-example",
+      "repo": "sickn33-antigravity-awesome-skills",
+      "risk_flags": [
+        {
+          "category": "network_or_api",
+          "hits": [
+            "token",
+            "secret",
+            "http://",
+            "https://"
+          ]
+        },
+        {
+          "category": "persistence_or_hooks",
+          "hits": [
+            "hook"
+          ]
+        }
+      ],
+      "safety": "PASS_PROMPT_ONLY_REWRITE_REQUIRED",
+      "source_path": "skills/cc-skill-project-guidelines-example/SKILL.md",
+      "text_sha256": "675c6974df9d10d80b2c34930a4f8d08cde7fabc7583fdb99d967df84a716496",
+      "url": "https://github.com/sickn33/antigravity-awesome-skills"
+    },
+    {
+      "candidate_id": "github4-sickn33-antigravity-awesome-skills-magic-ui-generator",
+      "commit": "9e5d4ddefa24be7b50cc83f56a2450401cdf3317",
+      "description": "name: magic-ui-generator",
+      "name": "magic-ui-generator",
+      "repo": "sickn33-antigravity-awesome-skills",
+      "risk_flags": [
+        {
+          "category": "network_or_api",
+          "hits": [
+            "https://"
+          ]
+        },
+        {
+          "category": "shell_or_install",
+          "hits": [
+            "sh "
+          ]
+        }
+      ],
+      "safety": "PASS_PROMPT_ONLY_REWRITE_REQUIRED",
+      "source_path": "skills/magic-ui-generator/SKILL.md",
+      "text_sha256": "52c4173f47c1c3f51e9a1a12250aad5f29ffddf3c3180a8d25dd5249f312ef48",
+      "url": "https://github.com/sickn33/antigravity-awesome-skills"
+    },
+    {
+      "candidate_id": "github4-sickn33-antigravity-awesome-skills-not-human-search-mcp",
+      "commit": "9e5d4ddefa24be7b50cc83f56a2450401cdf3317",
+      "description": "Search AI-ready websites, inspect indexed site details, verify MCP endpoints, and discover tools and APIs using the Not Human Search MCP server",
+      "name": "not-human-search-mcp",
+      "repo": "sickn33-antigravity-awesome-skills",
+      "risk_flags": [
+        {
+          "category": "network_or_api",
+          "hits": [
+            "api key",
+            "https://"
+          ]
+        }
+      ],
+      "safety": "PASS_PROMPT_ONLY_REWRITE_REQUIRED",
+      "source_path": "skills/not-human-search-mcp/SKILL.md",
+      "text_sha256": "9e7c9230f5ac7199bd6803606e53114f01d170a384bddc0cb7a5f503be49b8a5",
+      "url": "https://github.com/sickn33/antigravity-awesome-skills"
+    },
+    {
+      "candidate_id": "github4-sickn33-antigravity-awesome-skills-error-debugging-error-analysis",
+      "commit": "9e5d4ddefa24be7b50cc83f56a2450401cdf3317",
+      "description": "You are an expert error analysis specialist with deep expertise in debugging distributed systems, analyzing production incidents, and implementing comprehensive observability solutions.",
+      "name": "error-debugging-error-analysis",
+      "repo": "sickn33-antigravity-awesome-skills",
+      "risk_flags": [
+        {
+          "category": "network_or_api",
+          "hits": [
+            "secret"
+          ]
+        },
+        {
+          "category": "shell_or_install",
+          "hits": [
+            "sh "
+          ]
+        }
+      ],
+      "safety": "PASS_PROMPT_ONLY_REWRITE_REQUIRED",
+      "source_path": "skills/error-debugging-error-analysis/SKILL.md",
+      "text_sha256": "d81efc7d58a4c8e0529373c8f25e184843f82e3adbe782bbd816c3a200d76948",
+      "url": "https://github.com/sickn33/antigravity-awesome-skills"
+    },
+    {
+      "candidate_id": "github4-sickn33-antigravity-awesome-skills-kotlin-coroutines-expert",
+      "commit": "9e5d4ddefa24be7b50cc83f56a2450401cdf3317",
+      "description": "Expert patterns for Kotlin Coroutines and Flow, covering structured concurrency, error handling, and testing.",
+      "name": "kotlin-coroutines-expert",
+      "repo": "sickn33-antigravity-awesome-skills",
+      "risk_flags": [],
+      "safety": "PASS_PROMPT_ONLY",
+      "source_path": "skills/kotlin-coroutines-expert/SKILL.md",
+      "text_sha256": "8e61a5ce1344b01f7c1bac623a9189cb889ab9c20156242224a172225d69d91b",
+      "url": "https://github.com/sickn33/antigravity-awesome-skills"
+    },
+    {
+      "candidate_id": "github4-sickn33-antigravity-awesome-skills-database-optimizer",
+      "commit": "9e5d4ddefa24be7b50cc83f56a2450401cdf3317",
+      "description": "Expert database optimizer specializing in modern performance tuning, query optimization, and scalable architectures.",
+      "name": "database-optimizer",
+      "repo": "sickn33-antigravity-awesome-skills",
+      "risk_flags": [],
+      "safety": "PASS_PROMPT_ONLY",
+      "source_path": "skills/database-optimizer/SKILL.md",
+      "text_sha256": "43ae1153dcaf3844c256ad8184dccaf953017816d6341b60c65baf30ab0fa4dd",
+      "url": "https://github.com/sickn33/antigravity-awesome-skills"
+    },
+    {
+      "candidate_id": "github4-sickn33-antigravity-awesome-skills-azure-monitor-opentelemetry-exporter-py",
+      "commit": "9e5d4ddefa24be7b50cc83f56a2450401cdf3317",
+      "description": "Azure Monitor OpenTelemetry Exporter for Python. Use for low-level OpenTelemetry export to Application Insights.",
+      "name": "azure-monitor-opentelemetry-exporter-py",
+      "repo": "sickn33-antigravity-awesome-skills",
+      "risk_flags": [
+        {
+          "category": "network_or_api",
+          "hits": [
+            "https://"
+          ]
+        },
+        {
+          "category": "shell_or_install",
+          "hits": [
+            "pip install"
+          ]
+        }
+      ],
+      "safety": "PASS_PROMPT_ONLY_REWRITE_REQUIRED",
+      "source_path": "skills/azure-monitor-opentelemetry-exporter-py/SKILL.md",
+      "text_sha256": "8e79104129fb4f166f5b344df01d5b3e3ada7fdbd0d86a3bdfdc5abfefae2cfa",
+      "url": "https://github.com/sickn33/antigravity-awesome-skills"
+    },
+    {
+      "candidate_id": "github4-sickn33-antigravity-awesome-skills-makepad-reference",
+      "commit": "9e5d4ddefa24be7b50cc83f56a2450401cdf3317",
+      "description": "This category provides reference materials for debugging, code quality, and advanced layout patterns.",
+      "name": "makepad-reference",
+      "repo": "sickn33-antigravity-awesome-skills",
+      "risk_flags": [
+        {
+          "category": "network_or_api",
+          "hits": [
+            "https://"
+          ]
+        }
+      ],
+      "safety": "PASS_PROMPT_ONLY_REWRITE_REQUIRED",
+      "source_path": "skills/makepad-reference/SKILL.md",
+      "text_sha256": "2eef22eaecc94edb3376197d76a1dea2468510f26dc3d175d0c201d08bd4db5f",
+      "url": "https://github.com/sickn33/antigravity-awesome-skills"
+    },
+    {
+      "candidate_id": "github4-sickn33-antigravity-awesome-skills-frontend-dev-guidelines",
+      "commit": "9e5d4ddefa24be7b50cc83f56a2450401cdf3317",
+      "description": "You are a senior frontend engineer operating under strict architectural and performance standards. Use when creating components or pages, adding new features, or fetching or mutating data.",
+      "name": "frontend-dev-guidelines",
+      "repo": "sickn33-antigravity-awesome-skills",
+      "risk_flags": [
+        {
+          "category": "persistence_or_hooks",
+          "hits": [
+            "hook"
+          ]
+        }
+      ],
+      "safety": "PASS_PROMPT_ONLY_REWRITE_REQUIRED",
+      "source_path": "skills/frontend-dev-guidelines/SKILL.md",
+      "text_sha256": "20b4e743d94efa6ed31a71317ba5ebebb1fdbf2381c0c2627f0505037c6f97fa",
+      "url": "https://github.com/sickn33/antigravity-awesome-skills"
+    },
+    {
+      "candidate_id": "github4-sickn33-antigravity-awesome-skills-using-git-worktrees",
+      "commit": "9e5d4ddefa24be7b50cc83f56a2450401cdf3317",
+      "description": "Git worktrees create isolated workspaces sharing the same repository, allowing work on multiple branches simultaneously without switching.",
+      "name": "using-git-worktrees",
+      "repo": "sickn33-antigravity-awesome-skills",
+      "risk_flags": [
+        {
+          "category": "shell_or_install",
+          "hits": [
+            "pip install",
+            "npm install",
+            "sh "
+          ]
+        }
+      ],
+      "safety": "PASS_PROMPT_ONLY_REWRITE_REQUIRED",
+      "source_path": "skills/using-git-worktrees/SKILL.md",
+      "text_sha256": "7067372aff2491d64253359f48a34ebe9f5988c71b8eb98fb32be2e49d27dcf5",
+      "url": "https://github.com/sickn33/antigravity-awesome-skills"
+    },
+    {
+      "candidate_id": "github4-sickn33-antigravity-awesome-skills-azure-keyvault-keys-ts",
+      "commit": "9e5d4ddefa24be7b50cc83f56a2450401cdf3317",
+      "description": "Manage cryptographic keys using Azure Key Vault Keys SDK for JavaScript (@azure/keyvault-keys). Use when creating, encrypting/decrypting, signing, or rotating keys.",
+      "name": "azure-keyvault-keys-ts",
+      "repo": "sickn33-antigravity-awesome-skills",
+      "risk_flags": [
+        {
+          "category": "network_or_api",
+          "hits": [
+            "secret",
+            "https://"
+          ]
+        },
+        {
+          "category": "shell_or_install",
+          "hits": [
+            "npm install",
+            "sh "
+          ]
+        }
+      ],
+      "safety": "PASS_PROMPT_ONLY_REWRITE_REQUIRED",
+      "source_path": "skills/azure-keyvault-keys-ts/SKILL.md",
+      "text_sha256": "c3b15180feaeb108ca97be8b584d59de8cc3a9959dc8b46b420ab4bf508d07bf",
+      "url": "https://github.com/sickn33/antigravity-awesome-skills"
+    }
+  ],
+  "capability_results": [
+    {
+      "capability": "artifact_gate",
+      "current_skill": "acceptance-evidence-failclosed",
+      "top_candidates": []
+    },
+    {
+      "capability": "autonomic_router",
+      "current_skill": "sf2-autonomic_router-route-fit-spec",
+      "top_candidates": []
+    },
+    {
+      "capability": "autoreason",
+      "current_skill": "sf2-belief-route-fit-spec",
+      "top_candidates": []
+    },
+    {
+      "capability": "belief",
+      "current_skill": "sf2-belief-route-fit-spec",
+      "top_candidates": []
+    },
+    {
+      "capability": "benchmark_meta_opt",
+      "current_skill": "nexus-benchmark-continuous-optimization",
+      "top_candidates": [
+        {
+          "avg_margin": -2.342442,
+          "candidate_id": "github4-sickn33-antigravity-awesome-skills-ad-creative",
+          "candidate_name": "ad-creative",
+          "capability": "benchmark_meta_opt",
+          "challenger_wins": 1,
+          "current_skill": "nexus-benchmark-continuous-optimization",
+          "description": "Create, iterate, and scale paid ad creative for Google Ads, Meta, LinkedIn, TikTok, and similar platforms. Use when generating headlines, descriptions, primary text, or large sets of ad variations for testing and performance optimization.",
+          "repo": "sickn33-antigravity-awesome-skills",
+          "safety": "PASS_PROMPT_ONLY_REWRITE_REQUIRED",
+          "source_path": "skills/ad-creative/SKILL.md"
+        },
+        {
+          "avg_margin": -2.342442,
+          "candidate_id": "github4-sickn33-antigravity-awesome-skills-ad-creative",
+          "candidate_name": "ad-creative",
+          "capability": "benchmark_meta_opt",
+          "challenger_wins": 1,
+          "current_skill": "nexus-benchmark-continuous-optimization",
+          "description": "Create, iterate, and scale paid ad creative for Google Ads, Meta, LinkedIn, TikTok, and similar platforms. Use when generating headlines, descriptions, primary text, or large sets of ad variations for testing and performance optimization.",
+          "repo": "sickn33-antigravity-awesome-skills",
+          "safety": "PASS_PROMPT_ONLY_REWRITE_REQUIRED",
+          "source_path": "plugins/antigravity-awesome-skills/skills/ad-creative/SKILL.md"
+        },
+        {
+          "avg_margin": -2.342442,
+          "candidate_id": "github4-sickn33-antigravity-awesome-skills-ad-creative",
+          "candidate_name": "ad-creative",
+          "capability": "benchmark_meta_opt",
+          "challenger_wins": 1,
+          "current_skill": "nexus-benchmark-continuous-optimization",
+          "description": "Create, iterate, and scale paid ad creative for Google Ads, Meta, LinkedIn, TikTok, and similar platforms. Use when generating headlines, descriptions, primary text, or large sets of ad variations for testing and performance optimization.",
+          "repo": "sickn33-antigravity-awesome-skills",
+          "safety": "PASS_PROMPT_ONLY_REWRITE_REQUIRED",
+          "source_path": "plugins/antigravity-awesome-skills-claude/skills/ad-creative/SKILL.md"
+        },
+        {
+          "avg_margin": -2.81093,
+          "candidate_id": "github4-sickn33-antigravity-awesome-skills-seo-aeo-meta-description-generator",
+          "candidate_name": "seo-aeo-meta-description-generator",
+          "capability": "benchmark_meta_opt",
+          "challenger_wins": 1,
+          "current_skill": "nexus-benchmark-continuous-optimization",
+          "description": "Writes 3 title tag variants and 3 meta description variants per page with SERP preview, OG tags, and Twitter Card tags. Activate when the user wants to write meta tags, title tags, or social sharing tags for any page.",
+          "repo": "sickn33-antigravity-awesome-skills",
+          "safety": "PASS_PROMPT_ONLY_REWRITE_REQUIRED",
+          "source_path": "skills/seo-aeo-meta-description-generator/SKILL.md"
+        },
+        {
+          "avg_margin": -2.81093,
+          "candidate_id": "github4-sickn33-antigravity-awesome-skills-scientific-writing",
+          "candidate_name": "scientific-writing",
+          "capability": "benchmark_meta_opt",
+          "challenger_wins": 1,
+          "current_skill": "nexus-benchmark-continuous-optimization",
+          "description": "This is the core skill for the deep research and writing tool—combining AI-driven deep research with well-formatted written outputs. Every document produced is backed by comprehensive literature search and verified citations through the research-lookup skill.",
+          "repo": "sickn33-antigravity-awesome-skills",
+          "safety": "PASS_PROMPT_ONLY_REWRITE_REQUIRED",
+          "source_path": "skills/scientific-writing/SKILL.md"
+        },
+        {
+          "avg_margin": -2.81093,
+          "candidate_id": "github4-sickn33-antigravity-awesome-skills-startup-financial-modeling",
+          "candidate_name": "startup-financial-modeling",
+          "capability": "benchmark_meta_opt",
+          "challenger_wins": 1,
+          "current_skill": "nexus-benchmark-continuous-optimization",
+          "description": "Build comprehensive 3-5 year financial models with revenue projections, cost structures, cash flow analysis, and scenario planning for early-stage startups.",
+          "repo": "sickn33-antigravity-awesome-skills",
+          "safety": "PASS_PROMPT_ONLY_REWRITE_REQUIRED",
+          "source_path": "skills/startup-financial-modeling/SKILL.md"
+        },
+        {
+          "avg_margin": -2.81093,
+          "candidate_id": "github4-sickn33-antigravity-awesome-skills-agents-md",
+          "candidate_name": "agents-md",
+          "capability": "benchmark_meta_opt",
+          "challenger_wins": 1,
+          "current_skill": "nexus-benchmark-continuous-optimization",
+          "description": "This skill should be used when the user asks to \"create AGENTS.md\", \"update AGENTS.md\", \"maintain agent docs\", \"set up CLAUDE.md\", or needs to keep agent instructions concise. Enforces research-backed best practices for minimal, high-signal agent documentation.",
+          "repo": "sickn33-antigravity-awesome-skills",
+          "safety": "PASS_PROMPT_ONLY_REWRITE_REQUIRED",
+          "source_path": "skills/agents-md/SKILL.md"
+        },
+        {
+          "avg_margin": -2.81093,
+          "candidate_id": "github4-sickn33-antigravity-awesome-skills-agenttrace-session-audit",
+          "candidate_name": "agenttrace-session-audit",
+          "capability": "benchmark_meta_opt",
+          "challenger_wins": 1,
+          "current_skill": "nexus-benchmark-continuous-optimization",
+          "description": "Audit local AI coding-agent sessions with agenttrace for cost, tool failures, latency, anomalies, health, diffs, and CI gates.",
+          "repo": "sickn33-antigravity-awesome-skills",
+          "safety": "PASS_PROMPT_ONLY_REWRITE_REQUIRED",
+          "source_path": "skills/agenttrace-session-audit/SKILL.md"
+        }
+      ]
+    },
+    {
+      "capability": "claim_gate",
+      "current_skill": "nexus-benchmark-continuous-optimization",
+      "top_candidates": [
+        {
+          "avg_margin": -1.873953,
+          "candidate_id": "github4-sickn33-antigravity-awesome-skills-scientific-writing",
+          "candidate_name": "scientific-writing",
+          "capability": "claim_gate",
+          "challenger_wins": 1,
+          "current_skill": "nexus-benchmark-continuous-optimization",
+          "description": "This is the core skill for the deep research and writing tool—combining AI-driven deep research with well-formatted written outputs. Every document produced is backed by comprehensive literature search and verified citations through the research-lookup skill.",
+          "repo": "sickn33-antigravity-awesome-skills",
+          "safety": "PASS_PROMPT_ONLY_REWRITE_REQUIRED",
+          "source_path": "skills/scientific-writing/SKILL.md"
+        },
+        {
+          "avg_margin": -1.873953,
+          "candidate_id": "github4-sickn33-antigravity-awesome-skills-agents-md",
+          "candidate_name": "agents-md",
+          "capability": "claim_gate",
+          "challenger_wins": 1,
+          "current_skill": "nexus-benchmark-continuous-optimization",
+          "description": "This skill should be used when the user asks to \"create AGENTS.md\", \"update AGENTS.md\", \"maintain agent docs\", \"set up CLAUDE.md\", or needs to keep agent instructions concise. Enforces research-backed best practices for minimal, high-signal agent documentation.",
+          "repo": "sickn33-antigravity-awesome-skills",
+          "safety": "PASS_PROMPT_ONLY_REWRITE_REQUIRED",
+          "source_path": "skills/agents-md/SKILL.md"
+        },
+        {
+          "avg_margin": -1.873953,
+          "candidate_id": "github4-sickn33-antigravity-awesome-skills-seo",
+          "candidate_name": "seo",
+          "capability": "claim_gate",
+          "challenger_wins": 1,
+          "current_skill": "nexus-benchmark-continuous-optimization",
+          "description": "Run a broad SEO audit across technical SEO, on-page SEO, schema, sitemaps, content quality, AI search readiness, and GEO. Use as the umbrella skill when the user asks for a full SEO analysis or strategy.",
+          "repo": "sickn33-antigravity-awesome-skills",
+          "safety": "PASS_PROMPT_ONLY_REWRITE_REQUIRED",
+          "source_path": "skills/seo/SKILL.md"
+        },
+        {
+          "avg_margin": -1.873953,
+          "candidate_id": "github4-sickn33-antigravity-awesome-skills-ab-test-setup",
+          "candidate_name": "ab-test-setup",
+          "capability": "claim_gate",
+          "challenger_wins": 1,
+          "current_skill": "nexus-benchmark-continuous-optimization",
+          "description": "Structured guide for setting up A/B tests with mandatory gates for hypothesis, metrics, and execution readiness.",
+          "repo": "sickn33-antigravity-awesome-skills",
+          "safety": "PASS_PROMPT_ONLY",
+          "source_path": "skills/ab-test-setup/SKILL.md"
+        },
+        {
+          "avg_margin": -1.873953,
+          "candidate_id": "github4-sickn33-antigravity-awesome-skills-workflow-patterns",
+          "candidate_name": "workflow-patterns",
+          "capability": "claim_gate",
+          "challenger_wins": 1,
+          "current_skill": "nexus-benchmark-continuous-optimization",
+          "description": "Use this skill when implementing tasks according to Conductor's TDD workflow, handling phase checkpoints, managing git commits for tasks, or understanding the verification protocol.",
+          "repo": "sickn33-antigravity-awesome-skills",
+          "safety": "PASS_PROMPT_ONLY",
+          "source_path": "skills/workflow-patterns/SKILL.md"
+        },
+        {
+          "avg_margin": -1.873953,
+          "candidate_id": "github4-sickn33-antigravity-awesome-skills-scientific-writing",
+          "candidate_name": "scientific-writing",
+          "capability": "claim_gate",
+          "challenger_wins": 1,
+          "current_skill": "nexus-benchmark-continuous-optimization",
+          "description": "This is the core skill for the deep research and writing tool—combining AI-driven deep research with well-formatted written outputs. Every document produced is backed by comprehensive literature search and verified citations through the research-lookup skill.",
+          "repo": "sickn33-antigravity-awesome-skills",
+          "safety": "PASS_PROMPT_ONLY_REWRITE_REQUIRED",
+          "source_path": "plugins/antigravity-awesome-skills/skills/scientific-writing/SKILL.md"
+        },
+        {
+          "avg_margin": -1.873953,
+          "candidate_id": "github4-sickn33-antigravity-awesome-skills-agents-md",
+          "candidate_name": "agents-md",
+          "capability": "claim_gate",
+          "challenger_wins": 1,
+          "current_skill": "nexus-benchmark-continuous-optimization",
+          "description": "This skill should be used when the user asks to \"create AGENTS.md\", \"update AGENTS.md\", \"maintain agent docs\", \"set up CLAUDE.md\", or needs to keep agent instructions concise. Enforces research-backed best practices for minimal, high-signal agent documentation.",
+          "repo": "sickn33-antigravity-awesome-skills",
+          "safety": "PASS_PROMPT_ONLY_REWRITE_REQUIRED",
+          "source_path": "plugins/antigravity-awesome-skills/skills/agents-md/SKILL.md"
+        },
+        {
+          "avg_margin": -1.873953,
+          "candidate_id": "github4-sickn33-antigravity-awesome-skills-seo",
+          "candidate_name": "seo",
+          "capability": "claim_gate",
+          "challenger_wins": 1,
+          "current_skill": "nexus-benchmark-continuous-optimization",
+          "description": "Run a broad SEO audit across technical SEO, on-page SEO, schema, sitemaps, content quality, AI search readiness, and GEO. Use as the umbrella skill when the user asks for a full SEO analysis or strategy.",
+          "repo": "sickn33-antigravity-awesome-skills",
+          "safety": "PASS_PROMPT_ONLY_REWRITE_REQUIRED",
+          "source_path": "plugins/antigravity-awesome-skills/skills/seo/SKILL.md"
+        }
+      ]
+    },
+    {
+      "capability": "codeintel",
+      "current_skill": "github-karpathy-guidelines",
+      "top_candidates": [
+        {
+          "avg_margin": 0.468488,
+          "candidate_id": "github4-sickn33-antigravity-awesome-skills-wiki-qa",
+          "candidate_name": "wiki-qa",
+          "capability": "codeintel",
+          "challenger_wins": 1,
+          "current_skill": "github-karpathy-guidelines",
+          "description": "Answer repository questions grounded entirely in source code evidence. Use when user asks a question about the codebase, user wants to understand a specific file, function, or component, or user asks \\\"how does X work\\\" or \\\"where is Y defined\\\".",
+          "repo": "sickn33-antigravity-awesome-skills",
+          "safety": "PASS_PROMPT_ONLY",
+          "source_path": "skills/wiki-qa/SKILL.md"
+        },
+        {
+          "avg_margin": 0.468488,
+          "candidate_id": "github4-sickn33-antigravity-awesome-skills-wiki-qa",
+          "candidate_name": "wiki-qa",
+          "capability": "codeintel",
+          "challenger_wins": 1,
+          "current_skill": "github-karpathy-guidelines",
+          "description": "Answer repository questions grounded entirely in source code evidence. Use when user asks a question about the codebase, user wants to understand a specific file, function, or component, or user asks \\\"how does X work\\\" or \\\"where is Y defined\\\".",
+          "repo": "sickn33-antigravity-awesome-skills",
+          "safety": "PASS_PROMPT_ONLY",
+          "source_path": "plugins/antigravity-awesome-skills/skills/wiki-qa/SKILL.md"
+        },
+        {
+          "avg_margin": 0.468488,
+          "candidate_id": "github4-sickn33-antigravity-awesome-skills-wiki-qa",
+          "candidate_name": "wiki-qa",
+          "capability": "codeintel",
+          "challenger_wins": 1,
+          "current_skill": "github-karpathy-guidelines",
+          "description": "Answer repository questions grounded entirely in source code evidence. Use when user asks a question about the codebase, user wants to understand a specific file, function, or component, or user asks \\\"how does X work\\\" or \\\"where is Y defined\\\".",
+          "repo": "sickn33-antigravity-awesome-skills",
+          "safety": "PASS_PROMPT_ONLY",
+          "source_path": "plugins/antigravity-awesome-skills-claude/skills/wiki-qa/SKILL.md"
+        },
+        {
+          "avg_margin": 0.0,
+          "candidate_id": "github4-sickn33-antigravity-awesome-skills-seaborn",
+          "candidate_name": "seaborn",
+          "capability": "codeintel",
+          "challenger_wins": 1,
+          "current_skill": "github-karpathy-guidelines",
+          "description": "Seaborn is a Python visualization library for creating publication-quality statistical graphics. Use this skill for dataset-oriented plotting, multivariate analysis, automatic statistical estimation, and complex multi-panel figures with minimal code.",
+          "repo": "sickn33-antigravity-awesome-skills",
+          "safety": "PASS_PROMPT_ONLY_REWRITE_REQUIRED",
+          "source_path": "skills/seaborn/SKILL.md"
+        },
+        {
+          "avg_margin": 0.0,
+          "candidate_id": "github4-sickn33-antigravity-awesome-skills-fp-ts-errors",
+          "candidate_name": "fp-ts-errors",
+          "capability": "codeintel",
+          "challenger_wins": 1,
+          "current_skill": "github-karpathy-guidelines",
+          "description": "Handle errors as values using fp-ts Either and TaskEither for cleaner, more predictable TypeScript code. Use when implementing error handling patterns with fp-ts.",
+          "repo": "sickn33-antigravity-awesome-skills",
+          "safety": "PASS_PROMPT_ONLY_REWRITE_REQUIRED",
+          "source_path": "skills/fp-ts-errors/SKILL.md"
+        },
+        {
+          "avg_margin": 0.0,
+          "candidate_id": "github4-sickn33-antigravity-awesome-skills-skill-optimizer",
+          "candidate_name": "skill-optimizer",
+          "capability": "codeintel",
+          "challenger_wins": 1,
+          "current_skill": "github-karpathy-guidelines",
+          "description": "Diagnose and optimize Agent Skills (SKILL.md) with real session data and research-backed static analysis. Works with Claude Code, Codex, and any Agent Skills-compatible agent.",
+          "repo": "sickn33-antigravity-awesome-skills",
+          "safety": "PASS_PROMPT_ONLY_REWRITE_REQUIRED",
+          "source_path": "skills/skill-optimizer/SKILL.md"
+        },
+        {
+          "avg_margin": 0.0,
+          "candidate_id": "github4-sickn33-antigravity-awesome-skills-code-refactoring-context-restore",
+          "candidate_name": "code-refactoring-context-restore",
+          "capability": "codeintel",
+          "challenger_wins": 1,
+          "current_skill": "github-karpathy-guidelines",
+          "description": "Use when working with code refactoring context restore",
+          "repo": "sickn33-antigravity-awesome-skills",
+          "safety": "PASS_PROMPT_ONLY_REWRITE_REQUIRED",
+          "source_path": "skills/code-refactoring-context-restore/SKILL.md"
+        },
+        {
+          "avg_margin": 0.0,
+          "candidate_id": "github4-sickn33-antigravity-awesome-skills-github-issue-creator",
+          "candidate_name": "github-issue-creator",
+          "capability": "codeintel",
+          "challenger_wins": 1,
+          "current_skill": "github-karpathy-guidelines",
+          "description": "Turn error logs, screenshots, voice notes, and rough bug reports into crisp, developer-ready GitHub issues with repro steps, impact, and evidence.",
+          "repo": "sickn33-antigravity-awesome-skills",
+          "safety": "PASS_PROMPT_ONLY_REWRITE_REQUIRED",
+          "source_path": "skills/github-issue-creator/SKILL.md"
+        }
+      ]
+    },
+    {
+      "capability": "ddtree",
+      "current_skill": "nexus-root-cause-probe",
+      "top_candidates": []
+    },
+    {
+      "capability": "direct_master_loop",
+      "current_skill": "sf2-direct_master_loop-route-fit-spec",
+      "top_candidates": []
+    },
+    {
+      "capability": "drone",
+      "current_skill": "diagnose",
+      "top_candidates": []
+    },
+    {
+      "capability": "external_productivity",
+      "current_skill": "sf2-external_productivity-route-fit-spec",
+      "top_candidates": []
+    },
+    {
+      "capability": "file_lock_security_gate",
+      "current_skill": "sf2-file_lock_security_gate-route-fit-spec",
+      "top_candidates": []
+    },
+    {
+      "capability": "forecast_pregate",
+      "current_skill": "create-plan",
+      "top_candidates": [
+        {
+          "avg_margin": -5.153372,
+          "candidate_id": "github4-sickn33-antigravity-awesome-skills-software-architecture",
+          "candidate_name": "software-architecture",
+          "capability": "forecast_pregate",
+          "challenger_wins": 1,
+          "current_skill": "create-plan",
+          "description": "Guide for quality focused software architecture. This skill should be used when users want to write code, design architecture, analyze code, in any case that relates to software development.",
+          "repo": "sickn33-antigravity-awesome-skills",
+          "safety": "PASS_PROMPT_ONLY",
+          "source_path": "skills/software-architecture/SKILL.md"
+        },
+        {
+          "avg_margin": -5.153372,
+          "candidate_id": "github4-sickn33-antigravity-awesome-skills-software-architecture",
+          "candidate_name": "software-architecture",
+          "capability": "forecast_pregate",
+          "challenger_wins": 1,
+          "current_skill": "create-plan",
+          "description": "Guide for quality focused software architecture. This skill should be used when users want to write code, design architecture, analyze code, in any case that relates to software development.",
+          "repo": "sickn33-antigravity-awesome-skills",
+          "safety": "PASS_PROMPT_ONLY",
+          "source_path": "plugins/antigravity-awesome-skills/skills/software-architecture/SKILL.md"
+        },
+        {
+          "avg_margin": -5.153372,
+          "candidate_id": "github4-sickn33-antigravity-awesome-skills-software-architecture",
+          "candidate_name": "software-architecture",
+          "capability": "forecast_pregate",
+          "challenger_wins": 1,
+          "current_skill": "create-plan",
+          "description": "Guide for quality focused software architecture. This skill should be used when users want to write code, design architecture, analyze code, in any case that relates to software development.",
+          "repo": "sickn33-antigravity-awesome-skills",
+          "safety": "PASS_PROMPT_ONLY",
+          "source_path": "plugins/antigravity-awesome-skills-claude/skills/software-architecture/SKILL.md"
+        },
+        {
+          "avg_margin": -5.621861,
+          "candidate_id": "github4-sickn33-antigravity-awesome-skills-agents-md",
+          "candidate_name": "agents-md",
+          "capability": "forecast_pregate",
+          "challenger_wins": 1,
+          "current_skill": "create-plan",
+          "description": "This skill should be used when the user asks to \"create AGENTS.md\", \"update AGENTS.md\", \"maintain agent docs\", \"set up CLAUDE.md\", or needs to keep agent instructions concise. Enforces research-backed best practices for minimal, high-signal agent documentation.",
+          "repo": "sickn33-antigravity-awesome-skills",
+          "safety": "PASS_PROMPT_ONLY_REWRITE_REQUIRED",
+          "source_path": "skills/agents-md/SKILL.md"
+        },
+        {
+          "avg_margin": -5.621861,
+          "candidate_id": "github4-sickn33-antigravity-awesome-skills-agents-md",
+          "candidate_name": "agents-md",
+          "capability": "forecast_pregate",
+          "challenger_wins": 1,
+          "current_skill": "create-plan",
+          "description": "This skill should be used when the user asks to \"create AGENTS.md\", \"update AGENTS.md\", \"maintain agent docs\", \"set up CLAUDE.md\", or needs to keep agent instructions concise. Enforces research-backed best practices for minimal, high-signal agent documentation.",
+          "repo": "sickn33-antigravity-awesome-skills",
+          "safety": "PASS_PROMPT_ONLY_REWRITE_REQUIRED",
+          "source_path": "plugins/antigravity-awesome-skills/skills/agents-md/SKILL.md"
+        },
+        {
+          "avg_margin": -5.621861,
+          "candidate_id": "github4-sickn33-antigravity-awesome-skills-agents-md",
+          "candidate_name": "agents-md",
+          "capability": "forecast_pregate",
+          "challenger_wins": 1,
+          "current_skill": "create-plan",
+          "description": "This skill should be used when the user asks to \"create AGENTS.md\", \"update AGENTS.md\", \"maintain agent docs\", \"set up CLAUDE.md\", or needs to keep agent instructions concise. Enforces research-backed best practices for minimal, high-signal agent documentation.",
+          "repo": "sickn33-antigravity-awesome-skills",
+          "safety": "PASS_PROMPT_ONLY_REWRITE_REQUIRED",
+          "source_path": "plugins/antigravity-awesome-skills-claude/skills/agents-md/SKILL.md"
+        },
+        {
+          "avg_margin": -6.090349,
+          "candidate_id": "github4-sickn33-antigravity-awesome-skills-sankhya-dashboard-html-jsp-custom-best-pratices",
+          "candidate_name": "sankhya-dashboard-html-jsp-custom-best-pratices",
+          "capability": "forecast_pregate",
+          "challenger_wins": 1,
+          "current_skill": "create-plan",
+          "description": "This skill should be used when the user asks for patterns, best practices, creation, or fixing of Sankhya dashboards using HTML, JSP, Java, and SQL.",
+          "repo": "sickn33-antigravity-awesome-skills",
+          "safety": "PASS_PROMPT_ONLY_REWRITE_REQUIRED",
+          "source_path": "skills/sankhya-dashboard-html-jsp-custom-best-pratices/SKILL.md"
+        },
+        {
+          "avg_margin": -6.090349,
+          "candidate_id": "github4-sickn33-antigravity-awesome-skills-sankhya-dashboard-html-jsp-custom-best-pratices",
+          "candidate_name": "sankhya-dashboard-html-jsp-custom-best-pratices",
+          "capability": "forecast_pregate",
+          "challenger_wins": 1,
+          "current_skill": "create-plan",
+          "description": "This skill should be used when the user asks for patterns, best practices, creation, or fixing of Sankhya dashboards using HTML, JSP, Java, and SQL.",
+          "repo": "sickn33-antigravity-awesome-skills",
+          "safety": "PASS_PROMPT_ONLY_REWRITE_REQUIRED",
+          "source_path": "plugins/antigravity-awesome-skills/skills/sankhya-dashboard-html-jsp-custom-best-pratices/SKILL.md"
+        }
+      ]
+    },
+    {
+      "capability": "governance_and_trust",
+      "current_skill": "acceptance-evidence-failclosed",
+      "top_candidates": []
+    },
+    {
+      "capability": "hyper_sprint",
+      "current_skill": "sf2-hyper_sprint-route-fit-spec",
+      "top_candidates": []
+    },
+    {
+      "capability": "lancedb",
+      "current_skill": "research-source-validation-auditor",
+      "top_candidates": []
+    },
+    {
+      "capability": "learn_ask",
+      "current_skill": "nexus-capability-upgrade",
+      "top_candidates": []
+    },
+    {
+      "capability": "learning_closure",
+      "current_skill": "sf2-learning_closure-route-fit-spec",
+      "top_candidates": []
+    },
+    {
+      "capability": "memory",
+      "current_skill": "diagnose",
+      "top_candidates": []
+    },
+    {
+      "capability": "mempalace",
+      "current_skill": "sf2-mempalace-route-fit-spec",
+      "top_candidates": []
+    },
+    {
+      "capability": "metabolism_resume",
+      "current_skill": "github-auto-skill-safe-learning",
+      "top_candidates": []
+    },
+    {
+      "capability": "nightshift",
+      "current_skill": "sf2-nightshift-route-fit-spec",
+      "top_candidates": []
+    },
+    {
+      "capability": "policy_capability_gate",
+      "current_skill": "nexus-root-cause-probe",
+      "top_candidates": []
+    },
+    {
+      "capability": "registry_skills_sync",
+      "current_skill": "github3-openai-skill-creator-safe-registry-sync",
+      "top_candidates": []
+    },
+    {
+      "capability": "regression_guard",
+      "current_skill": "diagnose",
+      "top_candidates": []
+    },
+    {
+      "capability": "repair_loop",
+      "current_skill": "tdd",
+      "top_candidates": [
+        {
+          "avg_margin": -3.279419,
+          "candidate_id": "github4-sickn33-antigravity-awesome-skills-tdd-workflows-tdd-red",
+          "candidate_name": "tdd-workflows-tdd-red",
+          "capability": "repair_loop",
+          "challenger_wins": 1,
+          "current_skill": "tdd",
+          "description": "Generate failing tests for the TDD red phase to define expected behavior and edge cases.",
+          "repo": "sickn33-antigravity-awesome-skills",
+          "safety": "PASS_PROMPT_ONLY_REWRITE_REQUIRED",
+          "source_path": "skills/tdd-workflows-tdd-red/SKILL.md"
+        },
+        {
+          "avg_margin": -3.279419,
+          "candidate_id": "github4-sickn33-antigravity-awesome-skills-tdd-workflows-tdd-red",
+          "candidate_name": "tdd-workflows-tdd-red",
+          "capability": "repair_loop",
+          "challenger_wins": 1,
+          "current_skill": "tdd",
+          "description": "Generate failing tests for the TDD red phase to define expected behavior and edge cases.",
+          "repo": "sickn33-antigravity-awesome-skills",
+          "safety": "PASS_PROMPT_ONLY_REWRITE_REQUIRED",
+          "source_path": "plugins/antigravity-awesome-skills/skills/tdd-workflows-tdd-red/SKILL.md"
+        },
+        {
+          "avg_margin": -3.279419,
+          "candidate_id": "github4-sickn33-antigravity-awesome-skills-tdd-workflows-tdd-red",
+          "candidate_name": "tdd-workflows-tdd-red",
+          "capability": "repair_loop",
+          "challenger_wins": 1,
+          "current_skill": "tdd",
+          "description": "Generate failing tests for the TDD red phase to define expected behavior and edge cases.",
+          "repo": "sickn33-antigravity-awesome-skills",
+          "safety": "PASS_PROMPT_ONLY_REWRITE_REQUIRED",
+          "source_path": "plugins/antigravity-awesome-skills-claude/skills/tdd-workflows-tdd-red/SKILL.md"
+        },
+        {
+          "avg_margin": -4.684884,
+          "candidate_id": "github4-sickn33-antigravity-awesome-skills-kaizen",
+          "candidate_name": "kaizen",
+          "capability": "repair_loop",
+          "challenger_wins": 1,
+          "current_skill": "tdd",
+          "description": "Guide for continuous improvement, error proofing, and standardization. Use this skill when the user wants to improve code quality, refactor, or discuss process improvements.",
+          "repo": "sickn33-antigravity-awesome-skills",
+          "safety": "PASS_PROMPT_ONLY_REWRITE_REQUIRED",
+          "source_path": "skills/kaizen/SKILL.md"
+        },
+        {
+          "avg_margin": -4.684884,
+          "candidate_id": "github4-sickn33-antigravity-awesome-skills-scientific-writing",
+          "candidate_name": "scientific-writing",
+          "capability": "repair_loop",
+          "challenger_wins": 1,
+          "current_skill": "tdd",
+          "description": "This is the core skill for the deep research and writing tool—combining AI-driven deep research with well-formatted written outputs. Every document produced is backed by comprehensive literature search and verified citations through the research-lookup skill.",
+          "repo": "sickn33-antigravity-awesome-skills",
+          "safety": "PASS_PROMPT_ONLY_REWRITE_REQUIRED",
+          "source_path": "skills/scientific-writing/SKILL.md"
+        },
+        {
+          "avg_margin": -4.684884,
+          "candidate_id": "github4-sickn33-antigravity-awesome-skills-agents-md",
+          "candidate_name": "agents-md",
+          "capability": "repair_loop",
+          "challenger_wins": 1,
+          "current_skill": "tdd",
+          "description": "This skill should be used when the user asks to \"create AGENTS.md\", \"update AGENTS.md\", \"maintain agent docs\", \"set up CLAUDE.md\", or needs to keep agent instructions concise. Enforces research-backed best practices for minimal, high-signal agent documentation.",
+          "repo": "sickn33-antigravity-awesome-skills",
+          "safety": "PASS_PROMPT_ONLY_REWRITE_REQUIRED",
+          "source_path": "skills/agents-md/SKILL.md"
+        },
+        {
+          "avg_margin": -4.684884,
+          "candidate_id": "github4-sickn33-antigravity-awesome-skills-workflow-patterns",
+          "candidate_name": "workflow-patterns",
+          "capability": "repair_loop",
+          "challenger_wins": 1,
+          "current_skill": "tdd",
+          "description": "Use this skill when implementing tasks according to Conductor's TDD workflow, handling phase checkpoints, managing git commits for tasks, or understanding the verification protocol.",
+          "repo": "sickn33-antigravity-awesome-skills",
+          "safety": "PASS_PROMPT_ONLY",
+          "source_path": "skills/workflow-patterns/SKILL.md"
+        },
+        {
+          "avg_margin": -4.684884,
+          "candidate_id": "github4-sickn33-antigravity-awesome-skills-kaizen",
+          "candidate_name": "kaizen",
+          "capability": "repair_loop",
+          "challenger_wins": 1,
+          "current_skill": "tdd",
+          "description": "Guide for continuous improvement, error proofing, and standardization. Use this skill when the user wants to improve code quality, refactor, or discuss process improvements.",
+          "repo": "sickn33-antigravity-awesome-skills",
+          "safety": "PASS_PROMPT_ONLY_REWRITE_REQUIRED",
+          "source_path": "plugins/antigravity-awesome-skills/skills/kaizen/SKILL.md"
+        }
+      ]
+    },
+    {
+      "capability": "research",
+      "current_skill": "research-citation-chain-verifier",
+      "top_candidates": []
+    },
+    {
+      "capability": "research_and_source_discipline",
+      "current_skill": "research-citation-chain-verifier",
+      "top_candidates": []
+    },
+    {
+      "capability": "research_control_plane",
+      "current_skill": "research-citation-chain-verifier",
+      "top_candidates": []
+    },
+    {
+      "capability": "sandbox_replay",
+      "current_skill": "sf2-sandbox_replay-route-fit-spec",
+      "top_candidates": []
+    },
+    {
+      "capability": "swarm_multi_agent",
+      "current_skill": "sf2-swarm_multi_agent-route-fit-spec",
+      "top_candidates": []
+    },
+    {
+      "capability": "ui_validator",
+      "current_skill": "github2-agent-browser-dogfood-safe-ui-validator",
+      "top_candidates": []
+    },
+    {
+      "capability": "ultra_review",
+      "current_skill": "acceptance-evidence-failclosed",
+      "top_candidates": []
+    },
+    {
+      "capability": "xray",
+      "current_skill": "diagnose",
+      "top_candidates": []
+    }
+  ],
+  "claim_boundary": [
+    "Static ranking only; replacement requires Flash+Nexus live receipt.",
+    "External scripts/tools are not executed.",
+    "Candidates are rewritten as prompt-only ablation skills before testing."
+  ],
+  "repos": {
+    "KerberosClaw-kc_ai_skills": {
+      "commit": "53154e93f6bcd3024ef5c4ad0d97d6a2e71eb686",
+      "snapshot_dir": "/private/tmp/nexus-sf-round4/KerberosClaw-kc_ai_skills",
+      "url": "https://github.com/KerberosClaw/kc_ai_skills"
+    },
+    "MiniMax-AI-skills": {
+      "commit": "60aaae52bb2af8162732751a4332f62a5fef518b",
+      "snapshot_dir": "/private/tmp/nexus-sf-round4/MiniMax-AI-skills",
+      "url": "https://github.com/MiniMax-AI/skills"
+    },
+    "mm-demo-collection-MiniMaxSkills": {
+      "commit": "0a727bfb24aac420c5f13e136a9040c40184b79c",
+      "snapshot_dir": "/private/tmp/nexus-sf-round4/mm-demo-collection-MiniMaxSkills",
+      "url": "https://github.com/mm-demo-collection/MiniMaxSkills"
+    },
+    "sickn33-antigravity-awesome-skills": {
+      "commit": "9e5d4ddefa24be7b50cc83f56a2450401cdf3317",
+      "snapshot_dir": "/private/tmp/nexus-sf-round4/sickn33-antigravity-awesome-skills",
+      "url": "https://github.com/sickn33/antigravity-awesome-skills"
+    }
+  },
+  "schema": "nexus.sf_github_round4_static_screen.v1",
+  "selected_for_live": [
+    {
+      "avg_margin": 0.468488,
+      "candidate_id": "github4-sickn33-antigravity-awesome-skills-wiki-qa",
+      "candidate_name": "wiki-qa",
+      "capability": "codeintel",
+      "challenger_wins": 1,
+      "current_skill": "github-karpathy-guidelines",
+      "description": "Answer repository questions grounded entirely in source code evidence. Use when user asks a question about the codebase, user wants to understand a specific file, function, or component, or user asks \\\"how does X work\\\" or \\\"where is Y defined\\\".",
+      "repo": "sickn33-antigravity-awesome-skills",
+      "safety": "PASS_PROMPT_ONLY",
+      "source_path": "skills/wiki-qa/SKILL.md"
+    },
+    {
+      "avg_margin": -1.873953,
+      "candidate_id": "github4-sickn33-antigravity-awesome-skills-scientific-writing",
+      "candidate_name": "scientific-writing",
+      "capability": "claim_gate",
+      "challenger_wins": 1,
+      "current_skill": "nexus-benchmark-continuous-optimization",
+      "description": "This is the core skill for the deep research and writing tool—combining AI-driven deep research with well-formatted written outputs. Every document produced is backed by comprehensive literature search and verified citations through the research-lookup skill.",
+      "repo": "sickn33-antigravity-awesome-skills",
+      "safety": "PASS_PROMPT_ONLY_REWRITE_REQUIRED",
+      "source_path": "skills/scientific-writing/SKILL.md"
+    },
+    {
+      "avg_margin": -2.342442,
+      "candidate_id": "github4-sickn33-antigravity-awesome-skills-ad-creative",
+      "candidate_name": "ad-creative",
+      "capability": "benchmark_meta_opt",
+      "challenger_wins": 1,
+      "current_skill": "nexus-benchmark-continuous-optimization",
+      "description": "Create, iterate, and scale paid ad creative for Google Ads, Meta, LinkedIn, TikTok, and similar platforms. Use when generating headlines, descriptions, primary text, or large sets of ad variations for testing and performance optimization.",
+      "repo": "sickn33-antigravity-awesome-skills",
+      "safety": "PASS_PROMPT_ONLY_REWRITE_REQUIRED",
+      "source_path": "skills/ad-creative/SKILL.md"
+    },
+    {
+      "avg_margin": -3.279419,
+      "candidate_id": "github4-sickn33-antigravity-awesome-skills-tdd-workflows-tdd-red",
+      "candidate_name": "tdd-workflows-tdd-red",
+      "capability": "repair_loop",
+      "challenger_wins": 1,
+      "current_skill": "tdd",
+      "description": "Generate failing tests for the TDD red phase to define expected behavior and edge cases.",
+      "repo": "sickn33-antigravity-awesome-skills",
+      "safety": "PASS_PROMPT_ONLY_REWRITE_REQUIRED",
+      "source_path": "skills/tdd-workflows-tdd-red/SKILL.md"
+    }
+  ],
+  "status": "PASS",
+  "summary": {
+    "capability_count": 34,
+    "pass_prompt_only_count": 4014,
+    "reject_or_review_count": 582,
+    "repo_count": 4,
+    "selected_live_candidate_count": 4,
+    "skill_count": 4596
+  },
+  "version": "2026-05-19"
+}

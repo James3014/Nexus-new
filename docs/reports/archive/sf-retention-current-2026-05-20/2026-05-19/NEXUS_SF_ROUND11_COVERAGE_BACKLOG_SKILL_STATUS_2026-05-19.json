@@ -1,0 +1,114 @@
+{
+  "schema": "nexus.sf_round11_coverage_backlog_skill_status.v1",
+  "summary": {
+    "skill_count": 8,
+    "runtime_update_allowed": false,
+    "public_benchmark_allowed": false
+  },
+  "skills": [
+    {
+      "name": "github4-sickn33-antigravity-awesome-skills-ad-creative",
+      "path": "",
+      "root": "current_best",
+      "skill_status": "nexus_curated_candidate",
+      "test_level": "sf_round11_coverage_backlog",
+      "action": "ablation_only_compare",
+      "capability_mount": "judge_panel",
+      "family": "benchmark_meta_opt",
+      "reason_codes": [
+        "sf_round11_current_best"
+      ]
+    },
+    {
+      "name": "github11-ab-test-analysis-benchmark-meta-opt",
+      "path": ".agents/skills/github-round11-challengers/github11-ab-test-analysis-benchmark-meta-opt/SKILL.md",
+      "root": "github_round11_coverage_backlog",
+      "skill_status": "external_reference_candidate",
+      "test_level": "sf_round11_coverage_backlog",
+      "action": "ablation_only_compare",
+      "capability_mount": "judge_panel",
+      "family": "benchmark_meta_opt",
+      "reason_codes": [
+        "sf_round11_challenger"
+      ]
+    },
+    {
+      "name": "github9-openai-security-threat-model-ultra-review",
+      "path": "",
+      "root": "current_best",
+      "skill_status": "nexus_curated_candidate",
+      "test_level": "sf_round11_coverage_backlog",
+      "action": "ablation_only_compare",
+      "capability_mount": "ultra_review",
+      "family": "ultra_review",
+      "reason_codes": [
+        "sf_round11_current_best"
+      ]
+    },
+    {
+      "name": "github11-vulnerability-scanner-ultra-review",
+      "path": ".agents/skills/github-round11-challengers/github11-vulnerability-scanner-ultra-review/SKILL.md",
+      "root": "github_round11_coverage_backlog",
+      "skill_status": "external_reference_candidate",
+      "test_level": "sf_round11_coverage_backlog",
+      "action": "ablation_only_compare",
+      "capability_mount": "ultra_review",
+      "family": "ultra_review",
+      "reason_codes": [
+        "sf_round11_challenger"
+      ]
+    },
+    {
+      "name": "github7-midudev-tdd-repair-loop",
+      "path": "",
+      "root": "current_best",
+      "skill_status": "nexus_curated_candidate",
+      "test_level": "sf_round11_coverage_backlog",
+      "action": "ablation_only_compare",
+      "capability_mount": "hyper",
+      "family": "repair_loop",
+      "reason_codes": [
+        "sf_round11_current_best"
+      ]
+    },
+    {
+      "name": "github11-bug-hunter-repair-loop",
+      "path": ".agents/skills/github-round11-challengers/github11-bug-hunter-repair-loop/SKILL.md",
+      "root": "github_round11_coverage_backlog",
+      "skill_status": "external_reference_candidate",
+      "test_level": "sf_round11_coverage_backlog",
+      "action": "ablation_only_compare",
+      "capability_mount": "hyper",
+      "family": "repair_loop",
+      "reason_codes": [
+        "sf_round11_challenger"
+      ]
+    },
+    {
+      "name": "create-plan",
+      "path": ".agents/skills/create-plan/SKILL.md",
+      "root": "current_best",
+      "skill_status": "nexus_curated_candidate",
+      "test_level": "sf_round11_coverage_backlog",
+      "action": "ablation_only_compare",
+      "capability_mount": "autoreason",
+      "family": "forecast_pregate",
+      "reason_codes": [
+        "sf_round11_current_best"
+      ]
+    },
+    {
+      "name": "github11-notion-spec-to-implementation-forecast-pregate",
+      "path": ".agents/skills/github-round11-challengers/github11-notion-spec-to-implementation-forecast-pregate/SKILL.md",
+      "root": "github_round11_coverage_backlog",
+      "skill_status": "external_reference_candidate",
+      "test_level": "sf_round11_coverage_backlog",
+      "action": "ablation_only_compare",
+      "capability_mount": "autoreason",
+      "family": "forecast_pregate",
+      "reason_codes": [
+        "sf_round11_challenger"
+      ]
+    }
+  ]
+}

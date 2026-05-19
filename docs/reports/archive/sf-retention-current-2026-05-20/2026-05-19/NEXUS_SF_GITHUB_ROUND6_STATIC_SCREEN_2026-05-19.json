@@ -1,0 +1,2436 @@
+{
+  "candidates": [
+    {
+      "candidate_id": "github6-bingjyun-repo-scout-skill-repo-scout",
+      "candidate_name": "repo-scout",
+      "commit": "878990373425a21bed9da56371229af5c7f52222",
+      "description": "Comprehensive GitHub repo analysis covering architecture, OWASP Top 10 security scanning (with file path + line number + fix), 4-dimension strategic value assessment (cost savings, efficiency, startup opportunities, community impact), auto-competitor discovery, and optional Traditional Chinese audio review via NotebookLM. Use this skill when the user wants to analyze, audit, evaluate, scout, or assess any GitHub repo or local codebase. Also trigger when the user asks about a repo's security risks, tech stack, strategic value, or wants to compare repos. Trigger for any prompt containing /repo-scout.",
+      "repo": "BingJyun-repo-scout-skill",
+      "risk_flags": [
+        {
+          "category": "network_or_api",
+          "hits": [
+            "https://",
+            "oauth",
+            "secret",
+            "token"
+          ]
+        },
+        {
+          "category": "shell_or_install",
+          "hits": [
+            "git clone",
+            "uv tool"
+          ]
+        },
+        {
+          "category": "persistence_or_hooks",
+          "hits": [
+            "startup"
+          ]
+        },
+        {
+          "category": "filesystem_write",
+          "hits": [
+            "output directory",
+            "write"
+          ]
+        }
+      ],
+      "safety": "PASS_PROMPT_ONLY_REWRITE_REQUIRED",
+      "source_path": "SKILL.md",
+      "text_sha256": "bcd6c2660731d68b264336906dcdeafa22228b2edcf0bd850a6552deef9b3290",
+      "url": "https://github.com/BingJyun/repo-scout-skill"
+    },
+    {
+      "candidate_id": "github6-addyosmani-agent-skills-api-and-interface-design",
+      "candidate_name": "api-and-interface-design",
+      "commit": "f17c6e88c904dc747381c374312c2d58e10647ae",
+      "description": "Guides stable API and interface design. Use when designing APIs, module boundaries, or any public interface. Use when creating REST or GraphQL endpoints, defining type contracts between modules, or establishing boundaries between frontend and backend.",
+      "repo": "addyosmani-agent-skills",
+      "risk_flags": [
+        {
+          "category": "filesystem_write",
+          "hits": [
+            "delete",
+            "remove"
+          ]
+        }
+      ],
+      "safety": "PASS_PROMPT_ONLY_REWRITE_REQUIRED",
+      "source_path": "skills/api-and-interface-design/SKILL.md",
+      "text_sha256": "293db2903b41316a5109a1e0ce3e1740eeafae31735bc1f9143dafbfd1187363",
+      "url": "https://github.com/addyosmani/agent-skills"
+    },
+    {
+      "candidate_id": "github6-addyosmani-agent-skills-browser-testing-with-devtools",
+      "candidate_name": "browser-testing-with-devtools",
+      "commit": "f17c6e88c904dc747381c374312c2d58e10647ae",
+      "description": "Tests in real browsers via Chrome DevTools MCP. Use when building or debugging anything that runs in a browser. Use when you need to inspect the DOM, capture console errors, analyze network requests, profile performance, or verify visual output with real runtime data. Requires the chrome-devtools MCP server to be configured.",
+      "repo": "addyosmani-agent-skills",
+      "risk_flags": [
+        {
+          "category": "network_or_api",
+          "hits": [
+            "http://",
+            "secret",
+            "token"
+          ]
+        },
+        {
+          "category": "filesystem_write",
+          "hits": [
+            "write"
+          ]
+        }
+      ],
+      "safety": "PASS_PROMPT_ONLY_REWRITE_REQUIRED",
+      "source_path": "skills/browser-testing-with-devtools/SKILL.md",
+      "text_sha256": "8fb8aef5678048b7786b4da6738accb58d55754f714d9ad02acee12f5d32a6f0",
+      "url": "https://github.com/addyosmani/agent-skills"
+    },
+    {
+      "candidate_id": "github6-addyosmani-agent-skills-ci-cd-and-automation",
+      "candidate_name": "ci-cd-and-automation",
+      "commit": "f17c6e88c904dc747381c374312c2d58e10647ae",
+      "description": "Automates CI/CD pipeline setup. Use when setting up or modifying build and deployment pipelines. Use when you need to automate quality gates, configure test runners in CI, or establish deployment strategies.",
+      "repo": "addyosmani-agent-skills",
+      "risk_flags": [
+        {
+          "category": "network_or_api",
+          "hits": [
+            "secret",
+            "token"
+          ]
+        },
+        {
+          "category": "filesystem_write",
+          "hits": [
+            "remove"
+          ]
+        }
+      ],
+      "safety": "PASS_PROMPT_ONLY_REWRITE_REQUIRED",
+      "source_path": "skills/ci-cd-and-automation/SKILL.md",
+      "text_sha256": "a6ed8ed56456b01ff8314c44eefc69897d9905ae4e06bb2b7036286efb79b5f0",
+      "url": "https://github.com/addyosmani/agent-skills"
+    },
+    {
+      "candidate_id": "github6-addyosmani-agent-skills-code-review-and-quality",
+      "candidate_name": "code-review-and-quality",
+      "commit": "f17c6e88c904dc747381c374312c2d58e10647ae",
+      "description": "Conducts multi-axis code review. Use before merging any change. Use when reviewing code written by yourself, another agent, or a human. Use when you need to assess code quality across multiple dimensions before it enters the main branch.",
+      "repo": "addyosmani-agent-skills",
+      "risk_flags": [
+        {
+          "category": "network_or_api",
+          "hits": [
+            "secret"
+          ]
+        },
+        {
+          "category": "filesystem_write",
+          "hits": [
+            "delete",
+            "remove",
+            "write"
+          ]
+        }
+      ],
+      "safety": "PASS_PROMPT_ONLY_REWRITE_REQUIRED",
+      "source_path": "skills/code-review-and-quality/SKILL.md",
+      "text_sha256": "7587de5eff9eccd098f0d3b57b6d86ee18df680a7bbbef03710de7c1a4e67263",
+      "url": "https://github.com/addyosmani/agent-skills"
+    },
+    {
+      "candidate_id": "github6-addyosmani-agent-skills-code-simplification",
+      "candidate_name": "code-simplification",
+      "commit": "f17c6e88c904dc747381c374312c2d58e10647ae",
+      "description": "Simplifies code for clarity. Use when refactoring code for clarity without changing behavior. Use when code works but is harder to read, maintain, or extend than it should be. Use when reviewing code that has accumulated unnecessary complexity.",
+      "repo": "addyosmani-agent-skills",
+      "risk_flags": [
+        {
+          "category": "network_or_api",
+          "hits": [
+            "https://"
+          ]
+        },
+        {
+          "category": "filesystem_write",
+          "hits": [
+            "delete",
+            "remove",
+            "write"
+          ]
+        }
+      ],
+      "safety": "PASS_PROMPT_ONLY_REWRITE_REQUIRED",
+      "source_path": "skills/code-simplification/SKILL.md",
+      "text_sha256": "f0c5ed754057eb0c1e027e2587f59de816651feb5e837242296c43ea21cf621d",
+      "url": "https://github.com/addyosmani/agent-skills"
+    },
+    {
+      "candidate_id": "github6-addyosmani-agent-skills-context-engineering",
+      "candidate_name": "context-engineering",
+      "commit": "f17c6e88c904dc747381c374312c2d58e10647ae",
+      "description": "Optimizes agent context setup. Use when starting a new session, when agent output quality degrades, when switching between tasks, or when you need to configure rules files and context for a project.",
+      "repo": "addyosmani-agent-skills",
+      "risk_flags": [
+        {
+          "category": "network_or_api",
+          "hits": [
+            "secret"
+          ]
+        },
+        {
+          "category": "persistence_or_hooks",
+          "hits": [
+            "hook"
+          ]
+        },
+        {
+          "category": "filesystem_write",
+          "hits": [
+            "delete",
+            "write"
+          ]
+        }
+      ],
+      "safety": "PASS_PROMPT_ONLY_REWRITE_REQUIRED",
+      "source_path": "skills/context-engineering/SKILL.md",
+      "text_sha256": "ff9d4e5706bdd2eb7de1bfed569f1f42d28e478979ce6fcc32e617e7861b491d",
+      "url": "https://github.com/addyosmani/agent-skills"
+    },
+    {
+      "candidate_id": "github6-addyosmani-agent-skills-debugging-and-error-recovery",
+      "candidate_name": "debugging-and-error-recovery",
+      "commit": "f17c6e88c904dc747381c374312c2d58e10647ae",
+      "description": "Guides systematic root-cause debugging. Use when tests fail, builds break, behavior doesn't match expectations, or you encounter any unexpected error. Use when you need a systematic approach to finding and fixing the root cause rather than guessing.",
+      "repo": "addyosmani-agent-skills",
+      "risk_flags": [
+        {
+          "category": "shell_or_install",
+          "hits": [
+            "npm install"
+          ]
+        },
+        {
+          "category": "filesystem_write",
+          "hits": [
+            "remove",
+            "write"
+          ]
+        }
+      ],
+      "safety": "PASS_PROMPT_ONLY_REWRITE_REQUIRED",
+      "source_path": "skills/debugging-and-error-recovery/SKILL.md",
+      "text_sha256": "2539c0078466755c192123c34758aa432da5d29529340037113eeaecb6647b0e",
+      "url": "https://github.com/addyosmani/agent-skills"
+    },
+    {
+      "candidate_id": "github6-addyosmani-agent-skills-deprecation-and-migration",
+      "candidate_name": "deprecation-and-migration",
+      "commit": "f17c6e88c904dc747381c374312c2d58e10647ae",
+      "description": "Manages deprecation and migration. Use when removing old systems, APIs, or features. Use when migrating users from one implementation to another. Use when deciding whether to maintain or sunset existing code.",
+      "repo": "addyosmani-agent-skills",
+      "risk_flags": [
+        {
+          "category": "filesystem_write",
+          "hits": [
+            "remove"
+          ]
+        }
+      ],
+      "safety": "PASS_PROMPT_ONLY_REWRITE_REQUIRED",
+      "source_path": "skills/deprecation-and-migration/SKILL.md",
+      "text_sha256": "bf2d9b4e3bc635b32e8de70b0ab41e4395d7b585e6474347c53ce89d45fbdb75",
+      "url": "https://github.com/addyosmani/agent-skills"
+    },
+    {
+      "candidate_id": "github6-addyosmani-agent-skills-documentation-and-adrs",
+      "candidate_name": "documentation-and-adrs",
+      "commit": "f17c6e88c904dc747381c374312c2d58e10647ae",
+      "description": "Records decisions and documentation. Use when making architectural decisions, changing public APIs, shipping features, or when you need to record context that future engineers and agents will need to understand the codebase.",
+      "repo": "addyosmani-agent-skills",
+      "risk_flags": [
+        {
+          "category": "shell_or_install",
+          "hits": [
+            "npm install"
+          ]
+        },
+        {
+          "category": "filesystem_write",
+          "hits": [
+            "delete",
+            "write"
+          ]
+        }
+      ],
+      "safety": "PASS_PROMPT_ONLY_REWRITE_REQUIRED",
+      "source_path": "skills/documentation-and-adrs/SKILL.md",
+      "text_sha256": "7fed35f9c5b95d8e3623ad24d78d209c3267ab62d7157fc03954c76a7e58adf4",
+      "url": "https://github.com/addyosmani/agent-skills"
+    },
+    {
+      "candidate_id": "github6-addyosmani-agent-skills-doubt-driven-development",
+      "candidate_name": "doubt-driven-development",
+      "commit": "f17c6e88c904dc747381c374312c2d58e10647ae",
+      "description": "Subjects every non-trivial decision to a fresh-context adversarial review before it stands. Use when correctness matters more than speed, when working in unfamiliar code, when stakes are high (production, security-sensitive logic, irreversible operations), or any time a confident output would be cheaper to verify now than to debug later.",
+      "repo": "addyosmani-agent-skills",
+      "risk_flags": [
+        {
+          "category": "filesystem_write",
+          "hits": [
+            "write"
+          ]
+        }
+      ],
+      "safety": "PASS_PROMPT_ONLY_REWRITE_REQUIRED",
+      "source_path": "skills/doubt-driven-development/SKILL.md",
+      "text_sha256": "59aef769adeae40aad67a1d54474aaf914ea7ecdfc2a4752a54840a8d29f80de",
+      "url": "https://github.com/addyosmani/agent-skills"
+    },
+    {
+      "candidate_id": "github6-addyosmani-agent-skills-frontend-ui-engineering",
+      "candidate_name": "frontend-ui-engineering",
+      "commit": "f17c6e88c904dc747381c374312c2d58e10647ae",
+      "description": "Builds production-quality UIs. Use when building or modifying user-facing interfaces. Use when creating components, implementing layouts, managing state, or when the output needs to look and feel production-quality rather than AI-generated.",
+      "repo": "addyosmani-agent-skills",
+      "risk_flags": [
+        {
+          "category": "network_or_api",
+          "hits": [
+            "token"
+          ]
+        },
+        {
+          "category": "persistence_or_hooks",
+          "hits": [
+            "hook"
+          ]
+        },
+        {
+          "category": "filesystem_write",
+          "hits": [
+            "delete",
+            "write"
+          ]
+        }
+      ],
+      "safety": "PASS_PROMPT_ONLY_REWRITE_REQUIRED",
+      "source_path": "skills/frontend-ui-engineering/SKILL.md",
+      "text_sha256": "9f9e5b3141c891d866c2a15a11ac3aba4e86ec6c530d054f0534503c2e720cb1",
+      "url": "https://github.com/addyosmani/agent-skills"
+    },
+    {
+      "candidate_id": "github6-addyosmani-agent-skills-git-workflow-and-versioning",
+      "candidate_name": "git-workflow-and-versioning",
+      "commit": "f17c6e88c904dc747381c374312c2d58e10647ae",
+      "description": "Structures git workflow practices. Use when making any code change. Use when committing, branching, resolving conflicts, or when you need to organize work across multiple parallel streams.",
+      "repo": "addyosmani-agent-skills",
+      "risk_flags": [
+        {
+          "category": "network_or_api",
+          "hits": [
+            "api_key",
+            "secret",
+            "token"
+          ]
+        },
+        {
+          "category": "persistence_or_hooks",
+          "hits": [
+            "hook"
+          ]
+        },
+        {
+          "category": "filesystem_write",
+          "hits": [
+            "delete",
+            "remove",
+            "write"
+          ]
+        }
+      ],
+      "safety": "PASS_PROMPT_ONLY_REWRITE_REQUIRED",
+      "source_path": "skills/git-workflow-and-versioning/SKILL.md",
+      "text_sha256": "b1a84eac7a47f6e2985a27733137d862fcdeb552eefe2bd17629e1f3c20e0e97",
+      "url": "https://github.com/addyosmani/agent-skills"
+    },
+    {
+      "candidate_id": "github6-addyosmani-agent-skills-idea-refine",
+      "candidate_name": "idea-refine",
+      "commit": "f17c6e88c904dc747381c374312c2d58e10647ae",
+      "description": "Refines raw ideas into sharp, actionable concepts through structured divergent and convergent thinking. Use when an idea is still vague, when you need to stress-test assumptions before committing to a plan, or when you want to expand options before converging on one. Triggers on \"ideate\", \"refine this idea\", or \"stress-test my plan\".",
+      "repo": "addyosmani-agent-skills",
+      "risk_flags": [
+        {
+          "category": "shell_or_install",
+          "hits": [
+            "bash "
+          ]
+        }
+      ],
+      "safety": "PASS_PROMPT_ONLY_REWRITE_REQUIRED",
+      "source_path": "skills/idea-refine/SKILL.md",
+      "text_sha256": "ee6ea1c7f444568e0b5e9b9791a8261d7834a180d2ecb96fd95ec6a4c0a4aef1",
+      "url": "https://github.com/addyosmani/agent-skills"
+    },
+    {
+      "candidate_id": "github6-addyosmani-agent-skills-incremental-implementation",
+      "candidate_name": "incremental-implementation",
+      "commit": "f17c6e88c904dc747381c374312c2d58e10647ae",
+      "description": "Delivers changes incrementally. Use when implementing any feature or change that touches more than one file. Use when you're about to write a large amount of code at once, or when a task feels too big to land in one step.",
+      "repo": "addyosmani-agent-skills",
+      "risk_flags": [
+        {
+          "category": "filesystem_write",
+          "hits": [
+            "delete",
+            "remove",
+            "write"
+          ]
+        }
+      ],
+      "safety": "PASS_PROMPT_ONLY_REWRITE_REQUIRED",
+      "source_path": "skills/incremental-implementation/SKILL.md",
+      "text_sha256": "5f16adf542330dfadb8b9a9c6d7ec45e4196bd1db9a67d4407e9dc07e6e29e41",
+      "url": "https://github.com/addyosmani/agent-skills"
+    },
+    {
+      "candidate_id": "github6-addyosmani-agent-skills-interview-me",
+      "candidate_name": "interview-me",
+      "commit": "f17c6e88c904dc747381c374312c2d58e10647ae",
+      "description": "Extracts what the user actually wants instead of what they think they should want. Achieves this through one-question-at-a-time interview until ~95% confidence about the underlying intent. Use when an ask is underspecified (\"build me X\" without \"for whom\" or \"why now\"), when the user explicitly invokes (\"interview me\", \"grill me\", \"are we sure?\", \"stress-test my thinking\"), or when you catch yourself silently filling in ambiguous requirements before any plan, spec, or code exists.",
+      "repo": "addyosmani-agent-skills",
+      "risk_flags": [
+        {
+          "category": "filesystem_write",
+          "hits": [
+            "write"
+          ]
+        }
+      ],
+      "safety": "PASS_PROMPT_ONLY_REWRITE_REQUIRED",
+      "source_path": "skills/interview-me/SKILL.md",
+      "text_sha256": "6c9c8406b3eb70dea5bb4213a27de47b507a7fd3fa415ad0141ea5369d88349d",
+      "url": "https://github.com/addyosmani/agent-skills"
+    },
+    {
+      "candidate_id": "github6-addyosmani-agent-skills-performance-optimization",
+      "candidate_name": "performance-optimization",
+      "commit": "f17c6e88c904dc747381c374312c2d58e10647ae",
+      "description": "Optimizes application performance. Use when performance requirements exist, when you suspect performance regressions, or when Core Web Vitals or load times need improvement. Use when profiling reveals bottlenecks that need fixing.",
+      "repo": "addyosmani-agent-skills",
+      "risk_flags": [],
+      "safety": "PASS_PROMPT_ONLY",
+      "source_path": "skills/performance-optimization/SKILL.md",
+      "text_sha256": "46ebf029d5fe812c312d4c5388ba7f07a076685fd30c7dfa7539c07763f1304e",
+      "url": "https://github.com/addyosmani/agent-skills"
+    },
+    {
+      "candidate_id": "github6-addyosmani-agent-skills-planning-and-task-breakdown",
+      "candidate_name": "planning-and-task-breakdown",
+      "commit": "f17c6e88c904dc747381c374312c2d58e10647ae",
+      "description": "Breaks work into ordered tasks. Use when you have a spec or clear requirements and need to break work into implementable tasks. Use when a task feels too large to start, when you need to estimate scope, or when parallel work is possible.",
+      "repo": "addyosmani-agent-skills",
+      "risk_flags": [
+        {
+          "category": "filesystem_write",
+          "hits": [
+            "write"
+          ]
+        }
+      ],
+      "safety": "PASS_PROMPT_ONLY_REWRITE_REQUIRED",
+      "source_path": "skills/planning-and-task-breakdown/SKILL.md",
+      "text_sha256": "d9dc9a1bea50a0bb2b5c51ed59833b65969b5b0bda2c8dacefb5560275443a35",
+      "url": "https://github.com/addyosmani/agent-skills"
+    },
+    {
+      "candidate_id": "github6-addyosmani-agent-skills-security-and-hardening",
+      "candidate_name": "security-and-hardening",
+      "commit": "f17c6e88c904dc747381c374312c2d58e10647ae",
+      "description": "Hardens code against vulnerabilities. Use when handling user input, authentication, data storage, or external integrations. Use when building any feature that accepts untrusted data, manages user sessions, or interacts with third-party services.",
+      "repo": "addyosmani-agent-skills",
+      "risk_flags": [
+        {
+          "category": "network_or_api",
+          "hits": [
+            "api_key",
+            "http://",
+            "secret",
+            "token"
+          ]
+        },
+        {
+          "category": "persistence_or_hooks",
+          "hits": [
+            "hook"
+          ]
+        }
+      ],
+      "safety": "PASS_PROMPT_ONLY_REWRITE_REQUIRED",
+      "source_path": "skills/security-and-hardening/SKILL.md",
+      "text_sha256": "d13c91c5aa27dbd95c25a83aa5a3290294d9068852dec3b2918b167f1f09e5d6",
+      "url": "https://github.com/addyosmani/agent-skills"
+    },
+    {
+      "candidate_id": "github6-addyosmani-agent-skills-shipping-and-launch",
+      "candidate_name": "shipping-and-launch",
+      "commit": "f17c6e88c904dc747381c374312c2d58e10647ae",
+      "description": "Prepares production launches. Use when preparing to deploy to production. Use when you need a pre-launch checklist, when setting up monitoring, when planning a staged rollout, or when you need a rollback strategy.",
+      "repo": "addyosmani-agent-skills",
+      "risk_flags": [
+        {
+          "category": "network_or_api",
+          "hits": [
+            "secret"
+          ]
+        },
+        {
+          "category": "filesystem_write",
+          "hits": [
+            "remove"
+          ]
+        }
+      ],
+      "safety": "PASS_PROMPT_ONLY_REWRITE_REQUIRED",
+      "source_path": "skills/shipping-and-launch/SKILL.md",
+      "text_sha256": "3e54575e5dcdc8f576cd1735aa804a56bb881c342bd6c702fd86531bd6652d56",
+      "url": "https://github.com/addyosmani/agent-skills"
+    },
+    {
+      "candidate_id": "github6-addyosmani-agent-skills-source-driven-development",
+      "candidate_name": "source-driven-development",
+      "commit": "f17c6e88c904dc747381c374312c2d58e10647ae",
+      "description": "Grounds every implementation decision in official documentation. Use when you want authoritative, source-cited code free from outdated patterns. Use when building with any framework or library where correctness matters.",
+      "repo": "addyosmani-agent-skills",
+      "risk_flags": [
+        {
+          "category": "network_or_api",
+          "hits": [
+            "https://",
+            "token"
+          ]
+        },
+        {
+          "category": "persistence_or_hooks",
+          "hits": [
+            "hook"
+          ]
+        },
+        {
+          "category": "filesystem_write",
+          "hits": [
+            "write"
+          ]
+        }
+      ],
+      "safety": "PASS_PROMPT_ONLY_REWRITE_REQUIRED",
+      "source_path": "skills/source-driven-development/SKILL.md",
+      "text_sha256": "b979e7531ea601ed14a090f32a5b135db517c48ab9821c5e8b09efd80f4ff4d8",
+      "url": "https://github.com/addyosmani/agent-skills"
+    },
+    {
+      "candidate_id": "github6-addyosmani-agent-skills-spec-driven-development",
+      "candidate_name": "spec-driven-development",
+      "commit": "f17c6e88c904dc747381c374312c2d58e10647ae",
+      "description": "Creates specs before coding. Use when starting a new project, feature, or significant change and no specification exists yet. Use when requirements are unclear, ambiguous, or only exist as a vague idea.",
+      "repo": "addyosmani-agent-skills",
+      "risk_flags": [
+        {
+          "category": "network_or_api",
+          "hits": [
+            "secret"
+          ]
+        },
+        {
+          "category": "filesystem_write",
+          "hits": [
+            "remove",
+            "write"
+          ]
+        }
+      ],
+      "safety": "PASS_PROMPT_ONLY_REWRITE_REQUIRED",
+      "source_path": "skills/spec-driven-development/SKILL.md",
+      "text_sha256": "16041b4b6149c0e99d7323f8c1e2104ddca2819bf46f78c402a8f0458938e344",
+      "url": "https://github.com/addyosmani/agent-skills"
+    },
+    {
+      "candidate_id": "github6-addyosmani-agent-skills-test-driven-development",
+      "candidate_name": "test-driven-development",
+      "commit": "f17c6e88c904dc747381c374312c2d58e10647ae",
+      "description": "Drives development with tests. Use when implementing any logic, fixing any bug, or changing any behavior. Use when you need to prove that code works, when a bug report arrives, or when you're about to modify existing functionality.",
+      "repo": "addyosmani-agent-skills",
+      "risk_flags": [
+        {
+          "category": "network_or_api",
+          "hits": [
+            "token"
+          ]
+        },
+        {
+          "category": "filesystem_write",
+          "hits": [
+            "remove",
+            "write"
+          ]
+        }
+      ],
+      "safety": "PASS_PROMPT_ONLY_REWRITE_REQUIRED",
+      "source_path": "skills/test-driven-development/SKILL.md",
+      "text_sha256": "6c60e193d77a6c52eb3d9a7ca774f1801b9f798ec34f075720e0425a8094f50e",
+      "url": "https://github.com/addyosmani/agent-skills"
+    },
+    {
+      "candidate_id": "github6-addyosmani-agent-skills-using-agent-skills",
+      "candidate_name": "using-agent-skills",
+      "commit": "f17c6e88c904dc747381c374312c2d58e10647ae",
+      "description": "Discovers and invokes agent skills. Use when starting a session or when you need to discover which skill applies to the current task. This is the meta-skill that governs how all other skills are discovered and invoked.",
+      "repo": "addyosmani-agent-skills",
+      "risk_flags": [
+        {
+          "category": "filesystem_write",
+          "hits": [
+            "delete",
+            "remove"
+          ]
+        }
+      ],
+      "safety": "PASS_PROMPT_ONLY_REWRITE_REQUIRED",
+      "source_path": "skills/using-agent-skills/SKILL.md",
+      "text_sha256": "0f7814bdcb8c10f6931d4f1d107cb3c110d271e4405ef6a2903bdb6420fd8728",
+      "url": "https://github.com/addyosmani/agent-skills"
+    },
+    {
+      "candidate_id": "github6-alchaincyf-darwin-skill-darwin-skill",
+      "candidate_name": "darwin-skill",
+      "commit": "2056abfccd924d68ae6baa9193cafff0f666260b",
+      "description": "Darwin Skill (\u8fbe\u5c14\u6587.skill): autonomous skill optimizer inspired by Karpathy's autoresearch. Evaluates SKILL.md files using an 8-dimension rubric (structure + effectiveness), runs hill-climbing with git version control, validates improvements through test prompts, and generates visual result cards. Use when user mentions \\\"\u4f18\u5316skill\\\", \\\"skill\u8bc4\u5206\\\", \\\"\u81ea\u52a8\u4f18\u5316\\\", \\\"auto optimize\\\", \\\"skill\u8d28\u91cf\u68c0\u67e5\\\", \\\"\u8fbe\u5c14\u6587\\\", \\\"darwin\\\", \\\"\u5e2e\u6211\u6539\u6539skill\\\", \\\"skill\u600e\u4e48\u6837\\\", \\\"\u63d0\u5347skill\u8d28\u91cf\\\", \\\"skill review\\\", \\\"skill\u6253\u5206\\\".",
+      "repo": "alchaincyf-darwin-skill",
+      "risk_flags": [
+        {
+          "category": "network_or_api",
+          "hits": [
+            "https://"
+          ]
+        },
+        {
+          "category": "filesystem_write",
+          "hits": [
+            "write"
+          ]
+        }
+      ],
+      "safety": "PASS_PROMPT_ONLY_REWRITE_REQUIRED",
+      "source_path": "SKILL.md",
+      "text_sha256": "229a72475699d7895837935afb49705b022002f58382ad50facf446221d4076a",
+      "url": "https://github.com/alchaincyf/darwin-skill"
+    },
+    {
+      "candidate_id": "github6-phuryn-pm-skills-ab-test-analysis",
+      "candidate_name": "ab-test-analysis",
+      "commit": "020ee82501d9c09f9b989517c4cf9641bad057ff",
+      "description": "Analyze A/B test results with statistical significance, sample size validation, confidence intervals, and ship/extend/stop recommendations. Use when evaluating experiment results, checking if a test reached significance, interpreting split test data, or deciding whether to ship a variant.",
+      "repo": "phuryn-pm-skills",
+      "risk_flags": [
+        {
+          "category": "network_or_api",
+          "hits": [
+            "https://"
+          ]
+        },
+        {
+          "category": "shell_or_install",
+          "hits": [
+            "python "
+          ]
+        },
+        {
+          "category": "filesystem_write",
+          "hits": [
+            "save as"
+          ]
+        }
+      ],
+      "safety": "PASS_PROMPT_ONLY_REWRITE_REQUIRED",
+      "source_path": "pm-data-analytics/skills/ab-test-analysis/SKILL.md",
+      "text_sha256": "9956966671d6d19d42acb6150307fd7954d16d1d150e8fd8277f99eec9a949e0",
+      "url": "https://github.com/phuryn/pm-skills"
+    },
+    {
+      "candidate_id": "github6-phuryn-pm-skills-cohort-analysis",
+      "candidate_name": "cohort-analysis",
+      "commit": "020ee82501d9c09f9b989517c4cf9641bad057ff",
+      "description": "Perform cohort analysis on user engagement data \u2014 retention curves, feature adoption trends, and segment-level insights. Use when analyzing user retention by cohort, studying feature adoption over time, investigating churn patterns, or identifying engagement trends.",
+      "repo": "phuryn-pm-skills",
+      "risk_flags": [
+        {
+          "category": "network_or_api",
+          "hits": [
+            "https://"
+          ]
+        },
+        {
+          "category": "shell_or_install",
+          "hits": [
+            "python "
+          ]
+        }
+      ],
+      "safety": "PASS_PROMPT_ONLY_REWRITE_REQUIRED",
+      "source_path": "pm-data-analytics/skills/cohort-analysis/SKILL.md",
+      "text_sha256": "bd721a429e58c71a1a488ac1e89ba2bcbb9e179cb9c0b5eac44a3c3b3e9fdb15",
+      "url": "https://github.com/phuryn/pm-skills"
+    },
+    {
+      "candidate_id": "github6-phuryn-pm-skills-sql-queries",
+      "candidate_name": "sql-queries",
+      "commit": "020ee82501d9c09f9b989517c4cf9641bad057ff",
+      "description": "Generate SQL queries from natural language descriptions. Supports BigQuery, PostgreSQL, MySQL, and other dialects. Reads database schemas from uploaded diagrams or documentation. Use when writing SQL, building data reports, exploring databases, or translating business questions into queries.",
+      "repo": "phuryn-pm-skills",
+      "risk_flags": [
+        {
+          "category": "network_or_api",
+          "hits": [
+            "https://"
+          ]
+        },
+        {
+          "category": "filesystem_write",
+          "hits": [
+            "write"
+          ]
+        }
+      ],
+      "safety": "PASS_PROMPT_ONLY_REWRITE_REQUIRED",
+      "source_path": "pm-data-analytics/skills/sql-queries/SKILL.md",
+      "text_sha256": "18da062d5171607dcaa31eb277be420560e061bdcb0c960201e86c7067e2e59a",
+      "url": "https://github.com/phuryn/pm-skills"
+    },
+    {
+      "candidate_id": "github6-phuryn-pm-skills-brainstorm-okrs",
+      "candidate_name": "brainstorm-okrs",
+      "commit": "020ee82501d9c09f9b989517c4cf9641bad057ff",
+      "description": "Brainstorm team-level OKRs aligned with company objectives \u2014 qualitative objectives with measurable key results. Use when setting quarterly OKRs, aligning team goals with company strategy, drafting objectives, or learning how to write effective OKRs.",
+      "repo": "phuryn-pm-skills",
+      "risk_flags": [
+        {
+          "category": "network_or_api",
+          "hits": [
+            "https://"
+          ]
+        },
+        {
+          "category": "filesystem_write",
+          "hits": [
+            "save as",
+            "write"
+          ]
+        }
+      ],
+      "safety": "PASS_PROMPT_ONLY_REWRITE_REQUIRED",
+      "source_path": "pm-execution/skills/brainstorm-okrs/SKILL.md",
+      "text_sha256": "9d4fcbc779aad7bcf4b4793148be31bec4bfe70e08f5885cf34635ecd08c47ee",
+      "url": "https://github.com/phuryn/pm-skills"
+    },
+    {
+      "candidate_id": "github6-phuryn-pm-skills-create-prd",
+      "candidate_name": "create-prd",
+      "commit": "020ee82501d9c09f9b989517c4cf9641bad057ff",
+      "description": "Create a Product Requirements Document using a comprehensive 8-section template covering problem, objectives, segments, value propositions, solution, and release planning. Use when writing a PRD, documenting product requirements, preparing a feature spec, or reviewing an existing PRD.",
+      "repo": "phuryn-pm-skills",
+      "risk_flags": [
+        {
+          "category": "network_or_api",
+          "hits": [
+            "https://"
+          ]
+        },
+        {
+          "category": "filesystem_write",
+          "hits": [
+            "write"
+          ]
+        }
+      ],
+      "safety": "PASS_PROMPT_ONLY_REWRITE_REQUIRED",
+      "source_path": "pm-execution/skills/create-prd/SKILL.md",
+      "text_sha256": "2a4059f16301c5559e10d0dfd00c9bdcde04d2cd964d8c360dbe43bd0161ed32",
+      "url": "https://github.com/phuryn/pm-skills"
+    },
+    {
+      "candidate_id": "github6-phuryn-pm-skills-dummy-dataset",
+      "candidate_name": "dummy-dataset",
+      "commit": "020ee82501d9c09f9b989517c4cf9641bad057ff",
+      "description": "Generate realistic dummy datasets for testing with customizable columns, constraints, and output formats (CSV, JSON, SQL, Python script). Use when creating test data, building mock datasets, or generating sample data for development and demos.",
+      "repo": "phuryn-pm-skills",
+      "risk_flags": [
+        {
+          "category": "shell_or_install",
+          "hits": [
+            "python "
+          ]
+        },
+        {
+          "category": "filesystem_write",
+          "hits": [
+            "write"
+          ]
+        }
+      ],
+      "safety": "PASS_PROMPT_ONLY_REWRITE_REQUIRED",
+      "source_path": "pm-execution/skills/dummy-dataset/SKILL.md",
+      "text_sha256": "35ca70a479f3c9cbdbee2d59c56d777886a8788aa79bd4bf3258b2cf557937aa",
+      "url": "https://github.com/phuryn/pm-skills"
+    },
+    {
+      "candidate_id": "github6-phuryn-pm-skills-job-stories",
+      "candidate_name": "job-stories",
+      "commit": "020ee82501d9c09f9b989517c4cf9641bad057ff",
+      "description": "Create job stories using the 'When [situation], I want to [motivation], so I can [outcome]' format with detailed acceptance criteria. Use when writing job stories, creating JTBD-style backlog items, or expressing user situations and motivations.",
+      "repo": "phuryn-pm-skills",
+      "risk_flags": [
+        {
+          "category": "network_or_api",
+          "hits": [
+            "https://"
+          ]
+        }
+      ],
+      "safety": "PASS_PROMPT_ONLY_REWRITE_REQUIRED",
+      "source_path": "pm-execution/skills/job-stories/SKILL.md",
+      "text_sha256": "69f75264b311418a1ebaf06c9872ed1271203cfc6316466fcb99cc948ade800b",
+      "url": "https://github.com/phuryn/pm-skills"
+    },
+    {
+      "candidate_id": "github6-phuryn-pm-skills-outcome-roadmap",
+      "candidate_name": "outcome-roadmap",
+      "commit": "020ee82501d9c09f9b989517c4cf9641bad057ff",
+      "description": "Transform an output-focused roadmap into an outcome-focused one that communicates strategic intent. Rewrites initiatives as outcome statements reflecting user and business impacts. Use when shifting to outcome roadmaps, making a roadmap more strategic, or rewriting feature lists as outcomes.",
+      "repo": "phuryn-pm-skills",
+      "risk_flags": [
+        {
+          "category": "network_or_api",
+          "hits": [
+            "https://"
+          ]
+        },
+        {
+          "category": "filesystem_write",
+          "hits": [
+            "save as",
+            "write"
+          ]
+        }
+      ],
+      "safety": "PASS_PROMPT_ONLY_REWRITE_REQUIRED",
+      "source_path": "pm-execution/skills/outcome-roadmap/SKILL.md",
+      "text_sha256": "3d2da8f82f4cbe4c8d06593765e2fbb94913676e9a65663b7da9e53c9a0082c8",
+      "url": "https://github.com/phuryn/pm-skills"
+    },
+    {
+      "candidate_id": "github6-phuryn-pm-skills-pre-mortem",
+      "candidate_name": "pre-mortem",
+      "commit": "020ee82501d9c09f9b989517c4cf9641bad057ff",
+      "description": "Run a pre-mortem risk analysis on a PRD or launch plan. Categorizes risks as Tigers (real problems), Paper Tigers (overblown concerns), and Elephants (unspoken worries), then classifies as launch-blocking, fast-follow, or track. Use when preparing for launch, stress-testing a product plan, or identifying what could go wrong.",
+      "repo": "phuryn-pm-skills",
+      "risk_flags": [
+        {
+          "category": "network_or_api",
+          "hits": [
+            "https://"
+          ]
+        },
+        {
+          "category": "filesystem_write",
+          "hits": [
+            "save as"
+          ]
+        }
+      ],
+      "safety": "PASS_PROMPT_ONLY_REWRITE_REQUIRED",
+      "source_path": "pm-execution/skills/pre-mortem/SKILL.md",
+      "text_sha256": "4e5cf10a46ac1d1cdde6aa009ba2b860c532f55c0c3d9ec53a82082cad073052",
+      "url": "https://github.com/phuryn/pm-skills"
+    },
+    {
+      "candidate_id": "github6-phuryn-pm-skills-prioritization-frameworks",
+      "candidate_name": "prioritization-frameworks",
+      "commit": "020ee82501d9c09f9b989517c4cf9641bad057ff",
+      "description": "Reference guide to 9 prioritization frameworks with formulas, when-to-use guidance, and templates \u2014 RICE, ICE, Kano, MoSCoW, Opportunity Score, and more. Use when selecting a prioritization method, comparing frameworks like RICE vs ICE, or learning how different prioritization approaches work.",
+      "repo": "phuryn-pm-skills",
+      "risk_flags": [
+        {
+          "category": "network_or_api",
+          "hits": [
+            "https://"
+          ]
+        }
+      ],
+      "safety": "PASS_PROMPT_ONLY_REWRITE_REQUIRED",
+      "source_path": "pm-execution/skills/prioritization-frameworks/SKILL.md",
+      "text_sha256": "5dab45be9e46397ec1c35a6a6aaa85233843184fd1e9d8e5f279dd02d6e4fc21",
+      "url": "https://github.com/phuryn/pm-skills"
+    },
+    {
+      "candidate_id": "github6-phuryn-pm-skills-release-notes",
+      "candidate_name": "release-notes",
+      "commit": "020ee82501d9c09f9b989517c4cf9641bad057ff",
+      "description": "Generate user-facing release notes from tickets, PRDs, or changelogs. Creates clear, engaging summaries organized by category (new features, improvements, fixes). Use when writing release notes, creating changelogs, announcing product updates, or summarizing what shipped.",
+      "repo": "phuryn-pm-skills",
+      "risk_flags": [
+        {
+          "category": "filesystem_write",
+          "hits": [
+            "save as",
+            "write"
+          ]
+        }
+      ],
+      "safety": "PASS_PROMPT_ONLY_REWRITE_REQUIRED",
+      "source_path": "pm-execution/skills/release-notes/SKILL.md",
+      "text_sha256": "b617edd39e721267c9726286b6304f086991f5e2215b848c952a8ad9e001a0d3",
+      "url": "https://github.com/phuryn/pm-skills"
+    },
+    {
+      "candidate_id": "github6-phuryn-pm-skills-retro",
+      "candidate_name": "retro",
+      "commit": "020ee82501d9c09f9b989517c4cf9641bad057ff",
+      "description": "Facilitate a structured sprint retrospective \u2014 what went well, what didn't, and prioritized action items with owners and deadlines. Use when running a retrospective, reflecting on a sprint, creating action items from team feedback, or learning how to run effective retros.",
+      "repo": "phuryn-pm-skills",
+      "risk_flags": [
+        {
+          "category": "filesystem_write",
+          "hits": [
+            "save as"
+          ]
+        }
+      ],
+      "safety": "PASS_PROMPT_ONLY_REWRITE_REQUIRED",
+      "source_path": "pm-execution/skills/retro/SKILL.md",
+      "text_sha256": "9ca1986756ce028a83314d49450ff390c00fce224099ff5678cdc83db0998b03",
+      "url": "https://github.com/phuryn/pm-skills"
+    },
+    {
+      "candidate_id": "github6-phuryn-pm-skills-sprint-plan",
+      "candidate_name": "sprint-plan",
+      "commit": "020ee82501d9c09f9b989517c4cf9641bad057ff",
+      "description": "Plan a sprint with capacity estimation, story selection, dependency mapping, and risk identification. Use when preparing for sprint planning, estimating team capacity, selecting stories, or balancing sprint scope against velocity.",
+      "repo": "phuryn-pm-skills",
+      "risk_flags": [
+        {
+          "category": "network_or_api",
+          "hits": [
+            "https://"
+          ]
+        },
+        {
+          "category": "filesystem_write",
+          "hits": [
+            "save as"
+          ]
+        }
+      ],
+      "safety": "PASS_PROMPT_ONLY_REWRITE_REQUIRED",
+      "source_path": "pm-execution/skills/sprint-plan/SKILL.md",
+      "text_sha256": "54ac27165fd7d57fe3f598f1ef66087d03fbf56d9f583adf7608ccaca9ce3382",
+      "url": "https://github.com/phuryn/pm-skills"
+    },
+    {
+      "candidate_id": "github6-phuryn-pm-skills-stakeholder-map",
+      "candidate_name": "stakeholder-map",
+      "commit": "020ee82501d9c09f9b989517c4cf9641bad057ff",
+      "description": "Build a stakeholder map using a power/interest grid, identify communication strategies per quadrant, and generate a communication plan. Use when managing stakeholders, preparing for a launch, aligning cross-functional teams, or planning stakeholder engagement.",
+      "repo": "phuryn-pm-skills",
+      "risk_flags": [
+        {
+          "category": "network_or_api",
+          "hits": [
+            "https://"
+          ]
+        }
+      ],
+      "safety": "PASS_PROMPT_ONLY_REWRITE_REQUIRED",
+      "source_path": "pm-execution/skills/stakeholder-map/SKILL.md",
+      "text_sha256": "0cc656200848c710e50a4240cfe9aee3bcd08ebc536a5b87b01d38a96ffe4174",
+      "url": "https://github.com/phuryn/pm-skills"
+    },
+    {
+      "candidate_id": "github6-phuryn-pm-skills-summarize-meeting",
+      "candidate_name": "summarize-meeting",
+      "commit": "020ee82501d9c09f9b989517c4cf9641bad057ff",
+      "description": "Summarize a meeting transcript into structured notes with date, participants, topic, key decisions, summary points, and action items. Use when processing meeting recordings, creating meeting notes, writing meeting minutes, or recapping discussions.",
+      "repo": "phuryn-pm-skills",
+      "risk_flags": [
+        {
+          "category": "filesystem_write",
+          "hits": [
+            "save as",
+            "write"
+          ]
+        }
+      ],
+      "safety": "PASS_PROMPT_ONLY_REWRITE_REQUIRED",
+      "source_path": "pm-execution/skills/summarize-meeting/SKILL.md",
+      "text_sha256": "4deabdd7f99c692ee800a80a4eaf6a688fb8873cdaaaea44b7f472499205f8e7",
+      "url": "https://github.com/phuryn/pm-skills"
+    },
+    {
+      "candidate_id": "github6-phuryn-pm-skills-test-scenarios",
+      "candidate_name": "test-scenarios",
+      "commit": "020ee82501d9c09f9b989517c4cf9641bad057ff",
+      "description": "Create comprehensive test scenarios from user stories with test objectives, starting conditions, user roles, step-by-step actions, and expected outcomes. Use when writing QA test cases, creating test plans, defining acceptance tests, or preparing for feature validation.",
+      "repo": "phuryn-pm-skills",
+      "risk_flags": [],
+      "safety": "PASS_PROMPT_ONLY",
+      "source_path": "pm-execution/skills/test-scenarios/SKILL.md",
+      "text_sha256": "2dc10ebb6359604275f26234d3c66c9ccc952e501ad5b685c23a5c0f34f634d4",
+      "url": "https://github.com/phuryn/pm-skills"
+    },
+    {
+      "candidate_id": "github6-phuryn-pm-skills-user-stories",
+      "candidate_name": "user-stories",
+      "commit": "020ee82501d9c09f9b989517c4cf9641bad057ff",
+      "description": "Create user stories following the 3 C's (Card, Conversation, Confirmation) and INVEST criteria with descriptions, design links, and acceptance criteria. Use when writing user stories, breaking down features into backlog items, or defining acceptance criteria.",
+      "repo": "phuryn-pm-skills",
+      "risk_flags": [
+        {
+          "category": "network_or_api",
+          "hits": [
+            "https://"
+          ]
+        },
+        {
+          "category": "filesystem_write",
+          "hits": [
+            "write"
+          ]
+        }
+      ],
+      "safety": "PASS_PROMPT_ONLY_REWRITE_REQUIRED",
+      "source_path": "pm-execution/skills/user-stories/SKILL.md",
+      "text_sha256": "8ce89cd81de5a3df7d504380d18c54cec6c59ccdb7fd18cbcb62b6b6183d0a55",
+      "url": "https://github.com/phuryn/pm-skills"
+    },
+    {
+      "candidate_id": "github6-phuryn-pm-skills-wwas",
+      "candidate_name": "wwas",
+      "commit": "020ee82501d9c09f9b989517c4cf9641bad057ff",
+      "description": "Create product backlog items in Why-What-Acceptance format \u2014 independent, valuable, testable items with strategic context. Use when writing structured backlog items, breaking features into work items, or using the WWA format.",
+      "repo": "phuryn-pm-skills",
+      "risk_flags": [
+        {
+          "category": "network_or_api",
+          "hits": [
+            "https://"
+          ]
+        },
+        {
+          "category": "filesystem_write",
+          "hits": [
+            "write"
+          ]
+        }
+      ],
+      "safety": "PASS_PROMPT_ONLY_REWRITE_REQUIRED",
+      "source_path": "pm-execution/skills/wwas/SKILL.md",
+      "text_sha256": "7fad2bed16046679a9eb2941573f978c692db425e5e5b7a7c31a8be2e4dd10a4",
+      "url": "https://github.com/phuryn/pm-skills"
+    },
+    {
+      "candidate_id": "github6-phuryn-pm-skills-beachhead-segment",
+      "candidate_name": "beachhead-segment",
+      "commit": "020ee82501d9c09f9b989517c4cf9641bad057ff",
+      "description": "Identify the first beachhead market segment for a product launch. Evaluates segments against burning pain, willingness to pay, winnable market share, and referral potential. Use when choosing a first market, targeting an initial customer segment, or planning market entry strategy.",
+      "repo": "phuryn-pm-skills",
+      "risk_flags": [
+        {
+          "category": "network_or_api",
+          "hits": [
+            "https://"
+          ]
+        }
+      ],
+      "safety": "PASS_PROMPT_ONLY_REWRITE_REQUIRED",
+      "source_path": "pm-go-to-market/skills/beachhead-segment/SKILL.md",
+      "text_sha256": "a3f94e98c05315938ad80d5e2103eab70096abfa40881dfb2c22a731d923ea5f",
+      "url": "https://github.com/phuryn/pm-skills"
+    },
+    {
+      "candidate_id": "github6-phuryn-pm-skills-competitive-battlecard",
+      "candidate_name": "competitive-battlecard",
+      "commit": "020ee82501d9c09f9b989517c4cf9641bad057ff",
+      "description": "Create sales-ready competitive battlecards comparing your product against a specific competitor \u2014 positioning, feature comparison, objection handling, and win/loss patterns. Use when preparing sales teams, creating competitive materials, or responding to 'why not competitor X?'",
+      "repo": "phuryn-pm-skills",
+      "risk_flags": [
+        {
+          "category": "network_or_api",
+          "hits": [
+            "https://"
+          ]
+        },
+        {
+          "category": "filesystem_write",
+          "hits": [
+            "save as"
+          ]
+        }
+      ],
+      "safety": "PASS_PROMPT_ONLY_REWRITE_REQUIRED",
+      "source_path": "pm-go-to-market/skills/competitive-battlecard/SKILL.md",
+      "text_sha256": "89a82a58675d7c82f9d9d2efc7ab81ca0597264804d4ab722ae354d767ebac21",
+      "url": "https://github.com/phuryn/pm-skills"
+    },
+    {
+      "candidate_id": "github6-phuryn-pm-skills-growth-loops",
+      "candidate_name": "growth-loops",
+      "commit": "020ee82501d9c09f9b989517c4cf9641bad057ff",
+      "description": "Identify growth loops (flywheels) for sustainable traction. Evaluates 5 loop types: Viral, Usage, Collaboration, User-Generated, and Referral. Use when designing growth mechanisms, building product-led traction, or understanding how growth loops work.",
+      "repo": "phuryn-pm-skills",
+      "risk_flags": [
+        {
+          "category": "network_or_api",
+          "hits": [
+            "https://"
+          ]
+        }
+      ],
+      "safety": "PASS_PROMPT_ONLY_REWRITE_REQUIRED",
+      "source_path": "pm-go-to-market/skills/growth-loops/SKILL.md",
+      "text_sha256": "ce93f8c3f3a5db135aff02c5859bc153b9bd376b93f97a1c68e5ca498cf53557",
+      "url": "https://github.com/phuryn/pm-skills"
+    },
+    {
+      "candidate_id": "github6-phuryn-pm-skills-gtm-motions",
+      "candidate_name": "gtm-motions",
+      "commit": "020ee82501d9c09f9b989517c4cf9641bad057ff",
+      "description": "Identify the best GTM motions and tools across 7 motion types: Inbound, Outbound, Paid Digital, Community, Partners, ABM, and PLG. Use when selecting marketing channels, choosing between inbound and outbound strategy, or planning cross-channel campaigns.",
+      "repo": "phuryn-pm-skills",
+      "risk_flags": [
+        {
+          "category": "network_or_api",
+          "hits": [
+            "https://"
+          ]
+        },
+        {
+          "category": "persistence_or_hooks",
+          "hits": [
+            "startup"
+          ]
+        }
+      ],
+      "safety": "PASS_PROMPT_ONLY_REWRITE_REQUIRED",
+      "source_path": "pm-go-to-market/skills/gtm-motions/SKILL.md",
+      "text_sha256": "b26db17f9eee4f04aa3d53bf3c393da0574a3fa54d59eb7427e0cf5edf2377c3",
+      "url": "https://github.com/phuryn/pm-skills"
+    },
+    {
+      "candidate_id": "github6-phuryn-pm-skills-gtm-strategy",
+      "candidate_name": "gtm-strategy",
+      "commit": "020ee82501d9c09f9b989517c4cf9641bad057ff",
+      "description": "Create a go-to-market strategy covering marketing channels, messaging, success metrics, and launch timeline. Use when planning a product launch, creating a GTM plan from scratch, or defining a launch strategy for a new market.",
+      "repo": "phuryn-pm-skills",
+      "risk_flags": [
+        {
+          "category": "network_or_api",
+          "hits": [
+            "https://"
+          ]
+        }
+      ],
+      "safety": "PASS_PROMPT_ONLY_REWRITE_REQUIRED",
+      "source_path": "pm-go-to-market/skills/gtm-strategy/SKILL.md",
+      "text_sha256": "fcc7c24dda6b4fec94d1d847e0ba2b42cff38b5ec6215bb1749a65d8b885f91e",
+      "url": "https://github.com/phuryn/pm-skills"
+    },
+    {
+      "candidate_id": "github6-phuryn-pm-skills-ideal-customer-profile",
+      "candidate_name": "ideal-customer-profile",
+      "commit": "020ee82501d9c09f9b989517c4cf9641bad057ff",
+      "description": "Identify the Ideal Customer Profile (ICP) from research data with demographics, behaviors, JTBD, and needs. Use when defining your ICP, analyzing PMF survey data, or understanding who your best customers are.",
+      "repo": "phuryn-pm-skills",
+      "risk_flags": [
+        {
+          "category": "network_or_api",
+          "hits": [
+            "https://"
+          ]
+        },
+        {
+          "category": "persistence_or_hooks",
+          "hits": [
+            "startup"
+          ]
+        }
+      ],
+      "safety": "PASS_PROMPT_ONLY_REWRITE_REQUIRED",
+      "source_path": "pm-go-to-market/skills/ideal-customer-profile/SKILL.md",
+      "text_sha256": "8d434df786db2290efb575f1d219c7e19650e7a7e3df9a5f4b82b0bd0d2ce298",
+      "url": "https://github.com/phuryn/pm-skills"
+    },
+    {
+      "candidate_id": "github6-phuryn-pm-skills-competitor-analysis",
+      "candidate_name": "competitor-analysis",
+      "commit": "020ee82501d9c09f9b989517c4cf9641bad057ff",
+      "description": "Analyze competitors with strengths, weaknesses, and differentiation opportunities. Identifies direct competitors and maps the competitive landscape. Use when doing competitive research, preparing a competitive brief, or finding differentiation opportunities.",
+      "repo": "phuryn-pm-skills",
+      "risk_flags": [
+        {
+          "category": "network_or_api",
+          "hits": [
+            "https://"
+          ]
+        }
+      ],
+      "safety": "PASS_PROMPT_ONLY_REWRITE_REQUIRED",
+      "source_path": "pm-market-research/skills/competitor-analysis/SKILL.md",
+      "text_sha256": "8e627fc7fba96f223ad9f8fd23c6033a429cc28f9e9ce2d672854c6851810c2b",
+      "url": "https://github.com/phuryn/pm-skills"
+    },
+    {
+      "candidate_id": "github6-phuryn-pm-skills-customer-journey-map",
+      "candidate_name": "customer-journey-map",
+      "commit": "020ee82501d9c09f9b989517c4cf9641bad057ff",
+      "description": "Create an end-to-end customer journey map with stages, touchpoints, emotions, pain points, and opportunities. Use when mapping the customer experience, identifying friction points, improving onboarding, or visualizing the user journey.",
+      "repo": "phuryn-pm-skills",
+      "risk_flags": [
+        {
+          "category": "network_or_api",
+          "hits": [
+            "https://"
+          ]
+        },
+        {
+          "category": "filesystem_write",
+          "hits": [
+            "save as"
+          ]
+        }
+      ],
+      "safety": "PASS_PROMPT_ONLY_REWRITE_REQUIRED",
+      "source_path": "pm-market-research/skills/customer-journey-map/SKILL.md",
+      "text_sha256": "656c0e16318b3b24870065a8eabb8a116b72e47c167472836ce76ea97ec5c75e",
+      "url": "https://github.com/phuryn/pm-skills"
+    },
+    {
+      "candidate_id": "github6-phuryn-pm-skills-market-segments",
+      "candidate_name": "market-segments",
+      "commit": "020ee82501d9c09f9b989517c4cf9641bad057ff",
+      "description": "Identify 3-5 potential customer segments with demographics, JTBD, and product fit analysis. Use when exploring market segments, identifying target audiences, evaluating new markets, or learning how to segment a market.",
+      "repo": "phuryn-pm-skills",
+      "risk_flags": [
+        {
+          "category": "network_or_api",
+          "hits": [
+            "https://"
+          ]
+        }
+      ],
+      "safety": "PASS_PROMPT_ONLY_REWRITE_REQUIRED",
+      "source_path": "pm-market-research/skills/market-segments/SKILL.md",
+      "text_sha256": "f8425da0486d844a661fe18f809de1e055d7125c74ed423ee750cf2be74a2319",
+      "url": "https://github.com/phuryn/pm-skills"
+    },
+    {
+      "candidate_id": "github6-phuryn-pm-skills-market-sizing",
+      "candidate_name": "market-sizing",
+      "commit": "020ee82501d9c09f9b989517c4cf9641bad057ff",
+      "description": "Estimate market size using TAM, SAM, and SOM with top-down and bottom-up approaches. Use when sizing a market opportunity, estimating addressable market, preparing for investor pitches, or evaluating market entry.",
+      "repo": "phuryn-pm-skills",
+      "risk_flags": [
+        {
+          "category": "network_or_api",
+          "hits": [
+            "https://"
+          ]
+        }
+      ],
+      "safety": "PASS_PROMPT_ONLY_REWRITE_REQUIRED",
+      "source_path": "pm-market-research/skills/market-sizing/SKILL.md",
+      "text_sha256": "96d1250ba0ab7e5b64c9be8278f63f9661b510237e423b42ef70ab914184faf8",
+      "url": "https://github.com/phuryn/pm-skills"
+    },
+    {
+      "candidate_id": "github6-phuryn-pm-skills-sentiment-analysis",
+      "candidate_name": "sentiment-analysis",
+      "commit": "020ee82501d9c09f9b989517c4cf9641bad057ff",
+      "description": "Analyze user feedback data to identify segments with sentiment scores, JTBD, and product satisfaction insights. Use when analyzing user feedback at scale, running sentiment analysis on reviews or surveys, or identifying satisfaction patterns.",
+      "repo": "phuryn-pm-skills",
+      "risk_flags": [
+        {
+          "category": "network_or_api",
+          "hits": [
+            "https://"
+          ]
+        }
+      ],
+      "safety": "PASS_PROMPT_ONLY_REWRITE_REQUIRED",
+      "source_path": "pm-market-research/skills/sentiment-analysis/SKILL.md",
+      "text_sha256": "516357ba8366845d13c4ee17acf96884571ad0fc8d3d48a2809c5cb84c95a01c",
+      "url": "https://github.com/phuryn/pm-skills"
+    },
+    {
+      "candidate_id": "github6-phuryn-pm-skills-user-personas",
+      "candidate_name": "user-personas",
+      "commit": "020ee82501d9c09f9b989517c4cf9641bad057ff",
+      "description": "Create refined user personas from research data \u2014 3 personas with JTBD, pains, gains, and unexpected insights. Use when building personas from survey data, creating user profiles from research, or segmenting users for product decisions.",
+      "repo": "phuryn-pm-skills",
+      "risk_flags": [
+        {
+          "category": "network_or_api",
+          "hits": [
+            "https://"
+          ]
+        }
+      ],
+      "safety": "PASS_PROMPT_ONLY_REWRITE_REQUIRED",
+      "source_path": "pm-market-research/skills/user-personas/SKILL.md",
+      "text_sha256": "012eb8ea4a6ec51bb72ddf41f48d8520f26c7f4e43ff82d69d1074e3503087ca",
+      "url": "https://github.com/phuryn/pm-skills"
+    },
+    {
+      "candidate_id": "github6-phuryn-pm-skills-user-segmentation",
+      "candidate_name": "user-segmentation",
+      "commit": "020ee82501d9c09f9b989517c4cf9641bad057ff",
+      "description": "Segment users from feedback data based on behavior, JTBD, and needs. Identifies at least 3 distinct user segments. Use when segmenting a user base, analyzing diverse user feedback, or building a segmentation model.",
+      "repo": "phuryn-pm-skills",
+      "risk_flags": [
+        {
+          "category": "network_or_api",
+          "hits": [
+            "https://"
+          ]
+        }
+      ],
+      "safety": "PASS_PROMPT_ONLY_REWRITE_REQUIRED",
+      "source_path": "pm-market-research/skills/user-segmentation/SKILL.md",
+      "text_sha256": "d91f745c9520e6a31c07e37c14bfa01e7982570e30a398be71cf324ac93be9c8",
+      "url": "https://github.com/phuryn/pm-skills"
+    },
+    {
+      "candidate_id": "github6-phuryn-pm-skills-marketing-ideas",
+      "candidate_name": "marketing-ideas",
+      "commit": "020ee82501d9c09f9b989517c4cf9641bad057ff",
+      "description": "Generate 5 creative, cost-effective marketing ideas with channels, messaging, and engagement rationale. Use when brainstorming marketing campaigns, planning product promotion, or looking for creative marketing tactics.",
+      "repo": "phuryn-pm-skills",
+      "risk_flags": [
+        {
+          "category": "network_or_api",
+          "hits": [
+            "https://"
+          ]
+        }
+      ],
+      "safety": "PASS_PROMPT_ONLY_REWRITE_REQUIRED",
+      "source_path": "pm-marketing-growth/skills/marketing-ideas/SKILL.md",
+      "text_sha256": "83242a3a8f5feae768820fee5ae8f4b6b4f7eaf12c8a450c49b134995bd76a89",
+      "url": "https://github.com/phuryn/pm-skills"
+    },
+    {
+      "candidate_id": "github6-phuryn-pm-skills-north-star-metric",
+      "candidate_name": "north-star-metric",
+      "commit": "020ee82501d9c09f9b989517c4cf9641bad057ff",
+      "description": "Define a North Star Metric and 3-5 supporting input metrics that form a metrics constellation. Classify the business game (Attention, Transaction, Productivity) and validate against 7 criteria for an effective North Star. Use when choosing a North Star Metric, setting up a metrics framework, learning about the North Star Framework, or deciding what to measure.",
+      "repo": "phuryn-pm-skills",
+      "risk_flags": [
+        {
+          "category": "network_or_api",
+          "hits": [
+            "https://"
+          ]
+        }
+      ],
+      "safety": "PASS_PROMPT_ONLY_REWRITE_REQUIRED",
+      "source_path": "pm-marketing-growth/skills/north-star-metric/SKILL.md",
+      "text_sha256": "00242397486a88bb7e91a1d6c99e29fd51bdc9a1cd5def9771988fb40c195fb8",
+      "url": "https://github.com/phuryn/pm-skills"
+    },
+    {
+      "candidate_id": "github6-phuryn-pm-skills-positioning-ideas",
+      "candidate_name": "positioning-ideas",
+      "commit": "020ee82501d9c09f9b989517c4cf9641bad057ff",
+      "description": "Brainstorm product positioning ideas differentiated from competitors. Identifies top competitors and generates positioning statements with rationale. Use when developing product positioning, differentiating from competitors, or crafting brand positioning strategy.",
+      "repo": "phuryn-pm-skills",
+      "risk_flags": [
+        {
+          "category": "network_or_api",
+          "hits": [
+            "https://"
+          ]
+        }
+      ],
+      "safety": "PASS_PROMPT_ONLY_REWRITE_REQUIRED",
+      "source_path": "pm-marketing-growth/skills/positioning-ideas/SKILL.md",
+      "text_sha256": "8864f284e66c8bb106c46dc5e51656a47ae4792e39091eb3a49f63cde00c3850",
+      "url": "https://github.com/phuryn/pm-skills"
+    },
+    {
+      "candidate_id": "github6-phuryn-pm-skills-product-name",
+      "candidate_name": "product-name",
+      "commit": "020ee82501d9c09f9b989517c4cf9641bad057ff",
+      "description": "Brainstorm 5 unique, memorable product names with rationale aligned to brand values and target audience. Use when naming a new product, rebranding, or exploring product name ideas.",
+      "repo": "phuryn-pm-skills",
+      "risk_flags": [],
+      "safety": "PASS_PROMPT_ONLY",
+      "source_path": "pm-marketing-growth/skills/product-name/SKILL.md",
+      "text_sha256": "16d715bbe6ab07b024a63a1a38f3616a3d9602bf4ca9425e1bb33496becce0b3",
+      "url": "https://github.com/phuryn/pm-skills"
+    },
+    {
+      "candidate_id": "github6-phuryn-pm-skills-value-prop-statements",
+      "candidate_name": "value-prop-statements",
+      "commit": "020ee82501d9c09f9b989517c4cf9641bad057ff",
+      "description": "Generate value proposition statements for marketing, sales, and onboarding from existing value propositions. Use when writing marketing copy, creating sales messaging, or crafting onboarding messages.",
+      "repo": "phuryn-pm-skills",
+      "risk_flags": [
+        {
+          "category": "network_or_api",
+          "hits": [
+            "https://"
+          ]
+        }
+      ],
+      "safety": "PASS_PROMPT_ONLY_REWRITE_REQUIRED",
+      "source_path": "pm-marketing-growth/skills/value-prop-statements/SKILL.md",
+      "text_sha256": "5f4e89542439b16d18af608d91d0a319c0e66a6d89257da38d6652a655aae5bc",
+      "url": "https://github.com/phuryn/pm-skills"
+    },
+    {
+      "candidate_id": "github6-phuryn-pm-skills-analyze-feature-requests",
+      "candidate_name": "analyze-feature-requests",
+      "commit": "020ee82501d9c09f9b989517c4cf9641bad057ff",
+      "description": "Analyze and prioritize a list of feature requests by theme, strategic alignment, impact, effort, and risk. Use when reviewing customer feature requests, triaging a backlog, or making prioritization decisions.",
+      "repo": "phuryn-pm-skills",
+      "risk_flags": [
+        {
+          "category": "network_or_api",
+          "hits": [
+            "https://"
+          ]
+        },
+        {
+          "category": "filesystem_write",
+          "hits": [
+            "save as"
+          ]
+        }
+      ],
+      "safety": "PASS_PROMPT_ONLY_REWRITE_REQUIRED",
+      "source_path": "pm-product-discovery/skills/analyze-feature-requests/SKILL.md",
+      "text_sha256": "7615db7687a668a99e015664295f849bfab696a8dd7b3c02b0200a512c6ad3c2",
+      "url": "https://github.com/phuryn/pm-skills"
+    },
+    {
+      "candidate_id": "github6-phuryn-pm-skills-brainstorm-experiments-existing",
+      "candidate_name": "brainstorm-experiments-existing",
+      "commit": "020ee82501d9c09f9b989517c4cf9641bad057ff",
+      "description": "Design experiments to test assumptions for an existing product \u2014 prototypes, A/B tests, spikes, and other low-effort validation methods. Use when validating assumptions, testing feature ideas cheaply, or planning product experiments.",
+      "repo": "phuryn-pm-skills",
+      "risk_flags": [
+        {
+          "category": "network_or_api",
+          "hits": [
+            "https://"
+          ]
+        },
+        {
+          "category": "filesystem_write",
+          "hits": [
+            "save as"
+          ]
+        }
+      ],
+      "safety": "PASS_PROMPT_ONLY_REWRITE_REQUIRED",
+      "source_path": "pm-product-discovery/skills/brainstorm-experiments-existing/SKILL.md",
+      "text_sha256": "d72da1f4f08d5514662d7bad37dfc3ed4ef11fcc5b5ddec6ca5a8ac0e47f45c5",
+      "url": "https://github.com/phuryn/pm-skills"
+    },
+    {
+      "candidate_id": "github6-phuryn-pm-skills-brainstorm-experiments-new",
+      "candidate_name": "brainstorm-experiments-new",
+      "commit": "020ee82501d9c09f9b989517c4cf9641bad057ff",
+      "description": "Design lean startup experiments (pretotypes) for a new product. Creates XYZ hypotheses and suggests low-effort validation methods like landing pages, explainer videos, and pre-orders. Use when validating a new product idea, creating pretotypes, or testing market demand.",
+      "repo": "phuryn-pm-skills",
+      "risk_flags": [
+        {
+          "category": "network_or_api",
+          "hits": [
+            "https://"
+          ]
+        },
+        {
+          "category": "persistence_or_hooks",
+          "hits": [
+            "startup"
+          ]
+        },
+        {
+          "category": "filesystem_write",
+          "hits": [
+            "save as"
+          ]
+        }
+      ],
+      "safety": "PASS_PROMPT_ONLY_REWRITE_REQUIRED",
+      "source_path": "pm-product-discovery/skills/brainstorm-experiments-new/SKILL.md",
+      "text_sha256": "fe66d9ba76cf6b0e156298c88f752d8e1e62549fe77a7c01c0a74d8679da9334",
+      "url": "https://github.com/phuryn/pm-skills"
+    },
+    {
+      "candidate_id": "github6-phuryn-pm-skills-brainstorm-ideas-existing",
+      "candidate_name": "brainstorm-ideas-existing",
+      "commit": "020ee82501d9c09f9b989517c4cf9641bad057ff",
+      "description": "Brainstorm product ideas for an existing product using multi-perspective ideation from PM, Designer, and Engineer viewpoints. Use when generating new feature ideas, brainstorming solutions for an identified opportunity, or ideating with a product trio.",
+      "repo": "phuryn-pm-skills",
+      "risk_flags": [
+        {
+          "category": "network_or_api",
+          "hits": [
+            "https://"
+          ]
+        }
+      ],
+      "safety": "PASS_PROMPT_ONLY_REWRITE_REQUIRED",
+      "source_path": "pm-product-discovery/skills/brainstorm-ideas-existing/SKILL.md",
+      "text_sha256": "cf950494541bd9b47e60054f1a917cef02094fe8c769d5feca86603282e2bd5b",
+      "url": "https://github.com/phuryn/pm-skills"
+    },
+    {
+      "candidate_id": "github6-phuryn-pm-skills-brainstorm-ideas-new",
+      "candidate_name": "brainstorm-ideas-new",
+      "commit": "020ee82501d9c09f9b989517c4cf9641bad057ff",
+      "description": "Brainstorm feature ideas for a new product in initial discovery from PM, Designer, and Engineer perspectives. Use when starting product discovery for a new product, exploring features for a startup idea, or doing initial ideation.",
+      "repo": "phuryn-pm-skills",
+      "risk_flags": [
+        {
+          "category": "network_or_api",
+          "hits": [
+            "https://"
+          ]
+        },
+        {
+          "category": "persistence_or_hooks",
+          "hits": [
+            "startup"
+          ]
+        }
+      ],
+      "safety": "PASS_PROMPT_ONLY_REWRITE_REQUIRED",
+      "source_path": "pm-product-discovery/skills/brainstorm-ideas-new/SKILL.md",
+      "text_sha256": "400e5e0760d6dc52bfe34953d90db6223df532ce720d7e85568696ab5c3d34d2",
+      "url": "https://github.com/phuryn/pm-skills"
+    },
+    {
+      "candidate_id": "github6-phuryn-pm-skills-identify-assumptions-existing",
+      "candidate_name": "identify-assumptions-existing",
+      "commit": "020ee82501d9c09f9b989517c4cf9641bad057ff",
+      "description": "Identify risky assumptions for a feature idea in an existing product across Value, Usability, Viability, and Feasibility. Uses multi-perspective devil's advocate thinking. Use when stress-testing a feature idea, doing risk assessment, or preparing for assumption mapping.",
+      "repo": "phuryn-pm-skills",
+      "risk_flags": [
+        {
+          "category": "network_or_api",
+          "hits": [
+            "https://"
+          ]
+        }
+      ],
+      "safety": "PASS_PROMPT_ONLY_REWRITE_REQUIRED",
+      "source_path": "pm-product-discovery/skills/identify-assumptions-existing/SKILL.md",
+      "text_sha256": "59d788213014552ac64f589c71ce82b135f9ef4b84fec457446ad90795fd439f",
+      "url": "https://github.com/phuryn/pm-skills"
+    },
+    {
+      "candidate_id": "github6-phuryn-pm-skills-identify-assumptions-new",
+      "candidate_name": "identify-assumptions-new",
+      "commit": "020ee82501d9c09f9b989517c4cf9641bad057ff",
+      "description": "Identify risky assumptions for a new product idea across 8 risk categories including Go-to-Market, Strategy, and Team. Use when evaluating startup risks, assessing a new product concept, or mapping assumptions for a new venture.",
+      "repo": "phuryn-pm-skills",
+      "risk_flags": [
+        {
+          "category": "network_or_api",
+          "hits": [
+            "https://"
+          ]
+        },
+        {
+          "category": "persistence_or_hooks",
+          "hits": [
+            "startup"
+          ]
+        },
+        {
+          "category": "filesystem_write",
+          "hits": [
+            "save as"
+          ]
+        }
+      ],
+      "safety": "PASS_PROMPT_ONLY_REWRITE_REQUIRED",
+      "source_path": "pm-product-discovery/skills/identify-assumptions-new/SKILL.md",
+      "text_sha256": "962b1e0c01e45ceb930e4d806c0ffb05e36cf25dcfef5497e7828d89d6ae474b",
+      "url": "https://github.com/phuryn/pm-skills"
+    },
+    {
+      "candidate_id": "github6-phuryn-pm-skills-interview-script",
+      "candidate_name": "interview-script",
+      "commit": "020ee82501d9c09f9b989517c4cf9641bad057ff",
+      "description": "Create a structured customer interview script with JTBD probing questions, warm-up, core exploration, and wrap-up sections. Follows The Mom Test principles \u2014 no leading questions, no pitching, focus on past behavior. Use when preparing for user interviews, creating interview guides, or planning discovery research.",
+      "repo": "phuryn-pm-skills",
+      "risk_flags": [
+        {
+          "category": "network_or_api",
+          "hits": [
+            "https://"
+          ]
+        },
+        {
+          "category": "filesystem_write",
+          "hits": [
+            "remove",
+            "save as"
+          ]
+        }
+      ],
+      "safety": "PASS_PROMPT_ONLY_REWRITE_REQUIRED",
+      "source_path": "pm-product-discovery/skills/interview-script/SKILL.md",
+      "text_sha256": "892ca53da9852d4e6516d2305f0c0eb2db370bf39693c6c6797154b44bec9b4c",
+      "url": "https://github.com/phuryn/pm-skills"
+    },
+    {
+      "candidate_id": "github6-phuryn-pm-skills-metrics-dashboard",
+      "candidate_name": "metrics-dashboard",
+      "commit": "020ee82501d9c09f9b989517c4cf9641bad057ff",
+      "description": "Define and design a product metrics dashboard with key metrics, data sources, visualization types, and alert thresholds. Use when creating a metrics dashboard, defining KPIs, setting up product analytics, or building a data monitoring plan.",
+      "repo": "phuryn-pm-skills",
+      "risk_flags": [
+        {
+          "category": "network_or_api",
+          "hits": [
+            "https://"
+          ]
+        }
+      ],
+      "safety": "PASS_PROMPT_ONLY_REWRITE_REQUIRED",
+      "source_path": "pm-product-discovery/skills/metrics-dashboard/SKILL.md",
+      "text_sha256": "fa74abf49be9f034ae43110528028402e5e63809540302b95567018d478ef4e9",
+      "url": "https://github.com/phuryn/pm-skills"
+    },
+    {
+      "candidate_id": "github6-phuryn-pm-skills-opportunity-solution-tree",
+      "candidate_name": "opportunity-solution-tree",
+      "commit": "020ee82501d9c09f9b989517c4cf9641bad057ff",
+      "description": "Build an Opportunity Solution Tree (OST) to structure product discovery \u2014 map a desired outcome to opportunities, solutions, and experiments. Based on Teresa Torres' Continuous Discovery Habits. Use when structuring discovery work, mapping opportunities to solutions, or deciding what to build next.",
+      "repo": "phuryn-pm-skills",
+      "risk_flags": [
+        {
+          "category": "network_or_api",
+          "hits": [
+            "https://"
+          ]
+        },
+        {
+          "category": "filesystem_write",
+          "hits": [
+            "save as"
+          ]
+        }
+      ],
+      "safety": "PASS_PROMPT_ONLY_REWRITE_REQUIRED",
+      "source_path": "pm-product-discovery/skills/opportunity-solution-tree/SKILL.md",
+      "text_sha256": "6b23e44a5ace86aa20d64cc130322265ace6a53a29831cc403b974098a379bcc",
+      "url": "https://github.com/phuryn/pm-skills"
+    },
+    {
+      "candidate_id": "github6-phuryn-pm-skills-prioritize-assumptions",
+      "candidate_name": "prioritize-assumptions",
+      "commit": "020ee82501d9c09f9b989517c4cf9641bad057ff",
+      "description": "Prioritize assumptions using an Impact \u00d7 Risk matrix and suggest experiments for each. Use when triaging a list of assumptions, deciding what to test first, or applying the assumption prioritization canvas.",
+      "repo": "phuryn-pm-skills",
+      "risk_flags": [
+        {
+          "category": "network_or_api",
+          "hits": [
+            "https://"
+          ]
+        },
+        {
+          "category": "filesystem_write",
+          "hits": [
+            "save as"
+          ]
+        }
+      ],
+      "safety": "PASS_PROMPT_ONLY_REWRITE_REQUIRED",
+      "source_path": "pm-product-discovery/skills/prioritize-assumptions/SKILL.md",
+      "text_sha256": "18160a0138c788790c9dd22995ffdcfac485c1f0599c170d8668678e59766073",
+      "url": "https://github.com/phuryn/pm-skills"
+    },
+    {
+      "candidate_id": "github6-phuryn-pm-skills-prioritize-features",
+      "candidate_name": "prioritize-features",
+      "commit": "020ee82501d9c09f9b989517c4cf9641bad057ff",
+      "description": "Prioritize a backlog of feature ideas based on impact, effort, risk, and strategic alignment with top 5 recommendations. Use when prioritizing a feature backlog, making scope decisions, or ranking product ideas.",
+      "repo": "phuryn-pm-skills",
+      "risk_flags": [
+        {
+          "category": "network_or_api",
+          "hits": [
+            "https://"
+          ]
+        },
+        {
+          "category": "filesystem_write",
+          "hits": [
+            "save as"
+          ]
+        }
+      ],
+      "safety": "PASS_PROMPT_ONLY_REWRITE_REQUIRED",
+      "source_path": "pm-product-discovery/skills/prioritize-features/SKILL.md",
+      "text_sha256": "d05c001ea9d71ccf6aca975e0530a2a85545192b1eec9e06cc6d1339156c0f87",
+      "url": "https://github.com/phuryn/pm-skills"
+    },
+    {
+      "candidate_id": "github6-phuryn-pm-skills-summarize-interview",
+      "candidate_name": "summarize-interview",
+      "commit": "020ee82501d9c09f9b989517c4cf9641bad057ff",
+      "description": "Summarize a customer interview transcript into a structured template with JTBD, satisfaction signals, and action items. Use when processing interview recordings or transcripts, synthesizing discovery interviews, or creating interview summaries.",
+      "repo": "phuryn-pm-skills",
+      "risk_flags": [
+        {
+          "category": "network_or_api",
+          "hits": [
+            "https://"
+          ]
+        }
+      ],
+      "safety": "PASS_PROMPT_ONLY_REWRITE_REQUIRED",
+      "source_path": "pm-product-discovery/skills/summarize-interview/SKILL.md",
+      "text_sha256": "5a2a0c8257f5e2f7ef098d4531acbbcd3087bb07bb87d4cabfe1a97ef1ad037c",
+      "url": "https://github.com/phuryn/pm-skills"
+    },
+    {
+      "candidate_id": "github6-phuryn-pm-skills-ansoff-matrix",
+      "candidate_name": "ansoff-matrix",
+      "commit": "020ee82501d9c09f9b989517c4cf9641bad057ff",
+      "description": "Generate an Ansoff Matrix analysis mapping growth strategies across market penetration, market development, product development, and diversification. Use when considering growth options, planning market expansion, or evaluating strategic growth paths.",
+      "repo": "phuryn-pm-skills",
+      "risk_flags": [
+        {
+          "category": "network_or_api",
+          "hits": [
+            "https://"
+          ]
+        }
+      ],
+      "safety": "PASS_PROMPT_ONLY_REWRITE_REQUIRED",
+      "source_path": "pm-product-strategy/skills/ansoff-matrix/SKILL.md",
+      "text_sha256": "2f2ffa5bc380d8df5d217334ef7b9f19941beaa2602fd2e7ac4f321f447a4153",
+      "url": "https://github.com/phuryn/pm-skills"
+    },
+    {
+      "candidate_id": "github6-phuryn-pm-skills-business-model",
+      "candidate_name": "business-model",
+      "commit": "020ee82501d9c09f9b989517c4cf9641bad057ff",
+      "description": "Generate a Business Model Canvas with all 9 building blocks. Use when creating a business model, documenting how a business creates value, or analyzing an existing business model.",
+      "repo": "phuryn-pm-skills",
+      "risk_flags": [
+        {
+          "category": "network_or_api",
+          "hits": [
+            "https://"
+          ]
+        },
+        {
+          "category": "persistence_or_hooks",
+          "hits": [
+            "startup"
+          ]
+        }
+      ],
+      "safety": "PASS_PROMPT_ONLY_REWRITE_REQUIRED",
+      "source_path": "pm-product-strategy/skills/business-model/SKILL.md",
+      "text_sha256": "515621fd8a41ecba5b7234d0d9e1e50185ba33805c4dd170b66364281f84acc8",
+      "url": "https://github.com/phuryn/pm-skills"
+    },
+    {
+      "candidate_id": "github6-phuryn-pm-skills-lean-canvas",
+      "candidate_name": "lean-canvas",
+      "commit": "020ee82501d9c09f9b989517c4cf9641bad057ff",
+      "description": "Generate a Lean Canvas with problem, solution, metrics, cost structure, UVP, unfair advantage, channels, segments, and revenue. Use when exploring a lean startup canvas, testing a business hypothesis, or modeling a new venture.",
+      "repo": "phuryn-pm-skills",
+      "risk_flags": [
+        {
+          "category": "network_or_api",
+          "hits": [
+            "https://"
+          ]
+        },
+        {
+          "category": "persistence_or_hooks",
+          "hits": [
+            "startup"
+          ]
+        }
+      ],
+      "safety": "PASS_PROMPT_ONLY_REWRITE_REQUIRED",
+      "source_path": "pm-product-strategy/skills/lean-canvas/SKILL.md",
+      "text_sha256": "5bafe7a33cf57631937fa863ebc6c3d3b0679808a6e5b5fa04b70be615fbc240",
+      "url": "https://github.com/phuryn/pm-skills"
+    },
+    {
+      "candidate_id": "github6-phuryn-pm-skills-monetization-strategy",
+      "candidate_name": "monetization-strategy",
+      "commit": "020ee82501d9c09f9b989517c4cf9641bad057ff",
+      "description": "Brainstorm 3-5 monetization strategies with audience fit, risks, and validation experiments. Use when exploring revenue models, evaluating pricing strategies, or deciding how to monetize a product.",
+      "repo": "phuryn-pm-skills",
+      "risk_flags": [
+        {
+          "category": "network_or_api",
+          "hits": [
+            "https://"
+          ]
+        }
+      ],
+      "safety": "PASS_PROMPT_ONLY_REWRITE_REQUIRED",
+      "source_path": "pm-product-strategy/skills/monetization-strategy/SKILL.md",
+      "text_sha256": "2306d3c987e9572258fa1327a864049965dda3e4e873093482c6b671d686eea5",
+      "url": "https://github.com/phuryn/pm-skills"
+    },
+    {
+      "candidate_id": "github6-phuryn-pm-skills-pestle-analysis",
+      "candidate_name": "pestle-analysis",
+      "commit": "020ee82501d9c09f9b989517c4cf9641bad057ff",
+      "description": "Perform a PESTLE analysis covering Political, Economic, Social, Technological, Legal, and Environmental factors. Use when assessing the macro environment, doing strategic planning, or evaluating external factors affecting your business.",
+      "repo": "phuryn-pm-skills",
+      "risk_flags": [
+        {
+          "category": "network_or_api",
+          "hits": [
+            "https://"
+          ]
+        }
+      ],
+      "safety": "PASS_PROMPT_ONLY_REWRITE_REQUIRED",
+      "source_path": "pm-product-strategy/skills/pestle-analysis/SKILL.md",
+      "text_sha256": "6b264055b74a8632ad41edf51766a56c4f20c7e90a4d16603915f4e17194c857",
+      "url": "https://github.com/phuryn/pm-skills"
+    },
+    {
+      "candidate_id": "github6-phuryn-pm-skills-porters-five-forces",
+      "candidate_name": "porters-five-forces",
+      "commit": "020ee82501d9c09f9b989517c4cf9641bad057ff",
+      "description": "Perform Porter's Five Forces analysis \u2014 competitive rivalry, supplier power, buyer power, threat of substitutes, and threat of new entrants. Use when analyzing industry dynamics, assessing competitive forces, or evaluating market attractiveness.",
+      "repo": "phuryn-pm-skills",
+      "risk_flags": [
+        {
+          "category": "network_or_api",
+          "hits": [
+            "https://"
+          ]
+        },
+        {
+          "category": "persistence_or_hooks",
+          "hits": [
+            "startup"
+          ]
+        }
+      ],
+      "safety": "PASS_PROMPT_ONLY_REWRITE_REQUIRED",
+      "source_path": "pm-product-strategy/skills/porters-five-forces/SKILL.md",
+      "text_sha256": "a010cd7e52e29456f5a11f1d40eb0342fde738e8cf685e81b4dd50a0ebb81309",
+      "url": "https://github.com/phuryn/pm-skills"
+    },
+    {
+      "candidate_id": "github6-phuryn-pm-skills-pricing-strategy",
+      "candidate_name": "pricing-strategy",
+      "commit": "020ee82501d9c09f9b989517c4cf9641bad057ff",
+      "description": "Analyze and design pricing strategies including pricing models, competitive pricing analysis, willingness-to-pay estimation, and price elasticity. Use when setting prices, evaluating pricing models, preparing for a pricing change, or comparing freemium vs paid approaches.",
+      "repo": "phuryn-pm-skills",
+      "risk_flags": [
+        {
+          "category": "network_or_api",
+          "hits": [
+            "https://"
+          ]
+        },
+        {
+          "category": "filesystem_write",
+          "hits": [
+            "save as"
+          ]
+        }
+      ],
+      "safety": "PASS_PROMPT_ONLY_REWRITE_REQUIRED",
+      "source_path": "pm-product-strategy/skills/pricing-strategy/SKILL.md",
+      "text_sha256": "09321c5984f3654077bd58921ec4b7235f47e00caf44445bd2e5a5ed13bcb895",
+      "url": "https://github.com/phuryn/pm-skills"
+    },
+    {
+      "candidate_id": "github6-phuryn-pm-skills-product-strategy",
+      "candidate_name": "product-strategy",
+      "commit": "020ee82501d9c09f9b989517c4cf9641bad057ff",
+      "description": "Create a comprehensive product strategy using the 9-section Product Strategy Canvas \u2014 vision, segments, costs, value propositions, trade-offs, metrics, growth, capabilities, and defensibility. Use when building a product strategy, creating a strategic plan, or defining product direction.",
+      "repo": "phuryn-pm-skills",
+      "risk_flags": [
+        {
+          "category": "network_or_api",
+          "hits": [
+            "https://"
+          ]
+        }
+      ],
+      "safety": "PASS_PROMPT_ONLY_REWRITE_REQUIRED",
+      "source_path": "pm-product-strategy/skills/product-strategy/SKILL.md",
+      "text_sha256": "50d4bfe62ae71a321271a491148e8dca4715a6a7550f82ffba2ded06f036d5b8",
+      "url": "https://github.com/phuryn/pm-skills"
+    },
+    {
+      "candidate_id": "github6-phuryn-pm-skills-product-vision",
+      "candidate_name": "product-vision",
+      "commit": "020ee82501d9c09f9b989517c4cf9641bad057ff",
+      "description": "Brainstorm an inspiring, achievable, and emotional product vision that motivates teams and aligns stakeholders. Use when defining or refining a product vision, creating a vision statement, or aligning the team around a shared direction.",
+      "repo": "phuryn-pm-skills",
+      "risk_flags": [
+        {
+          "category": "network_or_api",
+          "hits": [
+            "https://"
+          ]
+        }
+      ],
+      "safety": "PASS_PROMPT_ONLY_REWRITE_REQUIRED",
+      "source_path": "pm-product-strategy/skills/product-vision/SKILL.md",
+      "text_sha256": "1414332e0f7893963a3308b8bea0d3ac05f5d704ad344f1c0013f7d7804a12fe",
+      "url": "https://github.com/phuryn/pm-skills"
+    },
+    {
+      "candidate_id": "github6-phuryn-pm-skills-startup-canvas",
+      "candidate_name": "startup-canvas",
+      "commit": "020ee82501d9c09f9b989517c4cf9641bad057ff",
+      "description": "Generate a Startup Canvas combining Product Strategy (9 sections) and Business Model (costs + revenue) for a new product. An alternative to BMC and Lean Canvas that separates strategy from business model. Use when launching a new product or evaluating a startup concept.",
+      "repo": "phuryn-pm-skills",
+      "risk_flags": [
+        {
+          "category": "network_or_api",
+          "hits": [
+            "https://"
+          ]
+        },
+        {
+          "category": "persistence_or_hooks",
+          "hits": [
+            "startup"
+          ]
+        }
+      ],
+      "safety": "PASS_PROMPT_ONLY_REWRITE_REQUIRED",
+      "source_path": "pm-product-strategy/skills/startup-canvas/SKILL.md",
+      "text_sha256": "356f02faf7bc60a71de658dbb6469e1e10bc4a7907b34c2096dc617a99616495",
+      "url": "https://github.com/phuryn/pm-skills"
+    },
+    {
+      "candidate_id": "github6-phuryn-pm-skills-swot-analysis",
+      "candidate_name": "swot-analysis",
+      "commit": "020ee82501d9c09f9b989517c4cf9641bad057ff",
+      "description": "Perform a detailed SWOT analysis \u2014 strengths, weaknesses, opportunities, and threats with actionable recommendations. Use when doing strategic assessment, competitive analysis, or evaluating a product or business position.",
+      "repo": "phuryn-pm-skills",
+      "risk_flags": [],
+      "safety": "PASS_PROMPT_ONLY",
+      "source_path": "pm-product-strategy/skills/swot-analysis/SKILL.md",
+      "text_sha256": "ef5efbc2d4b84237469808cc9ce90016d926c0b3d65977f7edf21c60e3d5f85b",
+      "url": "https://github.com/phuryn/pm-skills"
+    },
+    {
+      "candidate_id": "github6-phuryn-pm-skills-value-proposition",
+      "candidate_name": "value-proposition",
+      "commit": "020ee82501d9c09f9b989517c4cf9641bad057ff",
+      "description": "Design a detailed value proposition using a 6-part JTBD template \u2014 Who, Why, What before, How, What after, Alternatives. Use when creating a value proposition, analyzing customer value delivery, or articulating why customers should choose your product.",
+      "repo": "phuryn-pm-skills",
+      "risk_flags": [
+        {
+          "category": "network_or_api",
+          "hits": [
+            "https://"
+          ]
+        }
+      ],
+      "safety": "PASS_PROMPT_ONLY_REWRITE_REQUIRED",
+      "source_path": "pm-product-strategy/skills/value-proposition/SKILL.md",
+      "text_sha256": "b07cc0399582fc178be31b513b313d2420c7941dd568b52a0bf6cfb0ab6c4ec7",
+      "url": "https://github.com/phuryn/pm-skills"
+    },
+    {
+      "candidate_id": "github6-phuryn-pm-skills-draft-nda",
+      "candidate_name": "draft-nda",
+      "commit": "020ee82501d9c09f9b989517c4cf9641bad057ff",
+      "description": "Draft a detailed Non-Disclosure Agreement between two parties covering information types, jurisdiction, and clauses needing legal review. Use when creating confidentiality agreements or preparing an NDA for a partnership.",
+      "repo": "phuryn-pm-skills",
+      "risk_flags": [
+        {
+          "category": "network_or_api",
+          "hits": [
+            "secret"
+          ]
+        },
+        {
+          "category": "filesystem_write",
+          "hits": [
+            "write"
+          ]
+        }
+      ],
+      "safety": "PASS_PROMPT_ONLY_REWRITE_REQUIRED",
+      "source_path": "pm-toolkit/skills/draft-nda/SKILL.md",
+      "text_sha256": "e37a613bae8038220aac1e45f73596a419920015abe28d4a012d339a0e018247",
+      "url": "https://github.com/phuryn/pm-skills"
+    },
+    {
+      "candidate_id": "github6-phuryn-pm-skills-grammar-check",
+      "candidate_name": "grammar-check",
+      "commit": "020ee82501d9c09f9b989517c4cf9641bad057ff",
+      "description": "Identify grammar, logical, and flow errors in text and suggest targeted fixes without rewriting the entire text. Use when proofreading content, checking writing quality, or reviewing a draft.",
+      "repo": "phuryn-pm-skills",
+      "risk_flags": [
+        {
+          "category": "filesystem_write",
+          "hits": [
+            "remove",
+            "write"
+          ]
+        }
+      ],
+      "safety": "PASS_PROMPT_ONLY_REWRITE_REQUIRED",
+      "source_path": "pm-toolkit/skills/grammar-check/SKILL.md",
+      "text_sha256": "67e4721b25541cea2f2b72e27dca0099cad66ac9a1a6fdc49d63adbae6450e02",
+      "url": "https://github.com/phuryn/pm-skills"
+    },
+    {
+      "candidate_id": "github6-phuryn-pm-skills-privacy-policy",
+      "candidate_name": "privacy-policy",
+      "commit": "020ee82501d9c09f9b989517c4cf9641bad057ff",
+      "description": "Draft a detailed privacy policy covering data types, jurisdiction, GDPR and compliance considerations, and clauses needing legal review. Use when creating a privacy policy, updating data protection documentation, or preparing for compliance.",
+      "repo": "phuryn-pm-skills",
+      "risk_flags": [
+        {
+          "category": "filesystem_write",
+          "hits": [
+            "delete",
+            "write"
+          ]
+        }
+      ],
+      "safety": "PASS_PROMPT_ONLY_REWRITE_REQUIRED",
+      "source_path": "pm-toolkit/skills/privacy-policy/SKILL.md",
+      "text_sha256": "4388e746dbde28b3eb04bbd88f8a8fe526545fce68a6e5a058d2f70ecadf364f",
+      "url": "https://github.com/phuryn/pm-skills"
+    },
+    {
+      "candidate_id": "github6-phuryn-pm-skills-review-resume",
+      "candidate_name": "review-resume",
+      "commit": "020ee82501d9c09f9b989517c4cf9641bad057ff",
+      "description": "Comprehensive PM resume review and tailoring against 10 best practices including XYZ+S formula, keyword optimization, job-specific tailoring, and structure. Use when reviewing a PM resume, preparing for job applications, or improving resume impact.",
+      "repo": "phuryn-pm-skills",
+      "risk_flags": [
+        {
+          "category": "network_or_api",
+          "hits": [
+            "https://"
+          ]
+        },
+        {
+          "category": "filesystem_write",
+          "hits": [
+            "remove",
+            "write"
+          ]
+        }
+      ],
+      "safety": "PASS_PROMPT_ONLY_REWRITE_REQUIRED",
+      "source_path": "pm-toolkit/skills/review-resume/SKILL.md",
+      "text_sha256": "cec1de0916b608a559844c5f39a3b18e65f88d6694d3bb9c1ff04bde9e062c2f",
+      "url": "https://github.com/phuryn/pm-skills"
+    }
+  ],
+  "capability_results": [
+    {
+      "capability": "research_control_plane",
+      "current_skill": "research-citation-chain-verifier",
+      "top_candidates": [
+        {
+          "candidate_id": "github6-bingjyun-repo-scout-skill-repo-scout",
+          "candidate_name": "repo-scout",
+          "repo": "BingJyun-repo-scout-skill",
+          "safety": "PASS_PROMPT_ONLY_REWRITE_REQUIRED",
+          "score": 5,
+          "source_path": "SKILL.md"
+        },
+        {
+          "candidate_id": "github6-phuryn-pm-skills-competitor-analysis",
+          "candidate_name": "competitor-analysis",
+          "repo": "phuryn-pm-skills",
+          "safety": "PASS_PROMPT_ONLY_REWRITE_REQUIRED",
+          "score": 1,
+          "source_path": "pm-market-research/skills/competitor-analysis/SKILL.md"
+        },
+        {
+          "candidate_id": "github6-phuryn-pm-skills-customer-journey-map",
+          "candidate_name": "customer-journey-map",
+          "repo": "phuryn-pm-skills",
+          "safety": "PASS_PROMPT_ONLY_REWRITE_REQUIRED",
+          "score": 1,
+          "source_path": "pm-market-research/skills/customer-journey-map/SKILL.md"
+        },
+        {
+          "candidate_id": "github6-alchaincyf-darwin-skill-darwin-skill",
+          "candidate_name": "darwin-skill",
+          "repo": "alchaincyf-darwin-skill",
+          "safety": "PASS_PROMPT_ONLY_REWRITE_REQUIRED",
+          "score": 1,
+          "source_path": "SKILL.md"
+        },
+        {
+          "candidate_id": "github6-addyosmani-agent-skills-doubt-driven-development",
+          "candidate_name": "doubt-driven-development",
+          "repo": "addyosmani-agent-skills",
+          "safety": "PASS_PROMPT_ONLY_REWRITE_REQUIRED",
+          "score": 1,
+          "source_path": "skills/doubt-driven-development/SKILL.md"
+        }
+      ]
+    },
+    {
+      "capability": "learning_closure",
+      "current_skill": "sf2-learning_closure-route-fit-spec",
+      "top_candidates": [
+        {
+          "candidate_id": "github6-alchaincyf-darwin-skill-darwin-skill",
+          "candidate_name": "darwin-skill",
+          "repo": "alchaincyf-darwin-skill",
+          "safety": "PASS_PROMPT_ONLY_REWRITE_REQUIRED",
+          "score": 4,
+          "source_path": "SKILL.md"
+        },
+        {
+          "candidate_id": "github6-addyosmani-agent-skills-context-engineering",
+          "candidate_name": "context-engineering",
+          "repo": "addyosmani-agent-skills",
+          "safety": "PASS_PROMPT_ONLY_REWRITE_REQUIRED",
+          "score": 2,
+          "source_path": "skills/context-engineering/SKILL.md"
+        },
+        {
+          "candidate_id": "github6-addyosmani-agent-skills-performance-optimization",
+          "candidate_name": "performance-optimization",
+          "repo": "addyosmani-agent-skills",
+          "safety": "PASS_PROMPT_ONLY",
+          "score": 2,
+          "source_path": "skills/performance-optimization/SKILL.md"
+        },
+        {
+          "candidate_id": "github6-phuryn-pm-skills-prioritization-frameworks",
+          "candidate_name": "prioritization-frameworks",
+          "repo": "phuryn-pm-skills",
+          "safety": "PASS_PROMPT_ONLY_REWRITE_REQUIRED",
+          "score": 2,
+          "source_path": "pm-execution/skills/prioritization-frameworks/SKILL.md"
+        },
+        {
+          "candidate_id": "github6-phuryn-pm-skills-sentiment-analysis",
+          "candidate_name": "sentiment-analysis",
+          "repo": "phuryn-pm-skills",
+          "safety": "PASS_PROMPT_ONLY_REWRITE_REQUIRED",
+          "score": 2,
+          "source_path": "pm-market-research/skills/sentiment-analysis/SKILL.md"
+        }
+      ]
+    },
+    {
+      "capability": "codeintel",
+      "current_skill": "github-karpathy-guidelines",
+      "top_candidates": [
+        {
+          "candidate_id": "github6-addyosmani-agent-skills-doubt-driven-development",
+          "candidate_name": "doubt-driven-development",
+          "repo": "addyosmani-agent-skills",
+          "safety": "PASS_PROMPT_ONLY_REWRITE_REQUIRED",
+          "score": 4,
+          "source_path": "skills/doubt-driven-development/SKILL.md"
+        },
+        {
+          "candidate_id": "github6-addyosmani-agent-skills-documentation-and-adrs",
+          "candidate_name": "documentation-and-adrs",
+          "repo": "addyosmani-agent-skills",
+          "safety": "PASS_PROMPT_ONLY_REWRITE_REQUIRED",
+          "score": 3,
+          "source_path": "skills/documentation-and-adrs/SKILL.md"
+        },
+        {
+          "candidate_id": "github6-addyosmani-agent-skills-source-driven-development",
+          "candidate_name": "source-driven-development",
+          "repo": "addyosmani-agent-skills",
+          "safety": "PASS_PROMPT_ONLY_REWRITE_REQUIRED",
+          "score": 3,
+          "source_path": "skills/source-driven-development/SKILL.md"
+        },
+        {
+          "candidate_id": "github6-addyosmani-agent-skills-browser-testing-with-devtools",
+          "candidate_name": "browser-testing-with-devtools",
+          "repo": "addyosmani-agent-skills",
+          "safety": "PASS_PROMPT_ONLY_REWRITE_REQUIRED",
+          "score": 2,
+          "source_path": "skills/browser-testing-with-devtools/SKILL.md"
+        },
+        {
+          "candidate_id": "github6-addyosmani-agent-skills-code-review-and-quality",
+          "candidate_name": "code-review-and-quality",
+          "repo": "addyosmani-agent-skills",
+          "safety": "PASS_PROMPT_ONLY_REWRITE_REQUIRED",
+          "score": 2,
+          "source_path": "skills/code-review-and-quality/SKILL.md"
+        }
+      ]
+    },
+    {
+      "capability": "repair_loop",
+      "current_skill": "github4-sickn33-antigravity-awesome-skills-tdd-workflows-tdd-red",
+      "top_candidates": [
+        {
+          "candidate_id": "github6-addyosmani-agent-skills-browser-testing-with-devtools",
+          "candidate_name": "browser-testing-with-devtools",
+          "repo": "addyosmani-agent-skills",
+          "safety": "PASS_PROMPT_ONLY_REWRITE_REQUIRED",
+          "score": 1,
+          "source_path": "skills/browser-testing-with-devtools/SKILL.md"
+        },
+        {
+          "candidate_id": "github6-addyosmani-agent-skills-debugging-and-error-recovery",
+          "candidate_name": "debugging-and-error-recovery",
+          "repo": "addyosmani-agent-skills",
+          "safety": "PASS_PROMPT_ONLY_REWRITE_REQUIRED",
+          "score": 1,
+          "source_path": "skills/debugging-and-error-recovery/SKILL.md"
+        },
+        {
+          "candidate_id": "github6-addyosmani-agent-skills-test-driven-development",
+          "candidate_name": "test-driven-development",
+          "repo": "addyosmani-agent-skills",
+          "safety": "PASS_PROMPT_ONLY_REWRITE_REQUIRED",
+          "score": 1,
+          "source_path": "skills/test-driven-development/SKILL.md"
+        }
+      ]
+    },
+    {
+      "capability": "forecast_pregate",
+      "current_skill": "create-plan",
+      "top_candidates": [
+        {
+          "candidate_id": "github6-phuryn-pm-skills-sprint-plan",
+          "candidate_name": "sprint-plan",
+          "repo": "phuryn-pm-skills",
+          "safety": "PASS_PROMPT_ONLY_REWRITE_REQUIRED",
+          "score": 4,
+          "source_path": "pm-execution/skills/sprint-plan/SKILL.md"
+        },
+        {
+          "candidate_id": "github6-phuryn-pm-skills-analyze-feature-requests",
+          "candidate_name": "analyze-feature-requests",
+          "repo": "phuryn-pm-skills",
+          "safety": "PASS_PROMPT_ONLY_REWRITE_REQUIRED",
+          "score": 2,
+          "source_path": "pm-product-discovery/skills/analyze-feature-requests/SKILL.md"
+        },
+        {
+          "candidate_id": "github6-phuryn-pm-skills-pre-mortem",
+          "candidate_name": "pre-mortem",
+          "repo": "phuryn-pm-skills",
+          "safety": "PASS_PROMPT_ONLY_REWRITE_REQUIRED",
+          "score": 2,
+          "source_path": "pm-execution/skills/pre-mortem/SKILL.md"
+        },
+        {
+          "candidate_id": "github6-phuryn-pm-skills-prioritize-assumptions",
+          "candidate_name": "prioritize-assumptions",
+          "repo": "phuryn-pm-skills",
+          "safety": "PASS_PROMPT_ONLY_REWRITE_REQUIRED",
+          "score": 2,
+          "source_path": "pm-product-discovery/skills/prioritize-assumptions/SKILL.md"
+        },
+        {
+          "candidate_id": "github6-phuryn-pm-skills-ansoff-matrix",
+          "candidate_name": "ansoff-matrix",
+          "repo": "phuryn-pm-skills",
+          "safety": "PASS_PROMPT_ONLY_REWRITE_REQUIRED",
+          "score": 1,
+          "source_path": "pm-product-strategy/skills/ansoff-matrix/SKILL.md"
+        }
+      ]
+    },
+    {
+      "capability": "external_productivity",
+      "current_skill": "github5-video-auto-dubber-safe-external-productivity",
+      "top_candidates": [
+        {
+          "candidate_id": "github6-phuryn-pm-skills-gtm-strategy",
+          "candidate_name": "gtm-strategy",
+          "repo": "phuryn-pm-skills",
+          "safety": "PASS_PROMPT_ONLY_REWRITE_REQUIRED",
+          "score": 3,
+          "source_path": "pm-go-to-market/skills/gtm-strategy/SKILL.md"
+        },
+        {
+          "candidate_id": "github6-phuryn-pm-skills-analyze-feature-requests",
+          "candidate_name": "analyze-feature-requests",
+          "repo": "phuryn-pm-skills",
+          "safety": "PASS_PROMPT_ONLY_REWRITE_REQUIRED",
+          "score": 2,
+          "source_path": "pm-product-discovery/skills/analyze-feature-requests/SKILL.md"
+        },
+        {
+          "candidate_id": "github6-phuryn-pm-skills-beachhead-segment",
+          "candidate_name": "beachhead-segment",
+          "repo": "phuryn-pm-skills",
+          "safety": "PASS_PROMPT_ONLY_REWRITE_REQUIRED",
+          "score": 2,
+          "source_path": "pm-go-to-market/skills/beachhead-segment/SKILL.md"
+        },
+        {
+          "candidate_id": "github6-phuryn-pm-skills-gtm-motions",
+          "candidate_name": "gtm-motions",
+          "repo": "phuryn-pm-skills",
+          "safety": "PASS_PROMPT_ONLY_REWRITE_REQUIRED",
+          "score": 2,
+          "source_path": "pm-go-to-market/skills/gtm-motions/SKILL.md"
+        },
+        {
+          "candidate_id": "github6-phuryn-pm-skills-interview-script",
+          "candidate_name": "interview-script",
+          "repo": "phuryn-pm-skills",
+          "safety": "PASS_PROMPT_ONLY_REWRITE_REQUIRED",
+          "score": 2,
+          "source_path": "pm-product-discovery/skills/interview-script/SKILL.md"
+        }
+      ]
+    },
+    {
+      "capability": "benchmark_meta_opt",
+      "current_skill": "github4-sickn33-antigravity-awesome-skills-ad-creative",
+      "top_candidates": [
+        {
+          "candidate_id": "github6-phuryn-pm-skills-metrics-dashboard",
+          "candidate_name": "metrics-dashboard",
+          "repo": "phuryn-pm-skills",
+          "safety": "PASS_PROMPT_ONLY_REWRITE_REQUIRED",
+          "score": 3,
+          "source_path": "pm-product-discovery/skills/metrics-dashboard/SKILL.md"
+        },
+        {
+          "candidate_id": "github6-phuryn-pm-skills-ab-test-analysis",
+          "candidate_name": "ab-test-analysis",
+          "repo": "phuryn-pm-skills",
+          "safety": "PASS_PROMPT_ONLY_REWRITE_REQUIRED",
+          "score": 2,
+          "source_path": "pm-data-analytics/skills/ab-test-analysis/SKILL.md"
+        },
+        {
+          "candidate_id": "github6-phuryn-pm-skills-brainstorm-experiments-existing",
+          "candidate_name": "brainstorm-experiments-existing",
+          "repo": "phuryn-pm-skills",
+          "safety": "PASS_PROMPT_ONLY_REWRITE_REQUIRED",
+          "score": 1,
+          "source_path": "pm-product-discovery/skills/brainstorm-experiments-existing/SKILL.md"
+        },
+        {
+          "candidate_id": "github6-phuryn-pm-skills-brainstorm-experiments-new",
+          "candidate_name": "brainstorm-experiments-new",
+          "repo": "phuryn-pm-skills",
+          "safety": "PASS_PROMPT_ONLY_REWRITE_REQUIRED",
+          "score": 1,
+          "source_path": "pm-product-discovery/skills/brainstorm-experiments-new/SKILL.md"
+        },
+        {
+          "candidate_id": "github6-phuryn-pm-skills-cohort-analysis",
+          "candidate_name": "cohort-analysis",
+          "repo": "phuryn-pm-skills",
+          "safety": "PASS_PROMPT_ONLY_REWRITE_REQUIRED",
+          "score": 1,
+          "source_path": "pm-data-analytics/skills/cohort-analysis/SKILL.md"
+        }
+      ]
+    }
+  ],
+  "claim_boundary": [
+    "Static safety and capability-fit screen only.",
+    "Does not execute upstream code.",
+    "Does not update runtime policy."
+  ],
+  "repos": {
+    "BingJyun-repo-scout-skill": {
+      "commit": "878990373425a21bed9da56371229af5c7f52222",
+      "snapshot_dir": "/private/tmp/nexus-sf-round6/BingJyun-repo-scout-skill",
+      "url": "https://github.com/BingJyun/repo-scout-skill"
+    },
+    "addyosmani-agent-skills": {
+      "commit": "f17c6e88c904dc747381c374312c2d58e10647ae",
+      "snapshot_dir": "/private/tmp/nexus-sf-round6/addyosmani-agent-skills",
+      "url": "https://github.com/addyosmani/agent-skills"
+    },
+    "alchaincyf-darwin-skill": {
+      "commit": "2056abfccd924d68ae6baa9193cafff0f666260b",
+      "snapshot_dir": "/private/tmp/nexus-sf-round6/alchaincyf-darwin-skill",
+      "url": "https://github.com/alchaincyf/darwin-skill"
+    },
+    "phuryn-pm-skills": {
+      "commit": "020ee82501d9c09f9b989517c4cf9641bad057ff",
+      "snapshot_dir": "/private/tmp/nexus-sf-round6/phuryn-pm-skills",
+      "url": "https://github.com/phuryn/pm-skills"
+    }
+  },
+  "schema": "nexus.sf_github_round6_static_screen.v1",
+  "selected_for_live": [
+    {
+      "candidate_skill": "github6-repo-scout-safe-research-control-plane",
+      "capability": "research_control_plane",
+      "current_skill": "research-citation-chain-verifier",
+      "source_repo": "BingJyun-repo-scout-skill",
+      "source_skill": "repo-scout"
+    },
+    {
+      "candidate_skill": "github6-darwin-skill-learning-closure",
+      "capability": "learning_closure",
+      "current_skill": "sf2-learning_closure-route-fit-spec",
+      "source_repo": "alchaincyf-darwin-skill",
+      "source_skill": "darwin-skill"
+    },
+    {
+      "candidate_skill": "github6-agent-context-codeintel",
+      "capability": "codeintel",
+      "current_skill": "github-karpathy-guidelines",
+      "source_repo": "addyosmani-agent-skills",
+      "source_skill": "context-engineering"
+    },
+    {
+      "candidate_skill": "github6-pm-sprint-forecast-pregate",
+      "capability": "forecast_pregate",
+      "current_skill": "create-plan",
+      "source_repo": "phuryn-pm-skills",
+      "source_skill": "sprint-plan"
+    }
+  ],
+  "status": "PASS",
+  "summary": {
+    "capability_count": 7,
+    "pass_prompt_only_count": 90,
+    "reject_or_review_count": 0,
+    "repo_count": 4,
+    "selected_live_candidate_count": 4,
+    "skill_count": 90
+  },
+  "version": "2026-05-19"
+}

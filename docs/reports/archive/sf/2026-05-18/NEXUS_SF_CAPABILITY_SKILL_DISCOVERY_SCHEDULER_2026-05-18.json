@@ -1,0 +1,105 @@
+{
+  "schema": "nexus.sf_capability_skill_discovery_scheduler.v1",
+  "status": "PASS",
+  "runtime_update_allowed": false,
+  "public_benchmark_allowed": false,
+  "summary": {
+    "capability_count": 5,
+    "scheduled_count": 5,
+    "due_source_capability_count": 0,
+    "action_counts": {
+      "monitor_new_candidates": 4,
+      "targeted_replay_needs_more_data": 1
+    },
+    "candidate_pool_schema": "nexus.fair_skill_candidate_pool.v1",
+    "current_catalog_schema": "nexus.sf_final_capability_skill_catalog.v5"
+  },
+  "failures": [],
+  "scheduled": [
+    {
+      "capability_id": "forecast_pregate",
+      "next_action": "monitor_new_candidates",
+      "due_source_count": 0,
+      "candidate_arm_count": 0,
+      "candidate_skill_ids": [],
+      "current_primary_skill_id": "create-plan",
+      "needs_more_data_skill_ids": [],
+      "negative_control_count": 1,
+      "plan_status": "RETURN",
+      "claim_boundary": "discovery_only_no_runtime_promotion"
+    },
+    {
+      "capability_id": "governance_and_trust",
+      "next_action": "targeted_replay_needs_more_data",
+      "due_source_count": 0,
+      "candidate_arm_count": 4,
+      "candidate_skill_ids": [
+        "nexus-root-cause-probe",
+        "nexus-acceptance-evidence-gate",
+        "acceptance-evidence-failclosed",
+        "cso"
+      ],
+      "current_primary_skill_id": "acceptance-evidence-failclosed",
+      "needs_more_data_skill_ids": [
+        "acceptance-evidence-failclosed",
+        "cso",
+        "claudeosint-safe-surface-audit",
+        "gbrain-soul-audit"
+      ],
+      "negative_control_count": 1,
+      "plan_status": "PASS",
+      "claim_boundary": "discovery_only_no_runtime_promotion"
+    },
+    {
+      "capability_id": "repair_and_coding",
+      "next_action": "monitor_new_candidates",
+      "due_source_count": 0,
+      "candidate_arm_count": 4,
+      "candidate_skill_ids": [
+        "test-driven-development",
+        "gstack-investigate",
+        "addy-code-simplification",
+        "aibdd.auto.java.e2e.refactor"
+      ],
+      "current_primary_skill_id": "tdd",
+      "needs_more_data_skill_ids": [],
+      "negative_control_count": 1,
+      "plan_status": "PASS",
+      "claim_boundary": "discovery_only_no_runtime_promotion"
+    },
+    {
+      "capability_id": "repair_loop",
+      "next_action": "monitor_new_candidates",
+      "due_source_count": 0,
+      "candidate_arm_count": 0,
+      "candidate_skill_ids": [],
+      "current_primary_skill_id": "tdd",
+      "needs_more_data_skill_ids": [],
+      "negative_control_count": 1,
+      "plan_status": "RETURN",
+      "claim_boundary": "discovery_only_no_runtime_promotion"
+    },
+    {
+      "capability_id": "research_and_source_discipline",
+      "next_action": "monitor_new_candidates",
+      "due_source_count": 0,
+      "candidate_arm_count": 4,
+      "candidate_skill_ids": [
+        "browserbase-company-research",
+        "arxiv",
+        "browserbase-search",
+        "gbrain-academic-verify"
+      ],
+      "current_primary_skill_id": "research-citation-chain-verifier",
+      "needs_more_data_skill_ids": [],
+      "negative_control_count": 1,
+      "plan_status": "PASS",
+      "claim_boundary": "discovery_only_no_runtime_promotion"
+    }
+  ],
+  "claim_boundary": [
+    "This scheduler only plans discovery and validation work.",
+    "Catalog verdicts require receipt-backed live evidence.",
+    "Runtime defaults and public benchmarks remain separate gates."
+  ]
+}

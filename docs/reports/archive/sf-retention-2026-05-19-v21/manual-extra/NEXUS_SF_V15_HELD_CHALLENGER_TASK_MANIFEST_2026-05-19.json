@@ -1,0 +1,226 @@
+{
+  "schema": "nexus.sf_v15_held_task_manifest.v1",
+  "version": "2026-05-19",
+  "frozen": true,
+  "benchmark_id": "nexus_sf_v15_held_challenger_tiebreak_2026_05_19",
+  "description": "SF V15 held-capability challenger tiebreak manifest",
+  "status": "PASS",
+  "summary": {
+    "task_count": 9,
+    "capability_count": 9,
+    "runtime_update_allowed": false,
+    "public_benchmark_allowed": false
+  },
+  "tasks": [
+    {
+      "id": "sf-v15-held-autonomic_router-001",
+      "task_desc": "SF V13 tradeoff tie-break for capability autonomic_router.",
+      "target_file": "unused",
+      "test_file": "unused",
+      "success_criteria": "sf_v13_tradeoff_tiebreak_receipt_chain_complete",
+      "category": "autonomic_router",
+      "difficulty": "medium",
+      "repo_kind": "neutral_fixture",
+      "repo": "fixture://sf-v13-tiebreak",
+      "repo_ref": "v1",
+      "fixture_kind": "sf_v13_tiebreak",
+      "mutation_required": false,
+      "allowed_files": [
+        "unused"
+      ],
+      "forbidden_files": [
+        ".nexus/",
+        "logs/",
+        "benchmarks/"
+      ],
+      "setup_command": "python -V",
+      "verification_command": "python -V",
+      "expected_capabilities": [
+        "autoreason"
+      ],
+      "capability_activation_contract": "required",
+      "eligibility_class": "model_required",
+      "public_claim_allowed_metrics": []
+    },
+    {
+      "id": "sf-v15-held-mempalace-001",
+      "task_desc": "SF V13 tradeoff tie-break for capability mempalace.",
+      "target_file": "unused",
+      "test_file": "unused",
+      "success_criteria": "sf_v13_tradeoff_tiebreak_receipt_chain_complete",
+      "category": "mempalace",
+      "difficulty": "medium",
+      "repo_kind": "neutral_fixture",
+      "repo": "fixture://sf-v13-tiebreak",
+      "repo_ref": "v1",
+      "fixture_kind": "sf_v13_tiebreak",
+      "mutation_required": false,
+      "allowed_files": [
+        "unused"
+      ],
+      "forbidden_files": [
+        ".nexus/",
+        "logs/",
+        "benchmarks/"
+      ],
+      "setup_command": "python -V",
+      "verification_command": "python -V",
+      "expected_capabilities": [
+        "mempalace_gate"
+      ],
+      "capability_activation_contract": "required",
+      "eligibility_class": "model_required",
+      "public_claim_allowed_metrics": []
+    },
+    {
+      "id": "sf-v15-held-policy_capability_gate-001",
+      "task_desc": "SF V13 tradeoff tie-break for capability policy_capability_gate.",
+      "target_file": "unused",
+      "test_file": "unused",
+      "success_criteria": "sf_v13_tradeoff_tiebreak_receipt_chain_complete",
+      "category": "policy_capability_gate",
+      "difficulty": "medium",
+      "repo_kind": "neutral_fixture",
+      "repo": "fixture://sf-v13-tiebreak",
+      "repo_ref": "v1",
+      "fixture_kind": "sf_v13_tiebreak",
+      "mutation_required": false,
+      "allowed_files": [
+        "unused"
+      ],
+      "forbidden_files": [
+        ".nexus/",
+        "logs/",
+        "benchmarks/"
+      ],
+      "setup_command": "python -V",
+      "verification_command": "python -V",
+      "expected_capabilities": [
+        "mempalace_gate"
+      ],
+      "capability_activation_contract": "required",
+      "eligibility_class": "model_required",
+      "public_claim_allowed_metrics": []
+    },
+    {
+      "id": "sf-v15-held-delivery_acceptance_gate-001",
+      "task_desc": "SF V13 tradeoff tie-break for capability delivery_acceptance_gate.",
+      "target_file": "unused",
+      "test_file": "unused",
+      "success_criteria": "sf_v13_tradeoff_tiebreak_receipt_chain_complete",
+      "category": "delivery_acceptance_gate",
+      "difficulty": "medium",
+      "repo_kind": "neutral_fixture",
+      "repo": "fixture://sf-v13-tiebreak",
+      "repo_ref": "v1",
+      "fixture_kind": "sf_v13_tiebreak",
+      "mutation_required": false,
+      "allowed_files": [
+        "unused"
+      ],
+      "forbidden_files": [
+        ".nexus/",
+        "logs/",
+        "benchmarks/"
+      ],
+      "setup_command": "python -V",
+      "verification_command": "python -V",
+      "expected_capabilities": [
+        "delivery_gate"
+      ],
+      "capability_activation_contract": "required",
+      "eligibility_class": "model_required",
+      "public_claim_allowed_metrics": []
+    },
+    {
+      "id": "sf-v15-held-sandbox_replay-001",
+      "task_desc": "SF V13 tradeoff tie-break for capability sandbox_replay.",
+      "target_file": "unused",
+      "test_file": "unused",
+      "success_criteria": "sf_v13_tradeoff_tiebreak_receipt_chain_complete",
+      "category": "sandbox_replay",
+      "difficulty": "medium",
+      "repo_kind": "neutral_fixture",
+      "repo": "fixture://sf-v13-tiebreak",
+      "repo_ref": "v1",
+      "fixture_kind": "sf_v13_tiebreak",
+      "mutation_required": false,
+      "allowed_files": [
+        "unused"
+      ],
+      "forbidden_files": [
+        ".nexus/",
+        "logs/",
+        "benchmarks/"
+      ],
+      "setup_command": "python -V",
+      "verification_command": "python -V",
+      "expected_capabilities": [
+        "harness_preflight_sensor"
+      ],
+      "capability_activation_contract": "required",
+      "eligibility_class": "model_required",
+      "public_claim_allowed_metrics": []
+    },
+    {
+      "id": "sf-v15-held-benchmark_meta_opt-001",
+      "task_desc": "SF V13 tradeoff tie-break for capability benchmark_meta_opt.",
+      "target_file": "unused",
+      "test_file": "unused",
+      "success_criteria": "sf_v13_tradeoff_tiebreak_receipt_chain_complete",
+      "category": "benchmark_meta_opt",
+      "difficulty": "medium",
+      "repo_kind": "neutral_fixture",
+      "repo": "fixture://sf-v13-tiebreak",
+      "repo_ref": "v1",
+      "fixture_kind": "sf_v13_tiebreak",
+      "mutation_required": false,
+      "allowed_files": [
+        "unused"
+      ],
+      "forbidden_files": [
+        ".nexus/",
+        "logs/",
+        "benchmarks/"
+      ],
+      "setup_command": "python -V",
+      "verification_command": "python -V",
+      "expected_capabilities": [
+        "judge_panel"
+      ],
+      "capability_activation_contract": "required",
+      "eligibility_class": "model_required",
+      "public_claim_allowed_metrics": []
+    },
+    {
+      "id": "sf-v15-held-registry_skills_sync-001",
+      "task_desc": "SF V13 tradeoff tie-break for capability registry_skills_sync.",
+      "target_file": "unused",
+      "test_file": "unused",
+      "success_criteria": "sf_v13_tradeoff_tiebreak_receipt_chain_complete",
+      "category": "registry_skills_sync",
+      "difficulty": "medium",
+      "repo_kind": "neutral_fixture",
+      "repo": "fixture://sf-v13-tiebreak",
+      "repo_ref": "v1",
+      "fixture_kind": "sf_v13_tiebreak",
+      "mutation_required": false,
+      "allowed_files": [
+        "unused"
+      ],
+      "forbidden_files": [
+        ".nexus/",
+        "logs/",
+        "benchmarks/"
+      ],
+      "setup_command": "python -V",
+      "verification_command": "python -V",
+      "expected_capabilities": [
+        "semantic_searcher"
+      ],
+      "capability_activation_contract": "required",
+      "eligibility_class": "model_required",
+      "public_claim_allowed_metrics": []
+    }
+  ]
+}

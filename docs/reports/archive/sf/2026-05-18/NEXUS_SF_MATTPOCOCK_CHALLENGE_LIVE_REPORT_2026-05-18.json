@@ -1,0 +1,285 @@
+{
+  "schema": "nexus.sf_flash_pair_live_report.v1",
+  "status": "PASS",
+  "summary": {
+    "comparison_count": 6,
+    "keep_count": 6,
+    "return_count": 0,
+    "same_runner_pair_artifact_count": 6,
+    "session_worker_clean_count": 6,
+    "runtime_update_allowed": false,
+    "public_benchmark_allowed": false
+  },
+  "blockers": [],
+  "comparisons": [
+    {
+      "capability_id": "codeintel",
+      "task_id": "sf-flash-pair-codeintel-001",
+      "baseline_row_id": "codeintel::sf-flash-pair-codeintel-001::flash_nexus",
+      "with_skill_row_id": "codeintel::sf-flash-pair-codeintel-001::flash_nexus_with_skill::improve-codebase-architecture",
+      "skill_id": "improve-codebase-architecture",
+      "same_runner_pair_artifacts": true,
+      "session_worker_clean": true,
+      "baseline": {
+        "status": "PASS",
+        "benchmark_status": "SUCCESS",
+        "semantic_status": "VERIFIED",
+        "trust_mismatch": false,
+        "model_calls": 2,
+        "total_tokens": 37318,
+        "phase_wall_total_sec": 76.1617,
+        "output_dir": "/private/tmp/nexus_sf_mattpocock_challenge_live_20260518/codeintel_sf-flash-pair-codeintel-001_flash_nexus"
+      },
+      "with_skill": {
+        "status": "PASS",
+        "benchmark_status": "SUCCESS",
+        "semantic_status": "VERIFIED",
+        "trust_mismatch": false,
+        "model_calls": 2,
+        "total_tokens": 37126,
+        "phase_wall_total_sec": 98.5131,
+        "output_dir": "/private/tmp/nexus_sf_mattpocock_challenge_live_20260518/codeintel_sf-flash-pair-codeintel-001_flash_nexus_with_matt_skill_improve-codebase-architecture",
+        "skill_mount_contract_status": "PASS",
+        "selected": true,
+        "injected": true,
+        "used": true,
+        "evidence_present": true,
+        "gate_passed": true,
+        "outcome_contributed": true
+      },
+      "delta": {
+        "token_delta": -192,
+        "phase_wall_total_delta_sec": 22.3514,
+        "skill_causality_delta": "receipt_backed_skill_chain_present",
+        "delivery_delta": "paired_delivery_equal_or_clean",
+        "cost_delta_status": "observation_only_not_promotion_gate"
+      },
+      "verdict": "KEEP"
+    },
+    {
+      "capability_id": "forecast_pregate",
+      "task_id": "sf-flash-pair-forecast_pregate-001",
+      "baseline_row_id": "forecast_pregate::sf-flash-pair-forecast_pregate-001::flash_nexus",
+      "with_skill_row_id": "forecast_pregate::sf-flash-pair-forecast_pregate-001::flash_nexus_with_skill::to-prd",
+      "skill_id": "to-prd",
+      "same_runner_pair_artifacts": true,
+      "session_worker_clean": true,
+      "baseline": {
+        "status": "PASS",
+        "benchmark_status": "SUCCESS",
+        "semantic_status": "VERIFIED",
+        "trust_mismatch": false,
+        "model_calls": 2,
+        "total_tokens": 39706,
+        "phase_wall_total_sec": 87.1347,
+        "output_dir": "/private/tmp/nexus_sf_mattpocock_challenge_live_20260518/forecast_pregate_sf-flash-pair-forecast_pregate-001_flash_nexus"
+      },
+      "with_skill": {
+        "status": "PASS",
+        "benchmark_status": "SUCCESS",
+        "semantic_status": "VERIFIED",
+        "trust_mismatch": false,
+        "model_calls": 2,
+        "total_tokens": 36830,
+        "phase_wall_total_sec": 88.0374,
+        "output_dir": "/private/tmp/nexus_sf_mattpocock_challenge_live_20260518/forecast_pregate_sf-flash-pair-forecast_pregate-001_flash_nexus_with_matt_skill_to-prd",
+        "skill_mount_contract_status": "PASS",
+        "selected": true,
+        "injected": true,
+        "used": true,
+        "evidence_present": true,
+        "gate_passed": true,
+        "outcome_contributed": true
+      },
+      "delta": {
+        "token_delta": -2876,
+        "phase_wall_total_delta_sec": 0.9027,
+        "skill_causality_delta": "receipt_backed_skill_chain_present",
+        "delivery_delta": "paired_delivery_equal_or_clean",
+        "cost_delta_status": "observation_only_not_promotion_gate"
+      },
+      "verdict": "KEEP"
+    },
+    {
+      "capability_id": "registry_skills_sync",
+      "task_id": "sf-flash-pair-registry_skills_sync-001",
+      "baseline_row_id": "registry_skills_sync::sf-flash-pair-registry_skills_sync-001::flash_nexus",
+      "with_skill_row_id": "registry_skills_sync::sf-flash-pair-registry_skills_sync-001::flash_nexus_with_skill::write-a-skill",
+      "skill_id": "write-a-skill",
+      "same_runner_pair_artifacts": true,
+      "session_worker_clean": true,
+      "baseline": {
+        "status": "PASS",
+        "benchmark_status": "SUCCESS",
+        "semantic_status": "VERIFIED",
+        "trust_mismatch": false,
+        "model_calls": 2,
+        "total_tokens": 40276,
+        "phase_wall_total_sec": 141.0555,
+        "output_dir": "/private/tmp/nexus_sf_mattpocock_challenge_live_20260518/registry_skills_sync_sf-flash-pair-registry_skills_sync-001_flash_nexus"
+      },
+      "with_skill": {
+        "status": "PASS",
+        "benchmark_status": "SUCCESS",
+        "semantic_status": "VERIFIED",
+        "trust_mismatch": false,
+        "model_calls": 2,
+        "total_tokens": 41275,
+        "phase_wall_total_sec": 122.4262,
+        "output_dir": "/private/tmp/nexus_sf_mattpocock_challenge_live_20260518/registry_skills_sync_sf-flash-pair-registry_skills_sync-001_flash_nexus_with_matt_skill_write-a-skill",
+        "skill_mount_contract_status": "PASS",
+        "selected": true,
+        "injected": true,
+        "used": true,
+        "evidence_present": true,
+        "gate_passed": true,
+        "outcome_contributed": true
+      },
+      "delta": {
+        "token_delta": 999,
+        "phase_wall_total_delta_sec": -18.6293,
+        "skill_causality_delta": "receipt_backed_skill_chain_present",
+        "delivery_delta": "paired_delivery_equal_or_clean",
+        "cost_delta_status": "observation_only_not_promotion_gate"
+      },
+      "verdict": "KEEP"
+    },
+    {
+      "capability_id": "repair_loop",
+      "task_id": "sf-flash-pair-repair_loop-001",
+      "baseline_row_id": "repair_loop::sf-flash-pair-repair_loop-001::flash_nexus",
+      "with_skill_row_id": "repair_loop::sf-flash-pair-repair_loop-001::flash_nexus_with_skill::tdd",
+      "skill_id": "tdd",
+      "same_runner_pair_artifacts": true,
+      "session_worker_clean": true,
+      "baseline": {
+        "status": "PASS",
+        "benchmark_status": "SUCCESS",
+        "semantic_status": "VERIFIED",
+        "trust_mismatch": false,
+        "model_calls": 2,
+        "total_tokens": 38973,
+        "phase_wall_total_sec": 92.8218,
+        "output_dir": "/private/tmp/nexus_sf_mattpocock_challenge_live_20260518/repair_loop_sf-flash-pair-repair_loop-001_flash_nexus"
+      },
+      "with_skill": {
+        "status": "PASS",
+        "benchmark_status": "SUCCESS",
+        "semantic_status": "VERIFIED",
+        "trust_mismatch": false,
+        "model_calls": 1,
+        "total_tokens": 17818,
+        "phase_wall_total_sec": 25.0741,
+        "output_dir": "/private/tmp/nexus_sf_mattpocock_challenge_live_20260518/repair_loop_sf-flash-pair-repair_loop-001_flash_nexus_with_matt_skill_tdd",
+        "skill_mount_contract_status": "PASS",
+        "selected": true,
+        "injected": true,
+        "used": true,
+        "evidence_present": true,
+        "gate_passed": true,
+        "outcome_contributed": true
+      },
+      "delta": {
+        "token_delta": -21155,
+        "phase_wall_total_delta_sec": -67.7477,
+        "skill_causality_delta": "receipt_backed_skill_chain_present",
+        "delivery_delta": "paired_delivery_equal_or_clean",
+        "cost_delta_status": "observation_only_not_promotion_gate"
+      },
+      "verdict": "KEEP"
+    },
+    {
+      "capability_id": "research_control_plane",
+      "task_id": "sf-flash-pair-research_control_plane-001",
+      "baseline_row_id": "research_control_plane::sf-flash-pair-research_control_plane-001::flash_nexus",
+      "with_skill_row_id": "research_control_plane::sf-flash-pair-research_control_plane-001::flash_nexus_with_skill::grill-with-docs",
+      "skill_id": "grill-with-docs",
+      "same_runner_pair_artifacts": true,
+      "session_worker_clean": true,
+      "baseline": {
+        "status": "PASS",
+        "benchmark_status": "SUCCESS",
+        "semantic_status": "VERIFIED",
+        "trust_mismatch": false,
+        "model_calls": 2,
+        "total_tokens": 40327,
+        "phase_wall_total_sec": 130.8633,
+        "output_dir": "/private/tmp/nexus_sf_mattpocock_challenge_live_20260518/research_control_plane_sf-flash-pair-research_control_plane-001_flash_nexus"
+      },
+      "with_skill": {
+        "status": "PASS",
+        "benchmark_status": "SUCCESS",
+        "semantic_status": "VERIFIED",
+        "trust_mismatch": false,
+        "model_calls": 2,
+        "total_tokens": 39625,
+        "phase_wall_total_sec": 107.7744,
+        "output_dir": "/private/tmp/nexus_sf_mattpocock_challenge_live_20260518/research_control_plane_sf-flash-pair-research_control_plane-001_flash_nexus_with_matt_skill_grill-with-docs",
+        "skill_mount_contract_status": "PASS",
+        "selected": true,
+        "injected": true,
+        "used": true,
+        "evidence_present": true,
+        "gate_passed": true,
+        "outcome_contributed": true
+      },
+      "delta": {
+        "token_delta": -702,
+        "phase_wall_total_delta_sec": -23.0889,
+        "skill_causality_delta": "receipt_backed_skill_chain_present",
+        "delivery_delta": "paired_delivery_equal_or_clean",
+        "cost_delta_status": "observation_only_not_promotion_gate"
+      },
+      "verdict": "KEEP"
+    },
+    {
+      "capability_id": "xray",
+      "task_id": "sf-flash-pair-xray-001",
+      "baseline_row_id": "xray::sf-flash-pair-xray-001::flash_nexus",
+      "with_skill_row_id": "xray::sf-flash-pair-xray-001::flash_nexus_with_skill::diagnose",
+      "skill_id": "diagnose",
+      "same_runner_pair_artifacts": true,
+      "session_worker_clean": true,
+      "baseline": {
+        "status": "PASS",
+        "benchmark_status": "SUCCESS",
+        "semantic_status": "VERIFIED",
+        "trust_mismatch": false,
+        "model_calls": 2,
+        "total_tokens": 38507,
+        "phase_wall_total_sec": 88.5569,
+        "output_dir": "/private/tmp/nexus_sf_mattpocock_challenge_live_20260518/xray_sf-flash-pair-xray-001_flash_nexus"
+      },
+      "with_skill": {
+        "status": "PASS",
+        "benchmark_status": "SUCCESS",
+        "semantic_status": "VERIFIED",
+        "trust_mismatch": false,
+        "model_calls": 2,
+        "total_tokens": 44376,
+        "phase_wall_total_sec": 125.3446,
+        "output_dir": "/private/tmp/nexus_sf_mattpocock_challenge_live_20260518/xray_sf-flash-pair-xray-001_flash_nexus_with_matt_skill_diagnose",
+        "skill_mount_contract_status": "PASS",
+        "selected": true,
+        "injected": true,
+        "used": true,
+        "evidence_present": true,
+        "gate_passed": true,
+        "outcome_contributed": true
+      },
+      "delta": {
+        "token_delta": 5869,
+        "phase_wall_total_delta_sec": 36.7877,
+        "skill_causality_delta": "receipt_backed_skill_chain_present",
+        "delivery_delta": "paired_delivery_equal_or_clean",
+        "cost_delta_status": "observation_only_not_promotion_gate"
+      },
+      "verdict": "KEEP"
+    }
+  ],
+  "claim_boundary": [
+    "This is SF live evidence for Flash+Nexus versus Flash+Nexus+skill.",
+    "Rows are paired by capability and task in the same runner artifact shape.",
+    "Token and wall deltas are observation-only and do not unlock public benchmark claims."
+  ]
+}

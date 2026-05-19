@@ -1,0 +1,17 @@
+{
+  "schema": "nexus.sf3_runtime_policy_apply_gate.v1",
+  "status": "PASS",
+  "summary": {
+    "runtime_policy_apply_allowed": true,
+    "pending_manual_approval_count": 0,
+    "runtime_update_allowed": true,
+    "public_benchmark_allowed": false,
+    "blocker_count": 0
+  },
+  "blockers": [],
+  "next_gate": "runtime_policy_patch",
+  "claim_boundary": [
+    "SF can prepare runtime policy proposals.",
+    "Public benchmark remains blocked until a separate benchmark unlock gate passes."
+  ]
+}

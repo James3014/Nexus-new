@@ -1,0 +1,95 @@
+{
+  "schema": "nexus.sf.external_challenge_comparison.v1",
+  "status": "PASS",
+  "summary": {
+    "challenger_count": 5,
+    "replace_candidate_count": 1,
+    "alternate_candidate_count": 2,
+    "keep_current_count": 2,
+    "reject_count": 0,
+    "runtime_update_allowed": false,
+    "public_benchmark_allowed": false
+  },
+  "rows": [
+    {
+      "capability_id": "codeintel",
+      "current_skill_id": "sf2-codeintel-route-fit-spec",
+      "challenger_skill_id": "karpathy-guidelines__codeintel",
+      "challenger_canonical_skill_id": "karpathy-guidelines",
+      "challenger_source": "https://github.com/doggy8088/andrej-karpathy-skills",
+      "challenger_commit_sha": "0bf99012a4e63f3370e8027215a715f1bed91059",
+      "current_token_delta": -1312,
+      "challenger_token_delta": 4135,
+      "current_wall_delta_sec": 9.142,
+      "challenger_wall_delta_sec": 39.7441,
+      "skill_chain": "receipt_backed_skill_chain_present",
+      "verdict": "keep_current",
+      "claim_boundary": "observation_only_external_challenge_not_runtime_promotion"
+    },
+    {
+      "capability_id": "direct_master_loop",
+      "current_skill_id": "sf2-direct_master_loop-route-fit-spec",
+      "challenger_skill_id": "karpathy-guidelines__direct_master_loop",
+      "challenger_canonical_skill_id": "karpathy-guidelines",
+      "challenger_source": "https://github.com/doggy8088/andrej-karpathy-skills",
+      "challenger_commit_sha": "0bf99012a4e63f3370e8027215a715f1bed91059",
+      "current_token_delta": -6314,
+      "challenger_token_delta": 3318,
+      "current_wall_delta_sec": -78.7746,
+      "challenger_wall_delta_sec": 31.592,
+      "skill_chain": "receipt_backed_skill_chain_present",
+      "verdict": "keep_current",
+      "claim_boundary": "observation_only_external_challenge_not_runtime_promotion"
+    },
+    {
+      "capability_id": "hyper_sprint",
+      "current_skill_id": "sf2-hyper_sprint-route-fit-spec",
+      "challenger_skill_id": "karpathy-guidelines__hyper_sprint",
+      "challenger_canonical_skill_id": "karpathy-guidelines",
+      "challenger_source": "https://github.com/doggy8088/andrej-karpathy-skills",
+      "challenger_commit_sha": "0bf99012a4e63f3370e8027215a715f1bed91059",
+      "current_token_delta": -360,
+      "challenger_token_delta": -7888,
+      "current_wall_delta_sec": -11.9126,
+      "challenger_wall_delta_sec": 13.212,
+      "skill_chain": "receipt_backed_skill_chain_present",
+      "verdict": "alternate_candidate",
+      "claim_boundary": "observation_only_external_challenge_not_runtime_promotion"
+    },
+    {
+      "capability_id": "repair_loop",
+      "current_skill_id": "test-driven-development",
+      "challenger_skill_id": "karpathy-guidelines__repair_loop",
+      "challenger_canonical_skill_id": "karpathy-guidelines",
+      "challenger_source": "https://github.com/doggy8088/andrej-karpathy-skills",
+      "challenger_commit_sha": "0bf99012a4e63f3370e8027215a715f1bed91059",
+      "current_token_delta": 562,
+      "challenger_token_delta": -904,
+      "current_wall_delta_sec": 19.1855,
+      "challenger_wall_delta_sec": -5.1138,
+      "skill_chain": "receipt_backed_skill_chain_present",
+      "verdict": "replace_candidate",
+      "claim_boundary": "observation_only_external_challenge_not_runtime_promotion"
+    },
+    {
+      "capability_id": "ultra_review",
+      "current_skill_id": "code-review-and-quality",
+      "challenger_skill_id": "karpathy-guidelines__ultra_review",
+      "challenger_canonical_skill_id": "karpathy-guidelines",
+      "challenger_source": "https://github.com/doggy8088/andrej-karpathy-skills",
+      "challenger_commit_sha": "0bf99012a4e63f3370e8027215a715f1bed91059",
+      "current_token_delta": 1760,
+      "challenger_token_delta": -1745,
+      "current_wall_delta_sec": -13.2412,
+      "challenger_wall_delta_sec": 14.6483,
+      "skill_chain": "receipt_backed_skill_chain_present",
+      "verdict": "alternate_candidate",
+      "claim_boundary": "observation_only_external_challenge_not_runtime_promotion"
+    }
+  ],
+  "claim_boundary": {
+    "runtime_update_allowed": false,
+    "public_benchmark_allowed": false,
+    "note": "External challenge can only propose replace/alternate candidates; runtime promotion requires separate review."
+  }
+}

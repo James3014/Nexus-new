@@ -1,0 +1,21 @@
+{
+  "schema": "nexus.skill_discovery_rerun_queue.v1",
+  "status": "PASS",
+  "queue_count": 1,
+  "skipped_count": 0,
+  "queue": [
+    {
+      "capability": "governance_and_trust",
+      "skill_id": "nexus-root-cause-probe",
+      "verdict": "needs_more_data",
+      "tested_rows": 30,
+      "effective_rows": 15,
+      "reason": "needs_more_data"
+    }
+  ],
+  "skipped": [],
+  "claim_boundary": [
+    "Discovery queue schedules validation only; it must not update runtime defaults.",
+    "Rejected skills are skipped until the taskset or candidate source changes."
+  ]
+}

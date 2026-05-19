@@ -1,0 +1,68 @@
+{
+  "schema": "nexus.sf_skill_finalization.v30",
+  "version": "2026-05-19",
+  "status": "PASS",
+  "summary": {
+    "round11_capability_count": 4,
+    "round11_replacement_count": 1,
+    "round11_hold_count": 3,
+    "overlay_version": "v30",
+    "runtime_update_allowed": false,
+    "public_benchmark_allowed": false
+  },
+  "replacements": [
+    {
+      "capability": "ultra_review",
+      "previous_skill": "github9-openai-security-threat-model-ultra-review",
+      "candidate_skill": "github11-vulnerability-scanner-ultra-review",
+      "previous_total_tokens": 39875,
+      "candidate_total_tokens": 39402,
+      "token_delta": -473,
+      "previous_wall_sec": 194.9008,
+      "candidate_wall_sec": 144.8122,
+      "wall_delta_sec": -50.0886,
+      "candidate_receipt_path": ".nexus/reports/sf_round11_coverage_backlog_live_2026-05-19/ultra_review_sf-round11-coverage-ultra_review-001_challenger_github11-vulnerability-scanner-ultra-review",
+      "candidate_evidence_path": ".nexus/reports/sf_round11_coverage_backlog_live_2026-05-19/ultra_review_sf-round11-coverage-ultra_review-001_challenger_github11-vulnerability-scanner-ultra-review/evidence_bundle.json",
+      "decision": "update_overlay_candidate_primary"
+    }
+  ],
+  "holds": [
+    {
+      "capability": "benchmark_meta_opt",
+      "current_skill": "github4-sickn33-antigravity-awesome-skills-ad-creative",
+      "candidate_skill": "github11-ab-test-analysis-benchmark-meta-opt",
+      "reason_codes": [
+        "challenger_token_not_lower",
+        "challenger_wall_not_lower"
+      ],
+      "token_delta": 3406,
+      "wall_delta_sec": 4.2742
+    },
+    {
+      "capability": "forecast_pregate",
+      "current_skill": "create-plan",
+      "candidate_skill": "github11-notion-spec-to-implementation-forecast-pregate",
+      "reason_codes": [
+        "challenger_token_not_lower"
+      ],
+      "token_delta": 1015,
+      "wall_delta_sec": -3.8919
+    },
+    {
+      "capability": "repair_loop",
+      "current_skill": "github7-midudev-tdd-repair-loop",
+      "candidate_skill": "github11-bug-hunter-repair-loop",
+      "reason_codes": [
+        "challenger_token_not_lower"
+      ],
+      "token_delta": 3913,
+      "wall_delta_sec": -7.7901
+    }
+  ],
+  "source_rollup": "docs/reports/NEXUS_SF_ROUND11_COVERAGE_BACKLOG_LIVE_ROLLUP_2026-05-19.json",
+  "source_overlay": "docs/reports/NEXUS_SF_RUNTIME_SKILL_POLICY_OVERLAY_V30_2026-05-19.json",
+  "claim_boundary": [
+    "SF goal: missed 9-round skills compared and better skills update overlay candidate.",
+    "This does not directly write runtime defaults or public benchmark claims."
+  ]
+}

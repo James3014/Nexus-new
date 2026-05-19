@@ -1,0 +1,115 @@
+{
+  "claim_boundary": [
+    "Static safety screen only; no untrusted repo code executed.",
+    "External repo material is prompt-only rewritten before SF ablation.",
+    "No runtime default or public benchmark promotion in this round."
+  ],
+  "repos": [
+    {
+      "commit_sha": "8ef63880775765d21513a480d7aa662b30e3a0ac",
+      "intake_decision": "prompt_only_rewrite_required",
+      "repo": "kevintsai1202/teaching-site-skills",
+      "runtime_mount_allowed": false,
+      "skill_md_count": 11,
+      "source_url": "https://github.com/kevintsai1202/teaching-site-skills",
+      "static_red_flags": [
+        "browser-automation",
+        "mutating-tool-reference",
+        "npx",
+        "secret-handling"
+      ]
+    },
+    {
+      "commit_sha": "044285c33a78afda10468012105b86a225f66267",
+      "intake_decision": "prompt_only_rewrite_required",
+      "repo": "K-Dense-AI/scientific-agent-skills",
+      "runtime_mount_allowed": false,
+      "skill_md_count": 138,
+      "source_url": "https://github.com/K-Dense-AI/scientific-agent-skills",
+      "static_red_flags": [
+        "docker",
+        "mcp-integration",
+        "mutating-tool-reference",
+        "npm-install",
+        "npx",
+        "pip-install",
+        "secret-handling",
+        "tool-declaration"
+      ]
+    },
+    {
+      "commit_sha": "6a1f9674d706a06d462296e53a40f668299e8893",
+      "intake_decision": "prompt_only_rewrite_required",
+      "repo": "Kappaemme-git/codex-complexity-optimizer",
+      "runtime_mount_allowed": false,
+      "skill_md_count": 1,
+      "source_url": "https://github.com/Kappaemme-git/codex-complexity-optimizer",
+      "static_red_flags": [
+        "mutating-tool-reference"
+      ]
+    },
+    {
+      "commit_sha": "590b49edc158611a2b2ed715ae73f27eb70d251a",
+      "intake_decision": "prompt_only_rewrite_required",
+      "repo": "openai/skills",
+      "runtime_mount_allowed": false,
+      "skill_md_count": 38,
+      "source_url": "https://github.com/openai/skills/tree/main/skills/.curated",
+      "static_red_flags": [
+        "browser-automation",
+        "curl-pipe",
+        "docker",
+        "mcp-integration",
+        "mutating-tool-reference",
+        "npm-install",
+        "npx",
+        "pip-install",
+        "secret-handling"
+      ]
+    }
+  ],
+  "schema": "nexus.sf_github_round9_static_screen.v1",
+  "selected_challengers": [
+    {
+      "candidate_path": "/Users/jameschen/Workspace/nexus/.agents/skills/github-round9-challengers/github9-teaching-web-visual-ui-validator/SKILL.md",
+      "candidate_skill": "github9-teaching-web-visual-ui-validator",
+      "capability": "ui_validator",
+      "reason": "Visual verification maps to UI validator behavior and viewport/console checks.",
+      "repo": "kevintsai1202/teaching-site-skills",
+      "source_skill": "web-visual-verification/SKILL.md"
+    },
+    {
+      "candidate_path": "/Users/jameschen/Workspace/nexus/.agents/skills/github-round9-challengers/github9-scientific-research-lookup-control-plane/SKILL.md",
+      "candidate_skill": "github9-scientific-research-lookup-control-plane",
+      "capability": "research_control_plane",
+      "reason": "Scientific lookup maps to research control-plane source routing.",
+      "repo": "K-Dense-AI/scientific-agent-skills",
+      "source_skill": "scientific-skills/research-lookup/SKILL.md"
+    },
+    {
+      "candidate_path": "/Users/jameschen/Workspace/nexus/.agents/skills/github-round9-challengers/github9-complexity-optimizer-codeintel/SKILL.md",
+      "candidate_skill": "github9-complexity-optimizer-codeintel",
+      "capability": "codeintel",
+      "reason": "Complexity hotspot analysis maps to CodeIntel impact and optimization reasoning.",
+      "repo": "Kappaemme-git/codex-complexity-optimizer",
+      "source_skill": "complexity-optimizer/SKILL.md"
+    },
+    {
+      "candidate_path": "/Users/jameschen/Workspace/nexus/.agents/skills/github-round9-challengers/github9-openai-security-threat-model-ultra-review/SKILL.md",
+      "candidate_skill": "github9-openai-security-threat-model-ultra-review",
+      "capability": "ultra_review",
+      "reason": "Threat modeling maps to Ultra Review security/trust boundary review.",
+      "repo": "openai/skills",
+      "source_skill": "skills/.curated/security-threat-model/SKILL.md"
+    }
+  ],
+  "status": "PASS",
+  "summary": {
+    "public_benchmark_allowed": false,
+    "repo_count": 4,
+    "runtime_update_allowed": false,
+    "selected_challenger_count": 4,
+    "total_skill_md_count": 188
+  },
+  "version": "2026-05-19"
+}

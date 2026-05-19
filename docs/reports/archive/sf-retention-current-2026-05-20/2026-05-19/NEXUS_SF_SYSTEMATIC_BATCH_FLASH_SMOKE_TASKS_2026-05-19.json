@@ -1,0 +1,1036 @@
+{
+  "benchmark_id": "nexus-sf-systematic-batch-v1",
+  "description": "Internal SF systematic compiled-interface batch current_best vs challenger matrix. Not a public benchmark.",
+  "frozen": true,
+  "schema": "nexus.sf_systematic_batch_tasks.v1",
+  "status": "PASS",
+  "summary": {
+    "capability_count": 34,
+    "public_benchmark_allowed": false,
+    "runtime_update_allowed": false,
+    "task_count": 34
+  },
+  "tasks": [
+    {
+      "allowed_files": [
+        "unused"
+      ],
+      "capability_activation_contract": "required",
+      "category": "artifact_gate",
+      "difficulty": "medium",
+      "eligibility_class": "model_required",
+      "expected_capabilities": [
+        "claim_gate"
+      ],
+      "fixture_kind": "sf_systematic_batch",
+      "forbidden_files": [
+        ".nexus/",
+        "logs/",
+        "benchmarks/"
+      ],
+      "id": "sf-systematic-batch-artifact_gate-001",
+      "mutation_required": false,
+      "public_claim_allowed_metrics": [],
+      "repo": "fixture://sf-systematic-batch",
+      "repo_kind": "neutral_fixture",
+      "repo_ref": "v1",
+      "setup_command": "python -V",
+      "success_criteria": "sf_systematic_batch_receipt_chain_complete",
+      "target_file": "unused",
+      "task_desc": "Systematic SF batch compare for artifact_gate: current_best vs compiled-interface challenger.",
+      "test_file": "unused",
+      "verification_command": "python -V"
+    },
+    {
+      "allowed_files": [
+        "unused"
+      ],
+      "capability_activation_contract": "required",
+      "category": "autonomic_router",
+      "difficulty": "medium",
+      "eligibility_class": "model_required",
+      "expected_capabilities": [
+        "autoreason"
+      ],
+      "fixture_kind": "sf_systematic_batch",
+      "forbidden_files": [
+        ".nexus/",
+        "logs/",
+        "benchmarks/"
+      ],
+      "id": "sf-systematic-batch-autonomic_router-001",
+      "mutation_required": false,
+      "public_claim_allowed_metrics": [],
+      "repo": "fixture://sf-systematic-batch",
+      "repo_kind": "neutral_fixture",
+      "repo_ref": "v1",
+      "setup_command": "python -V",
+      "success_criteria": "sf_systematic_batch_receipt_chain_complete",
+      "target_file": "unused",
+      "task_desc": "Systematic SF batch compare for autonomic_router: current_best vs compiled-interface challenger.",
+      "test_file": "unused",
+      "verification_command": "python -V"
+    },
+    {
+      "allowed_files": [
+        "unused"
+      ],
+      "capability_activation_contract": "required",
+      "category": "autoreason",
+      "difficulty": "medium",
+      "eligibility_class": "model_required",
+      "expected_capabilities": [
+        "autoreason"
+      ],
+      "fixture_kind": "sf_systematic_batch",
+      "forbidden_files": [
+        ".nexus/",
+        "logs/",
+        "benchmarks/"
+      ],
+      "id": "sf-systematic-batch-autoreason-001",
+      "mutation_required": false,
+      "public_claim_allowed_metrics": [],
+      "repo": "fixture://sf-systematic-batch",
+      "repo_kind": "neutral_fixture",
+      "repo_ref": "v1",
+      "setup_command": "python -V",
+      "success_criteria": "sf_systematic_batch_receipt_chain_complete",
+      "target_file": "unused",
+      "task_desc": "Systematic SF batch compare for autoreason: current_best vs compiled-interface challenger.",
+      "test_file": "unused",
+      "verification_command": "python -V"
+    },
+    {
+      "allowed_files": [
+        "unused"
+      ],
+      "capability_activation_contract": "required",
+      "category": "belief",
+      "difficulty": "medium",
+      "eligibility_class": "model_required",
+      "expected_capabilities": [
+        "autoreason"
+      ],
+      "fixture_kind": "sf_systematic_batch",
+      "forbidden_files": [
+        ".nexus/",
+        "logs/",
+        "benchmarks/"
+      ],
+      "id": "sf-systematic-batch-belief-001",
+      "mutation_required": false,
+      "public_claim_allowed_metrics": [],
+      "repo": "fixture://sf-systematic-batch",
+      "repo_kind": "neutral_fixture",
+      "repo_ref": "v1",
+      "setup_command": "python -V",
+      "success_criteria": "sf_systematic_batch_receipt_chain_complete",
+      "target_file": "unused",
+      "task_desc": "Systematic SF batch compare for belief: current_best vs compiled-interface challenger.",
+      "test_file": "unused",
+      "verification_command": "python -V"
+    },
+    {
+      "allowed_files": [
+        "unused"
+      ],
+      "capability_activation_contract": "required",
+      "category": "benchmark_meta_opt",
+      "difficulty": "medium",
+      "eligibility_class": "model_required",
+      "expected_capabilities": [
+        "judge_panel"
+      ],
+      "fixture_kind": "sf_systematic_batch",
+      "forbidden_files": [
+        ".nexus/",
+        "logs/",
+        "benchmarks/"
+      ],
+      "id": "sf-systematic-batch-benchmark_meta_opt-001",
+      "mutation_required": false,
+      "public_claim_allowed_metrics": [],
+      "repo": "fixture://sf-systematic-batch",
+      "repo_kind": "neutral_fixture",
+      "repo_ref": "v1",
+      "setup_command": "python -V",
+      "success_criteria": "sf_systematic_batch_receipt_chain_complete",
+      "target_file": "unused",
+      "task_desc": "Systematic SF batch compare for benchmark_meta_opt: current_best vs compiled-interface challenger.",
+      "test_file": "unused",
+      "verification_command": "python -V"
+    },
+    {
+      "allowed_files": [
+        "unused"
+      ],
+      "capability_activation_contract": "required",
+      "category": "claim_gate",
+      "difficulty": "medium",
+      "eligibility_class": "model_required",
+      "expected_capabilities": [
+        "claim_gate"
+      ],
+      "fixture_kind": "sf_systematic_batch",
+      "forbidden_files": [
+        ".nexus/",
+        "logs/",
+        "benchmarks/"
+      ],
+      "id": "sf-systematic-batch-claim_gate-001",
+      "mutation_required": false,
+      "public_claim_allowed_metrics": [],
+      "repo": "fixture://sf-systematic-batch",
+      "repo_kind": "neutral_fixture",
+      "repo_ref": "v1",
+      "setup_command": "python -V",
+      "success_criteria": "sf_systematic_batch_receipt_chain_complete",
+      "target_file": "unused",
+      "task_desc": "Systematic SF batch compare for claim_gate: current_best vs compiled-interface challenger.",
+      "test_file": "unused",
+      "verification_command": "python -V"
+    },
+    {
+      "allowed_files": [
+        "unused"
+      ],
+      "capability_activation_contract": "required",
+      "category": "codeintel",
+      "difficulty": "medium",
+      "eligibility_class": "model_required",
+      "expected_capabilities": [
+        "codeintel"
+      ],
+      "fixture_kind": "sf_systematic_batch",
+      "forbidden_files": [
+        ".nexus/",
+        "logs/",
+        "benchmarks/"
+      ],
+      "id": "sf-systematic-batch-codeintel-001",
+      "mutation_required": false,
+      "public_claim_allowed_metrics": [],
+      "repo": "fixture://sf-systematic-batch",
+      "repo_kind": "neutral_fixture",
+      "repo_ref": "v1",
+      "setup_command": "python -V",
+      "success_criteria": "sf_systematic_batch_receipt_chain_complete",
+      "target_file": "unused",
+      "task_desc": "Systematic SF batch compare for codeintel: current_best vs compiled-interface challenger.",
+      "test_file": "unused",
+      "verification_command": "python -V"
+    },
+    {
+      "allowed_files": [
+        "unused"
+      ],
+      "capability_activation_contract": "required",
+      "category": "ddtree",
+      "difficulty": "medium",
+      "eligibility_class": "model_required",
+      "expected_capabilities": [
+        "autoreason"
+      ],
+      "fixture_kind": "sf_systematic_batch",
+      "forbidden_files": [
+        ".nexus/",
+        "logs/",
+        "benchmarks/"
+      ],
+      "id": "sf-systematic-batch-ddtree-001",
+      "mutation_required": false,
+      "public_claim_allowed_metrics": [],
+      "repo": "fixture://sf-systematic-batch",
+      "repo_kind": "neutral_fixture",
+      "repo_ref": "v1",
+      "setup_command": "python -V",
+      "success_criteria": "sf_systematic_batch_receipt_chain_complete",
+      "target_file": "unused",
+      "task_desc": "Systematic SF batch compare for ddtree: current_best vs compiled-interface challenger.",
+      "test_file": "unused",
+      "verification_command": "python -V"
+    },
+    {
+      "allowed_files": [
+        "unused"
+      ],
+      "capability_activation_contract": "required",
+      "category": "direct_master_loop",
+      "difficulty": "medium",
+      "eligibility_class": "model_required",
+      "expected_capabilities": [
+        "hyper"
+      ],
+      "fixture_kind": "sf_systematic_batch",
+      "forbidden_files": [
+        ".nexus/",
+        "logs/",
+        "benchmarks/"
+      ],
+      "id": "sf-systematic-batch-direct_master_loop-001",
+      "mutation_required": false,
+      "public_claim_allowed_metrics": [],
+      "repo": "fixture://sf-systematic-batch",
+      "repo_kind": "neutral_fixture",
+      "repo_ref": "v1",
+      "setup_command": "python -V",
+      "success_criteria": "sf_systematic_batch_receipt_chain_complete",
+      "target_file": "unused",
+      "task_desc": "Systematic SF batch compare for direct_master_loop: current_best vs compiled-interface challenger.",
+      "test_file": "unused",
+      "verification_command": "python -V"
+    },
+    {
+      "allowed_files": [
+        "unused"
+      ],
+      "capability_activation_contract": "required",
+      "category": "drone",
+      "difficulty": "medium",
+      "eligibility_class": "model_required",
+      "expected_capabilities": [
+        "hyper"
+      ],
+      "fixture_kind": "sf_systematic_batch",
+      "forbidden_files": [
+        ".nexus/",
+        "logs/",
+        "benchmarks/"
+      ],
+      "id": "sf-systematic-batch-drone-001",
+      "mutation_required": false,
+      "public_claim_allowed_metrics": [],
+      "repo": "fixture://sf-systematic-batch",
+      "repo_kind": "neutral_fixture",
+      "repo_ref": "v1",
+      "setup_command": "python -V",
+      "success_criteria": "sf_systematic_batch_receipt_chain_complete",
+      "target_file": "unused",
+      "task_desc": "Systematic SF batch compare for drone: current_best vs compiled-interface challenger.",
+      "test_file": "unused",
+      "verification_command": "python -V"
+    },
+    {
+      "allowed_files": [
+        "unused"
+      ],
+      "capability_activation_contract": "required",
+      "category": "external_productivity",
+      "difficulty": "medium",
+      "eligibility_class": "model_required",
+      "expected_capabilities": [
+        "research"
+      ],
+      "fixture_kind": "sf_systematic_batch",
+      "forbidden_files": [
+        ".nexus/",
+        "logs/",
+        "benchmarks/"
+      ],
+      "id": "sf-systematic-batch-external_productivity-001",
+      "mutation_required": false,
+      "public_claim_allowed_metrics": [],
+      "repo": "fixture://sf-systematic-batch",
+      "repo_kind": "neutral_fixture",
+      "repo_ref": "v1",
+      "setup_command": "python -V",
+      "success_criteria": "sf_systematic_batch_receipt_chain_complete",
+      "target_file": "unused",
+      "task_desc": "Systematic SF batch compare for external_productivity: current_best vs compiled-interface challenger.",
+      "test_file": "unused",
+      "verification_command": "python -V"
+    },
+    {
+      "allowed_files": [
+        "unused"
+      ],
+      "capability_activation_contract": "required",
+      "category": "file_lock_security_gate",
+      "difficulty": "medium",
+      "eligibility_class": "model_required",
+      "expected_capabilities": [
+        "ultra_review"
+      ],
+      "fixture_kind": "sf_systematic_batch",
+      "forbidden_files": [
+        ".nexus/",
+        "logs/",
+        "benchmarks/"
+      ],
+      "id": "sf-systematic-batch-file_lock_security_gate-001",
+      "mutation_required": false,
+      "public_claim_allowed_metrics": [],
+      "repo": "fixture://sf-systematic-batch",
+      "repo_kind": "neutral_fixture",
+      "repo_ref": "v1",
+      "setup_command": "python -V",
+      "success_criteria": "sf_systematic_batch_receipt_chain_complete",
+      "target_file": "unused",
+      "task_desc": "Systematic SF batch compare for file_lock_security_gate: current_best vs compiled-interface challenger.",
+      "test_file": "unused",
+      "verification_command": "python -V"
+    },
+    {
+      "allowed_files": [
+        "unused"
+      ],
+      "capability_activation_contract": "required",
+      "category": "forecast_pregate",
+      "difficulty": "medium",
+      "eligibility_class": "model_required",
+      "expected_capabilities": [
+        "autoreason"
+      ],
+      "fixture_kind": "sf_systematic_batch",
+      "forbidden_files": [
+        ".nexus/",
+        "logs/",
+        "benchmarks/"
+      ],
+      "id": "sf-systematic-batch-forecast_pregate-001",
+      "mutation_required": false,
+      "public_claim_allowed_metrics": [],
+      "repo": "fixture://sf-systematic-batch",
+      "repo_kind": "neutral_fixture",
+      "repo_ref": "v1",
+      "setup_command": "python -V",
+      "success_criteria": "sf_systematic_batch_receipt_chain_complete",
+      "target_file": "unused",
+      "task_desc": "Systematic SF batch compare for forecast_pregate: current_best vs compiled-interface challenger.",
+      "test_file": "unused",
+      "verification_command": "python -V"
+    },
+    {
+      "allowed_files": [
+        "unused"
+      ],
+      "capability_activation_contract": "required",
+      "category": "governance_and_trust",
+      "difficulty": "medium",
+      "eligibility_class": "model_required",
+      "expected_capabilities": [
+        "claim_gate"
+      ],
+      "fixture_kind": "sf_systematic_batch",
+      "forbidden_files": [
+        ".nexus/",
+        "logs/",
+        "benchmarks/"
+      ],
+      "id": "sf-systematic-batch-governance_and_trust-001",
+      "mutation_required": false,
+      "public_claim_allowed_metrics": [],
+      "repo": "fixture://sf-systematic-batch",
+      "repo_kind": "neutral_fixture",
+      "repo_ref": "v1",
+      "setup_command": "python -V",
+      "success_criteria": "sf_systematic_batch_receipt_chain_complete",
+      "target_file": "unused",
+      "task_desc": "Systematic SF batch compare for governance_and_trust: current_best vs compiled-interface challenger.",
+      "test_file": "unused",
+      "verification_command": "python -V"
+    },
+    {
+      "allowed_files": [
+        "unused"
+      ],
+      "capability_activation_contract": "required",
+      "category": "hyper_sprint",
+      "difficulty": "medium",
+      "eligibility_class": "model_required",
+      "expected_capabilities": [
+        "hyper"
+      ],
+      "fixture_kind": "sf_systematic_batch",
+      "forbidden_files": [
+        ".nexus/",
+        "logs/",
+        "benchmarks/"
+      ],
+      "id": "sf-systematic-batch-hyper_sprint-001",
+      "mutation_required": false,
+      "public_claim_allowed_metrics": [],
+      "repo": "fixture://sf-systematic-batch",
+      "repo_kind": "neutral_fixture",
+      "repo_ref": "v1",
+      "setup_command": "python -V",
+      "success_criteria": "sf_systematic_batch_receipt_chain_complete",
+      "target_file": "unused",
+      "task_desc": "Systematic SF batch compare for hyper_sprint: current_best vs compiled-interface challenger.",
+      "test_file": "unused",
+      "verification_command": "python -V"
+    },
+    {
+      "allowed_files": [
+        "unused"
+      ],
+      "capability_activation_contract": "required",
+      "category": "lancedb",
+      "difficulty": "medium",
+      "eligibility_class": "model_required",
+      "expected_capabilities": [
+        "semantic_searcher"
+      ],
+      "fixture_kind": "sf_systematic_batch",
+      "forbidden_files": [
+        ".nexus/",
+        "logs/",
+        "benchmarks/"
+      ],
+      "id": "sf-systematic-batch-lancedb-001",
+      "mutation_required": false,
+      "public_claim_allowed_metrics": [],
+      "repo": "fixture://sf-systematic-batch",
+      "repo_kind": "neutral_fixture",
+      "repo_ref": "v1",
+      "setup_command": "python -V",
+      "success_criteria": "sf_systematic_batch_receipt_chain_complete",
+      "target_file": "unused",
+      "task_desc": "Systematic SF batch compare for lancedb: current_best vs compiled-interface challenger.",
+      "test_file": "unused",
+      "verification_command": "python -V"
+    },
+    {
+      "allowed_files": [
+        "unused"
+      ],
+      "capability_activation_contract": "required",
+      "category": "learn_ask",
+      "difficulty": "medium",
+      "eligibility_class": "model_required",
+      "expected_capabilities": [
+        "research"
+      ],
+      "fixture_kind": "sf_systematic_batch",
+      "forbidden_files": [
+        ".nexus/",
+        "logs/",
+        "benchmarks/"
+      ],
+      "id": "sf-systematic-batch-learn_ask-001",
+      "mutation_required": false,
+      "public_claim_allowed_metrics": [],
+      "repo": "fixture://sf-systematic-batch",
+      "repo_kind": "neutral_fixture",
+      "repo_ref": "v1",
+      "setup_command": "python -V",
+      "success_criteria": "sf_systematic_batch_receipt_chain_complete",
+      "target_file": "unused",
+      "task_desc": "Systematic SF batch compare for learn_ask: current_best vs compiled-interface challenger.",
+      "test_file": "unused",
+      "verification_command": "python -V"
+    },
+    {
+      "allowed_files": [
+        "unused"
+      ],
+      "capability_activation_contract": "required",
+      "category": "learning_closure",
+      "difficulty": "medium",
+      "eligibility_class": "model_required",
+      "expected_capabilities": [
+        "semantic_failure_sensor"
+      ],
+      "fixture_kind": "sf_systematic_batch",
+      "forbidden_files": [
+        ".nexus/",
+        "logs/",
+        "benchmarks/"
+      ],
+      "id": "sf-systematic-batch-learning_closure-001",
+      "mutation_required": false,
+      "public_claim_allowed_metrics": [],
+      "repo": "fixture://sf-systematic-batch",
+      "repo_kind": "neutral_fixture",
+      "repo_ref": "v1",
+      "setup_command": "python -V",
+      "success_criteria": "sf_systematic_batch_receipt_chain_complete",
+      "target_file": "unused",
+      "task_desc": "Systematic SF batch compare for learning_closure: current_best vs compiled-interface challenger.",
+      "test_file": "unused",
+      "verification_command": "python -V"
+    },
+    {
+      "allowed_files": [
+        "unused"
+      ],
+      "capability_activation_contract": "required",
+      "category": "memory",
+      "difficulty": "medium",
+      "eligibility_class": "model_required",
+      "expected_capabilities": [
+        "semantic_searcher"
+      ],
+      "fixture_kind": "sf_systematic_batch",
+      "forbidden_files": [
+        ".nexus/",
+        "logs/",
+        "benchmarks/"
+      ],
+      "id": "sf-systematic-batch-memory-001",
+      "mutation_required": false,
+      "public_claim_allowed_metrics": [],
+      "repo": "fixture://sf-systematic-batch",
+      "repo_kind": "neutral_fixture",
+      "repo_ref": "v1",
+      "setup_command": "python -V",
+      "success_criteria": "sf_systematic_batch_receipt_chain_complete",
+      "target_file": "unused",
+      "task_desc": "Systematic SF batch compare for memory: current_best vs compiled-interface challenger.",
+      "test_file": "unused",
+      "verification_command": "python -V"
+    },
+    {
+      "allowed_files": [
+        "unused"
+      ],
+      "capability_activation_contract": "required",
+      "category": "mempalace",
+      "difficulty": "medium",
+      "eligibility_class": "model_required",
+      "expected_capabilities": [
+        "claim_gate"
+      ],
+      "fixture_kind": "sf_systematic_batch",
+      "forbidden_files": [
+        ".nexus/",
+        "logs/",
+        "benchmarks/"
+      ],
+      "id": "sf-systematic-batch-mempalace-001",
+      "mutation_required": false,
+      "public_claim_allowed_metrics": [],
+      "repo": "fixture://sf-systematic-batch",
+      "repo_kind": "neutral_fixture",
+      "repo_ref": "v1",
+      "setup_command": "python -V",
+      "success_criteria": "sf_systematic_batch_receipt_chain_complete",
+      "target_file": "unused",
+      "task_desc": "Systematic SF batch compare for mempalace: current_best vs compiled-interface challenger.",
+      "test_file": "unused",
+      "verification_command": "python -V"
+    },
+    {
+      "allowed_files": [
+        "unused"
+      ],
+      "capability_activation_contract": "required",
+      "category": "metabolism_resume",
+      "difficulty": "medium",
+      "eligibility_class": "model_required",
+      "expected_capabilities": [
+        "semantic_failure_sensor"
+      ],
+      "fixture_kind": "sf_systematic_batch",
+      "forbidden_files": [
+        ".nexus/",
+        "logs/",
+        "benchmarks/"
+      ],
+      "id": "sf-systematic-batch-metabolism_resume-001",
+      "mutation_required": false,
+      "public_claim_allowed_metrics": [],
+      "repo": "fixture://sf-systematic-batch",
+      "repo_kind": "neutral_fixture",
+      "repo_ref": "v1",
+      "setup_command": "python -V",
+      "success_criteria": "sf_systematic_batch_receipt_chain_complete",
+      "target_file": "unused",
+      "task_desc": "Systematic SF batch compare for metabolism_resume: current_best vs compiled-interface challenger.",
+      "test_file": "unused",
+      "verification_command": "python -V"
+    },
+    {
+      "allowed_files": [
+        "unused"
+      ],
+      "capability_activation_contract": "required",
+      "category": "nightshift",
+      "difficulty": "medium",
+      "eligibility_class": "model_required",
+      "expected_capabilities": [
+        "hyper"
+      ],
+      "fixture_kind": "sf_systematic_batch",
+      "forbidden_files": [
+        ".nexus/",
+        "logs/",
+        "benchmarks/"
+      ],
+      "id": "sf-systematic-batch-nightshift-001",
+      "mutation_required": false,
+      "public_claim_allowed_metrics": [],
+      "repo": "fixture://sf-systematic-batch",
+      "repo_kind": "neutral_fixture",
+      "repo_ref": "v1",
+      "setup_command": "python -V",
+      "success_criteria": "sf_systematic_batch_receipt_chain_complete",
+      "target_file": "unused",
+      "task_desc": "Systematic SF batch compare for nightshift: current_best vs compiled-interface challenger.",
+      "test_file": "unused",
+      "verification_command": "python -V"
+    },
+    {
+      "allowed_files": [
+        "unused"
+      ],
+      "capability_activation_contract": "required",
+      "category": "policy_capability_gate",
+      "difficulty": "medium",
+      "eligibility_class": "model_required",
+      "expected_capabilities": [
+        "claim_gate"
+      ],
+      "fixture_kind": "sf_systematic_batch",
+      "forbidden_files": [
+        ".nexus/",
+        "logs/",
+        "benchmarks/"
+      ],
+      "id": "sf-systematic-batch-policy_capability_gate-001",
+      "mutation_required": false,
+      "public_claim_allowed_metrics": [],
+      "repo": "fixture://sf-systematic-batch",
+      "repo_kind": "neutral_fixture",
+      "repo_ref": "v1",
+      "setup_command": "python -V",
+      "success_criteria": "sf_systematic_batch_receipt_chain_complete",
+      "target_file": "unused",
+      "task_desc": "Systematic SF batch compare for policy_capability_gate: current_best vs compiled-interface challenger.",
+      "test_file": "unused",
+      "verification_command": "python -V"
+    },
+    {
+      "allowed_files": [
+        "unused"
+      ],
+      "capability_activation_contract": "required",
+      "category": "registry_skills_sync",
+      "difficulty": "medium",
+      "eligibility_class": "model_required",
+      "expected_capabilities": [
+        "semantic_searcher"
+      ],
+      "fixture_kind": "sf_systematic_batch",
+      "forbidden_files": [
+        ".nexus/",
+        "logs/",
+        "benchmarks/"
+      ],
+      "id": "sf-systematic-batch-registry_skills_sync-001",
+      "mutation_required": false,
+      "public_claim_allowed_metrics": [],
+      "repo": "fixture://sf-systematic-batch",
+      "repo_kind": "neutral_fixture",
+      "repo_ref": "v1",
+      "setup_command": "python -V",
+      "success_criteria": "sf_systematic_batch_receipt_chain_complete",
+      "target_file": "unused",
+      "task_desc": "Systematic SF batch compare for registry_skills_sync: current_best vs compiled-interface challenger.",
+      "test_file": "unused",
+      "verification_command": "python -V"
+    },
+    {
+      "allowed_files": [
+        "unused"
+      ],
+      "capability_activation_contract": "required",
+      "category": "regression_guard",
+      "difficulty": "medium",
+      "eligibility_class": "model_required",
+      "expected_capabilities": [
+        "ultra_review"
+      ],
+      "fixture_kind": "sf_systematic_batch",
+      "forbidden_files": [
+        ".nexus/",
+        "logs/",
+        "benchmarks/"
+      ],
+      "id": "sf-systematic-batch-regression_guard-001",
+      "mutation_required": false,
+      "public_claim_allowed_metrics": [],
+      "repo": "fixture://sf-systematic-batch",
+      "repo_kind": "neutral_fixture",
+      "repo_ref": "v1",
+      "setup_command": "python -V",
+      "success_criteria": "sf_systematic_batch_receipt_chain_complete",
+      "target_file": "unused",
+      "task_desc": "Systematic SF batch compare for regression_guard: current_best vs compiled-interface challenger.",
+      "test_file": "unused",
+      "verification_command": "python -V"
+    },
+    {
+      "allowed_files": [
+        "unused"
+      ],
+      "capability_activation_contract": "required",
+      "category": "repair_loop",
+      "difficulty": "medium",
+      "eligibility_class": "model_required",
+      "expected_capabilities": [
+        "hyper"
+      ],
+      "fixture_kind": "sf_systematic_batch",
+      "forbidden_files": [
+        ".nexus/",
+        "logs/",
+        "benchmarks/"
+      ],
+      "id": "sf-systematic-batch-repair_loop-001",
+      "mutation_required": false,
+      "public_claim_allowed_metrics": [],
+      "repo": "fixture://sf-systematic-batch",
+      "repo_kind": "neutral_fixture",
+      "repo_ref": "v1",
+      "setup_command": "python -V",
+      "success_criteria": "sf_systematic_batch_receipt_chain_complete",
+      "target_file": "unused",
+      "task_desc": "Systematic SF batch compare for repair_loop: current_best vs compiled-interface challenger.",
+      "test_file": "unused",
+      "verification_command": "python -V"
+    },
+    {
+      "allowed_files": [
+        "unused"
+      ],
+      "capability_activation_contract": "required",
+      "category": "research",
+      "difficulty": "medium",
+      "eligibility_class": "model_required",
+      "expected_capabilities": [
+        "research"
+      ],
+      "fixture_kind": "sf_systematic_batch",
+      "forbidden_files": [
+        ".nexus/",
+        "logs/",
+        "benchmarks/"
+      ],
+      "id": "sf-systematic-batch-research-001",
+      "mutation_required": false,
+      "public_claim_allowed_metrics": [],
+      "repo": "fixture://sf-systematic-batch",
+      "repo_kind": "neutral_fixture",
+      "repo_ref": "v1",
+      "setup_command": "python -V",
+      "success_criteria": "sf_systematic_batch_receipt_chain_complete",
+      "target_file": "unused",
+      "task_desc": "Systematic SF batch compare for research: current_best vs compiled-interface challenger.",
+      "test_file": "unused",
+      "verification_command": "python -V"
+    },
+    {
+      "allowed_files": [
+        "unused"
+      ],
+      "capability_activation_contract": "required",
+      "category": "research_and_source_discipline",
+      "difficulty": "medium",
+      "eligibility_class": "model_required",
+      "expected_capabilities": [
+        "research"
+      ],
+      "fixture_kind": "sf_systematic_batch",
+      "forbidden_files": [
+        ".nexus/",
+        "logs/",
+        "benchmarks/"
+      ],
+      "id": "sf-systematic-batch-research_and_source_discipline-001",
+      "mutation_required": false,
+      "public_claim_allowed_metrics": [],
+      "repo": "fixture://sf-systematic-batch",
+      "repo_kind": "neutral_fixture",
+      "repo_ref": "v1",
+      "setup_command": "python -V",
+      "success_criteria": "sf_systematic_batch_receipt_chain_complete",
+      "target_file": "unused",
+      "task_desc": "Systematic SF batch compare for research_and_source_discipline: current_best vs compiled-interface challenger.",
+      "test_file": "unused",
+      "verification_command": "python -V"
+    },
+    {
+      "allowed_files": [
+        "unused"
+      ],
+      "capability_activation_contract": "required",
+      "category": "research_control_plane",
+      "difficulty": "medium",
+      "eligibility_class": "model_required",
+      "expected_capabilities": [
+        "research"
+      ],
+      "fixture_kind": "sf_systematic_batch",
+      "forbidden_files": [
+        ".nexus/",
+        "logs/",
+        "benchmarks/"
+      ],
+      "id": "sf-systematic-batch-research_control_plane-001",
+      "mutation_required": false,
+      "public_claim_allowed_metrics": [],
+      "repo": "fixture://sf-systematic-batch",
+      "repo_kind": "neutral_fixture",
+      "repo_ref": "v1",
+      "setup_command": "python -V",
+      "success_criteria": "sf_systematic_batch_receipt_chain_complete",
+      "target_file": "unused",
+      "task_desc": "Systematic SF batch compare for research_control_plane: current_best vs compiled-interface challenger.",
+      "test_file": "unused",
+      "verification_command": "python -V"
+    },
+    {
+      "allowed_files": [
+        "unused"
+      ],
+      "capability_activation_contract": "required",
+      "category": "sandbox_replay",
+      "difficulty": "medium",
+      "eligibility_class": "model_required",
+      "expected_capabilities": [
+        "ultra_review"
+      ],
+      "fixture_kind": "sf_systematic_batch",
+      "forbidden_files": [
+        ".nexus/",
+        "logs/",
+        "benchmarks/"
+      ],
+      "id": "sf-systematic-batch-sandbox_replay-001",
+      "mutation_required": false,
+      "public_claim_allowed_metrics": [],
+      "repo": "fixture://sf-systematic-batch",
+      "repo_kind": "neutral_fixture",
+      "repo_ref": "v1",
+      "setup_command": "python -V",
+      "success_criteria": "sf_systematic_batch_receipt_chain_complete",
+      "target_file": "unused",
+      "task_desc": "Systematic SF batch compare for sandbox_replay: current_best vs compiled-interface challenger.",
+      "test_file": "unused",
+      "verification_command": "python -V"
+    },
+    {
+      "allowed_files": [
+        "unused"
+      ],
+      "capability_activation_contract": "required",
+      "category": "swarm_multi_agent",
+      "difficulty": "medium",
+      "eligibility_class": "model_required",
+      "expected_capabilities": [
+        "hyper"
+      ],
+      "fixture_kind": "sf_systematic_batch",
+      "forbidden_files": [
+        ".nexus/",
+        "logs/",
+        "benchmarks/"
+      ],
+      "id": "sf-systematic-batch-swarm_multi_agent-001",
+      "mutation_required": false,
+      "public_claim_allowed_metrics": [],
+      "repo": "fixture://sf-systematic-batch",
+      "repo_kind": "neutral_fixture",
+      "repo_ref": "v1",
+      "setup_command": "python -V",
+      "success_criteria": "sf_systematic_batch_receipt_chain_complete",
+      "target_file": "unused",
+      "task_desc": "Systematic SF batch compare for swarm_multi_agent: current_best vs compiled-interface challenger.",
+      "test_file": "unused",
+      "verification_command": "python -V"
+    },
+    {
+      "allowed_files": [
+        "unused"
+      ],
+      "capability_activation_contract": "required",
+      "category": "ui_validator",
+      "difficulty": "medium",
+      "eligibility_class": "model_required",
+      "expected_capabilities": [
+        "ultra_review"
+      ],
+      "fixture_kind": "sf_systematic_batch",
+      "forbidden_files": [
+        ".nexus/",
+        "logs/",
+        "benchmarks/"
+      ],
+      "id": "sf-systematic-batch-ui_validator-001",
+      "mutation_required": false,
+      "public_claim_allowed_metrics": [],
+      "repo": "fixture://sf-systematic-batch",
+      "repo_kind": "neutral_fixture",
+      "repo_ref": "v1",
+      "setup_command": "python -V",
+      "success_criteria": "sf_systematic_batch_receipt_chain_complete",
+      "target_file": "unused",
+      "task_desc": "Systematic SF batch compare for ui_validator: current_best vs compiled-interface challenger.",
+      "test_file": "unused",
+      "verification_command": "python -V"
+    },
+    {
+      "allowed_files": [
+        "unused"
+      ],
+      "capability_activation_contract": "required",
+      "category": "ultra_review",
+      "difficulty": "medium",
+      "eligibility_class": "model_required",
+      "expected_capabilities": [
+        "ultra_review"
+      ],
+      "fixture_kind": "sf_systematic_batch",
+      "forbidden_files": [
+        ".nexus/",
+        "logs/",
+        "benchmarks/"
+      ],
+      "id": "sf-systematic-batch-ultra_review-001",
+      "mutation_required": false,
+      "public_claim_allowed_metrics": [],
+      "repo": "fixture://sf-systematic-batch",
+      "repo_kind": "neutral_fixture",
+      "repo_ref": "v1",
+      "setup_command": "python -V",
+      "success_criteria": "sf_systematic_batch_receipt_chain_complete",
+      "target_file": "unused",
+      "task_desc": "Systematic SF batch compare for ultra_review: current_best vs compiled-interface challenger.",
+      "test_file": "unused",
+      "verification_command": "python -V"
+    },
+    {
+      "allowed_files": [
+        "unused"
+      ],
+      "capability_activation_contract": "required",
+      "category": "xray",
+      "difficulty": "medium",
+      "eligibility_class": "model_required",
+      "expected_capabilities": [
+        "codeintel"
+      ],
+      "fixture_kind": "sf_systematic_batch",
+      "forbidden_files": [
+        ".nexus/",
+        "logs/",
+        "benchmarks/"
+      ],
+      "id": "sf-systematic-batch-xray-001",
+      "mutation_required": false,
+      "public_claim_allowed_metrics": [],
+      "repo": "fixture://sf-systematic-batch",
+      "repo_kind": "neutral_fixture",
+      "repo_ref": "v1",
+      "setup_command": "python -V",
+      "success_criteria": "sf_systematic_batch_receipt_chain_complete",
+      "target_file": "unused",
+      "task_desc": "Systematic SF batch compare for xray: current_best vs compiled-interface challenger.",
+      "test_file": "unused",
+      "verification_command": "python -V"
+    }
+  ],
+  "version": "2026-05-19"
+}

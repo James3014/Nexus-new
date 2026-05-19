@@ -1,0 +1,55 @@
+{
+  "schema": "nexus.sf2_static_repair_task_manifest.v1",
+  "tasks": [
+    {
+      "id": "sf2-static-repair-codeintel-001",
+      "task_id": "sf2-static-repair-codeintel-001",
+      "capability_id": "codeintel",
+      "difficulty": "medium",
+      "task_type": "sf2_static_repair",
+      "task_desc": "Repair SF2 static route-fit coverage for codeintel.",
+      "runtime_update_allowed": false,
+      "public_benchmark_allowed": false
+    },
+    {
+      "id": "sf2-static-repair-ddtree-001",
+      "task_id": "sf2-static-repair-ddtree-001",
+      "capability_id": "ddtree",
+      "difficulty": "medium",
+      "task_type": "sf2_static_repair",
+      "task_desc": "Repair SF2 static route-fit coverage for ddtree.",
+      "runtime_update_allowed": false,
+      "public_benchmark_allowed": false
+    },
+    {
+      "id": "sf2-static-repair-external_productivity-001",
+      "task_id": "sf2-static-repair-external_productivity-001",
+      "capability_id": "external_productivity",
+      "difficulty": "medium",
+      "task_type": "sf2_static_repair",
+      "task_desc": "Repair SF2 static route-fit coverage for external_productivity.",
+      "runtime_update_allowed": false,
+      "public_benchmark_allowed": false
+    },
+    {
+      "id": "sf2-static-repair-ui_validator-001",
+      "task_id": "sf2-static-repair-ui_validator-001",
+      "capability_id": "ui_validator",
+      "difficulty": "medium",
+      "task_type": "sf2_static_repair",
+      "task_desc": "Repair SF2 static route-fit coverage for ui_validator.",
+      "runtime_update_allowed": false,
+      "public_benchmark_allowed": false
+    },
+    {
+      "id": "sf2-static-repair-xray-001",
+      "task_id": "sf2-static-repair-xray-001",
+      "capability_id": "xray",
+      "difficulty": "medium",
+      "task_type": "sf2_static_repair",
+      "task_desc": "Repair SF2 static route-fit coverage for xray.",
+      "runtime_update_allowed": false,
+      "public_benchmark_allowed": false
+    }
+  ]
+}

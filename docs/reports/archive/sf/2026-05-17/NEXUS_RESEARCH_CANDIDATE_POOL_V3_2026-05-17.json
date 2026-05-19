@@ -1,0 +1,49 @@
+{
+  "schema": "nexus.fair_skill_candidate_pool.v3.slice",
+  "status": "RETURN",
+  "source_status_report_schema": "nexus.skill_status.v1",
+  "summary": {
+    "total_candidates": 1,
+    "selected_candidate_count": 0,
+    "negative_control_count": 1,
+    "capability": "research_and_source_discipline",
+    "source_root_counts": {
+      "agents": 1
+    }
+  },
+  "claim_boundary": [
+    "This v3 pool is ablation-only and cannot update runtime policy.",
+    "Generic research wrappers are excluded until they expose observable source-discipline behavior."
+  ],
+  "candidates": [
+    {
+      "skill_id": "candidate-skill-from-gemini-session-215",
+      "source_root": "agents",
+      "source_type": "quarantine",
+      "path": "/Users/jameschen/.agents/skills/devops/candidate-skill-from-gemini-session-215/SKILL.md",
+      "sha256": "004bd76bacd6c5dc79588e6e544d37557af6c64b058b2ab050c13cdcb69a76a8",
+      "capability_candidates": [],
+      "load_when": "Use when handling workflow patterns similar to 'Candidate Skill from Gemini Session' auto-promoted from inbox candidate.",
+      "forbidden_when": [
+        "runtime_mount",
+        "ablation_arm",
+        "generated_or_candidate_inbox"
+      ],
+      "metadata_quality": "INCOMPLETE:capability_mount",
+      "safety_status": "quarantined",
+      "ablation_eligible": false,
+      "runtime_eligible": false,
+      "quarantine_reason": "status:candidate_quarantine",
+      "evidence_refs": [
+        "skill_status_report:nexus.skill_status.v1",
+        "skill_path:/Users/jameschen/.agents/skills/devops/candidate-skill-from-gemini-session-215/SKILL.md",
+        "skill_sha256:004bd76bacd6c5dc79588e6e544d37557af6c64b058b2ab050c13cdcb69a76a8"
+      ],
+      "shadow_policy": {
+        "duplicate_count": 1,
+        "shadowed": false,
+        "canonical_path": "/Users/jameschen/.agents/skills/devops/candidate-skill-from-gemini-session-215/SKILL.md"
+      }
+    }
+  ]
+}

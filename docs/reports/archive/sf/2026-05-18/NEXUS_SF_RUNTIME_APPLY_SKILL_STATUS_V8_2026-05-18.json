@@ -1,0 +1,91 @@
+{
+  "generated_at": "2026-05-18T00:00:00+08:00",
+  "schema": "nexus.sf_runtime_apply_skill_status.v8",
+  "skills": [
+    {
+      "action": "eligible_for_runtime_overlay_primary",
+      "capability_mount": "repair_loop",
+      "dir_name": "tdd",
+      "family": "repair_loop",
+      "name": "tdd",
+      "path": "/Users/jameschen/Workspace/nexus/.agents/skills/tdd/SKILL.md",
+      "reason_codes": [
+        "sf_v8_evidence_approved_primary",
+        "runtime_overlay_apply_ready"
+      ],
+      "root": "nexus_repo",
+      "runtime_eligible": true,
+      "sha256": "af059705061156fd4845ddbb736fe92b564118ac5f03551e09ef9e8f6d970638",
+      "skill_status": "nexus_curated_candidate",
+      "source_status": "active",
+      "source_type": "nexus_local",
+      "source_url": "repo-local plus mattpocock/skills challenge winner",
+      "test_level": "sf_runtime_apply_v8"
+    },
+    {
+      "action": "eligible_for_runtime_overlay_primary",
+      "capability_mount": "forecast_pregate",
+      "dir_name": "create-plan",
+      "family": "forecast_pregate",
+      "name": "create-plan",
+      "path": "/Users/jameschen/Workspace/nexus/.agents/skills/create-plan/SKILL.md",
+      "reason_codes": [
+        "sf_v8_evidence_approved_primary",
+        "runtime_overlay_apply_ready"
+      ],
+      "root": "nexus_repo",
+      "runtime_eligible": true,
+      "sha256": "b1f7b3147c8057eab694fadf8dd3cb7091702c5667e9d158bc2dd829ecf5f204",
+      "skill_status": "nexus_curated_candidate",
+      "source_status": "active",
+      "source_type": "repo_local_materialized_external",
+      "source_url": "https://github.com/ComposioHQ/awesome-codex-skills",
+      "test_level": "sf_runtime_apply_v8"
+    },
+    {
+      "action": "eligible_for_runtime_overlay_primary",
+      "capability_mount": "research_and_source_discipline",
+      "dir_name": "research-citation-chain-verifier",
+      "family": "research_and_source_discipline",
+      "name": "research-citation-chain-verifier",
+      "path": "/Users/jameschen/Workspace/nexus/.agents/skills/research-citation-chain-verifier/SKILL.md",
+      "reason_codes": [
+        "sf_v8_evidence_approved_primary",
+        "runtime_overlay_apply_ready"
+      ],
+      "root": "nexus_repo",
+      "runtime_eligible": true,
+      "sha256": "8a3d1e0a8e6c79aa0cec10463eb37ed4bcfb44dac9d6de748aed02fe0e918418",
+      "skill_status": "nexus_curated_candidate",
+      "source_status": "active",
+      "source_type": "repo_local_materialized_research_candidate",
+      "source_url": "repo-local materialized SF research spec",
+      "test_level": "sf_runtime_apply_v8"
+    },
+    {
+      "action": "eligible_for_runtime_overlay_primary",
+      "capability_mount": "governance_and_trust",
+      "dir_name": "acceptance-evidence-failclosed",
+      "family": "governance_and_trust",
+      "name": "acceptance-evidence-failclosed",
+      "path": "/Users/jameschen/Workspace/nexus/.agents/skills/acceptance-evidence-failclosed/SKILL.md",
+      "reason_codes": [
+        "sf_v8_evidence_approved_primary",
+        "runtime_overlay_apply_ready"
+      ],
+      "root": "nexus_repo",
+      "runtime_eligible": true,
+      "sha256": "5cfb7b62f7e051a05ef92141e73814414e360819c19f9706189cc75e62de28a9",
+      "skill_status": "nexus_curated_candidate",
+      "source_status": "active",
+      "source_type": "repo_local_curated_governance_candidate",
+      "source_url": "repo-local governance curation",
+      "test_level": "sf_runtime_apply_v8"
+    }
+  ],
+  "status": "PASS",
+  "summary": {
+    "runtime_eligible_count": 4,
+    "skill_count": 4
+  }
+}

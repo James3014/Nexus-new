@@ -1,0 +1,1124 @@
+{
+  "schema": "nexus.sf2_live_receipt_validation.v1",
+  "status": "PASS",
+  "summary": {
+    "capability_count": 33,
+    "validated_capability_count": 33,
+    "blocker_count": 0,
+    "runtime_update_allowed": false,
+    "public_benchmark_allowed": false
+  },
+  "blockers": [],
+  "capabilities": [
+    {
+      "capability_id": "artifact_gate",
+      "validated_candidate_count": 3,
+      "candidates": [
+        {
+          "skill_id": "nexus-goal-closure-executor",
+          "receipt_status": "PASS",
+          "validated_for_route_capability": true,
+          "reason": "receipt_chain_present",
+          "source_verdict": "static_fit_candidate",
+          "skill_path": "/Users/jameschen/Workspace/nexus/.agents/skills/nexus-goal-closure-executor/SKILL.md"
+        },
+        {
+          "skill_id": "nexus-root-cause-probe",
+          "receipt_status": "PASS",
+          "validated_for_route_capability": true,
+          "reason": "receipt_chain_present",
+          "source_verdict": "static_fit_candidate",
+          "skill_path": "/Users/jameschen/Workspace/nexus/.agents/skills/nexus-root-cause-probe/SKILL.md"
+        },
+        {
+          "skill_id": "diagnose",
+          "receipt_status": "PASS",
+          "validated_for_route_capability": true,
+          "reason": "receipt_chain_present",
+          "source_verdict": "static_fit_candidate",
+          "skill_path": "/Users/jameschen/Workspace/nexus/.agents/skills/diagnose/SKILL.md"
+        },
+        {
+          "skill_id": "setup-matt-pocock-skills",
+          "receipt_status": "RETURN",
+          "validated_for_route_capability": false,
+          "reason": "missing_static_receipt_chain",
+          "source_verdict": "reject",
+          "skill_path": "/Users/jameschen/Workspace/nexus/.agents/skills/setup-matt-pocock-skills/SKILL.md"
+        }
+      ]
+    },
+    {
+      "capability_id": "autonomic_router",
+      "validated_candidate_count": 4,
+      "candidates": [
+        {
+          "skill_id": "sf2-autonomic_router-route-fit-spec",
+          "receipt_status": "PASS",
+          "validated_for_route_capability": true,
+          "reason": "receipt_chain_present",
+          "source_verdict": "static_fit_candidate",
+          "skill_path": "/Users/jameschen/Workspace/nexus/.agents/skills/sf2/sf2-autonomic_router-route-fit-spec/SKILL.md"
+        },
+        {
+          "skill_id": "sf2-autoreason-route-fit-spec",
+          "receipt_status": "PASS",
+          "validated_for_route_capability": true,
+          "reason": "receipt_chain_present",
+          "source_verdict": "static_fit_candidate",
+          "skill_path": "/Users/jameschen/Workspace/nexus/.agents/skills/sf2/sf2-autoreason-route-fit-spec/SKILL.md"
+        },
+        {
+          "skill_id": "sf2-belief-route-fit-spec",
+          "receipt_status": "PASS",
+          "validated_for_route_capability": true,
+          "reason": "receipt_chain_present",
+          "source_verdict": "static_fit_candidate",
+          "skill_path": "/Users/jameschen/Workspace/nexus/.agents/skills/sf2/sf2-belief-route-fit-spec/SKILL.md"
+        },
+        {
+          "skill_id": "sf2-delivery_acceptance_gate-route-fit-spec",
+          "receipt_status": "PASS",
+          "validated_for_route_capability": true,
+          "reason": "receipt_chain_present",
+          "source_verdict": "static_fit_candidate",
+          "skill_path": "/Users/jameschen/Workspace/nexus/.agents/skills/sf2/sf2-delivery_acceptance_gate-route-fit-spec/SKILL.md"
+        }
+      ]
+    },
+    {
+      "capability_id": "autoreason",
+      "validated_candidate_count": 4,
+      "candidates": [
+        {
+          "skill_id": "sf2-autoreason-route-fit-spec",
+          "receipt_status": "PASS",
+          "validated_for_route_capability": true,
+          "reason": "receipt_chain_present",
+          "source_verdict": "static_fit_candidate",
+          "skill_path": "/Users/jameschen/Workspace/nexus/.agents/skills/sf2/sf2-autoreason-route-fit-spec/SKILL.md"
+        },
+        {
+          "skill_id": "sf2-belief-route-fit-spec",
+          "receipt_status": "PASS",
+          "validated_for_route_capability": true,
+          "reason": "receipt_chain_present",
+          "source_verdict": "static_fit_candidate",
+          "skill_path": "/Users/jameschen/Workspace/nexus/.agents/skills/sf2/sf2-belief-route-fit-spec/SKILL.md"
+        },
+        {
+          "skill_id": "sf2-lancedb-route-fit-spec",
+          "receipt_status": "PASS",
+          "validated_for_route_capability": true,
+          "reason": "receipt_chain_present",
+          "source_verdict": "static_fit_candidate",
+          "skill_path": "/Users/jameschen/Workspace/nexus/.agents/skills/sf2/sf2-lancedb-route-fit-spec/SKILL.md"
+        },
+        {
+          "skill_id": "nexus-benchmark-public-report",
+          "receipt_status": "PASS",
+          "validated_for_route_capability": true,
+          "reason": "receipt_chain_present",
+          "source_verdict": "static_fit_candidate",
+          "skill_path": "/Users/jameschen/Workspace/nexus/.agents/skills/nexus-benchmark-public-report/SKILL.md"
+        }
+      ]
+    },
+    {
+      "capability_id": "belief",
+      "validated_candidate_count": 2,
+      "candidates": [
+        {
+          "skill_id": "sf2-belief-route-fit-spec",
+          "receipt_status": "PASS",
+          "validated_for_route_capability": true,
+          "reason": "receipt_chain_present",
+          "source_verdict": "static_fit_candidate",
+          "skill_path": "/Users/jameschen/Workspace/nexus/.agents/skills/sf2/sf2-belief-route-fit-spec/SKILL.md"
+        },
+        {
+          "skill_id": "sf2-autoreason-route-fit-spec",
+          "receipt_status": "PASS",
+          "validated_for_route_capability": true,
+          "reason": "receipt_chain_present",
+          "source_verdict": "static_fit_candidate",
+          "skill_path": "/Users/jameschen/Workspace/nexus/.agents/skills/sf2/sf2-autoreason-route-fit-spec/SKILL.md"
+        },
+        {
+          "skill_id": "wondelai-software-design-philosophy",
+          "receipt_status": "RETURN",
+          "validated_for_route_capability": false,
+          "reason": "missing_static_receipt_chain",
+          "source_verdict": "reject",
+          "skill_path": ""
+        },
+        {
+          "skill_id": "addy-doubt-driven-development",
+          "receipt_status": "RETURN",
+          "validated_for_route_capability": false,
+          "reason": "missing_static_receipt_chain",
+          "source_verdict": "reject",
+          "skill_path": ""
+        }
+      ]
+    },
+    {
+      "capability_id": "benchmark_meta_opt",
+      "validated_candidate_count": 3,
+      "candidates": [
+        {
+          "skill_id": "nexus-benchmark-continuous-optimization",
+          "receipt_status": "PASS",
+          "validated_for_route_capability": true,
+          "reason": "receipt_chain_present",
+          "source_verdict": "static_fit_candidate",
+          "skill_path": "/Users/jameschen/Workspace/nexus/.agents/skills/nexus-benchmark-continuous-optimization/SKILL.md"
+        },
+        {
+          "skill_id": "nexus-benchmark-public-report",
+          "receipt_status": "PASS",
+          "validated_for_route_capability": true,
+          "reason": "receipt_chain_present",
+          "source_verdict": "static_fit_candidate",
+          "skill_path": "/Users/jameschen/Workspace/nexus/.agents/skills/nexus-benchmark-public-report/SKILL.md"
+        },
+        {
+          "skill_id": "nexus-capability-upgrade",
+          "receipt_status": "PASS",
+          "validated_for_route_capability": true,
+          "reason": "receipt_chain_present",
+          "source_verdict": "static_fit_candidate",
+          "skill_path": "/Users/jameschen/Workspace/nexus/.agents/skills/nexus-capability-upgrade/SKILL.md"
+        },
+        {
+          "skill_id": "benchmark-models",
+          "receipt_status": "RETURN",
+          "validated_for_route_capability": false,
+          "reason": "missing_static_receipt_chain",
+          "source_verdict": "reject",
+          "skill_path": ""
+        }
+      ]
+    },
+    {
+      "capability_id": "claim_gate",
+      "validated_candidate_count": 4,
+      "candidates": [
+        {
+          "skill_id": "sf2-research_control_plane-route-fit-spec",
+          "receipt_status": "PASS",
+          "validated_for_route_capability": true,
+          "reason": "receipt_chain_present",
+          "source_verdict": "static_fit_candidate",
+          "skill_path": "/Users/jameschen/Workspace/nexus/.agents/skills/sf2/sf2-research_control_plane-route-fit-spec/SKILL.md"
+        },
+        {
+          "skill_id": "diagnose",
+          "receipt_status": "PASS",
+          "validated_for_route_capability": true,
+          "reason": "receipt_chain_present",
+          "source_verdict": "static_fit_candidate",
+          "skill_path": "/Users/jameschen/Workspace/nexus/.agents/skills/diagnose/SKILL.md"
+        },
+        {
+          "skill_id": "nexus-goal-closure-executor",
+          "receipt_status": "PASS",
+          "validated_for_route_capability": true,
+          "reason": "receipt_chain_present",
+          "source_verdict": "static_fit_candidate",
+          "skill_path": "/Users/jameschen/Workspace/nexus/.agents/skills/nexus-goal-closure-executor/SKILL.md"
+        },
+        {
+          "skill_id": "nexus-root-cause-probe",
+          "receipt_status": "PASS",
+          "validated_for_route_capability": true,
+          "reason": "receipt_chain_present",
+          "source_verdict": "static_fit_candidate",
+          "skill_path": "/Users/jameschen/Workspace/nexus/.agents/skills/nexus-root-cause-probe/SKILL.md"
+        }
+      ]
+    },
+    {
+      "capability_id": "codeintel",
+      "validated_candidate_count": 1,
+      "candidates": [
+        {
+          "skill_id": "sf2-codeintel-route-fit-spec",
+          "receipt_status": "PASS",
+          "validated_for_route_capability": true,
+          "reason": "receipt_chain_present",
+          "source_verdict": "static_fit_candidate",
+          "skill_path": "/Users/jameschen/Workspace/nexus/.agents/skills/sf2/sf2-codeintel-route-fit-spec/SKILL.md"
+        }
+      ]
+    },
+    {
+      "capability_id": "ddtree",
+      "validated_candidate_count": 1,
+      "candidates": [
+        {
+          "skill_id": "sf2-ddtree-route-fit-spec",
+          "receipt_status": "PASS",
+          "validated_for_route_capability": true,
+          "reason": "receipt_chain_present",
+          "source_verdict": "static_fit_candidate",
+          "skill_path": "/Users/jameschen/Workspace/nexus/.agents/skills/sf2/sf2-ddtree-route-fit-spec/SKILL.md"
+        }
+      ]
+    },
+    {
+      "capability_id": "delivery_acceptance_gate",
+      "validated_candidate_count": 2,
+      "candidates": [
+        {
+          "skill_id": "sf2-delivery_acceptance_gate-route-fit-spec",
+          "receipt_status": "PASS",
+          "validated_for_route_capability": true,
+          "reason": "receipt_chain_present",
+          "source_verdict": "static_fit_candidate",
+          "skill_path": "/Users/jameschen/Workspace/nexus/.agents/skills/sf2/sf2-delivery_acceptance_gate-route-fit-spec/SKILL.md"
+        },
+        {
+          "skill_id": "nexus-benchmark-continuous-optimization",
+          "receipt_status": "PASS",
+          "validated_for_route_capability": true,
+          "reason": "receipt_chain_present",
+          "source_verdict": "static_fit_candidate",
+          "skill_path": "/Users/jameschen/Workspace/nexus/.agents/skills/nexus-benchmark-continuous-optimization/SKILL.md"
+        },
+        {
+          "skill_id": "acceptance-evidence-failclosed",
+          "receipt_status": "RETURN",
+          "validated_for_route_capability": false,
+          "reason": "missing_static_receipt_chain",
+          "source_verdict": "reject",
+          "skill_path": ""
+        },
+        {
+          "skill_id": "nexus-acceptance-evidence-gate",
+          "receipt_status": "RETURN",
+          "validated_for_route_capability": false,
+          "reason": "missing_static_receipt_chain",
+          "source_verdict": "reject",
+          "skill_path": ""
+        }
+      ]
+    },
+    {
+      "capability_id": "direct_master_loop",
+      "validated_candidate_count": 3,
+      "candidates": [
+        {
+          "skill_id": "sf2-direct_master_loop-route-fit-spec",
+          "receipt_status": "PASS",
+          "validated_for_route_capability": true,
+          "reason": "receipt_chain_present",
+          "source_verdict": "static_fit_candidate",
+          "skill_path": "/Users/jameschen/Workspace/nexus/.agents/skills/sf2/sf2-direct_master_loop-route-fit-spec/SKILL.md"
+        },
+        {
+          "skill_id": "sf2-nightshift-route-fit-spec",
+          "receipt_status": "PASS",
+          "validated_for_route_capability": true,
+          "reason": "receipt_chain_present",
+          "source_verdict": "static_fit_candidate",
+          "skill_path": "/Users/jameschen/Workspace/nexus/.agents/skills/sf2/sf2-nightshift-route-fit-spec/SKILL.md"
+        },
+        {
+          "skill_id": "nexus-goal-closure-executor",
+          "receipt_status": "PASS",
+          "validated_for_route_capability": true,
+          "reason": "receipt_chain_present",
+          "source_verdict": "static_fit_candidate",
+          "skill_path": "/Users/jameschen/Workspace/nexus/.agents/skills/nexus-goal-closure-executor/SKILL.md"
+        },
+        {
+          "skill_id": "subagent-driven-development",
+          "receipt_status": "RETURN",
+          "validated_for_route_capability": false,
+          "reason": "missing_static_receipt_chain",
+          "source_verdict": "reject",
+          "skill_path": ""
+        }
+      ]
+    },
+    {
+      "capability_id": "drone",
+      "validated_candidate_count": 1,
+      "candidates": [
+        {
+          "skill_id": "sf2-drone-route-fit-spec",
+          "receipt_status": "PASS",
+          "validated_for_route_capability": true,
+          "reason": "receipt_chain_present",
+          "source_verdict": "static_fit_candidate",
+          "skill_path": "/Users/jameschen/Workspace/nexus/.agents/skills/sf2/sf2-drone-route-fit-spec/SKILL.md"
+        },
+        {
+          "skill_id": "claude-code",
+          "receipt_status": "RETURN",
+          "validated_for_route_capability": false,
+          "reason": "missing_static_receipt_chain",
+          "source_verdict": "reject",
+          "skill_path": ""
+        },
+        {
+          "skill_id": "codex",
+          "receipt_status": "RETURN",
+          "validated_for_route_capability": false,
+          "reason": "missing_static_receipt_chain",
+          "source_verdict": "reject",
+          "skill_path": ""
+        },
+        {
+          "skill_id": "opencode",
+          "receipt_status": "RETURN",
+          "validated_for_route_capability": false,
+          "reason": "missing_static_receipt_chain",
+          "source_verdict": "reject",
+          "skill_path": ""
+        }
+      ]
+    },
+    {
+      "capability_id": "external_productivity",
+      "validated_candidate_count": 1,
+      "candidates": [
+        {
+          "skill_id": "sf2-external_productivity-route-fit-spec",
+          "receipt_status": "PASS",
+          "validated_for_route_capability": true,
+          "reason": "receipt_chain_present",
+          "source_verdict": "static_fit_candidate",
+          "skill_path": "/Users/jameschen/Workspace/nexus/.agents/skills/sf2/sf2-external_productivity-route-fit-spec/SKILL.md"
+        }
+      ]
+    },
+    {
+      "capability_id": "file_lock_security_gate",
+      "validated_candidate_count": 1,
+      "candidates": [
+        {
+          "skill_id": "sf2-file_lock_security_gate-route-fit-spec",
+          "receipt_status": "PASS",
+          "validated_for_route_capability": true,
+          "reason": "receipt_chain_present",
+          "source_verdict": "static_fit_candidate",
+          "skill_path": "/Users/jameschen/Workspace/nexus/.agents/skills/sf2/sf2-file_lock_security_gate-route-fit-spec/SKILL.md"
+        },
+        {
+          "skill_id": "freeze",
+          "receipt_status": "RETURN",
+          "validated_for_route_capability": false,
+          "reason": "missing_static_receipt_chain",
+          "source_verdict": "reject",
+          "skill_path": ""
+        },
+        {
+          "skill_id": "gbrain-skillify",
+          "receipt_status": "RETURN",
+          "validated_for_route_capability": false,
+          "reason": "missing_static_receipt_chain",
+          "source_verdict": "reject",
+          "skill_path": ""
+        },
+        {
+          "skill_id": "gstack-freeze",
+          "receipt_status": "RETURN",
+          "validated_for_route_capability": false,
+          "reason": "missing_static_receipt_chain",
+          "source_verdict": "reject",
+          "skill_path": ""
+        }
+      ]
+    },
+    {
+      "capability_id": "forecast_pregate",
+      "validated_candidate_count": 2,
+      "candidates": [
+        {
+          "skill_id": "sf2-forecast_pregate-route-fit-spec",
+          "receipt_status": "PASS",
+          "validated_for_route_capability": true,
+          "reason": "receipt_chain_present",
+          "source_verdict": "static_fit_candidate",
+          "skill_path": "/Users/jameschen/Workspace/nexus/.agents/skills/sf2/sf2-forecast_pregate-route-fit-spec/SKILL.md"
+        },
+        {
+          "skill_id": "to-issues",
+          "receipt_status": "RETURN",
+          "validated_for_route_capability": false,
+          "reason": "missing_static_receipt_chain",
+          "source_verdict": "reject",
+          "skill_path": "/Users/jameschen/Workspace/nexus/.agents/skills/to-issues/SKILL.md"
+        },
+        {
+          "skill_id": "to-prd",
+          "receipt_status": "RETURN",
+          "validated_for_route_capability": false,
+          "reason": "missing_static_receipt_chain",
+          "source_verdict": "reject",
+          "skill_path": "/Users/jameschen/Workspace/nexus/.agents/skills/to-prd/SKILL.md"
+        },
+        {
+          "skill_id": "triage",
+          "receipt_status": "PASS",
+          "validated_for_route_capability": true,
+          "reason": "receipt_chain_present",
+          "source_verdict": "static_fit_candidate",
+          "skill_path": "/Users/jameschen/Workspace/nexus/.agents/skills/triage/SKILL.md"
+        }
+      ]
+    },
+    {
+      "capability_id": "hyper_sprint",
+      "validated_candidate_count": 1,
+      "candidates": [
+        {
+          "skill_id": "sf2-hyper_sprint-route-fit-spec",
+          "receipt_status": "PASS",
+          "validated_for_route_capability": true,
+          "reason": "receipt_chain_present",
+          "source_verdict": "static_fit_candidate",
+          "skill_path": "/Users/jameschen/Workspace/nexus/.agents/skills/sf2/sf2-hyper_sprint-route-fit-spec/SKILL.md"
+        },
+        {
+          "skill_id": "gstack-retro",
+          "receipt_status": "RETURN",
+          "validated_for_route_capability": false,
+          "reason": "missing_static_receipt_chain",
+          "source_verdict": "reject",
+          "skill_path": ""
+        },
+        {
+          "skill_id": "retro",
+          "receipt_status": "RETURN",
+          "validated_for_route_capability": false,
+          "reason": "missing_static_receipt_chain",
+          "source_verdict": "reject",
+          "skill_path": ""
+        },
+        {
+          "skill_id": "wondelai-design-sprint",
+          "receipt_status": "RETURN",
+          "validated_for_route_capability": false,
+          "reason": "missing_static_receipt_chain",
+          "source_verdict": "reject",
+          "skill_path": ""
+        }
+      ]
+    },
+    {
+      "capability_id": "lancedb",
+      "validated_candidate_count": 2,
+      "candidates": [
+        {
+          "skill_id": "sf2-lancedb-route-fit-spec",
+          "receipt_status": "PASS",
+          "validated_for_route_capability": true,
+          "reason": "receipt_chain_present",
+          "source_verdict": "static_fit_candidate",
+          "skill_path": "/Users/jameschen/Workspace/nexus/.agents/skills/sf2/sf2-lancedb-route-fit-spec/SKILL.md"
+        },
+        {
+          "skill_id": "sf2-autoreason-route-fit-spec",
+          "receipt_status": "PASS",
+          "validated_for_route_capability": true,
+          "reason": "receipt_chain_present",
+          "source_verdict": "static_fit_candidate",
+          "skill_path": "/Users/jameschen/Workspace/nexus/.agents/skills/sf2/sf2-autoreason-route-fit-spec/SKILL.md"
+        },
+        {
+          "skill_id": "dspy",
+          "receipt_status": "RETURN",
+          "validated_for_route_capability": false,
+          "reason": "missing_static_receipt_chain",
+          "source_verdict": "reject",
+          "skill_path": ""
+        },
+        {
+          "skill_id": "imagegen",
+          "receipt_status": "RETURN",
+          "validated_for_route_capability": false,
+          "reason": "missing_static_receipt_chain",
+          "source_verdict": "reject",
+          "skill_path": ""
+        }
+      ]
+    },
+    {
+      "capability_id": "learn_ask",
+      "validated_candidate_count": 3,
+      "candidates": [
+        {
+          "skill_id": "notebooklm-bulk-injector",
+          "receipt_status": "RETURN",
+          "validated_for_route_capability": false,
+          "reason": "missing_static_receipt_chain",
+          "source_verdict": "reject",
+          "skill_path": "/Users/jameschen/Workspace/nexus/.agents/skills/notebooklm-bulk-injector/SKILL.md"
+        },
+        {
+          "skill_id": "notebooklm-context-bridge",
+          "receipt_status": "PASS",
+          "validated_for_route_capability": true,
+          "reason": "receipt_chain_present",
+          "source_verdict": "static_fit_candidate",
+          "skill_path": "/Users/jameschen/Workspace/nexus/.agents/skills/notebooklm-context-bridge/SKILL.md"
+        },
+        {
+          "skill_id": "nexus-capability-upgrade",
+          "receipt_status": "PASS",
+          "validated_for_route_capability": true,
+          "reason": "receipt_chain_present",
+          "source_verdict": "static_fit_candidate",
+          "skill_path": "/Users/jameschen/Workspace/nexus/.agents/skills/nexus-capability-upgrade/SKILL.md"
+        },
+        {
+          "skill_id": "nexus-root-cause-probe",
+          "receipt_status": "PASS",
+          "validated_for_route_capability": true,
+          "reason": "receipt_chain_present",
+          "source_verdict": "static_fit_candidate",
+          "skill_path": "/Users/jameschen/Workspace/nexus/.agents/skills/nexus-root-cause-probe/SKILL.md"
+        }
+      ]
+    },
+    {
+      "capability_id": "learning_closure",
+      "validated_candidate_count": 2,
+      "candidates": [
+        {
+          "skill_id": "sf2-learning_closure-route-fit-spec",
+          "receipt_status": "PASS",
+          "validated_for_route_capability": true,
+          "reason": "receipt_chain_present",
+          "source_verdict": "static_fit_candidate",
+          "skill_path": "/Users/jameschen/Workspace/nexus/.agents/skills/sf2/sf2-learning_closure-route-fit-spec/SKILL.md"
+        },
+        {
+          "skill_id": "sf2-nightshift-route-fit-spec",
+          "receipt_status": "PASS",
+          "validated_for_route_capability": true,
+          "reason": "receipt_chain_present",
+          "source_verdict": "static_fit_candidate",
+          "skill_path": "/Users/jameschen/Workspace/nexus/.agents/skills/sf2/sf2-nightshift-route-fit-spec/SKILL.md"
+        },
+        {
+          "skill_id": "nexus-new-idea-intake-decision-tree",
+          "receipt_status": "RETURN",
+          "validated_for_route_capability": false,
+          "reason": "missing_static_receipt_chain",
+          "source_verdict": "reject",
+          "skill_path": ""
+        }
+      ]
+    },
+    {
+      "capability_id": "memory",
+      "validated_candidate_count": 3,
+      "candidates": [
+        {
+          "skill_id": "sf2-memory-route-fit-spec",
+          "receipt_status": "PASS",
+          "validated_for_route_capability": true,
+          "reason": "receipt_chain_present",
+          "source_verdict": "static_fit_candidate",
+          "skill_path": "/Users/jameschen/Workspace/nexus/.agents/skills/sf2/sf2-memory-route-fit-spec/SKILL.md"
+        },
+        {
+          "skill_id": "sf2-lancedb-route-fit-spec",
+          "receipt_status": "PASS",
+          "validated_for_route_capability": true,
+          "reason": "receipt_chain_present",
+          "source_verdict": "static_fit_candidate",
+          "skill_path": "/Users/jameschen/Workspace/nexus/.agents/skills/sf2/sf2-lancedb-route-fit-spec/SKILL.md"
+        },
+        {
+          "skill_id": "sf2-mempalace-route-fit-spec",
+          "receipt_status": "PASS",
+          "validated_for_route_capability": true,
+          "reason": "receipt_chain_present",
+          "source_verdict": "static_fit_candidate",
+          "skill_path": "/Users/jameschen/Workspace/nexus/.agents/skills/sf2/sf2-mempalace-route-fit-spec/SKILL.md"
+        },
+        {
+          "skill_id": "obsidian-cli",
+          "receipt_status": "RETURN",
+          "validated_for_route_capability": false,
+          "reason": "missing_static_receipt_chain",
+          "source_verdict": "reject",
+          "skill_path": ""
+        }
+      ]
+    },
+    {
+      "capability_id": "mempalace",
+      "validated_candidate_count": 2,
+      "candidates": [
+        {
+          "skill_id": "sf2-mempalace-route-fit-spec",
+          "receipt_status": "PASS",
+          "validated_for_route_capability": true,
+          "reason": "receipt_chain_present",
+          "source_verdict": "static_fit_candidate",
+          "skill_path": "/Users/jameschen/Workspace/nexus/.agents/skills/sf2/sf2-mempalace-route-fit-spec/SKILL.md"
+        },
+        {
+          "skill_id": "sf2-file_lock_security_gate-route-fit-spec",
+          "receipt_status": "PASS",
+          "validated_for_route_capability": true,
+          "reason": "receipt_chain_present",
+          "source_verdict": "static_fit_candidate",
+          "skill_path": "/Users/jameschen/Workspace/nexus/.agents/skills/sf2/sf2-file_lock_security_gate-route-fit-spec/SKILL.md"
+        },
+        {
+          "skill_id": "gstack-review",
+          "receipt_status": "RETURN",
+          "validated_for_route_capability": false,
+          "reason": "missing_static_receipt_chain",
+          "source_verdict": "reject",
+          "skill_path": ""
+        },
+        {
+          "skill_id": "review",
+          "receipt_status": "RETURN",
+          "validated_for_route_capability": false,
+          "reason": "missing_static_receipt_chain",
+          "source_verdict": "reject",
+          "skill_path": ""
+        }
+      ]
+    },
+    {
+      "capability_id": "metabolism_resume",
+      "validated_candidate_count": 1,
+      "candidates": [
+        {
+          "skill_id": "to-prd",
+          "receipt_status": "RETURN",
+          "validated_for_route_capability": false,
+          "reason": "missing_static_receipt_chain",
+          "source_verdict": "reject",
+          "skill_path": "/Users/jameschen/Workspace/nexus/.agents/skills/to-prd/SKILL.md"
+        },
+        {
+          "skill_id": "to-issues",
+          "receipt_status": "RETURN",
+          "validated_for_route_capability": false,
+          "reason": "missing_static_receipt_chain",
+          "source_verdict": "reject",
+          "skill_path": "/Users/jameschen/Workspace/nexus/.agents/skills/to-issues/SKILL.md"
+        },
+        {
+          "skill_id": "triage",
+          "receipt_status": "PASS",
+          "validated_for_route_capability": true,
+          "reason": "receipt_chain_present",
+          "source_verdict": "static_fit_candidate",
+          "skill_path": "/Users/jameschen/Workspace/nexus/.agents/skills/triage/SKILL.md"
+        },
+        {
+          "skill_id": "grill-with-docs",
+          "receipt_status": "RETURN",
+          "validated_for_route_capability": false,
+          "reason": "missing_static_receipt_chain",
+          "source_verdict": "reject",
+          "skill_path": "/Users/jameschen/Workspace/nexus/.agents/skills/grill-with-docs/SKILL.md"
+        }
+      ]
+    },
+    {
+      "capability_id": "nightshift",
+      "validated_candidate_count": 2,
+      "candidates": [
+        {
+          "skill_id": "sf2-nightshift-route-fit-spec",
+          "receipt_status": "PASS",
+          "validated_for_route_capability": true,
+          "reason": "receipt_chain_present",
+          "source_verdict": "static_fit_candidate",
+          "skill_path": "/Users/jameschen/Workspace/nexus/.agents/skills/sf2/sf2-nightshift-route-fit-spec/SKILL.md"
+        },
+        {
+          "skill_id": "sf2-learning_closure-route-fit-spec",
+          "receipt_status": "PASS",
+          "validated_for_route_capability": true,
+          "reason": "receipt_chain_present",
+          "source_verdict": "static_fit_candidate",
+          "skill_path": "/Users/jameschen/Workspace/nexus/.agents/skills/sf2/sf2-learning_closure-route-fit-spec/SKILL.md"
+        }
+      ]
+    },
+    {
+      "capability_id": "policy_capability_gate",
+      "validated_candidate_count": 3,
+      "candidates": [
+        {
+          "skill_id": "diagnose",
+          "receipt_status": "PASS",
+          "validated_for_route_capability": true,
+          "reason": "receipt_chain_present",
+          "source_verdict": "static_fit_candidate",
+          "skill_path": "/Users/jameschen/Workspace/nexus/.agents/skills/diagnose/SKILL.md"
+        },
+        {
+          "skill_id": "nexus-goal-closure-executor",
+          "receipt_status": "PASS",
+          "validated_for_route_capability": true,
+          "reason": "receipt_chain_present",
+          "source_verdict": "static_fit_candidate",
+          "skill_path": "/Users/jameschen/Workspace/nexus/.agents/skills/nexus-goal-closure-executor/SKILL.md"
+        },
+        {
+          "skill_id": "nexus-root-cause-probe",
+          "receipt_status": "PASS",
+          "validated_for_route_capability": true,
+          "reason": "receipt_chain_present",
+          "source_verdict": "static_fit_candidate",
+          "skill_path": "/Users/jameschen/Workspace/nexus/.agents/skills/nexus-root-cause-probe/SKILL.md"
+        },
+        {
+          "skill_id": "setup-matt-pocock-skills",
+          "receipt_status": "RETURN",
+          "validated_for_route_capability": false,
+          "reason": "missing_static_receipt_chain",
+          "source_verdict": "reject",
+          "skill_path": "/Users/jameschen/Workspace/nexus/.agents/skills/setup-matt-pocock-skills/SKILL.md"
+        }
+      ]
+    },
+    {
+      "capability_id": "registry_skills_sync",
+      "validated_candidate_count": 1,
+      "candidates": [
+        {
+          "skill_id": "sf2-registry_skills_sync-route-fit-spec",
+          "receipt_status": "PASS",
+          "validated_for_route_capability": true,
+          "reason": "receipt_chain_present",
+          "source_verdict": "static_fit_candidate",
+          "skill_path": "/Users/jameschen/Workspace/nexus/.agents/skills/sf2/sf2-registry_skills_sync-route-fit-spec/SKILL.md"
+        },
+        {
+          "skill_id": "browserbase-cookie-sync",
+          "receipt_status": "RETURN",
+          "validated_for_route_capability": false,
+          "reason": "missing_static_receipt_chain",
+          "source_verdict": "reject",
+          "skill_path": ""
+        },
+        {
+          "skill_id": "document-release",
+          "receipt_status": "RETURN",
+          "validated_for_route_capability": false,
+          "reason": "missing_static_receipt_chain",
+          "source_verdict": "reject",
+          "skill_path": ""
+        },
+        {
+          "skill_id": "gbrain-cold-start",
+          "receipt_status": "RETURN",
+          "validated_for_route_capability": false,
+          "reason": "missing_static_receipt_chain",
+          "source_verdict": "reject",
+          "skill_path": ""
+        }
+      ]
+    },
+    {
+      "capability_id": "regression_guard",
+      "validated_candidate_count": 3,
+      "candidates": [
+        {
+          "skill_id": "nexus-benchmark-continuous-optimization",
+          "receipt_status": "PASS",
+          "validated_for_route_capability": true,
+          "reason": "receipt_chain_present",
+          "source_verdict": "static_fit_candidate",
+          "skill_path": "/Users/jameschen/Workspace/nexus/.agents/skills/nexus-benchmark-continuous-optimization/SKILL.md"
+        },
+        {
+          "skill_id": "nexus-benchmark-public-report",
+          "receipt_status": "PASS",
+          "validated_for_route_capability": true,
+          "reason": "receipt_chain_present",
+          "source_verdict": "static_fit_candidate",
+          "skill_path": "/Users/jameschen/Workspace/nexus/.agents/skills/nexus-benchmark-public-report/SKILL.md"
+        },
+        {
+          "skill_id": "nexus-capability-upgrade",
+          "receipt_status": "PASS",
+          "validated_for_route_capability": true,
+          "reason": "receipt_chain_present",
+          "source_verdict": "static_fit_candidate",
+          "skill_path": "/Users/jameschen/Workspace/nexus/.agents/skills/nexus-capability-upgrade/SKILL.md"
+        },
+        {
+          "skill_id": "grill-me",
+          "receipt_status": "RETURN",
+          "validated_for_route_capability": false,
+          "reason": "missing_static_receipt_chain",
+          "source_verdict": "reject",
+          "skill_path": "/Users/jameschen/Workspace/nexus/.agents/skills/grill-me/SKILL.md"
+        }
+      ]
+    },
+    {
+      "capability_id": "repair_loop",
+      "validated_candidate_count": 3,
+      "candidates": [
+        {
+          "skill_id": "sf2-hyper_sprint-route-fit-spec",
+          "receipt_status": "PASS",
+          "validated_for_route_capability": true,
+          "reason": "receipt_chain_present",
+          "source_verdict": "static_fit_candidate",
+          "skill_path": "/Users/jameschen/Workspace/nexus/.agents/skills/sf2/sf2-hyper_sprint-route-fit-spec/SKILL.md"
+        },
+        {
+          "skill_id": "sf2-nightshift-route-fit-spec",
+          "receipt_status": "PASS",
+          "validated_for_route_capability": true,
+          "reason": "receipt_chain_present",
+          "source_verdict": "static_fit_candidate",
+          "skill_path": "/Users/jameschen/Workspace/nexus/.agents/skills/sf2/sf2-nightshift-route-fit-spec/SKILL.md"
+        },
+        {
+          "skill_id": "tdd",
+          "receipt_status": "PASS",
+          "validated_for_route_capability": true,
+          "reason": "receipt_chain_present",
+          "source_verdict": "static_fit_candidate",
+          "skill_path": "/Users/jameschen/Workspace/nexus/.agents/skills/tdd/SKILL.md"
+        },
+        {
+          "skill_id": "grill-me",
+          "receipt_status": "RETURN",
+          "validated_for_route_capability": false,
+          "reason": "missing_static_receipt_chain",
+          "source_verdict": "reject",
+          "skill_path": "/Users/jameschen/Workspace/nexus/.agents/skills/grill-me/SKILL.md"
+        }
+      ]
+    },
+    {
+      "capability_id": "research",
+      "validated_candidate_count": 2,
+      "candidates": [
+        {
+          "skill_id": "sf2-research_control_plane-route-fit-spec",
+          "receipt_status": "PASS",
+          "validated_for_route_capability": true,
+          "reason": "receipt_chain_present",
+          "source_verdict": "static_fit_candidate",
+          "skill_path": "/Users/jameschen/Workspace/nexus/.agents/skills/sf2/sf2-research_control_plane-route-fit-spec/SKILL.md"
+        },
+        {
+          "skill_id": "sf2-lancedb-route-fit-spec",
+          "receipt_status": "PASS",
+          "validated_for_route_capability": true,
+          "reason": "receipt_chain_present",
+          "source_verdict": "static_fit_candidate",
+          "skill_path": "/Users/jameschen/Workspace/nexus/.agents/skills/sf2/sf2-lancedb-route-fit-spec/SKILL.md"
+        },
+        {
+          "skill_id": "browserbase-browserbase-cli",
+          "receipt_status": "RETURN",
+          "validated_for_route_capability": false,
+          "reason": "missing_static_receipt_chain",
+          "source_verdict": "reject",
+          "skill_path": ""
+        },
+        {
+          "skill_id": "gbrain-academic-verify",
+          "receipt_status": "RETURN",
+          "validated_for_route_capability": false,
+          "reason": "missing_static_receipt_chain",
+          "source_verdict": "reject",
+          "skill_path": ""
+        }
+      ]
+    },
+    {
+      "capability_id": "research_control_plane",
+      "validated_candidate_count": 1,
+      "candidates": [
+        {
+          "skill_id": "sf2-research_control_plane-route-fit-spec",
+          "receipt_status": "PASS",
+          "validated_for_route_capability": true,
+          "reason": "receipt_chain_present",
+          "source_verdict": "static_fit_candidate",
+          "skill_path": "/Users/jameschen/Workspace/nexus/.agents/skills/sf2/sf2-research_control_plane-route-fit-spec/SKILL.md"
+        },
+        {
+          "skill_id": "agent-reach",
+          "receipt_status": "RETURN",
+          "validated_for_route_capability": false,
+          "reason": "missing_static_receipt_chain",
+          "source_verdict": "reject",
+          "skill_path": ""
+        },
+        {
+          "skill_id": "aibdd.auto.python.e2e.green",
+          "receipt_status": "RETURN",
+          "validated_for_route_capability": false,
+          "reason": "missing_static_receipt_chain",
+          "source_verdict": "reject",
+          "skill_path": ""
+        },
+        {
+          "skill_id": "aibdd.auto.python.e2e.handlers.aggregate-given",
+          "receipt_status": "RETURN",
+          "validated_for_route_capability": false,
+          "reason": "missing_static_receipt_chain",
+          "source_verdict": "reject",
+          "skill_path": ""
+        }
+      ]
+    },
+    {
+      "capability_id": "sandbox_replay",
+      "validated_candidate_count": 1,
+      "candidates": [
+        {
+          "skill_id": "sf2-file_lock_security_gate-route-fit-spec",
+          "receipt_status": "PASS",
+          "validated_for_route_capability": true,
+          "reason": "receipt_chain_present",
+          "source_verdict": "static_fit_candidate",
+          "skill_path": "/Users/jameschen/Workspace/nexus/.agents/skills/sf2/sf2-file_lock_security_gate-route-fit-spec/SKILL.md"
+        },
+        {
+          "skill_id": "gstack-health",
+          "receipt_status": "RETURN",
+          "validated_for_route_capability": false,
+          "reason": "missing_static_receipt_chain",
+          "source_verdict": "reject",
+          "skill_path": ""
+        },
+        {
+          "skill_id": "health",
+          "receipt_status": "RETURN",
+          "validated_for_route_capability": false,
+          "reason": "missing_static_receipt_chain",
+          "source_verdict": "reject",
+          "skill_path": ""
+        },
+        {
+          "skill_id": "aibdd.auto.java.e2e.refactor",
+          "receipt_status": "RETURN",
+          "validated_for_route_capability": false,
+          "reason": "missing_static_receipt_chain",
+          "source_verdict": "reject",
+          "skill_path": ""
+        }
+      ]
+    },
+    {
+      "capability_id": "swarm_multi_agent",
+      "validated_candidate_count": 1,
+      "candidates": [
+        {
+          "skill_id": "sf2-swarm_multi_agent-route-fit-spec",
+          "receipt_status": "PASS",
+          "validated_for_route_capability": true,
+          "reason": "receipt_chain_present",
+          "source_verdict": "static_fit_candidate",
+          "skill_path": "/Users/jameschen/Workspace/nexus/.agents/skills/sf2/sf2-swarm_multi_agent-route-fit-spec/SKILL.md"
+        },
+        {
+          "skill_id": "benepass-reimbursement",
+          "receipt_status": "RETURN",
+          "validated_for_route_capability": false,
+          "reason": "missing_static_receipt_chain",
+          "source_verdict": "reject",
+          "skill_path": ""
+        },
+        {
+          "skill_id": "multi-agent-handoff-governance-design",
+          "receipt_status": "RETURN",
+          "validated_for_route_capability": false,
+          "reason": "missing_static_receipt_chain",
+          "source_verdict": "reject",
+          "skill_path": ""
+        },
+        {
+          "skill_id": "nexus-gemini-code-review-orchestrator",
+          "receipt_status": "RETURN",
+          "validated_for_route_capability": false,
+          "reason": "missing_static_receipt_chain",
+          "source_verdict": "reject",
+          "skill_path": ""
+        }
+      ]
+    },
+    {
+      "capability_id": "ui_validator",
+      "validated_candidate_count": 1,
+      "candidates": [
+        {
+          "skill_id": "sf2-ui_validator-route-fit-spec",
+          "receipt_status": "PASS",
+          "validated_for_route_capability": true,
+          "reason": "receipt_chain_present",
+          "source_verdict": "static_fit_candidate",
+          "skill_path": "/Users/jameschen/Workspace/nexus/.agents/skills/sf2/sf2-ui_validator-route-fit-spec/SKILL.md"
+        }
+      ]
+    },
+    {
+      "capability_id": "ultra_review",
+      "validated_candidate_count": 4,
+      "candidates": [
+        {
+          "skill_id": "sf2-file_lock_security_gate-route-fit-spec",
+          "receipt_status": "PASS",
+          "validated_for_route_capability": true,
+          "reason": "receipt_chain_present",
+          "source_verdict": "static_fit_candidate",
+          "skill_path": "/Users/jameschen/Workspace/nexus/.agents/skills/sf2/sf2-file_lock_security_gate-route-fit-spec/SKILL.md"
+        },
+        {
+          "skill_id": "diagnose",
+          "receipt_status": "PASS",
+          "validated_for_route_capability": true,
+          "reason": "receipt_chain_present",
+          "source_verdict": "static_fit_candidate",
+          "skill_path": "/Users/jameschen/Workspace/nexus/.agents/skills/diagnose/SKILL.md"
+        },
+        {
+          "skill_id": "nexus-goal-closure-executor",
+          "receipt_status": "PASS",
+          "validated_for_route_capability": true,
+          "reason": "receipt_chain_present",
+          "source_verdict": "static_fit_candidate",
+          "skill_path": "/Users/jameschen/Workspace/nexus/.agents/skills/nexus-goal-closure-executor/SKILL.md"
+        },
+        {
+          "skill_id": "nexus-root-cause-probe",
+          "receipt_status": "PASS",
+          "validated_for_route_capability": true,
+          "reason": "receipt_chain_present",
+          "source_verdict": "static_fit_candidate",
+          "skill_path": "/Users/jameschen/Workspace/nexus/.agents/skills/nexus-root-cause-probe/SKILL.md"
+        }
+      ]
+    },
+    {
+      "capability_id": "xray",
+      "validated_candidate_count": 1,
+      "candidates": [
+        {
+          "skill_id": "sf2-xray-route-fit-spec",
+          "receipt_status": "PASS",
+          "validated_for_route_capability": true,
+          "reason": "receipt_chain_present",
+          "source_verdict": "static_fit_candidate",
+          "skill_path": "/Users/jameschen/Workspace/nexus/.agents/skills/sf2/sf2-xray-route-fit-spec/SKILL.md"
+        }
+      ]
+    }
+  ]
+}

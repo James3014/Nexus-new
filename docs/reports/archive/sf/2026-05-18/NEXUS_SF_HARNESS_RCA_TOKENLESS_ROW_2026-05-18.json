@@ -1,0 +1,56 @@
+{
+  "schema": "nexus.sf_harness_rca.v1",
+  "status": "PASS",
+  "date": "2026-05-18",
+  "scope": "skill_fit",
+  "problem": {
+    "row_id": "research_and_source_discipline::pub-ops-002::capability_only",
+    "observed_live_checkpoint_issue": "A row with delivery SUCCESS was previously eligible to be counted as live PASS even though the benchmark row was infra-invalid for public skill-fit evidence.",
+    "bench_status": "SUCCESS",
+    "infra_invalid_reason": "model_call_without_tokens",
+    "run_eligible": false,
+    "model_calls": 1,
+    "total_tokens": 0,
+    "token_measured": false
+  },
+  "root_cause": "The skill-fit runner treated delivery SUCCESS after an ablation gate PASS as enough for row PASS. That collapsed delivery success and SF evidence eligibility. Rows with model calls but no measured tokens are delivery-diagnostic only and cannot be counted as skill-fit live evidence.",
+  "clean_code_linus_readout": {
+    "keep_the_fix_small": "Do not refactor all 39 skill-fit complexity findings before restoring the correctness invariant.",
+    "separate_concerns": "Token/accounting eligibility must be evaluated before delivery status. Delivery, cost/accounting, and skill-mount evidence are separate gates.",
+    "make_bad_states_unrepresentable": "A row with infra_invalid_reason, run_eligible=false, or model_call_without_tokens now returns RETURN before delivery SUCCESS can be interpreted.",
+    "avoid_global_rewrites": "The complexity scan is a lead list, not a license to churn skill-fit modules while a live evidence bug is open."
+  },
+  "fix_summary": {
+    "runner_gate": "scripts/ops/run_skill_fit_ablation_matrix.py now uses a disqualifying bench-row check before accepting row PASS.",
+    "classifier": "nexus/learning/skill_fit_ablation_core.py now classifies tokenless model-call rows as provider_token_ineligible.",
+    "regression": "tests/learning/test_skill_fit_ablation.py covers model_call_without_tokens returning RETURN."
+  },
+  "verification": {
+    "existing_artifact_reclassification": {
+      "row_id": "research_and_source_discipline::pub-ops-002::capability_only",
+      "status": "RETURN",
+      "reason": "model_call_without_tokens",
+      "failure_classification": {
+        "kind": "provider_token_ineligible",
+        "action": "stop_full_live_and_run_probe_or_clean_replay",
+        "reason": "model_call_without_tokens"
+      }
+    },
+    "tests": [
+      {
+        "command": "uv run pytest tests/learning/test_skill_fit_ablation.py -q",
+        "result": "70 passed"
+      },
+      {
+        "command": "uv run python -m py_compile scripts/ops/run_skill_fit_ablation_matrix.py nexus/learning/skill_fit_ablation_core.py",
+        "result": "PASS"
+      }
+    ]
+  },
+  "sf_next_gate": {
+    "full_live_allowed": false,
+    "public_benchmark_allowed": false,
+    "required_next_step": "Run a bounded token-clean research probe or clean targeted replay before resuming the 24-row research live matrix.",
+    "blocked_resume_manifest": "docs/reports/NEXUS_SF_RESEARCH_STATUS_VISIBLE_LIVE_RESUME_MANIFEST_2026-05-18.json"
+  }
+}

@@ -1,0 +1,43 @@
+{
+  "final_decisions": [
+    {
+      "candidate_skill": "github3-openai-skill-creator-safe-registry-sync",
+      "capability": "registry_skills_sync",
+      "decision": "APPROVE_RUNTIME_REPLACEMENT",
+      "evidence_path": ".nexus/reports/sf_github_round3_runtime_reviewed_v21_2026-05-19/registry_skills_sync_sf-github-round3-v21-runtime-reviewed-registry_skills_sync-001_github3_openai_skill_creator_github3-openai-skill-creator-safe-registry-sync/evidence_bundle.json",
+      "from_skill": "sf2-registry_skills_sync-route-fit-spec",
+      "reason": "runtime_receipt_confirmed_and_cost_improved",
+      "receipt_path": ".nexus/reports/sf_github_round3_runtime_reviewed_v21_2026-05-19/registry_skills_sync_sf-github-round3-v21-runtime-reviewed-registry_skills_sync-001_github3_openai_skill_creator_github3-openai-skill-creator-safe-registry-sync",
+      "to_skill": "github3-openai-skill-creator-safe-registry-sync",
+      "token_delta": -1338,
+      "wall_delta_sec": -12.3289
+    },
+    {
+      "candidate_skill": "github3-claude-security-scan-safe-ultra-review",
+      "capability": "ultra_review",
+      "decision": "KEEP_CURRENT_SKILL",
+      "evidence_path": ".nexus/reports/sf_github_round3_runtime_reviewed_v21_2026-05-19/ultra_review_sf-github-round3-v21-runtime-reviewed-ultra_review-001_github3_claude_security_scan_github3-claude-security-scan-safe-ultra-review/evidence_bundle.json",
+      "from_skill": "acceptance-evidence-failclosed",
+      "reason": "candidate_runtime_receipt_confirmed_but_not_cost_improved",
+      "receipt_path": ".nexus/reports/sf_github_round3_runtime_reviewed_v21_2026-05-19/ultra_review_sf-github-round3-v21-runtime-reviewed-ultra_review-001_github3_claude_security_scan_github3-claude-security-scan-safe-ultra-review",
+      "to_skill": "acceptance-evidence-failclosed",
+      "token_delta": 2287,
+      "wall_delta_sec": 3.9968
+    }
+  ],
+  "human_summary": [
+    "registry_skills_sync replaces sf2-registry_skills_sync-route-fit-spec with github3-openai-skill-creator-safe-registry-sync.",
+    "ultra_review keeps acceptance-evidence-failclosed because runtime-reviewed challenger regressed cost.",
+    "Public benchmark remains held."
+  ],
+  "public_benchmark_allowed": false,
+  "runtime_overlay_finalized": true,
+  "runtime_update_allowed": true,
+  "schema": "nexus.sf_skill_finalization.v21",
+  "skill_pairing_finalized": true,
+  "source_apply_gate": "docs/reports/NEXUS_SF_RUNTIME_POLICY_APPLY_GATE_V21_2026-05-19.json",
+  "source_overlay": "docs/reports/NEXUS_SF_RUNTIME_SKILL_POLICY_OVERLAY_V21_2026-05-19.json",
+  "source_rollup": "docs/reports/NEXUS_SF_RUNTIME_REVIEWED_ROLLUP_V21_2026-05-19.json",
+  "status": "PASS_SKILL_FINALIZED",
+  "version": "2026-05-19"
+}

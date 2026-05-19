@@ -1,0 +1,250 @@
+{
+  "generated_at": "2026-05-18T00:00:00+08:00",
+  "schema": "nexus.sf_runtime_expand_skill_status.v9_candidate",
+  "skills": [
+    {
+      "action": "eligible_for_runtime_overlay_primary",
+      "capability_mount": "belief",
+      "dir_name": "sf2-belief-route-fit-spec",
+      "family": "belief",
+      "name": "sf2-belief-route-fit-spec",
+      "path": "/Users/jameschen/Workspace/nexus/.agents/skills/sf2/sf2-belief-route-fit-spec/SKILL.md",
+      "reason_codes": [
+        "sf_v9_strong_help_or_v8_primary"
+      ],
+      "root": "nexus_repo",
+      "runtime_eligible": true,
+      "sha256": "af1c7646569d8dea802760f06757ba1968c511b475962e23e6e2e3a80cf7d95f",
+      "skill_status": "nexus_curated_candidate",
+      "source_status": "active",
+      "test_level": "sf_runtime_expand_v9_candidate"
+    },
+    {
+      "action": "eligible_for_runtime_overlay_primary",
+      "capability_mount": "claim_gate",
+      "dir_name": "nexus-benchmark-continuous-optimization",
+      "family": "claim_gate",
+      "name": "nexus-benchmark-continuous-optimization",
+      "path": "/Users/jameschen/Workspace/nexus/.agents/skills/nexus-benchmark-continuous-optimization/SKILL.md",
+      "reason_codes": [
+        "sf_v9_strong_help_or_v8_primary"
+      ],
+      "root": "nexus_repo",
+      "runtime_eligible": true,
+      "sha256": "bda61624f657cf28dfcbb639afecfffc83e873e550f4731acf09194384bcc27c",
+      "skill_status": "nexus_curated_candidate",
+      "source_status": "active",
+      "test_level": "sf_runtime_expand_v9_candidate"
+    },
+    {
+      "action": "eligible_for_runtime_overlay_primary",
+      "capability_mount": "direct_master_loop",
+      "dir_name": "sf2-direct_master_loop-route-fit-spec",
+      "family": "direct_master_loop",
+      "name": "sf2-direct_master_loop-route-fit-spec",
+      "path": "/Users/jameschen/Workspace/nexus/.agents/skills/sf2/sf2-direct_master_loop-route-fit-spec/SKILL.md",
+      "reason_codes": [
+        "sf_v9_strong_help_or_v8_primary"
+      ],
+      "root": "nexus_repo",
+      "runtime_eligible": true,
+      "sha256": "186201698442e5678cdd7fa8b4b785818cb7df450072dbf948a5c49098661cfc",
+      "skill_status": "nexus_curated_candidate",
+      "source_status": "active",
+      "test_level": "sf_runtime_expand_v9_candidate"
+    },
+    {
+      "action": "eligible_for_runtime_overlay_primary",
+      "capability_mount": "external_productivity",
+      "dir_name": "sf2-external_productivity-route-fit-spec",
+      "family": "external_productivity",
+      "name": "sf2-external_productivity-route-fit-spec",
+      "path": "/Users/jameschen/Workspace/nexus/.agents/skills/sf2/sf2-external_productivity-route-fit-spec/SKILL.md",
+      "reason_codes": [
+        "sf_v9_strong_help_or_v8_primary"
+      ],
+      "root": "nexus_repo",
+      "runtime_eligible": true,
+      "sha256": "5e4dad47a96f0a8818bf246e27c1e2a65ecddcae6b04703e25301f1810d8e6cc",
+      "skill_status": "nexus_curated_candidate",
+      "source_status": "active",
+      "test_level": "sf_runtime_expand_v9_candidate"
+    },
+    {
+      "action": "eligible_for_runtime_overlay_primary",
+      "capability_mount": "file_lock_security_gate",
+      "dir_name": "sf2-file_lock_security_gate-route-fit-spec",
+      "family": "file_lock_security_gate",
+      "name": "sf2-file_lock_security_gate-route-fit-spec",
+      "path": "/Users/jameschen/Workspace/nexus/.agents/skills/sf2/sf2-file_lock_security_gate-route-fit-spec/SKILL.md",
+      "reason_codes": [
+        "sf_v9_strong_help_or_v8_primary"
+      ],
+      "root": "nexus_repo",
+      "runtime_eligible": true,
+      "sha256": "5b5e9cc1c64fea3d957aff7b1eb2c56846b9a62b87c13626e361e42e6acc1254",
+      "skill_status": "nexus_curated_candidate",
+      "source_status": "active",
+      "test_level": "sf_runtime_expand_v9_candidate"
+    },
+    {
+      "action": "eligible_for_runtime_overlay_primary",
+      "capability_mount": "forecast_pregate",
+      "dir_name": "create-plan",
+      "family": "forecast_pregate",
+      "name": "create-plan",
+      "path": "/Users/jameschen/Workspace/nexus/.agents/skills/create-plan/SKILL.md",
+      "reason_codes": [
+        "sf_v9_strong_help_or_v8_primary"
+      ],
+      "root": "nexus_repo",
+      "runtime_eligible": true,
+      "sha256": "b1f7b3147c8057eab694fadf8dd3cb7091702c5667e9d158bc2dd829ecf5f204",
+      "skill_status": "nexus_curated_candidate",
+      "source_status": "active",
+      "test_level": "sf_runtime_expand_v9_candidate"
+    },
+    {
+      "action": "eligible_for_runtime_overlay_primary",
+      "capability_mount": "governance_and_trust",
+      "dir_name": "acceptance-evidence-failclosed",
+      "family": "governance_and_trust",
+      "name": "acceptance-evidence-failclosed",
+      "path": "/Users/jameschen/Workspace/nexus/.agents/skills/acceptance-evidence-failclosed/SKILL.md",
+      "reason_codes": [
+        "sf_v9_strong_help_or_v8_primary"
+      ],
+      "root": "nexus_repo",
+      "runtime_eligible": true,
+      "sha256": "5cfb7b62f7e051a05ef92141e73814414e360819c19f9706189cc75e62de28a9",
+      "skill_status": "nexus_curated_candidate",
+      "source_status": "active",
+      "test_level": "sf_runtime_expand_v9_candidate"
+    },
+    {
+      "action": "eligible_for_runtime_overlay_primary",
+      "capability_mount": "hyper_sprint",
+      "dir_name": "sf2-hyper_sprint-route-fit-spec",
+      "family": "hyper_sprint",
+      "name": "sf2-hyper_sprint-route-fit-spec",
+      "path": "/Users/jameschen/Workspace/nexus/.agents/skills/sf2/sf2-hyper_sprint-route-fit-spec/SKILL.md",
+      "reason_codes": [
+        "sf_v9_strong_help_or_v8_primary"
+      ],
+      "root": "nexus_repo",
+      "runtime_eligible": true,
+      "sha256": "01cf5927218faa0b7deaa048311d9680ea4f70b35d352da7daa7044044801df7",
+      "skill_status": "nexus_curated_candidate",
+      "source_status": "active",
+      "test_level": "sf_runtime_expand_v9_candidate"
+    },
+    {
+      "action": "eligible_for_runtime_overlay_primary",
+      "capability_mount": "learn_ask",
+      "dir_name": "nexus-capability-upgrade",
+      "family": "learn_ask",
+      "name": "nexus-capability-upgrade",
+      "path": "/Users/jameschen/Workspace/nexus/.agents/skills/nexus-capability-upgrade/SKILL.md",
+      "reason_codes": [
+        "sf_v9_strong_help_or_v8_primary"
+      ],
+      "root": "nexus_repo",
+      "runtime_eligible": true,
+      "sha256": "f1f8a77165a7e71104de25664dce23c95b7a6b817d4a888d65fbeeaa3a5e36f4",
+      "skill_status": "nexus_curated_candidate",
+      "source_status": "active",
+      "test_level": "sf_runtime_expand_v9_candidate"
+    },
+    {
+      "action": "eligible_for_runtime_overlay_primary",
+      "capability_mount": "nightshift",
+      "dir_name": "sf2-nightshift-route-fit-spec",
+      "family": "nightshift",
+      "name": "sf2-nightshift-route-fit-spec",
+      "path": "/Users/jameschen/Workspace/nexus/.agents/skills/sf2/sf2-nightshift-route-fit-spec/SKILL.md",
+      "reason_codes": [
+        "sf_v9_strong_help_or_v8_primary"
+      ],
+      "root": "nexus_repo",
+      "runtime_eligible": true,
+      "sha256": "70e794b11be546dbd911f572d4b9d20311bf79a12aff8e72fa46837eb6204d18",
+      "skill_status": "nexus_curated_candidate",
+      "source_status": "active",
+      "test_level": "sf_runtime_expand_v9_candidate"
+    },
+    {
+      "action": "eligible_for_runtime_overlay_primary",
+      "capability_mount": "regression_guard",
+      "dir_name": "diagnose",
+      "family": "regression_guard",
+      "name": "diagnose",
+      "path": "/Users/jameschen/Workspace/nexus/.agents/skills/diagnose/SKILL.md",
+      "reason_codes": [
+        "sf_v9_strong_help_or_v8_primary"
+      ],
+      "root": "nexus_repo",
+      "runtime_eligible": true,
+      "sha256": "28886402bbfa0470248086eab9106a103b964b76ae9496e63ff0c8a6761b6d13",
+      "skill_status": "nexus_curated_candidate",
+      "source_status": "active",
+      "test_level": "sf_runtime_expand_v9_candidate"
+    },
+    {
+      "action": "eligible_for_runtime_overlay_primary",
+      "capability_mount": "repair_loop",
+      "dir_name": "tdd",
+      "family": "repair_loop",
+      "name": "tdd",
+      "path": "/Users/jameschen/Workspace/nexus/.agents/skills/tdd/SKILL.md",
+      "reason_codes": [
+        "sf_v9_strong_help_or_v8_primary"
+      ],
+      "root": "nexus_repo",
+      "runtime_eligible": true,
+      "sha256": "af059705061156fd4845ddbb736fe92b564118ac5f03551e09ef9e8f6d970638",
+      "skill_status": "nexus_curated_candidate",
+      "source_status": "active",
+      "test_level": "sf_runtime_expand_v9_candidate"
+    },
+    {
+      "action": "eligible_for_runtime_overlay_primary",
+      "capability_mount": "research_and_source_discipline",
+      "dir_name": "research-citation-chain-verifier",
+      "family": "research_and_source_discipline",
+      "name": "research-citation-chain-verifier",
+      "path": "/Users/jameschen/Workspace/nexus/.agents/skills/research-citation-chain-verifier/SKILL.md",
+      "reason_codes": [
+        "sf_v9_strong_help_or_v8_primary"
+      ],
+      "root": "nexus_repo",
+      "runtime_eligible": true,
+      "sha256": "8a3d1e0a8e6c79aa0cec10463eb37ed4bcfb44dac9d6de748aed02fe0e918418",
+      "skill_status": "nexus_curated_candidate",
+      "source_status": "active",
+      "test_level": "sf_runtime_expand_v9_candidate"
+    },
+    {
+      "action": "eligible_for_runtime_overlay_primary",
+      "capability_mount": "swarm_multi_agent",
+      "dir_name": "sf2-swarm_multi_agent-route-fit-spec",
+      "family": "swarm_multi_agent",
+      "name": "sf2-swarm_multi_agent-route-fit-spec",
+      "path": "/Users/jameschen/Workspace/nexus/.agents/skills/sf2/sf2-swarm_multi_agent-route-fit-spec/SKILL.md",
+      "reason_codes": [
+        "sf_v9_strong_help_or_v8_primary"
+      ],
+      "root": "nexus_repo",
+      "runtime_eligible": true,
+      "sha256": "b67cb5379a5ed3546125468ecd4fbe682f2fab3b3d28e292d3aa3253608eb898",
+      "skill_status": "nexus_curated_candidate",
+      "source_status": "active",
+      "test_level": "sf_runtime_expand_v9_candidate"
+    }
+  ],
+  "status": "PASS",
+  "summary": {
+    "missing_path_count": 0,
+    "runtime_eligible_count": 14,
+    "skill_count": 14
+  }
+}

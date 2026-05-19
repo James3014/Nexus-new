@@ -1,0 +1,55 @@
+{
+  "schema": "nexus.sf_round10_coverage_backlog_materialization.v1",
+  "status": "PASS",
+  "runtime_update_allowed": false,
+  "public_benchmark_allowed": false,
+  "summary": {
+    "candidate_count": 4
+  },
+  "materialized": [
+    {
+      "capability": "research_control_plane",
+      "runner_capability": "research",
+      "candidate_skill": "github10-paper-lookup-research-control-plane",
+      "source": "/private/tmp/nexus-sf-round9/K-Dense-AI-scientific-agent-skills/scientific-skills/paper-lookup/SKILL.md",
+      "name": "paper-lookup",
+      "desc": "Use for research_control_plane tasks that need safe paper lookup, scientific source discovery, citation-quality evidence paths, and source-backed research receipts.",
+      "target": ".agents/skills/github-round10-challengers/github10-paper-lookup-research-control-plane/SKILL.md",
+      "current_best": "github6-repo-scout-safe-research-control-plane"
+    },
+    {
+      "capability": "ui_validator",
+      "runner_capability": "ultra_review",
+      "candidate_skill": "github10-openai-playwright-ui-validator",
+      "source": "/private/tmp/nexus-sf-round9/openai-skills/skills/.curated/playwright/SKILL.md",
+      "name": "playwright",
+      "desc": "Use for ui_validator tasks that need browser/UI verification, Playwright-style interaction checks, screenshot-oriented evidence, and fail-closed visual validation receipts.",
+      "target": ".agents/skills/github-round10-challengers/github10-openai-playwright-ui-validator/SKILL.md",
+      "current_best": "github7-browserbase-ui-test-safe-ui-validator"
+    },
+    {
+      "capability": "codeintel",
+      "runner_capability": "codeintel",
+      "candidate_skill": "github10-code-simplification-codeintel",
+      "source": "/private/tmp/nexus-sf-round6/addyosmani-agent-skills/skills/code-simplification/SKILL.md",
+      "name": "code-simplification",
+      "desc": "Use for codeintel tasks that need source inspection, complexity reduction, impact-aware simplification, and evidence-backed code structure analysis.",
+      "target": ".agents/skills/github-round10-challengers/github10-code-simplification-codeintel/SKILL.md",
+      "current_best": "github6-agent-context-codeintel"
+    },
+    {
+      "capability": "autoreason",
+      "runner_capability": "autoreason",
+      "candidate_skill": "github10-first-principles-autoreason",
+      "source": "/private/tmp/nexus-sf-round7/awesome-skills-first-principles-skill/SKILL.md",
+      "name": "First Principles Thinking",
+      "desc": "Use for autoreason tasks that need first-principles decomposition, assumption testing, causal reasoning, and explicit evidence/gate/outcome decision traces.",
+      "target": ".agents/skills/github-round10-challengers/github10-first-principles-autoreason/SKILL.md",
+      "current_best": "sf2-belief-route-fit-spec"
+    }
+  ],
+  "claim_boundary": [
+    "candidate-only materialization from SF coverage backlog",
+    "does not update runtime default"
+  ]
+}

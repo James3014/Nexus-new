@@ -1,0 +1,64 @@
+{
+  "holds": [
+    {
+      "capability": "ui_validator",
+      "challenger_evidence_path": ".nexus/reports/sf_github_round9_live_2026-05-19/ui_validator_sf-github-round9-smoke-ui_validator-001_challenger_github9-teaching-web-visual-ui-validator/evidence_bundle.json",
+      "challenger_skill": "github9-teaching-web-visual-ui-validator",
+      "current_skill": "github7-browserbase-ui-test-safe-ui-validator",
+      "decision": "hold_current_best",
+      "reason_codes": [
+        "challenger_token_not_lower",
+        "challenger_wall_not_lower"
+      ],
+      "token_delta": 7531,
+      "wall_delta_sec": 13.8026
+    },
+    {
+      "capability": "research_control_plane",
+      "challenger_evidence_path": ".nexus/reports/sf_github_round9_live_2026-05-19/research_control_plane_sf-github-round9-smoke-research_control_plane-001_challenger_github9-scientific-research-lookup-control-plane/evidence_bundle.json",
+      "challenger_skill": "github9-scientific-research-lookup-control-plane",
+      "current_skill": "github6-repo-scout-safe-research-control-plane",
+      "decision": "hold_current_best",
+      "reason_codes": [
+        "challenger_token_not_lower"
+      ],
+      "token_delta": 198,
+      "wall_delta_sec": -13.1796
+    },
+    {
+      "capability": "codeintel",
+      "challenger_evidence_path": ".nexus/reports/sf_github_round9_live_2026-05-19/codeintel_sf-github-round9-smoke-codeintel-001_challenger_github9-complexity-optimizer-codeintel/evidence_bundle.json",
+      "challenger_skill": "github9-complexity-optimizer-codeintel",
+      "current_skill": "github6-agent-context-codeintel",
+      "decision": "hold_current_best",
+      "reason_codes": [
+        "challenger_token_not_lower",
+        "challenger_wall_not_lower"
+      ],
+      "token_delta": 2569,
+      "wall_delta_sec": 6.4812
+    }
+  ],
+  "replacements": [
+    {
+      "capability": "ultra_review",
+      "decision": "update_overlay_candidate_primary",
+      "evidence_path": ".nexus/reports/sf_github_round9_live_2026-05-19/ultra_review_sf-github-round9-smoke-ultra_review-001_challenger_github9-openai-security-threat-model-ultra-review/evidence_bundle.json",
+      "from_skill": "acceptance-evidence-failclosed",
+      "receipt_path": "/Users/jameschen/Workspace/nexus/.nexus/reports/sf_github_round9_live_2026-05-19/ultra_review_sf-github-round9-smoke-ultra_review-001_challenger_github9-openai-security-threat-model-ultra-review/evidence_1779173959/with_nexus__sf-github-round9-smoke-ultra_review-001__trial_1.row.json",
+      "runtime_default_written": false,
+      "to_skill": "github9-openai-security-threat-model-ultra-review",
+      "token_delta": -5260,
+      "wall_delta_sec": -53.0906
+    }
+  ],
+  "schema": "nexus.sf_github_round9_replacement_ledger.v1",
+  "source_rollup": "docs/reports/NEXUS_SF_GITHUB_ROUND9_LIVE_ROLLUP_2026-05-19.json",
+  "status": "PASS",
+  "summary": {
+    "hold_count": 3,
+    "replacement_count": 1,
+    "runtime_default_written": false
+  },
+  "version": "2026-05-19"
+}

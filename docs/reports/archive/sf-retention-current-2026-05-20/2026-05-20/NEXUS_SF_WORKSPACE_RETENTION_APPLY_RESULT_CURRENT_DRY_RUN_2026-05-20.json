@@ -1,0 +1,939 @@
+{
+  "schema": "nexus.sf_workspace_retention_apply_result.v1",
+  "status": "PASS",
+  "summary": {
+    "mode": "dry-run",
+    "result_count": 132,
+    "status_counts": {
+      "WOULD_MOVE": 132
+    },
+    "blocker_count": 0
+  },
+  "blockers": [],
+  "results": [
+    {
+      "source": "docs/reports/NEXUS_SF_BACKFILL_GAP_AUDIT_2026-05-19.json",
+      "destination": "docs/reports/archive/sf-retention-current-2026-05-20/2026-05-19/NEXUS_SF_BACKFILL_GAP_AUDIT_2026-05-19.json",
+      "mode": "dry-run",
+      "status": "WOULD_MOVE",
+      "reason": "dry_run"
+    },
+    {
+      "source": "docs/reports/NEXUS_SF_BACKFILL_GAP_AUDIT_2026-05-19.md",
+      "destination": "docs/reports/archive/sf-retention-current-2026-05-20/2026-05-19/NEXUS_SF_BACKFILL_GAP_AUDIT_2026-05-19.md",
+      "mode": "dry-run",
+      "status": "WOULD_MOVE",
+      "reason": "dry_run"
+    },
+    {
+      "source": "docs/reports/NEXUS_SF_COVERAGE_AUDIT_2026-05-19.md",
+      "destination": "docs/reports/archive/sf-retention-current-2026-05-20/2026-05-19/NEXUS_SF_COVERAGE_AUDIT_2026-05-19.md",
+      "mode": "dry-run",
+      "status": "WOULD_MOVE",
+      "reason": "dry_run"
+    },
+    {
+      "source": "docs/reports/NEXUS_SF_COVERAGE_COMPLETION_2026-05-19.json",
+      "destination": "docs/reports/archive/sf-retention-current-2026-05-20/2026-05-19/NEXUS_SF_COVERAGE_COMPLETION_2026-05-19.json",
+      "mode": "dry-run",
+      "status": "WOULD_MOVE",
+      "reason": "dry_run"
+    },
+    {
+      "source": "docs/reports/NEXUS_SF_COVERAGE_INVENTORY_2026-05-19.json",
+      "destination": "docs/reports/archive/sf-retention-current-2026-05-20/2026-05-19/NEXUS_SF_COVERAGE_INVENTORY_2026-05-19.json",
+      "mode": "dry-run",
+      "status": "WOULD_MOVE",
+      "reason": "dry_run"
+    },
+    {
+      "source": "docs/reports/NEXUS_SF_COVERAGE_ROUND5_SELECTED_FIX_2026-05-19.json",
+      "destination": "docs/reports/archive/sf-retention-current-2026-05-20/2026-05-19/NEXUS_SF_COVERAGE_ROUND5_SELECTED_FIX_2026-05-19.json",
+      "mode": "dry-run",
+      "status": "WOULD_MOVE",
+      "reason": "dry_run"
+    },
+    {
+      "source": "docs/reports/NEXUS_SF_COVERAGE_TOPN_BACKLOG_2026-05-19.json",
+      "destination": "docs/reports/archive/sf-retention-current-2026-05-20/2026-05-19/NEXUS_SF_COVERAGE_TOPN_BACKLOG_2026-05-19.json",
+      "mode": "dry-run",
+      "status": "WOULD_MOVE",
+      "reason": "dry_run"
+    },
+    {
+      "source": "docs/reports/NEXUS_SF_GITHUB_ROUND3_CANDIDATE_OVERLAY_V20_2026-05-19.json",
+      "destination": "docs/reports/archive/sf-retention-current-2026-05-20/2026-05-19/NEXUS_SF_GITHUB_ROUND3_CANDIDATE_OVERLAY_V20_2026-05-19.json",
+      "mode": "dry-run",
+      "status": "WOULD_MOVE",
+      "reason": "dry_run"
+    },
+    {
+      "source": "docs/reports/NEXUS_SF_GITHUB_ROUND3_RUNTIME_REVIEWED_MATRIX_V21_2026-05-19.json",
+      "destination": "docs/reports/archive/sf-retention-current-2026-05-20/2026-05-19/NEXUS_SF_GITHUB_ROUND3_RUNTIME_REVIEWED_MATRIX_V21_2026-05-19.json",
+      "mode": "dry-run",
+      "status": "WOULD_MOVE",
+      "reason": "dry_run"
+    },
+    {
+      "source": "docs/reports/NEXUS_SF_GITHUB_ROUND3_RUNTIME_REVIEWED_SKILL_STATUS_V21_2026-05-19.json",
+      "destination": "docs/reports/archive/sf-retention-current-2026-05-20/2026-05-19/NEXUS_SF_GITHUB_ROUND3_RUNTIME_REVIEWED_SKILL_STATUS_V21_2026-05-19.json",
+      "mode": "dry-run",
+      "status": "WOULD_MOVE",
+      "reason": "dry_run"
+    },
+    {
+      "source": "docs/reports/NEXUS_SF_GITHUB_ROUND4B_BACKFILL_COVERAGE_AUDIT_2026-05-19.json",
+      "destination": "docs/reports/archive/sf-retention-current-2026-05-20/2026-05-19/NEXUS_SF_GITHUB_ROUND4B_BACKFILL_COVERAGE_AUDIT_2026-05-19.json",
+      "mode": "dry-run",
+      "status": "WOULD_MOVE",
+      "reason": "dry_run"
+    },
+    {
+      "source": "docs/reports/NEXUS_SF_GITHUB_ROUND4B_BACKFILL_LIVE_ROLLUP_2026-05-19.json",
+      "destination": "docs/reports/archive/sf-retention-current-2026-05-20/2026-05-19/NEXUS_SF_GITHUB_ROUND4B_BACKFILL_LIVE_ROLLUP_2026-05-19.json",
+      "mode": "dry-run",
+      "status": "WOULD_MOVE",
+      "reason": "dry_run"
+    },
+    {
+      "source": "docs/reports/NEXUS_SF_GITHUB_ROUND4B_BACKFILL_MATRIX_2026-05-19.json",
+      "destination": "docs/reports/archive/sf-retention-current-2026-05-20/2026-05-19/NEXUS_SF_GITHUB_ROUND4B_BACKFILL_MATRIX_2026-05-19.json",
+      "mode": "dry-run",
+      "status": "WOULD_MOVE",
+      "reason": "dry_run"
+    },
+    {
+      "source": "docs/reports/NEXUS_SF_GITHUB_ROUND4B_BACKFILL_REPLACEMENT_LEDGER_2026-05-19.json",
+      "destination": "docs/reports/archive/sf-retention-current-2026-05-20/2026-05-19/NEXUS_SF_GITHUB_ROUND4B_BACKFILL_REPLACEMENT_LEDGER_2026-05-19.json",
+      "mode": "dry-run",
+      "status": "WOULD_MOVE",
+      "reason": "dry_run"
+    },
+    {
+      "source": "docs/reports/NEXUS_SF_GITHUB_ROUND4B_BACKFILL_SKILL_STATUS_2026-05-19.json",
+      "destination": "docs/reports/archive/sf-retention-current-2026-05-20/2026-05-19/NEXUS_SF_GITHUB_ROUND4B_BACKFILL_SKILL_STATUS_2026-05-19.json",
+      "mode": "dry-run",
+      "status": "WOULD_MOVE",
+      "reason": "dry_run"
+    },
+    {
+      "source": "docs/reports/NEXUS_SF_GITHUB_ROUND4B_BACKFILL_TASKS_2026-05-19.json",
+      "destination": "docs/reports/archive/sf-retention-current-2026-05-20/2026-05-19/NEXUS_SF_GITHUB_ROUND4B_BACKFILL_TASKS_2026-05-19.json",
+      "mode": "dry-run",
+      "status": "WOULD_MOVE",
+      "reason": "dry_run"
+    },
+    {
+      "source": "docs/reports/NEXUS_SF_GITHUB_ROUND4_CATALOG_UPDATE_2026-05-19.json",
+      "destination": "docs/reports/archive/sf-retention-current-2026-05-20/2026-05-19/NEXUS_SF_GITHUB_ROUND4_CATALOG_UPDATE_2026-05-19.json",
+      "mode": "dry-run",
+      "status": "WOULD_MOVE",
+      "reason": "dry_run"
+    },
+    {
+      "source": "docs/reports/NEXUS_SF_GITHUB_ROUND4_FLASH_SMOKE_MATRIX_2026-05-19.json",
+      "destination": "docs/reports/archive/sf-retention-current-2026-05-20/2026-05-19/NEXUS_SF_GITHUB_ROUND4_FLASH_SMOKE_MATRIX_2026-05-19.json",
+      "mode": "dry-run",
+      "status": "WOULD_MOVE",
+      "reason": "dry_run"
+    },
+    {
+      "source": "docs/reports/NEXUS_SF_GITHUB_ROUND4_FLASH_SMOKE_TASKS_2026-05-19.json",
+      "destination": "docs/reports/archive/sf-retention-current-2026-05-20/2026-05-19/NEXUS_SF_GITHUB_ROUND4_FLASH_SMOKE_TASKS_2026-05-19.json",
+      "mode": "dry-run",
+      "status": "WOULD_MOVE",
+      "reason": "dry_run"
+    },
+    {
+      "source": "docs/reports/NEXUS_SF_GITHUB_ROUND4_LIVE_ROLLUP_2026-05-19.json",
+      "destination": "docs/reports/archive/sf-retention-current-2026-05-20/2026-05-19/NEXUS_SF_GITHUB_ROUND4_LIVE_ROLLUP_2026-05-19.json",
+      "mode": "dry-run",
+      "status": "WOULD_MOVE",
+      "reason": "dry_run"
+    },
+    {
+      "source": "docs/reports/NEXUS_SF_GITHUB_ROUND4_MATERIALIZATION_2026-05-19.json",
+      "destination": "docs/reports/archive/sf-retention-current-2026-05-20/2026-05-19/NEXUS_SF_GITHUB_ROUND4_MATERIALIZATION_2026-05-19.json",
+      "mode": "dry-run",
+      "status": "WOULD_MOVE",
+      "reason": "dry_run"
+    },
+    {
+      "source": "docs/reports/NEXUS_SF_GITHUB_ROUND4_REPLACEMENT_LEDGER_2026-05-19.json",
+      "destination": "docs/reports/archive/sf-retention-current-2026-05-20/2026-05-19/NEXUS_SF_GITHUB_ROUND4_REPLACEMENT_LEDGER_2026-05-19.json",
+      "mode": "dry-run",
+      "status": "WOULD_MOVE",
+      "reason": "dry_run"
+    },
+    {
+      "source": "docs/reports/NEXUS_SF_GITHUB_ROUND4_SKILL_STATUS_2026-05-19.json",
+      "destination": "docs/reports/archive/sf-retention-current-2026-05-20/2026-05-19/NEXUS_SF_GITHUB_ROUND4_SKILL_STATUS_2026-05-19.json",
+      "mode": "dry-run",
+      "status": "WOULD_MOVE",
+      "reason": "dry_run"
+    },
+    {
+      "source": "docs/reports/NEXUS_SF_GITHUB_ROUND4_STATIC_SCREEN_2026-05-19.json",
+      "destination": "docs/reports/archive/sf-retention-current-2026-05-20/2026-05-19/NEXUS_SF_GITHUB_ROUND4_STATIC_SCREEN_2026-05-19.json",
+      "mode": "dry-run",
+      "status": "WOULD_MOVE",
+      "reason": "dry_run"
+    },
+    {
+      "source": "docs/reports/NEXUS_SF_GITHUB_ROUND5_FLASH_SMOKE_MATRIX_2026-05-19.json",
+      "destination": "docs/reports/archive/sf-retention-current-2026-05-20/2026-05-19/NEXUS_SF_GITHUB_ROUND5_FLASH_SMOKE_MATRIX_2026-05-19.json",
+      "mode": "dry-run",
+      "status": "WOULD_MOVE",
+      "reason": "dry_run"
+    },
+    {
+      "source": "docs/reports/NEXUS_SF_GITHUB_ROUND5_FLASH_SMOKE_TASKS_2026-05-19.json",
+      "destination": "docs/reports/archive/sf-retention-current-2026-05-20/2026-05-19/NEXUS_SF_GITHUB_ROUND5_FLASH_SMOKE_TASKS_2026-05-19.json",
+      "mode": "dry-run",
+      "status": "WOULD_MOVE",
+      "reason": "dry_run"
+    },
+    {
+      "source": "docs/reports/NEXUS_SF_GITHUB_ROUND5_LIVE_ROLLUP_2026-05-19.json",
+      "destination": "docs/reports/archive/sf-retention-current-2026-05-20/2026-05-19/NEXUS_SF_GITHUB_ROUND5_LIVE_ROLLUP_2026-05-19.json",
+      "mode": "dry-run",
+      "status": "WOULD_MOVE",
+      "reason": "dry_run"
+    },
+    {
+      "source": "docs/reports/NEXUS_SF_GITHUB_ROUND5_REPLACEMENT_LEDGER_2026-05-19.json",
+      "destination": "docs/reports/archive/sf-retention-current-2026-05-20/2026-05-19/NEXUS_SF_GITHUB_ROUND5_REPLACEMENT_LEDGER_2026-05-19.json",
+      "mode": "dry-run",
+      "status": "WOULD_MOVE",
+      "reason": "dry_run"
+    },
+    {
+      "source": "docs/reports/NEXUS_SF_GITHUB_ROUND5_SKILL_STATUS_2026-05-19.json",
+      "destination": "docs/reports/archive/sf-retention-current-2026-05-20/2026-05-19/NEXUS_SF_GITHUB_ROUND5_SKILL_STATUS_2026-05-19.json",
+      "mode": "dry-run",
+      "status": "WOULD_MOVE",
+      "reason": "dry_run"
+    },
+    {
+      "source": "docs/reports/NEXUS_SF_GITHUB_ROUND5_STATIC_SCREEN_2026-05-19.json",
+      "destination": "docs/reports/archive/sf-retention-current-2026-05-20/2026-05-19/NEXUS_SF_GITHUB_ROUND5_STATIC_SCREEN_2026-05-19.json",
+      "mode": "dry-run",
+      "status": "WOULD_MOVE",
+      "reason": "dry_run"
+    },
+    {
+      "source": "docs/reports/NEXUS_SF_GITHUB_ROUND6_FLASH_SMOKE_MATRIX_2026-05-19.json",
+      "destination": "docs/reports/archive/sf-retention-current-2026-05-20/2026-05-19/NEXUS_SF_GITHUB_ROUND6_FLASH_SMOKE_MATRIX_2026-05-19.json",
+      "mode": "dry-run",
+      "status": "WOULD_MOVE",
+      "reason": "dry_run"
+    },
+    {
+      "source": "docs/reports/NEXUS_SF_GITHUB_ROUND6_FLASH_SMOKE_TASKS_2026-05-19.json",
+      "destination": "docs/reports/archive/sf-retention-current-2026-05-20/2026-05-19/NEXUS_SF_GITHUB_ROUND6_FLASH_SMOKE_TASKS_2026-05-19.json",
+      "mode": "dry-run",
+      "status": "WOULD_MOVE",
+      "reason": "dry_run"
+    },
+    {
+      "source": "docs/reports/NEXUS_SF_GITHUB_ROUND6_LIVE_ROLLUP_2026-05-19.json",
+      "destination": "docs/reports/archive/sf-retention-current-2026-05-20/2026-05-19/NEXUS_SF_GITHUB_ROUND6_LIVE_ROLLUP_2026-05-19.json",
+      "mode": "dry-run",
+      "status": "WOULD_MOVE",
+      "reason": "dry_run"
+    },
+    {
+      "source": "docs/reports/NEXUS_SF_GITHUB_ROUND6_REPLACEMENT_LEDGER_2026-05-19.json",
+      "destination": "docs/reports/archive/sf-retention-current-2026-05-20/2026-05-19/NEXUS_SF_GITHUB_ROUND6_REPLACEMENT_LEDGER_2026-05-19.json",
+      "mode": "dry-run",
+      "status": "WOULD_MOVE",
+      "reason": "dry_run"
+    },
+    {
+      "source": "docs/reports/NEXUS_SF_GITHUB_ROUND6_SKILL_STATUS_2026-05-19.json",
+      "destination": "docs/reports/archive/sf-retention-current-2026-05-20/2026-05-19/NEXUS_SF_GITHUB_ROUND6_SKILL_STATUS_2026-05-19.json",
+      "mode": "dry-run",
+      "status": "WOULD_MOVE",
+      "reason": "dry_run"
+    },
+    {
+      "source": "docs/reports/NEXUS_SF_GITHUB_ROUND6_STATIC_SCREEN_2026-05-19.json",
+      "destination": "docs/reports/archive/sf-retention-current-2026-05-20/2026-05-19/NEXUS_SF_GITHUB_ROUND6_STATIC_SCREEN_2026-05-19.json",
+      "mode": "dry-run",
+      "status": "WOULD_MOVE",
+      "reason": "dry_run"
+    },
+    {
+      "source": "docs/reports/NEXUS_SF_GITHUB_ROUND7_FLASH_SMOKE_MATRIX_2026-05-19.json",
+      "destination": "docs/reports/archive/sf-retention-current-2026-05-20/2026-05-19/NEXUS_SF_GITHUB_ROUND7_FLASH_SMOKE_MATRIX_2026-05-19.json",
+      "mode": "dry-run",
+      "status": "WOULD_MOVE",
+      "reason": "dry_run"
+    },
+    {
+      "source": "docs/reports/NEXUS_SF_GITHUB_ROUND7_FLASH_SMOKE_TASKS_2026-05-19.json",
+      "destination": "docs/reports/archive/sf-retention-current-2026-05-20/2026-05-19/NEXUS_SF_GITHUB_ROUND7_FLASH_SMOKE_TASKS_2026-05-19.json",
+      "mode": "dry-run",
+      "status": "WOULD_MOVE",
+      "reason": "dry_run"
+    },
+    {
+      "source": "docs/reports/NEXUS_SF_GITHUB_ROUND7_LIVE_ROLLUP_2026-05-19.json",
+      "destination": "docs/reports/archive/sf-retention-current-2026-05-20/2026-05-19/NEXUS_SF_GITHUB_ROUND7_LIVE_ROLLUP_2026-05-19.json",
+      "mode": "dry-run",
+      "status": "WOULD_MOVE",
+      "reason": "dry_run"
+    },
+    {
+      "source": "docs/reports/NEXUS_SF_GITHUB_ROUND7_REPLACEMENT_LEDGER_2026-05-19.json",
+      "destination": "docs/reports/archive/sf-retention-current-2026-05-20/2026-05-19/NEXUS_SF_GITHUB_ROUND7_REPLACEMENT_LEDGER_2026-05-19.json",
+      "mode": "dry-run",
+      "status": "WOULD_MOVE",
+      "reason": "dry_run"
+    },
+    {
+      "source": "docs/reports/NEXUS_SF_GITHUB_ROUND7_SKILL_STATUS_2026-05-19.json",
+      "destination": "docs/reports/archive/sf-retention-current-2026-05-20/2026-05-19/NEXUS_SF_GITHUB_ROUND7_SKILL_STATUS_2026-05-19.json",
+      "mode": "dry-run",
+      "status": "WOULD_MOVE",
+      "reason": "dry_run"
+    },
+    {
+      "source": "docs/reports/NEXUS_SF_GITHUB_ROUND7_STATIC_SCREEN_2026-05-19.json",
+      "destination": "docs/reports/archive/sf-retention-current-2026-05-20/2026-05-19/NEXUS_SF_GITHUB_ROUND7_STATIC_SCREEN_2026-05-19.json",
+      "mode": "dry-run",
+      "status": "WOULD_MOVE",
+      "reason": "dry_run"
+    },
+    {
+      "source": "docs/reports/NEXUS_SF_GITHUB_ROUND8_FLASH_SMOKE_MATRIX_2026-05-19.json",
+      "destination": "docs/reports/archive/sf-retention-current-2026-05-20/2026-05-19/NEXUS_SF_GITHUB_ROUND8_FLASH_SMOKE_MATRIX_2026-05-19.json",
+      "mode": "dry-run",
+      "status": "WOULD_MOVE",
+      "reason": "dry_run"
+    },
+    {
+      "source": "docs/reports/NEXUS_SF_GITHUB_ROUND8_FLASH_SMOKE_TASKS_2026-05-19.json",
+      "destination": "docs/reports/archive/sf-retention-current-2026-05-20/2026-05-19/NEXUS_SF_GITHUB_ROUND8_FLASH_SMOKE_TASKS_2026-05-19.json",
+      "mode": "dry-run",
+      "status": "WOULD_MOVE",
+      "reason": "dry_run"
+    },
+    {
+      "source": "docs/reports/NEXUS_SF_GITHUB_ROUND8_LIVE_ROLLUP_2026-05-19.json",
+      "destination": "docs/reports/archive/sf-retention-current-2026-05-20/2026-05-19/NEXUS_SF_GITHUB_ROUND8_LIVE_ROLLUP_2026-05-19.json",
+      "mode": "dry-run",
+      "status": "WOULD_MOVE",
+      "reason": "dry_run"
+    },
+    {
+      "source": "docs/reports/NEXUS_SF_GITHUB_ROUND8_REPLACEMENT_LEDGER_2026-05-19.json",
+      "destination": "docs/reports/archive/sf-retention-current-2026-05-20/2026-05-19/NEXUS_SF_GITHUB_ROUND8_REPLACEMENT_LEDGER_2026-05-19.json",
+      "mode": "dry-run",
+      "status": "WOULD_MOVE",
+      "reason": "dry_run"
+    },
+    {
+      "source": "docs/reports/NEXUS_SF_GITHUB_ROUND8_SKILL_STATUS_2026-05-19.json",
+      "destination": "docs/reports/archive/sf-retention-current-2026-05-20/2026-05-19/NEXUS_SF_GITHUB_ROUND8_SKILL_STATUS_2026-05-19.json",
+      "mode": "dry-run",
+      "status": "WOULD_MOVE",
+      "reason": "dry_run"
+    },
+    {
+      "source": "docs/reports/NEXUS_SF_GITHUB_ROUND8_STATIC_SCREEN_2026-05-19.json",
+      "destination": "docs/reports/archive/sf-retention-current-2026-05-20/2026-05-19/NEXUS_SF_GITHUB_ROUND8_STATIC_SCREEN_2026-05-19.json",
+      "mode": "dry-run",
+      "status": "WOULD_MOVE",
+      "reason": "dry_run"
+    },
+    {
+      "source": "docs/reports/NEXUS_SF_GITHUB_ROUND9_FLASH_SMOKE_MATRIX_2026-05-19.json",
+      "destination": "docs/reports/archive/sf-retention-current-2026-05-20/2026-05-19/NEXUS_SF_GITHUB_ROUND9_FLASH_SMOKE_MATRIX_2026-05-19.json",
+      "mode": "dry-run",
+      "status": "WOULD_MOVE",
+      "reason": "dry_run"
+    },
+    {
+      "source": "docs/reports/NEXUS_SF_GITHUB_ROUND9_FLASH_SMOKE_TASKS_2026-05-19.json",
+      "destination": "docs/reports/archive/sf-retention-current-2026-05-20/2026-05-19/NEXUS_SF_GITHUB_ROUND9_FLASH_SMOKE_TASKS_2026-05-19.json",
+      "mode": "dry-run",
+      "status": "WOULD_MOVE",
+      "reason": "dry_run"
+    },
+    {
+      "source": "docs/reports/NEXUS_SF_GITHUB_ROUND9_LIVE_ROLLUP_2026-05-19.json",
+      "destination": "docs/reports/archive/sf-retention-current-2026-05-20/2026-05-19/NEXUS_SF_GITHUB_ROUND9_LIVE_ROLLUP_2026-05-19.json",
+      "mode": "dry-run",
+      "status": "WOULD_MOVE",
+      "reason": "dry_run"
+    },
+    {
+      "source": "docs/reports/NEXUS_SF_GITHUB_ROUND9_REPLACEMENT_LEDGER_2026-05-19.json",
+      "destination": "docs/reports/archive/sf-retention-current-2026-05-20/2026-05-19/NEXUS_SF_GITHUB_ROUND9_REPLACEMENT_LEDGER_2026-05-19.json",
+      "mode": "dry-run",
+      "status": "WOULD_MOVE",
+      "reason": "dry_run"
+    },
+    {
+      "source": "docs/reports/NEXUS_SF_GITHUB_ROUND9_SKILL_STATUS_2026-05-19.json",
+      "destination": "docs/reports/archive/sf-retention-current-2026-05-20/2026-05-19/NEXUS_SF_GITHUB_ROUND9_SKILL_STATUS_2026-05-19.json",
+      "mode": "dry-run",
+      "status": "WOULD_MOVE",
+      "reason": "dry_run"
+    },
+    {
+      "source": "docs/reports/NEXUS_SF_GITHUB_ROUND9_STATIC_SCREEN_2026-05-19.json",
+      "destination": "docs/reports/archive/sf-retention-current-2026-05-20/2026-05-19/NEXUS_SF_GITHUB_ROUND9_STATIC_SCREEN_2026-05-19.json",
+      "mode": "dry-run",
+      "status": "WOULD_MOVE",
+      "reason": "dry_run"
+    },
+    {
+      "source": "docs/reports/NEXUS_SF_ROUND10_COVERAGE_BACKLOG_FLASH_SMOKE_MATRIX_2026-05-19.json",
+      "destination": "docs/reports/archive/sf-retention-current-2026-05-20/2026-05-19/NEXUS_SF_ROUND10_COVERAGE_BACKLOG_FLASH_SMOKE_MATRIX_2026-05-19.json",
+      "mode": "dry-run",
+      "status": "WOULD_MOVE",
+      "reason": "dry_run"
+    },
+    {
+      "source": "docs/reports/NEXUS_SF_ROUND10_COVERAGE_BACKLOG_FLASH_SMOKE_TASKS_2026-05-19.json",
+      "destination": "docs/reports/archive/sf-retention-current-2026-05-20/2026-05-19/NEXUS_SF_ROUND10_COVERAGE_BACKLOG_FLASH_SMOKE_TASKS_2026-05-19.json",
+      "mode": "dry-run",
+      "status": "WOULD_MOVE",
+      "reason": "dry_run"
+    },
+    {
+      "source": "docs/reports/NEXUS_SF_ROUND10_COVERAGE_BACKLOG_LIVE_ROLLUP_2026-05-19.json",
+      "destination": "docs/reports/archive/sf-retention-current-2026-05-20/2026-05-19/NEXUS_SF_ROUND10_COVERAGE_BACKLOG_LIVE_ROLLUP_2026-05-19.json",
+      "mode": "dry-run",
+      "status": "WOULD_MOVE",
+      "reason": "dry_run"
+    },
+    {
+      "source": "docs/reports/NEXUS_SF_ROUND10_COVERAGE_BACKLOG_MATERIALIZATION_2026-05-19.json",
+      "destination": "docs/reports/archive/sf-retention-current-2026-05-20/2026-05-19/NEXUS_SF_ROUND10_COVERAGE_BACKLOG_MATERIALIZATION_2026-05-19.json",
+      "mode": "dry-run",
+      "status": "WOULD_MOVE",
+      "reason": "dry_run"
+    },
+    {
+      "source": "docs/reports/NEXUS_SF_ROUND10_COVERAGE_BACKLOG_REPLACEMENT_LEDGER_2026-05-19.json",
+      "destination": "docs/reports/archive/sf-retention-current-2026-05-20/2026-05-19/NEXUS_SF_ROUND10_COVERAGE_BACKLOG_REPLACEMENT_LEDGER_2026-05-19.json",
+      "mode": "dry-run",
+      "status": "WOULD_MOVE",
+      "reason": "dry_run"
+    },
+    {
+      "source": "docs/reports/NEXUS_SF_ROUND10_COVERAGE_BACKLOG_SKILL_FIT_CATALOG_2026-05-19.json",
+      "destination": "docs/reports/archive/sf-retention-current-2026-05-20/2026-05-19/NEXUS_SF_ROUND10_COVERAGE_BACKLOG_SKILL_FIT_CATALOG_2026-05-19.json",
+      "mode": "dry-run",
+      "status": "WOULD_MOVE",
+      "reason": "dry_run"
+    },
+    {
+      "source": "docs/reports/NEXUS_SF_ROUND10_COVERAGE_BACKLOG_SKILL_STATUS_2026-05-19.json",
+      "destination": "docs/reports/archive/sf-retention-current-2026-05-20/2026-05-19/NEXUS_SF_ROUND10_COVERAGE_BACKLOG_SKILL_STATUS_2026-05-19.json",
+      "mode": "dry-run",
+      "status": "WOULD_MOVE",
+      "reason": "dry_run"
+    },
+    {
+      "source": "docs/reports/NEXUS_SF_ROUND11_COVERAGE_BACKLOG_FLASH_SMOKE_MATRIX_2026-05-19.json",
+      "destination": "docs/reports/archive/sf-retention-current-2026-05-20/2026-05-19/NEXUS_SF_ROUND11_COVERAGE_BACKLOG_FLASH_SMOKE_MATRIX_2026-05-19.json",
+      "mode": "dry-run",
+      "status": "WOULD_MOVE",
+      "reason": "dry_run"
+    },
+    {
+      "source": "docs/reports/NEXUS_SF_ROUND11_COVERAGE_BACKLOG_FLASH_SMOKE_TASKS_2026-05-19.json",
+      "destination": "docs/reports/archive/sf-retention-current-2026-05-20/2026-05-19/NEXUS_SF_ROUND11_COVERAGE_BACKLOG_FLASH_SMOKE_TASKS_2026-05-19.json",
+      "mode": "dry-run",
+      "status": "WOULD_MOVE",
+      "reason": "dry_run"
+    },
+    {
+      "source": "docs/reports/NEXUS_SF_ROUND11_COVERAGE_BACKLOG_LIVE_ROLLUP_2026-05-19.json",
+      "destination": "docs/reports/archive/sf-retention-current-2026-05-20/2026-05-19/NEXUS_SF_ROUND11_COVERAGE_BACKLOG_LIVE_ROLLUP_2026-05-19.json",
+      "mode": "dry-run",
+      "status": "WOULD_MOVE",
+      "reason": "dry_run"
+    },
+    {
+      "source": "docs/reports/NEXUS_SF_ROUND11_COVERAGE_BACKLOG_MATERIALIZATION_2026-05-19.json",
+      "destination": "docs/reports/archive/sf-retention-current-2026-05-20/2026-05-19/NEXUS_SF_ROUND11_COVERAGE_BACKLOG_MATERIALIZATION_2026-05-19.json",
+      "mode": "dry-run",
+      "status": "WOULD_MOVE",
+      "reason": "dry_run"
+    },
+    {
+      "source": "docs/reports/NEXUS_SF_ROUND11_COVERAGE_BACKLOG_REPLACEMENT_LEDGER_2026-05-19.json",
+      "destination": "docs/reports/archive/sf-retention-current-2026-05-20/2026-05-19/NEXUS_SF_ROUND11_COVERAGE_BACKLOG_REPLACEMENT_LEDGER_2026-05-19.json",
+      "mode": "dry-run",
+      "status": "WOULD_MOVE",
+      "reason": "dry_run"
+    },
+    {
+      "source": "docs/reports/NEXUS_SF_ROUND11_COVERAGE_BACKLOG_SKILL_FIT_CATALOG_2026-05-19.json",
+      "destination": "docs/reports/archive/sf-retention-current-2026-05-20/2026-05-19/NEXUS_SF_ROUND11_COVERAGE_BACKLOG_SKILL_FIT_CATALOG_2026-05-19.json",
+      "mode": "dry-run",
+      "status": "WOULD_MOVE",
+      "reason": "dry_run"
+    },
+    {
+      "source": "docs/reports/NEXUS_SF_ROUND11_COVERAGE_BACKLOG_SKILL_STATUS_2026-05-19.json",
+      "destination": "docs/reports/archive/sf-retention-current-2026-05-20/2026-05-19/NEXUS_SF_ROUND11_COVERAGE_BACKLOG_SKILL_STATUS_2026-05-19.json",
+      "mode": "dry-run",
+      "status": "WOULD_MOVE",
+      "reason": "dry_run"
+    },
+    {
+      "source": "docs/reports/NEXUS_SF_RUNTIME_POLICY_APPLY_GATE_V21_2026-05-19.json",
+      "destination": "docs/reports/archive/sf-retention-current-2026-05-20/2026-05-19/NEXUS_SF_RUNTIME_POLICY_APPLY_GATE_V21_2026-05-19.json",
+      "mode": "dry-run",
+      "status": "WOULD_MOVE",
+      "reason": "dry_run"
+    },
+    {
+      "source": "docs/reports/NEXUS_SF_RUNTIME_REVIEWED_ROLLUP_V21_2026-05-19.json",
+      "destination": "docs/reports/archive/sf-retention-current-2026-05-20/2026-05-19/NEXUS_SF_RUNTIME_REVIEWED_ROLLUP_V21_2026-05-19.json",
+      "mode": "dry-run",
+      "status": "WOULD_MOVE",
+      "reason": "dry_run"
+    },
+    {
+      "source": "docs/reports/NEXUS_SF_RUNTIME_SKILL_POLICY_OVERLAY_V21_2026-05-19.json",
+      "destination": "docs/reports/archive/sf-retention-current-2026-05-20/2026-05-19/NEXUS_SF_RUNTIME_SKILL_POLICY_OVERLAY_V21_2026-05-19.json",
+      "mode": "dry-run",
+      "status": "WOULD_MOVE",
+      "reason": "dry_run"
+    },
+    {
+      "source": "docs/reports/NEXUS_SF_RUNTIME_SKILL_POLICY_OVERLAY_V22_2026-05-19.json",
+      "destination": "docs/reports/archive/sf-retention-current-2026-05-20/2026-05-19/NEXUS_SF_RUNTIME_SKILL_POLICY_OVERLAY_V22_2026-05-19.json",
+      "mode": "dry-run",
+      "status": "WOULD_MOVE",
+      "reason": "dry_run"
+    },
+    {
+      "source": "docs/reports/NEXUS_SF_RUNTIME_SKILL_POLICY_OVERLAY_V23_2026-05-19.json",
+      "destination": "docs/reports/archive/sf-retention-current-2026-05-20/2026-05-19/NEXUS_SF_RUNTIME_SKILL_POLICY_OVERLAY_V23_2026-05-19.json",
+      "mode": "dry-run",
+      "status": "WOULD_MOVE",
+      "reason": "dry_run"
+    },
+    {
+      "source": "docs/reports/NEXUS_SF_RUNTIME_SKILL_POLICY_OVERLAY_V24_2026-05-19.json",
+      "destination": "docs/reports/archive/sf-retention-current-2026-05-20/2026-05-19/NEXUS_SF_RUNTIME_SKILL_POLICY_OVERLAY_V24_2026-05-19.json",
+      "mode": "dry-run",
+      "status": "WOULD_MOVE",
+      "reason": "dry_run"
+    },
+    {
+      "source": "docs/reports/NEXUS_SF_RUNTIME_SKILL_POLICY_OVERLAY_V25_2026-05-19.json",
+      "destination": "docs/reports/archive/sf-retention-current-2026-05-20/2026-05-19/NEXUS_SF_RUNTIME_SKILL_POLICY_OVERLAY_V25_2026-05-19.json",
+      "mode": "dry-run",
+      "status": "WOULD_MOVE",
+      "reason": "dry_run"
+    },
+    {
+      "source": "docs/reports/NEXUS_SF_RUNTIME_SKILL_POLICY_OVERLAY_V26_2026-05-19.json",
+      "destination": "docs/reports/archive/sf-retention-current-2026-05-20/2026-05-19/NEXUS_SF_RUNTIME_SKILL_POLICY_OVERLAY_V26_2026-05-19.json",
+      "mode": "dry-run",
+      "status": "WOULD_MOVE",
+      "reason": "dry_run"
+    },
+    {
+      "source": "docs/reports/NEXUS_SF_RUNTIME_SKILL_POLICY_OVERLAY_V27_2026-05-19.json",
+      "destination": "docs/reports/archive/sf-retention-current-2026-05-20/2026-05-19/NEXUS_SF_RUNTIME_SKILL_POLICY_OVERLAY_V27_2026-05-19.json",
+      "mode": "dry-run",
+      "status": "WOULD_MOVE",
+      "reason": "dry_run"
+    },
+    {
+      "source": "docs/reports/NEXUS_SF_RUNTIME_SKILL_POLICY_OVERLAY_V28_2026-05-19.json",
+      "destination": "docs/reports/archive/sf-retention-current-2026-05-20/2026-05-19/NEXUS_SF_RUNTIME_SKILL_POLICY_OVERLAY_V28_2026-05-19.json",
+      "mode": "dry-run",
+      "status": "WOULD_MOVE",
+      "reason": "dry_run"
+    },
+    {
+      "source": "docs/reports/NEXUS_SF_RUNTIME_SKILL_POLICY_OVERLAY_V29_2026-05-19.json",
+      "destination": "docs/reports/archive/sf-retention-current-2026-05-20/2026-05-19/NEXUS_SF_RUNTIME_SKILL_POLICY_OVERLAY_V29_2026-05-19.json",
+      "mode": "dry-run",
+      "status": "WOULD_MOVE",
+      "reason": "dry_run"
+    },
+    {
+      "source": "docs/reports/NEXUS_SF_RUNTIME_SKILL_POLICY_OVERLAY_V30_2026-05-19.json",
+      "destination": "docs/reports/archive/sf-retention-current-2026-05-20/2026-05-19/NEXUS_SF_RUNTIME_SKILL_POLICY_OVERLAY_V30_2026-05-19.json",
+      "mode": "dry-run",
+      "status": "WOULD_MOVE",
+      "reason": "dry_run"
+    },
+    {
+      "source": "docs/reports/NEXUS_SF_RUNTIME_SKILL_POLICY_OVERLAY_V31_2026-05-19.json",
+      "destination": "docs/reports/archive/sf-retention-current-2026-05-20/2026-05-19/NEXUS_SF_RUNTIME_SKILL_POLICY_OVERLAY_V31_2026-05-19.json",
+      "mode": "dry-run",
+      "status": "WOULD_MOVE",
+      "reason": "dry_run"
+    },
+    {
+      "source": "docs/reports/NEXUS_SF_RUNTIME_SKILL_POLICY_OVERLAY_V32_2026-05-19.json",
+      "destination": "docs/reports/archive/sf-retention-current-2026-05-20/2026-05-19/NEXUS_SF_RUNTIME_SKILL_POLICY_OVERLAY_V32_2026-05-19.json",
+      "mode": "dry-run",
+      "status": "WOULD_MOVE",
+      "reason": "dry_run"
+    },
+    {
+      "source": "docs/reports/NEXUS_SF_SKILL_FINALIZATION_V21_2026-05-19.json",
+      "destination": "docs/reports/archive/sf-retention-current-2026-05-20/2026-05-19/NEXUS_SF_SKILL_FINALIZATION_V21_2026-05-19.json",
+      "mode": "dry-run",
+      "status": "WOULD_MOVE",
+      "reason": "dry_run"
+    },
+    {
+      "source": "docs/reports/NEXUS_SF_SKILL_FINALIZATION_V21_2026-05-19.md",
+      "destination": "docs/reports/archive/sf-retention-current-2026-05-20/2026-05-19/NEXUS_SF_SKILL_FINALIZATION_V21_2026-05-19.md",
+      "mode": "dry-run",
+      "status": "WOULD_MOVE",
+      "reason": "dry_run"
+    },
+    {
+      "source": "docs/reports/NEXUS_SF_SKILL_FINALIZATION_V22_2026-05-19.json",
+      "destination": "docs/reports/archive/sf-retention-current-2026-05-20/2026-05-19/NEXUS_SF_SKILL_FINALIZATION_V22_2026-05-19.json",
+      "mode": "dry-run",
+      "status": "WOULD_MOVE",
+      "reason": "dry_run"
+    },
+    {
+      "source": "docs/reports/NEXUS_SF_SKILL_FINALIZATION_V22_2026-05-19.md",
+      "destination": "docs/reports/archive/sf-retention-current-2026-05-20/2026-05-19/NEXUS_SF_SKILL_FINALIZATION_V22_2026-05-19.md",
+      "mode": "dry-run",
+      "status": "WOULD_MOVE",
+      "reason": "dry_run"
+    },
+    {
+      "source": "docs/reports/NEXUS_SF_SKILL_FINALIZATION_V23_2026-05-19.json",
+      "destination": "docs/reports/archive/sf-retention-current-2026-05-20/2026-05-19/NEXUS_SF_SKILL_FINALIZATION_V23_2026-05-19.json",
+      "mode": "dry-run",
+      "status": "WOULD_MOVE",
+      "reason": "dry_run"
+    },
+    {
+      "source": "docs/reports/NEXUS_SF_SKILL_FINALIZATION_V23_2026-05-19.md",
+      "destination": "docs/reports/archive/sf-retention-current-2026-05-20/2026-05-19/NEXUS_SF_SKILL_FINALIZATION_V23_2026-05-19.md",
+      "mode": "dry-run",
+      "status": "WOULD_MOVE",
+      "reason": "dry_run"
+    },
+    {
+      "source": "docs/reports/NEXUS_SF_SKILL_FINALIZATION_V24_2026-05-19.json",
+      "destination": "docs/reports/archive/sf-retention-current-2026-05-20/2026-05-19/NEXUS_SF_SKILL_FINALIZATION_V24_2026-05-19.json",
+      "mode": "dry-run",
+      "status": "WOULD_MOVE",
+      "reason": "dry_run"
+    },
+    {
+      "source": "docs/reports/NEXUS_SF_SKILL_FINALIZATION_V24_2026-05-19.md",
+      "destination": "docs/reports/archive/sf-retention-current-2026-05-20/2026-05-19/NEXUS_SF_SKILL_FINALIZATION_V24_2026-05-19.md",
+      "mode": "dry-run",
+      "status": "WOULD_MOVE",
+      "reason": "dry_run"
+    },
+    {
+      "source": "docs/reports/NEXUS_SF_SKILL_FINALIZATION_V25_2026-05-19.json",
+      "destination": "docs/reports/archive/sf-retention-current-2026-05-20/2026-05-19/NEXUS_SF_SKILL_FINALIZATION_V25_2026-05-19.json",
+      "mode": "dry-run",
+      "status": "WOULD_MOVE",
+      "reason": "dry_run"
+    },
+    {
+      "source": "docs/reports/NEXUS_SF_SKILL_FINALIZATION_V25_2026-05-19.md",
+      "destination": "docs/reports/archive/sf-retention-current-2026-05-20/2026-05-19/NEXUS_SF_SKILL_FINALIZATION_V25_2026-05-19.md",
+      "mode": "dry-run",
+      "status": "WOULD_MOVE",
+      "reason": "dry_run"
+    },
+    {
+      "source": "docs/reports/NEXUS_SF_SKILL_FINALIZATION_V26_2026-05-19.json",
+      "destination": "docs/reports/archive/sf-retention-current-2026-05-20/2026-05-19/NEXUS_SF_SKILL_FINALIZATION_V26_2026-05-19.json",
+      "mode": "dry-run",
+      "status": "WOULD_MOVE",
+      "reason": "dry_run"
+    },
+    {
+      "source": "docs/reports/NEXUS_SF_SKILL_FINALIZATION_V26_2026-05-19.md",
+      "destination": "docs/reports/archive/sf-retention-current-2026-05-20/2026-05-19/NEXUS_SF_SKILL_FINALIZATION_V26_2026-05-19.md",
+      "mode": "dry-run",
+      "status": "WOULD_MOVE",
+      "reason": "dry_run"
+    },
+    {
+      "source": "docs/reports/NEXUS_SF_SKILL_FINALIZATION_V27_2026-05-19.json",
+      "destination": "docs/reports/archive/sf-retention-current-2026-05-20/2026-05-19/NEXUS_SF_SKILL_FINALIZATION_V27_2026-05-19.json",
+      "mode": "dry-run",
+      "status": "WOULD_MOVE",
+      "reason": "dry_run"
+    },
+    {
+      "source": "docs/reports/NEXUS_SF_SKILL_FINALIZATION_V27_2026-05-19.md",
+      "destination": "docs/reports/archive/sf-retention-current-2026-05-20/2026-05-19/NEXUS_SF_SKILL_FINALIZATION_V27_2026-05-19.md",
+      "mode": "dry-run",
+      "status": "WOULD_MOVE",
+      "reason": "dry_run"
+    },
+    {
+      "source": "docs/reports/NEXUS_SF_SKILL_FINALIZATION_V28_2026-05-19.json",
+      "destination": "docs/reports/archive/sf-retention-current-2026-05-20/2026-05-19/NEXUS_SF_SKILL_FINALIZATION_V28_2026-05-19.json",
+      "mode": "dry-run",
+      "status": "WOULD_MOVE",
+      "reason": "dry_run"
+    },
+    {
+      "source": "docs/reports/NEXUS_SF_SKILL_FINALIZATION_V28_2026-05-19.md",
+      "destination": "docs/reports/archive/sf-retention-current-2026-05-20/2026-05-19/NEXUS_SF_SKILL_FINALIZATION_V28_2026-05-19.md",
+      "mode": "dry-run",
+      "status": "WOULD_MOVE",
+      "reason": "dry_run"
+    },
+    {
+      "source": "docs/reports/NEXUS_SF_SKILL_FINALIZATION_V29_2026-05-19.json",
+      "destination": "docs/reports/archive/sf-retention-current-2026-05-20/2026-05-19/NEXUS_SF_SKILL_FINALIZATION_V29_2026-05-19.json",
+      "mode": "dry-run",
+      "status": "WOULD_MOVE",
+      "reason": "dry_run"
+    },
+    {
+      "source": "docs/reports/NEXUS_SF_SKILL_FINALIZATION_V29_2026-05-19.md",
+      "destination": "docs/reports/archive/sf-retention-current-2026-05-20/2026-05-19/NEXUS_SF_SKILL_FINALIZATION_V29_2026-05-19.md",
+      "mode": "dry-run",
+      "status": "WOULD_MOVE",
+      "reason": "dry_run"
+    },
+    {
+      "source": "docs/reports/NEXUS_SF_SKILL_FINALIZATION_V30_2026-05-19.json",
+      "destination": "docs/reports/archive/sf-retention-current-2026-05-20/2026-05-19/NEXUS_SF_SKILL_FINALIZATION_V30_2026-05-19.json",
+      "mode": "dry-run",
+      "status": "WOULD_MOVE",
+      "reason": "dry_run"
+    },
+    {
+      "source": "docs/reports/NEXUS_SF_SKILL_FINALIZATION_V30_2026-05-19.md",
+      "destination": "docs/reports/archive/sf-retention-current-2026-05-20/2026-05-19/NEXUS_SF_SKILL_FINALIZATION_V30_2026-05-19.md",
+      "mode": "dry-run",
+      "status": "WOULD_MOVE",
+      "reason": "dry_run"
+    },
+    {
+      "source": "docs/reports/NEXUS_SF_SYSTEMATIC_ALL_CAPABILITY_LIVE_ROLLUP_2026-05-19.json",
+      "destination": "docs/reports/archive/sf-retention-current-2026-05-20/2026-05-19/NEXUS_SF_SYSTEMATIC_ALL_CAPABILITY_LIVE_ROLLUP_2026-05-19.json",
+      "mode": "dry-run",
+      "status": "WOULD_MOVE",
+      "reason": "dry_run"
+    },
+    {
+      "source": "docs/reports/NEXUS_SF_SYSTEMATIC_ALL_CAPABILITY_LIVE_ROLLUP_2026-05-19.md",
+      "destination": "docs/reports/archive/sf-retention-current-2026-05-20/2026-05-19/NEXUS_SF_SYSTEMATIC_ALL_CAPABILITY_LIVE_ROLLUP_2026-05-19.md",
+      "mode": "dry-run",
+      "status": "WOULD_MOVE",
+      "reason": "dry_run"
+    },
+    {
+      "source": "docs/reports/NEXUS_SF_SYSTEMATIC_ALL_CAPABILITY_SKILL_FIT_CATALOG_2026-05-19.json",
+      "destination": "docs/reports/archive/sf-retention-current-2026-05-20/2026-05-19/NEXUS_SF_SYSTEMATIC_ALL_CAPABILITY_SKILL_FIT_CATALOG_2026-05-19.json",
+      "mode": "dry-run",
+      "status": "WOULD_MOVE",
+      "reason": "dry_run"
+    },
+    {
+      "source": "docs/reports/NEXUS_SF_SYSTEMATIC_BATCH_FLASH_SMOKE_MATRIX_2026-05-19.json",
+      "destination": "docs/reports/archive/sf-retention-current-2026-05-20/2026-05-19/NEXUS_SF_SYSTEMATIC_BATCH_FLASH_SMOKE_MATRIX_2026-05-19.json",
+      "mode": "dry-run",
+      "status": "WOULD_MOVE",
+      "reason": "dry_run"
+    },
+    {
+      "source": "docs/reports/NEXUS_SF_SYSTEMATIC_BATCH_FLASH_SMOKE_TASKS_2026-05-19.json",
+      "destination": "docs/reports/archive/sf-retention-current-2026-05-20/2026-05-19/NEXUS_SF_SYSTEMATIC_BATCH_FLASH_SMOKE_TASKS_2026-05-19.json",
+      "mode": "dry-run",
+      "status": "WOULD_MOVE",
+      "reason": "dry_run"
+    },
+    {
+      "source": "docs/reports/NEXUS_SF_SYSTEMATIC_BATCH_LIVE_ROLLUP_2026-05-19.json",
+      "destination": "docs/reports/archive/sf-retention-current-2026-05-20/2026-05-19/NEXUS_SF_SYSTEMATIC_BATCH_LIVE_ROLLUP_2026-05-19.json",
+      "mode": "dry-run",
+      "status": "WOULD_MOVE",
+      "reason": "dry_run"
+    },
+    {
+      "source": "docs/reports/NEXUS_SF_SYSTEMATIC_BATCH_LIVE_ROLLUP_2026-05-19.md",
+      "destination": "docs/reports/archive/sf-retention-current-2026-05-20/2026-05-19/NEXUS_SF_SYSTEMATIC_BATCH_LIVE_ROLLUP_2026-05-19.md",
+      "mode": "dry-run",
+      "status": "WOULD_MOVE",
+      "reason": "dry_run"
+    },
+    {
+      "source": "docs/reports/NEXUS_SF_SYSTEMATIC_BATCH_SKILL_FIT_CATALOG_2026-05-19.json",
+      "destination": "docs/reports/archive/sf-retention-current-2026-05-20/2026-05-19/NEXUS_SF_SYSTEMATIC_BATCH_SKILL_FIT_CATALOG_2026-05-19.json",
+      "mode": "dry-run",
+      "status": "WOULD_MOVE",
+      "reason": "dry_run"
+    },
+    {
+      "source": "docs/reports/NEXUS_SF_SYSTEMATIC_DECISION_GATE_2026-05-19.json",
+      "destination": "docs/reports/archive/sf-retention-current-2026-05-20/2026-05-19/NEXUS_SF_SYSTEMATIC_DECISION_GATE_2026-05-19.json",
+      "mode": "dry-run",
+      "status": "WOULD_MOVE",
+      "reason": "dry_run"
+    },
+    {
+      "source": "docs/reports/NEXUS_SF_SYSTEMATIC_FINALIZATION_V31_2026-05-19.json",
+      "destination": "docs/reports/archive/sf-retention-current-2026-05-20/2026-05-19/NEXUS_SF_SYSTEMATIC_FINALIZATION_V31_2026-05-19.json",
+      "mode": "dry-run",
+      "status": "WOULD_MOVE",
+      "reason": "dry_run"
+    },
+    {
+      "source": "docs/reports/NEXUS_SF_SYSTEMATIC_FINALIZATION_V31_2026-05-19.md",
+      "destination": "docs/reports/archive/sf-retention-current-2026-05-20/2026-05-19/NEXUS_SF_SYSTEMATIC_FINALIZATION_V31_2026-05-19.md",
+      "mode": "dry-run",
+      "status": "WOULD_MOVE",
+      "reason": "dry_run"
+    },
+    {
+      "source": "docs/reports/NEXUS_SF_SYSTEMATIC_LIVE_GAP_AUDIT_2026-05-19.json",
+      "destination": "docs/reports/archive/sf-retention-current-2026-05-20/2026-05-19/NEXUS_SF_SYSTEMATIC_LIVE_GAP_AUDIT_2026-05-19.json",
+      "mode": "dry-run",
+      "status": "WOULD_MOVE",
+      "reason": "dry_run"
+    },
+    {
+      "source": "docs/reports/NEXUS_SF_SYSTEMATIC_LIVE_GAP_AUDIT_2026-05-19.md",
+      "destination": "docs/reports/archive/sf-retention-current-2026-05-20/2026-05-19/NEXUS_SF_SYSTEMATIC_LIVE_GAP_AUDIT_2026-05-19.md",
+      "mode": "dry-run",
+      "status": "WOULD_MOVE",
+      "reason": "dry_run"
+    },
+    {
+      "source": "docs/reports/NEXUS_SF_SYSTEMATIC_OFFLINE_TOURNAMENT_2026-05-19.json",
+      "destination": "docs/reports/archive/sf-retention-current-2026-05-20/2026-05-19/NEXUS_SF_SYSTEMATIC_OFFLINE_TOURNAMENT_2026-05-19.json",
+      "mode": "dry-run",
+      "status": "WOULD_MOVE",
+      "reason": "dry_run"
+    },
+    {
+      "source": "docs/reports/NEXUS_SF_SYSTEMATIC_POST_APPLY_SMOKE_V31_2026-05-19.json",
+      "destination": "docs/reports/archive/sf-retention-current-2026-05-20/2026-05-19/NEXUS_SF_SYSTEMATIC_POST_APPLY_SMOKE_V31_2026-05-19.json",
+      "mode": "dry-run",
+      "status": "WOULD_MOVE",
+      "reason": "dry_run"
+    },
+    {
+      "source": "docs/reports/NEXUS_SF_SYSTEMATIC_POST_APPLY_SMOKE_V31_2026-05-19.md",
+      "destination": "docs/reports/archive/sf-retention-current-2026-05-20/2026-05-19/NEXUS_SF_SYSTEMATIC_POST_APPLY_SMOKE_V31_2026-05-19.md",
+      "mode": "dry-run",
+      "status": "WOULD_MOVE",
+      "reason": "dry_run"
+    },
+    {
+      "source": "docs/reports/NEXUS_SF_SYSTEMATIC_POST_APPLY_SMOKE_V32_2026-05-19.json",
+      "destination": "docs/reports/archive/sf-retention-current-2026-05-20/2026-05-19/NEXUS_SF_SYSTEMATIC_POST_APPLY_SMOKE_V32_2026-05-19.json",
+      "mode": "dry-run",
+      "status": "WOULD_MOVE",
+      "reason": "dry_run"
+    },
+    {
+      "source": "docs/reports/NEXUS_SF_SYSTEMATIC_POST_APPLY_SMOKE_V32_2026-05-19.md",
+      "destination": "docs/reports/archive/sf-retention-current-2026-05-20/2026-05-19/NEXUS_SF_SYSTEMATIC_POST_APPLY_SMOKE_V32_2026-05-19.md",
+      "mode": "dry-run",
+      "status": "WOULD_MOVE",
+      "reason": "dry_run"
+    },
+    {
+      "source": "docs/reports/NEXUS_SF_SYSTEMATIC_RUNTIME_POLICY_APPLY_GATE_V31_2026-05-19.json",
+      "destination": "docs/reports/archive/sf-retention-current-2026-05-20/2026-05-19/NEXUS_SF_SYSTEMATIC_RUNTIME_POLICY_APPLY_GATE_V31_2026-05-19.json",
+      "mode": "dry-run",
+      "status": "WOULD_MOVE",
+      "reason": "dry_run"
+    },
+    {
+      "source": "docs/reports/NEXUS_SF_SYSTEMATIC_RUNTIME_POLICY_APPLY_GATE_V32_2026-05-19.json",
+      "destination": "docs/reports/archive/sf-retention-current-2026-05-20/2026-05-19/NEXUS_SF_SYSTEMATIC_RUNTIME_POLICY_APPLY_GATE_V32_2026-05-19.json",
+      "mode": "dry-run",
+      "status": "WOULD_MOVE",
+      "reason": "dry_run"
+    },
+    {
+      "source": "docs/reports/NEXUS_SF_SYSTEMATIC_RUNTIME_POLICY_PATCH_PLAN_V31_2026-05-19.json",
+      "destination": "docs/reports/archive/sf-retention-current-2026-05-20/2026-05-19/NEXUS_SF_SYSTEMATIC_RUNTIME_POLICY_PATCH_PLAN_V31_2026-05-19.json",
+      "mode": "dry-run",
+      "status": "WOULD_MOVE",
+      "reason": "dry_run"
+    },
+    {
+      "source": "docs/reports/NEXUS_SF_SYSTEMATIC_RUNTIME_POLICY_PATCH_PLAN_V32_2026-05-19.json",
+      "destination": "docs/reports/archive/sf-retention-current-2026-05-20/2026-05-19/NEXUS_SF_SYSTEMATIC_RUNTIME_POLICY_PATCH_PLAN_V32_2026-05-19.json",
+      "mode": "dry-run",
+      "status": "WOULD_MOVE",
+      "reason": "dry_run"
+    },
+    {
+      "source": "docs/reports/NEXUS_SF_SYSTEMATIC_RUNTIME_PROMOTION_REVIEW_V31_2026-05-19.json",
+      "destination": "docs/reports/archive/sf-retention-current-2026-05-20/2026-05-19/NEXUS_SF_SYSTEMATIC_RUNTIME_PROMOTION_REVIEW_V31_2026-05-19.json",
+      "mode": "dry-run",
+      "status": "WOULD_MOVE",
+      "reason": "dry_run"
+    },
+    {
+      "source": "docs/reports/NEXUS_SF_SYSTEMATIC_RUNTIME_PROMOTION_REVIEW_V32_2026-05-19.json",
+      "destination": "docs/reports/archive/sf-retention-current-2026-05-20/2026-05-19/NEXUS_SF_SYSTEMATIC_RUNTIME_PROMOTION_REVIEW_V32_2026-05-19.json",
+      "mode": "dry-run",
+      "status": "WOULD_MOVE",
+      "reason": "dry_run"
+    },
+    {
+      "source": "docs/reports/NEXUS_SF_SYSTEMATIC_RUNTIME_SKILL_POLICY_OVERLAY_APPLIED_V31_2026-05-19.json",
+      "destination": "docs/reports/archive/sf-retention-current-2026-05-20/2026-05-19/NEXUS_SF_SYSTEMATIC_RUNTIME_SKILL_POLICY_OVERLAY_APPLIED_V31_2026-05-19.json",
+      "mode": "dry-run",
+      "status": "WOULD_MOVE",
+      "reason": "dry_run"
+    },
+    {
+      "source": "docs/reports/NEXUS_SF_SYSTEMATIC_RUNTIME_SKILL_POLICY_OVERLAY_APPLIED_V32_2026-05-19.json",
+      "destination": "docs/reports/archive/sf-retention-current-2026-05-20/2026-05-19/NEXUS_SF_SYSTEMATIC_RUNTIME_SKILL_POLICY_OVERLAY_APPLIED_V32_2026-05-19.json",
+      "mode": "dry-run",
+      "status": "WOULD_MOVE",
+      "reason": "dry_run"
+    },
+    {
+      "source": "docs/reports/NEXUS_SF_SYSTEMATIC_SKILLSMITH_LITE_PLAN_2026-05-19.md",
+      "destination": "docs/reports/archive/sf-retention-current-2026-05-20/2026-05-19/NEXUS_SF_SYSTEMATIC_SKILLSMITH_LITE_PLAN_2026-05-19.md",
+      "mode": "dry-run",
+      "status": "WOULD_MOVE",
+      "reason": "dry_run"
+    },
+    {
+      "source": "docs/reports/NEXUS_SF_WORKSPACE_MANUAL_EXTRA_RETENTION_V21_2026-05-19.json",
+      "destination": "docs/reports/archive/sf-retention-current-2026-05-20/2026-05-19/NEXUS_SF_WORKSPACE_MANUAL_EXTRA_RETENTION_V21_2026-05-19.json",
+      "mode": "dry-run",
+      "status": "WOULD_MOVE",
+      "reason": "dry_run"
+    },
+    {
+      "source": "docs/reports/NEXUS_SF_WORKSPACE_RETENTION_APPLY_RESULT_V21_2026-05-19.json",
+      "destination": "docs/reports/archive/sf-retention-current-2026-05-20/2026-05-19/NEXUS_SF_WORKSPACE_RETENTION_APPLY_RESULT_V21_2026-05-19.json",
+      "mode": "dry-run",
+      "status": "WOULD_MOVE",
+      "reason": "dry_run"
+    },
+    {
+      "source": "docs/reports/NEXUS_SKILL_FIT_CATALOG_REPAIR_AND_CODING_2026-05-15.json",
+      "destination": "docs/reports/archive/sf-retention-current-2026-05-20/2026-05-15/NEXUS_SKILL_FIT_CATALOG_REPAIR_AND_CODING_2026-05-15.json",
+      "mode": "dry-run",
+      "status": "WOULD_MOVE",
+      "reason": "dry_run"
+    }
+  ]
+}

@@ -1,0 +1,17 @@
+{
+  "schema": "nexus.sf_runtime_policy_apply_gate.v12",
+  "status": "PASS",
+  "runtime_update_allowed": true,
+  "public_benchmark_allowed": false,
+  "summary": {
+    "patch_item_count": 11,
+    "overlay_primary_count": 26,
+    "blocker_count": 0
+  },
+  "overlay_output": "docs/reports/NEXUS_SF_RUNTIME_SKILL_POLICY_OVERLAY_V12_2026-05-19.json",
+  "blockers": [],
+  "claim_boundary": {
+    "does_not_run_public_benchmark": true,
+    "post_apply_smoke_required": true
+  }
+}

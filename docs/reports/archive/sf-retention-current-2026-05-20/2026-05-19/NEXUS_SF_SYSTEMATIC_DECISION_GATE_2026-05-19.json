@@ -1,0 +1,23 @@
+{
+  "claim_boundary": [
+    "This gate defines replacement criteria for future live rollup.",
+    "It does not approve runtime default writes."
+  ],
+  "current_overlay_schema": "nexus.sf_runtime_skill_policy_overlay.v31",
+  "required_replacement_conditions": [
+    "current_best_status_PASS",
+    "challenger_status_PASS",
+    "selected_injected_used_evidence_gate_outcome_all_true",
+    "challenger_token_delta_lower_than_current",
+    "challenger_wall_delta_lower_than_current",
+    "receipt_path_present",
+    "evidence_path_present"
+  ],
+  "schema": "nexus.sf_systematic_replacement_decision_gate.v1",
+  "status": "PASS",
+  "summary": {
+    "public_benchmark_allowed": false,
+    "queued_batch_row_count": 68,
+    "runtime_update_allowed": false
+  }
+}

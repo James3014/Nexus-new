@@ -1,0 +1,113 @@
+{
+  "claim_boundary": [
+    "Systematic candidates are repo-local prompt slices with live receipt-backed evidence.",
+    "This review does not write runtime defaults."
+  ],
+  "public_benchmark_allowed": false,
+  "runtime_review_items": [
+    {
+      "capability": "benchmark_meta_opt",
+      "disposition": "runtime_review_ready",
+      "evidence_refs": [
+        ".nexus/reports/sf_systematic_batch_live_2026-05-19/benchmark_meta_opt_sf-systematic-batch-benchmark_meta_opt-001_challenger_sf-systematic-benchmark_meta_opt-hugging-face-trackio-d21c6b90/evidence_bundle.json"
+      ],
+      "path": ".agents/skills/sf-systematic-challengers/sf-systematic-benchmark_meta_opt-hugging-face-trackio-d21c6b90/SKILL.md",
+      "receipt_refs": [
+        ".nexus/reports/sf_systematic_batch_live_2026-05-19/benchmark_meta_opt_sf-systematic-batch-benchmark_meta_opt-001_challenger_sf-systematic-benchmark_meta_opt-hugging-face-trackio-d21c6b90"
+      ],
+      "runtime_eligible": true,
+      "runtime_review_ready": true,
+      "safety_status": "runtime_reviewed",
+      "skill_id": "sf-systematic-benchmark_meta_opt-hugging-face-trackio-d21c6b90",
+      "source_root": ".agents/skills/sf-systematic-challengers",
+      "source_type": "repo_local_systematic_slice",
+      "token_delta": -4574,
+      "wall_delta_sec": -33.2371
+    },
+    {
+      "capability": "learning_closure",
+      "disposition": "runtime_review_ready",
+      "evidence_refs": [
+        ".nexus/reports/sf_systematic_batch_live_2026-05-19/learning_closure_sf-systematic-batch-learning_closure-001_challenger_sf-systematic-learning_closure-memory-lint-8bdb0fca/evidence_bundle.json"
+      ],
+      "path": ".agents/skills/sf-systematic-challengers/sf-systematic-learning_closure-memory-lint-8bdb0fca/SKILL.md",
+      "receipt_refs": [
+        ".nexus/reports/sf_systematic_batch_live_2026-05-19/learning_closure_sf-systematic-batch-learning_closure-001_challenger_sf-systematic-learning_closure-memory-lint-8bdb0fca"
+      ],
+      "runtime_eligible": true,
+      "runtime_review_ready": true,
+      "safety_status": "runtime_reviewed",
+      "skill_id": "sf-systematic-learning_closure-memory-lint-8bdb0fca",
+      "source_root": ".agents/skills/sf-systematic-challengers",
+      "source_type": "repo_local_systematic_slice",
+      "token_delta": -2003,
+      "wall_delta_sec": -39.4723
+    },
+    {
+      "capability": "repair_loop",
+      "disposition": "runtime_review_ready",
+      "evidence_refs": [
+        ".nexus/reports/sf_systematic_batch_live_2026-05-19/repair_loop_sf-systematic-batch-repair_loop-001_challenger_sf-systematic-repair_loop-tailwind-v4-shadcn-7197cbbf/evidence_bundle.json"
+      ],
+      "path": ".agents/skills/sf-systematic-challengers/sf-systematic-repair_loop-tailwind-v4-shadcn-7197cbbf/SKILL.md",
+      "receipt_refs": [
+        ".nexus/reports/sf_systematic_batch_live_2026-05-19/repair_loop_sf-systematic-batch-repair_loop-001_challenger_sf-systematic-repair_loop-tailwind-v4-shadcn-7197cbbf"
+      ],
+      "runtime_eligible": true,
+      "runtime_review_ready": true,
+      "safety_status": "runtime_reviewed",
+      "skill_id": "sf-systematic-repair_loop-tailwind-v4-shadcn-7197cbbf",
+      "source_root": ".agents/skills/sf-systematic-challengers",
+      "source_type": "repo_local_systematic_slice",
+      "token_delta": -2272,
+      "wall_delta_sec": -16.1279
+    },
+    {
+      "capability": "research_control_plane",
+      "disposition": "runtime_review_ready",
+      "evidence_refs": [
+        ".nexus/reports/sf_systematic_batch_live_2026-05-19/research_control_plane_sf-systematic-batch-research_control_plane-001_challenger_sf-systematic-research_control_plane-research-lookup-7e6f92a0/evidence_bundle.json"
+      ],
+      "path": ".agents/skills/sf-systematic-challengers/sf-systematic-research_control_plane-research-lookup-7e6f92a0/SKILL.md",
+      "receipt_refs": [
+        ".nexus/reports/sf_systematic_batch_live_2026-05-19/research_control_plane_sf-systematic-batch-research_control_plane-001_challenger_sf-systematic-research_control_plane-research-lookup-7e6f92a0"
+      ],
+      "runtime_eligible": true,
+      "runtime_review_ready": true,
+      "safety_status": "runtime_reviewed",
+      "skill_id": "sf-systematic-research_control_plane-research-lookup-7e6f92a0",
+      "source_root": ".agents/skills/sf-systematic-challengers",
+      "source_type": "repo_local_systematic_slice",
+      "token_delta": -3171,
+      "wall_delta_sec": -16.6247
+    },
+    {
+      "capability": "ui_validator",
+      "disposition": "runtime_review_ready",
+      "evidence_refs": [
+        ".nexus/reports/sf_systematic_batch_live_2026-05-19/ui_validator_sf-systematic-batch-ui_validator-001_challenger_sf-systematic-ui_validator-e2e-testing-d98eb7c3/evidence_bundle.json"
+      ],
+      "path": ".agents/skills/sf-systematic-challengers/sf-systematic-ui_validator-e2e-testing-d98eb7c3/SKILL.md",
+      "receipt_refs": [
+        ".nexus/reports/sf_systematic_batch_live_2026-05-19/ui_validator_sf-systematic-batch-ui_validator-001_challenger_sf-systematic-ui_validator-e2e-testing-d98eb7c3"
+      ],
+      "runtime_eligible": true,
+      "runtime_review_ready": true,
+      "safety_status": "runtime_reviewed",
+      "skill_id": "sf-systematic-ui_validator-e2e-testing-d98eb7c3",
+      "source_root": ".agents/skills/sf-systematic-challengers",
+      "source_type": "repo_local_systematic_slice",
+      "token_delta": -1959,
+      "wall_delta_sec": -64.7312
+    }
+  ],
+  "runtime_update_allowed": false,
+  "schema": "nexus.sf_systematic_runtime_promotion_review.v31",
+  "sf_closed_loop_complete": true,
+  "status": "PASS",
+  "summary": {
+    "review_item_count": 5,
+    "runtime_review_ready_count": 5,
+    "undecided_count": 0
+  }
+}

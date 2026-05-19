@@ -1,0 +1,54 @@
+{
+  "generated_at": "2026-05-18T00:00:00+08:00",
+  "non_goals": [
+    "do_not_auto_promote_external_github_skill_without_materialization",
+    "do_not_open_public_benchmark_from_sf_apply"
+  ],
+  "replacement_steps": [
+    {
+      "gate": "candidate source screen + capability bucket",
+      "name": "discover",
+      "output": "candidate intake only",
+      "step": 1
+    },
+    {
+      "gate": "Flash+Nexus without skill vs Flash+Nexus with skill paired evidence",
+      "name": "compare",
+      "output": "delta + receipt-backed verdict",
+      "step": 2
+    },
+    {
+      "gate": "selected/injected/used/evidence/gate/outcome all true",
+      "name": "seal",
+      "output": "promotion seal report",
+      "step": 3
+    },
+    {
+      "gate": "evidence-approved V8 apply review, no human taste decision",
+      "name": "approve_for_apply",
+      "output": "runtime_update_allowed=true",
+      "step": 4
+    },
+    {
+      "gate": "load V8 runtime overlay via NEXUS_SF_RUNTIME_SKILL_POLICY_OVERLAY or NEXUS_RUNTIME_SKILL_POLICY_OVERLAY",
+      "name": "replace_runtime_default",
+      "output": "primary_skill_by_capability active",
+      "step": 5
+    },
+    {
+      "gate": "runtime-final receipt confirms selected/injected/used/evidence/gate/outcome",
+      "name": "post_apply_smoke",
+      "output": "replacement complete",
+      "step": 6
+    },
+    {
+      "gate": "applied_primary/held_alternate/rejected split",
+      "name": "ledger",
+      "output": "replacement ledger",
+      "step": 7
+    }
+  ],
+  "schema": "nexus.sf_runtime_replacement_flow.v8",
+  "single_exit": "runtime_default_replacement_complete_when_overlay_loaded_and_post_apply_smoke_passes",
+  "status": "PASS"
+}

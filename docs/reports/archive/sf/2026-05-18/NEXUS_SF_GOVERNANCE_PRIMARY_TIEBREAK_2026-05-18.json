@@ -1,0 +1,96 @@
+{
+  "alternate_skill_ids": [
+    "cso",
+    "claudeosint-safe-surface-audit",
+    "gbrain-soul-audit"
+  ],
+  "capability": "governance_and_trust",
+  "claim_boundary": [
+    "This tie-break selects catalog primary only.",
+    "It does not auto-mount governance skill as runtime default.",
+    "Runtime apply requires separate apply gate and smoke evidence."
+  ],
+  "decision_basis": [
+    "all four candidates passed runtime-review mutant seal with complete receipt chains",
+    "primary selection uses broadest governance default scope and lowest default blast radius",
+    "security, external-source, and values-audit candidates remain capability-local alternates",
+    "runtime default apply remains separate from catalog primary selection"
+  ],
+  "evidence_refs": [
+    "docs/reports/NEXUS_SF_GOVERNANCE_RUNTIME_REVIEW_SEAL_2026-05-18.json",
+    "docs/reports/NEXUS_SF_AUTO_GOVERNANCE_TARGETED_REPLAY_2026-05-18.json",
+    "docs/reports/NEXUS_SF_GOVERNANCE_V3_CANDIDATE_MUTANT_VALID_CATALOG_2026-05-18.json",
+    "docs/reports/NEXUS_SF_RESEARCH_TIEBREAK_AND_GOVERNANCE_CURATION_2026-05-18.json"
+  ],
+  "generated_at": "2026-05-18T00:00:00+08:00",
+  "primary_skill_id": "acceptance-evidence-failclosed",
+  "public_benchmark_allowed": false,
+  "ranked_candidates": [
+    {
+      "capability": "governance_and_trust",
+      "default_scope": "general_acceptance_evidence_gate",
+      "mutant_receipt_count": 2,
+      "receipt_complete": true,
+      "repo_local_path": "/Users/jameschen/Workspace/nexus/.agents/skills/acceptance-evidence-failclosed/SKILL.md",
+      "risk": "lowest_default_blast_radius_for_governance",
+      "row_count": 2,
+      "runtime_review_seal_status": "PASS",
+      "selected_as_governance_primary": true,
+      "skill_id": "acceptance-evidence-failclosed",
+      "specificity_rank": 1,
+      "tie_break_score": 100
+    },
+    {
+      "capability": "governance_and_trust",
+      "default_scope": "security_policy_auth_subset",
+      "mutant_receipt_count": 2,
+      "receipt_complete": true,
+      "repo_local_path": "/Users/jameschen/Workspace/nexus/.agents/skills/cso/SKILL.md",
+      "risk": "too_security_specific_for_general_governance_default",
+      "row_count": 2,
+      "runtime_review_seal_status": "PASS",
+      "selected_as_governance_primary": false,
+      "skill_id": "cso",
+      "specificity_rank": 2,
+      "tie_break_score": 86
+    },
+    {
+      "capability": "governance_and_trust",
+      "default_scope": "external_source_disclosure_subset",
+      "mutant_receipt_count": 2,
+      "receipt_complete": true,
+      "repo_local_path": "/Users/jameschen/Workspace/nexus/.agents/skills/claudeosint-safe-surface-audit/SKILL.md",
+      "risk": "too_external_source_specific_for_general_governance_default",
+      "row_count": 2,
+      "runtime_review_seal_status": "PASS",
+      "selected_as_governance_primary": false,
+      "skill_id": "claudeosint-safe-surface-audit",
+      "specificity_rank": 3,
+      "tie_break_score": 82
+    },
+    {
+      "capability": "governance_and_trust",
+      "default_scope": "policy_intent_values_subset",
+      "mutant_receipt_count": 2,
+      "receipt_complete": true,
+      "repo_local_path": "/Users/jameschen/Workspace/nexus/.agents/skills/gbrain-soul-audit/SKILL.md",
+      "risk": "too_values_intent_specific_for_general_governance_default",
+      "row_count": 2,
+      "runtime_review_seal_status": "PASS",
+      "selected_as_governance_primary": false,
+      "skill_id": "gbrain-soul-audit",
+      "specificity_rank": 4,
+      "tie_break_score": 78
+    }
+  ],
+  "runtime_update_allowed": false,
+  "schema": "nexus.sf_auto_governance_primary_tiebreak.v1",
+  "status": "PASS",
+  "summary": {
+    "candidate_count": 4,
+    "primary_selected": true,
+    "primary_skill_id": "acceptance-evidence-failclosed",
+    "receipt_complete_count": 4,
+    "sealed_candidate_count": 4
+  }
+}

@@ -1,0 +1,79 @@
+{
+  "schema": "nexus.sf_runtime_review_metadata_overlay.v1",
+  "status": "PASS",
+  "generated_at": "2026-05-18",
+  "candidates": [
+    {
+      "metadata_overlay": true,
+      "skill_id": "create-plan",
+      "capability": "forecast_pregate",
+      "source_root": "nexus_repo",
+      "source_type": "repo_local_materialized_external",
+      "path": "/Users/jameschen/Workspace/nexus/.agents/skills/create-plan/SKILL.md",
+      "runtime_eligible": true,
+      "safety_status": "runtime_reviewed",
+      "runtime_review_basis": [
+        "Apache-2.0 third-party notice present",
+        "repo-local candidate boundary present",
+        "Flash+Nexus vs Flash+Nexus+skill seal PASS",
+        "selected/injected/used/evidence/gate/outcome all true",
+        "runtime default not applied by this overlay"
+      ],
+      "evidence_refs": [
+        "docs/reports/NEXUS_SF_FORECAST_CREATE_PLAN_SEAL_LIVE_REPORT_V2_2026-05-18.json",
+        "docs/reports/NEXUS_SF_FORECAST_CREATE_PLAN_SEAL_CATALOG_V2_2026-05-18.json",
+        ".agents/skills/create-plan/THIRD_PARTY_NOTICE.md"
+      ]
+    },
+    {
+      "metadata_overlay": true,
+      "skill_id": "research-citation-chain-verifier",
+      "capability": "research_and_source_discipline",
+      "source_root": "nexus_repo",
+      "source_type": "repo_local_sf_candidate",
+      "path": ".agents/skills/research-citation-chain-verifier/SKILL.md",
+      "runtime_eligible": true,
+      "safety_status": "runtime_reviewed",
+      "runtime_review_basis": [
+        "repo-local source-discipline skill asset",
+        "expected-capability seal produced receipt-backed effective rows",
+        "runtime default not applied by this overlay"
+      ],
+      "evidence_refs": [
+        "docs/reports/NEXUS_SF_RESEARCH_EXPECTED_CAPABILITY_SEAL_CATALOG_2026-05-18.json",
+        "docs/reports/NEXUS_SF_RESEARCH_MATERIALIZED_SKILL_ASSETS_2026-05-18.json"
+      ]
+    },
+    {
+      "metadata_overlay": true,
+      "skill_id": "research-source-validation-auditor",
+      "capability": "research_and_source_discipline",
+      "source_root": "nexus_repo",
+      "source_type": "repo_local_sf_candidate",
+      "path": ".agents/skills/research-source-validation-auditor/SKILL.md",
+      "runtime_eligible": true,
+      "safety_status": "runtime_reviewed",
+      "runtime_review_basis": [
+        "repo-local source-discipline skill asset",
+        "expected-capability seal produced receipt-backed effective rows",
+        "runtime default not applied by this overlay"
+      ],
+      "evidence_refs": [
+        "docs/reports/NEXUS_SF_RESEARCH_EXPECTED_CAPABILITY_SEAL_CATALOG_2026-05-18.json",
+        "docs/reports/NEXUS_SF_RESEARCH_MATERIALIZED_SKILL_ASSETS_2026-05-18.json"
+      ]
+    }
+  ],
+  "summary": {
+    "overlay_candidate_count": 3,
+    "runtime_reviewed_count": 3,
+    "runtime_update_allowed": false,
+    "public_benchmark_allowed": false,
+    "metadata_overlay_count": 3
+  },
+  "claim_boundary": [
+    "This overlay enables runtime review classification only.",
+    "It does not modify SKILL.md runtime_eligible fields.",
+    "It does not apply runtime defaults."
+  ]
+}

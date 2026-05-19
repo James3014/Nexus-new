@@ -1,0 +1,206 @@
+{
+  "schema": "nexus.sf2_candidate_asset_status.v1",
+  "status": "PASS",
+  "summary": {
+    "asset_count": 17,
+    "status_visible_asset_count": 17,
+    "blocker_count": 0,
+    "runtime_update_allowed": false,
+    "public_benchmark_allowed": false,
+    "bounded_probe_allowed": true
+  },
+  "blockers": [],
+  "assets": [
+    {
+      "skill_id": "sf2-autonomic_router-route-fit-spec",
+      "target_path": ".agents/skills/sf2/sf2-autonomic_router-route-fit-spec/SKILL.md",
+      "status": "PASS",
+      "exists": true,
+      "runtime_update_allowed": false,
+      "runtime_eligible_false_present": true,
+      "public_benchmark_allowed": false,
+      "public_benchmark_false_present": true,
+      "candidate_only_boundary_present": true
+    },
+    {
+      "skill_id": "sf2-autoreason-route-fit-spec",
+      "target_path": ".agents/skills/sf2/sf2-autoreason-route-fit-spec/SKILL.md",
+      "status": "PASS",
+      "exists": true,
+      "runtime_update_allowed": false,
+      "runtime_eligible_false_present": true,
+      "public_benchmark_allowed": false,
+      "public_benchmark_false_present": true,
+      "candidate_only_boundary_present": true
+    },
+    {
+      "skill_id": "sf2-belief-route-fit-spec",
+      "target_path": ".agents/skills/sf2/sf2-belief-route-fit-spec/SKILL.md",
+      "status": "PASS",
+      "exists": true,
+      "runtime_update_allowed": false,
+      "runtime_eligible_false_present": true,
+      "public_benchmark_allowed": false,
+      "public_benchmark_false_present": true,
+      "candidate_only_boundary_present": true
+    },
+    {
+      "skill_id": "sf2-delivery_acceptance_gate-route-fit-spec",
+      "target_path": ".agents/skills/sf2/sf2-delivery_acceptance_gate-route-fit-spec/SKILL.md",
+      "status": "PASS",
+      "exists": true,
+      "runtime_update_allowed": false,
+      "runtime_eligible_false_present": true,
+      "public_benchmark_allowed": false,
+      "public_benchmark_false_present": true,
+      "candidate_only_boundary_present": true
+    },
+    {
+      "skill_id": "sf2-direct_master_loop-route-fit-spec",
+      "target_path": ".agents/skills/sf2/sf2-direct_master_loop-route-fit-spec/SKILL.md",
+      "status": "PASS",
+      "exists": true,
+      "runtime_update_allowed": false,
+      "runtime_eligible_false_present": true,
+      "public_benchmark_allowed": false,
+      "public_benchmark_false_present": true,
+      "candidate_only_boundary_present": true
+    },
+    {
+      "skill_id": "sf2-drone-route-fit-spec",
+      "target_path": ".agents/skills/sf2/sf2-drone-route-fit-spec/SKILL.md",
+      "status": "PASS",
+      "exists": true,
+      "runtime_update_allowed": false,
+      "runtime_eligible_false_present": true,
+      "public_benchmark_allowed": false,
+      "public_benchmark_false_present": true,
+      "candidate_only_boundary_present": true
+    },
+    {
+      "skill_id": "sf2-file_lock_security_gate-route-fit-spec",
+      "target_path": ".agents/skills/sf2/sf2-file_lock_security_gate-route-fit-spec/SKILL.md",
+      "status": "PASS",
+      "exists": true,
+      "runtime_update_allowed": false,
+      "runtime_eligible_false_present": true,
+      "public_benchmark_allowed": false,
+      "public_benchmark_false_present": true,
+      "candidate_only_boundary_present": true
+    },
+    {
+      "skill_id": "sf2-forecast_pregate-route-fit-spec",
+      "target_path": ".agents/skills/sf2/sf2-forecast_pregate-route-fit-spec/SKILL.md",
+      "status": "PASS",
+      "exists": true,
+      "runtime_update_allowed": false,
+      "runtime_eligible_false_present": true,
+      "public_benchmark_allowed": false,
+      "public_benchmark_false_present": true,
+      "candidate_only_boundary_present": true
+    },
+    {
+      "skill_id": "sf2-hyper_sprint-route-fit-spec",
+      "target_path": ".agents/skills/sf2/sf2-hyper_sprint-route-fit-spec/SKILL.md",
+      "status": "PASS",
+      "exists": true,
+      "runtime_update_allowed": false,
+      "runtime_eligible_false_present": true,
+      "public_benchmark_allowed": false,
+      "public_benchmark_false_present": true,
+      "candidate_only_boundary_present": true
+    },
+    {
+      "skill_id": "sf2-lancedb-route-fit-spec",
+      "target_path": ".agents/skills/sf2/sf2-lancedb-route-fit-spec/SKILL.md",
+      "status": "PASS",
+      "exists": true,
+      "runtime_update_allowed": false,
+      "runtime_eligible_false_present": true,
+      "public_benchmark_allowed": false,
+      "public_benchmark_false_present": true,
+      "candidate_only_boundary_present": true
+    },
+    {
+      "skill_id": "sf2-learning_closure-route-fit-spec",
+      "target_path": ".agents/skills/sf2/sf2-learning_closure-route-fit-spec/SKILL.md",
+      "status": "PASS",
+      "exists": true,
+      "runtime_update_allowed": false,
+      "runtime_eligible_false_present": true,
+      "public_benchmark_allowed": false,
+      "public_benchmark_false_present": true,
+      "candidate_only_boundary_present": true
+    },
+    {
+      "skill_id": "sf2-memory-route-fit-spec",
+      "target_path": ".agents/skills/sf2/sf2-memory-route-fit-spec/SKILL.md",
+      "status": "PASS",
+      "exists": true,
+      "runtime_update_allowed": false,
+      "runtime_eligible_false_present": true,
+      "public_benchmark_allowed": false,
+      "public_benchmark_false_present": true,
+      "candidate_only_boundary_present": true
+    },
+    {
+      "skill_id": "sf2-mempalace-route-fit-spec",
+      "target_path": ".agents/skills/sf2/sf2-mempalace-route-fit-spec/SKILL.md",
+      "status": "PASS",
+      "exists": true,
+      "runtime_update_allowed": false,
+      "runtime_eligible_false_present": true,
+      "public_benchmark_allowed": false,
+      "public_benchmark_false_present": true,
+      "candidate_only_boundary_present": true
+    },
+    {
+      "skill_id": "sf2-nightshift-route-fit-spec",
+      "target_path": ".agents/skills/sf2/sf2-nightshift-route-fit-spec/SKILL.md",
+      "status": "PASS",
+      "exists": true,
+      "runtime_update_allowed": false,
+      "runtime_eligible_false_present": true,
+      "public_benchmark_allowed": false,
+      "public_benchmark_false_present": true,
+      "candidate_only_boundary_present": true
+    },
+    {
+      "skill_id": "sf2-registry_skills_sync-route-fit-spec",
+      "target_path": ".agents/skills/sf2/sf2-registry_skills_sync-route-fit-spec/SKILL.md",
+      "status": "PASS",
+      "exists": true,
+      "runtime_update_allowed": false,
+      "runtime_eligible_false_present": true,
+      "public_benchmark_allowed": false,
+      "public_benchmark_false_present": true,
+      "candidate_only_boundary_present": true
+    },
+    {
+      "skill_id": "sf2-research_control_plane-route-fit-spec",
+      "target_path": ".agents/skills/sf2/sf2-research_control_plane-route-fit-spec/SKILL.md",
+      "status": "PASS",
+      "exists": true,
+      "runtime_update_allowed": false,
+      "runtime_eligible_false_present": true,
+      "public_benchmark_allowed": false,
+      "public_benchmark_false_present": true,
+      "candidate_only_boundary_present": true
+    },
+    {
+      "skill_id": "sf2-swarm_multi_agent-route-fit-spec",
+      "target_path": ".agents/skills/sf2/sf2-swarm_multi_agent-route-fit-spec/SKILL.md",
+      "status": "PASS",
+      "exists": true,
+      "runtime_update_allowed": false,
+      "runtime_eligible_false_present": true,
+      "public_benchmark_allowed": false,
+      "public_benchmark_false_present": true,
+      "candidate_only_boundary_present": true
+    }
+  ],
+  "claim_boundary": [
+    "Status-visible means candidate assets exist and preserve candidate-only boundaries.",
+    "This report does not promote any SF2 candidate to runtime default."
+  ]
+}

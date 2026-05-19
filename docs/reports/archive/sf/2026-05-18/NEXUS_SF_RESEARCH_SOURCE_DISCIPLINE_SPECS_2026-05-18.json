@@ -1,0 +1,94 @@
+{
+  "schema": "nexus.research_source_discipline_skill_specs.v1",
+  "status": "PASS",
+  "capability": "research_and_source_discipline",
+  "runtime_update_allowed": false,
+  "research_live_allowed": false,
+  "summary": {
+    "creation_spec_count": 3,
+    "required_behavior_group_count": 3,
+    "external_ingest_guard_present": true,
+    "supply_gap": true
+  },
+  "required_behavior_groups": [
+    "citation_chain",
+    "source_conflict",
+    "source_validation"
+  ],
+  "creation_specs": [
+    {
+      "skill_id": "research-citation-chain-verifier",
+      "behavior_groups": [
+        "citation_chain",
+        "source_validation"
+      ],
+      "load_when": "Load when research output must trace claims to stable source references and verify citation chains.",
+      "required_receipts": [
+        "claim_to_source_refs",
+        "citation_chain_status",
+        "source_validation_status"
+      ],
+      "promotion_gate": "Must improve outcome_contributed rows without increasing trust mismatch."
+    },
+    {
+      "skill_id": "research-source-conflict-resolver",
+      "behavior_groups": [
+        "source_conflict",
+        "source_validation"
+      ],
+      "load_when": "Load when sources disagree and the answer must preserve conflict, confidence, and provenance.",
+      "required_receipts": [
+        "conflicting_source_refs",
+        "resolution_reason",
+        "source_validation_status"
+      ],
+      "promotion_gate": "Must fail closed when source disagreement is unresolved."
+    },
+    {
+      "skill_id": "research-source-validation-auditor",
+      "behavior_groups": [
+        "citation_chain",
+        "source_conflict",
+        "source_validation"
+      ],
+      "load_when": "Load when a research artifact needs an independent source-discipline audit before acceptance.",
+      "required_receipts": [
+        "audit_findings",
+        "missing_source_refs",
+        "source_validation_status"
+      ],
+      "promotion_gate": "Must reject missing or circular evidence paths."
+    }
+  ],
+  "external_ingest_guard": {
+    "lane": "external_candidate_pool_only",
+    "runtime_mount_allowed": false,
+    "required_fields": [
+      "source_url",
+      "repo",
+      "commit_sha",
+      "license",
+      "skill_manifest_path",
+      "ingest_receipt",
+      "security_receipt"
+    ],
+    "required_checks": [
+      "commit_sha_pinned",
+      "license_allowlist_pass",
+      "dependency_review_pass",
+      "code_scanning_or_static_scan_pass",
+      "workflow_scan_pass",
+      "observable_source_discipline_behavior_present"
+    ],
+    "fail_fast": [
+      "unversioned_external_source",
+      "unknown_or_disallowed_license",
+      "missing_security_receipt",
+      "runtime_policy_update_attempt"
+    ]
+  },
+  "promotion_boundary": [
+    "Generated or ingested research skills may enter only the candidate pool.",
+    "Research live remains blocked until a regenerated v3 report selects candidates with observable behavior receipts."
+  ]
+}

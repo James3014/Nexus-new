@@ -1,0 +1,27 @@
+{
+  "schema": "nexus.sf_evidence_gate_schema.v1",
+  "status": "PASS",
+  "required_fields": [
+    "selected",
+    "injected",
+    "used",
+    "evidence_present",
+    "gate_passed",
+    "outcome_contributed",
+    "trust_mismatch",
+    "cost_delta_status"
+  ],
+  "hard_gates": {
+    "selected_only_is_invalid": true,
+    "delivery_success_without_skill_evidence_is_invalid": true,
+    "negative_control_must_block_or_return": true,
+    "trust_mismatch_required": 0
+  },
+  "verdict_rules": {
+    "primary_candidate": "skill arm passes full evidence chain and is strongest among capability-local candidates",
+    "alternate_candidate": "skill arm passes full evidence chain but is not strongest or is candidate-only",
+    "needs_flash_compare": "bounded probe cannot distinguish top candidates or receipt chain is synthetic/weak",
+    "reject": "missing used/evidence/gate/outcome or negative safety signal"
+  },
+  "public_benchmark_allowed": false
+}

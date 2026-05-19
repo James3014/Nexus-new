@@ -1,0 +1,639 @@
+{
+  "schema": "nexus.sf2_candidate_spec_overlay.v1",
+  "status": "PASS",
+  "summary": {
+    "spec_candidate_count": 17,
+    "runtime_update_allowed": false,
+    "public_benchmark_allowed": false,
+    "materialization_required_before_live": true
+  },
+  "spec_candidates": [
+    {
+      "skill_id": "sf2-autonomic_router-route-fit-spec",
+      "source_root": "sf2_spec_overlay",
+      "source_type": "sf2_spec_candidate",
+      "path": "virtual://sf2/spec-candidates/sf2-autonomic_router-route-fit-spec/SKILL.md",
+      "sha256": "",
+      "capability_candidates": [],
+      "load_when": "SF2 spec candidate for autonomic_router: autonomic route selection and route evolution. Use when route capability is autonomic_router. Required route terms: autonomic, router, routing, route.",
+      "forbidden_when": [
+        "runtime_mount",
+        "public_benchmark",
+        "production_policy_update"
+      ],
+      "metadata_quality": "SPEC_ONLY",
+      "safety_status": "ablation_only",
+      "ablation_eligible": true,
+      "runtime_eligible": false,
+      "evidence_required": [
+        "capability_only_baseline",
+        "skill_arm_outcome_contribution",
+        "negative_control_block_or_return",
+        "runtime_receipt_required_before_promotion"
+      ],
+      "sf2_overlay": {
+        "capability_id": "autonomic_router",
+        "group": "reasoning_acceleration",
+        "pillar": "belief",
+        "phases": [
+          "S",
+          "P",
+          "X"
+        ],
+        "required_behavior": "autonomic route selection and route evolution",
+        "materialization_required": true
+      }
+    },
+    {
+      "skill_id": "sf2-autoreason-route-fit-spec",
+      "source_root": "sf2_spec_overlay",
+      "source_type": "sf2_spec_candidate",
+      "path": "virtual://sf2/spec-candidates/sf2-autoreason-route-fit-spec/SKILL.md",
+      "sha256": "",
+      "capability_candidates": [],
+      "load_when": "SF2 spec candidate for autoreason: candidate evaluation, semantic confidence, and reasoned selection. Use when route capability is autoreason. Required route terms: autoreason, reason, judge, confidence, semantic.",
+      "forbidden_when": [
+        "runtime_mount",
+        "public_benchmark",
+        "production_policy_update"
+      ],
+      "metadata_quality": "SPEC_ONLY",
+      "safety_status": "ablation_only",
+      "ablation_eligible": true,
+      "runtime_eligible": false,
+      "evidence_required": [
+        "capability_only_baseline",
+        "skill_arm_outcome_contribution",
+        "negative_control_block_or_return",
+        "runtime_receipt_required_before_promotion"
+      ],
+      "sf2_overlay": {
+        "capability_id": "autoreason",
+        "group": "reasoning_acceleration",
+        "pillar": "belief",
+        "phases": [
+          "P",
+          "X",
+          "D",
+          "R"
+        ],
+        "required_behavior": "candidate evaluation, semantic confidence, and reasoned selection",
+        "materialization_required": true
+      }
+    },
+    {
+      "skill_id": "sf2-belief-route-fit-spec",
+      "source_root": "sf2_spec_overlay",
+      "source_type": "sf2_spec_candidate",
+      "path": "virtual://sf2/spec-candidates/sf2-belief-route-fit-spec/SKILL.md",
+      "sha256": "",
+      "capability_candidates": [],
+      "load_when": "SF2 spec candidate for belief: belief state, subjective confidence, and route priors. Use when route capability is belief. Required route terms: belief, confidence, prior, budget, doubt, careful, strategy, strategic.",
+      "forbidden_when": [
+        "runtime_mount",
+        "public_benchmark",
+        "production_policy_update"
+      ],
+      "metadata_quality": "SPEC_ONLY",
+      "safety_status": "ablation_only",
+      "ablation_eligible": true,
+      "runtime_eligible": false,
+      "evidence_required": [
+        "capability_only_baseline",
+        "skill_arm_outcome_contribution",
+        "negative_control_block_or_return",
+        "runtime_receipt_required_before_promotion"
+      ],
+      "sf2_overlay": {
+        "capability_id": "belief",
+        "group": "reasoning_acceleration",
+        "pillar": "belief",
+        "phases": [
+          "P",
+          "X",
+          "D",
+          "R"
+        ],
+        "required_behavior": "belief state, subjective confidence, and route priors",
+        "materialization_required": true
+      }
+    },
+    {
+      "skill_id": "sf2-delivery_acceptance_gate-route-fit-spec",
+      "source_root": "sf2_spec_overlay",
+      "source_type": "sf2_spec_candidate",
+      "path": "virtual://sf2/spec-candidates/sf2-delivery_acceptance_gate-route-fit-spec/SKILL.md",
+      "sha256": "",
+      "capability_candidates": [],
+      "load_when": "SF2 spec candidate for delivery_acceptance_gate: delivery gate, acceptance check, and contract checks. Use when route capability is delivery_acceptance_gate. Required route terms: delivery, acceptance, contract, done criteria.",
+      "forbidden_when": [
+        "runtime_mount",
+        "public_benchmark",
+        "production_policy_update"
+      ],
+      "metadata_quality": "SPEC_ONLY",
+      "safety_status": "ablation_only",
+      "ablation_eligible": true,
+      "runtime_eligible": false,
+      "evidence_required": [
+        "capability_only_baseline",
+        "skill_arm_outcome_contribution",
+        "negative_control_block_or_return",
+        "runtime_receipt_required_before_promotion"
+      ],
+      "sf2_overlay": {
+        "capability_id": "delivery_acceptance_gate",
+        "group": "delivery_validation",
+        "pillar": "artifact",
+        "phases": [
+          "A",
+          "C"
+        ],
+        "required_behavior": "delivery gate, acceptance check, and contract checks",
+        "materialization_required": true
+      }
+    },
+    {
+      "skill_id": "sf2-direct_master_loop-route-fit-spec",
+      "source_root": "sf2_spec_overlay",
+      "source_type": "sf2_spec_candidate",
+      "path": "virtual://sf2/spec-candidates/sf2-direct_master_loop-route-fit-spec/SKILL.md",
+      "sha256": "",
+      "capability_candidates": [],
+      "load_when": "SF2 spec candidate for direct_master_loop: default execution loop and content/rewrite control. Use when route capability is direct_master_loop. Required route terms: direct, master loop, rewrite, content, execute, task.",
+      "forbidden_when": [
+        "runtime_mount",
+        "public_benchmark",
+        "production_policy_update"
+      ],
+      "metadata_quality": "SPEC_ONLY",
+      "safety_status": "ablation_only",
+      "ablation_eligible": true,
+      "runtime_eligible": false,
+      "evidence_required": [
+        "capability_only_baseline",
+        "skill_arm_outcome_contribution",
+        "negative_control_block_or_return",
+        "runtime_receipt_required_before_promotion"
+      ],
+      "sf2_overlay": {
+        "capability_id": "direct_master_loop",
+        "group": "primary_execution",
+        "pillar": "artifact",
+        "phases": [
+          "S",
+          "P",
+          "X",
+          "D",
+          "R",
+          "A",
+          "C"
+        ],
+        "required_behavior": "default execution loop and content/rewrite control",
+        "materialization_required": true
+      }
+    },
+    {
+      "skill_id": "sf2-drone-route-fit-spec",
+      "source_root": "sf2_spec_overlay",
+      "source_type": "sf2_spec_candidate",
+      "path": "virtual://sf2/spec-candidates/sf2-drone-route-fit-spec/SKILL.md",
+      "sha256": "",
+      "capability_candidates": [],
+      "load_when": "SF2 spec candidate for drone: delegated worker tactical execution and HUD monitoring. Use when route capability is drone. Required route terms: drone, hud, delegate, worker.",
+      "forbidden_when": [
+        "runtime_mount",
+        "public_benchmark",
+        "production_policy_update"
+      ],
+      "metadata_quality": "SPEC_ONLY",
+      "safety_status": "ablation_only",
+      "ablation_eligible": true,
+      "runtime_eligible": false,
+      "evidence_required": [
+        "capability_only_baseline",
+        "skill_arm_outcome_contribution",
+        "negative_control_block_or_return",
+        "runtime_receipt_required_before_promotion"
+      ],
+      "sf2_overlay": {
+        "capability_id": "drone",
+        "group": "collaboration",
+        "pillar": "artifact",
+        "phases": [
+          "X",
+          "D",
+          "R"
+        ],
+        "required_behavior": "delegated worker tactical execution and HUD monitoring",
+        "materialization_required": true
+      }
+    },
+    {
+      "skill_id": "sf2-file_lock_security_gate-route-fit-spec",
+      "source_root": "sf2_spec_overlay",
+      "source_type": "sf2_spec_candidate",
+      "path": "virtual://sf2/spec-candidates/sf2-file_lock_security_gate-route-fit-spec/SKILL.md",
+      "sha256": "",
+      "capability_candidates": [],
+      "load_when": "SF2 spec candidate for file_lock_security_gate: file-lock and delegated execution safety boundaries. Use when route capability is file_lock_security_gate. Required route terms: file lock, lock, security gate, permission, sandbox permission.",
+      "forbidden_when": [
+        "runtime_mount",
+        "public_benchmark",
+        "production_policy_update"
+      ],
+      "metadata_quality": "SPEC_ONLY",
+      "safety_status": "ablation_only",
+      "ablation_eligible": true,
+      "runtime_eligible": false,
+      "evidence_required": [
+        "capability_only_baseline",
+        "skill_arm_outcome_contribution",
+        "negative_control_block_or_return",
+        "runtime_receipt_required_before_promotion"
+      ],
+      "sf2_overlay": {
+        "capability_id": "file_lock_security_gate",
+        "group": "collaboration",
+        "pillar": "mempalace",
+        "phases": [
+          "P",
+          "D",
+          "A"
+        ],
+        "required_behavior": "file-lock and delegated execution safety boundaries",
+        "materialization_required": true
+      }
+    },
+    {
+      "skill_id": "sf2-forecast_pregate-route-fit-spec",
+      "source_root": "sf2_spec_overlay",
+      "source_type": "sf2_spec_candidate",
+      "path": "virtual://sf2/spec-candidates/sf2-forecast_pregate-route-fit-spec/SKILL.md",
+      "sha256": "",
+      "capability_candidates": [],
+      "load_when": "SF2 spec candidate for forecast_pregate: forecast, pregate, plan quality, and risk prediction. Use when route capability is forecast_pregate. Required route terms: forecast, pregate, plan quality, risk, planner.",
+      "forbidden_when": [
+        "runtime_mount",
+        "public_benchmark",
+        "production_policy_update"
+      ],
+      "metadata_quality": "SPEC_ONLY",
+      "safety_status": "ablation_only",
+      "ablation_eligible": true,
+      "runtime_eligible": false,
+      "evidence_required": [
+        "capability_only_baseline",
+        "skill_arm_outcome_contribution",
+        "negative_control_block_or_return",
+        "runtime_receipt_required_before_promotion"
+      ],
+      "sf2_overlay": {
+        "capability_id": "forecast_pregate",
+        "group": "reasoning_acceleration",
+        "pillar": "belief",
+        "phases": [
+          "S",
+          "P"
+        ],
+        "required_behavior": "forecast, pregate, plan quality, and risk prediction",
+        "materialization_required": true
+      }
+    },
+    {
+      "skill_id": "sf2-hyper_sprint-route-fit-spec",
+      "source_root": "sf2_spec_overlay",
+      "source_type": "sf2_spec_candidate",
+      "path": "virtual://sf2/spec-candidates/sf2-hyper_sprint-route-fit-spec/SKILL.md",
+      "sha256": "",
+      "capability_candidates": [],
+      "load_when": "SF2 spec candidate for hyper_sprint: fast multi-candidate local repair and sprint execution. Use when route capability is hyper_sprint. Required route terms: hyper, sprint, multi-candidate, quick fix, fast path.",
+      "forbidden_when": [
+        "runtime_mount",
+        "public_benchmark",
+        "production_policy_update"
+      ],
+      "metadata_quality": "SPEC_ONLY",
+      "safety_status": "ablation_only",
+      "ablation_eligible": true,
+      "runtime_eligible": false,
+      "evidence_required": [
+        "capability_only_baseline",
+        "skill_arm_outcome_contribution",
+        "negative_control_block_or_return",
+        "runtime_receipt_required_before_promotion"
+      ],
+      "sf2_overlay": {
+        "capability_id": "hyper_sprint",
+        "group": "primary_execution",
+        "pillar": "belief",
+        "phases": [
+          "P",
+          "X",
+          "D",
+          "R"
+        ],
+        "required_behavior": "fast multi-candidate local repair and sprint execution",
+        "materialization_required": true
+      }
+    },
+    {
+      "skill_id": "sf2-lancedb-route-fit-spec",
+      "source_root": "sf2_spec_overlay",
+      "source_type": "sf2_spec_candidate",
+      "path": "virtual://sf2/spec-candidates/sf2-lancedb-route-fit-spec/SKILL.md",
+      "sha256": "",
+      "capability_candidates": [],
+      "load_when": "SF2 spec candidate for lancedb: vector search, semantic retrieval, and findings lookup. Use when route capability is lancedb. Required route terms: lancedb, vector, embedding, semantic, rag, retrieval.",
+      "forbidden_when": [
+        "runtime_mount",
+        "public_benchmark",
+        "production_policy_update"
+      ],
+      "metadata_quality": "SPEC_ONLY",
+      "safety_status": "ablation_only",
+      "ablation_eligible": true,
+      "runtime_eligible": false,
+      "evidence_required": [
+        "capability_only_baseline",
+        "skill_arm_outcome_contribution",
+        "negative_control_block_or_return",
+        "runtime_receipt_required_before_promotion"
+      ],
+      "sf2_overlay": {
+        "capability_id": "lancedb",
+        "group": "scout_context",
+        "pillar": "lancedb",
+        "phases": [
+          "S",
+          "X",
+          "R"
+        ],
+        "required_behavior": "vector search, semantic retrieval, and findings lookup",
+        "materialization_required": true
+      }
+    },
+    {
+      "skill_id": "sf2-learning_closure-route-fit-spec",
+      "source_root": "sf2_spec_overlay",
+      "source_type": "sf2_spec_candidate",
+      "path": "virtual://sf2/spec-candidates/sf2-learning_closure-route-fit-spec/SKILL.md",
+      "sha256": "",
+      "capability_candidates": [],
+      "load_when": "SF2 spec candidate for learning_closure: lesson writeback, closure matrices, and learning KPI/SLO. Use when route capability is learning_closure. Required route terms: learning closure, lesson, writeback, slo, kpi, closure matrix, goal closure, closure executor, continuous optimization, autotune.",
+      "forbidden_when": [
+        "runtime_mount",
+        "public_benchmark",
+        "production_policy_update"
+      ],
+      "metadata_quality": "SPEC_ONLY",
+      "safety_status": "ablation_only",
+      "ablation_eligible": true,
+      "runtime_eligible": false,
+      "evidence_required": [
+        "capability_only_baseline",
+        "skill_arm_outcome_contribution",
+        "negative_control_block_or_return",
+        "runtime_receipt_required_before_promotion"
+      ],
+      "sf2_overlay": {
+        "capability_id": "learning_closure",
+        "group": "memory_learning",
+        "pillar": "memory",
+        "phases": [
+          "R",
+          "A",
+          "C"
+        ],
+        "required_behavior": "lesson writeback, closure matrices, and learning KPI/SLO",
+        "materialization_required": true
+      }
+    },
+    {
+      "skill_id": "sf2-memory-route-fit-spec",
+      "source_root": "sf2_spec_overlay",
+      "source_type": "sf2_spec_candidate",
+      "path": "virtual://sf2/spec-candidates/sf2-memory-route-fit-spec/SKILL.md",
+      "sha256": "",
+      "capability_candidates": [],
+      "load_when": "SF2 spec candidate for memory: long-term memory and durable experience reuse. Use when route capability is memory. Required route terms: memory, findings, remember, recall, experience, vault.",
+      "forbidden_when": [
+        "runtime_mount",
+        "public_benchmark",
+        "production_policy_update"
+      ],
+      "metadata_quality": "SPEC_ONLY",
+      "safety_status": "ablation_only",
+      "ablation_eligible": true,
+      "runtime_eligible": false,
+      "evidence_required": [
+        "capability_only_baseline",
+        "skill_arm_outcome_contribution",
+        "negative_control_block_or_return",
+        "runtime_receipt_required_before_promotion"
+      ],
+      "sf2_overlay": {
+        "capability_id": "memory",
+        "group": "memory_learning",
+        "pillar": "memory",
+        "phases": [
+          "S",
+          "P",
+          "R",
+          "C"
+        ],
+        "required_behavior": "long-term memory and durable experience reuse",
+        "materialization_required": true
+      }
+    },
+    {
+      "skill_id": "sf2-mempalace-route-fit-spec",
+      "source_root": "sf2_spec_overlay",
+      "source_type": "sf2_spec_candidate",
+      "path": "virtual://sf2/spec-candidates/sf2-mempalace-route-fit-spec/SKILL.md",
+      "sha256": "",
+      "capability_candidates": [],
+      "load_when": "SF2 spec candidate for mempalace: ethical boundary, memory palace, and forbidden action constraints. Use when route capability is mempalace. Required route terms: mempalace, ethic, policy, guardrail, safety, boundary.",
+      "forbidden_when": [
+        "runtime_mount",
+        "public_benchmark",
+        "production_policy_update"
+      ],
+      "metadata_quality": "SPEC_ONLY",
+      "safety_status": "ablation_only",
+      "ablation_eligible": true,
+      "runtime_eligible": false,
+      "evidence_required": [
+        "capability_only_baseline",
+        "skill_arm_outcome_contribution",
+        "negative_control_block_or_return",
+        "runtime_receipt_required_before_promotion"
+      ],
+      "sf2_overlay": {
+        "capability_id": "mempalace",
+        "group": "governance_risk",
+        "pillar": "mempalace",
+        "phases": [
+          "S",
+          "P",
+          "A",
+          "C"
+        ],
+        "required_behavior": "ethical boundary, memory palace, and forbidden action constraints",
+        "materialization_required": true
+      }
+    },
+    {
+      "skill_id": "sf2-nightshift-route-fit-spec",
+      "source_root": "sf2_spec_overlay",
+      "source_type": "sf2_spec_candidate",
+      "path": "virtual://sf2/spec-candidates/sf2-nightshift-route-fit-spec/SKILL.md",
+      "sha256": "",
+      "capability_candidates": [],
+      "load_when": "SF2 spec candidate for nightshift: long-running recovery after normal repair fails. Use when route capability is nightshift. Required route terms: nightshift, night shift, longrun, long-running, recovery, emergency recovery, autonomous task, continuous optimization.",
+      "forbidden_when": [
+        "runtime_mount",
+        "public_benchmark",
+        "production_policy_update"
+      ],
+      "metadata_quality": "SPEC_ONLY",
+      "safety_status": "ablation_only",
+      "ablation_eligible": true,
+      "runtime_eligible": false,
+      "evidence_required": [
+        "capability_only_baseline",
+        "skill_arm_outcome_contribution",
+        "negative_control_block_or_return",
+        "runtime_receipt_required_before_promotion"
+      ],
+      "sf2_overlay": {
+        "capability_id": "nightshift",
+        "group": "primary_execution",
+        "pillar": "memory",
+        "phases": [
+          "D",
+          "R",
+          "A",
+          "C"
+        ],
+        "required_behavior": "long-running recovery after normal repair fails",
+        "materialization_required": true
+      }
+    },
+    {
+      "skill_id": "sf2-registry_skills_sync-route-fit-spec",
+      "source_root": "sf2_spec_overlay",
+      "source_type": "sf2_spec_candidate",
+      "path": "virtual://sf2/spec-candidates/sf2-registry_skills_sync-route-fit-spec/SKILL.md",
+      "sha256": "",
+      "capability_candidates": [],
+      "load_when": "SF2 spec candidate for registry_skills_sync: skill registry, plugin sync, and catalog maintenance. Use when route capability is registry_skills_sync. Required route terms: skill registry, registry, plugin, install, catalog, sync.",
+      "forbidden_when": [
+        "runtime_mount",
+        "public_benchmark",
+        "production_policy_update"
+      ],
+      "metadata_quality": "SPEC_ONLY",
+      "safety_status": "ablation_only",
+      "ablation_eligible": true,
+      "runtime_eligible": false,
+      "evidence_required": [
+        "capability_only_baseline",
+        "skill_arm_outcome_contribution",
+        "negative_control_block_or_return",
+        "runtime_receipt_required_before_promotion"
+      ],
+      "sf2_overlay": {
+        "capability_id": "registry_skills_sync",
+        "group": "productization",
+        "pillar": "artifact",
+        "phases": [
+          "S",
+          "C"
+        ],
+        "required_behavior": "skill registry, plugin sync, and catalog maintenance",
+        "materialization_required": true
+      }
+    },
+    {
+      "skill_id": "sf2-research_control_plane-route-fit-spec",
+      "source_root": "sf2_spec_overlay",
+      "source_type": "sf2_spec_candidate",
+      "path": "virtual://sf2/spec-candidates/sf2-research_control_plane-route-fit-spec/SKILL.md",
+      "sha256": "",
+      "capability_candidates": [],
+      "load_when": "SF2 spec candidate for research_control_plane: research planning, source conflict handling, and research gates. Use when route capability is research_control_plane. Required route terms: source conflict, source validation, citation chain, claim verification, academic verify.",
+      "forbidden_when": [
+        "runtime_mount",
+        "public_benchmark",
+        "production_policy_update"
+      ],
+      "metadata_quality": "SPEC_ONLY",
+      "safety_status": "ablation_only",
+      "ablation_eligible": true,
+      "runtime_eligible": false,
+      "evidence_required": [
+        "capability_only_baseline",
+        "skill_arm_outcome_contribution",
+        "negative_control_block_or_return",
+        "runtime_receipt_required_before_promotion"
+      ],
+      "sf2_overlay": {
+        "capability_id": "research_control_plane",
+        "group": "scout_context",
+        "pillar": "claim",
+        "phases": [
+          "S",
+          "P",
+          "X",
+          "R",
+          "C"
+        ],
+        "required_behavior": "research planning, source conflict handling, and research gates",
+        "materialization_required": true
+      }
+    },
+    {
+      "skill_id": "sf2-swarm_multi_agent-route-fit-spec",
+      "source_root": "sf2_spec_overlay",
+      "source_type": "sf2_spec_candidate",
+      "path": "virtual://sf2/spec-candidates/sf2-swarm_multi_agent-route-fit-spec/SKILL.md",
+      "sha256": "",
+      "capability_candidates": [],
+      "load_when": "SF2 spec candidate for swarm_multi_agent: swarm, multi-agent, worktree, submit, verify, integrate. Use when route capability is swarm_multi_agent. Required route terms: swarm, multi-agent, worktree, fleet, integrate, submit.",
+      "forbidden_when": [
+        "runtime_mount",
+        "public_benchmark",
+        "production_policy_update"
+      ],
+      "metadata_quality": "SPEC_ONLY",
+      "safety_status": "ablation_only",
+      "ablation_eligible": true,
+      "runtime_eligible": false,
+      "evidence_required": [
+        "capability_only_baseline",
+        "skill_arm_outcome_contribution",
+        "negative_control_block_or_return",
+        "runtime_receipt_required_before_promotion"
+      ],
+      "sf2_overlay": {
+        "capability_id": "swarm_multi_agent",
+        "group": "collaboration",
+        "pillar": "artifact",
+        "phases": [
+          "P",
+          "X",
+          "D",
+          "A",
+          "C"
+        ],
+        "required_behavior": "swarm, multi-agent, worktree, submit, verify, integrate",
+        "materialization_required": true
+      }
+    }
+  ],
+  "claim_boundary": [
+    "Spec candidates close route-fit supply gaps for planning only.",
+    "Spec candidates are not runtime skills until materialized, reviewed, and receipt-backed."
+  ]
+}

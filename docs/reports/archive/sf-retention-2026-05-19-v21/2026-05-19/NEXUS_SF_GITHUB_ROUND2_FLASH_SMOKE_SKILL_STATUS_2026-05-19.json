@@ -1,0 +1,62 @@
+{
+  "schema": "nexus.sf_github_round2_flash_smoke_skill_status.v1",
+  "skills": [
+    {
+      "action": "ablation_only_compare",
+      "capability_mount": "hyper",
+      "family": "repair_loop",
+      "name": "tdd",
+      "path": "/Users/jameschen/Workspace/nexus/.agents/skills/tdd/SKILL.md",
+      "reason_codes": [
+        "sf_github_round2_current_best"
+      ],
+      "root": "current_best",
+      "skill_status": "nexus_curated_candidate",
+      "test_level": "sf_github_round2_flash_smoke"
+    },
+    {
+      "action": "ablation_only_compare",
+      "capability_mount": "hyper",
+      "family": "repair_loop",
+      "name": "github2-superpowers-test-driven-development",
+      "path": "",
+      "reason_codes": [
+        "sf_github_round2_github_challenger"
+      ],
+      "root": "github_challenger",
+      "skill_status": "external_reference_candidate",
+      "test_level": "sf_github_round2_flash_smoke"
+    },
+    {
+      "action": "ablation_only_compare",
+      "capability_mount": "ultra_review",
+      "family": "ui_validator",
+      "name": "nexus-root-cause-probe",
+      "path": "/Users/jameschen/Workspace/nexus/.agents/skills/nexus-root-cause-probe/SKILL.md",
+      "reason_codes": [
+        "sf_github_round2_current_best"
+      ],
+      "root": "current_best",
+      "skill_status": "nexus_curated_candidate",
+      "test_level": "sf_github_round2_flash_smoke"
+    },
+    {
+      "action": "ablation_only_compare",
+      "capability_mount": "ultra_review",
+      "family": "ui_validator",
+      "name": "github2-agent-browser-dogfood",
+      "path": "",
+      "reason_codes": [
+        "sf_github_round2_github_challenger"
+      ],
+      "root": "github_challenger",
+      "skill_status": "external_reference_candidate",
+      "test_level": "sf_github_round2_flash_smoke"
+    }
+  ],
+  "summary": {
+    "public_benchmark_allowed": false,
+    "runtime_update_allowed": false,
+    "skill_count": 4
+  }
+}

@@ -1,0 +1,331 @@
+{
+  "schema": "nexus.sf.external_skill_update_record.v1",
+  "status": "PASS",
+  "generated_at": "2026-05-18T00:00:00+08:00",
+  "goal": "Record external SF replacement/alternate evidence and identify catalog-level skill updates without granting runtime defaults.",
+  "summary": {
+    "external_project_count": 3,
+    "compared_row_count": 17,
+    "capability_count": 10,
+    "catalog_replace_ready_count": 2,
+    "catalog_alternate_ready_count": 0,
+    "materialization_required_count": 5,
+    "runtime_update_allowed": false,
+    "public_benchmark_allowed": false
+  },
+  "applied_local_materialization": [
+    {
+      "skill_id": "create-plan",
+      "capability_id": "forecast_pregate",
+      "path": ".agents/skills/create-plan/SKILL.md",
+      "source": "https://github.com/ComposioHQ/awesome-codex-skills",
+      "commit_sha": "9c9da64cf1bbea611d43dd14a10788d55369b353",
+      "reason": "Composio create-plan was the strongest forecast_pregate replace_candidate and needed repo-local materialization before catalog update review."
+    }
+  ],
+  "capability_updates": [
+    {
+      "capability_id": "codeintel",
+      "selected_update_state": "keep_current",
+      "selected_candidate": null,
+      "selected_source": null,
+      "selected_verdict": null,
+      "selected_local_path": "",
+      "catalog_update_allowed": false,
+      "runtime_update_allowed": false,
+      "runtime_review_required": false,
+      "materialization_required": false,
+      "best_score": null,
+      "replace_candidates": [],
+      "alternate_candidates": [],
+      "keep_current_rows": [
+        {
+          "skill_id": "improve-codebase-architecture",
+          "source": "mattpocock/skills"
+        },
+        {
+          "skill_id": "karpathy-guidelines__codeintel",
+          "source": "doggy8088/andrej-karpathy-skills"
+        }
+      ]
+    },
+    {
+      "capability_id": "direct_master_loop",
+      "selected_update_state": "keep_current",
+      "selected_candidate": null,
+      "selected_source": null,
+      "selected_verdict": null,
+      "selected_local_path": "",
+      "catalog_update_allowed": false,
+      "runtime_update_allowed": false,
+      "runtime_review_required": false,
+      "materialization_required": false,
+      "best_score": null,
+      "replace_candidates": [],
+      "alternate_candidates": [],
+      "keep_current_rows": [
+        {
+          "skill_id": "karpathy-guidelines__direct_master_loop",
+          "source": "doggy8088/andrej-karpathy-skills"
+        }
+      ]
+    },
+    {
+      "capability_id": "forecast_pregate",
+      "selected_update_state": "catalog_replace_ready",
+      "selected_candidate": "create-plan",
+      "selected_source": "ComposioHQ/awesome-codex-skills",
+      "selected_verdict": "replace_candidate",
+      "selected_local_path": "/Users/jameschen/Workspace/nexus/.agents/skills/create-plan/SKILL.md",
+      "catalog_update_allowed": true,
+      "runtime_update_allowed": false,
+      "runtime_review_required": true,
+      "materialization_required": false,
+      "best_score": 7929.44,
+      "replace_candidates": [
+        {
+          "skill_id": "create-plan",
+          "source": "ComposioHQ/awesome-codex-skills",
+          "score": 7929.44,
+          "token_delta": -6785,
+          "wall_delta_sec": -19.3681
+        },
+        {
+          "skill_id": "to-prd",
+          "source": "mattpocock/skills",
+          "score": 1993.36,
+          "token_delta": -2876,
+          "wall_delta_sec": 0.9027
+        }
+      ],
+      "alternate_candidates": [],
+      "keep_current_rows": []
+    },
+    {
+      "capability_id": "hyper_sprint",
+      "selected_update_state": "alternate_materialization_required",
+      "selected_candidate": "karpathy-guidelines__hyper_sprint",
+      "selected_source": "doggy8088/andrej-karpathy-skills",
+      "selected_verdict": "alternate_candidate",
+      "selected_local_path": "",
+      "catalog_update_allowed": false,
+      "runtime_update_allowed": false,
+      "runtime_review_required": false,
+      "materialization_required": true,
+      "best_score": 5015.54,
+      "replace_candidates": [],
+      "alternate_candidates": [
+        {
+          "skill_id": "karpathy-guidelines__hyper_sprint",
+          "source": "doggy8088/andrej-karpathy-skills",
+          "score": 5015.54,
+          "token_delta": -7888,
+          "wall_delta_sec": 13.212
+        }
+      ],
+      "keep_current_rows": []
+    },
+    {
+      "capability_id": "registry_skills_sync",
+      "selected_update_state": "alternate_materialization_required",
+      "selected_candidate": "skill-creator",
+      "selected_source": "ComposioHQ/awesome-codex-skills",
+      "selected_verdict": "alternate_candidate",
+      "selected_local_path": "",
+      "catalog_update_allowed": false,
+      "runtime_update_allowed": false,
+      "runtime_review_required": false,
+      "materialization_required": true,
+      "best_score": -1251.49,
+      "replace_candidates": [],
+      "alternate_candidates": [
+        {
+          "skill_id": "skill-creator",
+          "source": "ComposioHQ/awesome-codex-skills",
+          "score": -1251.49,
+          "token_delta": 750,
+          "wall_delta_sec": -33.7727
+        },
+        {
+          "skill_id": "write-a-skill",
+          "source": "mattpocock/skills",
+          "score": -3014.83,
+          "token_delta": 999,
+          "wall_delta_sec": -18.6293
+        }
+      ],
+      "keep_current_rows": []
+    },
+    {
+      "capability_id": "repair_loop",
+      "selected_update_state": "catalog_replace_ready",
+      "selected_candidate": "tdd",
+      "selected_source": "mattpocock/skills",
+      "selected_verdict": "replace_candidate",
+      "selected_local_path": "/Users/jameschen/Workspace/nexus/.agents/skills/tdd/SKILL.md",
+      "catalog_update_allowed": true,
+      "runtime_update_allowed": false,
+      "runtime_review_required": true,
+      "materialization_required": false,
+      "best_score": 30410.32,
+      "replace_candidates": [
+        {
+          "skill_id": "tdd",
+          "source": "mattpocock/skills",
+          "score": 30410.32,
+          "token_delta": -21155,
+          "wall_delta_sec": -67.7477
+        },
+        {
+          "skill_id": "karpathy-guidelines__repair_loop",
+          "source": "doggy8088/andrej-karpathy-skills",
+          "score": 3895.93,
+          "token_delta": -904,
+          "wall_delta_sec": -5.1138
+        }
+      ],
+      "alternate_candidates": [
+        {
+          "skill_id": "codebase-migrate",
+          "source": "ComposioHQ/awesome-codex-skills",
+          "score": -324.66,
+          "token_delta": 1464,
+          "wall_delta_sec": 13.4121
+        }
+      ],
+      "keep_current_rows": []
+    },
+    {
+      "capability_id": "research_control_plane",
+      "selected_update_state": "alternate_materialization_required",
+      "selected_candidate": "content-research-writer",
+      "selected_source": "ComposioHQ/awesome-codex-skills",
+      "selected_verdict": "alternate_candidate",
+      "selected_local_path": "",
+      "catalog_update_allowed": false,
+      "runtime_update_allowed": false,
+      "runtime_review_required": false,
+      "materialization_required": true,
+      "best_score": -455.54,
+      "replace_candidates": [],
+      "alternate_candidates": [
+        {
+          "skill_id": "content-research-writer",
+          "source": "ComposioHQ/awesome-codex-skills",
+          "score": -455.54,
+          "token_delta": -1414,
+          "wall_delta_sec": -19.2867
+        },
+        {
+          "skill_id": "grill-with-docs",
+          "source": "mattpocock/skills",
+          "score": -787.32,
+          "token_delta": -702,
+          "wall_delta_sec": -23.0889
+        }
+      ],
+      "keep_current_rows": []
+    },
+    {
+      "capability_id": "ui_validator",
+      "selected_update_state": "alternate_materialization_required",
+      "selected_candidate": "webapp-testing",
+      "selected_source": "ComposioHQ/awesome-codex-skills",
+      "selected_verdict": "alternate_candidate",
+      "selected_local_path": "",
+      "catalog_update_allowed": false,
+      "runtime_update_allowed": false,
+      "runtime_review_required": false,
+      "materialization_required": true,
+      "best_score": 7250.76,
+      "replace_candidates": [],
+      "alternate_candidates": [
+        {
+          "skill_id": "webapp-testing",
+          "source": "ComposioHQ/awesome-codex-skills",
+          "score": 7250.76,
+          "token_delta": -4621,
+          "wall_delta_sec": 19.9203
+        }
+      ],
+      "keep_current_rows": []
+    },
+    {
+      "capability_id": "ultra_review",
+      "selected_update_state": "alternate_materialization_required",
+      "selected_candidate": "karpathy-guidelines__ultra_review",
+      "selected_source": "doggy8088/andrej-karpathy-skills",
+      "selected_verdict": "alternate_candidate",
+      "selected_local_path": "",
+      "catalog_update_allowed": false,
+      "runtime_update_allowed": false,
+      "runtime_review_required": false,
+      "materialization_required": true,
+      "best_score": 716.05,
+      "replace_candidates": [],
+      "alternate_candidates": [
+        {
+          "skill_id": "karpathy-guidelines__ultra_review",
+          "source": "doggy8088/andrej-karpathy-skills",
+          "score": 716.05,
+          "token_delta": -1745,
+          "wall_delta_sec": 14.6483
+        }
+      ],
+      "keep_current_rows": [
+        {
+          "skill_id": "pr-review-ci-fix",
+          "source": "ComposioHQ/awesome-codex-skills"
+        }
+      ]
+    },
+    {
+      "capability_id": "xray",
+      "selected_update_state": "keep_current",
+      "selected_candidate": null,
+      "selected_source": null,
+      "selected_verdict": null,
+      "selected_local_path": "",
+      "catalog_update_allowed": false,
+      "runtime_update_allowed": false,
+      "runtime_review_required": false,
+      "materialization_required": false,
+      "best_score": null,
+      "replace_candidates": [],
+      "alternate_candidates": [],
+      "keep_current_rows": [
+        {
+          "skill_id": "diagnose",
+          "source": "mattpocock/skills"
+        }
+      ]
+    }
+  ],
+  "replacement_log": [
+    {
+      "capability_id": "forecast_pregate",
+      "current_replaced_by_candidate": "create-plan",
+      "source": "ComposioHQ/awesome-codex-skills",
+      "state": "catalog_replace_ready",
+      "runtime_update_allowed": false,
+      "evidence": [
+        "docs/reports/NEXUS_SF_COMPOSIO_AWESOME_CODEX_CHALLENGE_COMPARISON_2026-05-18.json"
+      ]
+    },
+    {
+      "capability_id": "repair_loop",
+      "current_replaced_by_candidate": "tdd",
+      "source": "mattpocock/skills",
+      "state": "catalog_replace_ready",
+      "runtime_update_allowed": false,
+      "evidence": [
+        "docs/reports/NEXUS_SF_MATTPOCOCK_CHALLENGE_COMPARISON_2026-05-18.json"
+      ]
+    }
+  ],
+  "claim_boundary": [
+    "This record updates SF catalog intent only; it does not write runtime defaults.",
+    "Runtime promotion requires separate review after repo-local materialization and seal validation.",
+    "Public benchmark remains blocked until runtime update and benchmark readiness gates pass."
+  ]
+}

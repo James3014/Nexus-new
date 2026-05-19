@@ -1,0 +1,307 @@
+{
+  "schema": "nexus.skill_fit_catalog.v1",
+  "status": "PASS",
+  "mode": "live",
+  "matrix_path": "docs/reports/NEXUS_SF_V15_HELD_CHALLENGER_EXECUTION_MATRIX_2026-05-19.json",
+  "summary": {
+    "planned_rows": 21,
+    "completed_rows": 21,
+    "matrix_complete": true,
+    "capability_only_rows": 7,
+    "skill_count": 14,
+    "negative_control_rows": 0,
+    "negative_control_blocked_rows": 0,
+    "keep_count": 5,
+    "replace_candidate_count": 0,
+    "reject_count": 9,
+    "needs_more_data_count": 0
+  },
+  "failures": [],
+  "claim_boundary": [
+    "Catalog verdicts are valid only for this capability, task set, model, and matrix version.",
+    "replace_candidate means import/review candidate, not runtime promotion.",
+    "runtime policy changes require a later Flash 50/100 regression gate."
+  ],
+  "skill_verdicts": [
+    {
+      "skill_id": "nexus-root-cause-probe",
+      "capability": "autonomic_router",
+      "anonymous_label": "challenger::nexus-root-cause-probe",
+      "source_root": "nexus_repo",
+      "runtime_eligible": true,
+      "tested_rows": 1,
+      "effective_rows": 0,
+      "trust_clean_rows": 1,
+      "verdict": "reject",
+      "evidence_refs": [
+        "/private/tmp/nexus_sf_v15_held_live_20260519/autonomic_router_sf-v15-held-autonomic_router-001_challenger_nexus-root-cause-probe/evidence_bundle.json"
+      ],
+      "receipt_refs": [
+        "/private/tmp/nexus_sf_v15_held_live_20260519/autonomic_router_sf-v15-held-autonomic_router-001_challenger_nexus-root-cause-probe"
+      ],
+      "task_buckets": [
+        "autonomic_router"
+      ]
+    },
+    {
+      "skill_id": "sf2-autonomic_router-route-fit-spec",
+      "capability": "autonomic_router",
+      "anonymous_label": "current_best::sf2-autonomic_router-route-fit-spec",
+      "source_root": "nexus_repo",
+      "runtime_eligible": true,
+      "tested_rows": 1,
+      "effective_rows": 1,
+      "trust_clean_rows": 1,
+      "verdict": "keep",
+      "evidence_refs": [
+        "/private/tmp/nexus_sf_v15_held_live_20260519/autonomic_router_sf-v15-held-autonomic_router-001_current_best_sf2-autonomic_router-route-fit-spec/evidence_bundle.json"
+      ],
+      "receipt_refs": [
+        "/private/tmp/nexus_sf_v15_held_live_20260519/autonomic_router_sf-v15-held-autonomic_router-001_current_best_sf2-autonomic_router-route-fit-spec"
+      ],
+      "task_buckets": [
+        "autonomic_router"
+      ]
+    },
+    {
+      "skill_id": "nexus-benchmark-continuous-optimization",
+      "capability": "benchmark_meta_opt",
+      "anonymous_label": "current_best::nexus-benchmark-continuous-optimization",
+      "source_root": "nexus_repo",
+      "runtime_eligible": true,
+      "tested_rows": 1,
+      "effective_rows": 1,
+      "trust_clean_rows": 1,
+      "verdict": "keep",
+      "evidence_refs": [
+        "/private/tmp/nexus_sf_v15_held_live_20260519/benchmark_meta_opt_sf-v15-held-benchmark_meta_opt-001_current_best_nexus-benchmark-continuous-optimization/evidence_bundle.json"
+      ],
+      "receipt_refs": [
+        "/private/tmp/nexus_sf_v15_held_live_20260519/benchmark_meta_opt_sf-v15-held-benchmark_meta_opt-001_current_best_nexus-benchmark-continuous-optimization"
+      ],
+      "task_buckets": [
+        "benchmark_meta_opt"
+      ]
+    },
+    {
+      "skill_id": "nexus-benchmark-public-report",
+      "capability": "benchmark_meta_opt",
+      "anonymous_label": "challenger::nexus-benchmark-public-report",
+      "source_root": "nexus_repo",
+      "runtime_eligible": true,
+      "tested_rows": 1,
+      "effective_rows": 0,
+      "trust_clean_rows": 1,
+      "verdict": "reject",
+      "evidence_refs": [
+        "/private/tmp/nexus_sf_v15_held_live_20260519/benchmark_meta_opt_sf-v15-held-benchmark_meta_opt-001_challenger_nexus-benchmark-public-report/evidence_bundle.json"
+      ],
+      "receipt_refs": [
+        "/private/tmp/nexus_sf_v15_held_live_20260519/benchmark_meta_opt_sf-v15-held-benchmark_meta_opt-001_challenger_nexus-benchmark-public-report"
+      ],
+      "task_buckets": [
+        "benchmark_meta_opt"
+      ]
+    },
+    {
+      "skill_id": "acceptance-evidence-failclosed",
+      "capability": "delivery_acceptance_gate",
+      "anonymous_label": "current_best::acceptance-evidence-failclosed",
+      "source_root": "nexus_repo",
+      "runtime_eligible": true,
+      "tested_rows": 1,
+      "effective_rows": 0,
+      "trust_clean_rows": 1,
+      "verdict": "reject",
+      "evidence_refs": [
+        "/private/tmp/nexus_sf_v15_held_live_20260519/delivery_acceptance_gate_sf-v15-held-delivery_acceptance_gate-001_current_best_acceptance-evidence-failclosed/evidence_bundle.json"
+      ],
+      "receipt_refs": [
+        "/private/tmp/nexus_sf_v15_held_live_20260519/delivery_acceptance_gate_sf-v15-held-delivery_acceptance_gate-001_current_best_acceptance-evidence-failclosed"
+      ],
+      "task_buckets": [
+        "delivery_acceptance_gate"
+      ]
+    },
+    {
+      "skill_id": "nexus-goal-closure-executor",
+      "capability": "delivery_acceptance_gate",
+      "anonymous_label": "challenger::nexus-goal-closure-executor",
+      "source_root": "nexus_repo",
+      "runtime_eligible": true,
+      "tested_rows": 1,
+      "effective_rows": 0,
+      "trust_clean_rows": 1,
+      "verdict": "reject",
+      "evidence_refs": [
+        "/private/tmp/nexus_sf_v15_held_live_20260519/delivery_acceptance_gate_sf-v15-held-delivery_acceptance_gate-001_challenger_nexus-goal-closure-executor/evidence_bundle.json"
+      ],
+      "receipt_refs": [
+        "/private/tmp/nexus_sf_v15_held_live_20260519/delivery_acceptance_gate_sf-v15-held-delivery_acceptance_gate-001_challenger_nexus-goal-closure-executor"
+      ],
+      "task_buckets": [
+        "delivery_acceptance_gate"
+      ]
+    },
+    {
+      "skill_id": "gbrain-soul-audit",
+      "capability": "mempalace",
+      "anonymous_label": "challenger::gbrain-soul-audit",
+      "source_root": "nexus_repo",
+      "runtime_eligible": true,
+      "tested_rows": 1,
+      "effective_rows": 0,
+      "trust_clean_rows": 1,
+      "verdict": "reject",
+      "evidence_refs": [
+        "/private/tmp/nexus_sf_v15_held_live_20260519/mempalace_sf-v15-held-mempalace-001_challenger_gbrain-soul-audit/evidence_bundle.json"
+      ],
+      "receipt_refs": [
+        "/private/tmp/nexus_sf_v15_held_live_20260519/mempalace_sf-v15-held-mempalace-001_challenger_gbrain-soul-audit"
+      ],
+      "task_buckets": [
+        "mempalace"
+      ]
+    },
+    {
+      "skill_id": "sf2-mempalace-route-fit-spec",
+      "capability": "mempalace",
+      "anonymous_label": "current_best::sf2-mempalace-route-fit-spec",
+      "source_root": "nexus_repo",
+      "runtime_eligible": true,
+      "tested_rows": 1,
+      "effective_rows": 1,
+      "trust_clean_rows": 1,
+      "verdict": "keep",
+      "evidence_refs": [
+        "/private/tmp/nexus_sf_v15_held_live_20260519/mempalace_sf-v15-held-mempalace-001_current_best_sf2-mempalace-route-fit-spec/evidence_bundle.json"
+      ],
+      "receipt_refs": [
+        "/private/tmp/nexus_sf_v15_held_live_20260519/mempalace_sf-v15-held-mempalace-001_current_best_sf2-mempalace-route-fit-spec"
+      ],
+      "task_buckets": [
+        "mempalace"
+      ]
+    },
+    {
+      "skill_id": "acceptance-evidence-failclosed",
+      "capability": "policy_capability_gate",
+      "anonymous_label": "current_best::acceptance-evidence-failclosed",
+      "source_root": "nexus_repo",
+      "runtime_eligible": true,
+      "tested_rows": 1,
+      "effective_rows": 0,
+      "trust_clean_rows": 1,
+      "verdict": "reject",
+      "evidence_refs": [
+        "/private/tmp/nexus_sf_v15_held_live_20260519/policy_capability_gate_sf-v15-held-policy_capability_gate-001_current_best_acceptance-evidence-failclosed/evidence_bundle.json"
+      ],
+      "receipt_refs": [
+        "/private/tmp/nexus_sf_v15_held_live_20260519/policy_capability_gate_sf-v15-held-policy_capability_gate-001_current_best_acceptance-evidence-failclosed"
+      ],
+      "task_buckets": [
+        "policy_capability_gate"
+      ]
+    },
+    {
+      "skill_id": "cso",
+      "capability": "policy_capability_gate",
+      "anonymous_label": "challenger::cso",
+      "source_root": "nexus_repo",
+      "runtime_eligible": true,
+      "tested_rows": 1,
+      "effective_rows": 0,
+      "trust_clean_rows": 1,
+      "verdict": "reject",
+      "evidence_refs": [
+        "/private/tmp/nexus_sf_v15_held_live_20260519/policy_capability_gate_sf-v15-held-policy_capability_gate-001_challenger_cso/evidence_bundle.json"
+      ],
+      "receipt_refs": [
+        "/private/tmp/nexus_sf_v15_held_live_20260519/policy_capability_gate_sf-v15-held-policy_capability_gate-001_challenger_cso"
+      ],
+      "task_buckets": [
+        "policy_capability_gate"
+      ]
+    },
+    {
+      "skill_id": "setup-matt-pocock-skills",
+      "capability": "registry_skills_sync",
+      "anonymous_label": "challenger::setup-matt-pocock-skills",
+      "source_root": "nexus_repo",
+      "runtime_eligible": true,
+      "tested_rows": 1,
+      "effective_rows": 0,
+      "trust_clean_rows": 1,
+      "verdict": "reject",
+      "evidence_refs": [
+        "/private/tmp/nexus_sf_v15_held_live_20260519/registry_skills_sync_sf-v15-held-registry_skills_sync-001_challenger_setup-matt-pocock-skills/evidence_bundle.json"
+      ],
+      "receipt_refs": [
+        "/private/tmp/nexus_sf_v15_held_live_20260519/registry_skills_sync_sf-v15-held-registry_skills_sync-001_challenger_setup-matt-pocock-skills"
+      ],
+      "task_buckets": [
+        "registry_skills_sync"
+      ]
+    },
+    {
+      "skill_id": "sf2-registry_skills_sync-route-fit-spec",
+      "capability": "registry_skills_sync",
+      "anonymous_label": "current_best::sf2-registry_skills_sync-route-fit-spec",
+      "source_root": "nexus_repo",
+      "runtime_eligible": true,
+      "tested_rows": 1,
+      "effective_rows": 1,
+      "trust_clean_rows": 1,
+      "verdict": "keep",
+      "evidence_refs": [
+        "/private/tmp/nexus_sf_v15_held_live_20260519/registry_skills_sync_sf-v15-held-registry_skills_sync-001_current_best_sf2-registry_skills_sync-route-fit-spec/evidence_bundle.json"
+      ],
+      "receipt_refs": [
+        "/private/tmp/nexus_sf_v15_held_live_20260519/registry_skills_sync_sf-v15-held-registry_skills_sync-001_current_best_sf2-registry_skills_sync-route-fit-spec"
+      ],
+      "task_buckets": [
+        "registry_skills_sync"
+      ]
+    },
+    {
+      "skill_id": "diagnose",
+      "capability": "sandbox_replay",
+      "anonymous_label": "challenger::diagnose",
+      "source_root": "nexus_repo",
+      "runtime_eligible": true,
+      "tested_rows": 1,
+      "effective_rows": 0,
+      "trust_clean_rows": 1,
+      "verdict": "reject",
+      "evidence_refs": [
+        "/private/tmp/nexus_sf_v15_held_live_20260519/sandbox_replay_sf-v15-held-sandbox_replay-001_challenger_diagnose/evidence_bundle.json"
+      ],
+      "receipt_refs": [
+        "/private/tmp/nexus_sf_v15_held_live_20260519/sandbox_replay_sf-v15-held-sandbox_replay-001_challenger_diagnose"
+      ],
+      "task_buckets": [
+        "sandbox_replay"
+      ]
+    },
+    {
+      "skill_id": "sf2-sandbox_replay-route-fit-spec",
+      "capability": "sandbox_replay",
+      "anonymous_label": "current_best::sf2-sandbox_replay-route-fit-spec",
+      "source_root": "nexus_repo",
+      "runtime_eligible": true,
+      "tested_rows": 1,
+      "effective_rows": 1,
+      "trust_clean_rows": 1,
+      "verdict": "keep",
+      "evidence_refs": [
+        "/private/tmp/nexus_sf_v15_held_live_20260519/sandbox_replay_sf-v15-held-sandbox_replay-001_current_best_sf2-sandbox_replay-route-fit-spec/evidence_bundle.json"
+      ],
+      "receipt_refs": [
+        "/private/tmp/nexus_sf_v15_held_live_20260519/sandbox_replay_sf-v15-held-sandbox_replay-001_current_best_sf2-sandbox_replay-route-fit-spec"
+      ],
+      "task_buckets": [
+        "sandbox_replay"
+      ]
+    }
+  ]
+}

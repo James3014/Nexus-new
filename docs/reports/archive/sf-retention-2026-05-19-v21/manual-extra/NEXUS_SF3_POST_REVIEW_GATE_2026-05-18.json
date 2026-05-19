@@ -1,0 +1,20 @@
+{
+  "schema": "nexus.sf3_post_review_gate.v1",
+  "status": "PASS",
+  "summary": {
+    "sf_closed_loop_complete": true,
+    "sf_state": "PROMOTION_REVIEW_READY",
+    "manual_review_required": true,
+    "runtime_review_ready": true,
+    "candidate_hardening_batch_count": 3,
+    "runtime_update_allowed": false,
+    "public_benchmark_allowed": false,
+    "blocker_count": 0
+  },
+  "blockers": [],
+  "next_gate": "manual_policy_approval",
+  "claim_boundary": [
+    "SF is complete at promotion-review-ready.",
+    "Benchmark and runtime updates remain blocked until manual policy approval exists."
+  ]
+}

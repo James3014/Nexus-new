@@ -1,0 +1,83 @@
+{
+  "schema": "nexus.sf_runtime_policy_apply_gate.v1",
+  "status": "PASS",
+  "summary": {
+    "primary_apply_ready_count": 2,
+    "held_item_count": 6,
+    "runtime_policy_apply_allowed": true,
+    "runtime_update_allowed": true,
+    "public_benchmark_allowed": false,
+    "blocker_count": 0
+  },
+  "applied_primary_candidates": [
+    {
+      "capability_id": "forecast_pregate",
+      "skill_id": "create-plan",
+      "source_root": "nexus_repo",
+      "source_type": "repo_local_materialized_external",
+      "path": "/Users/jameschen/Workspace/nexus/.agents/skills/create-plan/SKILL.md",
+      "evidence_refs": [
+        "docs/reports/NEXUS_SF_COMPOSIO_AWESOME_CODEX_CHALLENGE_COMPARISON_2026-05-18.json",
+        "docs/reports/NEXUS_SF_FORECAST_CREATE_PLAN_SEAL_LIVE_REPORT_V2_2026-05-18.json",
+        "docs/reports/NEXUS_SF_FORECAST_CREATE_PLAN_SEAL_CATALOG_V2_2026-05-18.json",
+        "docs/reports/NEXUS_SF_EXTERNAL_SKILL_UPDATE_RECORD_2026-05-18.json"
+      ]
+    },
+    {
+      "capability_id": "repair_loop",
+      "skill_id": "tdd",
+      "source_root": "nexus_repo",
+      "source_type": "nexus_local",
+      "path": "/Users/jameschen/Workspace/nexus/.agents/skills/tdd/SKILL.md",
+      "evidence_refs": [
+        "docs/reports/NEXUS_SF_TDD_SEAL_SKILL_ARM_CATALOG_2026-05-17.json",
+        "docs/reports/NEXUS_SKILL_PROMOTION_THRESHOLD_CONTRACT_REPAIR_AND_CODING_SF_TDD_SEAL_2026-05-18.json",
+        "docs/reports/NEXUS_SF_MATTPOCOCK_CHALLENGE_COMPARISON_2026-05-18.json"
+      ]
+    }
+  ],
+  "held_items": [
+    {
+      "capability_id": "research_and_source_discipline",
+      "skill_id": "research-citation-chain-verifier",
+      "planned_action": "keep_as_runtime_review_ready_alternate_until_research_tiebreak",
+      "apply_state": "hold_primary_default"
+    },
+    {
+      "capability_id": "research_and_source_discipline",
+      "skill_id": "research-source-validation-auditor",
+      "planned_action": "keep_as_runtime_review_ready_alternate_until_research_tiebreak",
+      "apply_state": "hold_primary_default"
+    },
+    {
+      "capability_id": "governance_and_trust",
+      "skill_id": "acceptance-evidence-failclosed",
+      "planned_action": "catalog_alternate_only",
+      "apply_state": "not_runtime_patchable"
+    },
+    {
+      "capability_id": "governance_and_trust",
+      "skill_id": "claudeosint-safe-surface-audit",
+      "planned_action": "catalog_alternate_only",
+      "apply_state": "not_runtime_patchable"
+    },
+    {
+      "capability_id": "governance_and_trust",
+      "skill_id": "cso",
+      "planned_action": "catalog_alternate_only",
+      "apply_state": "not_runtime_patchable"
+    },
+    {
+      "capability_id": "governance_and_trust",
+      "skill_id": "gbrain-soul-audit",
+      "planned_action": "catalog_alternate_only",
+      "apply_state": "not_runtime_patchable"
+    }
+  ],
+  "blockers": [],
+  "claim_boundary": [
+    "This gate only validates internal SF runtime policy overlay application.",
+    "It does not unlock public benchmarks.",
+    "Held alternates stay out of runtime primary defaults until a separate tie-break or curation gate passes."
+  ]
+}

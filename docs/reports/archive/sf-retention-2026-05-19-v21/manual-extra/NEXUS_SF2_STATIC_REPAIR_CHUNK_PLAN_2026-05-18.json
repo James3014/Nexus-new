@@ -1,0 +1,34 @@
+{
+  "schema": "nexus.sf2_static_repair_chunk_plan.v1",
+  "status": "PASS",
+  "summary": {
+    "chunk_count": 1,
+    "row_count": 15
+  },
+  "chunks": [
+    {
+      "chunk_id": "SF2-I3-REPAIR-01",
+      "status": "READY",
+      "row_count": 15,
+      "row_ids": [
+        "codeintel::capability_only",
+        "codeintel::skill_arm::sf2-codeintel-route-fit-spec",
+        "codeintel::negative_control",
+        "ddtree::capability_only",
+        "ddtree::skill_arm::sf2-ddtree-route-fit-spec",
+        "ddtree::negative_control",
+        "external_productivity::capability_only",
+        "external_productivity::skill_arm::sf2-external_productivity-route-fit-spec",
+        "external_productivity::negative_control",
+        "ui_validator::capability_only",
+        "ui_validator::skill_arm::sf2-ui_validator-route-fit-spec",
+        "ui_validator::negative_control",
+        "xray::capability_only",
+        "xray::skill_arm::sf2-xray-route-fit-spec",
+        "xray::negative_control"
+      ],
+      "runtime_update_allowed": false,
+      "public_benchmark_allowed": false
+    }
+  ]
+}

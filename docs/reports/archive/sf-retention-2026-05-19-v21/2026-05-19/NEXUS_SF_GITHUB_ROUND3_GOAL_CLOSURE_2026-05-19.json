@@ -1,0 +1,220 @@
+{
+  "claim_boundary": [
+    "Catalog/candidate overlay only.",
+    "Runtime default remains unchanged until apply gate and runtime receipt smoke pass.",
+    "External repo scripts/plugins/tools were not executed."
+  ],
+  "comparisons": [
+    {
+      "better_on_token_and_wall": true,
+      "capability": "registry_skills_sync",
+      "challenger": {
+        "arm_id": "github3_openclaw_map",
+        "evidence_path": ".nexus/reports/sf_github_round3_live_2026-05-19/registry_skills_sync_sf-github-round3-smoke-registry_skills_sync-001_github3_openclaw_map_github3-openclaw-map-registry-sync/evidence_bundle.json",
+        "receipt_path": ".nexus/reports/sf_github_round3_live_2026-05-19/registry_skills_sync_sf-github-round3-smoke-registry_skills_sync-001_github3_openclaw_map_github3-openclaw-map-registry-sync",
+        "row_id": "registry_skills_sync::sf-github-round3-smoke-registry_skills_sync-001::github3_openclaw_map::github3-openclaw-map-registry-sync",
+        "semantic_status": "VERIFIED",
+        "skill_id": "github3-openclaw-map-registry-sync",
+        "status": "PASS",
+        "token_measured": true,
+        "total_tokens": 40654,
+        "wall_duration_sec": 130.7965
+      },
+      "current_best": {
+        "arm_id": "current_best",
+        "evidence_path": ".nexus/reports/sf_github_round3_live_2026-05-19/registry_skills_sync_sf-github-round3-smoke-registry_skills_sync-001_current_best_sf2-registry_skills_sync-route-fit-spec/evidence_bundle.json",
+        "receipt_path": ".nexus/reports/sf_github_round3_live_2026-05-19/registry_skills_sync_sf-github-round3-smoke-registry_skills_sync-001_current_best_sf2-registry_skills_sync-route-fit-spec",
+        "row_id": "registry_skills_sync::sf-github-round3-smoke-registry_skills_sync-001::current_best::sf2-registry_skills_sync-route-fit-spec",
+        "semantic_status": "VERIFIED",
+        "skill_id": "sf2-registry_skills_sync-route-fit-spec",
+        "status": "PASS",
+        "token_measured": true,
+        "total_tokens": 43573,
+        "wall_duration_sec": 136.642
+      },
+      "decision": "REPLACE_CANDIDATE_NOT_RUNTIME_DEFAULT",
+      "token_delta": -2919,
+      "wall_delta_sec": -5.8455
+    },
+    {
+      "better_on_token_and_wall": true,
+      "capability": "registry_skills_sync",
+      "challenger": {
+        "arm_id": "github3_openai_skill_creator",
+        "evidence_path": ".nexus/reports/sf_github_round3_live_2026-05-19/registry_skills_sync_sf-github-round3-smoke-registry_skills_sync-001_github3_openai_skill_creator_github3-openai-skill-creator-safe-registry-sync/evidence_bundle.json",
+        "receipt_path": ".nexus/reports/sf_github_round3_live_2026-05-19/registry_skills_sync_sf-github-round3-smoke-registry_skills_sync-001_github3_openai_skill_creator_github3-openai-skill-creator-safe-registry-sync",
+        "row_id": "registry_skills_sync::sf-github-round3-smoke-registry_skills_sync-001::github3_openai_skill_creator::github3-openai-skill-creator-safe-registry-sync",
+        "semantic_status": "VERIFIED",
+        "skill_id": "github3-openai-skill-creator-safe-registry-sync",
+        "status": "PASS",
+        "token_measured": true,
+        "total_tokens": 40737,
+        "wall_duration_sec": 125.1112
+      },
+      "current_best": {
+        "arm_id": "current_best",
+        "evidence_path": ".nexus/reports/sf_github_round3_live_2026-05-19/registry_skills_sync_sf-github-round3-smoke-registry_skills_sync-001_current_best_sf2-registry_skills_sync-route-fit-spec/evidence_bundle.json",
+        "receipt_path": ".nexus/reports/sf_github_round3_live_2026-05-19/registry_skills_sync_sf-github-round3-smoke-registry_skills_sync-001_current_best_sf2-registry_skills_sync-route-fit-spec",
+        "row_id": "registry_skills_sync::sf-github-round3-smoke-registry_skills_sync-001::current_best::sf2-registry_skills_sync-route-fit-spec",
+        "semantic_status": "VERIFIED",
+        "skill_id": "sf2-registry_skills_sync-route-fit-spec",
+        "status": "PASS",
+        "token_measured": true,
+        "total_tokens": 43573,
+        "wall_duration_sec": 136.642
+      },
+      "decision": "REPLACE_CANDIDATE_NOT_RUNTIME_DEFAULT",
+      "token_delta": -2836,
+      "wall_delta_sec": -11.5308
+    },
+    {
+      "better_on_token_and_wall": true,
+      "capability": "ultra_review",
+      "challenger": {
+        "arm_id": "github3_claude_security_scan",
+        "evidence_path": ".nexus/reports/sf_github_round3_live_2026-05-19/ultra_review_sf-github-round3-smoke-ultra_review-001_github3_claude_security_scan_github3-claude-security-scan-safe-ultra-review/evidence_bundle.json",
+        "receipt_path": ".nexus/reports/sf_github_round3_live_2026-05-19/ultra_review_sf-github-round3-smoke-ultra_review-001_github3_claude_security_scan_github3-claude-security-scan-safe-ultra-review",
+        "row_id": "ultra_review::sf-github-round3-smoke-ultra_review-001::github3_claude_security_scan::github3-claude-security-scan-safe-ultra-review",
+        "semantic_status": "VERIFIED",
+        "skill_id": "github3-claude-security-scan-safe-ultra-review",
+        "status": "PASS",
+        "token_measured": true,
+        "total_tokens": 40635,
+        "wall_duration_sec": 112.1515
+      },
+      "current_best": {
+        "arm_id": "current_best",
+        "evidence_path": ".nexus/reports/sf_github_round3_live_2026-05-19/ultra_review_sf-github-round3-smoke-ultra_review-001_current_best_acceptance-evidence-failclosed/evidence_bundle.json",
+        "receipt_path": ".nexus/reports/sf_github_round3_live_2026-05-19/ultra_review_sf-github-round3-smoke-ultra_review-001_current_best_acceptance-evidence-failclosed",
+        "row_id": "ultra_review::sf-github-round3-smoke-ultra_review-001::current_best::acceptance-evidence-failclosed",
+        "semantic_status": "VERIFIED",
+        "skill_id": "acceptance-evidence-failclosed",
+        "status": "PASS",
+        "token_measured": true,
+        "total_tokens": 41582,
+        "wall_duration_sec": 129.8064
+      },
+      "decision": "REPLACE_CANDIDATE_NOT_RUNTIME_DEFAULT",
+      "token_delta": -947,
+      "wall_delta_sec": -17.6549
+    }
+  ],
+  "live_summary": {
+    "completed_rows": 5,
+    "pass_count": 5,
+    "planned_rows": 5,
+    "public_benchmark_allowed": false,
+    "replacement_candidate_count": 3,
+    "return_count": 0,
+    "runtime_update_allowed": false
+  },
+  "recommended_candidate_primary_updates": {
+    "registry_skills_sync": "github3-openai-skill-creator-safe-registry-sync",
+    "ultra_review": "github3-claude-security-scan-safe-ultra-review"
+  },
+  "replacement_candidates": [
+    {
+      "better_on_token_and_wall": true,
+      "capability": "registry_skills_sync",
+      "challenger": {
+        "arm_id": "github3_openclaw_map",
+        "evidence_path": ".nexus/reports/sf_github_round3_live_2026-05-19/registry_skills_sync_sf-github-round3-smoke-registry_skills_sync-001_github3_openclaw_map_github3-openclaw-map-registry-sync/evidence_bundle.json",
+        "receipt_path": ".nexus/reports/sf_github_round3_live_2026-05-19/registry_skills_sync_sf-github-round3-smoke-registry_skills_sync-001_github3_openclaw_map_github3-openclaw-map-registry-sync",
+        "row_id": "registry_skills_sync::sf-github-round3-smoke-registry_skills_sync-001::github3_openclaw_map::github3-openclaw-map-registry-sync",
+        "semantic_status": "VERIFIED",
+        "skill_id": "github3-openclaw-map-registry-sync",
+        "status": "PASS",
+        "token_measured": true,
+        "total_tokens": 40654,
+        "wall_duration_sec": 130.7965
+      },
+      "current_best": {
+        "arm_id": "current_best",
+        "evidence_path": ".nexus/reports/sf_github_round3_live_2026-05-19/registry_skills_sync_sf-github-round3-smoke-registry_skills_sync-001_current_best_sf2-registry_skills_sync-route-fit-spec/evidence_bundle.json",
+        "receipt_path": ".nexus/reports/sf_github_round3_live_2026-05-19/registry_skills_sync_sf-github-round3-smoke-registry_skills_sync-001_current_best_sf2-registry_skills_sync-route-fit-spec",
+        "row_id": "registry_skills_sync::sf-github-round3-smoke-registry_skills_sync-001::current_best::sf2-registry_skills_sync-route-fit-spec",
+        "semantic_status": "VERIFIED",
+        "skill_id": "sf2-registry_skills_sync-route-fit-spec",
+        "status": "PASS",
+        "token_measured": true,
+        "total_tokens": 43573,
+        "wall_duration_sec": 136.642
+      },
+      "decision": "REPLACE_CANDIDATE_NOT_RUNTIME_DEFAULT",
+      "token_delta": -2919,
+      "wall_delta_sec": -5.8455
+    },
+    {
+      "better_on_token_and_wall": true,
+      "capability": "registry_skills_sync",
+      "challenger": {
+        "arm_id": "github3_openai_skill_creator",
+        "evidence_path": ".nexus/reports/sf_github_round3_live_2026-05-19/registry_skills_sync_sf-github-round3-smoke-registry_skills_sync-001_github3_openai_skill_creator_github3-openai-skill-creator-safe-registry-sync/evidence_bundle.json",
+        "receipt_path": ".nexus/reports/sf_github_round3_live_2026-05-19/registry_skills_sync_sf-github-round3-smoke-registry_skills_sync-001_github3_openai_skill_creator_github3-openai-skill-creator-safe-registry-sync",
+        "row_id": "registry_skills_sync::sf-github-round3-smoke-registry_skills_sync-001::github3_openai_skill_creator::github3-openai-skill-creator-safe-registry-sync",
+        "semantic_status": "VERIFIED",
+        "skill_id": "github3-openai-skill-creator-safe-registry-sync",
+        "status": "PASS",
+        "token_measured": true,
+        "total_tokens": 40737,
+        "wall_duration_sec": 125.1112
+      },
+      "current_best": {
+        "arm_id": "current_best",
+        "evidence_path": ".nexus/reports/sf_github_round3_live_2026-05-19/registry_skills_sync_sf-github-round3-smoke-registry_skills_sync-001_current_best_sf2-registry_skills_sync-route-fit-spec/evidence_bundle.json",
+        "receipt_path": ".nexus/reports/sf_github_round3_live_2026-05-19/registry_skills_sync_sf-github-round3-smoke-registry_skills_sync-001_current_best_sf2-registry_skills_sync-route-fit-spec",
+        "row_id": "registry_skills_sync::sf-github-round3-smoke-registry_skills_sync-001::current_best::sf2-registry_skills_sync-route-fit-spec",
+        "semantic_status": "VERIFIED",
+        "skill_id": "sf2-registry_skills_sync-route-fit-spec",
+        "status": "PASS",
+        "token_measured": true,
+        "total_tokens": 43573,
+        "wall_duration_sec": 136.642
+      },
+      "decision": "REPLACE_CANDIDATE_NOT_RUNTIME_DEFAULT",
+      "token_delta": -2836,
+      "wall_delta_sec": -11.5308
+    },
+    {
+      "better_on_token_and_wall": true,
+      "capability": "ultra_review",
+      "challenger": {
+        "arm_id": "github3_claude_security_scan",
+        "evidence_path": ".nexus/reports/sf_github_round3_live_2026-05-19/ultra_review_sf-github-round3-smoke-ultra_review-001_github3_claude_security_scan_github3-claude-security-scan-safe-ultra-review/evidence_bundle.json",
+        "receipt_path": ".nexus/reports/sf_github_round3_live_2026-05-19/ultra_review_sf-github-round3-smoke-ultra_review-001_github3_claude_security_scan_github3-claude-security-scan-safe-ultra-review",
+        "row_id": "ultra_review::sf-github-round3-smoke-ultra_review-001::github3_claude_security_scan::github3-claude-security-scan-safe-ultra-review",
+        "semantic_status": "VERIFIED",
+        "skill_id": "github3-claude-security-scan-safe-ultra-review",
+        "status": "PASS",
+        "token_measured": true,
+        "total_tokens": 40635,
+        "wall_duration_sec": 112.1515
+      },
+      "current_best": {
+        "arm_id": "current_best",
+        "evidence_path": ".nexus/reports/sf_github_round3_live_2026-05-19/ultra_review_sf-github-round3-smoke-ultra_review-001_current_best_acceptance-evidence-failclosed/evidence_bundle.json",
+        "receipt_path": ".nexus/reports/sf_github_round3_live_2026-05-19/ultra_review_sf-github-round3-smoke-ultra_review-001_current_best_acceptance-evidence-failclosed",
+        "row_id": "ultra_review::sf-github-round3-smoke-ultra_review-001::current_best::acceptance-evidence-failclosed",
+        "semantic_status": "VERIFIED",
+        "skill_id": "acceptance-evidence-failclosed",
+        "status": "PASS",
+        "token_measured": true,
+        "total_tokens": 41582,
+        "wall_duration_sec": 129.8064
+      },
+      "decision": "REPLACE_CANDIDATE_NOT_RUNTIME_DEFAULT",
+      "token_delta": -947,
+      "wall_delta_sec": -17.6549
+    }
+  ],
+  "repo_safety": {
+    "andrew54068/claude-plugins": "PASS_WITH_PLUGIN_SCRIPT_BOUNDARY; generated prompt-only security scan candidate; plugin scripts/commands not executed.",
+    "coreyhaines31/marketingskills": "PASS_PROMPT_ONLY; generated marketing A/B benchmark candidate; no external marketing tools used; no live fixture selected.",
+    "openai/skills": "PASS_OFFICIAL_REFERENCE; generated prompt-only skill-creator candidate; upstream scripts not executed.",
+    "wsxqaza12/skill-openclaw-map": "PASS_PROMPT_ONLY; generated prompt-only registry sync candidate; update scripts not executed."
+  },
+  "schema": "nexus.sf_github_round3_goal_closure.v1",
+  "static_screen": "docs/reports/NEXUS_SF_GITHUB_ROUND3_ALL_CAPABILITY_SCREEN_2026-05-19.json",
+  "status": "PASS",
+  "version": "2026-05-19"
+}

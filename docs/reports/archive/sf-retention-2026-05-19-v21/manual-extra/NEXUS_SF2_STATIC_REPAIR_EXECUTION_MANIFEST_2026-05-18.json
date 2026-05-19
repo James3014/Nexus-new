@@ -1,0 +1,206 @@
+{
+  "schema": "nexus.sf2_static_repair_execution_manifest.v1",
+  "status": "PASS",
+  "summary": {
+    "row_count": 15,
+    "runtime_update_allowed": false,
+    "public_benchmark_allowed": false
+  },
+  "rows": [
+    {
+      "row_id": "codeintel::capability_only",
+      "capability_id": "codeintel",
+      "capability": "codeintel",
+      "arm_type": "capability_only",
+      "skill_id": null,
+      "task_ref": {
+        "manifest": "/Users/jameschen/Workspace/nexus/docs/reports/NEXUS_SF2_STATIC_REPAIR_TASK_MANIFEST_2026-05-18.json",
+        "task_id": "sf2-static-repair-codeintel-001"
+      },
+      "runtime_update_allowed": false,
+      "public_benchmark_allowed": false
+    },
+    {
+      "row_id": "codeintel::skill_arm::sf2-codeintel-route-fit-spec",
+      "capability_id": "codeintel",
+      "capability": "codeintel",
+      "arm_type": "skill_arm",
+      "skill_id": "sf2-codeintel-route-fit-spec",
+      "task_ref": {
+        "manifest": "/Users/jameschen/Workspace/nexus/docs/reports/NEXUS_SF2_STATIC_REPAIR_TASK_MANIFEST_2026-05-18.json",
+        "task_id": "sf2-static-repair-codeintel-001"
+      },
+      "runtime_update_allowed": false,
+      "public_benchmark_allowed": false
+    },
+    {
+      "row_id": "codeintel::negative_control",
+      "capability_id": "codeintel",
+      "capability": "codeintel",
+      "arm_type": "negative_control",
+      "skill_id": null,
+      "task_ref": {
+        "manifest": "/Users/jameschen/Workspace/nexus/docs/reports/NEXUS_SF2_STATIC_REPAIR_TASK_MANIFEST_2026-05-18.json",
+        "task_id": "sf2-static-repair-codeintel-001"
+      },
+      "runtime_update_allowed": false,
+      "public_benchmark_allowed": false
+    },
+    {
+      "row_id": "ddtree::capability_only",
+      "capability_id": "ddtree",
+      "capability": "ddtree",
+      "arm_type": "capability_only",
+      "skill_id": null,
+      "task_ref": {
+        "manifest": "/Users/jameschen/Workspace/nexus/docs/reports/NEXUS_SF2_STATIC_REPAIR_TASK_MANIFEST_2026-05-18.json",
+        "task_id": "sf2-static-repair-ddtree-001"
+      },
+      "runtime_update_allowed": false,
+      "public_benchmark_allowed": false
+    },
+    {
+      "row_id": "ddtree::skill_arm::sf2-ddtree-route-fit-spec",
+      "capability_id": "ddtree",
+      "capability": "ddtree",
+      "arm_type": "skill_arm",
+      "skill_id": "sf2-ddtree-route-fit-spec",
+      "task_ref": {
+        "manifest": "/Users/jameschen/Workspace/nexus/docs/reports/NEXUS_SF2_STATIC_REPAIR_TASK_MANIFEST_2026-05-18.json",
+        "task_id": "sf2-static-repair-ddtree-001"
+      },
+      "runtime_update_allowed": false,
+      "public_benchmark_allowed": false
+    },
+    {
+      "row_id": "ddtree::negative_control",
+      "capability_id": "ddtree",
+      "capability": "ddtree",
+      "arm_type": "negative_control",
+      "skill_id": null,
+      "task_ref": {
+        "manifest": "/Users/jameschen/Workspace/nexus/docs/reports/NEXUS_SF2_STATIC_REPAIR_TASK_MANIFEST_2026-05-18.json",
+        "task_id": "sf2-static-repair-ddtree-001"
+      },
+      "runtime_update_allowed": false,
+      "public_benchmark_allowed": false
+    },
+    {
+      "row_id": "external_productivity::capability_only",
+      "capability_id": "external_productivity",
+      "capability": "external_productivity",
+      "arm_type": "capability_only",
+      "skill_id": null,
+      "task_ref": {
+        "manifest": "/Users/jameschen/Workspace/nexus/docs/reports/NEXUS_SF2_STATIC_REPAIR_TASK_MANIFEST_2026-05-18.json",
+        "task_id": "sf2-static-repair-external_productivity-001"
+      },
+      "runtime_update_allowed": false,
+      "public_benchmark_allowed": false
+    },
+    {
+      "row_id": "external_productivity::skill_arm::sf2-external_productivity-route-fit-spec",
+      "capability_id": "external_productivity",
+      "capability": "external_productivity",
+      "arm_type": "skill_arm",
+      "skill_id": "sf2-external_productivity-route-fit-spec",
+      "task_ref": {
+        "manifest": "/Users/jameschen/Workspace/nexus/docs/reports/NEXUS_SF2_STATIC_REPAIR_TASK_MANIFEST_2026-05-18.json",
+        "task_id": "sf2-static-repair-external_productivity-001"
+      },
+      "runtime_update_allowed": false,
+      "public_benchmark_allowed": false
+    },
+    {
+      "row_id": "external_productivity::negative_control",
+      "capability_id": "external_productivity",
+      "capability": "external_productivity",
+      "arm_type": "negative_control",
+      "skill_id": null,
+      "task_ref": {
+        "manifest": "/Users/jameschen/Workspace/nexus/docs/reports/NEXUS_SF2_STATIC_REPAIR_TASK_MANIFEST_2026-05-18.json",
+        "task_id": "sf2-static-repair-external_productivity-001"
+      },
+      "runtime_update_allowed": false,
+      "public_benchmark_allowed": false
+    },
+    {
+      "row_id": "ui_validator::capability_only",
+      "capability_id": "ui_validator",
+      "capability": "ui_validator",
+      "arm_type": "capability_only",
+      "skill_id": null,
+      "task_ref": {
+        "manifest": "/Users/jameschen/Workspace/nexus/docs/reports/NEXUS_SF2_STATIC_REPAIR_TASK_MANIFEST_2026-05-18.json",
+        "task_id": "sf2-static-repair-ui_validator-001"
+      },
+      "runtime_update_allowed": false,
+      "public_benchmark_allowed": false
+    },
+    {
+      "row_id": "ui_validator::skill_arm::sf2-ui_validator-route-fit-spec",
+      "capability_id": "ui_validator",
+      "capability": "ui_validator",
+      "arm_type": "skill_arm",
+      "skill_id": "sf2-ui_validator-route-fit-spec",
+      "task_ref": {
+        "manifest": "/Users/jameschen/Workspace/nexus/docs/reports/NEXUS_SF2_STATIC_REPAIR_TASK_MANIFEST_2026-05-18.json",
+        "task_id": "sf2-static-repair-ui_validator-001"
+      },
+      "runtime_update_allowed": false,
+      "public_benchmark_allowed": false
+    },
+    {
+      "row_id": "ui_validator::negative_control",
+      "capability_id": "ui_validator",
+      "capability": "ui_validator",
+      "arm_type": "negative_control",
+      "skill_id": null,
+      "task_ref": {
+        "manifest": "/Users/jameschen/Workspace/nexus/docs/reports/NEXUS_SF2_STATIC_REPAIR_TASK_MANIFEST_2026-05-18.json",
+        "task_id": "sf2-static-repair-ui_validator-001"
+      },
+      "runtime_update_allowed": false,
+      "public_benchmark_allowed": false
+    },
+    {
+      "row_id": "xray::capability_only",
+      "capability_id": "xray",
+      "capability": "xray",
+      "arm_type": "capability_only",
+      "skill_id": null,
+      "task_ref": {
+        "manifest": "/Users/jameschen/Workspace/nexus/docs/reports/NEXUS_SF2_STATIC_REPAIR_TASK_MANIFEST_2026-05-18.json",
+        "task_id": "sf2-static-repair-xray-001"
+      },
+      "runtime_update_allowed": false,
+      "public_benchmark_allowed": false
+    },
+    {
+      "row_id": "xray::skill_arm::sf2-xray-route-fit-spec",
+      "capability_id": "xray",
+      "capability": "xray",
+      "arm_type": "skill_arm",
+      "skill_id": "sf2-xray-route-fit-spec",
+      "task_ref": {
+        "manifest": "/Users/jameschen/Workspace/nexus/docs/reports/NEXUS_SF2_STATIC_REPAIR_TASK_MANIFEST_2026-05-18.json",
+        "task_id": "sf2-static-repair-xray-001"
+      },
+      "runtime_update_allowed": false,
+      "public_benchmark_allowed": false
+    },
+    {
+      "row_id": "xray::negative_control",
+      "capability_id": "xray",
+      "capability": "xray",
+      "arm_type": "negative_control",
+      "skill_id": null,
+      "task_ref": {
+        "manifest": "/Users/jameschen/Workspace/nexus/docs/reports/NEXUS_SF2_STATIC_REPAIR_TASK_MANIFEST_2026-05-18.json",
+        "task_id": "sf2-static-repair-xray-001"
+      },
+      "runtime_update_allowed": false,
+      "public_benchmark_allowed": false
+    }
+  ]
+}

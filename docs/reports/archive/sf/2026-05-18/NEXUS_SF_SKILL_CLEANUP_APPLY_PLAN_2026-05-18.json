@@ -1,0 +1,2307 @@
+{
+  "schema": "nexus.sf_skill_cleanup_apply_plan.v1",
+  "status": "PASS",
+  "summary": {
+    "planned_quarantine_count": 229,
+    "blocker_count": 0,
+    "quarantine_root": ".agents/skills/.duplicates-quarantine",
+    "destructive_delete_allowed": false
+  },
+  "blockers": [],
+  "items": [
+    {
+      "skill_id": "autoplan",
+      "identity_id": "5c8506402d591c752590f6a8",
+      "source_status": "codex_mirror_cache",
+      "source_dir": "/Users/jameschen/.codex/skills/gstack/.kiro/skills/gstack-autoplan",
+      "source_skill_path": "/Users/jameschen/.codex/skills/gstack/.kiro/skills/gstack-autoplan/SKILL.md",
+      "destination_dir": ".agents/skills/.duplicates-quarantine/codex_mirror_cache/5c8506402d591c752590f6a8/gstack/.kiro/skills/gstack-autoplan",
+      "reason": "byte_identical_lower_priority_duplicate",
+      "canonical_path": "/Users/jameschen/.agents/skills/gstack/.kiro/skills/gstack-autoplan/SKILL.md"
+    },
+    {
+      "skill_id": "autoplan",
+      "identity_id": "1a01ec4ae810435cb3f7ef59",
+      "source_status": "codex_mirror_cache",
+      "source_dir": "/Users/jameschen/.codex/skills/gstack/.openclaw/skills/gstack-autoplan",
+      "source_skill_path": "/Users/jameschen/.codex/skills/gstack/.openclaw/skills/gstack-autoplan/SKILL.md",
+      "destination_dir": ".agents/skills/.duplicates-quarantine/codex_mirror_cache/1a01ec4ae810435cb3f7ef59/gstack/.openclaw/skills/gstack-autoplan",
+      "reason": "byte_identical_lower_priority_duplicate",
+      "canonical_path": "/Users/jameschen/.agents/skills/gstack/.openclaw/skills/gstack-autoplan/SKILL.md"
+    },
+    {
+      "skill_id": "autoplan",
+      "identity_id": "396927356afd1f753380ac03",
+      "source_status": "codex_mirror_cache",
+      "source_dir": "/Users/jameschen/.codex/skills/gstack/.opencode/skills/gstack-autoplan",
+      "source_skill_path": "/Users/jameschen/.codex/skills/gstack/.opencode/skills/gstack-autoplan/SKILL.md",
+      "destination_dir": ".agents/skills/.duplicates-quarantine/codex_mirror_cache/396927356afd1f753380ac03/gstack/.opencode/skills/gstack-autoplan",
+      "reason": "byte_identical_lower_priority_duplicate",
+      "canonical_path": "/Users/jameschen/.agents/skills/gstack/.opencode/skills/gstack-autoplan/SKILL.md"
+    },
+    {
+      "skill_id": "autoplan",
+      "identity_id": "6d81706175589e8c505c1506",
+      "source_status": "codex_mirror_cache",
+      "source_dir": "/Users/jameschen/.codex/skills/gstack/.slate/skills/gstack-autoplan",
+      "source_skill_path": "/Users/jameschen/.codex/skills/gstack/.slate/skills/gstack-autoplan/SKILL.md",
+      "destination_dir": ".agents/skills/.duplicates-quarantine/codex_mirror_cache/6d81706175589e8c505c1506/gstack/.slate/skills/gstack-autoplan",
+      "reason": "byte_identical_lower_priority_duplicate",
+      "canonical_path": "/Users/jameschen/.agents/skills/gstack/.slate/skills/gstack-autoplan/SKILL.md"
+    },
+    {
+      "skill_id": "autoplan",
+      "identity_id": "f570d80b1af14d538ad946ff",
+      "source_status": "codex_mirror_cache",
+      "source_dir": "/Users/jameschen/.codex/skills/gstack/autoplan",
+      "source_skill_path": "/Users/jameschen/.codex/skills/gstack/autoplan/SKILL.md",
+      "destination_dir": ".agents/skills/.duplicates-quarantine/codex_mirror_cache/f570d80b1af14d538ad946ff/gstack/autoplan",
+      "reason": "byte_identical_lower_priority_duplicate",
+      "canonical_path": "/Users/jameschen/.agents/skills/gstack/autoplan/SKILL.md"
+    },
+    {
+      "skill_id": "benchmark",
+      "identity_id": "022c4e0b8f49f249419f3e34",
+      "source_status": "codex_mirror_cache",
+      "source_dir": "/Users/jameschen/.codex/skills/gstack/.kiro/skills/gstack-benchmark",
+      "source_skill_path": "/Users/jameschen/.codex/skills/gstack/.kiro/skills/gstack-benchmark/SKILL.md",
+      "destination_dir": ".agents/skills/.duplicates-quarantine/codex_mirror_cache/022c4e0b8f49f249419f3e34/gstack/.kiro/skills/gstack-benchmark",
+      "reason": "byte_identical_lower_priority_duplicate",
+      "canonical_path": "/Users/jameschen/.agents/skills/gstack/.kiro/skills/gstack-benchmark/SKILL.md"
+    },
+    {
+      "skill_id": "benchmark",
+      "identity_id": "48250861a1179edd117b1cd8",
+      "source_status": "codex_mirror_cache",
+      "source_dir": "/Users/jameschen/.codex/skills/gstack/.openclaw/skills/gstack-benchmark",
+      "source_skill_path": "/Users/jameschen/.codex/skills/gstack/.openclaw/skills/gstack-benchmark/SKILL.md",
+      "destination_dir": ".agents/skills/.duplicates-quarantine/codex_mirror_cache/48250861a1179edd117b1cd8/gstack/.openclaw/skills/gstack-benchmark",
+      "reason": "byte_identical_lower_priority_duplicate",
+      "canonical_path": "/Users/jameschen/.agents/skills/gstack/.openclaw/skills/gstack-benchmark/SKILL.md"
+    },
+    {
+      "skill_id": "benchmark",
+      "identity_id": "31aebcdb7ca15c7abdfb7b13",
+      "source_status": "codex_mirror_cache",
+      "source_dir": "/Users/jameschen/.codex/skills/gstack/.opencode/skills/gstack-benchmark",
+      "source_skill_path": "/Users/jameschen/.codex/skills/gstack/.opencode/skills/gstack-benchmark/SKILL.md",
+      "destination_dir": ".agents/skills/.duplicates-quarantine/codex_mirror_cache/31aebcdb7ca15c7abdfb7b13/gstack/.opencode/skills/gstack-benchmark",
+      "reason": "byte_identical_lower_priority_duplicate",
+      "canonical_path": "/Users/jameschen/.agents/skills/gstack/.opencode/skills/gstack-benchmark/SKILL.md"
+    },
+    {
+      "skill_id": "benchmark",
+      "identity_id": "75d4c33765a7b22335f63bf0",
+      "source_status": "codex_mirror_cache",
+      "source_dir": "/Users/jameschen/.codex/skills/gstack/.slate/skills/gstack-benchmark",
+      "source_skill_path": "/Users/jameschen/.codex/skills/gstack/.slate/skills/gstack-benchmark/SKILL.md",
+      "destination_dir": ".agents/skills/.duplicates-quarantine/codex_mirror_cache/75d4c33765a7b22335f63bf0/gstack/.slate/skills/gstack-benchmark",
+      "reason": "byte_identical_lower_priority_duplicate",
+      "canonical_path": "/Users/jameschen/.agents/skills/gstack/.slate/skills/gstack-benchmark/SKILL.md"
+    },
+    {
+      "skill_id": "benchmark",
+      "identity_id": "8bcb770fa12784f1e2c8c4a0",
+      "source_status": "codex_mirror_cache",
+      "source_dir": "/Users/jameschen/.codex/skills/gstack/benchmark",
+      "source_skill_path": "/Users/jameschen/.codex/skills/gstack/benchmark/SKILL.md",
+      "destination_dir": ".agents/skills/.duplicates-quarantine/codex_mirror_cache/8bcb770fa12784f1e2c8c4a0/gstack/benchmark",
+      "reason": "byte_identical_lower_priority_duplicate",
+      "canonical_path": "/Users/jameschen/.agents/skills/gstack/benchmark/SKILL.md"
+    },
+    {
+      "skill_id": "benchmark-models",
+      "identity_id": "a730db82faec4f563506e0ac",
+      "source_status": "codex_mirror_cache",
+      "source_dir": "/Users/jameschen/.codex/skills/gstack/.kiro/skills/gstack-benchmark-models",
+      "source_skill_path": "/Users/jameschen/.codex/skills/gstack/.kiro/skills/gstack-benchmark-models/SKILL.md",
+      "destination_dir": ".agents/skills/.duplicates-quarantine/codex_mirror_cache/a730db82faec4f563506e0ac/gstack/.kiro/skills/gstack-benchmark-models",
+      "reason": "byte_identical_lower_priority_duplicate",
+      "canonical_path": "/Users/jameschen/.agents/skills/gstack/.kiro/skills/gstack-benchmark-models/SKILL.md"
+    },
+    {
+      "skill_id": "benchmark-models",
+      "identity_id": "1275eb71901eadabfb18d3c5",
+      "source_status": "codex_mirror_cache",
+      "source_dir": "/Users/jameschen/.codex/skills/gstack/.openclaw/skills/gstack-benchmark-models",
+      "source_skill_path": "/Users/jameschen/.codex/skills/gstack/.openclaw/skills/gstack-benchmark-models/SKILL.md",
+      "destination_dir": ".agents/skills/.duplicates-quarantine/codex_mirror_cache/1275eb71901eadabfb18d3c5/gstack/.openclaw/skills/gstack-benchmark-models",
+      "reason": "byte_identical_lower_priority_duplicate",
+      "canonical_path": "/Users/jameschen/.agents/skills/gstack/.openclaw/skills/gstack-benchmark-models/SKILL.md"
+    },
+    {
+      "skill_id": "benchmark-models",
+      "identity_id": "b5c79899280286a52c6efee3",
+      "source_status": "codex_mirror_cache",
+      "source_dir": "/Users/jameschen/.codex/skills/gstack/.opencode/skills/gstack-benchmark-models",
+      "source_skill_path": "/Users/jameschen/.codex/skills/gstack/.opencode/skills/gstack-benchmark-models/SKILL.md",
+      "destination_dir": ".agents/skills/.duplicates-quarantine/codex_mirror_cache/b5c79899280286a52c6efee3/gstack/.opencode/skills/gstack-benchmark-models",
+      "reason": "byte_identical_lower_priority_duplicate",
+      "canonical_path": "/Users/jameschen/.agents/skills/gstack/.opencode/skills/gstack-benchmark-models/SKILL.md"
+    },
+    {
+      "skill_id": "benchmark-models",
+      "identity_id": "572197b99f44672938705c3e",
+      "source_status": "codex_mirror_cache",
+      "source_dir": "/Users/jameschen/.codex/skills/gstack/.slate/skills/gstack-benchmark-models",
+      "source_skill_path": "/Users/jameschen/.codex/skills/gstack/.slate/skills/gstack-benchmark-models/SKILL.md",
+      "destination_dir": ".agents/skills/.duplicates-quarantine/codex_mirror_cache/572197b99f44672938705c3e/gstack/.slate/skills/gstack-benchmark-models",
+      "reason": "byte_identical_lower_priority_duplicate",
+      "canonical_path": "/Users/jameschen/.agents/skills/gstack/.slate/skills/gstack-benchmark-models/SKILL.md"
+    },
+    {
+      "skill_id": "benchmark-models",
+      "identity_id": "7d951dc7105aea16223e1f1b",
+      "source_status": "codex_mirror_cache",
+      "source_dir": "/Users/jameschen/.codex/skills/gstack/benchmark-models",
+      "source_skill_path": "/Users/jameschen/.codex/skills/gstack/benchmark-models/SKILL.md",
+      "destination_dir": ".agents/skills/.duplicates-quarantine/codex_mirror_cache/7d951dc7105aea16223e1f1b/gstack/benchmark-models",
+      "reason": "byte_identical_lower_priority_duplicate",
+      "canonical_path": "/Users/jameschen/.agents/skills/gstack/benchmark-models/SKILL.md"
+    },
+    {
+      "skill_id": "browse",
+      "identity_id": "905ff6ed5c66680aa48ef918",
+      "source_status": "codex_mirror_cache",
+      "source_dir": "/Users/jameschen/.codex/skills/gstack/.kiro/skills/gstack-browse",
+      "source_skill_path": "/Users/jameschen/.codex/skills/gstack/.kiro/skills/gstack-browse/SKILL.md",
+      "destination_dir": ".agents/skills/.duplicates-quarantine/codex_mirror_cache/905ff6ed5c66680aa48ef918/gstack/.kiro/skills/gstack-browse",
+      "reason": "byte_identical_lower_priority_duplicate",
+      "canonical_path": "/Users/jameschen/.agents/skills/gstack/.kiro/skills/gstack-browse/SKILL.md"
+    },
+    {
+      "skill_id": "browse",
+      "identity_id": "3428771cfedaf9e136108383",
+      "source_status": "codex_mirror_cache",
+      "source_dir": "/Users/jameschen/.codex/skills/gstack/.openclaw/skills/gstack-browse",
+      "source_skill_path": "/Users/jameschen/.codex/skills/gstack/.openclaw/skills/gstack-browse/SKILL.md",
+      "destination_dir": ".agents/skills/.duplicates-quarantine/codex_mirror_cache/3428771cfedaf9e136108383/gstack/.openclaw/skills/gstack-browse",
+      "reason": "byte_identical_lower_priority_duplicate",
+      "canonical_path": "/Users/jameschen/.agents/skills/gstack/.openclaw/skills/gstack-browse/SKILL.md"
+    },
+    {
+      "skill_id": "browse",
+      "identity_id": "d47580a102478e4d7ee6c6e5",
+      "source_status": "codex_mirror_cache",
+      "source_dir": "/Users/jameschen/.codex/skills/gstack/.opencode/skills/gstack-browse",
+      "source_skill_path": "/Users/jameschen/.codex/skills/gstack/.opencode/skills/gstack-browse/SKILL.md",
+      "destination_dir": ".agents/skills/.duplicates-quarantine/codex_mirror_cache/d47580a102478e4d7ee6c6e5/gstack/.opencode/skills/gstack-browse",
+      "reason": "byte_identical_lower_priority_duplicate",
+      "canonical_path": "/Users/jameschen/.agents/skills/gstack/.opencode/skills/gstack-browse/SKILL.md"
+    },
+    {
+      "skill_id": "browse",
+      "identity_id": "1ca56dbf11fde898bcf08277",
+      "source_status": "codex_mirror_cache",
+      "source_dir": "/Users/jameschen/.codex/skills/gstack/.slate/skills/gstack-browse",
+      "source_skill_path": "/Users/jameschen/.codex/skills/gstack/.slate/skills/gstack-browse/SKILL.md",
+      "destination_dir": ".agents/skills/.duplicates-quarantine/codex_mirror_cache/1ca56dbf11fde898bcf08277/gstack/.slate/skills/gstack-browse",
+      "reason": "byte_identical_lower_priority_duplicate",
+      "canonical_path": "/Users/jameschen/.agents/skills/gstack/.slate/skills/gstack-browse/SKILL.md"
+    },
+    {
+      "skill_id": "browse",
+      "identity_id": "105f44cef6981ef578ee9e0b",
+      "source_status": "codex_mirror_cache",
+      "source_dir": "/Users/jameschen/.codex/skills/gstack/browse",
+      "source_skill_path": "/Users/jameschen/.codex/skills/gstack/browse/SKILL.md",
+      "destination_dir": ".agents/skills/.duplicates-quarantine/codex_mirror_cache/105f44cef6981ef578ee9e0b/gstack/browse",
+      "reason": "byte_identical_lower_priority_duplicate",
+      "canonical_path": "/Users/jameschen/.agents/skills/gstack/browse/SKILL.md"
+    },
+    {
+      "skill_id": "canary",
+      "identity_id": "3bde45bee2b04f971a380bad",
+      "source_status": "codex_mirror_cache",
+      "source_dir": "/Users/jameschen/.codex/skills/gstack/.kiro/skills/gstack-canary",
+      "source_skill_path": "/Users/jameschen/.codex/skills/gstack/.kiro/skills/gstack-canary/SKILL.md",
+      "destination_dir": ".agents/skills/.duplicates-quarantine/codex_mirror_cache/3bde45bee2b04f971a380bad/gstack/.kiro/skills/gstack-canary",
+      "reason": "byte_identical_lower_priority_duplicate",
+      "canonical_path": "/Users/jameschen/.agents/skills/gstack/.kiro/skills/gstack-canary/SKILL.md"
+    },
+    {
+      "skill_id": "canary",
+      "identity_id": "ae419219cbf1e3e01fc6b9db",
+      "source_status": "codex_mirror_cache",
+      "source_dir": "/Users/jameschen/.codex/skills/gstack/.openclaw/skills/gstack-canary",
+      "source_skill_path": "/Users/jameschen/.codex/skills/gstack/.openclaw/skills/gstack-canary/SKILL.md",
+      "destination_dir": ".agents/skills/.duplicates-quarantine/codex_mirror_cache/ae419219cbf1e3e01fc6b9db/gstack/.openclaw/skills/gstack-canary",
+      "reason": "byte_identical_lower_priority_duplicate",
+      "canonical_path": "/Users/jameschen/.agents/skills/gstack/.openclaw/skills/gstack-canary/SKILL.md"
+    },
+    {
+      "skill_id": "canary",
+      "identity_id": "90c33dfb498907975fc3b47d",
+      "source_status": "codex_mirror_cache",
+      "source_dir": "/Users/jameschen/.codex/skills/gstack/.opencode/skills/gstack-canary",
+      "source_skill_path": "/Users/jameschen/.codex/skills/gstack/.opencode/skills/gstack-canary/SKILL.md",
+      "destination_dir": ".agents/skills/.duplicates-quarantine/codex_mirror_cache/90c33dfb498907975fc3b47d/gstack/.opencode/skills/gstack-canary",
+      "reason": "byte_identical_lower_priority_duplicate",
+      "canonical_path": "/Users/jameschen/.agents/skills/gstack/.opencode/skills/gstack-canary/SKILL.md"
+    },
+    {
+      "skill_id": "canary",
+      "identity_id": "40ebba44f72451269cfe4abd",
+      "source_status": "codex_mirror_cache",
+      "source_dir": "/Users/jameschen/.codex/skills/gstack/.slate/skills/gstack-canary",
+      "source_skill_path": "/Users/jameschen/.codex/skills/gstack/.slate/skills/gstack-canary/SKILL.md",
+      "destination_dir": ".agents/skills/.duplicates-quarantine/codex_mirror_cache/40ebba44f72451269cfe4abd/gstack/.slate/skills/gstack-canary",
+      "reason": "byte_identical_lower_priority_duplicate",
+      "canonical_path": "/Users/jameschen/.agents/skills/gstack/.slate/skills/gstack-canary/SKILL.md"
+    },
+    {
+      "skill_id": "canary",
+      "identity_id": "cdb9a6ac850505d4f6ce2bcc",
+      "source_status": "codex_mirror_cache",
+      "source_dir": "/Users/jameschen/.codex/skills/gstack/canary",
+      "source_skill_path": "/Users/jameschen/.codex/skills/gstack/canary/SKILL.md",
+      "destination_dir": ".agents/skills/.duplicates-quarantine/codex_mirror_cache/cdb9a6ac850505d4f6ce2bcc/gstack/canary",
+      "reason": "byte_identical_lower_priority_duplicate",
+      "canonical_path": "/Users/jameschen/.agents/skills/gstack/canary/SKILL.md"
+    },
+    {
+      "skill_id": "candidate-skill-from-antigravity-session-telemetry",
+      "identity_id": "e5edb34ba46a48697101d34c",
+      "source_status": "codex_mirror_cache",
+      "source_dir": "/Users/jameschen/.codex/skills/devops/candidate-skill-from-antigravity-session-telemetry",
+      "source_skill_path": "/Users/jameschen/.codex/skills/devops/candidate-skill-from-antigravity-session-telemetry/SKILL.md",
+      "destination_dir": ".agents/skills/.duplicates-quarantine/codex_mirror_cache/e5edb34ba46a48697101d34c/devops/candidate-skill-from-antigravity-session-telemetry",
+      "reason": "byte_identical_lower_priority_duplicate",
+      "canonical_path": "/Users/jameschen/.agents/skills/devops/candidate-skill-from-antigravity-session-telemetry/SKILL.md"
+    },
+    {
+      "skill_id": "candidate-skill-from-gemini-session",
+      "identity_id": "4d8a16cf543c7c2742b522ca",
+      "source_status": "codex_mirror_cache",
+      "source_dir": "/Users/jameschen/.codex/skills/devops/candidate-skill-from-gemini-session",
+      "source_skill_path": "/Users/jameschen/.codex/skills/devops/candidate-skill-from-gemini-session/SKILL.md",
+      "destination_dir": ".agents/skills/.duplicates-quarantine/codex_mirror_cache/4d8a16cf543c7c2742b522ca/devops/candidate-skill-from-gemini-session",
+      "reason": "byte_identical_lower_priority_duplicate",
+      "canonical_path": "/Users/jameschen/.agents/skills/devops/candidate-skill-from-gemini-session/SKILL.md"
+    },
+    {
+      "skill_id": "candidate-skill-from-gemini-session-2",
+      "identity_id": "aefb94eff32b30e90378a95b",
+      "source_status": "codex_mirror_cache",
+      "source_dir": "/Users/jameschen/.codex/skills/devops/candidate-skill-from-gemini-session-2",
+      "source_skill_path": "/Users/jameschen/.codex/skills/devops/candidate-skill-from-gemini-session-2/SKILL.md",
+      "destination_dir": ".agents/skills/.duplicates-quarantine/codex_mirror_cache/aefb94eff32b30e90378a95b/devops/candidate-skill-from-gemini-session-2",
+      "reason": "byte_identical_lower_priority_duplicate",
+      "canonical_path": "/Users/jameschen/.agents/skills/devops/candidate-skill-from-gemini-session-2/SKILL.md"
+    },
+    {
+      "skill_id": "candidate-skill-from-gemini-session-3",
+      "identity_id": "8cc7f59bb069e656e0679634",
+      "source_status": "codex_mirror_cache",
+      "source_dir": "/Users/jameschen/.codex/skills/devops/candidate-skill-from-gemini-session-3",
+      "source_skill_path": "/Users/jameschen/.codex/skills/devops/candidate-skill-from-gemini-session-3/SKILL.md",
+      "destination_dir": ".agents/skills/.duplicates-quarantine/codex_mirror_cache/8cc7f59bb069e656e0679634/devops/candidate-skill-from-gemini-session-3",
+      "reason": "byte_identical_lower_priority_duplicate",
+      "canonical_path": "/Users/jameschen/.agents/skills/devops/candidate-skill-from-gemini-session-3/SKILL.md"
+    },
+    {
+      "skill_id": "candidate-skill-from-gemini-session-4",
+      "identity_id": "ed319cdb8f9db0cbce39ca37",
+      "source_status": "codex_mirror_cache",
+      "source_dir": "/Users/jameschen/.codex/skills/devops/candidate-skill-from-gemini-session-4",
+      "source_skill_path": "/Users/jameschen/.codex/skills/devops/candidate-skill-from-gemini-session-4/SKILL.md",
+      "destination_dir": ".agents/skills/.duplicates-quarantine/codex_mirror_cache/ed319cdb8f9db0cbce39ca37/devops/candidate-skill-from-gemini-session-4",
+      "reason": "byte_identical_lower_priority_duplicate",
+      "canonical_path": "/Users/jameschen/.agents/skills/devops/candidate-skill-from-gemini-session-4/SKILL.md"
+    },
+    {
+      "skill_id": "claude",
+      "identity_id": "7a3a485d556401d875bfa5dc",
+      "source_status": "codex_mirror_cache",
+      "source_dir": "/Users/jameschen/.codex/skills/gstack/.kiro/skills/gstack-claude",
+      "source_skill_path": "/Users/jameschen/.codex/skills/gstack/.kiro/skills/gstack-claude/SKILL.md",
+      "destination_dir": ".agents/skills/.duplicates-quarantine/codex_mirror_cache/7a3a485d556401d875bfa5dc/gstack/.kiro/skills/gstack-claude",
+      "reason": "byte_identical_lower_priority_duplicate",
+      "canonical_path": "/Users/jameschen/.agents/skills/gstack/.kiro/skills/gstack-claude/SKILL.md"
+    },
+    {
+      "skill_id": "claude",
+      "identity_id": "f3e34860b5d75e9d4017110e",
+      "source_status": "codex_mirror_cache",
+      "source_dir": "/Users/jameschen/.codex/skills/gstack/.openclaw/skills/gstack-claude",
+      "source_skill_path": "/Users/jameschen/.codex/skills/gstack/.openclaw/skills/gstack-claude/SKILL.md",
+      "destination_dir": ".agents/skills/.duplicates-quarantine/codex_mirror_cache/f3e34860b5d75e9d4017110e/gstack/.openclaw/skills/gstack-claude",
+      "reason": "byte_identical_lower_priority_duplicate",
+      "canonical_path": "/Users/jameschen/.agents/skills/gstack/.openclaw/skills/gstack-claude/SKILL.md"
+    },
+    {
+      "skill_id": "claude",
+      "identity_id": "aabc398c80f35c6035775c2b",
+      "source_status": "codex_mirror_cache",
+      "source_dir": "/Users/jameschen/.codex/skills/gstack/.opencode/skills/gstack-claude",
+      "source_skill_path": "/Users/jameschen/.codex/skills/gstack/.opencode/skills/gstack-claude/SKILL.md",
+      "destination_dir": ".agents/skills/.duplicates-quarantine/codex_mirror_cache/aabc398c80f35c6035775c2b/gstack/.opencode/skills/gstack-claude",
+      "reason": "byte_identical_lower_priority_duplicate",
+      "canonical_path": "/Users/jameschen/.agents/skills/gstack/.opencode/skills/gstack-claude/SKILL.md"
+    },
+    {
+      "skill_id": "claude",
+      "identity_id": "6dc9a991d64621960a52f6d5",
+      "source_status": "codex_mirror_cache",
+      "source_dir": "/Users/jameschen/.codex/skills/gstack/.slate/skills/gstack-claude",
+      "source_skill_path": "/Users/jameschen/.codex/skills/gstack/.slate/skills/gstack-claude/SKILL.md",
+      "destination_dir": ".agents/skills/.duplicates-quarantine/codex_mirror_cache/6dc9a991d64621960a52f6d5/gstack/.slate/skills/gstack-claude",
+      "reason": "byte_identical_lower_priority_duplicate",
+      "canonical_path": "/Users/jameschen/.agents/skills/gstack/.slate/skills/gstack-claude/SKILL.md"
+    },
+    {
+      "skill_id": "context-restore",
+      "identity_id": "52e8789928454e1b838c1afb",
+      "source_status": "codex_mirror_cache",
+      "source_dir": "/Users/jameschen/.codex/skills/gstack/.kiro/skills/gstack-context-restore",
+      "source_skill_path": "/Users/jameschen/.codex/skills/gstack/.kiro/skills/gstack-context-restore/SKILL.md",
+      "destination_dir": ".agents/skills/.duplicates-quarantine/codex_mirror_cache/52e8789928454e1b838c1afb/gstack/.kiro/skills/gstack-context-restore",
+      "reason": "byte_identical_lower_priority_duplicate",
+      "canonical_path": "/Users/jameschen/.agents/skills/gstack/.kiro/skills/gstack-context-restore/SKILL.md"
+    },
+    {
+      "skill_id": "context-restore",
+      "identity_id": "d95cb864aea34b7ec663dd11",
+      "source_status": "codex_mirror_cache",
+      "source_dir": "/Users/jameschen/.codex/skills/gstack/.openclaw/skills/gstack-context-restore",
+      "source_skill_path": "/Users/jameschen/.codex/skills/gstack/.openclaw/skills/gstack-context-restore/SKILL.md",
+      "destination_dir": ".agents/skills/.duplicates-quarantine/codex_mirror_cache/d95cb864aea34b7ec663dd11/gstack/.openclaw/skills/gstack-context-restore",
+      "reason": "byte_identical_lower_priority_duplicate",
+      "canonical_path": "/Users/jameschen/.agents/skills/gstack/.openclaw/skills/gstack-context-restore/SKILL.md"
+    },
+    {
+      "skill_id": "context-restore",
+      "identity_id": "3d42796e817e2c9a6ef14e5e",
+      "source_status": "codex_mirror_cache",
+      "source_dir": "/Users/jameschen/.codex/skills/gstack/.opencode/skills/gstack-context-restore",
+      "source_skill_path": "/Users/jameschen/.codex/skills/gstack/.opencode/skills/gstack-context-restore/SKILL.md",
+      "destination_dir": ".agents/skills/.duplicates-quarantine/codex_mirror_cache/3d42796e817e2c9a6ef14e5e/gstack/.opencode/skills/gstack-context-restore",
+      "reason": "byte_identical_lower_priority_duplicate",
+      "canonical_path": "/Users/jameschen/.agents/skills/gstack/.opencode/skills/gstack-context-restore/SKILL.md"
+    },
+    {
+      "skill_id": "context-restore",
+      "identity_id": "4f3abc88cc98dd723bba649a",
+      "source_status": "codex_mirror_cache",
+      "source_dir": "/Users/jameschen/.codex/skills/gstack/.slate/skills/gstack-context-restore",
+      "source_skill_path": "/Users/jameschen/.codex/skills/gstack/.slate/skills/gstack-context-restore/SKILL.md",
+      "destination_dir": ".agents/skills/.duplicates-quarantine/codex_mirror_cache/4f3abc88cc98dd723bba649a/gstack/.slate/skills/gstack-context-restore",
+      "reason": "byte_identical_lower_priority_duplicate",
+      "canonical_path": "/Users/jameschen/.agents/skills/gstack/.slate/skills/gstack-context-restore/SKILL.md"
+    },
+    {
+      "skill_id": "context-restore",
+      "identity_id": "f2e9c73f428bdd7536ab012a",
+      "source_status": "codex_mirror_cache",
+      "source_dir": "/Users/jameschen/.codex/skills/gstack/context-restore",
+      "source_skill_path": "/Users/jameschen/.codex/skills/gstack/context-restore/SKILL.md",
+      "destination_dir": ".agents/skills/.duplicates-quarantine/codex_mirror_cache/f2e9c73f428bdd7536ab012a/gstack/context-restore",
+      "reason": "byte_identical_lower_priority_duplicate",
+      "canonical_path": "/Users/jameschen/.agents/skills/gstack/context-restore/SKILL.md"
+    },
+    {
+      "skill_id": "context-save",
+      "identity_id": "4127d0c3ad02d07ac54f629c",
+      "source_status": "codex_mirror_cache",
+      "source_dir": "/Users/jameschen/.codex/skills/gstack/.kiro/skills/gstack-context-save",
+      "source_skill_path": "/Users/jameschen/.codex/skills/gstack/.kiro/skills/gstack-context-save/SKILL.md",
+      "destination_dir": ".agents/skills/.duplicates-quarantine/codex_mirror_cache/4127d0c3ad02d07ac54f629c/gstack/.kiro/skills/gstack-context-save",
+      "reason": "byte_identical_lower_priority_duplicate",
+      "canonical_path": "/Users/jameschen/.agents/skills/gstack/.kiro/skills/gstack-context-save/SKILL.md"
+    },
+    {
+      "skill_id": "context-save",
+      "identity_id": "259325ea8e525946ca4f81b3",
+      "source_status": "codex_mirror_cache",
+      "source_dir": "/Users/jameschen/.codex/skills/gstack/.openclaw/skills/gstack-context-save",
+      "source_skill_path": "/Users/jameschen/.codex/skills/gstack/.openclaw/skills/gstack-context-save/SKILL.md",
+      "destination_dir": ".agents/skills/.duplicates-quarantine/codex_mirror_cache/259325ea8e525946ca4f81b3/gstack/.openclaw/skills/gstack-context-save",
+      "reason": "byte_identical_lower_priority_duplicate",
+      "canonical_path": "/Users/jameschen/.agents/skills/gstack/.openclaw/skills/gstack-context-save/SKILL.md"
+    },
+    {
+      "skill_id": "context-save",
+      "identity_id": "8a476402d9080d4fd7b9a267",
+      "source_status": "codex_mirror_cache",
+      "source_dir": "/Users/jameschen/.codex/skills/gstack/.opencode/skills/gstack-context-save",
+      "source_skill_path": "/Users/jameschen/.codex/skills/gstack/.opencode/skills/gstack-context-save/SKILL.md",
+      "destination_dir": ".agents/skills/.duplicates-quarantine/codex_mirror_cache/8a476402d9080d4fd7b9a267/gstack/.opencode/skills/gstack-context-save",
+      "reason": "byte_identical_lower_priority_duplicate",
+      "canonical_path": "/Users/jameschen/.agents/skills/gstack/.opencode/skills/gstack-context-save/SKILL.md"
+    },
+    {
+      "skill_id": "context-save",
+      "identity_id": "7dc875d7480a80a3245fe2f7",
+      "source_status": "codex_mirror_cache",
+      "source_dir": "/Users/jameschen/.codex/skills/gstack/.slate/skills/gstack-context-save",
+      "source_skill_path": "/Users/jameschen/.codex/skills/gstack/.slate/skills/gstack-context-save/SKILL.md",
+      "destination_dir": ".agents/skills/.duplicates-quarantine/codex_mirror_cache/7dc875d7480a80a3245fe2f7/gstack/.slate/skills/gstack-context-save",
+      "reason": "byte_identical_lower_priority_duplicate",
+      "canonical_path": "/Users/jameschen/.agents/skills/gstack/.slate/skills/gstack-context-save/SKILL.md"
+    },
+    {
+      "skill_id": "context-save",
+      "identity_id": "0076ff97de07e998fe5754d2",
+      "source_status": "codex_mirror_cache",
+      "source_dir": "/Users/jameschen/.codex/skills/gstack/context-save",
+      "source_skill_path": "/Users/jameschen/.codex/skills/gstack/context-save/SKILL.md",
+      "destination_dir": ".agents/skills/.duplicates-quarantine/codex_mirror_cache/0076ff97de07e998fe5754d2/gstack/context-save",
+      "reason": "byte_identical_lower_priority_duplicate",
+      "canonical_path": "/Users/jameschen/.agents/skills/gstack/context-save/SKILL.md"
+    },
+    {
+      "skill_id": "cso",
+      "identity_id": "c722e259c3f66472f59be548",
+      "source_status": "codex_mirror_cache",
+      "source_dir": "/Users/jameschen/.codex/skills/gstack/.kiro/skills/gstack-cso",
+      "source_skill_path": "/Users/jameschen/.codex/skills/gstack/.kiro/skills/gstack-cso/SKILL.md",
+      "destination_dir": ".agents/skills/.duplicates-quarantine/codex_mirror_cache/c722e259c3f66472f59be548/gstack/.kiro/skills/gstack-cso",
+      "reason": "byte_identical_lower_priority_duplicate",
+      "canonical_path": "/Users/jameschen/.agents/skills/gstack/.kiro/skills/gstack-cso/SKILL.md"
+    },
+    {
+      "skill_id": "cso",
+      "identity_id": "7c9620b47d736e6699deda9e",
+      "source_status": "codex_mirror_cache",
+      "source_dir": "/Users/jameschen/.codex/skills/gstack/.openclaw/skills/gstack-cso",
+      "source_skill_path": "/Users/jameschen/.codex/skills/gstack/.openclaw/skills/gstack-cso/SKILL.md",
+      "destination_dir": ".agents/skills/.duplicates-quarantine/codex_mirror_cache/7c9620b47d736e6699deda9e/gstack/.openclaw/skills/gstack-cso",
+      "reason": "byte_identical_lower_priority_duplicate",
+      "canonical_path": "/Users/jameschen/.agents/skills/gstack/.openclaw/skills/gstack-cso/SKILL.md"
+    },
+    {
+      "skill_id": "cso",
+      "identity_id": "a3902217bc6e9198a5722244",
+      "source_status": "codex_mirror_cache",
+      "source_dir": "/Users/jameschen/.codex/skills/gstack/.opencode/skills/gstack-cso",
+      "source_skill_path": "/Users/jameschen/.codex/skills/gstack/.opencode/skills/gstack-cso/SKILL.md",
+      "destination_dir": ".agents/skills/.duplicates-quarantine/codex_mirror_cache/a3902217bc6e9198a5722244/gstack/.opencode/skills/gstack-cso",
+      "reason": "byte_identical_lower_priority_duplicate",
+      "canonical_path": "/Users/jameschen/.agents/skills/gstack/.opencode/skills/gstack-cso/SKILL.md"
+    },
+    {
+      "skill_id": "cso",
+      "identity_id": "9a5293ece0b51da852889f54",
+      "source_status": "codex_mirror_cache",
+      "source_dir": "/Users/jameschen/.codex/skills/gstack/.slate/skills/gstack-cso",
+      "source_skill_path": "/Users/jameschen/.codex/skills/gstack/.slate/skills/gstack-cso/SKILL.md",
+      "destination_dir": ".agents/skills/.duplicates-quarantine/codex_mirror_cache/9a5293ece0b51da852889f54/gstack/.slate/skills/gstack-cso",
+      "reason": "byte_identical_lower_priority_duplicate",
+      "canonical_path": "/Users/jameschen/.agents/skills/gstack/.slate/skills/gstack-cso/SKILL.md"
+    },
+    {
+      "skill_id": "cso",
+      "identity_id": "8263e1bb379ae4b2f252dbe4",
+      "source_status": "codex_mirror_cache",
+      "source_dir": "/Users/jameschen/.codex/skills/gstack/cso",
+      "source_skill_path": "/Users/jameschen/.codex/skills/gstack/cso/SKILL.md",
+      "destination_dir": ".agents/skills/.duplicates-quarantine/codex_mirror_cache/8263e1bb379ae4b2f252dbe4/gstack/cso",
+      "reason": "byte_identical_lower_priority_duplicate",
+      "canonical_path": "/Users/jameschen/.agents/skills/gstack/cso/SKILL.md"
+    },
+    {
+      "skill_id": "design-consultation",
+      "identity_id": "a7b0708a47d502233aa26ae9",
+      "source_status": "codex_mirror_cache",
+      "source_dir": "/Users/jameschen/.codex/skills/gstack/.kiro/skills/gstack-design-consultation",
+      "source_skill_path": "/Users/jameschen/.codex/skills/gstack/.kiro/skills/gstack-design-consultation/SKILL.md",
+      "destination_dir": ".agents/skills/.duplicates-quarantine/codex_mirror_cache/a7b0708a47d502233aa26ae9/gstack/.kiro/skills/gstack-design-consultation",
+      "reason": "byte_identical_lower_priority_duplicate",
+      "canonical_path": "/Users/jameschen/.agents/skills/gstack/.kiro/skills/gstack-design-consultation/SKILL.md"
+    },
+    {
+      "skill_id": "design-consultation",
+      "identity_id": "1c7c4546ab35fb2f54b68827",
+      "source_status": "codex_mirror_cache",
+      "source_dir": "/Users/jameschen/.codex/skills/gstack/.openclaw/skills/gstack-design-consultation",
+      "source_skill_path": "/Users/jameschen/.codex/skills/gstack/.openclaw/skills/gstack-design-consultation/SKILL.md",
+      "destination_dir": ".agents/skills/.duplicates-quarantine/codex_mirror_cache/1c7c4546ab35fb2f54b68827/gstack/.openclaw/skills/gstack-design-consultation",
+      "reason": "byte_identical_lower_priority_duplicate",
+      "canonical_path": "/Users/jameschen/.agents/skills/gstack/.openclaw/skills/gstack-design-consultation/SKILL.md"
+    },
+    {
+      "skill_id": "design-consultation",
+      "identity_id": "68f24cc3a022be49179acf03",
+      "source_status": "codex_mirror_cache",
+      "source_dir": "/Users/jameschen/.codex/skills/gstack/.opencode/skills/gstack-design-consultation",
+      "source_skill_path": "/Users/jameschen/.codex/skills/gstack/.opencode/skills/gstack-design-consultation/SKILL.md",
+      "destination_dir": ".agents/skills/.duplicates-quarantine/codex_mirror_cache/68f24cc3a022be49179acf03/gstack/.opencode/skills/gstack-design-consultation",
+      "reason": "byte_identical_lower_priority_duplicate",
+      "canonical_path": "/Users/jameschen/.agents/skills/gstack/.opencode/skills/gstack-design-consultation/SKILL.md"
+    },
+    {
+      "skill_id": "design-consultation",
+      "identity_id": "028b4c4bfae8d088e5a2e5e8",
+      "source_status": "codex_mirror_cache",
+      "source_dir": "/Users/jameschen/.codex/skills/gstack/.slate/skills/gstack-design-consultation",
+      "source_skill_path": "/Users/jameschen/.codex/skills/gstack/.slate/skills/gstack-design-consultation/SKILL.md",
+      "destination_dir": ".agents/skills/.duplicates-quarantine/codex_mirror_cache/028b4c4bfae8d088e5a2e5e8/gstack/.slate/skills/gstack-design-consultation",
+      "reason": "byte_identical_lower_priority_duplicate",
+      "canonical_path": "/Users/jameschen/.agents/skills/gstack/.slate/skills/gstack-design-consultation/SKILL.md"
+    },
+    {
+      "skill_id": "design-consultation",
+      "identity_id": "1c45befba62f18f4854eae26",
+      "source_status": "codex_mirror_cache",
+      "source_dir": "/Users/jameschen/.codex/skills/gstack/design-consultation",
+      "source_skill_path": "/Users/jameschen/.codex/skills/gstack/design-consultation/SKILL.md",
+      "destination_dir": ".agents/skills/.duplicates-quarantine/codex_mirror_cache/1c45befba62f18f4854eae26/gstack/design-consultation",
+      "reason": "byte_identical_lower_priority_duplicate",
+      "canonical_path": "/Users/jameschen/.agents/skills/gstack/design-consultation/SKILL.md"
+    },
+    {
+      "skill_id": "design-html",
+      "identity_id": "00cde9245c6f5b99e8cd5dff",
+      "source_status": "codex_mirror_cache",
+      "source_dir": "/Users/jameschen/.codex/skills/gstack/.kiro/skills/gstack-design-html",
+      "source_skill_path": "/Users/jameschen/.codex/skills/gstack/.kiro/skills/gstack-design-html/SKILL.md",
+      "destination_dir": ".agents/skills/.duplicates-quarantine/codex_mirror_cache/00cde9245c6f5b99e8cd5dff/gstack/.kiro/skills/gstack-design-html",
+      "reason": "byte_identical_lower_priority_duplicate",
+      "canonical_path": "/Users/jameschen/.agents/skills/gstack/.kiro/skills/gstack-design-html/SKILL.md"
+    },
+    {
+      "skill_id": "design-html",
+      "identity_id": "19bdd8ef5edff3e69e5bc607",
+      "source_status": "codex_mirror_cache",
+      "source_dir": "/Users/jameschen/.codex/skills/gstack/.openclaw/skills/gstack-design-html",
+      "source_skill_path": "/Users/jameschen/.codex/skills/gstack/.openclaw/skills/gstack-design-html/SKILL.md",
+      "destination_dir": ".agents/skills/.duplicates-quarantine/codex_mirror_cache/19bdd8ef5edff3e69e5bc607/gstack/.openclaw/skills/gstack-design-html",
+      "reason": "byte_identical_lower_priority_duplicate",
+      "canonical_path": "/Users/jameschen/.agents/skills/gstack/.openclaw/skills/gstack-design-html/SKILL.md"
+    },
+    {
+      "skill_id": "design-html",
+      "identity_id": "2af10fe4c582262517367dd2",
+      "source_status": "codex_mirror_cache",
+      "source_dir": "/Users/jameschen/.codex/skills/gstack/.opencode/skills/gstack-design-html",
+      "source_skill_path": "/Users/jameschen/.codex/skills/gstack/.opencode/skills/gstack-design-html/SKILL.md",
+      "destination_dir": ".agents/skills/.duplicates-quarantine/codex_mirror_cache/2af10fe4c582262517367dd2/gstack/.opencode/skills/gstack-design-html",
+      "reason": "byte_identical_lower_priority_duplicate",
+      "canonical_path": "/Users/jameschen/.agents/skills/gstack/.opencode/skills/gstack-design-html/SKILL.md"
+    },
+    {
+      "skill_id": "design-html",
+      "identity_id": "22abb08f75a53d1ea392510e",
+      "source_status": "codex_mirror_cache",
+      "source_dir": "/Users/jameschen/.codex/skills/gstack/.slate/skills/gstack-design-html",
+      "source_skill_path": "/Users/jameschen/.codex/skills/gstack/.slate/skills/gstack-design-html/SKILL.md",
+      "destination_dir": ".agents/skills/.duplicates-quarantine/codex_mirror_cache/22abb08f75a53d1ea392510e/gstack/.slate/skills/gstack-design-html",
+      "reason": "byte_identical_lower_priority_duplicate",
+      "canonical_path": "/Users/jameschen/.agents/skills/gstack/.slate/skills/gstack-design-html/SKILL.md"
+    },
+    {
+      "skill_id": "design-html",
+      "identity_id": "509d1ca1410cf152f0775a9c",
+      "source_status": "codex_mirror_cache",
+      "source_dir": "/Users/jameschen/.codex/skills/gstack/design-html",
+      "source_skill_path": "/Users/jameschen/.codex/skills/gstack/design-html/SKILL.md",
+      "destination_dir": ".agents/skills/.duplicates-quarantine/codex_mirror_cache/509d1ca1410cf152f0775a9c/gstack/design-html",
+      "reason": "byte_identical_lower_priority_duplicate",
+      "canonical_path": "/Users/jameschen/.agents/skills/gstack/design-html/SKILL.md"
+    },
+    {
+      "skill_id": "design-review",
+      "identity_id": "292bd92158243c096c14f42e",
+      "source_status": "codex_mirror_cache",
+      "source_dir": "/Users/jameschen/.codex/skills/gstack/.kiro/skills/gstack-design-review",
+      "source_skill_path": "/Users/jameschen/.codex/skills/gstack/.kiro/skills/gstack-design-review/SKILL.md",
+      "destination_dir": ".agents/skills/.duplicates-quarantine/codex_mirror_cache/292bd92158243c096c14f42e/gstack/.kiro/skills/gstack-design-review",
+      "reason": "byte_identical_lower_priority_duplicate",
+      "canonical_path": "/Users/jameschen/.agents/skills/gstack/.kiro/skills/gstack-design-review/SKILL.md"
+    },
+    {
+      "skill_id": "design-review",
+      "identity_id": "ea71315089dfd4fdde26b95b",
+      "source_status": "codex_mirror_cache",
+      "source_dir": "/Users/jameschen/.codex/skills/gstack/.openclaw/skills/gstack-design-review",
+      "source_skill_path": "/Users/jameschen/.codex/skills/gstack/.openclaw/skills/gstack-design-review/SKILL.md",
+      "destination_dir": ".agents/skills/.duplicates-quarantine/codex_mirror_cache/ea71315089dfd4fdde26b95b/gstack/.openclaw/skills/gstack-design-review",
+      "reason": "byte_identical_lower_priority_duplicate",
+      "canonical_path": "/Users/jameschen/.agents/skills/gstack/.openclaw/skills/gstack-design-review/SKILL.md"
+    },
+    {
+      "skill_id": "design-review",
+      "identity_id": "85ae2066822a099fb5d4cc56",
+      "source_status": "codex_mirror_cache",
+      "source_dir": "/Users/jameschen/.codex/skills/gstack/.opencode/skills/gstack-design-review",
+      "source_skill_path": "/Users/jameschen/.codex/skills/gstack/.opencode/skills/gstack-design-review/SKILL.md",
+      "destination_dir": ".agents/skills/.duplicates-quarantine/codex_mirror_cache/85ae2066822a099fb5d4cc56/gstack/.opencode/skills/gstack-design-review",
+      "reason": "byte_identical_lower_priority_duplicate",
+      "canonical_path": "/Users/jameschen/.agents/skills/gstack/.opencode/skills/gstack-design-review/SKILL.md"
+    },
+    {
+      "skill_id": "design-review",
+      "identity_id": "36a458c859e54b5a364e3961",
+      "source_status": "codex_mirror_cache",
+      "source_dir": "/Users/jameschen/.codex/skills/gstack/.slate/skills/gstack-design-review",
+      "source_skill_path": "/Users/jameschen/.codex/skills/gstack/.slate/skills/gstack-design-review/SKILL.md",
+      "destination_dir": ".agents/skills/.duplicates-quarantine/codex_mirror_cache/36a458c859e54b5a364e3961/gstack/.slate/skills/gstack-design-review",
+      "reason": "byte_identical_lower_priority_duplicate",
+      "canonical_path": "/Users/jameschen/.agents/skills/gstack/.slate/skills/gstack-design-review/SKILL.md"
+    },
+    {
+      "skill_id": "design-review",
+      "identity_id": "92a1fd583fb1c2bad40def87",
+      "source_status": "codex_mirror_cache",
+      "source_dir": "/Users/jameschen/.codex/skills/gstack/design-review",
+      "source_skill_path": "/Users/jameschen/.codex/skills/gstack/design-review/SKILL.md",
+      "destination_dir": ".agents/skills/.duplicates-quarantine/codex_mirror_cache/92a1fd583fb1c2bad40def87/gstack/design-review",
+      "reason": "byte_identical_lower_priority_duplicate",
+      "canonical_path": "/Users/jameschen/.agents/skills/gstack/design-review/SKILL.md"
+    },
+    {
+      "skill_id": "design-shotgun",
+      "identity_id": "8f62e1ff624537411300069d",
+      "source_status": "codex_mirror_cache",
+      "source_dir": "/Users/jameschen/.codex/skills/gstack/.kiro/skills/gstack-design-shotgun",
+      "source_skill_path": "/Users/jameschen/.codex/skills/gstack/.kiro/skills/gstack-design-shotgun/SKILL.md",
+      "destination_dir": ".agents/skills/.duplicates-quarantine/codex_mirror_cache/8f62e1ff624537411300069d/gstack/.kiro/skills/gstack-design-shotgun",
+      "reason": "byte_identical_lower_priority_duplicate",
+      "canonical_path": "/Users/jameschen/.agents/skills/gstack/.kiro/skills/gstack-design-shotgun/SKILL.md"
+    },
+    {
+      "skill_id": "design-shotgun",
+      "identity_id": "cf076436ca8c500dfa415184",
+      "source_status": "codex_mirror_cache",
+      "source_dir": "/Users/jameschen/.codex/skills/gstack/.openclaw/skills/gstack-design-shotgun",
+      "source_skill_path": "/Users/jameschen/.codex/skills/gstack/.openclaw/skills/gstack-design-shotgun/SKILL.md",
+      "destination_dir": ".agents/skills/.duplicates-quarantine/codex_mirror_cache/cf076436ca8c500dfa415184/gstack/.openclaw/skills/gstack-design-shotgun",
+      "reason": "byte_identical_lower_priority_duplicate",
+      "canonical_path": "/Users/jameschen/.agents/skills/gstack/.openclaw/skills/gstack-design-shotgun/SKILL.md"
+    },
+    {
+      "skill_id": "design-shotgun",
+      "identity_id": "58b5f1d41101c35d59257fb3",
+      "source_status": "codex_mirror_cache",
+      "source_dir": "/Users/jameschen/.codex/skills/gstack/.opencode/skills/gstack-design-shotgun",
+      "source_skill_path": "/Users/jameschen/.codex/skills/gstack/.opencode/skills/gstack-design-shotgun/SKILL.md",
+      "destination_dir": ".agents/skills/.duplicates-quarantine/codex_mirror_cache/58b5f1d41101c35d59257fb3/gstack/.opencode/skills/gstack-design-shotgun",
+      "reason": "byte_identical_lower_priority_duplicate",
+      "canonical_path": "/Users/jameschen/.agents/skills/gstack/.opencode/skills/gstack-design-shotgun/SKILL.md"
+    },
+    {
+      "skill_id": "design-shotgun",
+      "identity_id": "34a448c44289bb5bdeb1876a",
+      "source_status": "codex_mirror_cache",
+      "source_dir": "/Users/jameschen/.codex/skills/gstack/.slate/skills/gstack-design-shotgun",
+      "source_skill_path": "/Users/jameschen/.codex/skills/gstack/.slate/skills/gstack-design-shotgun/SKILL.md",
+      "destination_dir": ".agents/skills/.duplicates-quarantine/codex_mirror_cache/34a448c44289bb5bdeb1876a/gstack/.slate/skills/gstack-design-shotgun",
+      "reason": "byte_identical_lower_priority_duplicate",
+      "canonical_path": "/Users/jameschen/.agents/skills/gstack/.slate/skills/gstack-design-shotgun/SKILL.md"
+    },
+    {
+      "skill_id": "design-shotgun",
+      "identity_id": "09717d4222943eed6d9cd6a7",
+      "source_status": "codex_mirror_cache",
+      "source_dir": "/Users/jameschen/.codex/skills/gstack/design-shotgun",
+      "source_skill_path": "/Users/jameschen/.codex/skills/gstack/design-shotgun/SKILL.md",
+      "destination_dir": ".agents/skills/.duplicates-quarantine/codex_mirror_cache/09717d4222943eed6d9cd6a7/gstack/design-shotgun",
+      "reason": "byte_identical_lower_priority_duplicate",
+      "canonical_path": "/Users/jameschen/.agents/skills/gstack/design-shotgun/SKILL.md"
+    },
+    {
+      "skill_id": "devex-review",
+      "identity_id": "1d467299ec1fa116c1bdcb75",
+      "source_status": "codex_mirror_cache",
+      "source_dir": "/Users/jameschen/.codex/skills/gstack/.kiro/skills/gstack-devex-review",
+      "source_skill_path": "/Users/jameschen/.codex/skills/gstack/.kiro/skills/gstack-devex-review/SKILL.md",
+      "destination_dir": ".agents/skills/.duplicates-quarantine/codex_mirror_cache/1d467299ec1fa116c1bdcb75/gstack/.kiro/skills/gstack-devex-review",
+      "reason": "byte_identical_lower_priority_duplicate",
+      "canonical_path": "/Users/jameschen/.agents/skills/gstack/.kiro/skills/gstack-devex-review/SKILL.md"
+    },
+    {
+      "skill_id": "devex-review",
+      "identity_id": "077a1698d8e42e6645963ae8",
+      "source_status": "codex_mirror_cache",
+      "source_dir": "/Users/jameschen/.codex/skills/gstack/.openclaw/skills/gstack-devex-review",
+      "source_skill_path": "/Users/jameschen/.codex/skills/gstack/.openclaw/skills/gstack-devex-review/SKILL.md",
+      "destination_dir": ".agents/skills/.duplicates-quarantine/codex_mirror_cache/077a1698d8e42e6645963ae8/gstack/.openclaw/skills/gstack-devex-review",
+      "reason": "byte_identical_lower_priority_duplicate",
+      "canonical_path": "/Users/jameschen/.agents/skills/gstack/.openclaw/skills/gstack-devex-review/SKILL.md"
+    },
+    {
+      "skill_id": "devex-review",
+      "identity_id": "854d011d501f183204a8d2c8",
+      "source_status": "codex_mirror_cache",
+      "source_dir": "/Users/jameschen/.codex/skills/gstack/.opencode/skills/gstack-devex-review",
+      "source_skill_path": "/Users/jameschen/.codex/skills/gstack/.opencode/skills/gstack-devex-review/SKILL.md",
+      "destination_dir": ".agents/skills/.duplicates-quarantine/codex_mirror_cache/854d011d501f183204a8d2c8/gstack/.opencode/skills/gstack-devex-review",
+      "reason": "byte_identical_lower_priority_duplicate",
+      "canonical_path": "/Users/jameschen/.agents/skills/gstack/.opencode/skills/gstack-devex-review/SKILL.md"
+    },
+    {
+      "skill_id": "devex-review",
+      "identity_id": "b4e3eb495eba9f7a7f16c36e",
+      "source_status": "codex_mirror_cache",
+      "source_dir": "/Users/jameschen/.codex/skills/gstack/.slate/skills/gstack-devex-review",
+      "source_skill_path": "/Users/jameschen/.codex/skills/gstack/.slate/skills/gstack-devex-review/SKILL.md",
+      "destination_dir": ".agents/skills/.duplicates-quarantine/codex_mirror_cache/b4e3eb495eba9f7a7f16c36e/gstack/.slate/skills/gstack-devex-review",
+      "reason": "byte_identical_lower_priority_duplicate",
+      "canonical_path": "/Users/jameschen/.agents/skills/gstack/.slate/skills/gstack-devex-review/SKILL.md"
+    },
+    {
+      "skill_id": "devex-review",
+      "identity_id": "7ebdc94309c2301fbc88124d",
+      "source_status": "codex_mirror_cache",
+      "source_dir": "/Users/jameschen/.codex/skills/gstack/devex-review",
+      "source_skill_path": "/Users/jameschen/.codex/skills/gstack/devex-review/SKILL.md",
+      "destination_dir": ".agents/skills/.duplicates-quarantine/codex_mirror_cache/7ebdc94309c2301fbc88124d/gstack/devex-review",
+      "reason": "byte_identical_lower_priority_duplicate",
+      "canonical_path": "/Users/jameschen/.agents/skills/gstack/devex-review/SKILL.md"
+    },
+    {
+      "skill_id": "document-release",
+      "identity_id": "fb40d9999b5d621ac09d0999",
+      "source_status": "codex_mirror_cache",
+      "source_dir": "/Users/jameschen/.codex/skills/gstack/.kiro/skills/gstack-document-release",
+      "source_skill_path": "/Users/jameschen/.codex/skills/gstack/.kiro/skills/gstack-document-release/SKILL.md",
+      "destination_dir": ".agents/skills/.duplicates-quarantine/codex_mirror_cache/fb40d9999b5d621ac09d0999/gstack/.kiro/skills/gstack-document-release",
+      "reason": "byte_identical_lower_priority_duplicate",
+      "canonical_path": "/Users/jameschen/.agents/skills/gstack/.kiro/skills/gstack-document-release/SKILL.md"
+    },
+    {
+      "skill_id": "document-release",
+      "identity_id": "e55fea1e20a0990f85d14e0a",
+      "source_status": "codex_mirror_cache",
+      "source_dir": "/Users/jameschen/.codex/skills/gstack/.openclaw/skills/gstack-document-release",
+      "source_skill_path": "/Users/jameschen/.codex/skills/gstack/.openclaw/skills/gstack-document-release/SKILL.md",
+      "destination_dir": ".agents/skills/.duplicates-quarantine/codex_mirror_cache/e55fea1e20a0990f85d14e0a/gstack/.openclaw/skills/gstack-document-release",
+      "reason": "byte_identical_lower_priority_duplicate",
+      "canonical_path": "/Users/jameschen/.agents/skills/gstack/.openclaw/skills/gstack-document-release/SKILL.md"
+    },
+    {
+      "skill_id": "document-release",
+      "identity_id": "83420415563fbac7f1983ebc",
+      "source_status": "codex_mirror_cache",
+      "source_dir": "/Users/jameschen/.codex/skills/gstack/.opencode/skills/gstack-document-release",
+      "source_skill_path": "/Users/jameschen/.codex/skills/gstack/.opencode/skills/gstack-document-release/SKILL.md",
+      "destination_dir": ".agents/skills/.duplicates-quarantine/codex_mirror_cache/83420415563fbac7f1983ebc/gstack/.opencode/skills/gstack-document-release",
+      "reason": "byte_identical_lower_priority_duplicate",
+      "canonical_path": "/Users/jameschen/.agents/skills/gstack/.opencode/skills/gstack-document-release/SKILL.md"
+    },
+    {
+      "skill_id": "document-release",
+      "identity_id": "a5ac92cf9a1e00443676152d",
+      "source_status": "codex_mirror_cache",
+      "source_dir": "/Users/jameschen/.codex/skills/gstack/.slate/skills/gstack-document-release",
+      "source_skill_path": "/Users/jameschen/.codex/skills/gstack/.slate/skills/gstack-document-release/SKILL.md",
+      "destination_dir": ".agents/skills/.duplicates-quarantine/codex_mirror_cache/a5ac92cf9a1e00443676152d/gstack/.slate/skills/gstack-document-release",
+      "reason": "byte_identical_lower_priority_duplicate",
+      "canonical_path": "/Users/jameschen/.agents/skills/gstack/.slate/skills/gstack-document-release/SKILL.md"
+    },
+    {
+      "skill_id": "document-release",
+      "identity_id": "2fbe06f749ac1c10cefc9829",
+      "source_status": "codex_mirror_cache",
+      "source_dir": "/Users/jameschen/.codex/skills/gstack/document-release",
+      "source_skill_path": "/Users/jameschen/.codex/skills/gstack/document-release/SKILL.md",
+      "destination_dir": ".agents/skills/.duplicates-quarantine/codex_mirror_cache/2fbe06f749ac1c10cefc9829/gstack/document-release",
+      "reason": "byte_identical_lower_priority_duplicate",
+      "canonical_path": "/Users/jameschen/.agents/skills/gstack/document-release/SKILL.md"
+    },
+    {
+      "skill_id": "freeze",
+      "identity_id": "fb27f23499e522fc9b3b94e9",
+      "source_status": "codex_mirror_cache",
+      "source_dir": "/Users/jameschen/.codex/skills/gstack/.kiro/skills/gstack-freeze",
+      "source_skill_path": "/Users/jameschen/.codex/skills/gstack/.kiro/skills/gstack-freeze/SKILL.md",
+      "destination_dir": ".agents/skills/.duplicates-quarantine/codex_mirror_cache/fb27f23499e522fc9b3b94e9/gstack/.kiro/skills/gstack-freeze",
+      "reason": "byte_identical_lower_priority_duplicate",
+      "canonical_path": "/Users/jameschen/.agents/skills/gstack/.kiro/skills/gstack-freeze/SKILL.md"
+    },
+    {
+      "skill_id": "freeze",
+      "identity_id": "3cbefd62e2e5b35d920c08f3",
+      "source_status": "codex_mirror_cache",
+      "source_dir": "/Users/jameschen/.codex/skills/gstack/.openclaw/skills/gstack-freeze",
+      "source_skill_path": "/Users/jameschen/.codex/skills/gstack/.openclaw/skills/gstack-freeze/SKILL.md",
+      "destination_dir": ".agents/skills/.duplicates-quarantine/codex_mirror_cache/3cbefd62e2e5b35d920c08f3/gstack/.openclaw/skills/gstack-freeze",
+      "reason": "byte_identical_lower_priority_duplicate",
+      "canonical_path": "/Users/jameschen/.agents/skills/gstack/.openclaw/skills/gstack-freeze/SKILL.md"
+    },
+    {
+      "skill_id": "freeze",
+      "identity_id": "c046db7a20b58e368285ba6e",
+      "source_status": "codex_mirror_cache",
+      "source_dir": "/Users/jameschen/.codex/skills/gstack/.opencode/skills/gstack-freeze",
+      "source_skill_path": "/Users/jameschen/.codex/skills/gstack/.opencode/skills/gstack-freeze/SKILL.md",
+      "destination_dir": ".agents/skills/.duplicates-quarantine/codex_mirror_cache/c046db7a20b58e368285ba6e/gstack/.opencode/skills/gstack-freeze",
+      "reason": "byte_identical_lower_priority_duplicate",
+      "canonical_path": "/Users/jameschen/.agents/skills/gstack/.opencode/skills/gstack-freeze/SKILL.md"
+    },
+    {
+      "skill_id": "freeze",
+      "identity_id": "f8bdecc84276cdd0f4a6f7da",
+      "source_status": "codex_mirror_cache",
+      "source_dir": "/Users/jameschen/.codex/skills/gstack/.slate/skills/gstack-freeze",
+      "source_skill_path": "/Users/jameschen/.codex/skills/gstack/.slate/skills/gstack-freeze/SKILL.md",
+      "destination_dir": ".agents/skills/.duplicates-quarantine/codex_mirror_cache/f8bdecc84276cdd0f4a6f7da/gstack/.slate/skills/gstack-freeze",
+      "reason": "byte_identical_lower_priority_duplicate",
+      "canonical_path": "/Users/jameschen/.agents/skills/gstack/.slate/skills/gstack-freeze/SKILL.md"
+    },
+    {
+      "skill_id": "freeze",
+      "identity_id": "a8d87baa92adf971719cae43",
+      "source_status": "codex_mirror_cache",
+      "source_dir": "/Users/jameschen/.codex/skills/gstack/freeze",
+      "source_skill_path": "/Users/jameschen/.codex/skills/gstack/freeze/SKILL.md",
+      "destination_dir": ".agents/skills/.duplicates-quarantine/codex_mirror_cache/a8d87baa92adf971719cae43/gstack/freeze",
+      "reason": "byte_identical_lower_priority_duplicate",
+      "canonical_path": "/Users/jameschen/.agents/skills/gstack/freeze/SKILL.md"
+    },
+    {
+      "skill_id": "gstack",
+      "identity_id": "82a9f57d45bc6a94226b301b",
+      "source_status": "codex_mirror_cache",
+      "source_dir": "/Users/jameschen/.codex/skills/gstack/.kiro/skills/gstack",
+      "source_skill_path": "/Users/jameschen/.codex/skills/gstack/.kiro/skills/gstack/SKILL.md",
+      "destination_dir": ".agents/skills/.duplicates-quarantine/codex_mirror_cache/82a9f57d45bc6a94226b301b/gstack/.kiro/skills/gstack",
+      "reason": "byte_identical_lower_priority_duplicate",
+      "canonical_path": "/Users/jameschen/.agents/skills/gstack/.kiro/skills/gstack/SKILL.md"
+    },
+    {
+      "skill_id": "gstack",
+      "identity_id": "5149852563066ca2721a6f22",
+      "source_status": "codex_mirror_cache",
+      "source_dir": "/Users/jameschen/.codex/skills/gstack/.openclaw/skills/gstack",
+      "source_skill_path": "/Users/jameschen/.codex/skills/gstack/.openclaw/skills/gstack/SKILL.md",
+      "destination_dir": ".agents/skills/.duplicates-quarantine/codex_mirror_cache/5149852563066ca2721a6f22/gstack/.openclaw/skills/gstack",
+      "reason": "byte_identical_lower_priority_duplicate",
+      "canonical_path": "/Users/jameschen/.agents/skills/gstack/.openclaw/skills/gstack/SKILL.md"
+    },
+    {
+      "skill_id": "gstack",
+      "identity_id": "29417927d82c9fe6f6dcfaa6",
+      "source_status": "codex_mirror_cache",
+      "source_dir": "/Users/jameschen/.codex/skills/gstack/.opencode/skills/gstack",
+      "source_skill_path": "/Users/jameschen/.codex/skills/gstack/.opencode/skills/gstack/SKILL.md",
+      "destination_dir": ".agents/skills/.duplicates-quarantine/codex_mirror_cache/29417927d82c9fe6f6dcfaa6/gstack/.opencode/skills/gstack",
+      "reason": "byte_identical_lower_priority_duplicate",
+      "canonical_path": "/Users/jameschen/.agents/skills/gstack/.opencode/skills/gstack/SKILL.md"
+    },
+    {
+      "skill_id": "gstack",
+      "identity_id": "0873cc21400d5518df70f816",
+      "source_status": "codex_mirror_cache",
+      "source_dir": "/Users/jameschen/.codex/skills/gstack/.slate/skills/gstack",
+      "source_skill_path": "/Users/jameschen/.codex/skills/gstack/.slate/skills/gstack/SKILL.md",
+      "destination_dir": ".agents/skills/.duplicates-quarantine/codex_mirror_cache/0873cc21400d5518df70f816/gstack/.slate/skills/gstack",
+      "reason": "byte_identical_lower_priority_duplicate",
+      "canonical_path": "/Users/jameschen/.agents/skills/gstack/.slate/skills/gstack/SKILL.md"
+    },
+    {
+      "skill_id": "gstack",
+      "identity_id": "bcda7199c92da65f765241d7",
+      "source_status": "codex_mirror_cache",
+      "source_dir": "/Users/jameschen/.codex/skills/gstack",
+      "source_skill_path": "/Users/jameschen/.codex/skills/gstack/SKILL.md",
+      "destination_dir": ".agents/skills/.duplicates-quarantine/codex_mirror_cache/bcda7199c92da65f765241d7/gstack",
+      "reason": "byte_identical_lower_priority_duplicate",
+      "canonical_path": "/Users/jameschen/.agents/skills/gstack/SKILL.md"
+    },
+    {
+      "skill_id": "gstack-upgrade",
+      "identity_id": "6ad08631a878f7419dcd55a9",
+      "source_status": "codex_mirror_cache",
+      "source_dir": "/Users/jameschen/.codex/skills/gstack/.hermes/skills/gstack-upgrade",
+      "source_skill_path": "/Users/jameschen/.codex/skills/gstack/.hermes/skills/gstack-upgrade/SKILL.md",
+      "destination_dir": ".agents/skills/.duplicates-quarantine/codex_mirror_cache/6ad08631a878f7419dcd55a9/gstack/.hermes/skills/gstack-upgrade",
+      "reason": "byte_identical_lower_priority_duplicate",
+      "canonical_path": "/Users/jameschen/.agents/skills/gstack/.hermes/skills/gstack-upgrade/SKILL.md"
+    },
+    {
+      "skill_id": "gstack-upgrade",
+      "identity_id": "1b8e39052eb700310d1f0d0c",
+      "source_status": "codex_mirror_cache",
+      "source_dir": "/Users/jameschen/.codex/skills/gstack/.kiro/skills/gstack-upgrade",
+      "source_skill_path": "/Users/jameschen/.codex/skills/gstack/.kiro/skills/gstack-upgrade/SKILL.md",
+      "destination_dir": ".agents/skills/.duplicates-quarantine/codex_mirror_cache/1b8e39052eb700310d1f0d0c/gstack/.kiro/skills/gstack-upgrade",
+      "reason": "byte_identical_lower_priority_duplicate",
+      "canonical_path": "/Users/jameschen/.agents/skills/gstack/.kiro/skills/gstack-upgrade/SKILL.md"
+    },
+    {
+      "skill_id": "gstack-upgrade",
+      "identity_id": "a979baa86ba8840db567c6ee",
+      "source_status": "codex_mirror_cache",
+      "source_dir": "/Users/jameschen/.codex/skills/gstack/.openclaw/skills/gstack-upgrade",
+      "source_skill_path": "/Users/jameschen/.codex/skills/gstack/.openclaw/skills/gstack-upgrade/SKILL.md",
+      "destination_dir": ".agents/skills/.duplicates-quarantine/codex_mirror_cache/a979baa86ba8840db567c6ee/gstack/.openclaw/skills/gstack-upgrade",
+      "reason": "byte_identical_lower_priority_duplicate",
+      "canonical_path": "/Users/jameschen/.agents/skills/gstack/.openclaw/skills/gstack-upgrade/SKILL.md"
+    },
+    {
+      "skill_id": "gstack-upgrade",
+      "identity_id": "e2e0926c82835968af13c94f",
+      "source_status": "codex_mirror_cache",
+      "source_dir": "/Users/jameschen/.codex/skills/gstack/.opencode/skills/gstack-upgrade",
+      "source_skill_path": "/Users/jameschen/.codex/skills/gstack/.opencode/skills/gstack-upgrade/SKILL.md",
+      "destination_dir": ".agents/skills/.duplicates-quarantine/codex_mirror_cache/e2e0926c82835968af13c94f/gstack/.opencode/skills/gstack-upgrade",
+      "reason": "byte_identical_lower_priority_duplicate",
+      "canonical_path": "/Users/jameschen/.agents/skills/gstack/.opencode/skills/gstack-upgrade/SKILL.md"
+    },
+    {
+      "skill_id": "gstack-upgrade",
+      "identity_id": "25f4ad7fd6e54334f6615381",
+      "source_status": "codex_mirror_cache",
+      "source_dir": "/Users/jameschen/.codex/skills/gstack/.slate/skills/gstack-upgrade",
+      "source_skill_path": "/Users/jameschen/.codex/skills/gstack/.slate/skills/gstack-upgrade/SKILL.md",
+      "destination_dir": ".agents/skills/.duplicates-quarantine/codex_mirror_cache/25f4ad7fd6e54334f6615381/gstack/.slate/skills/gstack-upgrade",
+      "reason": "byte_identical_lower_priority_duplicate",
+      "canonical_path": "/Users/jameschen/.agents/skills/gstack/.slate/skills/gstack-upgrade/SKILL.md"
+    },
+    {
+      "skill_id": "guard",
+      "identity_id": "37390d3b78649bc501880cd2",
+      "source_status": "codex_mirror_cache",
+      "source_dir": "/Users/jameschen/.codex/skills/gstack/.kiro/skills/gstack-guard",
+      "source_skill_path": "/Users/jameschen/.codex/skills/gstack/.kiro/skills/gstack-guard/SKILL.md",
+      "destination_dir": ".agents/skills/.duplicates-quarantine/codex_mirror_cache/37390d3b78649bc501880cd2/gstack/.kiro/skills/gstack-guard",
+      "reason": "byte_identical_lower_priority_duplicate",
+      "canonical_path": "/Users/jameschen/.agents/skills/gstack/.kiro/skills/gstack-guard/SKILL.md"
+    },
+    {
+      "skill_id": "guard",
+      "identity_id": "97d85f7e282518ebed348ac2",
+      "source_status": "codex_mirror_cache",
+      "source_dir": "/Users/jameschen/.codex/skills/gstack/.openclaw/skills/gstack-guard",
+      "source_skill_path": "/Users/jameschen/.codex/skills/gstack/.openclaw/skills/gstack-guard/SKILL.md",
+      "destination_dir": ".agents/skills/.duplicates-quarantine/codex_mirror_cache/97d85f7e282518ebed348ac2/gstack/.openclaw/skills/gstack-guard",
+      "reason": "byte_identical_lower_priority_duplicate",
+      "canonical_path": "/Users/jameschen/.agents/skills/gstack/.openclaw/skills/gstack-guard/SKILL.md"
+    },
+    {
+      "skill_id": "guard",
+      "identity_id": "99bd51e249b1e5b9e4729541",
+      "source_status": "codex_mirror_cache",
+      "source_dir": "/Users/jameschen/.codex/skills/gstack/.opencode/skills/gstack-guard",
+      "source_skill_path": "/Users/jameschen/.codex/skills/gstack/.opencode/skills/gstack-guard/SKILL.md",
+      "destination_dir": ".agents/skills/.duplicates-quarantine/codex_mirror_cache/99bd51e249b1e5b9e4729541/gstack/.opencode/skills/gstack-guard",
+      "reason": "byte_identical_lower_priority_duplicate",
+      "canonical_path": "/Users/jameschen/.agents/skills/gstack/.opencode/skills/gstack-guard/SKILL.md"
+    },
+    {
+      "skill_id": "guard",
+      "identity_id": "ed99bb0674f51bc76b08338a",
+      "source_status": "codex_mirror_cache",
+      "source_dir": "/Users/jameschen/.codex/skills/gstack/.slate/skills/gstack-guard",
+      "source_skill_path": "/Users/jameschen/.codex/skills/gstack/.slate/skills/gstack-guard/SKILL.md",
+      "destination_dir": ".agents/skills/.duplicates-quarantine/codex_mirror_cache/ed99bb0674f51bc76b08338a/gstack/.slate/skills/gstack-guard",
+      "reason": "byte_identical_lower_priority_duplicate",
+      "canonical_path": "/Users/jameschen/.agents/skills/gstack/.slate/skills/gstack-guard/SKILL.md"
+    },
+    {
+      "skill_id": "guard",
+      "identity_id": "b7c9274c1f4382a294cd9497",
+      "source_status": "codex_mirror_cache",
+      "source_dir": "/Users/jameschen/.codex/skills/gstack/guard",
+      "source_skill_path": "/Users/jameschen/.codex/skills/gstack/guard/SKILL.md",
+      "destination_dir": ".agents/skills/.duplicates-quarantine/codex_mirror_cache/b7c9274c1f4382a294cd9497/gstack/guard",
+      "reason": "byte_identical_lower_priority_duplicate",
+      "canonical_path": "/Users/jameschen/.agents/skills/gstack/guard/SKILL.md"
+    },
+    {
+      "skill_id": "health",
+      "identity_id": "12a4efc2802330a3d7e5491a",
+      "source_status": "codex_mirror_cache",
+      "source_dir": "/Users/jameschen/.codex/skills/gstack/.kiro/skills/gstack-health",
+      "source_skill_path": "/Users/jameschen/.codex/skills/gstack/.kiro/skills/gstack-health/SKILL.md",
+      "destination_dir": ".agents/skills/.duplicates-quarantine/codex_mirror_cache/12a4efc2802330a3d7e5491a/gstack/.kiro/skills/gstack-health",
+      "reason": "byte_identical_lower_priority_duplicate",
+      "canonical_path": "/Users/jameschen/.agents/skills/gstack/.kiro/skills/gstack-health/SKILL.md"
+    },
+    {
+      "skill_id": "health",
+      "identity_id": "6102c1e4706d0c5b0bf7da7e",
+      "source_status": "codex_mirror_cache",
+      "source_dir": "/Users/jameschen/.codex/skills/gstack/.openclaw/skills/gstack-health",
+      "source_skill_path": "/Users/jameschen/.codex/skills/gstack/.openclaw/skills/gstack-health/SKILL.md",
+      "destination_dir": ".agents/skills/.duplicates-quarantine/codex_mirror_cache/6102c1e4706d0c5b0bf7da7e/gstack/.openclaw/skills/gstack-health",
+      "reason": "byte_identical_lower_priority_duplicate",
+      "canonical_path": "/Users/jameschen/.agents/skills/gstack/.openclaw/skills/gstack-health/SKILL.md"
+    },
+    {
+      "skill_id": "health",
+      "identity_id": "13f526c8b066ac703003f060",
+      "source_status": "codex_mirror_cache",
+      "source_dir": "/Users/jameschen/.codex/skills/gstack/.opencode/skills/gstack-health",
+      "source_skill_path": "/Users/jameschen/.codex/skills/gstack/.opencode/skills/gstack-health/SKILL.md",
+      "destination_dir": ".agents/skills/.duplicates-quarantine/codex_mirror_cache/13f526c8b066ac703003f060/gstack/.opencode/skills/gstack-health",
+      "reason": "byte_identical_lower_priority_duplicate",
+      "canonical_path": "/Users/jameschen/.agents/skills/gstack/.opencode/skills/gstack-health/SKILL.md"
+    },
+    {
+      "skill_id": "health",
+      "identity_id": "4161bfafde772cdc363ad0cc",
+      "source_status": "codex_mirror_cache",
+      "source_dir": "/Users/jameschen/.codex/skills/gstack/.slate/skills/gstack-health",
+      "source_skill_path": "/Users/jameschen/.codex/skills/gstack/.slate/skills/gstack-health/SKILL.md",
+      "destination_dir": ".agents/skills/.duplicates-quarantine/codex_mirror_cache/4161bfafde772cdc363ad0cc/gstack/.slate/skills/gstack-health",
+      "reason": "byte_identical_lower_priority_duplicate",
+      "canonical_path": "/Users/jameschen/.agents/skills/gstack/.slate/skills/gstack-health/SKILL.md"
+    },
+    {
+      "skill_id": "health",
+      "identity_id": "6f821863aab83b0187cf291c",
+      "source_status": "codex_mirror_cache",
+      "source_dir": "/Users/jameschen/.codex/skills/gstack/health",
+      "source_skill_path": "/Users/jameschen/.codex/skills/gstack/health/SKILL.md",
+      "destination_dir": ".agents/skills/.duplicates-quarantine/codex_mirror_cache/6f821863aab83b0187cf291c/gstack/health",
+      "reason": "byte_identical_lower_priority_duplicate",
+      "canonical_path": "/Users/jameschen/.agents/skills/gstack/health/SKILL.md"
+    },
+    {
+      "skill_id": "investigate",
+      "identity_id": "f7ceeb114877ecee5b112e94",
+      "source_status": "codex_mirror_cache",
+      "source_dir": "/Users/jameschen/.codex/skills/gstack/.kiro/skills/gstack-investigate",
+      "source_skill_path": "/Users/jameschen/.codex/skills/gstack/.kiro/skills/gstack-investigate/SKILL.md",
+      "destination_dir": ".agents/skills/.duplicates-quarantine/codex_mirror_cache/f7ceeb114877ecee5b112e94/gstack/.kiro/skills/gstack-investigate",
+      "reason": "byte_identical_lower_priority_duplicate",
+      "canonical_path": "/Users/jameschen/.agents/skills/gstack/.kiro/skills/gstack-investigate/SKILL.md"
+    },
+    {
+      "skill_id": "investigate",
+      "identity_id": "f4bb35fe233feeebb5db414a",
+      "source_status": "codex_mirror_cache",
+      "source_dir": "/Users/jameschen/.codex/skills/gstack/.openclaw/skills/gstack-investigate",
+      "source_skill_path": "/Users/jameschen/.codex/skills/gstack/.openclaw/skills/gstack-investigate/SKILL.md",
+      "destination_dir": ".agents/skills/.duplicates-quarantine/codex_mirror_cache/f4bb35fe233feeebb5db414a/gstack/.openclaw/skills/gstack-investigate",
+      "reason": "byte_identical_lower_priority_duplicate",
+      "canonical_path": "/Users/jameschen/.agents/skills/gstack/.openclaw/skills/gstack-investigate/SKILL.md"
+    },
+    {
+      "skill_id": "investigate",
+      "identity_id": "303c503b08e229dd25ecee4b",
+      "source_status": "codex_mirror_cache",
+      "source_dir": "/Users/jameschen/.codex/skills/gstack/.opencode/skills/gstack-investigate",
+      "source_skill_path": "/Users/jameschen/.codex/skills/gstack/.opencode/skills/gstack-investigate/SKILL.md",
+      "destination_dir": ".agents/skills/.duplicates-quarantine/codex_mirror_cache/303c503b08e229dd25ecee4b/gstack/.opencode/skills/gstack-investigate",
+      "reason": "byte_identical_lower_priority_duplicate",
+      "canonical_path": "/Users/jameschen/.agents/skills/gstack/.opencode/skills/gstack-investigate/SKILL.md"
+    },
+    {
+      "skill_id": "investigate",
+      "identity_id": "bed121775dd8bcf59c6ca2f4",
+      "source_status": "codex_mirror_cache",
+      "source_dir": "/Users/jameschen/.codex/skills/gstack/.slate/skills/gstack-investigate",
+      "source_skill_path": "/Users/jameschen/.codex/skills/gstack/.slate/skills/gstack-investigate/SKILL.md",
+      "destination_dir": ".agents/skills/.duplicates-quarantine/codex_mirror_cache/bed121775dd8bcf59c6ca2f4/gstack/.slate/skills/gstack-investigate",
+      "reason": "byte_identical_lower_priority_duplicate",
+      "canonical_path": "/Users/jameschen/.agents/skills/gstack/.slate/skills/gstack-investigate/SKILL.md"
+    },
+    {
+      "skill_id": "investigate",
+      "identity_id": "808f73064a90dffb2b00fec3",
+      "source_status": "codex_mirror_cache",
+      "source_dir": "/Users/jameschen/.codex/skills/gstack/investigate",
+      "source_skill_path": "/Users/jameschen/.codex/skills/gstack/investigate/SKILL.md",
+      "destination_dir": ".agents/skills/.duplicates-quarantine/codex_mirror_cache/808f73064a90dffb2b00fec3/gstack/investigate",
+      "reason": "byte_identical_lower_priority_duplicate",
+      "canonical_path": "/Users/jameschen/.agents/skills/gstack/investigate/SKILL.md"
+    },
+    {
+      "skill_id": "land-and-deploy",
+      "identity_id": "01de359abb2ee1fcf2acb072",
+      "source_status": "codex_mirror_cache",
+      "source_dir": "/Users/jameschen/.codex/skills/gstack/.kiro/skills/gstack-land-and-deploy",
+      "source_skill_path": "/Users/jameschen/.codex/skills/gstack/.kiro/skills/gstack-land-and-deploy/SKILL.md",
+      "destination_dir": ".agents/skills/.duplicates-quarantine/codex_mirror_cache/01de359abb2ee1fcf2acb072/gstack/.kiro/skills/gstack-land-and-deploy",
+      "reason": "byte_identical_lower_priority_duplicate",
+      "canonical_path": "/Users/jameschen/.agents/skills/gstack/.kiro/skills/gstack-land-and-deploy/SKILL.md"
+    },
+    {
+      "skill_id": "land-and-deploy",
+      "identity_id": "f894321ab80de4e197f23199",
+      "source_status": "codex_mirror_cache",
+      "source_dir": "/Users/jameschen/.codex/skills/gstack/.openclaw/skills/gstack-land-and-deploy",
+      "source_skill_path": "/Users/jameschen/.codex/skills/gstack/.openclaw/skills/gstack-land-and-deploy/SKILL.md",
+      "destination_dir": ".agents/skills/.duplicates-quarantine/codex_mirror_cache/f894321ab80de4e197f23199/gstack/.openclaw/skills/gstack-land-and-deploy",
+      "reason": "byte_identical_lower_priority_duplicate",
+      "canonical_path": "/Users/jameschen/.agents/skills/gstack/.openclaw/skills/gstack-land-and-deploy/SKILL.md"
+    },
+    {
+      "skill_id": "land-and-deploy",
+      "identity_id": "b16eb5fcd39132f53ee17988",
+      "source_status": "codex_mirror_cache",
+      "source_dir": "/Users/jameschen/.codex/skills/gstack/.opencode/skills/gstack-land-and-deploy",
+      "source_skill_path": "/Users/jameschen/.codex/skills/gstack/.opencode/skills/gstack-land-and-deploy/SKILL.md",
+      "destination_dir": ".agents/skills/.duplicates-quarantine/codex_mirror_cache/b16eb5fcd39132f53ee17988/gstack/.opencode/skills/gstack-land-and-deploy",
+      "reason": "byte_identical_lower_priority_duplicate",
+      "canonical_path": "/Users/jameschen/.agents/skills/gstack/.opencode/skills/gstack-land-and-deploy/SKILL.md"
+    },
+    {
+      "skill_id": "land-and-deploy",
+      "identity_id": "718f092aeea01c55ee554af5",
+      "source_status": "codex_mirror_cache",
+      "source_dir": "/Users/jameschen/.codex/skills/gstack/.slate/skills/gstack-land-and-deploy",
+      "source_skill_path": "/Users/jameschen/.codex/skills/gstack/.slate/skills/gstack-land-and-deploy/SKILL.md",
+      "destination_dir": ".agents/skills/.duplicates-quarantine/codex_mirror_cache/718f092aeea01c55ee554af5/gstack/.slate/skills/gstack-land-and-deploy",
+      "reason": "byte_identical_lower_priority_duplicate",
+      "canonical_path": "/Users/jameschen/.agents/skills/gstack/.slate/skills/gstack-land-and-deploy/SKILL.md"
+    },
+    {
+      "skill_id": "land-and-deploy",
+      "identity_id": "b25b2eafebb5a4d90f7afe7c",
+      "source_status": "codex_mirror_cache",
+      "source_dir": "/Users/jameschen/.codex/skills/gstack/land-and-deploy",
+      "source_skill_path": "/Users/jameschen/.codex/skills/gstack/land-and-deploy/SKILL.md",
+      "destination_dir": ".agents/skills/.duplicates-quarantine/codex_mirror_cache/b25b2eafebb5a4d90f7afe7c/gstack/land-and-deploy",
+      "reason": "byte_identical_lower_priority_duplicate",
+      "canonical_path": "/Users/jameschen/.agents/skills/gstack/land-and-deploy/SKILL.md"
+    },
+    {
+      "skill_id": "landing-report",
+      "identity_id": "bb02db5daece09a8b7c5fb93",
+      "source_status": "codex_mirror_cache",
+      "source_dir": "/Users/jameschen/.codex/skills/gstack/.kiro/skills/gstack-landing-report",
+      "source_skill_path": "/Users/jameschen/.codex/skills/gstack/.kiro/skills/gstack-landing-report/SKILL.md",
+      "destination_dir": ".agents/skills/.duplicates-quarantine/codex_mirror_cache/bb02db5daece09a8b7c5fb93/gstack/.kiro/skills/gstack-landing-report",
+      "reason": "byte_identical_lower_priority_duplicate",
+      "canonical_path": "/Users/jameschen/.agents/skills/gstack/.kiro/skills/gstack-landing-report/SKILL.md"
+    },
+    {
+      "skill_id": "landing-report",
+      "identity_id": "60617af8307b989e82f8426b",
+      "source_status": "codex_mirror_cache",
+      "source_dir": "/Users/jameschen/.codex/skills/gstack/.openclaw/skills/gstack-landing-report",
+      "source_skill_path": "/Users/jameschen/.codex/skills/gstack/.openclaw/skills/gstack-landing-report/SKILL.md",
+      "destination_dir": ".agents/skills/.duplicates-quarantine/codex_mirror_cache/60617af8307b989e82f8426b/gstack/.openclaw/skills/gstack-landing-report",
+      "reason": "byte_identical_lower_priority_duplicate",
+      "canonical_path": "/Users/jameschen/.agents/skills/gstack/.openclaw/skills/gstack-landing-report/SKILL.md"
+    },
+    {
+      "skill_id": "landing-report",
+      "identity_id": "bdd684836961c6212aac589c",
+      "source_status": "codex_mirror_cache",
+      "source_dir": "/Users/jameschen/.codex/skills/gstack/.opencode/skills/gstack-landing-report",
+      "source_skill_path": "/Users/jameschen/.codex/skills/gstack/.opencode/skills/gstack-landing-report/SKILL.md",
+      "destination_dir": ".agents/skills/.duplicates-quarantine/codex_mirror_cache/bdd684836961c6212aac589c/gstack/.opencode/skills/gstack-landing-report",
+      "reason": "byte_identical_lower_priority_duplicate",
+      "canonical_path": "/Users/jameschen/.agents/skills/gstack/.opencode/skills/gstack-landing-report/SKILL.md"
+    },
+    {
+      "skill_id": "landing-report",
+      "identity_id": "881746c3459ab9fd1b4cf243",
+      "source_status": "codex_mirror_cache",
+      "source_dir": "/Users/jameschen/.codex/skills/gstack/.slate/skills/gstack-landing-report",
+      "source_skill_path": "/Users/jameschen/.codex/skills/gstack/.slate/skills/gstack-landing-report/SKILL.md",
+      "destination_dir": ".agents/skills/.duplicates-quarantine/codex_mirror_cache/881746c3459ab9fd1b4cf243/gstack/.slate/skills/gstack-landing-report",
+      "reason": "byte_identical_lower_priority_duplicate",
+      "canonical_path": "/Users/jameschen/.agents/skills/gstack/.slate/skills/gstack-landing-report/SKILL.md"
+    },
+    {
+      "skill_id": "landing-report",
+      "identity_id": "58f4c6a71740415e686802f2",
+      "source_status": "codex_mirror_cache",
+      "source_dir": "/Users/jameschen/.codex/skills/gstack/landing-report",
+      "source_skill_path": "/Users/jameschen/.codex/skills/gstack/landing-report/SKILL.md",
+      "destination_dir": ".agents/skills/.duplicates-quarantine/codex_mirror_cache/58f4c6a71740415e686802f2/gstack/landing-report",
+      "reason": "byte_identical_lower_priority_duplicate",
+      "canonical_path": "/Users/jameschen/.agents/skills/gstack/landing-report/SKILL.md"
+    },
+    {
+      "skill_id": "learn",
+      "identity_id": "7562c140d16145981d4491ba",
+      "source_status": "codex_mirror_cache",
+      "source_dir": "/Users/jameschen/.codex/skills/gstack/.kiro/skills/gstack-learn",
+      "source_skill_path": "/Users/jameschen/.codex/skills/gstack/.kiro/skills/gstack-learn/SKILL.md",
+      "destination_dir": ".agents/skills/.duplicates-quarantine/codex_mirror_cache/7562c140d16145981d4491ba/gstack/.kiro/skills/gstack-learn",
+      "reason": "byte_identical_lower_priority_duplicate",
+      "canonical_path": "/Users/jameschen/.agents/skills/gstack/.kiro/skills/gstack-learn/SKILL.md"
+    },
+    {
+      "skill_id": "learn",
+      "identity_id": "aa420bd85dded4ec705a27e1",
+      "source_status": "codex_mirror_cache",
+      "source_dir": "/Users/jameschen/.codex/skills/gstack/.openclaw/skills/gstack-learn",
+      "source_skill_path": "/Users/jameschen/.codex/skills/gstack/.openclaw/skills/gstack-learn/SKILL.md",
+      "destination_dir": ".agents/skills/.duplicates-quarantine/codex_mirror_cache/aa420bd85dded4ec705a27e1/gstack/.openclaw/skills/gstack-learn",
+      "reason": "byte_identical_lower_priority_duplicate",
+      "canonical_path": "/Users/jameschen/.agents/skills/gstack/.openclaw/skills/gstack-learn/SKILL.md"
+    },
+    {
+      "skill_id": "learn",
+      "identity_id": "4868df5dc7afa5fce5484778",
+      "source_status": "codex_mirror_cache",
+      "source_dir": "/Users/jameschen/.codex/skills/gstack/.opencode/skills/gstack-learn",
+      "source_skill_path": "/Users/jameschen/.codex/skills/gstack/.opencode/skills/gstack-learn/SKILL.md",
+      "destination_dir": ".agents/skills/.duplicates-quarantine/codex_mirror_cache/4868df5dc7afa5fce5484778/gstack/.opencode/skills/gstack-learn",
+      "reason": "byte_identical_lower_priority_duplicate",
+      "canonical_path": "/Users/jameschen/.agents/skills/gstack/.opencode/skills/gstack-learn/SKILL.md"
+    },
+    {
+      "skill_id": "learn",
+      "identity_id": "cb227c7b11f62390b3f54996",
+      "source_status": "codex_mirror_cache",
+      "source_dir": "/Users/jameschen/.codex/skills/gstack/.slate/skills/gstack-learn",
+      "source_skill_path": "/Users/jameschen/.codex/skills/gstack/.slate/skills/gstack-learn/SKILL.md",
+      "destination_dir": ".agents/skills/.duplicates-quarantine/codex_mirror_cache/cb227c7b11f62390b3f54996/gstack/.slate/skills/gstack-learn",
+      "reason": "byte_identical_lower_priority_duplicate",
+      "canonical_path": "/Users/jameschen/.agents/skills/gstack/.slate/skills/gstack-learn/SKILL.md"
+    },
+    {
+      "skill_id": "learn",
+      "identity_id": "329883812b8a8352a6908dcf",
+      "source_status": "codex_mirror_cache",
+      "source_dir": "/Users/jameschen/.codex/skills/gstack/learn",
+      "source_skill_path": "/Users/jameschen/.codex/skills/gstack/learn/SKILL.md",
+      "destination_dir": ".agents/skills/.duplicates-quarantine/codex_mirror_cache/329883812b8a8352a6908dcf/gstack/learn",
+      "reason": "byte_identical_lower_priority_duplicate",
+      "canonical_path": "/Users/jameschen/.agents/skills/gstack/learn/SKILL.md"
+    },
+    {
+      "skill_id": "make-pdf",
+      "identity_id": "aefe3625e68ecbcf798e0b99",
+      "source_status": "codex_mirror_cache",
+      "source_dir": "/Users/jameschen/.codex/skills/gstack/.kiro/skills/gstack-make-pdf",
+      "source_skill_path": "/Users/jameschen/.codex/skills/gstack/.kiro/skills/gstack-make-pdf/SKILL.md",
+      "destination_dir": ".agents/skills/.duplicates-quarantine/codex_mirror_cache/aefe3625e68ecbcf798e0b99/gstack/.kiro/skills/gstack-make-pdf",
+      "reason": "byte_identical_lower_priority_duplicate",
+      "canonical_path": "/Users/jameschen/.agents/skills/gstack/.kiro/skills/gstack-make-pdf/SKILL.md"
+    },
+    {
+      "skill_id": "make-pdf",
+      "identity_id": "e0b667b8c1988b71f9d9ed24",
+      "source_status": "codex_mirror_cache",
+      "source_dir": "/Users/jameschen/.codex/skills/gstack/.openclaw/skills/gstack-make-pdf",
+      "source_skill_path": "/Users/jameschen/.codex/skills/gstack/.openclaw/skills/gstack-make-pdf/SKILL.md",
+      "destination_dir": ".agents/skills/.duplicates-quarantine/codex_mirror_cache/e0b667b8c1988b71f9d9ed24/gstack/.openclaw/skills/gstack-make-pdf",
+      "reason": "byte_identical_lower_priority_duplicate",
+      "canonical_path": "/Users/jameschen/.agents/skills/gstack/.openclaw/skills/gstack-make-pdf/SKILL.md"
+    },
+    {
+      "skill_id": "make-pdf",
+      "identity_id": "6fba234e98de130eb166f012",
+      "source_status": "codex_mirror_cache",
+      "source_dir": "/Users/jameschen/.codex/skills/gstack/.opencode/skills/gstack-make-pdf",
+      "source_skill_path": "/Users/jameschen/.codex/skills/gstack/.opencode/skills/gstack-make-pdf/SKILL.md",
+      "destination_dir": ".agents/skills/.duplicates-quarantine/codex_mirror_cache/6fba234e98de130eb166f012/gstack/.opencode/skills/gstack-make-pdf",
+      "reason": "byte_identical_lower_priority_duplicate",
+      "canonical_path": "/Users/jameschen/.agents/skills/gstack/.opencode/skills/gstack-make-pdf/SKILL.md"
+    },
+    {
+      "skill_id": "make-pdf",
+      "identity_id": "1b7fd5b58aae4962dc7d8074",
+      "source_status": "codex_mirror_cache",
+      "source_dir": "/Users/jameschen/.codex/skills/gstack/.slate/skills/gstack-make-pdf",
+      "source_skill_path": "/Users/jameschen/.codex/skills/gstack/.slate/skills/gstack-make-pdf/SKILL.md",
+      "destination_dir": ".agents/skills/.duplicates-quarantine/codex_mirror_cache/1b7fd5b58aae4962dc7d8074/gstack/.slate/skills/gstack-make-pdf",
+      "reason": "byte_identical_lower_priority_duplicate",
+      "canonical_path": "/Users/jameschen/.agents/skills/gstack/.slate/skills/gstack-make-pdf/SKILL.md"
+    },
+    {
+      "skill_id": "make-pdf",
+      "identity_id": "48d7856a6827309f23930031",
+      "source_status": "codex_mirror_cache",
+      "source_dir": "/Users/jameschen/.codex/skills/gstack/make-pdf",
+      "source_skill_path": "/Users/jameschen/.codex/skills/gstack/make-pdf/SKILL.md",
+      "destination_dir": ".agents/skills/.duplicates-quarantine/codex_mirror_cache/48d7856a6827309f23930031/gstack/make-pdf",
+      "reason": "byte_identical_lower_priority_duplicate",
+      "canonical_path": "/Users/jameschen/.agents/skills/gstack/make-pdf/SKILL.md"
+    },
+    {
+      "skill_id": "office-hours",
+      "identity_id": "3041a68276c1d7cb31a2843f",
+      "source_status": "codex_mirror_cache",
+      "source_dir": "/Users/jameschen/.codex/skills/gstack/.kiro/skills/gstack-office-hours",
+      "source_skill_path": "/Users/jameschen/.codex/skills/gstack/.kiro/skills/gstack-office-hours/SKILL.md",
+      "destination_dir": ".agents/skills/.duplicates-quarantine/codex_mirror_cache/3041a68276c1d7cb31a2843f/gstack/.kiro/skills/gstack-office-hours",
+      "reason": "byte_identical_lower_priority_duplicate",
+      "canonical_path": "/Users/jameschen/.agents/skills/gstack/.kiro/skills/gstack-office-hours/SKILL.md"
+    },
+    {
+      "skill_id": "office-hours",
+      "identity_id": "1d5e3ec1add1251584de03c2",
+      "source_status": "codex_mirror_cache",
+      "source_dir": "/Users/jameschen/.codex/skills/gstack/.openclaw/skills/gstack-office-hours",
+      "source_skill_path": "/Users/jameschen/.codex/skills/gstack/.openclaw/skills/gstack-office-hours/SKILL.md",
+      "destination_dir": ".agents/skills/.duplicates-quarantine/codex_mirror_cache/1d5e3ec1add1251584de03c2/gstack/.openclaw/skills/gstack-office-hours",
+      "reason": "byte_identical_lower_priority_duplicate",
+      "canonical_path": "/Users/jameschen/.agents/skills/gstack/.openclaw/skills/gstack-office-hours/SKILL.md"
+    },
+    {
+      "skill_id": "office-hours",
+      "identity_id": "35bf959ddd68336083d8d48b",
+      "source_status": "codex_mirror_cache",
+      "source_dir": "/Users/jameschen/.codex/skills/gstack/.opencode/skills/gstack-office-hours",
+      "source_skill_path": "/Users/jameschen/.codex/skills/gstack/.opencode/skills/gstack-office-hours/SKILL.md",
+      "destination_dir": ".agents/skills/.duplicates-quarantine/codex_mirror_cache/35bf959ddd68336083d8d48b/gstack/.opencode/skills/gstack-office-hours",
+      "reason": "byte_identical_lower_priority_duplicate",
+      "canonical_path": "/Users/jameschen/.agents/skills/gstack/.opencode/skills/gstack-office-hours/SKILL.md"
+    },
+    {
+      "skill_id": "office-hours",
+      "identity_id": "19dbdf03b768690b19b02756",
+      "source_status": "codex_mirror_cache",
+      "source_dir": "/Users/jameschen/.codex/skills/gstack/.slate/skills/gstack-office-hours",
+      "source_skill_path": "/Users/jameschen/.codex/skills/gstack/.slate/skills/gstack-office-hours/SKILL.md",
+      "destination_dir": ".agents/skills/.duplicates-quarantine/codex_mirror_cache/19dbdf03b768690b19b02756/gstack/.slate/skills/gstack-office-hours",
+      "reason": "byte_identical_lower_priority_duplicate",
+      "canonical_path": "/Users/jameschen/.agents/skills/gstack/.slate/skills/gstack-office-hours/SKILL.md"
+    },
+    {
+      "skill_id": "office-hours",
+      "identity_id": "052cc18c39e33b3a2e8ef797",
+      "source_status": "codex_mirror_cache",
+      "source_dir": "/Users/jameschen/.codex/skills/gstack/office-hours",
+      "source_skill_path": "/Users/jameschen/.codex/skills/gstack/office-hours/SKILL.md",
+      "destination_dir": ".agents/skills/.duplicates-quarantine/codex_mirror_cache/052cc18c39e33b3a2e8ef797/gstack/office-hours",
+      "reason": "byte_identical_lower_priority_duplicate",
+      "canonical_path": "/Users/jameschen/.agents/skills/gstack/office-hours/SKILL.md"
+    },
+    {
+      "skill_id": "open-gstack-browser",
+      "identity_id": "078a679aff0af4c080656bf9",
+      "source_status": "codex_mirror_cache",
+      "source_dir": "/Users/jameschen/.codex/skills/gstack/.kiro/skills/gstack-open-gstack-browser",
+      "source_skill_path": "/Users/jameschen/.codex/skills/gstack/.kiro/skills/gstack-open-gstack-browser/SKILL.md",
+      "destination_dir": ".agents/skills/.duplicates-quarantine/codex_mirror_cache/078a679aff0af4c080656bf9/gstack/.kiro/skills/gstack-open-gstack-browser",
+      "reason": "byte_identical_lower_priority_duplicate",
+      "canonical_path": "/Users/jameschen/.agents/skills/gstack/.kiro/skills/gstack-open-gstack-browser/SKILL.md"
+    },
+    {
+      "skill_id": "open-gstack-browser",
+      "identity_id": "e5b0ae13683ac44684a93339",
+      "source_status": "codex_mirror_cache",
+      "source_dir": "/Users/jameschen/.codex/skills/gstack/.openclaw/skills/gstack-open-gstack-browser",
+      "source_skill_path": "/Users/jameschen/.codex/skills/gstack/.openclaw/skills/gstack-open-gstack-browser/SKILL.md",
+      "destination_dir": ".agents/skills/.duplicates-quarantine/codex_mirror_cache/e5b0ae13683ac44684a93339/gstack/.openclaw/skills/gstack-open-gstack-browser",
+      "reason": "byte_identical_lower_priority_duplicate",
+      "canonical_path": "/Users/jameschen/.agents/skills/gstack/.openclaw/skills/gstack-open-gstack-browser/SKILL.md"
+    },
+    {
+      "skill_id": "open-gstack-browser",
+      "identity_id": "f8430e955f5f84327de6f1c8",
+      "source_status": "codex_mirror_cache",
+      "source_dir": "/Users/jameschen/.codex/skills/gstack/.opencode/skills/gstack-open-gstack-browser",
+      "source_skill_path": "/Users/jameschen/.codex/skills/gstack/.opencode/skills/gstack-open-gstack-browser/SKILL.md",
+      "destination_dir": ".agents/skills/.duplicates-quarantine/codex_mirror_cache/f8430e955f5f84327de6f1c8/gstack/.opencode/skills/gstack-open-gstack-browser",
+      "reason": "byte_identical_lower_priority_duplicate",
+      "canonical_path": "/Users/jameschen/.agents/skills/gstack/.opencode/skills/gstack-open-gstack-browser/SKILL.md"
+    },
+    {
+      "skill_id": "open-gstack-browser",
+      "identity_id": "d0241147ae6526f1b8d7df81",
+      "source_status": "codex_mirror_cache",
+      "source_dir": "/Users/jameschen/.codex/skills/gstack/.slate/skills/gstack-open-gstack-browser",
+      "source_skill_path": "/Users/jameschen/.codex/skills/gstack/.slate/skills/gstack-open-gstack-browser/SKILL.md",
+      "destination_dir": ".agents/skills/.duplicates-quarantine/codex_mirror_cache/d0241147ae6526f1b8d7df81/gstack/.slate/skills/gstack-open-gstack-browser",
+      "reason": "byte_identical_lower_priority_duplicate",
+      "canonical_path": "/Users/jameschen/.agents/skills/gstack/.slate/skills/gstack-open-gstack-browser/SKILL.md"
+    },
+    {
+      "skill_id": "open-gstack-browser",
+      "identity_id": "e1eafdaac229ed4656486096",
+      "source_status": "codex_mirror_cache",
+      "source_dir": "/Users/jameschen/.codex/skills/gstack/open-gstack-browser",
+      "source_skill_path": "/Users/jameschen/.codex/skills/gstack/open-gstack-browser/SKILL.md",
+      "destination_dir": ".agents/skills/.duplicates-quarantine/codex_mirror_cache/e1eafdaac229ed4656486096/gstack/open-gstack-browser",
+      "reason": "byte_identical_lower_priority_duplicate",
+      "canonical_path": "/Users/jameschen/.agents/skills/gstack/open-gstack-browser/SKILL.md"
+    },
+    {
+      "skill_id": "pair-agent",
+      "identity_id": "d39babb4ef2fcbab071e1ef7",
+      "source_status": "codex_mirror_cache",
+      "source_dir": "/Users/jameschen/.codex/skills/gstack/.kiro/skills/gstack-pair-agent",
+      "source_skill_path": "/Users/jameschen/.codex/skills/gstack/.kiro/skills/gstack-pair-agent/SKILL.md",
+      "destination_dir": ".agents/skills/.duplicates-quarantine/codex_mirror_cache/d39babb4ef2fcbab071e1ef7/gstack/.kiro/skills/gstack-pair-agent",
+      "reason": "byte_identical_lower_priority_duplicate",
+      "canonical_path": "/Users/jameschen/.agents/skills/gstack/.kiro/skills/gstack-pair-agent/SKILL.md"
+    },
+    {
+      "skill_id": "pair-agent",
+      "identity_id": "7fce37bf5308f564bfdc18fc",
+      "source_status": "codex_mirror_cache",
+      "source_dir": "/Users/jameschen/.codex/skills/gstack/.openclaw/skills/gstack-pair-agent",
+      "source_skill_path": "/Users/jameschen/.codex/skills/gstack/.openclaw/skills/gstack-pair-agent/SKILL.md",
+      "destination_dir": ".agents/skills/.duplicates-quarantine/codex_mirror_cache/7fce37bf5308f564bfdc18fc/gstack/.openclaw/skills/gstack-pair-agent",
+      "reason": "byte_identical_lower_priority_duplicate",
+      "canonical_path": "/Users/jameschen/.agents/skills/gstack/.openclaw/skills/gstack-pair-agent/SKILL.md"
+    },
+    {
+      "skill_id": "pair-agent",
+      "identity_id": "a073fb847dfe3361af519f89",
+      "source_status": "codex_mirror_cache",
+      "source_dir": "/Users/jameschen/.codex/skills/gstack/.opencode/skills/gstack-pair-agent",
+      "source_skill_path": "/Users/jameschen/.codex/skills/gstack/.opencode/skills/gstack-pair-agent/SKILL.md",
+      "destination_dir": ".agents/skills/.duplicates-quarantine/codex_mirror_cache/a073fb847dfe3361af519f89/gstack/.opencode/skills/gstack-pair-agent",
+      "reason": "byte_identical_lower_priority_duplicate",
+      "canonical_path": "/Users/jameschen/.agents/skills/gstack/.opencode/skills/gstack-pair-agent/SKILL.md"
+    },
+    {
+      "skill_id": "pair-agent",
+      "identity_id": "2cf29e16b61fc1629364c415",
+      "source_status": "codex_mirror_cache",
+      "source_dir": "/Users/jameschen/.codex/skills/gstack/.slate/skills/gstack-pair-agent",
+      "source_skill_path": "/Users/jameschen/.codex/skills/gstack/.slate/skills/gstack-pair-agent/SKILL.md",
+      "destination_dir": ".agents/skills/.duplicates-quarantine/codex_mirror_cache/2cf29e16b61fc1629364c415/gstack/.slate/skills/gstack-pair-agent",
+      "reason": "byte_identical_lower_priority_duplicate",
+      "canonical_path": "/Users/jameschen/.agents/skills/gstack/.slate/skills/gstack-pair-agent/SKILL.md"
+    },
+    {
+      "skill_id": "pair-agent",
+      "identity_id": "8abceac69ad0e6ad02060076",
+      "source_status": "codex_mirror_cache",
+      "source_dir": "/Users/jameschen/.codex/skills/gstack/pair-agent",
+      "source_skill_path": "/Users/jameschen/.codex/skills/gstack/pair-agent/SKILL.md",
+      "destination_dir": ".agents/skills/.duplicates-quarantine/codex_mirror_cache/8abceac69ad0e6ad02060076/gstack/pair-agent",
+      "reason": "byte_identical_lower_priority_duplicate",
+      "canonical_path": "/Users/jameschen/.agents/skills/gstack/pair-agent/SKILL.md"
+    },
+    {
+      "skill_id": "plan-ceo-review",
+      "identity_id": "5696e396fff9b9907979b5af",
+      "source_status": "codex_mirror_cache",
+      "source_dir": "/Users/jameschen/.codex/skills/gstack/.kiro/skills/gstack-plan-ceo-review",
+      "source_skill_path": "/Users/jameschen/.codex/skills/gstack/.kiro/skills/gstack-plan-ceo-review/SKILL.md",
+      "destination_dir": ".agents/skills/.duplicates-quarantine/codex_mirror_cache/5696e396fff9b9907979b5af/gstack/.kiro/skills/gstack-plan-ceo-review",
+      "reason": "byte_identical_lower_priority_duplicate",
+      "canonical_path": "/Users/jameschen/.agents/skills/gstack/.kiro/skills/gstack-plan-ceo-review/SKILL.md"
+    },
+    {
+      "skill_id": "plan-ceo-review",
+      "identity_id": "0270ad38155e7b8f502f5098",
+      "source_status": "codex_mirror_cache",
+      "source_dir": "/Users/jameschen/.codex/skills/gstack/.openclaw/skills/gstack-plan-ceo-review",
+      "source_skill_path": "/Users/jameschen/.codex/skills/gstack/.openclaw/skills/gstack-plan-ceo-review/SKILL.md",
+      "destination_dir": ".agents/skills/.duplicates-quarantine/codex_mirror_cache/0270ad38155e7b8f502f5098/gstack/.openclaw/skills/gstack-plan-ceo-review",
+      "reason": "byte_identical_lower_priority_duplicate",
+      "canonical_path": "/Users/jameschen/.agents/skills/gstack/.openclaw/skills/gstack-plan-ceo-review/SKILL.md"
+    },
+    {
+      "skill_id": "plan-ceo-review",
+      "identity_id": "c58919c6845e158bd9bed9f3",
+      "source_status": "codex_mirror_cache",
+      "source_dir": "/Users/jameschen/.codex/skills/gstack/.opencode/skills/gstack-plan-ceo-review",
+      "source_skill_path": "/Users/jameschen/.codex/skills/gstack/.opencode/skills/gstack-plan-ceo-review/SKILL.md",
+      "destination_dir": ".agents/skills/.duplicates-quarantine/codex_mirror_cache/c58919c6845e158bd9bed9f3/gstack/.opencode/skills/gstack-plan-ceo-review",
+      "reason": "byte_identical_lower_priority_duplicate",
+      "canonical_path": "/Users/jameschen/.agents/skills/gstack/.opencode/skills/gstack-plan-ceo-review/SKILL.md"
+    },
+    {
+      "skill_id": "plan-ceo-review",
+      "identity_id": "aadee2854dff8d7bf5e65877",
+      "source_status": "codex_mirror_cache",
+      "source_dir": "/Users/jameschen/.codex/skills/gstack/.slate/skills/gstack-plan-ceo-review",
+      "source_skill_path": "/Users/jameschen/.codex/skills/gstack/.slate/skills/gstack-plan-ceo-review/SKILL.md",
+      "destination_dir": ".agents/skills/.duplicates-quarantine/codex_mirror_cache/aadee2854dff8d7bf5e65877/gstack/.slate/skills/gstack-plan-ceo-review",
+      "reason": "byte_identical_lower_priority_duplicate",
+      "canonical_path": "/Users/jameschen/.agents/skills/gstack/.slate/skills/gstack-plan-ceo-review/SKILL.md"
+    },
+    {
+      "skill_id": "plan-ceo-review",
+      "identity_id": "5eb7587b7e3316799e298073",
+      "source_status": "codex_mirror_cache",
+      "source_dir": "/Users/jameschen/.codex/skills/gstack/plan-ceo-review",
+      "source_skill_path": "/Users/jameschen/.codex/skills/gstack/plan-ceo-review/SKILL.md",
+      "destination_dir": ".agents/skills/.duplicates-quarantine/codex_mirror_cache/5eb7587b7e3316799e298073/gstack/plan-ceo-review",
+      "reason": "byte_identical_lower_priority_duplicate",
+      "canonical_path": "/Users/jameschen/.agents/skills/gstack/plan-ceo-review/SKILL.md"
+    },
+    {
+      "skill_id": "plan-design-review",
+      "identity_id": "b96a1dde0e416c35603df33d",
+      "source_status": "codex_mirror_cache",
+      "source_dir": "/Users/jameschen/.codex/skills/gstack/.kiro/skills/gstack-plan-design-review",
+      "source_skill_path": "/Users/jameschen/.codex/skills/gstack/.kiro/skills/gstack-plan-design-review/SKILL.md",
+      "destination_dir": ".agents/skills/.duplicates-quarantine/codex_mirror_cache/b96a1dde0e416c35603df33d/gstack/.kiro/skills/gstack-plan-design-review",
+      "reason": "byte_identical_lower_priority_duplicate",
+      "canonical_path": "/Users/jameschen/.agents/skills/gstack/.kiro/skills/gstack-plan-design-review/SKILL.md"
+    },
+    {
+      "skill_id": "plan-design-review",
+      "identity_id": "6f6db2bfaf5954862ea17ef8",
+      "source_status": "codex_mirror_cache",
+      "source_dir": "/Users/jameschen/.codex/skills/gstack/.openclaw/skills/gstack-plan-design-review",
+      "source_skill_path": "/Users/jameschen/.codex/skills/gstack/.openclaw/skills/gstack-plan-design-review/SKILL.md",
+      "destination_dir": ".agents/skills/.duplicates-quarantine/codex_mirror_cache/6f6db2bfaf5954862ea17ef8/gstack/.openclaw/skills/gstack-plan-design-review",
+      "reason": "byte_identical_lower_priority_duplicate",
+      "canonical_path": "/Users/jameschen/.agents/skills/gstack/.openclaw/skills/gstack-plan-design-review/SKILL.md"
+    },
+    {
+      "skill_id": "plan-design-review",
+      "identity_id": "63a2d2474e897115e80c8827",
+      "source_status": "codex_mirror_cache",
+      "source_dir": "/Users/jameschen/.codex/skills/gstack/.opencode/skills/gstack-plan-design-review",
+      "source_skill_path": "/Users/jameschen/.codex/skills/gstack/.opencode/skills/gstack-plan-design-review/SKILL.md",
+      "destination_dir": ".agents/skills/.duplicates-quarantine/codex_mirror_cache/63a2d2474e897115e80c8827/gstack/.opencode/skills/gstack-plan-design-review",
+      "reason": "byte_identical_lower_priority_duplicate",
+      "canonical_path": "/Users/jameschen/.agents/skills/gstack/.opencode/skills/gstack-plan-design-review/SKILL.md"
+    },
+    {
+      "skill_id": "plan-design-review",
+      "identity_id": "1a542128096f4af0945cc284",
+      "source_status": "codex_mirror_cache",
+      "source_dir": "/Users/jameschen/.codex/skills/gstack/.slate/skills/gstack-plan-design-review",
+      "source_skill_path": "/Users/jameschen/.codex/skills/gstack/.slate/skills/gstack-plan-design-review/SKILL.md",
+      "destination_dir": ".agents/skills/.duplicates-quarantine/codex_mirror_cache/1a542128096f4af0945cc284/gstack/.slate/skills/gstack-plan-design-review",
+      "reason": "byte_identical_lower_priority_duplicate",
+      "canonical_path": "/Users/jameschen/.agents/skills/gstack/.slate/skills/gstack-plan-design-review/SKILL.md"
+    },
+    {
+      "skill_id": "plan-design-review",
+      "identity_id": "f301a9d98b1dfab12082fd6e",
+      "source_status": "codex_mirror_cache",
+      "source_dir": "/Users/jameschen/.codex/skills/gstack/plan-design-review",
+      "source_skill_path": "/Users/jameschen/.codex/skills/gstack/plan-design-review/SKILL.md",
+      "destination_dir": ".agents/skills/.duplicates-quarantine/codex_mirror_cache/f301a9d98b1dfab12082fd6e/gstack/plan-design-review",
+      "reason": "byte_identical_lower_priority_duplicate",
+      "canonical_path": "/Users/jameschen/.agents/skills/gstack/plan-design-review/SKILL.md"
+    },
+    {
+      "skill_id": "plan-devex-review",
+      "identity_id": "e58a85403e2c403d97f12637",
+      "source_status": "codex_mirror_cache",
+      "source_dir": "/Users/jameschen/.codex/skills/gstack/.kiro/skills/gstack-plan-devex-review",
+      "source_skill_path": "/Users/jameschen/.codex/skills/gstack/.kiro/skills/gstack-plan-devex-review/SKILL.md",
+      "destination_dir": ".agents/skills/.duplicates-quarantine/codex_mirror_cache/e58a85403e2c403d97f12637/gstack/.kiro/skills/gstack-plan-devex-review",
+      "reason": "byte_identical_lower_priority_duplicate",
+      "canonical_path": "/Users/jameschen/.agents/skills/gstack/.kiro/skills/gstack-plan-devex-review/SKILL.md"
+    },
+    {
+      "skill_id": "plan-devex-review",
+      "identity_id": "379cf41eb314837bdb296b0b",
+      "source_status": "codex_mirror_cache",
+      "source_dir": "/Users/jameschen/.codex/skills/gstack/.openclaw/skills/gstack-plan-devex-review",
+      "source_skill_path": "/Users/jameschen/.codex/skills/gstack/.openclaw/skills/gstack-plan-devex-review/SKILL.md",
+      "destination_dir": ".agents/skills/.duplicates-quarantine/codex_mirror_cache/379cf41eb314837bdb296b0b/gstack/.openclaw/skills/gstack-plan-devex-review",
+      "reason": "byte_identical_lower_priority_duplicate",
+      "canonical_path": "/Users/jameschen/.agents/skills/gstack/.openclaw/skills/gstack-plan-devex-review/SKILL.md"
+    },
+    {
+      "skill_id": "plan-devex-review",
+      "identity_id": "40ed2672ce8c1c82aec3524e",
+      "source_status": "codex_mirror_cache",
+      "source_dir": "/Users/jameschen/.codex/skills/gstack/.opencode/skills/gstack-plan-devex-review",
+      "source_skill_path": "/Users/jameschen/.codex/skills/gstack/.opencode/skills/gstack-plan-devex-review/SKILL.md",
+      "destination_dir": ".agents/skills/.duplicates-quarantine/codex_mirror_cache/40ed2672ce8c1c82aec3524e/gstack/.opencode/skills/gstack-plan-devex-review",
+      "reason": "byte_identical_lower_priority_duplicate",
+      "canonical_path": "/Users/jameschen/.agents/skills/gstack/.opencode/skills/gstack-plan-devex-review/SKILL.md"
+    },
+    {
+      "skill_id": "plan-devex-review",
+      "identity_id": "016c443339c3984b0b30a109",
+      "source_status": "codex_mirror_cache",
+      "source_dir": "/Users/jameschen/.codex/skills/gstack/.slate/skills/gstack-plan-devex-review",
+      "source_skill_path": "/Users/jameschen/.codex/skills/gstack/.slate/skills/gstack-plan-devex-review/SKILL.md",
+      "destination_dir": ".agents/skills/.duplicates-quarantine/codex_mirror_cache/016c443339c3984b0b30a109/gstack/.slate/skills/gstack-plan-devex-review",
+      "reason": "byte_identical_lower_priority_duplicate",
+      "canonical_path": "/Users/jameschen/.agents/skills/gstack/.slate/skills/gstack-plan-devex-review/SKILL.md"
+    },
+    {
+      "skill_id": "plan-devex-review",
+      "identity_id": "2bba4e2dd67fca8a3de6c38c",
+      "source_status": "codex_mirror_cache",
+      "source_dir": "/Users/jameschen/.codex/skills/gstack/plan-devex-review",
+      "source_skill_path": "/Users/jameschen/.codex/skills/gstack/plan-devex-review/SKILL.md",
+      "destination_dir": ".agents/skills/.duplicates-quarantine/codex_mirror_cache/2bba4e2dd67fca8a3de6c38c/gstack/plan-devex-review",
+      "reason": "byte_identical_lower_priority_duplicate",
+      "canonical_path": "/Users/jameschen/.agents/skills/gstack/plan-devex-review/SKILL.md"
+    },
+    {
+      "skill_id": "plan-eng-review",
+      "identity_id": "26388240fa5b3c500b11bbe5",
+      "source_status": "codex_mirror_cache",
+      "source_dir": "/Users/jameschen/.codex/skills/gstack/.kiro/skills/gstack-plan-eng-review",
+      "source_skill_path": "/Users/jameschen/.codex/skills/gstack/.kiro/skills/gstack-plan-eng-review/SKILL.md",
+      "destination_dir": ".agents/skills/.duplicates-quarantine/codex_mirror_cache/26388240fa5b3c500b11bbe5/gstack/.kiro/skills/gstack-plan-eng-review",
+      "reason": "byte_identical_lower_priority_duplicate",
+      "canonical_path": "/Users/jameschen/.agents/skills/gstack/.kiro/skills/gstack-plan-eng-review/SKILL.md"
+    },
+    {
+      "skill_id": "plan-eng-review",
+      "identity_id": "31ab30d65417c593cd8a1eab",
+      "source_status": "codex_mirror_cache",
+      "source_dir": "/Users/jameschen/.codex/skills/gstack/.openclaw/skills/gstack-plan-eng-review",
+      "source_skill_path": "/Users/jameschen/.codex/skills/gstack/.openclaw/skills/gstack-plan-eng-review/SKILL.md",
+      "destination_dir": ".agents/skills/.duplicates-quarantine/codex_mirror_cache/31ab30d65417c593cd8a1eab/gstack/.openclaw/skills/gstack-plan-eng-review",
+      "reason": "byte_identical_lower_priority_duplicate",
+      "canonical_path": "/Users/jameschen/.agents/skills/gstack/.openclaw/skills/gstack-plan-eng-review/SKILL.md"
+    },
+    {
+      "skill_id": "plan-eng-review",
+      "identity_id": "d5c4e82d2bb6b7e0e9ea9bdf",
+      "source_status": "codex_mirror_cache",
+      "source_dir": "/Users/jameschen/.codex/skills/gstack/.opencode/skills/gstack-plan-eng-review",
+      "source_skill_path": "/Users/jameschen/.codex/skills/gstack/.opencode/skills/gstack-plan-eng-review/SKILL.md",
+      "destination_dir": ".agents/skills/.duplicates-quarantine/codex_mirror_cache/d5c4e82d2bb6b7e0e9ea9bdf/gstack/.opencode/skills/gstack-plan-eng-review",
+      "reason": "byte_identical_lower_priority_duplicate",
+      "canonical_path": "/Users/jameschen/.agents/skills/gstack/.opencode/skills/gstack-plan-eng-review/SKILL.md"
+    },
+    {
+      "skill_id": "plan-eng-review",
+      "identity_id": "be7cfb67d71a0e9de5d8e458",
+      "source_status": "codex_mirror_cache",
+      "source_dir": "/Users/jameschen/.codex/skills/gstack/.slate/skills/gstack-plan-eng-review",
+      "source_skill_path": "/Users/jameschen/.codex/skills/gstack/.slate/skills/gstack-plan-eng-review/SKILL.md",
+      "destination_dir": ".agents/skills/.duplicates-quarantine/codex_mirror_cache/be7cfb67d71a0e9de5d8e458/gstack/.slate/skills/gstack-plan-eng-review",
+      "reason": "byte_identical_lower_priority_duplicate",
+      "canonical_path": "/Users/jameschen/.agents/skills/gstack/.slate/skills/gstack-plan-eng-review/SKILL.md"
+    },
+    {
+      "skill_id": "plan-eng-review",
+      "identity_id": "2b26234648bd2cc6577fb5de",
+      "source_status": "codex_mirror_cache",
+      "source_dir": "/Users/jameschen/.codex/skills/gstack/plan-eng-review",
+      "source_skill_path": "/Users/jameschen/.codex/skills/gstack/plan-eng-review/SKILL.md",
+      "destination_dir": ".agents/skills/.duplicates-quarantine/codex_mirror_cache/2b26234648bd2cc6577fb5de/gstack/plan-eng-review",
+      "reason": "byte_identical_lower_priority_duplicate",
+      "canonical_path": "/Users/jameschen/.agents/skills/gstack/plan-eng-review/SKILL.md"
+    },
+    {
+      "skill_id": "plan-tune",
+      "identity_id": "2428d557370148d48f2085fd",
+      "source_status": "codex_mirror_cache",
+      "source_dir": "/Users/jameschen/.codex/skills/gstack/.kiro/skills/gstack-plan-tune",
+      "source_skill_path": "/Users/jameschen/.codex/skills/gstack/.kiro/skills/gstack-plan-tune/SKILL.md",
+      "destination_dir": ".agents/skills/.duplicates-quarantine/codex_mirror_cache/2428d557370148d48f2085fd/gstack/.kiro/skills/gstack-plan-tune",
+      "reason": "byte_identical_lower_priority_duplicate",
+      "canonical_path": "/Users/jameschen/.agents/skills/gstack/.kiro/skills/gstack-plan-tune/SKILL.md"
+    },
+    {
+      "skill_id": "plan-tune",
+      "identity_id": "d4ada1dcb75bd3004fc4c1da",
+      "source_status": "codex_mirror_cache",
+      "source_dir": "/Users/jameschen/.codex/skills/gstack/.openclaw/skills/gstack-plan-tune",
+      "source_skill_path": "/Users/jameschen/.codex/skills/gstack/.openclaw/skills/gstack-plan-tune/SKILL.md",
+      "destination_dir": ".agents/skills/.duplicates-quarantine/codex_mirror_cache/d4ada1dcb75bd3004fc4c1da/gstack/.openclaw/skills/gstack-plan-tune",
+      "reason": "byte_identical_lower_priority_duplicate",
+      "canonical_path": "/Users/jameschen/.agents/skills/gstack/.openclaw/skills/gstack-plan-tune/SKILL.md"
+    },
+    {
+      "skill_id": "plan-tune",
+      "identity_id": "9880310d66a3a203360f2d3a",
+      "source_status": "codex_mirror_cache",
+      "source_dir": "/Users/jameschen/.codex/skills/gstack/.opencode/skills/gstack-plan-tune",
+      "source_skill_path": "/Users/jameschen/.codex/skills/gstack/.opencode/skills/gstack-plan-tune/SKILL.md",
+      "destination_dir": ".agents/skills/.duplicates-quarantine/codex_mirror_cache/9880310d66a3a203360f2d3a/gstack/.opencode/skills/gstack-plan-tune",
+      "reason": "byte_identical_lower_priority_duplicate",
+      "canonical_path": "/Users/jameschen/.agents/skills/gstack/.opencode/skills/gstack-plan-tune/SKILL.md"
+    },
+    {
+      "skill_id": "plan-tune",
+      "identity_id": "56b985a172b27a4961008146",
+      "source_status": "codex_mirror_cache",
+      "source_dir": "/Users/jameschen/.codex/skills/gstack/.slate/skills/gstack-plan-tune",
+      "source_skill_path": "/Users/jameschen/.codex/skills/gstack/.slate/skills/gstack-plan-tune/SKILL.md",
+      "destination_dir": ".agents/skills/.duplicates-quarantine/codex_mirror_cache/56b985a172b27a4961008146/gstack/.slate/skills/gstack-plan-tune",
+      "reason": "byte_identical_lower_priority_duplicate",
+      "canonical_path": "/Users/jameschen/.agents/skills/gstack/.slate/skills/gstack-plan-tune/SKILL.md"
+    },
+    {
+      "skill_id": "plan-tune",
+      "identity_id": "5026ef81df73ee4b3c69d13d",
+      "source_status": "codex_mirror_cache",
+      "source_dir": "/Users/jameschen/.codex/skills/gstack/plan-tune",
+      "source_skill_path": "/Users/jameschen/.codex/skills/gstack/plan-tune/SKILL.md",
+      "destination_dir": ".agents/skills/.duplicates-quarantine/codex_mirror_cache/5026ef81df73ee4b3c69d13d/gstack/plan-tune",
+      "reason": "byte_identical_lower_priority_duplicate",
+      "canonical_path": "/Users/jameschen/.agents/skills/gstack/plan-tune/SKILL.md"
+    },
+    {
+      "skill_id": "qa",
+      "identity_id": "ea4404c9e6160b5cb1231cdb",
+      "source_status": "codex_mirror_cache",
+      "source_dir": "/Users/jameschen/.codex/skills/gstack/.kiro/skills/gstack-qa",
+      "source_skill_path": "/Users/jameschen/.codex/skills/gstack/.kiro/skills/gstack-qa/SKILL.md",
+      "destination_dir": ".agents/skills/.duplicates-quarantine/codex_mirror_cache/ea4404c9e6160b5cb1231cdb/gstack/.kiro/skills/gstack-qa",
+      "reason": "byte_identical_lower_priority_duplicate",
+      "canonical_path": "/Users/jameschen/.agents/skills/gstack/.kiro/skills/gstack-qa/SKILL.md"
+    },
+    {
+      "skill_id": "qa",
+      "identity_id": "0d333dabc44eb1f93228383d",
+      "source_status": "codex_mirror_cache",
+      "source_dir": "/Users/jameschen/.codex/skills/gstack/.openclaw/skills/gstack-qa",
+      "source_skill_path": "/Users/jameschen/.codex/skills/gstack/.openclaw/skills/gstack-qa/SKILL.md",
+      "destination_dir": ".agents/skills/.duplicates-quarantine/codex_mirror_cache/0d333dabc44eb1f93228383d/gstack/.openclaw/skills/gstack-qa",
+      "reason": "byte_identical_lower_priority_duplicate",
+      "canonical_path": "/Users/jameschen/.agents/skills/gstack/.openclaw/skills/gstack-qa/SKILL.md"
+    },
+    {
+      "skill_id": "qa",
+      "identity_id": "912c9a93076589788f8e3aca",
+      "source_status": "codex_mirror_cache",
+      "source_dir": "/Users/jameschen/.codex/skills/gstack/.opencode/skills/gstack-qa",
+      "source_skill_path": "/Users/jameschen/.codex/skills/gstack/.opencode/skills/gstack-qa/SKILL.md",
+      "destination_dir": ".agents/skills/.duplicates-quarantine/codex_mirror_cache/912c9a93076589788f8e3aca/gstack/.opencode/skills/gstack-qa",
+      "reason": "byte_identical_lower_priority_duplicate",
+      "canonical_path": "/Users/jameschen/.agents/skills/gstack/.opencode/skills/gstack-qa/SKILL.md"
+    },
+    {
+      "skill_id": "qa",
+      "identity_id": "d5bb813fede4d10e346f29e0",
+      "source_status": "codex_mirror_cache",
+      "source_dir": "/Users/jameschen/.codex/skills/gstack/.slate/skills/gstack-qa",
+      "source_skill_path": "/Users/jameschen/.codex/skills/gstack/.slate/skills/gstack-qa/SKILL.md",
+      "destination_dir": ".agents/skills/.duplicates-quarantine/codex_mirror_cache/d5bb813fede4d10e346f29e0/gstack/.slate/skills/gstack-qa",
+      "reason": "byte_identical_lower_priority_duplicate",
+      "canonical_path": "/Users/jameschen/.agents/skills/gstack/.slate/skills/gstack-qa/SKILL.md"
+    },
+    {
+      "skill_id": "qa",
+      "identity_id": "9663e824f691a1d294a3dc58",
+      "source_status": "codex_mirror_cache",
+      "source_dir": "/Users/jameschen/.codex/skills/gstack/qa",
+      "source_skill_path": "/Users/jameschen/.codex/skills/gstack/qa/SKILL.md",
+      "destination_dir": ".agents/skills/.duplicates-quarantine/codex_mirror_cache/9663e824f691a1d294a3dc58/gstack/qa",
+      "reason": "byte_identical_lower_priority_duplicate",
+      "canonical_path": "/Users/jameschen/.agents/skills/gstack/qa/SKILL.md"
+    },
+    {
+      "skill_id": "qa-only",
+      "identity_id": "2ba548eb2881d23e662ff28a",
+      "source_status": "codex_mirror_cache",
+      "source_dir": "/Users/jameschen/.codex/skills/gstack/.kiro/skills/gstack-qa-only",
+      "source_skill_path": "/Users/jameschen/.codex/skills/gstack/.kiro/skills/gstack-qa-only/SKILL.md",
+      "destination_dir": ".agents/skills/.duplicates-quarantine/codex_mirror_cache/2ba548eb2881d23e662ff28a/gstack/.kiro/skills/gstack-qa-only",
+      "reason": "byte_identical_lower_priority_duplicate",
+      "canonical_path": "/Users/jameschen/.agents/skills/gstack/.kiro/skills/gstack-qa-only/SKILL.md"
+    },
+    {
+      "skill_id": "qa-only",
+      "identity_id": "118bcacf4532801f9eca99f6",
+      "source_status": "codex_mirror_cache",
+      "source_dir": "/Users/jameschen/.codex/skills/gstack/.openclaw/skills/gstack-qa-only",
+      "source_skill_path": "/Users/jameschen/.codex/skills/gstack/.openclaw/skills/gstack-qa-only/SKILL.md",
+      "destination_dir": ".agents/skills/.duplicates-quarantine/codex_mirror_cache/118bcacf4532801f9eca99f6/gstack/.openclaw/skills/gstack-qa-only",
+      "reason": "byte_identical_lower_priority_duplicate",
+      "canonical_path": "/Users/jameschen/.agents/skills/gstack/.openclaw/skills/gstack-qa-only/SKILL.md"
+    },
+    {
+      "skill_id": "qa-only",
+      "identity_id": "5379d9b4c7a12925e23352a4",
+      "source_status": "codex_mirror_cache",
+      "source_dir": "/Users/jameschen/.codex/skills/gstack/.opencode/skills/gstack-qa-only",
+      "source_skill_path": "/Users/jameschen/.codex/skills/gstack/.opencode/skills/gstack-qa-only/SKILL.md",
+      "destination_dir": ".agents/skills/.duplicates-quarantine/codex_mirror_cache/5379d9b4c7a12925e23352a4/gstack/.opencode/skills/gstack-qa-only",
+      "reason": "byte_identical_lower_priority_duplicate",
+      "canonical_path": "/Users/jameschen/.agents/skills/gstack/.opencode/skills/gstack-qa-only/SKILL.md"
+    },
+    {
+      "skill_id": "qa-only",
+      "identity_id": "44a5311fe7228e769dd0460a",
+      "source_status": "codex_mirror_cache",
+      "source_dir": "/Users/jameschen/.codex/skills/gstack/.slate/skills/gstack-qa-only",
+      "source_skill_path": "/Users/jameschen/.codex/skills/gstack/.slate/skills/gstack-qa-only/SKILL.md",
+      "destination_dir": ".agents/skills/.duplicates-quarantine/codex_mirror_cache/44a5311fe7228e769dd0460a/gstack/.slate/skills/gstack-qa-only",
+      "reason": "byte_identical_lower_priority_duplicate",
+      "canonical_path": "/Users/jameschen/.agents/skills/gstack/.slate/skills/gstack-qa-only/SKILL.md"
+    },
+    {
+      "skill_id": "qa-only",
+      "identity_id": "92f4da8de46c810241c0d40d",
+      "source_status": "codex_mirror_cache",
+      "source_dir": "/Users/jameschen/.codex/skills/gstack/qa-only",
+      "source_skill_path": "/Users/jameschen/.codex/skills/gstack/qa-only/SKILL.md",
+      "destination_dir": ".agents/skills/.duplicates-quarantine/codex_mirror_cache/92f4da8de46c810241c0d40d/gstack/qa-only",
+      "reason": "byte_identical_lower_priority_duplicate",
+      "canonical_path": "/Users/jameschen/.agents/skills/gstack/qa-only/SKILL.md"
+    },
+    {
+      "skill_id": "retro",
+      "identity_id": "41ee25d6a83f7cd086e1a674",
+      "source_status": "codex_mirror_cache",
+      "source_dir": "/Users/jameschen/.codex/skills/gstack/.kiro/skills/gstack-retro",
+      "source_skill_path": "/Users/jameschen/.codex/skills/gstack/.kiro/skills/gstack-retro/SKILL.md",
+      "destination_dir": ".agents/skills/.duplicates-quarantine/codex_mirror_cache/41ee25d6a83f7cd086e1a674/gstack/.kiro/skills/gstack-retro",
+      "reason": "byte_identical_lower_priority_duplicate",
+      "canonical_path": "/Users/jameschen/.agents/skills/gstack/.kiro/skills/gstack-retro/SKILL.md"
+    },
+    {
+      "skill_id": "retro",
+      "identity_id": "86ef6175d93e51a62e1fc459",
+      "source_status": "codex_mirror_cache",
+      "source_dir": "/Users/jameschen/.codex/skills/gstack/.openclaw/skills/gstack-retro",
+      "source_skill_path": "/Users/jameschen/.codex/skills/gstack/.openclaw/skills/gstack-retro/SKILL.md",
+      "destination_dir": ".agents/skills/.duplicates-quarantine/codex_mirror_cache/86ef6175d93e51a62e1fc459/gstack/.openclaw/skills/gstack-retro",
+      "reason": "byte_identical_lower_priority_duplicate",
+      "canonical_path": "/Users/jameschen/.agents/skills/gstack/.openclaw/skills/gstack-retro/SKILL.md"
+    },
+    {
+      "skill_id": "retro",
+      "identity_id": "72fa1f6c8022e0df676e12da",
+      "source_status": "codex_mirror_cache",
+      "source_dir": "/Users/jameschen/.codex/skills/gstack/.opencode/skills/gstack-retro",
+      "source_skill_path": "/Users/jameschen/.codex/skills/gstack/.opencode/skills/gstack-retro/SKILL.md",
+      "destination_dir": ".agents/skills/.duplicates-quarantine/codex_mirror_cache/72fa1f6c8022e0df676e12da/gstack/.opencode/skills/gstack-retro",
+      "reason": "byte_identical_lower_priority_duplicate",
+      "canonical_path": "/Users/jameschen/.agents/skills/gstack/.opencode/skills/gstack-retro/SKILL.md"
+    },
+    {
+      "skill_id": "retro",
+      "identity_id": "c42f236580d53baf3294e1e1",
+      "source_status": "codex_mirror_cache",
+      "source_dir": "/Users/jameschen/.codex/skills/gstack/.slate/skills/gstack-retro",
+      "source_skill_path": "/Users/jameschen/.codex/skills/gstack/.slate/skills/gstack-retro/SKILL.md",
+      "destination_dir": ".agents/skills/.duplicates-quarantine/codex_mirror_cache/c42f236580d53baf3294e1e1/gstack/.slate/skills/gstack-retro",
+      "reason": "byte_identical_lower_priority_duplicate",
+      "canonical_path": "/Users/jameschen/.agents/skills/gstack/.slate/skills/gstack-retro/SKILL.md"
+    },
+    {
+      "skill_id": "retro",
+      "identity_id": "f7e44a549ef2131ec477bbf2",
+      "source_status": "codex_mirror_cache",
+      "source_dir": "/Users/jameschen/.codex/skills/gstack/retro",
+      "source_skill_path": "/Users/jameschen/.codex/skills/gstack/retro/SKILL.md",
+      "destination_dir": ".agents/skills/.duplicates-quarantine/codex_mirror_cache/f7e44a549ef2131ec477bbf2/gstack/retro",
+      "reason": "byte_identical_lower_priority_duplicate",
+      "canonical_path": "/Users/jameschen/.agents/skills/gstack/retro/SKILL.md"
+    },
+    {
+      "skill_id": "review",
+      "identity_id": "4c6a60c015fe074620153278",
+      "source_status": "codex_mirror_cache",
+      "source_dir": "/Users/jameschen/.codex/skills/gstack/.kiro/skills/gstack-review",
+      "source_skill_path": "/Users/jameschen/.codex/skills/gstack/.kiro/skills/gstack-review/SKILL.md",
+      "destination_dir": ".agents/skills/.duplicates-quarantine/codex_mirror_cache/4c6a60c015fe074620153278/gstack/.kiro/skills/gstack-review",
+      "reason": "byte_identical_lower_priority_duplicate",
+      "canonical_path": "/Users/jameschen/.agents/skills/gstack/.kiro/skills/gstack-review/SKILL.md"
+    },
+    {
+      "skill_id": "review",
+      "identity_id": "4e0a164b7e551b0ca2206fcc",
+      "source_status": "codex_mirror_cache",
+      "source_dir": "/Users/jameschen/.codex/skills/gstack/.openclaw/skills/gstack-review",
+      "source_skill_path": "/Users/jameschen/.codex/skills/gstack/.openclaw/skills/gstack-review/SKILL.md",
+      "destination_dir": ".agents/skills/.duplicates-quarantine/codex_mirror_cache/4e0a164b7e551b0ca2206fcc/gstack/.openclaw/skills/gstack-review",
+      "reason": "byte_identical_lower_priority_duplicate",
+      "canonical_path": "/Users/jameschen/.agents/skills/gstack/.openclaw/skills/gstack-review/SKILL.md"
+    },
+    {
+      "skill_id": "review",
+      "identity_id": "3cacaadc6023ed55a088e5ea",
+      "source_status": "codex_mirror_cache",
+      "source_dir": "/Users/jameschen/.codex/skills/gstack/.opencode/skills/gstack-review",
+      "source_skill_path": "/Users/jameschen/.codex/skills/gstack/.opencode/skills/gstack-review/SKILL.md",
+      "destination_dir": ".agents/skills/.duplicates-quarantine/codex_mirror_cache/3cacaadc6023ed55a088e5ea/gstack/.opencode/skills/gstack-review",
+      "reason": "byte_identical_lower_priority_duplicate",
+      "canonical_path": "/Users/jameschen/.agents/skills/gstack/.opencode/skills/gstack-review/SKILL.md"
+    },
+    {
+      "skill_id": "review",
+      "identity_id": "cc7b17c78e63052599b0c304",
+      "source_status": "codex_mirror_cache",
+      "source_dir": "/Users/jameschen/.codex/skills/gstack/.slate/skills/gstack-review",
+      "source_skill_path": "/Users/jameschen/.codex/skills/gstack/.slate/skills/gstack-review/SKILL.md",
+      "destination_dir": ".agents/skills/.duplicates-quarantine/codex_mirror_cache/cc7b17c78e63052599b0c304/gstack/.slate/skills/gstack-review",
+      "reason": "byte_identical_lower_priority_duplicate",
+      "canonical_path": "/Users/jameschen/.agents/skills/gstack/.slate/skills/gstack-review/SKILL.md"
+    },
+    {
+      "skill_id": "review",
+      "identity_id": "c7e3c81314d3c5370df5e27e",
+      "source_status": "codex_mirror_cache",
+      "source_dir": "/Users/jameschen/.codex/skills/gstack/review",
+      "source_skill_path": "/Users/jameschen/.codex/skills/gstack/review/SKILL.md",
+      "destination_dir": ".agents/skills/.duplicates-quarantine/codex_mirror_cache/c7e3c81314d3c5370df5e27e/gstack/review",
+      "reason": "byte_identical_lower_priority_duplicate",
+      "canonical_path": "/Users/jameschen/.agents/skills/gstack/review/SKILL.md"
+    },
+    {
+      "skill_id": "scrape",
+      "identity_id": "544b19ece21c3e09be06746b",
+      "source_status": "codex_mirror_cache",
+      "source_dir": "/Users/jameschen/.codex/skills/gstack/.kiro/skills/gstack-scrape",
+      "source_skill_path": "/Users/jameschen/.codex/skills/gstack/.kiro/skills/gstack-scrape/SKILL.md",
+      "destination_dir": ".agents/skills/.duplicates-quarantine/codex_mirror_cache/544b19ece21c3e09be06746b/gstack/.kiro/skills/gstack-scrape",
+      "reason": "byte_identical_lower_priority_duplicate",
+      "canonical_path": "/Users/jameschen/.agents/skills/gstack/.kiro/skills/gstack-scrape/SKILL.md"
+    },
+    {
+      "skill_id": "scrape",
+      "identity_id": "12ed72b357b43b7bfc6be6c2",
+      "source_status": "codex_mirror_cache",
+      "source_dir": "/Users/jameschen/.codex/skills/gstack/.openclaw/skills/gstack-scrape",
+      "source_skill_path": "/Users/jameschen/.codex/skills/gstack/.openclaw/skills/gstack-scrape/SKILL.md",
+      "destination_dir": ".agents/skills/.duplicates-quarantine/codex_mirror_cache/12ed72b357b43b7bfc6be6c2/gstack/.openclaw/skills/gstack-scrape",
+      "reason": "byte_identical_lower_priority_duplicate",
+      "canonical_path": "/Users/jameschen/.agents/skills/gstack/.openclaw/skills/gstack-scrape/SKILL.md"
+    },
+    {
+      "skill_id": "scrape",
+      "identity_id": "e394c22dcf6eb593077a8f7b",
+      "source_status": "codex_mirror_cache",
+      "source_dir": "/Users/jameschen/.codex/skills/gstack/.opencode/skills/gstack-scrape",
+      "source_skill_path": "/Users/jameschen/.codex/skills/gstack/.opencode/skills/gstack-scrape/SKILL.md",
+      "destination_dir": ".agents/skills/.duplicates-quarantine/codex_mirror_cache/e394c22dcf6eb593077a8f7b/gstack/.opencode/skills/gstack-scrape",
+      "reason": "byte_identical_lower_priority_duplicate",
+      "canonical_path": "/Users/jameschen/.agents/skills/gstack/.opencode/skills/gstack-scrape/SKILL.md"
+    },
+    {
+      "skill_id": "scrape",
+      "identity_id": "24eed94ab7a36b0abf4bfbb7",
+      "source_status": "codex_mirror_cache",
+      "source_dir": "/Users/jameschen/.codex/skills/gstack/.slate/skills/gstack-scrape",
+      "source_skill_path": "/Users/jameschen/.codex/skills/gstack/.slate/skills/gstack-scrape/SKILL.md",
+      "destination_dir": ".agents/skills/.duplicates-quarantine/codex_mirror_cache/24eed94ab7a36b0abf4bfbb7/gstack/.slate/skills/gstack-scrape",
+      "reason": "byte_identical_lower_priority_duplicate",
+      "canonical_path": "/Users/jameschen/.agents/skills/gstack/.slate/skills/gstack-scrape/SKILL.md"
+    },
+    {
+      "skill_id": "scrape",
+      "identity_id": "c021f23bb19ca7f2637674dc",
+      "source_status": "codex_mirror_cache",
+      "source_dir": "/Users/jameschen/.codex/skills/gstack/scrape",
+      "source_skill_path": "/Users/jameschen/.codex/skills/gstack/scrape/SKILL.md",
+      "destination_dir": ".agents/skills/.duplicates-quarantine/codex_mirror_cache/c021f23bb19ca7f2637674dc/gstack/scrape",
+      "reason": "byte_identical_lower_priority_duplicate",
+      "canonical_path": "/Users/jameschen/.agents/skills/gstack/scrape/SKILL.md"
+    },
+    {
+      "skill_id": "setup-browser-cookies",
+      "identity_id": "4449ccc1001e23ecdf913358",
+      "source_status": "codex_mirror_cache",
+      "source_dir": "/Users/jameschen/.codex/skills/gstack/.kiro/skills/gstack-setup-browser-cookies",
+      "source_skill_path": "/Users/jameschen/.codex/skills/gstack/.kiro/skills/gstack-setup-browser-cookies/SKILL.md",
+      "destination_dir": ".agents/skills/.duplicates-quarantine/codex_mirror_cache/4449ccc1001e23ecdf913358/gstack/.kiro/skills/gstack-setup-browser-cookies",
+      "reason": "byte_identical_lower_priority_duplicate",
+      "canonical_path": "/Users/jameschen/.agents/skills/gstack/.kiro/skills/gstack-setup-browser-cookies/SKILL.md"
+    },
+    {
+      "skill_id": "setup-browser-cookies",
+      "identity_id": "57d80a3a2dd14094137beb9b",
+      "source_status": "codex_mirror_cache",
+      "source_dir": "/Users/jameschen/.codex/skills/gstack/.openclaw/skills/gstack-setup-browser-cookies",
+      "source_skill_path": "/Users/jameschen/.codex/skills/gstack/.openclaw/skills/gstack-setup-browser-cookies/SKILL.md",
+      "destination_dir": ".agents/skills/.duplicates-quarantine/codex_mirror_cache/57d80a3a2dd14094137beb9b/gstack/.openclaw/skills/gstack-setup-browser-cookies",
+      "reason": "byte_identical_lower_priority_duplicate",
+      "canonical_path": "/Users/jameschen/.agents/skills/gstack/.openclaw/skills/gstack-setup-browser-cookies/SKILL.md"
+    },
+    {
+      "skill_id": "setup-browser-cookies",
+      "identity_id": "d5d94308976d3fc469ad8241",
+      "source_status": "codex_mirror_cache",
+      "source_dir": "/Users/jameschen/.codex/skills/gstack/.opencode/skills/gstack-setup-browser-cookies",
+      "source_skill_path": "/Users/jameschen/.codex/skills/gstack/.opencode/skills/gstack-setup-browser-cookies/SKILL.md",
+      "destination_dir": ".agents/skills/.duplicates-quarantine/codex_mirror_cache/d5d94308976d3fc469ad8241/gstack/.opencode/skills/gstack-setup-browser-cookies",
+      "reason": "byte_identical_lower_priority_duplicate",
+      "canonical_path": "/Users/jameschen/.agents/skills/gstack/.opencode/skills/gstack-setup-browser-cookies/SKILL.md"
+    },
+    {
+      "skill_id": "setup-browser-cookies",
+      "identity_id": "43468743d26ebd32c193b3e8",
+      "source_status": "codex_mirror_cache",
+      "source_dir": "/Users/jameschen/.codex/skills/gstack/.slate/skills/gstack-setup-browser-cookies",
+      "source_skill_path": "/Users/jameschen/.codex/skills/gstack/.slate/skills/gstack-setup-browser-cookies/SKILL.md",
+      "destination_dir": ".agents/skills/.duplicates-quarantine/codex_mirror_cache/43468743d26ebd32c193b3e8/gstack/.slate/skills/gstack-setup-browser-cookies",
+      "reason": "byte_identical_lower_priority_duplicate",
+      "canonical_path": "/Users/jameschen/.agents/skills/gstack/.slate/skills/gstack-setup-browser-cookies/SKILL.md"
+    },
+    {
+      "skill_id": "setup-browser-cookies",
+      "identity_id": "f4a7e56d6c8644fbbf25128e",
+      "source_status": "codex_mirror_cache",
+      "source_dir": "/Users/jameschen/.codex/skills/gstack/setup-browser-cookies",
+      "source_skill_path": "/Users/jameschen/.codex/skills/gstack/setup-browser-cookies/SKILL.md",
+      "destination_dir": ".agents/skills/.duplicates-quarantine/codex_mirror_cache/f4a7e56d6c8644fbbf25128e/gstack/setup-browser-cookies",
+      "reason": "byte_identical_lower_priority_duplicate",
+      "canonical_path": "/Users/jameschen/.agents/skills/gstack/setup-browser-cookies/SKILL.md"
+    },
+    {
+      "skill_id": "setup-deploy",
+      "identity_id": "6338fa6d3d42c006b2fe971a",
+      "source_status": "codex_mirror_cache",
+      "source_dir": "/Users/jameschen/.codex/skills/gstack/.kiro/skills/gstack-setup-deploy",
+      "source_skill_path": "/Users/jameschen/.codex/skills/gstack/.kiro/skills/gstack-setup-deploy/SKILL.md",
+      "destination_dir": ".agents/skills/.duplicates-quarantine/codex_mirror_cache/6338fa6d3d42c006b2fe971a/gstack/.kiro/skills/gstack-setup-deploy",
+      "reason": "byte_identical_lower_priority_duplicate",
+      "canonical_path": "/Users/jameschen/.agents/skills/gstack/.kiro/skills/gstack-setup-deploy/SKILL.md"
+    },
+    {
+      "skill_id": "setup-deploy",
+      "identity_id": "5795e3afc5a2e152e767297e",
+      "source_status": "codex_mirror_cache",
+      "source_dir": "/Users/jameschen/.codex/skills/gstack/.openclaw/skills/gstack-setup-deploy",
+      "source_skill_path": "/Users/jameschen/.codex/skills/gstack/.openclaw/skills/gstack-setup-deploy/SKILL.md",
+      "destination_dir": ".agents/skills/.duplicates-quarantine/codex_mirror_cache/5795e3afc5a2e152e767297e/gstack/.openclaw/skills/gstack-setup-deploy",
+      "reason": "byte_identical_lower_priority_duplicate",
+      "canonical_path": "/Users/jameschen/.agents/skills/gstack/.openclaw/skills/gstack-setup-deploy/SKILL.md"
+    },
+    {
+      "skill_id": "setup-deploy",
+      "identity_id": "ca2014784c4a45652ad6e10e",
+      "source_status": "codex_mirror_cache",
+      "source_dir": "/Users/jameschen/.codex/skills/gstack/.opencode/skills/gstack-setup-deploy",
+      "source_skill_path": "/Users/jameschen/.codex/skills/gstack/.opencode/skills/gstack-setup-deploy/SKILL.md",
+      "destination_dir": ".agents/skills/.duplicates-quarantine/codex_mirror_cache/ca2014784c4a45652ad6e10e/gstack/.opencode/skills/gstack-setup-deploy",
+      "reason": "byte_identical_lower_priority_duplicate",
+      "canonical_path": "/Users/jameschen/.agents/skills/gstack/.opencode/skills/gstack-setup-deploy/SKILL.md"
+    },
+    {
+      "skill_id": "setup-deploy",
+      "identity_id": "d914da26884a9754ca9baee1",
+      "source_status": "codex_mirror_cache",
+      "source_dir": "/Users/jameschen/.codex/skills/gstack/.slate/skills/gstack-setup-deploy",
+      "source_skill_path": "/Users/jameschen/.codex/skills/gstack/.slate/skills/gstack-setup-deploy/SKILL.md",
+      "destination_dir": ".agents/skills/.duplicates-quarantine/codex_mirror_cache/d914da26884a9754ca9baee1/gstack/.slate/skills/gstack-setup-deploy",
+      "reason": "byte_identical_lower_priority_duplicate",
+      "canonical_path": "/Users/jameschen/.agents/skills/gstack/.slate/skills/gstack-setup-deploy/SKILL.md"
+    },
+    {
+      "skill_id": "setup-deploy",
+      "identity_id": "9f3ac0a58a513698949f8fdd",
+      "source_status": "codex_mirror_cache",
+      "source_dir": "/Users/jameschen/.codex/skills/gstack/setup-deploy",
+      "source_skill_path": "/Users/jameschen/.codex/skills/gstack/setup-deploy/SKILL.md",
+      "destination_dir": ".agents/skills/.duplicates-quarantine/codex_mirror_cache/9f3ac0a58a513698949f8fdd/gstack/setup-deploy",
+      "reason": "byte_identical_lower_priority_duplicate",
+      "canonical_path": "/Users/jameschen/.agents/skills/gstack/setup-deploy/SKILL.md"
+    },
+    {
+      "skill_id": "setup-gbrain",
+      "identity_id": "81a9e245def5fba9ffdcbcbc",
+      "source_status": "codex_mirror_cache",
+      "source_dir": "/Users/jameschen/.codex/skills/gstack/.kiro/skills/gstack-setup-gbrain",
+      "source_skill_path": "/Users/jameschen/.codex/skills/gstack/.kiro/skills/gstack-setup-gbrain/SKILL.md",
+      "destination_dir": ".agents/skills/.duplicates-quarantine/codex_mirror_cache/81a9e245def5fba9ffdcbcbc/gstack/.kiro/skills/gstack-setup-gbrain",
+      "reason": "byte_identical_lower_priority_duplicate",
+      "canonical_path": "/Users/jameschen/.agents/skills/gstack/.kiro/skills/gstack-setup-gbrain/SKILL.md"
+    },
+    {
+      "skill_id": "setup-gbrain",
+      "identity_id": "78f3ee44129bcf915ce48d99",
+      "source_status": "codex_mirror_cache",
+      "source_dir": "/Users/jameschen/.codex/skills/gstack/.openclaw/skills/gstack-setup-gbrain",
+      "source_skill_path": "/Users/jameschen/.codex/skills/gstack/.openclaw/skills/gstack-setup-gbrain/SKILL.md",
+      "destination_dir": ".agents/skills/.duplicates-quarantine/codex_mirror_cache/78f3ee44129bcf915ce48d99/gstack/.openclaw/skills/gstack-setup-gbrain",
+      "reason": "byte_identical_lower_priority_duplicate",
+      "canonical_path": "/Users/jameschen/.agents/skills/gstack/.openclaw/skills/gstack-setup-gbrain/SKILL.md"
+    },
+    {
+      "skill_id": "setup-gbrain",
+      "identity_id": "c5106d82ff8573fdb8aa3db5",
+      "source_status": "codex_mirror_cache",
+      "source_dir": "/Users/jameschen/.codex/skills/gstack/.opencode/skills/gstack-setup-gbrain",
+      "source_skill_path": "/Users/jameschen/.codex/skills/gstack/.opencode/skills/gstack-setup-gbrain/SKILL.md",
+      "destination_dir": ".agents/skills/.duplicates-quarantine/codex_mirror_cache/c5106d82ff8573fdb8aa3db5/gstack/.opencode/skills/gstack-setup-gbrain",
+      "reason": "byte_identical_lower_priority_duplicate",
+      "canonical_path": "/Users/jameschen/.agents/skills/gstack/.opencode/skills/gstack-setup-gbrain/SKILL.md"
+    },
+    {
+      "skill_id": "setup-gbrain",
+      "identity_id": "b8ba0a84a6dbd0929930343e",
+      "source_status": "codex_mirror_cache",
+      "source_dir": "/Users/jameschen/.codex/skills/gstack/.slate/skills/gstack-setup-gbrain",
+      "source_skill_path": "/Users/jameschen/.codex/skills/gstack/.slate/skills/gstack-setup-gbrain/SKILL.md",
+      "destination_dir": ".agents/skills/.duplicates-quarantine/codex_mirror_cache/b8ba0a84a6dbd0929930343e/gstack/.slate/skills/gstack-setup-gbrain",
+      "reason": "byte_identical_lower_priority_duplicate",
+      "canonical_path": "/Users/jameschen/.agents/skills/gstack/.slate/skills/gstack-setup-gbrain/SKILL.md"
+    },
+    {
+      "skill_id": "setup-gbrain",
+      "identity_id": "db31854efaba70404758db00",
+      "source_status": "codex_mirror_cache",
+      "source_dir": "/Users/jameschen/.codex/skills/gstack/setup-gbrain",
+      "source_skill_path": "/Users/jameschen/.codex/skills/gstack/setup-gbrain/SKILL.md",
+      "destination_dir": ".agents/skills/.duplicates-quarantine/codex_mirror_cache/db31854efaba70404758db00/gstack/setup-gbrain",
+      "reason": "byte_identical_lower_priority_duplicate",
+      "canonical_path": "/Users/jameschen/.agents/skills/gstack/setup-gbrain/SKILL.md"
+    },
+    {
+      "skill_id": "ship",
+      "identity_id": "634d39f99a8ad4592e5257c7",
+      "source_status": "codex_mirror_cache",
+      "source_dir": "/Users/jameschen/.codex/skills/gstack/.kiro/skills/gstack-ship",
+      "source_skill_path": "/Users/jameschen/.codex/skills/gstack/.kiro/skills/gstack-ship/SKILL.md",
+      "destination_dir": ".agents/skills/.duplicates-quarantine/codex_mirror_cache/634d39f99a8ad4592e5257c7/gstack/.kiro/skills/gstack-ship",
+      "reason": "byte_identical_lower_priority_duplicate",
+      "canonical_path": "/Users/jameschen/.agents/skills/gstack/.kiro/skills/gstack-ship/SKILL.md"
+    },
+    {
+      "skill_id": "ship",
+      "identity_id": "f7ee19a1f7fee3d307eadfaa",
+      "source_status": "codex_mirror_cache",
+      "source_dir": "/Users/jameschen/.codex/skills/gstack/.openclaw/skills/gstack-ship",
+      "source_skill_path": "/Users/jameschen/.codex/skills/gstack/.openclaw/skills/gstack-ship/SKILL.md",
+      "destination_dir": ".agents/skills/.duplicates-quarantine/codex_mirror_cache/f7ee19a1f7fee3d307eadfaa/gstack/.openclaw/skills/gstack-ship",
+      "reason": "byte_identical_lower_priority_duplicate",
+      "canonical_path": "/Users/jameschen/.agents/skills/gstack/.openclaw/skills/gstack-ship/SKILL.md"
+    },
+    {
+      "skill_id": "ship",
+      "identity_id": "1aefceef4e9fe0e949c9f7b3",
+      "source_status": "codex_mirror_cache",
+      "source_dir": "/Users/jameschen/.codex/skills/gstack/.opencode/skills/gstack-ship",
+      "source_skill_path": "/Users/jameschen/.codex/skills/gstack/.opencode/skills/gstack-ship/SKILL.md",
+      "destination_dir": ".agents/skills/.duplicates-quarantine/codex_mirror_cache/1aefceef4e9fe0e949c9f7b3/gstack/.opencode/skills/gstack-ship",
+      "reason": "byte_identical_lower_priority_duplicate",
+      "canonical_path": "/Users/jameschen/.agents/skills/gstack/.opencode/skills/gstack-ship/SKILL.md"
+    },
+    {
+      "skill_id": "ship",
+      "identity_id": "03f54c8c96557f2c9bc5daca",
+      "source_status": "codex_mirror_cache",
+      "source_dir": "/Users/jameschen/.codex/skills/gstack/.slate/skills/gstack-ship",
+      "source_skill_path": "/Users/jameschen/.codex/skills/gstack/.slate/skills/gstack-ship/SKILL.md",
+      "destination_dir": ".agents/skills/.duplicates-quarantine/codex_mirror_cache/03f54c8c96557f2c9bc5daca/gstack/.slate/skills/gstack-ship",
+      "reason": "byte_identical_lower_priority_duplicate",
+      "canonical_path": "/Users/jameschen/.agents/skills/gstack/.slate/skills/gstack-ship/SKILL.md"
+    },
+    {
+      "skill_id": "ship",
+      "identity_id": "9694e3dda7bed29369c29352",
+      "source_status": "codex_mirror_cache",
+      "source_dir": "/Users/jameschen/.codex/skills/gstack/ship",
+      "source_skill_path": "/Users/jameschen/.codex/skills/gstack/ship/SKILL.md",
+      "destination_dir": ".agents/skills/.duplicates-quarantine/codex_mirror_cache/9694e3dda7bed29369c29352/gstack/ship",
+      "reason": "byte_identical_lower_priority_duplicate",
+      "canonical_path": "/Users/jameschen/.agents/skills/gstack/ship/SKILL.md"
+    },
+    {
+      "skill_id": "skillify",
+      "identity_id": "0a07c020aed8c5534439cdb9",
+      "source_status": "codex_mirror_cache",
+      "source_dir": "/Users/jameschen/.codex/skills/gstack/.kiro/skills/gstack-skillify",
+      "source_skill_path": "/Users/jameschen/.codex/skills/gstack/.kiro/skills/gstack-skillify/SKILL.md",
+      "destination_dir": ".agents/skills/.duplicates-quarantine/codex_mirror_cache/0a07c020aed8c5534439cdb9/gstack/.kiro/skills/gstack-skillify",
+      "reason": "byte_identical_lower_priority_duplicate",
+      "canonical_path": "/Users/jameschen/.agents/skills/gstack/.kiro/skills/gstack-skillify/SKILL.md"
+    },
+    {
+      "skill_id": "skillify",
+      "identity_id": "69ced9d862662cbe74abd779",
+      "source_status": "codex_mirror_cache",
+      "source_dir": "/Users/jameschen/.codex/skills/gstack/.openclaw/skills/gstack-skillify",
+      "source_skill_path": "/Users/jameschen/.codex/skills/gstack/.openclaw/skills/gstack-skillify/SKILL.md",
+      "destination_dir": ".agents/skills/.duplicates-quarantine/codex_mirror_cache/69ced9d862662cbe74abd779/gstack/.openclaw/skills/gstack-skillify",
+      "reason": "byte_identical_lower_priority_duplicate",
+      "canonical_path": "/Users/jameschen/.agents/skills/gstack/.openclaw/skills/gstack-skillify/SKILL.md"
+    },
+    {
+      "skill_id": "skillify",
+      "identity_id": "b878746cdf637688eec7b2b1",
+      "source_status": "codex_mirror_cache",
+      "source_dir": "/Users/jameschen/.codex/skills/gstack/.opencode/skills/gstack-skillify",
+      "source_skill_path": "/Users/jameschen/.codex/skills/gstack/.opencode/skills/gstack-skillify/SKILL.md",
+      "destination_dir": ".agents/skills/.duplicates-quarantine/codex_mirror_cache/b878746cdf637688eec7b2b1/gstack/.opencode/skills/gstack-skillify",
+      "reason": "byte_identical_lower_priority_duplicate",
+      "canonical_path": "/Users/jameschen/.agents/skills/gstack/.opencode/skills/gstack-skillify/SKILL.md"
+    },
+    {
+      "skill_id": "skillify",
+      "identity_id": "337dac5d925b6d7f2ddd2d66",
+      "source_status": "codex_mirror_cache",
+      "source_dir": "/Users/jameschen/.codex/skills/gstack/.slate/skills/gstack-skillify",
+      "source_skill_path": "/Users/jameschen/.codex/skills/gstack/.slate/skills/gstack-skillify/SKILL.md",
+      "destination_dir": ".agents/skills/.duplicates-quarantine/codex_mirror_cache/337dac5d925b6d7f2ddd2d66/gstack/.slate/skills/gstack-skillify",
+      "reason": "byte_identical_lower_priority_duplicate",
+      "canonical_path": "/Users/jameschen/.agents/skills/gstack/.slate/skills/gstack-skillify/SKILL.md"
+    },
+    {
+      "skill_id": "skillify",
+      "identity_id": "617581f6b2333d930b661eef",
+      "source_status": "codex_mirror_cache",
+      "source_dir": "/Users/jameschen/.codex/skills/gstack/skillify",
+      "source_skill_path": "/Users/jameschen/.codex/skills/gstack/skillify/SKILL.md",
+      "destination_dir": ".agents/skills/.duplicates-quarantine/codex_mirror_cache/617581f6b2333d930b661eef/gstack/skillify",
+      "reason": "byte_identical_lower_priority_duplicate",
+      "canonical_path": "/Users/jameschen/.agents/skills/gstack/skillify/SKILL.md"
+    },
+    {
+      "skill_id": "sync-gbrain",
+      "identity_id": "ce88547a8ac376c395c998e0",
+      "source_status": "codex_mirror_cache",
+      "source_dir": "/Users/jameschen/.codex/skills/gstack/.kiro/skills/gstack-sync-gbrain",
+      "source_skill_path": "/Users/jameschen/.codex/skills/gstack/.kiro/skills/gstack-sync-gbrain/SKILL.md",
+      "destination_dir": ".agents/skills/.duplicates-quarantine/codex_mirror_cache/ce88547a8ac376c395c998e0/gstack/.kiro/skills/gstack-sync-gbrain",
+      "reason": "byte_identical_lower_priority_duplicate",
+      "canonical_path": "/Users/jameschen/.agents/skills/gstack/.kiro/skills/gstack-sync-gbrain/SKILL.md"
+    },
+    {
+      "skill_id": "sync-gbrain",
+      "identity_id": "5fcc8a7be3e19869d7cfb3ab",
+      "source_status": "codex_mirror_cache",
+      "source_dir": "/Users/jameschen/.codex/skills/gstack/.openclaw/skills/gstack-sync-gbrain",
+      "source_skill_path": "/Users/jameschen/.codex/skills/gstack/.openclaw/skills/gstack-sync-gbrain/SKILL.md",
+      "destination_dir": ".agents/skills/.duplicates-quarantine/codex_mirror_cache/5fcc8a7be3e19869d7cfb3ab/gstack/.openclaw/skills/gstack-sync-gbrain",
+      "reason": "byte_identical_lower_priority_duplicate",
+      "canonical_path": "/Users/jameschen/.agents/skills/gstack/.openclaw/skills/gstack-sync-gbrain/SKILL.md"
+    },
+    {
+      "skill_id": "sync-gbrain",
+      "identity_id": "6bbb993480f114d22570c054",
+      "source_status": "codex_mirror_cache",
+      "source_dir": "/Users/jameschen/.codex/skills/gstack/.opencode/skills/gstack-sync-gbrain",
+      "source_skill_path": "/Users/jameschen/.codex/skills/gstack/.opencode/skills/gstack-sync-gbrain/SKILL.md",
+      "destination_dir": ".agents/skills/.duplicates-quarantine/codex_mirror_cache/6bbb993480f114d22570c054/gstack/.opencode/skills/gstack-sync-gbrain",
+      "reason": "byte_identical_lower_priority_duplicate",
+      "canonical_path": "/Users/jameschen/.agents/skills/gstack/.opencode/skills/gstack-sync-gbrain/SKILL.md"
+    },
+    {
+      "skill_id": "sync-gbrain",
+      "identity_id": "fb0652883a964974c40f9f9a",
+      "source_status": "codex_mirror_cache",
+      "source_dir": "/Users/jameschen/.codex/skills/gstack/.slate/skills/gstack-sync-gbrain",
+      "source_skill_path": "/Users/jameschen/.codex/skills/gstack/.slate/skills/gstack-sync-gbrain/SKILL.md",
+      "destination_dir": ".agents/skills/.duplicates-quarantine/codex_mirror_cache/fb0652883a964974c40f9f9a/gstack/.slate/skills/gstack-sync-gbrain",
+      "reason": "byte_identical_lower_priority_duplicate",
+      "canonical_path": "/Users/jameschen/.agents/skills/gstack/.slate/skills/gstack-sync-gbrain/SKILL.md"
+    },
+    {
+      "skill_id": "sync-gbrain",
+      "identity_id": "1a49c638f19cd8f66a14e120",
+      "source_status": "codex_mirror_cache",
+      "source_dir": "/Users/jameschen/.codex/skills/gstack/sync-gbrain",
+      "source_skill_path": "/Users/jameschen/.codex/skills/gstack/sync-gbrain/SKILL.md",
+      "destination_dir": ".agents/skills/.duplicates-quarantine/codex_mirror_cache/1a49c638f19cd8f66a14e120/gstack/sync-gbrain",
+      "reason": "byte_identical_lower_priority_duplicate",
+      "canonical_path": "/Users/jameschen/.agents/skills/gstack/sync-gbrain/SKILL.md"
+    },
+    {
+      "skill_id": "unfreeze",
+      "identity_id": "c058c4d3fa890d988b4ee66b",
+      "source_status": "codex_mirror_cache",
+      "source_dir": "/Users/jameschen/.codex/skills/gstack/.kiro/skills/gstack-unfreeze",
+      "source_skill_path": "/Users/jameschen/.codex/skills/gstack/.kiro/skills/gstack-unfreeze/SKILL.md",
+      "destination_dir": ".agents/skills/.duplicates-quarantine/codex_mirror_cache/c058c4d3fa890d988b4ee66b/gstack/.kiro/skills/gstack-unfreeze",
+      "reason": "byte_identical_lower_priority_duplicate",
+      "canonical_path": "/Users/jameschen/.agents/skills/gstack/.kiro/skills/gstack-unfreeze/SKILL.md"
+    },
+    {
+      "skill_id": "unfreeze",
+      "identity_id": "2f2c1429dc808ca2778bb515",
+      "source_status": "codex_mirror_cache",
+      "source_dir": "/Users/jameschen/.codex/skills/gstack/.openclaw/skills/gstack-unfreeze",
+      "source_skill_path": "/Users/jameschen/.codex/skills/gstack/.openclaw/skills/gstack-unfreeze/SKILL.md",
+      "destination_dir": ".agents/skills/.duplicates-quarantine/codex_mirror_cache/2f2c1429dc808ca2778bb515/gstack/.openclaw/skills/gstack-unfreeze",
+      "reason": "byte_identical_lower_priority_duplicate",
+      "canonical_path": "/Users/jameschen/.agents/skills/gstack/.openclaw/skills/gstack-unfreeze/SKILL.md"
+    },
+    {
+      "skill_id": "unfreeze",
+      "identity_id": "0865c0dd73e33aed106cd58f",
+      "source_status": "codex_mirror_cache",
+      "source_dir": "/Users/jameschen/.codex/skills/gstack/.opencode/skills/gstack-unfreeze",
+      "source_skill_path": "/Users/jameschen/.codex/skills/gstack/.opencode/skills/gstack-unfreeze/SKILL.md",
+      "destination_dir": ".agents/skills/.duplicates-quarantine/codex_mirror_cache/0865c0dd73e33aed106cd58f/gstack/.opencode/skills/gstack-unfreeze",
+      "reason": "byte_identical_lower_priority_duplicate",
+      "canonical_path": "/Users/jameschen/.agents/skills/gstack/.opencode/skills/gstack-unfreeze/SKILL.md"
+    },
+    {
+      "skill_id": "unfreeze",
+      "identity_id": "f6113434ccacb13198674c81",
+      "source_status": "codex_mirror_cache",
+      "source_dir": "/Users/jameschen/.codex/skills/gstack/.slate/skills/gstack-unfreeze",
+      "source_skill_path": "/Users/jameschen/.codex/skills/gstack/.slate/skills/gstack-unfreeze/SKILL.md",
+      "destination_dir": ".agents/skills/.duplicates-quarantine/codex_mirror_cache/f6113434ccacb13198674c81/gstack/.slate/skills/gstack-unfreeze",
+      "reason": "byte_identical_lower_priority_duplicate",
+      "canonical_path": "/Users/jameschen/.agents/skills/gstack/.slate/skills/gstack-unfreeze/SKILL.md"
+    },
+    {
+      "skill_id": "unfreeze",
+      "identity_id": "f6024b0a4d455df3dd4726ae",
+      "source_status": "codex_mirror_cache",
+      "source_dir": "/Users/jameschen/.codex/skills/gstack/unfreeze",
+      "source_skill_path": "/Users/jameschen/.codex/skills/gstack/unfreeze/SKILL.md",
+      "destination_dir": ".agents/skills/.duplicates-quarantine/codex_mirror_cache/f6024b0a4d455df3dd4726ae/gstack/unfreeze",
+      "reason": "byte_identical_lower_priority_duplicate",
+      "canonical_path": "/Users/jameschen/.agents/skills/gstack/unfreeze/SKILL.md"
+    }
+  ],
+  "claim_boundary": [
+    "The apply plan moves byte-identical lower-priority duplicates to quarantine; it does not permanently delete files.",
+    "Same-id different-content records are excluded and require manual review."
+  ]
+}

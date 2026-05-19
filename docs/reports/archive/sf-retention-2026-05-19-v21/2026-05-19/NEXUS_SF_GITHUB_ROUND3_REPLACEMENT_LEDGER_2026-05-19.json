@@ -1,0 +1,40 @@
+{
+  "entries": [
+    {
+      "after_candidate_skill": "github3-openclaw-map-registry-sync",
+      "before_skill": "sf2-registry_skills_sync-route-fit-spec",
+      "capability": "registry_skills_sync",
+      "decision": "REPLACE_CANDIDATE_NOT_RUNTIME_DEFAULT",
+      "evidence_path": ".nexus/reports/sf_github_round3_live_2026-05-19/registry_skills_sync_sf-github-round3-smoke-registry_skills_sync-001_github3_openclaw_map_github3-openclaw-map-registry-sync/evidence_bundle.json",
+      "receipt_path": ".nexus/reports/sf_github_round3_live_2026-05-19/registry_skills_sync_sf-github-round3-smoke-registry_skills_sync-001_github3_openclaw_map_github3-openclaw-map-registry-sync",
+      "token_delta": -2919,
+      "wall_delta_sec": -5.8455
+    },
+    {
+      "after_candidate_skill": "github3-openai-skill-creator-safe-registry-sync",
+      "before_skill": "sf2-registry_skills_sync-route-fit-spec",
+      "capability": "registry_skills_sync",
+      "decision": "REPLACE_CANDIDATE_NOT_RUNTIME_DEFAULT",
+      "evidence_path": ".nexus/reports/sf_github_round3_live_2026-05-19/registry_skills_sync_sf-github-round3-smoke-registry_skills_sync-001_github3_openai_skill_creator_github3-openai-skill-creator-safe-registry-sync/evidence_bundle.json",
+      "receipt_path": ".nexus/reports/sf_github_round3_live_2026-05-19/registry_skills_sync_sf-github-round3-smoke-registry_skills_sync-001_github3_openai_skill_creator_github3-openai-skill-creator-safe-registry-sync",
+      "token_delta": -2836,
+      "wall_delta_sec": -11.5308
+    },
+    {
+      "after_candidate_skill": "github3-claude-security-scan-safe-ultra-review",
+      "before_skill": "acceptance-evidence-failclosed",
+      "capability": "ultra_review",
+      "decision": "REPLACE_CANDIDATE_NOT_RUNTIME_DEFAULT",
+      "evidence_path": ".nexus/reports/sf_github_round3_live_2026-05-19/ultra_review_sf-github-round3-smoke-ultra_review-001_github3_claude_security_scan_github3-claude-security-scan-safe-ultra-review/evidence_bundle.json",
+      "receipt_path": ".nexus/reports/sf_github_round3_live_2026-05-19/ultra_review_sf-github-round3-smoke-ultra_review-001_github3_claude_security_scan_github3-claude-security-scan-safe-ultra-review",
+      "token_delta": -947,
+      "wall_delta_sec": -17.6549
+    }
+  ],
+  "kept": [],
+  "public_benchmark_allowed": false,
+  "runtime_update_allowed": false,
+  "schema": "nexus.sf_github_round3_replacement_ledger.v1",
+  "status": "REPLACEMENT_CANDIDATES_FOUND",
+  "version": "2026-05-19"
+}

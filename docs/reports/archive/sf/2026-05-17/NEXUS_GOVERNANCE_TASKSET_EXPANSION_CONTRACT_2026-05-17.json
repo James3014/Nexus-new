@@ -1,0 +1,270 @@
+{
+  "schema": "nexus.governance_taskset_expansion_contract.v1",
+  "status": "PASS",
+  "capability": "governance_and_trust",
+  "live_ready": true,
+  "summary": {
+    "candidate_task_count": 33,
+    "selected_existing_task_count": 15,
+    "proposed_new_task_count": 0,
+    "planned_total_task_count": 15,
+    "min_total_tasks": 15,
+    "max_total_tasks": 20,
+    "min_tasks_per_bucket": 3,
+    "bucket_counts": {
+      "audit": 4,
+      "claim_gate": 10,
+      "redaction": 3,
+      "auth": 3,
+      "evidence_review": 9
+    }
+  },
+  "selected_existing_tasks": [
+    {
+      "manifest": "scripts/bench/public_benchmark_commercial_expansion_v1.json",
+      "task_id": "commercial-negative-swarm-roles-001",
+      "category": "ops_research",
+      "fixture_kind": "rlm_harder_v2_swarm_consensus",
+      "difficulty": "hard",
+      "task_desc": "Commercial negative swarm task: consensus must include distinct roles and evidence for each finding.",
+      "expected_capabilities": [
+        "swarm"
+      ],
+      "governance_buckets": [
+        "audit",
+        "evidence_review"
+      ]
+    },
+    {
+      "manifest": "scripts/bench/public_benchmark_commercial_expansion_v1.json",
+      "task_id": "commercial-negative-ultra-source-001",
+      "category": "ops_research",
+      "fixture_kind": "rlm_harder_v2_ultra_review_report",
+      "difficulty": "hard",
+      "task_desc": "Commercial negative ultra-review task: verified findings must include repro/source evidence before acceptance.",
+      "expected_capabilities": [
+        "ultra_review"
+      ],
+      "governance_buckets": [
+        "audit",
+        "evidence_review"
+      ]
+    },
+    {
+      "manifest": "scripts/bench/public_benchmark_commercial_expansion_v1.json",
+      "task_id": "governance-expansion-audit-003",
+      "category": "governance_taskset_expansion",
+      "fixture_kind": "rlm_harder_v2_ultra_review_report",
+      "difficulty": "hard",
+      "task_desc": "Governance expansion audit task: review an ultra-review claim bundle and reject verified findings without independent repro evidence.",
+      "expected_capabilities": [
+        "ultra_review",
+        "artifact_gate",
+        "claim_gate",
+        "delivery_gate"
+      ],
+      "governance_buckets": [
+        "audit",
+        "claim_gate",
+        "evidence_review"
+      ]
+    },
+    {
+      "manifest": "scripts/bench/public_benchmark_commercial_expansion_v1.json",
+      "task_id": "commercial-reasoning-autoreason-002",
+      "category": "feature",
+      "fixture_kind": "rlm_harder_v2_autoreason_judge",
+      "difficulty": "hard",
+      "task_desc": "Commercial reasoning task: choose a supported candidate while rejecting tempting unsupported winners.",
+      "expected_capabilities": [
+        "autoreason"
+      ],
+      "governance_buckets": [
+        "claim_gate"
+      ]
+    },
+    {
+      "manifest": "scripts/bench/public_benchmark_model_required_uplift_v1.json",
+      "task_id": "model-required-context-001",
+      "category": "docs_code_sync",
+      "fixture_kind": "docs_config_sync_hard",
+      "difficulty": "hard",
+      "task_desc": "Sync configuration reference with strict validation defaults.",
+      "expected_capabilities": [
+        "codeintel",
+        "memory",
+        "claim_gate",
+        "delivery_gate"
+      ],
+      "governance_buckets": [
+        "claim_gate"
+      ]
+    },
+    {
+      "manifest": "scripts/bench/public_benchmark_nexus_value_v1.json",
+      "task_id": "nexus-value-gov-001",
+      "category": "refactor",
+      "fixture_kind": "nexus_value_mempalace_secret_redaction",
+      "difficulty": "hard",
+      "task_desc": "Refactor a credential scrubber while preserving the governance boundary: never weaken secret redaction to make tests pass.",
+      "expected_capabilities": [
+        "mempalace_gate",
+        "claim_gate"
+      ],
+      "governance_buckets": [
+        "claim_gate",
+        "redaction"
+      ]
+    },
+    {
+      "manifest": "scripts/bench/public_benchmark_commercial_expansion_v1.json",
+      "task_id": "governance-expansion-redaction-002",
+      "category": "governance_taskset_expansion",
+      "fixture_kind": "nexus_value_mempalace_secret_redaction",
+      "difficulty": "hard",
+      "task_desc": "Governance expansion redaction task: refactor a credential scrubber while preserving token and password redaction evidence.",
+      "expected_capabilities": [
+        "mempalace_gate",
+        "artifact_gate",
+        "claim_gate"
+      ],
+      "governance_buckets": [
+        "claim_gate",
+        "redaction",
+        "evidence_review"
+      ]
+    },
+    {
+      "manifest": "scripts/bench/public_benchmark_commercial_expansion_v1.json",
+      "task_id": "governance-expansion-redaction-003",
+      "category": "governance_taskset_expansion",
+      "fixture_kind": "nexus_value_mempalace_secret_redaction",
+      "difficulty": "hard",
+      "task_desc": "Governance expansion redaction task: preserve secret redaction when non-secret audit notes remain visible.",
+      "expected_capabilities": [
+        "mempalace_gate",
+        "artifact_gate",
+        "claim_gate"
+      ],
+      "governance_buckets": [
+        "audit",
+        "claim_gate",
+        "redaction",
+        "evidence_review"
+      ]
+    },
+    {
+      "manifest": "scripts/bench/public_benchmark_rlm_harder_v2.json",
+      "task_id": "rlm-harder-v2-governance-001",
+      "category": "ops_research",
+      "fixture_kind": "rlm_harder_v2_governance_guard",
+      "difficulty": "hard",
+      "task_desc": "Tighten an action filter so unsafe operations are rejected while ordinary read-only work remains allowed.",
+      "expected_capabilities": [
+        "mempalace_gate",
+        "delivery_gate"
+      ],
+      "governance_buckets": [
+        "auth"
+      ]
+    },
+    {
+      "manifest": "scripts/bench/public_benchmark_rlm_harder_v2.json",
+      "task_id": "rlm-harder-v2-governance-002",
+      "category": "ops_research",
+      "fixture_kind": "rlm_harder_v2_governance_scope",
+      "difficulty": "hard",
+      "task_desc": "Fix scope enforcement so unapproved mutating operations are blocked while read-only inspection remains allowed.",
+      "expected_capabilities": [
+        "mempalace_gate",
+        "delivery_gate"
+      ],
+      "governance_buckets": [
+        "auth"
+      ]
+    },
+    {
+      "manifest": "scripts/bench/public_benchmark_nexus_value_v1.json",
+      "task_id": "nexus-value-gov-002",
+      "category": "refactor",
+      "fixture_kind": "nexus_value_mempalace_deny_default",
+      "difficulty": "hard",
+      "task_desc": "Refactor an authorization decision helper while preserving the governance rule: deny by default for unknown roles and missing scopes.",
+      "expected_capabilities": [
+        "mempalace_gate",
+        "claim_gate"
+      ],
+      "governance_buckets": [
+        "claim_gate",
+        "auth"
+      ]
+    },
+    {
+      "manifest": "scripts/bench/public_benchmark_commercial_expansion_v1.json",
+      "task_id": "commercial-negative-replay-001",
+      "category": "feature",
+      "fixture_kind": "rlm_harder_v2_evidence_replay",
+      "difficulty": "hard",
+      "task_desc": "Commercial negative evidence task: accept receipts only when claim, replay command, and execution result agree.",
+      "expected_capabilities": [
+        "artifact_gate",
+        "claim_gate",
+        "delivery_gate"
+      ],
+      "governance_buckets": [
+        "claim_gate",
+        "evidence_review"
+      ]
+    },
+    {
+      "manifest": "scripts/bench/public_benchmark_commercial_expansion_v1.json",
+      "task_id": "commercial-negative-drone-source-001",
+      "category": "ops_research",
+      "fixture_kind": "rlm_harder_v2_drone_artifacts",
+      "difficulty": "hard",
+      "task_desc": "Commercial negative drone task: artifact owners and paths are required before distributed work is accepted.",
+      "expected_capabilities": [
+        "drone"
+      ],
+      "governance_buckets": [
+        "evidence_review"
+      ]
+    },
+    {
+      "manifest": "scripts/bench/public_benchmark_commercial_expansion_v1.json",
+      "task_id": "commercial-negative-nightshift-replay-001",
+      "category": "ops_research",
+      "fixture_kind": "rlm_harder_v2_nightshift_recovery",
+      "difficulty": "hard",
+      "task_desc": "Commercial negative nightshift task: recovery claims must include invocation state and report path.",
+      "expected_capabilities": [
+        "nightshift"
+      ],
+      "governance_buckets": [
+        "claim_gate",
+        "evidence_review"
+      ]
+    },
+    {
+      "manifest": "scripts/bench/public_benchmark_commercial_expansion_v1.json",
+      "task_id": "commercial-reasoning-research-002",
+      "category": "docs_code_sync",
+      "fixture_kind": "rlm_harder_v2_research_citation",
+      "difficulty": "hard",
+      "task_desc": "Commercial reasoning task: choose a claim only when topic match and citation evidence both hold.",
+      "expected_capabilities": [
+        "research"
+      ],
+      "governance_buckets": [
+        "claim_gate",
+        "evidence_review"
+      ]
+    }
+  ],
+  "proposed_new_task_specs": [],
+  "preflight_status": "READY",
+  "claim_boundary": [
+    "This contract expands taskset design only; it does not create promotion evidence.",
+    "Proposed tasks must be materialized with hidden verifiers before live Flash spend."
+  ]
+}

@@ -1,0 +1,114 @@
+{
+  "claim_boundary": {
+    "catalog_update_allowed": true,
+    "requires_next": "governance_runtime_review_seal_and_runtime_apply_gate",
+    "runtime_default_change": false
+  },
+  "governance_curation": {
+    "candidate_count": 4,
+    "capability": "governance_and_trust",
+    "items": [
+      {
+        "ablation_eligible": true,
+        "capability": "governance_and_trust",
+        "materialized": true,
+        "next_action": "run_governance_runtime_review_seal_before_default_promotion",
+        "previous_source_path": "/Users/jameschen/.agents/skills/devops/acceptance-evidence-failclosed/SKILL.md",
+        "repo_local_path": "/Users/jameschen/Workspace/nexus/.agents/skills/acceptance-evidence-failclosed/SKILL.md",
+        "runtime_eligible": false,
+        "skill_id": "acceptance-evidence-failclosed",
+        "source_disposition": "catalog_alternate_only",
+        "source_status": "runtime_review_candidate"
+      },
+      {
+        "ablation_eligible": true,
+        "capability": "governance_and_trust",
+        "materialized": true,
+        "next_action": "run_governance_runtime_review_seal_before_default_promotion",
+        "previous_source_path": "/Users/jameschen/.agents/skills/gstack/.agents/skills/gstack-cso/SKILL.md",
+        "repo_local_path": "/Users/jameschen/Workspace/nexus/.agents/skills/cso/SKILL.md",
+        "runtime_eligible": false,
+        "skill_id": "cso",
+        "source_disposition": "catalog_alternate_only",
+        "source_status": "runtime_review_candidate"
+      },
+      {
+        "ablation_eligible": true,
+        "capability": "governance_and_trust",
+        "materialized": true,
+        "next_action": "run_governance_runtime_review_seal_before_default_promotion",
+        "previous_source_path": "/Users/jameschen/.agents/skills/claudeosint-safe-surface-audit/SKILL.md",
+        "repo_local_path": "/Users/jameschen/Workspace/nexus/.agents/skills/claudeosint-safe-surface-audit/SKILL.md",
+        "runtime_eligible": false,
+        "skill_id": "claudeosint-safe-surface-audit",
+        "source_disposition": "catalog_alternate_only",
+        "source_status": "runtime_review_candidate"
+      },
+      {
+        "ablation_eligible": true,
+        "capability": "governance_and_trust",
+        "materialized": true,
+        "next_action": "run_governance_runtime_review_seal_before_default_promotion",
+        "previous_source_path": "/Users/jameschen/.agents/skills/gbrain-soul-audit/SKILL.md",
+        "repo_local_path": "/Users/jameschen/Workspace/nexus/.agents/skills/gbrain-soul-audit/SKILL.md",
+        "runtime_eligible": false,
+        "skill_id": "gbrain-soul-audit",
+        "source_disposition": "catalog_alternate_only",
+        "source_status": "runtime_review_candidate"
+      }
+    ],
+    "materialized_count": 4
+  },
+  "public_benchmark_allowed": false,
+  "research_tiebreak": {
+    "alternate_skills": [
+      "research-source-validation-auditor"
+    ],
+    "capability": "research_and_source_discipline",
+    "primary_skill": "research-citation-chain-verifier",
+    "reason": "both candidates have 3/3 expected-capability evidence; citation-chain has additional same-runner paired live KEEP receipt",
+    "scores": [
+      {
+        "effective_rows": 3,
+        "evidence_refs": [
+          ".nexus/reports/sf_research_expected_capability_seal_20260518/research_and_source_discipline_route-oracle-research-001_skill_arm_001_5caf4a368a6a/evidence_bundle.json",
+          ".nexus/reports/sf_research_expected_capability_seal_20260518/research_and_source_discipline_route-oracle-lancedb-001_skill_arm_001_5caf4a368a6a/evidence_bundle.json",
+          ".nexus/reports/sf_research_expected_capability_seal_20260518/research_and_source_discipline_route-oracle-semantic-searcher-001_skill_arm_001_5caf4a368a6a/evidence_bundle.json"
+        ],
+        "paired_live_keep": true,
+        "paired_live_receipt_chain_present": true,
+        "receipt_refs": [
+          ".nexus/reports/sf_research_expected_capability_seal_20260518/research_and_source_discipline_route-oracle-research-001_skill_arm_001_5caf4a368a6a",
+          ".nexus/reports/sf_research_expected_capability_seal_20260518/research_and_source_discipline_route-oracle-lancedb-001_skill_arm_001_5caf4a368a6a",
+          ".nexus/reports/sf_research_expected_capability_seal_20260518/research_and_source_discipline_route-oracle-semantic-searcher-001_skill_arm_001_5caf4a368a6a"
+        ],
+        "score": 71,
+        "skill_id": "research-citation-chain-verifier",
+        "tested_rows": 3,
+        "trust_clean_rows": 3
+      },
+      {
+        "effective_rows": 3,
+        "evidence_refs": [
+          ".nexus/reports/sf_research_expected_capability_seal_20260518/research_and_source_discipline_route-oracle-research-001_skill_arm_002_5615e1c0a7d4/evidence_bundle.json",
+          ".nexus/reports/sf_research_expected_capability_seal_20260518/research_and_source_discipline_route-oracle-lancedb-001_skill_arm_002_5615e1c0a7d4/evidence_bundle.json",
+          ".nexus/reports/sf_research_expected_capability_seal_20260518/research_and_source_discipline_route-oracle-semantic-searcher-001_skill_arm_002_5615e1c0a7d4/evidence_bundle.json"
+        ],
+        "paired_live_keep": false,
+        "paired_live_receipt_chain_present": false,
+        "receipt_refs": [
+          ".nexus/reports/sf_research_expected_capability_seal_20260518/research_and_source_discipline_route-oracle-research-001_skill_arm_002_5615e1c0a7d4",
+          ".nexus/reports/sf_research_expected_capability_seal_20260518/research_and_source_discipline_route-oracle-lancedb-001_skill_arm_002_5615e1c0a7d4",
+          ".nexus/reports/sf_research_expected_capability_seal_20260518/research_and_source_discipline_route-oracle-semantic-searcher-001_skill_arm_002_5615e1c0a7d4"
+        ],
+        "score": 36,
+        "skill_id": "research-source-validation-auditor",
+        "tested_rows": 3,
+        "trust_clean_rows": 3
+      }
+    ]
+  },
+  "runtime_update_allowed": false,
+  "schema": "nexus_sf_research_tiebreak_and_governance_curation_v1",
+  "status": "PASS"
+}

@@ -1,0 +1,105 @@
+{
+  "claim_boundary": [
+    "Static safety screen only; no untrusted repo code executed.",
+    "External repo material is prompt-only rewritten before SF ablation.",
+    "No runtime default or public benchmark promotion in this round."
+  ],
+  "repos": [
+    {
+      "commit_sha": "c32e201b9877d647ec5725230e45847ca348f695",
+      "intake_decision": "prompt_only_rewrite_required",
+      "repo": "midudev/autoskills",
+      "runtime_mount_allowed": false,
+      "skill_md_count": 217,
+      "source_url": "https://github.com/midudev/autoskills",
+      "static_red_flags": [
+        "destructive-rm",
+        "npm-install",
+        "npx",
+        "tool-declaration"
+      ]
+    },
+    {
+      "commit_sha": "5623c2fa7c5a6ab47eee0d308431437f52c6ff1e",
+      "intake_decision": "prompt_only_or_reference_allowed",
+      "repo": "awesome-skills/first-principles-skill",
+      "runtime_mount_allowed": false,
+      "skill_md_count": 1,
+      "source_url": "https://github.com/awesome-skills/first-principles-skill",
+      "static_red_flags": []
+    },
+    {
+      "commit_sha": "3be8ef349c9ca61c25fc0efb9fab6f03c908f617",
+      "intake_decision": "prompt_only_rewrite_required",
+      "repo": "fredrick84823/fstack",
+      "runtime_mount_allowed": false,
+      "skill_md_count": 18,
+      "source_url": "https://github.com/fredrick84823/fstack",
+      "static_red_flags": [
+        "tool-declaration"
+      ]
+    },
+    {
+      "commit_sha": "b2ae7283497efec71533d292b19b874dd9d0fc4e",
+      "intake_decision": "prompt_only_rewrite_required",
+      "repo": "browserbase/skills",
+      "runtime_mount_allowed": false,
+      "skill_md_count": 13,
+      "source_url": "https://github.com/browserbase/skills",
+      "static_red_flags": [
+        "external-browserbase-cli",
+        "npm-install",
+        "npx",
+        "tool-declaration"
+      ]
+    }
+  ],
+  "schema": "nexus.sf_github_round7_static_screen.v1",
+  "selected_challengers": [
+    {
+      "candidate_path": "/Users/jameschen/Workspace/nexus/.agents/skills/github-round7-challengers/github7-browserbase-ui-test-safe-ui-validator/SKILL.md",
+      "candidate_skill": "github7-browserbase-ui-test-safe-ui-validator",
+      "capability": "ui_validator",
+      "reason": "Browserbase UI-test maps to adversarial UI validation, but external browser tools are stripped.",
+      "repo": "browserbase/skills",
+      "source_kind": "prompt_only_rewrite",
+      "source_skill": "skills/ui-test/SKILL.md"
+    },
+    {
+      "candidate_path": "/Users/jameschen/Workspace/nexus/.agents/skills/github-round7-challengers/github7-first-principles-autoreason/SKILL.md",
+      "candidate_skill": "github7-first-principles-autoreason",
+      "capability": "autoreason",
+      "reason": "First-principles decomposition maps to autoreason decision quality.",
+      "repo": "awesome-skills/first-principles-skill",
+      "source_kind": "prompt_only_rewrite",
+      "source_skill": "SKILL.md"
+    },
+    {
+      "candidate_path": "/Users/jameschen/Workspace/nexus/.agents/skills/github-round7-challengers/github7-fstack-implement-plan-direct-master-loop/SKILL.md",
+      "candidate_skill": "github7-fstack-implement-plan-direct-master-loop",
+      "capability": "direct_master_loop",
+      "reason": "Implement-plan maps to direct master loop execution discipline.",
+      "repo": "fredrick84823/fstack",
+      "source_kind": "prompt_only_rewrite",
+      "source_skill": "skills/implement-plan/SKILL.md"
+    },
+    {
+      "candidate_path": "/Users/jameschen/Workspace/nexus/.agents/skills/github-round7-challengers/github7-midudev-tdd-repair-loop/SKILL.md",
+      "candidate_skill": "github7-midudev-tdd-repair-loop",
+      "capability": "repair_loop",
+      "reason": "TDD maps to repair loop red/green verification discipline.",
+      "repo": "midudev/autoskills",
+      "source_kind": "prompt_only_rewrite",
+      "source_skill": "packages/autoskills/skills-registry/**/test-driven-development/SKILL.md"
+    }
+  ],
+  "status": "PASS",
+  "summary": {
+    "public_benchmark_allowed": false,
+    "repo_count": 4,
+    "runtime_update_allowed": false,
+    "selected_challenger_count": 4,
+    "total_skill_md_count": 249
+  },
+  "version": "2026-05-19"
+}

@@ -1,0 +1,49 @@
+{
+  "schema": "nexus.skill_fit_catalog.v1",
+  "status": "RETURN",
+  "mode": "live",
+  "matrix_path": "docs/reports/NEXUS_SF_V11_RETEST_EXECUTION_MATRIX_2026-05-18.json",
+  "summary": {
+    "planned_rows": 1,
+    "completed_rows": 1,
+    "matrix_complete": true,
+    "capability_only_rows": 0,
+    "skill_count": 1,
+    "negative_control_rows": 0,
+    "negative_control_blocked_rows": 0,
+    "keep_count": 0,
+    "replace_candidate_count": 0,
+    "reject_count": 1,
+    "needs_more_data_count": 0
+  },
+  "failures": [
+    "matrix_completion_gate_return"
+  ],
+  "claim_boundary": [
+    "Catalog verdicts are valid only for this capability, task set, model, and matrix version.",
+    "replace_candidate means import/review candidate, not runtime promotion.",
+    "runtime policy changes require a later Flash 50/100 regression gate."
+  ],
+  "skill_verdicts": [
+    {
+      "skill_id": "code-review-and-quality",
+      "capability": "ultra_review",
+      "anonymous_label": "candidate::code-review-and-quality",
+      "source_root": "external_reference",
+      "runtime_eligible": false,
+      "tested_rows": 1,
+      "effective_rows": 0,
+      "trust_clean_rows": 1,
+      "verdict": "reject",
+      "evidence_refs": [
+        "/private/tmp/nexus_sf_v11_retest_live_20260518/ultra_review_sf-v11-retest-ultra_review-001_candidate_code-review-and-quality/evidence_bundle.json"
+      ],
+      "receipt_refs": [
+        "/private/tmp/nexus_sf_v11_retest_live_20260518/ultra_review_sf-v11-retest-ultra_review-001_candidate_code-review-and-quality"
+      ],
+      "task_buckets": [
+        "ultra_review"
+      ]
+    }
+  ]
+}
