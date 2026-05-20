@@ -2763,3 +2763,17 @@ version_scope:
 - Failure: the outer matrix runner returned `runner_timeout` before any with-Nexus artifact was finalized, creating a false skill stop-loss for `mempalace`.
 - Lesson: live orchestration timeouts must be wider than the inner benchmark timeout and per-task stop-loss.
 - Guardrail: use 120 seconds only for preflight; use at least 900 seconds for live MAT-B chunks and rebuild summaries from existing artifacts after any orchestration timeout.
+
+## 2026-05-20 - challenger failure is MAT-B evidence, not a global abort
+
+- Trigger: the `research` multi-skill challenger produced a real model-required delivery RETURN while baseline evidence existed.
+- Failure: resume sealing stopped at the first existing RETURN, which is correct for fail-fast execution but too narrow for MAT-B rollup reporting.
+- Lesson: all-arm comparison reports must preserve rejected challenger rows so the capability can be decided as `REJECT_MULTI_SKILL` while unrelated capabilities continue.
+- Guardrail: keep live execution fail-fast, but allow explicit resume/report collection of existing RETURN artifacts with `--collect-existing-returns`.
+
+## 2026-05-20 - MAT-B baseline infra invalid cannot be a comparison baseline
+
+- Trigger: `research_and_source_discipline` baseline returned semantic SUCCESS through local fallback but had `infra_invalid_reason=model_call_without_tokens`.
+- Failure: without an explicit cleanliness gate, the report could treat a tokenless baseline as a valid comparison arm.
+- Lesson: baseline cleanliness is part of the comparison contract, not an optional cost annotation.
+- Guardrail: any baseline or challenger `infra_invalid_reason` holds the pair as `HOLD_MISSING_MAT_B_EVIDENCE`; only clean challenger delivery failures become `REJECT_MULTI_SKILL`.

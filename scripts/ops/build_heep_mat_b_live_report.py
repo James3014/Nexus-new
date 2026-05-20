@@ -116,11 +116,18 @@ def _row_metrics(row: Mapping[str, Any]) -> dict[str, Any]:
         "trust_mismatch": bool(bench.get("report_trust_mismatch")),
         "skill_mount_contract_status": bench.get("skill_mount_contract_status", ""),
         "receipt_chain_pass": _receipt_chain_pass(row),
+        "infra_invalid_reason": str(bench.get("infra_invalid_reason") or ""),
     }
 
 
 def _decision(*, baseline: Mapping[str, Any], challenger: Mapping[str, Any]) -> tuple[str, list[str]]:
     reasons: list[str] = []
+    if baseline["infra_invalid_reason"]:
+        reasons.append(f"baseline_infra_invalid:{baseline['infra_invalid_reason']}")
+        return "HOLD_MISSING_MAT_B_EVIDENCE", reasons
+    if challenger["infra_invalid_reason"]:
+        reasons.append(f"challenger_infra_invalid:{challenger['infra_invalid_reason']}")
+        return "HOLD_MISSING_MAT_B_EVIDENCE", reasons
     if challenger["success_rate"] < baseline["success_rate"] or challenger["success_rate"] < 1.0:
         reasons.append("reliability_not_better_or_delivery_return")
         return "REJECT_MULTI_SKILL", reasons

@@ -65,6 +65,8 @@ HEEP 的最終選用標準不是 local role coverage，也不是單純「複數 
 
 `reopen_rate` 的優先來源是 runner 原生欄位。若 runner 尚未輸出原生 `reopen_rate`，HEEP report builder 只能在 row 同時具備 delivery、runtime classification、data contract、cost/evidence/delivery rubric、skill mount contract 與 receipt-chain 信號時，使用 deterministic receipt replay proxy 產生 `0.0` 或 `1.0`。缺少這些 replay inputs 時必須維持 `HOLD_MISSING_MAT_B_EVIDENCE`，不得把空值視為通過。
 
+任何 arm 若出現 `infra_invalid_reason`，該 pair 不得被當作有效勝負比較。baseline infra-invalid 只能 `HOLD_MISSING_MAT_B_EVIDENCE`；challenger infra-invalid 也只能 HOLD。只有 challenger 具備乾淨成本/receipt 證據但 delivery RETURN 時，才可判為 `REJECT_MULTI_SKILL`。
+
 ### 6.3 Decision State
 
 - `KEEP_SINGLE_PRIMARY`：Mode A 仍是最佳或 challenger 未通過 MAT-B。

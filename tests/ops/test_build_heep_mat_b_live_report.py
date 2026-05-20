@@ -14,6 +14,7 @@ def _result(
     mounts: int = 1,
     status: str = "PASS",
     replay_evidence: bool = False,
+    infra_invalid_reason: str = "",
 ) -> dict:
     replay_fields = {}
     if replay_evidence:
@@ -40,6 +41,7 @@ def _result(
             "model_attempt_runner_overhead_polluted": False,
             "skill_mount_count": mounts,
             "skill_mount_contract_status": "PASS",
+            "infra_invalid_reason": infra_invalid_reason,
             **replay_fields,
         },
         "ablation_gate_row": {
@@ -100,6 +102,40 @@ def test_heep_mat_b_report_uses_deterministic_reopen_replay_proxy() -> None:
     assert comparison["verdict"] == "APPROVE_HEEP_MODE_CANDIDATE"
     assert comparison["baseline"]["reopen_rate"] == 0.0
     assert comparison["challenger"]["reopen_rate_source"] == "deterministic_receipt_replay_proxy"
+
+
+def test_heep_mat_b_report_holds_when_baseline_is_infra_invalid() -> None:
+    report = build_heep_mat_b_live_report(
+        live_summary={
+            "results": [
+                _result(
+                    arm="mode_a_current_primary",
+                    tokens=0,
+                    wall=10.0,
+                    replay_evidence=True,
+                    infra_invalid_reason="model_call_without_tokens",
+                ),
+                _result(arm="heep_multi_skill", tokens=90, wall=8.5, mounts=3, replay_evidence=True),
+            ]
+        }
+    )
+
+    comparison = report["comparisons"][0]
+    assert comparison["verdict"] == "HOLD_MISSING_MAT_B_EVIDENCE"
+    assert comparison["reason_codes"] == ["baseline_infra_invalid:model_call_without_tokens"]
+
+
+def test_heep_mat_b_report_rejects_delivery_failed_challenger() -> None:
+    report = build_heep_mat_b_live_report(
+        live_summary={
+            "results": [
+                _result(arm="mode_a_current_primary", tokens=100, wall=10.0, replay_evidence=True),
+                _result(arm="heep_multi_skill", tokens=90, wall=8.5, mounts=3, status="RETURN", replay_evidence=True),
+            ]
+        }
+    )
+
+    assert report["comparisons"][0]["verdict"] == "REJECT_MULTI_SKILL"
 
 
 def test_heep_mat_b_cli_writes_report(tmp_path: Path, capsys) -> None:

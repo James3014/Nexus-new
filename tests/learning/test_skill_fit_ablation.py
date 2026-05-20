@@ -1500,6 +1500,53 @@ def test_run_resume_manifest_skips_stale_remaining_rows_with_existing_artifacts(
     assert summary["results"][0]["resumed_from_existing_artifact"] is True
 
 
+def test_run_resume_manifest_can_collect_existing_returns_for_reports(tmp_path: Path):
+    matrix = {
+        "rows": [
+            {
+                "row_id": "task::bad",
+                "arm_id": "bad",
+                "arm_type": "skill_ablation",
+                "skill_id": "s",
+                "runtime_eligible": True,
+            },
+            {
+                "row_id": "task::good",
+                "arm_id": "good",
+                "arm_type": "skill_ablation",
+                "skill_id": "s",
+                "runtime_eligible": True,
+            },
+        ]
+    }
+    matrix_path = tmp_path / "matrix.json"
+    matrix_path.write_text(json.dumps(matrix), encoding="utf-8")
+    for row_id, status in (("task_bad", "FAILED"), ("task_good", "SUCCESS")):
+        row_dir = tmp_path / "out" / row_id
+        row_dir.mkdir(parents=True)
+        row = {"status": status, "skill_mount_contract_status": "PASS", "skill_mount_contract": [{"skill_id": "s"}]}
+        (row_dir / "with_nexus_stub.jsonl").write_text(json.dumps(row) + "\n", encoding="utf-8")
+    manifest_path = tmp_path / "resume.json"
+    manifest_path.write_text(
+        json.dumps(
+            {
+                "matrix_path": str(matrix_path),
+                "output_root": str(tmp_path / "out"),
+                "completed_row_ids": ["task::bad", "task::good"],
+                "remaining_row_ids": [],
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    summary = run_resume_manifest(resume_manifest_path=manifest_path, collect_existing_returns=True)
+
+    assert summary["status"] == "RETURN"
+    assert summary["summary"]["completed_rows"] == 2
+    assert summary["summary"]["return_count"] == 1
+    assert [row["row_id"] for row in summary["results"]] == ["task::bad", "task::good"]
+
+
 def test_classify_skill_fit_failure_routes_timeout_policy():
     skill_result = {
         "status": "RETURN",

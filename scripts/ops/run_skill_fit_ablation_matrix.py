@@ -385,6 +385,7 @@ def run_resume_manifest(
     resume_manifest_path: str | Path,
     docs_catalog_path: str | Path | None = None,
     row_timeout_sec: int = 900,
+    collect_existing_returns: bool = False,
 ) -> dict[str, Any]:
     resume = json.loads(Path(resume_manifest_path).read_text(encoding="utf-8"))
     matrix_path = Path(str(resume.get("matrix_path") or ""))
@@ -420,7 +421,8 @@ def run_resume_manifest(
         results.append(result)
         if result.get("status") != "PASS":
             status = "RETURN"
-            break
+            if not collect_existing_returns:
+                break
     summary = {
         "schema": "nexus.skill_fit_ablation_matrix_run.v1",
         "status": status,
@@ -512,6 +514,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--emit-resume-manifest", action="store_true")
     parser.add_argument("--resume-manifest", default="")
     parser.add_argument("--resume-manifest-output", default="")
+    parser.add_argument("--collect-existing-returns", action="store_true")
     parser.add_argument("--abort-reason", default="")
     args = parser.parse_args(argv)
     if args.resume_manifest:
@@ -519,6 +522,7 @@ def main(argv: list[str] | None = None) -> int:
             resume_manifest_path=args.resume_manifest,
             docs_catalog_path=args.docs_catalog_path,
             row_timeout_sec=args.row_timeout_sec,
+            collect_existing_returns=args.collect_existing_returns,
         )
         print(json.dumps({"status": summary["status"], **summary["summary"], "output_root": summary["output_root"]}, sort_keys=True))
         return 0 if summary["status"] == "PASS" else 1
