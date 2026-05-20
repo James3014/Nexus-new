@@ -1,0 +1,533 @@
+{
+  "schema": "nexus.heep_runtime_apply_gate.v1",
+  "status": "RETURN",
+  "created_at": "2026-05-20T08:30:32.876544+00:00",
+  "summary": {
+    "approved_candidate_count": 9,
+    "case_count": 9,
+    "pass_count": 0,
+    "return_count": 9,
+    "blocker_count": 20,
+    "runtime_update_allowed": false,
+    "public_benchmark_allowed": false
+  },
+  "blockers": [
+    "autonomic_router:sf-systematic-artifact_gate-differential-review-461fbd0c:reference_only_status:external_reference_candidate",
+    "autonomic_router:sf2-autonomic_router-route-fit-spec:reference_only_status:external_reference_candidate",
+    "belief:sf-systematic-artifact_gate-differential-review-461fbd0c:reference_only_status:external_reference_candidate",
+    "belief:sf2-belief-route-fit-spec:reference_only_status:external_reference_candidate",
+    "codeintel:sf-systematic-artifact_gate-differential-review-461fbd0c:reference_only_status:external_reference_candidate",
+    "codeintel:sf-systematic-codeintel-first-principles-thinking-f95019ea:reference_only_status:external_reference_candidate",
+    "codeintel:sf2-autonomic_router-route-fit-spec:reference_only_status:external_reference_candidate",
+    "ddtree:nexus-root-cause-probe:reference_only_status:external_reference_candidate",
+    "ddtree:sf-systematic-artifact_gate-differential-review-461fbd0c:reference_only_status:external_reference_candidate",
+    "governance_and_trust:sf-systematic-codeintel-first-principles-thinking-f95019ea:reference_only_status:external_reference_candidate",
+    "governance_and_trust:sf-systematic-governance_and_trust-aegisops-ai-0aa841e2:reference_only_status:external_reference_candidate",
+    "governance_and_trust:sf2-autonomic_router-route-fit-spec:reference_only_status:external_reference_candidate",
+    "lancedb:research-source-validation-auditor:reference_only_status:external_reference_candidate",
+    "lancedb:sf-systematic-artifact_gate-differential-review-461fbd0c:reference_only_status:external_reference_candidate",
+    "memory:sf-systematic-artifact_gate-differential-review-461fbd0c:reference_only_status:external_reference_candidate",
+    "memory:sf-systematic-memory-project-skill-audit-cc8b7621:reference_only_status:external_reference_candidate",
+    "mempalace:sf-systematic-artifact_gate-differential-review-461fbd0c:reference_only_status:external_reference_candidate",
+    "mempalace:sf2-mempalace-route-fit-spec:reference_only_status:external_reference_candidate",
+    "regression_guard:sf-systematic-artifact_gate-differential-review-461fbd0c:reference_only_status:external_reference_candidate",
+    "regression_guard:sf-systematic-regression_guard-odoo-automated-tests-dad98433:reference_only_status:external_reference_candidate"
+  ],
+  "cases": [
+    {
+      "capability": "autonomic_router",
+      "selected_mode": "Mode B (Guard)",
+      "skill_count": 2,
+      "skill_ids": [
+        "sf2-autonomic_router-route-fit-spec",
+        "sf-systematic-artifact_gate-differential-review-461fbd0c"
+      ],
+      "status": "RETURN",
+      "skill_checks": [
+        {
+          "skill_id": "sf2-autonomic_router-route-fit-spec",
+          "status": "RETURN",
+          "runtime_final_receipt_chain": {
+            "selected": true,
+            "injected": false,
+            "used": false,
+            "evidence_present": false,
+            "gate_passed": false,
+            "outcome_contributed": false
+          },
+          "blocking_skill_mount_violations": [
+            {
+              "skill_name": "sf2-autonomic_router-route-fit-spec",
+              "path": ".agents/skills/sf2/sf2-autonomic_router-route-fit-spec/SKILL.md",
+              "reason": "reference_only_status:external_reference_candidate"
+            }
+          ]
+        },
+        {
+          "skill_id": "sf-systematic-artifact_gate-differential-review-461fbd0c",
+          "status": "RETURN",
+          "runtime_final_receipt_chain": {
+            "selected": true,
+            "injected": false,
+            "used": false,
+            "evidence_present": false,
+            "gate_passed": false,
+            "outcome_contributed": false
+          },
+          "blocking_skill_mount_violations": [
+            {
+              "skill_name": "sf-systematic-artifact_gate-differential-review-461fbd0c",
+              "path": ".agents/skills/sf-systematic-challengers/sf-systematic-artifact_gate-differential-review-461fbd0c/SKILL.md",
+              "reason": "reference_only_status:external_reference_candidate"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "capability": "belief",
+      "selected_mode": "Mode B (Guard)",
+      "skill_count": 2,
+      "skill_ids": [
+        "sf2-belief-route-fit-spec",
+        "sf-systematic-artifact_gate-differential-review-461fbd0c"
+      ],
+      "status": "RETURN",
+      "skill_checks": [
+        {
+          "skill_id": "sf2-belief-route-fit-spec",
+          "status": "RETURN",
+          "runtime_final_receipt_chain": {
+            "selected": true,
+            "injected": false,
+            "used": false,
+            "evidence_present": false,
+            "gate_passed": false,
+            "outcome_contributed": false
+          },
+          "blocking_skill_mount_violations": [
+            {
+              "skill_name": "sf2-belief-route-fit-spec",
+              "path": ".agents/skills/sf2/sf2-belief-route-fit-spec/SKILL.md",
+              "reason": "reference_only_status:external_reference_candidate"
+            }
+          ]
+        },
+        {
+          "skill_id": "sf-systematic-artifact_gate-differential-review-461fbd0c",
+          "status": "RETURN",
+          "runtime_final_receipt_chain": {
+            "selected": true,
+            "injected": false,
+            "used": false,
+            "evidence_present": false,
+            "gate_passed": false,
+            "outcome_contributed": false
+          },
+          "blocking_skill_mount_violations": [
+            {
+              "skill_name": "sf-systematic-artifact_gate-differential-review-461fbd0c",
+              "path": ".agents/skills/sf-systematic-challengers/sf-systematic-artifact_gate-differential-review-461fbd0c/SKILL.md",
+              "reason": "reference_only_status:external_reference_candidate"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "capability": "codeintel",
+      "selected_mode": "Mode C (Swarm)",
+      "skill_count": 3,
+      "skill_ids": [
+        "sf-systematic-codeintel-first-principles-thinking-f95019ea",
+        "sf2-autonomic_router-route-fit-spec",
+        "sf-systematic-artifact_gate-differential-review-461fbd0c"
+      ],
+      "status": "RETURN",
+      "skill_checks": [
+        {
+          "skill_id": "sf-systematic-codeintel-first-principles-thinking-f95019ea",
+          "status": "RETURN",
+          "runtime_final_receipt_chain": {
+            "selected": true,
+            "injected": false,
+            "used": false,
+            "evidence_present": false,
+            "gate_passed": false,
+            "outcome_contributed": false
+          },
+          "blocking_skill_mount_violations": [
+            {
+              "skill_name": "sf-systematic-codeintel-first-principles-thinking-f95019ea",
+              "path": ".agents/skills/sf-systematic-challengers/sf-systematic-codeintel-first-principles-thinking-f95019ea/SKILL.md",
+              "reason": "reference_only_status:external_reference_candidate"
+            }
+          ]
+        },
+        {
+          "skill_id": "sf2-autonomic_router-route-fit-spec",
+          "status": "RETURN",
+          "runtime_final_receipt_chain": {
+            "selected": true,
+            "injected": false,
+            "used": false,
+            "evidence_present": false,
+            "gate_passed": false,
+            "outcome_contributed": false
+          },
+          "blocking_skill_mount_violations": [
+            {
+              "skill_name": "sf2-autonomic_router-route-fit-spec",
+              "path": ".agents/skills/sf2/sf2-autonomic_router-route-fit-spec/SKILL.md",
+              "reason": "reference_only_status:external_reference_candidate"
+            }
+          ]
+        },
+        {
+          "skill_id": "sf-systematic-artifact_gate-differential-review-461fbd0c",
+          "status": "RETURN",
+          "runtime_final_receipt_chain": {
+            "selected": true,
+            "injected": false,
+            "used": false,
+            "evidence_present": false,
+            "gate_passed": false,
+            "outcome_contributed": false
+          },
+          "blocking_skill_mount_violations": [
+            {
+              "skill_name": "sf-systematic-artifact_gate-differential-review-461fbd0c",
+              "path": ".agents/skills/sf-systematic-challengers/sf-systematic-artifact_gate-differential-review-461fbd0c/SKILL.md",
+              "reason": "reference_only_status:external_reference_candidate"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "capability": "ddtree",
+      "selected_mode": "Mode B (Guard)",
+      "skill_count": 2,
+      "skill_ids": [
+        "nexus-root-cause-probe",
+        "sf-systematic-artifact_gate-differential-review-461fbd0c"
+      ],
+      "status": "RETURN",
+      "skill_checks": [
+        {
+          "skill_id": "nexus-root-cause-probe",
+          "status": "RETURN",
+          "runtime_final_receipt_chain": {
+            "selected": true,
+            "injected": false,
+            "used": false,
+            "evidence_present": false,
+            "gate_passed": false,
+            "outcome_contributed": false
+          },
+          "blocking_skill_mount_violations": [
+            {
+              "skill_name": "nexus-root-cause-probe",
+              "path": ".agents/skills/nexus-root-cause-probe/SKILL.md",
+              "reason": "reference_only_status:external_reference_candidate"
+            }
+          ]
+        },
+        {
+          "skill_id": "sf-systematic-artifact_gate-differential-review-461fbd0c",
+          "status": "RETURN",
+          "runtime_final_receipt_chain": {
+            "selected": true,
+            "injected": false,
+            "used": false,
+            "evidence_present": false,
+            "gate_passed": false,
+            "outcome_contributed": false
+          },
+          "blocking_skill_mount_violations": [
+            {
+              "skill_name": "sf-systematic-artifact_gate-differential-review-461fbd0c",
+              "path": ".agents/skills/sf-systematic-challengers/sf-systematic-artifact_gate-differential-review-461fbd0c/SKILL.md",
+              "reason": "reference_only_status:external_reference_candidate"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "capability": "governance_and_trust",
+      "selected_mode": "Mode C (Swarm)",
+      "skill_count": 3,
+      "skill_ids": [
+        "sf-systematic-codeintel-first-principles-thinking-f95019ea",
+        "sf2-autonomic_router-route-fit-spec",
+        "sf-systematic-governance_and_trust-aegisops-ai-0aa841e2"
+      ],
+      "status": "RETURN",
+      "skill_checks": [
+        {
+          "skill_id": "sf-systematic-codeintel-first-principles-thinking-f95019ea",
+          "status": "RETURN",
+          "runtime_final_receipt_chain": {
+            "selected": true,
+            "injected": false,
+            "used": false,
+            "evidence_present": false,
+            "gate_passed": false,
+            "outcome_contributed": false
+          },
+          "blocking_skill_mount_violations": [
+            {
+              "skill_name": "sf-systematic-codeintel-first-principles-thinking-f95019ea",
+              "path": ".agents/skills/sf-systematic-challengers/sf-systematic-codeintel-first-principles-thinking-f95019ea/SKILL.md",
+              "reason": "reference_only_status:external_reference_candidate"
+            }
+          ]
+        },
+        {
+          "skill_id": "sf2-autonomic_router-route-fit-spec",
+          "status": "RETURN",
+          "runtime_final_receipt_chain": {
+            "selected": true,
+            "injected": false,
+            "used": false,
+            "evidence_present": false,
+            "gate_passed": false,
+            "outcome_contributed": false
+          },
+          "blocking_skill_mount_violations": [
+            {
+              "skill_name": "sf2-autonomic_router-route-fit-spec",
+              "path": ".agents/skills/sf2/sf2-autonomic_router-route-fit-spec/SKILL.md",
+              "reason": "reference_only_status:external_reference_candidate"
+            }
+          ]
+        },
+        {
+          "skill_id": "sf-systematic-governance_and_trust-aegisops-ai-0aa841e2",
+          "status": "RETURN",
+          "runtime_final_receipt_chain": {
+            "selected": true,
+            "injected": false,
+            "used": false,
+            "evidence_present": false,
+            "gate_passed": false,
+            "outcome_contributed": false
+          },
+          "blocking_skill_mount_violations": [
+            {
+              "skill_name": "sf-systematic-governance_and_trust-aegisops-ai-0aa841e2",
+              "path": ".agents/skills/sf-systematic-challengers/sf-systematic-governance_and_trust-aegisops-ai-0aa841e2/SKILL.md",
+              "reason": "reference_only_status:external_reference_candidate"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "capability": "lancedb",
+      "selected_mode": "Mode B (Guard)",
+      "skill_count": 2,
+      "skill_ids": [
+        "research-source-validation-auditor",
+        "sf-systematic-artifact_gate-differential-review-461fbd0c"
+      ],
+      "status": "RETURN",
+      "skill_checks": [
+        {
+          "skill_id": "research-source-validation-auditor",
+          "status": "RETURN",
+          "runtime_final_receipt_chain": {
+            "selected": true,
+            "injected": false,
+            "used": false,
+            "evidence_present": false,
+            "gate_passed": false,
+            "outcome_contributed": false
+          },
+          "blocking_skill_mount_violations": [
+            {
+              "skill_name": "research-source-validation-auditor",
+              "path": ".agents/skills/research-source-validation-auditor/SKILL.md",
+              "reason": "reference_only_status:external_reference_candidate"
+            }
+          ]
+        },
+        {
+          "skill_id": "sf-systematic-artifact_gate-differential-review-461fbd0c",
+          "status": "RETURN",
+          "runtime_final_receipt_chain": {
+            "selected": true,
+            "injected": false,
+            "used": false,
+            "evidence_present": false,
+            "gate_passed": false,
+            "outcome_contributed": false
+          },
+          "blocking_skill_mount_violations": [
+            {
+              "skill_name": "sf-systematic-artifact_gate-differential-review-461fbd0c",
+              "path": ".agents/skills/sf-systematic-challengers/sf-systematic-artifact_gate-differential-review-461fbd0c/SKILL.md",
+              "reason": "reference_only_status:external_reference_candidate"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "capability": "memory",
+      "selected_mode": "Mode B (Guard)",
+      "skill_count": 2,
+      "skill_ids": [
+        "sf-systematic-memory-project-skill-audit-cc8b7621",
+        "sf-systematic-artifact_gate-differential-review-461fbd0c"
+      ],
+      "status": "RETURN",
+      "skill_checks": [
+        {
+          "skill_id": "sf-systematic-memory-project-skill-audit-cc8b7621",
+          "status": "RETURN",
+          "runtime_final_receipt_chain": {
+            "selected": true,
+            "injected": false,
+            "used": false,
+            "evidence_present": false,
+            "gate_passed": false,
+            "outcome_contributed": false
+          },
+          "blocking_skill_mount_violations": [
+            {
+              "skill_name": "sf-systematic-memory-project-skill-audit-cc8b7621",
+              "path": ".agents/skills/sf-systematic-challengers/sf-systematic-memory-project-skill-audit-cc8b7621/SKILL.md",
+              "reason": "reference_only_status:external_reference_candidate"
+            }
+          ]
+        },
+        {
+          "skill_id": "sf-systematic-artifact_gate-differential-review-461fbd0c",
+          "status": "RETURN",
+          "runtime_final_receipt_chain": {
+            "selected": true,
+            "injected": false,
+            "used": false,
+            "evidence_present": false,
+            "gate_passed": false,
+            "outcome_contributed": false
+          },
+          "blocking_skill_mount_violations": [
+            {
+              "skill_name": "sf-systematic-artifact_gate-differential-review-461fbd0c",
+              "path": ".agents/skills/sf-systematic-challengers/sf-systematic-artifact_gate-differential-review-461fbd0c/SKILL.md",
+              "reason": "reference_only_status:external_reference_candidate"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "capability": "mempalace",
+      "selected_mode": "Mode B (Guard)",
+      "skill_count": 2,
+      "skill_ids": [
+        "sf2-mempalace-route-fit-spec",
+        "sf-systematic-artifact_gate-differential-review-461fbd0c"
+      ],
+      "status": "RETURN",
+      "skill_checks": [
+        {
+          "skill_id": "sf2-mempalace-route-fit-spec",
+          "status": "RETURN",
+          "runtime_final_receipt_chain": {
+            "selected": true,
+            "injected": false,
+            "used": false,
+            "evidence_present": false,
+            "gate_passed": false,
+            "outcome_contributed": false
+          },
+          "blocking_skill_mount_violations": [
+            {
+              "skill_name": "sf2-mempalace-route-fit-spec",
+              "path": ".agents/skills/sf2/sf2-mempalace-route-fit-spec/SKILL.md",
+              "reason": "reference_only_status:external_reference_candidate"
+            }
+          ]
+        },
+        {
+          "skill_id": "sf-systematic-artifact_gate-differential-review-461fbd0c",
+          "status": "RETURN",
+          "runtime_final_receipt_chain": {
+            "selected": true,
+            "injected": false,
+            "used": false,
+            "evidence_present": false,
+            "gate_passed": false,
+            "outcome_contributed": false
+          },
+          "blocking_skill_mount_violations": [
+            {
+              "skill_name": "sf-systematic-artifact_gate-differential-review-461fbd0c",
+              "path": ".agents/skills/sf-systematic-challengers/sf-systematic-artifact_gate-differential-review-461fbd0c/SKILL.md",
+              "reason": "reference_only_status:external_reference_candidate"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "capability": "regression_guard",
+      "selected_mode": "Mode B (Guard)",
+      "skill_count": 2,
+      "skill_ids": [
+        "sf-systematic-regression_guard-odoo-automated-tests-dad98433",
+        "sf-systematic-artifact_gate-differential-review-461fbd0c"
+      ],
+      "status": "RETURN",
+      "skill_checks": [
+        {
+          "skill_id": "sf-systematic-regression_guard-odoo-automated-tests-dad98433",
+          "status": "RETURN",
+          "runtime_final_receipt_chain": {
+            "selected": true,
+            "injected": false,
+            "used": false,
+            "evidence_present": false,
+            "gate_passed": false,
+            "outcome_contributed": false
+          },
+          "blocking_skill_mount_violations": [
+            {
+              "skill_name": "sf-systematic-regression_guard-odoo-automated-tests-dad98433",
+              "path": ".agents/skills/sf-systematic-challengers/sf-systematic-regression_guard-odoo-automated-tests-dad98433/SKILL.md",
+              "reason": "reference_only_status:external_reference_candidate"
+            }
+          ]
+        },
+        {
+          "skill_id": "sf-systematic-artifact_gate-differential-review-461fbd0c",
+          "status": "RETURN",
+          "runtime_final_receipt_chain": {
+            "selected": true,
+            "injected": false,
+            "used": false,
+            "evidence_present": false,
+            "gate_passed": false,
+            "outcome_contributed": false
+          },
+          "blocking_skill_mount_violations": [
+            {
+              "skill_name": "sf-systematic-artifact_gate-differential-review-461fbd0c",
+              "path": ".agents/skills/sf-systematic-challengers/sf-systematic-artifact_gate-differential-review-461fbd0c/SKILL.md",
+              "reason": "reference_only_status:external_reference_candidate"
+            }
+          ]
+        }
+      ]
+    }
+  ],
+  "claim_boundary": [
+    "HEEP runtime apply gate verifies MAT-B-approved assemblies only.",
+    "It does not update runtime defaults.",
+    "Public benchmark remains blocked and must use a separate gate."
+  ]
+}

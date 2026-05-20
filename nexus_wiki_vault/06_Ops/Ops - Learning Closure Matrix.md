@@ -2798,3 +2798,10 @@ version_scope:
 - Failure: keeping the rows as generic `HOLD_MISSING_MAT_B_EVIDENCE` after a failed clean replay would make the SF/HEEP closure loop appear unfinished forever.
 - Lesson: after an explicit clean replay attempt, unresolved evidence failures should become final blocker verdicts rather than indefinite holds.
 - Guardrail: convert repeated tokenless rows to `BLOCKED_BY_PROVIDER_TOKEN_TRUTH` and repeated receipt data-contract rows to `BLOCKED_BY_RECEIPT_DATA_CONTRACT`; neither verdict may update runtime default or public benchmark readiness.
+
+## 2026-05-20 - MAT-B approval is not runtime mount eligibility
+
+- Trigger: the HEEP runtime apply gate checked the 9 `APPROVE_HEEP_MODE_CANDIDATE` assemblies after MAT-B live compare.
+- Failure: all 9 assemblies failed runtime apply gate because their requested skills were still `external_reference_candidate`, so runtime mount contracts could not be injected.
+- Lesson: MAT-B approval proves an internal compare winner, not curated runtime eligibility.
+- Guardrail: keep runtime apply gated on `nexus_curated_candidate` skill tier plus selected/injected/used/evidence/gate/outcome receipts; reference-only winners must enter curation before runtime default review.

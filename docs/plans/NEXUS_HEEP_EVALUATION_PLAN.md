@@ -81,5 +81,24 @@ HEEP 的最終選用標準不是 local role coverage，也不是單純「複數 
 - 禁止將 `APPROVE_HEEP_MODE_CANDIDATE` 等同 runtime default；runtime default 仍需獨立 apply gate。
 - 禁止將本 contract 的 internal live compare 等同 public benchmark 或 publication-ready claim。
 
+## 7. Runtime Apply Gate (2026-05-20)
+
+MAT-B approval is a prerequisite for runtime apply review, not runtime mount eligibility. The apply gate must re-read:
+
+- `docs/reports/NEXUS_HEEP_MAT_B_LIVE_REPORT_2026-05-20.json`
+- `docs/reports/NEXUS_HEEP_FLASH_NEXUS_EXECUTION_MATRIX_2026-05-20.json`
+- `docs/reports/NEXUS_HEEP_FLASH_NEXUS_SKILL_STATUS_2026-05-20.json`
+
+The gate output is `docs/reports/NEXUS_HEEP_RUNTIME_APPLY_GATE_2026-05-20.json`.
+
+Required runtime apply conditions:
+
+- MAT-B verdict is `APPROVE_HEEP_MODE_CANDIDATE`.
+- Every requested skill is runtime-mount eligible, currently `nexus_curated_candidate`.
+- Runtime-final receipt chain has selected / injected / used / evidence / gate / outcome all true.
+- `public_benchmark_allowed=false`; public benchmark still requires its own gate.
+
+Current result: the gate is `RETURN` because approved assemblies still contain `external_reference_candidate` skills. Next action is curation/runtime-review of the winning reference skills, not runtime default apply.
+
 ---
 *Created by Antigravity - Nexus Singularity V17*
