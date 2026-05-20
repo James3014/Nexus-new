@@ -1,0 +1,4876 @@
+{
+  "blockers": [],
+  "claim_boundary": [
+    "SFV2 automates skill intake, shortlist, single-vs-multi decision, role-ablation queue, catalog writeback candidates, and runtime apply review packets.",
+    "SFV2 does not turn internal HEEP/MAT-B evidence into public benchmark or publication-ready claims.",
+    "Runtime defaults remain gated by runtime-confirmed selected/injected/used/evidence/gate/outcome receipts and provider-token truth."
+  ],
+  "milestones": {
+    "M1_skill_source_tiering": {
+      "count": 34,
+      "gate": "all candidates classified",
+      "status": "PASS"
+    },
+    "M2_capability_shortlist": {
+      "count": 34,
+      "gate": "current primary and challenger shortlist generated",
+      "status": "PASS"
+    },
+    "M3_single_skill_tournament": {
+      "count": 34,
+      "gate": "single-skill decision states derived from MAT-B",
+      "status": "PASS"
+    },
+    "M4_multi_role_ablation": {
+      "count": 97,
+      "gate": "role-drop matrices generated for every non-solo assembly",
+      "status": "PASS"
+    },
+    "M5_mat_b_decision_gate": {
+      "count": 34,
+      "gate": "MAT-B decision states normalized",
+      "status": "PASS"
+    },
+    "M6_catalog_map_ledger_update": {
+      "count": 34,
+      "gate": "catalog update actions generated",
+      "status": "PASS"
+    },
+    "M7_runtime_apply_review_packet": {
+      "count": 34,
+      "gate": "runtime apply review states generated",
+      "status": "PASS"
+    },
+    "M8_public_gate_separation": {
+      "evidence": "internal SFV2/HEEP evidence remains separate from public benchmark claims",
+      "gate": "public_benchmark_allowed=false",
+      "status": "PASS"
+    },
+    "blocker_policy": {
+      "blockers": [],
+      "status": "PASS"
+    }
+  },
+  "rows": [
+    {
+      "capability": "artifact_gate",
+      "m1_intake": {
+        "eligible_for_discovery": true,
+        "eligible_for_runtime_direct_mount": false,
+        "original_skill_name": "differential-review",
+        "primary_skill_id": "sf-systematic-artifact_gate-differential-review-461fbd0c",
+        "source_class": "approved_external_reference",
+        "source_path": "/private/tmp/nexus-sf-round4/sickn33-antigravity-awesome-skills/plugins/antigravity-awesome-skills/skills/differential-review/SKILL.md"
+      },
+      "m2_shortlist": {
+        "current_primary": "sf-systematic-artifact_gate-differential-review-461fbd0c",
+        "multi_role_candidates": [
+          {
+            "role": "Scout",
+            "skill_id": "sf-systematic-codeintel-first-principles-thinking-f95019ea"
+          },
+          {
+            "role": "Logic",
+            "skill_id": "sf2-autonomic_router-route-fit-spec"
+          },
+          {
+            "role": "Audit",
+            "skill_id": "sf-systematic-artifact_gate-differential-review-461fbd0c"
+          }
+        ],
+        "negative_control_required": true,
+        "shortlist_complete": true,
+        "single_challengers": [
+          "sf-systematic-codeintel-first-principles-thinking-f95019ea",
+          "sf2-autonomic_router-route-fit-spec"
+        ]
+      },
+      "m3_single_skill_tournament": {
+        "cost_read_after_correctness_only": true,
+        "decision": "KEEP_SINGLE_PRIMARY",
+        "public_benchmark_allowed": false,
+        "runtime_update_allowed": false
+      },
+      "m4_multi_skill_assembly": {
+        "assembly": [
+          {
+            "role": "Scout",
+            "skill_id": "sf-systematic-codeintel-first-principles-thinking-f95019ea"
+          },
+          {
+            "role": "Logic",
+            "skill_id": "sf2-autonomic_router-route-fit-spec"
+          },
+          {
+            "role": "Audit",
+            "skill_id": "sf-systematic-artifact_gate-differential-review-461fbd0c"
+          }
+        ],
+        "assembly_kind": "scout_logic_audit",
+        "mode": "Mode C (Swarm)"
+      },
+      "m5_role_ablation": {
+        "capability": "artifact_gate",
+        "contribution_gate": "full assembly must beat every minus-role arm before public/default claims",
+        "matrix": [
+          {
+            "arm_id": "full_assembly",
+            "dropped_role": "",
+            "skill_ids": [
+              "sf-systematic-codeintel-first-principles-thinking-f95019ea",
+              "sf2-autonomic_router-route-fit-spec",
+              "sf-systematic-artifact_gate-differential-review-461fbd0c"
+            ]
+          },
+          {
+            "arm_id": "minus_scout",
+            "dropped_role": "Scout",
+            "skill_ids": [
+              "sf2-autonomic_router-route-fit-spec",
+              "sf-systematic-artifact_gate-differential-review-461fbd0c"
+            ]
+          },
+          {
+            "arm_id": "minus_logic",
+            "dropped_role": "Logic",
+            "skill_ids": [
+              "sf-systematic-codeintel-first-principles-thinking-f95019ea",
+              "sf-systematic-artifact_gate-differential-review-461fbd0c"
+            ]
+          },
+          {
+            "arm_id": "minus_audit",
+            "dropped_role": "Audit",
+            "skill_ids": [
+              "sf-systematic-codeintel-first-principles-thinking-f95019ea",
+              "sf2-autonomic_router-route-fit-spec"
+            ]
+          }
+        ],
+        "status": "MATRIX_GENERATED_NOT_SELECTED"
+      },
+      "m6_mat_b_decision": {
+        "baseline": {
+          "evidence_seal_count": 1,
+          "infra_invalid_reason": "",
+          "phase_wall_total_sec": 29.1261,
+          "pollution_pct": 0.0,
+          "receipt_chain_pass": true,
+          "reopen_rate": 0.0,
+          "reopen_rate_source": "deterministic_receipt_replay_proxy",
+          "skill_mount_contract_status": "PASS",
+          "success_rate": 1.0,
+          "total_tokens": 29553,
+          "trust_mismatch": false
+        },
+        "challenger": {
+          "evidence_seal_count": 3,
+          "infra_invalid_reason": "",
+          "phase_wall_total_sec": 59.8368,
+          "pollution_pct": 0.0,
+          "receipt_chain_pass": true,
+          "reopen_rate": 0.0,
+          "reopen_rate_source": "deterministic_receipt_replay_proxy",
+          "skill_mount_contract_status": "PASS",
+          "success_rate": 1.0,
+          "total_tokens": 35444,
+          "trust_mismatch": false
+        },
+        "correctness_before_cost": true,
+        "decision_state": "KEEP_SINGLE_PRIMARY",
+        "delta": {
+          "evidence_seal_count_delta": 2,
+          "pollution_pct_delta": 0.0,
+          "reopen_rate_delta": 0.0,
+          "success_rate_delta": 0.0,
+          "token_delta": 5891,
+          "wall_delta": 30.7107
+        },
+        "public_benchmark_allowed": false,
+        "reason_codes": [
+          "efficiency_regressed"
+        ],
+        "runtime_update_allowed": false,
+        "verdict": "KEEP_SINGLE_PRIMARY"
+      },
+      "m7_catalog_update": {
+        "capability": "artifact_gate",
+        "catalog_update_allowed": true,
+        "planned_action": "retain_single_primary",
+        "public_benchmark_allowed": false,
+        "runtime_update_allowed": false,
+        "selected_skill_ids": [
+          "sf-systematic-artifact_gate-differential-review-461fbd0c"
+        ]
+      },
+      "m8_runtime_apply_review": {
+        "overlay_applied": false,
+        "post_apply_smoke_status": "",
+        "public_benchmark_allowed": false,
+        "review_state": "NO_RUNTIME_APPLY_NEEDED",
+        "runtime_update_allowed": false
+      }
+    },
+    {
+      "capability": "autonomic_router",
+      "m1_intake": {
+        "eligible_for_discovery": true,
+        "eligible_for_runtime_direct_mount": true,
+        "original_skill_name": "sf2-autonomic_router-route-fit-spec",
+        "primary_skill_id": "sf2-autonomic_router-route-fit-spec",
+        "source_class": "current_best",
+        "source_path": ""
+      },
+      "m2_shortlist": {
+        "current_primary": "sf2-autonomic_router-route-fit-spec",
+        "multi_role_candidates": [
+          {
+            "role": "primary",
+            "skill_id": "sf2-autonomic_router-route-fit-spec"
+          },
+          {
+            "role": "Audit",
+            "skill_id": "sf-systematic-artifact_gate-differential-review-461fbd0c"
+          }
+        ],
+        "negative_control_required": true,
+        "shortlist_complete": true,
+        "single_challengers": [
+          "sf-systematic-artifact_gate-differential-review-461fbd0c"
+        ]
+      },
+      "m3_single_skill_tournament": {
+        "cost_read_after_correctness_only": true,
+        "decision": "NO_SINGLE_REPLACEMENT_MULTI_ASSEMBLY_WINS",
+        "public_benchmark_allowed": false,
+        "runtime_update_allowed": false
+      },
+      "m4_multi_skill_assembly": {
+        "assembly": [
+          {
+            "role": "primary",
+            "skill_id": "sf2-autonomic_router-route-fit-spec"
+          },
+          {
+            "role": "Audit",
+            "skill_id": "sf-systematic-artifact_gate-differential-review-461fbd0c"
+          }
+        ],
+        "assembly_kind": "primary_plus_guard",
+        "mode": "Mode B (Guard)"
+      },
+      "m5_role_ablation": {
+        "capability": "autonomic_router",
+        "contribution_gate": "full assembly must beat every minus-role arm before public/default claims",
+        "matrix": [
+          {
+            "arm_id": "full_assembly",
+            "dropped_role": "",
+            "skill_ids": [
+              "sf2-autonomic_router-route-fit-spec",
+              "sf-systematic-artifact_gate-differential-review-461fbd0c"
+            ]
+          },
+          {
+            "arm_id": "minus_primary",
+            "dropped_role": "primary",
+            "skill_ids": [
+              "sf-systematic-artifact_gate-differential-review-461fbd0c"
+            ]
+          },
+          {
+            "arm_id": "minus_audit",
+            "dropped_role": "Audit",
+            "skill_ids": [
+              "sf2-autonomic_router-route-fit-spec"
+            ]
+          }
+        ],
+        "status": "READY_FOR_ROLE_CONTRIBUTION_REPLAY"
+      },
+      "m6_mat_b_decision": {
+        "baseline": {
+          "evidence_seal_count": 1,
+          "infra_invalid_reason": "",
+          "phase_wall_total_sec": 135.5151,
+          "pollution_pct": 0.0,
+          "receipt_chain_pass": true,
+          "reopen_rate": 0.0,
+          "reopen_rate_source": "deterministic_receipt_replay_proxy",
+          "skill_mount_contract_status": "PASS",
+          "success_rate": 1.0,
+          "total_tokens": 62029,
+          "trust_mismatch": false
+        },
+        "challenger": {
+          "evidence_seal_count": 2,
+          "infra_invalid_reason": "",
+          "phase_wall_total_sec": 94.1448,
+          "pollution_pct": 0.0,
+          "receipt_chain_pass": true,
+          "reopen_rate": 0.0,
+          "reopen_rate_source": "deterministic_receipt_replay_proxy",
+          "skill_mount_contract_status": "PASS",
+          "success_rate": 1.0,
+          "total_tokens": 60515,
+          "trust_mismatch": false
+        },
+        "correctness_before_cost": true,
+        "decision_state": "APPROVE_MULTI_ASSEMBLY",
+        "delta": {
+          "evidence_seal_count_delta": 1,
+          "pollution_pct_delta": 0.0,
+          "reopen_rate_delta": 0.0,
+          "success_rate_delta": 0.0,
+          "token_delta": -1514,
+          "wall_delta": -41.3703
+        },
+        "public_benchmark_allowed": false,
+        "reason_codes": [],
+        "runtime_update_allowed": false,
+        "verdict": "APPROVE_HEEP_MODE_CANDIDATE"
+      },
+      "m7_catalog_update": {
+        "capability": "autonomic_router",
+        "catalog_update_allowed": true,
+        "planned_action": "set_capability_multi_skill_candidate",
+        "public_benchmark_allowed": false,
+        "runtime_update_allowed": false,
+        "selected_skill_ids": [
+          "sf2-autonomic_router-route-fit-spec",
+          "sf-systematic-artifact_gate-differential-review-461fbd0c"
+        ]
+      },
+      "m8_runtime_apply_review": {
+        "overlay_applied": true,
+        "post_apply_smoke_status": "PASS",
+        "public_benchmark_allowed": false,
+        "review_state": "RUNTIME_OVERLAY_SMOKE_PASS",
+        "runtime_update_allowed": true
+      }
+    },
+    {
+      "capability": "autoreason",
+      "m1_intake": {
+        "eligible_for_discovery": true,
+        "eligible_for_runtime_direct_mount": true,
+        "original_skill_name": "sf2-belief-route-fit-spec",
+        "primary_skill_id": "sf2-belief-route-fit-spec",
+        "source_class": "current_best",
+        "source_path": ""
+      },
+      "m2_shortlist": {
+        "current_primary": "sf2-belief-route-fit-spec",
+        "multi_role_candidates": [
+          {
+            "role": "primary",
+            "skill_id": "sf2-belief-route-fit-spec"
+          },
+          {
+            "role": "Audit",
+            "skill_id": "sf-systematic-artifact_gate-differential-review-461fbd0c"
+          }
+        ],
+        "negative_control_required": true,
+        "shortlist_complete": true,
+        "single_challengers": [
+          "sf-systematic-artifact_gate-differential-review-461fbd0c"
+        ]
+      },
+      "m3_single_skill_tournament": {
+        "cost_read_after_correctness_only": true,
+        "decision": "KEEP_SINGLE_PRIMARY",
+        "public_benchmark_allowed": false,
+        "runtime_update_allowed": false
+      },
+      "m4_multi_skill_assembly": {
+        "assembly": [
+          {
+            "role": "primary",
+            "skill_id": "sf2-belief-route-fit-spec"
+          },
+          {
+            "role": "Audit",
+            "skill_id": "sf-systematic-artifact_gate-differential-review-461fbd0c"
+          }
+        ],
+        "assembly_kind": "primary_plus_guard",
+        "mode": "Mode B (Guard)"
+      },
+      "m5_role_ablation": {
+        "capability": "autoreason",
+        "contribution_gate": "full assembly must beat every minus-role arm before public/default claims",
+        "matrix": [
+          {
+            "arm_id": "full_assembly",
+            "dropped_role": "",
+            "skill_ids": [
+              "sf2-belief-route-fit-spec",
+              "sf-systematic-artifact_gate-differential-review-461fbd0c"
+            ]
+          },
+          {
+            "arm_id": "minus_primary",
+            "dropped_role": "primary",
+            "skill_ids": [
+              "sf-systematic-artifact_gate-differential-review-461fbd0c"
+            ]
+          },
+          {
+            "arm_id": "minus_audit",
+            "dropped_role": "Audit",
+            "skill_ids": [
+              "sf2-belief-route-fit-spec"
+            ]
+          }
+        ],
+        "status": "MATRIX_GENERATED_NOT_SELECTED"
+      },
+      "m6_mat_b_decision": {
+        "baseline": {
+          "evidence_seal_count": 1,
+          "infra_invalid_reason": "",
+          "phase_wall_total_sec": 108.0229,
+          "pollution_pct": 0.0,
+          "receipt_chain_pass": true,
+          "reopen_rate": 0.0,
+          "reopen_rate_source": "deterministic_receipt_replay_proxy",
+          "skill_mount_contract_status": "PASS",
+          "success_rate": 1.0,
+          "total_tokens": 62392,
+          "trust_mismatch": false
+        },
+        "challenger": {
+          "evidence_seal_count": 2,
+          "infra_invalid_reason": "",
+          "phase_wall_total_sec": 138.7624,
+          "pollution_pct": 0.0,
+          "receipt_chain_pass": true,
+          "reopen_rate": 0.0,
+          "reopen_rate_source": "deterministic_receipt_replay_proxy",
+          "skill_mount_contract_status": "PASS",
+          "success_rate": 1.0,
+          "total_tokens": 64069,
+          "trust_mismatch": false
+        },
+        "correctness_before_cost": true,
+        "decision_state": "KEEP_SINGLE_PRIMARY",
+        "delta": {
+          "evidence_seal_count_delta": 1,
+          "pollution_pct_delta": 0.0,
+          "reopen_rate_delta": 0.0,
+          "success_rate_delta": 0.0,
+          "token_delta": 1677,
+          "wall_delta": 30.7395
+        },
+        "public_benchmark_allowed": false,
+        "reason_codes": [
+          "efficiency_regressed"
+        ],
+        "runtime_update_allowed": false,
+        "verdict": "KEEP_SINGLE_PRIMARY"
+      },
+      "m7_catalog_update": {
+        "capability": "autoreason",
+        "catalog_update_allowed": true,
+        "planned_action": "retain_single_primary",
+        "public_benchmark_allowed": false,
+        "runtime_update_allowed": false,
+        "selected_skill_ids": [
+          "sf2-belief-route-fit-spec"
+        ]
+      },
+      "m8_runtime_apply_review": {
+        "overlay_applied": false,
+        "post_apply_smoke_status": "",
+        "public_benchmark_allowed": false,
+        "review_state": "NO_RUNTIME_APPLY_NEEDED",
+        "runtime_update_allowed": false
+      }
+    },
+    {
+      "capability": "belief",
+      "m1_intake": {
+        "eligible_for_discovery": true,
+        "eligible_for_runtime_direct_mount": true,
+        "original_skill_name": "sf2-belief-route-fit-spec",
+        "primary_skill_id": "sf2-belief-route-fit-spec",
+        "source_class": "current_best",
+        "source_path": ""
+      },
+      "m2_shortlist": {
+        "current_primary": "sf2-belief-route-fit-spec",
+        "multi_role_candidates": [
+          {
+            "role": "primary",
+            "skill_id": "sf2-belief-route-fit-spec"
+          },
+          {
+            "role": "Audit",
+            "skill_id": "sf-systematic-artifact_gate-differential-review-461fbd0c"
+          }
+        ],
+        "negative_control_required": true,
+        "shortlist_complete": true,
+        "single_challengers": [
+          "sf-systematic-artifact_gate-differential-review-461fbd0c"
+        ]
+      },
+      "m3_single_skill_tournament": {
+        "cost_read_after_correctness_only": true,
+        "decision": "NO_SINGLE_REPLACEMENT_MULTI_ASSEMBLY_WINS",
+        "public_benchmark_allowed": false,
+        "runtime_update_allowed": false
+      },
+      "m4_multi_skill_assembly": {
+        "assembly": [
+          {
+            "role": "primary",
+            "skill_id": "sf2-belief-route-fit-spec"
+          },
+          {
+            "role": "Audit",
+            "skill_id": "sf-systematic-artifact_gate-differential-review-461fbd0c"
+          }
+        ],
+        "assembly_kind": "primary_plus_guard",
+        "mode": "Mode B (Guard)"
+      },
+      "m5_role_ablation": {
+        "capability": "belief",
+        "contribution_gate": "full assembly must beat every minus-role arm before public/default claims",
+        "matrix": [
+          {
+            "arm_id": "full_assembly",
+            "dropped_role": "",
+            "skill_ids": [
+              "sf2-belief-route-fit-spec",
+              "sf-systematic-artifact_gate-differential-review-461fbd0c"
+            ]
+          },
+          {
+            "arm_id": "minus_primary",
+            "dropped_role": "primary",
+            "skill_ids": [
+              "sf-systematic-artifact_gate-differential-review-461fbd0c"
+            ]
+          },
+          {
+            "arm_id": "minus_audit",
+            "dropped_role": "Audit",
+            "skill_ids": [
+              "sf2-belief-route-fit-spec"
+            ]
+          }
+        ],
+        "status": "READY_FOR_ROLE_CONTRIBUTION_REPLAY"
+      },
+      "m6_mat_b_decision": {
+        "baseline": {
+          "evidence_seal_count": 1,
+          "infra_invalid_reason": "",
+          "phase_wall_total_sec": 185.7285,
+          "pollution_pct": 0.0,
+          "receipt_chain_pass": true,
+          "reopen_rate": 0.0,
+          "reopen_rate_source": "deterministic_receipt_replay_proxy",
+          "skill_mount_contract_status": "PASS",
+          "success_rate": 1.0,
+          "total_tokens": 65970,
+          "trust_mismatch": false
+        },
+        "challenger": {
+          "evidence_seal_count": 2,
+          "infra_invalid_reason": "",
+          "phase_wall_total_sec": 113.6623,
+          "pollution_pct": 0.0,
+          "receipt_chain_pass": true,
+          "reopen_rate": 0.0,
+          "reopen_rate_source": "deterministic_receipt_replay_proxy",
+          "skill_mount_contract_status": "PASS",
+          "success_rate": 1.0,
+          "total_tokens": 61592,
+          "trust_mismatch": false
+        },
+        "correctness_before_cost": true,
+        "decision_state": "APPROVE_MULTI_ASSEMBLY",
+        "delta": {
+          "evidence_seal_count_delta": 1,
+          "pollution_pct_delta": 0.0,
+          "reopen_rate_delta": 0.0,
+          "success_rate_delta": 0.0,
+          "token_delta": -4378,
+          "wall_delta": -72.0662
+        },
+        "public_benchmark_allowed": false,
+        "reason_codes": [],
+        "runtime_update_allowed": false,
+        "verdict": "APPROVE_HEEP_MODE_CANDIDATE"
+      },
+      "m7_catalog_update": {
+        "capability": "belief",
+        "catalog_update_allowed": true,
+        "planned_action": "set_capability_multi_skill_candidate",
+        "public_benchmark_allowed": false,
+        "runtime_update_allowed": false,
+        "selected_skill_ids": [
+          "sf2-belief-route-fit-spec",
+          "sf-systematic-artifact_gate-differential-review-461fbd0c"
+        ]
+      },
+      "m8_runtime_apply_review": {
+        "overlay_applied": true,
+        "post_apply_smoke_status": "PASS",
+        "public_benchmark_allowed": false,
+        "review_state": "RUNTIME_OVERLAY_SMOKE_PASS",
+        "runtime_update_allowed": true
+      }
+    },
+    {
+      "capability": "benchmark_meta_opt",
+      "m1_intake": {
+        "eligible_for_discovery": true,
+        "eligible_for_runtime_direct_mount": false,
+        "original_skill_name": "hugging-face-trackio",
+        "primary_skill_id": "sf-systematic-benchmark_meta_opt-hugging-face-trackio-d21c6b90",
+        "source_class": "approved_external_reference",
+        "source_path": "/private/tmp/nexus-sf-round4/sickn33-antigravity-awesome-skills/plugins/antigravity-awesome-skills/skills/hugging-face-trackio/SKILL.md"
+      },
+      "m2_shortlist": {
+        "current_primary": "sf-systematic-benchmark_meta_opt-hugging-face-trackio-d21c6b90",
+        "multi_role_candidates": [
+          {
+            "role": "Scout",
+            "skill_id": "sf-systematic-codeintel-first-principles-thinking-f95019ea"
+          },
+          {
+            "role": "Logic",
+            "skill_id": "sf-systematic-benchmark_meta_opt-hugging-face-trackio-d21c6b90"
+          },
+          {
+            "role": "Audit",
+            "skill_id": "sf-systematic-artifact_gate-differential-review-461fbd0c"
+          }
+        ],
+        "negative_control_required": true,
+        "shortlist_complete": true,
+        "single_challengers": [
+          "sf-systematic-codeintel-first-principles-thinking-f95019ea",
+          "sf-systematic-artifact_gate-differential-review-461fbd0c"
+        ]
+      },
+      "m3_single_skill_tournament": {
+        "cost_read_after_correctness_only": true,
+        "decision": "KEEP_SINGLE_PRIMARY",
+        "public_benchmark_allowed": false,
+        "runtime_update_allowed": false
+      },
+      "m4_multi_skill_assembly": {
+        "assembly": [
+          {
+            "role": "Scout",
+            "skill_id": "sf-systematic-codeintel-first-principles-thinking-f95019ea"
+          },
+          {
+            "role": "Logic",
+            "skill_id": "sf-systematic-benchmark_meta_opt-hugging-face-trackio-d21c6b90"
+          },
+          {
+            "role": "Audit",
+            "skill_id": "sf-systematic-artifact_gate-differential-review-461fbd0c"
+          }
+        ],
+        "assembly_kind": "scout_logic_audit",
+        "mode": "Mode C (Swarm)"
+      },
+      "m5_role_ablation": {
+        "capability": "benchmark_meta_opt",
+        "contribution_gate": "full assembly must beat every minus-role arm before public/default claims",
+        "matrix": [
+          {
+            "arm_id": "full_assembly",
+            "dropped_role": "",
+            "skill_ids": [
+              "sf-systematic-codeintel-first-principles-thinking-f95019ea",
+              "sf-systematic-benchmark_meta_opt-hugging-face-trackio-d21c6b90",
+              "sf-systematic-artifact_gate-differential-review-461fbd0c"
+            ]
+          },
+          {
+            "arm_id": "minus_scout",
+            "dropped_role": "Scout",
+            "skill_ids": [
+              "sf-systematic-benchmark_meta_opt-hugging-face-trackio-d21c6b90",
+              "sf-systematic-artifact_gate-differential-review-461fbd0c"
+            ]
+          },
+          {
+            "arm_id": "minus_logic",
+            "dropped_role": "Logic",
+            "skill_ids": [
+              "sf-systematic-codeintel-first-principles-thinking-f95019ea",
+              "sf-systematic-artifact_gate-differential-review-461fbd0c"
+            ]
+          },
+          {
+            "arm_id": "minus_audit",
+            "dropped_role": "Audit",
+            "skill_ids": [
+              "sf-systematic-codeintel-first-principles-thinking-f95019ea",
+              "sf-systematic-benchmark_meta_opt-hugging-face-trackio-d21c6b90"
+            ]
+          }
+        ],
+        "status": "MATRIX_GENERATED_NOT_SELECTED"
+      },
+      "m6_mat_b_decision": {
+        "baseline": {
+          "evidence_seal_count": 1,
+          "infra_invalid_reason": "",
+          "phase_wall_total_sec": 105.9456,
+          "pollution_pct": 0.0,
+          "receipt_chain_pass": true,
+          "reopen_rate": 0.0,
+          "reopen_rate_source": "deterministic_receipt_replay_proxy",
+          "skill_mount_contract_status": "PASS",
+          "success_rate": 1.0,
+          "total_tokens": 61897,
+          "trust_mismatch": false
+        },
+        "challenger": {
+          "evidence_seal_count": 3,
+          "infra_invalid_reason": "",
+          "phase_wall_total_sec": 124.2769,
+          "pollution_pct": 0.0,
+          "receipt_chain_pass": true,
+          "reopen_rate": 0.0,
+          "reopen_rate_source": "deterministic_receipt_replay_proxy",
+          "skill_mount_contract_status": "PASS",
+          "success_rate": 1.0,
+          "total_tokens": 66442,
+          "trust_mismatch": false
+        },
+        "correctness_before_cost": true,
+        "decision_state": "KEEP_SINGLE_PRIMARY",
+        "delta": {
+          "evidence_seal_count_delta": 2,
+          "pollution_pct_delta": 0.0,
+          "reopen_rate_delta": 0.0,
+          "success_rate_delta": 0.0,
+          "token_delta": 4545,
+          "wall_delta": 18.3313
+        },
+        "public_benchmark_allowed": false,
+        "reason_codes": [
+          "efficiency_regressed"
+        ],
+        "runtime_update_allowed": false,
+        "verdict": "KEEP_SINGLE_PRIMARY"
+      },
+      "m7_catalog_update": {
+        "capability": "benchmark_meta_opt",
+        "catalog_update_allowed": true,
+        "planned_action": "retain_single_primary",
+        "public_benchmark_allowed": false,
+        "runtime_update_allowed": false,
+        "selected_skill_ids": [
+          "sf-systematic-benchmark_meta_opt-hugging-face-trackio-d21c6b90"
+        ]
+      },
+      "m8_runtime_apply_review": {
+        "overlay_applied": false,
+        "post_apply_smoke_status": "",
+        "public_benchmark_allowed": false,
+        "review_state": "NO_RUNTIME_APPLY_NEEDED",
+        "runtime_update_allowed": false
+      }
+    },
+    {
+      "capability": "claim_gate",
+      "m1_intake": {
+        "eligible_for_discovery": true,
+        "eligible_for_runtime_direct_mount": true,
+        "original_skill_name": "nexus-benchmark-continuous-optimization",
+        "primary_skill_id": "nexus-benchmark-continuous-optimization",
+        "source_class": "current_best",
+        "source_path": ""
+      },
+      "m2_shortlist": {
+        "current_primary": "nexus-benchmark-continuous-optimization",
+        "multi_role_candidates": [
+          {
+            "role": "primary",
+            "skill_id": "nexus-benchmark-continuous-optimization"
+          },
+          {
+            "role": "Logic",
+            "skill_id": "sf2-autonomic_router-route-fit-spec"
+          }
+        ],
+        "negative_control_required": true,
+        "shortlist_complete": true,
+        "single_challengers": [
+          "sf2-autonomic_router-route-fit-spec"
+        ]
+      },
+      "m3_single_skill_tournament": {
+        "cost_read_after_correctness_only": true,
+        "decision": "KEEP_SINGLE_PRIMARY",
+        "public_benchmark_allowed": false,
+        "runtime_update_allowed": false
+      },
+      "m4_multi_skill_assembly": {
+        "assembly": [
+          {
+            "role": "primary",
+            "skill_id": "nexus-benchmark-continuous-optimization"
+          },
+          {
+            "role": "Logic",
+            "skill_id": "sf2-autonomic_router-route-fit-spec"
+          }
+        ],
+        "assembly_kind": "primary_plus_guard",
+        "mode": "Mode B (Guard)"
+      },
+      "m5_role_ablation": {
+        "capability": "claim_gate",
+        "contribution_gate": "full assembly must beat every minus-role arm before public/default claims",
+        "matrix": [
+          {
+            "arm_id": "full_assembly",
+            "dropped_role": "",
+            "skill_ids": [
+              "nexus-benchmark-continuous-optimization",
+              "sf2-autonomic_router-route-fit-spec"
+            ]
+          },
+          {
+            "arm_id": "minus_primary",
+            "dropped_role": "primary",
+            "skill_ids": [
+              "sf2-autonomic_router-route-fit-spec"
+            ]
+          },
+          {
+            "arm_id": "minus_logic",
+            "dropped_role": "Logic",
+            "skill_ids": [
+              "nexus-benchmark-continuous-optimization"
+            ]
+          }
+        ],
+        "status": "MATRIX_GENERATED_NOT_SELECTED"
+      },
+      "m6_mat_b_decision": {
+        "baseline": {
+          "evidence_seal_count": 1,
+          "infra_invalid_reason": "",
+          "phase_wall_total_sec": 45.1351,
+          "pollution_pct": 0.0,
+          "receipt_chain_pass": true,
+          "reopen_rate": 0.0,
+          "reopen_rate_source": "deterministic_receipt_replay_proxy",
+          "skill_mount_contract_status": "PASS",
+          "success_rate": 1.0,
+          "total_tokens": 59359,
+          "trust_mismatch": false
+        },
+        "challenger": {
+          "evidence_seal_count": 2,
+          "infra_invalid_reason": "",
+          "phase_wall_total_sec": 57.6911,
+          "pollution_pct": 0.0,
+          "receipt_chain_pass": true,
+          "reopen_rate": 0.0,
+          "reopen_rate_source": "deterministic_receipt_replay_proxy",
+          "skill_mount_contract_status": "PASS",
+          "success_rate": 1.0,
+          "total_tokens": 62656,
+          "trust_mismatch": false
+        },
+        "correctness_before_cost": true,
+        "decision_state": "KEEP_SINGLE_PRIMARY",
+        "delta": {
+          "evidence_seal_count_delta": 1,
+          "pollution_pct_delta": 0.0,
+          "reopen_rate_delta": 0.0,
+          "success_rate_delta": 0.0,
+          "token_delta": 3297,
+          "wall_delta": 12.556
+        },
+        "public_benchmark_allowed": false,
+        "reason_codes": [
+          "efficiency_regressed"
+        ],
+        "runtime_update_allowed": false,
+        "verdict": "KEEP_SINGLE_PRIMARY"
+      },
+      "m7_catalog_update": {
+        "capability": "claim_gate",
+        "catalog_update_allowed": true,
+        "planned_action": "retain_single_primary",
+        "public_benchmark_allowed": false,
+        "runtime_update_allowed": false,
+        "selected_skill_ids": [
+          "nexus-benchmark-continuous-optimization"
+        ]
+      },
+      "m8_runtime_apply_review": {
+        "overlay_applied": false,
+        "post_apply_smoke_status": "",
+        "public_benchmark_allowed": false,
+        "review_state": "NO_RUNTIME_APPLY_NEEDED",
+        "runtime_update_allowed": false
+      }
+    },
+    {
+      "capability": "codeintel",
+      "m1_intake": {
+        "eligible_for_discovery": true,
+        "eligible_for_runtime_direct_mount": false,
+        "original_skill_name": "First Principles Thinking",
+        "primary_skill_id": "sf-systematic-codeintel-first-principles-thinking-f95019ea",
+        "source_class": "approved_external_reference",
+        "source_path": "/private/tmp/nexus-sf-round7/awesome-skills-first-principles-skill/SKILL.md"
+      },
+      "m2_shortlist": {
+        "current_primary": "sf-systematic-codeintel-first-principles-thinking-f95019ea",
+        "multi_role_candidates": [
+          {
+            "role": "Scout",
+            "skill_id": "sf-systematic-codeintel-first-principles-thinking-f95019ea"
+          },
+          {
+            "role": "Logic",
+            "skill_id": "sf2-autonomic_router-route-fit-spec"
+          },
+          {
+            "role": "Audit",
+            "skill_id": "sf-systematic-artifact_gate-differential-review-461fbd0c"
+          }
+        ],
+        "negative_control_required": true,
+        "shortlist_complete": true,
+        "single_challengers": [
+          "sf2-autonomic_router-route-fit-spec",
+          "sf-systematic-artifact_gate-differential-review-461fbd0c"
+        ]
+      },
+      "m3_single_skill_tournament": {
+        "cost_read_after_correctness_only": true,
+        "decision": "NO_SINGLE_REPLACEMENT_MULTI_ASSEMBLY_WINS",
+        "public_benchmark_allowed": false,
+        "runtime_update_allowed": false
+      },
+      "m4_multi_skill_assembly": {
+        "assembly": [
+          {
+            "role": "Scout",
+            "skill_id": "sf-systematic-codeintel-first-principles-thinking-f95019ea"
+          },
+          {
+            "role": "Logic",
+            "skill_id": "sf2-autonomic_router-route-fit-spec"
+          },
+          {
+            "role": "Audit",
+            "skill_id": "sf-systematic-artifact_gate-differential-review-461fbd0c"
+          }
+        ],
+        "assembly_kind": "scout_logic_audit",
+        "mode": "Mode C (Swarm)"
+      },
+      "m5_role_ablation": {
+        "capability": "codeintel",
+        "contribution_gate": "full assembly must beat every minus-role arm before public/default claims",
+        "matrix": [
+          {
+            "arm_id": "full_assembly",
+            "dropped_role": "",
+            "skill_ids": [
+              "sf-systematic-codeintel-first-principles-thinking-f95019ea",
+              "sf2-autonomic_router-route-fit-spec",
+              "sf-systematic-artifact_gate-differential-review-461fbd0c"
+            ]
+          },
+          {
+            "arm_id": "minus_scout",
+            "dropped_role": "Scout",
+            "skill_ids": [
+              "sf2-autonomic_router-route-fit-spec",
+              "sf-systematic-artifact_gate-differential-review-461fbd0c"
+            ]
+          },
+          {
+            "arm_id": "minus_logic",
+            "dropped_role": "Logic",
+            "skill_ids": [
+              "sf-systematic-codeintel-first-principles-thinking-f95019ea",
+              "sf-systematic-artifact_gate-differential-review-461fbd0c"
+            ]
+          },
+          {
+            "arm_id": "minus_audit",
+            "dropped_role": "Audit",
+            "skill_ids": [
+              "sf-systematic-codeintel-first-principles-thinking-f95019ea",
+              "sf2-autonomic_router-route-fit-spec"
+            ]
+          }
+        ],
+        "status": "READY_FOR_ROLE_CONTRIBUTION_REPLAY"
+      },
+      "m6_mat_b_decision": {
+        "baseline": {
+          "evidence_seal_count": 1,
+          "infra_invalid_reason": "",
+          "phase_wall_total_sec": 159.0759,
+          "pollution_pct": 0.0,
+          "receipt_chain_pass": true,
+          "reopen_rate": 0.0,
+          "reopen_rate_source": "deterministic_receipt_replay_proxy",
+          "skill_mount_contract_status": "PASS",
+          "success_rate": 1.0,
+          "total_tokens": 67856,
+          "trust_mismatch": false
+        },
+        "challenger": {
+          "evidence_seal_count": 3,
+          "infra_invalid_reason": "",
+          "phase_wall_total_sec": 110.0551,
+          "pollution_pct": 0.0,
+          "receipt_chain_pass": true,
+          "reopen_rate": 0.0,
+          "reopen_rate_source": "deterministic_receipt_replay_proxy",
+          "skill_mount_contract_status": "PASS",
+          "success_rate": 1.0,
+          "total_tokens": 61739,
+          "trust_mismatch": false
+        },
+        "correctness_before_cost": true,
+        "decision_state": "APPROVE_MULTI_ASSEMBLY",
+        "delta": {
+          "evidence_seal_count_delta": 2,
+          "pollution_pct_delta": 0.0,
+          "reopen_rate_delta": 0.0,
+          "success_rate_delta": 0.0,
+          "token_delta": -6117,
+          "wall_delta": -49.0208
+        },
+        "public_benchmark_allowed": false,
+        "reason_codes": [],
+        "runtime_update_allowed": false,
+        "verdict": "APPROVE_HEEP_MODE_CANDIDATE"
+      },
+      "m7_catalog_update": {
+        "capability": "codeintel",
+        "catalog_update_allowed": true,
+        "planned_action": "set_capability_multi_skill_candidate",
+        "public_benchmark_allowed": false,
+        "runtime_update_allowed": false,
+        "selected_skill_ids": [
+          "sf-systematic-codeintel-first-principles-thinking-f95019ea",
+          "sf2-autonomic_router-route-fit-spec",
+          "sf-systematic-artifact_gate-differential-review-461fbd0c"
+        ]
+      },
+      "m8_runtime_apply_review": {
+        "overlay_applied": true,
+        "post_apply_smoke_status": "PASS",
+        "public_benchmark_allowed": false,
+        "review_state": "RUNTIME_OVERLAY_SMOKE_PASS",
+        "runtime_update_allowed": true
+      }
+    },
+    {
+      "capability": "ddtree",
+      "m1_intake": {
+        "eligible_for_discovery": true,
+        "eligible_for_runtime_direct_mount": true,
+        "original_skill_name": "nexus-root-cause-probe",
+        "primary_skill_id": "nexus-root-cause-probe",
+        "source_class": "current_best",
+        "source_path": ""
+      },
+      "m2_shortlist": {
+        "current_primary": "nexus-root-cause-probe",
+        "multi_role_candidates": [
+          {
+            "role": "primary",
+            "skill_id": "nexus-root-cause-probe"
+          },
+          {
+            "role": "Audit",
+            "skill_id": "sf-systematic-artifact_gate-differential-review-461fbd0c"
+          }
+        ],
+        "negative_control_required": true,
+        "shortlist_complete": true,
+        "single_challengers": [
+          "sf-systematic-artifact_gate-differential-review-461fbd0c"
+        ]
+      },
+      "m3_single_skill_tournament": {
+        "cost_read_after_correctness_only": true,
+        "decision": "NO_SINGLE_REPLACEMENT_MULTI_ASSEMBLY_WINS",
+        "public_benchmark_allowed": false,
+        "runtime_update_allowed": false
+      },
+      "m4_multi_skill_assembly": {
+        "assembly": [
+          {
+            "role": "primary",
+            "skill_id": "nexus-root-cause-probe"
+          },
+          {
+            "role": "Audit",
+            "skill_id": "sf-systematic-artifact_gate-differential-review-461fbd0c"
+          }
+        ],
+        "assembly_kind": "primary_plus_guard",
+        "mode": "Mode B (Guard)"
+      },
+      "m5_role_ablation": {
+        "capability": "ddtree",
+        "contribution_gate": "full assembly must beat every minus-role arm before public/default claims",
+        "matrix": [
+          {
+            "arm_id": "full_assembly",
+            "dropped_role": "",
+            "skill_ids": [
+              "nexus-root-cause-probe",
+              "sf-systematic-artifact_gate-differential-review-461fbd0c"
+            ]
+          },
+          {
+            "arm_id": "minus_primary",
+            "dropped_role": "primary",
+            "skill_ids": [
+              "sf-systematic-artifact_gate-differential-review-461fbd0c"
+            ]
+          },
+          {
+            "arm_id": "minus_audit",
+            "dropped_role": "Audit",
+            "skill_ids": [
+              "nexus-root-cause-probe"
+            ]
+          }
+        ],
+        "status": "READY_FOR_ROLE_CONTRIBUTION_REPLAY"
+      },
+      "m6_mat_b_decision": {
+        "baseline": {
+          "evidence_seal_count": 1,
+          "infra_invalid_reason": "",
+          "phase_wall_total_sec": 127.0889,
+          "pollution_pct": 0.0,
+          "receipt_chain_pass": true,
+          "reopen_rate": 0.0,
+          "reopen_rate_source": "deterministic_receipt_replay_proxy",
+          "skill_mount_contract_status": "PASS",
+          "success_rate": 1.0,
+          "total_tokens": 93904,
+          "trust_mismatch": false
+        },
+        "challenger": {
+          "evidence_seal_count": 2,
+          "infra_invalid_reason": "",
+          "phase_wall_total_sec": 119.0428,
+          "pollution_pct": 0.0,
+          "receipt_chain_pass": true,
+          "reopen_rate": 0.0,
+          "reopen_rate_source": "deterministic_receipt_replay_proxy",
+          "skill_mount_contract_status": "PASS",
+          "success_rate": 1.0,
+          "total_tokens": 92480,
+          "trust_mismatch": false
+        },
+        "correctness_before_cost": true,
+        "decision_state": "APPROVE_MULTI_ASSEMBLY",
+        "delta": {
+          "evidence_seal_count_delta": 1,
+          "pollution_pct_delta": 0.0,
+          "reopen_rate_delta": 0.0,
+          "success_rate_delta": 0.0,
+          "token_delta": -1424,
+          "wall_delta": -8.0461
+        },
+        "public_benchmark_allowed": false,
+        "reason_codes": [],
+        "runtime_update_allowed": false,
+        "verdict": "APPROVE_HEEP_MODE_CANDIDATE"
+      },
+      "m7_catalog_update": {
+        "capability": "ddtree",
+        "catalog_update_allowed": true,
+        "planned_action": "set_capability_multi_skill_candidate",
+        "public_benchmark_allowed": false,
+        "runtime_update_allowed": false,
+        "selected_skill_ids": [
+          "nexus-root-cause-probe",
+          "sf-systematic-artifact_gate-differential-review-461fbd0c"
+        ]
+      },
+      "m8_runtime_apply_review": {
+        "overlay_applied": true,
+        "post_apply_smoke_status": "PASS",
+        "public_benchmark_allowed": false,
+        "review_state": "RUNTIME_OVERLAY_SMOKE_PASS",
+        "runtime_update_allowed": true
+      }
+    },
+    {
+      "capability": "direct_master_loop",
+      "m1_intake": {
+        "eligible_for_discovery": true,
+        "eligible_for_runtime_direct_mount": false,
+        "original_skill_name": "build",
+        "primary_skill_id": "sf-systematic-direct_master_loop-build-32802a87",
+        "source_class": "approved_external_reference",
+        "source_path": "/private/tmp/nexus-sf-round4/sickn33-antigravity-awesome-skills/plugins/antigravity-awesome-skills/skills/build/SKILL.md"
+      },
+      "m2_shortlist": {
+        "current_primary": "sf-systematic-direct_master_loop-build-32802a87",
+        "multi_role_candidates": [
+          {
+            "role": "primary",
+            "skill_id": "sf-systematic-direct_master_loop-build-32802a87"
+          }
+        ],
+        "negative_control_required": true,
+        "shortlist_complete": true,
+        "single_challengers": []
+      },
+      "m3_single_skill_tournament": {
+        "cost_read_after_correctness_only": true,
+        "decision": "HOLD_PROVIDER_TOKEN_TRUTH",
+        "public_benchmark_allowed": false,
+        "runtime_update_allowed": false
+      },
+      "m4_multi_skill_assembly": {
+        "assembly": [
+          {
+            "role": "primary",
+            "skill_id": "sf-systematic-direct_master_loop-build-32802a87"
+          }
+        ],
+        "assembly_kind": "single_primary",
+        "mode": "Mode A (Solo)"
+      },
+      "m5_role_ablation": {
+        "contribution_gate": "solo_mode",
+        "matrix": [],
+        "status": "NOT_REQUIRED_FOR_SOLO"
+      },
+      "m6_mat_b_decision": {
+        "baseline": {
+          "evidence_seal_count": 1,
+          "infra_invalid_reason": "model_call_without_tokens",
+          "phase_wall_total_sec": 13.9598,
+          "pollution_pct": 0.0,
+          "receipt_chain_pass": true,
+          "reopen_rate": 1.0,
+          "reopen_rate_source": "deterministic_receipt_replay_proxy",
+          "skill_mount_contract_status": "PASS",
+          "success_rate": 0.0,
+          "total_tokens": 0,
+          "trust_mismatch": false
+        },
+        "challenger": {
+          "evidence_seal_count": 3,
+          "infra_invalid_reason": "model_call_without_tokens",
+          "phase_wall_total_sec": 12.482,
+          "pollution_pct": 0.0,
+          "receipt_chain_pass": true,
+          "reopen_rate": 1.0,
+          "reopen_rate_source": "deterministic_receipt_replay_proxy",
+          "skill_mount_contract_status": "PASS",
+          "success_rate": 0.0,
+          "total_tokens": 0,
+          "trust_mismatch": false
+        },
+        "correctness_before_cost": true,
+        "decision_state": "HOLD_PROVIDER_TOKEN_TRUTH",
+        "delta": {
+          "evidence_seal_count_delta": 2,
+          "pollution_pct_delta": 0.0,
+          "reopen_rate_delta": 0.0,
+          "success_rate_delta": 0.0,
+          "token_delta": 0,
+          "wall_delta": -1.4778
+        },
+        "public_benchmark_allowed": false,
+        "reason_codes": [
+          "baseline_infra_invalid:model_call_without_tokens",
+          "clean_replay_still_unclean",
+          "clean_replay:baseline_infra_invalid:model_call_without_tokens"
+        ],
+        "runtime_update_allowed": false,
+        "verdict": "BLOCKED_BY_PROVIDER_TOKEN_TRUTH"
+      },
+      "m7_catalog_update": {
+        "capability": "direct_master_loop",
+        "catalog_update_allowed": true,
+        "planned_action": "write_hold_and_replay_queue",
+        "public_benchmark_allowed": false,
+        "runtime_update_allowed": false,
+        "selected_skill_ids": [
+          "sf-systematic-direct_master_loop-build-32802a87"
+        ]
+      },
+      "m8_runtime_apply_review": {
+        "overlay_applied": false,
+        "post_apply_smoke_status": "",
+        "public_benchmark_allowed": false,
+        "review_state": "BLOCKED",
+        "runtime_update_allowed": false
+      }
+    },
+    {
+      "capability": "drone",
+      "m1_intake": {
+        "eligible_for_discovery": true,
+        "eligible_for_runtime_direct_mount": false,
+        "original_skill_name": "python-background-jobs",
+        "primary_skill_id": "sf-systematic-drone-python-background-jobs-18326a62",
+        "source_class": "approved_external_reference",
+        "source_path": "/private/tmp/nexus-sf-round7/midudev-autoskills/packages/autoskills/skills-registry/python-background-jobs/SKILL.md"
+      },
+      "m2_shortlist": {
+        "current_primary": "sf-systematic-drone-python-background-jobs-18326a62",
+        "multi_role_candidates": [
+          {
+            "role": "primary",
+            "skill_id": "sf-systematic-drone-python-background-jobs-18326a62"
+          }
+        ],
+        "negative_control_required": true,
+        "shortlist_complete": true,
+        "single_challengers": []
+      },
+      "m3_single_skill_tournament": {
+        "cost_read_after_correctness_only": true,
+        "decision": "HOLD_RECEIPT_CHAIN",
+        "public_benchmark_allowed": false,
+        "runtime_update_allowed": false
+      },
+      "m4_multi_skill_assembly": {
+        "assembly": [
+          {
+            "role": "primary",
+            "skill_id": "sf-systematic-drone-python-background-jobs-18326a62"
+          }
+        ],
+        "assembly_kind": "single_primary",
+        "mode": "Mode A (Solo)"
+      },
+      "m5_role_ablation": {
+        "contribution_gate": "solo_mode",
+        "matrix": [],
+        "status": "NOT_REQUIRED_FOR_SOLO"
+      },
+      "m6_mat_b_decision": {
+        "baseline": {
+          "evidence_seal_count": 0,
+          "infra_invalid_reason": "receipt_data_contract_violation",
+          "phase_wall_total_sec": 24.6649,
+          "pollution_pct": 0.0,
+          "receipt_chain_pass": false,
+          "reopen_rate": 1.0,
+          "reopen_rate_source": "deterministic_receipt_replay_proxy",
+          "skill_mount_contract_status": "RETURN",
+          "success_rate": 0.0,
+          "total_tokens": 1193,
+          "trust_mismatch": false
+        },
+        "challenger": {
+          "evidence_seal_count": 0,
+          "infra_invalid_reason": "receipt_data_contract_violation",
+          "phase_wall_total_sec": 12.1613,
+          "pollution_pct": 0.0,
+          "receipt_chain_pass": false,
+          "reopen_rate": 1.0,
+          "reopen_rate_source": "deterministic_receipt_replay_proxy",
+          "skill_mount_contract_status": "RETURN",
+          "success_rate": 0.0,
+          "total_tokens": 595,
+          "trust_mismatch": false
+        },
+        "correctness_before_cost": true,
+        "decision_state": "HOLD_RECEIPT_CHAIN",
+        "delta": {
+          "evidence_seal_count_delta": 0,
+          "pollution_pct_delta": 0.0,
+          "reopen_rate_delta": 0.0,
+          "success_rate_delta": 0.0,
+          "token_delta": -598,
+          "wall_delta": -12.5036
+        },
+        "public_benchmark_allowed": false,
+        "reason_codes": [
+          "baseline_infra_invalid:receipt_data_contract_violation",
+          "clean_replay_still_unclean",
+          "clean_replay:baseline_infra_invalid:receipt_data_contract_violation"
+        ],
+        "runtime_update_allowed": false,
+        "verdict": "BLOCKED_BY_RECEIPT_DATA_CONTRACT"
+      },
+      "m7_catalog_update": {
+        "capability": "drone",
+        "catalog_update_allowed": true,
+        "planned_action": "write_hold_and_replay_queue",
+        "public_benchmark_allowed": false,
+        "runtime_update_allowed": false,
+        "selected_skill_ids": [
+          "sf-systematic-drone-python-background-jobs-18326a62"
+        ]
+      },
+      "m8_runtime_apply_review": {
+        "overlay_applied": false,
+        "post_apply_smoke_status": "",
+        "public_benchmark_allowed": false,
+        "review_state": "BLOCKED",
+        "runtime_update_allowed": false
+      }
+    },
+    {
+      "capability": "external_productivity",
+      "m1_intake": {
+        "eligible_for_discovery": true,
+        "eligible_for_runtime_direct_mount": false,
+        "original_skill_name": "writer",
+        "primary_skill_id": "sf-systematic-external_productivity-writer-77dc7840",
+        "source_class": "approved_external_reference",
+        "source_path": "/private/tmp/nexus-sf-round4/sickn33-antigravity-awesome-skills/plugins/antigravity-awesome-skills/skills/libreoffice/writer/SKILL.md"
+      },
+      "m2_shortlist": {
+        "current_primary": "sf-systematic-external_productivity-writer-77dc7840",
+        "multi_role_candidates": [
+          {
+            "role": "primary",
+            "skill_id": "sf-systematic-external_productivity-writer-77dc7840"
+          }
+        ],
+        "negative_control_required": true,
+        "shortlist_complete": true,
+        "single_challengers": []
+      },
+      "m3_single_skill_tournament": {
+        "cost_read_after_correctness_only": true,
+        "decision": "HOLD_PROVIDER_TOKEN_TRUTH",
+        "public_benchmark_allowed": false,
+        "runtime_update_allowed": false
+      },
+      "m4_multi_skill_assembly": {
+        "assembly": [
+          {
+            "role": "primary",
+            "skill_id": "sf-systematic-external_productivity-writer-77dc7840"
+          }
+        ],
+        "assembly_kind": "single_primary",
+        "mode": "Mode A (Solo)"
+      },
+      "m5_role_ablation": {
+        "contribution_gate": "solo_mode",
+        "matrix": [],
+        "status": "NOT_REQUIRED_FOR_SOLO"
+      },
+      "m6_mat_b_decision": {
+        "baseline": {
+          "evidence_seal_count": 1,
+          "infra_invalid_reason": "model_call_without_tokens",
+          "phase_wall_total_sec": 11.9547,
+          "pollution_pct": 0.0,
+          "receipt_chain_pass": true,
+          "reopen_rate": 1.0,
+          "reopen_rate_source": "deterministic_receipt_replay_proxy",
+          "skill_mount_contract_status": "PASS",
+          "success_rate": 0.0,
+          "total_tokens": 0,
+          "trust_mismatch": false
+        },
+        "challenger": {
+          "evidence_seal_count": 3,
+          "infra_invalid_reason": "model_call_without_tokens",
+          "phase_wall_total_sec": 12.8667,
+          "pollution_pct": 0.0,
+          "receipt_chain_pass": true,
+          "reopen_rate": 1.0,
+          "reopen_rate_source": "deterministic_receipt_replay_proxy",
+          "skill_mount_contract_status": "PASS",
+          "success_rate": 0.0,
+          "total_tokens": 0,
+          "trust_mismatch": false
+        },
+        "correctness_before_cost": true,
+        "decision_state": "HOLD_PROVIDER_TOKEN_TRUTH",
+        "delta": {
+          "evidence_seal_count_delta": 2,
+          "pollution_pct_delta": 0.0,
+          "reopen_rate_delta": 0.0,
+          "success_rate_delta": 0.0,
+          "token_delta": 0,
+          "wall_delta": 0.912
+        },
+        "public_benchmark_allowed": false,
+        "reason_codes": [
+          "baseline_infra_invalid:model_call_without_tokens",
+          "clean_replay_still_unclean",
+          "clean_replay:baseline_infra_invalid:model_call_without_tokens"
+        ],
+        "runtime_update_allowed": false,
+        "verdict": "BLOCKED_BY_PROVIDER_TOKEN_TRUTH"
+      },
+      "m7_catalog_update": {
+        "capability": "external_productivity",
+        "catalog_update_allowed": true,
+        "planned_action": "write_hold_and_replay_queue",
+        "public_benchmark_allowed": false,
+        "runtime_update_allowed": false,
+        "selected_skill_ids": [
+          "sf-systematic-external_productivity-writer-77dc7840"
+        ]
+      },
+      "m8_runtime_apply_review": {
+        "overlay_applied": false,
+        "post_apply_smoke_status": "",
+        "public_benchmark_allowed": false,
+        "review_state": "BLOCKED",
+        "runtime_update_allowed": false
+      }
+    },
+    {
+      "capability": "file_lock_security_gate",
+      "m1_intake": {
+        "eligible_for_discovery": true,
+        "eligible_for_runtime_direct_mount": true,
+        "original_skill_name": "sf2-file_lock_security_gate-route-fit-spec",
+        "primary_skill_id": "sf2-file_lock_security_gate-route-fit-spec",
+        "source_class": "current_best",
+        "source_path": ""
+      },
+      "m2_shortlist": {
+        "current_primary": "sf2-file_lock_security_gate-route-fit-spec",
+        "multi_role_candidates": [
+          {
+            "role": "Scout",
+            "skill_id": "sf-systematic-codeintel-first-principles-thinking-f95019ea"
+          },
+          {
+            "role": "Logic",
+            "skill_id": "sf2-file_lock_security_gate-route-fit-spec"
+          },
+          {
+            "role": "Audit",
+            "skill_id": "sf-systematic-artifact_gate-differential-review-461fbd0c"
+          }
+        ],
+        "negative_control_required": true,
+        "shortlist_complete": true,
+        "single_challengers": [
+          "sf-systematic-codeintel-first-principles-thinking-f95019ea",
+          "sf-systematic-artifact_gate-differential-review-461fbd0c"
+        ]
+      },
+      "m3_single_skill_tournament": {
+        "cost_read_after_correctness_only": true,
+        "decision": "KEEP_SINGLE_PRIMARY",
+        "public_benchmark_allowed": false,
+        "runtime_update_allowed": false
+      },
+      "m4_multi_skill_assembly": {
+        "assembly": [
+          {
+            "role": "Scout",
+            "skill_id": "sf-systematic-codeintel-first-principles-thinking-f95019ea"
+          },
+          {
+            "role": "Logic",
+            "skill_id": "sf2-file_lock_security_gate-route-fit-spec"
+          },
+          {
+            "role": "Audit",
+            "skill_id": "sf-systematic-artifact_gate-differential-review-461fbd0c"
+          }
+        ],
+        "assembly_kind": "scout_logic_audit",
+        "mode": "Mode C (Swarm)"
+      },
+      "m5_role_ablation": {
+        "capability": "file_lock_security_gate",
+        "contribution_gate": "full assembly must beat every minus-role arm before public/default claims",
+        "matrix": [
+          {
+            "arm_id": "full_assembly",
+            "dropped_role": "",
+            "skill_ids": [
+              "sf-systematic-codeintel-first-principles-thinking-f95019ea",
+              "sf2-file_lock_security_gate-route-fit-spec",
+              "sf-systematic-artifact_gate-differential-review-461fbd0c"
+            ]
+          },
+          {
+            "arm_id": "minus_scout",
+            "dropped_role": "Scout",
+            "skill_ids": [
+              "sf2-file_lock_security_gate-route-fit-spec",
+              "sf-systematic-artifact_gate-differential-review-461fbd0c"
+            ]
+          },
+          {
+            "arm_id": "minus_logic",
+            "dropped_role": "Logic",
+            "skill_ids": [
+              "sf-systematic-codeintel-first-principles-thinking-f95019ea",
+              "sf-systematic-artifact_gate-differential-review-461fbd0c"
+            ]
+          },
+          {
+            "arm_id": "minus_audit",
+            "dropped_role": "Audit",
+            "skill_ids": [
+              "sf-systematic-codeintel-first-principles-thinking-f95019ea",
+              "sf2-file_lock_security_gate-route-fit-spec"
+            ]
+          }
+        ],
+        "status": "MATRIX_GENERATED_NOT_SELECTED"
+      },
+      "m6_mat_b_decision": {
+        "baseline": {
+          "evidence_seal_count": 1,
+          "infra_invalid_reason": "",
+          "phase_wall_total_sec": 62.8887,
+          "pollution_pct": 0.0,
+          "receipt_chain_pass": true,
+          "reopen_rate": 0.0,
+          "reopen_rate_source": "deterministic_receipt_replay_proxy",
+          "skill_mount_contract_status": "PASS",
+          "success_rate": 1.0,
+          "total_tokens": 62861,
+          "trust_mismatch": false
+        },
+        "challenger": {
+          "evidence_seal_count": 3,
+          "infra_invalid_reason": "",
+          "phase_wall_total_sec": 108.7997,
+          "pollution_pct": 0.0,
+          "receipt_chain_pass": true,
+          "reopen_rate": 0.0,
+          "reopen_rate_source": "deterministic_receipt_replay_proxy",
+          "skill_mount_contract_status": "PASS",
+          "success_rate": 1.0,
+          "total_tokens": 71116,
+          "trust_mismatch": false
+        },
+        "correctness_before_cost": true,
+        "decision_state": "KEEP_SINGLE_PRIMARY",
+        "delta": {
+          "evidence_seal_count_delta": 2,
+          "pollution_pct_delta": 0.0,
+          "reopen_rate_delta": 0.0,
+          "success_rate_delta": 0.0,
+          "token_delta": 8255,
+          "wall_delta": 45.911
+        },
+        "public_benchmark_allowed": false,
+        "reason_codes": [
+          "efficiency_regressed"
+        ],
+        "runtime_update_allowed": false,
+        "verdict": "KEEP_SINGLE_PRIMARY"
+      },
+      "m7_catalog_update": {
+        "capability": "file_lock_security_gate",
+        "catalog_update_allowed": true,
+        "planned_action": "retain_single_primary",
+        "public_benchmark_allowed": false,
+        "runtime_update_allowed": false,
+        "selected_skill_ids": [
+          "sf2-file_lock_security_gate-route-fit-spec"
+        ]
+      },
+      "m8_runtime_apply_review": {
+        "overlay_applied": false,
+        "post_apply_smoke_status": "",
+        "public_benchmark_allowed": false,
+        "review_state": "NO_RUNTIME_APPLY_NEEDED",
+        "runtime_update_allowed": false
+      }
+    },
+    {
+      "capability": "forecast_pregate",
+      "m1_intake": {
+        "eligible_for_discovery": true,
+        "eligible_for_runtime_direct_mount": true,
+        "original_skill_name": "create-plan",
+        "primary_skill_id": "create-plan",
+        "source_class": "current_best",
+        "source_path": ""
+      },
+      "m2_shortlist": {
+        "current_primary": "create-plan",
+        "multi_role_candidates": [
+          {
+            "role": "primary",
+            "skill_id": "create-plan"
+          },
+          {
+            "role": "Logic",
+            "skill_id": "sf2-autonomic_router-route-fit-spec"
+          }
+        ],
+        "negative_control_required": true,
+        "shortlist_complete": true,
+        "single_challengers": [
+          "sf2-autonomic_router-route-fit-spec"
+        ]
+      },
+      "m3_single_skill_tournament": {
+        "cost_read_after_correctness_only": true,
+        "decision": "KEEP_SINGLE_PRIMARY",
+        "public_benchmark_allowed": false,
+        "runtime_update_allowed": false
+      },
+      "m4_multi_skill_assembly": {
+        "assembly": [
+          {
+            "role": "primary",
+            "skill_id": "create-plan"
+          },
+          {
+            "role": "Logic",
+            "skill_id": "sf2-autonomic_router-route-fit-spec"
+          }
+        ],
+        "assembly_kind": "primary_plus_guard",
+        "mode": "Mode B (Guard)"
+      },
+      "m5_role_ablation": {
+        "capability": "forecast_pregate",
+        "contribution_gate": "full assembly must beat every minus-role arm before public/default claims",
+        "matrix": [
+          {
+            "arm_id": "full_assembly",
+            "dropped_role": "",
+            "skill_ids": [
+              "create-plan",
+              "sf2-autonomic_router-route-fit-spec"
+            ]
+          },
+          {
+            "arm_id": "minus_primary",
+            "dropped_role": "primary",
+            "skill_ids": [
+              "sf2-autonomic_router-route-fit-spec"
+            ]
+          },
+          {
+            "arm_id": "minus_logic",
+            "dropped_role": "Logic",
+            "skill_ids": [
+              "create-plan"
+            ]
+          }
+        ],
+        "status": "MATRIX_GENERATED_NOT_SELECTED"
+      },
+      "m6_mat_b_decision": {
+        "baseline": {
+          "evidence_seal_count": 1,
+          "infra_invalid_reason": "",
+          "phase_wall_total_sec": 104.955,
+          "pollution_pct": 0.0,
+          "receipt_chain_pass": true,
+          "reopen_rate": 0.0,
+          "reopen_rate_source": "deterministic_receipt_replay_proxy",
+          "skill_mount_contract_status": "PASS",
+          "success_rate": 1.0,
+          "total_tokens": 63740,
+          "trust_mismatch": false
+        },
+        "challenger": {
+          "evidence_seal_count": 2,
+          "infra_invalid_reason": "",
+          "phase_wall_total_sec": 113.5468,
+          "pollution_pct": 0.0,
+          "receipt_chain_pass": true,
+          "reopen_rate": 0.0,
+          "reopen_rate_source": "deterministic_receipt_replay_proxy",
+          "skill_mount_contract_status": "PASS",
+          "success_rate": 1.0,
+          "total_tokens": 65081,
+          "trust_mismatch": false
+        },
+        "correctness_before_cost": true,
+        "decision_state": "KEEP_SINGLE_PRIMARY",
+        "delta": {
+          "evidence_seal_count_delta": 1,
+          "pollution_pct_delta": 0.0,
+          "reopen_rate_delta": 0.0,
+          "success_rate_delta": 0.0,
+          "token_delta": 1341,
+          "wall_delta": 8.5918
+        },
+        "public_benchmark_allowed": false,
+        "reason_codes": [
+          "efficiency_regressed"
+        ],
+        "runtime_update_allowed": false,
+        "verdict": "KEEP_SINGLE_PRIMARY"
+      },
+      "m7_catalog_update": {
+        "capability": "forecast_pregate",
+        "catalog_update_allowed": true,
+        "planned_action": "retain_single_primary",
+        "public_benchmark_allowed": false,
+        "runtime_update_allowed": false,
+        "selected_skill_ids": [
+          "create-plan"
+        ]
+      },
+      "m8_runtime_apply_review": {
+        "overlay_applied": false,
+        "post_apply_smoke_status": "",
+        "public_benchmark_allowed": false,
+        "review_state": "NO_RUNTIME_APPLY_NEEDED",
+        "runtime_update_allowed": false
+      }
+    },
+    {
+      "capability": "governance_and_trust",
+      "m1_intake": {
+        "eligible_for_discovery": true,
+        "eligible_for_runtime_direct_mount": false,
+        "original_skill_name": "aegisops-ai",
+        "primary_skill_id": "sf-systematic-governance_and_trust-aegisops-ai-0aa841e2",
+        "source_class": "approved_external_reference",
+        "source_path": "/private/tmp/nexus-sf-round4/sickn33-antigravity-awesome-skills/plugins/antigravity-awesome-skills/skills/aegisops-ai/SKILL.md"
+      },
+      "m2_shortlist": {
+        "current_primary": "sf-systematic-governance_and_trust-aegisops-ai-0aa841e2",
+        "multi_role_candidates": [
+          {
+            "role": "Scout",
+            "skill_id": "sf-systematic-codeintel-first-principles-thinking-f95019ea"
+          },
+          {
+            "role": "Logic",
+            "skill_id": "sf2-autonomic_router-route-fit-spec"
+          },
+          {
+            "role": "Audit",
+            "skill_id": "sf-systematic-governance_and_trust-aegisops-ai-0aa841e2"
+          }
+        ],
+        "negative_control_required": true,
+        "shortlist_complete": true,
+        "single_challengers": [
+          "sf-systematic-codeintel-first-principles-thinking-f95019ea",
+          "sf2-autonomic_router-route-fit-spec"
+        ]
+      },
+      "m3_single_skill_tournament": {
+        "cost_read_after_correctness_only": true,
+        "decision": "NO_SINGLE_REPLACEMENT_MULTI_ASSEMBLY_WINS",
+        "public_benchmark_allowed": false,
+        "runtime_update_allowed": false
+      },
+      "m4_multi_skill_assembly": {
+        "assembly": [
+          {
+            "role": "Scout",
+            "skill_id": "sf-systematic-codeintel-first-principles-thinking-f95019ea"
+          },
+          {
+            "role": "Logic",
+            "skill_id": "sf2-autonomic_router-route-fit-spec"
+          },
+          {
+            "role": "Audit",
+            "skill_id": "sf-systematic-governance_and_trust-aegisops-ai-0aa841e2"
+          }
+        ],
+        "assembly_kind": "scout_logic_audit",
+        "mode": "Mode C (Swarm)"
+      },
+      "m5_role_ablation": {
+        "capability": "governance_and_trust",
+        "contribution_gate": "full assembly must beat every minus-role arm before public/default claims",
+        "matrix": [
+          {
+            "arm_id": "full_assembly",
+            "dropped_role": "",
+            "skill_ids": [
+              "sf-systematic-codeintel-first-principles-thinking-f95019ea",
+              "sf2-autonomic_router-route-fit-spec",
+              "sf-systematic-governance_and_trust-aegisops-ai-0aa841e2"
+            ]
+          },
+          {
+            "arm_id": "minus_scout",
+            "dropped_role": "Scout",
+            "skill_ids": [
+              "sf2-autonomic_router-route-fit-spec",
+              "sf-systematic-governance_and_trust-aegisops-ai-0aa841e2"
+            ]
+          },
+          {
+            "arm_id": "minus_logic",
+            "dropped_role": "Logic",
+            "skill_ids": [
+              "sf-systematic-codeintel-first-principles-thinking-f95019ea",
+              "sf-systematic-governance_and_trust-aegisops-ai-0aa841e2"
+            ]
+          },
+          {
+            "arm_id": "minus_audit",
+            "dropped_role": "Audit",
+            "skill_ids": [
+              "sf-systematic-codeintel-first-principles-thinking-f95019ea",
+              "sf2-autonomic_router-route-fit-spec"
+            ]
+          }
+        ],
+        "status": "READY_FOR_ROLE_CONTRIBUTION_REPLAY"
+      },
+      "m6_mat_b_decision": {
+        "baseline": {
+          "evidence_seal_count": 1,
+          "infra_invalid_reason": "",
+          "phase_wall_total_sec": 71.1706,
+          "pollution_pct": 0.0,
+          "receipt_chain_pass": true,
+          "reopen_rate": 0.0,
+          "reopen_rate_source": "deterministic_receipt_replay_proxy",
+          "skill_mount_contract_status": "PASS",
+          "success_rate": 1.0,
+          "total_tokens": 64538,
+          "trust_mismatch": false
+        },
+        "challenger": {
+          "evidence_seal_count": 3,
+          "infra_invalid_reason": "",
+          "phase_wall_total_sec": 47.6013,
+          "pollution_pct": 0.0,
+          "receipt_chain_pass": true,
+          "reopen_rate": 0.0,
+          "reopen_rate_source": "deterministic_receipt_replay_proxy",
+          "skill_mount_contract_status": "PASS",
+          "success_rate": 1.0,
+          "total_tokens": 60781,
+          "trust_mismatch": false
+        },
+        "correctness_before_cost": true,
+        "decision_state": "APPROVE_MULTI_ASSEMBLY",
+        "delta": {
+          "evidence_seal_count_delta": 2,
+          "pollution_pct_delta": 0.0,
+          "reopen_rate_delta": 0.0,
+          "success_rate_delta": 0.0,
+          "token_delta": -3757,
+          "wall_delta": -23.5693
+        },
+        "public_benchmark_allowed": false,
+        "reason_codes": [],
+        "runtime_update_allowed": false,
+        "verdict": "APPROVE_HEEP_MODE_CANDIDATE"
+      },
+      "m7_catalog_update": {
+        "capability": "governance_and_trust",
+        "catalog_update_allowed": true,
+        "planned_action": "set_capability_multi_skill_candidate",
+        "public_benchmark_allowed": false,
+        "runtime_update_allowed": false,
+        "selected_skill_ids": [
+          "sf-systematic-codeintel-first-principles-thinking-f95019ea",
+          "sf2-autonomic_router-route-fit-spec",
+          "sf-systematic-governance_and_trust-aegisops-ai-0aa841e2"
+        ]
+      },
+      "m8_runtime_apply_review": {
+        "overlay_applied": true,
+        "post_apply_smoke_status": "PASS",
+        "public_benchmark_allowed": false,
+        "review_state": "RUNTIME_OVERLAY_SMOKE_PASS",
+        "runtime_update_allowed": true
+      }
+    },
+    {
+      "capability": "hyper_sprint",
+      "m1_intake": {
+        "eligible_for_discovery": true,
+        "eligible_for_runtime_direct_mount": true,
+        "original_skill_name": "sf2-hyper_sprint-route-fit-spec",
+        "primary_skill_id": "sf2-hyper_sprint-route-fit-spec",
+        "source_class": "current_best",
+        "source_path": ""
+      },
+      "m2_shortlist": {
+        "current_primary": "sf2-hyper_sprint-route-fit-spec",
+        "multi_role_candidates": [
+          {
+            "role": "primary",
+            "skill_id": "sf2-hyper_sprint-route-fit-spec"
+          }
+        ],
+        "negative_control_required": true,
+        "shortlist_complete": true,
+        "single_challengers": []
+      },
+      "m3_single_skill_tournament": {
+        "cost_read_after_correctness_only": true,
+        "decision": "HOLD_PROVIDER_TOKEN_TRUTH",
+        "public_benchmark_allowed": false,
+        "runtime_update_allowed": false
+      },
+      "m4_multi_skill_assembly": {
+        "assembly": [
+          {
+            "role": "primary",
+            "skill_id": "sf2-hyper_sprint-route-fit-spec"
+          }
+        ],
+        "assembly_kind": "single_primary",
+        "mode": "Mode A (Solo)"
+      },
+      "m5_role_ablation": {
+        "contribution_gate": "solo_mode",
+        "matrix": [],
+        "status": "NOT_REQUIRED_FOR_SOLO"
+      },
+      "m6_mat_b_decision": {
+        "baseline": {
+          "evidence_seal_count": 1,
+          "infra_invalid_reason": "model_call_without_tokens",
+          "phase_wall_total_sec": 12.8269,
+          "pollution_pct": 0.0,
+          "receipt_chain_pass": true,
+          "reopen_rate": 1.0,
+          "reopen_rate_source": "deterministic_receipt_replay_proxy",
+          "skill_mount_contract_status": "PASS",
+          "success_rate": 0.0,
+          "total_tokens": 0,
+          "trust_mismatch": false
+        },
+        "challenger": {
+          "evidence_seal_count": 3,
+          "infra_invalid_reason": "model_call_without_tokens",
+          "phase_wall_total_sec": 11.2277,
+          "pollution_pct": 0.0,
+          "receipt_chain_pass": true,
+          "reopen_rate": 1.0,
+          "reopen_rate_source": "deterministic_receipt_replay_proxy",
+          "skill_mount_contract_status": "PASS",
+          "success_rate": 0.0,
+          "total_tokens": 0,
+          "trust_mismatch": false
+        },
+        "correctness_before_cost": true,
+        "decision_state": "HOLD_PROVIDER_TOKEN_TRUTH",
+        "delta": {
+          "evidence_seal_count_delta": 2,
+          "pollution_pct_delta": 0.0,
+          "reopen_rate_delta": 0.0,
+          "success_rate_delta": 0.0,
+          "token_delta": 0,
+          "wall_delta": -1.5992
+        },
+        "public_benchmark_allowed": false,
+        "reason_codes": [
+          "baseline_infra_invalid:model_call_without_tokens",
+          "clean_replay_still_unclean",
+          "clean_replay:baseline_infra_invalid:model_call_without_tokens"
+        ],
+        "runtime_update_allowed": false,
+        "verdict": "BLOCKED_BY_PROVIDER_TOKEN_TRUTH"
+      },
+      "m7_catalog_update": {
+        "capability": "hyper_sprint",
+        "catalog_update_allowed": true,
+        "planned_action": "write_hold_and_replay_queue",
+        "public_benchmark_allowed": false,
+        "runtime_update_allowed": false,
+        "selected_skill_ids": [
+          "sf2-hyper_sprint-route-fit-spec"
+        ]
+      },
+      "m8_runtime_apply_review": {
+        "overlay_applied": false,
+        "post_apply_smoke_status": "",
+        "public_benchmark_allowed": false,
+        "review_state": "BLOCKED",
+        "runtime_update_allowed": false
+      }
+    },
+    {
+      "capability": "lancedb",
+      "m1_intake": {
+        "eligible_for_discovery": true,
+        "eligible_for_runtime_direct_mount": true,
+        "original_skill_name": "research-source-validation-auditor",
+        "primary_skill_id": "research-source-validation-auditor",
+        "source_class": "current_best",
+        "source_path": ""
+      },
+      "m2_shortlist": {
+        "current_primary": "research-source-validation-auditor",
+        "multi_role_candidates": [
+          {
+            "role": "primary",
+            "skill_id": "research-source-validation-auditor"
+          },
+          {
+            "role": "Logic",
+            "skill_id": "sf2-autonomic_router-route-fit-spec"
+          }
+        ],
+        "negative_control_required": true,
+        "shortlist_complete": true,
+        "single_challengers": [
+          "sf2-autonomic_router-route-fit-spec"
+        ]
+      },
+      "m3_single_skill_tournament": {
+        "cost_read_after_correctness_only": true,
+        "decision": "NO_SINGLE_REPLACEMENT_MULTI_ASSEMBLY_WINS",
+        "public_benchmark_allowed": false,
+        "runtime_update_allowed": false
+      },
+      "m4_multi_skill_assembly": {
+        "assembly": [
+          {
+            "role": "primary",
+            "skill_id": "research-source-validation-auditor"
+          },
+          {
+            "role": "Logic",
+            "skill_id": "sf2-autonomic_router-route-fit-spec"
+          }
+        ],
+        "assembly_kind": "primary_plus_guard",
+        "mode": "Mode B (Guard)"
+      },
+      "m5_role_ablation": {
+        "capability": "lancedb",
+        "contribution_gate": "full assembly must beat every minus-role arm before public/default claims",
+        "matrix": [
+          {
+            "arm_id": "full_assembly",
+            "dropped_role": "",
+            "skill_ids": [
+              "research-source-validation-auditor",
+              "sf2-autonomic_router-route-fit-spec"
+            ]
+          },
+          {
+            "arm_id": "minus_primary",
+            "dropped_role": "primary",
+            "skill_ids": [
+              "sf2-autonomic_router-route-fit-spec"
+            ]
+          },
+          {
+            "arm_id": "minus_logic",
+            "dropped_role": "Logic",
+            "skill_ids": [
+              "research-source-validation-auditor"
+            ]
+          }
+        ],
+        "status": "READY_FOR_ROLE_CONTRIBUTION_REPLAY"
+      },
+      "m6_mat_b_decision": {
+        "baseline": {
+          "evidence_seal_count": 1,
+          "infra_invalid_reason": "",
+          "phase_wall_total_sec": 143.4347,
+          "pollution_pct": 0.0,
+          "receipt_chain_pass": true,
+          "reopen_rate": 0.0,
+          "reopen_rate_source": "deterministic_receipt_replay_proxy",
+          "skill_mount_contract_status": "PASS",
+          "success_rate": 1.0,
+          "total_tokens": 65159,
+          "trust_mismatch": false
+        },
+        "challenger": {
+          "evidence_seal_count": 2,
+          "infra_invalid_reason": "",
+          "phase_wall_total_sec": 105.7929,
+          "pollution_pct": 0.0,
+          "receipt_chain_pass": true,
+          "reopen_rate": 0.0,
+          "reopen_rate_source": "deterministic_receipt_replay_proxy",
+          "skill_mount_contract_status": "PASS",
+          "success_rate": 1.0,
+          "total_tokens": 61123,
+          "trust_mismatch": false
+        },
+        "correctness_before_cost": true,
+        "decision_state": "APPROVE_MULTI_ASSEMBLY",
+        "delta": {
+          "evidence_seal_count_delta": 1,
+          "pollution_pct_delta": 0.0,
+          "reopen_rate_delta": 0.0,
+          "success_rate_delta": 0.0,
+          "token_delta": -4036,
+          "wall_delta": -37.6418
+        },
+        "public_benchmark_allowed": false,
+        "reason_codes": [],
+        "runtime_update_allowed": false,
+        "verdict": "APPROVE_HEEP_MODE_CANDIDATE"
+      },
+      "m7_catalog_update": {
+        "capability": "lancedb",
+        "catalog_update_allowed": true,
+        "planned_action": "set_capability_multi_skill_candidate",
+        "public_benchmark_allowed": false,
+        "runtime_update_allowed": false,
+        "selected_skill_ids": [
+          "research-source-validation-auditor",
+          "sf2-autonomic_router-route-fit-spec"
+        ]
+      },
+      "m8_runtime_apply_review": {
+        "overlay_applied": true,
+        "post_apply_smoke_status": "PASS",
+        "public_benchmark_allowed": false,
+        "review_state": "RUNTIME_OVERLAY_SMOKE_PASS",
+        "runtime_update_allowed": true
+      }
+    },
+    {
+      "capability": "learn_ask",
+      "m1_intake": {
+        "eligible_for_discovery": true,
+        "eligible_for_runtime_direct_mount": true,
+        "original_skill_name": "github8-skilless-deep-research-learn-ask",
+        "primary_skill_id": "github8-skilless-deep-research-learn-ask",
+        "source_class": "current_best",
+        "source_path": ""
+      },
+      "m2_shortlist": {
+        "current_primary": "github8-skilless-deep-research-learn-ask",
+        "multi_role_candidates": [
+          {
+            "role": "Scout",
+            "skill_id": "github8-skilless-deep-research-learn-ask"
+          },
+          {
+            "role": "Logic",
+            "skill_id": "sf2-autonomic_router-route-fit-spec"
+          },
+          {
+            "role": "Audit",
+            "skill_id": "sf-systematic-artifact_gate-differential-review-461fbd0c"
+          }
+        ],
+        "negative_control_required": true,
+        "shortlist_complete": true,
+        "single_challengers": [
+          "sf2-autonomic_router-route-fit-spec",
+          "sf-systematic-artifact_gate-differential-review-461fbd0c"
+        ]
+      },
+      "m3_single_skill_tournament": {
+        "cost_read_after_correctness_only": true,
+        "decision": "KEEP_SINGLE_PRIMARY",
+        "public_benchmark_allowed": false,
+        "runtime_update_allowed": false
+      },
+      "m4_multi_skill_assembly": {
+        "assembly": [
+          {
+            "role": "Scout",
+            "skill_id": "github8-skilless-deep-research-learn-ask"
+          },
+          {
+            "role": "Logic",
+            "skill_id": "sf2-autonomic_router-route-fit-spec"
+          },
+          {
+            "role": "Audit",
+            "skill_id": "sf-systematic-artifact_gate-differential-review-461fbd0c"
+          }
+        ],
+        "assembly_kind": "scout_logic_audit",
+        "mode": "Mode C (Swarm)"
+      },
+      "m5_role_ablation": {
+        "capability": "learn_ask",
+        "contribution_gate": "full assembly must beat every minus-role arm before public/default claims",
+        "matrix": [
+          {
+            "arm_id": "full_assembly",
+            "dropped_role": "",
+            "skill_ids": [
+              "github8-skilless-deep-research-learn-ask",
+              "sf2-autonomic_router-route-fit-spec",
+              "sf-systematic-artifact_gate-differential-review-461fbd0c"
+            ]
+          },
+          {
+            "arm_id": "minus_scout",
+            "dropped_role": "Scout",
+            "skill_ids": [
+              "sf2-autonomic_router-route-fit-spec",
+              "sf-systematic-artifact_gate-differential-review-461fbd0c"
+            ]
+          },
+          {
+            "arm_id": "minus_logic",
+            "dropped_role": "Logic",
+            "skill_ids": [
+              "github8-skilless-deep-research-learn-ask",
+              "sf-systematic-artifact_gate-differential-review-461fbd0c"
+            ]
+          },
+          {
+            "arm_id": "minus_audit",
+            "dropped_role": "Audit",
+            "skill_ids": [
+              "github8-skilless-deep-research-learn-ask",
+              "sf2-autonomic_router-route-fit-spec"
+            ]
+          }
+        ],
+        "status": "MATRIX_GENERATED_NOT_SELECTED"
+      },
+      "m6_mat_b_decision": {
+        "baseline": {
+          "evidence_seal_count": 1,
+          "infra_invalid_reason": "",
+          "phase_wall_total_sec": 96.8743,
+          "pollution_pct": 0.0,
+          "receipt_chain_pass": true,
+          "reopen_rate": 0.0,
+          "reopen_rate_source": "deterministic_receipt_replay_proxy",
+          "skill_mount_contract_status": "PASS",
+          "success_rate": 1.0,
+          "total_tokens": 62607,
+          "trust_mismatch": false
+        },
+        "challenger": {
+          "evidence_seal_count": 3,
+          "infra_invalid_reason": "",
+          "phase_wall_total_sec": 117.6378,
+          "pollution_pct": 0.0,
+          "receipt_chain_pass": true,
+          "reopen_rate": 0.0,
+          "reopen_rate_source": "deterministic_receipt_replay_proxy",
+          "skill_mount_contract_status": "PASS",
+          "success_rate": 1.0,
+          "total_tokens": 64957,
+          "trust_mismatch": false
+        },
+        "correctness_before_cost": true,
+        "decision_state": "KEEP_SINGLE_PRIMARY",
+        "delta": {
+          "evidence_seal_count_delta": 2,
+          "pollution_pct_delta": 0.0,
+          "reopen_rate_delta": 0.0,
+          "success_rate_delta": 0.0,
+          "token_delta": 2350,
+          "wall_delta": 20.7635
+        },
+        "public_benchmark_allowed": false,
+        "reason_codes": [
+          "efficiency_regressed"
+        ],
+        "runtime_update_allowed": false,
+        "verdict": "KEEP_SINGLE_PRIMARY"
+      },
+      "m7_catalog_update": {
+        "capability": "learn_ask",
+        "catalog_update_allowed": true,
+        "planned_action": "retain_single_primary",
+        "public_benchmark_allowed": false,
+        "runtime_update_allowed": false,
+        "selected_skill_ids": [
+          "github8-skilless-deep-research-learn-ask"
+        ]
+      },
+      "m8_runtime_apply_review": {
+        "overlay_applied": false,
+        "post_apply_smoke_status": "",
+        "public_benchmark_allowed": false,
+        "review_state": "NO_RUNTIME_APPLY_NEEDED",
+        "runtime_update_allowed": false
+      }
+    },
+    {
+      "capability": "learning_closure",
+      "m1_intake": {
+        "eligible_for_discovery": true,
+        "eligible_for_runtime_direct_mount": false,
+        "original_skill_name": "memory-lint",
+        "primary_skill_id": "sf-systematic-learning_closure-memory-lint-8bdb0fca",
+        "source_class": "approved_external_reference",
+        "source_path": "/private/tmp/nexus-sf-round4/KerberosClaw-kc_ai_skills/memory-lint/SKILL.md"
+      },
+      "m2_shortlist": {
+        "current_primary": "sf-systematic-learning_closure-memory-lint-8bdb0fca",
+        "multi_role_candidates": [
+          {
+            "role": "Scout",
+            "skill_id": "sf-systematic-learning_closure-memory-lint-8bdb0fca"
+          },
+          {
+            "role": "Logic",
+            "skill_id": "sf2-autonomic_router-route-fit-spec"
+          },
+          {
+            "role": "Audit",
+            "skill_id": "sf-systematic-artifact_gate-differential-review-461fbd0c"
+          }
+        ],
+        "negative_control_required": true,
+        "shortlist_complete": true,
+        "single_challengers": [
+          "sf2-autonomic_router-route-fit-spec",
+          "sf-systematic-artifact_gate-differential-review-461fbd0c"
+        ]
+      },
+      "m3_single_skill_tournament": {
+        "cost_read_after_correctness_only": true,
+        "decision": "KEEP_SINGLE_PRIMARY",
+        "public_benchmark_allowed": false,
+        "runtime_update_allowed": false
+      },
+      "m4_multi_skill_assembly": {
+        "assembly": [
+          {
+            "role": "Scout",
+            "skill_id": "sf-systematic-learning_closure-memory-lint-8bdb0fca"
+          },
+          {
+            "role": "Logic",
+            "skill_id": "sf2-autonomic_router-route-fit-spec"
+          },
+          {
+            "role": "Audit",
+            "skill_id": "sf-systematic-artifact_gate-differential-review-461fbd0c"
+          }
+        ],
+        "assembly_kind": "scout_logic_audit",
+        "mode": "Mode C (Swarm)"
+      },
+      "m5_role_ablation": {
+        "capability": "learning_closure",
+        "contribution_gate": "full assembly must beat every minus-role arm before public/default claims",
+        "matrix": [
+          {
+            "arm_id": "full_assembly",
+            "dropped_role": "",
+            "skill_ids": [
+              "sf-systematic-learning_closure-memory-lint-8bdb0fca",
+              "sf2-autonomic_router-route-fit-spec",
+              "sf-systematic-artifact_gate-differential-review-461fbd0c"
+            ]
+          },
+          {
+            "arm_id": "minus_scout",
+            "dropped_role": "Scout",
+            "skill_ids": [
+              "sf2-autonomic_router-route-fit-spec",
+              "sf-systematic-artifact_gate-differential-review-461fbd0c"
+            ]
+          },
+          {
+            "arm_id": "minus_logic",
+            "dropped_role": "Logic",
+            "skill_ids": [
+              "sf-systematic-learning_closure-memory-lint-8bdb0fca",
+              "sf-systematic-artifact_gate-differential-review-461fbd0c"
+            ]
+          },
+          {
+            "arm_id": "minus_audit",
+            "dropped_role": "Audit",
+            "skill_ids": [
+              "sf-systematic-learning_closure-memory-lint-8bdb0fca",
+              "sf2-autonomic_router-route-fit-spec"
+            ]
+          }
+        ],
+        "status": "MATRIX_GENERATED_NOT_SELECTED"
+      },
+      "m6_mat_b_decision": {
+        "baseline": {
+          "evidence_seal_count": 1,
+          "infra_invalid_reason": "",
+          "phase_wall_total_sec": 112.0428,
+          "pollution_pct": 0.0,
+          "receipt_chain_pass": true,
+          "reopen_rate": 0.0,
+          "reopen_rate_source": "deterministic_receipt_replay_proxy",
+          "skill_mount_contract_status": "PASS",
+          "success_rate": 1.0,
+          "total_tokens": 60665,
+          "trust_mismatch": false
+        },
+        "challenger": {
+          "evidence_seal_count": 3,
+          "infra_invalid_reason": "",
+          "phase_wall_total_sec": 87.7201,
+          "pollution_pct": 0.0,
+          "receipt_chain_pass": true,
+          "reopen_rate": 0.0,
+          "reopen_rate_source": "deterministic_receipt_replay_proxy",
+          "skill_mount_contract_status": "PASS",
+          "success_rate": 1.0,
+          "total_tokens": 61251,
+          "trust_mismatch": false
+        },
+        "correctness_before_cost": true,
+        "decision_state": "KEEP_SINGLE_PRIMARY",
+        "delta": {
+          "evidence_seal_count_delta": 2,
+          "pollution_pct_delta": 0.0,
+          "reopen_rate_delta": 0.0,
+          "success_rate_delta": 0.0,
+          "token_delta": 586,
+          "wall_delta": -24.3227
+        },
+        "public_benchmark_allowed": false,
+        "reason_codes": [
+          "efficiency_regressed"
+        ],
+        "runtime_update_allowed": false,
+        "verdict": "KEEP_SINGLE_PRIMARY"
+      },
+      "m7_catalog_update": {
+        "capability": "learning_closure",
+        "catalog_update_allowed": true,
+        "planned_action": "retain_single_primary",
+        "public_benchmark_allowed": false,
+        "runtime_update_allowed": false,
+        "selected_skill_ids": [
+          "sf-systematic-learning_closure-memory-lint-8bdb0fca"
+        ]
+      },
+      "m8_runtime_apply_review": {
+        "overlay_applied": false,
+        "post_apply_smoke_status": "",
+        "public_benchmark_allowed": false,
+        "review_state": "NO_RUNTIME_APPLY_NEEDED",
+        "runtime_update_allowed": false
+      }
+    },
+    {
+      "capability": "memory",
+      "m1_intake": {
+        "eligible_for_discovery": true,
+        "eligible_for_runtime_direct_mount": false,
+        "original_skill_name": "project-skill-audit",
+        "primary_skill_id": "sf-systematic-memory-project-skill-audit-cc8b7621",
+        "source_class": "approved_external_reference",
+        "source_path": "/private/tmp/nexus-sf-round4/sickn33-antigravity-awesome-skills/plugins/antigravity-awesome-skills/skills/project-skill-audit/SKILL.md"
+      },
+      "m2_shortlist": {
+        "current_primary": "sf-systematic-memory-project-skill-audit-cc8b7621",
+        "multi_role_candidates": [
+          {
+            "role": "primary",
+            "skill_id": "sf-systematic-memory-project-skill-audit-cc8b7621"
+          },
+          {
+            "role": "Logic",
+            "skill_id": "sf2-autonomic_router-route-fit-spec"
+          }
+        ],
+        "negative_control_required": true,
+        "shortlist_complete": true,
+        "single_challengers": [
+          "sf2-autonomic_router-route-fit-spec"
+        ]
+      },
+      "m3_single_skill_tournament": {
+        "cost_read_after_correctness_only": true,
+        "decision": "NO_SINGLE_REPLACEMENT_MULTI_ASSEMBLY_WINS",
+        "public_benchmark_allowed": false,
+        "runtime_update_allowed": false
+      },
+      "m4_multi_skill_assembly": {
+        "assembly": [
+          {
+            "role": "primary",
+            "skill_id": "sf-systematic-memory-project-skill-audit-cc8b7621"
+          },
+          {
+            "role": "Logic",
+            "skill_id": "sf2-autonomic_router-route-fit-spec"
+          }
+        ],
+        "assembly_kind": "primary_plus_guard",
+        "mode": "Mode B (Guard)"
+      },
+      "m5_role_ablation": {
+        "capability": "memory",
+        "contribution_gate": "full assembly must beat every minus-role arm before public/default claims",
+        "matrix": [
+          {
+            "arm_id": "full_assembly",
+            "dropped_role": "",
+            "skill_ids": [
+              "sf-systematic-memory-project-skill-audit-cc8b7621",
+              "sf2-autonomic_router-route-fit-spec"
+            ]
+          },
+          {
+            "arm_id": "minus_primary",
+            "dropped_role": "primary",
+            "skill_ids": [
+              "sf2-autonomic_router-route-fit-spec"
+            ]
+          },
+          {
+            "arm_id": "minus_logic",
+            "dropped_role": "Logic",
+            "skill_ids": [
+              "sf-systematic-memory-project-skill-audit-cc8b7621"
+            ]
+          }
+        ],
+        "status": "READY_FOR_ROLE_CONTRIBUTION_REPLAY"
+      },
+      "m6_mat_b_decision": {
+        "baseline": {
+          "evidence_seal_count": 1,
+          "infra_invalid_reason": "",
+          "phase_wall_total_sec": 163.1611,
+          "pollution_pct": 0.0,
+          "receipt_chain_pass": true,
+          "reopen_rate": 0.0,
+          "reopen_rate_source": "deterministic_receipt_replay_proxy",
+          "skill_mount_contract_status": "PASS",
+          "success_rate": 1.0,
+          "total_tokens": 70447,
+          "trust_mismatch": false
+        },
+        "challenger": {
+          "evidence_seal_count": 2,
+          "infra_invalid_reason": "",
+          "phase_wall_total_sec": 143.3688,
+          "pollution_pct": 0.0,
+          "receipt_chain_pass": true,
+          "reopen_rate": 0.0,
+          "reopen_rate_source": "deterministic_receipt_replay_proxy",
+          "skill_mount_contract_status": "PASS",
+          "success_rate": 1.0,
+          "total_tokens": 67016,
+          "trust_mismatch": false
+        },
+        "correctness_before_cost": true,
+        "decision_state": "APPROVE_MULTI_ASSEMBLY",
+        "delta": {
+          "evidence_seal_count_delta": 1,
+          "pollution_pct_delta": 0.0,
+          "reopen_rate_delta": 0.0,
+          "success_rate_delta": 0.0,
+          "token_delta": -3431,
+          "wall_delta": -19.7923
+        },
+        "public_benchmark_allowed": false,
+        "reason_codes": [],
+        "runtime_update_allowed": false,
+        "verdict": "APPROVE_HEEP_MODE_CANDIDATE"
+      },
+      "m7_catalog_update": {
+        "capability": "memory",
+        "catalog_update_allowed": true,
+        "planned_action": "set_capability_multi_skill_candidate",
+        "public_benchmark_allowed": false,
+        "runtime_update_allowed": false,
+        "selected_skill_ids": [
+          "sf-systematic-memory-project-skill-audit-cc8b7621",
+          "sf2-autonomic_router-route-fit-spec"
+        ]
+      },
+      "m8_runtime_apply_review": {
+        "overlay_applied": true,
+        "post_apply_smoke_status": "PASS",
+        "public_benchmark_allowed": false,
+        "review_state": "RUNTIME_OVERLAY_SMOKE_PASS",
+        "runtime_update_allowed": true
+      }
+    },
+    {
+      "capability": "mempalace",
+      "m1_intake": {
+        "eligible_for_discovery": true,
+        "eligible_for_runtime_direct_mount": true,
+        "original_skill_name": "sf2-mempalace-route-fit-spec",
+        "primary_skill_id": "sf2-mempalace-route-fit-spec",
+        "source_class": "current_best",
+        "source_path": ""
+      },
+      "m2_shortlist": {
+        "current_primary": "sf2-mempalace-route-fit-spec",
+        "multi_role_candidates": [
+          {
+            "role": "primary",
+            "skill_id": "sf2-mempalace-route-fit-spec"
+          },
+          {
+            "role": "Audit",
+            "skill_id": "sf-systematic-artifact_gate-differential-review-461fbd0c"
+          }
+        ],
+        "negative_control_required": true,
+        "shortlist_complete": true,
+        "single_challengers": [
+          "sf-systematic-artifact_gate-differential-review-461fbd0c"
+        ]
+      },
+      "m3_single_skill_tournament": {
+        "cost_read_after_correctness_only": true,
+        "decision": "NO_SINGLE_REPLACEMENT_MULTI_ASSEMBLY_WINS",
+        "public_benchmark_allowed": false,
+        "runtime_update_allowed": false
+      },
+      "m4_multi_skill_assembly": {
+        "assembly": [
+          {
+            "role": "primary",
+            "skill_id": "sf2-mempalace-route-fit-spec"
+          },
+          {
+            "role": "Audit",
+            "skill_id": "sf-systematic-artifact_gate-differential-review-461fbd0c"
+          }
+        ],
+        "assembly_kind": "primary_plus_guard",
+        "mode": "Mode B (Guard)"
+      },
+      "m5_role_ablation": {
+        "capability": "mempalace",
+        "contribution_gate": "full assembly must beat every minus-role arm before public/default claims",
+        "matrix": [
+          {
+            "arm_id": "full_assembly",
+            "dropped_role": "",
+            "skill_ids": [
+              "sf2-mempalace-route-fit-spec",
+              "sf-systematic-artifact_gate-differential-review-461fbd0c"
+            ]
+          },
+          {
+            "arm_id": "minus_primary",
+            "dropped_role": "primary",
+            "skill_ids": [
+              "sf-systematic-artifact_gate-differential-review-461fbd0c"
+            ]
+          },
+          {
+            "arm_id": "minus_audit",
+            "dropped_role": "Audit",
+            "skill_ids": [
+              "sf2-mempalace-route-fit-spec"
+            ]
+          }
+        ],
+        "status": "READY_FOR_ROLE_CONTRIBUTION_REPLAY"
+      },
+      "m6_mat_b_decision": {
+        "baseline": {
+          "evidence_seal_count": 1,
+          "infra_invalid_reason": "",
+          "phase_wall_total_sec": 139.6623,
+          "pollution_pct": 0.0,
+          "receipt_chain_pass": true,
+          "reopen_rate": 0.0,
+          "reopen_rate_source": "deterministic_receipt_replay_proxy",
+          "skill_mount_contract_status": "PASS",
+          "success_rate": 1.0,
+          "total_tokens": 64777,
+          "trust_mismatch": false
+        },
+        "challenger": {
+          "evidence_seal_count": 2,
+          "infra_invalid_reason": "",
+          "phase_wall_total_sec": 104.4636,
+          "pollution_pct": 0.0,
+          "receipt_chain_pass": true,
+          "reopen_rate": 0.0,
+          "reopen_rate_source": "deterministic_receipt_replay_proxy",
+          "skill_mount_contract_status": "PASS",
+          "success_rate": 1.0,
+          "total_tokens": 61427,
+          "trust_mismatch": false
+        },
+        "correctness_before_cost": true,
+        "decision_state": "APPROVE_MULTI_ASSEMBLY",
+        "delta": {
+          "evidence_seal_count_delta": 1,
+          "pollution_pct_delta": 0.0,
+          "reopen_rate_delta": 0.0,
+          "success_rate_delta": 0.0,
+          "token_delta": -3350,
+          "wall_delta": -35.1987
+        },
+        "public_benchmark_allowed": false,
+        "reason_codes": [],
+        "runtime_update_allowed": false,
+        "verdict": "APPROVE_HEEP_MODE_CANDIDATE"
+      },
+      "m7_catalog_update": {
+        "capability": "mempalace",
+        "catalog_update_allowed": true,
+        "planned_action": "set_capability_multi_skill_candidate",
+        "public_benchmark_allowed": false,
+        "runtime_update_allowed": false,
+        "selected_skill_ids": [
+          "sf2-mempalace-route-fit-spec",
+          "sf-systematic-artifact_gate-differential-review-461fbd0c"
+        ]
+      },
+      "m8_runtime_apply_review": {
+        "overlay_applied": true,
+        "post_apply_smoke_status": "PASS",
+        "public_benchmark_allowed": false,
+        "review_state": "RUNTIME_OVERLAY_SMOKE_PASS",
+        "runtime_update_allowed": true
+      }
+    },
+    {
+      "capability": "metabolism_resume",
+      "m1_intake": {
+        "eligible_for_discovery": true,
+        "eligible_for_runtime_direct_mount": true,
+        "original_skill_name": "github-auto-skill-safe-learning",
+        "primary_skill_id": "github-auto-skill-safe-learning",
+        "source_class": "current_best",
+        "source_path": ""
+      },
+      "m2_shortlist": {
+        "current_primary": "github-auto-skill-safe-learning",
+        "multi_role_candidates": [
+          {
+            "role": "primary",
+            "skill_id": "github-auto-skill-safe-learning"
+          }
+        ],
+        "negative_control_required": true,
+        "shortlist_complete": true,
+        "single_challengers": []
+      },
+      "m3_single_skill_tournament": {
+        "cost_read_after_correctness_only": true,
+        "decision": "HOLD_PROVIDER_TOKEN_TRUTH",
+        "public_benchmark_allowed": false,
+        "runtime_update_allowed": false
+      },
+      "m4_multi_skill_assembly": {
+        "assembly": [
+          {
+            "role": "primary",
+            "skill_id": "github-auto-skill-safe-learning"
+          }
+        ],
+        "assembly_kind": "single_primary",
+        "mode": "Mode A (Solo)"
+      },
+      "m5_role_ablation": {
+        "contribution_gate": "solo_mode",
+        "matrix": [],
+        "status": "NOT_REQUIRED_FOR_SOLO"
+      },
+      "m6_mat_b_decision": {
+        "baseline": {
+          "evidence_seal_count": 1,
+          "infra_invalid_reason": "model_call_without_tokens",
+          "phase_wall_total_sec": 11.7697,
+          "pollution_pct": 0.0,
+          "receipt_chain_pass": true,
+          "reopen_rate": 1.0,
+          "reopen_rate_source": "deterministic_receipt_replay_proxy",
+          "skill_mount_contract_status": "PASS",
+          "success_rate": 0.0,
+          "total_tokens": 0,
+          "trust_mismatch": false
+        },
+        "challenger": {
+          "evidence_seal_count": 3,
+          "infra_invalid_reason": "model_call_without_tokens",
+          "phase_wall_total_sec": 11.8718,
+          "pollution_pct": 0.0,
+          "receipt_chain_pass": true,
+          "reopen_rate": 1.0,
+          "reopen_rate_source": "deterministic_receipt_replay_proxy",
+          "skill_mount_contract_status": "PASS",
+          "success_rate": 0.0,
+          "total_tokens": 0,
+          "trust_mismatch": false
+        },
+        "correctness_before_cost": true,
+        "decision_state": "HOLD_PROVIDER_TOKEN_TRUTH",
+        "delta": {
+          "evidence_seal_count_delta": 2,
+          "pollution_pct_delta": 0.0,
+          "reopen_rate_delta": 0.0,
+          "success_rate_delta": 0.0,
+          "token_delta": 0,
+          "wall_delta": 0.1021
+        },
+        "public_benchmark_allowed": false,
+        "reason_codes": [
+          "baseline_infra_invalid:model_call_without_tokens",
+          "clean_replay_still_unclean",
+          "clean_replay:baseline_infra_invalid:model_call_without_tokens"
+        ],
+        "runtime_update_allowed": false,
+        "verdict": "BLOCKED_BY_PROVIDER_TOKEN_TRUTH"
+      },
+      "m7_catalog_update": {
+        "capability": "metabolism_resume",
+        "catalog_update_allowed": true,
+        "planned_action": "write_hold_and_replay_queue",
+        "public_benchmark_allowed": false,
+        "runtime_update_allowed": false,
+        "selected_skill_ids": [
+          "github-auto-skill-safe-learning"
+        ]
+      },
+      "m8_runtime_apply_review": {
+        "overlay_applied": false,
+        "post_apply_smoke_status": "",
+        "public_benchmark_allowed": false,
+        "review_state": "BLOCKED",
+        "runtime_update_allowed": false
+      }
+    },
+    {
+      "capability": "nightshift",
+      "m1_intake": {
+        "eligible_for_discovery": true,
+        "eligible_for_runtime_direct_mount": true,
+        "original_skill_name": "sf2-nightshift-route-fit-spec",
+        "primary_skill_id": "sf2-nightshift-route-fit-spec",
+        "source_class": "current_best",
+        "source_path": ""
+      },
+      "m2_shortlist": {
+        "current_primary": "sf2-nightshift-route-fit-spec",
+        "multi_role_candidates": [
+          {
+            "role": "primary",
+            "skill_id": "sf2-nightshift-route-fit-spec"
+          }
+        ],
+        "negative_control_required": true,
+        "shortlist_complete": true,
+        "single_challengers": []
+      },
+      "m3_single_skill_tournament": {
+        "cost_read_after_correctness_only": true,
+        "decision": "HOLD_RECEIPT_CHAIN",
+        "public_benchmark_allowed": false,
+        "runtime_update_allowed": false
+      },
+      "m4_multi_skill_assembly": {
+        "assembly": [
+          {
+            "role": "primary",
+            "skill_id": "sf2-nightshift-route-fit-spec"
+          }
+        ],
+        "assembly_kind": "single_primary",
+        "mode": "Mode A (Solo)"
+      },
+      "m5_role_ablation": {
+        "contribution_gate": "solo_mode",
+        "matrix": [],
+        "status": "NOT_REQUIRED_FOR_SOLO"
+      },
+      "m6_mat_b_decision": {
+        "baseline": {
+          "evidence_seal_count": 0,
+          "infra_invalid_reason": "receipt_data_contract_violation",
+          "phase_wall_total_sec": 10.8845,
+          "pollution_pct": 0.0,
+          "receipt_chain_pass": false,
+          "reopen_rate": 1.0,
+          "reopen_rate_source": "deterministic_receipt_replay_proxy",
+          "skill_mount_contract_status": "RETURN",
+          "success_rate": 0.0,
+          "total_tokens": 649,
+          "trust_mismatch": false
+        },
+        "challenger": {
+          "evidence_seal_count": 0,
+          "infra_invalid_reason": "receipt_data_contract_violation",
+          "phase_wall_total_sec": 9.9783,
+          "pollution_pct": 0.0,
+          "receipt_chain_pass": false,
+          "reopen_rate": 1.0,
+          "reopen_rate_source": "deterministic_receipt_replay_proxy",
+          "skill_mount_contract_status": "RETURN",
+          "success_rate": 0.0,
+          "total_tokens": 649,
+          "trust_mismatch": false
+        },
+        "correctness_before_cost": true,
+        "decision_state": "HOLD_RECEIPT_CHAIN",
+        "delta": {
+          "evidence_seal_count_delta": 0,
+          "pollution_pct_delta": 0.0,
+          "reopen_rate_delta": 0.0,
+          "success_rate_delta": 0.0,
+          "token_delta": 0,
+          "wall_delta": -0.9062
+        },
+        "public_benchmark_allowed": false,
+        "reason_codes": [
+          "baseline_infra_invalid:receipt_data_contract_violation",
+          "clean_replay_still_unclean",
+          "clean_replay:baseline_infra_invalid:receipt_data_contract_violation"
+        ],
+        "runtime_update_allowed": false,
+        "verdict": "BLOCKED_BY_RECEIPT_DATA_CONTRACT"
+      },
+      "m7_catalog_update": {
+        "capability": "nightshift",
+        "catalog_update_allowed": true,
+        "planned_action": "write_hold_and_replay_queue",
+        "public_benchmark_allowed": false,
+        "runtime_update_allowed": false,
+        "selected_skill_ids": [
+          "sf2-nightshift-route-fit-spec"
+        ]
+      },
+      "m8_runtime_apply_review": {
+        "overlay_applied": false,
+        "post_apply_smoke_status": "",
+        "public_benchmark_allowed": false,
+        "review_state": "BLOCKED",
+        "runtime_update_allowed": false
+      }
+    },
+    {
+      "capability": "policy_capability_gate",
+      "m1_intake": {
+        "eligible_for_discovery": true,
+        "eligible_for_runtime_direct_mount": false,
+        "original_skill_name": "aegisops-ai",
+        "primary_skill_id": "sf-systematic-policy_capability_gate-aegisops-ai-0aa841e2",
+        "source_class": "approved_external_reference",
+        "source_path": "/private/tmp/nexus-sf-round4/sickn33-antigravity-awesome-skills/plugins/antigravity-awesome-skills/skills/aegisops-ai/SKILL.md"
+      },
+      "m2_shortlist": {
+        "current_primary": "sf-systematic-policy_capability_gate-aegisops-ai-0aa841e2",
+        "multi_role_candidates": [
+          {
+            "role": "Scout",
+            "skill_id": "sf-systematic-codeintel-first-principles-thinking-f95019ea"
+          },
+          {
+            "role": "Logic",
+            "skill_id": "sf2-autonomic_router-route-fit-spec"
+          },
+          {
+            "role": "Audit",
+            "skill_id": "sf-systematic-policy_capability_gate-aegisops-ai-0aa841e2"
+          }
+        ],
+        "negative_control_required": true,
+        "shortlist_complete": true,
+        "single_challengers": [
+          "sf-systematic-codeintel-first-principles-thinking-f95019ea",
+          "sf2-autonomic_router-route-fit-spec"
+        ]
+      },
+      "m3_single_skill_tournament": {
+        "cost_read_after_correctness_only": true,
+        "decision": "KEEP_SINGLE_PRIMARY",
+        "public_benchmark_allowed": false,
+        "runtime_update_allowed": false
+      },
+      "m4_multi_skill_assembly": {
+        "assembly": [
+          {
+            "role": "Scout",
+            "skill_id": "sf-systematic-codeintel-first-principles-thinking-f95019ea"
+          },
+          {
+            "role": "Logic",
+            "skill_id": "sf2-autonomic_router-route-fit-spec"
+          },
+          {
+            "role": "Audit",
+            "skill_id": "sf-systematic-policy_capability_gate-aegisops-ai-0aa841e2"
+          }
+        ],
+        "assembly_kind": "scout_logic_audit",
+        "mode": "Mode C (Swarm)"
+      },
+      "m5_role_ablation": {
+        "capability": "policy_capability_gate",
+        "contribution_gate": "full assembly must beat every minus-role arm before public/default claims",
+        "matrix": [
+          {
+            "arm_id": "full_assembly",
+            "dropped_role": "",
+            "skill_ids": [
+              "sf-systematic-codeintel-first-principles-thinking-f95019ea",
+              "sf2-autonomic_router-route-fit-spec",
+              "sf-systematic-policy_capability_gate-aegisops-ai-0aa841e2"
+            ]
+          },
+          {
+            "arm_id": "minus_scout",
+            "dropped_role": "Scout",
+            "skill_ids": [
+              "sf2-autonomic_router-route-fit-spec",
+              "sf-systematic-policy_capability_gate-aegisops-ai-0aa841e2"
+            ]
+          },
+          {
+            "arm_id": "minus_logic",
+            "dropped_role": "Logic",
+            "skill_ids": [
+              "sf-systematic-codeintel-first-principles-thinking-f95019ea",
+              "sf-systematic-policy_capability_gate-aegisops-ai-0aa841e2"
+            ]
+          },
+          {
+            "arm_id": "minus_audit",
+            "dropped_role": "Audit",
+            "skill_ids": [
+              "sf-systematic-codeintel-first-principles-thinking-f95019ea",
+              "sf2-autonomic_router-route-fit-spec"
+            ]
+          }
+        ],
+        "status": "MATRIX_GENERATED_NOT_SELECTED"
+      },
+      "m6_mat_b_decision": {
+        "baseline": {
+          "evidence_seal_count": 1,
+          "infra_invalid_reason": "",
+          "phase_wall_total_sec": 113.1052,
+          "pollution_pct": 0.0,
+          "receipt_chain_pass": true,
+          "reopen_rate": 0.0,
+          "reopen_rate_source": "deterministic_receipt_replay_proxy",
+          "skill_mount_contract_status": "PASS",
+          "success_rate": 1.0,
+          "total_tokens": 61041,
+          "trust_mismatch": false
+        },
+        "challenger": {
+          "evidence_seal_count": 3,
+          "infra_invalid_reason": "",
+          "phase_wall_total_sec": 147.9475,
+          "pollution_pct": 0.0,
+          "receipt_chain_pass": true,
+          "reopen_rate": 1.0,
+          "reopen_rate_source": "deterministic_receipt_replay_proxy",
+          "skill_mount_contract_status": "PASS",
+          "success_rate": 1.0,
+          "total_tokens": 658,
+          "trust_mismatch": false
+        },
+        "correctness_before_cost": true,
+        "decision_state": "KEEP_SINGLE_PRIMARY",
+        "delta": {
+          "evidence_seal_count_delta": 2,
+          "pollution_pct_delta": 0.0,
+          "reopen_rate_delta": 1.0,
+          "success_rate_delta": 0.0,
+          "token_delta": -60383,
+          "wall_delta": 34.8423
+        },
+        "public_benchmark_allowed": false,
+        "reason_codes": [
+          "efficiency_regressed"
+        ],
+        "runtime_update_allowed": false,
+        "verdict": "KEEP_SINGLE_PRIMARY"
+      },
+      "m7_catalog_update": {
+        "capability": "policy_capability_gate",
+        "catalog_update_allowed": true,
+        "planned_action": "retain_single_primary",
+        "public_benchmark_allowed": false,
+        "runtime_update_allowed": false,
+        "selected_skill_ids": [
+          "sf-systematic-policy_capability_gate-aegisops-ai-0aa841e2"
+        ]
+      },
+      "m8_runtime_apply_review": {
+        "overlay_applied": false,
+        "post_apply_smoke_status": "",
+        "public_benchmark_allowed": false,
+        "review_state": "NO_RUNTIME_APPLY_NEEDED",
+        "runtime_update_allowed": false
+      }
+    },
+    {
+      "capability": "registry_skills_sync",
+      "m1_intake": {
+        "eligible_for_discovery": true,
+        "eligible_for_runtime_direct_mount": true,
+        "original_skill_name": "github5-skill-seekers-safe-registry-builder",
+        "primary_skill_id": "github5-skill-seekers-safe-registry-builder",
+        "source_class": "current_best",
+        "source_path": ""
+      },
+      "m2_shortlist": {
+        "current_primary": "github5-skill-seekers-safe-registry-builder",
+        "multi_role_candidates": [
+          {
+            "role": "primary",
+            "skill_id": "github5-skill-seekers-safe-registry-builder"
+          },
+          {
+            "role": "Audit",
+            "skill_id": "sf-systematic-artifact_gate-differential-review-461fbd0c"
+          }
+        ],
+        "negative_control_required": true,
+        "shortlist_complete": true,
+        "single_challengers": [
+          "sf-systematic-artifact_gate-differential-review-461fbd0c"
+        ]
+      },
+      "m3_single_skill_tournament": {
+        "cost_read_after_correctness_only": true,
+        "decision": "KEEP_SINGLE_PRIMARY",
+        "public_benchmark_allowed": false,
+        "runtime_update_allowed": false
+      },
+      "m4_multi_skill_assembly": {
+        "assembly": [
+          {
+            "role": "primary",
+            "skill_id": "github5-skill-seekers-safe-registry-builder"
+          },
+          {
+            "role": "Audit",
+            "skill_id": "sf-systematic-artifact_gate-differential-review-461fbd0c"
+          }
+        ],
+        "assembly_kind": "primary_plus_guard",
+        "mode": "Mode B (Guard)"
+      },
+      "m5_role_ablation": {
+        "capability": "registry_skills_sync",
+        "contribution_gate": "full assembly must beat every minus-role arm before public/default claims",
+        "matrix": [
+          {
+            "arm_id": "full_assembly",
+            "dropped_role": "",
+            "skill_ids": [
+              "github5-skill-seekers-safe-registry-builder",
+              "sf-systematic-artifact_gate-differential-review-461fbd0c"
+            ]
+          },
+          {
+            "arm_id": "minus_primary",
+            "dropped_role": "primary",
+            "skill_ids": [
+              "sf-systematic-artifact_gate-differential-review-461fbd0c"
+            ]
+          },
+          {
+            "arm_id": "minus_audit",
+            "dropped_role": "Audit",
+            "skill_ids": [
+              "github5-skill-seekers-safe-registry-builder"
+            ]
+          }
+        ],
+        "status": "MATRIX_GENERATED_NOT_SELECTED"
+      },
+      "m6_mat_b_decision": {
+        "baseline": {
+          "evidence_seal_count": 1,
+          "infra_invalid_reason": "",
+          "phase_wall_total_sec": 80.4624,
+          "pollution_pct": 0.0,
+          "receipt_chain_pass": true,
+          "reopen_rate": 0.0,
+          "reopen_rate_source": "deterministic_receipt_replay_proxy",
+          "skill_mount_contract_status": "PASS",
+          "success_rate": 1.0,
+          "total_tokens": 61930,
+          "trust_mismatch": false
+        },
+        "challenger": {
+          "evidence_seal_count": 2,
+          "infra_invalid_reason": "",
+          "phase_wall_total_sec": 110.0508,
+          "pollution_pct": 0.0,
+          "receipt_chain_pass": true,
+          "reopen_rate": 0.0,
+          "reopen_rate_source": "deterministic_receipt_replay_proxy",
+          "skill_mount_contract_status": "PASS",
+          "success_rate": 1.0,
+          "total_tokens": 60586,
+          "trust_mismatch": false
+        },
+        "correctness_before_cost": true,
+        "decision_state": "KEEP_SINGLE_PRIMARY",
+        "delta": {
+          "evidence_seal_count_delta": 1,
+          "pollution_pct_delta": 0.0,
+          "reopen_rate_delta": 0.0,
+          "success_rate_delta": 0.0,
+          "token_delta": -1344,
+          "wall_delta": 29.5884
+        },
+        "public_benchmark_allowed": false,
+        "reason_codes": [
+          "efficiency_regressed"
+        ],
+        "runtime_update_allowed": false,
+        "verdict": "KEEP_SINGLE_PRIMARY"
+      },
+      "m7_catalog_update": {
+        "capability": "registry_skills_sync",
+        "catalog_update_allowed": true,
+        "planned_action": "retain_single_primary",
+        "public_benchmark_allowed": false,
+        "runtime_update_allowed": false,
+        "selected_skill_ids": [
+          "github5-skill-seekers-safe-registry-builder"
+        ]
+      },
+      "m8_runtime_apply_review": {
+        "overlay_applied": false,
+        "post_apply_smoke_status": "",
+        "public_benchmark_allowed": false,
+        "review_state": "NO_RUNTIME_APPLY_NEEDED",
+        "runtime_update_allowed": false
+      }
+    },
+    {
+      "capability": "regression_guard",
+      "m1_intake": {
+        "eligible_for_discovery": true,
+        "eligible_for_runtime_direct_mount": false,
+        "original_skill_name": "odoo-automated-tests",
+        "primary_skill_id": "sf-systematic-regression_guard-odoo-automated-tests-dad98433",
+        "source_class": "approved_external_reference",
+        "source_path": "/private/tmp/nexus-sf-round4/sickn33-antigravity-awesome-skills/plugins/antigravity-awesome-skills/skills/odoo-automated-tests/SKILL.md"
+      },
+      "m2_shortlist": {
+        "current_primary": "sf-systematic-regression_guard-odoo-automated-tests-dad98433",
+        "multi_role_candidates": [
+          {
+            "role": "primary",
+            "skill_id": "sf-systematic-regression_guard-odoo-automated-tests-dad98433"
+          },
+          {
+            "role": "Logic",
+            "skill_id": "sf2-autonomic_router-route-fit-spec"
+          }
+        ],
+        "negative_control_required": true,
+        "shortlist_complete": true,
+        "single_challengers": [
+          "sf2-autonomic_router-route-fit-spec"
+        ]
+      },
+      "m3_single_skill_tournament": {
+        "cost_read_after_correctness_only": true,
+        "decision": "NO_SINGLE_REPLACEMENT_MULTI_ASSEMBLY_WINS",
+        "public_benchmark_allowed": false,
+        "runtime_update_allowed": false
+      },
+      "m4_multi_skill_assembly": {
+        "assembly": [
+          {
+            "role": "primary",
+            "skill_id": "sf-systematic-regression_guard-odoo-automated-tests-dad98433"
+          },
+          {
+            "role": "Logic",
+            "skill_id": "sf2-autonomic_router-route-fit-spec"
+          }
+        ],
+        "assembly_kind": "primary_plus_guard",
+        "mode": "Mode B (Guard)"
+      },
+      "m5_role_ablation": {
+        "capability": "regression_guard",
+        "contribution_gate": "full assembly must beat every minus-role arm before public/default claims",
+        "matrix": [
+          {
+            "arm_id": "full_assembly",
+            "dropped_role": "",
+            "skill_ids": [
+              "sf-systematic-regression_guard-odoo-automated-tests-dad98433",
+              "sf2-autonomic_router-route-fit-spec"
+            ]
+          },
+          {
+            "arm_id": "minus_primary",
+            "dropped_role": "primary",
+            "skill_ids": [
+              "sf2-autonomic_router-route-fit-spec"
+            ]
+          },
+          {
+            "arm_id": "minus_logic",
+            "dropped_role": "Logic",
+            "skill_ids": [
+              "sf-systematic-regression_guard-odoo-automated-tests-dad98433"
+            ]
+          }
+        ],
+        "status": "READY_FOR_ROLE_CONTRIBUTION_REPLAY"
+      },
+      "m6_mat_b_decision": {
+        "baseline": {
+          "evidence_seal_count": 1,
+          "infra_invalid_reason": "",
+          "phase_wall_total_sec": 121.0627,
+          "pollution_pct": 0.0,
+          "receipt_chain_pass": true,
+          "reopen_rate": 0.0,
+          "reopen_rate_source": "deterministic_receipt_replay_proxy",
+          "skill_mount_contract_status": "PASS",
+          "success_rate": 1.0,
+          "total_tokens": 63488,
+          "trust_mismatch": false
+        },
+        "challenger": {
+          "evidence_seal_count": 2,
+          "infra_invalid_reason": "",
+          "phase_wall_total_sec": 80.7127,
+          "pollution_pct": 0.0,
+          "receipt_chain_pass": true,
+          "reopen_rate": 0.0,
+          "reopen_rate_source": "deterministic_receipt_replay_proxy",
+          "skill_mount_contract_status": "PASS",
+          "success_rate": 1.0,
+          "total_tokens": 61300,
+          "trust_mismatch": false
+        },
+        "correctness_before_cost": true,
+        "decision_state": "APPROVE_MULTI_ASSEMBLY",
+        "delta": {
+          "evidence_seal_count_delta": 1,
+          "pollution_pct_delta": 0.0,
+          "reopen_rate_delta": 0.0,
+          "success_rate_delta": 0.0,
+          "token_delta": -2188,
+          "wall_delta": -40.35
+        },
+        "public_benchmark_allowed": false,
+        "reason_codes": [],
+        "runtime_update_allowed": false,
+        "verdict": "APPROVE_HEEP_MODE_CANDIDATE"
+      },
+      "m7_catalog_update": {
+        "capability": "regression_guard",
+        "catalog_update_allowed": true,
+        "planned_action": "set_capability_multi_skill_candidate",
+        "public_benchmark_allowed": false,
+        "runtime_update_allowed": false,
+        "selected_skill_ids": [
+          "sf-systematic-regression_guard-odoo-automated-tests-dad98433",
+          "sf2-autonomic_router-route-fit-spec"
+        ]
+      },
+      "m8_runtime_apply_review": {
+        "overlay_applied": true,
+        "post_apply_smoke_status": "PASS",
+        "public_benchmark_allowed": false,
+        "review_state": "RUNTIME_OVERLAY_SMOKE_PASS",
+        "runtime_update_allowed": true
+      }
+    },
+    {
+      "capability": "repair_loop",
+      "m1_intake": {
+        "eligible_for_discovery": true,
+        "eligible_for_runtime_direct_mount": false,
+        "original_skill_name": "odoo-automated-tests",
+        "primary_skill_id": "sf-systematic-repair_loop-odoo-automated-tests-dad98433",
+        "source_class": "approved_external_reference",
+        "source_path": "/private/tmp/nexus-sf-round4/sickn33-antigravity-awesome-skills/plugins/antigravity-awesome-skills/skills/odoo-automated-tests/SKILL.md"
+      },
+      "m2_shortlist": {
+        "current_primary": "sf-systematic-repair_loop-odoo-automated-tests-dad98433",
+        "multi_role_candidates": [
+          {
+            "role": "primary",
+            "skill_id": "sf-systematic-repair_loop-odoo-automated-tests-dad98433"
+          },
+          {
+            "role": "Audit",
+            "skill_id": "sf-systematic-artifact_gate-differential-review-461fbd0c"
+          }
+        ],
+        "negative_control_required": true,
+        "shortlist_complete": true,
+        "single_challengers": [
+          "sf-systematic-artifact_gate-differential-review-461fbd0c"
+        ]
+      },
+      "m3_single_skill_tournament": {
+        "cost_read_after_correctness_only": true,
+        "decision": "KEEP_SINGLE_PRIMARY",
+        "public_benchmark_allowed": false,
+        "runtime_update_allowed": false
+      },
+      "m4_multi_skill_assembly": {
+        "assembly": [
+          {
+            "role": "primary",
+            "skill_id": "sf-systematic-repair_loop-odoo-automated-tests-dad98433"
+          },
+          {
+            "role": "Audit",
+            "skill_id": "sf-systematic-artifact_gate-differential-review-461fbd0c"
+          }
+        ],
+        "assembly_kind": "primary_plus_guard",
+        "mode": "Mode B (Guard)"
+      },
+      "m5_role_ablation": {
+        "capability": "repair_loop",
+        "contribution_gate": "full assembly must beat every minus-role arm before public/default claims",
+        "matrix": [
+          {
+            "arm_id": "full_assembly",
+            "dropped_role": "",
+            "skill_ids": [
+              "sf-systematic-repair_loop-odoo-automated-tests-dad98433",
+              "sf-systematic-artifact_gate-differential-review-461fbd0c"
+            ]
+          },
+          {
+            "arm_id": "minus_primary",
+            "dropped_role": "primary",
+            "skill_ids": [
+              "sf-systematic-artifact_gate-differential-review-461fbd0c"
+            ]
+          },
+          {
+            "arm_id": "minus_audit",
+            "dropped_role": "Audit",
+            "skill_ids": [
+              "sf-systematic-repair_loop-odoo-automated-tests-dad98433"
+            ]
+          }
+        ],
+        "status": "MATRIX_GENERATED_NOT_SELECTED"
+      },
+      "m6_mat_b_decision": {
+        "baseline": {
+          "evidence_seal_count": 1,
+          "infra_invalid_reason": "",
+          "phase_wall_total_sec": 98.2385,
+          "pollution_pct": 0.0,
+          "receipt_chain_pass": true,
+          "reopen_rate": 0.0,
+          "reopen_rate_source": "deterministic_receipt_replay_proxy",
+          "skill_mount_contract_status": "PASS",
+          "success_rate": 1.0,
+          "total_tokens": 66992,
+          "trust_mismatch": false
+        },
+        "challenger": {
+          "evidence_seal_count": 2,
+          "infra_invalid_reason": "",
+          "phase_wall_total_sec": 114.0646,
+          "pollution_pct": 0.0,
+          "receipt_chain_pass": true,
+          "reopen_rate": 0.0,
+          "reopen_rate_source": "deterministic_receipt_replay_proxy",
+          "skill_mount_contract_status": "PASS",
+          "success_rate": 1.0,
+          "total_tokens": 64473,
+          "trust_mismatch": false
+        },
+        "correctness_before_cost": true,
+        "decision_state": "KEEP_SINGLE_PRIMARY",
+        "delta": {
+          "evidence_seal_count_delta": 1,
+          "pollution_pct_delta": 0.0,
+          "reopen_rate_delta": 0.0,
+          "success_rate_delta": 0.0,
+          "token_delta": -2519,
+          "wall_delta": 15.8261
+        },
+        "public_benchmark_allowed": false,
+        "reason_codes": [
+          "efficiency_regressed"
+        ],
+        "runtime_update_allowed": false,
+        "verdict": "KEEP_SINGLE_PRIMARY"
+      },
+      "m7_catalog_update": {
+        "capability": "repair_loop",
+        "catalog_update_allowed": true,
+        "planned_action": "retain_single_primary",
+        "public_benchmark_allowed": false,
+        "runtime_update_allowed": false,
+        "selected_skill_ids": [
+          "sf-systematic-repair_loop-odoo-automated-tests-dad98433"
+        ]
+      },
+      "m8_runtime_apply_review": {
+        "overlay_applied": false,
+        "post_apply_smoke_status": "",
+        "public_benchmark_allowed": false,
+        "review_state": "NO_RUNTIME_APPLY_NEEDED",
+        "runtime_update_allowed": false
+      }
+    },
+    {
+      "capability": "research",
+      "m1_intake": {
+        "eligible_for_discovery": true,
+        "eligible_for_runtime_direct_mount": false,
+        "original_skill_name": "research-lookup",
+        "primary_skill_id": "sf-systematic-research-research-lookup-7e6f92a0",
+        "source_class": "approved_external_reference",
+        "source_path": "/private/tmp/nexus-sf-round9/K-Dense-AI-scientific-agent-skills/scientific-skills/research-lookup/SKILL.md"
+      },
+      "m2_shortlist": {
+        "current_primary": "sf-systematic-research-research-lookup-7e6f92a0",
+        "multi_role_candidates": [
+          {
+            "role": "Scout",
+            "skill_id": "sf-systematic-research-research-lookup-7e6f92a0"
+          },
+          {
+            "role": "Logic",
+            "skill_id": "sf2-autonomic_router-route-fit-spec"
+          },
+          {
+            "role": "Audit",
+            "skill_id": "sf-systematic-artifact_gate-differential-review-461fbd0c"
+          }
+        ],
+        "negative_control_required": true,
+        "shortlist_complete": true,
+        "single_challengers": [
+          "sf2-autonomic_router-route-fit-spec",
+          "sf-systematic-artifact_gate-differential-review-461fbd0c"
+        ]
+      },
+      "m3_single_skill_tournament": {
+        "cost_read_after_correctness_only": true,
+        "decision": "KEEP_SINGLE_PRIMARY_REJECT_MULTI",
+        "public_benchmark_allowed": false,
+        "runtime_update_allowed": false
+      },
+      "m4_multi_skill_assembly": {
+        "assembly": [
+          {
+            "role": "Scout",
+            "skill_id": "sf-systematic-research-research-lookup-7e6f92a0"
+          },
+          {
+            "role": "Logic",
+            "skill_id": "sf2-autonomic_router-route-fit-spec"
+          },
+          {
+            "role": "Audit",
+            "skill_id": "sf-systematic-artifact_gate-differential-review-461fbd0c"
+          }
+        ],
+        "assembly_kind": "scout_logic_audit",
+        "mode": "Mode C (Swarm)"
+      },
+      "m5_role_ablation": {
+        "capability": "research",
+        "contribution_gate": "full assembly must beat every minus-role arm before public/default claims",
+        "matrix": [
+          {
+            "arm_id": "full_assembly",
+            "dropped_role": "",
+            "skill_ids": [
+              "sf-systematic-research-research-lookup-7e6f92a0",
+              "sf2-autonomic_router-route-fit-spec",
+              "sf-systematic-artifact_gate-differential-review-461fbd0c"
+            ]
+          },
+          {
+            "arm_id": "minus_scout",
+            "dropped_role": "Scout",
+            "skill_ids": [
+              "sf2-autonomic_router-route-fit-spec",
+              "sf-systematic-artifact_gate-differential-review-461fbd0c"
+            ]
+          },
+          {
+            "arm_id": "minus_logic",
+            "dropped_role": "Logic",
+            "skill_ids": [
+              "sf-systematic-research-research-lookup-7e6f92a0",
+              "sf-systematic-artifact_gate-differential-review-461fbd0c"
+            ]
+          },
+          {
+            "arm_id": "minus_audit",
+            "dropped_role": "Audit",
+            "skill_ids": [
+              "sf-systematic-research-research-lookup-7e6f92a0",
+              "sf2-autonomic_router-route-fit-spec"
+            ]
+          }
+        ],
+        "status": "MATRIX_GENERATED_NOT_SELECTED"
+      },
+      "m6_mat_b_decision": {
+        "baseline": {
+          "evidence_seal_count": 1,
+          "infra_invalid_reason": "",
+          "phase_wall_total_sec": 83.2028,
+          "pollution_pct": 0.0,
+          "receipt_chain_pass": true,
+          "reopen_rate": 0.0,
+          "reopen_rate_source": "deterministic_receipt_replay_proxy",
+          "skill_mount_contract_status": "PASS",
+          "success_rate": 1.0,
+          "total_tokens": 60696,
+          "trust_mismatch": false
+        },
+        "challenger": {
+          "evidence_seal_count": 0,
+          "infra_invalid_reason": "",
+          "phase_wall_total_sec": 45.972,
+          "pollution_pct": 0.0,
+          "receipt_chain_pass": false,
+          "reopen_rate": 1.0,
+          "reopen_rate_source": "deterministic_receipt_replay_proxy",
+          "skill_mount_contract_status": "RETURN",
+          "success_rate": 0.0,
+          "total_tokens": 30231,
+          "trust_mismatch": false
+        },
+        "correctness_before_cost": true,
+        "decision_state": "REJECT_CANDIDATE",
+        "delta": {
+          "evidence_seal_count_delta": -1,
+          "pollution_pct_delta": 0.0,
+          "reopen_rate_delta": 1.0,
+          "success_rate_delta": -1.0,
+          "token_delta": -30465,
+          "wall_delta": -37.2308
+        },
+        "public_benchmark_allowed": false,
+        "reason_codes": [
+          "reliability_not_better_or_delivery_return"
+        ],
+        "runtime_update_allowed": false,
+        "verdict": "REJECT_MULTI_SKILL"
+      },
+      "m7_catalog_update": {
+        "capability": "research",
+        "catalog_update_allowed": true,
+        "planned_action": "retain_single_primary",
+        "public_benchmark_allowed": false,
+        "runtime_update_allowed": false,
+        "selected_skill_ids": [
+          "sf-systematic-research-research-lookup-7e6f92a0"
+        ]
+      },
+      "m8_runtime_apply_review": {
+        "overlay_applied": false,
+        "post_apply_smoke_status": "",
+        "public_benchmark_allowed": false,
+        "review_state": "NO_RUNTIME_APPLY_NEEDED",
+        "runtime_update_allowed": false
+      }
+    },
+    {
+      "capability": "research_and_source_discipline",
+      "m1_intake": {
+        "eligible_for_discovery": true,
+        "eligible_for_runtime_direct_mount": true,
+        "original_skill_name": "research-citation-chain-verifier",
+        "primary_skill_id": "research-citation-chain-verifier",
+        "source_class": "current_best",
+        "source_path": ""
+      },
+      "m2_shortlist": {
+        "current_primary": "research-citation-chain-verifier",
+        "multi_role_candidates": [
+          {
+            "role": "Scout",
+            "skill_id": "research-citation-chain-verifier"
+          },
+          {
+            "role": "Logic",
+            "skill_id": "sf2-autonomic_router-route-fit-spec"
+          },
+          {
+            "role": "Audit",
+            "skill_id": "sf-systematic-artifact_gate-differential-review-461fbd0c"
+          }
+        ],
+        "negative_control_required": true,
+        "shortlist_complete": true,
+        "single_challengers": [
+          "sf2-autonomic_router-route-fit-spec",
+          "sf-systematic-artifact_gate-differential-review-461fbd0c"
+        ]
+      },
+      "m3_single_skill_tournament": {
+        "cost_read_after_correctness_only": true,
+        "decision": "HOLD_PROVIDER_TOKEN_TRUTH",
+        "public_benchmark_allowed": false,
+        "runtime_update_allowed": false
+      },
+      "m4_multi_skill_assembly": {
+        "assembly": [
+          {
+            "role": "Scout",
+            "skill_id": "research-citation-chain-verifier"
+          },
+          {
+            "role": "Logic",
+            "skill_id": "sf2-autonomic_router-route-fit-spec"
+          },
+          {
+            "role": "Audit",
+            "skill_id": "sf-systematic-artifact_gate-differential-review-461fbd0c"
+          }
+        ],
+        "assembly_kind": "scout_logic_audit",
+        "mode": "Mode C (Swarm)"
+      },
+      "m5_role_ablation": {
+        "capability": "research_and_source_discipline",
+        "contribution_gate": "full assembly must beat every minus-role arm before public/default claims",
+        "matrix": [
+          {
+            "arm_id": "full_assembly",
+            "dropped_role": "",
+            "skill_ids": [
+              "research-citation-chain-verifier",
+              "sf2-autonomic_router-route-fit-spec",
+              "sf-systematic-artifact_gate-differential-review-461fbd0c"
+            ]
+          },
+          {
+            "arm_id": "minus_scout",
+            "dropped_role": "Scout",
+            "skill_ids": [
+              "sf2-autonomic_router-route-fit-spec",
+              "sf-systematic-artifact_gate-differential-review-461fbd0c"
+            ]
+          },
+          {
+            "arm_id": "minus_logic",
+            "dropped_role": "Logic",
+            "skill_ids": [
+              "research-citation-chain-verifier",
+              "sf-systematic-artifact_gate-differential-review-461fbd0c"
+            ]
+          },
+          {
+            "arm_id": "minus_audit",
+            "dropped_role": "Audit",
+            "skill_ids": [
+              "research-citation-chain-verifier",
+              "sf2-autonomic_router-route-fit-spec"
+            ]
+          }
+        ],
+        "status": "BLOCKED_UNTIL_MAT_B_CLEAN"
+      },
+      "m6_mat_b_decision": {
+        "baseline": {
+          "evidence_seal_count": 1,
+          "infra_invalid_reason": "model_call_without_tokens",
+          "phase_wall_total_sec": 12.2744,
+          "pollution_pct": 0.0,
+          "receipt_chain_pass": true,
+          "reopen_rate": 1.0,
+          "reopen_rate_source": "deterministic_receipt_replay_proxy",
+          "skill_mount_contract_status": "PASS",
+          "success_rate": 0.0,
+          "total_tokens": 0,
+          "trust_mismatch": false
+        },
+        "challenger": {
+          "evidence_seal_count": 3,
+          "infra_invalid_reason": "model_call_without_tokens",
+          "phase_wall_total_sec": 13.0338,
+          "pollution_pct": 0.0,
+          "receipt_chain_pass": true,
+          "reopen_rate": 1.0,
+          "reopen_rate_source": "deterministic_receipt_replay_proxy",
+          "skill_mount_contract_status": "PASS",
+          "success_rate": 0.0,
+          "total_tokens": 0,
+          "trust_mismatch": false
+        },
+        "correctness_before_cost": true,
+        "decision_state": "HOLD_PROVIDER_TOKEN_TRUTH",
+        "delta": {
+          "evidence_seal_count_delta": 2,
+          "pollution_pct_delta": 0.0,
+          "reopen_rate_delta": 0.0,
+          "success_rate_delta": 0.0,
+          "token_delta": 0,
+          "wall_delta": 0.7594
+        },
+        "public_benchmark_allowed": false,
+        "reason_codes": [
+          "baseline_infra_invalid:model_call_without_tokens",
+          "clean_replay_still_unclean",
+          "clean_replay:baseline_infra_invalid:model_call_without_tokens"
+        ],
+        "runtime_update_allowed": false,
+        "verdict": "BLOCKED_BY_PROVIDER_TOKEN_TRUTH"
+      },
+      "m7_catalog_update": {
+        "capability": "research_and_source_discipline",
+        "catalog_update_allowed": true,
+        "planned_action": "write_hold_and_replay_queue",
+        "public_benchmark_allowed": false,
+        "runtime_update_allowed": false,
+        "selected_skill_ids": [
+          "research-citation-chain-verifier"
+        ]
+      },
+      "m8_runtime_apply_review": {
+        "overlay_applied": false,
+        "post_apply_smoke_status": "",
+        "public_benchmark_allowed": false,
+        "review_state": "BLOCKED",
+        "runtime_update_allowed": false
+      }
+    },
+    {
+      "capability": "research_control_plane",
+      "m1_intake": {
+        "eligible_for_discovery": true,
+        "eligible_for_runtime_direct_mount": false,
+        "original_skill_name": "research-lookup",
+        "primary_skill_id": "sf-systematic-research_control_plane-research-lookup-7e6f92a0",
+        "source_class": "approved_external_reference",
+        "source_path": "/private/tmp/nexus-sf-round9/K-Dense-AI-scientific-agent-skills/scientific-skills/research-lookup/SKILL.md"
+      },
+      "m2_shortlist": {
+        "current_primary": "sf-systematic-research_control_plane-research-lookup-7e6f92a0",
+        "multi_role_candidates": [
+          {
+            "role": "Scout",
+            "skill_id": "sf-systematic-research_control_plane-research-lookup-7e6f92a0"
+          },
+          {
+            "role": "Logic",
+            "skill_id": "sf2-autonomic_router-route-fit-spec"
+          },
+          {
+            "role": "Audit",
+            "skill_id": "sf-systematic-artifact_gate-differential-review-461fbd0c"
+          }
+        ],
+        "negative_control_required": true,
+        "shortlist_complete": true,
+        "single_challengers": [
+          "sf2-autonomic_router-route-fit-spec",
+          "sf-systematic-artifact_gate-differential-review-461fbd0c"
+        ]
+      },
+      "m3_single_skill_tournament": {
+        "cost_read_after_correctness_only": true,
+        "decision": "HOLD_PROVIDER_TOKEN_TRUTH",
+        "public_benchmark_allowed": false,
+        "runtime_update_allowed": false
+      },
+      "m4_multi_skill_assembly": {
+        "assembly": [
+          {
+            "role": "Scout",
+            "skill_id": "sf-systematic-research_control_plane-research-lookup-7e6f92a0"
+          },
+          {
+            "role": "Logic",
+            "skill_id": "sf2-autonomic_router-route-fit-spec"
+          },
+          {
+            "role": "Audit",
+            "skill_id": "sf-systematic-artifact_gate-differential-review-461fbd0c"
+          }
+        ],
+        "assembly_kind": "scout_logic_audit",
+        "mode": "Mode C (Swarm)"
+      },
+      "m5_role_ablation": {
+        "capability": "research_control_plane",
+        "contribution_gate": "full assembly must beat every minus-role arm before public/default claims",
+        "matrix": [
+          {
+            "arm_id": "full_assembly",
+            "dropped_role": "",
+            "skill_ids": [
+              "sf-systematic-research_control_plane-research-lookup-7e6f92a0",
+              "sf2-autonomic_router-route-fit-spec",
+              "sf-systematic-artifact_gate-differential-review-461fbd0c"
+            ]
+          },
+          {
+            "arm_id": "minus_scout",
+            "dropped_role": "Scout",
+            "skill_ids": [
+              "sf2-autonomic_router-route-fit-spec",
+              "sf-systematic-artifact_gate-differential-review-461fbd0c"
+            ]
+          },
+          {
+            "arm_id": "minus_logic",
+            "dropped_role": "Logic",
+            "skill_ids": [
+              "sf-systematic-research_control_plane-research-lookup-7e6f92a0",
+              "sf-systematic-artifact_gate-differential-review-461fbd0c"
+            ]
+          },
+          {
+            "arm_id": "minus_audit",
+            "dropped_role": "Audit",
+            "skill_ids": [
+              "sf-systematic-research_control_plane-research-lookup-7e6f92a0",
+              "sf2-autonomic_router-route-fit-spec"
+            ]
+          }
+        ],
+        "status": "BLOCKED_UNTIL_MAT_B_CLEAN"
+      },
+      "m6_mat_b_decision": {
+        "baseline": {
+          "evidence_seal_count": 1,
+          "infra_invalid_reason": "model_call_without_tokens",
+          "phase_wall_total_sec": 11.5514,
+          "pollution_pct": 0.0,
+          "receipt_chain_pass": true,
+          "reopen_rate": 1.0,
+          "reopen_rate_source": "deterministic_receipt_replay_proxy",
+          "skill_mount_contract_status": "PASS",
+          "success_rate": 0.0,
+          "total_tokens": 0,
+          "trust_mismatch": false
+        },
+        "challenger": {
+          "evidence_seal_count": 3,
+          "infra_invalid_reason": "model_call_without_tokens",
+          "phase_wall_total_sec": 11.8591,
+          "pollution_pct": 0.0,
+          "receipt_chain_pass": true,
+          "reopen_rate": 1.0,
+          "reopen_rate_source": "deterministic_receipt_replay_proxy",
+          "skill_mount_contract_status": "PASS",
+          "success_rate": 0.0,
+          "total_tokens": 0,
+          "trust_mismatch": false
+        },
+        "correctness_before_cost": true,
+        "decision_state": "HOLD_PROVIDER_TOKEN_TRUTH",
+        "delta": {
+          "evidence_seal_count_delta": 2,
+          "pollution_pct_delta": 0.0,
+          "reopen_rate_delta": 0.0,
+          "success_rate_delta": 0.0,
+          "token_delta": 0,
+          "wall_delta": 0.3077
+        },
+        "public_benchmark_allowed": false,
+        "reason_codes": [
+          "baseline_infra_invalid:model_call_without_tokens",
+          "clean_replay_still_unclean",
+          "clean_replay:baseline_infra_invalid:model_call_without_tokens"
+        ],
+        "runtime_update_allowed": false,
+        "verdict": "BLOCKED_BY_PROVIDER_TOKEN_TRUTH"
+      },
+      "m7_catalog_update": {
+        "capability": "research_control_plane",
+        "catalog_update_allowed": true,
+        "planned_action": "write_hold_and_replay_queue",
+        "public_benchmark_allowed": false,
+        "runtime_update_allowed": false,
+        "selected_skill_ids": [
+          "sf-systematic-research_control_plane-research-lookup-7e6f92a0"
+        ]
+      },
+      "m8_runtime_apply_review": {
+        "overlay_applied": false,
+        "post_apply_smoke_status": "",
+        "public_benchmark_allowed": false,
+        "review_state": "BLOCKED",
+        "runtime_update_allowed": false
+      }
+    },
+    {
+      "capability": "sandbox_replay",
+      "m1_intake": {
+        "eligible_for_discovery": true,
+        "eligible_for_runtime_direct_mount": true,
+        "original_skill_name": "sf2-sandbox_replay-route-fit-spec",
+        "primary_skill_id": "sf2-sandbox_replay-route-fit-spec",
+        "source_class": "current_best",
+        "source_path": ""
+      },
+      "m2_shortlist": {
+        "current_primary": "sf2-sandbox_replay-route-fit-spec",
+        "multi_role_candidates": [
+          {
+            "role": "primary",
+            "skill_id": "sf2-sandbox_replay-route-fit-spec"
+          },
+          {
+            "role": "Audit",
+            "skill_id": "sf-systematic-artifact_gate-differential-review-461fbd0c"
+          }
+        ],
+        "negative_control_required": true,
+        "shortlist_complete": true,
+        "single_challengers": [
+          "sf-systematic-artifact_gate-differential-review-461fbd0c"
+        ]
+      },
+      "m3_single_skill_tournament": {
+        "cost_read_after_correctness_only": true,
+        "decision": "HOLD_PROVIDER_TOKEN_TRUTH",
+        "public_benchmark_allowed": false,
+        "runtime_update_allowed": false
+      },
+      "m4_multi_skill_assembly": {
+        "assembly": [
+          {
+            "role": "primary",
+            "skill_id": "sf2-sandbox_replay-route-fit-spec"
+          },
+          {
+            "role": "Audit",
+            "skill_id": "sf-systematic-artifact_gate-differential-review-461fbd0c"
+          }
+        ],
+        "assembly_kind": "primary_plus_guard",
+        "mode": "Mode B (Guard)"
+      },
+      "m5_role_ablation": {
+        "capability": "sandbox_replay",
+        "contribution_gate": "full assembly must beat every minus-role arm before public/default claims",
+        "matrix": [
+          {
+            "arm_id": "full_assembly",
+            "dropped_role": "",
+            "skill_ids": [
+              "sf2-sandbox_replay-route-fit-spec",
+              "sf-systematic-artifact_gate-differential-review-461fbd0c"
+            ]
+          },
+          {
+            "arm_id": "minus_primary",
+            "dropped_role": "primary",
+            "skill_ids": [
+              "sf-systematic-artifact_gate-differential-review-461fbd0c"
+            ]
+          },
+          {
+            "arm_id": "minus_audit",
+            "dropped_role": "Audit",
+            "skill_ids": [
+              "sf2-sandbox_replay-route-fit-spec"
+            ]
+          }
+        ],
+        "status": "BLOCKED_UNTIL_MAT_B_CLEAN"
+      },
+      "m6_mat_b_decision": {
+        "baseline": {
+          "evidence_seal_count": 1,
+          "infra_invalid_reason": "model_call_without_tokens",
+          "phase_wall_total_sec": 11.618,
+          "pollution_pct": 0.0,
+          "receipt_chain_pass": true,
+          "reopen_rate": 1.0,
+          "reopen_rate_source": "deterministic_receipt_replay_proxy",
+          "skill_mount_contract_status": "PASS",
+          "success_rate": 0.0,
+          "total_tokens": 0,
+          "trust_mismatch": false
+        },
+        "challenger": {
+          "evidence_seal_count": 2,
+          "infra_invalid_reason": "model_call_without_tokens",
+          "phase_wall_total_sec": 12.4749,
+          "pollution_pct": 0.0,
+          "receipt_chain_pass": true,
+          "reopen_rate": 1.0,
+          "reopen_rate_source": "deterministic_receipt_replay_proxy",
+          "skill_mount_contract_status": "PASS",
+          "success_rate": 0.0,
+          "total_tokens": 0,
+          "trust_mismatch": false
+        },
+        "correctness_before_cost": true,
+        "decision_state": "HOLD_PROVIDER_TOKEN_TRUTH",
+        "delta": {
+          "evidence_seal_count_delta": 1,
+          "pollution_pct_delta": 0.0,
+          "reopen_rate_delta": 0.0,
+          "success_rate_delta": 0.0,
+          "token_delta": 0,
+          "wall_delta": 0.8569
+        },
+        "public_benchmark_allowed": false,
+        "reason_codes": [
+          "baseline_infra_invalid:model_call_without_tokens",
+          "clean_replay_still_unclean",
+          "clean_replay:baseline_infra_invalid:model_call_without_tokens"
+        ],
+        "runtime_update_allowed": false,
+        "verdict": "BLOCKED_BY_PROVIDER_TOKEN_TRUTH"
+      },
+      "m7_catalog_update": {
+        "capability": "sandbox_replay",
+        "catalog_update_allowed": true,
+        "planned_action": "write_hold_and_replay_queue",
+        "public_benchmark_allowed": false,
+        "runtime_update_allowed": false,
+        "selected_skill_ids": [
+          "sf2-sandbox_replay-route-fit-spec"
+        ]
+      },
+      "m8_runtime_apply_review": {
+        "overlay_applied": false,
+        "post_apply_smoke_status": "",
+        "public_benchmark_allowed": false,
+        "review_state": "BLOCKED",
+        "runtime_update_allowed": false
+      }
+    },
+    {
+      "capability": "swarm_multi_agent",
+      "m1_intake": {
+        "eligible_for_discovery": true,
+        "eligible_for_runtime_direct_mount": true,
+        "original_skill_name": "sf2-swarm_multi_agent-route-fit-spec",
+        "primary_skill_id": "sf2-swarm_multi_agent-route-fit-spec",
+        "source_class": "current_best",
+        "source_path": ""
+      },
+      "m2_shortlist": {
+        "current_primary": "sf2-swarm_multi_agent-route-fit-spec",
+        "multi_role_candidates": [
+          {
+            "role": "Scout",
+            "skill_id": "sf-systematic-codeintel-first-principles-thinking-f95019ea"
+          },
+          {
+            "role": "Logic",
+            "skill_id": "sf2-swarm_multi_agent-route-fit-spec"
+          },
+          {
+            "role": "Audit",
+            "skill_id": "sf-systematic-artifact_gate-differential-review-461fbd0c"
+          }
+        ],
+        "negative_control_required": true,
+        "shortlist_complete": true,
+        "single_challengers": [
+          "sf-systematic-codeintel-first-principles-thinking-f95019ea",
+          "sf-systematic-artifact_gate-differential-review-461fbd0c"
+        ]
+      },
+      "m3_single_skill_tournament": {
+        "cost_read_after_correctness_only": true,
+        "decision": "HOLD_RECEIPT_CHAIN",
+        "public_benchmark_allowed": false,
+        "runtime_update_allowed": false
+      },
+      "m4_multi_skill_assembly": {
+        "assembly": [
+          {
+            "role": "Scout",
+            "skill_id": "sf-systematic-codeintel-first-principles-thinking-f95019ea"
+          },
+          {
+            "role": "Logic",
+            "skill_id": "sf2-swarm_multi_agent-route-fit-spec"
+          },
+          {
+            "role": "Audit",
+            "skill_id": "sf-systematic-artifact_gate-differential-review-461fbd0c"
+          }
+        ],
+        "assembly_kind": "scout_logic_audit",
+        "mode": "Mode C (Swarm)"
+      },
+      "m5_role_ablation": {
+        "capability": "swarm_multi_agent",
+        "contribution_gate": "full assembly must beat every minus-role arm before public/default claims",
+        "matrix": [
+          {
+            "arm_id": "full_assembly",
+            "dropped_role": "",
+            "skill_ids": [
+              "sf-systematic-codeintel-first-principles-thinking-f95019ea",
+              "sf2-swarm_multi_agent-route-fit-spec",
+              "sf-systematic-artifact_gate-differential-review-461fbd0c"
+            ]
+          },
+          {
+            "arm_id": "minus_scout",
+            "dropped_role": "Scout",
+            "skill_ids": [
+              "sf2-swarm_multi_agent-route-fit-spec",
+              "sf-systematic-artifact_gate-differential-review-461fbd0c"
+            ]
+          },
+          {
+            "arm_id": "minus_logic",
+            "dropped_role": "Logic",
+            "skill_ids": [
+              "sf-systematic-codeintel-first-principles-thinking-f95019ea",
+              "sf-systematic-artifact_gate-differential-review-461fbd0c"
+            ]
+          },
+          {
+            "arm_id": "minus_audit",
+            "dropped_role": "Audit",
+            "skill_ids": [
+              "sf-systematic-codeintel-first-principles-thinking-f95019ea",
+              "sf2-swarm_multi_agent-route-fit-spec"
+            ]
+          }
+        ],
+        "status": "BLOCKED_UNTIL_MAT_B_CLEAN"
+      },
+      "m6_mat_b_decision": {
+        "baseline": {
+          "evidence_seal_count": 0,
+          "infra_invalid_reason": "receipt_data_contract_violation",
+          "phase_wall_total_sec": 10.9875,
+          "pollution_pct": 0.0,
+          "receipt_chain_pass": false,
+          "reopen_rate": 1.0,
+          "reopen_rate_source": "deterministic_receipt_replay_proxy",
+          "skill_mount_contract_status": "RETURN",
+          "success_rate": 0.0,
+          "total_tokens": 598,
+          "trust_mismatch": false
+        },
+        "challenger": {
+          "evidence_seal_count": 0,
+          "infra_invalid_reason": "receipt_data_contract_violation",
+          "phase_wall_total_sec": 10.533,
+          "pollution_pct": 0.0,
+          "receipt_chain_pass": false,
+          "reopen_rate": 1.0,
+          "reopen_rate_source": "deterministic_receipt_replay_proxy",
+          "skill_mount_contract_status": "RETURN",
+          "success_rate": 0.0,
+          "total_tokens": 598,
+          "trust_mismatch": false
+        },
+        "correctness_before_cost": true,
+        "decision_state": "HOLD_RECEIPT_CHAIN",
+        "delta": {
+          "evidence_seal_count_delta": 0,
+          "pollution_pct_delta": 0.0,
+          "reopen_rate_delta": 0.0,
+          "success_rate_delta": 0.0,
+          "token_delta": 0,
+          "wall_delta": -0.4545
+        },
+        "public_benchmark_allowed": false,
+        "reason_codes": [
+          "baseline_infra_invalid:receipt_data_contract_violation",
+          "clean_replay_still_unclean",
+          "clean_replay:baseline_infra_invalid:receipt_data_contract_violation"
+        ],
+        "runtime_update_allowed": false,
+        "verdict": "BLOCKED_BY_RECEIPT_DATA_CONTRACT"
+      },
+      "m7_catalog_update": {
+        "capability": "swarm_multi_agent",
+        "catalog_update_allowed": true,
+        "planned_action": "write_hold_and_replay_queue",
+        "public_benchmark_allowed": false,
+        "runtime_update_allowed": false,
+        "selected_skill_ids": [
+          "sf2-swarm_multi_agent-route-fit-spec"
+        ]
+      },
+      "m8_runtime_apply_review": {
+        "overlay_applied": false,
+        "post_apply_smoke_status": "",
+        "public_benchmark_allowed": false,
+        "review_state": "BLOCKED",
+        "runtime_update_allowed": false
+      }
+    },
+    {
+      "capability": "ui_validator",
+      "m1_intake": {
+        "eligible_for_discovery": true,
+        "eligible_for_runtime_direct_mount": false,
+        "original_skill_name": "e2e-testing",
+        "primary_skill_id": "sf-systematic-ui_validator-e2e-testing-d98eb7c3",
+        "source_class": "approved_external_reference",
+        "source_path": "/private/tmp/nexus-sf-round4/sickn33-antigravity-awesome-skills/plugins/antigravity-awesome-skills/skills/e2e-testing/SKILL.md"
+      },
+      "m2_shortlist": {
+        "current_primary": "sf-systematic-ui_validator-e2e-testing-d98eb7c3",
+        "multi_role_candidates": [
+          {
+            "role": "primary",
+            "skill_id": "sf-systematic-ui_validator-e2e-testing-d98eb7c3"
+          },
+          {
+            "role": "Audit",
+            "skill_id": "sf-systematic-artifact_gate-differential-review-461fbd0c"
+          }
+        ],
+        "negative_control_required": true,
+        "shortlist_complete": true,
+        "single_challengers": [
+          "sf-systematic-artifact_gate-differential-review-461fbd0c"
+        ]
+      },
+      "m3_single_skill_tournament": {
+        "cost_read_after_correctness_only": true,
+        "decision": "HOLD_PROVIDER_TOKEN_TRUTH",
+        "public_benchmark_allowed": false,
+        "runtime_update_allowed": false
+      },
+      "m4_multi_skill_assembly": {
+        "assembly": [
+          {
+            "role": "primary",
+            "skill_id": "sf-systematic-ui_validator-e2e-testing-d98eb7c3"
+          },
+          {
+            "role": "Audit",
+            "skill_id": "sf-systematic-artifact_gate-differential-review-461fbd0c"
+          }
+        ],
+        "assembly_kind": "primary_plus_guard",
+        "mode": "Mode B (Guard)"
+      },
+      "m5_role_ablation": {
+        "capability": "ui_validator",
+        "contribution_gate": "full assembly must beat every minus-role arm before public/default claims",
+        "matrix": [
+          {
+            "arm_id": "full_assembly",
+            "dropped_role": "",
+            "skill_ids": [
+              "sf-systematic-ui_validator-e2e-testing-d98eb7c3",
+              "sf-systematic-artifact_gate-differential-review-461fbd0c"
+            ]
+          },
+          {
+            "arm_id": "minus_primary",
+            "dropped_role": "primary",
+            "skill_ids": [
+              "sf-systematic-artifact_gate-differential-review-461fbd0c"
+            ]
+          },
+          {
+            "arm_id": "minus_audit",
+            "dropped_role": "Audit",
+            "skill_ids": [
+              "sf-systematic-ui_validator-e2e-testing-d98eb7c3"
+            ]
+          }
+        ],
+        "status": "BLOCKED_UNTIL_MAT_B_CLEAN"
+      },
+      "m6_mat_b_decision": {
+        "baseline": {
+          "evidence_seal_count": 1,
+          "infra_invalid_reason": "model_call_without_tokens",
+          "phase_wall_total_sec": 13.9647,
+          "pollution_pct": 0.0,
+          "receipt_chain_pass": true,
+          "reopen_rate": 1.0,
+          "reopen_rate_source": "deterministic_receipt_replay_proxy",
+          "skill_mount_contract_status": "PASS",
+          "success_rate": 0.0,
+          "total_tokens": 0,
+          "trust_mismatch": false
+        },
+        "challenger": {
+          "evidence_seal_count": 2,
+          "infra_invalid_reason": "model_call_without_tokens",
+          "phase_wall_total_sec": 14.3949,
+          "pollution_pct": 0.0,
+          "receipt_chain_pass": true,
+          "reopen_rate": 1.0,
+          "reopen_rate_source": "deterministic_receipt_replay_proxy",
+          "skill_mount_contract_status": "PASS",
+          "success_rate": 0.0,
+          "total_tokens": 0,
+          "trust_mismatch": false
+        },
+        "correctness_before_cost": true,
+        "decision_state": "HOLD_PROVIDER_TOKEN_TRUTH",
+        "delta": {
+          "evidence_seal_count_delta": 1,
+          "pollution_pct_delta": 0.0,
+          "reopen_rate_delta": 0.0,
+          "success_rate_delta": 0.0,
+          "token_delta": 0,
+          "wall_delta": 0.4302
+        },
+        "public_benchmark_allowed": false,
+        "reason_codes": [
+          "baseline_infra_invalid:model_call_without_tokens",
+          "clean_replay_still_unclean",
+          "clean_replay:baseline_infra_invalid:model_call_without_tokens"
+        ],
+        "runtime_update_allowed": false,
+        "verdict": "BLOCKED_BY_PROVIDER_TOKEN_TRUTH"
+      },
+      "m7_catalog_update": {
+        "capability": "ui_validator",
+        "catalog_update_allowed": true,
+        "planned_action": "write_hold_and_replay_queue",
+        "public_benchmark_allowed": false,
+        "runtime_update_allowed": false,
+        "selected_skill_ids": [
+          "sf-systematic-ui_validator-e2e-testing-d98eb7c3"
+        ]
+      },
+      "m8_runtime_apply_review": {
+        "overlay_applied": false,
+        "post_apply_smoke_status": "",
+        "public_benchmark_allowed": false,
+        "review_state": "BLOCKED",
+        "runtime_update_allowed": false
+      }
+    },
+    {
+      "capability": "ultra_review",
+      "m1_intake": {
+        "eligible_for_discovery": true,
+        "eligible_for_runtime_direct_mount": true,
+        "original_skill_name": "github11-vulnerability-scanner-ultra-review",
+        "primary_skill_id": "github11-vulnerability-scanner-ultra-review",
+        "source_class": "current_best",
+        "source_path": ""
+      },
+      "m2_shortlist": {
+        "current_primary": "github11-vulnerability-scanner-ultra-review",
+        "multi_role_candidates": [
+          {
+            "role": "Scout",
+            "skill_id": "sf-systematic-codeintel-first-principles-thinking-f95019ea"
+          },
+          {
+            "role": "Logic",
+            "skill_id": "sf2-autonomic_router-route-fit-spec"
+          },
+          {
+            "role": "Audit",
+            "skill_id": "github11-vulnerability-scanner-ultra-review"
+          }
+        ],
+        "negative_control_required": true,
+        "shortlist_complete": true,
+        "single_challengers": [
+          "sf-systematic-codeintel-first-principles-thinking-f95019ea",
+          "sf2-autonomic_router-route-fit-spec"
+        ]
+      },
+      "m3_single_skill_tournament": {
+        "cost_read_after_correctness_only": true,
+        "decision": "HOLD_PROVIDER_TOKEN_TRUTH",
+        "public_benchmark_allowed": false,
+        "runtime_update_allowed": false
+      },
+      "m4_multi_skill_assembly": {
+        "assembly": [
+          {
+            "role": "Scout",
+            "skill_id": "sf-systematic-codeintel-first-principles-thinking-f95019ea"
+          },
+          {
+            "role": "Logic",
+            "skill_id": "sf2-autonomic_router-route-fit-spec"
+          },
+          {
+            "role": "Audit",
+            "skill_id": "github11-vulnerability-scanner-ultra-review"
+          }
+        ],
+        "assembly_kind": "scout_logic_audit",
+        "mode": "Mode C (Swarm)"
+      },
+      "m5_role_ablation": {
+        "capability": "ultra_review",
+        "contribution_gate": "full assembly must beat every minus-role arm before public/default claims",
+        "matrix": [
+          {
+            "arm_id": "full_assembly",
+            "dropped_role": "",
+            "skill_ids": [
+              "sf-systematic-codeintel-first-principles-thinking-f95019ea",
+              "sf2-autonomic_router-route-fit-spec",
+              "github11-vulnerability-scanner-ultra-review"
+            ]
+          },
+          {
+            "arm_id": "minus_scout",
+            "dropped_role": "Scout",
+            "skill_ids": [
+              "sf2-autonomic_router-route-fit-spec",
+              "github11-vulnerability-scanner-ultra-review"
+            ]
+          },
+          {
+            "arm_id": "minus_logic",
+            "dropped_role": "Logic",
+            "skill_ids": [
+              "sf-systematic-codeintel-first-principles-thinking-f95019ea",
+              "github11-vulnerability-scanner-ultra-review"
+            ]
+          },
+          {
+            "arm_id": "minus_audit",
+            "dropped_role": "Audit",
+            "skill_ids": [
+              "sf-systematic-codeintel-first-principles-thinking-f95019ea",
+              "sf2-autonomic_router-route-fit-spec"
+            ]
+          }
+        ],
+        "status": "BLOCKED_UNTIL_MAT_B_CLEAN"
+      },
+      "m6_mat_b_decision": {
+        "baseline": {
+          "evidence_seal_count": 1,
+          "infra_invalid_reason": "model_call_without_tokens",
+          "phase_wall_total_sec": 16.4081,
+          "pollution_pct": 0.0,
+          "receipt_chain_pass": true,
+          "reopen_rate": 1.0,
+          "reopen_rate_source": "deterministic_receipt_replay_proxy",
+          "skill_mount_contract_status": "PASS",
+          "success_rate": 0.0,
+          "total_tokens": 0,
+          "trust_mismatch": false
+        },
+        "challenger": {
+          "evidence_seal_count": 3,
+          "infra_invalid_reason": "model_call_without_tokens",
+          "phase_wall_total_sec": 15.1692,
+          "pollution_pct": 0.0,
+          "receipt_chain_pass": true,
+          "reopen_rate": 1.0,
+          "reopen_rate_source": "deterministic_receipt_replay_proxy",
+          "skill_mount_contract_status": "PASS",
+          "success_rate": 0.0,
+          "total_tokens": 0,
+          "trust_mismatch": false
+        },
+        "correctness_before_cost": true,
+        "decision_state": "HOLD_PROVIDER_TOKEN_TRUTH",
+        "delta": {
+          "evidence_seal_count_delta": 2,
+          "pollution_pct_delta": 0.0,
+          "reopen_rate_delta": 0.0,
+          "success_rate_delta": 0.0,
+          "token_delta": 0,
+          "wall_delta": -1.2389
+        },
+        "public_benchmark_allowed": false,
+        "reason_codes": [
+          "baseline_infra_invalid:model_call_without_tokens",
+          "clean_replay_still_unclean",
+          "clean_replay:baseline_infra_invalid:model_call_without_tokens"
+        ],
+        "runtime_update_allowed": false,
+        "verdict": "BLOCKED_BY_PROVIDER_TOKEN_TRUTH"
+      },
+      "m7_catalog_update": {
+        "capability": "ultra_review",
+        "catalog_update_allowed": true,
+        "planned_action": "write_hold_and_replay_queue",
+        "public_benchmark_allowed": false,
+        "runtime_update_allowed": false,
+        "selected_skill_ids": [
+          "github11-vulnerability-scanner-ultra-review"
+        ]
+      },
+      "m8_runtime_apply_review": {
+        "overlay_applied": false,
+        "post_apply_smoke_status": "",
+        "public_benchmark_allowed": false,
+        "review_state": "BLOCKED",
+        "runtime_update_allowed": false
+      }
+    },
+    {
+      "capability": "xray",
+      "m1_intake": {
+        "eligible_for_discovery": true,
+        "eligible_for_runtime_direct_mount": true,
+        "original_skill_name": "diagnose",
+        "primary_skill_id": "diagnose",
+        "source_class": "current_best",
+        "source_path": ""
+      },
+      "m2_shortlist": {
+        "current_primary": "diagnose",
+        "multi_role_candidates": [
+          {
+            "role": "primary",
+            "skill_id": "diagnose"
+          },
+          {
+            "role": "Audit",
+            "skill_id": "sf-systematic-artifact_gate-differential-review-461fbd0c"
+          }
+        ],
+        "negative_control_required": true,
+        "shortlist_complete": true,
+        "single_challengers": [
+          "sf-systematic-artifact_gate-differential-review-461fbd0c"
+        ]
+      },
+      "m3_single_skill_tournament": {
+        "cost_read_after_correctness_only": true,
+        "decision": "HOLD_PROVIDER_TOKEN_TRUTH",
+        "public_benchmark_allowed": false,
+        "runtime_update_allowed": false
+      },
+      "m4_multi_skill_assembly": {
+        "assembly": [
+          {
+            "role": "primary",
+            "skill_id": "diagnose"
+          },
+          {
+            "role": "Audit",
+            "skill_id": "sf-systematic-artifact_gate-differential-review-461fbd0c"
+          }
+        ],
+        "assembly_kind": "primary_plus_guard",
+        "mode": "Mode B (Guard)"
+      },
+      "m5_role_ablation": {
+        "capability": "xray",
+        "contribution_gate": "full assembly must beat every minus-role arm before public/default claims",
+        "matrix": [
+          {
+            "arm_id": "full_assembly",
+            "dropped_role": "",
+            "skill_ids": [
+              "diagnose",
+              "sf-systematic-artifact_gate-differential-review-461fbd0c"
+            ]
+          },
+          {
+            "arm_id": "minus_primary",
+            "dropped_role": "primary",
+            "skill_ids": [
+              "sf-systematic-artifact_gate-differential-review-461fbd0c"
+            ]
+          },
+          {
+            "arm_id": "minus_audit",
+            "dropped_role": "Audit",
+            "skill_ids": [
+              "diagnose"
+            ]
+          }
+        ],
+        "status": "BLOCKED_UNTIL_MAT_B_CLEAN"
+      },
+      "m6_mat_b_decision": {
+        "baseline": {
+          "evidence_seal_count": 1,
+          "infra_invalid_reason": "model_call_without_tokens",
+          "phase_wall_total_sec": 10.4056,
+          "pollution_pct": 0.0,
+          "receipt_chain_pass": true,
+          "reopen_rate": 1.0,
+          "reopen_rate_source": "deterministic_receipt_replay_proxy",
+          "skill_mount_contract_status": "PASS",
+          "success_rate": 0.0,
+          "total_tokens": 0,
+          "trust_mismatch": false
+        },
+        "challenger": {
+          "evidence_seal_count": 2,
+          "infra_invalid_reason": "model_call_without_tokens",
+          "phase_wall_total_sec": 8.9096,
+          "pollution_pct": 0.0,
+          "receipt_chain_pass": true,
+          "reopen_rate": 1.0,
+          "reopen_rate_source": "deterministic_receipt_replay_proxy",
+          "skill_mount_contract_status": "PASS",
+          "success_rate": 0.0,
+          "total_tokens": 0,
+          "trust_mismatch": false
+        },
+        "correctness_before_cost": true,
+        "decision_state": "HOLD_PROVIDER_TOKEN_TRUTH",
+        "delta": {
+          "evidence_seal_count_delta": 1,
+          "pollution_pct_delta": 0.0,
+          "reopen_rate_delta": 0.0,
+          "success_rate_delta": 0.0,
+          "token_delta": 0,
+          "wall_delta": -1.496
+        },
+        "public_benchmark_allowed": false,
+        "reason_codes": [
+          "baseline_infra_invalid:model_call_without_tokens",
+          "clean_replay_still_unclean",
+          "clean_replay:baseline_infra_invalid:model_call_without_tokens"
+        ],
+        "runtime_update_allowed": false,
+        "verdict": "BLOCKED_BY_PROVIDER_TOKEN_TRUTH"
+      },
+      "m7_catalog_update": {
+        "capability": "xray",
+        "catalog_update_allowed": true,
+        "planned_action": "write_hold_and_replay_queue",
+        "public_benchmark_allowed": false,
+        "runtime_update_allowed": false,
+        "selected_skill_ids": [
+          "diagnose"
+        ]
+      },
+      "m8_runtime_apply_review": {
+        "overlay_applied": false,
+        "post_apply_smoke_status": "",
+        "public_benchmark_allowed": false,
+        "review_state": "BLOCKED",
+        "runtime_update_allowed": false
+      }
+    }
+  ],
+  "schema": "nexus.sfv2_skill_selection_pipeline.v1",
+  "status": "PASS",
+  "summary": {
+    "approve_multi_assembly_count": 9,
+    "capability_count": 34,
+    "hold_provider_token_truth_count": 10,
+    "hold_receipt_chain_count": 3,
+    "keep_single_primary_count": 11,
+    "needs_more_candidates_count": 0,
+    "public_benchmark_allowed": false,
+    "reject_candidate_count": 1,
+    "role_ablation_matrix_count": 97,
+    "runtime_review_ready_or_applied_count": 9,
+    "runtime_update_allowed": false,
+    "source_class_counts": {
+      "approved_external_reference": 15,
+      "current_best": 19
+    }
+  }
+}

@@ -117,6 +117,20 @@ EMAS 的 update notification 應表達為「新增互補組件」，不是「取
 
 是否取代或升為 runtime mode，仍由 HEEP MAT-B gate 與 runtime apply review 決定。
 
+## 8. SFV2 Automation Binding (2026-05-20)
+
+EMAS role assembly is now consumed by `scripts/ops/build_sfv2_skill_selection_pipeline.py`. The SFV2 binding keeps the EMAS responsibility narrow:
+
+- EMAS proposes Scout / Logic / Audit assemblies.
+- SFV2 turns those assemblies into role-ablation matrices.
+- HEEP MAT-B remains the only correctness gate for single-vs-multi decisions.
+- Runtime apply review remains separate from catalog update.
+- Public benchmark remains separate from internal SFV2/HEEP evidence.
+
+The generated artifact is `docs/reports/NEXUS_SFV2_SKILL_SELECTION_PIPELINE_2026-05-20.json`. It records all 34 capabilities and 97 role-ablation rows. This means future skill discovery can update the candidate pool and rerun the same deterministic pipeline without hand-editing the skill map.
+
+Failure lesson: EMAS must not treat more roles as automatic synergy. A role is useful only if the SFV2 role-ablation matrix plus MAT-B evidence shows that dropping the role loses reliability, quality, governance, regression safety, or a required receipt.
+
 ---
 *Created by Antigravity - Nexus Singularity V17*
 *Refined with Heterogeneous Intelligence Principles*

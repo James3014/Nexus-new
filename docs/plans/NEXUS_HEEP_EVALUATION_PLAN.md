@@ -140,6 +140,22 @@ Executor trio next step: `docs/reports/NEXUS_HEEP_EXECUTOR_TRIO_NEXT_STEP_PACKET
 
 Provider-clean replay attempt: `.nexus/reports/heep_flash_nexus_mat_b_executor_trio_provider_clean_replay_2026-05-20` was run for the six executor-trio MAT-B rows and stopped after the first `drone` row, summarized in `docs/reports/NEXUS_HEEP_EXECUTOR_TRIO_PROVIDER_CLEAN_REPLAY_STATUS_2026-05-20.json` and `docs/reports/NEXUS_HEEP_PROVIDER_CLEAN_REPLAY_RCA_2026-05-20.json`. The failure matched the previous provider blocker: `token_data_contract_status=DATA_CONTRACT_VIOLATION`, `token_data_contract_reason=model_call_without_measured_provider_tokens`, `gateway_error_category=gateway_error`, `provider_token_measured=false`, and missing expected `drone` receipt. The trio remains ready for the next clean replay window, but no runtime/public gate may consume this attempt.
 
+## 9. SFV2 Single/Multi Skill Selection Pipeline (2026-05-20)
+
+`docs/reports/NEXUS_SFV2_SKILL_SELECTION_PIPELINE_2026-05-20.json` is now the single machine-checkable closure artifact for the future automatic selection loop. It covers all 34 capabilities across the full milestone path: source tiering, capability shortlist, single-skill tournament state, multi-skill assembly, role-drop ablation matrix, MAT-B decision normalization, catalog update action, and runtime apply review state.
+
+Current SFV2 summary:
+
+- `34/34` capabilities classified and shortlisted.
+- `9` capabilities have approved multi-skill assembly candidates.
+- `11` retain the single primary because multi-skill regressed or did not beat the primary.
+- `1` rejects multi-skill on reliability/delivery.
+- `10` are held by provider-token truth.
+- `3` are held by receipt-chain truth.
+- `97` role-ablation matrix rows are generated for non-solo assemblies.
+
+The new rule is explicit: role count, local synergy, or a multi-skill mount is not enough. A multi-skill assembly can update internal catalog state only after MAT-B correctness gates, and it can move toward runtime only after runtime-confirmed selected / injected / used / evidence / gate / outcome receipts. Public benchmark remains separate and locked.
+
 Failure lesson: clean replay must preserve the distinction between provider-token truth and expected-capability receipt invocation. If they are merged into a generic `HOLD_MISSING_MAT_B_EVIDENCE`, later agents can accidentally rerun the wrong path or misread a provider telemetry gap as a weak skill.
 
 Failure lesson: executor route smoke is necessary but not sufficient for MAT-B promotion. It proves the route oracle can express `drone`, `nightshift`, and `swarm`, but a skill-specific MAT-B row must still prove runtime skill mount confirmation, expected capability receipt invocation, and provider-token cleanliness in the same evidence window.
