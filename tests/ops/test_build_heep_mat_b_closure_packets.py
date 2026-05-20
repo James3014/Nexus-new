@@ -62,6 +62,7 @@ def test_closure_packets_keep_runtime_and_public_blocked(tmp_path: Path) -> None
         mode_gate_output=str(tmp_path / "mode_gate.json"),
         runtime_review_output=str(tmp_path / "runtime_review.json"),
         public_gate_output=str(tmp_path / "public_gate.json"),
+        taskcard_status_output=str(tmp_path / "taskcards.json"),
     )
     artifacts = closure.build_all(args)
 
@@ -71,3 +72,5 @@ def test_closure_packets_keep_runtime_and_public_blocked(tmp_path: Path) -> None
     assert artifacts["runtime_review"]["summary"]["hold_for_skill_specific_replay_count"] == 1
     assert artifacts["public_gate"]["status"] == "BLOCKED"
     assert artifacts["public_gate"]["summary"]["public_benchmark_allowed"] is False
+    assert artifacts["taskcard_status"]["summary"]["taskcard_count"] == 6
+    assert artifacts["taskcard_status"]["summary"]["blocked_count"] == 5

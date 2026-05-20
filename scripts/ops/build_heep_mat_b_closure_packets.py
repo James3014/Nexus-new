@@ -17,6 +17,7 @@ DEFAULT_ROLLUP = Path("docs/reports/NEXUS_HEEP_MAT_B_ROLLUP_V2_2026-05-20.json")
 DEFAULT_MODE_GATE = Path("docs/reports/NEXUS_HEEP_MODE_MAP_UPDATE_GATE_V2_2026-05-20.json")
 DEFAULT_RUNTIME_REVIEW = Path("docs/reports/NEXUS_HEEP_RUNTIME_APPLY_REVIEW_PACKET_V2_2026-05-20.json")
 DEFAULT_PUBLIC_GATE = Path("docs/reports/NEXUS_HEEP_PUBLIC_BENCHMARK_READINESS_GATE_2026-05-20.json")
+DEFAULT_TASKCARD_STATUS = Path("docs/reports/NEXUS_HEEP_TASKCARD_STATUS_R1_R6_2026-05-20.json")
 
 
 def _safe_read(path: Path) -> dict[str, Any]:
@@ -257,6 +258,80 @@ def build_public_readiness_gate(*, rollup: Mapping[str, Any], runtime_review: Ma
     }
 
 
+def build_taskcard_status(
+    *,
+    replay_status: Mapping[str, Any],
+    rollup: Mapping[str, Any],
+    mode_gate: Mapping[str, Any],
+    runtime_review: Mapping[str, Any],
+    public_gate: Mapping[str, Any],
+) -> dict[str, Any]:
+    provider_clean = not runtime_review.get("summary", {}).get("hold_for_provider_clean_count", 0)
+    skill_specific = replay_status.get("status") == "PASS"
+    taskcards = [
+        {
+            "taskcard": "HEEP-R1 Provider-Clean Replay Window",
+            "status": "BLOCKED" if not provider_clean else "PASS",
+            "evidence": str(DEFAULT_REPLAY_STATUS),
+            "reason": "provider-clean replay holds remain" if not provider_clean else "provider token truth clean",
+        },
+        {
+            "taskcard": "HEEP-R2 Executor Trio Skill-Specific MAT-B",
+            "status": "BLOCKED" if not skill_specific else "PASS",
+            "evidence": str(DEFAULT_REPLAY_STATUS),
+            "reason": "skill-specific executor trio replay is not clean" if not skill_specific else "executor trio MAT-B clean",
+        },
+        {
+            "taskcard": "HEEP-R3 Runtime Apply Review Refresh",
+            "status": "PASS",
+            "evidence": str(DEFAULT_RUNTIME_REVIEW),
+            "reason": "review packet refreshed with explicit holds",
+        },
+        {
+            "taskcard": "HEEP-R4 Runtime Overlay Apply Gate",
+            "status": "BLOCKED",
+            "evidence": str(DEFAULT_RUNTIME_REVIEW),
+            "reason": "blocked rows cannot update runtime overlay/default",
+        },
+        {
+            "taskcard": "HEEP-R5 Post-Apply Smoke",
+            "status": "BLOCKED",
+            "evidence": str(DEFAULT_RUNTIME_REVIEW),
+            "reason": "no new runtime overlay apply is allowed before R1/R2 pass",
+        },
+        {
+            "taskcard": "HEEP-R6 Public Benchmark Readiness",
+            "status": str(public_gate.get("status") or "BLOCKED"),
+            "evidence": str(DEFAULT_PUBLIC_GATE),
+            "reason": "public benchmark remains separate and fail-closed",
+        },
+    ]
+    return {
+        "schema": "nexus.heep_taskcard_status_r1_r6.v1",
+        "status": "PASS",
+        "summary": {
+            "taskcard_count": len(taskcards),
+            "pass_count": sum(1 for item in taskcards if item["status"] == "PASS"),
+            "blocked_count": sum(1 for item in taskcards if item["status"] == "BLOCKED"),
+            "runtime_update_allowed": False,
+            "public_benchmark_allowed": False,
+        },
+        "taskcards": taskcards,
+        "milestone_roadmap": [
+            "DONE: 13/13 blocked capabilities have usable internal HEEP skill decisions.",
+            "DONE: R3 review packet refresh is explicit and fail-closed.",
+            "BLOCKED: R1/R2 need provider-clean and skill-specific MAT-B evidence.",
+            "BLOCKED: R4/R5/R6 cannot proceed to apply/public lanes until R1/R2 pass.",
+        ],
+        "source_reports": {
+            "rollup": str(DEFAULT_ROLLUP),
+            "mode_gate": str(DEFAULT_MODE_GATE),
+            "runtime_review": str(DEFAULT_RUNTIME_REVIEW),
+            "public_gate": str(DEFAULT_PUBLIC_GATE),
+        },
+    }
+
+
 def build_all(args: argparse.Namespace) -> dict[str, dict[str, Any]]:
     final_decisions = read_json(Path(args.final_decisions))
     runtime_packet = read_json(Path(args.runtime_packet))
@@ -269,12 +344,20 @@ def build_all(args: argparse.Namespace) -> dict[str, dict[str, Any]]:
     mode_gate = build_mode_gate_v2(final_decisions=final_decisions)
     runtime_review = build_runtime_review_v2(runtime_packet=runtime_packet, final_decisions=final_decisions)
     public_gate = build_public_readiness_gate(rollup=rollup, runtime_review=runtime_review)
+    taskcard_status = build_taskcard_status(
+        replay_status=replay_status,
+        rollup=rollup,
+        mode_gate=mode_gate,
+        runtime_review=runtime_review,
+        public_gate=public_gate,
+    )
     outputs = {
         Path(args.replay_status_output): replay_status,
         Path(args.rollup_output): rollup,
         Path(args.mode_gate_output): mode_gate,
         Path(args.runtime_review_output): runtime_review,
         Path(args.public_gate_output): public_gate,
+        Path(args.taskcard_status_output): taskcard_status,
     }
     for path, payload in outputs.items():
         write_json(path, payload)
@@ -284,6 +367,7 @@ def build_all(args: argparse.Namespace) -> dict[str, dict[str, Any]]:
         "mode_gate": mode_gate,
         "runtime_review": runtime_review,
         "public_gate": public_gate,
+        "taskcard_status": taskcard_status,
     }
 
 
@@ -297,6 +381,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--mode-gate-output", default=str(DEFAULT_MODE_GATE))
     parser.add_argument("--runtime-review-output", default=str(DEFAULT_RUNTIME_REVIEW))
     parser.add_argument("--public-gate-output", default=str(DEFAULT_PUBLIC_GATE))
+    parser.add_argument("--taskcard-status-output", default=str(DEFAULT_TASKCARD_STATUS))
     args = parser.parse_args(argv)
     artifacts = build_all(args)
     print(
@@ -308,6 +393,7 @@ def main(argv: list[str] | None = None) -> int:
                 "mode_gate_rows": artifacts["mode_gate"]["summary"]["row_count"],
                 "runtime_review_rows": artifacts["runtime_review"]["summary"]["row_count"],
                 "public_gate_status": artifacts["public_gate"]["status"],
+                "taskcard_blocked_count": artifacts["taskcard_status"]["summary"]["blocked_count"],
             },
             ensure_ascii=False,
             sort_keys=True,

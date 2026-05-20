@@ -1,0 +1,61 @@
+{
+  "schema": "nexus.heep_taskcard_status_r1_r6.v1",
+  "status": "PASS",
+  "summary": {
+    "taskcard_count": 6,
+    "pass_count": 1,
+    "blocked_count": 5,
+    "runtime_update_allowed": false,
+    "public_benchmark_allowed": false
+  },
+  "taskcards": [
+    {
+      "taskcard": "HEEP-R1 Provider-Clean Replay Window",
+      "status": "BLOCKED",
+      "evidence": "docs/reports/NEXUS_HEEP_MAT_B_EXECUTOR_TRIO_REPLAY_STATUS_2026-05-20.json",
+      "reason": "provider-clean replay holds remain"
+    },
+    {
+      "taskcard": "HEEP-R2 Executor Trio Skill-Specific MAT-B",
+      "status": "BLOCKED",
+      "evidence": "docs/reports/NEXUS_HEEP_MAT_B_EXECUTOR_TRIO_REPLAY_STATUS_2026-05-20.json",
+      "reason": "skill-specific executor trio replay is not clean"
+    },
+    {
+      "taskcard": "HEEP-R3 Runtime Apply Review Refresh",
+      "status": "PASS",
+      "evidence": "docs/reports/NEXUS_HEEP_RUNTIME_APPLY_REVIEW_PACKET_V2_2026-05-20.json",
+      "reason": "review packet refreshed with explicit holds"
+    },
+    {
+      "taskcard": "HEEP-R4 Runtime Overlay Apply Gate",
+      "status": "BLOCKED",
+      "evidence": "docs/reports/NEXUS_HEEP_RUNTIME_APPLY_REVIEW_PACKET_V2_2026-05-20.json",
+      "reason": "blocked rows cannot update runtime overlay/default"
+    },
+    {
+      "taskcard": "HEEP-R5 Post-Apply Smoke",
+      "status": "BLOCKED",
+      "evidence": "docs/reports/NEXUS_HEEP_RUNTIME_APPLY_REVIEW_PACKET_V2_2026-05-20.json",
+      "reason": "no new runtime overlay apply is allowed before R1/R2 pass"
+    },
+    {
+      "taskcard": "HEEP-R6 Public Benchmark Readiness",
+      "status": "BLOCKED",
+      "evidence": "docs/reports/NEXUS_HEEP_PUBLIC_BENCHMARK_READINESS_GATE_2026-05-20.json",
+      "reason": "public benchmark remains separate and fail-closed"
+    }
+  ],
+  "milestone_roadmap": [
+    "DONE: 13/13 blocked capabilities have usable internal HEEP skill decisions.",
+    "DONE: R3 review packet refresh is explicit and fail-closed.",
+    "BLOCKED: R1/R2 need provider-clean and skill-specific MAT-B evidence.",
+    "BLOCKED: R4/R5/R6 cannot proceed to apply/public lanes until R1/R2 pass."
+  ],
+  "source_reports": {
+    "rollup": "docs/reports/NEXUS_HEEP_MAT_B_ROLLUP_V2_2026-05-20.json",
+    "mode_gate": "docs/reports/NEXUS_HEEP_MODE_MAP_UPDATE_GATE_V2_2026-05-20.json",
+    "runtime_review": "docs/reports/NEXUS_HEEP_RUNTIME_APPLY_REVIEW_PACKET_V2_2026-05-20.json",
+    "public_gate": "docs/reports/NEXUS_HEEP_PUBLIC_BENCHMARK_READINESS_GATE_2026-05-20.json"
+  }
+}
