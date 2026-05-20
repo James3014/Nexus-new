@@ -156,6 +156,8 @@ Current SFV2 summary:
 
 The new rule is explicit: role count, local synergy, or a multi-skill mount is not enough. A multi-skill assembly can update internal catalog state only after MAT-B correctness gates, and it can move toward runtime only after runtime-confirmed selected / injected / used / evidence / gate / outcome receipts. Public benchmark remains separate and locked.
 
+Role-ablation probe: `docs/reports/NEXUS_SFV2_ROLE_ABLATION_PROBE_2026-05-20.json` now expands the 9 approved multi-skill assemblies into 29 executable full/minus-role arms. This completes the local role-ablation probe and live-replay plan, but it intentionally does not claim role contribution is live-proven. A role is proven only when the full assembly and every minus-role arm run in a clean MAT-B window and dropping the role worsens a correctness, governance, regression, or receipt KPI without being rescued by token/wall gains.
+
 Failure lesson: clean replay must preserve the distinction between provider-token truth and expected-capability receipt invocation. If they are merged into a generic `HOLD_MISSING_MAT_B_EVIDENCE`, later agents can accidentally rerun the wrong path or misread a provider telemetry gap as a weak skill.
 
 Failure lesson: executor route smoke is necessary but not sufficient for MAT-B promotion. It proves the route oracle can express `drone`, `nightshift`, and `swarm`, but a skill-specific MAT-B row must still prove runtime skill mount confirmation, expected capability receipt invocation, and provider-token cleanliness in the same evidence window.

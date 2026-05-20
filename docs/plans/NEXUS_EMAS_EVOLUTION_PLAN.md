@@ -129,6 +129,8 @@ EMAS role assembly is now consumed by `scripts/ops/build_sfv2_skill_selection_pi
 
 The generated artifact is `docs/reports/NEXUS_SFV2_SKILL_SELECTION_PIPELINE_2026-05-20.json`. It records all 34 capabilities and 97 role-ablation rows. This means future skill discovery can update the candidate pool and rerun the same deterministic pipeline without hand-editing the skill map.
 
+`docs/reports/NEXUS_SFV2_ROLE_ABLATION_PROBE_2026-05-20.json` narrows the executable probe to the 9 MAT-B-approved multi-skill assemblies and emits 29 full/minus-role arms. EMAS treats this as the required role contribution preflight: it is complete enough to schedule live role-ablation replay, but not enough to declare a role's contribution proven.
+
 Failure lesson: EMAS must not treat more roles as automatic synergy. A role is useful only if the SFV2 role-ablation matrix plus MAT-B evidence shows that dropping the role loses reliability, quality, governance, regression safety, or a required receipt.
 
 ---
