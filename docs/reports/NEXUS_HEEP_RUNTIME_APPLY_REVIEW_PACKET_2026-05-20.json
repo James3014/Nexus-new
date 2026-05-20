@@ -1,555 +1,396 @@
 {
-  "blockers": [],
-  "claim_boundary": [
-    "This packet can request review only after internal Flash+Nexus live compare receipts exist.",
-    "Multi-skill replacements require MAT-B reliability, quality, governance, efficiency, and regression evidence.",
-    "Local HEEP replay alone cannot approve runtime default changes."
-  ],
-  "rows": [
-    {
-      "capability": "artifact_gate",
-      "disposition": "PENDING_FLASH_NEXUS_LIVE_COMPARE",
-      "local_decision": "swarm_best",
-      "mat_b_kpis": [
-        "success_rate",
-        "pollution_pct",
-        "evidence_seal_count",
-        "token_delta",
-        "wall_delta",
-        "reopen_rate"
-      ],
-      "mat_b_required_before_runtime_apply": true,
-      "public_benchmark_allowed": false,
-      "runtime_update_allowed": false,
-      "selected_mode": "Mode C (Swarm)"
-    },
-    {
-      "capability": "autonomic_router",
-      "disposition": "PENDING_FLASH_NEXUS_LIVE_COMPARE",
-      "local_decision": "guard_best",
-      "mat_b_kpis": [
-        "success_rate",
-        "pollution_pct",
-        "evidence_seal_count",
-        "token_delta",
-        "wall_delta",
-        "reopen_rate"
-      ],
-      "mat_b_required_before_runtime_apply": true,
-      "public_benchmark_allowed": false,
-      "runtime_update_allowed": false,
-      "selected_mode": "Mode B (Guard)"
-    },
-    {
-      "capability": "autoreason",
-      "disposition": "PENDING_FLASH_NEXUS_LIVE_COMPARE",
-      "local_decision": "guard_best",
-      "mat_b_kpis": [
-        "success_rate",
-        "pollution_pct",
-        "evidence_seal_count",
-        "token_delta",
-        "wall_delta",
-        "reopen_rate"
-      ],
-      "mat_b_required_before_runtime_apply": true,
-      "public_benchmark_allowed": false,
-      "runtime_update_allowed": false,
-      "selected_mode": "Mode B (Guard)"
-    },
-    {
-      "capability": "belief",
-      "disposition": "PENDING_FLASH_NEXUS_LIVE_COMPARE",
-      "local_decision": "guard_best",
-      "mat_b_kpis": [
-        "success_rate",
-        "pollution_pct",
-        "evidence_seal_count",
-        "token_delta",
-        "wall_delta",
-        "reopen_rate"
-      ],
-      "mat_b_required_before_runtime_apply": true,
-      "public_benchmark_allowed": false,
-      "runtime_update_allowed": false,
-      "selected_mode": "Mode B (Guard)"
-    },
-    {
-      "capability": "benchmark_meta_opt",
-      "disposition": "PENDING_FLASH_NEXUS_LIVE_COMPARE",
-      "local_decision": "swarm_best",
-      "mat_b_kpis": [
-        "success_rate",
-        "pollution_pct",
-        "evidence_seal_count",
-        "token_delta",
-        "wall_delta",
-        "reopen_rate"
-      ],
-      "mat_b_required_before_runtime_apply": true,
-      "public_benchmark_allowed": false,
-      "runtime_update_allowed": false,
-      "selected_mode": "Mode C (Swarm)"
-    },
-    {
-      "capability": "claim_gate",
-      "disposition": "PENDING_FLASH_NEXUS_LIVE_COMPARE",
-      "local_decision": "guard_best",
-      "mat_b_kpis": [
-        "success_rate",
-        "pollution_pct",
-        "evidence_seal_count",
-        "token_delta",
-        "wall_delta",
-        "reopen_rate"
-      ],
-      "mat_b_required_before_runtime_apply": true,
-      "public_benchmark_allowed": false,
-      "runtime_update_allowed": false,
-      "selected_mode": "Mode B (Guard)"
-    },
-    {
-      "capability": "codeintel",
-      "disposition": "PENDING_FLASH_NEXUS_LIVE_COMPARE",
-      "local_decision": "swarm_best",
-      "mat_b_kpis": [
-        "success_rate",
-        "pollution_pct",
-        "evidence_seal_count",
-        "token_delta",
-        "wall_delta",
-        "reopen_rate"
-      ],
-      "mat_b_required_before_runtime_apply": true,
-      "public_benchmark_allowed": false,
-      "runtime_update_allowed": false,
-      "selected_mode": "Mode C (Swarm)"
-    },
-    {
-      "capability": "ddtree",
-      "disposition": "PENDING_FLASH_NEXUS_LIVE_COMPARE",
-      "local_decision": "guard_best",
-      "mat_b_kpis": [
-        "success_rate",
-        "pollution_pct",
-        "evidence_seal_count",
-        "token_delta",
-        "wall_delta",
-        "reopen_rate"
-      ],
-      "mat_b_required_before_runtime_apply": true,
-      "public_benchmark_allowed": false,
-      "runtime_update_allowed": false,
-      "selected_mode": "Mode B (Guard)"
-    },
-    {
-      "capability": "direct_master_loop",
-      "disposition": "KEEP_SINGLE_PRIMARY",
-      "local_decision": "solo_best",
-      "mat_b_kpis": [],
-      "mat_b_required_before_runtime_apply": false,
-      "public_benchmark_allowed": false,
-      "runtime_update_allowed": false,
-      "selected_mode": "Mode A (Solo)"
-    },
-    {
-      "capability": "drone",
-      "disposition": "KEEP_SINGLE_PRIMARY",
-      "local_decision": "solo_best",
-      "mat_b_kpis": [],
-      "mat_b_required_before_runtime_apply": false,
-      "public_benchmark_allowed": false,
-      "runtime_update_allowed": false,
-      "selected_mode": "Mode A (Solo)"
-    },
-    {
-      "capability": "external_productivity",
-      "disposition": "KEEP_SINGLE_PRIMARY",
-      "local_decision": "solo_best",
-      "mat_b_kpis": [],
-      "mat_b_required_before_runtime_apply": false,
-      "public_benchmark_allowed": false,
-      "runtime_update_allowed": false,
-      "selected_mode": "Mode A (Solo)"
-    },
-    {
-      "capability": "file_lock_security_gate",
-      "disposition": "PENDING_FLASH_NEXUS_LIVE_COMPARE",
-      "local_decision": "swarm_best",
-      "mat_b_kpis": [
-        "success_rate",
-        "pollution_pct",
-        "evidence_seal_count",
-        "token_delta",
-        "wall_delta",
-        "reopen_rate"
-      ],
-      "mat_b_required_before_runtime_apply": true,
-      "public_benchmark_allowed": false,
-      "runtime_update_allowed": false,
-      "selected_mode": "Mode C (Swarm)"
-    },
-    {
-      "capability": "forecast_pregate",
-      "disposition": "PENDING_FLASH_NEXUS_LIVE_COMPARE",
-      "local_decision": "guard_best",
-      "mat_b_kpis": [
-        "success_rate",
-        "pollution_pct",
-        "evidence_seal_count",
-        "token_delta",
-        "wall_delta",
-        "reopen_rate"
-      ],
-      "mat_b_required_before_runtime_apply": true,
-      "public_benchmark_allowed": false,
-      "runtime_update_allowed": false,
-      "selected_mode": "Mode B (Guard)"
-    },
-    {
-      "capability": "governance_and_trust",
-      "disposition": "PENDING_FLASH_NEXUS_LIVE_COMPARE",
-      "local_decision": "swarm_best",
-      "mat_b_kpis": [
-        "success_rate",
-        "pollution_pct",
-        "evidence_seal_count",
-        "token_delta",
-        "wall_delta",
-        "reopen_rate"
-      ],
-      "mat_b_required_before_runtime_apply": true,
-      "public_benchmark_allowed": false,
-      "runtime_update_allowed": false,
-      "selected_mode": "Mode C (Swarm)"
-    },
-    {
-      "capability": "hyper_sprint",
-      "disposition": "KEEP_SINGLE_PRIMARY",
-      "local_decision": "solo_best",
-      "mat_b_kpis": [],
-      "mat_b_required_before_runtime_apply": false,
-      "public_benchmark_allowed": false,
-      "runtime_update_allowed": false,
-      "selected_mode": "Mode A (Solo)"
-    },
-    {
-      "capability": "lancedb",
-      "disposition": "PENDING_FLASH_NEXUS_LIVE_COMPARE",
-      "local_decision": "guard_best",
-      "mat_b_kpis": [
-        "success_rate",
-        "pollution_pct",
-        "evidence_seal_count",
-        "token_delta",
-        "wall_delta",
-        "reopen_rate"
-      ],
-      "mat_b_required_before_runtime_apply": true,
-      "public_benchmark_allowed": false,
-      "runtime_update_allowed": false,
-      "selected_mode": "Mode B (Guard)"
-    },
-    {
-      "capability": "learn_ask",
-      "disposition": "PENDING_FLASH_NEXUS_LIVE_COMPARE",
-      "local_decision": "swarm_best",
-      "mat_b_kpis": [
-        "success_rate",
-        "pollution_pct",
-        "evidence_seal_count",
-        "token_delta",
-        "wall_delta",
-        "reopen_rate"
-      ],
-      "mat_b_required_before_runtime_apply": true,
-      "public_benchmark_allowed": false,
-      "runtime_update_allowed": false,
-      "selected_mode": "Mode C (Swarm)"
-    },
-    {
-      "capability": "learning_closure",
-      "disposition": "PENDING_FLASH_NEXUS_LIVE_COMPARE",
-      "local_decision": "swarm_best",
-      "mat_b_kpis": [
-        "success_rate",
-        "pollution_pct",
-        "evidence_seal_count",
-        "token_delta",
-        "wall_delta",
-        "reopen_rate"
-      ],
-      "mat_b_required_before_runtime_apply": true,
-      "public_benchmark_allowed": false,
-      "runtime_update_allowed": false,
-      "selected_mode": "Mode C (Swarm)"
-    },
-    {
-      "capability": "memory",
-      "disposition": "PENDING_FLASH_NEXUS_LIVE_COMPARE",
-      "local_decision": "guard_best",
-      "mat_b_kpis": [
-        "success_rate",
-        "pollution_pct",
-        "evidence_seal_count",
-        "token_delta",
-        "wall_delta",
-        "reopen_rate"
-      ],
-      "mat_b_required_before_runtime_apply": true,
-      "public_benchmark_allowed": false,
-      "runtime_update_allowed": false,
-      "selected_mode": "Mode B (Guard)"
-    },
-    {
-      "capability": "mempalace",
-      "disposition": "PENDING_FLASH_NEXUS_LIVE_COMPARE",
-      "local_decision": "guard_best",
-      "mat_b_kpis": [
-        "success_rate",
-        "pollution_pct",
-        "evidence_seal_count",
-        "token_delta",
-        "wall_delta",
-        "reopen_rate"
-      ],
-      "mat_b_required_before_runtime_apply": true,
-      "public_benchmark_allowed": false,
-      "runtime_update_allowed": false,
-      "selected_mode": "Mode B (Guard)"
-    },
-    {
-      "capability": "metabolism_resume",
-      "disposition": "KEEP_SINGLE_PRIMARY",
-      "local_decision": "solo_best",
-      "mat_b_kpis": [],
-      "mat_b_required_before_runtime_apply": false,
-      "public_benchmark_allowed": false,
-      "runtime_update_allowed": false,
-      "selected_mode": "Mode A (Solo)"
-    },
-    {
-      "capability": "nightshift",
-      "disposition": "KEEP_SINGLE_PRIMARY",
-      "local_decision": "solo_best",
-      "mat_b_kpis": [],
-      "mat_b_required_before_runtime_apply": false,
-      "public_benchmark_allowed": false,
-      "runtime_update_allowed": false,
-      "selected_mode": "Mode A (Solo)"
-    },
-    {
-      "capability": "policy_capability_gate",
-      "disposition": "PENDING_FLASH_NEXUS_LIVE_COMPARE",
-      "local_decision": "swarm_best",
-      "mat_b_kpis": [
-        "success_rate",
-        "pollution_pct",
-        "evidence_seal_count",
-        "token_delta",
-        "wall_delta",
-        "reopen_rate"
-      ],
-      "mat_b_required_before_runtime_apply": true,
-      "public_benchmark_allowed": false,
-      "runtime_update_allowed": false,
-      "selected_mode": "Mode C (Swarm)"
-    },
-    {
-      "capability": "registry_skills_sync",
-      "disposition": "PENDING_FLASH_NEXUS_LIVE_COMPARE",
-      "local_decision": "guard_best",
-      "mat_b_kpis": [
-        "success_rate",
-        "pollution_pct",
-        "evidence_seal_count",
-        "token_delta",
-        "wall_delta",
-        "reopen_rate"
-      ],
-      "mat_b_required_before_runtime_apply": true,
-      "public_benchmark_allowed": false,
-      "runtime_update_allowed": false,
-      "selected_mode": "Mode B (Guard)"
-    },
-    {
-      "capability": "regression_guard",
-      "disposition": "PENDING_FLASH_NEXUS_LIVE_COMPARE",
-      "local_decision": "guard_best",
-      "mat_b_kpis": [
-        "success_rate",
-        "pollution_pct",
-        "evidence_seal_count",
-        "token_delta",
-        "wall_delta",
-        "reopen_rate"
-      ],
-      "mat_b_required_before_runtime_apply": true,
-      "public_benchmark_allowed": false,
-      "runtime_update_allowed": false,
-      "selected_mode": "Mode B (Guard)"
-    },
-    {
-      "capability": "repair_loop",
-      "disposition": "PENDING_FLASH_NEXUS_LIVE_COMPARE",
-      "local_decision": "guard_best",
-      "mat_b_kpis": [
-        "success_rate",
-        "pollution_pct",
-        "evidence_seal_count",
-        "token_delta",
-        "wall_delta",
-        "reopen_rate"
-      ],
-      "mat_b_required_before_runtime_apply": true,
-      "public_benchmark_allowed": false,
-      "runtime_update_allowed": false,
-      "selected_mode": "Mode B (Guard)"
-    },
-    {
-      "capability": "research",
-      "disposition": "PENDING_FLASH_NEXUS_LIVE_COMPARE",
-      "local_decision": "swarm_best",
-      "mat_b_kpis": [
-        "success_rate",
-        "pollution_pct",
-        "evidence_seal_count",
-        "token_delta",
-        "wall_delta",
-        "reopen_rate"
-      ],
-      "mat_b_required_before_runtime_apply": true,
-      "public_benchmark_allowed": false,
-      "runtime_update_allowed": false,
-      "selected_mode": "Mode C (Swarm)"
-    },
-    {
-      "capability": "research_and_source_discipline",
-      "disposition": "PENDING_FLASH_NEXUS_LIVE_COMPARE",
-      "local_decision": "swarm_best",
-      "mat_b_kpis": [
-        "success_rate",
-        "pollution_pct",
-        "evidence_seal_count",
-        "token_delta",
-        "wall_delta",
-        "reopen_rate"
-      ],
-      "mat_b_required_before_runtime_apply": true,
-      "public_benchmark_allowed": false,
-      "runtime_update_allowed": false,
-      "selected_mode": "Mode C (Swarm)"
-    },
-    {
-      "capability": "research_control_plane",
-      "disposition": "PENDING_FLASH_NEXUS_LIVE_COMPARE",
-      "local_decision": "swarm_best",
-      "mat_b_kpis": [
-        "success_rate",
-        "pollution_pct",
-        "evidence_seal_count",
-        "token_delta",
-        "wall_delta",
-        "reopen_rate"
-      ],
-      "mat_b_required_before_runtime_apply": true,
-      "public_benchmark_allowed": false,
-      "runtime_update_allowed": false,
-      "selected_mode": "Mode C (Swarm)"
-    },
-    {
-      "capability": "sandbox_replay",
-      "disposition": "PENDING_FLASH_NEXUS_LIVE_COMPARE",
-      "local_decision": "guard_best",
-      "mat_b_kpis": [
-        "success_rate",
-        "pollution_pct",
-        "evidence_seal_count",
-        "token_delta",
-        "wall_delta",
-        "reopen_rate"
-      ],
-      "mat_b_required_before_runtime_apply": true,
-      "public_benchmark_allowed": false,
-      "runtime_update_allowed": false,
-      "selected_mode": "Mode B (Guard)"
-    },
-    {
-      "capability": "swarm_multi_agent",
-      "disposition": "PENDING_FLASH_NEXUS_LIVE_COMPARE",
-      "local_decision": "swarm_best",
-      "mat_b_kpis": [
-        "success_rate",
-        "pollution_pct",
-        "evidence_seal_count",
-        "token_delta",
-        "wall_delta",
-        "reopen_rate"
-      ],
-      "mat_b_required_before_runtime_apply": true,
-      "public_benchmark_allowed": false,
-      "runtime_update_allowed": false,
-      "selected_mode": "Mode C (Swarm)"
-    },
-    {
-      "capability": "ui_validator",
-      "disposition": "PENDING_FLASH_NEXUS_LIVE_COMPARE",
-      "local_decision": "guard_best",
-      "mat_b_kpis": [
-        "success_rate",
-        "pollution_pct",
-        "evidence_seal_count",
-        "token_delta",
-        "wall_delta",
-        "reopen_rate"
-      ],
-      "mat_b_required_before_runtime_apply": true,
-      "public_benchmark_allowed": false,
-      "runtime_update_allowed": false,
-      "selected_mode": "Mode B (Guard)"
-    },
-    {
-      "capability": "ultra_review",
-      "disposition": "PENDING_FLASH_NEXUS_LIVE_COMPARE",
-      "local_decision": "swarm_best",
-      "mat_b_kpis": [
-        "success_rate",
-        "pollution_pct",
-        "evidence_seal_count",
-        "token_delta",
-        "wall_delta",
-        "reopen_rate"
-      ],
-      "mat_b_required_before_runtime_apply": true,
-      "public_benchmark_allowed": false,
-      "runtime_update_allowed": false,
-      "selected_mode": "Mode C (Swarm)"
-    },
-    {
-      "capability": "xray",
-      "disposition": "PENDING_FLASH_NEXUS_LIVE_COMPARE",
-      "local_decision": "guard_best",
-      "mat_b_kpis": [
-        "success_rate",
-        "pollution_pct",
-        "evidence_seal_count",
-        "token_delta",
-        "wall_delta",
-        "reopen_rate"
-      ],
-      "mat_b_required_before_runtime_apply": true,
-      "public_benchmark_allowed": false,
-      "runtime_update_allowed": false,
-      "selected_mode": "Mode B (Guard)"
-    }
-  ],
-  "schema": "nexus.heep_runtime_apply_review_packet.v1",
+  "schema": "nexus.heep_runtime_apply_review_packet.v2",
   "status": "PASS",
   "summary": {
     "capability_count": 34,
-    "keep_single_primary_count": 6,
-    "pending_live_compare_count": 28,
-    "public_benchmark_allowed": false,
-    "runtime_update_allowed": false
-  }
+    "ready_for_runtime_apply_review_count": 9,
+    "runtime_update_allowed": false,
+    "public_benchmark_allowed": false
+  },
+  "rows": [
+    {
+      "capability": "artifact_gate",
+      "selected_mode": "Mode A (Solo)",
+      "disposition": "KEEP_SINGLE_PRIMARY",
+      "mat_b_verdict": "KEEP_SINGLE_PRIMARY",
+      "mat_b_reason_codes": [
+        "efficiency_regressed"
+      ],
+      "mat_b_required_before_runtime_apply": false,
+      "runtime_update_allowed": false,
+      "public_benchmark_allowed": false
+    },
+    {
+      "capability": "autonomic_router",
+      "selected_mode": "Mode B (Guard)",
+      "disposition": "READY_FOR_RUNTIME_APPLY_REVIEW",
+      "mat_b_verdict": "APPROVE_HEEP_MODE_CANDIDATE",
+      "mat_b_reason_codes": [],
+      "mat_b_required_before_runtime_apply": false,
+      "runtime_update_allowed": false,
+      "public_benchmark_allowed": false
+    },
+    {
+      "capability": "autoreason",
+      "selected_mode": "Mode A (Solo)",
+      "disposition": "KEEP_SINGLE_PRIMARY",
+      "mat_b_verdict": "KEEP_SINGLE_PRIMARY",
+      "mat_b_reason_codes": [
+        "efficiency_regressed"
+      ],
+      "mat_b_required_before_runtime_apply": false,
+      "runtime_update_allowed": false,
+      "public_benchmark_allowed": false
+    },
+    {
+      "capability": "belief",
+      "selected_mode": "Mode B (Guard)",
+      "disposition": "READY_FOR_RUNTIME_APPLY_REVIEW",
+      "mat_b_verdict": "APPROVE_HEEP_MODE_CANDIDATE",
+      "mat_b_reason_codes": [],
+      "mat_b_required_before_runtime_apply": false,
+      "runtime_update_allowed": false,
+      "public_benchmark_allowed": false
+    },
+    {
+      "capability": "benchmark_meta_opt",
+      "selected_mode": "Mode A (Solo)",
+      "disposition": "KEEP_SINGLE_PRIMARY",
+      "mat_b_verdict": "KEEP_SINGLE_PRIMARY",
+      "mat_b_reason_codes": [
+        "efficiency_regressed"
+      ],
+      "mat_b_required_before_runtime_apply": false,
+      "runtime_update_allowed": false,
+      "public_benchmark_allowed": false
+    },
+    {
+      "capability": "claim_gate",
+      "selected_mode": "Mode A (Solo)",
+      "disposition": "KEEP_SINGLE_PRIMARY",
+      "mat_b_verdict": "KEEP_SINGLE_PRIMARY",
+      "mat_b_reason_codes": [
+        "efficiency_regressed"
+      ],
+      "mat_b_required_before_runtime_apply": false,
+      "runtime_update_allowed": false,
+      "public_benchmark_allowed": false
+    },
+    {
+      "capability": "codeintel",
+      "selected_mode": "Mode C (Swarm)",
+      "disposition": "READY_FOR_RUNTIME_APPLY_REVIEW",
+      "mat_b_verdict": "APPROVE_HEEP_MODE_CANDIDATE",
+      "mat_b_reason_codes": [],
+      "mat_b_required_before_runtime_apply": false,
+      "runtime_update_allowed": false,
+      "public_benchmark_allowed": false
+    },
+    {
+      "capability": "ddtree",
+      "selected_mode": "Mode B (Guard)",
+      "disposition": "READY_FOR_RUNTIME_APPLY_REVIEW",
+      "mat_b_verdict": "APPROVE_HEEP_MODE_CANDIDATE",
+      "mat_b_reason_codes": [],
+      "mat_b_required_before_runtime_apply": false,
+      "runtime_update_allowed": false,
+      "public_benchmark_allowed": false
+    },
+    {
+      "capability": "direct_master_loop",
+      "selected_mode": "Mode A (Solo)",
+      "disposition": "KEEP_SINGLE_PRIMARY",
+      "mat_b_verdict": "NOT_IN_MAT_B_LIVE_COMPARE",
+      "mat_b_reason_codes": [],
+      "mat_b_required_before_runtime_apply": false,
+      "runtime_update_allowed": false,
+      "public_benchmark_allowed": false
+    },
+    {
+      "capability": "drone",
+      "selected_mode": "Mode A (Solo)",
+      "disposition": "KEEP_SINGLE_PRIMARY",
+      "mat_b_verdict": "NOT_IN_MAT_B_LIVE_COMPARE",
+      "mat_b_reason_codes": [],
+      "mat_b_required_before_runtime_apply": false,
+      "runtime_update_allowed": false,
+      "public_benchmark_allowed": false
+    },
+    {
+      "capability": "external_productivity",
+      "selected_mode": "Mode A (Solo)",
+      "disposition": "KEEP_SINGLE_PRIMARY",
+      "mat_b_verdict": "NOT_IN_MAT_B_LIVE_COMPARE",
+      "mat_b_reason_codes": [],
+      "mat_b_required_before_runtime_apply": false,
+      "runtime_update_allowed": false,
+      "public_benchmark_allowed": false
+    },
+    {
+      "capability": "file_lock_security_gate",
+      "selected_mode": "Mode A (Solo)",
+      "disposition": "KEEP_SINGLE_PRIMARY",
+      "mat_b_verdict": "KEEP_SINGLE_PRIMARY",
+      "mat_b_reason_codes": [
+        "efficiency_regressed"
+      ],
+      "mat_b_required_before_runtime_apply": false,
+      "runtime_update_allowed": false,
+      "public_benchmark_allowed": false
+    },
+    {
+      "capability": "forecast_pregate",
+      "selected_mode": "Mode A (Solo)",
+      "disposition": "KEEP_SINGLE_PRIMARY",
+      "mat_b_verdict": "KEEP_SINGLE_PRIMARY",
+      "mat_b_reason_codes": [
+        "efficiency_regressed"
+      ],
+      "mat_b_required_before_runtime_apply": false,
+      "runtime_update_allowed": false,
+      "public_benchmark_allowed": false
+    },
+    {
+      "capability": "governance_and_trust",
+      "selected_mode": "Mode C (Swarm)",
+      "disposition": "READY_FOR_RUNTIME_APPLY_REVIEW",
+      "mat_b_verdict": "APPROVE_HEEP_MODE_CANDIDATE",
+      "mat_b_reason_codes": [],
+      "mat_b_required_before_runtime_apply": false,
+      "runtime_update_allowed": false,
+      "public_benchmark_allowed": false
+    },
+    {
+      "capability": "hyper_sprint",
+      "selected_mode": "Mode A (Solo)",
+      "disposition": "KEEP_SINGLE_PRIMARY",
+      "mat_b_verdict": "NOT_IN_MAT_B_LIVE_COMPARE",
+      "mat_b_reason_codes": [],
+      "mat_b_required_before_runtime_apply": false,
+      "runtime_update_allowed": false,
+      "public_benchmark_allowed": false
+    },
+    {
+      "capability": "lancedb",
+      "selected_mode": "Mode B (Guard)",
+      "disposition": "READY_FOR_RUNTIME_APPLY_REVIEW",
+      "mat_b_verdict": "APPROVE_HEEP_MODE_CANDIDATE",
+      "mat_b_reason_codes": [],
+      "mat_b_required_before_runtime_apply": false,
+      "runtime_update_allowed": false,
+      "public_benchmark_allowed": false
+    },
+    {
+      "capability": "learn_ask",
+      "selected_mode": "Mode A (Solo)",
+      "disposition": "KEEP_SINGLE_PRIMARY",
+      "mat_b_verdict": "KEEP_SINGLE_PRIMARY",
+      "mat_b_reason_codes": [
+        "efficiency_regressed"
+      ],
+      "mat_b_required_before_runtime_apply": false,
+      "runtime_update_allowed": false,
+      "public_benchmark_allowed": false
+    },
+    {
+      "capability": "learning_closure",
+      "selected_mode": "Mode A (Solo)",
+      "disposition": "KEEP_SINGLE_PRIMARY",
+      "mat_b_verdict": "KEEP_SINGLE_PRIMARY",
+      "mat_b_reason_codes": [
+        "efficiency_regressed"
+      ],
+      "mat_b_required_before_runtime_apply": false,
+      "runtime_update_allowed": false,
+      "public_benchmark_allowed": false
+    },
+    {
+      "capability": "memory",
+      "selected_mode": "Mode B (Guard)",
+      "disposition": "READY_FOR_RUNTIME_APPLY_REVIEW",
+      "mat_b_verdict": "APPROVE_HEEP_MODE_CANDIDATE",
+      "mat_b_reason_codes": [],
+      "mat_b_required_before_runtime_apply": false,
+      "runtime_update_allowed": false,
+      "public_benchmark_allowed": false
+    },
+    {
+      "capability": "mempalace",
+      "selected_mode": "Mode B (Guard)",
+      "disposition": "READY_FOR_RUNTIME_APPLY_REVIEW",
+      "mat_b_verdict": "APPROVE_HEEP_MODE_CANDIDATE",
+      "mat_b_reason_codes": [],
+      "mat_b_required_before_runtime_apply": false,
+      "runtime_update_allowed": false,
+      "public_benchmark_allowed": false
+    },
+    {
+      "capability": "metabolism_resume",
+      "selected_mode": "Mode A (Solo)",
+      "disposition": "KEEP_SINGLE_PRIMARY",
+      "mat_b_verdict": "NOT_IN_MAT_B_LIVE_COMPARE",
+      "mat_b_reason_codes": [],
+      "mat_b_required_before_runtime_apply": false,
+      "runtime_update_allowed": false,
+      "public_benchmark_allowed": false
+    },
+    {
+      "capability": "nightshift",
+      "selected_mode": "Mode A (Solo)",
+      "disposition": "KEEP_SINGLE_PRIMARY",
+      "mat_b_verdict": "NOT_IN_MAT_B_LIVE_COMPARE",
+      "mat_b_reason_codes": [],
+      "mat_b_required_before_runtime_apply": false,
+      "runtime_update_allowed": false,
+      "public_benchmark_allowed": false
+    },
+    {
+      "capability": "policy_capability_gate",
+      "selected_mode": "Mode A (Solo)",
+      "disposition": "KEEP_SINGLE_PRIMARY",
+      "mat_b_verdict": "KEEP_SINGLE_PRIMARY",
+      "mat_b_reason_codes": [
+        "efficiency_regressed"
+      ],
+      "mat_b_required_before_runtime_apply": false,
+      "runtime_update_allowed": false,
+      "public_benchmark_allowed": false
+    },
+    {
+      "capability": "registry_skills_sync",
+      "selected_mode": "Mode A (Solo)",
+      "disposition": "KEEP_SINGLE_PRIMARY",
+      "mat_b_verdict": "KEEP_SINGLE_PRIMARY",
+      "mat_b_reason_codes": [
+        "efficiency_regressed"
+      ],
+      "mat_b_required_before_runtime_apply": false,
+      "runtime_update_allowed": false,
+      "public_benchmark_allowed": false
+    },
+    {
+      "capability": "regression_guard",
+      "selected_mode": "Mode B (Guard)",
+      "disposition": "READY_FOR_RUNTIME_APPLY_REVIEW",
+      "mat_b_verdict": "APPROVE_HEEP_MODE_CANDIDATE",
+      "mat_b_reason_codes": [],
+      "mat_b_required_before_runtime_apply": false,
+      "runtime_update_allowed": false,
+      "public_benchmark_allowed": false
+    },
+    {
+      "capability": "repair_loop",
+      "selected_mode": "Mode A (Solo)",
+      "disposition": "KEEP_SINGLE_PRIMARY",
+      "mat_b_verdict": "KEEP_SINGLE_PRIMARY",
+      "mat_b_reason_codes": [
+        "efficiency_regressed"
+      ],
+      "mat_b_required_before_runtime_apply": false,
+      "runtime_update_allowed": false,
+      "public_benchmark_allowed": false
+    },
+    {
+      "capability": "research",
+      "selected_mode": "Mode A (Solo)",
+      "disposition": "REJECT_MULTI_SKILL",
+      "mat_b_verdict": "REJECT_MULTI_SKILL",
+      "mat_b_reason_codes": [
+        "reliability_not_better_or_delivery_return"
+      ],
+      "mat_b_required_before_runtime_apply": false,
+      "runtime_update_allowed": false,
+      "public_benchmark_allowed": false
+    },
+    {
+      "capability": "research_and_source_discipline",
+      "selected_mode": "Mode A (Solo)",
+      "disposition": "HOLD_MISSING_MAT_B_EVIDENCE",
+      "mat_b_verdict": "HOLD_MISSING_MAT_B_EVIDENCE",
+      "mat_b_reason_codes": [
+        "baseline_infra_invalid:model_call_without_tokens"
+      ],
+      "mat_b_required_before_runtime_apply": false,
+      "runtime_update_allowed": false,
+      "public_benchmark_allowed": false
+    },
+    {
+      "capability": "research_control_plane",
+      "selected_mode": "Mode A (Solo)",
+      "disposition": "HOLD_MISSING_MAT_B_EVIDENCE",
+      "mat_b_verdict": "HOLD_MISSING_MAT_B_EVIDENCE",
+      "mat_b_reason_codes": [
+        "baseline_infra_invalid:model_call_without_tokens"
+      ],
+      "mat_b_required_before_runtime_apply": false,
+      "runtime_update_allowed": false,
+      "public_benchmark_allowed": false
+    },
+    {
+      "capability": "sandbox_replay",
+      "selected_mode": "Mode A (Solo)",
+      "disposition": "HOLD_MISSING_MAT_B_EVIDENCE",
+      "mat_b_verdict": "HOLD_MISSING_MAT_B_EVIDENCE",
+      "mat_b_reason_codes": [
+        "baseline_infra_invalid:model_call_without_tokens"
+      ],
+      "mat_b_required_before_runtime_apply": false,
+      "runtime_update_allowed": false,
+      "public_benchmark_allowed": false
+    },
+    {
+      "capability": "swarm_multi_agent",
+      "selected_mode": "Mode A (Solo)",
+      "disposition": "HOLD_MISSING_MAT_B_EVIDENCE",
+      "mat_b_verdict": "HOLD_MISSING_MAT_B_EVIDENCE",
+      "mat_b_reason_codes": [
+        "baseline_infra_invalid:receipt_data_contract_violation"
+      ],
+      "mat_b_required_before_runtime_apply": false,
+      "runtime_update_allowed": false,
+      "public_benchmark_allowed": false
+    },
+    {
+      "capability": "ui_validator",
+      "selected_mode": "Mode A (Solo)",
+      "disposition": "HOLD_MISSING_MAT_B_EVIDENCE",
+      "mat_b_verdict": "HOLD_MISSING_MAT_B_EVIDENCE",
+      "mat_b_reason_codes": [
+        "baseline_infra_invalid:model_call_without_tokens"
+      ],
+      "mat_b_required_before_runtime_apply": false,
+      "runtime_update_allowed": false,
+      "public_benchmark_allowed": false
+    },
+    {
+      "capability": "ultra_review",
+      "selected_mode": "Mode A (Solo)",
+      "disposition": "HOLD_MISSING_MAT_B_EVIDENCE",
+      "mat_b_verdict": "HOLD_MISSING_MAT_B_EVIDENCE",
+      "mat_b_reason_codes": [
+        "baseline_infra_invalid:model_call_without_tokens"
+      ],
+      "mat_b_required_before_runtime_apply": false,
+      "runtime_update_allowed": false,
+      "public_benchmark_allowed": false
+    },
+    {
+      "capability": "xray",
+      "selected_mode": "Mode A (Solo)",
+      "disposition": "HOLD_MISSING_MAT_B_EVIDENCE",
+      "mat_b_verdict": "HOLD_MISSING_MAT_B_EVIDENCE",
+      "mat_b_reason_codes": [
+        "baseline_infra_invalid:model_call_without_tokens"
+      ],
+      "mat_b_required_before_runtime_apply": false,
+      "runtime_update_allowed": false,
+      "public_benchmark_allowed": false
+    }
+  ],
+  "blockers": [],
+  "claim_boundary": [
+    "This packet records runtime apply review candidates only.",
+    "MAT-B approval is not runtime default approval.",
+    "Runtime default remains disabled until a separate apply gate passes."
+  ]
 }

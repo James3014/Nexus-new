@@ -1,0 +1,359 @@
+{
+  "schema": "nexus.heep_mode_candidate_catalog.v1",
+  "status": "PASS",
+  "summary": {
+    "capability_count": 28,
+    "approved_mode_candidate_count": 9,
+    "runtime_update_allowed": false,
+    "public_benchmark_allowed": false
+  },
+  "rows": [
+    {
+      "capability": "artifact_gate",
+      "baseline_row_id": "heep::artifact_gate::heep-mat-b-artifact_gate-001::mode_a_current_primary",
+      "challenger_row_id": "heep::artifact_gate::heep-mat-b-artifact_gate-001::heep_multi_skill",
+      "mat_b_verdict": "KEEP_SINGLE_PRIMARY",
+      "mat_b_reason_codes": [
+        "efficiency_regressed"
+      ],
+      "selected_mode_candidate": "Mode A (Solo)",
+      "runtime_apply_review_ready": false,
+      "runtime_update_allowed": false,
+      "public_benchmark_allowed": false
+    },
+    {
+      "capability": "autonomic_router",
+      "baseline_row_id": "heep::autonomic_router::heep-mat-b-autonomic_router-001::mode_a_current_primary",
+      "challenger_row_id": "heep::autonomic_router::heep-mat-b-autonomic_router-001::heep_multi_skill",
+      "mat_b_verdict": "APPROVE_HEEP_MODE_CANDIDATE",
+      "mat_b_reason_codes": [],
+      "selected_mode_candidate": "Mode B (Guard)",
+      "runtime_apply_review_ready": true,
+      "runtime_update_allowed": false,
+      "public_benchmark_allowed": false
+    },
+    {
+      "capability": "autoreason",
+      "baseline_row_id": "heep::autoreason::heep-mat-b-autoreason-001::mode_a_current_primary",
+      "challenger_row_id": "heep::autoreason::heep-mat-b-autoreason-001::heep_multi_skill",
+      "mat_b_verdict": "KEEP_SINGLE_PRIMARY",
+      "mat_b_reason_codes": [
+        "efficiency_regressed"
+      ],
+      "selected_mode_candidate": "Mode A (Solo)",
+      "runtime_apply_review_ready": false,
+      "runtime_update_allowed": false,
+      "public_benchmark_allowed": false
+    },
+    {
+      "capability": "belief",
+      "baseline_row_id": "heep::belief::heep-mat-b-belief-001::mode_a_current_primary",
+      "challenger_row_id": "heep::belief::heep-mat-b-belief-001::heep_multi_skill",
+      "mat_b_verdict": "APPROVE_HEEP_MODE_CANDIDATE",
+      "mat_b_reason_codes": [],
+      "selected_mode_candidate": "Mode B (Guard)",
+      "runtime_apply_review_ready": true,
+      "runtime_update_allowed": false,
+      "public_benchmark_allowed": false
+    },
+    {
+      "capability": "benchmark_meta_opt",
+      "baseline_row_id": "heep::benchmark_meta_opt::heep-mat-b-benchmark_meta_opt-001::mode_a_current_primary",
+      "challenger_row_id": "heep::benchmark_meta_opt::heep-mat-b-benchmark_meta_opt-001::heep_multi_skill",
+      "mat_b_verdict": "KEEP_SINGLE_PRIMARY",
+      "mat_b_reason_codes": [
+        "efficiency_regressed"
+      ],
+      "selected_mode_candidate": "Mode A (Solo)",
+      "runtime_apply_review_ready": false,
+      "runtime_update_allowed": false,
+      "public_benchmark_allowed": false
+    },
+    {
+      "capability": "claim_gate",
+      "baseline_row_id": "heep::claim_gate::heep-mat-b-claim_gate-001::mode_a_current_primary",
+      "challenger_row_id": "heep::claim_gate::heep-mat-b-claim_gate-001::heep_multi_skill",
+      "mat_b_verdict": "KEEP_SINGLE_PRIMARY",
+      "mat_b_reason_codes": [
+        "efficiency_regressed"
+      ],
+      "selected_mode_candidate": "Mode A (Solo)",
+      "runtime_apply_review_ready": false,
+      "runtime_update_allowed": false,
+      "public_benchmark_allowed": false
+    },
+    {
+      "capability": "codeintel",
+      "baseline_row_id": "heep::codeintel::heep-mat-b-codeintel-001::mode_a_current_primary",
+      "challenger_row_id": "heep::codeintel::heep-mat-b-codeintel-001::heep_multi_skill",
+      "mat_b_verdict": "APPROVE_HEEP_MODE_CANDIDATE",
+      "mat_b_reason_codes": [],
+      "selected_mode_candidate": "Mode C (Swarm)",
+      "runtime_apply_review_ready": true,
+      "runtime_update_allowed": false,
+      "public_benchmark_allowed": false
+    },
+    {
+      "capability": "ddtree",
+      "baseline_row_id": "heep::ddtree::heep-mat-b-ddtree-001::mode_a_current_primary",
+      "challenger_row_id": "heep::ddtree::heep-mat-b-ddtree-001::heep_multi_skill",
+      "mat_b_verdict": "APPROVE_HEEP_MODE_CANDIDATE",
+      "mat_b_reason_codes": [],
+      "selected_mode_candidate": "Mode B (Guard)",
+      "runtime_apply_review_ready": true,
+      "runtime_update_allowed": false,
+      "public_benchmark_allowed": false
+    },
+    {
+      "capability": "file_lock_security_gate",
+      "baseline_row_id": "heep::file_lock_security_gate::heep-mat-b-file_lock_security_gate-001::mode_a_current_primary",
+      "challenger_row_id": "heep::file_lock_security_gate::heep-mat-b-file_lock_security_gate-001::heep_multi_skill",
+      "mat_b_verdict": "KEEP_SINGLE_PRIMARY",
+      "mat_b_reason_codes": [
+        "efficiency_regressed"
+      ],
+      "selected_mode_candidate": "Mode A (Solo)",
+      "runtime_apply_review_ready": false,
+      "runtime_update_allowed": false,
+      "public_benchmark_allowed": false
+    },
+    {
+      "capability": "forecast_pregate",
+      "baseline_row_id": "heep::forecast_pregate::heep-mat-b-forecast_pregate-001::mode_a_current_primary",
+      "challenger_row_id": "heep::forecast_pregate::heep-mat-b-forecast_pregate-001::heep_multi_skill",
+      "mat_b_verdict": "KEEP_SINGLE_PRIMARY",
+      "mat_b_reason_codes": [
+        "efficiency_regressed"
+      ],
+      "selected_mode_candidate": "Mode A (Solo)",
+      "runtime_apply_review_ready": false,
+      "runtime_update_allowed": false,
+      "public_benchmark_allowed": false
+    },
+    {
+      "capability": "governance_and_trust",
+      "baseline_row_id": "heep::governance_and_trust::heep-mat-b-governance_and_trust-001::mode_a_current_primary",
+      "challenger_row_id": "heep::governance_and_trust::heep-mat-b-governance_and_trust-001::heep_multi_skill",
+      "mat_b_verdict": "APPROVE_HEEP_MODE_CANDIDATE",
+      "mat_b_reason_codes": [],
+      "selected_mode_candidate": "Mode C (Swarm)",
+      "runtime_apply_review_ready": true,
+      "runtime_update_allowed": false,
+      "public_benchmark_allowed": false
+    },
+    {
+      "capability": "lancedb",
+      "baseline_row_id": "heep::lancedb::heep-mat-b-lancedb-001::mode_a_current_primary",
+      "challenger_row_id": "heep::lancedb::heep-mat-b-lancedb-001::heep_multi_skill",
+      "mat_b_verdict": "APPROVE_HEEP_MODE_CANDIDATE",
+      "mat_b_reason_codes": [],
+      "selected_mode_candidate": "Mode B (Guard)",
+      "runtime_apply_review_ready": true,
+      "runtime_update_allowed": false,
+      "public_benchmark_allowed": false
+    },
+    {
+      "capability": "learn_ask",
+      "baseline_row_id": "heep::learn_ask::heep-mat-b-learn_ask-001::mode_a_current_primary",
+      "challenger_row_id": "heep::learn_ask::heep-mat-b-learn_ask-001::heep_multi_skill",
+      "mat_b_verdict": "KEEP_SINGLE_PRIMARY",
+      "mat_b_reason_codes": [
+        "efficiency_regressed"
+      ],
+      "selected_mode_candidate": "Mode A (Solo)",
+      "runtime_apply_review_ready": false,
+      "runtime_update_allowed": false,
+      "public_benchmark_allowed": false
+    },
+    {
+      "capability": "learning_closure",
+      "baseline_row_id": "heep::learning_closure::heep-mat-b-learning_closure-001::mode_a_current_primary",
+      "challenger_row_id": "heep::learning_closure::heep-mat-b-learning_closure-001::heep_multi_skill",
+      "mat_b_verdict": "KEEP_SINGLE_PRIMARY",
+      "mat_b_reason_codes": [
+        "efficiency_regressed"
+      ],
+      "selected_mode_candidate": "Mode A (Solo)",
+      "runtime_apply_review_ready": false,
+      "runtime_update_allowed": false,
+      "public_benchmark_allowed": false
+    },
+    {
+      "capability": "memory",
+      "baseline_row_id": "heep::memory::heep-mat-b-memory-001::mode_a_current_primary",
+      "challenger_row_id": "heep::memory::heep-mat-b-memory-001::heep_multi_skill",
+      "mat_b_verdict": "APPROVE_HEEP_MODE_CANDIDATE",
+      "mat_b_reason_codes": [],
+      "selected_mode_candidate": "Mode B (Guard)",
+      "runtime_apply_review_ready": true,
+      "runtime_update_allowed": false,
+      "public_benchmark_allowed": false
+    },
+    {
+      "capability": "mempalace",
+      "baseline_row_id": "heep::mempalace::heep-mat-b-mempalace-001::mode_a_current_primary",
+      "challenger_row_id": "heep::mempalace::heep-mat-b-mempalace-001::heep_multi_skill",
+      "mat_b_verdict": "APPROVE_HEEP_MODE_CANDIDATE",
+      "mat_b_reason_codes": [],
+      "selected_mode_candidate": "Mode B (Guard)",
+      "runtime_apply_review_ready": true,
+      "runtime_update_allowed": false,
+      "public_benchmark_allowed": false
+    },
+    {
+      "capability": "policy_capability_gate",
+      "baseline_row_id": "heep::policy_capability_gate::heep-mat-b-policy_capability_gate-001::mode_a_current_primary",
+      "challenger_row_id": "heep::policy_capability_gate::heep-mat-b-policy_capability_gate-001::heep_multi_skill",
+      "mat_b_verdict": "KEEP_SINGLE_PRIMARY",
+      "mat_b_reason_codes": [
+        "efficiency_regressed"
+      ],
+      "selected_mode_candidate": "Mode A (Solo)",
+      "runtime_apply_review_ready": false,
+      "runtime_update_allowed": false,
+      "public_benchmark_allowed": false
+    },
+    {
+      "capability": "registry_skills_sync",
+      "baseline_row_id": "heep::registry_skills_sync::heep-mat-b-registry_skills_sync-001::mode_a_current_primary",
+      "challenger_row_id": "heep::registry_skills_sync::heep-mat-b-registry_skills_sync-001::heep_multi_skill",
+      "mat_b_verdict": "KEEP_SINGLE_PRIMARY",
+      "mat_b_reason_codes": [
+        "efficiency_regressed"
+      ],
+      "selected_mode_candidate": "Mode A (Solo)",
+      "runtime_apply_review_ready": false,
+      "runtime_update_allowed": false,
+      "public_benchmark_allowed": false
+    },
+    {
+      "capability": "regression_guard",
+      "baseline_row_id": "heep::regression_guard::heep-mat-b-regression_guard-001::mode_a_current_primary",
+      "challenger_row_id": "heep::regression_guard::heep-mat-b-regression_guard-001::heep_multi_skill",
+      "mat_b_verdict": "APPROVE_HEEP_MODE_CANDIDATE",
+      "mat_b_reason_codes": [],
+      "selected_mode_candidate": "Mode B (Guard)",
+      "runtime_apply_review_ready": true,
+      "runtime_update_allowed": false,
+      "public_benchmark_allowed": false
+    },
+    {
+      "capability": "repair_loop",
+      "baseline_row_id": "heep::repair_loop::heep-mat-b-repair_loop-001::mode_a_current_primary",
+      "challenger_row_id": "heep::repair_loop::heep-mat-b-repair_loop-001::heep_multi_skill",
+      "mat_b_verdict": "KEEP_SINGLE_PRIMARY",
+      "mat_b_reason_codes": [
+        "efficiency_regressed"
+      ],
+      "selected_mode_candidate": "Mode A (Solo)",
+      "runtime_apply_review_ready": false,
+      "runtime_update_allowed": false,
+      "public_benchmark_allowed": false
+    },
+    {
+      "capability": "research",
+      "baseline_row_id": "heep::research::heep-mat-b-research-001::mode_a_current_primary",
+      "challenger_row_id": "heep::research::heep-mat-b-research-001::heep_multi_skill",
+      "mat_b_verdict": "REJECT_MULTI_SKILL",
+      "mat_b_reason_codes": [
+        "reliability_not_better_or_delivery_return"
+      ],
+      "selected_mode_candidate": "Mode A (Solo)",
+      "runtime_apply_review_ready": false,
+      "runtime_update_allowed": false,
+      "public_benchmark_allowed": false
+    },
+    {
+      "capability": "research_and_source_discipline",
+      "baseline_row_id": "heep::research_and_source_discipline::heep-mat-b-research_and_source_discipline-001::mode_a_current_primary",
+      "challenger_row_id": "heep::research_and_source_discipline::heep-mat-b-research_and_source_discipline-001::heep_multi_skill",
+      "mat_b_verdict": "HOLD_MISSING_MAT_B_EVIDENCE",
+      "mat_b_reason_codes": [
+        "baseline_infra_invalid:model_call_without_tokens"
+      ],
+      "selected_mode_candidate": "Mode A (Solo)",
+      "runtime_apply_review_ready": false,
+      "runtime_update_allowed": false,
+      "public_benchmark_allowed": false
+    },
+    {
+      "capability": "research_control_plane",
+      "baseline_row_id": "heep::research_control_plane::heep-mat-b-research_control_plane-001::mode_a_current_primary",
+      "challenger_row_id": "heep::research_control_plane::heep-mat-b-research_control_plane-001::heep_multi_skill",
+      "mat_b_verdict": "HOLD_MISSING_MAT_B_EVIDENCE",
+      "mat_b_reason_codes": [
+        "baseline_infra_invalid:model_call_without_tokens"
+      ],
+      "selected_mode_candidate": "Mode A (Solo)",
+      "runtime_apply_review_ready": false,
+      "runtime_update_allowed": false,
+      "public_benchmark_allowed": false
+    },
+    {
+      "capability": "sandbox_replay",
+      "baseline_row_id": "heep::sandbox_replay::heep-mat-b-sandbox_replay-001::mode_a_current_primary",
+      "challenger_row_id": "heep::sandbox_replay::heep-mat-b-sandbox_replay-001::heep_multi_skill",
+      "mat_b_verdict": "HOLD_MISSING_MAT_B_EVIDENCE",
+      "mat_b_reason_codes": [
+        "baseline_infra_invalid:model_call_without_tokens"
+      ],
+      "selected_mode_candidate": "Mode A (Solo)",
+      "runtime_apply_review_ready": false,
+      "runtime_update_allowed": false,
+      "public_benchmark_allowed": false
+    },
+    {
+      "capability": "swarm_multi_agent",
+      "baseline_row_id": "heep::swarm_multi_agent::heep-mat-b-swarm_multi_agent-001::mode_a_current_primary",
+      "challenger_row_id": "heep::swarm_multi_agent::heep-mat-b-swarm_multi_agent-001::heep_multi_skill",
+      "mat_b_verdict": "HOLD_MISSING_MAT_B_EVIDENCE",
+      "mat_b_reason_codes": [
+        "baseline_infra_invalid:receipt_data_contract_violation"
+      ],
+      "selected_mode_candidate": "Mode A (Solo)",
+      "runtime_apply_review_ready": false,
+      "runtime_update_allowed": false,
+      "public_benchmark_allowed": false
+    },
+    {
+      "capability": "ui_validator",
+      "baseline_row_id": "heep::ui_validator::heep-mat-b-ui_validator-001::mode_a_current_primary",
+      "challenger_row_id": "heep::ui_validator::heep-mat-b-ui_validator-001::heep_multi_skill",
+      "mat_b_verdict": "HOLD_MISSING_MAT_B_EVIDENCE",
+      "mat_b_reason_codes": [
+        "baseline_infra_invalid:model_call_without_tokens"
+      ],
+      "selected_mode_candidate": "Mode A (Solo)",
+      "runtime_apply_review_ready": false,
+      "runtime_update_allowed": false,
+      "public_benchmark_allowed": false
+    },
+    {
+      "capability": "ultra_review",
+      "baseline_row_id": "heep::ultra_review::heep-mat-b-ultra_review-001::mode_a_current_primary",
+      "challenger_row_id": "heep::ultra_review::heep-mat-b-ultra_review-001::heep_multi_skill",
+      "mat_b_verdict": "HOLD_MISSING_MAT_B_EVIDENCE",
+      "mat_b_reason_codes": [
+        "baseline_infra_invalid:model_call_without_tokens"
+      ],
+      "selected_mode_candidate": "Mode A (Solo)",
+      "runtime_apply_review_ready": false,
+      "runtime_update_allowed": false,
+      "public_benchmark_allowed": false
+    },
+    {
+      "capability": "xray",
+      "baseline_row_id": "heep::xray::heep-mat-b-xray-001::mode_a_current_primary",
+      "challenger_row_id": "heep::xray::heep-mat-b-xray-001::heep_multi_skill",
+      "mat_b_verdict": "HOLD_MISSING_MAT_B_EVIDENCE",
+      "mat_b_reason_codes": [
+        "baseline_infra_invalid:model_call_without_tokens"
+      ],
+      "selected_mode_candidate": "Mode A (Solo)",
+      "runtime_apply_review_ready": false,
+      "runtime_update_allowed": false,
+      "public_benchmark_allowed": false
+    }
+  ],
+  "source_report": "docs/reports/NEXUS_HEEP_MAT_B_LIVE_REPORT_2026-05-20.json"
+}

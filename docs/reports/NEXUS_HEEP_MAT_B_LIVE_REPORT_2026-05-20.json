@@ -2,11 +2,11 @@
   "schema": "nexus.heep_mat_b_live_report.v1",
   "status": "PASS",
   "summary": {
-    "comparison_count": 23,
+    "comparison_count": 28,
     "approve_count": 9,
     "keep_single_count": 11,
     "reject_count": 1,
-    "hold_count": 2,
+    "hold_count": 7,
     "runtime_update_allowed": false,
     "public_benchmark_allowed": false
   },
@@ -999,6 +999,226 @@
         "success_rate_delta": 0.0,
         "pollution_pct_delta": 0.0,
         "evidence_seal_count_delta": 2,
+        "reopen_rate_delta": 0.0
+      },
+      "verdict": "HOLD_MISSING_MAT_B_EVIDENCE",
+      "reason_codes": [
+        "baseline_infra_invalid:model_call_without_tokens"
+      ]
+    },
+    {
+      "capability": "sandbox_replay",
+      "task_id": "heep-mat-b-sandbox_replay-001",
+      "baseline_row_id": "heep::sandbox_replay::heep-mat-b-sandbox_replay-001::mode_a_current_primary",
+      "challenger_row_id": "heep::sandbox_replay::heep-mat-b-sandbox_replay-001::heep_multi_skill",
+      "baseline": {
+        "success_rate": 0.0,
+        "pollution_pct": 0.0,
+        "evidence_seal_count": 1,
+        "total_tokens": 0,
+        "phase_wall_total_sec": 12.9689,
+        "reopen_rate": 1.0,
+        "reopen_rate_source": "deterministic_receipt_replay_proxy",
+        "trust_mismatch": false,
+        "skill_mount_contract_status": "PASS",
+        "receipt_chain_pass": true,
+        "infra_invalid_reason": "model_call_without_tokens"
+      },
+      "challenger": {
+        "success_rate": 0.0,
+        "pollution_pct": 0.0,
+        "evidence_seal_count": 2,
+        "total_tokens": 0,
+        "phase_wall_total_sec": 11.8958,
+        "reopen_rate": 1.0,
+        "reopen_rate_source": "deterministic_receipt_replay_proxy",
+        "trust_mismatch": false,
+        "skill_mount_contract_status": "PASS",
+        "receipt_chain_pass": true,
+        "infra_invalid_reason": "model_call_without_tokens"
+      },
+      "delta": {
+        "token_delta": 0,
+        "wall_delta": -1.0731,
+        "success_rate_delta": 0.0,
+        "pollution_pct_delta": 0.0,
+        "evidence_seal_count_delta": 1,
+        "reopen_rate_delta": 0.0
+      },
+      "verdict": "HOLD_MISSING_MAT_B_EVIDENCE",
+      "reason_codes": [
+        "baseline_infra_invalid:model_call_without_tokens"
+      ]
+    },
+    {
+      "capability": "swarm_multi_agent",
+      "task_id": "heep-mat-b-swarm_multi_agent-001",
+      "baseline_row_id": "heep::swarm_multi_agent::heep-mat-b-swarm_multi_agent-001::mode_a_current_primary",
+      "challenger_row_id": "heep::swarm_multi_agent::heep-mat-b-swarm_multi_agent-001::heep_multi_skill",
+      "baseline": {
+        "success_rate": 0.0,
+        "pollution_pct": 0.0,
+        "evidence_seal_count": 0,
+        "total_tokens": 598,
+        "phase_wall_total_sec": 11.8474,
+        "reopen_rate": 1.0,
+        "reopen_rate_source": "deterministic_receipt_replay_proxy",
+        "trust_mismatch": false,
+        "skill_mount_contract_status": "RETURN",
+        "receipt_chain_pass": false,
+        "infra_invalid_reason": "receipt_data_contract_violation"
+      },
+      "challenger": {
+        "success_rate": 0.0,
+        "pollution_pct": 0.0,
+        "evidence_seal_count": 0,
+        "total_tokens": 598,
+        "phase_wall_total_sec": 17.2051,
+        "reopen_rate": 1.0,
+        "reopen_rate_source": "deterministic_receipt_replay_proxy",
+        "trust_mismatch": false,
+        "skill_mount_contract_status": "RETURN",
+        "receipt_chain_pass": false,
+        "infra_invalid_reason": "receipt_data_contract_violation"
+      },
+      "delta": {
+        "token_delta": 0,
+        "wall_delta": 5.3577,
+        "success_rate_delta": 0.0,
+        "pollution_pct_delta": 0.0,
+        "evidence_seal_count_delta": 0,
+        "reopen_rate_delta": 0.0
+      },
+      "verdict": "HOLD_MISSING_MAT_B_EVIDENCE",
+      "reason_codes": [
+        "baseline_infra_invalid:receipt_data_contract_violation"
+      ]
+    },
+    {
+      "capability": "ui_validator",
+      "task_id": "heep-mat-b-ui_validator-001",
+      "baseline_row_id": "heep::ui_validator::heep-mat-b-ui_validator-001::mode_a_current_primary",
+      "challenger_row_id": "heep::ui_validator::heep-mat-b-ui_validator-001::heep_multi_skill",
+      "baseline": {
+        "success_rate": 0.0,
+        "pollution_pct": 0.0,
+        "evidence_seal_count": 1,
+        "total_tokens": 0,
+        "phase_wall_total_sec": 18.3903,
+        "reopen_rate": 1.0,
+        "reopen_rate_source": "deterministic_receipt_replay_proxy",
+        "trust_mismatch": false,
+        "skill_mount_contract_status": "PASS",
+        "receipt_chain_pass": true,
+        "infra_invalid_reason": "model_call_without_tokens"
+      },
+      "challenger": {
+        "success_rate": 0.0,
+        "pollution_pct": 0.0,
+        "evidence_seal_count": 2,
+        "total_tokens": 0,
+        "phase_wall_total_sec": 16.6292,
+        "reopen_rate": 1.0,
+        "reopen_rate_source": "deterministic_receipt_replay_proxy",
+        "trust_mismatch": false,
+        "skill_mount_contract_status": "PASS",
+        "receipt_chain_pass": true,
+        "infra_invalid_reason": "model_call_without_tokens"
+      },
+      "delta": {
+        "token_delta": 0,
+        "wall_delta": -1.7611,
+        "success_rate_delta": 0.0,
+        "pollution_pct_delta": 0.0,
+        "evidence_seal_count_delta": 1,
+        "reopen_rate_delta": 0.0
+      },
+      "verdict": "HOLD_MISSING_MAT_B_EVIDENCE",
+      "reason_codes": [
+        "baseline_infra_invalid:model_call_without_tokens"
+      ]
+    },
+    {
+      "capability": "ultra_review",
+      "task_id": "heep-mat-b-ultra_review-001",
+      "baseline_row_id": "heep::ultra_review::heep-mat-b-ultra_review-001::mode_a_current_primary",
+      "challenger_row_id": "heep::ultra_review::heep-mat-b-ultra_review-001::heep_multi_skill",
+      "baseline": {
+        "success_rate": 0.0,
+        "pollution_pct": 0.0,
+        "evidence_seal_count": 1,
+        "total_tokens": 0,
+        "phase_wall_total_sec": 17.8945,
+        "reopen_rate": 1.0,
+        "reopen_rate_source": "deterministic_receipt_replay_proxy",
+        "trust_mismatch": false,
+        "skill_mount_contract_status": "PASS",
+        "receipt_chain_pass": true,
+        "infra_invalid_reason": "model_call_without_tokens"
+      },
+      "challenger": {
+        "success_rate": 0.0,
+        "pollution_pct": 0.0,
+        "evidence_seal_count": 3,
+        "total_tokens": 0,
+        "phase_wall_total_sec": 16.9748,
+        "reopen_rate": 1.0,
+        "reopen_rate_source": "deterministic_receipt_replay_proxy",
+        "trust_mismatch": false,
+        "skill_mount_contract_status": "PASS",
+        "receipt_chain_pass": true,
+        "infra_invalid_reason": "model_call_without_tokens"
+      },
+      "delta": {
+        "token_delta": 0,
+        "wall_delta": -0.9197,
+        "success_rate_delta": 0.0,
+        "pollution_pct_delta": 0.0,
+        "evidence_seal_count_delta": 2,
+        "reopen_rate_delta": 0.0
+      },
+      "verdict": "HOLD_MISSING_MAT_B_EVIDENCE",
+      "reason_codes": [
+        "baseline_infra_invalid:model_call_without_tokens"
+      ]
+    },
+    {
+      "capability": "xray",
+      "task_id": "heep-mat-b-xray-001",
+      "baseline_row_id": "heep::xray::heep-mat-b-xray-001::mode_a_current_primary",
+      "challenger_row_id": "heep::xray::heep-mat-b-xray-001::heep_multi_skill",
+      "baseline": {
+        "success_rate": 0.0,
+        "pollution_pct": 0.0,
+        "evidence_seal_count": 1,
+        "total_tokens": 0,
+        "phase_wall_total_sec": 10.9959,
+        "reopen_rate": 1.0,
+        "reopen_rate_source": "deterministic_receipt_replay_proxy",
+        "trust_mismatch": false,
+        "skill_mount_contract_status": "PASS",
+        "receipt_chain_pass": true,
+        "infra_invalid_reason": "model_call_without_tokens"
+      },
+      "challenger": {
+        "success_rate": 0.0,
+        "pollution_pct": 0.0,
+        "evidence_seal_count": 2,
+        "total_tokens": 0,
+        "phase_wall_total_sec": 12.0015,
+        "reopen_rate": 1.0,
+        "reopen_rate_source": "deterministic_receipt_replay_proxy",
+        "trust_mismatch": false,
+        "skill_mount_contract_status": "PASS",
+        "receipt_chain_pass": true,
+        "infra_invalid_reason": "model_call_without_tokens"
+      },
+      "delta": {
+        "token_delta": 0,
+        "wall_delta": 1.0056,
+        "success_rate_delta": 0.0,
+        "pollution_pct_delta": 0.0,
+        "evidence_seal_count_delta": 1,
         "reopen_rate_delta": 0.0
       },
       "verdict": "HOLD_MISSING_MAT_B_EVIDENCE",
