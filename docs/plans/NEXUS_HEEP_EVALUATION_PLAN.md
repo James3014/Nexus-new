@@ -42,5 +42,40 @@ HEEP 不直接接舊式 `nexus_benchmark_full.py` 作為第一步；第一階段
 - **邊界**：本階段只做 deterministic local dry-run 與 catalog/mode 更新；`runtime_update_allowed=false`、`public_benchmark_allowed=false`。
 - **下一階段**：只有當 live ensemble runner 產出 runtime-confirmed selected/injected/used/evidence/gate/outcome receipt，Mode B/C 才能進 runtime apply review。
 
+## 6. MAT-B 可執行比對契約 (2026-05-20)
+
+HEEP 的最終選用標準不是 local role coverage，也不是單純「複數 skill 比單 skill 看起來完整」。每個 capability 都必須先以目前 primary skill 作為 **Mode A baseline**，再將 Mode B / Mode C 作為 challenger arm 進入 Flash+Nexus internal live compare。local replay 只能產出候選與 receipt readiness，不能直接產生 replacement verdict。
+
+### 6.1 Arm 定義
+
+- **Baseline arm**：`mode_a_current_primary`，只掛目前 `(capability, primary_skill)`。
+- **Challenger arm**：`heep_multi_skill`，掛 Mode B 或 Mode C assembly。
+- **比較範圍**：同一 capability、同一 task set、同一 runner boundary、同一 hidden verifier / receipt contract。
+- **產物入口**：`docs/reports/NEXUS_HEEP_FLASH_NEXUS_LIVE_COMPARE_QUEUE_2026-05-20.json`。
+
+### 6.2 MAT-B KPI 與判定順序
+
+| 順序 | 維度 | KPI | Gate |
+| :--- | :--- | :--- | :--- |
+| 1 | Reliability | `success_rate` | challenger 必須 >= baseline，且不得出現 delivery RETURN。 |
+| 2 | Quality | `pollution_pct` | challenger 必須 <= baseline，且不得超過該 task family 的污染上限。 |
+| 3 | Governance | `evidence_seal_count` | challenger 必須 >= baseline，且 runtime receipt 必須包含 selected / injected / used / evidence / gate / outcome。 |
+| 4 | Efficiency | `token_delta`, `wall_delta` | 只有 Reliability、Quality、Governance 全 PASS 後才可判讀；不得用成本改善覆蓋前三項失敗。 |
+| 5 | Regression | `reopen_rate` | challenger 必須 <= baseline，且 replay/regression simulation 不得重新打開已關閉問題。 |
+
+### 6.3 Decision State
+
+- `KEEP_SINGLE_PRIMARY`：Mode A 仍是最佳或 challenger 未通過 MAT-B。
+- `PENDING_FLASH_NEXUS_LIVE_COMPARE`：local replay 顯示 Mode B/C 有潛力，但 live KPI 尚未收齊。
+- `APPROVE_HEEP_MODE_CANDIDATE`：Mode B/C 在 MAT-B 全部 PASS，可進 runtime apply review packet。
+- `REJECT_MULTI_SKILL`：Mode B/C 未通過 Reliability、Quality、Governance 或 Regression。
+- `HOLD_MISSING_MAT_B_EVIDENCE`：缺少 live receipt、token/wall truth、污染率或 reopen evidence。
+
+### 6.4 禁止宣稱
+
+- 禁止用 local replay、role count、consensus score 或 synergy factor 直接取代 MAT-B live KPI。
+- 禁止將 `APPROVE_HEEP_MODE_CANDIDATE` 等同 runtime default；runtime default 仍需獨立 apply gate。
+- 禁止將本 contract 的 internal live compare 等同 public benchmark 或 publication-ready claim。
+
 ---
 *Created by Antigravity - Nexus Singularity V17*

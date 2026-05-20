@@ -40,6 +40,43 @@ EMAS 第一階段不自動掃 GitHub 並 promotion runtime；它只把現有 SF 
   - GitHub / external skill 必須先經 sanitize、receipt-backed comparison、apply gate，才可進 runtime review。
   - 本階段產物不得作為 public benchmark 或 publication-ready claim。
 
+## 6. Heterogeneous Assembly Evaluation Contract (2026-05-20)
+
+EMAS 的 Scout / Logic / Audit 分類只用來建立 Mode B / Mode C assembly，不是 replacement 證據。任何異質組合都必須回到 HEEP MAT-B gate，以目前 primary skill 的 Mode A 作 baseline 做 Flash+Nexus internal live compare。
+
+### 6.1 Role Contract
+
+- **Scout**：可提供上下文、檢索、索引、環境感知，但不得單獨作為 delivery success。
+- **Logic**：可提供核心推理、實作與決策，但不得繞過 evidence gate。
+- **Audit**：可提供安全、治理、回歸與污染檢查，但不得覆寫 hidden verifier 或 runtime receipt。
+
+### 6.2 Assembly Eligibility
+
+Mode B / Mode C 進入 compare queue 前必須同時滿足：
+
+- skill 來源已被標為 repo-local current-best 或 sanitized Safe-Candidate。
+- quarantine / candidate inbox / worktree copy / vendor-only skill 未被直接納入 runtime arm。
+- 每個 arm 都可產生 runtime-final receipt chain：selected、injected、used、evidence、gate、outcome。
+- assembly 沒有宣稱 public-ready；只允許 `internal_heep_mode_candidate_only`。
+
+### 6.3 MAT-B 交接
+
+EMAS 只負責產生候選組合與角色解釋；最終是否替代單一 primary skill 由 HEEP MAT-B 決定：
+
+- Reliability：`success_rate`
+- Quality：`pollution_pct`
+- Governance：`evidence_seal_count`
+- Efficiency：`token_delta`, `wall_delta`
+- Regression：`reopen_rate`
+
+若 MAT-B 缺任一 live KPI，EMAS verdict 必須停在 `PENDING_FLASH_NEXUS_LIVE_COMPARE` 或 `HOLD_MISSING_MAT_B_EVIDENCE`。
+
+### 6.4 更新邊界
+
+- EMAS 不直接修改 runtime default。
+- EMAS 不直接觸發 public benchmark。
+- EMAS 只更新 assembly catalog、compare queue、runtime apply review packet 的候選狀態。
+
 ---
 *Created by Antigravity - Nexus Singularity V17*
 *Refined with Heterogeneous Intelligence Principles*
