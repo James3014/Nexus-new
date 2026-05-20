@@ -2721,3 +2721,10 @@ version_scope:
 - Failure: the contract produced the correct blocker set while the test failed on list ordering.
 - Lesson: fail-closed contract tests should either assert the documented stable order or compare sets when order is not part of the contract.
 - Guardrail: when a validator returns `sorted(set(blockers))`, write expected blocker lists in lexical order.
+
+## 2026-05-20 - HEEP map gates must inherit run-level receipt blockers
+
+- Trigger: HEEP live pilot tests intentionally set `runtime_final_receipt_chain.used=false`.
+- Failure: the run report returned `RETURN`, but the map update gate still returned `PASS` because only initial input blockers were propagated.
+- Lesson: downstream map/update gates must inherit all row-level receipt blockers, not only source-manifest blockers.
+- Guardrail: pass run report blockers into decision and map gate builders before allowing HEEP mode candidate updates.

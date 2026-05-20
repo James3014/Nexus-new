@@ -1,0 +1,31 @@
+{
+  "blockers": [],
+  "claim_boundary": [
+    "This pilot replays existing runtime receipts for HEEP ensemble mode selection.",
+    "It is not a public benchmark and does not update runtime defaults.",
+    "A future external model run must replace replay rows before publication-ready claims."
+  ],
+  "modes": [
+    "Mode A (Solo)",
+    "Mode B (Guard)",
+    "Mode C (Swarm)"
+  ],
+  "pilot_capabilities": [
+    "codeintel",
+    "artifact_gate",
+    "research",
+    "repair_loop"
+  ],
+  "public_benchmark_allowed": false,
+  "receipt_requirements": [
+    "selected",
+    "injected",
+    "used",
+    "evidence_present",
+    "gate_passed",
+    "outcome_contributed"
+  ],
+  "runtime_update_allowed": false,
+  "schema": "nexus.heep_live_pilot_contract.v1",
+  "status": "PASS"
+}

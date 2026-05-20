@@ -1,0 +1,48 @@
+{
+  "blockers": [],
+  "claim_boundary": [
+    "Map updates are HEEP mode candidates only.",
+    "They do not alter runtime defaults or public benchmark readiness."
+  ],
+  "rows": [
+    {
+      "capability": "artifact_gate",
+      "decision": "swarm_best",
+      "heep_mode_candidate": "Mode C (Swarm)",
+      "map_update_allowed": true,
+      "public_benchmark_allowed": false,
+      "runtime_update_allowed": false
+    },
+    {
+      "capability": "codeintel",
+      "decision": "swarm_best",
+      "heep_mode_candidate": "Mode C (Swarm)",
+      "map_update_allowed": true,
+      "public_benchmark_allowed": false,
+      "runtime_update_allowed": false
+    },
+    {
+      "capability": "repair_loop",
+      "decision": "swarm_best",
+      "heep_mode_candidate": "Mode C (Swarm)",
+      "map_update_allowed": true,
+      "public_benchmark_allowed": false,
+      "runtime_update_allowed": false
+    },
+    {
+      "capability": "research",
+      "decision": "swarm_best",
+      "heep_mode_candidate": "Mode C (Swarm)",
+      "map_update_allowed": true,
+      "public_benchmark_allowed": false,
+      "runtime_update_allowed": false
+    }
+  ],
+  "schema": "nexus.heep_live_map_update_gate.v1",
+  "status": "PASS",
+  "summary": {
+    "candidate_update_count": 4,
+    "public_benchmark_allowed": false,
+    "runtime_update_allowed": false
+  }
+}

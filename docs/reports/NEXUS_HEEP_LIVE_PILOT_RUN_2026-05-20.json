@@ -1,0 +1,374 @@
+{
+  "blockers": [],
+  "rows": [
+    {
+      "capability": "codeintel",
+      "mode": "Mode A (Solo)",
+      "premium_cost": 0,
+      "public_claim_allowed": false,
+      "quality_score": 1.3333,
+      "role_coverage": 0.3333333333333333,
+      "runtime_final_receipt_chain": {
+        "evidence_present": true,
+        "gate_passed": true,
+        "injected": true,
+        "outcome_contributed": true,
+        "selected": true,
+        "used": true
+      },
+      "runtime_update_allowed": false,
+      "skill_count": 1,
+      "skills": [
+        {
+          "role": "primary",
+          "skill_id": "sf-systematic-codeintel-first-principles-thinking-f95019ea"
+        }
+      ],
+      "source_evidence_ref": ".nexus/reports/sf_systematic_all_capability_live_v32_2026-05-19/codeintel_sf-systematic-batch-codeintel-001_challenger_sf-systematic-codeintel-first-principles-thinking-f95019ea/evidence_bundle.json",
+      "status": "PASS"
+    },
+    {
+      "capability": "codeintel",
+      "mode": "Mode B (Guard)",
+      "premium_cost": 1,
+      "public_claim_allowed": false,
+      "quality_score": 1.6667,
+      "role_coverage": 0.6666666666666666,
+      "runtime_final_receipt_chain": {
+        "evidence_present": true,
+        "gate_passed": true,
+        "injected": true,
+        "outcome_contributed": true,
+        "selected": true,
+        "used": true
+      },
+      "runtime_update_allowed": false,
+      "skill_count": 2,
+      "skills": [
+        {
+          "role": "primary",
+          "skill_id": "sf-systematic-codeintel-first-principles-thinking-f95019ea"
+        },
+        {
+          "role": "Audit",
+          "skill_id": "sf-systematic-artifact_gate-differential-review-461fbd0c"
+        }
+      ],
+      "source_evidence_ref": ".nexus/reports/sf_systematic_all_capability_live_v32_2026-05-19/codeintel_sf-systematic-batch-codeintel-001_challenger_sf-systematic-codeintel-first-principles-thinking-f95019ea/evidence_bundle.json",
+      "status": "PASS"
+    },
+    {
+      "capability": "codeintel",
+      "mode": "Mode C (Swarm)",
+      "premium_cost": 2,
+      "public_claim_allowed": false,
+      "quality_score": 2.0,
+      "role_coverage": 1.0,
+      "runtime_final_receipt_chain": {
+        "evidence_present": true,
+        "gate_passed": true,
+        "injected": true,
+        "outcome_contributed": true,
+        "selected": true,
+        "used": true
+      },
+      "runtime_update_allowed": false,
+      "skill_count": 3,
+      "skills": [
+        {
+          "role": "Scout",
+          "skill_id": "sf-systematic-codeintel-first-principles-thinking-f95019ea"
+        },
+        {
+          "role": "Logic",
+          "skill_id": "sf2-autonomic_router-route-fit-spec"
+        },
+        {
+          "role": "Audit",
+          "skill_id": "sf-systematic-artifact_gate-differential-review-461fbd0c"
+        }
+      ],
+      "source_evidence_ref": ".nexus/reports/sf_systematic_all_capability_live_v32_2026-05-19/codeintel_sf-systematic-batch-codeintel-001_challenger_sf-systematic-codeintel-first-principles-thinking-f95019ea/evidence_bundle.json",
+      "status": "PASS"
+    },
+    {
+      "capability": "artifact_gate",
+      "mode": "Mode A (Solo)",
+      "premium_cost": 0,
+      "public_claim_allowed": false,
+      "quality_score": 1.3333,
+      "role_coverage": 0.3333333333333333,
+      "runtime_final_receipt_chain": {
+        "evidence_present": true,
+        "gate_passed": true,
+        "injected": true,
+        "outcome_contributed": true,
+        "selected": true,
+        "used": true
+      },
+      "runtime_update_allowed": false,
+      "skill_count": 1,
+      "skills": [
+        {
+          "role": "primary",
+          "skill_id": "sf-systematic-artifact_gate-differential-review-461fbd0c"
+        }
+      ],
+      "source_evidence_ref": ".nexus/reports/sf_systematic_all_capability_live_v32_2026-05-19/artifact_gate_sf-systematic-batch-artifact_gate-001_challenger_sf-systematic-artifact_gate-differential-review-461fbd0c/evidence_bundle.json",
+      "status": "PASS"
+    },
+    {
+      "capability": "artifact_gate",
+      "mode": "Mode B (Guard)",
+      "premium_cost": 1,
+      "public_claim_allowed": false,
+      "quality_score": 1.6667,
+      "role_coverage": 0.6666666666666666,
+      "runtime_final_receipt_chain": {
+        "evidence_present": true,
+        "gate_passed": true,
+        "injected": true,
+        "outcome_contributed": true,
+        "selected": true,
+        "used": true
+      },
+      "runtime_update_allowed": false,
+      "skill_count": 2,
+      "skills": [
+        {
+          "role": "primary",
+          "skill_id": "sf-systematic-artifact_gate-differential-review-461fbd0c"
+        },
+        {
+          "role": "Audit",
+          "skill_id": "sf-systematic-governance_and_trust-aegisops-ai-0aa841e2"
+        }
+      ],
+      "source_evidence_ref": ".nexus/reports/sf_systematic_all_capability_live_v32_2026-05-19/artifact_gate_sf-systematic-batch-artifact_gate-001_challenger_sf-systematic-artifact_gate-differential-review-461fbd0c/evidence_bundle.json",
+      "status": "PASS"
+    },
+    {
+      "capability": "artifact_gate",
+      "mode": "Mode C (Swarm)",
+      "premium_cost": 2,
+      "public_claim_allowed": false,
+      "quality_score": 2.0,
+      "role_coverage": 1.0,
+      "runtime_final_receipt_chain": {
+        "evidence_present": true,
+        "gate_passed": true,
+        "injected": true,
+        "outcome_contributed": true,
+        "selected": true,
+        "used": true
+      },
+      "runtime_update_allowed": false,
+      "skill_count": 3,
+      "skills": [
+        {
+          "role": "Scout",
+          "skill_id": "sf-systematic-codeintel-first-principles-thinking-f95019ea"
+        },
+        {
+          "role": "Logic",
+          "skill_id": "sf2-autonomic_router-route-fit-spec"
+        },
+        {
+          "role": "Audit",
+          "skill_id": "sf-systematic-artifact_gate-differential-review-461fbd0c"
+        }
+      ],
+      "source_evidence_ref": ".nexus/reports/sf_systematic_all_capability_live_v32_2026-05-19/artifact_gate_sf-systematic-batch-artifact_gate-001_challenger_sf-systematic-artifact_gate-differential-review-461fbd0c/evidence_bundle.json",
+      "status": "PASS"
+    },
+    {
+      "capability": "research",
+      "mode": "Mode A (Solo)",
+      "premium_cost": 0,
+      "public_claim_allowed": false,
+      "quality_score": 1.3333,
+      "role_coverage": 0.3333333333333333,
+      "runtime_final_receipt_chain": {
+        "evidence_present": true,
+        "gate_passed": true,
+        "injected": true,
+        "outcome_contributed": true,
+        "selected": true,
+        "used": true
+      },
+      "runtime_update_allowed": false,
+      "skill_count": 1,
+      "skills": [
+        {
+          "role": "primary",
+          "skill_id": "sf-systematic-research-research-lookup-7e6f92a0"
+        }
+      ],
+      "source_evidence_ref": ".nexus/reports/sf_systematic_all_capability_live_v32_2026-05-19/research_sf-systematic-batch-research-001_challenger_sf-systematic-research-research-lookup-7e6f92a0/evidence_bundle.json",
+      "status": "PASS"
+    },
+    {
+      "capability": "research",
+      "mode": "Mode B (Guard)",
+      "premium_cost": 1,
+      "public_claim_allowed": false,
+      "quality_score": 1.6667,
+      "role_coverage": 0.6666666666666666,
+      "runtime_final_receipt_chain": {
+        "evidence_present": true,
+        "gate_passed": true,
+        "injected": true,
+        "outcome_contributed": true,
+        "selected": true,
+        "used": true
+      },
+      "runtime_update_allowed": false,
+      "skill_count": 2,
+      "skills": [
+        {
+          "role": "primary",
+          "skill_id": "sf-systematic-research-research-lookup-7e6f92a0"
+        },
+        {
+          "role": "Audit",
+          "skill_id": "sf-systematic-artifact_gate-differential-review-461fbd0c"
+        }
+      ],
+      "source_evidence_ref": ".nexus/reports/sf_systematic_all_capability_live_v32_2026-05-19/research_sf-systematic-batch-research-001_challenger_sf-systematic-research-research-lookup-7e6f92a0/evidence_bundle.json",
+      "status": "PASS"
+    },
+    {
+      "capability": "research",
+      "mode": "Mode C (Swarm)",
+      "premium_cost": 2,
+      "public_claim_allowed": false,
+      "quality_score": 2.0,
+      "role_coverage": 1.0,
+      "runtime_final_receipt_chain": {
+        "evidence_present": true,
+        "gate_passed": true,
+        "injected": true,
+        "outcome_contributed": true,
+        "selected": true,
+        "used": true
+      },
+      "runtime_update_allowed": false,
+      "skill_count": 3,
+      "skills": [
+        {
+          "role": "Scout",
+          "skill_id": "sf-systematic-research-research-lookup-7e6f92a0"
+        },
+        {
+          "role": "Logic",
+          "skill_id": "sf2-autonomic_router-route-fit-spec"
+        },
+        {
+          "role": "Audit",
+          "skill_id": "sf-systematic-artifact_gate-differential-review-461fbd0c"
+        }
+      ],
+      "source_evidence_ref": ".nexus/reports/sf_systematic_all_capability_live_v32_2026-05-19/research_sf-systematic-batch-research-001_challenger_sf-systematic-research-research-lookup-7e6f92a0/evidence_bundle.json",
+      "status": "PASS"
+    },
+    {
+      "capability": "repair_loop",
+      "mode": "Mode A (Solo)",
+      "premium_cost": 0,
+      "public_claim_allowed": false,
+      "quality_score": 1.3333,
+      "role_coverage": 0.3333333333333333,
+      "runtime_final_receipt_chain": {
+        "evidence_present": true,
+        "gate_passed": true,
+        "injected": true,
+        "outcome_contributed": true,
+        "selected": true,
+        "used": true
+      },
+      "runtime_update_allowed": false,
+      "skill_count": 1,
+      "skills": [
+        {
+          "role": "primary",
+          "skill_id": "sf-systematic-repair_loop-odoo-automated-tests-dad98433"
+        }
+      ],
+      "source_evidence_ref": ".nexus/reports/sf_systematic_all_capability_live_v32_2026-05-19/repair_loop_sf-systematic-batch-repair_loop-001_challenger_sf-systematic-repair_loop-odoo-automated-tests-dad98433/evidence_bundle.json",
+      "status": "PASS"
+    },
+    {
+      "capability": "repair_loop",
+      "mode": "Mode B (Guard)",
+      "premium_cost": 1,
+      "public_claim_allowed": false,
+      "quality_score": 1.6667,
+      "role_coverage": 0.6666666666666666,
+      "runtime_final_receipt_chain": {
+        "evidence_present": true,
+        "gate_passed": true,
+        "injected": true,
+        "outcome_contributed": true,
+        "selected": true,
+        "used": true
+      },
+      "runtime_update_allowed": false,
+      "skill_count": 2,
+      "skills": [
+        {
+          "role": "primary",
+          "skill_id": "sf-systematic-repair_loop-odoo-automated-tests-dad98433"
+        },
+        {
+          "role": "Audit",
+          "skill_id": "sf-systematic-artifact_gate-differential-review-461fbd0c"
+        }
+      ],
+      "source_evidence_ref": ".nexus/reports/sf_systematic_all_capability_live_v32_2026-05-19/repair_loop_sf-systematic-batch-repair_loop-001_challenger_sf-systematic-repair_loop-odoo-automated-tests-dad98433/evidence_bundle.json",
+      "status": "PASS"
+    },
+    {
+      "capability": "repair_loop",
+      "mode": "Mode C (Swarm)",
+      "premium_cost": 2,
+      "public_claim_allowed": false,
+      "quality_score": 2.0,
+      "role_coverage": 1.0,
+      "runtime_final_receipt_chain": {
+        "evidence_present": true,
+        "gate_passed": true,
+        "injected": true,
+        "outcome_contributed": true,
+        "selected": true,
+        "used": true
+      },
+      "runtime_update_allowed": false,
+      "skill_count": 3,
+      "skills": [
+        {
+          "role": "Scout",
+          "skill_id": "sf-systematic-codeintel-first-principles-thinking-f95019ea"
+        },
+        {
+          "role": "Logic",
+          "skill_id": "sf-systematic-repair_loop-odoo-automated-tests-dad98433"
+        },
+        {
+          "role": "Audit",
+          "skill_id": "sf-systematic-artifact_gate-differential-review-461fbd0c"
+        }
+      ],
+      "source_evidence_ref": ".nexus/reports/sf_systematic_all_capability_live_v32_2026-05-19/repair_loop_sf-systematic-batch-repair_loop-001_challenger_sf-systematic-repair_loop-odoo-automated-tests-dad98433/evidence_bundle.json",
+      "status": "PASS"
+    }
+  ],
+  "schema": "nexus.heep_live_pilot_run.v1",
+  "status": "PASS",
+  "summary": {
+    "capability_count": 4,
+    "pass_count": 12,
+    "public_benchmark_allowed": false,
+    "row_count": 12,
+    "runtime_update_allowed": false
+  }
+}
