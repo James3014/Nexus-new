@@ -5,6 +5,8 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Protocol
 
+from nexus.services.memory_repository_lifecycle import ScopedMemoryRepositoryRegistry
+
 
 class FindingsVectorSync(Protocol):
     """Adapter boundary for optional findings-card vector indexing."""
@@ -22,15 +24,19 @@ class NoopFindingsVectorSync:
 @dataclass(frozen=True)
 class MemoryRepositoryFindingsVectorSync:
     project_root: Path
+    registry: ScopedMemoryRepositoryRegistry | None = None
 
     def sync(self, payload: dict[str, Any]) -> bool:
         if not _sync_enabled():
             return False
-        from nexus.services.memory_repository import MemoryRepository
 
         db_path = os.environ.get("NEXUS_MEMORY_DB_PATH")
-        repo = MemoryRepository(
-            Path(db_path) if db_path else self.project_root / ".nexus" / "memory" / "memory_index.lancedb"
+        resolved_db_path = Path(db_path) if db_path else self.project_root / ".nexus" / "memory" / "memory_index.lancedb"
+        registry = self.registry or ScopedMemoryRepositoryRegistry()
+        repo = registry.repository_for(
+            project_root=self.project_root,
+            db_path=resolved_db_path,
+            table_name="findings_cards",
         )
         repo.semantic_dedup_ingest("findings_cards", payload)
         return True

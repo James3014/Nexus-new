@@ -3,6 +3,8 @@ from pathlib import Path
 import json
 import shutil
 from nexus.research.findings_memory import FindingsCard, FindingsMemoryStore
+from nexus.research.findings_vector_sync import MemoryRepositoryFindingsVectorSync
+from nexus.services.memory_repository_lifecycle import ScopedMemoryRepositoryRegistry
 
 @pytest.fixture
 def temp_project_root(tmp_path):
@@ -76,6 +78,32 @@ def test_memory_store_records_vector_sync_success(temp_project_root):
 
     assert payload["extra"]["lancedb_synced"] is True
     assert card.extra["lancedb_synced"] is True
+
+
+def test_findings_vector_sync_reuses_injected_repository_registry(temp_project_root):
+    class FakeRepository:
+        def __init__(self, path):
+            self.path = path
+            self.calls = []
+
+        def semantic_dedup_ingest(self, table_name, payload):
+            self.calls.append((table_name, payload["id"]))
+
+    created = []
+
+    def factory(path):
+        repo = FakeRepository(path)
+        created.append(repo)
+        return repo
+
+    registry = ScopedMemoryRepositoryRegistry(factory=factory)
+    sync = MemoryRepositoryFindingsVectorSync(temp_project_root, registry=registry)
+
+    assert sync.sync({"id": "a", "extra": {}}) is True
+    assert sync.sync({"id": "b", "extra": {}}) is True
+
+    assert len(created) == 1
+    assert created[0].calls == [("findings_cards", "a"), ("findings_cards", "b")]
 
 def test_memory_list_recent(memory_store):
     """驗證最近記憶列表功能。"""

@@ -559,3 +559,39 @@ Failure lesson:
 Next:
 
 - start `CBO-3 Scoped LanceDB Repository Lifecycle`.
+
+## 16. CBO-3 Result
+
+Status: `DONE`
+
+Changed surface:
+
+- `nexus/services/memory_repository_lifecycle.py`;
+- `nexus/research/findings_vector_sync.py`;
+- `tests/services/test_memory_repository_lifecycle.py`;
+- `tests/research/test_findings_memory.py`.
+
+Result:
+
+- added `ScopedMemoryRepositoryRegistry` as an explicit repository lifecycle
+  seam;
+- repositories are cached by `(project_root, db_path, table_name)`;
+- tests can inject a factory and reset the cache;
+- findings vector sync can reuse an injected scoped registry without creating a
+  hidden global singleton.
+
+Verification:
+
+- `uv run python -m py_compile nexus/services/memory_repository_lifecycle.py nexus/research/findings_vector_sync.py tests/services/test_memory_repository_lifecycle.py tests/research/test_findings_memory.py` -> `PASS`;
+- `uv run pytest tests/services/test_memory_repository_lifecycle.py tests/research/test_findings_memory.py -q` -> `10 passed`;
+- `git diff --check -- nexus/services/memory_repository_lifecycle.py nexus/research/findings_vector_sync.py tests/services/test_memory_repository_lifecycle.py tests/research/test_findings_memory.py` -> `PASS`.
+
+Failure lesson:
+
+- No new CBO-3 failure occurred. Repository reuse must remain explicitly
+  injectable per caller; a module-level global cache would make tests and
+  multi-project worktrees share mutable retrieval state.
+
+Next:
+
+- start `CBO-7 Observation-Only I/O Measurement Harness`.
