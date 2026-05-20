@@ -99,9 +99,11 @@
     {
       "capability": "direct_master_loop",
       "selected_mode": "Mode A (Solo)",
-      "disposition": "KEEP_SINGLE_PRIMARY",
-      "mat_b_verdict": "NOT_IN_MAT_B_LIVE_COMPARE",
-      "mat_b_reason_codes": [],
+      "disposition": "HOLD_MISSING_MAT_B_EVIDENCE",
+      "mat_b_verdict": "HOLD_MISSING_MAT_B_EVIDENCE",
+      "mat_b_reason_codes": [
+        "baseline_infra_invalid:model_call_without_tokens"
+      ],
       "mat_b_required_before_runtime_apply": false,
       "runtime_update_allowed": false,
       "public_benchmark_allowed": false
@@ -109,9 +111,11 @@
     {
       "capability": "drone",
       "selected_mode": "Mode A (Solo)",
-      "disposition": "KEEP_SINGLE_PRIMARY",
-      "mat_b_verdict": "NOT_IN_MAT_B_LIVE_COMPARE",
-      "mat_b_reason_codes": [],
+      "disposition": "HOLD_MISSING_MAT_B_EVIDENCE",
+      "mat_b_verdict": "HOLD_MISSING_MAT_B_EVIDENCE",
+      "mat_b_reason_codes": [
+        "baseline_infra_invalid:receipt_data_contract_violation"
+      ],
       "mat_b_required_before_runtime_apply": false,
       "runtime_update_allowed": false,
       "public_benchmark_allowed": false
@@ -119,9 +123,11 @@
     {
       "capability": "external_productivity",
       "selected_mode": "Mode A (Solo)",
-      "disposition": "KEEP_SINGLE_PRIMARY",
-      "mat_b_verdict": "NOT_IN_MAT_B_LIVE_COMPARE",
-      "mat_b_reason_codes": [],
+      "disposition": "HOLD_MISSING_MAT_B_EVIDENCE",
+      "mat_b_verdict": "HOLD_MISSING_MAT_B_EVIDENCE",
+      "mat_b_reason_codes": [
+        "baseline_infra_invalid:model_call_without_tokens"
+      ],
       "mat_b_required_before_runtime_apply": false,
       "runtime_update_allowed": false,
       "public_benchmark_allowed": false
@@ -163,9 +169,11 @@
     {
       "capability": "hyper_sprint",
       "selected_mode": "Mode A (Solo)",
-      "disposition": "KEEP_SINGLE_PRIMARY",
-      "mat_b_verdict": "NOT_IN_MAT_B_LIVE_COMPARE",
-      "mat_b_reason_codes": [],
+      "disposition": "HOLD_MISSING_MAT_B_EVIDENCE",
+      "mat_b_verdict": "HOLD_MISSING_MAT_B_EVIDENCE",
+      "mat_b_reason_codes": [
+        "baseline_infra_invalid:model_call_without_tokens"
+      ],
       "mat_b_required_before_runtime_apply": false,
       "runtime_update_allowed": false,
       "public_benchmark_allowed": false
@@ -227,9 +235,11 @@
     {
       "capability": "metabolism_resume",
       "selected_mode": "Mode A (Solo)",
-      "disposition": "KEEP_SINGLE_PRIMARY",
-      "mat_b_verdict": "NOT_IN_MAT_B_LIVE_COMPARE",
-      "mat_b_reason_codes": [],
+      "disposition": "HOLD_MISSING_MAT_B_EVIDENCE",
+      "mat_b_verdict": "HOLD_MISSING_MAT_B_EVIDENCE",
+      "mat_b_reason_codes": [
+        "baseline_infra_invalid:model_call_without_tokens"
+      ],
       "mat_b_required_before_runtime_apply": false,
       "runtime_update_allowed": false,
       "public_benchmark_allowed": false
@@ -237,9 +247,11 @@
     {
       "capability": "nightshift",
       "selected_mode": "Mode A (Solo)",
-      "disposition": "KEEP_SINGLE_PRIMARY",
-      "mat_b_verdict": "NOT_IN_MAT_B_LIVE_COMPARE",
-      "mat_b_reason_codes": [],
+      "disposition": "HOLD_MISSING_MAT_B_EVIDENCE",
+      "mat_b_verdict": "HOLD_MISSING_MAT_B_EVIDENCE",
+      "mat_b_reason_codes": [
+        "baseline_infra_invalid:receipt_data_contract_violation"
+      ],
       "mat_b_required_before_runtime_apply": false,
       "runtime_update_allowed": false,
       "public_benchmark_allowed": false

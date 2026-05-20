@@ -6,8 +6,8 @@
   "description": "Internal HEEP Mode A vs Mode B/C Flash+Nexus compare manifest. Not a public benchmark.",
   "status": "PASS",
   "summary": {
-    "task_count": 28,
-    "capability_count": 28,
+    "task_count": 34,
+    "capability_count": 34,
     "runtime_update_allowed": false,
     "public_benchmark_allowed": false
   },
@@ -253,6 +253,96 @@
       "public_claim_allowed_metrics": []
     },
     {
+      "id": "heep-mat-b-direct_master_loop-001",
+      "task_desc": "Run internal Flash+Nexus MAT-B live compare for capability direct_master_loop. Compare Mode A current primary against the HEEP multi-skill challenger.",
+      "target_file": "unused",
+      "test_file": "unused",
+      "success_criteria": "heep_mat_b_live_receipt_chain_complete",
+      "category": "direct_master_loop",
+      "difficulty": "medium",
+      "repo_kind": "neutral_fixture",
+      "repo": "fixture://heep-flash-nexus-compare",
+      "repo_ref": "v1",
+      "fixture_kind": "heep_mat_b_flash_nexus",
+      "mutation_required": false,
+      "allowed_files": [
+        "unused"
+      ],
+      "forbidden_files": [
+        ".nexus/",
+        "logs/",
+        "benchmarks/"
+      ],
+      "setup_command": "python -V",
+      "verification_command": "python -V",
+      "expected_capabilities": [
+        "hyper"
+      ],
+      "capability_activation_contract": "required",
+      "eligibility_class": "model_required",
+      "public_claim_allowed_metrics": []
+    },
+    {
+      "id": "heep-mat-b-drone-001",
+      "task_desc": "Run internal Flash+Nexus MAT-B live compare for capability drone. Compare Mode A current primary against the HEEP multi-skill challenger.",
+      "target_file": "unused",
+      "test_file": "unused",
+      "success_criteria": "heep_mat_b_live_receipt_chain_complete",
+      "category": "drone",
+      "difficulty": "medium",
+      "repo_kind": "neutral_fixture",
+      "repo": "fixture://heep-flash-nexus-compare",
+      "repo_ref": "v1",
+      "fixture_kind": "heep_mat_b_flash_nexus",
+      "mutation_required": false,
+      "allowed_files": [
+        "unused"
+      ],
+      "forbidden_files": [
+        ".nexus/",
+        "logs/",
+        "benchmarks/"
+      ],
+      "setup_command": "python -V",
+      "verification_command": "python -V",
+      "expected_capabilities": [
+        "drone"
+      ],
+      "capability_activation_contract": "required",
+      "eligibility_class": "model_required",
+      "public_claim_allowed_metrics": []
+    },
+    {
+      "id": "heep-mat-b-external_productivity-001",
+      "task_desc": "Run internal Flash+Nexus MAT-B live compare for capability external_productivity. Compare Mode A current primary against the HEEP multi-skill challenger.",
+      "target_file": "unused",
+      "test_file": "unused",
+      "success_criteria": "heep_mat_b_live_receipt_chain_complete",
+      "category": "external_productivity",
+      "difficulty": "medium",
+      "repo_kind": "neutral_fixture",
+      "repo": "fixture://heep-flash-nexus-compare",
+      "repo_ref": "v1",
+      "fixture_kind": "heep_mat_b_flash_nexus",
+      "mutation_required": false,
+      "allowed_files": [
+        "unused"
+      ],
+      "forbidden_files": [
+        ".nexus/",
+        "logs/",
+        "benchmarks/"
+      ],
+      "setup_command": "python -V",
+      "verification_command": "python -V",
+      "expected_capabilities": [
+        "research"
+      ],
+      "capability_activation_contract": "required",
+      "eligibility_class": "model_required",
+      "public_claim_allowed_metrics": []
+    },
+    {
       "id": "heep-mat-b-file_lock_security_gate-001",
       "task_desc": "Run internal Flash+Nexus MAT-B live compare for capability file_lock_security_gate. Compare Mode A current primary against the HEEP multi-skill challenger.",
       "target_file": "unused",
@@ -337,6 +427,36 @@
       "verification_command": "python -V",
       "expected_capabilities": [
         "mempalace_gate"
+      ],
+      "capability_activation_contract": "required",
+      "eligibility_class": "model_required",
+      "public_claim_allowed_metrics": []
+    },
+    {
+      "id": "heep-mat-b-hyper_sprint-001",
+      "task_desc": "Run internal Flash+Nexus MAT-B live compare for capability hyper_sprint. Compare Mode A current primary against the HEEP multi-skill challenger.",
+      "target_file": "unused",
+      "test_file": "unused",
+      "success_criteria": "heep_mat_b_live_receipt_chain_complete",
+      "category": "hyper_sprint",
+      "difficulty": "medium",
+      "repo_kind": "neutral_fixture",
+      "repo": "fixture://heep-flash-nexus-compare",
+      "repo_ref": "v1",
+      "fixture_kind": "heep_mat_b_flash_nexus",
+      "mutation_required": false,
+      "allowed_files": [
+        "unused"
+      ],
+      "forbidden_files": [
+        ".nexus/",
+        "logs/",
+        "benchmarks/"
+      ],
+      "setup_command": "python -V",
+      "verification_command": "python -V",
+      "expected_capabilities": [
+        "hyper"
       ],
       "capability_activation_contract": "required",
       "eligibility_class": "model_required",
@@ -487,6 +607,66 @@
       "verification_command": "python -V",
       "expected_capabilities": [
         "mempalace_gate"
+      ],
+      "capability_activation_contract": "required",
+      "eligibility_class": "model_required",
+      "public_claim_allowed_metrics": []
+    },
+    {
+      "id": "heep-mat-b-metabolism_resume-001",
+      "task_desc": "Run internal Flash+Nexus MAT-B live compare for capability metabolism_resume. Compare Mode A current primary against the HEEP multi-skill challenger.",
+      "target_file": "unused",
+      "test_file": "unused",
+      "success_criteria": "heep_mat_b_live_receipt_chain_complete",
+      "category": "metabolism_resume",
+      "difficulty": "medium",
+      "repo_kind": "neutral_fixture",
+      "repo": "fixture://heep-flash-nexus-compare",
+      "repo_ref": "v1",
+      "fixture_kind": "heep_mat_b_flash_nexus",
+      "mutation_required": false,
+      "allowed_files": [
+        "unused"
+      ],
+      "forbidden_files": [
+        ".nexus/",
+        "logs/",
+        "benchmarks/"
+      ],
+      "setup_command": "python -V",
+      "verification_command": "python -V",
+      "expected_capabilities": [
+        "semantic_failure_sensor"
+      ],
+      "capability_activation_contract": "required",
+      "eligibility_class": "model_required",
+      "public_claim_allowed_metrics": []
+    },
+    {
+      "id": "heep-mat-b-nightshift-001",
+      "task_desc": "Run internal Flash+Nexus MAT-B live compare for capability nightshift. Compare Mode A current primary against the HEEP multi-skill challenger.",
+      "target_file": "unused",
+      "test_file": "unused",
+      "success_criteria": "heep_mat_b_live_receipt_chain_complete",
+      "category": "nightshift",
+      "difficulty": "medium",
+      "repo_kind": "neutral_fixture",
+      "repo": "fixture://heep-flash-nexus-compare",
+      "repo_ref": "v1",
+      "fixture_kind": "heep_mat_b_flash_nexus",
+      "mutation_required": false,
+      "allowed_files": [
+        "unused"
+      ],
+      "forbidden_files": [
+        ".nexus/",
+        "logs/",
+        "benchmarks/"
+      ],
+      "setup_command": "python -V",
+      "verification_command": "python -V",
+      "expected_capabilities": [
+        "nightshift"
       ],
       "capability_activation_contract": "required",
       "eligibility_class": "model_required",

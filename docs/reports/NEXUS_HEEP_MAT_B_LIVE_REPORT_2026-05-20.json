@@ -2,11 +2,11 @@
   "schema": "nexus.heep_mat_b_live_report.v1",
   "status": "PASS",
   "summary": {
-    "comparison_count": 28,
+    "comparison_count": 34,
     "approve_count": 9,
     "keep_single_count": 11,
     "reject_count": 1,
-    "hold_count": 7,
+    "hold_count": 13,
     "runtime_update_allowed": false,
     "public_benchmark_allowed": false
   },
@@ -357,6 +357,138 @@
       "reason_codes": []
     },
     {
+      "capability": "direct_master_loop",
+      "task_id": "heep-mat-b-direct_master_loop-001",
+      "baseline_row_id": "heep::direct_master_loop::heep-mat-b-direct_master_loop-001::mode_a_current_primary",
+      "challenger_row_id": "heep::direct_master_loop::heep-mat-b-direct_master_loop-001::heep_multi_skill",
+      "baseline": {
+        "success_rate": 0.0,
+        "pollution_pct": 0.0,
+        "evidence_seal_count": 1,
+        "total_tokens": 0,
+        "phase_wall_total_sec": 13.9598,
+        "reopen_rate": 1.0,
+        "reopen_rate_source": "deterministic_receipt_replay_proxy",
+        "trust_mismatch": false,
+        "skill_mount_contract_status": "PASS",
+        "receipt_chain_pass": true,
+        "infra_invalid_reason": "model_call_without_tokens"
+      },
+      "challenger": {
+        "success_rate": 0.0,
+        "pollution_pct": 0.0,
+        "evidence_seal_count": 3,
+        "total_tokens": 0,
+        "phase_wall_total_sec": 12.482,
+        "reopen_rate": 1.0,
+        "reopen_rate_source": "deterministic_receipt_replay_proxy",
+        "trust_mismatch": false,
+        "skill_mount_contract_status": "PASS",
+        "receipt_chain_pass": true,
+        "infra_invalid_reason": "model_call_without_tokens"
+      },
+      "delta": {
+        "token_delta": 0,
+        "wall_delta": -1.4778,
+        "success_rate_delta": 0.0,
+        "pollution_pct_delta": 0.0,
+        "evidence_seal_count_delta": 2,
+        "reopen_rate_delta": 0.0
+      },
+      "verdict": "HOLD_MISSING_MAT_B_EVIDENCE",
+      "reason_codes": [
+        "baseline_infra_invalid:model_call_without_tokens"
+      ]
+    },
+    {
+      "capability": "drone",
+      "task_id": "heep-mat-b-drone-001",
+      "baseline_row_id": "heep::drone::heep-mat-b-drone-001::mode_a_current_primary",
+      "challenger_row_id": "heep::drone::heep-mat-b-drone-001::heep_multi_skill",
+      "baseline": {
+        "success_rate": 0.0,
+        "pollution_pct": 0.0,
+        "evidence_seal_count": 0,
+        "total_tokens": 1193,
+        "phase_wall_total_sec": 24.6649,
+        "reopen_rate": 1.0,
+        "reopen_rate_source": "deterministic_receipt_replay_proxy",
+        "trust_mismatch": false,
+        "skill_mount_contract_status": "RETURN",
+        "receipt_chain_pass": false,
+        "infra_invalid_reason": "receipt_data_contract_violation"
+      },
+      "challenger": {
+        "success_rate": 0.0,
+        "pollution_pct": 0.0,
+        "evidence_seal_count": 0,
+        "total_tokens": 595,
+        "phase_wall_total_sec": 12.1613,
+        "reopen_rate": 1.0,
+        "reopen_rate_source": "deterministic_receipt_replay_proxy",
+        "trust_mismatch": false,
+        "skill_mount_contract_status": "RETURN",
+        "receipt_chain_pass": false,
+        "infra_invalid_reason": "receipt_data_contract_violation"
+      },
+      "delta": {
+        "token_delta": -598,
+        "wall_delta": -12.5036,
+        "success_rate_delta": 0.0,
+        "pollution_pct_delta": 0.0,
+        "evidence_seal_count_delta": 0,
+        "reopen_rate_delta": 0.0
+      },
+      "verdict": "HOLD_MISSING_MAT_B_EVIDENCE",
+      "reason_codes": [
+        "baseline_infra_invalid:receipt_data_contract_violation"
+      ]
+    },
+    {
+      "capability": "external_productivity",
+      "task_id": "heep-mat-b-external_productivity-001",
+      "baseline_row_id": "heep::external_productivity::heep-mat-b-external_productivity-001::mode_a_current_primary",
+      "challenger_row_id": "heep::external_productivity::heep-mat-b-external_productivity-001::heep_multi_skill",
+      "baseline": {
+        "success_rate": 0.0,
+        "pollution_pct": 0.0,
+        "evidence_seal_count": 1,
+        "total_tokens": 0,
+        "phase_wall_total_sec": 11.9547,
+        "reopen_rate": 1.0,
+        "reopen_rate_source": "deterministic_receipt_replay_proxy",
+        "trust_mismatch": false,
+        "skill_mount_contract_status": "PASS",
+        "receipt_chain_pass": true,
+        "infra_invalid_reason": "model_call_without_tokens"
+      },
+      "challenger": {
+        "success_rate": 0.0,
+        "pollution_pct": 0.0,
+        "evidence_seal_count": 3,
+        "total_tokens": 0,
+        "phase_wall_total_sec": 12.8667,
+        "reopen_rate": 1.0,
+        "reopen_rate_source": "deterministic_receipt_replay_proxy",
+        "trust_mismatch": false,
+        "skill_mount_contract_status": "PASS",
+        "receipt_chain_pass": true,
+        "infra_invalid_reason": "model_call_without_tokens"
+      },
+      "delta": {
+        "token_delta": 0,
+        "wall_delta": 0.912,
+        "success_rate_delta": 0.0,
+        "pollution_pct_delta": 0.0,
+        "evidence_seal_count_delta": 2,
+        "reopen_rate_delta": 0.0
+      },
+      "verdict": "HOLD_MISSING_MAT_B_EVIDENCE",
+      "reason_codes": [
+        "baseline_infra_invalid:model_call_without_tokens"
+      ]
+    },
+    {
       "capability": "file_lock_security_gate",
       "task_id": "heep-mat-b-file_lock_security_gate-001",
       "baseline_row_id": "heep::file_lock_security_gate::heep-mat-b-file_lock_security_gate-001::mode_a_current_primary",
@@ -485,6 +617,50 @@
       },
       "verdict": "APPROVE_HEEP_MODE_CANDIDATE",
       "reason_codes": []
+    },
+    {
+      "capability": "hyper_sprint",
+      "task_id": "heep-mat-b-hyper_sprint-001",
+      "baseline_row_id": "heep::hyper_sprint::heep-mat-b-hyper_sprint-001::mode_a_current_primary",
+      "challenger_row_id": "heep::hyper_sprint::heep-mat-b-hyper_sprint-001::heep_multi_skill",
+      "baseline": {
+        "success_rate": 0.0,
+        "pollution_pct": 0.0,
+        "evidence_seal_count": 1,
+        "total_tokens": 0,
+        "phase_wall_total_sec": 12.8269,
+        "reopen_rate": 1.0,
+        "reopen_rate_source": "deterministic_receipt_replay_proxy",
+        "trust_mismatch": false,
+        "skill_mount_contract_status": "PASS",
+        "receipt_chain_pass": true,
+        "infra_invalid_reason": "model_call_without_tokens"
+      },
+      "challenger": {
+        "success_rate": 0.0,
+        "pollution_pct": 0.0,
+        "evidence_seal_count": 3,
+        "total_tokens": 0,
+        "phase_wall_total_sec": 11.2277,
+        "reopen_rate": 1.0,
+        "reopen_rate_source": "deterministic_receipt_replay_proxy",
+        "trust_mismatch": false,
+        "skill_mount_contract_status": "PASS",
+        "receipt_chain_pass": true,
+        "infra_invalid_reason": "model_call_without_tokens"
+      },
+      "delta": {
+        "token_delta": 0,
+        "wall_delta": -1.5992,
+        "success_rate_delta": 0.0,
+        "pollution_pct_delta": 0.0,
+        "evidence_seal_count_delta": 2,
+        "reopen_rate_delta": 0.0
+      },
+      "verdict": "HOLD_MISSING_MAT_B_EVIDENCE",
+      "reason_codes": [
+        "baseline_infra_invalid:model_call_without_tokens"
+      ]
     },
     {
       "capability": "lancedb",
@@ -699,6 +875,94 @@
       },
       "verdict": "APPROVE_HEEP_MODE_CANDIDATE",
       "reason_codes": []
+    },
+    {
+      "capability": "metabolism_resume",
+      "task_id": "heep-mat-b-metabolism_resume-001",
+      "baseline_row_id": "heep::metabolism_resume::heep-mat-b-metabolism_resume-001::mode_a_current_primary",
+      "challenger_row_id": "heep::metabolism_resume::heep-mat-b-metabolism_resume-001::heep_multi_skill",
+      "baseline": {
+        "success_rate": 0.0,
+        "pollution_pct": 0.0,
+        "evidence_seal_count": 1,
+        "total_tokens": 0,
+        "phase_wall_total_sec": 11.7697,
+        "reopen_rate": 1.0,
+        "reopen_rate_source": "deterministic_receipt_replay_proxy",
+        "trust_mismatch": false,
+        "skill_mount_contract_status": "PASS",
+        "receipt_chain_pass": true,
+        "infra_invalid_reason": "model_call_without_tokens"
+      },
+      "challenger": {
+        "success_rate": 0.0,
+        "pollution_pct": 0.0,
+        "evidence_seal_count": 3,
+        "total_tokens": 0,
+        "phase_wall_total_sec": 11.8718,
+        "reopen_rate": 1.0,
+        "reopen_rate_source": "deterministic_receipt_replay_proxy",
+        "trust_mismatch": false,
+        "skill_mount_contract_status": "PASS",
+        "receipt_chain_pass": true,
+        "infra_invalid_reason": "model_call_without_tokens"
+      },
+      "delta": {
+        "token_delta": 0,
+        "wall_delta": 0.1021,
+        "success_rate_delta": 0.0,
+        "pollution_pct_delta": 0.0,
+        "evidence_seal_count_delta": 2,
+        "reopen_rate_delta": 0.0
+      },
+      "verdict": "HOLD_MISSING_MAT_B_EVIDENCE",
+      "reason_codes": [
+        "baseline_infra_invalid:model_call_without_tokens"
+      ]
+    },
+    {
+      "capability": "nightshift",
+      "task_id": "heep-mat-b-nightshift-001",
+      "baseline_row_id": "heep::nightshift::heep-mat-b-nightshift-001::mode_a_current_primary",
+      "challenger_row_id": "heep::nightshift::heep-mat-b-nightshift-001::heep_multi_skill",
+      "baseline": {
+        "success_rate": 0.0,
+        "pollution_pct": 0.0,
+        "evidence_seal_count": 0,
+        "total_tokens": 649,
+        "phase_wall_total_sec": 10.8845,
+        "reopen_rate": 1.0,
+        "reopen_rate_source": "deterministic_receipt_replay_proxy",
+        "trust_mismatch": false,
+        "skill_mount_contract_status": "RETURN",
+        "receipt_chain_pass": false,
+        "infra_invalid_reason": "receipt_data_contract_violation"
+      },
+      "challenger": {
+        "success_rate": 0.0,
+        "pollution_pct": 0.0,
+        "evidence_seal_count": 0,
+        "total_tokens": 649,
+        "phase_wall_total_sec": 9.9783,
+        "reopen_rate": 1.0,
+        "reopen_rate_source": "deterministic_receipt_replay_proxy",
+        "trust_mismatch": false,
+        "skill_mount_contract_status": "RETURN",
+        "receipt_chain_pass": false,
+        "infra_invalid_reason": "receipt_data_contract_violation"
+      },
+      "delta": {
+        "token_delta": 0,
+        "wall_delta": -0.9062,
+        "success_rate_delta": 0.0,
+        "pollution_pct_delta": 0.0,
+        "evidence_seal_count_delta": 0,
+        "reopen_rate_delta": 0.0
+      },
+      "verdict": "HOLD_MISSING_MAT_B_EVIDENCE",
+      "reason_codes": [
+        "baseline_infra_invalid:receipt_data_contract_violation"
+      ]
     },
     {
       "capability": "policy_capability_gate",

@@ -2777,3 +2777,17 @@ version_scope:
 - Failure: without an explicit cleanliness gate, the report could treat a tokenless baseline as a valid comparison arm.
 - Lesson: baseline cleanliness is part of the comparison contract, not an optional cost annotation.
 - Guardrail: any baseline or challenger `infra_invalid_reason` holds the pair as `HOLD_MISSING_MAT_B_EVIDENCE`; only clean challenger delivery failures become `REJECT_MULTI_SKILL`.
+
+## 2026-05-20 - MAT-B full-coverage compare must probe solo capabilities too
+
+- Trigger: HEEP selected `Mode A (Solo)` for lean capabilities such as `direct_master_loop`, `drone`, `hyper_sprint`, and `nightshift`.
+- Failure: the live compare queue skipped solo-selected capabilities, so the MAT-B report covered only 28/34 capabilities while the apply packet still listed 34.
+- Lesson: "keep single primary" is a verdict, not a reason to skip comparison when the goal is full capability coverage.
+- Guardrail: generate a best non-solo challenger probe for every solo-selected capability, then let MAT-B live KPIs decide `KEEP_SINGLE_PRIMARY`, `APPROVE_HEEP_MODE_CANDIDATE`, or `HOLD_MISSING_MAT_B_EVIDENCE`.
+
+## 2026-05-20 - report collectors must run every remaining row in collection mode
+
+- Trigger: `--collect-existing-returns` was used to rebuild a MAT-B all-capability report from a resume manifest containing remaining rows.
+- Failure: remaining rows were still executed through a single fail-fast `run_matrix` call, so a first RETURN could prevent later rows from producing artifacts.
+- Lesson: fail-fast execution and complete report collection are separate modes.
+- Guardrail: when `collect_existing_returns=true`, execute remaining resume rows one at a time, then collect all existing PASS/RETURN artifacts into the sealed summary.

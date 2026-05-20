@@ -2,8 +2,8 @@
   "schema": "nexus.heep_live_map_update_gate.v2",
   "status": "PASS",
   "summary": {
-    "candidate_update_count": 27,
-    "mat_b_comparison_count": 28,
+    "candidate_update_count": 21,
+    "mat_b_comparison_count": 34,
     "runtime_update_allowed": false,
     "public_benchmark_allowed": false
   },
@@ -91,27 +91,33 @@
     {
       "capability": "direct_master_loop",
       "heep_mode_candidate": "Mode A (Solo)",
-      "mat_b_verdict": "NOT_IN_MAT_B_LIVE_COMPARE",
-      "mat_b_reason_codes": [],
-      "map_update_allowed": true,
+      "mat_b_verdict": "HOLD_MISSING_MAT_B_EVIDENCE",
+      "mat_b_reason_codes": [
+        "baseline_infra_invalid:model_call_without_tokens"
+      ],
+      "map_update_allowed": false,
       "runtime_update_allowed": false,
       "public_benchmark_allowed": false
     },
     {
       "capability": "drone",
       "heep_mode_candidate": "Mode A (Solo)",
-      "mat_b_verdict": "NOT_IN_MAT_B_LIVE_COMPARE",
-      "mat_b_reason_codes": [],
-      "map_update_allowed": true,
+      "mat_b_verdict": "HOLD_MISSING_MAT_B_EVIDENCE",
+      "mat_b_reason_codes": [
+        "baseline_infra_invalid:receipt_data_contract_violation"
+      ],
+      "map_update_allowed": false,
       "runtime_update_allowed": false,
       "public_benchmark_allowed": false
     },
     {
       "capability": "external_productivity",
       "heep_mode_candidate": "Mode A (Solo)",
-      "mat_b_verdict": "NOT_IN_MAT_B_LIVE_COMPARE",
-      "mat_b_reason_codes": [],
-      "map_update_allowed": true,
+      "mat_b_verdict": "HOLD_MISSING_MAT_B_EVIDENCE",
+      "mat_b_reason_codes": [
+        "baseline_infra_invalid:model_call_without_tokens"
+      ],
+      "map_update_allowed": false,
       "runtime_update_allowed": false,
       "public_benchmark_allowed": false
     },
@@ -149,9 +155,11 @@
     {
       "capability": "hyper_sprint",
       "heep_mode_candidate": "Mode A (Solo)",
-      "mat_b_verdict": "NOT_IN_MAT_B_LIVE_COMPARE",
-      "mat_b_reason_codes": [],
-      "map_update_allowed": true,
+      "mat_b_verdict": "HOLD_MISSING_MAT_B_EVIDENCE",
+      "mat_b_reason_codes": [
+        "baseline_infra_invalid:model_call_without_tokens"
+      ],
+      "map_update_allowed": false,
       "runtime_update_allowed": false,
       "public_benchmark_allowed": false
     },
@@ -207,18 +215,22 @@
     {
       "capability": "metabolism_resume",
       "heep_mode_candidate": "Mode A (Solo)",
-      "mat_b_verdict": "NOT_IN_MAT_B_LIVE_COMPARE",
-      "mat_b_reason_codes": [],
-      "map_update_allowed": true,
+      "mat_b_verdict": "HOLD_MISSING_MAT_B_EVIDENCE",
+      "mat_b_reason_codes": [
+        "baseline_infra_invalid:model_call_without_tokens"
+      ],
+      "map_update_allowed": false,
       "runtime_update_allowed": false,
       "public_benchmark_allowed": false
     },
     {
       "capability": "nightshift",
       "heep_mode_candidate": "Mode A (Solo)",
-      "mat_b_verdict": "NOT_IN_MAT_B_LIVE_COMPARE",
-      "mat_b_reason_codes": [],
-      "map_update_allowed": true,
+      "mat_b_verdict": "HOLD_MISSING_MAT_B_EVIDENCE",
+      "mat_b_reason_codes": [
+        "baseline_infra_invalid:receipt_data_contract_violation"
+      ],
+      "map_update_allowed": false,
       "runtime_update_allowed": false,
       "public_benchmark_allowed": false
     },

@@ -1,7 +1,7 @@
 {
   "schema": "nexus.heep_flash_nexus_skill_status.v1",
   "summary": {
-    "skill_count": 27,
+    "skill_count": 33,
     "runtime_update_allowed": false,
     "public_benchmark_allowed": false
   },
@@ -112,6 +112,51 @@
       ]
     },
     {
+      "name": "sf-systematic-direct_master_loop-build-32802a87",
+      "path": ".agents/skills/sf-systematic-challengers/sf-systematic-direct_master_loop-build-32802a87/SKILL.md",
+      "root": "heep_mat_b_internal_compare",
+      "skill_status": "external_reference_candidate",
+      "test_level": "heep_flash_nexus_mat_b",
+      "action": "ablation_only_compare",
+      "capability_mount": "hyper",
+      "family": "direct_master_loop",
+      "reason_codes": [
+        "heep_mat_b_internal_compare",
+        "not_runtime_default",
+        "not_public_benchmark"
+      ]
+    },
+    {
+      "name": "sf-systematic-drone-python-background-jobs-18326a62",
+      "path": ".agents/skills/sf-systematic-challengers/sf-systematic-drone-python-background-jobs-18326a62/SKILL.md",
+      "root": "heep_mat_b_internal_compare",
+      "skill_status": "external_reference_candidate",
+      "test_level": "heep_flash_nexus_mat_b",
+      "action": "ablation_only_compare",
+      "capability_mount": "drone",
+      "family": "drone",
+      "reason_codes": [
+        "heep_mat_b_internal_compare",
+        "not_runtime_default",
+        "not_public_benchmark"
+      ]
+    },
+    {
+      "name": "sf-systematic-external_productivity-writer-77dc7840",
+      "path": ".agents/skills/sf-systematic-challengers/sf-systematic-external_productivity-writer-77dc7840/SKILL.md",
+      "root": "heep_mat_b_internal_compare",
+      "skill_status": "external_reference_candidate",
+      "test_level": "heep_flash_nexus_mat_b",
+      "action": "ablation_only_compare",
+      "capability_mount": "research",
+      "family": "external_productivity",
+      "reason_codes": [
+        "heep_mat_b_internal_compare",
+        "not_runtime_default",
+        "not_public_benchmark"
+      ]
+    },
+    {
       "name": "sf2-file_lock_security_gate-route-fit-spec",
       "path": ".agents/skills/sf2/sf2-file_lock_security_gate-route-fit-spec/SKILL.md",
       "root": "heep_mat_b_internal_compare",
@@ -150,6 +195,21 @@
       "action": "ablation_only_compare",
       "capability_mount": "mempalace_gate",
       "family": "governance_and_trust",
+      "reason_codes": [
+        "heep_mat_b_internal_compare",
+        "not_runtime_default",
+        "not_public_benchmark"
+      ]
+    },
+    {
+      "name": "sf2-hyper_sprint-route-fit-spec",
+      "path": ".agents/skills/sf2/sf2-hyper_sprint-route-fit-spec/SKILL.md",
+      "root": "heep_mat_b_internal_compare",
+      "skill_status": "external_reference_candidate",
+      "test_level": "heep_flash_nexus_mat_b",
+      "action": "ablation_only_compare",
+      "capability_mount": "hyper",
+      "family": "hyper_sprint",
       "reason_codes": [
         "heep_mat_b_internal_compare",
         "not_runtime_default",
@@ -225,6 +285,36 @@
       "action": "ablation_only_compare",
       "capability_mount": "mempalace_gate",
       "family": "mempalace",
+      "reason_codes": [
+        "heep_mat_b_internal_compare",
+        "not_runtime_default",
+        "not_public_benchmark"
+      ]
+    },
+    {
+      "name": "github-auto-skill-safe-learning",
+      "path": ".agents/skills/github-challengers/github-auto-skill-safe-learning/SKILL.md",
+      "root": "heep_mat_b_internal_compare",
+      "skill_status": "external_reference_candidate",
+      "test_level": "heep_flash_nexus_mat_b",
+      "action": "ablation_only_compare",
+      "capability_mount": "semantic_failure_sensor",
+      "family": "metabolism_resume",
+      "reason_codes": [
+        "heep_mat_b_internal_compare",
+        "not_runtime_default",
+        "not_public_benchmark"
+      ]
+    },
+    {
+      "name": "sf2-nightshift-route-fit-spec",
+      "path": ".agents/skills/sf2/sf2-nightshift-route-fit-spec/SKILL.md",
+      "root": "heep_mat_b_internal_compare",
+      "skill_status": "external_reference_candidate",
+      "test_level": "heep_flash_nexus_mat_b",
+      "action": "ablation_only_compare",
+      "capability_mount": "nightshift",
+      "family": "nightshift",
       "reason_codes": [
         "heep_mat_b_internal_compare",
         "not_runtime_default",

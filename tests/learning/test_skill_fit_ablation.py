@@ -1547,6 +1547,52 @@ def test_run_resume_manifest_can_collect_existing_returns_for_reports(tmp_path: 
     assert [row["row_id"] for row in summary["results"]] == ["task::bad", "task::good"]
 
 
+def test_run_resume_manifest_collects_remaining_rows_after_return(tmp_path: Path):
+    stub = tmp_path / "stub_runner.py"
+    stub.write_text(
+        "import argparse, json\n"
+        "from pathlib import Path\n"
+        "parser=argparse.ArgumentParser(); parser.add_argument('--output-dir')\n"
+        "args, _ = parser.parse_known_args(); out=Path(args.output_dir); out.mkdir(parents=True, exist_ok=True)\n"
+        "status = 'FAILED' if out.name.endswith('bad') else 'SUCCESS'\n"
+        "row={'status':status,'skill_mount_contract_status':'PASS','skill_mount_contract':[{'skill_id':'s'}]}\n"
+        "Path(out, 'with_nexus_stub.jsonl').write_text(json.dumps(row)+'\\n', encoding='utf-8')\n",
+        encoding="utf-8",
+    )
+    matrix = {
+        "rows": [
+            {
+                "row_id": "task::bad",
+                "arm_id": "bad",
+                "arm_type": "skill_ablation",
+                "skill_id": "s",
+                "runtime_eligible": True,
+                "runner_args": ["python3", str(stub)],
+            },
+            {
+                "row_id": "task::good",
+                "arm_id": "good",
+                "arm_type": "skill_ablation",
+                "skill_id": "s",
+                "runtime_eligible": True,
+                "runner_args": ["python3", str(stub)],
+            },
+        ]
+    }
+    matrix_path = tmp_path / "matrix.json"
+    matrix_path.write_text(json.dumps(matrix), encoding="utf-8")
+    manifest = build_resume_manifest(matrix_path=matrix_path, output_root=tmp_path / "out")
+    manifest_path = tmp_path / "resume.json"
+    manifest_path.write_text(json.dumps(manifest), encoding="utf-8")
+
+    summary = run_resume_manifest(resume_manifest_path=manifest_path, collect_existing_returns=True)
+
+    assert summary["status"] == "RETURN"
+    assert summary["summary"]["completed_rows"] == 2
+    assert summary["summary"]["return_count"] == 1
+    assert [row["row_id"] for row in summary["results"]] == ["task::bad", "task::good"]
+
+
 def test_classify_skill_fit_failure_routes_timeout_policy():
     skill_result = {
         "status": "RETURN",

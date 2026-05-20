@@ -187,4 +187,9 @@ def test_heep_live_pilot_respects_assembly_recommended_solo_mode() -> None:
 
     decisions = {item["capability"]: item for item in artifacts["decision"]["decisions"]}
     assert decisions["hyper_sprint"]["selected_mode"] == "Mode A (Solo)"
-    assert artifacts["compare_queue"]["summary"]["candidate_count"] == 2
+    assert artifacts["compare_queue"]["summary"]["candidate_count"] == 3
+    queue_rows = {item["capability"]: item for item in artifacts["compare_queue"]["rows"]}
+    assert queue_rows["hyper_sprint"]["baseline_arm"]["mode"] == "Mode A (Solo)"
+    assert queue_rows["hyper_sprint"]["challenger_arm"]["mode"] != "Mode A (Solo)"
+    apply_rows = {item["capability"]: item for item in artifacts["apply_review"]["rows"]}
+    assert apply_rows["hyper_sprint"]["disposition"] == "PENDING_FLASH_NEXUS_LIVE_COMPARE"

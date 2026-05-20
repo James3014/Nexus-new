@@ -11,6 +11,7 @@ PROJECT_ROOT = Path(__file__).resolve().parents[2]
 DEFAULT_ORIGINAL_MAP = PROJECT_ROOT / "docs/reports/NEXUS_SF_CAPABILITY_PRIMARY_ORIGINAL_SKILL_MAP_2026-05-20.json"
 DEFAULT_OVERLAY = PROJECT_ROOT / "docs/reports/NEXUS_SF_RUNTIME_SKILL_POLICY_OVERLAY_CURRENT_2026-05-20.json"
 DEFAULT_SMOKE = PROJECT_ROOT / "docs/reports/NEXUS_SF_RUNTIME_SKILL_POLICY_OVERLAY_CURRENT_SMOKE_2026-05-20.json"
+DEFAULT_MAT_B_REPORT = PROJECT_ROOT / "docs/reports/NEXUS_HEEP_MAT_B_LIVE_REPORT_2026-05-20.json"
 DEFAULT_REPORT_DIR = PROJECT_ROOT / "docs/reports"
 DEFAULT_INFO_MAP = PROJECT_ROOT / "docs/info/NEXUS_CAPABILITY_SKILL_MAP.md"
 
@@ -98,6 +99,7 @@ def build_heep_emas_artifacts(
     original_map: Mapping[str, Any],
     overlay: Mapping[str, Any],
     smoke: Mapping[str, Any],
+    mat_b_report: Mapping[str, Any] | None = None,
 ) -> dict[str, dict[str, Any] | str]:
     rows = [row for row in original_map.get("rows", []) if isinstance(row, Mapping)]
     selected = _index_by(overlay.get("selected_primary", []), "capability_id")
@@ -119,7 +121,7 @@ def build_heep_emas_artifacts(
     gold_cases = _build_gold_cases(catalog_rows)
     rollup = _build_rollup(assembly["rows"])
     intake = _build_safe_candidate_intake(catalog_rows)
-    markdown_map = _render_markdown_map(assembly["rows"])
+    markdown_map = _render_markdown_map(assembly["rows"], mat_b_report=mat_b_report or {})
 
     missing_capabilities = sorted(set(primary_by_capability) - {row["capability"] for row in catalog_rows})
     receipt_blockers = [
@@ -373,30 +375,53 @@ def _build_safe_candidate_intake(catalog_rows: list[dict[str, Any]]) -> dict[str
     }
 
 
-def _render_markdown_map(rows: list[Mapping[str, Any]]) -> str:
+def _render_markdown_map(rows: list[Mapping[str, Any]], *, mat_b_report: Mapping[str, Any]) -> str:
+    mat_b_by_capability = {
+        str(row.get("capability") or ""): row
+        for row in (mat_b_report.get("comparisons", []) or [])
+        if isinstance(row, Mapping) and row.get("capability")
+    }
+    mat_b_summary = mat_b_report.get("summary", {}) if isinstance(mat_b_report.get("summary"), Mapping) else {}
+    comparison_count = int(mat_b_summary.get("comparison_count") or 0)
+    capability_count = len(rows)
+    evidence_note = (
+        f"> MAT-B live compare coverage: {comparison_count}/{capability_count} capabilities."
+        if comparison_count
+        else "> MAT-B live compare coverage: not attached; this map is local HEEP assembly only."
+    )
     lines = [
         "# Nexus 能力與 Skill 映射表 (2026-05-20)",
         "",
         "> [!NOTE]",
         "> 本文件由 `scripts/ops/build_heep_emas_pipeline.py` 依據 SF SSOT 與 HEEP/EMAS contract 自動生成。",
-        "> HEEP 結果目前是 deterministic local dry-run；runtime default 與 public benchmark 仍需獨立 gate。",
+        evidence_note,
+        "> runtime default 與 public benchmark 仍需獨立 gate。",
         "",
         "## 映射總表",
         "",
-        "| 能力 (Capability) | 當前主技能 (Primary Skill ID) | HEEP Mode | EMAS Assembly | Evidence |",
-        "| :--- | :--- | :--- | :--- | :--- |",
+        "| 能力 (Capability) | 當前主技能 (Primary Skill ID) | HEEP Mode | EMAS Assembly | MAT-B Live Verdict | Evidence |",
+        "| :--- | :--- | :--- | :--- | :--- | :--- |",
     ]
     for row in sorted(rows, key=lambda item: str(item["capability"])):
+        mat_b = mat_b_by_capability.get(str(row["capability"]), {})
+        verdict = str(mat_b.get("verdict") or "NOT_IN_MAT_B_LIVE_COMPARE")
+        reasons = ", ".join(str(item) for item in (mat_b.get("reason_codes", []) or []))
+        verdict_cell = verdict if not reasons else f"{verdict} ({reasons})"
         assembly = ", ".join(f"{item['role']}={item['skill_id']}" for item in row.get("assembly", []))
-        evidence = "receipt-backed SF root" if row.get("evidence_refs") else "missing evidence ref"
+        evidence = (
+            "[MAT-B live report](../reports/NEXUS_HEEP_MAT_B_LIVE_REPORT_2026-05-20.json)"
+            if mat_b
+            else ("receipt-backed SF root" if row.get("evidence_refs") else "missing evidence ref")
+        )
         lines.append(
-            f"| `{row['capability']}` | `{row['primary_skill_id']}` | **{row['recommended_mode']}** | {assembly} | {evidence} |"
+            f"| `{row['capability']}` | `{row['primary_skill_id']}` | **{row['recommended_mode']}** | {assembly} | {verdict_cell} | {evidence} |"
         )
     lines.extend(
         [
             "",
             "## 邊界",
-            "- Mode A/B/C 是 HEEP local evaluation policy，不是 public benchmark claim。",
+            "- Mode A/B/C 是 HEEP internal evaluation policy，不是 public benchmark claim。",
+            "- MAT-B verdict 只代表內部 Flash+Nexus multi-skill compare，不等於 runtime default apply。",
             "- EMAS Safe-Candidate 不會自動 promotion 到 runtime default。",
             "- 任何 runtime apply 仍需 runtime-confirmed selected/injected/used/evidence/gate/outcome receipt。",
             "",
@@ -508,6 +533,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--original-map", default=str(DEFAULT_ORIGINAL_MAP), type=Path)
     parser.add_argument("--overlay", default=str(DEFAULT_OVERLAY), type=Path)
     parser.add_argument("--smoke", default=str(DEFAULT_SMOKE), type=Path)
+    parser.add_argument("--mat-b-report", default=str(DEFAULT_MAT_B_REPORT), type=Path)
     parser.add_argument("--report-dir", default=str(DEFAULT_REPORT_DIR), type=Path)
     parser.add_argument("--info-map", default=str(DEFAULT_INFO_MAP), type=Path)
     parser.add_argument("--dry-run", action="store_true")
@@ -517,6 +543,7 @@ def main(argv: list[str] | None = None) -> int:
         original_map=_read_json(args.original_map),
         overlay=_read_json(args.overlay),
         smoke=_read_json(args.smoke),
+        mat_b_report=_read_json(args.mat_b_report) if args.mat_b_report.exists() else {},
     )
     status = "PASS" if all(artifacts[key]["status"] == "PASS" for key in ("contract", "assembly", "gold_cases", "rollup", "intake")) else "RETURN"  # type: ignore[index]
     outputs: dict[str, str] = {}

@@ -2,7 +2,7 @@
   "schema": "nexus.heep_mode_candidate_catalog.v1",
   "status": "PASS",
   "summary": {
-    "capability_count": 28,
+    "capability_count": 34,
     "approved_mode_candidate_count": 9,
     "runtime_update_allowed": false,
     "public_benchmark_allowed": false
@@ -105,6 +105,45 @@
       "public_benchmark_allowed": false
     },
     {
+      "capability": "direct_master_loop",
+      "baseline_row_id": "heep::direct_master_loop::heep-mat-b-direct_master_loop-001::mode_a_current_primary",
+      "challenger_row_id": "heep::direct_master_loop::heep-mat-b-direct_master_loop-001::heep_multi_skill",
+      "mat_b_verdict": "HOLD_MISSING_MAT_B_EVIDENCE",
+      "mat_b_reason_codes": [
+        "baseline_infra_invalid:model_call_without_tokens"
+      ],
+      "selected_mode_candidate": "Mode A (Solo)",
+      "runtime_apply_review_ready": false,
+      "runtime_update_allowed": false,
+      "public_benchmark_allowed": false
+    },
+    {
+      "capability": "drone",
+      "baseline_row_id": "heep::drone::heep-mat-b-drone-001::mode_a_current_primary",
+      "challenger_row_id": "heep::drone::heep-mat-b-drone-001::heep_multi_skill",
+      "mat_b_verdict": "HOLD_MISSING_MAT_B_EVIDENCE",
+      "mat_b_reason_codes": [
+        "baseline_infra_invalid:receipt_data_contract_violation"
+      ],
+      "selected_mode_candidate": "Mode A (Solo)",
+      "runtime_apply_review_ready": false,
+      "runtime_update_allowed": false,
+      "public_benchmark_allowed": false
+    },
+    {
+      "capability": "external_productivity",
+      "baseline_row_id": "heep::external_productivity::heep-mat-b-external_productivity-001::mode_a_current_primary",
+      "challenger_row_id": "heep::external_productivity::heep-mat-b-external_productivity-001::heep_multi_skill",
+      "mat_b_verdict": "HOLD_MISSING_MAT_B_EVIDENCE",
+      "mat_b_reason_codes": [
+        "baseline_infra_invalid:model_call_without_tokens"
+      ],
+      "selected_mode_candidate": "Mode A (Solo)",
+      "runtime_apply_review_ready": false,
+      "runtime_update_allowed": false,
+      "public_benchmark_allowed": false
+    },
+    {
       "capability": "file_lock_security_gate",
       "baseline_row_id": "heep::file_lock_security_gate::heep-mat-b-file_lock_security_gate-001::mode_a_current_primary",
       "challenger_row_id": "heep::file_lock_security_gate::heep-mat-b-file_lock_security_gate-001::heep_multi_skill",
@@ -138,6 +177,19 @@
       "mat_b_reason_codes": [],
       "selected_mode_candidate": "Mode C (Swarm)",
       "runtime_apply_review_ready": true,
+      "runtime_update_allowed": false,
+      "public_benchmark_allowed": false
+    },
+    {
+      "capability": "hyper_sprint",
+      "baseline_row_id": "heep::hyper_sprint::heep-mat-b-hyper_sprint-001::mode_a_current_primary",
+      "challenger_row_id": "heep::hyper_sprint::heep-mat-b-hyper_sprint-001::heep_multi_skill",
+      "mat_b_verdict": "HOLD_MISSING_MAT_B_EVIDENCE",
+      "mat_b_reason_codes": [
+        "baseline_infra_invalid:model_call_without_tokens"
+      ],
+      "selected_mode_candidate": "Mode A (Solo)",
+      "runtime_apply_review_ready": false,
       "runtime_update_allowed": false,
       "public_benchmark_allowed": false
     },
@@ -197,6 +249,32 @@
       "mat_b_reason_codes": [],
       "selected_mode_candidate": "Mode B (Guard)",
       "runtime_apply_review_ready": true,
+      "runtime_update_allowed": false,
+      "public_benchmark_allowed": false
+    },
+    {
+      "capability": "metabolism_resume",
+      "baseline_row_id": "heep::metabolism_resume::heep-mat-b-metabolism_resume-001::mode_a_current_primary",
+      "challenger_row_id": "heep::metabolism_resume::heep-mat-b-metabolism_resume-001::heep_multi_skill",
+      "mat_b_verdict": "HOLD_MISSING_MAT_B_EVIDENCE",
+      "mat_b_reason_codes": [
+        "baseline_infra_invalid:model_call_without_tokens"
+      ],
+      "selected_mode_candidate": "Mode A (Solo)",
+      "runtime_apply_review_ready": false,
+      "runtime_update_allowed": false,
+      "public_benchmark_allowed": false
+    },
+    {
+      "capability": "nightshift",
+      "baseline_row_id": "heep::nightshift::heep-mat-b-nightshift-001::mode_a_current_primary",
+      "challenger_row_id": "heep::nightshift::heep-mat-b-nightshift-001::heep_multi_skill",
+      "mat_b_verdict": "HOLD_MISSING_MAT_B_EVIDENCE",
+      "mat_b_reason_codes": [
+        "baseline_infra_invalid:receipt_data_contract_violation"
+      ],
+      "selected_mode_candidate": "Mode A (Solo)",
+      "runtime_apply_review_ready": false,
       "runtime_update_allowed": false,
       "public_benchmark_allowed": false
     },

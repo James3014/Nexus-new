@@ -198,13 +198,16 @@ def _flash_nexus_compare_queue(
             continue
         capability = str(decision.get("capability") or "")
         selected_mode = str(decision.get("selected_mode") or "")
-        if selected_mode == "Mode A (Solo)" or not selected_mode:
-            continue
-        if float(decision.get("selected_minus_mode_a_quality") or 0.0) <= 0:
+        if not selected_mode:
             continue
         mode_rows = rows_by_capability.get(capability, {})
         mode_a = mode_rows.get("Mode A (Solo)")
-        selected = mode_rows.get(selected_mode)
+        if selected_mode == "Mode A (Solo)":
+            selected = _best_non_solo_probe(mode_rows)
+        else:
+            selected = mode_rows.get(selected_mode)
+            if float(decision.get("selected_minus_mode_a_quality") or 0.0) <= 0:
+                continue
         if not mode_a or not selected:
             continue
         queue_rows.append(
@@ -238,6 +241,17 @@ def _flash_nexus_compare_queue(
             "Runtime default cannot change until live compare receipts pass and an apply gate approves.",
         ],
     }
+
+
+def _best_non_solo_probe(mode_rows: Mapping[str, dict[str, Any]]) -> dict[str, Any] | None:
+    candidates = [
+        row
+        for mode, row in mode_rows.items()
+        if mode != "Mode A (Solo)" and isinstance(row, Mapping) and row.get("status") == "PASS"
+    ]
+    if not candidates:
+        return None
+    return max(candidates, key=lambda row: (float(row.get("quality_score") or 0.0), -int(row.get("premium_cost") or 0)))
 
 
 def _mat_b_gate_template(*, capability: str, selected_mode: str) -> dict[str, Any]:
@@ -304,10 +318,10 @@ def _runtime_apply_review_packet(
             continue
         capability = str(decision.get("capability") or "")
         selected_mode = str(decision.get("selected_mode") or "")
-        if selected_mode == "Mode A (Solo)":
-            disposition = "KEEP_SINGLE_PRIMARY"
-        elif capability in compare_by_capability and not blockers:
+        if capability in compare_by_capability and not blockers:
             disposition = "PENDING_FLASH_NEXUS_LIVE_COMPARE"
+        elif selected_mode == "Mode A (Solo)":
+            disposition = "KEEP_SINGLE_PRIMARY"
         else:
             disposition = "HOLD"
         rows.append(

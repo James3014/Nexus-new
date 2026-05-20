@@ -406,13 +406,23 @@ def run_resume_manifest(
         if not _row_has_with_nexus_artifact(output_root, row)
     ]
     if remaining_row_ids:
-        run_matrix(
-            matrix_path=matrix_path,
-            output_root=output_root,
-            row_timeout_sec=row_timeout_sec,
-            row_id_filter=",".join(remaining_row_ids),
-            docs_catalog_path=docs_catalog_path,
-        )
+        if collect_existing_returns:
+            for row_id in remaining_row_ids:
+                run_matrix(
+                    matrix_path=matrix_path,
+                    output_root=output_root,
+                    row_timeout_sec=row_timeout_sec,
+                    row_id_filter=row_id,
+                    docs_catalog_path=docs_catalog_path,
+                )
+        else:
+            run_matrix(
+                matrix_path=matrix_path,
+                output_root=output_root,
+                row_timeout_sec=row_timeout_sec,
+                row_id_filter=",".join(remaining_row_ids),
+                docs_catalog_path=docs_catalog_path,
+            )
     all_rows = requested_rows
     results = []
     status = "PASS" if all_rows else "RETURN"

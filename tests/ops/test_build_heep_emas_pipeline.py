@@ -76,7 +76,16 @@ def _smoke(*, used: bool = True) -> dict:
 
 
 def test_build_heep_emas_artifacts_keeps_runtime_and_public_gates_closed() -> None:
-    artifacts = build_heep_emas_artifacts(original_map=_original_map(), overlay=_overlay(), smoke=_smoke())
+    mat_b_report = {
+        "summary": {"comparison_count": 2},
+        "comparisons": [
+            {"capability": "codeintel", "verdict": "APPROVE_HEEP_MODE_CANDIDATE", "reason_codes": []},
+            {"capability": "hyper_sprint", "verdict": "KEEP_SINGLE_PRIMARY", "reason_codes": ["efficiency_regressed"]},
+        ],
+    }
+    artifacts = build_heep_emas_artifacts(
+        original_map=_original_map(), overlay=_overlay(), smoke=_smoke(), mat_b_report=mat_b_report
+    )
 
     assert artifacts["contract"]["status"] == "PASS"
     assert artifacts["assembly"]["summary"]["capability_count"] == 2
@@ -86,6 +95,8 @@ def test_build_heep_emas_artifacts_keeps_runtime_and_public_gates_closed() -> No
     assert artifacts["contract"]["summary"]["runtime_update_allowed"] is False
     assert artifacts["rollup"]["summary"]["public_benchmark_allowed"] is False
     assert "Mode C (Swarm)" in artifacts["markdown_map"]
+    assert "MAT-B live compare coverage: 2/2 capabilities" in artifacts["markdown_map"]
+    assert "APPROVE_HEEP_MODE_CANDIDATE" in artifacts["markdown_map"]
 
 
 def test_build_heep_emas_artifacts_returns_on_overlay_map_gap() -> None:
