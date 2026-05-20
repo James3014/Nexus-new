@@ -458,6 +458,25 @@ Action:
   suites. The tactical research-ordering case remains a separate route-policy
   follow-up if the cost-control contract is reopened.
 
+### CC-8 root cleanup reference-safety lesson
+
+Failure:
+
+- `CC-0` classification alone identified root ops/test candidates, but the
+  `CC-8` reference check showed those files are still referenced by readiness
+  inventory, historical reports, health tests, or oracle fixtures.
+
+Lesson:
+
+- Root cleanup cannot treat classification as move authorization. A file is
+  only movable after reference-safety, wrapper compatibility, and asset
+  inventory migration are defined.
+
+Action:
+
+- `CC-8` is closed as `PASS_WITH_ZERO_MOVES`; root movement is deferred to a
+  separate compatibility-wrapper migration.
+
 ## 13. CC-1 Research Flow Route Decision Module Result
 
 Status: `DONE`
@@ -629,3 +648,25 @@ Verification:
 
 - `uv run python -m py_compile nexus/engine/learning_policy_loader.py nexus/engine/learning_policy_store.py tests/engine/test_learning_policy_store.py`
 - `uv run pytest tests/engine/test_learning_policy_store.py tests/engine/test_capability_planner.py tests/engine/test_rlm_outcome_integration.py -q` -> `94 passed`
+
+## 20. CC-8 Root Script Cleanup Result
+
+Status: `DONE_WITH_ZERO_MOVES`
+
+Artifact:
+
+- `docs/reports/NEXUS_CLEAN_CODE_ROOT_CLEANUP_SAFETY_REVIEW_2026-05-20.md`
+
+Result:
+
+- reviewed all `ops_script_candidate` and `test_candidate` rows from the CC-0
+  retention inventory;
+- moved `0` files and deleted `0` files;
+- found that root entrypoints are still anchored by readiness inventory,
+  historical evidence, health tests, or oracle fixtures;
+- deferred actual root movement to a future compatibility-wrapper migration.
+
+Verification:
+
+- `rg` reference check across `20` root ops/test candidates;
+- `git diff --check -- docs/plans/NEXUS_CLEAN_CODE_REFACTOR_TASK_PLAN_2026-05-20.md docs/reports/NEXUS_CLEAN_CODE_ROOT_CLEANUP_SAFETY_REVIEW_2026-05-20.md`
