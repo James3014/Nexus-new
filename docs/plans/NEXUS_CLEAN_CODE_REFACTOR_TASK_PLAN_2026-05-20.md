@@ -438,6 +438,26 @@ Action:
   `tests/test_iron_gate_closed_loop.py`; recursive repair fallback remains a
   separate follow-up if the composition contract is reopened.
 
+### CC-6 tactical-policy boundary lesson
+
+Failure:
+
+- Adding `tests/engine/test_route_tactical_policy.py` to `CC-6` verification
+  exposed that a high-risk public refactor plan can keep `research` optional
+  under cost-control policy, causing tactical ordering expectations to fail.
+
+Lesson:
+
+- Decision trace extraction must not silently change capability selection to
+  satisfy tactical-policy tests; research enablement belongs to route/tactical
+  policy, not A/B trace construction.
+
+Action:
+
+- CC-6 verifies planner equivalence with capability planner and RLM outcome
+  suites. The tactical research-ordering case remains a separate route-policy
+  follow-up if the cost-control contract is reopened.
+
 ## 13. CC-1 Research Flow Route Decision Module Result
 
 Status: `DONE`
@@ -559,4 +579,27 @@ Result:
 Verification:
 
 - `uv run python -m py_compile nexus/engine/capability_planner.py nexus/engine/planner/policy_applier.py nexus/engine/planner/__init__.py`
+- `uv run pytest tests/engine/test_capability_planner.py tests/engine/test_rlm_outcome_integration.py -q` -> `93 passed`
+
+## 18. CC-6 Capability Planner A/B Evaluator Result
+
+Status: `DONE`
+
+Files:
+
+- `nexus/engine/planner/ab_evaluator.py`
+- `nexus/engine/capability_planner.py`
+- `docs/plans/NEXUS_CLEAN_CODE_REFACTOR_TASK_PLAN_2026-05-20.md`
+
+Result:
+
+- decision trace scoring moved behind
+  `nexus.engine.planner.ab_evaluator.build_decision_trace`;
+- `CapabilityPlanner` still owns capability state selection and policy order;
+- no public benchmark claim is inferred from internal scoring;
+- selected capability output remains covered by existing planner tests.
+
+Verification:
+
+- `uv run python -m py_compile nexus/engine/capability_planner.py nexus/engine/planner/ab_evaluator.py nexus/engine/planner/policy_applier.py nexus/engine/planner/__init__.py`
 - `uv run pytest tests/engine/test_capability_planner.py tests/engine/test_rlm_outcome_integration.py -q` -> `93 passed`

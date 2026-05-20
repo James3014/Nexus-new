@@ -13,6 +13,7 @@ from nexus.engine.harness_route_policy import (
 )
 from nexus.engine.harness_sensors import build_harness_preflight_sensor
 from nexus.engine.policy_evaluator import apply_signal_policies, apply_tier_policies
+from nexus.engine.planner.ab_evaluator import build_decision_trace
 from nexus.engine.planner.policy_applier import apply_learning_policy
 from nexus.engine.route_signal_adapter import build_replan_trace, build_signal_snapshot
 from nexus.engine.capability_signals import build_capability_constraints, build_capability_signals
@@ -785,29 +786,16 @@ class CapabilityPlanner:
         )
         semantic_failure_sensor = build_semantic_failure_snapshot(route=route, task_desc=task_desc)
 
-        decision_trace: list[dict[str, Any]] = []
-        score = 0
         leverage_roles = ssd_route_map.get("leverage_roles", {})
-        for name, node in self.nodes.items():
-            state = states[name]
-            score_delta = scoring.score(node) if state in {"required", "conditional"} else 0
-            score += score_delta
-            decision_trace.append(
-                {
-                    "capability": name,
-                    "state": state,
-                    "phase_hooks": list(node.phase_hooks),
-                    "reasons": reasons[name] or ["available_but_not_selected"],
-                    "dependencies": list(node.dependencies),
-                    "parallelizable_with": list(node.parallelizable_with),
-                    "cost_tier": _cost_tier(int(node.cost)),
-                    "score_delta": score_delta,
-                    "score_components": scoring.components(node),
-                    "scoring_weights": scoring.to_dict(),
-                    "s2t_shadow_policy": s2t_shadow_score.get("capability_hints", {}).get(name, {}),
-                    "leverage_role": leverage_roles.get(name, ""),
-                }
-            )
+        score, decision_trace = build_decision_trace(
+            nodes=self.nodes,
+            states=states,
+            reasons=reasons,
+            scoring=scoring,
+            s2t_shadow_score=s2t_shadow_score,
+            leverage_roles=leverage_roles,
+            cost_tier=_cost_tier,
+        )
 
         replan_trace = build_replan_trace(
             states=states,
