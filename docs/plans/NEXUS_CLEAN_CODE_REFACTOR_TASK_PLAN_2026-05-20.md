@@ -417,6 +417,27 @@ Action:
   `detect_inconclusive_success` into `evaluate_audit_result` as
   `phantom_detector`.
 
+### CC-4 focused-test boundary lesson
+
+Failure:
+
+- Adding `tests/engine/test_recursive_repair_loop.py` to the `CC-4` focused
+  verification exposed pre-existing composed-audit fallback expectations that
+  are outside escalation extraction. The failures occurred before escalation
+  manager behavior, with the loop treating missing composed audit as rejected.
+
+Lesson:
+
+- CC-4 verification should prove escalation behavior and compilation only; RLM
+  recursive audit fallback belongs to the separate RLM/composition contract and
+  should not be silently fixed inside escalation extraction.
+
+Action:
+
+- CC-4 focused verification uses `tests/engine/test_pipeline_repair.py` and
+  `tests/test_iron_gate_closed_loop.py`; recursive repair fallback remains a
+  separate follow-up if the composition contract is reopened.
+
 ## 13. CC-1 Research Flow Route Decision Module Result
 
 Status: `DONE`
@@ -489,4 +510,29 @@ Result:
 Verification:
 
 - `uv run python -m py_compile nexus/engine/pipeline_repair.py nexus/engine/repair/audit_evaluator.py nexus/engine/repair/__init__.py`
+- `uv run pytest tests/engine/test_pipeline_repair.py tests/test_iron_gate_closed_loop.py -q` -> `11 passed`
+
+## 16. CC-4 Pipeline Repair Escalation Manager Result
+
+Status: `DONE`
+
+Files:
+
+- `nexus/engine/repair/escalation_manager.py`
+- `nexus/engine/pipeline_repair.py`
+- `docs/plans/NEXUS_CLEAN_CODE_REFACTOR_TASK_PLAN_2026-05-20.md`
+
+Result:
+
+- escalation analysis and P-stage replan execution moved behind
+  `nexus.engine.repair.escalation_manager`;
+- `PipelineRepairMixin._handle_escalation` and `_perform_escalation` remain
+  compatibility facades;
+- `analyze_cycle` remains injected through the facade so existing patch seams
+  continue to work;
+- Swarm/NSP behavior was not added or changed.
+
+Verification:
+
+- `uv run python -m py_compile nexus/engine/pipeline_repair.py nexus/engine/repair/audit_evaluator.py nexus/engine/repair/escalation_manager.py nexus/engine/repair/__init__.py`
 - `uv run pytest tests/engine/test_pipeline_repair.py tests/test_iron_gate_closed_loop.py -q` -> `11 passed`

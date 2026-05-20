@@ -13,6 +13,7 @@ from nexus.core.skill_outcomes import build_outcome_event, append_skill_outcome_
 from nexus.learning.cycle_analyzer import analyze_cycle
 from nexus.engine.recursive_repair_loop import RecursiveRepairLoop, recursive_repair_enabled
 from nexus.engine.repair.audit_evaluator import evaluate_audit_result
+from nexus.engine.repair.escalation_manager import handle_escalation, perform_escalation
 
 logger = logging.getLogger(__name__)
 
@@ -566,69 +567,17 @@ class PipelineRepairMixin:
             logger.warning("skill_outcome_event_write_failed: %s", exc)
 
     def _handle_escalation(self, ctx: PipelineContextProtocol, repair_attempts: int, review_status_raw: str, phantom_reason: str) -> bool:
-        """Handles escalation logic after audit failure."""
-        rejection_history = list(ctx.state.metadata.get("rejection_history", []))
-        reason_tag = phantom_reason if phantom_reason else f"rejected:{review_status_raw}"
-        rejection_history.append(reason_tag)
-        ctx.state.metadata["rejection_history"] = rejection_history
-
-        ctx.state.metadata["last_audit_failure"] = f"phantom success: {phantom_reason}" if phantom_reason else f"rejected: {review_status_raw}"
-        ctx.pack["audit_feedback"] = ctx.state.metadata["last_audit_failure"]
-
-        # Escalation analysis after 3 failures
-        if repair_attempts >= 3:
-            try:
-                mid_cycle = analyze_cycle(rejection_history)
-                mid_root = mid_cycle.get("root_cause", "")
-                if mid_root in ("scope_drift", "insufficient_diag"):
-                    return self._perform_escalation(ctx, mid_root, repair_attempts)
-            except Exception as esc_exc:
-                logger.debug("escalation_analysis_failed: %s", esc_exc)
-        return False, False
+        return handle_escalation(
+            self,
+            ctx,
+            repair_attempts,
+            review_status_raw,
+            phantom_reason,
+            cycle_analyzer=analyze_cycle,
+        )
 
     def _perform_escalation(self, ctx: PipelineContextProtocol, mid_root: str, repair_attempts: int):
-        """Executes specific escalation actions (Plan jump or Human Review).
-        Returns a tuple: (break_loop: bool, replan_succeeded: bool)
-        """
-        self._update_meta_counter(ctx, "escalation_count")
-        esc_count = ctx.state.metadata.get("escalation_count", 0)
-
-        if esc_count > 2:
-            logger.error("🛑 Max escalation reached (%d). Entering HUMAN_REVIEW.", esc_count)
-            ctx.state.metadata["human_review_required"] = True
-            ctx.state.metadata["human_review_reason"] = f"max_escalation:{mid_root}"
-            NexusEventBus.publish("human_review_required", {"task_id": ctx.state.task_id, "root_cause": mid_root, "escalation_count": esc_count})
-            return True, False
-
-        logger.warning("📢 Escalation → Actual Replan (root_cause=%s)", mid_root)
-        ctx.state.metadata["escalation_triggered"] = True
-        ctx.state.metadata["escalation_root_cause"] = mid_root
-        NexusEventBus.publish("escalation_to_plan", {"task_id": ctx.state.task_id, "root_cause": mid_root, "attempt": repair_attempts})
-        
-        # === NEW: T19 Actual Replan Execution ===
-        try:
-            logger.info("⚙️ Executing actual P-Stage for replan due to escalation...")
-            p_plugin = next((p for p in self.engine.registry.get_ordered_plugins() if p.name == "P"), None)
-            if not p_plugin:
-                raise RuntimeError("P-Stage plugin not found")
-                
-            replan_feedback = {
-                "root_cause": mid_root,
-                "rejection_history": ctx.state.metadata.get("rejection_history", []),
-                "repair_attempts": repair_attempts,
-            }
-            # Inject feedback so P-Stage loop will see it
-            ctx.kwargs["plan_feedback"] = replan_feedback
-            try:
-                p_plugin.execute(self.engine, ctx)
-            finally:
-                ctx.kwargs.pop("plan_feedback", None)
-            
-            logger.info("✅ Escalation Replan succeeded, about to reset R↔A loop.")
-            return False, True
-        except Exception as e:
-            logger.error("❌ Replan failed during escalation: %s", e)
-            return True, False
+        return perform_escalation(self, ctx, mid_root, repair_attempts)
 
     def _repair_audit_loop(self, ctx: PipelineContextProtocol, tracer: Any) -> bool:
         """Main R↔A loop: Iteratively repair and audit until success or exhaustion."""
