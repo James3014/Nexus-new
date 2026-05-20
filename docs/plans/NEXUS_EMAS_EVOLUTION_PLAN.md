@@ -77,6 +77,46 @@ EMAS 只負責產生候選組合與角色解釋；最終是否替代單一 prima
 - EMAS 不直接觸發 public benchmark。
 - EMAS 只更新 assembly catalog、compare queue、runtime apply review packet 的候選狀態。
 
+## 7. Multi-Nature Ensemble 校準 (2026-05-20)
+
+EMAS 的複數模式不是「三路投票」或多數決，而是 **Multi-Nature Ensemble**：用不同性質的 skill 覆蓋同一能力的不同風險面，追求互補協同，而不是堆疊同質候選。
+
+### 7.1 三維矩陣
+
+| 角色性質 | 負責維度 | `codeintel` 例子 |
+| :--- | :--- | :--- |
+| Scout | 物理掃描、數據採集 | 分析全域依賴、symbol index、impact surface。 |
+| Logic | 語義推理、決策生成 | 判斷演算法邏輯、修改策略、上下文取捨。 |
+| Audit | 邊界檢查、安全防禦 | 檢查 security risk、regression risk、policy boundary。 |
+
+### 7.2 搜尋策略
+
+外部 skill discovery 不再優先尋找「同質 replacement」，而是尋找能補齊當前 primary 缺口的專職組件：
+
+- `codeintel`：優先找 symbol indexing、dependency impact、security-aware static scan。
+- `artifact_gate` / `claim_gate`：優先找 evidence sealing、citation/claim verification、redaction/audit。
+- `research_control_plane`：優先找 citation-chain、source validation、source conflict resolution。
+- `ui_validator`：優先找 browser/e2e visual validator，而不是一般 frontend writer。
+
+### 7.3 Synergy Factor 定義
+
+`Synergy Factor` 只在異質組合解決 Mode A primary 漏掉的邊界案例時成立。範例：
+
+- Mode A 成功交付但漏掉 security risk，Audit 補上並讓 evidence gate 改判。
+- Mode A 找到局部 symbol，Scout 補出跨檔 impact surface 並降低 reopen risk。
+- Mode A 做出可行答案，Logic + Audit 組合發現 hidden verifier 會拒絕的 claim gap。
+
+因此 synergy 不是「輸出更長」、「角色更多」或「共識更高」。沒有 MAT-B live KPI 與 runtime receipt，Synergy Factor 必須停在 `PENDING_FLASH_NEXUS_LIVE_COMPARE`。
+
+### 7.4 裝配建議語義
+
+EMAS 的 update notification 應表達為「新增互補組件」，不是「取代 primary」：
+
+- 正確：`發現高品質安全審計專職 skill，建議加入 artifact_gate 的 Audit slot。`
+- 錯誤：`新安全 skill 比 artifact_gate primary 更好，直接取代。`
+
+是否取代或升為 runtime mode，仍由 HEEP MAT-B gate 與 runtime apply review 決定。
+
 ---
 *Created by Antigravity - Nexus Singularity V17*
 *Refined with Heterogeneous Intelligence Principles*
