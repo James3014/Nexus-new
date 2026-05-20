@@ -595,3 +595,39 @@ Failure lesson:
 Next:
 
 - start `CBO-7 Observation-Only I/O Measurement Harness`.
+
+## 17. CBO-7 Result
+
+Status: `DONE`
+
+Changed surface:
+
+- `scripts/ops/cbo_io_measurement.py`;
+- `tests/ops/test_cbo_io_measurement.py`;
+- `docs/reports/NEXUS_CBO_IO_MEASUREMENT_2026-05-20.json`.
+
+Result:
+
+- added a deterministic observation-only I/O harness for route build and
+  findings write paths;
+- report records baseline/current-code sample, changed/current-code sample,
+  sample size, wall time, file read/write counts, and limitations;
+- `delta_claim_allowed=false`, so this artifact cannot be used as a performance
+  improvement claim.
+
+Verification:
+
+- `uv run python -m py_compile scripts/ops/cbo_io_measurement.py tests/ops/test_cbo_io_measurement.py` -> `PASS`;
+- `uv run pytest tests/ops/test_cbo_io_measurement.py -q` -> `1 passed`;
+- `uv run python scripts/ops/cbo_io_measurement.py --output docs/reports/NEXUS_CBO_IO_MEASUREMENT_2026-05-20.json` -> `{"output": "docs/reports/NEXUS_CBO_IO_MEASUREMENT_2026-05-20.json", "status": "PASS"}`;
+- `git diff --check -- scripts/ops/cbo_io_measurement.py tests/ops/test_cbo_io_measurement.py` -> `PASS`.
+
+Failure lesson:
+
+- No new CBO-7 failure occurred. Baseline and changed samples are intentionally
+  both measured on the current code revision; this protects the harness from
+  becoming an unsupported before/after performance claim.
+
+Next:
+
+- start `CBO-8 Repair Split Continuation Gate`.

@@ -1,0 +1,27 @@
+{
+  "baseline": {
+    "file_reads": 2,
+    "file_writes": 2,
+    "findings_write_path_present": true,
+    "memory_hits": 1,
+    "route_flow": "hyper_sprint",
+    "wall_ms": 6.7547
+  },
+  "changed": {
+    "file_reads": 3,
+    "file_writes": 2,
+    "findings_write_path_present": true,
+    "memory_hits": 1,
+    "route_flow": "hyper_sprint",
+    "wall_ms": 4.0911
+  },
+  "claim_class": "OBSERVATION_ONLY",
+  "delta_claim_allowed": false,
+  "limitations": [
+    "Baseline and changed samples are both measured on the current code revision.",
+    "This harness validates I/O visibility and report shape; it does not claim performance improvement."
+  ],
+  "sample_size": 2,
+  "schema": "nexus.cbo_io_measurement.v1",
+  "status": "PASS"
+}
