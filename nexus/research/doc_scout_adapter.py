@@ -8,7 +8,8 @@ from pathlib import Path
 from typing import Any, Protocol
 import re
 import time
-import urllib.request
+
+from nexus.infrastructure.guarded_fetch import GuardedFetcher
 
 
 @dataclass(frozen=True)
@@ -104,9 +105,7 @@ class FetchedExternalScoutProvider:
 
     @staticmethod
     def _urlopen_fetcher(url: str, *, timeout_sec: float) -> str:
-        request = urllib.request.Request(url, headers={"User-Agent": "nexus-doc-scout/1.0"})
-        with urllib.request.urlopen(request, timeout=timeout_sec) as response:
-            return response.read(200_000).decode("utf-8", errors="ignore")
+        return GuardedFetcher().fetch_text(url, timeout_sec=timeout_sec)
 
 
 def _split_env_urls(value: str) -> list[str]:

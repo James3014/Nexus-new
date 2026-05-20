@@ -486,3 +486,39 @@ Failure lesson:
 Next:
 
 - start `CBO-5 Guarded Fetch Adapter`.
+
+## 14. CBO-5 Result
+
+Status: `DONE`
+
+Changed surface:
+
+- `nexus/infrastructure/guarded_fetch.py`;
+- `nexus/research/doc_scout_adapter.py`;
+- `tests/contracts/test_network_fetch_guard.py`;
+- `tests/research/test_doc_scout_adapter.py`.
+
+Result:
+
+- remote text fetches can now go through `GuardedFetcher`;
+- the adapter validates URL scheme, resolved DNS addresses, redirect scheme,
+  and redirect target DNS before returning content;
+- `FetchedExternalScoutProvider` now uses the guarded fetch adapter by default;
+- unsupported/private/link-local/loopback targets remain fail-closed and do not
+  reach the injected transport.
+
+Verification:
+
+- `uv run python -m py_compile nexus/infrastructure/guarded_fetch.py nexus/research/doc_scout_adapter.py tests/contracts/test_network_fetch_guard.py tests/research/test_doc_scout_adapter.py` -> `PASS`;
+- `uv run pytest tests/contracts/test_network_fetch_guard.py tests/research/test_doc_scout_adapter.py -q` -> `14 passed`;
+- `git diff --check -- nexus/infrastructure/guarded_fetch.py nexus/research/doc_scout_adapter.py tests/contracts/test_network_fetch_guard.py tests/research/test_doc_scout_adapter.py` -> `PASS`.
+
+Failure lesson:
+
+- No new CBO-5 failure occurred. Redirect validation must include the redirect
+  target's DNS result, not only the original URL receipt, otherwise an allowed
+  public origin could redirect to an internal address after preflight.
+
+Next:
+
+- start `CBO-6 Retrieval Query Contract`.

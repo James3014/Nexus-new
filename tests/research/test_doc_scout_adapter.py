@@ -136,6 +136,24 @@ def test_doc_scout_fetched_provider_is_opt_in_and_uses_injected_fetcher(tmp_path
     assert enabled["external_metadata"]["source_count"] == 1
 
 
+def test_doc_scout_default_fetched_provider_blocks_private_targets(tmp_path: Path):
+    provider = FetchedExternalScoutProvider(
+        name="private_fetch",
+        source="spec",
+        urls=["http://127.0.0.1/private-doc"],
+        timeout_sec=0.1,
+    )
+
+    enabled = DocScoutAdapter(tmp_path, external_providers=[provider], cache_ttl_sec=0).search(
+        "private doc",
+        include_external=True,
+    )
+
+    assert enabled["hits"] == []
+    assert enabled["external_metadata"]["verified_source_count"] == 0
+    assert enabled["external_metadata"]["source_count"] == 0
+
+
 def test_doc_scout_external_provider_failure_is_measured_not_silent(tmp_path: Path):
     class BrokenProvider:
         name = "broken_spec"
