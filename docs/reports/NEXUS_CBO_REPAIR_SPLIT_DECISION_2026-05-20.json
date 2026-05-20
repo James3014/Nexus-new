@@ -1,0 +1,71 @@
+{
+  "schema": "nexus.cbo_repair_split_decision.v1",
+  "status": "PASS",
+  "decision": "NO_ACTION_FOR_CBO",
+  "claim_class": "INTERNAL_ARCHITECTURE_DECISION",
+  "runtime_update_allowed": false,
+  "public_benchmark_allowed": false,
+  "source_request": {
+    "proposed_splits": [
+      "repair_runner",
+      "repair_verifier",
+      "repair_rollback"
+    ],
+    "decision_scope": "determine whether these splits are still warranted after the Clean Code repair split"
+  },
+  "current_structure": {
+    "nexus/engine/pipeline_repair.py": {
+      "line_count": 744,
+      "role": "legacy mixin facade and loop coordinator"
+    },
+    "nexus/engine/repair_attempt_service.py": {
+      "line_count": 130,
+      "role": "repair attempt execution service"
+    },
+    "nexus/engine/repair_loop_service.py": {
+      "line_count": 69,
+      "role": "repair loop service facade"
+    },
+    "nexus/engine/attempt_settlement_service.py": {
+      "line_count": 110,
+      "role": "attempt commit/writeback/rollback settlement"
+    },
+    "nexus/engine/repair/audit_evaluator.py": {
+      "line_count": 162,
+      "role": "audit verdict evaluator"
+    },
+    "nexus/engine/repair/escalation_manager.py": {
+      "line_count": 86,
+      "role": "repair escalation manager"
+    }
+  },
+  "deletion_test": {
+    "repair_runner_split": "not_approved",
+    "repair_verifier_split": "not_approved",
+    "repair_rollback_split": "not_approved",
+    "reason": "Existing services already cover attempt execution, audit evaluation, escalation, and settlement/rollback seams. A new broad split would duplicate these seams without a new adapter or failing contract that requires it."
+  },
+  "verification": {
+    "commands": [
+      {
+        "cmd": "uv run pytest tests/engine/test_repair_loop_service.py tests/engine/test_attempt_settlement_service.py tests/engine/test_pipeline_composition.py -q",
+        "result": "26 passed"
+      },
+      {
+        "cmd": "wc -l nexus/engine/pipeline_repair.py nexus/engine/repair_attempt_service.py nexus/engine/repair_loop_service.py nexus/engine/attempt_settlement_service.py nexus/engine/repair/audit_evaluator.py nexus/engine/repair/escalation_manager.py",
+        "result": "pipeline_repair=744; repair_attempt_service=130; repair_loop_service=69; attempt_settlement_service=110; audit_evaluator=162; escalation_manager=86"
+      }
+    ]
+  },
+  "residual_debt": [
+    {
+      "id": "recursive_repair_loop_policy_tests",
+      "status": "known_out_of_scope_for_cbo",
+      "reason": "Earlier broad recursive repair loop run showed 5 failures where audit rejection returned false. This is RLM/repair policy composition debt, not evidence that the proposed repair_runner/verifier/rollback split should proceed in CBO."
+    }
+  ],
+  "next_if_reopened": [
+    "Open a dedicated RLM repair policy task with failing tests as the acceptance gate.",
+    "Do not split pipeline_repair.py again until a deletion test identifies duplicated behavior that can be removed after extraction."
+  ]
+}

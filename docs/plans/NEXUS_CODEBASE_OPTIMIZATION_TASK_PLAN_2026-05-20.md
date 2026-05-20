@@ -631,3 +631,36 @@ Failure lesson:
 Next:
 
 - start `CBO-8 Repair Split Continuation Gate`.
+
+## 18. CBO-8 Result
+
+Status: `DONE`
+
+Artifact:
+
+- `docs/reports/NEXUS_CBO_REPAIR_SPLIT_DECISION_2026-05-20.json`
+
+Result:
+
+- immediate `repair_runner`, `repair_verifier`, and `repair_rollback` split is
+  declined as `NO_ACTION_FOR_CBO`;
+- existing seams already cover repair attempt execution, audit verdict
+  evaluation, escalation, and attempt settlement/rollback;
+- `pipeline_repair.py` remains a large legacy facade, but no new deletion-test
+  evidence justifies another broad split inside this CBO plan.
+
+Verification:
+
+- `uv run pytest tests/engine/test_repair_loop_service.py tests/engine/test_attempt_settlement_service.py tests/engine/test_pipeline_composition.py -q` -> `26 passed`;
+- `wc -l nexus/engine/pipeline_repair.py nexus/engine/repair_attempt_service.py nexus/engine/repair_loop_service.py nexus/engine/attempt_settlement_service.py nexus/engine/repair/audit_evaluator.py nexus/engine/repair/escalation_manager.py` -> `pipeline_repair=744`, `repair_attempt_service=130`, `repair_loop_service=69`, `attempt_settlement_service=110`, `audit_evaluator=162`, `escalation_manager=86`.
+
+Failure lesson:
+
+- The earlier recursive repair loop failures are retained as RLM/repair policy
+  composition debt, not as approval to reopen a broad repair split. Future work
+  should start from a dedicated failing RLM acceptance gate and remove duplicated
+  code only after the deletion test passes.
+
+Next:
+
+- run final CBO smoke/CI gate for all touched seams.
