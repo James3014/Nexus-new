@@ -122,6 +122,8 @@ Matrix repair: `docs/reports/NEXUS_HEEP_FLASH_NEXUS_EXECUTION_MATRIX_2026-05-20.
 
 Targeted replay check: a 6-row receipt replay was attempted at `.nexus/reports/heep_flash_nexus_mat_b_receipt_replay_2026-05-20`; the first `drone` row still returned because the model-required delivery path produced `gateway_error` / `model_required_model_delivery_failed` and provider token truth remained invalid. Therefore the three receipt-lane rows are not yet settled; they need a provider-clean replay window after the matrix/manifest repair, not a local pass override.
 
+NEXT replay check: a full 26-row blocked replay was attempted at `.nexus/reports/heep_flash_nexus_mat_b_next_replay_2026-05-20` and summarized in `docs/reports/NEXUS_HEEP_MAT_B_NEXT_REPLAY_STATUS_2026-05-20.json`. The first `direct_master_loop` row was semantically `VERIFIED`, but it still returned because `model_calls=1`, `gateway_error_category=gateway_error`, `raw_provider_total_tokens=0`, and `token_data_contract_status=DATA_CONTRACT_VIOLATION`. Therefore all 13 blocked capabilities remain fail-closed until a provider-clean replay window produces measured provider tokens.
+
 Failure lesson: clean replay must preserve the distinction between provider-token truth and expected-capability receipt invocation. If they are merged into a generic `HOLD_MISSING_MAT_B_EVIDENCE`, later agents can accidentally rerun the wrong path or misread a provider telemetry gap as a weak skill.
 
 ---

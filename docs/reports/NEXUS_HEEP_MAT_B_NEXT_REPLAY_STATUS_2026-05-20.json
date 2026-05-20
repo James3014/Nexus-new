@@ -1,0 +1,40 @@
+{
+  "claim_boundary": [
+    "This replay attempt does not approve any blocked MAT-B capability.",
+    "Semantic VERIFIED with local fallback is not provider-clean cost evidence.",
+    "Rows with model_calls > 0 and missing provider tokens remain fail-closed.",
+    "Runtime default and public benchmark remain HOLD."
+  ],
+  "first_return": {
+    "arm_id": "mode_a_current_primary",
+    "benchmark_status": "SUCCESS",
+    "capability": "direct_master_loop",
+    "gateway_error_category": "gateway_error",
+    "gateway_stats_present": false,
+    "infra_invalid_reason": "model_call_without_tokens",
+    "model_calls": 1,
+    "nexus_winner_source": "local(llm_error_gateway_error_fallback_local)",
+    "raw_provider_total_tokens": 0,
+    "receipt_data_contract_status": "PASS",
+    "row_id": "heep::direct_master_loop::heep-mat-b-direct_master_loop-001::mode_a_current_primary",
+    "semantic_status": "VERIFIED",
+    "status": "RETURN",
+    "token_data_contract_status": "DATA_CONTRACT_VIOLATION",
+    "total_tokens": 0
+  },
+  "schema": "nexus.heep_mat_b_next_replay_status.v1",
+  "source_blocker_queue": "docs/reports/NEXUS_HEEP_MAT_B_BLOCKER_RESOLUTION_QUEUE_2026-05-20.json",
+  "source_live_summary": ".nexus/reports/heep_flash_nexus_mat_b_next_replay_2026-05-20/live_summary.json",
+  "status": "RETURN",
+  "summary": {
+    "completed_rows": 1,
+    "pass_count": 0,
+    "planned_rows": 26,
+    "provider_token_truth_replay_count": 10,
+    "public_benchmark_allowed": false,
+    "receipt_invocation_replay_count": 3,
+    "remaining_blocked_capabilities": 13,
+    "return_count": 1,
+    "runtime_update_allowed": false
+  }
+}
