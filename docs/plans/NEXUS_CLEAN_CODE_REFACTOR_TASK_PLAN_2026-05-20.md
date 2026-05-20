@@ -536,3 +536,27 @@ Verification:
 
 - `uv run python -m py_compile nexus/engine/pipeline_repair.py nexus/engine/repair/audit_evaluator.py nexus/engine/repair/escalation_manager.py nexus/engine/repair/__init__.py`
 - `uv run pytest tests/engine/test_pipeline_repair.py tests/test_iron_gate_closed_loop.py -q` -> `11 passed`
+
+## 17. CC-5 Capability Planner Policy Applier Result
+
+Status: `DONE`
+
+Files:
+
+- `nexus/engine/planner/policy_applier.py`
+- `nexus/engine/planner/__init__.py`
+- `nexus/engine/capability_planner.py`
+- `docs/plans/NEXUS_CLEAN_CODE_REFACTOR_TASK_PLAN_2026-05-20.md`
+
+Result:
+
+- dynamic learning policy application moved behind
+  `nexus.engine.planner.policy_applier.apply_learning_policy`;
+- `CapabilityPlanner` remains the planning facade;
+- policy application is deterministic and has no runtime default/public
+  benchmark authority.
+
+Verification:
+
+- `uv run python -m py_compile nexus/engine/capability_planner.py nexus/engine/planner/policy_applier.py nexus/engine/planner/__init__.py`
+- `uv run pytest tests/engine/test_capability_planner.py tests/engine/test_rlm_outcome_integration.py -q` -> `93 passed`

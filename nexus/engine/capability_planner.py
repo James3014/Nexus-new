@@ -13,6 +13,7 @@ from nexus.engine.harness_route_policy import (
 )
 from nexus.engine.harness_sensors import build_harness_preflight_sensor
 from nexus.engine.policy_evaluator import apply_signal_policies, apply_tier_policies
+from nexus.engine.planner.policy_applier import apply_learning_policy
 from nexus.engine.route_signal_adapter import build_replan_trace, build_signal_snapshot
 from nexus.engine.capability_signals import build_capability_constraints, build_capability_signals
 from nexus.learning.skill_catalog import SkillCatalog
@@ -1037,17 +1038,13 @@ class CapabilityPlanner:
         learning_policy: dict[str, Any],
         enable: Any,
     ) -> None:
-        for name in learning_policy.get("promoted_capabilities", ()) or ():
-            cap = str(name)
-            if cap in self.nodes:
-                enable(cap, "learning_policy_promoted")
-        for name in learning_policy.get("penalized_capabilities", ()) or ():
-            cap = str(name)
-            if cap not in self.nodes:
-                continue
-            reasons[cap].append("learning_policy_penalized")
-            if learning_policy.get("enforce_penalties") is True and states.get(cap) == "conditional":
-                states[cap] = "optional"
+        apply_learning_policy(
+            nodes=self.nodes,
+            states=states,
+            reasons=reasons,
+            learning_policy=learning_policy,
+            enable=enable,
+        )
 
     def _apply_route_oracle_expected_contract(
         self,
