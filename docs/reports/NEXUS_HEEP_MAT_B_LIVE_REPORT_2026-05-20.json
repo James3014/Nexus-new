@@ -1,0 +1,61 @@
+{
+  "schema": "nexus.heep_mat_b_live_report.v1",
+  "status": "PASS",
+  "summary": {
+    "comparison_count": 1,
+    "approve_count": 0,
+    "keep_single_count": 1,
+    "reject_count": 0,
+    "hold_count": 0,
+    "runtime_update_allowed": false,
+    "public_benchmark_allowed": false
+  },
+  "blockers": [],
+  "comparisons": [
+    {
+      "capability": "artifact_gate",
+      "task_id": "heep-mat-b-artifact_gate-001",
+      "baseline_row_id": "heep::artifact_gate::heep-mat-b-artifact_gate-001::mode_a_current_primary",
+      "challenger_row_id": "heep::artifact_gate::heep-mat-b-artifact_gate-001::heep_multi_skill",
+      "baseline": {
+        "success_rate": 1.0,
+        "pollution_pct": 0.0,
+        "evidence_seal_count": 1,
+        "total_tokens": 29553,
+        "phase_wall_total_sec": 29.1261,
+        "reopen_rate": null,
+        "trust_mismatch": false,
+        "skill_mount_contract_status": "PASS",
+        "receipt_chain_pass": true
+      },
+      "challenger": {
+        "success_rate": 1.0,
+        "pollution_pct": 0.0,
+        "evidence_seal_count": 3,
+        "total_tokens": 35444,
+        "phase_wall_total_sec": 59.8368,
+        "reopen_rate": null,
+        "trust_mismatch": false,
+        "skill_mount_contract_status": "PASS",
+        "receipt_chain_pass": true
+      },
+      "delta": {
+        "token_delta": 5891,
+        "wall_delta": 30.7107,
+        "success_rate_delta": 0.0,
+        "pollution_pct_delta": 0.0,
+        "evidence_seal_count_delta": 2,
+        "reopen_rate_delta": null
+      },
+      "verdict": "KEEP_SINGLE_PRIMARY",
+      "reason_codes": [
+        "efficiency_regressed"
+      ]
+    }
+  ],
+  "claim_boundary": [
+    "This report is internal HEEP MAT-B live evidence only.",
+    "It can update HEEP mode candidates and runtime apply review packets, not runtime defaults.",
+    "It is not a public benchmark or publication-ready claim."
+  ]
+}

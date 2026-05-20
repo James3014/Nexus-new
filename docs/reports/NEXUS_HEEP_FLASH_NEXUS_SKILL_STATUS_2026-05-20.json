@@ -1,0 +1,415 @@
+{
+  "schema": "nexus.heep_flash_nexus_skill_status.v1",
+  "summary": {
+    "skill_count": 27,
+    "runtime_update_allowed": false,
+    "public_benchmark_allowed": false
+  },
+  "skills": [
+    {
+      "name": "sf-systematic-artifact_gate-differential-review-461fbd0c",
+      "path": ".agents/skills/sf-systematic-challengers/sf-systematic-artifact_gate-differential-review-461fbd0c/SKILL.md",
+      "root": "heep_mat_b_internal_compare",
+      "skill_status": "external_reference_candidate",
+      "test_level": "heep_flash_nexus_mat_b",
+      "action": "ablation_only_compare",
+      "capability_mount": "artifact_gate",
+      "family": "artifact_gate",
+      "reason_codes": [
+        "heep_mat_b_internal_compare",
+        "not_runtime_default",
+        "not_public_benchmark"
+      ]
+    },
+    {
+      "name": "sf-systematic-codeintel-first-principles-thinking-f95019ea",
+      "path": ".agents/skills/sf-systematic-challengers/sf-systematic-codeintel-first-principles-thinking-f95019ea/SKILL.md",
+      "root": "heep_mat_b_internal_compare",
+      "skill_status": "external_reference_candidate",
+      "test_level": "heep_flash_nexus_mat_b",
+      "action": "ablation_only_compare",
+      "capability_mount": "artifact_gate",
+      "family": "artifact_gate",
+      "reason_codes": [
+        "heep_mat_b_internal_compare",
+        "not_runtime_default",
+        "not_public_benchmark"
+      ]
+    },
+    {
+      "name": "sf2-autonomic_router-route-fit-spec",
+      "path": ".agents/skills/sf2/sf2-autonomic_router-route-fit-spec/SKILL.md",
+      "root": "heep_mat_b_internal_compare",
+      "skill_status": "external_reference_candidate",
+      "test_level": "heep_flash_nexus_mat_b",
+      "action": "ablation_only_compare",
+      "capability_mount": "artifact_gate",
+      "family": "artifact_gate",
+      "reason_codes": [
+        "heep_mat_b_internal_compare",
+        "not_runtime_default",
+        "not_public_benchmark"
+      ]
+    },
+    {
+      "name": "sf2-belief-route-fit-spec",
+      "path": ".agents/skills/sf2/sf2-belief-route-fit-spec/SKILL.md",
+      "root": "heep_mat_b_internal_compare",
+      "skill_status": "external_reference_candidate",
+      "test_level": "heep_flash_nexus_mat_b",
+      "action": "ablation_only_compare",
+      "capability_mount": "autoreason",
+      "family": "autoreason",
+      "reason_codes": [
+        "heep_mat_b_internal_compare",
+        "not_runtime_default",
+        "not_public_benchmark"
+      ]
+    },
+    {
+      "name": "sf-systematic-benchmark_meta_opt-hugging-face-trackio-d21c6b90",
+      "path": ".agents/skills/sf-systematic-challengers/sf-systematic-benchmark_meta_opt-hugging-face-trackio-d21c6b90/SKILL.md",
+      "root": "heep_mat_b_internal_compare",
+      "skill_status": "external_reference_candidate",
+      "test_level": "heep_flash_nexus_mat_b",
+      "action": "ablation_only_compare",
+      "capability_mount": "judge_panel",
+      "family": "benchmark_meta_opt",
+      "reason_codes": [
+        "heep_mat_b_internal_compare",
+        "not_runtime_default",
+        "not_public_benchmark"
+      ]
+    },
+    {
+      "name": "nexus-benchmark-continuous-optimization",
+      "path": ".agents/skills/nexus-benchmark-continuous-optimization/SKILL.md",
+      "root": "heep_mat_b_internal_compare",
+      "skill_status": "external_reference_candidate",
+      "test_level": "heep_flash_nexus_mat_b",
+      "action": "ablation_only_compare",
+      "capability_mount": "claim_gate",
+      "family": "claim_gate",
+      "reason_codes": [
+        "heep_mat_b_internal_compare",
+        "not_runtime_default",
+        "not_public_benchmark"
+      ]
+    },
+    {
+      "name": "nexus-root-cause-probe",
+      "path": ".agents/skills/nexus-root-cause-probe/SKILL.md",
+      "root": "heep_mat_b_internal_compare",
+      "skill_status": "external_reference_candidate",
+      "test_level": "heep_flash_nexus_mat_b",
+      "action": "ablation_only_compare",
+      "capability_mount": "ddtree",
+      "family": "ddtree",
+      "reason_codes": [
+        "heep_mat_b_internal_compare",
+        "not_runtime_default",
+        "not_public_benchmark"
+      ]
+    },
+    {
+      "name": "sf2-file_lock_security_gate-route-fit-spec",
+      "path": ".agents/skills/sf2/sf2-file_lock_security_gate-route-fit-spec/SKILL.md",
+      "root": "heep_mat_b_internal_compare",
+      "skill_status": "external_reference_candidate",
+      "test_level": "heep_flash_nexus_mat_b",
+      "action": "ablation_only_compare",
+      "capability_mount": "ultra_review",
+      "family": "file_lock_security_gate",
+      "reason_codes": [
+        "heep_mat_b_internal_compare",
+        "not_runtime_default",
+        "not_public_benchmark"
+      ]
+    },
+    {
+      "name": "create-plan",
+      "path": ".agents/skills/create-plan/SKILL.md",
+      "root": "heep_mat_b_internal_compare",
+      "skill_status": "external_reference_candidate",
+      "test_level": "heep_flash_nexus_mat_b",
+      "action": "ablation_only_compare",
+      "capability_mount": "autoreason",
+      "family": "forecast_pregate",
+      "reason_codes": [
+        "heep_mat_b_internal_compare",
+        "not_runtime_default",
+        "not_public_benchmark"
+      ]
+    },
+    {
+      "name": "sf-systematic-governance_and_trust-aegisops-ai-0aa841e2",
+      "path": ".agents/skills/sf-systematic-challengers/sf-systematic-governance_and_trust-aegisops-ai-0aa841e2/SKILL.md",
+      "root": "heep_mat_b_internal_compare",
+      "skill_status": "external_reference_candidate",
+      "test_level": "heep_flash_nexus_mat_b",
+      "action": "ablation_only_compare",
+      "capability_mount": "mempalace_gate",
+      "family": "governance_and_trust",
+      "reason_codes": [
+        "heep_mat_b_internal_compare",
+        "not_runtime_default",
+        "not_public_benchmark"
+      ]
+    },
+    {
+      "name": "research-source-validation-auditor",
+      "path": ".agents/skills/research-source-validation-auditor/SKILL.md",
+      "root": "heep_mat_b_internal_compare",
+      "skill_status": "external_reference_candidate",
+      "test_level": "heep_flash_nexus_mat_b",
+      "action": "ablation_only_compare",
+      "capability_mount": "lancedb",
+      "family": "lancedb",
+      "reason_codes": [
+        "heep_mat_b_internal_compare",
+        "not_runtime_default",
+        "not_public_benchmark"
+      ]
+    },
+    {
+      "name": "github8-skilless-deep-research-learn-ask",
+      "path": ".agents/skills/github-round8-challengers/github8-skilless-deep-research-learn-ask/SKILL.md",
+      "root": "heep_mat_b_internal_compare",
+      "skill_status": "external_reference_candidate",
+      "test_level": "heep_flash_nexus_mat_b",
+      "action": "ablation_only_compare",
+      "capability_mount": "semantic_searcher",
+      "family": "learn_ask",
+      "reason_codes": [
+        "heep_mat_b_internal_compare",
+        "not_runtime_default",
+        "not_public_benchmark"
+      ]
+    },
+    {
+      "name": "sf-systematic-learning_closure-memory-lint-8bdb0fca",
+      "path": ".agents/skills/sf-systematic-challengers/sf-systematic-learning_closure-memory-lint-8bdb0fca/SKILL.md",
+      "root": "heep_mat_b_internal_compare",
+      "skill_status": "external_reference_candidate",
+      "test_level": "heep_flash_nexus_mat_b",
+      "action": "ablation_only_compare",
+      "capability_mount": "semantic_failure_sensor",
+      "family": "learning_closure",
+      "reason_codes": [
+        "heep_mat_b_internal_compare",
+        "not_runtime_default",
+        "not_public_benchmark"
+      ]
+    },
+    {
+      "name": "sf-systematic-memory-project-skill-audit-cc8b7621",
+      "path": ".agents/skills/sf-systematic-challengers/sf-systematic-memory-project-skill-audit-cc8b7621/SKILL.md",
+      "root": "heep_mat_b_internal_compare",
+      "skill_status": "external_reference_candidate",
+      "test_level": "heep_flash_nexus_mat_b",
+      "action": "ablation_only_compare",
+      "capability_mount": "memory",
+      "family": "memory",
+      "reason_codes": [
+        "heep_mat_b_internal_compare",
+        "not_runtime_default",
+        "not_public_benchmark"
+      ]
+    },
+    {
+      "name": "sf2-mempalace-route-fit-spec",
+      "path": ".agents/skills/sf2/sf2-mempalace-route-fit-spec/SKILL.md",
+      "root": "heep_mat_b_internal_compare",
+      "skill_status": "external_reference_candidate",
+      "test_level": "heep_flash_nexus_mat_b",
+      "action": "ablation_only_compare",
+      "capability_mount": "mempalace_gate",
+      "family": "mempalace",
+      "reason_codes": [
+        "heep_mat_b_internal_compare",
+        "not_runtime_default",
+        "not_public_benchmark"
+      ]
+    },
+    {
+      "name": "sf-systematic-policy_capability_gate-aegisops-ai-0aa841e2",
+      "path": ".agents/skills/sf-systematic-challengers/sf-systematic-policy_capability_gate-aegisops-ai-0aa841e2/SKILL.md",
+      "root": "heep_mat_b_internal_compare",
+      "skill_status": "external_reference_candidate",
+      "test_level": "heep_flash_nexus_mat_b",
+      "action": "ablation_only_compare",
+      "capability_mount": "mempalace_gate",
+      "family": "policy_capability_gate",
+      "reason_codes": [
+        "heep_mat_b_internal_compare",
+        "not_runtime_default",
+        "not_public_benchmark"
+      ]
+    },
+    {
+      "name": "github5-skill-seekers-safe-registry-builder",
+      "path": ".agents/skills/github-round5-challengers/github5-skill-seekers-safe-registry-builder/SKILL.md",
+      "root": "heep_mat_b_internal_compare",
+      "skill_status": "external_reference_candidate",
+      "test_level": "heep_flash_nexus_mat_b",
+      "action": "ablation_only_compare",
+      "capability_mount": "semantic_searcher",
+      "family": "registry_skills_sync",
+      "reason_codes": [
+        "heep_mat_b_internal_compare",
+        "not_runtime_default",
+        "not_public_benchmark"
+      ]
+    },
+    {
+      "name": "sf-systematic-regression_guard-odoo-automated-tests-dad98433",
+      "path": ".agents/skills/sf-systematic-challengers/sf-systematic-regression_guard-odoo-automated-tests-dad98433/SKILL.md",
+      "root": "heep_mat_b_internal_compare",
+      "skill_status": "external_reference_candidate",
+      "test_level": "heep_flash_nexus_mat_b",
+      "action": "ablation_only_compare",
+      "capability_mount": "semantic_failure_sensor",
+      "family": "regression_guard",
+      "reason_codes": [
+        "heep_mat_b_internal_compare",
+        "not_runtime_default",
+        "not_public_benchmark"
+      ]
+    },
+    {
+      "name": "sf-systematic-repair_loop-odoo-automated-tests-dad98433",
+      "path": ".agents/skills/sf-systematic-challengers/sf-systematic-repair_loop-odoo-automated-tests-dad98433/SKILL.md",
+      "root": "heep_mat_b_internal_compare",
+      "skill_status": "external_reference_candidate",
+      "test_level": "heep_flash_nexus_mat_b",
+      "action": "ablation_only_compare",
+      "capability_mount": "hyper",
+      "family": "repair_loop",
+      "reason_codes": [
+        "heep_mat_b_internal_compare",
+        "not_runtime_default",
+        "not_public_benchmark"
+      ]
+    },
+    {
+      "name": "sf-systematic-research-research-lookup-7e6f92a0",
+      "path": ".agents/skills/sf-systematic-challengers/sf-systematic-research-research-lookup-7e6f92a0/SKILL.md",
+      "root": "heep_mat_b_internal_compare",
+      "skill_status": "external_reference_candidate",
+      "test_level": "heep_flash_nexus_mat_b",
+      "action": "ablation_only_compare",
+      "capability_mount": "research",
+      "family": "research",
+      "reason_codes": [
+        "heep_mat_b_internal_compare",
+        "not_runtime_default",
+        "not_public_benchmark"
+      ]
+    },
+    {
+      "name": "research-citation-chain-verifier",
+      "path": ".agents/skills/research-citation-chain-verifier/SKILL.md",
+      "root": "heep_mat_b_internal_compare",
+      "skill_status": "external_reference_candidate",
+      "test_level": "heep_flash_nexus_mat_b",
+      "action": "ablation_only_compare",
+      "capability_mount": "research",
+      "family": "research_and_source_discipline",
+      "reason_codes": [
+        "heep_mat_b_internal_compare",
+        "not_runtime_default",
+        "not_public_benchmark"
+      ]
+    },
+    {
+      "name": "sf-systematic-research_control_plane-research-lookup-7e6f92a0",
+      "path": ".agents/skills/sf-systematic-challengers/sf-systematic-research_control_plane-research-lookup-7e6f92a0/SKILL.md",
+      "root": "heep_mat_b_internal_compare",
+      "skill_status": "external_reference_candidate",
+      "test_level": "heep_flash_nexus_mat_b",
+      "action": "ablation_only_compare",
+      "capability_mount": "research",
+      "family": "research_control_plane",
+      "reason_codes": [
+        "heep_mat_b_internal_compare",
+        "not_runtime_default",
+        "not_public_benchmark"
+      ]
+    },
+    {
+      "name": "sf2-sandbox_replay-route-fit-spec",
+      "path": ".agents/skills/sf2/sf2-sandbox_replay-route-fit-spec/SKILL.md",
+      "root": "heep_mat_b_internal_compare",
+      "skill_status": "external_reference_candidate",
+      "test_level": "heep_flash_nexus_mat_b",
+      "action": "ablation_only_compare",
+      "capability_mount": "harness_preflight_sensor",
+      "family": "sandbox_replay",
+      "reason_codes": [
+        "heep_mat_b_internal_compare",
+        "not_runtime_default",
+        "not_public_benchmark"
+      ]
+    },
+    {
+      "name": "sf2-swarm_multi_agent-route-fit-spec",
+      "path": ".agents/skills/sf2/sf2-swarm_multi_agent-route-fit-spec/SKILL.md",
+      "root": "heep_mat_b_internal_compare",
+      "skill_status": "external_reference_candidate",
+      "test_level": "heep_flash_nexus_mat_b",
+      "action": "ablation_only_compare",
+      "capability_mount": "swarm",
+      "family": "swarm_multi_agent",
+      "reason_codes": [
+        "heep_mat_b_internal_compare",
+        "not_runtime_default",
+        "not_public_benchmark"
+      ]
+    },
+    {
+      "name": "sf-systematic-ui_validator-e2e-testing-d98eb7c3",
+      "path": ".agents/skills/sf-systematic-challengers/sf-systematic-ui_validator-e2e-testing-d98eb7c3/SKILL.md",
+      "root": "heep_mat_b_internal_compare",
+      "skill_status": "external_reference_candidate",
+      "test_level": "heep_flash_nexus_mat_b",
+      "action": "ablation_only_compare",
+      "capability_mount": "ultra_review",
+      "family": "ui_validator",
+      "reason_codes": [
+        "heep_mat_b_internal_compare",
+        "not_runtime_default",
+        "not_public_benchmark"
+      ]
+    },
+    {
+      "name": "github11-vulnerability-scanner-ultra-review",
+      "path": ".agents/skills/github-round11-challengers/github11-vulnerability-scanner-ultra-review/SKILL.md",
+      "root": "heep_mat_b_internal_compare",
+      "skill_status": "external_reference_candidate",
+      "test_level": "heep_flash_nexus_mat_b",
+      "action": "ablation_only_compare",
+      "capability_mount": "ultra_review",
+      "family": "ultra_review",
+      "reason_codes": [
+        "heep_mat_b_internal_compare",
+        "not_runtime_default",
+        "not_public_benchmark"
+      ]
+    },
+    {
+      "name": "diagnose",
+      "path": ".agents/skills/diagnose/SKILL.md",
+      "root": "heep_mat_b_internal_compare",
+      "skill_status": "external_reference_candidate",
+      "test_level": "heep_flash_nexus_mat_b",
+      "action": "ablation_only_compare",
+      "capability_mount": "codeintel",
+      "family": "xray",
+      "reason_codes": [
+        "heep_mat_b_internal_compare",
+        "not_runtime_default",
+        "not_public_benchmark"
+      ]
+    }
+  ]
+}

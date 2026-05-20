@@ -2742,3 +2742,10 @@ version_scope:
 - Failure: the shell passed escape text into Python and produced a `SyntaxError` before reading the generated HEEP summaries.
 - Lesson: evidence-summary commands should use semicolon-safe one-liners or checked scripts, not fragile multiline shell escapes.
 - Guardrail: prefer list-comprehension or small checked helper scripts for report summaries in ops turns.
+
+## 2026-05-20 - HEEP compare task manifests must stay schema-clean
+
+- Trigger: the first HEEP MAT-B preflight failed with `manifest_task_1_unknown:heep_selected_mode`.
+- Failure: the matrix builder wrote HEEP mode metadata into the task manifest, where the capability benchmark preflight rejects unknown task fields.
+- Lesson: HEEP/EMAS comparison metadata belongs on matrix rows and reports, not on frozen benchmark task manifests.
+- Guardrail: keep generated task manifests limited to capability task schema fields; store mode, arm, and MAT-B metadata in execution rows.
