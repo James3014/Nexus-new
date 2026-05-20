@@ -2833,3 +2833,10 @@ version_scope:
 - Failure: optional field weakness inside a row-level PASS would overclaim role necessity and could incorrectly promote a multi-skill role.
 - Lesson: role necessity requires the matching minus-role row to RETURN or fail a hard external assertion while the full assembly remains clean.
 - Guardrail: compute `ROLE_REQUIREDNESS_PROVEN` only when full assembly is clean, the minus-role runner result is non-PASS, and the minus-role loses the required external assertion.
+
+## 2026-05-21 - SF-FINAL must preserve fair-pool row counts separately from unique candidates
+
+- Trigger: the first SF-FINAL settlement run reported `processed_ablation_eligible_count=658` while the historical fair pool summary declared 684 ablation-eligible candidates.
+- Failure: the reconciliation keyed by `skill_id`, so duplicate fair-pool candidate rows collapsed into the unique candidate view and made the all-candidate coverage claim look incomplete.
+- Lesson: inventory coverage and comparison shortlist canonicalization are different accounting layers.
+- Guardrail: report fair-pool row coverage from the source summary or candidate rows, and report `unique_ablation_eligible_count` separately for deduped shortlist/canonicalization decisions.
