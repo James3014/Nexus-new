@@ -1,0 +1,617 @@
+{
+  "schema": "nexus.sfv2_role_ablation_edgecase_task_manifest.v1",
+  "version": "2026-05-21",
+  "frozen": true,
+  "benchmark_id": "nexus-sfv2-role-ablation-edgecase-v1",
+  "description": "Internal SFV2 role-focused edge-case ablation manifest. Not a public benchmark.",
+  "status": "PASS",
+  "summary": {
+    "task_count": 20,
+    "capability_count": 9,
+    "role_focus_count": 20,
+    "runtime_update_allowed": false,
+    "public_benchmark_allowed": false
+  },
+  "tasks": [
+    {
+      "id": "sfv2-role-edge-autonomic_router-primary-001",
+      "task_desc": "Run SFV2 role-focused edge-case for capability autonomic_router. The primary role must use the primary capability specialist signal rather than a generic helper-only path. Fail the role-requiredness claim if the minus-primary arm preserves the same evidence chain.",
+      "target_file": "unused",
+      "test_file": "unused",
+      "success_criteria": "all_target_tests_pass",
+      "category": "autonomic_router",
+      "difficulty": "medium",
+      "repo_kind": "neutral_fixture",
+      "repo": "fixture://sfv2-role-ablation-edgecase",
+      "repo_ref": "v1",
+      "fixture_kind": "sfv2_role_ablation_edgecase_flash_nexus",
+      "mutation_required": false,
+      "allowed_files": [
+        "unused"
+      ],
+      "forbidden_files": [
+        ".nexus/",
+        "logs/",
+        "benchmarks/"
+      ],
+      "setup_command": "python -V",
+      "verification_command": "python -V",
+      "expected_capabilities": [
+        "autoreason"
+      ],
+      "capability_activation_contract": "required",
+      "eligibility_class": "model_required",
+      "public_claim_allowed_metrics": []
+    },
+    {
+      "id": "sfv2-role-edge-autonomic_router-audit-001",
+      "task_desc": "Run SFV2 role-focused edge-case for capability autonomic_router. The Audit role must produce a fail-closed evidence, policy, regression, or claim-boundary check. Fail the role-requiredness claim if the minus-Audit arm preserves the same evidence chain.",
+      "target_file": "unused",
+      "test_file": "unused",
+      "success_criteria": "all_target_tests_pass",
+      "category": "autonomic_router",
+      "difficulty": "medium",
+      "repo_kind": "neutral_fixture",
+      "repo": "fixture://sfv2-role-ablation-edgecase",
+      "repo_ref": "v1",
+      "fixture_kind": "sfv2_role_ablation_edgecase_flash_nexus",
+      "mutation_required": false,
+      "allowed_files": [
+        "unused"
+      ],
+      "forbidden_files": [
+        ".nexus/",
+        "logs/",
+        "benchmarks/"
+      ],
+      "setup_command": "python -V",
+      "verification_command": "python -V",
+      "expected_capabilities": [
+        "autoreason"
+      ],
+      "capability_activation_contract": "required",
+      "eligibility_class": "model_required",
+      "public_claim_allowed_metrics": []
+    },
+    {
+      "id": "sfv2-role-edge-belief-primary-001",
+      "task_desc": "Run SFV2 role-focused edge-case for capability belief. The primary role must use the primary capability specialist signal rather than a generic helper-only path. Fail the role-requiredness claim if the minus-primary arm preserves the same evidence chain.",
+      "target_file": "unused",
+      "test_file": "unused",
+      "success_criteria": "all_target_tests_pass",
+      "category": "belief",
+      "difficulty": "medium",
+      "repo_kind": "neutral_fixture",
+      "repo": "fixture://sfv2-role-ablation-edgecase",
+      "repo_ref": "v1",
+      "fixture_kind": "sfv2_role_ablation_edgecase_flash_nexus",
+      "mutation_required": false,
+      "allowed_files": [
+        "unused"
+      ],
+      "forbidden_files": [
+        ".nexus/",
+        "logs/",
+        "benchmarks/"
+      ],
+      "setup_command": "python -V",
+      "verification_command": "python -V",
+      "expected_capabilities": [
+        "belief"
+      ],
+      "capability_activation_contract": "required",
+      "eligibility_class": "model_required",
+      "public_claim_allowed_metrics": []
+    },
+    {
+      "id": "sfv2-role-edge-belief-audit-001",
+      "task_desc": "Run SFV2 role-focused edge-case for capability belief. The Audit role must produce a fail-closed evidence, policy, regression, or claim-boundary check. Fail the role-requiredness claim if the minus-Audit arm preserves the same evidence chain.",
+      "target_file": "unused",
+      "test_file": "unused",
+      "success_criteria": "all_target_tests_pass",
+      "category": "belief",
+      "difficulty": "medium",
+      "repo_kind": "neutral_fixture",
+      "repo": "fixture://sfv2-role-ablation-edgecase",
+      "repo_ref": "v1",
+      "fixture_kind": "sfv2_role_ablation_edgecase_flash_nexus",
+      "mutation_required": false,
+      "allowed_files": [
+        "unused"
+      ],
+      "forbidden_files": [
+        ".nexus/",
+        "logs/",
+        "benchmarks/"
+      ],
+      "setup_command": "python -V",
+      "verification_command": "python -V",
+      "expected_capabilities": [
+        "belief"
+      ],
+      "capability_activation_contract": "required",
+      "eligibility_class": "model_required",
+      "public_claim_allowed_metrics": []
+    },
+    {
+      "id": "sfv2-role-edge-codeintel-scout-001",
+      "task_desc": "Run SFV2 role-focused edge-case for capability codeintel. The Scout role must identify the concrete impacted surface, source span, or retrieval target before reasoning. Fail the role-requiredness claim if the minus-Scout arm preserves the same evidence chain.",
+      "target_file": "unused",
+      "test_file": "unused",
+      "success_criteria": "all_target_tests_pass",
+      "category": "codeintel",
+      "difficulty": "medium",
+      "repo_kind": "neutral_fixture",
+      "repo": "fixture://sfv2-role-ablation-edgecase",
+      "repo_ref": "v1",
+      "fixture_kind": "sfv2_role_ablation_edgecase_flash_nexus",
+      "mutation_required": false,
+      "allowed_files": [
+        "unused"
+      ],
+      "forbidden_files": [
+        ".nexus/",
+        "logs/",
+        "benchmarks/"
+      ],
+      "setup_command": "python -V",
+      "verification_command": "python -V",
+      "expected_capabilities": [
+        "codeintel"
+      ],
+      "capability_activation_contract": "required",
+      "eligibility_class": "model_required",
+      "public_claim_allowed_metrics": []
+    },
+    {
+      "id": "sfv2-role-edge-codeintel-logic-001",
+      "task_desc": "Run SFV2 role-focused edge-case for capability codeintel. The Logic role must explain the decision rule, counterexample, and correctness invariant before proposing the outcome. Fail the role-requiredness claim if the minus-Logic arm preserves the same evidence chain.",
+      "target_file": "unused",
+      "test_file": "unused",
+      "success_criteria": "all_target_tests_pass",
+      "category": "codeintel",
+      "difficulty": "medium",
+      "repo_kind": "neutral_fixture",
+      "repo": "fixture://sfv2-role-ablation-edgecase",
+      "repo_ref": "v1",
+      "fixture_kind": "sfv2_role_ablation_edgecase_flash_nexus",
+      "mutation_required": false,
+      "allowed_files": [
+        "unused"
+      ],
+      "forbidden_files": [
+        ".nexus/",
+        "logs/",
+        "benchmarks/"
+      ],
+      "setup_command": "python -V",
+      "verification_command": "python -V",
+      "expected_capabilities": [
+        "codeintel"
+      ],
+      "capability_activation_contract": "required",
+      "eligibility_class": "model_required",
+      "public_claim_allowed_metrics": []
+    },
+    {
+      "id": "sfv2-role-edge-codeintel-audit-001",
+      "task_desc": "Run SFV2 role-focused edge-case for capability codeintel. The Audit role must produce a fail-closed evidence, policy, regression, or claim-boundary check. Fail the role-requiredness claim if the minus-Audit arm preserves the same evidence chain.",
+      "target_file": "unused",
+      "test_file": "unused",
+      "success_criteria": "all_target_tests_pass",
+      "category": "codeintel",
+      "difficulty": "medium",
+      "repo_kind": "neutral_fixture",
+      "repo": "fixture://sfv2-role-ablation-edgecase",
+      "repo_ref": "v1",
+      "fixture_kind": "sfv2_role_ablation_edgecase_flash_nexus",
+      "mutation_required": false,
+      "allowed_files": [
+        "unused"
+      ],
+      "forbidden_files": [
+        ".nexus/",
+        "logs/",
+        "benchmarks/"
+      ],
+      "setup_command": "python -V",
+      "verification_command": "python -V",
+      "expected_capabilities": [
+        "codeintel"
+      ],
+      "capability_activation_contract": "required",
+      "eligibility_class": "model_required",
+      "public_claim_allowed_metrics": []
+    },
+    {
+      "id": "sfv2-role-edge-ddtree-primary-001",
+      "task_desc": "Run SFV2 role-focused edge-case for capability ddtree. The primary role must use the primary capability specialist signal rather than a generic helper-only path. Fail the role-requiredness claim if the minus-primary arm preserves the same evidence chain.",
+      "target_file": "unused",
+      "test_file": "unused",
+      "success_criteria": "all_target_tests_pass",
+      "category": "ddtree",
+      "difficulty": "medium",
+      "repo_kind": "neutral_fixture",
+      "repo": "fixture://sfv2-role-ablation-edgecase",
+      "repo_ref": "v1",
+      "fixture_kind": "sfv2_role_ablation_edgecase_flash_nexus",
+      "mutation_required": false,
+      "allowed_files": [
+        "unused"
+      ],
+      "forbidden_files": [
+        ".nexus/",
+        "logs/",
+        "benchmarks/"
+      ],
+      "setup_command": "python -V",
+      "verification_command": "python -V",
+      "expected_capabilities": [
+        "ddtree"
+      ],
+      "capability_activation_contract": "required",
+      "eligibility_class": "model_required",
+      "public_claim_allowed_metrics": []
+    },
+    {
+      "id": "sfv2-role-edge-ddtree-audit-001",
+      "task_desc": "Run SFV2 role-focused edge-case for capability ddtree. The Audit role must produce a fail-closed evidence, policy, regression, or claim-boundary check. Fail the role-requiredness claim if the minus-Audit arm preserves the same evidence chain.",
+      "target_file": "unused",
+      "test_file": "unused",
+      "success_criteria": "all_target_tests_pass",
+      "category": "ddtree",
+      "difficulty": "medium",
+      "repo_kind": "neutral_fixture",
+      "repo": "fixture://sfv2-role-ablation-edgecase",
+      "repo_ref": "v1",
+      "fixture_kind": "sfv2_role_ablation_edgecase_flash_nexus",
+      "mutation_required": false,
+      "allowed_files": [
+        "unused"
+      ],
+      "forbidden_files": [
+        ".nexus/",
+        "logs/",
+        "benchmarks/"
+      ],
+      "setup_command": "python -V",
+      "verification_command": "python -V",
+      "expected_capabilities": [
+        "ddtree"
+      ],
+      "capability_activation_contract": "required",
+      "eligibility_class": "model_required",
+      "public_claim_allowed_metrics": []
+    },
+    {
+      "id": "sfv2-role-edge-governance_and_trust-scout-001",
+      "task_desc": "Run SFV2 role-focused edge-case for capability governance_and_trust. The Scout role must identify the concrete impacted surface, source span, or retrieval target before reasoning. Fail the role-requiredness claim if the minus-Scout arm preserves the same evidence chain.",
+      "target_file": "unused",
+      "test_file": "unused",
+      "success_criteria": "all_target_tests_pass",
+      "category": "governance_and_trust",
+      "difficulty": "medium",
+      "repo_kind": "neutral_fixture",
+      "repo": "fixture://sfv2-role-ablation-edgecase",
+      "repo_ref": "v1",
+      "fixture_kind": "sfv2_role_ablation_edgecase_flash_nexus",
+      "mutation_required": false,
+      "allowed_files": [
+        "unused"
+      ],
+      "forbidden_files": [
+        ".nexus/",
+        "logs/",
+        "benchmarks/"
+      ],
+      "setup_command": "python -V",
+      "verification_command": "python -V",
+      "expected_capabilities": [
+        "mempalace_gate"
+      ],
+      "capability_activation_contract": "required",
+      "eligibility_class": "model_required",
+      "public_claim_allowed_metrics": []
+    },
+    {
+      "id": "sfv2-role-edge-governance_and_trust-logic-001",
+      "task_desc": "Run SFV2 role-focused edge-case for capability governance_and_trust. The Logic role must explain the decision rule, counterexample, and correctness invariant before proposing the outcome. Fail the role-requiredness claim if the minus-Logic arm preserves the same evidence chain.",
+      "target_file": "unused",
+      "test_file": "unused",
+      "success_criteria": "all_target_tests_pass",
+      "category": "governance_and_trust",
+      "difficulty": "medium",
+      "repo_kind": "neutral_fixture",
+      "repo": "fixture://sfv2-role-ablation-edgecase",
+      "repo_ref": "v1",
+      "fixture_kind": "sfv2_role_ablation_edgecase_flash_nexus",
+      "mutation_required": false,
+      "allowed_files": [
+        "unused"
+      ],
+      "forbidden_files": [
+        ".nexus/",
+        "logs/",
+        "benchmarks/"
+      ],
+      "setup_command": "python -V",
+      "verification_command": "python -V",
+      "expected_capabilities": [
+        "mempalace_gate"
+      ],
+      "capability_activation_contract": "required",
+      "eligibility_class": "model_required",
+      "public_claim_allowed_metrics": []
+    },
+    {
+      "id": "sfv2-role-edge-governance_and_trust-audit-001",
+      "task_desc": "Run SFV2 role-focused edge-case for capability governance_and_trust. The Audit role must produce a fail-closed evidence, policy, regression, or claim-boundary check. Fail the role-requiredness claim if the minus-Audit arm preserves the same evidence chain.",
+      "target_file": "unused",
+      "test_file": "unused",
+      "success_criteria": "all_target_tests_pass",
+      "category": "governance_and_trust",
+      "difficulty": "medium",
+      "repo_kind": "neutral_fixture",
+      "repo": "fixture://sfv2-role-ablation-edgecase",
+      "repo_ref": "v1",
+      "fixture_kind": "sfv2_role_ablation_edgecase_flash_nexus",
+      "mutation_required": false,
+      "allowed_files": [
+        "unused"
+      ],
+      "forbidden_files": [
+        ".nexus/",
+        "logs/",
+        "benchmarks/"
+      ],
+      "setup_command": "python -V",
+      "verification_command": "python -V",
+      "expected_capabilities": [
+        "mempalace_gate"
+      ],
+      "capability_activation_contract": "required",
+      "eligibility_class": "model_required",
+      "public_claim_allowed_metrics": []
+    },
+    {
+      "id": "sfv2-role-edge-lancedb-primary-001",
+      "task_desc": "Run SFV2 role-focused edge-case for capability lancedb. The primary role must use the primary capability specialist signal rather than a generic helper-only path. Fail the role-requiredness claim if the minus-primary arm preserves the same evidence chain.",
+      "target_file": "unused",
+      "test_file": "unused",
+      "success_criteria": "all_target_tests_pass",
+      "category": "lancedb",
+      "difficulty": "medium",
+      "repo_kind": "neutral_fixture",
+      "repo": "fixture://sfv2-role-ablation-edgecase",
+      "repo_ref": "v1",
+      "fixture_kind": "sfv2_role_ablation_edgecase_flash_nexus",
+      "mutation_required": false,
+      "allowed_files": [
+        "unused"
+      ],
+      "forbidden_files": [
+        ".nexus/",
+        "logs/",
+        "benchmarks/"
+      ],
+      "setup_command": "python -V",
+      "verification_command": "python -V",
+      "expected_capabilities": [
+        "lancedb"
+      ],
+      "capability_activation_contract": "required",
+      "eligibility_class": "model_required",
+      "public_claim_allowed_metrics": []
+    },
+    {
+      "id": "sfv2-role-edge-lancedb-logic-001",
+      "task_desc": "Run SFV2 role-focused edge-case for capability lancedb. The Logic role must explain the decision rule, counterexample, and correctness invariant before proposing the outcome. Fail the role-requiredness claim if the minus-Logic arm preserves the same evidence chain.",
+      "target_file": "unused",
+      "test_file": "unused",
+      "success_criteria": "all_target_tests_pass",
+      "category": "lancedb",
+      "difficulty": "medium",
+      "repo_kind": "neutral_fixture",
+      "repo": "fixture://sfv2-role-ablation-edgecase",
+      "repo_ref": "v1",
+      "fixture_kind": "sfv2_role_ablation_edgecase_flash_nexus",
+      "mutation_required": false,
+      "allowed_files": [
+        "unused"
+      ],
+      "forbidden_files": [
+        ".nexus/",
+        "logs/",
+        "benchmarks/"
+      ],
+      "setup_command": "python -V",
+      "verification_command": "python -V",
+      "expected_capabilities": [
+        "lancedb"
+      ],
+      "capability_activation_contract": "required",
+      "eligibility_class": "model_required",
+      "public_claim_allowed_metrics": []
+    },
+    {
+      "id": "sfv2-role-edge-memory-primary-001",
+      "task_desc": "Run SFV2 role-focused edge-case for capability memory. The primary role must use the primary capability specialist signal rather than a generic helper-only path. Fail the role-requiredness claim if the minus-primary arm preserves the same evidence chain.",
+      "target_file": "unused",
+      "test_file": "unused",
+      "success_criteria": "all_target_tests_pass",
+      "category": "memory",
+      "difficulty": "medium",
+      "repo_kind": "neutral_fixture",
+      "repo": "fixture://sfv2-role-ablation-edgecase",
+      "repo_ref": "v1",
+      "fixture_kind": "sfv2_role_ablation_edgecase_flash_nexus",
+      "mutation_required": false,
+      "allowed_files": [
+        "unused"
+      ],
+      "forbidden_files": [
+        ".nexus/",
+        "logs/",
+        "benchmarks/"
+      ],
+      "setup_command": "python -V",
+      "verification_command": "python -V",
+      "expected_capabilities": [
+        "memory"
+      ],
+      "capability_activation_contract": "required",
+      "eligibility_class": "model_required",
+      "public_claim_allowed_metrics": []
+    },
+    {
+      "id": "sfv2-role-edge-memory-logic-001",
+      "task_desc": "Run SFV2 role-focused edge-case for capability memory. The Logic role must explain the decision rule, counterexample, and correctness invariant before proposing the outcome. Fail the role-requiredness claim if the minus-Logic arm preserves the same evidence chain.",
+      "target_file": "unused",
+      "test_file": "unused",
+      "success_criteria": "all_target_tests_pass",
+      "category": "memory",
+      "difficulty": "medium",
+      "repo_kind": "neutral_fixture",
+      "repo": "fixture://sfv2-role-ablation-edgecase",
+      "repo_ref": "v1",
+      "fixture_kind": "sfv2_role_ablation_edgecase_flash_nexus",
+      "mutation_required": false,
+      "allowed_files": [
+        "unused"
+      ],
+      "forbidden_files": [
+        ".nexus/",
+        "logs/",
+        "benchmarks/"
+      ],
+      "setup_command": "python -V",
+      "verification_command": "python -V",
+      "expected_capabilities": [
+        "memory"
+      ],
+      "capability_activation_contract": "required",
+      "eligibility_class": "model_required",
+      "public_claim_allowed_metrics": []
+    },
+    {
+      "id": "sfv2-role-edge-mempalace-primary-001",
+      "task_desc": "Run SFV2 role-focused edge-case for capability mempalace. The primary role must use the primary capability specialist signal rather than a generic helper-only path. Fail the role-requiredness claim if the minus-primary arm preserves the same evidence chain.",
+      "target_file": "unused",
+      "test_file": "unused",
+      "success_criteria": "all_target_tests_pass",
+      "category": "mempalace",
+      "difficulty": "medium",
+      "repo_kind": "neutral_fixture",
+      "repo": "fixture://sfv2-role-ablation-edgecase",
+      "repo_ref": "v1",
+      "fixture_kind": "sfv2_role_ablation_edgecase_flash_nexus",
+      "mutation_required": false,
+      "allowed_files": [
+        "unused"
+      ],
+      "forbidden_files": [
+        ".nexus/",
+        "logs/",
+        "benchmarks/"
+      ],
+      "setup_command": "python -V",
+      "verification_command": "python -V",
+      "expected_capabilities": [
+        "mempalace_gate"
+      ],
+      "capability_activation_contract": "required",
+      "eligibility_class": "model_required",
+      "public_claim_allowed_metrics": []
+    },
+    {
+      "id": "sfv2-role-edge-mempalace-audit-001",
+      "task_desc": "Run SFV2 role-focused edge-case for capability mempalace. The Audit role must produce a fail-closed evidence, policy, regression, or claim-boundary check. Fail the role-requiredness claim if the minus-Audit arm preserves the same evidence chain.",
+      "target_file": "unused",
+      "test_file": "unused",
+      "success_criteria": "all_target_tests_pass",
+      "category": "mempalace",
+      "difficulty": "medium",
+      "repo_kind": "neutral_fixture",
+      "repo": "fixture://sfv2-role-ablation-edgecase",
+      "repo_ref": "v1",
+      "fixture_kind": "sfv2_role_ablation_edgecase_flash_nexus",
+      "mutation_required": false,
+      "allowed_files": [
+        "unused"
+      ],
+      "forbidden_files": [
+        ".nexus/",
+        "logs/",
+        "benchmarks/"
+      ],
+      "setup_command": "python -V",
+      "verification_command": "python -V",
+      "expected_capabilities": [
+        "mempalace_gate"
+      ],
+      "capability_activation_contract": "required",
+      "eligibility_class": "model_required",
+      "public_claim_allowed_metrics": []
+    },
+    {
+      "id": "sfv2-role-edge-regression_guard-primary-001",
+      "task_desc": "Run SFV2 role-focused edge-case for capability regression_guard. The primary role must use the primary capability specialist signal rather than a generic helper-only path. Fail the role-requiredness claim if the minus-primary arm preserves the same evidence chain.",
+      "target_file": "unused",
+      "test_file": "unused",
+      "success_criteria": "all_target_tests_pass",
+      "category": "regression_guard",
+      "difficulty": "medium",
+      "repo_kind": "neutral_fixture",
+      "repo": "fixture://sfv2-role-ablation-edgecase",
+      "repo_ref": "v1",
+      "fixture_kind": "sfv2_role_ablation_edgecase_flash_nexus",
+      "mutation_required": false,
+      "allowed_files": [
+        "unused"
+      ],
+      "forbidden_files": [
+        ".nexus/",
+        "logs/",
+        "benchmarks/"
+      ],
+      "setup_command": "python -V",
+      "verification_command": "python -V",
+      "expected_capabilities": [
+        "semantic_failure_sensor"
+      ],
+      "capability_activation_contract": "required",
+      "eligibility_class": "model_required",
+      "public_claim_allowed_metrics": []
+    },
+    {
+      "id": "sfv2-role-edge-regression_guard-logic-001",
+      "task_desc": "Run SFV2 role-focused edge-case for capability regression_guard. The Logic role must explain the decision rule, counterexample, and correctness invariant before proposing the outcome. Fail the role-requiredness claim if the minus-Logic arm preserves the same evidence chain.",
+      "target_file": "unused",
+      "test_file": "unused",
+      "success_criteria": "all_target_tests_pass",
+      "category": "regression_guard",
+      "difficulty": "medium",
+      "repo_kind": "neutral_fixture",
+      "repo": "fixture://sfv2-role-ablation-edgecase",
+      "repo_ref": "v1",
+      "fixture_kind": "sfv2_role_ablation_edgecase_flash_nexus",
+      "mutation_required": false,
+      "allowed_files": [
+        "unused"
+      ],
+      "forbidden_files": [
+        ".nexus/",
+        "logs/",
+        "benchmarks/"
+      ],
+      "setup_command": "python -V",
+      "verification_command": "python -V",
+      "expected_capabilities": [
+        "semantic_failure_sensor"
+      ],
+      "capability_activation_contract": "required",
+      "eligibility_class": "model_required",
+      "public_claim_allowed_metrics": []
+    }
+  ]
+}

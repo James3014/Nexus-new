@@ -1,0 +1,848 @@
+{
+  "schema": "nexus.sfv2_role_ablation_edgecase_live_rollup.v1",
+  "status": "PASS",
+  "summary": {
+    "planned_rows": 40,
+    "completed_rows": 40,
+    "pass_count": 40,
+    "return_count": 0,
+    "capability_count": 9,
+    "role_focus_count": 20,
+    "role_requiredness_proven_count": 0,
+    "role_requiredness_not_proven_count": 20,
+    "runtime_update_allowed": false,
+    "public_benchmark_allowed": false
+  },
+  "claim_boundary": [
+    "Internal SFV2 role-focused edge-case evidence only; not public benchmark evidence.",
+    "All rows produced clean runtime receipts, but a role is required only when the matching minus-role arm loses reliability, governance, regression, or receipt evidence.",
+    "This run proves executable coverage and provider-clean receipt replay, not runtime default eligibility."
+  ],
+  "provider_retry_note": "The first memory full-assembly attempt returned due to provider-token and missing memory receipt; a targeted same-row retry passed before the final resume seal.",
+  "role_pairs": [
+    {
+      "capability": "autonomic_router",
+      "role_focus": "Audit",
+      "role_dimension": "boundary_security_and_regression",
+      "role_loss_signal": "missing_boundary_or_regression_guard",
+      "status": "RECEIPT_CLEAN_ROLE_REQUIREDNESS_NOT_PROVEN",
+      "full_tokens": 59257,
+      "minus_tokens": 68618,
+      "minus_minus_full_token_delta": 9361,
+      "full_elapsed_sec": 35.822,
+      "minus_elapsed_sec": 78.6185,
+      "minus_minus_full_elapsed_delta": 42.7965,
+      "arms": [
+        {
+          "row_id": "sfv2-role-edge::autonomic_router::sfv2-role-edge-autonomic_router-audit-001::full_assembly",
+          "arm_id": "full_assembly",
+          "status": "PASS",
+          "total_tokens": 59257,
+          "elapsed_sec": 35.822,
+          "model_calls": 2,
+          "provider_token_measured": true,
+          "skill_mount_contract_status": "PASS",
+          "trust_mismatch": false,
+          "token_data_contract_status": "PASS",
+          "receipt_data_contract_status": "PASS"
+        },
+        {
+          "row_id": "sfv2-role-edge::autonomic_router::sfv2-role-edge-autonomic_router-audit-001::minus_audit",
+          "arm_id": "minus_audit",
+          "status": "PASS",
+          "total_tokens": 68618,
+          "elapsed_sec": 78.6185,
+          "model_calls": 2,
+          "provider_token_measured": true,
+          "skill_mount_contract_status": "PASS",
+          "trust_mismatch": false,
+          "token_data_contract_status": "PASS",
+          "receipt_data_contract_status": "PASS"
+        }
+      ]
+    },
+    {
+      "capability": "autonomic_router",
+      "role_focus": "primary",
+      "role_dimension": "capability_primary_specialist",
+      "role_loss_signal": "missing_primary_capability_signal",
+      "status": "RECEIPT_CLEAN_ROLE_REQUIREDNESS_NOT_PROVEN",
+      "full_tokens": 72587,
+      "minus_tokens": 61947,
+      "minus_minus_full_token_delta": -10640,
+      "full_elapsed_sec": 101.3684,
+      "minus_elapsed_sec": 43.5863,
+      "minus_minus_full_elapsed_delta": -57.7821,
+      "arms": [
+        {
+          "row_id": "sfv2-role-edge::autonomic_router::sfv2-role-edge-autonomic_router-primary-001::full_assembly",
+          "arm_id": "full_assembly",
+          "status": "PASS",
+          "total_tokens": 72587,
+          "elapsed_sec": 101.3684,
+          "model_calls": 2,
+          "provider_token_measured": true,
+          "skill_mount_contract_status": "PASS",
+          "trust_mismatch": false,
+          "token_data_contract_status": "PASS",
+          "receipt_data_contract_status": "PASS"
+        },
+        {
+          "row_id": "sfv2-role-edge::autonomic_router::sfv2-role-edge-autonomic_router-primary-001::minus_primary",
+          "arm_id": "minus_primary",
+          "status": "PASS",
+          "total_tokens": 61947,
+          "elapsed_sec": 43.5863,
+          "model_calls": 2,
+          "provider_token_measured": true,
+          "skill_mount_contract_status": "PASS",
+          "trust_mismatch": false,
+          "token_data_contract_status": "PASS",
+          "receipt_data_contract_status": "PASS"
+        }
+      ]
+    },
+    {
+      "capability": "belief",
+      "role_focus": "Audit",
+      "role_dimension": "boundary_security_and_regression",
+      "role_loss_signal": "missing_boundary_or_regression_guard",
+      "status": "RECEIPT_CLEAN_ROLE_REQUIREDNESS_NOT_PROVEN",
+      "full_tokens": 65336,
+      "minus_tokens": 66282,
+      "minus_minus_full_token_delta": 946,
+      "full_elapsed_sec": 64.1057,
+      "minus_elapsed_sec": 67.1681,
+      "minus_minus_full_elapsed_delta": 3.0624,
+      "arms": [
+        {
+          "row_id": "sfv2-role-edge::belief::sfv2-role-edge-belief-audit-001::full_assembly",
+          "arm_id": "full_assembly",
+          "status": "PASS",
+          "total_tokens": 65336,
+          "elapsed_sec": 64.1057,
+          "model_calls": 2,
+          "provider_token_measured": true,
+          "skill_mount_contract_status": "PASS",
+          "trust_mismatch": false,
+          "token_data_contract_status": "PASS",
+          "receipt_data_contract_status": "PASS"
+        },
+        {
+          "row_id": "sfv2-role-edge::belief::sfv2-role-edge-belief-audit-001::minus_audit",
+          "arm_id": "minus_audit",
+          "status": "PASS",
+          "total_tokens": 66282,
+          "elapsed_sec": 67.1681,
+          "model_calls": 2,
+          "provider_token_measured": true,
+          "skill_mount_contract_status": "PASS",
+          "trust_mismatch": false,
+          "token_data_contract_status": "PASS",
+          "receipt_data_contract_status": "PASS"
+        }
+      ]
+    },
+    {
+      "capability": "belief",
+      "role_focus": "primary",
+      "role_dimension": "capability_primary_specialist",
+      "role_loss_signal": "missing_primary_capability_signal",
+      "status": "RECEIPT_CLEAN_ROLE_REQUIREDNESS_NOT_PROVEN",
+      "full_tokens": 66079,
+      "minus_tokens": 76816,
+      "minus_minus_full_token_delta": 10737,
+      "full_elapsed_sec": 63.621,
+      "minus_elapsed_sec": 119.1512,
+      "minus_minus_full_elapsed_delta": 55.5302,
+      "arms": [
+        {
+          "row_id": "sfv2-role-edge::belief::sfv2-role-edge-belief-primary-001::full_assembly",
+          "arm_id": "full_assembly",
+          "status": "PASS",
+          "total_tokens": 66079,
+          "elapsed_sec": 63.621,
+          "model_calls": 2,
+          "provider_token_measured": true,
+          "skill_mount_contract_status": "PASS",
+          "trust_mismatch": false,
+          "token_data_contract_status": "PASS",
+          "receipt_data_contract_status": "PASS"
+        },
+        {
+          "row_id": "sfv2-role-edge::belief::sfv2-role-edge-belief-primary-001::minus_primary",
+          "arm_id": "minus_primary",
+          "status": "PASS",
+          "total_tokens": 76816,
+          "elapsed_sec": 119.1512,
+          "model_calls": 2,
+          "provider_token_measured": true,
+          "skill_mount_contract_status": "PASS",
+          "trust_mismatch": false,
+          "token_data_contract_status": "PASS",
+          "receipt_data_contract_status": "PASS"
+        }
+      ]
+    },
+    {
+      "capability": "codeintel",
+      "role_focus": "Audit",
+      "role_dimension": "boundary_security_and_regression",
+      "role_loss_signal": "missing_boundary_or_regression_guard",
+      "status": "RECEIPT_CLEAN_ROLE_REQUIREDNESS_NOT_PROVEN",
+      "full_tokens": 30495,
+      "minus_tokens": 37225,
+      "minus_minus_full_token_delta": 6730,
+      "full_elapsed_sec": 18.5361,
+      "minus_elapsed_sec": 55.7585,
+      "minus_minus_full_elapsed_delta": 37.2224,
+      "arms": [
+        {
+          "row_id": "sfv2-role-edge::codeintel::sfv2-role-edge-codeintel-audit-001::full_assembly",
+          "arm_id": "full_assembly",
+          "status": "PASS",
+          "total_tokens": 30495,
+          "elapsed_sec": 18.5361,
+          "model_calls": 1,
+          "provider_token_measured": true,
+          "skill_mount_contract_status": "RETURN",
+          "trust_mismatch": false,
+          "token_data_contract_status": "PASS",
+          "receipt_data_contract_status": "PASS"
+        },
+        {
+          "row_id": "sfv2-role-edge::codeintel::sfv2-role-edge-codeintel-audit-001::minus_audit",
+          "arm_id": "minus_audit",
+          "status": "PASS",
+          "total_tokens": 37225,
+          "elapsed_sec": 55.7585,
+          "model_calls": 1,
+          "provider_token_measured": true,
+          "skill_mount_contract_status": "RETURN",
+          "trust_mismatch": false,
+          "token_data_contract_status": "PASS",
+          "receipt_data_contract_status": "PASS"
+        }
+      ]
+    },
+    {
+      "capability": "codeintel",
+      "role_focus": "Logic",
+      "role_dimension": "semantic_reasoning_and_decision",
+      "role_loss_signal": "missing_decision_invariant_or_counterexample",
+      "status": "RECEIPT_CLEAN_ROLE_REQUIREDNESS_NOT_PROVEN",
+      "full_tokens": 38375,
+      "minus_tokens": 34011,
+      "minus_minus_full_token_delta": -4364,
+      "full_elapsed_sec": 59.0698,
+      "minus_elapsed_sec": 37.1177,
+      "minus_minus_full_elapsed_delta": -21.9521,
+      "arms": [
+        {
+          "row_id": "sfv2-role-edge::codeintel::sfv2-role-edge-codeintel-logic-001::full_assembly",
+          "arm_id": "full_assembly",
+          "status": "PASS",
+          "total_tokens": 38375,
+          "elapsed_sec": 59.0698,
+          "model_calls": 1,
+          "provider_token_measured": true,
+          "skill_mount_contract_status": "RETURN",
+          "trust_mismatch": false,
+          "token_data_contract_status": "PASS",
+          "receipt_data_contract_status": "PASS"
+        },
+        {
+          "row_id": "sfv2-role-edge::codeintel::sfv2-role-edge-codeintel-logic-001::minus_logic",
+          "arm_id": "minus_logic",
+          "status": "PASS",
+          "total_tokens": 34011,
+          "elapsed_sec": 37.1177,
+          "model_calls": 1,
+          "provider_token_measured": true,
+          "skill_mount_contract_status": "RETURN",
+          "trust_mismatch": false,
+          "token_data_contract_status": "PASS",
+          "receipt_data_contract_status": "PASS"
+        }
+      ]
+    },
+    {
+      "capability": "codeintel",
+      "role_focus": "Scout",
+      "role_dimension": "physical_scan_and_data_collection",
+      "role_loss_signal": "missing_scan_or_incomplete_impact_surface",
+      "status": "RECEIPT_CLEAN_ROLE_REQUIREDNESS_NOT_PROVEN",
+      "full_tokens": 65452,
+      "minus_tokens": 36906,
+      "minus_minus_full_token_delta": -28546,
+      "full_elapsed_sec": 60.6206,
+      "minus_elapsed_sec": 50.2724,
+      "minus_minus_full_elapsed_delta": -10.3482,
+      "arms": [
+        {
+          "row_id": "sfv2-role-edge::codeintel::sfv2-role-edge-codeintel-scout-001::full_assembly",
+          "arm_id": "full_assembly",
+          "status": "PASS",
+          "total_tokens": 65452,
+          "elapsed_sec": 60.6206,
+          "model_calls": 2,
+          "provider_token_measured": true,
+          "skill_mount_contract_status": "PASS",
+          "trust_mismatch": false,
+          "token_data_contract_status": "PASS",
+          "receipt_data_contract_status": "PASS"
+        },
+        {
+          "row_id": "sfv2-role-edge::codeintel::sfv2-role-edge-codeintel-scout-001::minus_scout",
+          "arm_id": "minus_scout",
+          "status": "PASS",
+          "total_tokens": 36906,
+          "elapsed_sec": 50.2724,
+          "model_calls": 1,
+          "provider_token_measured": true,
+          "skill_mount_contract_status": "RETURN",
+          "trust_mismatch": false,
+          "token_data_contract_status": "PASS",
+          "receipt_data_contract_status": "PASS"
+        }
+      ]
+    },
+    {
+      "capability": "ddtree",
+      "role_focus": "Audit",
+      "role_dimension": "boundary_security_and_regression",
+      "role_loss_signal": "missing_boundary_or_regression_guard",
+      "status": "RECEIPT_CLEAN_ROLE_REQUIREDNESS_NOT_PROVEN",
+      "full_tokens": 110998,
+      "minus_tokens": 104203,
+      "minus_minus_full_token_delta": -6795,
+      "full_elapsed_sec": 157.8003,
+      "minus_elapsed_sec": 128.4688,
+      "minus_minus_full_elapsed_delta": -29.3315,
+      "arms": [
+        {
+          "row_id": "sfv2-role-edge::ddtree::sfv2-role-edge-ddtree-audit-001::full_assembly",
+          "arm_id": "full_assembly",
+          "status": "PASS",
+          "total_tokens": 110998,
+          "elapsed_sec": 157.8003,
+          "model_calls": 3,
+          "provider_token_measured": true,
+          "skill_mount_contract_status": "PASS",
+          "trust_mismatch": false,
+          "token_data_contract_status": "PASS",
+          "receipt_data_contract_status": "PASS"
+        },
+        {
+          "row_id": "sfv2-role-edge::ddtree::sfv2-role-edge-ddtree-audit-001::minus_audit",
+          "arm_id": "minus_audit",
+          "status": "PASS",
+          "total_tokens": 104203,
+          "elapsed_sec": 128.4688,
+          "model_calls": 3,
+          "provider_token_measured": true,
+          "skill_mount_contract_status": "PASS",
+          "trust_mismatch": false,
+          "token_data_contract_status": "PASS",
+          "receipt_data_contract_status": "PASS"
+        }
+      ]
+    },
+    {
+      "capability": "ddtree",
+      "role_focus": "primary",
+      "role_dimension": "capability_primary_specialist",
+      "role_loss_signal": "missing_primary_capability_signal",
+      "status": "RECEIPT_CLEAN_ROLE_REQUIREDNESS_NOT_PROVEN",
+      "full_tokens": 96565,
+      "minus_tokens": 108423,
+      "minus_minus_full_token_delta": 11858,
+      "full_elapsed_sec": 81.338,
+      "minus_elapsed_sec": 141.8807,
+      "minus_minus_full_elapsed_delta": 60.5427,
+      "arms": [
+        {
+          "row_id": "sfv2-role-edge::ddtree::sfv2-role-edge-ddtree-primary-001::full_assembly",
+          "arm_id": "full_assembly",
+          "status": "PASS",
+          "total_tokens": 96565,
+          "elapsed_sec": 81.338,
+          "model_calls": 3,
+          "provider_token_measured": true,
+          "skill_mount_contract_status": "PASS",
+          "trust_mismatch": false,
+          "token_data_contract_status": "PASS",
+          "receipt_data_contract_status": "PASS"
+        },
+        {
+          "row_id": "sfv2-role-edge::ddtree::sfv2-role-edge-ddtree-primary-001::minus_primary",
+          "arm_id": "minus_primary",
+          "status": "PASS",
+          "total_tokens": 108423,
+          "elapsed_sec": 141.8807,
+          "model_calls": 3,
+          "provider_token_measured": true,
+          "skill_mount_contract_status": "PASS",
+          "trust_mismatch": false,
+          "token_data_contract_status": "PASS",
+          "receipt_data_contract_status": "PASS"
+        }
+      ]
+    },
+    {
+      "capability": "governance_and_trust",
+      "role_focus": "Audit",
+      "role_dimension": "boundary_security_and_regression",
+      "role_loss_signal": "missing_boundary_or_regression_guard",
+      "status": "RECEIPT_CLEAN_ROLE_REQUIREDNESS_NOT_PROVEN",
+      "full_tokens": 33042,
+      "minus_tokens": 35605,
+      "minus_minus_full_token_delta": 2563,
+      "full_elapsed_sec": 32.6776,
+      "minus_elapsed_sec": 45.2306,
+      "minus_minus_full_elapsed_delta": 12.553,
+      "arms": [
+        {
+          "row_id": "sfv2-role-edge::governance_and_trust::sfv2-role-edge-governance_and_trust-audit-001::full_assembly",
+          "arm_id": "full_assembly",
+          "status": "PASS",
+          "total_tokens": 33042,
+          "elapsed_sec": 32.6776,
+          "model_calls": 1,
+          "provider_token_measured": true,
+          "skill_mount_contract_status": "RETURN",
+          "trust_mismatch": false,
+          "token_data_contract_status": "PASS",
+          "receipt_data_contract_status": "PASS"
+        },
+        {
+          "row_id": "sfv2-role-edge::governance_and_trust::sfv2-role-edge-governance_and_trust-audit-001::minus_audit",
+          "arm_id": "minus_audit",
+          "status": "PASS",
+          "total_tokens": 35605,
+          "elapsed_sec": 45.2306,
+          "model_calls": 1,
+          "provider_token_measured": true,
+          "skill_mount_contract_status": "RETURN",
+          "trust_mismatch": false,
+          "token_data_contract_status": "PASS",
+          "receipt_data_contract_status": "PASS"
+        }
+      ]
+    },
+    {
+      "capability": "governance_and_trust",
+      "role_focus": "Logic",
+      "role_dimension": "semantic_reasoning_and_decision",
+      "role_loss_signal": "missing_decision_invariant_or_counterexample",
+      "status": "RECEIPT_CLEAN_ROLE_REQUIREDNESS_NOT_PROVEN",
+      "full_tokens": 75667,
+      "minus_tokens": 74685,
+      "minus_minus_full_token_delta": -982,
+      "full_elapsed_sec": 113.7709,
+      "minus_elapsed_sec": 110.0002,
+      "minus_minus_full_elapsed_delta": -3.7707,
+      "arms": [
+        {
+          "row_id": "sfv2-role-edge::governance_and_trust::sfv2-role-edge-governance_and_trust-logic-001::full_assembly",
+          "arm_id": "full_assembly",
+          "status": "PASS",
+          "total_tokens": 75667,
+          "elapsed_sec": 113.7709,
+          "model_calls": 2,
+          "provider_token_measured": true,
+          "skill_mount_contract_status": "PASS",
+          "trust_mismatch": false,
+          "token_data_contract_status": "PASS",
+          "receipt_data_contract_status": "PASS"
+        },
+        {
+          "row_id": "sfv2-role-edge::governance_and_trust::sfv2-role-edge-governance_and_trust-logic-001::minus_logic",
+          "arm_id": "minus_logic",
+          "status": "PASS",
+          "total_tokens": 74685,
+          "elapsed_sec": 110.0002,
+          "model_calls": 2,
+          "provider_token_measured": true,
+          "skill_mount_contract_status": "PASS",
+          "trust_mismatch": false,
+          "token_data_contract_status": "PASS",
+          "receipt_data_contract_status": "PASS"
+        }
+      ]
+    },
+    {
+      "capability": "governance_and_trust",
+      "role_focus": "Scout",
+      "role_dimension": "physical_scan_and_data_collection",
+      "role_loss_signal": "missing_scan_or_incomplete_impact_surface",
+      "status": "RECEIPT_CLEAN_ROLE_REQUIREDNESS_NOT_PROVEN",
+      "full_tokens": 71758,
+      "minus_tokens": 73174,
+      "minus_minus_full_token_delta": 1416,
+      "full_elapsed_sec": 96.6589,
+      "minus_elapsed_sec": 103.7343,
+      "minus_minus_full_elapsed_delta": 7.0754,
+      "arms": [
+        {
+          "row_id": "sfv2-role-edge::governance_and_trust::sfv2-role-edge-governance_and_trust-scout-001::full_assembly",
+          "arm_id": "full_assembly",
+          "status": "PASS",
+          "total_tokens": 71758,
+          "elapsed_sec": 96.6589,
+          "model_calls": 2,
+          "provider_token_measured": true,
+          "skill_mount_contract_status": "PASS",
+          "trust_mismatch": false,
+          "token_data_contract_status": "PASS",
+          "receipt_data_contract_status": "PASS"
+        },
+        {
+          "row_id": "sfv2-role-edge::governance_and_trust::sfv2-role-edge-governance_and_trust-scout-001::minus_scout",
+          "arm_id": "minus_scout",
+          "status": "PASS",
+          "total_tokens": 73174,
+          "elapsed_sec": 103.7343,
+          "model_calls": 2,
+          "provider_token_measured": true,
+          "skill_mount_contract_status": "PASS",
+          "trust_mismatch": false,
+          "token_data_contract_status": "PASS",
+          "receipt_data_contract_status": "PASS"
+        }
+      ]
+    },
+    {
+      "capability": "lancedb",
+      "role_focus": "Logic",
+      "role_dimension": "semantic_reasoning_and_decision",
+      "role_loss_signal": "missing_decision_invariant_or_counterexample",
+      "status": "RECEIPT_CLEAN_ROLE_REQUIREDNESS_NOT_PROVEN",
+      "full_tokens": 37884,
+      "minus_tokens": 38045,
+      "minus_minus_full_token_delta": 161,
+      "full_elapsed_sec": 58.4765,
+      "minus_elapsed_sec": 61.3168,
+      "minus_minus_full_elapsed_delta": 2.8403,
+      "arms": [
+        {
+          "row_id": "sfv2-role-edge::lancedb::sfv2-role-edge-lancedb-logic-001::full_assembly",
+          "arm_id": "full_assembly",
+          "status": "PASS",
+          "total_tokens": 37884,
+          "elapsed_sec": 58.4765,
+          "model_calls": 1,
+          "provider_token_measured": true,
+          "skill_mount_contract_status": "RETURN",
+          "trust_mismatch": false,
+          "token_data_contract_status": "PASS",
+          "receipt_data_contract_status": "PASS"
+        },
+        {
+          "row_id": "sfv2-role-edge::lancedb::sfv2-role-edge-lancedb-logic-001::minus_logic",
+          "arm_id": "minus_logic",
+          "status": "PASS",
+          "total_tokens": 38045,
+          "elapsed_sec": 61.3168,
+          "model_calls": 1,
+          "provider_token_measured": true,
+          "skill_mount_contract_status": "PASS",
+          "trust_mismatch": false,
+          "token_data_contract_status": "PASS",
+          "receipt_data_contract_status": "PASS"
+        }
+      ]
+    },
+    {
+      "capability": "lancedb",
+      "role_focus": "primary",
+      "role_dimension": "capability_primary_specialist",
+      "role_loss_signal": "missing_primary_capability_signal",
+      "status": "RECEIPT_CLEAN_ROLE_REQUIREDNESS_NOT_PROVEN",
+      "full_tokens": 33591,
+      "minus_tokens": 34349,
+      "minus_minus_full_token_delta": 758,
+      "full_elapsed_sec": 34.0347,
+      "minus_elapsed_sec": 42.8602,
+      "minus_minus_full_elapsed_delta": 8.8255,
+      "arms": [
+        {
+          "row_id": "sfv2-role-edge::lancedb::sfv2-role-edge-lancedb-primary-001::full_assembly",
+          "arm_id": "full_assembly",
+          "status": "PASS",
+          "total_tokens": 33591,
+          "elapsed_sec": 34.0347,
+          "model_calls": 1,
+          "provider_token_measured": true,
+          "skill_mount_contract_status": "RETURN",
+          "trust_mismatch": false,
+          "token_data_contract_status": "PASS",
+          "receipt_data_contract_status": "PASS"
+        },
+        {
+          "row_id": "sfv2-role-edge::lancedb::sfv2-role-edge-lancedb-primary-001::minus_primary",
+          "arm_id": "minus_primary",
+          "status": "PASS",
+          "total_tokens": 34349,
+          "elapsed_sec": 42.8602,
+          "model_calls": 1,
+          "provider_token_measured": true,
+          "skill_mount_contract_status": "RETURN",
+          "trust_mismatch": false,
+          "token_data_contract_status": "PASS",
+          "receipt_data_contract_status": "PASS"
+        }
+      ]
+    },
+    {
+      "capability": "memory",
+      "role_focus": "Logic",
+      "role_dimension": "semantic_reasoning_and_decision",
+      "role_loss_signal": "missing_decision_invariant_or_counterexample",
+      "status": "RECEIPT_CLEAN_ROLE_REQUIREDNESS_NOT_PROVEN",
+      "full_tokens": 36573,
+      "minus_tokens": 32509,
+      "minus_minus_full_token_delta": -4064,
+      "full_elapsed_sec": 54.7343,
+      "minus_elapsed_sec": 31.2293,
+      "minus_minus_full_elapsed_delta": -23.505,
+      "arms": [
+        {
+          "row_id": "sfv2-role-edge::memory::sfv2-role-edge-memory-logic-001::full_assembly",
+          "arm_id": "full_assembly",
+          "status": "PASS",
+          "total_tokens": 36573,
+          "elapsed_sec": 54.7343,
+          "model_calls": 1,
+          "provider_token_measured": true,
+          "skill_mount_contract_status": "RETURN",
+          "trust_mismatch": false,
+          "token_data_contract_status": "PASS",
+          "receipt_data_contract_status": "PASS"
+        },
+        {
+          "row_id": "sfv2-role-edge::memory::sfv2-role-edge-memory-logic-001::minus_logic",
+          "arm_id": "minus_logic",
+          "status": "PASS",
+          "total_tokens": 32509,
+          "elapsed_sec": 31.2293,
+          "model_calls": 1,
+          "provider_token_measured": true,
+          "skill_mount_contract_status": "PASS",
+          "trust_mismatch": false,
+          "token_data_contract_status": "PASS",
+          "receipt_data_contract_status": "PASS"
+        }
+      ]
+    },
+    {
+      "capability": "memory",
+      "role_focus": "primary",
+      "role_dimension": "capability_primary_specialist",
+      "role_loss_signal": "missing_primary_capability_signal",
+      "status": "RECEIPT_CLEAN_ROLE_REQUIREDNESS_NOT_PROVEN",
+      "full_tokens": 32288,
+      "minus_tokens": 39978,
+      "minus_minus_full_token_delta": 7690,
+      "full_elapsed_sec": 26.9974,
+      "minus_elapsed_sec": 75.0595,
+      "minus_minus_full_elapsed_delta": 48.0621,
+      "arms": [
+        {
+          "row_id": "sfv2-role-edge::memory::sfv2-role-edge-memory-primary-001::full_assembly",
+          "arm_id": "full_assembly",
+          "status": "PASS",
+          "total_tokens": 32288,
+          "elapsed_sec": 26.9974,
+          "model_calls": 1,
+          "provider_token_measured": true,
+          "skill_mount_contract_status": "RETURN",
+          "trust_mismatch": false,
+          "token_data_contract_status": "PASS",
+          "receipt_data_contract_status": "PASS"
+        },
+        {
+          "row_id": "sfv2-role-edge::memory::sfv2-role-edge-memory-primary-001::minus_primary",
+          "arm_id": "minus_primary",
+          "status": "PASS",
+          "total_tokens": 39978,
+          "elapsed_sec": 75.0595,
+          "model_calls": 1,
+          "provider_token_measured": true,
+          "skill_mount_contract_status": "RETURN",
+          "trust_mismatch": false,
+          "token_data_contract_status": "PASS",
+          "receipt_data_contract_status": "PASS"
+        }
+      ]
+    },
+    {
+      "capability": "mempalace",
+      "role_focus": "Audit",
+      "role_dimension": "boundary_security_and_regression",
+      "role_loss_signal": "missing_boundary_or_regression_guard",
+      "status": "RECEIPT_CLEAN_ROLE_REQUIREDNESS_NOT_PROVEN",
+      "full_tokens": 35226,
+      "minus_tokens": 30172,
+      "minus_minus_full_token_delta": -5054,
+      "full_elapsed_sec": 49.7519,
+      "minus_elapsed_sec": 18.6411,
+      "minus_minus_full_elapsed_delta": -31.1108,
+      "arms": [
+        {
+          "row_id": "sfv2-role-edge::mempalace::sfv2-role-edge-mempalace-audit-001::full_assembly",
+          "arm_id": "full_assembly",
+          "status": "PASS",
+          "total_tokens": 35226,
+          "elapsed_sec": 49.7519,
+          "model_calls": 1,
+          "provider_token_measured": true,
+          "skill_mount_contract_status": "RETURN",
+          "trust_mismatch": false,
+          "token_data_contract_status": "PASS",
+          "receipt_data_contract_status": "PASS"
+        },
+        {
+          "row_id": "sfv2-role-edge::mempalace::sfv2-role-edge-mempalace-audit-001::minus_audit",
+          "arm_id": "minus_audit",
+          "status": "PASS",
+          "total_tokens": 30172,
+          "elapsed_sec": 18.6411,
+          "model_calls": 1,
+          "provider_token_measured": true,
+          "skill_mount_contract_status": "PASS",
+          "trust_mismatch": false,
+          "token_data_contract_status": "PASS",
+          "receipt_data_contract_status": "PASS"
+        }
+      ]
+    },
+    {
+      "capability": "mempalace",
+      "role_focus": "primary",
+      "role_dimension": "capability_primary_specialist",
+      "role_loss_signal": "missing_primary_capability_signal",
+      "status": "RECEIPT_CLEAN_ROLE_REQUIREDNESS_NOT_PROVEN",
+      "full_tokens": 64487,
+      "minus_tokens": 34979,
+      "minus_minus_full_token_delta": -29508,
+      "full_elapsed_sec": 56.018,
+      "minus_elapsed_sec": 47.9801,
+      "minus_minus_full_elapsed_delta": -8.0379,
+      "arms": [
+        {
+          "row_id": "sfv2-role-edge::mempalace::sfv2-role-edge-mempalace-primary-001::full_assembly",
+          "arm_id": "full_assembly",
+          "status": "PASS",
+          "total_tokens": 64487,
+          "elapsed_sec": 56.018,
+          "model_calls": 2,
+          "provider_token_measured": true,
+          "skill_mount_contract_status": "PASS",
+          "trust_mismatch": false,
+          "token_data_contract_status": "PASS",
+          "receipt_data_contract_status": "PASS"
+        },
+        {
+          "row_id": "sfv2-role-edge::mempalace::sfv2-role-edge-mempalace-primary-001::minus_primary",
+          "arm_id": "minus_primary",
+          "status": "PASS",
+          "total_tokens": 34979,
+          "elapsed_sec": 47.9801,
+          "model_calls": 1,
+          "provider_token_measured": true,
+          "skill_mount_contract_status": "RETURN",
+          "trust_mismatch": false,
+          "token_data_contract_status": "PASS",
+          "receipt_data_contract_status": "PASS"
+        }
+      ]
+    },
+    {
+      "capability": "regression_guard",
+      "role_focus": "Logic",
+      "role_dimension": "semantic_reasoning_and_decision",
+      "role_loss_signal": "missing_decision_invariant_or_counterexample",
+      "status": "RECEIPT_CLEAN_ROLE_REQUIREDNESS_NOT_PROVEN",
+      "full_tokens": 36972,
+      "minus_tokens": 33248,
+      "minus_minus_full_token_delta": -3724,
+      "full_elapsed_sec": 60.6971,
+      "minus_elapsed_sec": 117.0953,
+      "minus_minus_full_elapsed_delta": 56.3982,
+      "arms": [
+        {
+          "row_id": "sfv2-role-edge::regression_guard::sfv2-role-edge-regression_guard-logic-001::full_assembly",
+          "arm_id": "full_assembly",
+          "status": "PASS",
+          "total_tokens": 36972,
+          "elapsed_sec": 60.6971,
+          "model_calls": 1,
+          "provider_token_measured": true,
+          "skill_mount_contract_status": "RETURN",
+          "trust_mismatch": false,
+          "token_data_contract_status": "PASS",
+          "receipt_data_contract_status": "PASS"
+        },
+        {
+          "row_id": "sfv2-role-edge::regression_guard::sfv2-role-edge-regression_guard-logic-001::minus_logic",
+          "arm_id": "minus_logic",
+          "status": "PASS",
+          "total_tokens": 33248,
+          "elapsed_sec": 117.0953,
+          "model_calls": 1,
+          "provider_token_measured": true,
+          "skill_mount_contract_status": "PASS",
+          "trust_mismatch": false,
+          "token_data_contract_status": "PASS",
+          "receipt_data_contract_status": "PASS"
+        }
+      ]
+    },
+    {
+      "capability": "regression_guard",
+      "role_focus": "primary",
+      "role_dimension": "capability_primary_specialist",
+      "role_loss_signal": "missing_primary_capability_signal",
+      "status": "RECEIPT_CLEAN_ROLE_REQUIREDNESS_NOT_PROVEN",
+      "full_tokens": 33829,
+      "minus_tokens": 37031,
+      "minus_minus_full_token_delta": 3202,
+      "full_elapsed_sec": 37.6199,
+      "minus_elapsed_sec": 58.8865,
+      "minus_minus_full_elapsed_delta": 21.2666,
+      "arms": [
+        {
+          "row_id": "sfv2-role-edge::regression_guard::sfv2-role-edge-regression_guard-primary-001::full_assembly",
+          "arm_id": "full_assembly",
+          "status": "PASS",
+          "total_tokens": 33829,
+          "elapsed_sec": 37.6199,
+          "model_calls": 1,
+          "provider_token_measured": true,
+          "skill_mount_contract_status": "RETURN",
+          "trust_mismatch": false,
+          "token_data_contract_status": "PASS",
+          "receipt_data_contract_status": "PASS"
+        },
+        {
+          "row_id": "sfv2-role-edge::regression_guard::sfv2-role-edge-regression_guard-primary-001::minus_primary",
+          "arm_id": "minus_primary",
+          "status": "PASS",
+          "total_tokens": 37031,
+          "elapsed_sec": 58.8865,
+          "model_calls": 1,
+          "provider_token_measured": true,
+          "skill_mount_contract_status": "RETURN",
+          "trust_mismatch": false,
+          "token_data_contract_status": "PASS",
+          "receipt_data_contract_status": "PASS"
+        }
+      ]
+    }
+  ],
+  "evidence": {
+    "live_summary": ".nexus/reports/sfv2_role_ablation_edgecase_live_2026-05-21/live_summary.json",
+    "execution_matrix": "docs/reports/NEXUS_SFV2_ROLE_ABLATION_EDGECASE_EXECUTION_MATRIX_2026-05-21.json"
+  }
+}

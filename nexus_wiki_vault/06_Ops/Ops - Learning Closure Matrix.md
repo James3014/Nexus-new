@@ -2812,3 +2812,17 @@ version_scope:
 - Failure: the planner correctly selected additional code-oriented capabilities, so the smoke observed the `codeintel` assembly instead of the intended single capability.
 - Lesson: runtime overlay assembly seams should be tested with an explicit selected-capability scope, or assertions must account for the planner's full selected capability set.
 - Guardrail: use `CapabilityPlanner._runtime_policy_overlay_skill_requests(..., selected_capabilities=[capability])` for deterministic overlay seam checks; use full planner tests only when validating capability selection itself.
+
+## 2026-05-21 - SFV2 role edgecase metadata belongs outside task schema
+
+- Trigger: the first SFV2 edgecase preflight returned `manifest_task_1_unknown:role_dimension,role_focus,role_loss_signal`.
+- Failure: role-ablation metadata was written into frozen benchmark task rows, where the capability benchmark preflight rejects unknown task fields.
+- Lesson: role-focused SF/HEEP metadata belongs in task text, matrix rows, runner env, and rollup artifacts, not arbitrary task manifest fields.
+- Guardrail: keep generated task manifests schema-clean; add tests that assert role metadata is absent from task rows and present in matrix rows.
+
+## 2026-05-21 - role-focused PASS does not prove role necessity
+
+- Trigger: SFV2 edgecase replay produced 40/40 PASS across full and minus-role rows.
+- Failure: treating those clean rows as role-requiredness proof would overclaim, because every minus-role row preserved delivery and runtime receipt cleanliness.
+- Lesson: full/minus role-ablation proves executability first; role necessity requires a concrete loss in reliability, quality, governance, regression, or receipt evidence when a role is removed.
+- Guardrail: keep `role_requiredness_proven_count=0` unless the matching minus-role arm loses a hard KPI that the full assembly preserves.
