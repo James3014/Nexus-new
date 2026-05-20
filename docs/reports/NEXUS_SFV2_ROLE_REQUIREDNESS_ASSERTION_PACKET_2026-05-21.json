@@ -1,0 +1,1146 @@
+{
+  "schema": "nexus.sfv2_role_requiredness_assertion_packet.v1",
+  "status": "PASS",
+  "summary": {
+    "assertion_count": 20,
+    "role_requiredness_proven_count": 0,
+    "not_proven_count": 20,
+    "runtime_update_allowed": false,
+    "public_benchmark_allowed": false
+  },
+  "claim_boundary": [
+    "This packet evaluates role requiredness with machine-checkable runtime fields.",
+    "A role is required only when full assembly is clean and the matching minus-role arm loses a required external assertion.",
+    "No runtime default or public benchmark is unlocked by this packet."
+  ],
+  "assertions": [
+    {
+      "capability": "autonomic_router",
+      "role_focus": "Audit",
+      "assertion_id": "audit_boundary_gate_present",
+      "loss_dimension": "governance_boundary_or_regression_evidence",
+      "status": "NOT_PROVEN",
+      "reason": "minus_role_preserved_required_external_assertions",
+      "full_clean": true,
+      "minus_clean": true,
+      "full_field_state": {
+        "rubric_contract_status": {
+          "present": true,
+          "value": "PASS"
+        },
+        "evidence_rubric_status": {
+          "present": true,
+          "value": "PASS"
+        },
+        "delivery_rubric_status": {
+          "present": true,
+          "value": "PASS"
+        },
+        "warning_clean": {
+          "present": true,
+          "value": true
+        }
+      },
+      "minus_field_state": {
+        "rubric_contract_status": {
+          "present": true,
+          "value": "PASS"
+        },
+        "evidence_rubric_status": {
+          "present": true,
+          "value": "PASS"
+        },
+        "delivery_rubric_status": {
+          "present": true,
+          "value": "PASS"
+        },
+        "warning_clean": {
+          "present": true,
+          "value": true
+        }
+      },
+      "full_row_id": "sfv2-role-edge::autonomic_router::sfv2-role-edge-autonomic_router-audit-001::full_assembly",
+      "minus_row_id": "sfv2-role-edge::autonomic_router::sfv2-role-edge-autonomic_router-audit-001::minus_audit"
+    },
+    {
+      "capability": "autonomic_router",
+      "role_focus": "primary",
+      "assertion_id": "primary_expected_receipt_present",
+      "loss_dimension": "primary_capability_receipt_evidence",
+      "status": "NOT_PROVEN",
+      "reason": "minus_role_preserved_required_external_assertions",
+      "full_clean": true,
+      "minus_clean": true,
+      "full_field_state": {
+        "expected_capability_receipt_coverage": {
+          "present": true,
+          "value": {
+            "expected": [
+              "autoreason"
+            ],
+            "public_safe": [
+              "autoreason"
+            ],
+            "missing": [],
+            "failure_reasons": {},
+            "all_public_safe": true
+          }
+        },
+        "expected_capability_invocation_coverage": {
+          "present": true,
+          "value": {
+            "expected": [
+              "autoreason"
+            ],
+            "invoked": [
+              "autoreason"
+            ],
+            "missing": [],
+            "failure_reasons": {},
+            "all_invoked_with_evidence": true
+          }
+        },
+        "skill_mount_contract_status": {
+          "present": true,
+          "value": "PASS"
+        }
+      },
+      "minus_field_state": {
+        "expected_capability_receipt_coverage": {
+          "present": true,
+          "value": {
+            "expected": [
+              "autoreason"
+            ],
+            "public_safe": [
+              "autoreason"
+            ],
+            "missing": [],
+            "failure_reasons": {},
+            "all_public_safe": true
+          }
+        },
+        "expected_capability_invocation_coverage": {
+          "present": true,
+          "value": {
+            "expected": [
+              "autoreason"
+            ],
+            "invoked": [
+              "autoreason"
+            ],
+            "missing": [],
+            "failure_reasons": {},
+            "all_invoked_with_evidence": true
+          }
+        },
+        "skill_mount_contract_status": {
+          "present": true,
+          "value": "PASS"
+        }
+      },
+      "full_row_id": "sfv2-role-edge::autonomic_router::sfv2-role-edge-autonomic_router-primary-001::full_assembly",
+      "minus_row_id": "sfv2-role-edge::autonomic_router::sfv2-role-edge-autonomic_router-primary-001::minus_primary"
+    },
+    {
+      "capability": "belief",
+      "role_focus": "Audit",
+      "assertion_id": "audit_boundary_gate_present",
+      "loss_dimension": "governance_boundary_or_regression_evidence",
+      "status": "NOT_PROVEN",
+      "reason": "minus_role_preserved_required_external_assertions",
+      "full_clean": true,
+      "minus_clean": true,
+      "full_field_state": {
+        "rubric_contract_status": {
+          "present": true,
+          "value": "PASS"
+        },
+        "evidence_rubric_status": {
+          "present": true,
+          "value": "PASS"
+        },
+        "delivery_rubric_status": {
+          "present": true,
+          "value": "PASS"
+        },
+        "warning_clean": {
+          "present": true,
+          "value": true
+        }
+      },
+      "minus_field_state": {
+        "rubric_contract_status": {
+          "present": true,
+          "value": "PASS"
+        },
+        "evidence_rubric_status": {
+          "present": true,
+          "value": "PASS"
+        },
+        "delivery_rubric_status": {
+          "present": true,
+          "value": "PASS"
+        },
+        "warning_clean": {
+          "present": true,
+          "value": true
+        }
+      },
+      "full_row_id": "sfv2-role-edge::belief::sfv2-role-edge-belief-audit-001::full_assembly",
+      "minus_row_id": "sfv2-role-edge::belief::sfv2-role-edge-belief-audit-001::minus_audit"
+    },
+    {
+      "capability": "belief",
+      "role_focus": "primary",
+      "assertion_id": "primary_expected_receipt_present",
+      "loss_dimension": "primary_capability_receipt_evidence",
+      "status": "NOT_PROVEN",
+      "reason": "minus_role_preserved_required_external_assertions",
+      "full_clean": true,
+      "minus_clean": true,
+      "full_field_state": {
+        "expected_capability_receipt_coverage": {
+          "present": true,
+          "value": {
+            "expected": [
+              "belief"
+            ],
+            "public_safe": [
+              "belief"
+            ],
+            "missing": [],
+            "failure_reasons": {},
+            "all_public_safe": true
+          }
+        },
+        "expected_capability_invocation_coverage": {
+          "present": true,
+          "value": {
+            "expected": [
+              "belief"
+            ],
+            "invoked": [
+              "belief"
+            ],
+            "missing": [],
+            "failure_reasons": {},
+            "all_invoked_with_evidence": true
+          }
+        },
+        "skill_mount_contract_status": {
+          "present": true,
+          "value": "PASS"
+        }
+      },
+      "minus_field_state": {
+        "expected_capability_receipt_coverage": {
+          "present": true,
+          "value": {
+            "expected": [
+              "belief"
+            ],
+            "public_safe": [
+              "belief"
+            ],
+            "missing": [],
+            "failure_reasons": {},
+            "all_public_safe": true
+          }
+        },
+        "expected_capability_invocation_coverage": {
+          "present": true,
+          "value": {
+            "expected": [
+              "belief"
+            ],
+            "invoked": [
+              "belief"
+            ],
+            "missing": [],
+            "failure_reasons": {},
+            "all_invoked_with_evidence": true
+          }
+        },
+        "skill_mount_contract_status": {
+          "present": true,
+          "value": "PASS"
+        }
+      },
+      "full_row_id": "sfv2-role-edge::belief::sfv2-role-edge-belief-primary-001::full_assembly",
+      "minus_row_id": "sfv2-role-edge::belief::sfv2-role-edge-belief-primary-001::minus_primary"
+    },
+    {
+      "capability": "codeintel",
+      "role_focus": "Audit",
+      "assertion_id": "audit_boundary_gate_present",
+      "loss_dimension": "governance_boundary_or_regression_evidence",
+      "status": "NOT_PROVEN",
+      "reason": "full_assembly_not_clean_for_assertion",
+      "full_clean": false,
+      "minus_clean": false,
+      "full_field_state": {
+        "rubric_contract_status": {
+          "present": true,
+          "value": "PASS"
+        },
+        "evidence_rubric_status": {
+          "present": true,
+          "value": "PASS"
+        },
+        "delivery_rubric_status": {
+          "present": true,
+          "value": "PASS"
+        },
+        "warning_clean": {
+          "present": true,
+          "value": true
+        }
+      },
+      "minus_field_state": {
+        "rubric_contract_status": {
+          "present": true,
+          "value": "PASS"
+        },
+        "evidence_rubric_status": {
+          "present": true,
+          "value": "PASS"
+        },
+        "delivery_rubric_status": {
+          "present": true,
+          "value": "PASS"
+        },
+        "warning_clean": {
+          "present": true,
+          "value": true
+        }
+      },
+      "full_row_id": "sfv2-role-edge::codeintel::sfv2-role-edge-codeintel-audit-001::full_assembly",
+      "minus_row_id": "sfv2-role-edge::codeintel::sfv2-role-edge-codeintel-audit-001::minus_audit"
+    },
+    {
+      "capability": "codeintel",
+      "role_focus": "Logic",
+      "assertion_id": "logic_decision_invariant_present",
+      "loss_dimension": "decision_invariant_or_reasoning_evidence",
+      "status": "NOT_PROVEN",
+      "reason": "full_assembly_not_clean_for_assertion",
+      "full_clean": false,
+      "minus_clean": false,
+      "full_field_state": {
+        "autoreason_status": {
+          "present": true,
+          "value": "SKIPPED"
+        },
+        "belief_confidence": {
+          "present": true,
+          "value": 1.0
+        },
+        "capability_plan_trace_present": {
+          "present": true,
+          "value": true
+        }
+      },
+      "minus_field_state": {
+        "autoreason_status": {
+          "present": true,
+          "value": "SKIPPED"
+        },
+        "belief_confidence": {
+          "present": true,
+          "value": 1.0
+        },
+        "capability_plan_trace_present": {
+          "present": true,
+          "value": true
+        }
+      },
+      "full_row_id": "sfv2-role-edge::codeintel::sfv2-role-edge-codeintel-logic-001::full_assembly",
+      "minus_row_id": "sfv2-role-edge::codeintel::sfv2-role-edge-codeintel-logic-001::minus_logic"
+    },
+    {
+      "capability": "codeintel",
+      "role_focus": "Scout",
+      "assertion_id": "scout_external_surface_present",
+      "loss_dimension": "external_scan_or_surface_evidence",
+      "status": "NOT_PROVEN",
+      "reason": "minus_role_preserved_required_external_assertions",
+      "full_clean": true,
+      "minus_clean": false,
+      "full_field_state": {
+        "codeintel_scan_report_present": {
+          "present": true,
+          "value": true
+        },
+        "codeintel_impact_report_present": {
+          "present": true,
+          "value": true
+        },
+        "dci_locator_present": {
+          "present": true,
+          "value": true
+        }
+      },
+      "minus_field_state": {
+        "codeintel_scan_report_present": {
+          "present": true,
+          "value": true
+        },
+        "codeintel_impact_report_present": {
+          "present": true,
+          "value": true
+        },
+        "dci_locator_present": {
+          "present": true,
+          "value": true
+        }
+      },
+      "full_row_id": "sfv2-role-edge::codeintel::sfv2-role-edge-codeintel-scout-001::full_assembly",
+      "minus_row_id": "sfv2-role-edge::codeintel::sfv2-role-edge-codeintel-scout-001::minus_scout"
+    },
+    {
+      "capability": "ddtree",
+      "role_focus": "Audit",
+      "assertion_id": "audit_boundary_gate_present",
+      "loss_dimension": "governance_boundary_or_regression_evidence",
+      "status": "NOT_PROVEN",
+      "reason": "minus_role_preserved_required_external_assertions",
+      "full_clean": true,
+      "minus_clean": true,
+      "full_field_state": {
+        "rubric_contract_status": {
+          "present": true,
+          "value": "PASS"
+        },
+        "evidence_rubric_status": {
+          "present": true,
+          "value": "PASS"
+        },
+        "delivery_rubric_status": {
+          "present": true,
+          "value": "PASS"
+        },
+        "warning_clean": {
+          "present": true,
+          "value": true
+        }
+      },
+      "minus_field_state": {
+        "rubric_contract_status": {
+          "present": true,
+          "value": "PASS"
+        },
+        "evidence_rubric_status": {
+          "present": true,
+          "value": "PASS"
+        },
+        "delivery_rubric_status": {
+          "present": true,
+          "value": "PASS"
+        },
+        "warning_clean": {
+          "present": true,
+          "value": true
+        }
+      },
+      "full_row_id": "sfv2-role-edge::ddtree::sfv2-role-edge-ddtree-audit-001::full_assembly",
+      "minus_row_id": "sfv2-role-edge::ddtree::sfv2-role-edge-ddtree-audit-001::minus_audit"
+    },
+    {
+      "capability": "ddtree",
+      "role_focus": "primary",
+      "assertion_id": "primary_expected_receipt_present",
+      "loss_dimension": "primary_capability_receipt_evidence",
+      "status": "NOT_PROVEN",
+      "reason": "minus_role_preserved_required_external_assertions",
+      "full_clean": true,
+      "minus_clean": true,
+      "full_field_state": {
+        "expected_capability_receipt_coverage": {
+          "present": true,
+          "value": {
+            "expected": [
+              "ddtree"
+            ],
+            "public_safe": [
+              "ddtree"
+            ],
+            "missing": [],
+            "failure_reasons": {},
+            "all_public_safe": true
+          }
+        },
+        "expected_capability_invocation_coverage": {
+          "present": true,
+          "value": {
+            "expected": [
+              "ddtree"
+            ],
+            "invoked": [
+              "ddtree"
+            ],
+            "missing": [],
+            "failure_reasons": {},
+            "all_invoked_with_evidence": true
+          }
+        },
+        "skill_mount_contract_status": {
+          "present": true,
+          "value": "PASS"
+        }
+      },
+      "minus_field_state": {
+        "expected_capability_receipt_coverage": {
+          "present": true,
+          "value": {
+            "expected": [
+              "ddtree"
+            ],
+            "public_safe": [
+              "ddtree"
+            ],
+            "missing": [],
+            "failure_reasons": {},
+            "all_public_safe": true
+          }
+        },
+        "expected_capability_invocation_coverage": {
+          "present": true,
+          "value": {
+            "expected": [
+              "ddtree"
+            ],
+            "invoked": [
+              "ddtree"
+            ],
+            "missing": [],
+            "failure_reasons": {},
+            "all_invoked_with_evidence": true
+          }
+        },
+        "skill_mount_contract_status": {
+          "present": true,
+          "value": "PASS"
+        }
+      },
+      "full_row_id": "sfv2-role-edge::ddtree::sfv2-role-edge-ddtree-primary-001::full_assembly",
+      "minus_row_id": "sfv2-role-edge::ddtree::sfv2-role-edge-ddtree-primary-001::minus_primary"
+    },
+    {
+      "capability": "governance_and_trust",
+      "role_focus": "Audit",
+      "assertion_id": "audit_boundary_gate_present",
+      "loss_dimension": "governance_boundary_or_regression_evidence",
+      "status": "NOT_PROVEN",
+      "reason": "full_assembly_not_clean_for_assertion",
+      "full_clean": false,
+      "minus_clean": false,
+      "full_field_state": {
+        "rubric_contract_status": {
+          "present": true,
+          "value": "PASS"
+        },
+        "evidence_rubric_status": {
+          "present": true,
+          "value": "PASS"
+        },
+        "delivery_rubric_status": {
+          "present": true,
+          "value": "PASS"
+        },
+        "warning_clean": {
+          "present": true,
+          "value": true
+        }
+      },
+      "minus_field_state": {
+        "rubric_contract_status": {
+          "present": true,
+          "value": "PASS"
+        },
+        "evidence_rubric_status": {
+          "present": true,
+          "value": "PASS"
+        },
+        "delivery_rubric_status": {
+          "present": true,
+          "value": "PASS"
+        },
+        "warning_clean": {
+          "present": true,
+          "value": true
+        }
+      },
+      "full_row_id": "sfv2-role-edge::governance_and_trust::sfv2-role-edge-governance_and_trust-audit-001::full_assembly",
+      "minus_row_id": "sfv2-role-edge::governance_and_trust::sfv2-role-edge-governance_and_trust-audit-001::minus_audit"
+    },
+    {
+      "capability": "governance_and_trust",
+      "role_focus": "Logic",
+      "assertion_id": "logic_decision_invariant_present",
+      "loss_dimension": "decision_invariant_or_reasoning_evidence",
+      "status": "NOT_PROVEN",
+      "reason": "minus_role_preserved_required_external_assertions",
+      "full_clean": true,
+      "minus_clean": true,
+      "full_field_state": {
+        "autoreason_status": {
+          "present": true,
+          "value": "SUCCESS"
+        },
+        "belief_confidence": {
+          "present": true,
+          "value": 1.0
+        },
+        "capability_plan_trace_present": {
+          "present": true,
+          "value": true
+        }
+      },
+      "minus_field_state": {
+        "autoreason_status": {
+          "present": true,
+          "value": "SUCCESS"
+        },
+        "belief_confidence": {
+          "present": true,
+          "value": 1.0
+        },
+        "capability_plan_trace_present": {
+          "present": true,
+          "value": true
+        }
+      },
+      "full_row_id": "sfv2-role-edge::governance_and_trust::sfv2-role-edge-governance_and_trust-logic-001::full_assembly",
+      "minus_row_id": "sfv2-role-edge::governance_and_trust::sfv2-role-edge-governance_and_trust-logic-001::minus_logic"
+    },
+    {
+      "capability": "governance_and_trust",
+      "role_focus": "Scout",
+      "assertion_id": "scout_external_surface_present",
+      "loss_dimension": "external_scan_or_surface_evidence",
+      "status": "NOT_PROVEN",
+      "reason": "minus_role_preserved_required_external_assertions",
+      "full_clean": true,
+      "minus_clean": true,
+      "full_field_state": {
+        "codeintel_scan_report_present": {
+          "present": true,
+          "value": true
+        },
+        "codeintel_impact_report_present": {
+          "present": true,
+          "value": true
+        },
+        "dci_locator_present": {
+          "present": true,
+          "value": true
+        }
+      },
+      "minus_field_state": {
+        "codeintel_scan_report_present": {
+          "present": true,
+          "value": true
+        },
+        "codeintel_impact_report_present": {
+          "present": true,
+          "value": true
+        },
+        "dci_locator_present": {
+          "present": true,
+          "value": true
+        }
+      },
+      "full_row_id": "sfv2-role-edge::governance_and_trust::sfv2-role-edge-governance_and_trust-scout-001::full_assembly",
+      "minus_row_id": "sfv2-role-edge::governance_and_trust::sfv2-role-edge-governance_and_trust-scout-001::minus_scout"
+    },
+    {
+      "capability": "lancedb",
+      "role_focus": "Logic",
+      "assertion_id": "logic_decision_invariant_present",
+      "loss_dimension": "decision_invariant_or_reasoning_evidence",
+      "status": "NOT_PROVEN",
+      "reason": "full_assembly_not_clean_for_assertion",
+      "full_clean": false,
+      "minus_clean": true,
+      "full_field_state": {
+        "autoreason_status": {
+          "present": true,
+          "value": "SKIPPED"
+        },
+        "belief_confidence": {
+          "present": true,
+          "value": 1.0
+        },
+        "capability_plan_trace_present": {
+          "present": true,
+          "value": true
+        }
+      },
+      "minus_field_state": {
+        "autoreason_status": {
+          "present": true,
+          "value": "SKIPPED"
+        },
+        "belief_confidence": {
+          "present": true,
+          "value": 1.0
+        },
+        "capability_plan_trace_present": {
+          "present": true,
+          "value": true
+        }
+      },
+      "full_row_id": "sfv2-role-edge::lancedb::sfv2-role-edge-lancedb-logic-001::full_assembly",
+      "minus_row_id": "sfv2-role-edge::lancedb::sfv2-role-edge-lancedb-logic-001::minus_logic"
+    },
+    {
+      "capability": "lancedb",
+      "role_focus": "primary",
+      "assertion_id": "primary_expected_receipt_present",
+      "loss_dimension": "primary_capability_receipt_evidence",
+      "status": "NOT_PROVEN",
+      "reason": "full_assembly_not_clean_for_assertion",
+      "full_clean": false,
+      "minus_clean": false,
+      "full_field_state": {
+        "expected_capability_receipt_coverage": {
+          "present": true,
+          "value": {
+            "expected": [
+              "lancedb"
+            ],
+            "public_safe": [
+              "lancedb"
+            ],
+            "missing": [],
+            "failure_reasons": {},
+            "all_public_safe": true
+          }
+        },
+        "expected_capability_invocation_coverage": {
+          "present": true,
+          "value": {
+            "expected": [
+              "lancedb"
+            ],
+            "invoked": [
+              "lancedb"
+            ],
+            "missing": [],
+            "failure_reasons": {},
+            "all_invoked_with_evidence": true
+          }
+        },
+        "skill_mount_contract_status": {
+          "present": true,
+          "value": "RETURN"
+        }
+      },
+      "minus_field_state": {
+        "expected_capability_receipt_coverage": {
+          "present": true,
+          "value": {
+            "expected": [
+              "lancedb"
+            ],
+            "public_safe": [
+              "lancedb"
+            ],
+            "missing": [],
+            "failure_reasons": {},
+            "all_public_safe": true
+          }
+        },
+        "expected_capability_invocation_coverage": {
+          "present": true,
+          "value": {
+            "expected": [
+              "lancedb"
+            ],
+            "invoked": [
+              "lancedb"
+            ],
+            "missing": [],
+            "failure_reasons": {},
+            "all_invoked_with_evidence": true
+          }
+        },
+        "skill_mount_contract_status": {
+          "present": true,
+          "value": "RETURN"
+        }
+      },
+      "full_row_id": "sfv2-role-edge::lancedb::sfv2-role-edge-lancedb-primary-001::full_assembly",
+      "minus_row_id": "sfv2-role-edge::lancedb::sfv2-role-edge-lancedb-primary-001::minus_primary"
+    },
+    {
+      "capability": "memory",
+      "role_focus": "Logic",
+      "assertion_id": "logic_decision_invariant_present",
+      "loss_dimension": "decision_invariant_or_reasoning_evidence",
+      "status": "NOT_PROVEN",
+      "reason": "full_assembly_not_clean_for_assertion",
+      "full_clean": false,
+      "minus_clean": true,
+      "full_field_state": {
+        "autoreason_status": {
+          "present": true,
+          "value": "SKIPPED"
+        },
+        "belief_confidence": {
+          "present": true,
+          "value": 1.0
+        },
+        "capability_plan_trace_present": {
+          "present": true,
+          "value": true
+        }
+      },
+      "minus_field_state": {
+        "autoreason_status": {
+          "present": true,
+          "value": "SKIPPED"
+        },
+        "belief_confidence": {
+          "present": true,
+          "value": 1.0
+        },
+        "capability_plan_trace_present": {
+          "present": true,
+          "value": true
+        }
+      },
+      "full_row_id": "sfv2-role-edge::memory::sfv2-role-edge-memory-logic-001::full_assembly",
+      "minus_row_id": "sfv2-role-edge::memory::sfv2-role-edge-memory-logic-001::minus_logic"
+    },
+    {
+      "capability": "memory",
+      "role_focus": "primary",
+      "assertion_id": "primary_expected_receipt_present",
+      "loss_dimension": "primary_capability_receipt_evidence",
+      "status": "NOT_PROVEN",
+      "reason": "full_assembly_not_clean_for_assertion",
+      "full_clean": false,
+      "minus_clean": false,
+      "full_field_state": {
+        "expected_capability_receipt_coverage": {
+          "present": true,
+          "value": {
+            "expected": [
+              "memory"
+            ],
+            "public_safe": [
+              "memory"
+            ],
+            "missing": [],
+            "failure_reasons": {},
+            "all_public_safe": true
+          }
+        },
+        "expected_capability_invocation_coverage": {
+          "present": true,
+          "value": {
+            "expected": [
+              "memory"
+            ],
+            "invoked": [
+              "memory"
+            ],
+            "missing": [],
+            "failure_reasons": {},
+            "all_invoked_with_evidence": true
+          }
+        },
+        "skill_mount_contract_status": {
+          "present": true,
+          "value": "RETURN"
+        }
+      },
+      "minus_field_state": {
+        "expected_capability_receipt_coverage": {
+          "present": true,
+          "value": {
+            "expected": [
+              "memory"
+            ],
+            "public_safe": [
+              "memory"
+            ],
+            "missing": [],
+            "failure_reasons": {},
+            "all_public_safe": true
+          }
+        },
+        "expected_capability_invocation_coverage": {
+          "present": true,
+          "value": {
+            "expected": [
+              "memory"
+            ],
+            "invoked": [
+              "memory"
+            ],
+            "missing": [],
+            "failure_reasons": {},
+            "all_invoked_with_evidence": true
+          }
+        },
+        "skill_mount_contract_status": {
+          "present": true,
+          "value": "RETURN"
+        }
+      },
+      "full_row_id": "sfv2-role-edge::memory::sfv2-role-edge-memory-primary-001::full_assembly",
+      "minus_row_id": "sfv2-role-edge::memory::sfv2-role-edge-memory-primary-001::minus_primary"
+    },
+    {
+      "capability": "mempalace",
+      "role_focus": "Audit",
+      "assertion_id": "audit_boundary_gate_present",
+      "loss_dimension": "governance_boundary_or_regression_evidence",
+      "status": "NOT_PROVEN",
+      "reason": "full_assembly_not_clean_for_assertion",
+      "full_clean": false,
+      "minus_clean": true,
+      "full_field_state": {
+        "rubric_contract_status": {
+          "present": true,
+          "value": "PASS"
+        },
+        "evidence_rubric_status": {
+          "present": true,
+          "value": "PASS"
+        },
+        "delivery_rubric_status": {
+          "present": true,
+          "value": "PASS"
+        },
+        "warning_clean": {
+          "present": true,
+          "value": true
+        }
+      },
+      "minus_field_state": {
+        "rubric_contract_status": {
+          "present": true,
+          "value": "PASS"
+        },
+        "evidence_rubric_status": {
+          "present": true,
+          "value": "PASS"
+        },
+        "delivery_rubric_status": {
+          "present": true,
+          "value": "PASS"
+        },
+        "warning_clean": {
+          "present": true,
+          "value": true
+        }
+      },
+      "full_row_id": "sfv2-role-edge::mempalace::sfv2-role-edge-mempalace-audit-001::full_assembly",
+      "minus_row_id": "sfv2-role-edge::mempalace::sfv2-role-edge-mempalace-audit-001::minus_audit"
+    },
+    {
+      "capability": "mempalace",
+      "role_focus": "primary",
+      "assertion_id": "primary_expected_receipt_present",
+      "loss_dimension": "primary_capability_receipt_evidence",
+      "status": "NOT_PROVEN",
+      "reason": "minus_role_preserved_required_external_assertions",
+      "full_clean": true,
+      "minus_clean": false,
+      "full_field_state": {
+        "expected_capability_receipt_coverage": {
+          "present": true,
+          "value": {
+            "expected": [
+              "mempalace_gate"
+            ],
+            "public_safe": [
+              "mempalace_gate"
+            ],
+            "missing": [],
+            "failure_reasons": {},
+            "all_public_safe": true
+          }
+        },
+        "expected_capability_invocation_coverage": {
+          "present": true,
+          "value": {
+            "expected": [
+              "mempalace_gate"
+            ],
+            "invoked": [
+              "mempalace_gate"
+            ],
+            "missing": [],
+            "failure_reasons": {},
+            "all_invoked_with_evidence": true
+          }
+        },
+        "skill_mount_contract_status": {
+          "present": true,
+          "value": "PASS"
+        }
+      },
+      "minus_field_state": {
+        "expected_capability_receipt_coverage": {
+          "present": true,
+          "value": {
+            "expected": [
+              "mempalace_gate"
+            ],
+            "public_safe": [
+              "mempalace_gate"
+            ],
+            "missing": [],
+            "failure_reasons": {},
+            "all_public_safe": true
+          }
+        },
+        "expected_capability_invocation_coverage": {
+          "present": true,
+          "value": {
+            "expected": [
+              "mempalace_gate"
+            ],
+            "invoked": [
+              "mempalace_gate"
+            ],
+            "missing": [],
+            "failure_reasons": {},
+            "all_invoked_with_evidence": true
+          }
+        },
+        "skill_mount_contract_status": {
+          "present": true,
+          "value": "RETURN"
+        }
+      },
+      "full_row_id": "sfv2-role-edge::mempalace::sfv2-role-edge-mempalace-primary-001::full_assembly",
+      "minus_row_id": "sfv2-role-edge::mempalace::sfv2-role-edge-mempalace-primary-001::minus_primary"
+    },
+    {
+      "capability": "regression_guard",
+      "role_focus": "Logic",
+      "assertion_id": "logic_decision_invariant_present",
+      "loss_dimension": "decision_invariant_or_reasoning_evidence",
+      "status": "NOT_PROVEN",
+      "reason": "full_assembly_not_clean_for_assertion",
+      "full_clean": false,
+      "minus_clean": true,
+      "full_field_state": {
+        "autoreason_status": {
+          "present": true,
+          "value": "SKIPPED"
+        },
+        "belief_confidence": {
+          "present": true,
+          "value": 1.0
+        },
+        "capability_plan_trace_present": {
+          "present": true,
+          "value": true
+        }
+      },
+      "minus_field_state": {
+        "autoreason_status": {
+          "present": true,
+          "value": "SKIPPED"
+        },
+        "belief_confidence": {
+          "present": true,
+          "value": 1.0
+        },
+        "capability_plan_trace_present": {
+          "present": true,
+          "value": true
+        }
+      },
+      "full_row_id": "sfv2-role-edge::regression_guard::sfv2-role-edge-regression_guard-logic-001::full_assembly",
+      "minus_row_id": "sfv2-role-edge::regression_guard::sfv2-role-edge-regression_guard-logic-001::minus_logic"
+    },
+    {
+      "capability": "regression_guard",
+      "role_focus": "primary",
+      "assertion_id": "primary_expected_receipt_present",
+      "loss_dimension": "primary_capability_receipt_evidence",
+      "status": "NOT_PROVEN",
+      "reason": "full_assembly_not_clean_for_assertion",
+      "full_clean": false,
+      "minus_clean": false,
+      "full_field_state": {
+        "expected_capability_receipt_coverage": {
+          "present": true,
+          "value": {
+            "expected": [
+              "semantic_failure_sensor"
+            ],
+            "public_safe": [
+              "semantic_failure_sensor"
+            ],
+            "missing": [],
+            "failure_reasons": {},
+            "all_public_safe": true
+          }
+        },
+        "expected_capability_invocation_coverage": {
+          "present": true,
+          "value": {
+            "expected": [
+              "semantic_failure_sensor"
+            ],
+            "invoked": [
+              "semantic_failure_sensor"
+            ],
+            "missing": [],
+            "failure_reasons": {},
+            "all_invoked_with_evidence": true
+          }
+        },
+        "skill_mount_contract_status": {
+          "present": true,
+          "value": "RETURN"
+        }
+      },
+      "minus_field_state": {
+        "expected_capability_receipt_coverage": {
+          "present": true,
+          "value": {
+            "expected": [
+              "semantic_failure_sensor"
+            ],
+            "public_safe": [
+              "semantic_failure_sensor"
+            ],
+            "missing": [],
+            "failure_reasons": {},
+            "all_public_safe": true
+          }
+        },
+        "expected_capability_invocation_coverage": {
+          "present": true,
+          "value": {
+            "expected": [
+              "semantic_failure_sensor"
+            ],
+            "invoked": [
+              "semantic_failure_sensor"
+            ],
+            "missing": [],
+            "failure_reasons": {},
+            "all_invoked_with_evidence": true
+          }
+        },
+        "skill_mount_contract_status": {
+          "present": true,
+          "value": "RETURN"
+        }
+      },
+      "full_row_id": "sfv2-role-edge::regression_guard::sfv2-role-edge-regression_guard-primary-001::full_assembly",
+      "minus_row_id": "sfv2-role-edge::regression_guard::sfv2-role-edge-regression_guard-primary-001::minus_primary"
+    }
+  ]
+}

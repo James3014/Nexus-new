@@ -2826,3 +2826,10 @@ version_scope:
 - Failure: treating those clean rows as role-requiredness proof would overclaim, because every minus-role row preserved delivery and runtime receipt cleanliness.
 - Lesson: full/minus role-ablation proves executability first; role necessity requires a concrete loss in reliability, quality, governance, regression, or receipt evidence when a role is removed.
 - Guardrail: keep `role_requiredness_proven_count=0` unless the matching minus-role arm loses a hard KPI that the full assembly preserves.
+
+## 2026-05-21 - role assertion packets must not overread weak telemetry
+
+- Trigger: the first role-requiredness assertion packet treated a PASS minus-role row with weaker optional telemetry as `ROLE_REQUIREDNESS_PROVEN`.
+- Failure: optional field weakness inside a row-level PASS would overclaim role necessity and could incorrectly promote a multi-skill role.
+- Lesson: role necessity requires the matching minus-role row to RETURN or fail a hard external assertion while the full assembly remains clean.
+- Guardrail: compute `ROLE_REQUIREDNESS_PROVEN` only when full assembly is clean, the minus-role runner result is non-PASS, and the minus-role loses the required external assertion.

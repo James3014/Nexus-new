@@ -166,6 +166,8 @@ Role-focused edge-case replay: `docs/reports/NEXUS_SFV2_ROLE_ABLATION_EDGECASE_E
 
 HEEP decision after edge-case replay: keep the 9 multi-skill assemblies as internal candidates, but do not claim Scout / Logic / Audit necessity, do not upgrade runtime defaults from role-ablation evidence, and do not unlock public benchmark. The next evidence step must use tasks where the removed role has an externally checkable loss signal, not only a role-focused prompt instruction.
 
+Role-requiredness assertion packet: `docs/reports/NEXUS_SFV2_ROLE_REQUIREDNESS_ASSERTION_PACKET_2026-05-21.json` adds the machine-checkable layer on top of the 40-row edgecase replay. It evaluates Scout / Logic / Audit / primary with runtime fields such as CodeIntel scan/impact presence, Autoreason/Belief plan evidence, rubric/evidence/delivery status, expected capability receipts, skill mount status, and token/receipt contracts. Result: `assertion_count=20`, `role_requiredness_proven_count=0`, `not_proven_count=20`. This confirms the conservative decision: the assemblies are executable, but no role is yet proven necessary by a hard external assertion loss.
+
 Failure lesson: clean replay must preserve the distinction between provider-token truth and expected-capability receipt invocation. If they are merged into a generic `HOLD_MISSING_MAT_B_EVIDENCE`, later agents can accidentally rerun the wrong path or misread a provider telemetry gap as a weak skill.
 
 Failure lesson: executor route smoke is necessary but not sufficient for MAT-B promotion. It proves the route oracle can express `drone`, `nightshift`, and `swarm`, but a skill-specific MAT-B row must still prove runtime skill mount confirmation, expected capability receipt invocation, and provider-token cleanliness in the same evidence window.
@@ -179,6 +181,8 @@ Failure lesson: role-ablation task manifests must satisfy the same runner manife
 Failure lesson: role-focused task metadata must not be added as arbitrary top-level task fields. The benchmark task schema rejects unknown fields, so role metadata belongs in task text, matrix rows, runner env, and rollup artifacts.
 
 Failure lesson: a clean full/minus role-ablation run is necessary but not sufficient for role requiredness. If the minus-role arm still passes with clean receipts, the evidence supports assembly executability, not a claim that the removed role is necessary.
+
+Failure lesson: assertion-level role requiredness must key off the row-level runner result, not only individual telemetry fields. A minus-role row with a PASS result but weaker optional telemetry is a follow-up signal, not proof that the removed role is required.
 
 ---
 *Created by Antigravity - Nexus Singularity V17*

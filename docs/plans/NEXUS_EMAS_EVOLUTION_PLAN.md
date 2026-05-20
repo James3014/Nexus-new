@@ -137,6 +137,8 @@ Next EMAS evidence requirement: add edge-case MAT-B tasks for each approved asse
 
 `docs/reports/NEXUS_SFV2_ROLE_ABLATION_EDGECASE_EXECUTION_MATRIX_2026-05-21.json` implements that first edge-case layer with 20 role-focused tasks and 40 full-vs-minus rows. `docs/reports/NEXUS_SFV2_ROLE_ABLATION_EDGECASE_LIVE_ROLLUP_2026-05-21.json` shows 40/40 rows PASS, so the assemblies are executable under role-focused prompts. The EMAS interpretation stays fail-closed: because no minus-role row lost reliability, quality, governance, regression, or receipt evidence, `role_requiredness_proven_count=0`.
 
+`docs/reports/NEXUS_SFV2_ROLE_REQUIREDNESS_ASSERTION_PACKET_2026-05-21.json` now defines the machine-checkable assertion layer for role necessity. Scout is checked through external scan/surface evidence, Logic through decision and plan evidence, Audit through boundary/rubric evidence, and primary through expected capability receipt plus mount status. Current result remains `0/20` role-requiredness proven, so EMAS must not mark any role as required solely from the current assemblies.
+
 Next EMAS upgrade criterion: role tasks must carry externally checkable edge assertions, such as a concrete impacted symbol set for Scout, a hidden counterexample/invariant for Logic, or a policy/regression violation for Audit. Prompt-level role focus alone is insufficient to establish synergy.
 
 Failure lesson: EMAS must not treat more roles as automatic synergy. A role is useful only if the SFV2 role-ablation matrix plus MAT-B evidence shows that dropping the role loses reliability, quality, governance, regression safety, or a required receipt.
