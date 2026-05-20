@@ -1,0 +1,1612 @@
+{
+  "automation_hook": {
+    "forbidden_actions": [
+      "runtime_default_auto_apply",
+      "public_benchmark_unlock",
+      "quarantine_skill_mount"
+    ],
+    "hook_name": "sf_new_skill_replacement_review",
+    "schema": "nexus.sf_replacement_automation_hook.v1",
+    "steps": [
+      "source_tier_and_safety_screen",
+      "capability_classification",
+      "baseline_resolution",
+      "flash_nexus_compare_queue",
+      "receipt_and_token_truth_gate",
+      "decision_ledger_writeback",
+      "catalog_update_packet",
+      "runtime_apply_review_packet"
+    ],
+    "triggers": [
+      "manual_skill_added",
+      "source_refresh_new_skill_detected"
+    ]
+  },
+  "blockers": [],
+  "candidate_intake": [],
+  "catalog_update_packet": {
+    "public_benchmark_allowed": false,
+    "runtime_update_allowed": false,
+    "schema": "nexus.sf_replacement_catalog_update_packet.v1",
+    "status": "PASS",
+    "update_count": 21,
+    "updates": [
+      {
+        "blockers": [],
+        "candidate_skill_id": "",
+        "capability": "artifact_gate",
+        "catalog_update_allowed": true,
+        "current_skill_ids": [
+          "sf-systematic-artifact_gate-differential-review-461fbd0c"
+        ],
+        "decision": "KEEP_CURRENT",
+        "entry_type": "current_baseline",
+        "public_benchmark_allowed": false,
+        "reason": "existing_baseline_remains_best",
+        "runtime_apply_review_allowed": false,
+        "runtime_update_allowed": false
+      },
+      {
+        "blockers": [],
+        "candidate_skill_id": "",
+        "capability": "autonomic_router",
+        "catalog_update_allowed": true,
+        "current_skill_ids": [
+          "sf2-autonomic_router-route-fit-spec",
+          "sf-systematic-artifact_gate-differential-review-461fbd0c"
+        ],
+        "decision": "ADD_TO_MULTI",
+        "entry_type": "current_baseline",
+        "public_benchmark_allowed": false,
+        "reason": "existing_heep_mat_b_approved_multi_assembly",
+        "runtime_apply_review_allowed": true,
+        "runtime_update_allowed": false
+      },
+      {
+        "blockers": [],
+        "candidate_skill_id": "",
+        "capability": "autoreason",
+        "catalog_update_allowed": true,
+        "current_skill_ids": [
+          "sf2-belief-route-fit-spec"
+        ],
+        "decision": "KEEP_CURRENT",
+        "entry_type": "current_baseline",
+        "public_benchmark_allowed": false,
+        "reason": "existing_baseline_remains_best",
+        "runtime_apply_review_allowed": false,
+        "runtime_update_allowed": false
+      },
+      {
+        "blockers": [],
+        "candidate_skill_id": "",
+        "capability": "belief",
+        "catalog_update_allowed": true,
+        "current_skill_ids": [
+          "sf2-belief-route-fit-spec",
+          "sf-systematic-artifact_gate-differential-review-461fbd0c"
+        ],
+        "decision": "ADD_TO_MULTI",
+        "entry_type": "current_baseline",
+        "public_benchmark_allowed": false,
+        "reason": "existing_heep_mat_b_approved_multi_assembly",
+        "runtime_apply_review_allowed": true,
+        "runtime_update_allowed": false
+      },
+      {
+        "blockers": [],
+        "candidate_skill_id": "",
+        "capability": "benchmark_meta_opt",
+        "catalog_update_allowed": true,
+        "current_skill_ids": [
+          "sf-systematic-benchmark_meta_opt-hugging-face-trackio-d21c6b90"
+        ],
+        "decision": "KEEP_CURRENT",
+        "entry_type": "current_baseline",
+        "public_benchmark_allowed": false,
+        "reason": "existing_baseline_remains_best",
+        "runtime_apply_review_allowed": false,
+        "runtime_update_allowed": false
+      },
+      {
+        "blockers": [],
+        "candidate_skill_id": "",
+        "capability": "claim_gate",
+        "catalog_update_allowed": true,
+        "current_skill_ids": [
+          "nexus-benchmark-continuous-optimization"
+        ],
+        "decision": "KEEP_CURRENT",
+        "entry_type": "current_baseline",
+        "public_benchmark_allowed": false,
+        "reason": "existing_baseline_remains_best",
+        "runtime_apply_review_allowed": false,
+        "runtime_update_allowed": false
+      },
+      {
+        "blockers": [],
+        "candidate_skill_id": "",
+        "capability": "codeintel",
+        "catalog_update_allowed": true,
+        "current_skill_ids": [
+          "sf-systematic-codeintel-first-principles-thinking-f95019ea",
+          "sf2-autonomic_router-route-fit-spec",
+          "sf-systematic-artifact_gate-differential-review-461fbd0c"
+        ],
+        "decision": "ADD_TO_MULTI",
+        "entry_type": "current_baseline",
+        "public_benchmark_allowed": false,
+        "reason": "existing_heep_mat_b_approved_multi_assembly",
+        "runtime_apply_review_allowed": true,
+        "runtime_update_allowed": false
+      },
+      {
+        "blockers": [],
+        "candidate_skill_id": "",
+        "capability": "ddtree",
+        "catalog_update_allowed": true,
+        "current_skill_ids": [
+          "nexus-root-cause-probe",
+          "sf-systematic-artifact_gate-differential-review-461fbd0c"
+        ],
+        "decision": "ADD_TO_MULTI",
+        "entry_type": "current_baseline",
+        "public_benchmark_allowed": false,
+        "reason": "existing_heep_mat_b_approved_multi_assembly",
+        "runtime_apply_review_allowed": true,
+        "runtime_update_allowed": false
+      },
+      {
+        "blockers": [],
+        "candidate_skill_id": "",
+        "capability": "file_lock_security_gate",
+        "catalog_update_allowed": true,
+        "current_skill_ids": [
+          "sf2-file_lock_security_gate-route-fit-spec"
+        ],
+        "decision": "KEEP_CURRENT",
+        "entry_type": "current_baseline",
+        "public_benchmark_allowed": false,
+        "reason": "existing_baseline_remains_best",
+        "runtime_apply_review_allowed": false,
+        "runtime_update_allowed": false
+      },
+      {
+        "blockers": [],
+        "candidate_skill_id": "",
+        "capability": "forecast_pregate",
+        "catalog_update_allowed": true,
+        "current_skill_ids": [
+          "create-plan"
+        ],
+        "decision": "KEEP_CURRENT",
+        "entry_type": "current_baseline",
+        "public_benchmark_allowed": false,
+        "reason": "existing_baseline_remains_best",
+        "runtime_apply_review_allowed": false,
+        "runtime_update_allowed": false
+      },
+      {
+        "blockers": [],
+        "candidate_skill_id": "",
+        "capability": "governance_and_trust",
+        "catalog_update_allowed": true,
+        "current_skill_ids": [
+          "sf-systematic-codeintel-first-principles-thinking-f95019ea",
+          "sf2-autonomic_router-route-fit-spec",
+          "sf-systematic-governance_and_trust-aegisops-ai-0aa841e2"
+        ],
+        "decision": "ADD_TO_MULTI",
+        "entry_type": "current_baseline",
+        "public_benchmark_allowed": false,
+        "reason": "existing_heep_mat_b_approved_multi_assembly",
+        "runtime_apply_review_allowed": true,
+        "runtime_update_allowed": false
+      },
+      {
+        "blockers": [],
+        "candidate_skill_id": "",
+        "capability": "lancedb",
+        "catalog_update_allowed": true,
+        "current_skill_ids": [
+          "research-source-validation-auditor",
+          "sf2-autonomic_router-route-fit-spec"
+        ],
+        "decision": "ADD_TO_MULTI",
+        "entry_type": "current_baseline",
+        "public_benchmark_allowed": false,
+        "reason": "existing_heep_mat_b_approved_multi_assembly",
+        "runtime_apply_review_allowed": true,
+        "runtime_update_allowed": false
+      },
+      {
+        "blockers": [],
+        "candidate_skill_id": "",
+        "capability": "learn_ask",
+        "catalog_update_allowed": true,
+        "current_skill_ids": [
+          "github8-skilless-deep-research-learn-ask"
+        ],
+        "decision": "KEEP_CURRENT",
+        "entry_type": "current_baseline",
+        "public_benchmark_allowed": false,
+        "reason": "existing_baseline_remains_best",
+        "runtime_apply_review_allowed": false,
+        "runtime_update_allowed": false
+      },
+      {
+        "blockers": [],
+        "candidate_skill_id": "",
+        "capability": "learning_closure",
+        "catalog_update_allowed": true,
+        "current_skill_ids": [
+          "sf-systematic-learning_closure-memory-lint-8bdb0fca"
+        ],
+        "decision": "KEEP_CURRENT",
+        "entry_type": "current_baseline",
+        "public_benchmark_allowed": false,
+        "reason": "existing_baseline_remains_best",
+        "runtime_apply_review_allowed": false,
+        "runtime_update_allowed": false
+      },
+      {
+        "blockers": [],
+        "candidate_skill_id": "",
+        "capability": "memory",
+        "catalog_update_allowed": true,
+        "current_skill_ids": [
+          "sf-systematic-memory-project-skill-audit-cc8b7621",
+          "sf2-autonomic_router-route-fit-spec"
+        ],
+        "decision": "ADD_TO_MULTI",
+        "entry_type": "current_baseline",
+        "public_benchmark_allowed": false,
+        "reason": "existing_heep_mat_b_approved_multi_assembly",
+        "runtime_apply_review_allowed": true,
+        "runtime_update_allowed": false
+      },
+      {
+        "blockers": [],
+        "candidate_skill_id": "",
+        "capability": "mempalace",
+        "catalog_update_allowed": true,
+        "current_skill_ids": [
+          "sf2-mempalace-route-fit-spec",
+          "sf-systematic-artifact_gate-differential-review-461fbd0c"
+        ],
+        "decision": "ADD_TO_MULTI",
+        "entry_type": "current_baseline",
+        "public_benchmark_allowed": false,
+        "reason": "existing_heep_mat_b_approved_multi_assembly",
+        "runtime_apply_review_allowed": true,
+        "runtime_update_allowed": false
+      },
+      {
+        "blockers": [],
+        "candidate_skill_id": "",
+        "capability": "policy_capability_gate",
+        "catalog_update_allowed": true,
+        "current_skill_ids": [
+          "sf-systematic-policy_capability_gate-aegisops-ai-0aa841e2"
+        ],
+        "decision": "KEEP_CURRENT",
+        "entry_type": "current_baseline",
+        "public_benchmark_allowed": false,
+        "reason": "existing_baseline_remains_best",
+        "runtime_apply_review_allowed": false,
+        "runtime_update_allowed": false
+      },
+      {
+        "blockers": [],
+        "candidate_skill_id": "",
+        "capability": "registry_skills_sync",
+        "catalog_update_allowed": true,
+        "current_skill_ids": [
+          "github5-skill-seekers-safe-registry-builder"
+        ],
+        "decision": "KEEP_CURRENT",
+        "entry_type": "current_baseline",
+        "public_benchmark_allowed": false,
+        "reason": "existing_baseline_remains_best",
+        "runtime_apply_review_allowed": false,
+        "runtime_update_allowed": false
+      },
+      {
+        "blockers": [],
+        "candidate_skill_id": "",
+        "capability": "regression_guard",
+        "catalog_update_allowed": true,
+        "current_skill_ids": [
+          "sf-systematic-regression_guard-odoo-automated-tests-dad98433",
+          "sf2-autonomic_router-route-fit-spec"
+        ],
+        "decision": "ADD_TO_MULTI",
+        "entry_type": "current_baseline",
+        "public_benchmark_allowed": false,
+        "reason": "existing_heep_mat_b_approved_multi_assembly",
+        "runtime_apply_review_allowed": true,
+        "runtime_update_allowed": false
+      },
+      {
+        "blockers": [],
+        "candidate_skill_id": "",
+        "capability": "repair_loop",
+        "catalog_update_allowed": true,
+        "current_skill_ids": [
+          "sf-systematic-repair_loop-odoo-automated-tests-dad98433"
+        ],
+        "decision": "KEEP_CURRENT",
+        "entry_type": "current_baseline",
+        "public_benchmark_allowed": false,
+        "reason": "existing_baseline_remains_best",
+        "runtime_apply_review_allowed": false,
+        "runtime_update_allowed": false
+      },
+      {
+        "blockers": [],
+        "candidate_skill_id": "",
+        "capability": "research",
+        "catalog_update_allowed": true,
+        "current_skill_ids": [
+          "sf-systematic-research-research-lookup-7e6f92a0"
+        ],
+        "decision": "KEEP_CURRENT",
+        "entry_type": "current_baseline",
+        "public_benchmark_allowed": false,
+        "reason": "existing_baseline_remains_best",
+        "runtime_apply_review_allowed": false,
+        "runtime_update_allowed": false
+      }
+    ]
+  },
+  "claim_boundary": [
+    "SF-R compares manually or automatically added skills against the current capability baseline.",
+    "A candidate can update catalog/review packets only after safety tiering, capability classification, receipt-backed comparison, and decision normalization.",
+    "SF-R does not directly update runtime defaults and does not unlock public benchmark claims."
+  ],
+  "comparison_queue": [],
+  "current_capability_baselines": [
+    {
+      "capability": "artifact_gate",
+      "current_mode": "Mode C (Swarm)",
+      "current_primary_skill_id": "sf-systematic-artifact_gate-differential-review-461fbd0c",
+      "current_selected_skill_ids": [
+        "sf-systematic-artifact_gate-differential-review-461fbd0c"
+      ],
+      "mat_b_state": "KEEP_SINGLE_PRIMARY",
+      "mat_b_verdict": "KEEP_SINGLE_PRIMARY",
+      "public_benchmark_allowed": false,
+      "runtime_review_state": "NO_RUNTIME_APPLY_NEEDED",
+      "runtime_update_allowed": false,
+      "source_class": "approved_external_reference"
+    },
+    {
+      "capability": "autonomic_router",
+      "current_mode": "Mode B (Guard)",
+      "current_primary_skill_id": "sf2-autonomic_router-route-fit-spec",
+      "current_selected_skill_ids": [
+        "sf2-autonomic_router-route-fit-spec",
+        "sf-systematic-artifact_gate-differential-review-461fbd0c"
+      ],
+      "mat_b_state": "APPROVE_MULTI_ASSEMBLY",
+      "mat_b_verdict": "APPROVE_HEEP_MODE_CANDIDATE",
+      "public_benchmark_allowed": false,
+      "runtime_review_state": "RUNTIME_OVERLAY_SMOKE_PASS",
+      "runtime_update_allowed": false,
+      "source_class": "current_best"
+    },
+    {
+      "capability": "autoreason",
+      "current_mode": "Mode B (Guard)",
+      "current_primary_skill_id": "sf2-belief-route-fit-spec",
+      "current_selected_skill_ids": [
+        "sf2-belief-route-fit-spec"
+      ],
+      "mat_b_state": "KEEP_SINGLE_PRIMARY",
+      "mat_b_verdict": "KEEP_SINGLE_PRIMARY",
+      "public_benchmark_allowed": false,
+      "runtime_review_state": "NO_RUNTIME_APPLY_NEEDED",
+      "runtime_update_allowed": false,
+      "source_class": "current_best"
+    },
+    {
+      "capability": "belief",
+      "current_mode": "Mode B (Guard)",
+      "current_primary_skill_id": "sf2-belief-route-fit-spec",
+      "current_selected_skill_ids": [
+        "sf2-belief-route-fit-spec",
+        "sf-systematic-artifact_gate-differential-review-461fbd0c"
+      ],
+      "mat_b_state": "APPROVE_MULTI_ASSEMBLY",
+      "mat_b_verdict": "APPROVE_HEEP_MODE_CANDIDATE",
+      "public_benchmark_allowed": false,
+      "runtime_review_state": "RUNTIME_OVERLAY_SMOKE_PASS",
+      "runtime_update_allowed": false,
+      "source_class": "current_best"
+    },
+    {
+      "capability": "benchmark_meta_opt",
+      "current_mode": "Mode C (Swarm)",
+      "current_primary_skill_id": "sf-systematic-benchmark_meta_opt-hugging-face-trackio-d21c6b90",
+      "current_selected_skill_ids": [
+        "sf-systematic-benchmark_meta_opt-hugging-face-trackio-d21c6b90"
+      ],
+      "mat_b_state": "KEEP_SINGLE_PRIMARY",
+      "mat_b_verdict": "KEEP_SINGLE_PRIMARY",
+      "public_benchmark_allowed": false,
+      "runtime_review_state": "NO_RUNTIME_APPLY_NEEDED",
+      "runtime_update_allowed": false,
+      "source_class": "approved_external_reference"
+    },
+    {
+      "capability": "claim_gate",
+      "current_mode": "Mode B (Guard)",
+      "current_primary_skill_id": "nexus-benchmark-continuous-optimization",
+      "current_selected_skill_ids": [
+        "nexus-benchmark-continuous-optimization"
+      ],
+      "mat_b_state": "KEEP_SINGLE_PRIMARY",
+      "mat_b_verdict": "KEEP_SINGLE_PRIMARY",
+      "public_benchmark_allowed": false,
+      "runtime_review_state": "NO_RUNTIME_APPLY_NEEDED",
+      "runtime_update_allowed": false,
+      "source_class": "current_best"
+    },
+    {
+      "capability": "codeintel",
+      "current_mode": "Mode C (Swarm)",
+      "current_primary_skill_id": "sf-systematic-codeintel-first-principles-thinking-f95019ea",
+      "current_selected_skill_ids": [
+        "sf-systematic-codeintel-first-principles-thinking-f95019ea",
+        "sf2-autonomic_router-route-fit-spec",
+        "sf-systematic-artifact_gate-differential-review-461fbd0c"
+      ],
+      "mat_b_state": "APPROVE_MULTI_ASSEMBLY",
+      "mat_b_verdict": "APPROVE_HEEP_MODE_CANDIDATE",
+      "public_benchmark_allowed": false,
+      "runtime_review_state": "RUNTIME_OVERLAY_SMOKE_PASS",
+      "runtime_update_allowed": false,
+      "source_class": "approved_external_reference"
+    },
+    {
+      "capability": "ddtree",
+      "current_mode": "Mode B (Guard)",
+      "current_primary_skill_id": "nexus-root-cause-probe",
+      "current_selected_skill_ids": [
+        "nexus-root-cause-probe",
+        "sf-systematic-artifact_gate-differential-review-461fbd0c"
+      ],
+      "mat_b_state": "APPROVE_MULTI_ASSEMBLY",
+      "mat_b_verdict": "APPROVE_HEEP_MODE_CANDIDATE",
+      "public_benchmark_allowed": false,
+      "runtime_review_state": "RUNTIME_OVERLAY_SMOKE_PASS",
+      "runtime_update_allowed": false,
+      "source_class": "current_best"
+    },
+    {
+      "capability": "direct_master_loop",
+      "current_mode": "Mode A (Solo)",
+      "current_primary_skill_id": "sf-systematic-direct_master_loop-build-32802a87",
+      "current_selected_skill_ids": [
+        "sf-systematic-direct_master_loop-build-32802a87"
+      ],
+      "mat_b_state": "HOLD_PROVIDER_TOKEN_TRUTH",
+      "mat_b_verdict": "BLOCKED_BY_PROVIDER_TOKEN_TRUTH",
+      "public_benchmark_allowed": false,
+      "runtime_review_state": "BLOCKED",
+      "runtime_update_allowed": false,
+      "source_class": "approved_external_reference"
+    },
+    {
+      "capability": "drone",
+      "current_mode": "Mode A (Solo)",
+      "current_primary_skill_id": "sf-systematic-drone-python-background-jobs-18326a62",
+      "current_selected_skill_ids": [
+        "sf-systematic-drone-python-background-jobs-18326a62"
+      ],
+      "mat_b_state": "HOLD_RECEIPT_CHAIN",
+      "mat_b_verdict": "BLOCKED_BY_RECEIPT_DATA_CONTRACT",
+      "public_benchmark_allowed": false,
+      "runtime_review_state": "BLOCKED",
+      "runtime_update_allowed": false,
+      "source_class": "approved_external_reference"
+    },
+    {
+      "capability": "external_productivity",
+      "current_mode": "Mode A (Solo)",
+      "current_primary_skill_id": "sf-systematic-external_productivity-writer-77dc7840",
+      "current_selected_skill_ids": [
+        "sf-systematic-external_productivity-writer-77dc7840"
+      ],
+      "mat_b_state": "HOLD_PROVIDER_TOKEN_TRUTH",
+      "mat_b_verdict": "BLOCKED_BY_PROVIDER_TOKEN_TRUTH",
+      "public_benchmark_allowed": false,
+      "runtime_review_state": "BLOCKED",
+      "runtime_update_allowed": false,
+      "source_class": "approved_external_reference"
+    },
+    {
+      "capability": "file_lock_security_gate",
+      "current_mode": "Mode C (Swarm)",
+      "current_primary_skill_id": "sf2-file_lock_security_gate-route-fit-spec",
+      "current_selected_skill_ids": [
+        "sf2-file_lock_security_gate-route-fit-spec"
+      ],
+      "mat_b_state": "KEEP_SINGLE_PRIMARY",
+      "mat_b_verdict": "KEEP_SINGLE_PRIMARY",
+      "public_benchmark_allowed": false,
+      "runtime_review_state": "NO_RUNTIME_APPLY_NEEDED",
+      "runtime_update_allowed": false,
+      "source_class": "current_best"
+    },
+    {
+      "capability": "forecast_pregate",
+      "current_mode": "Mode B (Guard)",
+      "current_primary_skill_id": "create-plan",
+      "current_selected_skill_ids": [
+        "create-plan"
+      ],
+      "mat_b_state": "KEEP_SINGLE_PRIMARY",
+      "mat_b_verdict": "KEEP_SINGLE_PRIMARY",
+      "public_benchmark_allowed": false,
+      "runtime_review_state": "NO_RUNTIME_APPLY_NEEDED",
+      "runtime_update_allowed": false,
+      "source_class": "current_best"
+    },
+    {
+      "capability": "governance_and_trust",
+      "current_mode": "Mode C (Swarm)",
+      "current_primary_skill_id": "sf-systematic-governance_and_trust-aegisops-ai-0aa841e2",
+      "current_selected_skill_ids": [
+        "sf-systematic-codeintel-first-principles-thinking-f95019ea",
+        "sf2-autonomic_router-route-fit-spec",
+        "sf-systematic-governance_and_trust-aegisops-ai-0aa841e2"
+      ],
+      "mat_b_state": "APPROVE_MULTI_ASSEMBLY",
+      "mat_b_verdict": "APPROVE_HEEP_MODE_CANDIDATE",
+      "public_benchmark_allowed": false,
+      "runtime_review_state": "RUNTIME_OVERLAY_SMOKE_PASS",
+      "runtime_update_allowed": false,
+      "source_class": "approved_external_reference"
+    },
+    {
+      "capability": "hyper_sprint",
+      "current_mode": "Mode A (Solo)",
+      "current_primary_skill_id": "sf2-hyper_sprint-route-fit-spec",
+      "current_selected_skill_ids": [
+        "sf2-hyper_sprint-route-fit-spec"
+      ],
+      "mat_b_state": "HOLD_PROVIDER_TOKEN_TRUTH",
+      "mat_b_verdict": "BLOCKED_BY_PROVIDER_TOKEN_TRUTH",
+      "public_benchmark_allowed": false,
+      "runtime_review_state": "BLOCKED",
+      "runtime_update_allowed": false,
+      "source_class": "current_best"
+    },
+    {
+      "capability": "lancedb",
+      "current_mode": "Mode B (Guard)",
+      "current_primary_skill_id": "research-source-validation-auditor",
+      "current_selected_skill_ids": [
+        "research-source-validation-auditor",
+        "sf2-autonomic_router-route-fit-spec"
+      ],
+      "mat_b_state": "APPROVE_MULTI_ASSEMBLY",
+      "mat_b_verdict": "APPROVE_HEEP_MODE_CANDIDATE",
+      "public_benchmark_allowed": false,
+      "runtime_review_state": "RUNTIME_OVERLAY_SMOKE_PASS",
+      "runtime_update_allowed": false,
+      "source_class": "current_best"
+    },
+    {
+      "capability": "learn_ask",
+      "current_mode": "Mode C (Swarm)",
+      "current_primary_skill_id": "github8-skilless-deep-research-learn-ask",
+      "current_selected_skill_ids": [
+        "github8-skilless-deep-research-learn-ask"
+      ],
+      "mat_b_state": "KEEP_SINGLE_PRIMARY",
+      "mat_b_verdict": "KEEP_SINGLE_PRIMARY",
+      "public_benchmark_allowed": false,
+      "runtime_review_state": "NO_RUNTIME_APPLY_NEEDED",
+      "runtime_update_allowed": false,
+      "source_class": "current_best"
+    },
+    {
+      "capability": "learning_closure",
+      "current_mode": "Mode C (Swarm)",
+      "current_primary_skill_id": "sf-systematic-learning_closure-memory-lint-8bdb0fca",
+      "current_selected_skill_ids": [
+        "sf-systematic-learning_closure-memory-lint-8bdb0fca"
+      ],
+      "mat_b_state": "KEEP_SINGLE_PRIMARY",
+      "mat_b_verdict": "KEEP_SINGLE_PRIMARY",
+      "public_benchmark_allowed": false,
+      "runtime_review_state": "NO_RUNTIME_APPLY_NEEDED",
+      "runtime_update_allowed": false,
+      "source_class": "approved_external_reference"
+    },
+    {
+      "capability": "memory",
+      "current_mode": "Mode B (Guard)",
+      "current_primary_skill_id": "sf-systematic-memory-project-skill-audit-cc8b7621",
+      "current_selected_skill_ids": [
+        "sf-systematic-memory-project-skill-audit-cc8b7621",
+        "sf2-autonomic_router-route-fit-spec"
+      ],
+      "mat_b_state": "APPROVE_MULTI_ASSEMBLY",
+      "mat_b_verdict": "APPROVE_HEEP_MODE_CANDIDATE",
+      "public_benchmark_allowed": false,
+      "runtime_review_state": "RUNTIME_OVERLAY_SMOKE_PASS",
+      "runtime_update_allowed": false,
+      "source_class": "approved_external_reference"
+    },
+    {
+      "capability": "mempalace",
+      "current_mode": "Mode B (Guard)",
+      "current_primary_skill_id": "sf2-mempalace-route-fit-spec",
+      "current_selected_skill_ids": [
+        "sf2-mempalace-route-fit-spec",
+        "sf-systematic-artifact_gate-differential-review-461fbd0c"
+      ],
+      "mat_b_state": "APPROVE_MULTI_ASSEMBLY",
+      "mat_b_verdict": "APPROVE_HEEP_MODE_CANDIDATE",
+      "public_benchmark_allowed": false,
+      "runtime_review_state": "RUNTIME_OVERLAY_SMOKE_PASS",
+      "runtime_update_allowed": false,
+      "source_class": "current_best"
+    },
+    {
+      "capability": "metabolism_resume",
+      "current_mode": "Mode A (Solo)",
+      "current_primary_skill_id": "github-auto-skill-safe-learning",
+      "current_selected_skill_ids": [
+        "github-auto-skill-safe-learning"
+      ],
+      "mat_b_state": "HOLD_PROVIDER_TOKEN_TRUTH",
+      "mat_b_verdict": "BLOCKED_BY_PROVIDER_TOKEN_TRUTH",
+      "public_benchmark_allowed": false,
+      "runtime_review_state": "BLOCKED",
+      "runtime_update_allowed": false,
+      "source_class": "current_best"
+    },
+    {
+      "capability": "nightshift",
+      "current_mode": "Mode A (Solo)",
+      "current_primary_skill_id": "sf2-nightshift-route-fit-spec",
+      "current_selected_skill_ids": [
+        "sf2-nightshift-route-fit-spec"
+      ],
+      "mat_b_state": "HOLD_RECEIPT_CHAIN",
+      "mat_b_verdict": "BLOCKED_BY_RECEIPT_DATA_CONTRACT",
+      "public_benchmark_allowed": false,
+      "runtime_review_state": "BLOCKED",
+      "runtime_update_allowed": false,
+      "source_class": "current_best"
+    },
+    {
+      "capability": "policy_capability_gate",
+      "current_mode": "Mode C (Swarm)",
+      "current_primary_skill_id": "sf-systematic-policy_capability_gate-aegisops-ai-0aa841e2",
+      "current_selected_skill_ids": [
+        "sf-systematic-policy_capability_gate-aegisops-ai-0aa841e2"
+      ],
+      "mat_b_state": "KEEP_SINGLE_PRIMARY",
+      "mat_b_verdict": "KEEP_SINGLE_PRIMARY",
+      "public_benchmark_allowed": false,
+      "runtime_review_state": "NO_RUNTIME_APPLY_NEEDED",
+      "runtime_update_allowed": false,
+      "source_class": "approved_external_reference"
+    },
+    {
+      "capability": "registry_skills_sync",
+      "current_mode": "Mode B (Guard)",
+      "current_primary_skill_id": "github5-skill-seekers-safe-registry-builder",
+      "current_selected_skill_ids": [
+        "github5-skill-seekers-safe-registry-builder"
+      ],
+      "mat_b_state": "KEEP_SINGLE_PRIMARY",
+      "mat_b_verdict": "KEEP_SINGLE_PRIMARY",
+      "public_benchmark_allowed": false,
+      "runtime_review_state": "NO_RUNTIME_APPLY_NEEDED",
+      "runtime_update_allowed": false,
+      "source_class": "current_best"
+    },
+    {
+      "capability": "regression_guard",
+      "current_mode": "Mode B (Guard)",
+      "current_primary_skill_id": "sf-systematic-regression_guard-odoo-automated-tests-dad98433",
+      "current_selected_skill_ids": [
+        "sf-systematic-regression_guard-odoo-automated-tests-dad98433",
+        "sf2-autonomic_router-route-fit-spec"
+      ],
+      "mat_b_state": "APPROVE_MULTI_ASSEMBLY",
+      "mat_b_verdict": "APPROVE_HEEP_MODE_CANDIDATE",
+      "public_benchmark_allowed": false,
+      "runtime_review_state": "RUNTIME_OVERLAY_SMOKE_PASS",
+      "runtime_update_allowed": false,
+      "source_class": "approved_external_reference"
+    },
+    {
+      "capability": "repair_loop",
+      "current_mode": "Mode B (Guard)",
+      "current_primary_skill_id": "sf-systematic-repair_loop-odoo-automated-tests-dad98433",
+      "current_selected_skill_ids": [
+        "sf-systematic-repair_loop-odoo-automated-tests-dad98433"
+      ],
+      "mat_b_state": "KEEP_SINGLE_PRIMARY",
+      "mat_b_verdict": "KEEP_SINGLE_PRIMARY",
+      "public_benchmark_allowed": false,
+      "runtime_review_state": "NO_RUNTIME_APPLY_NEEDED",
+      "runtime_update_allowed": false,
+      "source_class": "approved_external_reference"
+    },
+    {
+      "capability": "research",
+      "current_mode": "Mode C (Swarm)",
+      "current_primary_skill_id": "sf-systematic-research-research-lookup-7e6f92a0",
+      "current_selected_skill_ids": [
+        "sf-systematic-research-research-lookup-7e6f92a0"
+      ],
+      "mat_b_state": "REJECT_CANDIDATE",
+      "mat_b_verdict": "REJECT_MULTI_SKILL",
+      "public_benchmark_allowed": false,
+      "runtime_review_state": "NO_RUNTIME_APPLY_NEEDED",
+      "runtime_update_allowed": false,
+      "source_class": "approved_external_reference"
+    },
+    {
+      "capability": "research_and_source_discipline",
+      "current_mode": "Mode C (Swarm)",
+      "current_primary_skill_id": "research-citation-chain-verifier",
+      "current_selected_skill_ids": [
+        "research-citation-chain-verifier"
+      ],
+      "mat_b_state": "HOLD_PROVIDER_TOKEN_TRUTH",
+      "mat_b_verdict": "BLOCKED_BY_PROVIDER_TOKEN_TRUTH",
+      "public_benchmark_allowed": false,
+      "runtime_review_state": "BLOCKED",
+      "runtime_update_allowed": false,
+      "source_class": "current_best"
+    },
+    {
+      "capability": "research_control_plane",
+      "current_mode": "Mode C (Swarm)",
+      "current_primary_skill_id": "sf-systematic-research_control_plane-research-lookup-7e6f92a0",
+      "current_selected_skill_ids": [
+        "sf-systematic-research_control_plane-research-lookup-7e6f92a0"
+      ],
+      "mat_b_state": "HOLD_PROVIDER_TOKEN_TRUTH",
+      "mat_b_verdict": "BLOCKED_BY_PROVIDER_TOKEN_TRUTH",
+      "public_benchmark_allowed": false,
+      "runtime_review_state": "BLOCKED",
+      "runtime_update_allowed": false,
+      "source_class": "approved_external_reference"
+    },
+    {
+      "capability": "sandbox_replay",
+      "current_mode": "Mode B (Guard)",
+      "current_primary_skill_id": "sf2-sandbox_replay-route-fit-spec",
+      "current_selected_skill_ids": [
+        "sf2-sandbox_replay-route-fit-spec"
+      ],
+      "mat_b_state": "HOLD_PROVIDER_TOKEN_TRUTH",
+      "mat_b_verdict": "BLOCKED_BY_PROVIDER_TOKEN_TRUTH",
+      "public_benchmark_allowed": false,
+      "runtime_review_state": "BLOCKED",
+      "runtime_update_allowed": false,
+      "source_class": "current_best"
+    },
+    {
+      "capability": "swarm_multi_agent",
+      "current_mode": "Mode C (Swarm)",
+      "current_primary_skill_id": "sf2-swarm_multi_agent-route-fit-spec",
+      "current_selected_skill_ids": [
+        "sf2-swarm_multi_agent-route-fit-spec"
+      ],
+      "mat_b_state": "HOLD_RECEIPT_CHAIN",
+      "mat_b_verdict": "BLOCKED_BY_RECEIPT_DATA_CONTRACT",
+      "public_benchmark_allowed": false,
+      "runtime_review_state": "BLOCKED",
+      "runtime_update_allowed": false,
+      "source_class": "current_best"
+    },
+    {
+      "capability": "ui_validator",
+      "current_mode": "Mode B (Guard)",
+      "current_primary_skill_id": "sf-systematic-ui_validator-e2e-testing-d98eb7c3",
+      "current_selected_skill_ids": [
+        "sf-systematic-ui_validator-e2e-testing-d98eb7c3"
+      ],
+      "mat_b_state": "HOLD_PROVIDER_TOKEN_TRUTH",
+      "mat_b_verdict": "BLOCKED_BY_PROVIDER_TOKEN_TRUTH",
+      "public_benchmark_allowed": false,
+      "runtime_review_state": "BLOCKED",
+      "runtime_update_allowed": false,
+      "source_class": "approved_external_reference"
+    },
+    {
+      "capability": "ultra_review",
+      "current_mode": "Mode C (Swarm)",
+      "current_primary_skill_id": "github11-vulnerability-scanner-ultra-review",
+      "current_selected_skill_ids": [
+        "github11-vulnerability-scanner-ultra-review"
+      ],
+      "mat_b_state": "HOLD_PROVIDER_TOKEN_TRUTH",
+      "mat_b_verdict": "BLOCKED_BY_PROVIDER_TOKEN_TRUTH",
+      "public_benchmark_allowed": false,
+      "runtime_review_state": "BLOCKED",
+      "runtime_update_allowed": false,
+      "source_class": "current_best"
+    },
+    {
+      "capability": "xray",
+      "current_mode": "Mode B (Guard)",
+      "current_primary_skill_id": "diagnose",
+      "current_selected_skill_ids": [
+        "diagnose"
+      ],
+      "mat_b_state": "HOLD_PROVIDER_TOKEN_TRUTH",
+      "mat_b_verdict": "BLOCKED_BY_PROVIDER_TOKEN_TRUTH",
+      "public_benchmark_allowed": false,
+      "runtime_review_state": "BLOCKED",
+      "runtime_update_allowed": false,
+      "source_class": "current_best"
+    }
+  ],
+  "decision_ledger": [
+    {
+      "blockers": [],
+      "candidate_skill_id": "",
+      "capability": "artifact_gate",
+      "catalog_update_allowed": true,
+      "current_skill_ids": [
+        "sf-systematic-artifact_gate-differential-review-461fbd0c"
+      ],
+      "decision": "KEEP_CURRENT",
+      "entry_type": "current_baseline",
+      "public_benchmark_allowed": false,
+      "reason": "existing_baseline_remains_best",
+      "runtime_apply_review_allowed": false,
+      "runtime_update_allowed": false
+    },
+    {
+      "blockers": [],
+      "candidate_skill_id": "",
+      "capability": "autonomic_router",
+      "catalog_update_allowed": true,
+      "current_skill_ids": [
+        "sf2-autonomic_router-route-fit-spec",
+        "sf-systematic-artifact_gate-differential-review-461fbd0c"
+      ],
+      "decision": "ADD_TO_MULTI",
+      "entry_type": "current_baseline",
+      "public_benchmark_allowed": false,
+      "reason": "existing_heep_mat_b_approved_multi_assembly",
+      "runtime_apply_review_allowed": true,
+      "runtime_update_allowed": false
+    },
+    {
+      "blockers": [],
+      "candidate_skill_id": "",
+      "capability": "autoreason",
+      "catalog_update_allowed": true,
+      "current_skill_ids": [
+        "sf2-belief-route-fit-spec"
+      ],
+      "decision": "KEEP_CURRENT",
+      "entry_type": "current_baseline",
+      "public_benchmark_allowed": false,
+      "reason": "existing_baseline_remains_best",
+      "runtime_apply_review_allowed": false,
+      "runtime_update_allowed": false
+    },
+    {
+      "blockers": [],
+      "candidate_skill_id": "",
+      "capability": "belief",
+      "catalog_update_allowed": true,
+      "current_skill_ids": [
+        "sf2-belief-route-fit-spec",
+        "sf-systematic-artifact_gate-differential-review-461fbd0c"
+      ],
+      "decision": "ADD_TO_MULTI",
+      "entry_type": "current_baseline",
+      "public_benchmark_allowed": false,
+      "reason": "existing_heep_mat_b_approved_multi_assembly",
+      "runtime_apply_review_allowed": true,
+      "runtime_update_allowed": false
+    },
+    {
+      "blockers": [],
+      "candidate_skill_id": "",
+      "capability": "benchmark_meta_opt",
+      "catalog_update_allowed": true,
+      "current_skill_ids": [
+        "sf-systematic-benchmark_meta_opt-hugging-face-trackio-d21c6b90"
+      ],
+      "decision": "KEEP_CURRENT",
+      "entry_type": "current_baseline",
+      "public_benchmark_allowed": false,
+      "reason": "existing_baseline_remains_best",
+      "runtime_apply_review_allowed": false,
+      "runtime_update_allowed": false
+    },
+    {
+      "blockers": [],
+      "candidate_skill_id": "",
+      "capability": "claim_gate",
+      "catalog_update_allowed": true,
+      "current_skill_ids": [
+        "nexus-benchmark-continuous-optimization"
+      ],
+      "decision": "KEEP_CURRENT",
+      "entry_type": "current_baseline",
+      "public_benchmark_allowed": false,
+      "reason": "existing_baseline_remains_best",
+      "runtime_apply_review_allowed": false,
+      "runtime_update_allowed": false
+    },
+    {
+      "blockers": [],
+      "candidate_skill_id": "",
+      "capability": "codeintel",
+      "catalog_update_allowed": true,
+      "current_skill_ids": [
+        "sf-systematic-codeintel-first-principles-thinking-f95019ea",
+        "sf2-autonomic_router-route-fit-spec",
+        "sf-systematic-artifact_gate-differential-review-461fbd0c"
+      ],
+      "decision": "ADD_TO_MULTI",
+      "entry_type": "current_baseline",
+      "public_benchmark_allowed": false,
+      "reason": "existing_heep_mat_b_approved_multi_assembly",
+      "runtime_apply_review_allowed": true,
+      "runtime_update_allowed": false
+    },
+    {
+      "blockers": [],
+      "candidate_skill_id": "",
+      "capability": "ddtree",
+      "catalog_update_allowed": true,
+      "current_skill_ids": [
+        "nexus-root-cause-probe",
+        "sf-systematic-artifact_gate-differential-review-461fbd0c"
+      ],
+      "decision": "ADD_TO_MULTI",
+      "entry_type": "current_baseline",
+      "public_benchmark_allowed": false,
+      "reason": "existing_heep_mat_b_approved_multi_assembly",
+      "runtime_apply_review_allowed": true,
+      "runtime_update_allowed": false
+    },
+    {
+      "blockers": [
+        "hold_provider_token_truth"
+      ],
+      "candidate_skill_id": "",
+      "capability": "direct_master_loop",
+      "catalog_update_allowed": true,
+      "current_skill_ids": [
+        "sf-systematic-direct_master_loop-build-32802a87"
+      ],
+      "decision": "HOLD_MORE_DATA",
+      "entry_type": "current_baseline",
+      "public_benchmark_allowed": false,
+      "reason": "hold_provider_token_truth",
+      "runtime_apply_review_allowed": false,
+      "runtime_update_allowed": false
+    },
+    {
+      "blockers": [
+        "hold_receipt_chain"
+      ],
+      "candidate_skill_id": "",
+      "capability": "drone",
+      "catalog_update_allowed": true,
+      "current_skill_ids": [
+        "sf-systematic-drone-python-background-jobs-18326a62"
+      ],
+      "decision": "HOLD_MORE_DATA",
+      "entry_type": "current_baseline",
+      "public_benchmark_allowed": false,
+      "reason": "hold_receipt_chain",
+      "runtime_apply_review_allowed": false,
+      "runtime_update_allowed": false
+    },
+    {
+      "blockers": [
+        "hold_provider_token_truth"
+      ],
+      "candidate_skill_id": "",
+      "capability": "external_productivity",
+      "catalog_update_allowed": true,
+      "current_skill_ids": [
+        "sf-systematic-external_productivity-writer-77dc7840"
+      ],
+      "decision": "HOLD_MORE_DATA",
+      "entry_type": "current_baseline",
+      "public_benchmark_allowed": false,
+      "reason": "hold_provider_token_truth",
+      "runtime_apply_review_allowed": false,
+      "runtime_update_allowed": false
+    },
+    {
+      "blockers": [],
+      "candidate_skill_id": "",
+      "capability": "file_lock_security_gate",
+      "catalog_update_allowed": true,
+      "current_skill_ids": [
+        "sf2-file_lock_security_gate-route-fit-spec"
+      ],
+      "decision": "KEEP_CURRENT",
+      "entry_type": "current_baseline",
+      "public_benchmark_allowed": false,
+      "reason": "existing_baseline_remains_best",
+      "runtime_apply_review_allowed": false,
+      "runtime_update_allowed": false
+    },
+    {
+      "blockers": [],
+      "candidate_skill_id": "",
+      "capability": "forecast_pregate",
+      "catalog_update_allowed": true,
+      "current_skill_ids": [
+        "create-plan"
+      ],
+      "decision": "KEEP_CURRENT",
+      "entry_type": "current_baseline",
+      "public_benchmark_allowed": false,
+      "reason": "existing_baseline_remains_best",
+      "runtime_apply_review_allowed": false,
+      "runtime_update_allowed": false
+    },
+    {
+      "blockers": [],
+      "candidate_skill_id": "",
+      "capability": "governance_and_trust",
+      "catalog_update_allowed": true,
+      "current_skill_ids": [
+        "sf-systematic-codeintel-first-principles-thinking-f95019ea",
+        "sf2-autonomic_router-route-fit-spec",
+        "sf-systematic-governance_and_trust-aegisops-ai-0aa841e2"
+      ],
+      "decision": "ADD_TO_MULTI",
+      "entry_type": "current_baseline",
+      "public_benchmark_allowed": false,
+      "reason": "existing_heep_mat_b_approved_multi_assembly",
+      "runtime_apply_review_allowed": true,
+      "runtime_update_allowed": false
+    },
+    {
+      "blockers": [
+        "hold_provider_token_truth"
+      ],
+      "candidate_skill_id": "",
+      "capability": "hyper_sprint",
+      "catalog_update_allowed": true,
+      "current_skill_ids": [
+        "sf2-hyper_sprint-route-fit-spec"
+      ],
+      "decision": "HOLD_MORE_DATA",
+      "entry_type": "current_baseline",
+      "public_benchmark_allowed": false,
+      "reason": "hold_provider_token_truth",
+      "runtime_apply_review_allowed": false,
+      "runtime_update_allowed": false
+    },
+    {
+      "blockers": [],
+      "candidate_skill_id": "",
+      "capability": "lancedb",
+      "catalog_update_allowed": true,
+      "current_skill_ids": [
+        "research-source-validation-auditor",
+        "sf2-autonomic_router-route-fit-spec"
+      ],
+      "decision": "ADD_TO_MULTI",
+      "entry_type": "current_baseline",
+      "public_benchmark_allowed": false,
+      "reason": "existing_heep_mat_b_approved_multi_assembly",
+      "runtime_apply_review_allowed": true,
+      "runtime_update_allowed": false
+    },
+    {
+      "blockers": [],
+      "candidate_skill_id": "",
+      "capability": "learn_ask",
+      "catalog_update_allowed": true,
+      "current_skill_ids": [
+        "github8-skilless-deep-research-learn-ask"
+      ],
+      "decision": "KEEP_CURRENT",
+      "entry_type": "current_baseline",
+      "public_benchmark_allowed": false,
+      "reason": "existing_baseline_remains_best",
+      "runtime_apply_review_allowed": false,
+      "runtime_update_allowed": false
+    },
+    {
+      "blockers": [],
+      "candidate_skill_id": "",
+      "capability": "learning_closure",
+      "catalog_update_allowed": true,
+      "current_skill_ids": [
+        "sf-systematic-learning_closure-memory-lint-8bdb0fca"
+      ],
+      "decision": "KEEP_CURRENT",
+      "entry_type": "current_baseline",
+      "public_benchmark_allowed": false,
+      "reason": "existing_baseline_remains_best",
+      "runtime_apply_review_allowed": false,
+      "runtime_update_allowed": false
+    },
+    {
+      "blockers": [],
+      "candidate_skill_id": "",
+      "capability": "memory",
+      "catalog_update_allowed": true,
+      "current_skill_ids": [
+        "sf-systematic-memory-project-skill-audit-cc8b7621",
+        "sf2-autonomic_router-route-fit-spec"
+      ],
+      "decision": "ADD_TO_MULTI",
+      "entry_type": "current_baseline",
+      "public_benchmark_allowed": false,
+      "reason": "existing_heep_mat_b_approved_multi_assembly",
+      "runtime_apply_review_allowed": true,
+      "runtime_update_allowed": false
+    },
+    {
+      "blockers": [],
+      "candidate_skill_id": "",
+      "capability": "mempalace",
+      "catalog_update_allowed": true,
+      "current_skill_ids": [
+        "sf2-mempalace-route-fit-spec",
+        "sf-systematic-artifact_gate-differential-review-461fbd0c"
+      ],
+      "decision": "ADD_TO_MULTI",
+      "entry_type": "current_baseline",
+      "public_benchmark_allowed": false,
+      "reason": "existing_heep_mat_b_approved_multi_assembly",
+      "runtime_apply_review_allowed": true,
+      "runtime_update_allowed": false
+    },
+    {
+      "blockers": [
+        "hold_provider_token_truth"
+      ],
+      "candidate_skill_id": "",
+      "capability": "metabolism_resume",
+      "catalog_update_allowed": true,
+      "current_skill_ids": [
+        "github-auto-skill-safe-learning"
+      ],
+      "decision": "HOLD_MORE_DATA",
+      "entry_type": "current_baseline",
+      "public_benchmark_allowed": false,
+      "reason": "hold_provider_token_truth",
+      "runtime_apply_review_allowed": false,
+      "runtime_update_allowed": false
+    },
+    {
+      "blockers": [
+        "hold_receipt_chain"
+      ],
+      "candidate_skill_id": "",
+      "capability": "nightshift",
+      "catalog_update_allowed": true,
+      "current_skill_ids": [
+        "sf2-nightshift-route-fit-spec"
+      ],
+      "decision": "HOLD_MORE_DATA",
+      "entry_type": "current_baseline",
+      "public_benchmark_allowed": false,
+      "reason": "hold_receipt_chain",
+      "runtime_apply_review_allowed": false,
+      "runtime_update_allowed": false
+    },
+    {
+      "blockers": [],
+      "candidate_skill_id": "",
+      "capability": "policy_capability_gate",
+      "catalog_update_allowed": true,
+      "current_skill_ids": [
+        "sf-systematic-policy_capability_gate-aegisops-ai-0aa841e2"
+      ],
+      "decision": "KEEP_CURRENT",
+      "entry_type": "current_baseline",
+      "public_benchmark_allowed": false,
+      "reason": "existing_baseline_remains_best",
+      "runtime_apply_review_allowed": false,
+      "runtime_update_allowed": false
+    },
+    {
+      "blockers": [],
+      "candidate_skill_id": "",
+      "capability": "registry_skills_sync",
+      "catalog_update_allowed": true,
+      "current_skill_ids": [
+        "github5-skill-seekers-safe-registry-builder"
+      ],
+      "decision": "KEEP_CURRENT",
+      "entry_type": "current_baseline",
+      "public_benchmark_allowed": false,
+      "reason": "existing_baseline_remains_best",
+      "runtime_apply_review_allowed": false,
+      "runtime_update_allowed": false
+    },
+    {
+      "blockers": [],
+      "candidate_skill_id": "",
+      "capability": "regression_guard",
+      "catalog_update_allowed": true,
+      "current_skill_ids": [
+        "sf-systematic-regression_guard-odoo-automated-tests-dad98433",
+        "sf2-autonomic_router-route-fit-spec"
+      ],
+      "decision": "ADD_TO_MULTI",
+      "entry_type": "current_baseline",
+      "public_benchmark_allowed": false,
+      "reason": "existing_heep_mat_b_approved_multi_assembly",
+      "runtime_apply_review_allowed": true,
+      "runtime_update_allowed": false
+    },
+    {
+      "blockers": [],
+      "candidate_skill_id": "",
+      "capability": "repair_loop",
+      "catalog_update_allowed": true,
+      "current_skill_ids": [
+        "sf-systematic-repair_loop-odoo-automated-tests-dad98433"
+      ],
+      "decision": "KEEP_CURRENT",
+      "entry_type": "current_baseline",
+      "public_benchmark_allowed": false,
+      "reason": "existing_baseline_remains_best",
+      "runtime_apply_review_allowed": false,
+      "runtime_update_allowed": false
+    },
+    {
+      "blockers": [],
+      "candidate_skill_id": "",
+      "capability": "research",
+      "catalog_update_allowed": true,
+      "current_skill_ids": [
+        "sf-systematic-research-research-lookup-7e6f92a0"
+      ],
+      "decision": "KEEP_CURRENT",
+      "entry_type": "current_baseline",
+      "public_benchmark_allowed": false,
+      "reason": "existing_baseline_remains_best",
+      "runtime_apply_review_allowed": false,
+      "runtime_update_allowed": false
+    },
+    {
+      "blockers": [
+        "hold_provider_token_truth"
+      ],
+      "candidate_skill_id": "",
+      "capability": "research_and_source_discipline",
+      "catalog_update_allowed": true,
+      "current_skill_ids": [
+        "research-citation-chain-verifier"
+      ],
+      "decision": "HOLD_MORE_DATA",
+      "entry_type": "current_baseline",
+      "public_benchmark_allowed": false,
+      "reason": "hold_provider_token_truth",
+      "runtime_apply_review_allowed": false,
+      "runtime_update_allowed": false
+    },
+    {
+      "blockers": [
+        "hold_provider_token_truth"
+      ],
+      "candidate_skill_id": "",
+      "capability": "research_control_plane",
+      "catalog_update_allowed": true,
+      "current_skill_ids": [
+        "sf-systematic-research_control_plane-research-lookup-7e6f92a0"
+      ],
+      "decision": "HOLD_MORE_DATA",
+      "entry_type": "current_baseline",
+      "public_benchmark_allowed": false,
+      "reason": "hold_provider_token_truth",
+      "runtime_apply_review_allowed": false,
+      "runtime_update_allowed": false
+    },
+    {
+      "blockers": [
+        "hold_provider_token_truth"
+      ],
+      "candidate_skill_id": "",
+      "capability": "sandbox_replay",
+      "catalog_update_allowed": true,
+      "current_skill_ids": [
+        "sf2-sandbox_replay-route-fit-spec"
+      ],
+      "decision": "HOLD_MORE_DATA",
+      "entry_type": "current_baseline",
+      "public_benchmark_allowed": false,
+      "reason": "hold_provider_token_truth",
+      "runtime_apply_review_allowed": false,
+      "runtime_update_allowed": false
+    },
+    {
+      "blockers": [
+        "hold_receipt_chain"
+      ],
+      "candidate_skill_id": "",
+      "capability": "swarm_multi_agent",
+      "catalog_update_allowed": true,
+      "current_skill_ids": [
+        "sf2-swarm_multi_agent-route-fit-spec"
+      ],
+      "decision": "HOLD_MORE_DATA",
+      "entry_type": "current_baseline",
+      "public_benchmark_allowed": false,
+      "reason": "hold_receipt_chain",
+      "runtime_apply_review_allowed": false,
+      "runtime_update_allowed": false
+    },
+    {
+      "blockers": [
+        "hold_provider_token_truth"
+      ],
+      "candidate_skill_id": "",
+      "capability": "ui_validator",
+      "catalog_update_allowed": true,
+      "current_skill_ids": [
+        "sf-systematic-ui_validator-e2e-testing-d98eb7c3"
+      ],
+      "decision": "HOLD_MORE_DATA",
+      "entry_type": "current_baseline",
+      "public_benchmark_allowed": false,
+      "reason": "hold_provider_token_truth",
+      "runtime_apply_review_allowed": false,
+      "runtime_update_allowed": false
+    },
+    {
+      "blockers": [
+        "hold_provider_token_truth"
+      ],
+      "candidate_skill_id": "",
+      "capability": "ultra_review",
+      "catalog_update_allowed": true,
+      "current_skill_ids": [
+        "github11-vulnerability-scanner-ultra-review"
+      ],
+      "decision": "HOLD_MORE_DATA",
+      "entry_type": "current_baseline",
+      "public_benchmark_allowed": false,
+      "reason": "hold_provider_token_truth",
+      "runtime_apply_review_allowed": false,
+      "runtime_update_allowed": false
+    },
+    {
+      "blockers": [
+        "hold_provider_token_truth"
+      ],
+      "candidate_skill_id": "",
+      "capability": "xray",
+      "catalog_update_allowed": true,
+      "current_skill_ids": [
+        "diagnose"
+      ],
+      "decision": "HOLD_MORE_DATA",
+      "entry_type": "current_baseline",
+      "public_benchmark_allowed": false,
+      "reason": "hold_provider_token_truth",
+      "runtime_apply_review_allowed": false,
+      "runtime_update_allowed": false
+    }
+  ],
+  "runtime_apply_review_packet": {
+    "gate": "manual/runtime apply review must rerun post-apply smoke before default changes",
+    "public_benchmark_allowed": false,
+    "review_item_count": 9,
+    "review_items": [
+      {
+        "blockers": [],
+        "candidate_skill_id": "",
+        "capability": "autonomic_router",
+        "catalog_update_allowed": true,
+        "current_skill_ids": [
+          "sf2-autonomic_router-route-fit-spec",
+          "sf-systematic-artifact_gate-differential-review-461fbd0c"
+        ],
+        "decision": "ADD_TO_MULTI",
+        "entry_type": "current_baseline",
+        "public_benchmark_allowed": false,
+        "reason": "existing_heep_mat_b_approved_multi_assembly",
+        "runtime_apply_review_allowed": true,
+        "runtime_update_allowed": false
+      },
+      {
+        "blockers": [],
+        "candidate_skill_id": "",
+        "capability": "belief",
+        "catalog_update_allowed": true,
+        "current_skill_ids": [
+          "sf2-belief-route-fit-spec",
+          "sf-systematic-artifact_gate-differential-review-461fbd0c"
+        ],
+        "decision": "ADD_TO_MULTI",
+        "entry_type": "current_baseline",
+        "public_benchmark_allowed": false,
+        "reason": "existing_heep_mat_b_approved_multi_assembly",
+        "runtime_apply_review_allowed": true,
+        "runtime_update_allowed": false
+      },
+      {
+        "blockers": [],
+        "candidate_skill_id": "",
+        "capability": "codeintel",
+        "catalog_update_allowed": true,
+        "current_skill_ids": [
+          "sf-systematic-codeintel-first-principles-thinking-f95019ea",
+          "sf2-autonomic_router-route-fit-spec",
+          "sf-systematic-artifact_gate-differential-review-461fbd0c"
+        ],
+        "decision": "ADD_TO_MULTI",
+        "entry_type": "current_baseline",
+        "public_benchmark_allowed": false,
+        "reason": "existing_heep_mat_b_approved_multi_assembly",
+        "runtime_apply_review_allowed": true,
+        "runtime_update_allowed": false
+      },
+      {
+        "blockers": [],
+        "candidate_skill_id": "",
+        "capability": "ddtree",
+        "catalog_update_allowed": true,
+        "current_skill_ids": [
+          "nexus-root-cause-probe",
+          "sf-systematic-artifact_gate-differential-review-461fbd0c"
+        ],
+        "decision": "ADD_TO_MULTI",
+        "entry_type": "current_baseline",
+        "public_benchmark_allowed": false,
+        "reason": "existing_heep_mat_b_approved_multi_assembly",
+        "runtime_apply_review_allowed": true,
+        "runtime_update_allowed": false
+      },
+      {
+        "blockers": [],
+        "candidate_skill_id": "",
+        "capability": "governance_and_trust",
+        "catalog_update_allowed": true,
+        "current_skill_ids": [
+          "sf-systematic-codeintel-first-principles-thinking-f95019ea",
+          "sf2-autonomic_router-route-fit-spec",
+          "sf-systematic-governance_and_trust-aegisops-ai-0aa841e2"
+        ],
+        "decision": "ADD_TO_MULTI",
+        "entry_type": "current_baseline",
+        "public_benchmark_allowed": false,
+        "reason": "existing_heep_mat_b_approved_multi_assembly",
+        "runtime_apply_review_allowed": true,
+        "runtime_update_allowed": false
+      },
+      {
+        "blockers": [],
+        "candidate_skill_id": "",
+        "capability": "lancedb",
+        "catalog_update_allowed": true,
+        "current_skill_ids": [
+          "research-source-validation-auditor",
+          "sf2-autonomic_router-route-fit-spec"
+        ],
+        "decision": "ADD_TO_MULTI",
+        "entry_type": "current_baseline",
+        "public_benchmark_allowed": false,
+        "reason": "existing_heep_mat_b_approved_multi_assembly",
+        "runtime_apply_review_allowed": true,
+        "runtime_update_allowed": false
+      },
+      {
+        "blockers": [],
+        "candidate_skill_id": "",
+        "capability": "memory",
+        "catalog_update_allowed": true,
+        "current_skill_ids": [
+          "sf-systematic-memory-project-skill-audit-cc8b7621",
+          "sf2-autonomic_router-route-fit-spec"
+        ],
+        "decision": "ADD_TO_MULTI",
+        "entry_type": "current_baseline",
+        "public_benchmark_allowed": false,
+        "reason": "existing_heep_mat_b_approved_multi_assembly",
+        "runtime_apply_review_allowed": true,
+        "runtime_update_allowed": false
+      },
+      {
+        "blockers": [],
+        "candidate_skill_id": "",
+        "capability": "mempalace",
+        "catalog_update_allowed": true,
+        "current_skill_ids": [
+          "sf2-mempalace-route-fit-spec",
+          "sf-systematic-artifact_gate-differential-review-461fbd0c"
+        ],
+        "decision": "ADD_TO_MULTI",
+        "entry_type": "current_baseline",
+        "public_benchmark_allowed": false,
+        "reason": "existing_heep_mat_b_approved_multi_assembly",
+        "runtime_apply_review_allowed": true,
+        "runtime_update_allowed": false
+      },
+      {
+        "blockers": [],
+        "candidate_skill_id": "",
+        "capability": "regression_guard",
+        "catalog_update_allowed": true,
+        "current_skill_ids": [
+          "sf-systematic-regression_guard-odoo-automated-tests-dad98433",
+          "sf2-autonomic_router-route-fit-spec"
+        ],
+        "decision": "ADD_TO_MULTI",
+        "entry_type": "current_baseline",
+        "public_benchmark_allowed": false,
+        "reason": "existing_heep_mat_b_approved_multi_assembly",
+        "runtime_apply_review_allowed": true,
+        "runtime_update_allowed": false
+      }
+    ],
+    "runtime_update_allowed": false,
+    "schema": "nexus.sf_replacement_runtime_apply_review_packet.v1",
+    "status": "PASS"
+  },
+  "schema": "nexus.sf_replacement_review_pipeline.v1",
+  "sf_r_taskcards": {
+    "SF-R0_source_tier_screen": {
+      "exit": "candidate tiers and quarantine blockers are explicit",
+      "status": "PASS"
+    },
+    "SF-R1_capability_classifier": {
+      "exit": "each accepted candidate maps to a known capability",
+      "status": "PASS"
+    },
+    "SF-R2_baseline_resolver": {
+      "exit": "each capability resolves current primary and selected skills",
+      "status": "PASS"
+    },
+    "SF-R3_compare_matrix_builder": {
+      "exit": "accepted candidates produce Flash+Nexus compare rows",
+      "status": "PASS"
+    },
+    "SF-R4_decision_schema": {
+      "exit": "decisions normalize to KEEP_CURRENT/REPLACE_PRIMARY/ADD_TO_MULTI/REJECT/HOLD_MORE_DATA",
+      "status": "PASS"
+    },
+    "SF-R5_catalog_ledger_packet": {
+      "exit": "catalog update packet is generated",
+      "status": "PASS"
+    },
+    "SF-R6_runtime_review_packet": {
+      "exit": "runtime apply review remains gated and non-public",
+      "status": "PASS"
+    },
+    "SF-R7_automation_hook": {
+      "exit": "manual and automatic new-skill triggers share one hook contract",
+      "status": "PASS"
+    }
+  },
+  "status": "PASS",
+  "summary": {
+    "all_capabilities_have_baseline": true,
+    "candidate_intake_count": 0,
+    "candidate_intake_pass_count": 0,
+    "capability_count": 34,
+    "comparison_queue_count": 0,
+    "decision_counts": {
+      "ADD_TO_MULTI": 9,
+      "HOLD_MORE_DATA": 13,
+      "KEEP_CURRENT": 12
+    },
+    "public_benchmark_allowed": false,
+    "runtime_update_allowed": false
+  }
+}

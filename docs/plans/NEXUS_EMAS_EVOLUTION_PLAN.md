@@ -143,6 +143,46 @@ Next EMAS upgrade criterion: role tasks must carry externally checkable edge ass
 
 Failure lesson: EMAS must not treat more roles as automatic synergy. A role is useful only if the SFV2 role-ablation matrix plus MAT-B evidence shows that dropping the role loses reliability, quality, governance, regression safety, or a required receipt.
 
+## 9. SF-R Candidate Intake Automation (2026-05-21)
+
+EMAS discovery now has a bounded handoff into `scripts/ops/build_sf_replacement_review_pipeline.py`. The handoff supports both manual skill additions and automated source-refresh discoveries without changing runtime defaults.
+
+### 9.1 Intake Contract
+
+Every new skill candidate must provide or derive:
+
+- `skill_id`
+- `source_tier`
+- `safety_status`
+- `license_status`
+- `capability` or `capability_hints`
+- optional `role`
+- optional `comparison_result` from Flash+Nexus / MAT-B
+
+The first accepted state is only a compare queue row. Missing compare evidence is `HOLD_MORE_DATA`, not a rejection and not an approval.
+
+### 9.2 Decision Contract
+
+SF-R normalizes candidate outcomes to five states:
+
+- `KEEP_CURRENT`: current capability skill remains best.
+- `REPLACE_PRIMARY`: candidate beats current primary with clean receipt, trust, provider-token, token, and wall evidence.
+- `ADD_TO_MULTI`: candidate adds a complementary Scout / Logic / Audit / Guard role with clean receipt evidence.
+- `REJECT`: candidate is unsafe, quarantined, unreliable, polluted, or regressive.
+- `HOLD_MORE_DATA`: candidate is plausible but lacks provider-token truth, receipt truth, or live compare evidence.
+
+### 9.3 Automation Boundary
+
+The automation hook is `sf_new_skill_replacement_review`. It may run source screening, capability classification, baseline resolution, compare queue generation, decision ledger writeback, catalog packet generation, and runtime apply review packet generation.
+
+Forbidden automation actions:
+
+- `runtime_default_auto_apply`
+- `public_benchmark_unlock`
+- `quarantine_skill_mount`
+
+This keeps EMAS discovery useful without turning external source refresh into a runtime promotion path.
+
 ---
 *Created by Antigravity - Nexus Singularity V17*
 *Refined with Heterogeneous Intelligence Principles*

@@ -184,5 +184,22 @@ Failure lesson: a clean full/minus role-ablation run is necessary but not suffic
 
 Failure lesson: assertion-level role requiredness must key off the row-level runner result, not only individual telemetry fields. A minus-role row with a PASS result but weaker optional telemetry is a follow-up signal, not proof that the removed role is required.
 
+## 10. SF-R New Skill Replacement Review (2026-05-21)
+
+`docs/reports/NEXUS_SF_REPLACEMENT_REVIEW_PIPELINE_2026-05-21.json` is the new single-exit artifact for manually or automatically added skills. It does not replace MAT-B; it wraps MAT-B into a repeatable intake and review loop:
+
+- SF-R0 source tier screen: classify `nexus_curated_candidate`, repo-local/current-best, approved external reference, safe-candidate, and quarantine tiers.
+- SF-R1 capability classifier: attach each accepted candidate to an existing Nexus route capability before any comparison.
+- SF-R2 baseline resolver: resolve the current primary/selected skill set from the SFV2 baseline.
+- SF-R3 compare matrix builder: emit Flash+Nexus internal compare rows for accepted candidates.
+- SF-R4 decision schema: normalize results to `KEEP_CURRENT`, `REPLACE_PRIMARY`, `ADD_TO_MULTI`, `REJECT`, or `HOLD_MORE_DATA`.
+- SF-R5 catalog/ledger packet: write only catalog/review packets, not runtime defaults.
+- SF-R6 runtime review packet: require a separate runtime apply review and post-apply smoke.
+- SF-R7 automation hook: use the same path for `manual_skill_added` and `source_refresh_new_skill_detected`.
+
+Current result: SF-R passes with all 34 capabilities resolving a baseline. With no new candidate intake, it emits no compare rows and records the current state as `ADD_TO_MULTI=9`, `KEEP_CURRENT=12`, `HOLD_MORE_DATA=13`. The hold rows remain the known provider-token and receipt-chain blockers from MAT-B; they do not block the replacement pipeline itself.
+
+Hard boundary: SF-R may generate catalog update packets and runtime apply review packets, but `runtime_update_allowed=false` and `public_benchmark_allowed=false` until the existing HEEP runtime apply gate and public benchmark gate are run explicitly.
+
 ---
 *Created by Antigravity - Nexus Singularity V17*
