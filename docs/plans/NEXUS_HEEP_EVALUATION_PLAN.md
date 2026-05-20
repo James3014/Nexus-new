@@ -158,6 +158,10 @@ The new rule is explicit: role count, local synergy, or a multi-skill mount is n
 
 Role-ablation probe: `docs/reports/NEXUS_SFV2_ROLE_ABLATION_PROBE_2026-05-20.json` now expands the 9 approved multi-skill assemblies into 29 executable full/minus-role arms. This completes the local role-ablation probe and live-replay plan, but it intentionally does not claim role contribution is live-proven. A role is proven only when the full assembly and every minus-role arm run in a clean MAT-B window and dropping the role worsens a correctness, governance, regression, or receipt KPI without being rescued by token/wall gains.
 
+Role-ablation execution matrix: `docs/reports/NEXUS_SFV2_ROLE_ABLATION_EXECUTION_MATRIX_2026-05-20.json` converts those 29 arms into runner-ready rows and `docs/reports/NEXUS_SFV2_ROLE_ABLATION_TASK_MANIFEST_2026-05-20.json` is now frozen with `benchmark_id=nexus-sfv2-role-ablation-v1`. The first preflight correctly returned when the manifest lacked public-runner top fields; the builder now emits `version`, `frozen`, `benchmark_id`, and `description`, and the preflight passes.
+
+Role-ablation live replay: `.nexus/reports/sfv2_role_ablation_live_2026-05-20/live_summary.json` and `docs/reports/NEXUS_SFV2_ROLE_ABLATION_LIVE_ROLLUP_2026-05-20.json` show 29/29 rows PASS across 9 approved multi-skill assemblies. This proves the full and minus-role arms are executable with clean runtime receipt chains in the current window. It does **not** prove every role is required: because all minus-role arms also passed on the neutral fixture, HEEP must treat role requiredness as `RECEIPT_CLEAN_ROLE_REQUIREDNESS_NOT_PROVEN` until edge-case MAT-B tasks show a quality, governance, regression, or receipt loss when a role is removed.
+
 Failure lesson: clean replay must preserve the distinction between provider-token truth and expected-capability receipt invocation. If they are merged into a generic `HOLD_MISSING_MAT_B_EVIDENCE`, later agents can accidentally rerun the wrong path or misread a provider telemetry gap as a weak skill.
 
 Failure lesson: executor route smoke is necessary but not sufficient for MAT-B promotion. It proves the route oracle can express `drone`, `nightshift`, and `swarm`, but a skill-specific MAT-B row must still prove runtime skill mount confirmation, expected capability receipt invocation, and provider-token cleanliness in the same evidence window.
@@ -165,6 +169,8 @@ Failure lesson: executor route smoke is necessary but not sufficient for MAT-B p
 Failure lesson: do not backfill executor skill receipts on a semantically failed model-required row. Estimated token counts and local fallback traces may support diagnosis, but only provider-measured same-window token data can unblock cost/runtime/public eligibility.
 
 Failure lesson: RCA tests must mirror real replay rows, including semantic status and token data contract fields. A fixture that only says `status=FAILED` can accidentally test an unknown failure as clean, which weakens the provider-clean fail-closed boundary.
+
+Failure lesson: role-ablation task manifests must satisfy the same runner manifest contract as other internal Flash+Nexus matrices. Missing `benchmark_id`, `description`, `frozen`, or `version` must fail preflight instead of being papered over by live execution.
 
 ---
 *Created by Antigravity - Nexus Singularity V17*

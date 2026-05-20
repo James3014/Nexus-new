@@ -131,6 +131,10 @@ The generated artifact is `docs/reports/NEXUS_SFV2_SKILL_SELECTION_PIPELINE_2026
 
 `docs/reports/NEXUS_SFV2_ROLE_ABLATION_PROBE_2026-05-20.json` narrows the executable probe to the 9 MAT-B-approved multi-skill assemblies and emits 29 full/minus-role arms. EMAS treats this as the required role contribution preflight: it is complete enough to schedule live role-ablation replay, but not enough to declare a role's contribution proven.
 
+`docs/reports/NEXUS_SFV2_ROLE_ABLATION_EXECUTION_MATRIX_2026-05-20.json` and `docs/reports/NEXUS_SFV2_ROLE_ABLATION_LIVE_ROLLUP_2026-05-20.json` close the first live execution pass: 29/29 full/minus-role arms PASS with runtime receipts. EMAS therefore has executable role-ablation coverage for the 9 approved multi-skill assemblies. The live interpretation remains conservative: if a minus-role arm passes, the removed role is not proven necessary on that fixture, even if the assembly remains a valid internal candidate.
+
+Next EMAS evidence requirement: add edge-case MAT-B tasks for each approved assembly where Scout, Logic, or Audit should uniquely matter. Role contribution may be promoted from `RECEIPT_CLEAN_ROLE_REQUIREDNESS_NOT_PROVEN` only when removing a role causes a reliability, quality, governance, regression, or receipt-chain loss that the full assembly avoids.
+
 Failure lesson: EMAS must not treat more roles as automatic synergy. A role is useful only if the SFV2 role-ablation matrix plus MAT-B evidence shows that dropping the role loses reliability, quality, governance, regression safety, or a required receipt.
 
 ---

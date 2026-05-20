@@ -1,0 +1,596 @@
+{
+  "schema": "nexus.sfv2_role_ablation_live_rollup.v1",
+  "status": "PASS",
+  "summary": {
+    "planned_rows": 29,
+    "completed_rows": 29,
+    "pass_count": 29,
+    "return_count": 0,
+    "capability_count": 9,
+    "runtime_update_allowed": false,
+    "public_benchmark_allowed": false
+  },
+  "claim_boundary": [
+    "Internal SFV2 role-ablation evidence only; not public benchmark evidence.",
+    "All minus-role rows passing means delivery and receipt are clean, but role requiredness is not proven on this neutral fixture.",
+    "Runtime defaults remain behind HEEP/EMAS apply review and public benchmark remains locked."
+  ],
+  "capabilities": [
+    {
+      "capability": "autonomic_router",
+      "status": "PASS",
+      "full_assembly_tokens": 61600,
+      "minus_role_count": 2,
+      "minus_role_all_pass": true,
+      "interpretation": "RECEIPT_CLEAN_ROLE_REQUIREDNESS_NOT_PROVEN",
+      "arms": [
+        {
+          "row_id": "sfv2-role-ablation::autonomic_router::sfv2-role-ablation-autonomic_router-001::full_assembly",
+          "arm_id": "full_assembly",
+          "dropped_role": "",
+          "status": "PASS",
+          "skill_mount_contract_status": "PASS",
+          "trust_mismatch": false,
+          "total_tokens": 61600,
+          "elapsed_sec": 45.4032,
+          "model_calls": 2,
+          "provider_token_measured": true,
+          "token_data_contract_status": "PASS",
+          "skill_mount_requests": [
+            "sf2-autonomic_router-route-fit-spec",
+            "sf-systematic-artifact_gate-differential-review-461fbd0c"
+          ]
+        },
+        {
+          "row_id": "sfv2-role-ablation::autonomic_router::sfv2-role-ablation-autonomic_router-001::minus_primary",
+          "arm_id": "minus_primary",
+          "dropped_role": "",
+          "status": "PASS",
+          "skill_mount_contract_status": "PASS",
+          "trust_mismatch": false,
+          "total_tokens": 63099,
+          "elapsed_sec": 48.8035,
+          "model_calls": 2,
+          "provider_token_measured": true,
+          "token_data_contract_status": "PASS",
+          "skill_mount_requests": [
+            "sf-systematic-artifact_gate-differential-review-461fbd0c"
+          ]
+        },
+        {
+          "row_id": "sfv2-role-ablation::autonomic_router::sfv2-role-ablation-autonomic_router-001::minus_audit",
+          "arm_id": "minus_audit",
+          "dropped_role": "",
+          "status": "PASS",
+          "skill_mount_contract_status": "PASS",
+          "trust_mismatch": false,
+          "total_tokens": 59976,
+          "elapsed_sec": 34.4821,
+          "model_calls": 2,
+          "provider_token_measured": true,
+          "token_data_contract_status": "PASS",
+          "skill_mount_requests": [
+            "sf2-autonomic_router-route-fit-spec"
+          ]
+        }
+      ]
+    },
+    {
+      "capability": "belief",
+      "status": "PASS",
+      "full_assembly_tokens": 61625,
+      "minus_role_count": 2,
+      "minus_role_all_pass": true,
+      "interpretation": "RECEIPT_CLEAN_ROLE_REQUIREDNESS_NOT_PROVEN",
+      "arms": [
+        {
+          "row_id": "sfv2-role-ablation::belief::sfv2-role-ablation-belief-001::full_assembly",
+          "arm_id": "full_assembly",
+          "dropped_role": "",
+          "status": "PASS",
+          "skill_mount_contract_status": "PASS",
+          "trust_mismatch": false,
+          "total_tokens": 61625,
+          "elapsed_sec": 41.9099,
+          "model_calls": 2,
+          "provider_token_measured": true,
+          "token_data_contract_status": "PASS",
+          "skill_mount_requests": [
+            "sf2-belief-route-fit-spec",
+            "sf-systematic-artifact_gate-differential-review-461fbd0c"
+          ]
+        },
+        {
+          "row_id": "sfv2-role-ablation::belief::sfv2-role-ablation-belief-001::minus_primary",
+          "arm_id": "minus_primary",
+          "dropped_role": "",
+          "status": "PASS",
+          "skill_mount_contract_status": "PASS",
+          "trust_mismatch": false,
+          "total_tokens": 59521,
+          "elapsed_sec": 31.3236,
+          "model_calls": 2,
+          "provider_token_measured": true,
+          "token_data_contract_status": "PASS",
+          "skill_mount_requests": [
+            "sf-systematic-artifact_gate-differential-review-461fbd0c"
+          ]
+        },
+        {
+          "row_id": "sfv2-role-ablation::belief::sfv2-role-ablation-belief-001::minus_audit",
+          "arm_id": "minus_audit",
+          "dropped_role": "",
+          "status": "PASS",
+          "skill_mount_contract_status": "PASS",
+          "trust_mismatch": false,
+          "total_tokens": 63931,
+          "elapsed_sec": 54.7275,
+          "model_calls": 2,
+          "provider_token_measured": true,
+          "token_data_contract_status": "PASS",
+          "skill_mount_requests": [
+            "sf2-belief-route-fit-spec"
+          ]
+        }
+      ]
+    },
+    {
+      "capability": "codeintel",
+      "status": "PASS",
+      "full_assembly_tokens": 62440,
+      "minus_role_count": 3,
+      "minus_role_all_pass": true,
+      "interpretation": "RECEIPT_CLEAN_ROLE_REQUIREDNESS_NOT_PROVEN",
+      "arms": [
+        {
+          "row_id": "sfv2-role-ablation::codeintel::sfv2-role-ablation-codeintel-001::full_assembly",
+          "arm_id": "full_assembly",
+          "dropped_role": "",
+          "status": "PASS",
+          "skill_mount_contract_status": "PASS",
+          "trust_mismatch": false,
+          "total_tokens": 62440,
+          "elapsed_sec": 47.0625,
+          "model_calls": 2,
+          "provider_token_measured": true,
+          "token_data_contract_status": "PASS",
+          "skill_mount_requests": [
+            "sf-systematic-codeintel-first-principles-thinking-f95019ea",
+            "sf2-autonomic_router-route-fit-spec",
+            "sf-systematic-artifact_gate-differential-review-461fbd0c"
+          ]
+        },
+        {
+          "row_id": "sfv2-role-ablation::codeintel::sfv2-role-ablation-codeintel-001::minus_scout",
+          "arm_id": "minus_scout",
+          "dropped_role": "",
+          "status": "PASS",
+          "skill_mount_contract_status": "PASS",
+          "trust_mismatch": false,
+          "total_tokens": 61242,
+          "elapsed_sec": 42.5715,
+          "model_calls": 2,
+          "provider_token_measured": true,
+          "token_data_contract_status": "PASS",
+          "skill_mount_requests": [
+            "sf2-autonomic_router-route-fit-spec",
+            "sf-systematic-artifact_gate-differential-review-461fbd0c"
+          ]
+        },
+        {
+          "row_id": "sfv2-role-ablation::codeintel::sfv2-role-ablation-codeintel-001::minus_logic",
+          "arm_id": "minus_logic",
+          "dropped_role": "",
+          "status": "PASS",
+          "skill_mount_contract_status": "PASS",
+          "trust_mismatch": false,
+          "total_tokens": 63403,
+          "elapsed_sec": 55.065,
+          "model_calls": 2,
+          "provider_token_measured": true,
+          "token_data_contract_status": "PASS",
+          "skill_mount_requests": [
+            "sf-systematic-codeintel-first-principles-thinking-f95019ea",
+            "sf-systematic-artifact_gate-differential-review-461fbd0c"
+          ]
+        },
+        {
+          "row_id": "sfv2-role-ablation::codeintel::sfv2-role-ablation-codeintel-001::minus_audit",
+          "arm_id": "minus_audit",
+          "dropped_role": "",
+          "status": "PASS",
+          "skill_mount_contract_status": "PASS",
+          "trust_mismatch": false,
+          "total_tokens": 63654,
+          "elapsed_sec": 65.3286,
+          "model_calls": 2,
+          "provider_token_measured": true,
+          "token_data_contract_status": "PASS",
+          "skill_mount_requests": [
+            "sf-systematic-codeintel-first-principles-thinking-f95019ea",
+            "sf2-autonomic_router-route-fit-spec"
+          ]
+        }
+      ]
+    },
+    {
+      "capability": "ddtree",
+      "status": "PASS",
+      "full_assembly_tokens": 102289,
+      "minus_role_count": 2,
+      "minus_role_all_pass": true,
+      "interpretation": "RECEIPT_CLEAN_ROLE_REQUIREDNESS_NOT_PROVEN",
+      "arms": [
+        {
+          "row_id": "sfv2-role-ablation::ddtree::sfv2-role-ablation-ddtree-001::full_assembly",
+          "arm_id": "full_assembly",
+          "dropped_role": "",
+          "status": "PASS",
+          "skill_mount_contract_status": "PASS",
+          "trust_mismatch": false,
+          "total_tokens": 102289,
+          "elapsed_sec": 160.3847,
+          "model_calls": 3,
+          "provider_token_measured": true,
+          "token_data_contract_status": "PASS",
+          "skill_mount_requests": [
+            "nexus-root-cause-probe",
+            "sf-systematic-artifact_gate-differential-review-461fbd0c"
+          ]
+        },
+        {
+          "row_id": "sfv2-role-ablation::ddtree::sfv2-role-ablation-ddtree-001::minus_primary",
+          "arm_id": "minus_primary",
+          "dropped_role": "",
+          "status": "PASS",
+          "skill_mount_contract_status": "PASS",
+          "trust_mismatch": false,
+          "total_tokens": 99546,
+          "elapsed_sec": 101.1835,
+          "model_calls": 3,
+          "provider_token_measured": true,
+          "token_data_contract_status": "PASS",
+          "skill_mount_requests": [
+            "sf-systematic-artifact_gate-differential-review-461fbd0c"
+          ]
+        },
+        {
+          "row_id": "sfv2-role-ablation::ddtree::sfv2-role-ablation-ddtree-001::minus_audit",
+          "arm_id": "minus_audit",
+          "dropped_role": "",
+          "status": "PASS",
+          "skill_mount_contract_status": "PASS",
+          "trust_mismatch": false,
+          "total_tokens": 102420,
+          "elapsed_sec": 109.2119,
+          "model_calls": 3,
+          "provider_token_measured": true,
+          "token_data_contract_status": "PASS",
+          "skill_mount_requests": [
+            "nexus-root-cause-probe"
+          ]
+        }
+      ]
+    },
+    {
+      "capability": "governance_and_trust",
+      "status": "PASS",
+      "full_assembly_tokens": 60945,
+      "minus_role_count": 3,
+      "minus_role_all_pass": true,
+      "interpretation": "RECEIPT_CLEAN_ROLE_REQUIREDNESS_NOT_PROVEN",
+      "arms": [
+        {
+          "row_id": "sfv2-role-ablation::governance_and_trust::sfv2-role-ablation-governance_and_trust-001::full_assembly",
+          "arm_id": "full_assembly",
+          "dropped_role": "",
+          "status": "PASS",
+          "skill_mount_contract_status": "PASS",
+          "trust_mismatch": false,
+          "total_tokens": 60945,
+          "elapsed_sec": 35.9019,
+          "model_calls": 2,
+          "provider_token_measured": true,
+          "token_data_contract_status": "PASS",
+          "skill_mount_requests": [
+            "sf-systematic-codeintel-first-principles-thinking-f95019ea",
+            "sf2-autonomic_router-route-fit-spec",
+            "sf-systematic-governance_and_trust-aegisops-ai-0aa841e2"
+          ]
+        },
+        {
+          "row_id": "sfv2-role-ablation::governance_and_trust::sfv2-role-ablation-governance_and_trust-001::minus_scout",
+          "arm_id": "minus_scout",
+          "dropped_role": "",
+          "status": "PASS",
+          "skill_mount_contract_status": "PASS",
+          "trust_mismatch": false,
+          "total_tokens": 61499,
+          "elapsed_sec": 38.3599,
+          "model_calls": 2,
+          "provider_token_measured": true,
+          "token_data_contract_status": "PASS",
+          "skill_mount_requests": [
+            "sf2-autonomic_router-route-fit-spec",
+            "sf-systematic-governance_and_trust-aegisops-ai-0aa841e2"
+          ]
+        },
+        {
+          "row_id": "sfv2-role-ablation::governance_and_trust::sfv2-role-ablation-governance_and_trust-001::minus_logic",
+          "arm_id": "minus_logic",
+          "dropped_role": "",
+          "status": "PASS",
+          "skill_mount_contract_status": "PASS",
+          "trust_mismatch": false,
+          "total_tokens": 61597,
+          "elapsed_sec": 39.3246,
+          "model_calls": 2,
+          "provider_token_measured": true,
+          "token_data_contract_status": "PASS",
+          "skill_mount_requests": [
+            "sf-systematic-codeintel-first-principles-thinking-f95019ea",
+            "sf-systematic-governance_and_trust-aegisops-ai-0aa841e2"
+          ]
+        },
+        {
+          "row_id": "sfv2-role-ablation::governance_and_trust::sfv2-role-ablation-governance_and_trust-001::minus_audit",
+          "arm_id": "minus_audit",
+          "dropped_role": "",
+          "status": "PASS",
+          "skill_mount_contract_status": "PASS",
+          "trust_mismatch": false,
+          "total_tokens": 60402,
+          "elapsed_sec": 33.2119,
+          "model_calls": 2,
+          "provider_token_measured": true,
+          "token_data_contract_status": "PASS",
+          "skill_mount_requests": [
+            "sf-systematic-codeintel-first-principles-thinking-f95019ea",
+            "sf2-autonomic_router-route-fit-spec"
+          ]
+        }
+      ]
+    },
+    {
+      "capability": "lancedb",
+      "status": "PASS",
+      "full_assembly_tokens": 64648,
+      "minus_role_count": 2,
+      "minus_role_all_pass": true,
+      "interpretation": "RECEIPT_CLEAN_ROLE_REQUIREDNESS_NOT_PROVEN",
+      "arms": [
+        {
+          "row_id": "sfv2-role-ablation::lancedb::sfv2-role-ablation-lancedb-001::full_assembly",
+          "arm_id": "full_assembly",
+          "dropped_role": "",
+          "status": "PASS",
+          "skill_mount_contract_status": "PASS",
+          "trust_mismatch": false,
+          "total_tokens": 64648,
+          "elapsed_sec": 59.3038,
+          "model_calls": 2,
+          "provider_token_measured": true,
+          "token_data_contract_status": "PASS",
+          "skill_mount_requests": [
+            "research-source-validation-auditor",
+            "sf2-autonomic_router-route-fit-spec"
+          ]
+        },
+        {
+          "row_id": "sfv2-role-ablation::lancedb::sfv2-role-ablation-lancedb-001::minus_primary",
+          "arm_id": "minus_primary",
+          "dropped_role": "",
+          "status": "PASS",
+          "skill_mount_contract_status": "PASS",
+          "trust_mismatch": false,
+          "total_tokens": 63732,
+          "elapsed_sec": 51.0763,
+          "model_calls": 2,
+          "provider_token_measured": true,
+          "token_data_contract_status": "PASS",
+          "skill_mount_requests": [
+            "sf2-autonomic_router-route-fit-spec"
+          ]
+        },
+        {
+          "row_id": "sfv2-role-ablation::lancedb::sfv2-role-ablation-lancedb-001::minus_logic",
+          "arm_id": "minus_logic",
+          "dropped_role": "",
+          "status": "PASS",
+          "skill_mount_contract_status": "PASS",
+          "trust_mismatch": false,
+          "total_tokens": 69830,
+          "elapsed_sec": 82.104,
+          "model_calls": 2,
+          "provider_token_measured": true,
+          "token_data_contract_status": "PASS",
+          "skill_mount_requests": [
+            "research-source-validation-auditor"
+          ]
+        }
+      ]
+    },
+    {
+      "capability": "memory",
+      "status": "PASS",
+      "full_assembly_tokens": 73748,
+      "minus_role_count": 2,
+      "minus_role_all_pass": true,
+      "interpretation": "RECEIPT_CLEAN_ROLE_REQUIREDNESS_NOT_PROVEN",
+      "arms": [
+        {
+          "row_id": "sfv2-role-ablation::memory::sfv2-role-ablation-memory-001::full_assembly",
+          "arm_id": "full_assembly",
+          "dropped_role": "",
+          "status": "PASS",
+          "skill_mount_contract_status": "PASS",
+          "trust_mismatch": false,
+          "total_tokens": 73748,
+          "elapsed_sec": 105.2514,
+          "model_calls": 2,
+          "provider_token_measured": true,
+          "token_data_contract_status": "PASS",
+          "skill_mount_requests": [
+            "sf-systematic-memory-project-skill-audit-cc8b7621",
+            "sf2-autonomic_router-route-fit-spec"
+          ]
+        },
+        {
+          "row_id": "sfv2-role-ablation::memory::sfv2-role-ablation-memory-001::minus_primary",
+          "arm_id": "minus_primary",
+          "dropped_role": "",
+          "status": "PASS",
+          "skill_mount_contract_status": "PASS",
+          "trust_mismatch": false,
+          "total_tokens": 70054,
+          "elapsed_sec": 88.78,
+          "model_calls": 2,
+          "provider_token_measured": true,
+          "token_data_contract_status": "PASS",
+          "skill_mount_requests": [
+            "sf2-autonomic_router-route-fit-spec"
+          ]
+        },
+        {
+          "row_id": "sfv2-role-ablation::memory::sfv2-role-ablation-memory-001::minus_logic",
+          "arm_id": "minus_logic",
+          "dropped_role": "",
+          "status": "PASS",
+          "skill_mount_contract_status": "PASS",
+          "trust_mismatch": false,
+          "total_tokens": 70297,
+          "elapsed_sec": 85.3588,
+          "model_calls": 2,
+          "provider_token_measured": true,
+          "token_data_contract_status": "PASS",
+          "skill_mount_requests": [
+            "sf-systematic-memory-project-skill-audit-cc8b7621"
+          ]
+        }
+      ]
+    },
+    {
+      "capability": "mempalace",
+      "status": "PASS",
+      "full_assembly_tokens": 66190,
+      "minus_role_count": 2,
+      "minus_role_all_pass": true,
+      "interpretation": "RECEIPT_CLEAN_ROLE_REQUIREDNESS_NOT_PROVEN",
+      "arms": [
+        {
+          "row_id": "sfv2-role-ablation::mempalace::sfv2-role-ablation-mempalace-001::full_assembly",
+          "arm_id": "full_assembly",
+          "dropped_role": "",
+          "status": "PASS",
+          "skill_mount_contract_status": "PASS",
+          "trust_mismatch": false,
+          "total_tokens": 66190,
+          "elapsed_sec": 65.0042,
+          "model_calls": 2,
+          "provider_token_measured": true,
+          "token_data_contract_status": "PASS",
+          "skill_mount_requests": [
+            "sf2-mempalace-route-fit-spec",
+            "sf-systematic-artifact_gate-differential-review-461fbd0c"
+          ]
+        },
+        {
+          "row_id": "sfv2-role-ablation::mempalace::sfv2-role-ablation-mempalace-001::minus_primary",
+          "arm_id": "minus_primary",
+          "dropped_role": "",
+          "status": "PASS",
+          "skill_mount_contract_status": "PASS",
+          "trust_mismatch": false,
+          "total_tokens": 63701,
+          "elapsed_sec": 51.5821,
+          "model_calls": 2,
+          "provider_token_measured": true,
+          "token_data_contract_status": "PASS",
+          "skill_mount_requests": [
+            "sf-systematic-artifact_gate-differential-review-461fbd0c"
+          ]
+        },
+        {
+          "row_id": "sfv2-role-ablation::mempalace::sfv2-role-ablation-mempalace-001::minus_audit",
+          "arm_id": "minus_audit",
+          "dropped_role": "",
+          "status": "PASS",
+          "skill_mount_contract_status": "PASS",
+          "trust_mismatch": false,
+          "total_tokens": 60458,
+          "elapsed_sec": 36.569,
+          "model_calls": 2,
+          "provider_token_measured": true,
+          "token_data_contract_status": "PASS",
+          "skill_mount_requests": [
+            "sf2-mempalace-route-fit-spec"
+          ]
+        }
+      ]
+    },
+    {
+      "capability": "regression_guard",
+      "status": "PASS",
+      "full_assembly_tokens": 63031,
+      "minus_role_count": 2,
+      "minus_role_all_pass": true,
+      "interpretation": "RECEIPT_CLEAN_ROLE_REQUIREDNESS_NOT_PROVEN",
+      "arms": [
+        {
+          "row_id": "sfv2-role-ablation::regression_guard::sfv2-role-ablation-regression_guard-001::full_assembly",
+          "arm_id": "full_assembly",
+          "dropped_role": "",
+          "status": "PASS",
+          "skill_mount_contract_status": "PASS",
+          "trust_mismatch": false,
+          "total_tokens": 63031,
+          "elapsed_sec": 49.0847,
+          "model_calls": 2,
+          "provider_token_measured": true,
+          "token_data_contract_status": "PASS",
+          "skill_mount_requests": [
+            "sf-systematic-regression_guard-odoo-automated-tests-dad98433",
+            "sf2-autonomic_router-route-fit-spec"
+          ]
+        },
+        {
+          "row_id": "sfv2-role-ablation::regression_guard::sfv2-role-ablation-regression_guard-001::minus_primary",
+          "arm_id": "minus_primary",
+          "dropped_role": "",
+          "status": "PASS",
+          "skill_mount_contract_status": "PASS",
+          "trust_mismatch": false,
+          "total_tokens": 60739,
+          "elapsed_sec": 39.3699,
+          "model_calls": 2,
+          "provider_token_measured": true,
+          "token_data_contract_status": "PASS",
+          "skill_mount_requests": [
+            "sf2-autonomic_router-route-fit-spec"
+          ]
+        },
+        {
+          "row_id": "sfv2-role-ablation::regression_guard::sfv2-role-ablation-regression_guard-001::minus_logic",
+          "arm_id": "minus_logic",
+          "dropped_role": "",
+          "status": "PASS",
+          "skill_mount_contract_status": "PASS",
+          "trust_mismatch": false,
+          "total_tokens": 67422,
+          "elapsed_sec": 97.9101,
+          "model_calls": 2,
+          "provider_token_measured": true,
+          "token_data_contract_status": "PASS",
+          "skill_mount_requests": [
+            "sf-systematic-regression_guard-odoo-automated-tests-dad98433"
+          ]
+        }
+      ]
+    }
+  ],
+  "evidence": {
+    "live_summary": ".nexus/reports/sfv2_role_ablation_live_2026-05-20/live_summary.json",
+    "execution_matrix": "docs/reports/NEXUS_SFV2_ROLE_ABLATION_EXECUTION_MATRIX_2026-05-20.json",
+    "catalog": "docs/reports/NEXUS_SFV2_ROLE_ABLATION_LIVE_CATALOG_2026-05-20.json"
+  }
+}

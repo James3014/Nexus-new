@@ -1,0 +1,160 @@
+{
+  "schema": "nexus.sfv2_role_ablation_skill_status.v1",
+  "summary": {
+    "skill_count": 10,
+    "runtime_update_allowed": false,
+    "public_benchmark_allowed": false
+  },
+  "skills": [
+    {
+      "name": "sf2-autonomic_router-route-fit-spec",
+      "path": ".agents/skills/sf2/sf2-autonomic_router-route-fit-spec/SKILL.md",
+      "root": "sfv2_role_ablation_internal_probe",
+      "skill_status": "external_reference_candidate",
+      "test_level": "sfv2_role_ablation",
+      "action": "ablation_only_compare",
+      "capability_mount": "autoreason",
+      "family": "autonomic_router",
+      "reason_codes": [
+        "sfv2_role_ablation_internal_probe",
+        "not_runtime_default",
+        "not_public_benchmark"
+      ]
+    },
+    {
+      "name": "sf-systematic-artifact_gate-differential-review-461fbd0c",
+      "path": ".agents/skills/sf-systematic-challengers/sf-systematic-artifact_gate-differential-review-461fbd0c/SKILL.md",
+      "root": "sfv2_role_ablation_internal_probe",
+      "skill_status": "external_reference_candidate",
+      "test_level": "sfv2_role_ablation",
+      "action": "ablation_only_compare",
+      "capability_mount": "autoreason",
+      "family": "autonomic_router",
+      "reason_codes": [
+        "sfv2_role_ablation_internal_probe",
+        "not_runtime_default",
+        "not_public_benchmark"
+      ]
+    },
+    {
+      "name": "sf2-belief-route-fit-spec",
+      "path": ".agents/skills/sf2/sf2-belief-route-fit-spec/SKILL.md",
+      "root": "sfv2_role_ablation_internal_probe",
+      "skill_status": "external_reference_candidate",
+      "test_level": "sfv2_role_ablation",
+      "action": "ablation_only_compare",
+      "capability_mount": "belief",
+      "family": "belief",
+      "reason_codes": [
+        "sfv2_role_ablation_internal_probe",
+        "not_runtime_default",
+        "not_public_benchmark"
+      ]
+    },
+    {
+      "name": "sf-systematic-codeintel-first-principles-thinking-f95019ea",
+      "path": ".agents/skills/sf-systematic-challengers/sf-systematic-codeintel-first-principles-thinking-f95019ea/SKILL.md",
+      "root": "sfv2_role_ablation_internal_probe",
+      "skill_status": "external_reference_candidate",
+      "test_level": "sfv2_role_ablation",
+      "action": "ablation_only_compare",
+      "capability_mount": "codeintel",
+      "family": "codeintel",
+      "reason_codes": [
+        "sfv2_role_ablation_internal_probe",
+        "not_runtime_default",
+        "not_public_benchmark"
+      ]
+    },
+    {
+      "name": "nexus-root-cause-probe",
+      "path": ".agents/skills/nexus-root-cause-probe/SKILL.md",
+      "root": "sfv2_role_ablation_internal_probe",
+      "skill_status": "external_reference_candidate",
+      "test_level": "sfv2_role_ablation",
+      "action": "ablation_only_compare",
+      "capability_mount": "ddtree",
+      "family": "ddtree",
+      "reason_codes": [
+        "sfv2_role_ablation_internal_probe",
+        "not_runtime_default",
+        "not_public_benchmark"
+      ]
+    },
+    {
+      "name": "sf-systematic-governance_and_trust-aegisops-ai-0aa841e2",
+      "path": ".agents/skills/sf-systematic-challengers/sf-systematic-governance_and_trust-aegisops-ai-0aa841e2/SKILL.md",
+      "root": "sfv2_role_ablation_internal_probe",
+      "skill_status": "external_reference_candidate",
+      "test_level": "sfv2_role_ablation",
+      "action": "ablation_only_compare",
+      "capability_mount": "mempalace_gate",
+      "family": "governance_and_trust",
+      "reason_codes": [
+        "sfv2_role_ablation_internal_probe",
+        "not_runtime_default",
+        "not_public_benchmark"
+      ]
+    },
+    {
+      "name": "research-source-validation-auditor",
+      "path": ".agents/skills/research-source-validation-auditor/SKILL.md",
+      "root": "sfv2_role_ablation_internal_probe",
+      "skill_status": "external_reference_candidate",
+      "test_level": "sfv2_role_ablation",
+      "action": "ablation_only_compare",
+      "capability_mount": "lancedb",
+      "family": "lancedb",
+      "reason_codes": [
+        "sfv2_role_ablation_internal_probe",
+        "not_runtime_default",
+        "not_public_benchmark"
+      ]
+    },
+    {
+      "name": "sf-systematic-memory-project-skill-audit-cc8b7621",
+      "path": ".agents/skills/sf-systematic-challengers/sf-systematic-memory-project-skill-audit-cc8b7621/SKILL.md",
+      "root": "sfv2_role_ablation_internal_probe",
+      "skill_status": "external_reference_candidate",
+      "test_level": "sfv2_role_ablation",
+      "action": "ablation_only_compare",
+      "capability_mount": "memory",
+      "family": "memory",
+      "reason_codes": [
+        "sfv2_role_ablation_internal_probe",
+        "not_runtime_default",
+        "not_public_benchmark"
+      ]
+    },
+    {
+      "name": "sf2-mempalace-route-fit-spec",
+      "path": ".agents/skills/sf2/sf2-mempalace-route-fit-spec/SKILL.md",
+      "root": "sfv2_role_ablation_internal_probe",
+      "skill_status": "external_reference_candidate",
+      "test_level": "sfv2_role_ablation",
+      "action": "ablation_only_compare",
+      "capability_mount": "mempalace_gate",
+      "family": "mempalace",
+      "reason_codes": [
+        "sfv2_role_ablation_internal_probe",
+        "not_runtime_default",
+        "not_public_benchmark"
+      ]
+    },
+    {
+      "name": "sf-systematic-regression_guard-odoo-automated-tests-dad98433",
+      "path": ".agents/skills/sf-systematic-challengers/sf-systematic-regression_guard-odoo-automated-tests-dad98433/SKILL.md",
+      "root": "sfv2_role_ablation_internal_probe",
+      "skill_status": "external_reference_candidate",
+      "test_level": "sfv2_role_ablation",
+      "action": "ablation_only_compare",
+      "capability_mount": "semantic_failure_sensor",
+      "family": "regression_guard",
+      "reason_codes": [
+        "sfv2_role_ablation_internal_probe",
+        "not_runtime_default",
+        "not_public_benchmark"
+      ]
+    }
+  ]
+}
