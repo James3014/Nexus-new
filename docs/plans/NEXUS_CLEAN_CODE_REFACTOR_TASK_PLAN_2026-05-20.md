@@ -420,3 +420,27 @@ Verification:
 
 - `uv run python -m py_compile nexus/app/research_flow_service.py nexus/research/flow/route_decider.py nexus/research/flow/__init__.py`
 - `uv run pytest tests/app/test_research_flow_service.py -q` -> `100 passed`
+
+## 14. CC-2 Research Flow Evidence Packer Result
+
+Status: `DONE`
+
+Files:
+
+- `nexus/research/flow/evidence_packer.py`
+- `nexus/app/research_flow_service.py`
+- `docs/plans/NEXUS_CLEAN_CODE_REFACTOR_TASK_PLAN_2026-05-20.md`
+
+Result:
+
+- MSA receipt report writing and research context packaging moved behind
+  `nexus.research.flow.evidence_packer`;
+- `research_flow_service.py` still owns orchestration and runtime flow;
+- receipt/report schema, public claim boundaries, and route decision semantics
+  are unchanged;
+- private helper compatibility names remain importable from the facade.
+
+Verification:
+
+- `uv run python -m py_compile nexus/app/research_flow_service.py nexus/research/flow/route_decider.py nexus/research/flow/evidence_packer.py nexus/research/flow/__init__.py`
+- `uv run pytest tests/app/test_research_flow_service.py -q` -> `100 passed`
