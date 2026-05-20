@@ -1,0 +1,437 @@
+{
+  "schema": "nexus.heep_mat_b_blocker_resolution_queue.v1",
+  "status": "PASS",
+  "summary": {
+    "mat_b_comparison_count": 34,
+    "decided_count": 21,
+    "blocked_count": 13,
+    "provider_token_truth_replay_count": 10,
+    "receipt_invocation_replay_count": 3,
+    "runtime_update_allowed": false,
+    "public_benchmark_allowed": false
+  },
+  "queue": [
+    {
+      "capability": "direct_master_loop",
+      "blocker": "BLOCKED_BY_PROVIDER_TOKEN_TRUTH",
+      "lane": "PROVIDER_TOKEN_TRUTH_REPLAY",
+      "required_action": "Rerun the same MAT-B baseline/challenger pair with provider-measured tokens on every model-call row.",
+      "closure_gate": [
+        "baseline token_data_contract_status == PASS",
+        "challenger token_data_contract_status == PASS",
+        "total_tokens > 0 when model_calls > 0",
+        "receipt_chain_pass remains true for both arms"
+      ],
+      "can_update_mode_map_before_replay": false,
+      "can_update_runtime_before_replay": false,
+      "reason_codes": [
+        "baseline_infra_invalid:model_call_without_tokens",
+        "clean_replay_still_unclean",
+        "clean_replay:baseline_infra_invalid:model_call_without_tokens"
+      ],
+      "baseline_row_id": "heep::direct_master_loop::heep-mat-b-direct_master_loop-001::mode_a_current_primary",
+      "challenger_row_id": "heep::direct_master_loop::heep-mat-b-direct_master_loop-001::heep_multi_skill"
+    },
+    {
+      "capability": "drone",
+      "blocker": "BLOCKED_BY_RECEIPT_DATA_CONTRACT",
+      "lane": "RECEIPT_INVOCATION_REPLAY",
+      "required_action": "Run a targeted route/executor smoke first, then rerun MAT-B only after expected capability receipts are selected, invoked, evidenced, gate-passed, and outcome-contributing.",
+      "closure_gate": [
+        "expected_capability_receipt_coverage.missing == []",
+        "skill_mount_contract_status == PASS",
+        "receipt_chain_pass == true for both arms",
+        "provider token contract is PASS if model_calls > 0"
+      ],
+      "missing_expected_capabilities": [
+        "drone"
+      ],
+      "can_update_mode_map_before_replay": false,
+      "can_update_runtime_before_replay": false,
+      "reason_codes": [
+        "baseline_infra_invalid:receipt_data_contract_violation",
+        "clean_replay_still_unclean",
+        "clean_replay:baseline_infra_invalid:receipt_data_contract_violation"
+      ],
+      "baseline_row_id": "heep::drone::heep-mat-b-drone-001::mode_a_current_primary",
+      "challenger_row_id": "heep::drone::heep-mat-b-drone-001::heep_multi_skill"
+    },
+    {
+      "capability": "external_productivity",
+      "blocker": "BLOCKED_BY_PROVIDER_TOKEN_TRUTH",
+      "lane": "PROVIDER_TOKEN_TRUTH_REPLAY",
+      "required_action": "Rerun the same MAT-B baseline/challenger pair with provider-measured tokens on every model-call row.",
+      "closure_gate": [
+        "baseline token_data_contract_status == PASS",
+        "challenger token_data_contract_status == PASS",
+        "total_tokens > 0 when model_calls > 0",
+        "receipt_chain_pass remains true for both arms"
+      ],
+      "can_update_mode_map_before_replay": false,
+      "can_update_runtime_before_replay": false,
+      "reason_codes": [
+        "baseline_infra_invalid:model_call_without_tokens",
+        "clean_replay_still_unclean",
+        "clean_replay:baseline_infra_invalid:model_call_without_tokens"
+      ],
+      "baseline_row_id": "heep::external_productivity::heep-mat-b-external_productivity-001::mode_a_current_primary",
+      "challenger_row_id": "heep::external_productivity::heep-mat-b-external_productivity-001::heep_multi_skill"
+    },
+    {
+      "capability": "hyper_sprint",
+      "blocker": "BLOCKED_BY_PROVIDER_TOKEN_TRUTH",
+      "lane": "PROVIDER_TOKEN_TRUTH_REPLAY",
+      "required_action": "Rerun the same MAT-B baseline/challenger pair with provider-measured tokens on every model-call row.",
+      "closure_gate": [
+        "baseline token_data_contract_status == PASS",
+        "challenger token_data_contract_status == PASS",
+        "total_tokens > 0 when model_calls > 0",
+        "receipt_chain_pass remains true for both arms"
+      ],
+      "can_update_mode_map_before_replay": false,
+      "can_update_runtime_before_replay": false,
+      "reason_codes": [
+        "baseline_infra_invalid:model_call_without_tokens",
+        "clean_replay_still_unclean",
+        "clean_replay:baseline_infra_invalid:model_call_without_tokens"
+      ],
+      "baseline_row_id": "heep::hyper_sprint::heep-mat-b-hyper_sprint-001::mode_a_current_primary",
+      "challenger_row_id": "heep::hyper_sprint::heep-mat-b-hyper_sprint-001::heep_multi_skill"
+    },
+    {
+      "capability": "metabolism_resume",
+      "blocker": "BLOCKED_BY_PROVIDER_TOKEN_TRUTH",
+      "lane": "PROVIDER_TOKEN_TRUTH_REPLAY",
+      "required_action": "Rerun the same MAT-B baseline/challenger pair with provider-measured tokens on every model-call row.",
+      "closure_gate": [
+        "baseline token_data_contract_status == PASS",
+        "challenger token_data_contract_status == PASS",
+        "total_tokens > 0 when model_calls > 0",
+        "receipt_chain_pass remains true for both arms"
+      ],
+      "can_update_mode_map_before_replay": false,
+      "can_update_runtime_before_replay": false,
+      "reason_codes": [
+        "baseline_infra_invalid:model_call_without_tokens",
+        "clean_replay_still_unclean",
+        "clean_replay:baseline_infra_invalid:model_call_without_tokens"
+      ],
+      "baseline_row_id": "heep::metabolism_resume::heep-mat-b-metabolism_resume-001::mode_a_current_primary",
+      "challenger_row_id": "heep::metabolism_resume::heep-mat-b-metabolism_resume-001::heep_multi_skill"
+    },
+    {
+      "capability": "nightshift",
+      "blocker": "BLOCKED_BY_RECEIPT_DATA_CONTRACT",
+      "lane": "RECEIPT_INVOCATION_REPLAY",
+      "required_action": "Run a targeted route/executor smoke first, then rerun MAT-B only after expected capability receipts are selected, invoked, evidenced, gate-passed, and outcome-contributing.",
+      "closure_gate": [
+        "expected_capability_receipt_coverage.missing == []",
+        "skill_mount_contract_status == PASS",
+        "receipt_chain_pass == true for both arms",
+        "provider token contract is PASS if model_calls > 0"
+      ],
+      "missing_expected_capabilities": [
+        "nightshift"
+      ],
+      "can_update_mode_map_before_replay": false,
+      "can_update_runtime_before_replay": false,
+      "reason_codes": [
+        "baseline_infra_invalid:receipt_data_contract_violation",
+        "clean_replay_still_unclean",
+        "clean_replay:baseline_infra_invalid:receipt_data_contract_violation"
+      ],
+      "baseline_row_id": "heep::nightshift::heep-mat-b-nightshift-001::mode_a_current_primary",
+      "challenger_row_id": "heep::nightshift::heep-mat-b-nightshift-001::heep_multi_skill"
+    },
+    {
+      "capability": "research_and_source_discipline",
+      "blocker": "BLOCKED_BY_PROVIDER_TOKEN_TRUTH",
+      "lane": "PROVIDER_TOKEN_TRUTH_REPLAY",
+      "required_action": "Rerun the same MAT-B baseline/challenger pair with provider-measured tokens on every model-call row.",
+      "closure_gate": [
+        "baseline token_data_contract_status == PASS",
+        "challenger token_data_contract_status == PASS",
+        "total_tokens > 0 when model_calls > 0",
+        "receipt_chain_pass remains true for both arms"
+      ],
+      "can_update_mode_map_before_replay": false,
+      "can_update_runtime_before_replay": false,
+      "reason_codes": [
+        "baseline_infra_invalid:model_call_without_tokens",
+        "clean_replay_still_unclean",
+        "clean_replay:baseline_infra_invalid:model_call_without_tokens"
+      ],
+      "baseline_row_id": "heep::research_and_source_discipline::heep-mat-b-research_and_source_discipline-001::mode_a_current_primary",
+      "challenger_row_id": "heep::research_and_source_discipline::heep-mat-b-research_and_source_discipline-001::heep_multi_skill"
+    },
+    {
+      "capability": "research_control_plane",
+      "blocker": "BLOCKED_BY_PROVIDER_TOKEN_TRUTH",
+      "lane": "PROVIDER_TOKEN_TRUTH_REPLAY",
+      "required_action": "Rerun the same MAT-B baseline/challenger pair with provider-measured tokens on every model-call row.",
+      "closure_gate": [
+        "baseline token_data_contract_status == PASS",
+        "challenger token_data_contract_status == PASS",
+        "total_tokens > 0 when model_calls > 0",
+        "receipt_chain_pass remains true for both arms"
+      ],
+      "can_update_mode_map_before_replay": false,
+      "can_update_runtime_before_replay": false,
+      "reason_codes": [
+        "baseline_infra_invalid:model_call_without_tokens",
+        "clean_replay_still_unclean",
+        "clean_replay:baseline_infra_invalid:model_call_without_tokens"
+      ],
+      "baseline_row_id": "heep::research_control_plane::heep-mat-b-research_control_plane-001::mode_a_current_primary",
+      "challenger_row_id": "heep::research_control_plane::heep-mat-b-research_control_plane-001::heep_multi_skill"
+    },
+    {
+      "capability": "sandbox_replay",
+      "blocker": "BLOCKED_BY_PROVIDER_TOKEN_TRUTH",
+      "lane": "PROVIDER_TOKEN_TRUTH_REPLAY",
+      "required_action": "Rerun the same MAT-B baseline/challenger pair with provider-measured tokens on every model-call row.",
+      "closure_gate": [
+        "baseline token_data_contract_status == PASS",
+        "challenger token_data_contract_status == PASS",
+        "total_tokens > 0 when model_calls > 0",
+        "receipt_chain_pass remains true for both arms"
+      ],
+      "can_update_mode_map_before_replay": false,
+      "can_update_runtime_before_replay": false,
+      "reason_codes": [
+        "baseline_infra_invalid:model_call_without_tokens",
+        "clean_replay_still_unclean",
+        "clean_replay:baseline_infra_invalid:model_call_without_tokens"
+      ],
+      "baseline_row_id": "heep::sandbox_replay::heep-mat-b-sandbox_replay-001::mode_a_current_primary",
+      "challenger_row_id": "heep::sandbox_replay::heep-mat-b-sandbox_replay-001::heep_multi_skill"
+    },
+    {
+      "capability": "swarm_multi_agent",
+      "blocker": "BLOCKED_BY_RECEIPT_DATA_CONTRACT",
+      "lane": "RECEIPT_INVOCATION_REPLAY",
+      "required_action": "Run a targeted route/executor smoke first, then rerun MAT-B only after expected capability receipts are selected, invoked, evidenced, gate-passed, and outcome-contributing.",
+      "closure_gate": [
+        "expected_capability_receipt_coverage.missing == []",
+        "skill_mount_contract_status == PASS",
+        "receipt_chain_pass == true for both arms",
+        "provider token contract is PASS if model_calls > 0"
+      ],
+      "missing_expected_capabilities": [
+        "swarm"
+      ],
+      "can_update_mode_map_before_replay": false,
+      "can_update_runtime_before_replay": false,
+      "reason_codes": [
+        "baseline_infra_invalid:receipt_data_contract_violation",
+        "clean_replay_still_unclean",
+        "clean_replay:baseline_infra_invalid:receipt_data_contract_violation"
+      ],
+      "baseline_row_id": "heep::swarm_multi_agent::heep-mat-b-swarm_multi_agent-001::mode_a_current_primary",
+      "challenger_row_id": "heep::swarm_multi_agent::heep-mat-b-swarm_multi_agent-001::heep_multi_skill"
+    },
+    {
+      "capability": "ui_validator",
+      "blocker": "BLOCKED_BY_PROVIDER_TOKEN_TRUTH",
+      "lane": "PROVIDER_TOKEN_TRUTH_REPLAY",
+      "required_action": "Rerun the same MAT-B baseline/challenger pair with provider-measured tokens on every model-call row.",
+      "closure_gate": [
+        "baseline token_data_contract_status == PASS",
+        "challenger token_data_contract_status == PASS",
+        "total_tokens > 0 when model_calls > 0",
+        "receipt_chain_pass remains true for both arms"
+      ],
+      "can_update_mode_map_before_replay": false,
+      "can_update_runtime_before_replay": false,
+      "reason_codes": [
+        "baseline_infra_invalid:model_call_without_tokens",
+        "clean_replay_still_unclean",
+        "clean_replay:baseline_infra_invalid:model_call_without_tokens"
+      ],
+      "baseline_row_id": "heep::ui_validator::heep-mat-b-ui_validator-001::mode_a_current_primary",
+      "challenger_row_id": "heep::ui_validator::heep-mat-b-ui_validator-001::heep_multi_skill"
+    },
+    {
+      "capability": "ultra_review",
+      "blocker": "BLOCKED_BY_PROVIDER_TOKEN_TRUTH",
+      "lane": "PROVIDER_TOKEN_TRUTH_REPLAY",
+      "required_action": "Rerun the same MAT-B baseline/challenger pair with provider-measured tokens on every model-call row.",
+      "closure_gate": [
+        "baseline token_data_contract_status == PASS",
+        "challenger token_data_contract_status == PASS",
+        "total_tokens > 0 when model_calls > 0",
+        "receipt_chain_pass remains true for both arms"
+      ],
+      "can_update_mode_map_before_replay": false,
+      "can_update_runtime_before_replay": false,
+      "reason_codes": [
+        "baseline_infra_invalid:model_call_without_tokens",
+        "clean_replay_still_unclean",
+        "clean_replay:baseline_infra_invalid:model_call_without_tokens"
+      ],
+      "baseline_row_id": "heep::ultra_review::heep-mat-b-ultra_review-001::mode_a_current_primary",
+      "challenger_row_id": "heep::ultra_review::heep-mat-b-ultra_review-001::heep_multi_skill"
+    },
+    {
+      "capability": "xray",
+      "blocker": "BLOCKED_BY_PROVIDER_TOKEN_TRUTH",
+      "lane": "PROVIDER_TOKEN_TRUTH_REPLAY",
+      "required_action": "Rerun the same MAT-B baseline/challenger pair with provider-measured tokens on every model-call row.",
+      "closure_gate": [
+        "baseline token_data_contract_status == PASS",
+        "challenger token_data_contract_status == PASS",
+        "total_tokens > 0 when model_calls > 0",
+        "receipt_chain_pass remains true for both arms"
+      ],
+      "can_update_mode_map_before_replay": false,
+      "can_update_runtime_before_replay": false,
+      "reason_codes": [
+        "baseline_infra_invalid:model_call_without_tokens",
+        "clean_replay_still_unclean",
+        "clean_replay:baseline_infra_invalid:model_call_without_tokens"
+      ],
+      "baseline_row_id": "heep::xray::heep-mat-b-xray-001::mode_a_current_primary",
+      "challenger_row_id": "heep::xray::heep-mat-b-xray-001::heep_multi_skill"
+    }
+  ],
+  "decided": [
+    {
+      "capability": "artifact_gate",
+      "verdict": "KEEP_SINGLE_PRIMARY",
+      "reason_codes": [
+        "efficiency_regressed"
+      ]
+    },
+    {
+      "capability": "autonomic_router",
+      "verdict": "APPROVE_HEEP_MODE_CANDIDATE",
+      "reason_codes": []
+    },
+    {
+      "capability": "autoreason",
+      "verdict": "KEEP_SINGLE_PRIMARY",
+      "reason_codes": [
+        "efficiency_regressed"
+      ]
+    },
+    {
+      "capability": "belief",
+      "verdict": "APPROVE_HEEP_MODE_CANDIDATE",
+      "reason_codes": []
+    },
+    {
+      "capability": "benchmark_meta_opt",
+      "verdict": "KEEP_SINGLE_PRIMARY",
+      "reason_codes": [
+        "efficiency_regressed"
+      ]
+    },
+    {
+      "capability": "claim_gate",
+      "verdict": "KEEP_SINGLE_PRIMARY",
+      "reason_codes": [
+        "efficiency_regressed"
+      ]
+    },
+    {
+      "capability": "codeintel",
+      "verdict": "APPROVE_HEEP_MODE_CANDIDATE",
+      "reason_codes": []
+    },
+    {
+      "capability": "ddtree",
+      "verdict": "APPROVE_HEEP_MODE_CANDIDATE",
+      "reason_codes": []
+    },
+    {
+      "capability": "file_lock_security_gate",
+      "verdict": "KEEP_SINGLE_PRIMARY",
+      "reason_codes": [
+        "efficiency_regressed"
+      ]
+    },
+    {
+      "capability": "forecast_pregate",
+      "verdict": "KEEP_SINGLE_PRIMARY",
+      "reason_codes": [
+        "efficiency_regressed"
+      ]
+    },
+    {
+      "capability": "governance_and_trust",
+      "verdict": "APPROVE_HEEP_MODE_CANDIDATE",
+      "reason_codes": []
+    },
+    {
+      "capability": "lancedb",
+      "verdict": "APPROVE_HEEP_MODE_CANDIDATE",
+      "reason_codes": []
+    },
+    {
+      "capability": "learn_ask",
+      "verdict": "KEEP_SINGLE_PRIMARY",
+      "reason_codes": [
+        "efficiency_regressed"
+      ]
+    },
+    {
+      "capability": "learning_closure",
+      "verdict": "KEEP_SINGLE_PRIMARY",
+      "reason_codes": [
+        "efficiency_regressed"
+      ]
+    },
+    {
+      "capability": "memory",
+      "verdict": "APPROVE_HEEP_MODE_CANDIDATE",
+      "reason_codes": []
+    },
+    {
+      "capability": "mempalace",
+      "verdict": "APPROVE_HEEP_MODE_CANDIDATE",
+      "reason_codes": []
+    },
+    {
+      "capability": "policy_capability_gate",
+      "verdict": "KEEP_SINGLE_PRIMARY",
+      "reason_codes": [
+        "efficiency_regressed"
+      ]
+    },
+    {
+      "capability": "registry_skills_sync",
+      "verdict": "KEEP_SINGLE_PRIMARY",
+      "reason_codes": [
+        "efficiency_regressed"
+      ]
+    },
+    {
+      "capability": "regression_guard",
+      "verdict": "APPROVE_HEEP_MODE_CANDIDATE",
+      "reason_codes": []
+    },
+    {
+      "capability": "repair_loop",
+      "verdict": "KEEP_SINGLE_PRIMARY",
+      "reason_codes": [
+        "efficiency_regressed"
+      ]
+    },
+    {
+      "capability": "research",
+      "verdict": "REJECT_MULTI_SKILL",
+      "reason_codes": [
+        "reliability_not_better_or_delivery_return"
+      ]
+    }
+  ],
+  "claim_boundary": [
+    "This queue is a blocker-resolution artifact for internal HEEP MAT-B only.",
+    "Provider-token blockers must not be converted to skill wins by local estimation or zero-fill.",
+    "Receipt blockers must not be converted to skill wins until expected capability invocation is confirmed by runtime receipts.",
+    "No runtime default or public benchmark claim is unlocked by this queue."
+  ],
+  "source_report": "docs/reports/NEXUS_HEEP_MAT_B_LIVE_REPORT_2026-05-20.json",
+  "source_clean_replay_report": "docs/reports/NEXUS_HEEP_MAT_B_HOLD_CLEAN_REPLAY_REPORT_2026-05-20.json",
+  "source_clean_replay_summary": ".nexus/reports/heep_flash_nexus_mat_b_hold_clean_replay_2026-05-20/live_summary.json"
+}
