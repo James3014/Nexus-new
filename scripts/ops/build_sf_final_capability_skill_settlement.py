@@ -21,6 +21,15 @@ DEFAULT_SFV2 = PROJECT_ROOT / "docs/reports/NEXUS_SFV2_SKILL_SELECTION_PIPELINE_
 DEFAULT_OUTPUT = PROJECT_ROOT / "docs/reports/NEXUS_SF_FINAL_CAPABILITY_SKILL_SETTLEMENT_2026-05-21.json"
 
 TOP_K = 8
+QUARANTINE_MARKERS = (
+    "candidate-skill-from-",
+    "auto-gen-",
+    ".codexworktrees",
+    ".codex/worktrees",
+    "worktree",
+    "archive",
+    "vendor",
+)
 COARSE_TO_ROUTE = {
     "benchmark_and_promotion": [
         "benchmark_meta_opt",
@@ -118,6 +127,7 @@ def build_sf_final_capability_skill_settlement(
     candidate_intake = _candidate_intake_from_buckets(buckets)
     replacement = build_sf_replacement_review_pipeline(sfv2_pipeline=sfv2_pipeline, candidate_intake=candidate_intake)
     settlement_rows = [_settlement_row(capability, baselines[capability], buckets, replacement) for capability in sorted(baselines)]
+    compare_matrix = _compare_matrix(buckets, baselines)
     blockers = _blockers(reconciled, baselines, settlement_rows)
     return {
         "schema": "nexus.sf_final_capability_skill_settlement.v1",
@@ -141,11 +151,13 @@ def build_sf_final_capability_skill_settlement(
         "capability_buckets": buckets,
         "sf_r_candidate_intake": candidate_intake,
         "sf_r_review": replacement,
+        "canonical_compare_matrix": compare_matrix,
         "settlement_rows": settlement_rows,
         "final_taskcards": _taskcards(blockers),
         "claim_boundary": [
             "SF-FINAL processes the historical 1759 skill inventory and 684 ablation-eligible fair pool.",
             "SF-FINAL proves coverage, shortlist, and review readiness; it does not claim every eligible skill has live Flash+Nexus evidence.",
+            "SF-FINAL compare matrix is a deterministic precheck; replacement still requires Flash+Nexus live comparison.",
             "Runtime defaults and public benchmarks remain gated by SF-R/HEEP apply review, post-apply smoke, and public benchmark gates.",
         ],
         "blockers": blockers,
@@ -230,11 +242,12 @@ def _build_buckets(
             by_capability[capability].append(_candidate_summary(row, score=score, reason=reason))
     buckets: dict[str, Any] = {}
     for capability, rows in by_capability.items():
-        canonical = _dedupe_by_sha(rows)
+        canonical = _dedupe_candidates(rows)
         canonical.sort(key=lambda item: (-int(item["score"]), item["skill_id"]))
         buckets[capability] = {
             "candidate_count": len(rows),
             "canonical_candidate_count": len(canonical),
+            "mirror_duplicate_count": max(0, len(rows) - len(canonical)),
             "shortlist": canonical[:top_k],
             "shortlist_limit": top_k,
         }
@@ -291,12 +304,17 @@ def _candidate_summary(row: Mapping[str, Any], *, score: int, reason: str) -> di
 
 def _candidate_intake_from_buckets(buckets: Mapping[str, Any]) -> dict[str, Any]:
     skills: list[dict[str, Any]] = []
+    seen: set[tuple[str, str]] = set()
     for capability, bucket in (buckets.get("by_capability", {}) or {}).items():
         if not isinstance(bucket, Mapping):
             continue
         for item in bucket.get("shortlist", []) or []:
             if not isinstance(item, Mapping):
                 continue
+            key = (str(capability), str(item.get("skill_id") or ""))
+            if key in seen:
+                continue
+            seen.add(key)
             skills.append(
                 {
                     "skill_id": str(item.get("skill_id") or ""),
@@ -315,6 +333,53 @@ def _candidate_intake_from_buckets(buckets: Mapping[str, Any]) -> dict[str, Any]
         "runtime_update_allowed": False,
         "public_benchmark_allowed": False,
     }
+
+
+def _compare_matrix(buckets: Mapping[str, Any], baselines: Mapping[str, Mapping[str, Any]]) -> list[dict[str, Any]]:
+    rows: list[dict[str, Any]] = []
+    for capability in sorted(baselines):
+        baseline = baselines[capability]
+        current_primary = str(_mapping(baseline.get("m2_shortlist")).get("current_primary") or "")
+        bucket = _mapping((buckets.get("by_capability", {}) or {}).get(capability))
+        for item in bucket.get("shortlist", []) or []:
+            if not isinstance(item, Mapping):
+                continue
+            precheck = _precheck_candidate(item, current_primary)
+            rows.append(
+                {
+                    "capability": capability,
+                    "current_primary_skill_id": current_primary,
+                    "candidate_skill_id": str(item.get("skill_id") or ""),
+                    "candidate_role": str(item.get("role") or ""),
+                    "candidate_source_tier": str(item.get("source_tier") or ""),
+                    "static_fit_score": int(item.get("score") or 0),
+                    "fit_reason": str(item.get("fit_reason") or ""),
+                    "mirror_count": int(item.get("mirror_count") or 1),
+                    "canonical_source_path": str(item.get("path") or ""),
+                    "dedupe_key": str(item.get("dedupe_key") or ""),
+                    "precheck_status": precheck["status"],
+                    "precheck_blockers": precheck["blockers"],
+                    "live_compare_status": "NEEDS_FLASH_NEXUS_COMPARE" if precheck["status"] == "PASS" else "BLOCKED_PRECHECK",
+                    "replacement_decision_status": "PENDING_LIVE_COMPARE" if precheck["status"] == "PASS" else "REJECT_PRECHECK",
+                    "runtime_update_allowed": False,
+                    "public_benchmark_allowed": False,
+                }
+            )
+    return rows
+
+
+def _precheck_candidate(item: Mapping[str, Any], current_primary: str) -> dict[str, Any]:
+    blockers: list[str] = []
+    blob = f"{item.get('skill_id', '')} {item.get('path', '')} {item.get('source_tier', '')}".lower()
+    if not item.get("skill_id"):
+        blockers.append("missing_skill_id")
+    if str(item.get("skill_id") or "") == current_primary:
+        blockers.append("same_as_current_primary")
+    if str(item.get("source_tier") or "") == "quarantine" or any(marker in blob for marker in QUARANTINE_MARKERS):
+        blockers.append("quarantine_tier_blocked")
+    if str(item.get("safety_status") or "") not in {"PASS", "REVIEWED_PASS"}:
+        blockers.append("safety_status_not_pass")
+    return {"status": "PASS" if not blockers else "RETURN", "blockers": sorted(set(blockers))}
 
 
 def _settlement_row(
@@ -337,6 +402,7 @@ def _settlement_row(
         "current_primary_skill_id": primary,
         "shortlist_count": len(bucket.get("shortlist", []) or []) if isinstance(bucket, Mapping) else 0,
         "canonical_candidate_count": int(bucket.get("canonical_candidate_count") or 0) if isinstance(bucket, Mapping) else 0,
+        "mirror_duplicate_count": int(bucket.get("mirror_duplicate_count") or 0) if isinstance(bucket, Mapping) else 0,
         "final_state": str(current.get("decision") or "HOLD_MORE_DATA"),
         "final_reason": str(current.get("reason") or ""),
         "candidate_decision_counts": _counts(str(row.get("decision") or "") for row in candidate_decisions),
@@ -359,6 +425,9 @@ def _summary(
     replacement: Mapping[str, Any],
 ) -> dict[str, Any]:
     by_capability = buckets.get("by_capability", {}) or {}
+    shortlisted_count = sum(
+        len(bucket.get("shortlist", []) or []) for bucket in by_capability.values() if isinstance(bucket, Mapping)
+    )
     return {
         "historical_total_skill_files": int(_mapping(inventory.get("summary")).get("total_skill_files") or len(reconciled)),
         "historical_fair_pool_total_candidates": int(_mapping(fair_pool.get("summary")).get("total_candidates") or 0),
@@ -372,14 +441,17 @@ def _summary(
         "capabilities_with_shortlist_count": sum(
             1 for bucket in by_capability.values() if isinstance(bucket, Mapping) and bucket.get("shortlist")
         ),
-        "shortlisted_candidate_count": sum(
-            len(bucket.get("shortlist", []) or []) for bucket in by_capability.values() if isinstance(bucket, Mapping)
+        "shortlisted_candidate_count": shortlisted_count,
+        "mirror_duplicate_count": sum(
+            int(bucket.get("mirror_duplicate_count") or 0) for bucket in by_capability.values() if isinstance(bucket, Mapping)
         ),
         "no_fit_count": int(buckets.get("no_fit_count") or 0),
         "final_state_counts": _counts(row["final_state"] for row in settlement_rows),
         "sf_r_status": replacement.get("status"),
         "sf_r_candidate_intake_count": _mapping(replacement.get("summary")).get("candidate_intake_count"),
         "sf_r_comparison_queue_count": _mapping(replacement.get("summary")).get("comparison_queue_count"),
+        "deterministic_precheck_count": shortlisted_count,
+        "pending_flash_nexus_compare_count": _mapping(replacement.get("summary")).get("comparison_queue_count"),
         "runtime_update_allowed": False,
         "public_benchmark_allowed": False,
     }
@@ -391,7 +463,7 @@ def _taskcards(blockers: list[str]) -> dict[str, Any]:
         "SF-FINAL-0_inventory_reconciliation": {"status": status, "exit": "1759 inventory and fair pool reconciled"},
         "SF-FINAL-1_tier_gate": {"status": status, "exit": "quarantine/reference/runtime tiers are explicit"},
         "SF-FINAL-2_capability_bucket_classifier": {"status": status, "exit": "ablation-eligible skills bucketed against 34 capabilities"},
-        "SF-FINAL-3_dedup_and_canonicalization": {"status": status, "exit": "shortlists are sha-deduped"},
+        "SF-FINAL-3_dedup_and_canonicalization": {"status": status, "exit": "shortlists are canonical skill-id deduped"},
         "SF-FINAL-4_static_fit_scoring": {"status": status, "exit": "top-K shortlist emitted for every capability"},
         "SF-FINAL-5_replay_precheck_queue": {"status": status, "exit": "accepted shortlist becomes SF-R compare queue"},
         "SF-FINAL-6_flash_nexus_gate": {"status": "HOLD", "exit": "live Flash+Nexus compare is required for replacement, not for inventory coverage"},
@@ -429,14 +501,33 @@ def _blockers(
     return sorted(set(blockers))
 
 
-def _dedupe_by_sha(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
+def _dedupe_candidates(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
     by_key: dict[str, dict[str, Any]] = {}
     for row in rows:
-        key = str(row.get("sha256") or row.get("skill_id") or row.get("path") or "")
+        key = _dedupe_key(row)
+        row["dedupe_key"] = key
         existing = by_key.get(key)
-        if existing is None or int(row.get("score") or 0) > int(existing.get("score") or 0):
-            by_key[key] = row
+        if existing is None:
+            copy = dict(row)
+            copy["mirror_count"] = 1
+            copy["mirror_paths"] = [str(row.get("path") or "")]
+            by_key[key] = copy
+        else:
+            existing["mirror_count"] = int(existing.get("mirror_count") or 1) + 1
+            existing.setdefault("mirror_paths", []).append(str(row.get("path") or ""))
+            if int(row.get("score") or 0) > int(existing.get("score") or 0):
+                existing.update({key_name: value for key_name, value in row.items() if key_name != "mirror_paths"})
     return list(by_key.values())
+
+
+def _dedupe_key(row: Mapping[str, Any]) -> str:
+    skill_id = str(row.get("skill_id") or "").strip().lower()
+    if skill_id:
+        return f"skill_id:{skill_id}"
+    sha = str(row.get("sha256") or "").strip().lower()
+    if sha:
+        return f"sha:{sha}"
+    return f"path:{str(row.get('path') or '').strip().lower()}"
 
 
 def _settlement_tier(*, status: str, safety_status: str, root: str) -> str:

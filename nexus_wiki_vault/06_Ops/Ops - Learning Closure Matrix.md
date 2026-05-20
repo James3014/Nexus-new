@@ -2840,3 +2840,10 @@ version_scope:
 - Failure: the reconciliation keyed by `skill_id`, so duplicate fair-pool candidate rows collapsed into the unique candidate view and made the all-candidate coverage claim look incomplete.
 - Lesson: inventory coverage and comparison shortlist canonicalization are different accounting layers.
 - Guardrail: report fair-pool row coverage from the source summary or candidate rows, and report `unique_ablation_eligible_count` separately for deduped shortlist/canonicalization decisions.
+
+## 2026-05-21 - SF-FINAL compare queues must dedupe mirrored skill copies before live runs
+
+- Trigger: the first SF-FINAL queue emitted 272 comparison rows but only 96 unique skill IDs, with mirror copies such as `browse` repeated across agent-specific directories.
+- Failure: path/SHA based dedupe treated mirrored copies as separate challenger skills, making the report look larger while not adding real comparison value.
+- Lesson: for skill-fit comparison, canonical identity is capability plus skill ID first; SHA/path are provenance, not separate challenger identities.
+- Guardrail: build compare queues from canonical `capability + skill_id` rows, retain mirror paths/counts as provenance, and only live-test the canonical row.

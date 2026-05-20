@@ -25,6 +25,14 @@ def _inventory() -> dict:
                 "description": "Scan repo symbols and impact.",
             },
             {
+                "name": "code-symbol-scout",
+                "path": "/tmp/mirror/code-symbol-scout/SKILL.md",
+                "sha256": "sha-code-mirror",
+                "status": "reference",
+                "family": "codeintel",
+                "description": "Mirror copy of repo symbol scan skill.",
+            },
+            {
                 "name": "artifact-audit-gate",
                 "path": "/tmp/artifact-audit-gate/SKILL.md",
                 "sha256": "sha-artifact",
@@ -47,6 +55,14 @@ def _inventory() -> dict:
                 "status": "reference",
                 "family": "misc",
                 "description": "No route terms.",
+            },
+            {
+                "name": "nexus-worktree-hotfix-sync-and-verify",
+                "path": "/tmp/nexus-worktree-hotfix-sync-and-verify/SKILL.md",
+                "sha256": "sha-worktree-name",
+                "status": "reference",
+                "family": "registry",
+                "description": "registry sync candidate with worktree marker in name",
             },
         ],
     }
@@ -88,6 +104,16 @@ def _fair_pool() -> dict:
                 "capability_candidates": ["repair_and_coding"],
                 "load_when": "candidate inbox code scan",
                 "safety_status": "quarantined",
+                "ablation_eligible": True,
+                "runtime_eligible": False,
+            },
+            {
+                "skill_id": "nexus-worktree-hotfix-sync-and-verify",
+                "path": "/tmp/nexus-worktree-hotfix-sync-and-verify/SKILL.md",
+                "sha256": "sha-worktree-name",
+                "capability_candidates": ["governance_and_trust"],
+                "load_when": "artifact evidence audit gate registry sync",
+                "safety_status": "ablation_only",
                 "ablation_eligible": True,
                 "runtime_eligible": False,
             },
@@ -134,7 +160,14 @@ def test_sf_final_settlement_reconciles_historical_pool_and_excludes_quarantine(
 
     code_shortlist = payload["capability_buckets"]["by_capability"]["codeintel"]["shortlist"]
     assert {row["skill_id"] for row in code_shortlist} == {"code-symbol-scout"}
+    assert code_shortlist[0]["mirror_count"] == 2
+    assert payload["capability_buckets"]["by_capability"]["codeintel"]["mirror_duplicate_count"] == 1
+    assert payload["summary"]["mirror_duplicate_count"] == 1
     assert "candidate-skill-from-noisy" not in {row["skill_id"] for row in payload["sf_r_candidate_intake"]["skills"]}
+    assert len(payload["canonical_compare_matrix"]) == 3
+    blocked = [row for row in payload["canonical_compare_matrix"] if row["precheck_status"] == "RETURN"]
+    assert blocked[0]["candidate_skill_id"] == "nexus-worktree-hotfix-sync-and-verify"
+    assert blocked[0]["live_compare_status"] == "BLOCKED_PRECHECK"
     assert payload["inventory_reconciliation"]["reconciled_counts"]["quarantine"] == 1
 
 
