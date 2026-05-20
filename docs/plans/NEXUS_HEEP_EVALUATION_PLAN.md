@@ -124,6 +124,8 @@ Targeted replay check: a 6-row receipt replay was attempted at `.nexus/reports/h
 
 NEXT replay check: a full 26-row blocked replay was attempted at `.nexus/reports/heep_flash_nexus_mat_b_next_replay_2026-05-20` and summarized in `docs/reports/NEXUS_HEEP_MAT_B_NEXT_REPLAY_STATUS_2026-05-20.json`. The first `direct_master_loop` row was semantically `VERIFIED`, but it still returned because `model_calls=1`, `gateway_error_category=gateway_error`, `raw_provider_total_tokens=0`, and `token_data_contract_status=DATA_CONTRACT_VIOLATION`. Therefore all 13 blocked capabilities remain fail-closed until a provider-clean replay window produces measured provider tokens.
 
+Blocked mode resolution: `docs/reports/NEXUS_HEEP_MAT_B_BLOCKED_MODE_RESOLUTION_2026-05-20.json` separates internal non-cost mode selection from provider-cost/public eligibility. The 10 provider-token blockers have clean receipt/trust chains and stronger challenger evidence, so they are recorded as `MULTI_SKILL_NON_COST_WIN`; they still cannot update runtime or public benchmark until same-window provider-token truth is measured. The 3 receipt blockers (`drone`, `nightshift`, `swarm_multi_agent`) remain `UNDECIDED_RECEIPT_CHAIN_MISSING` because expected executor receipts are still absent.
+
 Failure lesson: clean replay must preserve the distinction between provider-token truth and expected-capability receipt invocation. If they are merged into a generic `HOLD_MISSING_MAT_B_EVIDENCE`, later agents can accidentally rerun the wrong path or misread a provider telemetry gap as a weak skill.
 
 ---

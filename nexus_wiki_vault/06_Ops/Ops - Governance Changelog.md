@@ -30,6 +30,9 @@ version_scope: '[v17.1, v22, v23]'
 ## 2026-05-20
 - **HEEP MAT-B Verification-Only Manifest Repair:** Updated the Flash+Nexus compare task manifest builder so internal HEEP MAT-B compare tasks use the runner-native `all_target_tests_pass` criterion while receipt-chain completeness remains judged by the MAT-B report layer. This keeps verification-only rows from being misclassified as artifact-change delivery tasks and preserves fail-closed receipt/token gates.
 
+## 2026-05-20
+- **HEEP MAT-B Blocked Mode Resolution:** Added a fail-closed resolver that separates internal non-cost mode selection from provider-token/public eligibility for blocked MAT-B rows. Provider-token blockers can record stronger non-cost multi-skill evidence without unlocking runtime defaults, while executor receipt blockers remain undecided until expected capability receipts exist.
+
 ## One-sentence summary
 記錄 Nexus 治理架構的所有重大變更、審計硬化與契約遷移歷史。 [Source: MUSE-NEXUS-Engine-Specification-v22-Eternal.md]
 

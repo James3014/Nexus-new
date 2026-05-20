@@ -1,0 +1,276 @@
+{
+  "schema": "nexus.heep_mat_b_blocked_mode_resolution.v1",
+  "status": "PASS",
+  "summary": {
+    "blocked_capability_count": 13,
+    "multi_skill_non_cost_win_count": 10,
+    "keep_single_non_cost_count": 0,
+    "receipt_chain_missing_count": 3,
+    "runtime_update_allowed": false,
+    "public_benchmark_allowed": false
+  },
+  "rows": [
+    {
+      "capability": "direct_master_loop",
+      "blocker": "BLOCKED_BY_PROVIDER_TOKEN_TRUTH",
+      "root_cause": "gateway_stats_missing_after_model_call",
+      "mode_decision": "MULTI_SKILL_NON_COST_WIN",
+      "decision_scope": "internal_non_cost_mode_selection",
+      "decision_reason": "challenger_has_stronger_evidence_chain",
+      "baseline_row_id": "heep::direct_master_loop::heep-mat-b-direct_master_loop-001::mode_a_current_primary",
+      "challenger_row_id": "heep::direct_master_loop::heep-mat-b-direct_master_loop-001::heep_multi_skill",
+      "evidence_seal_count_delta": 2,
+      "pollution_pct_delta": 0.0,
+      "wall_delta_observation": -1.4778,
+      "provider_cost_status": "HOLD_PROVIDER_TOKEN_TRUTH",
+      "runtime_update_allowed": false,
+      "public_benchmark_allowed": false,
+      "remaining_gate": [
+        "provider-clean replay with measured provider tokens",
+        "same-window baseline/challenger token truth before cost decision"
+      ]
+    },
+    {
+      "capability": "drone",
+      "blocker": "BLOCKED_BY_RECEIPT_DATA_CONTRACT",
+      "root_cause": "expected_executor_receipt_missing",
+      "mode_decision": "UNDECIDED_RECEIPT_CHAIN_MISSING",
+      "decision_scope": "no_mode_selection_until_receipt_chain_passes",
+      "decision_reason": "baseline_and_challenger_missing_expected_capability_receipts",
+      "baseline_row_id": "heep::drone::heep-mat-b-drone-001::mode_a_current_primary",
+      "challenger_row_id": "heep::drone::heep-mat-b-drone-001::heep_multi_skill",
+      "missing_expected_capabilities": [
+        "drone"
+      ],
+      "runtime_update_allowed": false,
+      "public_benchmark_allowed": false,
+      "remaining_gate": [
+        "targeted route/executor smoke produces selected/invoked/evidence/gate/outcome receipt",
+        "provider-clean MAT-B replay after executor receipt is present"
+      ]
+    },
+    {
+      "capability": "external_productivity",
+      "blocker": "BLOCKED_BY_PROVIDER_TOKEN_TRUTH",
+      "root_cause": "gateway_stats_missing_after_model_call",
+      "mode_decision": "MULTI_SKILL_NON_COST_WIN",
+      "decision_scope": "internal_non_cost_mode_selection",
+      "decision_reason": "challenger_has_stronger_evidence_chain",
+      "baseline_row_id": "heep::external_productivity::heep-mat-b-external_productivity-001::mode_a_current_primary",
+      "challenger_row_id": "heep::external_productivity::heep-mat-b-external_productivity-001::heep_multi_skill",
+      "evidence_seal_count_delta": 2,
+      "pollution_pct_delta": 0.0,
+      "wall_delta_observation": 0.912,
+      "provider_cost_status": "HOLD_PROVIDER_TOKEN_TRUTH",
+      "runtime_update_allowed": false,
+      "public_benchmark_allowed": false,
+      "remaining_gate": [
+        "provider-clean replay with measured provider tokens",
+        "same-window baseline/challenger token truth before cost decision"
+      ]
+    },
+    {
+      "capability": "hyper_sprint",
+      "blocker": "BLOCKED_BY_PROVIDER_TOKEN_TRUTH",
+      "root_cause": "gateway_stats_missing_after_model_call",
+      "mode_decision": "MULTI_SKILL_NON_COST_WIN",
+      "decision_scope": "internal_non_cost_mode_selection",
+      "decision_reason": "challenger_has_stronger_evidence_chain",
+      "baseline_row_id": "heep::hyper_sprint::heep-mat-b-hyper_sprint-001::mode_a_current_primary",
+      "challenger_row_id": "heep::hyper_sprint::heep-mat-b-hyper_sprint-001::heep_multi_skill",
+      "evidence_seal_count_delta": 2,
+      "pollution_pct_delta": 0.0,
+      "wall_delta_observation": -1.5992,
+      "provider_cost_status": "HOLD_PROVIDER_TOKEN_TRUTH",
+      "runtime_update_allowed": false,
+      "public_benchmark_allowed": false,
+      "remaining_gate": [
+        "provider-clean replay with measured provider tokens",
+        "same-window baseline/challenger token truth before cost decision"
+      ]
+    },
+    {
+      "capability": "metabolism_resume",
+      "blocker": "BLOCKED_BY_PROVIDER_TOKEN_TRUTH",
+      "root_cause": "gateway_stats_missing_after_model_call",
+      "mode_decision": "MULTI_SKILL_NON_COST_WIN",
+      "decision_scope": "internal_non_cost_mode_selection",
+      "decision_reason": "challenger_has_stronger_evidence_chain",
+      "baseline_row_id": "heep::metabolism_resume::heep-mat-b-metabolism_resume-001::mode_a_current_primary",
+      "challenger_row_id": "heep::metabolism_resume::heep-mat-b-metabolism_resume-001::heep_multi_skill",
+      "evidence_seal_count_delta": 2,
+      "pollution_pct_delta": 0.0,
+      "wall_delta_observation": 0.1021,
+      "provider_cost_status": "HOLD_PROVIDER_TOKEN_TRUTH",
+      "runtime_update_allowed": false,
+      "public_benchmark_allowed": false,
+      "remaining_gate": [
+        "provider-clean replay with measured provider tokens",
+        "same-window baseline/challenger token truth before cost decision"
+      ]
+    },
+    {
+      "capability": "nightshift",
+      "blocker": "BLOCKED_BY_RECEIPT_DATA_CONTRACT",
+      "root_cause": "expected_executor_receipt_missing",
+      "mode_decision": "UNDECIDED_RECEIPT_CHAIN_MISSING",
+      "decision_scope": "no_mode_selection_until_receipt_chain_passes",
+      "decision_reason": "baseline_and_challenger_missing_expected_capability_receipts",
+      "baseline_row_id": "heep::nightshift::heep-mat-b-nightshift-001::mode_a_current_primary",
+      "challenger_row_id": "heep::nightshift::heep-mat-b-nightshift-001::heep_multi_skill",
+      "missing_expected_capabilities": [
+        "nightshift"
+      ],
+      "runtime_update_allowed": false,
+      "public_benchmark_allowed": false,
+      "remaining_gate": [
+        "targeted route/executor smoke produces selected/invoked/evidence/gate/outcome receipt",
+        "provider-clean MAT-B replay after executor receipt is present"
+      ]
+    },
+    {
+      "capability": "research_and_source_discipline",
+      "blocker": "BLOCKED_BY_PROVIDER_TOKEN_TRUTH",
+      "root_cause": "gateway_stats_missing_after_model_call",
+      "mode_decision": "MULTI_SKILL_NON_COST_WIN",
+      "decision_scope": "internal_non_cost_mode_selection",
+      "decision_reason": "challenger_has_stronger_evidence_chain",
+      "baseline_row_id": "heep::research_and_source_discipline::heep-mat-b-research_and_source_discipline-001::mode_a_current_primary",
+      "challenger_row_id": "heep::research_and_source_discipline::heep-mat-b-research_and_source_discipline-001::heep_multi_skill",
+      "evidence_seal_count_delta": 2,
+      "pollution_pct_delta": 0.0,
+      "wall_delta_observation": 0.7594,
+      "provider_cost_status": "HOLD_PROVIDER_TOKEN_TRUTH",
+      "runtime_update_allowed": false,
+      "public_benchmark_allowed": false,
+      "remaining_gate": [
+        "provider-clean replay with measured provider tokens",
+        "same-window baseline/challenger token truth before cost decision"
+      ]
+    },
+    {
+      "capability": "research_control_plane",
+      "blocker": "BLOCKED_BY_PROVIDER_TOKEN_TRUTH",
+      "root_cause": "gateway_stats_missing_after_model_call",
+      "mode_decision": "MULTI_SKILL_NON_COST_WIN",
+      "decision_scope": "internal_non_cost_mode_selection",
+      "decision_reason": "challenger_has_stronger_evidence_chain",
+      "baseline_row_id": "heep::research_control_plane::heep-mat-b-research_control_plane-001::mode_a_current_primary",
+      "challenger_row_id": "heep::research_control_plane::heep-mat-b-research_control_plane-001::heep_multi_skill",
+      "evidence_seal_count_delta": 2,
+      "pollution_pct_delta": 0.0,
+      "wall_delta_observation": 0.3077,
+      "provider_cost_status": "HOLD_PROVIDER_TOKEN_TRUTH",
+      "runtime_update_allowed": false,
+      "public_benchmark_allowed": false,
+      "remaining_gate": [
+        "provider-clean replay with measured provider tokens",
+        "same-window baseline/challenger token truth before cost decision"
+      ]
+    },
+    {
+      "capability": "sandbox_replay",
+      "blocker": "BLOCKED_BY_PROVIDER_TOKEN_TRUTH",
+      "root_cause": "gateway_stats_missing_after_model_call",
+      "mode_decision": "MULTI_SKILL_NON_COST_WIN",
+      "decision_scope": "internal_non_cost_mode_selection",
+      "decision_reason": "challenger_has_stronger_evidence_chain",
+      "baseline_row_id": "heep::sandbox_replay::heep-mat-b-sandbox_replay-001::mode_a_current_primary",
+      "challenger_row_id": "heep::sandbox_replay::heep-mat-b-sandbox_replay-001::heep_multi_skill",
+      "evidence_seal_count_delta": 1,
+      "pollution_pct_delta": 0.0,
+      "wall_delta_observation": 0.8569,
+      "provider_cost_status": "HOLD_PROVIDER_TOKEN_TRUTH",
+      "runtime_update_allowed": false,
+      "public_benchmark_allowed": false,
+      "remaining_gate": [
+        "provider-clean replay with measured provider tokens",
+        "same-window baseline/challenger token truth before cost decision"
+      ]
+    },
+    {
+      "capability": "swarm_multi_agent",
+      "blocker": "BLOCKED_BY_RECEIPT_DATA_CONTRACT",
+      "root_cause": "expected_executor_receipt_missing",
+      "mode_decision": "UNDECIDED_RECEIPT_CHAIN_MISSING",
+      "decision_scope": "no_mode_selection_until_receipt_chain_passes",
+      "decision_reason": "baseline_and_challenger_missing_expected_capability_receipts",
+      "baseline_row_id": "heep::swarm_multi_agent::heep-mat-b-swarm_multi_agent-001::mode_a_current_primary",
+      "challenger_row_id": "heep::swarm_multi_agent::heep-mat-b-swarm_multi_agent-001::heep_multi_skill",
+      "missing_expected_capabilities": [
+        "swarm"
+      ],
+      "runtime_update_allowed": false,
+      "public_benchmark_allowed": false,
+      "remaining_gate": [
+        "targeted route/executor smoke produces selected/invoked/evidence/gate/outcome receipt",
+        "provider-clean MAT-B replay after executor receipt is present"
+      ]
+    },
+    {
+      "capability": "ui_validator",
+      "blocker": "BLOCKED_BY_PROVIDER_TOKEN_TRUTH",
+      "root_cause": "gateway_stats_missing_after_model_call",
+      "mode_decision": "MULTI_SKILL_NON_COST_WIN",
+      "decision_scope": "internal_non_cost_mode_selection",
+      "decision_reason": "challenger_has_stronger_evidence_chain",
+      "baseline_row_id": "heep::ui_validator::heep-mat-b-ui_validator-001::mode_a_current_primary",
+      "challenger_row_id": "heep::ui_validator::heep-mat-b-ui_validator-001::heep_multi_skill",
+      "evidence_seal_count_delta": 1,
+      "pollution_pct_delta": 0.0,
+      "wall_delta_observation": 0.4302,
+      "provider_cost_status": "HOLD_PROVIDER_TOKEN_TRUTH",
+      "runtime_update_allowed": false,
+      "public_benchmark_allowed": false,
+      "remaining_gate": [
+        "provider-clean replay with measured provider tokens",
+        "same-window baseline/challenger token truth before cost decision"
+      ]
+    },
+    {
+      "capability": "ultra_review",
+      "blocker": "BLOCKED_BY_PROVIDER_TOKEN_TRUTH",
+      "root_cause": "gateway_stats_missing_after_model_call",
+      "mode_decision": "MULTI_SKILL_NON_COST_WIN",
+      "decision_scope": "internal_non_cost_mode_selection",
+      "decision_reason": "challenger_has_stronger_evidence_chain",
+      "baseline_row_id": "heep::ultra_review::heep-mat-b-ultra_review-001::mode_a_current_primary",
+      "challenger_row_id": "heep::ultra_review::heep-mat-b-ultra_review-001::heep_multi_skill",
+      "evidence_seal_count_delta": 2,
+      "pollution_pct_delta": 0.0,
+      "wall_delta_observation": -1.2389,
+      "provider_cost_status": "HOLD_PROVIDER_TOKEN_TRUTH",
+      "runtime_update_allowed": false,
+      "public_benchmark_allowed": false,
+      "remaining_gate": [
+        "provider-clean replay with measured provider tokens",
+        "same-window baseline/challenger token truth before cost decision"
+      ]
+    },
+    {
+      "capability": "xray",
+      "blocker": "BLOCKED_BY_PROVIDER_TOKEN_TRUTH",
+      "root_cause": "gateway_stats_missing_after_model_call",
+      "mode_decision": "MULTI_SKILL_NON_COST_WIN",
+      "decision_scope": "internal_non_cost_mode_selection",
+      "decision_reason": "challenger_has_stronger_evidence_chain",
+      "baseline_row_id": "heep::xray::heep-mat-b-xray-001::mode_a_current_primary",
+      "challenger_row_id": "heep::xray::heep-mat-b-xray-001::heep_multi_skill",
+      "evidence_seal_count_delta": 1,
+      "pollution_pct_delta": 0.0,
+      "wall_delta_observation": -1.496,
+      "provider_cost_status": "HOLD_PROVIDER_TOKEN_TRUTH",
+      "runtime_update_allowed": false,
+      "public_benchmark_allowed": false,
+      "remaining_gate": [
+        "provider-clean replay with measured provider tokens",
+        "same-window baseline/challenger token truth before cost decision"
+      ]
+    }
+  ],
+  "claim_boundary": [
+    "Provider-token blockers may receive internal non-cost mode decisions when receipt/trust evidence is clean.",
+    "Internal non-cost mode decisions do not approve runtime default, public benchmark, or cost claims.",
+    "Receipt-chain blockers remain undecided until expected capability runtime receipts are present."
+  ]
+}
