@@ -1,8 +1,8 @@
-import json
 from pathlib import Path
 from typing import Dict, Any
 
 from nexus.core.belief_contracts import AuditOutcome
+from nexus.infrastructure.state_json_store import StateJsonStore
 from nexus.telemetry.tracer import NexusTracer
 
 
@@ -15,15 +15,17 @@ def blend_semantic_confidence(audit_confidence: float, semantic_confidence: floa
 
 class BeliefEngine:
     """維護當前的邏輯假設與信心度 (Subjective Trust)。"""
-    def __init__(self, state_file: Path = Path(".nexus/belief_state.json")):
+    def __init__(self, state_file: Path = Path(".nexus/belief_state.json"), state_store: StateJsonStore | None = None):
         self.state_file = state_file
-        self.beliefs = {}
+        self.state_store = state_store or StateJsonStore()
+        self.beliefs: Dict[str, Any] = {}
         self._load()
 
     def _load(self):
-        if self.state_file.exists():
-            with open(self.state_file, "r") as f:
-                self.beliefs = json.load(f)
+        self.beliefs = self.state_store.read_dict(self.state_file)
+
+    def _persist(self) -> None:
+        self.state_store.write_dict(self.state_file, self.beliefs)
 
     def assess_confidence(self, task_id: str, assumption: str = "") -> float:
         """根據歷史證據評估信心。"""
@@ -40,9 +42,7 @@ class BeliefEngine:
             "evidence": evidence_id,
             "task_id": task_id
         }
-        self.state_file.parent.mkdir(parents=True, exist_ok=True)
-        with open(self.state_file, "w") as f:
-            json.dump(self.beliefs, f, indent=2)
+        self._persist()
 
     def process_audit_outcome(self, outcome: AuditOutcome) -> dict[str, Any]:
         """Process a structured audit outcome without leaking confidence policy."""
@@ -74,8 +74,7 @@ class BeliefEngine:
         if semantic_confidence is not None:
             self.beliefs[outcome.assumption]["semantic_searcher_confidence"] = semantic_confidence
             self.beliefs[outcome.assumption]["confidence_policy"] = "audit_semantic_weighted"
-        with open(self.state_file, "w") as f:
-            json.dump(self.beliefs, f, indent=2)
+        self._persist()
         NexusTracer.record_belief_shift(outcome.task_id, old_confidence, confidence)
         return {
             "task_id": outcome.task_id,

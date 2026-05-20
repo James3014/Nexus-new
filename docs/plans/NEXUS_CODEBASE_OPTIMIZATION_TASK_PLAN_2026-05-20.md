@@ -370,3 +370,43 @@ Verification:
 Next:
 
 - start `CBO-1 State JSON Store and BeliefEngine Migration`.
+
+## 11. CBO-1 Result
+
+Status: `DONE`
+
+Changed surface:
+
+- `nexus/infrastructure/state_json_store.py`;
+- `nexus/core/belief_engine.py`;
+- `tests/core/test_belief_engine.py`.
+
+Result:
+
+- `BeliefEngine` now reads and writes through `StateJsonStore`;
+- state writes use a file lock, temp-file write, fsync, and `os.replace`;
+- corrupt/non-dict/missing state files fail closed to an empty belief map;
+- belief scoring and audit confidence semantics are unchanged.
+
+Verification:
+
+- `uv run python -m py_compile nexus/core/belief_engine.py nexus/infrastructure/state_json_store.py tests/core/test_belief_engine.py` -> `PASS`;
+- `uv run pytest tests/core/test_belief_engine.py -q` -> `15 passed`;
+- `uv run pytest tests/app/test_research_flow_service.py tests/core/test_belief_engine.py -q` -> `115 passed`;
+- `git diff --check -- nexus/infrastructure/state_json_store.py nexus/core/belief_engine.py tests/core/test_belief_engine.py docs/plans/NEXUS_CODEBASE_OPTIMIZATION_TASK_PLAN_2026-05-20.md` -> `PASS`.
+
+Failure lesson:
+
+- Broad recursive repair loop coverage is not a valid CBO-1 acceptance gate.
+  `uv run pytest tests/app/test_research_flow_service.py tests/engine/test_recursive_repair_loop.py tests/core/test_belief_engine.py -q`
+  produced `118 passed, 5 failed`; all failures were in
+  `tests/engine/test_recursive_repair_loop.py` where `_repair_audit_loop(...)`
+  returned `False` after audit rejection. This is classified as pre-existing
+  repair-loop composition debt from the Clean Code repair split path, not a
+  belief state persistence regression. CBO slices must keep broad repair-loop
+  failures visible, but must not block a storage seam when focused storage and
+  adjacent research-flow tests pass.
+
+Next:
+
+- start `CBO-2 Findings Memory Persistence / Vector Sync Split` after CBO-1 commit.

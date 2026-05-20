@@ -1,4 +1,5 @@
 import json
+import threading
 import unittest
 from pathlib import Path
 from types import SimpleNamespace
@@ -297,3 +298,32 @@ def test_belief_engine_blends_semantic_searcher_confidence_conservatively(tmp_pa
     assert blend_semantic_confidence(0.6, 1.0) == 0.72
     assert out["confidence"] == 0.72
     assert engine.beliefs["semantic confidence supports fix"]["confidence_policy"] == "audit_semantic_weighted"
+
+
+def test_belief_engine_corrupt_state_file_fails_closed(tmp_path):
+    path = tmp_path / "belief.json"
+    path.write_text("{not-json", encoding="utf-8")
+
+    engine = BeliefEngine(path)
+
+    assert engine.beliefs == {}
+    assert engine.get_confidence("task-1", "missing") == 0.7
+
+
+def test_belief_engine_parallel_writes_leave_valid_json(tmp_path):
+    path = tmp_path / "belief.json"
+
+    def write_belief(index: int) -> None:
+        engine = BeliefEngine(path)
+        engine.update_belief(f"task-{index}", f"assumption-{index}", 0.5, f"EV-{index}")
+
+    threads = [threading.Thread(target=write_belief, args=(index,)) for index in range(10)]
+    for thread in threads:
+        thread.start()
+    for thread in threads:
+        thread.join()
+
+    stored = json.loads(path.read_text(encoding="utf-8"))
+    assert isinstance(stored, dict)
+    assert stored
+    assert all(isinstance(value, dict) for value in stored.values())
