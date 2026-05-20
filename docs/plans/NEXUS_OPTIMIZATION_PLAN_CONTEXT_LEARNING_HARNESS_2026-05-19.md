@@ -1,6 +1,6 @@
 # Nexus Optimization Plan: Context, Learning, Data, Harness
 
-Status: `PLAN_READY`
+Status: `CLOSED_WITH_DEFERRED_ITEMS`
 Date: `2026-05-19`
 Source docs:
 - `docs/plans/CONTEXT_ENGINEERING_SYNC.md`
@@ -858,3 +858,49 @@ Lesson:
 - Focused RLM regressions can fail before collection if the command uses remembered test node names instead of the current local names.
 - Treat node-id misses as command drift, not product failure.
 - Prevention rule: locate RLM test names with `rg` before composing focused test commands that include long app test modules.
+
+## 11. Refactor Closeout Map 2026-05-20
+
+Status: `CLOSED_WITH_DEFERRED_ITEMS`
+
+This plan is closed as a planning-and-implementation bridge. The narrow seams
+that were safe to complete have been completed through the Clean Code and CBO
+task plans. Remaining items stay as successor work and do not block the current
+refactor closeout.
+
+| Milestone / slice | Disposition | Closure evidence |
+| --- | --- | --- |
+| `M0 Optimization Contract Freeze` | `DONE_BY_OPT_CONTRACT` | `docs/plans/NEXUS_OPTIMIZATION_CONTRACT_AND_RETENTION_2026-05-19.md` defines claim classes, readiness checks, and hard-gate compatibility. |
+| `OPT-NEXT-1 Evidence Retention Dry Run` | `DONE_BY_RETENTION_WORK` | Retention behavior is now represented in the optimization contract closeout and CBO report retention artifacts. |
+| `OPT-NEXT-2 Evidence Dataset Contract` | `DEFERRED_SUCCESSOR` | Evidence read models and sealing exist, but a broader normalized dataset flywheel is outside this refactor closeout. |
+| `OPT-NEXT-3 Context Budget Contract` | `DONE_BY_PRIOR_OPTIMIZATION` | Context budget and assembly contracts remain in dedicated contract modules; no additional CBO change required. |
+| `OPT-NEXT-4 Route DAG Pregate` | `DONE_BY_PRIOR_ROUTING_WORK` | Route DAG pregate and route runtime dispatcher work are retained as prior completed routing-spec slices. |
+| `OPT-NEXT-5 SF Replacement Cleanliness Gate` | `DONE_BY_PRIOR_SF_WORK` | SF replacement remains gated by receipt-clean current-best/challenger evidence and separate runtime apply review. |
+| `CBO State/Persistence/Fetch/Retrieval seams` | `DONE_BY_CBO` | `docs/plans/NEXUS_CODEBASE_OPTIMIZATION_TASK_PLAN_2026-05-20.md` closure records focused suite `73 passed`. |
+| `Public benchmark publication-ready` | `DEFERRED_PUBLIC_LANE` | Internal refactor evidence does not unlock public benchmark or publication claims. |
+| `Runtime default apply` | `DEFERRED_APPLY_GATE` | Runtime apply remains a separate authorization and smoke path. |
+
+Final refactor readiness declaration:
+
+- Clean Code refactor: `COMPLETE`.
+- CBO codebase optimization: `COMPLETE`.
+- Optimization master plan: `CLOSED_WITH_DEFERRED_ITEMS`.
+- Runtime policy promotion: `NOT_REQUESTED_AND_NOT_GRANTED`.
+- Public benchmark / publication-ready claim: `NOT_UNLOCKED_BY_THIS_CLOSEOUT`.
+
+Current non-blocking debt:
+
+- `governance_eval_quality_debt`: full CI can pass while wiki eval warns at
+  20%; this requires a dedicated wiki-eval improvement task if the warning
+  should become green.
+- `rlm_repair_policy_composition_debt`: recursive repair loop policy tests need
+  a dedicated RLM gate before any further repair-loop runtime work.
+- `workspace_local_state`: `.obsidian/workspace.json`, `.serena/project.yml`,
+  and `.antigravitycli/` are local/user-owned state and remain excluded from
+  refactor closeout commits.
+
+Closeout verification:
+
+- `uv run scripts/ops/ci_gate.py` -> `ALL QUALITY GATES PASSED`.
+- Non-blocking warning retained: `Eval pass rate 20.00% below required 80.00%`.
+- CI transient cleanup reported `4 tracked path(s)`.

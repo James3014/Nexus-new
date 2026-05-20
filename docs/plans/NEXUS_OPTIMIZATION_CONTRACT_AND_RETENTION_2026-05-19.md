@@ -1,6 +1,6 @@
 # Nexus Optimization Contract and Evidence Retention
 
-Status: `ACTIVE_PRE_SKILL_ADJUSTMENT`
+Status: `CLOSED_WITH_SUCCESSOR_ITEMS`
 Date: `2026-05-19`
 Parent plan: `docs/plans/NEXUS_OPTIMIZATION_PLAN_CONTEXT_LEARNING_HARNESS_2026-05-19.md`
 
@@ -158,6 +158,49 @@ After this contract:
 3. run `G0` compatibility checks before any route/context/harness runtime change;
 4. continue SF skill adjustment only after current evidence roots are classified;
 5. defer broad M1-M7 runtime rewrites until the narrow contracts are green.
+
+## 9. Closeout Map 2026-05-20
+
+Status: `CLOSED_WITH_SUCCESSOR_ITEMS`
+
+This contract is closed as the active pre-skill-adjustment optimization
+contract. It remains the governance reference for future optimization work, but
+its initial implementation obligations have been either completed by later task
+plans or carried forward as explicit successor items.
+
+| Contract area | Current disposition | Evidence |
+| --- | --- | --- |
+| Claim classes and readiness boundaries | `DONE_BY_OPT_CONTRACT` | Sections 2 and 3 define `PLAN_ONLY`, `INTERNAL_DIAGNOSTIC`, `SF_DISCOVERY`, `RUNTIME_APPLY_REVIEW`, and `PUBLIC_READY`. |
+| Evidence/report retention classes | `DONE_BY_CBO_AND_RETENTION_DRY_RUN` | `docs/reports/NEXUS_CBO_IO_MEASUREMENT_2026-05-20.json` and CBO closeout keep generated reports observation-only. |
+| Network fetch guard | `DONE_BY_CBO` | `nexus/infrastructure/guarded_fetch.py` and network fetch guard tests. |
+| Retrieval query shape guard | `DONE_BY_CBO` | `nexus/contracts/retrieval_query.py` and doc-scout integration tests. |
+| Skill replacement cleanliness boundary | `DONE_BY_PRIOR_SF_WORK` | This contract continues to require same-window receipt-clean current-best/challenger evidence before replacement. |
+| Public benchmark gate | `DEFERRED_PUBLIC_LANE` | No CBO or closeout artifact unlocks public benchmark claims. |
+| Runtime default apply | `DEFERRED_APPLY_GATE` | Runtime updates remain `false` unless a separate apply gate passes. |
+
+Dirty workspace retention decision:
+
+| Path | Disposition | Reason |
+| --- | --- | --- |
+| `.obsidian/workspace.json` | `user_local_keep` | Forbidden-path/user-local workspace state; do not stage or clean in refactor closeout. |
+| `.serena/project.yml` | `user_local_keep` | Local agent/tooling state not owned by CBO or Clean Code tasks. |
+| `.antigravitycli/` | `user_local_keep` | Local CLI/session artifact; not part of repo refactor deliverables. |
+
+CI warning ownership:
+
+- `Wiki Eval pass rate 20.00% below required 80.00%` is classified as
+  `governance_eval_quality_debt`.
+- It is not release-blocking under the current warning enforcement level.
+- Follow-up owner should be a dedicated wiki-eval quality task, not the CBO or
+  Clean Code refactor closeout.
+
+RLM repair debt ownership:
+
+- Recursive repair loop failures observed during broad exploratory testing are
+  classified as `rlm_repair_policy_composition_debt`.
+- They remain outside this contract closeout and outside CBO completion.
+- Reopening requires a dedicated RLM acceptance gate and should not be folded
+  into repair split or optimization closeout work.
 
 ## 9. Implementation Status 2026-05-20
 
