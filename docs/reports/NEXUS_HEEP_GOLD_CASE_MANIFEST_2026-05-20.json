@@ -1,0 +1,865 @@
+{
+  "blockers": [],
+  "cases": [
+    {
+      "capability": "artifact_gate",
+      "case_id": "heep-gold-artifact_gate",
+      "expected_mode": "Mode C (Swarm)",
+      "expected_receipt_keys": [
+        "selected",
+        "injected",
+        "used",
+        "evidence_present",
+        "gate_passed",
+        "outcome_contributed"
+      ],
+      "live_required_for_public_claim": true,
+      "primary_skill_id": "sf-systematic-artifact_gate-differential-review-461fbd0c",
+      "receipt_chain_complete": true,
+      "runtime_final_receipt_chain": {
+        "evidence_present": true,
+        "gate_passed": true,
+        "injected": true,
+        "outcome_contributed": true,
+        "selected": true,
+        "used": true
+      },
+      "source_evidence_ref": ".nexus/reports/sf_systematic_all_capability_live_v32_2026-05-19/artifact_gate_sf-systematic-batch-artifact_gate-001_challenger_sf-systematic-artifact_gate-differential-review-461fbd0c/evidence_bundle.json"
+    },
+    {
+      "capability": "autonomic_router",
+      "case_id": "heep-gold-autonomic_router",
+      "expected_mode": "Mode B (Guard)",
+      "expected_receipt_keys": [
+        "selected",
+        "injected",
+        "used",
+        "evidence_present",
+        "gate_passed",
+        "outcome_contributed"
+      ],
+      "live_required_for_public_claim": true,
+      "primary_skill_id": "sf2-autonomic_router-route-fit-spec",
+      "receipt_chain_complete": true,
+      "runtime_final_receipt_chain": {
+        "evidence_present": true,
+        "gate_passed": true,
+        "injected": true,
+        "outcome_contributed": true,
+        "selected": true,
+        "used": true
+      },
+      "source_evidence_ref": ".nexus/reports/sf_systematic_all_capability_live_v32_2026-05-19/autonomic_router_sf-systematic-batch-autonomic_router-001_current_best_sf2-autonomic_router-route-fit-spec/evidence_bundle.json"
+    },
+    {
+      "capability": "autoreason",
+      "case_id": "heep-gold-autoreason",
+      "expected_mode": "Mode B (Guard)",
+      "expected_receipt_keys": [
+        "selected",
+        "injected",
+        "used",
+        "evidence_present",
+        "gate_passed",
+        "outcome_contributed"
+      ],
+      "live_required_for_public_claim": true,
+      "primary_skill_id": "sf2-belief-route-fit-spec",
+      "receipt_chain_complete": true,
+      "runtime_final_receipt_chain": {
+        "evidence_present": true,
+        "gate_passed": true,
+        "injected": true,
+        "outcome_contributed": true,
+        "selected": true,
+        "used": true
+      },
+      "source_evidence_ref": ".nexus/reports/sf_systematic_all_capability_live_v32_2026-05-19/autoreason_sf-systematic-batch-autoreason-001_current_best_sf2-belief-route-fit-spec/evidence_bundle.json"
+    },
+    {
+      "capability": "belief",
+      "case_id": "heep-gold-belief",
+      "expected_mode": "Mode B (Guard)",
+      "expected_receipt_keys": [
+        "selected",
+        "injected",
+        "used",
+        "evidence_present",
+        "gate_passed",
+        "outcome_contributed"
+      ],
+      "live_required_for_public_claim": true,
+      "primary_skill_id": "sf2-belief-route-fit-spec",
+      "receipt_chain_complete": true,
+      "runtime_final_receipt_chain": {
+        "evidence_present": true,
+        "gate_passed": true,
+        "injected": true,
+        "outcome_contributed": true,
+        "selected": true,
+        "used": true
+      },
+      "source_evidence_ref": ".nexus/reports/sf_systematic_all_capability_live_v32_2026-05-19/belief_sf-systematic-batch-belief-001_current_best_sf2-belief-route-fit-spec/evidence_bundle.json"
+    },
+    {
+      "capability": "benchmark_meta_opt",
+      "case_id": "heep-gold-benchmark_meta_opt",
+      "expected_mode": "Mode C (Swarm)",
+      "expected_receipt_keys": [
+        "selected",
+        "injected",
+        "used",
+        "evidence_present",
+        "gate_passed",
+        "outcome_contributed"
+      ],
+      "live_required_for_public_claim": true,
+      "primary_skill_id": "sf-systematic-benchmark_meta_opt-hugging-face-trackio-d21c6b90",
+      "receipt_chain_complete": true,
+      "runtime_final_receipt_chain": {
+        "evidence_present": true,
+        "gate_passed": true,
+        "injected": true,
+        "outcome_contributed": true,
+        "selected": true,
+        "used": true
+      },
+      "source_evidence_ref": ".nexus/reports/sf_systematic_all_capability_live_v32_2026-05-19/benchmark_meta_opt_sf-systematic-batch-benchmark_meta_opt-001_current_best_sf-systematic-benchmark_meta_opt-hugging-face-trackio-d21c6b90/evidence_bundle.json"
+    },
+    {
+      "capability": "claim_gate",
+      "case_id": "heep-gold-claim_gate",
+      "expected_mode": "Mode B (Guard)",
+      "expected_receipt_keys": [
+        "selected",
+        "injected",
+        "used",
+        "evidence_present",
+        "gate_passed",
+        "outcome_contributed"
+      ],
+      "live_required_for_public_claim": true,
+      "primary_skill_id": "nexus-benchmark-continuous-optimization",
+      "receipt_chain_complete": true,
+      "runtime_final_receipt_chain": {
+        "evidence_present": true,
+        "gate_passed": true,
+        "injected": true,
+        "outcome_contributed": true,
+        "selected": true,
+        "used": true
+      },
+      "source_evidence_ref": ".nexus/reports/sf_systematic_all_capability_live_v32_2026-05-19/claim_gate_sf-systematic-batch-claim_gate-001_current_best_nexus-benchmark-continuous-optimization/evidence_bundle.json"
+    },
+    {
+      "capability": "codeintel",
+      "case_id": "heep-gold-codeintel",
+      "expected_mode": "Mode C (Swarm)",
+      "expected_receipt_keys": [
+        "selected",
+        "injected",
+        "used",
+        "evidence_present",
+        "gate_passed",
+        "outcome_contributed"
+      ],
+      "live_required_for_public_claim": true,
+      "primary_skill_id": "sf-systematic-codeintel-first-principles-thinking-f95019ea",
+      "receipt_chain_complete": true,
+      "runtime_final_receipt_chain": {
+        "evidence_present": true,
+        "gate_passed": true,
+        "injected": true,
+        "outcome_contributed": true,
+        "selected": true,
+        "used": true
+      },
+      "source_evidence_ref": ".nexus/reports/sf_systematic_all_capability_live_v32_2026-05-19/codeintel_sf-systematic-batch-codeintel-001_challenger_sf-systematic-codeintel-first-principles-thinking-f95019ea/evidence_bundle.json"
+    },
+    {
+      "capability": "ddtree",
+      "case_id": "heep-gold-ddtree",
+      "expected_mode": "Mode B (Guard)",
+      "expected_receipt_keys": [
+        "selected",
+        "injected",
+        "used",
+        "evidence_present",
+        "gate_passed",
+        "outcome_contributed"
+      ],
+      "live_required_for_public_claim": true,
+      "primary_skill_id": "nexus-root-cause-probe",
+      "receipt_chain_complete": true,
+      "runtime_final_receipt_chain": {
+        "evidence_present": true,
+        "gate_passed": true,
+        "injected": true,
+        "outcome_contributed": true,
+        "selected": true,
+        "used": true
+      },
+      "source_evidence_ref": ".nexus/reports/sf_systematic_all_capability_live_v32_2026-05-19/ddtree_sf-systematic-batch-ddtree-001_current_best_nexus-root-cause-probe/evidence_bundle.json"
+    },
+    {
+      "capability": "direct_master_loop",
+      "case_id": "heep-gold-direct_master_loop",
+      "expected_mode": "Mode A (Solo)",
+      "expected_receipt_keys": [
+        "selected",
+        "injected",
+        "used",
+        "evidence_present",
+        "gate_passed",
+        "outcome_contributed"
+      ],
+      "live_required_for_public_claim": true,
+      "primary_skill_id": "sf-systematic-direct_master_loop-build-32802a87",
+      "receipt_chain_complete": true,
+      "runtime_final_receipt_chain": {
+        "evidence_present": true,
+        "gate_passed": true,
+        "injected": true,
+        "outcome_contributed": true,
+        "selected": true,
+        "used": true
+      },
+      "source_evidence_ref": ".nexus/reports/sf_systematic_all_capability_live_v32_2026-05-19/direct_master_loop_sf-systematic-batch-direct_master_loop-001_challenger_sf-systematic-direct_master_loop-build-32802a87/evidence_bundle.json"
+    },
+    {
+      "capability": "drone",
+      "case_id": "heep-gold-drone",
+      "expected_mode": "Mode A (Solo)",
+      "expected_receipt_keys": [
+        "selected",
+        "injected",
+        "used",
+        "evidence_present",
+        "gate_passed",
+        "outcome_contributed"
+      ],
+      "live_required_for_public_claim": true,
+      "primary_skill_id": "sf-systematic-drone-python-background-jobs-18326a62",
+      "receipt_chain_complete": true,
+      "runtime_final_receipt_chain": {
+        "evidence_present": true,
+        "gate_passed": true,
+        "injected": true,
+        "outcome_contributed": true,
+        "selected": true,
+        "used": true
+      },
+      "source_evidence_ref": ".nexus/reports/sf_systematic_all_capability_live_v32_2026-05-19/drone_sf-systematic-batch-drone-001_challenger_sf-systematic-drone-python-background-jobs-18326a62/evidence_bundle.json"
+    },
+    {
+      "capability": "external_productivity",
+      "case_id": "heep-gold-external_productivity",
+      "expected_mode": "Mode A (Solo)",
+      "expected_receipt_keys": [
+        "selected",
+        "injected",
+        "used",
+        "evidence_present",
+        "gate_passed",
+        "outcome_contributed"
+      ],
+      "live_required_for_public_claim": true,
+      "primary_skill_id": "sf-systematic-external_productivity-writer-77dc7840",
+      "receipt_chain_complete": true,
+      "runtime_final_receipt_chain": {
+        "evidence_present": true,
+        "gate_passed": true,
+        "injected": true,
+        "outcome_contributed": true,
+        "selected": true,
+        "used": true
+      },
+      "source_evidence_ref": ".nexus/reports/sf_systematic_all_capability_live_v32_2026-05-19/external_productivity_sf-systematic-batch-external_productivity-001_challenger_sf-systematic-external_productivity-writer-77dc7840/evidence_bundle.json"
+    },
+    {
+      "capability": "file_lock_security_gate",
+      "case_id": "heep-gold-file_lock_security_gate",
+      "expected_mode": "Mode C (Swarm)",
+      "expected_receipt_keys": [
+        "selected",
+        "injected",
+        "used",
+        "evidence_present",
+        "gate_passed",
+        "outcome_contributed"
+      ],
+      "live_required_for_public_claim": true,
+      "primary_skill_id": "sf2-file_lock_security_gate-route-fit-spec",
+      "receipt_chain_complete": true,
+      "runtime_final_receipt_chain": {
+        "evidence_present": true,
+        "gate_passed": true,
+        "injected": true,
+        "outcome_contributed": true,
+        "selected": true,
+        "used": true
+      },
+      "source_evidence_ref": ".nexus/reports/sf_systematic_all_capability_live_v32_2026-05-19/file_lock_security_gate_sf-systematic-batch-file_lock_security_gate-001_current_best_sf2-file_lock_security_gate-route-fit-spec/evidence_bundle.json"
+    },
+    {
+      "capability": "forecast_pregate",
+      "case_id": "heep-gold-forecast_pregate",
+      "expected_mode": "Mode B (Guard)",
+      "expected_receipt_keys": [
+        "selected",
+        "injected",
+        "used",
+        "evidence_present",
+        "gate_passed",
+        "outcome_contributed"
+      ],
+      "live_required_for_public_claim": true,
+      "primary_skill_id": "create-plan",
+      "receipt_chain_complete": true,
+      "runtime_final_receipt_chain": {
+        "evidence_present": true,
+        "gate_passed": true,
+        "injected": true,
+        "outcome_contributed": true,
+        "selected": true,
+        "used": true
+      },
+      "source_evidence_ref": ".nexus/reports/sf_systematic_all_capability_live_v32_2026-05-19/forecast_pregate_sf-systematic-batch-forecast_pregate-001_current_best_create-plan/evidence_bundle.json"
+    },
+    {
+      "capability": "governance_and_trust",
+      "case_id": "heep-gold-governance_and_trust",
+      "expected_mode": "Mode C (Swarm)",
+      "expected_receipt_keys": [
+        "selected",
+        "injected",
+        "used",
+        "evidence_present",
+        "gate_passed",
+        "outcome_contributed"
+      ],
+      "live_required_for_public_claim": true,
+      "primary_skill_id": "sf-systematic-governance_and_trust-aegisops-ai-0aa841e2",
+      "receipt_chain_complete": true,
+      "runtime_final_receipt_chain": {
+        "evidence_present": true,
+        "gate_passed": true,
+        "injected": true,
+        "outcome_contributed": true,
+        "selected": true,
+        "used": true
+      },
+      "source_evidence_ref": ".nexus/reports/sf_systematic_all_capability_live_v32_2026-05-19/governance_and_trust_sf-systematic-batch-governance_and_trust-001_challenger_sf-systematic-governance_and_trust-aegisops-ai-0aa841e2/evidence_bundle.json"
+    },
+    {
+      "capability": "hyper_sprint",
+      "case_id": "heep-gold-hyper_sprint",
+      "expected_mode": "Mode A (Solo)",
+      "expected_receipt_keys": [
+        "selected",
+        "injected",
+        "used",
+        "evidence_present",
+        "gate_passed",
+        "outcome_contributed"
+      ],
+      "live_required_for_public_claim": true,
+      "primary_skill_id": "sf2-hyper_sprint-route-fit-spec",
+      "receipt_chain_complete": true,
+      "runtime_final_receipt_chain": {
+        "evidence_present": true,
+        "gate_passed": true,
+        "injected": true,
+        "outcome_contributed": true,
+        "selected": true,
+        "used": true
+      },
+      "source_evidence_ref": ".nexus/reports/sf_systematic_all_capability_live_v32_2026-05-19/hyper_sprint_sf-systematic-batch-hyper_sprint-001_current_best_sf2-hyper_sprint-route-fit-spec/evidence_bundle.json"
+    },
+    {
+      "capability": "lancedb",
+      "case_id": "heep-gold-lancedb",
+      "expected_mode": "Mode B (Guard)",
+      "expected_receipt_keys": [
+        "selected",
+        "injected",
+        "used",
+        "evidence_present",
+        "gate_passed",
+        "outcome_contributed"
+      ],
+      "live_required_for_public_claim": true,
+      "primary_skill_id": "research-source-validation-auditor",
+      "receipt_chain_complete": true,
+      "runtime_final_receipt_chain": {
+        "evidence_present": true,
+        "gate_passed": true,
+        "injected": true,
+        "outcome_contributed": true,
+        "selected": true,
+        "used": true
+      },
+      "source_evidence_ref": ".nexus/reports/sf_systematic_all_capability_live_v32_2026-05-19/lancedb_sf-systematic-batch-lancedb-001_current_best_research-source-validation-auditor/evidence_bundle.json"
+    },
+    {
+      "capability": "learn_ask",
+      "case_id": "heep-gold-learn_ask",
+      "expected_mode": "Mode C (Swarm)",
+      "expected_receipt_keys": [
+        "selected",
+        "injected",
+        "used",
+        "evidence_present",
+        "gate_passed",
+        "outcome_contributed"
+      ],
+      "live_required_for_public_claim": true,
+      "primary_skill_id": "github8-skilless-deep-research-learn-ask",
+      "receipt_chain_complete": true,
+      "runtime_final_receipt_chain": {
+        "evidence_present": true,
+        "gate_passed": true,
+        "injected": true,
+        "outcome_contributed": true,
+        "selected": true,
+        "used": true
+      },
+      "source_evidence_ref": ".nexus/reports/sf_systematic_all_capability_live_v32_2026-05-19/learn_ask_sf-systematic-batch-learn_ask-001_current_best_github8-skilless-deep-research-learn-ask/evidence_bundle.json"
+    },
+    {
+      "capability": "learning_closure",
+      "case_id": "heep-gold-learning_closure",
+      "expected_mode": "Mode C (Swarm)",
+      "expected_receipt_keys": [
+        "selected",
+        "injected",
+        "used",
+        "evidence_present",
+        "gate_passed",
+        "outcome_contributed"
+      ],
+      "live_required_for_public_claim": true,
+      "primary_skill_id": "sf-systematic-learning_closure-memory-lint-8bdb0fca",
+      "receipt_chain_complete": true,
+      "runtime_final_receipt_chain": {
+        "evidence_present": true,
+        "gate_passed": true,
+        "injected": true,
+        "outcome_contributed": true,
+        "selected": true,
+        "used": true
+      },
+      "source_evidence_ref": ".nexus/reports/sf_systematic_all_capability_live_v32_2026-05-19/learning_closure_sf-systematic-batch-learning_closure-001_current_best_sf-systematic-learning_closure-memory-lint-8bdb0fca/evidence_bundle.json"
+    },
+    {
+      "capability": "memory",
+      "case_id": "heep-gold-memory",
+      "expected_mode": "Mode B (Guard)",
+      "expected_receipt_keys": [
+        "selected",
+        "injected",
+        "used",
+        "evidence_present",
+        "gate_passed",
+        "outcome_contributed"
+      ],
+      "live_required_for_public_claim": true,
+      "primary_skill_id": "sf-systematic-memory-project-skill-audit-cc8b7621",
+      "receipt_chain_complete": true,
+      "runtime_final_receipt_chain": {
+        "evidence_present": true,
+        "gate_passed": true,
+        "injected": true,
+        "outcome_contributed": true,
+        "selected": true,
+        "used": true
+      },
+      "source_evidence_ref": ".nexus/reports/sf_systematic_all_capability_live_v32_2026-05-19/memory_sf-systematic-batch-memory-001_challenger_sf-systematic-memory-project-skill-audit-cc8b7621/evidence_bundle.json"
+    },
+    {
+      "capability": "mempalace",
+      "case_id": "heep-gold-mempalace",
+      "expected_mode": "Mode B (Guard)",
+      "expected_receipt_keys": [
+        "selected",
+        "injected",
+        "used",
+        "evidence_present",
+        "gate_passed",
+        "outcome_contributed"
+      ],
+      "live_required_for_public_claim": true,
+      "primary_skill_id": "sf2-mempalace-route-fit-spec",
+      "receipt_chain_complete": true,
+      "runtime_final_receipt_chain": {
+        "evidence_present": true,
+        "gate_passed": true,
+        "injected": true,
+        "outcome_contributed": true,
+        "selected": true,
+        "used": true
+      },
+      "source_evidence_ref": ".nexus/reports/sf_systematic_all_capability_live_v32_2026-05-19/mempalace_sf-systematic-batch-mempalace-001_current_best_sf2-mempalace-route-fit-spec/evidence_bundle.json"
+    },
+    {
+      "capability": "metabolism_resume",
+      "case_id": "heep-gold-metabolism_resume",
+      "expected_mode": "Mode A (Solo)",
+      "expected_receipt_keys": [
+        "selected",
+        "injected",
+        "used",
+        "evidence_present",
+        "gate_passed",
+        "outcome_contributed"
+      ],
+      "live_required_for_public_claim": true,
+      "primary_skill_id": "github-auto-skill-safe-learning",
+      "receipt_chain_complete": true,
+      "runtime_final_receipt_chain": {
+        "evidence_present": true,
+        "gate_passed": true,
+        "injected": true,
+        "outcome_contributed": true,
+        "selected": true,
+        "used": true
+      },
+      "source_evidence_ref": ".nexus/reports/sf_systematic_all_capability_live_v32_2026-05-19/metabolism_resume_sf-systematic-batch-metabolism_resume-001_current_best_github-auto-skill-safe-learning/evidence_bundle.json"
+    },
+    {
+      "capability": "nightshift",
+      "case_id": "heep-gold-nightshift",
+      "expected_mode": "Mode A (Solo)",
+      "expected_receipt_keys": [
+        "selected",
+        "injected",
+        "used",
+        "evidence_present",
+        "gate_passed",
+        "outcome_contributed"
+      ],
+      "live_required_for_public_claim": true,
+      "primary_skill_id": "sf2-nightshift-route-fit-spec",
+      "receipt_chain_complete": true,
+      "runtime_final_receipt_chain": {
+        "evidence_present": true,
+        "gate_passed": true,
+        "injected": true,
+        "outcome_contributed": true,
+        "selected": true,
+        "used": true
+      },
+      "source_evidence_ref": ".nexus/reports/sf_systematic_all_capability_live_v32_2026-05-19/nightshift_sf-systematic-batch-nightshift-001_current_best_sf2-nightshift-route-fit-spec/evidence_bundle.json"
+    },
+    {
+      "capability": "policy_capability_gate",
+      "case_id": "heep-gold-policy_capability_gate",
+      "expected_mode": "Mode C (Swarm)",
+      "expected_receipt_keys": [
+        "selected",
+        "injected",
+        "used",
+        "evidence_present",
+        "gate_passed",
+        "outcome_contributed"
+      ],
+      "live_required_for_public_claim": true,
+      "primary_skill_id": "sf-systematic-policy_capability_gate-aegisops-ai-0aa841e2",
+      "receipt_chain_complete": true,
+      "runtime_final_receipt_chain": {
+        "evidence_present": true,
+        "gate_passed": true,
+        "injected": true,
+        "outcome_contributed": true,
+        "selected": true,
+        "used": true
+      },
+      "source_evidence_ref": ".nexus/reports/sf_systematic_all_capability_live_v32_2026-05-19/policy_capability_gate_sf-systematic-batch-policy_capability_gate-001_challenger_sf-systematic-policy_capability_gate-aegisops-ai-0aa841e2/evidence_bundle.json"
+    },
+    {
+      "capability": "registry_skills_sync",
+      "case_id": "heep-gold-registry_skills_sync",
+      "expected_mode": "Mode B (Guard)",
+      "expected_receipt_keys": [
+        "selected",
+        "injected",
+        "used",
+        "evidence_present",
+        "gate_passed",
+        "outcome_contributed"
+      ],
+      "live_required_for_public_claim": true,
+      "primary_skill_id": "github5-skill-seekers-safe-registry-builder",
+      "receipt_chain_complete": true,
+      "runtime_final_receipt_chain": {
+        "evidence_present": true,
+        "gate_passed": true,
+        "injected": true,
+        "outcome_contributed": true,
+        "selected": true,
+        "used": true
+      },
+      "source_evidence_ref": ".nexus/reports/sf_systematic_all_capability_live_v32_2026-05-19/registry_skills_sync_sf-systematic-batch-registry_skills_sync-001_current_best_github5-skill-seekers-safe-registry-builder/evidence_bundle.json"
+    },
+    {
+      "capability": "regression_guard",
+      "case_id": "heep-gold-regression_guard",
+      "expected_mode": "Mode B (Guard)",
+      "expected_receipt_keys": [
+        "selected",
+        "injected",
+        "used",
+        "evidence_present",
+        "gate_passed",
+        "outcome_contributed"
+      ],
+      "live_required_for_public_claim": true,
+      "primary_skill_id": "sf-systematic-regression_guard-odoo-automated-tests-dad98433",
+      "receipt_chain_complete": true,
+      "runtime_final_receipt_chain": {
+        "evidence_present": true,
+        "gate_passed": true,
+        "injected": true,
+        "outcome_contributed": true,
+        "selected": true,
+        "used": true
+      },
+      "source_evidence_ref": ".nexus/reports/sf_systematic_all_capability_live_v32_2026-05-19/regression_guard_sf-systematic-batch-regression_guard-001_challenger_sf-systematic-regression_guard-odoo-automated-tests-dad98433/evidence_bundle.json"
+    },
+    {
+      "capability": "repair_loop",
+      "case_id": "heep-gold-repair_loop",
+      "expected_mode": "Mode B (Guard)",
+      "expected_receipt_keys": [
+        "selected",
+        "injected",
+        "used",
+        "evidence_present",
+        "gate_passed",
+        "outcome_contributed"
+      ],
+      "live_required_for_public_claim": true,
+      "primary_skill_id": "sf-systematic-repair_loop-odoo-automated-tests-dad98433",
+      "receipt_chain_complete": true,
+      "runtime_final_receipt_chain": {
+        "evidence_present": true,
+        "gate_passed": true,
+        "injected": true,
+        "outcome_contributed": true,
+        "selected": true,
+        "used": true
+      },
+      "source_evidence_ref": ".nexus/reports/sf_systematic_all_capability_live_v32_2026-05-19/repair_loop_sf-systematic-batch-repair_loop-001_challenger_sf-systematic-repair_loop-odoo-automated-tests-dad98433/evidence_bundle.json"
+    },
+    {
+      "capability": "research",
+      "case_id": "heep-gold-research",
+      "expected_mode": "Mode C (Swarm)",
+      "expected_receipt_keys": [
+        "selected",
+        "injected",
+        "used",
+        "evidence_present",
+        "gate_passed",
+        "outcome_contributed"
+      ],
+      "live_required_for_public_claim": true,
+      "primary_skill_id": "sf-systematic-research-research-lookup-7e6f92a0",
+      "receipt_chain_complete": true,
+      "runtime_final_receipt_chain": {
+        "evidence_present": true,
+        "gate_passed": true,
+        "injected": true,
+        "outcome_contributed": true,
+        "selected": true,
+        "used": true
+      },
+      "source_evidence_ref": ".nexus/reports/sf_systematic_all_capability_live_v32_2026-05-19/research_sf-systematic-batch-research-001_challenger_sf-systematic-research-research-lookup-7e6f92a0/evidence_bundle.json"
+    },
+    {
+      "capability": "research_and_source_discipline",
+      "case_id": "heep-gold-research_and_source_discipline",
+      "expected_mode": "Mode C (Swarm)",
+      "expected_receipt_keys": [
+        "selected",
+        "injected",
+        "used",
+        "evidence_present",
+        "gate_passed",
+        "outcome_contributed"
+      ],
+      "live_required_for_public_claim": true,
+      "primary_skill_id": "research-citation-chain-verifier",
+      "receipt_chain_complete": true,
+      "runtime_final_receipt_chain": {
+        "evidence_present": true,
+        "gate_passed": true,
+        "injected": true,
+        "outcome_contributed": true,
+        "selected": true,
+        "used": true
+      },
+      "source_evidence_ref": ".nexus/reports/sf_systematic_all_capability_live_v32_2026-05-19/research_and_source_discipline_sf-systematic-batch-research_and_source_discipline-001_current_best_research-citation-chain-verifier/evidence_bundle.json"
+    },
+    {
+      "capability": "research_control_plane",
+      "case_id": "heep-gold-research_control_plane",
+      "expected_mode": "Mode C (Swarm)",
+      "expected_receipt_keys": [
+        "selected",
+        "injected",
+        "used",
+        "evidence_present",
+        "gate_passed",
+        "outcome_contributed"
+      ],
+      "live_required_for_public_claim": true,
+      "primary_skill_id": "sf-systematic-research_control_plane-research-lookup-7e6f92a0",
+      "receipt_chain_complete": true,
+      "runtime_final_receipt_chain": {
+        "evidence_present": true,
+        "gate_passed": true,
+        "injected": true,
+        "outcome_contributed": true,
+        "selected": true,
+        "used": true
+      },
+      "source_evidence_ref": ".nexus/reports/sf_systematic_all_capability_live_v32_2026-05-19/research_control_plane_sf-systematic-batch-research_control_plane-001_current_best_sf-systematic-research_control_plane-research-lookup-7e6f92a0/evidence_bundle.json"
+    },
+    {
+      "capability": "sandbox_replay",
+      "case_id": "heep-gold-sandbox_replay",
+      "expected_mode": "Mode B (Guard)",
+      "expected_receipt_keys": [
+        "selected",
+        "injected",
+        "used",
+        "evidence_present",
+        "gate_passed",
+        "outcome_contributed"
+      ],
+      "live_required_for_public_claim": true,
+      "primary_skill_id": "sf2-sandbox_replay-route-fit-spec",
+      "receipt_chain_complete": true,
+      "runtime_final_receipt_chain": {
+        "evidence_present": true,
+        "gate_passed": true,
+        "injected": true,
+        "outcome_contributed": true,
+        "selected": true,
+        "used": true
+      },
+      "source_evidence_ref": ".nexus/reports/sf_systematic_all_capability_live_v32_2026-05-19/sandbox_replay_sf-systematic-batch-sandbox_replay-001_current_best_sf2-sandbox_replay-route-fit-spec/evidence_bundle.json"
+    },
+    {
+      "capability": "swarm_multi_agent",
+      "case_id": "heep-gold-swarm_multi_agent",
+      "expected_mode": "Mode C (Swarm)",
+      "expected_receipt_keys": [
+        "selected",
+        "injected",
+        "used",
+        "evidence_present",
+        "gate_passed",
+        "outcome_contributed"
+      ],
+      "live_required_for_public_claim": true,
+      "primary_skill_id": "sf2-swarm_multi_agent-route-fit-spec",
+      "receipt_chain_complete": true,
+      "runtime_final_receipt_chain": {
+        "evidence_present": true,
+        "gate_passed": true,
+        "injected": true,
+        "outcome_contributed": true,
+        "selected": true,
+        "used": true
+      },
+      "source_evidence_ref": ".nexus/reports/sf_systematic_all_capability_live_v32_2026-05-19/swarm_multi_agent_sf-systematic-batch-swarm_multi_agent-001_current_best_sf2-swarm_multi_agent-route-fit-spec/evidence_bundle.json"
+    },
+    {
+      "capability": "ui_validator",
+      "case_id": "heep-gold-ui_validator",
+      "expected_mode": "Mode B (Guard)",
+      "expected_receipt_keys": [
+        "selected",
+        "injected",
+        "used",
+        "evidence_present",
+        "gate_passed",
+        "outcome_contributed"
+      ],
+      "live_required_for_public_claim": true,
+      "primary_skill_id": "sf-systematic-ui_validator-e2e-testing-d98eb7c3",
+      "receipt_chain_complete": true,
+      "runtime_final_receipt_chain": {
+        "evidence_present": true,
+        "gate_passed": true,
+        "injected": true,
+        "outcome_contributed": true,
+        "selected": true,
+        "used": true
+      },
+      "source_evidence_ref": ".nexus/reports/sf_systematic_all_capability_live_v32_2026-05-19/ui_validator_sf-systematic-batch-ui_validator-001_current_best_sf-systematic-ui_validator-e2e-testing-d98eb7c3/evidence_bundle.json"
+    },
+    {
+      "capability": "ultra_review",
+      "case_id": "heep-gold-ultra_review",
+      "expected_mode": "Mode C (Swarm)",
+      "expected_receipt_keys": [
+        "selected",
+        "injected",
+        "used",
+        "evidence_present",
+        "gate_passed",
+        "outcome_contributed"
+      ],
+      "live_required_for_public_claim": true,
+      "primary_skill_id": "github11-vulnerability-scanner-ultra-review",
+      "receipt_chain_complete": true,
+      "runtime_final_receipt_chain": {
+        "evidence_present": true,
+        "gate_passed": true,
+        "injected": true,
+        "outcome_contributed": true,
+        "selected": true,
+        "used": true
+      },
+      "source_evidence_ref": ".nexus/reports/sf_systematic_all_capability_live_v32_2026-05-19/ultra_review_sf-systematic-batch-ultra_review-001_current_best_github11-vulnerability-scanner-ultra-review/evidence_bundle.json"
+    },
+    {
+      "capability": "xray",
+      "case_id": "heep-gold-xray",
+      "expected_mode": "Mode B (Guard)",
+      "expected_receipt_keys": [
+        "selected",
+        "injected",
+        "used",
+        "evidence_present",
+        "gate_passed",
+        "outcome_contributed"
+      ],
+      "live_required_for_public_claim": true,
+      "primary_skill_id": "diagnose",
+      "receipt_chain_complete": true,
+      "runtime_final_receipt_chain": {
+        "evidence_present": true,
+        "gate_passed": true,
+        "injected": true,
+        "outcome_contributed": true,
+        "selected": true,
+        "used": true
+      },
+      "source_evidence_ref": ".nexus/reports/sf_systematic_all_capability_live_v32_2026-05-19/xray_sf-systematic-batch-xray-001_current_best_diagnose/evidence_bundle.json"
+    }
+  ],
+  "claim_boundary": [
+    "Gold cases point at existing SF evidence roots for deterministic local HEEP dry-runs.",
+    "They are not a replacement for live same-model public benchmarks."
+  ],
+  "schema": "nexus.heep_gold_case_manifest.v1",
+  "status": "PASS",
+  "summary": {
+    "case_count": 34,
+    "public_benchmark_allowed": false
+  }
+}

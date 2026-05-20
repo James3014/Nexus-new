@@ -1,0 +1,65 @@
+{
+  "blockers": [],
+  "claim_boundary": [
+    "HEEP/EMAS artifacts are discovery-only until a live ensemble runner produces runtime receipts.",
+    "External GitHub skills may enter Safe-Candidate intake only; they do not auto-promote to runtime default.",
+    "Public benchmark and runtime apply gates remain separate and fail-closed."
+  ],
+  "metrics": {
+    "consensus_score": "role coverage ratio for the proposed assembly",
+    "premium_factor": "extra skill count divided by quality lift; lower is better",
+    "quality_lift": "dry-run score delta until live ensemble evidence exists",
+    "synergy_factor": "ensemble role coverage minus solo role coverage"
+  },
+  "modes": {
+    "Mode A (Solo)": {
+      "purpose": "Primary skill only; lowest coordination cost.",
+      "required_roles": [
+        "primary"
+      ],
+      "skill_count": 1
+    },
+    "Mode B (Guard)": {
+      "purpose": "Primary skill plus complementary guard/auditor.",
+      "required_roles": [
+        "primary",
+        "complementary_guard"
+      ],
+      "skill_count": 2
+    },
+    "Mode C (Swarm)": {
+      "purpose": "Scout, Logic, and Audit roles assembled for consensus.",
+      "required_roles": [
+        "Scout",
+        "Logic",
+        "Audit"
+      ],
+      "skill_count": 3
+    }
+  },
+  "receipt_requirements": [
+    "selected",
+    "injected",
+    "used",
+    "evidence_present",
+    "gate_passed",
+    "outcome_contributed"
+  ],
+  "schema": "nexus.heep_emas_contract.v1",
+  "status": "PASS",
+  "summary": {
+    "capability_count": 34,
+    "modes": [
+      "Mode A (Solo)",
+      "Mode B (Guard)",
+      "Mode C (Swarm)"
+    ],
+    "public_benchmark_allowed": false,
+    "roles": [
+      "Scout",
+      "Logic",
+      "Audit"
+    ],
+    "runtime_update_allowed": false
+  }
+}

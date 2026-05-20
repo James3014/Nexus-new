@@ -24,5 +24,23 @@
 2. **三路併行測試**：利用修改後的 `nexus_benchmark_full.py` 進行 A/B/C 組對抗。
 3. **動態策略標定**：將測試結果回灌至 `NEXUS_CAPABILITY_SKILL_MAP.md`。
 
+## 5. 落地契約修訂 (2026-05-20)
+
+HEEP 不直接接舊式 `nexus_benchmark_full.py` 作為第一步；第一階段改接現有 SF SSOT 與 overlay artifact，先產生可機器檢查的 discovery-only contract。
+
+- **輸入 SSOT**：
+  - `docs/reports/NEXUS_SF_CAPABILITY_PRIMARY_ORIGINAL_SKILL_MAP_2026-05-20.json`
+  - `docs/reports/NEXUS_SF_RUNTIME_SKILL_POLICY_OVERLAY_CURRENT_2026-05-20.json`
+  - `docs/reports/NEXUS_SF_RUNTIME_SKILL_POLICY_OVERLAY_CURRENT_SMOKE_2026-05-20.json`
+- **執行入口**：`uv run python scripts/ops/build_heep_emas_pipeline.py`
+- **產物**：
+  - `docs/reports/NEXUS_HEEP_EMAS_CONTRACT_2026-05-20.json`
+  - `docs/reports/NEXUS_HEEP_ASSEMBLY_CATALOG_2026-05-20.json`
+  - `docs/reports/NEXUS_HEEP_GOLD_CASE_MANIFEST_2026-05-20.json`
+  - `docs/reports/NEXUS_HEEP_LOCAL_ABC_ROLLUP_2026-05-20.json`
+  - `docs/info/NEXUS_CAPABILITY_SKILL_MAP.md`
+- **邊界**：本階段只做 deterministic local dry-run 與 catalog/mode 更新；`runtime_update_allowed=false`、`public_benchmark_allowed=false`。
+- **下一階段**：只有當 live ensemble runner 產出 runtime-confirmed selected/injected/used/evidence/gate/outcome receipt，Mode B/C 才能進 runtime apply review。
+
 ---
 *Created by Antigravity - Nexus Singularity V17*

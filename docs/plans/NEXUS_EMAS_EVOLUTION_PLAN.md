@@ -24,6 +24,22 @@
 | `codeintel` | Scout + Logic + Audit | Mode C (Neural Swarm) |
 | `research` | Scout + Logic | Mode B (Dual Guard) |
 
+## 5. 落地契約修訂 (2026-05-20)
+
+EMAS 第一階段不自動掃 GitHub 並 promotion runtime；它只把現有 SF skill provenance 分成 repo-local/current-best 與 sanitized Safe-Candidate，供 HEEP assembly catalog 使用。
+
+- **執行入口**：`uv run python scripts/ops/build_heep_emas_pipeline.py`
+- **Safe-Candidate 產物**：`docs/reports/NEXUS_EMAS_SAFE_CANDIDATE_INTAKE_2026-05-20.json`
+- **角色分類**：每個 capability 的 current primary 先按 `Scout / Logic / Audit` deterministic role heuristics 分類。
+- **裝配規則**：
+  - Mode A：只保留 primary skill。
+  - Mode B：primary + complementary guard/auditor。
+  - Mode C：Scout + Logic + Audit 三角色組裝。
+- **硬邊界**：
+  - Safe-Candidate 不會自動寫入 runtime default。
+  - GitHub / external skill 必須先經 sanitize、receipt-backed comparison、apply gate，才可進 runtime review。
+  - 本階段產物不得作為 public benchmark 或 publication-ready claim。
+
 ---
 *Created by Antigravity - Nexus Singularity V17*
 *Refined with Heterogeneous Intelligence Principles*

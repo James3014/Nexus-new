@@ -1,0 +1,391 @@
+{
+  "blockers": [],
+  "claim_boundary": [
+    "EMAS intake records sanitized candidate provenance only.",
+    "No candidate in this artifact is automatically promoted to runtime default."
+  ],
+  "rows": [
+    {
+      "capability": "artifact_gate",
+      "original_skill_name": "differential-review",
+      "public_benchmark_allowed": false,
+      "runtime_promotion_allowed": false,
+      "sanitize_status": "sanitized_prompt_only",
+      "skill_id": "sf-systematic-artifact_gate-differential-review-461fbd0c",
+      "source_class": "safe_candidate",
+      "source_path": "/private/tmp/nexus-sf-round4/sickn33-antigravity-awesome-skills/plugins/antigravity-awesome-skills/skills/differential-review/SKILL.md",
+      "source_round_or_root": "round4"
+    },
+    {
+      "capability": "autonomic_router",
+      "original_skill_name": "sf2-autonomic_router-route-fit-spec",
+      "public_benchmark_allowed": false,
+      "runtime_promotion_allowed": false,
+      "sanitize_status": "not_required_repo_local",
+      "skill_id": "sf2-autonomic_router-route-fit-spec",
+      "source_class": "repo_local_or_current_best",
+      "source_path": "",
+      "source_round_or_root": "current_best"
+    },
+    {
+      "capability": "autoreason",
+      "original_skill_name": "sf2-belief-route-fit-spec",
+      "public_benchmark_allowed": false,
+      "runtime_promotion_allowed": false,
+      "sanitize_status": "not_required_repo_local",
+      "skill_id": "sf2-belief-route-fit-spec",
+      "source_class": "repo_local_or_current_best",
+      "source_path": "",
+      "source_round_or_root": "current_best"
+    },
+    {
+      "capability": "belief",
+      "original_skill_name": "sf2-belief-route-fit-spec",
+      "public_benchmark_allowed": false,
+      "runtime_promotion_allowed": false,
+      "sanitize_status": "not_required_repo_local",
+      "skill_id": "sf2-belief-route-fit-spec",
+      "source_class": "repo_local_or_current_best",
+      "source_path": "",
+      "source_round_or_root": "current_best"
+    },
+    {
+      "capability": "benchmark_meta_opt",
+      "original_skill_name": "hugging-face-trackio",
+      "public_benchmark_allowed": false,
+      "runtime_promotion_allowed": false,
+      "sanitize_status": "sanitized_prompt_only",
+      "skill_id": "sf-systematic-benchmark_meta_opt-hugging-face-trackio-d21c6b90",
+      "source_class": "safe_candidate",
+      "source_path": "/private/tmp/nexus-sf-round4/sickn33-antigravity-awesome-skills/plugins/antigravity-awesome-skills/skills/hugging-face-trackio/SKILL.md",
+      "source_round_or_root": "systematic-current"
+    },
+    {
+      "capability": "claim_gate",
+      "original_skill_name": "nexus-benchmark-continuous-optimization",
+      "public_benchmark_allowed": false,
+      "runtime_promotion_allowed": false,
+      "sanitize_status": "not_required_repo_local",
+      "skill_id": "nexus-benchmark-continuous-optimization",
+      "source_class": "repo_local_or_current_best",
+      "source_path": "",
+      "source_round_or_root": "current_best"
+    },
+    {
+      "capability": "codeintel",
+      "original_skill_name": "First Principles Thinking",
+      "public_benchmark_allowed": false,
+      "runtime_promotion_allowed": false,
+      "sanitize_status": "sanitized_prompt_only",
+      "skill_id": "sf-systematic-codeintel-first-principles-thinking-f95019ea",
+      "source_class": "safe_candidate",
+      "source_path": "/private/tmp/nexus-sf-round7/awesome-skills-first-principles-skill/SKILL.md",
+      "source_round_or_root": "round7"
+    },
+    {
+      "capability": "ddtree",
+      "original_skill_name": "nexus-root-cause-probe",
+      "public_benchmark_allowed": false,
+      "runtime_promotion_allowed": false,
+      "sanitize_status": "not_required_repo_local",
+      "skill_id": "nexus-root-cause-probe",
+      "source_class": "repo_local_or_current_best",
+      "source_path": "",
+      "source_round_or_root": "current_best"
+    },
+    {
+      "capability": "direct_master_loop",
+      "original_skill_name": "build",
+      "public_benchmark_allowed": false,
+      "runtime_promotion_allowed": false,
+      "sanitize_status": "sanitized_prompt_only",
+      "skill_id": "sf-systematic-direct_master_loop-build-32802a87",
+      "source_class": "safe_candidate",
+      "source_path": "/private/tmp/nexus-sf-round4/sickn33-antigravity-awesome-skills/plugins/antigravity-awesome-skills/skills/build/SKILL.md",
+      "source_round_or_root": "round4"
+    },
+    {
+      "capability": "drone",
+      "original_skill_name": "python-background-jobs",
+      "public_benchmark_allowed": false,
+      "runtime_promotion_allowed": false,
+      "sanitize_status": "sanitized_prompt_only",
+      "skill_id": "sf-systematic-drone-python-background-jobs-18326a62",
+      "source_class": "safe_candidate",
+      "source_path": "/private/tmp/nexus-sf-round7/midudev-autoskills/packages/autoskills/skills-registry/python-background-jobs/SKILL.md",
+      "source_round_or_root": "round7"
+    },
+    {
+      "capability": "external_productivity",
+      "original_skill_name": "writer",
+      "public_benchmark_allowed": false,
+      "runtime_promotion_allowed": false,
+      "sanitize_status": "sanitized_prompt_only",
+      "skill_id": "sf-systematic-external_productivity-writer-77dc7840",
+      "source_class": "safe_candidate",
+      "source_path": "/private/tmp/nexus-sf-round4/sickn33-antigravity-awesome-skills/plugins/antigravity-awesome-skills/skills/libreoffice/writer/SKILL.md",
+      "source_round_or_root": "round4"
+    },
+    {
+      "capability": "file_lock_security_gate",
+      "original_skill_name": "sf2-file_lock_security_gate-route-fit-spec",
+      "public_benchmark_allowed": false,
+      "runtime_promotion_allowed": false,
+      "sanitize_status": "not_required_repo_local",
+      "skill_id": "sf2-file_lock_security_gate-route-fit-spec",
+      "source_class": "repo_local_or_current_best",
+      "source_path": "",
+      "source_round_or_root": "current_best"
+    },
+    {
+      "capability": "forecast_pregate",
+      "original_skill_name": "create-plan",
+      "public_benchmark_allowed": false,
+      "runtime_promotion_allowed": false,
+      "sanitize_status": "not_required_repo_local",
+      "skill_id": "create-plan",
+      "source_class": "repo_local_or_current_best",
+      "source_path": "",
+      "source_round_or_root": "current_best"
+    },
+    {
+      "capability": "governance_and_trust",
+      "original_skill_name": "aegisops-ai",
+      "public_benchmark_allowed": false,
+      "runtime_promotion_allowed": false,
+      "sanitize_status": "sanitized_prompt_only",
+      "skill_id": "sf-systematic-governance_and_trust-aegisops-ai-0aa841e2",
+      "source_class": "safe_candidate",
+      "source_path": "/private/tmp/nexus-sf-round4/sickn33-antigravity-awesome-skills/plugins/antigravity-awesome-skills/skills/aegisops-ai/SKILL.md",
+      "source_round_or_root": "round4"
+    },
+    {
+      "capability": "hyper_sprint",
+      "original_skill_name": "sf2-hyper_sprint-route-fit-spec",
+      "public_benchmark_allowed": false,
+      "runtime_promotion_allowed": false,
+      "sanitize_status": "not_required_repo_local",
+      "skill_id": "sf2-hyper_sprint-route-fit-spec",
+      "source_class": "repo_local_or_current_best",
+      "source_path": "",
+      "source_round_or_root": "current_best"
+    },
+    {
+      "capability": "lancedb",
+      "original_skill_name": "research-source-validation-auditor",
+      "public_benchmark_allowed": false,
+      "runtime_promotion_allowed": false,
+      "sanitize_status": "not_required_repo_local",
+      "skill_id": "research-source-validation-auditor",
+      "source_class": "repo_local_or_current_best",
+      "source_path": "",
+      "source_round_or_root": "current_best"
+    },
+    {
+      "capability": "learn_ask",
+      "original_skill_name": "github8-skilless-deep-research-learn-ask",
+      "public_benchmark_allowed": false,
+      "runtime_promotion_allowed": false,
+      "sanitize_status": "not_required_repo_local",
+      "skill_id": "github8-skilless-deep-research-learn-ask",
+      "source_class": "repo_local_or_current_best",
+      "source_path": "",
+      "source_round_or_root": "current_best"
+    },
+    {
+      "capability": "learning_closure",
+      "original_skill_name": "memory-lint",
+      "public_benchmark_allowed": false,
+      "runtime_promotion_allowed": false,
+      "sanitize_status": "sanitized_prompt_only",
+      "skill_id": "sf-systematic-learning_closure-memory-lint-8bdb0fca",
+      "source_class": "safe_candidate",
+      "source_path": "/private/tmp/nexus-sf-round4/KerberosClaw-kc_ai_skills/memory-lint/SKILL.md",
+      "source_round_or_root": "systematic-current"
+    },
+    {
+      "capability": "memory",
+      "original_skill_name": "project-skill-audit",
+      "public_benchmark_allowed": false,
+      "runtime_promotion_allowed": false,
+      "sanitize_status": "sanitized_prompt_only",
+      "skill_id": "sf-systematic-memory-project-skill-audit-cc8b7621",
+      "source_class": "safe_candidate",
+      "source_path": "/private/tmp/nexus-sf-round4/sickn33-antigravity-awesome-skills/plugins/antigravity-awesome-skills/skills/project-skill-audit/SKILL.md",
+      "source_round_or_root": "round4"
+    },
+    {
+      "capability": "mempalace",
+      "original_skill_name": "sf2-mempalace-route-fit-spec",
+      "public_benchmark_allowed": false,
+      "runtime_promotion_allowed": false,
+      "sanitize_status": "not_required_repo_local",
+      "skill_id": "sf2-mempalace-route-fit-spec",
+      "source_class": "repo_local_or_current_best",
+      "source_path": "",
+      "source_round_or_root": "current_best"
+    },
+    {
+      "capability": "metabolism_resume",
+      "original_skill_name": "github-auto-skill-safe-learning",
+      "public_benchmark_allowed": false,
+      "runtime_promotion_allowed": false,
+      "sanitize_status": "not_required_repo_local",
+      "skill_id": "github-auto-skill-safe-learning",
+      "source_class": "repo_local_or_current_best",
+      "source_path": "",
+      "source_round_or_root": "current_best"
+    },
+    {
+      "capability": "nightshift",
+      "original_skill_name": "sf2-nightshift-route-fit-spec",
+      "public_benchmark_allowed": false,
+      "runtime_promotion_allowed": false,
+      "sanitize_status": "not_required_repo_local",
+      "skill_id": "sf2-nightshift-route-fit-spec",
+      "source_class": "repo_local_or_current_best",
+      "source_path": "",
+      "source_round_or_root": "current_best"
+    },
+    {
+      "capability": "policy_capability_gate",
+      "original_skill_name": "aegisops-ai",
+      "public_benchmark_allowed": false,
+      "runtime_promotion_allowed": false,
+      "sanitize_status": "sanitized_prompt_only",
+      "skill_id": "sf-systematic-policy_capability_gate-aegisops-ai-0aa841e2",
+      "source_class": "safe_candidate",
+      "source_path": "/private/tmp/nexus-sf-round4/sickn33-antigravity-awesome-skills/plugins/antigravity-awesome-skills/skills/aegisops-ai/SKILL.md",
+      "source_round_or_root": "round4"
+    },
+    {
+      "capability": "registry_skills_sync",
+      "original_skill_name": "github5-skill-seekers-safe-registry-builder",
+      "public_benchmark_allowed": false,
+      "runtime_promotion_allowed": false,
+      "sanitize_status": "not_required_repo_local",
+      "skill_id": "github5-skill-seekers-safe-registry-builder",
+      "source_class": "repo_local_or_current_best",
+      "source_path": "",
+      "source_round_or_root": "current_best"
+    },
+    {
+      "capability": "regression_guard",
+      "original_skill_name": "odoo-automated-tests",
+      "public_benchmark_allowed": false,
+      "runtime_promotion_allowed": false,
+      "sanitize_status": "sanitized_prompt_only",
+      "skill_id": "sf-systematic-regression_guard-odoo-automated-tests-dad98433",
+      "source_class": "safe_candidate",
+      "source_path": "/private/tmp/nexus-sf-round4/sickn33-antigravity-awesome-skills/plugins/antigravity-awesome-skills/skills/odoo-automated-tests/SKILL.md",
+      "source_round_or_root": "round4"
+    },
+    {
+      "capability": "repair_loop",
+      "original_skill_name": "odoo-automated-tests",
+      "public_benchmark_allowed": false,
+      "runtime_promotion_allowed": false,
+      "sanitize_status": "sanitized_prompt_only",
+      "skill_id": "sf-systematic-repair_loop-odoo-automated-tests-dad98433",
+      "source_class": "safe_candidate",
+      "source_path": "/private/tmp/nexus-sf-round4/sickn33-antigravity-awesome-skills/plugins/antigravity-awesome-skills/skills/odoo-automated-tests/SKILL.md",
+      "source_round_or_root": "round4"
+    },
+    {
+      "capability": "research",
+      "original_skill_name": "research-lookup",
+      "public_benchmark_allowed": false,
+      "runtime_promotion_allowed": false,
+      "sanitize_status": "sanitized_prompt_only",
+      "skill_id": "sf-systematic-research-research-lookup-7e6f92a0",
+      "source_class": "safe_candidate",
+      "source_path": "/private/tmp/nexus-sf-round9/K-Dense-AI-scientific-agent-skills/scientific-skills/research-lookup/SKILL.md",
+      "source_round_or_root": "round9"
+    },
+    {
+      "capability": "research_and_source_discipline",
+      "original_skill_name": "research-citation-chain-verifier",
+      "public_benchmark_allowed": false,
+      "runtime_promotion_allowed": false,
+      "sanitize_status": "not_required_repo_local",
+      "skill_id": "research-citation-chain-verifier",
+      "source_class": "repo_local_or_current_best",
+      "source_path": "",
+      "source_round_or_root": "current_best"
+    },
+    {
+      "capability": "research_control_plane",
+      "original_skill_name": "research-lookup",
+      "public_benchmark_allowed": false,
+      "runtime_promotion_allowed": false,
+      "sanitize_status": "sanitized_prompt_only",
+      "skill_id": "sf-systematic-research_control_plane-research-lookup-7e6f92a0",
+      "source_class": "safe_candidate",
+      "source_path": "/private/tmp/nexus-sf-round9/K-Dense-AI-scientific-agent-skills/scientific-skills/research-lookup/SKILL.md",
+      "source_round_or_root": "systematic-current"
+    },
+    {
+      "capability": "sandbox_replay",
+      "original_skill_name": "sf2-sandbox_replay-route-fit-spec",
+      "public_benchmark_allowed": false,
+      "runtime_promotion_allowed": false,
+      "sanitize_status": "not_required_repo_local",
+      "skill_id": "sf2-sandbox_replay-route-fit-spec",
+      "source_class": "repo_local_or_current_best",
+      "source_path": "",
+      "source_round_or_root": "current_best"
+    },
+    {
+      "capability": "swarm_multi_agent",
+      "original_skill_name": "sf2-swarm_multi_agent-route-fit-spec",
+      "public_benchmark_allowed": false,
+      "runtime_promotion_allowed": false,
+      "sanitize_status": "not_required_repo_local",
+      "skill_id": "sf2-swarm_multi_agent-route-fit-spec",
+      "source_class": "repo_local_or_current_best",
+      "source_path": "",
+      "source_round_or_root": "current_best"
+    },
+    {
+      "capability": "ui_validator",
+      "original_skill_name": "e2e-testing",
+      "public_benchmark_allowed": false,
+      "runtime_promotion_allowed": false,
+      "sanitize_status": "sanitized_prompt_only",
+      "skill_id": "sf-systematic-ui_validator-e2e-testing-d98eb7c3",
+      "source_class": "safe_candidate",
+      "source_path": "/private/tmp/nexus-sf-round4/sickn33-antigravity-awesome-skills/plugins/antigravity-awesome-skills/skills/e2e-testing/SKILL.md",
+      "source_round_or_root": "systematic-current"
+    },
+    {
+      "capability": "ultra_review",
+      "original_skill_name": "github11-vulnerability-scanner-ultra-review",
+      "public_benchmark_allowed": false,
+      "runtime_promotion_allowed": false,
+      "sanitize_status": "not_required_repo_local",
+      "skill_id": "github11-vulnerability-scanner-ultra-review",
+      "source_class": "repo_local_or_current_best",
+      "source_path": "",
+      "source_round_or_root": "current_best"
+    },
+    {
+      "capability": "xray",
+      "original_skill_name": "diagnose",
+      "public_benchmark_allowed": false,
+      "runtime_promotion_allowed": false,
+      "sanitize_status": "not_required_repo_local",
+      "skill_id": "diagnose",
+      "source_class": "repo_local_or_current_best",
+      "source_path": "",
+      "source_round_or_root": "current_best"
+    }
+  ],
+  "schema": "nexus.emas_safe_candidate_intake.v1",
+  "status": "PASS",
+  "summary": {
+    "candidate_count": 34,
+    "public_benchmark_allowed": false,
+    "runtime_promotion_allowed": false,
+    "safe_candidate_count": 15
+  }
+}
