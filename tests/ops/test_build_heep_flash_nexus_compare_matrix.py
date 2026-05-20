@@ -140,3 +140,38 @@ def test_heep_flash_nexus_compare_normalizes_sf_only_capability_names(tmp_path: 
     task = artifacts["tasks"]["tasks"][0]
     assert task["expected_capabilities"] == ["mempalace_gate"]
     assert artifacts["matrix"]["rows"][0]["runner_capability_id"] == "mempalace_gate"
+
+
+def test_heep_flash_nexus_compare_enables_swarm_executor_for_receipt_capabilities(tmp_path: Path) -> None:
+    queue = _queue()
+    queue["rows"] = [
+        {
+            "capability": "drone",
+            "status": "READY",
+            "baseline_arm": {
+                "arm_id": "mode_a_current_primary",
+                "mode": "Mode A (Solo)",
+                "skill_ids": ["sf-systematic-drone-python-background-jobs-18326a62"],
+            },
+            "challenger_arm": {
+                "arm_id": "heep_multi_skill",
+                "mode": "Mode C (Swarm)",
+                "skill_ids": [
+                    "sf-systematic-codeintel-first-principles-thinking-f95019ea",
+                    "sf-systematic-drone-python-background-jobs-18326a62",
+                    "sf-systematic-artifact_gate-differential-review-461fbd0c",
+                ],
+            },
+            "mat_b_gate": {"status": "PENDING_LIVE_COMPARE"},
+        }
+    ]
+
+    artifacts = build_heep_flash_nexus_compare_artifacts(
+        queue=queue,
+        tasks_output=tmp_path / "tasks.json",
+        status_output=tmp_path / "status.json",
+        matrix_output=tmp_path / "matrix.json",
+    )
+
+    assert artifacts["tasks"]["tasks"][0]["expected_capabilities"] == ["drone"]
+    assert all(row["runner_env"]["NEXUS_ENABLE_SWARM_BENCH_EXECUTOR"] == "1" for row in artifacts["matrix"]["rows"])

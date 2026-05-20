@@ -2008,7 +2008,8 @@
         "NEXUS_BENCH_ALLOW_ABLATION_SKILL_MOUNTS": "1",
         "NEXUS_BENCH_SKILL_MOUNT_REQUESTS": "[\"sf-systematic-drone-python-background-jobs-18326a62\"]",
         "NEXUS_HEEP_MODE": "Mode A (Solo)",
-        "NEXUS_HEEP_MAT_B_COMPARE": "1"
+        "NEXUS_HEEP_MAT_B_COMPARE": "1",
+        "NEXUS_ENABLE_SWARM_BENCH_EXECUTOR": "1"
       },
       "runner_args": [
         "uv",
@@ -2116,7 +2117,8 @@
         "NEXUS_BENCH_ALLOW_ABLATION_SKILL_MOUNTS": "1",
         "NEXUS_BENCH_SKILL_MOUNT_REQUESTS": "[\"sf-systematic-codeintel-first-principles-thinking-f95019ea\", \"sf-systematic-drone-python-background-jobs-18326a62\", \"sf-systematic-artifact_gate-differential-review-461fbd0c\"]",
         "NEXUS_HEEP_MODE": "Mode C (Swarm)",
-        "NEXUS_HEEP_MAT_B_COMPARE": "1"
+        "NEXUS_HEEP_MAT_B_COMPARE": "1",
+        "NEXUS_ENABLE_SWARM_BENCH_EXECUTOR": "1"
       },
       "runner_args": [
         "uv",
@@ -4572,7 +4574,8 @@
         "NEXUS_BENCH_ALLOW_ABLATION_SKILL_MOUNTS": "1",
         "NEXUS_BENCH_SKILL_MOUNT_REQUESTS": "[\"sf2-nightshift-route-fit-spec\"]",
         "NEXUS_HEEP_MODE": "Mode A (Solo)",
-        "NEXUS_HEEP_MAT_B_COMPARE": "1"
+        "NEXUS_HEEP_MAT_B_COMPARE": "1",
+        "NEXUS_ENABLE_SWARM_BENCH_EXECUTOR": "1"
       },
       "runner_args": [
         "uv",
@@ -4680,7 +4683,8 @@
         "NEXUS_BENCH_ALLOW_ABLATION_SKILL_MOUNTS": "1",
         "NEXUS_BENCH_SKILL_MOUNT_REQUESTS": "[\"sf-systematic-codeintel-first-principles-thinking-f95019ea\", \"sf2-nightshift-route-fit-spec\", \"sf-systematic-artifact_gate-differential-review-461fbd0c\"]",
         "NEXUS_HEEP_MODE": "Mode C (Swarm)",
-        "NEXUS_HEEP_MAT_B_COMPARE": "1"
+        "NEXUS_HEEP_MAT_B_COMPARE": "1",
+        "NEXUS_ENABLE_SWARM_BENCH_EXECUTOR": "1"
       },
       "runner_args": [
         "uv",
@@ -6494,7 +6498,8 @@
         "NEXUS_BENCH_ALLOW_ABLATION_SKILL_MOUNTS": "1",
         "NEXUS_BENCH_SKILL_MOUNT_REQUESTS": "[\"sf2-swarm_multi_agent-route-fit-spec\"]",
         "NEXUS_HEEP_MODE": "Mode A (Solo)",
-        "NEXUS_HEEP_MAT_B_COMPARE": "1"
+        "NEXUS_HEEP_MAT_B_COMPARE": "1",
+        "NEXUS_ENABLE_SWARM_BENCH_EXECUTOR": "1"
       },
       "runner_args": [
         "uv",
@@ -6602,7 +6607,8 @@
         "NEXUS_BENCH_ALLOW_ABLATION_SKILL_MOUNTS": "1",
         "NEXUS_BENCH_SKILL_MOUNT_REQUESTS": "[\"sf-systematic-codeintel-first-principles-thinking-f95019ea\", \"sf2-swarm_multi_agent-route-fit-spec\", \"sf-systematic-artifact_gate-differential-review-461fbd0c\"]",
         "NEXUS_HEEP_MODE": "Mode C (Swarm)",
-        "NEXUS_HEEP_MAT_B_COMPARE": "1"
+        "NEXUS_HEEP_MAT_B_COMPARE": "1",
+        "NEXUS_ENABLE_SWARM_BENCH_EXECUTOR": "1"
       },
       "runner_args": [
         "uv",

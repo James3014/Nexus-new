@@ -24,6 +24,7 @@ HEEP_RUNNER_CAPABILITY_ALIAS = {
     "governance_and_trust": "mempalace_gate",
     "research_and_source_discipline": "research",
 }
+SWARM_EXECUTOR_RECEIPT_CAPABILITIES = {"drone", "nightshift", "swarm", "swarm_quiet_moment"}
 
 
 def _skill_paths() -> dict[str, str]:
@@ -110,6 +111,18 @@ def _matrix_row(
     skill_ids = _arm_skill_ids(arm)
     arm_id = str(arm.get("arm_id") or arm_key)
     mode = str(arm.get("mode") or "")
+    runner_env = {
+        "NEXUS_VALUE_HIDDEN_VERIFIER": "1",
+        "NEXUS_DIRECT_GEMINI_MODEL": model,
+        "NEXUS_CAPABILITY_RECEIPT_FIRST": "1",
+        "NEXUS_BENCH_SKILL_STATUS_REPORT": str(status_output),
+        "NEXUS_BENCH_ALLOW_ABLATION_SKILL_MOUNTS": "1",
+        "NEXUS_BENCH_SKILL_MOUNT_REQUESTS": json.dumps(skill_ids),
+        "NEXUS_HEEP_MODE": mode,
+        "NEXUS_HEEP_MAT_B_COMPARE": "1",
+    }
+    if runner_capability in SWARM_EXECUTOR_RECEIPT_CAPABILITIES:
+        runner_env["NEXUS_ENABLE_SWARM_BENCH_EXECUTOR"] = "1"
     return {
         "row_id": f"heep::{capability}::{task_id}::{arm_id}",
         "task_ref": {"manifest": str(tasks_output), "task_id": task_id},
@@ -128,16 +141,7 @@ def _matrix_row(
         "skill_mount_requests": skill_ids,
         "heep_mode": mode,
         "heep_mat_b_gate": candidate.get("mat_b_gate") or {},
-        "runner_env": {
-            "NEXUS_VALUE_HIDDEN_VERIFIER": "1",
-            "NEXUS_DIRECT_GEMINI_MODEL": model,
-            "NEXUS_CAPABILITY_RECEIPT_FIRST": "1",
-            "NEXUS_BENCH_SKILL_STATUS_REPORT": str(status_output),
-            "NEXUS_BENCH_ALLOW_ABLATION_SKILL_MOUNTS": "1",
-            "NEXUS_BENCH_SKILL_MOUNT_REQUESTS": json.dumps(skill_ids),
-            "NEXUS_HEEP_MODE": mode,
-            "NEXUS_HEEP_MAT_B_COMPARE": "1",
-        },
+        "runner_env": runner_env,
         "runner_args": _runner_args(tasks_output, task_id, model=model),
         "expected_outcome": f"flash_nexus_internal_heep_compare::{arm_id}",
     }

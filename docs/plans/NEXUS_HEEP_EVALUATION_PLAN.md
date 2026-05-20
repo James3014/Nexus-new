@@ -118,6 +118,8 @@ After the reviewed runtime overlay and post-apply smoke, the remaining MAT-B unr
 
 The blocker queue keeps `runtime_update_allowed=false` and `public_benchmark_allowed=false`. It is a repair queue only: no HEEP map update, runtime default apply, or public benchmark may consume a blocked row until its lane-specific closure gate passes.
 
+Matrix repair: `docs/reports/NEXUS_HEEP_FLASH_NEXUS_EXECUTION_MATRIX_2026-05-20.json` now sets `NEXUS_ENABLE_SWARM_BENCH_EXECUTOR=1` for `drone`, `nightshift`, and `swarm` MAT-B rows. This does not retroactively approve the blocked rows; it only makes the next targeted replay capable of producing the required executor receipts.
+
 Failure lesson: clean replay must preserve the distinction between provider-token truth and expected-capability receipt invocation. If they are merged into a generic `HOLD_MISSING_MAT_B_EVIDENCE`, later agents can accidentally rerun the wrong path or misread a provider telemetry gap as a weak skill.
 
 ---
