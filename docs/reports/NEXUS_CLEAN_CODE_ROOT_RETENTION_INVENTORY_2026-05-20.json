@@ -1,0 +1,887 @@
+{
+  "claim_class": "PLAN_ONLY",
+  "date": "2026-05-20",
+  "public_benchmark_allowed": false,
+  "rows": [
+    {
+      "action": "no_move_no_delete_cc0_inventory_only",
+      "classification": "keep_tracked_source",
+      "path": ".codex_lessons.md",
+      "reason": "top_level_documentation_or_spec",
+      "tracked": true
+    },
+    {
+      "action": "no_move_no_delete_cc0_inventory_only",
+      "classification": "unknown_hold",
+      "path": ".coverage",
+      "reason": "no_safe_automatic_classification",
+      "tracked": true
+    },
+    {
+      "action": "no_move_no_delete_cc0_inventory_only",
+      "classification": "keep_tracked_source",
+      "path": ".cursorrules",
+      "reason": "project_config_or_top_level_source_contract",
+      "tracked": true
+    },
+    {
+      "action": "no_move_no_delete_cc0_inventory_only",
+      "classification": "unknown_hold",
+      "path": ".drclaw_session.json",
+      "reason": "structured_root_file_needs_owner_review",
+      "tracked": false
+    },
+    {
+      "action": "no_move_no_delete_cc0_inventory_only",
+      "classification": "keep_tracked_source",
+      "path": ".env.template",
+      "reason": "project_config_or_top_level_source_contract",
+      "tracked": true
+    },
+    {
+      "action": "no_move_no_delete_cc0_inventory_only",
+      "classification": "keep_tracked_source",
+      "path": ".gitignore",
+      "reason": "project_config_or_top_level_source_contract",
+      "tracked": true
+    },
+    {
+      "action": "no_move_no_delete_cc0_inventory_only",
+      "classification": "keep_tracked_source",
+      "path": ".metadata_never_index",
+      "reason": "project_config_or_top_level_source_contract",
+      "tracked": true
+    },
+    {
+      "action": "no_move_no_delete_cc0_inventory_only",
+      "classification": "keep_tracked_source",
+      "path": ".nexus-soul.md",
+      "reason": "project_config_or_top_level_source_contract",
+      "tracked": true
+    },
+    {
+      "action": "no_move_no_delete_cc0_inventory_only",
+      "classification": "keep_tracked_source",
+      "path": ".pyre_configuration",
+      "reason": "project_config_or_top_level_source_contract",
+      "tracked": true
+    },
+    {
+      "action": "no_move_no_delete_cc0_inventory_only",
+      "classification": "keep_tracked_source",
+      "path": "AGENTS.md",
+      "reason": "project_config_or_top_level_source_contract",
+      "tracked": true
+    },
+    {
+      "action": "no_move_no_delete_cc0_inventory_only",
+      "classification": "keep_tracked_source",
+      "path": "CLAUDE.md",
+      "reason": "project_config_or_top_level_source_contract",
+      "tracked": true
+    },
+    {
+      "action": "no_move_no_delete_cc0_inventory_only",
+      "classification": "keep_tracked_source",
+      "path": "CONTEXT-MAP.md",
+      "reason": "project_config_or_top_level_source_contract",
+      "tracked": true
+    },
+    {
+      "action": "no_move_no_delete_cc0_inventory_only",
+      "classification": "keep_tracked_source",
+      "path": "CONTRIBUTING.md",
+      "reason": "project_config_or_top_level_source_contract",
+      "tracked": true
+    },
+    {
+      "action": "no_move_no_delete_cc0_inventory_only",
+      "classification": "archive_candidate",
+      "path": "Daily_Log.md",
+      "reason": "top_level_markdown_report_or_historical_evidence",
+      "tracked": true
+    },
+    {
+      "action": "no_move_no_delete_cc0_inventory_only",
+      "classification": "keep_tracked_source",
+      "path": "Dockerfile",
+      "reason": "project_config_or_top_level_source_contract",
+      "tracked": true
+    },
+    {
+      "action": "no_move_no_delete_cc0_inventory_only",
+      "classification": "keep_tracked_source",
+      "path": "Dockerfile.swe",
+      "reason": "project_config_or_top_level_source_contract",
+      "tracked": true
+    },
+    {
+      "action": "no_move_no_delete_cc0_inventory_only",
+      "classification": "unknown_hold",
+      "path": "Evolution_Context.txt",
+      "reason": "no_safe_automatic_classification",
+      "tracked": true
+    },
+    {
+      "action": "no_move_no_delete_cc0_inventory_only",
+      "classification": "keep_tracked_source",
+      "path": "GEMINI.md",
+      "reason": "project_config_or_top_level_source_contract",
+      "tracked": true
+    },
+    {
+      "action": "no_move_no_delete_cc0_inventory_only",
+      "classification": "keep_tracked_source",
+      "path": "MEMORY.md",
+      "reason": "project_config_or_top_level_source_contract",
+      "tracked": true
+    },
+    {
+      "action": "no_move_no_delete_cc0_inventory_only",
+      "classification": "keep_tracked_source",
+      "path": "MUSE-NEXUS-Engine-Specification-v22-Eternal.md",
+      "reason": "top_level_documentation_or_spec",
+      "tracked": true
+    },
+    {
+      "action": "no_move_no_delete_cc0_inventory_only",
+      "classification": "keep_tracked_source",
+      "path": "MUSE_ENGINE_SPEC_V17.1_HARDENED.md",
+      "reason": "top_level_documentation_or_spec",
+      "tracked": true
+    },
+    {
+      "action": "no_move_no_delete_cc0_inventory_only",
+      "classification": "keep_tracked_source",
+      "path": "MUSE_PROTO.md",
+      "reason": "project_config_or_top_level_source_contract",
+      "tracked": true
+    },
+    {
+      "action": "no_move_no_delete_cc0_inventory_only",
+      "classification": "keep_tracked_source",
+      "path": "PHASE3_TASKBOARD.md",
+      "reason": "top_level_documentation_or_spec",
+      "tracked": true
+    },
+    {
+      "action": "no_move_no_delete_cc0_inventory_only",
+      "classification": "keep_tracked_source",
+      "path": "QUICKSTART.md",
+      "reason": "project_config_or_top_level_source_contract",
+      "tracked": true
+    },
+    {
+      "action": "no_move_no_delete_cc0_inventory_only",
+      "classification": "keep_tracked_source",
+      "path": "README.md",
+      "reason": "project_config_or_top_level_source_contract",
+      "tracked": true
+    },
+    {
+      "action": "no_move_no_delete_cc0_inventory_only",
+      "classification": "keep_tracked_source",
+      "path": "RELEASE_NOTES.md",
+      "reason": "top_level_documentation_or_spec",
+      "tracked": true
+    },
+    {
+      "action": "no_move_no_delete_cc0_inventory_only",
+      "classification": "keep_tracked_source",
+      "path": "RELEASE_NOTES_V9.md",
+      "reason": "top_level_documentation_or_spec",
+      "tracked": true
+    },
+    {
+      "action": "no_move_no_delete_cc0_inventory_only",
+      "classification": "keep_tracked_source",
+      "path": "RELEASE_NOTE_v23.1.md",
+      "reason": "top_level_documentation_or_spec",
+      "tracked": true
+    },
+    {
+      "action": "no_move_no_delete_cc0_inventory_only",
+      "classification": "keep_tracked_source",
+      "path": "SEAL.md",
+      "reason": "project_config_or_top_level_source_contract",
+      "tracked": true
+    },
+    {
+      "action": "no_move_no_delete_cc0_inventory_only",
+      "classification": "keep_tracked_source",
+      "path": "SOUL.md",
+      "reason": "project_config_or_top_level_source_contract",
+      "tracked": true
+    },
+    {
+      "action": "no_move_no_delete_cc0_inventory_only",
+      "classification": "ops_script_candidate",
+      "path": "STATUS_DASHBOARD.sh",
+      "reason": "root_level_ops_script_candidate",
+      "tracked": true
+    },
+    {
+      "action": "no_move_no_delete_cc0_inventory_only",
+      "classification": "keep_tracked_source",
+      "path": "Taskfile.yml",
+      "reason": "project_config_or_top_level_source_contract",
+      "tracked": true
+    },
+    {
+      "action": "no_move_no_delete_cc0_inventory_only",
+      "classification": "archive_candidate",
+      "path": "acceptance_summary.md",
+      "reason": "top_level_markdown_report_or_historical_evidence",
+      "tracked": true
+    },
+    {
+      "action": "no_move_no_delete_cc0_inventory_only",
+      "classification": "ops_script_candidate",
+      "path": "analyze_metrics.py",
+      "reason": "root_level_ops_script_candidate",
+      "tracked": true
+    },
+    {
+      "action": "no_move_no_delete_cc0_inventory_only",
+      "classification": "unknown_hold",
+      "path": "asan_audit",
+      "reason": "extensionless_executable_or_artifact_requires_manual_classification",
+      "tracked": true
+    },
+    {
+      "action": "no_move_no_delete_cc0_inventory_only",
+      "classification": "unknown_hold",
+      "path": "asan_bin",
+      "reason": "extensionless_executable_or_artifact_requires_manual_classification",
+      "tracked": true
+    },
+    {
+      "action": "no_move_no_delete_cc0_inventory_only",
+      "classification": "archive_candidate",
+      "path": "audit_result.md",
+      "reason": "top_level_markdown_report_or_historical_evidence",
+      "tracked": true
+    },
+    {
+      "action": "no_move_no_delete_cc0_inventory_only",
+      "classification": "ops_script_candidate",
+      "path": "compute_truth_scores.py",
+      "reason": "root_level_ops_script_candidate",
+      "tracked": true
+    },
+    {
+      "action": "no_move_no_delete_cc0_inventory_only",
+      "classification": "keep_tracked_source",
+      "path": "consensus_cli_demo.md",
+      "reason": "top_level_documentation_or_spec",
+      "tracked": true
+    },
+    {
+      "action": "no_move_no_delete_cc0_inventory_only",
+      "classification": "keep_tracked_source",
+      "path": "crdt_vote_test.md",
+      "reason": "top_level_documentation_or_spec",
+      "tracked": true
+    },
+    {
+      "action": "no_move_no_delete_cc0_inventory_only",
+      "classification": "archive_candidate",
+      "path": "current_aos_status.md",
+      "reason": "top_level_markdown_report_or_historical_evidence",
+      "tracked": true
+    },
+    {
+      "action": "no_move_no_delete_cc0_inventory_only",
+      "classification": "ops_script_candidate",
+      "path": "deploy-v21a.sh",
+      "reason": "root_level_ops_script_candidate",
+      "tracked": true
+    },
+    {
+      "action": "no_move_no_delete_cc0_inventory_only",
+      "classification": "archive_candidate",
+      "path": "deployment_seal.json",
+      "reason": "top_level_generated_evidence_or_report_candidate",
+      "tracked": true
+    },
+    {
+      "action": "no_move_no_delete_cc0_inventory_only",
+      "classification": "keep_tracked_source",
+      "path": "distilled_skills_list.md",
+      "reason": "top_level_documentation_or_spec",
+      "tracked": true
+    },
+    {
+      "action": "no_move_no_delete_cc0_inventory_only",
+      "classification": "test_candidate",
+      "path": "elite_sprint_verify.sh",
+      "reason": "root_level_test_or_verification_script_candidate",
+      "tracked": true
+    },
+    {
+      "action": "no_move_no_delete_cc0_inventory_only",
+      "classification": "unknown_hold",
+      "path": "events_sourced.jsonl",
+      "reason": "structured_root_file_needs_owner_review",
+      "tracked": false
+    },
+    {
+      "action": "no_move_no_delete_cc0_inventory_only",
+      "classification": "archive_candidate",
+      "path": "evolve_trace.log",
+      "reason": "top_level_generated_evidence_or_report_candidate",
+      "tracked": true
+    },
+    {
+      "action": "no_move_no_delete_cc0_inventory_only",
+      "classification": "test_candidate",
+      "path": "final_verify.py",
+      "reason": "root_level_test_or_verification_script_candidate",
+      "tracked": true
+    },
+    {
+      "action": "no_move_no_delete_cc0_inventory_only",
+      "classification": "unknown_hold",
+      "path": "fingerprint_exchange.log",
+      "reason": "structured_root_file_needs_owner_review",
+      "tracked": true
+    },
+    {
+      "action": "no_move_no_delete_cc0_inventory_only",
+      "classification": "archive_candidate",
+      "path": "full_e2e_trace.json",
+      "reason": "top_level_generated_evidence_or_report_candidate",
+      "tracked": true
+    },
+    {
+      "action": "no_move_no_delete_cc0_inventory_only",
+      "classification": "archive_candidate",
+      "path": "full_lineage_graph.json",
+      "reason": "top_level_generated_evidence_or_report_candidate",
+      "tracked": true
+    },
+    {
+      "action": "no_move_no_delete_cc0_inventory_only",
+      "classification": "archive_candidate",
+      "path": "full_workspace_xray.md",
+      "reason": "top_level_markdown_report_or_historical_evidence",
+      "tracked": true
+    },
+    {
+      "action": "no_move_no_delete_cc0_inventory_only",
+      "classification": "unknown_hold",
+      "path": "hello.py",
+      "reason": "root_level_executable_source_needs_owner_review",
+      "tracked": true
+    },
+    {
+      "action": "no_move_no_delete_cc0_inventory_only",
+      "classification": "ops_script_candidate",
+      "path": "ingest.py",
+      "reason": "root_level_ops_script_candidate",
+      "tracked": true
+    },
+    {
+      "action": "no_move_no_delete_cc0_inventory_only",
+      "classification": "ops_script_candidate",
+      "path": "latency_tracker.py",
+      "reason": "root_level_ops_script_candidate",
+      "tracked": true
+    },
+    {
+      "action": "no_move_no_delete_cc0_inventory_only",
+      "classification": "test_candidate",
+      "path": "live_guardrail_test.py",
+      "reason": "root_level_test_or_verification_script_candidate",
+      "tracked": true
+    },
+    {
+      "action": "no_move_no_delete_cc0_inventory_only",
+      "classification": "unknown_hold",
+      "path": "login_service.py",
+      "reason": "root_level_executable_source_needs_owner_review",
+      "tracked": true
+    },
+    {
+      "action": "no_move_no_delete_cc0_inventory_only",
+      "classification": "ops_script_candidate",
+      "path": "migrate_adrs.py",
+      "reason": "root_level_ops_script_candidate",
+      "tracked": true
+    },
+    {
+      "action": "no_move_no_delete_cc0_inventory_only",
+      "classification": "unknown_hold",
+      "path": "mock_gemini.py",
+      "reason": "root_level_executable_source_needs_owner_review",
+      "tracked": true
+    },
+    {
+      "action": "no_move_no_delete_cc0_inventory_only",
+      "classification": "keep_tracked_source",
+      "path": "nexus-belief-artifact-v0.2-spec.md",
+      "reason": "top_level_documentation_or_spec",
+      "tracked": true
+    },
+    {
+      "action": "no_move_no_delete_cc0_inventory_only",
+      "classification": "unknown_hold",
+      "path": "nexus-evolve",
+      "reason": "no_safe_automatic_classification",
+      "tracked": true
+    },
+    {
+      "action": "no_move_no_delete_cc0_inventory_only",
+      "classification": "ops_script_candidate",
+      "path": "nexus-proxy.sh",
+      "reason": "root_level_ops_script_candidate",
+      "tracked": true
+    },
+    {
+      "action": "no_move_no_delete_cc0_inventory_only",
+      "classification": "test_candidate",
+      "path": "nexus_belief_mechanics_test.py",
+      "reason": "root_level_test_or_verification_script_candidate",
+      "tracked": true
+    },
+    {
+      "action": "no_move_no_delete_cc0_inventory_only",
+      "classification": "ops_script_candidate",
+      "path": "nexus_benchmark_full.py",
+      "reason": "root_level_ops_script_candidate",
+      "tracked": true
+    },
+    {
+      "action": "no_move_no_delete_cc0_inventory_only",
+      "classification": "unknown_hold",
+      "path": "nexus_dag_workflow.py",
+      "reason": "root_level_executable_source_needs_owner_review",
+      "tracked": true
+    },
+    {
+      "action": "no_move_no_delete_cc0_inventory_only",
+      "classification": "test_candidate",
+      "path": "nexus_limit_test.py",
+      "reason": "root_level_test_or_verification_script_candidate",
+      "tracked": true
+    },
+    {
+      "action": "no_move_no_delete_cc0_inventory_only",
+      "classification": "unknown_hold",
+      "path": "nexus_proxy.log",
+      "reason": "structured_root_file_needs_owner_review",
+      "tracked": true
+    },
+    {
+      "action": "no_move_no_delete_cc0_inventory_only",
+      "classification": "keep_tracked_source",
+      "path": "oms_api_spec.md",
+      "reason": "top_level_documentation_or_spec",
+      "tracked": true
+    },
+    {
+      "action": "no_move_no_delete_cc0_inventory_only",
+      "classification": "archive_candidate",
+      "path": "optimization_curve.csv",
+      "reason": "top_level_generated_evidence_or_report_candidate",
+      "tracked": true
+    },
+    {
+      "action": "no_move_no_delete_cc0_inventory_only",
+      "classification": "archive_candidate",
+      "path": "optimization_curve_closed_loop.csv",
+      "reason": "top_level_generated_evidence_or_report_candidate",
+      "tracked": true
+    },
+    {
+      "action": "no_move_no_delete_cc0_inventory_only",
+      "classification": "archive_candidate",
+      "path": "optimization_curve_cors.csv",
+      "reason": "top_level_generated_evidence_or_report_candidate",
+      "tracked": true
+    },
+    {
+      "action": "no_move_no_delete_cc0_inventory_only",
+      "classification": "archive_candidate",
+      "path": "optimization_curve_hydration.csv",
+      "reason": "top_level_generated_evidence_or_report_candidate",
+      "tracked": true
+    },
+    {
+      "action": "no_move_no_delete_cc0_inventory_only",
+      "classification": "archive_candidate",
+      "path": "optimization_curve_integration.csv",
+      "reason": "top_level_generated_evidence_or_report_candidate",
+      "tracked": true
+    },
+    {
+      "action": "no_move_no_delete_cc0_inventory_only",
+      "classification": "archive_candidate",
+      "path": "optimization_curve_master_loop.csv",
+      "reason": "top_level_generated_evidence_or_report_candidate",
+      "tracked": true
+    },
+    {
+      "action": "no_move_no_delete_cc0_inventory_only",
+      "classification": "archive_candidate",
+      "path": "optimization_curve_meta_loop.csv",
+      "reason": "top_level_generated_evidence_or_report_candidate",
+      "tracked": true
+    },
+    {
+      "action": "no_move_no_delete_cc0_inventory_only",
+      "classification": "archive_candidate",
+      "path": "optimization_curve_nexusenginepipe.csv",
+      "reason": "top_level_generated_evidence_or_report_candidate",
+      "tracked": true
+    },
+    {
+      "action": "no_move_no_delete_cc0_inventory_only",
+      "classification": "archive_candidate",
+      "path": "optimization_curve_redis.csv",
+      "reason": "top_level_generated_evidence_or_report_candidate",
+      "tracked": true
+    },
+    {
+      "action": "no_move_no_delete_cc0_inventory_only",
+      "classification": "archive_candidate",
+      "path": "optimization_curve_scriptstestrepa.csv",
+      "reason": "top_level_generated_evidence_or_report_candidate",
+      "tracked": true
+    },
+    {
+      "action": "no_move_no_delete_cc0_inventory_only",
+      "classification": "test_candidate",
+      "path": "oracle_test.py",
+      "reason": "root_level_test_or_verification_script_candidate",
+      "tracked": true
+    },
+    {
+      "action": "no_move_no_delete_cc0_inventory_only",
+      "classification": "unknown_hold",
+      "path": "peering_proof.json",
+      "reason": "structured_root_file_needs_owner_review",
+      "tracked": true
+    },
+    {
+      "action": "no_move_no_delete_cc0_inventory_only",
+      "classification": "archive_candidate",
+      "path": "phase_2_4_closure_report.md",
+      "reason": "top_level_markdown_report_or_historical_evidence",
+      "tracked": true
+    },
+    {
+      "action": "no_move_no_delete_cc0_inventory_only",
+      "classification": "test_candidate",
+      "path": "physical_verify.py",
+      "reason": "root_level_test_or_verification_script_candidate",
+      "tracked": true
+    },
+    {
+      "action": "no_move_no_delete_cc0_inventory_only",
+      "classification": "ops_script_candidate",
+      "path": "ppo_controller.py",
+      "reason": "root_level_ops_script_candidate",
+      "tracked": true
+    },
+    {
+      "action": "no_move_no_delete_cc0_inventory_only",
+      "classification": "keep_tracked_source",
+      "path": "pricing.md",
+      "reason": "top_level_documentation_or_spec",
+      "tracked": true
+    },
+    {
+      "action": "no_move_no_delete_cc0_inventory_only",
+      "classification": "keep_tracked_source",
+      "path": "program.md",
+      "reason": "top_level_documentation_or_spec",
+      "tracked": true
+    },
+    {
+      "action": "no_move_no_delete_cc0_inventory_only",
+      "classification": "keep_tracked_source",
+      "path": "pyproject.toml",
+      "reason": "project_config_or_top_level_source_contract",
+      "tracked": true
+    },
+    {
+      "action": "no_move_no_delete_cc0_inventory_only",
+      "classification": "keep_tracked_source",
+      "path": "pytest.ini",
+      "reason": "project_config_or_top_level_source_contract",
+      "tracked": true
+    },
+    {
+      "action": "no_move_no_delete_cc0_inventory_only",
+      "classification": "archive_candidate",
+      "path": "quantum_deployment_seal.json",
+      "reason": "top_level_generated_evidence_or_report_candidate",
+      "tracked": true
+    },
+    {
+      "action": "no_move_no_delete_cc0_inventory_only",
+      "classification": "unknown_hold",
+      "path": "quantum_sim_proof.json",
+      "reason": "structured_root_file_needs_owner_review",
+      "tracked": true
+    },
+    {
+      "action": "no_move_no_delete_cc0_inventory_only",
+      "classification": "unknown_hold",
+      "path": "quickstart.sh",
+      "reason": "root_level_executable_source_needs_owner_review",
+      "tracked": true
+    },
+    {
+      "action": "no_move_no_delete_cc0_inventory_only",
+      "classification": "archive_candidate",
+      "path": "rca_report.md",
+      "reason": "top_level_markdown_report_or_historical_evidence",
+      "tracked": true
+    },
+    {
+      "action": "no_move_no_delete_cc0_inventory_only",
+      "classification": "unknown_hold",
+      "path": "reconciliation_demo.json",
+      "reason": "structured_root_file_needs_owner_review",
+      "tracked": true
+    },
+    {
+      "action": "no_move_no_delete_cc0_inventory_only",
+      "classification": "unknown_hold",
+      "path": "reminders.json",
+      "reason": "structured_root_file_needs_owner_review",
+      "tracked": false
+    },
+    {
+      "action": "no_move_no_delete_cc0_inventory_only",
+      "classification": "archive_candidate",
+      "path": "report_inact_timeout.json",
+      "reason": "top_level_generated_evidence_or_report_candidate",
+      "tracked": true
+    },
+    {
+      "action": "no_move_no_delete_cc0_inventory_only",
+      "classification": "archive_candidate",
+      "path": "report_ok.json",
+      "reason": "top_level_generated_evidence_or_report_candidate",
+      "tracked": true
+    },
+    {
+      "action": "no_move_no_delete_cc0_inventory_only",
+      "classification": "archive_candidate",
+      "path": "report_wall_timeout.json",
+      "reason": "top_level_generated_evidence_or_report_candidate",
+      "tracked": true
+    },
+    {
+      "action": "no_move_no_delete_cc0_inventory_only",
+      "classification": "unknown_hold",
+      "path": "revision_propagation_proof.json",
+      "reason": "structured_root_file_needs_owner_review",
+      "tracked": true
+    },
+    {
+      "action": "no_move_no_delete_cc0_inventory_only",
+      "classification": "archive_candidate",
+      "path": "run_1_belief_extract.jsonl",
+      "reason": "top_level_generated_evidence_or_report_candidate",
+      "tracked": true
+    },
+    {
+      "action": "no_move_no_delete_cc0_inventory_only",
+      "classification": "archive_candidate",
+      "path": "run_1_ingest_proof.json",
+      "reason": "top_level_generated_evidence_or_report_candidate",
+      "tracked": true
+    },
+    {
+      "action": "no_move_no_delete_cc0_inventory_only",
+      "classification": "test_candidate",
+      "path": "run_1_simulator.py",
+      "reason": "root_level_test_or_verification_script_candidate",
+      "tracked": true
+    },
+    {
+      "action": "no_move_no_delete_cc0_inventory_only",
+      "classification": "archive_candidate",
+      "path": "run_1_source_event.json",
+      "reason": "top_level_generated_evidence_or_report_candidate",
+      "tracked": true
+    },
+    {
+      "action": "no_move_no_delete_cc0_inventory_only",
+      "classification": "archive_candidate",
+      "path": "run_2_baseline_plan.json",
+      "reason": "top_level_generated_evidence_or_report_candidate",
+      "tracked": true
+    },
+    {
+      "action": "no_move_no_delete_cc0_inventory_only",
+      "classification": "keep_tracked_source",
+      "path": "run_2_plan_diff.md",
+      "reason": "top_level_documentation_or_spec",
+      "tracked": true
+    },
+    {
+      "action": "no_move_no_delete_cc0_inventory_only",
+      "classification": "archive_candidate",
+      "path": "run_2_retrieval_lancedb_proof.json",
+      "reason": "top_level_generated_evidence_or_report_candidate",
+      "tracked": true
+    },
+    {
+      "action": "no_move_no_delete_cc0_inventory_only",
+      "classification": "archive_candidate",
+      "path": "run_2_retrieval_proof.json",
+      "reason": "top_level_generated_evidence_or_report_candidate",
+      "tracked": true
+    },
+    {
+      "action": "no_move_no_delete_cc0_inventory_only",
+      "classification": "archive_candidate",
+      "path": "run_3_post_stale_proof.json",
+      "reason": "top_level_generated_evidence_or_report_candidate",
+      "tracked": true
+    },
+    {
+      "action": "no_move_no_delete_cc0_inventory_only",
+      "classification": "keep_tracked_source",
+      "path": "task.md",
+      "reason": "top_level_documentation_or_spec",
+      "tracked": true
+    },
+    {
+      "action": "no_move_no_delete_cc0_inventory_only",
+      "classification": "unknown_hold",
+      "path": "task_manifest.yaml",
+      "reason": "no_safe_automatic_classification",
+      "tracked": true
+    },
+    {
+      "action": "no_move_no_delete_cc0_inventory_only",
+      "classification": "keep_tracked_source",
+      "path": "tenantA-wiki.md",
+      "reason": "top_level_documentation_or_spec",
+      "tracked": true
+    },
+    {
+      "action": "no_move_no_delete_cc0_inventory_only",
+      "classification": "ops_script_candidate",
+      "path": "topology_genome.py",
+      "reason": "root_level_ops_script_candidate",
+      "tracked": true
+    },
+    {
+      "action": "no_move_no_delete_cc0_inventory_only",
+      "classification": "archive_candidate",
+      "path": "tracelog.jsonl",
+      "reason": "top_level_generated_evidence_or_report_candidate",
+      "tracked": false
+    },
+    {
+      "action": "no_move_no_delete_cc0_inventory_only",
+      "classification": "archive_candidate",
+      "path": "tracelog_governance_hardening.jsonl",
+      "reason": "top_level_generated_evidence_or_report_candidate",
+      "tracked": true
+    },
+    {
+      "action": "no_move_no_delete_cc0_inventory_only",
+      "classification": "archive_candidate",
+      "path": "tracelog_nexus_core_outcome_schema.py.jsonl",
+      "reason": "top_level_generated_evidence_or_report_candidate",
+      "tracked": true
+    },
+    {
+      "action": "no_move_no_delete_cc0_inventory_only",
+      "classification": "unknown_hold",
+      "path": "tsan_audit",
+      "reason": "extensionless_executable_or_artifact_requires_manual_classification",
+      "tracked": true
+    },
+    {
+      "action": "no_move_no_delete_cc0_inventory_only",
+      "classification": "unknown_hold",
+      "path": "tsan_bin",
+      "reason": "extensionless_executable_or_artifact_requires_manual_classification",
+      "tracked": true
+    },
+    {
+      "action": "no_move_no_delete_cc0_inventory_only",
+      "classification": "keep_tracked_source",
+      "path": "uv.lock",
+      "reason": "project_config_or_top_level_source_contract",
+      "tracked": true
+    },
+    {
+      "action": "no_move_no_delete_cc0_inventory_only",
+      "classification": "test_candidate",
+      "path": "verify_v9_hardening.py",
+      "reason": "root_level_test_or_verification_script_candidate",
+      "tracked": true
+    },
+    {
+      "action": "no_move_no_delete_cc0_inventory_only",
+      "classification": "keep_tracked_source",
+      "path": "walkthrough.md",
+      "reason": "top_level_documentation_or_spec",
+      "tracked": true
+    },
+    {
+      "action": "no_move_no_delete_cc0_inventory_only",
+      "classification": "archive_candidate",
+      "path": "wiki_audit.json",
+      "reason": "top_level_generated_evidence_or_report_candidate",
+      "tracked": true
+    },
+    {
+      "action": "no_move_no_delete_cc0_inventory_only",
+      "classification": "keep_tracked_source",
+      "path": "window_200_acceptance.md",
+      "reason": "top_level_documentation_or_spec",
+      "tracked": true
+    },
+    {
+      "action": "no_move_no_delete_cc0_inventory_only",
+      "classification": "archive_candidate",
+      "path": "writeback_or_lineage_proof.json",
+      "reason": "top_level_generated_evidence_or_report_candidate",
+      "tracked": true
+    },
+    {
+      "action": "no_move_no_delete_cc0_inventory_only",
+      "classification": "archive_candidate",
+      "path": "xray_report.md",
+      "reason": "top_level_markdown_report_or_historical_evidence",
+      "tracked": true
+    },
+    {
+      "action": "no_move_no_delete_cc0_inventory_only",
+      "classification": "archive_candidate",
+      "path": "xray_report_full.md",
+      "reason": "top_level_markdown_report_or_historical_evidence",
+      "tracked": true
+    }
+  ],
+  "runtime_update_allowed": false,
+  "schema": "nexus.clean_code_root_retention_inventory.v1",
+  "scope": "root_files_only_no_moves_no_deletes",
+  "source_plan": "docs/plans/NEXUS_CLEAN_CODE_REFACTOR_TASK_PLAN_2026-05-20.md",
+  "status": "PASS",
+  "summary": {
+    "classification_counts": {
+      "archive_candidate": 39,
+      "keep_tracked_source": 42,
+      "ops_script_candidate": 11,
+      "test_candidate": 9,
+      "unknown_hold": 22
+    },
+    "delete_count": 0,
+    "move_count": 0,
+    "root_file_count": 123,
+    "tracked_count": 119,
+    "untracked_count": 4
+  }
+}

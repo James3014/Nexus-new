@@ -348,3 +348,28 @@ This crosswalk prevents the Clean Code refactor from re-opening already-closed r
 | Claim class | `PLAN_ONLY` |
 | Runtime update allowed | `false` |
 | Public benchmark allowed | `false` |
+
+## 11. CC-0 Root Hygiene Retention Inventory Result
+
+Status: `DONE`
+
+Artifact: `docs/reports/NEXUS_CLEAN_CODE_ROOT_RETENTION_INVENTORY_2026-05-20.json`
+
+Summary:
+
+- root files inspected: `123`
+- tracked files: `119`
+- untracked files: `4`
+- `keep_tracked_source`: `42`
+- `archive_candidate`: `39`
+- `ops_script_candidate`: `11`
+- `test_candidate`: `9`
+- `unknown_hold`: `22`
+- files moved: `0`
+- files deleted: `0`
+
+Result:
+
+- `CC-0` stayed inventory-only as required.
+- `unknown_hold` items require owner-aware review before any future `CC-8` move.
+- No runtime, benchmark, Swarm/NSP, or root cleanup behavior changed.
