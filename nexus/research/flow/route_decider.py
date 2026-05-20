@@ -1,12 +1,12 @@
 from __future__ import annotations
 
-import json
 import re
 from pathlib import Path
 from typing import Any, TypedDict
 
 from nexus.engine.local_reflex import assess_local_reflex
 from nexus.engine.policies.research_policy import ResearchPolicy
+from nexus.research.flow.history_signal_store import HistorySignalStore
 from nexus.research.findings_memory import FindingsMemoryStore
 
 
@@ -152,40 +152,10 @@ def extract_keywords(text: str, *, limit: int = 12) -> list[str]:
 
 
 def load_history_memory_signal(repo_root: Path, *, task_desc: str, task_type: str) -> dict[str, Any]:
-    history_path = (repo_root / ".nexus" / "reports" / "research" / "auto-flow-history.json").resolve()
-    if not history_path.exists():
-        return {"memory_hits": 0, "memory_hints": []}
-    try:
-        payload = json.loads(history_path.read_text(encoding="utf-8"))
-    except Exception:
-        return {"memory_hits": 0, "memory_hints": []}
-    if not isinstance(payload, dict):
-        return {"memory_hits": 0, "memory_hints": []}
-
-    task_keywords = set(extract_keywords(task_desc))
-    memory_hits = 0
-    memory_hints: list[str] = []
-    for entries in payload.values():
-        if not isinstance(entries, list):
-            continue
-        for item in entries:
-            if not isinstance(item, dict):
-                continue
-            if str(item.get("status", "")) != "SUCCESS":
-                continue
-            hist_task = str(item.get("task_desc", ""))
-            hist_type = str(item.get("task_type", ""))
-            hist_keywords = set(extract_keywords(hist_task))
-            keyword_overlap = len(task_keywords & hist_keywords)
-            type_match = bool(task_type and hist_type and task_type == hist_type)
-            if keyword_overlap >= 2 and (type_match or keyword_overlap >= 3):
-                memory_hits += 1
-                if str(item.get("flow", "")):
-                    memory_hints.append(f"flow:{item['flow']}")
-                if str(item.get("reason", "")):
-                    memory_hints.append(f"reason:{item['reason']}")
-    uniq_hints = list(dict.fromkeys(memory_hints))[:4]
-    return {"memory_hits": memory_hits, "memory_hints": uniq_hints}
+    return HistorySignalStore(repo_root, keyword_extractor=extract_keywords).load_memory_signal(
+        task_desc=task_desc,
+        task_type=task_type,
+    )
 
 
 def collect_route_signals(

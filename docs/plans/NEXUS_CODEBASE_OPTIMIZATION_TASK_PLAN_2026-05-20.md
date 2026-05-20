@@ -449,3 +449,40 @@ Failure lesson:
 Next:
 
 - start `CBO-4 History Signal Store and Rollup Contract`.
+
+## 13. CBO-4 Result
+
+Status: `DONE`
+
+Changed surface:
+
+- `nexus/research/flow/history_signal_store.py`;
+- `nexus/research/flow/route_decider.py`;
+- `tests/research/test_history_signal_store.py`.
+
+Result:
+
+- route history matching now delegates to `HistorySignalStore`;
+- the route-decider compatibility function remains in place for callers and
+  tests;
+- corrupt history, non-dict history, missing history, and oversized history
+  fail closed to zero memory hits;
+- history processing is bounded by `max_entries` before route signals consume
+  it.
+
+Verification:
+
+- `uv run python -m py_compile nexus/research/flow/history_signal_store.py nexus/research/flow/route_decider.py tests/research/test_history_signal_store.py` -> `PASS`;
+- `uv run pytest tests/research/test_history_signal_store.py tests/app/test_research_flow_service.py -q` -> `103 passed`;
+- `git diff --check -- nexus/research/flow/history_signal_store.py nexus/research/flow/route_decider.py tests/research/test_history_signal_store.py` -> `PASS`.
+
+Failure lesson:
+
+- No new CBO-4 failure occurred. The bounded reader intentionally returns no
+  history signal for oversized history files until a later rollup writer exists;
+  this preserves route correctness by avoiding unbounded history ingestion
+  rather than manufacturing partial memory hints from an unsafe file.
+
+Next:
+
+- start `CBO-5 Guarded Fetch Adapter`.
