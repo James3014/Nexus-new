@@ -6,7 +6,7 @@
   "public_benchmark_claim_blocked_reason": "nexus_only_receipt_smoke_not_same_model_ab",
   "suites": [
     {
-      "file": "/Users/jameschen/Workspace/nexus/.nexus/reports/bench_route_8oracle_smoke/with_nexus_1779269949.jsonl",
+      "file": "/Users/jameschen/Workspace/nexus/.nexus/reports/bench_route_8oracle_smoke/with_nexus_1779275464.jsonl",
       "tasks": 8,
       "expected_capabilities": [
         "autoreason",
@@ -50,7 +50,7 @@
       "returncode": 0
     },
     {
-      "file": "/Users/jameschen/Workspace/nexus/.nexus/reports/bench_route_codeintel_hyper_smoke/with_nexus_1779270071.jsonl",
+      "file": "/Users/jameschen/Workspace/nexus/.nexus/reports/bench_route_codeintel_hyper_smoke/with_nexus_1779275584.jsonl",
       "tasks": 2,
       "expected_capabilities": [
         "codeintel",
@@ -86,7 +86,7 @@
       "returncode": 0
     },
     {
-      "file": "/Users/jameschen/Workspace/nexus/.nexus/reports/bench_route_core_gates_smoke/with_nexus_1779270097.jsonl",
+      "file": "/Users/jameschen/Workspace/nexus/.nexus/reports/bench_route_core_gates_smoke/with_nexus_1779275612.jsonl",
       "tasks": 2,
       "expected_capabilities": [
         "artifact_gate",
@@ -120,7 +120,7 @@
       "returncode": 0
     },
     {
-      "file": "/Users/jameschen/Workspace/nexus/.nexus/reports/bench_route_belief_smoke/with_nexus_1779270124.jsonl",
+      "file": "/Users/jameschen/Workspace/nexus/.nexus/reports/bench_route_belief_smoke/with_nexus_1779275638.jsonl",
       "tasks": 1,
       "expected_capabilities": [
         "belief"
@@ -150,7 +150,7 @@
       "returncode": 0
     },
     {
-      "file": "/Users/jameschen/Workspace/nexus/.nexus/reports/bench_route_runtime_receipt_smoke/with_nexus_1779270138.jsonl",
+      "file": "/Users/jameschen/Workspace/nexus/.nexus/reports/bench_route_runtime_receipt_smoke/with_nexus_1779275652.jsonl",
       "tasks": 2,
       "expected_capabilities": [
         "semantic_searcher",
@@ -182,7 +182,7 @@
       "returncode": 0
     },
     {
-      "file": "/Users/jameschen/Workspace/nexus/.nexus/reports/bench_route_harness_engineering_smoke/with_nexus_1779270168.jsonl",
+      "file": "/Users/jameschen/Workspace/nexus/.nexus/reports/bench_route_harness_engineering_smoke/with_nexus_1779275678.jsonl",
       "tasks": 2,
       "expected_capabilities": [
         "bdd_acceptance_skill",

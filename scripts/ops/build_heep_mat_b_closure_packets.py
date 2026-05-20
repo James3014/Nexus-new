@@ -18,6 +18,7 @@ DEFAULT_MODE_GATE = Path("docs/reports/NEXUS_HEEP_MODE_MAP_UPDATE_GATE_V2_2026-0
 DEFAULT_RUNTIME_REVIEW = Path("docs/reports/NEXUS_HEEP_RUNTIME_APPLY_REVIEW_PACKET_V2_2026-05-20.json")
 DEFAULT_PUBLIC_GATE = Path("docs/reports/NEXUS_HEEP_PUBLIC_BENCHMARK_READINESS_GATE_2026-05-20.json")
 DEFAULT_TASKCARD_STATUS = Path("docs/reports/NEXUS_HEEP_TASKCARD_STATUS_R1_R6_2026-05-20.json")
+DEFAULT_BLOCKER_RCA = Path("docs/reports/NEXUS_HEEP_PROVIDER_RECEIPT_BLOCKER_RCA_2026-05-20.json")
 
 
 def _safe_read(path: Path) -> dict[str, Any]:
@@ -332,6 +333,49 @@ def build_taskcard_status(
     }
 
 
+def build_provider_receipt_blocker_rca(*, replay_status: Mapping[str, Any]) -> dict[str, Any]:
+    first = replay_status.get("first_blocker", {})
+    first = first if isinstance(first, Mapping) else {}
+    provider_unclean = (
+        first.get("token_data_contract_status") == "DATA_CONTRACT_VIOLATION"
+        and str(first.get("token_data_contract_reason") or "") == "model_call_without_measured_provider_tokens"
+    )
+    model_delivery_failed = str(first.get("status") or "") == "FAILED" and str(first.get("semantic_status") or "") != "VERIFIED"
+    missing_receipts = [str(item) for item in (first.get("expected_capability_missing") or []) if str(item)]
+    receipt_downstream = bool(missing_receipts) and model_delivery_failed
+    action = "WAIT_FOR_PROVIDER_CLEAN_REPLAY_WINDOW" if provider_unclean else "RUN_RECEIPT_RCA"
+    if receipt_downstream:
+        action = "WAIT_FOR_PROVIDER_CLEAN_REPLAY_WINDOW_THEN_RERUN_SKILL_SPECIFIC_MAT_B"
+    return {
+        "schema": "nexus.heep_provider_receipt_blocker_rca.v1",
+        "status": "BLOCKED" if provider_unclean or receipt_downstream else "PASS",
+        "summary": {
+            "provider_unclean": provider_unclean,
+            "model_delivery_failed": model_delivery_failed,
+            "receipt_blocker_downstream_of_model_delivery": receipt_downstream,
+            "missing_expected_capability_count": len(missing_receipts),
+            "runtime_update_allowed": False,
+            "public_benchmark_allowed": False,
+        },
+        "first_blocker": dict(first),
+        "diagnosis": [
+            "provider_token_truth_is_not_fixable_by_local_score_or_estimated_tokens"
+            if provider_unclean
+            else "provider_token_truth_clean_or_not_observed",
+            "skill_specific_receipt_missing_is_downstream_of_failed_model_required_row"
+            if receipt_downstream
+            else "skill_specific_receipt_requires_separate_rca",
+            "matrix_has_executor_env_but_runtime_receipt_requires_successful_model_delivery_window",
+        ],
+        "next_action": action,
+        "claim_boundary": [
+            "Do not convert estimated tokens into provider-clean cost evidence.",
+            "Do not backfill executor skill receipts on a semantically failed model-required row.",
+            "A provider-clean same-window replay is the only admissible path to unblock R1/R2.",
+        ],
+    }
+
+
 def build_all(args: argparse.Namespace) -> dict[str, dict[str, Any]]:
     final_decisions = read_json(Path(args.final_decisions))
     runtime_packet = read_json(Path(args.runtime_packet))
@@ -344,6 +388,7 @@ def build_all(args: argparse.Namespace) -> dict[str, dict[str, Any]]:
     mode_gate = build_mode_gate_v2(final_decisions=final_decisions)
     runtime_review = build_runtime_review_v2(runtime_packet=runtime_packet, final_decisions=final_decisions)
     public_gate = build_public_readiness_gate(rollup=rollup, runtime_review=runtime_review)
+    blocker_rca = build_provider_receipt_blocker_rca(replay_status=replay_status)
     taskcard_status = build_taskcard_status(
         replay_status=replay_status,
         rollup=rollup,
@@ -358,6 +403,7 @@ def build_all(args: argparse.Namespace) -> dict[str, dict[str, Any]]:
         Path(args.runtime_review_output): runtime_review,
         Path(args.public_gate_output): public_gate,
         Path(args.taskcard_status_output): taskcard_status,
+        Path(args.blocker_rca_output): blocker_rca,
     }
     for path, payload in outputs.items():
         write_json(path, payload)
@@ -368,6 +414,7 @@ def build_all(args: argparse.Namespace) -> dict[str, dict[str, Any]]:
         "runtime_review": runtime_review,
         "public_gate": public_gate,
         "taskcard_status": taskcard_status,
+        "blocker_rca": blocker_rca,
     }
 
 
@@ -382,6 +429,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--runtime-review-output", default=str(DEFAULT_RUNTIME_REVIEW))
     parser.add_argument("--public-gate-output", default=str(DEFAULT_PUBLIC_GATE))
     parser.add_argument("--taskcard-status-output", default=str(DEFAULT_TASKCARD_STATUS))
+    parser.add_argument("--blocker-rca-output", default=str(DEFAULT_BLOCKER_RCA))
     args = parser.parse_args(argv)
     artifacts = build_all(args)
     print(
@@ -394,6 +442,7 @@ def main(argv: list[str] | None = None) -> int:
                 "runtime_review_rows": artifacts["runtime_review"]["summary"]["row_count"],
                 "public_gate_status": artifacts["public_gate"]["status"],
                 "taskcard_blocked_count": artifacts["taskcard_status"]["summary"]["blocked_count"],
+                "blocker_rca_status": artifacts["blocker_rca"]["status"],
             },
             ensure_ascii=False,
             sort_keys=True,

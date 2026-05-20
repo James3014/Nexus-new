@@ -132,9 +132,17 @@ Executor receipt smoke: `docs/reports/NEXUS_HEEP_EXECUTOR_RECEIPT_ROUTE_SMOKE_20
 
 Closure packets: `docs/reports/NEXUS_HEEP_MAT_B_EXECUTOR_TRIO_REPLAY_STATUS_2026-05-20.json`, `docs/reports/NEXUS_HEEP_MAT_B_ROLLUP_V2_2026-05-20.json`, `docs/reports/NEXUS_HEEP_MODE_MAP_UPDATE_GATE_V2_2026-05-20.json`, `docs/reports/NEXUS_HEEP_RUNTIME_APPLY_REVIEW_PACKET_V2_2026-05-20.json`, `docs/reports/NEXUS_HEEP_PUBLIC_BENCHMARK_READINESS_GATE_2026-05-20.json`, and `docs/reports/NEXUS_HEEP_TASKCARD_STATUS_R1_R6_2026-05-20.json` close the current N1-N8 / R1-R6 task-card set. A fresh 6-row executor-trio MAT-B replay still stopped at the first `drone` row because the row had `skill_mount_contract_status=RETURN`, `token_data_contract_status=DATA_CONTRACT_VIOLATION`, `gateway_error_category=gateway_error`, missing expected `drone` receipt, and no measured provider token truth. The closure state is therefore explicit: 13/13 blocked capabilities have a usable selected skill set for internal HEEP selection, R3 review refresh is done, but R1/R2/R4/R5/R6 remain fail-closed until provider-clean and skill-specific MAT-B evidence exists.
 
+Provider/receipt RCA: `docs/reports/NEXUS_HEEP_PROVIDER_RECEIPT_BLOCKER_RCA_2026-05-20.json` classifies the current blocker as `WAIT_FOR_PROVIDER_CLEAN_REPLAY_WINDOW_THEN_RERUN_SKILL_SPECIFIC_MAT_B`. The matrix already carries the executor flag for the trio rows, but the first model-required MAT-B row failed before runtime-final receipts could become public-safe. Therefore the missing `drone` receipt is downstream of failed model delivery and missing provider-token truth, not proof that the selected `drone` skill is unusable.
+
+Deterministic route smoke was rerun after the RCA and still passed in `docs/reports/NEXUS_HEEP_EXECUTOR_RECEIPT_ROUTE_SMOKE_2026-05-20.json`; `drone`, `nightshift`, and `swarm` are all present in the route-oracle expected/public-safe capability sets. This narrows the unresolved work to a provider-clean MAT-B replay window, not a route-oracle or skill asset repair.
+
 Failure lesson: clean replay must preserve the distinction between provider-token truth and expected-capability receipt invocation. If they are merged into a generic `HOLD_MISSING_MAT_B_EVIDENCE`, later agents can accidentally rerun the wrong path or misread a provider telemetry gap as a weak skill.
 
 Failure lesson: executor route smoke is necessary but not sufficient for MAT-B promotion. It proves the route oracle can express `drone`, `nightshift`, and `swarm`, but a skill-specific MAT-B row must still prove runtime skill mount confirmation, expected capability receipt invocation, and provider-token cleanliness in the same evidence window.
+
+Failure lesson: do not backfill executor skill receipts on a semantically failed model-required row. Estimated token counts and local fallback traces may support diagnosis, but only provider-measured same-window token data can unblock cost/runtime/public eligibility.
+
+Failure lesson: RCA tests must mirror real replay rows, including semantic status and token data contract fields. A fixture that only says `status=FAILED` can accidentally test an unknown failure as clean, which weakens the provider-clean fail-closed boundary.
 
 ---
 *Created by Antigravity - Nexus Singularity V17*

@@ -36,6 +36,25 @@ def test_executor_trio_status_classifies_failed_replay(tmp_path: Path) -> None:
     assert out["summary"]["public_benchmark_allowed"] is False
 
 
+def test_provider_receipt_rca_keeps_estimated_tokens_blocked() -> None:
+    replay_status = {
+        "first_blocker": {
+            "status": "FAILED",
+            "semantic_status": "UNVERIFIED",
+            "token_data_contract_status": "DATA_CONTRACT_VIOLATION",
+            "token_data_contract_reason": "model_call_without_measured_provider_tokens",
+            "expected_capability_missing": ["drone"],
+        }
+    }
+
+    out = closure.build_provider_receipt_blocker_rca(replay_status=replay_status)
+
+    assert out["status"] == "BLOCKED"
+    assert out["summary"]["provider_unclean"] is True
+    assert out["summary"]["receipt_blocker_downstream_of_model_delivery"] is True
+    assert out["next_action"] == "WAIT_FOR_PROVIDER_CLEAN_REPLAY_WINDOW_THEN_RERUN_SKILL_SPECIFIC_MAT_B"
+
+
 def test_closure_packets_keep_runtime_and_public_blocked(tmp_path: Path) -> None:
     final_decisions = tmp_path / "final.json"
     runtime_packet = tmp_path / "runtime.json"
@@ -51,7 +70,17 @@ def test_closure_packets_keep_runtime_and_public_blocked(tmp_path: Path) -> None
     )
     _write(runtime_packet, {"summary": {"ready_for_runtime_apply_review_count": 1}, "rows": [{"capability": "codeintel"}]})
     _write(replay_root / "live_summary.json", {"status": "RETURN", "summary": {"planned_rows": 6, "completed_rows": 1}})
-    _write(replay_root / "row" / "failed.row.json", {"status": "FAILED", "capability": "drone"})
+    _write(
+        replay_root / "row" / "failed.row.json",
+        {
+            "status": "FAILED",
+            "semantic_status": "UNVERIFIED",
+            "capability": "drone",
+            "token_data_contract_status": "DATA_CONTRACT_VIOLATION",
+            "token_data_contract_reason": "model_call_without_measured_provider_tokens",
+            "expected_capability_receipt_coverage": {"missing": ["drone"]},
+        },
+    )
 
     args = SimpleNamespace(
         final_decisions=str(final_decisions),
@@ -63,6 +92,7 @@ def test_closure_packets_keep_runtime_and_public_blocked(tmp_path: Path) -> None
         runtime_review_output=str(tmp_path / "runtime_review.json"),
         public_gate_output=str(tmp_path / "public_gate.json"),
         taskcard_status_output=str(tmp_path / "taskcards.json"),
+        blocker_rca_output=str(tmp_path / "rca.json"),
     )
     artifacts = closure.build_all(args)
 
@@ -74,3 +104,4 @@ def test_closure_packets_keep_runtime_and_public_blocked(tmp_path: Path) -> None
     assert artifacts["public_gate"]["summary"]["public_benchmark_allowed"] is False
     assert artifacts["taskcard_status"]["summary"]["taskcard_count"] == 6
     assert artifacts["taskcard_status"]["summary"]["blocked_count"] == 5
+    assert artifacts["blocker_rca"]["status"] == "BLOCKED"

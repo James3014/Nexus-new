@@ -1,0 +1,46 @@
+{
+  "schema": "nexus.heep_provider_receipt_blocker_rca.v1",
+  "status": "BLOCKED",
+  "summary": {
+    "provider_unclean": true,
+    "model_delivery_failed": true,
+    "receipt_blocker_downstream_of_model_delivery": true,
+    "missing_expected_capability_count": 1,
+    "runtime_update_allowed": false,
+    "public_benchmark_allowed": false
+  },
+  "first_blocker": {
+    "row_path": ".nexus/reports/heep_flash_nexus_mat_b_executor_trio_replay_2026-05-20/heep_drone_heep-mat-b-drone-001_mode_a_current_primary/evidence_1779271206/with_nexus__heep-mat-b-drone-001__trial_1.row.json",
+    "row_id": "",
+    "capability": "drone",
+    "status": "FAILED",
+    "semantic_status": "UNVERIFIED",
+    "skill_mount_contract_status": "RETURN",
+    "token_data_contract_status": "DATA_CONTRACT_VIOLATION",
+    "token_data_contract_reason": "model_call_without_measured_provider_tokens",
+    "receipt_data_contract_status": "DATA_CONTRACT_VIOLATION",
+    "receipt_data_contract_reason": "missing_expected_capability_receipts",
+    "infra_invalid_reason": "receipt_data_contract_violation",
+    "gateway_error_category": "gateway_error",
+    "provider_token_measured": false,
+    "expected_capability_missing": [
+      "drone"
+    ],
+    "blocker_reasons": [
+      "model_call_without_measured_provider_tokens",
+      "skill_mount_contract_return",
+      "missing_expected_capability_receipts:drone"
+    ]
+  },
+  "diagnosis": [
+    "provider_token_truth_is_not_fixable_by_local_score_or_estimated_tokens",
+    "skill_specific_receipt_missing_is_downstream_of_failed_model_required_row",
+    "matrix_has_executor_env_but_runtime_receipt_requires_successful_model_delivery_window"
+  ],
+  "next_action": "WAIT_FOR_PROVIDER_CLEAN_REPLAY_WINDOW_THEN_RERUN_SKILL_SPECIFIC_MAT_B",
+  "claim_boundary": [
+    "Do not convert estimated tokens into provider-clean cost evidence.",
+    "Do not backfill executor skill receipts on a semantically failed model-required row.",
+    "A provider-clean same-window replay is the only admissible path to unblock R1/R2."
+  ]
+}
