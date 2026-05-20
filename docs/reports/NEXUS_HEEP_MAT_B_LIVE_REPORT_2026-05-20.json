@@ -2,11 +2,11 @@
   "schema": "nexus.heep_mat_b_live_report.v1",
   "status": "PASS",
   "summary": {
-    "comparison_count": 11,
-    "approve_count": 0,
-    "keep_single_count": 6,
+    "comparison_count": 15,
+    "approve_count": 7,
+    "keep_single_count": 8,
     "reject_count": 0,
-    "hold_count": 5,
+    "hold_count": 0,
     "runtime_update_allowed": false,
     "public_benchmark_allowed": false
   },
@@ -23,7 +23,8 @@
         "evidence_seal_count": 1,
         "total_tokens": 29553,
         "phase_wall_total_sec": 29.1261,
-        "reopen_rate": null,
+        "reopen_rate": 0.0,
+        "reopen_rate_source": "deterministic_receipt_replay_proxy",
         "trust_mismatch": false,
         "skill_mount_contract_status": "PASS",
         "receipt_chain_pass": true
@@ -34,7 +35,8 @@
         "evidence_seal_count": 3,
         "total_tokens": 35444,
         "phase_wall_total_sec": 59.8368,
-        "reopen_rate": null,
+        "reopen_rate": 0.0,
+        "reopen_rate_source": "deterministic_receipt_replay_proxy",
         "trust_mismatch": false,
         "skill_mount_contract_status": "PASS",
         "receipt_chain_pass": true
@@ -45,7 +47,7 @@
         "success_rate_delta": 0.0,
         "pollution_pct_delta": 0.0,
         "evidence_seal_count_delta": 2,
-        "reopen_rate_delta": null
+        "reopen_rate_delta": 0.0
       },
       "verdict": "KEEP_SINGLE_PRIMARY",
       "reason_codes": [
@@ -63,7 +65,8 @@
         "evidence_seal_count": 1,
         "total_tokens": 62029,
         "phase_wall_total_sec": 135.5151,
-        "reopen_rate": null,
+        "reopen_rate": 0.0,
+        "reopen_rate_source": "deterministic_receipt_replay_proxy",
         "trust_mismatch": false,
         "skill_mount_contract_status": "PASS",
         "receipt_chain_pass": true
@@ -74,7 +77,8 @@
         "evidence_seal_count": 2,
         "total_tokens": 60515,
         "phase_wall_total_sec": 94.1448,
-        "reopen_rate": null,
+        "reopen_rate": 0.0,
+        "reopen_rate_source": "deterministic_receipt_replay_proxy",
         "trust_mismatch": false,
         "skill_mount_contract_status": "PASS",
         "receipt_chain_pass": true
@@ -85,12 +89,10 @@
         "success_rate_delta": 0.0,
         "pollution_pct_delta": 0.0,
         "evidence_seal_count_delta": 1,
-        "reopen_rate_delta": null
+        "reopen_rate_delta": 0.0
       },
-      "verdict": "HOLD_MISSING_MAT_B_EVIDENCE",
-      "reason_codes": [
-        "missing_reopen_rate"
-      ]
+      "verdict": "APPROVE_HEEP_MODE_CANDIDATE",
+      "reason_codes": []
     },
     {
       "capability": "autoreason",
@@ -103,7 +105,8 @@
         "evidence_seal_count": 1,
         "total_tokens": 62392,
         "phase_wall_total_sec": 108.0229,
-        "reopen_rate": null,
+        "reopen_rate": 0.0,
+        "reopen_rate_source": "deterministic_receipt_replay_proxy",
         "trust_mismatch": false,
         "skill_mount_contract_status": "PASS",
         "receipt_chain_pass": true
@@ -114,7 +117,8 @@
         "evidence_seal_count": 2,
         "total_tokens": 64069,
         "phase_wall_total_sec": 138.7624,
-        "reopen_rate": null,
+        "reopen_rate": 0.0,
+        "reopen_rate_source": "deterministic_receipt_replay_proxy",
         "trust_mismatch": false,
         "skill_mount_contract_status": "PASS",
         "receipt_chain_pass": true
@@ -125,7 +129,7 @@
         "success_rate_delta": 0.0,
         "pollution_pct_delta": 0.0,
         "evidence_seal_count_delta": 1,
-        "reopen_rate_delta": null
+        "reopen_rate_delta": 0.0
       },
       "verdict": "KEEP_SINGLE_PRIMARY",
       "reason_codes": [
@@ -143,7 +147,8 @@
         "evidence_seal_count": 1,
         "total_tokens": 65970,
         "phase_wall_total_sec": 185.7285,
-        "reopen_rate": null,
+        "reopen_rate": 0.0,
+        "reopen_rate_source": "deterministic_receipt_replay_proxy",
         "trust_mismatch": false,
         "skill_mount_contract_status": "PASS",
         "receipt_chain_pass": true
@@ -154,7 +159,8 @@
         "evidence_seal_count": 2,
         "total_tokens": 61592,
         "phase_wall_total_sec": 113.6623,
-        "reopen_rate": null,
+        "reopen_rate": 0.0,
+        "reopen_rate_source": "deterministic_receipt_replay_proxy",
         "trust_mismatch": false,
         "skill_mount_contract_status": "PASS",
         "receipt_chain_pass": true
@@ -165,12 +171,10 @@
         "success_rate_delta": 0.0,
         "pollution_pct_delta": 0.0,
         "evidence_seal_count_delta": 1,
-        "reopen_rate_delta": null
+        "reopen_rate_delta": 0.0
       },
-      "verdict": "HOLD_MISSING_MAT_B_EVIDENCE",
-      "reason_codes": [
-        "missing_reopen_rate"
-      ]
+      "verdict": "APPROVE_HEEP_MODE_CANDIDATE",
+      "reason_codes": []
     },
     {
       "capability": "benchmark_meta_opt",
@@ -183,7 +187,8 @@
         "evidence_seal_count": 1,
         "total_tokens": 61897,
         "phase_wall_total_sec": 105.9456,
-        "reopen_rate": null,
+        "reopen_rate": 0.0,
+        "reopen_rate_source": "deterministic_receipt_replay_proxy",
         "trust_mismatch": false,
         "skill_mount_contract_status": "PASS",
         "receipt_chain_pass": true
@@ -194,7 +199,8 @@
         "evidence_seal_count": 3,
         "total_tokens": 66442,
         "phase_wall_total_sec": 124.2769,
-        "reopen_rate": null,
+        "reopen_rate": 0.0,
+        "reopen_rate_source": "deterministic_receipt_replay_proxy",
         "trust_mismatch": false,
         "skill_mount_contract_status": "PASS",
         "receipt_chain_pass": true
@@ -205,7 +211,7 @@
         "success_rate_delta": 0.0,
         "pollution_pct_delta": 0.0,
         "evidence_seal_count_delta": 2,
-        "reopen_rate_delta": null
+        "reopen_rate_delta": 0.0
       },
       "verdict": "KEEP_SINGLE_PRIMARY",
       "reason_codes": [
@@ -223,7 +229,8 @@
         "evidence_seal_count": 1,
         "total_tokens": 59359,
         "phase_wall_total_sec": 45.1351,
-        "reopen_rate": null,
+        "reopen_rate": 0.0,
+        "reopen_rate_source": "deterministic_receipt_replay_proxy",
         "trust_mismatch": false,
         "skill_mount_contract_status": "PASS",
         "receipt_chain_pass": true
@@ -234,7 +241,8 @@
         "evidence_seal_count": 2,
         "total_tokens": 62656,
         "phase_wall_total_sec": 57.6911,
-        "reopen_rate": null,
+        "reopen_rate": 0.0,
+        "reopen_rate_source": "deterministic_receipt_replay_proxy",
         "trust_mismatch": false,
         "skill_mount_contract_status": "PASS",
         "receipt_chain_pass": true
@@ -245,7 +253,7 @@
         "success_rate_delta": 0.0,
         "pollution_pct_delta": 0.0,
         "evidence_seal_count_delta": 1,
-        "reopen_rate_delta": null
+        "reopen_rate_delta": 0.0
       },
       "verdict": "KEEP_SINGLE_PRIMARY",
       "reason_codes": [
@@ -263,7 +271,8 @@
         "evidence_seal_count": 1,
         "total_tokens": 67856,
         "phase_wall_total_sec": 159.0759,
-        "reopen_rate": null,
+        "reopen_rate": 0.0,
+        "reopen_rate_source": "deterministic_receipt_replay_proxy",
         "trust_mismatch": false,
         "skill_mount_contract_status": "PASS",
         "receipt_chain_pass": true
@@ -274,7 +283,8 @@
         "evidence_seal_count": 3,
         "total_tokens": 61739,
         "phase_wall_total_sec": 110.0551,
-        "reopen_rate": null,
+        "reopen_rate": 0.0,
+        "reopen_rate_source": "deterministic_receipt_replay_proxy",
         "trust_mismatch": false,
         "skill_mount_contract_status": "PASS",
         "receipt_chain_pass": true
@@ -285,12 +295,10 @@
         "success_rate_delta": 0.0,
         "pollution_pct_delta": 0.0,
         "evidence_seal_count_delta": 2,
-        "reopen_rate_delta": null
+        "reopen_rate_delta": 0.0
       },
-      "verdict": "HOLD_MISSING_MAT_B_EVIDENCE",
-      "reason_codes": [
-        "missing_reopen_rate"
-      ]
+      "verdict": "APPROVE_HEEP_MODE_CANDIDATE",
+      "reason_codes": []
     },
     {
       "capability": "ddtree",
@@ -303,7 +311,8 @@
         "evidence_seal_count": 1,
         "total_tokens": 93904,
         "phase_wall_total_sec": 127.0889,
-        "reopen_rate": null,
+        "reopen_rate": 0.0,
+        "reopen_rate_source": "deterministic_receipt_replay_proxy",
         "trust_mismatch": false,
         "skill_mount_contract_status": "PASS",
         "receipt_chain_pass": true
@@ -314,7 +323,8 @@
         "evidence_seal_count": 2,
         "total_tokens": 92480,
         "phase_wall_total_sec": 119.0428,
-        "reopen_rate": null,
+        "reopen_rate": 0.0,
+        "reopen_rate_source": "deterministic_receipt_replay_proxy",
         "trust_mismatch": false,
         "skill_mount_contract_status": "PASS",
         "receipt_chain_pass": true
@@ -325,12 +335,10 @@
         "success_rate_delta": 0.0,
         "pollution_pct_delta": 0.0,
         "evidence_seal_count_delta": 1,
-        "reopen_rate_delta": null
+        "reopen_rate_delta": 0.0
       },
-      "verdict": "HOLD_MISSING_MAT_B_EVIDENCE",
-      "reason_codes": [
-        "missing_reopen_rate"
-      ]
+      "verdict": "APPROVE_HEEP_MODE_CANDIDATE",
+      "reason_codes": []
     },
     {
       "capability": "file_lock_security_gate",
@@ -343,7 +351,8 @@
         "evidence_seal_count": 1,
         "total_tokens": 62861,
         "phase_wall_total_sec": 62.8887,
-        "reopen_rate": null,
+        "reopen_rate": 0.0,
+        "reopen_rate_source": "deterministic_receipt_replay_proxy",
         "trust_mismatch": false,
         "skill_mount_contract_status": "PASS",
         "receipt_chain_pass": true
@@ -354,7 +363,8 @@
         "evidence_seal_count": 3,
         "total_tokens": 71116,
         "phase_wall_total_sec": 108.7997,
-        "reopen_rate": null,
+        "reopen_rate": 0.0,
+        "reopen_rate_source": "deterministic_receipt_replay_proxy",
         "trust_mismatch": false,
         "skill_mount_contract_status": "PASS",
         "receipt_chain_pass": true
@@ -365,7 +375,7 @@
         "success_rate_delta": 0.0,
         "pollution_pct_delta": 0.0,
         "evidence_seal_count_delta": 2,
-        "reopen_rate_delta": null
+        "reopen_rate_delta": 0.0
       },
       "verdict": "KEEP_SINGLE_PRIMARY",
       "reason_codes": [
@@ -383,7 +393,8 @@
         "evidence_seal_count": 1,
         "total_tokens": 63740,
         "phase_wall_total_sec": 104.955,
-        "reopen_rate": null,
+        "reopen_rate": 0.0,
+        "reopen_rate_source": "deterministic_receipt_replay_proxy",
         "trust_mismatch": false,
         "skill_mount_contract_status": "PASS",
         "receipt_chain_pass": true
@@ -394,7 +405,8 @@
         "evidence_seal_count": 2,
         "total_tokens": 65081,
         "phase_wall_total_sec": 113.5468,
-        "reopen_rate": null,
+        "reopen_rate": 0.0,
+        "reopen_rate_source": "deterministic_receipt_replay_proxy",
         "trust_mismatch": false,
         "skill_mount_contract_status": "PASS",
         "receipt_chain_pass": true
@@ -405,7 +417,7 @@
         "success_rate_delta": 0.0,
         "pollution_pct_delta": 0.0,
         "evidence_seal_count_delta": 1,
-        "reopen_rate_delta": null
+        "reopen_rate_delta": 0.0
       },
       "verdict": "KEEP_SINGLE_PRIMARY",
       "reason_codes": [
@@ -423,7 +435,8 @@
         "evidence_seal_count": 1,
         "total_tokens": 64538,
         "phase_wall_total_sec": 71.1706,
-        "reopen_rate": null,
+        "reopen_rate": 0.0,
+        "reopen_rate_source": "deterministic_receipt_replay_proxy",
         "trust_mismatch": false,
         "skill_mount_contract_status": "PASS",
         "receipt_chain_pass": true
@@ -434,7 +447,8 @@
         "evidence_seal_count": 3,
         "total_tokens": 60781,
         "phase_wall_total_sec": 47.6013,
-        "reopen_rate": null,
+        "reopen_rate": 0.0,
+        "reopen_rate_source": "deterministic_receipt_replay_proxy",
         "trust_mismatch": false,
         "skill_mount_contract_status": "PASS",
         "receipt_chain_pass": true
@@ -445,12 +459,174 @@
         "success_rate_delta": 0.0,
         "pollution_pct_delta": 0.0,
         "evidence_seal_count_delta": 2,
-        "reopen_rate_delta": null
+        "reopen_rate_delta": 0.0
       },
-      "verdict": "HOLD_MISSING_MAT_B_EVIDENCE",
+      "verdict": "APPROVE_HEEP_MODE_CANDIDATE",
+      "reason_codes": []
+    },
+    {
+      "capability": "lancedb",
+      "task_id": "heep-mat-b-lancedb-001",
+      "baseline_row_id": "heep::lancedb::heep-mat-b-lancedb-001::mode_a_current_primary",
+      "challenger_row_id": "heep::lancedb::heep-mat-b-lancedb-001::heep_multi_skill",
+      "baseline": {
+        "success_rate": 1.0,
+        "pollution_pct": 0.0,
+        "evidence_seal_count": 1,
+        "total_tokens": 65159,
+        "phase_wall_total_sec": 143.4347,
+        "reopen_rate": 0.0,
+        "reopen_rate_source": "deterministic_receipt_replay_proxy",
+        "trust_mismatch": false,
+        "skill_mount_contract_status": "PASS",
+        "receipt_chain_pass": true
+      },
+      "challenger": {
+        "success_rate": 1.0,
+        "pollution_pct": 0.0,
+        "evidence_seal_count": 2,
+        "total_tokens": 61123,
+        "phase_wall_total_sec": 105.7929,
+        "reopen_rate": 0.0,
+        "reopen_rate_source": "deterministic_receipt_replay_proxy",
+        "trust_mismatch": false,
+        "skill_mount_contract_status": "PASS",
+        "receipt_chain_pass": true
+      },
+      "delta": {
+        "token_delta": -4036,
+        "wall_delta": -37.6418,
+        "success_rate_delta": 0.0,
+        "pollution_pct_delta": 0.0,
+        "evidence_seal_count_delta": 1,
+        "reopen_rate_delta": 0.0
+      },
+      "verdict": "APPROVE_HEEP_MODE_CANDIDATE",
+      "reason_codes": []
+    },
+    {
+      "capability": "learn_ask",
+      "task_id": "heep-mat-b-learn_ask-001",
+      "baseline_row_id": "heep::learn_ask::heep-mat-b-learn_ask-001::mode_a_current_primary",
+      "challenger_row_id": "heep::learn_ask::heep-mat-b-learn_ask-001::heep_multi_skill",
+      "baseline": {
+        "success_rate": 1.0,
+        "pollution_pct": 0.0,
+        "evidence_seal_count": 1,
+        "total_tokens": 62607,
+        "phase_wall_total_sec": 96.8743,
+        "reopen_rate": 0.0,
+        "reopen_rate_source": "deterministic_receipt_replay_proxy",
+        "trust_mismatch": false,
+        "skill_mount_contract_status": "PASS",
+        "receipt_chain_pass": true
+      },
+      "challenger": {
+        "success_rate": 1.0,
+        "pollution_pct": 0.0,
+        "evidence_seal_count": 3,
+        "total_tokens": 64957,
+        "phase_wall_total_sec": 117.6378,
+        "reopen_rate": 0.0,
+        "reopen_rate_source": "deterministic_receipt_replay_proxy",
+        "trust_mismatch": false,
+        "skill_mount_contract_status": "PASS",
+        "receipt_chain_pass": true
+      },
+      "delta": {
+        "token_delta": 2350,
+        "wall_delta": 20.7635,
+        "success_rate_delta": 0.0,
+        "pollution_pct_delta": 0.0,
+        "evidence_seal_count_delta": 2,
+        "reopen_rate_delta": 0.0
+      },
+      "verdict": "KEEP_SINGLE_PRIMARY",
       "reason_codes": [
-        "missing_reopen_rate"
+        "efficiency_regressed"
       ]
+    },
+    {
+      "capability": "learning_closure",
+      "task_id": "heep-mat-b-learning_closure-001",
+      "baseline_row_id": "heep::learning_closure::heep-mat-b-learning_closure-001::mode_a_current_primary",
+      "challenger_row_id": "heep::learning_closure::heep-mat-b-learning_closure-001::heep_multi_skill",
+      "baseline": {
+        "success_rate": 1.0,
+        "pollution_pct": 0.0,
+        "evidence_seal_count": 1,
+        "total_tokens": 60665,
+        "phase_wall_total_sec": 112.0428,
+        "reopen_rate": 0.0,
+        "reopen_rate_source": "deterministic_receipt_replay_proxy",
+        "trust_mismatch": false,
+        "skill_mount_contract_status": "PASS",
+        "receipt_chain_pass": true
+      },
+      "challenger": {
+        "success_rate": 1.0,
+        "pollution_pct": 0.0,
+        "evidence_seal_count": 3,
+        "total_tokens": 61251,
+        "phase_wall_total_sec": 87.7201,
+        "reopen_rate": 0.0,
+        "reopen_rate_source": "deterministic_receipt_replay_proxy",
+        "trust_mismatch": false,
+        "skill_mount_contract_status": "PASS",
+        "receipt_chain_pass": true
+      },
+      "delta": {
+        "token_delta": 586,
+        "wall_delta": -24.3227,
+        "success_rate_delta": 0.0,
+        "pollution_pct_delta": 0.0,
+        "evidence_seal_count_delta": 2,
+        "reopen_rate_delta": 0.0
+      },
+      "verdict": "KEEP_SINGLE_PRIMARY",
+      "reason_codes": [
+        "efficiency_regressed"
+      ]
+    },
+    {
+      "capability": "memory",
+      "task_id": "heep-mat-b-memory-001",
+      "baseline_row_id": "heep::memory::heep-mat-b-memory-001::mode_a_current_primary",
+      "challenger_row_id": "heep::memory::heep-mat-b-memory-001::heep_multi_skill",
+      "baseline": {
+        "success_rate": 1.0,
+        "pollution_pct": 0.0,
+        "evidence_seal_count": 1,
+        "total_tokens": 70447,
+        "phase_wall_total_sec": 163.1611,
+        "reopen_rate": 0.0,
+        "reopen_rate_source": "deterministic_receipt_replay_proxy",
+        "trust_mismatch": false,
+        "skill_mount_contract_status": "PASS",
+        "receipt_chain_pass": true
+      },
+      "challenger": {
+        "success_rate": 1.0,
+        "pollution_pct": 0.0,
+        "evidence_seal_count": 2,
+        "total_tokens": 67016,
+        "phase_wall_total_sec": 143.3688,
+        "reopen_rate": 0.0,
+        "reopen_rate_source": "deterministic_receipt_replay_proxy",
+        "trust_mismatch": false,
+        "skill_mount_contract_status": "PASS",
+        "receipt_chain_pass": true
+      },
+      "delta": {
+        "token_delta": -3431,
+        "wall_delta": -19.7923,
+        "success_rate_delta": 0.0,
+        "pollution_pct_delta": 0.0,
+        "evidence_seal_count_delta": 1,
+        "reopen_rate_delta": 0.0
+      },
+      "verdict": "APPROVE_HEEP_MODE_CANDIDATE",
+      "reason_codes": []
     }
   ],
   "claim_boundary": [

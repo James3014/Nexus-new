@@ -63,6 +63,8 @@ HEEP 的最終選用標準不是 local role coverage，也不是單純「複數 
 | 4 | Efficiency | `token_delta`, `wall_delta` | 只有 Reliability、Quality、Governance 全 PASS 後才可判讀；不得用成本改善覆蓋前三項失敗。 |
 | 5 | Regression | `reopen_rate` | challenger 必須 <= baseline，且 replay/regression simulation 不得重新打開已關閉問題。 |
 
+`reopen_rate` 的優先來源是 runner 原生欄位。若 runner 尚未輸出原生 `reopen_rate`，HEEP report builder 只能在 row 同時具備 delivery、runtime classification、data contract、cost/evidence/delivery rubric、skill mount contract 與 receipt-chain 信號時，使用 deterministic receipt replay proxy 產生 `0.0` 或 `1.0`。缺少這些 replay inputs 時必須維持 `HOLD_MISSING_MAT_B_EVIDENCE`，不得把空值視為通過。
+
 ### 6.3 Decision State
 
 - `KEEP_SINGLE_PRIMARY`：Mode A 仍是最佳或 challenger 未通過 MAT-B。

@@ -65,15 +65,54 @@ def _evidence_seal_count(row: Mapping[str, Any]) -> int:
     return int(bench.get("skill_mount_count") or 0) if _receipt_chain_pass(row) else 0
 
 
+def _reopen_rate(row: Mapping[str, Any]) -> tuple[float | int | None, str]:
+    bench = _bench(row)
+    explicit = _metric_number(bench, "reopen_rate")
+    if explicit is not None:
+        return explicit, "runner_reopen_rate"
+    has_replay_inputs = all(
+        key in bench
+        for key in (
+            "semantic_completed",
+            "runtime_classification",
+            "data_contract_violation",
+            "cost_rubric_status",
+            "delivery_rubric_status",
+            "evidence_rubric_status",
+            "skill_mount_contract_status",
+        )
+    )
+    if not has_replay_inputs:
+        return None, "missing_reopen_replay_evidence"
+    reopened = any(
+        (
+            row.get("status") != "PASS",
+            bench.get("status") != "SUCCESS",
+            bench.get("semantic_completed") is not True,
+            bench.get("runtime_classification") != "verified_pass",
+            bool(bench.get("data_contract_violation")),
+            bool(bench.get("report_trust_mismatch")),
+            bench.get("cost_rubric_status") != "PASS",
+            bench.get("delivery_rubric_status") != "PASS",
+            bench.get("evidence_rubric_status") != "PASS",
+            bench.get("skill_mount_contract_status") != "PASS",
+            not _receipt_chain_pass(row),
+        )
+    )
+    return (1.0 if reopened else 0.0), "deterministic_receipt_replay_proxy"
+
+
 def _row_metrics(row: Mapping[str, Any]) -> dict[str, Any]:
     bench = _bench(row)
+    reopen_rate, reopen_rate_source = _reopen_rate(row)
     return {
         "success_rate": _success_rate(row),
         "pollution_pct": _pollution_pct(row),
         "evidence_seal_count": _evidence_seal_count(row),
         "total_tokens": _metric_number(bench, "total_tokens"),
         "phase_wall_total_sec": _metric_number(bench, "phase_wall_total_sec"),
-        "reopen_rate": _metric_number(bench, "reopen_rate"),
+        "reopen_rate": reopen_rate,
+        "reopen_rate_source": reopen_rate_source,
         "trust_mismatch": bool(bench.get("report_trust_mismatch")),
         "skill_mount_contract_status": bench.get("skill_mount_contract_status", ""),
         "receipt_chain_pass": _receipt_chain_pass(row),

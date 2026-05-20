@@ -2749,3 +2749,10 @@ version_scope:
 - Failure: the matrix builder wrote HEEP mode metadata into the task manifest, where the capability benchmark preflight rejects unknown task fields.
 - Lesson: HEEP/EMAS comparison metadata belongs on matrix rows and reports, not on frozen benchmark task manifests.
 - Guardrail: keep generated task manifests limited to capability task schema fields; store mode, arm, and MAT-B metadata in execution rows.
+
+## 2026-05-20 - HEEP regression KPI needs an implemented replay seam
+
+- Trigger: MAT-B live rows passed delivery/receipt gates, but the report held every efficiency-improved challenger because `reopen_rate` was plan-only and absent from runner output.
+- Failure: the plan required Regression evidence, while the report builder only read a missing raw field and had no deterministic replay fallback.
+- Lesson: hard KPI contracts must have a concrete data seam before live results can be used for candidate decisions.
+- Guardrail: prefer runner-native `reopen_rate`; otherwise use deterministic receipt replay only when delivery, rubric, data-contract, skill-mount, and receipt-chain inputs are all present, and keep missing inputs as `HOLD_MISSING_MAT_B_EVIDENCE`.
