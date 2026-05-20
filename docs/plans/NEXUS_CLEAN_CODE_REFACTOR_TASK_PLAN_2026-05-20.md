@@ -603,3 +603,29 @@ Verification:
 
 - `uv run python -m py_compile nexus/engine/capability_planner.py nexus/engine/planner/ab_evaluator.py nexus/engine/planner/policy_applier.py nexus/engine/planner/__init__.py`
 - `uv run pytest tests/engine/test_capability_planner.py tests/engine/test_rlm_outcome_integration.py -q` -> `93 passed`
+
+## 19. CC-7 Learning Policy Store Interface Result
+
+Status: `DONE`
+
+Files:
+
+- `nexus/engine/learning_policy_store.py`
+- `nexus/engine/learning_policy_loader.py`
+- `tests/engine/test_learning_policy_store.py`
+- `docs/plans/NEXUS_CLEAN_CODE_REFACTOR_TASK_PLAN_2026-05-20.md`
+
+Result:
+
+- policy payload reads moved behind `LearningPolicyStore`;
+- default JSON behavior remains implemented by `JsonLearningPolicyStore`;
+- `learning_policy_loader.py` still owns schema validation, merge order, and
+  route/S2T policy boundaries;
+- promoted learning, dynamic learning, route-cost, and S2T draft policy reads
+  can now be replaced in tests or future adapters without editing planner
+  logic.
+
+Verification:
+
+- `uv run python -m py_compile nexus/engine/learning_policy_loader.py nexus/engine/learning_policy_store.py tests/engine/test_learning_policy_store.py`
+- `uv run pytest tests/engine/test_learning_policy_store.py tests/engine/test_capability_planner.py tests/engine/test_rlm_outcome_integration.py -q` -> `94 passed`

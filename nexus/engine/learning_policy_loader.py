@@ -6,7 +6,7 @@ import re
 from pathlib import Path
 from typing import Any
 
-from nexus.contracts.learning_experience import load_promoted_learning_policy
+from nexus.engine.learning_policy_store import DEFAULT_LEARNING_POLICY_STORE, LearningPolicyStore
 
 DEFAULT_PROMOTED_POLICY_PATH = Path(".nexus") / "policy" / "promoted_learning_policy.json"
 DEFAULT_DYNAMIC_LEARNING_POLICY_PATH = Path(".nexus") / "memory" / "dynamic_learning_policy.json"
@@ -60,8 +60,8 @@ DETERMINISTIC_ROUTE_ORACLE_RECEIPT_LITE_CAPABILITIES = frozenset(
 )
 
 
-def load_learning_policy_budget(path: Path) -> dict[str, Any]:
-    policy = load_promoted_learning_policy(path)
+def load_learning_policy_budget(path: Path, store: LearningPolicyStore | None = None) -> dict[str, Any]:
+    policy = (store or DEFAULT_LEARNING_POLICY_STORE).read_promoted_policy(path)
     if policy.get("schema_version") != "nexus_promoted_learning_policy.v1":
         return {}
     promoted = [str(item) for item in policy.get("promoted_capabilities", []) or [] if str(item).strip()]
@@ -79,11 +79,9 @@ def load_learning_policy_budget(path: Path) -> dict[str, Any]:
     }
 
 
-def load_dynamic_learning_policy_budget(path: Path) -> dict[str, Any]:
-    if not path.exists():
-        return {}
+def load_dynamic_learning_policy_budget(path: Path, store: LearningPolicyStore | None = None) -> dict[str, Any]:
     try:
-        policy = json.loads(path.read_text(encoding="utf-8"))
+        policy = (store or DEFAULT_LEARNING_POLICY_STORE).read_json_policy(path)
     except (OSError, ValueError, json.JSONDecodeError):
         return {}
     if policy.get("schema_version") != "nexus_dynamic_learning_policy.v1":
@@ -106,12 +104,17 @@ def load_dynamic_learning_policy_budget(path: Path) -> dict[str, Any]:
     }
 
 
-def merge_runtime_learning_policy(project_root: Path, budget: dict[str, Any] | None = None) -> dict[str, Any]:
+def merge_runtime_learning_policy(
+    project_root: Path,
+    budget: dict[str, Any] | None = None,
+    store: LearningPolicyStore | None = None,
+) -> dict[str, Any]:
     merged = dict(budget or {})
     if isinstance(merged.get("learning_policy"), dict):
-        return merge_runtime_s2t_policy_draft(project_root, merge_runtime_route_cost_policy(project_root, merged))
-    runtime_budget = load_learning_policy_budget(project_root / DEFAULT_PROMOTED_POLICY_PATH)
-    dynamic_budget = load_dynamic_learning_policy_budget(project_root / DEFAULT_DYNAMIC_LEARNING_POLICY_PATH)
+        route_budget = merge_runtime_route_cost_policy(project_root, merged, store=store)
+        return merge_runtime_s2t_policy_draft(project_root, route_budget, store=store)
+    runtime_budget = load_learning_policy_budget(project_root / DEFAULT_PROMOTED_POLICY_PATH, store=store)
+    dynamic_budget = load_dynamic_learning_policy_budget(project_root / DEFAULT_DYNAMIC_LEARNING_POLICY_PATH, store=store)
     if runtime_budget and dynamic_budget:
         runtime_policy = runtime_budget["learning_policy"]
         dynamic_policy = dynamic_budget["learning_policy"]
@@ -131,16 +134,16 @@ def merge_runtime_learning_policy(project_root: Path, budget: dict[str, Any] | N
     elif dynamic_budget:
         runtime_budget = dynamic_budget
     if not runtime_budget:
-        return merge_runtime_s2t_policy_draft(project_root, merge_runtime_route_cost_policy(project_root, merged))
+        route_budget = merge_runtime_route_cost_policy(project_root, merged, store=store)
+        return merge_runtime_s2t_policy_draft(project_root, route_budget, store=store)
     merged.update(runtime_budget)
-    return merge_runtime_s2t_policy_draft(project_root, merge_runtime_route_cost_policy(project_root, merged))
+    route_budget = merge_runtime_route_cost_policy(project_root, merged, store=store)
+    return merge_runtime_s2t_policy_draft(project_root, route_budget, store=store)
 
 
-def load_route_cost_policy_budget(path: Path) -> dict[str, Any]:
-    if not path.exists():
-        return {}
+def load_route_cost_policy_budget(path: Path, store: LearningPolicyStore | None = None) -> dict[str, Any]:
     try:
-        policy = load_promoted_learning_policy(path)
+        policy = (store or DEFAULT_LEARNING_POLICY_STORE).read_promoted_policy(path)
     except (OSError, ValueError):
         return {}
     if policy.get("schema_version") != "nexus_promoted_route_cost_policy.v1":
@@ -215,7 +218,11 @@ def audit_route_cost_policy(project_root: Path, budget: dict[str, Any] | None = 
     }
 
 
-def merge_runtime_route_cost_policy(project_root: Path, budget: dict[str, Any] | None = None) -> dict[str, Any]:
+def merge_runtime_route_cost_policy(
+    project_root: Path,
+    budget: dict[str, Any] | None = None,
+    store: LearningPolicyStore | None = None,
+) -> dict[str, Any]:
     merged = dict(budget or {})
     if isinstance(merged.get("route_cost_policy"), dict):
         return merged
@@ -225,17 +232,15 @@ def merge_runtime_route_cost_policy(project_root: Path, budget: dict[str, Any] |
         return merged
     if os.environ.get("NEXUS_DISABLE_PROMOTED_ROUTE_COST_POLICY", "").strip().lower() in {"1", "true", "yes"}:
         return merged
-    runtime_budget = load_route_cost_policy_budget(project_root / DEFAULT_ROUTE_COST_POLICY_PATH)
+    runtime_budget = load_route_cost_policy_budget(project_root / DEFAULT_ROUTE_COST_POLICY_PATH, store=store)
     if runtime_budget:
         merged.update(runtime_budget)
     return merged
 
 
-def load_s2t_policy_draft_budget(path: Path) -> dict[str, Any]:
-    if not path.exists():
-        return {}
+def load_s2t_policy_draft_budget(path: Path, store: LearningPolicyStore | None = None) -> dict[str, Any]:
     try:
-        policy = json.loads(path.read_text(encoding="utf-8"))
+        policy = (store or DEFAULT_LEARNING_POLICY_STORE).read_json_policy(path)
     except (OSError, ValueError):
         return {}
     if policy.get("schema") != "nexus_promoted_s2t_policy_draft_v1":
@@ -261,13 +266,17 @@ def load_s2t_policy_draft_budget(path: Path) -> dict[str, Any]:
     }
 
 
-def merge_runtime_s2t_policy_draft(project_root: Path, budget: dict[str, Any] | None = None) -> dict[str, Any]:
+def merge_runtime_s2t_policy_draft(
+    project_root: Path,
+    budget: dict[str, Any] | None = None,
+    store: LearningPolicyStore | None = None,
+) -> dict[str, Any]:
     merged = dict(budget or {})
     if isinstance(merged.get("s2t_policy_draft"), dict):
         return merged
     if os.environ.get("NEXUS_DISABLE_S2T_POLICY_DRAFT", "").strip().lower() in {"1", "true", "yes"}:
         return merged
-    runtime_budget = load_s2t_policy_draft_budget(project_root / DEFAULT_S2T_POLICY_DRAFT_PATH)
+    runtime_budget = load_s2t_policy_draft_budget(project_root / DEFAULT_S2T_POLICY_DRAFT_PATH, store=store)
     if runtime_budget:
         merged.update(runtime_budget)
     return merged
