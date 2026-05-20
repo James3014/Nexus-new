@@ -78,6 +78,7 @@ def test_build_heep_flash_nexus_compare_artifacts_emit_two_arms_per_ready_candid
     assert matrix["rows"][1]["heep_mat_b_gate"]["status"] == "PENDING_LIVE_COMPARE"
     assert matrix["summary"]["runtime_update_allowed"] is False
     assert matrix["summary"]["public_benchmark_allowed"] is False
+    assert artifacts["tasks"]["tasks"][0]["success_criteria"] == "all_target_tests_pass"
 
     status = artifacts["status"]
     assert status["summary"]["skill_count"] == 4

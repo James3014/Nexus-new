@@ -118,7 +118,9 @@ After the reviewed runtime overlay and post-apply smoke, the remaining MAT-B unr
 
 The blocker queue keeps `runtime_update_allowed=false` and `public_benchmark_allowed=false`. It is a repair queue only: no HEEP map update, runtime default apply, or public benchmark may consume a blocked row until its lane-specific closure gate passes.
 
-Matrix repair: `docs/reports/NEXUS_HEEP_FLASH_NEXUS_EXECUTION_MATRIX_2026-05-20.json` now sets `NEXUS_ENABLE_SWARM_BENCH_EXECUTOR=1` for `drone`, `nightshift`, and `swarm` MAT-B rows. This does not retroactively approve the blocked rows; it only makes the next targeted replay capable of producing the required executor receipts.
+Matrix repair: `docs/reports/NEXUS_HEEP_FLASH_NEXUS_EXECUTION_MATRIX_2026-05-20.json` now sets `NEXUS_ENABLE_SWARM_BENCH_EXECUTOR=1` for `drone`, `nightshift`, and `swarm` MAT-B rows, and the HEEP internal task manifest uses runner-native `all_target_tests_pass` so the benchmark row can be verification-only while MAT-B still judges receipt-chain completeness in the report layer. This does not retroactively approve the blocked rows; it only makes the next targeted replay capable of producing the required executor receipts.
+
+Targeted replay check: a 6-row receipt replay was attempted at `.nexus/reports/heep_flash_nexus_mat_b_receipt_replay_2026-05-20`; the first `drone` row still returned because the model-required delivery path produced `gateway_error` / `model_required_model_delivery_failed` and provider token truth remained invalid. Therefore the three receipt-lane rows are not yet settled; they need a provider-clean replay window after the matrix/manifest repair, not a local pass override.
 
 Failure lesson: clean replay must preserve the distinction between provider-token truth and expected-capability receipt invocation. If they are merged into a generic `HOLD_MISSING_MAT_B_EVIDENCE`, later agents can accidentally rerun the wrong path or misread a provider telemetry gap as a weak skill.
 

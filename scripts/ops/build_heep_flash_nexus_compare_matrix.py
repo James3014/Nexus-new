@@ -49,7 +49,7 @@ def _task_for_candidate(candidate: Mapping[str, Any], *, task_id: str, runner_ca
         ),
         "target_file": "unused",
         "test_file": "unused",
-        "success_criteria": "heep_mat_b_live_receipt_chain_complete",
+        "success_criteria": "all_target_tests_pass",
         "category": capability,
         "difficulty": "medium",
         "repo_kind": "neutral_fixture",
