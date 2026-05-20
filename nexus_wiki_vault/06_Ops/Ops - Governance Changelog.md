@@ -33,6 +33,9 @@ version_scope: '[v17.1, v22, v23]'
 ## 2026-05-20
 - **HEEP MAT-B Blocked Mode Resolution:** Added a fail-closed resolver that separates internal non-cost mode selection from provider-token/public eligibility for blocked MAT-B rows. Provider-token blockers can record stronger non-cost multi-skill evidence without unlocking runtime defaults, while executor receipt blockers remain undecided until expected capability receipts exist.
 
+## 2026-05-20
+- **HEEP MAT-B Final Skill Decisions:** Added a final blocked-capability skill decision packet that assigns a usable skill or skill set to all 13 blocked capabilities. Provider-token blockers select multi-skill for internal non-cost use; executor receipt blockers select single primary fallback until receipt replay proves the multi-skill challenger.
+
 ## One-sentence summary
 記錄 Nexus 治理架構的所有重大變更、審計硬化與契約遷移歷史。 [Source: MUSE-NEXUS-Engine-Specification-v22-Eternal.md]
 

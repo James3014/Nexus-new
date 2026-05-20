@@ -126,6 +126,8 @@ NEXT replay check: a full 26-row blocked replay was attempted at `.nexus/reports
 
 Blocked mode resolution: `docs/reports/NEXUS_HEEP_MAT_B_BLOCKED_MODE_RESOLUTION_2026-05-20.json` separates internal non-cost mode selection from provider-cost/public eligibility. The 10 provider-token blockers have clean receipt/trust chains and stronger challenger evidence, so they are recorded as `MULTI_SKILL_NON_COST_WIN`; they still cannot update runtime or public benchmark until same-window provider-token truth is measured. The 3 receipt blockers (`drone`, `nightshift`, `swarm_multi_agent`) remain `UNDECIDED_RECEIPT_CHAIN_MISSING` because expected executor receipts are still absent.
 
+Final skill decision: `docs/reports/NEXUS_HEEP_MAT_B_FINAL_SKILL_DECISIONS_2026-05-20.json` assigns a usable skill set to all 13 blocked capabilities. The 10 provider-token blockers use the multi-skill set for internal non-cost selection. The 3 executor receipt blockers use the current single primary fallback until executor receipts prove the multi-skill challenger. All selected skill assets resolve to repo-local `SKILL.md` files; runtime defaults and public benchmarks remain blocked.
+
 Failure lesson: clean replay must preserve the distinction between provider-token truth and expected-capability receipt invocation. If they are merged into a generic `HOLD_MISSING_MAT_B_EVIDENCE`, later agents can accidentally rerun the wrong path or misread a provider telemetry gap as a weak skill.
 
 ---
