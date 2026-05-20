@@ -1,0 +1,350 @@
+{
+  "schema": "nexus.heep_runtime_skill_policy_overlay.applied.v1",
+  "status": "PASS",
+  "created_at": "2026-05-20T08:47:58.532891+00:00",
+  "primary_skill_by_capability": {
+    "artifact_gate": "sf-systematic-artifact_gate-differential-review-461fbd0c",
+    "autonomic_router": "sf2-autonomic_router-route-fit-spec",
+    "autoreason": "sf2-belief-route-fit-spec",
+    "belief": "sf2-belief-route-fit-spec",
+    "benchmark_meta_opt": "sf-systematic-benchmark_meta_opt-hugging-face-trackio-d21c6b90",
+    "claim_gate": "nexus-benchmark-continuous-optimization",
+    "codeintel": "sf-systematic-codeintel-first-principles-thinking-f95019ea",
+    "ddtree": "nexus-root-cause-probe",
+    "direct_master_loop": "sf-systematic-direct_master_loop-build-32802a87",
+    "drone": "sf-systematic-drone-python-background-jobs-18326a62",
+    "external_productivity": "sf-systematic-external_productivity-writer-77dc7840",
+    "file_lock_security_gate": "sf2-file_lock_security_gate-route-fit-spec",
+    "forecast_pregate": "create-plan",
+    "governance_and_trust": "sf-systematic-codeintel-first-principles-thinking-f95019ea",
+    "hyper_sprint": "sf2-hyper_sprint-route-fit-spec",
+    "lancedb": "research-source-validation-auditor",
+    "learn_ask": "github8-skilless-deep-research-learn-ask",
+    "learning_closure": "sf-systematic-learning_closure-memory-lint-8bdb0fca",
+    "memory": "sf-systematic-memory-project-skill-audit-cc8b7621",
+    "mempalace": "sf2-mempalace-route-fit-spec",
+    "metabolism_resume": "github-auto-skill-safe-learning",
+    "nightshift": "sf2-nightshift-route-fit-spec",
+    "policy_capability_gate": "sf-systematic-policy_capability_gate-aegisops-ai-0aa841e2",
+    "registry_skills_sync": "github5-skill-seekers-safe-registry-builder",
+    "regression_guard": "sf-systematic-regression_guard-odoo-automated-tests-dad98433",
+    "repair_loop": "sf-systematic-repair_loop-odoo-automated-tests-dad98433",
+    "research": "sf-systematic-research-research-lookup-7e6f92a0",
+    "research_and_source_discipline": "research-citation-chain-verifier",
+    "research_control_plane": "sf-systematic-research_control_plane-research-lookup-7e6f92a0",
+    "sandbox_replay": "sf2-sandbox_replay-route-fit-spec",
+    "swarm_multi_agent": "sf2-swarm_multi_agent-route-fit-spec",
+    "ui_validator": "sf-systematic-ui_validator-e2e-testing-d98eb7c3",
+    "ultra_review": "github11-vulnerability-scanner-ultra-review",
+    "xray": "diagnose"
+  },
+  "candidate_primary_skill_by_capability": {
+    "artifact_gate": "sf-systematic-artifact_gate-differential-review-461fbd0c",
+    "autonomic_router": "sf2-autonomic_router-route-fit-spec",
+    "autoreason": "sf2-belief-route-fit-spec",
+    "belief": "sf2-belief-route-fit-spec",
+    "benchmark_meta_opt": "sf-systematic-benchmark_meta_opt-hugging-face-trackio-d21c6b90",
+    "claim_gate": "nexus-benchmark-continuous-optimization",
+    "codeintel": "sf-systematic-codeintel-first-principles-thinking-f95019ea",
+    "ddtree": "nexus-root-cause-probe",
+    "direct_master_loop": "sf-systematic-direct_master_loop-build-32802a87",
+    "drone": "sf-systematic-drone-python-background-jobs-18326a62",
+    "external_productivity": "sf-systematic-external_productivity-writer-77dc7840",
+    "file_lock_security_gate": "sf2-file_lock_security_gate-route-fit-spec",
+    "forecast_pregate": "create-plan",
+    "governance_and_trust": "sf-systematic-codeintel-first-principles-thinking-f95019ea",
+    "hyper_sprint": "sf2-hyper_sprint-route-fit-spec",
+    "lancedb": "research-source-validation-auditor",
+    "learn_ask": "github8-skilless-deep-research-learn-ask",
+    "learning_closure": "sf-systematic-learning_closure-memory-lint-8bdb0fca",
+    "memory": "sf-systematic-memory-project-skill-audit-cc8b7621",
+    "mempalace": "sf2-mempalace-route-fit-spec",
+    "metabolism_resume": "github-auto-skill-safe-learning",
+    "nightshift": "sf2-nightshift-route-fit-spec",
+    "policy_capability_gate": "sf-systematic-policy_capability_gate-aegisops-ai-0aa841e2",
+    "registry_skills_sync": "github5-skill-seekers-safe-registry-builder",
+    "regression_guard": "sf-systematic-regression_guard-odoo-automated-tests-dad98433",
+    "repair_loop": "sf-systematic-repair_loop-odoo-automated-tests-dad98433",
+    "research": "sf-systematic-research-research-lookup-7e6f92a0",
+    "research_and_source_discipline": "research-citation-chain-verifier",
+    "research_control_plane": "sf-systematic-research_control_plane-research-lookup-7e6f92a0",
+    "sandbox_replay": "sf2-sandbox_replay-route-fit-spec",
+    "swarm_multi_agent": "sf2-swarm_multi_agent-route-fit-spec",
+    "ui_validator": "sf-systematic-ui_validator-e2e-testing-d98eb7c3",
+    "ultra_review": "github11-vulnerability-scanner-ultra-review",
+    "xray": "diagnose"
+  },
+  "skill_assembly_by_capability": {
+    "autonomic_router": [
+      {
+        "role": "skill_1",
+        "skill_id": "sf2-autonomic_router-route-fit-spec"
+      },
+      {
+        "role": "skill_2",
+        "skill_id": "sf-systematic-artifact_gate-differential-review-461fbd0c"
+      }
+    ],
+    "belief": [
+      {
+        "role": "skill_1",
+        "skill_id": "sf2-belief-route-fit-spec"
+      },
+      {
+        "role": "skill_2",
+        "skill_id": "sf-systematic-artifact_gate-differential-review-461fbd0c"
+      }
+    ],
+    "codeintel": [
+      {
+        "role": "skill_1",
+        "skill_id": "sf-systematic-codeintel-first-principles-thinking-f95019ea"
+      },
+      {
+        "role": "skill_2",
+        "skill_id": "sf2-autonomic_router-route-fit-spec"
+      },
+      {
+        "role": "skill_3",
+        "skill_id": "sf-systematic-artifact_gate-differential-review-461fbd0c"
+      }
+    ],
+    "ddtree": [
+      {
+        "role": "skill_1",
+        "skill_id": "nexus-root-cause-probe"
+      },
+      {
+        "role": "skill_2",
+        "skill_id": "sf-systematic-artifact_gate-differential-review-461fbd0c"
+      }
+    ],
+    "governance_and_trust": [
+      {
+        "role": "skill_1",
+        "skill_id": "sf-systematic-codeintel-first-principles-thinking-f95019ea"
+      },
+      {
+        "role": "skill_2",
+        "skill_id": "sf2-autonomic_router-route-fit-spec"
+      },
+      {
+        "role": "skill_3",
+        "skill_id": "sf-systematic-governance_and_trust-aegisops-ai-0aa841e2"
+      }
+    ],
+    "lancedb": [
+      {
+        "role": "skill_1",
+        "skill_id": "research-source-validation-auditor"
+      },
+      {
+        "role": "skill_2",
+        "skill_id": "sf-systematic-artifact_gate-differential-review-461fbd0c"
+      }
+    ],
+    "memory": [
+      {
+        "role": "skill_1",
+        "skill_id": "sf-systematic-memory-project-skill-audit-cc8b7621"
+      },
+      {
+        "role": "skill_2",
+        "skill_id": "sf-systematic-artifact_gate-differential-review-461fbd0c"
+      }
+    ],
+    "mempalace": [
+      {
+        "role": "skill_1",
+        "skill_id": "sf2-mempalace-route-fit-spec"
+      },
+      {
+        "role": "skill_2",
+        "skill_id": "sf-systematic-artifact_gate-differential-review-461fbd0c"
+      }
+    ],
+    "regression_guard": [
+      {
+        "role": "skill_1",
+        "skill_id": "sf-systematic-regression_guard-odoo-automated-tests-dad98433"
+      },
+      {
+        "role": "skill_2",
+        "skill_id": "sf-systematic-artifact_gate-differential-review-461fbd0c"
+      }
+    ]
+  },
+  "heep_mode_by_capability": {
+    "autonomic_router": "Mode B (Guard)",
+    "belief": "Mode B (Guard)",
+    "codeintel": "Mode C (Swarm)",
+    "ddtree": "Mode B (Guard)",
+    "governance_and_trust": "Mode C (Swarm)",
+    "lancedb": "Mode B (Guard)",
+    "memory": "Mode B (Guard)",
+    "mempalace": "Mode B (Guard)",
+    "regression_guard": "Mode B (Guard)"
+  },
+  "applied_heep_assemblies": [
+    {
+      "capability": "autonomic_router",
+      "selected_mode": "Mode B (Guard)",
+      "primary_skill_id": "sf2-autonomic_router-route-fit-spec",
+      "assembly": [
+        {
+          "role": "skill_1",
+          "skill_id": "sf2-autonomic_router-route-fit-spec"
+        },
+        {
+          "role": "skill_2",
+          "skill_id": "sf-systematic-artifact_gate-differential-review-461fbd0c"
+        }
+      ],
+      "runtime_apply_status": "APPLIED_TO_OVERLAY"
+    },
+    {
+      "capability": "belief",
+      "selected_mode": "Mode B (Guard)",
+      "primary_skill_id": "sf2-belief-route-fit-spec",
+      "assembly": [
+        {
+          "role": "skill_1",
+          "skill_id": "sf2-belief-route-fit-spec"
+        },
+        {
+          "role": "skill_2",
+          "skill_id": "sf-systematic-artifact_gate-differential-review-461fbd0c"
+        }
+      ],
+      "runtime_apply_status": "APPLIED_TO_OVERLAY"
+    },
+    {
+      "capability": "codeintel",
+      "selected_mode": "Mode C (Swarm)",
+      "primary_skill_id": "sf-systematic-codeintel-first-principles-thinking-f95019ea",
+      "assembly": [
+        {
+          "role": "skill_1",
+          "skill_id": "sf-systematic-codeintel-first-principles-thinking-f95019ea"
+        },
+        {
+          "role": "skill_2",
+          "skill_id": "sf2-autonomic_router-route-fit-spec"
+        },
+        {
+          "role": "skill_3",
+          "skill_id": "sf-systematic-artifact_gate-differential-review-461fbd0c"
+        }
+      ],
+      "runtime_apply_status": "APPLIED_TO_OVERLAY"
+    },
+    {
+      "capability": "ddtree",
+      "selected_mode": "Mode B (Guard)",
+      "primary_skill_id": "nexus-root-cause-probe",
+      "assembly": [
+        {
+          "role": "skill_1",
+          "skill_id": "nexus-root-cause-probe"
+        },
+        {
+          "role": "skill_2",
+          "skill_id": "sf-systematic-artifact_gate-differential-review-461fbd0c"
+        }
+      ],
+      "runtime_apply_status": "APPLIED_TO_OVERLAY"
+    },
+    {
+      "capability": "governance_and_trust",
+      "selected_mode": "Mode C (Swarm)",
+      "primary_skill_id": "sf-systematic-codeintel-first-principles-thinking-f95019ea",
+      "assembly": [
+        {
+          "role": "skill_1",
+          "skill_id": "sf-systematic-codeintel-first-principles-thinking-f95019ea"
+        },
+        {
+          "role": "skill_2",
+          "skill_id": "sf2-autonomic_router-route-fit-spec"
+        },
+        {
+          "role": "skill_3",
+          "skill_id": "sf-systematic-governance_and_trust-aegisops-ai-0aa841e2"
+        }
+      ],
+      "runtime_apply_status": "APPLIED_TO_OVERLAY"
+    },
+    {
+      "capability": "lancedb",
+      "selected_mode": "Mode B (Guard)",
+      "primary_skill_id": "research-source-validation-auditor",
+      "assembly": [
+        {
+          "role": "skill_1",
+          "skill_id": "research-source-validation-auditor"
+        },
+        {
+          "role": "skill_2",
+          "skill_id": "sf-systematic-artifact_gate-differential-review-461fbd0c"
+        }
+      ],
+      "runtime_apply_status": "APPLIED_TO_OVERLAY"
+    },
+    {
+      "capability": "memory",
+      "selected_mode": "Mode B (Guard)",
+      "primary_skill_id": "sf-systematic-memory-project-skill-audit-cc8b7621",
+      "assembly": [
+        {
+          "role": "skill_1",
+          "skill_id": "sf-systematic-memory-project-skill-audit-cc8b7621"
+        },
+        {
+          "role": "skill_2",
+          "skill_id": "sf-systematic-artifact_gate-differential-review-461fbd0c"
+        }
+      ],
+      "runtime_apply_status": "APPLIED_TO_OVERLAY"
+    },
+    {
+      "capability": "mempalace",
+      "selected_mode": "Mode B (Guard)",
+      "primary_skill_id": "sf2-mempalace-route-fit-spec",
+      "assembly": [
+        {
+          "role": "skill_1",
+          "skill_id": "sf2-mempalace-route-fit-spec"
+        },
+        {
+          "role": "skill_2",
+          "skill_id": "sf-systematic-artifact_gate-differential-review-461fbd0c"
+        }
+      ],
+      "runtime_apply_status": "APPLIED_TO_OVERLAY"
+    },
+    {
+      "capability": "regression_guard",
+      "selected_mode": "Mode B (Guard)",
+      "primary_skill_id": "sf-systematic-regression_guard-odoo-automated-tests-dad98433",
+      "assembly": [
+        {
+          "role": "skill_1",
+          "skill_id": "sf-systematic-regression_guard-odoo-automated-tests-dad98433"
+        },
+        {
+          "role": "skill_2",
+          "skill_id": "sf-systematic-artifact_gate-differential-review-461fbd0c"
+        }
+      ],
+      "runtime_apply_status": "APPLIED_TO_OVERLAY"
+    }
+  ],
+  "runtime_update_allowed": true,
+  "public_benchmark_allowed": false,
+  "claim_boundary": [
+    "This overlay applies reviewed HEEP assemblies for runtime routing input.",
+    "It does not claim public benchmark readiness.",
+    "Runtime routes must still emit final selected/injected/used/evidence/gate/outcome receipts."
+  ],
+  "blockers": []
+}

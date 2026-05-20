@@ -102,7 +102,9 @@ Initial result: `docs/reports/NEXUS_HEEP_RUNTIME_APPLY_GATE_2026-05-20.json` is 
 
 Reviewed result: `docs/reports/NEXUS_HEEP_RUNTIME_CURATION_STATUS_2026-05-20.json` curates the 10 required repo-local winner skills for runtime-apply-review input only, and `docs/reports/NEXUS_HEEP_RUNTIME_APPLY_GATE_REVIEWED_2026-05-20.json` is `PASS` for 9/9 approved assemblies.
 
-This still does not apply runtime defaults. Next action is a separate runtime default apply decision artifact that consumes the reviewed gate and keeps public benchmark blocked.
+Apply result: `docs/reports/NEXUS_HEEP_RUNTIME_DEFAULT_APPLY_DECISION_2026-05-20.json` and `docs/reports/NEXUS_HEEP_RUNTIME_SKILL_POLICY_OVERLAY_APPLIED_2026-05-20.json` apply the 9 reviewed assemblies to a runtime overlay artifact. The planner now supports `skill_assembly_by_capability`, so a selected capability can request multiple reviewed skills.
+
+This still does not unlock public benchmark. Runtime routes must still emit final receipts for selected / injected / used / evidence / gate / outcome.
 
 ---
 *Created by Antigravity - Nexus Singularity V17*

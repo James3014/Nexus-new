@@ -874,13 +874,45 @@ class CapabilityPlanner:
                 return []
         if not isinstance(overlay, dict) or overlay.get("status") != "PASS":
             return []
-        mapping = overlay.get("primary_skill_by_capability")
-        if not isinstance(mapping, dict):
-            return []
         aliases = overlay.get("capability_aliases")
         aliases = aliases if isinstance(aliases, dict) else {}
         selected = set(selected_capabilities)
+        assembly_mapping = overlay.get("skill_assembly_by_capability")
+        assembly_mapping = assembly_mapping if isinstance(assembly_mapping, dict) else {}
         requests: list[dict[str, str]] = []
+        for capability, assembly in assembly_mapping.items():
+            capability_id = str(capability or "").strip()
+            capability_aliases = {
+                str(alias)
+                for alias in aliases.get(capability_id, [])
+                if str(alias)
+            }
+            if capability_id not in selected and not selected.intersection(capability_aliases):
+                continue
+            if not isinstance(assembly, list):
+                continue
+            for item in assembly:
+                if isinstance(item, dict):
+                    skill_name = str(item.get("skill_id") or "").strip()
+                    role = str(item.get("role") or "").strip()
+                else:
+                    skill_name = str(item or "").strip()
+                    role = ""
+                if not skill_name:
+                    continue
+                requests.append(
+                    {
+                        "skill_id": skill_name,
+                        "capability_id": capability_id,
+                        "source": "sf_runtime_policy_overlay",
+                        "role": role,
+                    }
+                )
+        if requests:
+            return requests
+        mapping = overlay.get("primary_skill_by_capability")
+        if not isinstance(mapping, dict):
+            return []
         for capability, skill_id in mapping.items():
             capability_id = str(capability or "").strip()
             skill_name = str(skill_id or "").strip()

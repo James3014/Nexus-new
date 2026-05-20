@@ -1,0 +1,172 @@
+{
+  "schema": "nexus.heep_runtime_default_apply_decision.v1",
+  "status": "PASS",
+  "created_at": "2026-05-20T08:47:58.532891+00:00",
+  "summary": {
+    "applied_assembly_count": 9,
+    "blocker_count": 0,
+    "runtime_update_allowed": true,
+    "public_benchmark_allowed": false
+  },
+  "applied_heep_assemblies": [
+    {
+      "capability": "autonomic_router",
+      "selected_mode": "Mode B (Guard)",
+      "primary_skill_id": "sf2-autonomic_router-route-fit-spec",
+      "assembly": [
+        {
+          "role": "skill_1",
+          "skill_id": "sf2-autonomic_router-route-fit-spec"
+        },
+        {
+          "role": "skill_2",
+          "skill_id": "sf-systematic-artifact_gate-differential-review-461fbd0c"
+        }
+      ],
+      "runtime_apply_status": "APPLIED_TO_OVERLAY"
+    },
+    {
+      "capability": "belief",
+      "selected_mode": "Mode B (Guard)",
+      "primary_skill_id": "sf2-belief-route-fit-spec",
+      "assembly": [
+        {
+          "role": "skill_1",
+          "skill_id": "sf2-belief-route-fit-spec"
+        },
+        {
+          "role": "skill_2",
+          "skill_id": "sf-systematic-artifact_gate-differential-review-461fbd0c"
+        }
+      ],
+      "runtime_apply_status": "APPLIED_TO_OVERLAY"
+    },
+    {
+      "capability": "codeintel",
+      "selected_mode": "Mode C (Swarm)",
+      "primary_skill_id": "sf-systematic-codeintel-first-principles-thinking-f95019ea",
+      "assembly": [
+        {
+          "role": "skill_1",
+          "skill_id": "sf-systematic-codeintel-first-principles-thinking-f95019ea"
+        },
+        {
+          "role": "skill_2",
+          "skill_id": "sf2-autonomic_router-route-fit-spec"
+        },
+        {
+          "role": "skill_3",
+          "skill_id": "sf-systematic-artifact_gate-differential-review-461fbd0c"
+        }
+      ],
+      "runtime_apply_status": "APPLIED_TO_OVERLAY"
+    },
+    {
+      "capability": "ddtree",
+      "selected_mode": "Mode B (Guard)",
+      "primary_skill_id": "nexus-root-cause-probe",
+      "assembly": [
+        {
+          "role": "skill_1",
+          "skill_id": "nexus-root-cause-probe"
+        },
+        {
+          "role": "skill_2",
+          "skill_id": "sf-systematic-artifact_gate-differential-review-461fbd0c"
+        }
+      ],
+      "runtime_apply_status": "APPLIED_TO_OVERLAY"
+    },
+    {
+      "capability": "governance_and_trust",
+      "selected_mode": "Mode C (Swarm)",
+      "primary_skill_id": "sf-systematic-codeintel-first-principles-thinking-f95019ea",
+      "assembly": [
+        {
+          "role": "skill_1",
+          "skill_id": "sf-systematic-codeintel-first-principles-thinking-f95019ea"
+        },
+        {
+          "role": "skill_2",
+          "skill_id": "sf2-autonomic_router-route-fit-spec"
+        },
+        {
+          "role": "skill_3",
+          "skill_id": "sf-systematic-governance_and_trust-aegisops-ai-0aa841e2"
+        }
+      ],
+      "runtime_apply_status": "APPLIED_TO_OVERLAY"
+    },
+    {
+      "capability": "lancedb",
+      "selected_mode": "Mode B (Guard)",
+      "primary_skill_id": "research-source-validation-auditor",
+      "assembly": [
+        {
+          "role": "skill_1",
+          "skill_id": "research-source-validation-auditor"
+        },
+        {
+          "role": "skill_2",
+          "skill_id": "sf-systematic-artifact_gate-differential-review-461fbd0c"
+        }
+      ],
+      "runtime_apply_status": "APPLIED_TO_OVERLAY"
+    },
+    {
+      "capability": "memory",
+      "selected_mode": "Mode B (Guard)",
+      "primary_skill_id": "sf-systematic-memory-project-skill-audit-cc8b7621",
+      "assembly": [
+        {
+          "role": "skill_1",
+          "skill_id": "sf-systematic-memory-project-skill-audit-cc8b7621"
+        },
+        {
+          "role": "skill_2",
+          "skill_id": "sf-systematic-artifact_gate-differential-review-461fbd0c"
+        }
+      ],
+      "runtime_apply_status": "APPLIED_TO_OVERLAY"
+    },
+    {
+      "capability": "mempalace",
+      "selected_mode": "Mode B (Guard)",
+      "primary_skill_id": "sf2-mempalace-route-fit-spec",
+      "assembly": [
+        {
+          "role": "skill_1",
+          "skill_id": "sf2-mempalace-route-fit-spec"
+        },
+        {
+          "role": "skill_2",
+          "skill_id": "sf-systematic-artifact_gate-differential-review-461fbd0c"
+        }
+      ],
+      "runtime_apply_status": "APPLIED_TO_OVERLAY"
+    },
+    {
+      "capability": "regression_guard",
+      "selected_mode": "Mode B (Guard)",
+      "primary_skill_id": "sf-systematic-regression_guard-odoo-automated-tests-dad98433",
+      "assembly": [
+        {
+          "role": "skill_1",
+          "skill_id": "sf-systematic-regression_guard-odoo-automated-tests-dad98433"
+        },
+        {
+          "role": "skill_2",
+          "skill_id": "sf-systematic-artifact_gate-differential-review-461fbd0c"
+        }
+      ],
+      "runtime_apply_status": "APPLIED_TO_OVERLAY"
+    }
+  ],
+  "overlay_output_schema": "nexus.heep_runtime_skill_policy_overlay.applied.v1",
+  "blockers": [],
+  "claim_boundary": [
+    "This overlay applies reviewed HEEP assemblies for runtime routing input.",
+    "It does not claim public benchmark readiness.",
+    "Runtime routes must still emit final selected/injected/used/evidence/gate/outcome receipts."
+  ]
+}

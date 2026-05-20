@@ -1002,6 +1002,73 @@ def test_capability_planner_uses_sf_runtime_policy_overlay_for_selected_capabili
     ]
 
 
+def test_capability_planner_uses_sf_runtime_policy_assembly_overlay(tmp_path):
+    status_report = tmp_path / "skill_status.json"
+    status_report.write_text(
+        json.dumps(
+            {
+                "schema": "nexus.skill_status.v1",
+                "skills": [
+                    {
+                        "name": "code-scout",
+                        "path": "/repo/.agents/skills/code-scout/SKILL.md",
+                        "skill_status": "nexus_curated_candidate",
+                        "capability_mount": "codeintel",
+                    },
+                    {
+                        "name": "code-audit",
+                        "path": "/repo/.agents/skills/code-audit/SKILL.md",
+                        "skill_status": "nexus_curated_candidate",
+                        "capability_mount": "codeintel",
+                    },
+                    {
+                        "name": "solo-codeintel",
+                        "path": "/repo/.agents/skills/solo-codeintel/SKILL.md",
+                        "skill_status": "nexus_curated_candidate",
+                        "capability_mount": "codeintel",
+                    },
+                ],
+            },
+            ensure_ascii=False,
+        ),
+        encoding="utf-8",
+    )
+    overlay_path = tmp_path / "heep_runtime_overlay.json"
+    overlay_path.write_text(
+        json.dumps(
+            {
+                "schema": "nexus.heep_runtime_skill_policy_overlay.v1",
+                "status": "PASS",
+                "primary_skill_by_capability": {"codeintel": "solo-codeintel"},
+                "skill_assembly_by_capability": {
+                    "codeintel": [
+                        {"role": "Scout", "skill_id": "code-scout"},
+                        {"role": "Audit", "skill_id": "code-audit"},
+                    ]
+                },
+            },
+            ensure_ascii=False,
+        ),
+        encoding="utf-8",
+    )
+
+    plan = CapabilityPlanner().plan(
+        task_desc="Scan implementation impact before editing.",
+        task_type="code_change",
+        route={"recommended_flow": "baseline", "route_features": {"risk_score": 40}},
+        budget={
+            "skill_status_report": str(status_report),
+            "runtime_skill_policy_overlay_path": str(overlay_path),
+        },
+    ).to_dict()
+
+    snapshot = plan["signal_snapshot"]
+    contracts = snapshot["planned_skill_mount_contracts"]
+    assert [contract["skill_id"] for contract in contracts] == ["code-scout", "code-audit"]
+    assert all("sf_runtime_policy_overlay" in contract["load_reason_codes"] for contract in contracts)
+    assert snapshot.get("skill_mount_violations", []) == []
+
+
 def test_capability_planner_applies_promoted_learning_policy_only_when_opt_in():
     baseline = CapabilityPlanner().plan(
         task_desc="Simple typo repair with no research need.",

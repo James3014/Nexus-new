@@ -2805,3 +2805,10 @@ version_scope:
 - Failure: all 9 assemblies failed runtime apply gate because their requested skills were still `external_reference_candidate`, so runtime mount contracts could not be injected.
 - Lesson: MAT-B approval proves an internal compare winner, not curated runtime eligibility.
 - Guardrail: keep runtime apply gated on `nexus_curated_candidate` skill tier plus selected/injected/used/evidence/gate/outcome receipts; reference-only winners must enter curation before runtime default review.
+
+## 2026-05-20 - HEEP assembly smoke must control selected capability scope
+
+- Trigger: a smoke command tested the applied HEEP overlay through a generic `code_change` planner call while expecting only `autonomic_router` skills.
+- Failure: the planner correctly selected additional code-oriented capabilities, so the smoke observed the `codeintel` assembly instead of the intended single capability.
+- Lesson: runtime overlay assembly seams should be tested with an explicit selected-capability scope, or assertions must account for the planner's full selected capability set.
+- Guardrail: use `CapabilityPlanner._runtime_policy_overlay_skill_requests(..., selected_capabilities=[capability])` for deterministic overlay seam checks; use full planner tests only when validating capability selection itself.
