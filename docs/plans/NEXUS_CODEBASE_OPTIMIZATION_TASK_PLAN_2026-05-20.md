@@ -334,3 +334,39 @@ implementation spec.
 Immediate next implementation should be `CBO-1 State JSON Store and BeliefEngine
 Migration`, because it has the clearest correctness risk and the smallest safe
 surface.
+
+## 10. CBO-PREFLIGHT Result
+
+Status: `DONE`
+
+Artifact:
+
+- `docs/reports/NEXUS_CODEBASE_OPTIMIZATION_PREFLIGHT_2026-05-20.json`
+
+Result:
+
+- baseline commit recorded as `446b3b10`;
+- Clean Code closeout commit recorded as `cec4c355`;
+- claim class remains `PLAN_PREFLIGHT_ONLY`;
+- runtime update allowed: `false`;
+- public benchmark allowed: `false`;
+- production code changed: `false`;
+- implementation notes were not updated because
+  `/Users/jameschen/Workspace/implementation-notes.html` is outside this
+  repo-local preflight scope.
+
+Dirty workspace excluded from this preflight:
+
+- `.obsidian/workspace.json`;
+- `.serena/project.yml`;
+- `.antigravitycli/102e96fa-ef91-4469-ae59-cda18e58d5b6.json`;
+- `docs/info/NEXUS_CAPABILITY_SKILL_MAP.md`.
+
+Verification:
+
+- `uv run pytest tests/core/test_belief_engine.py -q` -> `13 passed`;
+- `uv run pytest tests/app/test_research_flow_service.py tests/engine/test_capability_planner.py tests/engine/test_rlm_outcome_integration.py -q` -> `193 passed`.
+
+Next:
+
+- start `CBO-1 State JSON Store and BeliefEngine Migration`.

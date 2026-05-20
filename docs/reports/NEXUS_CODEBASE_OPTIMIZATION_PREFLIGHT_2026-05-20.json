@@ -1,0 +1,40 @@
+{
+  "schema": "nexus_codebase_optimization_preflight.v1",
+  "date": "2026-05-20",
+  "status": "PASS",
+  "claim_class": "PLAN_PREFLIGHT_ONLY",
+  "baseline_commit": "446b3b10",
+  "clean_code_closeout_commit": "cec4c355",
+  "source_plan": "/Users/jameschen/.gemini/antigravity/brain/aff9416a-04e7-48d5-9b10-85410ef6b790/NEXUS_CODEBASE_OPTIMIZATION_PLAN.md",
+  "plan_path": "docs/plans/NEXUS_CODEBASE_OPTIMIZATION_TASK_PLAN_2026-05-20.md",
+  "runtime_update_allowed": false,
+  "public_benchmark_allowed": false,
+  "production_code_changed": false,
+  "implementation_notes_updated": false,
+  "implementation_notes_reason": "outside current writable/AGENTS scope and not required for CBO-PREFLIGHT",
+  "dirty_workspace_unrelated": [
+    ".obsidian/workspace.json",
+    ".serena/project.yml",
+    ".antigravitycli/102e96fa-ef91-4469-ae59-cda18e58d5b6.json",
+    "docs/info/NEXUS_CAPABILITY_SKILL_MAP.md"
+  ],
+  "tests": [
+    {
+      "command": "uv run pytest tests/core/test_belief_engine.py -q",
+      "status": "PASS",
+      "summary": "13 passed in 0.37s"
+    },
+    {
+      "command": "uv run pytest tests/app/test_research_flow_service.py tests/engine/test_capability_planner.py tests/engine/test_rlm_outcome_integration.py -q",
+      "status": "PASS",
+      "summary": "193 passed in 6.12s"
+    }
+  ],
+  "next_card": "CBO-1 State JSON Store and BeliefEngine Migration",
+  "stop_conditions_checked": [
+    "no forbidden path edits",
+    "no runtime behavior changes",
+    "no public benchmark claim",
+    "no production code touched"
+  ]
+}
