@@ -98,7 +98,11 @@ Required runtime apply conditions:
 - Runtime-final receipt chain has selected / injected / used / evidence / gate / outcome all true.
 - `public_benchmark_allowed=false`; public benchmark still requires its own gate.
 
-Current result: the gate is `RETURN` because approved assemblies still contain `external_reference_candidate` skills. Next action is curation/runtime-review of the winning reference skills, not runtime default apply.
+Initial result: `docs/reports/NEXUS_HEEP_RUNTIME_APPLY_GATE_2026-05-20.json` is `RETURN` because approved assemblies still contain `external_reference_candidate` skills.
+
+Reviewed result: `docs/reports/NEXUS_HEEP_RUNTIME_CURATION_STATUS_2026-05-20.json` curates the 10 required repo-local winner skills for runtime-apply-review input only, and `docs/reports/NEXUS_HEEP_RUNTIME_APPLY_GATE_REVIEWED_2026-05-20.json` is `PASS` for 9/9 approved assemblies.
+
+This still does not apply runtime defaults. Next action is a separate runtime default apply decision artifact that consumes the reviewed gate and keeps public benchmark blocked.
 
 ---
 *Created by Antigravity - Nexus Singularity V17*
