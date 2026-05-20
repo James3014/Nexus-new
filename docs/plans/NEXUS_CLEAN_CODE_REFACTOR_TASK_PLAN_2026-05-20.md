@@ -373,3 +373,50 @@ Result:
 - `CC-0` stayed inventory-only as required.
 - `unknown_hold` items require owner-aware review before any future `CC-8` move.
 - No runtime, benchmark, Swarm/NSP, or root cleanup behavior changed.
+
+## 12. Failure Lessons
+
+### CC-1 compatibility wrapper lesson
+
+Failure:
+
+- `tests/app/test_research_flow_service.py::test_build_route_uses_auto_findings_query_when_not_provided`
+  initially failed after route signal extraction because the test monkeypatched
+  `research_flow_service.FindingsMemoryStore`, while the extracted module used
+  its own direct `FindingsMemoryStore` import.
+
+Lesson:
+
+- For private-helper extraction from a large facade, preserve existing test and
+  monkeypatch seams with a thin compatibility wrapper until callers migrate to
+  the deeper module directly.
+
+Action:
+
+- `research_flow_service._collect_route_signals` remains as a wrapper and passes
+  the facade-level `FindingsMemoryStore` into `route_decider.collect_route_signals`.
+
+## 13. CC-1 Research Flow Route Decision Module Result
+
+Status: `DONE`
+
+Files:
+
+- `nexus/research/flow/route_decider.py`
+- `nexus/research/flow/__init__.py`
+- `nexus/app/research_flow_service.py`
+
+Result:
+
+- route signal collection and flow decision logic moved behind
+  `nexus.research.flow.route_decider`;
+- `research_flow_service.py` remains the orchestration facade;
+- private helper compatibility names remain available from
+  `research_flow_service.py` for existing tests/callers;
+- route semantics, runtime dispatch, evidence packing, public benchmark gates,
+  and runtime skill policy remain unchanged.
+
+Verification:
+
+- `uv run python -m py_compile nexus/app/research_flow_service.py nexus/research/flow/route_decider.py nexus/research/flow/__init__.py`
+- `uv run pytest tests/app/test_research_flow_service.py -q` -> `100 passed`
