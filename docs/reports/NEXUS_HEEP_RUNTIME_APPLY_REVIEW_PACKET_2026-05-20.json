@@ -99,10 +99,12 @@
     {
       "capability": "direct_master_loop",
       "selected_mode": "Mode A (Solo)",
-      "disposition": "HOLD_MISSING_MAT_B_EVIDENCE",
-      "mat_b_verdict": "HOLD_MISSING_MAT_B_EVIDENCE",
+      "disposition": "BLOCKED_BY_PROVIDER_TOKEN_TRUTH",
+      "mat_b_verdict": "BLOCKED_BY_PROVIDER_TOKEN_TRUTH",
       "mat_b_reason_codes": [
-        "baseline_infra_invalid:model_call_without_tokens"
+        "baseline_infra_invalid:model_call_without_tokens",
+        "clean_replay_still_unclean",
+        "clean_replay:baseline_infra_invalid:model_call_without_tokens"
       ],
       "mat_b_required_before_runtime_apply": false,
       "runtime_update_allowed": false,
@@ -111,10 +113,12 @@
     {
       "capability": "drone",
       "selected_mode": "Mode A (Solo)",
-      "disposition": "HOLD_MISSING_MAT_B_EVIDENCE",
-      "mat_b_verdict": "HOLD_MISSING_MAT_B_EVIDENCE",
+      "disposition": "BLOCKED_BY_RECEIPT_DATA_CONTRACT",
+      "mat_b_verdict": "BLOCKED_BY_RECEIPT_DATA_CONTRACT",
       "mat_b_reason_codes": [
-        "baseline_infra_invalid:receipt_data_contract_violation"
+        "baseline_infra_invalid:receipt_data_contract_violation",
+        "clean_replay_still_unclean",
+        "clean_replay:baseline_infra_invalid:receipt_data_contract_violation"
       ],
       "mat_b_required_before_runtime_apply": false,
       "runtime_update_allowed": false,
@@ -123,10 +127,12 @@
     {
       "capability": "external_productivity",
       "selected_mode": "Mode A (Solo)",
-      "disposition": "HOLD_MISSING_MAT_B_EVIDENCE",
-      "mat_b_verdict": "HOLD_MISSING_MAT_B_EVIDENCE",
+      "disposition": "BLOCKED_BY_PROVIDER_TOKEN_TRUTH",
+      "mat_b_verdict": "BLOCKED_BY_PROVIDER_TOKEN_TRUTH",
       "mat_b_reason_codes": [
-        "baseline_infra_invalid:model_call_without_tokens"
+        "baseline_infra_invalid:model_call_without_tokens",
+        "clean_replay_still_unclean",
+        "clean_replay:baseline_infra_invalid:model_call_without_tokens"
       ],
       "mat_b_required_before_runtime_apply": false,
       "runtime_update_allowed": false,
@@ -169,10 +175,12 @@
     {
       "capability": "hyper_sprint",
       "selected_mode": "Mode A (Solo)",
-      "disposition": "HOLD_MISSING_MAT_B_EVIDENCE",
-      "mat_b_verdict": "HOLD_MISSING_MAT_B_EVIDENCE",
+      "disposition": "BLOCKED_BY_PROVIDER_TOKEN_TRUTH",
+      "mat_b_verdict": "BLOCKED_BY_PROVIDER_TOKEN_TRUTH",
       "mat_b_reason_codes": [
-        "baseline_infra_invalid:model_call_without_tokens"
+        "baseline_infra_invalid:model_call_without_tokens",
+        "clean_replay_still_unclean",
+        "clean_replay:baseline_infra_invalid:model_call_without_tokens"
       ],
       "mat_b_required_before_runtime_apply": false,
       "runtime_update_allowed": false,
@@ -235,10 +243,12 @@
     {
       "capability": "metabolism_resume",
       "selected_mode": "Mode A (Solo)",
-      "disposition": "HOLD_MISSING_MAT_B_EVIDENCE",
-      "mat_b_verdict": "HOLD_MISSING_MAT_B_EVIDENCE",
+      "disposition": "BLOCKED_BY_PROVIDER_TOKEN_TRUTH",
+      "mat_b_verdict": "BLOCKED_BY_PROVIDER_TOKEN_TRUTH",
       "mat_b_reason_codes": [
-        "baseline_infra_invalid:model_call_without_tokens"
+        "baseline_infra_invalid:model_call_without_tokens",
+        "clean_replay_still_unclean",
+        "clean_replay:baseline_infra_invalid:model_call_without_tokens"
       ],
       "mat_b_required_before_runtime_apply": false,
       "runtime_update_allowed": false,
@@ -247,10 +257,12 @@
     {
       "capability": "nightshift",
       "selected_mode": "Mode A (Solo)",
-      "disposition": "HOLD_MISSING_MAT_B_EVIDENCE",
-      "mat_b_verdict": "HOLD_MISSING_MAT_B_EVIDENCE",
+      "disposition": "BLOCKED_BY_RECEIPT_DATA_CONTRACT",
+      "mat_b_verdict": "BLOCKED_BY_RECEIPT_DATA_CONTRACT",
       "mat_b_reason_codes": [
-        "baseline_infra_invalid:receipt_data_contract_violation"
+        "baseline_infra_invalid:receipt_data_contract_violation",
+        "clean_replay_still_unclean",
+        "clean_replay:baseline_infra_invalid:receipt_data_contract_violation"
       ],
       "mat_b_required_before_runtime_apply": false,
       "runtime_update_allowed": false,
@@ -317,10 +329,12 @@
     {
       "capability": "research_and_source_discipline",
       "selected_mode": "Mode A (Solo)",
-      "disposition": "HOLD_MISSING_MAT_B_EVIDENCE",
-      "mat_b_verdict": "HOLD_MISSING_MAT_B_EVIDENCE",
+      "disposition": "BLOCKED_BY_PROVIDER_TOKEN_TRUTH",
+      "mat_b_verdict": "BLOCKED_BY_PROVIDER_TOKEN_TRUTH",
       "mat_b_reason_codes": [
-        "baseline_infra_invalid:model_call_without_tokens"
+        "baseline_infra_invalid:model_call_without_tokens",
+        "clean_replay_still_unclean",
+        "clean_replay:baseline_infra_invalid:model_call_without_tokens"
       ],
       "mat_b_required_before_runtime_apply": false,
       "runtime_update_allowed": false,
@@ -329,10 +343,12 @@
     {
       "capability": "research_control_plane",
       "selected_mode": "Mode A (Solo)",
-      "disposition": "HOLD_MISSING_MAT_B_EVIDENCE",
-      "mat_b_verdict": "HOLD_MISSING_MAT_B_EVIDENCE",
+      "disposition": "BLOCKED_BY_PROVIDER_TOKEN_TRUTH",
+      "mat_b_verdict": "BLOCKED_BY_PROVIDER_TOKEN_TRUTH",
       "mat_b_reason_codes": [
-        "baseline_infra_invalid:model_call_without_tokens"
+        "baseline_infra_invalid:model_call_without_tokens",
+        "clean_replay_still_unclean",
+        "clean_replay:baseline_infra_invalid:model_call_without_tokens"
       ],
       "mat_b_required_before_runtime_apply": false,
       "runtime_update_allowed": false,
@@ -341,10 +357,12 @@
     {
       "capability": "sandbox_replay",
       "selected_mode": "Mode A (Solo)",
-      "disposition": "HOLD_MISSING_MAT_B_EVIDENCE",
-      "mat_b_verdict": "HOLD_MISSING_MAT_B_EVIDENCE",
+      "disposition": "BLOCKED_BY_PROVIDER_TOKEN_TRUTH",
+      "mat_b_verdict": "BLOCKED_BY_PROVIDER_TOKEN_TRUTH",
       "mat_b_reason_codes": [
-        "baseline_infra_invalid:model_call_without_tokens"
+        "baseline_infra_invalid:model_call_without_tokens",
+        "clean_replay_still_unclean",
+        "clean_replay:baseline_infra_invalid:model_call_without_tokens"
       ],
       "mat_b_required_before_runtime_apply": false,
       "runtime_update_allowed": false,
@@ -353,10 +371,12 @@
     {
       "capability": "swarm_multi_agent",
       "selected_mode": "Mode A (Solo)",
-      "disposition": "HOLD_MISSING_MAT_B_EVIDENCE",
-      "mat_b_verdict": "HOLD_MISSING_MAT_B_EVIDENCE",
+      "disposition": "BLOCKED_BY_RECEIPT_DATA_CONTRACT",
+      "mat_b_verdict": "BLOCKED_BY_RECEIPT_DATA_CONTRACT",
       "mat_b_reason_codes": [
-        "baseline_infra_invalid:receipt_data_contract_violation"
+        "baseline_infra_invalid:receipt_data_contract_violation",
+        "clean_replay_still_unclean",
+        "clean_replay:baseline_infra_invalid:receipt_data_contract_violation"
       ],
       "mat_b_required_before_runtime_apply": false,
       "runtime_update_allowed": false,
@@ -365,10 +385,12 @@
     {
       "capability": "ui_validator",
       "selected_mode": "Mode A (Solo)",
-      "disposition": "HOLD_MISSING_MAT_B_EVIDENCE",
-      "mat_b_verdict": "HOLD_MISSING_MAT_B_EVIDENCE",
+      "disposition": "BLOCKED_BY_PROVIDER_TOKEN_TRUTH",
+      "mat_b_verdict": "BLOCKED_BY_PROVIDER_TOKEN_TRUTH",
       "mat_b_reason_codes": [
-        "baseline_infra_invalid:model_call_without_tokens"
+        "baseline_infra_invalid:model_call_without_tokens",
+        "clean_replay_still_unclean",
+        "clean_replay:baseline_infra_invalid:model_call_without_tokens"
       ],
       "mat_b_required_before_runtime_apply": false,
       "runtime_update_allowed": false,
@@ -377,10 +399,12 @@
     {
       "capability": "ultra_review",
       "selected_mode": "Mode A (Solo)",
-      "disposition": "HOLD_MISSING_MAT_B_EVIDENCE",
-      "mat_b_verdict": "HOLD_MISSING_MAT_B_EVIDENCE",
+      "disposition": "BLOCKED_BY_PROVIDER_TOKEN_TRUTH",
+      "mat_b_verdict": "BLOCKED_BY_PROVIDER_TOKEN_TRUTH",
       "mat_b_reason_codes": [
-        "baseline_infra_invalid:model_call_without_tokens"
+        "baseline_infra_invalid:model_call_without_tokens",
+        "clean_replay_still_unclean",
+        "clean_replay:baseline_infra_invalid:model_call_without_tokens"
       ],
       "mat_b_required_before_runtime_apply": false,
       "runtime_update_allowed": false,
@@ -389,10 +413,12 @@
     {
       "capability": "xray",
       "selected_mode": "Mode A (Solo)",
-      "disposition": "HOLD_MISSING_MAT_B_EVIDENCE",
-      "mat_b_verdict": "HOLD_MISSING_MAT_B_EVIDENCE",
+      "disposition": "BLOCKED_BY_PROVIDER_TOKEN_TRUTH",
+      "mat_b_verdict": "BLOCKED_BY_PROVIDER_TOKEN_TRUTH",
       "mat_b_reason_codes": [
-        "baseline_infra_invalid:model_call_without_tokens"
+        "baseline_infra_invalid:model_call_without_tokens",
+        "clean_replay_still_unclean",
+        "clean_replay:baseline_infra_invalid:model_call_without_tokens"
       ],
       "mat_b_required_before_runtime_apply": false,
       "runtime_update_allowed": false,

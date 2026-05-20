@@ -91,9 +91,11 @@
     {
       "capability": "direct_master_loop",
       "heep_mode_candidate": "Mode A (Solo)",
-      "mat_b_verdict": "HOLD_MISSING_MAT_B_EVIDENCE",
+      "mat_b_verdict": "BLOCKED_BY_PROVIDER_TOKEN_TRUTH",
       "mat_b_reason_codes": [
-        "baseline_infra_invalid:model_call_without_tokens"
+        "baseline_infra_invalid:model_call_without_tokens",
+        "clean_replay_still_unclean",
+        "clean_replay:baseline_infra_invalid:model_call_without_tokens"
       ],
       "map_update_allowed": false,
       "runtime_update_allowed": false,
@@ -102,9 +104,11 @@
     {
       "capability": "drone",
       "heep_mode_candidate": "Mode A (Solo)",
-      "mat_b_verdict": "HOLD_MISSING_MAT_B_EVIDENCE",
+      "mat_b_verdict": "BLOCKED_BY_RECEIPT_DATA_CONTRACT",
       "mat_b_reason_codes": [
-        "baseline_infra_invalid:receipt_data_contract_violation"
+        "baseline_infra_invalid:receipt_data_contract_violation",
+        "clean_replay_still_unclean",
+        "clean_replay:baseline_infra_invalid:receipt_data_contract_violation"
       ],
       "map_update_allowed": false,
       "runtime_update_allowed": false,
@@ -113,9 +117,11 @@
     {
       "capability": "external_productivity",
       "heep_mode_candidate": "Mode A (Solo)",
-      "mat_b_verdict": "HOLD_MISSING_MAT_B_EVIDENCE",
+      "mat_b_verdict": "BLOCKED_BY_PROVIDER_TOKEN_TRUTH",
       "mat_b_reason_codes": [
-        "baseline_infra_invalid:model_call_without_tokens"
+        "baseline_infra_invalid:model_call_without_tokens",
+        "clean_replay_still_unclean",
+        "clean_replay:baseline_infra_invalid:model_call_without_tokens"
       ],
       "map_update_allowed": false,
       "runtime_update_allowed": false,
@@ -155,9 +161,11 @@
     {
       "capability": "hyper_sprint",
       "heep_mode_candidate": "Mode A (Solo)",
-      "mat_b_verdict": "HOLD_MISSING_MAT_B_EVIDENCE",
+      "mat_b_verdict": "BLOCKED_BY_PROVIDER_TOKEN_TRUTH",
       "mat_b_reason_codes": [
-        "baseline_infra_invalid:model_call_without_tokens"
+        "baseline_infra_invalid:model_call_without_tokens",
+        "clean_replay_still_unclean",
+        "clean_replay:baseline_infra_invalid:model_call_without_tokens"
       ],
       "map_update_allowed": false,
       "runtime_update_allowed": false,
@@ -215,9 +223,11 @@
     {
       "capability": "metabolism_resume",
       "heep_mode_candidate": "Mode A (Solo)",
-      "mat_b_verdict": "HOLD_MISSING_MAT_B_EVIDENCE",
+      "mat_b_verdict": "BLOCKED_BY_PROVIDER_TOKEN_TRUTH",
       "mat_b_reason_codes": [
-        "baseline_infra_invalid:model_call_without_tokens"
+        "baseline_infra_invalid:model_call_without_tokens",
+        "clean_replay_still_unclean",
+        "clean_replay:baseline_infra_invalid:model_call_without_tokens"
       ],
       "map_update_allowed": false,
       "runtime_update_allowed": false,
@@ -226,9 +236,11 @@
     {
       "capability": "nightshift",
       "heep_mode_candidate": "Mode A (Solo)",
-      "mat_b_verdict": "HOLD_MISSING_MAT_B_EVIDENCE",
+      "mat_b_verdict": "BLOCKED_BY_RECEIPT_DATA_CONTRACT",
       "mat_b_reason_codes": [
-        "baseline_infra_invalid:receipt_data_contract_violation"
+        "baseline_infra_invalid:receipt_data_contract_violation",
+        "clean_replay_still_unclean",
+        "clean_replay:baseline_infra_invalid:receipt_data_contract_violation"
       ],
       "map_update_allowed": false,
       "runtime_update_allowed": false,
@@ -290,9 +302,11 @@
     {
       "capability": "research_and_source_discipline",
       "heep_mode_candidate": "Mode A (Solo)",
-      "mat_b_verdict": "HOLD_MISSING_MAT_B_EVIDENCE",
+      "mat_b_verdict": "BLOCKED_BY_PROVIDER_TOKEN_TRUTH",
       "mat_b_reason_codes": [
-        "baseline_infra_invalid:model_call_without_tokens"
+        "baseline_infra_invalid:model_call_without_tokens",
+        "clean_replay_still_unclean",
+        "clean_replay:baseline_infra_invalid:model_call_without_tokens"
       ],
       "map_update_allowed": false,
       "runtime_update_allowed": false,
@@ -301,9 +315,11 @@
     {
       "capability": "research_control_plane",
       "heep_mode_candidate": "Mode A (Solo)",
-      "mat_b_verdict": "HOLD_MISSING_MAT_B_EVIDENCE",
+      "mat_b_verdict": "BLOCKED_BY_PROVIDER_TOKEN_TRUTH",
       "mat_b_reason_codes": [
-        "baseline_infra_invalid:model_call_without_tokens"
+        "baseline_infra_invalid:model_call_without_tokens",
+        "clean_replay_still_unclean",
+        "clean_replay:baseline_infra_invalid:model_call_without_tokens"
       ],
       "map_update_allowed": false,
       "runtime_update_allowed": false,
@@ -312,9 +328,11 @@
     {
       "capability": "sandbox_replay",
       "heep_mode_candidate": "Mode A (Solo)",
-      "mat_b_verdict": "HOLD_MISSING_MAT_B_EVIDENCE",
+      "mat_b_verdict": "BLOCKED_BY_PROVIDER_TOKEN_TRUTH",
       "mat_b_reason_codes": [
-        "baseline_infra_invalid:model_call_without_tokens"
+        "baseline_infra_invalid:model_call_without_tokens",
+        "clean_replay_still_unclean",
+        "clean_replay:baseline_infra_invalid:model_call_without_tokens"
       ],
       "map_update_allowed": false,
       "runtime_update_allowed": false,
@@ -323,9 +341,11 @@
     {
       "capability": "swarm_multi_agent",
       "heep_mode_candidate": "Mode A (Solo)",
-      "mat_b_verdict": "HOLD_MISSING_MAT_B_EVIDENCE",
+      "mat_b_verdict": "BLOCKED_BY_RECEIPT_DATA_CONTRACT",
       "mat_b_reason_codes": [
-        "baseline_infra_invalid:receipt_data_contract_violation"
+        "baseline_infra_invalid:receipt_data_contract_violation",
+        "clean_replay_still_unclean",
+        "clean_replay:baseline_infra_invalid:receipt_data_contract_violation"
       ],
       "map_update_allowed": false,
       "runtime_update_allowed": false,
@@ -334,9 +354,11 @@
     {
       "capability": "ui_validator",
       "heep_mode_candidate": "Mode A (Solo)",
-      "mat_b_verdict": "HOLD_MISSING_MAT_B_EVIDENCE",
+      "mat_b_verdict": "BLOCKED_BY_PROVIDER_TOKEN_TRUTH",
       "mat_b_reason_codes": [
-        "baseline_infra_invalid:model_call_without_tokens"
+        "baseline_infra_invalid:model_call_without_tokens",
+        "clean_replay_still_unclean",
+        "clean_replay:baseline_infra_invalid:model_call_without_tokens"
       ],
       "map_update_allowed": false,
       "runtime_update_allowed": false,
@@ -345,9 +367,11 @@
     {
       "capability": "ultra_review",
       "heep_mode_candidate": "Mode A (Solo)",
-      "mat_b_verdict": "HOLD_MISSING_MAT_B_EVIDENCE",
+      "mat_b_verdict": "BLOCKED_BY_PROVIDER_TOKEN_TRUTH",
       "mat_b_reason_codes": [
-        "baseline_infra_invalid:model_call_without_tokens"
+        "baseline_infra_invalid:model_call_without_tokens",
+        "clean_replay_still_unclean",
+        "clean_replay:baseline_infra_invalid:model_call_without_tokens"
       ],
       "map_update_allowed": false,
       "runtime_update_allowed": false,
@@ -356,9 +380,11 @@
     {
       "capability": "xray",
       "heep_mode_candidate": "Mode A (Solo)",
-      "mat_b_verdict": "HOLD_MISSING_MAT_B_EVIDENCE",
+      "mat_b_verdict": "BLOCKED_BY_PROVIDER_TOKEN_TRUTH",
       "mat_b_reason_codes": [
-        "baseline_infra_invalid:model_call_without_tokens"
+        "baseline_infra_invalid:model_call_without_tokens",
+        "clean_replay_still_unclean",
+        "clean_replay:baseline_infra_invalid:model_call_without_tokens"
       ],
       "map_update_allowed": false,
       "runtime_update_allowed": false,

@@ -1,12 +1,14 @@
 {
-  "schema": "nexus.heep_mat_b_live_report.v1",
+  "schema": "nexus.heep_mat_b_live_report.v2",
   "status": "PASS",
   "summary": {
     "comparison_count": 34,
     "approve_count": 9,
     "keep_single_count": 11,
     "reject_count": 1,
-    "hold_count": 13,
+    "hold_count": 0,
+    "final_blocker_count": 13,
+    "finalized_hold_count": 13,
     "runtime_update_allowed": false,
     "public_benchmark_allowed": false
   },
@@ -395,10 +397,20 @@
         "evidence_seal_count_delta": 2,
         "reopen_rate_delta": 0.0
       },
-      "verdict": "HOLD_MISSING_MAT_B_EVIDENCE",
+      "verdict": "BLOCKED_BY_PROVIDER_TOKEN_TRUTH",
       "reason_codes": [
-        "baseline_infra_invalid:model_call_without_tokens"
-      ]
+        "baseline_infra_invalid:model_call_without_tokens",
+        "clean_replay_still_unclean",
+        "clean_replay:baseline_infra_invalid:model_call_without_tokens"
+      ],
+      "clean_replay": {
+        "baseline_row_id": "heep::direct_master_loop::heep-mat-b-direct_master_loop-001::mode_a_current_primary",
+        "challenger_row_id": "heep::direct_master_loop::heep-mat-b-direct_master_loop-001::heep_multi_skill",
+        "verdict": "HOLD_MISSING_MAT_B_EVIDENCE",
+        "reason_codes": [
+          "baseline_infra_invalid:model_call_without_tokens"
+        ]
+      }
     },
     {
       "capability": "drone",
@@ -439,10 +451,20 @@
         "evidence_seal_count_delta": 0,
         "reopen_rate_delta": 0.0
       },
-      "verdict": "HOLD_MISSING_MAT_B_EVIDENCE",
+      "verdict": "BLOCKED_BY_RECEIPT_DATA_CONTRACT",
       "reason_codes": [
-        "baseline_infra_invalid:receipt_data_contract_violation"
-      ]
+        "baseline_infra_invalid:receipt_data_contract_violation",
+        "clean_replay_still_unclean",
+        "clean_replay:baseline_infra_invalid:receipt_data_contract_violation"
+      ],
+      "clean_replay": {
+        "baseline_row_id": "heep::drone::heep-mat-b-drone-001::mode_a_current_primary",
+        "challenger_row_id": "heep::drone::heep-mat-b-drone-001::heep_multi_skill",
+        "verdict": "HOLD_MISSING_MAT_B_EVIDENCE",
+        "reason_codes": [
+          "baseline_infra_invalid:receipt_data_contract_violation"
+        ]
+      }
     },
     {
       "capability": "external_productivity",
@@ -483,10 +505,20 @@
         "evidence_seal_count_delta": 2,
         "reopen_rate_delta": 0.0
       },
-      "verdict": "HOLD_MISSING_MAT_B_EVIDENCE",
+      "verdict": "BLOCKED_BY_PROVIDER_TOKEN_TRUTH",
       "reason_codes": [
-        "baseline_infra_invalid:model_call_without_tokens"
-      ]
+        "baseline_infra_invalid:model_call_without_tokens",
+        "clean_replay_still_unclean",
+        "clean_replay:baseline_infra_invalid:model_call_without_tokens"
+      ],
+      "clean_replay": {
+        "baseline_row_id": "heep::external_productivity::heep-mat-b-external_productivity-001::mode_a_current_primary",
+        "challenger_row_id": "heep::external_productivity::heep-mat-b-external_productivity-001::heep_multi_skill",
+        "verdict": "HOLD_MISSING_MAT_B_EVIDENCE",
+        "reason_codes": [
+          "baseline_infra_invalid:model_call_without_tokens"
+        ]
+      }
     },
     {
       "capability": "file_lock_security_gate",
@@ -657,10 +689,20 @@
         "evidence_seal_count_delta": 2,
         "reopen_rate_delta": 0.0
       },
-      "verdict": "HOLD_MISSING_MAT_B_EVIDENCE",
+      "verdict": "BLOCKED_BY_PROVIDER_TOKEN_TRUTH",
       "reason_codes": [
-        "baseline_infra_invalid:model_call_without_tokens"
-      ]
+        "baseline_infra_invalid:model_call_without_tokens",
+        "clean_replay_still_unclean",
+        "clean_replay:baseline_infra_invalid:model_call_without_tokens"
+      ],
+      "clean_replay": {
+        "baseline_row_id": "heep::hyper_sprint::heep-mat-b-hyper_sprint-001::mode_a_current_primary",
+        "challenger_row_id": "heep::hyper_sprint::heep-mat-b-hyper_sprint-001::heep_multi_skill",
+        "verdict": "HOLD_MISSING_MAT_B_EVIDENCE",
+        "reason_codes": [
+          "baseline_infra_invalid:model_call_without_tokens"
+        ]
+      }
     },
     {
       "capability": "lancedb",
@@ -915,10 +957,20 @@
         "evidence_seal_count_delta": 2,
         "reopen_rate_delta": 0.0
       },
-      "verdict": "HOLD_MISSING_MAT_B_EVIDENCE",
+      "verdict": "BLOCKED_BY_PROVIDER_TOKEN_TRUTH",
       "reason_codes": [
-        "baseline_infra_invalid:model_call_without_tokens"
-      ]
+        "baseline_infra_invalid:model_call_without_tokens",
+        "clean_replay_still_unclean",
+        "clean_replay:baseline_infra_invalid:model_call_without_tokens"
+      ],
+      "clean_replay": {
+        "baseline_row_id": "heep::metabolism_resume::heep-mat-b-metabolism_resume-001::mode_a_current_primary",
+        "challenger_row_id": "heep::metabolism_resume::heep-mat-b-metabolism_resume-001::heep_multi_skill",
+        "verdict": "HOLD_MISSING_MAT_B_EVIDENCE",
+        "reason_codes": [
+          "baseline_infra_invalid:model_call_without_tokens"
+        ]
+      }
     },
     {
       "capability": "nightshift",
@@ -959,10 +1011,20 @@
         "evidence_seal_count_delta": 0,
         "reopen_rate_delta": 0.0
       },
-      "verdict": "HOLD_MISSING_MAT_B_EVIDENCE",
+      "verdict": "BLOCKED_BY_RECEIPT_DATA_CONTRACT",
       "reason_codes": [
-        "baseline_infra_invalid:receipt_data_contract_violation"
-      ]
+        "baseline_infra_invalid:receipt_data_contract_violation",
+        "clean_replay_still_unclean",
+        "clean_replay:baseline_infra_invalid:receipt_data_contract_violation"
+      ],
+      "clean_replay": {
+        "baseline_row_id": "heep::nightshift::heep-mat-b-nightshift-001::mode_a_current_primary",
+        "challenger_row_id": "heep::nightshift::heep-mat-b-nightshift-001::heep_multi_skill",
+        "verdict": "HOLD_MISSING_MAT_B_EVIDENCE",
+        "reason_codes": [
+          "baseline_infra_invalid:receipt_data_contract_violation"
+        ]
+      }
     },
     {
       "capability": "policy_capability_gate",
@@ -1221,10 +1283,20 @@
         "evidence_seal_count_delta": 2,
         "reopen_rate_delta": 0.0
       },
-      "verdict": "HOLD_MISSING_MAT_B_EVIDENCE",
+      "verdict": "BLOCKED_BY_PROVIDER_TOKEN_TRUTH",
       "reason_codes": [
-        "baseline_infra_invalid:model_call_without_tokens"
-      ]
+        "baseline_infra_invalid:model_call_without_tokens",
+        "clean_replay_still_unclean",
+        "clean_replay:baseline_infra_invalid:model_call_without_tokens"
+      ],
+      "clean_replay": {
+        "baseline_row_id": "heep::research_and_source_discipline::heep-mat-b-research_and_source_discipline-001::mode_a_current_primary",
+        "challenger_row_id": "heep::research_and_source_discipline::heep-mat-b-research_and_source_discipline-001::heep_multi_skill",
+        "verdict": "HOLD_MISSING_MAT_B_EVIDENCE",
+        "reason_codes": [
+          "baseline_infra_invalid:model_call_without_tokens"
+        ]
+      }
     },
     {
       "capability": "research_control_plane",
@@ -1265,10 +1337,20 @@
         "evidence_seal_count_delta": 2,
         "reopen_rate_delta": 0.0
       },
-      "verdict": "HOLD_MISSING_MAT_B_EVIDENCE",
+      "verdict": "BLOCKED_BY_PROVIDER_TOKEN_TRUTH",
       "reason_codes": [
-        "baseline_infra_invalid:model_call_without_tokens"
-      ]
+        "baseline_infra_invalid:model_call_without_tokens",
+        "clean_replay_still_unclean",
+        "clean_replay:baseline_infra_invalid:model_call_without_tokens"
+      ],
+      "clean_replay": {
+        "baseline_row_id": "heep::research_control_plane::heep-mat-b-research_control_plane-001::mode_a_current_primary",
+        "challenger_row_id": "heep::research_control_plane::heep-mat-b-research_control_plane-001::heep_multi_skill",
+        "verdict": "HOLD_MISSING_MAT_B_EVIDENCE",
+        "reason_codes": [
+          "baseline_infra_invalid:model_call_without_tokens"
+        ]
+      }
     },
     {
       "capability": "sandbox_replay",
@@ -1309,10 +1391,20 @@
         "evidence_seal_count_delta": 1,
         "reopen_rate_delta": 0.0
       },
-      "verdict": "HOLD_MISSING_MAT_B_EVIDENCE",
+      "verdict": "BLOCKED_BY_PROVIDER_TOKEN_TRUTH",
       "reason_codes": [
-        "baseline_infra_invalid:model_call_without_tokens"
-      ]
+        "baseline_infra_invalid:model_call_without_tokens",
+        "clean_replay_still_unclean",
+        "clean_replay:baseline_infra_invalid:model_call_without_tokens"
+      ],
+      "clean_replay": {
+        "baseline_row_id": "heep::sandbox_replay::heep-mat-b-sandbox_replay-001::mode_a_current_primary",
+        "challenger_row_id": "heep::sandbox_replay::heep-mat-b-sandbox_replay-001::heep_multi_skill",
+        "verdict": "HOLD_MISSING_MAT_B_EVIDENCE",
+        "reason_codes": [
+          "baseline_infra_invalid:model_call_without_tokens"
+        ]
+      }
     },
     {
       "capability": "swarm_multi_agent",
@@ -1353,10 +1445,20 @@
         "evidence_seal_count_delta": 0,
         "reopen_rate_delta": 0.0
       },
-      "verdict": "HOLD_MISSING_MAT_B_EVIDENCE",
+      "verdict": "BLOCKED_BY_RECEIPT_DATA_CONTRACT",
       "reason_codes": [
-        "baseline_infra_invalid:receipt_data_contract_violation"
-      ]
+        "baseline_infra_invalid:receipt_data_contract_violation",
+        "clean_replay_still_unclean",
+        "clean_replay:baseline_infra_invalid:receipt_data_contract_violation"
+      ],
+      "clean_replay": {
+        "baseline_row_id": "heep::swarm_multi_agent::heep-mat-b-swarm_multi_agent-001::mode_a_current_primary",
+        "challenger_row_id": "heep::swarm_multi_agent::heep-mat-b-swarm_multi_agent-001::heep_multi_skill",
+        "verdict": "HOLD_MISSING_MAT_B_EVIDENCE",
+        "reason_codes": [
+          "baseline_infra_invalid:receipt_data_contract_violation"
+        ]
+      }
     },
     {
       "capability": "ui_validator",
@@ -1397,10 +1499,20 @@
         "evidence_seal_count_delta": 1,
         "reopen_rate_delta": 0.0
       },
-      "verdict": "HOLD_MISSING_MAT_B_EVIDENCE",
+      "verdict": "BLOCKED_BY_PROVIDER_TOKEN_TRUTH",
       "reason_codes": [
-        "baseline_infra_invalid:model_call_without_tokens"
-      ]
+        "baseline_infra_invalid:model_call_without_tokens",
+        "clean_replay_still_unclean",
+        "clean_replay:baseline_infra_invalid:model_call_without_tokens"
+      ],
+      "clean_replay": {
+        "baseline_row_id": "heep::ui_validator::heep-mat-b-ui_validator-001::mode_a_current_primary",
+        "challenger_row_id": "heep::ui_validator::heep-mat-b-ui_validator-001::heep_multi_skill",
+        "verdict": "HOLD_MISSING_MAT_B_EVIDENCE",
+        "reason_codes": [
+          "baseline_infra_invalid:model_call_without_tokens"
+        ]
+      }
     },
     {
       "capability": "ultra_review",
@@ -1441,10 +1553,20 @@
         "evidence_seal_count_delta": 2,
         "reopen_rate_delta": 0.0
       },
-      "verdict": "HOLD_MISSING_MAT_B_EVIDENCE",
+      "verdict": "BLOCKED_BY_PROVIDER_TOKEN_TRUTH",
       "reason_codes": [
-        "baseline_infra_invalid:model_call_without_tokens"
-      ]
+        "baseline_infra_invalid:model_call_without_tokens",
+        "clean_replay_still_unclean",
+        "clean_replay:baseline_infra_invalid:model_call_without_tokens"
+      ],
+      "clean_replay": {
+        "baseline_row_id": "heep::ultra_review::heep-mat-b-ultra_review-001::mode_a_current_primary",
+        "challenger_row_id": "heep::ultra_review::heep-mat-b-ultra_review-001::heep_multi_skill",
+        "verdict": "HOLD_MISSING_MAT_B_EVIDENCE",
+        "reason_codes": [
+          "baseline_infra_invalid:model_call_without_tokens"
+        ]
+      }
     },
     {
       "capability": "xray",
@@ -1485,14 +1607,25 @@
         "evidence_seal_count_delta": 1,
         "reopen_rate_delta": 0.0
       },
-      "verdict": "HOLD_MISSING_MAT_B_EVIDENCE",
+      "verdict": "BLOCKED_BY_PROVIDER_TOKEN_TRUTH",
       "reason_codes": [
-        "baseline_infra_invalid:model_call_without_tokens"
-      ]
+        "baseline_infra_invalid:model_call_without_tokens",
+        "clean_replay_still_unclean",
+        "clean_replay:baseline_infra_invalid:model_call_without_tokens"
+      ],
+      "clean_replay": {
+        "baseline_row_id": "heep::xray::heep-mat-b-xray-001::mode_a_current_primary",
+        "challenger_row_id": "heep::xray::heep-mat-b-xray-001::heep_multi_skill",
+        "verdict": "HOLD_MISSING_MAT_B_EVIDENCE",
+        "reason_codes": [
+          "baseline_infra_invalid:model_call_without_tokens"
+        ]
+      }
     }
   ],
   "claim_boundary": [
     "This report is internal HEEP MAT-B live evidence only.",
+    "Final blocker verdicts mean clean replay also failed the evidence contract; they are not skill-quality approvals.",
     "It can update HEEP mode candidates and runtime apply review packets, not runtime defaults.",
     "It is not a public benchmark or publication-ready claim."
   ]

@@ -2791,3 +2791,10 @@ version_scope:
 - Failure: remaining rows were still executed through a single fail-fast `run_matrix` call, so a first RETURN could prevent later rows from producing artifacts.
 - Lesson: fail-fast execution and complete report collection are separate modes.
 - Guardrail: when `collect_existing_returns=true`, execute remaining resume rows one at a time, then collect all existing PASS/RETURN artifacts into the sealed summary.
+
+## 2026-05-20 - repeated MAT-B HOLD needs a final blocker verdict
+
+- Trigger: the 13 MAT-B HOLD capabilities were replayed in a clean targeted run and all 26 paired rows still returned token or receipt contract violations.
+- Failure: keeping the rows as generic `HOLD_MISSING_MAT_B_EVIDENCE` after a failed clean replay would make the SF/HEEP closure loop appear unfinished forever.
+- Lesson: after an explicit clean replay attempt, unresolved evidence failures should become final blocker verdicts rather than indefinite holds.
+- Guardrail: convert repeated tokenless rows to `BLOCKED_BY_PROVIDER_TOKEN_TRUTH` and repeated receipt data-contract rows to `BLOCKED_BY_RECEIPT_DATA_CONTRACT`; neither verdict may update runtime default or public benchmark readiness.
