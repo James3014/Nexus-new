@@ -2847,3 +2847,10 @@ version_scope:
 - Failure: path/SHA based dedupe treated mirrored copies as separate challenger skills, making the report look larger while not adding real comparison value.
 - Lesson: for skill-fit comparison, canonical identity is capability plus skill ID first; SHA/path are provenance, not separate challenger identities.
 - Guardrail: build compare queues from canonical `capability + skill_id` rows, retain mirror paths/counts as provenance, and only live-test the canonical row.
+
+## 2026-05-21 - deterministic SF compare triage must not be reported as a live winner
+
+- Trigger: SF-FINAL had generated `READY_FOR_COMPARISON` rows, but the map did not clearly show whether those rows had actually beaten the current primary skill.
+- Failure: a queue artifact can be misread as a replacement verdict if it lacks explicit baseline/challenger arms and live evidence status.
+- Lesson: current-vs-candidate compare artifacts need separate deterministic triage decisions and live Flash+Nexus verdicts.
+- Guardrail: emit `READY_FOR_LIVE_COMPARE`, `REJECT_PRECHECK`, or `KEEP_CURRENT_NO_LIVE_EVIDENCE`; only a later live compare report may emit replacement decisions.
