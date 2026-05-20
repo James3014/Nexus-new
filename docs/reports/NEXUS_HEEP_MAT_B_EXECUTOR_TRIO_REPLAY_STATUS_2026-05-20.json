@@ -1,0 +1,40 @@
+{
+  "schema": "nexus.heep_mat_b_executor_trio_replay_status.v1",
+  "status": "BLOCKED",
+  "summary": {
+    "planned_rows": 6,
+    "completed_rows": 1,
+    "pass_count": 0,
+    "return_count": 1,
+    "runtime_update_allowed": false,
+    "public_benchmark_allowed": false
+  },
+  "first_blocker": {
+    "row_path": ".nexus/reports/heep_flash_nexus_mat_b_executor_trio_replay_2026-05-20/heep_drone_heep-mat-b-drone-001_mode_a_current_primary/evidence_1779271206/with_nexus__heep-mat-b-drone-001__trial_1.row.json",
+    "row_id": "",
+    "capability": "drone",
+    "status": "FAILED",
+    "semantic_status": "UNVERIFIED",
+    "skill_mount_contract_status": "RETURN",
+    "token_data_contract_status": "DATA_CONTRACT_VIOLATION",
+    "token_data_contract_reason": "model_call_without_measured_provider_tokens",
+    "receipt_data_contract_status": "DATA_CONTRACT_VIOLATION",
+    "receipt_data_contract_reason": "missing_expected_capability_receipts",
+    "infra_invalid_reason": "receipt_data_contract_violation",
+    "gateway_error_category": "gateway_error",
+    "provider_token_measured": false,
+    "expected_capability_missing": [
+      "drone"
+    ],
+    "blocker_reasons": [
+      "model_call_without_measured_provider_tokens",
+      "skill_mount_contract_return",
+      "missing_expected_capability_receipts:drone"
+    ]
+  },
+  "lesson": "Executor route smoke can prove route-oracle coverage, but MAT-B skill comparison still needs skill-specific runtime receipts and measured provider token truth before runtime/public gates consume it.",
+  "claim_boundary": [
+    "This is an internal HEEP MAT-B replay status artifact.",
+    "A BLOCKED status cannot update runtime defaults or public benchmark claims."
+  ]
+}

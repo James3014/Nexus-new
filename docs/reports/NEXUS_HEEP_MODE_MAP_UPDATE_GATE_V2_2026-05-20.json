@@ -1,0 +1,216 @@
+{
+  "schema": "nexus.heep_mode_map_update_gate_v2.v1",
+  "status": "PASS",
+  "summary": {
+    "row_count": 13,
+    "internal_candidate_count": 10,
+    "single_fallback_count": 3,
+    "runtime_update_allowed": false,
+    "public_benchmark_allowed": false
+  },
+  "rows": [
+    {
+      "capability": "direct_master_loop",
+      "mode_map_update": "INTERNAL_CANDIDATE_ONLY",
+      "selected_skill_ids": [
+        "sf-systematic-codeintel-first-principles-thinking-f95019ea",
+        "sf-systematic-direct_master_loop-build-32802a87",
+        "sf-systematic-artifact_gate-differential-review-461fbd0c"
+      ],
+      "runtime_update_allowed": false,
+      "public_benchmark_allowed": false,
+      "reason": "multi_skill_has_stronger_non_cost_evidence",
+      "remaining_gate": [
+        "provider-clean replay with measured provider tokens",
+        "same-window baseline/challenger token truth before cost decision"
+      ]
+    },
+    {
+      "capability": "drone",
+      "mode_map_update": "KEEP_SINGLE_PRIMARY_FALLBACK",
+      "selected_skill_ids": [
+        "sf-systematic-drone-python-background-jobs-18326a62"
+      ],
+      "runtime_update_allowed": false,
+      "public_benchmark_allowed": false,
+      "reason": "multi_skill_not_proven_until_executor_receipt_chain_passes",
+      "remaining_gate": [
+        "skill-specific MAT-B replay with executor receipt present",
+        "provider-clean MAT-B replay before cost/runtime/public eligibility"
+      ]
+    },
+    {
+      "capability": "external_productivity",
+      "mode_map_update": "INTERNAL_CANDIDATE_ONLY",
+      "selected_skill_ids": [
+        "sf-systematic-codeintel-first-principles-thinking-f95019ea",
+        "sf-systematic-external_productivity-writer-77dc7840",
+        "sf-systematic-artifact_gate-differential-review-461fbd0c"
+      ],
+      "runtime_update_allowed": false,
+      "public_benchmark_allowed": false,
+      "reason": "multi_skill_has_stronger_non_cost_evidence",
+      "remaining_gate": [
+        "provider-clean replay with measured provider tokens",
+        "same-window baseline/challenger token truth before cost decision"
+      ]
+    },
+    {
+      "capability": "hyper_sprint",
+      "mode_map_update": "INTERNAL_CANDIDATE_ONLY",
+      "selected_skill_ids": [
+        "sf-systematic-codeintel-first-principles-thinking-f95019ea",
+        "sf2-hyper_sprint-route-fit-spec",
+        "sf-systematic-artifact_gate-differential-review-461fbd0c"
+      ],
+      "runtime_update_allowed": false,
+      "public_benchmark_allowed": false,
+      "reason": "multi_skill_has_stronger_non_cost_evidence",
+      "remaining_gate": [
+        "provider-clean replay with measured provider tokens",
+        "same-window baseline/challenger token truth before cost decision"
+      ]
+    },
+    {
+      "capability": "metabolism_resume",
+      "mode_map_update": "INTERNAL_CANDIDATE_ONLY",
+      "selected_skill_ids": [
+        "sf-systematic-codeintel-first-principles-thinking-f95019ea",
+        "github-auto-skill-safe-learning",
+        "sf-systematic-artifact_gate-differential-review-461fbd0c"
+      ],
+      "runtime_update_allowed": false,
+      "public_benchmark_allowed": false,
+      "reason": "multi_skill_has_stronger_non_cost_evidence",
+      "remaining_gate": [
+        "provider-clean replay with measured provider tokens",
+        "same-window baseline/challenger token truth before cost decision"
+      ]
+    },
+    {
+      "capability": "nightshift",
+      "mode_map_update": "KEEP_SINGLE_PRIMARY_FALLBACK",
+      "selected_skill_ids": [
+        "sf2-nightshift-route-fit-spec"
+      ],
+      "runtime_update_allowed": false,
+      "public_benchmark_allowed": false,
+      "reason": "multi_skill_not_proven_until_executor_receipt_chain_passes",
+      "remaining_gate": [
+        "skill-specific MAT-B replay with executor receipt present",
+        "provider-clean MAT-B replay before cost/runtime/public eligibility"
+      ]
+    },
+    {
+      "capability": "research_and_source_discipline",
+      "mode_map_update": "INTERNAL_CANDIDATE_ONLY",
+      "selected_skill_ids": [
+        "research-citation-chain-verifier",
+        "sf2-autonomic_router-route-fit-spec",
+        "sf-systematic-artifact_gate-differential-review-461fbd0c"
+      ],
+      "runtime_update_allowed": false,
+      "public_benchmark_allowed": false,
+      "reason": "multi_skill_has_stronger_non_cost_evidence",
+      "remaining_gate": [
+        "provider-clean replay with measured provider tokens",
+        "same-window baseline/challenger token truth before cost decision"
+      ]
+    },
+    {
+      "capability": "research_control_plane",
+      "mode_map_update": "INTERNAL_CANDIDATE_ONLY",
+      "selected_skill_ids": [
+        "sf-systematic-research_control_plane-research-lookup-7e6f92a0",
+        "sf2-autonomic_router-route-fit-spec",
+        "sf-systematic-artifact_gate-differential-review-461fbd0c"
+      ],
+      "runtime_update_allowed": false,
+      "public_benchmark_allowed": false,
+      "reason": "multi_skill_has_stronger_non_cost_evidence",
+      "remaining_gate": [
+        "provider-clean replay with measured provider tokens",
+        "same-window baseline/challenger token truth before cost decision"
+      ]
+    },
+    {
+      "capability": "sandbox_replay",
+      "mode_map_update": "INTERNAL_CANDIDATE_ONLY",
+      "selected_skill_ids": [
+        "sf2-sandbox_replay-route-fit-spec",
+        "sf-systematic-artifact_gate-differential-review-461fbd0c"
+      ],
+      "runtime_update_allowed": false,
+      "public_benchmark_allowed": false,
+      "reason": "multi_skill_has_stronger_non_cost_evidence",
+      "remaining_gate": [
+        "provider-clean replay with measured provider tokens",
+        "same-window baseline/challenger token truth before cost decision"
+      ]
+    },
+    {
+      "capability": "swarm_multi_agent",
+      "mode_map_update": "KEEP_SINGLE_PRIMARY_FALLBACK",
+      "selected_skill_ids": [
+        "sf2-swarm_multi_agent-route-fit-spec"
+      ],
+      "runtime_update_allowed": false,
+      "public_benchmark_allowed": false,
+      "reason": "multi_skill_not_proven_until_executor_receipt_chain_passes",
+      "remaining_gate": [
+        "skill-specific MAT-B replay with executor receipt present",
+        "provider-clean MAT-B replay before cost/runtime/public eligibility"
+      ]
+    },
+    {
+      "capability": "ui_validator",
+      "mode_map_update": "INTERNAL_CANDIDATE_ONLY",
+      "selected_skill_ids": [
+        "sf-systematic-ui_validator-e2e-testing-d98eb7c3",
+        "sf-systematic-artifact_gate-differential-review-461fbd0c"
+      ],
+      "runtime_update_allowed": false,
+      "public_benchmark_allowed": false,
+      "reason": "multi_skill_has_stronger_non_cost_evidence",
+      "remaining_gate": [
+        "provider-clean replay with measured provider tokens",
+        "same-window baseline/challenger token truth before cost decision"
+      ]
+    },
+    {
+      "capability": "ultra_review",
+      "mode_map_update": "INTERNAL_CANDIDATE_ONLY",
+      "selected_skill_ids": [
+        "sf-systematic-codeintel-first-principles-thinking-f95019ea",
+        "sf2-autonomic_router-route-fit-spec",
+        "github11-vulnerability-scanner-ultra-review"
+      ],
+      "runtime_update_allowed": false,
+      "public_benchmark_allowed": false,
+      "reason": "multi_skill_has_stronger_non_cost_evidence",
+      "remaining_gate": [
+        "provider-clean replay with measured provider tokens",
+        "same-window baseline/challenger token truth before cost decision"
+      ]
+    },
+    {
+      "capability": "xray",
+      "mode_map_update": "INTERNAL_CANDIDATE_ONLY",
+      "selected_skill_ids": [
+        "diagnose",
+        "sf-systematic-artifact_gate-differential-review-461fbd0c"
+      ],
+      "runtime_update_allowed": false,
+      "public_benchmark_allowed": false,
+      "reason": "multi_skill_has_stronger_non_cost_evidence",
+      "remaining_gate": [
+        "provider-clean replay with measured provider tokens",
+        "same-window baseline/challenger token truth before cost decision"
+      ]
+    }
+  ],
+  "claim_boundary": [
+    "Mode map updates are internal HEEP candidate state only.",
+    "Runtime defaults require the runtime apply review gate."
+  ]
+}

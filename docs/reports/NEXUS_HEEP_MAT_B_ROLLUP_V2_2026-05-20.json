@@ -1,0 +1,719 @@
+{
+  "schema": "nexus.heep_mat_b_rollup_v2.v1",
+  "status": "PASS",
+  "summary": {
+    "capability_count": 13,
+    "internal_multi_skill_selection_count": 10,
+    "single_primary_fallback_count": 3,
+    "ready_for_runtime_apply_review_count": 9,
+    "executor_trio_replay_status": "BLOCKED",
+    "runtime_update_allowed": false,
+    "public_benchmark_allowed": false
+  },
+  "decisions": [
+    {
+      "capability": "direct_master_loop",
+      "decision": "USE_MULTI_SKILL",
+      "selected_mode": "multi_skill",
+      "selected_skill_ids": [
+        "sf-systematic-codeintel-first-principles-thinking-f95019ea",
+        "sf-systematic-direct_master_loop-build-32802a87",
+        "sf-systematic-artifact_gate-differential-review-461fbd0c"
+      ],
+      "selected_skill_paths": [
+        ".agents/skills/sf-systematic-challengers/sf-systematic-codeintel-first-principles-thinking-f95019ea/SKILL.md",
+        ".agents/skills/sf-systematic-challengers/sf-systematic-direct_master_loop-build-32802a87/SKILL.md",
+        ".agents/skills/sf-systematic-challengers/sf-systematic-artifact_gate-differential-review-461fbd0c/SKILL.md"
+      ],
+      "skill_asset_status": "PASS",
+      "missing_skill_ids": [],
+      "reason": "multi_skill_has_stronger_non_cost_evidence",
+      "source_mode_decision": "MULTI_SKILL_NON_COST_WIN",
+      "root_cause": "gateway_stats_missing_after_model_call",
+      "evidence": {
+        "baseline_skill_ids": [
+          "sf-systematic-direct_master_loop-build-32802a87"
+        ],
+        "challenger_skill_ids": [
+          "sf-systematic-codeintel-first-principles-thinking-f95019ea",
+          "sf-systematic-direct_master_loop-build-32802a87",
+          "sf-systematic-artifact_gate-differential-review-461fbd0c"
+        ],
+        "baseline_planned_receipt_chain": {
+          "evidence_present": true,
+          "gate_passed": true,
+          "injected": true,
+          "outcome_contributed": true,
+          "selected": true,
+          "used": true
+        },
+        "challenger_planned_receipt_chain": {
+          "evidence_present": true,
+          "gate_passed": true,
+          "injected": true,
+          "outcome_contributed": true,
+          "selected": true,
+          "used": true
+        },
+        "evidence_seal_count_delta": 2,
+        "wall_delta_observation": -1.4778,
+        "executor_route_smoke_status": "NOT_APPLICABLE"
+      },
+      "remaining_gate": [
+        "provider-clean replay with measured provider tokens",
+        "same-window baseline/challenger token truth before cost decision"
+      ],
+      "runtime_update_allowed": false,
+      "public_benchmark_allowed": false
+    },
+    {
+      "capability": "drone",
+      "decision": "USE_SINGLE_PRIMARY_FALLBACK",
+      "selected_mode": "single_primary",
+      "selected_skill_ids": [
+        "sf-systematic-drone-python-background-jobs-18326a62"
+      ],
+      "selected_skill_paths": [
+        ".agents/skills/sf-systematic-challengers/sf-systematic-drone-python-background-jobs-18326a62/SKILL.md"
+      ],
+      "skill_asset_status": "PASS",
+      "missing_skill_ids": [],
+      "reason": "multi_skill_not_proven_until_executor_receipt_chain_passes",
+      "source_mode_decision": "UNDECIDED_RECEIPT_CHAIN_MISSING",
+      "root_cause": "expected_executor_receipt_missing",
+      "evidence": {
+        "baseline_skill_ids": [
+          "sf-systematic-drone-python-background-jobs-18326a62"
+        ],
+        "challenger_skill_ids": [
+          "sf-systematic-codeintel-first-principles-thinking-f95019ea",
+          "sf-systematic-drone-python-background-jobs-18326a62",
+          "sf-systematic-artifact_gate-differential-review-461fbd0c"
+        ],
+        "baseline_planned_receipt_chain": {
+          "evidence_present": true,
+          "gate_passed": true,
+          "injected": true,
+          "outcome_contributed": true,
+          "selected": true,
+          "used": true
+        },
+        "challenger_planned_receipt_chain": {
+          "evidence_present": true,
+          "gate_passed": true,
+          "injected": true,
+          "outcome_contributed": true,
+          "selected": true,
+          "used": true
+        },
+        "evidence_seal_count_delta": null,
+        "wall_delta_observation": null,
+        "executor_route_smoke_status": "PASS"
+      },
+      "remaining_gate": [
+        "skill-specific MAT-B replay with executor receipt present",
+        "provider-clean MAT-B replay before cost/runtime/public eligibility"
+      ],
+      "runtime_update_allowed": false,
+      "public_benchmark_allowed": false
+    },
+    {
+      "capability": "external_productivity",
+      "decision": "USE_MULTI_SKILL",
+      "selected_mode": "multi_skill",
+      "selected_skill_ids": [
+        "sf-systematic-codeintel-first-principles-thinking-f95019ea",
+        "sf-systematic-external_productivity-writer-77dc7840",
+        "sf-systematic-artifact_gate-differential-review-461fbd0c"
+      ],
+      "selected_skill_paths": [
+        ".agents/skills/sf-systematic-challengers/sf-systematic-codeintel-first-principles-thinking-f95019ea/SKILL.md",
+        ".agents/skills/sf-systematic-challengers/sf-systematic-external_productivity-writer-77dc7840/SKILL.md",
+        ".agents/skills/sf-systematic-challengers/sf-systematic-artifact_gate-differential-review-461fbd0c/SKILL.md"
+      ],
+      "skill_asset_status": "PASS",
+      "missing_skill_ids": [],
+      "reason": "multi_skill_has_stronger_non_cost_evidence",
+      "source_mode_decision": "MULTI_SKILL_NON_COST_WIN",
+      "root_cause": "gateway_stats_missing_after_model_call",
+      "evidence": {
+        "baseline_skill_ids": [
+          "sf-systematic-external_productivity-writer-77dc7840"
+        ],
+        "challenger_skill_ids": [
+          "sf-systematic-codeintel-first-principles-thinking-f95019ea",
+          "sf-systematic-external_productivity-writer-77dc7840",
+          "sf-systematic-artifact_gate-differential-review-461fbd0c"
+        ],
+        "baseline_planned_receipt_chain": {
+          "evidence_present": true,
+          "gate_passed": true,
+          "injected": true,
+          "outcome_contributed": true,
+          "selected": true,
+          "used": true
+        },
+        "challenger_planned_receipt_chain": {
+          "evidence_present": true,
+          "gate_passed": true,
+          "injected": true,
+          "outcome_contributed": true,
+          "selected": true,
+          "used": true
+        },
+        "evidence_seal_count_delta": 2,
+        "wall_delta_observation": 0.912,
+        "executor_route_smoke_status": "NOT_APPLICABLE"
+      },
+      "remaining_gate": [
+        "provider-clean replay with measured provider tokens",
+        "same-window baseline/challenger token truth before cost decision"
+      ],
+      "runtime_update_allowed": false,
+      "public_benchmark_allowed": false
+    },
+    {
+      "capability": "hyper_sprint",
+      "decision": "USE_MULTI_SKILL",
+      "selected_mode": "multi_skill",
+      "selected_skill_ids": [
+        "sf-systematic-codeintel-first-principles-thinking-f95019ea",
+        "sf2-hyper_sprint-route-fit-spec",
+        "sf-systematic-artifact_gate-differential-review-461fbd0c"
+      ],
+      "selected_skill_paths": [
+        ".agents/skills/sf-systematic-challengers/sf-systematic-codeintel-first-principles-thinking-f95019ea/SKILL.md",
+        ".agents/skills/sf2/sf2-hyper_sprint-route-fit-spec/SKILL.md",
+        ".agents/skills/sf-systematic-challengers/sf-systematic-artifact_gate-differential-review-461fbd0c/SKILL.md"
+      ],
+      "skill_asset_status": "PASS",
+      "missing_skill_ids": [],
+      "reason": "multi_skill_has_stronger_non_cost_evidence",
+      "source_mode_decision": "MULTI_SKILL_NON_COST_WIN",
+      "root_cause": "gateway_stats_missing_after_model_call",
+      "evidence": {
+        "baseline_skill_ids": [
+          "sf2-hyper_sprint-route-fit-spec"
+        ],
+        "challenger_skill_ids": [
+          "sf-systematic-codeintel-first-principles-thinking-f95019ea",
+          "sf2-hyper_sprint-route-fit-spec",
+          "sf-systematic-artifact_gate-differential-review-461fbd0c"
+        ],
+        "baseline_planned_receipt_chain": {
+          "evidence_present": true,
+          "gate_passed": true,
+          "injected": true,
+          "outcome_contributed": true,
+          "selected": true,
+          "used": true
+        },
+        "challenger_planned_receipt_chain": {
+          "evidence_present": true,
+          "gate_passed": true,
+          "injected": true,
+          "outcome_contributed": true,
+          "selected": true,
+          "used": true
+        },
+        "evidence_seal_count_delta": 2,
+        "wall_delta_observation": -1.5992,
+        "executor_route_smoke_status": "NOT_APPLICABLE"
+      },
+      "remaining_gate": [
+        "provider-clean replay with measured provider tokens",
+        "same-window baseline/challenger token truth before cost decision"
+      ],
+      "runtime_update_allowed": false,
+      "public_benchmark_allowed": false
+    },
+    {
+      "capability": "metabolism_resume",
+      "decision": "USE_MULTI_SKILL",
+      "selected_mode": "multi_skill",
+      "selected_skill_ids": [
+        "sf-systematic-codeintel-first-principles-thinking-f95019ea",
+        "github-auto-skill-safe-learning",
+        "sf-systematic-artifact_gate-differential-review-461fbd0c"
+      ],
+      "selected_skill_paths": [
+        ".agents/skills/sf-systematic-challengers/sf-systematic-codeintel-first-principles-thinking-f95019ea/SKILL.md",
+        ".agents/skills/github-challengers/github-auto-skill-safe-learning/SKILL.md",
+        ".agents/skills/sf-systematic-challengers/sf-systematic-artifact_gate-differential-review-461fbd0c/SKILL.md"
+      ],
+      "skill_asset_status": "PASS",
+      "missing_skill_ids": [],
+      "reason": "multi_skill_has_stronger_non_cost_evidence",
+      "source_mode_decision": "MULTI_SKILL_NON_COST_WIN",
+      "root_cause": "gateway_stats_missing_after_model_call",
+      "evidence": {
+        "baseline_skill_ids": [
+          "github-auto-skill-safe-learning"
+        ],
+        "challenger_skill_ids": [
+          "sf-systematic-codeintel-first-principles-thinking-f95019ea",
+          "github-auto-skill-safe-learning",
+          "sf-systematic-artifact_gate-differential-review-461fbd0c"
+        ],
+        "baseline_planned_receipt_chain": {
+          "evidence_present": true,
+          "gate_passed": true,
+          "injected": true,
+          "outcome_contributed": true,
+          "selected": true,
+          "used": true
+        },
+        "challenger_planned_receipt_chain": {
+          "evidence_present": true,
+          "gate_passed": true,
+          "injected": true,
+          "outcome_contributed": true,
+          "selected": true,
+          "used": true
+        },
+        "evidence_seal_count_delta": 2,
+        "wall_delta_observation": 0.1021,
+        "executor_route_smoke_status": "NOT_APPLICABLE"
+      },
+      "remaining_gate": [
+        "provider-clean replay with measured provider tokens",
+        "same-window baseline/challenger token truth before cost decision"
+      ],
+      "runtime_update_allowed": false,
+      "public_benchmark_allowed": false
+    },
+    {
+      "capability": "nightshift",
+      "decision": "USE_SINGLE_PRIMARY_FALLBACK",
+      "selected_mode": "single_primary",
+      "selected_skill_ids": [
+        "sf2-nightshift-route-fit-spec"
+      ],
+      "selected_skill_paths": [
+        ".agents/skills/sf2/sf2-nightshift-route-fit-spec/SKILL.md"
+      ],
+      "skill_asset_status": "PASS",
+      "missing_skill_ids": [],
+      "reason": "multi_skill_not_proven_until_executor_receipt_chain_passes",
+      "source_mode_decision": "UNDECIDED_RECEIPT_CHAIN_MISSING",
+      "root_cause": "expected_executor_receipt_missing",
+      "evidence": {
+        "baseline_skill_ids": [
+          "sf2-nightshift-route-fit-spec"
+        ],
+        "challenger_skill_ids": [
+          "sf-systematic-codeintel-first-principles-thinking-f95019ea",
+          "sf2-nightshift-route-fit-spec",
+          "sf-systematic-artifact_gate-differential-review-461fbd0c"
+        ],
+        "baseline_planned_receipt_chain": {
+          "evidence_present": true,
+          "gate_passed": true,
+          "injected": true,
+          "outcome_contributed": true,
+          "selected": true,
+          "used": true
+        },
+        "challenger_planned_receipt_chain": {
+          "evidence_present": true,
+          "gate_passed": true,
+          "injected": true,
+          "outcome_contributed": true,
+          "selected": true,
+          "used": true
+        },
+        "evidence_seal_count_delta": null,
+        "wall_delta_observation": null,
+        "executor_route_smoke_status": "PASS"
+      },
+      "remaining_gate": [
+        "skill-specific MAT-B replay with executor receipt present",
+        "provider-clean MAT-B replay before cost/runtime/public eligibility"
+      ],
+      "runtime_update_allowed": false,
+      "public_benchmark_allowed": false
+    },
+    {
+      "capability": "research_and_source_discipline",
+      "decision": "USE_MULTI_SKILL",
+      "selected_mode": "multi_skill",
+      "selected_skill_ids": [
+        "research-citation-chain-verifier",
+        "sf2-autonomic_router-route-fit-spec",
+        "sf-systematic-artifact_gate-differential-review-461fbd0c"
+      ],
+      "selected_skill_paths": [
+        ".agents/skills/research-citation-chain-verifier/SKILL.md",
+        ".agents/skills/sf2/sf2-autonomic_router-route-fit-spec/SKILL.md",
+        ".agents/skills/sf-systematic-challengers/sf-systematic-artifact_gate-differential-review-461fbd0c/SKILL.md"
+      ],
+      "skill_asset_status": "PASS",
+      "missing_skill_ids": [],
+      "reason": "multi_skill_has_stronger_non_cost_evidence",
+      "source_mode_decision": "MULTI_SKILL_NON_COST_WIN",
+      "root_cause": "gateway_stats_missing_after_model_call",
+      "evidence": {
+        "baseline_skill_ids": [
+          "research-citation-chain-verifier"
+        ],
+        "challenger_skill_ids": [
+          "research-citation-chain-verifier",
+          "sf2-autonomic_router-route-fit-spec",
+          "sf-systematic-artifact_gate-differential-review-461fbd0c"
+        ],
+        "baseline_planned_receipt_chain": {
+          "evidence_present": true,
+          "gate_passed": true,
+          "injected": true,
+          "outcome_contributed": true,
+          "selected": true,
+          "used": true
+        },
+        "challenger_planned_receipt_chain": {
+          "evidence_present": true,
+          "gate_passed": true,
+          "injected": true,
+          "outcome_contributed": true,
+          "selected": true,
+          "used": true
+        },
+        "evidence_seal_count_delta": 2,
+        "wall_delta_observation": 0.7594,
+        "executor_route_smoke_status": "NOT_APPLICABLE"
+      },
+      "remaining_gate": [
+        "provider-clean replay with measured provider tokens",
+        "same-window baseline/challenger token truth before cost decision"
+      ],
+      "runtime_update_allowed": false,
+      "public_benchmark_allowed": false
+    },
+    {
+      "capability": "research_control_plane",
+      "decision": "USE_MULTI_SKILL",
+      "selected_mode": "multi_skill",
+      "selected_skill_ids": [
+        "sf-systematic-research_control_plane-research-lookup-7e6f92a0",
+        "sf2-autonomic_router-route-fit-spec",
+        "sf-systematic-artifact_gate-differential-review-461fbd0c"
+      ],
+      "selected_skill_paths": [
+        ".agents/skills/sf-systematic-challengers/sf-systematic-research_control_plane-research-lookup-7e6f92a0/SKILL.md",
+        ".agents/skills/sf2/sf2-autonomic_router-route-fit-spec/SKILL.md",
+        ".agents/skills/sf-systematic-challengers/sf-systematic-artifact_gate-differential-review-461fbd0c/SKILL.md"
+      ],
+      "skill_asset_status": "PASS",
+      "missing_skill_ids": [],
+      "reason": "multi_skill_has_stronger_non_cost_evidence",
+      "source_mode_decision": "MULTI_SKILL_NON_COST_WIN",
+      "root_cause": "gateway_stats_missing_after_model_call",
+      "evidence": {
+        "baseline_skill_ids": [
+          "sf-systematic-research_control_plane-research-lookup-7e6f92a0"
+        ],
+        "challenger_skill_ids": [
+          "sf-systematic-research_control_plane-research-lookup-7e6f92a0",
+          "sf2-autonomic_router-route-fit-spec",
+          "sf-systematic-artifact_gate-differential-review-461fbd0c"
+        ],
+        "baseline_planned_receipt_chain": {
+          "evidence_present": true,
+          "gate_passed": true,
+          "injected": true,
+          "outcome_contributed": true,
+          "selected": true,
+          "used": true
+        },
+        "challenger_planned_receipt_chain": {
+          "evidence_present": true,
+          "gate_passed": true,
+          "injected": true,
+          "outcome_contributed": true,
+          "selected": true,
+          "used": true
+        },
+        "evidence_seal_count_delta": 2,
+        "wall_delta_observation": 0.3077,
+        "executor_route_smoke_status": "NOT_APPLICABLE"
+      },
+      "remaining_gate": [
+        "provider-clean replay with measured provider tokens",
+        "same-window baseline/challenger token truth before cost decision"
+      ],
+      "runtime_update_allowed": false,
+      "public_benchmark_allowed": false
+    },
+    {
+      "capability": "sandbox_replay",
+      "decision": "USE_MULTI_SKILL",
+      "selected_mode": "multi_skill",
+      "selected_skill_ids": [
+        "sf2-sandbox_replay-route-fit-spec",
+        "sf-systematic-artifact_gate-differential-review-461fbd0c"
+      ],
+      "selected_skill_paths": [
+        ".agents/skills/sf2/sf2-sandbox_replay-route-fit-spec/SKILL.md",
+        ".agents/skills/sf-systematic-challengers/sf-systematic-artifact_gate-differential-review-461fbd0c/SKILL.md"
+      ],
+      "skill_asset_status": "PASS",
+      "missing_skill_ids": [],
+      "reason": "multi_skill_has_stronger_non_cost_evidence",
+      "source_mode_decision": "MULTI_SKILL_NON_COST_WIN",
+      "root_cause": "gateway_stats_missing_after_model_call",
+      "evidence": {
+        "baseline_skill_ids": [
+          "sf2-sandbox_replay-route-fit-spec"
+        ],
+        "challenger_skill_ids": [
+          "sf2-sandbox_replay-route-fit-spec",
+          "sf-systematic-artifact_gate-differential-review-461fbd0c"
+        ],
+        "baseline_planned_receipt_chain": {
+          "evidence_present": true,
+          "gate_passed": true,
+          "injected": true,
+          "outcome_contributed": true,
+          "selected": true,
+          "used": true
+        },
+        "challenger_planned_receipt_chain": {
+          "evidence_present": true,
+          "gate_passed": true,
+          "injected": true,
+          "outcome_contributed": true,
+          "selected": true,
+          "used": true
+        },
+        "evidence_seal_count_delta": 1,
+        "wall_delta_observation": 0.8569,
+        "executor_route_smoke_status": "NOT_APPLICABLE"
+      },
+      "remaining_gate": [
+        "provider-clean replay with measured provider tokens",
+        "same-window baseline/challenger token truth before cost decision"
+      ],
+      "runtime_update_allowed": false,
+      "public_benchmark_allowed": false
+    },
+    {
+      "capability": "swarm_multi_agent",
+      "decision": "USE_SINGLE_PRIMARY_FALLBACK",
+      "selected_mode": "single_primary",
+      "selected_skill_ids": [
+        "sf2-swarm_multi_agent-route-fit-spec"
+      ],
+      "selected_skill_paths": [
+        ".agents/skills/sf2/sf2-swarm_multi_agent-route-fit-spec/SKILL.md"
+      ],
+      "skill_asset_status": "PASS",
+      "missing_skill_ids": [],
+      "reason": "multi_skill_not_proven_until_executor_receipt_chain_passes",
+      "source_mode_decision": "UNDECIDED_RECEIPT_CHAIN_MISSING",
+      "root_cause": "expected_executor_receipt_missing",
+      "evidence": {
+        "baseline_skill_ids": [
+          "sf2-swarm_multi_agent-route-fit-spec"
+        ],
+        "challenger_skill_ids": [
+          "sf-systematic-codeintel-first-principles-thinking-f95019ea",
+          "sf2-swarm_multi_agent-route-fit-spec",
+          "sf-systematic-artifact_gate-differential-review-461fbd0c"
+        ],
+        "baseline_planned_receipt_chain": {
+          "evidence_present": true,
+          "gate_passed": true,
+          "injected": true,
+          "outcome_contributed": true,
+          "selected": true,
+          "used": true
+        },
+        "challenger_planned_receipt_chain": {
+          "evidence_present": true,
+          "gate_passed": true,
+          "injected": true,
+          "outcome_contributed": true,
+          "selected": true,
+          "used": true
+        },
+        "evidence_seal_count_delta": null,
+        "wall_delta_observation": null,
+        "executor_route_smoke_status": "PASS"
+      },
+      "remaining_gate": [
+        "skill-specific MAT-B replay with executor receipt present",
+        "provider-clean MAT-B replay before cost/runtime/public eligibility"
+      ],
+      "runtime_update_allowed": false,
+      "public_benchmark_allowed": false
+    },
+    {
+      "capability": "ui_validator",
+      "decision": "USE_MULTI_SKILL",
+      "selected_mode": "multi_skill",
+      "selected_skill_ids": [
+        "sf-systematic-ui_validator-e2e-testing-d98eb7c3",
+        "sf-systematic-artifact_gate-differential-review-461fbd0c"
+      ],
+      "selected_skill_paths": [
+        ".agents/skills/sf-systematic-challengers/sf-systematic-ui_validator-e2e-testing-d98eb7c3/SKILL.md",
+        ".agents/skills/sf-systematic-challengers/sf-systematic-artifact_gate-differential-review-461fbd0c/SKILL.md"
+      ],
+      "skill_asset_status": "PASS",
+      "missing_skill_ids": [],
+      "reason": "multi_skill_has_stronger_non_cost_evidence",
+      "source_mode_decision": "MULTI_SKILL_NON_COST_WIN",
+      "root_cause": "gateway_stats_missing_after_model_call",
+      "evidence": {
+        "baseline_skill_ids": [
+          "sf-systematic-ui_validator-e2e-testing-d98eb7c3"
+        ],
+        "challenger_skill_ids": [
+          "sf-systematic-ui_validator-e2e-testing-d98eb7c3",
+          "sf-systematic-artifact_gate-differential-review-461fbd0c"
+        ],
+        "baseline_planned_receipt_chain": {
+          "evidence_present": true,
+          "gate_passed": true,
+          "injected": true,
+          "outcome_contributed": true,
+          "selected": true,
+          "used": true
+        },
+        "challenger_planned_receipt_chain": {
+          "evidence_present": true,
+          "gate_passed": true,
+          "injected": true,
+          "outcome_contributed": true,
+          "selected": true,
+          "used": true
+        },
+        "evidence_seal_count_delta": 1,
+        "wall_delta_observation": 0.4302,
+        "executor_route_smoke_status": "NOT_APPLICABLE"
+      },
+      "remaining_gate": [
+        "provider-clean replay with measured provider tokens",
+        "same-window baseline/challenger token truth before cost decision"
+      ],
+      "runtime_update_allowed": false,
+      "public_benchmark_allowed": false
+    },
+    {
+      "capability": "ultra_review",
+      "decision": "USE_MULTI_SKILL",
+      "selected_mode": "multi_skill",
+      "selected_skill_ids": [
+        "sf-systematic-codeintel-first-principles-thinking-f95019ea",
+        "sf2-autonomic_router-route-fit-spec",
+        "github11-vulnerability-scanner-ultra-review"
+      ],
+      "selected_skill_paths": [
+        ".agents/skills/sf-systematic-challengers/sf-systematic-codeintel-first-principles-thinking-f95019ea/SKILL.md",
+        ".agents/skills/sf2/sf2-autonomic_router-route-fit-spec/SKILL.md",
+        ".agents/skills/github-round11-challengers/github11-vulnerability-scanner-ultra-review/SKILL.md"
+      ],
+      "skill_asset_status": "PASS",
+      "missing_skill_ids": [],
+      "reason": "multi_skill_has_stronger_non_cost_evidence",
+      "source_mode_decision": "MULTI_SKILL_NON_COST_WIN",
+      "root_cause": "gateway_stats_missing_after_model_call",
+      "evidence": {
+        "baseline_skill_ids": [
+          "github11-vulnerability-scanner-ultra-review"
+        ],
+        "challenger_skill_ids": [
+          "sf-systematic-codeintel-first-principles-thinking-f95019ea",
+          "sf2-autonomic_router-route-fit-spec",
+          "github11-vulnerability-scanner-ultra-review"
+        ],
+        "baseline_planned_receipt_chain": {
+          "evidence_present": true,
+          "gate_passed": true,
+          "injected": true,
+          "outcome_contributed": true,
+          "selected": true,
+          "used": true
+        },
+        "challenger_planned_receipt_chain": {
+          "evidence_present": true,
+          "gate_passed": true,
+          "injected": true,
+          "outcome_contributed": true,
+          "selected": true,
+          "used": true
+        },
+        "evidence_seal_count_delta": 2,
+        "wall_delta_observation": -1.2389,
+        "executor_route_smoke_status": "NOT_APPLICABLE"
+      },
+      "remaining_gate": [
+        "provider-clean replay with measured provider tokens",
+        "same-window baseline/challenger token truth before cost decision"
+      ],
+      "runtime_update_allowed": false,
+      "public_benchmark_allowed": false
+    },
+    {
+      "capability": "xray",
+      "decision": "USE_MULTI_SKILL",
+      "selected_mode": "multi_skill",
+      "selected_skill_ids": [
+        "diagnose",
+        "sf-systematic-artifact_gate-differential-review-461fbd0c"
+      ],
+      "selected_skill_paths": [
+        ".agents/skills/diagnose/SKILL.md",
+        ".agents/skills/sf-systematic-challengers/sf-systematic-artifact_gate-differential-review-461fbd0c/SKILL.md"
+      ],
+      "skill_asset_status": "PASS",
+      "missing_skill_ids": [],
+      "reason": "multi_skill_has_stronger_non_cost_evidence",
+      "source_mode_decision": "MULTI_SKILL_NON_COST_WIN",
+      "root_cause": "gateway_stats_missing_after_model_call",
+      "evidence": {
+        "baseline_skill_ids": [
+          "diagnose"
+        ],
+        "challenger_skill_ids": [
+          "diagnose",
+          "sf-systematic-artifact_gate-differential-review-461fbd0c"
+        ],
+        "baseline_planned_receipt_chain": {
+          "evidence_present": true,
+          "gate_passed": true,
+          "injected": true,
+          "outcome_contributed": true,
+          "selected": true,
+          "used": true
+        },
+        "challenger_planned_receipt_chain": {
+          "evidence_present": true,
+          "gate_passed": true,
+          "injected": true,
+          "outcome_contributed": true,
+          "selected": true,
+          "used": true
+        },
+        "evidence_seal_count_delta": 1,
+        "wall_delta_observation": -1.496,
+        "executor_route_smoke_status": "NOT_APPLICABLE"
+      },
+      "remaining_gate": [
+        "provider-clean replay with measured provider tokens",
+        "same-window baseline/challenger token truth before cost decision"
+      ],
+      "runtime_update_allowed": false,
+      "public_benchmark_allowed": false
+    }
+  ],
+  "blocking_gates": [
+    "provider-clean same-window replay with measured provider tokens",
+    "skill-specific MAT-B executor receipts for drone/nightshift/swarm_multi_agent",
+    "runtime apply review packet must not consume blocked rows",
+    "public benchmark remains separate and blocked"
+  ],
+  "claim_boundary": [
+    "Rollup V2 finalizes internal usable skill decisions for the 13 previously blocked capabilities.",
+    "It does not change runtime defaults."
+  ]
+}

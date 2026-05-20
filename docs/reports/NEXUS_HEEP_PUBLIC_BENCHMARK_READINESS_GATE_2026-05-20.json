@@ -1,0 +1,18 @@
+{
+  "schema": "nexus.heep_public_benchmark_readiness_gate.v1",
+  "status": "BLOCKED",
+  "summary": {
+    "blocker_count": 3,
+    "runtime_update_allowed": false,
+    "public_benchmark_allowed": false
+  },
+  "blockers": [
+    "mat_b_rollup_public_benchmark_allowed_false",
+    "provider_clean_replay_holds_present",
+    "skill_specific_replay_holds_present"
+  ],
+  "claim_boundary": [
+    "Internal HEEP/EMAS evidence cannot be converted into a public benchmark claim.",
+    "Public benchmark requires its own same-model, hidden-verifier, provider-clean evidence bundle."
+  ]
+}

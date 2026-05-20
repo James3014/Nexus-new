@@ -1,0 +1,659 @@
+{
+  "schema": "nexus.heep_runtime_apply_review_packet_v2.v1",
+  "status": "PASS",
+  "summary": {
+    "row_count": 47,
+    "existing_ready_for_runtime_apply_review_count": 9,
+    "hold_for_provider_clean_count": 10,
+    "hold_for_skill_specific_replay_count": 3,
+    "runtime_update_allowed": false,
+    "public_benchmark_allowed": false
+  },
+  "rows": [
+    {
+      "capability": "artifact_gate",
+      "selected_mode": "Mode A (Solo)",
+      "disposition": "KEEP_SINGLE_PRIMARY",
+      "mat_b_verdict": "KEEP_SINGLE_PRIMARY",
+      "mat_b_reason_codes": [
+        "efficiency_regressed"
+      ],
+      "mat_b_required_before_runtime_apply": false,
+      "runtime_update_allowed": false,
+      "public_benchmark_allowed": false
+    },
+    {
+      "capability": "autonomic_router",
+      "selected_mode": "Mode B (Guard)",
+      "disposition": "READY_FOR_RUNTIME_APPLY_REVIEW",
+      "mat_b_verdict": "APPROVE_HEEP_MODE_CANDIDATE",
+      "mat_b_reason_codes": [],
+      "mat_b_required_before_runtime_apply": false,
+      "runtime_update_allowed": false,
+      "public_benchmark_allowed": false
+    },
+    {
+      "capability": "autoreason",
+      "selected_mode": "Mode A (Solo)",
+      "disposition": "KEEP_SINGLE_PRIMARY",
+      "mat_b_verdict": "KEEP_SINGLE_PRIMARY",
+      "mat_b_reason_codes": [
+        "efficiency_regressed"
+      ],
+      "mat_b_required_before_runtime_apply": false,
+      "runtime_update_allowed": false,
+      "public_benchmark_allowed": false
+    },
+    {
+      "capability": "belief",
+      "selected_mode": "Mode B (Guard)",
+      "disposition": "READY_FOR_RUNTIME_APPLY_REVIEW",
+      "mat_b_verdict": "APPROVE_HEEP_MODE_CANDIDATE",
+      "mat_b_reason_codes": [],
+      "mat_b_required_before_runtime_apply": false,
+      "runtime_update_allowed": false,
+      "public_benchmark_allowed": false
+    },
+    {
+      "capability": "benchmark_meta_opt",
+      "selected_mode": "Mode A (Solo)",
+      "disposition": "KEEP_SINGLE_PRIMARY",
+      "mat_b_verdict": "KEEP_SINGLE_PRIMARY",
+      "mat_b_reason_codes": [
+        "efficiency_regressed"
+      ],
+      "mat_b_required_before_runtime_apply": false,
+      "runtime_update_allowed": false,
+      "public_benchmark_allowed": false
+    },
+    {
+      "capability": "claim_gate",
+      "selected_mode": "Mode A (Solo)",
+      "disposition": "KEEP_SINGLE_PRIMARY",
+      "mat_b_verdict": "KEEP_SINGLE_PRIMARY",
+      "mat_b_reason_codes": [
+        "efficiency_regressed"
+      ],
+      "mat_b_required_before_runtime_apply": false,
+      "runtime_update_allowed": false,
+      "public_benchmark_allowed": false
+    },
+    {
+      "capability": "codeintel",
+      "selected_mode": "Mode C (Swarm)",
+      "disposition": "READY_FOR_RUNTIME_APPLY_REVIEW",
+      "mat_b_verdict": "APPROVE_HEEP_MODE_CANDIDATE",
+      "mat_b_reason_codes": [],
+      "mat_b_required_before_runtime_apply": false,
+      "runtime_update_allowed": false,
+      "public_benchmark_allowed": false
+    },
+    {
+      "capability": "ddtree",
+      "selected_mode": "Mode B (Guard)",
+      "disposition": "READY_FOR_RUNTIME_APPLY_REVIEW",
+      "mat_b_verdict": "APPROVE_HEEP_MODE_CANDIDATE",
+      "mat_b_reason_codes": [],
+      "mat_b_required_before_runtime_apply": false,
+      "runtime_update_allowed": false,
+      "public_benchmark_allowed": false
+    },
+    {
+      "capability": "direct_master_loop",
+      "selected_mode": "Mode A (Solo)",
+      "disposition": "BLOCKED_BY_PROVIDER_TOKEN_TRUTH",
+      "mat_b_verdict": "BLOCKED_BY_PROVIDER_TOKEN_TRUTH",
+      "mat_b_reason_codes": [
+        "baseline_infra_invalid:model_call_without_tokens",
+        "clean_replay_still_unclean",
+        "clean_replay:baseline_infra_invalid:model_call_without_tokens"
+      ],
+      "mat_b_required_before_runtime_apply": false,
+      "runtime_update_allowed": false,
+      "public_benchmark_allowed": false
+    },
+    {
+      "capability": "drone",
+      "selected_mode": "Mode A (Solo)",
+      "disposition": "BLOCKED_BY_RECEIPT_DATA_CONTRACT",
+      "mat_b_verdict": "BLOCKED_BY_RECEIPT_DATA_CONTRACT",
+      "mat_b_reason_codes": [
+        "baseline_infra_invalid:receipt_data_contract_violation",
+        "clean_replay_still_unclean",
+        "clean_replay:baseline_infra_invalid:receipt_data_contract_violation"
+      ],
+      "mat_b_required_before_runtime_apply": false,
+      "runtime_update_allowed": false,
+      "public_benchmark_allowed": false
+    },
+    {
+      "capability": "external_productivity",
+      "selected_mode": "Mode A (Solo)",
+      "disposition": "BLOCKED_BY_PROVIDER_TOKEN_TRUTH",
+      "mat_b_verdict": "BLOCKED_BY_PROVIDER_TOKEN_TRUTH",
+      "mat_b_reason_codes": [
+        "baseline_infra_invalid:model_call_without_tokens",
+        "clean_replay_still_unclean",
+        "clean_replay:baseline_infra_invalid:model_call_without_tokens"
+      ],
+      "mat_b_required_before_runtime_apply": false,
+      "runtime_update_allowed": false,
+      "public_benchmark_allowed": false
+    },
+    {
+      "capability": "file_lock_security_gate",
+      "selected_mode": "Mode A (Solo)",
+      "disposition": "KEEP_SINGLE_PRIMARY",
+      "mat_b_verdict": "KEEP_SINGLE_PRIMARY",
+      "mat_b_reason_codes": [
+        "efficiency_regressed"
+      ],
+      "mat_b_required_before_runtime_apply": false,
+      "runtime_update_allowed": false,
+      "public_benchmark_allowed": false
+    },
+    {
+      "capability": "forecast_pregate",
+      "selected_mode": "Mode A (Solo)",
+      "disposition": "KEEP_SINGLE_PRIMARY",
+      "mat_b_verdict": "KEEP_SINGLE_PRIMARY",
+      "mat_b_reason_codes": [
+        "efficiency_regressed"
+      ],
+      "mat_b_required_before_runtime_apply": false,
+      "runtime_update_allowed": false,
+      "public_benchmark_allowed": false
+    },
+    {
+      "capability": "governance_and_trust",
+      "selected_mode": "Mode C (Swarm)",
+      "disposition": "READY_FOR_RUNTIME_APPLY_REVIEW",
+      "mat_b_verdict": "APPROVE_HEEP_MODE_CANDIDATE",
+      "mat_b_reason_codes": [],
+      "mat_b_required_before_runtime_apply": false,
+      "runtime_update_allowed": false,
+      "public_benchmark_allowed": false
+    },
+    {
+      "capability": "hyper_sprint",
+      "selected_mode": "Mode A (Solo)",
+      "disposition": "BLOCKED_BY_PROVIDER_TOKEN_TRUTH",
+      "mat_b_verdict": "BLOCKED_BY_PROVIDER_TOKEN_TRUTH",
+      "mat_b_reason_codes": [
+        "baseline_infra_invalid:model_call_without_tokens",
+        "clean_replay_still_unclean",
+        "clean_replay:baseline_infra_invalid:model_call_without_tokens"
+      ],
+      "mat_b_required_before_runtime_apply": false,
+      "runtime_update_allowed": false,
+      "public_benchmark_allowed": false
+    },
+    {
+      "capability": "lancedb",
+      "selected_mode": "Mode B (Guard)",
+      "disposition": "READY_FOR_RUNTIME_APPLY_REVIEW",
+      "mat_b_verdict": "APPROVE_HEEP_MODE_CANDIDATE",
+      "mat_b_reason_codes": [],
+      "mat_b_required_before_runtime_apply": false,
+      "runtime_update_allowed": false,
+      "public_benchmark_allowed": false
+    },
+    {
+      "capability": "learn_ask",
+      "selected_mode": "Mode A (Solo)",
+      "disposition": "KEEP_SINGLE_PRIMARY",
+      "mat_b_verdict": "KEEP_SINGLE_PRIMARY",
+      "mat_b_reason_codes": [
+        "efficiency_regressed"
+      ],
+      "mat_b_required_before_runtime_apply": false,
+      "runtime_update_allowed": false,
+      "public_benchmark_allowed": false
+    },
+    {
+      "capability": "learning_closure",
+      "selected_mode": "Mode A (Solo)",
+      "disposition": "KEEP_SINGLE_PRIMARY",
+      "mat_b_verdict": "KEEP_SINGLE_PRIMARY",
+      "mat_b_reason_codes": [
+        "efficiency_regressed"
+      ],
+      "mat_b_required_before_runtime_apply": false,
+      "runtime_update_allowed": false,
+      "public_benchmark_allowed": false
+    },
+    {
+      "capability": "memory",
+      "selected_mode": "Mode B (Guard)",
+      "disposition": "READY_FOR_RUNTIME_APPLY_REVIEW",
+      "mat_b_verdict": "APPROVE_HEEP_MODE_CANDIDATE",
+      "mat_b_reason_codes": [],
+      "mat_b_required_before_runtime_apply": false,
+      "runtime_update_allowed": false,
+      "public_benchmark_allowed": false
+    },
+    {
+      "capability": "mempalace",
+      "selected_mode": "Mode B (Guard)",
+      "disposition": "READY_FOR_RUNTIME_APPLY_REVIEW",
+      "mat_b_verdict": "APPROVE_HEEP_MODE_CANDIDATE",
+      "mat_b_reason_codes": [],
+      "mat_b_required_before_runtime_apply": false,
+      "runtime_update_allowed": false,
+      "public_benchmark_allowed": false
+    },
+    {
+      "capability": "metabolism_resume",
+      "selected_mode": "Mode A (Solo)",
+      "disposition": "BLOCKED_BY_PROVIDER_TOKEN_TRUTH",
+      "mat_b_verdict": "BLOCKED_BY_PROVIDER_TOKEN_TRUTH",
+      "mat_b_reason_codes": [
+        "baseline_infra_invalid:model_call_without_tokens",
+        "clean_replay_still_unclean",
+        "clean_replay:baseline_infra_invalid:model_call_without_tokens"
+      ],
+      "mat_b_required_before_runtime_apply": false,
+      "runtime_update_allowed": false,
+      "public_benchmark_allowed": false
+    },
+    {
+      "capability": "nightshift",
+      "selected_mode": "Mode A (Solo)",
+      "disposition": "BLOCKED_BY_RECEIPT_DATA_CONTRACT",
+      "mat_b_verdict": "BLOCKED_BY_RECEIPT_DATA_CONTRACT",
+      "mat_b_reason_codes": [
+        "baseline_infra_invalid:receipt_data_contract_violation",
+        "clean_replay_still_unclean",
+        "clean_replay:baseline_infra_invalid:receipt_data_contract_violation"
+      ],
+      "mat_b_required_before_runtime_apply": false,
+      "runtime_update_allowed": false,
+      "public_benchmark_allowed": false
+    },
+    {
+      "capability": "policy_capability_gate",
+      "selected_mode": "Mode A (Solo)",
+      "disposition": "KEEP_SINGLE_PRIMARY",
+      "mat_b_verdict": "KEEP_SINGLE_PRIMARY",
+      "mat_b_reason_codes": [
+        "efficiency_regressed"
+      ],
+      "mat_b_required_before_runtime_apply": false,
+      "runtime_update_allowed": false,
+      "public_benchmark_allowed": false
+    },
+    {
+      "capability": "registry_skills_sync",
+      "selected_mode": "Mode A (Solo)",
+      "disposition": "KEEP_SINGLE_PRIMARY",
+      "mat_b_verdict": "KEEP_SINGLE_PRIMARY",
+      "mat_b_reason_codes": [
+        "efficiency_regressed"
+      ],
+      "mat_b_required_before_runtime_apply": false,
+      "runtime_update_allowed": false,
+      "public_benchmark_allowed": false
+    },
+    {
+      "capability": "regression_guard",
+      "selected_mode": "Mode B (Guard)",
+      "disposition": "READY_FOR_RUNTIME_APPLY_REVIEW",
+      "mat_b_verdict": "APPROVE_HEEP_MODE_CANDIDATE",
+      "mat_b_reason_codes": [],
+      "mat_b_required_before_runtime_apply": false,
+      "runtime_update_allowed": false,
+      "public_benchmark_allowed": false
+    },
+    {
+      "capability": "repair_loop",
+      "selected_mode": "Mode A (Solo)",
+      "disposition": "KEEP_SINGLE_PRIMARY",
+      "mat_b_verdict": "KEEP_SINGLE_PRIMARY",
+      "mat_b_reason_codes": [
+        "efficiency_regressed"
+      ],
+      "mat_b_required_before_runtime_apply": false,
+      "runtime_update_allowed": false,
+      "public_benchmark_allowed": false
+    },
+    {
+      "capability": "research",
+      "selected_mode": "Mode A (Solo)",
+      "disposition": "REJECT_MULTI_SKILL",
+      "mat_b_verdict": "REJECT_MULTI_SKILL",
+      "mat_b_reason_codes": [
+        "reliability_not_better_or_delivery_return"
+      ],
+      "mat_b_required_before_runtime_apply": false,
+      "runtime_update_allowed": false,
+      "public_benchmark_allowed": false
+    },
+    {
+      "capability": "research_and_source_discipline",
+      "selected_mode": "Mode A (Solo)",
+      "disposition": "BLOCKED_BY_PROVIDER_TOKEN_TRUTH",
+      "mat_b_verdict": "BLOCKED_BY_PROVIDER_TOKEN_TRUTH",
+      "mat_b_reason_codes": [
+        "baseline_infra_invalid:model_call_without_tokens",
+        "clean_replay_still_unclean",
+        "clean_replay:baseline_infra_invalid:model_call_without_tokens"
+      ],
+      "mat_b_required_before_runtime_apply": false,
+      "runtime_update_allowed": false,
+      "public_benchmark_allowed": false
+    },
+    {
+      "capability": "research_control_plane",
+      "selected_mode": "Mode A (Solo)",
+      "disposition": "BLOCKED_BY_PROVIDER_TOKEN_TRUTH",
+      "mat_b_verdict": "BLOCKED_BY_PROVIDER_TOKEN_TRUTH",
+      "mat_b_reason_codes": [
+        "baseline_infra_invalid:model_call_without_tokens",
+        "clean_replay_still_unclean",
+        "clean_replay:baseline_infra_invalid:model_call_without_tokens"
+      ],
+      "mat_b_required_before_runtime_apply": false,
+      "runtime_update_allowed": false,
+      "public_benchmark_allowed": false
+    },
+    {
+      "capability": "sandbox_replay",
+      "selected_mode": "Mode A (Solo)",
+      "disposition": "BLOCKED_BY_PROVIDER_TOKEN_TRUTH",
+      "mat_b_verdict": "BLOCKED_BY_PROVIDER_TOKEN_TRUTH",
+      "mat_b_reason_codes": [
+        "baseline_infra_invalid:model_call_without_tokens",
+        "clean_replay_still_unclean",
+        "clean_replay:baseline_infra_invalid:model_call_without_tokens"
+      ],
+      "mat_b_required_before_runtime_apply": false,
+      "runtime_update_allowed": false,
+      "public_benchmark_allowed": false
+    },
+    {
+      "capability": "swarm_multi_agent",
+      "selected_mode": "Mode A (Solo)",
+      "disposition": "BLOCKED_BY_RECEIPT_DATA_CONTRACT",
+      "mat_b_verdict": "BLOCKED_BY_RECEIPT_DATA_CONTRACT",
+      "mat_b_reason_codes": [
+        "baseline_infra_invalid:receipt_data_contract_violation",
+        "clean_replay_still_unclean",
+        "clean_replay:baseline_infra_invalid:receipt_data_contract_violation"
+      ],
+      "mat_b_required_before_runtime_apply": false,
+      "runtime_update_allowed": false,
+      "public_benchmark_allowed": false
+    },
+    {
+      "capability": "ui_validator",
+      "selected_mode": "Mode A (Solo)",
+      "disposition": "BLOCKED_BY_PROVIDER_TOKEN_TRUTH",
+      "mat_b_verdict": "BLOCKED_BY_PROVIDER_TOKEN_TRUTH",
+      "mat_b_reason_codes": [
+        "baseline_infra_invalid:model_call_without_tokens",
+        "clean_replay_still_unclean",
+        "clean_replay:baseline_infra_invalid:model_call_without_tokens"
+      ],
+      "mat_b_required_before_runtime_apply": false,
+      "runtime_update_allowed": false,
+      "public_benchmark_allowed": false
+    },
+    {
+      "capability": "ultra_review",
+      "selected_mode": "Mode A (Solo)",
+      "disposition": "BLOCKED_BY_PROVIDER_TOKEN_TRUTH",
+      "mat_b_verdict": "BLOCKED_BY_PROVIDER_TOKEN_TRUTH",
+      "mat_b_reason_codes": [
+        "baseline_infra_invalid:model_call_without_tokens",
+        "clean_replay_still_unclean",
+        "clean_replay:baseline_infra_invalid:model_call_without_tokens"
+      ],
+      "mat_b_required_before_runtime_apply": false,
+      "runtime_update_allowed": false,
+      "public_benchmark_allowed": false
+    },
+    {
+      "capability": "xray",
+      "selected_mode": "Mode A (Solo)",
+      "disposition": "BLOCKED_BY_PROVIDER_TOKEN_TRUTH",
+      "mat_b_verdict": "BLOCKED_BY_PROVIDER_TOKEN_TRUTH",
+      "mat_b_reason_codes": [
+        "baseline_infra_invalid:model_call_without_tokens",
+        "clean_replay_still_unclean",
+        "clean_replay:baseline_infra_invalid:model_call_without_tokens"
+      ],
+      "mat_b_required_before_runtime_apply": false,
+      "runtime_update_allowed": false,
+      "public_benchmark_allowed": false
+    },
+    {
+      "capability": "direct_master_loop",
+      "selected_mode": "multi_skill",
+      "selected_skill_ids": [
+        "sf-systematic-codeintel-first-principles-thinking-f95019ea",
+        "sf-systematic-direct_master_loop-build-32802a87",
+        "sf-systematic-artifact_gate-differential-review-461fbd0c"
+      ],
+      "disposition": "REVIEW_HOLD_PROVIDER_CLEAN_REPLAY",
+      "mat_b_verdict": "USE_MULTI_SKILL",
+      "mat_b_required_before_runtime_apply": true,
+      "remaining_gate": [
+        "provider-clean replay with measured provider tokens",
+        "same-window baseline/challenger token truth before cost decision"
+      ],
+      "runtime_update_allowed": false,
+      "public_benchmark_allowed": false
+    },
+    {
+      "capability": "drone",
+      "selected_mode": "single_primary",
+      "selected_skill_ids": [
+        "sf-systematic-drone-python-background-jobs-18326a62"
+      ],
+      "disposition": "REVIEW_HOLD_SKILL_SPECIFIC_MAT_B_REPLAY",
+      "mat_b_verdict": "USE_SINGLE_PRIMARY_FALLBACK",
+      "mat_b_required_before_runtime_apply": true,
+      "remaining_gate": [
+        "skill-specific MAT-B replay with executor receipt present",
+        "provider-clean MAT-B replay before cost/runtime/public eligibility"
+      ],
+      "runtime_update_allowed": false,
+      "public_benchmark_allowed": false
+    },
+    {
+      "capability": "external_productivity",
+      "selected_mode": "multi_skill",
+      "selected_skill_ids": [
+        "sf-systematic-codeintel-first-principles-thinking-f95019ea",
+        "sf-systematic-external_productivity-writer-77dc7840",
+        "sf-systematic-artifact_gate-differential-review-461fbd0c"
+      ],
+      "disposition": "REVIEW_HOLD_PROVIDER_CLEAN_REPLAY",
+      "mat_b_verdict": "USE_MULTI_SKILL",
+      "mat_b_required_before_runtime_apply": true,
+      "remaining_gate": [
+        "provider-clean replay with measured provider tokens",
+        "same-window baseline/challenger token truth before cost decision"
+      ],
+      "runtime_update_allowed": false,
+      "public_benchmark_allowed": false
+    },
+    {
+      "capability": "hyper_sprint",
+      "selected_mode": "multi_skill",
+      "selected_skill_ids": [
+        "sf-systematic-codeintel-first-principles-thinking-f95019ea",
+        "sf2-hyper_sprint-route-fit-spec",
+        "sf-systematic-artifact_gate-differential-review-461fbd0c"
+      ],
+      "disposition": "REVIEW_HOLD_PROVIDER_CLEAN_REPLAY",
+      "mat_b_verdict": "USE_MULTI_SKILL",
+      "mat_b_required_before_runtime_apply": true,
+      "remaining_gate": [
+        "provider-clean replay with measured provider tokens",
+        "same-window baseline/challenger token truth before cost decision"
+      ],
+      "runtime_update_allowed": false,
+      "public_benchmark_allowed": false
+    },
+    {
+      "capability": "metabolism_resume",
+      "selected_mode": "multi_skill",
+      "selected_skill_ids": [
+        "sf-systematic-codeintel-first-principles-thinking-f95019ea",
+        "github-auto-skill-safe-learning",
+        "sf-systematic-artifact_gate-differential-review-461fbd0c"
+      ],
+      "disposition": "REVIEW_HOLD_PROVIDER_CLEAN_REPLAY",
+      "mat_b_verdict": "USE_MULTI_SKILL",
+      "mat_b_required_before_runtime_apply": true,
+      "remaining_gate": [
+        "provider-clean replay with measured provider tokens",
+        "same-window baseline/challenger token truth before cost decision"
+      ],
+      "runtime_update_allowed": false,
+      "public_benchmark_allowed": false
+    },
+    {
+      "capability": "nightshift",
+      "selected_mode": "single_primary",
+      "selected_skill_ids": [
+        "sf2-nightshift-route-fit-spec"
+      ],
+      "disposition": "REVIEW_HOLD_SKILL_SPECIFIC_MAT_B_REPLAY",
+      "mat_b_verdict": "USE_SINGLE_PRIMARY_FALLBACK",
+      "mat_b_required_before_runtime_apply": true,
+      "remaining_gate": [
+        "skill-specific MAT-B replay with executor receipt present",
+        "provider-clean MAT-B replay before cost/runtime/public eligibility"
+      ],
+      "runtime_update_allowed": false,
+      "public_benchmark_allowed": false
+    },
+    {
+      "capability": "research_and_source_discipline",
+      "selected_mode": "multi_skill",
+      "selected_skill_ids": [
+        "research-citation-chain-verifier",
+        "sf2-autonomic_router-route-fit-spec",
+        "sf-systematic-artifact_gate-differential-review-461fbd0c"
+      ],
+      "disposition": "REVIEW_HOLD_PROVIDER_CLEAN_REPLAY",
+      "mat_b_verdict": "USE_MULTI_SKILL",
+      "mat_b_required_before_runtime_apply": true,
+      "remaining_gate": [
+        "provider-clean replay with measured provider tokens",
+        "same-window baseline/challenger token truth before cost decision"
+      ],
+      "runtime_update_allowed": false,
+      "public_benchmark_allowed": false
+    },
+    {
+      "capability": "research_control_plane",
+      "selected_mode": "multi_skill",
+      "selected_skill_ids": [
+        "sf-systematic-research_control_plane-research-lookup-7e6f92a0",
+        "sf2-autonomic_router-route-fit-spec",
+        "sf-systematic-artifact_gate-differential-review-461fbd0c"
+      ],
+      "disposition": "REVIEW_HOLD_PROVIDER_CLEAN_REPLAY",
+      "mat_b_verdict": "USE_MULTI_SKILL",
+      "mat_b_required_before_runtime_apply": true,
+      "remaining_gate": [
+        "provider-clean replay with measured provider tokens",
+        "same-window baseline/challenger token truth before cost decision"
+      ],
+      "runtime_update_allowed": false,
+      "public_benchmark_allowed": false
+    },
+    {
+      "capability": "sandbox_replay",
+      "selected_mode": "multi_skill",
+      "selected_skill_ids": [
+        "sf2-sandbox_replay-route-fit-spec",
+        "sf-systematic-artifact_gate-differential-review-461fbd0c"
+      ],
+      "disposition": "REVIEW_HOLD_PROVIDER_CLEAN_REPLAY",
+      "mat_b_verdict": "USE_MULTI_SKILL",
+      "mat_b_required_before_runtime_apply": true,
+      "remaining_gate": [
+        "provider-clean replay with measured provider tokens",
+        "same-window baseline/challenger token truth before cost decision"
+      ],
+      "runtime_update_allowed": false,
+      "public_benchmark_allowed": false
+    },
+    {
+      "capability": "swarm_multi_agent",
+      "selected_mode": "single_primary",
+      "selected_skill_ids": [
+        "sf2-swarm_multi_agent-route-fit-spec"
+      ],
+      "disposition": "REVIEW_HOLD_SKILL_SPECIFIC_MAT_B_REPLAY",
+      "mat_b_verdict": "USE_SINGLE_PRIMARY_FALLBACK",
+      "mat_b_required_before_runtime_apply": true,
+      "remaining_gate": [
+        "skill-specific MAT-B replay with executor receipt present",
+        "provider-clean MAT-B replay before cost/runtime/public eligibility"
+      ],
+      "runtime_update_allowed": false,
+      "public_benchmark_allowed": false
+    },
+    {
+      "capability": "ui_validator",
+      "selected_mode": "multi_skill",
+      "selected_skill_ids": [
+        "sf-systematic-ui_validator-e2e-testing-d98eb7c3",
+        "sf-systematic-artifact_gate-differential-review-461fbd0c"
+      ],
+      "disposition": "REVIEW_HOLD_PROVIDER_CLEAN_REPLAY",
+      "mat_b_verdict": "USE_MULTI_SKILL",
+      "mat_b_required_before_runtime_apply": true,
+      "remaining_gate": [
+        "provider-clean replay with measured provider tokens",
+        "same-window baseline/challenger token truth before cost decision"
+      ],
+      "runtime_update_allowed": false,
+      "public_benchmark_allowed": false
+    },
+    {
+      "capability": "ultra_review",
+      "selected_mode": "multi_skill",
+      "selected_skill_ids": [
+        "sf-systematic-codeintel-first-principles-thinking-f95019ea",
+        "sf2-autonomic_router-route-fit-spec",
+        "github11-vulnerability-scanner-ultra-review"
+      ],
+      "disposition": "REVIEW_HOLD_PROVIDER_CLEAN_REPLAY",
+      "mat_b_verdict": "USE_MULTI_SKILL",
+      "mat_b_required_before_runtime_apply": true,
+      "remaining_gate": [
+        "provider-clean replay with measured provider tokens",
+        "same-window baseline/challenger token truth before cost decision"
+      ],
+      "runtime_update_allowed": false,
+      "public_benchmark_allowed": false
+    },
+    {
+      "capability": "xray",
+      "selected_mode": "multi_skill",
+      "selected_skill_ids": [
+        "diagnose",
+        "sf-systematic-artifact_gate-differential-review-461fbd0c"
+      ],
+      "disposition": "REVIEW_HOLD_PROVIDER_CLEAN_REPLAY",
+      "mat_b_verdict": "USE_MULTI_SKILL",
+      "mat_b_required_before_runtime_apply": true,
+      "remaining_gate": [
+        "provider-clean replay with measured provider tokens",
+        "same-window baseline/challenger token truth before cost decision"
+      ],
+      "runtime_update_allowed": false,
+      "public_benchmark_allowed": false
+    }
+  ],
+  "claim_boundary": [
+    "This packet records review candidates and holds; it is not runtime default apply approval.",
+    "Provider-clean and skill-specific replay holds must close before runtime apply can consume the 13 blocked capabilities."
+  ]
+}
