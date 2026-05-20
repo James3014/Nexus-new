@@ -54,7 +54,7 @@ Observed implementation surface:
 
 Primary friction:
 
-- context budgeting, retrieval, and compaction are not yet a single audited context contract;
+- context budgeting, retrieval, and runtime ContextHub assembly now have audited contracts; compaction remains a later consumer of the same receipt shape;
 - route planning and benchmark runner both know about capability evidence and cost gates;
 - learning data artifacts are rich but not normalized into a stable data-quality flywheel;
 - skill-fit discovery, runtime apply, and public benchmark are now better separated, but need an ongoing intake/replace lifecycle;
@@ -593,6 +593,12 @@ Exit:
 - merge drivers enforce hard size/node/record caps and fail closed on parse or schema errors;
 - post-merge schema validation is recorded before the merged evidence can feed a claim gate.
 
+Implementation note 2026-05-20:
+
+- `nexus.contracts.evidence_retention.build_evidence_union_merge_guard` now provides the read-only union-merge eligibility contract.
+- The guard is intentionally not a git driver; it authorizes only evidence conflict-resolution eligibility and keeps runtime/public gates closed.
+- Hard caps are 50MB and 100k nodes, with `schema_validation_status=PASS` required before merged evidence can feed a claim/read-model path.
+
 ### OPT-G0-P: Packed Context Exfiltration Guard
 
 Goal: keep repository/context packs from leaking secrets or trusting unreviewed remote configuration.
@@ -805,3 +811,27 @@ Lesson:
 - Patching an evidence parser in a broad CI test module can mask or perturb the real parser behavior for later assertions in the same module.
 - Treat parser stubs as a last resort when the test can cheaply emit a real fixture file.
 - Prevention rule: changed-only CI tests should write a minimal JUnit fixture and exercise `_extract_junit_target_durations` directly instead of monkeypatching the parser seam.
+
+### Failure Lesson: Completion Gate Attachment Drift
+
+Lesson:
+
+- Attaching CompletionEnvelope state only in an export script leaves the reusable claim/evidence contract unaware of closeout readiness.
+- Treat script-level post-processing as a compatibility layer, not as the source of truth for runtime/public review gates.
+- Prevention rule: completion status and envelope references live in `ClaimEvidenceReadModel` validation, so every consumer gets the same fail-closed blockers.
+
+### Failure Lesson: Evidence Merge Eligibility Drift
+
+Lesson:
+
+- Multi-agent evidence ledgers can look mergeable because a git merge driver can union graph data, while the artifact itself may be oversized, non-commutative, or schema-invalid.
+- Treat merge drivers as transport helpers, not governance proof.
+- Prevention rule: evidence union-merge requires an explicit read-only guard with append-only/commutative shape, hard caps, and schema validation before any merged artifact feeds a claim gate.
+
+### Failure Lesson: Quarantine Blocker Shape Drift
+
+Lesson:
+
+- Tests for fail-closed context quarantine should assert the canonical blocker emitted by the contract, not an inferred source-index format from a nearby receipt shape.
+- Treat shorter blocker strings as acceptable when they preserve the quarantined skill id and the boundary category.
+- Prevention rule: contract tests should first inspect existing validator blocker names before inventing a more detailed expected string.

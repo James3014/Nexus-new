@@ -172,6 +172,34 @@ def test_context_hub_runtime_context_payload_returns_before_assembly_when_receip
     assert payload["public_benchmark_allowed"] is False
 
 
+def test_context_hub_runtime_context_payload_blocks_quarantined_skill_before_assembly(tmp_path, monkeypatch):
+    hub = ContextHub(str(tmp_path), deps=ContextDependencies(), strict_deps=True)
+
+    def fail_if_called(*args, **kwargs):
+        raise AssertionError("assemble_context should not run with quarantined skill context")
+
+    monkeypatch.setattr(hub, "assemble_context", fail_if_called)
+
+    payload = hub.assemble_context_with_runtime_contract(
+        "ctx-runtime",
+        [0, 1],
+        budget=120,
+        extra_sources=[
+            {
+                "source_id": "candidate-skill-from-example",
+                "kind": "skill",
+                "estimated_tokens": 10,
+                "skill_tier": "candidate_inbox",
+            }
+        ],
+    )
+
+    assert payload["status"] == "RETURN"
+    assert payload["context"] == ""
+    assert payload["adapter_receipt"]["status"] == "RETURN"
+    assert "quarantined_skill_context:candidate-skill-from-example" in payload["blockers"]
+
+
 def test_context_runtime_adapter_returns_without_calling_assembler_when_receipt_fails():
     def fail_if_called(*args, **kwargs):
         raise AssertionError("assembler should not run")

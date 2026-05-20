@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 from nexus.contracts.evidence_retention import (
+    EVIDENCE_UNION_MERGE_GUARD_SCHEMA,
+    build_evidence_union_merge_guard,
     build_evidence_retention_dry_run,
     classify_evidence_retention_path,
     current_evidence_paths_from_manifest,
@@ -82,3 +84,38 @@ def test_current_evidence_paths_from_manifest_ignores_invalid_shape() -> None:
     assert current_evidence_paths_from_manifest(
         {"keep_artifacts": ["./docs/reports/NEXUS_SF_FINAL_CURRENT_STATE_2026-05-20.md"]}
     ) == ("docs/reports/NEXUS_SF_FINAL_CURRENT_STATE_2026-05-20.md",)
+
+
+def test_union_merge_guard_passes_for_bounded_append_only_evidence() -> None:
+    guard = build_evidence_union_merge_guard(
+        path="docs/reports/evidence_bundle.json",
+        append_only=True,
+        file_size_bytes=1024,
+        node_count=20,
+    )
+
+    assert guard["schema"] == EVIDENCE_UNION_MERGE_GUARD_SCHEMA
+    assert guard["status"] == "PASS"
+    assert guard["runtime_update_allowed"] is False
+    assert guard["public_benchmark_allowed"] is False
+    assert guard["delete_allowed"] is False
+    assert guard["move_allowed"] is False
+
+
+def test_union_merge_guard_blocks_unbounded_or_non_commutative_merge() -> None:
+    guard = build_evidence_union_merge_guard(
+        path="docs/reports/evidence_bundle.json",
+        append_only=False,
+        commutative=False,
+        file_size_bytes=51 * 1024 * 1024,
+        node_count=100_001,
+        schema_validation_status="RETURN",
+    )
+
+    assert guard["status"] == "RETURN"
+    assert guard["blockers"] == [
+        "merge_file_size_over_limit",
+        "merge_node_count_over_limit",
+        "merge_requires_append_only_or_commutative_shape",
+        "merge_schema_validation_not_pass",
+    ]

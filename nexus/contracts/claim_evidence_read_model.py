@@ -38,6 +38,8 @@ class ClaimEvidenceReadModel:
     source_records: tuple[Mapping[str, Any], ...] = ()
     status: str = "PASS"
     sealed_evidence_required: bool = False
+    completion_status: str = "NOT_APPLICABLE"
+    completion_envelope_ref: str = ""
     schema: str = CLAIM_EVIDENCE_READ_MODEL_SCHEMA
     blockers: tuple[str, ...] = field(default_factory=tuple)
 
@@ -48,6 +50,8 @@ class ClaimEvidenceReadModel:
             "claim_class": self.claim_class.value,
             "provider_token_cleanliness": self.provider_token_cleanliness.value,
             "sealed_evidence_required": self.sealed_evidence_required,
+            "completion_status": self.completion_status,
+            "completion_envelope_ref": self.completion_envelope_ref,
             "evidence_bundle_refs": list(self.evidence_bundle_refs),
             "receipt_refs": list(self.receipt_refs),
             "records": [dict(record) for record in self.source_records],
@@ -72,6 +76,8 @@ def build_claim_evidence_read_model(
     evidence_bundle_refs: list[str] | tuple[str, ...] = (),
     receipt_refs: list[str] | tuple[str, ...] = (),
     sealed_evidence_required: bool = False,
+    completion_status: str = "NOT_APPLICABLE",
+    completion_envelope_ref: str = "",
 ) -> dict[str, Any]:
     claim = _claim_class(claim_class)
     gates = _gates_from_records(records)
@@ -84,6 +90,8 @@ def build_claim_evidence_read_model(
         provider_token_cleanliness=provider_cleanliness,
         source_records=tuple(records),
         sealed_evidence_required=bool(sealed_evidence_required),
+        completion_status=str(completion_status or "NOT_APPLICABLE").upper(),
+        completion_envelope_ref=str(completion_envelope_ref or ""),
     )
     return model.to_dict()
 
@@ -127,6 +135,13 @@ def validate_claim_evidence_read_model(payload: Mapping[str, Any]) -> list[str]:
         ProviderTokenCleanliness.NOT_APPLICABLE,
     }:
         blockers.append("public_ready_requires_measured_or_not_applicable_tokens")
+    completion_status = str(payload.get("completion_status") or "NOT_APPLICABLE").upper()
+    completion_ref = str(payload.get("completion_envelope_ref") or "")
+    if claim in {ClaimClass.RUNTIME_APPLY_REVIEW, ClaimClass.PUBLIC_READY}:
+        if completion_status not in {"PASS", "NOT_APPLICABLE"}:
+            blockers.append("completion_envelope_not_pass")
+        if completion_status == "PASS" and not completion_ref:
+            blockers.append("missing_completion_envelope_ref")
     if bool(payload.get("sealed_evidence_required", False)):
         for gate in _sealed_evidence_gates(payload):
             blockers.append(gate)

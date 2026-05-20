@@ -8,6 +8,9 @@ from nexus.contracts.optimization_report import ClaimClass, RetentionClass
 
 
 EVIDENCE_RETENTION_DRY_RUN_SCHEMA = "nexus_evidence_retention_dry_run.v1"
+EVIDENCE_UNION_MERGE_GUARD_SCHEMA = "nexus_evidence_union_merge_guard.v1"
+UNION_MERGE_MAX_BYTES = 50 * 1024 * 1024
+UNION_MERGE_MAX_NODES = 100_000
 RETENTION_REPORT_PREFIXES = (
     "NEXUS_OPT_",
     "NEXUS_SF_",
@@ -168,6 +171,61 @@ def current_evidence_paths_from_manifest(payload: Mapping[str, Any]) -> tuple[st
     if not isinstance(keep, list):
         return ()
     return tuple(_normalize_path(str(item)) for item in keep if str(item).strip())
+
+
+def build_evidence_union_merge_guard(
+    *,
+    path: str,
+    append_only: bool = False,
+    commutative: bool = False,
+    file_size_bytes: int = 0,
+    node_count: int = 0,
+    schema_validation_status: str = "PASS",
+    conflict_resolution: str = "union_merge",
+) -> dict[str, Any]:
+    """Return a read-only guard for automated evidence ledger conflict resolution.
+
+    The guard authorizes only the merge strategy's eligibility. It never moves
+    evidence, mutates git config, or upgrades claim/public readiness.
+    """
+
+    blockers: list[str] = []
+    normalized = _normalize_path(path)
+    size = max(0, int(file_size_bytes or 0))
+    nodes = max(0, int(node_count or 0))
+    schema_status = str(schema_validation_status or "").upper()
+    if not (append_only or commutative):
+        blockers.append("merge_requires_append_only_or_commutative_shape")
+    if size > UNION_MERGE_MAX_BYTES:
+        blockers.append("merge_file_size_over_limit")
+    if nodes > UNION_MERGE_MAX_NODES:
+        blockers.append("merge_node_count_over_limit")
+    if schema_status != "PASS":
+        blockers.append("merge_schema_validation_not_pass")
+    if not normalized:
+        blockers.append("merge_path_missing")
+    return {
+        "schema": EVIDENCE_UNION_MERGE_GUARD_SCHEMA,
+        "status": "PASS" if not blockers else "RETURN",
+        "path": normalized,
+        "conflict_resolution": conflict_resolution,
+        "append_only": bool(append_only),
+        "commutative": bool(commutative),
+        "file_size_bytes": size,
+        "max_file_size_bytes": UNION_MERGE_MAX_BYTES,
+        "node_count": nodes,
+        "max_node_count": UNION_MERGE_MAX_NODES,
+        "schema_validation_status": schema_status,
+        "runtime_update_allowed": False,
+        "public_benchmark_allowed": False,
+        "delete_allowed": False,
+        "move_allowed": False,
+        "blockers": sorted(set(blockers)),
+        "claim_boundary": [
+            "Union-merge guards only determine whether automated evidence conflict resolution is eligible.",
+            "They do not mutate evidence, change runtime policy, or unlock public benchmark claims.",
+        ],
+    }
 
 
 def _dry_run_blockers(rows: list[Mapping[str, Any]]) -> list[str]:

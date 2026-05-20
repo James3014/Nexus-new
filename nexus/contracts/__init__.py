@@ -37,7 +37,9 @@ from nexus.contracts.context_assembly import (
 )
 from nexus.contracts.evidence_retention import (
     EVIDENCE_RETENTION_DRY_RUN_SCHEMA,
+    EVIDENCE_UNION_MERGE_GUARD_SCHEMA,
     EvidenceRetentionItem,
+    build_evidence_union_merge_guard,
     build_evidence_retention_dry_run,
     classify_evidence_retention_path,
     current_evidence_paths_from_manifest,
@@ -95,6 +97,7 @@ __all__ = [
     "EVIDENCE_DATASET_MANIFEST_SCHEMA",
     "EVIDENCE_DATASET_RECORD_SCHEMA",
     "EVIDENCE_RETENTION_DRY_RUN_SCHEMA",
+    "EVIDENCE_UNION_MERGE_GUARD_SCHEMA",
     "ROUTE_DAG_PREGATE_SCHEMA",
     "RETRIEVAL_RECEIPT_SCHEMA",
     "ROUTE_CONTEXT_SEAM_FREEZE_SCHEMA",
@@ -121,6 +124,7 @@ __all__ = [
     "build_context_assembly_contract",
     "build_claim_evidence_read_model",
     "build_evidence_retention_dry_run",
+    "build_evidence_union_merge_guard",
     "build_optimization_report_contract",
     "build_route_dag_pregate",
     "build_retrieval_receipt",

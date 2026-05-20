@@ -39,9 +39,10 @@ def build_read_model_from_evidence_manifest(
         evidence_bundle_refs=evidence_refs,
         receipt_refs=receipt_refs,
         sealed_evidence_required=bool(manifest.get("sealed_evidence_required", claim_class == ClaimClass.PUBLIC_READY.value)),
+        completion_status=str(manifest.get("completion_status") or "NOT_APPLICABLE").upper(),
+        completion_envelope_ref=str(manifest.get("completion_envelope_ref") or ""),
     )
     _attach_manifest_schema_gate(model, manifest)
-    _attach_completion_gate(model, manifest)
     _attach_mutation_assurance_gate(model, manifest)
     if not dry_run:
         _write(output_path, model)
@@ -77,19 +78,6 @@ def _attach_manifest_schema_gate(model: dict[str, Any], manifest: dict[str, Any]
         if manifest_schema != EVIDENCE_DATASET_MANIFEST_SCHEMA:
             blockers = list(model.get("blockers", []) or [])
             blockers.append("invalid_or_missing_evidence_dataset_manifest_schema")
-            model["blockers"] = sorted(set(blockers))
-            model["status"] = "RETURN"
-
-
-def _attach_completion_gate(model: dict[str, Any], manifest: dict[str, Any]) -> None:
-    completion_status = str(manifest.get("completion_status") or "NOT_APPLICABLE").upper()
-    completion_ref = str(manifest.get("completion_envelope_ref") or "")
-    model["completion_status"] = completion_status
-    model["completion_envelope_ref"] = completion_ref
-    if model.get("claim_class") in {ClaimClass.RUNTIME_APPLY_REVIEW.value, ClaimClass.PUBLIC_READY.value}:
-        if completion_status not in {"PASS", "NOT_APPLICABLE"}:
-            blockers = list(model.get("blockers", []) or [])
-            blockers.append("completion_envelope_not_pass")
             model["blockers"] = sorted(set(blockers))
             model["status"] = "RETURN"
 

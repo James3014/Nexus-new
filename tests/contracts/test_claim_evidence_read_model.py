@@ -106,3 +106,30 @@ def test_read_model_requires_sealed_and_hash_valid_evidence_when_requested() -> 
 
     assert payload["status"] == "RETURN"
     assert payload["blockers"] == ["record_0:evidence_seal_not_pass"]
+
+
+def test_runtime_read_model_requires_completion_envelope_when_completion_passes() -> None:
+    payload = build_claim_evidence_read_model(
+        claim_class=ClaimClass.RUNTIME_APPLY_REVIEW,
+        records=[_record()],
+        evidence_bundle_refs=["docs/reports/evidence.json"],
+        receipt_refs=["docs/reports/receipt.json"],
+        completion_status="PASS",
+    )
+
+    assert payload["status"] == "RETURN"
+    assert "missing_completion_envelope_ref" in payload["blockers"]
+
+
+def test_runtime_read_model_blocks_failed_completion_envelope_in_contract() -> None:
+    payload = build_claim_evidence_read_model(
+        claim_class=ClaimClass.RUNTIME_APPLY_REVIEW,
+        records=[_record()],
+        evidence_bundle_refs=["docs/reports/evidence.json"],
+        receipt_refs=["docs/reports/receipt.json"],
+        completion_status="RETURN",
+        completion_envelope_ref="docs/reports/completion.json",
+    )
+
+    assert payload["status"] == "RETURN"
+    assert "completion_envelope_not_pass" in payload["blockers"]
