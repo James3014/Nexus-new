@@ -73,11 +73,6 @@ def test_run_changed_only_check_uses_selector_targets(monkeypatch, tmp_path, cap
         return True, "ok"
 
     monkeypatch.setattr(ci_gate, "run_step", fake_run_step)
-    monkeypatch.setattr(
-        ci_gate,
-        "_extract_junit_target_durations",
-        lambda _path, _targets: {"tests/ops/test_select_tests.py": 0.12},
-    )
 
     assert ci_gate.run_changed_only_check(["scripts/ops/select_tests.py"]) is True
     assert seen["name"] == "Changed-Only JIT Tests"

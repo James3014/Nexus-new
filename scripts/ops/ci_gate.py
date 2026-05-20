@@ -6,6 +6,7 @@ import json
 import argparse
 import subprocess
 import concurrent.futures
+import re
 import time
 import xml.etree.ElementTree as ET
 from datetime import datetime, timezone
@@ -21,6 +22,13 @@ from scripts.engine.output_guard import truncate_output
 
 WIKI_DRIFT_REPORT = ROOT / ".nexus" / "reports" / "wiki_drift_report.json"
 VENV_PYTHON = ROOT / ".venv" / "bin" / "python"
+CI_TRANSIENT_ARTIFACTS = (
+    ".nexus/reports/learn/learning_closure.jsonl",
+    ".nexusknowledge/beliefs.jsonl",
+    ".nexusknowledge/reconciliation_proposals.jsonl",
+    "wiki_audit.json",
+    "wiki_audit_changed.json",
+)
 REPORT_TRUST_AUDIT_TARGETS = (
     "tests/engine/test_completion_contract.py",
     "tests/engine/test_completion_enforcer.py",
@@ -55,19 +63,33 @@ def _target_matches_test_file(target: str, test_file: str) -> bool:
 def _extract_junit_target_durations(junit_path: Path, targets: list[str]) -> dict[str, float]:
     if not junit_path.exists():
         return {}
+    testcases: list[dict[str, str]] = []
     try:
-        root = ET.fromstring(junit_path.read_text(encoding="utf-8"))
+        root = ET.parse(junit_path).getroot()
+        testcases = [dict(testcase.attrib) for testcase in root.iter("testcase")]
     except (ET.ParseError, ImportError, OSError):
-        return {}
+        testcases = []
+    if not testcases:
+        try:
+            text = junit_path.read_text(encoding="utf-8")
+        except OSError:
+            return {}
+        for match in re.finditer(r"<testcase\b(?P<attrs>[^>]*)/?>", text):
+            attrs = {
+                key: value
+                for key, value in re.findall(r'([A-Za-z_][\w:-]*)="([^"]*)"', match.group("attrs"))
+            }
+            if attrs:
+                testcases.append(attrs)
 
     durations = {target: 0.0 for target in targets}
-    for testcase in root.iter("testcase"):
-        test_file = str(testcase.attrib.get("file") or "")
+    for testcase in testcases:
+        test_file = str(testcase.get("file") or "")
         if not test_file:
-            classname = str(testcase.attrib.get("classname") or "")
+            classname = str(testcase.get("classname") or "")
             test_file = classname.replace(".", "/") + ".py" if classname else ""
         try:
-            elapsed = float(testcase.attrib.get("time") or 0.0)
+            elapsed = float(testcase.get("time") or 0.0)
         except (TypeError, ValueError):
             elapsed = 0.0
         for target in targets:
@@ -87,6 +109,60 @@ def _append_jsonl(path: Path, payload: dict) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     with path.open("a", encoding="utf-8") as handle:
         handle.write(json.dumps(payload, ensure_ascii=False, default=str) + "\n")
+
+
+def _is_git_tracked_path(rel_path: str) -> bool:
+    result = subprocess.run(
+        ["git", "-C", str(ROOT), "ls-files", "--error-unmatch", rel_path],
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    return result.returncode == 0
+
+
+def cleanup_ci_transient_artifacts(*, dry_run: bool = False) -> dict:
+    restored_paths: list[str] = []
+    planned_paths: list[str] = []
+    skipped_paths: list[str] = []
+    errors: list[dict] = []
+
+    for rel_path in CI_TRANSIENT_ARTIFACTS:
+        path = ROOT / rel_path
+        if not path.exists():
+            continue
+        if not _is_git_tracked_path(rel_path):
+            skipped_paths.append(rel_path)
+            continue
+        if dry_run:
+            planned_paths.append(rel_path)
+            continue
+        result = subprocess.run(
+            ["git", "-C", str(ROOT), "restore", "--worktree", "--", rel_path],
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        if result.returncode == 0:
+            restored_paths.append(rel_path)
+        else:
+            errors.append(
+                {
+                    "path": rel_path,
+                    "returncode": result.returncode,
+                    "stderr": truncate_output(result.stderr or "", label=f"restore_{rel_path}_stderr"),
+                }
+            )
+
+    return {
+        "schema": "nexus.ci_transient_artifact_cleanup.v1",
+        "status": "PASS" if not errors else "RETURN",
+        "dry_run": dry_run,
+        "planned_paths": planned_paths,
+        "restored_paths": restored_paths,
+        "skipped_untracked_paths": skipped_paths,
+        "errors": errors,
+    }
 
 
 def run_step(name, cmd):
@@ -1011,6 +1087,18 @@ def main():
             repair_cmd = [str(VENV_PYTHON), "scripts/ops/autonomous_repair_loop.py"]
             subprocess.run(repair_cmd)
         elif not args.dry_run:
+            sys.exit(1)
+
+    cleanup_summary = cleanup_ci_transient_artifacts(dry_run=args.dry_run)
+    if cleanup_summary["restored_paths"] or cleanup_summary["planned_paths"]:
+        paths = cleanup_summary["planned_paths"] if args.dry_run else cleanup_summary["restored_paths"]
+        print(f"🧹 [CI-Gate] Transient artifact cleanup: {len(paths)} tracked path(s)")
+    if cleanup_summary["skipped_untracked_paths"]:
+        skipped = ", ".join(cleanup_summary["skipped_untracked_paths"])
+        print(f"⚠️ [CI-Gate] Skipped untracked transient artifact(s): {skipped}")
+    if cleanup_summary["status"] != "PASS":
+        print(f"❌ [CI-BLOCK] Transient artifact cleanup failed: {cleanup_summary['errors']}")
+        if not args.dry_run:
             sys.exit(1)
 
     print("\n🎉 [CI-Gate] ALL QUALITY GATES PASSED!")

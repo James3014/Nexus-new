@@ -789,3 +789,19 @@ Lesson:
 - Contract validators must distinguish a missing optional field from an explicitly blank malformed field before applying defaults.
 - Treat a test that mutates a serialized contract payload to `""` as a validator-hardening signal, not as proof the runtime object constructor is wrong.
 - Prevention rule: apply defaults at construction boundaries, but validate serialized payloads from their raw keys when a field is intended to be fail-closed.
+
+### Failure Lesson: CI Transient Artifact Cleanup Drift
+
+Lesson:
+
+- Full `ci_gate.py` can PASS while tracked generated report/state files remain dirty, forcing every follow-up slice to spend manual cleanup effort before continuing.
+- Treat `.nexus` learning closure output, `.nexusknowledge` crystallization output, and root wiki audit reports as known tracked transient CI artifacts unless a specific retention manifest pins them.
+- Prevention rule: the CI success closeout restores only known tracked transient artifact paths; untracked generated files remain explicit retention operations and are never silently deleted.
+
+### Failure Lesson: Monkeypatch Evidence Parser Drift
+
+Lesson:
+
+- Patching an evidence parser in a broad CI test module can mask or perturb the real parser behavior for later assertions in the same module.
+- Treat parser stubs as a last resort when the test can cheaply emit a real fixture file.
+- Prevention rule: changed-only CI tests should write a minimal JUnit fixture and exercise `_extract_junit_target_durations` directly instead of monkeypatching the parser seam.
