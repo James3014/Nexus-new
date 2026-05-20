@@ -14,6 +14,46 @@
       "runtime_update_allowed": false
     },
     {
+      "capability": "autonomic_router",
+      "decision": "guard_best",
+      "heep_mode_candidate": "Mode B (Guard)",
+      "map_update_allowed": true,
+      "public_benchmark_allowed": false,
+      "runtime_update_allowed": false
+    },
+    {
+      "capability": "autoreason",
+      "decision": "guard_best",
+      "heep_mode_candidate": "Mode B (Guard)",
+      "map_update_allowed": true,
+      "public_benchmark_allowed": false,
+      "runtime_update_allowed": false
+    },
+    {
+      "capability": "belief",
+      "decision": "guard_best",
+      "heep_mode_candidate": "Mode B (Guard)",
+      "map_update_allowed": true,
+      "public_benchmark_allowed": false,
+      "runtime_update_allowed": false
+    },
+    {
+      "capability": "benchmark_meta_opt",
+      "decision": "swarm_best",
+      "heep_mode_candidate": "Mode C (Swarm)",
+      "map_update_allowed": true,
+      "public_benchmark_allowed": false,
+      "runtime_update_allowed": false
+    },
+    {
+      "capability": "claim_gate",
+      "decision": "guard_best",
+      "heep_mode_candidate": "Mode B (Guard)",
+      "map_update_allowed": true,
+      "public_benchmark_allowed": false,
+      "runtime_update_allowed": false
+    },
+    {
       "capability": "codeintel",
       "decision": "swarm_best",
       "heep_mode_candidate": "Mode C (Swarm)",
@@ -22,9 +62,153 @@
       "runtime_update_allowed": false
     },
     {
-      "capability": "repair_loop",
+      "capability": "ddtree",
+      "decision": "guard_best",
+      "heep_mode_candidate": "Mode B (Guard)",
+      "map_update_allowed": true,
+      "public_benchmark_allowed": false,
+      "runtime_update_allowed": false
+    },
+    {
+      "capability": "direct_master_loop",
+      "decision": "solo_best",
+      "heep_mode_candidate": "Mode A (Solo)",
+      "map_update_allowed": true,
+      "public_benchmark_allowed": false,
+      "runtime_update_allowed": false
+    },
+    {
+      "capability": "drone",
+      "decision": "solo_best",
+      "heep_mode_candidate": "Mode A (Solo)",
+      "map_update_allowed": true,
+      "public_benchmark_allowed": false,
+      "runtime_update_allowed": false
+    },
+    {
+      "capability": "external_productivity",
+      "decision": "solo_best",
+      "heep_mode_candidate": "Mode A (Solo)",
+      "map_update_allowed": true,
+      "public_benchmark_allowed": false,
+      "runtime_update_allowed": false
+    },
+    {
+      "capability": "file_lock_security_gate",
       "decision": "swarm_best",
       "heep_mode_candidate": "Mode C (Swarm)",
+      "map_update_allowed": true,
+      "public_benchmark_allowed": false,
+      "runtime_update_allowed": false
+    },
+    {
+      "capability": "forecast_pregate",
+      "decision": "guard_best",
+      "heep_mode_candidate": "Mode B (Guard)",
+      "map_update_allowed": true,
+      "public_benchmark_allowed": false,
+      "runtime_update_allowed": false
+    },
+    {
+      "capability": "governance_and_trust",
+      "decision": "swarm_best",
+      "heep_mode_candidate": "Mode C (Swarm)",
+      "map_update_allowed": true,
+      "public_benchmark_allowed": false,
+      "runtime_update_allowed": false
+    },
+    {
+      "capability": "hyper_sprint",
+      "decision": "solo_best",
+      "heep_mode_candidate": "Mode A (Solo)",
+      "map_update_allowed": true,
+      "public_benchmark_allowed": false,
+      "runtime_update_allowed": false
+    },
+    {
+      "capability": "lancedb",
+      "decision": "guard_best",
+      "heep_mode_candidate": "Mode B (Guard)",
+      "map_update_allowed": true,
+      "public_benchmark_allowed": false,
+      "runtime_update_allowed": false
+    },
+    {
+      "capability": "learn_ask",
+      "decision": "swarm_best",
+      "heep_mode_candidate": "Mode C (Swarm)",
+      "map_update_allowed": true,
+      "public_benchmark_allowed": false,
+      "runtime_update_allowed": false
+    },
+    {
+      "capability": "learning_closure",
+      "decision": "swarm_best",
+      "heep_mode_candidate": "Mode C (Swarm)",
+      "map_update_allowed": true,
+      "public_benchmark_allowed": false,
+      "runtime_update_allowed": false
+    },
+    {
+      "capability": "memory",
+      "decision": "guard_best",
+      "heep_mode_candidate": "Mode B (Guard)",
+      "map_update_allowed": true,
+      "public_benchmark_allowed": false,
+      "runtime_update_allowed": false
+    },
+    {
+      "capability": "mempalace",
+      "decision": "guard_best",
+      "heep_mode_candidate": "Mode B (Guard)",
+      "map_update_allowed": true,
+      "public_benchmark_allowed": false,
+      "runtime_update_allowed": false
+    },
+    {
+      "capability": "metabolism_resume",
+      "decision": "solo_best",
+      "heep_mode_candidate": "Mode A (Solo)",
+      "map_update_allowed": true,
+      "public_benchmark_allowed": false,
+      "runtime_update_allowed": false
+    },
+    {
+      "capability": "nightshift",
+      "decision": "solo_best",
+      "heep_mode_candidate": "Mode A (Solo)",
+      "map_update_allowed": true,
+      "public_benchmark_allowed": false,
+      "runtime_update_allowed": false
+    },
+    {
+      "capability": "policy_capability_gate",
+      "decision": "swarm_best",
+      "heep_mode_candidate": "Mode C (Swarm)",
+      "map_update_allowed": true,
+      "public_benchmark_allowed": false,
+      "runtime_update_allowed": false
+    },
+    {
+      "capability": "registry_skills_sync",
+      "decision": "guard_best",
+      "heep_mode_candidate": "Mode B (Guard)",
+      "map_update_allowed": true,
+      "public_benchmark_allowed": false,
+      "runtime_update_allowed": false
+    },
+    {
+      "capability": "regression_guard",
+      "decision": "guard_best",
+      "heep_mode_candidate": "Mode B (Guard)",
+      "map_update_allowed": true,
+      "public_benchmark_allowed": false,
+      "runtime_update_allowed": false
+    },
+    {
+      "capability": "repair_loop",
+      "decision": "guard_best",
+      "heep_mode_candidate": "Mode B (Guard)",
       "map_update_allowed": true,
       "public_benchmark_allowed": false,
       "runtime_update_allowed": false
@@ -36,12 +220,68 @@
       "map_update_allowed": true,
       "public_benchmark_allowed": false,
       "runtime_update_allowed": false
+    },
+    {
+      "capability": "research_and_source_discipline",
+      "decision": "swarm_best",
+      "heep_mode_candidate": "Mode C (Swarm)",
+      "map_update_allowed": true,
+      "public_benchmark_allowed": false,
+      "runtime_update_allowed": false
+    },
+    {
+      "capability": "research_control_plane",
+      "decision": "swarm_best",
+      "heep_mode_candidate": "Mode C (Swarm)",
+      "map_update_allowed": true,
+      "public_benchmark_allowed": false,
+      "runtime_update_allowed": false
+    },
+    {
+      "capability": "sandbox_replay",
+      "decision": "guard_best",
+      "heep_mode_candidate": "Mode B (Guard)",
+      "map_update_allowed": true,
+      "public_benchmark_allowed": false,
+      "runtime_update_allowed": false
+    },
+    {
+      "capability": "swarm_multi_agent",
+      "decision": "swarm_best",
+      "heep_mode_candidate": "Mode C (Swarm)",
+      "map_update_allowed": true,
+      "public_benchmark_allowed": false,
+      "runtime_update_allowed": false
+    },
+    {
+      "capability": "ui_validator",
+      "decision": "guard_best",
+      "heep_mode_candidate": "Mode B (Guard)",
+      "map_update_allowed": true,
+      "public_benchmark_allowed": false,
+      "runtime_update_allowed": false
+    },
+    {
+      "capability": "ultra_review",
+      "decision": "swarm_best",
+      "heep_mode_candidate": "Mode C (Swarm)",
+      "map_update_allowed": true,
+      "public_benchmark_allowed": false,
+      "runtime_update_allowed": false
+    },
+    {
+      "capability": "xray",
+      "decision": "guard_best",
+      "heep_mode_candidate": "Mode B (Guard)",
+      "map_update_allowed": true,
+      "public_benchmark_allowed": false,
+      "runtime_update_allowed": false
     }
   ],
   "schema": "nexus.heep_live_map_update_gate.v1",
   "status": "PASS",
   "summary": {
-    "candidate_update_count": 4,
+    "candidate_update_count": 34,
     "public_benchmark_allowed": false,
     "runtime_update_allowed": false
   }

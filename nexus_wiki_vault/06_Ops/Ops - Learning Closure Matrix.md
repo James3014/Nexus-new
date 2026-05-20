@@ -2728,3 +2728,17 @@ version_scope:
 - Failure: the run report returned `RETURN`, but the map update gate still returned `PASS` because only initial input blockers were propagated.
 - Lesson: downstream map/update gates must inherit all row-level receipt blockers, not only source-manifest blockers.
 - Guardrail: pass run report blockers into decision and map gate builders before allowing HEEP mode candidate updates.
+
+## 2026-05-20 - HEEP local mode scoring must not upgrade every capability to swarm
+
+- Trigger: full-capability HEEP dry-run initially selected `Mode C (Swarm)` for all 34 capabilities because role coverage always outscored solo mode.
+- Failure: synthetic role coverage was treated as stronger evidence than the HEEP/EMAS assembly recommendation, creating false-positive multi-skill upgrade candidates.
+- Lesson: local ensemble replay can confirm receipt readiness, but it must not invent quality lift from role count alone.
+- Guardrail: select the assembly `recommended_mode` when its receipt replay passes; only queue Flash+Nexus live compare for non-solo recommended modes.
+
+## 2026-05-20 - ad-hoc summary commands should avoid multiline shell escapes
+
+- Trigger: a Python one-liner used literal `\n` line breaks inside `python -c`.
+- Failure: the shell passed escape text into Python and produced a `SyntaxError` before reading the generated HEEP summaries.
+- Lesson: evidence-summary commands should use semicolon-safe one-liners or checked scripts, not fragile multiline shell escapes.
+- Guardrail: prefer list-comprehension or small checked helper scripts for report summaries in ops turns.

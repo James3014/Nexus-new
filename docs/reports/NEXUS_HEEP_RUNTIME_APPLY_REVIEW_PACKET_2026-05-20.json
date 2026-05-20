@@ -1,0 +1,555 @@
+{
+  "blockers": [],
+  "claim_boundary": [
+    "This packet can request review only after internal Flash+Nexus live compare receipts exist.",
+    "Multi-skill replacements require MAT-B reliability, quality, governance, efficiency, and regression evidence.",
+    "Local HEEP replay alone cannot approve runtime default changes."
+  ],
+  "rows": [
+    {
+      "capability": "artifact_gate",
+      "disposition": "PENDING_FLASH_NEXUS_LIVE_COMPARE",
+      "local_decision": "swarm_best",
+      "mat_b_kpis": [
+        "success_rate",
+        "pollution_pct",
+        "evidence_seal_count",
+        "token_delta",
+        "wall_delta",
+        "reopen_rate"
+      ],
+      "mat_b_required_before_runtime_apply": true,
+      "public_benchmark_allowed": false,
+      "runtime_update_allowed": false,
+      "selected_mode": "Mode C (Swarm)"
+    },
+    {
+      "capability": "autonomic_router",
+      "disposition": "PENDING_FLASH_NEXUS_LIVE_COMPARE",
+      "local_decision": "guard_best",
+      "mat_b_kpis": [
+        "success_rate",
+        "pollution_pct",
+        "evidence_seal_count",
+        "token_delta",
+        "wall_delta",
+        "reopen_rate"
+      ],
+      "mat_b_required_before_runtime_apply": true,
+      "public_benchmark_allowed": false,
+      "runtime_update_allowed": false,
+      "selected_mode": "Mode B (Guard)"
+    },
+    {
+      "capability": "autoreason",
+      "disposition": "PENDING_FLASH_NEXUS_LIVE_COMPARE",
+      "local_decision": "guard_best",
+      "mat_b_kpis": [
+        "success_rate",
+        "pollution_pct",
+        "evidence_seal_count",
+        "token_delta",
+        "wall_delta",
+        "reopen_rate"
+      ],
+      "mat_b_required_before_runtime_apply": true,
+      "public_benchmark_allowed": false,
+      "runtime_update_allowed": false,
+      "selected_mode": "Mode B (Guard)"
+    },
+    {
+      "capability": "belief",
+      "disposition": "PENDING_FLASH_NEXUS_LIVE_COMPARE",
+      "local_decision": "guard_best",
+      "mat_b_kpis": [
+        "success_rate",
+        "pollution_pct",
+        "evidence_seal_count",
+        "token_delta",
+        "wall_delta",
+        "reopen_rate"
+      ],
+      "mat_b_required_before_runtime_apply": true,
+      "public_benchmark_allowed": false,
+      "runtime_update_allowed": false,
+      "selected_mode": "Mode B (Guard)"
+    },
+    {
+      "capability": "benchmark_meta_opt",
+      "disposition": "PENDING_FLASH_NEXUS_LIVE_COMPARE",
+      "local_decision": "swarm_best",
+      "mat_b_kpis": [
+        "success_rate",
+        "pollution_pct",
+        "evidence_seal_count",
+        "token_delta",
+        "wall_delta",
+        "reopen_rate"
+      ],
+      "mat_b_required_before_runtime_apply": true,
+      "public_benchmark_allowed": false,
+      "runtime_update_allowed": false,
+      "selected_mode": "Mode C (Swarm)"
+    },
+    {
+      "capability": "claim_gate",
+      "disposition": "PENDING_FLASH_NEXUS_LIVE_COMPARE",
+      "local_decision": "guard_best",
+      "mat_b_kpis": [
+        "success_rate",
+        "pollution_pct",
+        "evidence_seal_count",
+        "token_delta",
+        "wall_delta",
+        "reopen_rate"
+      ],
+      "mat_b_required_before_runtime_apply": true,
+      "public_benchmark_allowed": false,
+      "runtime_update_allowed": false,
+      "selected_mode": "Mode B (Guard)"
+    },
+    {
+      "capability": "codeintel",
+      "disposition": "PENDING_FLASH_NEXUS_LIVE_COMPARE",
+      "local_decision": "swarm_best",
+      "mat_b_kpis": [
+        "success_rate",
+        "pollution_pct",
+        "evidence_seal_count",
+        "token_delta",
+        "wall_delta",
+        "reopen_rate"
+      ],
+      "mat_b_required_before_runtime_apply": true,
+      "public_benchmark_allowed": false,
+      "runtime_update_allowed": false,
+      "selected_mode": "Mode C (Swarm)"
+    },
+    {
+      "capability": "ddtree",
+      "disposition": "PENDING_FLASH_NEXUS_LIVE_COMPARE",
+      "local_decision": "guard_best",
+      "mat_b_kpis": [
+        "success_rate",
+        "pollution_pct",
+        "evidence_seal_count",
+        "token_delta",
+        "wall_delta",
+        "reopen_rate"
+      ],
+      "mat_b_required_before_runtime_apply": true,
+      "public_benchmark_allowed": false,
+      "runtime_update_allowed": false,
+      "selected_mode": "Mode B (Guard)"
+    },
+    {
+      "capability": "direct_master_loop",
+      "disposition": "KEEP_SINGLE_PRIMARY",
+      "local_decision": "solo_best",
+      "mat_b_kpis": [],
+      "mat_b_required_before_runtime_apply": false,
+      "public_benchmark_allowed": false,
+      "runtime_update_allowed": false,
+      "selected_mode": "Mode A (Solo)"
+    },
+    {
+      "capability": "drone",
+      "disposition": "KEEP_SINGLE_PRIMARY",
+      "local_decision": "solo_best",
+      "mat_b_kpis": [],
+      "mat_b_required_before_runtime_apply": false,
+      "public_benchmark_allowed": false,
+      "runtime_update_allowed": false,
+      "selected_mode": "Mode A (Solo)"
+    },
+    {
+      "capability": "external_productivity",
+      "disposition": "KEEP_SINGLE_PRIMARY",
+      "local_decision": "solo_best",
+      "mat_b_kpis": [],
+      "mat_b_required_before_runtime_apply": false,
+      "public_benchmark_allowed": false,
+      "runtime_update_allowed": false,
+      "selected_mode": "Mode A (Solo)"
+    },
+    {
+      "capability": "file_lock_security_gate",
+      "disposition": "PENDING_FLASH_NEXUS_LIVE_COMPARE",
+      "local_decision": "swarm_best",
+      "mat_b_kpis": [
+        "success_rate",
+        "pollution_pct",
+        "evidence_seal_count",
+        "token_delta",
+        "wall_delta",
+        "reopen_rate"
+      ],
+      "mat_b_required_before_runtime_apply": true,
+      "public_benchmark_allowed": false,
+      "runtime_update_allowed": false,
+      "selected_mode": "Mode C (Swarm)"
+    },
+    {
+      "capability": "forecast_pregate",
+      "disposition": "PENDING_FLASH_NEXUS_LIVE_COMPARE",
+      "local_decision": "guard_best",
+      "mat_b_kpis": [
+        "success_rate",
+        "pollution_pct",
+        "evidence_seal_count",
+        "token_delta",
+        "wall_delta",
+        "reopen_rate"
+      ],
+      "mat_b_required_before_runtime_apply": true,
+      "public_benchmark_allowed": false,
+      "runtime_update_allowed": false,
+      "selected_mode": "Mode B (Guard)"
+    },
+    {
+      "capability": "governance_and_trust",
+      "disposition": "PENDING_FLASH_NEXUS_LIVE_COMPARE",
+      "local_decision": "swarm_best",
+      "mat_b_kpis": [
+        "success_rate",
+        "pollution_pct",
+        "evidence_seal_count",
+        "token_delta",
+        "wall_delta",
+        "reopen_rate"
+      ],
+      "mat_b_required_before_runtime_apply": true,
+      "public_benchmark_allowed": false,
+      "runtime_update_allowed": false,
+      "selected_mode": "Mode C (Swarm)"
+    },
+    {
+      "capability": "hyper_sprint",
+      "disposition": "KEEP_SINGLE_PRIMARY",
+      "local_decision": "solo_best",
+      "mat_b_kpis": [],
+      "mat_b_required_before_runtime_apply": false,
+      "public_benchmark_allowed": false,
+      "runtime_update_allowed": false,
+      "selected_mode": "Mode A (Solo)"
+    },
+    {
+      "capability": "lancedb",
+      "disposition": "PENDING_FLASH_NEXUS_LIVE_COMPARE",
+      "local_decision": "guard_best",
+      "mat_b_kpis": [
+        "success_rate",
+        "pollution_pct",
+        "evidence_seal_count",
+        "token_delta",
+        "wall_delta",
+        "reopen_rate"
+      ],
+      "mat_b_required_before_runtime_apply": true,
+      "public_benchmark_allowed": false,
+      "runtime_update_allowed": false,
+      "selected_mode": "Mode B (Guard)"
+    },
+    {
+      "capability": "learn_ask",
+      "disposition": "PENDING_FLASH_NEXUS_LIVE_COMPARE",
+      "local_decision": "swarm_best",
+      "mat_b_kpis": [
+        "success_rate",
+        "pollution_pct",
+        "evidence_seal_count",
+        "token_delta",
+        "wall_delta",
+        "reopen_rate"
+      ],
+      "mat_b_required_before_runtime_apply": true,
+      "public_benchmark_allowed": false,
+      "runtime_update_allowed": false,
+      "selected_mode": "Mode C (Swarm)"
+    },
+    {
+      "capability": "learning_closure",
+      "disposition": "PENDING_FLASH_NEXUS_LIVE_COMPARE",
+      "local_decision": "swarm_best",
+      "mat_b_kpis": [
+        "success_rate",
+        "pollution_pct",
+        "evidence_seal_count",
+        "token_delta",
+        "wall_delta",
+        "reopen_rate"
+      ],
+      "mat_b_required_before_runtime_apply": true,
+      "public_benchmark_allowed": false,
+      "runtime_update_allowed": false,
+      "selected_mode": "Mode C (Swarm)"
+    },
+    {
+      "capability": "memory",
+      "disposition": "PENDING_FLASH_NEXUS_LIVE_COMPARE",
+      "local_decision": "guard_best",
+      "mat_b_kpis": [
+        "success_rate",
+        "pollution_pct",
+        "evidence_seal_count",
+        "token_delta",
+        "wall_delta",
+        "reopen_rate"
+      ],
+      "mat_b_required_before_runtime_apply": true,
+      "public_benchmark_allowed": false,
+      "runtime_update_allowed": false,
+      "selected_mode": "Mode B (Guard)"
+    },
+    {
+      "capability": "mempalace",
+      "disposition": "PENDING_FLASH_NEXUS_LIVE_COMPARE",
+      "local_decision": "guard_best",
+      "mat_b_kpis": [
+        "success_rate",
+        "pollution_pct",
+        "evidence_seal_count",
+        "token_delta",
+        "wall_delta",
+        "reopen_rate"
+      ],
+      "mat_b_required_before_runtime_apply": true,
+      "public_benchmark_allowed": false,
+      "runtime_update_allowed": false,
+      "selected_mode": "Mode B (Guard)"
+    },
+    {
+      "capability": "metabolism_resume",
+      "disposition": "KEEP_SINGLE_PRIMARY",
+      "local_decision": "solo_best",
+      "mat_b_kpis": [],
+      "mat_b_required_before_runtime_apply": false,
+      "public_benchmark_allowed": false,
+      "runtime_update_allowed": false,
+      "selected_mode": "Mode A (Solo)"
+    },
+    {
+      "capability": "nightshift",
+      "disposition": "KEEP_SINGLE_PRIMARY",
+      "local_decision": "solo_best",
+      "mat_b_kpis": [],
+      "mat_b_required_before_runtime_apply": false,
+      "public_benchmark_allowed": false,
+      "runtime_update_allowed": false,
+      "selected_mode": "Mode A (Solo)"
+    },
+    {
+      "capability": "policy_capability_gate",
+      "disposition": "PENDING_FLASH_NEXUS_LIVE_COMPARE",
+      "local_decision": "swarm_best",
+      "mat_b_kpis": [
+        "success_rate",
+        "pollution_pct",
+        "evidence_seal_count",
+        "token_delta",
+        "wall_delta",
+        "reopen_rate"
+      ],
+      "mat_b_required_before_runtime_apply": true,
+      "public_benchmark_allowed": false,
+      "runtime_update_allowed": false,
+      "selected_mode": "Mode C (Swarm)"
+    },
+    {
+      "capability": "registry_skills_sync",
+      "disposition": "PENDING_FLASH_NEXUS_LIVE_COMPARE",
+      "local_decision": "guard_best",
+      "mat_b_kpis": [
+        "success_rate",
+        "pollution_pct",
+        "evidence_seal_count",
+        "token_delta",
+        "wall_delta",
+        "reopen_rate"
+      ],
+      "mat_b_required_before_runtime_apply": true,
+      "public_benchmark_allowed": false,
+      "runtime_update_allowed": false,
+      "selected_mode": "Mode B (Guard)"
+    },
+    {
+      "capability": "regression_guard",
+      "disposition": "PENDING_FLASH_NEXUS_LIVE_COMPARE",
+      "local_decision": "guard_best",
+      "mat_b_kpis": [
+        "success_rate",
+        "pollution_pct",
+        "evidence_seal_count",
+        "token_delta",
+        "wall_delta",
+        "reopen_rate"
+      ],
+      "mat_b_required_before_runtime_apply": true,
+      "public_benchmark_allowed": false,
+      "runtime_update_allowed": false,
+      "selected_mode": "Mode B (Guard)"
+    },
+    {
+      "capability": "repair_loop",
+      "disposition": "PENDING_FLASH_NEXUS_LIVE_COMPARE",
+      "local_decision": "guard_best",
+      "mat_b_kpis": [
+        "success_rate",
+        "pollution_pct",
+        "evidence_seal_count",
+        "token_delta",
+        "wall_delta",
+        "reopen_rate"
+      ],
+      "mat_b_required_before_runtime_apply": true,
+      "public_benchmark_allowed": false,
+      "runtime_update_allowed": false,
+      "selected_mode": "Mode B (Guard)"
+    },
+    {
+      "capability": "research",
+      "disposition": "PENDING_FLASH_NEXUS_LIVE_COMPARE",
+      "local_decision": "swarm_best",
+      "mat_b_kpis": [
+        "success_rate",
+        "pollution_pct",
+        "evidence_seal_count",
+        "token_delta",
+        "wall_delta",
+        "reopen_rate"
+      ],
+      "mat_b_required_before_runtime_apply": true,
+      "public_benchmark_allowed": false,
+      "runtime_update_allowed": false,
+      "selected_mode": "Mode C (Swarm)"
+    },
+    {
+      "capability": "research_and_source_discipline",
+      "disposition": "PENDING_FLASH_NEXUS_LIVE_COMPARE",
+      "local_decision": "swarm_best",
+      "mat_b_kpis": [
+        "success_rate",
+        "pollution_pct",
+        "evidence_seal_count",
+        "token_delta",
+        "wall_delta",
+        "reopen_rate"
+      ],
+      "mat_b_required_before_runtime_apply": true,
+      "public_benchmark_allowed": false,
+      "runtime_update_allowed": false,
+      "selected_mode": "Mode C (Swarm)"
+    },
+    {
+      "capability": "research_control_plane",
+      "disposition": "PENDING_FLASH_NEXUS_LIVE_COMPARE",
+      "local_decision": "swarm_best",
+      "mat_b_kpis": [
+        "success_rate",
+        "pollution_pct",
+        "evidence_seal_count",
+        "token_delta",
+        "wall_delta",
+        "reopen_rate"
+      ],
+      "mat_b_required_before_runtime_apply": true,
+      "public_benchmark_allowed": false,
+      "runtime_update_allowed": false,
+      "selected_mode": "Mode C (Swarm)"
+    },
+    {
+      "capability": "sandbox_replay",
+      "disposition": "PENDING_FLASH_NEXUS_LIVE_COMPARE",
+      "local_decision": "guard_best",
+      "mat_b_kpis": [
+        "success_rate",
+        "pollution_pct",
+        "evidence_seal_count",
+        "token_delta",
+        "wall_delta",
+        "reopen_rate"
+      ],
+      "mat_b_required_before_runtime_apply": true,
+      "public_benchmark_allowed": false,
+      "runtime_update_allowed": false,
+      "selected_mode": "Mode B (Guard)"
+    },
+    {
+      "capability": "swarm_multi_agent",
+      "disposition": "PENDING_FLASH_NEXUS_LIVE_COMPARE",
+      "local_decision": "swarm_best",
+      "mat_b_kpis": [
+        "success_rate",
+        "pollution_pct",
+        "evidence_seal_count",
+        "token_delta",
+        "wall_delta",
+        "reopen_rate"
+      ],
+      "mat_b_required_before_runtime_apply": true,
+      "public_benchmark_allowed": false,
+      "runtime_update_allowed": false,
+      "selected_mode": "Mode C (Swarm)"
+    },
+    {
+      "capability": "ui_validator",
+      "disposition": "PENDING_FLASH_NEXUS_LIVE_COMPARE",
+      "local_decision": "guard_best",
+      "mat_b_kpis": [
+        "success_rate",
+        "pollution_pct",
+        "evidence_seal_count",
+        "token_delta",
+        "wall_delta",
+        "reopen_rate"
+      ],
+      "mat_b_required_before_runtime_apply": true,
+      "public_benchmark_allowed": false,
+      "runtime_update_allowed": false,
+      "selected_mode": "Mode B (Guard)"
+    },
+    {
+      "capability": "ultra_review",
+      "disposition": "PENDING_FLASH_NEXUS_LIVE_COMPARE",
+      "local_decision": "swarm_best",
+      "mat_b_kpis": [
+        "success_rate",
+        "pollution_pct",
+        "evidence_seal_count",
+        "token_delta",
+        "wall_delta",
+        "reopen_rate"
+      ],
+      "mat_b_required_before_runtime_apply": true,
+      "public_benchmark_allowed": false,
+      "runtime_update_allowed": false,
+      "selected_mode": "Mode C (Swarm)"
+    },
+    {
+      "capability": "xray",
+      "disposition": "PENDING_FLASH_NEXUS_LIVE_COMPARE",
+      "local_decision": "guard_best",
+      "mat_b_kpis": [
+        "success_rate",
+        "pollution_pct",
+        "evidence_seal_count",
+        "token_delta",
+        "wall_delta",
+        "reopen_rate"
+      ],
+      "mat_b_required_before_runtime_apply": true,
+      "public_benchmark_allowed": false,
+      "runtime_update_allowed": false,
+      "selected_mode": "Mode B (Guard)"
+    }
+  ],
+  "schema": "nexus.heep_runtime_apply_review_packet.v1",
+  "status": "PASS",
+  "summary": {
+    "capability_count": 34,
+    "keep_single_primary_count": 6,
+    "pending_live_compare_count": 28,
+    "public_benchmark_allowed": false,
+    "runtime_update_allowed": false
+  }
+}

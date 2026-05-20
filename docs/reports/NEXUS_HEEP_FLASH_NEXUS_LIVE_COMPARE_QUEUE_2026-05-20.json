@@ -1,0 +1,2523 @@
+{
+  "blockers": [],
+  "claim_boundary": [
+    "Rows are executable internal Flash+Nexus compare candidates.",
+    "They are not public benchmark rows.",
+    "Candidate replacement decisions must be made by MAT-B live KPIs, not local role coverage.",
+    "Runtime default cannot change until live compare receipts pass and an apply gate approves."
+  ],
+  "rows": [
+    {
+      "baseline_arm": {
+        "arm_id": "mode_a_current_primary",
+        "mode": "Mode A (Solo)",
+        "runner_env": {
+          "NEXUS_BENCH_ALLOW_ABLATION_SKILL_MOUNTS": "1",
+          "NEXUS_BENCH_SKILL_MOUNT_REQUESTS": "[\"sf-systematic-artifact_gate-differential-review-461fbd0c\"]",
+          "NEXUS_HEEP_MODE": "Mode A (Solo)"
+        },
+        "runtime_final_receipt_chain": {
+          "evidence_present": true,
+          "gate_passed": true,
+          "injected": true,
+          "outcome_contributed": true,
+          "selected": true,
+          "used": true
+        },
+        "skill_count": 1,
+        "skill_ids": [
+          "sf-systematic-artifact_gate-differential-review-461fbd0c"
+        ]
+      },
+      "capability": "artifact_gate",
+      "challenger_arm": {
+        "arm_id": "heep_multi_skill",
+        "mode": "Mode C (Swarm)",
+        "runner_env": {
+          "NEXUS_BENCH_ALLOW_ABLATION_SKILL_MOUNTS": "1",
+          "NEXUS_BENCH_SKILL_MOUNT_REQUESTS": "[\"sf-systematic-codeintel-first-principles-thinking-f95019ea\", \"sf2-autonomic_router-route-fit-spec\", \"sf-systematic-artifact_gate-differential-review-461fbd0c\"]",
+          "NEXUS_HEEP_MODE": "Mode C (Swarm)"
+        },
+        "runtime_final_receipt_chain": {
+          "evidence_present": true,
+          "gate_passed": true,
+          "injected": true,
+          "outcome_contributed": true,
+          "selected": true,
+          "used": true
+        },
+        "skill_count": 3,
+        "skill_ids": [
+          "sf-systematic-codeintel-first-principles-thinking-f95019ea",
+          "sf2-autonomic_router-route-fit-spec",
+          "sf-systematic-artifact_gate-differential-review-461fbd0c"
+        ]
+      },
+      "claim_boundary": "internal_heep_mode_candidate_only",
+      "local_quality_lift": 0.6667,
+      "mat_b_gate": {
+        "capability": "artifact_gate",
+        "claim_boundary": "local replay cannot pass MAT-B; live compare must fill these KPI values",
+        "current_values": {
+          "evidence_seal_count": null,
+          "pollution_pct": null,
+          "reopen_rate": null,
+          "success_rate": null,
+          "token_delta": null,
+          "wall_delta": null
+        },
+        "decision_order": [
+          "Reliability",
+          "Quality",
+          "Governance",
+          "Efficiency",
+          "Regression"
+        ],
+        "required_kpis": [
+          "success_rate",
+          "pollution_pct",
+          "evidence_seal_count",
+          "token_delta",
+          "wall_delta",
+          "reopen_rate"
+        ],
+        "schema": "nexus.heep_mat_b_gate.v1",
+        "selected_mode": "Mode C (Swarm)",
+        "status": "PENDING_LIVE_COMPARE",
+        "thresholds": {
+          "evidence_seal_count": "challenger >= baseline and all required receipt keys present",
+          "pollution_pct": "challenger <= baseline and below task pollution threshold",
+          "reopen_rate": "challenger <= baseline in replay/regression simulation",
+          "success_rate": "challenger >= baseline and no delivery RETURN",
+          "token_delta": "evaluated only after reliability, quality, and governance pass",
+          "wall_delta": "evaluated only after reliability, quality, and governance pass"
+        }
+      },
+      "runner": "Flash+Nexus internal live compare",
+      "selected_mode": "Mode C (Swarm)",
+      "status": "READY"
+    },
+    {
+      "baseline_arm": {
+        "arm_id": "mode_a_current_primary",
+        "mode": "Mode A (Solo)",
+        "runner_env": {
+          "NEXUS_BENCH_ALLOW_ABLATION_SKILL_MOUNTS": "1",
+          "NEXUS_BENCH_SKILL_MOUNT_REQUESTS": "[\"sf2-autonomic_router-route-fit-spec\"]",
+          "NEXUS_HEEP_MODE": "Mode A (Solo)"
+        },
+        "runtime_final_receipt_chain": {
+          "evidence_present": true,
+          "gate_passed": true,
+          "injected": true,
+          "outcome_contributed": true,
+          "selected": true,
+          "used": true
+        },
+        "skill_count": 1,
+        "skill_ids": [
+          "sf2-autonomic_router-route-fit-spec"
+        ]
+      },
+      "capability": "autonomic_router",
+      "challenger_arm": {
+        "arm_id": "heep_multi_skill",
+        "mode": "Mode B (Guard)",
+        "runner_env": {
+          "NEXUS_BENCH_ALLOW_ABLATION_SKILL_MOUNTS": "1",
+          "NEXUS_BENCH_SKILL_MOUNT_REQUESTS": "[\"sf2-autonomic_router-route-fit-spec\", \"sf-systematic-artifact_gate-differential-review-461fbd0c\"]",
+          "NEXUS_HEEP_MODE": "Mode B (Guard)"
+        },
+        "runtime_final_receipt_chain": {
+          "evidence_present": true,
+          "gate_passed": true,
+          "injected": true,
+          "outcome_contributed": true,
+          "selected": true,
+          "used": true
+        },
+        "skill_count": 2,
+        "skill_ids": [
+          "sf2-autonomic_router-route-fit-spec",
+          "sf-systematic-artifact_gate-differential-review-461fbd0c"
+        ]
+      },
+      "claim_boundary": "internal_heep_mode_candidate_only",
+      "local_quality_lift": 0.3334,
+      "mat_b_gate": {
+        "capability": "autonomic_router",
+        "claim_boundary": "local replay cannot pass MAT-B; live compare must fill these KPI values",
+        "current_values": {
+          "evidence_seal_count": null,
+          "pollution_pct": null,
+          "reopen_rate": null,
+          "success_rate": null,
+          "token_delta": null,
+          "wall_delta": null
+        },
+        "decision_order": [
+          "Reliability",
+          "Quality",
+          "Governance",
+          "Efficiency",
+          "Regression"
+        ],
+        "required_kpis": [
+          "success_rate",
+          "pollution_pct",
+          "evidence_seal_count",
+          "token_delta",
+          "wall_delta",
+          "reopen_rate"
+        ],
+        "schema": "nexus.heep_mat_b_gate.v1",
+        "selected_mode": "Mode B (Guard)",
+        "status": "PENDING_LIVE_COMPARE",
+        "thresholds": {
+          "evidence_seal_count": "challenger >= baseline and all required receipt keys present",
+          "pollution_pct": "challenger <= baseline and below task pollution threshold",
+          "reopen_rate": "challenger <= baseline in replay/regression simulation",
+          "success_rate": "challenger >= baseline and no delivery RETURN",
+          "token_delta": "evaluated only after reliability, quality, and governance pass",
+          "wall_delta": "evaluated only after reliability, quality, and governance pass"
+        }
+      },
+      "runner": "Flash+Nexus internal live compare",
+      "selected_mode": "Mode B (Guard)",
+      "status": "READY"
+    },
+    {
+      "baseline_arm": {
+        "arm_id": "mode_a_current_primary",
+        "mode": "Mode A (Solo)",
+        "runner_env": {
+          "NEXUS_BENCH_ALLOW_ABLATION_SKILL_MOUNTS": "1",
+          "NEXUS_BENCH_SKILL_MOUNT_REQUESTS": "[\"sf2-belief-route-fit-spec\"]",
+          "NEXUS_HEEP_MODE": "Mode A (Solo)"
+        },
+        "runtime_final_receipt_chain": {
+          "evidence_present": true,
+          "gate_passed": true,
+          "injected": true,
+          "outcome_contributed": true,
+          "selected": true,
+          "used": true
+        },
+        "skill_count": 1,
+        "skill_ids": [
+          "sf2-belief-route-fit-spec"
+        ]
+      },
+      "capability": "autoreason",
+      "challenger_arm": {
+        "arm_id": "heep_multi_skill",
+        "mode": "Mode B (Guard)",
+        "runner_env": {
+          "NEXUS_BENCH_ALLOW_ABLATION_SKILL_MOUNTS": "1",
+          "NEXUS_BENCH_SKILL_MOUNT_REQUESTS": "[\"sf2-belief-route-fit-spec\", \"sf-systematic-artifact_gate-differential-review-461fbd0c\"]",
+          "NEXUS_HEEP_MODE": "Mode B (Guard)"
+        },
+        "runtime_final_receipt_chain": {
+          "evidence_present": true,
+          "gate_passed": true,
+          "injected": true,
+          "outcome_contributed": true,
+          "selected": true,
+          "used": true
+        },
+        "skill_count": 2,
+        "skill_ids": [
+          "sf2-belief-route-fit-spec",
+          "sf-systematic-artifact_gate-differential-review-461fbd0c"
+        ]
+      },
+      "claim_boundary": "internal_heep_mode_candidate_only",
+      "local_quality_lift": 0.3334,
+      "mat_b_gate": {
+        "capability": "autoreason",
+        "claim_boundary": "local replay cannot pass MAT-B; live compare must fill these KPI values",
+        "current_values": {
+          "evidence_seal_count": null,
+          "pollution_pct": null,
+          "reopen_rate": null,
+          "success_rate": null,
+          "token_delta": null,
+          "wall_delta": null
+        },
+        "decision_order": [
+          "Reliability",
+          "Quality",
+          "Governance",
+          "Efficiency",
+          "Regression"
+        ],
+        "required_kpis": [
+          "success_rate",
+          "pollution_pct",
+          "evidence_seal_count",
+          "token_delta",
+          "wall_delta",
+          "reopen_rate"
+        ],
+        "schema": "nexus.heep_mat_b_gate.v1",
+        "selected_mode": "Mode B (Guard)",
+        "status": "PENDING_LIVE_COMPARE",
+        "thresholds": {
+          "evidence_seal_count": "challenger >= baseline and all required receipt keys present",
+          "pollution_pct": "challenger <= baseline and below task pollution threshold",
+          "reopen_rate": "challenger <= baseline in replay/regression simulation",
+          "success_rate": "challenger >= baseline and no delivery RETURN",
+          "token_delta": "evaluated only after reliability, quality, and governance pass",
+          "wall_delta": "evaluated only after reliability, quality, and governance pass"
+        }
+      },
+      "runner": "Flash+Nexus internal live compare",
+      "selected_mode": "Mode B (Guard)",
+      "status": "READY"
+    },
+    {
+      "baseline_arm": {
+        "arm_id": "mode_a_current_primary",
+        "mode": "Mode A (Solo)",
+        "runner_env": {
+          "NEXUS_BENCH_ALLOW_ABLATION_SKILL_MOUNTS": "1",
+          "NEXUS_BENCH_SKILL_MOUNT_REQUESTS": "[\"sf2-belief-route-fit-spec\"]",
+          "NEXUS_HEEP_MODE": "Mode A (Solo)"
+        },
+        "runtime_final_receipt_chain": {
+          "evidence_present": true,
+          "gate_passed": true,
+          "injected": true,
+          "outcome_contributed": true,
+          "selected": true,
+          "used": true
+        },
+        "skill_count": 1,
+        "skill_ids": [
+          "sf2-belief-route-fit-spec"
+        ]
+      },
+      "capability": "belief",
+      "challenger_arm": {
+        "arm_id": "heep_multi_skill",
+        "mode": "Mode B (Guard)",
+        "runner_env": {
+          "NEXUS_BENCH_ALLOW_ABLATION_SKILL_MOUNTS": "1",
+          "NEXUS_BENCH_SKILL_MOUNT_REQUESTS": "[\"sf2-belief-route-fit-spec\", \"sf-systematic-artifact_gate-differential-review-461fbd0c\"]",
+          "NEXUS_HEEP_MODE": "Mode B (Guard)"
+        },
+        "runtime_final_receipt_chain": {
+          "evidence_present": true,
+          "gate_passed": true,
+          "injected": true,
+          "outcome_contributed": true,
+          "selected": true,
+          "used": true
+        },
+        "skill_count": 2,
+        "skill_ids": [
+          "sf2-belief-route-fit-spec",
+          "sf-systematic-artifact_gate-differential-review-461fbd0c"
+        ]
+      },
+      "claim_boundary": "internal_heep_mode_candidate_only",
+      "local_quality_lift": 0.3334,
+      "mat_b_gate": {
+        "capability": "belief",
+        "claim_boundary": "local replay cannot pass MAT-B; live compare must fill these KPI values",
+        "current_values": {
+          "evidence_seal_count": null,
+          "pollution_pct": null,
+          "reopen_rate": null,
+          "success_rate": null,
+          "token_delta": null,
+          "wall_delta": null
+        },
+        "decision_order": [
+          "Reliability",
+          "Quality",
+          "Governance",
+          "Efficiency",
+          "Regression"
+        ],
+        "required_kpis": [
+          "success_rate",
+          "pollution_pct",
+          "evidence_seal_count",
+          "token_delta",
+          "wall_delta",
+          "reopen_rate"
+        ],
+        "schema": "nexus.heep_mat_b_gate.v1",
+        "selected_mode": "Mode B (Guard)",
+        "status": "PENDING_LIVE_COMPARE",
+        "thresholds": {
+          "evidence_seal_count": "challenger >= baseline and all required receipt keys present",
+          "pollution_pct": "challenger <= baseline and below task pollution threshold",
+          "reopen_rate": "challenger <= baseline in replay/regression simulation",
+          "success_rate": "challenger >= baseline and no delivery RETURN",
+          "token_delta": "evaluated only after reliability, quality, and governance pass",
+          "wall_delta": "evaluated only after reliability, quality, and governance pass"
+        }
+      },
+      "runner": "Flash+Nexus internal live compare",
+      "selected_mode": "Mode B (Guard)",
+      "status": "READY"
+    },
+    {
+      "baseline_arm": {
+        "arm_id": "mode_a_current_primary",
+        "mode": "Mode A (Solo)",
+        "runner_env": {
+          "NEXUS_BENCH_ALLOW_ABLATION_SKILL_MOUNTS": "1",
+          "NEXUS_BENCH_SKILL_MOUNT_REQUESTS": "[\"sf-systematic-benchmark_meta_opt-hugging-face-trackio-d21c6b90\"]",
+          "NEXUS_HEEP_MODE": "Mode A (Solo)"
+        },
+        "runtime_final_receipt_chain": {
+          "evidence_present": true,
+          "gate_passed": true,
+          "injected": true,
+          "outcome_contributed": true,
+          "selected": true,
+          "used": true
+        },
+        "skill_count": 1,
+        "skill_ids": [
+          "sf-systematic-benchmark_meta_opt-hugging-face-trackio-d21c6b90"
+        ]
+      },
+      "capability": "benchmark_meta_opt",
+      "challenger_arm": {
+        "arm_id": "heep_multi_skill",
+        "mode": "Mode C (Swarm)",
+        "runner_env": {
+          "NEXUS_BENCH_ALLOW_ABLATION_SKILL_MOUNTS": "1",
+          "NEXUS_BENCH_SKILL_MOUNT_REQUESTS": "[\"sf-systematic-codeintel-first-principles-thinking-f95019ea\", \"sf-systematic-benchmark_meta_opt-hugging-face-trackio-d21c6b90\", \"sf-systematic-artifact_gate-differential-review-461fbd0c\"]",
+          "NEXUS_HEEP_MODE": "Mode C (Swarm)"
+        },
+        "runtime_final_receipt_chain": {
+          "evidence_present": true,
+          "gate_passed": true,
+          "injected": true,
+          "outcome_contributed": true,
+          "selected": true,
+          "used": true
+        },
+        "skill_count": 3,
+        "skill_ids": [
+          "sf-systematic-codeintel-first-principles-thinking-f95019ea",
+          "sf-systematic-benchmark_meta_opt-hugging-face-trackio-d21c6b90",
+          "sf-systematic-artifact_gate-differential-review-461fbd0c"
+        ]
+      },
+      "claim_boundary": "internal_heep_mode_candidate_only",
+      "local_quality_lift": 0.6667,
+      "mat_b_gate": {
+        "capability": "benchmark_meta_opt",
+        "claim_boundary": "local replay cannot pass MAT-B; live compare must fill these KPI values",
+        "current_values": {
+          "evidence_seal_count": null,
+          "pollution_pct": null,
+          "reopen_rate": null,
+          "success_rate": null,
+          "token_delta": null,
+          "wall_delta": null
+        },
+        "decision_order": [
+          "Reliability",
+          "Quality",
+          "Governance",
+          "Efficiency",
+          "Regression"
+        ],
+        "required_kpis": [
+          "success_rate",
+          "pollution_pct",
+          "evidence_seal_count",
+          "token_delta",
+          "wall_delta",
+          "reopen_rate"
+        ],
+        "schema": "nexus.heep_mat_b_gate.v1",
+        "selected_mode": "Mode C (Swarm)",
+        "status": "PENDING_LIVE_COMPARE",
+        "thresholds": {
+          "evidence_seal_count": "challenger >= baseline and all required receipt keys present",
+          "pollution_pct": "challenger <= baseline and below task pollution threshold",
+          "reopen_rate": "challenger <= baseline in replay/regression simulation",
+          "success_rate": "challenger >= baseline and no delivery RETURN",
+          "token_delta": "evaluated only after reliability, quality, and governance pass",
+          "wall_delta": "evaluated only after reliability, quality, and governance pass"
+        }
+      },
+      "runner": "Flash+Nexus internal live compare",
+      "selected_mode": "Mode C (Swarm)",
+      "status": "READY"
+    },
+    {
+      "baseline_arm": {
+        "arm_id": "mode_a_current_primary",
+        "mode": "Mode A (Solo)",
+        "runner_env": {
+          "NEXUS_BENCH_ALLOW_ABLATION_SKILL_MOUNTS": "1",
+          "NEXUS_BENCH_SKILL_MOUNT_REQUESTS": "[\"nexus-benchmark-continuous-optimization\"]",
+          "NEXUS_HEEP_MODE": "Mode A (Solo)"
+        },
+        "runtime_final_receipt_chain": {
+          "evidence_present": true,
+          "gate_passed": true,
+          "injected": true,
+          "outcome_contributed": true,
+          "selected": true,
+          "used": true
+        },
+        "skill_count": 1,
+        "skill_ids": [
+          "nexus-benchmark-continuous-optimization"
+        ]
+      },
+      "capability": "claim_gate",
+      "challenger_arm": {
+        "arm_id": "heep_multi_skill",
+        "mode": "Mode B (Guard)",
+        "runner_env": {
+          "NEXUS_BENCH_ALLOW_ABLATION_SKILL_MOUNTS": "1",
+          "NEXUS_BENCH_SKILL_MOUNT_REQUESTS": "[\"nexus-benchmark-continuous-optimization\", \"sf-systematic-artifact_gate-differential-review-461fbd0c\"]",
+          "NEXUS_HEEP_MODE": "Mode B (Guard)"
+        },
+        "runtime_final_receipt_chain": {
+          "evidence_present": true,
+          "gate_passed": true,
+          "injected": true,
+          "outcome_contributed": true,
+          "selected": true,
+          "used": true
+        },
+        "skill_count": 2,
+        "skill_ids": [
+          "nexus-benchmark-continuous-optimization",
+          "sf-systematic-artifact_gate-differential-review-461fbd0c"
+        ]
+      },
+      "claim_boundary": "internal_heep_mode_candidate_only",
+      "local_quality_lift": 0.3334,
+      "mat_b_gate": {
+        "capability": "claim_gate",
+        "claim_boundary": "local replay cannot pass MAT-B; live compare must fill these KPI values",
+        "current_values": {
+          "evidence_seal_count": null,
+          "pollution_pct": null,
+          "reopen_rate": null,
+          "success_rate": null,
+          "token_delta": null,
+          "wall_delta": null
+        },
+        "decision_order": [
+          "Reliability",
+          "Quality",
+          "Governance",
+          "Efficiency",
+          "Regression"
+        ],
+        "required_kpis": [
+          "success_rate",
+          "pollution_pct",
+          "evidence_seal_count",
+          "token_delta",
+          "wall_delta",
+          "reopen_rate"
+        ],
+        "schema": "nexus.heep_mat_b_gate.v1",
+        "selected_mode": "Mode B (Guard)",
+        "status": "PENDING_LIVE_COMPARE",
+        "thresholds": {
+          "evidence_seal_count": "challenger >= baseline and all required receipt keys present",
+          "pollution_pct": "challenger <= baseline and below task pollution threshold",
+          "reopen_rate": "challenger <= baseline in replay/regression simulation",
+          "success_rate": "challenger >= baseline and no delivery RETURN",
+          "token_delta": "evaluated only after reliability, quality, and governance pass",
+          "wall_delta": "evaluated only after reliability, quality, and governance pass"
+        }
+      },
+      "runner": "Flash+Nexus internal live compare",
+      "selected_mode": "Mode B (Guard)",
+      "status": "READY"
+    },
+    {
+      "baseline_arm": {
+        "arm_id": "mode_a_current_primary",
+        "mode": "Mode A (Solo)",
+        "runner_env": {
+          "NEXUS_BENCH_ALLOW_ABLATION_SKILL_MOUNTS": "1",
+          "NEXUS_BENCH_SKILL_MOUNT_REQUESTS": "[\"sf-systematic-codeintel-first-principles-thinking-f95019ea\"]",
+          "NEXUS_HEEP_MODE": "Mode A (Solo)"
+        },
+        "runtime_final_receipt_chain": {
+          "evidence_present": true,
+          "gate_passed": true,
+          "injected": true,
+          "outcome_contributed": true,
+          "selected": true,
+          "used": true
+        },
+        "skill_count": 1,
+        "skill_ids": [
+          "sf-systematic-codeintel-first-principles-thinking-f95019ea"
+        ]
+      },
+      "capability": "codeintel",
+      "challenger_arm": {
+        "arm_id": "heep_multi_skill",
+        "mode": "Mode C (Swarm)",
+        "runner_env": {
+          "NEXUS_BENCH_ALLOW_ABLATION_SKILL_MOUNTS": "1",
+          "NEXUS_BENCH_SKILL_MOUNT_REQUESTS": "[\"sf-systematic-codeintel-first-principles-thinking-f95019ea\", \"sf2-autonomic_router-route-fit-spec\", \"sf-systematic-artifact_gate-differential-review-461fbd0c\"]",
+          "NEXUS_HEEP_MODE": "Mode C (Swarm)"
+        },
+        "runtime_final_receipt_chain": {
+          "evidence_present": true,
+          "gate_passed": true,
+          "injected": true,
+          "outcome_contributed": true,
+          "selected": true,
+          "used": true
+        },
+        "skill_count": 3,
+        "skill_ids": [
+          "sf-systematic-codeintel-first-principles-thinking-f95019ea",
+          "sf2-autonomic_router-route-fit-spec",
+          "sf-systematic-artifact_gate-differential-review-461fbd0c"
+        ]
+      },
+      "claim_boundary": "internal_heep_mode_candidate_only",
+      "local_quality_lift": 0.6667,
+      "mat_b_gate": {
+        "capability": "codeintel",
+        "claim_boundary": "local replay cannot pass MAT-B; live compare must fill these KPI values",
+        "current_values": {
+          "evidence_seal_count": null,
+          "pollution_pct": null,
+          "reopen_rate": null,
+          "success_rate": null,
+          "token_delta": null,
+          "wall_delta": null
+        },
+        "decision_order": [
+          "Reliability",
+          "Quality",
+          "Governance",
+          "Efficiency",
+          "Regression"
+        ],
+        "required_kpis": [
+          "success_rate",
+          "pollution_pct",
+          "evidence_seal_count",
+          "token_delta",
+          "wall_delta",
+          "reopen_rate"
+        ],
+        "schema": "nexus.heep_mat_b_gate.v1",
+        "selected_mode": "Mode C (Swarm)",
+        "status": "PENDING_LIVE_COMPARE",
+        "thresholds": {
+          "evidence_seal_count": "challenger >= baseline and all required receipt keys present",
+          "pollution_pct": "challenger <= baseline and below task pollution threshold",
+          "reopen_rate": "challenger <= baseline in replay/regression simulation",
+          "success_rate": "challenger >= baseline and no delivery RETURN",
+          "token_delta": "evaluated only after reliability, quality, and governance pass",
+          "wall_delta": "evaluated only after reliability, quality, and governance pass"
+        }
+      },
+      "runner": "Flash+Nexus internal live compare",
+      "selected_mode": "Mode C (Swarm)",
+      "status": "READY"
+    },
+    {
+      "baseline_arm": {
+        "arm_id": "mode_a_current_primary",
+        "mode": "Mode A (Solo)",
+        "runner_env": {
+          "NEXUS_BENCH_ALLOW_ABLATION_SKILL_MOUNTS": "1",
+          "NEXUS_BENCH_SKILL_MOUNT_REQUESTS": "[\"nexus-root-cause-probe\"]",
+          "NEXUS_HEEP_MODE": "Mode A (Solo)"
+        },
+        "runtime_final_receipt_chain": {
+          "evidence_present": true,
+          "gate_passed": true,
+          "injected": true,
+          "outcome_contributed": true,
+          "selected": true,
+          "used": true
+        },
+        "skill_count": 1,
+        "skill_ids": [
+          "nexus-root-cause-probe"
+        ]
+      },
+      "capability": "ddtree",
+      "challenger_arm": {
+        "arm_id": "heep_multi_skill",
+        "mode": "Mode B (Guard)",
+        "runner_env": {
+          "NEXUS_BENCH_ALLOW_ABLATION_SKILL_MOUNTS": "1",
+          "NEXUS_BENCH_SKILL_MOUNT_REQUESTS": "[\"nexus-root-cause-probe\", \"sf-systematic-artifact_gate-differential-review-461fbd0c\"]",
+          "NEXUS_HEEP_MODE": "Mode B (Guard)"
+        },
+        "runtime_final_receipt_chain": {
+          "evidence_present": true,
+          "gate_passed": true,
+          "injected": true,
+          "outcome_contributed": true,
+          "selected": true,
+          "used": true
+        },
+        "skill_count": 2,
+        "skill_ids": [
+          "nexus-root-cause-probe",
+          "sf-systematic-artifact_gate-differential-review-461fbd0c"
+        ]
+      },
+      "claim_boundary": "internal_heep_mode_candidate_only",
+      "local_quality_lift": 0.3334,
+      "mat_b_gate": {
+        "capability": "ddtree",
+        "claim_boundary": "local replay cannot pass MAT-B; live compare must fill these KPI values",
+        "current_values": {
+          "evidence_seal_count": null,
+          "pollution_pct": null,
+          "reopen_rate": null,
+          "success_rate": null,
+          "token_delta": null,
+          "wall_delta": null
+        },
+        "decision_order": [
+          "Reliability",
+          "Quality",
+          "Governance",
+          "Efficiency",
+          "Regression"
+        ],
+        "required_kpis": [
+          "success_rate",
+          "pollution_pct",
+          "evidence_seal_count",
+          "token_delta",
+          "wall_delta",
+          "reopen_rate"
+        ],
+        "schema": "nexus.heep_mat_b_gate.v1",
+        "selected_mode": "Mode B (Guard)",
+        "status": "PENDING_LIVE_COMPARE",
+        "thresholds": {
+          "evidence_seal_count": "challenger >= baseline and all required receipt keys present",
+          "pollution_pct": "challenger <= baseline and below task pollution threshold",
+          "reopen_rate": "challenger <= baseline in replay/regression simulation",
+          "success_rate": "challenger >= baseline and no delivery RETURN",
+          "token_delta": "evaluated only after reliability, quality, and governance pass",
+          "wall_delta": "evaluated only after reliability, quality, and governance pass"
+        }
+      },
+      "runner": "Flash+Nexus internal live compare",
+      "selected_mode": "Mode B (Guard)",
+      "status": "READY"
+    },
+    {
+      "baseline_arm": {
+        "arm_id": "mode_a_current_primary",
+        "mode": "Mode A (Solo)",
+        "runner_env": {
+          "NEXUS_BENCH_ALLOW_ABLATION_SKILL_MOUNTS": "1",
+          "NEXUS_BENCH_SKILL_MOUNT_REQUESTS": "[\"sf2-file_lock_security_gate-route-fit-spec\"]",
+          "NEXUS_HEEP_MODE": "Mode A (Solo)"
+        },
+        "runtime_final_receipt_chain": {
+          "evidence_present": true,
+          "gate_passed": true,
+          "injected": true,
+          "outcome_contributed": true,
+          "selected": true,
+          "used": true
+        },
+        "skill_count": 1,
+        "skill_ids": [
+          "sf2-file_lock_security_gate-route-fit-spec"
+        ]
+      },
+      "capability": "file_lock_security_gate",
+      "challenger_arm": {
+        "arm_id": "heep_multi_skill",
+        "mode": "Mode C (Swarm)",
+        "runner_env": {
+          "NEXUS_BENCH_ALLOW_ABLATION_SKILL_MOUNTS": "1",
+          "NEXUS_BENCH_SKILL_MOUNT_REQUESTS": "[\"sf-systematic-codeintel-first-principles-thinking-f95019ea\", \"sf2-file_lock_security_gate-route-fit-spec\", \"sf-systematic-artifact_gate-differential-review-461fbd0c\"]",
+          "NEXUS_HEEP_MODE": "Mode C (Swarm)"
+        },
+        "runtime_final_receipt_chain": {
+          "evidence_present": true,
+          "gate_passed": true,
+          "injected": true,
+          "outcome_contributed": true,
+          "selected": true,
+          "used": true
+        },
+        "skill_count": 3,
+        "skill_ids": [
+          "sf-systematic-codeintel-first-principles-thinking-f95019ea",
+          "sf2-file_lock_security_gate-route-fit-spec",
+          "sf-systematic-artifact_gate-differential-review-461fbd0c"
+        ]
+      },
+      "claim_boundary": "internal_heep_mode_candidate_only",
+      "local_quality_lift": 0.6667,
+      "mat_b_gate": {
+        "capability": "file_lock_security_gate",
+        "claim_boundary": "local replay cannot pass MAT-B; live compare must fill these KPI values",
+        "current_values": {
+          "evidence_seal_count": null,
+          "pollution_pct": null,
+          "reopen_rate": null,
+          "success_rate": null,
+          "token_delta": null,
+          "wall_delta": null
+        },
+        "decision_order": [
+          "Reliability",
+          "Quality",
+          "Governance",
+          "Efficiency",
+          "Regression"
+        ],
+        "required_kpis": [
+          "success_rate",
+          "pollution_pct",
+          "evidence_seal_count",
+          "token_delta",
+          "wall_delta",
+          "reopen_rate"
+        ],
+        "schema": "nexus.heep_mat_b_gate.v1",
+        "selected_mode": "Mode C (Swarm)",
+        "status": "PENDING_LIVE_COMPARE",
+        "thresholds": {
+          "evidence_seal_count": "challenger >= baseline and all required receipt keys present",
+          "pollution_pct": "challenger <= baseline and below task pollution threshold",
+          "reopen_rate": "challenger <= baseline in replay/regression simulation",
+          "success_rate": "challenger >= baseline and no delivery RETURN",
+          "token_delta": "evaluated only after reliability, quality, and governance pass",
+          "wall_delta": "evaluated only after reliability, quality, and governance pass"
+        }
+      },
+      "runner": "Flash+Nexus internal live compare",
+      "selected_mode": "Mode C (Swarm)",
+      "status": "READY"
+    },
+    {
+      "baseline_arm": {
+        "arm_id": "mode_a_current_primary",
+        "mode": "Mode A (Solo)",
+        "runner_env": {
+          "NEXUS_BENCH_ALLOW_ABLATION_SKILL_MOUNTS": "1",
+          "NEXUS_BENCH_SKILL_MOUNT_REQUESTS": "[\"create-plan\"]",
+          "NEXUS_HEEP_MODE": "Mode A (Solo)"
+        },
+        "runtime_final_receipt_chain": {
+          "evidence_present": true,
+          "gate_passed": true,
+          "injected": true,
+          "outcome_contributed": true,
+          "selected": true,
+          "used": true
+        },
+        "skill_count": 1,
+        "skill_ids": [
+          "create-plan"
+        ]
+      },
+      "capability": "forecast_pregate",
+      "challenger_arm": {
+        "arm_id": "heep_multi_skill",
+        "mode": "Mode B (Guard)",
+        "runner_env": {
+          "NEXUS_BENCH_ALLOW_ABLATION_SKILL_MOUNTS": "1",
+          "NEXUS_BENCH_SKILL_MOUNT_REQUESTS": "[\"create-plan\", \"sf-systematic-artifact_gate-differential-review-461fbd0c\"]",
+          "NEXUS_HEEP_MODE": "Mode B (Guard)"
+        },
+        "runtime_final_receipt_chain": {
+          "evidence_present": true,
+          "gate_passed": true,
+          "injected": true,
+          "outcome_contributed": true,
+          "selected": true,
+          "used": true
+        },
+        "skill_count": 2,
+        "skill_ids": [
+          "create-plan",
+          "sf-systematic-artifact_gate-differential-review-461fbd0c"
+        ]
+      },
+      "claim_boundary": "internal_heep_mode_candidate_only",
+      "local_quality_lift": 0.3334,
+      "mat_b_gate": {
+        "capability": "forecast_pregate",
+        "claim_boundary": "local replay cannot pass MAT-B; live compare must fill these KPI values",
+        "current_values": {
+          "evidence_seal_count": null,
+          "pollution_pct": null,
+          "reopen_rate": null,
+          "success_rate": null,
+          "token_delta": null,
+          "wall_delta": null
+        },
+        "decision_order": [
+          "Reliability",
+          "Quality",
+          "Governance",
+          "Efficiency",
+          "Regression"
+        ],
+        "required_kpis": [
+          "success_rate",
+          "pollution_pct",
+          "evidence_seal_count",
+          "token_delta",
+          "wall_delta",
+          "reopen_rate"
+        ],
+        "schema": "nexus.heep_mat_b_gate.v1",
+        "selected_mode": "Mode B (Guard)",
+        "status": "PENDING_LIVE_COMPARE",
+        "thresholds": {
+          "evidence_seal_count": "challenger >= baseline and all required receipt keys present",
+          "pollution_pct": "challenger <= baseline and below task pollution threshold",
+          "reopen_rate": "challenger <= baseline in replay/regression simulation",
+          "success_rate": "challenger >= baseline and no delivery RETURN",
+          "token_delta": "evaluated only after reliability, quality, and governance pass",
+          "wall_delta": "evaluated only after reliability, quality, and governance pass"
+        }
+      },
+      "runner": "Flash+Nexus internal live compare",
+      "selected_mode": "Mode B (Guard)",
+      "status": "READY"
+    },
+    {
+      "baseline_arm": {
+        "arm_id": "mode_a_current_primary",
+        "mode": "Mode A (Solo)",
+        "runner_env": {
+          "NEXUS_BENCH_ALLOW_ABLATION_SKILL_MOUNTS": "1",
+          "NEXUS_BENCH_SKILL_MOUNT_REQUESTS": "[\"sf-systematic-governance_and_trust-aegisops-ai-0aa841e2\"]",
+          "NEXUS_HEEP_MODE": "Mode A (Solo)"
+        },
+        "runtime_final_receipt_chain": {
+          "evidence_present": true,
+          "gate_passed": true,
+          "injected": true,
+          "outcome_contributed": true,
+          "selected": true,
+          "used": true
+        },
+        "skill_count": 1,
+        "skill_ids": [
+          "sf-systematic-governance_and_trust-aegisops-ai-0aa841e2"
+        ]
+      },
+      "capability": "governance_and_trust",
+      "challenger_arm": {
+        "arm_id": "heep_multi_skill",
+        "mode": "Mode C (Swarm)",
+        "runner_env": {
+          "NEXUS_BENCH_ALLOW_ABLATION_SKILL_MOUNTS": "1",
+          "NEXUS_BENCH_SKILL_MOUNT_REQUESTS": "[\"sf-systematic-codeintel-first-principles-thinking-f95019ea\", \"sf2-autonomic_router-route-fit-spec\", \"sf-systematic-governance_and_trust-aegisops-ai-0aa841e2\"]",
+          "NEXUS_HEEP_MODE": "Mode C (Swarm)"
+        },
+        "runtime_final_receipt_chain": {
+          "evidence_present": true,
+          "gate_passed": true,
+          "injected": true,
+          "outcome_contributed": true,
+          "selected": true,
+          "used": true
+        },
+        "skill_count": 3,
+        "skill_ids": [
+          "sf-systematic-codeintel-first-principles-thinking-f95019ea",
+          "sf2-autonomic_router-route-fit-spec",
+          "sf-systematic-governance_and_trust-aegisops-ai-0aa841e2"
+        ]
+      },
+      "claim_boundary": "internal_heep_mode_candidate_only",
+      "local_quality_lift": 0.6667,
+      "mat_b_gate": {
+        "capability": "governance_and_trust",
+        "claim_boundary": "local replay cannot pass MAT-B; live compare must fill these KPI values",
+        "current_values": {
+          "evidence_seal_count": null,
+          "pollution_pct": null,
+          "reopen_rate": null,
+          "success_rate": null,
+          "token_delta": null,
+          "wall_delta": null
+        },
+        "decision_order": [
+          "Reliability",
+          "Quality",
+          "Governance",
+          "Efficiency",
+          "Regression"
+        ],
+        "required_kpis": [
+          "success_rate",
+          "pollution_pct",
+          "evidence_seal_count",
+          "token_delta",
+          "wall_delta",
+          "reopen_rate"
+        ],
+        "schema": "nexus.heep_mat_b_gate.v1",
+        "selected_mode": "Mode C (Swarm)",
+        "status": "PENDING_LIVE_COMPARE",
+        "thresholds": {
+          "evidence_seal_count": "challenger >= baseline and all required receipt keys present",
+          "pollution_pct": "challenger <= baseline and below task pollution threshold",
+          "reopen_rate": "challenger <= baseline in replay/regression simulation",
+          "success_rate": "challenger >= baseline and no delivery RETURN",
+          "token_delta": "evaluated only after reliability, quality, and governance pass",
+          "wall_delta": "evaluated only after reliability, quality, and governance pass"
+        }
+      },
+      "runner": "Flash+Nexus internal live compare",
+      "selected_mode": "Mode C (Swarm)",
+      "status": "READY"
+    },
+    {
+      "baseline_arm": {
+        "arm_id": "mode_a_current_primary",
+        "mode": "Mode A (Solo)",
+        "runner_env": {
+          "NEXUS_BENCH_ALLOW_ABLATION_SKILL_MOUNTS": "1",
+          "NEXUS_BENCH_SKILL_MOUNT_REQUESTS": "[\"research-source-validation-auditor\"]",
+          "NEXUS_HEEP_MODE": "Mode A (Solo)"
+        },
+        "runtime_final_receipt_chain": {
+          "evidence_present": true,
+          "gate_passed": true,
+          "injected": true,
+          "outcome_contributed": true,
+          "selected": true,
+          "used": true
+        },
+        "skill_count": 1,
+        "skill_ids": [
+          "research-source-validation-auditor"
+        ]
+      },
+      "capability": "lancedb",
+      "challenger_arm": {
+        "arm_id": "heep_multi_skill",
+        "mode": "Mode B (Guard)",
+        "runner_env": {
+          "NEXUS_BENCH_ALLOW_ABLATION_SKILL_MOUNTS": "1",
+          "NEXUS_BENCH_SKILL_MOUNT_REQUESTS": "[\"research-source-validation-auditor\", \"sf-systematic-artifact_gate-differential-review-461fbd0c\"]",
+          "NEXUS_HEEP_MODE": "Mode B (Guard)"
+        },
+        "runtime_final_receipt_chain": {
+          "evidence_present": true,
+          "gate_passed": true,
+          "injected": true,
+          "outcome_contributed": true,
+          "selected": true,
+          "used": true
+        },
+        "skill_count": 2,
+        "skill_ids": [
+          "research-source-validation-auditor",
+          "sf-systematic-artifact_gate-differential-review-461fbd0c"
+        ]
+      },
+      "claim_boundary": "internal_heep_mode_candidate_only",
+      "local_quality_lift": 0.3334,
+      "mat_b_gate": {
+        "capability": "lancedb",
+        "claim_boundary": "local replay cannot pass MAT-B; live compare must fill these KPI values",
+        "current_values": {
+          "evidence_seal_count": null,
+          "pollution_pct": null,
+          "reopen_rate": null,
+          "success_rate": null,
+          "token_delta": null,
+          "wall_delta": null
+        },
+        "decision_order": [
+          "Reliability",
+          "Quality",
+          "Governance",
+          "Efficiency",
+          "Regression"
+        ],
+        "required_kpis": [
+          "success_rate",
+          "pollution_pct",
+          "evidence_seal_count",
+          "token_delta",
+          "wall_delta",
+          "reopen_rate"
+        ],
+        "schema": "nexus.heep_mat_b_gate.v1",
+        "selected_mode": "Mode B (Guard)",
+        "status": "PENDING_LIVE_COMPARE",
+        "thresholds": {
+          "evidence_seal_count": "challenger >= baseline and all required receipt keys present",
+          "pollution_pct": "challenger <= baseline and below task pollution threshold",
+          "reopen_rate": "challenger <= baseline in replay/regression simulation",
+          "success_rate": "challenger >= baseline and no delivery RETURN",
+          "token_delta": "evaluated only after reliability, quality, and governance pass",
+          "wall_delta": "evaluated only after reliability, quality, and governance pass"
+        }
+      },
+      "runner": "Flash+Nexus internal live compare",
+      "selected_mode": "Mode B (Guard)",
+      "status": "READY"
+    },
+    {
+      "baseline_arm": {
+        "arm_id": "mode_a_current_primary",
+        "mode": "Mode A (Solo)",
+        "runner_env": {
+          "NEXUS_BENCH_ALLOW_ABLATION_SKILL_MOUNTS": "1",
+          "NEXUS_BENCH_SKILL_MOUNT_REQUESTS": "[\"github8-skilless-deep-research-learn-ask\"]",
+          "NEXUS_HEEP_MODE": "Mode A (Solo)"
+        },
+        "runtime_final_receipt_chain": {
+          "evidence_present": true,
+          "gate_passed": true,
+          "injected": true,
+          "outcome_contributed": true,
+          "selected": true,
+          "used": true
+        },
+        "skill_count": 1,
+        "skill_ids": [
+          "github8-skilless-deep-research-learn-ask"
+        ]
+      },
+      "capability": "learn_ask",
+      "challenger_arm": {
+        "arm_id": "heep_multi_skill",
+        "mode": "Mode C (Swarm)",
+        "runner_env": {
+          "NEXUS_BENCH_ALLOW_ABLATION_SKILL_MOUNTS": "1",
+          "NEXUS_BENCH_SKILL_MOUNT_REQUESTS": "[\"github8-skilless-deep-research-learn-ask\", \"sf2-autonomic_router-route-fit-spec\", \"sf-systematic-artifact_gate-differential-review-461fbd0c\"]",
+          "NEXUS_HEEP_MODE": "Mode C (Swarm)"
+        },
+        "runtime_final_receipt_chain": {
+          "evidence_present": true,
+          "gate_passed": true,
+          "injected": true,
+          "outcome_contributed": true,
+          "selected": true,
+          "used": true
+        },
+        "skill_count": 3,
+        "skill_ids": [
+          "github8-skilless-deep-research-learn-ask",
+          "sf2-autonomic_router-route-fit-spec",
+          "sf-systematic-artifact_gate-differential-review-461fbd0c"
+        ]
+      },
+      "claim_boundary": "internal_heep_mode_candidate_only",
+      "local_quality_lift": 0.6667,
+      "mat_b_gate": {
+        "capability": "learn_ask",
+        "claim_boundary": "local replay cannot pass MAT-B; live compare must fill these KPI values",
+        "current_values": {
+          "evidence_seal_count": null,
+          "pollution_pct": null,
+          "reopen_rate": null,
+          "success_rate": null,
+          "token_delta": null,
+          "wall_delta": null
+        },
+        "decision_order": [
+          "Reliability",
+          "Quality",
+          "Governance",
+          "Efficiency",
+          "Regression"
+        ],
+        "required_kpis": [
+          "success_rate",
+          "pollution_pct",
+          "evidence_seal_count",
+          "token_delta",
+          "wall_delta",
+          "reopen_rate"
+        ],
+        "schema": "nexus.heep_mat_b_gate.v1",
+        "selected_mode": "Mode C (Swarm)",
+        "status": "PENDING_LIVE_COMPARE",
+        "thresholds": {
+          "evidence_seal_count": "challenger >= baseline and all required receipt keys present",
+          "pollution_pct": "challenger <= baseline and below task pollution threshold",
+          "reopen_rate": "challenger <= baseline in replay/regression simulation",
+          "success_rate": "challenger >= baseline and no delivery RETURN",
+          "token_delta": "evaluated only after reliability, quality, and governance pass",
+          "wall_delta": "evaluated only after reliability, quality, and governance pass"
+        }
+      },
+      "runner": "Flash+Nexus internal live compare",
+      "selected_mode": "Mode C (Swarm)",
+      "status": "READY"
+    },
+    {
+      "baseline_arm": {
+        "arm_id": "mode_a_current_primary",
+        "mode": "Mode A (Solo)",
+        "runner_env": {
+          "NEXUS_BENCH_ALLOW_ABLATION_SKILL_MOUNTS": "1",
+          "NEXUS_BENCH_SKILL_MOUNT_REQUESTS": "[\"sf-systematic-learning_closure-memory-lint-8bdb0fca\"]",
+          "NEXUS_HEEP_MODE": "Mode A (Solo)"
+        },
+        "runtime_final_receipt_chain": {
+          "evidence_present": true,
+          "gate_passed": true,
+          "injected": true,
+          "outcome_contributed": true,
+          "selected": true,
+          "used": true
+        },
+        "skill_count": 1,
+        "skill_ids": [
+          "sf-systematic-learning_closure-memory-lint-8bdb0fca"
+        ]
+      },
+      "capability": "learning_closure",
+      "challenger_arm": {
+        "arm_id": "heep_multi_skill",
+        "mode": "Mode C (Swarm)",
+        "runner_env": {
+          "NEXUS_BENCH_ALLOW_ABLATION_SKILL_MOUNTS": "1",
+          "NEXUS_BENCH_SKILL_MOUNT_REQUESTS": "[\"sf-systematic-learning_closure-memory-lint-8bdb0fca\", \"sf2-autonomic_router-route-fit-spec\", \"sf-systematic-artifact_gate-differential-review-461fbd0c\"]",
+          "NEXUS_HEEP_MODE": "Mode C (Swarm)"
+        },
+        "runtime_final_receipt_chain": {
+          "evidence_present": true,
+          "gate_passed": true,
+          "injected": true,
+          "outcome_contributed": true,
+          "selected": true,
+          "used": true
+        },
+        "skill_count": 3,
+        "skill_ids": [
+          "sf-systematic-learning_closure-memory-lint-8bdb0fca",
+          "sf2-autonomic_router-route-fit-spec",
+          "sf-systematic-artifact_gate-differential-review-461fbd0c"
+        ]
+      },
+      "claim_boundary": "internal_heep_mode_candidate_only",
+      "local_quality_lift": 0.6667,
+      "mat_b_gate": {
+        "capability": "learning_closure",
+        "claim_boundary": "local replay cannot pass MAT-B; live compare must fill these KPI values",
+        "current_values": {
+          "evidence_seal_count": null,
+          "pollution_pct": null,
+          "reopen_rate": null,
+          "success_rate": null,
+          "token_delta": null,
+          "wall_delta": null
+        },
+        "decision_order": [
+          "Reliability",
+          "Quality",
+          "Governance",
+          "Efficiency",
+          "Regression"
+        ],
+        "required_kpis": [
+          "success_rate",
+          "pollution_pct",
+          "evidence_seal_count",
+          "token_delta",
+          "wall_delta",
+          "reopen_rate"
+        ],
+        "schema": "nexus.heep_mat_b_gate.v1",
+        "selected_mode": "Mode C (Swarm)",
+        "status": "PENDING_LIVE_COMPARE",
+        "thresholds": {
+          "evidence_seal_count": "challenger >= baseline and all required receipt keys present",
+          "pollution_pct": "challenger <= baseline and below task pollution threshold",
+          "reopen_rate": "challenger <= baseline in replay/regression simulation",
+          "success_rate": "challenger >= baseline and no delivery RETURN",
+          "token_delta": "evaluated only after reliability, quality, and governance pass",
+          "wall_delta": "evaluated only after reliability, quality, and governance pass"
+        }
+      },
+      "runner": "Flash+Nexus internal live compare",
+      "selected_mode": "Mode C (Swarm)",
+      "status": "READY"
+    },
+    {
+      "baseline_arm": {
+        "arm_id": "mode_a_current_primary",
+        "mode": "Mode A (Solo)",
+        "runner_env": {
+          "NEXUS_BENCH_ALLOW_ABLATION_SKILL_MOUNTS": "1",
+          "NEXUS_BENCH_SKILL_MOUNT_REQUESTS": "[\"sf-systematic-memory-project-skill-audit-cc8b7621\"]",
+          "NEXUS_HEEP_MODE": "Mode A (Solo)"
+        },
+        "runtime_final_receipt_chain": {
+          "evidence_present": true,
+          "gate_passed": true,
+          "injected": true,
+          "outcome_contributed": true,
+          "selected": true,
+          "used": true
+        },
+        "skill_count": 1,
+        "skill_ids": [
+          "sf-systematic-memory-project-skill-audit-cc8b7621"
+        ]
+      },
+      "capability": "memory",
+      "challenger_arm": {
+        "arm_id": "heep_multi_skill",
+        "mode": "Mode B (Guard)",
+        "runner_env": {
+          "NEXUS_BENCH_ALLOW_ABLATION_SKILL_MOUNTS": "1",
+          "NEXUS_BENCH_SKILL_MOUNT_REQUESTS": "[\"sf-systematic-memory-project-skill-audit-cc8b7621\", \"sf-systematic-artifact_gate-differential-review-461fbd0c\"]",
+          "NEXUS_HEEP_MODE": "Mode B (Guard)"
+        },
+        "runtime_final_receipt_chain": {
+          "evidence_present": true,
+          "gate_passed": true,
+          "injected": true,
+          "outcome_contributed": true,
+          "selected": true,
+          "used": true
+        },
+        "skill_count": 2,
+        "skill_ids": [
+          "sf-systematic-memory-project-skill-audit-cc8b7621",
+          "sf-systematic-artifact_gate-differential-review-461fbd0c"
+        ]
+      },
+      "claim_boundary": "internal_heep_mode_candidate_only",
+      "local_quality_lift": 0.3334,
+      "mat_b_gate": {
+        "capability": "memory",
+        "claim_boundary": "local replay cannot pass MAT-B; live compare must fill these KPI values",
+        "current_values": {
+          "evidence_seal_count": null,
+          "pollution_pct": null,
+          "reopen_rate": null,
+          "success_rate": null,
+          "token_delta": null,
+          "wall_delta": null
+        },
+        "decision_order": [
+          "Reliability",
+          "Quality",
+          "Governance",
+          "Efficiency",
+          "Regression"
+        ],
+        "required_kpis": [
+          "success_rate",
+          "pollution_pct",
+          "evidence_seal_count",
+          "token_delta",
+          "wall_delta",
+          "reopen_rate"
+        ],
+        "schema": "nexus.heep_mat_b_gate.v1",
+        "selected_mode": "Mode B (Guard)",
+        "status": "PENDING_LIVE_COMPARE",
+        "thresholds": {
+          "evidence_seal_count": "challenger >= baseline and all required receipt keys present",
+          "pollution_pct": "challenger <= baseline and below task pollution threshold",
+          "reopen_rate": "challenger <= baseline in replay/regression simulation",
+          "success_rate": "challenger >= baseline and no delivery RETURN",
+          "token_delta": "evaluated only after reliability, quality, and governance pass",
+          "wall_delta": "evaluated only after reliability, quality, and governance pass"
+        }
+      },
+      "runner": "Flash+Nexus internal live compare",
+      "selected_mode": "Mode B (Guard)",
+      "status": "READY"
+    },
+    {
+      "baseline_arm": {
+        "arm_id": "mode_a_current_primary",
+        "mode": "Mode A (Solo)",
+        "runner_env": {
+          "NEXUS_BENCH_ALLOW_ABLATION_SKILL_MOUNTS": "1",
+          "NEXUS_BENCH_SKILL_MOUNT_REQUESTS": "[\"sf2-mempalace-route-fit-spec\"]",
+          "NEXUS_HEEP_MODE": "Mode A (Solo)"
+        },
+        "runtime_final_receipt_chain": {
+          "evidence_present": true,
+          "gate_passed": true,
+          "injected": true,
+          "outcome_contributed": true,
+          "selected": true,
+          "used": true
+        },
+        "skill_count": 1,
+        "skill_ids": [
+          "sf2-mempalace-route-fit-spec"
+        ]
+      },
+      "capability": "mempalace",
+      "challenger_arm": {
+        "arm_id": "heep_multi_skill",
+        "mode": "Mode B (Guard)",
+        "runner_env": {
+          "NEXUS_BENCH_ALLOW_ABLATION_SKILL_MOUNTS": "1",
+          "NEXUS_BENCH_SKILL_MOUNT_REQUESTS": "[\"sf2-mempalace-route-fit-spec\", \"sf-systematic-artifact_gate-differential-review-461fbd0c\"]",
+          "NEXUS_HEEP_MODE": "Mode B (Guard)"
+        },
+        "runtime_final_receipt_chain": {
+          "evidence_present": true,
+          "gate_passed": true,
+          "injected": true,
+          "outcome_contributed": true,
+          "selected": true,
+          "used": true
+        },
+        "skill_count": 2,
+        "skill_ids": [
+          "sf2-mempalace-route-fit-spec",
+          "sf-systematic-artifact_gate-differential-review-461fbd0c"
+        ]
+      },
+      "claim_boundary": "internal_heep_mode_candidate_only",
+      "local_quality_lift": 0.3334,
+      "mat_b_gate": {
+        "capability": "mempalace",
+        "claim_boundary": "local replay cannot pass MAT-B; live compare must fill these KPI values",
+        "current_values": {
+          "evidence_seal_count": null,
+          "pollution_pct": null,
+          "reopen_rate": null,
+          "success_rate": null,
+          "token_delta": null,
+          "wall_delta": null
+        },
+        "decision_order": [
+          "Reliability",
+          "Quality",
+          "Governance",
+          "Efficiency",
+          "Regression"
+        ],
+        "required_kpis": [
+          "success_rate",
+          "pollution_pct",
+          "evidence_seal_count",
+          "token_delta",
+          "wall_delta",
+          "reopen_rate"
+        ],
+        "schema": "nexus.heep_mat_b_gate.v1",
+        "selected_mode": "Mode B (Guard)",
+        "status": "PENDING_LIVE_COMPARE",
+        "thresholds": {
+          "evidence_seal_count": "challenger >= baseline and all required receipt keys present",
+          "pollution_pct": "challenger <= baseline and below task pollution threshold",
+          "reopen_rate": "challenger <= baseline in replay/regression simulation",
+          "success_rate": "challenger >= baseline and no delivery RETURN",
+          "token_delta": "evaluated only after reliability, quality, and governance pass",
+          "wall_delta": "evaluated only after reliability, quality, and governance pass"
+        }
+      },
+      "runner": "Flash+Nexus internal live compare",
+      "selected_mode": "Mode B (Guard)",
+      "status": "READY"
+    },
+    {
+      "baseline_arm": {
+        "arm_id": "mode_a_current_primary",
+        "mode": "Mode A (Solo)",
+        "runner_env": {
+          "NEXUS_BENCH_ALLOW_ABLATION_SKILL_MOUNTS": "1",
+          "NEXUS_BENCH_SKILL_MOUNT_REQUESTS": "[\"sf-systematic-policy_capability_gate-aegisops-ai-0aa841e2\"]",
+          "NEXUS_HEEP_MODE": "Mode A (Solo)"
+        },
+        "runtime_final_receipt_chain": {
+          "evidence_present": true,
+          "gate_passed": true,
+          "injected": true,
+          "outcome_contributed": true,
+          "selected": true,
+          "used": true
+        },
+        "skill_count": 1,
+        "skill_ids": [
+          "sf-systematic-policy_capability_gate-aegisops-ai-0aa841e2"
+        ]
+      },
+      "capability": "policy_capability_gate",
+      "challenger_arm": {
+        "arm_id": "heep_multi_skill",
+        "mode": "Mode C (Swarm)",
+        "runner_env": {
+          "NEXUS_BENCH_ALLOW_ABLATION_SKILL_MOUNTS": "1",
+          "NEXUS_BENCH_SKILL_MOUNT_REQUESTS": "[\"sf-systematic-codeintel-first-principles-thinking-f95019ea\", \"sf2-autonomic_router-route-fit-spec\", \"sf-systematic-policy_capability_gate-aegisops-ai-0aa841e2\"]",
+          "NEXUS_HEEP_MODE": "Mode C (Swarm)"
+        },
+        "runtime_final_receipt_chain": {
+          "evidence_present": true,
+          "gate_passed": true,
+          "injected": true,
+          "outcome_contributed": true,
+          "selected": true,
+          "used": true
+        },
+        "skill_count": 3,
+        "skill_ids": [
+          "sf-systematic-codeintel-first-principles-thinking-f95019ea",
+          "sf2-autonomic_router-route-fit-spec",
+          "sf-systematic-policy_capability_gate-aegisops-ai-0aa841e2"
+        ]
+      },
+      "claim_boundary": "internal_heep_mode_candidate_only",
+      "local_quality_lift": 0.6667,
+      "mat_b_gate": {
+        "capability": "policy_capability_gate",
+        "claim_boundary": "local replay cannot pass MAT-B; live compare must fill these KPI values",
+        "current_values": {
+          "evidence_seal_count": null,
+          "pollution_pct": null,
+          "reopen_rate": null,
+          "success_rate": null,
+          "token_delta": null,
+          "wall_delta": null
+        },
+        "decision_order": [
+          "Reliability",
+          "Quality",
+          "Governance",
+          "Efficiency",
+          "Regression"
+        ],
+        "required_kpis": [
+          "success_rate",
+          "pollution_pct",
+          "evidence_seal_count",
+          "token_delta",
+          "wall_delta",
+          "reopen_rate"
+        ],
+        "schema": "nexus.heep_mat_b_gate.v1",
+        "selected_mode": "Mode C (Swarm)",
+        "status": "PENDING_LIVE_COMPARE",
+        "thresholds": {
+          "evidence_seal_count": "challenger >= baseline and all required receipt keys present",
+          "pollution_pct": "challenger <= baseline and below task pollution threshold",
+          "reopen_rate": "challenger <= baseline in replay/regression simulation",
+          "success_rate": "challenger >= baseline and no delivery RETURN",
+          "token_delta": "evaluated only after reliability, quality, and governance pass",
+          "wall_delta": "evaluated only after reliability, quality, and governance pass"
+        }
+      },
+      "runner": "Flash+Nexus internal live compare",
+      "selected_mode": "Mode C (Swarm)",
+      "status": "READY"
+    },
+    {
+      "baseline_arm": {
+        "arm_id": "mode_a_current_primary",
+        "mode": "Mode A (Solo)",
+        "runner_env": {
+          "NEXUS_BENCH_ALLOW_ABLATION_SKILL_MOUNTS": "1",
+          "NEXUS_BENCH_SKILL_MOUNT_REQUESTS": "[\"github5-skill-seekers-safe-registry-builder\"]",
+          "NEXUS_HEEP_MODE": "Mode A (Solo)"
+        },
+        "runtime_final_receipt_chain": {
+          "evidence_present": true,
+          "gate_passed": true,
+          "injected": true,
+          "outcome_contributed": true,
+          "selected": true,
+          "used": true
+        },
+        "skill_count": 1,
+        "skill_ids": [
+          "github5-skill-seekers-safe-registry-builder"
+        ]
+      },
+      "capability": "registry_skills_sync",
+      "challenger_arm": {
+        "arm_id": "heep_multi_skill",
+        "mode": "Mode B (Guard)",
+        "runner_env": {
+          "NEXUS_BENCH_ALLOW_ABLATION_SKILL_MOUNTS": "1",
+          "NEXUS_BENCH_SKILL_MOUNT_REQUESTS": "[\"github5-skill-seekers-safe-registry-builder\", \"sf-systematic-artifact_gate-differential-review-461fbd0c\"]",
+          "NEXUS_HEEP_MODE": "Mode B (Guard)"
+        },
+        "runtime_final_receipt_chain": {
+          "evidence_present": true,
+          "gate_passed": true,
+          "injected": true,
+          "outcome_contributed": true,
+          "selected": true,
+          "used": true
+        },
+        "skill_count": 2,
+        "skill_ids": [
+          "github5-skill-seekers-safe-registry-builder",
+          "sf-systematic-artifact_gate-differential-review-461fbd0c"
+        ]
+      },
+      "claim_boundary": "internal_heep_mode_candidate_only",
+      "local_quality_lift": 0.3334,
+      "mat_b_gate": {
+        "capability": "registry_skills_sync",
+        "claim_boundary": "local replay cannot pass MAT-B; live compare must fill these KPI values",
+        "current_values": {
+          "evidence_seal_count": null,
+          "pollution_pct": null,
+          "reopen_rate": null,
+          "success_rate": null,
+          "token_delta": null,
+          "wall_delta": null
+        },
+        "decision_order": [
+          "Reliability",
+          "Quality",
+          "Governance",
+          "Efficiency",
+          "Regression"
+        ],
+        "required_kpis": [
+          "success_rate",
+          "pollution_pct",
+          "evidence_seal_count",
+          "token_delta",
+          "wall_delta",
+          "reopen_rate"
+        ],
+        "schema": "nexus.heep_mat_b_gate.v1",
+        "selected_mode": "Mode B (Guard)",
+        "status": "PENDING_LIVE_COMPARE",
+        "thresholds": {
+          "evidence_seal_count": "challenger >= baseline and all required receipt keys present",
+          "pollution_pct": "challenger <= baseline and below task pollution threshold",
+          "reopen_rate": "challenger <= baseline in replay/regression simulation",
+          "success_rate": "challenger >= baseline and no delivery RETURN",
+          "token_delta": "evaluated only after reliability, quality, and governance pass",
+          "wall_delta": "evaluated only after reliability, quality, and governance pass"
+        }
+      },
+      "runner": "Flash+Nexus internal live compare",
+      "selected_mode": "Mode B (Guard)",
+      "status": "READY"
+    },
+    {
+      "baseline_arm": {
+        "arm_id": "mode_a_current_primary",
+        "mode": "Mode A (Solo)",
+        "runner_env": {
+          "NEXUS_BENCH_ALLOW_ABLATION_SKILL_MOUNTS": "1",
+          "NEXUS_BENCH_SKILL_MOUNT_REQUESTS": "[\"sf-systematic-regression_guard-odoo-automated-tests-dad98433\"]",
+          "NEXUS_HEEP_MODE": "Mode A (Solo)"
+        },
+        "runtime_final_receipt_chain": {
+          "evidence_present": true,
+          "gate_passed": true,
+          "injected": true,
+          "outcome_contributed": true,
+          "selected": true,
+          "used": true
+        },
+        "skill_count": 1,
+        "skill_ids": [
+          "sf-systematic-regression_guard-odoo-automated-tests-dad98433"
+        ]
+      },
+      "capability": "regression_guard",
+      "challenger_arm": {
+        "arm_id": "heep_multi_skill",
+        "mode": "Mode B (Guard)",
+        "runner_env": {
+          "NEXUS_BENCH_ALLOW_ABLATION_SKILL_MOUNTS": "1",
+          "NEXUS_BENCH_SKILL_MOUNT_REQUESTS": "[\"sf-systematic-regression_guard-odoo-automated-tests-dad98433\", \"sf-systematic-artifact_gate-differential-review-461fbd0c\"]",
+          "NEXUS_HEEP_MODE": "Mode B (Guard)"
+        },
+        "runtime_final_receipt_chain": {
+          "evidence_present": true,
+          "gate_passed": true,
+          "injected": true,
+          "outcome_contributed": true,
+          "selected": true,
+          "used": true
+        },
+        "skill_count": 2,
+        "skill_ids": [
+          "sf-systematic-regression_guard-odoo-automated-tests-dad98433",
+          "sf-systematic-artifact_gate-differential-review-461fbd0c"
+        ]
+      },
+      "claim_boundary": "internal_heep_mode_candidate_only",
+      "local_quality_lift": 0.3334,
+      "mat_b_gate": {
+        "capability": "regression_guard",
+        "claim_boundary": "local replay cannot pass MAT-B; live compare must fill these KPI values",
+        "current_values": {
+          "evidence_seal_count": null,
+          "pollution_pct": null,
+          "reopen_rate": null,
+          "success_rate": null,
+          "token_delta": null,
+          "wall_delta": null
+        },
+        "decision_order": [
+          "Reliability",
+          "Quality",
+          "Governance",
+          "Efficiency",
+          "Regression"
+        ],
+        "required_kpis": [
+          "success_rate",
+          "pollution_pct",
+          "evidence_seal_count",
+          "token_delta",
+          "wall_delta",
+          "reopen_rate"
+        ],
+        "schema": "nexus.heep_mat_b_gate.v1",
+        "selected_mode": "Mode B (Guard)",
+        "status": "PENDING_LIVE_COMPARE",
+        "thresholds": {
+          "evidence_seal_count": "challenger >= baseline and all required receipt keys present",
+          "pollution_pct": "challenger <= baseline and below task pollution threshold",
+          "reopen_rate": "challenger <= baseline in replay/regression simulation",
+          "success_rate": "challenger >= baseline and no delivery RETURN",
+          "token_delta": "evaluated only after reliability, quality, and governance pass",
+          "wall_delta": "evaluated only after reliability, quality, and governance pass"
+        }
+      },
+      "runner": "Flash+Nexus internal live compare",
+      "selected_mode": "Mode B (Guard)",
+      "status": "READY"
+    },
+    {
+      "baseline_arm": {
+        "arm_id": "mode_a_current_primary",
+        "mode": "Mode A (Solo)",
+        "runner_env": {
+          "NEXUS_BENCH_ALLOW_ABLATION_SKILL_MOUNTS": "1",
+          "NEXUS_BENCH_SKILL_MOUNT_REQUESTS": "[\"sf-systematic-repair_loop-odoo-automated-tests-dad98433\"]",
+          "NEXUS_HEEP_MODE": "Mode A (Solo)"
+        },
+        "runtime_final_receipt_chain": {
+          "evidence_present": true,
+          "gate_passed": true,
+          "injected": true,
+          "outcome_contributed": true,
+          "selected": true,
+          "used": true
+        },
+        "skill_count": 1,
+        "skill_ids": [
+          "sf-systematic-repair_loop-odoo-automated-tests-dad98433"
+        ]
+      },
+      "capability": "repair_loop",
+      "challenger_arm": {
+        "arm_id": "heep_multi_skill",
+        "mode": "Mode B (Guard)",
+        "runner_env": {
+          "NEXUS_BENCH_ALLOW_ABLATION_SKILL_MOUNTS": "1",
+          "NEXUS_BENCH_SKILL_MOUNT_REQUESTS": "[\"sf-systematic-repair_loop-odoo-automated-tests-dad98433\", \"sf-systematic-artifact_gate-differential-review-461fbd0c\"]",
+          "NEXUS_HEEP_MODE": "Mode B (Guard)"
+        },
+        "runtime_final_receipt_chain": {
+          "evidence_present": true,
+          "gate_passed": true,
+          "injected": true,
+          "outcome_contributed": true,
+          "selected": true,
+          "used": true
+        },
+        "skill_count": 2,
+        "skill_ids": [
+          "sf-systematic-repair_loop-odoo-automated-tests-dad98433",
+          "sf-systematic-artifact_gate-differential-review-461fbd0c"
+        ]
+      },
+      "claim_boundary": "internal_heep_mode_candidate_only",
+      "local_quality_lift": 0.3334,
+      "mat_b_gate": {
+        "capability": "repair_loop",
+        "claim_boundary": "local replay cannot pass MAT-B; live compare must fill these KPI values",
+        "current_values": {
+          "evidence_seal_count": null,
+          "pollution_pct": null,
+          "reopen_rate": null,
+          "success_rate": null,
+          "token_delta": null,
+          "wall_delta": null
+        },
+        "decision_order": [
+          "Reliability",
+          "Quality",
+          "Governance",
+          "Efficiency",
+          "Regression"
+        ],
+        "required_kpis": [
+          "success_rate",
+          "pollution_pct",
+          "evidence_seal_count",
+          "token_delta",
+          "wall_delta",
+          "reopen_rate"
+        ],
+        "schema": "nexus.heep_mat_b_gate.v1",
+        "selected_mode": "Mode B (Guard)",
+        "status": "PENDING_LIVE_COMPARE",
+        "thresholds": {
+          "evidence_seal_count": "challenger >= baseline and all required receipt keys present",
+          "pollution_pct": "challenger <= baseline and below task pollution threshold",
+          "reopen_rate": "challenger <= baseline in replay/regression simulation",
+          "success_rate": "challenger >= baseline and no delivery RETURN",
+          "token_delta": "evaluated only after reliability, quality, and governance pass",
+          "wall_delta": "evaluated only after reliability, quality, and governance pass"
+        }
+      },
+      "runner": "Flash+Nexus internal live compare",
+      "selected_mode": "Mode B (Guard)",
+      "status": "READY"
+    },
+    {
+      "baseline_arm": {
+        "arm_id": "mode_a_current_primary",
+        "mode": "Mode A (Solo)",
+        "runner_env": {
+          "NEXUS_BENCH_ALLOW_ABLATION_SKILL_MOUNTS": "1",
+          "NEXUS_BENCH_SKILL_MOUNT_REQUESTS": "[\"sf-systematic-research-research-lookup-7e6f92a0\"]",
+          "NEXUS_HEEP_MODE": "Mode A (Solo)"
+        },
+        "runtime_final_receipt_chain": {
+          "evidence_present": true,
+          "gate_passed": true,
+          "injected": true,
+          "outcome_contributed": true,
+          "selected": true,
+          "used": true
+        },
+        "skill_count": 1,
+        "skill_ids": [
+          "sf-systematic-research-research-lookup-7e6f92a0"
+        ]
+      },
+      "capability": "research",
+      "challenger_arm": {
+        "arm_id": "heep_multi_skill",
+        "mode": "Mode C (Swarm)",
+        "runner_env": {
+          "NEXUS_BENCH_ALLOW_ABLATION_SKILL_MOUNTS": "1",
+          "NEXUS_BENCH_SKILL_MOUNT_REQUESTS": "[\"sf-systematic-research-research-lookup-7e6f92a0\", \"sf2-autonomic_router-route-fit-spec\", \"sf-systematic-artifact_gate-differential-review-461fbd0c\"]",
+          "NEXUS_HEEP_MODE": "Mode C (Swarm)"
+        },
+        "runtime_final_receipt_chain": {
+          "evidence_present": true,
+          "gate_passed": true,
+          "injected": true,
+          "outcome_contributed": true,
+          "selected": true,
+          "used": true
+        },
+        "skill_count": 3,
+        "skill_ids": [
+          "sf-systematic-research-research-lookup-7e6f92a0",
+          "sf2-autonomic_router-route-fit-spec",
+          "sf-systematic-artifact_gate-differential-review-461fbd0c"
+        ]
+      },
+      "claim_boundary": "internal_heep_mode_candidate_only",
+      "local_quality_lift": 0.6667,
+      "mat_b_gate": {
+        "capability": "research",
+        "claim_boundary": "local replay cannot pass MAT-B; live compare must fill these KPI values",
+        "current_values": {
+          "evidence_seal_count": null,
+          "pollution_pct": null,
+          "reopen_rate": null,
+          "success_rate": null,
+          "token_delta": null,
+          "wall_delta": null
+        },
+        "decision_order": [
+          "Reliability",
+          "Quality",
+          "Governance",
+          "Efficiency",
+          "Regression"
+        ],
+        "required_kpis": [
+          "success_rate",
+          "pollution_pct",
+          "evidence_seal_count",
+          "token_delta",
+          "wall_delta",
+          "reopen_rate"
+        ],
+        "schema": "nexus.heep_mat_b_gate.v1",
+        "selected_mode": "Mode C (Swarm)",
+        "status": "PENDING_LIVE_COMPARE",
+        "thresholds": {
+          "evidence_seal_count": "challenger >= baseline and all required receipt keys present",
+          "pollution_pct": "challenger <= baseline and below task pollution threshold",
+          "reopen_rate": "challenger <= baseline in replay/regression simulation",
+          "success_rate": "challenger >= baseline and no delivery RETURN",
+          "token_delta": "evaluated only after reliability, quality, and governance pass",
+          "wall_delta": "evaluated only after reliability, quality, and governance pass"
+        }
+      },
+      "runner": "Flash+Nexus internal live compare",
+      "selected_mode": "Mode C (Swarm)",
+      "status": "READY"
+    },
+    {
+      "baseline_arm": {
+        "arm_id": "mode_a_current_primary",
+        "mode": "Mode A (Solo)",
+        "runner_env": {
+          "NEXUS_BENCH_ALLOW_ABLATION_SKILL_MOUNTS": "1",
+          "NEXUS_BENCH_SKILL_MOUNT_REQUESTS": "[\"research-citation-chain-verifier\"]",
+          "NEXUS_HEEP_MODE": "Mode A (Solo)"
+        },
+        "runtime_final_receipt_chain": {
+          "evidence_present": true,
+          "gate_passed": true,
+          "injected": true,
+          "outcome_contributed": true,
+          "selected": true,
+          "used": true
+        },
+        "skill_count": 1,
+        "skill_ids": [
+          "research-citation-chain-verifier"
+        ]
+      },
+      "capability": "research_and_source_discipline",
+      "challenger_arm": {
+        "arm_id": "heep_multi_skill",
+        "mode": "Mode C (Swarm)",
+        "runner_env": {
+          "NEXUS_BENCH_ALLOW_ABLATION_SKILL_MOUNTS": "1",
+          "NEXUS_BENCH_SKILL_MOUNT_REQUESTS": "[\"research-citation-chain-verifier\", \"sf2-autonomic_router-route-fit-spec\", \"sf-systematic-artifact_gate-differential-review-461fbd0c\"]",
+          "NEXUS_HEEP_MODE": "Mode C (Swarm)"
+        },
+        "runtime_final_receipt_chain": {
+          "evidence_present": true,
+          "gate_passed": true,
+          "injected": true,
+          "outcome_contributed": true,
+          "selected": true,
+          "used": true
+        },
+        "skill_count": 3,
+        "skill_ids": [
+          "research-citation-chain-verifier",
+          "sf2-autonomic_router-route-fit-spec",
+          "sf-systematic-artifact_gate-differential-review-461fbd0c"
+        ]
+      },
+      "claim_boundary": "internal_heep_mode_candidate_only",
+      "local_quality_lift": 0.6667,
+      "mat_b_gate": {
+        "capability": "research_and_source_discipline",
+        "claim_boundary": "local replay cannot pass MAT-B; live compare must fill these KPI values",
+        "current_values": {
+          "evidence_seal_count": null,
+          "pollution_pct": null,
+          "reopen_rate": null,
+          "success_rate": null,
+          "token_delta": null,
+          "wall_delta": null
+        },
+        "decision_order": [
+          "Reliability",
+          "Quality",
+          "Governance",
+          "Efficiency",
+          "Regression"
+        ],
+        "required_kpis": [
+          "success_rate",
+          "pollution_pct",
+          "evidence_seal_count",
+          "token_delta",
+          "wall_delta",
+          "reopen_rate"
+        ],
+        "schema": "nexus.heep_mat_b_gate.v1",
+        "selected_mode": "Mode C (Swarm)",
+        "status": "PENDING_LIVE_COMPARE",
+        "thresholds": {
+          "evidence_seal_count": "challenger >= baseline and all required receipt keys present",
+          "pollution_pct": "challenger <= baseline and below task pollution threshold",
+          "reopen_rate": "challenger <= baseline in replay/regression simulation",
+          "success_rate": "challenger >= baseline and no delivery RETURN",
+          "token_delta": "evaluated only after reliability, quality, and governance pass",
+          "wall_delta": "evaluated only after reliability, quality, and governance pass"
+        }
+      },
+      "runner": "Flash+Nexus internal live compare",
+      "selected_mode": "Mode C (Swarm)",
+      "status": "READY"
+    },
+    {
+      "baseline_arm": {
+        "arm_id": "mode_a_current_primary",
+        "mode": "Mode A (Solo)",
+        "runner_env": {
+          "NEXUS_BENCH_ALLOW_ABLATION_SKILL_MOUNTS": "1",
+          "NEXUS_BENCH_SKILL_MOUNT_REQUESTS": "[\"sf-systematic-research_control_plane-research-lookup-7e6f92a0\"]",
+          "NEXUS_HEEP_MODE": "Mode A (Solo)"
+        },
+        "runtime_final_receipt_chain": {
+          "evidence_present": true,
+          "gate_passed": true,
+          "injected": true,
+          "outcome_contributed": true,
+          "selected": true,
+          "used": true
+        },
+        "skill_count": 1,
+        "skill_ids": [
+          "sf-systematic-research_control_plane-research-lookup-7e6f92a0"
+        ]
+      },
+      "capability": "research_control_plane",
+      "challenger_arm": {
+        "arm_id": "heep_multi_skill",
+        "mode": "Mode C (Swarm)",
+        "runner_env": {
+          "NEXUS_BENCH_ALLOW_ABLATION_SKILL_MOUNTS": "1",
+          "NEXUS_BENCH_SKILL_MOUNT_REQUESTS": "[\"sf-systematic-research_control_plane-research-lookup-7e6f92a0\", \"sf2-autonomic_router-route-fit-spec\", \"sf-systematic-artifact_gate-differential-review-461fbd0c\"]",
+          "NEXUS_HEEP_MODE": "Mode C (Swarm)"
+        },
+        "runtime_final_receipt_chain": {
+          "evidence_present": true,
+          "gate_passed": true,
+          "injected": true,
+          "outcome_contributed": true,
+          "selected": true,
+          "used": true
+        },
+        "skill_count": 3,
+        "skill_ids": [
+          "sf-systematic-research_control_plane-research-lookup-7e6f92a0",
+          "sf2-autonomic_router-route-fit-spec",
+          "sf-systematic-artifact_gate-differential-review-461fbd0c"
+        ]
+      },
+      "claim_boundary": "internal_heep_mode_candidate_only",
+      "local_quality_lift": 0.6667,
+      "mat_b_gate": {
+        "capability": "research_control_plane",
+        "claim_boundary": "local replay cannot pass MAT-B; live compare must fill these KPI values",
+        "current_values": {
+          "evidence_seal_count": null,
+          "pollution_pct": null,
+          "reopen_rate": null,
+          "success_rate": null,
+          "token_delta": null,
+          "wall_delta": null
+        },
+        "decision_order": [
+          "Reliability",
+          "Quality",
+          "Governance",
+          "Efficiency",
+          "Regression"
+        ],
+        "required_kpis": [
+          "success_rate",
+          "pollution_pct",
+          "evidence_seal_count",
+          "token_delta",
+          "wall_delta",
+          "reopen_rate"
+        ],
+        "schema": "nexus.heep_mat_b_gate.v1",
+        "selected_mode": "Mode C (Swarm)",
+        "status": "PENDING_LIVE_COMPARE",
+        "thresholds": {
+          "evidence_seal_count": "challenger >= baseline and all required receipt keys present",
+          "pollution_pct": "challenger <= baseline and below task pollution threshold",
+          "reopen_rate": "challenger <= baseline in replay/regression simulation",
+          "success_rate": "challenger >= baseline and no delivery RETURN",
+          "token_delta": "evaluated only after reliability, quality, and governance pass",
+          "wall_delta": "evaluated only after reliability, quality, and governance pass"
+        }
+      },
+      "runner": "Flash+Nexus internal live compare",
+      "selected_mode": "Mode C (Swarm)",
+      "status": "READY"
+    },
+    {
+      "baseline_arm": {
+        "arm_id": "mode_a_current_primary",
+        "mode": "Mode A (Solo)",
+        "runner_env": {
+          "NEXUS_BENCH_ALLOW_ABLATION_SKILL_MOUNTS": "1",
+          "NEXUS_BENCH_SKILL_MOUNT_REQUESTS": "[\"sf2-sandbox_replay-route-fit-spec\"]",
+          "NEXUS_HEEP_MODE": "Mode A (Solo)"
+        },
+        "runtime_final_receipt_chain": {
+          "evidence_present": true,
+          "gate_passed": true,
+          "injected": true,
+          "outcome_contributed": true,
+          "selected": true,
+          "used": true
+        },
+        "skill_count": 1,
+        "skill_ids": [
+          "sf2-sandbox_replay-route-fit-spec"
+        ]
+      },
+      "capability": "sandbox_replay",
+      "challenger_arm": {
+        "arm_id": "heep_multi_skill",
+        "mode": "Mode B (Guard)",
+        "runner_env": {
+          "NEXUS_BENCH_ALLOW_ABLATION_SKILL_MOUNTS": "1",
+          "NEXUS_BENCH_SKILL_MOUNT_REQUESTS": "[\"sf2-sandbox_replay-route-fit-spec\", \"sf-systematic-artifact_gate-differential-review-461fbd0c\"]",
+          "NEXUS_HEEP_MODE": "Mode B (Guard)"
+        },
+        "runtime_final_receipt_chain": {
+          "evidence_present": true,
+          "gate_passed": true,
+          "injected": true,
+          "outcome_contributed": true,
+          "selected": true,
+          "used": true
+        },
+        "skill_count": 2,
+        "skill_ids": [
+          "sf2-sandbox_replay-route-fit-spec",
+          "sf-systematic-artifact_gate-differential-review-461fbd0c"
+        ]
+      },
+      "claim_boundary": "internal_heep_mode_candidate_only",
+      "local_quality_lift": 0.3334,
+      "mat_b_gate": {
+        "capability": "sandbox_replay",
+        "claim_boundary": "local replay cannot pass MAT-B; live compare must fill these KPI values",
+        "current_values": {
+          "evidence_seal_count": null,
+          "pollution_pct": null,
+          "reopen_rate": null,
+          "success_rate": null,
+          "token_delta": null,
+          "wall_delta": null
+        },
+        "decision_order": [
+          "Reliability",
+          "Quality",
+          "Governance",
+          "Efficiency",
+          "Regression"
+        ],
+        "required_kpis": [
+          "success_rate",
+          "pollution_pct",
+          "evidence_seal_count",
+          "token_delta",
+          "wall_delta",
+          "reopen_rate"
+        ],
+        "schema": "nexus.heep_mat_b_gate.v1",
+        "selected_mode": "Mode B (Guard)",
+        "status": "PENDING_LIVE_COMPARE",
+        "thresholds": {
+          "evidence_seal_count": "challenger >= baseline and all required receipt keys present",
+          "pollution_pct": "challenger <= baseline and below task pollution threshold",
+          "reopen_rate": "challenger <= baseline in replay/regression simulation",
+          "success_rate": "challenger >= baseline and no delivery RETURN",
+          "token_delta": "evaluated only after reliability, quality, and governance pass",
+          "wall_delta": "evaluated only after reliability, quality, and governance pass"
+        }
+      },
+      "runner": "Flash+Nexus internal live compare",
+      "selected_mode": "Mode B (Guard)",
+      "status": "READY"
+    },
+    {
+      "baseline_arm": {
+        "arm_id": "mode_a_current_primary",
+        "mode": "Mode A (Solo)",
+        "runner_env": {
+          "NEXUS_BENCH_ALLOW_ABLATION_SKILL_MOUNTS": "1",
+          "NEXUS_BENCH_SKILL_MOUNT_REQUESTS": "[\"sf2-swarm_multi_agent-route-fit-spec\"]",
+          "NEXUS_HEEP_MODE": "Mode A (Solo)"
+        },
+        "runtime_final_receipt_chain": {
+          "evidence_present": true,
+          "gate_passed": true,
+          "injected": true,
+          "outcome_contributed": true,
+          "selected": true,
+          "used": true
+        },
+        "skill_count": 1,
+        "skill_ids": [
+          "sf2-swarm_multi_agent-route-fit-spec"
+        ]
+      },
+      "capability": "swarm_multi_agent",
+      "challenger_arm": {
+        "arm_id": "heep_multi_skill",
+        "mode": "Mode C (Swarm)",
+        "runner_env": {
+          "NEXUS_BENCH_ALLOW_ABLATION_SKILL_MOUNTS": "1",
+          "NEXUS_BENCH_SKILL_MOUNT_REQUESTS": "[\"sf-systematic-codeintel-first-principles-thinking-f95019ea\", \"sf2-swarm_multi_agent-route-fit-spec\", \"sf-systematic-artifact_gate-differential-review-461fbd0c\"]",
+          "NEXUS_HEEP_MODE": "Mode C (Swarm)"
+        },
+        "runtime_final_receipt_chain": {
+          "evidence_present": true,
+          "gate_passed": true,
+          "injected": true,
+          "outcome_contributed": true,
+          "selected": true,
+          "used": true
+        },
+        "skill_count": 3,
+        "skill_ids": [
+          "sf-systematic-codeintel-first-principles-thinking-f95019ea",
+          "sf2-swarm_multi_agent-route-fit-spec",
+          "sf-systematic-artifact_gate-differential-review-461fbd0c"
+        ]
+      },
+      "claim_boundary": "internal_heep_mode_candidate_only",
+      "local_quality_lift": 0.6667,
+      "mat_b_gate": {
+        "capability": "swarm_multi_agent",
+        "claim_boundary": "local replay cannot pass MAT-B; live compare must fill these KPI values",
+        "current_values": {
+          "evidence_seal_count": null,
+          "pollution_pct": null,
+          "reopen_rate": null,
+          "success_rate": null,
+          "token_delta": null,
+          "wall_delta": null
+        },
+        "decision_order": [
+          "Reliability",
+          "Quality",
+          "Governance",
+          "Efficiency",
+          "Regression"
+        ],
+        "required_kpis": [
+          "success_rate",
+          "pollution_pct",
+          "evidence_seal_count",
+          "token_delta",
+          "wall_delta",
+          "reopen_rate"
+        ],
+        "schema": "nexus.heep_mat_b_gate.v1",
+        "selected_mode": "Mode C (Swarm)",
+        "status": "PENDING_LIVE_COMPARE",
+        "thresholds": {
+          "evidence_seal_count": "challenger >= baseline and all required receipt keys present",
+          "pollution_pct": "challenger <= baseline and below task pollution threshold",
+          "reopen_rate": "challenger <= baseline in replay/regression simulation",
+          "success_rate": "challenger >= baseline and no delivery RETURN",
+          "token_delta": "evaluated only after reliability, quality, and governance pass",
+          "wall_delta": "evaluated only after reliability, quality, and governance pass"
+        }
+      },
+      "runner": "Flash+Nexus internal live compare",
+      "selected_mode": "Mode C (Swarm)",
+      "status": "READY"
+    },
+    {
+      "baseline_arm": {
+        "arm_id": "mode_a_current_primary",
+        "mode": "Mode A (Solo)",
+        "runner_env": {
+          "NEXUS_BENCH_ALLOW_ABLATION_SKILL_MOUNTS": "1",
+          "NEXUS_BENCH_SKILL_MOUNT_REQUESTS": "[\"sf-systematic-ui_validator-e2e-testing-d98eb7c3\"]",
+          "NEXUS_HEEP_MODE": "Mode A (Solo)"
+        },
+        "runtime_final_receipt_chain": {
+          "evidence_present": true,
+          "gate_passed": true,
+          "injected": true,
+          "outcome_contributed": true,
+          "selected": true,
+          "used": true
+        },
+        "skill_count": 1,
+        "skill_ids": [
+          "sf-systematic-ui_validator-e2e-testing-d98eb7c3"
+        ]
+      },
+      "capability": "ui_validator",
+      "challenger_arm": {
+        "arm_id": "heep_multi_skill",
+        "mode": "Mode B (Guard)",
+        "runner_env": {
+          "NEXUS_BENCH_ALLOW_ABLATION_SKILL_MOUNTS": "1",
+          "NEXUS_BENCH_SKILL_MOUNT_REQUESTS": "[\"sf-systematic-ui_validator-e2e-testing-d98eb7c3\", \"sf-systematic-artifact_gate-differential-review-461fbd0c\"]",
+          "NEXUS_HEEP_MODE": "Mode B (Guard)"
+        },
+        "runtime_final_receipt_chain": {
+          "evidence_present": true,
+          "gate_passed": true,
+          "injected": true,
+          "outcome_contributed": true,
+          "selected": true,
+          "used": true
+        },
+        "skill_count": 2,
+        "skill_ids": [
+          "sf-systematic-ui_validator-e2e-testing-d98eb7c3",
+          "sf-systematic-artifact_gate-differential-review-461fbd0c"
+        ]
+      },
+      "claim_boundary": "internal_heep_mode_candidate_only",
+      "local_quality_lift": 0.3334,
+      "mat_b_gate": {
+        "capability": "ui_validator",
+        "claim_boundary": "local replay cannot pass MAT-B; live compare must fill these KPI values",
+        "current_values": {
+          "evidence_seal_count": null,
+          "pollution_pct": null,
+          "reopen_rate": null,
+          "success_rate": null,
+          "token_delta": null,
+          "wall_delta": null
+        },
+        "decision_order": [
+          "Reliability",
+          "Quality",
+          "Governance",
+          "Efficiency",
+          "Regression"
+        ],
+        "required_kpis": [
+          "success_rate",
+          "pollution_pct",
+          "evidence_seal_count",
+          "token_delta",
+          "wall_delta",
+          "reopen_rate"
+        ],
+        "schema": "nexus.heep_mat_b_gate.v1",
+        "selected_mode": "Mode B (Guard)",
+        "status": "PENDING_LIVE_COMPARE",
+        "thresholds": {
+          "evidence_seal_count": "challenger >= baseline and all required receipt keys present",
+          "pollution_pct": "challenger <= baseline and below task pollution threshold",
+          "reopen_rate": "challenger <= baseline in replay/regression simulation",
+          "success_rate": "challenger >= baseline and no delivery RETURN",
+          "token_delta": "evaluated only after reliability, quality, and governance pass",
+          "wall_delta": "evaluated only after reliability, quality, and governance pass"
+        }
+      },
+      "runner": "Flash+Nexus internal live compare",
+      "selected_mode": "Mode B (Guard)",
+      "status": "READY"
+    },
+    {
+      "baseline_arm": {
+        "arm_id": "mode_a_current_primary",
+        "mode": "Mode A (Solo)",
+        "runner_env": {
+          "NEXUS_BENCH_ALLOW_ABLATION_SKILL_MOUNTS": "1",
+          "NEXUS_BENCH_SKILL_MOUNT_REQUESTS": "[\"github11-vulnerability-scanner-ultra-review\"]",
+          "NEXUS_HEEP_MODE": "Mode A (Solo)"
+        },
+        "runtime_final_receipt_chain": {
+          "evidence_present": true,
+          "gate_passed": true,
+          "injected": true,
+          "outcome_contributed": true,
+          "selected": true,
+          "used": true
+        },
+        "skill_count": 1,
+        "skill_ids": [
+          "github11-vulnerability-scanner-ultra-review"
+        ]
+      },
+      "capability": "ultra_review",
+      "challenger_arm": {
+        "arm_id": "heep_multi_skill",
+        "mode": "Mode C (Swarm)",
+        "runner_env": {
+          "NEXUS_BENCH_ALLOW_ABLATION_SKILL_MOUNTS": "1",
+          "NEXUS_BENCH_SKILL_MOUNT_REQUESTS": "[\"sf-systematic-codeintel-first-principles-thinking-f95019ea\", \"sf2-autonomic_router-route-fit-spec\", \"github11-vulnerability-scanner-ultra-review\"]",
+          "NEXUS_HEEP_MODE": "Mode C (Swarm)"
+        },
+        "runtime_final_receipt_chain": {
+          "evidence_present": true,
+          "gate_passed": true,
+          "injected": true,
+          "outcome_contributed": true,
+          "selected": true,
+          "used": true
+        },
+        "skill_count": 3,
+        "skill_ids": [
+          "sf-systematic-codeintel-first-principles-thinking-f95019ea",
+          "sf2-autonomic_router-route-fit-spec",
+          "github11-vulnerability-scanner-ultra-review"
+        ]
+      },
+      "claim_boundary": "internal_heep_mode_candidate_only",
+      "local_quality_lift": 0.6667,
+      "mat_b_gate": {
+        "capability": "ultra_review",
+        "claim_boundary": "local replay cannot pass MAT-B; live compare must fill these KPI values",
+        "current_values": {
+          "evidence_seal_count": null,
+          "pollution_pct": null,
+          "reopen_rate": null,
+          "success_rate": null,
+          "token_delta": null,
+          "wall_delta": null
+        },
+        "decision_order": [
+          "Reliability",
+          "Quality",
+          "Governance",
+          "Efficiency",
+          "Regression"
+        ],
+        "required_kpis": [
+          "success_rate",
+          "pollution_pct",
+          "evidence_seal_count",
+          "token_delta",
+          "wall_delta",
+          "reopen_rate"
+        ],
+        "schema": "nexus.heep_mat_b_gate.v1",
+        "selected_mode": "Mode C (Swarm)",
+        "status": "PENDING_LIVE_COMPARE",
+        "thresholds": {
+          "evidence_seal_count": "challenger >= baseline and all required receipt keys present",
+          "pollution_pct": "challenger <= baseline and below task pollution threshold",
+          "reopen_rate": "challenger <= baseline in replay/regression simulation",
+          "success_rate": "challenger >= baseline and no delivery RETURN",
+          "token_delta": "evaluated only after reliability, quality, and governance pass",
+          "wall_delta": "evaluated only after reliability, quality, and governance pass"
+        }
+      },
+      "runner": "Flash+Nexus internal live compare",
+      "selected_mode": "Mode C (Swarm)",
+      "status": "READY"
+    },
+    {
+      "baseline_arm": {
+        "arm_id": "mode_a_current_primary",
+        "mode": "Mode A (Solo)",
+        "runner_env": {
+          "NEXUS_BENCH_ALLOW_ABLATION_SKILL_MOUNTS": "1",
+          "NEXUS_BENCH_SKILL_MOUNT_REQUESTS": "[\"diagnose\"]",
+          "NEXUS_HEEP_MODE": "Mode A (Solo)"
+        },
+        "runtime_final_receipt_chain": {
+          "evidence_present": true,
+          "gate_passed": true,
+          "injected": true,
+          "outcome_contributed": true,
+          "selected": true,
+          "used": true
+        },
+        "skill_count": 1,
+        "skill_ids": [
+          "diagnose"
+        ]
+      },
+      "capability": "xray",
+      "challenger_arm": {
+        "arm_id": "heep_multi_skill",
+        "mode": "Mode B (Guard)",
+        "runner_env": {
+          "NEXUS_BENCH_ALLOW_ABLATION_SKILL_MOUNTS": "1",
+          "NEXUS_BENCH_SKILL_MOUNT_REQUESTS": "[\"diagnose\", \"sf-systematic-artifact_gate-differential-review-461fbd0c\"]",
+          "NEXUS_HEEP_MODE": "Mode B (Guard)"
+        },
+        "runtime_final_receipt_chain": {
+          "evidence_present": true,
+          "gate_passed": true,
+          "injected": true,
+          "outcome_contributed": true,
+          "selected": true,
+          "used": true
+        },
+        "skill_count": 2,
+        "skill_ids": [
+          "diagnose",
+          "sf-systematic-artifact_gate-differential-review-461fbd0c"
+        ]
+      },
+      "claim_boundary": "internal_heep_mode_candidate_only",
+      "local_quality_lift": 0.3334,
+      "mat_b_gate": {
+        "capability": "xray",
+        "claim_boundary": "local replay cannot pass MAT-B; live compare must fill these KPI values",
+        "current_values": {
+          "evidence_seal_count": null,
+          "pollution_pct": null,
+          "reopen_rate": null,
+          "success_rate": null,
+          "token_delta": null,
+          "wall_delta": null
+        },
+        "decision_order": [
+          "Reliability",
+          "Quality",
+          "Governance",
+          "Efficiency",
+          "Regression"
+        ],
+        "required_kpis": [
+          "success_rate",
+          "pollution_pct",
+          "evidence_seal_count",
+          "token_delta",
+          "wall_delta",
+          "reopen_rate"
+        ],
+        "schema": "nexus.heep_mat_b_gate.v1",
+        "selected_mode": "Mode B (Guard)",
+        "status": "PENDING_LIVE_COMPARE",
+        "thresholds": {
+          "evidence_seal_count": "challenger >= baseline and all required receipt keys present",
+          "pollution_pct": "challenger <= baseline and below task pollution threshold",
+          "reopen_rate": "challenger <= baseline in replay/regression simulation",
+          "success_rate": "challenger >= baseline and no delivery RETURN",
+          "token_delta": "evaluated only after reliability, quality, and governance pass",
+          "wall_delta": "evaluated only after reliability, quality, and governance pass"
+        }
+      },
+      "runner": "Flash+Nexus internal live compare",
+      "selected_mode": "Mode B (Guard)",
+      "status": "READY"
+    }
+  ],
+  "schema": "nexus.heep_flash_nexus_live_compare_queue.v1",
+  "status": "PASS",
+  "summary": {
+    "candidate_count": 28,
+    "public_benchmark_allowed": false,
+    "runtime_update_allowed": false
+  }
+}

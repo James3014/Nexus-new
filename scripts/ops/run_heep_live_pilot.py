@@ -11,9 +11,17 @@ PROJECT_ROOT = Path(__file__).resolve().parents[2]
 DEFAULT_ASSEMBLY = PROJECT_ROOT / "docs/reports/NEXUS_HEEP_ASSEMBLY_CATALOG_2026-05-20.json"
 DEFAULT_GOLD_CASES = PROJECT_ROOT / "docs/reports/NEXUS_HEEP_GOLD_CASE_MANIFEST_2026-05-20.json"
 DEFAULT_REPORT_DIR = PROJECT_ROOT / "docs/reports"
-DEFAULT_PILOT_CAPABILITIES = ("codeintel", "artifact_gate", "research", "repair_loop")
+DEFAULT_PILOT_CAPABILITIES = ()
 RECEIPT_KEYS = ("selected", "injected", "used", "evidence_present", "gate_passed", "outcome_contributed")
 MODES = ("Mode A (Solo)", "Mode B (Guard)", "Mode C (Swarm)")
+MAT_B_KPIS = (
+    "success_rate",
+    "pollution_pct",
+    "evidence_seal_count",
+    "token_delta",
+    "wall_delta",
+    "reopen_rate",
+)
 
 
 def build_heep_live_pilot(
@@ -25,6 +33,7 @@ def build_heep_live_pilot(
     assembly_by_capability = _index_by(assembly_catalog.get("rows", []), "capability")
     gold_by_capability = _index_by(gold_cases.get("cases", []), "capability")
     role_pools = _role_pools(assembly_catalog.get("rows", []))
+    pilot_capabilities = pilot_capabilities or tuple(sorted(assembly_by_capability))
 
     blockers = [
         f"missing_assembly:{capability}" for capability in pilot_capabilities if capability not in assembly_by_capability
@@ -42,11 +51,15 @@ def build_heep_live_pilot(
     run_blockers = list(run.get("blockers", []))
     decision = _decision_report(run_rows, run_blockers)
     map_gate = _map_update_gate(decision.get("decisions", []), run_blockers)
+    compare_queue = _flash_nexus_compare_queue(run_rows, decision.get("decisions", []), run_blockers)
+    apply_review = _runtime_apply_review_packet(decision.get("decisions", []), compare_queue.get("rows", []), run_blockers)
     return {
         "contract": contract,
         "run": run,
         "decision": decision,
         "map_gate": map_gate,
+        "compare_queue": compare_queue,
+        "apply_review": apply_review,
     }
 
 
@@ -91,6 +104,7 @@ def _run_row(
         "quality_score": quality_score,
         "premium_cost": premium_cost,
         "source_evidence_ref": str(gold_case.get("source_evidence_ref") or ""),
+        "assembly_recommended_mode": str(assembly.get("recommended_mode") or ""),
         "runtime_final_receipt_chain": receipt_chain,
         "status": "PASS" if receipt_complete and role_coverage > 0 else "RETURN",
         "public_claim_allowed": False,
@@ -129,18 +143,28 @@ def _decision_report(rows: list[dict[str, Any]], blockers: list[str]) -> dict[st
                     "capability": capability,
                     "decision": "hold_due_to_missing_receipt",
                     "selected_mode": "",
+                    "mode_a_quality_score": 0.0,
+                    "selected_minus_mode_a_quality": 0.0,
                     "selected_quality_score": 0.0,
                     "runtime_update_allowed": False,
                     "public_benchmark_allowed": False,
                 }
             )
             continue
-        selected = max(pass_rows, key=lambda row: (row["quality_score"] - row["premium_cost"] * 0.05, -row["premium_cost"]))
+        mode_a = next((row for row in cap_rows if row["mode"] == "Mode A (Solo)"), {})
+        mode_a_quality = float(mode_a.get("quality_score") or 0.0)
+        recommended_mode = str((cap_rows[0] if cap_rows else {}).get("assembly_recommended_mode") or "")
+        selected = next((row for row in pass_rows if row["mode"] == recommended_mode), None)
+        if selected is None:
+            selected = max(pass_rows, key=lambda row: (row["quality_score"] - row["premium_cost"] * 0.05, -row["premium_cost"]))
         decisions.append(
             {
                 "capability": capability,
                 "decision": _decision_for_mode(str(selected["mode"])),
+                "assembly_recommended_mode": recommended_mode,
                 "selected_mode": selected["mode"],
+                "mode_a_quality_score": mode_a_quality,
+                "selected_minus_mode_a_quality": round(float(selected["quality_score"]) - mode_a_quality, 4),
                 "selected_quality_score": selected["quality_score"],
                 "selected_skill_count": selected["skill_count"],
                 "runtime_update_allowed": False,
@@ -158,6 +182,165 @@ def _decision_report(rows: list[dict[str, Any]], blockers: list[str]) -> dict[st
         },
         "decisions": decisions,
         "blockers": blockers,
+    }
+
+
+def _flash_nexus_compare_queue(
+    rows: list[dict[str, Any]], decisions: Any, blockers: list[str]
+) -> dict[str, Any]:
+    rows_by_capability: dict[str, dict[str, dict[str, Any]]] = {}
+    for row in rows:
+        rows_by_capability.setdefault(str(row["capability"]), {})[str(row["mode"])] = row
+
+    queue_rows = []
+    for decision in decisions if isinstance(decisions, list) else []:
+        if not isinstance(decision, Mapping):
+            continue
+        capability = str(decision.get("capability") or "")
+        selected_mode = str(decision.get("selected_mode") or "")
+        if selected_mode == "Mode A (Solo)" or not selected_mode:
+            continue
+        if float(decision.get("selected_minus_mode_a_quality") or 0.0) <= 0:
+            continue
+        mode_rows = rows_by_capability.get(capability, {})
+        mode_a = mode_rows.get("Mode A (Solo)")
+        selected = mode_rows.get(selected_mode)
+        if not mode_a or not selected:
+            continue
+        queue_rows.append(
+            {
+                "capability": capability,
+                "baseline_arm": _compare_arm("mode_a_current_primary", mode_a),
+                "challenger_arm": _compare_arm("heep_multi_skill", selected),
+                "selected_mode": selected_mode,
+                "local_quality_lift": decision.get("selected_minus_mode_a_quality"),
+                "mat_b_gate": _mat_b_gate_template(capability=capability, selected_mode=selected_mode),
+                "status": "READY" if not blockers else "BLOCKED",
+                "runner": "Flash+Nexus internal live compare",
+                "claim_boundary": "internal_heep_mode_candidate_only",
+            }
+        )
+
+    return {
+        "schema": "nexus.heep_flash_nexus_live_compare_queue.v1",
+        "status": "PASS" if queue_rows and not blockers else ("PASS" if not blockers else "RETURN"),
+        "summary": {
+            "candidate_count": len(queue_rows),
+            "runtime_update_allowed": False,
+            "public_benchmark_allowed": False,
+        },
+        "rows": queue_rows,
+        "blockers": blockers,
+        "claim_boundary": [
+            "Rows are executable internal Flash+Nexus compare candidates.",
+            "They are not public benchmark rows.",
+            "Candidate replacement decisions must be made by MAT-B live KPIs, not local role coverage.",
+            "Runtime default cannot change until live compare receipts pass and an apply gate approves.",
+        ],
+    }
+
+
+def _mat_b_gate_template(*, capability: str, selected_mode: str) -> dict[str, Any]:
+    return {
+        "schema": "nexus.heep_mat_b_gate.v1",
+        "capability": capability,
+        "selected_mode": selected_mode,
+        "status": "PENDING_LIVE_COMPARE",
+        "required_kpis": list(MAT_B_KPIS),
+        "thresholds": {
+            "success_rate": "challenger >= baseline and no delivery RETURN",
+            "pollution_pct": "challenger <= baseline and below task pollution threshold",
+            "evidence_seal_count": "challenger >= baseline and all required receipt keys present",
+            "token_delta": "evaluated only after reliability, quality, and governance pass",
+            "wall_delta": "evaluated only after reliability, quality, and governance pass",
+            "reopen_rate": "challenger <= baseline in replay/regression simulation",
+        },
+        "current_values": {
+            "success_rate": None,
+            "pollution_pct": None,
+            "evidence_seal_count": None,
+            "token_delta": None,
+            "wall_delta": None,
+            "reopen_rate": None,
+        },
+        "decision_order": [
+            "Reliability",
+            "Quality",
+            "Governance",
+            "Efficiency",
+            "Regression",
+        ],
+        "claim_boundary": "local replay cannot pass MAT-B; live compare must fill these KPI values",
+    }
+
+
+def _compare_arm(arm_id: str, row: Mapping[str, Any]) -> dict[str, Any]:
+    skill_ids = [str(item.get("skill_id") or "") for item in row.get("skills", []) if isinstance(item, Mapping)]
+    return {
+        "arm_id": arm_id,
+        "mode": row.get("mode"),
+        "skill_ids": [skill_id for skill_id in skill_ids if skill_id],
+        "skill_count": row.get("skill_count"),
+        "runtime_final_receipt_chain": dict(row.get("runtime_final_receipt_chain") or {}),
+        "runner_env": {
+            "NEXUS_BENCH_ALLOW_ABLATION_SKILL_MOUNTS": "1",
+            "NEXUS_BENCH_SKILL_MOUNT_REQUESTS": json.dumps([skill_id for skill_id in skill_ids if skill_id]),
+            "NEXUS_HEEP_MODE": str(row.get("mode") or ""),
+        },
+    }
+
+
+def _runtime_apply_review_packet(
+    decisions: Any, compare_rows: Any, blockers: list[str]
+) -> dict[str, Any]:
+    compare_by_capability = {
+        str(row.get("capability") or ""): row
+        for row in (compare_rows if isinstance(compare_rows, list) else [])
+        if isinstance(row, Mapping)
+    }
+    rows = []
+    for decision in decisions if isinstance(decisions, list) else []:
+        if not isinstance(decision, Mapping):
+            continue
+        capability = str(decision.get("capability") or "")
+        selected_mode = str(decision.get("selected_mode") or "")
+        if selected_mode == "Mode A (Solo)":
+            disposition = "KEEP_SINGLE_PRIMARY"
+        elif capability in compare_by_capability and not blockers:
+            disposition = "PENDING_FLASH_NEXUS_LIVE_COMPARE"
+        else:
+            disposition = "HOLD"
+        rows.append(
+            {
+                "capability": capability,
+                "selected_mode": selected_mode,
+                "local_decision": decision.get("decision"),
+                "disposition": disposition,
+                "mat_b_required_before_runtime_apply": disposition == "PENDING_FLASH_NEXUS_LIVE_COMPARE",
+                "mat_b_kpis": list(MAT_B_KPIS) if disposition == "PENDING_FLASH_NEXUS_LIVE_COMPARE" else [],
+                "runtime_update_allowed": False,
+                "public_benchmark_allowed": False,
+            }
+        )
+    return {
+        "schema": "nexus.heep_runtime_apply_review_packet.v1",
+        "status": "PASS" if rows and not blockers else "RETURN",
+        "summary": {
+            "capability_count": len(rows),
+            "pending_live_compare_count": sum(
+                1 for row in rows if row["disposition"] == "PENDING_FLASH_NEXUS_LIVE_COMPARE"
+            ),
+            "keep_single_primary_count": sum(1 for row in rows if row["disposition"] == "KEEP_SINGLE_PRIMARY"),
+            "runtime_update_allowed": False,
+            "public_benchmark_allowed": False,
+        },
+        "rows": rows,
+        "blockers": blockers,
+        "claim_boundary": [
+            "This packet can request review only after internal Flash+Nexus live compare receipts exist.",
+            "Multi-skill replacements require MAT-B reliability, quality, governance, efficiency, and regression evidence.",
+            "Local HEEP replay alone cannot approve runtime default changes.",
+        ],
     }
 
 
@@ -299,6 +482,8 @@ def write_heep_live_pilot(*, artifacts: Mapping[str, Mapping[str, Any]], report_
         "run": report_dir / "NEXUS_HEEP_LIVE_PILOT_RUN_2026-05-20.json",
         "decision": report_dir / "NEXUS_HEEP_LIVE_MODE_DECISION_2026-05-20.json",
         "map_gate": report_dir / "NEXUS_HEEP_LIVE_MAP_UPDATE_GATE_2026-05-20.json",
+        "compare_queue": report_dir / "NEXUS_HEEP_FLASH_NEXUS_LIVE_COMPARE_QUEUE_2026-05-20.json",
+        "apply_review": report_dir / "NEXUS_HEEP_RUNTIME_APPLY_REVIEW_PACKET_2026-05-20.json",
     }
     for key, path in outputs.items():
         _write_json(path, artifacts[key])
@@ -310,13 +495,14 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--assembly", type=Path, default=DEFAULT_ASSEMBLY)
     parser.add_argument("--gold-cases", type=Path, default=DEFAULT_GOLD_CASES)
     parser.add_argument("--report-dir", type=Path, default=DEFAULT_REPORT_DIR)
-    parser.add_argument("--pilot-capabilities", default=",".join(DEFAULT_PILOT_CAPABILITIES))
+    parser.add_argument("--pilot-capabilities", default="ALL")
     parser.add_argument("--dry-run", action="store_true")
     args = parser.parse_args(argv)
 
-    pilot_capabilities = tuple(cap.strip() for cap in args.pilot_capabilities.split(",") if cap.strip())
+    assembly_catalog = _read_json(args.assembly)
+    pilot_capabilities = _resolve_pilot_capabilities(assembly_catalog, args.pilot_capabilities)
     artifacts = build_heep_live_pilot(
-        assembly_catalog=_read_json(args.assembly),
+        assembly_catalog=assembly_catalog,
         gold_cases=_read_json(args.gold_cases),
         pilot_capabilities=pilot_capabilities,
     )
@@ -331,6 +517,8 @@ def main(argv: list[str] | None = None) -> int:
                 "pilot_capability_count": len(pilot_capabilities),
                 "row_count": artifacts["run"]["summary"]["row_count"],
                 "candidate_update_count": artifacts["map_gate"]["summary"]["candidate_update_count"],
+                "live_compare_candidate_count": artifacts["compare_queue"]["summary"]["candidate_count"],
+                "pending_apply_review_count": artifacts["apply_review"]["summary"]["pending_live_compare_count"],
                 "runtime_update_allowed": False,
                 "public_benchmark_allowed": False,
                 "outputs": outputs,
@@ -340,6 +528,12 @@ def main(argv: list[str] | None = None) -> int:
         )
     )
     return 0 if status == "PASS" else 1
+
+
+def _resolve_pilot_capabilities(assembly_catalog: Mapping[str, Any], value: str) -> tuple[str, ...]:
+    if not value or value.strip().upper() == "ALL":
+        return tuple(sorted(_index_by(assembly_catalog.get("rows", []), "capability")))
+    return tuple(cap.strip() for cap in value.split(",") if cap.strip())
 
 
 if __name__ == "__main__":
