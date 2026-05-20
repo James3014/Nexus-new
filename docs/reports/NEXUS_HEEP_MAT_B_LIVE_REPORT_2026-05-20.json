@@ -2,11 +2,11 @@
   "schema": "nexus.heep_mat_b_live_report.v1",
   "status": "PASS",
   "summary": {
-    "comparison_count": 5,
+    "comparison_count": 7,
     "approve_count": 0,
-    "keep_single_count": 3,
+    "keep_single_count": 4,
     "reject_count": 0,
-    "hold_count": 2,
+    "hold_count": 3,
     "runtime_update_allowed": false,
     "public_benchmark_allowed": false
   },
@@ -210,6 +210,86 @@
       "verdict": "KEEP_SINGLE_PRIMARY",
       "reason_codes": [
         "efficiency_regressed"
+      ]
+    },
+    {
+      "capability": "claim_gate",
+      "task_id": "heep-mat-b-claim_gate-001",
+      "baseline_row_id": "heep::claim_gate::heep-mat-b-claim_gate-001::mode_a_current_primary",
+      "challenger_row_id": "heep::claim_gate::heep-mat-b-claim_gate-001::heep_multi_skill",
+      "baseline": {
+        "success_rate": 1.0,
+        "pollution_pct": 0.0,
+        "evidence_seal_count": 1,
+        "total_tokens": 59359,
+        "phase_wall_total_sec": 45.1351,
+        "reopen_rate": null,
+        "trust_mismatch": false,
+        "skill_mount_contract_status": "PASS",
+        "receipt_chain_pass": true
+      },
+      "challenger": {
+        "success_rate": 1.0,
+        "pollution_pct": 0.0,
+        "evidence_seal_count": 2,
+        "total_tokens": 62656,
+        "phase_wall_total_sec": 57.6911,
+        "reopen_rate": null,
+        "trust_mismatch": false,
+        "skill_mount_contract_status": "PASS",
+        "receipt_chain_pass": true
+      },
+      "delta": {
+        "token_delta": 3297,
+        "wall_delta": 12.556,
+        "success_rate_delta": 0.0,
+        "pollution_pct_delta": 0.0,
+        "evidence_seal_count_delta": 1,
+        "reopen_rate_delta": null
+      },
+      "verdict": "KEEP_SINGLE_PRIMARY",
+      "reason_codes": [
+        "efficiency_regressed"
+      ]
+    },
+    {
+      "capability": "codeintel",
+      "task_id": "heep-mat-b-codeintel-001",
+      "baseline_row_id": "heep::codeintel::heep-mat-b-codeintel-001::mode_a_current_primary",
+      "challenger_row_id": "heep::codeintel::heep-mat-b-codeintel-001::heep_multi_skill",
+      "baseline": {
+        "success_rate": 1.0,
+        "pollution_pct": 0.0,
+        "evidence_seal_count": 1,
+        "total_tokens": 67856,
+        "phase_wall_total_sec": 159.0759,
+        "reopen_rate": null,
+        "trust_mismatch": false,
+        "skill_mount_contract_status": "PASS",
+        "receipt_chain_pass": true
+      },
+      "challenger": {
+        "success_rate": 1.0,
+        "pollution_pct": 0.0,
+        "evidence_seal_count": 3,
+        "total_tokens": 61739,
+        "phase_wall_total_sec": 110.0551,
+        "reopen_rate": null,
+        "trust_mismatch": false,
+        "skill_mount_contract_status": "PASS",
+        "receipt_chain_pass": true
+      },
+      "delta": {
+        "token_delta": -6117,
+        "wall_delta": -49.0208,
+        "success_rate_delta": 0.0,
+        "pollution_pct_delta": 0.0,
+        "evidence_seal_count_delta": 2,
+        "reopen_rate_delta": null
+      },
+      "verdict": "HOLD_MISSING_MAT_B_EVIDENCE",
+      "reason_codes": [
+        "missing_reopen_rate"
       ]
     }
   ],
