@@ -6,6 +6,7 @@ from typing import Any
 
 RLM_RUNTIME_DECISION_RECEIPT_SCHEMA = "nexus_rlm_runtime_decision_receipt.v1"
 RLM_NIGHTSHIFT_HANDOFF_RECEIPT_SCHEMA = "nexus_rlm_nightshift_handoff_receipt.v1"
+RLM_BOUNDED_ORCHESTRATION_RECEIPT_SCHEMA = "nexus_rlm_bounded_orchestration_receipt.v1"
 
 
 @dataclass
@@ -145,4 +146,72 @@ def build_nightshift_handoff_receipt(
         "runtime_update_allowed": False,
         "public_benchmark_allowed": False,
         "claim_boundary": "handoff_receipt_only_not_runtime_or_public_claim",
+    }
+
+
+def build_bounded_rlm_orchestration_receipt(
+    *,
+    gate_passed: bool,
+    belief_confidence: float,
+    current_tokens: int = 0,
+    x_observations: int = 0,
+    r_observations: int = 0,
+    max_tokens: int = 150_000,
+    max_x_iterations: int = 3,
+    max_r_iterations: int = 4,
+    source: str = "research_flow_service",
+) -> dict[str, Any]:
+    """Build a bounded X/R-loop orchestration receipt without dispatching loops.
+
+    This adapter closes the routing-spec-v2 RLM seam by making the X/R budget
+    decision explicit while keeping the existing ResearchFlowService flow intact.
+    It does not execute recursive work, update runtime policy, or unlock public
+    benchmark claims.
+    """
+
+    x_count = max(0, int(x_observations or 0))
+    r_count = max(0, int(r_observations or 0))
+    x_receipt = build_rlm_decision_receipt(
+        loop_phase="X",
+        gate_passed=False,
+        belief_confidence=belief_confidence,
+        current_tokens=current_tokens,
+        current_x_count=x_count,
+        current_r_count=r_count,
+        max_tokens=max_tokens,
+        max_x_iterations=max_x_iterations,
+        max_r_iterations=max_r_iterations,
+        source=source,
+    )
+    r_receipt = build_rlm_decision_receipt(
+        loop_phase="R",
+        gate_passed=gate_passed,
+        belief_confidence=belief_confidence,
+        current_tokens=current_tokens,
+        current_x_count=x_count,
+        current_r_count=r_count,
+        max_tokens=max_tokens,
+        max_x_iterations=max_x_iterations,
+        max_r_iterations=max_r_iterations,
+        source=source,
+    )
+    final_receipt = r_receipt if r_count > 0 or gate_passed else x_receipt
+    handoff = build_nightshift_handoff_receipt(
+        decision_receipt=final_receipt,
+        artifact_gate_passed=gate_passed,
+        source=source,
+    )
+    return {
+        "schema_version": RLM_BOUNDED_ORCHESTRATION_RECEIPT_SCHEMA,
+        "status": "PASS",
+        "source": source,
+        "orchestration_mode": "bounded_adapter_not_dispatch",
+        "x_loop_decision_receipt": x_receipt,
+        "r_loop_decision_receipt": r_receipt,
+        "final_decision_receipt": final_receipt,
+        "nightshift_handoff_receipt": handoff,
+        "budget": dict(final_receipt.get("budget") or {}),
+        "runtime_update_allowed": False,
+        "public_benchmark_allowed": False,
+        "claim_boundary": "bounded_orchestration_receipt_only_not_runtime_or_public_claim",
     }

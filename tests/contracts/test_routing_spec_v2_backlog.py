@@ -19,6 +19,10 @@ def test_routing_spec_v2_backlog_gate_holds_forbidden_swarm_work_at_boundary() -
     assert sidecar["id"] == "service_mesh_sidecar"
     assert sidecar["status"] == "FORBIDDEN_PATH_BOUNDARY"
     assert sidecar["forbidden_paths"]
+    rlm = next(item for item in gate["items"] if item["id"] == "rlm_recursive_orchestration")
+    assert rlm["status"] == "IMPLEMENTED_AS_BOUNDED_ADAPTER"
+    assert rlm["forbidden_paths"] == []
+    assert rlm["next_gate"] == "full_recursive_dispatch_requires_separate_runtime_authorization"
 
 
 def test_routing_spec_v2_backlog_gate_returns_for_forbidden_path_without_boundary() -> None:

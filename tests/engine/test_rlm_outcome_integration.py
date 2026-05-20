@@ -4,7 +4,14 @@ import json
 
 from nexus.engine.capability_planner import CapabilityPlanner
 from nexus.engine.learning_policy_loader import merge_runtime_learning_policy
-from nexus.engine.rlm_controller import RlmBudget, RlmController, build_nightshift_handoff_receipt, build_rlm_decision_receipt
+from nexus.engine.rlm_controller import (
+    RLM_BOUNDED_ORCHESTRATION_RECEIPT_SCHEMA,
+    RlmBudget,
+    RlmController,
+    build_bounded_rlm_orchestration_receipt,
+    build_nightshift_handoff_receipt,
+    build_rlm_decision_receipt,
+)
 from nexus.learning.outcome_memory import EpisodeOutcomeRecord, OutcomeMemoryManager
 
 
@@ -60,6 +67,43 @@ def test_rlm_no_handoff_when_artifact_gate_passed() -> None:
     assert handoff["status"] == "NOT_APPLICABLE"
     assert handoff["recommended"] is False
     assert "artifact_gate_passed_no_handoff" in handoff["blockers"]
+
+
+def test_bounded_rlm_orchestration_receipt_emits_x_r_and_handoff_without_runtime_unlock() -> None:
+    receipt = build_bounded_rlm_orchestration_receipt(
+        gate_passed=False,
+        belief_confidence=0.2,
+        current_tokens=1000,
+        x_observations=2,
+        r_observations=4,
+        max_tokens=10_000,
+        max_x_iterations=3,
+        max_r_iterations=4,
+    )
+
+    assert receipt["schema_version"] == RLM_BOUNDED_ORCHESTRATION_RECEIPT_SCHEMA
+    assert receipt["status"] == "PASS"
+    assert receipt["orchestration_mode"] == "bounded_adapter_not_dispatch"
+    assert receipt["x_loop_decision_receipt"]["loop_phase"] == "X"
+    assert receipt["r_loop_decision_receipt"]["loop_phase"] == "R"
+    assert receipt["final_decision_receipt"]["terminal_reason"] == "r_iteration_budget_exhausted"
+    assert receipt["nightshift_handoff_receipt"]["recommended"] is True
+    assert receipt["runtime_update_allowed"] is False
+    assert receipt["public_benchmark_allowed"] is False
+
+
+def test_bounded_rlm_orchestration_stops_cleanly_on_gate_passed_high_belief() -> None:
+    receipt = build_bounded_rlm_orchestration_receipt(
+        gate_passed=True,
+        belief_confidence=0.91,
+        current_tokens=120,
+        x_observations=1,
+        r_observations=1,
+    )
+
+    assert receipt["final_decision_receipt"]["continue_allowed"] is False
+    assert receipt["final_decision_receipt"]["terminal_reason"] == "gate_passed_high_belief"
+    assert receipt["nightshift_handoff_receipt"]["status"] == "NOT_APPLICABLE"
 
 
 def test_outcome_memory_writes_learning_policy(tmp_path, monkeypatch) -> None:

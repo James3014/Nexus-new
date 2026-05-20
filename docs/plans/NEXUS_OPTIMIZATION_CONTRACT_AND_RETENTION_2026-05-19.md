@@ -163,6 +163,9 @@ After this contract:
 
 - `M2 Skeleton-First CodeIntel`: implemented as a bounded adapter over exact symbol lookup, rationale preservation, generated-file filtering, and last-known-good AST fallback.
 - `M3 Hybrid Retrieval`: implemented as a retrieval receipt plus BM25/dense fusion contract with snapshot and chunk-hash blockers.
+- `M5 Route Runtime`: implemented as route DAG pregate plus runtime dispatcher plan-consume preparation; forced-swarm and required-rescue guards remain fail-closed.
+- `M6 Claim/Evidence`: implemented as read-model validation with CompletionEnvelope state, mutation assurance state, sealed evidence, and hash-valid evidence blockers.
 - `M7 SF Replacement`: implemented as a two-step cleanliness gate plus explicit apply plan; runtime apply still requires authorization and post-apply smoke.
 - `M8 Workspace Hygiene`: implemented as retention dry-run classification plus per-run report output routing.
+- `RLM Routing Spec V2`: implemented as bounded X/R-loop orchestration receipts plus OutcomeMemory writeback; full recursive dispatch remains a separate runtime authorization gate.
 - Public benchmark and publication claims remain separate gates and are not unlocked by these contracts.

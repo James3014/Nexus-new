@@ -45,7 +45,7 @@ from nexus.engine.learning_policy_loader import (
     merge_runtime_learning_policy,
     route_cost_controls_from_env,
 )
-from nexus.engine.rlm_controller import build_nightshift_handoff_receipt, build_rlm_decision_receipt
+from nexus.engine.rlm_controller import build_bounded_rlm_orchestration_receipt
 from nexus.learning.outcome_memory import EpisodeOutcomeRecord, OutcomeMemoryManager
 from nexus.research.architecture_scout import DistantScoutPlanner
 from nexus.research.doc_scout_adapter import DocScoutAdapter, build_external_scout_providers_from_env
@@ -3753,18 +3753,16 @@ def run_auto_flow(
                 "submit_not_success",
                 "ac_gate_verified",
             ]
-        nexus_usage_trace["rlm_runtime_decision_receipt"] = build_rlm_decision_receipt(
-            loop_phase=str(nexus_usage_trace.get("rlm_loop_phase") or "R"),
+        rlm_orchestration = build_bounded_rlm_orchestration_receipt(
             gate_passed=bool(artifact_verified),
             belief_confidence=float(route_confidence or 0.0),
             current_tokens=int(result_report.get("total_tokens", 0) or 0),
-            current_x_count=int(rlm_budget_summary.get("iterations_observed", 0) or 0),
-            current_r_count=0 if recursive_research else 1,
+            x_observations=int(rlm_budget_summary.get("iterations_observed", 0) or 0),
+            r_observations=0 if recursive_research else 1,
         )
-        nexus_usage_trace["rlm_nightshift_handoff_receipt"] = build_nightshift_handoff_receipt(
-            decision_receipt=nexus_usage_trace["rlm_runtime_decision_receipt"],
-            artifact_gate_passed=bool(artifact_verified),
-        )
+        nexus_usage_trace["rlm_bounded_orchestration_receipt"] = rlm_orchestration
+        nexus_usage_trace["rlm_runtime_decision_receipt"] = rlm_orchestration["final_decision_receipt"]
+        nexus_usage_trace["rlm_nightshift_handoff_receipt"] = rlm_orchestration["nightshift_handoff_receipt"]
         nexus_usage_trace["rlm_trace_path"] = _write_research_rlm_trace(
             repo_root=repo_root,
             task_desc=task_desc,

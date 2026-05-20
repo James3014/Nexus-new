@@ -95,9 +95,10 @@ def _default_entries() -> list[dict[str, Any]]:
         },
         {
             "id": "rlm_recursive_orchestration",
-            "title": "Full X/R-loop recursive execution orchestration",
+            "title": "Bounded X/R-loop recursive execution orchestration adapter",
             "target_paths": ["nexus/app/research_flow_service.py", "nexus/engine/rlm_controller.py"],
-            "status": "READY_FOR_ALLOWED_PATH_IMPLEMENTATION",
+            "status": "IMPLEMENTED_AS_BOUNDED_ADAPTER",
             "allowed_adapter_path": "nexus/engine/rlm_controller.py",
+            "next_gate": "full_recursive_dispatch_requires_separate_runtime_authorization",
         },
     ]

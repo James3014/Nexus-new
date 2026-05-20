@@ -676,6 +676,13 @@ Exit:
 
 - plan readout includes dependencies, parallelizable work, required receipts, and fallback policy.
 
+Implementation note 2026-05-20:
+
+- `nexus.engine.rlm_controller.build_bounded_rlm_orchestration_receipt` closes the routing-spec-v2 RLM seam as a bounded X/R-loop adapter.
+- The adapter emits X-loop, R-loop, final decision, and Nightshift handoff receipts without executing recursive dispatch or mutating runtime policy.
+- `ResearchFlowService` consumes the bounded adapter receipt only as runtime evidence; `runtime_update_allowed=false` and `public_benchmark_allowed=false` remain invariant.
+- Full recursive dispatch remains a separate authorization gate, while Swarm/NSP/Go sidecar work remains outside this slice.
+
 ### OPT-NEXT-5: SF Replacement Cleanliness Gate
 
 Goal: prevent replacement from provider-blocked challenger runs.
@@ -835,3 +842,19 @@ Lesson:
 - Tests for fail-closed context quarantine should assert the canonical blocker emitted by the contract, not an inferred source-index format from a nearby receipt shape.
 - Treat shorter blocker strings as acceptable when they preserve the quarantined skill id and the boundary category.
 - Prevention rule: contract tests should first inspect existing validator blocker names before inventing a more detailed expected string.
+
+### Failure Lesson: RLM Recursive Dispatch Scope Drift
+
+Lesson:
+
+- Routing spec v2 asks for X/R-loop orchestration, but directly rewriting `ResearchFlowService` into nested recursive loops would mix evidence receipt generation with runtime dispatch policy.
+- Treat RLM closure as a bounded adapter first: it must emit X-loop, R-loop, final decision, and handoff receipts before any full recursive dispatch is authorized.
+- Prevention rule: RLM adapters may record budget and handoff evidence, but must keep `runtime_update_allowed=false` and `public_benchmark_allowed=false` unless a separate runtime apply gate exists.
+
+### Failure Lesson: RLM Focused Test Node Drift
+
+Lesson:
+
+- Focused RLM regressions can fail before collection if the command uses remembered test node names instead of the current local names.
+- Treat node-id misses as command drift, not product failure.
+- Prevention rule: locate RLM test names with `rg` before composing focused test commands that include long app test modules.
