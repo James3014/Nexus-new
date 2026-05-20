@@ -128,6 +128,8 @@ Blocked mode resolution: `docs/reports/NEXUS_HEEP_MAT_B_BLOCKED_MODE_RESOLUTION_
 
 Final skill decision: `docs/reports/NEXUS_HEEP_MAT_B_FINAL_SKILL_DECISIONS_2026-05-20.json` assigns a usable skill set to all 13 blocked capabilities. The 10 provider-token blockers use the multi-skill set for internal non-cost selection. The 3 executor receipt blockers use the current single primary fallback until executor receipts prove the multi-skill challenger. All selected skill assets resolve to repo-local `SKILL.md` files; runtime defaults and public benchmarks remain blocked.
 
+Executor receipt smoke: `docs/reports/NEXUS_HEEP_EXECUTOR_RECEIPT_ROUTE_SMOKE_2026-05-20.json` passed. The `route_oracles` suite includes `drone`, `nightshift`, and `swarm` in both expected and public-safe capability receipts with no failures. The final skill decision artifact now records `executor_route_smoke_status=PASS` for `drone`, `nightshift`, and `swarm_multi_agent`; their remaining gate is skill-specific MAT-B replay plus provider-clean replay before cost/runtime/public eligibility.
+
 Failure lesson: clean replay must preserve the distinction between provider-token truth and expected-capability receipt invocation. If they are merged into a generic `HOLD_MISSING_MAT_B_EVIDENCE`, later agents can accidentally rerun the wrong path or misread a provider telemetry gap as a weak skill.
 
 ---

@@ -6,6 +6,7 @@
     "multi_skill_decision_count": 10,
     "single_primary_fallback_count": 3,
     "skill_asset_pass_count": 13,
+    "executor_route_smoke_pass_count": 3,
     "missing_asset_count": 0,
     "runtime_update_allowed": false,
     "public_benchmark_allowed": false
@@ -56,7 +57,8 @@
           "used": true
         },
         "evidence_seal_count_delta": 2,
-        "wall_delta_observation": -1.4778
+        "wall_delta_observation": -1.4778,
+        "executor_route_smoke_status": "NOT_APPLICABLE"
       },
       "remaining_gate": [
         "provider-clean replay with measured provider tokens",
@@ -106,11 +108,12 @@
           "used": true
         },
         "evidence_seal_count_delta": null,
-        "wall_delta_observation": null
+        "wall_delta_observation": null,
+        "executor_route_smoke_status": "PASS"
       },
       "remaining_gate": [
-        "targeted route/executor smoke produces selected/invoked/evidence/gate/outcome receipt",
-        "provider-clean MAT-B replay after executor receipt is present"
+        "skill-specific MAT-B replay with executor receipt present",
+        "provider-clean MAT-B replay before cost/runtime/public eligibility"
       ],
       "runtime_update_allowed": false,
       "public_benchmark_allowed": false
@@ -160,7 +163,8 @@
           "used": true
         },
         "evidence_seal_count_delta": 2,
-        "wall_delta_observation": 0.912
+        "wall_delta_observation": 0.912,
+        "executor_route_smoke_status": "NOT_APPLICABLE"
       },
       "remaining_gate": [
         "provider-clean replay with measured provider tokens",
@@ -214,7 +218,8 @@
           "used": true
         },
         "evidence_seal_count_delta": 2,
-        "wall_delta_observation": -1.5992
+        "wall_delta_observation": -1.5992,
+        "executor_route_smoke_status": "NOT_APPLICABLE"
       },
       "remaining_gate": [
         "provider-clean replay with measured provider tokens",
@@ -268,7 +273,8 @@
           "used": true
         },
         "evidence_seal_count_delta": 2,
-        "wall_delta_observation": 0.1021
+        "wall_delta_observation": 0.1021,
+        "executor_route_smoke_status": "NOT_APPLICABLE"
       },
       "remaining_gate": [
         "provider-clean replay with measured provider tokens",
@@ -318,11 +324,12 @@
           "used": true
         },
         "evidence_seal_count_delta": null,
-        "wall_delta_observation": null
+        "wall_delta_observation": null,
+        "executor_route_smoke_status": "PASS"
       },
       "remaining_gate": [
-        "targeted route/executor smoke produces selected/invoked/evidence/gate/outcome receipt",
-        "provider-clean MAT-B replay after executor receipt is present"
+        "skill-specific MAT-B replay with executor receipt present",
+        "provider-clean MAT-B replay before cost/runtime/public eligibility"
       ],
       "runtime_update_allowed": false,
       "public_benchmark_allowed": false
@@ -372,7 +379,8 @@
           "used": true
         },
         "evidence_seal_count_delta": 2,
-        "wall_delta_observation": 0.7594
+        "wall_delta_observation": 0.7594,
+        "executor_route_smoke_status": "NOT_APPLICABLE"
       },
       "remaining_gate": [
         "provider-clean replay with measured provider tokens",
@@ -426,7 +434,8 @@
           "used": true
         },
         "evidence_seal_count_delta": 2,
-        "wall_delta_observation": 0.3077
+        "wall_delta_observation": 0.3077,
+        "executor_route_smoke_status": "NOT_APPLICABLE"
       },
       "remaining_gate": [
         "provider-clean replay with measured provider tokens",
@@ -477,7 +486,8 @@
           "used": true
         },
         "evidence_seal_count_delta": 1,
-        "wall_delta_observation": 0.8569
+        "wall_delta_observation": 0.8569,
+        "executor_route_smoke_status": "NOT_APPLICABLE"
       },
       "remaining_gate": [
         "provider-clean replay with measured provider tokens",
@@ -527,11 +537,12 @@
           "used": true
         },
         "evidence_seal_count_delta": null,
-        "wall_delta_observation": null
+        "wall_delta_observation": null,
+        "executor_route_smoke_status": "PASS"
       },
       "remaining_gate": [
-        "targeted route/executor smoke produces selected/invoked/evidence/gate/outcome receipt",
-        "provider-clean MAT-B replay after executor receipt is present"
+        "skill-specific MAT-B replay with executor receipt present",
+        "provider-clean MAT-B replay before cost/runtime/public eligibility"
       ],
       "runtime_update_allowed": false,
       "public_benchmark_allowed": false
@@ -578,7 +589,8 @@
           "used": true
         },
         "evidence_seal_count_delta": 1,
-        "wall_delta_observation": 0.4302
+        "wall_delta_observation": 0.4302,
+        "executor_route_smoke_status": "NOT_APPLICABLE"
       },
       "remaining_gate": [
         "provider-clean replay with measured provider tokens",
@@ -632,7 +644,8 @@
           "used": true
         },
         "evidence_seal_count_delta": 2,
-        "wall_delta_observation": -1.2389
+        "wall_delta_observation": -1.2389,
+        "executor_route_smoke_status": "NOT_APPLICABLE"
       },
       "remaining_gate": [
         "provider-clean replay with measured provider tokens",
@@ -683,7 +696,8 @@
           "used": true
         },
         "evidence_seal_count_delta": 1,
-        "wall_delta_observation": -1.496
+        "wall_delta_observation": -1.496,
+        "executor_route_smoke_status": "NOT_APPLICABLE"
       },
       "remaining_gate": [
         "provider-clean replay with measured provider tokens",
@@ -701,6 +715,7 @@
   ],
   "source_reports": {
     "live_compare_queue": "docs/reports/NEXUS_HEEP_FLASH_NEXUS_LIVE_COMPARE_QUEUE_2026-05-20.json",
-    "blocked_mode_resolution": "docs/reports/NEXUS_HEEP_MAT_B_BLOCKED_MODE_RESOLUTION_2026-05-20.json"
+    "blocked_mode_resolution": "docs/reports/NEXUS_HEEP_MAT_B_BLOCKED_MODE_RESOLUTION_2026-05-20.json",
+    "executor_smoke": "docs/reports/NEXUS_HEEP_EXECUTOR_RECEIPT_ROUTE_SMOKE_2026-05-20.json"
   }
 }

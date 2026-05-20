@@ -16,10 +16,16 @@ from nexus.learning.skill_fit_closure import read_json, write_json
 
 DEFAULT_QUEUE = Path("docs/reports/NEXUS_HEEP_FLASH_NEXUS_LIVE_COMPARE_QUEUE_2026-05-20.json")
 DEFAULT_RESOLUTION = Path("docs/reports/NEXUS_HEEP_MAT_B_BLOCKED_MODE_RESOLUTION_2026-05-20.json")
+DEFAULT_EXECUTOR_SMOKE = Path("docs/reports/NEXUS_HEEP_EXECUTOR_RECEIPT_ROUTE_SMOKE_2026-05-20.json")
 DEFAULT_OUTPUT = Path("docs/reports/NEXUS_HEEP_MAT_B_FINAL_SKILL_DECISIONS_2026-05-20.json")
 
 MULTI_WIN = "MULTI_SKILL_NON_COST_WIN"
 RECEIPT_MISSING = "UNDECIDED_RECEIPT_CHAIN_MISSING"
+EXECUTOR_RECEIPT_NAME = {
+    "drone": "drone",
+    "nightshift": "nightshift",
+    "swarm_multi_agent": "swarm",
+}
 
 
 def _skill_paths() -> dict[str, str]:
@@ -61,12 +67,42 @@ def _asset_status(skill_ids: list[str], skill_paths: Mapping[str, str]) -> tuple
     return ("PASS" if not missing and skill_ids else "RETURN", paths, missing)
 
 
+def _executor_smoke_receipts(executor_smoke: Mapping[str, Any]) -> set[str]:
+    receipts: set[str] = set()
+    if executor_smoke.get("passed") is not True:
+        return receipts
+    for suite in executor_smoke.get("suites", []) or []:
+        if not isinstance(suite, Mapping):
+            continue
+        receipts.update(str(item) for item in suite.get("public_safe_capabilities", []) or [] if str(item).strip())
+    return receipts
+
+
+def _remaining_gate(
+    *,
+    capability: str,
+    resolution_row: Mapping[str, Any],
+    executor_receipts: set[str],
+) -> tuple[str, list[str]]:
+    receipt_name = EXECUTOR_RECEIPT_NAME.get(capability, "")
+    if not receipt_name or receipt_name not in executor_receipts:
+        return "NOT_APPLICABLE" if not receipt_name else "MISSING", list(resolution_row.get("remaining_gate", []) or [])
+    return (
+        "PASS",
+        [
+            "skill-specific MAT-B replay with executor receipt present",
+            "provider-clean MAT-B replay before cost/runtime/public eligibility",
+        ],
+    )
+
+
 def _decision_for(
     *,
     capability: str,
     queue_row: Mapping[str, Any],
     resolution_row: Mapping[str, Any],
     skill_paths: Mapping[str, str],
+    executor_receipts: set[str],
 ) -> dict[str, Any]:
     baseline = _arm(queue_row, "baseline_arm")
     challenger = _arm(queue_row, "challenger_arm")
@@ -89,6 +125,11 @@ def _decision_for(
 
     selected_skill_ids = _skill_ids(selected_arm)
     asset_status, selected_paths, missing = _asset_status(selected_skill_ids, skill_paths)
+    executor_smoke_status, remaining_gate = _remaining_gate(
+        capability=capability,
+        resolution_row=resolution_row,
+        executor_receipts=executor_receipts,
+    )
     return {
         "capability": capability,
         "decision": decision,
@@ -107,8 +148,9 @@ def _decision_for(
             "challenger_planned_receipt_chain": challenger.get("runtime_final_receipt_chain", {}),
             "evidence_seal_count_delta": resolution_row.get("evidence_seal_count_delta"),
             "wall_delta_observation": resolution_row.get("wall_delta_observation"),
+            "executor_route_smoke_status": executor_smoke_status,
         },
-        "remaining_gate": resolution_row.get("remaining_gate", []),
+        "remaining_gate": remaining_gate,
         "runtime_update_allowed": False,
         "public_benchmark_allowed": False,
     }
@@ -118,8 +160,10 @@ def build_final_skill_decisions(
     *,
     live_compare_queue: Mapping[str, Any],
     blocked_mode_resolution: Mapping[str, Any],
+    executor_smoke: Mapping[str, Any] | None = None,
 ) -> dict[str, Any]:
     skill_paths = _skill_paths()
+    executor_receipts = _executor_smoke_receipts(executor_smoke or {})
     queue_rows = _rows_by_capability(live_compare_queue)
     resolution_rows = _resolutions_by_capability(blocked_mode_resolution)
     decisions = [
@@ -128,6 +172,7 @@ def build_final_skill_decisions(
             queue_row=queue_rows.get(capability, {}),
             resolution_row=row,
             skill_paths=skill_paths,
+            executor_receipts=executor_receipts,
         )
         for capability, row in sorted(resolution_rows.items())
     ]
@@ -142,6 +187,9 @@ def build_final_skill_decisions(
                 1 for row in decisions if row["decision"] == "USE_SINGLE_PRIMARY_FALLBACK"
             ),
             "skill_asset_pass_count": sum(1 for row in decisions if row["skill_asset_status"] == "PASS"),
+            "executor_route_smoke_pass_count": sum(
+                1 for row in decisions if row["evidence"]["executor_route_smoke_status"] == "PASS"
+            ),
             "missing_asset_count": len(missing_assets),
             "runtime_update_allowed": False,
             "public_benchmark_allowed": False,
@@ -156,6 +204,7 @@ def build_final_skill_decisions(
         "source_reports": {
             "live_compare_queue": str(DEFAULT_QUEUE),
             "blocked_mode_resolution": str(DEFAULT_RESOLUTION),
+            "executor_smoke": str(DEFAULT_EXECUTOR_SMOKE),
         },
     }
 
@@ -164,11 +213,13 @@ def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description="Build final HEEP MAT-B skill decisions for blocked capabilities.")
     parser.add_argument("--live-compare-queue", default=str(DEFAULT_QUEUE))
     parser.add_argument("--blocked-mode-resolution", default=str(DEFAULT_RESOLUTION))
+    parser.add_argument("--executor-smoke", default=str(DEFAULT_EXECUTOR_SMOKE))
     parser.add_argument("--output", default=str(DEFAULT_OUTPUT))
     args = parser.parse_args(argv)
     report = build_final_skill_decisions(
         live_compare_queue=read_json(args.live_compare_queue),
         blocked_mode_resolution=read_json(args.blocked_mode_resolution),
+        executor_smoke=read_json(args.executor_smoke),
     )
     write_json(args.output, report)
     print(json.dumps({"status": report["status"], **report["summary"], "output": args.output}, sort_keys=True))

@@ -66,3 +66,39 @@ def test_final_decision_uses_single_primary_when_receipt_chain_missing(monkeypat
     assert out["summary"]["single_primary_fallback_count"] == 1
     assert out["decisions"][0]["decision"] == "USE_SINGLE_PRIMARY_FALLBACK"
     assert out["decisions"][0]["selected_skill_ids"] == ["base"]
+
+
+def test_final_decision_records_executor_route_smoke_pass(monkeypatch) -> None:
+    monkeypatch.setattr(final_decisions, "_skill_paths", lambda: {"base": "base/SKILL.md", "extra": "extra/SKILL.md"})
+    queue = {
+        "rows": [
+            {
+                "capability": "drone",
+                "baseline_arm": {"skill_ids": ["base"]},
+                "challenger_arm": {"skill_ids": ["base", "extra"]},
+            }
+        ]
+    }
+    resolution = {
+        "rows": [
+            {
+                "capability": "drone",
+                "mode_decision": "UNDECIDED_RECEIPT_CHAIN_MISSING",
+                "remaining_gate": ["executor receipt replay"],
+            }
+        ]
+    }
+    executor_smoke = {"passed": True, "suites": [{"public_safe_capabilities": ["drone"]}]}
+
+    out = final_decisions.build_final_skill_decisions(
+        live_compare_queue=queue,
+        blocked_mode_resolution=resolution,
+        executor_smoke=executor_smoke,
+    )
+
+    assert out["summary"]["executor_route_smoke_pass_count"] == 1
+    assert out["decisions"][0]["evidence"]["executor_route_smoke_status"] == "PASS"
+    assert out["decisions"][0]["remaining_gate"] == [
+        "skill-specific MAT-B replay with executor receipt present",
+        "provider-clean MAT-B replay before cost/runtime/public eligibility",
+    ]

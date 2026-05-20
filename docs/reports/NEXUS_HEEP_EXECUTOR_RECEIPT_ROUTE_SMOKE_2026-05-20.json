@@ -1,0 +1,219 @@
+{
+  "schema_version": "nexus_capability_route_smoke.v1",
+  "diagnostic_type": "receipt_diagnostic",
+  "receipt_diagnostic_pass": true,
+  "public_benchmark_claim_allowed": false,
+  "public_benchmark_claim_blocked_reason": "nexus_only_receipt_smoke_not_same_model_ab",
+  "suites": [
+    {
+      "file": "/Users/jameschen/Workspace/nexus/.nexus/reports/bench_route_8oracle_smoke/with_nexus_1779269949.jsonl",
+      "tasks": 8,
+      "expected_capabilities": [
+        "autoreason",
+        "ddtree",
+        "drone",
+        "lancedb",
+        "nightshift",
+        "research",
+        "swarm",
+        "ultra_review"
+      ],
+      "public_safe_capabilities": [
+        "autoreason",
+        "ddtree",
+        "drone",
+        "lancedb",
+        "nightshift",
+        "research",
+        "swarm",
+        "ultra_review"
+      ],
+      "route_quality": {
+        "selected_total": 73,
+        "invoked_total": 72,
+        "evidence_total": 72,
+        "outcome_total": 72,
+        "selected_to_invoked_rate": 0.9863013698630136,
+        "invoked_to_evidence_rate": 1.0,
+        "evidence_to_outcome_rate": 1.0,
+        "unnecessary_selected_rate": 0.0136986301369863,
+        "over_selection_hotspots": []
+      },
+      "brain_hub_guidance": {
+        "present_total": 8,
+        "audit_passed_total": 8,
+        "present_rate": 1.0,
+        "audit_passed_rate": 1.0
+      },
+      "failures": [],
+      "suite": "route_oracles",
+      "returncode": 0
+    },
+    {
+      "file": "/Users/jameschen/Workspace/nexus/.nexus/reports/bench_route_codeintel_hyper_smoke/with_nexus_1779270071.jsonl",
+      "tasks": 2,
+      "expected_capabilities": [
+        "codeintel",
+        "delivery_gate",
+        "hyper",
+        "memory"
+      ],
+      "public_safe_capabilities": [
+        "codeintel",
+        "delivery_gate",
+        "hyper",
+        "memory"
+      ],
+      "route_quality": {
+        "selected_total": 16,
+        "invoked_total": 16,
+        "evidence_total": 16,
+        "outcome_total": 16,
+        "selected_to_invoked_rate": 1.0,
+        "invoked_to_evidence_rate": 1.0,
+        "evidence_to_outcome_rate": 1.0,
+        "unnecessary_selected_rate": 0.0,
+        "over_selection_hotspots": []
+      },
+      "brain_hub_guidance": {
+        "present_total": 2,
+        "audit_passed_total": 2,
+        "present_rate": 1.0,
+        "audit_passed_rate": 1.0
+      },
+      "failures": [],
+      "suite": "codeintel_hyper",
+      "returncode": 0
+    },
+    {
+      "file": "/Users/jameschen/Workspace/nexus/.nexus/reports/bench_route_core_gates_smoke/with_nexus_1779270097.jsonl",
+      "tasks": 2,
+      "expected_capabilities": [
+        "artifact_gate",
+        "claim_gate",
+        "mempalace_gate"
+      ],
+      "public_safe_capabilities": [
+        "artifact_gate",
+        "claim_gate",
+        "mempalace_gate"
+      ],
+      "route_quality": {
+        "selected_total": 16,
+        "invoked_total": 16,
+        "evidence_total": 16,
+        "outcome_total": 16,
+        "selected_to_invoked_rate": 1.0,
+        "invoked_to_evidence_rate": 1.0,
+        "evidence_to_outcome_rate": 1.0,
+        "unnecessary_selected_rate": 0.0,
+        "over_selection_hotspots": []
+      },
+      "brain_hub_guidance": {
+        "present_total": 2,
+        "audit_passed_total": 2,
+        "present_rate": 1.0,
+        "audit_passed_rate": 1.0
+      },
+      "failures": [],
+      "suite": "core_governance_gates",
+      "returncode": 0
+    },
+    {
+      "file": "/Users/jameschen/Workspace/nexus/.nexus/reports/bench_route_belief_smoke/with_nexus_1779270124.jsonl",
+      "tasks": 1,
+      "expected_capabilities": [
+        "belief"
+      ],
+      "public_safe_capabilities": [
+        "belief"
+      ],
+      "route_quality": {
+        "selected_total": 8,
+        "invoked_total": 8,
+        "evidence_total": 8,
+        "outcome_total": 8,
+        "selected_to_invoked_rate": 1.0,
+        "invoked_to_evidence_rate": 1.0,
+        "evidence_to_outcome_rate": 1.0,
+        "unnecessary_selected_rate": 0.0,
+        "over_selection_hotspots": []
+      },
+      "brain_hub_guidance": {
+        "present_total": 1,
+        "audit_passed_total": 1,
+        "present_rate": 1.0,
+        "audit_passed_rate": 1.0
+      },
+      "failures": [],
+      "suite": "belief_gate",
+      "returncode": 0
+    },
+    {
+      "file": "/Users/jameschen/Workspace/nexus/.nexus/reports/bench_route_runtime_receipt_smoke/with_nexus_1779270138.jsonl",
+      "tasks": 2,
+      "expected_capabilities": [
+        "semantic_searcher",
+        "swarm_quiet_moment"
+      ],
+      "public_safe_capabilities": [
+        "semantic_searcher",
+        "swarm_quiet_moment"
+      ],
+      "route_quality": {
+        "selected_total": 17,
+        "invoked_total": 17,
+        "evidence_total": 17,
+        "outcome_total": 17,
+        "selected_to_invoked_rate": 1.0,
+        "invoked_to_evidence_rate": 1.0,
+        "evidence_to_outcome_rate": 1.0,
+        "unnecessary_selected_rate": 0.0,
+        "over_selection_hotspots": []
+      },
+      "brain_hub_guidance": {
+        "present_total": 2,
+        "audit_passed_total": 2,
+        "present_rate": 1.0,
+        "audit_passed_rate": 1.0
+      },
+      "failures": [],
+      "suite": "runtime_receipt_oracles",
+      "returncode": 0
+    },
+    {
+      "file": "/Users/jameschen/Workspace/nexus/.nexus/reports/bench_route_harness_engineering_smoke/with_nexus_1779270168.jsonl",
+      "tasks": 2,
+      "expected_capabilities": [
+        "bdd_acceptance_skill",
+        "semantic_failure_sensor"
+      ],
+      "public_safe_capabilities": [
+        "bdd_acceptance_skill",
+        "semantic_failure_sensor"
+      ],
+      "route_quality": {
+        "selected_total": 17,
+        "invoked_total": 17,
+        "evidence_total": 17,
+        "outcome_total": 17,
+        "selected_to_invoked_rate": 1.0,
+        "invoked_to_evidence_rate": 1.0,
+        "evidence_to_outcome_rate": 1.0,
+        "unnecessary_selected_rate": 0.0,
+        "over_selection_hotspots": []
+      },
+      "brain_hub_guidance": {
+        "present_total": 2,
+        "audit_passed_total": 2,
+        "present_rate": 1.0,
+        "audit_passed_rate": 1.0
+      },
+      "failures": [],
+      "suite": "harness_engineering_oracles",
+      "returncode": 0
+    }
+  ],
+  "failures": [],
+  "passed": true
+}

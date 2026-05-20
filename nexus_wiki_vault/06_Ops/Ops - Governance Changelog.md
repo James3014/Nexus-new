@@ -36,6 +36,9 @@ version_scope: '[v17.1, v22, v23]'
 ## 2026-05-20
 - **HEEP MAT-B Final Skill Decisions:** Added a final blocked-capability skill decision packet that assigns a usable skill or skill set to all 13 blocked capabilities. Provider-token blockers select multi-skill for internal non-cost use; executor receipt blockers select single primary fallback until receipt replay proves the multi-skill challenger.
 
+## 2026-05-20
+- **HEEP Executor Receipt Route Smoke:** Ran deterministic route receipt smoke and recorded public-safe `drone`, `nightshift`, and `swarm` receipts. Final HEEP skill decisions now distinguish route-level executor receipt readiness from the remaining skill-specific MAT-B/provider-clean replay gates.
+
 ## One-sentence summary
 記錄 Nexus 治理架構的所有重大變更、審計硬化與契約遷移歷史。 [Source: MUSE-NEXUS-Engine-Specification-v22-Eternal.md]
 
