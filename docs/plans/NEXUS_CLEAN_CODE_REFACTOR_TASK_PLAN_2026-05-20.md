@@ -1,6 +1,6 @@
 # Nexus Clean Code Refactor Task Plan
 
-Status: `PLAN_ONLY`
+Status: `COMPLETED`
 Date: `2026-05-20`
 Source audit: `/Users/jameschen/.gemini/antigravity/brain/aff9416a-04e7-48d5-9b10-85410ef6b790/NEXUS_CLEAN_CODE_AUDIT_REPORT.md`
 Baseline commit: `17c1409d`
@@ -670,3 +670,30 @@ Verification:
 
 - `rg` reference check across `20` root ops/test candidates;
 - `git diff --check -- docs/plans/NEXUS_CLEAN_CODE_REFACTOR_TASK_PLAN_2026-05-20.md docs/reports/NEXUS_CLEAN_CODE_ROOT_CLEANUP_SAFETY_REVIEW_2026-05-20.md`
+
+## 21. Final Closeout
+
+Status: `COMPLETED`
+
+Decision:
+
+- this bounded Clean Code refactor task plan is complete;
+- all planned CC slices are either implemented or closed within their safety
+  boundary;
+- `CC-8` is intentionally closed with zero moves because reference-safety checks
+  showed root entrypoints still need compatibility wrappers before relocation;
+- this plan does not claim runtime behavior changes, public benchmark readiness,
+  Swarm/NSP work, or broad root cleanup beyond the reviewed boundary.
+
+Final verification:
+
+- focused tests recorded in each task-card result section;
+- final full gate: `uv run scripts/ops/ci_gate.py` -> `ALL QUALITY GATES PASSED`;
+- final full gate warning retained as non-blocking evidence:
+  `Eval pass rate 20.00% below required 80.00%`;
+- unrelated dirty workspace entries were not included in this plan closeout.
+
+Residual follow-up:
+
+- future root script movement requires a separate compatibility-wrapper
+  migration covering readiness inventory, root-path tests, and oracle fixtures.
