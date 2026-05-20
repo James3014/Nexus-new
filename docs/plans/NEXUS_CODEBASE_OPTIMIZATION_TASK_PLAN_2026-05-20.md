@@ -664,3 +664,37 @@ Failure lesson:
 Next:
 
 - run final CBO smoke/CI gate for all touched seams.
+
+## 19. CBO Closure
+
+Status: `COMPLETED`
+
+Completed task cards:
+
+- `CBO-PREFLIGHT`;
+- `CBO-1 State JSON Store and BeliefEngine Migration`;
+- `CBO-2 Findings Memory Persistence / Vector Sync Split`;
+- `CBO-4 History Signal Store and Rollup Contract`;
+- `CBO-5 Guarded Fetch Adapter`;
+- `CBO-6 Retrieval Query Contract`;
+- `CBO-3 Scoped LanceDB Repository Lifecycle`;
+- `CBO-7 Observation-Only I/O Measurement Harness`;
+- `CBO-8 Repair Split Continuation Gate`.
+
+Final focused verification:
+
+- `uv run pytest tests/core/test_belief_engine.py tests/research/test_findings_memory.py tests/research/test_history_signal_store.py tests/contracts/test_network_fetch_guard.py tests/contracts/test_retrieval_query.py tests/research/test_doc_scout_adapter.py tests/services/test_memory_repository_lifecycle.py tests/ops/test_cbo_io_measurement.py tests/engine/test_repair_loop_service.py tests/engine/test_attempt_settlement_service.py tests/engine/test_pipeline_composition.py -q` -> `73 passed`.
+
+Claim boundary:
+
+- runtime update allowed: `false`;
+- public benchmark allowed: `false`;
+- performance delta claim allowed: `false`;
+- CBO is complete as an internal codebase optimization task-card set, not as a
+  public benchmark or runtime policy promotion.
+
+Residual debt:
+
+- `tests/engine/test_recursive_repair_loop.py` remains classified as
+  RLM/repair policy composition debt from earlier broad coverage, outside CBO
+  closure. It needs a dedicated RLM acceptance gate if reopened.
