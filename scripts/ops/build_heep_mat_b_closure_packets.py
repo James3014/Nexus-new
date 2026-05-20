@@ -19,6 +19,8 @@ DEFAULT_RUNTIME_REVIEW = Path("docs/reports/NEXUS_HEEP_RUNTIME_APPLY_REVIEW_PACK
 DEFAULT_PUBLIC_GATE = Path("docs/reports/NEXUS_HEEP_PUBLIC_BENCHMARK_READINESS_GATE_2026-05-20.json")
 DEFAULT_TASKCARD_STATUS = Path("docs/reports/NEXUS_HEEP_TASKCARD_STATUS_R1_R6_2026-05-20.json")
 DEFAULT_BLOCKER_RCA = Path("docs/reports/NEXUS_HEEP_PROVIDER_RECEIPT_BLOCKER_RCA_2026-05-20.json")
+DEFAULT_TRIO_NEXT_STEP = Path("docs/reports/NEXUS_HEEP_EXECUTOR_TRIO_NEXT_STEP_PACKET_2026-05-20.json")
+EXECUTOR_TRIO_CAPABILITIES = {"drone", "nightshift", "swarm_multi_agent"}
 
 
 def _safe_read(path: Path) -> dict[str, Any]:
@@ -376,9 +378,93 @@ def build_provider_receipt_blocker_rca(*, replay_status: Mapping[str, Any]) -> d
     }
 
 
+def _smoke_public_safe_capabilities(executor_smoke: Mapping[str, Any]) -> set[str]:
+    names: set[str] = set()
+    for suite in executor_smoke.get("suites", []) or []:
+        if not isinstance(suite, Mapping):
+            continue
+        names.update(str(item) for item in (suite.get("public_safe_capabilities") or []) if str(item))
+    return names
+
+
+def _trio_expected_capability(capability: str) -> str:
+    if capability == "swarm_multi_agent":
+        return "swarm"
+    return capability
+
+
+def _receipt_chain_ready(decision: Mapping[str, Any]) -> bool:
+    evidence = decision.get("evidence", {})
+    if not isinstance(evidence, Mapping):
+        return False
+    chain = evidence.get("challenger_planned_receipt_chain") or evidence.get("baseline_planned_receipt_chain")
+    if not isinstance(chain, Mapping):
+        return False
+    return all(bool(chain.get(key)) for key in ("selected", "injected", "used", "evidence_present", "gate_passed", "outcome_contributed"))
+
+
+def build_executor_trio_next_step_packet(
+    *,
+    final_decisions: Mapping[str, Any],
+    executor_smoke: Mapping[str, Any],
+    blocker_rca: Mapping[str, Any],
+) -> dict[str, Any]:
+    public_safe = _smoke_public_safe_capabilities(executor_smoke)
+    rows = []
+    for decision in final_decisions.get("decisions", []) or []:
+        if not isinstance(decision, Mapping):
+            continue
+        capability = str(decision.get("capability") or "")
+        if capability not in EXECUTOR_TRIO_CAPABILITIES:
+            continue
+        expected = _trio_expected_capability(capability)
+        skill_assets_pass = str(decision.get("skill_asset_status") or "") == "PASS" and not decision.get("missing_skill_ids")
+        route_smoke_pass = bool(executor_smoke.get("passed")) and expected in public_safe
+        planned_receipt_ready = _receipt_chain_ready(decision)
+        readiness_pass = skill_assets_pass and route_smoke_pass and planned_receipt_ready
+        rows.append(
+            {
+                "capability": capability,
+                "expected_runtime_capability": expected,
+                "selected_single_primary": decision.get("selected_skill_ids", []),
+                "multi_skill_challenger": (decision.get("evidence", {}) or {}).get("challenger_skill_ids", []),
+                "skill_assets_pass": skill_assets_pass,
+                "executor_route_smoke_pass": route_smoke_pass,
+                "planned_receipt_chain_ready": planned_receipt_ready,
+                "skill_specific_receipt_next_step": "READY_FOR_PROVIDER_CLEAN_MAT_B_REPLAY"
+                if readiness_pass
+                else "BLOCKED_BY_LOCAL_RECEIPT_READINESS",
+                "runtime_update_allowed": False,
+                "public_benchmark_allowed": False,
+            }
+        )
+    provider_blocked = bool((blocker_rca.get("summary") or {}).get("provider_unclean"))
+    return {
+        "schema": "nexus.heep_executor_trio_next_step_packet.v1",
+        "status": "PASS" if rows and all(row["skill_specific_receipt_next_step"].startswith("READY") for row in rows) else "BLOCKED",
+        "summary": {
+            "capability_count": len(rows),
+            "local_receipt_readiness_pass_count": sum(
+                1 for row in rows if row["skill_specific_receipt_next_step"].startswith("READY")
+            ),
+            "provider_clean_replay_required": provider_blocked,
+            "runtime_update_allowed": False,
+            "public_benchmark_allowed": False,
+        },
+        "rows": rows,
+        "next_action": "RUN_PROVIDER_CLEAN_MAT_B_REPLAY_FOR_EXECUTOR_TRIO" if provider_blocked else "RUN_SKILL_SPECIFIC_MAT_B_REPLAY",
+        "claim_boundary": [
+            "This packet resolves the local executor/skill receipt readiness question for the trio.",
+            "It does not approve runtime default, public benchmark, or cost claims.",
+            "The next admissible live step still requires provider-measured token truth.",
+        ],
+    }
+
+
 def build_all(args: argparse.Namespace) -> dict[str, dict[str, Any]]:
     final_decisions = read_json(Path(args.final_decisions))
     runtime_packet = read_json(Path(args.runtime_packet))
+    executor_smoke = _safe_read(Path(args.executor_smoke))
     replay_status = build_executor_trio_replay_status(replay_root=Path(args.replay_root))
     rollup = build_rollup_v2(
         final_decisions=final_decisions,
@@ -389,6 +475,11 @@ def build_all(args: argparse.Namespace) -> dict[str, dict[str, Any]]:
     runtime_review = build_runtime_review_v2(runtime_packet=runtime_packet, final_decisions=final_decisions)
     public_gate = build_public_readiness_gate(rollup=rollup, runtime_review=runtime_review)
     blocker_rca = build_provider_receipt_blocker_rca(replay_status=replay_status)
+    trio_next_step = build_executor_trio_next_step_packet(
+        final_decisions=final_decisions,
+        executor_smoke=executor_smoke,
+        blocker_rca=blocker_rca,
+    )
     taskcard_status = build_taskcard_status(
         replay_status=replay_status,
         rollup=rollup,
@@ -404,6 +495,7 @@ def build_all(args: argparse.Namespace) -> dict[str, dict[str, Any]]:
         Path(args.public_gate_output): public_gate,
         Path(args.taskcard_status_output): taskcard_status,
         Path(args.blocker_rca_output): blocker_rca,
+        Path(args.trio_next_step_output): trio_next_step,
     }
     for path, payload in outputs.items():
         write_json(path, payload)
@@ -415,6 +507,7 @@ def build_all(args: argparse.Namespace) -> dict[str, dict[str, Any]]:
         "public_gate": public_gate,
         "taskcard_status": taskcard_status,
         "blocker_rca": blocker_rca,
+        "trio_next_step": trio_next_step,
     }
 
 
@@ -422,6 +515,7 @@ def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description="Build HEEP MAT-B closure packets for remaining task cards.")
     parser.add_argument("--final-decisions", default=str(DEFAULT_FINAL_DECISIONS))
     parser.add_argument("--runtime-packet", default=str(DEFAULT_RUNTIME_PACKET))
+    parser.add_argument("--executor-smoke", default="docs/reports/NEXUS_HEEP_EXECUTOR_RECEIPT_ROUTE_SMOKE_2026-05-20.json")
     parser.add_argument("--replay-root", default=str(DEFAULT_REPLAY_ROOT))
     parser.add_argument("--replay-status-output", default=str(DEFAULT_REPLAY_STATUS))
     parser.add_argument("--rollup-output", default=str(DEFAULT_ROLLUP))
@@ -430,6 +524,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--public-gate-output", default=str(DEFAULT_PUBLIC_GATE))
     parser.add_argument("--taskcard-status-output", default=str(DEFAULT_TASKCARD_STATUS))
     parser.add_argument("--blocker-rca-output", default=str(DEFAULT_BLOCKER_RCA))
+    parser.add_argument("--trio-next-step-output", default=str(DEFAULT_TRIO_NEXT_STEP))
     args = parser.parse_args(argv)
     artifacts = build_all(args)
     print(
@@ -443,6 +538,7 @@ def main(argv: list[str] | None = None) -> int:
                 "public_gate_status": artifacts["public_gate"]["status"],
                 "taskcard_blocked_count": artifacts["taskcard_status"]["summary"]["blocked_count"],
                 "blocker_rca_status": artifacts["blocker_rca"]["status"],
+                "trio_next_step_status": artifacts["trio_next_step"]["status"],
             },
             ensure_ascii=False,
             sort_keys=True,

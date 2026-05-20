@@ -55,6 +55,42 @@ def test_provider_receipt_rca_keeps_estimated_tokens_blocked() -> None:
     assert out["next_action"] == "WAIT_FOR_PROVIDER_CLEAN_REPLAY_WINDOW_THEN_RERUN_SKILL_SPECIFIC_MAT_B"
 
 
+def test_executor_trio_next_step_packet_unblocks_local_receipt_readiness() -> None:
+    final_decisions = {
+        "decisions": [
+            {
+                "capability": "swarm_multi_agent",
+                "selected_skill_ids": ["single"],
+                "skill_asset_status": "PASS",
+                "missing_skill_ids": [],
+                "evidence": {
+                    "challenger_skill_ids": ["scout", "single", "audit"],
+                    "challenger_planned_receipt_chain": {
+                        "selected": True,
+                        "injected": True,
+                        "used": True,
+                        "evidence_present": True,
+                        "gate_passed": True,
+                        "outcome_contributed": True,
+                    },
+                },
+            }
+        ]
+    }
+    smoke = {"passed": True, "suites": [{"public_safe_capabilities": ["swarm"]}]}
+    rca = {"summary": {"provider_unclean": True}}
+
+    out = closure.build_executor_trio_next_step_packet(
+        final_decisions=final_decisions,
+        executor_smoke=smoke,
+        blocker_rca=rca,
+    )
+
+    assert out["status"] == "PASS"
+    assert out["summary"]["provider_clean_replay_required"] is True
+    assert out["rows"][0]["skill_specific_receipt_next_step"] == "READY_FOR_PROVIDER_CLEAN_MAT_B_REPLAY"
+
+
 def test_closure_packets_keep_runtime_and_public_blocked(tmp_path: Path) -> None:
     final_decisions = tmp_path / "final.json"
     runtime_packet = tmp_path / "runtime.json"
@@ -69,6 +105,18 @@ def test_closure_packets_keep_runtime_and_public_blocked(tmp_path: Path) -> None
         },
     )
     _write(runtime_packet, {"summary": {"ready_for_runtime_apply_review_count": 1}, "rows": [{"capability": "codeintel"}]})
+    executor_smoke = tmp_path / "smoke.json"
+    _write(
+        executor_smoke,
+        {
+            "passed": True,
+            "suites": [
+                {
+                    "public_safe_capabilities": ["drone"],
+                }
+            ],
+        },
+    )
     _write(replay_root / "live_summary.json", {"status": "RETURN", "summary": {"planned_rows": 6, "completed_rows": 1}})
     _write(
         replay_root / "row" / "failed.row.json",
@@ -85,6 +133,7 @@ def test_closure_packets_keep_runtime_and_public_blocked(tmp_path: Path) -> None
     args = SimpleNamespace(
         final_decisions=str(final_decisions),
         runtime_packet=str(runtime_packet),
+        executor_smoke=str(executor_smoke),
         replay_root=str(replay_root),
         replay_status_output=str(tmp_path / "replay_status.json"),
         rollup_output=str(tmp_path / "rollup.json"),
@@ -93,6 +142,7 @@ def test_closure_packets_keep_runtime_and_public_blocked(tmp_path: Path) -> None
         public_gate_output=str(tmp_path / "public_gate.json"),
         taskcard_status_output=str(tmp_path / "taskcards.json"),
         blocker_rca_output=str(tmp_path / "rca.json"),
+        trio_next_step_output=str(tmp_path / "trio_next.json"),
     )
     artifacts = closure.build_all(args)
 
@@ -105,3 +155,4 @@ def test_closure_packets_keep_runtime_and_public_blocked(tmp_path: Path) -> None
     assert artifacts["taskcard_status"]["summary"]["taskcard_count"] == 6
     assert artifacts["taskcard_status"]["summary"]["blocked_count"] == 5
     assert artifacts["blocker_rca"]["status"] == "BLOCKED"
+    assert artifacts["trio_next_step"]["summary"]["provider_clean_replay_required"] is True

@@ -136,6 +136,8 @@ Provider/receipt RCA: `docs/reports/NEXUS_HEEP_PROVIDER_RECEIPT_BLOCKER_RCA_2026
 
 Deterministic route smoke was rerun after the RCA and still passed in `docs/reports/NEXUS_HEEP_EXECUTOR_RECEIPT_ROUTE_SMOKE_2026-05-20.json`; `drone`, `nightshift`, and `swarm` are all present in the route-oracle expected/public-safe capability sets. This narrows the unresolved work to a provider-clean MAT-B replay window, not a route-oracle or skill asset repair.
 
+Executor trio next step: `docs/reports/NEXUS_HEEP_EXECUTOR_TRIO_NEXT_STEP_PACKET_2026-05-20.json` now separates local receipt readiness from provider-clean live evidence. `drone`, `nightshift`, and `swarm_multi_agent` all have repo-local skill assets, executor route smoke PASS, and planned receipt chains ready, so their skill-specific receipt next step is `READY_FOR_PROVIDER_CLEAN_MAT_B_REPLAY`. This moves the trio out of generic receipt uncertainty; the only remaining admissible blocker is provider-measured token truth in a clean MAT-B replay window.
+
 Failure lesson: clean replay must preserve the distinction between provider-token truth and expected-capability receipt invocation. If they are merged into a generic `HOLD_MISSING_MAT_B_EVIDENCE`, later agents can accidentally rerun the wrong path or misread a provider telemetry gap as a weak skill.
 
 Failure lesson: executor route smoke is necessary but not sufficient for MAT-B promotion. It proves the route oracle can express `drone`, `nightshift`, and `swarm`, but a skill-specific MAT-B row must still prove runtime skill mount confirmation, expected capability receipt invocation, and provider-token cleanliness in the same evidence window.

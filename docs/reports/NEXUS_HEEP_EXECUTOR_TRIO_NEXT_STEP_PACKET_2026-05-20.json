@@ -1,0 +1,73 @@
+{
+  "schema": "nexus.heep_executor_trio_next_step_packet.v1",
+  "status": "PASS",
+  "summary": {
+    "capability_count": 3,
+    "local_receipt_readiness_pass_count": 3,
+    "provider_clean_replay_required": true,
+    "runtime_update_allowed": false,
+    "public_benchmark_allowed": false
+  },
+  "rows": [
+    {
+      "capability": "drone",
+      "expected_runtime_capability": "drone",
+      "selected_single_primary": [
+        "sf-systematic-drone-python-background-jobs-18326a62"
+      ],
+      "multi_skill_challenger": [
+        "sf-systematic-codeintel-first-principles-thinking-f95019ea",
+        "sf-systematic-drone-python-background-jobs-18326a62",
+        "sf-systematic-artifact_gate-differential-review-461fbd0c"
+      ],
+      "skill_assets_pass": true,
+      "executor_route_smoke_pass": true,
+      "planned_receipt_chain_ready": true,
+      "skill_specific_receipt_next_step": "READY_FOR_PROVIDER_CLEAN_MAT_B_REPLAY",
+      "runtime_update_allowed": false,
+      "public_benchmark_allowed": false
+    },
+    {
+      "capability": "nightshift",
+      "expected_runtime_capability": "nightshift",
+      "selected_single_primary": [
+        "sf2-nightshift-route-fit-spec"
+      ],
+      "multi_skill_challenger": [
+        "sf-systematic-codeintel-first-principles-thinking-f95019ea",
+        "sf2-nightshift-route-fit-spec",
+        "sf-systematic-artifact_gate-differential-review-461fbd0c"
+      ],
+      "skill_assets_pass": true,
+      "executor_route_smoke_pass": true,
+      "planned_receipt_chain_ready": true,
+      "skill_specific_receipt_next_step": "READY_FOR_PROVIDER_CLEAN_MAT_B_REPLAY",
+      "runtime_update_allowed": false,
+      "public_benchmark_allowed": false
+    },
+    {
+      "capability": "swarm_multi_agent",
+      "expected_runtime_capability": "swarm",
+      "selected_single_primary": [
+        "sf2-swarm_multi_agent-route-fit-spec"
+      ],
+      "multi_skill_challenger": [
+        "sf-systematic-codeintel-first-principles-thinking-f95019ea",
+        "sf2-swarm_multi_agent-route-fit-spec",
+        "sf-systematic-artifact_gate-differential-review-461fbd0c"
+      ],
+      "skill_assets_pass": true,
+      "executor_route_smoke_pass": true,
+      "planned_receipt_chain_ready": true,
+      "skill_specific_receipt_next_step": "READY_FOR_PROVIDER_CLEAN_MAT_B_REPLAY",
+      "runtime_update_allowed": false,
+      "public_benchmark_allowed": false
+    }
+  ],
+  "next_action": "RUN_PROVIDER_CLEAN_MAT_B_REPLAY_FOR_EXECUTOR_TRIO",
+  "claim_boundary": [
+    "This packet resolves the local executor/skill receipt readiness question for the trio.",
+    "It does not approve runtime default, public benchmark, or cost claims.",
+    "The next admissible live step still requires provider-measured token truth."
+  ]
+}
