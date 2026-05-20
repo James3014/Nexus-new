@@ -396,6 +396,27 @@ Action:
 - `research_flow_service._collect_route_signals` remains as a wrapper and passes
   the facade-level `FindingsMemoryStore` into `route_decider.collect_route_signals`.
 
+### CC-3 patch seam lesson
+
+Failure:
+
+- `tests/engine/test_pipeline_repair.py::test_evaluate_audit_result_phantom`
+  initially failed after audit evaluator extraction because the test patched
+  `nexus.engine.pipeline_repair.detect_inconclusive_success`, while the extracted
+  evaluator used its own imported detector.
+
+Lesson:
+
+- When extracting behavior from a mixin that existing tests patch at the facade
+  module, pass the dependency through the facade wrapper instead of binding it
+  directly in the extracted module.
+
+Action:
+
+- `PipelineRepairMixin._evaluate_audit_result` now passes
+  `detect_inconclusive_success` into `evaluate_audit_result` as
+  `phantom_detector`.
+
 ## 13. CC-1 Research Flow Route Decision Module Result
 
 Status: `DONE`
@@ -444,3 +465,28 @@ Verification:
 
 - `uv run python -m py_compile nexus/app/research_flow_service.py nexus/research/flow/route_decider.py nexus/research/flow/evidence_packer.py nexus/research/flow/__init__.py`
 - `uv run pytest tests/app/test_research_flow_service.py -q` -> `100 passed`
+
+## 15. CC-3 Pipeline Repair Audit Evaluator Result
+
+Status: `DONE`
+
+Files:
+
+- `nexus/engine/repair/audit_evaluator.py`
+- `nexus/engine/repair/__init__.py`
+- `nexus/engine/pipeline_repair.py`
+- `docs/plans/NEXUS_CLEAN_CODE_REFACTOR_TASK_PLAN_2026-05-20.md`
+
+Result:
+
+- audit verdict evaluation moved behind
+  `nexus.engine.repair.audit_evaluator.evaluate_audit_result`;
+- `PipelineRepairMixin._evaluate_audit_result` remains the compatibility facade;
+- phantom-success detector remains injected through the facade so existing
+  tests and patch seams continue to work;
+- repair loop execution and escalation behavior are unchanged.
+
+Verification:
+
+- `uv run python -m py_compile nexus/engine/pipeline_repair.py nexus/engine/repair/audit_evaluator.py nexus/engine/repair/__init__.py`
+- `uv run pytest tests/engine/test_pipeline_repair.py tests/test_iron_gate_closed_loop.py -q` -> `11 passed`
