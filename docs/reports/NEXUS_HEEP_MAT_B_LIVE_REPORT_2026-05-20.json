@@ -2,9 +2,9 @@
   "schema": "nexus.heep_mat_b_live_report.v1",
   "status": "PASS",
   "summary": {
-    "comparison_count": 15,
-    "approve_count": 7,
-    "keep_single_count": 8,
+    "comparison_count": 19,
+    "approve_count": 9,
+    "keep_single_count": 10,
     "reject_count": 0,
     "hold_count": 0,
     "runtime_update_allowed": false,
@@ -620,6 +620,170 @@
       "delta": {
         "token_delta": -3431,
         "wall_delta": -19.7923,
+        "success_rate_delta": 0.0,
+        "pollution_pct_delta": 0.0,
+        "evidence_seal_count_delta": 1,
+        "reopen_rate_delta": 0.0
+      },
+      "verdict": "APPROVE_HEEP_MODE_CANDIDATE",
+      "reason_codes": []
+    },
+    {
+      "capability": "mempalace",
+      "task_id": "heep-mat-b-mempalace-001",
+      "baseline_row_id": "heep::mempalace::heep-mat-b-mempalace-001::mode_a_current_primary",
+      "challenger_row_id": "heep::mempalace::heep-mat-b-mempalace-001::heep_multi_skill",
+      "baseline": {
+        "success_rate": 1.0,
+        "pollution_pct": 0.0,
+        "evidence_seal_count": 1,
+        "total_tokens": 64777,
+        "phase_wall_total_sec": 139.6623,
+        "reopen_rate": 0.0,
+        "reopen_rate_source": "deterministic_receipt_replay_proxy",
+        "trust_mismatch": false,
+        "skill_mount_contract_status": "PASS",
+        "receipt_chain_pass": true
+      },
+      "challenger": {
+        "success_rate": 1.0,
+        "pollution_pct": 0.0,
+        "evidence_seal_count": 2,
+        "total_tokens": 61427,
+        "phase_wall_total_sec": 104.4636,
+        "reopen_rate": 0.0,
+        "reopen_rate_source": "deterministic_receipt_replay_proxy",
+        "trust_mismatch": false,
+        "skill_mount_contract_status": "PASS",
+        "receipt_chain_pass": true
+      },
+      "delta": {
+        "token_delta": -3350,
+        "wall_delta": -35.1987,
+        "success_rate_delta": 0.0,
+        "pollution_pct_delta": 0.0,
+        "evidence_seal_count_delta": 1,
+        "reopen_rate_delta": 0.0
+      },
+      "verdict": "APPROVE_HEEP_MODE_CANDIDATE",
+      "reason_codes": []
+    },
+    {
+      "capability": "policy_capability_gate",
+      "task_id": "heep-mat-b-policy_capability_gate-001",
+      "baseline_row_id": "heep::policy_capability_gate::heep-mat-b-policy_capability_gate-001::mode_a_current_primary",
+      "challenger_row_id": "heep::policy_capability_gate::heep-mat-b-policy_capability_gate-001::heep_multi_skill",
+      "baseline": {
+        "success_rate": 1.0,
+        "pollution_pct": 0.0,
+        "evidence_seal_count": 1,
+        "total_tokens": 61041,
+        "phase_wall_total_sec": 113.1052,
+        "reopen_rate": 0.0,
+        "reopen_rate_source": "deterministic_receipt_replay_proxy",
+        "trust_mismatch": false,
+        "skill_mount_contract_status": "PASS",
+        "receipt_chain_pass": true
+      },
+      "challenger": {
+        "success_rate": 1.0,
+        "pollution_pct": 0.0,
+        "evidence_seal_count": 3,
+        "total_tokens": 658,
+        "phase_wall_total_sec": 147.9475,
+        "reopen_rate": 1.0,
+        "reopen_rate_source": "deterministic_receipt_replay_proxy",
+        "trust_mismatch": false,
+        "skill_mount_contract_status": "PASS",
+        "receipt_chain_pass": true
+      },
+      "delta": {
+        "token_delta": -60383,
+        "wall_delta": 34.8423,
+        "success_rate_delta": 0.0,
+        "pollution_pct_delta": 0.0,
+        "evidence_seal_count_delta": 2,
+        "reopen_rate_delta": 1.0
+      },
+      "verdict": "KEEP_SINGLE_PRIMARY",
+      "reason_codes": [
+        "efficiency_regressed"
+      ]
+    },
+    {
+      "capability": "registry_skills_sync",
+      "task_id": "heep-mat-b-registry_skills_sync-001",
+      "baseline_row_id": "heep::registry_skills_sync::heep-mat-b-registry_skills_sync-001::mode_a_current_primary",
+      "challenger_row_id": "heep::registry_skills_sync::heep-mat-b-registry_skills_sync-001::heep_multi_skill",
+      "baseline": {
+        "success_rate": 1.0,
+        "pollution_pct": 0.0,
+        "evidence_seal_count": 1,
+        "total_tokens": 61930,
+        "phase_wall_total_sec": 80.4624,
+        "reopen_rate": 0.0,
+        "reopen_rate_source": "deterministic_receipt_replay_proxy",
+        "trust_mismatch": false,
+        "skill_mount_contract_status": "PASS",
+        "receipt_chain_pass": true
+      },
+      "challenger": {
+        "success_rate": 1.0,
+        "pollution_pct": 0.0,
+        "evidence_seal_count": 2,
+        "total_tokens": 60586,
+        "phase_wall_total_sec": 110.0508,
+        "reopen_rate": 0.0,
+        "reopen_rate_source": "deterministic_receipt_replay_proxy",
+        "trust_mismatch": false,
+        "skill_mount_contract_status": "PASS",
+        "receipt_chain_pass": true
+      },
+      "delta": {
+        "token_delta": -1344,
+        "wall_delta": 29.5884,
+        "success_rate_delta": 0.0,
+        "pollution_pct_delta": 0.0,
+        "evidence_seal_count_delta": 1,
+        "reopen_rate_delta": 0.0
+      },
+      "verdict": "KEEP_SINGLE_PRIMARY",
+      "reason_codes": [
+        "efficiency_regressed"
+      ]
+    },
+    {
+      "capability": "regression_guard",
+      "task_id": "heep-mat-b-regression_guard-001",
+      "baseline_row_id": "heep::regression_guard::heep-mat-b-regression_guard-001::mode_a_current_primary",
+      "challenger_row_id": "heep::regression_guard::heep-mat-b-regression_guard-001::heep_multi_skill",
+      "baseline": {
+        "success_rate": 1.0,
+        "pollution_pct": 0.0,
+        "evidence_seal_count": 1,
+        "total_tokens": 63488,
+        "phase_wall_total_sec": 121.0627,
+        "reopen_rate": 0.0,
+        "reopen_rate_source": "deterministic_receipt_replay_proxy",
+        "trust_mismatch": false,
+        "skill_mount_contract_status": "PASS",
+        "receipt_chain_pass": true
+      },
+      "challenger": {
+        "success_rate": 1.0,
+        "pollution_pct": 0.0,
+        "evidence_seal_count": 2,
+        "total_tokens": 61300,
+        "phase_wall_total_sec": 80.7127,
+        "reopen_rate": 0.0,
+        "reopen_rate_source": "deterministic_receipt_replay_proxy",
+        "trust_mismatch": false,
+        "skill_mount_contract_status": "PASS",
+        "receipt_chain_pass": true
+      },
+      "delta": {
+        "token_delta": -2188,
+        "wall_delta": -40.35,
         "success_rate_delta": 0.0,
         "pollution_pct_delta": 0.0,
         "evidence_seal_count_delta": 1,

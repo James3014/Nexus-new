@@ -2756,3 +2756,10 @@ version_scope:
 - Failure: the plan required Regression evidence, while the report builder only read a missing raw field and had no deterministic replay fallback.
 - Lesson: hard KPI contracts must have a concrete data seam before live results can be used for candidate decisions.
 - Guardrail: prefer runner-native `reopen_rate`; otherwise use deterministic receipt replay only when delivery, rubric, data-contract, skill-mount, and receipt-chain inputs are all present, and keep missing inputs as `HOLD_MISSING_MAT_B_EVIDENCE`.
+
+## 2026-05-20 - HEEP live chunks need outer timeout above runner timeout
+
+- Trigger: a MAT-B live chunk used `--row-timeout-sec 120` while the row runner itself can legitimately run longer under Flash+Nexus live compare.
+- Failure: the outer matrix runner returned `runner_timeout` before any with-Nexus artifact was finalized, creating a false skill stop-loss for `mempalace`.
+- Lesson: live orchestration timeouts must be wider than the inner benchmark timeout and per-task stop-loss.
+- Guardrail: use 120 seconds only for preflight; use at least 900 seconds for live MAT-B chunks and rebuild summaries from existing artifacts after any orchestration timeout.
