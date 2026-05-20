@@ -104,7 +104,9 @@ Reviewed result: `docs/reports/NEXUS_HEEP_RUNTIME_CURATION_STATUS_2026-05-20.jso
 
 Apply result: `docs/reports/NEXUS_HEEP_RUNTIME_DEFAULT_APPLY_DECISION_2026-05-20.json` and `docs/reports/NEXUS_HEEP_RUNTIME_SKILL_POLICY_OVERLAY_APPLIED_2026-05-20.json` apply the 9 reviewed assemblies to a runtime overlay artifact. The planner now supports `skill_assembly_by_capability`, so a selected capability can request multiple reviewed skills.
 
-This still does not unlock public benchmark. Runtime routes must still emit final receipts for selected / injected / used / evidence / gate / outcome.
+Post-apply smoke: `docs/reports/NEXUS_HEEP_RUNTIME_POST_APPLY_SMOKE_2026-05-20.json` verifies 9/9 applied assemblies with selected / injected / used / evidence / gate / outcome receipts.
+
+This still does not unlock public benchmark.
 
 ---
 *Created by Antigravity - Nexus Singularity V17*

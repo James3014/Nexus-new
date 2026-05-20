@@ -1,0 +1,318 @@
+{
+  "schema": "nexus.heep_runtime_post_apply_smoke.v1",
+  "status": "PASS",
+  "created_at": "2026-05-20T08:52:41.545220+00:00",
+  "summary": {
+    "case_count": 9,
+    "pass_count": 9,
+    "return_count": 0,
+    "runtime_update_allowed": true,
+    "public_benchmark_allowed": false
+  },
+  "blockers": [],
+  "cases": [
+    {
+      "capability": "autonomic_router",
+      "expected_skill_ids": [
+        "sf2-autonomic_router-route-fit-spec",
+        "sf-systematic-artifact_gate-differential-review-461fbd0c"
+      ],
+      "requested_skill_ids": [
+        "sf2-autonomic_router-route-fit-spec",
+        "sf-systematic-artifact_gate-differential-review-461fbd0c"
+      ],
+      "runtime_final_receipt_chain_by_skill": {
+        "sf2-autonomic_router-route-fit-spec": {
+          "selected": true,
+          "injected": true,
+          "used": true,
+          "evidence_present": true,
+          "gate_passed": true,
+          "outcome_contributed": true
+        },
+        "sf-systematic-artifact_gate-differential-review-461fbd0c": {
+          "selected": true,
+          "injected": true,
+          "used": true,
+          "evidence_present": true,
+          "gate_passed": true,
+          "outcome_contributed": true
+        }
+      },
+      "blocking_skill_mount_violations": [],
+      "status": "PASS"
+    },
+    {
+      "capability": "belief",
+      "expected_skill_ids": [
+        "sf2-belief-route-fit-spec",
+        "sf-systematic-artifact_gate-differential-review-461fbd0c"
+      ],
+      "requested_skill_ids": [
+        "sf2-belief-route-fit-spec",
+        "sf-systematic-artifact_gate-differential-review-461fbd0c"
+      ],
+      "runtime_final_receipt_chain_by_skill": {
+        "sf2-belief-route-fit-spec": {
+          "selected": true,
+          "injected": true,
+          "used": true,
+          "evidence_present": true,
+          "gate_passed": true,
+          "outcome_contributed": true
+        },
+        "sf-systematic-artifact_gate-differential-review-461fbd0c": {
+          "selected": true,
+          "injected": true,
+          "used": true,
+          "evidence_present": true,
+          "gate_passed": true,
+          "outcome_contributed": true
+        }
+      },
+      "blocking_skill_mount_violations": [],
+      "status": "PASS"
+    },
+    {
+      "capability": "codeintel",
+      "expected_skill_ids": [
+        "sf-systematic-codeintel-first-principles-thinking-f95019ea",
+        "sf2-autonomic_router-route-fit-spec",
+        "sf-systematic-artifact_gate-differential-review-461fbd0c"
+      ],
+      "requested_skill_ids": [
+        "sf-systematic-codeintel-first-principles-thinking-f95019ea",
+        "sf2-autonomic_router-route-fit-spec",
+        "sf-systematic-artifact_gate-differential-review-461fbd0c"
+      ],
+      "runtime_final_receipt_chain_by_skill": {
+        "sf-systematic-codeintel-first-principles-thinking-f95019ea": {
+          "selected": true,
+          "injected": true,
+          "used": true,
+          "evidence_present": true,
+          "gate_passed": true,
+          "outcome_contributed": true
+        },
+        "sf2-autonomic_router-route-fit-spec": {
+          "selected": true,
+          "injected": true,
+          "used": true,
+          "evidence_present": true,
+          "gate_passed": true,
+          "outcome_contributed": true
+        },
+        "sf-systematic-artifact_gate-differential-review-461fbd0c": {
+          "selected": true,
+          "injected": true,
+          "used": true,
+          "evidence_present": true,
+          "gate_passed": true,
+          "outcome_contributed": true
+        }
+      },
+      "blocking_skill_mount_violations": [],
+      "status": "PASS"
+    },
+    {
+      "capability": "ddtree",
+      "expected_skill_ids": [
+        "nexus-root-cause-probe",
+        "sf-systematic-artifact_gate-differential-review-461fbd0c"
+      ],
+      "requested_skill_ids": [
+        "nexus-root-cause-probe",
+        "sf-systematic-artifact_gate-differential-review-461fbd0c"
+      ],
+      "runtime_final_receipt_chain_by_skill": {
+        "nexus-root-cause-probe": {
+          "selected": true,
+          "injected": true,
+          "used": true,
+          "evidence_present": true,
+          "gate_passed": true,
+          "outcome_contributed": true
+        },
+        "sf-systematic-artifact_gate-differential-review-461fbd0c": {
+          "selected": true,
+          "injected": true,
+          "used": true,
+          "evidence_present": true,
+          "gate_passed": true,
+          "outcome_contributed": true
+        }
+      },
+      "blocking_skill_mount_violations": [],
+      "status": "PASS"
+    },
+    {
+      "capability": "governance_and_trust",
+      "expected_skill_ids": [
+        "sf-systematic-codeintel-first-principles-thinking-f95019ea",
+        "sf2-autonomic_router-route-fit-spec",
+        "sf-systematic-governance_and_trust-aegisops-ai-0aa841e2"
+      ],
+      "requested_skill_ids": [
+        "sf-systematic-codeintel-first-principles-thinking-f95019ea",
+        "sf2-autonomic_router-route-fit-spec",
+        "sf-systematic-governance_and_trust-aegisops-ai-0aa841e2"
+      ],
+      "runtime_final_receipt_chain_by_skill": {
+        "sf-systematic-codeintel-first-principles-thinking-f95019ea": {
+          "selected": true,
+          "injected": true,
+          "used": true,
+          "evidence_present": true,
+          "gate_passed": true,
+          "outcome_contributed": true
+        },
+        "sf2-autonomic_router-route-fit-spec": {
+          "selected": true,
+          "injected": true,
+          "used": true,
+          "evidence_present": true,
+          "gate_passed": true,
+          "outcome_contributed": true
+        },
+        "sf-systematic-governance_and_trust-aegisops-ai-0aa841e2": {
+          "selected": true,
+          "injected": true,
+          "used": true,
+          "evidence_present": true,
+          "gate_passed": true,
+          "outcome_contributed": true
+        }
+      },
+      "blocking_skill_mount_violations": [],
+      "status": "PASS"
+    },
+    {
+      "capability": "lancedb",
+      "expected_skill_ids": [
+        "research-source-validation-auditor",
+        "sf-systematic-artifact_gate-differential-review-461fbd0c"
+      ],
+      "requested_skill_ids": [
+        "research-source-validation-auditor",
+        "sf-systematic-artifact_gate-differential-review-461fbd0c"
+      ],
+      "runtime_final_receipt_chain_by_skill": {
+        "research-source-validation-auditor": {
+          "selected": true,
+          "injected": true,
+          "used": true,
+          "evidence_present": true,
+          "gate_passed": true,
+          "outcome_contributed": true
+        },
+        "sf-systematic-artifact_gate-differential-review-461fbd0c": {
+          "selected": true,
+          "injected": true,
+          "used": true,
+          "evidence_present": true,
+          "gate_passed": true,
+          "outcome_contributed": true
+        }
+      },
+      "blocking_skill_mount_violations": [],
+      "status": "PASS"
+    },
+    {
+      "capability": "memory",
+      "expected_skill_ids": [
+        "sf-systematic-memory-project-skill-audit-cc8b7621",
+        "sf-systematic-artifact_gate-differential-review-461fbd0c"
+      ],
+      "requested_skill_ids": [
+        "sf-systematic-memory-project-skill-audit-cc8b7621",
+        "sf-systematic-artifact_gate-differential-review-461fbd0c"
+      ],
+      "runtime_final_receipt_chain_by_skill": {
+        "sf-systematic-memory-project-skill-audit-cc8b7621": {
+          "selected": true,
+          "injected": true,
+          "used": true,
+          "evidence_present": true,
+          "gate_passed": true,
+          "outcome_contributed": true
+        },
+        "sf-systematic-artifact_gate-differential-review-461fbd0c": {
+          "selected": true,
+          "injected": true,
+          "used": true,
+          "evidence_present": true,
+          "gate_passed": true,
+          "outcome_contributed": true
+        }
+      },
+      "blocking_skill_mount_violations": [],
+      "status": "PASS"
+    },
+    {
+      "capability": "mempalace",
+      "expected_skill_ids": [
+        "sf2-mempalace-route-fit-spec",
+        "sf-systematic-artifact_gate-differential-review-461fbd0c"
+      ],
+      "requested_skill_ids": [
+        "sf2-mempalace-route-fit-spec",
+        "sf-systematic-artifact_gate-differential-review-461fbd0c"
+      ],
+      "runtime_final_receipt_chain_by_skill": {
+        "sf2-mempalace-route-fit-spec": {
+          "selected": true,
+          "injected": true,
+          "used": true,
+          "evidence_present": true,
+          "gate_passed": true,
+          "outcome_contributed": true
+        },
+        "sf-systematic-artifact_gate-differential-review-461fbd0c": {
+          "selected": true,
+          "injected": true,
+          "used": true,
+          "evidence_present": true,
+          "gate_passed": true,
+          "outcome_contributed": true
+        }
+      },
+      "blocking_skill_mount_violations": [],
+      "status": "PASS"
+    },
+    {
+      "capability": "regression_guard",
+      "expected_skill_ids": [
+        "sf-systematic-regression_guard-odoo-automated-tests-dad98433",
+        "sf-systematic-artifact_gate-differential-review-461fbd0c"
+      ],
+      "requested_skill_ids": [
+        "sf-systematic-regression_guard-odoo-automated-tests-dad98433",
+        "sf-systematic-artifact_gate-differential-review-461fbd0c"
+      ],
+      "runtime_final_receipt_chain_by_skill": {
+        "sf-systematic-regression_guard-odoo-automated-tests-dad98433": {
+          "selected": true,
+          "injected": true,
+          "used": true,
+          "evidence_present": true,
+          "gate_passed": true,
+          "outcome_contributed": true
+        },
+        "sf-systematic-artifact_gate-differential-review-461fbd0c": {
+          "selected": true,
+          "injected": true,
+          "used": true,
+          "evidence_present": true,
+          "gate_passed": true,
+          "outcome_contributed": true
+        }
+      },
+      "blocking_skill_mount_violations": [],
+      "status": "PASS"
+    }
+  ],
+  "claim_boundary": [
+    "Post-apply smoke validates HEEP overlay routing and runtime receipt construction.",
+    "It is not a public benchmark."
+  ]
+}
