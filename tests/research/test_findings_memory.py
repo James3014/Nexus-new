@@ -45,6 +45,38 @@ def test_memory_store_write_and_read(memory_store):
     assert loaded.title == "Hyperparameter Rule"
     assert loaded.body == "LR should be < 0.01 for this dataset."
 
+
+def test_memory_store_keeps_json_when_vector_sync_fails(temp_project_root):
+    class FailingVectorSync:
+        def sync(self, payload):
+            raise RuntimeError("vector unavailable")
+
+    store = FindingsMemoryStore(temp_project_root, vector_sync=FailingVectorSync())
+    card = FindingsCard(id="syncfail", title="Persistent Finding", kind="knowledge")
+
+    path = Path(store.write(card))
+
+    assert path.exists()
+    payload = json.loads(path.read_text(encoding="utf-8"))
+    assert payload["title"] == "Persistent Finding"
+    assert payload["extra"]["lancedb_synced"] is False
+    assert card.extra["lancedb_synced"] is False
+
+
+def test_memory_store_records_vector_sync_success(temp_project_root):
+    class SuccessfulVectorSync:
+        def sync(self, payload):
+            return True
+
+    store = FindingsMemoryStore(temp_project_root, vector_sync=SuccessfulVectorSync())
+    card = FindingsCard(id="synced", title="Indexed Finding", kind="knowledge")
+
+    path = Path(store.write(card))
+    payload = json.loads(path.read_text(encoding="utf-8"))
+
+    assert payload["extra"]["lancedb_synced"] is True
+    assert card.extra["lancedb_synced"] is True
+
 def test_memory_list_recent(memory_store):
     """驗證最近記憶列表功能。"""
     for i in range(5):

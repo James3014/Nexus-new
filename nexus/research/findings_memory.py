@@ -3,8 +3,13 @@ from typing import List, Dict, Any, Optional
 from datetime import datetime
 from pathlib import Path
 import json
-import os
 import uuid
+
+from nexus.research.findings_store import FindingsFileStore
+from nexus.research.findings_vector_sync import (
+    FindingsVectorSync,
+    MemoryRepositoryFindingsVectorSync,
+)
 
 @dataclass
 class FindingsCard:
@@ -70,37 +75,34 @@ class FindingsMemoryStore:
     🏗️ 記憶儲存引擎
     職責: 管理 .nexus/memory/ 下的結構化記憶分佈。
     """
-    def __init__(self, project_root: Path):
+    def __init__(
+        self,
+        project_root: Path,
+        file_store: FindingsFileStore | None = None,
+        vector_sync: FindingsVectorSync | None = None,
+    ):
         self.project_root = project_root
         self.base_path = project_root / ".nexus" / "memory"
+        self.file_store = file_store or FindingsFileStore(self.base_path)
+        self.vector_sync = vector_sync or MemoryRepositoryFindingsVectorSync(project_root)
         self._ensure_dirs()
 
     def _ensure_dirs(self):
-        for scope in ["task", "global"]:
-            for kind in ["papers", "knowledge", "episodes", "decisions", "ideas"]:
-                (self.base_path / scope / kind).mkdir(parents=True, exist_ok=True)
+        self.file_store.ensure_dirs()
 
     def _get_card_path(self, card: FindingsCard) -> Path:
         """
         🛡️ 硬化路徑: 加入 task_id 避免併發覆蓋。
         """
-        safe_task_id = "".join(ch if ch.isalnum() or ch in ("-", "_") else "_" for ch in (card.task_id or ""))
-        filename = f"{safe_task_id}_{card.id}.json" if safe_task_id else f"{card.id}.json"
-        return self.base_path / card.scope / card.kind / filename
+        return self.file_store.card_path(
+            scope=card.scope,
+            kind=card.kind,
+            card_id=card.id,
+            task_id=card.task_id or "",
+        )
 
     def _atomic_write_json(self, path: Path, payload: Dict[str, Any]) -> None:
-        path.parent.mkdir(parents=True, exist_ok=True)
-        tmp_path = path.with_suffix(path.suffix + ".tmp")
-        with open(tmp_path, "w", encoding="utf-8") as f:
-            json.dump(payload, f, indent=4, ensure_ascii=False)
-            f.flush()
-            os.fsync(f.fileno())
-        os.replace(tmp_path, path)
-        dir_fd = os.open(str(path.parent), os.O_RDONLY)
-        try:
-            os.fsync(dir_fd)
-        finally:
-            os.close(dir_fd)
+        self.file_store.write_json(path, payload)
 
     @classmethod
     def from_lesson_event(cls, event: Any) -> "FindingsCard":
@@ -128,28 +130,15 @@ class FindingsMemoryStore:
         payload = card.to_dict()
         self._atomic_write_json(path, payload)
 
-        # 🚀 [v24.0 Evolution] Trigger Vector Indexing if repository is available
         lancedb_synced = False
-        sync_enabled = os.environ.get("NEXUS_FINDINGS_LANCEDB_SYNC", "1").strip().lower() not in {
-            "0",
-            "false",
-            "no",
-            "off",
-        }
-        if sync_enabled:
-            try:
-                from nexus.services.memory_repository import MemoryRepository
-                db_path = os.environ.get("NEXUS_MEMORY_DB_PATH")
-                repo = MemoryRepository(Path(db_path) if db_path else self.project_root / ".nexus" / "memory" / "memory_index.lancedb")
-                repo.semantic_dedup_ingest("findings_cards", payload)
-                lancedb_synced = True
-            except Exception:
-                pass
+        try:
+            lancedb_synced = bool(self.vector_sync.sync(payload))
+        except Exception:
+            lancedb_synced = False
         
         card.extra["lancedb_synced"] = lancedb_synced
         payload["extra"]["lancedb_synced"] = lancedb_synced
-        self._atomic_write_json(path, payload) # re-write with sync status if needed that's fine, but at least card object has it
-
+        self._atomic_write_json(path, payload)
 
         return str(path)
 

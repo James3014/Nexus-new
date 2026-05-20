@@ -410,3 +410,42 @@ Failure lesson:
 Next:
 
 - start `CBO-2 Findings Memory Persistence / Vector Sync Split` after CBO-1 commit.
+
+## 12. CBO-2 Result
+
+Status: `DONE`
+
+Changed surface:
+
+- `nexus/research/findings_store.py`;
+- `nexus/research/findings_vector_sync.py`;
+- `nexus/research/findings_memory.py`;
+- `tests/research/test_findings_memory.py`.
+
+Result:
+
+- findings-card JSON persistence is isolated in `FindingsFileStore`;
+- optional LanceDB/vector indexing is isolated behind `FindingsVectorSync`;
+- `FindingsMemoryStore` remains the compatibility facade for existing call
+  sites;
+- vector sync failure now leaves the JSON card persisted with
+  `lancedb_synced=false` instead of coupling persistence correctness to LanceDB
+  availability.
+
+Verification:
+
+- `uv run python -m py_compile nexus/research/findings_memory.py nexus/research/findings_store.py nexus/research/findings_vector_sync.py tests/research/test_findings_memory.py` -> `PASS`;
+- `uv run pytest tests/research/test_findings_memory.py -q` -> `7 passed`;
+- `uv run pytest tests/app/test_research_flow_service.py tests/research/test_findings_memory.py -q` -> `107 passed`;
+- `git diff --check -- nexus/research/findings_memory.py nexus/research/findings_store.py nexus/research/findings_vector_sync.py tests/research/test_findings_memory.py` -> `PASS`.
+
+Failure lesson:
+
+- No new CBO-2 failure occurred. The LanceDB dependency is now an adapter
+  concern; future findings-card tests should inject a fake vector sync instead
+  of requiring a live LanceDB path unless the test explicitly targets vector
+  indexing.
+
+Next:
+
+- start `CBO-4 History Signal Store and Rollup Contract`.
