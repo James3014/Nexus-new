@@ -36,6 +36,7 @@ def test_doc_scout_adapter_returns_hits_for_matching_docs(tmp_path: Path):
     out = DocScoutAdapter(tmp_path).search("fix websocket timeout race", limit=5)
     assert out["status"] == "SUCCESS"
     assert out["hits_count"] >= 1
+    assert out["retrieval_query_receipt"]["status"] == "PASS"
     assert out["confidence"] > 0
     assert any("websocket" in str(item.get("snippet", "")).lower() for item in out["hits"])
 
@@ -43,6 +44,8 @@ def test_doc_scout_adapter_returns_hits_for_matching_docs(tmp_path: Path):
 def test_doc_scout_adapter_handles_empty_query(tmp_path: Path):
     out = DocScoutAdapter(tmp_path).search("", limit=3)
     assert out["status"] == "EMPTY_QUERY"
+    assert out["retrieval_query_receipt"]["status"] == "RETURN"
+    assert out["retrieval_query_receipt"]["unsafe_flags"] == ["empty_query"]
     assert out["hits_count"] == 0
     assert out["external_metadata"]["source_count"] == 0
     assert out["external_metadata"]["error_count"] == 0
@@ -152,6 +155,14 @@ def test_doc_scout_default_fetched_provider_blocks_private_targets(tmp_path: Pat
     assert enabled["hits"] == []
     assert enabled["external_metadata"]["verified_source_count"] == 0
     assert enabled["external_metadata"]["source_count"] == 0
+
+
+def test_doc_scout_adapter_returns_for_control_char_query(tmp_path: Path):
+    out = DocScoutAdapter(tmp_path).search("websocket\x00timeout", limit=3)
+
+    assert out["status"] == "QUERY_RETURN"
+    assert out["hits_count"] == 0
+    assert out["retrieval_query_receipt"]["unsafe_flags"] == ["control_chars"]
 
 
 def test_doc_scout_external_provider_failure_is_measured_not_silent(tmp_path: Path):

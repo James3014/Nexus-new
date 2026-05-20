@@ -9,6 +9,7 @@ from typing import Any, Protocol
 import re
 import time
 
+from nexus.contracts.retrieval_query import build_retrieval_query
 from nexus.infrastructure.guarded_fetch import GuardedFetcher
 
 
@@ -152,9 +153,19 @@ class DocScoutAdapter:
         self.cache_ttl_sec = max(0, int(cache_ttl_sec or 0))
 
     def search(self, query: str, *, limit: int = 8, include_external: bool = False) -> dict[str, Any]:
+        retrieval_query = build_retrieval_query(query, source_scope="doc_scout")
+        receipt = retrieval_query.receipt()
+        if receipt["unsafe_flags"] == ["empty_query"]:
+            return self._empty(query, retrieval_query_receipt=receipt)
+        if not retrieval_query.allowed:
+            out = self._empty(query, retrieval_query_receipt=receipt)
+            out["status"] = "QUERY_RETURN"
+            return out
+
+        query = retrieval_query.normalized_text
         tokens = self._tokens(query)
         if not tokens:
-            return self._empty(query)
+            return self._empty(query, retrieval_query_receipt=receipt)
 
         hits: list[DocScoutHit] = []
         external_hits: list[DocScoutHit] = []
@@ -216,6 +227,7 @@ class DocScoutAdapter:
         return {
             "query": query,
             "status": "SUCCESS",
+            "retrieval_query_receipt": receipt,
             "external_enabled": external_enabled,
             "external_metadata": external_meta,
             "hits_count": len(ranked),
@@ -391,10 +403,11 @@ class DocScoutAdapter:
             out.append(token)
         return out[:12]
 
-    def _empty(self, query: str) -> dict[str, Any]:
+    def _empty(self, query: str, *, retrieval_query_receipt: dict[str, Any] | None = None) -> dict[str, Any]:
         return {
             "query": query,
             "status": "EMPTY_QUERY",
+            "retrieval_query_receipt": retrieval_query_receipt or build_retrieval_query(query).receipt(),
             "external_enabled": False,
             "external_metadata": {
                 "providers_configured": [],

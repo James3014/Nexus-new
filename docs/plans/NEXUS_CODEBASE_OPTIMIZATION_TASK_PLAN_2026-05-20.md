@@ -522,3 +522,40 @@ Failure lesson:
 Next:
 
 - start `CBO-6 Retrieval Query Contract`.
+
+## 15. CBO-6 Result
+
+Status: `DONE`
+
+Changed surface:
+
+- `nexus/contracts/retrieval_query.py`;
+- `nexus/research/doc_scout_adapter.py`;
+- `tests/contracts/test_retrieval_query.py`;
+- `tests/research/test_doc_scout_adapter.py`.
+
+Result:
+
+- retrieval query shape is now represented by `RetrievalQuery`;
+- query receipts record raw length, normalized length, source scope, max
+  character budget, unsafe flags, and claim boundary;
+- `DocScoutAdapter.search` consumes the contract before local scan or external
+  provider calls;
+- empty queries keep the existing `EMPTY_QUERY` behavior while control-character
+  queries return `QUERY_RETURN` without scanning or fetching.
+
+Verification:
+
+- `uv run python -m py_compile nexus/contracts/retrieval_query.py nexus/research/doc_scout_adapter.py tests/contracts/test_retrieval_query.py tests/research/test_doc_scout_adapter.py` -> `PASS`;
+- `uv run pytest tests/contracts/test_retrieval_query.py tests/research/test_doc_scout_adapter.py -q` -> `12 passed`;
+- `git diff --check -- nexus/contracts/retrieval_query.py nexus/research/doc_scout_adapter.py tests/contracts/test_retrieval_query.py tests/research/test_doc_scout_adapter.py` -> `PASS`.
+
+Failure lesson:
+
+- No new CBO-6 failure occurred. Retrieval query receipts must stay scoped to
+  query-shape safety only; they cannot be reused as source relevance,
+  source-verification, or public-readiness evidence.
+
+Next:
+
+- start `CBO-3 Scoped LanceDB Repository Lifecycle`.
