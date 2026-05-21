@@ -1,0 +1,149 @@
+{
+  "schema": "nexus.sf_final_live_compare_report.v1",
+  "status": "PASS",
+  "summary": {
+    "comparison_count": 3,
+    "replace_live_approved_count": 0,
+    "keep_current_count": 3,
+    "hold_count": 0,
+    "runtime_update_allowed": false,
+    "public_benchmark_allowed": false
+  },
+  "blockers": [],
+  "comparisons": [
+    {
+      "capability": "artifact_gate",
+      "task_id": "sf-final-live-compare-artifact_gate-001",
+      "current_row_id": "artifact_gate::sf-final-live-compare-artifact_gate-001::current_primary_skill::sf-systematic-artifact_gate-differential-review-461fbd0c",
+      "candidate_row_id": "artifact_gate::sf-final-live-compare-artifact_gate-001::candidate_skill::acceptance-evidence-failclosed",
+      "current_skill_id": "sf-systematic-artifact_gate-differential-review-461fbd0c",
+      "candidate_skill_id": "acceptance-evidence-failclosed",
+      "current": {
+        "status": "PASS",
+        "delivery_status": "SUCCESS",
+        "success_rate": 1.0,
+        "total_tokens": 62563,
+        "phase_wall_total_sec": 48.7753,
+        "trust_mismatch": false,
+        "receipt_chain_pass": true,
+        "skill_mount_contract_status": "PASS",
+        "infra_invalid_reason": "",
+        "evidence_path": ".nexus/reports/sf_final_live_compare_v2_2026-05-21/artifact_gate_sf-final-live-compare-artifact_gate-001_current_primary_skill_sf-systematic-artifact_gate-differential-review-461fbd0c/evidence_bundle.json",
+        "receipt_path": ".nexus/reports/sf_final_live_compare_v2_2026-05-21/artifact_gate_sf-final-live-compare-artifact_gate-001_current_primary_skill_sf-systematic-artifact_gate-differential-review-461fbd0c"
+      },
+      "candidate": {
+        "status": "PASS",
+        "delivery_status": "SUCCESS",
+        "success_rate": 1.0,
+        "total_tokens": 37175,
+        "phase_wall_total_sec": 56.8342,
+        "trust_mismatch": false,
+        "receipt_chain_pass": true,
+        "skill_mount_contract_status": "PASS",
+        "infra_invalid_reason": "",
+        "evidence_path": ".nexus/reports/sf_final_live_compare_v2_2026-05-21/artifact_gate_sf-final-live-compare-artifact_gate-001_candidate_skill_acceptance-evidence-failclosed/evidence_bundle.json",
+        "receipt_path": ".nexus/reports/sf_final_live_compare_v2_2026-05-21/artifact_gate_sf-final-live-compare-artifact_gate-001_candidate_skill_acceptance-evidence-failclosed"
+      },
+      "delta": {
+        "token_delta": -25388,
+        "wall_delta": 8.0589,
+        "success_rate_delta": 0.0
+      },
+      "verdict": "KEEP_CURRENT_PRIMARY",
+      "reason_codes": [
+        "candidate_efficiency_regressed"
+      ]
+    },
+    {
+      "capability": "benchmark_meta_opt",
+      "task_id": "sf-final-live-compare-benchmark_meta_opt-001",
+      "current_row_id": "benchmark_meta_opt::sf-final-live-compare-benchmark_meta_opt-001::current_primary_skill::sf-systematic-benchmark_meta_opt-hugging-face-trackio-d21c6b90",
+      "candidate_row_id": "benchmark_meta_opt::sf-final-live-compare-benchmark_meta_opt-001::candidate_skill::evaluating-llms-harness",
+      "current_skill_id": "sf-systematic-benchmark_meta_opt-hugging-face-trackio-d21c6b90",
+      "candidate_skill_id": "evaluating-llms-harness",
+      "current": {
+        "status": "PASS",
+        "delivery_status": "SUCCESS",
+        "success_rate": 1.0,
+        "total_tokens": 31189,
+        "phase_wall_total_sec": 94.3466,
+        "trust_mismatch": false,
+        "receipt_chain_pass": true,
+        "skill_mount_contract_status": "PASS",
+        "infra_invalid_reason": "",
+        "evidence_path": ".nexus/reports/sf_final_live_compare_v2_2026-05-21/benchmark_meta_opt_sf-final-live-compare-benchmark_meta_opt-001_current_primary_skill_sf-systematic-benchmark_meta_opt-hugging-face-trackio-d21c6b90/evidence_bundle.json",
+        "receipt_path": ".nexus/reports/sf_final_live_compare_v2_2026-05-21/benchmark_meta_opt_sf-final-live-compare-benchmark_meta_opt-001_current_primary_skill_sf-systematic-benchmark_meta_opt-hugging-face-trackio-d21c6b90"
+      },
+      "candidate": {
+        "status": "PASS",
+        "delivery_status": "SUCCESS",
+        "success_rate": 1.0,
+        "total_tokens": 34612,
+        "phase_wall_total_sec": 96.1727,
+        "trust_mismatch": false,
+        "receipt_chain_pass": true,
+        "skill_mount_contract_status": "PASS",
+        "infra_invalid_reason": "",
+        "evidence_path": ".nexus/reports/sf_final_live_compare_v2_2026-05-21/benchmark_meta_opt_sf-final-live-compare-benchmark_meta_opt-001_candidate_skill_evaluating-llms-harness/evidence_bundle.json",
+        "receipt_path": ".nexus/reports/sf_final_live_compare_v2_2026-05-21/benchmark_meta_opt_sf-final-live-compare-benchmark_meta_opt-001_candidate_skill_evaluating-llms-harness"
+      },
+      "delta": {
+        "token_delta": 3423,
+        "wall_delta": 1.8261,
+        "success_rate_delta": 0.0
+      },
+      "verdict": "KEEP_CURRENT_PRIMARY",
+      "reason_codes": [
+        "candidate_efficiency_regressed"
+      ]
+    },
+    {
+      "capability": "repair_loop",
+      "task_id": "sf-final-live-compare-repair_loop-001",
+      "current_row_id": "repair_loop::sf-final-live-compare-repair_loop-001::current_primary_skill::sf-systematic-repair_loop-odoo-automated-tests-dad98433",
+      "candidate_row_id": "repair_loop::sf-final-live-compare-repair_loop-001::candidate_skill::systematic-debugging",
+      "current_skill_id": "sf-systematic-repair_loop-odoo-automated-tests-dad98433",
+      "candidate_skill_id": "systematic-debugging",
+      "current": {
+        "status": "PASS",
+        "delivery_status": "SUCCESS",
+        "success_rate": 1.0,
+        "total_tokens": 30301,
+        "phase_wall_total_sec": 63.7659,
+        "trust_mismatch": false,
+        "receipt_chain_pass": true,
+        "skill_mount_contract_status": "PASS",
+        "infra_invalid_reason": "",
+        "evidence_path": ".nexus/reports/sf_final_live_compare_v2_2026-05-21/repair_loop_sf-final-live-compare-repair_loop-001_current_primary_skill_sf-systematic-repair_loop-odoo-automated-tests-dad98433/evidence_bundle.json",
+        "receipt_path": ".nexus/reports/sf_final_live_compare_v2_2026-05-21/repair_loop_sf-final-live-compare-repair_loop-001_current_primary_skill_sf-systematic-repair_loop-odoo-automated-tests-dad98433"
+      },
+      "candidate": {
+        "status": "PASS",
+        "delivery_status": "SUCCESS",
+        "success_rate": 1.0,
+        "total_tokens": 30757,
+        "phase_wall_total_sec": 71.9739,
+        "trust_mismatch": false,
+        "receipt_chain_pass": true,
+        "skill_mount_contract_status": "PASS",
+        "infra_invalid_reason": "",
+        "evidence_path": ".nexus/reports/sf_final_live_compare_v2_2026-05-21/repair_loop_sf-final-live-compare-repair_loop-001_candidate_skill_systematic-debugging/evidence_bundle.json",
+        "receipt_path": ".nexus/reports/sf_final_live_compare_v2_2026-05-21/repair_loop_sf-final-live-compare-repair_loop-001_candidate_skill_systematic-debugging"
+      },
+      "delta": {
+        "token_delta": 456,
+        "wall_delta": 8.208,
+        "success_rate_delta": 0.0
+      },
+      "verdict": "KEEP_CURRENT_PRIMARY",
+      "reason_codes": [
+        "candidate_efficiency_regressed"
+      ]
+    }
+  ],
+  "claim_boundary": [
+    "This is internal Flash+Nexus live skill-pair evidence only.",
+    "Replacement is catalog-map eligible only when verdict is REPLACE_PRIMARY_LIVE_APPROVED.",
+    "Runtime default and public benchmark remain separate gates."
+  ]
+}

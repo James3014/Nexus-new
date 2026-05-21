@@ -2861,3 +2861,10 @@ version_scope:
 - Failure: a generic high-quality skill can outscore a route-specific primary unless the comparator requires capability term coverage to be at least as strong as the current primary.
 - Lesson: local skill replacement evidence must prove both quality and capability fit.
 - Guardrail: require score margin, no penalties, and candidate capability term hits greater than or equal to current primary before emitting `REPLACE_PRIMARY_LOCAL_CANDIDATE`.
+
+## 2026-05-21 - SF-FINAL live replacement must repair receipt seams before judging winners
+
+- Trigger: the first SF-FINAL live compare mapped `benchmark_meta_opt` to `judge_panel`, but the neutral live fixture did not create multi-candidate judge receipts.
+- Failure: delivery and token telemetry were present, yet the row correctly returned on `receipt_data_contract_violation` because the expected `judge_panel` receipt was missing.
+- Lesson: a skill replacement live test must validate the actually executed Flash+Nexus receipt seam; an unsupported expected capability alias turns a skill comparison into a harness mismatch.
+- Guardrail: keep the first run fail-closed, repair the final-live matrix to use the executed route seam for that capability, rerun preflight/live, and only allow replacement when delivery, receipt chain, trust, token, and wall gates all pass.

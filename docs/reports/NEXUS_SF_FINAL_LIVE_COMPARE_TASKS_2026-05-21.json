@@ -1,0 +1,106 @@
+{
+  "schema": "nexus.sf_final_live_compare_task_manifest.v1",
+  "version": "2026-05-21",
+  "frozen": true,
+  "benchmark_id": "nexus-sf-final-live-compare-v1",
+  "description": "Internal live Flash+Nexus current-primary vs candidate skill comparison. Not a public benchmark.",
+  "status": "PASS",
+  "summary": {
+    "task_count": 3,
+    "capability_count": 3,
+    "runtime_update_allowed": false,
+    "public_benchmark_allowed": false
+  },
+  "tasks": [
+    {
+      "id": "sf-final-live-compare-artifact_gate-001",
+      "task_desc": "Use Flash+Nexus to compare current primary skill sf-systematic-artifact_gate-differential-review-461fbd0c against local replacement candidate acceptance-evidence-failclosed for capability artifact_gate.",
+      "target_file": "unused",
+      "test_file": "unused",
+      "success_criteria": "current_vs_candidate_skill_receipt_trust_token_wall_gate",
+      "category": "artifact_gate",
+      "difficulty": "medium",
+      "repo_kind": "neutral_fixture",
+      "repo": "fixture://sf-final-live-compare",
+      "repo_ref": "v1",
+      "fixture_kind": "sf_final_live_compare",
+      "mutation_required": false,
+      "allowed_files": [
+        "unused"
+      ],
+      "forbidden_files": [
+        ".nexus/",
+        "logs/",
+        "benchmarks/"
+      ],
+      "setup_command": "python -V",
+      "verification_command": "python -V",
+      "expected_capabilities": [
+        "artifact_gate"
+      ],
+      "capability_activation_contract": "required",
+      "eligibility_class": "model_required",
+      "public_claim_allowed_metrics": []
+    },
+    {
+      "id": "sf-final-live-compare-benchmark_meta_opt-001",
+      "task_desc": "Use Flash+Nexus to compare current primary skill sf-systematic-benchmark_meta_opt-hugging-face-trackio-d21c6b90 against local replacement candidate evaluating-llms-harness for capability benchmark_meta_opt.",
+      "target_file": "unused",
+      "test_file": "unused",
+      "success_criteria": "current_vs_candidate_skill_receipt_trust_token_wall_gate",
+      "category": "benchmark_meta_opt",
+      "difficulty": "medium",
+      "repo_kind": "neutral_fixture",
+      "repo": "fixture://sf-final-live-compare",
+      "repo_ref": "v1",
+      "fixture_kind": "sf_final_live_compare",
+      "mutation_required": false,
+      "allowed_files": [
+        "unused"
+      ],
+      "forbidden_files": [
+        ".nexus/",
+        "logs/",
+        "benchmarks/"
+      ],
+      "setup_command": "python -V",
+      "verification_command": "python -V",
+      "expected_capabilities": [
+        "hyper"
+      ],
+      "capability_activation_contract": "required",
+      "eligibility_class": "model_required",
+      "public_claim_allowed_metrics": []
+    },
+    {
+      "id": "sf-final-live-compare-repair_loop-001",
+      "task_desc": "Use Flash+Nexus to compare current primary skill sf-systematic-repair_loop-odoo-automated-tests-dad98433 against local replacement candidate systematic-debugging for capability repair_loop.",
+      "target_file": "unused",
+      "test_file": "unused",
+      "success_criteria": "current_vs_candidate_skill_receipt_trust_token_wall_gate",
+      "category": "repair_loop",
+      "difficulty": "medium",
+      "repo_kind": "neutral_fixture",
+      "repo": "fixture://sf-final-live-compare",
+      "repo_ref": "v1",
+      "fixture_kind": "sf_final_live_compare",
+      "mutation_required": false,
+      "allowed_files": [
+        "unused"
+      ],
+      "forbidden_files": [
+        ".nexus/",
+        "logs/",
+        "benchmarks/"
+      ],
+      "setup_command": "python -V",
+      "verification_command": "python -V",
+      "expected_capabilities": [
+        "hyper"
+      ],
+      "capability_activation_contract": "required",
+      "eligibility_class": "model_required",
+      "public_claim_allowed_metrics": []
+    }
+  ]
+}

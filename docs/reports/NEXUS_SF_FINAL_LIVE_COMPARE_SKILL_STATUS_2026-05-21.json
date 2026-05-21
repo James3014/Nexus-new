@@ -1,0 +1,88 @@
+{
+  "schema": "nexus.sf_final_live_compare_skill_status.v1",
+  "summary": {
+    "skill_count": 6,
+    "runtime_update_allowed": false,
+    "public_benchmark_allowed": false
+  },
+  "skills": [
+    {
+      "name": "sf-systematic-artifact_gate-differential-review-461fbd0c",
+      "path": "/Users/jameschen/Workspace/nexus/.agents/skills/sf-systematic-challengers/sf-systematic-artifact_gate-differential-review-461fbd0c/SKILL.md",
+      "root": "nexus_repo_local",
+      "skill_status": "nexus_curated_candidate",
+      "test_level": "sf_final_live_compare",
+      "action": "ablation_only_compare",
+      "capability_mount": "artifact_gate",
+      "family": "artifact_gate",
+      "reason_codes": [
+        "sf_final_live_compare_current_primary"
+      ]
+    },
+    {
+      "name": "acceptance-evidence-failclosed",
+      "path": "/Users/jameschen/Workspace/nexus/.agents/skills/acceptance-evidence-failclosed/SKILL.md",
+      "root": "nexus_repo_local",
+      "skill_status": "nexus_curated_candidate",
+      "test_level": "sf_final_live_compare",
+      "action": "ablation_only_compare",
+      "capability_mount": "artifact_gate",
+      "family": "artifact_gate",
+      "reason_codes": [
+        "sf_final_live_compare_candidate"
+      ]
+    },
+    {
+      "name": "sf-systematic-benchmark_meta_opt-hugging-face-trackio-d21c6b90",
+      "path": "/Users/jameschen/Workspace/nexus/.agents/skills/sf-systematic-challengers/sf-systematic-benchmark_meta_opt-hugging-face-trackio-d21c6b90/SKILL.md",
+      "root": "nexus_repo_local",
+      "skill_status": "nexus_curated_candidate",
+      "test_level": "sf_final_live_compare",
+      "action": "ablation_only_compare",
+      "capability_mount": "hyper",
+      "family": "benchmark_meta_opt",
+      "reason_codes": [
+        "sf_final_live_compare_current_primary"
+      ]
+    },
+    {
+      "name": "evaluating-llms-harness",
+      "path": "/Users/jameschen/Workspace/hermes-agent/skills/mlops/evaluation/lm-evaluation-harness/SKILL.md",
+      "root": "external_reference",
+      "skill_status": "external_reference_candidate",
+      "test_level": "sf_final_live_compare",
+      "action": "ablation_only_compare",
+      "capability_mount": "hyper",
+      "family": "benchmark_meta_opt",
+      "reason_codes": [
+        "sf_final_live_compare_candidate"
+      ]
+    },
+    {
+      "name": "sf-systematic-repair_loop-odoo-automated-tests-dad98433",
+      "path": "/Users/jameschen/Workspace/nexus/.agents/skills/sf-systematic-challengers/sf-systematic-repair_loop-odoo-automated-tests-dad98433/SKILL.md",
+      "root": "nexus_repo_local",
+      "skill_status": "nexus_curated_candidate",
+      "test_level": "sf_final_live_compare",
+      "action": "ablation_only_compare",
+      "capability_mount": "hyper",
+      "family": "repair_loop",
+      "reason_codes": [
+        "sf_final_live_compare_current_primary"
+      ]
+    },
+    {
+      "name": "systematic-debugging",
+      "path": "/Users/jameschen/Workspace/hermes-agent/skills/software-development/systematic-debugging/SKILL.md",
+      "root": "external_reference",
+      "skill_status": "external_reference_candidate",
+      "test_level": "sf_final_live_compare",
+      "action": "ablation_only_compare",
+      "capability_mount": "hyper",
+      "family": "repair_loop",
+      "reason_codes": [
+        "sf_final_live_compare_candidate"
+      ]
+    }
+  ]
+}

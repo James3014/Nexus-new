@@ -54,6 +54,16 @@
 | `benchmark_meta_opt` | `sf-systematic-benchmark_meta_opt-hugging-face-trackio-d21c6b90` | `evaluating-llms-harness` | 26 | `REPLACE_PRIMARY_LOCAL_CANDIDATE` |
 | `repair_loop` | `sf-systematic-repair_loop-odoo-automated-tests-dad98433` | `systematic-debugging` | 28 | `REPLACE_PRIMARY_LOCAL_CANDIDATE` |
 
+## SF-FINAL Flash+Nexus Live Replacement Verdict
+
+> `docs/reports/NEXUS_SF_FINAL_LIVE_COMPARE_REPORT_2026-05-21.json` 已對上表三個本地 replacement candidate 跑 current-primary vs candidate 的 live Flash+Nexus pair compare。三組皆有 delivery / receipt / trust gate，結果沒有任何 candidate 同時通過 token 與 wall 非回歸門檻，因此本表 Primary Skill 不更換。
+
+| 能力 | 目前 Primary | Live Candidate | Live Verdict | Token Delta | Wall Delta | 處置 |
+| :--- | :--- | :--- | :--- | ---: | ---: | :--- |
+| `artifact_gate` | `sf-systematic-artifact_gate-differential-review-461fbd0c` | `acceptance-evidence-failclosed` | `KEEP_CURRENT_PRIMARY` | -25388 | 8.0589 | candidate token 下降但 wall 回歸，保留 current primary |
+| `benchmark_meta_opt` | `sf-systematic-benchmark_meta_opt-hugging-face-trackio-d21c6b90` | `evaluating-llms-harness` | `KEEP_CURRENT_PRIMARY` | 3423 | 1.8261 | candidate token / wall 都回歸，保留 current primary |
+| `repair_loop` | `sf-systematic-repair_loop-odoo-automated-tests-dad98433` | `systematic-debugging` | `KEEP_CURRENT_PRIMARY` | 456 | 8.2080 | candidate token / wall 都回歸，保留 current primary |
+
 ## 邊界
 - Mode A/B/C 是 HEEP internal evaluation policy，不是 public benchmark claim。
 - MAT-B verdict 只代表內部 Flash+Nexus multi-skill compare，不等於 runtime default apply。
@@ -64,6 +74,7 @@
 - SF-FINAL historical settlement：`docs/reports/NEXUS_SF_FINAL_CAPABILITY_SKILL_SETTLEMENT_2026-05-21.json` 已將 2026-05-15 歷史 inventory / fair pool 納入定案面：1759 historical skill files、684 ablation-eligible candidates、771 quarantine candidates、34/34 capabilities with canonical top-8 shortlist、265 deterministic precheck rows、264 SF-R Flash+Nexus comparison queue entries、1 precheck-blocked worktree/quarantine candidate。這代表「歷史候選已分桶、分層、去重、接入 compare queue」；不代表 684 個候選都已有 live Flash+Nexus replacement evidence。
 - SF-FINAL-COMPARE deterministic report：`docs/reports/NEXUS_SF_FINAL_COMPARE_REPORT_2026-05-21.json` 已把 canonical shortlist 轉成 explicit current-primary vs challenger rows：265 compare rows、264 `READY_FOR_LIVE_COMPARE`、1 `REJECT_PRECHECK`、34 live compare batches。這仍是 deterministic/local triage，不是 live winner verdict；只有後續 Flash+Nexus live compare PASS 的候選才可進 replacement decision。
 - SF-FINAL-LOCAL deterministic compare：`docs/reports/NEXUS_SF_FINAL_LOCAL_SKILL_COMPARE_2026-05-21.json` 已比對本地可讀 `SKILL.md`：265 compare rows、302 local skill index entries、3 `REPLACE_PRIMARY_LOCAL_CANDIDATE`、31 `KEEP_CURRENT`。這三個是文件層建議替換候選，仍需 live Flash+Nexus 與 runtime apply gate 才可變成 runtime default。
+- SF-FINAL-LIVE compare：`docs/reports/NEXUS_SF_FINAL_LIVE_COMPARE_REPORT_2026-05-21.json` 已對三個 local replacement candidate 完成 live Flash+Nexus current-vs-candidate pair compare：3/3 comparisons PASS、0 `REPLACE_PRIMARY_LIVE_APPROVED`、3 `KEEP_CURRENT_PRIMARY`。因此本輪沒有 skill 更換，local replacement 建議全部降為「已 live 測試但未勝出」。
 - SF-FINAL runtime boundary：historical settlement 的 `runtime_update_allowed=false`、`public_benchmark_allowed=false`。能力目前仍以本表 Primary / HEEP Mode / MAT-B verdict 為 current map；SF-FINAL shortlist 只提供後續 SF-R replay/Flash+Nexus compare 的候選來源。
 
 ---
