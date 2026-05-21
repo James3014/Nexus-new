@@ -14,8 +14,9 @@ if str(PROJECT_ROOT) not in sys.path:
 from nexus.learning.skill_fit_closure import read_json, write_json
 
 
-DEFAULT_LIVE_SUMMARY = Path(".nexus/reports/sf_final_live_compare_2026-05-21/live_summary.json")
-DEFAULT_OUTPUT = Path("docs/reports/NEXUS_SF_FINAL_LIVE_COMPARE_REPORT_2026-05-21.json")
+DEFAULT_MATRIX = Path("docs/reports/NEXUS_SF_FINAL_ALL_CANDIDATE_LIVE_COMPARE_MATRIX_2026-05-21.json")
+DEFAULT_LIVE_SUMMARY = Path(".nexus/reports/sf_final_all_candidate_live_compare_2026-05-21/live_summary.json")
+DEFAULT_OUTPUT = Path("docs/reports/NEXUS_SF_FINAL_ALL_CANDIDATE_LIVE_COMPARE_REPORT_2026-05-21.json")
 
 
 def _bench(row: Mapping[str, Any]) -> Mapping[str, Any]:
@@ -88,26 +89,44 @@ def _decision(*, current: Mapping[str, Any], candidate: Mapping[str, Any]) -> tu
     return "REPLACE_PRIMARY_LIVE_APPROVED", reasons
 
 
-def build_sf_final_live_compare_report(*, live_summary: Mapping[str, Any]) -> dict[str, Any]:
+def _candidate_keys_from_matrix(matrix: Mapping[str, Any]) -> set[tuple[str, str]]:
+    keys: set[tuple[str, str]] = set()
+    for row in matrix.get("rows", []) or []:
+        if not isinstance(row, Mapping) or row.get("arm_id") != "candidate_skill":
+            continue
+        keys.add((str(row.get("capability") or ""), str(row.get("candidate_skill_id") or row.get("skill_id") or "")))
+    return {key for key in keys if all(key)}
+
+
+def build_sf_final_live_compare_report(*, live_summary: Mapping[str, Any], matrix: Mapping[str, Any] | None = None) -> dict[str, Any]:
     results = [row for row in live_summary.get("results", []) or [] if isinstance(row, Mapping)]
-    by_key: dict[tuple[str, str], dict[str, Mapping[str, Any]]] = {}
+    baselines: dict[str, Mapping[str, Any]] = {}
+    candidates: list[Mapping[str, Any]] = []
+    row_blockers: list[str] = []
     for row in results:
         capability = str(row.get("capability") or "")
-        task_ref = row.get("task_ref") if isinstance(row.get("task_ref"), Mapping) else {}
-        task_id = str(task_ref.get("task_id") or "")
         arm_id = str(row.get("arm_id") or "")
-        if capability and task_id and arm_id:
-            by_key.setdefault((capability, task_id), {})[arm_id] = row
+        if str(row.get("status") or "").upper() != "PASS":
+            skill_id = str(row.get("candidate_skill_id") or row.get("skill_id") or "")
+            reason = str(row.get("reason") or "row_return")
+            row_blockers.append(f"{capability}:{arm_id}:{skill_id}:{reason}")
+        if arm_id == "current_primary_skill" and capability:
+            baselines[capability] = row
+        elif arm_id == "candidate_skill" and capability:
+            candidates.append(row)
 
     comparisons: list[dict[str, Any]] = []
-    blockers: list[str] = []
-    for (capability, task_id), arms in sorted(by_key.items()):
-        current_row = arms.get("current_primary_skill")
-        candidate_row = arms.get("candidate_skill")
-        if current_row is None or candidate_row is None:
-            blockers.append(f"{capability}:{task_id}:missing_current_candidate_pair")
+    observed_candidate_keys: set[tuple[str, str]] = set()
+    blockers: list[str] = [*row_blockers]
+    for candidate_row in sorted(candidates, key=lambda item: (str(item.get("capability") or ""), str(item.get("candidate_skill_id") or item.get("skill_id") or ""))):
+        capability = str(candidate_row.get("capability") or "")
+        baseline_row = baselines.get(capability)
+        candidate_skill_id = str(candidate_row.get("candidate_skill_id") or candidate_row.get("skill_id") or "")
+        observed_candidate_keys.add((capability, candidate_skill_id))
+        if baseline_row is None:
+            blockers.append(f"{capability}:{candidate_skill_id}:missing_current_baseline")
             continue
-        current = _row_metrics(current_row)
+        current = _row_metrics(baseline_row)
         candidate = _row_metrics(candidate_row)
         token_delta = None
         if current["total_tokens"] is not None and candidate["total_tokens"] is not None:
@@ -119,11 +138,11 @@ def build_sf_final_live_compare_report(*, live_summary: Mapping[str, Any]) -> di
         comparisons.append(
             {
                 "capability": capability,
-                "task_id": task_id,
-                "current_row_id": current_row.get("row_id", ""),
+                "task_id": (candidate_row.get("task_ref") if isinstance(candidate_row.get("task_ref"), Mapping) else {}).get("task_id", ""),
+                "current_row_id": baseline_row.get("row_id", ""),
                 "candidate_row_id": candidate_row.get("row_id", ""),
-                "current_skill_id": current_row.get("skill_id", ""),
-                "candidate_skill_id": candidate_row.get("skill_id", ""),
+                "current_skill_id": baseline_row.get("skill_id", ""),
+                "candidate_skill_id": candidate_skill_id,
                 "current": current,
                 "candidate": candidate,
                 "delta": {
@@ -136,11 +155,18 @@ def build_sf_final_live_compare_report(*, live_summary: Mapping[str, Any]) -> di
             }
         )
 
+    pending_candidates: list[dict[str, str]] = []
+    expected_candidate_keys = _candidate_keys_from_matrix(matrix or {})
+    for capability, skill_id in sorted(expected_candidate_keys - observed_candidate_keys):
+        pending_candidates.append({"capability": capability, "candidate_skill_id": skill_id, "reason": "not_yet_live_executed"})
+
     return {
-        "schema": "nexus.sf_final_live_compare_report.v1",
+        "schema": "nexus.sf_final_all_candidate_live_compare_report.v1",
         "status": "PASS" if comparisons and not blockers else "RETURN",
         "summary": {
+            "expected_candidate_count": len(expected_candidate_keys),
             "comparison_count": len(comparisons),
+            "pending_candidate_count": len(pending_candidates),
             "replace_live_approved_count": sum(1 for item in comparisons if item["verdict"] == "REPLACE_PRIMARY_LIVE_APPROVED"),
             "keep_current_count": sum(1 for item in comparisons if item["verdict"] == "KEEP_CURRENT_PRIMARY"),
             "hold_count": sum(1 for item in comparisons if item["verdict"] == "HOLD_MISSING_LIVE_EVIDENCE"),
@@ -148,21 +174,46 @@ def build_sf_final_live_compare_report(*, live_summary: Mapping[str, Any]) -> di
             "public_benchmark_allowed": False,
         },
         "blockers": blockers,
+        "pending_candidates": pending_candidates,
         "comparisons": comparisons,
         "claim_boundary": [
             "This is internal Flash+Nexus live skill-pair evidence only.",
-            "Replacement is catalog-map eligible only when verdict is REPLACE_PRIMARY_LIVE_APPROVED.",
+            "Every READY_FOR_LIVE_COMPARE candidate must be either compared or listed under pending_candidates/blockers.",
             "Runtime default and public benchmark remain separate gates.",
         ],
     }
 
 
+def _read_live_summary_arg(value: str) -> dict[str, Any]:
+    paths = [Path(part.strip()) for part in value.split(",") if part.strip()]
+    if len(paths) == 1:
+        return read_json(paths[0])
+    results_by_row_id: dict[str, Mapping[str, Any]] = {}
+    sources: list[str] = []
+    for path in paths:
+        summary = read_json(path)
+        sources.append(str(path))
+        for row in summary.get("results", []) or []:
+            if not isinstance(row, Mapping):
+                continue
+            row_id = str(row.get("row_id") or "")
+            if row_id:
+                results_by_row_id[row_id] = row
+    return {
+        "schema": "nexus.skill_fit_ablation_matrix_run.merged.v1",
+        "status": "PASS",
+        "sources": sources,
+        "results": list(results_by_row_id.values()),
+    }
+
+
 def main(argv: list[str] | None = None) -> int:
-    parser = argparse.ArgumentParser(description="Build SF final live current-vs-candidate comparison report.")
+    parser = argparse.ArgumentParser(description="Build SF final all-candidate live comparison report.")
     parser.add_argument("--live-summary", default=str(DEFAULT_LIVE_SUMMARY))
+    parser.add_argument("--matrix", default=str(DEFAULT_MATRIX))
     parser.add_argument("--output", default=str(DEFAULT_OUTPUT))
     args = parser.parse_args(argv)
-    report = build_sf_final_live_compare_report(live_summary=read_json(args.live_summary))
+    report = build_sf_final_live_compare_report(live_summary=_read_live_summary_arg(args.live_summary), matrix=read_json(args.matrix))
     write_json(args.output, report)
     print(json.dumps({"status": report["status"], **report["summary"], "output": str(args.output)}, sort_keys=True))
     return 0 if report["status"] == "PASS" else 1

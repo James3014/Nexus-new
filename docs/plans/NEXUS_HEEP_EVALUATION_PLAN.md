@@ -201,5 +201,13 @@ Current result: SF-R passes with all 34 capabilities resolving a baseline. With 
 
 Hard boundary: SF-R may generate catalog update packets and runtime apply review packets, but `runtime_update_allowed=false` and `public_benchmark_allowed=false` until the existing HEEP runtime apply gate and public benchmark gate are run explicitly.
 
+SF final all-candidate live compare note: `docs/reports/NEXUS_SF_FINAL_264_CANDIDATE_CLASSIFICATION_2026-05-21.json` classifies all 264 READY_FOR_LIVE_COMPARE candidates against capability need profiles before live execution. It emits 169 term-backed live-eligible candidate arms and 95 fail-closed filtered candidates. `docs/reports/NEXUS_SF_FINAL_ALL_CANDIDATE_LIVE_COMPARE_REPORT_2026-05-21.json` then records 169/169 candidate live comparisons with zero pending candidates.
+
+Failure lesson: all-candidate SF must classify candidates against capability need profiles before preflight/live execution. Running a broad matrix directly can waste live budget on coarse-fit or low-score support-role candidates and can obscure whether a candidate actually addresses the capability's Scout / Logic / Audit need.
+
+Failure lesson: partial live compare rollups must fail closed on returned baseline rows, not only returned candidate rows. A candidate comparison is not valid if its current-primary baseline has an infra-invalid receipt, even when other candidates in the same report look clean.
+
+Failure lesson: provider-token gaps such as `model_call_without_tokens` should trigger narrow clean replay for that row before continuing the matrix. They are evidence cleanliness blockers, not proof that the candidate skill is weak.
+
 ---
 *Created by Antigravity - Nexus Singularity V17*
