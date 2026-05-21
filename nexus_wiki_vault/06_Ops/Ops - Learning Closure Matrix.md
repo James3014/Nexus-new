@@ -2854,3 +2854,10 @@ version_scope:
 - Failure: a queue artifact can be misread as a replacement verdict if it lacks explicit baseline/challenger arms and live evidence status.
 - Lesson: current-vs-candidate compare artifacts need separate deterministic triage decisions and live Flash+Nexus verdicts.
 - Guardrail: emit `READY_FOR_LIVE_COMPARE`, `REJECT_PRECHECK`, or `KEEP_CURRENT_NO_LIVE_EVIDENCE`; only a later live compare report may emit replacement decisions.
+
+## 2026-05-21 - local skill comparison must require capability fit, not generic quality only
+
+- Trigger: the first local SF-FINAL comparison run marked several generic gstack skills as stronger because they had better general instruction quality.
+- Failure: a generic high-quality skill can outscore a route-specific primary unless the comparator requires capability term coverage to be at least as strong as the current primary.
+- Lesson: local skill replacement evidence must prove both quality and capability fit.
+- Guardrail: require score margin, no penalties, and candidate capability term hits greater than or equal to current primary before emitting `REPLACE_PRIMARY_LOCAL_CANDIDATE`.

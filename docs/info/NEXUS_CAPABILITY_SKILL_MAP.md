@@ -44,6 +44,16 @@
 | `ultra_review`                   | `github11-vulnerability-scanner-ultra-review`                    | **Mode C (Swarm)** | Scout=sf-systematic-codeintel-first-principles-thinking-f95019ea, Logic=sf2-autonomic_router-route-fit-spec, Audit=github11-vulnerability-scanner-ultra-review                                         | BLOCKED_BY_PROVIDER_TOKEN_TRUTH (baseline_infra_invalid:model_call_without_tokens, clean_replay_still_unclean, clean_replay:baseline_infra_invalid:model_call_without_tokens)              | [MAT-B live report](../reports/NEXUS_HEEP_MAT_B_LIVE_REPORT_2026-05-20.json) |
 | `xray`                           | `diagnose`                                                       | **Mode B (Guard)** | primary=diagnose, Audit=sf-systematic-artifact_gate-differential-review-461fbd0c                                                                                                                       | BLOCKED_BY_PROVIDER_TOKEN_TRUTH (baseline_infra_invalid:model_call_without_tokens, clean_replay_still_unclean, clean_replay:baseline_infra_invalid:model_call_without_tokens)              | [MAT-B live report](../reports/NEXUS_HEEP_MAT_B_LIVE_REPORT_2026-05-20.json) |
 
+## SF-FINAL 本地比對建議替換
+
+> 本節是 `docs/reports/NEXUS_SF_FINAL_LOCAL_SKILL_COMPARE_2026-05-21.json` 的 deterministic/local 結果。它表示「本地 skill 內容與能力契合度更強，建議進下一輪 Flash+Nexus live replacement」；不表示 runtime default 已套用。
+
+| 能力 | 目前 Primary | 本地建議 Skill | Local Score Delta | 文件層處置 |
+| :--- | :--- | :--- | ---: | :--- |
+| `artifact_gate` | `sf-systematic-artifact_gate-differential-review-461fbd0c` | `acceptance-evidence-failclosed` | 30 | `REPLACE_PRIMARY_LOCAL_CANDIDATE` |
+| `benchmark_meta_opt` | `sf-systematic-benchmark_meta_opt-hugging-face-trackio-d21c6b90` | `evaluating-llms-harness` | 26 | `REPLACE_PRIMARY_LOCAL_CANDIDATE` |
+| `repair_loop` | `sf-systematic-repair_loop-odoo-automated-tests-dad98433` | `systematic-debugging` | 28 | `REPLACE_PRIMARY_LOCAL_CANDIDATE` |
+
 ## 邊界
 - Mode A/B/C 是 HEEP internal evaluation policy，不是 public benchmark claim。
 - MAT-B verdict 只代表內部 Flash+Nexus multi-skill compare，不等於 runtime default apply。
@@ -53,6 +63,7 @@
 - SF-R 新 skill 入口：`docs/reports/NEXUS_SF_REPLACEMENT_REVIEW_PIPELINE_2026-05-21.json` 已定義手動/自動新增 skill 的 intake -> capability classification -> baseline resolver -> Flash+Nexus compare queue -> decision ledger -> catalog packet -> runtime review packet 閉環。新增 skill 沒有 clean compare 前只能 `HOLD_MORE_DATA`，不可直接改 runtime default 或解鎖 public benchmark。
 - SF-FINAL historical settlement：`docs/reports/NEXUS_SF_FINAL_CAPABILITY_SKILL_SETTLEMENT_2026-05-21.json` 已將 2026-05-15 歷史 inventory / fair pool 納入定案面：1759 historical skill files、684 ablation-eligible candidates、771 quarantine candidates、34/34 capabilities with canonical top-8 shortlist、265 deterministic precheck rows、264 SF-R Flash+Nexus comparison queue entries、1 precheck-blocked worktree/quarantine candidate。這代表「歷史候選已分桶、分層、去重、接入 compare queue」；不代表 684 個候選都已有 live Flash+Nexus replacement evidence。
 - SF-FINAL-COMPARE deterministic report：`docs/reports/NEXUS_SF_FINAL_COMPARE_REPORT_2026-05-21.json` 已把 canonical shortlist 轉成 explicit current-primary vs challenger rows：265 compare rows、264 `READY_FOR_LIVE_COMPARE`、1 `REJECT_PRECHECK`、34 live compare batches。這仍是 deterministic/local triage，不是 live winner verdict；只有後續 Flash+Nexus live compare PASS 的候選才可進 replacement decision。
+- SF-FINAL-LOCAL deterministic compare：`docs/reports/NEXUS_SF_FINAL_LOCAL_SKILL_COMPARE_2026-05-21.json` 已比對本地可讀 `SKILL.md`：265 compare rows、302 local skill index entries、3 `REPLACE_PRIMARY_LOCAL_CANDIDATE`、31 `KEEP_CURRENT`。這三個是文件層建議替換候選，仍需 live Flash+Nexus 與 runtime apply gate 才可變成 runtime default。
 - SF-FINAL runtime boundary：historical settlement 的 `runtime_update_allowed=false`、`public_benchmark_allowed=false`。能力目前仍以本表 Primary / HEEP Mode / MAT-B verdict 為 current map；SF-FINAL shortlist 只提供後續 SF-R replay/Flash+Nexus compare 的候選來源。
 
 ---
