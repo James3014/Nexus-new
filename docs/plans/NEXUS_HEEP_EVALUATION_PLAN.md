@@ -209,5 +209,7 @@ Failure lesson: partial live compare rollups must fail closed on returned baseli
 
 Failure lesson: provider-token gaps such as `model_call_without_tokens` should trigger narrow clean replay for that row before continuing the matrix. They are evidence cleanliness blockers, not proof that the candidate skill is weak.
 
+Failure lesson: runtime apply gates must treat zero pending candidates as an explicit clean value, not as a falsy missing value. Gate code should read `pending_candidate_count` with a default only when the field is absent, otherwise a complete live report can be falsely blocked.
+
 ---
 *Created by Antigravity - Nexus Singularity V17*

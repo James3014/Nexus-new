@@ -115,19 +115,50 @@
 | `xray` | `addy-browser-testing-with-devtools` | `candidate_receipt_chain_incomplete` |
 | `xray` | `browserbase-fetch` | `candidate_receipt_chain_incomplete` |
 
+## SF-FINAL Runtime Apply 定案（2026-05-21）
+
+> 本節來自 `docs/reports/NEXUS_SF_FINAL_RUNTIME_APPLY_DECISION_2026-05-21.json`、`docs/reports/NEXUS_SF_FINAL_RUNTIME_SKILL_POLICY_OVERLAY_APPLIED_2026-05-21.json`、`docs/reports/NEXUS_SF_FINAL_RUNTIME_POST_APPLY_SMOKE_2026-05-21.json`。這是 runtime overlay apply，不是 public benchmark。
+
+- Runtime apply: `PASS`, capability_count=34, applied_replacement_count=19, kept_primary_count=15.
+- Post-apply smoke: `PASS`, case_count=34, pass_count=34, return_count=0.
+- Selection rule: 每個能力只從 `REPLACE_PRIMARY_LIVE_APPROVED` 且 delivery / receipt-chain / trust / infra / provider-token / token / wall gate 全 PASS 的候選中選；多個候選同時通過時，採 `min_token_delta_then_wall_delta_among_clean_live_approved`。
+- Runtime boundary: `runtime_update_allowed=true`, `public_benchmark_allowed=false`。
+
+| 能力 | Previous Runtime Primary | Applied Runtime Primary | Token Delta | Wall Delta |
+| :--- | :--- | :--- | ---: | ---: |
+| `autonomic_router` | `sf2-autonomic_router-route-fit-spec` | `nexus-agent-execution-board-failclosed` | -4460 | -0.517 |
+| `claim_gate` | `nexus-benchmark-continuous-optimization` | `addy-doubt-driven-development` | -5796 | -31.0591 |
+| `codeintel` | `sf-systematic-codeintel-first-principles-thinking-f95019ea` | `gstack-qa` | -59759 | -5.1033 |
+| `external_productivity` | `sf-systematic-external_productivity-writer-77dc7840` | `aibdd.auto.python.e2e.green` | -2699 | -39.5248 |
+| `file_lock_security_gate` | `sf2-file_lock_security_gate-route-fit-spec` | `browserbase-what-antibot` | -5253 | -27.0019 |
+| `forecast_pregate` | `create-plan` | `addy-shipping-and-launch` | -10213 | -8.2536 |
+| `hyper_sprint` | `sf2-hyper_sprint-route-fit-spec` | `retro` | -892 | -19.2818 |
+| `learn_ask` | `github8-skilless-deep-research-learn-ask` | `nexus-live-ask-replay-normalization-gate` | -4839 | -65.3619 |
+| `memory` | `sf-systematic-memory-project-skill-audit-cc8b7621` | `product-self-knowledge` | -8030 | -24.9999 |
+| `metabolism_resume` | `github-auto-skill-safe-learning` | `addy-shipping-and-launch` | -5001 | -52.0269 |
+| `nightshift` | `sf2-nightshift-route-fit-spec` | `canary` | -733 | -3.3439 |
+| `policy_capability_gate` | `sf-systematic-policy_capability_gate-aegisops-ai-0aa841e2` | `browse` | -3121 | -57.467 |
+| `registry_skills_sync` | `github5-skill-seekers-safe-registry-builder` | `gstack-sync-gbrain` | -3559 | -7.1926 |
+| `repair_loop` | `sf-systematic-repair_loop-odoo-automated-tests-dad98433` | `qa-only` | -11100 | -79.3396 |
+| `research` | `sf-systematic-research-research-lookup-7e6f92a0` | `gbrain-academic-verify` | -584 | -32.7566 |
+| `research_and_source_discipline` | `research-citation-chain-verifier` | `gbrain-maintain` | -6009 | -47.5073 |
+| `research_control_plane` | `sf-systematic-research_control_plane-research-lookup-7e6f92a0` | `browserbase-fetch` | -2927 | -8.2376 |
+| `sandbox_replay` | `sf2-sandbox_replay-route-fit-spec` | `nexus-acceptance-evidence-gate` | -67247 | -21.5693 |
+| `swarm_multi_agent` | `sf2-swarm_multi_agent-route-fit-spec` | `nexus-gemini-code-review-orchestrator` | -636 | -1.9359 |
+
 
 ## 邊界
 - Mode A/B/C 是 HEEP internal evaluation policy，不是 public benchmark claim。
 - MAT-B verdict 只代表內部 Flash+Nexus multi-skill compare，不等於 runtime default apply。
 - EMAS Safe-Candidate 不會自動 promotion 到 runtime default。
-- 任何 runtime apply 仍需 runtime-confirmed selected/injected/used/evidence/gate/outcome receipt。
+- SF-FINAL runtime overlay 已套用 19 個 live-approved replacement；任何 public claim 仍需獨立 public benchmark gate。
 - SFV2 自動化出口：`docs/reports/NEXUS_SFV2_SKILL_SELECTION_PIPELINE_2026-05-20.json` 已將 34/34 capabilities 轉成 source tier、shortlist、single/multi decision、role-ablation matrix、catalog action、runtime apply review state。複數 skill 必須通過 role-ablation + MAT-B receipt gate，不能只靠角色數或 local synergy 宣稱變強。
 - SF-R 新 skill 入口：`docs/reports/NEXUS_SF_REPLACEMENT_REVIEW_PIPELINE_2026-05-21.json` 已定義手動/自動新增 skill 的 intake -> capability classification -> baseline resolver -> Flash+Nexus compare queue -> decision ledger -> catalog packet -> runtime review packet 閉環。新增 skill 沒有 clean compare 前只能 `HOLD_MORE_DATA`，不可直接改 runtime default 或解鎖 public benchmark。
 - SF-FINAL historical settlement：`docs/reports/NEXUS_SF_FINAL_CAPABILITY_SKILL_SETTLEMENT_2026-05-21.json` 已將 2026-05-15 歷史 inventory / fair pool 納入定案面：1759 historical skill files、684 ablation-eligible candidates、771 quarantine candidates、34/34 capabilities with canonical top-8 shortlist、265 deterministic precheck rows、264 SF-R Flash+Nexus comparison queue entries、1 precheck-blocked worktree/quarantine candidate。這代表「歷史候選已分桶、分層、去重、接入 compare queue」；不代表 684 個候選都已有 live Flash+Nexus replacement evidence。
 - SF-FINAL-COMPARE deterministic report：`docs/reports/NEXUS_SF_FINAL_COMPARE_REPORT_2026-05-21.json` 已把 canonical shortlist 轉成 explicit current-primary vs challenger rows：265 compare rows、264 `READY_FOR_LIVE_COMPARE`、1 `REJECT_PRECHECK`、34 live compare batches。這仍是 deterministic/local triage，不是 live winner verdict；只有後續 Flash+Nexus live compare PASS 的候選才可進 replacement decision。
 - SF-FINAL-LOCAL deterministic compare：`docs/reports/NEXUS_SF_FINAL_LOCAL_SKILL_COMPARE_2026-05-21.json` 已比對本地可讀 `SKILL.md`：265 compare rows、302 local skill index entries、3 `REPLACE_PRIMARY_LOCAL_CANDIDATE`、31 `KEEP_CURRENT`。這三個是文件層建議替換候選，仍需 live Flash+Nexus 與 runtime apply gate 才可變成 runtime default。
 - SF-FINAL-LIVE compare：`docs/reports/NEXUS_SF_FINAL_LIVE_COMPARE_REPORT_2026-05-21.json` 已對三個 local replacement candidate 完成 live Flash+Nexus current-vs-candidate pair compare：3/3 comparisons PASS、0 `REPLACE_PRIMARY_LIVE_APPROVED`、3 `KEEP_CURRENT_PRIMARY`。因此本輪沒有 skill 更換，local replacement 建議全部降為「已 live 測試但未勝出」。
-- SF-FINAL runtime boundary：historical settlement 的 `runtime_update_allowed=false`、`public_benchmark_allowed=false`。能力目前仍以本表 Primary / HEEP Mode / MAT-B verdict 為 current map；SF-FINAL shortlist 只提供後續 SF-R replay/Flash+Nexus compare 的候選來源。
+- SF-FINAL runtime apply：`docs/reports/NEXUS_SF_FINAL_RUNTIME_POST_APPLY_SMOKE_2026-05-21.json` 已確認 34/34 runtime overlay routes 具備 selected / injected / used / evidence / gate / outcome receipt chain；`public_benchmark_allowed=false` 仍維持。
 
 ---
 *Generated by Nexus HEEP/EMAS pipeline.*

@@ -1,0 +1,438 @@
+{
+  "schema": "nexus.sf_final_runtime_skill_policy_overlay.applied.v1",
+  "status": "PASS",
+  "created_at": "2026-05-21T09:33:51.043737+00:00",
+  "source_live_report": "docs/reports/NEXUS_SF_FINAL_ALL_CANDIDATE_LIVE_COMPARE_REPORT_2026-05-21.json",
+  "runtime_update_allowed": true,
+  "public_benchmark_allowed": false,
+  "primary_skill_by_capability": {
+    "artifact_gate": "sf-systematic-artifact_gate-differential-review-461fbd0c",
+    "autonomic_router": "nexus-agent-execution-board-failclosed",
+    "autoreason": "sf2-belief-route-fit-spec",
+    "belief": "sf2-belief-route-fit-spec",
+    "benchmark_meta_opt": "sf-systematic-benchmark_meta_opt-hugging-face-trackio-d21c6b90",
+    "claim_gate": "addy-doubt-driven-development",
+    "codeintel": "gstack-qa",
+    "ddtree": "nexus-root-cause-probe",
+    "direct_master_loop": "sf-systematic-direct_master_loop-build-32802a87",
+    "drone": "sf-systematic-drone-python-background-jobs-18326a62",
+    "external_productivity": "aibdd.auto.python.e2e.green",
+    "file_lock_security_gate": "browserbase-what-antibot",
+    "forecast_pregate": "addy-shipping-and-launch",
+    "governance_and_trust": "sf-systematic-governance_and_trust-aegisops-ai-0aa841e2",
+    "hyper_sprint": "retro",
+    "lancedb": "research-source-validation-auditor",
+    "learn_ask": "nexus-live-ask-replay-normalization-gate",
+    "learning_closure": "sf-systematic-learning_closure-memory-lint-8bdb0fca",
+    "memory": "product-self-knowledge",
+    "mempalace": "sf2-mempalace-route-fit-spec",
+    "metabolism_resume": "addy-shipping-and-launch",
+    "nightshift": "canary",
+    "policy_capability_gate": "browse",
+    "registry_skills_sync": "gstack-sync-gbrain",
+    "regression_guard": "sf-systematic-regression_guard-odoo-automated-tests-dad98433",
+    "repair_loop": "qa-only",
+    "research": "gbrain-academic-verify",
+    "research_and_source_discipline": "gbrain-maintain",
+    "research_control_plane": "browserbase-fetch",
+    "sandbox_replay": "nexus-acceptance-evidence-gate",
+    "swarm_multi_agent": "nexus-gemini-code-review-orchestrator",
+    "ui_validator": "sf-systematic-ui_validator-e2e-testing-d98eb7c3",
+    "ultra_review": "github11-vulnerability-scanner-ultra-review",
+    "xray": "diagnose"
+  },
+  "candidate_primary_skill_by_capability": {
+    "artifact_gate": "sf-systematic-artifact_gate-differential-review-461fbd0c",
+    "autonomic_router": "nexus-agent-execution-board-failclosed",
+    "autoreason": "sf2-belief-route-fit-spec",
+    "belief": "sf2-belief-route-fit-spec",
+    "benchmark_meta_opt": "sf-systematic-benchmark_meta_opt-hugging-face-trackio-d21c6b90",
+    "claim_gate": "addy-doubt-driven-development",
+    "codeintel": "gstack-qa",
+    "ddtree": "nexus-root-cause-probe",
+    "direct_master_loop": "sf-systematic-direct_master_loop-build-32802a87",
+    "drone": "sf-systematic-drone-python-background-jobs-18326a62",
+    "external_productivity": "aibdd.auto.python.e2e.green",
+    "file_lock_security_gate": "browserbase-what-antibot",
+    "forecast_pregate": "addy-shipping-and-launch",
+    "governance_and_trust": "sf-systematic-governance_and_trust-aegisops-ai-0aa841e2",
+    "hyper_sprint": "retro",
+    "lancedb": "research-source-validation-auditor",
+    "learn_ask": "nexus-live-ask-replay-normalization-gate",
+    "learning_closure": "sf-systematic-learning_closure-memory-lint-8bdb0fca",
+    "memory": "product-self-knowledge",
+    "mempalace": "sf2-mempalace-route-fit-spec",
+    "metabolism_resume": "addy-shipping-and-launch",
+    "nightshift": "canary",
+    "policy_capability_gate": "browse",
+    "registry_skills_sync": "gstack-sync-gbrain",
+    "regression_guard": "sf-systematic-regression_guard-odoo-automated-tests-dad98433",
+    "repair_loop": "qa-only",
+    "research": "gbrain-academic-verify",
+    "research_and_source_discipline": "gbrain-maintain",
+    "research_control_plane": "browserbase-fetch",
+    "sandbox_replay": "nexus-acceptance-evidence-gate",
+    "swarm_multi_agent": "nexus-gemini-code-review-orchestrator",
+    "ui_validator": "sf-systematic-ui_validator-e2e-testing-d98eb7c3",
+    "ultra_review": "github11-vulnerability-scanner-ultra-review",
+    "xray": "diagnose"
+  },
+  "capability_aliases": {
+    "forecast_pregate": [
+      "pregate",
+      "forecast_gate",
+      "plan_quality_gate"
+    ]
+  },
+  "applied_primary": [
+    {
+      "capability_id": "autonomic_router",
+      "previous_skill_id": "sf2-autonomic_router-route-fit-spec",
+      "skill_id": "nexus-agent-execution-board-failclosed",
+      "decision": "runtime_primary_replaced",
+      "selection_rule": "min_token_delta_then_wall_delta_among_clean_live_approved",
+      "token_delta": -4460,
+      "wall_delta": -0.517,
+      "evidence_refs": [
+        ".nexus/reports/sf_final_all_candidate_live_compare_chunk2_2026-05-21/autonomic_router_sf-final-all-live-compare-autonomic_router-001_candidate_skill_nexus-agent-execution-board-failclosed/evidence_bundle.json"
+      ],
+      "receipt_path": ".nexus/reports/sf_final_all_candidate_live_compare_chunk2_2026-05-21/autonomic_router_sf-final-all-live-compare-autonomic_router-001_candidate_skill_nexus-agent-execution-board-failclosed",
+      "source_status": "external_reference_candidate"
+    },
+    {
+      "capability_id": "claim_gate",
+      "previous_skill_id": "nexus-benchmark-continuous-optimization",
+      "skill_id": "addy-doubt-driven-development",
+      "decision": "runtime_primary_replaced",
+      "selection_rule": "min_token_delta_then_wall_delta_among_clean_live_approved",
+      "token_delta": -5796,
+      "wall_delta": -31.0591,
+      "evidence_refs": [
+        ".nexus/reports/sf_final_all_candidate_live_compare_chunk2_2026-05-21/claim_gate_sf-final-all-live-compare-claim_gate-001_candidate_skill_addy-doubt-driven-development/evidence_bundle.json"
+      ],
+      "receipt_path": ".nexus/reports/sf_final_all_candidate_live_compare_chunk2_2026-05-21/claim_gate_sf-final-all-live-compare-claim_gate-001_candidate_skill_addy-doubt-driven-development",
+      "source_status": "external_reference_candidate"
+    },
+    {
+      "capability_id": "codeintel",
+      "previous_skill_id": "sf-systematic-codeintel-first-principles-thinking-f95019ea",
+      "skill_id": "gstack-qa",
+      "decision": "runtime_primary_replaced",
+      "selection_rule": "min_token_delta_then_wall_delta_among_clean_live_approved",
+      "token_delta": -59759,
+      "wall_delta": -5.1033,
+      "evidence_refs": [
+        ".nexus/reports/sf_final_all_candidate_live_compare_chunk3_2026-05-21/codeintel_sf-final-all-live-compare-codeintel-001_candidate_skill_gstack-qa/evidence_bundle.json"
+      ],
+      "receipt_path": ".nexus/reports/sf_final_all_candidate_live_compare_chunk3_2026-05-21/codeintel_sf-final-all-live-compare-codeintel-001_candidate_skill_gstack-qa",
+      "source_status": "external_reference_candidate"
+    },
+    {
+      "capability_id": "external_productivity",
+      "previous_skill_id": "sf-systematic-external_productivity-writer-77dc7840",
+      "skill_id": "aibdd.auto.python.e2e.green",
+      "decision": "runtime_primary_replaced",
+      "selection_rule": "min_token_delta_then_wall_delta_among_clean_live_approved",
+      "token_delta": -2699,
+      "wall_delta": -39.5248,
+      "evidence_refs": [
+        ".nexus/reports/sf_final_all_candidate_live_compare_chunk3_2026-05-21/external_productivity_sf-final-all-live-compare-external_productivity-001_candidate_skill_aibdd.auto.python.e2e.green/evidence_bundle.json"
+      ],
+      "receipt_path": ".nexus/reports/sf_final_all_candidate_live_compare_chunk3_2026-05-21/external_productivity_sf-final-all-live-compare-external_productivity-001_candidate_skill_aibdd.auto.python.e2e.green",
+      "source_status": "external_reference_candidate"
+    },
+    {
+      "capability_id": "file_lock_security_gate",
+      "previous_skill_id": "sf2-file_lock_security_gate-route-fit-spec",
+      "skill_id": "browserbase-what-antibot",
+      "decision": "runtime_primary_replaced",
+      "selection_rule": "min_token_delta_then_wall_delta_among_clean_live_approved",
+      "token_delta": -5253,
+      "wall_delta": -27.0019,
+      "evidence_refs": [
+        ".nexus/reports/sf_final_all_candidate_live_compare_chunk3_2026-05-21/file_lock_security_gate_sf-final-all-live-compare-file_lock_security_gate-001_candidate_skill_browserbase-what-antibot/evidence_bundle.json"
+      ],
+      "receipt_path": ".nexus/reports/sf_final_all_candidate_live_compare_chunk3_2026-05-21/file_lock_security_gate_sf-final-all-live-compare-file_lock_security_gate-001_candidate_skill_browserbase-what-antibot",
+      "source_status": "external_reference_candidate"
+    },
+    {
+      "capability_id": "forecast_pregate",
+      "previous_skill_id": "create-plan",
+      "skill_id": "addy-shipping-and-launch",
+      "decision": "runtime_primary_replaced",
+      "selection_rule": "min_token_delta_then_wall_delta_among_clean_live_approved",
+      "token_delta": -10213,
+      "wall_delta": -8.2536,
+      "evidence_refs": [
+        ".nexus/reports/sf_final_all_candidate_live_compare_chunk3_2026-05-21/forecast_pregate_sf-final-all-live-compare-forecast_pregate-001_candidate_skill_addy-shipping-and-launch/evidence_bundle.json"
+      ],
+      "receipt_path": ".nexus/reports/sf_final_all_candidate_live_compare_chunk3_2026-05-21/forecast_pregate_sf-final-all-live-compare-forecast_pregate-001_candidate_skill_addy-shipping-and-launch",
+      "source_status": "external_reference_candidate"
+    },
+    {
+      "capability_id": "hyper_sprint",
+      "previous_skill_id": "sf2-hyper_sprint-route-fit-spec",
+      "skill_id": "retro",
+      "decision": "runtime_primary_replaced",
+      "selection_rule": "min_token_delta_then_wall_delta_among_clean_live_approved",
+      "token_delta": -892,
+      "wall_delta": -19.2818,
+      "evidence_refs": [
+        ".nexus/reports/sf_final_all_candidate_live_compare_chunk4_2026-05-21/hyper_sprint_sf-final-all-live-compare-hyper_sprint-001_candidate_skill_retro/evidence_bundle.json"
+      ],
+      "receipt_path": ".nexus/reports/sf_final_all_candidate_live_compare_chunk4_2026-05-21/hyper_sprint_sf-final-all-live-compare-hyper_sprint-001_candidate_skill_retro",
+      "source_status": "external_reference_candidate"
+    },
+    {
+      "capability_id": "learn_ask",
+      "previous_skill_id": "github8-skilless-deep-research-learn-ask",
+      "skill_id": "nexus-live-ask-replay-normalization-gate",
+      "decision": "runtime_primary_replaced",
+      "selection_rule": "min_token_delta_then_wall_delta_among_clean_live_approved",
+      "token_delta": -4839,
+      "wall_delta": -65.3619,
+      "evidence_refs": [
+        ".nexus/reports/sf_final_all_candidate_live_compare_chunk4_2026-05-21/learn_ask_sf-final-all-live-compare-learn_ask-001_candidate_skill_nexus-live-ask-replay-normalization-gate/evidence_bundle.json"
+      ],
+      "receipt_path": ".nexus/reports/sf_final_all_candidate_live_compare_chunk4_2026-05-21/learn_ask_sf-final-all-live-compare-learn_ask-001_candidate_skill_nexus-live-ask-replay-normalization-gate",
+      "source_status": "external_reference_candidate"
+    },
+    {
+      "capability_id": "memory",
+      "previous_skill_id": "sf-systematic-memory-project-skill-audit-cc8b7621",
+      "skill_id": "product-self-knowledge",
+      "decision": "runtime_primary_replaced",
+      "selection_rule": "min_token_delta_then_wall_delta_among_clean_live_approved",
+      "token_delta": -8030,
+      "wall_delta": -24.9999,
+      "evidence_refs": [
+        ".nexus/reports/sf_final_all_candidate_live_compare_chunk4_2026-05-21/memory_sf-final-all-live-compare-memory-001_candidate_skill_product-self-knowledge/evidence_bundle.json"
+      ],
+      "receipt_path": ".nexus/reports/sf_final_all_candidate_live_compare_chunk4_2026-05-21/memory_sf-final-all-live-compare-memory-001_candidate_skill_product-self-knowledge",
+      "source_status": "external_reference_candidate"
+    },
+    {
+      "capability_id": "metabolism_resume",
+      "previous_skill_id": "github-auto-skill-safe-learning",
+      "skill_id": "addy-shipping-and-launch",
+      "decision": "runtime_primary_replaced",
+      "selection_rule": "min_token_delta_then_wall_delta_among_clean_live_approved",
+      "token_delta": -5001,
+      "wall_delta": -52.0269,
+      "evidence_refs": [
+        ".nexus/reports/sf_final_all_candidate_live_compare_chunk4_2026-05-21/metabolism_resume_sf-final-all-live-compare-metabolism_resume-001_candidate_skill_addy-shipping-and-launch/evidence_bundle.json"
+      ],
+      "receipt_path": ".nexus/reports/sf_final_all_candidate_live_compare_chunk4_2026-05-21/metabolism_resume_sf-final-all-live-compare-metabolism_resume-001_candidate_skill_addy-shipping-and-launch",
+      "source_status": "external_reference_candidate"
+    },
+    {
+      "capability_id": "nightshift",
+      "previous_skill_id": "sf2-nightshift-route-fit-spec",
+      "skill_id": "canary",
+      "decision": "runtime_primary_replaced",
+      "selection_rule": "min_token_delta_then_wall_delta_among_clean_live_approved",
+      "token_delta": -733,
+      "wall_delta": -3.3439,
+      "evidence_refs": [
+        ".nexus/reports/sf_final_all_candidate_live_compare_chunk4_2026-05-21/nightshift_sf-final-all-live-compare-nightshift-001_candidate_skill_canary/evidence_bundle.json"
+      ],
+      "receipt_path": ".nexus/reports/sf_final_all_candidate_live_compare_chunk4_2026-05-21/nightshift_sf-final-all-live-compare-nightshift-001_candidate_skill_canary",
+      "source_status": "external_reference_candidate"
+    },
+    {
+      "capability_id": "policy_capability_gate",
+      "previous_skill_id": "sf-systematic-policy_capability_gate-aegisops-ai-0aa841e2",
+      "skill_id": "browse",
+      "decision": "runtime_primary_replaced",
+      "selection_rule": "min_token_delta_then_wall_delta_among_clean_live_approved",
+      "token_delta": -3121,
+      "wall_delta": -57.467,
+      "evidence_refs": [
+        ".nexus/reports/sf_final_all_candidate_live_compare_chunk5_2026-05-21/policy_capability_gate_sf-final-all-live-compare-policy_capability_gate-001_candidate_skill_browse/evidence_bundle.json"
+      ],
+      "receipt_path": ".nexus/reports/sf_final_all_candidate_live_compare_chunk5_2026-05-21/policy_capability_gate_sf-final-all-live-compare-policy_capability_gate-001_candidate_skill_browse",
+      "source_status": "external_reference_candidate"
+    },
+    {
+      "capability_id": "registry_skills_sync",
+      "previous_skill_id": "github5-skill-seekers-safe-registry-builder",
+      "skill_id": "gstack-sync-gbrain",
+      "decision": "runtime_primary_replaced",
+      "selection_rule": "min_token_delta_then_wall_delta_among_clean_live_approved",
+      "token_delta": -3559,
+      "wall_delta": -7.1926,
+      "evidence_refs": [
+        ".nexus/reports/sf_final_all_candidate_live_compare_replay_registry_sync_2026-05-21/registry_skills_sync_sf-final-all-live-compare-registry_skills_sync-001_candidate_skill_gstack-sync-gbrain/evidence_bundle.json"
+      ],
+      "receipt_path": ".nexus/reports/sf_final_all_candidate_live_compare_replay_registry_sync_2026-05-21/registry_skills_sync_sf-final-all-live-compare-registry_skills_sync-001_candidate_skill_gstack-sync-gbrain",
+      "source_status": "external_reference_candidate"
+    },
+    {
+      "capability_id": "repair_loop",
+      "previous_skill_id": "sf-systematic-repair_loop-odoo-automated-tests-dad98433",
+      "skill_id": "qa-only",
+      "decision": "runtime_primary_replaced",
+      "selection_rule": "min_token_delta_then_wall_delta_among_clean_live_approved",
+      "token_delta": -11100,
+      "wall_delta": -79.3396,
+      "evidence_refs": [
+        ".nexus/reports/sf_final_all_candidate_live_compare_chunk6_2026-05-21/repair_loop_sf-final-all-live-compare-repair_loop-001_candidate_skill_qa-only/evidence_bundle.json"
+      ],
+      "receipt_path": ".nexus/reports/sf_final_all_candidate_live_compare_chunk6_2026-05-21/repair_loop_sf-final-all-live-compare-repair_loop-001_candidate_skill_qa-only",
+      "source_status": "external_reference_candidate"
+    },
+    {
+      "capability_id": "research",
+      "previous_skill_id": "sf-systematic-research-research-lookup-7e6f92a0",
+      "skill_id": "gbrain-academic-verify",
+      "decision": "runtime_primary_replaced",
+      "selection_rule": "min_token_delta_then_wall_delta_among_clean_live_approved",
+      "token_delta": -584,
+      "wall_delta": -32.7566,
+      "evidence_refs": [
+        ".nexus/reports/sf_final_all_candidate_live_compare_chunk6_2026-05-21/research_sf-final-all-live-compare-research-001_candidate_skill_gbrain-academic-verify/evidence_bundle.json"
+      ],
+      "receipt_path": ".nexus/reports/sf_final_all_candidate_live_compare_chunk6_2026-05-21/research_sf-final-all-live-compare-research-001_candidate_skill_gbrain-academic-verify",
+      "source_status": "external_reference_candidate"
+    },
+    {
+      "capability_id": "research_and_source_discipline",
+      "previous_skill_id": "research-citation-chain-verifier",
+      "skill_id": "gbrain-maintain",
+      "decision": "runtime_primary_replaced",
+      "selection_rule": "min_token_delta_then_wall_delta_among_clean_live_approved",
+      "token_delta": -6009,
+      "wall_delta": -47.5073,
+      "evidence_refs": [
+        ".nexus/reports/sf_final_all_candidate_live_compare_chunk6_2026-05-21/research_and_source_discipline_sf-final-all-live-compare-research_and_source_discipline-001_candidate_skill_gbrain-maintain/evidence_bundle.json"
+      ],
+      "receipt_path": ".nexus/reports/sf_final_all_candidate_live_compare_chunk6_2026-05-21/research_and_source_discipline_sf-final-all-live-compare-research_and_source_discipline-001_candidate_skill_gbrain-maintain",
+      "source_status": "external_reference_candidate"
+    },
+    {
+      "capability_id": "research_control_plane",
+      "previous_skill_id": "sf-systematic-research_control_plane-research-lookup-7e6f92a0",
+      "skill_id": "browserbase-fetch",
+      "decision": "runtime_primary_replaced",
+      "selection_rule": "min_token_delta_then_wall_delta_among_clean_live_approved",
+      "token_delta": -2927,
+      "wall_delta": -8.2376,
+      "evidence_refs": [
+        ".nexus/reports/sf_final_all_candidate_live_compare_chunk6_2026-05-21/research_control_plane_sf-final-all-live-compare-research_control_plane-001_candidate_skill_browserbase-fetch/evidence_bundle.json"
+      ],
+      "receipt_path": ".nexus/reports/sf_final_all_candidate_live_compare_chunk6_2026-05-21/research_control_plane_sf-final-all-live-compare-research_control_plane-001_candidate_skill_browserbase-fetch",
+      "source_status": "external_reference_candidate"
+    },
+    {
+      "capability_id": "sandbox_replay",
+      "previous_skill_id": "sf2-sandbox_replay-route-fit-spec",
+      "skill_id": "nexus-acceptance-evidence-gate",
+      "decision": "runtime_primary_replaced",
+      "selection_rule": "min_token_delta_then_wall_delta_among_clean_live_approved",
+      "token_delta": -67247,
+      "wall_delta": -21.5693,
+      "evidence_refs": [
+        ".nexus/reports/sf_final_all_candidate_live_compare_chunk6_2026-05-21/sandbox_replay_sf-final-all-live-compare-sandbox_replay-001_candidate_skill_nexus-acceptance-evidence-gate/evidence_bundle.json"
+      ],
+      "receipt_path": ".nexus/reports/sf_final_all_candidate_live_compare_chunk6_2026-05-21/sandbox_replay_sf-final-all-live-compare-sandbox_replay-001_candidate_skill_nexus-acceptance-evidence-gate",
+      "source_status": "external_reference_candidate"
+    },
+    {
+      "capability_id": "swarm_multi_agent",
+      "previous_skill_id": "sf2-swarm_multi_agent-route-fit-spec",
+      "skill_id": "nexus-gemini-code-review-orchestrator",
+      "decision": "runtime_primary_replaced",
+      "selection_rule": "min_token_delta_then_wall_delta_among_clean_live_approved",
+      "token_delta": -636,
+      "wall_delta": -1.9359,
+      "evidence_refs": [
+        ".nexus/reports/sf_final_all_candidate_live_compare_chunk6_2026-05-21/swarm_multi_agent_sf-final-all-live-compare-swarm_multi_agent-001_candidate_skill_nexus-gemini-code-review-orchestrator/evidence_bundle.json"
+      ],
+      "receipt_path": ".nexus/reports/sf_final_all_candidate_live_compare_chunk6_2026-05-21/swarm_multi_agent_sf-final-all-live-compare-swarm_multi_agent-001_candidate_skill_nexus-gemini-code-review-orchestrator",
+      "source_status": "external_reference_candidate"
+    }
+  ],
+  "kept_primary": [
+    {
+      "capability_id": "artifact_gate",
+      "skill_id": "sf-systematic-artifact_gate-differential-review-461fbd0c",
+      "decision": "runtime_primary_kept"
+    },
+    {
+      "capability_id": "autoreason",
+      "skill_id": "sf2-belief-route-fit-spec",
+      "decision": "runtime_primary_kept"
+    },
+    {
+      "capability_id": "belief",
+      "skill_id": "sf2-belief-route-fit-spec",
+      "decision": "runtime_primary_kept"
+    },
+    {
+      "capability_id": "benchmark_meta_opt",
+      "skill_id": "sf-systematic-benchmark_meta_opt-hugging-face-trackio-d21c6b90",
+      "decision": "runtime_primary_kept"
+    },
+    {
+      "capability_id": "ddtree",
+      "skill_id": "nexus-root-cause-probe",
+      "decision": "runtime_primary_kept"
+    },
+    {
+      "capability_id": "direct_master_loop",
+      "skill_id": "sf-systematic-direct_master_loop-build-32802a87",
+      "decision": "runtime_primary_kept"
+    },
+    {
+      "capability_id": "drone",
+      "skill_id": "sf-systematic-drone-python-background-jobs-18326a62",
+      "decision": "runtime_primary_kept"
+    },
+    {
+      "capability_id": "governance_and_trust",
+      "skill_id": "sf-systematic-governance_and_trust-aegisops-ai-0aa841e2",
+      "decision": "runtime_primary_kept"
+    },
+    {
+      "capability_id": "lancedb",
+      "skill_id": "research-source-validation-auditor",
+      "decision": "runtime_primary_kept"
+    },
+    {
+      "capability_id": "learning_closure",
+      "skill_id": "sf-systematic-learning_closure-memory-lint-8bdb0fca",
+      "decision": "runtime_primary_kept"
+    },
+    {
+      "capability_id": "mempalace",
+      "skill_id": "sf2-mempalace-route-fit-spec",
+      "decision": "runtime_primary_kept"
+    },
+    {
+      "capability_id": "regression_guard",
+      "skill_id": "sf-systematic-regression_guard-odoo-automated-tests-dad98433",
+      "decision": "runtime_primary_kept"
+    },
+    {
+      "capability_id": "ui_validator",
+      "skill_id": "sf-systematic-ui_validator-e2e-testing-d98eb7c3",
+      "decision": "runtime_primary_kept"
+    },
+    {
+      "capability_id": "ultra_review",
+      "skill_id": "github11-vulnerability-scanner-ultra-review",
+      "decision": "runtime_primary_kept"
+    },
+    {
+      "capability_id": "xray",
+      "skill_id": "diagnose",
+      "decision": "runtime_primary_kept"
+    }
+  ],
+  "blockers": [],
+  "claim_boundary": [
+    "This overlay formally applies SF final live-approved runtime primary replacements.",
+    "Runtime routes must still emit selected/injected/used/evidence/gate/outcome receipts.",
+    "Public benchmark remains a separate gate."
+  ]
+}
