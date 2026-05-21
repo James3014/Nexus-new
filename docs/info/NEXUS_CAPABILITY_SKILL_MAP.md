@@ -64,6 +64,58 @@
 | `benchmark_meta_opt` | `sf-systematic-benchmark_meta_opt-hugging-face-trackio-d21c6b90` | `evaluating-llms-harness` | `KEEP_CURRENT_PRIMARY` | 3423 | 1.8261 | candidate token / wall 都回歸，保留 current primary |
 | `repair_loop` | `sf-systematic-repair_loop-odoo-automated-tests-dad98433` | `systematic-debugging` | `KEEP_CURRENT_PRIMARY` | 456 | 8.2080 | candidate token / wall 都回歸，保留 current primary |
 
+## SF-FINAL 全候選 Flash+Nexus Live Compare 定案（2026-05-21）
+
+> 本節來自 `docs/reports/NEXUS_SF_FINAL_ALL_CANDIDATE_LIVE_COMPARE_REPORT_2026-05-21.json`。它是 internal SF live compare，不是 runtime default apply，也不是 public benchmark。
+> 264 個 READY_FOR_LIVE_COMPARE 候選先按 capability need profile 分類；169 個進 live matrix，95 個因 coarse fit / support 低分 / role mismatch fail-closed。
+
+- Classification: ready=264, live_eligible=169, filtered=95.
+- Live compare: expected=169, compared=169, pending=0, replace-approved=50, keep-current=104, hold=15.
+- Replacement rule: candidate must pass delivery / receipt-chain / trust / infra / provider-token / wall gates; runtime default remains `runtime_update_allowed=false` until separate apply review.
+
+| 能力 | Current Primary | Best Live-Approved Challenger | Token Delta | Wall Delta | Approved Challenger Count | Catalog Action |
+| :--- | :--- | :--- | ---: | ---: | ---: | :--- |
+| `autonomic_router` | `sf2-autonomic_router-route-fit-spec` | `nexus-agent-execution-board-failclosed` | -4460 | -0.517 | 1 | `REVIEW_REPLACEMENT_CANDIDATE` |
+| `claim_gate` | `nexus-benchmark-continuous-optimization` | `addy-doubt-driven-development` | -5796 | -31.0591 | 3 | `REVIEW_REPLACEMENT_CANDIDATE` |
+| `codeintel` | `sf-systematic-codeintel-first-principles-thinking-f95019ea` | `gstack-sync-gbrain` | -127 | -45.2704 | 3 | `REVIEW_REPLACEMENT_CANDIDATE` |
+| `external_productivity` | `sf-systematic-external_productivity-writer-77dc7840` | `aibdd.auto.python.e2e.red` | -1772 | -56.758 | 3 | `REVIEW_REPLACEMENT_CANDIDATE` |
+| `file_lock_security_gate` | `sf2-file_lock_security_gate-route-fit-spec` | `browserbase-what-antibot` | -5253 | -27.0019 | 2 | `REVIEW_REPLACEMENT_CANDIDATE` |
+| `forecast_pregate` | `create-plan` | `pm-eval-first-planner` | -5743 | -26.1281 | 3 | `REVIEW_REPLACEMENT_CANDIDATE` |
+| `hyper_sprint` | `sf2-hyper_sprint-route-fit-spec` | `retro` | -892 | -19.2818 | 1 | `REVIEW_REPLACEMENT_CANDIDATE` |
+| `learn_ask` | `github8-skilless-deep-research-learn-ask` | `nexus-live-ask-replay-normalization-gate` | -4839 | -65.3619 | 6 | `REVIEW_REPLACEMENT_CANDIDATE` |
+| `memory` | `sf-systematic-memory-project-skill-audit-cc8b7621` | `product-self-knowledge` | -8030 | -24.9999 | 1 | `REVIEW_REPLACEMENT_CANDIDATE` |
+| `metabolism_resume` | `github-auto-skill-safe-learning` | `aibdd.spec.prd.detail-req.gen` | -4773 | -57.8852 | 3 | `REVIEW_REPLACEMENT_CANDIDATE` |
+| `nightshift` | `sf2-nightshift-route-fit-spec` | `canary` | -733 | -3.3439 | 1 | `REVIEW_REPLACEMENT_CANDIDATE` |
+| `policy_capability_gate` | `sf-systematic-policy_capability_gate-aegisops-ai-0aa841e2` | `browse` | -3121 | -57.467 | 1 | `REVIEW_REPLACEMENT_CANDIDATE` |
+| `registry_skills_sync` | `github5-skill-seekers-safe-registry-builder` | `gbrain-cold-start` | -1186 | -22.5756 | 4 | `REVIEW_REPLACEMENT_CANDIDATE` |
+| `repair_loop` | `sf-systematic-repair_loop-odoo-automated-tests-dad98433` | `freeze` | -8821 | -79.4382 | 6 | `REVIEW_REPLACEMENT_CANDIDATE` |
+| `research` | `sf-systematic-research-research-lookup-7e6f92a0` | `research-paper-writing` | -547 | -45.7582 | 4 | `REVIEW_REPLACEMENT_CANDIDATE` |
+| `research_and_source_discipline` | `research-citation-chain-verifier` | `gbrain-maintain` | -6009 | -47.5073 | 3 | `REVIEW_REPLACEMENT_CANDIDATE` |
+| `research_control_plane` | `sf-systematic-research_control_plane-research-lookup-7e6f92a0` | `browserbase-fetch` | -2927 | -8.2376 | 3 | `REVIEW_REPLACEMENT_CANDIDATE` |
+| `sandbox_replay` | `sf2-sandbox_replay-route-fit-spec` | `nexus-acceptance-evidence-gate` | -67247 | -21.5693 | 1 | `REVIEW_REPLACEMENT_CANDIDATE` |
+| `swarm_multi_agent` | `sf2-swarm_multi_agent-route-fit-spec` | `nexus-gemini-code-review-orchestrator` | -636 | -1.9359 | 1 | `REVIEW_REPLACEMENT_CANDIDATE` |
+
+### Live Hold Rows
+
+| 能力 | Candidate | Hold Reason |
+| :--- | :--- | :--- |
+| `direct_master_loop` | `addy-source-driven-development` | `candidate_receipt_chain_incomplete` |
+| `forecast_pregate` | `wondelai-design-sprint` | `candidate_receipt_chain_incomplete` |
+| `learning_closure` | `wondelai-lean-startup` | `candidate_receipt_chain_incomplete` |
+| `mempalace` | `browserbase-what-antibot` | `candidate_receipt_chain_incomplete` |
+| `metabolism_resume` | `context-save` | `candidate_receipt_chain_incomplete` |
+| `metabolism_resume` | `gemini-flash-nexus-worker-handoff` | `candidate_receipt_chain_incomplete` |
+| `policy_capability_gate` | `autoplan` | `candidate_receipt_chain_incomplete` |
+| `repair_loop` | `gstack-openclaw-investigate` | `candidate_receipt_chain_incomplete` |
+| `research_and_source_discipline` | `doc-coauthoring` | `candidate_receipt_chain_incomplete` |
+| `research_control_plane` | `gbrain-query` | `candidate_receipt_chain_incomplete` |
+| `sandbox_replay` | `nexus-live-ask-replay-normalization-gate` | `candidate_receipt_chain_incomplete` |
+| `ui_validator` | `addy-browser-testing-with-devtools` | `candidate_receipt_chain_incomplete` |
+| `ultra_review` | `autoplan` | `candidate_receipt_chain_incomplete` |
+| `xray` | `addy-browser-testing-with-devtools` | `candidate_receipt_chain_incomplete` |
+| `xray` | `browserbase-fetch` | `candidate_receipt_chain_incomplete` |
+
+
 ## 邊界
 - Mode A/B/C 是 HEEP internal evaluation policy，不是 public benchmark claim。
 - MAT-B verdict 只代表內部 Flash+Nexus multi-skill compare，不等於 runtime default apply。

@@ -1,0 +1,1009 @@
+{
+  "schema": "nexus.sf_final_all_candidate_live_compare_task_manifest.v1",
+  "version": "2026-05-21",
+  "frozen": true,
+  "benchmark_id": "nexus-sf-final-all-candidate-live-compare-v1",
+  "description": "Internal live Flash+Nexus current-primary vs all ready candidate skill comparison. Not a public benchmark.",
+  "status": "PASS",
+  "summary": {
+    "task_count": 33,
+    "capability_count": 33,
+    "ready_candidate_count": 264,
+    "live_eligible_candidate_count": 169,
+    "filtered_candidate_count": 95,
+    "runtime_update_allowed": false,
+    "public_benchmark_allowed": false
+  },
+  "tasks": [
+    {
+      "id": "sf-final-all-live-compare-artifact_gate-001",
+      "task_desc": "Use Flash+Nexus to compare current primary skill sf-systematic-artifact_gate-differential-review-461fbd0c against all ready candidate skills for capability artifact_gate.",
+      "target_file": "unused",
+      "test_file": "unused",
+      "success_criteria": "current_vs_candidate_skill_receipt_trust_token_wall_gate",
+      "category": "artifact_gate",
+      "difficulty": "medium",
+      "repo_kind": "neutral_fixture",
+      "repo": "fixture://sf-final-all-candidate-live-compare",
+      "repo_ref": "v1",
+      "fixture_kind": "sf_final_all_candidate_live_compare",
+      "mutation_required": false,
+      "allowed_files": [
+        "unused"
+      ],
+      "forbidden_files": [
+        ".nexus/",
+        "logs/",
+        "benchmarks/"
+      ],
+      "setup_command": "python -V",
+      "verification_command": "python -V",
+      "expected_capabilities": [
+        "artifact_gate"
+      ],
+      "capability_activation_contract": "required",
+      "eligibility_class": "model_required",
+      "public_claim_allowed_metrics": []
+    },
+    {
+      "id": "sf-final-all-live-compare-autonomic_router-001",
+      "task_desc": "Use Flash+Nexus to compare current primary skill sf2-autonomic_router-route-fit-spec against all ready candidate skills for capability autonomic_router.",
+      "target_file": "unused",
+      "test_file": "unused",
+      "success_criteria": "current_vs_candidate_skill_receipt_trust_token_wall_gate",
+      "category": "autonomic_router",
+      "difficulty": "medium",
+      "repo_kind": "neutral_fixture",
+      "repo": "fixture://sf-final-all-candidate-live-compare",
+      "repo_ref": "v1",
+      "fixture_kind": "sf_final_all_candidate_live_compare",
+      "mutation_required": false,
+      "allowed_files": [
+        "unused"
+      ],
+      "forbidden_files": [
+        ".nexus/",
+        "logs/",
+        "benchmarks/"
+      ],
+      "setup_command": "python -V",
+      "verification_command": "python -V",
+      "expected_capabilities": [
+        "autoreason"
+      ],
+      "capability_activation_contract": "required",
+      "eligibility_class": "model_required",
+      "public_claim_allowed_metrics": []
+    },
+    {
+      "id": "sf-final-all-live-compare-autoreason-001",
+      "task_desc": "Use Flash+Nexus to compare current primary skill sf2-belief-route-fit-spec against all ready candidate skills for capability autoreason.",
+      "target_file": "unused",
+      "test_file": "unused",
+      "success_criteria": "current_vs_candidate_skill_receipt_trust_token_wall_gate",
+      "category": "autoreason",
+      "difficulty": "medium",
+      "repo_kind": "neutral_fixture",
+      "repo": "fixture://sf-final-all-candidate-live-compare",
+      "repo_ref": "v1",
+      "fixture_kind": "sf_final_all_candidate_live_compare",
+      "mutation_required": false,
+      "allowed_files": [
+        "unused"
+      ],
+      "forbidden_files": [
+        ".nexus/",
+        "logs/",
+        "benchmarks/"
+      ],
+      "setup_command": "python -V",
+      "verification_command": "python -V",
+      "expected_capabilities": [
+        "autoreason"
+      ],
+      "capability_activation_contract": "required",
+      "eligibility_class": "model_required",
+      "public_claim_allowed_metrics": []
+    },
+    {
+      "id": "sf-final-all-live-compare-benchmark_meta_opt-001",
+      "task_desc": "Use Flash+Nexus to compare current primary skill sf-systematic-benchmark_meta_opt-hugging-face-trackio-d21c6b90 against all ready candidate skills for capability benchmark_meta_opt.",
+      "target_file": "unused",
+      "test_file": "unused",
+      "success_criteria": "current_vs_candidate_skill_receipt_trust_token_wall_gate",
+      "category": "benchmark_meta_opt",
+      "difficulty": "medium",
+      "repo_kind": "neutral_fixture",
+      "repo": "fixture://sf-final-all-candidate-live-compare",
+      "repo_ref": "v1",
+      "fixture_kind": "sf_final_all_candidate_live_compare",
+      "mutation_required": false,
+      "allowed_files": [
+        "unused"
+      ],
+      "forbidden_files": [
+        ".nexus/",
+        "logs/",
+        "benchmarks/"
+      ],
+      "setup_command": "python -V",
+      "verification_command": "python -V",
+      "expected_capabilities": [
+        "hyper"
+      ],
+      "capability_activation_contract": "required",
+      "eligibility_class": "model_required",
+      "public_claim_allowed_metrics": []
+    },
+    {
+      "id": "sf-final-all-live-compare-claim_gate-001",
+      "task_desc": "Use Flash+Nexus to compare current primary skill nexus-benchmark-continuous-optimization against all ready candidate skills for capability claim_gate.",
+      "target_file": "unused",
+      "test_file": "unused",
+      "success_criteria": "current_vs_candidate_skill_receipt_trust_token_wall_gate",
+      "category": "claim_gate",
+      "difficulty": "medium",
+      "repo_kind": "neutral_fixture",
+      "repo": "fixture://sf-final-all-candidate-live-compare",
+      "repo_ref": "v1",
+      "fixture_kind": "sf_final_all_candidate_live_compare",
+      "mutation_required": false,
+      "allowed_files": [
+        "unused"
+      ],
+      "forbidden_files": [
+        ".nexus/",
+        "logs/",
+        "benchmarks/"
+      ],
+      "setup_command": "python -V",
+      "verification_command": "python -V",
+      "expected_capabilities": [
+        "claim_gate"
+      ],
+      "capability_activation_contract": "required",
+      "eligibility_class": "model_required",
+      "public_claim_allowed_metrics": []
+    },
+    {
+      "id": "sf-final-all-live-compare-codeintel-001",
+      "task_desc": "Use Flash+Nexus to compare current primary skill sf-systematic-codeintel-first-principles-thinking-f95019ea against all ready candidate skills for capability codeintel.",
+      "target_file": "unused",
+      "test_file": "unused",
+      "success_criteria": "current_vs_candidate_skill_receipt_trust_token_wall_gate",
+      "category": "codeintel",
+      "difficulty": "medium",
+      "repo_kind": "neutral_fixture",
+      "repo": "fixture://sf-final-all-candidate-live-compare",
+      "repo_ref": "v1",
+      "fixture_kind": "sf_final_all_candidate_live_compare",
+      "mutation_required": false,
+      "allowed_files": [
+        "unused"
+      ],
+      "forbidden_files": [
+        ".nexus/",
+        "logs/",
+        "benchmarks/"
+      ],
+      "setup_command": "python -V",
+      "verification_command": "python -V",
+      "expected_capabilities": [
+        "codeintel"
+      ],
+      "capability_activation_contract": "required",
+      "eligibility_class": "model_required",
+      "public_claim_allowed_metrics": []
+    },
+    {
+      "id": "sf-final-all-live-compare-ddtree-001",
+      "task_desc": "Use Flash+Nexus to compare current primary skill nexus-root-cause-probe against all ready candidate skills for capability ddtree.",
+      "target_file": "unused",
+      "test_file": "unused",
+      "success_criteria": "current_vs_candidate_skill_receipt_trust_token_wall_gate",
+      "category": "ddtree",
+      "difficulty": "medium",
+      "repo_kind": "neutral_fixture",
+      "repo": "fixture://sf-final-all-candidate-live-compare",
+      "repo_ref": "v1",
+      "fixture_kind": "sf_final_all_candidate_live_compare",
+      "mutation_required": false,
+      "allowed_files": [
+        "unused"
+      ],
+      "forbidden_files": [
+        ".nexus/",
+        "logs/",
+        "benchmarks/"
+      ],
+      "setup_command": "python -V",
+      "verification_command": "python -V",
+      "expected_capabilities": [
+        "ddtree"
+      ],
+      "capability_activation_contract": "required",
+      "eligibility_class": "model_required",
+      "public_claim_allowed_metrics": []
+    },
+    {
+      "id": "sf-final-all-live-compare-direct_master_loop-001",
+      "task_desc": "Use Flash+Nexus to compare current primary skill sf-systematic-direct_master_loop-build-32802a87 against all ready candidate skills for capability direct_master_loop.",
+      "target_file": "unused",
+      "test_file": "unused",
+      "success_criteria": "current_vs_candidate_skill_receipt_trust_token_wall_gate",
+      "category": "direct_master_loop",
+      "difficulty": "medium",
+      "repo_kind": "neutral_fixture",
+      "repo": "fixture://sf-final-all-candidate-live-compare",
+      "repo_ref": "v1",
+      "fixture_kind": "sf_final_all_candidate_live_compare",
+      "mutation_required": false,
+      "allowed_files": [
+        "unused"
+      ],
+      "forbidden_files": [
+        ".nexus/",
+        "logs/",
+        "benchmarks/"
+      ],
+      "setup_command": "python -V",
+      "verification_command": "python -V",
+      "expected_capabilities": [
+        "hyper"
+      ],
+      "capability_activation_contract": "required",
+      "eligibility_class": "model_required",
+      "public_claim_allowed_metrics": []
+    },
+    {
+      "id": "sf-final-all-live-compare-drone-001",
+      "task_desc": "Use Flash+Nexus to compare current primary skill sf-systematic-drone-python-background-jobs-18326a62 against all ready candidate skills for capability drone.",
+      "target_file": "unused",
+      "test_file": "unused",
+      "success_criteria": "current_vs_candidate_skill_receipt_trust_token_wall_gate",
+      "category": "drone",
+      "difficulty": "medium",
+      "repo_kind": "neutral_fixture",
+      "repo": "fixture://sf-final-all-candidate-live-compare",
+      "repo_ref": "v1",
+      "fixture_kind": "sf_final_all_candidate_live_compare",
+      "mutation_required": false,
+      "allowed_files": [
+        "unused"
+      ],
+      "forbidden_files": [
+        ".nexus/",
+        "logs/",
+        "benchmarks/"
+      ],
+      "setup_command": "python -V",
+      "verification_command": "python -V",
+      "expected_capabilities": [
+        "drone"
+      ],
+      "capability_activation_contract": "required",
+      "eligibility_class": "model_required",
+      "public_claim_allowed_metrics": []
+    },
+    {
+      "id": "sf-final-all-live-compare-external_productivity-001",
+      "task_desc": "Use Flash+Nexus to compare current primary skill sf-systematic-external_productivity-writer-77dc7840 against all ready candidate skills for capability external_productivity.",
+      "target_file": "unused",
+      "test_file": "unused",
+      "success_criteria": "current_vs_candidate_skill_receipt_trust_token_wall_gate",
+      "category": "external_productivity",
+      "difficulty": "medium",
+      "repo_kind": "neutral_fixture",
+      "repo": "fixture://sf-final-all-candidate-live-compare",
+      "repo_ref": "v1",
+      "fixture_kind": "sf_final_all_candidate_live_compare",
+      "mutation_required": false,
+      "allowed_files": [
+        "unused"
+      ],
+      "forbidden_files": [
+        ".nexus/",
+        "logs/",
+        "benchmarks/"
+      ],
+      "setup_command": "python -V",
+      "verification_command": "python -V",
+      "expected_capabilities": [
+        "research"
+      ],
+      "capability_activation_contract": "required",
+      "eligibility_class": "model_required",
+      "public_claim_allowed_metrics": []
+    },
+    {
+      "id": "sf-final-all-live-compare-file_lock_security_gate-001",
+      "task_desc": "Use Flash+Nexus to compare current primary skill sf2-file_lock_security_gate-route-fit-spec against all ready candidate skills for capability file_lock_security_gate.",
+      "target_file": "unused",
+      "test_file": "unused",
+      "success_criteria": "current_vs_candidate_skill_receipt_trust_token_wall_gate",
+      "category": "file_lock_security_gate",
+      "difficulty": "medium",
+      "repo_kind": "neutral_fixture",
+      "repo": "fixture://sf-final-all-candidate-live-compare",
+      "repo_ref": "v1",
+      "fixture_kind": "sf_final_all_candidate_live_compare",
+      "mutation_required": false,
+      "allowed_files": [
+        "unused"
+      ],
+      "forbidden_files": [
+        ".nexus/",
+        "logs/",
+        "benchmarks/"
+      ],
+      "setup_command": "python -V",
+      "verification_command": "python -V",
+      "expected_capabilities": [
+        "ultra_review"
+      ],
+      "capability_activation_contract": "required",
+      "eligibility_class": "model_required",
+      "public_claim_allowed_metrics": []
+    },
+    {
+      "id": "sf-final-all-live-compare-forecast_pregate-001",
+      "task_desc": "Use Flash+Nexus to compare current primary skill create-plan against all ready candidate skills for capability forecast_pregate.",
+      "target_file": "unused",
+      "test_file": "unused",
+      "success_criteria": "current_vs_candidate_skill_receipt_trust_token_wall_gate",
+      "category": "forecast_pregate",
+      "difficulty": "medium",
+      "repo_kind": "neutral_fixture",
+      "repo": "fixture://sf-final-all-candidate-live-compare",
+      "repo_ref": "v1",
+      "fixture_kind": "sf_final_all_candidate_live_compare",
+      "mutation_required": false,
+      "allowed_files": [
+        "unused"
+      ],
+      "forbidden_files": [
+        ".nexus/",
+        "logs/",
+        "benchmarks/"
+      ],
+      "setup_command": "python -V",
+      "verification_command": "python -V",
+      "expected_capabilities": [
+        "autoreason"
+      ],
+      "capability_activation_contract": "required",
+      "eligibility_class": "model_required",
+      "public_claim_allowed_metrics": []
+    },
+    {
+      "id": "sf-final-all-live-compare-governance_and_trust-001",
+      "task_desc": "Use Flash+Nexus to compare current primary skill sf-systematic-governance_and_trust-aegisops-ai-0aa841e2 against all ready candidate skills for capability governance_and_trust.",
+      "target_file": "unused",
+      "test_file": "unused",
+      "success_criteria": "current_vs_candidate_skill_receipt_trust_token_wall_gate",
+      "category": "governance_and_trust",
+      "difficulty": "medium",
+      "repo_kind": "neutral_fixture",
+      "repo": "fixture://sf-final-all-candidate-live-compare",
+      "repo_ref": "v1",
+      "fixture_kind": "sf_final_all_candidate_live_compare",
+      "mutation_required": false,
+      "allowed_files": [
+        "unused"
+      ],
+      "forbidden_files": [
+        ".nexus/",
+        "logs/",
+        "benchmarks/"
+      ],
+      "setup_command": "python -V",
+      "verification_command": "python -V",
+      "expected_capabilities": [
+        "mempalace_gate"
+      ],
+      "capability_activation_contract": "required",
+      "eligibility_class": "model_required",
+      "public_claim_allowed_metrics": []
+    },
+    {
+      "id": "sf-final-all-live-compare-hyper_sprint-001",
+      "task_desc": "Use Flash+Nexus to compare current primary skill sf2-hyper_sprint-route-fit-spec against all ready candidate skills for capability hyper_sprint.",
+      "target_file": "unused",
+      "test_file": "unused",
+      "success_criteria": "current_vs_candidate_skill_receipt_trust_token_wall_gate",
+      "category": "hyper_sprint",
+      "difficulty": "medium",
+      "repo_kind": "neutral_fixture",
+      "repo": "fixture://sf-final-all-candidate-live-compare",
+      "repo_ref": "v1",
+      "fixture_kind": "sf_final_all_candidate_live_compare",
+      "mutation_required": false,
+      "allowed_files": [
+        "unused"
+      ],
+      "forbidden_files": [
+        ".nexus/",
+        "logs/",
+        "benchmarks/"
+      ],
+      "setup_command": "python -V",
+      "verification_command": "python -V",
+      "expected_capabilities": [
+        "hyper"
+      ],
+      "capability_activation_contract": "required",
+      "eligibility_class": "model_required",
+      "public_claim_allowed_metrics": []
+    },
+    {
+      "id": "sf-final-all-live-compare-lancedb-001",
+      "task_desc": "Use Flash+Nexus to compare current primary skill research-source-validation-auditor against all ready candidate skills for capability lancedb.",
+      "target_file": "unused",
+      "test_file": "unused",
+      "success_criteria": "current_vs_candidate_skill_receipt_trust_token_wall_gate",
+      "category": "lancedb",
+      "difficulty": "medium",
+      "repo_kind": "neutral_fixture",
+      "repo": "fixture://sf-final-all-candidate-live-compare",
+      "repo_ref": "v1",
+      "fixture_kind": "sf_final_all_candidate_live_compare",
+      "mutation_required": false,
+      "allowed_files": [
+        "unused"
+      ],
+      "forbidden_files": [
+        ".nexus/",
+        "logs/",
+        "benchmarks/"
+      ],
+      "setup_command": "python -V",
+      "verification_command": "python -V",
+      "expected_capabilities": [
+        "lancedb"
+      ],
+      "capability_activation_contract": "required",
+      "eligibility_class": "model_required",
+      "public_claim_allowed_metrics": []
+    },
+    {
+      "id": "sf-final-all-live-compare-learn_ask-001",
+      "task_desc": "Use Flash+Nexus to compare current primary skill github8-skilless-deep-research-learn-ask against all ready candidate skills for capability learn_ask.",
+      "target_file": "unused",
+      "test_file": "unused",
+      "success_criteria": "current_vs_candidate_skill_receipt_trust_token_wall_gate",
+      "category": "learn_ask",
+      "difficulty": "medium",
+      "repo_kind": "neutral_fixture",
+      "repo": "fixture://sf-final-all-candidate-live-compare",
+      "repo_ref": "v1",
+      "fixture_kind": "sf_final_all_candidate_live_compare",
+      "mutation_required": false,
+      "allowed_files": [
+        "unused"
+      ],
+      "forbidden_files": [
+        ".nexus/",
+        "logs/",
+        "benchmarks/"
+      ],
+      "setup_command": "python -V",
+      "verification_command": "python -V",
+      "expected_capabilities": [
+        "semantic_searcher"
+      ],
+      "capability_activation_contract": "required",
+      "eligibility_class": "model_required",
+      "public_claim_allowed_metrics": []
+    },
+    {
+      "id": "sf-final-all-live-compare-learning_closure-001",
+      "task_desc": "Use Flash+Nexus to compare current primary skill sf-systematic-learning_closure-memory-lint-8bdb0fca against all ready candidate skills for capability learning_closure.",
+      "target_file": "unused",
+      "test_file": "unused",
+      "success_criteria": "current_vs_candidate_skill_receipt_trust_token_wall_gate",
+      "category": "learning_closure",
+      "difficulty": "medium",
+      "repo_kind": "neutral_fixture",
+      "repo": "fixture://sf-final-all-candidate-live-compare",
+      "repo_ref": "v1",
+      "fixture_kind": "sf_final_all_candidate_live_compare",
+      "mutation_required": false,
+      "allowed_files": [
+        "unused"
+      ],
+      "forbidden_files": [
+        ".nexus/",
+        "logs/",
+        "benchmarks/"
+      ],
+      "setup_command": "python -V",
+      "verification_command": "python -V",
+      "expected_capabilities": [
+        "semantic_failure_sensor"
+      ],
+      "capability_activation_contract": "required",
+      "eligibility_class": "model_required",
+      "public_claim_allowed_metrics": []
+    },
+    {
+      "id": "sf-final-all-live-compare-memory-001",
+      "task_desc": "Use Flash+Nexus to compare current primary skill sf-systematic-memory-project-skill-audit-cc8b7621 against all ready candidate skills for capability memory.",
+      "target_file": "unused",
+      "test_file": "unused",
+      "success_criteria": "current_vs_candidate_skill_receipt_trust_token_wall_gate",
+      "category": "memory",
+      "difficulty": "medium",
+      "repo_kind": "neutral_fixture",
+      "repo": "fixture://sf-final-all-candidate-live-compare",
+      "repo_ref": "v1",
+      "fixture_kind": "sf_final_all_candidate_live_compare",
+      "mutation_required": false,
+      "allowed_files": [
+        "unused"
+      ],
+      "forbidden_files": [
+        ".nexus/",
+        "logs/",
+        "benchmarks/"
+      ],
+      "setup_command": "python -V",
+      "verification_command": "python -V",
+      "expected_capabilities": [
+        "memory"
+      ],
+      "capability_activation_contract": "required",
+      "eligibility_class": "model_required",
+      "public_claim_allowed_metrics": []
+    },
+    {
+      "id": "sf-final-all-live-compare-mempalace-001",
+      "task_desc": "Use Flash+Nexus to compare current primary skill sf2-mempalace-route-fit-spec against all ready candidate skills for capability mempalace.",
+      "target_file": "unused",
+      "test_file": "unused",
+      "success_criteria": "current_vs_candidate_skill_receipt_trust_token_wall_gate",
+      "category": "mempalace",
+      "difficulty": "medium",
+      "repo_kind": "neutral_fixture",
+      "repo": "fixture://sf-final-all-candidate-live-compare",
+      "repo_ref": "v1",
+      "fixture_kind": "sf_final_all_candidate_live_compare",
+      "mutation_required": false,
+      "allowed_files": [
+        "unused"
+      ],
+      "forbidden_files": [
+        ".nexus/",
+        "logs/",
+        "benchmarks/"
+      ],
+      "setup_command": "python -V",
+      "verification_command": "python -V",
+      "expected_capabilities": [
+        "mempalace_gate"
+      ],
+      "capability_activation_contract": "required",
+      "eligibility_class": "model_required",
+      "public_claim_allowed_metrics": []
+    },
+    {
+      "id": "sf-final-all-live-compare-metabolism_resume-001",
+      "task_desc": "Use Flash+Nexus to compare current primary skill github-auto-skill-safe-learning against all ready candidate skills for capability metabolism_resume.",
+      "target_file": "unused",
+      "test_file": "unused",
+      "success_criteria": "current_vs_candidate_skill_receipt_trust_token_wall_gate",
+      "category": "metabolism_resume",
+      "difficulty": "medium",
+      "repo_kind": "neutral_fixture",
+      "repo": "fixture://sf-final-all-candidate-live-compare",
+      "repo_ref": "v1",
+      "fixture_kind": "sf_final_all_candidate_live_compare",
+      "mutation_required": false,
+      "allowed_files": [
+        "unused"
+      ],
+      "forbidden_files": [
+        ".nexus/",
+        "logs/",
+        "benchmarks/"
+      ],
+      "setup_command": "python -V",
+      "verification_command": "python -V",
+      "expected_capabilities": [
+        "semantic_failure_sensor"
+      ],
+      "capability_activation_contract": "required",
+      "eligibility_class": "model_required",
+      "public_claim_allowed_metrics": []
+    },
+    {
+      "id": "sf-final-all-live-compare-nightshift-001",
+      "task_desc": "Use Flash+Nexus to compare current primary skill sf2-nightshift-route-fit-spec against all ready candidate skills for capability nightshift.",
+      "target_file": "unused",
+      "test_file": "unused",
+      "success_criteria": "current_vs_candidate_skill_receipt_trust_token_wall_gate",
+      "category": "nightshift",
+      "difficulty": "medium",
+      "repo_kind": "neutral_fixture",
+      "repo": "fixture://sf-final-all-candidate-live-compare",
+      "repo_ref": "v1",
+      "fixture_kind": "sf_final_all_candidate_live_compare",
+      "mutation_required": false,
+      "allowed_files": [
+        "unused"
+      ],
+      "forbidden_files": [
+        ".nexus/",
+        "logs/",
+        "benchmarks/"
+      ],
+      "setup_command": "python -V",
+      "verification_command": "python -V",
+      "expected_capabilities": [
+        "nightshift"
+      ],
+      "capability_activation_contract": "required",
+      "eligibility_class": "model_required",
+      "public_claim_allowed_metrics": []
+    },
+    {
+      "id": "sf-final-all-live-compare-policy_capability_gate-001",
+      "task_desc": "Use Flash+Nexus to compare current primary skill sf-systematic-policy_capability_gate-aegisops-ai-0aa841e2 against all ready candidate skills for capability policy_capability_gate.",
+      "target_file": "unused",
+      "test_file": "unused",
+      "success_criteria": "current_vs_candidate_skill_receipt_trust_token_wall_gate",
+      "category": "policy_capability_gate",
+      "difficulty": "medium",
+      "repo_kind": "neutral_fixture",
+      "repo": "fixture://sf-final-all-candidate-live-compare",
+      "repo_ref": "v1",
+      "fixture_kind": "sf_final_all_candidate_live_compare",
+      "mutation_required": false,
+      "allowed_files": [
+        "unused"
+      ],
+      "forbidden_files": [
+        ".nexus/",
+        "logs/",
+        "benchmarks/"
+      ],
+      "setup_command": "python -V",
+      "verification_command": "python -V",
+      "expected_capabilities": [
+        "mempalace_gate"
+      ],
+      "capability_activation_contract": "required",
+      "eligibility_class": "model_required",
+      "public_claim_allowed_metrics": []
+    },
+    {
+      "id": "sf-final-all-live-compare-registry_skills_sync-001",
+      "task_desc": "Use Flash+Nexus to compare current primary skill github5-skill-seekers-safe-registry-builder against all ready candidate skills for capability registry_skills_sync.",
+      "target_file": "unused",
+      "test_file": "unused",
+      "success_criteria": "current_vs_candidate_skill_receipt_trust_token_wall_gate",
+      "category": "registry_skills_sync",
+      "difficulty": "medium",
+      "repo_kind": "neutral_fixture",
+      "repo": "fixture://sf-final-all-candidate-live-compare",
+      "repo_ref": "v1",
+      "fixture_kind": "sf_final_all_candidate_live_compare",
+      "mutation_required": false,
+      "allowed_files": [
+        "unused"
+      ],
+      "forbidden_files": [
+        ".nexus/",
+        "logs/",
+        "benchmarks/"
+      ],
+      "setup_command": "python -V",
+      "verification_command": "python -V",
+      "expected_capabilities": [
+        "semantic_searcher"
+      ],
+      "capability_activation_contract": "required",
+      "eligibility_class": "model_required",
+      "public_claim_allowed_metrics": []
+    },
+    {
+      "id": "sf-final-all-live-compare-regression_guard-001",
+      "task_desc": "Use Flash+Nexus to compare current primary skill sf-systematic-regression_guard-odoo-automated-tests-dad98433 against all ready candidate skills for capability regression_guard.",
+      "target_file": "unused",
+      "test_file": "unused",
+      "success_criteria": "current_vs_candidate_skill_receipt_trust_token_wall_gate",
+      "category": "regression_guard",
+      "difficulty": "medium",
+      "repo_kind": "neutral_fixture",
+      "repo": "fixture://sf-final-all-candidate-live-compare",
+      "repo_ref": "v1",
+      "fixture_kind": "sf_final_all_candidate_live_compare",
+      "mutation_required": false,
+      "allowed_files": [
+        "unused"
+      ],
+      "forbidden_files": [
+        ".nexus/",
+        "logs/",
+        "benchmarks/"
+      ],
+      "setup_command": "python -V",
+      "verification_command": "python -V",
+      "expected_capabilities": [
+        "semantic_failure_sensor"
+      ],
+      "capability_activation_contract": "required",
+      "eligibility_class": "model_required",
+      "public_claim_allowed_metrics": []
+    },
+    {
+      "id": "sf-final-all-live-compare-repair_loop-001",
+      "task_desc": "Use Flash+Nexus to compare current primary skill sf-systematic-repair_loop-odoo-automated-tests-dad98433 against all ready candidate skills for capability repair_loop.",
+      "target_file": "unused",
+      "test_file": "unused",
+      "success_criteria": "current_vs_candidate_skill_receipt_trust_token_wall_gate",
+      "category": "repair_loop",
+      "difficulty": "medium",
+      "repo_kind": "neutral_fixture",
+      "repo": "fixture://sf-final-all-candidate-live-compare",
+      "repo_ref": "v1",
+      "fixture_kind": "sf_final_all_candidate_live_compare",
+      "mutation_required": false,
+      "allowed_files": [
+        "unused"
+      ],
+      "forbidden_files": [
+        ".nexus/",
+        "logs/",
+        "benchmarks/"
+      ],
+      "setup_command": "python -V",
+      "verification_command": "python -V",
+      "expected_capabilities": [
+        "hyper"
+      ],
+      "capability_activation_contract": "required",
+      "eligibility_class": "model_required",
+      "public_claim_allowed_metrics": []
+    },
+    {
+      "id": "sf-final-all-live-compare-research-001",
+      "task_desc": "Use Flash+Nexus to compare current primary skill sf-systematic-research-research-lookup-7e6f92a0 against all ready candidate skills for capability research.",
+      "target_file": "unused",
+      "test_file": "unused",
+      "success_criteria": "current_vs_candidate_skill_receipt_trust_token_wall_gate",
+      "category": "research",
+      "difficulty": "medium",
+      "repo_kind": "neutral_fixture",
+      "repo": "fixture://sf-final-all-candidate-live-compare",
+      "repo_ref": "v1",
+      "fixture_kind": "sf_final_all_candidate_live_compare",
+      "mutation_required": false,
+      "allowed_files": [
+        "unused"
+      ],
+      "forbidden_files": [
+        ".nexus/",
+        "logs/",
+        "benchmarks/"
+      ],
+      "setup_command": "python -V",
+      "verification_command": "python -V",
+      "expected_capabilities": [
+        "research"
+      ],
+      "capability_activation_contract": "required",
+      "eligibility_class": "model_required",
+      "public_claim_allowed_metrics": []
+    },
+    {
+      "id": "sf-final-all-live-compare-research_and_source_discipline-001",
+      "task_desc": "Use Flash+Nexus to compare current primary skill research-citation-chain-verifier against all ready candidate skills for capability research_and_source_discipline.",
+      "target_file": "unused",
+      "test_file": "unused",
+      "success_criteria": "current_vs_candidate_skill_receipt_trust_token_wall_gate",
+      "category": "research_and_source_discipline",
+      "difficulty": "medium",
+      "repo_kind": "neutral_fixture",
+      "repo": "fixture://sf-final-all-candidate-live-compare",
+      "repo_ref": "v1",
+      "fixture_kind": "sf_final_all_candidate_live_compare",
+      "mutation_required": false,
+      "allowed_files": [
+        "unused"
+      ],
+      "forbidden_files": [
+        ".nexus/",
+        "logs/",
+        "benchmarks/"
+      ],
+      "setup_command": "python -V",
+      "verification_command": "python -V",
+      "expected_capabilities": [
+        "research"
+      ],
+      "capability_activation_contract": "required",
+      "eligibility_class": "model_required",
+      "public_claim_allowed_metrics": []
+    },
+    {
+      "id": "sf-final-all-live-compare-research_control_plane-001",
+      "task_desc": "Use Flash+Nexus to compare current primary skill sf-systematic-research_control_plane-research-lookup-7e6f92a0 against all ready candidate skills for capability research_control_plane.",
+      "target_file": "unused",
+      "test_file": "unused",
+      "success_criteria": "current_vs_candidate_skill_receipt_trust_token_wall_gate",
+      "category": "research_control_plane",
+      "difficulty": "medium",
+      "repo_kind": "neutral_fixture",
+      "repo": "fixture://sf-final-all-candidate-live-compare",
+      "repo_ref": "v1",
+      "fixture_kind": "sf_final_all_candidate_live_compare",
+      "mutation_required": false,
+      "allowed_files": [
+        "unused"
+      ],
+      "forbidden_files": [
+        ".nexus/",
+        "logs/",
+        "benchmarks/"
+      ],
+      "setup_command": "python -V",
+      "verification_command": "python -V",
+      "expected_capabilities": [
+        "research"
+      ],
+      "capability_activation_contract": "required",
+      "eligibility_class": "model_required",
+      "public_claim_allowed_metrics": []
+    },
+    {
+      "id": "sf-final-all-live-compare-sandbox_replay-001",
+      "task_desc": "Use Flash+Nexus to compare current primary skill sf2-sandbox_replay-route-fit-spec against all ready candidate skills for capability sandbox_replay.",
+      "target_file": "unused",
+      "test_file": "unused",
+      "success_criteria": "current_vs_candidate_skill_receipt_trust_token_wall_gate",
+      "category": "sandbox_replay",
+      "difficulty": "medium",
+      "repo_kind": "neutral_fixture",
+      "repo": "fixture://sf-final-all-candidate-live-compare",
+      "repo_ref": "v1",
+      "fixture_kind": "sf_final_all_candidate_live_compare",
+      "mutation_required": false,
+      "allowed_files": [
+        "unused"
+      ],
+      "forbidden_files": [
+        ".nexus/",
+        "logs/",
+        "benchmarks/"
+      ],
+      "setup_command": "python -V",
+      "verification_command": "python -V",
+      "expected_capabilities": [
+        "harness_preflight_sensor"
+      ],
+      "capability_activation_contract": "required",
+      "eligibility_class": "model_required",
+      "public_claim_allowed_metrics": []
+    },
+    {
+      "id": "sf-final-all-live-compare-swarm_multi_agent-001",
+      "task_desc": "Use Flash+Nexus to compare current primary skill sf2-swarm_multi_agent-route-fit-spec against all ready candidate skills for capability swarm_multi_agent.",
+      "target_file": "unused",
+      "test_file": "unused",
+      "success_criteria": "current_vs_candidate_skill_receipt_trust_token_wall_gate",
+      "category": "swarm_multi_agent",
+      "difficulty": "medium",
+      "repo_kind": "neutral_fixture",
+      "repo": "fixture://sf-final-all-candidate-live-compare",
+      "repo_ref": "v1",
+      "fixture_kind": "sf_final_all_candidate_live_compare",
+      "mutation_required": false,
+      "allowed_files": [
+        "unused"
+      ],
+      "forbidden_files": [
+        ".nexus/",
+        "logs/",
+        "benchmarks/"
+      ],
+      "setup_command": "python -V",
+      "verification_command": "python -V",
+      "expected_capabilities": [
+        "swarm"
+      ],
+      "capability_activation_contract": "required",
+      "eligibility_class": "model_required",
+      "public_claim_allowed_metrics": []
+    },
+    {
+      "id": "sf-final-all-live-compare-ui_validator-001",
+      "task_desc": "Use Flash+Nexus to compare current primary skill sf-systematic-ui_validator-e2e-testing-d98eb7c3 against all ready candidate skills for capability ui_validator.",
+      "target_file": "unused",
+      "test_file": "unused",
+      "success_criteria": "current_vs_candidate_skill_receipt_trust_token_wall_gate",
+      "category": "ui_validator",
+      "difficulty": "medium",
+      "repo_kind": "neutral_fixture",
+      "repo": "fixture://sf-final-all-candidate-live-compare",
+      "repo_ref": "v1",
+      "fixture_kind": "sf_final_all_candidate_live_compare",
+      "mutation_required": false,
+      "allowed_files": [
+        "unused"
+      ],
+      "forbidden_files": [
+        ".nexus/",
+        "logs/",
+        "benchmarks/"
+      ],
+      "setup_command": "python -V",
+      "verification_command": "python -V",
+      "expected_capabilities": [
+        "ultra_review"
+      ],
+      "capability_activation_contract": "required",
+      "eligibility_class": "model_required",
+      "public_claim_allowed_metrics": []
+    },
+    {
+      "id": "sf-final-all-live-compare-ultra_review-001",
+      "task_desc": "Use Flash+Nexus to compare current primary skill github11-vulnerability-scanner-ultra-review against all ready candidate skills for capability ultra_review.",
+      "target_file": "unused",
+      "test_file": "unused",
+      "success_criteria": "current_vs_candidate_skill_receipt_trust_token_wall_gate",
+      "category": "ultra_review",
+      "difficulty": "medium",
+      "repo_kind": "neutral_fixture",
+      "repo": "fixture://sf-final-all-candidate-live-compare",
+      "repo_ref": "v1",
+      "fixture_kind": "sf_final_all_candidate_live_compare",
+      "mutation_required": false,
+      "allowed_files": [
+        "unused"
+      ],
+      "forbidden_files": [
+        ".nexus/",
+        "logs/",
+        "benchmarks/"
+      ],
+      "setup_command": "python -V",
+      "verification_command": "python -V",
+      "expected_capabilities": [
+        "ultra_review"
+      ],
+      "capability_activation_contract": "required",
+      "eligibility_class": "model_required",
+      "public_claim_allowed_metrics": []
+    },
+    {
+      "id": "sf-final-all-live-compare-xray-001",
+      "task_desc": "Use Flash+Nexus to compare current primary skill diagnose against all ready candidate skills for capability xray.",
+      "target_file": "unused",
+      "test_file": "unused",
+      "success_criteria": "current_vs_candidate_skill_receipt_trust_token_wall_gate",
+      "category": "xray",
+      "difficulty": "medium",
+      "repo_kind": "neutral_fixture",
+      "repo": "fixture://sf-final-all-candidate-live-compare",
+      "repo_ref": "v1",
+      "fixture_kind": "sf_final_all_candidate_live_compare",
+      "mutation_required": false,
+      "allowed_files": [
+        "unused"
+      ],
+      "forbidden_files": [
+        ".nexus/",
+        "logs/",
+        "benchmarks/"
+      ],
+      "setup_command": "python -V",
+      "verification_command": "python -V",
+      "expected_capabilities": [
+        "codeintel"
+      ],
+      "capability_activation_contract": "required",
+      "eligibility_class": "model_required",
+      "public_claim_allowed_metrics": []
+    }
+  ]
+}

@@ -1,0 +1,1921 @@
+{
+  "schema": "nexus.sf_final_all_candidate_live_compare_skill_status.v1",
+  "summary": {
+    "skill_count": 147,
+    "runtime_update_allowed": false,
+    "public_benchmark_allowed": false
+  },
+  "skills": [
+    {
+      "name": "sf-systematic-artifact_gate-differential-review-461fbd0c",
+      "path": ".agents/skills/sf-systematic-artifact_gate-differential-review-461fbd0c/SKILL.md",
+      "root": "nexus_repo_local",
+      "skill_status": "nexus_curated_candidate",
+      "test_level": "sf_final_all_candidate_live_compare",
+      "action": "ablation_only_compare",
+      "capability_mount": "artifact_gate",
+      "family": "artifact_gate",
+      "reason_codes": [
+        "sf_final_all_candidate_current_primary"
+      ]
+    },
+    {
+      "name": "acceptance-evidence-failclosed",
+      "path": "/Users/jameschen/.agents/skills/devops/acceptance-evidence-failclosed/SKILL.md",
+      "root": "external_reference",
+      "skill_status": "external_reference_candidate",
+      "test_level": "sf_final_all_candidate_live_compare",
+      "action": "ablation_only_compare",
+      "capability_mount": "artifact_gate",
+      "family": "artifact_gate",
+      "reason_codes": [
+        "sf_final_all_candidate_candidate"
+      ]
+    },
+    {
+      "name": "browse",
+      "path": "/Users/jameschen/.agents/skills/gstack/.agents/skills/gstack-browse/SKILL.md",
+      "root": "external_reference",
+      "skill_status": "external_reference_candidate",
+      "test_level": "sf_final_all_candidate_live_compare",
+      "action": "ablation_only_compare",
+      "capability_mount": "artifact_gate",
+      "family": "artifact_gate",
+      "reason_codes": [
+        "sf_final_all_candidate_candidate"
+      ]
+    },
+    {
+      "name": "gstack",
+      "path": "/Users/jameschen/.agents/skills/gstack/.agents/skills/gstack/SKILL.md",
+      "root": "external_reference",
+      "skill_status": "external_reference_candidate",
+      "test_level": "sf_final_all_candidate_live_compare",
+      "action": "ablation_only_compare",
+      "capability_mount": "artifact_gate",
+      "family": "artifact_gate",
+      "reason_codes": [
+        "sf_final_all_candidate_candidate"
+      ]
+    },
+    {
+      "name": "gstack-browse",
+      "path": "/Users/jameschen/.agents/skills/gstack-browse/SKILL.md",
+      "root": "external_reference",
+      "skill_status": "external_reference_candidate",
+      "test_level": "sf_final_all_candidate_live_compare",
+      "action": "ablation_only_compare",
+      "capability_mount": "artifact_gate",
+      "family": "artifact_gate",
+      "reason_codes": [
+        "sf_final_all_candidate_candidate"
+      ]
+    },
+    {
+      "name": "nexus-acceptance-evidence-gate",
+      "path": "/Users/jameschen/.agents/skills/devops/nexus-acceptance-evidence-gate/SKILL.md",
+      "root": "external_reference",
+      "skill_status": "external_reference_candidate",
+      "test_level": "sf_final_all_candidate_live_compare",
+      "action": "ablation_only_compare",
+      "capability_mount": "artifact_gate",
+      "family": "artifact_gate",
+      "reason_codes": [
+        "sf_final_all_candidate_candidate"
+      ]
+    },
+    {
+      "name": "nexus-agent-execution-board-failclosed",
+      "path": "/Users/jameschen/.agents/skills/devops/nexus-agent-execution-board-failclosed/SKILL.md",
+      "root": "external_reference",
+      "skill_status": "external_reference_candidate",
+      "test_level": "sf_final_all_candidate_live_compare",
+      "action": "ablation_only_compare",
+      "capability_mount": "artifact_gate",
+      "family": "artifact_gate",
+      "reason_codes": [
+        "sf_final_all_candidate_candidate"
+      ]
+    },
+    {
+      "name": "browserbase-ui-test",
+      "path": "/Users/jameschen/.agents/skills/browserbase-ui-test/SKILL.md",
+      "root": "external_reference",
+      "skill_status": "external_reference_candidate",
+      "test_level": "sf_final_all_candidate_live_compare",
+      "action": "ablation_only_compare",
+      "capability_mount": "artifact_gate",
+      "family": "artifact_gate",
+      "reason_codes": [
+        "sf_final_all_candidate_candidate"
+      ]
+    },
+    {
+      "name": "claude",
+      "path": "/Users/jameschen/.agents/skills/gstack/.agents/skills/gstack-claude/SKILL.md",
+      "root": "external_reference",
+      "skill_status": "external_reference_candidate",
+      "test_level": "sf_final_all_candidate_live_compare",
+      "action": "ablation_only_compare",
+      "capability_mount": "artifact_gate",
+      "family": "artifact_gate",
+      "reason_codes": [
+        "sf_final_all_candidate_candidate"
+      ]
+    },
+    {
+      "name": "sf2-autonomic_router-route-fit-spec",
+      "path": ".agents/skills/sf2-autonomic_router-route-fit-spec/SKILL.md",
+      "root": "nexus_repo_local",
+      "skill_status": "nexus_curated_candidate",
+      "test_level": "sf_final_all_candidate_live_compare",
+      "action": "ablation_only_compare",
+      "capability_mount": "autoreason",
+      "family": "autonomic_router",
+      "reason_codes": [
+        "sf_final_all_candidate_current_primary"
+      ]
+    },
+    {
+      "name": "maps",
+      "path": "/Users/jameschen/Workspace/hermes-agent/skills/productivity/maps/SKILL.md",
+      "root": "external_reference",
+      "skill_status": "external_reference_candidate",
+      "test_level": "sf_final_all_candidate_live_compare",
+      "action": "ablation_only_compare",
+      "capability_mount": "autoreason",
+      "family": "autonomic_router",
+      "reason_codes": [
+        "sf_final_all_candidate_candidate"
+      ]
+    },
+    {
+      "name": "sf2-belief-route-fit-spec",
+      "path": ".agents/skills/sf2-belief-route-fit-spec/SKILL.md",
+      "root": "nexus_repo_local",
+      "skill_status": "nexus_curated_candidate",
+      "test_level": "sf_final_all_candidate_live_compare",
+      "action": "ablation_only_compare",
+      "capability_mount": "autoreason",
+      "family": "autoreason",
+      "reason_codes": [
+        "sf_final_all_candidate_current_primary"
+      ]
+    },
+    {
+      "name": "wondelai-clean-architecture",
+      "path": "/Users/jameschen/.agents/skills/wondelai-clean-architecture/SKILL.md",
+      "root": "external_reference",
+      "skill_status": "external_reference_candidate",
+      "test_level": "sf_final_all_candidate_live_compare",
+      "action": "ablation_only_compare",
+      "capability_mount": "autoreason",
+      "family": "autoreason",
+      "reason_codes": [
+        "sf_final_all_candidate_candidate"
+      ]
+    },
+    {
+      "name": "wondelai-release-it",
+      "path": "/Users/jameschen/.agents/skills/wondelai-release-it/SKILL.md",
+      "root": "external_reference",
+      "skill_status": "external_reference_candidate",
+      "test_level": "sf_final_all_candidate_live_compare",
+      "action": "ablation_only_compare",
+      "capability_mount": "autoreason",
+      "family": "autoreason",
+      "reason_codes": [
+        "sf_final_all_candidate_candidate"
+      ]
+    },
+    {
+      "name": "sf-systematic-benchmark_meta_opt-hugging-face-trackio-d21c6b90",
+      "path": ".agents/skills/sf-systematic-benchmark_meta_opt-hugging-face-trackio-d21c6b90/SKILL.md",
+      "root": "nexus_repo_local",
+      "skill_status": "nexus_curated_candidate",
+      "test_level": "sf_final_all_candidate_live_compare",
+      "action": "ablation_only_compare",
+      "capability_mount": "hyper",
+      "family": "benchmark_meta_opt",
+      "reason_codes": [
+        "sf_final_all_candidate_current_primary"
+      ]
+    },
+    {
+      "name": "evaluating-llms-harness",
+      "path": "/Users/jameschen/Workspace/hermes-agent/skills/mlops/evaluation/lm-evaluation-harness/SKILL.md",
+      "root": "external_reference",
+      "skill_status": "external_reference_candidate",
+      "test_level": "sf_final_all_candidate_live_compare",
+      "action": "ablation_only_compare",
+      "capability_mount": "hyper",
+      "family": "benchmark_meta_opt",
+      "reason_codes": [
+        "sf_final_all_candidate_candidate"
+      ]
+    },
+    {
+      "name": "gbrain-skillify",
+      "path": "/Users/jameschen/.agents/skills/gbrain-skillify/SKILL.md",
+      "root": "external_reference",
+      "skill_status": "external_reference_candidate",
+      "test_level": "sf_final_all_candidate_live_compare",
+      "action": "ablation_only_compare",
+      "capability_mount": "hyper",
+      "family": "benchmark_meta_opt",
+      "reason_codes": [
+        "sf_final_all_candidate_candidate"
+      ]
+    },
+    {
+      "name": "wondelai-design-everyday-things",
+      "path": "/Users/jameschen/.agents/skills/wondelai-design-everyday-things/SKILL.md",
+      "root": "external_reference",
+      "skill_status": "external_reference_candidate",
+      "test_level": "sf_final_all_candidate_live_compare",
+      "action": "ablation_only_compare",
+      "capability_mount": "hyper",
+      "family": "benchmark_meta_opt",
+      "reason_codes": [
+        "sf_final_all_candidate_candidate"
+      ]
+    },
+    {
+      "name": "wondelai-hooked-ux",
+      "path": "/Users/jameschen/.agents/skills/wondelai-hooked-ux/SKILL.md",
+      "root": "external_reference",
+      "skill_status": "external_reference_candidate",
+      "test_level": "sf_final_all_candidate_live_compare",
+      "action": "ablation_only_compare",
+      "capability_mount": "hyper",
+      "family": "benchmark_meta_opt",
+      "reason_codes": [
+        "sf_final_all_candidate_candidate"
+      ]
+    },
+    {
+      "name": "wondelai-pragmatic-programmer",
+      "path": "/Users/jameschen/.agents/skills/wondelai-pragmatic-programmer/SKILL.md",
+      "root": "external_reference",
+      "skill_status": "external_reference_candidate",
+      "test_level": "sf_final_all_candidate_live_compare",
+      "action": "ablation_only_compare",
+      "capability_mount": "hyper",
+      "family": "benchmark_meta_opt",
+      "reason_codes": [
+        "sf_final_all_candidate_candidate"
+      ]
+    },
+    {
+      "name": "wondelai-ux-heuristics",
+      "path": "/Users/jameschen/.agents/skills/wondelai-ux-heuristics/SKILL.md",
+      "root": "external_reference",
+      "skill_status": "external_reference_candidate",
+      "test_level": "sf_final_all_candidate_live_compare",
+      "action": "ablation_only_compare",
+      "capability_mount": "hyper",
+      "family": "benchmark_meta_opt",
+      "reason_codes": [
+        "sf_final_all_candidate_candidate"
+      ]
+    },
+    {
+      "name": "wondelai-web-typography",
+      "path": "/Users/jameschen/.agents/skills/wondelai-web-typography/SKILL.md",
+      "root": "external_reference",
+      "skill_status": "external_reference_candidate",
+      "test_level": "sf_final_all_candidate_live_compare",
+      "action": "ablation_only_compare",
+      "capability_mount": "hyper",
+      "family": "benchmark_meta_opt",
+      "reason_codes": [
+        "sf_final_all_candidate_candidate"
+      ]
+    },
+    {
+      "name": "ab-test-setup",
+      "path": "/Users/jameschen/.agents/skills/ab-test-setup/SKILL.md",
+      "root": "external_reference",
+      "skill_status": "external_reference_candidate",
+      "test_level": "sf_final_all_candidate_live_compare",
+      "action": "ablation_only_compare",
+      "capability_mount": "hyper",
+      "family": "benchmark_meta_opt",
+      "reason_codes": [
+        "sf_final_all_candidate_candidate"
+      ]
+    },
+    {
+      "name": "nexus-benchmark-continuous-optimization",
+      "path": ".agents/skills/nexus-benchmark-continuous-optimization/SKILL.md",
+      "root": "nexus_repo_local",
+      "skill_status": "nexus_curated_candidate",
+      "test_level": "sf_final_all_candidate_live_compare",
+      "action": "ablation_only_compare",
+      "capability_mount": "claim_gate",
+      "family": "claim_gate",
+      "reason_codes": [
+        "sf_final_all_candidate_current_primary"
+      ]
+    },
+    {
+      "name": "gbrain-academic-verify",
+      "path": "/Users/jameschen/.agents/skills/gbrain-academic-verify/SKILL.md",
+      "root": "external_reference",
+      "skill_status": "external_reference_candidate",
+      "test_level": "sf_final_all_candidate_live_compare",
+      "action": "ablation_only_compare",
+      "capability_mount": "claim_gate",
+      "family": "claim_gate",
+      "reason_codes": [
+        "sf_final_all_candidate_candidate"
+      ]
+    },
+    {
+      "name": "addy-doubt-driven-development",
+      "path": "/Users/jameschen/.agents/skills/addy-doubt-driven-development/SKILL.md",
+      "root": "external_reference",
+      "skill_status": "external_reference_candidate",
+      "test_level": "sf_final_all_candidate_live_compare",
+      "action": "ablation_only_compare",
+      "capability_mount": "claim_gate",
+      "family": "claim_gate",
+      "reason_codes": [
+        "sf_final_all_candidate_candidate"
+      ]
+    },
+    {
+      "name": "design-consultation",
+      "path": "/Users/jameschen/.agents/skills/gstack/.agents/skills/gstack-design-consultation/SKILL.md",
+      "root": "external_reference",
+      "skill_status": "external_reference_candidate",
+      "test_level": "sf_final_all_candidate_live_compare",
+      "action": "ablation_only_compare",
+      "capability_mount": "claim_gate",
+      "family": "claim_gate",
+      "reason_codes": [
+        "sf_final_all_candidate_candidate"
+      ]
+    },
+    {
+      "name": "design-review",
+      "path": "/Users/jameschen/.agents/skills/gstack/.agents/skills/gstack-design-review/SKILL.md",
+      "root": "external_reference",
+      "skill_status": "external_reference_candidate",
+      "test_level": "sf_final_all_candidate_live_compare",
+      "action": "ablation_only_compare",
+      "capability_mount": "claim_gate",
+      "family": "claim_gate",
+      "reason_codes": [
+        "sf_final_all_candidate_candidate"
+      ]
+    },
+    {
+      "name": "sf-systematic-codeintel-first-principles-thinking-f95019ea",
+      "path": ".agents/skills/sf-systematic-codeintel-first-principles-thinking-f95019ea/SKILL.md",
+      "root": "nexus_repo_local",
+      "skill_status": "nexus_curated_candidate",
+      "test_level": "sf_final_all_candidate_live_compare",
+      "action": "ablation_only_compare",
+      "capability_mount": "codeintel",
+      "family": "codeintel",
+      "reason_codes": [
+        "sf_final_all_candidate_current_primary"
+      ]
+    },
+    {
+      "name": "addy-code-simplification",
+      "path": "/Users/jameschen/.agents/skills/addy-code-simplification/SKILL.md",
+      "root": "external_reference",
+      "skill_status": "external_reference_candidate",
+      "test_level": "sf_final_all_candidate_live_compare",
+      "action": "ablation_only_compare",
+      "capability_mount": "codeintel",
+      "family": "codeintel",
+      "reason_codes": [
+        "sf_final_all_candidate_candidate"
+      ]
+    },
+    {
+      "name": "cso",
+      "path": "/Users/jameschen/.agents/skills/gstack/.opencode/skills/gstack-cso/SKILL.md",
+      "root": "external_reference",
+      "skill_status": "external_reference_candidate",
+      "test_level": "sf_final_all_candidate_live_compare",
+      "action": "ablation_only_compare",
+      "capability_mount": "codeintel",
+      "family": "codeintel",
+      "reason_codes": [
+        "sf_final_all_candidate_candidate"
+      ]
+    },
+    {
+      "name": "gstack-qa",
+      "path": "/Users/jameschen/.agents/skills/gstack-qa/SKILL.md",
+      "root": "external_reference",
+      "skill_status": "external_reference_candidate",
+      "test_level": "sf_final_all_candidate_live_compare",
+      "action": "ablation_only_compare",
+      "capability_mount": "codeintel",
+      "family": "codeintel",
+      "reason_codes": [
+        "sf_final_all_candidate_candidate"
+      ]
+    },
+    {
+      "name": "gstack-qa-only",
+      "path": "/Users/jameschen/.agents/skills/gstack-qa-only/SKILL.md",
+      "root": "external_reference",
+      "skill_status": "external_reference_candidate",
+      "test_level": "sf_final_all_candidate_live_compare",
+      "action": "ablation_only_compare",
+      "capability_mount": "codeintel",
+      "family": "codeintel",
+      "reason_codes": [
+        "sf_final_all_candidate_candidate"
+      ]
+    },
+    {
+      "name": "gstack-sync-gbrain",
+      "path": "/Users/jameschen/.agents/skills/gstack-sync-gbrain/SKILL.md",
+      "root": "external_reference",
+      "skill_status": "external_reference_candidate",
+      "test_level": "sf_final_all_candidate_live_compare",
+      "action": "ablation_only_compare",
+      "capability_mount": "codeintel",
+      "family": "codeintel",
+      "reason_codes": [
+        "sf_final_all_candidate_candidate"
+      ]
+    },
+    {
+      "name": "investigate",
+      "path": "/Users/jameschen/.agents/skills/gstack/.opencode/skills/gstack-investigate/SKILL.md",
+      "root": "external_reference",
+      "skill_status": "external_reference_candidate",
+      "test_level": "sf_final_all_candidate_live_compare",
+      "action": "ablation_only_compare",
+      "capability_mount": "codeintel",
+      "family": "codeintel",
+      "reason_codes": [
+        "sf_final_all_candidate_candidate"
+      ]
+    },
+    {
+      "name": "qa",
+      "path": "/Users/jameschen/.agents/skills/gstack/.agents/skills/gstack-qa/SKILL.md",
+      "root": "external_reference",
+      "skill_status": "external_reference_candidate",
+      "test_level": "sf_final_all_candidate_live_compare",
+      "action": "ablation_only_compare",
+      "capability_mount": "codeintel",
+      "family": "codeintel",
+      "reason_codes": [
+        "sf_final_all_candidate_candidate"
+      ]
+    },
+    {
+      "name": "nexus-root-cause-probe",
+      "path": ".agents/skills/nexus-root-cause-probe/SKILL.md",
+      "root": "nexus_repo_local",
+      "skill_status": "nexus_curated_candidate",
+      "test_level": "sf_final_all_candidate_live_compare",
+      "action": "ablation_only_compare",
+      "capability_mount": "ddtree",
+      "family": "ddtree",
+      "reason_codes": [
+        "sf_final_all_candidate_current_primary"
+      ]
+    },
+    {
+      "name": "nexus-new-idea-intake-decision-tree",
+      "path": "/Users/jameschen/.agents/skills/devops/nexus-new-idea-intake-decision-tree/SKILL.md",
+      "root": "external_reference",
+      "skill_status": "external_reference_candidate",
+      "test_level": "sf_final_all_candidate_live_compare",
+      "action": "ablation_only_compare",
+      "capability_mount": "ddtree",
+      "family": "ddtree",
+      "reason_codes": [
+        "sf_final_all_candidate_candidate"
+      ]
+    },
+    {
+      "name": "addy-source-driven-development",
+      "path": "/Users/jameschen/.agents/skills/addy-source-driven-development/SKILL.md",
+      "root": "external_reference",
+      "skill_status": "external_reference_candidate",
+      "test_level": "sf_final_all_candidate_live_compare",
+      "action": "ablation_only_compare",
+      "capability_mount": "ddtree",
+      "family": "ddtree",
+      "reason_codes": [
+        "sf_final_all_candidate_candidate"
+      ]
+    },
+    {
+      "name": "context-save",
+      "path": "/Users/jameschen/.agents/skills/gstack/.agents/skills/gstack-context-save/SKILL.md",
+      "root": "external_reference",
+      "skill_status": "external_reference_candidate",
+      "test_level": "sf_final_all_candidate_live_compare",
+      "action": "ablation_only_compare",
+      "capability_mount": "ddtree",
+      "family": "ddtree",
+      "reason_codes": [
+        "sf_final_all_candidate_candidate"
+      ]
+    },
+    {
+      "name": "doc-coauthoring",
+      "path": "/Users/jameschen/.agents/skills/doc-coauthoring/SKILL.md",
+      "root": "external_reference",
+      "skill_status": "external_reference_candidate",
+      "test_level": "sf_final_all_candidate_live_compare",
+      "action": "ablation_only_compare",
+      "capability_mount": "ddtree",
+      "family": "ddtree",
+      "reason_codes": [
+        "sf_final_all_candidate_candidate"
+      ]
+    },
+    {
+      "name": "sf-systematic-direct_master_loop-build-32802a87",
+      "path": ".agents/skills/sf-systematic-direct_master_loop-build-32802a87/SKILL.md",
+      "root": "nexus_repo_local",
+      "skill_status": "nexus_curated_candidate",
+      "test_level": "sf_final_all_candidate_live_compare",
+      "action": "ablation_only_compare",
+      "capability_mount": "hyper",
+      "family": "direct_master_loop",
+      "reason_codes": [
+        "sf_final_all_candidate_current_primary"
+      ]
+    },
+    {
+      "name": "design-html",
+      "path": "/Users/jameschen/.agents/skills/gstack/.agents/skills/gstack-design-html/SKILL.md",
+      "root": "external_reference",
+      "skill_status": "external_reference_candidate",
+      "test_level": "sf_final_all_candidate_live_compare",
+      "action": "ablation_only_compare",
+      "capability_mount": "hyper",
+      "family": "direct_master_loop",
+      "reason_codes": [
+        "sf_final_all_candidate_candidate"
+      ]
+    },
+    {
+      "name": "executing-plans",
+      "path": "/Users/jameschen/.agents/skills/executing-plans/SKILL.md",
+      "root": "external_reference",
+      "skill_status": "external_reference_candidate",
+      "test_level": "sf_final_all_candidate_live_compare",
+      "action": "ablation_only_compare",
+      "capability_mount": "hyper",
+      "family": "direct_master_loop",
+      "reason_codes": [
+        "sf_final_all_candidate_candidate"
+      ]
+    },
+    {
+      "name": "gstack-design-html",
+      "path": "/Users/jameschen/.agents/skills/gstack-design-html/SKILL.md",
+      "root": "external_reference",
+      "skill_status": "external_reference_candidate",
+      "test_level": "sf_final_all_candidate_live_compare",
+      "action": "ablation_only_compare",
+      "capability_mount": "hyper",
+      "family": "direct_master_loop",
+      "reason_codes": [
+        "sf_final_all_candidate_candidate"
+      ]
+    },
+    {
+      "name": "gstack-investigate",
+      "path": "/Users/jameschen/.agents/skills/gstack-investigate/SKILL.md",
+      "root": "external_reference",
+      "skill_status": "external_reference_candidate",
+      "test_level": "sf_final_all_candidate_live_compare",
+      "action": "ablation_only_compare",
+      "capability_mount": "hyper",
+      "family": "direct_master_loop",
+      "reason_codes": [
+        "sf_final_all_candidate_candidate"
+      ]
+    },
+    {
+      "name": "gstack-office-hours",
+      "path": "/Users/jameschen/.agents/skills/gstack-office-hours/SKILL.md",
+      "root": "external_reference",
+      "skill_status": "external_reference_candidate",
+      "test_level": "sf_final_all_candidate_live_compare",
+      "action": "ablation_only_compare",
+      "capability_mount": "hyper",
+      "family": "direct_master_loop",
+      "reason_codes": [
+        "sf_final_all_candidate_candidate"
+      ]
+    },
+    {
+      "name": "gstack-openclaw-office-hours",
+      "path": "/Users/jameschen/.agents/skills/gstack/openclaw/skills/gstack-openclaw-office-hours/SKILL.md",
+      "root": "external_reference",
+      "skill_status": "external_reference_candidate",
+      "test_level": "sf_final_all_candidate_live_compare",
+      "action": "ablation_only_compare",
+      "capability_mount": "hyper",
+      "family": "direct_master_loop",
+      "reason_codes": [
+        "sf_final_all_candidate_candidate"
+      ]
+    },
+    {
+      "name": "sf-systematic-drone-python-background-jobs-18326a62",
+      "path": ".agents/skills/sf-systematic-drone-python-background-jobs-18326a62/SKILL.md",
+      "root": "nexus_repo_local",
+      "skill_status": "nexus_curated_candidate",
+      "test_level": "sf_final_all_candidate_live_compare",
+      "action": "ablation_only_compare",
+      "capability_mount": "drone",
+      "family": "drone",
+      "reason_codes": [
+        "sf_final_all_candidate_current_primary"
+      ]
+    },
+    {
+      "name": "gemini-flash-nexus-worker-handoff",
+      "path": "/Users/jameschen/.agents/skills/devops/gemini-flash-nexus-worker-handoff/SKILL.md",
+      "root": "external_reference",
+      "skill_status": "external_reference_candidate",
+      "test_level": "sf_final_all_candidate_live_compare",
+      "action": "ablation_only_compare",
+      "capability_mount": "drone",
+      "family": "drone",
+      "reason_codes": [
+        "sf_final_all_candidate_candidate"
+      ]
+    },
+    {
+      "name": "wondelai-design-sprint",
+      "path": "/Users/jameschen/.agents/skills/wondelai-design-sprint/SKILL.md",
+      "root": "external_reference",
+      "skill_status": "external_reference_candidate",
+      "test_level": "sf_final_all_candidate_live_compare",
+      "action": "ablation_only_compare",
+      "capability_mount": "drone",
+      "family": "drone",
+      "reason_codes": [
+        "sf_final_all_candidate_candidate"
+      ]
+    },
+    {
+      "name": "wondelai-lean-startup",
+      "path": "/Users/jameschen/.agents/skills/wondelai-lean-startup/SKILL.md",
+      "root": "external_reference",
+      "skill_status": "external_reference_candidate",
+      "test_level": "sf_final_all_candidate_live_compare",
+      "action": "ablation_only_compare",
+      "capability_mount": "drone",
+      "family": "drone",
+      "reason_codes": [
+        "sf_final_all_candidate_candidate"
+      ]
+    },
+    {
+      "name": "sf-systematic-external_productivity-writer-77dc7840",
+      "path": ".agents/skills/sf-systematic-external_productivity-writer-77dc7840/SKILL.md",
+      "root": "nexus_repo_local",
+      "skill_status": "nexus_curated_candidate",
+      "test_level": "sf_final_all_candidate_live_compare",
+      "action": "ablation_only_compare",
+      "capability_mount": "research",
+      "family": "external_productivity",
+      "reason_codes": [
+        "sf_final_all_candidate_current_primary"
+      ]
+    },
+    {
+      "name": "aibdd.auto.python.e2e.green",
+      "path": "/Users/jameschen/.agents/skills/aibdd.auto.python.e2e.green/SKILL.md",
+      "root": "external_reference",
+      "skill_status": "external_reference_candidate",
+      "test_level": "sf_final_all_candidate_live_compare",
+      "action": "ablation_only_compare",
+      "capability_mount": "research",
+      "family": "external_productivity",
+      "reason_codes": [
+        "sf_final_all_candidate_candidate"
+      ]
+    },
+    {
+      "name": "aibdd.auto.python.e2e.handlers.command",
+      "path": "/Users/jameschen/.agents/skills/aibdd.auto.python.e2e.handlers.command/SKILL.md",
+      "root": "external_reference",
+      "skill_status": "external_reference_candidate",
+      "test_level": "sf_final_all_candidate_live_compare",
+      "action": "ablation_only_compare",
+      "capability_mount": "research",
+      "family": "external_productivity",
+      "reason_codes": [
+        "sf_final_all_candidate_candidate"
+      ]
+    },
+    {
+      "name": "aibdd.auto.python.e2e.handlers.query",
+      "path": "/Users/jameschen/.agents/skills/aibdd.auto.python.e2e.handlers.query/SKILL.md",
+      "root": "external_reference",
+      "skill_status": "external_reference_candidate",
+      "test_level": "sf_final_all_candidate_live_compare",
+      "action": "ablation_only_compare",
+      "capability_mount": "research",
+      "family": "external_productivity",
+      "reason_codes": [
+        "sf_final_all_candidate_candidate"
+      ]
+    },
+    {
+      "name": "aibdd.auto.python.e2e.handlers.readmodel-then",
+      "path": "/Users/jameschen/.agents/skills/aibdd.auto.python.e2e.handlers.readmodel-then/SKILL.md",
+      "root": "external_reference",
+      "skill_status": "external_reference_candidate",
+      "test_level": "sf_final_all_candidate_live_compare",
+      "action": "ablation_only_compare",
+      "capability_mount": "research",
+      "family": "external_productivity",
+      "reason_codes": [
+        "sf_final_all_candidate_candidate"
+      ]
+    },
+    {
+      "name": "aibdd.auto.python.e2e.handlers.success-failure",
+      "path": "/Users/jameschen/.agents/skills/aibdd.auto.python.e2e.handlers.success-failure/SKILL.md",
+      "root": "external_reference",
+      "skill_status": "external_reference_candidate",
+      "test_level": "sf_final_all_candidate_live_compare",
+      "action": "ablation_only_compare",
+      "capability_mount": "research",
+      "family": "external_productivity",
+      "reason_codes": [
+        "sf_final_all_candidate_candidate"
+      ]
+    },
+    {
+      "name": "aibdd.auto.python.e2e.red",
+      "path": "/Users/jameschen/.agents/skills/aibdd.auto.python.e2e.red/SKILL.md",
+      "root": "external_reference",
+      "skill_status": "external_reference_candidate",
+      "test_level": "sf_final_all_candidate_live_compare",
+      "action": "ablation_only_compare",
+      "capability_mount": "research",
+      "family": "external_productivity",
+      "reason_codes": [
+        "sf_final_all_candidate_candidate"
+      ]
+    },
+    {
+      "name": "sf2-file_lock_security_gate-route-fit-spec",
+      "path": ".agents/skills/sf2-file_lock_security_gate-route-fit-spec/SKILL.md",
+      "root": "nexus_repo_local",
+      "skill_status": "nexus_curated_candidate",
+      "test_level": "sf_final_all_candidate_live_compare",
+      "action": "ablation_only_compare",
+      "capability_mount": "ultra_review",
+      "family": "file_lock_security_gate",
+      "reason_codes": [
+        "sf_final_all_candidate_current_primary"
+      ]
+    },
+    {
+      "name": "browserbase-what-antibot",
+      "path": "/Users/jameschen/.agents/skills/browserbase-what-antibot/SKILL.md",
+      "root": "external_reference",
+      "skill_status": "external_reference_candidate",
+      "test_level": "sf_final_all_candidate_live_compare",
+      "action": "ablation_only_compare",
+      "capability_mount": "ultra_review",
+      "family": "file_lock_security_gate",
+      "reason_codes": [
+        "sf_final_all_candidate_candidate"
+      ]
+    },
+    {
+      "name": "create-plan",
+      "path": ".agents/skills/create-plan/SKILL.md",
+      "root": "nexus_repo_local",
+      "skill_status": "nexus_curated_candidate",
+      "test_level": "sf_final_all_candidate_live_compare",
+      "action": "ablation_only_compare",
+      "capability_mount": "autoreason",
+      "family": "forecast_pregate",
+      "reason_codes": [
+        "sf_final_all_candidate_current_primary"
+      ]
+    },
+    {
+      "name": "plan",
+      "path": "/Users/jameschen/Workspace/hermes-agent/skills/software-development/plan/SKILL.md",
+      "root": "external_reference",
+      "skill_status": "external_reference_candidate",
+      "test_level": "sf_final_all_candidate_live_compare",
+      "action": "ablation_only_compare",
+      "capability_mount": "autoreason",
+      "family": "forecast_pregate",
+      "reason_codes": [
+        "sf_final_all_candidate_candidate"
+      ]
+    },
+    {
+      "name": "pm-eval-first-planner",
+      "path": "/Users/jameschen/.agents/skills/devops/pm-eval-first-planner/SKILL.md",
+      "root": "external_reference",
+      "skill_status": "external_reference_candidate",
+      "test_level": "sf_final_all_candidate_live_compare",
+      "action": "ablation_only_compare",
+      "capability_mount": "autoreason",
+      "family": "forecast_pregate",
+      "reason_codes": [
+        "sf_final_all_candidate_candidate"
+      ]
+    },
+    {
+      "name": "subagent-driven-development",
+      "path": "/Users/jameschen/Workspace/hermes-agent/skills/software-development/subagent-driven-development/SKILL.md",
+      "root": "external_reference",
+      "skill_status": "external_reference_candidate",
+      "test_level": "sf_final_all_candidate_live_compare",
+      "action": "ablation_only_compare",
+      "capability_mount": "autoreason",
+      "family": "forecast_pregate",
+      "reason_codes": [
+        "sf_final_all_candidate_candidate"
+      ]
+    },
+    {
+      "name": "writing-plans",
+      "path": "/Users/jameschen/Workspace/hermes-agent/skills/software-development/writing-plans/SKILL.md",
+      "root": "external_reference",
+      "skill_status": "external_reference_candidate",
+      "test_level": "sf_final_all_candidate_live_compare",
+      "action": "ablation_only_compare",
+      "capability_mount": "autoreason",
+      "family": "forecast_pregate",
+      "reason_codes": [
+        "sf_final_all_candidate_candidate"
+      ]
+    },
+    {
+      "name": "addy-shipping-and-launch",
+      "path": "/Users/jameschen/.agents/skills/addy-shipping-and-launch/SKILL.md",
+      "root": "external_reference",
+      "skill_status": "external_reference_candidate",
+      "test_level": "sf_final_all_candidate_live_compare",
+      "action": "ablation_only_compare",
+      "capability_mount": "autoreason",
+      "family": "forecast_pregate",
+      "reason_codes": [
+        "sf_final_all_candidate_candidate"
+      ]
+    },
+    {
+      "name": "sf-systematic-governance_and_trust-aegisops-ai-0aa841e2",
+      "path": ".agents/skills/sf-systematic-governance_and_trust-aegisops-ai-0aa841e2/SKILL.md",
+      "root": "nexus_repo_local",
+      "skill_status": "nexus_curated_candidate",
+      "test_level": "sf_final_all_candidate_live_compare",
+      "action": "ablation_only_compare",
+      "capability_mount": "mempalace_gate",
+      "family": "governance_and_trust",
+      "reason_codes": [
+        "sf_final_all_candidate_current_primary"
+      ]
+    },
+    {
+      "name": "gbrain-soul-audit",
+      "path": "/Users/jameschen/.agents/skills/gbrain-soul-audit/SKILL.md",
+      "root": "external_reference",
+      "skill_status": "external_reference_candidate",
+      "test_level": "sf_final_all_candidate_live_compare",
+      "action": "ablation_only_compare",
+      "capability_mount": "mempalace_gate",
+      "family": "governance_and_trust",
+      "reason_codes": [
+        "sf_final_all_candidate_candidate"
+      ]
+    },
+    {
+      "name": "gstack-setup-gbrain",
+      "path": "/Users/jameschen/.agents/skills/gstack-setup-gbrain/SKILL.md",
+      "root": "external_reference",
+      "skill_status": "external_reference_candidate",
+      "test_level": "sf_final_all_candidate_live_compare",
+      "action": "ablation_only_compare",
+      "capability_mount": "mempalace_gate",
+      "family": "governance_and_trust",
+      "reason_codes": [
+        "sf_final_all_candidate_candidate"
+      ]
+    },
+    {
+      "name": "setup-gbrain",
+      "path": "/Users/jameschen/.agents/skills/gstack/.agents/skills/gstack-setup-gbrain/SKILL.md",
+      "root": "external_reference",
+      "skill_status": "external_reference_candidate",
+      "test_level": "sf_final_all_candidate_live_compare",
+      "action": "ablation_only_compare",
+      "capability_mount": "mempalace_gate",
+      "family": "governance_and_trust",
+      "reason_codes": [
+        "sf_final_all_candidate_candidate"
+      ]
+    },
+    {
+      "name": "browserbase-browser-trace",
+      "path": "/Users/jameschen/.agents/skills/browserbase-browser-trace/SKILL.md",
+      "root": "external_reference",
+      "skill_status": "external_reference_candidate",
+      "test_level": "sf_final_all_candidate_live_compare",
+      "action": "ablation_only_compare",
+      "capability_mount": "mempalace_gate",
+      "family": "governance_and_trust",
+      "reason_codes": [
+        "sf_final_all_candidate_candidate"
+      ]
+    },
+    {
+      "name": "sf2-hyper_sprint-route-fit-spec",
+      "path": ".agents/skills/sf2-hyper_sprint-route-fit-spec/SKILL.md",
+      "root": "nexus_repo_local",
+      "skill_status": "nexus_curated_candidate",
+      "test_level": "sf_final_all_candidate_live_compare",
+      "action": "ablation_only_compare",
+      "capability_mount": "hyper",
+      "family": "hyper_sprint",
+      "reason_codes": [
+        "sf_final_all_candidate_current_primary"
+      ]
+    },
+    {
+      "name": "gstack-retro",
+      "path": "/Users/jameschen/.agents/skills/gstack-retro/SKILL.md",
+      "root": "external_reference",
+      "skill_status": "external_reference_candidate",
+      "test_level": "sf_final_all_candidate_live_compare",
+      "action": "ablation_only_compare",
+      "capability_mount": "hyper",
+      "family": "hyper_sprint",
+      "reason_codes": [
+        "sf_final_all_candidate_candidate"
+      ]
+    },
+    {
+      "name": "retro",
+      "path": "/Users/jameschen/.agents/skills/gstack/.agents/skills/gstack-retro/SKILL.md",
+      "root": "external_reference",
+      "skill_status": "external_reference_candidate",
+      "test_level": "sf_final_all_candidate_live_compare",
+      "action": "ablation_only_compare",
+      "capability_mount": "hyper",
+      "family": "hyper_sprint",
+      "reason_codes": [
+        "sf_final_all_candidate_candidate"
+      ]
+    },
+    {
+      "name": "research-source-validation-auditor",
+      "path": ".agents/skills/research-source-validation-auditor/SKILL.md",
+      "root": "nexus_repo_local",
+      "skill_status": "nexus_curated_candidate",
+      "test_level": "sf_final_all_candidate_live_compare",
+      "action": "ablation_only_compare",
+      "capability_mount": "lancedb",
+      "family": "lancedb",
+      "reason_codes": [
+        "sf_final_all_candidate_current_primary"
+      ]
+    },
+    {
+      "name": "dspy",
+      "path": "/Users/jameschen/Workspace/hermes-agent/skills/mlops/research/dspy/SKILL.md",
+      "root": "external_reference",
+      "skill_status": "external_reference_candidate",
+      "test_level": "sf_final_all_candidate_live_compare",
+      "action": "ablation_only_compare",
+      "capability_mount": "lancedb",
+      "family": "lancedb",
+      "reason_codes": [
+        "sf_final_all_candidate_candidate"
+      ]
+    },
+    {
+      "name": "gbrain-testing",
+      "path": "/Users/jameschen/.agents/skills/gbrain-testing/SKILL.md",
+      "root": "external_reference",
+      "skill_status": "external_reference_candidate",
+      "test_level": "sf_final_all_candidate_live_compare",
+      "action": "ablation_only_compare",
+      "capability_mount": "lancedb",
+      "family": "lancedb",
+      "reason_codes": [
+        "sf_final_all_candidate_candidate"
+      ]
+    },
+    {
+      "name": "github8-skilless-deep-research-learn-ask",
+      "path": ".agents/skills/github8-skilless-deep-research-learn-ask/SKILL.md",
+      "root": "nexus_repo_local",
+      "skill_status": "nexus_curated_candidate",
+      "test_level": "sf_final_all_candidate_live_compare",
+      "action": "ablation_only_compare",
+      "capability_mount": "semantic_searcher",
+      "family": "learn_ask",
+      "reason_codes": [
+        "sf_final_all_candidate_current_primary"
+      ]
+    },
+    {
+      "name": "office-hours",
+      "path": "/Users/jameschen/.agents/skills/gstack/.agents/skills/gstack-office-hours/SKILL.md",
+      "root": "external_reference",
+      "skill_status": "external_reference_candidate",
+      "test_level": "sf_final_all_candidate_live_compare",
+      "action": "ablation_only_compare",
+      "capability_mount": "semantic_searcher",
+      "family": "learn_ask",
+      "reason_codes": [
+        "sf_final_all_candidate_candidate"
+      ]
+    },
+    {
+      "name": "autoplan",
+      "path": "/Users/jameschen/.agents/skills/gstack/.agents/skills/gstack-autoplan/SKILL.md",
+      "root": "external_reference",
+      "skill_status": "external_reference_candidate",
+      "test_level": "sf_final_all_candidate_live_compare",
+      "action": "ablation_only_compare",
+      "capability_mount": "semantic_searcher",
+      "family": "learn_ask",
+      "reason_codes": [
+        "sf_final_all_candidate_candidate"
+      ]
+    },
+    {
+      "name": "gbrain-query",
+      "path": "/Users/jameschen/.agents/skills/gbrain-query/SKILL.md",
+      "root": "external_reference",
+      "skill_status": "external_reference_candidate",
+      "test_level": "sf_final_all_candidate_live_compare",
+      "action": "ablation_only_compare",
+      "capability_mount": "semantic_searcher",
+      "family": "learn_ask",
+      "reason_codes": [
+        "sf_final_all_candidate_candidate"
+      ]
+    },
+    {
+      "name": "gstack-autoplan",
+      "path": "/Users/jameschen/.agents/skills/gstack-autoplan/SKILL.md",
+      "root": "external_reference",
+      "skill_status": "external_reference_candidate",
+      "test_level": "sf_final_all_candidate_live_compare",
+      "action": "ablation_only_compare",
+      "capability_mount": "semantic_searcher",
+      "family": "learn_ask",
+      "reason_codes": [
+        "sf_final_all_candidate_candidate"
+      ]
+    },
+    {
+      "name": "gstack-plan-ceo-review",
+      "path": "/Users/jameschen/.agents/skills/gstack-plan-ceo-review/SKILL.md",
+      "root": "external_reference",
+      "skill_status": "external_reference_candidate",
+      "test_level": "sf_final_all_candidate_live_compare",
+      "action": "ablation_only_compare",
+      "capability_mount": "semantic_searcher",
+      "family": "learn_ask",
+      "reason_codes": [
+        "sf_final_all_candidate_candidate"
+      ]
+    },
+    {
+      "name": "gstack-plan-tune",
+      "path": "/Users/jameschen/.agents/skills/gstack-plan-tune/SKILL.md",
+      "root": "external_reference",
+      "skill_status": "external_reference_candidate",
+      "test_level": "sf_final_all_candidate_live_compare",
+      "action": "ablation_only_compare",
+      "capability_mount": "semantic_searcher",
+      "family": "learn_ask",
+      "reason_codes": [
+        "sf_final_all_candidate_candidate"
+      ]
+    },
+    {
+      "name": "nexus-live-ask-replay-normalization-gate",
+      "path": "/Users/jameschen/.agents/skills/devops/nexus-live-ask-replay-normalization-gate/SKILL.md",
+      "root": "external_reference",
+      "skill_status": "external_reference_candidate",
+      "test_level": "sf_final_all_candidate_live_compare",
+      "action": "ablation_only_compare",
+      "capability_mount": "semantic_searcher",
+      "family": "learn_ask",
+      "reason_codes": [
+        "sf_final_all_candidate_candidate"
+      ]
+    },
+    {
+      "name": "sf-systematic-learning_closure-memory-lint-8bdb0fca",
+      "path": ".agents/skills/sf-systematic-learning_closure-memory-lint-8bdb0fca/SKILL.md",
+      "root": "nexus_repo_local",
+      "skill_status": "nexus_curated_candidate",
+      "test_level": "sf_final_all_candidate_live_compare",
+      "action": "ablation_only_compare",
+      "capability_mount": "semantic_failure_sensor",
+      "family": "learning_closure",
+      "reason_codes": [
+        "sf_final_all_candidate_current_primary"
+      ]
+    },
+    {
+      "name": "sf-systematic-memory-project-skill-audit-cc8b7621",
+      "path": ".agents/skills/sf-systematic-memory-project-skill-audit-cc8b7621/SKILL.md",
+      "root": "nexus_repo_local",
+      "skill_status": "nexus_curated_candidate",
+      "test_level": "sf_final_all_candidate_live_compare",
+      "action": "ablation_only_compare",
+      "capability_mount": "memory",
+      "family": "memory",
+      "reason_codes": [
+        "sf_final_all_candidate_current_primary"
+      ]
+    },
+    {
+      "name": "product-self-knowledge",
+      "path": "/Users/jameschen/.agents/skills/product-self-knowledge/SKILL.md",
+      "root": "external_reference",
+      "skill_status": "external_reference_candidate",
+      "test_level": "sf_final_all_candidate_live_compare",
+      "action": "ablation_only_compare",
+      "capability_mount": "memory",
+      "family": "memory",
+      "reason_codes": [
+        "sf_final_all_candidate_candidate"
+      ]
+    },
+    {
+      "name": "sf2-mempalace-route-fit-spec",
+      "path": ".agents/skills/sf2-mempalace-route-fit-spec/SKILL.md",
+      "root": "nexus_repo_local",
+      "skill_status": "nexus_curated_candidate",
+      "test_level": "sf_final_all_candidate_live_compare",
+      "action": "ablation_only_compare",
+      "capability_mount": "mempalace_gate",
+      "family": "mempalace",
+      "reason_codes": [
+        "sf_final_all_candidate_current_primary"
+      ]
+    },
+    {
+      "name": "browserbase-browser",
+      "path": "/Users/jameschen/.agents/skills/browserbase-browser/SKILL.md",
+      "root": "external_reference",
+      "skill_status": "external_reference_candidate",
+      "test_level": "sf_final_all_candidate_live_compare",
+      "action": "ablation_only_compare",
+      "capability_mount": "mempalace_gate",
+      "family": "mempalace",
+      "reason_codes": [
+        "sf_final_all_candidate_candidate"
+      ]
+    },
+    {
+      "name": "github-auto-skill-safe-learning",
+      "path": ".agents/skills/github-auto-skill-safe-learning/SKILL.md",
+      "root": "nexus_repo_local",
+      "skill_status": "nexus_curated_candidate",
+      "test_level": "sf_final_all_candidate_live_compare",
+      "action": "ablation_only_compare",
+      "capability_mount": "semantic_failure_sensor",
+      "family": "metabolism_resume",
+      "reason_codes": [
+        "sf_final_all_candidate_current_primary"
+      ]
+    },
+    {
+      "name": "context-restore",
+      "path": "/Users/jameschen/.agents/skills/gstack/.agents/skills/gstack-context-restore/SKILL.md",
+      "root": "external_reference",
+      "skill_status": "external_reference_candidate",
+      "test_level": "sf_final_all_candidate_live_compare",
+      "action": "ablation_only_compare",
+      "capability_mount": "semantic_failure_sensor",
+      "family": "metabolism_resume",
+      "reason_codes": [
+        "sf_final_all_candidate_candidate"
+      ]
+    },
+    {
+      "name": "gstack-context-restore",
+      "path": "/Users/jameschen/.agents/skills/gstack-context-restore/SKILL.md",
+      "root": "external_reference",
+      "skill_status": "external_reference_candidate",
+      "test_level": "sf_final_all_candidate_live_compare",
+      "action": "ablation_only_compare",
+      "capability_mount": "semantic_failure_sensor",
+      "family": "metabolism_resume",
+      "reason_codes": [
+        "sf_final_all_candidate_candidate"
+      ]
+    },
+    {
+      "name": "aibdd.spec.prd.detail-req.gen",
+      "path": "/Users/jameschen/.agents/skills/aibdd.spec.prd.detail-req.gen/SKILL.md",
+      "root": "external_reference",
+      "skill_status": "external_reference_candidate",
+      "test_level": "sf_final_all_candidate_live_compare",
+      "action": "ablation_only_compare",
+      "capability_mount": "semantic_failure_sensor",
+      "family": "metabolism_resume",
+      "reason_codes": [
+        "sf_final_all_candidate_candidate"
+      ]
+    },
+    {
+      "name": "sf2-nightshift-route-fit-spec",
+      "path": ".agents/skills/sf2-nightshift-route-fit-spec/SKILL.md",
+      "root": "nexus_repo_local",
+      "skill_status": "nexus_curated_candidate",
+      "test_level": "sf_final_all_candidate_live_compare",
+      "action": "ablation_only_compare",
+      "capability_mount": "nightshift",
+      "family": "nightshift",
+      "reason_codes": [
+        "sf_final_all_candidate_current_primary"
+      ]
+    },
+    {
+      "name": "addy-browser-testing-with-devtools",
+      "path": "/Users/jameschen/.agents/skills/addy-browser-testing-with-devtools/SKILL.md",
+      "root": "external_reference",
+      "skill_status": "external_reference_candidate",
+      "test_level": "sf_final_all_candidate_live_compare",
+      "action": "ablation_only_compare",
+      "capability_mount": "nightshift",
+      "family": "nightshift",
+      "reason_codes": [
+        "sf_final_all_candidate_candidate"
+      ]
+    },
+    {
+      "name": "gstack-openclaw-investigate",
+      "path": "/Users/jameschen/.agents/skills/gstack/openclaw/skills/gstack-openclaw-investigate/SKILL.md",
+      "root": "external_reference",
+      "skill_status": "external_reference_candidate",
+      "test_level": "sf_final_all_candidate_live_compare",
+      "action": "ablation_only_compare",
+      "capability_mount": "nightshift",
+      "family": "nightshift",
+      "reason_codes": [
+        "sf_final_all_candidate_candidate"
+      ]
+    },
+    {
+      "name": "obsidian-cli",
+      "path": "/Users/jameschen/.agents/skills/obsidian-skills/skills/obsidian-cli/SKILL.md",
+      "root": "external_reference",
+      "skill_status": "external_reference_candidate",
+      "test_level": "sf_final_all_candidate_live_compare",
+      "action": "ablation_only_compare",
+      "capability_mount": "nightshift",
+      "family": "nightshift",
+      "reason_codes": [
+        "sf_final_all_candidate_candidate"
+      ]
+    },
+    {
+      "name": "canary",
+      "path": "/Users/jameschen/.agents/skills/gstack/.agents/skills/gstack-canary/SKILL.md",
+      "root": "external_reference",
+      "skill_status": "external_reference_candidate",
+      "test_level": "sf_final_all_candidate_live_compare",
+      "action": "ablation_only_compare",
+      "capability_mount": "nightshift",
+      "family": "nightshift",
+      "reason_codes": [
+        "sf_final_all_candidate_candidate"
+      ]
+    },
+    {
+      "name": "sf-systematic-policy_capability_gate-aegisops-ai-0aa841e2",
+      "path": ".agents/skills/sf-systematic-policy_capability_gate-aegisops-ai-0aa841e2/SKILL.md",
+      "root": "nexus_repo_local",
+      "skill_status": "nexus_curated_candidate",
+      "test_level": "sf_final_all_candidate_live_compare",
+      "action": "ablation_only_compare",
+      "capability_mount": "mempalace_gate",
+      "family": "policy_capability_gate",
+      "reason_codes": [
+        "sf_final_all_candidate_current_primary"
+      ]
+    },
+    {
+      "name": "addy-ci-cd-and-automation",
+      "path": "/Users/jameschen/.agents/skills/addy-ci-cd-and-automation/SKILL.md",
+      "root": "external_reference",
+      "skill_status": "external_reference_candidate",
+      "test_level": "sf_final_all_candidate_live_compare",
+      "action": "ablation_only_compare",
+      "capability_mount": "mempalace_gate",
+      "family": "policy_capability_gate",
+      "reason_codes": [
+        "sf_final_all_candidate_candidate"
+      ]
+    },
+    {
+      "name": "aibdd.auto.python.e2e.handlers.aggregate-given",
+      "path": "/Users/jameschen/.agents/skills/aibdd.auto.python.e2e.handlers.aggregate-given/SKILL.md",
+      "root": "external_reference",
+      "skill_status": "external_reference_candidate",
+      "test_level": "sf_final_all_candidate_live_compare",
+      "action": "ablation_only_compare",
+      "capability_mount": "mempalace_gate",
+      "family": "policy_capability_gate",
+      "reason_codes": [
+        "sf_final_all_candidate_candidate"
+      ]
+    },
+    {
+      "name": "aibdd.auto.python.e2e.handlers.aggregate-then",
+      "path": "/Users/jameschen/.agents/skills/aibdd.auto.python.e2e.handlers.aggregate-then/SKILL.md",
+      "root": "external_reference",
+      "skill_status": "external_reference_candidate",
+      "test_level": "sf_final_all_candidate_live_compare",
+      "action": "ablation_only_compare",
+      "capability_mount": "mempalace_gate",
+      "family": "policy_capability_gate",
+      "reason_codes": [
+        "sf_final_all_candidate_candidate"
+      ]
+    },
+    {
+      "name": "github5-skill-seekers-safe-registry-builder",
+      "path": ".agents/skills/github5-skill-seekers-safe-registry-builder/SKILL.md",
+      "root": "nexus_repo_local",
+      "skill_status": "nexus_curated_candidate",
+      "test_level": "sf_final_all_candidate_live_compare",
+      "action": "ablation_only_compare",
+      "capability_mount": "semantic_searcher",
+      "family": "registry_skills_sync",
+      "reason_codes": [
+        "sf_final_all_candidate_current_primary"
+      ]
+    },
+    {
+      "name": "browserbase-cookie-sync",
+      "path": "/Users/jameschen/.agents/skills/browserbase-cookie-sync/SKILL.md",
+      "root": "external_reference",
+      "skill_status": "external_reference_candidate",
+      "test_level": "sf_final_all_candidate_live_compare",
+      "action": "ablation_only_compare",
+      "capability_mount": "semantic_searcher",
+      "family": "registry_skills_sync",
+      "reason_codes": [
+        "sf_final_all_candidate_candidate"
+      ]
+    },
+    {
+      "name": "document-release",
+      "path": "/Users/jameschen/.agents/skills/gstack/.agents/skills/gstack-document-release/SKILL.md",
+      "root": "external_reference",
+      "skill_status": "external_reference_candidate",
+      "test_level": "sf_final_all_candidate_live_compare",
+      "action": "ablation_only_compare",
+      "capability_mount": "semantic_searcher",
+      "family": "registry_skills_sync",
+      "reason_codes": [
+        "sf_final_all_candidate_candidate"
+      ]
+    },
+    {
+      "name": "gbrain-cold-start",
+      "path": "/Users/jameschen/.agents/skills/gbrain-cold-start/SKILL.md",
+      "root": "external_reference",
+      "skill_status": "external_reference_candidate",
+      "test_level": "sf_final_all_candidate_live_compare",
+      "action": "ablation_only_compare",
+      "capability_mount": "semantic_searcher",
+      "family": "registry_skills_sync",
+      "reason_codes": [
+        "sf_final_all_candidate_candidate"
+      ]
+    },
+    {
+      "name": "gstack-document-release",
+      "path": "/Users/jameschen/.agents/skills/gstack-document-release/SKILL.md",
+      "root": "external_reference",
+      "skill_status": "external_reference_candidate",
+      "test_level": "sf_final_all_candidate_live_compare",
+      "action": "ablation_only_compare",
+      "capability_mount": "semantic_searcher",
+      "family": "registry_skills_sync",
+      "reason_codes": [
+        "sf_final_all_candidate_candidate"
+      ]
+    },
+    {
+      "name": "llm-wiki",
+      "path": "/Users/jameschen/Workspace/hermes-agent/skills/research/llm-wiki/SKILL.md",
+      "root": "external_reference",
+      "skill_status": "external_reference_candidate",
+      "test_level": "sf_final_all_candidate_live_compare",
+      "action": "ablation_only_compare",
+      "capability_mount": "semantic_searcher",
+      "family": "registry_skills_sync",
+      "reason_codes": [
+        "sf_final_all_candidate_candidate"
+      ]
+    },
+    {
+      "name": "sync-gbrain",
+      "path": "/Users/jameschen/.agents/skills/gstack/.agents/skills/gstack-sync-gbrain/SKILL.md",
+      "root": "external_reference",
+      "skill_status": "external_reference_candidate",
+      "test_level": "sf_final_all_candidate_live_compare",
+      "action": "ablation_only_compare",
+      "capability_mount": "semantic_searcher",
+      "family": "registry_skills_sync",
+      "reason_codes": [
+        "sf_final_all_candidate_candidate"
+      ]
+    },
+    {
+      "name": "sf-systematic-regression_guard-odoo-automated-tests-dad98433",
+      "path": ".agents/skills/sf-systematic-regression_guard-odoo-automated-tests-dad98433/SKILL.md",
+      "root": "nexus_repo_local",
+      "skill_status": "nexus_curated_candidate",
+      "test_level": "sf_final_all_candidate_live_compare",
+      "action": "ablation_only_compare",
+      "capability_mount": "semantic_failure_sensor",
+      "family": "regression_guard",
+      "reason_codes": [
+        "sf_final_all_candidate_current_primary"
+      ]
+    },
+    {
+      "name": "sf-systematic-repair_loop-odoo-automated-tests-dad98433",
+      "path": ".agents/skills/sf-systematic-repair_loop-odoo-automated-tests-dad98433/SKILL.md",
+      "root": "nexus_repo_local",
+      "skill_status": "nexus_curated_candidate",
+      "test_level": "sf_final_all_candidate_live_compare",
+      "action": "ablation_only_compare",
+      "capability_mount": "hyper",
+      "family": "repair_loop",
+      "reason_codes": [
+        "sf_final_all_candidate_current_primary"
+      ]
+    },
+    {
+      "name": "freeze",
+      "path": "/Users/jameschen/.agents/skills/gstack/.agents/skills/gstack-freeze/SKILL.md",
+      "root": "external_reference",
+      "skill_status": "external_reference_candidate",
+      "test_level": "sf_final_all_candidate_live_compare",
+      "action": "ablation_only_compare",
+      "capability_mount": "hyper",
+      "family": "repair_loop",
+      "reason_codes": [
+        "sf_final_all_candidate_candidate"
+      ]
+    },
+    {
+      "name": "gstack-freeze",
+      "path": "/Users/jameschen/.agents/skills/gstack-freeze/SKILL.md",
+      "root": "external_reference",
+      "skill_status": "external_reference_candidate",
+      "test_level": "sf_final_all_candidate_live_compare",
+      "action": "ablation_only_compare",
+      "capability_mount": "hyper",
+      "family": "repair_loop",
+      "reason_codes": [
+        "sf_final_all_candidate_candidate"
+      ]
+    },
+    {
+      "name": "qa-only",
+      "path": "/Users/jameschen/.agents/skills/gstack/.agents/skills/gstack-qa-only/SKILL.md",
+      "root": "external_reference",
+      "skill_status": "external_reference_candidate",
+      "test_level": "sf_final_all_candidate_live_compare",
+      "action": "ablation_only_compare",
+      "capability_mount": "hyper",
+      "family": "repair_loop",
+      "reason_codes": [
+        "sf_final_all_candidate_candidate"
+      ]
+    },
+    {
+      "name": "systematic-debugging",
+      "path": "/Users/jameschen/Workspace/hermes-agent/skills/software-development/systematic-debugging/SKILL.md",
+      "root": "external_reference",
+      "skill_status": "external_reference_candidate",
+      "test_level": "sf_final_all_candidate_live_compare",
+      "action": "ablation_only_compare",
+      "capability_mount": "hyper",
+      "family": "repair_loop",
+      "reason_codes": [
+        "sf_final_all_candidate_candidate"
+      ]
+    },
+    {
+      "name": "sf-systematic-research-research-lookup-7e6f92a0",
+      "path": ".agents/skills/sf-systematic-research-research-lookup-7e6f92a0/SKILL.md",
+      "root": "nexus_repo_local",
+      "skill_status": "nexus_curated_candidate",
+      "test_level": "sf_final_all_candidate_live_compare",
+      "action": "ablation_only_compare",
+      "capability_mount": "research",
+      "family": "research",
+      "reason_codes": [
+        "sf_final_all_candidate_current_primary"
+      ]
+    },
+    {
+      "name": "arxiv",
+      "path": "/Users/jameschen/Workspace/hermes-agent/skills/research/arxiv/SKILL.md",
+      "root": "external_reference",
+      "skill_status": "external_reference_candidate",
+      "test_level": "sf_final_all_candidate_live_compare",
+      "action": "ablation_only_compare",
+      "capability_mount": "research",
+      "family": "research",
+      "reason_codes": [
+        "sf_final_all_candidate_candidate"
+      ]
+    },
+    {
+      "name": "gbrain-brain-ops",
+      "path": "/Users/jameschen/.agents/skills/gbrain-brain-ops/SKILL.md",
+      "root": "external_reference",
+      "skill_status": "external_reference_candidate",
+      "test_level": "sf_final_all_candidate_live_compare",
+      "action": "ablation_only_compare",
+      "capability_mount": "research",
+      "family": "research",
+      "reason_codes": [
+        "sf_final_all_candidate_candidate"
+      ]
+    },
+    {
+      "name": "research-paper-writing",
+      "path": "/Users/jameschen/Workspace/hermes-agent/skills/research/research-paper-writing/SKILL.md",
+      "root": "external_reference",
+      "skill_status": "external_reference_candidate",
+      "test_level": "sf_final_all_candidate_live_compare",
+      "action": "ablation_only_compare",
+      "capability_mount": "research",
+      "family": "research",
+      "reason_codes": [
+        "sf_final_all_candidate_candidate"
+      ]
+    },
+    {
+      "name": "agent-reach",
+      "path": "/Users/jameschen/.agents/skills/agent-reach/agent_reach/skill/SKILL.md",
+      "root": "external_reference",
+      "skill_status": "external_reference_candidate",
+      "test_level": "sf_final_all_candidate_live_compare",
+      "action": "ablation_only_compare",
+      "capability_mount": "research",
+      "family": "research",
+      "reason_codes": [
+        "sf_final_all_candidate_candidate"
+      ]
+    },
+    {
+      "name": "research-citation-chain-verifier",
+      "path": ".agents/skills/research-citation-chain-verifier/SKILL.md",
+      "root": "nexus_repo_local",
+      "skill_status": "nexus_curated_candidate",
+      "test_level": "sf_final_all_candidate_live_compare",
+      "action": "ablation_only_compare",
+      "capability_mount": "research",
+      "family": "research_and_source_discipline",
+      "reason_codes": [
+        "sf_final_all_candidate_current_primary"
+      ]
+    },
+    {
+      "name": "gbrain-citation-fixer",
+      "path": "/Users/jameschen/.agents/skills/gbrain-citation-fixer/SKILL.md",
+      "root": "external_reference",
+      "skill_status": "external_reference_candidate",
+      "test_level": "sf_final_all_candidate_live_compare",
+      "action": "ablation_only_compare",
+      "capability_mount": "research",
+      "family": "research_and_source_discipline",
+      "reason_codes": [
+        "sf_final_all_candidate_candidate"
+      ]
+    },
+    {
+      "name": "gbrain-maintain",
+      "path": "/Users/jameschen/.agents/skills/gbrain-maintain/SKILL.md",
+      "root": "external_reference",
+      "skill_status": "external_reference_candidate",
+      "test_level": "sf_final_all_candidate_live_compare",
+      "action": "ablation_only_compare",
+      "capability_mount": "research",
+      "family": "research_and_source_discipline",
+      "reason_codes": [
+        "sf_final_all_candidate_candidate"
+      ]
+    },
+    {
+      "name": "gbrain-perplexity-research",
+      "path": "/Users/jameschen/.agents/skills/gbrain-perplexity-research/SKILL.md",
+      "root": "external_reference",
+      "skill_status": "external_reference_candidate",
+      "test_level": "sf_final_all_candidate_live_compare",
+      "action": "ablation_only_compare",
+      "capability_mount": "research",
+      "family": "research_and_source_discipline",
+      "reason_codes": [
+        "sf_final_all_candidate_candidate"
+      ]
+    },
+    {
+      "name": "gstack-design-review",
+      "path": "/Users/jameschen/.agents/skills/gstack-design-review/SKILL.md",
+      "root": "external_reference",
+      "skill_status": "external_reference_candidate",
+      "test_level": "sf_final_all_candidate_live_compare",
+      "action": "ablation_only_compare",
+      "capability_mount": "research",
+      "family": "research_and_source_discipline",
+      "reason_codes": [
+        "sf_final_all_candidate_candidate"
+      ]
+    },
+    {
+      "name": "sf-systematic-research_control_plane-research-lookup-7e6f92a0",
+      "path": ".agents/skills/sf-systematic-research_control_plane-research-lookup-7e6f92a0/SKILL.md",
+      "root": "nexus_repo_local",
+      "skill_status": "nexus_curated_candidate",
+      "test_level": "sf_final_all_candidate_live_compare",
+      "action": "ablation_only_compare",
+      "capability_mount": "research",
+      "family": "research_control_plane",
+      "reason_codes": [
+        "sf_final_all_candidate_current_primary"
+      ]
+    },
+    {
+      "name": "browserbase-fetch",
+      "path": "/Users/jameschen/.agents/skills/browserbase-fetch/SKILL.md",
+      "root": "external_reference",
+      "skill_status": "external_reference_candidate",
+      "test_level": "sf_final_all_candidate_live_compare",
+      "action": "ablation_only_compare",
+      "capability_mount": "research",
+      "family": "research_control_plane",
+      "reason_codes": [
+        "sf_final_all_candidate_candidate"
+      ]
+    },
+    {
+      "name": "gstack-open-gstack-browser",
+      "path": "/Users/jameschen/.agents/skills/gstack-open-gstack-browser/SKILL.md",
+      "root": "external_reference",
+      "skill_status": "external_reference_candidate",
+      "test_level": "sf_final_all_candidate_live_compare",
+      "action": "ablation_only_compare",
+      "capability_mount": "research",
+      "family": "research_control_plane",
+      "reason_codes": [
+        "sf_final_all_candidate_candidate"
+      ]
+    },
+    {
+      "name": "open-gstack-browser",
+      "path": "/Users/jameschen/.agents/skills/gstack/.agents/skills/gstack-open-gstack-browser/SKILL.md",
+      "root": "external_reference",
+      "skill_status": "external_reference_candidate",
+      "test_level": "sf_final_all_candidate_live_compare",
+      "action": "ablation_only_compare",
+      "capability_mount": "research",
+      "family": "research_control_plane",
+      "reason_codes": [
+        "sf_final_all_candidate_candidate"
+      ]
+    },
+    {
+      "name": "sf2-sandbox_replay-route-fit-spec",
+      "path": ".agents/skills/sf2-sandbox_replay-route-fit-spec/SKILL.md",
+      "root": "nexus_repo_local",
+      "skill_status": "nexus_curated_candidate",
+      "test_level": "sf_final_all_candidate_live_compare",
+      "action": "ablation_only_compare",
+      "capability_mount": "harness_preflight_sensor",
+      "family": "sandbox_replay",
+      "reason_codes": [
+        "sf_final_all_candidate_current_primary"
+      ]
+    },
+    {
+      "name": "sf2-swarm_multi_agent-route-fit-spec",
+      "path": ".agents/skills/sf2-swarm_multi_agent-route-fit-spec/SKILL.md",
+      "root": "nexus_repo_local",
+      "skill_status": "nexus_curated_candidate",
+      "test_level": "sf_final_all_candidate_live_compare",
+      "action": "ablation_only_compare",
+      "capability_mount": "swarm",
+      "family": "swarm_multi_agent",
+      "reason_codes": [
+        "sf_final_all_candidate_current_primary"
+      ]
+    },
+    {
+      "name": "nexus-gemini-code-review-orchestrator",
+      "path": "/Users/jameschen/.agents/skills/devops/nexus-gemini-code-review-orchestrator/SKILL.md",
+      "root": "external_reference",
+      "skill_status": "external_reference_candidate",
+      "test_level": "sf_final_all_candidate_live_compare",
+      "action": "ablation_only_compare",
+      "capability_mount": "swarm",
+      "family": "swarm_multi_agent",
+      "reason_codes": [
+        "sf_final_all_candidate_candidate"
+      ]
+    },
+    {
+      "name": "multi-agent-handoff-governance-design",
+      "path": "/Users/jameschen/.agents/skills/devops/multi-agent-handoff-governance-design/SKILL.md",
+      "root": "external_reference",
+      "skill_status": "external_reference_candidate",
+      "test_level": "sf_final_all_candidate_live_compare",
+      "action": "ablation_only_compare",
+      "capability_mount": "swarm",
+      "family": "swarm_multi_agent",
+      "reason_codes": [
+        "sf_final_all_candidate_candidate"
+      ]
+    },
+    {
+      "name": "multi-agent-handoff-v15-execution-and-validation",
+      "path": "/Users/jameschen/.agents/skills/devops/multi-agent-handoff-v15-execution-and-validation/SKILL.md",
+      "root": "external_reference",
+      "skill_status": "external_reference_candidate",
+      "test_level": "sf_final_all_candidate_live_compare",
+      "action": "ablation_only_compare",
+      "capability_mount": "swarm",
+      "family": "swarm_multi_agent",
+      "reason_codes": [
+        "sf_final_all_candidate_candidate"
+      ]
+    },
+    {
+      "name": "sf-systematic-ui_validator-e2e-testing-d98eb7c3",
+      "path": ".agents/skills/sf-systematic-ui_validator-e2e-testing-d98eb7c3/SKILL.md",
+      "root": "nexus_repo_local",
+      "skill_status": "nexus_curated_candidate",
+      "test_level": "sf_final_all_candidate_live_compare",
+      "action": "ablation_only_compare",
+      "capability_mount": "ultra_review",
+      "family": "ui_validator",
+      "reason_codes": [
+        "sf_final_all_candidate_current_primary"
+      ]
+    },
+    {
+      "name": "wondelai-high-perf-browser",
+      "path": "/Users/jameschen/.agents/skills/wondelai-high-perf-browser/SKILL.md",
+      "root": "external_reference",
+      "skill_status": "external_reference_candidate",
+      "test_level": "sf_final_all_candidate_live_compare",
+      "action": "ablation_only_compare",
+      "capability_mount": "ultra_review",
+      "family": "ui_validator",
+      "reason_codes": [
+        "sf_final_all_candidate_candidate"
+      ]
+    },
+    {
+      "name": "benepass-reimbursement",
+      "path": "/Users/jameschen/.agents/skills/benepass-reimbursement/SKILL.md",
+      "root": "external_reference",
+      "skill_status": "external_reference_candidate",
+      "test_level": "sf_final_all_candidate_live_compare",
+      "action": "ablation_only_compare",
+      "capability_mount": "ultra_review",
+      "family": "ui_validator",
+      "reason_codes": [
+        "sf_final_all_candidate_candidate"
+      ]
+    },
+    {
+      "name": "browserbase-autobrowse",
+      "path": "/Users/jameschen/.agents/skills/browserbase-autobrowse/SKILL.md",
+      "root": "external_reference",
+      "skill_status": "external_reference_candidate",
+      "test_level": "sf_final_all_candidate_live_compare",
+      "action": "ablation_only_compare",
+      "capability_mount": "ultra_review",
+      "family": "ui_validator",
+      "reason_codes": [
+        "sf_final_all_candidate_candidate"
+      ]
+    },
+    {
+      "name": "browserbase-company-research",
+      "path": "/Users/jameschen/.agents/skills/browserbase-company-research/SKILL.md",
+      "root": "external_reference",
+      "skill_status": "external_reference_candidate",
+      "test_level": "sf_final_all_candidate_live_compare",
+      "action": "ablation_only_compare",
+      "capability_mount": "ultra_review",
+      "family": "ui_validator",
+      "reason_codes": [
+        "sf_final_all_candidate_candidate"
+      ]
+    },
+    {
+      "name": "browserbase-event-prospecting",
+      "path": "/Users/jameschen/.agents/skills/browserbase-event-prospecting/SKILL.md",
+      "root": "external_reference",
+      "skill_status": "external_reference_candidate",
+      "test_level": "sf_final_all_candidate_live_compare",
+      "action": "ablation_only_compare",
+      "capability_mount": "ultra_review",
+      "family": "ui_validator",
+      "reason_codes": [
+        "sf_final_all_candidate_candidate"
+      ]
+    },
+    {
+      "name": "browserbase-safe-browser",
+      "path": "/Users/jameschen/.agents/skills/browserbase-safe-browser/SKILL.md",
+      "root": "external_reference",
+      "skill_status": "external_reference_candidate",
+      "test_level": "sf_final_all_candidate_live_compare",
+      "action": "ablation_only_compare",
+      "capability_mount": "ultra_review",
+      "family": "ui_validator",
+      "reason_codes": [
+        "sf_final_all_candidate_candidate"
+      ]
+    },
+    {
+      "name": "github11-vulnerability-scanner-ultra-review",
+      "path": ".agents/skills/github11-vulnerability-scanner-ultra-review/SKILL.md",
+      "root": "nexus_repo_local",
+      "skill_status": "nexus_curated_candidate",
+      "test_level": "sf_final_all_candidate_live_compare",
+      "action": "ablation_only_compare",
+      "capability_mount": "ultra_review",
+      "family": "ultra_review",
+      "reason_codes": [
+        "sf_final_all_candidate_current_primary"
+      ]
+    },
+    {
+      "name": "gstack-cso",
+      "path": "/Users/jameschen/.agents/skills/gstack-cso/SKILL.md",
+      "root": "external_reference",
+      "skill_status": "external_reference_candidate",
+      "test_level": "sf_final_all_candidate_live_compare",
+      "action": "ablation_only_compare",
+      "capability_mount": "ultra_review",
+      "family": "ultra_review",
+      "reason_codes": [
+        "sf_final_all_candidate_candidate"
+      ]
+    },
+    {
+      "name": "requesting-code-review",
+      "path": "/Users/jameschen/Workspace/hermes-agent/skills/software-development/requesting-code-review/SKILL.md",
+      "root": "external_reference",
+      "skill_status": "external_reference_candidate",
+      "test_level": "sf_final_all_candidate_live_compare",
+      "action": "ablation_only_compare",
+      "capability_mount": "ultra_review",
+      "family": "ultra_review",
+      "reason_codes": [
+        "sf_final_all_candidate_candidate"
+      ]
+    },
+    {
+      "name": "diagnose",
+      "path": ".agents/skills/diagnose/SKILL.md",
+      "root": "nexus_repo_local",
+      "skill_status": "nexus_curated_candidate",
+      "test_level": "sf_final_all_candidate_live_compare",
+      "action": "ablation_only_compare",
+      "capability_mount": "codeintel",
+      "family": "xray",
+      "reason_codes": [
+        "sf_final_all_candidate_current_primary"
+      ]
+    }
+  ]
+}
