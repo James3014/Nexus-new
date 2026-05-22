@@ -76,6 +76,7 @@ from nexus.research.flow.evidence_packer import (
     _infer_research_role,
     _write_msa_receipt_reports,
 )
+from nexus.research.flow.phase_clock import AutoFlowPhaseClock
 
 
 RESEARCH_SOURCE_PROJECTS = tuple(research_stack_source_projects())
@@ -1982,11 +1983,11 @@ def run_auto_flow(
     """Internal impl for Auto Flow Runner: route -> run baseline/hyper -> enforce guard -> emit report."""
 
     flow_started_at = time.monotonic()
-    phase_wall_sec: dict[str, float] = {}
+    phase_clock = AutoFlowPhaseClock()
+    phase_wall_sec = phase_clock.phase_wall_sec
     timing_breakdown_sec: dict[str, float] = {}
     benchmark_skill_mount_requests = _benchmark_skill_mount_requests_from_env(task_id=task_id)
     runtime_budget = _runtime_capability_budget(repo_root)
-    phase_started_at = time.monotonic()
     route = build_route(
         repo_root=repo_root,
         task_desc=task_desc,
@@ -2008,8 +2009,7 @@ def run_auto_flow(
         )
         route["capability_plan"] = capability_plan.to_dict()
         route["route_decision"] = route_decision
-    phase_wall_sec["P"] = round(time.monotonic() - phase_started_at, 4)
-    phase_started_at = time.monotonic()
+    phase_clock.mark("P")
     tuning_payload = read_capability_tuning_fast(repo_root)
     parsed_knobs = _parse_tuning_knobs(tuning_payload)
     execution_profile = build_hyper_execution_profile(
@@ -2031,8 +2031,7 @@ def run_auto_flow(
         force_flow=force_flow,
     )
     learn_phase_slo = read_phase_slo_summary_fast(repo_root)
-    phase_wall_sec["X"] = round(time.monotonic() - phase_started_at, 4)
-    phase_started_at = time.monotonic()
+    phase_clock.mark("X")
     learn_gate_blocked = (
         not bool(learn_phase_slo.get("phase_slo_pass", False))
         or float((learn_phase_slo.get("global", {}) or {}).get("required_done_ratio", 0.0) or 0.0) < 0.95
@@ -2110,7 +2109,7 @@ def run_auto_flow(
     ):
         chosen_flow = "baseline"
         history_forced_baseline = True
-    phase_wall_sec["D"] = round(time.monotonic() - phase_started_at, 4)
+    phase_clock.mark("D")
 
     guard_hit = False
     setup_started_at = time.monotonic()
@@ -2693,7 +2692,7 @@ def run_auto_flow(
                     else:
                         chosen_flow = "hyper_sprint"
                         strategy_path = "probe_then_hyper_guard_fallback_rejected"
-    phase_wall_sec["R"] = round(time.monotonic() - phase_started_at, 4)
+    phase_clock.mark("R")
 
     baseline_probe_for_report = None
     if isinstance(baseline_probe, dict):
