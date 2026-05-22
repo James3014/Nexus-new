@@ -58,6 +58,11 @@ from scripts.bench.public_lane_contract import (
 from scripts.bench.provider_retry import (
     direct_model_retryable_infra_failure as _provider_retry_direct_model_retryable_infra_failure,
 )
+from scripts.bench.row_usage_trace import (
+    governance_event_types as _row_governance_event_types,
+    phase_wall_from_trace as _row_phase_wall_from_trace,
+    skill_mount_view as _row_skill_mount_view,
+)
 from scripts.bench.route_execution_policy import (
     allow_deterministic_pre_rescue as _policy_allow_deterministic_pre_rescue,
     allow_pre_model_deterministic_rescue as _policy_allow_pre_model_deterministic_rescue,
@@ -2392,8 +2397,7 @@ def _extract_record(
     timing = timing if isinstance(timing, dict) else {}
     timing_breakdown = timing.get("breakdown_sec", {}) if isinstance(timing, dict) else {}
     timing_breakdown = timing_breakdown if isinstance(timing_breakdown, dict) else {}
-    phase_wall = timing.get("phase_wall_sec") or usage_trace.get("phase_wall_sec") or {}
-    phase_wall = phase_wall if isinstance(phase_wall, dict) else {}
+    phase_wall = _row_phase_wall_from_trace(timing=timing, usage_trace=usage_trace)
     phase_wall_total_sec = _sum_phase_wall_sec(phase_wall)
     pillars = usage_trace.get("pillars", {}) if isinstance(usage_trace, dict) else {}
     pillars = pillars if isinstance(pillars, dict) else {}
@@ -2442,26 +2446,10 @@ def _extract_record(
     forecast_gate_shadow = forecast_gate_shadow if isinstance(forecast_gate_shadow, dict) else {}
     capability_receipts = usage_trace.get("capability_receipts", []) if isinstance(usage_trace, dict) else []
     capability_receipts = capability_receipts if isinstance(capability_receipts, list) else []
-    skill_mount_contract = []
-    if isinstance(usage_trace, dict):
-        raw_skill_mount_contract = usage_trace.get("skill_mount_contract")
-        if raw_skill_mount_contract is None:
-            raw_skill_mount_contract = usage_trace.get("skill_mount_contracts")
-        if isinstance(raw_skill_mount_contract, dict):
-            skill_mount_contract = [raw_skill_mount_contract]
-        elif isinstance(raw_skill_mount_contract, list):
-            skill_mount_contract = [item for item in raw_skill_mount_contract if isinstance(item, dict)]
-    skill_mount_violations = []
-    if isinstance(usage_trace, dict):
-        raw_skill_mount_violations = usage_trace.get("skill_mount_violations")
-        if isinstance(raw_skill_mount_violations, list):
-            skill_mount_violations = [item for item in raw_skill_mount_violations if isinstance(item, dict)]
-    if skill_mount_violations:
-        skill_mount_contract_status = "RETURN"
-    elif skill_mount_contract:
-        skill_mount_contract_status = "PASS"
-    else:
-        skill_mount_contract_status = "EMPTY"
+    skill_mount = _row_skill_mount_view(usage_trace)
+    skill_mount_contract = skill_mount.contracts
+    skill_mount_violations = skill_mount.violations
+    skill_mount_contract_status = skill_mount.status
     runtime_pruned_capabilities = capabilities.get("runtime_pruned_capabilities", {})
     runtime_pruned_capabilities = runtime_pruned_capabilities if isinstance(runtime_pruned_capabilities, dict) else {}
     capability_replan_trace = capability_plan.get("replan_trace", []) if isinstance(capability_plan, dict) else []
@@ -2479,13 +2467,7 @@ def _extract_record(
     nexus_failure_analysis = nexus_failure_analysis if isinstance(nexus_failure_analysis, dict) else {}
     governance_events = payload.get("governance_events") or usage_trace.get("governance_events") or []
     governance_events = governance_events if isinstance(governance_events, list) else []
-    governance_event_types = sorted(
-        {
-            str(item.get("event_type") or "")
-            for item in governance_events
-            if isinstance(item, dict) and str(item.get("event_type") or "")
-        }
-    )
+    governance_event_types = _row_governance_event_types(governance_events)
     governance_event_summary = payload.get("governance_event_summary") or usage_trace.get("governance_event_summary") or {}
     governance_event_summary = governance_event_summary if isinstance(governance_event_summary, dict) else {}
     openseeker = usage_trace.get("openseeker_alignment", {}) if isinstance(usage_trace, dict) else {}

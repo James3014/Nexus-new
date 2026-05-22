@@ -3027,3 +3027,9 @@ version_scope:
 - **Root Cause**: The test treated immutable report node data as a mutable fixture.
 - **Action Taken**: Replaced the node with `dataclasses.replace(...)` to construct the bad DAG while preserving node immutability.
 - **Prevention**: DAG and report-contract tests should create alternate immutable nodes rather than mutating shared node instances; immutability is part of the report registry interface.
+
+## 2026-05-22: Runner Row Trace Extraction Needs Contract-Level Fixtures
+- **Phenomenon**: The first `row_usage_trace` TDD cycle failed at import time, and prior lessons showed `_extract_record`, public gate annotations, and evidence bundle fields are tightly coupled.
+- **Root Cause**: Pulling helpers out of `capability_ab_runner` can look mechanical, but phase wall, skill mount, and governance event fields are public row contract fields consumed by later claim gates.
+- **Action Taken**: Added a focused helper test before implementation, preserved timing-vs-usage fallback, skill mount `PASS/RETURN/EMPTY`, and governance event de-dup semantics, then reran the full benchmark runner test file.
+- **Prevention**: Future `_extract_record` extractions should first pin the public row field behavior in a dedicated module test, then rerun the full runner test file rather than relying only on helper unit tests.
