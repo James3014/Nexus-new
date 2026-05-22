@@ -3087,3 +3087,9 @@ version_scope:
 - **Root Cause**: The search handles were relevant, but the path scope was too broad for a non-audit task and violated the intended bounded retrieval posture.
 - **Action Taken**: Continued with only the directly applicable Learning Closure entries for public gate contract and helper extraction, and recorded this retrieval failure before final CI.
 - **Prevention**: For ordinary refactor slices, search `nexus_wiki_vault/06_Ops/Ops - Learning Closure Matrix.md`, specific ADR paths, and current top-level report files only; include `docs/reports/archive` only for dedicated archive/indexing work.
+
+## 2026-05-22: Benchmark Row Token Fields Need A Small Contract Module
+- **Phenomenon**: `_extract_record` still normalized token status, local no-model measurement, provider raw token evidence, and token-ledger fields inline while also building the full public benchmark row.
+- **Root Cause**: Token row accounting was coupled to unrelated route, capability, and timing extraction, making small token contract changes require edits inside a thousand-line row builder.
+- **Action Taken**: Added `scripts/bench/benchmark_row_tokens.py` with `normalize_token_status` and `build_row_token_fields`, covered measured aliases, no-model local fast paths, provider evidence, and ledger fields with TDD, then reran focused `_extract_record` token tests and the full runner test file.
+- **Prevention**: Future token-accounting changes should start in `benchmark_row_tokens` tests; `_extract_record` should only assemble the returned token fields into the row.

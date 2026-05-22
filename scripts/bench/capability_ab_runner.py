@@ -44,6 +44,10 @@ from scripts.bench.cost_evidence_classifier import (
     model_attempt_runner_overhead_polluted as _model_attempt_runner_overhead_polluted,
     row_has_measured_provider_tokens as _row_has_measured_provider_tokens,
 )
+from scripts.bench.benchmark_row_tokens import (
+    build_row_token_fields as _build_row_token_fields,
+    normalize_token_status as _row_normalize_token_status,
+)
 from scripts.bench.public_lane_contract import (
     build_external_provider_claim_boundary_contract,
     build_expected_capability_evidence_contract,
@@ -2237,10 +2241,7 @@ def _clear_total_timeout(previous_handler) -> None:
 
 
 def _normalize_token_status(status: str, total_tokens: int) -> str:
-    normalized = str(status or "unknown").strip().lower() or "unknown"
-    if normalized in {"ok", "captured"} and total_tokens > 0:
-        return "measured"
-    return normalized
+    return _row_normalize_token_status(status, total_tokens)
 
 
 def _extract_token_info_from_payload(payload: dict[str, Any]) -> dict[str, Any]:
@@ -2525,16 +2526,9 @@ def _extract_record(
     cli_elapsed_sec = timing.get("cli_elapsed_sec")
     if cli_elapsed_sec is None and result.get("elapsed_sec") is not None:
         cli_elapsed_sec = task_duration
-    model_calls = int(report.get("model_calls", 0) or 0)
-    model_name = str(report.get("model_name", "") or "")
-    total_tokens = int(report.get("total_tokens", 0) or 0)
-    token_capture_status = _normalize_token_status(
-        str(report.get("token_capture_status", "unknown") or "unknown"),
-        total_tokens,
-    )
-    token_measured = token_capture_status == "measured" or (
-        model_calls <= 0 and token_capture_status in {"not_applicable_local_only", "not_applicable_no_model"}
-    )
+    token_fields = _build_row_token_fields(report)
+    model_calls = token_fields["model_calls"]
+    model_name = token_fields["model_name"]
     rlm_trace_path = str(usage_trace.get("rlm_trace_path") or "")
     rlm_trace_summary = _summarize_rlm_trace(rlm_trace_path)
     semantic_status = payload.get("semantic_status")
@@ -2608,27 +2602,27 @@ def _extract_record(
         "model_name": model_name,
         "model_patch_generated": bool(report.get("model_patch_generated", False)),
         "fallback_used": bool(report.get("fallback_used", False)),
-        "total_tokens": total_tokens,
-        "token_capture_status": token_capture_status,
-        "token_measured": token_measured,
-        "model_total_tokens": int(report.get("model_total_tokens", total_tokens if model_calls > 0 else 0) or 0),
-        "model_token_capture_status": str(report.get("model_token_capture_status") or ""),
-        "gateway_stats_present": bool(report.get("gateway_stats_present", False)),
+        "total_tokens": token_fields["total_tokens"],
+        "token_capture_status": token_fields["token_capture_status"],
+        "token_measured": token_fields["token_measured"],
+        "model_total_tokens": token_fields["model_total_tokens"],
+        "model_token_capture_status": token_fields["model_token_capture_status"],
+        "gateway_stats_present": token_fields["gateway_stats_present"],
         "direct_infra_retry_count": int(report.get("direct_infra_retry_count", 0) or 0),
         "direct_infra_retry_wall_sec": float(report.get("direct_infra_retry_wall_sec", 0.0) or 0.0),
         "direct_infra_retry_reasons": list(report.get("direct_infra_retry_reasons", []) or []),
         "direct_infra_retry_raw_tails": list(report.get("direct_infra_retry_raw_tails", []) or []),
-        "gateway_usage_metadata_present": bool(report.get("gateway_usage_metadata_present", False)),
-        "gateway_token_source": str(report.get("gateway_token_source") or ""),
-        "gateway_token_outlier_reason": str(report.get("gateway_token_outlier_reason") or ""),
-        "raw_provider_total_tokens": int(report.get("raw_provider_total_tokens", 0) or 0),
-        "raw_provider_token_source": str(report.get("raw_provider_token_source") or ""),
-        "provider_stats_cumulative_suspected": bool(report.get("provider_stats_cumulative_suspected", False)),
-        "token_accounting_failure_class": str(report.get("token_accounting_failure_class") or ""),
-        "token_ledger_status": str(report.get("token_ledger_status") or ""),
-        "token_ledger_source": str(report.get("token_ledger_source") or ""),
-        "token_ledger_normalized_tokens": int(report.get("token_ledger_normalized_tokens", 0) or 0),
-        "token_ledger_raw_provider_total_tokens": int(report.get("token_ledger_raw_provider_total_tokens", 0) or 0),
+        "gateway_usage_metadata_present": token_fields["gateway_usage_metadata_present"],
+        "gateway_token_source": token_fields["gateway_token_source"],
+        "gateway_token_outlier_reason": token_fields["gateway_token_outlier_reason"],
+        "raw_provider_total_tokens": token_fields["raw_provider_total_tokens"],
+        "raw_provider_token_source": token_fields["raw_provider_token_source"],
+        "provider_stats_cumulative_suspected": token_fields["provider_stats_cumulative_suspected"],
+        "token_accounting_failure_class": token_fields["token_accounting_failure_class"],
+        "token_ledger_status": token_fields["token_ledger_status"],
+        "token_ledger_source": token_fields["token_ledger_source"],
+        "token_ledger_normalized_tokens": token_fields["token_ledger_normalized_tokens"],
+        "token_ledger_raw_provider_total_tokens": token_fields["token_ledger_raw_provider_total_tokens"],
         "gateway_error_category": str(report.get("gateway_error_category") or ""),
         "gateway_prompt_chars": int(report.get("gateway_prompt_chars", 0) or 0),
         "gateway_payload_chars": int(report.get("gateway_payload_chars", 0) or 0),
