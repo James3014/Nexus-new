@@ -55,6 +55,7 @@ from scripts.bench.public_lane_contract import (
     commercial_model_basis_gate_failures,
     derive_public_gate_failures,
 )
+from scripts.bench.public_gate_bundle import derive_cost_efficiency_decision
 from scripts.bench.provider_retry import (
     direct_model_retryable_infra_failure as _provider_retry_direct_model_retryable_infra_failure,
 )
@@ -8689,33 +8690,21 @@ def write_evidence_bundle(
         )
     delivery_gate_passed = not delivery_gate_failures
     cost_claim_passed = delivery_gate_passed and not cost_gate_failures
-    cost_efficiency_failures = []
-    if not delivery_gate_passed:
-        cost_efficiency_failures.extend(delivery_gate_failures)
-    if cost_gate_failures:
-        cost_efficiency_failures.extend(cost_gate_failures)
-    if wall_cost_ratio_with_over_without > 1.0:
-        cost_efficiency_failures.append("wall_cost_not_improved")
-    if token_cost_ratio_with_over_without > 1.0:
-        cost_efficiency_failures.append("token_cost_not_improved")
-    if model_call_ratio_with_over_without > 1.0:
-        cost_efficiency_failures.append("model_calls_not_improved")
-    if retry_cost_share_wall > 0.0:
-        cost_efficiency_failures.append("hidden_retry_wall_share_present")
-    if retry_cost_share_tokens > 0.0:
-        cost_efficiency_failures.append("hidden_retry_token_share_present")
-    if retry_cost_share_wall >= 0.25 or retry_cost_share_tokens >= 0.25:
-        cost_efficiency_failures.append("hidden_retry_second_attempt_dominant")
-    if wall_ledger_invalid:
-        cost_efficiency_failures.append("wall_ledger_telemetry_invalid")
-    if warning_ledger_invalid:
-        cost_efficiency_failures.append("warning_ledger_telemetry_invalid")
-    cost_efficiency_status = "IMPROVED" if not cost_efficiency_failures else "REGRESSED"
-    if wall_ledger_invalid or warning_ledger_invalid:
-        cost_efficiency_status = "RETURN"
-    if not valid_comparison_ready:
-        cost_efficiency_status = "INCONCLUSIVE_PROVIDER_VARIANCE"
-        cost_efficiency_failures.append("valid_comparison_not_ready")
+    cost_efficiency_decision = derive_cost_efficiency_decision(
+        delivery_gate_passed=delivery_gate_passed,
+        delivery_gate_failures=delivery_gate_failures,
+        cost_gate_failures=cost_gate_failures,
+        wall_cost_ratio_with_over_without=wall_cost_ratio_with_over_without,
+        token_cost_ratio_with_over_without=token_cost_ratio_with_over_without,
+        model_call_ratio_with_over_without=model_call_ratio_with_over_without,
+        retry_cost_share_wall=retry_cost_share_wall,
+        retry_cost_share_tokens=retry_cost_share_tokens,
+        wall_ledger_invalid=wall_ledger_invalid,
+        warning_ledger_invalid=warning_ledger_invalid,
+        valid_comparison_ready=valid_comparison_ready,
+    )
+    cost_efficiency_failures = cost_efficiency_decision.failures
+    cost_efficiency_status = cost_efficiency_decision.status
     if (
         cost_efficiency_failures
         and delivery_gate_passed

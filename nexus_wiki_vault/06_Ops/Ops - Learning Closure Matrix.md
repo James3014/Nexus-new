@@ -3045,3 +3045,9 @@ version_scope:
 - **Root Cause**: The previous Learning Closure entry covered the phase-clock slice, not the later `nexus_cli_registry` change.
 - **Action Taken**: Added `deprecated_command_names()` so deprecated CLI alias tests consume registry data, then wrote this lesson before rerunning CI.
 - **Prevention**: When doing multiple TDD slices in one rollout, append a slice-specific Learning Closure entry before each CI gate run that touches protected code.
+
+## 2026-05-22: Public Gate Cost-Efficiency Decisions Need A Deep Module
+- **Phenomenon**: `write_evidence_bundle` mixed row aggregation, public gate failure wiring, and cost-efficiency status transitions in one long function.
+- **Root Cause**: Cost-efficiency gate semantics are public-claim policy, not bundle serialization; keeping them inline makes it easy to accidentally alter `IMPROVED`, `REGRESSED`, `RETURN`, and `INCONCLUSIVE_PROVIDER_VARIANCE` behavior while editing unrelated bundle fields.
+- **Action Taken**: Added `scripts/bench/public_gate_bundle.py` with `derive_cost_efficiency_decision`, pinned improvement, wall-ledger RETURN, and provider-variance INCONCLUSIVE behavior with TDD, then reran the full benchmark runner test file.
+- **Prevention**: Future PublicGate extraction should move policy decisions behind small public functions before moving payload serialization, and each move should rerun `write_evidence_bundle` coverage rather than only helper tests.
