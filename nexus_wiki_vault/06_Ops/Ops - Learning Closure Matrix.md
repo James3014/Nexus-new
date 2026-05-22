@@ -3021,3 +3021,9 @@ version_scope:
 - **Root Cause**: The test fixture invented a near-miss string instead of using an observed Gemini CLI error phrase.
 - **Action Taken**: Updated the test fixture to `Error resuming session: Invalid session identifier "abc"` and kept the extracted retry classifier behavior-equivalent with `capability_ab_runner`.
 - **Prevention**: Provider retry tests should reuse observed error strings from `tests/services/test_gemini_cli.py` or benchmark fixtures; do not invent paraphrases for brittle provider text classifiers.
+
+## 2026-05-22: Report DAG Fixtures Should Preserve Immutable Nodes
+- **Phenomenon**: The first Zero Trust V2 report DAG negative test tried to mutate `depends_on` on a frozen `ZeroTrustV2ReportNode` and failed before reaching the unknown-dependency assertion.
+- **Root Cause**: The test treated immutable report node data as a mutable fixture.
+- **Action Taken**: Replaced the node with `dataclasses.replace(...)` to construct the bad DAG while preserving node immutability.
+- **Prevention**: DAG and report-contract tests should create alternate immutable nodes rather than mutating shared node instances; immutability is part of the report registry interface.
