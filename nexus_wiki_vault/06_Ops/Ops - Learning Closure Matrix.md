@@ -3063,3 +3063,9 @@ version_scope:
 - **Root Cause**: `topological_report_order` proved ordering but did not expose a stable manifest shape with node metadata and allowed mutation/benchmark lists.
 - **Action Taken**: Added `build_report_manifest` and `ZeroTrustV2ReportNode.to_manifest`, preserving fail-closed `public_benchmark_allowed_nodes=[]` while making `runtime_apply` the only runtime update node.
 - **Prevention**: Future Zero Trust report-DAG changes should update the manifest test whenever a node is added or a runtime/public boundary changes, so report contract drift is visible without reading builder internals.
+
+## 2026-05-22: Public Gate Checks Need Their Own Contract Test
+- **Phenomenon**: Public claim gate checks were assembled inside `capability_ab_runner`, even though downstream readiness contracts and dashboards rely on exact fields such as token measured rates, wall-ledger rates, route-cost schemas, and S2T draft status.
+- **Root Cause**: The checks payload was treated as bundle formatting, but it is a public gate contract surface.
+- **Action Taken**: Moved `build_public_gate_checks` into `scripts/bench/public_gate_bundle.py`, added a dedicated behavior test for the claim-boundary inputs, and reran the full benchmark runner test file.
+- **Prevention**: Any future change to public gate check fields should land with a `public_gate_bundle` contract test before touching evidence bundle serialization or dashboard readers.
