@@ -48,6 +48,50 @@ class RouteExecutionPolicy:
         }
 
 
+@dataclass(frozen=True)
+class ModelParticipationRescuePolicy:
+    route_cost_controls: dict[str, Any]
+    route_cost_policy_overrides: dict[str, Any]
+    require_model_participation_for_run: bool
+    allow_cost_efficiency_pre_model_rescue: bool
+
+
+def apply_model_participation_rescue_policy(
+    route_cost_controls: Mapping[str, Any],
+    route_cost_policy_overrides: Mapping[str, Any],
+    *,
+    llm_enabled: bool,
+    require_model_participation_env: bool,
+    disable_deterministic_rescue_env: bool,
+    allow_cost_efficiency_pre_model_rescue_env: bool,
+) -> ModelParticipationRescuePolicy:
+    controls = dict(route_cost_controls)
+    overrides = dict(route_cost_policy_overrides)
+    require_model_participation_for_run = bool(llm_enabled and require_model_participation_env)
+    allow_cost_efficiency_pre_model_rescue = bool(allow_cost_efficiency_pre_model_rescue_env)
+
+    if llm_enabled and disable_deterministic_rescue_env:
+        controls["disable_deterministic_rescue"] = True
+        overrides["disable_deterministic_rescue"] = True
+        controls["allow_pre_model_deterministic_rescue"] = False
+
+    if require_model_participation_for_run:
+        if controls.get("allow_pre_model_deterministic_rescue") is True:
+            overrides["allow_pre_model_deterministic_rescue"] = True
+        if not allow_cost_efficiency_pre_model_rescue:
+            controls["allow_pre_model_deterministic_rescue"] = False
+        else:
+            controls["cost_efficiency_pre_model_rescue_profile"] = True
+        controls["require_model_participation"] = True
+
+    return ModelParticipationRescuePolicy(
+        route_cost_controls=controls,
+        route_cost_policy_overrides=overrides,
+        require_model_participation_for_run=require_model_participation_for_run,
+        allow_cost_efficiency_pre_model_rescue=allow_cost_efficiency_pre_model_rescue,
+    )
+
+
 def prefer_baseline_fast_path(route_cost_controls: Mapping[str, Any]) -> bool:
     if route_cost_controls.get("expected_capability_protection"):
         return False

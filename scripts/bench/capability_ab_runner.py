@@ -81,6 +81,7 @@ from scripts.bench.row_usage_trace import (
 from scripts.bench.route_execution_policy import (
     allow_deterministic_pre_rescue as _policy_allow_deterministic_pre_rescue,
     allow_pre_model_deterministic_rescue as _policy_allow_pre_model_deterministic_rescue,
+    apply_model_participation_rescue_policy,
     decide_route_execution_policy,
     prefer_baseline_fast_path as _policy_prefer_baseline_fast_path,
     supervised_bare_first_reason as _policy_supervised_bare_first_reason,
@@ -5216,20 +5217,20 @@ def run_with_nexus(
         route_cost_controls,
         task.expected_capabilities,
     )
-    require_model_participation_for_run = bool(llm_enabled and _truthy_env("NEXUS_REQUIRE_MODEL_PARTICIPATION"))
-    if llm_enabled and _truthy_env("NEXUS_BENCH_DISABLE_DETERMINISTIC_RESCUE"):
-        route_cost_controls["disable_deterministic_rescue"] = True
-        route_cost_policy_overrides["disable_deterministic_rescue"] = True
-        route_cost_controls["allow_pre_model_deterministic_rescue"] = False
-    allow_cost_efficiency_pre_model_rescue = _truthy_env("NEXUS_ALLOW_COST_EFFICIENCY_PRE_MODEL_RESCUE")
-    if require_model_participation_for_run:
-        if route_cost_controls.get("allow_pre_model_deterministic_rescue") is True:
-            route_cost_policy_overrides["allow_pre_model_deterministic_rescue"] = True
-        if not allow_cost_efficiency_pre_model_rescue:
-            route_cost_controls["allow_pre_model_deterministic_rescue"] = False
-        else:
-            route_cost_controls["cost_efficiency_pre_model_rescue_profile"] = True
-        route_cost_controls["require_model_participation"] = True
+    model_participation_policy = apply_model_participation_rescue_policy(
+        route_cost_controls,
+        route_cost_policy_overrides,
+        llm_enabled=llm_enabled,
+        require_model_participation_env=_truthy_env("NEXUS_REQUIRE_MODEL_PARTICIPATION"),
+        disable_deterministic_rescue_env=_truthy_env("NEXUS_BENCH_DISABLE_DETERMINISTIC_RESCUE"),
+        allow_cost_efficiency_pre_model_rescue_env=_truthy_env("NEXUS_ALLOW_COST_EFFICIENCY_PRE_MODEL_RESCUE"),
+    )
+    route_cost_controls = model_participation_policy.route_cost_controls
+    route_cost_policy_overrides = model_participation_policy.route_cost_policy_overrides
+    require_model_participation_for_run = model_participation_policy.require_model_participation_for_run
+    allow_cost_efficiency_pre_model_rescue = (
+        model_participation_policy.allow_cost_efficiency_pre_model_rescue
+    )
     if (
         skip_llm_baseline
         and route_cost_controls.get("require_llm_baseline") is not True

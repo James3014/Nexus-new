@@ -3123,3 +3123,9 @@ version_scope:
 - **Root Cause**: The orchestration body owned both phase decisions and persistence mechanics for `.nexus/reports/research/auto-flow-history.json`, forcing history IO changes through the large runner.
 - **Action Taken**: Added `auto_flow_key`, `load_payload`, `recent_for`, `write_payload`, and `write_recent_for` to `HistorySignalStore`, covered read/write trimming with TDD, and rewired `run_auto_flow` to use the store.
 - **Prevention**: Future `run_auto_flow` phase-runner work should move persistence and payload-shaping seams into flow modules before extracting execution branches.
+
+## 2026-05-22: Model Participation Rescue Policy Needs A Pure Contract
+- **Phenomenon**: `run_with_nexus` still mutated route-cost controls directly from `NEXUS_REQUIRE_MODEL_PARTICIPATION`, `NEXUS_BENCH_DISABLE_DETERMINISTIC_RESCUE`, and `NEXUS_ALLOW_COST_EFFICIENCY_PRE_MODEL_RESCUE`.
+- **Root Cause**: Env-derived benchmark policy was embedded in the runner body, making cost-efficiency pre-model rescue boundaries harder to test without invoking the full harness.
+- **Action Taken**: Added `apply_model_participation_rescue_policy` to `scripts/bench/route_execution_policy.py`, covered require-model blocking, explicit cost-efficiency opt-in, deterministic rescue disablement, and llm-disabled no-op cases, then rewired `run_with_nexus`.
+- **Prevention**: Future `run_with_nexus` cost/rescue policy changes should start in `test_route_execution_policy.py` and only then update harness orchestration.
