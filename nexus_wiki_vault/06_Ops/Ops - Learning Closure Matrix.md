@@ -2868,3 +2868,144 @@ version_scope:
 - Failure: delivery and token telemetry were present, yet the row correctly returned on `receipt_data_contract_violation` because the expected `judge_panel` receipt was missing.
 - Lesson: a skill replacement live test must validate the actually executed Flash+Nexus receipt seam; an unsupported expected capability alias turns a skill comparison into a harness mismatch.
 - Guardrail: keep the first run fail-closed, repair the final-live matrix to use the executed route seam for that capability, rerun preflight/live, and only allow replacement when delivery, receipt chain, trust, token, and wall gates all pass.
+
+## 2026-05-21 - code-path V2 promotion work must update governance wiki
+
+- Trigger: the first Zero-Trust V2 closeout ran `uv run scripts/ops/ci_gate.py` after adding V2 promotion control-plane modules and reports.
+- Failure: `WIKI-SYNC-BLOCK` fired because code changes existed in protected paths but no `nexus_wiki_vault/` governance update had been made.
+- Lesson: V2 promotion changes are governance changes, not only implementation details; their runtime mutation boundary must be recorded in the wiki before closeout.
+- Guardrail: update `nexus_wiki_vault/06_Ops/Ops - Governance Changelog.md` whenever V2 promotion code or apply-gate semantics change, especially when the change keeps `runtime_mutation_allowed=false` and separates v1 diagnostic evidence from v2-only promotion credit.
+
+## 2026-05-21 - sandbox probes are not skill promotion evidence
+
+- Trigger: the first Zero-Trust V2 physical sandbox wrapper enriched candidate rows using a harmless `/bin/echo` probe and could make the promotion evaluator see complete sandbox / receipt / clean-slate fields.
+- Failure: a sandbox capability probe can prove runner isolation but not candidate skill behavior; counting it as V2 evidence would overclaim `READY_FOR_MANUAL_APPLY`.
+- Lesson: physical sandbox readiness and skill execution evidence are separate accounting layers.
+- Guardrail: V2 physical runners must default to `probe_only=true` and `promotion_credit_allowed=false`; only true skill execution rows may increment `v2_evidence_count` or feed manual apply readiness.
+
+## 2026-05-21 - materialized SKILL.md is not behavior evidence
+
+- Trigger: the first M1-M6 rollout path could materialize one P0 `SKILL.md` into a sandbox and emit runtime-owned receipt fields.
+- Failure: reading and hashing a skill asset proves source availability and sandbox mechanics, but not that Nexus actually used the skill to improve a capability outcome.
+- Lesson: command-ready source materialization and behavior-level skill execution are separate V2 evidence tiers.
+- Guardrail: reports must mark `materialization_only=true` and keep `ready_for_manual_apply_count=0` until the command spec is backed by a capability runner that records selected/injected/used/evidence/gate/outcome receipts for the candidate skill.
+
+## 2026-05-21 - dependent V2 report builders must run sequentially
+
+- Trigger: `build_zero_trust_v2_behavior_evidence.py`, `build_zero_trust_v2_behavior_promotion_report.py`, and `build_zero_trust_v2_final_rollout_completion.py` were first launched in parallel.
+- Failure: downstream builders failed with `FileNotFoundError` because their upstream JSON artifacts had not been written yet.
+- Lesson: report builders can be parallelized only when they do not consume each other's outputs.
+- Guardrail: run behavior evidence -> behavior promotion report -> final rollout completion sequentially, or add an orchestration wrapper that encodes these dependencies.
+
+## 2026-05-21 - historical behavior receipts are diagnostic only
+
+- Trigger: M7-M12 behavior extraction read existing live-compare evidence bundles with selected/evidence/outcome/trust signals.
+- Failure: counting historical v1 bundles as V2 evidence would bypass physical sandbox behavior execution and recreate the old promotion ambiguity.
+- Lesson: historical behavior receipts may explain why a candidate looked useful, but they cannot satisfy V2 promotion without fresh physical sandbox execution and runtime-signed behavior receipts.
+- Guardrail: behavior evidence reports must keep `v2_behavior_evidence_count=0` unless the row was produced by the V2 physical behavior runner with selected/injected/used/evidence/gate/outcome and trust mismatch checks.
+
+## 2026-05-21 - quoted wiki paths are required for shell lesson retrieval
+
+- Trigger: a targeted retrieval command ran `tail -n 60 nexus_wiki_vault/06_Ops/Ops - Governance Changelog.md` without quoting the path.
+- Failure: the shell split the filename on spaces, so `tail` read `nexus_wiki_vault/06_Ops/Ops` and failed on `-`, `Governance`, and `Changelog.md`.
+- Lesson: wiki paths with spaces must be quoted or passed as separate exec args by a safer wrapper.
+- Guardrail: use quoted path strings for `nexus_wiki_vault/06_Ops/Ops - *.md` retrieval commands and avoid treating partial `Ops` output as valid evidence.
+
+## 2026-05-21 - fresh behavior runner adapters must include runner preflight guards
+
+- Trigger: the first M13 adapter command included the core `capability_ab_runner.py` invocation but omitted runner guardrails such as hidden verifier, history neutralization, learning-loop disablement, and executor gate flags.
+- Failure: a command can look structurally runnable while producing evidence that is not comparable or is polluted by history/learning state.
+- Lesson: V2 behavior adapter specs must encode the same preflight and isolation knobs that the runner expects for trustworthy receipt generation.
+- Guardrail: require `NEXUS_VALUE_HIDDEN_VERIFIER=1`, `--neutralize-history`, `--disable-learning-loop`, executor gate flags, explicit `--task-id-filter`, and `--evidence-bundle` before an adapter can be marked `READY_FOR_PHYSICAL_BEHAVIOR_RUN`.
+
+## 2026-05-21 - fresh task refs must be generated before runner matrices consume them
+
+- Trigger: `build_zero_trust_v2_fresh_task_refs.py` and `build_zero_trust_v2_behavior_runner_matrix.py --fresh-task-refs ...` were launched in parallel.
+- Failure: the matrix builder failed with `FileNotFoundError` because the fresh task refs artifact had not been written yet.
+- Lesson: M20 fresh task refs are an upstream dependency for M21 runner matrix generation.
+- Guardrail: run M20 fresh task refs first, then M21 behavior runner matrix, then M20-M27 completion; only parallelize independent validation after these artifacts exist.
+
+## 2026-05-21 - rollout summary counters must preserve priority scope
+
+- Trigger: the first M28-M35 execution plan wrote total ready-to-run count into `m33_p0_ready_for_execution_count`.
+- Failure: the P0 rollout card showed `19` instead of the true P0 count `5`, while P1/P2 showed `14`; this made the batch split internally inconsistent.
+- Lesson: milestone counters must preserve the scope encoded in the milestone name.
+- Guardrail: derive P0 counters from P0 adapters only, derive P1/P2 counters from total ready minus P0, and add regression coverage for both values.
+
+## 2026-05-21 - behavior runner adapters must use real capability_ab_runner flags
+
+- Trigger: the first M36 preflight command emitted by the V2 behavior adapter used `--model gemini-3-flash`.
+- Failure: `scripts/bench/capability_ab_runner.py` rejected the command with `error: unrecognized arguments: --model gemini-3-flash`.
+- Lesson: execution-plan adapters must track the runner's actual argparse contract, not a generic model flag.
+- Guardrail: use `--gemini-model` for Gemini model selection and add regression coverage that `--model` is absent from V2 behavior adapter commands.
+
+## 2026-05-21 - fresh V2 task manifests must stay runner-public
+
+- Trigger: after repairing the M36 model flag, preflight failed on `manifest_task_*_unknown:zero_trust_v2` and `expected_capabilities_unknown:policy_capability_gate`.
+- Failure: private V2 metadata in task rows and non-core capability ids made an otherwise valid canary task fail the public benchmark preflight contract.
+- Lesson: V2 promotion metadata and runner task manifests are separate surfaces; runner-facing tasks must use only supported public fields and core expected capability ids.
+- Guardrail: keep V2 metadata in a top-level companion section, map V2 capabilities such as `policy_capability_gate` to runner-core aliases such as `mempalace_gate`, and regress that task rows do not contain private `zero_trust_v2` fields.
+
+## 2026-05-22 - behavior run plans must bind runner env and stop after unclean canary evidence
+
+- Trigger: the first M45 canary run executed `policy_capability_gate / browse` and produced an evidence bundle, but the row was infra-invalid with `receipt_data_contract_violation`.
+- Failure: a completed runner command can still lack expected capability receipts, runtime-signed V2 receipt export, semantic verification, and measured provider token telemetry.
+- Lesson: M45 execution is not equivalent to M46 receipt import readiness; run plans must bind the validated runner environment, and the rollout must stop after the first unclean canary instead of spending run-02/run-03.
+- Guardrail: require `runner_env` on every behavior run item, validate it through `run_zero_trust_v2_behavior_runs.py`, and keep M46-M52 blocked until `3/3` clean runtime-signed V2 behavior receipts exist.
+
+## 2026-05-22 - unified mainline closeout must distinguish fail-closed completion from runtime unification
+
+- Trigger: the V2 unified mainline was requested while M45-M52 still had `clean_v2_receipt_count=0` and `v2_ready_capability_count=0`.
+- Failure: treating a completed roadmap artifact as V2 unification would silently bypass M53-M64 gates, including expected capability receipts, runtime-signed receipt export, semantic delivery, manual apply, rollback proof, and 34 capability coverage.
+- Lesson: a V2 mainline can be closed only as a fail-closed artifact when root evidence blockers remain.
+- Guardrail: generate `NEXUS_ZERO_TRUST_V2_UNIFIED_MAINLINE_*.json` with every M53-M64 milestone explicitly PASS/BLOCKED, and keep `runtime_mutation_allowed=false` until all milestones pass with clean evidence.
+
+## 2026-05-22 - V2 behavior promotion must import fresh M45 receipts before apply
+
+- Trigger: after M45 reached `102/102` clean runtime-signed receipts, the downstream `NEXUS_ZERO_TRUST_V2_BEHAVIOR_PROMOTION_REPORT_2026-05-21.json` still showed `19` blocked candidates with `ready_for_manual_apply_count=0`.
+- Failure: applying from the stale promotion report would keep manual apply and rollout blocked even though the authoritative M45 receipt import was clean.
+- Lesson: clean receipt evidence and promotion readiness are separate artifacts; the promotion report must be regenerated from M45/M46 runtime-signed receipt rows before manual apply, P0/P1/P2 rollout, or default overlay apply.
+- Guardrail: run M45/M46 receipt import -> behavior evidence from M45 -> behavior promotion report -> manual trial -> P0/P1/P2 rollout -> runtime apply -> post-apply smoke sequentially, and regress that ready count equals `34` before V2 default overlay mutation.
+
+## 2026-05-22 - report inventory CLI must not treat empty output-dir as root override
+
+- Trigger: the first `build_report_retention_inventory.py` run used the default `--output-dir` value and generated `NEXUS_REPORT_RETENTION_INVENTORY_2026-05-22.json` plus `NEXUS_REPORT_RETENTION_PLAN_2026-05-22.md`.
+- Failure: `Path("")` rendered as `.`, so `resolve_report_output` treated it as an explicit root output directory and wrote the artifacts at repository root instead of `docs/reports`.
+- Lesson: optional output directory arguments must normalize both empty string and `.` to `None` before calling shared report output helpers.
+- Guardrail: add regression coverage for default CLI output paths and keep report-retention artifacts under `docs/reports` unless an explicit `--output-dir` or `--*-output` override is provided.
+
+## 2026-05-22 - closure ledger probes must avoid brittle full-sentence matches
+
+- Trigger: the first `build_antigravity_closure_ledger.py` evidence probe matched a wrapped plan sentence and a test file class name literally.
+- Failure: valid completed seams showed `all_evidence_matched=false` because the evidence existed under line-wrapped wording or helper function names.
+- Lesson: closure ledgers should probe stable symbols, file paths, and short independent tokens instead of full prose sentences.
+- Guardrail: keep ledger probes to stable code identifiers or two short tokens, and add focused tests for output path defaults plus summary shape rather than brittle prose text.
+## 2026-05-22: Closure Ledger Tests Must Track Status Promotions
+- **Phenomenon**: P3-P6 Antigravity contract work passed its focused contract tests, but the closure-ledger unit test still asserted that three Swarm-local rows remained `NOT_STARTED`.
+- **Root Cause**: The test locked onto historical status counts instead of the intended invariant: forbidden direct Swarm work stays blocked while local simulation contracts can move forward.
+- **Action Taken**: Updated the closure-ledger test to expect `DONE_CONTRACT_READY` for the three local simulation rows after the contracts landed.
+- **Prevention**: Future closure-ledger tests should assert claim boundaries and representative promoted statuses, not stale phase counts that are expected to change during plan execution.
+
+## 2026-05-22: Closure Ledger Probes Should Match Test Invariants, Not Internal Literals
+- **Phenomenon**: The Antigravity ledger stayed `PASS`, but the P3 AST snapshot row reported `all_evidence_matched=false` because the probe expected the literal `LAST_KNOWN_GOOD` string inside the focused test.
+- **Root Cause**: The test asserted the public receipt field `used_last_known_good`, while the probe searched for an implementation-level AST status literal.
+- **Action Taken**: Updated the probe to match the stable test invariant instead of the lower-level symbol.
+- **Prevention**: Closure-ledger probes for tests should prefer public receipt fields and blocker codes over internal literals that may only appear in production modules.
+
+## 2026-05-22: Public Benchmark Parse Failures Need Separate Delivery And Cost Treatment
+- **Phenomenon**: A V2 public-lane run produced `semantic_status=VERIFIED` rows, but `public_claim_gate` failed because `baseline_gateway_error_category=parse_failure` made successful with-Nexus rescues infra-invalid; another row carried `token_capture_status=estimated` after `stats_outlier_possible_cumulative`.
+- **Root Cause**: The eligibility classifier treated every with-Nexus parse failure as infrastructure invalid, even when Gemini had a measured response and Nexus subsequently delivered a hidden-verifier-clean rescue. The direct retry classifier also skipped retries whenever token count was positive, even if the token source was estimated/outlier and therefore unusable for public cost accounting.
+- **Action Taken**: Allow measured parse-failure rows to remain eligible only when Nexus delivery is semantic/hidden-verifier clean, trust-mismatch-free, context-delivered, and model-used-Nexus. Retry parse failures with estimated or otherwise unmeasured token capture before they enter the public denominator.
+- **Prevention**: Public benchmark gates must keep delivery and cost evidence distinct: measured parse failures can be valid model failures or verified Nexus rescues, but estimated/outlier token telemetry must be retried or kept fail-closed for cost claims.
+
+## 2026-05-22: Cost-Efficiency Rescue Profiles Must Be Explicit And Boundary-Labeled
+- **Phenomenon**: The V2 public 12x3 run passed delivery and cost gates but `public_cost_efficiency_claim_gate=REGRESSED`; the largest wall regressions came from lanes that could be hidden-verifier-rescued locally, yet `NEXUS_REQUIRE_MODEL_PARTICIPATION=1` and `--strict-llm-baseline` forced a model/CLI path first.
+- **Root Cause**: The runner had only one require-model posture. It correctly protected same-model model-participation claims, but it also blocked a separate Nexus-system cost-efficiency profile where deterministic pre-model rescue is the intended cost reducer.
+- **Action Taken**: Added the explicit opt-in `NEXUS_ALLOW_COST_EFFICIENCY_PRE_MODEL_RESCUE=1`. Only that profile can override require-model and strict-baseline pre-model blocking, and only after route policy, hidden verifier, and deterministic rescue gates allow it.
+- **Prevention**: Report cost improvements from this profile as Nexus-system/local-rescue efficiency, not as "the same external model used fewer tokens." Keep default public model-participation runs fail-closed unless the opt-in is present and the evidence bundle records clean hidden verifier, trust mismatch 0, token reliability, and cost-efficiency `IMPROVED`.
+
+## 2026-05-22: Pregate Tests Must Update When Blocker Granularity Improves
+- **Phenomenon**: After ContextHub physical split pregate learned to require the extracted `context_view` leaf module, the old deferred test failed because it still expected only `physical_split_requires_caller_map_and_deletion_tests`.
+- **Root Cause**: The test asserted the full blocker list instead of the stable fail-closed invariant plus the newly explicit missing leaf blocker.
+- **Action Taken**: Updated the test to expect both the original pregate blocker and `missing_context_view`, then added the real leaf extraction and compatibility/deletion test before regenerating the gate as `APPROVED`.
+- **Prevention**: Pregate tests should allow blocker lists to become more specific when evidence probes improve; assert status, safety flags, and required blocker classes rather than freezing an incomplete blocker set.

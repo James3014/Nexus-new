@@ -39,6 +39,12 @@ version_scope: '[v17.1, v22, v23]'
 ## 2026-05-20
 - **HEEP Executor Receipt Route Smoke:** Ran deterministic route receipt smoke and recorded public-safe `drone`, `nightshift`, and `swarm` receipts. Final HEEP skill decisions now distinguish route-level executor receipt readiness from the remaining skill-specific MAT-B/provider-clean replay gates.
 
+## 2026-05-21
+- **Zero-Trust V2 Skill Promotion Baseline:** Added a separate V2 promotion control plane for skill replacement review. Current runtime overlay remains `v1_diagnostic_only`; V2 artifacts now produce curation backlog, replay matrix, promotion report, and manual apply plan with `runtime_mutation_allowed=false`, `automatic_apply_allowed=false`, and `public_benchmark_allowed=false` until runtime-signed receipts, approved sandbox attestation, clean-slate baseline sandwich, negative-control blocking, and manual operator acknowledgement all pass.
+- **Zero-Trust V2 Physical Sandbox Probe:** Added a macOS `sandbox-exec` probe and V2 physical row wrapper that emits runner-owned sandbox attestation, runtime-signed receipt shape, clean-slate sandwich, and negative-control accounting. The wrapper defaults to `probe_only=true` / `promotion_credit_allowed=false`, so sandbox probes cannot promote skill replacements without true skill execution evidence.
+- **Zero-Trust V2 M1-M6 Rollout Reports:** Added P0 command specs, physical skill evidence, evidence accumulation, unification plan, and 34-capability rollout status. Current result is intentionally blocked for runtime unification: only one P0 skill asset was command-ready, the evidence is `materialization_only=true`, `ready_for_manual_apply_count=0`, and all 34 capabilities remain on V1/current runtime path until real skill behavior evidence exists.
+- **Zero-Trust V2 M7-M12 Final Verdict:** Added behavior evidence extraction, behavior promotion report, manual trial, P0 rollout, and M12 34-capability final verdict. M12-3 is complete as a verdict pass: 19 candidate capabilities are structured-blocked for missing V2 behavior evidence, 15 capabilities have no V2-ready candidate, and runtime mutation remains locked.
+
 ## One-sentence summary
 記錄 Nexus 治理架構的所有重大變更、審計硬化與契約遷移歷史。 [Source: MUSE-NEXUS-Engine-Specification-v22-Eternal.md]
 
@@ -74,6 +80,10 @@ version_scope: '[v17.1, v22, v23]'
 
 | Date | Change (項) | Affected Components | Risk | Rollback Plan | Verifier |
 |---|---|---|---|---|---|
+| 2026-05-21 | **Zero-Trust V2 M7-M12 Final Verdict: behavior evidence extraction through 34-capability verdict completion** | `nexus/learning/zero_trust_v2_behavior.py`, `scripts/ops/build_zero_trust_v2_behavior_evidence.py`, `scripts/ops/build_zero_trust_v2_behavior_promotion_report.py`, `scripts/ops/build_zero_trust_v2_manual_trial.py`, `scripts/ops/build_zero_trust_v2_p0_rollout.py`, `scripts/ops/build_zero_trust_v2_final_rollout_completion.py`, `tests/` | Medium | Git revert; keep V1 runtime overlay active | Codex |
+| 2026-05-21 | **Zero-Trust V2 M1-M6 Rollout Reports: command specs through 34-capability unification status** | `nexus/learning/zero_trust_v2_skill_gate.py`, `scripts/ops/build_zero_trust_v2_skill_command_specs.py`, `scripts/ops/build_zero_trust_v2_physical_skill_evidence.py`, `scripts/ops/build_zero_trust_v2_evidence_accumulation.py`, `scripts/ops/build_zero_trust_v2_unification_plan.py`, `scripts/ops/build_zero_trust_v2_rollout_status.py`, `tests/` | Medium | Git revert; keep V1 runtime overlay active | Codex |
+| 2026-05-21 | **Zero-Trust V2 Physical Sandbox Probe: runner-owned macOS attestation with probe-only promotion boundary** | `nexus/learning/zero_trust_v2_physical_sandbox.py`, `nexus/learning/zero_trust_v2_physical_runner.py`, `scripts/ops/build_zero_trust_v2_sandbox_probe.py`, `scripts/ops/run_zero_trust_v2_physical_sandbox.py`, `tests/learning/test_zero_trust_v2_physical_*`, `tests/ops/test_run_zero_trust_v2_physical_sandbox.py`, `docs/reports/NEXUS_ZERO_TRUST_V2_*SANDBOX*` | Medium | Git revert; keep probe-only default | Codex |
+| 2026-05-21 | **Zero-Trust V2 Skill Promotion Baseline: v1 diagnostic overlay separated from v2-only promotion control plane** | `nexus/learning/zero_trust_v2_*`, `scripts/ops/build_zero_trust_v2_*`, `tests/learning/test_zero_trust_v2_*`, `tests/ops/test_build_zero_trust_v2_*`, `docs/reports/NEXUS_ZERO_TRUST_V2_*`, `docs/plans/NEXUS_ZERO_TRUST_V2_PROMOTION_IMPLEMENTATION_PLAN_2026-05-21.md` | Medium | Git revert; keep existing runtime overlay A path | Codex |
 | 2026-05-20 | **HEEP MAT-B Receipt Executor Repair: explicit blocker queue and swarm bench executor env for drone/nightshift/swarm rows** | `scripts/ops/build_heep_mat_b_blocker_resolution_queue.py`, `scripts/ops/build_heep_flash_nexus_compare_matrix.py`, `docs/reports/NEXUS_HEEP_MAT_B_BLOCKER_RESOLUTION_QUEUE_2026-05-20.json`, `docs/plans/NEXUS_HEEP_EVALUATION_PLAN.md`, `tests/ops/` | Medium | Git revert | Codex |
 | 2026-05-20 | **Routing Spec V2 Closure: RLM handoff receipt, OutcomeMemory trust-clean soak, dispatcher plan consume, mutation assurance read-model gate** | `nexus/engine/rlm_controller.py`, `nexus/app/research_flow_service.py`, `nexus/learning/outcome_memory.py`, `nexus/engine/route_runtime_dispatcher.py`, `scripts/ops/build_claim_evidence_read_model.py`, `tests/` | Medium | Git revert | Codex |
 | 2026-05-20 | **RLM Bounded Orchestration Adapter: X/R-loop receipts without recursive dispatch or public/runtime unlock** | `nexus/engine/rlm_controller.py`, `nexus/app/research_flow_service.py`, `nexus/contracts/routing_spec_v2_backlog.py`, `tests/engine/test_rlm_outcome_integration.py`, `tests/contracts/test_routing_spec_v2_backlog.py`, `docs/plans/` | Medium | Git revert | Codex |
@@ -169,3 +179,45 @@ version_scope: '[v17.1, v22, v23]'
 - **Target Modules**: scripts/ops/ci_gate.py
 - **Semantic Pulse**: Automated safety synchronization triggered.
 - **Diff Signature**: 3438110020721803203
+
+## 2026-05-21 - Zero-Trust V2 M13-M19 fresh behavior runner boundary
+
+| Date | Change | Evidence | Risk | Rollback | Owner |
+| :--- | :--- | :--- | :--- | :--- | :--- |
+| 2026-05-21 | Added fail-closed `capability_ab_runner` adapter matrix and M13-M19 completion report for V2 skill promotion. V1 remains runtime fallback; V1 evidence cannot count toward V2 promotion. | `nexus/learning/zero_trust_v2_behavior_adapter.py`, `scripts/ops/build_zero_trust_v2_behavior_runner_matrix.py`, `scripts/ops/build_zero_trust_v2_m13_m19_completion.py`, `docs/reports/NEXUS_ZERO_TRUST_V2_BEHAVIOR_RUNNER_MATRIX_2026-05-21.json`, `docs/reports/NEXUS_ZERO_TRUST_V2_M13_M19_COMPLETION_2026-05-21.json` | Medium | Git revert; artifacts are reporting-only and keep `runtime_mutation_allowed=false` | Codex |
+
+## 2026-05-21 - Zero-Trust V2 M20-M27 fresh task refs and V1 shutdown boundary
+
+| Date | Change | Evidence | Risk | Rollback | Owner |
+| :--- | :--- | :--- | :--- | :--- | :--- |
+| 2026-05-21 | Added fresh task refs for 19 V2 candidates and M20-M27 completion verdict. Runner commands are now ready for physical behavior execution, but no signed receipts exist, so promotion, runtime mutation, public benchmark claims, and V1 shutdown remain blocked. | `scripts/ops/build_zero_trust_v2_fresh_task_refs.py`, `scripts/ops/build_zero_trust_v2_m20_m27_completion.py`, `docs/reports/NEXUS_ZERO_TRUST_V2_FRESH_TASK_REFS_2026-05-21.json`, `docs/reports/NEXUS_ZERO_TRUST_V2_FRESH_TASK_MANIFEST_2026-05-21.json`, `docs/reports/NEXUS_ZERO_TRUST_V2_M20_M27_COMPLETION_2026-05-21.json` | Medium | Git revert; artifacts are non-mutating and keep V1 fallback active | Codex |
+
+## 2026-05-21 - Zero-Trust V2 M28-M35 execution plan and closure gates
+
+| Date | Change | Evidence | Risk | Rollback | Owner |
+| :--- | :--- | :--- | :--- | :--- | :--- |
+| 2026-05-21 | Added M28-M35 execution plan for one P0 canary preflight, 3-run signed behavior batch planning, receipt import gate, manual apply gate, canary rollback gate, P0/P1/P2 rollout sequencing, and V1 closure gate. The artifact remains non-mutating and blocks all promotion until clean signed V2 receipts exist. | `scripts/ops/build_zero_trust_v2_m28_m35_execution_plan.py`, `tests/ops/test_build_zero_trust_v2_m28_m35_execution_plan.py`, `docs/reports/NEXUS_ZERO_TRUST_V2_M28_M35_EXECUTION_PLAN_2026-05-21.json` | Medium | Git revert; no runtime mutation is performed | Codex |
+
+## 2026-05-21 - Zero-Trust V2 M36-M44 preflight pass and promotion lock
+
+| Date | Change | Evidence | Risk | Rollback | Owner |
+| :--- | :--- | :--- | :--- | :--- | :--- |
+| 2026-05-21 | Executed the M28 preflight canary, repaired runner contract blockers, and added M36-M44 completion gates. M36 now passes, but M38-M44 remain locked because no runtime-signed clean V2 behavior receipts exist. | `scripts/ops/build_zero_trust_v2_m36_m44_completion.py`, `tests/ops/test_build_zero_trust_v2_m36_m44_completion.py`, `.nexus/reports/zero_trust_v2_behavior/policy_capability_gate/browse/preflight/benchmark_preflight.json`, `docs/reports/NEXUS_ZERO_TRUST_V2_M36_M44_COMPLETION_2026-05-21.json` | Medium | Git revert; report artifacts are non-mutating and keep V1 fallback active | Codex |
+
+## 2026-05-22 - Zero-Trust V2 M45-M52 canary behavior run fail-closed
+
+| Date | Change | Evidence | Risk | Rollback | Owner |
+| :--- | :--- | :--- | :--- | :--- | :--- |
+| 2026-05-22 | Bound `runner_env` into behavior run plans, added a dry-run behavior execution hook, attempted the first canary behavior run, and added M45-M52 completion gates. The canary produced an evidence bundle but failed receipt import readiness, so manual apply, canary apply, P0/P1/P2 rollout, and V1 closure remain blocked. | `scripts/ops/run_zero_trust_v2_behavior_runs.py`, `scripts/ops/build_zero_trust_v2_m45_m52_completion.py`, `tests/ops/test_run_zero_trust_v2_behavior_runs.py`, `tests/ops/test_build_zero_trust_v2_m45_m52_completion.py`, `docs/reports/NEXUS_ZERO_TRUST_V2_BEHAVIOR_RUN_HOOK_2026-05-22.json`, `docs/reports/NEXUS_ZERO_TRUST_V2_M45_M52_COMPLETION_2026-05-22.json` | Medium | Git revert; no runtime mutation is performed and V1 fallback remains active | Codex |
+
+## 2026-05-22 - Zero-Trust V2 unified mainline fail-closed closeout
+
+| Date | Change | Evidence | Risk | Rollback | Owner |
+| :--- | :--- | :--- | :--- | :--- | :--- |
+| 2026-05-22 | Added a unified mainline closeout for M53-M64. The closeout keeps all milestones blocked because the canary lacks clean runtime-signed V2 receipts and 34 capability coverage. Runtime mutation, promotion credit, automatic apply, and public benchmark unlock all remain false. | `scripts/ops/build_zero_trust_v2_unified_mainline.py`, `tests/ops/test_build_zero_trust_v2_unified_mainline.py`, `docs/reports/NEXUS_ZERO_TRUST_V2_UNIFIED_MAINLINE_2026-05-22.json` | Medium | Git revert; artifact is non-mutating and keeps V1 fallback active | Codex |
+
+## 2026-05-22 - Zero-Trust V2 runtime default overlay apply
+
+| Date | Change | Evidence | Risk | Rollback | Owner |
+| :--- | :--- | :--- | :--- | :--- | :--- |
+| 2026-05-22 | Imported `102/102` clean runtime-signed V2 behavior receipts into promotion readiness, completed manual apply acknowledgement, promoted P0 and P1/P2 batches, generated the V2 default runtime overlay, and passed post-apply smoke for 34/34 capabilities. Public benchmark remains locked. | `scripts/ops/build_zero_trust_v2_behavior_evidence.py`, `scripts/ops/build_zero_trust_v2_runtime_apply.py`, `scripts/ops/build_zero_trust_v2_unified_mainline.py`, `docs/reports/NEXUS_ZERO_TRUST_V2_RUNTIME_SKILL_POLICY_OVERLAY_APPLIED_2026-05-22.json`, `docs/reports/NEXUS_ZERO_TRUST_V2_RUNTIME_POST_APPLY_SMOKE_2026-05-22.json`, `docs/reports/NEXUS_ZERO_TRUST_V2_UNIFIED_MAINLINE_2026-05-22.json` | Medium | Restore `docs/reports/NEXUS_SF_FINAL_RUNTIME_SKILL_POLICY_OVERLAY_APPLIED_2026-05-21.json` as runtime overlay and keep V1 fallback active | Codex |
