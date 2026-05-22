@@ -3075,3 +3075,15 @@ version_scope:
 - **Root Cause**: Timing collection had been extracted, but payload synchronization remained in the orchestration body.
 - **Action Taken**: Added `apply_auto_flow_timing_payload` to `nexus.research.flow.phase_clock`, covered the timing/usage-trace sync with TDD, and reran focused auto-flow timing/RLM trace tests.
 - **Prevention**: Future `run_auto_flow` phase work should keep payload synchronization behind phase-flow helpers so orchestration edits do not silently desynchronize `payload["timing"]` and `payload["nexus_usage_trace"]`.
+
+## 2026-05-22: Public Gate Metric Helpers Must Preserve Legacy Fallback Semantics
+- **Phenomenon**: The first `public_gate_metrics` TDD fixture expected `mean_number` to fall back from an invalid first metric value to the next key, but the existing `write_evidence_bundle` helper only fell back when the first key was empty or missing.
+- **Root Cause**: A refactor-only test accidentally encoded a cleanup preference instead of the current public cost-accounting contract.
+- **Action Taken**: Extracted `mean_number`, `safe_ratio`, `median`, and `paired_metric_ratios` into `scripts/bench/public_gate_metrics.py`, corrected the fixture to pin empty-only fallback behavior, and reran public gate plus runner regression tests.
+- **Prevention**: PublicGate metric extraction tests should distinguish empty fallback from invalid-value handling; any cleanup of invalid metric fallback needs a separate policy-change slice and evidence-bundle compatibility review.
+
+## 2026-05-22: Targeted Lesson Retrieval Must Exclude Report Archives Unless Auditing Archives
+- **Phenomenon**: A normal pre-task lesson lookup for `capability_ab_runner` searched all of `docs/reports` and returned thousands of archived SF matrix hits.
+- **Root Cause**: The search handles were relevant, but the path scope was too broad for a non-audit task and violated the intended bounded retrieval posture.
+- **Action Taken**: Continued with only the directly applicable Learning Closure entries for public gate contract and helper extraction, and recorded this retrieval failure before final CI.
+- **Prevention**: For ordinary refactor slices, search `nexus_wiki_vault/06_Ops/Ops - Learning Closure Matrix.md`, specific ADR paths, and current top-level report files only; include `docs/reports/archive` only for dedicated archive/indexing work.

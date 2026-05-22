@@ -59,6 +59,12 @@ from scripts.bench.public_gate_bundle import (
     build_public_gate_checks as _build_public_gate_checks,
     derive_cost_efficiency_decision,
 )
+from scripts.bench.public_gate_metrics import (
+    mean_number as _public_gate_mean_number,
+    median as _public_gate_median,
+    paired_metric_ratios as _public_gate_paired_metric_ratios,
+    safe_ratio as _public_gate_safe_ratio,
+)
 from scripts.bench.provider_retry import (
     direct_model_retryable_infra_failure as _provider_retry_direct_model_retryable_infra_failure,
 )
@@ -8383,49 +8389,6 @@ def write_evidence_bundle(
     provider_token_measured_rate_without = (
         round(sum(1 for row in without_rows if _row_has_measured_provider_tokens(row)) / len(without_rows), 4) if without_rows else 0.0
     )
-    def _mean_number(source_rows: list[dict[str, Any]], *keys: str) -> float:
-        values: list[float] = []
-        for row in source_rows:
-            for key in keys:
-                value = row.get(key)
-                if value in (None, ""):
-                    continue
-                try:
-                    values.append(float(value))
-                except (TypeError, ValueError):
-                    pass
-                break
-        return round(sum(values) / len(values), 4) if values else 0.0
-
-    def _safe_ratio(numerator: float, denominator: float) -> float:
-        return round(numerator / denominator, 4) if denominator > 0 else 0.0
-
-    def _median(values: list[float]) -> float:
-        if not values:
-            return 0.0
-        ordered = sorted(values)
-        mid = len(ordered) // 2
-        if len(ordered) % 2:
-            return round(ordered[mid], 4)
-        return round((ordered[mid - 1] + ordered[mid]) / 2, 4)
-
-    def _paired_ratios(metric_key: str) -> list[float]:
-        with_by_key = {
-            (str(row.get("task_id") or ""), str(row.get("trial_index") or "")): row
-            for row in eligible_with
-        }
-        ratios: list[float] = []
-        for row in eligible_without:
-            key = (str(row.get("task_id") or ""), str(row.get("trial_index") or ""))
-            with_row = with_by_key.get(key)
-            if not with_row:
-                continue
-            numerator = _mean_number([with_row], metric_key)
-            denominator = _mean_number([row], metric_key)
-            if numerator > 0 and denominator > 0:
-                ratios.append(_safe_ratio(numerator, denominator))
-        return ratios
-
     def _paired_prompt_purity_ratios() -> list[float]:
         with_by_key = {
             (str(row.get("task_id") or ""), str(row.get("trial_index") or "")): row
@@ -8437,48 +8400,48 @@ def write_evidence_bundle(
             with_row = with_by_key.get(key)
             if not with_row:
                 continue
-            explicit_ppi = _mean_number([with_row], "prompt_purity_index")
+            explicit_ppi = _public_gate_mean_number([with_row], "prompt_purity_index")
             if explicit_ppi > 0:
                 ratios.append(explicit_ppi)
                 continue
-            with_prompt_chars = _mean_number([with_row], "gateway_prompt_chars")
-            without_prompt_chars = _mean_number([row], "gateway_prompt_chars")
+            with_prompt_chars = _public_gate_mean_number([with_row], "gateway_prompt_chars")
+            without_prompt_chars = _public_gate_mean_number([row], "gateway_prompt_chars")
             if with_prompt_chars > 0 and without_prompt_chars > 0:
-                ratios.append(_safe_ratio(with_prompt_chars, without_prompt_chars))
+                ratios.append(_public_gate_safe_ratio(with_prompt_chars, without_prompt_chars))
         return ratios
 
-    with_avg_wall_sec = _mean_number(eligible_with, "wall_duration_sec", "duration_sec")
-    without_avg_wall_sec = _mean_number(eligible_without, "wall_duration_sec", "duration_sec")
-    with_avg_tokens = _mean_number(eligible_with, "total_tokens", "model_total_tokens")
-    without_avg_tokens = _mean_number(eligible_without, "total_tokens", "model_total_tokens")
-    with_avg_model_calls = _mean_number(eligible_with, "model_calls")
-    without_avg_model_calls = _mean_number(eligible_without, "model_calls")
-    with_avg_prompt_system_instruction_chars = _mean_number(eligible_with, "prompt_system_instruction_chars")
-    with_avg_prompt_task_constraint_chars = _mean_number(eligible_with, "prompt_task_constraint_chars")
-    with_avg_prompt_source_payload_chars = _mean_number(eligible_with, "prompt_source_payload_chars")
-    with_avg_prompt_test_payload_chars = _mean_number(eligible_with, "prompt_test_payload_chars")
-    with_avg_prompt_candidate_payload_chars = _mean_number(eligible_with, "prompt_candidate_payload_chars")
-    with_avg_prompt_nexus_control_chars = _mean_number(eligible_with, "prompt_nexus_control_chars")
-    with_avg_prompt_governance_contract_chars = _mean_number(eligible_with, "prompt_governance_contract_chars")
-    with_avg_gateway_total_sec = _mean_number(eligible_with, "gateway_total_sec")
-    without_avg_gateway_total_sec = _mean_number(eligible_without, "gateway_total_sec")
-    with_avg_gateway_process_sec = _mean_number(eligible_with, "gateway_process_sec")
-    without_avg_gateway_process_sec = _mean_number(eligible_without, "gateway_process_sec")
-    with_avg_gateway_provider_wait_sec = _mean_number(eligible_with, "gateway_provider_wait_sec")
-    without_avg_gateway_provider_wait_sec = _mean_number(eligible_without, "gateway_provider_wait_sec")
-    with_avg_gateway_parse_sec = _mean_number(eligible_with, "gateway_parse_sec")
-    without_avg_gateway_parse_sec = _mean_number(eligible_without, "gateway_parse_sec")
-    with_avg_context_hydration_sec = _mean_number(eligible_with, "timing_context_pack_sec")
-    with_avg_phase_wall_r_sec = _mean_number(eligible_with, "phase_wall_r_sec")
-    with_avg_r_phase_hyper_sprint_sec = _mean_number(eligible_with, "r_phase_hyper_sprint_sec")
-    wall_attribution_known_share_uncapped_with = _safe_ratio(
+    with_avg_wall_sec = _public_gate_mean_number(eligible_with, "wall_duration_sec", "duration_sec")
+    without_avg_wall_sec = _public_gate_mean_number(eligible_without, "wall_duration_sec", "duration_sec")
+    with_avg_tokens = _public_gate_mean_number(eligible_with, "total_tokens", "model_total_tokens")
+    without_avg_tokens = _public_gate_mean_number(eligible_without, "total_tokens", "model_total_tokens")
+    with_avg_model_calls = _public_gate_mean_number(eligible_with, "model_calls")
+    without_avg_model_calls = _public_gate_mean_number(eligible_without, "model_calls")
+    with_avg_prompt_system_instruction_chars = _public_gate_mean_number(eligible_with, "prompt_system_instruction_chars")
+    with_avg_prompt_task_constraint_chars = _public_gate_mean_number(eligible_with, "prompt_task_constraint_chars")
+    with_avg_prompt_source_payload_chars = _public_gate_mean_number(eligible_with, "prompt_source_payload_chars")
+    with_avg_prompt_test_payload_chars = _public_gate_mean_number(eligible_with, "prompt_test_payload_chars")
+    with_avg_prompt_candidate_payload_chars = _public_gate_mean_number(eligible_with, "prompt_candidate_payload_chars")
+    with_avg_prompt_nexus_control_chars = _public_gate_mean_number(eligible_with, "prompt_nexus_control_chars")
+    with_avg_prompt_governance_contract_chars = _public_gate_mean_number(eligible_with, "prompt_governance_contract_chars")
+    with_avg_gateway_total_sec = _public_gate_mean_number(eligible_with, "gateway_total_sec")
+    without_avg_gateway_total_sec = _public_gate_mean_number(eligible_without, "gateway_total_sec")
+    with_avg_gateway_process_sec = _public_gate_mean_number(eligible_with, "gateway_process_sec")
+    without_avg_gateway_process_sec = _public_gate_mean_number(eligible_without, "gateway_process_sec")
+    with_avg_gateway_provider_wait_sec = _public_gate_mean_number(eligible_with, "gateway_provider_wait_sec")
+    without_avg_gateway_provider_wait_sec = _public_gate_mean_number(eligible_without, "gateway_provider_wait_sec")
+    with_avg_gateway_parse_sec = _public_gate_mean_number(eligible_with, "gateway_parse_sec")
+    without_avg_gateway_parse_sec = _public_gate_mean_number(eligible_without, "gateway_parse_sec")
+    with_avg_context_hydration_sec = _public_gate_mean_number(eligible_with, "timing_context_pack_sec")
+    with_avg_phase_wall_r_sec = _public_gate_mean_number(eligible_with, "phase_wall_r_sec")
+    with_avg_r_phase_hyper_sprint_sec = _public_gate_mean_number(eligible_with, "r_phase_hyper_sprint_sec")
+    wall_attribution_known_share_uncapped_with = _public_gate_safe_ratio(
         with_avg_gateway_total_sec + with_avg_context_hydration_sec + with_avg_phase_wall_r_sec,
         with_avg_wall_sec,
     )
     wall_attribution_known_share_with = min(1.0, wall_attribution_known_share_uncapped_with)
-    wall_cost_ratio_with_over_without = _safe_ratio(with_avg_wall_sec, without_avg_wall_sec)
-    token_cost_ratio_with_over_without = _safe_ratio(with_avg_tokens, without_avg_tokens)
-    model_call_ratio_with_over_without = _safe_ratio(with_avg_model_calls, without_avg_model_calls)
+    wall_cost_ratio_with_over_without = _public_gate_safe_ratio(with_avg_wall_sec, without_avg_wall_sec)
+    token_cost_ratio_with_over_without = _public_gate_safe_ratio(with_avg_tokens, without_avg_tokens)
+    model_call_ratio_with_over_without = _public_gate_safe_ratio(with_avg_model_calls, without_avg_model_calls)
     verified_lift_rate = round(with_semantic_verified_rate - without_semantic_verified_rate, 4)
     token_overhead = max(0.0, with_avg_tokens - without_avg_tokens)
     verified_lift_per_1k_with_tokens = round(verified_lift_rate / (with_avg_tokens / 1000.0), 6) if with_avg_tokens > 0 else 0.0
@@ -8493,14 +8456,14 @@ def write_evidence_bundle(
     hidden_retry_token_total = sum(float(row.get("hidden_retry_tokens", 0.0) or 0.0) for row in eligible_with)
     with_wall_total = sum(float(row.get("wall_duration_sec", row.get("duration_sec", 0.0)) or 0.0) for row in eligible_with)
     with_token_total = sum(float(row.get("total_tokens", row.get("model_total_tokens", 0.0)) or 0.0) for row in eligible_with)
-    retry_cost_share_wall = _safe_ratio(hidden_retry_wall_total, with_wall_total)
-    retry_cost_share_tokens = _safe_ratio(hidden_retry_token_total, with_token_total)
-    paired_wall_ratios = _paired_ratios("wall_duration_sec")
-    paired_token_ratios = _paired_ratios("total_tokens")
+    retry_cost_share_wall = _public_gate_safe_ratio(hidden_retry_wall_total, with_wall_total)
+    retry_cost_share_tokens = _public_gate_safe_ratio(hidden_retry_token_total, with_token_total)
+    paired_wall_ratios = _public_gate_paired_metric_ratios(eligible_with, eligible_without, "wall_duration_sec")
+    paired_token_ratios = _public_gate_paired_metric_ratios(eligible_with, eligible_without, "total_tokens")
     paired_prompt_purity_ratios = _paired_prompt_purity_ratios()
-    median_paired_wall_cost_ratio = _median(paired_wall_ratios)
-    median_paired_token_cost_ratio = _median(paired_token_ratios)
-    median_prompt_purity_index = _median(paired_prompt_purity_ratios)
+    median_paired_wall_cost_ratio = _public_gate_median(paired_wall_ratios)
+    median_paired_token_cost_ratio = _public_gate_median(paired_token_ratios)
+    median_prompt_purity_index = _public_gate_median(paired_prompt_purity_ratios)
     max_prompt_purity_index = round(max(paired_prompt_purity_ratios), 4) if paired_prompt_purity_ratios else 0.0
     prompt_purity_threshold = float(config.get("prompt_purity_threshold") or 1.02)
     prompt_purity_gate_passed = not paired_prompt_purity_ratios or max_prompt_purity_index <= prompt_purity_threshold
