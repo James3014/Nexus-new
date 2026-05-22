@@ -5,6 +5,7 @@ from types import SimpleNamespace
 from pathlib import Path
 from nexus.app import research_flow_service
 from nexus.research.learn_mode import LearnModeService
+from nexus.research.flow import route_decider, signal_collector
 
 
 def test_runtime_skill_mount_contract_requires_confirmed_capability_receipt():
@@ -620,6 +621,12 @@ def test_collect_route_signals_includes_history_memory_hits(tmp_path: Path):
     assert signals["memory_hits"] >= 1
     assert signals["adjusted_root_cause_confidence"] == pytest.approx(0.8)
     assert signals["has_hard_signal"] is True
+
+
+def test_route_decider_reexports_split_signal_collector_contracts():
+    assert route_decider.collect_route_signals is signal_collector.collect_route_signals
+    assert route_decider.RouteSignals is signal_collector.RouteSignals
+    assert route_decider._collect_route_signals is signal_collector.collect_route_signals
 
 
 def test_decide_flow_preserves_core_route_cases(tmp_path: Path):
