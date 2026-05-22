@@ -3111,3 +3111,9 @@ version_scope:
 - **Root Cause**: Prompt purity looked like bundle-local formatting, but it is used by public claim posture and training-eligibility gates.
 - **Action Taken**: Added `paired_prompt_purity_ratios` to `scripts/bench/public_gate_metrics.py`, covered explicit index precedence and prompt-char fallback with TDD, then reran public gate and full runner regression tests.
 - **Prevention**: Future prompt purity changes should be tested in `test_public_gate_metrics.py` before touching evidence bundle serialization or posture gates.
+
+## 2026-05-22: P9 Narrow Integration Reports Need Exact Probe Fixtures
+- **Phenomenon**: The first P9 report-builder GREEN run failed because the test repo fixture omitted exact contract probe strings such as `provider_call`, `mutable_global_singleton`, and `unsealed_evidence_event_blocked`.
+- **Root Cause**: The fixture described intent, but the builder intentionally validates concrete call-site tokens to keep P9 from claiming integration readiness from vague file presence.
+- **Action Taken**: Added `scripts/ops/build_antigravity_p9_narrow_integration_call_sites.py`, pinned six plan-only call-site rows with focused tests and rollback plans, regenerated the P9 report, and corrected the fixture to include exact probe tokens.
+- **Prevention**: Future prerequisite/report builders should test both missing-file and exact-token cases so a plan-only gate cannot pass from path existence alone.

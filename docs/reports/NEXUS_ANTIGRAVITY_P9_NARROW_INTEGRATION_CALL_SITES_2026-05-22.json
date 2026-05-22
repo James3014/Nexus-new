@@ -1,0 +1,121 @@
+{
+  "claim_class": "PLAN_ONLY",
+  "date": "2026-05-22",
+  "forbidden_paths_touched": [],
+  "missing_probes": [],
+  "public_benchmark_allowed": false,
+  "retrieved_lessons": [
+    {
+      "applicability": "capability_ab_runner and public-gate extractions require focused contract tests first.",
+      "plan_effect": "P9 remains a plan-only report and does not edit public benchmark gates.",
+      "source_path": "nexus_wiki_vault/06_Ops/Ops - Learning Closure Matrix.md"
+    },
+    {
+      "applicability": "run_auto_flow execution branches should move only after pure helper seams are tested.",
+      "plan_effect": "P9 selects call sites without wiring orchestration branches.",
+      "source_path": "nexus_wiki_vault/06_Ops/Ops - Learning Closure Matrix.md"
+    },
+    {
+      "applicability": "P9 exit requires one file, one call site, one focused test, and one rollback plan per proposal.",
+      "plan_effect": "Every selected row carries explicit test and rollback fields.",
+      "source_path": "docs/plans/NEXUS_ANTIGRAVITY_CLOSURE_AND_DECOUPLED_SWARM_PLAN_2026-05-22.md"
+    }
+  ],
+  "runtime_default_change_allowed": false,
+  "schema": "nexus.antigravity_p9_narrow_integration_call_sites.v1",
+  "selected_call_sites": [
+    {
+      "adapter": "evidence_sealing_barrier",
+      "call_site": "_load_evidence_bundle",
+      "decision": "SELECTED_PLAN_ONLY",
+      "file": "scripts/bench/gemini_nexus_report.py",
+      "focused_test": "tests/benchmark/test_gemini_nexus_report.py::test_load_evidence_bundle_can_require_sealed_evidence_policy",
+      "implementation_scope": "claim/report reader only; historical unsealed bundles stay compatible unless policy opts in.",
+      "missing_tokens": [],
+      "probe_matched": true,
+      "public_benchmark_allowed": false,
+      "rollback_plan": "Keep current direct JSON evidence bundle read when seal-required policy is disabled.",
+      "runtime_default_change_allowed": false,
+      "zero_trust_v2_touch_allowed": false
+    },
+    {
+      "adapter": "sqlite_retry_handler",
+      "call_site": "_execute_with_retry",
+      "decision": "SELECTED_PLAN_ONLY",
+      "file": "nexus/core/memory_manager.py",
+      "focused_test": "tests/core/test_memory_manager_sqlite_retry.py::test_execute_with_retry_uses_sqlite_retry_handler_for_busy_then_success",
+      "implementation_scope": "single SQLite writer retry seam; no global storage or runtime default change.",
+      "missing_tokens": [],
+      "probe_matched": true,
+      "public_benchmark_allowed": false,
+      "rollback_plan": "Restore local retry loop around _is_retryable_sqlite_lock and _sqlite_jitter_delay.",
+      "runtime_default_change_allowed": false,
+      "zero_trust_v2_touch_allowed": false
+    },
+    {
+      "adapter": "fault_tolerant_ast_snapshot",
+      "call_site": "build_code_skeleton_context",
+      "decision": "SELECTED_PLAN_ONLY",
+      "file": "nexus/services/codeintel/skeleton_context_adapter.py",
+      "focused_test": "tests/nexus/codeintel/test_skeleton_context_adapter.py::test_skeleton_context_can_use_last_known_good_snapshot_on_parse_failure",
+      "implementation_scope": "CodeIntel context adapter only; stores compact symbol metadata, not source text.",
+      "missing_tokens": [],
+      "probe_matched": true,
+      "public_benchmark_allowed": false,
+      "rollback_plan": "Keep existing lookup_implementation path and skip snapshot fallback injection.",
+      "runtime_default_change_allowed": false,
+      "zero_trust_v2_touch_allowed": false
+    },
+    {
+      "adapter": "local_gateway",
+      "call_site": "test_local_gateway_allows_non_network_provider_gate_without_sidecar",
+      "decision": "SELECTED_PLAN_ONLY",
+      "file": "tests/contracts/test_antigravity_local_simulation_contracts.py",
+      "focused_test": "tests/contracts/test_antigravity_local_simulation_contracts.py::test_local_gateway_allows_non_network_provider_gate_without_sidecar",
+      "implementation_scope": "contract-ready test-only proof; no provider proxy or sidecar.",
+      "missing_tokens": [],
+      "probe_matched": true,
+      "public_benchmark_allowed": false,
+      "rollback_plan": "Leave provider/tool/network calls on their current guarded paths until a real unsafe call site is proven.",
+      "runtime_default_change_allowed": false,
+      "zero_trust_v2_touch_allowed": false
+    },
+    {
+      "adapter": "local_memory_hub",
+      "call_site": "test_local_memory_hub_snapshot_is_read_only_and_health_checked",
+      "decision": "SELECTED_PLAN_ONLY",
+      "file": "tests/contracts/test_antigravity_local_simulation_contracts.py",
+      "focused_test": "tests/contracts/test_antigravity_local_simulation_contracts.py::test_local_memory_hub_snapshot_is_read_only_and_health_checked",
+      "implementation_scope": "contract-ready read-only snapshot; no globals or distributed heartbeat.",
+      "missing_tokens": [],
+      "probe_matched": true,
+      "public_benchmark_allowed": false,
+      "rollback_plan": "Keep memory/health snapshots out of runtime receipts until a read-only report consumer is selected.",
+      "runtime_default_change_allowed": false,
+      "zero_trust_v2_touch_allowed": false
+    },
+    {
+      "adapter": "local_event_pipeline",
+      "call_site": "test_local_event_pipeline_preserves_order_and_blocks_unsealed_evidence",
+      "decision": "SELECTED_PLAN_ONLY",
+      "file": "tests/contracts/test_antigravity_local_simulation_contracts.py",
+      "focused_test": "tests/contracts/test_antigravity_local_simulation_contracts.py::test_local_event_pipeline_preserves_order_and_blocks_unsealed_evidence",
+      "implementation_scope": "test-only async progress pipeline; no daemon or server.",
+      "missing_tokens": [],
+      "probe_matched": true,
+      "public_benchmark_allowed": false,
+      "rollback_plan": "Keep event publication test-only and do not add daemon/server wiring.",
+      "runtime_default_change_allowed": false,
+      "zero_trust_v2_touch_allowed": false
+    }
+  ],
+  "status": "PASS",
+  "summary": {
+    "max_files_per_future_slice": 10,
+    "missing_probe_count": 0,
+    "requires_new_plan_before_code_wiring": true,
+    "runtime_integration_started": false,
+    "selected_count": 6
+  },
+  "zero_trust_v2_files_touched": false
+}
