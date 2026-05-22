@@ -81,6 +81,7 @@ from nexus.research.flow.baseline_report import (
     local_baseline_meta,
     strict_baseline_failure_meta,
 )
+from nexus.research.flow.history_signal_store import HistorySignalStore
 from nexus.research.flow.phase_clock import AutoFlowPhaseClock, apply_auto_flow_timing_payload
 
 
@@ -2043,23 +2044,8 @@ def run_auto_flow(
     )
     if force_flow is None and chosen_flow == "hyper_sprint" and learn_gate_blocked and not execution_profile["is_hard_task"]:
         chosen_flow = "baseline"
-    flow_key = f"{target_file}|{test_file}"
-    history_path = (repo_root / ".nexus" / "reports" / "research" / "auto-flow-history.json").resolve()
-
-    def _read_history() -> dict:
-        if history_path.exists():
-            try:
-                return json.loads(history_path.read_text(encoding="utf-8"))
-            except Exception:
-                return {}
-        return {}
-
-    def _write_history(data: dict) -> None:
-        history_path.parent.mkdir(parents=True, exist_ok=True)
-        history_path.write_text(json.dumps(data, indent=2), encoding="utf-8")
-
-    history_data = _read_history()
-    recent = list(history_data.get(flow_key, []))
+    history_store = HistorySignalStore(repo_root)
+    recent = history_store.recent_for(target_file=target_file, test_file=test_file)
     asi_ledger = [item.get("asi_record") for item in recent if isinstance(item, dict) and isinstance(item.get("asi_record"), dict)]
     plateau = _detect_plateau(asi_ledger)
     plateau_hard_pivot = bool(force_flow is None and plateau.get("detected"))
@@ -3262,8 +3248,7 @@ def run_auto_flow(
         }
     )
     payload["asi_ledger"] = [item.get("asi_record") for item in recent if isinstance(item, dict) and isinstance(item.get("asi_record"), dict)]
-    history_data[flow_key] = recent[-200:]
-    _write_history(history_data)
+    history_store.write_recent_for(target_file=target_file, test_file=test_file, recent=recent, max_items=200)
     phase_clock.mark("C")
     apply_auto_flow_timing_payload(
         payload,

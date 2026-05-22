@@ -1,7 +1,7 @@
 import json
 from pathlib import Path
 
-from nexus.research.flow.history_signal_store import HistorySignalStore
+from nexus.research.flow.history_signal_store import HistorySignalStore, auto_flow_key
 
 
 def _history_path(root: Path) -> Path:
@@ -81,3 +81,28 @@ def test_history_signal_store_corrupt_or_oversized_history_fails_closed(tmp_path
         task_desc="fix race",
         task_type="bug",
     )["memory_hits"] == 0
+
+
+def test_history_signal_store_loads_and_writes_flow_history(tmp_path):
+    store = HistorySignalStore(tmp_path)
+    key = auto_flow_key("nexus/foo.py", "tests/test_foo.py")
+
+    assert key == "nexus/foo.py|tests/test_foo.py"
+    assert store.load_payload() == {}
+    assert store.recent_for(target_file="nexus/foo.py", test_file="tests/test_foo.py") == []
+
+    payload = store.write_recent_for(
+        target_file="nexus/foo.py",
+        test_file="tests/test_foo.py",
+        recent=[
+            {"status": "OLD", "flow": "baseline"},
+            {"status": "SUCCESS", "flow": "hyper_sprint"},
+        ],
+        max_items=1,
+    )
+
+    assert payload[key] == [{"status": "SUCCESS", "flow": "hyper_sprint"}]
+    assert store.load_payload()[key] == [{"status": "SUCCESS", "flow": "hyper_sprint"}]
+    assert store.recent_for(target_file="nexus/foo.py", test_file="tests/test_foo.py") == [
+        {"status": "SUCCESS", "flow": "hyper_sprint"}
+    ]

@@ -7,6 +7,15 @@ from pathlib import Path
 from typing import Any, Callable
 
 KeywordExtractor = Callable[[str], list[str]]
+AUTO_FLOW_HISTORY_RELATIVE_PATH = Path(".nexus") / "reports" / "research" / "auto-flow-history.json"
+
+
+def auto_flow_history_path(repo_root: Path) -> Path:
+    return (repo_root / AUTO_FLOW_HISTORY_RELATIVE_PATH).resolve()
+
+
+def auto_flow_key(target_file: str, test_file: str) -> str:
+    return f"{target_file}|{test_file}"
 
 
 @dataclass(frozen=True)
@@ -19,10 +28,7 @@ class HistorySignalStore:
     keyword_extractor: KeywordExtractor | None = None
 
     def load_memory_signal(self, *, task_desc: str, task_type: str) -> dict[str, Any]:
-        history_path = (
-            self.repo_root / ".nexus" / "reports" / "research" / "auto-flow-history.json"
-        ).resolve()
-        payload = self._read_history_payload(history_path)
+        payload = self.load_payload()
         if not payload:
             return {"memory_hits": 0, "memory_hints": [], "processed_entries": 0}
 
@@ -54,6 +60,32 @@ class HistorySignalStore:
             "memory_hints": uniq_hints,
             "processed_entries": processed_entries,
         }
+
+    def load_payload(self) -> dict[str, Any]:
+        return self._read_history_payload(auto_flow_history_path(self.repo_root))
+
+    def write_payload(self, payload: dict[str, Any]) -> None:
+        history_path = auto_flow_history_path(self.repo_root)
+        history_path.parent.mkdir(parents=True, exist_ok=True)
+        history_path.write_text(json.dumps(payload, indent=2), encoding="utf-8")
+
+    def recent_for(self, *, target_file: str, test_file: str) -> list[dict[str, Any]]:
+        payload = self.load_payload()
+        recent = payload.get(auto_flow_key(target_file, test_file), [])
+        return list(recent) if isinstance(recent, list) else []
+
+    def write_recent_for(
+        self,
+        *,
+        target_file: str,
+        test_file: str,
+        recent: list[dict[str, Any]],
+        max_items: int = 200,
+    ) -> dict[str, Any]:
+        payload = self.load_payload()
+        payload[auto_flow_key(target_file, test_file)] = recent[-max(1, max_items) :]
+        self.write_payload(payload)
+        return payload
 
     def _read_history_payload(self, history_path: Path) -> dict[str, Any]:
         if not history_path.exists():

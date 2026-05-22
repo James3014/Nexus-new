@@ -3117,3 +3117,9 @@ version_scope:
 - **Root Cause**: The fixture described intent, but the builder intentionally validates concrete call-site tokens to keep P9 from claiming integration readiness from vague file presence.
 - **Action Taken**: Added `scripts/ops/build_antigravity_p9_narrow_integration_call_sites.py`, pinned six plan-only call-site rows with focused tests and rollback plans, regenerated the P9 report, and corrected the fixture to include exact probe tokens.
 - **Prevention**: Future prerequisite/report builders should test both missing-file and exact-token cases so a plan-only gate cannot pass from path existence alone.
+
+## 2026-05-22: Auto Flow History IO Belongs In HistorySignalStore
+- **Phenomenon**: `run_auto_flow` still carried inline `_read_history` and `_write_history` closures after timing and baseline metadata had moved into flow modules.
+- **Root Cause**: The orchestration body owned both phase decisions and persistence mechanics for `.nexus/reports/research/auto-flow-history.json`, forcing history IO changes through the large runner.
+- **Action Taken**: Added `auto_flow_key`, `load_payload`, `recent_for`, `write_payload`, and `write_recent_for` to `HistorySignalStore`, covered read/write trimming with TDD, and rewired `run_auto_flow` to use the store.
+- **Prevention**: Future `run_auto_flow` phase-runner work should move persistence and payload-shaping seams into flow modules before extracting execution branches.
