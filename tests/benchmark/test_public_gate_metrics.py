@@ -1,4 +1,10 @@
-from scripts.bench.public_gate_metrics import mean_number, median, paired_metric_ratios, safe_ratio
+from scripts.bench.public_gate_metrics import (
+    mean_number,
+    median,
+    paired_metric_ratios,
+    paired_prompt_purity_ratios,
+    safe_ratio,
+)
 
 
 def test_mean_number_falls_back_only_when_metric_is_empty():
@@ -30,3 +36,18 @@ def test_paired_metric_ratios_match_rows_by_task_and_trial():
     ]
 
     assert paired_metric_ratios(with_rows, without_rows, "wall_duration_sec") == [0.5]
+
+
+def test_paired_prompt_purity_ratios_prefer_explicit_index_then_prompt_chars():
+    with_rows = [
+        {"task_id": "explicit", "trial_index": 1, "prompt_purity_index": 1.01, "gateway_prompt_chars": 99},
+        {"task_id": "derived", "trial_index": 1, "gateway_prompt_chars": 40},
+        {"task_id": "missing_without", "trial_index": 1, "gateway_prompt_chars": 10},
+    ]
+    without_rows = [
+        {"task_id": "explicit", "trial_index": 1, "gateway_prompt_chars": 10},
+        {"task_id": "derived", "trial_index": 1, "gateway_prompt_chars": 80},
+        {"task_id": "zero", "trial_index": 1, "gateway_prompt_chars": 0},
+    ]
+
+    assert paired_prompt_purity_ratios(with_rows, without_rows) == [1.01, 0.5]

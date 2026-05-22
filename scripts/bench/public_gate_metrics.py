@@ -52,3 +52,28 @@ def paired_metric_ratios(
         if numerator > 0 and denominator > 0:
             ratios.append(safe_ratio(numerator, denominator))
     return ratios
+
+
+def paired_prompt_purity_ratios(
+    with_rows: list[dict[str, Any]],
+    without_rows: list[dict[str, Any]],
+) -> list[float]:
+    with_by_key = {
+        (str(row.get("task_id") or ""), str(row.get("trial_index") or "")): row
+        for row in with_rows
+    }
+    ratios: list[float] = []
+    for row in without_rows:
+        key = (str(row.get("task_id") or ""), str(row.get("trial_index") or ""))
+        with_row = with_by_key.get(key)
+        if not with_row:
+            continue
+        explicit_ppi = mean_number([with_row], "prompt_purity_index")
+        if explicit_ppi > 0:
+            ratios.append(explicit_ppi)
+            continue
+        with_prompt_chars = mean_number([with_row], "gateway_prompt_chars")
+        without_prompt_chars = mean_number([row], "gateway_prompt_chars")
+        if with_prompt_chars > 0 and without_prompt_chars > 0:
+            ratios.append(safe_ratio(with_prompt_chars, without_prompt_chars))
+    return ratios

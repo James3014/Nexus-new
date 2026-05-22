@@ -3105,3 +3105,9 @@ version_scope:
 - **Root Cause**: R-phase execution and report-accounting helpers were mixed together, making strict-baseline fail-closed behavior harder to test without running the full flow.
 - **Action Taken**: Added `nexus/research/flow/baseline_report.py`, covered gateway/model metadata preservation, local no-model fallback metadata, and strict LLM-baseline failure metadata with TDD, then reran focused and full research-flow tests.
 - **Prevention**: Future `run_auto_flow` phase-runner work should extract pure report/meta helpers first, then move execution branches only after their accounting contracts are independently tested.
+
+## 2026-05-22: Prompt Purity Pairing Is A Public Gate Metric
+- **Phenomenon**: `write_evidence_bundle` still kept prompt-purity pair matching inline after other public gate metric helpers moved into `public_gate_metrics.py`.
+- **Root Cause**: Prompt purity looked like bundle-local formatting, but it is used by public claim posture and training-eligibility gates.
+- **Action Taken**: Added `paired_prompt_purity_ratios` to `scripts/bench/public_gate_metrics.py`, covered explicit index precedence and prompt-char fallback with TDD, then reran public gate and full runner regression tests.
+- **Prevention**: Future prompt purity changes should be tested in `test_public_gate_metrics.py` before touching evidence bundle serialization or posture gates.

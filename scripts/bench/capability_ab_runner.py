@@ -67,6 +67,7 @@ from scripts.bench.public_gate_metrics import (
     mean_number as _public_gate_mean_number,
     median as _public_gate_median,
     paired_metric_ratios as _public_gate_paired_metric_ratios,
+    paired_prompt_purity_ratios as _public_gate_paired_prompt_purity_ratios,
     safe_ratio as _public_gate_safe_ratio,
 )
 from scripts.bench.provider_retry import (
@@ -8351,27 +8352,6 @@ def write_evidence_bundle(
     provider_token_measured_rate_without = (
         round(sum(1 for row in without_rows if _row_has_measured_provider_tokens(row)) / len(without_rows), 4) if without_rows else 0.0
     )
-    def _paired_prompt_purity_ratios() -> list[float]:
-        with_by_key = {
-            (str(row.get("task_id") or ""), str(row.get("trial_index") or "")): row
-            for row in eligible_with
-        }
-        ratios: list[float] = []
-        for row in eligible_without:
-            key = (str(row.get("task_id") or ""), str(row.get("trial_index") or ""))
-            with_row = with_by_key.get(key)
-            if not with_row:
-                continue
-            explicit_ppi = _public_gate_mean_number([with_row], "prompt_purity_index")
-            if explicit_ppi > 0:
-                ratios.append(explicit_ppi)
-                continue
-            with_prompt_chars = _public_gate_mean_number([with_row], "gateway_prompt_chars")
-            without_prompt_chars = _public_gate_mean_number([row], "gateway_prompt_chars")
-            if with_prompt_chars > 0 and without_prompt_chars > 0:
-                ratios.append(_public_gate_safe_ratio(with_prompt_chars, without_prompt_chars))
-        return ratios
-
     with_avg_wall_sec = _public_gate_mean_number(eligible_with, "wall_duration_sec", "duration_sec")
     without_avg_wall_sec = _public_gate_mean_number(eligible_without, "wall_duration_sec", "duration_sec")
     with_avg_tokens = _public_gate_mean_number(eligible_with, "total_tokens", "model_total_tokens")
@@ -8422,7 +8402,7 @@ def write_evidence_bundle(
     retry_cost_share_tokens = _public_gate_safe_ratio(hidden_retry_token_total, with_token_total)
     paired_wall_ratios = _public_gate_paired_metric_ratios(eligible_with, eligible_without, "wall_duration_sec")
     paired_token_ratios = _public_gate_paired_metric_ratios(eligible_with, eligible_without, "total_tokens")
-    paired_prompt_purity_ratios = _paired_prompt_purity_ratios()
+    paired_prompt_purity_ratios = _public_gate_paired_prompt_purity_ratios(eligible_with, eligible_without)
     median_paired_wall_cost_ratio = _public_gate_median(paired_wall_ratios)
     median_paired_token_cost_ratio = _public_gate_median(paired_token_ratios)
     median_prompt_purity_index = _public_gate_median(paired_prompt_purity_ratios)
