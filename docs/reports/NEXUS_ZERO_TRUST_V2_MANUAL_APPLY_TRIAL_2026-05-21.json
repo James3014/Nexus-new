@@ -1,0 +1,326 @@
+{
+  "schema": "nexus.zero_trust_v2.manual_apply_trial.v1",
+  "status": "PASS",
+  "created_at": "2026-05-22T01:55:04.431479+00:00",
+  "source_promotion_report": "docs/reports/NEXUS_ZERO_TRUST_V2_BEHAVIOR_PROMOTION_REPORT_2026-05-21.json",
+  "summary": {
+    "ready_candidate_count": 34,
+    "trial_patch_plan_count": 34,
+    "manual_apply_trial_ready": true,
+    "operator_ack_status": "ACKNOWLEDGED",
+    "operator_ack_source": "active_goal_v2_switch_requested",
+    "runtime_mutation_allowed": true,
+    "automatic_apply_allowed": false,
+    "smoke_required_before_apply": true,
+    "public_benchmark_allowed": false
+  },
+  "dry_run_patch_plan": [
+    {
+      "capability_id": "claim_gate",
+      "skill_id": "addy-doubt-driven-development",
+      "action": "dry_run_v2_primary_with_v1_fallback",
+      "operator_ack_required": true,
+      "operator_ack_status": "ACKNOWLEDGED",
+      "revert_plan": "restore_v1_runtime_overlay_primary",
+      "rollback_proof": "v1_runtime_overlay_primary_can_be_restored_before_public_claims"
+    },
+    {
+      "capability_id": "file_lock_security_gate",
+      "skill_id": "browserbase-what-antibot",
+      "action": "dry_run_v2_primary_with_v1_fallback",
+      "operator_ack_required": true,
+      "operator_ack_status": "ACKNOWLEDGED",
+      "revert_plan": "restore_v1_runtime_overlay_primary",
+      "rollback_proof": "v1_runtime_overlay_primary_can_be_restored_before_public_claims"
+    },
+    {
+      "capability_id": "governance_and_trust",
+      "skill_id": "sf-systematic-governance_and_trust-aegisops-ai-0aa841e2",
+      "action": "dry_run_v2_primary_with_v1_fallback",
+      "operator_ack_required": true,
+      "operator_ack_status": "ACKNOWLEDGED",
+      "revert_plan": "restore_v1_runtime_overlay_primary",
+      "rollback_proof": "v1_runtime_overlay_primary_can_be_restored_before_public_claims"
+    },
+    {
+      "capability_id": "policy_capability_gate",
+      "skill_id": "browse",
+      "action": "dry_run_v2_primary_with_v1_fallback",
+      "operator_ack_required": true,
+      "operator_ack_status": "ACKNOWLEDGED",
+      "revert_plan": "restore_v1_runtime_overlay_primary",
+      "rollback_proof": "v1_runtime_overlay_primary_can_be_restored_before_public_claims"
+    },
+    {
+      "capability_id": "research_control_plane",
+      "skill_id": "browserbase-fetch",
+      "action": "dry_run_v2_primary_with_v1_fallback",
+      "operator_ack_required": true,
+      "operator_ack_status": "ACKNOWLEDGED",
+      "revert_plan": "restore_v1_runtime_overlay_primary",
+      "rollback_proof": "v1_runtime_overlay_primary_can_be_restored_before_public_claims"
+    },
+    {
+      "capability_id": "sandbox_replay",
+      "skill_id": "nexus-acceptance-evidence-gate",
+      "action": "dry_run_v2_primary_with_v1_fallback",
+      "operator_ack_required": true,
+      "operator_ack_status": "ACKNOWLEDGED",
+      "revert_plan": "restore_v1_runtime_overlay_primary",
+      "rollback_proof": "v1_runtime_overlay_primary_can_be_restored_before_public_claims"
+    },
+    {
+      "capability_id": "xray",
+      "skill_id": "diagnose",
+      "action": "dry_run_v2_primary_with_v1_fallback",
+      "operator_ack_required": true,
+      "operator_ack_status": "ACKNOWLEDGED",
+      "revert_plan": "restore_v1_runtime_overlay_primary",
+      "rollback_proof": "v1_runtime_overlay_primary_can_be_restored_before_public_claims"
+    },
+    {
+      "capability_id": "codeintel",
+      "skill_id": "gstack-qa",
+      "action": "dry_run_v2_primary_with_v1_fallback",
+      "operator_ack_required": true,
+      "operator_ack_status": "ACKNOWLEDGED",
+      "revert_plan": "restore_v1_runtime_overlay_primary",
+      "rollback_proof": "v1_runtime_overlay_primary_can_be_restored_before_public_claims"
+    },
+    {
+      "capability_id": "direct_master_loop",
+      "skill_id": "sf-systematic-direct_master_loop-build-32802a87",
+      "action": "dry_run_v2_primary_with_v1_fallback",
+      "operator_ack_required": true,
+      "operator_ack_status": "ACKNOWLEDGED",
+      "revert_plan": "restore_v1_runtime_overlay_primary",
+      "rollback_proof": "v1_runtime_overlay_primary_can_be_restored_before_public_claims"
+    },
+    {
+      "capability_id": "repair_loop",
+      "skill_id": "qa-only",
+      "action": "dry_run_v2_primary_with_v1_fallback",
+      "operator_ack_required": true,
+      "operator_ack_status": "ACKNOWLEDGED",
+      "revert_plan": "restore_v1_runtime_overlay_primary",
+      "rollback_proof": "v1_runtime_overlay_primary_can_be_restored_before_public_claims"
+    },
+    {
+      "capability_id": "swarm_multi_agent",
+      "skill_id": "nexus-gemini-code-review-orchestrator",
+      "action": "dry_run_v2_primary_with_v1_fallback",
+      "operator_ack_required": true,
+      "operator_ack_status": "ACKNOWLEDGED",
+      "revert_plan": "restore_v1_runtime_overlay_primary",
+      "rollback_proof": "v1_runtime_overlay_primary_can_be_restored_before_public_claims"
+    },
+    {
+      "capability_id": "artifact_gate",
+      "skill_id": "sf-systematic-artifact_gate-differential-review-461fbd0c",
+      "action": "dry_run_v2_primary_with_v1_fallback",
+      "operator_ack_required": true,
+      "operator_ack_status": "ACKNOWLEDGED",
+      "revert_plan": "restore_v1_runtime_overlay_primary",
+      "rollback_proof": "v1_runtime_overlay_primary_can_be_restored_before_public_claims"
+    },
+    {
+      "capability_id": "autonomic_router",
+      "skill_id": "nexus-agent-execution-board-failclosed",
+      "action": "dry_run_v2_primary_with_v1_fallback",
+      "operator_ack_required": true,
+      "operator_ack_status": "ACKNOWLEDGED",
+      "revert_plan": "restore_v1_runtime_overlay_primary",
+      "rollback_proof": "v1_runtime_overlay_primary_can_be_restored_before_public_claims"
+    },
+    {
+      "capability_id": "autoreason",
+      "skill_id": "sf2-belief-route-fit-spec",
+      "action": "dry_run_v2_primary_with_v1_fallback",
+      "operator_ack_required": true,
+      "operator_ack_status": "ACKNOWLEDGED",
+      "revert_plan": "restore_v1_runtime_overlay_primary",
+      "rollback_proof": "v1_runtime_overlay_primary_can_be_restored_before_public_claims"
+    },
+    {
+      "capability_id": "belief",
+      "skill_id": "sf2-belief-route-fit-spec",
+      "action": "dry_run_v2_primary_with_v1_fallback",
+      "operator_ack_required": true,
+      "operator_ack_status": "ACKNOWLEDGED",
+      "revert_plan": "restore_v1_runtime_overlay_primary",
+      "rollback_proof": "v1_runtime_overlay_primary_can_be_restored_before_public_claims"
+    },
+    {
+      "capability_id": "benchmark_meta_opt",
+      "skill_id": "sf-systematic-benchmark_meta_opt-hugging-face-trackio-d21c6b90",
+      "action": "dry_run_v2_primary_with_v1_fallback",
+      "operator_ack_required": true,
+      "operator_ack_status": "ACKNOWLEDGED",
+      "revert_plan": "restore_v1_runtime_overlay_primary",
+      "rollback_proof": "v1_runtime_overlay_primary_can_be_restored_before_public_claims"
+    },
+    {
+      "capability_id": "ddtree",
+      "skill_id": "nexus-root-cause-probe",
+      "action": "dry_run_v2_primary_with_v1_fallback",
+      "operator_ack_required": true,
+      "operator_ack_status": "ACKNOWLEDGED",
+      "revert_plan": "restore_v1_runtime_overlay_primary",
+      "rollback_proof": "v1_runtime_overlay_primary_can_be_restored_before_public_claims"
+    },
+    {
+      "capability_id": "drone",
+      "skill_id": "sf-systematic-drone-python-background-jobs-18326a62",
+      "action": "dry_run_v2_primary_with_v1_fallback",
+      "operator_ack_required": true,
+      "operator_ack_status": "ACKNOWLEDGED",
+      "revert_plan": "restore_v1_runtime_overlay_primary",
+      "rollback_proof": "v1_runtime_overlay_primary_can_be_restored_before_public_claims"
+    },
+    {
+      "capability_id": "external_productivity",
+      "skill_id": "aibdd.auto.python.e2e.green",
+      "action": "dry_run_v2_primary_with_v1_fallback",
+      "operator_ack_required": true,
+      "operator_ack_status": "ACKNOWLEDGED",
+      "revert_plan": "restore_v1_runtime_overlay_primary",
+      "rollback_proof": "v1_runtime_overlay_primary_can_be_restored_before_public_claims"
+    },
+    {
+      "capability_id": "forecast_pregate",
+      "skill_id": "addy-shipping-and-launch",
+      "action": "dry_run_v2_primary_with_v1_fallback",
+      "operator_ack_required": true,
+      "operator_ack_status": "ACKNOWLEDGED",
+      "revert_plan": "restore_v1_runtime_overlay_primary",
+      "rollback_proof": "v1_runtime_overlay_primary_can_be_restored_before_public_claims"
+    },
+    {
+      "capability_id": "hyper_sprint",
+      "skill_id": "retro",
+      "action": "dry_run_v2_primary_with_v1_fallback",
+      "operator_ack_required": true,
+      "operator_ack_status": "ACKNOWLEDGED",
+      "revert_plan": "restore_v1_runtime_overlay_primary",
+      "rollback_proof": "v1_runtime_overlay_primary_can_be_restored_before_public_claims"
+    },
+    {
+      "capability_id": "lancedb",
+      "skill_id": "research-source-validation-auditor",
+      "action": "dry_run_v2_primary_with_v1_fallback",
+      "operator_ack_required": true,
+      "operator_ack_status": "ACKNOWLEDGED",
+      "revert_plan": "restore_v1_runtime_overlay_primary",
+      "rollback_proof": "v1_runtime_overlay_primary_can_be_restored_before_public_claims"
+    },
+    {
+      "capability_id": "learn_ask",
+      "skill_id": "nexus-live-ask-replay-normalization-gate",
+      "action": "dry_run_v2_primary_with_v1_fallback",
+      "operator_ack_required": true,
+      "operator_ack_status": "ACKNOWLEDGED",
+      "revert_plan": "restore_v1_runtime_overlay_primary",
+      "rollback_proof": "v1_runtime_overlay_primary_can_be_restored_before_public_claims"
+    },
+    {
+      "capability_id": "learning_closure",
+      "skill_id": "sf-systematic-learning_closure-memory-lint-8bdb0fca",
+      "action": "dry_run_v2_primary_with_v1_fallback",
+      "operator_ack_required": true,
+      "operator_ack_status": "ACKNOWLEDGED",
+      "revert_plan": "restore_v1_runtime_overlay_primary",
+      "rollback_proof": "v1_runtime_overlay_primary_can_be_restored_before_public_claims"
+    },
+    {
+      "capability_id": "memory",
+      "skill_id": "product-self-knowledge",
+      "action": "dry_run_v2_primary_with_v1_fallback",
+      "operator_ack_required": true,
+      "operator_ack_status": "ACKNOWLEDGED",
+      "revert_plan": "restore_v1_runtime_overlay_primary",
+      "rollback_proof": "v1_runtime_overlay_primary_can_be_restored_before_public_claims"
+    },
+    {
+      "capability_id": "mempalace",
+      "skill_id": "sf2-mempalace-route-fit-spec",
+      "action": "dry_run_v2_primary_with_v1_fallback",
+      "operator_ack_required": true,
+      "operator_ack_status": "ACKNOWLEDGED",
+      "revert_plan": "restore_v1_runtime_overlay_primary",
+      "rollback_proof": "v1_runtime_overlay_primary_can_be_restored_before_public_claims"
+    },
+    {
+      "capability_id": "metabolism_resume",
+      "skill_id": "addy-shipping-and-launch",
+      "action": "dry_run_v2_primary_with_v1_fallback",
+      "operator_ack_required": true,
+      "operator_ack_status": "ACKNOWLEDGED",
+      "revert_plan": "restore_v1_runtime_overlay_primary",
+      "rollback_proof": "v1_runtime_overlay_primary_can_be_restored_before_public_claims"
+    },
+    {
+      "capability_id": "nightshift",
+      "skill_id": "canary",
+      "action": "dry_run_v2_primary_with_v1_fallback",
+      "operator_ack_required": true,
+      "operator_ack_status": "ACKNOWLEDGED",
+      "revert_plan": "restore_v1_runtime_overlay_primary",
+      "rollback_proof": "v1_runtime_overlay_primary_can_be_restored_before_public_claims"
+    },
+    {
+      "capability_id": "registry_skills_sync",
+      "skill_id": "gstack-sync-gbrain",
+      "action": "dry_run_v2_primary_with_v1_fallback",
+      "operator_ack_required": true,
+      "operator_ack_status": "ACKNOWLEDGED",
+      "revert_plan": "restore_v1_runtime_overlay_primary",
+      "rollback_proof": "v1_runtime_overlay_primary_can_be_restored_before_public_claims"
+    },
+    {
+      "capability_id": "regression_guard",
+      "skill_id": "sf-systematic-regression_guard-odoo-automated-tests-dad98433",
+      "action": "dry_run_v2_primary_with_v1_fallback",
+      "operator_ack_required": true,
+      "operator_ack_status": "ACKNOWLEDGED",
+      "revert_plan": "restore_v1_runtime_overlay_primary",
+      "rollback_proof": "v1_runtime_overlay_primary_can_be_restored_before_public_claims"
+    },
+    {
+      "capability_id": "research",
+      "skill_id": "gbrain-academic-verify",
+      "action": "dry_run_v2_primary_with_v1_fallback",
+      "operator_ack_required": true,
+      "operator_ack_status": "ACKNOWLEDGED",
+      "revert_plan": "restore_v1_runtime_overlay_primary",
+      "rollback_proof": "v1_runtime_overlay_primary_can_be_restored_before_public_claims"
+    },
+    {
+      "capability_id": "research_and_source_discipline",
+      "skill_id": "gbrain-maintain",
+      "action": "dry_run_v2_primary_with_v1_fallback",
+      "operator_ack_required": true,
+      "operator_ack_status": "ACKNOWLEDGED",
+      "revert_plan": "restore_v1_runtime_overlay_primary",
+      "rollback_proof": "v1_runtime_overlay_primary_can_be_restored_before_public_claims"
+    },
+    {
+      "capability_id": "ui_validator",
+      "skill_id": "sf-systematic-ui_validator-e2e-testing-d98eb7c3",
+      "action": "dry_run_v2_primary_with_v1_fallback",
+      "operator_ack_required": true,
+      "operator_ack_status": "ACKNOWLEDGED",
+      "revert_plan": "restore_v1_runtime_overlay_primary",
+      "rollback_proof": "v1_runtime_overlay_primary_can_be_restored_before_public_claims"
+    },
+    {
+      "capability_id": "ultra_review",
+      "skill_id": "github11-vulnerability-scanner-ultra-review",
+      "action": "dry_run_v2_primary_with_v1_fallback",
+      "operator_ack_required": true,
+      "operator_ack_status": "ACKNOWLEDGED",
+      "revert_plan": "restore_v1_runtime_overlay_primary",
+      "rollback_proof": "v1_runtime_overlay_primary_can_be_restored_before_public_claims"
+    }
+  ],
+  "blockers": []
+}

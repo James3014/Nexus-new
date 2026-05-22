@@ -55,6 +55,7 @@ from scripts.bench.capability_ab_runner import (
     _hidden_verifier_infra_reason,
     _nexus_cli_subprocess_cmd,
     _direct_gemini_timeout_sec,
+    _direct_model_retryable_infra_failure,
     _direct_provider_infra_row,
     _direct_provider_timeout_row,
     _direct_infra_abort_reason,
@@ -549,6 +550,7 @@ def test_public_promotion_readiness_contract_requires_all_public_gates():
         "x3_promotion_gate": {"status": "PASS", "failures": []},
         "valid_comparison_readiness_gate": {"status": "PASS", "failures": []},
         "route_policy_evidence_contract": {"status": "PASS", "failures": []},
+        "expected_capability_evidence_contract": {"status": "PASS", "failures": []},
         "external_provider_claim_boundary_contract": {"status": "PASS", "public_claim_allowed": True, "failures": []},
         "taskset_contract": {"fixed_public_taskset_ready": True},
         "session_worker_contamination": {"clean": True, "contamination_rate": 0.0},
@@ -3251,7 +3253,29 @@ def test_write_trial_evidence_and_bundle(tmp_path: Path):
         "nexus_usage_valid": True,
         "capability_claim_verified": True,
         "route_decision_schema_version": "nexus_route_decision_v1",
-            "route_execution_policy": _route_policy(),
+        "route_execution_policy": _route_policy(),
+        "capability_receipts": [
+            {
+                "name": "ddtree",
+                "selected": True,
+                "invoked": True,
+                "evidence_present": True,
+                "gate_passed": True,
+                "outcome_contributed": True,
+                "public_claim_safe": True,
+                "evidence_refs": ["saved_steps:2"],
+            }
+        ],
+        "expected_capability_receipt_coverage": {
+            "expected": ["ddtree"],
+            "missing": [],
+            "all_public_safe": True,
+        },
+        "expected_capability_invocation_coverage": {
+            "expected": ["ddtree"],
+            "missing": [],
+            "all_invoked_with_evidence": True,
+        },
         "rubric_contract_status": "PASS",
         "openseeker_schema_version": "nexus_openseeker_alignment.v1",
         "trajectory_step_count": 12,
@@ -6651,6 +6675,7 @@ def test_run_with_nexus_subprocess_disables_memory_auto_init(tmp_path: Path, mon
         force_flow=None,
         runner_mode="subprocess",
         with_llm_mode="all",
+        strict_llm_baseline=True,
     )
 
     assert captured["env"]["NEXUS_MEMORY_AUTO_INIT"] == "0"
@@ -7011,16 +7036,16 @@ def test_run_with_nexus_preserves_expected_autoreason_over_cost_cap(tmp_path: Pa
 
     assert captured["cmd"][captured["cmd"].index("--candidate-count") + 1] == "3"
     assert captured["env"]["NEXUS_LLM_CANDIDATE_CAP"] == "3"
-    assert "--llm-baseline" not in captured["cmd"]
+    assert "--llm-baseline" in captured["cmd"]
     controls = json.loads(captured["env"]["NEXUS_ROUTE_COST_CONTROLS"])
     assert "candidate_cap" not in controls
-    assert controls["skip_llm_baseline"] is True
+    assert controls.get("skip_llm_baseline") is not True
     assert controls["lite_route"] is False
     assert controls["supervised_bare_first"] is False
     assert controls["expected_capability_protection"] == ["autoreason"]
     assert captured["env"]["NEXUS_LLM_SELF_HEAL_ON_PYTEST_FAIL"] == "1"
     assert out["route_cost_policy_expected_capability_overrides"]["candidate_cap"] == 1
-    assert "skip_llm_baseline" not in out["route_cost_policy_expected_capability_overrides"]
+    assert out["route_cost_policy_expected_capability_overrides"]["skip_llm_baseline"] is True
     assert out["route_cost_policy_expected_capability_overrides"]["lite_route"] is True
     assert out["route_cost_policy_expected_capability_overrides"]["supervised_bare_first"] is True
     assert out["expected_capability_receipt_coverage"]["missing"] == []
@@ -8427,6 +8452,76 @@ def test_hidden_lite_failed_model_attempt_uses_deterministic_pre_rescue(tmp_path
     assert out["semantic_status"] == "VERIFIED"
     assert out["model_calls"] == 1
     assert out["total_tokens"] == 10
+
+
+def test_cost_efficiency_profile_allows_pre_model_rescue_under_required_participation(tmp_path: Path, monkeypatch):
+    task = CapabilityTask(
+        id="model-required-repair-001",
+        difficulty="hard",
+        task_type="public_test_repair",
+        category="test_repair",
+        repo_kind="neutral_fixture",
+        task_desc="Repair async timeout tests without hiding the timeout contract.",
+        target_file="unused",
+        test_file="unused",
+        success_criteria="patch_and_tests_pass",
+        fixture_kind="pytest_async_repair",
+        expected_capabilities=("hyper", "delivery_gate"),
+        capability_activation_contract="cost_capped",
+    )
+    target_file, visible_test_file = _materialize_fixture(tmp_path, task)
+    policy = tmp_path / ".nexus" / "policy" / "promoted_route_cost_policy.json"
+    policy.parent.mkdir(parents=True, exist_ok=True)
+    policy.write_text(
+        """{
+  "schema_version": "nexus_promoted_route_cost_policy.v1",
+  "source": ".nexus/reports/cost",
+  "feature_rules": [
+    {
+      "id": "feature:public-test-repair-hard-neutral-fixture-lite",
+      "match": {"task_type": "public_test_repair", "difficulty": "hard", "repo_kind": "neutral_fixture"},
+      "controls": {"candidate_cap": 1, "lite_route": true, "disable_research": true, "max_rounds": 1, "context_mode": "compact", "route_lane": "hidden_lite", "allow_pre_model_deterministic_rescue": true}
+    }
+  ]
+}""",
+        encoding="utf-8",
+    )
+
+    def fake_without(**_kwargs):
+        raise AssertionError("cost-efficiency pre-model rescue should run before the model call")
+
+    def fake_run_process_group(cmd, *, cwd, env, timeout_sec):
+        if cmd[:3] == ["uv", "run", "scripts/engine/nexus_cli.py"]:
+            raise AssertionError("cost-efficiency pre-model rescue should not invoke Nexus subprocess")
+        return _run_process_group(cmd, cwd=cwd, env=env, timeout_sec=timeout_sec)
+
+    monkeypatch.setenv("NEXUS_VALUE_HIDDEN_VERIFIER", "1")
+    monkeypatch.setenv("NEXUS_REQUIRE_MODEL_PARTICIPATION", "1")
+    monkeypatch.setenv("NEXUS_ALLOW_COST_EFFICIENCY_PRE_MODEL_RESCUE", "1")
+    monkeypatch.setattr("scripts.bench.capability_ab_runner.run_without_nexus", fake_without)
+    monkeypatch.setattr("scripts.bench.capability_ab_runner._run_process_group", fake_run_process_group)
+
+    out = run_with_nexus(
+        repo_root=tmp_path,
+        task=task,
+        target_file=target_file,
+        test_file=visible_test_file,
+        timeout_sec=10,
+        force_flow=None,
+        runner_mode="subprocess",
+        with_llm_mode="all",
+    )
+
+    assert out["runtime_classification"] == "nexus_deterministic_pre_model_rescue"
+    assert out["nexus_winner_source"] == "local_deterministic_pre_model_rescue"
+    assert out["model_calls"] == 0
+    assert out["total_tokens"] == 0
+    assert out["token_capture_status"] == "not_applicable_local_only"
+    assert out["provider_token_measured"] is True
+    assert out["route_cost_policy_controls"]["cost_efficiency_pre_model_rescue_profile"] is True
+    assert out["route_execution_policy"]["pre_model_deterministic_rescue_allowed"] is True
+    assert out["status"] == "SUCCESS"
+    assert out["semantic_status"] == "VERIFIED"
 
 
 def test_benchmark_disable_deterministic_rescue_keeps_model_cost_path(tmp_path: Path, monkeypatch):
@@ -10522,8 +10617,8 @@ def test_run_with_nexus_subprocess_preserves_executor_receipts_without_llm(tmp_p
         }
     ]
     assert out["skill_mount_count"] == 1
-    assert out["skill_mount_contract_status"] == "PASS"
-    assert out["skill_mount_violations"] == []
+    assert out["skill_mount_contract_status"] == "RETURN"
+    assert out["skill_mount_violations"]
     assert json.loads(out["skill_mount_contract_json"]) == out["skill_mount_contract"]
     assert out["research_preflight_present"] is True
     assert out["research_preflight_requires_evidence"] is True
@@ -11692,6 +11787,76 @@ def test_without_nexus_parse_failure_with_tokens_is_eligible_model_failure():
     assert out["infra_invalid_reason"] is None
     assert out["model_response_received"] is True
     assert out["model_uplift_eligible"] is True
+
+
+def test_with_nexus_verified_rescue_after_measured_parse_failure_is_eligible():
+    row = {
+        "mode": "with_nexus",
+        "status": "SUCCESS",
+        "semantic_completed": True,
+        "model_calls": 1,
+        "model_patch_generated": False,
+        "total_tokens": 321,
+        "token_capture_status": "measured",
+        "baseline_gateway_error_category": "parse_failure",
+        "eligibility_class": "model_required",
+        "gemini_uses_nexus": True,
+        "model_uses_nexus": True,
+        "nexus_context_delivered": True,
+        "hidden_verifier_passed": True,
+        "report_trust_mismatch": False,
+        "nexus_winner_source": "nexus_llm_deterministic_pre_rescue",
+        "pillar_lancedb_active": True,
+        "pillar_memory_active": True,
+        "pillar_mempalace_active": True,
+        "pillar_belief_active": True,
+        "pillar_artifact_active": True,
+        "phase_p": "supervised_bare_preflight",
+        "phase_x": "supervised_bare_context_suppressed",
+        "phase_d": "supervised_bare_route_decision",
+        "phase_r": "supervised_bare_deterministic_pre_rescue",
+        "phase_a": "supervised_bare_hidden_verifier",
+        "phase_c": "supervised_bare_delivery_receipt",
+    }
+
+    out = _annotate_benchmark_eligibility(
+        row,
+        provider="gemini",
+        model_required=True,
+        nexus_required=True,
+    )
+
+    assert out["run_eligible"] is True
+    assert out["infra_invalid_reason"] is None
+    assert out["nexus_wearing_valid"] is True
+
+
+def test_direct_parse_failure_with_estimated_tokens_is_retryable():
+    retryable, reason = _direct_model_retryable_infra_failure(
+        {
+            "error_category": "parse_failure",
+            "tokens_used": 517,
+            "token_capture_status": "estimated",
+        },
+        "stats_outlier_possible_cumulative",
+    )
+
+    assert retryable is True
+    assert reason == "parse_failure_without_measured_tokens"
+
+
+def test_direct_parse_failure_with_measured_tokens_is_model_failure_not_retryable():
+    retryable, reason = _direct_model_retryable_infra_failure(
+        {
+            "error_category": "parse_failure",
+            "tokens_used": 321,
+            "token_capture_status": "measured",
+        },
+        "not-json",
+    )
+
+    assert retryable is False
+    assert reason == ""
 
 
 def test_strict_llm_baseline_gateway_error_is_infra_invalid():

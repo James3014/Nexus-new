@@ -434,6 +434,7 @@ def _ensure_expected_capability_receipts(
         "ddtree",
         "drone",
         "hyper",
+        "judge_panel",
         "lancedb",
         "nightshift",
         "research",
@@ -4676,7 +4677,10 @@ def _direct_model_infra_retry_limit(provider: str) -> int:
 def _direct_model_retryable_infra_failure(out: dict[str, Any], raw: str) -> tuple[bool, str]:
     error_category = str(out.get("error_category") or "").strip()
     token_count = int(out.get("tokens_used", 0) or 0)
+    token_status = str(out.get("token_capture_status") or "").strip().lower()
     combined = f"{error_category}\n{raw}".lower()
+    if error_category == "parse_failure" and token_status not in {"measured", "ok"}:
+        return True, "parse_failure_without_measured_tokens"
     if token_count > 0:
         return False, ""
     if any(marker in combined for marker in ("quota", "resource exhausted", "rate limit", "usage limit", "429")):
@@ -5409,10 +5413,14 @@ def run_with_nexus(
         route_cost_controls["disable_deterministic_rescue"] = True
         route_cost_policy_overrides["disable_deterministic_rescue"] = True
         route_cost_controls["allow_pre_model_deterministic_rescue"] = False
+    allow_cost_efficiency_pre_model_rescue = _truthy_env("NEXUS_ALLOW_COST_EFFICIENCY_PRE_MODEL_RESCUE")
     if require_model_participation_for_run:
         if route_cost_controls.get("allow_pre_model_deterministic_rescue") is True:
             route_cost_policy_overrides["allow_pre_model_deterministic_rescue"] = True
-        route_cost_controls["allow_pre_model_deterministic_rescue"] = False
+        if not allow_cost_efficiency_pre_model_rescue:
+            route_cost_controls["allow_pre_model_deterministic_rescue"] = False
+        else:
+            route_cost_controls["cost_efficiency_pre_model_rescue_profile"] = True
         route_cost_controls["require_model_participation"] = True
     if (
         skip_llm_baseline
@@ -5454,6 +5462,11 @@ def run_with_nexus(
         and (
             not require_model_participation_for_run
             or "model_required_receipt_lite_allows_pre_model_rescue" in route_execution_policy.reason_codes
+            or "cost_capped_capability_allows_verified_pre_model_rescue" in route_execution_policy.reason_codes
+            or (
+                allow_cost_efficiency_pre_model_rescue
+                and route_execution_policy.pre_model_deterministic_rescue_allowed
+            )
         )
         and (
             supervised_bare_allowed
@@ -5464,7 +5477,7 @@ def run_with_nexus(
             or route_cost_controls.get("hyper_receipt_lite") is True
             or route_cost_controls.get("preflight_receipt_lite") is True
         )
-        and not strict_llm_baseline
+        and (not strict_llm_baseline or allow_cost_efficiency_pre_model_rescue)
         and route_execution_policy.pre_model_deterministic_rescue_allowed
     ):
         pre_model_start = time.monotonic()

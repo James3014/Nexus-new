@@ -122,6 +122,19 @@ def classify_infra_invalid_reason(
             total_tokens > 0 or token_status in {"measured", "ok"}
         ):
             return None
+        if (
+            model_required
+            and nexus_required
+            and model_calls > 0
+            and total_tokens > 0
+            and token_status in {"measured", "ok"}
+            and bool(row.get("semantic_completed", False))
+            and bool(row.get("hidden_verifier_passed", False))
+            and bool(row.get("nexus_context_delivered", False))
+            and bool(model_uses_nexus(row))
+            and not bool(row.get("report_trust_mismatch", False))
+        ):
+            return None
         return "parse_error"
     if bool(row.get("baseline_llm_required", False)) and gateway_error in {"gateway_error", "binary_missing"}:
         return "cli_missing" if gateway_error == "binary_missing" else "model_gateway_error"

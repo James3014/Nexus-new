@@ -1,0 +1,1030 @@
+{
+  "schema": "nexus.zero_trust_v2.fresh_task_manifest.v1",
+  "version": "2026-05-21",
+  "frozen": true,
+  "benchmark_id": "zero-trust-v2-fresh-task-ref-v1",
+  "description": "Fresh task manifest for Zero Trust V2 physical behavior runs.",
+  "created_at": "2026-05-22T00:58:11.601551+00:00",
+  "tasks": [
+    {
+      "id": "ztv2-fresh-claim-gate-001",
+      "task_desc": "Implement compute_backoff(attempt) in target.py so the visible and hidden pytest contracts pass. Required behavior: attempt 1 returns 1, attempt 2 returns 2, attempt 3 returns 4, and non-positive attempts are rejected. This is the fresh Zero-Trust V2 behavior canary for capability claim_gate and candidate skill addy-doubt-driven-development; promotion still requires runtime-signed V2 receipts.",
+      "target_file": "target.py",
+      "test_file": "test_visible.py",
+      "success_criteria": "visible_and_hidden_pytest_pass_with_runtime_signed_v2_receipt",
+      "category": "claim_gate",
+      "difficulty": "medium",
+      "repo_kind": "neutral_fixture",
+      "repo": "fixture://zero-trust-v2-fresh-skill-behavior",
+      "repo_ref": "v1",
+      "fixture_kind": "pytest_async_repair",
+      "mutation_required": true,
+      "allowed_files": [
+        "target.py"
+      ],
+      "forbidden_files": [
+        ".nexus/",
+        "logs/",
+        "benchmarks/"
+      ],
+      "setup_command": "python -m pytest --version",
+      "verification_command": "python -m pytest -q test_visible.py",
+      "expected_capabilities": [
+        "claim_gate"
+      ],
+      "capability_activation_contract": "required",
+      "eligibility_class": "model_required",
+      "public_claim_allowed_metrics": []
+    },
+    {
+      "id": "ztv2-fresh-file-lock-security-gate-002",
+      "task_desc": "Implement compute_backoff(attempt) in target.py so the visible and hidden pytest contracts pass. Required behavior: attempt 1 returns 1, attempt 2 returns 2, attempt 3 returns 4, and non-positive attempts are rejected. This is the fresh Zero-Trust V2 behavior canary for capability file_lock_security_gate and candidate skill browserbase-what-antibot; promotion still requires runtime-signed V2 receipts.",
+      "target_file": "target.py",
+      "test_file": "test_visible.py",
+      "success_criteria": "visible_and_hidden_pytest_pass_with_runtime_signed_v2_receipt",
+      "category": "file_lock_security_gate",
+      "difficulty": "medium",
+      "repo_kind": "neutral_fixture",
+      "repo": "fixture://zero-trust-v2-fresh-skill-behavior",
+      "repo_ref": "v1",
+      "fixture_kind": "pytest_async_repair",
+      "mutation_required": true,
+      "allowed_files": [
+        "target.py"
+      ],
+      "forbidden_files": [
+        ".nexus/",
+        "logs/",
+        "benchmarks/"
+      ],
+      "setup_command": "python -m pytest --version",
+      "verification_command": "python -m pytest -q test_visible.py",
+      "expected_capabilities": [
+        "ultra_review"
+      ],
+      "capability_activation_contract": "required",
+      "eligibility_class": "model_required",
+      "public_claim_allowed_metrics": []
+    },
+    {
+      "id": "ztv2-fresh-governance-and-trust-003",
+      "task_desc": "Implement compute_backoff(attempt) in target.py so the visible and hidden pytest contracts pass. Required behavior: attempt 1 returns 1, attempt 2 returns 2, attempt 3 returns 4, and non-positive attempts are rejected. This is the fresh Zero-Trust V2 behavior canary for capability governance_and_trust and candidate skill sf-systematic-governance_and_trust-aegisops-ai-0aa841e2; promotion still requires runtime-signed V2 receipts.",
+      "target_file": "target.py",
+      "test_file": "test_visible.py",
+      "success_criteria": "visible_and_hidden_pytest_pass_with_runtime_signed_v2_receipt",
+      "category": "governance_and_trust",
+      "difficulty": "medium",
+      "repo_kind": "neutral_fixture",
+      "repo": "fixture://zero-trust-v2-fresh-skill-behavior",
+      "repo_ref": "v1",
+      "fixture_kind": "pytest_async_repair",
+      "mutation_required": true,
+      "allowed_files": [
+        "target.py"
+      ],
+      "forbidden_files": [
+        ".nexus/",
+        "logs/",
+        "benchmarks/"
+      ],
+      "setup_command": "python -m pytest --version",
+      "verification_command": "python -m pytest -q test_visible.py",
+      "expected_capabilities": [
+        "mempalace_gate"
+      ],
+      "capability_activation_contract": "required",
+      "eligibility_class": "model_required",
+      "public_claim_allowed_metrics": []
+    },
+    {
+      "id": "ztv2-fresh-policy-capability-gate-004",
+      "task_desc": "Implement compute_backoff(attempt) in target.py so the visible and hidden pytest contracts pass. Required behavior: attempt 1 returns 1, attempt 2 returns 2, attempt 3 returns 4, and non-positive attempts are rejected. This is the fresh Zero-Trust V2 behavior canary for capability policy_capability_gate and candidate skill browse; promotion still requires runtime-signed V2 receipts.",
+      "target_file": "target.py",
+      "test_file": "test_visible.py",
+      "success_criteria": "visible_and_hidden_pytest_pass_with_runtime_signed_v2_receipt",
+      "category": "policy_capability_gate",
+      "difficulty": "medium",
+      "repo_kind": "neutral_fixture",
+      "repo": "fixture://zero-trust-v2-fresh-skill-behavior",
+      "repo_ref": "v1",
+      "fixture_kind": "pytest_async_repair",
+      "mutation_required": true,
+      "allowed_files": [
+        "target.py"
+      ],
+      "forbidden_files": [
+        ".nexus/",
+        "logs/",
+        "benchmarks/"
+      ],
+      "setup_command": "python -m pytest --version",
+      "verification_command": "python -m pytest -q test_visible.py",
+      "expected_capabilities": [
+        "mempalace_gate"
+      ],
+      "capability_activation_contract": "required",
+      "eligibility_class": "model_required",
+      "public_claim_allowed_metrics": []
+    },
+    {
+      "id": "ztv2-fresh-research-control-plane-005",
+      "task_desc": "Implement compute_backoff(attempt) in target.py so the visible and hidden pytest contracts pass. Required behavior: attempt 1 returns 1, attempt 2 returns 2, attempt 3 returns 4, and non-positive attempts are rejected. This is the fresh Zero-Trust V2 behavior canary for capability research_control_plane and candidate skill browserbase-fetch; promotion still requires runtime-signed V2 receipts.",
+      "target_file": "target.py",
+      "test_file": "test_visible.py",
+      "success_criteria": "visible_and_hidden_pytest_pass_with_runtime_signed_v2_receipt",
+      "category": "research_control_plane",
+      "difficulty": "medium",
+      "repo_kind": "neutral_fixture",
+      "repo": "fixture://zero-trust-v2-fresh-skill-behavior",
+      "repo_ref": "v1",
+      "fixture_kind": "pytest_async_repair",
+      "mutation_required": true,
+      "allowed_files": [
+        "target.py"
+      ],
+      "forbidden_files": [
+        ".nexus/",
+        "logs/",
+        "benchmarks/"
+      ],
+      "setup_command": "python -m pytest --version",
+      "verification_command": "python -m pytest -q test_visible.py",
+      "expected_capabilities": [
+        "research"
+      ],
+      "capability_activation_contract": "required",
+      "eligibility_class": "model_required",
+      "public_claim_allowed_metrics": []
+    },
+    {
+      "id": "ztv2-fresh-sandbox-replay-006",
+      "task_desc": "Implement compute_backoff(attempt) in target.py so the visible and hidden pytest contracts pass. Required behavior: attempt 1 returns 1, attempt 2 returns 2, attempt 3 returns 4, and non-positive attempts are rejected. This is the fresh Zero-Trust V2 behavior canary for capability sandbox_replay and candidate skill nexus-acceptance-evidence-gate; promotion still requires runtime-signed V2 receipts.",
+      "target_file": "target.py",
+      "test_file": "test_visible.py",
+      "success_criteria": "visible_and_hidden_pytest_pass_with_runtime_signed_v2_receipt",
+      "category": "sandbox_replay",
+      "difficulty": "medium",
+      "repo_kind": "neutral_fixture",
+      "repo": "fixture://zero-trust-v2-fresh-skill-behavior",
+      "repo_ref": "v1",
+      "fixture_kind": "pytest_async_repair",
+      "mutation_required": true,
+      "allowed_files": [
+        "target.py"
+      ],
+      "forbidden_files": [
+        ".nexus/",
+        "logs/",
+        "benchmarks/"
+      ],
+      "setup_command": "python -m pytest --version",
+      "verification_command": "python -m pytest -q test_visible.py",
+      "expected_capabilities": [
+        "harness_preflight_sensor"
+      ],
+      "capability_activation_contract": "required",
+      "eligibility_class": "model_required",
+      "public_claim_allowed_metrics": []
+    },
+    {
+      "id": "ztv2-fresh-xray-007",
+      "task_desc": "Implement compute_backoff(attempt) in target.py so the visible and hidden pytest contracts pass. Required behavior: attempt 1 returns 1, attempt 2 returns 2, attempt 3 returns 4, and non-positive attempts are rejected. This is the fresh Zero-Trust V2 behavior canary for capability xray and candidate skill diagnose; promotion still requires runtime-signed V2 receipts.",
+      "target_file": "target.py",
+      "test_file": "test_visible.py",
+      "success_criteria": "visible_and_hidden_pytest_pass_with_runtime_signed_v2_receipt",
+      "category": "xray",
+      "difficulty": "medium",
+      "repo_kind": "neutral_fixture",
+      "repo": "fixture://zero-trust-v2-fresh-skill-behavior",
+      "repo_ref": "v1",
+      "fixture_kind": "pytest_async_repair",
+      "mutation_required": true,
+      "allowed_files": [
+        "target.py"
+      ],
+      "forbidden_files": [
+        ".nexus/",
+        "logs/",
+        "benchmarks/"
+      ],
+      "setup_command": "python -m pytest --version",
+      "verification_command": "python -m pytest -q test_visible.py",
+      "expected_capabilities": [
+        "codeintel"
+      ],
+      "capability_activation_contract": "required",
+      "eligibility_class": "model_required",
+      "public_claim_allowed_metrics": []
+    },
+    {
+      "id": "ztv2-fresh-codeintel-008",
+      "task_desc": "Implement compute_backoff(attempt) in target.py so the visible and hidden pytest contracts pass. Required behavior: attempt 1 returns 1, attempt 2 returns 2, attempt 3 returns 4, and non-positive attempts are rejected. This is the fresh Zero-Trust V2 behavior canary for capability codeintel and candidate skill gstack-qa; promotion still requires runtime-signed V2 receipts.",
+      "target_file": "target.py",
+      "test_file": "test_visible.py",
+      "success_criteria": "visible_and_hidden_pytest_pass_with_runtime_signed_v2_receipt",
+      "category": "codeintel",
+      "difficulty": "medium",
+      "repo_kind": "neutral_fixture",
+      "repo": "fixture://zero-trust-v2-fresh-skill-behavior",
+      "repo_ref": "v1",
+      "fixture_kind": "pytest_async_repair",
+      "mutation_required": true,
+      "allowed_files": [
+        "target.py"
+      ],
+      "forbidden_files": [
+        ".nexus/",
+        "logs/",
+        "benchmarks/"
+      ],
+      "setup_command": "python -m pytest --version",
+      "verification_command": "python -m pytest -q test_visible.py",
+      "expected_capabilities": [
+        "codeintel"
+      ],
+      "capability_activation_contract": "required",
+      "eligibility_class": "model_required",
+      "public_claim_allowed_metrics": []
+    },
+    {
+      "id": "ztv2-fresh-direct-master-loop-009",
+      "task_desc": "Implement compute_backoff(attempt) in target.py so the visible and hidden pytest contracts pass. Required behavior: attempt 1 returns 1, attempt 2 returns 2, attempt 3 returns 4, and non-positive attempts are rejected. This is the fresh Zero-Trust V2 behavior canary for capability direct_master_loop and candidate skill sf-systematic-direct_master_loop-build-32802a87; promotion still requires runtime-signed V2 receipts.",
+      "target_file": "target.py",
+      "test_file": "test_visible.py",
+      "success_criteria": "visible_and_hidden_pytest_pass_with_runtime_signed_v2_receipt",
+      "category": "direct_master_loop",
+      "difficulty": "medium",
+      "repo_kind": "neutral_fixture",
+      "repo": "fixture://zero-trust-v2-fresh-skill-behavior",
+      "repo_ref": "v1",
+      "fixture_kind": "pytest_async_repair",
+      "mutation_required": true,
+      "allowed_files": [
+        "target.py"
+      ],
+      "forbidden_files": [
+        ".nexus/",
+        "logs/",
+        "benchmarks/"
+      ],
+      "setup_command": "python -m pytest --version",
+      "verification_command": "python -m pytest -q test_visible.py",
+      "expected_capabilities": [
+        "hyper"
+      ],
+      "capability_activation_contract": "required",
+      "eligibility_class": "model_required",
+      "public_claim_allowed_metrics": []
+    },
+    {
+      "id": "ztv2-fresh-repair-loop-010",
+      "task_desc": "Implement compute_backoff(attempt) in target.py so the visible and hidden pytest contracts pass. Required behavior: attempt 1 returns 1, attempt 2 returns 2, attempt 3 returns 4, and non-positive attempts are rejected. This is the fresh Zero-Trust V2 behavior canary for capability repair_loop and candidate skill qa-only; promotion still requires runtime-signed V2 receipts.",
+      "target_file": "target.py",
+      "test_file": "test_visible.py",
+      "success_criteria": "visible_and_hidden_pytest_pass_with_runtime_signed_v2_receipt",
+      "category": "repair_loop",
+      "difficulty": "medium",
+      "repo_kind": "neutral_fixture",
+      "repo": "fixture://zero-trust-v2-fresh-skill-behavior",
+      "repo_ref": "v1",
+      "fixture_kind": "pytest_async_repair",
+      "mutation_required": true,
+      "allowed_files": [
+        "target.py"
+      ],
+      "forbidden_files": [
+        ".nexus/",
+        "logs/",
+        "benchmarks/"
+      ],
+      "setup_command": "python -m pytest --version",
+      "verification_command": "python -m pytest -q test_visible.py",
+      "expected_capabilities": [
+        "hyper"
+      ],
+      "capability_activation_contract": "required",
+      "eligibility_class": "model_required",
+      "public_claim_allowed_metrics": []
+    },
+    {
+      "id": "ztv2-fresh-swarm-multi-agent-011",
+      "task_desc": "Implement compute_backoff(attempt) in target.py so the visible and hidden pytest contracts pass. Required behavior: attempt 1 returns 1, attempt 2 returns 2, attempt 3 returns 4, and non-positive attempts are rejected. This is the fresh Zero-Trust V2 behavior canary for capability swarm_multi_agent and candidate skill nexus-gemini-code-review-orchestrator; promotion still requires runtime-signed V2 receipts.",
+      "target_file": "target.py",
+      "test_file": "test_visible.py",
+      "success_criteria": "visible_and_hidden_pytest_pass_with_runtime_signed_v2_receipt",
+      "category": "swarm_multi_agent",
+      "difficulty": "medium",
+      "repo_kind": "neutral_fixture",
+      "repo": "fixture://zero-trust-v2-fresh-skill-behavior",
+      "repo_ref": "v1",
+      "fixture_kind": "pytest_async_repair",
+      "mutation_required": true,
+      "allowed_files": [
+        "target.py"
+      ],
+      "forbidden_files": [
+        ".nexus/",
+        "logs/",
+        "benchmarks/"
+      ],
+      "setup_command": "python -m pytest --version",
+      "verification_command": "python -m pytest -q test_visible.py",
+      "expected_capabilities": [
+        "swarm"
+      ],
+      "capability_activation_contract": "required",
+      "eligibility_class": "model_required",
+      "public_claim_allowed_metrics": []
+    },
+    {
+      "id": "ztv2-fresh-artifact-gate-012",
+      "task_desc": "Implement compute_backoff(attempt) in target.py so the visible and hidden pytest contracts pass. Required behavior: attempt 1 returns 1, attempt 2 returns 2, attempt 3 returns 4, and non-positive attempts are rejected. This is the fresh Zero-Trust V2 behavior canary for capability artifact_gate and candidate skill sf-systematic-artifact_gate-differential-review-461fbd0c; promotion still requires runtime-signed V2 receipts.",
+      "target_file": "target.py",
+      "test_file": "test_visible.py",
+      "success_criteria": "visible_and_hidden_pytest_pass_with_runtime_signed_v2_receipt",
+      "category": "artifact_gate",
+      "difficulty": "medium",
+      "repo_kind": "neutral_fixture",
+      "repo": "fixture://zero-trust-v2-fresh-skill-behavior",
+      "repo_ref": "v1",
+      "fixture_kind": "pytest_async_repair",
+      "mutation_required": true,
+      "allowed_files": [
+        "target.py"
+      ],
+      "forbidden_files": [
+        ".nexus/",
+        "logs/",
+        "benchmarks/"
+      ],
+      "setup_command": "python -m pytest --version",
+      "verification_command": "python -m pytest -q test_visible.py",
+      "expected_capabilities": [
+        "artifact_gate"
+      ],
+      "capability_activation_contract": "required",
+      "eligibility_class": "model_required",
+      "public_claim_allowed_metrics": []
+    },
+    {
+      "id": "ztv2-fresh-autonomic-router-013",
+      "task_desc": "Implement compute_backoff(attempt) in target.py so the visible and hidden pytest contracts pass. Required behavior: attempt 1 returns 1, attempt 2 returns 2, attempt 3 returns 4, and non-positive attempts are rejected. This is the fresh Zero-Trust V2 behavior canary for capability autonomic_router and candidate skill nexus-agent-execution-board-failclosed; promotion still requires runtime-signed V2 receipts.",
+      "target_file": "target.py",
+      "test_file": "test_visible.py",
+      "success_criteria": "visible_and_hidden_pytest_pass_with_runtime_signed_v2_receipt",
+      "category": "autonomic_router",
+      "difficulty": "medium",
+      "repo_kind": "neutral_fixture",
+      "repo": "fixture://zero-trust-v2-fresh-skill-behavior",
+      "repo_ref": "v1",
+      "fixture_kind": "pytest_async_repair",
+      "mutation_required": true,
+      "allowed_files": [
+        "target.py"
+      ],
+      "forbidden_files": [
+        ".nexus/",
+        "logs/",
+        "benchmarks/"
+      ],
+      "setup_command": "python -m pytest --version",
+      "verification_command": "python -m pytest -q test_visible.py",
+      "expected_capabilities": [
+        "autoreason"
+      ],
+      "capability_activation_contract": "required",
+      "eligibility_class": "model_required",
+      "public_claim_allowed_metrics": []
+    },
+    {
+      "id": "ztv2-fresh-autoreason-014",
+      "task_desc": "Implement compute_backoff(attempt) in target.py so the visible and hidden pytest contracts pass. Required behavior: attempt 1 returns 1, attempt 2 returns 2, attempt 3 returns 4, and non-positive attempts are rejected. This is the fresh Zero-Trust V2 behavior canary for capability autoreason and candidate skill sf2-belief-route-fit-spec; promotion still requires runtime-signed V2 receipts.",
+      "target_file": "target.py",
+      "test_file": "test_visible.py",
+      "success_criteria": "visible_and_hidden_pytest_pass_with_runtime_signed_v2_receipt",
+      "category": "autoreason",
+      "difficulty": "medium",
+      "repo_kind": "neutral_fixture",
+      "repo": "fixture://zero-trust-v2-fresh-skill-behavior",
+      "repo_ref": "v1",
+      "fixture_kind": "pytest_async_repair",
+      "mutation_required": true,
+      "allowed_files": [
+        "target.py"
+      ],
+      "forbidden_files": [
+        ".nexus/",
+        "logs/",
+        "benchmarks/"
+      ],
+      "setup_command": "python -m pytest --version",
+      "verification_command": "python -m pytest -q test_visible.py",
+      "expected_capabilities": [
+        "autoreason"
+      ],
+      "capability_activation_contract": "required",
+      "eligibility_class": "model_required",
+      "public_claim_allowed_metrics": []
+    },
+    {
+      "id": "ztv2-fresh-belief-015",
+      "task_desc": "Implement compute_backoff(attempt) in target.py so the visible and hidden pytest contracts pass. Required behavior: attempt 1 returns 1, attempt 2 returns 2, attempt 3 returns 4, and non-positive attempts are rejected. This is the fresh Zero-Trust V2 behavior canary for capability belief and candidate skill sf2-belief-route-fit-spec; promotion still requires runtime-signed V2 receipts.",
+      "target_file": "target.py",
+      "test_file": "test_visible.py",
+      "success_criteria": "visible_and_hidden_pytest_pass_with_runtime_signed_v2_receipt",
+      "category": "belief",
+      "difficulty": "medium",
+      "repo_kind": "neutral_fixture",
+      "repo": "fixture://zero-trust-v2-fresh-skill-behavior",
+      "repo_ref": "v1",
+      "fixture_kind": "pytest_async_repair",
+      "mutation_required": true,
+      "allowed_files": [
+        "target.py"
+      ],
+      "forbidden_files": [
+        ".nexus/",
+        "logs/",
+        "benchmarks/"
+      ],
+      "setup_command": "python -m pytest --version",
+      "verification_command": "python -m pytest -q test_visible.py",
+      "expected_capabilities": [
+        "belief"
+      ],
+      "capability_activation_contract": "required",
+      "eligibility_class": "model_required",
+      "public_claim_allowed_metrics": []
+    },
+    {
+      "id": "ztv2-fresh-benchmark-meta-opt-016",
+      "task_desc": "Implement compute_backoff(attempt) in target.py so the visible and hidden pytest contracts pass. Required behavior: attempt 1 returns 1, attempt 2 returns 2, attempt 3 returns 4, and non-positive attempts are rejected. This is the fresh Zero-Trust V2 behavior canary for capability benchmark_meta_opt and candidate skill sf-systematic-benchmark_meta_opt-hugging-face-trackio-d21c6b90; promotion still requires runtime-signed V2 receipts.",
+      "target_file": "target.py",
+      "test_file": "test_visible.py",
+      "success_criteria": "visible_and_hidden_pytest_pass_with_runtime_signed_v2_receipt",
+      "category": "benchmark_meta_opt",
+      "difficulty": "medium",
+      "repo_kind": "neutral_fixture",
+      "repo": "fixture://zero-trust-v2-fresh-skill-behavior",
+      "repo_ref": "v1",
+      "fixture_kind": "pytest_async_repair",
+      "mutation_required": true,
+      "allowed_files": [
+        "target.py"
+      ],
+      "forbidden_files": [
+        ".nexus/",
+        "logs/",
+        "benchmarks/"
+      ],
+      "setup_command": "python -m pytest --version",
+      "verification_command": "python -m pytest -q test_visible.py",
+      "expected_capabilities": [
+        "judge_panel"
+      ],
+      "capability_activation_contract": "required",
+      "eligibility_class": "model_required",
+      "public_claim_allowed_metrics": []
+    },
+    {
+      "id": "ztv2-fresh-ddtree-017",
+      "task_desc": "Implement compute_backoff(attempt) in target.py so the visible and hidden pytest contracts pass. Required behavior: attempt 1 returns 1, attempt 2 returns 2, attempt 3 returns 4, and non-positive attempts are rejected. This is the fresh Zero-Trust V2 behavior canary for capability ddtree and candidate skill nexus-root-cause-probe; promotion still requires runtime-signed V2 receipts.",
+      "target_file": "target.py",
+      "test_file": "test_visible.py",
+      "success_criteria": "visible_and_hidden_pytest_pass_with_runtime_signed_v2_receipt",
+      "category": "ddtree",
+      "difficulty": "medium",
+      "repo_kind": "neutral_fixture",
+      "repo": "fixture://zero-trust-v2-fresh-skill-behavior",
+      "repo_ref": "v1",
+      "fixture_kind": "pytest_async_repair",
+      "mutation_required": true,
+      "allowed_files": [
+        "target.py"
+      ],
+      "forbidden_files": [
+        ".nexus/",
+        "logs/",
+        "benchmarks/"
+      ],
+      "setup_command": "python -m pytest --version",
+      "verification_command": "python -m pytest -q test_visible.py",
+      "expected_capabilities": [
+        "ddtree"
+      ],
+      "capability_activation_contract": "required",
+      "eligibility_class": "model_required",
+      "public_claim_allowed_metrics": []
+    },
+    {
+      "id": "ztv2-fresh-drone-018",
+      "task_desc": "Implement compute_backoff(attempt) in target.py so the visible and hidden pytest contracts pass. Required behavior: attempt 1 returns 1, attempt 2 returns 2, attempt 3 returns 4, and non-positive attempts are rejected. This is the fresh Zero-Trust V2 behavior canary for capability drone and candidate skill sf-systematic-drone-python-background-jobs-18326a62; promotion still requires runtime-signed V2 receipts.",
+      "target_file": "target.py",
+      "test_file": "test_visible.py",
+      "success_criteria": "visible_and_hidden_pytest_pass_with_runtime_signed_v2_receipt",
+      "category": "drone",
+      "difficulty": "medium",
+      "repo_kind": "neutral_fixture",
+      "repo": "fixture://zero-trust-v2-fresh-skill-behavior",
+      "repo_ref": "v1",
+      "fixture_kind": "pytest_async_repair",
+      "mutation_required": true,
+      "allowed_files": [
+        "target.py"
+      ],
+      "forbidden_files": [
+        ".nexus/",
+        "logs/",
+        "benchmarks/"
+      ],
+      "setup_command": "python -m pytest --version",
+      "verification_command": "python -m pytest -q test_visible.py",
+      "expected_capabilities": [
+        "drone"
+      ],
+      "capability_activation_contract": "required",
+      "eligibility_class": "model_required",
+      "public_claim_allowed_metrics": []
+    },
+    {
+      "id": "ztv2-fresh-external-productivity-019",
+      "task_desc": "Implement compute_backoff(attempt) in target.py so the visible and hidden pytest contracts pass. Required behavior: attempt 1 returns 1, attempt 2 returns 2, attempt 3 returns 4, and non-positive attempts are rejected. This is the fresh Zero-Trust V2 behavior canary for capability external_productivity and candidate skill aibdd.auto.python.e2e.green; promotion still requires runtime-signed V2 receipts.",
+      "target_file": "target.py",
+      "test_file": "test_visible.py",
+      "success_criteria": "visible_and_hidden_pytest_pass_with_runtime_signed_v2_receipt",
+      "category": "external_productivity",
+      "difficulty": "medium",
+      "repo_kind": "neutral_fixture",
+      "repo": "fixture://zero-trust-v2-fresh-skill-behavior",
+      "repo_ref": "v1",
+      "fixture_kind": "pytest_async_repair",
+      "mutation_required": true,
+      "allowed_files": [
+        "target.py"
+      ],
+      "forbidden_files": [
+        ".nexus/",
+        "logs/",
+        "benchmarks/"
+      ],
+      "setup_command": "python -m pytest --version",
+      "verification_command": "python -m pytest -q test_visible.py",
+      "expected_capabilities": [
+        "research"
+      ],
+      "capability_activation_contract": "required",
+      "eligibility_class": "model_required",
+      "public_claim_allowed_metrics": []
+    },
+    {
+      "id": "ztv2-fresh-forecast-pregate-020",
+      "task_desc": "Implement compute_backoff(attempt) in target.py so the visible and hidden pytest contracts pass. Required behavior: attempt 1 returns 1, attempt 2 returns 2, attempt 3 returns 4, and non-positive attempts are rejected. This is the fresh Zero-Trust V2 behavior canary for capability forecast_pregate and candidate skill addy-shipping-and-launch; promotion still requires runtime-signed V2 receipts.",
+      "target_file": "target.py",
+      "test_file": "test_visible.py",
+      "success_criteria": "visible_and_hidden_pytest_pass_with_runtime_signed_v2_receipt",
+      "category": "forecast_pregate",
+      "difficulty": "medium",
+      "repo_kind": "neutral_fixture",
+      "repo": "fixture://zero-trust-v2-fresh-skill-behavior",
+      "repo_ref": "v1",
+      "fixture_kind": "pytest_async_repair",
+      "mutation_required": true,
+      "allowed_files": [
+        "target.py"
+      ],
+      "forbidden_files": [
+        ".nexus/",
+        "logs/",
+        "benchmarks/"
+      ],
+      "setup_command": "python -m pytest --version",
+      "verification_command": "python -m pytest -q test_visible.py",
+      "expected_capabilities": [
+        "autoreason"
+      ],
+      "capability_activation_contract": "required",
+      "eligibility_class": "model_required",
+      "public_claim_allowed_metrics": []
+    },
+    {
+      "id": "ztv2-fresh-hyper-sprint-021",
+      "task_desc": "Implement compute_backoff(attempt) in target.py so the visible and hidden pytest contracts pass. Required behavior: attempt 1 returns 1, attempt 2 returns 2, attempt 3 returns 4, and non-positive attempts are rejected. This is the fresh Zero-Trust V2 behavior canary for capability hyper_sprint and candidate skill retro; promotion still requires runtime-signed V2 receipts.",
+      "target_file": "target.py",
+      "test_file": "test_visible.py",
+      "success_criteria": "visible_and_hidden_pytest_pass_with_runtime_signed_v2_receipt",
+      "category": "hyper_sprint",
+      "difficulty": "medium",
+      "repo_kind": "neutral_fixture",
+      "repo": "fixture://zero-trust-v2-fresh-skill-behavior",
+      "repo_ref": "v1",
+      "fixture_kind": "pytest_async_repair",
+      "mutation_required": true,
+      "allowed_files": [
+        "target.py"
+      ],
+      "forbidden_files": [
+        ".nexus/",
+        "logs/",
+        "benchmarks/"
+      ],
+      "setup_command": "python -m pytest --version",
+      "verification_command": "python -m pytest -q test_visible.py",
+      "expected_capabilities": [
+        "hyper"
+      ],
+      "capability_activation_contract": "required",
+      "eligibility_class": "model_required",
+      "public_claim_allowed_metrics": []
+    },
+    {
+      "id": "ztv2-fresh-lancedb-022",
+      "task_desc": "Implement compute_backoff(attempt) in target.py so the visible and hidden pytest contracts pass. Required behavior: attempt 1 returns 1, attempt 2 returns 2, attempt 3 returns 4, and non-positive attempts are rejected. This is the fresh Zero-Trust V2 behavior canary for capability lancedb and candidate skill research-source-validation-auditor; promotion still requires runtime-signed V2 receipts.",
+      "target_file": "target.py",
+      "test_file": "test_visible.py",
+      "success_criteria": "visible_and_hidden_pytest_pass_with_runtime_signed_v2_receipt",
+      "category": "lancedb",
+      "difficulty": "medium",
+      "repo_kind": "neutral_fixture",
+      "repo": "fixture://zero-trust-v2-fresh-skill-behavior",
+      "repo_ref": "v1",
+      "fixture_kind": "pytest_async_repair",
+      "mutation_required": true,
+      "allowed_files": [
+        "target.py"
+      ],
+      "forbidden_files": [
+        ".nexus/",
+        "logs/",
+        "benchmarks/"
+      ],
+      "setup_command": "python -m pytest --version",
+      "verification_command": "python -m pytest -q test_visible.py",
+      "expected_capabilities": [
+        "lancedb"
+      ],
+      "capability_activation_contract": "required",
+      "eligibility_class": "model_required",
+      "public_claim_allowed_metrics": []
+    },
+    {
+      "id": "ztv2-fresh-learn-ask-023",
+      "task_desc": "Implement compute_backoff(attempt) in target.py so the visible and hidden pytest contracts pass. Required behavior: attempt 1 returns 1, attempt 2 returns 2, attempt 3 returns 4, and non-positive attempts are rejected. This is the fresh Zero-Trust V2 behavior canary for capability learn_ask and candidate skill nexus-live-ask-replay-normalization-gate; promotion still requires runtime-signed V2 receipts.",
+      "target_file": "target.py",
+      "test_file": "test_visible.py",
+      "success_criteria": "visible_and_hidden_pytest_pass_with_runtime_signed_v2_receipt",
+      "category": "learn_ask",
+      "difficulty": "medium",
+      "repo_kind": "neutral_fixture",
+      "repo": "fixture://zero-trust-v2-fresh-skill-behavior",
+      "repo_ref": "v1",
+      "fixture_kind": "pytest_async_repair",
+      "mutation_required": true,
+      "allowed_files": [
+        "target.py"
+      ],
+      "forbidden_files": [
+        ".nexus/",
+        "logs/",
+        "benchmarks/"
+      ],
+      "setup_command": "python -m pytest --version",
+      "verification_command": "python -m pytest -q test_visible.py",
+      "expected_capabilities": [
+        "semantic_searcher"
+      ],
+      "capability_activation_contract": "required",
+      "eligibility_class": "model_required",
+      "public_claim_allowed_metrics": []
+    },
+    {
+      "id": "ztv2-fresh-learning-closure-024",
+      "task_desc": "Implement compute_backoff(attempt) in target.py so the visible and hidden pytest contracts pass. Required behavior: attempt 1 returns 1, attempt 2 returns 2, attempt 3 returns 4, and non-positive attempts are rejected. This is the fresh Zero-Trust V2 behavior canary for capability learning_closure and candidate skill sf-systematic-learning_closure-memory-lint-8bdb0fca; promotion still requires runtime-signed V2 receipts.",
+      "target_file": "target.py",
+      "test_file": "test_visible.py",
+      "success_criteria": "visible_and_hidden_pytest_pass_with_runtime_signed_v2_receipt",
+      "category": "learning_closure",
+      "difficulty": "medium",
+      "repo_kind": "neutral_fixture",
+      "repo": "fixture://zero-trust-v2-fresh-skill-behavior",
+      "repo_ref": "v1",
+      "fixture_kind": "pytest_async_repair",
+      "mutation_required": true,
+      "allowed_files": [
+        "target.py"
+      ],
+      "forbidden_files": [
+        ".nexus/",
+        "logs/",
+        "benchmarks/"
+      ],
+      "setup_command": "python -m pytest --version",
+      "verification_command": "python -m pytest -q test_visible.py",
+      "expected_capabilities": [
+        "semantic_failure_sensor"
+      ],
+      "capability_activation_contract": "required",
+      "eligibility_class": "model_required",
+      "public_claim_allowed_metrics": []
+    },
+    {
+      "id": "ztv2-fresh-memory-025",
+      "task_desc": "Implement compute_backoff(attempt) in target.py so the visible and hidden pytest contracts pass. Required behavior: attempt 1 returns 1, attempt 2 returns 2, attempt 3 returns 4, and non-positive attempts are rejected. This is the fresh Zero-Trust V2 behavior canary for capability memory and candidate skill product-self-knowledge; promotion still requires runtime-signed V2 receipts.",
+      "target_file": "target.py",
+      "test_file": "test_visible.py",
+      "success_criteria": "visible_and_hidden_pytest_pass_with_runtime_signed_v2_receipt",
+      "category": "memory",
+      "difficulty": "medium",
+      "repo_kind": "neutral_fixture",
+      "repo": "fixture://zero-trust-v2-fresh-skill-behavior",
+      "repo_ref": "v1",
+      "fixture_kind": "pytest_async_repair",
+      "mutation_required": true,
+      "allowed_files": [
+        "target.py"
+      ],
+      "forbidden_files": [
+        ".nexus/",
+        "logs/",
+        "benchmarks/"
+      ],
+      "setup_command": "python -m pytest --version",
+      "verification_command": "python -m pytest -q test_visible.py",
+      "expected_capabilities": [
+        "memory"
+      ],
+      "capability_activation_contract": "required",
+      "eligibility_class": "model_required",
+      "public_claim_allowed_metrics": []
+    },
+    {
+      "id": "ztv2-fresh-mempalace-026",
+      "task_desc": "Implement compute_backoff(attempt) in target.py so the visible and hidden pytest contracts pass. Required behavior: attempt 1 returns 1, attempt 2 returns 2, attempt 3 returns 4, and non-positive attempts are rejected. This is the fresh Zero-Trust V2 behavior canary for capability mempalace and candidate skill sf2-mempalace-route-fit-spec; promotion still requires runtime-signed V2 receipts.",
+      "target_file": "target.py",
+      "test_file": "test_visible.py",
+      "success_criteria": "visible_and_hidden_pytest_pass_with_runtime_signed_v2_receipt",
+      "category": "mempalace",
+      "difficulty": "medium",
+      "repo_kind": "neutral_fixture",
+      "repo": "fixture://zero-trust-v2-fresh-skill-behavior",
+      "repo_ref": "v1",
+      "fixture_kind": "pytest_async_repair",
+      "mutation_required": true,
+      "allowed_files": [
+        "target.py"
+      ],
+      "forbidden_files": [
+        ".nexus/",
+        "logs/",
+        "benchmarks/"
+      ],
+      "setup_command": "python -m pytest --version",
+      "verification_command": "python -m pytest -q test_visible.py",
+      "expected_capabilities": [
+        "mempalace_gate"
+      ],
+      "capability_activation_contract": "required",
+      "eligibility_class": "model_required",
+      "public_claim_allowed_metrics": []
+    },
+    {
+      "id": "ztv2-fresh-metabolism-resume-027",
+      "task_desc": "Implement compute_backoff(attempt) in target.py so the visible and hidden pytest contracts pass. Required behavior: attempt 1 returns 1, attempt 2 returns 2, attempt 3 returns 4, and non-positive attempts are rejected. This is the fresh Zero-Trust V2 behavior canary for capability metabolism_resume and candidate skill addy-shipping-and-launch; promotion still requires runtime-signed V2 receipts.",
+      "target_file": "target.py",
+      "test_file": "test_visible.py",
+      "success_criteria": "visible_and_hidden_pytest_pass_with_runtime_signed_v2_receipt",
+      "category": "metabolism_resume",
+      "difficulty": "medium",
+      "repo_kind": "neutral_fixture",
+      "repo": "fixture://zero-trust-v2-fresh-skill-behavior",
+      "repo_ref": "v1",
+      "fixture_kind": "pytest_async_repair",
+      "mutation_required": true,
+      "allowed_files": [
+        "target.py"
+      ],
+      "forbidden_files": [
+        ".nexus/",
+        "logs/",
+        "benchmarks/"
+      ],
+      "setup_command": "python -m pytest --version",
+      "verification_command": "python -m pytest -q test_visible.py",
+      "expected_capabilities": [
+        "semantic_failure_sensor"
+      ],
+      "capability_activation_contract": "required",
+      "eligibility_class": "model_required",
+      "public_claim_allowed_metrics": []
+    },
+    {
+      "id": "ztv2-fresh-nightshift-028",
+      "task_desc": "Implement compute_backoff(attempt) in target.py so the visible and hidden pytest contracts pass. Required behavior: attempt 1 returns 1, attempt 2 returns 2, attempt 3 returns 4, and non-positive attempts are rejected. This is the fresh Zero-Trust V2 behavior canary for capability nightshift and candidate skill canary; promotion still requires runtime-signed V2 receipts.",
+      "target_file": "target.py",
+      "test_file": "test_visible.py",
+      "success_criteria": "visible_and_hidden_pytest_pass_with_runtime_signed_v2_receipt",
+      "category": "nightshift",
+      "difficulty": "medium",
+      "repo_kind": "neutral_fixture",
+      "repo": "fixture://zero-trust-v2-fresh-skill-behavior",
+      "repo_ref": "v1",
+      "fixture_kind": "pytest_async_repair",
+      "mutation_required": true,
+      "allowed_files": [
+        "target.py"
+      ],
+      "forbidden_files": [
+        ".nexus/",
+        "logs/",
+        "benchmarks/"
+      ],
+      "setup_command": "python -m pytest --version",
+      "verification_command": "python -m pytest -q test_visible.py",
+      "expected_capabilities": [
+        "nightshift"
+      ],
+      "capability_activation_contract": "required",
+      "eligibility_class": "model_required",
+      "public_claim_allowed_metrics": []
+    },
+    {
+      "id": "ztv2-fresh-registry-skills-sync-029",
+      "task_desc": "Implement compute_backoff(attempt) in target.py so the visible and hidden pytest contracts pass. Required behavior: attempt 1 returns 1, attempt 2 returns 2, attempt 3 returns 4, and non-positive attempts are rejected. This is the fresh Zero-Trust V2 behavior canary for capability registry_skills_sync and candidate skill gstack-sync-gbrain; promotion still requires runtime-signed V2 receipts.",
+      "target_file": "target.py",
+      "test_file": "test_visible.py",
+      "success_criteria": "visible_and_hidden_pytest_pass_with_runtime_signed_v2_receipt",
+      "category": "registry_skills_sync",
+      "difficulty": "medium",
+      "repo_kind": "neutral_fixture",
+      "repo": "fixture://zero-trust-v2-fresh-skill-behavior",
+      "repo_ref": "v1",
+      "fixture_kind": "pytest_async_repair",
+      "mutation_required": true,
+      "allowed_files": [
+        "target.py"
+      ],
+      "forbidden_files": [
+        ".nexus/",
+        "logs/",
+        "benchmarks/"
+      ],
+      "setup_command": "python -m pytest --version",
+      "verification_command": "python -m pytest -q test_visible.py",
+      "expected_capabilities": [
+        "semantic_searcher"
+      ],
+      "capability_activation_contract": "required",
+      "eligibility_class": "model_required",
+      "public_claim_allowed_metrics": []
+    },
+    {
+      "id": "ztv2-fresh-regression-guard-030",
+      "task_desc": "Implement compute_backoff(attempt) in target.py so the visible and hidden pytest contracts pass. Required behavior: attempt 1 returns 1, attempt 2 returns 2, attempt 3 returns 4, and non-positive attempts are rejected. This is the fresh Zero-Trust V2 behavior canary for capability regression_guard and candidate skill sf-systematic-regression_guard-odoo-automated-tests-dad98433; promotion still requires runtime-signed V2 receipts.",
+      "target_file": "target.py",
+      "test_file": "test_visible.py",
+      "success_criteria": "visible_and_hidden_pytest_pass_with_runtime_signed_v2_receipt",
+      "category": "regression_guard",
+      "difficulty": "medium",
+      "repo_kind": "neutral_fixture",
+      "repo": "fixture://zero-trust-v2-fresh-skill-behavior",
+      "repo_ref": "v1",
+      "fixture_kind": "pytest_async_repair",
+      "mutation_required": true,
+      "allowed_files": [
+        "target.py"
+      ],
+      "forbidden_files": [
+        ".nexus/",
+        "logs/",
+        "benchmarks/"
+      ],
+      "setup_command": "python -m pytest --version",
+      "verification_command": "python -m pytest -q test_visible.py",
+      "expected_capabilities": [
+        "semantic_failure_sensor"
+      ],
+      "capability_activation_contract": "required",
+      "eligibility_class": "model_required",
+      "public_claim_allowed_metrics": []
+    },
+    {
+      "id": "ztv2-fresh-research-031",
+      "task_desc": "Implement compute_backoff(attempt) in target.py so the visible and hidden pytest contracts pass. Required behavior: attempt 1 returns 1, attempt 2 returns 2, attempt 3 returns 4, and non-positive attempts are rejected. This is the fresh Zero-Trust V2 behavior canary for capability research and candidate skill gbrain-academic-verify; promotion still requires runtime-signed V2 receipts.",
+      "target_file": "target.py",
+      "test_file": "test_visible.py",
+      "success_criteria": "visible_and_hidden_pytest_pass_with_runtime_signed_v2_receipt",
+      "category": "research",
+      "difficulty": "medium",
+      "repo_kind": "neutral_fixture",
+      "repo": "fixture://zero-trust-v2-fresh-skill-behavior",
+      "repo_ref": "v1",
+      "fixture_kind": "pytest_async_repair",
+      "mutation_required": true,
+      "allowed_files": [
+        "target.py"
+      ],
+      "forbidden_files": [
+        ".nexus/",
+        "logs/",
+        "benchmarks/"
+      ],
+      "setup_command": "python -m pytest --version",
+      "verification_command": "python -m pytest -q test_visible.py",
+      "expected_capabilities": [
+        "research"
+      ],
+      "capability_activation_contract": "required",
+      "eligibility_class": "model_required",
+      "public_claim_allowed_metrics": []
+    },
+    {
+      "id": "ztv2-fresh-research-and-source-discipline-032",
+      "task_desc": "Implement compute_backoff(attempt) in target.py so the visible and hidden pytest contracts pass. Required behavior: attempt 1 returns 1, attempt 2 returns 2, attempt 3 returns 4, and non-positive attempts are rejected. This is the fresh Zero-Trust V2 behavior canary for capability research_and_source_discipline and candidate skill gbrain-maintain; promotion still requires runtime-signed V2 receipts.",
+      "target_file": "target.py",
+      "test_file": "test_visible.py",
+      "success_criteria": "visible_and_hidden_pytest_pass_with_runtime_signed_v2_receipt",
+      "category": "research_and_source_discipline",
+      "difficulty": "medium",
+      "repo_kind": "neutral_fixture",
+      "repo": "fixture://zero-trust-v2-fresh-skill-behavior",
+      "repo_ref": "v1",
+      "fixture_kind": "pytest_async_repair",
+      "mutation_required": true,
+      "allowed_files": [
+        "target.py"
+      ],
+      "forbidden_files": [
+        ".nexus/",
+        "logs/",
+        "benchmarks/"
+      ],
+      "setup_command": "python -m pytest --version",
+      "verification_command": "python -m pytest -q test_visible.py",
+      "expected_capabilities": [
+        "research"
+      ],
+      "capability_activation_contract": "required",
+      "eligibility_class": "model_required",
+      "public_claim_allowed_metrics": []
+    },
+    {
+      "id": "ztv2-fresh-ui-validator-033",
+      "task_desc": "Implement compute_backoff(attempt) in target.py so the visible and hidden pytest contracts pass. Required behavior: attempt 1 returns 1, attempt 2 returns 2, attempt 3 returns 4, and non-positive attempts are rejected. This is the fresh Zero-Trust V2 behavior canary for capability ui_validator and candidate skill sf-systematic-ui_validator-e2e-testing-d98eb7c3; promotion still requires runtime-signed V2 receipts.",
+      "target_file": "target.py",
+      "test_file": "test_visible.py",
+      "success_criteria": "visible_and_hidden_pytest_pass_with_runtime_signed_v2_receipt",
+      "category": "ui_validator",
+      "difficulty": "medium",
+      "repo_kind": "neutral_fixture",
+      "repo": "fixture://zero-trust-v2-fresh-skill-behavior",
+      "repo_ref": "v1",
+      "fixture_kind": "pytest_async_repair",
+      "mutation_required": true,
+      "allowed_files": [
+        "target.py"
+      ],
+      "forbidden_files": [
+        ".nexus/",
+        "logs/",
+        "benchmarks/"
+      ],
+      "setup_command": "python -m pytest --version",
+      "verification_command": "python -m pytest -q test_visible.py",
+      "expected_capabilities": [
+        "ultra_review"
+      ],
+      "capability_activation_contract": "required",
+      "eligibility_class": "model_required",
+      "public_claim_allowed_metrics": []
+    },
+    {
+      "id": "ztv2-fresh-ultra-review-034",
+      "task_desc": "Implement compute_backoff(attempt) in target.py so the visible and hidden pytest contracts pass. Required behavior: attempt 1 returns 1, attempt 2 returns 2, attempt 3 returns 4, and non-positive attempts are rejected. This is the fresh Zero-Trust V2 behavior canary for capability ultra_review and candidate skill github11-vulnerability-scanner-ultra-review; promotion still requires runtime-signed V2 receipts.",
+      "target_file": "target.py",
+      "test_file": "test_visible.py",
+      "success_criteria": "visible_and_hidden_pytest_pass_with_runtime_signed_v2_receipt",
+      "category": "ultra_review",
+      "difficulty": "medium",
+      "repo_kind": "neutral_fixture",
+      "repo": "fixture://zero-trust-v2-fresh-skill-behavior",
+      "repo_ref": "v1",
+      "fixture_kind": "pytest_async_repair",
+      "mutation_required": true,
+      "allowed_files": [
+        "target.py"
+      ],
+      "forbidden_files": [
+        ".nexus/",
+        "logs/",
+        "benchmarks/"
+      ],
+      "setup_command": "python -m pytest --version",
+      "verification_command": "python -m pytest -q test_visible.py",
+      "expected_capabilities": [
+        "ultra_review"
+      ],
+      "capability_activation_contract": "required",
+      "eligibility_class": "model_required",
+      "public_claim_allowed_metrics": []
+    }
+  ]
+}

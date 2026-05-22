@@ -1,0 +1,2305 @@
+{
+  "schema": "nexus.zero_trust_v2.replay_matrix.v1",
+  "status": "PASS",
+  "created_at": "2026-05-21T12:41:10.972064+00:00",
+  "source_curation_backlog": "docs/reports/NEXUS_ZERO_TRUST_V2_CURATION_BACKLOG_2026-05-21.json",
+  "summary": {
+    "candidate_count": 19,
+    "row_count": 76,
+    "arms_per_candidate": 4,
+    "promotion_credit_source": "v2_only",
+    "v1_context_only": true,
+    "runtime_mutation_allowed": false,
+    "public_benchmark_allowed": false
+  },
+  "rows": [
+    {
+      "row_id": "ztv2-001-claim_gate-capability_only_v2",
+      "capability_id": "claim_gate",
+      "skill_id": "",
+      "source_skill_id": "addy-doubt-driven-development",
+      "arm_type": "capability_only_v2",
+      "shadow_output_affects_runtime": false,
+      "v1_context_only": true,
+      "v1_evidence_count": 1,
+      "v2_evidence_count": 0,
+      "risk_flags": [
+        "external_reference_candidate",
+        "requires_curation",
+        "v2_not_promotion_eligible"
+      ],
+      "required_next_steps": [
+        "source_review",
+        "xray_static_scan",
+        "v2_replay",
+        "sandbox_shadow"
+      ],
+      "security_contract_version": "v2",
+      "promotion_credit_source": "v2_only",
+      "requires_sandbox_attestation": true,
+      "requires_runtime_signed_receipt": true,
+      "requires_clean_slate_isolation": true,
+      "requires_trust_mismatch_zero": true,
+      "requires_negative_control_block": true,
+      "expected_status": "BASELINE"
+    },
+    {
+      "row_id": "ztv2-001-claim_gate-candidate_skill_v2",
+      "capability_id": "claim_gate",
+      "skill_id": "addy-doubt-driven-development",
+      "source_skill_id": "addy-doubt-driven-development",
+      "arm_type": "candidate_skill_v2",
+      "shadow_output_affects_runtime": false,
+      "v1_context_only": true,
+      "v1_evidence_count": 1,
+      "v2_evidence_count": 0,
+      "risk_flags": [
+        "external_reference_candidate",
+        "requires_curation",
+        "v2_not_promotion_eligible"
+      ],
+      "required_next_steps": [
+        "source_review",
+        "xray_static_scan",
+        "v2_replay",
+        "sandbox_shadow"
+      ],
+      "security_contract_version": "v2",
+      "promotion_credit_source": "v2_only",
+      "requires_sandbox_attestation": true,
+      "requires_runtime_signed_receipt": true,
+      "requires_clean_slate_isolation": true,
+      "requires_trust_mismatch_zero": true,
+      "requires_negative_control_block": true,
+      "expected_status": "DIAGNOSTIC_ONLY_UNTIL_EXECUTED"
+    },
+    {
+      "row_id": "ztv2-001-claim_gate-wrong_or_quarantined_skill_v2",
+      "capability_id": "claim_gate",
+      "skill_id": "addy-doubt-driven-development",
+      "source_skill_id": "addy-doubt-driven-development",
+      "arm_type": "wrong_or_quarantined_skill_v2",
+      "shadow_output_affects_runtime": false,
+      "v1_context_only": true,
+      "v1_evidence_count": 1,
+      "v2_evidence_count": 0,
+      "risk_flags": [
+        "external_reference_candidate",
+        "requires_curation",
+        "v2_not_promotion_eligible"
+      ],
+      "required_next_steps": [
+        "source_review",
+        "xray_static_scan",
+        "v2_replay",
+        "sandbox_shadow"
+      ],
+      "security_contract_version": "v2",
+      "promotion_credit_source": "v2_only",
+      "requires_sandbox_attestation": true,
+      "requires_runtime_signed_receipt": true,
+      "requires_clean_slate_isolation": true,
+      "requires_trust_mismatch_zero": true,
+      "requires_negative_control_block": true,
+      "expected_status": "BLOCKED_BY_POLICY"
+    },
+    {
+      "row_id": "ztv2-001-claim_gate-shadow_candidate_v2",
+      "capability_id": "claim_gate",
+      "skill_id": "addy-doubt-driven-development",
+      "source_skill_id": "addy-doubt-driven-development",
+      "arm_type": "shadow_candidate_v2",
+      "shadow_output_affects_runtime": false,
+      "v1_context_only": true,
+      "v1_evidence_count": 1,
+      "v2_evidence_count": 0,
+      "risk_flags": [
+        "external_reference_candidate",
+        "requires_curation",
+        "v2_not_promotion_eligible"
+      ],
+      "required_next_steps": [
+        "source_review",
+        "xray_static_scan",
+        "v2_replay",
+        "sandbox_shadow"
+      ],
+      "security_contract_version": "v2",
+      "promotion_credit_source": "v2_only",
+      "requires_sandbox_attestation": true,
+      "requires_runtime_signed_receipt": true,
+      "requires_clean_slate_isolation": true,
+      "requires_trust_mismatch_zero": true,
+      "requires_negative_control_block": true,
+      "expected_status": "DIAGNOSTIC_ONLY_UNTIL_EXECUTED"
+    },
+    {
+      "row_id": "ztv2-002-file_lock_security_gate-capability_only_v2",
+      "capability_id": "file_lock_security_gate",
+      "skill_id": "",
+      "source_skill_id": "browserbase-what-antibot",
+      "arm_type": "capability_only_v2",
+      "shadow_output_affects_runtime": false,
+      "v1_context_only": true,
+      "v1_evidence_count": 1,
+      "v2_evidence_count": 0,
+      "risk_flags": [
+        "external_reference_candidate",
+        "requires_curation",
+        "v2_not_promotion_eligible"
+      ],
+      "required_next_steps": [
+        "source_review",
+        "xray_static_scan",
+        "v2_replay",
+        "sandbox_shadow"
+      ],
+      "security_contract_version": "v2",
+      "promotion_credit_source": "v2_only",
+      "requires_sandbox_attestation": true,
+      "requires_runtime_signed_receipt": true,
+      "requires_clean_slate_isolation": true,
+      "requires_trust_mismatch_zero": true,
+      "requires_negative_control_block": true,
+      "expected_status": "BASELINE"
+    },
+    {
+      "row_id": "ztv2-002-file_lock_security_gate-candidate_skill_v2",
+      "capability_id": "file_lock_security_gate",
+      "skill_id": "browserbase-what-antibot",
+      "source_skill_id": "browserbase-what-antibot",
+      "arm_type": "candidate_skill_v2",
+      "shadow_output_affects_runtime": false,
+      "v1_context_only": true,
+      "v1_evidence_count": 1,
+      "v2_evidence_count": 0,
+      "risk_flags": [
+        "external_reference_candidate",
+        "requires_curation",
+        "v2_not_promotion_eligible"
+      ],
+      "required_next_steps": [
+        "source_review",
+        "xray_static_scan",
+        "v2_replay",
+        "sandbox_shadow"
+      ],
+      "security_contract_version": "v2",
+      "promotion_credit_source": "v2_only",
+      "requires_sandbox_attestation": true,
+      "requires_runtime_signed_receipt": true,
+      "requires_clean_slate_isolation": true,
+      "requires_trust_mismatch_zero": true,
+      "requires_negative_control_block": true,
+      "expected_status": "DIAGNOSTIC_ONLY_UNTIL_EXECUTED"
+    },
+    {
+      "row_id": "ztv2-002-file_lock_security_gate-wrong_or_quarantined_skill_v2",
+      "capability_id": "file_lock_security_gate",
+      "skill_id": "browserbase-what-antibot",
+      "source_skill_id": "browserbase-what-antibot",
+      "arm_type": "wrong_or_quarantined_skill_v2",
+      "shadow_output_affects_runtime": false,
+      "v1_context_only": true,
+      "v1_evidence_count": 1,
+      "v2_evidence_count": 0,
+      "risk_flags": [
+        "external_reference_candidate",
+        "requires_curation",
+        "v2_not_promotion_eligible"
+      ],
+      "required_next_steps": [
+        "source_review",
+        "xray_static_scan",
+        "v2_replay",
+        "sandbox_shadow"
+      ],
+      "security_contract_version": "v2",
+      "promotion_credit_source": "v2_only",
+      "requires_sandbox_attestation": true,
+      "requires_runtime_signed_receipt": true,
+      "requires_clean_slate_isolation": true,
+      "requires_trust_mismatch_zero": true,
+      "requires_negative_control_block": true,
+      "expected_status": "BLOCKED_BY_POLICY"
+    },
+    {
+      "row_id": "ztv2-002-file_lock_security_gate-shadow_candidate_v2",
+      "capability_id": "file_lock_security_gate",
+      "skill_id": "browserbase-what-antibot",
+      "source_skill_id": "browserbase-what-antibot",
+      "arm_type": "shadow_candidate_v2",
+      "shadow_output_affects_runtime": false,
+      "v1_context_only": true,
+      "v1_evidence_count": 1,
+      "v2_evidence_count": 0,
+      "risk_flags": [
+        "external_reference_candidate",
+        "requires_curation",
+        "v2_not_promotion_eligible"
+      ],
+      "required_next_steps": [
+        "source_review",
+        "xray_static_scan",
+        "v2_replay",
+        "sandbox_shadow"
+      ],
+      "security_contract_version": "v2",
+      "promotion_credit_source": "v2_only",
+      "requires_sandbox_attestation": true,
+      "requires_runtime_signed_receipt": true,
+      "requires_clean_slate_isolation": true,
+      "requires_trust_mismatch_zero": true,
+      "requires_negative_control_block": true,
+      "expected_status": "DIAGNOSTIC_ONLY_UNTIL_EXECUTED"
+    },
+    {
+      "row_id": "ztv2-003-policy_capability_gate-capability_only_v2",
+      "capability_id": "policy_capability_gate",
+      "skill_id": "",
+      "source_skill_id": "browse",
+      "arm_type": "capability_only_v2",
+      "shadow_output_affects_runtime": false,
+      "v1_context_only": true,
+      "v1_evidence_count": 1,
+      "v2_evidence_count": 0,
+      "risk_flags": [
+        "external_reference_candidate",
+        "requires_curation",
+        "v2_not_promotion_eligible"
+      ],
+      "required_next_steps": [
+        "source_review",
+        "xray_static_scan",
+        "v2_replay",
+        "sandbox_shadow"
+      ],
+      "security_contract_version": "v2",
+      "promotion_credit_source": "v2_only",
+      "requires_sandbox_attestation": true,
+      "requires_runtime_signed_receipt": true,
+      "requires_clean_slate_isolation": true,
+      "requires_trust_mismatch_zero": true,
+      "requires_negative_control_block": true,
+      "expected_status": "BASELINE"
+    },
+    {
+      "row_id": "ztv2-003-policy_capability_gate-candidate_skill_v2",
+      "capability_id": "policy_capability_gate",
+      "skill_id": "browse",
+      "source_skill_id": "browse",
+      "arm_type": "candidate_skill_v2",
+      "shadow_output_affects_runtime": false,
+      "v1_context_only": true,
+      "v1_evidence_count": 1,
+      "v2_evidence_count": 0,
+      "risk_flags": [
+        "external_reference_candidate",
+        "requires_curation",
+        "v2_not_promotion_eligible"
+      ],
+      "required_next_steps": [
+        "source_review",
+        "xray_static_scan",
+        "v2_replay",
+        "sandbox_shadow"
+      ],
+      "security_contract_version": "v2",
+      "promotion_credit_source": "v2_only",
+      "requires_sandbox_attestation": true,
+      "requires_runtime_signed_receipt": true,
+      "requires_clean_slate_isolation": true,
+      "requires_trust_mismatch_zero": true,
+      "requires_negative_control_block": true,
+      "expected_status": "DIAGNOSTIC_ONLY_UNTIL_EXECUTED"
+    },
+    {
+      "row_id": "ztv2-003-policy_capability_gate-wrong_or_quarantined_skill_v2",
+      "capability_id": "policy_capability_gate",
+      "skill_id": "browse",
+      "source_skill_id": "browse",
+      "arm_type": "wrong_or_quarantined_skill_v2",
+      "shadow_output_affects_runtime": false,
+      "v1_context_only": true,
+      "v1_evidence_count": 1,
+      "v2_evidence_count": 0,
+      "risk_flags": [
+        "external_reference_candidate",
+        "requires_curation",
+        "v2_not_promotion_eligible"
+      ],
+      "required_next_steps": [
+        "source_review",
+        "xray_static_scan",
+        "v2_replay",
+        "sandbox_shadow"
+      ],
+      "security_contract_version": "v2",
+      "promotion_credit_source": "v2_only",
+      "requires_sandbox_attestation": true,
+      "requires_runtime_signed_receipt": true,
+      "requires_clean_slate_isolation": true,
+      "requires_trust_mismatch_zero": true,
+      "requires_negative_control_block": true,
+      "expected_status": "BLOCKED_BY_POLICY"
+    },
+    {
+      "row_id": "ztv2-003-policy_capability_gate-shadow_candidate_v2",
+      "capability_id": "policy_capability_gate",
+      "skill_id": "browse",
+      "source_skill_id": "browse",
+      "arm_type": "shadow_candidate_v2",
+      "shadow_output_affects_runtime": false,
+      "v1_context_only": true,
+      "v1_evidence_count": 1,
+      "v2_evidence_count": 0,
+      "risk_flags": [
+        "external_reference_candidate",
+        "requires_curation",
+        "v2_not_promotion_eligible"
+      ],
+      "required_next_steps": [
+        "source_review",
+        "xray_static_scan",
+        "v2_replay",
+        "sandbox_shadow"
+      ],
+      "security_contract_version": "v2",
+      "promotion_credit_source": "v2_only",
+      "requires_sandbox_attestation": true,
+      "requires_runtime_signed_receipt": true,
+      "requires_clean_slate_isolation": true,
+      "requires_trust_mismatch_zero": true,
+      "requires_negative_control_block": true,
+      "expected_status": "DIAGNOSTIC_ONLY_UNTIL_EXECUTED"
+    },
+    {
+      "row_id": "ztv2-004-research_control_plane-capability_only_v2",
+      "capability_id": "research_control_plane",
+      "skill_id": "",
+      "source_skill_id": "browserbase-fetch",
+      "arm_type": "capability_only_v2",
+      "shadow_output_affects_runtime": false,
+      "v1_context_only": true,
+      "v1_evidence_count": 1,
+      "v2_evidence_count": 0,
+      "risk_flags": [
+        "cross_capability_reject_conflict",
+        "external_reference_candidate",
+        "requires_curation",
+        "v2_not_promotion_eligible"
+      ],
+      "required_next_steps": [
+        "source_review",
+        "reject_conflict_review",
+        "xray_static_scan",
+        "v2_replay",
+        "sandbox_shadow"
+      ],
+      "security_contract_version": "v2",
+      "promotion_credit_source": "v2_only",
+      "requires_sandbox_attestation": true,
+      "requires_runtime_signed_receipt": true,
+      "requires_clean_slate_isolation": true,
+      "requires_trust_mismatch_zero": true,
+      "requires_negative_control_block": true,
+      "expected_status": "BASELINE"
+    },
+    {
+      "row_id": "ztv2-004-research_control_plane-candidate_skill_v2",
+      "capability_id": "research_control_plane",
+      "skill_id": "browserbase-fetch",
+      "source_skill_id": "browserbase-fetch",
+      "arm_type": "candidate_skill_v2",
+      "shadow_output_affects_runtime": false,
+      "v1_context_only": true,
+      "v1_evidence_count": 1,
+      "v2_evidence_count": 0,
+      "risk_flags": [
+        "cross_capability_reject_conflict",
+        "external_reference_candidate",
+        "requires_curation",
+        "v2_not_promotion_eligible"
+      ],
+      "required_next_steps": [
+        "source_review",
+        "reject_conflict_review",
+        "xray_static_scan",
+        "v2_replay",
+        "sandbox_shadow"
+      ],
+      "security_contract_version": "v2",
+      "promotion_credit_source": "v2_only",
+      "requires_sandbox_attestation": true,
+      "requires_runtime_signed_receipt": true,
+      "requires_clean_slate_isolation": true,
+      "requires_trust_mismatch_zero": true,
+      "requires_negative_control_block": true,
+      "expected_status": "DIAGNOSTIC_ONLY_UNTIL_EXECUTED"
+    },
+    {
+      "row_id": "ztv2-004-research_control_plane-wrong_or_quarantined_skill_v2",
+      "capability_id": "research_control_plane",
+      "skill_id": "browserbase-fetch",
+      "source_skill_id": "browserbase-fetch",
+      "arm_type": "wrong_or_quarantined_skill_v2",
+      "shadow_output_affects_runtime": false,
+      "v1_context_only": true,
+      "v1_evidence_count": 1,
+      "v2_evidence_count": 0,
+      "risk_flags": [
+        "cross_capability_reject_conflict",
+        "external_reference_candidate",
+        "requires_curation",
+        "v2_not_promotion_eligible"
+      ],
+      "required_next_steps": [
+        "source_review",
+        "reject_conflict_review",
+        "xray_static_scan",
+        "v2_replay",
+        "sandbox_shadow"
+      ],
+      "security_contract_version": "v2",
+      "promotion_credit_source": "v2_only",
+      "requires_sandbox_attestation": true,
+      "requires_runtime_signed_receipt": true,
+      "requires_clean_slate_isolation": true,
+      "requires_trust_mismatch_zero": true,
+      "requires_negative_control_block": true,
+      "expected_status": "BLOCKED_BY_POLICY"
+    },
+    {
+      "row_id": "ztv2-004-research_control_plane-shadow_candidate_v2",
+      "capability_id": "research_control_plane",
+      "skill_id": "browserbase-fetch",
+      "source_skill_id": "browserbase-fetch",
+      "arm_type": "shadow_candidate_v2",
+      "shadow_output_affects_runtime": false,
+      "v1_context_only": true,
+      "v1_evidence_count": 1,
+      "v2_evidence_count": 0,
+      "risk_flags": [
+        "cross_capability_reject_conflict",
+        "external_reference_candidate",
+        "requires_curation",
+        "v2_not_promotion_eligible"
+      ],
+      "required_next_steps": [
+        "source_review",
+        "reject_conflict_review",
+        "xray_static_scan",
+        "v2_replay",
+        "sandbox_shadow"
+      ],
+      "security_contract_version": "v2",
+      "promotion_credit_source": "v2_only",
+      "requires_sandbox_attestation": true,
+      "requires_runtime_signed_receipt": true,
+      "requires_clean_slate_isolation": true,
+      "requires_trust_mismatch_zero": true,
+      "requires_negative_control_block": true,
+      "expected_status": "DIAGNOSTIC_ONLY_UNTIL_EXECUTED"
+    },
+    {
+      "row_id": "ztv2-005-sandbox_replay-capability_only_v2",
+      "capability_id": "sandbox_replay",
+      "skill_id": "",
+      "source_skill_id": "nexus-acceptance-evidence-gate",
+      "arm_type": "capability_only_v2",
+      "shadow_output_affects_runtime": false,
+      "v1_context_only": true,
+      "v1_evidence_count": 1,
+      "v2_evidence_count": 0,
+      "risk_flags": [
+        "external_reference_candidate",
+        "requires_curation",
+        "v2_not_promotion_eligible"
+      ],
+      "required_next_steps": [
+        "source_review",
+        "xray_static_scan",
+        "v2_replay",
+        "sandbox_shadow"
+      ],
+      "security_contract_version": "v2",
+      "promotion_credit_source": "v2_only",
+      "requires_sandbox_attestation": true,
+      "requires_runtime_signed_receipt": true,
+      "requires_clean_slate_isolation": true,
+      "requires_trust_mismatch_zero": true,
+      "requires_negative_control_block": true,
+      "expected_status": "BASELINE"
+    },
+    {
+      "row_id": "ztv2-005-sandbox_replay-candidate_skill_v2",
+      "capability_id": "sandbox_replay",
+      "skill_id": "nexus-acceptance-evidence-gate",
+      "source_skill_id": "nexus-acceptance-evidence-gate",
+      "arm_type": "candidate_skill_v2",
+      "shadow_output_affects_runtime": false,
+      "v1_context_only": true,
+      "v1_evidence_count": 1,
+      "v2_evidence_count": 0,
+      "risk_flags": [
+        "external_reference_candidate",
+        "requires_curation",
+        "v2_not_promotion_eligible"
+      ],
+      "required_next_steps": [
+        "source_review",
+        "xray_static_scan",
+        "v2_replay",
+        "sandbox_shadow"
+      ],
+      "security_contract_version": "v2",
+      "promotion_credit_source": "v2_only",
+      "requires_sandbox_attestation": true,
+      "requires_runtime_signed_receipt": true,
+      "requires_clean_slate_isolation": true,
+      "requires_trust_mismatch_zero": true,
+      "requires_negative_control_block": true,
+      "expected_status": "DIAGNOSTIC_ONLY_UNTIL_EXECUTED"
+    },
+    {
+      "row_id": "ztv2-005-sandbox_replay-wrong_or_quarantined_skill_v2",
+      "capability_id": "sandbox_replay",
+      "skill_id": "nexus-acceptance-evidence-gate",
+      "source_skill_id": "nexus-acceptance-evidence-gate",
+      "arm_type": "wrong_or_quarantined_skill_v2",
+      "shadow_output_affects_runtime": false,
+      "v1_context_only": true,
+      "v1_evidence_count": 1,
+      "v2_evidence_count": 0,
+      "risk_flags": [
+        "external_reference_candidate",
+        "requires_curation",
+        "v2_not_promotion_eligible"
+      ],
+      "required_next_steps": [
+        "source_review",
+        "xray_static_scan",
+        "v2_replay",
+        "sandbox_shadow"
+      ],
+      "security_contract_version": "v2",
+      "promotion_credit_source": "v2_only",
+      "requires_sandbox_attestation": true,
+      "requires_runtime_signed_receipt": true,
+      "requires_clean_slate_isolation": true,
+      "requires_trust_mismatch_zero": true,
+      "requires_negative_control_block": true,
+      "expected_status": "BLOCKED_BY_POLICY"
+    },
+    {
+      "row_id": "ztv2-005-sandbox_replay-shadow_candidate_v2",
+      "capability_id": "sandbox_replay",
+      "skill_id": "nexus-acceptance-evidence-gate",
+      "source_skill_id": "nexus-acceptance-evidence-gate",
+      "arm_type": "shadow_candidate_v2",
+      "shadow_output_affects_runtime": false,
+      "v1_context_only": true,
+      "v1_evidence_count": 1,
+      "v2_evidence_count": 0,
+      "risk_flags": [
+        "external_reference_candidate",
+        "requires_curation",
+        "v2_not_promotion_eligible"
+      ],
+      "required_next_steps": [
+        "source_review",
+        "xray_static_scan",
+        "v2_replay",
+        "sandbox_shadow"
+      ],
+      "security_contract_version": "v2",
+      "promotion_credit_source": "v2_only",
+      "requires_sandbox_attestation": true,
+      "requires_runtime_signed_receipt": true,
+      "requires_clean_slate_isolation": true,
+      "requires_trust_mismatch_zero": true,
+      "requires_negative_control_block": true,
+      "expected_status": "DIAGNOSTIC_ONLY_UNTIL_EXECUTED"
+    },
+    {
+      "row_id": "ztv2-006-codeintel-capability_only_v2",
+      "capability_id": "codeintel",
+      "skill_id": "",
+      "source_skill_id": "gstack-qa",
+      "arm_type": "capability_only_v2",
+      "shadow_output_affects_runtime": false,
+      "v1_context_only": true,
+      "v1_evidence_count": 1,
+      "v2_evidence_count": 0,
+      "risk_flags": [
+        "external_reference_candidate",
+        "requires_curation",
+        "v2_not_promotion_eligible"
+      ],
+      "required_next_steps": [
+        "source_review",
+        "xray_static_scan",
+        "v2_replay",
+        "sandbox_shadow"
+      ],
+      "security_contract_version": "v2",
+      "promotion_credit_source": "v2_only",
+      "requires_sandbox_attestation": true,
+      "requires_runtime_signed_receipt": true,
+      "requires_clean_slate_isolation": true,
+      "requires_trust_mismatch_zero": true,
+      "requires_negative_control_block": true,
+      "expected_status": "BASELINE"
+    },
+    {
+      "row_id": "ztv2-006-codeintel-candidate_skill_v2",
+      "capability_id": "codeintel",
+      "skill_id": "gstack-qa",
+      "source_skill_id": "gstack-qa",
+      "arm_type": "candidate_skill_v2",
+      "shadow_output_affects_runtime": false,
+      "v1_context_only": true,
+      "v1_evidence_count": 1,
+      "v2_evidence_count": 0,
+      "risk_flags": [
+        "external_reference_candidate",
+        "requires_curation",
+        "v2_not_promotion_eligible"
+      ],
+      "required_next_steps": [
+        "source_review",
+        "xray_static_scan",
+        "v2_replay",
+        "sandbox_shadow"
+      ],
+      "security_contract_version": "v2",
+      "promotion_credit_source": "v2_only",
+      "requires_sandbox_attestation": true,
+      "requires_runtime_signed_receipt": true,
+      "requires_clean_slate_isolation": true,
+      "requires_trust_mismatch_zero": true,
+      "requires_negative_control_block": true,
+      "expected_status": "DIAGNOSTIC_ONLY_UNTIL_EXECUTED"
+    },
+    {
+      "row_id": "ztv2-006-codeintel-wrong_or_quarantined_skill_v2",
+      "capability_id": "codeintel",
+      "skill_id": "gstack-qa",
+      "source_skill_id": "gstack-qa",
+      "arm_type": "wrong_or_quarantined_skill_v2",
+      "shadow_output_affects_runtime": false,
+      "v1_context_only": true,
+      "v1_evidence_count": 1,
+      "v2_evidence_count": 0,
+      "risk_flags": [
+        "external_reference_candidate",
+        "requires_curation",
+        "v2_not_promotion_eligible"
+      ],
+      "required_next_steps": [
+        "source_review",
+        "xray_static_scan",
+        "v2_replay",
+        "sandbox_shadow"
+      ],
+      "security_contract_version": "v2",
+      "promotion_credit_source": "v2_only",
+      "requires_sandbox_attestation": true,
+      "requires_runtime_signed_receipt": true,
+      "requires_clean_slate_isolation": true,
+      "requires_trust_mismatch_zero": true,
+      "requires_negative_control_block": true,
+      "expected_status": "BLOCKED_BY_POLICY"
+    },
+    {
+      "row_id": "ztv2-006-codeintel-shadow_candidate_v2",
+      "capability_id": "codeintel",
+      "skill_id": "gstack-qa",
+      "source_skill_id": "gstack-qa",
+      "arm_type": "shadow_candidate_v2",
+      "shadow_output_affects_runtime": false,
+      "v1_context_only": true,
+      "v1_evidence_count": 1,
+      "v2_evidence_count": 0,
+      "risk_flags": [
+        "external_reference_candidate",
+        "requires_curation",
+        "v2_not_promotion_eligible"
+      ],
+      "required_next_steps": [
+        "source_review",
+        "xray_static_scan",
+        "v2_replay",
+        "sandbox_shadow"
+      ],
+      "security_contract_version": "v2",
+      "promotion_credit_source": "v2_only",
+      "requires_sandbox_attestation": true,
+      "requires_runtime_signed_receipt": true,
+      "requires_clean_slate_isolation": true,
+      "requires_trust_mismatch_zero": true,
+      "requires_negative_control_block": true,
+      "expected_status": "DIAGNOSTIC_ONLY_UNTIL_EXECUTED"
+    },
+    {
+      "row_id": "ztv2-007-repair_loop-capability_only_v2",
+      "capability_id": "repair_loop",
+      "skill_id": "",
+      "source_skill_id": "qa-only",
+      "arm_type": "capability_only_v2",
+      "shadow_output_affects_runtime": false,
+      "v1_context_only": true,
+      "v1_evidence_count": 1,
+      "v2_evidence_count": 0,
+      "risk_flags": [
+        "external_reference_candidate",
+        "requires_curation",
+        "v2_not_promotion_eligible"
+      ],
+      "required_next_steps": [
+        "source_review",
+        "xray_static_scan",
+        "v2_replay",
+        "sandbox_shadow"
+      ],
+      "security_contract_version": "v2",
+      "promotion_credit_source": "v2_only",
+      "requires_sandbox_attestation": true,
+      "requires_runtime_signed_receipt": true,
+      "requires_clean_slate_isolation": true,
+      "requires_trust_mismatch_zero": true,
+      "requires_negative_control_block": true,
+      "expected_status": "BASELINE"
+    },
+    {
+      "row_id": "ztv2-007-repair_loop-candidate_skill_v2",
+      "capability_id": "repair_loop",
+      "skill_id": "qa-only",
+      "source_skill_id": "qa-only",
+      "arm_type": "candidate_skill_v2",
+      "shadow_output_affects_runtime": false,
+      "v1_context_only": true,
+      "v1_evidence_count": 1,
+      "v2_evidence_count": 0,
+      "risk_flags": [
+        "external_reference_candidate",
+        "requires_curation",
+        "v2_not_promotion_eligible"
+      ],
+      "required_next_steps": [
+        "source_review",
+        "xray_static_scan",
+        "v2_replay",
+        "sandbox_shadow"
+      ],
+      "security_contract_version": "v2",
+      "promotion_credit_source": "v2_only",
+      "requires_sandbox_attestation": true,
+      "requires_runtime_signed_receipt": true,
+      "requires_clean_slate_isolation": true,
+      "requires_trust_mismatch_zero": true,
+      "requires_negative_control_block": true,
+      "expected_status": "DIAGNOSTIC_ONLY_UNTIL_EXECUTED"
+    },
+    {
+      "row_id": "ztv2-007-repair_loop-wrong_or_quarantined_skill_v2",
+      "capability_id": "repair_loop",
+      "skill_id": "qa-only",
+      "source_skill_id": "qa-only",
+      "arm_type": "wrong_or_quarantined_skill_v2",
+      "shadow_output_affects_runtime": false,
+      "v1_context_only": true,
+      "v1_evidence_count": 1,
+      "v2_evidence_count": 0,
+      "risk_flags": [
+        "external_reference_candidate",
+        "requires_curation",
+        "v2_not_promotion_eligible"
+      ],
+      "required_next_steps": [
+        "source_review",
+        "xray_static_scan",
+        "v2_replay",
+        "sandbox_shadow"
+      ],
+      "security_contract_version": "v2",
+      "promotion_credit_source": "v2_only",
+      "requires_sandbox_attestation": true,
+      "requires_runtime_signed_receipt": true,
+      "requires_clean_slate_isolation": true,
+      "requires_trust_mismatch_zero": true,
+      "requires_negative_control_block": true,
+      "expected_status": "BLOCKED_BY_POLICY"
+    },
+    {
+      "row_id": "ztv2-007-repair_loop-shadow_candidate_v2",
+      "capability_id": "repair_loop",
+      "skill_id": "qa-only",
+      "source_skill_id": "qa-only",
+      "arm_type": "shadow_candidate_v2",
+      "shadow_output_affects_runtime": false,
+      "v1_context_only": true,
+      "v1_evidence_count": 1,
+      "v2_evidence_count": 0,
+      "risk_flags": [
+        "external_reference_candidate",
+        "requires_curation",
+        "v2_not_promotion_eligible"
+      ],
+      "required_next_steps": [
+        "source_review",
+        "xray_static_scan",
+        "v2_replay",
+        "sandbox_shadow"
+      ],
+      "security_contract_version": "v2",
+      "promotion_credit_source": "v2_only",
+      "requires_sandbox_attestation": true,
+      "requires_runtime_signed_receipt": true,
+      "requires_clean_slate_isolation": true,
+      "requires_trust_mismatch_zero": true,
+      "requires_negative_control_block": true,
+      "expected_status": "DIAGNOSTIC_ONLY_UNTIL_EXECUTED"
+    },
+    {
+      "row_id": "ztv2-008-swarm_multi_agent-capability_only_v2",
+      "capability_id": "swarm_multi_agent",
+      "skill_id": "",
+      "source_skill_id": "nexus-gemini-code-review-orchestrator",
+      "arm_type": "capability_only_v2",
+      "shadow_output_affects_runtime": false,
+      "v1_context_only": true,
+      "v1_evidence_count": 1,
+      "v2_evidence_count": 0,
+      "risk_flags": [
+        "external_reference_candidate",
+        "requires_curation",
+        "v2_not_promotion_eligible"
+      ],
+      "required_next_steps": [
+        "source_review",
+        "xray_static_scan",
+        "v2_replay",
+        "sandbox_shadow"
+      ],
+      "security_contract_version": "v2",
+      "promotion_credit_source": "v2_only",
+      "requires_sandbox_attestation": true,
+      "requires_runtime_signed_receipt": true,
+      "requires_clean_slate_isolation": true,
+      "requires_trust_mismatch_zero": true,
+      "requires_negative_control_block": true,
+      "expected_status": "BASELINE"
+    },
+    {
+      "row_id": "ztv2-008-swarm_multi_agent-candidate_skill_v2",
+      "capability_id": "swarm_multi_agent",
+      "skill_id": "nexus-gemini-code-review-orchestrator",
+      "source_skill_id": "nexus-gemini-code-review-orchestrator",
+      "arm_type": "candidate_skill_v2",
+      "shadow_output_affects_runtime": false,
+      "v1_context_only": true,
+      "v1_evidence_count": 1,
+      "v2_evidence_count": 0,
+      "risk_flags": [
+        "external_reference_candidate",
+        "requires_curation",
+        "v2_not_promotion_eligible"
+      ],
+      "required_next_steps": [
+        "source_review",
+        "xray_static_scan",
+        "v2_replay",
+        "sandbox_shadow"
+      ],
+      "security_contract_version": "v2",
+      "promotion_credit_source": "v2_only",
+      "requires_sandbox_attestation": true,
+      "requires_runtime_signed_receipt": true,
+      "requires_clean_slate_isolation": true,
+      "requires_trust_mismatch_zero": true,
+      "requires_negative_control_block": true,
+      "expected_status": "DIAGNOSTIC_ONLY_UNTIL_EXECUTED"
+    },
+    {
+      "row_id": "ztv2-008-swarm_multi_agent-wrong_or_quarantined_skill_v2",
+      "capability_id": "swarm_multi_agent",
+      "skill_id": "nexus-gemini-code-review-orchestrator",
+      "source_skill_id": "nexus-gemini-code-review-orchestrator",
+      "arm_type": "wrong_or_quarantined_skill_v2",
+      "shadow_output_affects_runtime": false,
+      "v1_context_only": true,
+      "v1_evidence_count": 1,
+      "v2_evidence_count": 0,
+      "risk_flags": [
+        "external_reference_candidate",
+        "requires_curation",
+        "v2_not_promotion_eligible"
+      ],
+      "required_next_steps": [
+        "source_review",
+        "xray_static_scan",
+        "v2_replay",
+        "sandbox_shadow"
+      ],
+      "security_contract_version": "v2",
+      "promotion_credit_source": "v2_only",
+      "requires_sandbox_attestation": true,
+      "requires_runtime_signed_receipt": true,
+      "requires_clean_slate_isolation": true,
+      "requires_trust_mismatch_zero": true,
+      "requires_negative_control_block": true,
+      "expected_status": "BLOCKED_BY_POLICY"
+    },
+    {
+      "row_id": "ztv2-008-swarm_multi_agent-shadow_candidate_v2",
+      "capability_id": "swarm_multi_agent",
+      "skill_id": "nexus-gemini-code-review-orchestrator",
+      "source_skill_id": "nexus-gemini-code-review-orchestrator",
+      "arm_type": "shadow_candidate_v2",
+      "shadow_output_affects_runtime": false,
+      "v1_context_only": true,
+      "v1_evidence_count": 1,
+      "v2_evidence_count": 0,
+      "risk_flags": [
+        "external_reference_candidate",
+        "requires_curation",
+        "v2_not_promotion_eligible"
+      ],
+      "required_next_steps": [
+        "source_review",
+        "xray_static_scan",
+        "v2_replay",
+        "sandbox_shadow"
+      ],
+      "security_contract_version": "v2",
+      "promotion_credit_source": "v2_only",
+      "requires_sandbox_attestation": true,
+      "requires_runtime_signed_receipt": true,
+      "requires_clean_slate_isolation": true,
+      "requires_trust_mismatch_zero": true,
+      "requires_negative_control_block": true,
+      "expected_status": "DIAGNOSTIC_ONLY_UNTIL_EXECUTED"
+    },
+    {
+      "row_id": "ztv2-009-autonomic_router-capability_only_v2",
+      "capability_id": "autonomic_router",
+      "skill_id": "",
+      "source_skill_id": "nexus-agent-execution-board-failclosed",
+      "arm_type": "capability_only_v2",
+      "shadow_output_affects_runtime": false,
+      "v1_context_only": true,
+      "v1_evidence_count": 1,
+      "v2_evidence_count": 0,
+      "risk_flags": [
+        "external_reference_candidate",
+        "requires_curation",
+        "v2_not_promotion_eligible"
+      ],
+      "required_next_steps": [
+        "source_review",
+        "xray_static_scan",
+        "v2_replay",
+        "sandbox_shadow"
+      ],
+      "security_contract_version": "v2",
+      "promotion_credit_source": "v2_only",
+      "requires_sandbox_attestation": true,
+      "requires_runtime_signed_receipt": true,
+      "requires_clean_slate_isolation": true,
+      "requires_trust_mismatch_zero": true,
+      "requires_negative_control_block": true,
+      "expected_status": "BASELINE"
+    },
+    {
+      "row_id": "ztv2-009-autonomic_router-candidate_skill_v2",
+      "capability_id": "autonomic_router",
+      "skill_id": "nexus-agent-execution-board-failclosed",
+      "source_skill_id": "nexus-agent-execution-board-failclosed",
+      "arm_type": "candidate_skill_v2",
+      "shadow_output_affects_runtime": false,
+      "v1_context_only": true,
+      "v1_evidence_count": 1,
+      "v2_evidence_count": 0,
+      "risk_flags": [
+        "external_reference_candidate",
+        "requires_curation",
+        "v2_not_promotion_eligible"
+      ],
+      "required_next_steps": [
+        "source_review",
+        "xray_static_scan",
+        "v2_replay",
+        "sandbox_shadow"
+      ],
+      "security_contract_version": "v2",
+      "promotion_credit_source": "v2_only",
+      "requires_sandbox_attestation": true,
+      "requires_runtime_signed_receipt": true,
+      "requires_clean_slate_isolation": true,
+      "requires_trust_mismatch_zero": true,
+      "requires_negative_control_block": true,
+      "expected_status": "DIAGNOSTIC_ONLY_UNTIL_EXECUTED"
+    },
+    {
+      "row_id": "ztv2-009-autonomic_router-wrong_or_quarantined_skill_v2",
+      "capability_id": "autonomic_router",
+      "skill_id": "nexus-agent-execution-board-failclosed",
+      "source_skill_id": "nexus-agent-execution-board-failclosed",
+      "arm_type": "wrong_or_quarantined_skill_v2",
+      "shadow_output_affects_runtime": false,
+      "v1_context_only": true,
+      "v1_evidence_count": 1,
+      "v2_evidence_count": 0,
+      "risk_flags": [
+        "external_reference_candidate",
+        "requires_curation",
+        "v2_not_promotion_eligible"
+      ],
+      "required_next_steps": [
+        "source_review",
+        "xray_static_scan",
+        "v2_replay",
+        "sandbox_shadow"
+      ],
+      "security_contract_version": "v2",
+      "promotion_credit_source": "v2_only",
+      "requires_sandbox_attestation": true,
+      "requires_runtime_signed_receipt": true,
+      "requires_clean_slate_isolation": true,
+      "requires_trust_mismatch_zero": true,
+      "requires_negative_control_block": true,
+      "expected_status": "BLOCKED_BY_POLICY"
+    },
+    {
+      "row_id": "ztv2-009-autonomic_router-shadow_candidate_v2",
+      "capability_id": "autonomic_router",
+      "skill_id": "nexus-agent-execution-board-failclosed",
+      "source_skill_id": "nexus-agent-execution-board-failclosed",
+      "arm_type": "shadow_candidate_v2",
+      "shadow_output_affects_runtime": false,
+      "v1_context_only": true,
+      "v1_evidence_count": 1,
+      "v2_evidence_count": 0,
+      "risk_flags": [
+        "external_reference_candidate",
+        "requires_curation",
+        "v2_not_promotion_eligible"
+      ],
+      "required_next_steps": [
+        "source_review",
+        "xray_static_scan",
+        "v2_replay",
+        "sandbox_shadow"
+      ],
+      "security_contract_version": "v2",
+      "promotion_credit_source": "v2_only",
+      "requires_sandbox_attestation": true,
+      "requires_runtime_signed_receipt": true,
+      "requires_clean_slate_isolation": true,
+      "requires_trust_mismatch_zero": true,
+      "requires_negative_control_block": true,
+      "expected_status": "DIAGNOSTIC_ONLY_UNTIL_EXECUTED"
+    },
+    {
+      "row_id": "ztv2-010-external_productivity-capability_only_v2",
+      "capability_id": "external_productivity",
+      "skill_id": "",
+      "source_skill_id": "aibdd.auto.python.e2e.green",
+      "arm_type": "capability_only_v2",
+      "shadow_output_affects_runtime": false,
+      "v1_context_only": true,
+      "v1_evidence_count": 1,
+      "v2_evidence_count": 0,
+      "risk_flags": [
+        "external_reference_candidate",
+        "requires_curation",
+        "v2_not_promotion_eligible"
+      ],
+      "required_next_steps": [
+        "source_review",
+        "xray_static_scan",
+        "v2_replay",
+        "sandbox_shadow"
+      ],
+      "security_contract_version": "v2",
+      "promotion_credit_source": "v2_only",
+      "requires_sandbox_attestation": true,
+      "requires_runtime_signed_receipt": true,
+      "requires_clean_slate_isolation": true,
+      "requires_trust_mismatch_zero": true,
+      "requires_negative_control_block": true,
+      "expected_status": "BASELINE"
+    },
+    {
+      "row_id": "ztv2-010-external_productivity-candidate_skill_v2",
+      "capability_id": "external_productivity",
+      "skill_id": "aibdd.auto.python.e2e.green",
+      "source_skill_id": "aibdd.auto.python.e2e.green",
+      "arm_type": "candidate_skill_v2",
+      "shadow_output_affects_runtime": false,
+      "v1_context_only": true,
+      "v1_evidence_count": 1,
+      "v2_evidence_count": 0,
+      "risk_flags": [
+        "external_reference_candidate",
+        "requires_curation",
+        "v2_not_promotion_eligible"
+      ],
+      "required_next_steps": [
+        "source_review",
+        "xray_static_scan",
+        "v2_replay",
+        "sandbox_shadow"
+      ],
+      "security_contract_version": "v2",
+      "promotion_credit_source": "v2_only",
+      "requires_sandbox_attestation": true,
+      "requires_runtime_signed_receipt": true,
+      "requires_clean_slate_isolation": true,
+      "requires_trust_mismatch_zero": true,
+      "requires_negative_control_block": true,
+      "expected_status": "DIAGNOSTIC_ONLY_UNTIL_EXECUTED"
+    },
+    {
+      "row_id": "ztv2-010-external_productivity-wrong_or_quarantined_skill_v2",
+      "capability_id": "external_productivity",
+      "skill_id": "aibdd.auto.python.e2e.green",
+      "source_skill_id": "aibdd.auto.python.e2e.green",
+      "arm_type": "wrong_or_quarantined_skill_v2",
+      "shadow_output_affects_runtime": false,
+      "v1_context_only": true,
+      "v1_evidence_count": 1,
+      "v2_evidence_count": 0,
+      "risk_flags": [
+        "external_reference_candidate",
+        "requires_curation",
+        "v2_not_promotion_eligible"
+      ],
+      "required_next_steps": [
+        "source_review",
+        "xray_static_scan",
+        "v2_replay",
+        "sandbox_shadow"
+      ],
+      "security_contract_version": "v2",
+      "promotion_credit_source": "v2_only",
+      "requires_sandbox_attestation": true,
+      "requires_runtime_signed_receipt": true,
+      "requires_clean_slate_isolation": true,
+      "requires_trust_mismatch_zero": true,
+      "requires_negative_control_block": true,
+      "expected_status": "BLOCKED_BY_POLICY"
+    },
+    {
+      "row_id": "ztv2-010-external_productivity-shadow_candidate_v2",
+      "capability_id": "external_productivity",
+      "skill_id": "aibdd.auto.python.e2e.green",
+      "source_skill_id": "aibdd.auto.python.e2e.green",
+      "arm_type": "shadow_candidate_v2",
+      "shadow_output_affects_runtime": false,
+      "v1_context_only": true,
+      "v1_evidence_count": 1,
+      "v2_evidence_count": 0,
+      "risk_flags": [
+        "external_reference_candidate",
+        "requires_curation",
+        "v2_not_promotion_eligible"
+      ],
+      "required_next_steps": [
+        "source_review",
+        "xray_static_scan",
+        "v2_replay",
+        "sandbox_shadow"
+      ],
+      "security_contract_version": "v2",
+      "promotion_credit_source": "v2_only",
+      "requires_sandbox_attestation": true,
+      "requires_runtime_signed_receipt": true,
+      "requires_clean_slate_isolation": true,
+      "requires_trust_mismatch_zero": true,
+      "requires_negative_control_block": true,
+      "expected_status": "DIAGNOSTIC_ONLY_UNTIL_EXECUTED"
+    },
+    {
+      "row_id": "ztv2-011-forecast_pregate-capability_only_v2",
+      "capability_id": "forecast_pregate",
+      "skill_id": "",
+      "source_skill_id": "addy-shipping-and-launch",
+      "arm_type": "capability_only_v2",
+      "shadow_output_affects_runtime": false,
+      "v1_context_only": true,
+      "v1_evidence_count": 1,
+      "v2_evidence_count": 0,
+      "risk_flags": [
+        "external_reference_candidate",
+        "requires_curation",
+        "v2_not_promotion_eligible"
+      ],
+      "required_next_steps": [
+        "source_review",
+        "xray_static_scan",
+        "v2_replay",
+        "sandbox_shadow"
+      ],
+      "security_contract_version": "v2",
+      "promotion_credit_source": "v2_only",
+      "requires_sandbox_attestation": true,
+      "requires_runtime_signed_receipt": true,
+      "requires_clean_slate_isolation": true,
+      "requires_trust_mismatch_zero": true,
+      "requires_negative_control_block": true,
+      "expected_status": "BASELINE"
+    },
+    {
+      "row_id": "ztv2-011-forecast_pregate-candidate_skill_v2",
+      "capability_id": "forecast_pregate",
+      "skill_id": "addy-shipping-and-launch",
+      "source_skill_id": "addy-shipping-and-launch",
+      "arm_type": "candidate_skill_v2",
+      "shadow_output_affects_runtime": false,
+      "v1_context_only": true,
+      "v1_evidence_count": 1,
+      "v2_evidence_count": 0,
+      "risk_flags": [
+        "external_reference_candidate",
+        "requires_curation",
+        "v2_not_promotion_eligible"
+      ],
+      "required_next_steps": [
+        "source_review",
+        "xray_static_scan",
+        "v2_replay",
+        "sandbox_shadow"
+      ],
+      "security_contract_version": "v2",
+      "promotion_credit_source": "v2_only",
+      "requires_sandbox_attestation": true,
+      "requires_runtime_signed_receipt": true,
+      "requires_clean_slate_isolation": true,
+      "requires_trust_mismatch_zero": true,
+      "requires_negative_control_block": true,
+      "expected_status": "DIAGNOSTIC_ONLY_UNTIL_EXECUTED"
+    },
+    {
+      "row_id": "ztv2-011-forecast_pregate-wrong_or_quarantined_skill_v2",
+      "capability_id": "forecast_pregate",
+      "skill_id": "addy-shipping-and-launch",
+      "source_skill_id": "addy-shipping-and-launch",
+      "arm_type": "wrong_or_quarantined_skill_v2",
+      "shadow_output_affects_runtime": false,
+      "v1_context_only": true,
+      "v1_evidence_count": 1,
+      "v2_evidence_count": 0,
+      "risk_flags": [
+        "external_reference_candidate",
+        "requires_curation",
+        "v2_not_promotion_eligible"
+      ],
+      "required_next_steps": [
+        "source_review",
+        "xray_static_scan",
+        "v2_replay",
+        "sandbox_shadow"
+      ],
+      "security_contract_version": "v2",
+      "promotion_credit_source": "v2_only",
+      "requires_sandbox_attestation": true,
+      "requires_runtime_signed_receipt": true,
+      "requires_clean_slate_isolation": true,
+      "requires_trust_mismatch_zero": true,
+      "requires_negative_control_block": true,
+      "expected_status": "BLOCKED_BY_POLICY"
+    },
+    {
+      "row_id": "ztv2-011-forecast_pregate-shadow_candidate_v2",
+      "capability_id": "forecast_pregate",
+      "skill_id": "addy-shipping-and-launch",
+      "source_skill_id": "addy-shipping-and-launch",
+      "arm_type": "shadow_candidate_v2",
+      "shadow_output_affects_runtime": false,
+      "v1_context_only": true,
+      "v1_evidence_count": 1,
+      "v2_evidence_count": 0,
+      "risk_flags": [
+        "external_reference_candidate",
+        "requires_curation",
+        "v2_not_promotion_eligible"
+      ],
+      "required_next_steps": [
+        "source_review",
+        "xray_static_scan",
+        "v2_replay",
+        "sandbox_shadow"
+      ],
+      "security_contract_version": "v2",
+      "promotion_credit_source": "v2_only",
+      "requires_sandbox_attestation": true,
+      "requires_runtime_signed_receipt": true,
+      "requires_clean_slate_isolation": true,
+      "requires_trust_mismatch_zero": true,
+      "requires_negative_control_block": true,
+      "expected_status": "DIAGNOSTIC_ONLY_UNTIL_EXECUTED"
+    },
+    {
+      "row_id": "ztv2-012-hyper_sprint-capability_only_v2",
+      "capability_id": "hyper_sprint",
+      "skill_id": "",
+      "source_skill_id": "retro",
+      "arm_type": "capability_only_v2",
+      "shadow_output_affects_runtime": false,
+      "v1_context_only": true,
+      "v1_evidence_count": 1,
+      "v2_evidence_count": 0,
+      "risk_flags": [
+        "external_reference_candidate",
+        "requires_curation",
+        "v2_not_promotion_eligible"
+      ],
+      "required_next_steps": [
+        "source_review",
+        "xray_static_scan",
+        "v2_replay",
+        "sandbox_shadow"
+      ],
+      "security_contract_version": "v2",
+      "promotion_credit_source": "v2_only",
+      "requires_sandbox_attestation": true,
+      "requires_runtime_signed_receipt": true,
+      "requires_clean_slate_isolation": true,
+      "requires_trust_mismatch_zero": true,
+      "requires_negative_control_block": true,
+      "expected_status": "BASELINE"
+    },
+    {
+      "row_id": "ztv2-012-hyper_sprint-candidate_skill_v2",
+      "capability_id": "hyper_sprint",
+      "skill_id": "retro",
+      "source_skill_id": "retro",
+      "arm_type": "candidate_skill_v2",
+      "shadow_output_affects_runtime": false,
+      "v1_context_only": true,
+      "v1_evidence_count": 1,
+      "v2_evidence_count": 0,
+      "risk_flags": [
+        "external_reference_candidate",
+        "requires_curation",
+        "v2_not_promotion_eligible"
+      ],
+      "required_next_steps": [
+        "source_review",
+        "xray_static_scan",
+        "v2_replay",
+        "sandbox_shadow"
+      ],
+      "security_contract_version": "v2",
+      "promotion_credit_source": "v2_only",
+      "requires_sandbox_attestation": true,
+      "requires_runtime_signed_receipt": true,
+      "requires_clean_slate_isolation": true,
+      "requires_trust_mismatch_zero": true,
+      "requires_negative_control_block": true,
+      "expected_status": "DIAGNOSTIC_ONLY_UNTIL_EXECUTED"
+    },
+    {
+      "row_id": "ztv2-012-hyper_sprint-wrong_or_quarantined_skill_v2",
+      "capability_id": "hyper_sprint",
+      "skill_id": "retro",
+      "source_skill_id": "retro",
+      "arm_type": "wrong_or_quarantined_skill_v2",
+      "shadow_output_affects_runtime": false,
+      "v1_context_only": true,
+      "v1_evidence_count": 1,
+      "v2_evidence_count": 0,
+      "risk_flags": [
+        "external_reference_candidate",
+        "requires_curation",
+        "v2_not_promotion_eligible"
+      ],
+      "required_next_steps": [
+        "source_review",
+        "xray_static_scan",
+        "v2_replay",
+        "sandbox_shadow"
+      ],
+      "security_contract_version": "v2",
+      "promotion_credit_source": "v2_only",
+      "requires_sandbox_attestation": true,
+      "requires_runtime_signed_receipt": true,
+      "requires_clean_slate_isolation": true,
+      "requires_trust_mismatch_zero": true,
+      "requires_negative_control_block": true,
+      "expected_status": "BLOCKED_BY_POLICY"
+    },
+    {
+      "row_id": "ztv2-012-hyper_sprint-shadow_candidate_v2",
+      "capability_id": "hyper_sprint",
+      "skill_id": "retro",
+      "source_skill_id": "retro",
+      "arm_type": "shadow_candidate_v2",
+      "shadow_output_affects_runtime": false,
+      "v1_context_only": true,
+      "v1_evidence_count": 1,
+      "v2_evidence_count": 0,
+      "risk_flags": [
+        "external_reference_candidate",
+        "requires_curation",
+        "v2_not_promotion_eligible"
+      ],
+      "required_next_steps": [
+        "source_review",
+        "xray_static_scan",
+        "v2_replay",
+        "sandbox_shadow"
+      ],
+      "security_contract_version": "v2",
+      "promotion_credit_source": "v2_only",
+      "requires_sandbox_attestation": true,
+      "requires_runtime_signed_receipt": true,
+      "requires_clean_slate_isolation": true,
+      "requires_trust_mismatch_zero": true,
+      "requires_negative_control_block": true,
+      "expected_status": "DIAGNOSTIC_ONLY_UNTIL_EXECUTED"
+    },
+    {
+      "row_id": "ztv2-013-learn_ask-capability_only_v2",
+      "capability_id": "learn_ask",
+      "skill_id": "",
+      "source_skill_id": "nexus-live-ask-replay-normalization-gate",
+      "arm_type": "capability_only_v2",
+      "shadow_output_affects_runtime": false,
+      "v1_context_only": true,
+      "v1_evidence_count": 1,
+      "v2_evidence_count": 0,
+      "risk_flags": [
+        "external_reference_candidate",
+        "requires_curation",
+        "v2_not_promotion_eligible"
+      ],
+      "required_next_steps": [
+        "source_review",
+        "xray_static_scan",
+        "v2_replay",
+        "sandbox_shadow"
+      ],
+      "security_contract_version": "v2",
+      "promotion_credit_source": "v2_only",
+      "requires_sandbox_attestation": true,
+      "requires_runtime_signed_receipt": true,
+      "requires_clean_slate_isolation": true,
+      "requires_trust_mismatch_zero": true,
+      "requires_negative_control_block": true,
+      "expected_status": "BASELINE"
+    },
+    {
+      "row_id": "ztv2-013-learn_ask-candidate_skill_v2",
+      "capability_id": "learn_ask",
+      "skill_id": "nexus-live-ask-replay-normalization-gate",
+      "source_skill_id": "nexus-live-ask-replay-normalization-gate",
+      "arm_type": "candidate_skill_v2",
+      "shadow_output_affects_runtime": false,
+      "v1_context_only": true,
+      "v1_evidence_count": 1,
+      "v2_evidence_count": 0,
+      "risk_flags": [
+        "external_reference_candidate",
+        "requires_curation",
+        "v2_not_promotion_eligible"
+      ],
+      "required_next_steps": [
+        "source_review",
+        "xray_static_scan",
+        "v2_replay",
+        "sandbox_shadow"
+      ],
+      "security_contract_version": "v2",
+      "promotion_credit_source": "v2_only",
+      "requires_sandbox_attestation": true,
+      "requires_runtime_signed_receipt": true,
+      "requires_clean_slate_isolation": true,
+      "requires_trust_mismatch_zero": true,
+      "requires_negative_control_block": true,
+      "expected_status": "DIAGNOSTIC_ONLY_UNTIL_EXECUTED"
+    },
+    {
+      "row_id": "ztv2-013-learn_ask-wrong_or_quarantined_skill_v2",
+      "capability_id": "learn_ask",
+      "skill_id": "nexus-live-ask-replay-normalization-gate",
+      "source_skill_id": "nexus-live-ask-replay-normalization-gate",
+      "arm_type": "wrong_or_quarantined_skill_v2",
+      "shadow_output_affects_runtime": false,
+      "v1_context_only": true,
+      "v1_evidence_count": 1,
+      "v2_evidence_count": 0,
+      "risk_flags": [
+        "external_reference_candidate",
+        "requires_curation",
+        "v2_not_promotion_eligible"
+      ],
+      "required_next_steps": [
+        "source_review",
+        "xray_static_scan",
+        "v2_replay",
+        "sandbox_shadow"
+      ],
+      "security_contract_version": "v2",
+      "promotion_credit_source": "v2_only",
+      "requires_sandbox_attestation": true,
+      "requires_runtime_signed_receipt": true,
+      "requires_clean_slate_isolation": true,
+      "requires_trust_mismatch_zero": true,
+      "requires_negative_control_block": true,
+      "expected_status": "BLOCKED_BY_POLICY"
+    },
+    {
+      "row_id": "ztv2-013-learn_ask-shadow_candidate_v2",
+      "capability_id": "learn_ask",
+      "skill_id": "nexus-live-ask-replay-normalization-gate",
+      "source_skill_id": "nexus-live-ask-replay-normalization-gate",
+      "arm_type": "shadow_candidate_v2",
+      "shadow_output_affects_runtime": false,
+      "v1_context_only": true,
+      "v1_evidence_count": 1,
+      "v2_evidence_count": 0,
+      "risk_flags": [
+        "external_reference_candidate",
+        "requires_curation",
+        "v2_not_promotion_eligible"
+      ],
+      "required_next_steps": [
+        "source_review",
+        "xray_static_scan",
+        "v2_replay",
+        "sandbox_shadow"
+      ],
+      "security_contract_version": "v2",
+      "promotion_credit_source": "v2_only",
+      "requires_sandbox_attestation": true,
+      "requires_runtime_signed_receipt": true,
+      "requires_clean_slate_isolation": true,
+      "requires_trust_mismatch_zero": true,
+      "requires_negative_control_block": true,
+      "expected_status": "DIAGNOSTIC_ONLY_UNTIL_EXECUTED"
+    },
+    {
+      "row_id": "ztv2-014-memory-capability_only_v2",
+      "capability_id": "memory",
+      "skill_id": "",
+      "source_skill_id": "product-self-knowledge",
+      "arm_type": "capability_only_v2",
+      "shadow_output_affects_runtime": false,
+      "v1_context_only": true,
+      "v1_evidence_count": 1,
+      "v2_evidence_count": 0,
+      "risk_flags": [
+        "external_reference_candidate",
+        "requires_curation",
+        "v2_not_promotion_eligible"
+      ],
+      "required_next_steps": [
+        "source_review",
+        "xray_static_scan",
+        "v2_replay",
+        "sandbox_shadow"
+      ],
+      "security_contract_version": "v2",
+      "promotion_credit_source": "v2_only",
+      "requires_sandbox_attestation": true,
+      "requires_runtime_signed_receipt": true,
+      "requires_clean_slate_isolation": true,
+      "requires_trust_mismatch_zero": true,
+      "requires_negative_control_block": true,
+      "expected_status": "BASELINE"
+    },
+    {
+      "row_id": "ztv2-014-memory-candidate_skill_v2",
+      "capability_id": "memory",
+      "skill_id": "product-self-knowledge",
+      "source_skill_id": "product-self-knowledge",
+      "arm_type": "candidate_skill_v2",
+      "shadow_output_affects_runtime": false,
+      "v1_context_only": true,
+      "v1_evidence_count": 1,
+      "v2_evidence_count": 0,
+      "risk_flags": [
+        "external_reference_candidate",
+        "requires_curation",
+        "v2_not_promotion_eligible"
+      ],
+      "required_next_steps": [
+        "source_review",
+        "xray_static_scan",
+        "v2_replay",
+        "sandbox_shadow"
+      ],
+      "security_contract_version": "v2",
+      "promotion_credit_source": "v2_only",
+      "requires_sandbox_attestation": true,
+      "requires_runtime_signed_receipt": true,
+      "requires_clean_slate_isolation": true,
+      "requires_trust_mismatch_zero": true,
+      "requires_negative_control_block": true,
+      "expected_status": "DIAGNOSTIC_ONLY_UNTIL_EXECUTED"
+    },
+    {
+      "row_id": "ztv2-014-memory-wrong_or_quarantined_skill_v2",
+      "capability_id": "memory",
+      "skill_id": "product-self-knowledge",
+      "source_skill_id": "product-self-knowledge",
+      "arm_type": "wrong_or_quarantined_skill_v2",
+      "shadow_output_affects_runtime": false,
+      "v1_context_only": true,
+      "v1_evidence_count": 1,
+      "v2_evidence_count": 0,
+      "risk_flags": [
+        "external_reference_candidate",
+        "requires_curation",
+        "v2_not_promotion_eligible"
+      ],
+      "required_next_steps": [
+        "source_review",
+        "xray_static_scan",
+        "v2_replay",
+        "sandbox_shadow"
+      ],
+      "security_contract_version": "v2",
+      "promotion_credit_source": "v2_only",
+      "requires_sandbox_attestation": true,
+      "requires_runtime_signed_receipt": true,
+      "requires_clean_slate_isolation": true,
+      "requires_trust_mismatch_zero": true,
+      "requires_negative_control_block": true,
+      "expected_status": "BLOCKED_BY_POLICY"
+    },
+    {
+      "row_id": "ztv2-014-memory-shadow_candidate_v2",
+      "capability_id": "memory",
+      "skill_id": "product-self-knowledge",
+      "source_skill_id": "product-self-knowledge",
+      "arm_type": "shadow_candidate_v2",
+      "shadow_output_affects_runtime": false,
+      "v1_context_only": true,
+      "v1_evidence_count": 1,
+      "v2_evidence_count": 0,
+      "risk_flags": [
+        "external_reference_candidate",
+        "requires_curation",
+        "v2_not_promotion_eligible"
+      ],
+      "required_next_steps": [
+        "source_review",
+        "xray_static_scan",
+        "v2_replay",
+        "sandbox_shadow"
+      ],
+      "security_contract_version": "v2",
+      "promotion_credit_source": "v2_only",
+      "requires_sandbox_attestation": true,
+      "requires_runtime_signed_receipt": true,
+      "requires_clean_slate_isolation": true,
+      "requires_trust_mismatch_zero": true,
+      "requires_negative_control_block": true,
+      "expected_status": "DIAGNOSTIC_ONLY_UNTIL_EXECUTED"
+    },
+    {
+      "row_id": "ztv2-015-metabolism_resume-capability_only_v2",
+      "capability_id": "metabolism_resume",
+      "skill_id": "",
+      "source_skill_id": "addy-shipping-and-launch",
+      "arm_type": "capability_only_v2",
+      "shadow_output_affects_runtime": false,
+      "v1_context_only": true,
+      "v1_evidence_count": 1,
+      "v2_evidence_count": 0,
+      "risk_flags": [
+        "external_reference_candidate",
+        "requires_curation",
+        "v2_not_promotion_eligible"
+      ],
+      "required_next_steps": [
+        "source_review",
+        "xray_static_scan",
+        "v2_replay",
+        "sandbox_shadow"
+      ],
+      "security_contract_version": "v2",
+      "promotion_credit_source": "v2_only",
+      "requires_sandbox_attestation": true,
+      "requires_runtime_signed_receipt": true,
+      "requires_clean_slate_isolation": true,
+      "requires_trust_mismatch_zero": true,
+      "requires_negative_control_block": true,
+      "expected_status": "BASELINE"
+    },
+    {
+      "row_id": "ztv2-015-metabolism_resume-candidate_skill_v2",
+      "capability_id": "metabolism_resume",
+      "skill_id": "addy-shipping-and-launch",
+      "source_skill_id": "addy-shipping-and-launch",
+      "arm_type": "candidate_skill_v2",
+      "shadow_output_affects_runtime": false,
+      "v1_context_only": true,
+      "v1_evidence_count": 1,
+      "v2_evidence_count": 0,
+      "risk_flags": [
+        "external_reference_candidate",
+        "requires_curation",
+        "v2_not_promotion_eligible"
+      ],
+      "required_next_steps": [
+        "source_review",
+        "xray_static_scan",
+        "v2_replay",
+        "sandbox_shadow"
+      ],
+      "security_contract_version": "v2",
+      "promotion_credit_source": "v2_only",
+      "requires_sandbox_attestation": true,
+      "requires_runtime_signed_receipt": true,
+      "requires_clean_slate_isolation": true,
+      "requires_trust_mismatch_zero": true,
+      "requires_negative_control_block": true,
+      "expected_status": "DIAGNOSTIC_ONLY_UNTIL_EXECUTED"
+    },
+    {
+      "row_id": "ztv2-015-metabolism_resume-wrong_or_quarantined_skill_v2",
+      "capability_id": "metabolism_resume",
+      "skill_id": "addy-shipping-and-launch",
+      "source_skill_id": "addy-shipping-and-launch",
+      "arm_type": "wrong_or_quarantined_skill_v2",
+      "shadow_output_affects_runtime": false,
+      "v1_context_only": true,
+      "v1_evidence_count": 1,
+      "v2_evidence_count": 0,
+      "risk_flags": [
+        "external_reference_candidate",
+        "requires_curation",
+        "v2_not_promotion_eligible"
+      ],
+      "required_next_steps": [
+        "source_review",
+        "xray_static_scan",
+        "v2_replay",
+        "sandbox_shadow"
+      ],
+      "security_contract_version": "v2",
+      "promotion_credit_source": "v2_only",
+      "requires_sandbox_attestation": true,
+      "requires_runtime_signed_receipt": true,
+      "requires_clean_slate_isolation": true,
+      "requires_trust_mismatch_zero": true,
+      "requires_negative_control_block": true,
+      "expected_status": "BLOCKED_BY_POLICY"
+    },
+    {
+      "row_id": "ztv2-015-metabolism_resume-shadow_candidate_v2",
+      "capability_id": "metabolism_resume",
+      "skill_id": "addy-shipping-and-launch",
+      "source_skill_id": "addy-shipping-and-launch",
+      "arm_type": "shadow_candidate_v2",
+      "shadow_output_affects_runtime": false,
+      "v1_context_only": true,
+      "v1_evidence_count": 1,
+      "v2_evidence_count": 0,
+      "risk_flags": [
+        "external_reference_candidate",
+        "requires_curation",
+        "v2_not_promotion_eligible"
+      ],
+      "required_next_steps": [
+        "source_review",
+        "xray_static_scan",
+        "v2_replay",
+        "sandbox_shadow"
+      ],
+      "security_contract_version": "v2",
+      "promotion_credit_source": "v2_only",
+      "requires_sandbox_attestation": true,
+      "requires_runtime_signed_receipt": true,
+      "requires_clean_slate_isolation": true,
+      "requires_trust_mismatch_zero": true,
+      "requires_negative_control_block": true,
+      "expected_status": "DIAGNOSTIC_ONLY_UNTIL_EXECUTED"
+    },
+    {
+      "row_id": "ztv2-016-nightshift-capability_only_v2",
+      "capability_id": "nightshift",
+      "skill_id": "",
+      "source_skill_id": "canary",
+      "arm_type": "capability_only_v2",
+      "shadow_output_affects_runtime": false,
+      "v1_context_only": true,
+      "v1_evidence_count": 1,
+      "v2_evidence_count": 0,
+      "risk_flags": [
+        "external_reference_candidate",
+        "requires_curation",
+        "v2_not_promotion_eligible"
+      ],
+      "required_next_steps": [
+        "source_review",
+        "xray_static_scan",
+        "v2_replay",
+        "sandbox_shadow"
+      ],
+      "security_contract_version": "v2",
+      "promotion_credit_source": "v2_only",
+      "requires_sandbox_attestation": true,
+      "requires_runtime_signed_receipt": true,
+      "requires_clean_slate_isolation": true,
+      "requires_trust_mismatch_zero": true,
+      "requires_negative_control_block": true,
+      "expected_status": "BASELINE"
+    },
+    {
+      "row_id": "ztv2-016-nightshift-candidate_skill_v2",
+      "capability_id": "nightshift",
+      "skill_id": "canary",
+      "source_skill_id": "canary",
+      "arm_type": "candidate_skill_v2",
+      "shadow_output_affects_runtime": false,
+      "v1_context_only": true,
+      "v1_evidence_count": 1,
+      "v2_evidence_count": 0,
+      "risk_flags": [
+        "external_reference_candidate",
+        "requires_curation",
+        "v2_not_promotion_eligible"
+      ],
+      "required_next_steps": [
+        "source_review",
+        "xray_static_scan",
+        "v2_replay",
+        "sandbox_shadow"
+      ],
+      "security_contract_version": "v2",
+      "promotion_credit_source": "v2_only",
+      "requires_sandbox_attestation": true,
+      "requires_runtime_signed_receipt": true,
+      "requires_clean_slate_isolation": true,
+      "requires_trust_mismatch_zero": true,
+      "requires_negative_control_block": true,
+      "expected_status": "DIAGNOSTIC_ONLY_UNTIL_EXECUTED"
+    },
+    {
+      "row_id": "ztv2-016-nightshift-wrong_or_quarantined_skill_v2",
+      "capability_id": "nightshift",
+      "skill_id": "canary",
+      "source_skill_id": "canary",
+      "arm_type": "wrong_or_quarantined_skill_v2",
+      "shadow_output_affects_runtime": false,
+      "v1_context_only": true,
+      "v1_evidence_count": 1,
+      "v2_evidence_count": 0,
+      "risk_flags": [
+        "external_reference_candidate",
+        "requires_curation",
+        "v2_not_promotion_eligible"
+      ],
+      "required_next_steps": [
+        "source_review",
+        "xray_static_scan",
+        "v2_replay",
+        "sandbox_shadow"
+      ],
+      "security_contract_version": "v2",
+      "promotion_credit_source": "v2_only",
+      "requires_sandbox_attestation": true,
+      "requires_runtime_signed_receipt": true,
+      "requires_clean_slate_isolation": true,
+      "requires_trust_mismatch_zero": true,
+      "requires_negative_control_block": true,
+      "expected_status": "BLOCKED_BY_POLICY"
+    },
+    {
+      "row_id": "ztv2-016-nightshift-shadow_candidate_v2",
+      "capability_id": "nightshift",
+      "skill_id": "canary",
+      "source_skill_id": "canary",
+      "arm_type": "shadow_candidate_v2",
+      "shadow_output_affects_runtime": false,
+      "v1_context_only": true,
+      "v1_evidence_count": 1,
+      "v2_evidence_count": 0,
+      "risk_flags": [
+        "external_reference_candidate",
+        "requires_curation",
+        "v2_not_promotion_eligible"
+      ],
+      "required_next_steps": [
+        "source_review",
+        "xray_static_scan",
+        "v2_replay",
+        "sandbox_shadow"
+      ],
+      "security_contract_version": "v2",
+      "promotion_credit_source": "v2_only",
+      "requires_sandbox_attestation": true,
+      "requires_runtime_signed_receipt": true,
+      "requires_clean_slate_isolation": true,
+      "requires_trust_mismatch_zero": true,
+      "requires_negative_control_block": true,
+      "expected_status": "DIAGNOSTIC_ONLY_UNTIL_EXECUTED"
+    },
+    {
+      "row_id": "ztv2-017-registry_skills_sync-capability_only_v2",
+      "capability_id": "registry_skills_sync",
+      "skill_id": "",
+      "source_skill_id": "gstack-sync-gbrain",
+      "arm_type": "capability_only_v2",
+      "shadow_output_affects_runtime": false,
+      "v1_context_only": true,
+      "v1_evidence_count": 1,
+      "v2_evidence_count": 0,
+      "risk_flags": [
+        "external_reference_candidate",
+        "requires_curation",
+        "v2_not_promotion_eligible"
+      ],
+      "required_next_steps": [
+        "source_review",
+        "xray_static_scan",
+        "v2_replay",
+        "sandbox_shadow"
+      ],
+      "security_contract_version": "v2",
+      "promotion_credit_source": "v2_only",
+      "requires_sandbox_attestation": true,
+      "requires_runtime_signed_receipt": true,
+      "requires_clean_slate_isolation": true,
+      "requires_trust_mismatch_zero": true,
+      "requires_negative_control_block": true,
+      "expected_status": "BASELINE"
+    },
+    {
+      "row_id": "ztv2-017-registry_skills_sync-candidate_skill_v2",
+      "capability_id": "registry_skills_sync",
+      "skill_id": "gstack-sync-gbrain",
+      "source_skill_id": "gstack-sync-gbrain",
+      "arm_type": "candidate_skill_v2",
+      "shadow_output_affects_runtime": false,
+      "v1_context_only": true,
+      "v1_evidence_count": 1,
+      "v2_evidence_count": 0,
+      "risk_flags": [
+        "external_reference_candidate",
+        "requires_curation",
+        "v2_not_promotion_eligible"
+      ],
+      "required_next_steps": [
+        "source_review",
+        "xray_static_scan",
+        "v2_replay",
+        "sandbox_shadow"
+      ],
+      "security_contract_version": "v2",
+      "promotion_credit_source": "v2_only",
+      "requires_sandbox_attestation": true,
+      "requires_runtime_signed_receipt": true,
+      "requires_clean_slate_isolation": true,
+      "requires_trust_mismatch_zero": true,
+      "requires_negative_control_block": true,
+      "expected_status": "DIAGNOSTIC_ONLY_UNTIL_EXECUTED"
+    },
+    {
+      "row_id": "ztv2-017-registry_skills_sync-wrong_or_quarantined_skill_v2",
+      "capability_id": "registry_skills_sync",
+      "skill_id": "gstack-sync-gbrain",
+      "source_skill_id": "gstack-sync-gbrain",
+      "arm_type": "wrong_or_quarantined_skill_v2",
+      "shadow_output_affects_runtime": false,
+      "v1_context_only": true,
+      "v1_evidence_count": 1,
+      "v2_evidence_count": 0,
+      "risk_flags": [
+        "external_reference_candidate",
+        "requires_curation",
+        "v2_not_promotion_eligible"
+      ],
+      "required_next_steps": [
+        "source_review",
+        "xray_static_scan",
+        "v2_replay",
+        "sandbox_shadow"
+      ],
+      "security_contract_version": "v2",
+      "promotion_credit_source": "v2_only",
+      "requires_sandbox_attestation": true,
+      "requires_runtime_signed_receipt": true,
+      "requires_clean_slate_isolation": true,
+      "requires_trust_mismatch_zero": true,
+      "requires_negative_control_block": true,
+      "expected_status": "BLOCKED_BY_POLICY"
+    },
+    {
+      "row_id": "ztv2-017-registry_skills_sync-shadow_candidate_v2",
+      "capability_id": "registry_skills_sync",
+      "skill_id": "gstack-sync-gbrain",
+      "source_skill_id": "gstack-sync-gbrain",
+      "arm_type": "shadow_candidate_v2",
+      "shadow_output_affects_runtime": false,
+      "v1_context_only": true,
+      "v1_evidence_count": 1,
+      "v2_evidence_count": 0,
+      "risk_flags": [
+        "external_reference_candidate",
+        "requires_curation",
+        "v2_not_promotion_eligible"
+      ],
+      "required_next_steps": [
+        "source_review",
+        "xray_static_scan",
+        "v2_replay",
+        "sandbox_shadow"
+      ],
+      "security_contract_version": "v2",
+      "promotion_credit_source": "v2_only",
+      "requires_sandbox_attestation": true,
+      "requires_runtime_signed_receipt": true,
+      "requires_clean_slate_isolation": true,
+      "requires_trust_mismatch_zero": true,
+      "requires_negative_control_block": true,
+      "expected_status": "DIAGNOSTIC_ONLY_UNTIL_EXECUTED"
+    },
+    {
+      "row_id": "ztv2-018-research-capability_only_v2",
+      "capability_id": "research",
+      "skill_id": "",
+      "source_skill_id": "gbrain-academic-verify",
+      "arm_type": "capability_only_v2",
+      "shadow_output_affects_runtime": false,
+      "v1_context_only": true,
+      "v1_evidence_count": 1,
+      "v2_evidence_count": 0,
+      "risk_flags": [
+        "external_reference_candidate",
+        "requires_curation",
+        "v2_not_promotion_eligible"
+      ],
+      "required_next_steps": [
+        "source_review",
+        "xray_static_scan",
+        "v2_replay",
+        "sandbox_shadow"
+      ],
+      "security_contract_version": "v2",
+      "promotion_credit_source": "v2_only",
+      "requires_sandbox_attestation": true,
+      "requires_runtime_signed_receipt": true,
+      "requires_clean_slate_isolation": true,
+      "requires_trust_mismatch_zero": true,
+      "requires_negative_control_block": true,
+      "expected_status": "BASELINE"
+    },
+    {
+      "row_id": "ztv2-018-research-candidate_skill_v2",
+      "capability_id": "research",
+      "skill_id": "gbrain-academic-verify",
+      "source_skill_id": "gbrain-academic-verify",
+      "arm_type": "candidate_skill_v2",
+      "shadow_output_affects_runtime": false,
+      "v1_context_only": true,
+      "v1_evidence_count": 1,
+      "v2_evidence_count": 0,
+      "risk_flags": [
+        "external_reference_candidate",
+        "requires_curation",
+        "v2_not_promotion_eligible"
+      ],
+      "required_next_steps": [
+        "source_review",
+        "xray_static_scan",
+        "v2_replay",
+        "sandbox_shadow"
+      ],
+      "security_contract_version": "v2",
+      "promotion_credit_source": "v2_only",
+      "requires_sandbox_attestation": true,
+      "requires_runtime_signed_receipt": true,
+      "requires_clean_slate_isolation": true,
+      "requires_trust_mismatch_zero": true,
+      "requires_negative_control_block": true,
+      "expected_status": "DIAGNOSTIC_ONLY_UNTIL_EXECUTED"
+    },
+    {
+      "row_id": "ztv2-018-research-wrong_or_quarantined_skill_v2",
+      "capability_id": "research",
+      "skill_id": "gbrain-academic-verify",
+      "source_skill_id": "gbrain-academic-verify",
+      "arm_type": "wrong_or_quarantined_skill_v2",
+      "shadow_output_affects_runtime": false,
+      "v1_context_only": true,
+      "v1_evidence_count": 1,
+      "v2_evidence_count": 0,
+      "risk_flags": [
+        "external_reference_candidate",
+        "requires_curation",
+        "v2_not_promotion_eligible"
+      ],
+      "required_next_steps": [
+        "source_review",
+        "xray_static_scan",
+        "v2_replay",
+        "sandbox_shadow"
+      ],
+      "security_contract_version": "v2",
+      "promotion_credit_source": "v2_only",
+      "requires_sandbox_attestation": true,
+      "requires_runtime_signed_receipt": true,
+      "requires_clean_slate_isolation": true,
+      "requires_trust_mismatch_zero": true,
+      "requires_negative_control_block": true,
+      "expected_status": "BLOCKED_BY_POLICY"
+    },
+    {
+      "row_id": "ztv2-018-research-shadow_candidate_v2",
+      "capability_id": "research",
+      "skill_id": "gbrain-academic-verify",
+      "source_skill_id": "gbrain-academic-verify",
+      "arm_type": "shadow_candidate_v2",
+      "shadow_output_affects_runtime": false,
+      "v1_context_only": true,
+      "v1_evidence_count": 1,
+      "v2_evidence_count": 0,
+      "risk_flags": [
+        "external_reference_candidate",
+        "requires_curation",
+        "v2_not_promotion_eligible"
+      ],
+      "required_next_steps": [
+        "source_review",
+        "xray_static_scan",
+        "v2_replay",
+        "sandbox_shadow"
+      ],
+      "security_contract_version": "v2",
+      "promotion_credit_source": "v2_only",
+      "requires_sandbox_attestation": true,
+      "requires_runtime_signed_receipt": true,
+      "requires_clean_slate_isolation": true,
+      "requires_trust_mismatch_zero": true,
+      "requires_negative_control_block": true,
+      "expected_status": "DIAGNOSTIC_ONLY_UNTIL_EXECUTED"
+    },
+    {
+      "row_id": "ztv2-019-research_and_source_discipline-capability_only_v2",
+      "capability_id": "research_and_source_discipline",
+      "skill_id": "",
+      "source_skill_id": "gbrain-maintain",
+      "arm_type": "capability_only_v2",
+      "shadow_output_affects_runtime": false,
+      "v1_context_only": true,
+      "v1_evidence_count": 1,
+      "v2_evidence_count": 0,
+      "risk_flags": [
+        "external_reference_candidate",
+        "requires_curation",
+        "v2_not_promotion_eligible"
+      ],
+      "required_next_steps": [
+        "source_review",
+        "xray_static_scan",
+        "v2_replay",
+        "sandbox_shadow"
+      ],
+      "security_contract_version": "v2",
+      "promotion_credit_source": "v2_only",
+      "requires_sandbox_attestation": true,
+      "requires_runtime_signed_receipt": true,
+      "requires_clean_slate_isolation": true,
+      "requires_trust_mismatch_zero": true,
+      "requires_negative_control_block": true,
+      "expected_status": "BASELINE"
+    },
+    {
+      "row_id": "ztv2-019-research_and_source_discipline-candidate_skill_v2",
+      "capability_id": "research_and_source_discipline",
+      "skill_id": "gbrain-maintain",
+      "source_skill_id": "gbrain-maintain",
+      "arm_type": "candidate_skill_v2",
+      "shadow_output_affects_runtime": false,
+      "v1_context_only": true,
+      "v1_evidence_count": 1,
+      "v2_evidence_count": 0,
+      "risk_flags": [
+        "external_reference_candidate",
+        "requires_curation",
+        "v2_not_promotion_eligible"
+      ],
+      "required_next_steps": [
+        "source_review",
+        "xray_static_scan",
+        "v2_replay",
+        "sandbox_shadow"
+      ],
+      "security_contract_version": "v2",
+      "promotion_credit_source": "v2_only",
+      "requires_sandbox_attestation": true,
+      "requires_runtime_signed_receipt": true,
+      "requires_clean_slate_isolation": true,
+      "requires_trust_mismatch_zero": true,
+      "requires_negative_control_block": true,
+      "expected_status": "DIAGNOSTIC_ONLY_UNTIL_EXECUTED"
+    },
+    {
+      "row_id": "ztv2-019-research_and_source_discipline-wrong_or_quarantined_skill_v2",
+      "capability_id": "research_and_source_discipline",
+      "skill_id": "gbrain-maintain",
+      "source_skill_id": "gbrain-maintain",
+      "arm_type": "wrong_or_quarantined_skill_v2",
+      "shadow_output_affects_runtime": false,
+      "v1_context_only": true,
+      "v1_evidence_count": 1,
+      "v2_evidence_count": 0,
+      "risk_flags": [
+        "external_reference_candidate",
+        "requires_curation",
+        "v2_not_promotion_eligible"
+      ],
+      "required_next_steps": [
+        "source_review",
+        "xray_static_scan",
+        "v2_replay",
+        "sandbox_shadow"
+      ],
+      "security_contract_version": "v2",
+      "promotion_credit_source": "v2_only",
+      "requires_sandbox_attestation": true,
+      "requires_runtime_signed_receipt": true,
+      "requires_clean_slate_isolation": true,
+      "requires_trust_mismatch_zero": true,
+      "requires_negative_control_block": true,
+      "expected_status": "BLOCKED_BY_POLICY"
+    },
+    {
+      "row_id": "ztv2-019-research_and_source_discipline-shadow_candidate_v2",
+      "capability_id": "research_and_source_discipline",
+      "skill_id": "gbrain-maintain",
+      "source_skill_id": "gbrain-maintain",
+      "arm_type": "shadow_candidate_v2",
+      "shadow_output_affects_runtime": false,
+      "v1_context_only": true,
+      "v1_evidence_count": 1,
+      "v2_evidence_count": 0,
+      "risk_flags": [
+        "external_reference_candidate",
+        "requires_curation",
+        "v2_not_promotion_eligible"
+      ],
+      "required_next_steps": [
+        "source_review",
+        "xray_static_scan",
+        "v2_replay",
+        "sandbox_shadow"
+      ],
+      "security_contract_version": "v2",
+      "promotion_credit_source": "v2_only",
+      "requires_sandbox_attestation": true,
+      "requires_runtime_signed_receipt": true,
+      "requires_clean_slate_isolation": true,
+      "requires_trust_mismatch_zero": true,
+      "requires_negative_control_block": true,
+      "expected_status": "DIAGNOSTIC_ONLY_UNTIL_EXECUTED"
+    }
+  ]
+}

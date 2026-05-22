@@ -1,0 +1,58 @@
+{
+  "schema": "nexus.zero_trust_v2.sandbox_probe_report.v1",
+  "status": "PASS",
+  "created_at": "2026-05-21T12:57:13.453939+00:00",
+  "summary": {
+    "probe_status": "PASS",
+    "promotion_eligible": true,
+    "sandbox_mode": "macos_sandbox",
+    "attestation_validation_status": "PASS",
+    "runtime_mutation_allowed": false,
+    "public_benchmark_allowed": false
+  },
+  "probe": {
+    "schema": "nexus.zero_trust_v2.physical_sandbox_probe.v1",
+    "status": "PASS",
+    "promotion_eligible": true,
+    "command": [
+      "/bin/echo",
+      "nexus-zero-trust-v2-sandbox-probe"
+    ],
+    "sandbox_attestation": {
+      "issuer": "nexus.runner",
+      "sandbox_mode": "macos_sandbox",
+      "status": "PASS",
+      "network_disabled": true,
+      "workspace_isolated": true,
+      "tmp_isolated": true,
+      "env_allowlist_hash": "01269ffa0137ef15d052bea0ccebc0a55f34e10a17423727c2b0dd75dba3c93e",
+      "resource_limits": {
+        "cpu": "process_timeout",
+        "memory_mb": 512,
+        "timeout_sec": 3
+      },
+      "teardown_status": "PASS",
+      "artifact_hash": "ba0bfdfcfefcd5bc241f2c98d64f35ba5e0eac41ea071624a49e6555f0fc98f2",
+      "runner_quarantine_status": "NONE",
+      "raw_observation": {
+        "returncode": 0,
+        "stdout_sha256": "bb78cc32fc2d54c1d1994800efc3e7fd8d5bc0e1394c3d9f22b17034f224f2a2",
+        "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "timed_out": false,
+        "sandbox_available": true,
+        "sandbox_apply_failed": false
+      },
+      "signature": "a390d6558bd4d6cc2c4f3e20c247043746c58225ddf5646ad62d1f452138e9ab"
+    }
+  },
+  "attestation_validation": {
+    "status": "PASS",
+    "reasons": [],
+    "sandbox_mode": "macos_sandbox"
+  },
+  "claim_boundary": [
+    "This probe validates runner-owned sandbox attestation shape only.",
+    "A blocked probe must not produce V2 promotion credit.",
+    "The signing secret is consumed by the runner observer and is not forwarded to the child process."
+  ]
+}

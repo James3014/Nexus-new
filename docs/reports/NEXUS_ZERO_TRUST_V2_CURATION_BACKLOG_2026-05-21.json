@@ -1,0 +1,1174 @@
+{
+  "schema": "nexus.zero_trust_v2.curation_backlog.v1",
+  "status": "PASS",
+  "created_at": "2026-05-22T00:58:11.527213+00:00",
+  "source_runtime_apply_decision": "docs/reports/NEXUS_SF_FINAL_RUNTIME_APPLY_DECISION_2026-05-21.json",
+  "summary": {
+    "candidate_count": 34,
+    "applied_replacement_count": 19,
+    "kept_primary_count": 15,
+    "kept_primary_v2_coverage_count": 15,
+    "requires_curation_count": 19,
+    "external_reference_candidate_count": 19,
+    "cross_capability_reject_warning_count": 1,
+    "v2_ready_count": 0,
+    "v1_evidence_count": 19,
+    "v2_evidence_count": 0,
+    "promotion_credit_source": "none",
+    "runtime_update_allowed": true,
+    "public_benchmark_allowed": false,
+    "priority_counts": {
+      "P0": 7,
+      "P1": 4,
+      "P2": 23
+    }
+  },
+  "items": [
+    {
+      "capability_id": "claim_gate",
+      "skill_id": "addy-doubt-driven-development",
+      "previous_skill_id": "nexus-benchmark-continuous-optimization",
+      "source_status": "external_reference_candidate",
+      "current_runtime_scope": "overlay_only_requires_curation",
+      "security_contract_version": "v1_diagnostic_only",
+      "promotion_credit_source": "none",
+      "v1_evidence_count": 1,
+      "v2_evidence_count": 0,
+      "v2_trust_mismatch_count": 0,
+      "requires_sandbox_attestation": true,
+      "sandbox_attestation_status": "missing_not_required_for_overlay_only",
+      "v2_promotion_eligible": false,
+      "curation_status": "PENDING",
+      "priority": "P0",
+      "risk_flags": [
+        "external_reference_candidate",
+        "requires_curation",
+        "v2_not_promotion_eligible"
+      ],
+      "reject_conflict_warnings": [],
+      "required_next_steps": [
+        "source_review",
+        "xray_static_scan",
+        "v2_replay",
+        "sandbox_shadow"
+      ],
+      "evidence_refs": [
+        ".nexus/reports/sf_final_all_candidate_live_compare_chunk2_2026-05-21/claim_gate_sf-final-all-live-compare-claim_gate-001_candidate_skill_addy-doubt-driven-development/evidence_bundle.json"
+      ],
+      "receipt_path": ".nexus/reports/sf_final_all_candidate_live_compare_chunk2_2026-05-21/claim_gate_sf-final-all-live-compare-claim_gate-001_candidate_skill_addy-doubt-driven-development",
+      "decision": "runtime_primary_replaced",
+      "coverage_lane": "applied_replacement_v2_curation"
+    },
+    {
+      "capability_id": "file_lock_security_gate",
+      "skill_id": "browserbase-what-antibot",
+      "previous_skill_id": "sf2-file_lock_security_gate-route-fit-spec",
+      "source_status": "external_reference_candidate",
+      "current_runtime_scope": "overlay_only_requires_curation",
+      "security_contract_version": "v1_diagnostic_only",
+      "promotion_credit_source": "none",
+      "v1_evidence_count": 1,
+      "v2_evidence_count": 0,
+      "v2_trust_mismatch_count": 0,
+      "requires_sandbox_attestation": true,
+      "sandbox_attestation_status": "missing_not_required_for_overlay_only",
+      "v2_promotion_eligible": false,
+      "curation_status": "PENDING",
+      "priority": "P0",
+      "risk_flags": [
+        "external_reference_candidate",
+        "requires_curation",
+        "v2_not_promotion_eligible"
+      ],
+      "reject_conflict_warnings": [],
+      "required_next_steps": [
+        "source_review",
+        "xray_static_scan",
+        "v2_replay",
+        "sandbox_shadow"
+      ],
+      "evidence_refs": [
+        ".nexus/reports/sf_final_all_candidate_live_compare_chunk3_2026-05-21/file_lock_security_gate_sf-final-all-live-compare-file_lock_security_gate-001_candidate_skill_browserbase-what-antibot/evidence_bundle.json"
+      ],
+      "receipt_path": ".nexus/reports/sf_final_all_candidate_live_compare_chunk3_2026-05-21/file_lock_security_gate_sf-final-all-live-compare-file_lock_security_gate-001_candidate_skill_browserbase-what-antibot",
+      "decision": "runtime_primary_replaced",
+      "coverage_lane": "applied_replacement_v2_curation"
+    },
+    {
+      "capability_id": "governance_and_trust",
+      "skill_id": "sf-systematic-governance_and_trust-aegisops-ai-0aa841e2",
+      "previous_skill_id": "sf-systematic-governance_and_trust-aegisops-ai-0aa841e2",
+      "source_status": "current_runtime_primary",
+      "current_runtime_scope": "kept_primary_requires_v2_coverage",
+      "security_contract_version": "v2_coverage_required",
+      "promotion_credit_source": "none",
+      "v1_evidence_count": 0,
+      "v2_evidence_count": 0,
+      "v2_trust_mismatch_count": 0,
+      "requires_sandbox_attestation": false,
+      "sandbox_attestation_status": "missing_for_v2_coverage",
+      "v2_promotion_eligible": false,
+      "curation_status": "PENDING",
+      "priority": "P0",
+      "risk_flags": [
+        "v2_not_promotion_eligible"
+      ],
+      "reject_conflict_warnings": [],
+      "required_next_steps": [
+        "source_review",
+        "xray_static_scan",
+        "v2_replay",
+        "sandbox_shadow"
+      ],
+      "evidence_refs": [],
+      "receipt_path": "",
+      "decision": "runtime_primary_kept",
+      "coverage_lane": "kept_primary_v2_coverage"
+    },
+    {
+      "capability_id": "policy_capability_gate",
+      "skill_id": "browse",
+      "previous_skill_id": "sf-systematic-policy_capability_gate-aegisops-ai-0aa841e2",
+      "source_status": "external_reference_candidate",
+      "current_runtime_scope": "overlay_only_requires_curation",
+      "security_contract_version": "v1_diagnostic_only",
+      "promotion_credit_source": "none",
+      "v1_evidence_count": 1,
+      "v2_evidence_count": 0,
+      "v2_trust_mismatch_count": 0,
+      "requires_sandbox_attestation": true,
+      "sandbox_attestation_status": "missing_not_required_for_overlay_only",
+      "v2_promotion_eligible": false,
+      "curation_status": "PENDING",
+      "priority": "P0",
+      "risk_flags": [
+        "external_reference_candidate",
+        "requires_curation",
+        "v2_not_promotion_eligible"
+      ],
+      "reject_conflict_warnings": [],
+      "required_next_steps": [
+        "source_review",
+        "xray_static_scan",
+        "v2_replay",
+        "sandbox_shadow"
+      ],
+      "evidence_refs": [
+        ".nexus/reports/sf_final_all_candidate_live_compare_chunk5_2026-05-21/policy_capability_gate_sf-final-all-live-compare-policy_capability_gate-001_candidate_skill_browse/evidence_bundle.json"
+      ],
+      "receipt_path": ".nexus/reports/sf_final_all_candidate_live_compare_chunk5_2026-05-21/policy_capability_gate_sf-final-all-live-compare-policy_capability_gate-001_candidate_skill_browse",
+      "decision": "runtime_primary_replaced",
+      "coverage_lane": "applied_replacement_v2_curation"
+    },
+    {
+      "capability_id": "research_control_plane",
+      "skill_id": "browserbase-fetch",
+      "previous_skill_id": "sf-systematic-research_control_plane-research-lookup-7e6f92a0",
+      "source_status": "external_reference_candidate",
+      "current_runtime_scope": "overlay_only_requires_curation",
+      "security_contract_version": "v1_diagnostic_only",
+      "promotion_credit_source": "none",
+      "v1_evidence_count": 1,
+      "v2_evidence_count": 0,
+      "v2_trust_mismatch_count": 0,
+      "requires_sandbox_attestation": true,
+      "sandbox_attestation_status": "missing_not_required_for_overlay_only",
+      "v2_promotion_eligible": false,
+      "curation_status": "PENDING",
+      "priority": "P0",
+      "risk_flags": [
+        "cross_capability_reject_conflict",
+        "external_reference_candidate",
+        "requires_curation",
+        "v2_not_promotion_eligible"
+      ],
+      "reject_conflict_warnings": [
+        {
+          "capability_id": "research_control_plane",
+          "skill_id": "browserbase-fetch",
+          "reject_capability": "xray",
+          "reject_verdict": "reject",
+          "reject_runtime_eligible": false,
+          "reason": "cross_capability_reject_conflict"
+        }
+      ],
+      "required_next_steps": [
+        "source_review",
+        "reject_conflict_review",
+        "xray_static_scan",
+        "v2_replay",
+        "sandbox_shadow"
+      ],
+      "evidence_refs": [
+        ".nexus/reports/sf_final_all_candidate_live_compare_chunk6_2026-05-21/research_control_plane_sf-final-all-live-compare-research_control_plane-001_candidate_skill_browserbase-fetch/evidence_bundle.json"
+      ],
+      "receipt_path": ".nexus/reports/sf_final_all_candidate_live_compare_chunk6_2026-05-21/research_control_plane_sf-final-all-live-compare-research_control_plane-001_candidate_skill_browserbase-fetch",
+      "decision": "runtime_primary_replaced",
+      "coverage_lane": "applied_replacement_v2_curation"
+    },
+    {
+      "capability_id": "sandbox_replay",
+      "skill_id": "nexus-acceptance-evidence-gate",
+      "previous_skill_id": "sf2-sandbox_replay-route-fit-spec",
+      "source_status": "external_reference_candidate",
+      "current_runtime_scope": "overlay_only_requires_curation",
+      "security_contract_version": "v1_diagnostic_only",
+      "promotion_credit_source": "none",
+      "v1_evidence_count": 1,
+      "v2_evidence_count": 0,
+      "v2_trust_mismatch_count": 0,
+      "requires_sandbox_attestation": true,
+      "sandbox_attestation_status": "missing_not_required_for_overlay_only",
+      "v2_promotion_eligible": false,
+      "curation_status": "PENDING",
+      "priority": "P0",
+      "risk_flags": [
+        "external_reference_candidate",
+        "requires_curation",
+        "v2_not_promotion_eligible"
+      ],
+      "reject_conflict_warnings": [],
+      "required_next_steps": [
+        "source_review",
+        "xray_static_scan",
+        "v2_replay",
+        "sandbox_shadow"
+      ],
+      "evidence_refs": [
+        ".nexus/reports/sf_final_all_candidate_live_compare_chunk6_2026-05-21/sandbox_replay_sf-final-all-live-compare-sandbox_replay-001_candidate_skill_nexus-acceptance-evidence-gate/evidence_bundle.json"
+      ],
+      "receipt_path": ".nexus/reports/sf_final_all_candidate_live_compare_chunk6_2026-05-21/sandbox_replay_sf-final-all-live-compare-sandbox_replay-001_candidate_skill_nexus-acceptance-evidence-gate",
+      "decision": "runtime_primary_replaced",
+      "coverage_lane": "applied_replacement_v2_curation"
+    },
+    {
+      "capability_id": "xray",
+      "skill_id": "diagnose",
+      "previous_skill_id": "diagnose",
+      "source_status": "current_runtime_primary",
+      "current_runtime_scope": "kept_primary_requires_v2_coverage",
+      "security_contract_version": "v2_coverage_required",
+      "promotion_credit_source": "none",
+      "v1_evidence_count": 0,
+      "v2_evidence_count": 0,
+      "v2_trust_mismatch_count": 0,
+      "requires_sandbox_attestation": false,
+      "sandbox_attestation_status": "missing_for_v2_coverage",
+      "v2_promotion_eligible": false,
+      "curation_status": "PENDING",
+      "priority": "P0",
+      "risk_flags": [
+        "v2_not_promotion_eligible"
+      ],
+      "reject_conflict_warnings": [],
+      "required_next_steps": [
+        "source_review",
+        "xray_static_scan",
+        "v2_replay",
+        "sandbox_shadow"
+      ],
+      "evidence_refs": [],
+      "receipt_path": "",
+      "decision": "runtime_primary_kept",
+      "coverage_lane": "kept_primary_v2_coverage"
+    },
+    {
+      "capability_id": "codeintel",
+      "skill_id": "gstack-qa",
+      "previous_skill_id": "sf-systematic-codeintel-first-principles-thinking-f95019ea",
+      "source_status": "external_reference_candidate",
+      "current_runtime_scope": "overlay_only_requires_curation",
+      "security_contract_version": "v1_diagnostic_only",
+      "promotion_credit_source": "none",
+      "v1_evidence_count": 1,
+      "v2_evidence_count": 0,
+      "v2_trust_mismatch_count": 0,
+      "requires_sandbox_attestation": true,
+      "sandbox_attestation_status": "missing_not_required_for_overlay_only",
+      "v2_promotion_eligible": false,
+      "curation_status": "PENDING",
+      "priority": "P1",
+      "risk_flags": [
+        "external_reference_candidate",
+        "requires_curation",
+        "v2_not_promotion_eligible"
+      ],
+      "reject_conflict_warnings": [],
+      "required_next_steps": [
+        "source_review",
+        "xray_static_scan",
+        "v2_replay",
+        "sandbox_shadow"
+      ],
+      "evidence_refs": [
+        ".nexus/reports/sf_final_all_candidate_live_compare_chunk3_2026-05-21/codeintel_sf-final-all-live-compare-codeintel-001_candidate_skill_gstack-qa/evidence_bundle.json"
+      ],
+      "receipt_path": ".nexus/reports/sf_final_all_candidate_live_compare_chunk3_2026-05-21/codeintel_sf-final-all-live-compare-codeintel-001_candidate_skill_gstack-qa",
+      "decision": "runtime_primary_replaced",
+      "coverage_lane": "applied_replacement_v2_curation"
+    },
+    {
+      "capability_id": "direct_master_loop",
+      "skill_id": "sf-systematic-direct_master_loop-build-32802a87",
+      "previous_skill_id": "sf-systematic-direct_master_loop-build-32802a87",
+      "source_status": "current_runtime_primary",
+      "current_runtime_scope": "kept_primary_requires_v2_coverage",
+      "security_contract_version": "v2_coverage_required",
+      "promotion_credit_source": "none",
+      "v1_evidence_count": 0,
+      "v2_evidence_count": 0,
+      "v2_trust_mismatch_count": 0,
+      "requires_sandbox_attestation": false,
+      "sandbox_attestation_status": "missing_for_v2_coverage",
+      "v2_promotion_eligible": false,
+      "curation_status": "PENDING",
+      "priority": "P1",
+      "risk_flags": [
+        "v2_not_promotion_eligible"
+      ],
+      "reject_conflict_warnings": [],
+      "required_next_steps": [
+        "source_review",
+        "xray_static_scan",
+        "v2_replay",
+        "sandbox_shadow"
+      ],
+      "evidence_refs": [],
+      "receipt_path": "",
+      "decision": "runtime_primary_kept",
+      "coverage_lane": "kept_primary_v2_coverage"
+    },
+    {
+      "capability_id": "repair_loop",
+      "skill_id": "qa-only",
+      "previous_skill_id": "sf-systematic-repair_loop-odoo-automated-tests-dad98433",
+      "source_status": "external_reference_candidate",
+      "current_runtime_scope": "overlay_only_requires_curation",
+      "security_contract_version": "v1_diagnostic_only",
+      "promotion_credit_source": "none",
+      "v1_evidence_count": 1,
+      "v2_evidence_count": 0,
+      "v2_trust_mismatch_count": 0,
+      "requires_sandbox_attestation": true,
+      "sandbox_attestation_status": "missing_not_required_for_overlay_only",
+      "v2_promotion_eligible": false,
+      "curation_status": "PENDING",
+      "priority": "P1",
+      "risk_flags": [
+        "external_reference_candidate",
+        "requires_curation",
+        "v2_not_promotion_eligible"
+      ],
+      "reject_conflict_warnings": [],
+      "required_next_steps": [
+        "source_review",
+        "xray_static_scan",
+        "v2_replay",
+        "sandbox_shadow"
+      ],
+      "evidence_refs": [
+        ".nexus/reports/sf_final_all_candidate_live_compare_chunk6_2026-05-21/repair_loop_sf-final-all-live-compare-repair_loop-001_candidate_skill_qa-only/evidence_bundle.json"
+      ],
+      "receipt_path": ".nexus/reports/sf_final_all_candidate_live_compare_chunk6_2026-05-21/repair_loop_sf-final-all-live-compare-repair_loop-001_candidate_skill_qa-only",
+      "decision": "runtime_primary_replaced",
+      "coverage_lane": "applied_replacement_v2_curation"
+    },
+    {
+      "capability_id": "swarm_multi_agent",
+      "skill_id": "nexus-gemini-code-review-orchestrator",
+      "previous_skill_id": "sf2-swarm_multi_agent-route-fit-spec",
+      "source_status": "external_reference_candidate",
+      "current_runtime_scope": "overlay_only_requires_curation",
+      "security_contract_version": "v1_diagnostic_only",
+      "promotion_credit_source": "none",
+      "v1_evidence_count": 1,
+      "v2_evidence_count": 0,
+      "v2_trust_mismatch_count": 0,
+      "requires_sandbox_attestation": true,
+      "sandbox_attestation_status": "missing_not_required_for_overlay_only",
+      "v2_promotion_eligible": false,
+      "curation_status": "PENDING",
+      "priority": "P1",
+      "risk_flags": [
+        "external_reference_candidate",
+        "requires_curation",
+        "v2_not_promotion_eligible"
+      ],
+      "reject_conflict_warnings": [],
+      "required_next_steps": [
+        "source_review",
+        "xray_static_scan",
+        "v2_replay",
+        "sandbox_shadow"
+      ],
+      "evidence_refs": [
+        ".nexus/reports/sf_final_all_candidate_live_compare_chunk6_2026-05-21/swarm_multi_agent_sf-final-all-live-compare-swarm_multi_agent-001_candidate_skill_nexus-gemini-code-review-orchestrator/evidence_bundle.json"
+      ],
+      "receipt_path": ".nexus/reports/sf_final_all_candidate_live_compare_chunk6_2026-05-21/swarm_multi_agent_sf-final-all-live-compare-swarm_multi_agent-001_candidate_skill_nexus-gemini-code-review-orchestrator",
+      "decision": "runtime_primary_replaced",
+      "coverage_lane": "applied_replacement_v2_curation"
+    },
+    {
+      "capability_id": "artifact_gate",
+      "skill_id": "sf-systematic-artifact_gate-differential-review-461fbd0c",
+      "previous_skill_id": "sf-systematic-artifact_gate-differential-review-461fbd0c",
+      "source_status": "current_runtime_primary",
+      "current_runtime_scope": "kept_primary_requires_v2_coverage",
+      "security_contract_version": "v2_coverage_required",
+      "promotion_credit_source": "none",
+      "v1_evidence_count": 0,
+      "v2_evidence_count": 0,
+      "v2_trust_mismatch_count": 0,
+      "requires_sandbox_attestation": false,
+      "sandbox_attestation_status": "missing_for_v2_coverage",
+      "v2_promotion_eligible": false,
+      "curation_status": "PENDING",
+      "priority": "P2",
+      "risk_flags": [
+        "v2_not_promotion_eligible"
+      ],
+      "reject_conflict_warnings": [],
+      "required_next_steps": [
+        "source_review",
+        "xray_static_scan",
+        "v2_replay",
+        "sandbox_shadow"
+      ],
+      "evidence_refs": [],
+      "receipt_path": "",
+      "decision": "runtime_primary_kept",
+      "coverage_lane": "kept_primary_v2_coverage"
+    },
+    {
+      "capability_id": "autonomic_router",
+      "skill_id": "nexus-agent-execution-board-failclosed",
+      "previous_skill_id": "sf2-autonomic_router-route-fit-spec",
+      "source_status": "external_reference_candidate",
+      "current_runtime_scope": "overlay_only_requires_curation",
+      "security_contract_version": "v1_diagnostic_only",
+      "promotion_credit_source": "none",
+      "v1_evidence_count": 1,
+      "v2_evidence_count": 0,
+      "v2_trust_mismatch_count": 0,
+      "requires_sandbox_attestation": true,
+      "sandbox_attestation_status": "missing_not_required_for_overlay_only",
+      "v2_promotion_eligible": false,
+      "curation_status": "PENDING",
+      "priority": "P2",
+      "risk_flags": [
+        "external_reference_candidate",
+        "requires_curation",
+        "v2_not_promotion_eligible"
+      ],
+      "reject_conflict_warnings": [],
+      "required_next_steps": [
+        "source_review",
+        "xray_static_scan",
+        "v2_replay",
+        "sandbox_shadow"
+      ],
+      "evidence_refs": [
+        ".nexus/reports/sf_final_all_candidate_live_compare_chunk2_2026-05-21/autonomic_router_sf-final-all-live-compare-autonomic_router-001_candidate_skill_nexus-agent-execution-board-failclosed/evidence_bundle.json"
+      ],
+      "receipt_path": ".nexus/reports/sf_final_all_candidate_live_compare_chunk2_2026-05-21/autonomic_router_sf-final-all-live-compare-autonomic_router-001_candidate_skill_nexus-agent-execution-board-failclosed",
+      "decision": "runtime_primary_replaced",
+      "coverage_lane": "applied_replacement_v2_curation"
+    },
+    {
+      "capability_id": "autoreason",
+      "skill_id": "sf2-belief-route-fit-spec",
+      "previous_skill_id": "sf2-belief-route-fit-spec",
+      "source_status": "current_runtime_primary",
+      "current_runtime_scope": "kept_primary_requires_v2_coverage",
+      "security_contract_version": "v2_coverage_required",
+      "promotion_credit_source": "none",
+      "v1_evidence_count": 0,
+      "v2_evidence_count": 0,
+      "v2_trust_mismatch_count": 0,
+      "requires_sandbox_attestation": false,
+      "sandbox_attestation_status": "missing_for_v2_coverage",
+      "v2_promotion_eligible": false,
+      "curation_status": "PENDING",
+      "priority": "P2",
+      "risk_flags": [
+        "v2_not_promotion_eligible"
+      ],
+      "reject_conflict_warnings": [],
+      "required_next_steps": [
+        "source_review",
+        "xray_static_scan",
+        "v2_replay",
+        "sandbox_shadow"
+      ],
+      "evidence_refs": [],
+      "receipt_path": "",
+      "decision": "runtime_primary_kept",
+      "coverage_lane": "kept_primary_v2_coverage"
+    },
+    {
+      "capability_id": "belief",
+      "skill_id": "sf2-belief-route-fit-spec",
+      "previous_skill_id": "sf2-belief-route-fit-spec",
+      "source_status": "current_runtime_primary",
+      "current_runtime_scope": "kept_primary_requires_v2_coverage",
+      "security_contract_version": "v2_coverage_required",
+      "promotion_credit_source": "none",
+      "v1_evidence_count": 0,
+      "v2_evidence_count": 0,
+      "v2_trust_mismatch_count": 0,
+      "requires_sandbox_attestation": false,
+      "sandbox_attestation_status": "missing_for_v2_coverage",
+      "v2_promotion_eligible": false,
+      "curation_status": "PENDING",
+      "priority": "P2",
+      "risk_flags": [
+        "v2_not_promotion_eligible"
+      ],
+      "reject_conflict_warnings": [],
+      "required_next_steps": [
+        "source_review",
+        "xray_static_scan",
+        "v2_replay",
+        "sandbox_shadow"
+      ],
+      "evidence_refs": [],
+      "receipt_path": "",
+      "decision": "runtime_primary_kept",
+      "coverage_lane": "kept_primary_v2_coverage"
+    },
+    {
+      "capability_id": "benchmark_meta_opt",
+      "skill_id": "sf-systematic-benchmark_meta_opt-hugging-face-trackio-d21c6b90",
+      "previous_skill_id": "sf-systematic-benchmark_meta_opt-hugging-face-trackio-d21c6b90",
+      "source_status": "current_runtime_primary",
+      "current_runtime_scope": "kept_primary_requires_v2_coverage",
+      "security_contract_version": "v2_coverage_required",
+      "promotion_credit_source": "none",
+      "v1_evidence_count": 0,
+      "v2_evidence_count": 0,
+      "v2_trust_mismatch_count": 0,
+      "requires_sandbox_attestation": false,
+      "sandbox_attestation_status": "missing_for_v2_coverage",
+      "v2_promotion_eligible": false,
+      "curation_status": "PENDING",
+      "priority": "P2",
+      "risk_flags": [
+        "v2_not_promotion_eligible"
+      ],
+      "reject_conflict_warnings": [],
+      "required_next_steps": [
+        "source_review",
+        "xray_static_scan",
+        "v2_replay",
+        "sandbox_shadow"
+      ],
+      "evidence_refs": [],
+      "receipt_path": "",
+      "decision": "runtime_primary_kept",
+      "coverage_lane": "kept_primary_v2_coverage"
+    },
+    {
+      "capability_id": "ddtree",
+      "skill_id": "nexus-root-cause-probe",
+      "previous_skill_id": "nexus-root-cause-probe",
+      "source_status": "current_runtime_primary",
+      "current_runtime_scope": "kept_primary_requires_v2_coverage",
+      "security_contract_version": "v2_coverage_required",
+      "promotion_credit_source": "none",
+      "v1_evidence_count": 0,
+      "v2_evidence_count": 0,
+      "v2_trust_mismatch_count": 0,
+      "requires_sandbox_attestation": false,
+      "sandbox_attestation_status": "missing_for_v2_coverage",
+      "v2_promotion_eligible": false,
+      "curation_status": "PENDING",
+      "priority": "P2",
+      "risk_flags": [
+        "v2_not_promotion_eligible"
+      ],
+      "reject_conflict_warnings": [],
+      "required_next_steps": [
+        "source_review",
+        "xray_static_scan",
+        "v2_replay",
+        "sandbox_shadow"
+      ],
+      "evidence_refs": [],
+      "receipt_path": "",
+      "decision": "runtime_primary_kept",
+      "coverage_lane": "kept_primary_v2_coverage"
+    },
+    {
+      "capability_id": "drone",
+      "skill_id": "sf-systematic-drone-python-background-jobs-18326a62",
+      "previous_skill_id": "sf-systematic-drone-python-background-jobs-18326a62",
+      "source_status": "current_runtime_primary",
+      "current_runtime_scope": "kept_primary_requires_v2_coverage",
+      "security_contract_version": "v2_coverage_required",
+      "promotion_credit_source": "none",
+      "v1_evidence_count": 0,
+      "v2_evidence_count": 0,
+      "v2_trust_mismatch_count": 0,
+      "requires_sandbox_attestation": false,
+      "sandbox_attestation_status": "missing_for_v2_coverage",
+      "v2_promotion_eligible": false,
+      "curation_status": "PENDING",
+      "priority": "P2",
+      "risk_flags": [
+        "v2_not_promotion_eligible"
+      ],
+      "reject_conflict_warnings": [],
+      "required_next_steps": [
+        "source_review",
+        "xray_static_scan",
+        "v2_replay",
+        "sandbox_shadow"
+      ],
+      "evidence_refs": [],
+      "receipt_path": "",
+      "decision": "runtime_primary_kept",
+      "coverage_lane": "kept_primary_v2_coverage"
+    },
+    {
+      "capability_id": "external_productivity",
+      "skill_id": "aibdd.auto.python.e2e.green",
+      "previous_skill_id": "sf-systematic-external_productivity-writer-77dc7840",
+      "source_status": "external_reference_candidate",
+      "current_runtime_scope": "overlay_only_requires_curation",
+      "security_contract_version": "v1_diagnostic_only",
+      "promotion_credit_source": "none",
+      "v1_evidence_count": 1,
+      "v2_evidence_count": 0,
+      "v2_trust_mismatch_count": 0,
+      "requires_sandbox_attestation": true,
+      "sandbox_attestation_status": "missing_not_required_for_overlay_only",
+      "v2_promotion_eligible": false,
+      "curation_status": "PENDING",
+      "priority": "P2",
+      "risk_flags": [
+        "external_reference_candidate",
+        "requires_curation",
+        "v2_not_promotion_eligible"
+      ],
+      "reject_conflict_warnings": [],
+      "required_next_steps": [
+        "source_review",
+        "xray_static_scan",
+        "v2_replay",
+        "sandbox_shadow"
+      ],
+      "evidence_refs": [
+        ".nexus/reports/sf_final_all_candidate_live_compare_chunk3_2026-05-21/external_productivity_sf-final-all-live-compare-external_productivity-001_candidate_skill_aibdd.auto.python.e2e.green/evidence_bundle.json"
+      ],
+      "receipt_path": ".nexus/reports/sf_final_all_candidate_live_compare_chunk3_2026-05-21/external_productivity_sf-final-all-live-compare-external_productivity-001_candidate_skill_aibdd.auto.python.e2e.green",
+      "decision": "runtime_primary_replaced",
+      "coverage_lane": "applied_replacement_v2_curation"
+    },
+    {
+      "capability_id": "forecast_pregate",
+      "skill_id": "addy-shipping-and-launch",
+      "previous_skill_id": "create-plan",
+      "source_status": "external_reference_candidate",
+      "current_runtime_scope": "overlay_only_requires_curation",
+      "security_contract_version": "v1_diagnostic_only",
+      "promotion_credit_source": "none",
+      "v1_evidence_count": 1,
+      "v2_evidence_count": 0,
+      "v2_trust_mismatch_count": 0,
+      "requires_sandbox_attestation": true,
+      "sandbox_attestation_status": "missing_not_required_for_overlay_only",
+      "v2_promotion_eligible": false,
+      "curation_status": "PENDING",
+      "priority": "P2",
+      "risk_flags": [
+        "external_reference_candidate",
+        "requires_curation",
+        "v2_not_promotion_eligible"
+      ],
+      "reject_conflict_warnings": [],
+      "required_next_steps": [
+        "source_review",
+        "xray_static_scan",
+        "v2_replay",
+        "sandbox_shadow"
+      ],
+      "evidence_refs": [
+        ".nexus/reports/sf_final_all_candidate_live_compare_chunk3_2026-05-21/forecast_pregate_sf-final-all-live-compare-forecast_pregate-001_candidate_skill_addy-shipping-and-launch/evidence_bundle.json"
+      ],
+      "receipt_path": ".nexus/reports/sf_final_all_candidate_live_compare_chunk3_2026-05-21/forecast_pregate_sf-final-all-live-compare-forecast_pregate-001_candidate_skill_addy-shipping-and-launch",
+      "decision": "runtime_primary_replaced",
+      "coverage_lane": "applied_replacement_v2_curation"
+    },
+    {
+      "capability_id": "hyper_sprint",
+      "skill_id": "retro",
+      "previous_skill_id": "sf2-hyper_sprint-route-fit-spec",
+      "source_status": "external_reference_candidate",
+      "current_runtime_scope": "overlay_only_requires_curation",
+      "security_contract_version": "v1_diagnostic_only",
+      "promotion_credit_source": "none",
+      "v1_evidence_count": 1,
+      "v2_evidence_count": 0,
+      "v2_trust_mismatch_count": 0,
+      "requires_sandbox_attestation": true,
+      "sandbox_attestation_status": "missing_not_required_for_overlay_only",
+      "v2_promotion_eligible": false,
+      "curation_status": "PENDING",
+      "priority": "P2",
+      "risk_flags": [
+        "external_reference_candidate",
+        "requires_curation",
+        "v2_not_promotion_eligible"
+      ],
+      "reject_conflict_warnings": [],
+      "required_next_steps": [
+        "source_review",
+        "xray_static_scan",
+        "v2_replay",
+        "sandbox_shadow"
+      ],
+      "evidence_refs": [
+        ".nexus/reports/sf_final_all_candidate_live_compare_chunk4_2026-05-21/hyper_sprint_sf-final-all-live-compare-hyper_sprint-001_candidate_skill_retro/evidence_bundle.json"
+      ],
+      "receipt_path": ".nexus/reports/sf_final_all_candidate_live_compare_chunk4_2026-05-21/hyper_sprint_sf-final-all-live-compare-hyper_sprint-001_candidate_skill_retro",
+      "decision": "runtime_primary_replaced",
+      "coverage_lane": "applied_replacement_v2_curation"
+    },
+    {
+      "capability_id": "lancedb",
+      "skill_id": "research-source-validation-auditor",
+      "previous_skill_id": "research-source-validation-auditor",
+      "source_status": "current_runtime_primary",
+      "current_runtime_scope": "kept_primary_requires_v2_coverage",
+      "security_contract_version": "v2_coverage_required",
+      "promotion_credit_source": "none",
+      "v1_evidence_count": 0,
+      "v2_evidence_count": 0,
+      "v2_trust_mismatch_count": 0,
+      "requires_sandbox_attestation": false,
+      "sandbox_attestation_status": "missing_for_v2_coverage",
+      "v2_promotion_eligible": false,
+      "curation_status": "PENDING",
+      "priority": "P2",
+      "risk_flags": [
+        "v2_not_promotion_eligible"
+      ],
+      "reject_conflict_warnings": [],
+      "required_next_steps": [
+        "source_review",
+        "xray_static_scan",
+        "v2_replay",
+        "sandbox_shadow"
+      ],
+      "evidence_refs": [],
+      "receipt_path": "",
+      "decision": "runtime_primary_kept",
+      "coverage_lane": "kept_primary_v2_coverage"
+    },
+    {
+      "capability_id": "learn_ask",
+      "skill_id": "nexus-live-ask-replay-normalization-gate",
+      "previous_skill_id": "github8-skilless-deep-research-learn-ask",
+      "source_status": "external_reference_candidate",
+      "current_runtime_scope": "overlay_only_requires_curation",
+      "security_contract_version": "v1_diagnostic_only",
+      "promotion_credit_source": "none",
+      "v1_evidence_count": 1,
+      "v2_evidence_count": 0,
+      "v2_trust_mismatch_count": 0,
+      "requires_sandbox_attestation": true,
+      "sandbox_attestation_status": "missing_not_required_for_overlay_only",
+      "v2_promotion_eligible": false,
+      "curation_status": "PENDING",
+      "priority": "P2",
+      "risk_flags": [
+        "external_reference_candidate",
+        "requires_curation",
+        "v2_not_promotion_eligible"
+      ],
+      "reject_conflict_warnings": [],
+      "required_next_steps": [
+        "source_review",
+        "xray_static_scan",
+        "v2_replay",
+        "sandbox_shadow"
+      ],
+      "evidence_refs": [
+        ".nexus/reports/sf_final_all_candidate_live_compare_chunk4_2026-05-21/learn_ask_sf-final-all-live-compare-learn_ask-001_candidate_skill_nexus-live-ask-replay-normalization-gate/evidence_bundle.json"
+      ],
+      "receipt_path": ".nexus/reports/sf_final_all_candidate_live_compare_chunk4_2026-05-21/learn_ask_sf-final-all-live-compare-learn_ask-001_candidate_skill_nexus-live-ask-replay-normalization-gate",
+      "decision": "runtime_primary_replaced",
+      "coverage_lane": "applied_replacement_v2_curation"
+    },
+    {
+      "capability_id": "learning_closure",
+      "skill_id": "sf-systematic-learning_closure-memory-lint-8bdb0fca",
+      "previous_skill_id": "sf-systematic-learning_closure-memory-lint-8bdb0fca",
+      "source_status": "current_runtime_primary",
+      "current_runtime_scope": "kept_primary_requires_v2_coverage",
+      "security_contract_version": "v2_coverage_required",
+      "promotion_credit_source": "none",
+      "v1_evidence_count": 0,
+      "v2_evidence_count": 0,
+      "v2_trust_mismatch_count": 0,
+      "requires_sandbox_attestation": false,
+      "sandbox_attestation_status": "missing_for_v2_coverage",
+      "v2_promotion_eligible": false,
+      "curation_status": "PENDING",
+      "priority": "P2",
+      "risk_flags": [
+        "v2_not_promotion_eligible"
+      ],
+      "reject_conflict_warnings": [],
+      "required_next_steps": [
+        "source_review",
+        "xray_static_scan",
+        "v2_replay",
+        "sandbox_shadow"
+      ],
+      "evidence_refs": [],
+      "receipt_path": "",
+      "decision": "runtime_primary_kept",
+      "coverage_lane": "kept_primary_v2_coverage"
+    },
+    {
+      "capability_id": "memory",
+      "skill_id": "product-self-knowledge",
+      "previous_skill_id": "sf-systematic-memory-project-skill-audit-cc8b7621",
+      "source_status": "external_reference_candidate",
+      "current_runtime_scope": "overlay_only_requires_curation",
+      "security_contract_version": "v1_diagnostic_only",
+      "promotion_credit_source": "none",
+      "v1_evidence_count": 1,
+      "v2_evidence_count": 0,
+      "v2_trust_mismatch_count": 0,
+      "requires_sandbox_attestation": true,
+      "sandbox_attestation_status": "missing_not_required_for_overlay_only",
+      "v2_promotion_eligible": false,
+      "curation_status": "PENDING",
+      "priority": "P2",
+      "risk_flags": [
+        "external_reference_candidate",
+        "requires_curation",
+        "v2_not_promotion_eligible"
+      ],
+      "reject_conflict_warnings": [],
+      "required_next_steps": [
+        "source_review",
+        "xray_static_scan",
+        "v2_replay",
+        "sandbox_shadow"
+      ],
+      "evidence_refs": [
+        ".nexus/reports/sf_final_all_candidate_live_compare_chunk4_2026-05-21/memory_sf-final-all-live-compare-memory-001_candidate_skill_product-self-knowledge/evidence_bundle.json"
+      ],
+      "receipt_path": ".nexus/reports/sf_final_all_candidate_live_compare_chunk4_2026-05-21/memory_sf-final-all-live-compare-memory-001_candidate_skill_product-self-knowledge",
+      "decision": "runtime_primary_replaced",
+      "coverage_lane": "applied_replacement_v2_curation"
+    },
+    {
+      "capability_id": "mempalace",
+      "skill_id": "sf2-mempalace-route-fit-spec",
+      "previous_skill_id": "sf2-mempalace-route-fit-spec",
+      "source_status": "current_runtime_primary",
+      "current_runtime_scope": "kept_primary_requires_v2_coverage",
+      "security_contract_version": "v2_coverage_required",
+      "promotion_credit_source": "none",
+      "v1_evidence_count": 0,
+      "v2_evidence_count": 0,
+      "v2_trust_mismatch_count": 0,
+      "requires_sandbox_attestation": false,
+      "sandbox_attestation_status": "missing_for_v2_coverage",
+      "v2_promotion_eligible": false,
+      "curation_status": "PENDING",
+      "priority": "P2",
+      "risk_flags": [
+        "v2_not_promotion_eligible"
+      ],
+      "reject_conflict_warnings": [],
+      "required_next_steps": [
+        "source_review",
+        "xray_static_scan",
+        "v2_replay",
+        "sandbox_shadow"
+      ],
+      "evidence_refs": [],
+      "receipt_path": "",
+      "decision": "runtime_primary_kept",
+      "coverage_lane": "kept_primary_v2_coverage"
+    },
+    {
+      "capability_id": "metabolism_resume",
+      "skill_id": "addy-shipping-and-launch",
+      "previous_skill_id": "github-auto-skill-safe-learning",
+      "source_status": "external_reference_candidate",
+      "current_runtime_scope": "overlay_only_requires_curation",
+      "security_contract_version": "v1_diagnostic_only",
+      "promotion_credit_source": "none",
+      "v1_evidence_count": 1,
+      "v2_evidence_count": 0,
+      "v2_trust_mismatch_count": 0,
+      "requires_sandbox_attestation": true,
+      "sandbox_attestation_status": "missing_not_required_for_overlay_only",
+      "v2_promotion_eligible": false,
+      "curation_status": "PENDING",
+      "priority": "P2",
+      "risk_flags": [
+        "external_reference_candidate",
+        "requires_curation",
+        "v2_not_promotion_eligible"
+      ],
+      "reject_conflict_warnings": [],
+      "required_next_steps": [
+        "source_review",
+        "xray_static_scan",
+        "v2_replay",
+        "sandbox_shadow"
+      ],
+      "evidence_refs": [
+        ".nexus/reports/sf_final_all_candidate_live_compare_chunk4_2026-05-21/metabolism_resume_sf-final-all-live-compare-metabolism_resume-001_candidate_skill_addy-shipping-and-launch/evidence_bundle.json"
+      ],
+      "receipt_path": ".nexus/reports/sf_final_all_candidate_live_compare_chunk4_2026-05-21/metabolism_resume_sf-final-all-live-compare-metabolism_resume-001_candidate_skill_addy-shipping-and-launch",
+      "decision": "runtime_primary_replaced",
+      "coverage_lane": "applied_replacement_v2_curation"
+    },
+    {
+      "capability_id": "nightshift",
+      "skill_id": "canary",
+      "previous_skill_id": "sf2-nightshift-route-fit-spec",
+      "source_status": "external_reference_candidate",
+      "current_runtime_scope": "overlay_only_requires_curation",
+      "security_contract_version": "v1_diagnostic_only",
+      "promotion_credit_source": "none",
+      "v1_evidence_count": 1,
+      "v2_evidence_count": 0,
+      "v2_trust_mismatch_count": 0,
+      "requires_sandbox_attestation": true,
+      "sandbox_attestation_status": "missing_not_required_for_overlay_only",
+      "v2_promotion_eligible": false,
+      "curation_status": "PENDING",
+      "priority": "P2",
+      "risk_flags": [
+        "external_reference_candidate",
+        "requires_curation",
+        "v2_not_promotion_eligible"
+      ],
+      "reject_conflict_warnings": [],
+      "required_next_steps": [
+        "source_review",
+        "xray_static_scan",
+        "v2_replay",
+        "sandbox_shadow"
+      ],
+      "evidence_refs": [
+        ".nexus/reports/sf_final_all_candidate_live_compare_chunk4_2026-05-21/nightshift_sf-final-all-live-compare-nightshift-001_candidate_skill_canary/evidence_bundle.json"
+      ],
+      "receipt_path": ".nexus/reports/sf_final_all_candidate_live_compare_chunk4_2026-05-21/nightshift_sf-final-all-live-compare-nightshift-001_candidate_skill_canary",
+      "decision": "runtime_primary_replaced",
+      "coverage_lane": "applied_replacement_v2_curation"
+    },
+    {
+      "capability_id": "registry_skills_sync",
+      "skill_id": "gstack-sync-gbrain",
+      "previous_skill_id": "github5-skill-seekers-safe-registry-builder",
+      "source_status": "external_reference_candidate",
+      "current_runtime_scope": "overlay_only_requires_curation",
+      "security_contract_version": "v1_diagnostic_only",
+      "promotion_credit_source": "none",
+      "v1_evidence_count": 1,
+      "v2_evidence_count": 0,
+      "v2_trust_mismatch_count": 0,
+      "requires_sandbox_attestation": true,
+      "sandbox_attestation_status": "missing_not_required_for_overlay_only",
+      "v2_promotion_eligible": false,
+      "curation_status": "PENDING",
+      "priority": "P2",
+      "risk_flags": [
+        "external_reference_candidate",
+        "requires_curation",
+        "v2_not_promotion_eligible"
+      ],
+      "reject_conflict_warnings": [],
+      "required_next_steps": [
+        "source_review",
+        "xray_static_scan",
+        "v2_replay",
+        "sandbox_shadow"
+      ],
+      "evidence_refs": [
+        ".nexus/reports/sf_final_all_candidate_live_compare_replay_registry_sync_2026-05-21/registry_skills_sync_sf-final-all-live-compare-registry_skills_sync-001_candidate_skill_gstack-sync-gbrain/evidence_bundle.json"
+      ],
+      "receipt_path": ".nexus/reports/sf_final_all_candidate_live_compare_replay_registry_sync_2026-05-21/registry_skills_sync_sf-final-all-live-compare-registry_skills_sync-001_candidate_skill_gstack-sync-gbrain",
+      "decision": "runtime_primary_replaced",
+      "coverage_lane": "applied_replacement_v2_curation"
+    },
+    {
+      "capability_id": "regression_guard",
+      "skill_id": "sf-systematic-regression_guard-odoo-automated-tests-dad98433",
+      "previous_skill_id": "sf-systematic-regression_guard-odoo-automated-tests-dad98433",
+      "source_status": "current_runtime_primary",
+      "current_runtime_scope": "kept_primary_requires_v2_coverage",
+      "security_contract_version": "v2_coverage_required",
+      "promotion_credit_source": "none",
+      "v1_evidence_count": 0,
+      "v2_evidence_count": 0,
+      "v2_trust_mismatch_count": 0,
+      "requires_sandbox_attestation": false,
+      "sandbox_attestation_status": "missing_for_v2_coverage",
+      "v2_promotion_eligible": false,
+      "curation_status": "PENDING",
+      "priority": "P2",
+      "risk_flags": [
+        "v2_not_promotion_eligible"
+      ],
+      "reject_conflict_warnings": [],
+      "required_next_steps": [
+        "source_review",
+        "xray_static_scan",
+        "v2_replay",
+        "sandbox_shadow"
+      ],
+      "evidence_refs": [],
+      "receipt_path": "",
+      "decision": "runtime_primary_kept",
+      "coverage_lane": "kept_primary_v2_coverage"
+    },
+    {
+      "capability_id": "research",
+      "skill_id": "gbrain-academic-verify",
+      "previous_skill_id": "sf-systematic-research-research-lookup-7e6f92a0",
+      "source_status": "external_reference_candidate",
+      "current_runtime_scope": "overlay_only_requires_curation",
+      "security_contract_version": "v1_diagnostic_only",
+      "promotion_credit_source": "none",
+      "v1_evidence_count": 1,
+      "v2_evidence_count": 0,
+      "v2_trust_mismatch_count": 0,
+      "requires_sandbox_attestation": true,
+      "sandbox_attestation_status": "missing_not_required_for_overlay_only",
+      "v2_promotion_eligible": false,
+      "curation_status": "PENDING",
+      "priority": "P2",
+      "risk_flags": [
+        "external_reference_candidate",
+        "requires_curation",
+        "v2_not_promotion_eligible"
+      ],
+      "reject_conflict_warnings": [],
+      "required_next_steps": [
+        "source_review",
+        "xray_static_scan",
+        "v2_replay",
+        "sandbox_shadow"
+      ],
+      "evidence_refs": [
+        ".nexus/reports/sf_final_all_candidate_live_compare_chunk6_2026-05-21/research_sf-final-all-live-compare-research-001_candidate_skill_gbrain-academic-verify/evidence_bundle.json"
+      ],
+      "receipt_path": ".nexus/reports/sf_final_all_candidate_live_compare_chunk6_2026-05-21/research_sf-final-all-live-compare-research-001_candidate_skill_gbrain-academic-verify",
+      "decision": "runtime_primary_replaced",
+      "coverage_lane": "applied_replacement_v2_curation"
+    },
+    {
+      "capability_id": "research_and_source_discipline",
+      "skill_id": "gbrain-maintain",
+      "previous_skill_id": "research-citation-chain-verifier",
+      "source_status": "external_reference_candidate",
+      "current_runtime_scope": "overlay_only_requires_curation",
+      "security_contract_version": "v1_diagnostic_only",
+      "promotion_credit_source": "none",
+      "v1_evidence_count": 1,
+      "v2_evidence_count": 0,
+      "v2_trust_mismatch_count": 0,
+      "requires_sandbox_attestation": true,
+      "sandbox_attestation_status": "missing_not_required_for_overlay_only",
+      "v2_promotion_eligible": false,
+      "curation_status": "PENDING",
+      "priority": "P2",
+      "risk_flags": [
+        "external_reference_candidate",
+        "requires_curation",
+        "v2_not_promotion_eligible"
+      ],
+      "reject_conflict_warnings": [],
+      "required_next_steps": [
+        "source_review",
+        "xray_static_scan",
+        "v2_replay",
+        "sandbox_shadow"
+      ],
+      "evidence_refs": [
+        ".nexus/reports/sf_final_all_candidate_live_compare_chunk6_2026-05-21/research_and_source_discipline_sf-final-all-live-compare-research_and_source_discipline-001_candidate_skill_gbrain-maintain/evidence_bundle.json"
+      ],
+      "receipt_path": ".nexus/reports/sf_final_all_candidate_live_compare_chunk6_2026-05-21/research_and_source_discipline_sf-final-all-live-compare-research_and_source_discipline-001_candidate_skill_gbrain-maintain",
+      "decision": "runtime_primary_replaced",
+      "coverage_lane": "applied_replacement_v2_curation"
+    },
+    {
+      "capability_id": "ui_validator",
+      "skill_id": "sf-systematic-ui_validator-e2e-testing-d98eb7c3",
+      "previous_skill_id": "sf-systematic-ui_validator-e2e-testing-d98eb7c3",
+      "source_status": "current_runtime_primary",
+      "current_runtime_scope": "kept_primary_requires_v2_coverage",
+      "security_contract_version": "v2_coverage_required",
+      "promotion_credit_source": "none",
+      "v1_evidence_count": 0,
+      "v2_evidence_count": 0,
+      "v2_trust_mismatch_count": 0,
+      "requires_sandbox_attestation": false,
+      "sandbox_attestation_status": "missing_for_v2_coverage",
+      "v2_promotion_eligible": false,
+      "curation_status": "PENDING",
+      "priority": "P2",
+      "risk_flags": [
+        "v2_not_promotion_eligible"
+      ],
+      "reject_conflict_warnings": [],
+      "required_next_steps": [
+        "source_review",
+        "xray_static_scan",
+        "v2_replay",
+        "sandbox_shadow"
+      ],
+      "evidence_refs": [],
+      "receipt_path": "",
+      "decision": "runtime_primary_kept",
+      "coverage_lane": "kept_primary_v2_coverage"
+    },
+    {
+      "capability_id": "ultra_review",
+      "skill_id": "github11-vulnerability-scanner-ultra-review",
+      "previous_skill_id": "github11-vulnerability-scanner-ultra-review",
+      "source_status": "current_runtime_primary",
+      "current_runtime_scope": "kept_primary_requires_v2_coverage",
+      "security_contract_version": "v2_coverage_required",
+      "promotion_credit_source": "none",
+      "v1_evidence_count": 0,
+      "v2_evidence_count": 0,
+      "v2_trust_mismatch_count": 0,
+      "requires_sandbox_attestation": false,
+      "sandbox_attestation_status": "missing_for_v2_coverage",
+      "v2_promotion_eligible": false,
+      "curation_status": "PENDING",
+      "priority": "P2",
+      "risk_flags": [
+        "v2_not_promotion_eligible"
+      ],
+      "reject_conflict_warnings": [],
+      "required_next_steps": [
+        "source_review",
+        "xray_static_scan",
+        "v2_replay",
+        "sandbox_shadow"
+      ],
+      "evidence_refs": [],
+      "receipt_path": "",
+      "decision": "runtime_primary_kept",
+      "coverage_lane": "kept_primary_v2_coverage"
+    }
+  ],
+  "claim_boundary": [
+    "This backlog is diagnostic and curation-only.",
+    "It does not mutate runtime overlay or grant V2 promotion credit.",
+    "V2 promotion requires replay, signed receipts, sandbox attestation, clean-slate evidence, and manual apply."
+  ]
+}

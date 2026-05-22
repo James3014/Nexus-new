@@ -1,0 +1,18 @@
+{
+  "schema": "nexus.zero_trust_v2.unification_plan.v1",
+  "status": "PASS",
+  "created_at": "2026-05-21T13:18:02.542557+00:00",
+  "source_accumulation": "docs/reports/NEXUS_ZERO_TRUST_V2_EVIDENCE_ACCUMULATION_2026-05-21.json",
+  "summary": {
+    "ready_for_manual_apply_count": 0,
+    "patch_plan_count": 0,
+    "v1_role_after_apply": "runtime_overlay_primary_until_v2_ready",
+    "runtime_mutation_allowed": false,
+    "automatic_apply_allowed": false,
+    "public_benchmark_allowed": false
+  },
+  "patch_plan": [],
+  "blockers": [
+    "no_v2_ready_candidates"
+  ]
+}

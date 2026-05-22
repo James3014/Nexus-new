@@ -1,0 +1,30 @@
+{
+  "schema": "nexus.zero_trust_v2.evidence_accumulation.v1",
+  "status": "PASS",
+  "created_at": "2026-05-21T13:18:02.533040+00:00",
+  "source_physical_evidence": "docs/reports/NEXUS_ZERO_TRUST_V2_PHYSICAL_SKILL_EVIDENCE_2026-05-21.json",
+  "summary": {
+    "candidate_count": 1,
+    "ready_for_manual_apply_count": 0,
+    "blocked_count": 1,
+    "min_v2_evidence_count": 3,
+    "materialization_only": true,
+    "runtime_mutation_allowed": false,
+    "public_benchmark_allowed": false
+  },
+  "candidates": [
+    {
+      "capability_id": "sandbox_replay",
+      "skill_id": "nexus-acceptance-evidence-gate",
+      "status": "BLOCKED",
+      "v2_evidence_count": 0,
+      "v2_trust_mismatch_count": 0,
+      "negative_control_blocked_count": 3,
+      "row_refs": [
+        "ztv2-005-sandbox_replay-candidate_skill_v2",
+        "ztv2-005-sandbox_replay-wrong_or_quarantined_skill_v2",
+        "ztv2-005-sandbox_replay-shadow_candidate_v2"
+      ]
+    }
+  ]
+}

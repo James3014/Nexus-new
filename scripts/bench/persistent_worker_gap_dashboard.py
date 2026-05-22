@@ -89,6 +89,21 @@ def _arm(bundle_path: str, label: str) -> dict[str, Any]:
         "commercial_model_roi_shadow_reason_counts": dict(roi_shadow.get("reason_counts", {}) or {}),
         "commercial_model_roi_shadow_wall_buckets": list(wall_concentration.get("buckets", []) or []),
         "commercial_model_roi_shadow_status": str(roi_shadow.get("status") or ""),
+        "commercial_model_basis_ready": bool(
+            task_contract.get("benchmark_basis_contract", {}).get("commercial_model_basis_ready", False)
+        )
+        if isinstance(task_contract.get("benchmark_basis_contract"), dict)
+        else False,
+        "external_provider_public_claim_allowed": bool(
+            payload.get("external_provider_claim_boundary_contract", {}).get("public_claim_allowed", True)
+        )
+        if isinstance(payload.get("external_provider_claim_boundary_contract"), dict)
+        else True,
+        "public_promotion_readiness_status": str(
+            payload.get("public_promotion_readiness_contract", {}).get("status") or ""
+        )
+        if isinstance(payload.get("public_promotion_readiness_contract"), dict)
+        else "",
     }
 
 
@@ -263,6 +278,12 @@ def build_gap_dashboard(*, baseline: str, treatments: list[str], labels: list[st
             arm["public_cost_gate"] == "PASS"
             and arm["public_cost_efficiency_gate"] in {"PASS", "NEUTRAL", "IMPROVED"}
         )
+        source_promotion_ready = bool(
+            arm["external_provider_public_claim_allowed"]
+            and arm["public_promotion_readiness_status"] != "RETURN"
+        )
+        promotion_ready = bool(delivery_promotion_ready and cost_promotion_ready and source_promotion_ready)
+        final_goal_ready = bool(promotion_ready and arm["commercial_model_basis_ready"])
         comparisons.append(
             {
                 "label": arm["label"],
@@ -284,7 +305,9 @@ def build_gap_dashboard(*, baseline: str, treatments: list[str], labels: list[st
                 ),
                 "delivery_promotion_ready": delivery_promotion_ready,
                 "cost_promotion_ready": cost_promotion_ready,
-                "promotion_ready": bool(delivery_promotion_ready and cost_promotion_ready),
+                "source_promotion_ready": source_promotion_ready,
+                "promotion_ready": promotion_ready,
+                "final_goal_ready": final_goal_ready,
                 "cost_policy_hook": _cost_policy_hook(
                     arm,
                     delivery_promotion_ready=delivery_promotion_ready,

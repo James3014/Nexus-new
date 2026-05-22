@@ -1,0 +1,66 @@
+{
+  "schema": "nexus.zero_trust_v2.m13_m19_completion.v1",
+  "status": "PASS",
+  "created_at": "2026-05-21T14:11:05.085098+00:00",
+  "source_runner_matrix": "docs/reports/NEXUS_ZERO_TRUST_V2_BEHAVIOR_RUNNER_MATRIX_2026-05-21.json",
+  "source_m12_verdict": "docs/reports/NEXUS_ZERO_TRUST_V2_M12_34_CAPABILITY_FINAL_VERDICT_2026-05-21.json",
+  "summary": {
+    "m13_capability_ab_runner_adapter_complete": true,
+    "m14_fresh_behavior_receipt_path_ready_count": 0,
+    "m15_first_candidate_ready_for_manual_apply": false,
+    "m16_manual_trial_rollback_gate_ready": false,
+    "m17_p0_rollout_promoted_count": 0,
+    "m17_p0_structured_blocked_count": 5,
+    "m18_p1_p2_promoted_count": 0,
+    "m18_p1_p2_structured_blocked_count": 14,
+    "m19_v1_promotion_shutdown_boundary_complete": true,
+    "candidate_count": 19,
+    "blocked_count": 19,
+    "capability_count": 34,
+    "v2_unification_complete": false,
+    "runtime_mutation_allowed": false,
+    "public_benchmark_allowed": false,
+    "promotion_credit_allowed": false
+  },
+  "milestones": [
+    {
+      "milestone": "M13",
+      "status": "COMPLETE",
+      "result": "capability_ab_runner adapter schema and hook gate generated"
+    },
+    {
+      "milestone": "M14",
+      "status": "BLOCKED",
+      "result": "fresh task_ref missing, no physical behavior receipt can be credited"
+    },
+    {
+      "milestone": "M15",
+      "status": "BLOCKED",
+      "result": "no candidate has sufficient signed V2 behavior receipts"
+    },
+    {
+      "milestone": "M16",
+      "status": "BLOCKED",
+      "result": "manual trial and rollback gate remain unavailable without ready candidate"
+    },
+    {
+      "milestone": "M17",
+      "status": "STRUCTURED_BLOCKED",
+      "result": "P0 batch has explicit blockers instead of silent promotion"
+    },
+    {
+      "milestone": "M18",
+      "status": "STRUCTURED_BLOCKED",
+      "result": "P1/P2 batch has explicit blockers instead of silent promotion"
+    },
+    {
+      "milestone": "M19",
+      "status": "COMPLETE",
+      "result": "V1 remains runtime fallback; V1 evidence cannot count toward V2 promotion"
+    }
+  ],
+  "claim_boundary": [
+    "M13-M19 completion here means the V2 fresh behavior runner path is specified and fail-closed.",
+    "V2 unification remains false until fresh physical behavior receipts exist."
+  ]
+}

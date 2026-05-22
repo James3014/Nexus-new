@@ -1,0 +1,752 @@
+{
+  "schema": "nexus.zero_trust_v2.runtime_skill_policy_overlay.applied.v1",
+  "status": "PASS",
+  "created_at": "2026-05-22T01:55:29.585442+00:00",
+  "source_promotion_report": "docs/reports/NEXUS_ZERO_TRUST_V2_PROMOTION_CANDIDATES_2026-05-21.json",
+  "source_m45_m52": "docs/reports/NEXUS_ZERO_TRUST_V2_M45_M52_COMPLETION_2026-05-22.json",
+  "source_manual_trial": "docs/reports/NEXUS_ZERO_TRUST_V2_MANUAL_APPLY_TRIAL_2026-05-21.json",
+  "source_rollout": "docs/reports/NEXUS_ZERO_TRUST_V2_P0_ROLLOUT_2026-05-21.json",
+  "runtime_update_allowed": true,
+  "runtime_mutation_allowed": true,
+  "automatic_apply_allowed": false,
+  "public_benchmark_allowed": false,
+  "security_contract_version": "zero_trust_v2_runtime_signed",
+  "promotion_credit_source": "v2_only",
+  "v1_fallback_mode": "rollback_only",
+  "v2_evidence_count": 102,
+  "v2_ready_capability_count": 34,
+  "v2_trust_mismatch_count": 0,
+  "primary_skill_by_capability": {
+    "artifact_gate": "sf-systematic-artifact_gate-differential-review-461fbd0c",
+    "autonomic_router": "nexus-agent-execution-board-failclosed",
+    "autoreason": "sf2-belief-route-fit-spec",
+    "belief": "sf2-belief-route-fit-spec",
+    "benchmark_meta_opt": "sf-systematic-benchmark_meta_opt-hugging-face-trackio-d21c6b90",
+    "claim_gate": "addy-doubt-driven-development",
+    "codeintel": "gstack-qa",
+    "ddtree": "nexus-root-cause-probe",
+    "direct_master_loop": "sf-systematic-direct_master_loop-build-32802a87",
+    "drone": "sf-systematic-drone-python-background-jobs-18326a62",
+    "external_productivity": "aibdd.auto.python.e2e.green",
+    "file_lock_security_gate": "browserbase-what-antibot",
+    "forecast_pregate": "addy-shipping-and-launch",
+    "governance_and_trust": "sf-systematic-governance_and_trust-aegisops-ai-0aa841e2",
+    "hyper_sprint": "retro",
+    "lancedb": "research-source-validation-auditor",
+    "learn_ask": "nexus-live-ask-replay-normalization-gate",
+    "learning_closure": "sf-systematic-learning_closure-memory-lint-8bdb0fca",
+    "memory": "product-self-knowledge",
+    "mempalace": "sf2-mempalace-route-fit-spec",
+    "metabolism_resume": "addy-shipping-and-launch",
+    "nightshift": "canary",
+    "policy_capability_gate": "browse",
+    "registry_skills_sync": "gstack-sync-gbrain",
+    "regression_guard": "sf-systematic-regression_guard-odoo-automated-tests-dad98433",
+    "repair_loop": "qa-only",
+    "research": "gbrain-academic-verify",
+    "research_and_source_discipline": "gbrain-maintain",
+    "research_control_plane": "browserbase-fetch",
+    "sandbox_replay": "nexus-acceptance-evidence-gate",
+    "swarm_multi_agent": "nexus-gemini-code-review-orchestrator",
+    "ui_validator": "sf-systematic-ui_validator-e2e-testing-d98eb7c3",
+    "ultra_review": "github11-vulnerability-scanner-ultra-review",
+    "xray": "diagnose"
+  },
+  "candidate_primary_skill_by_capability": {
+    "artifact_gate": "sf-systematic-artifact_gate-differential-review-461fbd0c",
+    "autonomic_router": "nexus-agent-execution-board-failclosed",
+    "autoreason": "sf2-belief-route-fit-spec",
+    "belief": "sf2-belief-route-fit-spec",
+    "benchmark_meta_opt": "sf-systematic-benchmark_meta_opt-hugging-face-trackio-d21c6b90",
+    "claim_gate": "addy-doubt-driven-development",
+    "codeintel": "gstack-qa",
+    "ddtree": "nexus-root-cause-probe",
+    "direct_master_loop": "sf-systematic-direct_master_loop-build-32802a87",
+    "drone": "sf-systematic-drone-python-background-jobs-18326a62",
+    "external_productivity": "aibdd.auto.python.e2e.green",
+    "file_lock_security_gate": "browserbase-what-antibot",
+    "forecast_pregate": "addy-shipping-and-launch",
+    "governance_and_trust": "sf-systematic-governance_and_trust-aegisops-ai-0aa841e2",
+    "hyper_sprint": "retro",
+    "lancedb": "research-source-validation-auditor",
+    "learn_ask": "nexus-live-ask-replay-normalization-gate",
+    "learning_closure": "sf-systematic-learning_closure-memory-lint-8bdb0fca",
+    "memory": "product-self-knowledge",
+    "mempalace": "sf2-mempalace-route-fit-spec",
+    "metabolism_resume": "addy-shipping-and-launch",
+    "nightshift": "canary",
+    "policy_capability_gate": "browse",
+    "registry_skills_sync": "gstack-sync-gbrain",
+    "regression_guard": "sf-systematic-regression_guard-odoo-automated-tests-dad98433",
+    "repair_loop": "qa-only",
+    "research": "gbrain-academic-verify",
+    "research_and_source_discipline": "gbrain-maintain",
+    "research_control_plane": "browserbase-fetch",
+    "sandbox_replay": "nexus-acceptance-evidence-gate",
+    "swarm_multi_agent": "nexus-gemini-code-review-orchestrator",
+    "ui_validator": "sf-systematic-ui_validator-e2e-testing-d98eb7c3",
+    "ultra_review": "github11-vulnerability-scanner-ultra-review",
+    "xray": "diagnose"
+  },
+  "capability_aliases": {
+    "forecast_pregate": [
+      "pregate",
+      "forecast_gate",
+      "plan_quality_gate"
+    ]
+  },
+  "applied_primary": [
+    {
+      "capability_id": "artifact_gate",
+      "previous_skill_id": "sf-systematic-artifact_gate-differential-review-461fbd0c",
+      "skill_id": "sf-systematic-artifact_gate-differential-review-461fbd0c",
+      "priority": "P2",
+      "decision": "v2_default_primary_applied",
+      "selection_rule": "runtime_signed_v2_receipt_3_of_3_then_manual_batch_rollout",
+      "v2_behavior_evidence_count": 3,
+      "clean_v2_receipt_count": 3,
+      "runtime_signed_receipt_verified_count": 3,
+      "evidence_refs": [
+        ".nexus/reports/zero_trust_v2_behavior/artifact_gate/sf-systematic-artifact_gate-differential-review-461fbd0c/run-01/evidence_bundle.json",
+        ".nexus/reports/zero_trust_v2_behavior/artifact_gate/sf-systematic-artifact_gate-differential-review-461fbd0c/run-02/evidence_bundle.json",
+        ".nexus/reports/zero_trust_v2_behavior/artifact_gate/sf-systematic-artifact_gate-differential-review-461fbd0c/run-03/evidence_bundle.json"
+      ],
+      "failed_security_contract_rules": [],
+      "promotion_credit_source": "v2_only",
+      "security_contract_version": "zero_trust_v2_runtime_signed"
+    },
+    {
+      "capability_id": "autonomic_router",
+      "previous_skill_id": "nexus-agent-execution-board-failclosed",
+      "skill_id": "nexus-agent-execution-board-failclosed",
+      "priority": "P2",
+      "decision": "v2_default_primary_applied",
+      "selection_rule": "runtime_signed_v2_receipt_3_of_3_then_manual_batch_rollout",
+      "v2_behavior_evidence_count": 3,
+      "clean_v2_receipt_count": 3,
+      "runtime_signed_receipt_verified_count": 3,
+      "evidence_refs": [
+        ".nexus/reports/zero_trust_v2_behavior/autonomic_router/nexus-agent-execution-board-failclosed/run-01/evidence_bundle.json",
+        ".nexus/reports/zero_trust_v2_behavior/autonomic_router/nexus-agent-execution-board-failclosed/run-02/evidence_bundle.json",
+        ".nexus/reports/zero_trust_v2_behavior/autonomic_router/nexus-agent-execution-board-failclosed/run-03/evidence_bundle.json"
+      ],
+      "failed_security_contract_rules": [],
+      "promotion_credit_source": "v2_only",
+      "security_contract_version": "zero_trust_v2_runtime_signed"
+    },
+    {
+      "capability_id": "autoreason",
+      "previous_skill_id": "sf2-belief-route-fit-spec",
+      "skill_id": "sf2-belief-route-fit-spec",
+      "priority": "P2",
+      "decision": "v2_default_primary_applied",
+      "selection_rule": "runtime_signed_v2_receipt_3_of_3_then_manual_batch_rollout",
+      "v2_behavior_evidence_count": 3,
+      "clean_v2_receipt_count": 3,
+      "runtime_signed_receipt_verified_count": 3,
+      "evidence_refs": [
+        ".nexus/reports/zero_trust_v2_behavior/autoreason/sf2-belief-route-fit-spec/run-01/evidence_bundle.json",
+        ".nexus/reports/zero_trust_v2_behavior/autoreason/sf2-belief-route-fit-spec/run-02/evidence_bundle.json",
+        ".nexus/reports/zero_trust_v2_behavior/autoreason/sf2-belief-route-fit-spec/run-03/evidence_bundle.json"
+      ],
+      "failed_security_contract_rules": [],
+      "promotion_credit_source": "v2_only",
+      "security_contract_version": "zero_trust_v2_runtime_signed"
+    },
+    {
+      "capability_id": "belief",
+      "previous_skill_id": "sf2-belief-route-fit-spec",
+      "skill_id": "sf2-belief-route-fit-spec",
+      "priority": "P2",
+      "decision": "v2_default_primary_applied",
+      "selection_rule": "runtime_signed_v2_receipt_3_of_3_then_manual_batch_rollout",
+      "v2_behavior_evidence_count": 3,
+      "clean_v2_receipt_count": 3,
+      "runtime_signed_receipt_verified_count": 3,
+      "evidence_refs": [
+        ".nexus/reports/zero_trust_v2_behavior/belief/sf2-belief-route-fit-spec/run-01/evidence_bundle.json",
+        ".nexus/reports/zero_trust_v2_behavior/belief/sf2-belief-route-fit-spec/run-02/evidence_bundle.json",
+        ".nexus/reports/zero_trust_v2_behavior/belief/sf2-belief-route-fit-spec/run-03/evidence_bundle.json"
+      ],
+      "failed_security_contract_rules": [],
+      "promotion_credit_source": "v2_only",
+      "security_contract_version": "zero_trust_v2_runtime_signed"
+    },
+    {
+      "capability_id": "benchmark_meta_opt",
+      "previous_skill_id": "sf-systematic-benchmark_meta_opt-hugging-face-trackio-d21c6b90",
+      "skill_id": "sf-systematic-benchmark_meta_opt-hugging-face-trackio-d21c6b90",
+      "priority": "P2",
+      "decision": "v2_default_primary_applied",
+      "selection_rule": "runtime_signed_v2_receipt_3_of_3_then_manual_batch_rollout",
+      "v2_behavior_evidence_count": 3,
+      "clean_v2_receipt_count": 3,
+      "runtime_signed_receipt_verified_count": 3,
+      "evidence_refs": [
+        ".nexus/reports/zero_trust_v2_behavior/benchmark_meta_opt/sf-systematic-benchmark_meta_opt-hugging-face-trackio-d21c6b90/run-01/evidence_bundle.json",
+        ".nexus/reports/zero_trust_v2_behavior/benchmark_meta_opt/sf-systematic-benchmark_meta_opt-hugging-face-trackio-d21c6b90/run-02/evidence_bundle.json",
+        ".nexus/reports/zero_trust_v2_behavior/benchmark_meta_opt/sf-systematic-benchmark_meta_opt-hugging-face-trackio-d21c6b90/run-03/evidence_bundle.json"
+      ],
+      "failed_security_contract_rules": [],
+      "promotion_credit_source": "v2_only",
+      "security_contract_version": "zero_trust_v2_runtime_signed"
+    },
+    {
+      "capability_id": "claim_gate",
+      "previous_skill_id": "addy-doubt-driven-development",
+      "skill_id": "addy-doubt-driven-development",
+      "priority": "P0",
+      "decision": "v2_default_primary_applied",
+      "selection_rule": "runtime_signed_v2_receipt_3_of_3_then_manual_batch_rollout",
+      "v2_behavior_evidence_count": 3,
+      "clean_v2_receipt_count": 3,
+      "runtime_signed_receipt_verified_count": 3,
+      "evidence_refs": [
+        ".nexus/reports/zero_trust_v2_behavior/claim_gate/addy-doubt-driven-development/run-01/evidence_bundle.json",
+        ".nexus/reports/zero_trust_v2_behavior/claim_gate/addy-doubt-driven-development/run-02/evidence_bundle.json",
+        ".nexus/reports/zero_trust_v2_behavior/claim_gate/addy-doubt-driven-development/run-03/evidence_bundle.json"
+      ],
+      "failed_security_contract_rules": [],
+      "promotion_credit_source": "v2_only",
+      "security_contract_version": "zero_trust_v2_runtime_signed"
+    },
+    {
+      "capability_id": "codeintel",
+      "previous_skill_id": "gstack-qa",
+      "skill_id": "gstack-qa",
+      "priority": "P1",
+      "decision": "v2_default_primary_applied",
+      "selection_rule": "runtime_signed_v2_receipt_3_of_3_then_manual_batch_rollout",
+      "v2_behavior_evidence_count": 3,
+      "clean_v2_receipt_count": 3,
+      "runtime_signed_receipt_verified_count": 3,
+      "evidence_refs": [
+        ".nexus/reports/zero_trust_v2_behavior/codeintel/gstack-qa/run-01/evidence_bundle.json",
+        ".nexus/reports/zero_trust_v2_behavior/codeintel/gstack-qa/run-02/evidence_bundle.json",
+        ".nexus/reports/zero_trust_v2_behavior/codeintel/gstack-qa/run-03/evidence_bundle.json"
+      ],
+      "failed_security_contract_rules": [],
+      "promotion_credit_source": "v2_only",
+      "security_contract_version": "zero_trust_v2_runtime_signed"
+    },
+    {
+      "capability_id": "ddtree",
+      "previous_skill_id": "nexus-root-cause-probe",
+      "skill_id": "nexus-root-cause-probe",
+      "priority": "P2",
+      "decision": "v2_default_primary_applied",
+      "selection_rule": "runtime_signed_v2_receipt_3_of_3_then_manual_batch_rollout",
+      "v2_behavior_evidence_count": 3,
+      "clean_v2_receipt_count": 3,
+      "runtime_signed_receipt_verified_count": 3,
+      "evidence_refs": [
+        ".nexus/reports/zero_trust_v2_behavior/ddtree/nexus-root-cause-probe/run-01/evidence_bundle.json",
+        ".nexus/reports/zero_trust_v2_behavior/ddtree/nexus-root-cause-probe/run-02/evidence_bundle.json",
+        ".nexus/reports/zero_trust_v2_behavior/ddtree/nexus-root-cause-probe/run-03/evidence_bundle.json"
+      ],
+      "failed_security_contract_rules": [],
+      "promotion_credit_source": "v2_only",
+      "security_contract_version": "zero_trust_v2_runtime_signed"
+    },
+    {
+      "capability_id": "direct_master_loop",
+      "previous_skill_id": "sf-systematic-direct_master_loop-build-32802a87",
+      "skill_id": "sf-systematic-direct_master_loop-build-32802a87",
+      "priority": "P1",
+      "decision": "v2_default_primary_applied",
+      "selection_rule": "runtime_signed_v2_receipt_3_of_3_then_manual_batch_rollout",
+      "v2_behavior_evidence_count": 3,
+      "clean_v2_receipt_count": 3,
+      "runtime_signed_receipt_verified_count": 3,
+      "evidence_refs": [
+        ".nexus/reports/zero_trust_v2_behavior/direct_master_loop/sf-systematic-direct_master_loop-build-32802a87/run-01/evidence_bundle.json",
+        ".nexus/reports/zero_trust_v2_behavior/direct_master_loop/sf-systematic-direct_master_loop-build-32802a87/run-02/evidence_bundle.json",
+        ".nexus/reports/zero_trust_v2_behavior/direct_master_loop/sf-systematic-direct_master_loop-build-32802a87/run-03/evidence_bundle.json"
+      ],
+      "failed_security_contract_rules": [],
+      "promotion_credit_source": "v2_only",
+      "security_contract_version": "zero_trust_v2_runtime_signed"
+    },
+    {
+      "capability_id": "drone",
+      "previous_skill_id": "sf-systematic-drone-python-background-jobs-18326a62",
+      "skill_id": "sf-systematic-drone-python-background-jobs-18326a62",
+      "priority": "P2",
+      "decision": "v2_default_primary_applied",
+      "selection_rule": "runtime_signed_v2_receipt_3_of_3_then_manual_batch_rollout",
+      "v2_behavior_evidence_count": 3,
+      "clean_v2_receipt_count": 3,
+      "runtime_signed_receipt_verified_count": 3,
+      "evidence_refs": [
+        ".nexus/reports/zero_trust_v2_behavior/drone/sf-systematic-drone-python-background-jobs-18326a62/run-01/evidence_bundle.json",
+        ".nexus/reports/zero_trust_v2_behavior/drone/sf-systematic-drone-python-background-jobs-18326a62/run-02/evidence_bundle.json",
+        ".nexus/reports/zero_trust_v2_behavior/drone/sf-systematic-drone-python-background-jobs-18326a62/run-03/evidence_bundle.json"
+      ],
+      "failed_security_contract_rules": [],
+      "promotion_credit_source": "v2_only",
+      "security_contract_version": "zero_trust_v2_runtime_signed"
+    },
+    {
+      "capability_id": "external_productivity",
+      "previous_skill_id": "aibdd.auto.python.e2e.green",
+      "skill_id": "aibdd.auto.python.e2e.green",
+      "priority": "P2",
+      "decision": "v2_default_primary_applied",
+      "selection_rule": "runtime_signed_v2_receipt_3_of_3_then_manual_batch_rollout",
+      "v2_behavior_evidence_count": 3,
+      "clean_v2_receipt_count": 3,
+      "runtime_signed_receipt_verified_count": 3,
+      "evidence_refs": [
+        ".nexus/reports/zero_trust_v2_behavior/external_productivity/aibdd.auto.python.e2e.green/run-01/evidence_bundle.json",
+        ".nexus/reports/zero_trust_v2_behavior/external_productivity/aibdd.auto.python.e2e.green/run-02/evidence_bundle.json",
+        ".nexus/reports/zero_trust_v2_behavior/external_productivity/aibdd.auto.python.e2e.green/run-03/evidence_bundle.json"
+      ],
+      "failed_security_contract_rules": [],
+      "promotion_credit_source": "v2_only",
+      "security_contract_version": "zero_trust_v2_runtime_signed"
+    },
+    {
+      "capability_id": "file_lock_security_gate",
+      "previous_skill_id": "browserbase-what-antibot",
+      "skill_id": "browserbase-what-antibot",
+      "priority": "P0",
+      "decision": "v2_default_primary_applied",
+      "selection_rule": "runtime_signed_v2_receipt_3_of_3_then_manual_batch_rollout",
+      "v2_behavior_evidence_count": 3,
+      "clean_v2_receipt_count": 3,
+      "runtime_signed_receipt_verified_count": 3,
+      "evidence_refs": [
+        ".nexus/reports/zero_trust_v2_behavior/file_lock_security_gate/browserbase-what-antibot/run-01/evidence_bundle.json",
+        ".nexus/reports/zero_trust_v2_behavior/file_lock_security_gate/browserbase-what-antibot/run-02/evidence_bundle.json",
+        ".nexus/reports/zero_trust_v2_behavior/file_lock_security_gate/browserbase-what-antibot/run-03/evidence_bundle.json"
+      ],
+      "failed_security_contract_rules": [],
+      "promotion_credit_source": "v2_only",
+      "security_contract_version": "zero_trust_v2_runtime_signed"
+    },
+    {
+      "capability_id": "forecast_pregate",
+      "previous_skill_id": "addy-shipping-and-launch",
+      "skill_id": "addy-shipping-and-launch",
+      "priority": "P2",
+      "decision": "v2_default_primary_applied",
+      "selection_rule": "runtime_signed_v2_receipt_3_of_3_then_manual_batch_rollout",
+      "v2_behavior_evidence_count": 3,
+      "clean_v2_receipt_count": 3,
+      "runtime_signed_receipt_verified_count": 3,
+      "evidence_refs": [
+        ".nexus/reports/zero_trust_v2_behavior/forecast_pregate/addy-shipping-and-launch/run-01/evidence_bundle.json",
+        ".nexus/reports/zero_trust_v2_behavior/forecast_pregate/addy-shipping-and-launch/run-02/evidence_bundle.json",
+        ".nexus/reports/zero_trust_v2_behavior/forecast_pregate/addy-shipping-and-launch/run-03/evidence_bundle.json"
+      ],
+      "failed_security_contract_rules": [],
+      "promotion_credit_source": "v2_only",
+      "security_contract_version": "zero_trust_v2_runtime_signed"
+    },
+    {
+      "capability_id": "governance_and_trust",
+      "previous_skill_id": "sf-systematic-governance_and_trust-aegisops-ai-0aa841e2",
+      "skill_id": "sf-systematic-governance_and_trust-aegisops-ai-0aa841e2",
+      "priority": "P0",
+      "decision": "v2_default_primary_applied",
+      "selection_rule": "runtime_signed_v2_receipt_3_of_3_then_manual_batch_rollout",
+      "v2_behavior_evidence_count": 3,
+      "clean_v2_receipt_count": 3,
+      "runtime_signed_receipt_verified_count": 3,
+      "evidence_refs": [
+        ".nexus/reports/zero_trust_v2_behavior/governance_and_trust/sf-systematic-governance_and_trust-aegisops-ai-0aa841e2/run-01/evidence_bundle.json",
+        ".nexus/reports/zero_trust_v2_behavior/governance_and_trust/sf-systematic-governance_and_trust-aegisops-ai-0aa841e2/run-02/evidence_bundle.json",
+        ".nexus/reports/zero_trust_v2_behavior/governance_and_trust/sf-systematic-governance_and_trust-aegisops-ai-0aa841e2/run-03/evidence_bundle.json"
+      ],
+      "failed_security_contract_rules": [],
+      "promotion_credit_source": "v2_only",
+      "security_contract_version": "zero_trust_v2_runtime_signed"
+    },
+    {
+      "capability_id": "hyper_sprint",
+      "previous_skill_id": "retro",
+      "skill_id": "retro",
+      "priority": "P2",
+      "decision": "v2_default_primary_applied",
+      "selection_rule": "runtime_signed_v2_receipt_3_of_3_then_manual_batch_rollout",
+      "v2_behavior_evidence_count": 3,
+      "clean_v2_receipt_count": 3,
+      "runtime_signed_receipt_verified_count": 3,
+      "evidence_refs": [
+        ".nexus/reports/zero_trust_v2_behavior/hyper_sprint/retro/run-01/evidence_bundle.json",
+        ".nexus/reports/zero_trust_v2_behavior/hyper_sprint/retro/run-02/evidence_bundle.json",
+        ".nexus/reports/zero_trust_v2_behavior/hyper_sprint/retro/run-03/evidence_bundle.json"
+      ],
+      "failed_security_contract_rules": [],
+      "promotion_credit_source": "v2_only",
+      "security_contract_version": "zero_trust_v2_runtime_signed"
+    },
+    {
+      "capability_id": "lancedb",
+      "previous_skill_id": "research-source-validation-auditor",
+      "skill_id": "research-source-validation-auditor",
+      "priority": "P2",
+      "decision": "v2_default_primary_applied",
+      "selection_rule": "runtime_signed_v2_receipt_3_of_3_then_manual_batch_rollout",
+      "v2_behavior_evidence_count": 3,
+      "clean_v2_receipt_count": 3,
+      "runtime_signed_receipt_verified_count": 3,
+      "evidence_refs": [
+        ".nexus/reports/zero_trust_v2_behavior/lancedb/research-source-validation-auditor/run-01/evidence_bundle.json",
+        ".nexus/reports/zero_trust_v2_behavior/lancedb/research-source-validation-auditor/run-02/evidence_bundle.json",
+        ".nexus/reports/zero_trust_v2_behavior/lancedb/research-source-validation-auditor/run-03/evidence_bundle.json"
+      ],
+      "failed_security_contract_rules": [],
+      "promotion_credit_source": "v2_only",
+      "security_contract_version": "zero_trust_v2_runtime_signed"
+    },
+    {
+      "capability_id": "learn_ask",
+      "previous_skill_id": "nexus-live-ask-replay-normalization-gate",
+      "skill_id": "nexus-live-ask-replay-normalization-gate",
+      "priority": "P2",
+      "decision": "v2_default_primary_applied",
+      "selection_rule": "runtime_signed_v2_receipt_3_of_3_then_manual_batch_rollout",
+      "v2_behavior_evidence_count": 3,
+      "clean_v2_receipt_count": 3,
+      "runtime_signed_receipt_verified_count": 3,
+      "evidence_refs": [
+        ".nexus/reports/zero_trust_v2_behavior/learn_ask/nexus-live-ask-replay-normalization-gate/run-01/evidence_bundle.json",
+        ".nexus/reports/zero_trust_v2_behavior/learn_ask/nexus-live-ask-replay-normalization-gate/run-02/evidence_bundle.json",
+        ".nexus/reports/zero_trust_v2_behavior/learn_ask/nexus-live-ask-replay-normalization-gate/run-03/evidence_bundle.json"
+      ],
+      "failed_security_contract_rules": [],
+      "promotion_credit_source": "v2_only",
+      "security_contract_version": "zero_trust_v2_runtime_signed"
+    },
+    {
+      "capability_id": "learning_closure",
+      "previous_skill_id": "sf-systematic-learning_closure-memory-lint-8bdb0fca",
+      "skill_id": "sf-systematic-learning_closure-memory-lint-8bdb0fca",
+      "priority": "P2",
+      "decision": "v2_default_primary_applied",
+      "selection_rule": "runtime_signed_v2_receipt_3_of_3_then_manual_batch_rollout",
+      "v2_behavior_evidence_count": 3,
+      "clean_v2_receipt_count": 3,
+      "runtime_signed_receipt_verified_count": 3,
+      "evidence_refs": [
+        ".nexus/reports/zero_trust_v2_behavior/learning_closure/sf-systematic-learning_closure-memory-lint-8bdb0fca/run-01/evidence_bundle.json",
+        ".nexus/reports/zero_trust_v2_behavior/learning_closure/sf-systematic-learning_closure-memory-lint-8bdb0fca/run-02/evidence_bundle.json",
+        ".nexus/reports/zero_trust_v2_behavior/learning_closure/sf-systematic-learning_closure-memory-lint-8bdb0fca/run-03/evidence_bundle.json"
+      ],
+      "failed_security_contract_rules": [],
+      "promotion_credit_source": "v2_only",
+      "security_contract_version": "zero_trust_v2_runtime_signed"
+    },
+    {
+      "capability_id": "memory",
+      "previous_skill_id": "product-self-knowledge",
+      "skill_id": "product-self-knowledge",
+      "priority": "P2",
+      "decision": "v2_default_primary_applied",
+      "selection_rule": "runtime_signed_v2_receipt_3_of_3_then_manual_batch_rollout",
+      "v2_behavior_evidence_count": 3,
+      "clean_v2_receipt_count": 3,
+      "runtime_signed_receipt_verified_count": 3,
+      "evidence_refs": [
+        ".nexus/reports/zero_trust_v2_behavior/memory/product-self-knowledge/run-01/evidence_bundle.json",
+        ".nexus/reports/zero_trust_v2_behavior/memory/product-self-knowledge/run-02/evidence_bundle.json",
+        ".nexus/reports/zero_trust_v2_behavior/memory/product-self-knowledge/run-03/evidence_bundle.json"
+      ],
+      "failed_security_contract_rules": [],
+      "promotion_credit_source": "v2_only",
+      "security_contract_version": "zero_trust_v2_runtime_signed"
+    },
+    {
+      "capability_id": "mempalace",
+      "previous_skill_id": "sf2-mempalace-route-fit-spec",
+      "skill_id": "sf2-mempalace-route-fit-spec",
+      "priority": "P2",
+      "decision": "v2_default_primary_applied",
+      "selection_rule": "runtime_signed_v2_receipt_3_of_3_then_manual_batch_rollout",
+      "v2_behavior_evidence_count": 3,
+      "clean_v2_receipt_count": 3,
+      "runtime_signed_receipt_verified_count": 3,
+      "evidence_refs": [
+        ".nexus/reports/zero_trust_v2_behavior/mempalace/sf2-mempalace-route-fit-spec/run-01/evidence_bundle.json",
+        ".nexus/reports/zero_trust_v2_behavior/mempalace/sf2-mempalace-route-fit-spec/run-02/evidence_bundle.json",
+        ".nexus/reports/zero_trust_v2_behavior/mempalace/sf2-mempalace-route-fit-spec/run-03/evidence_bundle.json"
+      ],
+      "failed_security_contract_rules": [],
+      "promotion_credit_source": "v2_only",
+      "security_contract_version": "zero_trust_v2_runtime_signed"
+    },
+    {
+      "capability_id": "metabolism_resume",
+      "previous_skill_id": "addy-shipping-and-launch",
+      "skill_id": "addy-shipping-and-launch",
+      "priority": "P2",
+      "decision": "v2_default_primary_applied",
+      "selection_rule": "runtime_signed_v2_receipt_3_of_3_then_manual_batch_rollout",
+      "v2_behavior_evidence_count": 3,
+      "clean_v2_receipt_count": 3,
+      "runtime_signed_receipt_verified_count": 3,
+      "evidence_refs": [
+        ".nexus/reports/zero_trust_v2_behavior/metabolism_resume/addy-shipping-and-launch/run-01/evidence_bundle.json",
+        ".nexus/reports/zero_trust_v2_behavior/metabolism_resume/addy-shipping-and-launch/run-02/evidence_bundle.json",
+        ".nexus/reports/zero_trust_v2_behavior/metabolism_resume/addy-shipping-and-launch/run-03/evidence_bundle.json"
+      ],
+      "failed_security_contract_rules": [],
+      "promotion_credit_source": "v2_only",
+      "security_contract_version": "zero_trust_v2_runtime_signed"
+    },
+    {
+      "capability_id": "nightshift",
+      "previous_skill_id": "canary",
+      "skill_id": "canary",
+      "priority": "P2",
+      "decision": "v2_default_primary_applied",
+      "selection_rule": "runtime_signed_v2_receipt_3_of_3_then_manual_batch_rollout",
+      "v2_behavior_evidence_count": 3,
+      "clean_v2_receipt_count": 3,
+      "runtime_signed_receipt_verified_count": 3,
+      "evidence_refs": [
+        ".nexus/reports/zero_trust_v2_behavior/nightshift/canary/run-01/evidence_bundle.json",
+        ".nexus/reports/zero_trust_v2_behavior/nightshift/canary/run-02/evidence_bundle.json",
+        ".nexus/reports/zero_trust_v2_behavior/nightshift/canary/run-03/evidence_bundle.json"
+      ],
+      "failed_security_contract_rules": [],
+      "promotion_credit_source": "v2_only",
+      "security_contract_version": "zero_trust_v2_runtime_signed"
+    },
+    {
+      "capability_id": "policy_capability_gate",
+      "previous_skill_id": "browse",
+      "skill_id": "browse",
+      "priority": "P0",
+      "decision": "v2_default_primary_applied",
+      "selection_rule": "runtime_signed_v2_receipt_3_of_3_then_manual_batch_rollout",
+      "v2_behavior_evidence_count": 3,
+      "clean_v2_receipt_count": 3,
+      "runtime_signed_receipt_verified_count": 3,
+      "evidence_refs": [
+        ".nexus/reports/zero_trust_v2_behavior/policy_capability_gate/browse/run-01/evidence_bundle.json",
+        ".nexus/reports/zero_trust_v2_behavior/policy_capability_gate/browse/run-02/evidence_bundle.json",
+        ".nexus/reports/zero_trust_v2_behavior/policy_capability_gate/browse/run-03/evidence_bundle.json"
+      ],
+      "failed_security_contract_rules": [],
+      "promotion_credit_source": "v2_only",
+      "security_contract_version": "zero_trust_v2_runtime_signed"
+    },
+    {
+      "capability_id": "registry_skills_sync",
+      "previous_skill_id": "gstack-sync-gbrain",
+      "skill_id": "gstack-sync-gbrain",
+      "priority": "P2",
+      "decision": "v2_default_primary_applied",
+      "selection_rule": "runtime_signed_v2_receipt_3_of_3_then_manual_batch_rollout",
+      "v2_behavior_evidence_count": 3,
+      "clean_v2_receipt_count": 3,
+      "runtime_signed_receipt_verified_count": 3,
+      "evidence_refs": [
+        ".nexus/reports/zero_trust_v2_behavior/registry_skills_sync/gstack-sync-gbrain/run-01/evidence_bundle.json",
+        ".nexus/reports/zero_trust_v2_behavior/registry_skills_sync/gstack-sync-gbrain/run-02/evidence_bundle.json",
+        ".nexus/reports/zero_trust_v2_behavior/registry_skills_sync/gstack-sync-gbrain/run-03/evidence_bundle.json"
+      ],
+      "failed_security_contract_rules": [],
+      "promotion_credit_source": "v2_only",
+      "security_contract_version": "zero_trust_v2_runtime_signed"
+    },
+    {
+      "capability_id": "regression_guard",
+      "previous_skill_id": "sf-systematic-regression_guard-odoo-automated-tests-dad98433",
+      "skill_id": "sf-systematic-regression_guard-odoo-automated-tests-dad98433",
+      "priority": "P2",
+      "decision": "v2_default_primary_applied",
+      "selection_rule": "runtime_signed_v2_receipt_3_of_3_then_manual_batch_rollout",
+      "v2_behavior_evidence_count": 3,
+      "clean_v2_receipt_count": 3,
+      "runtime_signed_receipt_verified_count": 3,
+      "evidence_refs": [
+        ".nexus/reports/zero_trust_v2_behavior/regression_guard/sf-systematic-regression_guard-odoo-automated-tests-dad98433/run-01/evidence_bundle.json",
+        ".nexus/reports/zero_trust_v2_behavior/regression_guard/sf-systematic-regression_guard-odoo-automated-tests-dad98433/run-02/evidence_bundle.json",
+        ".nexus/reports/zero_trust_v2_behavior/regression_guard/sf-systematic-regression_guard-odoo-automated-tests-dad98433/run-03/evidence_bundle.json"
+      ],
+      "failed_security_contract_rules": [],
+      "promotion_credit_source": "v2_only",
+      "security_contract_version": "zero_trust_v2_runtime_signed"
+    },
+    {
+      "capability_id": "repair_loop",
+      "previous_skill_id": "qa-only",
+      "skill_id": "qa-only",
+      "priority": "P1",
+      "decision": "v2_default_primary_applied",
+      "selection_rule": "runtime_signed_v2_receipt_3_of_3_then_manual_batch_rollout",
+      "v2_behavior_evidence_count": 3,
+      "clean_v2_receipt_count": 3,
+      "runtime_signed_receipt_verified_count": 3,
+      "evidence_refs": [
+        ".nexus/reports/zero_trust_v2_behavior/repair_loop/qa-only/run-01/evidence_bundle.json",
+        ".nexus/reports/zero_trust_v2_behavior/repair_loop/qa-only/run-02/evidence_bundle.json",
+        ".nexus/reports/zero_trust_v2_behavior/repair_loop/qa-only/run-03/evidence_bundle.json"
+      ],
+      "failed_security_contract_rules": [],
+      "promotion_credit_source": "v2_only",
+      "security_contract_version": "zero_trust_v2_runtime_signed"
+    },
+    {
+      "capability_id": "research",
+      "previous_skill_id": "gbrain-academic-verify",
+      "skill_id": "gbrain-academic-verify",
+      "priority": "P2",
+      "decision": "v2_default_primary_applied",
+      "selection_rule": "runtime_signed_v2_receipt_3_of_3_then_manual_batch_rollout",
+      "v2_behavior_evidence_count": 3,
+      "clean_v2_receipt_count": 3,
+      "runtime_signed_receipt_verified_count": 3,
+      "evidence_refs": [
+        ".nexus/reports/zero_trust_v2_behavior/research/gbrain-academic-verify/run-01/evidence_bundle.json",
+        ".nexus/reports/zero_trust_v2_behavior/research/gbrain-academic-verify/run-02/evidence_bundle.json",
+        ".nexus/reports/zero_trust_v2_behavior/research/gbrain-academic-verify/run-03/evidence_bundle.json"
+      ],
+      "failed_security_contract_rules": [],
+      "promotion_credit_source": "v2_only",
+      "security_contract_version": "zero_trust_v2_runtime_signed"
+    },
+    {
+      "capability_id": "research_and_source_discipline",
+      "previous_skill_id": "gbrain-maintain",
+      "skill_id": "gbrain-maintain",
+      "priority": "P2",
+      "decision": "v2_default_primary_applied",
+      "selection_rule": "runtime_signed_v2_receipt_3_of_3_then_manual_batch_rollout",
+      "v2_behavior_evidence_count": 3,
+      "clean_v2_receipt_count": 3,
+      "runtime_signed_receipt_verified_count": 3,
+      "evidence_refs": [
+        ".nexus/reports/zero_trust_v2_behavior/research_and_source_discipline/gbrain-maintain/run-01/evidence_bundle.json",
+        ".nexus/reports/zero_trust_v2_behavior/research_and_source_discipline/gbrain-maintain/run-02/evidence_bundle.json",
+        ".nexus/reports/zero_trust_v2_behavior/research_and_source_discipline/gbrain-maintain/run-03/evidence_bundle.json"
+      ],
+      "failed_security_contract_rules": [],
+      "promotion_credit_source": "v2_only",
+      "security_contract_version": "zero_trust_v2_runtime_signed"
+    },
+    {
+      "capability_id": "research_control_plane",
+      "previous_skill_id": "browserbase-fetch",
+      "skill_id": "browserbase-fetch",
+      "priority": "P0",
+      "decision": "v2_default_primary_applied",
+      "selection_rule": "runtime_signed_v2_receipt_3_of_3_then_manual_batch_rollout",
+      "v2_behavior_evidence_count": 3,
+      "clean_v2_receipt_count": 3,
+      "runtime_signed_receipt_verified_count": 3,
+      "evidence_refs": [
+        ".nexus/reports/zero_trust_v2_behavior/research_control_plane/browserbase-fetch/run-01/evidence_bundle.json",
+        ".nexus/reports/zero_trust_v2_behavior/research_control_plane/browserbase-fetch/run-02/evidence_bundle.json",
+        ".nexus/reports/zero_trust_v2_behavior/research_control_plane/browserbase-fetch/run-03/evidence_bundle.json"
+      ],
+      "failed_security_contract_rules": [],
+      "promotion_credit_source": "v2_only",
+      "security_contract_version": "zero_trust_v2_runtime_signed"
+    },
+    {
+      "capability_id": "sandbox_replay",
+      "previous_skill_id": "nexus-acceptance-evidence-gate",
+      "skill_id": "nexus-acceptance-evidence-gate",
+      "priority": "P0",
+      "decision": "v2_default_primary_applied",
+      "selection_rule": "runtime_signed_v2_receipt_3_of_3_then_manual_batch_rollout",
+      "v2_behavior_evidence_count": 3,
+      "clean_v2_receipt_count": 3,
+      "runtime_signed_receipt_verified_count": 3,
+      "evidence_refs": [
+        ".nexus/reports/zero_trust_v2_behavior/sandbox_replay/nexus-acceptance-evidence-gate/run-01/evidence_bundle.json",
+        ".nexus/reports/zero_trust_v2_behavior/sandbox_replay/nexus-acceptance-evidence-gate/run-02/evidence_bundle.json",
+        ".nexus/reports/zero_trust_v2_behavior/sandbox_replay/nexus-acceptance-evidence-gate/run-03/evidence_bundle.json"
+      ],
+      "failed_security_contract_rules": [],
+      "promotion_credit_source": "v2_only",
+      "security_contract_version": "zero_trust_v2_runtime_signed"
+    },
+    {
+      "capability_id": "swarm_multi_agent",
+      "previous_skill_id": "nexus-gemini-code-review-orchestrator",
+      "skill_id": "nexus-gemini-code-review-orchestrator",
+      "priority": "P1",
+      "decision": "v2_default_primary_applied",
+      "selection_rule": "runtime_signed_v2_receipt_3_of_3_then_manual_batch_rollout",
+      "v2_behavior_evidence_count": 3,
+      "clean_v2_receipt_count": 3,
+      "runtime_signed_receipt_verified_count": 3,
+      "evidence_refs": [
+        ".nexus/reports/zero_trust_v2_behavior/swarm_multi_agent/nexus-gemini-code-review-orchestrator/run-01/evidence_bundle.json",
+        ".nexus/reports/zero_trust_v2_behavior/swarm_multi_agent/nexus-gemini-code-review-orchestrator/run-02/evidence_bundle.json",
+        ".nexus/reports/zero_trust_v2_behavior/swarm_multi_agent/nexus-gemini-code-review-orchestrator/run-03/evidence_bundle.json"
+      ],
+      "failed_security_contract_rules": [],
+      "promotion_credit_source": "v2_only",
+      "security_contract_version": "zero_trust_v2_runtime_signed"
+    },
+    {
+      "capability_id": "ui_validator",
+      "previous_skill_id": "sf-systematic-ui_validator-e2e-testing-d98eb7c3",
+      "skill_id": "sf-systematic-ui_validator-e2e-testing-d98eb7c3",
+      "priority": "P2",
+      "decision": "v2_default_primary_applied",
+      "selection_rule": "runtime_signed_v2_receipt_3_of_3_then_manual_batch_rollout",
+      "v2_behavior_evidence_count": 3,
+      "clean_v2_receipt_count": 3,
+      "runtime_signed_receipt_verified_count": 3,
+      "evidence_refs": [
+        ".nexus/reports/zero_trust_v2_behavior/ui_validator/sf-systematic-ui_validator-e2e-testing-d98eb7c3/run-01/evidence_bundle.json",
+        ".nexus/reports/zero_trust_v2_behavior/ui_validator/sf-systematic-ui_validator-e2e-testing-d98eb7c3/run-02/evidence_bundle.json",
+        ".nexus/reports/zero_trust_v2_behavior/ui_validator/sf-systematic-ui_validator-e2e-testing-d98eb7c3/run-03/evidence_bundle.json"
+      ],
+      "failed_security_contract_rules": [],
+      "promotion_credit_source": "v2_only",
+      "security_contract_version": "zero_trust_v2_runtime_signed"
+    },
+    {
+      "capability_id": "ultra_review",
+      "previous_skill_id": "github11-vulnerability-scanner-ultra-review",
+      "skill_id": "github11-vulnerability-scanner-ultra-review",
+      "priority": "P2",
+      "decision": "v2_default_primary_applied",
+      "selection_rule": "runtime_signed_v2_receipt_3_of_3_then_manual_batch_rollout",
+      "v2_behavior_evidence_count": 3,
+      "clean_v2_receipt_count": 3,
+      "runtime_signed_receipt_verified_count": 3,
+      "evidence_refs": [
+        ".nexus/reports/zero_trust_v2_behavior/ultra_review/github11-vulnerability-scanner-ultra-review/run-01/evidence_bundle.json",
+        ".nexus/reports/zero_trust_v2_behavior/ultra_review/github11-vulnerability-scanner-ultra-review/run-02/evidence_bundle.json",
+        ".nexus/reports/zero_trust_v2_behavior/ultra_review/github11-vulnerability-scanner-ultra-review/run-03/evidence_bundle.json"
+      ],
+      "failed_security_contract_rules": [],
+      "promotion_credit_source": "v2_only",
+      "security_contract_version": "zero_trust_v2_runtime_signed"
+    },
+    {
+      "capability_id": "xray",
+      "previous_skill_id": "diagnose",
+      "skill_id": "diagnose",
+      "priority": "P0",
+      "decision": "v2_default_primary_applied",
+      "selection_rule": "runtime_signed_v2_receipt_3_of_3_then_manual_batch_rollout",
+      "v2_behavior_evidence_count": 3,
+      "clean_v2_receipt_count": 3,
+      "runtime_signed_receipt_verified_count": 3,
+      "evidence_refs": [
+        ".nexus/reports/zero_trust_v2_behavior/xray/diagnose/run-01/evidence_bundle.json",
+        ".nexus/reports/zero_trust_v2_behavior/xray/diagnose/run-02/evidence_bundle.json",
+        ".nexus/reports/zero_trust_v2_behavior/xray/diagnose/run-03/evidence_bundle.json"
+      ],
+      "failed_security_contract_rules": [],
+      "promotion_credit_source": "v2_only",
+      "security_contract_version": "zero_trust_v2_runtime_signed"
+    }
+  ],
+  "blockers": [],
+  "claim_boundary": [
+    "This overlay applies Zero-Trust V2 runtime-signed behavior evidence to the internal runtime default lane.",
+    "Public benchmark remains a separate gate and is not unlocked by this apply.",
+    "V1 remains rollback-only until a separate closure decision removes the fallback path."
+  ]
+}

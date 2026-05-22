@@ -1,0 +1,221 @@
+{
+  "schema": "nexus.zero_trust_v2.rollout_status.v1",
+  "status": "PASS",
+  "created_at": "2026-05-21T13:18:02.590904+00:00",
+  "source_runtime_apply": "docs/reports/NEXUS_SF_FINAL_RUNTIME_APPLY_DECISION_2026-05-21.json",
+  "source_unification_plan": "docs/reports/NEXUS_ZERO_TRUST_V2_UNIFICATION_PLAN_2026-05-21.json",
+  "summary": {
+    "capability_count": 34,
+    "v2_default_ready_count": 0,
+    "v1_primary_or_existing_count": 34,
+    "unification_complete": false,
+    "runtime_mutation_allowed": false,
+    "public_benchmark_allowed": false
+  },
+  "capabilities": [
+    {
+      "capability_id": "artifact_gate",
+      "v2_default_ready": false,
+      "runtime_primary_source": "v1_overlay_or_existing_primary",
+      "v1_role": "primary_or_existing_runtime_path"
+    },
+    {
+      "capability_id": "autonomic_router",
+      "v2_default_ready": false,
+      "runtime_primary_source": "v1_overlay_or_existing_primary",
+      "v1_role": "primary_or_existing_runtime_path"
+    },
+    {
+      "capability_id": "autoreason",
+      "v2_default_ready": false,
+      "runtime_primary_source": "v1_overlay_or_existing_primary",
+      "v1_role": "primary_or_existing_runtime_path"
+    },
+    {
+      "capability_id": "belief",
+      "v2_default_ready": false,
+      "runtime_primary_source": "v1_overlay_or_existing_primary",
+      "v1_role": "primary_or_existing_runtime_path"
+    },
+    {
+      "capability_id": "benchmark_meta_opt",
+      "v2_default_ready": false,
+      "runtime_primary_source": "v1_overlay_or_existing_primary",
+      "v1_role": "primary_or_existing_runtime_path"
+    },
+    {
+      "capability_id": "claim_gate",
+      "v2_default_ready": false,
+      "runtime_primary_source": "v1_overlay_or_existing_primary",
+      "v1_role": "primary_or_existing_runtime_path"
+    },
+    {
+      "capability_id": "codeintel",
+      "v2_default_ready": false,
+      "runtime_primary_source": "v1_overlay_or_existing_primary",
+      "v1_role": "primary_or_existing_runtime_path"
+    },
+    {
+      "capability_id": "ddtree",
+      "v2_default_ready": false,
+      "runtime_primary_source": "v1_overlay_or_existing_primary",
+      "v1_role": "primary_or_existing_runtime_path"
+    },
+    {
+      "capability_id": "direct_master_loop",
+      "v2_default_ready": false,
+      "runtime_primary_source": "v1_overlay_or_existing_primary",
+      "v1_role": "primary_or_existing_runtime_path"
+    },
+    {
+      "capability_id": "drone",
+      "v2_default_ready": false,
+      "runtime_primary_source": "v1_overlay_or_existing_primary",
+      "v1_role": "primary_or_existing_runtime_path"
+    },
+    {
+      "capability_id": "external_productivity",
+      "v2_default_ready": false,
+      "runtime_primary_source": "v1_overlay_or_existing_primary",
+      "v1_role": "primary_or_existing_runtime_path"
+    },
+    {
+      "capability_id": "file_lock_security_gate",
+      "v2_default_ready": false,
+      "runtime_primary_source": "v1_overlay_or_existing_primary",
+      "v1_role": "primary_or_existing_runtime_path"
+    },
+    {
+      "capability_id": "forecast_pregate",
+      "v2_default_ready": false,
+      "runtime_primary_source": "v1_overlay_or_existing_primary",
+      "v1_role": "primary_or_existing_runtime_path"
+    },
+    {
+      "capability_id": "governance_and_trust",
+      "v2_default_ready": false,
+      "runtime_primary_source": "v1_overlay_or_existing_primary",
+      "v1_role": "primary_or_existing_runtime_path"
+    },
+    {
+      "capability_id": "hyper_sprint",
+      "v2_default_ready": false,
+      "runtime_primary_source": "v1_overlay_or_existing_primary",
+      "v1_role": "primary_or_existing_runtime_path"
+    },
+    {
+      "capability_id": "lancedb",
+      "v2_default_ready": false,
+      "runtime_primary_source": "v1_overlay_or_existing_primary",
+      "v1_role": "primary_or_existing_runtime_path"
+    },
+    {
+      "capability_id": "learn_ask",
+      "v2_default_ready": false,
+      "runtime_primary_source": "v1_overlay_or_existing_primary",
+      "v1_role": "primary_or_existing_runtime_path"
+    },
+    {
+      "capability_id": "learning_closure",
+      "v2_default_ready": false,
+      "runtime_primary_source": "v1_overlay_or_existing_primary",
+      "v1_role": "primary_or_existing_runtime_path"
+    },
+    {
+      "capability_id": "memory",
+      "v2_default_ready": false,
+      "runtime_primary_source": "v1_overlay_or_existing_primary",
+      "v1_role": "primary_or_existing_runtime_path"
+    },
+    {
+      "capability_id": "mempalace",
+      "v2_default_ready": false,
+      "runtime_primary_source": "v1_overlay_or_existing_primary",
+      "v1_role": "primary_or_existing_runtime_path"
+    },
+    {
+      "capability_id": "metabolism_resume",
+      "v2_default_ready": false,
+      "runtime_primary_source": "v1_overlay_or_existing_primary",
+      "v1_role": "primary_or_existing_runtime_path"
+    },
+    {
+      "capability_id": "nightshift",
+      "v2_default_ready": false,
+      "runtime_primary_source": "v1_overlay_or_existing_primary",
+      "v1_role": "primary_or_existing_runtime_path"
+    },
+    {
+      "capability_id": "policy_capability_gate",
+      "v2_default_ready": false,
+      "runtime_primary_source": "v1_overlay_or_existing_primary",
+      "v1_role": "primary_or_existing_runtime_path"
+    },
+    {
+      "capability_id": "registry_skills_sync",
+      "v2_default_ready": false,
+      "runtime_primary_source": "v1_overlay_or_existing_primary",
+      "v1_role": "primary_or_existing_runtime_path"
+    },
+    {
+      "capability_id": "regression_guard",
+      "v2_default_ready": false,
+      "runtime_primary_source": "v1_overlay_or_existing_primary",
+      "v1_role": "primary_or_existing_runtime_path"
+    },
+    {
+      "capability_id": "repair_loop",
+      "v2_default_ready": false,
+      "runtime_primary_source": "v1_overlay_or_existing_primary",
+      "v1_role": "primary_or_existing_runtime_path"
+    },
+    {
+      "capability_id": "research",
+      "v2_default_ready": false,
+      "runtime_primary_source": "v1_overlay_or_existing_primary",
+      "v1_role": "primary_or_existing_runtime_path"
+    },
+    {
+      "capability_id": "research_and_source_discipline",
+      "v2_default_ready": false,
+      "runtime_primary_source": "v1_overlay_or_existing_primary",
+      "v1_role": "primary_or_existing_runtime_path"
+    },
+    {
+      "capability_id": "research_control_plane",
+      "v2_default_ready": false,
+      "runtime_primary_source": "v1_overlay_or_existing_primary",
+      "v1_role": "primary_or_existing_runtime_path"
+    },
+    {
+      "capability_id": "sandbox_replay",
+      "v2_default_ready": false,
+      "runtime_primary_source": "v1_overlay_or_existing_primary",
+      "v1_role": "primary_or_existing_runtime_path"
+    },
+    {
+      "capability_id": "swarm_multi_agent",
+      "v2_default_ready": false,
+      "runtime_primary_source": "v1_overlay_or_existing_primary",
+      "v1_role": "primary_or_existing_runtime_path"
+    },
+    {
+      "capability_id": "ui_validator",
+      "v2_default_ready": false,
+      "runtime_primary_source": "v1_overlay_or_existing_primary",
+      "v1_role": "primary_or_existing_runtime_path"
+    },
+    {
+      "capability_id": "ultra_review",
+      "v2_default_ready": false,
+      "runtime_primary_source": "v1_overlay_or_existing_primary",
+      "v1_role": "primary_or_existing_runtime_path"
+    },
+    {
+      "capability_id": "xray",
+      "v2_default_ready": false,
+      "runtime_primary_source": "v1_overlay_or_existing_primary",
+      "v1_role": "primary_or_existing_runtime_path"
+    }
+  ]
+}

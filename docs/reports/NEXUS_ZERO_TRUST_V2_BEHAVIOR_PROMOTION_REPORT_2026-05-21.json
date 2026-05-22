@@ -1,0 +1,288 @@
+{
+  "schema": "nexus.zero_trust_v2.behavior_promotion_report.v1",
+  "status": "PASS",
+  "created_at": "2026-05-22T01:54:46.789689+00:00",
+  "source_behavior_evidence": "docs/reports/NEXUS_ZERO_TRUST_V2_BEHAVIOR_EVIDENCE_2026-05-21.json",
+  "summary": {
+    "candidate_count": 34,
+    "ready_for_manual_apply_count": 34,
+    "blocked_count": 0,
+    "min_v2_evidence_count": 3,
+    "runtime_mutation_allowed": false,
+    "public_benchmark_allowed": false
+  },
+  "candidates": [
+    {
+      "capability_id": "claim_gate",
+      "skill_id": "addy-doubt-driven-development",
+      "priority": "P0",
+      "status": "READY_FOR_MANUAL_APPLY",
+      "v2_behavior_evidence_count": 3,
+      "failed_security_contract_rules": []
+    },
+    {
+      "capability_id": "file_lock_security_gate",
+      "skill_id": "browserbase-what-antibot",
+      "priority": "P0",
+      "status": "READY_FOR_MANUAL_APPLY",
+      "v2_behavior_evidence_count": 3,
+      "failed_security_contract_rules": []
+    },
+    {
+      "capability_id": "governance_and_trust",
+      "skill_id": "sf-systematic-governance_and_trust-aegisops-ai-0aa841e2",
+      "priority": "P0",
+      "status": "READY_FOR_MANUAL_APPLY",
+      "v2_behavior_evidence_count": 3,
+      "failed_security_contract_rules": []
+    },
+    {
+      "capability_id": "policy_capability_gate",
+      "skill_id": "browse",
+      "priority": "P0",
+      "status": "READY_FOR_MANUAL_APPLY",
+      "v2_behavior_evidence_count": 3,
+      "failed_security_contract_rules": []
+    },
+    {
+      "capability_id": "research_control_plane",
+      "skill_id": "browserbase-fetch",
+      "priority": "P0",
+      "status": "READY_FOR_MANUAL_APPLY",
+      "v2_behavior_evidence_count": 3,
+      "failed_security_contract_rules": []
+    },
+    {
+      "capability_id": "sandbox_replay",
+      "skill_id": "nexus-acceptance-evidence-gate",
+      "priority": "P0",
+      "status": "READY_FOR_MANUAL_APPLY",
+      "v2_behavior_evidence_count": 3,
+      "failed_security_contract_rules": []
+    },
+    {
+      "capability_id": "xray",
+      "skill_id": "diagnose",
+      "priority": "P0",
+      "status": "READY_FOR_MANUAL_APPLY",
+      "v2_behavior_evidence_count": 3,
+      "failed_security_contract_rules": []
+    },
+    {
+      "capability_id": "codeintel",
+      "skill_id": "gstack-qa",
+      "priority": "P1",
+      "status": "READY_FOR_MANUAL_APPLY",
+      "v2_behavior_evidence_count": 3,
+      "failed_security_contract_rules": []
+    },
+    {
+      "capability_id": "direct_master_loop",
+      "skill_id": "sf-systematic-direct_master_loop-build-32802a87",
+      "priority": "P1",
+      "status": "READY_FOR_MANUAL_APPLY",
+      "v2_behavior_evidence_count": 3,
+      "failed_security_contract_rules": []
+    },
+    {
+      "capability_id": "repair_loop",
+      "skill_id": "qa-only",
+      "priority": "P1",
+      "status": "READY_FOR_MANUAL_APPLY",
+      "v2_behavior_evidence_count": 3,
+      "failed_security_contract_rules": []
+    },
+    {
+      "capability_id": "swarm_multi_agent",
+      "skill_id": "nexus-gemini-code-review-orchestrator",
+      "priority": "P1",
+      "status": "READY_FOR_MANUAL_APPLY",
+      "v2_behavior_evidence_count": 3,
+      "failed_security_contract_rules": []
+    },
+    {
+      "capability_id": "artifact_gate",
+      "skill_id": "sf-systematic-artifact_gate-differential-review-461fbd0c",
+      "priority": "P2",
+      "status": "READY_FOR_MANUAL_APPLY",
+      "v2_behavior_evidence_count": 3,
+      "failed_security_contract_rules": []
+    },
+    {
+      "capability_id": "autonomic_router",
+      "skill_id": "nexus-agent-execution-board-failclosed",
+      "priority": "P2",
+      "status": "READY_FOR_MANUAL_APPLY",
+      "v2_behavior_evidence_count": 3,
+      "failed_security_contract_rules": []
+    },
+    {
+      "capability_id": "autoreason",
+      "skill_id": "sf2-belief-route-fit-spec",
+      "priority": "P2",
+      "status": "READY_FOR_MANUAL_APPLY",
+      "v2_behavior_evidence_count": 3,
+      "failed_security_contract_rules": []
+    },
+    {
+      "capability_id": "belief",
+      "skill_id": "sf2-belief-route-fit-spec",
+      "priority": "P2",
+      "status": "READY_FOR_MANUAL_APPLY",
+      "v2_behavior_evidence_count": 3,
+      "failed_security_contract_rules": []
+    },
+    {
+      "capability_id": "benchmark_meta_opt",
+      "skill_id": "sf-systematic-benchmark_meta_opt-hugging-face-trackio-d21c6b90",
+      "priority": "P2",
+      "status": "READY_FOR_MANUAL_APPLY",
+      "v2_behavior_evidence_count": 3,
+      "failed_security_contract_rules": []
+    },
+    {
+      "capability_id": "ddtree",
+      "skill_id": "nexus-root-cause-probe",
+      "priority": "P2",
+      "status": "READY_FOR_MANUAL_APPLY",
+      "v2_behavior_evidence_count": 3,
+      "failed_security_contract_rules": []
+    },
+    {
+      "capability_id": "drone",
+      "skill_id": "sf-systematic-drone-python-background-jobs-18326a62",
+      "priority": "P2",
+      "status": "READY_FOR_MANUAL_APPLY",
+      "v2_behavior_evidence_count": 3,
+      "failed_security_contract_rules": []
+    },
+    {
+      "capability_id": "external_productivity",
+      "skill_id": "aibdd.auto.python.e2e.green",
+      "priority": "P2",
+      "status": "READY_FOR_MANUAL_APPLY",
+      "v2_behavior_evidence_count": 3,
+      "failed_security_contract_rules": []
+    },
+    {
+      "capability_id": "forecast_pregate",
+      "skill_id": "addy-shipping-and-launch",
+      "priority": "P2",
+      "status": "READY_FOR_MANUAL_APPLY",
+      "v2_behavior_evidence_count": 3,
+      "failed_security_contract_rules": []
+    },
+    {
+      "capability_id": "hyper_sprint",
+      "skill_id": "retro",
+      "priority": "P2",
+      "status": "READY_FOR_MANUAL_APPLY",
+      "v2_behavior_evidence_count": 3,
+      "failed_security_contract_rules": []
+    },
+    {
+      "capability_id": "lancedb",
+      "skill_id": "research-source-validation-auditor",
+      "priority": "P2",
+      "status": "READY_FOR_MANUAL_APPLY",
+      "v2_behavior_evidence_count": 3,
+      "failed_security_contract_rules": []
+    },
+    {
+      "capability_id": "learn_ask",
+      "skill_id": "nexus-live-ask-replay-normalization-gate",
+      "priority": "P2",
+      "status": "READY_FOR_MANUAL_APPLY",
+      "v2_behavior_evidence_count": 3,
+      "failed_security_contract_rules": []
+    },
+    {
+      "capability_id": "learning_closure",
+      "skill_id": "sf-systematic-learning_closure-memory-lint-8bdb0fca",
+      "priority": "P2",
+      "status": "READY_FOR_MANUAL_APPLY",
+      "v2_behavior_evidence_count": 3,
+      "failed_security_contract_rules": []
+    },
+    {
+      "capability_id": "memory",
+      "skill_id": "product-self-knowledge",
+      "priority": "P2",
+      "status": "READY_FOR_MANUAL_APPLY",
+      "v2_behavior_evidence_count": 3,
+      "failed_security_contract_rules": []
+    },
+    {
+      "capability_id": "mempalace",
+      "skill_id": "sf2-mempalace-route-fit-spec",
+      "priority": "P2",
+      "status": "READY_FOR_MANUAL_APPLY",
+      "v2_behavior_evidence_count": 3,
+      "failed_security_contract_rules": []
+    },
+    {
+      "capability_id": "metabolism_resume",
+      "skill_id": "addy-shipping-and-launch",
+      "priority": "P2",
+      "status": "READY_FOR_MANUAL_APPLY",
+      "v2_behavior_evidence_count": 3,
+      "failed_security_contract_rules": []
+    },
+    {
+      "capability_id": "nightshift",
+      "skill_id": "canary",
+      "priority": "P2",
+      "status": "READY_FOR_MANUAL_APPLY",
+      "v2_behavior_evidence_count": 3,
+      "failed_security_contract_rules": []
+    },
+    {
+      "capability_id": "registry_skills_sync",
+      "skill_id": "gstack-sync-gbrain",
+      "priority": "P2",
+      "status": "READY_FOR_MANUAL_APPLY",
+      "v2_behavior_evidence_count": 3,
+      "failed_security_contract_rules": []
+    },
+    {
+      "capability_id": "regression_guard",
+      "skill_id": "sf-systematic-regression_guard-odoo-automated-tests-dad98433",
+      "priority": "P2",
+      "status": "READY_FOR_MANUAL_APPLY",
+      "v2_behavior_evidence_count": 3,
+      "failed_security_contract_rules": []
+    },
+    {
+      "capability_id": "research",
+      "skill_id": "gbrain-academic-verify",
+      "priority": "P2",
+      "status": "READY_FOR_MANUAL_APPLY",
+      "v2_behavior_evidence_count": 3,
+      "failed_security_contract_rules": []
+    },
+    {
+      "capability_id": "research_and_source_discipline",
+      "skill_id": "gbrain-maintain",
+      "priority": "P2",
+      "status": "READY_FOR_MANUAL_APPLY",
+      "v2_behavior_evidence_count": 3,
+      "failed_security_contract_rules": []
+    },
+    {
+      "capability_id": "ui_validator",
+      "skill_id": "sf-systematic-ui_validator-e2e-testing-d98eb7c3",
+      "priority": "P2",
+      "status": "READY_FOR_MANUAL_APPLY",
+      "v2_behavior_evidence_count": 3,
+      "failed_security_contract_rules": []
+    },
+    {
+      "capability_id": "ultra_review",
+      "skill_id": "github11-vulnerability-scanner-ultra-review",
+      "priority": "P2",
+      "status": "READY_FOR_MANUAL_APPLY",
+      "v2_behavior_evidence_count": 3,
+      "failed_security_contract_rules": []
+    }
+  ]
+}

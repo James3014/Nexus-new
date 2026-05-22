@@ -1,0 +1,113 @@
+{
+  "schema": "nexus.zero_trust_v2.skill_command_specs.v1",
+  "status": "PASS",
+  "created_at": "2026-05-21T13:14:38.086080+00:00",
+  "source_backlog": "docs/reports/NEXUS_ZERO_TRUST_V2_CURATION_BACKLOG_2026-05-21.json",
+  "summary": {
+    "source_candidate_count": 19,
+    "selected_priority": "P0",
+    "selected_candidate_count": 5,
+    "command_ready_count": 1,
+    "blocked_count": 4,
+    "source_review_status_counts": {
+      "BLOCKED_BY_POLICY": 4,
+      "PASS": 1
+    },
+    "runtime_mutation_allowed": false,
+    "public_benchmark_allowed": false
+  },
+  "specs": [
+    {
+      "capability_id": "claim_gate",
+      "skill_id": "addy-doubt-driven-development",
+      "priority": "P0",
+      "source_review": {
+        "skill_id": "addy-doubt-driven-development",
+        "status": "BLOCKED_BY_POLICY",
+        "failed_security_contract_rules": [
+          "SKILL_SOURCE_NOT_FOUND"
+        ],
+        "skill_path": "",
+        "source_sha256": ""
+      },
+      "command": [],
+      "workspace_file": "",
+      "promotion_credit_allowed": false
+    },
+    {
+      "capability_id": "file_lock_security_gate",
+      "skill_id": "browserbase-what-antibot",
+      "priority": "P0",
+      "source_review": {
+        "skill_id": "browserbase-what-antibot",
+        "status": "BLOCKED_BY_POLICY",
+        "failed_security_contract_rules": [
+          "SKILL_SOURCE_NOT_FOUND"
+        ],
+        "skill_path": "",
+        "source_sha256": ""
+      },
+      "command": [],
+      "workspace_file": "",
+      "promotion_credit_allowed": false
+    },
+    {
+      "capability_id": "policy_capability_gate",
+      "skill_id": "browse",
+      "priority": "P0",
+      "source_review": {
+        "skill_id": "browse",
+        "status": "BLOCKED_BY_POLICY",
+        "failed_security_contract_rules": [
+          "SKILL_SOURCE_NOT_FOUND"
+        ],
+        "skill_path": "",
+        "source_sha256": ""
+      },
+      "command": [],
+      "workspace_file": "",
+      "promotion_credit_allowed": false
+    },
+    {
+      "capability_id": "research_control_plane",
+      "skill_id": "browserbase-fetch",
+      "priority": "P0",
+      "source_review": {
+        "skill_id": "browserbase-fetch",
+        "status": "BLOCKED_BY_POLICY",
+        "failed_security_contract_rules": [
+          "SKILL_SOURCE_NOT_FOUND"
+        ],
+        "skill_path": "",
+        "source_sha256": ""
+      },
+      "command": [],
+      "workspace_file": "",
+      "promotion_credit_allowed": false
+    },
+    {
+      "capability_id": "sandbox_replay",
+      "skill_id": "nexus-acceptance-evidence-gate",
+      "priority": "P0",
+      "source_review": {
+        "skill_id": "nexus-acceptance-evidence-gate",
+        "status": "PASS",
+        "failed_security_contract_rules": [],
+        "skill_path": "/Users/jameschen/.hermes/skills/devops/nexus-acceptance-evidence-gate/SKILL.md",
+        "source_sha256": "3f6df2fe29c0ff2607698d5c77016b7ac2c777e5491f87e0880876062dec47c2",
+        "source_line_count": 163
+      },
+      "command": [
+        "python3",
+        "-c",
+        "from pathlib import Path; import hashlib; p=Path('SKILL.md'); data=p.read_bytes(); print(hashlib.sha256(data).hexdigest())"
+      ],
+      "workspace_file": "SKILL.md",
+      "promotion_credit_allowed": true
+    }
+  ],
+  "claim_boundary": [
+    "Command specs materialize SKILL.md into a per-arm sandbox workspace.",
+    "Source review pass permits sandbox inspection only; behavior promotion still requires physical V2 evidence."
+  ]
+}

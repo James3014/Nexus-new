@@ -1,0 +1,735 @@
+{
+  "cases": [
+    {
+      "blocking_skill_mount_violations": [],
+      "capability": "artifact_gate",
+      "expected_skill": "sf-systematic-artifact_gate-differential-review-461fbd0c",
+      "planned_requests": [
+        {
+          "capability_id": "artifact_gate",
+          "skill_id": "sf-systematic-artifact_gate-differential-review-461fbd0c",
+          "source": "sf_runtime_policy_overlay"
+        }
+      ],
+      "runtime_final_receipt_chain": {
+        "evidence_present": true,
+        "gate_passed": true,
+        "injected": true,
+        "outcome_contributed": true,
+        "selected": true,
+        "used": true
+      },
+      "status": "PASS"
+    },
+    {
+      "blocking_skill_mount_violations": [],
+      "capability": "autonomic_router",
+      "expected_skill": "nexus-agent-execution-board-failclosed",
+      "planned_requests": [
+        {
+          "capability_id": "autonomic_router",
+          "skill_id": "nexus-agent-execution-board-failclosed",
+          "source": "sf_runtime_policy_overlay"
+        }
+      ],
+      "runtime_final_receipt_chain": {
+        "evidence_present": true,
+        "gate_passed": true,
+        "injected": true,
+        "outcome_contributed": true,
+        "selected": true,
+        "used": true
+      },
+      "status": "PASS"
+    },
+    {
+      "blocking_skill_mount_violations": [],
+      "capability": "autoreason",
+      "expected_skill": "sf2-belief-route-fit-spec",
+      "planned_requests": [
+        {
+          "capability_id": "autoreason",
+          "skill_id": "sf2-belief-route-fit-spec",
+          "source": "sf_runtime_policy_overlay"
+        }
+      ],
+      "runtime_final_receipt_chain": {
+        "evidence_present": true,
+        "gate_passed": true,
+        "injected": true,
+        "outcome_contributed": true,
+        "selected": true,
+        "used": true
+      },
+      "status": "PASS"
+    },
+    {
+      "blocking_skill_mount_violations": [],
+      "capability": "belief",
+      "expected_skill": "sf2-belief-route-fit-spec",
+      "planned_requests": [
+        {
+          "capability_id": "belief",
+          "skill_id": "sf2-belief-route-fit-spec",
+          "source": "sf_runtime_policy_overlay"
+        }
+      ],
+      "runtime_final_receipt_chain": {
+        "evidence_present": true,
+        "gate_passed": true,
+        "injected": true,
+        "outcome_contributed": true,
+        "selected": true,
+        "used": true
+      },
+      "status": "PASS"
+    },
+    {
+      "blocking_skill_mount_violations": [],
+      "capability": "benchmark_meta_opt",
+      "expected_skill": "sf-systematic-benchmark_meta_opt-hugging-face-trackio-d21c6b90",
+      "planned_requests": [
+        {
+          "capability_id": "benchmark_meta_opt",
+          "skill_id": "sf-systematic-benchmark_meta_opt-hugging-face-trackio-d21c6b90",
+          "source": "sf_runtime_policy_overlay"
+        }
+      ],
+      "runtime_final_receipt_chain": {
+        "evidence_present": true,
+        "gate_passed": true,
+        "injected": true,
+        "outcome_contributed": true,
+        "selected": true,
+        "used": true
+      },
+      "status": "PASS"
+    },
+    {
+      "blocking_skill_mount_violations": [],
+      "capability": "claim_gate",
+      "expected_skill": "addy-doubt-driven-development",
+      "planned_requests": [
+        {
+          "capability_id": "claim_gate",
+          "skill_id": "addy-doubt-driven-development",
+          "source": "sf_runtime_policy_overlay"
+        }
+      ],
+      "runtime_final_receipt_chain": {
+        "evidence_present": true,
+        "gate_passed": true,
+        "injected": true,
+        "outcome_contributed": true,
+        "selected": true,
+        "used": true
+      },
+      "status": "PASS"
+    },
+    {
+      "blocking_skill_mount_violations": [],
+      "capability": "codeintel",
+      "expected_skill": "gstack-qa",
+      "planned_requests": [
+        {
+          "capability_id": "codeintel",
+          "skill_id": "gstack-qa",
+          "source": "sf_runtime_policy_overlay"
+        }
+      ],
+      "runtime_final_receipt_chain": {
+        "evidence_present": true,
+        "gate_passed": true,
+        "injected": true,
+        "outcome_contributed": true,
+        "selected": true,
+        "used": true
+      },
+      "status": "PASS"
+    },
+    {
+      "blocking_skill_mount_violations": [],
+      "capability": "ddtree",
+      "expected_skill": "nexus-root-cause-probe",
+      "planned_requests": [
+        {
+          "capability_id": "ddtree",
+          "skill_id": "nexus-root-cause-probe",
+          "source": "sf_runtime_policy_overlay"
+        }
+      ],
+      "runtime_final_receipt_chain": {
+        "evidence_present": true,
+        "gate_passed": true,
+        "injected": true,
+        "outcome_contributed": true,
+        "selected": true,
+        "used": true
+      },
+      "status": "PASS"
+    },
+    {
+      "blocking_skill_mount_violations": [],
+      "capability": "direct_master_loop",
+      "expected_skill": "sf-systematic-direct_master_loop-build-32802a87",
+      "planned_requests": [
+        {
+          "capability_id": "direct_master_loop",
+          "skill_id": "sf-systematic-direct_master_loop-build-32802a87",
+          "source": "sf_runtime_policy_overlay"
+        }
+      ],
+      "runtime_final_receipt_chain": {
+        "evidence_present": true,
+        "gate_passed": true,
+        "injected": true,
+        "outcome_contributed": true,
+        "selected": true,
+        "used": true
+      },
+      "status": "PASS"
+    },
+    {
+      "blocking_skill_mount_violations": [],
+      "capability": "drone",
+      "expected_skill": "sf-systematic-drone-python-background-jobs-18326a62",
+      "planned_requests": [
+        {
+          "capability_id": "drone",
+          "skill_id": "sf-systematic-drone-python-background-jobs-18326a62",
+          "source": "sf_runtime_policy_overlay"
+        }
+      ],
+      "runtime_final_receipt_chain": {
+        "evidence_present": true,
+        "gate_passed": true,
+        "injected": true,
+        "outcome_contributed": true,
+        "selected": true,
+        "used": true
+      },
+      "status": "PASS"
+    },
+    {
+      "blocking_skill_mount_violations": [],
+      "capability": "external_productivity",
+      "expected_skill": "aibdd.auto.python.e2e.green",
+      "planned_requests": [
+        {
+          "capability_id": "external_productivity",
+          "skill_id": "aibdd.auto.python.e2e.green",
+          "source": "sf_runtime_policy_overlay"
+        }
+      ],
+      "runtime_final_receipt_chain": {
+        "evidence_present": true,
+        "gate_passed": true,
+        "injected": true,
+        "outcome_contributed": true,
+        "selected": true,
+        "used": true
+      },
+      "status": "PASS"
+    },
+    {
+      "blocking_skill_mount_violations": [],
+      "capability": "file_lock_security_gate",
+      "expected_skill": "browserbase-what-antibot",
+      "planned_requests": [
+        {
+          "capability_id": "file_lock_security_gate",
+          "skill_id": "browserbase-what-antibot",
+          "source": "sf_runtime_policy_overlay"
+        }
+      ],
+      "runtime_final_receipt_chain": {
+        "evidence_present": true,
+        "gate_passed": true,
+        "injected": true,
+        "outcome_contributed": true,
+        "selected": true,
+        "used": true
+      },
+      "status": "PASS"
+    },
+    {
+      "blocking_skill_mount_violations": [],
+      "capability": "forecast_pregate",
+      "expected_skill": "addy-shipping-and-launch",
+      "planned_requests": [
+        {
+          "capability_id": "forecast_pregate",
+          "skill_id": "addy-shipping-and-launch",
+          "source": "sf_runtime_policy_overlay"
+        }
+      ],
+      "runtime_final_receipt_chain": {
+        "evidence_present": true,
+        "gate_passed": true,
+        "injected": true,
+        "outcome_contributed": true,
+        "selected": true,
+        "used": true
+      },
+      "status": "PASS"
+    },
+    {
+      "blocking_skill_mount_violations": [],
+      "capability": "governance_and_trust",
+      "expected_skill": "sf-systematic-governance_and_trust-aegisops-ai-0aa841e2",
+      "planned_requests": [
+        {
+          "capability_id": "governance_and_trust",
+          "skill_id": "sf-systematic-governance_and_trust-aegisops-ai-0aa841e2",
+          "source": "sf_runtime_policy_overlay"
+        }
+      ],
+      "runtime_final_receipt_chain": {
+        "evidence_present": true,
+        "gate_passed": true,
+        "injected": true,
+        "outcome_contributed": true,
+        "selected": true,
+        "used": true
+      },
+      "status": "PASS"
+    },
+    {
+      "blocking_skill_mount_violations": [],
+      "capability": "hyper_sprint",
+      "expected_skill": "retro",
+      "planned_requests": [
+        {
+          "capability_id": "hyper_sprint",
+          "skill_id": "retro",
+          "source": "sf_runtime_policy_overlay"
+        }
+      ],
+      "runtime_final_receipt_chain": {
+        "evidence_present": true,
+        "gate_passed": true,
+        "injected": true,
+        "outcome_contributed": true,
+        "selected": true,
+        "used": true
+      },
+      "status": "PASS"
+    },
+    {
+      "blocking_skill_mount_violations": [],
+      "capability": "lancedb",
+      "expected_skill": "research-source-validation-auditor",
+      "planned_requests": [
+        {
+          "capability_id": "lancedb",
+          "skill_id": "research-source-validation-auditor",
+          "source": "sf_runtime_policy_overlay"
+        }
+      ],
+      "runtime_final_receipt_chain": {
+        "evidence_present": true,
+        "gate_passed": true,
+        "injected": true,
+        "outcome_contributed": true,
+        "selected": true,
+        "used": true
+      },
+      "status": "PASS"
+    },
+    {
+      "blocking_skill_mount_violations": [],
+      "capability": "learn_ask",
+      "expected_skill": "nexus-live-ask-replay-normalization-gate",
+      "planned_requests": [
+        {
+          "capability_id": "learn_ask",
+          "skill_id": "nexus-live-ask-replay-normalization-gate",
+          "source": "sf_runtime_policy_overlay"
+        }
+      ],
+      "runtime_final_receipt_chain": {
+        "evidence_present": true,
+        "gate_passed": true,
+        "injected": true,
+        "outcome_contributed": true,
+        "selected": true,
+        "used": true
+      },
+      "status": "PASS"
+    },
+    {
+      "blocking_skill_mount_violations": [],
+      "capability": "learning_closure",
+      "expected_skill": "sf-systematic-learning_closure-memory-lint-8bdb0fca",
+      "planned_requests": [
+        {
+          "capability_id": "learning_closure",
+          "skill_id": "sf-systematic-learning_closure-memory-lint-8bdb0fca",
+          "source": "sf_runtime_policy_overlay"
+        }
+      ],
+      "runtime_final_receipt_chain": {
+        "evidence_present": true,
+        "gate_passed": true,
+        "injected": true,
+        "outcome_contributed": true,
+        "selected": true,
+        "used": true
+      },
+      "status": "PASS"
+    },
+    {
+      "blocking_skill_mount_violations": [],
+      "capability": "memory",
+      "expected_skill": "product-self-knowledge",
+      "planned_requests": [
+        {
+          "capability_id": "memory",
+          "skill_id": "product-self-knowledge",
+          "source": "sf_runtime_policy_overlay"
+        }
+      ],
+      "runtime_final_receipt_chain": {
+        "evidence_present": true,
+        "gate_passed": true,
+        "injected": true,
+        "outcome_contributed": true,
+        "selected": true,
+        "used": true
+      },
+      "status": "PASS"
+    },
+    {
+      "blocking_skill_mount_violations": [],
+      "capability": "mempalace",
+      "expected_skill": "sf2-mempalace-route-fit-spec",
+      "planned_requests": [
+        {
+          "capability_id": "mempalace",
+          "skill_id": "sf2-mempalace-route-fit-spec",
+          "source": "sf_runtime_policy_overlay"
+        }
+      ],
+      "runtime_final_receipt_chain": {
+        "evidence_present": true,
+        "gate_passed": true,
+        "injected": true,
+        "outcome_contributed": true,
+        "selected": true,
+        "used": true
+      },
+      "status": "PASS"
+    },
+    {
+      "blocking_skill_mount_violations": [],
+      "capability": "metabolism_resume",
+      "expected_skill": "addy-shipping-and-launch",
+      "planned_requests": [
+        {
+          "capability_id": "metabolism_resume",
+          "skill_id": "addy-shipping-and-launch",
+          "source": "sf_runtime_policy_overlay"
+        }
+      ],
+      "runtime_final_receipt_chain": {
+        "evidence_present": true,
+        "gate_passed": true,
+        "injected": true,
+        "outcome_contributed": true,
+        "selected": true,
+        "used": true
+      },
+      "status": "PASS"
+    },
+    {
+      "blocking_skill_mount_violations": [],
+      "capability": "nightshift",
+      "expected_skill": "canary",
+      "planned_requests": [
+        {
+          "capability_id": "nightshift",
+          "skill_id": "canary",
+          "source": "sf_runtime_policy_overlay"
+        }
+      ],
+      "runtime_final_receipt_chain": {
+        "evidence_present": true,
+        "gate_passed": true,
+        "injected": true,
+        "outcome_contributed": true,
+        "selected": true,
+        "used": true
+      },
+      "status": "PASS"
+    },
+    {
+      "blocking_skill_mount_violations": [],
+      "capability": "policy_capability_gate",
+      "expected_skill": "browse",
+      "planned_requests": [
+        {
+          "capability_id": "policy_capability_gate",
+          "skill_id": "browse",
+          "source": "sf_runtime_policy_overlay"
+        }
+      ],
+      "runtime_final_receipt_chain": {
+        "evidence_present": true,
+        "gate_passed": true,
+        "injected": true,
+        "outcome_contributed": true,
+        "selected": true,
+        "used": true
+      },
+      "status": "PASS"
+    },
+    {
+      "blocking_skill_mount_violations": [],
+      "capability": "registry_skills_sync",
+      "expected_skill": "gstack-sync-gbrain",
+      "planned_requests": [
+        {
+          "capability_id": "registry_skills_sync",
+          "skill_id": "gstack-sync-gbrain",
+          "source": "sf_runtime_policy_overlay"
+        }
+      ],
+      "runtime_final_receipt_chain": {
+        "evidence_present": true,
+        "gate_passed": true,
+        "injected": true,
+        "outcome_contributed": true,
+        "selected": true,
+        "used": true
+      },
+      "status": "PASS"
+    },
+    {
+      "blocking_skill_mount_violations": [],
+      "capability": "regression_guard",
+      "expected_skill": "sf-systematic-regression_guard-odoo-automated-tests-dad98433",
+      "planned_requests": [
+        {
+          "capability_id": "regression_guard",
+          "skill_id": "sf-systematic-regression_guard-odoo-automated-tests-dad98433",
+          "source": "sf_runtime_policy_overlay"
+        }
+      ],
+      "runtime_final_receipt_chain": {
+        "evidence_present": true,
+        "gate_passed": true,
+        "injected": true,
+        "outcome_contributed": true,
+        "selected": true,
+        "used": true
+      },
+      "status": "PASS"
+    },
+    {
+      "blocking_skill_mount_violations": [],
+      "capability": "repair_loop",
+      "expected_skill": "qa-only",
+      "planned_requests": [
+        {
+          "capability_id": "repair_loop",
+          "skill_id": "qa-only",
+          "source": "sf_runtime_policy_overlay"
+        }
+      ],
+      "runtime_final_receipt_chain": {
+        "evidence_present": true,
+        "gate_passed": true,
+        "injected": true,
+        "outcome_contributed": true,
+        "selected": true,
+        "used": true
+      },
+      "status": "PASS"
+    },
+    {
+      "blocking_skill_mount_violations": [],
+      "capability": "research",
+      "expected_skill": "gbrain-academic-verify",
+      "planned_requests": [
+        {
+          "capability_id": "research",
+          "skill_id": "gbrain-academic-verify",
+          "source": "sf_runtime_policy_overlay"
+        }
+      ],
+      "runtime_final_receipt_chain": {
+        "evidence_present": true,
+        "gate_passed": true,
+        "injected": true,
+        "outcome_contributed": true,
+        "selected": true,
+        "used": true
+      },
+      "status": "PASS"
+    },
+    {
+      "blocking_skill_mount_violations": [],
+      "capability": "research_and_source_discipline",
+      "expected_skill": "gbrain-maintain",
+      "planned_requests": [
+        {
+          "capability_id": "research_and_source_discipline",
+          "skill_id": "gbrain-maintain",
+          "source": "sf_runtime_policy_overlay"
+        }
+      ],
+      "runtime_final_receipt_chain": {
+        "evidence_present": true,
+        "gate_passed": true,
+        "injected": true,
+        "outcome_contributed": true,
+        "selected": true,
+        "used": true
+      },
+      "status": "PASS"
+    },
+    {
+      "blocking_skill_mount_violations": [],
+      "capability": "research_control_plane",
+      "expected_skill": "browserbase-fetch",
+      "planned_requests": [
+        {
+          "capability_id": "research_control_plane",
+          "skill_id": "browserbase-fetch",
+          "source": "sf_runtime_policy_overlay"
+        }
+      ],
+      "runtime_final_receipt_chain": {
+        "evidence_present": true,
+        "gate_passed": true,
+        "injected": true,
+        "outcome_contributed": true,
+        "selected": true,
+        "used": true
+      },
+      "status": "PASS"
+    },
+    {
+      "blocking_skill_mount_violations": [],
+      "capability": "sandbox_replay",
+      "expected_skill": "nexus-acceptance-evidence-gate",
+      "planned_requests": [
+        {
+          "capability_id": "sandbox_replay",
+          "skill_id": "nexus-acceptance-evidence-gate",
+          "source": "sf_runtime_policy_overlay"
+        }
+      ],
+      "runtime_final_receipt_chain": {
+        "evidence_present": true,
+        "gate_passed": true,
+        "injected": true,
+        "outcome_contributed": true,
+        "selected": true,
+        "used": true
+      },
+      "status": "PASS"
+    },
+    {
+      "blocking_skill_mount_violations": [],
+      "capability": "swarm_multi_agent",
+      "expected_skill": "nexus-gemini-code-review-orchestrator",
+      "planned_requests": [
+        {
+          "capability_id": "swarm_multi_agent",
+          "skill_id": "nexus-gemini-code-review-orchestrator",
+          "source": "sf_runtime_policy_overlay"
+        }
+      ],
+      "runtime_final_receipt_chain": {
+        "evidence_present": true,
+        "gate_passed": true,
+        "injected": true,
+        "outcome_contributed": true,
+        "selected": true,
+        "used": true
+      },
+      "status": "PASS"
+    },
+    {
+      "blocking_skill_mount_violations": [],
+      "capability": "ui_validator",
+      "expected_skill": "sf-systematic-ui_validator-e2e-testing-d98eb7c3",
+      "planned_requests": [
+        {
+          "capability_id": "ui_validator",
+          "skill_id": "sf-systematic-ui_validator-e2e-testing-d98eb7c3",
+          "source": "sf_runtime_policy_overlay"
+        }
+      ],
+      "runtime_final_receipt_chain": {
+        "evidence_present": true,
+        "gate_passed": true,
+        "injected": true,
+        "outcome_contributed": true,
+        "selected": true,
+        "used": true
+      },
+      "status": "PASS"
+    },
+    {
+      "blocking_skill_mount_violations": [],
+      "capability": "ultra_review",
+      "expected_skill": "github11-vulnerability-scanner-ultra-review",
+      "planned_requests": [
+        {
+          "capability_id": "ultra_review",
+          "skill_id": "github11-vulnerability-scanner-ultra-review",
+          "source": "sf_runtime_policy_overlay"
+        }
+      ],
+      "runtime_final_receipt_chain": {
+        "evidence_present": true,
+        "gate_passed": true,
+        "injected": true,
+        "outcome_contributed": true,
+        "selected": true,
+        "used": true
+      },
+      "status": "PASS"
+    },
+    {
+      "blocking_skill_mount_violations": [],
+      "capability": "xray",
+      "expected_skill": "diagnose",
+      "planned_requests": [
+        {
+          "capability_id": "xray",
+          "skill_id": "diagnose",
+          "source": "sf_runtime_policy_overlay"
+        }
+      ],
+      "runtime_final_receipt_chain": {
+        "evidence_present": true,
+        "gate_passed": true,
+        "injected": true,
+        "outcome_contributed": true,
+        "selected": true,
+        "used": true
+      },
+      "status": "PASS"
+    }
+  ],
+  "claim_boundary": [
+    "Runtime contract smoke only.",
+    "This verifies overlay selection and final receipt-chain construction for all current SF capabilities.",
+    "It is not a public benchmark claim."
+  ],
+  "created_at": "2026-05-22T01:55:43.432320+00:00",
+  "overlay_path": "docs/reports/NEXUS_ZERO_TRUST_V2_RUNTIME_SKILL_POLICY_OVERLAY_APPLIED_2026-05-22.json",
+  "public_benchmark_allowed": false,
+  "runtime_update_allowed": true,
+  "schema": "nexus.sf_current_overlay_runtime_smoke.v1",
+  "skill_status_report": "docs/reports/NEXUS_ZERO_TRUST_V2_RUNTIME_SKILL_STATUS_MERGED_2026-05-22.json",
+  "status": "PASS",
+  "summary": {
+    "case_count": 34,
+    "pass_count": 34,
+    "return_count": 0
+  }
+}

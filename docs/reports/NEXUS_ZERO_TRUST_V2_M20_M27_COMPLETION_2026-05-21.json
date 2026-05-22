@@ -1,0 +1,82 @@
+{
+  "schema": "nexus.zero_trust_v2.m20_m27_completion.v1",
+  "status": "PASS",
+  "created_at": "2026-05-22T00:15:25.367260+00:00",
+  "source_fresh_task_refs": "docs/reports/NEXUS_ZERO_TRUST_V2_FRESH_TASK_REFS_2026-05-21.json",
+  "source_runner_matrix": "docs/reports/NEXUS_ZERO_TRUST_V2_BEHAVIOR_RUNNER_MATRIX_2026-05-21.json",
+  "source_m12_verdict": "docs/reports/NEXUS_ZERO_TRUST_V2_M12_34_CAPABILITY_FINAL_VERDICT_2026-05-21.json",
+  "summary": {
+    "m20_fresh_task_ref_count": 19,
+    "m21_ready_for_physical_behavior_run_count": 19,
+    "m21_physical_behavior_executed_count": 0,
+    "m22_clean_v2_receipt_count": 0,
+    "m23_manual_apply_trial_ready_count": 0,
+    "m24_low_risk_canary_ready": false,
+    "m25_p0_promoted_count": 0,
+    "m25_p0_structured_blocked_count": 5,
+    "m26_p1_p2_promoted_count": 0,
+    "m26_p1_p2_structured_blocked_count": 14,
+    "m27_capability_count": 34,
+    "m27_v2_ready_capability_count": 0,
+    "m27_v1_promotion_path_closed": false,
+    "v2_unification_complete": false,
+    "runtime_mutation_allowed": false,
+    "automatic_apply_allowed": false,
+    "public_benchmark_allowed": false,
+    "promotion_credit_allowed": false
+  },
+  "milestones": [
+    {
+      "milestone": "M20",
+      "status": "COMPLETE",
+      "result": "fresh task_ref manifest generated for all current V2 candidates"
+    },
+    {
+      "milestone": "M21",
+      "status": "READY_TO_RUN",
+      "result": "physical behavior commands are prepared; model/sandbox execution not run in this artifact"
+    },
+    {
+      "milestone": "M22",
+      "status": "BLOCKED",
+      "result": "no signed clean V2 behavior receipts accumulated yet"
+    },
+    {
+      "milestone": "M23",
+      "status": "BLOCKED",
+      "result": "manual apply trial remains blocked without ready candidate"
+    },
+    {
+      "milestone": "M24",
+      "status": "BLOCKED",
+      "result": "low-risk canary replacement requires at least one manual-apply-ready candidate"
+    },
+    {
+      "milestone": "M25",
+      "status": "STRUCTURED_BLOCKED",
+      "result": "P0 batch has execution path but no promotion receipts"
+    },
+    {
+      "milestone": "M26",
+      "status": "STRUCTURED_BLOCKED",
+      "result": "P1/P2 batch has execution path but no promotion receipts"
+    },
+    {
+      "milestone": "M27",
+      "status": "BOUNDARY_COMPLETE",
+      "result": "V1 shutdown boundary is enforced, but V1 path is not closed until all 34 capabilities are V2 ready"
+    }
+  ],
+  "rollback_gate": {
+    "required_before_runtime_mutation": true,
+    "rollback_target": "restore_v1_runtime_overlay_primary",
+    "requires_previous_skill_id": true,
+    "smoke_required": true,
+    "operator_ack_required": true,
+    "post_apply_smoke_required": true
+  },
+  "claim_boundary": [
+    "M20-M27 completion here means every downstream decision has an explicit artifact and fail-closed status.",
+    "No runtime default is changed and no V2 unification claim is allowed without fresh signed behavior receipts."
+  ]
+}

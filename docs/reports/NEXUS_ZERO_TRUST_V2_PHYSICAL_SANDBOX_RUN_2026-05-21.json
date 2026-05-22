@@ -1,0 +1,311 @@
+{
+  "schema": "nexus.zero_trust_v2.physical_sandbox_run.v1",
+  "status": "PASS",
+  "created_at": "2026-05-21T12:58:15.993770+00:00",
+  "source_replay_matrix": "docs/reports/NEXUS_ZERO_TRUST_V2_REPLAY_MATRIX_2026-05-21.json",
+  "summary": {
+    "input_row_count": 76,
+    "executed_row_count": 4,
+    "ready_for_manual_apply_count": 0,
+    "execution_status_counts": {
+      "BASELINE_ONLY": 1,
+      "BLOCKED_BY_POLICY": 1,
+      "PASS": 2
+    },
+    "runtime_mutation_allowed": false,
+    "automatic_apply_allowed": false,
+    "public_benchmark_allowed": false,
+    "probe_only": true
+  },
+  "rows": [
+    {
+      "row_id": "ztv2-001-claim_gate-capability_only_v2",
+      "capability_id": "claim_gate",
+      "skill_id": "",
+      "source_skill_id": "addy-doubt-driven-development",
+      "arm_type": "capability_only_v2",
+      "shadow_output_affects_runtime": false,
+      "v1_context_only": true,
+      "v1_evidence_count": 1,
+      "v2_evidence_count": 0,
+      "risk_flags": [
+        "external_reference_candidate",
+        "requires_curation",
+        "v2_not_promotion_eligible"
+      ],
+      "required_next_steps": [
+        "source_review",
+        "xray_static_scan",
+        "v2_replay",
+        "sandbox_shadow"
+      ],
+      "security_contract_version": "v2",
+      "promotion_credit_source": "v2_only",
+      "requires_sandbox_attestation": true,
+      "requires_runtime_signed_receipt": true,
+      "requires_clean_slate_isolation": true,
+      "requires_trust_mismatch_zero": true,
+      "requires_negative_control_block": true,
+      "expected_status": "BASELINE",
+      "execution_status": "BASELINE_ONLY"
+    },
+    {
+      "row_id": "ztv2-001-claim_gate-candidate_skill_v2",
+      "capability_id": "claim_gate",
+      "skill_id": "addy-doubt-driven-development",
+      "source_skill_id": "addy-doubt-driven-development",
+      "arm_type": "candidate_skill_v2",
+      "shadow_output_affects_runtime": false,
+      "v1_context_only": true,
+      "v1_evidence_count": 1,
+      "v2_evidence_count": 0,
+      "risk_flags": [
+        "external_reference_candidate",
+        "requires_curation",
+        "v2_not_promotion_eligible"
+      ],
+      "required_next_steps": [
+        "source_review",
+        "xray_static_scan",
+        "v2_replay",
+        "sandbox_shadow"
+      ],
+      "security_contract_version": "v2",
+      "promotion_credit_source": "v2_only",
+      "requires_sandbox_attestation": true,
+      "requires_runtime_signed_receipt": true,
+      "requires_clean_slate_isolation": true,
+      "requires_trust_mismatch_zero": true,
+      "requires_negative_control_block": true,
+      "expected_status": "DIAGNOSTIC_ONLY_UNTIL_EXECUTED",
+      "execution_status": "PASS",
+      "probe_only": true,
+      "sandbox_attestation": {
+        "issuer": "nexus.runner",
+        "sandbox_mode": "macos_sandbox",
+        "status": "PASS",
+        "network_disabled": true,
+        "workspace_isolated": true,
+        "tmp_isolated": true,
+        "env_allowlist_hash": "fc3aaefda54f4d64d642de4eba46d4ad2843f4e6f33bdf2dfed7e5d717001448",
+        "resource_limits": {
+          "cpu": "process_timeout",
+          "memory_mb": 512,
+          "timeout_sec": 3
+        },
+        "teardown_status": "PASS",
+        "artifact_hash": "b95452fe9b97514ac71a570ac5c6f21c5b9e04639eb829fbe8fc4e82f5ce140f",
+        "runner_quarantine_status": "NONE",
+        "raw_observation": {
+          "returncode": 0,
+          "stdout_sha256": "c33ccdefd8f91f93f9b5a0b908969191fd3988acd206c92ad96bd74970d05d3f",
+          "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "timed_out": false,
+          "sandbox_available": true,
+          "sandbox_apply_failed": false
+        },
+        "signature": "b539d70347208d522d1955180622d3000f9942aff283c35f985d32c8fffa93e8"
+      },
+      "sandbox_attestation_verdict": {
+        "status": "PASS",
+        "reasons": [],
+        "sandbox_mode": "macos_sandbox"
+      },
+      "receipt_provenance": "runtime_signed",
+      "receipt_signature": "705833196324e506a08c13aa25908e5288a0ad08e75d030e11f31d87f34f6832",
+      "receipt_signature_algorithm": "hmac-sha256",
+      "receipt_signature_inputs": {
+        "run_id": "ztv2-physical-20260521125815",
+        "row_id": "ztv2-001-claim_gate-candidate_skill_v2",
+        "arm_id": "candidate_skill_v2",
+        "capability_id": "claim_gate",
+        "skill_id": "addy-doubt-driven-development",
+        "artifact_hash": "b95452fe9b97514ac71a570ac5c6f21c5b9e04639eb829fbe8fc4e82f5ce140f",
+        "raw_observation_hash": "b95452fe9b97514ac71a570ac5c6f21c5b9e04639eb829fbe8fc4e82f5ce140f",
+        "receipt_hash": "646565aafe7629b0768a909c6e12ea0fc1d8536c1960b7b07511567488c5d0bd"
+      },
+      "observer": {
+        "issuer": "nexus.runtime_observer",
+        "version": "zero-trust-v2-physical-runner-v1"
+      },
+      "baseline_sandwich": {
+        "enabled": true,
+        "baseline_before_hash": "b95452fe9b97514ac71a570ac5c6f21c5b9e04639eb829fbe8fc4e82f5ce140f",
+        "skill_arm_hash": "b95452fe9b97514ac71a570ac5c6f21c5b9e04639eb829fbe8fc4e82f5ce140f",
+        "baseline_after_hash": "b95452fe9b97514ac71a570ac5c6f21c5b9e04639eb829fbe8fc4e82f5ce140f",
+        "baseline_delta_status": "CLEAN",
+        "pollution_detector_provenance": "runtime_observer"
+      },
+      "cleanup_attestation": {
+        "required": true,
+        "teardown_status": "PASS",
+        "runner_quarantine_status": "NONE",
+        "cleanup_observer": "nexus.runner",
+        "artifact_hash": "b95452fe9b97514ac71a570ac5c6f21c5b9e04639eb829fbe8fc4e82f5ce140f",
+        "signature": "mock-cleanup"
+      },
+      "v2_trust_mismatch_count": 0,
+      "negative_control_blocked_count": 1,
+      "promotion_evaluation": {
+        "schema": "nexus.zero_trust_v2.promotion_candidate.v1",
+        "status": "BLOCKED",
+        "capability_id": "claim_gate",
+        "skill_id": "addy-doubt-driven-development",
+        "reasons": [
+          "insufficient_v2_evidence"
+        ],
+        "promotion_credit_source": "v2_only",
+        "v2_evidence_count": 0,
+        "v2_trust_mismatch_count": 0,
+        "manual_apply_required": false
+      }
+    },
+    {
+      "row_id": "ztv2-001-claim_gate-wrong_or_quarantined_skill_v2",
+      "capability_id": "claim_gate",
+      "skill_id": "addy-doubt-driven-development",
+      "source_skill_id": "addy-doubt-driven-development",
+      "arm_type": "wrong_or_quarantined_skill_v2",
+      "shadow_output_affects_runtime": false,
+      "v1_context_only": true,
+      "v1_evidence_count": 1,
+      "v2_evidence_count": 0,
+      "risk_flags": [
+        "external_reference_candidate",
+        "requires_curation",
+        "v2_not_promotion_eligible"
+      ],
+      "required_next_steps": [
+        "source_review",
+        "xray_static_scan",
+        "v2_replay",
+        "sandbox_shadow"
+      ],
+      "security_contract_version": "v2",
+      "promotion_credit_source": "v2_only",
+      "requires_sandbox_attestation": true,
+      "requires_runtime_signed_receipt": true,
+      "requires_clean_slate_isolation": true,
+      "requires_trust_mismatch_zero": true,
+      "requires_negative_control_block": true,
+      "expected_status": "BLOCKED_BY_POLICY",
+      "execution_status": "BLOCKED_BY_POLICY",
+      "negative_control_blocked_count": 1
+    },
+    {
+      "row_id": "ztv2-001-claim_gate-shadow_candidate_v2",
+      "capability_id": "claim_gate",
+      "skill_id": "addy-doubt-driven-development",
+      "source_skill_id": "addy-doubt-driven-development",
+      "arm_type": "shadow_candidate_v2",
+      "shadow_output_affects_runtime": false,
+      "v1_context_only": true,
+      "v1_evidence_count": 1,
+      "v2_evidence_count": 0,
+      "risk_flags": [
+        "external_reference_candidate",
+        "requires_curation",
+        "v2_not_promotion_eligible"
+      ],
+      "required_next_steps": [
+        "source_review",
+        "xray_static_scan",
+        "v2_replay",
+        "sandbox_shadow"
+      ],
+      "security_contract_version": "v2",
+      "promotion_credit_source": "v2_only",
+      "requires_sandbox_attestation": true,
+      "requires_runtime_signed_receipt": true,
+      "requires_clean_slate_isolation": true,
+      "requires_trust_mismatch_zero": true,
+      "requires_negative_control_block": true,
+      "expected_status": "DIAGNOSTIC_ONLY_UNTIL_EXECUTED",
+      "execution_status": "PASS",
+      "probe_only": true,
+      "sandbox_attestation": {
+        "issuer": "nexus.runner",
+        "sandbox_mode": "macos_sandbox",
+        "status": "PASS",
+        "network_disabled": true,
+        "workspace_isolated": true,
+        "tmp_isolated": true,
+        "env_allowlist_hash": "862072e2ee15a76c8c16bf2f460ddf2f94ceb4a9c48579a2d18da3e3d88d6cdb",
+        "resource_limits": {
+          "cpu": "process_timeout",
+          "memory_mb": 512,
+          "timeout_sec": 3
+        },
+        "teardown_status": "PASS",
+        "artifact_hash": "b95452fe9b97514ac71a570ac5c6f21c5b9e04639eb829fbe8fc4e82f5ce140f",
+        "runner_quarantine_status": "NONE",
+        "raw_observation": {
+          "returncode": 0,
+          "stdout_sha256": "c33ccdefd8f91f93f9b5a0b908969191fd3988acd206c92ad96bd74970d05d3f",
+          "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "timed_out": false,
+          "sandbox_available": true,
+          "sandbox_apply_failed": false
+        },
+        "signature": "a02c695764510c86dd3197d0fd6798d1ed07ac3de6f8b370e1fd26db34b1879d"
+      },
+      "sandbox_attestation_verdict": {
+        "status": "PASS",
+        "reasons": [],
+        "sandbox_mode": "macos_sandbox"
+      },
+      "receipt_provenance": "runtime_signed",
+      "receipt_signature": "8f28be3490bfdf10bd7b6ddc897973f09e881a4d06c7db5edb7e9579269e8573",
+      "receipt_signature_algorithm": "hmac-sha256",
+      "receipt_signature_inputs": {
+        "run_id": "ztv2-physical-20260521125815",
+        "row_id": "ztv2-001-claim_gate-shadow_candidate_v2",
+        "arm_id": "shadow_candidate_v2",
+        "capability_id": "claim_gate",
+        "skill_id": "addy-doubt-driven-development",
+        "artifact_hash": "b95452fe9b97514ac71a570ac5c6f21c5b9e04639eb829fbe8fc4e82f5ce140f",
+        "raw_observation_hash": "b95452fe9b97514ac71a570ac5c6f21c5b9e04639eb829fbe8fc4e82f5ce140f",
+        "receipt_hash": "a0984c03f3022d1e28cbb8ae0f1e5bb2e68d275d77ab4fa5ecabca6f067649cf"
+      },
+      "observer": {
+        "issuer": "nexus.runtime_observer",
+        "version": "zero-trust-v2-physical-runner-v1"
+      },
+      "baseline_sandwich": {
+        "enabled": true,
+        "baseline_before_hash": "b95452fe9b97514ac71a570ac5c6f21c5b9e04639eb829fbe8fc4e82f5ce140f",
+        "skill_arm_hash": "b95452fe9b97514ac71a570ac5c6f21c5b9e04639eb829fbe8fc4e82f5ce140f",
+        "baseline_after_hash": "b95452fe9b97514ac71a570ac5c6f21c5b9e04639eb829fbe8fc4e82f5ce140f",
+        "baseline_delta_status": "CLEAN",
+        "pollution_detector_provenance": "runtime_observer"
+      },
+      "cleanup_attestation": {
+        "required": true,
+        "teardown_status": "PASS",
+        "runner_quarantine_status": "NONE",
+        "cleanup_observer": "nexus.runner",
+        "artifact_hash": "b95452fe9b97514ac71a570ac5c6f21c5b9e04639eb829fbe8fc4e82f5ce140f",
+        "signature": "mock-cleanup"
+      },
+      "v2_trust_mismatch_count": 0,
+      "negative_control_blocked_count": 1,
+      "promotion_evaluation": {
+        "schema": "nexus.zero_trust_v2.promotion_candidate.v1",
+        "status": "BLOCKED",
+        "capability_id": "claim_gate",
+        "skill_id": "addy-doubt-driven-development",
+        "reasons": [
+          "insufficient_v2_evidence"
+        ],
+        "promotion_credit_source": "v2_only",
+        "v2_evidence_count": 0,
+        "v2_trust_mismatch_count": 0,
+        "manual_apply_required": false
+      }
+    }
+  ],
+  "claim_boundary": [
+    "This physical sandbox run enriches V2 replay rows but does not mutate runtime overlays.",
+    "Rows with blocked sandbox attestation produce no V2 promotion credit."
+  ]
+}

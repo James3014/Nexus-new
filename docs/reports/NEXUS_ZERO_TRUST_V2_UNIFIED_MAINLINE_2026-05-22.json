@@ -1,0 +1,121 @@
+{
+  "schema": "nexus.zero_trust_v2.unified_mainline.v1",
+  "status": "PASS",
+  "created_at": "2026-05-22T01:56:07.459603+00:00",
+  "source_m45_m52": "docs/reports/NEXUS_ZERO_TRUST_V2_M45_M52_COMPLETION_2026-05-22.json",
+  "summary": {
+    "milestone_count": 12,
+    "milestone_pass_count": 12,
+    "milestone_blocked_count": 0,
+    "clean_v2_receipt_count": 102,
+    "v2_ready_capability_count": 34,
+    "v2_unification_complete": true,
+    "runtime_mutation_allowed": true,
+    "automatic_apply_allowed": false,
+    "public_benchmark_allowed": false,
+    "promotion_credit_allowed": true
+  },
+  "milestones": [
+    {
+      "milestone": "M53",
+      "title": "expected_capability_receipt_bridge",
+      "status": "PASS",
+      "blockers": [],
+      "acceptance": "expected capability coverage has no missing public-safe receipts",
+      "next_action": "repair mempalace_gate public-safe receipt source before more canary runs"
+    },
+    {
+      "milestone": "M54",
+      "title": "runtime_signed_behavior_receipt_export",
+      "status": "PASS",
+      "blockers": [],
+      "acceptance": "verify_runtime_signed_receipt passes for every imported behavior bundle",
+      "next_action": "export runtime observer signature into evidence bundle"
+    },
+    {
+      "milestone": "M55",
+      "title": "canary_semantic_delivery_repair",
+      "status": "PASS",
+      "blockers": [],
+      "acceptance": "eligible_behavior_rows>=1 and semantic_completed=true",
+      "next_action": "repair model delivery path or task execution route"
+    },
+    {
+      "milestone": "M56",
+      "title": "canary_three_clean_receipts",
+      "status": "PASS",
+      "blockers": [],
+      "acceptance": "3/3 clean V2 behavior receipts for the canary candidate",
+      "next_action": "rerun run-01/run-02/run-03 only after M53-M55 pass"
+    },
+    {
+      "milestone": "M57",
+      "title": "manual_apply_trial_packet",
+      "status": "PASS",
+      "blockers": [],
+      "acceptance": "manual apply trial packet exists with explicit operator acknowledgement",
+      "next_action": "generate trial packet after receipt import passes"
+    },
+    {
+      "milestone": "M58",
+      "title": "canary_dry_run_apply_and_rollback",
+      "status": "PASS",
+      "blockers": [],
+      "acceptance": "dry-run overlay diff, smoke command, and rollback command are present",
+      "next_action": "prepare canary apply only after manual ack"
+    },
+    {
+      "milestone": "M59",
+      "title": "p0_batch_rollout",
+      "status": "PASS",
+      "blockers": [],
+      "acceptance": "all P0 candidates have clean receipts and rollback proof",
+      "next_action": "run P0 after canary apply/rollback passes"
+    },
+    {
+      "milestone": "M60",
+      "title": "p1_p2_batch_rollout",
+      "status": "PASS",
+      "blockers": [],
+      "acceptance": "all P1/P2 candidates have clean receipts and rollback proof",
+      "next_action": "run P1/P2 only after P0 is clean"
+    },
+    {
+      "milestone": "M61",
+      "title": "thirty_four_capability_coverage",
+      "status": "PASS",
+      "blockers": [],
+      "acceptance": "v2_ready_capability_count=34",
+      "next_action": "generate fresh tasks for missing capability coverage"
+    },
+    {
+      "milestone": "M62",
+      "title": "v1_closure_decision",
+      "status": "PASS",
+      "blockers": [],
+      "acceptance": "closure apply plan is allowed only after 34/34 V2-ready capabilities",
+      "next_action": "keep V1 fallback path active"
+    },
+    {
+      "milestone": "M63",
+      "title": "v2_default_overlay_apply",
+      "status": "PASS",
+      "blockers": [],
+      "acceptance": "operator-approved V2 default overlay is applied with rollback path",
+      "next_action": "do not mutate runtime until closure decision passes"
+    },
+    {
+      "milestone": "M64",
+      "title": "post_unification_smoke_and_public_gate",
+      "status": "PASS",
+      "blockers": [],
+      "acceptance": "34/34 smoke passes; public benchmark gate remains separately reviewed",
+      "next_action": "separate internal V2 unification from public claim unlock"
+    }
+  ],
+  "root_blockers": [],
+  "claim_boundary": [
+    "V2 runtime unification is internal-only and does not unlock public benchmark claims.",
+    "Runtime mutation is allowed only when M53-M64 all pass with clean evidence."
+  ]
+}

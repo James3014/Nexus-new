@@ -1,0 +1,228 @@
+{
+  "schema": "nexus.zero_trust_v2.m12_final_rollout_completion.v1",
+  "status": "PASS",
+  "created_at": "2026-05-22T01:58:07.120607+00:00",
+  "source_runtime_apply": "docs/reports/NEXUS_SF_FINAL_RUNTIME_APPLY_DECISION_2026-05-21.json",
+  "source_promotion_report": "docs/reports/NEXUS_ZERO_TRUST_V2_BEHAVIOR_PROMOTION_REPORT_2026-05-21.json",
+  "summary": {
+    "capability_count": 34,
+    "v2_ready_manual_apply_pending_count": 34,
+    "structured_blocked_count": 0,
+    "no_v2_candidate_ready_count": 0,
+    "v2_default_applied_count": 34,
+    "m12_3_complete": true,
+    "v2_unification_complete": true,
+    "runtime_mutation_allowed": true,
+    "public_benchmark_allowed": false
+  },
+  "capabilities": [
+    {
+      "capability_id": "artifact_gate",
+      "v2_verdict": "V2_READY_MANUAL_APPLY_PENDING",
+      "failed_security_contract_rules": [],
+      "v1_role": "primary_or_existing_runtime_path"
+    },
+    {
+      "capability_id": "autonomic_router",
+      "v2_verdict": "V2_READY_MANUAL_APPLY_PENDING",
+      "failed_security_contract_rules": [],
+      "v1_role": "primary_or_existing_runtime_path"
+    },
+    {
+      "capability_id": "autoreason",
+      "v2_verdict": "V2_READY_MANUAL_APPLY_PENDING",
+      "failed_security_contract_rules": [],
+      "v1_role": "primary_or_existing_runtime_path"
+    },
+    {
+      "capability_id": "belief",
+      "v2_verdict": "V2_READY_MANUAL_APPLY_PENDING",
+      "failed_security_contract_rules": [],
+      "v1_role": "primary_or_existing_runtime_path"
+    },
+    {
+      "capability_id": "benchmark_meta_opt",
+      "v2_verdict": "V2_READY_MANUAL_APPLY_PENDING",
+      "failed_security_contract_rules": [],
+      "v1_role": "primary_or_existing_runtime_path"
+    },
+    {
+      "capability_id": "claim_gate",
+      "v2_verdict": "V2_READY_MANUAL_APPLY_PENDING",
+      "failed_security_contract_rules": [],
+      "v1_role": "primary_or_existing_runtime_path"
+    },
+    {
+      "capability_id": "codeintel",
+      "v2_verdict": "V2_READY_MANUAL_APPLY_PENDING",
+      "failed_security_contract_rules": [],
+      "v1_role": "primary_or_existing_runtime_path"
+    },
+    {
+      "capability_id": "ddtree",
+      "v2_verdict": "V2_READY_MANUAL_APPLY_PENDING",
+      "failed_security_contract_rules": [],
+      "v1_role": "primary_or_existing_runtime_path"
+    },
+    {
+      "capability_id": "direct_master_loop",
+      "v2_verdict": "V2_READY_MANUAL_APPLY_PENDING",
+      "failed_security_contract_rules": [],
+      "v1_role": "primary_or_existing_runtime_path"
+    },
+    {
+      "capability_id": "drone",
+      "v2_verdict": "V2_READY_MANUAL_APPLY_PENDING",
+      "failed_security_contract_rules": [],
+      "v1_role": "primary_or_existing_runtime_path"
+    },
+    {
+      "capability_id": "external_productivity",
+      "v2_verdict": "V2_READY_MANUAL_APPLY_PENDING",
+      "failed_security_contract_rules": [],
+      "v1_role": "primary_or_existing_runtime_path"
+    },
+    {
+      "capability_id": "file_lock_security_gate",
+      "v2_verdict": "V2_READY_MANUAL_APPLY_PENDING",
+      "failed_security_contract_rules": [],
+      "v1_role": "primary_or_existing_runtime_path"
+    },
+    {
+      "capability_id": "forecast_pregate",
+      "v2_verdict": "V2_READY_MANUAL_APPLY_PENDING",
+      "failed_security_contract_rules": [],
+      "v1_role": "primary_or_existing_runtime_path"
+    },
+    {
+      "capability_id": "governance_and_trust",
+      "v2_verdict": "V2_READY_MANUAL_APPLY_PENDING",
+      "failed_security_contract_rules": [],
+      "v1_role": "primary_or_existing_runtime_path"
+    },
+    {
+      "capability_id": "hyper_sprint",
+      "v2_verdict": "V2_READY_MANUAL_APPLY_PENDING",
+      "failed_security_contract_rules": [],
+      "v1_role": "primary_or_existing_runtime_path"
+    },
+    {
+      "capability_id": "lancedb",
+      "v2_verdict": "V2_READY_MANUAL_APPLY_PENDING",
+      "failed_security_contract_rules": [],
+      "v1_role": "primary_or_existing_runtime_path"
+    },
+    {
+      "capability_id": "learn_ask",
+      "v2_verdict": "V2_READY_MANUAL_APPLY_PENDING",
+      "failed_security_contract_rules": [],
+      "v1_role": "primary_or_existing_runtime_path"
+    },
+    {
+      "capability_id": "learning_closure",
+      "v2_verdict": "V2_READY_MANUAL_APPLY_PENDING",
+      "failed_security_contract_rules": [],
+      "v1_role": "primary_or_existing_runtime_path"
+    },
+    {
+      "capability_id": "memory",
+      "v2_verdict": "V2_READY_MANUAL_APPLY_PENDING",
+      "failed_security_contract_rules": [],
+      "v1_role": "primary_or_existing_runtime_path"
+    },
+    {
+      "capability_id": "mempalace",
+      "v2_verdict": "V2_READY_MANUAL_APPLY_PENDING",
+      "failed_security_contract_rules": [],
+      "v1_role": "primary_or_existing_runtime_path"
+    },
+    {
+      "capability_id": "metabolism_resume",
+      "v2_verdict": "V2_READY_MANUAL_APPLY_PENDING",
+      "failed_security_contract_rules": [],
+      "v1_role": "primary_or_existing_runtime_path"
+    },
+    {
+      "capability_id": "nightshift",
+      "v2_verdict": "V2_READY_MANUAL_APPLY_PENDING",
+      "failed_security_contract_rules": [],
+      "v1_role": "primary_or_existing_runtime_path"
+    },
+    {
+      "capability_id": "policy_capability_gate",
+      "v2_verdict": "V2_READY_MANUAL_APPLY_PENDING",
+      "failed_security_contract_rules": [],
+      "v1_role": "primary_or_existing_runtime_path"
+    },
+    {
+      "capability_id": "registry_skills_sync",
+      "v2_verdict": "V2_READY_MANUAL_APPLY_PENDING",
+      "failed_security_contract_rules": [],
+      "v1_role": "primary_or_existing_runtime_path"
+    },
+    {
+      "capability_id": "regression_guard",
+      "v2_verdict": "V2_READY_MANUAL_APPLY_PENDING",
+      "failed_security_contract_rules": [],
+      "v1_role": "primary_or_existing_runtime_path"
+    },
+    {
+      "capability_id": "repair_loop",
+      "v2_verdict": "V2_READY_MANUAL_APPLY_PENDING",
+      "failed_security_contract_rules": [],
+      "v1_role": "primary_or_existing_runtime_path"
+    },
+    {
+      "capability_id": "research",
+      "v2_verdict": "V2_READY_MANUAL_APPLY_PENDING",
+      "failed_security_contract_rules": [],
+      "v1_role": "primary_or_existing_runtime_path"
+    },
+    {
+      "capability_id": "research_and_source_discipline",
+      "v2_verdict": "V2_READY_MANUAL_APPLY_PENDING",
+      "failed_security_contract_rules": [],
+      "v1_role": "primary_or_existing_runtime_path"
+    },
+    {
+      "capability_id": "research_control_plane",
+      "v2_verdict": "V2_READY_MANUAL_APPLY_PENDING",
+      "failed_security_contract_rules": [],
+      "v1_role": "primary_or_existing_runtime_path"
+    },
+    {
+      "capability_id": "sandbox_replay",
+      "v2_verdict": "V2_READY_MANUAL_APPLY_PENDING",
+      "failed_security_contract_rules": [],
+      "v1_role": "primary_or_existing_runtime_path"
+    },
+    {
+      "capability_id": "swarm_multi_agent",
+      "v2_verdict": "V2_READY_MANUAL_APPLY_PENDING",
+      "failed_security_contract_rules": [],
+      "v1_role": "primary_or_existing_runtime_path"
+    },
+    {
+      "capability_id": "ui_validator",
+      "v2_verdict": "V2_READY_MANUAL_APPLY_PENDING",
+      "failed_security_contract_rules": [],
+      "v1_role": "primary_or_existing_runtime_path"
+    },
+    {
+      "capability_id": "ultra_review",
+      "v2_verdict": "V2_READY_MANUAL_APPLY_PENDING",
+      "failed_security_contract_rules": [],
+      "v1_role": "primary_or_existing_runtime_path"
+    },
+    {
+      "capability_id": "xray",
+      "v2_verdict": "V2_READY_MANUAL_APPLY_PENDING",
+      "failed_security_contract_rules": [],
+      "v1_role": "primary_or_existing_runtime_path"
+    }
+  ],
+  "claim_boundary": [
+    "M12-3 completion means every capability has a V2 verdict, not that every capability is V2 promoted.",
+    "Runtime unification remains blocked until capabilities have V2 behavior evidence."
+  ]
+}

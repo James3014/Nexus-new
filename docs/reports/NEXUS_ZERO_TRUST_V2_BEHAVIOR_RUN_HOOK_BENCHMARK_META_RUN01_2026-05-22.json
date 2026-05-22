@@ -1,0 +1,91 @@
+{
+  "schema": "nexus.zero_trust_v2.behavior_run_hook.v1",
+  "status": "PASS",
+  "created_at": "2026-05-22T01:17:33.642704+00:00",
+  "source_plan": "docs/reports/NEXUS_ZERO_TRUST_V2_M28_M35_EXECUTION_PLAN_2026-05-21.json",
+  "summary": {
+    "run_count": 1,
+    "ready_count": 0,
+    "executed_count": 1,
+    "blocked_count": 0,
+    "execute_requested": true,
+    "runtime_mutation_allowed": false,
+    "promotion_credit_allowed": false
+  },
+  "runs": [
+    {
+      "run_index": 1,
+      "run_id": "ztv2-matrix-benchmark_meta_opt-sf-systematic-benchmark_meta_opt-hugging-face-trackio-d21c6b90-01",
+      "capability_id": "benchmark_meta_opt",
+      "skill_id": "sf-systematic-benchmark_meta_opt-hugging-face-trackio-d21c6b90",
+      "priority": "",
+      "command": [
+        "uv",
+        "run",
+        "python",
+        "scripts/bench/capability_ab_runner.py",
+        "--tasks-file",
+        "docs/reports/NEXUS_ZERO_TRUST_V2_FRESH_TASK_MANIFEST_2026-05-21.json",
+        "--task-id-filter",
+        "ztv2-fresh-benchmark-meta-opt-016",
+        "--max-tasks",
+        "1",
+        "--output-dir",
+        ".nexus/reports/zero_trust_v2_behavior/benchmark_meta_opt/sf-systematic-benchmark_meta_opt-hugging-face-trackio-d21c6b90/run-01",
+        "--timeout-sec",
+        "300",
+        "--per-task-stop-loss-sec",
+        "600",
+        "--stop-loss-sec",
+        "600",
+        "--with-model-provider",
+        "codex",
+        "--nexus-only",
+        "--with-nexus-runner",
+        "subprocess",
+        "--with-llm-mode",
+        "all",
+        "--without-mode",
+        "codex",
+        "--force-flow",
+        "hyper_sprint",
+        "--enable-autoreason-executor",
+        "--enable-ddtree-executor",
+        "--enable-ultra-review-dry-gate",
+        "--llm-candidate-cap",
+        "3",
+        "--neutralize-history",
+        "--disable-learning-loop",
+        "--evidence-bundle"
+      ],
+      "runner_env": {
+        "NEXUS_ZERO_TRUST_V2_PHYSICAL_BEHAVIOR": "1",
+        "NEXUS_VALUE_HIDDEN_VERIFIER": "1",
+        "NEXUS_BENCH_SKILL_MOUNTS": "1",
+        "NEXUS_BENCH_ALLOW_ABLATION_SKILL_MOUNTS": "1",
+        "NEXUS_BENCH_SKILL_MOUNT_REQUESTS": "[\"sf-systematic-benchmark_meta_opt-hugging-face-trackio-d21c6b90\"]",
+        "NEXUS_BENCH_SKILL_STATUS_REPORT": "docs/reports/archive/sf/2026-05-15/NEXUS_SKILL_STATUS_2026-05-15.json",
+        "NEXUS_CODEX_MODEL_NAME": "gpt-5.5",
+        "NEXUS_DIRECT_CODEX_MODEL": "gpt-5.5"
+      },
+      "expected_evidence_bundle": ".nexus/reports/zero_trust_v2_behavior/benchmark_meta_opt/sf-systematic-benchmark_meta_opt-hugging-face-trackio-d21c6b90/run-01/evidence_bundle.json",
+      "status": "EXECUTED",
+      "blockers": [],
+      "returncode": 0,
+      "stdout_tail": "_total_timeout_sec\": 600, \"direct_timeout_abort_threshold\": 3, \"direct_infra_abort_threshold\": 3, \"with_nexus_file\": \"/Users/jameschen/Workspace/nexus/.nexus/reports/zero_trust_v2_behavior/benchmark_meta_opt/sf-systematic-benchmark_meta_opt-hugging-face-trackio-d21c6b90/run-01/with_nexus_1779412604.jsonl\", \"without_nexus_file\": \"/Users/jameschen/Workspace/nexus/.nexus/reports/zero_trust_v2_behavior/benchmark_meta_opt/sf-systematic-benchmark_meta_opt-hugging-face-trackio-d21c6b90/run-01/without_nexus_1779412604.jsonl\", \"evidence_bundle_file\": \"/Users/jameschen/Workspace/nexus/.nexus/reports/zero_trust_v2_behavior/benchmark_meta_opt/sf-systematic-benchmark_meta_opt-hugging-face-trackio-d21c6b90/run-01/evidence_bundle.json\", \"markdown_report_file\": \"\", \"history_policy\": \"per_task_reset\", \"learn_slo_policy\": \"repo_state\", \"hidden_verifier_mode\": true, \"benchmark_summary\": {\"with_nexus\": {\"total_n\": 1, \"eligible_n\": 1, \"infra_invalid_n\": 0, \"infra_invalid_reasons\": [], \"solve_rate\": 1.0, \"semantic_verified_rate\": 1.0, \"trust_mismatch_rate\": 0.0, \"first_pass_rate\": 1.0, \"avg_wall_time_sec\": 30.8665, \"avg_phase_wall_total_sec\": 0.0, \"avg_phase_wall_r_sec\": 0.0, \"avg_r_phase_hyper_sprint_sec\": 0.0, \"avg_r_phase_total_sec\": 0.0, \"avg_cli_uninstrumented_sec\": 30.8665, \"avg_runner_overhead_sec\": 0.0, \"avg_model_attempt_wall_sec\": 30.8665, \"avg_hidden_verifier_wall_sec\": 0.0, \"avg_hidden_retry_wall_sec\": 0.0, \"avg_hidden_retry_verifier_wall_sec\": 0.0, \"runner_overhead_polluted_n\": 0, \"avg_tokens\": 27475.0, \"token_measured_rate\": 1.0, \"provider_token_measured_rate\": 1.0, \"clean_model_cost_evidence_rate\": 1.0, \"training_eligible_cost_evidence_rate\": 1.0, \"token_reliable_rate\": 1.0, \"token_unreliable_reasons\": [], \"avg_model_calls\": 1.0, \"local_fallback_unhelpful_rate\": 0.0, \"model_required_n\": 1, \"model_uplift_eligible_n\": 0, \"model_uplift_eligible_rate\": 0.0, \"model_uplift_blocked_by_local_delivery_n\": 0, \"model_uplift_ineligible_reasons\": [\"final_delivery_not_model_source\"]}}}\n",
+      "stderr_tail": "{\"event\": \"task_start\", \"mode\": \"with_nexus\", \"elapsed_sec\": 0.0007, \"task_id\": \"ztv2-fresh-benchmark-meta-opt-016\", \"trial_index\": 1, \"difficulty\": \"medium\", \"task_type\": \"public_benchmark_meta_opt\", \"category\": \"benchmark_meta_opt\", \"repo_kind\": \"neutral_fixture\", \"target_file\": \"/Users/jameschen/Workspace/nexus/.nexus/bench_cases/ztv2-fresh-benchmark-meta-opt-016/target.py\", \"test_file\": \"/Users/jameschen/Workspace/nexus/.nexus/bench_cases/ztv2-fresh-benchmark-meta-opt-016/test_visible.py\"}\n{\"event\": \"task_end\", \"mode\": \"with_nexus\", \"elapsed_sec\": 48.7162, \"task_id\": \"ztv2-fresh-benchmark-meta-opt-016\", \"trial_index\": 1, \"difficulty\": \"medium\", \"task_type\": \"public_benchmark_meta_opt\", \"category\": \"benchmark_meta_opt\", \"repo_kind\": \"neutral_fixture\", \"target_file\": \"/Users/jameschen/Workspace/nexus/.nexus/bench_cases/ztv2-fresh-benchmark-meta-opt-016/target.py\", \"test_file\": \"/Users/jameschen/Workspace/nexus/.nexus/bench_cases/ztv2-fresh-benchmark-meta-opt-016/test_visible.py\", \"status\": \"SUCCESS\"}\n",
+      "runtime_signed_receipt_export": {
+        "status": "PASS",
+        "blockers": [],
+        "bundle_path": ".nexus/reports/zero_trust_v2_behavior/benchmark_meta_opt/sf-systematic-benchmark_meta_opt-hugging-face-trackio-d21c6b90/run-01/evidence_bundle.json",
+        "signing_secret_source": "local_runtime_secret_file"
+      }
+    }
+  ],
+  "blockers": [],
+  "claim_boundary": [
+    "This hook binds runner_env to each behavior run command.",
+    "Dry-run validation is the default; execution requires --execute.",
+    "Successful command execution is not promotion credit until receipt import passes."
+  ]
+}
