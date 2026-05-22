@@ -55,7 +55,6 @@ from scripts.bench.capability_ab_runner import (
     _hidden_verifier_infra_reason,
     _nexus_cli_subprocess_cmd,
     _direct_gemini_timeout_sec,
-    _direct_model_retryable_infra_failure,
     _direct_provider_infra_row,
     _direct_provider_timeout_row,
     _direct_infra_abort_reason,
@@ -11829,34 +11828,6 @@ def test_with_nexus_verified_rescue_after_measured_parse_failure_is_eligible():
     assert out["run_eligible"] is True
     assert out["infra_invalid_reason"] is None
     assert out["nexus_wearing_valid"] is True
-
-
-def test_direct_parse_failure_with_estimated_tokens_is_retryable():
-    retryable, reason = _direct_model_retryable_infra_failure(
-        {
-            "error_category": "parse_failure",
-            "tokens_used": 517,
-            "token_capture_status": "estimated",
-        },
-        "stats_outlier_possible_cumulative",
-    )
-
-    assert retryable is True
-    assert reason == "parse_failure_without_measured_tokens"
-
-
-def test_direct_parse_failure_with_measured_tokens_is_model_failure_not_retryable():
-    retryable, reason = _direct_model_retryable_infra_failure(
-        {
-            "error_category": "parse_failure",
-            "tokens_used": 321,
-            "token_capture_status": "measured",
-        },
-        "not-json",
-    )
-
-    assert retryable is False
-    assert reason == ""
 
 
 def test_strict_llm_baseline_gateway_error_is_infra_invalid():
