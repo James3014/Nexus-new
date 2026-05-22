@@ -1,4 +1,4 @@
-from scripts.engine.nexus_cli_registry import deprecated_command_message, deprecated_command_registry
+from scripts.engine.nexus_cli_registry import deprecated_command_message, deprecated_command_names, deprecated_command_registry
 
 
 def test_deprecated_command_registry_contains_legacy_status_aliases():
@@ -6,6 +6,17 @@ def test_deprecated_command_registry_contains_legacy_status_aliases():
 
     assert registry["nexus:status"].replacement == "uv run scripts/engine/nexus_cli.py nexus status"
     assert registry["nexus:hud"].replacement == "uv run scripts/engine/nexus_cli.py nexus status"
+
+
+def test_deprecated_command_names_are_stable_for_cli_registration():
+    assert deprecated_command_names() == [
+        "nexus:acceptance-check",
+        "nexus:closeout",
+        "nexus:governance-check",
+        "nexus:hud",
+        "nexus:spec-lock",
+        "nexus:status",
+    ]
 
 
 def test_deprecated_command_message_is_stable_and_actionable():

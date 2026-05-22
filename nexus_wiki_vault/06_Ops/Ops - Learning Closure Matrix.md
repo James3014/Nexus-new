@@ -3039,3 +3039,9 @@ version_scope:
 - **Root Cause**: P/X/D/R had moved behind the phase clock while A/C retained local `time.monotonic()` deltas, leaving two timing styles in one orchestration path.
 - **Action Taken**: Added `AutoFlowPhaseClock.restart()`, moved A/C timing to `phase_clock.mark(...)`, and reran focused phase-wall/RLM trace tests plus the CI gate.
 - **Prevention**: Future `run_auto_flow` phase instrumentation should add clock behavior first and keep manual `phase_started_at` variables out of the orchestration body unless a phase has a separate domain clock.
+
+## 2026-05-22: CLI Registry Slices Need Wiki Writeback Before CI Gate
+- **Phenomenon**: The CLI registry SSOT slice passed focused tests, but the first `ci_gate.py` run failed with `WIKI-SYNC-BLOCK` because protected code changed before this slice had a fresh wiki update.
+- **Root Cause**: The previous Learning Closure entry covered the phase-clock slice, not the later `nexus_cli_registry` change.
+- **Action Taken**: Added `deprecated_command_names()` so deprecated CLI alias tests consume registry data, then wrote this lesson before rerunning CI.
+- **Prevention**: When doing multiple TDD slices in one rollout, append a slice-specific Learning Closure entry before each CI gate run that touches protected code.

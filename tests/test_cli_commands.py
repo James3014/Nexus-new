@@ -1,18 +1,12 @@
 import pytest
 from click.testing import CliRunner
 from scripts.engine.nexus_cli import nexus
+from scripts.engine.nexus_cli_registry import deprecated_command_names
 import os
 from unittest.mock import patch, MagicMock
 
 
-@pytest.mark.parametrize("cmd", [
-    ["nexus:status"],
-    ["nexus:hud"],
-    ["nexus:spec-lock"],
-    ["nexus:governance-check"],
-    ["nexus:acceptance-check"],
-    ["nexus:closeout"]
-])
+@pytest.mark.parametrize("cmd", [[name] for name in deprecated_command_names()])
 def test_cli_deprecated_commands_blocked(cmd):
     runner = CliRunner()
     result = runner.invoke(nexus, cmd)

@@ -27,6 +27,10 @@ def deprecated_command_registry() -> dict[str, DeprecatedCommand]:
     return {command.name: command for command in commands}
 
 
+def deprecated_command_names() -> list[str]:
+    return sorted(deprecated_command_registry())
+
+
 def deprecated_command_message(name: str) -> str:
     command = deprecated_command_registry().get(name)
     replacement = command.replacement if command else ""
