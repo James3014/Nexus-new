@@ -1,10 +1,21 @@
 {
   "schema": "nexus.sf_final_runtime_skill_policy_overlay.applied.v1",
   "status": "PASS",
-  "created_at": "2026-05-21T09:33:51.043737+00:00",
+  "created_at": "2026-05-21T12:12:12.779208+00:00",
   "source_live_report": "docs/reports/NEXUS_SF_FINAL_ALL_CANDIDATE_LIVE_COMPARE_REPORT_2026-05-21.json",
   "runtime_update_allowed": true,
   "public_benchmark_allowed": false,
+  "runtime_review_scope": "overlay_only",
+  "security_contract_version": "v1_diagnostic_only",
+  "promotion_credit_source": "none",
+  "v1_evidence_count": 19,
+  "v2_evidence_count": 0,
+  "v2_trust_mismatch_count": 0,
+  "requires_sandbox_attestation": true,
+  "sandbox_attestation_status": "missing_not_required_for_overlay_only",
+  "v2_promotion_eligible": false,
+  "external_reference_applied_count": 19,
+  "requires_curation_count": 19,
   "primary_skill_by_capability": {
     "artifact_gate": "sf-systematic-artifact_gate-differential-review-461fbd0c",
     "autonomic_router": "nexus-agent-execution-board-failclosed",
@@ -97,7 +108,17 @@
         ".nexus/reports/sf_final_all_candidate_live_compare_chunk2_2026-05-21/autonomic_router_sf-final-all-live-compare-autonomic_router-001_candidate_skill_nexus-agent-execution-board-failclosed/evidence_bundle.json"
       ],
       "receipt_path": ".nexus/reports/sf_final_all_candidate_live_compare_chunk2_2026-05-21/autonomic_router_sf-final-all-live-compare-autonomic_router-001_candidate_skill_nexus-agent-execution-board-failclosed",
-      "source_status": "external_reference_candidate"
+      "source_status": "external_reference_candidate",
+      "requires_curation": true,
+      "runtime_review_scope": "overlay_only_requires_curation",
+      "security_contract_version": "v1_diagnostic_only",
+      "promotion_credit_source": "none",
+      "v1_evidence_count": 1,
+      "v2_evidence_count": 0,
+      "v2_trust_mismatch_count": 0,
+      "requires_sandbox_attestation": true,
+      "sandbox_attestation_status": "missing_not_required_for_overlay_only",
+      "v2_promotion_eligible": false
     },
     {
       "capability_id": "claim_gate",
@@ -111,7 +132,17 @@
         ".nexus/reports/sf_final_all_candidate_live_compare_chunk2_2026-05-21/claim_gate_sf-final-all-live-compare-claim_gate-001_candidate_skill_addy-doubt-driven-development/evidence_bundle.json"
       ],
       "receipt_path": ".nexus/reports/sf_final_all_candidate_live_compare_chunk2_2026-05-21/claim_gate_sf-final-all-live-compare-claim_gate-001_candidate_skill_addy-doubt-driven-development",
-      "source_status": "external_reference_candidate"
+      "source_status": "external_reference_candidate",
+      "requires_curation": true,
+      "runtime_review_scope": "overlay_only_requires_curation",
+      "security_contract_version": "v1_diagnostic_only",
+      "promotion_credit_source": "none",
+      "v1_evidence_count": 1,
+      "v2_evidence_count": 0,
+      "v2_trust_mismatch_count": 0,
+      "requires_sandbox_attestation": true,
+      "sandbox_attestation_status": "missing_not_required_for_overlay_only",
+      "v2_promotion_eligible": false
     },
     {
       "capability_id": "codeintel",
@@ -125,7 +156,17 @@
         ".nexus/reports/sf_final_all_candidate_live_compare_chunk3_2026-05-21/codeintel_sf-final-all-live-compare-codeintel-001_candidate_skill_gstack-qa/evidence_bundle.json"
       ],
       "receipt_path": ".nexus/reports/sf_final_all_candidate_live_compare_chunk3_2026-05-21/codeintel_sf-final-all-live-compare-codeintel-001_candidate_skill_gstack-qa",
-      "source_status": "external_reference_candidate"
+      "source_status": "external_reference_candidate",
+      "requires_curation": true,
+      "runtime_review_scope": "overlay_only_requires_curation",
+      "security_contract_version": "v1_diagnostic_only",
+      "promotion_credit_source": "none",
+      "v1_evidence_count": 1,
+      "v2_evidence_count": 0,
+      "v2_trust_mismatch_count": 0,
+      "requires_sandbox_attestation": true,
+      "sandbox_attestation_status": "missing_not_required_for_overlay_only",
+      "v2_promotion_eligible": false
     },
     {
       "capability_id": "external_productivity",
@@ -139,7 +180,17 @@
         ".nexus/reports/sf_final_all_candidate_live_compare_chunk3_2026-05-21/external_productivity_sf-final-all-live-compare-external_productivity-001_candidate_skill_aibdd.auto.python.e2e.green/evidence_bundle.json"
       ],
       "receipt_path": ".nexus/reports/sf_final_all_candidate_live_compare_chunk3_2026-05-21/external_productivity_sf-final-all-live-compare-external_productivity-001_candidate_skill_aibdd.auto.python.e2e.green",
-      "source_status": "external_reference_candidate"
+      "source_status": "external_reference_candidate",
+      "requires_curation": true,
+      "runtime_review_scope": "overlay_only_requires_curation",
+      "security_contract_version": "v1_diagnostic_only",
+      "promotion_credit_source": "none",
+      "v1_evidence_count": 1,
+      "v2_evidence_count": 0,
+      "v2_trust_mismatch_count": 0,
+      "requires_sandbox_attestation": true,
+      "sandbox_attestation_status": "missing_not_required_for_overlay_only",
+      "v2_promotion_eligible": false
     },
     {
       "capability_id": "file_lock_security_gate",
@@ -153,7 +204,17 @@
         ".nexus/reports/sf_final_all_candidate_live_compare_chunk3_2026-05-21/file_lock_security_gate_sf-final-all-live-compare-file_lock_security_gate-001_candidate_skill_browserbase-what-antibot/evidence_bundle.json"
       ],
       "receipt_path": ".nexus/reports/sf_final_all_candidate_live_compare_chunk3_2026-05-21/file_lock_security_gate_sf-final-all-live-compare-file_lock_security_gate-001_candidate_skill_browserbase-what-antibot",
-      "source_status": "external_reference_candidate"
+      "source_status": "external_reference_candidate",
+      "requires_curation": true,
+      "runtime_review_scope": "overlay_only_requires_curation",
+      "security_contract_version": "v1_diagnostic_only",
+      "promotion_credit_source": "none",
+      "v1_evidence_count": 1,
+      "v2_evidence_count": 0,
+      "v2_trust_mismatch_count": 0,
+      "requires_sandbox_attestation": true,
+      "sandbox_attestation_status": "missing_not_required_for_overlay_only",
+      "v2_promotion_eligible": false
     },
     {
       "capability_id": "forecast_pregate",
@@ -167,7 +228,17 @@
         ".nexus/reports/sf_final_all_candidate_live_compare_chunk3_2026-05-21/forecast_pregate_sf-final-all-live-compare-forecast_pregate-001_candidate_skill_addy-shipping-and-launch/evidence_bundle.json"
       ],
       "receipt_path": ".nexus/reports/sf_final_all_candidate_live_compare_chunk3_2026-05-21/forecast_pregate_sf-final-all-live-compare-forecast_pregate-001_candidate_skill_addy-shipping-and-launch",
-      "source_status": "external_reference_candidate"
+      "source_status": "external_reference_candidate",
+      "requires_curation": true,
+      "runtime_review_scope": "overlay_only_requires_curation",
+      "security_contract_version": "v1_diagnostic_only",
+      "promotion_credit_source": "none",
+      "v1_evidence_count": 1,
+      "v2_evidence_count": 0,
+      "v2_trust_mismatch_count": 0,
+      "requires_sandbox_attestation": true,
+      "sandbox_attestation_status": "missing_not_required_for_overlay_only",
+      "v2_promotion_eligible": false
     },
     {
       "capability_id": "hyper_sprint",
@@ -181,7 +252,17 @@
         ".nexus/reports/sf_final_all_candidate_live_compare_chunk4_2026-05-21/hyper_sprint_sf-final-all-live-compare-hyper_sprint-001_candidate_skill_retro/evidence_bundle.json"
       ],
       "receipt_path": ".nexus/reports/sf_final_all_candidate_live_compare_chunk4_2026-05-21/hyper_sprint_sf-final-all-live-compare-hyper_sprint-001_candidate_skill_retro",
-      "source_status": "external_reference_candidate"
+      "source_status": "external_reference_candidate",
+      "requires_curation": true,
+      "runtime_review_scope": "overlay_only_requires_curation",
+      "security_contract_version": "v1_diagnostic_only",
+      "promotion_credit_source": "none",
+      "v1_evidence_count": 1,
+      "v2_evidence_count": 0,
+      "v2_trust_mismatch_count": 0,
+      "requires_sandbox_attestation": true,
+      "sandbox_attestation_status": "missing_not_required_for_overlay_only",
+      "v2_promotion_eligible": false
     },
     {
       "capability_id": "learn_ask",
@@ -195,7 +276,17 @@
         ".nexus/reports/sf_final_all_candidate_live_compare_chunk4_2026-05-21/learn_ask_sf-final-all-live-compare-learn_ask-001_candidate_skill_nexus-live-ask-replay-normalization-gate/evidence_bundle.json"
       ],
       "receipt_path": ".nexus/reports/sf_final_all_candidate_live_compare_chunk4_2026-05-21/learn_ask_sf-final-all-live-compare-learn_ask-001_candidate_skill_nexus-live-ask-replay-normalization-gate",
-      "source_status": "external_reference_candidate"
+      "source_status": "external_reference_candidate",
+      "requires_curation": true,
+      "runtime_review_scope": "overlay_only_requires_curation",
+      "security_contract_version": "v1_diagnostic_only",
+      "promotion_credit_source": "none",
+      "v1_evidence_count": 1,
+      "v2_evidence_count": 0,
+      "v2_trust_mismatch_count": 0,
+      "requires_sandbox_attestation": true,
+      "sandbox_attestation_status": "missing_not_required_for_overlay_only",
+      "v2_promotion_eligible": false
     },
     {
       "capability_id": "memory",
@@ -209,7 +300,17 @@
         ".nexus/reports/sf_final_all_candidate_live_compare_chunk4_2026-05-21/memory_sf-final-all-live-compare-memory-001_candidate_skill_product-self-knowledge/evidence_bundle.json"
       ],
       "receipt_path": ".nexus/reports/sf_final_all_candidate_live_compare_chunk4_2026-05-21/memory_sf-final-all-live-compare-memory-001_candidate_skill_product-self-knowledge",
-      "source_status": "external_reference_candidate"
+      "source_status": "external_reference_candidate",
+      "requires_curation": true,
+      "runtime_review_scope": "overlay_only_requires_curation",
+      "security_contract_version": "v1_diagnostic_only",
+      "promotion_credit_source": "none",
+      "v1_evidence_count": 1,
+      "v2_evidence_count": 0,
+      "v2_trust_mismatch_count": 0,
+      "requires_sandbox_attestation": true,
+      "sandbox_attestation_status": "missing_not_required_for_overlay_only",
+      "v2_promotion_eligible": false
     },
     {
       "capability_id": "metabolism_resume",
@@ -223,7 +324,17 @@
         ".nexus/reports/sf_final_all_candidate_live_compare_chunk4_2026-05-21/metabolism_resume_sf-final-all-live-compare-metabolism_resume-001_candidate_skill_addy-shipping-and-launch/evidence_bundle.json"
       ],
       "receipt_path": ".nexus/reports/sf_final_all_candidate_live_compare_chunk4_2026-05-21/metabolism_resume_sf-final-all-live-compare-metabolism_resume-001_candidate_skill_addy-shipping-and-launch",
-      "source_status": "external_reference_candidate"
+      "source_status": "external_reference_candidate",
+      "requires_curation": true,
+      "runtime_review_scope": "overlay_only_requires_curation",
+      "security_contract_version": "v1_diagnostic_only",
+      "promotion_credit_source": "none",
+      "v1_evidence_count": 1,
+      "v2_evidence_count": 0,
+      "v2_trust_mismatch_count": 0,
+      "requires_sandbox_attestation": true,
+      "sandbox_attestation_status": "missing_not_required_for_overlay_only",
+      "v2_promotion_eligible": false
     },
     {
       "capability_id": "nightshift",
@@ -237,7 +348,17 @@
         ".nexus/reports/sf_final_all_candidate_live_compare_chunk4_2026-05-21/nightshift_sf-final-all-live-compare-nightshift-001_candidate_skill_canary/evidence_bundle.json"
       ],
       "receipt_path": ".nexus/reports/sf_final_all_candidate_live_compare_chunk4_2026-05-21/nightshift_sf-final-all-live-compare-nightshift-001_candidate_skill_canary",
-      "source_status": "external_reference_candidate"
+      "source_status": "external_reference_candidate",
+      "requires_curation": true,
+      "runtime_review_scope": "overlay_only_requires_curation",
+      "security_contract_version": "v1_diagnostic_only",
+      "promotion_credit_source": "none",
+      "v1_evidence_count": 1,
+      "v2_evidence_count": 0,
+      "v2_trust_mismatch_count": 0,
+      "requires_sandbox_attestation": true,
+      "sandbox_attestation_status": "missing_not_required_for_overlay_only",
+      "v2_promotion_eligible": false
     },
     {
       "capability_id": "policy_capability_gate",
@@ -251,7 +372,17 @@
         ".nexus/reports/sf_final_all_candidate_live_compare_chunk5_2026-05-21/policy_capability_gate_sf-final-all-live-compare-policy_capability_gate-001_candidate_skill_browse/evidence_bundle.json"
       ],
       "receipt_path": ".nexus/reports/sf_final_all_candidate_live_compare_chunk5_2026-05-21/policy_capability_gate_sf-final-all-live-compare-policy_capability_gate-001_candidate_skill_browse",
-      "source_status": "external_reference_candidate"
+      "source_status": "external_reference_candidate",
+      "requires_curation": true,
+      "runtime_review_scope": "overlay_only_requires_curation",
+      "security_contract_version": "v1_diagnostic_only",
+      "promotion_credit_source": "none",
+      "v1_evidence_count": 1,
+      "v2_evidence_count": 0,
+      "v2_trust_mismatch_count": 0,
+      "requires_sandbox_attestation": true,
+      "sandbox_attestation_status": "missing_not_required_for_overlay_only",
+      "v2_promotion_eligible": false
     },
     {
       "capability_id": "registry_skills_sync",
@@ -265,7 +396,17 @@
         ".nexus/reports/sf_final_all_candidate_live_compare_replay_registry_sync_2026-05-21/registry_skills_sync_sf-final-all-live-compare-registry_skills_sync-001_candidate_skill_gstack-sync-gbrain/evidence_bundle.json"
       ],
       "receipt_path": ".nexus/reports/sf_final_all_candidate_live_compare_replay_registry_sync_2026-05-21/registry_skills_sync_sf-final-all-live-compare-registry_skills_sync-001_candidate_skill_gstack-sync-gbrain",
-      "source_status": "external_reference_candidate"
+      "source_status": "external_reference_candidate",
+      "requires_curation": true,
+      "runtime_review_scope": "overlay_only_requires_curation",
+      "security_contract_version": "v1_diagnostic_only",
+      "promotion_credit_source": "none",
+      "v1_evidence_count": 1,
+      "v2_evidence_count": 0,
+      "v2_trust_mismatch_count": 0,
+      "requires_sandbox_attestation": true,
+      "sandbox_attestation_status": "missing_not_required_for_overlay_only",
+      "v2_promotion_eligible": false
     },
     {
       "capability_id": "repair_loop",
@@ -279,7 +420,17 @@
         ".nexus/reports/sf_final_all_candidate_live_compare_chunk6_2026-05-21/repair_loop_sf-final-all-live-compare-repair_loop-001_candidate_skill_qa-only/evidence_bundle.json"
       ],
       "receipt_path": ".nexus/reports/sf_final_all_candidate_live_compare_chunk6_2026-05-21/repair_loop_sf-final-all-live-compare-repair_loop-001_candidate_skill_qa-only",
-      "source_status": "external_reference_candidate"
+      "source_status": "external_reference_candidate",
+      "requires_curation": true,
+      "runtime_review_scope": "overlay_only_requires_curation",
+      "security_contract_version": "v1_diagnostic_only",
+      "promotion_credit_source": "none",
+      "v1_evidence_count": 1,
+      "v2_evidence_count": 0,
+      "v2_trust_mismatch_count": 0,
+      "requires_sandbox_attestation": true,
+      "sandbox_attestation_status": "missing_not_required_for_overlay_only",
+      "v2_promotion_eligible": false
     },
     {
       "capability_id": "research",
@@ -293,7 +444,17 @@
         ".nexus/reports/sf_final_all_candidate_live_compare_chunk6_2026-05-21/research_sf-final-all-live-compare-research-001_candidate_skill_gbrain-academic-verify/evidence_bundle.json"
       ],
       "receipt_path": ".nexus/reports/sf_final_all_candidate_live_compare_chunk6_2026-05-21/research_sf-final-all-live-compare-research-001_candidate_skill_gbrain-academic-verify",
-      "source_status": "external_reference_candidate"
+      "source_status": "external_reference_candidate",
+      "requires_curation": true,
+      "runtime_review_scope": "overlay_only_requires_curation",
+      "security_contract_version": "v1_diagnostic_only",
+      "promotion_credit_source": "none",
+      "v1_evidence_count": 1,
+      "v2_evidence_count": 0,
+      "v2_trust_mismatch_count": 0,
+      "requires_sandbox_attestation": true,
+      "sandbox_attestation_status": "missing_not_required_for_overlay_only",
+      "v2_promotion_eligible": false
     },
     {
       "capability_id": "research_and_source_discipline",
@@ -307,7 +468,17 @@
         ".nexus/reports/sf_final_all_candidate_live_compare_chunk6_2026-05-21/research_and_source_discipline_sf-final-all-live-compare-research_and_source_discipline-001_candidate_skill_gbrain-maintain/evidence_bundle.json"
       ],
       "receipt_path": ".nexus/reports/sf_final_all_candidate_live_compare_chunk6_2026-05-21/research_and_source_discipline_sf-final-all-live-compare-research_and_source_discipline-001_candidate_skill_gbrain-maintain",
-      "source_status": "external_reference_candidate"
+      "source_status": "external_reference_candidate",
+      "requires_curation": true,
+      "runtime_review_scope": "overlay_only_requires_curation",
+      "security_contract_version": "v1_diagnostic_only",
+      "promotion_credit_source": "none",
+      "v1_evidence_count": 1,
+      "v2_evidence_count": 0,
+      "v2_trust_mismatch_count": 0,
+      "requires_sandbox_attestation": true,
+      "sandbox_attestation_status": "missing_not_required_for_overlay_only",
+      "v2_promotion_eligible": false
     },
     {
       "capability_id": "research_control_plane",
@@ -321,7 +492,17 @@
         ".nexus/reports/sf_final_all_candidate_live_compare_chunk6_2026-05-21/research_control_plane_sf-final-all-live-compare-research_control_plane-001_candidate_skill_browserbase-fetch/evidence_bundle.json"
       ],
       "receipt_path": ".nexus/reports/sf_final_all_candidate_live_compare_chunk6_2026-05-21/research_control_plane_sf-final-all-live-compare-research_control_plane-001_candidate_skill_browserbase-fetch",
-      "source_status": "external_reference_candidate"
+      "source_status": "external_reference_candidate",
+      "requires_curation": true,
+      "runtime_review_scope": "overlay_only_requires_curation",
+      "security_contract_version": "v1_diagnostic_only",
+      "promotion_credit_source": "none",
+      "v1_evidence_count": 1,
+      "v2_evidence_count": 0,
+      "v2_trust_mismatch_count": 0,
+      "requires_sandbox_attestation": true,
+      "sandbox_attestation_status": "missing_not_required_for_overlay_only",
+      "v2_promotion_eligible": false
     },
     {
       "capability_id": "sandbox_replay",
@@ -335,7 +516,17 @@
         ".nexus/reports/sf_final_all_candidate_live_compare_chunk6_2026-05-21/sandbox_replay_sf-final-all-live-compare-sandbox_replay-001_candidate_skill_nexus-acceptance-evidence-gate/evidence_bundle.json"
       ],
       "receipt_path": ".nexus/reports/sf_final_all_candidate_live_compare_chunk6_2026-05-21/sandbox_replay_sf-final-all-live-compare-sandbox_replay-001_candidate_skill_nexus-acceptance-evidence-gate",
-      "source_status": "external_reference_candidate"
+      "source_status": "external_reference_candidate",
+      "requires_curation": true,
+      "runtime_review_scope": "overlay_only_requires_curation",
+      "security_contract_version": "v1_diagnostic_only",
+      "promotion_credit_source": "none",
+      "v1_evidence_count": 1,
+      "v2_evidence_count": 0,
+      "v2_trust_mismatch_count": 0,
+      "requires_sandbox_attestation": true,
+      "sandbox_attestation_status": "missing_not_required_for_overlay_only",
+      "v2_promotion_eligible": false
     },
     {
       "capability_id": "swarm_multi_agent",
@@ -349,7 +540,17 @@
         ".nexus/reports/sf_final_all_candidate_live_compare_chunk6_2026-05-21/swarm_multi_agent_sf-final-all-live-compare-swarm_multi_agent-001_candidate_skill_nexus-gemini-code-review-orchestrator/evidence_bundle.json"
       ],
       "receipt_path": ".nexus/reports/sf_final_all_candidate_live_compare_chunk6_2026-05-21/swarm_multi_agent_sf-final-all-live-compare-swarm_multi_agent-001_candidate_skill_nexus-gemini-code-review-orchestrator",
-      "source_status": "external_reference_candidate"
+      "source_status": "external_reference_candidate",
+      "requires_curation": true,
+      "runtime_review_scope": "overlay_only_requires_curation",
+      "security_contract_version": "v1_diagnostic_only",
+      "promotion_credit_source": "none",
+      "v1_evidence_count": 1,
+      "v2_evidence_count": 0,
+      "v2_trust_mismatch_count": 0,
+      "requires_sandbox_attestation": true,
+      "sandbox_attestation_status": "missing_not_required_for_overlay_only",
+      "v2_promotion_eligible": false
     }
   ],
   "kept_primary": [
@@ -430,6 +631,16 @@
     }
   ],
   "blockers": [],
+  "reject_conflict_warnings": [
+    {
+      "capability_id": "research_control_plane",
+      "skill_id": "browserbase-fetch",
+      "reject_capability": "xray",
+      "reject_verdict": "reject",
+      "reject_runtime_eligible": false,
+      "reason": "cross_capability_reject_conflict"
+    }
+  ],
   "claim_boundary": [
     "This overlay formally applies SF final live-approved runtime primary replacements.",
     "Runtime routes must still emit selected/injected/used/evidence/gate/outcome receipts.",
