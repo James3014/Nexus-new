@@ -3033,3 +3033,9 @@ version_scope:
 - **Root Cause**: Pulling helpers out of `capability_ab_runner` can look mechanical, but phase wall, skill mount, and governance event fields are public row contract fields consumed by later claim gates.
 - **Action Taken**: Added a focused helper test before implementation, preserved timing-vs-usage fallback, skill mount `PASS/RETURN/EMPTY`, and governance event de-dup semantics, then reran the full benchmark runner test file.
 - **Prevention**: Future `_extract_record` extractions should first pin the public row field behavior in a dedicated module test, then rerun the full runner test file rather than relying only on helper unit tests.
+
+## 2026-05-22: Auto Flow Late-Phase Timing Should Stay Behind The Phase Clock
+- **Phenomenon**: The first late-phase timing test failed because `AutoFlowPhaseClock` could mark sequential phases but could not restart timing around the A/C report-writing windows that `run_auto_flow` still measured manually.
+- **Root Cause**: P/X/D/R had moved behind the phase clock while A/C retained local `time.monotonic()` deltas, leaving two timing styles in one orchestration path.
+- **Action Taken**: Added `AutoFlowPhaseClock.restart()`, moved A/C timing to `phase_clock.mark(...)`, and reran focused phase-wall/RLM trace tests plus the CI gate.
+- **Prevention**: Future `run_auto_flow` phase instrumentation should add clock behavior first and keep manual `phase_started_at` variables out of the orchestration body unless a phase has a separate domain clock.

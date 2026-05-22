@@ -16,3 +16,6 @@ class AutoFlowPhaseClock:
         self.phase_wall_sec[phase] = elapsed
         self._phase_started_at = now
         return elapsed
+
+    def restart(self) -> None:
+        self._phase_started_at = self._now()

@@ -17,3 +17,14 @@ def test_auto_flow_phase_clock_rounds_to_four_decimals():
 
     assert clock.mark("P") == 0.3333
     assert clock.mark("X") == 0.3333
+
+
+def test_auto_flow_phase_clock_can_restart_before_late_phase():
+    ticks = iter([10.0, 11.0, 12.0, 12.75])
+    clock = AutoFlowPhaseClock(now=lambda: next(ticks))
+
+    assert clock.mark("R") == 1.0
+    clock.restart()
+
+    assert clock.mark("A") == 0.75
+    assert clock.phase_wall_sec == {"R": 1.0, "A": 0.75}

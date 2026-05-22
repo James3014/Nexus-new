@@ -2503,7 +2503,6 @@ def run_auto_flow(
     baseline_probe = None
     early_baseline_shortcut = False
     baseline_probe_skipped = False
-    phase_started_at = time.monotonic()
     if chosen_flow == "baseline":
         result = _run_baseline_apply()
         strategy_path = "baseline_only"
@@ -2698,7 +2697,7 @@ def run_auto_flow(
     if isinstance(baseline_probe, dict):
         baseline_probe_for_report = {k: v for k, v in baseline_probe.items() if k != "_patch"}
 
-    phase_started_at = time.monotonic()
+    phase_clock.restart()
     final_code = target_path.read_text(encoding="utf-8") if target_path.exists() else original_code
     diff_lines = list(
         difflib.unified_diff(
@@ -2814,7 +2813,7 @@ def run_auto_flow(
         route_confidence=route_confidence,
         hitl=hitl,
     )
-    phase_wall_sec["A"] = round(time.monotonic() - phase_started_at, 4)
+    phase_clock.mark("A")
     context_memory_needed = "docs_code_sync" in str(task_type).lower() or any(
         token in (task_desc or "").lower() for token in ("context", "contract", "docs")
     )
@@ -3245,7 +3244,7 @@ def run_auto_flow(
         payload["io"]["output_path"] = str(written)
         # keep report + output payload in sync
         out_path.write_text(json.dumps(payload, indent=2), encoding="utf-8")
-    phase_started_at = time.monotonic()
+    phase_clock.restart()
     asi_record = _asi_record(
         run_id=len(recent) + 1,
         task_desc=task_desc,
@@ -3310,7 +3309,7 @@ def run_auto_flow(
     payload["asi_ledger"] = [item.get("asi_record") for item in recent if isinstance(item, dict) and isinstance(item.get("asi_record"), dict)]
     history_data[flow_key] = recent[-200:]
     _write_history(history_data)
-    phase_wall_sec["C"] = round(time.monotonic() - phase_started_at, 4)
+    phase_clock.mark("C")
     payload["timing"]["cli_elapsed_sec"] = round(time.monotonic() - flow_started_at, 4)
     payload["timing"]["phase_wall_sec"] = phase_wall_sec
     payload["timing"]["breakdown_sec"] = timing_breakdown_sec
