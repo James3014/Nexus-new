@@ -76,6 +76,11 @@ from nexus.research.flow.evidence_packer import (
     _infer_research_role,
     _write_msa_receipt_reports,
 )
+from nexus.research.flow.baseline_report import (
+    baseline_report_from_meta,
+    local_baseline_meta,
+    strict_baseline_failure_meta,
+)
 from nexus.research.flow.phase_clock import AutoFlowPhaseClock, apply_auto_flow_timing_payload
 
 
@@ -2129,56 +2134,6 @@ def run_auto_flow(
     task_desc_with_codeintel = _task_with_codeintel_context(task_desc, codeintel_evidence)
     timing_breakdown_sec["context_pack_sec"] = round(time.monotonic() - context_started_at, 4)
 
-    def _baseline_report_from_meta(source: str, meta: dict[str, Any]) -> dict[str, Any]:
-        model_calls = int(meta.get("model_calls", 0) or 0)
-        total_tokens = int(meta.get("tokens_used", meta.get("total_tokens", 0)) or 0)
-        return {
-            "source": source,
-            "attempt_count": 1,
-            "model_calls": model_calls,
-            "model_name": str(meta.get("model_name", "") or ""),
-            "model_patch_generated": bool(meta.get("model_patch_generated", model_calls > 0)),
-            "fallback_used": bool(meta.get("fallback_used", False)),
-            "total_tokens": total_tokens,
-            "token_capture_status": str(meta.get("token_capture_status", "not_applicable_local_only") or "unknown"),
-            "gateway_stats_present": bool(meta.get("gateway_stats_present", False)),
-            "gateway_usage_metadata_present": bool(meta.get("gateway_usage_metadata_present", False)),
-            "gateway_token_source": str(meta.get("gateway_token_source", "missing") or "missing"),
-            "gateway_error_category": str(meta.get("gateway_error_category", "") or ""),
-            "gateway_prompt_chars": int(meta.get("gateway_prompt_chars", 0) or 0),
-            "gateway_payload_chars": int(meta.get("gateway_payload_chars", 0) or 0),
-            "gateway_total_chars": int(meta.get("gateway_total_chars", 0) or 0),
-            "gateway_timeout_sec": int(meta.get("gateway_timeout_sec", 0) or 0),
-            "baseline_llm_required": bool(meta.get("baseline_llm_required", False)),
-            "baseline_source_policy": str(meta.get("baseline_source_policy", "")),
-        }
-
-    def _local_baseline_meta(*, fallback_reason: str | None = None) -> dict[str, Any]:
-        meta = {
-            "source": "local",
-            "model_calls": 0,
-            "tokens_used": 0,
-            "token_capture_status": "not_applicable_local_only",
-            "model_patch_generated": False,
-        }
-        if fallback_reason:
-            meta["fallback_used"] = True
-            meta["gateway_error_category"] = fallback_reason
-        return meta
-
-    def _strict_baseline_failure_meta(reason: str, meta: dict[str, Any] | None = None) -> dict[str, Any]:
-        out = dict(meta or {})
-        out.setdefault("source", "nexus_llm_baseline")
-        out.setdefault("model_calls", 0)
-        out.setdefault("tokens_used", out.get("total_tokens", 0) or 0)
-        out.setdefault("token_capture_status", "missing_gateway_stats")
-        out["model_patch_generated"] = False
-        out["fallback_used"] = False
-        out["gateway_error_category"] = reason
-        out["baseline_llm_required"] = True
-        out["baseline_source_policy"] = "strict_llm_no_local_fallback"
-        return out
-
     def _hidden_contract_local_first_patch(trial: int) -> tuple[str, str, dict[str, Any]] | None:
         """Use deterministic local repair before spending a model call on known hidden-contract reducers."""
 
@@ -2204,7 +2159,7 @@ def run_auto_flow(
         patched = generate_local_candidate(original_code, task_desc, "baseline", trial)
         if patched == original_code:
             return None
-        meta = _local_baseline_meta()
+        meta = local_baseline_meta()
         meta["baseline_source_policy"] = "hidden_contract_local_first_before_llm"
         return patched, "local_hidden_contract_fast_path", meta
 
@@ -2247,7 +2202,7 @@ def run_auto_flow(
                     return patched, "llm_assisted", meta
                 else:
                     if llm_baseline_required:
-                        return original_code, "nexus_llm_baseline_failed", _strict_baseline_failure_meta(
+                        return original_code, "nexus_llm_baseline_failed", strict_baseline_failure_meta(
                             "llm_no_patch",
                             dict(meta),
                         )
@@ -2257,7 +2212,7 @@ def run_auto_flow(
                     fallback_meta["gateway_error_category"] = fallback_reason
             except LLMCandidateError as e:
                 if llm_baseline_required:
-                    return original_code, "nexus_llm_baseline_failed", _strict_baseline_failure_meta(str(e), e.metadata)
+                    return original_code, "nexus_llm_baseline_failed", strict_baseline_failure_meta(str(e), e.metadata)
                 fallback_reason = f"llm_error_{str(e).lower()}_fallback_local"
                 fallback_meta = dict(e.metadata)
                 fallback_meta["fallback_used"] = True
@@ -2271,10 +2226,10 @@ def run_auto_flow(
                 else:
                     fallback_reason = f"llm_error_{err_str}"
                 if llm_baseline_required:
-                    return original_code, "nexus_llm_baseline_failed", _strict_baseline_failure_meta(fallback_reason)
+                    return original_code, "nexus_llm_baseline_failed", strict_baseline_failure_meta(fallback_reason)
                 fallback_reason = f"{fallback_reason}_fallback_local"
         elif llm_baseline_required:
-            return original_code, "nexus_llm_baseline_missing", _strict_baseline_failure_meta("llm_baseline_required_missing")
+            return original_code, "nexus_llm_baseline_missing", strict_baseline_failure_meta("llm_baseline_required_missing")
         
         # Local fallback intentionally uses raw task_desc to avoid prior-art keyword pollution
         # (e.g., stale "flaky/race" hints forcing conservative patch on unrelated tasks).
@@ -2296,7 +2251,7 @@ def run_auto_flow(
         if fallback_reason:
             label = f"{source_label}({fallback_reason})"
             
-        return patched, label, fallback_meta or _local_baseline_meta(fallback_reason=fallback_reason)
+        return patched, label, fallback_meta or local_baseline_meta(fallback_reason=fallback_reason)
 
     def _restore_baseline_files(restored_files: dict[Path, str | None], *, keep_target: bool) -> None:
         for path, original_text in restored_files.items():
@@ -2312,7 +2267,7 @@ def run_auto_flow(
         ok = False
         err = ""
         source = "local"
-        generation_meta = _local_baseline_meta()
+        generation_meta = local_baseline_meta()
         companion_edits: dict[Path, str] = {}
         restored_files: dict[Path, str | None] = {}
         try:
@@ -2342,7 +2297,7 @@ def run_auto_flow(
             "status": "SUCCESS" if ok else "FAILED",
             "elapsed_sec": round(time.monotonic() - start, 4),
             "error": err,
-            "report": _baseline_report_from_meta(source, generation_meta),
+            "report": baseline_report_from_meta(source, generation_meta),
         }
 
     def _run_baseline_probe() -> dict:
@@ -2351,7 +2306,7 @@ def run_auto_flow(
         ok = False
         err = ""
         source = "local"
-        generation_meta = _local_baseline_meta()
+        generation_meta = local_baseline_meta()
         patched = original_code
         restored_files: dict[Path, str | None] = {}
         try:
@@ -2381,7 +2336,7 @@ def run_auto_flow(
             "status": "SUCCESS" if ok else "FAILED",
             "elapsed_sec": round(time.monotonic() - start, 4),
             "error": err,
-            "report": _baseline_report_from_meta(source, generation_meta),
+            "report": baseline_report_from_meta(source, generation_meta),
             "_patch": patched if ok else None,
         }
 

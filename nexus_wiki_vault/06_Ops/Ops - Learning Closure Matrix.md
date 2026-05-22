@@ -3099,3 +3099,9 @@ version_scope:
 - **Root Cause**: Receipt data-contract checks lived in `receipt_contracts.py`, but row-level receipt payload construction stayed coupled to the full benchmark row builder.
 - **Action Taken**: Added `expected_capability_invocation_coverage` and `build_row_receipt_fields` to `scripts/bench/receipt_contracts.py`, covered selected/invoked/evidence requirements and row serialization with TDD, then reran focused receipt tests and the full runner test file.
 - **Prevention**: Future receipt row changes should start in `test_token_receipt_contracts.py`; `_extract_record` should receive normalized receipts and assemble fields returned by `build_row_receipt_fields`.
+
+## 2026-05-22: Auto Flow Baseline Metadata Should Stay Out Of Orchestration
+- **Phenomenon**: `run_auto_flow` still defined baseline report shaping, local baseline metadata, and strict LLM-baseline failure metadata inline inside the orchestration body.
+- **Root Cause**: R-phase execution and report-accounting helpers were mixed together, making strict-baseline fail-closed behavior harder to test without running the full flow.
+- **Action Taken**: Added `nexus/research/flow/baseline_report.py`, covered gateway/model metadata preservation, local no-model fallback metadata, and strict LLM-baseline failure metadata with TDD, then reran focused and full research-flow tests.
+- **Prevention**: Future `run_auto_flow` phase-runner work should extract pure report/meta helpers first, then move execution branches only after their accounting contracts are independently tested.
