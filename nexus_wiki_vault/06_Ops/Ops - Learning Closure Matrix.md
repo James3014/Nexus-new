@@ -3129,3 +3129,9 @@ version_scope:
 - **Root Cause**: Env-derived benchmark policy was embedded in the runner body, making cost-efficiency pre-model rescue boundaries harder to test without invoking the full harness.
 - **Action Taken**: Added `apply_model_participation_rescue_policy` to `scripts/bench/route_execution_policy.py`, covered require-model blocking, explicit cost-efficiency opt-in, deterministic rescue disablement, and llm-disabled no-op cases, then rewired `run_with_nexus`.
 - **Prevention**: Future `run_with_nexus` cost/rescue policy changes should start in `test_route_execution_policy.py` and only then update harness orchestration.
+
+## 2026-05-22: Research CLI Session Wiring Needs A Small Support Module
+- **Phenomenon**: `scripts/engine/nexus_cli.py` still owned research-session preflight, block-payload shaping, JSON file reads, and packet logging inline beside Click command decorators.
+- **Root Cause**: Command wiring and research-session contract code shared one large CLI file, so small preflight/report changes had to touch the main command surface.
+- **Action Taken**: Added `scripts/engine/commands/research_support.py`, covered relative JSON reads and blocked completion payloads with TDD, and rewired `research:auto-flow`, `research:packet`, `research:log-from-last`, and `research:run` to use the support module.
+- **Prevention**: Future CLI research commands should keep Click option parsing in `nexus_cli.py` and put reusable session/preflight/report contracts under `scripts/engine/commands/`.
