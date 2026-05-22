@@ -3069,3 +3069,9 @@ version_scope:
 - **Root Cause**: The checks payload was treated as bundle formatting, but it is a public gate contract surface.
 - **Action Taken**: Moved `build_public_gate_checks` into `scripts/bench/public_gate_bundle.py`, added a dedicated behavior test for the claim-boundary inputs, and reran the full benchmark runner test file.
 - **Prevention**: Any future change to public gate check fields should land with a `public_gate_bundle` contract test before touching evidence bundle serialization or dashboard readers.
+
+## 2026-05-22: Auto Flow Timing Payload Sync Should Be A Phase Helper
+- **Phenomenon**: `run_auto_flow` still manually copied `cli_elapsed_sec`, `phase_wall_sec`, and `breakdown_sec` into the payload after the phase clock owned timing collection.
+- **Root Cause**: Timing collection had been extracted, but payload synchronization remained in the orchestration body.
+- **Action Taken**: Added `apply_auto_flow_timing_payload` to `nexus.research.flow.phase_clock`, covered the timing/usage-trace sync with TDD, and reran focused auto-flow timing/RLM trace tests.
+- **Prevention**: Future `run_auto_flow` phase work should keep payload synchronization behind phase-flow helpers so orchestration edits do not silently desynchronize `payload["timing"]` and `payload["nexus_usage_trace"]`.

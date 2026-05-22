@@ -76,7 +76,7 @@ from nexus.research.flow.evidence_packer import (
     _infer_research_role,
     _write_msa_receipt_reports,
 )
-from nexus.research.flow.phase_clock import AutoFlowPhaseClock
+from nexus.research.flow.phase_clock import AutoFlowPhaseClock, apply_auto_flow_timing_payload
 
 
 RESEARCH_SOURCE_PROJECTS = tuple(research_stack_source_projects())
@@ -3310,10 +3310,12 @@ def run_auto_flow(
     history_data[flow_key] = recent[-200:]
     _write_history(history_data)
     phase_clock.mark("C")
-    payload["timing"]["cli_elapsed_sec"] = round(time.monotonic() - flow_started_at, 4)
-    payload["timing"]["phase_wall_sec"] = phase_wall_sec
-    payload["timing"]["breakdown_sec"] = timing_breakdown_sec
-    payload["nexus_usage_trace"]["phase_wall_sec"] = phase_wall_sec
+    apply_auto_flow_timing_payload(
+        payload,
+        cli_elapsed_sec=time.monotonic() - flow_started_at,
+        phase_wall_sec=phase_wall_sec,
+        breakdown_sec=timing_breakdown_sec,
+    )
     out_path.write_text(json.dumps(payload, indent=2), encoding="utf-8")
     if payload["io"].get("output_path"):
         Path(str(payload["io"]["output_path"])).write_text(json.dumps(payload, indent=2), encoding="utf-8")
