@@ -3051,3 +3051,9 @@ version_scope:
 - **Root Cause**: Cost-efficiency gate semantics are public-claim policy, not bundle serialization; keeping them inline makes it easy to accidentally alter `IMPROVED`, `REGRESSED`, `RETURN`, and `INCONCLUSIVE_PROVIDER_VARIANCE` behavior while editing unrelated bundle fields.
 - **Action Taken**: Added `scripts/bench/public_gate_bundle.py` with `derive_cost_efficiency_decision`, pinned improvement, wall-ledger RETURN, and provider-variance INCONCLUSIVE behavior with TDD, then reran the full benchmark runner test file.
 - **Prevention**: Future PublicGate extraction should move policy decisions behind small public functions before moving payload serialization, and each move should rerun `write_evidence_bundle` coverage rather than only helper tests.
+
+## 2026-05-22: Token And Receipt Contract Refactors Must Preserve Odd Existing Inputs
+- **Phenomenon**: The first token/receipt module test expected `None` in missing receipt coverage to be ignored, but the existing contract stringified non-empty values and would emit `"None"`.
+- **Root Cause**: The test introduced a cleanup behavior during a refactor-only slice.
+- **Action Taken**: Kept `run_contracts` behavior-compatible by extracting `receipt_data_contract` and `token_data_contract` into dedicated modules, corrected the fixture to avoid changing policy, and reran runner contract coverage.
+- **Prevention**: When splitting Token/Receipt policy modules, do not change malformed-input normalization in the same slice; add a separate policy-change test and migration note if that cleanup is actually desired.
