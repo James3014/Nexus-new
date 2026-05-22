@@ -3009,3 +3009,15 @@ version_scope:
 - **Root Cause**: The test asserted the full blocker list instead of the stable fail-closed invariant plus the newly explicit missing leaf blocker.
 - **Action Taken**: Updated the test to expect both the original pregate blocker and `missing_context_view`, then added the real leaf extraction and compatibility/deletion test before regenerating the gate as `APPROVED`.
 - **Prevention**: Pregate tests should allow blocker lists to become more specific when evidence probes improve; assert status, safety flags, and required blocker classes rather than freezing an incomplete blocker set.
+
+## 2026-05-22: Architecture Skill References Must Be Self-Contained
+- **Phenomenon**: The `improve-codebase-architecture` skill instructed agents to read `LANGUAGE.md`, but the project skill directory only contained `SKILL.md`.
+- **Root Cause**: The architecture-review workflow depended on a companion file that was not packaged with the local Nexus skill.
+- **Action Taken**: Continued the audit using the vocabulary embedded in `SKILL.md` and recorded the missing companion file as a packaging lesson.
+- **Prevention**: Architecture skills should either package referenced glossary files with the skill or inline required terms in `SKILL.md`; future agents should not block a Nexus architecture audit on a missing optional glossary file.
+
+## 2026-05-22: Provider Retry Tests Must Use Real Gemini Error Markers
+- **Phenomenon**: The new `provider_retry` test expected `Invalid session ID: abc` to trigger `gemini_invalid_session_identifier`, but the shared Gemini detector only recognizes the real marker `invalid session identifier`.
+- **Root Cause**: The test fixture invented a near-miss string instead of using an observed Gemini CLI error phrase.
+- **Action Taken**: Updated the test fixture to `Error resuming session: Invalid session identifier "abc"` and kept the extracted retry classifier behavior-equivalent with `capability_ab_runner`.
+- **Prevention**: Provider retry tests should reuse observed error strings from `tests/services/test_gemini_cli.py` or benchmark fixtures; do not invent paraphrases for brittle provider text classifiers.
