@@ -26,6 +26,7 @@ from nexus.engine.completion_contract import write_completion_envelope
 from nexus.engine.completion_enforcer import CompletionEnforcementError
 from nexus.engine.completion_enforcer import write_completion_handoff
 from nexus.engine.direct_mode import evaluate_direct_mode_completion
+from scripts.engine.nexus_cli_registry import deprecated_command_registry
 
 def validate_claim_integrity(evidence_path: str):
     """🛡️ 硬性物理守門：驗證結論與證據的匹配度。"""
@@ -57,40 +58,43 @@ def nexus():
     pass
 
 
-def _blocked_deprecated(old: str, new: str):
+def _blocked_deprecated(old: str, new: str | None = None):
     """🚫 DEPRECATED_BLOCKED: 停止執行並引導至新入口。"""
+    if new is None:
+        command = deprecated_command_registry().get(old)
+        new = command.replacement if command else ""
     click.secho(f"❌ [DEPRECATED_BLOCKED] 此命令 '{old}' 已停用。", fg="red", bold=True)
     click.echo(f"💡 請改用唯一新入口：\n   {new}")
     sys.exit(2)
 
 @nexus.command(name="nexus:status")
 def legacy_status():
-    _blocked_deprecated("nexus:status", "uv run scripts/engine/nexus_cli.py nexus status")
+    _blocked_deprecated("nexus:status")
 
 
 @nexus.command(name="nexus:hud")
 def legacy_hud():
-    _blocked_deprecated("nexus:hud", "uv run scripts/engine/nexus_cli.py nexus status")
+    _blocked_deprecated("nexus:hud")
 
 
 @nexus.command(name="nexus:spec-lock")
 def legacy_spec_lock():
-    _blocked_deprecated("nexus:spec-lock", "MUSE_ENGINE_SPEC 審計已整合入 ci_gate。")
+    _blocked_deprecated("nexus:spec-lock")
 
 
 @nexus.command(name="nexus:governance-check")
 def legacy_governance_check():
-    _blocked_deprecated("nexus:governance-check", "uv run scripts/ops/ci_gate.py --dry-run")
+    _blocked_deprecated("nexus:governance-check")
 
 
 @nexus.command(name="nexus:acceptance-check")
 def legacy_acceptance_check():
-    _blocked_deprecated("nexus:acceptance-check", "uv run scripts/engine/nexus_cli.py nexus acceptance-check --evidence <FILE>")
+    _blocked_deprecated("nexus:acceptance-check")
 
 
 @nexus.command(name="nexus:closeout")
 def legacy_closeout():
-    _blocked_deprecated("nexus:closeout", "uv run scripts/engine/nexus_cli.py nexus contract-check --contract-file <FILE>")
+    _blocked_deprecated("nexus:closeout")
 
 @nexus.group(name="nexus")
 def nexus_group():
