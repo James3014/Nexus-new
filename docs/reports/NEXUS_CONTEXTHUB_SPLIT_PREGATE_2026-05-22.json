@@ -1,0 +1,30 @@
+{
+  "blockers": [],
+  "caller_map": {
+    "known_facade": "nexus/core/context_hub.py",
+    "monkeypatch_sensitive_tests": [
+      "tests/core/test_context_hub_strict_deps.py",
+      "tests/core/test_belief_engine.py"
+    ]
+  },
+  "checked_paths": {
+    "belief_engine_test": "tests/core/test_belief_engine.py",
+    "context_hub": "nexus/core/context_hub.py",
+    "context_view": "nexus/core/context_view.py",
+    "strict_deps_test": "tests/core/test_context_hub_strict_deps.py"
+  },
+  "compatibility_facade_required": true,
+  "decision": "APPROVED",
+  "deletion_test": "tests/core/test_context_hub_strict_deps.py::test_context_hub_reexports_split_context_view_contracts",
+  "leaf_extraction_candidate": "nexus.core.context_view.StateView",
+  "physical_split_allowed": true,
+  "public_benchmark_allowed": false,
+  "required_evidence": [
+    "caller/import map for ContextHub construction",
+    "responsibility map with one leaf extraction candidate",
+    "deletion test proving duplicated logic removal"
+  ],
+  "runtime_update_allowed": false,
+  "schema": "nexus.contexthub_split_pregate.v1",
+  "status": "APPROVED"
+}

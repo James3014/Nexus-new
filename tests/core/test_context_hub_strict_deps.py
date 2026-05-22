@@ -6,6 +6,19 @@ import pytest
 
 from nexus.core.context_hub import ContextDependencies, ContextHub
 from nexus.core.context_runtime_adapter import StatelessContextCoordinator, build_runtime_context_payload
+from nexus.core.context_view import ContextDependencies as SplitContextDependencies
+from nexus.core.context_view import StateView
+
+
+def test_context_hub_reexports_split_context_view_contracts():
+    assert ContextDependencies is SplitContextDependencies
+    view = StateView(
+        metadata={"task_type": "conversation"},
+        route_receipts=[{"selected": True, "invoked": True, "evidence_present": True, "gate_passed": False}],
+    )
+
+    assert view.get_conversation_metadata() == {}
+    assert view.receipt_summary() == {"selected": 1, "invoked": 1, "evidence": 1, "gate": 0}
 
 
 def test_context_hub_strict_deps_requires_dependency_container(tmp_path):

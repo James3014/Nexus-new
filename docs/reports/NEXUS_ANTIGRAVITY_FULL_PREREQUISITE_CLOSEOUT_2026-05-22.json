@@ -1,0 +1,45 @@
+{
+  "claim_boundary": [
+    "Antigravity remaining prerequisite gates are complete.",
+    "Runtime defaults remain unchanged.",
+    "Public benchmark and performance claims remain locked.",
+    "Zero Trust V2 workstream artifacts were not modified by this closeout."
+  ],
+  "closure_state": "FULL_PREREQUISITE_APPROVED_RUNTIME_SAFE_FOLLOWTHROUGH_READY",
+  "gate_reports": {
+    "closure_ledger": "docs/reports/NEXUS_ANTIGRAVITY_CLOSURE_LEDGER_2026-05-22.json",
+    "context_hub_split_pregate": "docs/reports/NEXUS_CONTEXTHUB_SPLIT_PREGATE_2026-05-22.json",
+    "remaining_prerequisite_gates": "docs/reports/NEXUS_ANTIGRAVITY_REMAINING_PREREQUISITE_GATES_2026-05-22.json",
+    "rlm_recursive_dispatch_gate": "docs/reports/NEXUS_RLM_RECURSIVE_DISPATCH_GATE_2026-05-22.json",
+    "runtime_split_prerequisite_evidence": "docs/reports/NEXUS_ANTIGRAVITY_RUNTIME_SPLIT_PREREQUISITE_EVIDENCE_2026-05-22.json",
+    "signal_collector_split_pregate": "docs/reports/NEXUS_SIGNAL_COLLECTOR_SPLIT_PREGATE_2026-05-22.json"
+  },
+  "remaining_gate_summary": {
+    "approved_count": 6,
+    "deferred_count": 0,
+    "gate_count": 6,
+    "implementation_allowed_count": 6
+  },
+  "runtime_boundary": {
+    "public_benchmark_allowed": false,
+    "runtime_default_change_allowed": false,
+    "runtime_update_allowed_in_remaining_gate_report": false,
+    "zero_trust_v2_modification_allowed": false
+  },
+  "schema": "nexus.antigravity_full_prerequisite_closeout.v1",
+  "status": "PASS",
+  "verification": [
+    {
+      "command": "uv run pytest tests/contracts/test_routing_spec_v2_backlog.py tests/engine/test_rlm_outcome_integration.py tests/app/test_research_flow_service.py tests/engine/test_pipeline_repair.py tests/engine/test_capability_planner.py tests/core/test_context_hub_strict_deps.py tests/ops/test_build_antigravity_nonruntime_gates.py tests/ops/test_build_antigravity_runtime_split_prerequisite_evidence.py tests/ops/test_build_antigravity_remaining_prerequisite_gates.py tests/ops/test_build_antigravity_closure_ledger.py tests/ops/test_build_signal_collector_split_pregate.py -q",
+      "result": "240 passed"
+    },
+    {
+      "command": "uv run python -m py_compile nexus/research/flow/route_decider.py nexus/research/flow/signal_collector.py nexus/research/flow/orchestrator.py nexus/core/context_hub.py nexus/core/context_view.py nexus/engine/pipeline_repair.py nexus/engine/repair/composed_phase_result.py nexus/engine/capability_planner.py nexus/engine/planner/skill_mount_evidence.py scripts/ops/build_antigravity_nonruntime_gates.py scripts/ops/build_antigravity_runtime_split_prerequisite_evidence.py scripts/ops/build_antigravity_remaining_prerequisite_gates.py scripts/ops/build_antigravity_closure_ledger.py scripts/ops/build_signal_collector_split_pregate.py",
+      "result": "pass"
+    },
+    {
+      "command": "uv run scripts/ops/ci_gate.py",
+      "result": "ALL QUALITY GATES PASSED"
+    }
+  ]
+}

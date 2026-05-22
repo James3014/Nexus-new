@@ -14,6 +14,24 @@ from nexus.engine.learning_policy_loader import (
     route_cost_controls_from_env,
     route_cost_controls_for_task,
 )
+from nexus.engine.planner.skill_mount_evidence import runtime_policy_overlay_skill_requests
+
+
+def test_capability_planner_delegates_runtime_policy_overlay_skill_requests_to_split_module():
+    budget = {
+        "runtime_skill_policy_overlay": {
+            "status": "PASS",
+            "primary_skill_by_capability": {"repair": "repair-skill"},
+        }
+    }
+
+    assert CapabilityPlanner._runtime_policy_overlay_skill_requests(
+        budget=budget,
+        selected_capabilities=["repair"],
+    ) == runtime_policy_overlay_skill_requests(
+        budget=budget,
+        selected_capabilities=["repair"],
+    )
 
 
 def test_capability_planner_builds_constrained_composition_trace():

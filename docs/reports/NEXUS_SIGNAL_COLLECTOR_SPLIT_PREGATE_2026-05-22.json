@@ -1,0 +1,83 @@
+{
+  "blockers": [],
+  "caller_import_map": [
+    {
+      "defines_symbol": false,
+      "monkeypatch_or_patch_sensitive": true,
+      "path": "nexus/app/research_flow_service.py",
+      "reference_count": 5
+    },
+    {
+      "defines_symbol": false,
+      "monkeypatch_or_patch_sensitive": false,
+      "path": "nexus/research/flow/route_decider.py",
+      "reference_count": 3
+    },
+    {
+      "defines_symbol": true,
+      "monkeypatch_or_patch_sensitive": false,
+      "path": "nexus/research/flow/signal_collector.py",
+      "reference_count": 1
+    },
+    {
+      "defines_symbol": false,
+      "monkeypatch_or_patch_sensitive": true,
+      "path": "tests/app/test_research_flow_service.py",
+      "reference_count": 8
+    },
+    {
+      "defines_symbol": false,
+      "monkeypatch_or_patch_sensitive": false,
+      "path": "tests/ops/test_build_antigravity_remaining_prerequisite_gates.py",
+      "reference_count": 2
+    },
+    {
+      "defines_symbol": false,
+      "monkeypatch_or_patch_sensitive": true,
+      "path": "tests/ops/test_build_signal_collector_split_pregate.py",
+      "reference_count": 7
+    }
+  ],
+  "decision": "APPROVED",
+  "implementation_allowed": true,
+  "monkeypatch_sensitive_files": [
+    {
+      "defines_symbol": false,
+      "monkeypatch_or_patch_sensitive": true,
+      "path": "nexus/app/research_flow_service.py",
+      "reference_count": 5
+    },
+    {
+      "defines_symbol": false,
+      "monkeypatch_or_patch_sensitive": true,
+      "path": "tests/app/test_research_flow_service.py",
+      "reference_count": 8
+    },
+    {
+      "defines_symbol": false,
+      "monkeypatch_or_patch_sensitive": true,
+      "path": "tests/ops/test_build_signal_collector_split_pregate.py",
+      "reference_count": 7
+    }
+  ],
+  "next_action": "Signal collector split is approved; keep route_decider as compatibility facade.",
+  "public_benchmark_allowed": false,
+  "required_evidence": [
+    "duplicated signal-construction block that can be deleted",
+    "deletion test proving the split removes real duplication or improves injection",
+    "route-decider compatibility rollback path"
+  ],
+  "runtime_update_allowed": false,
+  "schema": "nexus.signal_collector_split_pregate.v1",
+  "status": "PASS",
+  "summary": {
+    "caller_file_count": 5,
+    "definition_count": 1,
+    "deletion_test_present": true,
+    "facade_reexport_present": true,
+    "monkeypatch_sensitive_file_count": 3,
+    "reference_file_count": 6,
+    "split_module_present": true
+  },
+  "zero_trust_v2_modification_allowed": false
+}

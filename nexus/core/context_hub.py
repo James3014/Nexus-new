@@ -4,10 +4,10 @@ import logging
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 from datetime import datetime
-from dataclasses import dataclass
 from nexus.contracts.context_assembly import build_context_assembly_contract
 from nexus.contracts.context_budget import ContextBudgetSource, build_context_budget_receipt
 from nexus.core.context_runtime_adapter import StatelessContextCoordinator
+from nexus.core.context_view import ContextDependencies, StateView
 from nexus.core.state_contracts import NexusDiagnosis, NexusResearch, NexusState
 from nexus.core.state_io import StateIO
 from nexus.services.memory import MemoryService
@@ -17,35 +17,6 @@ from nexus.core.brain_de_entropy import prune_dialogue
 from nexus.core.context_compression import ToonRenderer, ContextScorer
 
 logger = logging.getLogger("nexus.context_hub")
-
-
-@dataclass(frozen=True)
-class StateView:
-    metadata: Dict[str, Any]
-    conversation_metadata: Dict[str, Any] | None = None
-    route_receipts: List[Dict[str, Any]] | None = None
-    report_receipts: List[Dict[str, Any]] | None = None
-
-    def get_conversation_metadata(self) -> Dict[str, Any]:
-        return dict(self.conversation_metadata or {})
-
-    def receipt_summary(self) -> Dict[str, int]:
-        receipts = list(self.route_receipts or []) + list(self.report_receipts or [])
-        return {
-            "selected": sum(1 for item in receipts if isinstance(item, dict) and item.get("selected")),
-            "invoked": sum(1 for item in receipts if isinstance(item, dict) and item.get("invoked")),
-            "evidence": sum(1 for item in receipts if isinstance(item, dict) and item.get("evidence_present")),
-            "gate": sum(1 for item in receipts if isinstance(item, dict) and item.get("gate_passed")),
-        }
-
-
-@dataclass(frozen=True)
-class ContextDependencies:
-    memory_service: Any | None = None
-    wisdom_vault: Any | None = None
-    belief_engine: Any | None = None
-    knowledge_injector: Any | None = None
-    prompt_builder: Any | None = None
 
 class ContextHub:
     """

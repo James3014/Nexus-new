@@ -1,7 +1,9 @@
 import pytest
 from unittest.mock import MagicMock, patch
 import json
-from nexus.engine.pipeline_repair import PipelineRepairMixin, AuditEvalContext
+from nexus.engine.pipeline_repair import ComposedAuditResult, ComposedRepairResult, PipelineRepairMixin, AuditEvalContext
+from nexus.engine.repair.composed_phase_result import ComposedAuditResult as SplitComposedAuditResult
+from nexus.engine.repair.composed_phase_result import ComposedRepairResult as SplitComposedRepairResult
 from nexus.core.state_contracts import NexusState
 
 class MockPipeline(PipelineRepairMixin):
@@ -13,6 +15,20 @@ class MockPipeline(PipelineRepairMixin):
 
     def _register_phase_decision(self, ctx, phase, skill_id):
         return f"dec_{phase.lower()}_mock"
+
+
+def test_pipeline_repair_reexports_split_composed_phase_results():
+    assert ComposedRepairResult is SplitComposedRepairResult
+    assert ComposedAuditResult is SplitComposedAuditResult
+    repair = ComposedRepairResult(
+        status="APPROVED",
+        result_object={"ok": True},
+        mutations={},
+        current_decision_id="d1",
+        current_skill_id="s1",
+    )
+
+    assert repair.status == "APPROVED"
 
 @pytest.fixture
 def mock_ctx():

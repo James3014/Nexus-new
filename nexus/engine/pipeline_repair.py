@@ -13,6 +13,7 @@ from nexus.core.skill_outcomes import build_outcome_event, append_skill_outcome_
 from nexus.learning.cycle_analyzer import analyze_cycle
 from nexus.engine.recursive_repair_loop import RecursiveRepairLoop, recursive_repair_enabled
 from nexus.engine.repair.audit_evaluator import evaluate_audit_result
+from nexus.engine.repair.composed_phase_result import ComposedAuditResult, ComposedRepairResult
 from nexus.engine.repair.escalation_manager import handle_escalation, perform_escalation
 
 logger = logging.getLogger(__name__)
@@ -28,24 +29,6 @@ class AuditEvalContext:
     result_object: dict
     current_decision_id: str
     current_skill_id: str
-
-@dataclass
-class ComposedRepairResult:
-    """Normalized output from a composed R phase."""
-    status: str
-    result_object: dict
-    mutations: dict
-    current_decision_id: str
-    current_skill_id: str
-
-@dataclass
-class ComposedAuditResult:
-    """Normalized output from a composed A phase."""
-    status: str
-    mutations: dict
-    current_decision_id: str
-    current_skill_id: str
-    rejection_reason: str
 
 class PipelineRepairMixin:
     """🛠️ Mixin for Repair/Audit loop logic in NexusPipeline."""

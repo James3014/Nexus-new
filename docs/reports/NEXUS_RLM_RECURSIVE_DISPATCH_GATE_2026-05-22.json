@@ -1,0 +1,24 @@
+{
+  "authorization": "docs/reports/NEXUS_RLM_RECURSIVE_DISPATCH_RUNTIME_AUTHORIZATION_2026-05-22.json",
+  "baseline": "bounded_rlm_receipt_only",
+  "blockers": [],
+  "checked_paths": {
+    "outcome_integration_test": "tests/engine/test_rlm_outcome_integration.py",
+    "rlm_controller": "nexus/engine/rlm_controller.py",
+    "routing_backlog_test": "tests/contracts/test_routing_spec_v2_backlog.py"
+  },
+  "decision": "APPROVED",
+  "max_handoff_count": 1,
+  "max_recursion_depth": 1,
+  "public_benchmark_allowed": false,
+  "recursive_dispatch_allowed": true,
+  "required_evidence": [
+    "budget ceiling and stop reason receipt",
+    "handoff and repair-loop composition receipt",
+    "focused regression for recursive dispatch authorization"
+  ],
+  "runtime_default_change_allowed": false,
+  "runtime_update_allowed": true,
+  "schema": "nexus.rlm_recursive_dispatch_gate.v1",
+  "status": "APPROVED"
+}

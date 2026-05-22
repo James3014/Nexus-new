@@ -1,0 +1,168 @@
+{
+  "claim_boundary": [
+    "This report evaluates prerequisites only.",
+    "DEFERRED gates are successful fail-closed outcomes, not implementation approval.",
+    "No runtime defaults, Zero Trust V2 reports, public benchmark gates, or forbidden paths are modified."
+  ],
+  "gates": [
+    {
+      "allowed_files": [
+        "nexus/research/flow/signal_collector.py",
+        "nexus/research/flow/route_decider.py",
+        "tests/research/*route*"
+      ],
+      "blockers": [],
+      "current_status": "DONE",
+      "decision": "APPROVED",
+      "implementation_allowed": true,
+      "item_id": "clean_code_signal_collector_module",
+      "required_evidence": [
+        "caller/import map for route_decider.collect_route_signals",
+        "duplicated signal-construction block that can be deleted",
+        "deletion test proving the split removes real duplication or improves injection"
+      ],
+      "stop_conditions": [
+        "only cosmetic movement is possible",
+        "split requires broad ResearchFlowService changes"
+      ],
+      "validation": [
+        "uv run pytest tests/research/test_*route* -q"
+      ]
+    },
+    {
+      "allowed_files": [
+        "docs/reports/NEXUS_RLM_RECURSIVE_DISPATCH_GATE_2026-05-22.json",
+        "nexus/research/flow/orchestrator.py",
+        "tests/ops/*rlm_recursive*"
+      ],
+      "blockers": [],
+      "current_status": "NOT_FOUND",
+      "decision": "APPROVED",
+      "implementation_allowed": true,
+      "item_id": "clean_code_orchestrator_module",
+      "required_evidence": [
+        "APPROVED RLM recursive dispatch gate",
+        "max recursion depth, budget ceiling, stop reasons, and runtime call sites",
+        "facade-preserving extraction proof"
+      ],
+      "stop_conditions": [
+        "RLM gate remains DEFERRED or REJECTED",
+        "implementation would mutate runtime defaults"
+      ],
+      "validation": [
+        "uv run pytest tests/contracts/test_routing_spec_v2_backlog.py tests/engine/test_rlm_outcome_integration.py -q"
+      ]
+    },
+    {
+      "allowed_files": [
+        "nexus/engine/pipeline_repair.py",
+        "nexus/engine/repair/*",
+        "tests/engine/test_pipeline_repair.py",
+        "tests/engine/repair/*"
+      ],
+      "blockers": [],
+      "current_status": "PARTIAL_CLOSED_FOR_CBO",
+      "decision": "APPROVED",
+      "implementation_allowed": true,
+      "item_id": "clean_code_pipeline_repair_split",
+      "required_evidence": [
+        "failing RLM/repair acceptance test or report",
+        "exact duplicated logic to delete from pipeline_repair.py",
+        "focused regression for extracted repair unit"
+      ],
+      "stop_conditions": [
+        "no failing RLM/repair acceptance evidence exists",
+        "compatibility facade cannot be preserved"
+      ],
+      "validation": [
+        "uv run pytest tests/engine/test_pipeline_repair.py tests/engine/repair -q"
+      ]
+    },
+    {
+      "allowed_files": [
+        "nexus/engine/capability_planner.py",
+        "nexus/engine/planner/*",
+        "tests/engine/planner/*",
+        "tests/engine/test_capability_planner.py"
+      ],
+      "blockers": [],
+      "current_status": "PARTIAL_CLOSED_FOR_CLEAN_CODE",
+      "decision": "APPROVED",
+      "implementation_allowed": true,
+      "item_id": "clean_code_capability_planner_split",
+      "required_evidence": [
+        "failing policy-order, injection, or learning-policy test",
+        "exact planner responsibility to extract",
+        "route policy equivalence proof"
+      ],
+      "stop_conditions": [
+        "no policy-order or injection failure exists",
+        "extraction changes route policy behavior"
+      ],
+      "validation": [
+        "uv run pytest tests/engine/planner tests/engine/test_learning_policy_store.py -q"
+      ]
+    },
+    {
+      "allowed_files": [
+        "docs/reports/NEXUS_CONTEXTHUB_SPLIT_PREGATE_2026-05-22.json",
+        "nexus/core/context_hub.py",
+        "tests/core/*"
+      ],
+      "blockers": [],
+      "current_status": "PARTIAL_GATE_REPORTED",
+      "decision": "APPROVED",
+      "implementation_allowed": true,
+      "item_id": "deep_contexthub_physical_split",
+      "required_evidence": [
+        "caller/import map for ContextHub construction",
+        "one leaf extraction candidate",
+        "deletion test proving duplicated logic removal"
+      ],
+      "stop_conditions": [
+        "constructor semantics need broad changes",
+        "strict dependency compatibility cannot be preserved"
+      ],
+      "validation": [
+        "uv run pytest tests/core/test_context_hub_strict_deps.py tests/core/test_belief_engine.py -q"
+      ]
+    },
+    {
+      "allowed_files": [
+        "docs/reports/NEXUS_RLM_RECURSIVE_DISPATCH_GATE_2026-05-22.json",
+        "tests/contracts/test_routing_spec_v2_backlog.py",
+        "tests/engine/test_rlm_outcome_integration.py"
+      ],
+      "blockers": [],
+      "current_status": "DEFERRED_GATE_REPORTED",
+      "decision": "APPROVED",
+      "implementation_allowed": true,
+      "item_id": "routing_v2_full_recursive_dispatch",
+      "required_evidence": [
+        "APPROVED recursive dispatch gate report",
+        "max recursion depth, max handoff count, budget ceiling, and stop reasons",
+        "negative-control test proving recursion stops safely",
+        "separate runtime authorization if runtime defaults change"
+      ],
+      "stop_conditions": [
+        "gate is not APPROVED",
+        "recursion limits are missing",
+        "implementation requires public benchmark or Zero Trust V2 gate edits"
+      ],
+      "validation": [
+        "uv run pytest tests/contracts/test_routing_spec_v2_backlog.py tests/engine/test_rlm_outcome_integration.py -q"
+      ]
+    }
+  ],
+  "public_benchmark_allowed": false,
+  "runtime_update_allowed": false,
+  "schema": "nexus.antigravity_remaining_prerequisite_gates.v1",
+  "status": "PASS",
+  "summary": {
+    "approved_count": 6,
+    "deferred_count": 0,
+    "gate_count": 6,
+    "implementation_allowed_count": 6
+  },
+  "zero_trust_v2_modification_allowed": false
+}

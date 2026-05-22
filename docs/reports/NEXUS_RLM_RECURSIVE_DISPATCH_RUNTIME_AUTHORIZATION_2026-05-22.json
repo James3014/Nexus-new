@@ -1,0 +1,25 @@
+{
+  "authorized_by": "user_goal_2026-05-22",
+  "budget_ceiling": {
+    "max_handoff_count": 1,
+    "max_recursion_depth": 1,
+    "max_repair_attempts": 1
+  },
+  "claim_boundary": [
+    "This authorizes implementation of a bounded recursive dispatch gate only.",
+    "Runtime defaults must stay disabled until a separate post-implementation smoke passes.",
+    "Public benchmark claims remain locked."
+  ],
+  "public_benchmark_allowed": false,
+  "rollback": "restore bounded_rlm_receipt_only behavior and set recursive_dispatch_allowed=false",
+  "runtime_default_change_allowed": false,
+  "runtime_update_allowed": true,
+  "schema": "nexus.rlm_recursive_dispatch_runtime_authorization.v1",
+  "status": "APPROVED",
+  "stop_reasons": [
+    "budget_exhausted",
+    "gate_passed",
+    "low_belief",
+    "handoff_limit_reached"
+  ]
+}

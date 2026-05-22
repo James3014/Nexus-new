@@ -1,0 +1,914 @@
+{
+  "claim_class": "PLAN_ONLY",
+  "forbidden_patterns": [
+    ".obsidian/",
+    "benchmarks/",
+    "logs/",
+    "nexus_swarm/",
+    "packages/",
+    "ZERO_TRUST",
+    "zero_trust"
+  ],
+  "next_recommended_slice": {
+    "id": "P9",
+    "name": "Select narrow integration call sites",
+    "reason": "all non-runtime plan slices now have adapters or fail-closed gate reports"
+  },
+  "performance_improvement_claim_allowed": false,
+  "public_benchmark_allowed": false,
+  "retrieved_lessons": [
+    {
+      "lesson": "report-retention cleanup should avoid git index mutation unless explicitly staging or committing",
+      "plan_effect": "this ledger writes reports only and performs no git operations",
+      "source": "nexus_wiki_vault/06_Ops/Ops - Learning Closure Matrix.md"
+    },
+    {
+      "lesson": "empty output-dir must normalize to no override before resolving report outputs",
+      "plan_effect": "the CLI treats empty string and dot output-dir as None",
+      "source": "nexus_wiki_vault/06_Ops/Ops - Learning Closure Matrix.md"
+    },
+    {
+      "lesson": "full RLM recursive dispatch remains a separate authorization gate",
+      "plan_effect": "recursive dispatch is classified DEFERRED_BY_GATE",
+      "source": "docs/plans/NEXUS_OPTIMIZATION_PLAN_CONTEXT_LEARNING_HARNESS_2026-05-19.md"
+    },
+    {
+      "lesson": "closure ledger probes should avoid brittle full-sentence matches",
+      "plan_effect": "evidence probes use stable symbols or short independent tokens",
+      "source": "nexus_wiki_vault/06_Ops/Ops - Learning Closure Matrix.md"
+    }
+  ],
+  "rows": [
+    {
+      "all_evidence_matched": true,
+      "evidence": [
+        {
+          "contains": [
+            "OutcomeMemoryManager",
+            "EpisodeOutcomeRecord"
+          ],
+          "exists": true,
+          "matched": true,
+          "path": "nexus/learning/outcome_memory.py"
+        },
+        {
+          "contains": [
+            "OutcomeMemoryManager",
+            "save_episode_and_tune_sync"
+          ],
+          "exists": true,
+          "matched": true,
+          "path": "nexus/app/research_flow_service.py"
+        },
+        {
+          "contains": [
+            "OutcomeMemoryManager"
+          ],
+          "exists": true,
+          "matched": true,
+          "path": "tests/engine/test_rlm_outcome_integration.py"
+        }
+      ],
+      "evidence_note": "",
+      "item_id": "routing_v2_outcome_memory_writeback",
+      "recommendation": "OutcomeMemory automatic episode writeback and dynamic policy tuning.",
+      "source": "nexus_routing_spec_v2.md",
+      "status": "DONE",
+      "successor_action": "Preserve current writeback and focused tests."
+    },
+    {
+      "all_evidence_matched": true,
+      "evidence": [
+        {
+          "contains": [
+            "RlmController",
+            "build_bounded_rlm_orchestration_receipt"
+          ],
+          "exists": true,
+          "matched": true,
+          "path": "nexus/engine/rlm_controller.py"
+        },
+        {
+          "contains": [
+            "IMPLEMENTED_AS_BOUNDED_ADAPTER",
+            "full_recursive_dispatch_requires_separate_runtime_authorization"
+          ],
+          "exists": true,
+          "matched": true,
+          "path": "tests/contracts/test_routing_spec_v2_backlog.py"
+        }
+      ],
+      "evidence_note": "",
+      "item_id": "routing_v2_bounded_rlm_receipt",
+      "recommendation": "RLM X/R-loop budget receipts before recursive runtime dispatch.",
+      "source": "nexus_routing_spec_v2.md",
+      "status": "DONE",
+      "successor_action": "Keep as bounded adapter until a separate runtime gate authorizes recursion."
+    },
+    {
+      "all_evidence_matched": true,
+      "evidence": [
+        {
+          "contains": [
+            "Full recursive dispatch remains a separate authorization gate"
+          ],
+          "exists": true,
+          "matched": true,
+          "path": "docs/plans/NEXUS_OPTIMIZATION_PLAN_CONTEXT_LEARNING_HARNESS_2026-05-19.md"
+        },
+        {
+          "contains": [
+            "full recursive dispatch remains a separate runtime authorization gate"
+          ],
+          "exists": true,
+          "matched": true,
+          "path": "docs/plans/NEXUS_OPTIMIZATION_CONTRACT_AND_RETENTION_2026-05-19.md"
+        },
+        {
+          "contains": [
+            "APPROVED",
+            "max_recursion_depth"
+          ],
+          "exists": true,
+          "matched": true,
+          "path": "docs/reports/NEXUS_RLM_RECURSIVE_DISPATCH_GATE_2026-05-22.json"
+        }
+      ],
+      "evidence_note": "",
+      "item_id": "routing_v2_full_recursive_dispatch",
+      "recommendation": "Full ResearchFlowService X-loop/R-loop recursive runtime orchestration.",
+      "source": "nexus_routing_spec_v2.md",
+      "status": "APPROVED_BOUNDED_GATE_REPORTED",
+      "successor_action": "Keep runtime defaults locked; bounded implementation gate is approved."
+    },
+    {
+      "all_evidence_matched": true,
+      "evidence": [
+        {
+          "contains": [
+            "collect_route_signals",
+            "decide_flow"
+          ],
+          "exists": true,
+          "matched": true,
+          "path": "nexus/research/flow/route_decider.py"
+        },
+        {
+          "contains": [
+            "route_decider"
+          ],
+          "exists": true,
+          "matched": true,
+          "path": "nexus/app/research_flow_service.py"
+        }
+      ],
+      "evidence_note": "",
+      "item_id": "clean_code_route_decider_extraction",
+      "recommendation": "Extract research route decisions from ResearchFlowService.",
+      "source": "NEXUS_CLEAN_CODE_AUDIT_REPORT.md",
+      "status": "DONE",
+      "successor_action": "Preserve compatibility wrapper and monkeypatch-sensitive tests."
+    },
+    {
+      "all_evidence_matched": true,
+      "evidence": [
+        {
+          "contains": [
+            "build_research_context",
+            "write_msa_receipt_reports"
+          ],
+          "exists": true,
+          "matched": true,
+          "path": "nexus/research/flow/evidence_packer.py"
+        },
+        {
+          "contains": [
+            "evidence_packer"
+          ],
+          "exists": true,
+          "matched": true,
+          "path": "nexus/app/research_flow_service.py"
+        }
+      ],
+      "evidence_note": "",
+      "item_id": "clean_code_evidence_packer_extraction",
+      "recommendation": "Extract research evidence packing from ResearchFlowService.",
+      "source": "NEXUS_CLEAN_CODE_AUDIT_REPORT.md",
+      "status": "DONE",
+      "successor_action": "Preserve current evidence read-model fields."
+    },
+    {
+      "all_evidence_matched": true,
+      "evidence": [
+        {
+          "contains": [
+            "collect_route_signals",
+            "RouteSignals"
+          ],
+          "exists": true,
+          "matched": true,
+          "path": "nexus/research/flow/signal_collector.py"
+        },
+        {
+          "contains": [
+            "signal_collector",
+            "collect_route_signals"
+          ],
+          "exists": true,
+          "matched": true,
+          "path": "nexus/research/flow/route_decider.py"
+        },
+        {
+          "contains": [
+            "test_route_decider_reexports_split_signal_collector_contracts"
+          ],
+          "exists": true,
+          "matched": true,
+          "path": "tests/app/test_research_flow_service.py"
+        }
+      ],
+      "evidence_note": "Signal collection is extracted into signal_collector.py with route_decider reexport compatibility.",
+      "item_id": "clean_code_signal_collector_module",
+      "recommendation": "Create a dedicated flow/signal_collector.py module.",
+      "source": "NEXUS_CLEAN_CODE_AUDIT_REPORT.md",
+      "status": "DONE",
+      "successor_action": "Preserve route_decider compatibility facade and reexport test."
+    },
+    {
+      "all_evidence_matched": true,
+      "evidence": [
+        {
+          "contains": [],
+          "exists": true,
+          "matched": true,
+          "path": "nexus/research/flow/orchestrator.py"
+        }
+      ],
+      "evidence_note": "",
+      "item_id": "clean_code_orchestrator_module",
+      "recommendation": "Create a dedicated flow/orchestrator.py module for R/X-loop orchestration.",
+      "source": "NEXUS_CLEAN_CODE_AUDIT_REPORT.md",
+      "status": "DONE_BOUNDED_POLICY_READY",
+      "successor_action": "Keep runtime defaults locked until post-implementation smoke explicitly promotes them."
+    },
+    {
+      "all_evidence_matched": true,
+      "evidence": [
+        {
+          "contains": [
+            "evaluate_audit_result"
+          ],
+          "exists": true,
+          "matched": true,
+          "path": "nexus/engine/repair/audit_evaluator.py"
+        },
+        {
+          "contains": [
+            "handle_escalation"
+          ],
+          "exists": true,
+          "matched": true,
+          "path": "nexus/engine/repair/escalation_manager.py"
+        },
+        {
+          "contains": [],
+          "exists": true,
+          "matched": true,
+          "path": "nexus/engine/pipeline_repair.py"
+        },
+        {
+          "contains": [
+            "pipeline_repair.py",
+            "large legacy facade"
+          ],
+          "exists": true,
+          "matched": true,
+          "path": "docs/plans/NEXUS_CODEBASE_OPTIMIZATION_TASK_PLAN_2026-05-20.md"
+        }
+      ],
+      "evidence_note": "",
+      "item_id": "clean_code_pipeline_repair_split",
+      "recommendation": "Split pipeline repair audit evaluation and escalation management.",
+      "source": "NEXUS_CLEAN_CODE_AUDIT_REPORT.md",
+      "status": "PARTIAL_CLOSED_FOR_CBO",
+      "successor_action": "Reopen only under a failing RLM/repair acceptance gate."
+    },
+    {
+      "all_evidence_matched": true,
+      "evidence": [
+        {
+          "contains": [
+            "build_decision_trace"
+          ],
+          "exists": true,
+          "matched": true,
+          "path": "nexus/engine/planner/ab_evaluator.py"
+        },
+        {
+          "contains": [
+            "apply_learning_policy"
+          ],
+          "exists": true,
+          "matched": true,
+          "path": "nexus/engine/planner/policy_applier.py"
+        },
+        {
+          "contains": [
+            "LearningPolicyStore"
+          ],
+          "exists": true,
+          "matched": true,
+          "path": "nexus/engine/learning_policy_store.py"
+        },
+        {
+          "contains": [],
+          "exists": true,
+          "matched": true,
+          "path": "nexus/engine/capability_planner.py"
+        }
+      ],
+      "evidence_note": "",
+      "item_id": "clean_code_capability_planner_split",
+      "recommendation": "Split capability planner A/B evaluation and policy application.",
+      "source": "NEXUS_CLEAN_CODE_AUDIT_REPORT.md",
+      "status": "PARTIAL_CLOSED_FOR_CLEAN_CODE",
+      "successor_action": "Do not split further unless policy order or test injection requires it."
+    },
+    {
+      "all_evidence_matched": true,
+      "evidence": [
+        {
+          "contains": [
+            "CC-8 Root Script Cleanup Result",
+            "moved `0` files"
+          ],
+          "exists": true,
+          "matched": true,
+          "path": "docs/plans/NEXUS_CLEAN_CODE_REFACTOR_TASK_PLAN_2026-05-20.md"
+        },
+        {
+          "contains": [],
+          "exists": true,
+          "matched": true,
+          "path": "docs/reports/NEXUS_CLEAN_CODE_ROOT_CLEANUP_SAFETY_REVIEW_2026-05-20.md"
+        }
+      ],
+      "evidence_note": "",
+      "item_id": "clean_code_root_cleanup",
+      "recommendation": "Move or clean root scripts and loose entrypoints.",
+      "source": "NEXUS_CLEAN_CODE_AUDIT_REPORT.md",
+      "status": "DONE_WITH_ZERO_MOVES",
+      "successor_action": "Future movement needs compatibility wrappers and owner review."
+    },
+    {
+      "all_evidence_matched": true,
+      "evidence": [
+        {
+          "contains": [
+            "fcntl.flock",
+            "os.replace",
+            "fsync"
+          ],
+          "exists": true,
+          "matched": true,
+          "path": "nexus/infrastructure/state_json_store.py"
+        },
+        {
+          "contains": [
+            "StateJsonStore"
+          ],
+          "exists": true,
+          "matched": true,
+          "path": "nexus/core/belief_engine.py"
+        }
+      ],
+      "evidence_note": "",
+      "item_id": "cbo_belief_state_atomic_write",
+      "recommendation": "Make belief_state.json writes atomic and locked.",
+      "source": "NEXUS_CODEBASE_OPTIMIZATION_PLAN.md",
+      "status": "DONE",
+      "successor_action": "Preserve StateJsonStore."
+    },
+    {
+      "all_evidence_matched": true,
+      "evidence": [
+        {
+          "contains": [
+            "FindingsFileStore"
+          ],
+          "exists": true,
+          "matched": true,
+          "path": "nexus/research/findings_store.py"
+        },
+        {
+          "contains": [
+            "MemoryRepositoryFindingsVectorSync"
+          ],
+          "exists": true,
+          "matched": true,
+          "path": "nexus/research/findings_vector_sync.py"
+        },
+        {
+          "contains": [
+            "FindingsFileStore",
+            "vector_sync"
+          ],
+          "exists": true,
+          "matched": true,
+          "path": "nexus/research/findings_memory.py"
+        }
+      ],
+      "evidence_note": "",
+      "item_id": "cbo_findings_vector_split",
+      "recommendation": "Decouple findings-card persistence from vector sync.",
+      "source": "NEXUS_CODEBASE_OPTIMIZATION_PLAN.md",
+      "status": "DONE",
+      "successor_action": "Keep vector sync injectable and persistence file-first."
+    },
+    {
+      "all_evidence_matched": true,
+      "evidence": [
+        {
+          "contains": [
+            "ScopedMemoryRepositoryRegistry"
+          ],
+          "exists": true,
+          "matched": true,
+          "path": "nexus/services/memory_repository_lifecycle.py"
+        },
+        {
+          "contains": [
+            "ScopedMemoryRepositoryRegistry"
+          ],
+          "exists": true,
+          "matched": true,
+          "path": "tests/services/test_memory_repository_lifecycle.py"
+        }
+      ],
+      "evidence_note": "",
+      "item_id": "cbo_scoped_lancedb_lifecycle",
+      "recommendation": "Reuse LanceDB/retrieval repository lifecycle without hidden globals.",
+      "source": "NEXUS_CODEBASE_OPTIMIZATION_PLAN.md",
+      "status": "DONE",
+      "successor_action": "Use ScopedMemoryRepositoryRegistry for local registry-like work."
+    },
+    {
+      "all_evidence_matched": true,
+      "evidence": [
+        {
+          "contains": [
+            "GuardedFetcher",
+            "GuardedFetchError"
+          ],
+          "exists": true,
+          "matched": true,
+          "path": "nexus/infrastructure/guarded_fetch.py"
+        },
+        {
+          "contains": [
+            "GuardedFetcher"
+          ],
+          "exists": true,
+          "matched": true,
+          "path": "nexus/research/doc_scout_adapter.py"
+        },
+        {
+          "contains": [
+            "blocks_private"
+          ],
+          "exists": true,
+          "matched": true,
+          "path": "tests/contracts/test_network_fetch_guard.py"
+        }
+      ],
+      "evidence_note": "",
+      "item_id": "cbo_guarded_fetch",
+      "recommendation": "Guard remote source refresh paths from SSRF, unsafe redirects, and private targets.",
+      "source": "NEXUS_CODEBASE_OPTIMIZATION_PLAN.md",
+      "status": "DONE_FOR_SOURCE_REFRESH_PATHS",
+      "successor_action": "Extend only after a new unguarded fetch call site is identified."
+    },
+    {
+      "all_evidence_matched": true,
+      "evidence": [
+        {
+          "contains": [
+            "RetrievalQuery"
+          ],
+          "exists": true,
+          "matched": true,
+          "path": "nexus/contracts/retrieval_query.py"
+        },
+        {
+          "contains": [
+            "build_retrieval_query"
+          ],
+          "exists": true,
+          "matched": true,
+          "path": "tests/contracts/test_retrieval_query.py"
+        }
+      ],
+      "evidence_note": "",
+      "item_id": "cbo_retrieval_query_guard",
+      "recommendation": "Add typed retrieval query sanitizer and receipt.",
+      "source": "NEXUS_CODEBASE_OPTIMIZATION_PLAN.md",
+      "status": "DONE",
+      "successor_action": "Keep query-shape safety separate from relevance claims."
+    },
+    {
+      "all_evidence_matched": true,
+      "evidence": [
+        {
+          "contains": [
+            "HistorySignalStore",
+            "max_entries",
+            "max_bytes"
+          ],
+          "exists": true,
+          "matched": true,
+          "path": "nexus/research/flow/history_signal_store.py"
+        },
+        {
+          "contains": [
+            "HistorySignalStore"
+          ],
+          "exists": true,
+          "matched": true,
+          "path": "tests/research/test_history_signal_store.py"
+        }
+      ],
+      "evidence_note": "",
+      "item_id": "cbo_history_signal_store",
+      "recommendation": "Bound auto-flow-history reads and avoid unbounded route memory ingestion.",
+      "source": "NEXUS_CODEBASE_OPTIMIZATION_PLAN.md",
+      "status": "DONE_FAIL_CLOSED",
+      "successor_action": "Add rollup writer only as a later evidence-preserving successor."
+    },
+    {
+      "all_evidence_matched": true,
+      "evidence": [
+        {
+          "contains": [
+            "ContextDependencies",
+            "strict_deps"
+          ],
+          "exists": true,
+          "matched": true,
+          "path": "nexus/core/context_hub.py"
+        },
+        {
+          "contains": [
+            "StatelessContextCoordinator"
+          ],
+          "exists": true,
+          "matched": true,
+          "path": "nexus/core/context_runtime_adapter.py"
+        },
+        {
+          "contains": [
+            "strict_deps",
+            "StatelessContextCoordinator"
+          ],
+          "exists": true,
+          "matched": true,
+          "path": "tests/core/test_context_hub_strict_deps.py"
+        }
+      ],
+      "evidence_note": "",
+      "item_id": "deep_context_dependencies_strict_mode",
+      "recommendation": "Make ContextHub dependency injection strict and stateless-coordinator compatible.",
+      "source": "NEXUS_OPT_DEEP_VULNERABILITY_AUDIT.md",
+      "status": "DONE",
+      "successor_action": "Preserve strict deps and runtime adapter seams."
+    },
+    {
+      "all_evidence_matched": false,
+      "evidence": [
+        {
+          "contains": [
+            "class ContextHub"
+          ],
+          "exists": true,
+          "matched": true,
+          "path": "nexus/core/context_hub.py"
+        },
+        {
+          "contains": [
+            "P8 - ContextHub Physical Split Pregate"
+          ],
+          "exists": true,
+          "matched": true,
+          "path": "docs/plans/NEXUS_ANTIGRAVITY_CLOSURE_AND_DECOUPLED_SWARM_PLAN_2026-05-22.md"
+        },
+        {
+          "contains": [
+            "physical_split_requires_caller_map_and_deletion_tests"
+          ],
+          "exists": true,
+          "matched": false,
+          "path": "docs/reports/NEXUS_CONTEXTHUB_SPLIT_PREGATE_2026-05-22.json"
+        }
+      ],
+      "evidence_note": "Strict deps exist, but ContextHub remains the compatibility facade.",
+      "item_id": "deep_contexthub_physical_split",
+      "recommendation": "Physically split ContextHub into smaller deep modules.",
+      "source": "NEXUS_OPT_DEEP_VULNERABILITY_AUDIT.md",
+      "status": "PARTIAL_GATE_REPORTED",
+      "successor_action": "Keep ContextHub as compatibility facade until caller map and deletion tests are green."
+    },
+    {
+      "all_evidence_matched": true,
+      "evidence": [
+        {
+          "contains": [
+            "sha256",
+            "seal"
+          ],
+          "exists": true,
+          "matched": true,
+          "path": "nexus/contracts/evidence_sealing.py"
+        },
+        {
+          "contains": [
+            "tamper"
+          ],
+          "exists": true,
+          "matched": true,
+          "path": "tests/contracts/test_evidence_sealing.py"
+        }
+      ],
+      "evidence_note": "",
+      "item_id": "deep_evidence_sealing_contract",
+      "recommendation": "Hash-seal evidence records.",
+      "source": "NEXUS_OPT_DEEP_VULNERABILITY_AUDIT.md",
+      "status": "DONE",
+      "successor_action": "Use as primitive for the runtime read barrier."
+    },
+    {
+      "all_evidence_matched": true,
+      "evidence": [
+        {
+          "contains": [
+            "seal"
+          ],
+          "exists": true,
+          "matched": true,
+          "path": "nexus/contracts/evidence_sealing.py"
+        },
+        {
+          "contains": [
+            "UnsealedEvidenceError",
+            "claim_read_allowed",
+            "partial_telemetry_detected"
+          ],
+          "exists": true,
+          "matched": true,
+          "path": "nexus/contracts/evidence_sealing_barrier.py"
+        },
+        {
+          "contains": [
+            "UnsealedEvidenceError",
+            "tampered"
+          ],
+          "exists": true,
+          "matched": true,
+          "path": "tests/contracts/test_evidence_sealing_barrier.py"
+        }
+      ],
+      "evidence_note": "A contract-level barrier exists; broad claim-reader integration remains a separate narrow call-site task.",
+      "item_id": "deep_evidence_sealing_runtime_barrier",
+      "recommendation": "Block claim reads from unsealed evidence with an explicit barrier.",
+      "source": "NEXUS_OPT_DEEP_VULNERABILITY_AUDIT.md",
+      "status": "DONE_CONTRACT_BARRIER",
+      "successor_action": "Integrate into a concrete claim/report reader only after a narrow call site is selected."
+    },
+    {
+      "all_evidence_matched": true,
+      "evidence": [
+        {
+          "contains": [
+            "FaultTolerantASTSnapshot",
+            "UNPARSABLE_HOTSPOT",
+            "stores_source_text"
+          ],
+          "exists": true,
+          "matched": true,
+          "path": "nexus/services/codeintel/fault_tolerant_ast_snapshot.py"
+        },
+        {
+          "contains": [
+            "used_last_known_good",
+            "UNPARSABLE_HOTSPOT"
+          ],
+          "exists": true,
+          "matched": true,
+          "path": "tests/nexus/codeintel/test_fault_tolerant_ast_snapshot.py"
+        },
+        {
+          "contains": [
+            "Skeleton"
+          ],
+          "exists": true,
+          "matched": true,
+          "path": "nexus/services/codeintel/skeleton_provider.py"
+        }
+      ],
+      "evidence_note": "A bounded snapshot adapter now wraps the existing skeleton provider without broad caller migration.",
+      "item_id": "deep_fault_tolerant_ast_snapshot",
+      "recommendation": "Add last-known-good AST snapshot fallback for parse-noise resilience.",
+      "source": "NEXUS_OPT_DEEP_VULNERABILITY_AUDIT.md",
+      "status": "DONE_ADAPTER_READY",
+      "successor_action": "Integrate only through existing CodeIntel skeleton callers after a narrow caller map."
+    },
+    {
+      "all_evidence_matched": true,
+      "evidence": [
+        {
+          "contains": [
+            "SQLiteRetryHandler",
+            "is_retryable_sqlite_busy"
+          ],
+          "exists": true,
+          "matched": true,
+          "path": "nexus/infrastructure/sqlite_retry.py"
+        },
+        {
+          "contains": [
+            "sqlite_busy_retry_exhausted",
+            "sqlite_error_not_retryable"
+          ],
+          "exists": true,
+          "matched": true,
+          "path": "tests/infrastructure/test_sqlite_retry.py"
+        },
+        {
+          "contains": [
+            "sqlite"
+          ],
+          "exists": true,
+          "matched": true,
+          "path": "nexus/contracts/sqlite_write_guard.py"
+        }
+      ],
+      "evidence_note": "A reusable bounded retry adapter exists; broad service integration remains a separate narrow call-site task.",
+      "item_id": "deep_sqlite_retry_handler",
+      "recommendation": "Add jittered SQLite busy retry handler for concurrent writes.",
+      "source": "NEXUS_OPT_DEEP_VULNERABILITY_AUDIT.md",
+      "status": "DONE_ADAPTER_READY",
+      "successor_action": "Integrate into one SQLite-backed service only after selecting a narrow write path."
+    },
+    {
+      "all_evidence_matched": true,
+      "evidence": [],
+      "evidence_note": "Direct Swarm/NSP/Go sidecar work is outside the current allowed path boundary.",
+      "item_id": "swarm_direct_sidecar_registry_nsp",
+      "recommendation": "Implement Go Swarm Sidecar Webhook, Registry Board 2.0, and NSP v0.2 directly.",
+      "source": "NEXUS_SWARM_DECOUPLED_SPEC.md",
+      "status": "FORBIDDEN_DIRECT",
+      "successor_action": "Do not touch nexus_swarm; translate only into local simulation seams."
+    },
+    {
+      "all_evidence_matched": true,
+      "evidence": [
+        {
+          "contains": [
+            "build_local_gateway_receipt",
+            "circuit_open"
+          ],
+          "exists": true,
+          "matched": true,
+          "path": "nexus/contracts/local_gateway.py"
+        },
+        {
+          "contains": [
+            "private_network_targets"
+          ],
+          "exists": true,
+          "matched": true,
+          "path": "tests/contracts/test_antigravity_local_simulation_contracts.py"
+        }
+      ],
+      "evidence_note": "",
+      "item_id": "swarm_local_gateway",
+      "recommendation": "Translate sidecar request governance into a local gateway contract.",
+      "source": "NEXUS_SWARM_DECOUPLED_SPEC.md",
+      "status": "DONE_CONTRACT_READY",
+      "successor_action": "Integrate only after a real unguarded provider/tool call site is identified."
+    },
+    {
+      "all_evidence_matched": true,
+      "evidence": [
+        {
+          "contains": [
+            "build_local_memory_hub_snapshot",
+            "mutable_global_singleton"
+          ],
+          "exists": true,
+          "matched": true,
+          "path": "nexus/contracts/local_memory_hub.py"
+        },
+        {
+          "contains": [
+            "local_memory_hub"
+          ],
+          "exists": true,
+          "matched": true,
+          "path": "tests/contracts/test_antigravity_local_simulation_contracts.py"
+        }
+      ],
+      "evidence_note": "",
+      "item_id": "swarm_local_memory_hub",
+      "recommendation": "Translate Registry Board 2.0 into local capability and health snapshots.",
+      "source": "NEXUS_SWARM_DECOUPLED_SPEC.md",
+      "status": "DONE_CONTRACT_READY",
+      "successor_action": "Wire into route receipts only after selecting stable read-only inputs."
+    },
+    {
+      "all_evidence_matched": true,
+      "evidence": [
+        {
+          "contains": [
+            "LocalEventPipeline",
+            "unsealed_evidence_event_blocked"
+          ],
+          "exists": true,
+          "matched": true,
+          "path": "nexus/contracts/local_event_pipeline.py"
+        },
+        {
+          "contains": [
+            "preserves_order"
+          ],
+          "exists": true,
+          "matched": true,
+          "path": "tests/contracts/test_antigravity_local_simulation_contracts.py"
+        }
+      ],
+      "evidence_note": "",
+      "item_id": "swarm_local_event_pipeline",
+      "recommendation": "Translate NSP v0.2 streaming semantics into local async event envelopes.",
+      "source": "NEXUS_SWARM_DECOUPLED_SPEC.md",
+      "status": "DONE_CONTRACT_READY",
+      "successor_action": "Keep in-memory and test-only until runtime authorization exists."
+    }
+  ],
+  "runtime_update_allowed": false,
+  "schema": "nexus.antigravity_closure_ledger.v1",
+  "source_files": [
+    {
+      "exists": true,
+      "name": "NEXUS_OPT_DEEP_VULNERABILITY_AUDIT.md",
+      "path": "/Users/jameschen/.gemini/antigravity/brain/aff9416a-04e7-48d5-9b10-85410ef6b790/NEXUS_OPT_DEEP_VULNERABILITY_AUDIT.md"
+    },
+    {
+      "exists": true,
+      "name": "nexus_routing_spec_v2.md",
+      "path": "/Users/jameschen/.gemini/antigravity/brain/aff9416a-04e7-48d5-9b10-85410ef6b790/nexus_routing_spec_v2.md"
+    },
+    {
+      "exists": true,
+      "name": "NEXUS_CLEAN_CODE_AUDIT_REPORT.md",
+      "path": "/Users/jameschen/.gemini/antigravity/brain/aff9416a-04e7-48d5-9b10-85410ef6b790/NEXUS_CLEAN_CODE_AUDIT_REPORT.md"
+    },
+    {
+      "exists": true,
+      "name": "NEXUS_CODEBASE_OPTIMIZATION_PLAN.md",
+      "path": "/Users/jameschen/.gemini/antigravity/brain/aff9416a-04e7-48d5-9b10-85410ef6b790/NEXUS_CODEBASE_OPTIMIZATION_PLAN.md"
+    },
+    {
+      "exists": true,
+      "name": "NEXUS_REMAINING_DEBT_BACKLOG.md",
+      "path": "/Users/jameschen/.gemini/antigravity/brain/aff9416a-04e7-48d5-9b10-85410ef6b790/NEXUS_REMAINING_DEBT_BACKLOG.md"
+    },
+    {
+      "exists": true,
+      "name": "NEXUS_SWARM_DECOUPLED_SPEC.md",
+      "path": "/Users/jameschen/.gemini/antigravity/brain/aff9416a-04e7-48d5-9b10-85410ef6b790/NEXUS_SWARM_DECOUPLED_SPEC.md"
+    }
+  ],
+  "source_root": "/Users/jameschen/.gemini/antigravity/brain/aff9416a-04e7-48d5-9b10-85410ef6b790",
+  "status": "PASS",
+  "summary": {
+    "forbidden_row_violations": [],
+    "row_count": 26,
+    "source_file_count": 6,
+    "source_files_missing": [],
+    "status_counts": {
+      "APPROVED_BOUNDED_GATE_REPORTED": 1,
+      "DONE": 11,
+      "DONE_ADAPTER_READY": 2,
+      "DONE_BOUNDED_POLICY_READY": 1,
+      "DONE_CONTRACT_BARRIER": 1,
+      "DONE_CONTRACT_READY": 3,
+      "DONE_FAIL_CLOSED": 1,
+      "DONE_FOR_SOURCE_REFRESH_PATHS": 1,
+      "DONE_WITH_ZERO_MOVES": 1,
+      "FORBIDDEN_DIRECT": 1,
+      "PARTIAL_CLOSED_FOR_CBO": 1,
+      "PARTIAL_CLOSED_FOR_CLEAN_CODE": 1,
+      "PARTIAL_GATE_REPORTED": 1
+    }
+  },
+  "swarm_direct_implementation_allowed": false,
+  "zero_trust_v2_modification_allowed": false
+}

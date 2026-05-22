@@ -1,0 +1,176 @@
+{
+  "claim_boundary": [
+    "This evidence report closes prerequisite inspection only.",
+    "APPROVED means the prerequisite blocker has been cleared for bounded implementation.",
+    "Runtime defaults and public benchmark claims remain locked unless their separate gates explicitly allow them."
+  ],
+  "gates": [
+    {
+      "blockers": [],
+      "decision": "APPROVED",
+      "evidence": {
+        "checks": {
+          "bounded_orchestration_receipt_present": true,
+          "bounded_receipt_test_present": true,
+          "full_recursive_dispatch_block_test_present": true,
+          "negative_control_test_present": true,
+          "recursive_repair_budget_test_present": true,
+          "runtime_decision_receipt_schema_present": true
+        },
+        "max_recursion_depth": 1,
+        "source_gate": "docs/reports/NEXUS_RLM_RECURSIVE_DISPATCH_GATE_2026-05-22.json",
+        "source_gate_decision": "APPROVED"
+      },
+      "implementation_allowed": true,
+      "item_id": "rlm_recursive_dispatch_prerequisite"
+    },
+    {
+      "blockers": [],
+      "decision": "APPROVED",
+      "evidence": {
+        "checks": {
+          "audit_evaluator_seam_present": true,
+          "composed_phase_result_deletion_test_present": true,
+          "composed_phase_result_seam_present": true,
+          "escalation_manager_seam_present": true,
+          "pipeline_repair_facade_present": true,
+          "pipeline_repair_test_present": true,
+          "recursive_repair_acceptance_tests_present": true,
+          "recursive_repair_loop_consumed": true
+        },
+        "decision_note": "Existing seams are present; no failing acceptance or deletion evidence justifies another split.",
+        "existing_decision_source": "docs/reports/NEXUS_CBO_REPAIR_SPLIT_DECISION_2026-05-20.json"
+      },
+      "implementation_allowed": true,
+      "item_id": "pipeline_repair_split_prerequisite"
+    },
+    {
+      "blockers": [],
+      "decision": "APPROVED",
+      "evidence": {
+        "checks": {
+          "ab_evaluator_seam_present": true,
+          "capability_planner_facade_present": true,
+          "capability_planner_tests_present": true,
+          "decision_trace_imported": true,
+          "learning_policy_imported": true,
+          "learning_policy_store_present": true,
+          "policy_applier_seam_present": true,
+          "route_contract_tests_present": true,
+          "skill_mount_evidence_injection_test_present": true,
+          "skill_mount_evidence_seam_present": true
+        },
+        "decision_note": "Planner seams exist; further split needs a failing policy-order/injection acceptance case."
+      },
+      "implementation_allowed": true,
+      "item_id": "capability_planner_split_prerequisite"
+    },
+    {
+      "blockers": [],
+      "decision": "APPROVED",
+      "evidence": {
+        "caller_map": [
+          {
+            "matches": [
+              "ContextHub"
+            ],
+            "path": "nexus/app/nightshift_runner_service.py"
+          },
+          {
+            "matches": [
+              "make_pre_routing_decision"
+            ],
+            "path": "nexus/engine/autonomic_routing_service.py"
+          },
+          {
+            "matches": [
+              "ContextHub"
+            ],
+            "path": "nexus/engine/bootstrap.py"
+          },
+          {
+            "matches": [
+              "make_pre_routing_decision"
+            ],
+            "path": "nexus/engine/hub.py"
+          },
+          {
+            "matches": [
+              "make_pre_routing_decision"
+            ],
+            "path": "nexus/engine/pipeline_stages.py"
+          },
+          {
+            "matches": [
+              "ContextHub",
+              "make_pre_routing_decision"
+            ],
+            "path": "tests/core/test_belief_engine.py"
+          },
+          {
+            "matches": [
+              "ContextHub"
+            ],
+            "path": "tests/core/test_context_hub_strict_deps.py"
+          },
+          {
+            "matches": [
+              "make_pre_routing_decision"
+            ],
+            "path": "tests/engine/test_autonomic_routing_service.py"
+          },
+          {
+            "matches": [
+              "make_pre_routing_decision"
+            ],
+            "path": "tests/engine/test_coordinator.py"
+          },
+          {
+            "matches": [
+              "make_pre_routing_decision"
+            ],
+            "path": "tests/engine/test_pipeline_learn_phase_policy.py"
+          }
+        ],
+        "checks": {
+          "belief_engine_test_present": true,
+          "caller_map_present": true,
+          "context_dependencies_present": true,
+          "context_view_module_present": true,
+          "context_view_reexport_present": true,
+          "contexthub_facade_present": true,
+          "deletion_test_present": true,
+          "state_view_leaf_candidate_present": true,
+          "strict_deps_present": true,
+          "strict_deps_test_present": true
+        },
+        "leaf_extraction_candidates": [
+          "StateView",
+          "ContextDependencies"
+        ],
+        "monkeypatch_sensitive_tests": [
+          "tests/core/test_belief_engine.py",
+          "tests/core/test_context_hub_strict_deps.py",
+          "tests/engine/test_autonomic_routing_service.py",
+          "tests/engine/test_coordinator.py",
+          "tests/engine/test_pipeline_learn_phase_policy.py"
+        ],
+        "source_gate": "docs/reports/NEXUS_CONTEXTHUB_SPLIT_PREGATE_2026-05-22.json",
+        "source_gate_decision": "APPROVED"
+      },
+      "implementation_allowed": true,
+      "item_id": "contexthub_physical_split_prerequisite"
+    }
+  ],
+  "public_benchmark_allowed": false,
+  "runtime_update_allowed": false,
+  "schema": "nexus.antigravity_runtime_split_prerequisite_evidence.v1",
+  "status": "PASS",
+  "summary": {
+    "approved_count": 4,
+    "deferred_count": 0,
+    "gate_count": 4,
+    "implementation_allowed_count": 4
+  },
+  "zero_trust_v2_modification_allowed": false
+}
