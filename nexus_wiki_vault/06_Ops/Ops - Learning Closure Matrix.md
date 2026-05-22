@@ -3057,3 +3057,9 @@ version_scope:
 - **Root Cause**: The test introduced a cleanup behavior during a refactor-only slice.
 - **Action Taken**: Kept `run_contracts` behavior-compatible by extracting `receipt_data_contract` and `token_data_contract` into dedicated modules, corrected the fixture to avoid changing policy, and reran runner contract coverage.
 - **Prevention**: When splitting Token/Receipt policy modules, do not change malformed-input normalization in the same slice; add a separate policy-change test and migration note if that cleanup is actually desired.
+
+## 2026-05-22: Zero Trust Report DAG Needs A Publishable Manifest
+- **Phenomenon**: The Zero Trust V2 report DAG encoded node order and flags, but downstream agents still had to inspect Python objects to understand runtime/public claim boundaries.
+- **Root Cause**: `topological_report_order` proved ordering but did not expose a stable manifest shape with node metadata and allowed mutation/benchmark lists.
+- **Action Taken**: Added `build_report_manifest` and `ZeroTrustV2ReportNode.to_manifest`, preserving fail-closed `public_benchmark_allowed_nodes=[]` while making `runtime_apply` the only runtime update node.
+- **Prevention**: Future Zero Trust report-DAG changes should update the manifest test whenever a node is added or a runtime/public boundary changes, so report contract drift is visible without reading builder internals.

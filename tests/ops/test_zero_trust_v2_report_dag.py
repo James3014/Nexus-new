@@ -1,6 +1,6 @@
 from dataclasses import replace
 
-from scripts.ops.zero_trust_v2_report_dag import build_report_dag, topological_report_order
+from scripts.ops.zero_trust_v2_report_dag import build_report_dag, build_report_manifest, topological_report_order
 
 
 def test_zero_trust_v2_report_dag_orders_receipt_import_before_runtime_apply():
@@ -27,3 +27,14 @@ def test_zero_trust_v2_report_dag_rejects_unknown_dependency():
         assert "missing_report" in str(exc)
     else:
         raise AssertionError("expected missing dependency to fail closed")
+
+
+def test_zero_trust_v2_report_manifest_exposes_order_and_claim_boundaries():
+    manifest = build_report_manifest(build_report_dag())
+
+    assert manifest["schema"] == "nexus_zero_trust_v2_report_dag_manifest_v1"
+    assert manifest["order"].index("m45_m52_completion") < manifest["order"].index("runtime_apply")
+    assert manifest["runtime_update_allowed_nodes"] == ["runtime_apply"]
+    assert manifest["public_benchmark_allowed_nodes"] == []
+    assert manifest["nodes"]["runtime_apply"]["runtime_update_allowed"] is True
+    assert manifest["nodes"]["public_claim_gate_review"]["public_benchmark_allowed"] is False

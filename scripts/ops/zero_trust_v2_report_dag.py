@@ -13,6 +13,16 @@ class ZeroTrustV2ReportNode:
     runtime_update_allowed: bool = False
     public_benchmark_allowed: bool = False
 
+    def to_manifest(self) -> dict[str, object]:
+        return {
+            "name": self.name,
+            "builder": str(self.builder),
+            "output": str(self.output),
+            "depends_on": list(self.depends_on),
+            "runtime_update_allowed": self.runtime_update_allowed,
+            "public_benchmark_allowed": self.public_benchmark_allowed,
+        }
+
 
 def build_report_dag() -> dict[str, ZeroTrustV2ReportNode]:
     return {
@@ -129,3 +139,19 @@ def topological_report_order(dag: dict[str, ZeroTrustV2ReportNode]) -> list[str]
     for name in dag:
         visit(name)
     return ordered
+
+
+def build_report_manifest(dag: dict[str, ZeroTrustV2ReportNode] | None = None) -> dict[str, object]:
+    report_dag = dag or build_report_dag()
+    order = topological_report_order(report_dag)
+    return {
+        "schema": "nexus_zero_trust_v2_report_dag_manifest_v1",
+        "order": order,
+        "runtime_update_allowed_nodes": [
+            name for name in order if report_dag[name].runtime_update_allowed
+        ],
+        "public_benchmark_allowed_nodes": [
+            name for name in order if report_dag[name].public_benchmark_allowed
+        ],
+        "nodes": {name: report_dag[name].to_manifest() for name in order},
+    }
