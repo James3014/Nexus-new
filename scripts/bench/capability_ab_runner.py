@@ -124,6 +124,8 @@ from scripts.bench.run_contracts import (
     apply_data_contract_audit as _run_contracts_apply_data_contract_audit,
     apply_rubric_contract as _run_contracts_apply_rubric_contract,
     build_rubric_contract as _run_contracts_build_rubric_contract,
+    build_row_receipt_fields as _run_contracts_build_row_receipt_fields,
+    expected_capability_invocation_coverage as _run_contracts_expected_capability_invocation_coverage,
     receipt_data_contract as _run_contracts_receipt_data_contract,
     rubric_section as _run_contracts_rubric_section,
     token_data_contract as _run_contracts_token_data_contract,
@@ -271,42 +273,7 @@ def _expected_capability_invocation_coverage(
     expected_capabilities: tuple[str, ...],
     capability_receipts: list[dict[str, Any]],
 ) -> dict[str, Any]:
-    receipts = {
-        normalize_capability_name(item.get("name") or item.get("capability")): normalize_capability_receipt(item)
-        for item in capability_receipts
-        if isinstance(item, dict) and str(item.get("name") or item.get("capability") or "").strip()
-    }
-    expected = normalize_capability_names(expected_capabilities)
-    invoked: list[str] = []
-    missing: list[str] = []
-    failure_reasons: dict[str, str] = {}
-    for capability in expected:
-        receipt = receipts.get(capability)
-        if not receipt:
-            missing.append(capability)
-            failure_reasons[capability] = "missing_receipt"
-            continue
-        if (
-            bool(receipt.get("selected"))
-            and bool(receipt.get("invoked"))
-            and bool(receipt.get("evidence_present"))
-        ):
-            invoked.append(capability)
-            continue
-        missing.append(capability)
-        if not bool(receipt.get("selected")):
-            failure_reasons[capability] = "not_selected"
-        elif not bool(receipt.get("invoked")):
-            failure_reasons[capability] = "not_invoked"
-        else:
-            failure_reasons[capability] = "missing_evidence"
-    return {
-        "expected": expected,
-        "invoked": invoked,
-        "missing": missing,
-        "failure_reasons": failure_reasons,
-        "all_invoked_with_evidence": bool(expected) and not missing,
-    }
+    return _run_contracts_expected_capability_invocation_coverage(expected_capabilities, capability_receipts)
 
 
 def _sensor_fusion_unfulfilled_recommendations(
@@ -2508,6 +2475,13 @@ def _extract_record(
         codeintel=codeintel,
         tests_passed=str(payload.get("status") or "") == "SUCCESS",
     )
+    receipt_fields = _run_contracts_build_row_receipt_fields(
+        expected_capabilities=task.expected_capabilities,
+        capability_receipts=capability_receipts,
+        skill_mount_contract=skill_mount_contract,
+        skill_mount_contract_status=skill_mount_contract_status,
+        skill_mount_violations=skill_mount_violations,
+    )
     sensor_fusion_unfulfilled = _sensor_fusion_unfulfilled_recommendations(
         sensor_fusion_decision=sensor_fusion_decision,
         capability_receipts=capability_receipts,
@@ -2795,14 +2769,14 @@ def _extract_record(
         "capability_plan_forbidden": list(capability_plan.get("forbidden_capabilities", []) or []),
         "runtime_pruned_capabilities": runtime_pruned_capabilities,
         "runtime_pruned_capability_count": len(runtime_pruned_capabilities),
-        "capability_receipts": capability_receipts,
-        "capability_receipts_json": json.dumps(capability_receipts, ensure_ascii=False, sort_keys=True),
-        "skill_mount_contract": skill_mount_contract,
-        "skill_mount_contract_json": json.dumps(skill_mount_contract, ensure_ascii=False, sort_keys=True),
-        "skill_mount_count": len(skill_mount_contract),
-        "skill_mount_contract_status": skill_mount_contract_status,
-        "skill_mount_violations": skill_mount_violations,
-        "skill_mount_violations_json": json.dumps(skill_mount_violations, ensure_ascii=False, sort_keys=True),
+        "capability_receipts": receipt_fields["capability_receipts"],
+        "capability_receipts_json": receipt_fields["capability_receipts_json"],
+        "skill_mount_contract": receipt_fields["skill_mount_contract"],
+        "skill_mount_contract_json": receipt_fields["skill_mount_contract_json"],
+        "skill_mount_count": receipt_fields["skill_mount_count"],
+        "skill_mount_contract_status": receipt_fields["skill_mount_contract_status"],
+        "skill_mount_violations": receipt_fields["skill_mount_violations"],
+        "skill_mount_violations_json": receipt_fields["skill_mount_violations_json"],
         "research_preflight": research_preflight,
         "research_preflight_present": bool(research_preflight.get("present") or research_preflight),
         "research_preflight_blocked": bool(research_preflight.get("blocked", False)),
@@ -2846,14 +2820,8 @@ def _extract_record(
         "route_evidence_required_count": int(openseeker.get("route_evidence_required_count", 0) or 0),
         "low_step_filtered": bool(openseeker.get("low_step_filtered", False)),
         "long_horizon_ready": bool(openseeker.get("long_horizon_ready", False)),
-        "expected_capability_receipt_coverage": _expected_capability_receipt_coverage(
-            task.expected_capabilities,
-            [item for item in capability_receipts if isinstance(item, dict)],
-        ),
-        "expected_capability_invocation_coverage": _expected_capability_invocation_coverage(
-            task.expected_capabilities,
-            [item for item in capability_receipts if isinstance(item, dict)],
-        ),
+        "expected_capability_receipt_coverage": receipt_fields["expected_capability_receipt_coverage"],
+        "expected_capability_invocation_coverage": receipt_fields["expected_capability_invocation_coverage"],
         "capability_plan_phases": [
             str(item.get("phase"))
             for item in capability_replan_trace

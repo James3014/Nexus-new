@@ -3093,3 +3093,9 @@ version_scope:
 - **Root Cause**: Token row accounting was coupled to unrelated route, capability, and timing extraction, making small token contract changes require edits inside a thousand-line row builder.
 - **Action Taken**: Added `scripts/bench/benchmark_row_tokens.py` with `normalize_token_status` and `build_row_token_fields`, covered measured aliases, no-model local fast paths, provider evidence, and ledger fields with TDD, then reran focused `_extract_record` token tests and the full runner test file.
 - **Prevention**: Future token-accounting changes should start in `benchmark_row_tokens` tests; `_extract_record` should only assemble the returned token fields into the row.
+
+## 2026-05-22: Benchmark Row Receipt Fields Belong With Receipt Contracts
+- **Phenomenon**: `_extract_record` still serialized capability receipts, skill-mount contracts, expected receipt coverage, and invocation coverage inline after token fields had already moved behind a small contract module.
+- **Root Cause**: Receipt data-contract checks lived in `receipt_contracts.py`, but row-level receipt payload construction stayed coupled to the full benchmark row builder.
+- **Action Taken**: Added `expected_capability_invocation_coverage` and `build_row_receipt_fields` to `scripts/bench/receipt_contracts.py`, covered selected/invoked/evidence requirements and row serialization with TDD, then reran focused receipt tests and the full runner test file.
+- **Prevention**: Future receipt row changes should start in `test_token_receipt_contracts.py`; `_extract_record` should receive normalized receipts and assemble fields returned by `build_row_receipt_fields`.
