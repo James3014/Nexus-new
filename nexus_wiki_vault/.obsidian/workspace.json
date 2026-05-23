@@ -13,12 +13,12 @@
             "state": {
               "type": "markdown",
               "state": {
-                "file": "06_Ops/Ops - Governance Changelog.md",
+                "file": "10_Analysis_Scans/repomix/repomix_complete.md",
                 "mode": "source",
                 "source": false
               },
               "icon": "lucide-file",
-              "title": "Ops - Governance Changelog"
+              "title": "repomix_complete"
             }
           }
         ]
@@ -180,8 +180,16 @@
       "bases:建立新的 base": false
     }
   },
-  "active": "70d8cc88b587a980",
+  "active": "1deb08cd24751f75",
   "lastOpenFiles": [
+    "03_Flows/HEEP_Blocker_Queue_Swarm_Feedback_Loop.md",
+    "01_System/ADR-042_MSA_Physical_Hallucination_Interlock.md",
+    "07_Compliance/Zero-Trust_V2_Mac_Sandbox_Runtime_Protocol.md",
+    "02_Modules/Research_Flow_Leaf_Architecture.md",
+    "10_Analysis_Scans/graphify/GRAPH_REPORT.md",
+    "10_Analysis_Scans/codegraph_audit/codegraph_status.md",
+    "10_Analysis_Scans/codegraph_audit/codegraph_files.md",
+    "06_Ops/Ops - Governance Changelog.md",
     "99_Schema/WIKI_GOVERNANCE_CHARTER.md",
     "00_Product/User Stories.md",
     "06_Ecosystem/SDK Quickstart.md",
@@ -205,14 +213,6 @@
     "00_Home/Wiki Index and Coverage Map.md",
     "01_System/Code_Ownership_Matrix.md",
     "01_System/Swarm_MultiNode.md",
-    "01_System/Errors_Enum.md",
-    "08_Diffs/Code_to_Wiki_Alignment_Matrix.md",
-    "06_Ops/Evidence_Bundle_Format.md",
-    "06_Ops/Retry_Escalation_and_Handoff_Policy.md",
-    "02_Modules/Router_Decision_Flow.md",
-    "07_Compliance/Hallucination_Guard_Scoring_Spec.md",
-    "01_System/Exit_Code_Registry.md",
-    "06_Ops/Ops - Governance Changelog.md",
     "Dashboard/Wiki_Health.json",
     "Dashboard/Live_Compliance.json",
     "Dashboard",
