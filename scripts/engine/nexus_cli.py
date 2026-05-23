@@ -701,7 +701,7 @@ def run(task_id, complexity, output_file, report_file):
     import asyncio
 
     # 偵測史詩/宏觀任務
-    is_macro = any(kw in task_id.lower() for kw in ["system", "app", "complete", "refactor all", "build a", "史詩"])
+    is_macro = len(task_id) < 200 and any(kw in task_id.lower() for kw in ["system", "app", "complete", "refactor all", "build a", "史詩"])
     
     runtime_ok = True
     if is_macro:

@@ -74,11 +74,11 @@ def _prediction_for_row(
             "uv",
             "run",
             "scripts/engine/nexus_cli.py",
-            "nexus:runner",
-            "--task",
+            "nexus",
+            "run",
             str(row.get("problem_statement") or ""),
-            "--audit-level",
-            "bypass",
+            "--output-file",
+            ".nexus/reports/swe_bench_wiring/run_output.json",
         ]
         env = os.environ.copy()
         env["NEXUS_BENCHMARK_MODE"] = "1"
