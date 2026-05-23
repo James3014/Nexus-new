@@ -1,0 +1,11 @@
+# 🛡️ Nexus Raw Data Physical Ignore
+# Prevent large JSON, HTML, SQLite files from bloating the Git repository
+
+# Ignore raw data outputs
+*.json
+*.sqlite
+*.db
+*.html
+
+# Allow tracking gitignore itself
+!.gitignore
