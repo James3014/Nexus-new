@@ -142,6 +142,30 @@ Stop condition:
 - `auto_flow_executor.py` is still not opened because baseline/hyper execution branch movement requires a separate execution-accounting snapshot covering guard fallback, token/cost, wall timing, and model/provider report fields.
 - Recursive runtime dispatch remains closed.
 
+## 2D. Auto-Flow Executor Accounting Snapshot Pregate
+
+Status: `DONE_TESTS_ONLY_PREGATE`
+
+What changed:
+
+- Strengthened `tests/app/test_research_flow_service.py::test_hyper_guard_fallback_preserves_gateway_token_source`.
+- The test now snapshots guard fallback execution accounting before any `auto_flow_executor.py` extraction: baseline probe status, guard hit, chosen/result flow, provider/model fields, token accounting, gateway token source, wall timing, and absence of recursive RLM dispatch by default.
+
+RED / adjustment:
+
+- First added assertion expected `winner_source` at top-level `result.report`.
+- Live behavior keeps winner source inside `result.report.guard_fallback_from`, so the test was adjusted to pin current schema rather than silently changing report shape.
+
+Verification:
+
+- `uv run pytest tests/app/test_research_flow_service.py::test_hyper_guard_fallback_preserves_gateway_token_source -q` -> `1 passed`.
+
+Decision:
+
+- `auto_flow_executor.py` is now startable only as a tests-first split that preserves this snapshot.
+- Do not open recursive runtime dispatch.
+- Do not change provider/token report schema in the executor extraction slice unless a focused failing test requires it.
+
 ## 3. Remaining Items Now Startable
 
 ### 3.1 External Fixture Live Clone / Setup

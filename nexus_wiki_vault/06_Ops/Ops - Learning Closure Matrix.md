@@ -3621,3 +3621,15 @@ version_scope:
 - **Root Cause**: Prior skill-fit work had pinned public plan behavior but stopped at tests-only characterization; the reusable candidate-pool seam was still implicit and split across plan construction and follow-up report builders.
 - **Action Taken**: Added frozen `SkillFitCandidateIndex`, routed plan candidate matching / explicit selection / selected-arm ordering / canonical id / negative-control selection through it, and reused the same Module for follow-up canonical id and negative-control selection.
 - **Prevention**: Keep candidate indexes pre-policy. They may sort, filter, canonicalize, and select negative controls, but must not decide promotion, runtime apply, public benchmark eligibility, or skill value claims.
+
+## 2026-05-23: Auto-Flow Executor Snapshots Must Pin Current Report Field Locations
+- **Phenomenon**: A new guard-fallback execution-accounting assertion expected `winner_source` at top-level `result.report`, but live auto-flow payload stores the hyper winner inside `result.report.guard_fallback_from`.
+- **Root Cause**: The pregate was meant to snapshot current executor accounting before extraction, but the first assertion accidentally encoded a desired schema change instead of the live public report shape.
+- **Action Taken**: Updated the test to assert `guard_fallback_from.winner_source`, and also pinned provider/model fields, token accounting, gateway token source, baseline probe status, guard hit, wall timing, and default absence of recursive RLM dispatch.
+- **Prevention**: Before extracting `auto_flow_executor.py`, snapshot current field locations exactly. Schema improvements must be separate from executor movement and require their own focused failing test.
+
+## 2026-05-23: App Test Edits Need Self Impact Rows Too
+- **Phenomenon**: Changed-only CI for the auto-flow executor pregate treated `tests/app/test_research_flow_service.py` as unmatched, escalated to broad `tests/core`, and failed on a missing local Playwright browser in `tests/core/test_web_dom_mapper.py`.
+- **Root Cause**: The production `research_flow_service.py` impact row had the focused nodeid, but the edited app test file itself had no self row, so the selector could not prove focused coverage for that test-file change.
+- **Action Taken**: Added a self impact-map row for `tests/app/test_research_flow_service.py` pointing to the guard-fallback accounting snapshot and existing Research Flow focused nodeids.
+- **Prevention**: The self-row rule applies to edited app tests, not only learning/ops tests. Add the test file itself to `docs/testing/test_impact_map.md` before changed-only CI.

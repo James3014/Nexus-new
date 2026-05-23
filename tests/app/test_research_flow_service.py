@@ -3029,6 +3029,18 @@ def test_hyper_guard_fallback_preserves_gateway_token_source(tmp_path: Path, mon
     assert report["guard_fallback_from"]["gateway_total_chars"] == 30
     assert report["token_capture_status"] == "measured"
     assert report["model_calls"] == 1
+    assert report["model_name"] == "gemini-3-flash-preview"
+    assert report["model_patch_generated"] is True
+    assert report["total_tokens"] == 333
+    assert report["guard_fallback_from"]["winner_source"] == "llm"
+    assert payload["chosen_flow"] == "baseline"
+    assert payload["result"]["flow"] == "baseline"
+    assert payload["guard"]["hit"] is True
+    assert payload["guard"]["baseline_probe"]["status"] == "SUCCESS"
+    assert payload["guard"]["baseline_probe"]["report"]["model_calls"] == 0
+    assert payload["timing"]["phase_wall_sec"]["R"] >= 0
+    assert payload["nexus_usage_trace"]["phase_wall_sec"]["R"] >= 0
+    assert "rlm_loop_phase" not in payload["nexus_usage_trace"]
     assert payload["nexus_usage_trace"]["gemini_uses_nexus"] is True
 
 

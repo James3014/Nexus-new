@@ -17,7 +17,7 @@
 | nexus/engine/sandbox_runner.py | tests/engine/test_sandbox_actions.py | active | high | sandbox_physical_runner_contract |
 | nexus/engine/asi_constraints.py | tests/engine/test_asi_constraints.py::test_asi_constraint_extractor_orders_families_and_preserves_evidence_refs, tests/engine/test_asi_constraints.py | active | medium | asi_constraint_ordering_contract |
 | nexus/contracts/s2t_export.py | tests/contracts/test_s2t_contracts.py::test_s2t_agent_lightning_export_emits_preference_pairs, tests/contracts/test_s2t_contracts.py::test_s2t_export_selects_highest_scored_failed_rejected_candidate_stably | active | medium | s2t_export_ordering_contract |
-| nexus/app/research_flow_service.py | tests/app/test_research_flow_service.py::test_runtime_skill_mount_contract_requires_confirmed_capability_receipt, tests/app/test_research_flow_service.py::test_runtime_skill_mount_contract_blocks_unconfirmed_planned_mount | active | high | skill_mount_runtime_contract |
+| nexus/app/research_flow_service.py | tests/app/test_research_flow_service.py::test_runtime_skill_mount_contract_requires_confirmed_capability_receipt, tests/app/test_research_flow_service.py::test_runtime_skill_mount_contract_blocks_unconfirmed_planned_mount, tests/app/test_research_flow_service.py::test_hyper_guard_fallback_preserves_gateway_token_source | active | high | skill_mount_runtime_and_auto_flow_executor_accounting_contract |
 | nexus/app/research_s2t_runtime.py | tests/app/test_research_s2t_runtime.py, tests/app/test_research_flow_service.py::test_run_auto_flow_populates_autoreason_from_candidate_summaries | active | high | research_s2t_runtime_trace_contract |
 | nexus/app | tests/app | active | medium | app_flow |
 | nexus/research | tests/research | active | medium | research_loop |
@@ -80,6 +80,7 @@
 | tests/contracts/test_s2t_contracts.py | tests/contracts/test_s2t_contracts.py | active | medium | test_contract |
 | tests/engine/test_sandbox_actions.py | tests/engine/test_sandbox_actions.py | active | medium | test_contract |
 | tests/app/test_research_s2t_runtime.py | tests/app/test_research_s2t_runtime.py | active | medium | test_contract |
+| tests/app/test_research_flow_service.py | tests/app/test_research_flow_service.py::test_hyper_guard_fallback_preserves_gateway_token_source, tests/app/test_research_flow_service.py::test_run_auto_flow_populates_autoreason_from_candidate_summaries, tests/app/test_research_flow_service.py::test_runtime_skill_mount_contract_requires_confirmed_capability_receipt, tests/app/test_research_flow_service.py::test_runtime_skill_mount_contract_blocks_unconfirmed_planned_mount | active | high | research_flow_service_test_contract |
 | tests/research/test_auto_flow_payload.py | tests/research/test_auto_flow_payload.py | active | medium | test_contract |
 | tests/research/test_flow_leaf_modules.py | tests/research/test_flow_leaf_modules.py | active | medium | test_contract |
 | tests/engine/test_asi_constraints.py | tests/engine/test_asi_constraints.py | active | medium | test_contract |
