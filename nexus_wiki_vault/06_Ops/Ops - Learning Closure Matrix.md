@@ -3496,14 +3496,104 @@ version_scope:
 - **Action Taken**: Added `scripts/engine/commands/sandbox_actions.py` with `SandboxRunResult`, `run_sandbox_task(...)`, and `render_sandbox_run_result(...)`; rewired `sandbox_run_cmd` as a thin translated adapter; added a fail-closed test for runners without `run_task`.
 - **Prevention**: Future physical sandbox execution work should first define and test the real `SandboxRunner.run_task` contract behind the Action seam. Do not make the CLI command invent success or start broad sandbox runner rewrites without a physical execution contract.
 
+## 2026-05-23: Sandbox Physical Runner Must Stay Local And Explicit
+- **Phenomenon**: After the sandbox Action seam existed, the next RED proved the concrete runner still needed physical semantics: command source, cwd, output artifact, cleanup, timeout, exit code, stdout, stderr, source symlink handling, and fail-closed path handling.
+- **Root Cause**: The earlier Action contract correctly avoided fake success, but it only characterized absence of `run_task`; it did not yet encode the local workspace-copy execution boundary.
+- **Action Taken**: Added `SandboxRunner.run_task(...)` as a local-only runner requiring an explicit command, copying the project into `.nexus/sandbox/runs/<run_id>/workspace` without following source symlinks, collecting an optional sandbox-relative output artifact, cleaning the workspace by default, and blocking cwd/output path escape before command execution.
+- **Prevention**: Keep sandbox expansion evidence-first. Do not wire `run_challenge(repo_url, task)` into `run_task(...)`, do not add remote clone/fetch/hook behavior, do not copy source symlink targets across the sandbox boundary, and do not claim kernel-level network isolation unless a socket/no-network hard barrier has focused tests.
+
+## 2026-05-23: Sandbox Hardening Needs Receipts Not Just Defaults
+- **Phenomenon**: The local sandbox runner had safe-looking defaults, but artifact collection only returned a path, Python child processes could still open an external socket, and source git hook policy was implicit rather than recorded.
+- **Root Cause**: The physical runner contract verified local execution and cleanup, but it did not yet produce provenance/security receipts for the most important hardening boundaries.
+- **Action Taken**: Added output artifact provenance (`sandbox_relative_path`, `artifact_path`, `sha256`, `size_bytes`), injected a runner-owned Python `sitecustomize.py` socket guard that blocks external hosts while keeping loopback semantics explicit, and added a `hook_policy` receipt proving source git metadata/hooks are not copied into the sandbox.
+- **Prevention**: Treat sandbox hardening as receipt-backed behavior. If a future slice extends to non-Python executables, remote allowlists, or kernel-level isolation, it must start with focused RED tests and must not rely on metadata-only `network_allowed=false`.
+
+## 2026-05-23: Repeat Markdown Backtick Search Must Use Single Quotes
+- **Phenomenon**: A sandbox doc stale-text scan repeated the shell failure `zsh:1: command not found: SandboxRunner.run_task` because an `rg` pattern containing Markdown backticks was double-quoted.
+- **Root Cause**: zsh command substitution happens before `rg` receives a double-quoted regex with backticked Markdown code spans.
+- **Action Taken**: Re-ran the stale-text scan with a single-quoted pattern and updated the relevant plan/report text.
+- **Prevention**: For any Markdown code-span search, single-quote the entire `rg` pattern or remove literal backticks from the regex; this applies even when the same lesson already exists.
+
+## 2026-05-23: CLI Action DONE Claims Need Live Adapter Wiring Tests
+- **Phenomenon**: `registry_actions.py` and `tests/engine/test_registry_actions.py` existed, but `uv run pytest tests/engine/test_registry_actions.py -q` failed because `nexus_cli.py` exposed no `get_registry_status`, `get_skills_list`, or `sync_external_skills` attributes for monkeypatch injection.
+- **Root Cause**: The plan/report claimed registry and skills Action extraction, but the live Click adapter had drifted back to inline imports and output formatting. The Action module existed without being the actual runtime seam.
+- **Action Taken**: Imported registry Action functions into `nexus_cli.py`, rewired `skills sync`, `skills list`, and `registry status` as thin Click adapters, applied `translate_action_exceptions`, and added focused impact-map coverage for `registry_actions.py`.
+- **Prevention**: Treat CLI Action extraction as incomplete until both the Action module tests and the live Click-adapter monkeypatch tests pass. A plan-level extraction note is not enough unless `nexus_cli.py` imports/delegates to the Action seam.
+
+## 2026-05-23: Changed-Only Inputs Need Self Rows Even For Existing Focused Tests
+- **Phenomenon**: Changed-only CI for the registry Action wiring slice treated `tests/engine/test_registry_actions.py` as unmatched, escalated through broad fallback targets, and failed on `tests/core/test_web_dom_mapper.py` because the local Playwright browser executable was missing.
+- **Root Cause**: The production and Action module rows selected registry tests, but the explicit test-file path passed to changed-only had no self row. Selector confidence dropped and pulled unrelated core tests.
+- **Action Taken**: Added a self impact-map row for `tests/engine/test_registry_actions.py`.
+- **Prevention**: When passing a test file explicitly to `ci_gate.py --changed-only`, make sure that exact test file has a self row, even if no test code changed in the current slice.
+
 ## 2026-05-23: External Fixture Live Setup Needs Offline Cache Manifest First
 - **Phenomenon**: External fixture pregate tests failed on `ImportError: cannot import name 'ExternalFixtureCacheManifest'`, proving remote fixture setup still had no pinned offline cache contract between fail-closed adapter injection and any future live clone/setup.
 - **Root Cause**: The sandboxed local Adapter could copy local/file sources safely, but there was no manifest object tying a remote repo/ref identity to a local cache directory and expected file list.
 - **Action Taken**: Added `ExternalFixtureCacheManifest` and `OfflineCachedExternalFixtureAdapter`; remote fixture requests must match pinned `allowed_repo` / `allowed_ref`, declared files must exist in `expected_files`, and materialization delegates to the existing sandboxed local Adapter. Missing manifest, repo/ref mismatch, and `network_allowed=True` all fail closed.
 - **Prevention**: Do not add live `git clone`, `git fetch`, HTTP, SSH, or DNS behavior until a separate live-network allowlist, socket/no-network barrier, and cache provenance receipt are specified and tested.
 
+## 2026-05-23: Capability Invocation Index Must Own Receipt Degrade Semantics
+- **Phenomenon**: The capability invocation matrix split was structurally complete, but the plan's malformed receipt-string fixture was not yet explicit in focused tests.
+- **Root Cause**: The initial extraction moved JSONL receipt parsing into `CapabilityInvocationArmIndex`, yet completion evidence still needed a direct characterization of invalid `capability_receipts` input.
+- **Action Taken**: Added a focused test proving malformed receipt JSON fails closed as `expected_capability_not_invoked_with_evidence` with the expected capability cell preserved as empty.
+- **Prevention**: Keep receipt parsing, malformed input degrade, and missing evidence failures inside `scripts/ops/capability_invocation_index.py`; `capability_invocation_matrix.py` should remain orchestration/report assembly, not duplicate row-level receipt parsing.
+
 ## 2026-05-23: Regression Questions Target Path Gaps Must Be Corrected In Wiki Not Code
 - **Phenomenon**: Wiki eval regression test pass rate fell to 20.00% with `MISSING_PAGE` errors for Q01-Q20 because target paths contained Markdown links (e.g. `[System Overview](../00_Home/System Overview.md)`).
 - **Root Cause**: The evaluation script `wiki_eval_regression.py` expects target files as plain file stems or relative script paths, but the regression table used raw Markdown links, making the script fail to locate files. An initial attempt modified the test script's parser to resolve links rather than keeping it frozen.
 - **Action Taken**: Restored the test script `wiki_eval_regression.py` to its original state. Updated the Wiki file `nexus_wiki_vault/06_Ops/Ops - Wiki Regression Evals.md` by stripping all Markdown link syntax from the `Target Page` column, leaving only clean file stems and relative script paths. Also corrected `System Overview.md` to restore required keywords for Q01.
 - **Prevention**: Never modify downstream gate test scripts (such as `wiki_eval_regression.py`) to bypass path drifts or syntax errors in Wiki documents. All documentation discrepancies must be corrected in the Wiki files themselves, keeping the test scripts frozen.
+
+## 2026-05-23: Refactor Plan DONE Claims Need Live Facade Deletion Tests
+- **Phenomenon**: The clean-code refactor plan and start-evidence report marked ContextHub budget-source and text-store leaves as complete, but the live checkout still had `ContextHub.load_program_rules`, `_load_last_handoff`, `_context_budget_sources`, and `_estimate_context_tokens` implemented inline. New monkeypatch deletion tests failed because `nexus.core.context_hub` did not expose `build_context_budget_sources` or `ContextTextStore`.
+- **Root Cause**: The split modules existed and standalone tests passed, but the facade delegation/deletion tests were missing from the live checkout, so documentation status drifted ahead of code reality.
+- **Action Taken**: Added deletion tests in `tests/core/test_context_hub_strict_deps.py`, wired `ContextHub` to `ContextTextStore`, `build_context_budget_sources`, and `estimate_context_tokens`, and added focused impact-map rows for the ContextHub split files.
+- **Prevention**: Treat a split Module as incomplete until both standalone module tests and facade deletion tests pass on the current checkout. Re-run the exact facade tests before using a plan/report DONE claim as successor-work evidence.
+
+## 2026-05-23: Targeted Retrieval Must Exclude Report Archives Unless Auditing Archives
+- **Phenomenon**: A normal refactor-continuation retrieval for `skill_fit`, P6A, P6C, and impact-map lessons accidentally searched `docs/reports` broadly and pulled many `docs/reports/archive/**` hits.
+- **Root Cause**: The search handles were correct, but the command did not include archive-exclusion globs, violating the bounded-retrieval intent and creating noisy evidence.
+- **Action Taken**: Stopped using the broad report output for decisions, reran focused source/test inspection, and recorded P6C as tests-only pregate from bounded exploration.
+- **Prevention**: For ordinary continuation or implementation tasks, add `--glob '!docs/reports/archive/**'` when searching `docs/reports`, or search explicit current report files only. Full archive searches are reserved for dedicated audit/indexing tasks.
+
+## 2026-05-23: Row-Index Refactors Must Replace Return-Payload Locals
+- **Phenomenon**: After routing skill-fit RCA and cost contracts through `SkillFitRowIndex`, focused guard tests failed with `NameError: name 'target_capability' is not defined`.
+- **Root Cause**: The refactor moved capability selection into the new index, but return payload assembly still referenced the old local variable in two places.
+- **Action Taken**: Replaced those payload references with `row_index.capability` and reran the row-index, RCA, cost-contract, and data-shape pregate focused tests.
+- **Prevention**: When extracting an index or context object, include return payload fields in the caller checklist, not only loop setup variables. Guard tests should cover both the new seam and the existing public payload shape.
+
+## 2026-05-23: Edited Test Files Need Self Impact Rows
+- **Phenomenon**: Changed-only CI for the skill-fit row-index slice treated `tests/learning/test_skill_fit_ablation.py` as unmatched, escalated to broad fallback targets, and failed on `tests/core/test_web_dom_mapper.py` because the local Playwright browser executable was missing.
+- **Root Cause**: The production file had a focused impact-map row, but the edited test file itself did not. The selector could not prove the changed test file was intentionally covered by the focused nodeids.
+- **Action Taken**: Added a self row for `tests/learning/test_skill_fit_ablation.py` pointing to the row-index, RCA, and cost-contract nodeids.
+- **Prevention**: When editing an existing test file as part of a protected refactor slice, add or verify a self impact-map row for that test file before changed-only CI. Avoid solving selector fallback by installing unrelated browser/runtime dependencies.
+
+## 2026-05-23: Compile Checks Must Only Receive Python Files
+- **Phenomenon**: A verification command failed with `SyntaxError: leading zeros in decimal integer literals are not permitted` after `python3 -m py_compile` was invoked on `docs/testing/test_impact_map.md`.
+- **Root Cause**: The verification command mixed Python source files and Markdown docs in one compile invocation; Python parsed the Markdown table as source code.
+- **Action Taken**: Re-ran compile verification only for `nexus/learning/skill_fit_ablation_core.py` and `tests/learning/test_skill_fit_ablation.py`.
+- **Prevention**: Use `python3 -m py_compile` only for `.py` files. Verify Markdown artifacts through the appropriate docs/selector gates such as changed-only CI or Markdown-specific lint, not Python bytecode compilation.
+
+## 2026-05-23: Candidate Selection Characterization Must Follow Public Plan Semantics
+- **Phenomenon**: A new skill-fit candidate-selection characterization test first expected `nexus-tdd` to remain the fixed first runtime candidate, but the public plan selected `runtime-repair` because it had higher repair relevance while still satisfying the single-runtime-baseline rule.
+- **Root Cause**: The test encoded an assumed favored skill id instead of the public `build_skill_fit_ablation_plan(...)` ordering semantics: highest-relevance runtime baseline first, then preferred/external distinct candidates, with blocked/generic/canonical-duplicate candidates excluded.
+- **Action Taken**: Rewrote the test as `test_skill_fit_plan_characterizes_public_candidate_selection_contract`, kept the assertion at the public builder interface, and did not extract `SkillFitCandidateIndex`.
+- **Prevention**: Future candidate-selection refactors must first pin public plan behavior, not private helper names or favorite runtime ids. Only extract a candidate Module after public-characterization evidence shows duplication, drift, or a failing focused nodeid.
+
+## 2026-05-23: Tool Memory Paths Can Drift From Installed Tool Roots
+- **Phenomenon**: A complexity scan attempted the remembered path `/Users/jameschen/.codex/skills/complexity-optimizer/scripts/analyze_complexity.py` and failed with `No such file or directory`.
+- **Root Cause**: The installed/usable tool had moved to `/Users/jameschen/Workspace/test/codex-complexity-optimizer/complexity-optimizer/scripts/analyze_complexity.py`, while the memory entry still described the older skill-cache path.
+- **Action Taken**: Located the current scanner under `/Users/jameschen/Workspace/test`, reran scoped scans against `nexus/learning`, `nexus/core`, and `scripts/ops`, and treated findings as heuristic leads only.
+- **Prevention**: Before using a remembered third-party tool path, verify the executable exists with `find` or `test -f`. Do not reinstall or create hooks just because a remembered path is stale; locate the current tool root or fall back to existing reports plus bounded source inspection.
+
+## 2026-05-23: CLI Action Sweeps Need Broad Live Adapter Matrix After Group Greens
+- **Phenomenon**: Individual CLI Action modules existed for bench, code, multi-agent, learn, research, registry, and sandbox, but the combined live adapter matrix still failed with `66 passed, 29 failed` because `nexus_cli.py` did not expose/delegate many `run_*` / `get_*` Action seams.
+- **Root Cause**: Module extraction and per-group green tests can drift from the live Click facade unless the combined matrix monkeypatches `scripts.engine.nexus_cli` itself. A command group can look extracted while production CLI execution still owns inline service calls.
+- **Action Taken**: Rewired `nexus_cli.py` to import/delegate the remaining bench/code/multi-agent/learn/research Action functions and renderers, applied `translate_action_exceptions`, physically removed the old `research:run` inline body, and reran the combined Action suite to `95 passed`.
+- **Prevention**: After each CLI group turns green, rerun the combined live adapter matrix (`tests/engine/test_bench_actions.py tests/engine/test_code_actions.py tests/engine/test_multi_agent_actions.py tests/engine/test_learn_actions.py tests/engine/test_research_actions.py tests/engine/test_registry_actions.py tests/engine/test_sandbox_actions.py`). Mark P4 complete only when the live facade matrix is green and `docs/testing/test_impact_map.md` has both Action-module rows and self rows for edited tests.
+
+## 2026-05-23: CLI Source Audits Must Follow The Action Seam
+- **Phenomenon**: Full `ci_gate.py` failed Report Trust Audit after CLI Action extraction because `test_cli_semantic_contract_audit.py` and `test_cli_artifact_gate_audit.py` still required `build_completion_envelope(`, `semantic_status`, and `write_text(` directly inside `nexus_cli.py` command blocks.
+- **Root Cause**: The audit encoded the old shallow Click implementation. After extraction, semantic contracts and artifact writes intentionally live in `scripts/engine/commands/*_actions.py`, while the CLI block should only parse arguments, preserve compatibility seams, translate exceptions, and render Action results.
+- **Action Taken**: Updated audits so delegated commands require an Action delegate token in `nexus_cli.py` and semantic/artifact tokens in the Action module. Also passed CLI compatibility seams into learn Actions so older monkeypatch-based fail-closed tests still exercise `_evaluate_learn_semantic_contract`.
+- **Prevention**: When moving CLI behavior into an Action module, update source-token audits in the same slice. Do not re-add semantic/report-write logic to the Click block just to satisfy stale audits; make the audit follow the seam.

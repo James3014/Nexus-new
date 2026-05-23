@@ -96,6 +96,43 @@ def test_run_changed_only_check_uses_selector_targets(monkeypatch, tmp_path, cap
     assert observation["target_durations"]["tests/ops/test_select_tests.py"] == 0.12
 
 
+def test_run_changed_only_check_selects_capability_invocation_matrix_targets(monkeypatch, tmp_path):
+    seen = {}
+    monkeypatch.setattr(ci_gate, "ROOT", tmp_path)
+
+    def fake_run_step(name, cmd):
+        seen["name"] = name
+        seen["cmd"] = cmd
+        junit_path = tmp_path / ".nexus" / "reports" / "changed_only_junit.xml"
+        junit_path.parent.mkdir(parents=True, exist_ok=True)
+        junit_path.write_text(
+            """<?xml version="1.0" encoding="utf-8"?>
+<testsuite>
+  <testcase classname="tests.ops.test_capability_invocation_matrix" name="test_capability_invocation_arm_index_preserves_jsonl_diagnostics" file="tests/ops/test_capability_invocation_matrix.py" time="0.05"/>
+</testsuite>
+""",
+            encoding="utf-8",
+        )
+        return True, "ok"
+
+    monkeypatch.setattr(ci_gate, "run_step", fake_run_step)
+
+    assert ci_gate.run_changed_only_check(["scripts/ops/capability_invocation_matrix.py"]) is True
+    assert seen["name"] == "Changed-Only JIT Tests"
+    assert (
+        "tests/ops/test_capability_invocation_matrix.py::test_capability_invocation_arm_index_preserves_jsonl_diagnostics"
+        in seen["cmd"]
+    )
+    assert (
+        "tests/ops/test_capability_invocation_matrix.py::test_invocation_matrix_fails_closed_on_missing_model_receipt"
+        in seen["cmd"]
+    )
+    assert "tests/ops " not in seen["cmd"]
+    selection = json.loads((tmp_path / ".nexus" / "reports" / "changed_only_selection.json").read_text(encoding="utf-8"))
+    assert selection["fallback_used"] is False
+    assert selection["unmatched_paths"] == []
+
+
 def test_extract_junit_target_durations_aggregates_by_file_and_directory(tmp_path):
     junit_path = tmp_path / "junit.xml"
     junit_path.write_text(

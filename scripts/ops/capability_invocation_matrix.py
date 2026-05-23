@@ -14,7 +14,12 @@ if str(REPO_ROOT) not in sys.path:
 
 from nexus.engine.capability_aliases import normalize_capability_name
 from nexus.engine.capability_receipt_policy import REQUIRED_ROUTE_RUNTIME_CAPABILITIES
-from nexus.engine.capability_wiring_audit import build_capability_wiring_audit, unused_reason_for_row
+from nexus.engine.capability_wiring_audit import build_capability_wiring_audit
+from scripts.ops.capability_invocation_index import (
+    build_arm_index,
+    empty_capability_cell,
+    merge_capability_cell,
+)
 
 
 @dataclass(frozen=True)
@@ -32,52 +37,6 @@ def _load_jsonl(path: Path) -> list[dict[str, Any]]:
         if isinstance(payload, dict):
             rows.append(payload)
     return rows
-
-
-def _bool(value: Any) -> bool:
-    return bool(value)
-
-
-def _empty_cell() -> dict[str, Any]:
-    return {
-        "selected": False,
-        "invoked": False,
-        "evidence_present": False,
-        "gate_passed": False,
-        "outcome_contributed": False,
-        "public_safe": False,
-        "tasks": [],
-        "unused_reasons": [],
-        "selection_sources": [],
-    }
-
-
-def _merge_cell(cell: dict[str, Any], *, task_id: str, receipt: dict[str, Any]) -> None:
-    cell["selected"] = cell["selected"] or _bool(receipt.get("selected"))
-    cell["invoked"] = cell["invoked"] or _bool(receipt.get("invoked"))
-    cell["evidence_present"] = cell["evidence_present"] or _bool(receipt.get("evidence_present") or receipt.get("evidence"))
-    cell["gate_passed"] = cell["gate_passed"] or _bool(receipt.get("gate_passed") or receipt.get("gate"))
-    cell["outcome_contributed"] = cell["outcome_contributed"] or _bool(receipt.get("outcome_contributed"))
-    cell["public_safe"] = cell["public_safe"] or _bool(receipt.get("public_claim_safe"))
-    if task_id and task_id not in cell["tasks"]:
-        cell["tasks"].append(task_id)
-    source = str(receipt.get("selection_source") or "").strip()
-    if source and source not in cell["selection_sources"]:
-        cell["selection_sources"].append(source)
-    reason = unused_reason_for_row(
-        {
-            "selected": receipt.get("selected", False),
-            "adapter_exists": True,
-            "pending_executor": False,
-            "maturity": "production",
-            "invoked": receipt.get("invoked", False),
-            "evidence_present": receipt.get("evidence_present") or receipt.get("evidence"),
-            "gate_passed": receipt.get("gate_passed") or receipt.get("gate"),
-            "outcome_contributed": receipt.get("outcome_contributed", False),
-        }
-    )
-    if reason and reason not in cell["unused_reasons"]:
-        cell["unused_reasons"].append(reason)
 
 
 def _integrity_heatmap_entry(capability: str, item: dict[str, Any]) -> dict[str, Any]:
@@ -124,79 +83,7 @@ def _cell_integrity_heatmap_entry(capability: str, arm: dict[str, Any], cell: di
 
 def _arm_from_jsonl(name: str, path: Path) -> dict[str, Any]:
     rows = _load_jsonl(path)
-    capabilities: dict[str, dict[str, Any]] = {}
-    expected: set[str] = set()
-    public_safe: set[str] = set()
-    failures: list[dict[str, Any]] = []
-    diagnostics: list[dict[str, Any]] = []
-    for row in rows:
-        task_id = str(row.get("task_id") or "")
-        coverage = row.get("expected_capability_receipt_coverage") or {}
-        for cap in coverage.get("expected", []) or []:
-            normalized = normalize_capability_name(cap)
-            if normalized:
-                expected.add(normalized)
-                capabilities.setdefault(normalized, _empty_cell())
-        for cap in coverage.get("public_safe", []) or []:
-            normalized = normalize_capability_name(cap)
-            if normalized:
-                public_safe.add(normalized)
-        receipts = row.get("capability_receipts") or []
-        if isinstance(receipts, str):
-            try:
-                receipts = json.loads(receipts)
-            except json.JSONDecodeError:
-                receipts = []
-        for receipt in receipts if isinstance(receipts, list) else []:
-            if not isinstance(receipt, dict):
-                continue
-            cap = normalize_capability_name(receipt.get("name") or receipt.get("capability"))
-            if not cap:
-                continue
-            cell = capabilities.setdefault(cap, _empty_cell())
-            _merge_cell(cell, task_id=task_id, receipt=receipt)
-        for cap in coverage.get("expected", []) or []:
-            normalized = normalize_capability_name(cap)
-            cell = capabilities.get(normalized, _empty_cell()) if normalized else _empty_cell()
-            if not normalized:
-                continue
-            if not cell.get("selected") or not cell.get("invoked") or not cell.get("evidence_present"):
-                failures.append(
-                    {
-                        "task_id": task_id,
-                        "kind": "expected_capability_not_invoked_with_evidence",
-                        "capability": normalized,
-                        "selected": bool(cell.get("selected")),
-                        "invoked": bool(cell.get("invoked")),
-                        "evidence_present": bool(cell.get("evidence_present")),
-                        "failure_reason": (coverage.get("failure_reasons") or {}).get(normalized),
-                    }
-                )
-            elif not cell.get("public_safe"):
-                diagnostics.append(
-                    {
-                        "task_id": task_id,
-                        "kind": "expected_capability_invoked_but_not_public_safe",
-                        "capability": normalized,
-                        "gate_passed": bool(cell.get("gate_passed")),
-                        "outcome_contributed": bool(cell.get("outcome_contributed")),
-                        "failure_reason": (coverage.get("failure_reasons") or {}).get(normalized),
-                    }
-                )
-        if not str(row.get("route_decision_schema_version") or "").strip():
-            failures.append({"task_id": task_id, "kind": "route_decision_missing"})
-    return {
-        "arm": name,
-        "path": str(path),
-        "kind": "jsonl",
-        "rows": len(rows),
-        "expected_capabilities": sorted(expected),
-        "public_safe_capabilities": sorted(public_safe),
-        "capabilities": capabilities,
-        "failures": failures,
-        "diagnostics": diagnostics,
-        "passed": bool(rows) and not failures,
-    }
+    return build_arm_index(rows).to_arm_payload(name=name, path=str(path))
 
 
 def _arm_from_smoke_summary(name: str, path: Path) -> dict[str, Any]:
@@ -211,13 +98,13 @@ def _arm_from_smoke_summary(name: str, path: Path) -> dict[str, Any]:
             normalized = normalize_capability_name(cap)
             if normalized:
                 expected.add(normalized)
-                capabilities.setdefault(normalized, _empty_cell())
+                capabilities.setdefault(normalized, empty_capability_cell())
         for cap in suite.get("public_safe_capabilities", []) or []:
             normalized = normalize_capability_name(cap)
             if not normalized:
                 continue
             public_safe.add(normalized)
-            cell = capabilities.setdefault(normalized, _empty_cell())
+            cell = capabilities.setdefault(normalized, empty_capability_cell())
             receipt = {
                 "selected": True,
                 "invoked": True,
@@ -226,7 +113,7 @@ def _arm_from_smoke_summary(name: str, path: Path) -> dict[str, Any]:
                 "outcome_contributed": True,
                 "public_claim_safe": True,
             }
-            _merge_cell(cell, task_id=suite_name, receipt=receipt)
+            merge_capability_cell(cell, task_id=suite_name, receipt=receipt)
     return {
         "arm": name,
         "path": str(path),
@@ -289,7 +176,7 @@ def _combine_matrix(
         per_arm = {}
         ever_selected = ever_invoked = ever_evidence = ever_outcome = ever_public_safe = False
         for arm in arms:
-            cell = (arm.get("capabilities") or {}).get(cap, _empty_cell())
+            cell = (arm.get("capabilities") or {}).get(cap, empty_capability_cell())
             cell["integrity_heatmap"] = _cell_integrity_heatmap_entry(cap, arm, cell)
             per_arm[arm["arm"]] = cell
             ever_selected = ever_selected or bool(cell.get("selected"))

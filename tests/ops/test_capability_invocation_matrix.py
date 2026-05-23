@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
+from scripts.ops.capability_invocation_index import build_arm_index
 from scripts.ops.capability_invocation_matrix import ArmInput, build_invocation_matrix
 
 
@@ -222,3 +223,83 @@ def test_invocation_matrix_exposes_runtime_backed_executor_claim_scope(tmp_path:
     assert payload["matrix"]["swarm"]["allowed_claim_scope"] == "runtime_backed"
     assert payload["matrix"]["swarm"]["wiring_status"] == "runtime_backed"
     assert payload["diagnostics"] == []
+
+
+def test_capability_invocation_arm_index_preserves_jsonl_diagnostics():
+    receipt = _receipt("swarm")
+    receipt["evidence_present"] = False
+    rows = [
+        {
+            "task_id": "task-1",
+            "route_decision_schema_version": "",
+            "expected_capability_receipt_coverage": {
+                "expected": ["swarm"],
+                "public_safe": [],
+                "failure_reasons": {"swarm": "missing_public_safe"},
+            },
+            "capability_receipts": json.dumps([receipt]),
+        }
+    ]
+
+    index = build_arm_index(rows)
+    payload = index.to_arm_payload(name="flash", path="/tmp/flash.jsonl")
+
+    assert payload["rows"] == 1
+    assert payload["expected_capabilities"] == ["swarm"]
+    assert payload["public_safe_capabilities"] == []
+    assert payload["capabilities"]["swarm"]["selected"] is True
+    assert payload["capabilities"]["swarm"]["invoked"] is True
+    assert payload["capabilities"]["swarm"]["evidence_present"] is False
+    assert payload["failures"] == [
+        {
+            "task_id": "task-1",
+            "kind": "expected_capability_not_invoked_with_evidence",
+            "capability": "swarm",
+            "selected": True,
+            "invoked": True,
+            "evidence_present": False,
+            "failure_reason": "missing_public_safe",
+        },
+        {"task_id": "task-1", "kind": "route_decision_missing"},
+    ]
+
+
+def test_capability_invocation_arm_index_fails_closed_on_malformed_receipts():
+    rows = [
+        {
+            "task_id": "task-1",
+            "route_decision_schema_version": "nexus_route_decision_v1",
+            "expected_capability_receipt_coverage": {
+                "expected": ["swarm"],
+                "public_safe": [],
+                "failure_reasons": {"swarm": "malformed_receipts"},
+            },
+            "capability_receipts": "[not-json",
+        }
+    ]
+
+    payload = build_arm_index(rows).to_arm_payload(name="flash", path="/tmp/flash.jsonl")
+
+    assert payload["passed"] is False
+    assert payload["capabilities"]["swarm"] == {
+        "selected": False,
+        "invoked": False,
+        "evidence_present": False,
+        "gate_passed": False,
+        "outcome_contributed": False,
+        "public_safe": False,
+        "tasks": [],
+        "unused_reasons": [],
+        "selection_sources": [],
+    }
+    assert payload["failures"] == [
+        {
+            "task_id": "task-1",
+            "kind": "expected_capability_not_invoked_with_evidence",
+            "capability": "swarm",
+            "selected": False,
+            "invoked": False,
+            "evidence_present": False,
+            "failure_reason": "malformed_receipts",
+        }
+    ]

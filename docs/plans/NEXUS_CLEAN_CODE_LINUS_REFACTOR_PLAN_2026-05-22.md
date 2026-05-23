@@ -40,11 +40,11 @@ Status legend:
 
 | Area | Status | 未完成內容 | 可開工條件 |
 | --- | --- | --- | --- |
-| Benchmark harness facade | `PARTIAL` | `capability_ab_runner.py` 仍是 benchmark orchestration facade，保留 sequencing、side-effect adapters、public gate context inputs。 | 只有新的 failing evidence 證明某個 side-effect orchestration seam 需要切，才開更小 slice。 |
+| Benchmark harness facade | `NO_SPLIT_NOW` | `capability_ab_runner.py` 仍是 benchmark orchestration facade；provider-token、session-worker contamination、telemetry fidelity focused probes 已通過。 | 只有新的 failing evidence 證明某個 side-effect orchestration seam 需要切，才開更小 slice。 |
 | External fixture live clone/setup | `DEFERRED` | offline cache manifest Adapter 已完成；尚未實作 remote clone/setup concrete Adapter。 | 需明確 live-network allowlist、socket/no-network barrier、cache provenance receipt；預設仍 fail-closed。 |
-| CLI root registration | `PARTIAL` | `sandbox run` 已抽成 Action seam；`nexus_cli.py` 仍保留 Click registration、compat shims、部分 thin adapter。 | 只有 CLI output schema / deprecated alias / audit test 出現新 failing evidence 才開小切片。 |
+| CLI root registration | `DONE_ACTION_WIRING_ROOT_REGISTRATION_REMAINS` | `code`、`bench effort`、`skills/registry`、`sandbox run`、`multi-agent`、`learn/ask`、`research` live Click commands 已委派 Action/renderer；`sandbox run` 已接本地 physical runner contract；`research:run` 舊內聯 body 已物理刪除。`nexus_cli.py` 仍保留 Click group registration 與 compat shims。 | 後續只在 CLI output schema / deprecated alias / root-registration audit 出現新 failing evidence 時開小切片；sandbox 後續只允許在 no-network / allowlist / hook policy 有新 failing evidence 時擴張。 |
 | Research flow runtime receipts | `PARTIAL` | RLM trace、runtime skill-mount contract、semantic runtime receipt augmentation leaf 已完成；`research_flow_service.py` 仍可切 auto-flow executor 或 S2T serialization leaf。 | 需 focused tests 證明 payload 不漂移；不可打開 recursive runtime dispatch。 |
-| ContextHub storage/retry next leaf | `DEFERRED` | SQLite-backed fallback / retry leaf 未開。 | 需新的 caller map、deletion test、busy/locked fixture，且不得改 constructor compatibility / strict deps 行為。 |
+| ContextHub storage/retry next leaf | `DEFERRED_CALLER_MAP_DONE_NO_SQLITE` | SQLite-backed fallback / retry leaf 未開；2026-05-23 caller map 證明 current ContextHub path 只有 `ContextTextStore` UTF-8 text/JSON reads 與 budget-source shaping，沒有 `sqlite3` / `SQLiteRetryHandler` writer。 | 只有真 storage responsibility 引入 SQLite-backed fallback，且有 deletion test / busy-locked fixture，才開 code slice；不得改 constructor compatibility / strict deps 行為。 |
 | SQLite transaction manager | `DEFERRED` | `memory_manager.py` 與 `skill_registry.py` 已共用 `SQLiteRetryHandler`；尚未升級成全域 `DatabaseTransactionManager`。 | 需第三個 writer 或重複 transaction-shape duplication 證明 context manager seam 有價值。 |
 | Capability planner / pipeline repair deeper split | `DEFERRED` | 不做 broad split。 | 僅在 policy order / injection equivalence / repair RLM acceptance gate 出現 failing evidence 時重開。 |
 | Root hygiene | `DEFERRED` | root-level entrypoint / generated artifact cleanup 未主動搬移。 | 一次一個 entrypoint；需 wrapper、reference map、CLI smoke。 |
@@ -54,7 +54,7 @@ Status legend:
 
 本計劃的「可在不影響 runtime/public gates 下直接完成」部分已完成到下一層：Research semantic runtime receipt leaf 也已切出。剩餘項目不是漏做，而是按 Clean Code / Linus 原則刻意保留在 `PARTIAL` 或 `DEFERRED`：沒有 caller map、deletion test、focused failing evidence 前，不用 file-size-only 理由繼續拆。
 
-目前可接續開工證據包已整理於 `docs/reports/NEXUS_REFACTOR_REMAINING_START_EVIDENCE_2026-05-23.md`。`SkillRegistry` SQLite retry 第二 writer、`sandbox_actions.py` CLI Action seam、external fixture offline cache manifest pregate 已完成。下一個可接續項只剩 evidence-first 類型：real `SandboxRunner.run_task` 需要先定 physical execution contract；benchmark / CLI root registration / ContextHub storage 仍需依該 evidence report 的 first RED 與 stop condition 啟動。
+目前可接續開工證據包已整理於 `docs/reports/NEXUS_REFACTOR_REMAINING_START_EVIDENCE_2026-05-23.md`。`SkillRegistry` SQLite retry 第二 writer、`sandbox_actions.py` CLI Action seam、`SandboxRunner.run_task` 本地 physical contract、external fixture offline cache manifest pregate、CLI live Action adapter sweep 已完成。下一個可接續項只剩 evidence-first 類型：benchmark / CLI root registration audit / ContextHub storage / sandbox no-network hardening 仍需依該 evidence report 的 first RED 與 stop condition 啟動。
 
 ### 0.4 未完成項開工證據包
 
@@ -62,12 +62,284 @@ Status legend:
 | --- | --- | --- | --- |
 | Benchmark orchestration facade | 找到一個 public gate / accounting / provider side-effect drift。 | 鎖定單一 `tests/benchmark/test_capability_ab_runner.py::<nodeid>`；先證明現有行為，再抽一個 seam。 | 不改 public claim gate schema；不開 live provider socket。 |
 | External fixture live clone/setup | offline cache manifest / remote denylist 已完成；下一步只剩 live-network allowlist 與 cache provenance receipt。 | 新 RED 必須先證明 socket/no-network barrier 與 allowlist receipt。 | 沒有 live-network allowlist + no-network barrier 前，不允許 remote clone。 |
-| CLI root registration facade | `sandbox run` 已完成；後續只能再選單一 command group 的 output schema / deprecated alias audit。 | `tests/engine/test_cli_*::<nodeid>` 先固定 stdout/stderr/exit code。 | Action Module 不 import Click；`KeyboardInterrupt` / `click.Abort` pass-through。 |
+| CLI root registration facade | live Action adapter sweep 已完成；後續只剩 root group registration、compat alias、output schema audit 類工作。 | `tests/engine/test_cli_*::<nodeid>` 先固定 stdout/stderr/exit code。 | Action Module 不 import Click；`KeyboardInterrupt` / `click.Abort` pass-through；不做 broad CLI rewrite。 |
+| Sandbox physical runner | `run_task` 本地 physical contract 已完成：local workspace copy、explicit command、relative cwd、optional output artifact、cleanup、timeout、exit code / stdout / stderr、cwd/output path escape fail-closed。 | 下一個 RED 只允許針對 socket/no-network hard barrier、allowlist、hook policy、artifact provenance 等新增安全約束。 | 不把現有 `run_challenge(repo_url, task)` 偷接成 remote flow；不開 remote clone / fetch / hook；不得宣稱 kernel-level network sandbox。 |
 | Research runtime receipt next leaf | `semantic runtime capability augmentation` 已完成；下一個只剩 auto-flow executor 或 S2T serialization caller map。 | snapshot auto-flow / S2T payload；extract only if payload stable。 | 不開 recursive runtime dispatch；不改 public-safe semantics。 |
-| ContextHub storage/retry next leaf | caller map + deletion test for exact storage responsibility。 | monkeypatch `ContextHub` facade to prove leaf use before moving code。 | 不改 constructor compatibility / strict deps。 |
+| ContextHub storage/retry next leaf | caller map 已補：current path 無 SQLite writer；下一步只在真 storage responsibility 出現時補 deletion test。 | monkeypatch `ContextHub` facade to prove new leaf use before moving code；若是 SQLite fallback，先寫 busy/locked fixture。 | 不改 constructor compatibility / strict deps；不為 synthetic SQLite writer 寫假 fixture。 |
 | SQLite transaction manager | 已完成 second writer：`SkillRegistry`。 | 下一步只在第三個 writer 或 transaction-shape duplication 出現時新增 context manager RED。 | 不因兩個 writer 已共用 retry helper就立即建立 global transaction manager。 |
 | Planner / repair deeper split | collect failing policy-order / injection / RLM acceptance evidence. | focused failing acceptance nodeid first. | 不做 broad split from line count. |
 | Root hygiene | wrapper + reference map + CLI smoke for one entrypoint. | smoke proves old and new entrypoints both work. | 不做 broad move. |
+
+### 0.5 2026-05-23 續作評估 / 實作結果
+
+本輪重新驗證 live checkout 後，發現 `ContextHub` 兩個 split Module 已存在，但 facade 還沒有委派到 split Module；原本 `DONE` 宣稱缺少 live facade deletion tests。已完成最小安全修正：
+
+| Area | Result | Evidence |
+| --- | --- | --- |
+| ContextHub budget-source facade delegation | `DONE` | `ContextHub._context_budget_sources` 改委派 `build_context_budget_sources(...)`；新增 monkeypatch deletion test。 |
+| ContextHub text-store facade delegation | `DONE` | `ContextHub.load_program_rules` 與 `_load_last_handoff` 改委派 `ContextTextStore`；新增 monkeypatch deletion test。 |
+| ContextHub token estimator dedupe | `DONE` | `ContextHub._estimate_context_tokens` 改委派 `estimate_context_tokens(...)`。 |
+| Impact map coverage | `DONE` | `docs/testing/test_impact_map.md` 新增 ContextHub split source/test rows，避免 changed-only gate fallback。 |
+
+RED:
+
+- `uv run pytest tests/core/test_context_hub_strict_deps.py::test_context_hub_uses_split_context_budget_source_builder tests/core/test_context_hub_strict_deps.py::test_context_hub_uses_split_context_text_store -q`
+- Result: `2 failed`，`context_hub` 沒有 `build_context_budget_sources` / `ContextTextStore` monkeypatch targets。
+
+GREEN:
+
+- `uv run pytest tests/core/test_context_hub_strict_deps.py::test_context_hub_uses_split_context_budget_source_builder tests/core/test_context_hub_strict_deps.py::test_context_hub_uses_split_context_text_store tests/core/test_context_budget_sources.py tests/core/test_context_text_store.py -q`
+- Result: `6 passed`。
+
+剩餘未完成項仍按 evidence-first gate 管制：
+
+- Benchmark harness facade：provider-token / session-worker contamination / telemetry fidelity nodeids 已通過；沒有 side-effect drift 前不切 seam。
+- External fixture live clone/setup：先補 live-network allowlist、no-network barrier、cache provenance receipt；目前不實作 live clone。
+- CLI sandbox physical runner：已補 `SandboxRunner.run_task` 本地 physical execution contract 與 sandbox hardening：Python child external socket barrier、artifact sha256 provenance receipt、source hook non-copy receipt。下一步只針對非 Python command 的 OS/kernel 級 network isolation 或 live-network allowlist 的新 failing evidence 開工，仍不讓 CLI 假造 sandbox success。
+- Research runtime receipt：只在 auto-flow / S2T payload snapshot 穩定後切 leaf；不開 full recursive dispatch。
+- ContextHub SQLite storage/retry：caller map 已補且確認 current ContextHub 沒有 SQLite writer；需新真實 storage responsibility + busy/locked fixture，才允許開 SQLite fallback。
+
+### 0.5.1 2026-05-23 缺口證據補強
+
+| Area | Result | Evidence |
+| --- | --- | --- |
+| Sandbox physical runner | `DONE_HARDENED_LOCAL_PHYSICAL_CONTRACT` | 新增 `SandboxRunner.run_task(...)` 本地 contract；`tests/engine/test_sandbox_actions.py` 覆蓋 explicit command fail-closed、本地 command 執行、artifact sha256 provenance、cleanup、cwd escape block、source symlink non-following、source git hook non-copy receipt、Python child external socket barrier、CLI option passthrough。 |
+| ContextHub storage/retry | `DONE_CALLER_MAP_ONLY` | Bounded caller map 證明 current ContextHub path 只有 `ContextTextStore` UTF-8 text/JSON reads 與 `build_context_budget_sources(...)` shaping，沒有 SQLite writer；因此不開 synthetic busy/locked fixture。 |
+| CLI registry/skills Action wiring | `DONE_LIVE_ADAPTER_RESTORED` | `registry_actions.py` 與 tests 已存在，但 live `nexus_cli.py` 仍未 import/delegate；已將 `skills sync/list`、`registry status` 降為 thin Click adapters 並套 `translate_action_exceptions`。 |
+
+Verification:
+
+- RED artifact provenance：`tests/engine/test_sandbox_actions.py::test_default_sandbox_runner_executes_local_command_and_collects_output` 先因 `KeyError: 'output_artifact'` 失敗；GREEN 後 output artifact receipt 包含 sandbox relative path、artifact path、sha256、size bytes。
+- RED Python socket barrier：`tests/engine/test_sandbox_actions.py::test_default_sandbox_runner_blocks_python_external_socket` 先證明 `socket.create_connection(('example.com', 80))` 在 child Python 內成功；GREEN 後由 runner-owned `sitecustomize.py` 阻斷 external host 並保留 loopback allowed boundary。
+- RED hook policy receipt：`tests/engine/test_sandbox_actions.py::test_default_sandbox_runner_does_not_copy_source_git_hooks` 先因 `KeyError: 'hook_policy'` 失敗；GREEN 後 result 明確記錄 source git metadata / hooks 未複製且 hooks 不允許。
+- `uv run pytest tests/engine/test_sandbox_actions.py -q` -> `10 passed`.
+- `uv run python -m py_compile nexus/engine/sandbox_runner.py scripts/engine/commands/sandbox_actions.py scripts/engine/nexus_cli.py tests/engine/test_sandbox_actions.py` -> `PASSED`.
+- `uv run pytest tests/engine/test_sandbox_actions.py tests/engine/test_cli_artifact_gate_audit.py tests/engine/test_cli_semantic_contract_audit.py tests/test_cli_commands.py -q` -> `49 passed`.
+- `uv run pytest tests/engine/test_bench_actions.py tests/engine/test_code_actions.py tests/engine/test_multi_agent_actions.py tests/engine/test_learn_actions.py tests/engine/test_research_actions.py tests/engine/test_registry_actions.py tests/engine/test_sandbox_actions.py -q` -> `101 passed`.
+- `uv run scripts/ops/ci_gate.py --changed-only nexus/engine/sandbox_runner.py scripts/engine/commands/sandbox_actions.py scripts/engine/nexus_cli.py tests/engine/test_sandbox_actions.py docs/testing/test_impact_map.md docs/plans/NEXUS_CLEAN_CODE_LINUS_REFACTOR_PLAN_2026-05-22.md docs/reports/NEXUS_REFACTOR_REMAINING_START_EVIDENCE_2026-05-23.md "nexus_wiki_vault/06_Ops/Ops - Learning Closure Matrix.md"` -> `Changed-Only JIT Tests PASSED`.
+- `uv run scripts/ops/ci_gate.py` -> `ALL QUALITY GATES PASSED`.
+- `uv run pytest tests/engine/test_registry_actions.py -q` -> RED `6 failed` because `nexus_cli.py` exposed no `get_registry_status` / `get_skills_list` / `sync_external_skills`; GREEN `12 passed` after CLI adapter wiring.
+- `uv run pytest tests/engine/test_registry_actions.py tests/engine/test_cli_exception_translation.py tests/engine/test_nexus_cli_registry.py -q` -> `20 passed`.
+- `uv run scripts/ops/ci_gate.py --changed-only scripts/engine/nexus_cli.py scripts/engine/commands/registry_actions.py tests/engine/test_registry_actions.py docs/testing/test_impact_map.md docs/plans/NEXUS_CLEAN_CODE_LINUS_REFACTOR_PLAN_2026-05-22.md docs/reports/NEXUS_REFACTOR_REMAINING_START_EVIDENCE_2026-05-23.md "nexus_wiki_vault/06_Ops/Ops - Learning Closure Matrix.md"` -> initial fallback failure from missing test self row; after adding `tests/engine/test_registry_actions.py` row, `Changed-Only JIT Tests PASSED`.
+
+### 0.6 2026-05-23 Complexity Scan 建議採納判定
+
+參考 `/Users/jameschen/Workspace/nexus-perplexity/nexus_complexity_report.md` 與本輪 live checkout 量測。該 report 是 heuristic hotspot scan，不等於 profiler-backed performance proof；採納方式必須先轉成 caller map、characterization tests、focused RED，再進 code。
+
+| Agent 建議 | 判定 | 併入計劃方式 |
+| --- | --- | --- |
+| `skill_fit_followup.py` / `skill_fit_ablation_core.py` 預索引與拆 leaf | `採納` | 新增 `P6A Skill-fit data-shape pregate`：先固定 RCA / taskset / candidate selection output，再抽 `SkillFitRowIndex` / `SkillFitCandidateIndex` 類深 Module；Interface 必須只接受 frozen / mapping inputs，Implementation 才處理 grouping、bucket counts、sorted top rows。 |
+| `sf2_bounded_probe.py` 多處 nested-loop / sort-in-loop | `採納為 tests-only pregate` | 新增 `P6D SF2 bounded-probe fail-closed characterization`：先固定 verdict catalog、live receipt validation、promotion review、completion gate 的多 capability / blocker / runtime-public false contract；不因 heuristic scan 直接抽 production。 |
+| `scripts/ops/capability_invocation_matrix.py` 消除 rows × capabilities × receipts 重複掃描 | `採納` | 新增 `P6B Capability invocation matrix index`：先以 JSONL fixture 固定 matrix/diagnostics，再建立 arm-level index，把 expected/public_safe/receipt cells 一次投影為 dict/set。 |
+| `capability_ab_runner.py` 抽 `benchmark_sequencer.py` / `side_effect_adapter.py`，Facade 壓到 200 行 | `方向採納，立即降級為 gate` | 不用行數目標做 broad split；只允許在 public gate / accounting / provider context / row mutation 出現 focused drift 時，切單一 sequencing 或 side-effect Module。`200 行 facade` 不列為成功條件。 |
+| `contracts/s2t_export.py` / `engine/asi_constraints.py` sort 外置化 | `採納為低風險 pregate` | 兩檔很小，先做 characterization：S2T preference pairs ordering、ASI grouped constraint ordering 必須穩定；若 scan 確認 repeated sort 真的在 event loop 熱路徑，再改成 one-pass best rejected candidate / pre-grouped ordered records。 |
+| 全域 frozen config / `FixtureConfig` | `已吸收，不重開` | `ExternalFixtureCacheManifest`、fixture request/source/result、runner/action dataclasses 已是 frozen；後續只補缺口，不做 blanket rewrite。 |
+| CLI Click / Action seam / exception translation | `已完成主要 seam，不重開 broad CLI rewrite` | `translate_action_exceptions` 已存在且保留 `KeyboardInterrupt` / `click.Abort` / `SystemExit` 穿透；新 CLI work 只能選單一 command group 與 output schema RED。 |
+| `learning_policy_loader.py` matcher / S2T / expected-capability 解耦 | `已完成，不重複列為新債` | `route_cost_policy_matcher.py`、`expected_capability_policy.py`、`s2t_policy_loader.py` 已存在；剩餘債務只在新 failing evidence 出現時開。 |
+| no-network socket barrier | `採納，但維持 runner-scoped` | `runner_socket_barrier.py` 已阻斷 external host 並允許 loopback；暫不把 pytest 全域 socket disable 設為預設，以免 coverage/debugger/local services 假陽性。Provider/helper tests 若涉及 runner 必須 opt-in barrier。 |
+| `research_flow_service.py` / CodeIntel I/O in loop | `採納為 caller-map pregate` | 先查 `_load_codeintel_graph`、target file restore、companion edit read paths 的 caller map 與 payload snapshot；只切 read-through cache / leaf Module，不改 runtime receipt semantics。 |
+| local analysis tools / hook | `採納工具，不採納立即 hook` | `docs/info/nexus_flow.json/html` 可作拓撲參考；`codex-complexity-optimizer` 只作 heuristic lead；`codegraph-audit` 可用 `/private/tmp` disposable snapshot index；`graphify hook` 會寫 git hook，artifact ownership 未定前不安裝 hook。 |
+
+Tool rerun note:
+
+- The old memory path `/Users/jameschen/.codex/skills/complexity-optimizer/scripts/analyze_complexity.py` is stale.
+- Current scanner path: `/Users/jameschen/Workspace/test/codex-complexity-optimizer/complexity-optimizer/scripts/analyze_complexity.py`.
+- 2026-05-23 scoped reruns against `nexus/learning`, `nexus/core`, and `scripts/ops` kept the same policy: use findings as leads, then require public characterization tests before production extraction.
+
+#### P6A. Skill-fit Data-Shape Pregate
+
+Status: `DONE_INITIAL_PREGATE_ROW_INDEX_CATALOG_INDEX_EXECUTION_MATRIX_AND_CANDIDATE_SELECTION_CHARACTERIZATION_2026-05-23`
+
+Files:
+
+- `nexus/learning/skill_fit_followup.py`
+- `nexus/learning/skill_fit_ablation_core.py`
+- `nexus/learning/skill_fit_status.py`
+- `tests/learning/test_skill_fit_data_shape_pregate.py`
+- `tests/learning/` 或現有 skill-fit focused tests
+
+Problem:
+
+- Complexity scan 指出 `skill_fit_followup.py` 21 個 heuristic findings，`skill_fit_ablation_core.py` 9 個 findings。
+- Live inspection 顯示重複 pattern：row grouping、catalog lookup、candidate capability membership、bucket counting、top-wall row sorting 分散在多個 function。
+
+Deep Module candidate:
+
+- Module: `SkillFitRowIndex`
+- Interface: `from_run_summary(run_summary, catalog, capability) -> SkillFitRowIndex`
+- Implementation: baseline rows、rows_by_skill、catalog_by_skill、bucket counts、effective rows、phase costs 等預索引。
+- Deletion test: 刪除此 Module 後，row grouping / lookup / sorting 會回流到至少 RCA、cost phase contract、candidate followup 三個 caller。
+- Module: `SkillFitCatalogIndex`
+- Interface: `from_run_summary(run_summary) -> SkillFitCatalogIndex`
+- Implementation: catalog rows、capability-only rows、negative-control rows、`(capability, skill_id)` row groups、planned/completed row counts。
+- Deletion test: 刪除此 Module 後，catalog grouping / negative-control separation / matrix count shaping 會回流到 `build_skill_fit_catalog(...)`。
+
+First RED / characterization:
+
+- 固定 `build_skill_fit_row_level_rca(...)` output。
+- 固定 `build_skill_fit_cost_phase_contract(...)` top-wall ordering 與 cost shares。
+- 固定 governance taskset selection / missing specs output。
+
+Completed initial pregate:
+
+- Added pure in-memory Interface `build_skill_fit_data_shape_pregate(...)`.
+- The pregate validates catalog / promotion policy / threshold contract pair consistency before any row-index refactor.
+- It always returns `runtime_update_allowed=false` and `public_benchmark_allowed=false`.
+- Added deletion tests for missing receipts, missing threshold pair, and accidental runtime/public unlock.
+- Added changed-only impact-map rows for `skill_fit_status.py` and the new pregate test file.
+
+Completed row-index slice:
+
+- Added frozen `SkillFitRowIndex` in `nexus/learning/skill_fit_followup.py`.
+- Reused that index in `build_skill_fit_row_level_rca(...)` and `build_skill_fit_cost_phase_contract(...)` for capability filtering, baseline lookup, skill grouping, catalog lookup, and stable skill ordering.
+- Added `test_skill_fit_row_index_groups_baselines_catalog_and_skill_rows_for_rca_and_cost` as the deletion/characterization test.
+- Added changed-only impact-map rows for `nexus/learning/skill_fit_followup.py` and the edited `tests/learning/test_skill_fit_ablation.py` test file.
+
+Completed catalog-index slice:
+
+- Added frozen `SkillFitCatalogIndex` in `nexus/learning/skill_fit_ablation_core.py`.
+- Reused that index in `build_skill_fit_catalog(...)` for capability-only row accounting, negative-control rows, planned/completed counts, and `(capability, skill_id)` grouping.
+- Added `test_skill_fit_catalog_index_groups_rows_by_capability_and_skill_id` as the deletion/characterization test.
+- Added changed-only impact-map rows for `nexus/learning/skill_fit_ablation_core.py` and the edited `tests/learning/test_skill_fit_ablation.py` test file.
+
+Completed execution-matrix characterization slice:
+
+- Added public-interface characterization `test_execution_matrix_characterizes_public_row_shape_for_all_arm_types`.
+- The test fixes row id shape, task ref, model propagation, gate requirements, runner args, runner env, mount requests, and expected outcomes for `capability_only`, `skill_ablation`, and `wrong_or_quarantined_skill`.
+- No production code was changed; this is a deletion test for a future `SkillFitExecutionMatrixIndex` / row-contract deep Module, not an extraction.
+- Hook decision remains `NO_HOOK`: the current impact-map plus focused nodeids covers this slice without adding index daemons or git ownership.
+
+Completed candidate-selection characterization slice:
+
+- Added public-interface characterization `test_skill_fit_plan_characterizes_public_candidate_selection_contract`.
+- The test fixes the current candidate selection contract through `build_skill_fit_ablation_plan(...)`: one highest-relevance runtime baseline first, then preferred/external distinct candidates, with blocked skills, generic skills, and canonical `gstack-` aliases excluded.
+- No production code was changed; this is evidence for a future `SkillFitCandidateIndex` / candidate-contract Module, not an extraction.
+
+Evidence:
+
+- RED: `ImportError: cannot import name 'build_skill_fit_data_shape_pregate' from 'nexus.learning.skill_fit_status'`.
+- GREEN: `uv run pytest tests/learning/test_skill_fit_data_shape_pregate.py -q` -> `4 passed`.
+- ROW-INDEX RED: `ImportError: cannot import name 'SkillFitRowIndex' from 'nexus.learning.skill_fit_followup'`.
+- ROW-INDEX GUARD: `uv run pytest tests/learning/test_skill_fit_data_shape_pregate.py tests/learning/test_skill_fit_ablation.py::test_skill_fit_row_index_groups_baselines_catalog_and_skill_rows_for_rca_and_cost tests/learning/test_skill_fit_ablation.py::test_skill_fit_row_level_rca_recommends_targeted_replay_for_promising_governance_skill tests/learning/test_skill_fit_ablation.py::test_skill_fit_cost_phase_contract_separates_cost_from_delivery_claims -q` -> `7 passed`.
+- CATALOG-INDEX RED: `ImportError: cannot import name 'SkillFitCatalogIndex' from 'nexus.learning.skill_fit_ablation_core'`.
+- CATALOG-INDEX GUARD: `uv run pytest tests/learning/test_skill_fit_ablation.py::test_skill_fit_catalog_requires_receipt_backed_effective_rows tests/learning/test_skill_fit_ablation.py::test_skill_fit_catalog_groups_verdicts_by_capability_and_skill_id tests/learning/test_skill_fit_ablation.py::test_skill_fit_catalog_index_groups_rows_by_capability_and_skill_id tests/learning/test_skill_fit_ablation.py::test_skill_fit_catalog_returns_when_matrix_incomplete tests/learning/test_skill_fit_data_shape_pregate.py tests/learning/test_skill_fit_ablation.py::test_skill_fit_row_index_groups_baselines_catalog_and_skill_rows_for_rca_and_cost tests/learning/test_skill_fit_ablation.py::test_skill_fit_row_level_rca_recommends_targeted_replay_for_promising_governance_skill tests/learning/test_skill_fit_ablation.py::test_skill_fit_cost_phase_contract_separates_cost_from_delivery_claims -q` -> `11 passed`.
+- EXECUTION-MATRIX CHARACTERIZATION: `uv run pytest tests/learning/test_skill_fit_ablation.py::test_execution_matrix_characterizes_public_row_shape_for_all_arm_types tests/learning/test_skill_fit_ablation.py::test_execution_matrix_expands_tasks_by_arms_without_claiming_value tests/learning/test_skill_fit_ablation.py::test_skill_fit_catalog_index_groups_rows_by_capability_and_skill_id -q` -> `3 passed`.
+- CANDIDATE-SELECTION CHARACTERIZATION RED: initial `test_skill_fit_plan_characterizes_public_candidate_selection_contract` expected fixed `nexus-tdd` first; live public contract selected higher-relevance `runtime-repair` as the single runtime baseline.
+- CANDIDATE-SELECTION CHARACTERIZATION GREEN: `uv run pytest tests/learning/test_skill_fit_ablation.py::test_skill_fit_plan_characterizes_public_candidate_selection_contract -q` -> `1 passed`.
+- CANDIDATE-SELECTION GUARD: `uv run pytest tests/learning/test_skill_fit_ablation.py::test_skill_fit_plan_characterizes_public_candidate_selection_contract tests/learning/test_skill_fit_ablation.py::test_plan_prefers_named_repair_candidates_over_generic_candidates tests/learning/test_skill_fit_ablation.py::test_plan_dedupes_gstack_prefixed_skill_aliases tests/learning/test_skill_fit_ablation.py::test_execution_matrix_characterizes_public_row_shape_for_all_arm_types -q` -> `4 passed`.
+- CHANGED-ONLY: `uv run scripts/ops/ci_gate.py --changed-only <refactor-slice paths>` -> `Changed-Only JIT Tests PASSED`.
+- CHANGED-ONLY LESSON: first changed-only attempt fell back through the edited test file and hit missing local Playwright browser; fixed by adding the test-file self impact row.
+
+Stop conditions:
+
+- 不改 promotion / runtime apply / public benchmark gate。
+- 不把 heuristic finding 當作 performance claim；需要 fixture input-size 或 benchmark evidence 才宣稱速度改善。
+- 不把 `SkillFitRowIndex` 或 `SkillFitCatalogIndex` 擴成 policy engine；它們只做 row lookup/indexing。
+- `skill_fit_ablation_core.py` candidate selection 與 execution matrix 目前都已有 public characterization；尚未證明 production extraction 必要。
+
+#### P6B. Capability Invocation Matrix Index
+
+Status: `DONE_COMPLETION_SLICE_2026-05-23`
+
+Files:
+
+- `scripts/ops/capability_invocation_matrix.py`
+- `scripts/ops/capability_invocation_index.py`
+- tests under `tests/ops/`
+
+Problem:
+
+- Complexity scan 指出 `capability_invocation_matrix.py` 13 個 findings。
+- Live inspection 顯示 `_arm_from_jsonl(...)` 對 rows、expected capabilities、public-safe capabilities、capability receipts 多次掃描，同一 row 的 coverage/receipt normalization 可先投影。
+
+Deep Module candidate:
+
+- Module: `CapabilityInvocationArmIndex`
+- Interface: `build_arm_index(rows) -> CapabilityInvocationArmIndex`
+- Implementation: expected set、public_safe set、capability cells、failures、diagnostics、receipt parsing。
+- Leverage: matrix builder 與 diagnostics caller 可共用一次解析結果。
+- Locality: receipt parsing / capability normalization / missing evidence rules 集中。
+
+First RED / characterization:
+
+- 用固定 JSONL rows 斷言 current matrix payload、failure diagnostics、integrity heatmap 不漂移。
+- 加 malformed receipt string fixture，確保 fail-closed degrade 不變。
+
+Completed initial slice:
+
+- Added deep module `CapabilityInvocationArmIndex` with `build_arm_index(rows)`.
+- Kept `capability_invocation_matrix.py` as the arm orchestration / report facade.
+- Added changed-only hook rows for matrix/index source paths and the matrix test file.
+- Added changed-only selector contract to prevent fallback to broad `tests/ops`.
+- Added malformed receipt string characterization so bad `capability_receipts` JSON degrades fail-closed through the index instead of crashing or silently passing.
+
+Evidence:
+
+- RED: `ModuleNotFoundError: No module named 'scripts.ops.capability_invocation_index'`.
+- Completion characterization: malformed `capability_receipts` JSON now fails closed through `CapabilityInvocationArmIndex` as `expected_capability_not_invoked_with_evidence`.
+- Compile: `uv run python -m py_compile scripts/ops/capability_invocation_index.py scripts/ops/capability_invocation_matrix.py tests/ops/test_capability_invocation_matrix.py` -> `PASSED`.
+- GREEN: `uv run pytest tests/ops/test_capability_invocation_matrix.py tests/ops/test_ci_gate_report_trust_audit.py::test_run_changed_only_check_selects_capability_invocation_matrix_targets -q` -> `8 passed`.
+- Changed-only: `uv run scripts/ops/ci_gate.py --changed-only ...` -> `Changed-Only JIT Tests PASSED`.
+- Full gate: `uv run scripts/ops/ci_gate.py` -> `ALL QUALITY GATES PASSED`.
+
+Stop conditions:
+
+- 不改 report schema。
+- 不把 row order 改成 unstable dict order；輸出排序仍 canonical。
+
+#### P6C. Small Ordered-Data Pregates
+
+Status: `DONE_TESTS_ONLY_PREGATE_2026-05-23`
+
+Files:
+
+- `nexus/contracts/s2t_export.py`
+- `nexus/engine/asi_constraints.py`
+
+Decision:
+
+- 兩檔目前行數小，掃描命中可能是可讀性與資料結構契約問題，不是立即大拆目標。
+- 下一步只補 tests：S2T rejected candidate selection、ASI family ordering / confidence / evidence refs。
+- 若 RED 證明 sort-in-loop 造成 drift 或 hot path cost，再改為 constructor/pre-index sorted contract 或 one-pass best candidate。
+
+Completed tests-only pregate:
+
+- Added S2T characterization for stable event order and highest-scored failed rejected candidate selection.
+- Added ASI characterization for sorted families, confidence formula, evidence-ref order, and `trajectory_step_count=0` as unknown/non-filtered while low positive steps remain filtered.
+- Added changed-only impact-map rows for the source/test paths.
+- No production code changed because characterization passed and no drift was found.
+
+Evidence:
+
+- `uv run pytest tests/contracts/test_s2t_contracts.py::test_s2t_export_selects_highest_scored_failed_rejected_candidate_stably tests/engine/test_asi_constraints.py::test_asi_constraint_extractor_orders_families_and_preserves_evidence_refs -q` -> `2 passed`.
+
+#### P6D. SF2 Bounded-Probe Fail-Closed Pregate
+
+Status: `DONE_TESTS_ONLY_PREGATE_2026-05-23`
+
+Files:
+
+- `nexus/learning/sf2_bounded_probe.py`
+- `tests/learning/test_skill_route_taxonomy.py`
+
+Decision:
+
+- Complexity scan still flags SF2 bounded-probe nested-loop / sort-in-loop hotspots.
+- The correct next move is public-interface characterization, not production extraction.
+- Runtime default and public benchmark gates must remain false.
+
+Completed tests-only pregate:
+
+- Added `test_sf2_probe_verdict_catalog_characterizes_multicapability_fail_closed_shape`.
+- The test fixes multi-capability verdict ordering, blocked capability output, receipt validation blockers, promotion-review blockers, and completion gate fail-closed output.
+- Added changed-only impact-map rows for source and test paths.
+- No production code changed because characterization passed and no drift was found.
+
+Evidence:
+
+- `uv run pytest tests/learning/test_skill_route_taxonomy.py::test_sf2_probe_verdict_catalog_characterizes_multicapability_fail_closed_shape tests/learning/test_skill_route_taxonomy.py::test_sf2_bounded_probe_static_receipts_keep_runtime_and_benchmark_blocked tests/learning/test_skill_route_taxonomy.py::test_sf2_completion_gate_closes_only_after_receipts_and_dispositions -q` -> `3 passed`.
+- `python3 -m py_compile nexus/learning/sf2_bounded_probe.py tests/learning/test_skill_route_taxonomy.py` -> passed.
+- `uv run scripts/ops/ci_gate.py --changed-only <refactor-slice paths including sf2_bounded_probe.py and test_skill_route_taxonomy.py>` -> `Changed-Only JIT Tests PASSED`.
 
 ## 1. 目標
 
@@ -107,13 +379,16 @@ Status legend:
 
 | 檔案 | 行數 | 現況判讀 |
 | --- | ---: | --- |
-| `scripts/bench/capability_ab_runner.py` | 8786 | 最大剩餘 benchmark harness facade；fixture materialization/source selection、direct provider failure policy、runner seams、evidence artifact writer、evidence bundle gate builder、posture/x1/x3 gate helpers、payload finalizer/writer、rubric bundle、public cost accounting context、provider model-lock context、row-set context、manifest metadata context、payload header section、computed report/contract section、claim/posture section、telemetry completeness section、Nexus wearing context、wall-ledger bundle section、warning-clean section、posture-finalization section 與 top-level payload assembly 已抽出；runner 仍負責 sequencing、side-effect adapters、public gate context inputs 與 final bundle orchestration。 |
-| `scripts/engine/nexus_cli.py` | 2405 | Click command registration、少量 legacy command body 與 compat shims 仍集中；learn/research route/session/auto-flow/run/multi-agent/benchmark 多數行為已轉入 Action modules。 |
+| `scripts/bench/capability_ab_runner.py` | 10192 | 最大剩餘 benchmark harness facade；fixture materialization/source selection、direct provider failure policy、runner seams、evidence artifact writer、evidence bundle gate builder、posture/x1/x3 gate helpers、payload finalizer/writer、rubric bundle、public cost accounting context、provider model-lock context、row-set context、manifest metadata context、payload header section、computed report/contract section、claim/posture section、telemetry completeness section、Nexus wearing context、wall-ledger bundle section、warning-clean section、posture-finalization section 與 top-level payload assembly 已抽出；runner 仍負責 sequencing、side-effect adapters、public gate context inputs 與 final bundle orchestration。 |
+| `scripts/engine/nexus_cli.py` | 3337 | Click command registration、少量 legacy command body 與 compat shims 仍集中；learn/research route/session/auto-flow/run/multi-agent/benchmark 多數行為已轉入 Action modules。 |
 | `nexus/app/research_flow_service.py` | 3276 | 已比舊 Clean Code 基線小，但仍混合 route、CodeIntel context、runtime receipts、`run_auto_flow` 分支。 |
 | `nexus/engine/capability_planner.py` | 1332 | planner facade 仍大，但已有 planner seams；不應無證據大拆。 |
 | `nexus/engine/learning_policy_loader.py` | 742 | `LearningPolicyStore` 已存在；剩餘債務是 policy matching、env controls、expected-capability protection 耦合。 |
 | `nexus/engine/pipeline_repair.py` | 727 | repair facade 仍大，但 audit/evaluation/escalation/composed-result seams 已存在；只在 failing acceptance evidence 出現時再切。 |
-| `nexus/core/context_hub.py` | 588 | `context_view.py` 已存在；storage/budget/retry 仍可做 leaf extraction。 |
+| `nexus/core/context_hub.py` | 569 | `context_view.py`、`context_budget_sources.py`、`context_text_store.py` 已存在且 facade deletion tests 已補；下一步只允許 storage/retry caller-map leaf。 |
+| `nexus/learning/skill_fit_followup.py` | 1675 | complexity scan 最高密度 source file；下一步以 data-shape pregate 先固定 row/candidate/taskset output，再決定是否抽 `SkillFitRowIndex`。 |
+| `nexus/learning/skill_fit_ablation_core.py` | 1650 | skill-fit ablation / catalog settlement 邏輯仍大；只在 RCA / cost / catalog characterization tests 穩定後抽 index Module。 |
+| `scripts/ops/capability_invocation_matrix.py` | 458 | ops scan 最高密度檔之一；適合以 arm-level index 消除 rows × capability × receipt 重複掃描。 |
 
 已存在的抽取模組：
 
@@ -1239,7 +1514,7 @@ Only if failing acceptance evidence exists:
 - `P4 Research run Action extraction`：`scripts/engine/commands/research_actions.py` 新增 `run_research_run`、`ResearchRunResult` 與 renderer，把 `research:run` 的 governance guards、scheduler/evaluator/selector candidate lifecycle、retention、metabolism persistence、completion envelope、continuation command、handoff/report write 從 Click command body 抽出；CLI 降為 Click parsing、JSON echo 與 exit-code adapter。
 - `P4 Learn read-only Action extraction`：新增 `scripts/engine/commands/learn_actions.py`，把 `nexus learn:phase-policy` 與 `nexus learn:scheduler-status` 的讀取/推導邏輯與 text output schema render 從 Click command body 抽出；scheduler report JSON 讀取改為明確 `encoding="utf-8"`。
 - `P4 Learn benchmark Action extraction`：`scripts/engine/commands/learn_actions.py` 新增 `run_learn_precision_benchmark`、output writer 與 completion renderer，把 `nexus learn:benchmark` 的 manifest parsing、LearnModeService ask loop、precision/unknown metrics 與 JSON write contract 從 Click command body 抽出；legacy `source` / `source-file` 仍保持忽略語義。
-- `P4 Sandbox run Action extraction`：新增 `scripts/engine/commands/sandbox_actions.py`，把 `nexus sandbox run` 的 runner dispatch 與 success output schema 從 Click command body 抽出；CLI adapter 只保留 Click option parsing、exception translation 與 echo formatting。`SandboxRunner` 目前仍沒有真 `run_task` Interface，因此 Action 在 default runner 不具備該 Interface 時 fail-closed，不假造 sandbox success。
+- `P4 Sandbox run Action extraction`：新增 `scripts/engine/commands/sandbox_actions.py`，把 `nexus sandbox run` 的 runner dispatch 與 success output schema 從 Click command body 抽出；CLI adapter 只保留 Click option parsing、exception translation 與 echo formatting。後續已補 `SandboxRunner.run_task(...)` 本地 physical contract，Action 對缺少 explicit command 仍 fail-closed，不假造 sandbox success。
 - `P5 Route-cost policy matcher extraction`：新增 `nexus/engine/route_cost_policy_matcher.py`，把 feature-rule matching 與 controls extraction 從 `learning_policy_loader.py` 抽出；loader 保留 underscored import aliases，store/env/S2T I/O 不變。
 - `P5 Expected-capability policy extraction`：新增 `nexus/engine/expected_capability_policy.py`，把 expected-capability normalization、executor flags、receipt-lite lane allowance、candidate factory protection、baseline protection 從 `learning_policy_loader.py` 抽出；loader 保留原 public function import aliases。
 - `P5 S2T policy loader extraction`：新增 `nexus/engine/s2t_policy_loader.py`，把 S2T draft schema parsing、promotion gate、runtime merge 從 `learning_policy_loader.py` 抽出；loader 保留 `load_s2t_policy_draft_budget`、`merge_runtime_s2t_policy_draft`、`DEFAULT_S2T_POLICY_DRAFT_PATH` aliases。
@@ -1247,7 +1522,7 @@ Only if failing acceptance evidence exists:
 本輪驗證：
 
 - P4 sandbox run 初次 RED：`tests/engine/test_sandbox_actions.py` 匯入 `scripts.engine.commands.sandbox_actions` 失敗，證明 `sandbox_run_cmd` runner dispatch 與 output schema 仍留在 Click command body。
-- 修正：新增 `SandboxRunResult`、`run_sandbox_task(...)` 與 `render_sandbox_run_result(...)`；`nexus_cli.py::sandbox_run_cmd` 降為 thin adapter 並套 `translate_action_exceptions`。新增 fail-closed test，明確記錄 default `SandboxRunner` 仍缺 `run_task` Interface，不可假成功。
+- 修正：新增 `SandboxRunResult`、`run_sandbox_task(...)` 與 `render_sandbox_run_result(...)`；`nexus_cli.py::sandbox_run_cmd` 降為 thin adapter 並套 `translate_action_exceptions`。後續 `SandboxRunner.run_task(...)` 補上本地 workspace copy / command / cwd / output / cleanup / timeout / exit semantics；無 explicit command 與 path escape 仍 fail-closed。
 - `uv run pytest tests/engine/test_sandbox_actions.py -q` -> `3 passed` after sandbox run Action extraction.
 - `uv run pytest tests/ops/test_ci_gate_report_trust_audit.py tests/benchmark/test_telemetry_fidelity.py -q` -> `19 passed`
 - `uv run python -c "from scripts.ops.ci_gate import run_focused_nodeid_contract_check; raise SystemExit(0 if run_focused_nodeid_contract_check() else 1)"` -> focused nodeid contract `PASSED`
@@ -1758,7 +2033,7 @@ Only if failing acceptance evidence exists:
 - `uv run pytest tests/test_skill_sharing.py::test_skill_registry_upsert_retries_sqlite_busy_then_success tests/test_skill_sharing.py::test_skill_registry_upsert_keeps_non_busy_errors_fail_fast -q` -> `2 passed` after SkillRegistry retry integration.
 - `uv run pytest tests/test_skill_sharing.py tests/core/test_memory_manager_sqlite_retry.py tests/core/test_memory_manager_write_guard.py tests/infrastructure/test_sqlite_retry.py -q` -> `19 passed` after SQLite writer pair validation.
 - P4 sandbox run 初次 RED：`tests/engine/test_sandbox_actions.py` 匯入 `scripts.engine.commands.sandbox_actions` 失敗，證明 `sandbox_run_cmd` runner dispatch 與 output schema 仍留在 Click command body。
-- 修正：新增 `SandboxRunResult`、`run_sandbox_task(...)` 與 `render_sandbox_run_result(...)`；`nexus_cli.py::sandbox_run_cmd` 降為 thin adapter 並套 `translate_action_exceptions`。新增 fail-closed test，明確記錄 default `SandboxRunner` 仍缺 `run_task` Interface，不可假成功。
+- 修正：新增 `SandboxRunResult`、`run_sandbox_task(...)` 與 `render_sandbox_run_result(...)`；`nexus_cli.py::sandbox_run_cmd` 降為 thin adapter 並套 `translate_action_exceptions`。後續 `SandboxRunner.run_task(...)` 補上本地 workspace copy / command / cwd / output / cleanup / timeout / exit semantics；無 explicit command 與 path escape 仍 fail-closed。
 - `uv run pytest tests/engine/test_sandbox_actions.py -q` -> `3 passed` after sandbox run Action extraction.
 - P4 research auto-flow 初次 RED：Action tests 匯入 `ResearchAutoFlowResult` / `run_research_auto_flow` 時失敗，證明 `research:auto-flow` execution、preflight、completion 與 report write 仍留在 Click command body。
 - P4 research auto-flow audit 初次失敗：semantic/artifact audits 仍要求 `build_completion_envelope` / `ensure_verified_completion` / `semantic_status` 在 Click block 內；Action extraction 後這些 token 應由 `research_actions.py` 擁有。
@@ -1768,6 +2043,18 @@ Only if failing acceptance evidence exists:
 - P4 research run 初次 RED：Action tests 匯入 `ResearchRunResult` / `run_research_run` 時失敗，證明 `research:run` governance、candidate lifecycle、completion、continuation 與 report write 仍留在 Click command body。
 - P4 research run audit 初次失敗：semantic/artifact audits 仍要求 `build_completion_envelope` / `ensure_verified_completion` / `semantic_status` / `write_text` 在 Click block 內；Action extraction 後這些 token 應由 `research_actions.py` 擁有。
 - 修正：新增 `ResearchRunResult`、`run_research_run` 與 renderer；CLI 降為 thin adapter；audit 改為要求 CLI 呼叫 `run_research_run` 並在 Action module 檢查 completion/report/handoff tokens。
+- P4 live adapter sweep RED：`uv run pytest tests/engine/test_bench_actions.py tests/engine/test_code_actions.py tests/engine/test_multi_agent_actions.py tests/engine/test_learn_actions.py tests/engine/test_research_actions.py tests/engine/test_registry_actions.py tests/engine/test_sandbox_actions.py -q` 初次為 `66 passed, 29 failed`，失敗集中在 `nexus_cli.py` 沒有 expose/delegate `run_code_*`、`*_multi_agent_*`、`run_learn_*`、`run_research_*` Action seams。
+- 修正：`nexus_cli.py` 匯入並委派 bench/code/multi-agent/learn/research Action functions 與 renderers；所有對應 command bodies 套用 `translate_action_exceptions`；`research:run` 舊內聯實作物理刪除，保留 thin adapter。
+- `uv run pytest tests/engine/test_code_actions.py tests/engine/test_multi_agent_actions.py -q` -> `33 passed` after code/multi-agent live adapter wiring.
+- `uv run pytest tests/engine/test_learn_actions.py -q` -> `30 passed` after learn/ask live adapter wiring.
+- `uv run python -m py_compile scripts/engine/nexus_cli.py` -> compile `PASSED` after research adapter body deletion.
+- `uv run pytest tests/engine/test_research_actions.py -q` -> `12 passed` after research live adapter wiring and `research:run` body deletion.
+- `uv run pytest tests/engine/test_bench_actions.py tests/engine/test_code_actions.py tests/engine/test_multi_agent_actions.py tests/engine/test_learn_actions.py tests/engine/test_research_actions.py tests/engine/test_registry_actions.py tests/engine/test_sandbox_actions.py -q` -> `95 passed` after full CLI Action live-adapter sweep.
+- Full gate Report Trust Audit 初次失敗：舊 source-token audits 仍要求 `build_completion_envelope(` / `write_text(` 留在 `nexus_cli.py` command blocks，與 Action extraction 後的深模組 seam 衝突；同時 `learn:ingest` wrapper 需把 CLI compatibility semantic evaluator seam 傳入 Action。
+- 修正：`nexus_cli.py` 對 learn Actions 傳入 `_write_hallucination_evidence`、`_enforce_hallucination_gate`、`_write_dual_gate_markdown`、`_evaluate_learn_semantic_contract`；CLI semantic/artifact audits 改為 CLI block 驗證 delegate token、Action module 驗證 semantic/artifact token。
+- `uv run pytest tests/engine/test_cli_semantic_contract_audit.py tests/engine/test_cli_artifact_gate_audit.py tests/test_cli_learn_mode.py::test_learn_ingest_fails_closed_when_semantic_contract_unverified -q` -> `5 passed` after Action-aware audit update.
+- `uv run scripts/ops/ci_gate.py --changed-only scripts/engine/nexus_cli.py tests/engine/test_cli_semantic_contract_audit.py tests/engine/test_cli_artifact_gate_audit.py docs/testing/test_impact_map.md docs/plans/NEXUS_CLEAN_CODE_LINUS_REFACTOR_PLAN_2026-05-22.md docs/reports/NEXUS_REFACTOR_REMAINING_START_EVIDENCE_2026-05-23.md "nexus_wiki_vault/06_Ops/Ops - Learning Closure Matrix.md"` -> `Changed-Only JIT Tests PASSED`.
+- `uv run scripts/ops/ci_gate.py` -> `ALL QUALITY GATES PASSED` after CLI live Action adapter sweep and Action-aware audit update.
 
 剩餘 / 暫不打開：
 

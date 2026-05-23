@@ -50,8 +50,23 @@ MUTATING_COMMANDS_REQUIRING_ARTIFACTS = {
     "fed-run": ("report_file", "write_text("),
     "meta-run": ("report_file", "write_text("),
     "run-bug": ("report_file",),
-    "learn:benchmark": ("output", "json.dump("),
+    "learn:benchmark": ("output", "write_learn_precision_benchmark_output"),
     "oracle:apply": ("report_file", "write_text("),
+}
+
+ACTION_CONTRACT_SOURCES = {
+    "learn:ingest": "/Users/jameschen/Workspace/nexus/scripts/engine/commands/learn_actions.py",
+    "learn:register-source": "/Users/jameschen/Workspace/nexus/scripts/engine/commands/learn_actions.py",
+    "learn:refresh": "/Users/jameschen/Workspace/nexus/scripts/engine/commands/learn_actions.py",
+    "learn:refresh-plan": "/Users/jameschen/Workspace/nexus/scripts/engine/commands/learn_actions.py",
+    "learn:converge": "/Users/jameschen/Workspace/nexus/scripts/engine/commands/learn_actions.py",
+    "learn:report": "/Users/jameschen/Workspace/nexus/scripts/engine/commands/learn_actions.py",
+    "learn:phase-slo": "/Users/jameschen/Workspace/nexus/scripts/engine/commands/learn_actions.py",
+    "learn:phase-kpi": "/Users/jameschen/Workspace/nexus/scripts/engine/commands/learn_actions.py",
+    "learn:gate": "/Users/jameschen/Workspace/nexus/scripts/engine/commands/learn_actions.py",
+    "learn:benchmark": "/Users/jameschen/Workspace/nexus/scripts/engine/commands/learn_actions.py",
+    "research:auto-flow": "/Users/jameschen/Workspace/nexus/scripts/engine/commands/research_actions.py",
+    "research:run": "/Users/jameschen/Workspace/nexus/scripts/engine/commands/research_actions.py",
 }
 
 READ_ONLY_OR_ROUTING_COMMANDS = (
@@ -70,8 +85,13 @@ def test_mutating_commands_expose_artifact_or_gate_contracts():
     source = Path("/Users/jameschen/Workspace/nexus/scripts/engine/nexus_cli.py").read_text(encoding="utf-8")
     for command_name, required_tokens in MUTATING_COMMANDS_REQUIRING_ARTIFACTS.items():
         block = _command_block(source, command_name)
+        action_source = ""
+        if command_name in ACTION_CONTRACT_SOURCES:
+            action_source = Path(ACTION_CONTRACT_SOURCES[command_name]).read_text(encoding="utf-8")
         for token in required_tokens:
-            assert token in block, f"{command_name} missing required artifact/gate token: {token}"
+            assert token in block or token in action_source, (
+                f"{command_name} missing required artifact/gate token: {token}"
+            )
 
 
 def test_read_only_commands_do_not_require_write_contracts():
