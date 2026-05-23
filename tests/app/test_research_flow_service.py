@@ -2845,6 +2845,14 @@ def test_forced_hyper_skips_baseline_probe(tmp_path: Path, monkeypatch):
             fallback_used=False,
             total_tokens=111,
             token_capture_status="measured",
+            gateway_stats_present=True,
+            gateway_usage_metadata_present=True,
+            gateway_token_source="usage_metadata",
+            gateway_error_category="",
+            gateway_prompt_chars=12,
+            gateway_payload_chars=34,
+            gateway_total_chars=46,
+            gateway_timeout_sec=20,
             learning_trace={},
             candidates=[],
         )
@@ -2878,7 +2886,21 @@ def test_forced_hyper_skips_baseline_probe(tmp_path: Path, monkeypatch):
 
     assert payload["strategy"]["baseline_probe_skipped"] is True
     assert payload["strategy"]["path"] == "hyper_direct_forced"
-    assert payload["result"]["report"]["model_calls"] == 1
+    report = payload["result"]["report"]
+    assert report["model_calls"] == 1
+    assert report["model_name"] == "gemini-3-flash-preview"
+    assert report["model_patch_generated"] is True
+    assert report["total_tokens"] == 111
+    assert report["token_capture_status"] == "measured"
+    assert report["gateway_stats_present"] is True
+    assert report["gateway_usage_metadata_present"] is True
+    assert report["gateway_token_source"] == "usage_metadata"
+    assert report["gateway_error_category"] == ""
+    assert report["gateway_prompt_chars"] == 12
+    assert report["gateway_payload_chars"] == 34
+    assert report["gateway_total_chars"] == 46
+    assert report["gateway_timeout_sec"] == 20
+    assert "guard_fallback_from" not in report
 
 
 def test_llm_candidate_cap_remains_hard_limit_when_ddtree_selected(tmp_path: Path, monkeypatch):

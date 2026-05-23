@@ -191,6 +191,25 @@ Decision:
 - Recursive runtime dispatch remains closed.
 - Process ownership lesson: do not kill ambiguous agent or app processes while executing this plan; list candidate PIDs and require explicit user confirmation unless the user names the exact PID/command.
 
+## 2F. Forced Hyper Direct Execution Accounting Snapshot
+
+Status: `DONE_TESTS_ONLY_PREGATE`
+
+What changed:
+
+- Strengthened `tests/app/test_research_flow_service.py::test_forced_hyper_skips_baseline_probe`.
+- The test now snapshots the direct forced-hyper branch before any additional executor branch movement: baseline probe skipped, `hyper_direct_forced` strategy path, provider/model fields, token accounting, gateway stats / usage metadata fields, gateway char counts, timeout receipt, and absence of `guard_fallback_from`.
+
+Verification:
+
+- `uv run pytest tests/app/test_research_flow_service.py::test_forced_hyper_skips_baseline_probe -q` -> `1 passed`.
+
+Decision:
+
+- A future executor branch extraction may now use both direct-hyper and guard-fallback accounting snapshots as deletion tests.
+- Do not move baseline / hyper orchestration without keeping both snapshots green.
+- Recursive runtime dispatch remains closed.
+
 ## 3. Remaining Items Now Startable
 
 ### 3.1 External Fixture Live Clone / Setup
