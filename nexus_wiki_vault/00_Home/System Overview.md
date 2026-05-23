@@ -14,7 +14,7 @@ version_scope: '[v24, v25, v26]'
 # System Overview (v26 Hardened)
 
 ## 🌐 歡迎來到 Nexus 治理作業系統
-Nexus 是一個以物理誠信為核心、為 AI Agent 打造的自動化治理環境。
+Nexus 是一個以物理誠信為核心、為 AI Agent Swarm 打造的自動化 P-X-D-R-A-C 治理環境。
 
 ---
 
