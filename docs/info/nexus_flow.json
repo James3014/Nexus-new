@@ -1,0 +1,108 @@
+{
+  "system": "Nexus Engine",
+  "version": "v22.5-Hardened",
+  "current_commit": "875d54c9083b45480f770d28ae76e5805346c5a1",
+  "ci_status": "FAIL (Playwright Environment Issue)",
+  "era": "ERA-C",
+  "core_intent": "定義 Nexus 系統的工業級架構與生命週期規範，正式化 DX/XD 變體、quick/direct/full/conversation 模式與 X 階段 provider fallback，確保複雜任務的原子化執行、知識回灌與自動化治理。",
+  "architecture_layers": [
+    {
+      "layer": "01",
+      "name": "PRODUCT OS CORE",
+      "components": ["Identity Layer", "Context Layer", "Memory Layer", "Agent Layer"]
+    },
+    {
+      "layer": "02",
+      "name": "QUERYABLE SHARED FOUNDATION",
+      "components": ["Knowledge (Docs/Messages)", "Execution (Tasks/Decisions)", "Results (Outcomes)", "Signals (Rules/Observations)"]
+    },
+    {
+      "layer": "03",
+      "name": "CLOSED-LOOP CONTROL CENTER",
+      "loop": "Observe -> Analyze -> Act -> Evaluate -> Re-feed"
+    },
+    {
+      "layer": "04",
+      "name": "SHARED PRODUCT CAPABILITIES",
+      "capabilities": ["Search / RAG", "Planner / Multi-Agent", "Generator / Personalizer", "Automation / Dashboard"]
+    },
+    {
+      "layer": "05",
+      "name": "CHILD PRODUCT TREE",
+      "products": ["Product A: Knowledge App", "Product B: GTM Agent", "Product C: Workflow App", "Product D: Insight App"]
+    },
+    {
+      "layer": "06",
+      "name": "PRODUCT GOVERNANCE LAYER",
+      "governance": ["Access Control", "Policy Enforcement", "Audit Trail", "Versioning"]
+    },
+    {
+      "layer": "07",
+      "name": "CORE DESIGN LOGIC",
+      "mappings": {
+        "Diana Company Logic": "整家公司可查詢 | AI是公司OS | 共享智能層 | Closed-loop 組織管理",
+        "Nexus Product Logic": "整個產品宇宙可查詢 | 產品核心是Product OS | 共享智能與記憶層 | Closed-loop 產品自我優化"
+      }
+    }
+  ],
+  "topology": {
+    "control_plane": {
+      "components": ["Sir (任務來源)", "Commander (Runner/State Machine)", "Task Runner (Scheduler)"],
+      "taboos": ["Commander不作為Formal Skill", "Commander不直接等同Worker/Reviewer", "排程階段不得手動綁定Skill"]
+    },
+    "execution_plane": {
+      "components": ["ContextHub (組裝/決策)", "Skills Router (調度)", "Worker / Callsign Layer (執行角色)"]
+    },
+    "governance_plane": {
+      "components": ["Verification / Governance (實體/環境/依賴驗證)", "A Phase (Codex-Loop Reviewer)", "C Phase (Crystallize / Wrap-up)", "Learning System"]
+    }
+  },
+  "lifecycle_phases": {
+    "P": {
+      "name": "Plan / Scout (計畫與探索)",
+      "description": "任務理解與初步規劃，Lessons/Memory/Daily_Log喚醒，產生外部研究需求。",
+      "callsign": "Scout",
+      "formal_skills": ["codebase_investigator", "pseudo-code.gen"]
+    },
+    "D": {
+      "name": "Diagnose (診斷與分析)",
+      "description": "問題分析與 root cause 定位，產出診斷書與修復藍圖。知識不足時標記 needsresearch 以觸發 X 階段。",
+      "callsign": "Architect",
+      "formal_skills": ["prd.gen", "sequence-diagram.gen", "tech-stack.gen"]
+    },
+    "X": {
+      "name": "External Research (外部研究)",
+      "description": "當 P 或 D 階段由 ContextHub 標記為 needsresearch 時觸發。執行 Felo search / Web fetch，產出 researchpack.json 回灌 D/R/A 階段。",
+      "callsign": "External Researcher",
+      "formal_skills": ["felo_search", "web_fetch"]
+    },
+    "R": {
+      "name": "Repair / Produce (執行與產出)",
+      "description": "真正執行工作（修復 Bug、編寫功能或創作），最多進行 5 次迭代。",
+      "callsign": "Green-Coder, Red-Test, Refactor",
+      "formal_skills": ["Repair/Implementation 類技能", "pytest-bdd.feature", "e2e.red", "e2e.refactor", "code-quality"]
+    },
+    "A": {
+      "name": "Audit / Codex-Loop (審核與循環)",
+      "description": "最後的審核關卡。由 Codex 評估是否通過。若未通過，依據問題性質定向退回至 P、D 或 R 階段。",
+      "callsign": "QA / Audit",
+      "formal_skills": ["audit", "deterministic-gate"]
+    },
+    "C": {
+      "name": "Crystallize / Wrap-up (結晶與收尾)",
+      "description": "長期知識結晶，提煉 Lessons，更新 codex_lessons 與 Daily_Log，向量化注入 LanceDB，進行 commit 與 case promotion，最多進行 3 次收束。",
+      "callsign": "Crystallizer",
+      "formal_skills": ["lessons_extraction", "vector_injection"]
+    }
+  },
+  "variant_rules": {
+    "DX_Default": "P -> D -> X -> R -> A -> C (預設主軌)",
+    "XD_Variant": "P -> X -> D -> R -> A -> C (於第三方整合/高未知度/needs_research時觸發)",
+    "return_routing": {
+      "APPROVED": "進入 C 階段",
+      "REJECTED": "定向退回至 P / D / R",
+      "BEST_ANSWER": "Codex 給予最佳答案，記錄為學習資產",
+      "SKIPPED_QUOTA": "Reviewer 跳過，不阻塞流程"
+    }
+  }
+}

@@ -1,0 +1,1294 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>🛡️ NEXUS ORCHESTRATION PIPELINE & ARCHITECTURE</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&family=Outfit:wght@400;600;800&display=swap" rel="stylesheet">
+    <style>
+        :root {
+            --bg-color: #070913;
+            --panel-bg: rgba(22, 27, 47, 0.7);
+            --border-color: rgba(255, 255, 255, 0.08);
+            --text-primary: #f8fafc;
+            --text-secondary: #94a3b8;
+            --accent-blue: #6366f1;
+            --accent-cyan: #06b6d4;
+            --accent-purple: #a855f7;
+            --accent-green: #10b981;
+            --accent-red: #ef4444;
+            --accent-orange: #f97316;
+            --font-sans: 'Inter', sans-serif;
+            --font-display: 'Outfit', sans-serif;
+            --font-mono: 'Fira Code', 'Courier New', monospace;
+        }
+
+        * {
+            box-sizing: border-box;
+            margin: 0;
+            padding: 0;
+        }
+
+        body {
+            background-color: var(--bg-color);
+            color: var(--text-primary);
+            font-family: var(--font-sans);
+            line-height: 1.6;
+            overflow-x: hidden;
+            background-image: 
+                radial-gradient(circle at 10% 20%, rgba(99, 102, 241, 0.05) 0%, transparent 40%),
+                radial-gradient(circle at 90% 80%, rgba(6, 182, 212, 0.05) 0%, transparent 40%),
+                linear-gradient(rgba(255, 255, 255, 0.003) 1px, transparent 1px),
+                linear-gradient(90deg, rgba(255, 255, 255, 0.003) 1px, transparent 1px);
+            background-size: 100% 100%, 100% 100%, 40px 40px, 40px 40px;
+        }
+
+        /* Container & Layout */
+        .app-container {
+            display: flex;
+            min-height: 100vh;
+        }
+
+        /* Sidebar */
+        aside {
+            width: 320px;
+            background: rgba(11, 15, 30, 0.95);
+            border-right: 1px solid var(--border-color);
+            padding: 2rem 1.5rem;
+            display: flex;
+            flex-direction: column;
+            backdrop-filter: blur(20px);
+            flex-shrink: 0;
+            z-index: 10;
+        }
+
+        .logo-area {
+            display: flex;
+            align-items: center;
+            gap: 0.75rem;
+            margin-bottom: 2.5rem;
+        }
+
+        .logo-icon {
+            width: 36px;
+            height: 36px;
+            background: linear-gradient(135deg, var(--accent-blue), var(--accent-cyan));
+            border-radius: 8px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-weight: 800;
+            color: #fff;
+            box-shadow: 0 0 15px rgba(99, 102, 241, 0.5);
+            font-family: var(--font-display);
+        }
+
+        .logo-title {
+            font-family: var(--font-display);
+            font-size: 1.4rem;
+            font-weight: 800;
+            background: linear-gradient(to right, #fff, var(--text-secondary));
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+            letter-spacing: -0.5px;
+        }
+
+        nav ul {
+            list-style: none;
+        }
+
+        nav li {
+            margin-bottom: 0.5rem;
+        }
+
+        nav a {
+            display: flex;
+            align-items: center;
+            gap: 0.75rem;
+            color: var(--text-secondary);
+            text-decoration: none;
+            padding: 0.75rem 1rem;
+            border-radius: 10px;
+            font-size: 0.95rem;
+            font-weight: 500;
+            transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+            border: 1px solid transparent;
+        }
+
+        nav a:hover, nav a.active {
+            color: #fff;
+            background: rgba(99, 102, 241, 0.1);
+            border-color: rgba(99, 102, 241, 0.2);
+            box-shadow: inset 0 0 10px rgba(99, 102, 241, 0.05);
+        }
+
+        nav a.active {
+            border-left: 4px solid var(--accent-blue);
+        }
+
+        .status-widget {
+            margin-top: auto;
+            background: rgba(255, 255, 255, 0.02);
+            border: 1px solid var(--border-color);
+            border-radius: 12px;
+            padding: 1.25rem;
+            font-size: 0.8rem;
+        }
+
+        .status-title {
+            color: var(--text-secondary);
+            font-weight: 600;
+            margin-bottom: 0.75rem;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+            font-size: 0.75rem;
+            display: flex;
+            align-items: center;
+            gap: 0.5rem;
+        }
+
+        .status-dot {
+            width: 8px;
+            height: 8px;
+            background-color: var(--accent-red);
+            border-radius: 50%;
+            display: inline-block;
+            box-shadow: 0 0 8px var(--accent-red);
+            animation: pulse 2s infinite;
+        }
+
+        .status-dot.pass {
+            background-color: var(--accent-green);
+            box-shadow: 0 0 8px var(--accent-green);
+        }
+
+        .status-row {
+            display: flex;
+            justify-content: space-between;
+            margin-bottom: 0.4rem;
+        }
+
+        .status-row span:first-child {
+            color: var(--text-secondary);
+        }
+
+        .status-row span:last-child {
+            font-family: var(--font-mono);
+            color: #fff;
+        }
+
+        /* Main Content */
+        main {
+            flex-grow: 1;
+            padding: 2.5rem;
+            overflow-y: auto;
+            max-width: 1200px;
+        }
+
+        header.main-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 2.5rem;
+            border-bottom: 1px solid var(--border-color);
+            padding-bottom: 1.5rem;
+        }
+
+        h1.page-title {
+            font-family: var(--font-display);
+            font-size: 2.2rem;
+            font-weight: 800;
+            letter-spacing: -1px;
+            background: linear-gradient(135deg, #fff 30%, var(--text-secondary));
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+        }
+
+        .tab-content {
+            display: none;
+            animation: slideUp 0.4s cubic-bezier(0.16, 1, 0.3, 1);
+        }
+
+        .tab-content.active {
+            display: block;
+        }
+
+        @keyframes slideUp {
+            from { opacity: 0; transform: translateY(15px); }
+            to { opacity: 1; transform: translateY(0); }
+        }
+
+        @keyframes pulse {
+            0% { transform: scale(0.95); opacity: 0.5; }
+            50% { transform: scale(1.1); opacity: 1; }
+            100% { transform: scale(0.95); opacity: 0.5; }
+        }
+
+        /* Dashboard Cards */
+        .glass-card {
+            background: var(--panel-bg);
+            border: 1px solid var(--border-color);
+            border-radius: 16px;
+            padding: 2rem;
+            margin-bottom: 2rem;
+            backdrop-filter: blur(20px);
+            box-shadow: 0 10px 30px rgba(0, 0, 0, 0.4);
+            position: relative;
+            overflow: hidden;
+        }
+
+        .glass-card::before {
+            content: '';
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background: linear-gradient(135deg, rgba(255, 255, 255, 0.02) 0%, transparent 100%);
+            pointer-events: none;
+        }
+
+        .card-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 1.5rem;
+        }
+
+        .card-title {
+            font-family: var(--font-display);
+            font-size: 1.4rem;
+            font-weight: 700;
+            color: #fff;
+            display: flex;
+            align-items: center;
+            gap: 0.75rem;
+        }
+
+        /* SVG Flow Visualizer */
+        .svg-container {
+            background: rgba(5, 7, 15, 0.7);
+            border-radius: 12px;
+            border: 1px solid var(--border-color);
+            padding: 2rem;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            overflow-x: auto;
+            position: relative;
+        }
+
+        .interactive-svg {
+            max-width: 100%;
+            height: auto;
+        }
+
+        /* SVG node styles */
+        .node-g {
+            cursor: pointer;
+        }
+
+        .node-rect {
+            fill: #161b2f;
+            stroke: var(--accent-blue);
+            stroke-width: 2;
+            transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+            filter: drop-shadow(0 0 5px rgba(99, 102, 241, 0.2));
+        }
+
+        .node-g:hover .node-rect, .node-g.selected .node-rect {
+            fill: rgba(99, 102, 241, 0.15);
+            stroke: var(--accent-cyan);
+            filter: drop-shadow(0 0 12px rgba(6, 182, 212, 0.6));
+        }
+
+        .node-text {
+            font-family: var(--font-display);
+            font-weight: 600;
+            fill: #fff;
+            font-size: 14px;
+            pointer-events: none;
+        }
+
+        .node-subtext {
+            font-family: var(--font-sans);
+            fill: var(--text-secondary);
+            font-size: 10px;
+            pointer-events: none;
+        }
+
+        .edge-path {
+            fill: none;
+            stroke: var(--border-color);
+            stroke-width: 2;
+            stroke-dasharray: 6 4;
+            transition: all 0.3s ease;
+        }
+
+        .edge-path.active {
+            stroke: var(--accent-cyan);
+            animation: dash 30s linear infinite;
+        }
+
+        @keyframes dash {
+            to {
+                stroke-dashoffset: -1000;
+            }
+        }
+
+        /* Segment Controller */
+        .segment-control {
+            display: flex;
+            background: rgba(11, 15, 30, 0.8);
+            border: 1px solid var(--border-color);
+            border-radius: 8px;
+            padding: 0.25rem;
+            gap: 0.25rem;
+            margin-bottom: 1.5rem;
+            width: fit-content;
+        }
+
+        .segment-btn {
+            background: transparent;
+            border: none;
+            color: var(--text-secondary);
+            padding: 0.5rem 1.25rem;
+            border-radius: 6px;
+            font-size: 0.85rem;
+            font-weight: 600;
+            cursor: pointer;
+            transition: all 0.3s ease;
+        }
+
+        .segment-btn:hover {
+            color: #fff;
+        }
+
+        .segment-btn.active {
+            background: var(--accent-blue);
+            color: #fff;
+            box-shadow: 0 4px 12px rgba(99, 102, 241, 0.3);
+        }
+
+        /* Detail Card Layout */
+        .detail-panel {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 1.5rem;
+            margin-top: 1.5rem;
+        }
+
+        .info-block {
+            background: rgba(255, 255, 255, 0.02);
+            border: 1px solid var(--border-color);
+            border-radius: 12px;
+            padding: 1.5rem;
+        }
+
+        .info-label {
+            font-size: 0.75rem;
+            font-weight: 700;
+            color: var(--accent-cyan);
+            text-transform: uppercase;
+            letter-spacing: 1px;
+            margin-bottom: 0.5rem;
+        }
+
+        .info-value {
+            color: #fff;
+            font-size: 0.95rem;
+        }
+
+        .skills-list {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 0.5rem;
+            margin-top: 0.75rem;
+        }
+
+        .skill-tag {
+            background: rgba(6, 182, 212, 0.08);
+            border: 1px solid rgba(6, 182, 212, 0.2);
+            color: var(--accent-cyan);
+            padding: 0.25rem 0.6rem;
+            border-radius: 6px;
+            font-size: 0.75rem;
+            font-family: var(--font-mono);
+        }
+
+        /* 7-Layer View Styling */
+        .layer-stack {
+            display: flex;
+            flex-direction: column;
+            gap: 1rem;
+        }
+
+        .layer-item {
+            border: 1px solid var(--border-color);
+            border-radius: 12px;
+            background: rgba(255, 255, 255, 0.01);
+            transition: all 0.3s ease;
+            overflow: hidden;
+        }
+
+        .layer-item:hover {
+            border-color: rgba(99, 102, 241, 0.3);
+            background: rgba(99, 102, 241, 0.02);
+            transform: translateX(4px);
+        }
+
+        .layer-header-bar {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 1rem 1.5rem;
+            background: rgba(255, 255, 255, 0.01);
+            cursor: pointer;
+        }
+
+        .layer-title-area {
+            display: flex;
+            align-items: center;
+            gap: 1rem;
+        }
+
+        .layer-num {
+            background: var(--accent-purple);
+            color: #fff;
+            font-family: var(--font-mono);
+            font-weight: 700;
+            font-size: 0.85rem;
+            padding: 2px 8px;
+            border-radius: 4px;
+            box-shadow: 0 0 10px rgba(168, 85, 247, 0.3);
+        }
+
+        .layer-name {
+            font-family: var(--font-display);
+            font-weight: 700;
+            font-size: 1rem;
+            color: #fff;
+        }
+
+        .layer-details {
+            padding: 0 1.5rem 1.5rem 1.5rem;
+            display: none;
+            border-top: 1px dashed var(--border-color);
+            padding-top: 1rem;
+            animation: fadeIn 0.3s ease;
+        }
+
+        .layer-item.open .layer-details {
+            display: block;
+        }
+
+        .grid-3 {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+            gap: 1rem;
+            margin-top: 0.75rem;
+        }
+
+        .sub-box {
+            background: rgba(0, 0, 0, 0.3);
+            border: 1px solid var(--border-color);
+            padding: 0.75rem;
+            border-radius: 8px;
+            font-size: 0.85rem;
+            text-align: center;
+        }
+
+        .sub-box strong {
+            color: var(--accent-cyan);
+            display: block;
+            margin-bottom: 2px;
+        }
+
+        /* Comparison Table */
+        .comp-table {
+            width: 100%;
+            border-collapse: collapse;
+            margin-top: 1rem;
+            background: rgba(0, 0, 0, 0.2);
+            border-radius: 8px;
+            overflow: hidden;
+        }
+
+        .comp-table th, .comp-table td {
+            padding: 0.75rem 1rem;
+            text-align: left;
+            border-bottom: 1px solid var(--border-color);
+            font-size: 0.85rem;
+        }
+
+        .comp-table th {
+            background: rgba(255, 255, 255, 0.02);
+            color: var(--text-secondary);
+        }
+
+        /* JSON Integration Section */
+        .json-header-actions {
+            display: flex;
+            gap: 0.5rem;
+        }
+
+        .action-btn {
+            background: rgba(255, 255, 255, 0.04);
+            border: 1px solid var(--border-color);
+            color: var(--text-secondary);
+            padding: 0.4rem 1rem;
+            border-radius: 8px;
+            font-size: 0.8rem;
+            font-weight: 600;
+            cursor: pointer;
+            transition: all 0.3s ease;
+            display: flex;
+            align-items: center;
+            gap: 0.4rem;
+        }
+
+        .action-btn:hover {
+            background: rgba(99, 102, 241, 0.1);
+            color: #fff;
+            border-color: var(--accent-blue);
+        }
+
+        .code-container {
+            background: #03050a;
+            border: 1px solid var(--border-color);
+            border-radius: 12px;
+            padding: 1.5rem;
+            overflow-x: auto;
+            max-height: 500px;
+            position: relative;
+        }
+
+        pre code {
+            font-family: var(--font-mono);
+            font-size: 0.85rem;
+            line-height: 1.5;
+            color: #34d399;
+        }
+
+        /* Alert Toast */
+        .toast {
+            position: fixed;
+            bottom: 2rem;
+            right: 2rem;
+            background: var(--accent-green);
+            color: #fff;
+            padding: 0.75rem 1.5rem;
+            border-radius: 8px;
+            font-weight: 600;
+            font-size: 0.9rem;
+            box-shadow: 0 10px 25px rgba(16, 185, 129, 0.3);
+            opacity: 0;
+            transform: translateY(10px);
+            transition: all 0.3s cubic-bezier(0.175, 0.885, 0.32, 1.275);
+            z-index: 100;
+            pointer-events: none;
+        }
+
+        .toast.show {
+            opacity: 1;
+            transform: translateY(0);
+        }
+
+        /* Decorative arrow */
+        .arrow-indicator {
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            color: var(--text-secondary);
+        }
+
+        /* Responsive Grid for components */
+        .grid-components {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+            gap: 1.5rem;
+        }
+
+        .comp-card {
+            border: 1px solid var(--border-color);
+            background: rgba(255, 255, 255, 0.01);
+            border-radius: 12px;
+            padding: 1.5rem;
+            transition: all 0.3s ease;
+        }
+
+        .comp-card:hover {
+            border-color: rgba(6, 182, 212, 0.3);
+            background: rgba(6, 182, 212, 0.01);
+            transform: translateY(-2px);
+        }
+
+        .comp-card-title {
+            font-family: var(--font-display);
+            font-weight: 700;
+            color: #fff;
+            margin-bottom: 0.5rem;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+
+        .comp-badge {
+            font-size: 0.7rem;
+            padding: 2px 6px;
+            border-radius: 4px;
+            font-weight: 600;
+            text-transform: uppercase;
+        }
+
+        .badge-control { background: rgba(99, 102, 241, 0.1); color: var(--accent-blue); border: 1px solid rgba(99, 102, 241, 0.2); }
+        .badge-exec { background: rgba(6, 182, 212, 0.1); color: var(--accent-cyan); border: 1px solid rgba(6, 182, 212, 0.2); }
+        .badge-gov { background: rgba(168, 85, 247, 0.1); color: var(--accent-purple); border: 1px solid rgba(168, 85, 247, 0.2); }
+
+        .comp-desc {
+            font-size: 0.85rem;
+            color: var(--text-secondary);
+        }
+
+        .comp-taboo {
+            margin-top: 1rem;
+            border-top: 1px dashed var(--border-color);
+            padding-top: 0.75rem;
+            font-size: 0.8rem;
+            color: var(--accent-red);
+        }
+
+        .comp-taboo strong {
+            text-transform: uppercase;
+            font-size: 0.75rem;
+            margin-right: 4px;
+        }
+    </style>
+</head>
+<body>
+
+<div class="app-container">
+    <!-- Sidebar -->
+    <aside>
+        <div class="logo-area">
+            <div class="logo-icon">N</div>
+            <div class="logo-title">NEXUS CONTROL</div>
+        </div>
+
+        <nav>
+            <ul>
+                <li><a href="#pipeline" class="active" onclick="switchTab('pipeline', this)">🌀 Lifecycle Pipeline</a></li>
+                <li><a href="#architecture" onclick="switchTab('architecture', this)">🏛️ System Architecture</a></li>
+                <li><a href="#layers" onclick="switchTab('layers', this)">🏗️ 7-Layer Mother OS</a></li>
+                <li><a href="#json-vault" onclick="switchTab('json-vault', this)">📦 AI Context JSON</a></li>
+            </ul>
+        </nav>
+
+        <div class="status-widget">
+            <div class="status-title">
+                <span class="status-dot"></span>
+                <span>System Status</span>
+            </div>
+            <div class="status-row">
+                <span>Era</span>
+                <span>ERA-C (v22.5)</span>
+            </div>
+            <div class="status-row">
+                <span>Commit</span>
+                <span>875d54c</span>
+            </div>
+            <div class="status-row">
+                <span>CI Gate</span>
+                <span style="color: var(--accent-red); font-weight: bold;">FAIL</span>
+            </div>
+            <p style="font-size: 0.7rem; color: var(--text-secondary); margin-top: 0.5rem; line-height: 1.3;">
+                *CI fails due to missing Playwright binary in runner cache. Normal system features are intact.
+            </p>
+        </div>
+    </aside>
+
+    <!-- Main Workspace -->
+    <main>
+        <!-- TAB 1: LIFECYCLE PIPELINE -->
+        <div id="pipeline" class="tab-content active">
+            <header class="main-header">
+                <h1 class="page-title">Nexus Lifecycle Pipeline</h1>
+                <div class="segment-control">
+                    <button class="segment-btn active" onclick="switchPipeline('DX', this)">DX-Default</button>
+                    <button class="segment-btn" onclick="switchPipeline('XD', this)">XD-Variant</button>
+                </div>
+            </header>
+
+            <div class="glass-card">
+                <div class="card-header">
+                    <h2 class="card-title">🛡️ Interactive Pipeline Visualizer</h2>
+                    <p style="font-size: 0.85rem; color: var(--text-secondary);">點擊各階段節點可查閱執行藍圖、角色分工及 Skills 規則</p>
+                </div>
+                
+                <div class="svg-container">
+                    <svg width="780" height="150" viewBox="0 0 780 150" class="interactive-svg" id="pipeline-svg">
+                        <!-- Connecting arrows/paths -->
+                        <path id="path-P-first" class="edge-path active" d="M 120 75 L 200 75" />
+                        <path id="path-second" class="edge-path active" d="M 240 75 L 320 75" />
+                        <path id="path-third" class="edge-path active" d="M 360 75 L 440 75" />
+                        <path id="path-fourth" class="edge-path active" d="M 480 75 L 560 75" />
+                        <path id="path-fifth" class="edge-path active" d="M 600 75 L 680 75" />
+
+                        <!-- Node P -->
+                        <g class="node-g selected" onclick="selectPhase('P')" transform="translate(40, 45)" id="node-P">
+                            <rect class="node-rect" width="80" height="60" rx="8" />
+                            <text class="node-text" x="40" y="30" text-anchor="middle">P</text>
+                            <text class="node-subtext" x="40" y="48" text-anchor="middle">Plan</text>
+                        </g>
+
+                        <!-- Node D -->
+                        <g class="node-g" onclick="selectPhase('D')" transform="translate(160, 45)" id="node-D">
+                            <rect class="node-rect" width="80" height="60" rx="8" />
+                            <text class="node-text" x="40" y="30" text-anchor="middle">D</text>
+                            <text class="node-subtext" x="40" y="48" text-anchor="middle">Diagnose</text>
+                        </g>
+
+                        <!-- Node X -->
+                        <g class="node-g" onclick="selectPhase('X')" transform="translate(280, 45)" id="node-X">
+                            <rect class="node-rect" width="80" height="60" rx="8" style="stroke: var(--accent-cyan); filter: drop-shadow(0 0 5px rgba(6, 182, 212, 0.2));" />
+                            <text class="node-text" x="40" y="30" text-anchor="middle">X</text>
+                            <text class="node-subtext" x="40" y="48" text-anchor="middle">Research</text>
+                        </g>
+
+                        <!-- Node R -->
+                        <g class="node-g" onclick="selectPhase('R')" transform="translate(400, 45)" id="node-R">
+                            <rect class="node-rect" width="80" height="60" rx="8" />
+                            <text class="node-text" x="40" y="30" text-anchor="middle">R</text>
+                            <text class="node-subtext" x="40" y="48" text-anchor="middle">Repair</text>
+                        </g>
+
+                        <!-- Node A -->
+                        <g class="node-g" onclick="selectPhase('A')" transform="translate(520, 45)" id="node-A">
+                            <rect class="node-rect" width="80" height="60" rx="8" style="stroke: var(--accent-purple); filter: drop-shadow(0 0 5px rgba(168, 85, 247, 0.2));" />
+                            <text class="node-text" x="40" y="30" text-anchor="middle">A</text>
+                            <text class="node-subtext" x="40" y="48" text-anchor="middle">Audit</text>
+                        </g>
+
+                        <!-- Node C -->
+                        <g class="node-g" onclick="selectPhase('C')" transform="translate(640, 45)" id="node-C">
+                            <rect class="node-rect" width="80" height="60" rx="8" style="stroke: var(--accent-green); filter: drop-shadow(0 0 5px rgba(16, 185, 129, 0.2));" />
+                            <text class="node-text" x="40" y="30" text-anchor="middle">C</text>
+                            <text class="node-subtext" x="40" y="48" text-anchor="middle">Crystallize</text>
+                        </g>
+                    </svg>
+                </div>
+
+                <!-- Detailed Phase Info -->
+                <div class="detail-panel" id="phase-detail-panel">
+                    <!-- Left side: Description & Roles -->
+                    <div class="info-block" style="grid-column: 1 / span 2; display: flex; flex-direction: column; gap: 1rem; background: rgba(99, 102, 241, 0.05); border-color: rgba(99, 102, 241, 0.2);">
+                        <h3 id="detail-name" style="font-family: var(--font-display); font-size: 1.3rem; color: #fff;">Plan / Scout (計畫與探索)</h3>
+                        <p id="detail-desc" style="color: var(--text-secondary); font-size: 0.95rem;">
+                            任務理解與初步規劃，Lessons / Memory / Daily_Log 喚醒，視需要產生外部研究需求。
+                        </p>
+                    </div>
+
+                    <div class="info-block">
+                        <div class="info-label">執行角色 (Callsign)</div>
+                        <div class="info-value" id="detail-callsign" style="font-weight: 600; font-size: 1.1rem; color: #fff; margin-bottom: 0.5rem;">Scout</div>
+                        <p style="font-size: 0.85rem; color: var(--text-secondary);">負責專案理解、AST代碼分析與依賴掃描的工作角色。</p>
+                    </div>
+
+                    <div class="info-block">
+                        <div class="info-label">調用技能 (Formal Skills)</div>
+                        <div class="skills-list" id="detail-skills">
+                            <span class="skill-tag">codebase_investigator</span>
+                            <span class="skill-tag">pseudo-code.gen</span>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- TAB 2: SYSTEM ARCHITECTURE -->
+        <div id="architecture" class="tab-content">
+            <header class="main-header">
+                <h1 class="page-title">Nexus System Architecture</h1>
+            </header>
+
+            <div class="glass-card">
+                <div class="card-header">
+                    <h2 class="card-title">🏛️ 拓撲與三平面架構</h2>
+                </div>
+                
+                <div class="svg-container" style="padding: 3rem 1rem;">
+                    <svg width="800" height="300" viewBox="0 0 800 300" class="interactive-svg">
+                        <!-- Define marker -->
+                        <defs>
+                            <marker id="arrow" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+                                <path d="M 0 0 L 10 5 L 0 10 z" fill="var(--text-secondary)" />
+                            </marker>
+                            <marker id="arrow-active" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+                                <path d="M 0 0 L 10 5 L 0 10 z" fill="var(--accent-cyan)" />
+                            </marker>
+                        </defs>
+
+                        <!-- SIR to COMMANDER -->
+                        <line x1="80" y1="150" x2="160" y2="150" stroke="var(--text-secondary)" stroke-width="2" marker-end="url(#arrow)" />
+                        
+                        <!-- COMMANDER to SCHEDULE -->
+                        <line x1="280" y1="150" x2="360" y2="150" stroke="var(--text-secondary)" stroke-width="2" marker-end="url(#arrow)" />
+                        
+                        <!-- SCHEDULE to CONTEXT / ROUTER -->
+                        <line x1="440" y1="150" x2="520" y2="100" stroke="var(--accent-cyan)" stroke-width="2" stroke-dasharray="4 2" marker-end="url(#arrow-active)" />
+                        <line x1="440" y1="150" x2="520" y2="200" stroke="var(--accent-cyan)" stroke-width="2" stroke-dasharray="4 2" marker-end="url(#arrow-active)" />
+
+                        <!-- CONTEXT and ROUTER interactive -->
+                        <line x1="580" y1="130" x2="580" y2="170" stroke="var(--accent-cyan)" stroke-width="2" marker-end="url(#arrow-active)" />
+                        <line x1="580" y1="170" x2="580" y2="130" stroke="var(--accent-cyan)" stroke-width="2" marker-end="url(#arrow-active)" />
+
+                        <!-- ROUTER to WORKER -->
+                        <line x1="640" y1="200" x2="700" y2="150" stroke="var(--accent-cyan)" stroke-width="2" marker-end="url(#arrow-active)" />
+                        <line x1="640" y1="100" x2="700" y2="150" stroke="var(--accent-cyan)" stroke-width="2" marker-end="url(#arrow-active)" />
+
+                        <!-- Nodes -->
+                        <!-- SIR -->
+                        <g transform="translate(10, 120)">
+                            <rect width="70" height="60" rx="8" fill="#1e293b" stroke="var(--accent-orange)" stroke-width="2" />
+                            <text x="35" y="35" text-anchor="middle" fill="#fff" font-family="var(--font-display)" font-weight="700" font-size="12">SIR</text>
+                            <text x="35" y="48" text-anchor="middle" fill="var(--text-secondary)" font-size="8">任務來源</text>
+                        </g>
+
+                        <!-- COMMANDER -->
+                        <g transform="translate(160, 110)">
+                            <rect width="120" height="80" rx="10" fill="#161b2f" stroke="var(--accent-blue)" stroke-width="2" />
+                            <text x="60" y="35" text-anchor="middle" fill="#fff" font-family="var(--font-display)" font-weight="700" font-size="12">COMMANDER</text>
+                            <text x="60" y="52" text-anchor="middle" fill="var(--text-secondary)" font-size="9">State Machine</text>
+                            <text x="60" y="65" text-anchor="middle" fill="var(--text-secondary)" font-size="8">控制平面</text>
+                        </g>
+
+                        <!-- TASK RUNNER -->
+                        <g transform="translate(340, 120)">
+                            <rect width="100" height="60" rx="8" fill="#161b2f" stroke="var(--border-color)" stroke-width="1.5" />
+                            <text x="50" y="32" text-anchor="middle" fill="#fff" font-family="var(--font-display)" font-weight="700" font-size="11">TASK RUNNER</text>
+                            <text x="50" y="46" text-anchor="middle" fill="var(--text-secondary)" font-size="8">Manifest Scheduler</text>
+                        </g>
+
+                        <!-- CONTEXT HUB -->
+                        <g transform="translate(500, 70)">
+                            <rect width="160" height="50" rx="8" fill="#0b1329" stroke="var(--accent-cyan)" stroke-width="1.5" stroke-dasharray="2 2" />
+                            <text x="80" y="28" text-anchor="middle" fill="#fff" font-family="var(--font-display)" font-weight="700" font-size="11">CONTEXT HUB</text>
+                            <text x="80" y="40" text-anchor="middle" fill="var(--text-secondary)" font-size="8">組裝與決策平面</text>
+                        </g>
+
+                        <!-- SKILLS ROUTER -->
+                        <g transform="translate(500, 180)">
+                            <rect width="160" height="50" rx="8" fill="#0b1329" stroke="var(--accent-cyan)" stroke-width="1.5" stroke-dasharray="2 2" />
+                            <text x="80" y="28" text-anchor="middle" fill="#fff" font-family="var(--font-display)" font-weight="700" font-size="11">SKILLS ROUTER</text>
+                            <text x="80" y="40" text-anchor="middle" fill="var(--text-secondary)" font-size="8">動態技能調度</text>
+                        </g>
+
+                        <!-- WORKER -->
+                        <g transform="translate(700, 120)">
+                            <rect width="90" height="60" rx="8" fill="#1e293b" stroke="var(--accent-green)" stroke-width="2" />
+                            <text x="45" y="32" text-anchor="middle" fill="#fff" font-family="var(--font-display)" font-weight="700" font-size="12">WORKER</text>
+                            <text x="45" y="46" text-anchor="middle" fill="var(--text-secondary)" font-size="8">Callsign Layer</text>
+                        </g>
+                    </svg>
+                </div>
+
+                <div class="grid-components" style="margin-top: 2rem;">
+                    <!-- Card 1: Control Plane -->
+                    <div class="comp-card">
+                        <div class="comp-card-title">
+                            <span>控制平面 (Control Plane)</span>
+                            <span class="comp-badge badge-control">Control</span>
+                        </div>
+                        <p class="comp-desc">
+                            由 Task Runner 讀取 <code>task_manifest.yaml</code>，套用超時、重試、依賴配置，並驅動 Commander 進行 P/D/X/R/A/C 狀態移轉。
+                        </p>
+                        <div class="comp-taboo">
+                            <strong>🚫 禁忌：</strong>Commander 絕不手動綁定特定 Skill。
+                        </div>
+                    </div>
+
+                    <!-- Card 2: Execution Plane -->
+                    <div class="comp-card">
+                        <div class="comp-card-title">
+                            <span>執行平面 (Execution Plane)</span>
+                            <span class="comp-badge badge-exec">Execution</span>
+                        </div>
+                        <p class="comp-desc">
+                            ContextHub 裝配當前 State/Memory 並決策路由。Skills Router 根據當前上下文動態挑選最適 Callsign 角色執行。
+                        </p>
+                        <div class="comp-taboo">
+                            <strong>🚫 邊界：</strong>動態調度，禁止手動硬編碼。
+                        </div>
+                    </div>
+
+                    <!-- Card 3: Governance Plane -->
+                    <div class="comp-card">
+                        <div class="comp-card-title">
+                            <span>治理平面 (Governance Plane)</span>
+                            <span class="comp-badge badge-gov">Governance</span>
+                        </div>
+                        <p class="comp-desc">
+                            產出經 Verification 驗證後，進入 A 階段由 Codex 進行最終簽收判定 (APPROVED/REJECTED)，不通過則定向退回。
+                        </p>
+                        <div class="comp-taboo">
+                            <strong>🚫 規則：</strong>發佈判定遵循 Fail-Closed，不妥協。
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- TAB 3: 7-LAYER MOTHER OS -->
+        <div id="layers" class="tab-content">
+            <header class="main-header">
+                <h1 class="page-title">7-Layer Mother OS Architecture</h1>
+            </header>
+
+            <div class="glass-card">
+                <div class="card-header">
+                    <h2 class="card-title">🏗️ 產品母系統抽象與演化層</h2>
+                    <p style="font-size: 0.85rem; color: var(--text-secondary);">將公司/產品 OS 的架構抽象為 7 層結構，在子產品間共享核心 Intelligence</p>
+                </div>
+
+                <div class="layer-stack">
+                    <!-- Layer 1 -->
+                    <div class="layer-item open">
+                        <div class="layer-header-bar" onclick="toggleLayer(this)">
+                            <div class="layer-title-area">
+                                <span class="layer-num">01</span>
+                                <span class="layer-name">PRODUCT OS CORE</span>
+                            </div>
+                            <span style="color: var(--text-secondary); font-size: 0.8rem;">▼</span>
+                        </div>
+                        <div class="layer-details">
+                            <p style="font-size: 0.9rem; color: var(--text-secondary); margin-bottom: 0.75rem;">整個產品宇宙的核心作業層。所有資料、流程、決策、回饋都先進到這裡。</p>
+                            <div class="grid-3">
+                                <div class="sub-box"><strong>Identity</strong>使用者/團隊權限</div>
+                                <div class="sub-box"><strong>Context</strong>文件/任務/事件</div>
+                                <div class="sub-box"><strong>Memory</strong>歷史/規則/日誌</div>
+                                <div class="sub-box"><strong>Agent</strong>規劃/路由/生成</div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Layer 2 -->
+                    <div class="layer-item">
+                        <div class="layer-header-bar" onclick="toggleLayer(this)">
+                            <div class="layer-title-area">
+                                <span class="layer-num">02</span>
+                                <span class="layer-name">QUERYABLE SHARED FOUNDATION</span>
+                            </div>
+                            <span style="color: var(--text-secondary); font-size: 0.8rem;">▶</span>
+                        </div>
+                        <div class="layer-details">
+                            <p style="font-size: 0.9rem; color: var(--text-secondary); margin-bottom: 0.75rem;">讓整個系統可被隨時查詢與追溯。每個動作都留下 Artifact。</p>
+                            <div class="grid-3">
+                                <div class="sub-box"><strong>Knowledge</strong>Docs / Messages</div>
+                                <div class="sub-box"><strong>Execution</strong>Tasks / Decisions</div>
+                                <div class="sub-box"><strong>Outcomes</strong>Metrics / Artifacts</div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Layer 3 -->
+                    <div class="layer-item">
+                        <div class="layer-header-bar" onclick="toggleLayer(this)">
+                            <div class="layer-title-area">
+                                <span class="layer-num">03</span>
+                                <span class="layer-name">CLOSED-LOOP CONTROL CENTER</span>
+                            </div>
+                            <span style="color: var(--text-secondary); font-size: 0.8rem;">▶</span>
+                        </div>
+                        <div class="layer-details">
+                            <p style="font-size: 0.9rem; color: var(--text-secondary); margin-bottom: 0.75rem;">統一的閉環控制中心：Observe → Analyze → Act → Evaluate → Re-feed。</p>
+                            <div style="text-align: center; font-family: var(--font-mono); font-size: 0.9rem; color: var(--accent-green); padding: 0.5rem; background: rgba(16, 185, 129, 0.05); border-radius: 6px;">
+                                觀察狀態 ─→ 分析差距 ─→ 執行動作 ─→ 評估成效 ─→ 回寫記憶 (Loop)
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Layer 4 -->
+                    <div class="layer-item">
+                        <div class="layer-header-bar" onclick="toggleLayer(this)">
+                            <div class="layer-title-area">
+                                <span class="layer-num">04</span>
+                                <span class="layer-name">SHARED PRODUCT CAPABILITIES</span>
+                            </div>
+                            <span style="color: var(--text-secondary); font-size: 0.8rem;">▶</span>
+                        </div>
+                        <div class="layer-details">
+                            <p style="font-size: 0.9rem; color: var(--text-secondary); margin-bottom: 0.75rem;">所有子產品可共用的能力模組，無需重複造輪子。</p>
+                            <div class="grid-3">
+                                <div class="sub-box">RAG / Search</div>
+                                <div class="sub-box">Multi-Agent Planner</div>
+                                <div class="sub-box">Dashboard Automation</div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Layer 5 -->
+                    <div class="layer-item" style="border-color: rgba(6, 182, 212, 0.3);">
+                        <div class="layer-header-bar" onclick="toggleLayer(this)">
+                            <div class="layer-title-area">
+                                <span class="layer-num" style="background: var(--accent-cyan); box-shadow: 0 0 10px rgba(6, 182, 212, 0.3);">05</span>
+                                <span class="layer-name">CHILD PRODUCT TREE</span>
+                            </div>
+                            <span style="color: var(--text-secondary); font-size: 0.8rem;">▶</span>
+                        </div>
+                        <div class="layer-details">
+                            <p style="font-size: 0.9rem; color: var(--text-secondary); margin-bottom: 0.75rem;">子產品共享母系統的智能與記憶層。</p>
+                            <div class="grid-3">
+                                <div class="sub-box" style="border-color: var(--accent-cyan);">Product A: Knowledge App</div>
+                                <div class="sub-box" style="border-color: var(--accent-cyan);">Product B: GTM Agent</div>
+                                <div class="sub-box" style="border-color: var(--accent-cyan);">Product C: Workflow App</div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Layer 6 -->
+                    <div class="layer-item">
+                        <div class="layer-header-bar" onclick="toggleLayer(this)">
+                            <div class="layer-title-area">
+                                <span class="layer-num">06</span>
+                                <span class="layer-name">PRODUCT GOVERNANCE LAYER</span>
+                            </div>
+                            <span style="color: var(--text-secondary); font-size: 0.8rem;">▶</span>
+                        </div>
+                        <div class="layer-details">
+                            <p style="font-size: 0.9rem; color: var(--text-secondary); margin-bottom: 0.75rem;">確保子產品不越界、不混亂的統一治理層。</p>
+                            <div class="grid-3">
+                                <div class="sub-box">Access Control</div>
+                                <div class="sub-box">Policy Enforcement</div>
+                                <div class="sub-box">Audit Trail</div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Layer 7 -->
+                    <div class="layer-item" style="border: 2.5px solid var(--accent-blue);">
+                        <div class="layer-header-bar" onclick="toggleLayer(this)">
+                            <div class="layer-title-area">
+                                <span class="layer-num" style="background: var(--accent-blue); box-shadow: 0 0 10px rgba(99, 102, 241, 0.3);">07</span>
+                                <span class="layer-name">CORE DESIGN LOGIC</span>
+                            </div>
+                            <span style="color: var(--text-secondary); font-size: 0.8rem;">▶</span>
+                        </div>
+                        <div class="layer-details">
+                            <table class="comp-table">
+                                <thead>
+                                    <tr>
+                                        <th>Diana's Company Logic</th>
+                                        <th></th>
+                                        <th>Nexus Product Logic</th>
+                                    </tr>
+                                </thead>
+                                <tbody>
+                                    <tr>
+                                        <td>整家公司變得可查詢</td>
+                                        <td style="color: var(--accent-cyan);">→</td>
+                                        <td>整個產品宇宙變得可查詢</td>
+                                    </tr>
+                                    <tr>
+                                        <td>AI 是公司的作業系統</td>
+                                        <td style="color: var(--accent-cyan);">→</td>
+                                        <td>產品核心是作業系統 (Product OS)</td>
+                                    </tr>
+                                    <tr>
+                                        <td>各部門共享同一智能層</td>
+                                        <td style="color: var(--accent-cyan);">→</td>
+                                        <td>各子產品共享同一智能與記憶層</td>
+                                    </tr>
+                                </tbody>
+                            </table>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- TAB 4: AI CONTEXT JSON -->
+        <div id="json-vault" class="tab-content">
+            <header class="main-header">
+                <h1 class="page-title">AI Context Integration</h1>
+                <div class="json-header-actions">
+                    <button class="action-btn" onclick="copyJson()">
+                        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"></rect><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path></svg>
+                        Copy JSON Map
+                    </button>
+                    <button class="action-btn" onclick="downloadJson()">
+                        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path><polyline points="7 10 12 15 17 10"></polyline><line x1="12" y1="15" x2="12" y2="3"></line></svg>
+                        Download JSON
+                    </button>
+                </div>
+            </header>
+
+            <div class="glass-card">
+                <div class="card-header">
+                    <h2 class="card-title">📦 AI System Map (Machine Readable)</h2>
+                    <p style="font-size: 0.85rem; color: var(--text-secondary);">
+                        在新開啟的對話中，將此 JSON 直接貼給 AI，即可為其提供完整的 Nexus 拓撲地圖與語意約束。
+                    </p>
+                </div>
+
+                <div class="code-container">
+                    <pre><code id="json-code-block">Loading JSON map...</code></pre>
+                </div>
+            </div>
+        </div>
+    </main>
+</div>
+
+<!-- Toast Alert -->
+<div class="toast" id="copy-toast">✓ Copy success! JSON is in your clipboard.</div>
+
+<script>
+    // System Data SSoT
+    const nexusData = {
+        "system": "Nexus Engine",
+        "version": "v22.5-Hardened",
+        "current_commit": "875d54c9083b45480f770d28ae76e5805346c5a1",
+        "ci_status": "FAIL (Playwright Environment Issue)",
+        "era": "ERA-C",
+        "core_intent": "定義 Nexus 系統的工業級架構與生命週期規範，正式化 DX/XD 變體、quick/direct/full/conversation 模式與 X 階段 provider fallback，確保複雜任務的原子化執行、知識回灌與自動化治理。",
+        "phases": {
+            "P": {
+                "name": "Plan / Scout (計畫與探索)",
+                "description": "任務理解與初步規劃，Lessons/Memory/Daily_Log喚醒，產生外部研究需求。",
+                "callsign": "Scout",
+                "skills": ["codebase_investigator", "pseudo-code.gen"]
+            },
+            "D": {
+                "name": "Diagnose (診斷與分析)",
+                "description": "問題分析與 root cause 定位，產出診斷書與修復藍圖。知識不足時標記 needsresearch 以觸發 X 階段。",
+                "callsign": "Architect",
+                "skills": ["prd.gen", "sequence-diagram.gen", "tech-stack.gen"]
+            },
+            "X": {
+                "name": "External Research (外部研究)",
+                "description": "當 P 或 D 階段由 ContextHub 標記為 needsresearch 時觸發。執行 Felo search / Web fetch，產出 researchpack.json 回灌 D/R/A 階段。",
+                "callsign": "External Researcher",
+                "skills": ["felo_search", "web_fetch"]
+            },
+            "R": {
+                "name": "Repair / Produce (執行與產出)",
+                "description": "真正執行工作（修復 Bug、編寫功能或創作），最多進行 5 次迭代。",
+                "callsign": "Green-Coder, Red-Test, Refactor",
+                "skills": ["Repair/Implementation 類技能", "pytest-bdd.feature", "e2e.red", "e2e.refactor", "code-quality"]
+            },
+            "A": {
+                "name": "Audit / Codex-Loop (審核與循環)",
+                "description": "最後的審核關卡。由 Codex 評估是否通過。若未通過，依據問題性質定向退回至 P、D 或 R 階段。",
+                "callsign": "QA / Audit",
+                "skills": ["audit", "deterministic-gate"]
+            },
+            "C": {
+                "name": "Crystallize / Wrap-up (結晶與收尾)",
+                "description": "長期知識結晶，提煉 Lessons，更新 codex_lessons 與 Daily_Log，向量化注入 LanceDB，進行 commit 與 case promotion，最多進行 3 次收束。",
+                "callsign": "Crystallizer",
+                "skills": ["lessons_extraction", "vector_injection"]
+            }
+        }
+    };
+
+    // Initialize UI Code Viewer
+    document.getElementById('json-code-block').innerText = JSON.stringify(nexusData, null, 2);
+
+    // Tab Switching
+    function switchTab(tabId, el) {
+        document.querySelectorAll('.tab-content').forEach(tab => tab.classList.remove('active'));
+        document.getElementById(tabId).classList.add('active');
+
+        document.querySelectorAll('nav a').forEach(link => link.classList.remove('active'));
+        el.classList.add('active');
+    }
+
+    // Interactive Phase Selector
+    function selectPhase(phaseId) {
+        document.querySelectorAll('.node-g').forEach(node => node.classList.remove('selected'));
+        document.getElementById(`node-${phaseId}`).classList.add('selected');
+
+        const phase = nexusData.phases[phaseId];
+        document.getElementById('detail-name').innerText = phase.name;
+        document.getElementById('detail-desc').innerText = phase.description;
+        document.getElementById('detail-callsign').innerText = phase.callsign;
+
+        const skillsContainer = document.getElementById('detail-skills');
+        skillsContainer.innerHTML = '';
+        phase.skills.forEach(skill => {
+            const span = document.createElement('span');
+            span.className = 'skill-tag';
+            span.innerText = skill;
+            skillsContainer.appendChild(span);
+        });
+    }
+
+    // Dynamic Pipeline Switcher (DX vs XD)
+    function switchPipeline(mode, el) {
+        document.querySelectorAll('.segment-btn').forEach(btn => btn.classList.remove('active'));
+        el.classList.add('active');
+
+        const nodeD = document.getElementById('node-D');
+        const nodeX = document.getElementById('node-X');
+        const pathSecond = document.getElementById('path-second');
+        const pathThird = document.getElementById('path-third');
+
+        if (mode === 'XD') {
+            // Swap X and D nodes visually via SVG translation
+            nodeD.setAttribute('transform', 'translate(280, 45)');
+            nodeX.setAttribute('transform', 'translate(160, 45)');
+            // Change color focus
+            nodeX.querySelector('.node-rect').style.stroke = 'var(--accent-cyan)';
+            nodeD.querySelector('.node-rect').style.stroke = 'var(--accent-blue)';
+        } else {
+            // Default DX configuration
+            nodeD.setAttribute('transform', 'translate(160, 45)');
+            nodeX.setAttribute('transform', 'translate(280, 45)');
+            // Restore default colors
+            nodeD.querySelector('.node-rect').style.stroke = 'var(--accent-blue)';
+            nodeX.querySelector('.node-rect').style.stroke = 'var(--accent-cyan)';
+        }
+    }
+
+    // Collapse and Expand Layers
+    function toggleLayer(el) {
+        const item = el.parentElement;
+        const isOpen = item.classList.contains('open');
+        
+        // Close all layers
+        document.querySelectorAll('.layer-item').forEach(l => {
+            l.classList.remove('open');
+            l.querySelector('.layer-header-bar span:last-child').innerText = '▶';
+        });
+
+        // Open target layer if it wasn't open
+        if (!isOpen) {
+            item.classList.add('open');
+            el.querySelector('span:last-child').innerText = '▼';
+        }
+    }
+
+    // Copy to Clipboard
+    function copyJson() {
+        const jsonText = JSON.stringify(nexusData, null, 2);
+        navigator.clipboard.writeText(jsonText).then(() => {
+            const toast = document.getElementById('copy-toast');
+            toast.classList.add('show');
+            setTimeout(() => toast.classList.remove('show'), 3000);
+        });
+    }
+
+    // Download JSON file
+    function downloadJson() {
+        const dataStr = "data:text/json;charset=utf-8," + encodeURIComponent(JSON.stringify(nexusData, null, 2));
+        const downloadAnchor = document.createElement('a');
+        downloadAnchor.setAttribute("href", dataStr);
+        downloadAnchor.setAttribute("download", "nexus_flow_map.json");
+        document.body.appendChild(downloadAnchor);
+        downloadAnchor.click();
+        downloadAnchor.remove();
+    }
+</script>
+</body>
+</html>
