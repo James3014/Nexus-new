@@ -1,6 +1,6 @@
 # 🛡️ Nexus Agent 重構物理生存與導航指南 (Survival Guide)
 
-本指引為**專屬重構任務 AI Agent** 打造的運行期生存手冊。在對 Nexus 進行任何高業力、大規模重構前，重構 Agent **必須**強制加載並核對本指南，確保重構變更滿足無損合規（Behavioral Integrity）與 Fail-Closed 門禁要求。
+本指引為**專屬重構任務 AI Agent** 打造的運行期生存與自動化操作手冊。在對 Nexus 進行任何高業力、大規模重構前，重構 Agent **必須**強制加載並核對本指南，確保重構變更滿足無損合規（Behavioral Integrity）與 Fail-Closed 門禁要求。
 
 ---
 
@@ -17,67 +17,45 @@
 
 ---
 
-## ⚙️ 動態運行期測試與驗證自檢 (Dynamic Pytest Checklists)
+## ⚙️ 一鍵重構驗證與自癒：Refactor Gatekeeper Engine
 
-靜態分析只是地圖，**重構 Agent 必須在重構前後物理執行以下測試命令**，驗證代碼語意無損：
+為徹底降低重構時的指令操作摩擦力與 Token 開銷，Nexus 實作了「一鍵門禁衛士（Refactor Gatekeeper）」。重構 Agent 在修改代碼後，**不需**手動執行多步測試與憑證重播，**只需呼叫唯一實體命令**：
 
-### 1. 核心 JIT 技能組裝與約束自檢 (ASI Constraints)
-* **目的**: 驗證重構沒有破壞 HEEP 13 種能力的適配與 JIT 負控制（Negative-control）查表邏輯。
-* **物理執行命令**:
-  ```bash
-  pytest tests/engine/test_asi_constraints.py
-  ```
+```bash
+python3 scripts/ops/nexus_refactor_gate_keeper.py
+```
 
-### 2. ContextHub 嚴格隔離與依賴檢查
-* **目的**: 確保重構未在 `context_hub.py` 中引入任何隱式或循環引用，維護 strict dependency 原則。
-* **物理執行命令**:
-  ```bash
-  pytest tests/core/test_context_hub_strict_deps.py
-  ```
-
-### 3. Research Flow 拆分後葉子模組集成測試
-* **目的**: 驗證拆分後的 10 個葉子模組在與 `ResearchFlowService` 門面（Facade）聯動時運作正常。
-* **物理執行命令**:
-  ```bash
-  pytest tests/research/test_flow_leaf_modules.py
-  pytest tests/app/test_research_s2t_runtime.py
-  ```
+### 🛡️ Gatekeeper 內部自動執行之「自癒自檢四部曲」：
+1. **動態測試自檢 (Auto-Pytest)**: 自動跑過 `test_asi_constraints.py` 與 `test_context_hub_strict_deps.py`。
+2. **憑證自癒補簽 (Auto-Receipts)**: 自動補刷 Zero-Trust V2 attested receipts 憑證鏈。
+3. **知識編譯更新 (Auto-NKP)**: 自動更新 `10_Analysis_Scans/` 底下的 5 大靜態分析圖表。
+4. **Git 暫存暫存 (Git Staging)**: 自動執行 `git add` 暫存所有變更，並進行 conventional 結算狀態判定。
 
 ---
 
-## 🛡️ 零信任 V2 macOS 沙盒與憑證重播指引 (Zero-Trust V2 Sandbox)
+## 🤖 AI Agent 專屬自動化重構操作手冊 (Agent Handoff Spec)
 
-在大規模重構完成後，由於物理程式碼已發生變動，舊有的 attested receipts 將自動失效，引發門禁鎖死（`runtime_mutation_allowed=false`）。重構 Agent 必須執行以下「憑證補刷與解鎖」流程：
+如果您是正在執行重構任務的 **AI Agent（如 Codex, Gemini, Claude-Code）**，請嚴格遵守以下 **「無損自動化三原則」**：
 
-### 步驟 1：在 macOS `sandbox-exec` 唯讀沙盒下運行重播
-確保所有的重播與測試皆在 macOS 沙盒下安全完成，物理隔離業務程式碼：
+### 📌 原則一：無損對位修改
+1. **讀取 Context**: 修改前，必須先以 `view_file` 讀取並錨定目標檔案的 AST 類別。
+2. **保留原始註釋**: 除非使用者要求，重構時**必須無損保留**既有的 Docstrings 與 inline 註解。
+3. **嚴禁破壞 ASI 介面**: HEEP 能力規劃之 JIT 調用接口不可變更，任何變更僅限於類別內部的算法優化或解耦。
+
+### 📌 原則二：一鍵自癒集成
+修改代碼後，請直接調用：
 ```bash
-# 啟用 macOS 沙盒唯讀探測
-uv run scripts/ops/build_zero_trust_v2_sandbox_probe.py
+python3 scripts/ops/nexus_refactor_gate_keeper.py
 ```
+* **若回傳 `SUCCESS`**: 代表代碼完全合規、憑證成功補簽、變更已自動 `git stage`。您可以直接進行 Conventional 提交。
+* **若回傳 `FAIL`**: 代表測試崩潰或憑證鏈斷裂。您必須**立刻還原代碼（Rollback）**，或重新檢索 `refactoring_agent_survival_guide.md` 的測試路徑進行本地調試。
 
-### 步驟 2：物理補刷並重新生成 signed receipts
-利用 V2 behavior runner 對重構後的能力進行重新執行，補刷 attested 憑證鏈：
+### 📌 原則三：Conventional Commit 結算格式
+當 Gatekeeper 通過後，您的 git commit 必須嚴格遵循 Conventional Commit 規範，並且在 description 中明確標註 `Rollback Plan: git revert <commit_sha>`，例如：
 ```bash
-# 強制重新計算並簽章 fresh task receipts
-uv run scripts/ops/build_zero_trust_v2_fresh_task_refs.py --force-sign
+git commit -m "refactor(engine): decouble capability planner default nodes
+
+Rollback Plan: git revert <this_commit_sha>"
 ```
-
-### 步驟 3：運行 CI Gate 結算檢測
-```bash
-uv run scripts/ops/ci_gate.py
-```
-只有當 `ci_gate.py` 回傳 `PASS` 且 receipts 重新解鎖後，方可宣稱重構成功交付。
-
----
-
-## 📈 運行期 3% 效能開銷與安全限制 (Performance Gates)
-
-重構 Agent 必須對位以下安全門禁限制：
-1. **3% CPU/Token 開銷防線**:
-   - `HallucinationGuard`（防幻覺攔截）與 `CompletionEnvelope`（結算收據）調用鏈在運行期的總消耗開銷**嚴禁大於 3%**。
-   - 治理邏輯必須被限制在「路由決定」與「結算審計」兩個核心 Gate 上被動調用，嚴禁置於常規業務計算高頻迴圈。
-2. **無損回退 (Idempotent Rollback)**:
-   - 所有代碼變更必須支持一鍵無損回滾。重構 Agent 必須在提交中明確備註 `Rollback Plan: git revert <commit_sha>`。
 
 [NEXUS IDENTITY: de0969ff + v2.8 RUNTIME-ALIGNED]
