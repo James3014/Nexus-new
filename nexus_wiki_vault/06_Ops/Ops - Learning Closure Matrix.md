@@ -54,6 +54,7 @@ version_scope:
 | Reference project layout assumption | 參考專案不是標準 `src/`、`dist/` 或 root `README.md` 形狀，固定路徑掃描產生假陰性或 noisy dependency 掃描 | 先做 layout probe，再只掃實際 implementation root；package-only 參考需避開 `node_modules` 泛掃並錨定 exported library files | `rg --files <reference-root>` before focused scan |
 | Evidence auto-merge poisoning | 多 Agent 並行時 evidence ledger/graph 自動合併可能吞掉 corrupt input 或超大 artifact | 只對 append-only/commutative evidence formats 啟用 union-merge，並要求 parse/schema validation、size cap、node/record cap 皆 PASS | `pytest tests/contracts/test_hard_gate_compatibility.py` |
 | Plan patch anchor drift | 計劃文件文字與記憶中的段落錨點不同，導致 patch 無法匹配 | 修改計劃前先用 heading/line range 重新定位，再用最小上下文 patch；避免靠記憶中的句子當錨點 | `sed -n '<range>p' docs/plans/<plan>.md` before patch |
+| Document-to-test path drift | 測試回歸通過率因 Wiki 中的連結格式 (如 [Link](Path)) 導致 MISSING_PAGE 失敗 | 禁止修改門禁腳本來包容格式錯誤，必須將 Wiki 修正為與代碼結構相符的純文字路徑 | `scripts/ops/wiki_eval_regression.py` |
 
 ## Upstream
 - `06_Ops/Ops - Wiki Drift Audit.md`: 漂移訊號來源。 [Source: 06_Ops/Ops - Wiki Drift Audit.md]
@@ -3135,3 +3136,338 @@ version_scope:
 - **Root Cause**: Command wiring and research-session contract code shared one large CLI file, so small preflight/report changes had to touch the main command surface.
 - **Action Taken**: Added `scripts/engine/commands/research_support.py`, covered relative JSON reads and blocked completion payloads with TDD, and rewired `research:auto-flow`, `research:packet`, `research:log-from-last`, and `research:run` to use the support module.
 - **Prevention**: Future CLI research commands should keep Click option parsing in `nexus_cli.py` and put reusable session/preflight/report contracts under `scripts/engine/commands/`.
+
+## 2026-05-22: Targeted Retrieval Globs Must Not Depend On Optional Files
+- **Phenomenon**: A bounded socket-barrier search failed before scanning because zsh expanded `requirements*.txt` and no matching root file existed.
+- **Root Cause**: The retrieval command used an unquoted optional shell glob instead of discovering files with `rg --files` first.
+- **Action Taken**: Re-ran discovery with `rg --files | rg '(^|/)conftest\.py$|requirements.*\.txt$|pyproject\.toml$'` and limited the follow-up scan to confirmed files.
+- **Prevention**: For targeted lesson or dependency retrieval, discover optional filenames first or quote globs; do not let shell expansion decide whether the search runs.
+
+## 2026-05-22: Golden JSON EOL Rules Need An Explicit Gitattributes Check
+- **Phenomenon**: A plan review tried to read root `.gitattributes` while validating Golden Master LF requirements, but the file did not exist in the current checkout.
+- **Root Cause**: The architecture plan assumed future `.gitattributes` enforcement without first treating the absence of the file as an implementation prerequisite.
+- **Action Taken**: Updated the Clean Code / Linus plan so G2/G7 require adding `.gitattributes` rules for `docs/testing/golden_schemas/*.json text eol=lf` and telemetry snapshot JSON paths before claiming cross-platform Golden JSON stability.
+- **Prevention**: Future Golden Master or telemetry snapshot gates should check for `.gitattributes` before relying on LF-stable JSON comparisons across macOS and Linux CI.
+
+## 2026-05-22: Shell Search Patterns Must Quote Backticks
+- **Phenomenon**: A verification `rg` command used a double-quoted pattern containing `` `.gitattributes` ``, and zsh attempted command substitution before running the search.
+- **Root Cause**: Markdown-style backticks inside double quotes are still shell metacharacters.
+- **Action Taken**: Re-ran the search with the regex in single quotes and verified the expected plan entries.
+- **Prevention**: When searching markdown text that contains backticks, wrap the whole pattern in single quotes or escape the backticks.
+
+## 2026-05-22: New Focused Tests Need Impact Map Rows Before Changed-Only Gates
+- **Phenomenon**: The first changed-only validation for `tests/benchmark/test_telemetry_fidelity.py` treated the new test file as unmatched, fell back into high-risk `tests/core`, and then failed on `tests/core/test_web_dom_mapper.py` because the local Playwright browser executable was not installed. The same fallback happened again when validating `tests/app/test_research_flow_service.py`, `docs/testing/test_impact_map.md`, and later `tests/ops/test_strategic_map_audit.py`.
+- **Root Cause**: The new benchmark/app/ops test contracts and impact-map file edits did not yet have self-rows in `docs/testing/test_impact_map.md`, so the selector could not keep the validation scope local.
+- **Action Taken**: Added impact-map rows for `tests/benchmark/test_telemetry_fidelity.py`, `tests/app/test_research_flow_service.py`, `tests/ops/test_strategic_map_audit.py`, and `docs/testing/test_impact_map.md`, reran the changed-only gates, and confirmed they selected the intended telemetry/app/ops contract tests without the unrelated core Playwright target.
+- **Prevention**: Future focused test files or selector-governance docs introduced for protected refactor gates should add their own active `test_contract` or domain-specific impact-map row before running `ci_gate.py --changed-only`.
+
+## 2026-05-22: CRLF Golden Schema Checks Must Inspect Bytes Before Text Decode
+- **Phenomenon**: The first G2/G7 CRLF regression test expected a golden schema snapshot containing CRLF newlines to fail, but the checker returned `PASS`.
+- **Root Cause**: `Path.read_text()` uses universal newline handling, so the string-level `"\r\n"` check observed normalized LF text instead of the raw file bytes.
+- **Action Taken**: Changed `check_golden_schema_snapshots.py::_read_text_lf` to read bytes, reject `b"\r\n"`, then decode as UTF-8; reran golden schema tests and the changed-only gate.
+- **Prevention**: Any future EOL-sensitive gate should inspect raw bytes before text decoding; text-level checks are appropriate only after newline policy has already been enforced.
+
+## 2026-05-22: Refactor Plan Documents Need Impact Map Rows Too
+- **Phenomenon**: A combined changed-only gate for the Clean Code / Linus refactor slice treated `docs/plans/NEXUS_CLEAN_CODE_LINUS_REFACTOR_PLAN_2026-05-22.md` as unmatched, fell back into high-risk `tests/core`, and failed on `tests/core/test_web_dom_mapper.py` because the local Playwright browser executable was not installed.
+- **Root Cause**: The plan document itself had no active row in `docs/testing/test_impact_map.md`, so a docs-only planning artifact change lost its narrow validation scope.
+- **Action Taken**: Added an impact-map row for `docs/plans/NEXUS_CLEAN_CODE_LINUS_REFACTOR_PLAN_2026-05-22.md` pointing at selector contract tests, then reran changed-only validation.
+- **Prevention**: Future executable plans that are updated during protected refactor work should get an explicit `plan_contract` impact-map row before they are included in combined changed-only gates.
+
+## 2026-05-22: Specific Engine Files Need Rows Before Broad Engine Gates
+- **Phenomenon**: A P5 route-cost matcher changed-only gate matched `nexus/engine/learning_policy_loader.py` only through the broad `nexus/engine` row, pulled the full engine suite, and failed on unrelated recursive repair / tactical route tests.
+- **Root Cause**: The extracted matcher had a focused impact-map row, but its caller `learning_policy_loader.py` did not; the selector therefore treated a narrow loader wiring change as a broad engine governance change.
+- **Action Taken**: Added an explicit `nexus/engine/learning_policy_loader.py` row pointing at learning-policy store, route-cost matcher, and two focused route-cost planner nodeids.
+- **Prevention**: When a refactor touches both a new leaf module and its existing caller, add impact-map rows for both paths before running changed-only gates; otherwise the existing caller can still fall back to a broad package row.
+
+## 2026-05-22: CLI Artifact Audits Must Follow Extracted Action Writers
+- **Phenomenon**: After moving `nexus learn:benchmark` artifact writing behind `write_learn_precision_benchmark_output`, the full CI report-trust lane failed because `test_cli_artifact_gate_audit.py` still required the literal `json.dump(` token inside the Click command block.
+- **Root Cause**: The audit encoded artifact ownership as inline CLI implementation text instead of allowing a Click adapter to delegate to a tested Action writer seam.
+- **Action Taken**: Updated the audit to require the CLI command to call `write_learn_precision_benchmark_output`, added an extracted-action artifact contract check for `scripts/engine/commands/learn_actions.py`, and added an impact-map row for the audit test itself.
+- **Prevention**: Future CLI Action extractions that move artifact writes out of `nexus_cli.py` must update artifact audits to follow the writer seam and assert the extracted module still owns a concrete write token.
+
+## 2026-05-22: Learning Closure Writebacks Need Impact Map Rows
+- **Phenomenon**: A changed-only validation that included `nexus_wiki_vault/06_Ops/Ops - Learning Closure Matrix.md` treated the lesson writeback as unmatched, fell back into `tests/core`, and failed on the local Playwright browser executable missing from `tests/core/test_web_dom_mapper.py`.
+- **Root Cause**: The Learning Closure Matrix is a protected operational artifact, but it had no active row in `docs/testing/test_impact_map.md`.
+- **Action Taken**: Added a `lesson_writeback_contract` row for `nexus_wiki_vault/06_Ops/Ops - Learning Closure Matrix.md` pointing at selector/focused-nodeid contract tests.
+- **Prevention**: Future required lesson writebacks should have narrow impact-map coverage before they are included in combined changed-only gates; otherwise documentation governance changes can pull unrelated runtime suites.
+
+## 2026-05-22: Benchmark Runner Test Files Need Self Rows Too
+- **Phenomenon**: A P3 socket-barrier changed-only validation had precise rows for `scripts/bench/capability_ab_runner.py` and `scripts/bench/runner_socket_barrier.py`, but still fell back into `tests/core` because the edited `tests/benchmark/test_capability_ab_runner.py` file itself was unmatched.
+- **Root Cause**: The selector treats changed test files as changed paths too; a precise source-file row does not cover the test file unless the test file has its own row.
+- **Action Taken**: Added a `benchmark_runner_test_contract` row for `tests/benchmark/test_capability_ab_runner.py` using the same focused benchmark runner nodeids as the source-file row.
+- **Prevention**: When adding or editing focused benchmark runner tests, add self rows for the test files as well as rows for the source modules; otherwise a safe nodeid selection can be widened by the test-file path.
+
+## 2026-05-22: Direct Runner Extraction Needs Success-Path Import Coverage
+- **Phenomenon**: During P3 direct-provider prompt seam extraction, focused direct baseline success tests failed with `NameError: name 'difflib' is not defined` when `artifact_summary.diff_line_count` computed `difflib.unified_diff`.
+- **Root Cause**: The benchmark runner success path depended on a module import that was not explicit in `capability_ab_runner.py`; prior focused work emphasized failure/socket paths and did not isolate the direct baseline success telemetry path.
+- **Action Taken**: Added explicit `import difflib`, introduced `scripts/bench/direct_provider_runner.py` with prompt/hash/attribution tests, and included direct success-path nodeids in the impact map for the runner seam.
+- **Prevention**: Future runner extractions must include at least one direct success-path focused test in addition to failure/pathological tests so missing imports and telemetry-only computations surface before full CI.
+
+## 2026-05-22: Evidence Bundle Focused Nodeids Must Be Resolved Before Gate Runs
+- **Phenomenon**: The first P3 evidence-bundle gate-builder validation command used stale nodeids for route-decision and provider-token tests, and pytest returned `not found` before running the selected suite.
+- **Root Cause**: Evidence bundle characterization tests have been renamed over several public-gate hardening rounds; relying on remembered nodeid names is weaker than resolving the current test names from the file.
+- **Action Taken**: Used `rg` against `tests/benchmark/test_capability_ab_runner.py` to resolve current nodeids, reran the corrected bundle-gate characterization set, and confirmed it passed.
+- **Prevention**: Before focused public-gate/evidence-bundle validations, resolve nodeids from the current test file or impact map rather than using historical names from reports or memory.
+
+## 2026-05-23: Lesson Writeback Gates Use Current Local Date
+- **Phenomenon**: A full `uv run scripts/ops/ci_gate.py` rerun after the evidence bundle gate seam failed at Lesson Writeback Check because the environment had crossed local midnight and required a `2026-05-23` Learning Closure entry.
+- **Root Cause**: The slice already wrote a `2026-05-22` lesson for stale evidence-bundle nodeids, but `lesson_writeback_check.py` compares against `datetime.now().strftime("%Y-%m-%d")` when the acceptance report is not PASS.
+- **Action Taken**: Added a same-day `2026-05-23` Learning Closure entry before rerunning the full gate.
+- **Prevention**: Before rerunning full CI near midnight, check the local date and ensure the required Failure-to-Lesson evidence uses today's date, not only the task-start date.
+
+## 2026-05-23: Multi-Agent Submit Needs Injectable Side-Effect Seams
+- **Phenomenon**: The first P4 multi-agent submit Action extraction test failed at import time because `TaskSubmissionView` did not exist yet.
+- **Root Cause**: `nexus multi-agent submit` mixed verification, hallucination evidence loading, delivery receipt assessment, governance event append, git commit lookup, and output rendering inside the Click command body.
+- **Action Taken**: Added `TaskSubmissionView` and `submit_multi_agent_task` with injectable receipt loader, governance event appender, and commit sha provider; rewired the CLI command as a thin adapter.
+- **Prevention**: Future CLI submission or completion commands should expose side-effect seams before testing so unit tests can assert fail-closed delivery behavior without touching real receipts, governance logs, or git subprocesses.
+
+## 2026-05-23: Learn Converge Needs Evidence And Gate Seams Before CLI Extraction
+- **Phenomenon**: The first P4 learn converge Action extraction test failed at import time because `LearnConvergeResult` did not exist yet.
+- **Root Cause**: `nexus learn:converge` mixed service convergence, hallucination evidence writing, hallucination gate enforcement, report writing, and Click rendering in one command body.
+- **Action Taken**: Added `LearnConvergeResult` and `run_learn_converge` with injectable evidence writer and hallucination gate seams; rewired the CLI command as a thin adapter.
+- **Prevention**: Future Learn command extractions should split service execution, evidence write/gate, and render/report writing behind explicit seams so tests can use fake services without bypassing hallucination safety.
+
+## 2026-05-23: CLI Artifact Audits Must Follow Learn Action Seams
+- **Phenomenon**: Full CI Report Trust Audit failed after `learn:converge` extraction because the semantic/artifact audits still required `_write_hallucination_evidence` and `_enforce_hallucination_gate` tokens inside the Click command block.
+- **Root Cause**: The audits encoded artifact and hallucination-gate ownership as inline CLI implementation text instead of following the extracted `run_learn_converge` Action seam.
+- **Action Taken**: Updated the audits to require `run_learn_converge` in the CLI adapter and to verify `_write_learn_hallucination_evidence`, `_enforce_learn_hallucination_gate`, and `write_text(` inside `scripts/engine/commands/learn_actions.py`.
+- **Prevention**: Future Learn Action extractions that move evidence or artifact writes out of `nexus_cli.py` must update semantic/artifact audits to follow the Action module and assert the extracted seam still owns the concrete write/gate tokens.
+
+## 2026-05-23: Semantic Audit Tests Need Impact Map Self Rows
+- **Phenomenon**: The changed-only gate after updating `test_cli_semantic_contract_audit.py` treated that test file as unmatched, fell back to `tests/core`, and failed on `tests/core/test_web_dom_mapper.py` because the local Playwright browser executable was missing.
+- **Root Cause**: `docs/testing/test_impact_map.md` had a self row for `test_cli_artifact_gate_audit.py` but not for `test_cli_semantic_contract_audit.py`.
+- **Action Taken**: Added a `test_contract` self row for `tests/engine/test_cli_semantic_contract_audit.py`.
+- **Prevention**: When a protected audit test is edited alongside an Action extraction, ensure the audit test file itself has an impact-map self row before running changed-only gates.
+
+## 2026-05-23: Learn Ask Action Tests Must Mirror Service Options
+- **Phenomenon**: The first green attempt for P4 `nexus ask` Action extraction failed because the fake `LearnModeService.ask` accepted only `topic` and `question`, while the extracted Action forwarded the real CLI option surface.
+- **Root Cause**: The fake service did not mirror the production `ask` interface for `top_k`, `min_evidence`, `min_token_coverage`, `max_staleness_days`, and `allow_cross_pack`.
+- **Action Taken**: Updated the fake service to accept and record keyword arguments, then asserted the Action passes the expected option payload before rendering or writing hallucination evidence.
+- **Prevention**: Future Learn command extractions should keep fakes interface-compatible with the service boundary and assert forwarded options explicitly so CLI thin adapters cannot silently drop safety or retrieval controls.
+
+## 2026-05-23: Learn Source Lifecycle Completion Payloads Are Envelope Contracts
+- **Phenomenon**: The first green attempt for P4 learn source lifecycle Action extraction failed because the test expected an exact minimal completion payload.
+- **Root Cause**: `build_completion_envelope` intentionally adds runtime classification, retryability, blocker type, timestamp, and related completion fields; exact dict equality made the test brittle against the established contract.
+- **Action Taken**: Changed the test to assert the stable contract fields while allowing the full completion envelope to remain present.
+- **Prevention**: When extracting commands that merge completion envelopes, tests should assert required semantic and routing fields instead of freezing volatile envelope metadata such as timestamps.
+
+## 2026-05-23: CLI Audits Must Follow Learn Source Lifecycle Action Seams
+- **Phenomenon**: Semantic and artifact audit tests failed after `learn:register-source`, `learn:refresh`, and `learn:refresh-plan` were extracted because the audits still required finalization and report-write tokens inside Click command blocks.
+- **Root Cause**: The audits encoded implementation location rather than ownership: report writes and completion finalization now live in `scripts/engine/commands/learn_actions.py`, while the CLI is intentionally a thin adapter.
+- **Action Taken**: Updated the audits to require CLI calls to the extracted lifecycle Actions and to verify `_write_json_report`, `_finalize_learn_semantic_payload`, and `ensure_verified_completion` in the Action module.
+- **Prevention**: Every CLI Action extraction that moves write/finalization behavior must update both CLI-block audits and extracted-module token audits in the same slice.
+
+## 2026-05-23: Learn Report Audits Must Follow Dual-Gate Action Ownership
+- **Phenomenon**: P4 `learn:report` extraction passed focused behavior tests, then semantic/artifact audits failed because they still required `semantic_status` and `write_text(` inside the Click command block.
+- **Root Cause**: The audits tracked the old inline CLI implementation instead of the new Action ownership for dual-gate markdown, semantic contract evaluation, and JSON report write.
+- **Action Taken**: Added `run_learn_report` with injectable markdown writer and semantic evaluator seams, rewired the CLI as a thin adapter, and updated audits to check the extracted Action module.
+- **Prevention**: When a Learn command owns dual-gate markdown or semantic report writes, audit tokens must live with the Action module that performs those writes, not with the Click adapter.
+
+## 2026-05-23: Extracted Learn Ingest Must Preserve Legacy Semantic Evaluator Seam
+- **Phenomenon**: After `learn:ingest` extraction, `test_learn_ingest_fails_closed_when_semantic_contract_unverified` unexpectedly exited 0 because its monkeypatch of `nexus_cli._evaluate_learn_semantic_contract` no longer affected the Action module.
+- **Root Cause**: The extraction moved semantic evaluation behind `run_learn_ingest` but initially did not pass the existing CLI-level evaluator seam into the Action.
+- **Action Taken**: The CLI adapter now passes `_evaluate_learn_semantic_contract` into `run_learn_ingest`, preserving existing monkeypatch and fail-closed test behavior while keeping the Action independently injectable.
+- **Prevention**: Before extracting a command with legacy monkeypatch seams, grep focused tests for patched helper names and explicitly preserve those injection points at the adapter boundary.
+
+## 2026-05-23: Learn Gate Subprocess Tokens Belong Behind Command Runner Seams
+- **Phenomenon**: P4 `learn:gate` artifact audit failed after extraction because it still expected `acceptance-check` and `contract-check` subprocess tokens inside the Click command body.
+- **Root Cause**: The gate command mixed threshold checks, evidence write, hallucination gate, acceptance checks, contract checks, and CI dry-run construction in one CLI function; after extraction, the audit still checked the old location.
+- **Action Taken**: Added `run_learn_gate` with an injectable `command_runner`, threshold fail-closed behavior before subprocess execution, and extracted-module audit checks for acceptance/contract/CI command tokens.
+- **Prevention**: Governance commands that invoke subprocess gates should expose a command-runner seam and test command construction without executing subprocesses; audits should verify gate command tokens at that seam.
+
+## 2026-05-23: Learn Phase Reports Need The Same Completion Action Seam
+- **Phenomenon**: P4 `learn:phase-slo` and `learn:phase-kpi` extraction hit audit failures because the audits still required completion finalization and report-write tokens inside Click command blocks.
+- **Root Cause**: Phase SLO/KPI commands used the same inline pattern as source lifecycle commands: service call, JSON write, completion envelope merge, and `ensure_verified_completion` were all owned by the Click function.
+- **Action Taken**: Added `run_learn_phase_slo`, `run_learn_phase_kpi`, `LearnPhaseReportResult`, and `verify_learn_phase_report_completion`; rewired CLI commands as thin adapters and moved audit token checks to `scripts/engine/commands/learn_actions.py`.
+- **Prevention**: Treat phase telemetry report commands as Learn Action modules, not as harmless inline CLI helpers, because their completion envelopes are part of the semantic gate contract.
+
+## 2026-05-23: Research Route Planner Needs Route Snapshot Isolation
+- **Phenomenon**: The first green attempt for P4 `research:route` Action extraction failed because the fake planner captured the route payload by reference and later saw `route_decision_report` added by report writing.
+- **Root Cause**: Route planning and route report annotation shared the same mutable dict, so a post-plan artifact annotation leaked across the planner seam.
+- **Action Taken**: Added `scripts/engine/commands/research_actions.py` with injectable route builder, planner, policy loader, decision builder, report writer, and timestamp provider seams; `run_research_route` now passes `dict(payload)` into the planner before annotating the payload with report path.
+- **Prevention**: Research route Actions should pass snapshots across planner/report seams when later artifact annotations mutate the public route payload.
+
+## 2026-05-23: Research Session Commands Should Share One Action Interface
+- **Phenomenon**: P4 research session extraction started with import failure for `ResearchHumanReportResult` and `ResearchSessionActionResult`, while multiple session commands still owned `ResearchSessionLoopService` calls directly in `nexus_cli.py`.
+- **Root Cause**: Session commands had repetitive shallow CLI implementations: instantiate service, call one method, optionally read JSON or write a human report, then render a small output schema.
+- **Action Taken**: Added research session Actions and renderers in `scripts/engine/commands/research_actions.py` for onboarding, recommend-next, packet, log-from-last, finalize-preview, writeback-lessons, and human-report; CLI commands now delegate to these Action seams.
+- **Prevention**: Future research session CLI changes should add behavior to the shared research Action interface first, with CLI kept to Click option parsing and output echo only.
+
+## 2026-05-23: Evidence Bundle Posture Logic Needs A Dedicated Gate Module
+- **Phenomenon**: P3 posture/x1/x3 extraction started with import failure for `scripts.bench.evidence_bundle_posture`, while claim posture, training eligibility, direction magnitude, x1 history, and x3 promotion logic still lived inside the large benchmark runner facade.
+- **Root Cause**: `capability_ab_runner.py` kept public-claim wording, training posture, direction/magnitude judgment, and history persistence near payload serialization, making small policy changes require navigating the whole runner.
+- **Action Taken**: Added `scripts/bench/evidence_bundle_posture.py` with public/training posture, valid comparison readiness, direction magnitude, mutation hardening, x1 history, and x3 promotion helpers; `capability_ab_runner.py` now imports compatibility aliases for existing callers.
+- **Follow-up Failure**: Full runner characterization initially failed because `write_evidence_bundle` still called `_x1_readiness_pass` directly after the helper moved.
+- **Prevention**: Future evidence-bundle policy changes should target the posture module first and keep runner edits limited to payload assembly or file I/O; when moving helper functions out of the runner, grep for private helper call sites and preserve compatibility aliases before claiming the extraction complete.
+
+## 2026-05-23: External Fixture Adapter Must Be Injectable Before Live Clone
+- **Phenomenon**: P2A external fixture adapter tests failed because `ExternalFixtureRequest` did not carry target/test path fields and `_resolve_task_files` had no adapter injection point.
+- **Root Cause**: The previous external seam was only a fail-closed placeholder, so tests could prove that live clone/setup was blocked but could not prove that a future sandboxed adapter would receive the full manifest contract.
+- **Action Taken**: Added an `ExternalFixtureAdapter` protocol, extended `ExternalFixtureRequest` with target/test/hidden paths, and allowed `resolve_external_fixture(..., adapter=...)` plus `_resolve_task_files(..., external_fixture_adapter=...)` to use a fake adapter while preserving the default `ExternalFixtureAdapterRequired` fail-closed path.
+- **Prevention**: Do not implement live external clone/setup until the adapter can be exercised with no-network tests and cache/sandbox path policy; every external fixture adapter change should first prove the injected adapter receives the full manifest path contract.
+
+## 2026-05-23: External Fixture Adapters Must Prove Local Sandbox Before Clone
+- **Phenomenon**: P2A sandboxed local Adapter tests started with `ImportError: cannot import name 'SandboxedLocalExternalFixtureAdapter'`, proving the external seam had no concrete non-network Adapter.
+- **Root Cause**: The adapter seam was injectable but still hypothetical beyond fake tests; enabling live clone/setup next would mix filesystem policy, cache policy, and network behavior in one risky step.
+- **Action Taken**: Added `SandboxedLocalExternalFixtureAdapter` with a small `resolve(request)` interface, local path / `file://` source support, `allowed_source_roots` containment, remote URL rejection, source path escape rejection, and case-dir escape rejection while preserving no-adapter fail-closed behavior.
+- **Prevention**: Future external fixture live clone work must be a separate Adapter behind an offline cache manifest, no-network tests, and explicit remote URL denylist/allowlist evidence; do not weaken the sandboxed local Adapter to make live network setup convenient.
+
+## 2026-05-23: Evidence Bundle Payload Finalization Should Be Its Own Serialization Seam
+- **Phenomenon**: P3 payload finalizer extraction started with import failure for `scripts.bench.evidence_bundle_payload`, and the first green test guessed the wrong public promotion requirement key.
+- **Root Cause**: `capability_ab_runner.py` still owned final bundle contract enrichment and JSON writing inline, while tests could easily drift from the established `public_promotion_readiness_contract` schema if they guessed field names.
+- **Action Taken**: Added `scripts/bench/evidence_bundle_payload.py` with `finalize_evidence_bundle_payload` and `write_evidence_bundle_payload`; the runner now delegates final external-provider boundary and public-promotion contracts plus UTF-8 JSON serialization to that module.
+- **Prevention**: Future payload serialization slices should assert actual existing contract keys and keep finalization/writing seams separate from cost/token/provider variance calculations until telemetry fidelity and full bundle characterization remain green.
+
+## 2026-05-23: Evidence Bundle Rubric Aggregation Belongs With Payload Semantics
+- **Phenomenon**: P3 rubric extraction started with `ImportError: cannot import name 'summarize_rubric_contract_rows'`, then `ImportError: cannot import name 'build_rubric_contract_bundle'`, proving rubric aggregation and bundle schema were still inline runner details.
+- **Root Cause**: `write_evidence_bundle` mixed payload key placement with rubric pass-rate calculation, hard-fail reason normalization, four summary keys, and claim-boundary wording, making it harder to test rubric payload semantics without exercising the whole runner.
+- **Action Taken**: Added `summarize_rubric_contract_rows` and `build_rubric_contract_bundle` to `scripts/bench/evidence_bundle_payload.py`, rewired `capability_ab_runner.py` to call the bundle builder, and added focused tests for empty rows, duplicate hard-fail reason dedupe, and stable claim-boundary schema.
+- **Prevention**: Future payload assembly extractions should move pure payload semantics into `evidence_bundle_payload.py` first, while leaving cost/token accounting and provider variance in the runner until telemetry fidelity and full benchmark characterization stay clean.
+
+## 2026-05-23: Public Cost Accounting Needs A Dedicated Context Module
+- **Phenomenon**: P3 accounting extraction started with `ModuleNotFoundError: No module named 'scripts.bench.evidence_bundle_accounting'`, while token/provider measured rates, paired wall/token ratios, prompt purity, retry share, valid comparison readiness, and systemic regression flags were still inline in `write_evidence_bundle`.
+- **Root Cause**: Evidence bundle payload assembly had become the only place that knew both cost accounting formulas and public gate context variable names, making small accounting changes require editing the large runner facade.
+- **Action Taken**: Added `PublicCostAccountingContext` and `build_public_cost_accounting_context(...)`, then rewired `capability_ab_runner.py` to compute public cost accounting through the new Module while preserving existing gate variable names, public cost semantics, and the runner compatibility alias.
+- **Follow-up Failure**: Full benchmark characterization initially failed because the extraction removed `capability_ab_runner.derive_valid_comparison_readiness_gate`, a compatibility alias still exercised by existing tests/callers.
+- **Prevention**: Future provider variance or payload assembly refactors should use this accounting Module as the seam; do not recompute cost ratios ad hoc inside payload construction or report renderers.
+
+## 2026-05-23: Provider Model Lock Context Should Be Deterministic
+- **Phenomenon**: P3 provider-context extraction started with `ModuleNotFoundError: No module named 'scripts.bench.evidence_bundle_provider_context'`, while model set extraction, same-model checks, and model-lock payload env fields were still inline in `write_evidence_bundle`.
+- **Root Cause**: Provider variance metadata was mixed into the main payload dict assembly, and `next(iter(model_set))` made multi-model payload labels dependent on set ordering.
+- **Action Taken**: Added `ModelLockContext`, `model_names`, and `build_model_lock_context(...)`, rewired `capability_ab_runner.py` to consume the context, and kept `_model_names` as a compatibility alias for runner callers.
+- **Prevention**: Future provider-variance changes should go through `evidence_bundle_provider_context.py`; keep model labels sorted/deterministic and avoid embedding env/model-lock logic directly inside payload assembly.
+
+## 2026-05-23: Evidence Bundle Row Sets Need Compatibility Tests
+- **Phenomenon**: P3 row-set extraction started with `ModuleNotFoundError: No module named 'scripts.bench.evidence_bundle_rows'`; after adding the Module, focused tests failed because they assumed `trial_index=0` should be a distinct row key.
+- **Root Cause**: Existing `_row_key_counts` compatibility semantics use `row.get("trial_index") or "1"`, so falsy trial indexes such as `0` are treated as default trial `"1"`. Changing that during an extraction would silently alter same-task-trials and public gate behavior.
+- **Action Taken**: Added `EvidenceBundleRowSets`, `build_evidence_bundle_row_sets(...)`, and `row_key_counts(...)`, rewired `capability_ab_runner.py` to consume the row-set context, kept `_row_key_counts` as a compatibility alias, and locked the existing `trial_index=0` behavior in tests.
+- **Prevention**: Payload assembly refactors must preserve row-key compatibility unless a separate migration explicitly changes trial-index semantics with telemetry fidelity evidence and public gate characterization.
+
+## 2026-05-23: Evidence Bundle Metadata Should Use Injected Providers
+- **Phenomenon**: P3 manifest extraction started with `ModuleNotFoundError: No module named 'scripts.bench.evidence_bundle_manifest'`, while artifact file manifest, run identity, task manifest, timeout manifest, and raw file manifest were still inline in `write_evidence_bundle`.
+- **Root Cause**: Payload metadata assembly mixed deterministic dictionary construction with filesystem hashes, git commit lookup, environment timeout policy, and direct Gemini timeout policy in the large runner facade.
+- **Action Taken**: Added `build_artifact_file_manifest(...)`, `build_run_identity(...)`, `build_task_manifest(...)`, `build_timeout_manifest(...)`, and `build_raw_file_manifest(...)`; runner now calls the metadata Module with injected sha/git/timeout helpers.
+- **Follow-up Failure**: A targeted `rg` evidence command failed with zsh `unmatched "` because the pattern included an unescaped quote; rerunning with a single-quoted pattern fixed the retrieval.
+- **Prevention**: Keep manifest metadata helpers pure and provider-injected; do not let them read public gate state or silently change environment/default timeout behavior during payload extraction.
+
+## 2026-05-23: Evidence Bundle Payload Sections Must Preserve Gate Context Names
+- **Phenomenon**: P3 payload section extraction started with `ImportError: cannot import name 'build_nexus_wearing_context'`, while telemetry completeness and Nexus wearing/system execution context were still inline in `write_evidence_bundle`.
+- **Root Cause**: The runner payload dict owned both rendered section fields and local variables consumed by `derive_public_gate_failures` / `build_public_gate_checks` through the gate context.
+- **Action Taken**: Added `build_telemetry_completeness_section(...)` and `build_nexus_wearing_context(...)` to `scripts/bench/evidence_bundle_payload.py`; runner now delegates section construction while preserving `nexus_valid_rate`, `local_reflex_verified_rate`, `nexus_system_execution_valid_rate`, and related local names.
+- **Prevention**: Future payload section extractions must identify which values are only rendered payload fields and which values are gate context inputs before replacing inline calculations.
+
+## 2026-05-23: Static Gate Sections Should Not Recompute Gate Decisions
+- **Phenomenon**: P3 static gate section extraction started with `ImportError: cannot import name 'build_wall_ledger_conservation_section'`, while wall-ledger bundle and warning-clean gate schemas were still inline in `write_evidence_bundle`.
+- **Root Cause**: Pure payload section assembly sat beside telemetry evaluation and warning invalid decision logic, making it tempting for a refactor to recompute gate decisions behind the payload seam.
+- **Action Taken**: Added `build_wall_ledger_conservation_section(...)` and `build_warning_clean_gate_section(...)` to `scripts/bench/evidence_bundle_payload.py`; runner passes existing summaries and invalid/required flags into the section builders.
+- **Prevention**: Static payload section builders should render already-decided gate inputs only; keep telemetry evaluation, summarization, and invalid decision logic in their existing seam until a dedicated tested extraction is justified.
+
+## 2026-05-23: Posture Finalization Payload Must Not Move Posture Derivation
+- **Phenomenon**: P3 posture finalization extraction started with `ImportError: cannot import name 'build_posture_finalization_gate_section'`, while `posture_finalization_gate` schema and public efficiency wording boolean were still inline in `write_evidence_bundle`.
+- **Root Cause**: The rendered posture-finalization payload sat close to public/training posture derivation, making a small payload cleanup risky if it also moved policy decisions.
+- **Action Taken**: Added `build_posture_finalization_gate_section(...)` to `scripts/bench/evidence_bundle_payload.py`; runner still derives public/training posture through the existing posture and cost-accounting seams, then passes only resolved inputs into the builder.
+- **Follow-up Failure**: A first Learning Closure patch failed because the expected context text did not match the current local file exactly.
+- **Prevention**: When appending lessons near recently edited sections, inspect the immediate local context first and patch against the smallest stable anchor.
+
+## 2026-05-23: Telemetry Fidelity Needs A Real Bundle Snapshot
+- **Phenomenon**: F01 telemetry fidelity work started with `ModuleNotFoundError: No module named 'scripts.bench.evidence_bundle_fidelity'`; after adding the Module, the first snapshot expected `valid_comparison_readiness_gate=RETURN` but the fixed matched-pair fixture produced `PASS`.
+- **Root Cause**: Comparator-only tests proved canonicalization behavior but did not exercise `write_evidence_bundle(...)`, so expected gate posture could still be guessed incorrectly.
+- **Action Taken**: Added `extract_telemetry_fidelity_snapshot(payload)` and a fixed mock with/without evidence-bundle test that snapshots telemetry completeness, Nexus wearing, public gate checks, wall-ledger conservation, and posture.
+- **Prevention**: Before further payload assembly extraction, run a real fixed mock bundle snapshot; do not infer readiness/posture values from memory or nearby tests.
+
+## 2026-05-23: Evidence Bundle Header Sections Should Reuse Manifest Helpers
+- **Phenomenon**: P3 payload header extraction started with `ImportError: cannot import name 'build_evidence_bundle_header_section'`, while schema/header/manifest/raw-file/row-count placement still lived inside `write_evidence_bundle`.
+- **Root Cause**: Manifest metadata helpers had already been extracted, but the top-level payload still manually placed their outputs in the runner, keeping the runner responsible for schema/default placement.
+- **Action Taken**: Added `build_evidence_bundle_header_section(...)` to `scripts/bench/evidence_bundle_payload.py`; runner now passes already-built manifest/context values into the header builder and keeps the metadata value computation in existing Modules.
+- **Prevention**: Header payload extraction should centralize placement/defaults only; keep hashing, git lookup, timeout policy, and taskset contract generation behind their existing injected helpers.
+
+## 2026-05-23: Computed Payload Sections Should Only Place Resolved Reports
+- **Phenomenon**: P3 computed section extraction started with `ImportError: cannot import name 'build_evidence_bundle_computed_sections'`, while route-cost/report/contract/S2T/product/OpenSeeker payload placement still lived inside `write_evidence_bundle`.
+- **Root Cause**: The runner had already computed these reports before payload assembly, but it still owned the final report/contract key placement, making payload assembly harder to audit without changing calculations.
+- **Action Taken**: Added `build_evidence_bundle_computed_sections(...)` to `scripts/bench/evidence_bundle_payload.py`; runner passes resolved reports/contracts into the builder and keeps cost accounting, provider variance, route reports, S2T shadow scoring, and public gates in their existing seams.
+- **Prevention**: Computed section builders must not call report builders or recompute policy values; they should only place already-resolved reports behind stable payload keys.
+
+## 2026-05-23: Claim Posture Sections Should Only Place Resolved Gates
+- **Phenomenon**: P3 claim/posture section extraction started with `ImportError: cannot import name 'build_evidence_bundle_claim_posture_sections'`, while public claim gates, readiness/direction/x3/mutation gates, and public/training posture placement still lived inside `write_evidence_bundle`.
+- **Root Cause**: Public gate derivation had already moved into gate/posture Modules, but payload assembly still manually placed their resolved outputs in the runner.
+- **Action Taken**: Added `build_evidence_bundle_claim_posture_sections(...)` to `scripts/bench/evidence_bundle_payload.py`; runner passes resolved gate/posture outputs into the builder and keeps all policy derivation in existing seams.
+- **Prevention**: Claim/posture payload builders should never decide gate status or training eligibility; they should only render outputs produced by gate/posture Modules.
+
+## 2026-05-23: Evidence Bundle Payload Assembly Should Only Merge Sections
+- **Phenomenon**: P3 final payload assembly extraction started with `ImportError: cannot import name 'build_evidence_bundle_payload'`, proving the top-level evidence bundle merge order still lived in `capability_ab_runner.py`.
+- **Root Cause**: Earlier section builders moved payload sub-sections, but the runner still owned final merge order, making future section additions require touching the large benchmark harness facade.
+- **Action Taken**: Added `build_evidence_bundle_payload(...)` to `scripts/bench/evidence_bundle_payload.py`; `write_evidence_bundle` now passes already-resolved header, telemetry, rubric, wall-ledger, warning-clean, computed, Nexus wearing, and claim/posture sections into the payload module.
+- **Follow-up Failure**: The first documentation patch failed because it used an imprecise context anchor around recently edited plan lines.
+- **Prevention**: Final payload assembly builders should only merge resolved sections and preserve top-level order; they must not call report builders, recompute cost/provider variance, or derive public gates. For plan updates after rapid edits, inspect exact local context and patch the smallest stable anchor.
+
+## 2026-05-23: SQLite Retry Integration Should Start With One Writer
+- **Phenomenon**: P9 memory-manager retry integration started with `AttributeError: module 'nexus.core.memory_manager' has no attribute 'SQLiteRetryHandler'` and no `last_sqlite_retry_receipt`, proving `ProjectMemoryManager._execute_with_retry` still used a local retry loop instead of the shared retry Module.
+- **Root Cause**: `SQLiteRetryHandler` existed and was tested, but no real writer consumed it, so retry policy was duplicated and local to `memory_manager.py`.
+- **Action Taken**: Rewired `ProjectMemoryManager._execute_with_retry` to run a single SQLite write through `SQLiteRetryHandler`, preserved `_is_retryable_sqlite_lock` as a compatibility wrapper, and added focused tests for busy-then-success plus corrupt/non-busy fail-fast behavior.
+- **Prevention**: Do not introduce a global `DatabaseTransactionManager` until at least two real SQLite writers share the retry Interface; each additional writer needs its own caller map, focused test, and rollback path.
+
+## 2026-05-23: Evidence Bundle Report Readers Need Opt-In Seal Policy
+- **Phenomenon**: P9 report-reader sealing integration started with `TypeError: _load_evidence_bundle() got an unexpected keyword argument 'require_sealed'`, proving `gemini_nexus_report.py` could only read legacy unsealed JSON bundles.
+- **Root Cause**: The evidence sealing barrier existed as a contract Module, but the benchmark report reader had no opt-in seam to require sealed evidence before using bundle claim gates.
+- **Action Taken**: Added `require_sealed` to `_load_evidence_bundle`, wired it to `read_sealed_evidence_payload(...)`, preserved default legacy unsealed reads, and added CLI flag `--require-sealed-evidence-bundle` for fail-closed report rendering.
+- **Prevention**: Evidence sealing in report readers must be opt-in until all historical bundles are sealed; default compatibility reads cannot count as public claim or runtime promotion credit, and sealed-only mode should fail closed on unsealed payloads.
+
+## 2026-05-23: ContextHub Budget Sources Belong In A Pure Leaf Module
+- **Phenomenon**: ContextHub budget-source extraction started with `ModuleNotFoundError: No module named 'nexus.core.context_budget_sources'`, proving L0/L1/history source shaping and token estimate helpers still lived inside the ContextHub facade.
+- **Root Cause**: ContextHub already delegated budget arithmetic to `nexus.contracts.context_budget`, but still owned the source list construction consumed by both budget receipts and context assembly contracts.
+- **Action Taken**: Added `nexus/core/context_budget_sources.py` with `build_context_budget_sources(...)` and `estimate_context_tokens(...)`; `ContextHub._context_budget_sources` now delegates source shaping while keeping state/L0/L1 lookup in the facade. Added a monkeypatch-backed deletion test proving the facade consumes the split Module.
+- **Prevention**: Future ContextHub physical split work should move one leaf at a time with a deletion test. Do not rewrite the constructor or runtime dispatch path while extracting pure budget/source helpers.
+
+## 2026-05-23: ContextHub Text Fallbacks Belong In A Storage Leaf
+- **Phenomenon**: ContextHub text-store extraction started with `ModuleNotFoundError: No module named 'nexus.core.context_text_store'`, proving local `program.md` rules fallback and `.nexus/state/last_handoff.json` JSON fallback still lived inside the ContextHub facade.
+- **Root Cause**: The previous ContextHub split moved typed state views and budget-source shaping, but left local file read/error-handling policy embedded in `ContextHub.load_program_rules` and `_load_last_handoff`.
+- **Action Taken**: Added `nexus/core/context_text_store.py` with `ContextTextStore.load_program_rules(...)` and `load_last_handoff()`; `ContextHub` keeps the compatibility facade and delegates to the leaf. Added standalone text-store tests plus a monkeypatch-backed deletion test proving the facade consumes the split Module.
+- **Prevention**: Keep ContextHub storage work as one local fallback leaf at a time. Do not open SQLite-backed fallback or transaction retry work without a caller map, a busy/locked fixture, and a second writer proving the shared Interface is real.
+
+## 2026-05-23: Research RLM Trace Writes Belong In A Leaf Module
+- **Phenomenon**: Research Flow RLM trace extraction started with `ImportError: cannot import name 'rlm_trace' from 'nexus.research.flow'`, proving JSONL X/R/A trace writes and trace slugging still lived inside `research_flow_service.py`.
+- **Root Cause**: Prior research-flow splits moved route, evidence, history, phase timing, and CodeIntel context, but RLM trace serialization remained embedded in the orchestration facade.
+- **Action Taken**: Added `nexus/research/flow/rlm_trace.py` with `safe_trace_slug(...)` and `write_research_rlm_trace(...)`; `research_flow_service.py` keeps `_safe_trace_slug` and `_write_research_rlm_trace` physical aliases. Added module characterization and facade alias tests.
+- **Prevention**: Future research-flow runtime receipt work should first snapshot receipt payload shape, then move one serialization leaf at a time with compatibility aliases. Do not open recursive runtime dispatch while extracting trace or receipt writers.
+
+## 2026-05-23: Runtime Skill-Mount Contracts Belong With Receipt Runtime
+- **Phenomenon**: Runtime receipt skill-mount extraction started with `AttributeError: module 'nexus.app.research_receipt_runtime' has no attribute 'build_runtime_skill_mount_contracts'`, proving skill-mount receipt confirmation and contract building still lived in `research_flow_service.py`.
+- **Root Cause**: `research_receipt_runtime.py` already owned runtime receipt plan pruning and capability receipt payload construction, but the skill-mount confirmation branch remained in the orchestration facade.
+- **Action Taken**: Moved `build_runtime_skill_mount_contracts(...)`, `confirmed_skill_mount_receipt(...)`, `skill_mount_receipt_names(...)`, and `SKILL_MOUNT_CAPABILITY_ALIASES` into `research_receipt_runtime.py`; `research_flow_service.py` keeps physical aliases for compatibility. Added module characterization and facade alias tests.
+- **Prevention**: Keep runtime receipt work in the receipt runtime Module. Future receipt JSON writer or semantic runtime capability extraction must snapshot payload shape first and keep public-safe semantics unchanged.
+
+## 2026-05-23: Research Auto-Flow Completion Gates Belong In The Action Seam
+- **Phenomenon**: P4 research auto-flow extraction started with `ImportError: cannot import name 'ResearchAutoFlowResult'`, then semantic/artifact audits failed because they still expected completion tokens inside the Click command block.
+- **Root Cause**: `research:auto-flow` mixed route explanation, research preflight blocking, `run_auto_flow` service execution, completion envelope construction, report writes, session packet logging, and completion handoff persistence in one CLI function.
+- **Action Taken**: Added `run_research_auto_flow`, `run_research_auto_flow_route_explanation`, renderers, and injectable runner/preflight/session/completion seams to `scripts/engine/commands/research_actions.py`; rewired the CLI to parse/echo/exit only; moved audit ownership to the Action module.
+- **Prevention**: Future high-side-effect research command extractions should first provide fake-injectable Action seams and then update semantic/artifact audits to check the Action module for completion/report/handoff tokens, not the Click adapter.
+
+## 2026-05-23: Research Seam Test Files Need Self Rows
+- **Phenomenon**: The changed-only gate for research auto-flow Action extraction treated `tests/engine/test_cli_research_seams.py` as unmatched, fell back to `tests/core`, and failed on `tests/core/test_web_dom_mapper.py` because Playwright's local Chromium executable was missing.
+- **Root Cause**: `docs/testing/test_impact_map.md` covered the research Action source module and some specific research seam nodeids, but the edited seam test file itself did not have a self row.
+- **Action Taken**: Added a `test_contract` self row for `tests/engine/test_cli_research_seams.py`.
+- **Prevention**: When editing shared CLI seam tests during Action extraction, add or verify the test file's own impact-map row before running changed-only gates; source-file rows do not cover changed test-file paths.
+
+## 2026-05-23: Research Run Needs A Deep Action Module For Candidate Lifecycle
+- **Phenomenon**: P4 research run extraction started with `ImportError: cannot import name 'ResearchRunResult'`, then semantic/artifact audits failed because they still expected completion/report tokens inside the Click command block.
+- **Root Cause**: `research:run` mixed governance guards, scheduler/evaluator/selector candidate lifecycle, retention cleanup, metabolism persistence, completion envelope construction, continuation subprocess construction, handoff persistence, and JSON rendering inside one CLI function.
+- **Action Taken**: Added `ResearchRunResult`, `run_research_run`, and `render_research_run_result` to `scripts/engine/commands/research_actions.py`; rewired the CLI to parse/echo/exit only; moved audit ownership for completion/report/handoff tokens to the Action module.
+- **Prevention**: Future candidate-lifecycle changes should target the research Action seam and use injectable scheduler/evaluator/selector/completion seams in tests, keeping Click functions as adapters only.
+
+## 2026-05-23: Semantic Runtime Receipts Belong In Their Own Module
+- **Phenomenon**: Research semantic runtime receipt extraction started with `ImportError: cannot import name 'research_semantic_runtime' from 'nexus.app'`, proving judge-panel, ASI constraint, architecture scout, external doc scout, harness runtime, and formal report receipt augmentation still lived inside `research_flow_service.py`.
+- **Root Cause**: Earlier research-flow splits moved route, trace, and skill-mount receipt contracts, but semantic runtime receipt augmentation still mixed JSON receipt writing, capability mutation, and report generation inside the orchestration facade.
+- **Action Taken**: Added `nexus/app/research_semantic_runtime.py` with `augment_semantic_runtime_capabilities(...)`; `research_flow_service.py` keeps `_augment_semantic_runtime_capabilities` as a physical alias. Added module characterization, facade alias, and semantic auto-flow receipt tests.
+- **Prevention**: Future research runtime receipt work should move one serialization/augmentation responsibility at a time and keep physical aliases in the facade. Do not open recursive runtime dispatch while moving semantic receipt writers.
+
+## 2026-05-23: Refactor Start-Evidence Reports Need Impact Map Rows
+- **Phenomenon**: Changed-only gate for `docs/reports/NEXUS_REFACTOR_REMAINING_START_EVIDENCE_2026-05-23.md` fell back to `tests/core` and failed on `tests/core/test_web_dom_mapper.py` because the local Playwright browser executable was missing.
+- **Root Cause**: The new start-evidence report had no `docs/testing/test_impact_map.md` row, so changed-only selection treated it as unmatched documentation and pulled broad fallback tests.
+- **Action Taken**: Added a focused impact-map row for the start-evidence report that runs selector/impact-map contract tests instead of broad core tests.
+- **Prevention**: Any new refactor report used as gate evidence should get an impact-map self row in the same slice, especially when changed-only validation is part of the closure evidence.
+
+## 2026-05-23: Regression Questions Target Path Gaps Must Be Corrected In Wiki Not Code
+- **Phenomenon**: Wiki eval regression test pass rate fell to 20.00% with `MISSING_PAGE` errors for Q01-Q20 because target paths contained Markdown links (e.g. `[System Overview](../00_Home/System Overview.md)`).
+- **Root Cause**: The evaluation script `wiki_eval_regression.py` expects target files as plain file stems or relative script paths, but the regression table used raw Markdown links, making the script fail to locate files. An initial attempt modified the test script's parser to resolve links rather than keeping it frozen.
+- **Action Taken**: Restored the test script `wiki_eval_regression.py` to its original state. Updated the Wiki file `nexus_wiki_vault/06_Ops/Ops - Wiki Regression Evals.md` by stripping all Markdown link syntax from the `Target Page` column, leaving only clean file stems and relative script paths. Also corrected `System Overview.md` to restore required keywords for Q01.
+- **Prevention**: Never modify downstream gate test scripts (such as `wiki_eval_regression.py`) to bypass path drifts or syntax errors in Wiki documents. All documentation discrepancies must be corrected in the Wiki files themselves, keeping the test scripts frozen.
