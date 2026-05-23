@@ -50,7 +50,7 @@ Status legend:
 | ContextHub storage/retry next leaf | `DEFERRED_CALLER_MAP_DONE_NO_SQLITE` | SQLite-backed fallback / retry leaf 未開；2026-05-23 caller map 證明 current ContextHub path 只有 `ContextTextStore` UTF-8 text/JSON reads 與 budget-source shaping，沒有 `sqlite3` / `SQLiteRetryHandler` writer。 | 只有真 storage responsibility 引入 SQLite-backed fallback，且有 deletion test / busy-locked fixture，才開 code slice；不得改 constructor compatibility / strict deps 行為。 |
 | SQLite transaction manager | `DEFERRED` | `memory_manager.py` 與 `skill_registry.py` 已共用 `SQLiteRetryHandler`；尚未升級成全域 `DatabaseTransactionManager`。 | 需第三個 writer 或重複 transaction-shape duplication 證明 context manager seam 有價值。 |
 | Capability planner / pipeline repair deeper split | `DEFERRED` | 不做 broad split。 | 僅在 policy order / injection equivalence / repair RLM acceptance gate 出現 failing evidence 時重開。 |
-| Root hygiene | `DEFERRED` | root-level entrypoint / generated artifact cleanup 未主動搬移。 | 一次一個 entrypoint；需 wrapper、reference map、CLI smoke。 |
+| Root hygiene | `PARTIAL_DOCS_INFO_RETAINED` | root-level entrypoint cleanup 未主動搬移；`docs/info/nexus_flow.html` 與 `docs/info/nexus_flow.json` 已作為 tracked docs orientation artifacts 保留。 | 後續一次一個 entrypoint；需 wrapper、reference map、CLI smoke。`docs/info/nexus_flow.*` 可作拓撲參考，但不是 source-code dependency evidence。 |
 | Governance eval quality warning | `OPEN-SEPARATE` | full gate 仍可能警告 `Eval pass rate 20.00% below required 80.00%`。 | 另開 wiki-eval quality debt；不是本重構計劃 blocker。 |
 
 ### 0.3 目前結論
@@ -71,7 +71,7 @@ Status legend:
 | ContextHub storage/retry next leaf | caller map 已補：current path 無 SQLite writer；下一步只在真 storage responsibility 出現時補 deletion test。 | monkeypatch `ContextHub` facade to prove new leaf use before moving code；若是 SQLite fallback，先寫 busy/locked fixture。 | 不改 constructor compatibility / strict deps；不為 synthetic SQLite writer 寫假 fixture。 |
 | SQLite transaction manager | 已完成 second writer：`SkillRegistry`。 | 下一步只在第三個 writer 或 transaction-shape duplication 出現時新增 context manager RED。 | 不因兩個 writer 已共用 retry helper就立即建立 global transaction manager。 |
 | Planner / repair deeper split | collect failing policy-order / injection / RLM acceptance evidence. | focused failing acceptance nodeid first. | 不做 broad split from line count. |
-| Root hygiene | wrapper + reference map + CLI smoke for one entrypoint. | smoke proves old and new entrypoints both work. | 不做 broad move. |
+| Root hygiene | `docs/info/nexus_flow.*` 已有 tracked retention evidence；若要搬 root entrypoint，仍需 wrapper + reference map + CLI smoke。 | smoke proves old and new entrypoints both work. | 不做 broad move；不把 docs/info topology artifact 誤當 dependency graph evidence。 |
 
 ### 0.5 2026-05-23 續作評估 / 實作結果
 

@@ -375,7 +375,7 @@ GREEN:
 | Skill-fit row/catalog indexing | `SkillFitRowIndex` covers followup RCA/cost row lookup; `SkillFitCatalogIndex` covers ablation-core catalog grouping; execution matrix row shape and candidate selection are now characterized through public builders. | `PARTIAL` | Production extraction remains deferred until candidate/execution duplication, row-contract drift, or a failing focused nodeid proves a new Module is needed. |
 | SF2 bounded probe pipeline | Complexity scan still flags `sf2_bounded_probe.py`, but public static-receipt, validation, review, and completion gates are now characterized across pass and fail-closed paths. | `DONE_TESTS_ONLY_PREGATE` | Production extraction remains deferred until ordering/receipt drift, repeated duplication, or measured hot-path evidence appears. |
 | Planner / repair deeper split | Existing seams sufficient. | `NO` | Need failing policy-order, injection-equivalence, or repair/RLM acceptance evidence. |
-| Root hygiene | Untracked generated artifacts reduced; `docs/info/nexus_flow.html` and `.json` intentionally retained. | `PARTIAL` | Decide whether retained `docs/info` flow artifacts are official docs or local artifacts before tracking. |
+| Root hygiene | `docs/info/nexus_flow.html` and `docs/info/nexus_flow.json` are tracked, clean docs orientation artifacts. | `PARTIAL_DOCS_INFO_RETAINED` | Future root entrypoint cleanup still needs wrapper + reference map + CLI smoke; do not treat `docs/info/nexus_flow.*` as source-code dependency evidence. |
 
 ### 5.3.1 Local Analysis Tools And Hook Decision
 
@@ -388,6 +388,24 @@ Tool ranking:
 - `codegraph-audit`: useful now only as a disposable snapshot index; current evidence used `/private/tmp/nexus-codegraph-snapshot.GTTKZf/.codegraph` so no Nexus repo artifact or hook ownership was introduced.
 - `repomix`: useful only for narrow `--stdout` handoff bundles; broad/default runs can create `repomix-output.xml` and are not needed for this slice.
 - `graphify`: deferred; current Nexus `graphify-runs` has empty subdirectories but no artifact files observed, and hook/install commands would add artifact/hook ownership questions.
+
+### 5.3.2 Root Hygiene Retained Docs Info Evidence
+
+Status: `PARTIAL_DOCS_INFO_RETAINED`
+
+Current evidence:
+
+- `git ls-files --stage docs/info/nexus_flow.html docs/info/nexus_flow.json` shows both files are tracked.
+- `git status --short docs/info/nexus_flow.html docs/info/nexus_flow.json` returns no dirty output.
+- `python3 -m json.tool docs/info/nexus_flow.json` parses successfully.
+- `git log --oneline -- docs/info/nexus_flow.html docs/info/nexus_flow.json` shows `80c41f63 docs: add nexus flow artifacts`.
+
+Decision:
+
+- Treat `docs/info/nexus_flow.html` and `docs/info/nexus_flow.json` as retained docs orientation artifacts, not local untracked artifacts.
+- They may guide topology review, but cannot prove source-code dependency, caller ownership, or runtime reachability.
+- No hook is needed for these artifacts.
+- Root entrypoint cleanup remains separate and still requires wrapper, reference map, and CLI smoke before moving any entrypoint.
 
 Hook decision:
 
