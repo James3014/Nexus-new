@@ -818,31 +818,64 @@ def classify_skill_fit_failure(row: Mapping[str, Any]) -> dict[str, str]:
     }
 
 
+@dataclass(frozen=True)
+class SkillFitCatalogIndex:
+    """Pre-index catalog rows without making promotion decisions."""
+
+    rows: tuple[Mapping[str, Any], ...]
+    planned_rows: int
+    completed_rows: int
+    by_skill: Mapping[tuple[str, str], tuple[Mapping[str, Any], ...]]
+    negative_rows: tuple[Mapping[str, Any], ...]
+    capability_only_rows: tuple[Mapping[str, Any], ...]
+
+    @classmethod
+    def from_run_summary(cls, run_summary: Mapping[str, Any]) -> "SkillFitCatalogIndex":
+        rows = tuple(row for row in run_summary.get("results", []) if isinstance(row, Mapping))
+        run_counts = run_summary.get("summary") if isinstance(run_summary.get("summary"), Mapping) else {}
+        by_skill: dict[tuple[str, str], list[Mapping[str, Any]]] = {}
+        negative_rows: list[Mapping[str, Any]] = []
+        capability_only_rows: list[Mapping[str, Any]] = []
+        for row in rows:
+            arm_type = str(row.get("arm_type") or "")
+            if arm_type == "capability_only":
+                capability_only_rows.append(row)
+                continue
+            if arm_type == "wrong_or_quarantined_skill":
+                negative_rows.append(row)
+                continue
+            if arm_type != "skill_ablation":
+                continue
+            skill_id = str(row.get("skill_id") or "")
+            if not skill_id:
+                continue
+            capability = _catalog_row_capability(row)
+            by_skill.setdefault((capability, skill_id), []).append(row)
+        return cls(
+            rows=rows,
+            planned_rows=int(run_counts.get("planned_rows") or len(rows)),
+            completed_rows=int(run_counts.get("completed_rows") or len(rows)),
+            by_skill={key: tuple(grouped_rows) for key, grouped_rows in sorted(by_skill.items())},
+            negative_rows=tuple(negative_rows),
+            capability_only_rows=tuple(capability_only_rows),
+        )
+
+    @property
+    def skill_keys(self) -> tuple[tuple[str, str], ...]:
+        return tuple(self.by_skill.keys())
+
+
 def build_skill_fit_catalog(run_summary: Mapping[str, Any]) -> dict[str, Any]:
     """Summarize live ablation receipts into skill policy verdicts."""
 
-    results = [row for row in run_summary.get("results", []) if isinstance(row, Mapping)]
-    run_counts = run_summary.get("summary") if isinstance(run_summary.get("summary"), Mapping) else {}
-    planned_rows = int(run_counts.get("planned_rows") or len(results))
-    completed_rows = int(run_counts.get("completed_rows") or len(results))
-    by_skill: dict[tuple[str, str], list[Mapping[str, Any]]] = {}
-    negative_rows: list[Mapping[str, Any]] = []
-    capability_only = [row for row in results if row.get("arm_type") == "capability_only"]
-    for row in results:
-        arm_type = str(row.get("arm_type") or "")
-        if arm_type == "wrong_or_quarantined_skill":
-            negative_rows.append(row)
-            continue
-        if arm_type != "skill_ablation":
-            continue
-        skill_id = str(row.get("skill_id") or "")
-        if not skill_id:
-            continue
-        capability = _catalog_row_capability(row)
-        by_skill.setdefault((capability, skill_id), []).append(row)
+    index = SkillFitCatalogIndex.from_run_summary(run_summary)
+    planned_rows = index.planned_rows
+    completed_rows = index.completed_rows
+    negative_rows = index.negative_rows
+    capability_only = index.capability_only_rows
 
     verdicts = []
-    for (capability, skill_id), rows in sorted(by_skill.items()):
+    for (capability, skill_id), rows in index.by_skill.items():
         effective_rows = [
             row
             for row in rows

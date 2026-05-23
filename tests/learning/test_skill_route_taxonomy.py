@@ -655,6 +655,76 @@ def test_sf2_bounded_probe_static_receipts_keep_runtime_and_benchmark_blocked(tm
     assert catalog["capabilities"][0]["candidates"][0]["verdict"] == "static_fit_candidate"
 
 
+def test_sf2_probe_verdict_catalog_characterizes_multicapability_fail_closed_shape():
+    catalog = build_sf2_probe_verdict_catalog(
+        [
+            {
+                "results": [
+                    {
+                        "row_id": "claim_gate::skill_arm_001",
+                        "capability_id": "claim_gate",
+                        "arm_type": "skill_arm",
+                        "skill_id": "sf2-claim-route-fit-spec",
+                        "status": "RETURN",
+                        "reason": "missing_static_receipt_chain",
+                        "outcome_contributed": False,
+                        "skill_path": "",
+                        "route_overlap": [],
+                        "evidence_overlap": [],
+                    },
+                    {
+                        "row_id": "claim_gate::capability_only",
+                        "capability_id": "claim_gate",
+                        "arm_type": "capability_only",
+                        "status": "PASS",
+                    },
+                ]
+            },
+            {
+                "results": [
+                    {
+                        "row_id": "belief::skill_arm_001",
+                        "capability_id": "belief",
+                        "arm_type": "skill_arm",
+                        "skill_id": "sf2-belief-route-fit-spec",
+                        "status": "PASS",
+                        "reason": "static_receipt_chain_present",
+                        "outcome_contributed": True,
+                        "skill_path": "/repo/.agents/skills/sf2/sf2-belief-route-fit-spec/SKILL.md",
+                        "route_overlap": ["belief"],
+                        "evidence_overlap": ["evidence", "receipt"],
+                    }
+                ]
+            },
+        ]
+    )
+    receipts = build_sf2_live_receipt_validation(catalog)
+    review = build_sf2_promotion_review(receipts)
+    gate = build_sf2_completion_gate(catalog, receipts, review)
+
+    assert catalog["status"] == "PARTIAL"
+    assert [item["capability_id"] for item in catalog["capabilities"]] == ["belief", "claim_gate"]
+    assert catalog["blocked_capabilities"] == ["claim_gate"]
+    assert catalog["summary"]["runtime_update_allowed"] is False
+    assert catalog["summary"]["public_benchmark_allowed"] is False
+    assert catalog["capabilities"][0]["candidates"][0]["verdict"] == "static_fit_candidate"
+    assert catalog["capabilities"][1]["candidates"][0]["verdict"] == "reject"
+
+    assert receipts["status"] == "BLOCKED"
+    assert receipts["blockers"] == ["claim_gate:missing_validated_candidate"]
+    assert receipts["capabilities"][0]["validated_candidate_count"] == 1
+    assert receipts["capabilities"][1]["validated_candidate_count"] == 0
+
+    assert review["status"] == "BLOCKED"
+    assert review["summary"]["candidate_only_catalog_alternate_count"] == 1
+    assert review["blockers"] == ["claim_gate:no_reviewable_validated_candidate"]
+
+    assert gate["status"] == "BLOCKED"
+    assert gate["summary"]["sf2_closed_loop_complete"] is False
+    assert gate["summary"]["runtime_update_allowed"] is False
+    assert gate["summary"]["public_benchmark_allowed"] is False
+
+
 def test_sf2_completion_gate_closes_only_after_receipts_and_dispositions(tmp_path: Path):
     skill_dir = tmp_path / ".agents" / "skills" / "sf2" / "sf2-belief-route-fit-spec"
     skill_dir.mkdir(parents=True)

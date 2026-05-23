@@ -8,6 +8,7 @@ from nexus.core.context_hub import ContextDependencies, ContextHub
 from nexus.core.context_runtime_adapter import StatelessContextCoordinator, build_runtime_context_payload
 from nexus.core.context_view import ContextDependencies as SplitContextDependencies
 from nexus.core.context_view import StateView
+from nexus.contracts.context_budget import ContextBudgetSource
 
 
 def test_context_hub_reexports_split_context_view_contracts():
@@ -116,6 +117,67 @@ def test_context_hub_builds_context_assembly_contract(tmp_path):
     assert contract["preserved_L0_L1"] is True
     assert contract["receipt"]["dropped_sources"][0]["drop_reason_code"] == "budget_exhausted"
     assert contract["claim_boundary"][0] == "Context assembly contracts select context under budget only."
+
+
+def test_context_hub_uses_split_context_budget_source_builder(tmp_path, monkeypatch):
+    calls = []
+
+    def fake_build_context_budget_sources(*, state, l0_rules, l1_index, extra_sources, token_estimator):
+        calls.append(
+            {
+                "state": state,
+                "l0_rules": l0_rules,
+                "l1_index": l1_index,
+                "extra_sources": extra_sources,
+                "token_estimator": token_estimator,
+            }
+        )
+        return [ContextBudgetSource("split:source", "split", 7, priority=3)]
+
+    monkeypatch.setattr(
+        "nexus.core.context_hub.build_context_budget_sources",
+        fake_build_context_budget_sources,
+    )
+    hub = ContextHub(str(tmp_path), deps=ContextDependencies(), strict_deps=True)
+
+    sources = hub._context_budget_sources(
+        state_view=StateView(metadata={"chat_history": ["hello"]}),
+        extra_sources=[{"source_id": "extra"}],
+    )
+
+    assert sources == [ContextBudgetSource("split:source", "split", 7, priority=3)]
+    assert calls
+    assert calls[0]["l0_rules"].startswith("L0:")
+    assert calls[0]["l1_index"].startswith("L1:")
+    assert calls[0]["extra_sources"] == [{"source_id": "extra"}]
+    assert calls[0]["token_estimator"]("abc") == hub._estimate_context_tokens("abc")
+
+
+def test_context_hub_uses_split_context_text_store(tmp_path, monkeypatch):
+    calls = []
+
+    class FakeContextTextStore:
+        def __init__(self, project_root):
+            calls.append(("init", project_root))
+
+        def load_program_rules(self, md_path="program.md"):
+            calls.append(("rules", md_path))
+            return "split rules"
+
+        def load_last_handoff(self):
+            calls.append(("handoff", None))
+            return {"task_id": "split-task", "phase": "R", "state_token": "SPLIT"}
+
+    monkeypatch.setattr("nexus.core.context_hub.ContextTextStore", FakeContextTextStore)
+    hub = ContextHub(str(tmp_path), deps=ContextDependencies(), strict_deps=True)
+
+    assert hub.load_program_rules("program.custom.md") == "split rules"
+    assert "[TASK: split-task]" in hub._get_l1_index()
+    assert calls == [
+        ("init", tmp_path),
+        ("rules", "program.custom.md"),
+        ("handoff", None),
+    ]
 
 
 def test_context_hub_context_assembly_contract_returns_when_core_context_exceeds_budget(tmp_path):

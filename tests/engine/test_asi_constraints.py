@@ -84,6 +84,99 @@ def test_asi_constraint_extractor_ignores_successful_low_step_noise():
     assert out["constraints"] == []
 
 
+def test_asi_constraint_extractor_orders_families_and_preserves_evidence_refs():
+    records = [
+        ASIRecord(
+            run_id=3,
+            hypothesis="third family first",
+            family="flow:zeta",
+            metric=0.0,
+            status="discard",
+            evidence="zeta evidence one",
+            rollback_reason="same zeta",
+        ),
+        ASIRecord(
+            run_id=1,
+            hypothesis="alpha first",
+            family="flow:alpha",
+            metric=0.0,
+            status="discard",
+            evidence="alpha evidence one",
+            rollback_reason="same alpha",
+        ),
+        ASIRecord(
+            run_id=4,
+            hypothesis="zeta second",
+            family="flow:zeta",
+            metric=0.0,
+            status="discard",
+            evidence="zeta evidence two",
+            rollback_reason="same zeta",
+        ),
+        ASIRecord(
+            run_id=2,
+            hypothesis="alpha second",
+            family="flow:alpha",
+            metric=0.0,
+            status="discard",
+            evidence="alpha evidence two",
+            rollback_reason="same alpha",
+        ),
+        ASIRecord(
+            run_id=5,
+            hypothesis="unknown step first",
+            family="flow:unknown_steps",
+            metric=0.0,
+            status="discard",
+            evidence="unknown evidence one",
+            rollback_reason="same unknown",
+            trajectory_step_count=0,
+        ),
+        ASIRecord(
+            run_id=6,
+            hypothesis="unknown step second",
+            family="flow:unknown_steps",
+            metric=0.0,
+            status="discard",
+            evidence="unknown evidence two",
+            rollback_reason="same unknown",
+            trajectory_step_count=0,
+        ),
+        ASIRecord(
+            run_id=7,
+            hypothesis="low step first",
+            family="flow:low_step",
+            metric=0.0,
+            status="discard",
+            evidence="low evidence one",
+            rollback_reason="low step",
+            trajectory_step_count=1,
+        ),
+        ASIRecord(
+            run_id=8,
+            hypothesis="low step second",
+            family="flow:low_step",
+            metric=0.0,
+            status="discard",
+            evidence="low evidence two",
+            rollback_reason="low step",
+            trajectory_step_count=2,
+        ),
+    ]
+
+    out = ASIConstraintExtractor(min_failures=2).extract(records, task_id="task-ordered")
+
+    assert [item["blocked_pattern"] for item in out["constraints"]] == [
+        "flow:alpha",
+        "flow:unknown_steps",
+        "flow:zeta",
+    ]
+    assert out["constraints"][0]["confidence"] == 0.75
+    assert out["constraints"][0]["evidence_refs"] == ["alpha evidence one", "alpha evidence two"]
+    assert out["constraints"][1]["source_run_ids"] == [5, 6]
+    assert "flow:low_step" not in {item["blocked_pattern"] for item in out["constraints"]}
+
+
 def test_asi_constraint_store_persists_and_matches_cross_task_constraints(tmp_path):
     constraint = {
         "schema": "nexus_asi_constraint_v1",

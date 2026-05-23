@@ -28,6 +28,128 @@ def _threshold_by_skill(threshold: Mapping[str, Any]) -> dict[tuple[str, str], M
     }
 
 
+def _positive_policy_pairs(policy: Mapping[str, Any]) -> set[tuple[str, str]]:
+    pairs: set[tuple[str, str]] = set()
+    defaults = policy.get("defaults") if isinstance(policy.get("defaults"), Mapping) else {}
+    alternates = policy.get("alternates") if isinstance(policy.get("alternates"), Mapping) else {}
+    for capability, skill_id in defaults.items():
+        if str(capability) and str(skill_id):
+            pairs.add((str(capability), str(skill_id)))
+    for capability, skill_ids in alternates.items():
+        for skill_id in _capability_items(alternates, str(capability)):
+            if str(capability) and skill_id:
+                pairs.add((str(capability), skill_id))
+        if isinstance(skill_ids, str) and str(capability) and skill_ids:
+            pairs.add((str(capability), str(skill_ids)))
+    return pairs
+
+
+def _catalog_verdicts(catalog: Mapping[str, Any]) -> dict[tuple[str, str], Mapping[str, Any]]:
+    verdicts: dict[tuple[str, str], Mapping[str, Any]] = {}
+    for item in catalog.get("skill_verdicts", []) or []:
+        if not isinstance(item, Mapping):
+            continue
+        capability = str(item.get("capability") or "")
+        skill_id = str(item.get("skill_id") or "")
+        if capability and skill_id:
+            verdicts[(capability, skill_id)] = item
+    return verdicts
+
+
+def build_skill_fit_data_shape_pregate(
+    *,
+    catalog: Mapping[str, Any],
+    promotion_policy: Mapping[str, Any],
+    threshold_contract: Mapping[str, Any],
+) -> dict[str, Any]:
+    """Validate skill-fit artifact shape before deeper refactor or runtime gates."""
+
+    failures: list[str] = []
+    catalog_summary = catalog.get("summary") if isinstance(catalog.get("summary"), Mapping) else {}
+    threshold_summary = (
+        threshold_contract.get("summary") if isinstance(threshold_contract.get("summary"), Mapping) else {}
+    )
+    if str(catalog.get("status") or "") != "PASS":
+        failures.append("catalog_not_pass")
+    if str(promotion_policy.get("status") or "") != "PASS":
+        failures.append("promotion_policy_not_pass")
+    if not bool(catalog_summary.get("matrix_complete")):
+        failures.append("catalog_matrix_not_complete")
+    if threshold_summary and not bool(threshold_summary.get("matrix_complete")):
+        failures.append("threshold_matrix_not_complete")
+    if bool(promotion_policy.get("runtime_update_allowed")):
+        failures.append("promotion_policy_runtime_update_must_remain_false")
+    if bool(threshold_contract.get("runtime_update_allowed")):
+        failures.append("threshold_runtime_update_must_remain_false")
+
+    catalog_verdicts = _catalog_verdicts(catalog)
+    threshold_rows: dict[tuple[str, str], Mapping[str, Any]] = {}
+    for item in threshold_contract.get("capability_skill_thresholds", []) or []:
+        if not isinstance(item, Mapping):
+            continue
+        capability = str(item.get("capability") or "")
+        skill_id = str(item.get("skill_id") or "")
+        if not capability or not skill_id:
+            failures.append("threshold_row_missing_capability_or_skill_id")
+            continue
+        pair = (capability, skill_id)
+        threshold_rows[pair] = item
+        if pair not in catalog_verdicts:
+            failures.append(f"{capability}:{skill_id}:threshold_pair_missing_catalog_verdict")
+
+    positive_policy_pairs = _positive_policy_pairs(promotion_policy)
+    for capability, skill_id in sorted(positive_policy_pairs):
+        verdict = catalog_verdicts.get((capability, skill_id))
+        if verdict is None:
+            failures.append(f"{capability}:{skill_id}:policy_pair_missing_catalog_verdict")
+        elif str(verdict.get("verdict") or "") in {"keep", "replace_candidate"}:
+            evidence_refs = [str(ref) for ref in verdict.get("evidence_refs", []) or [] if str(ref)]
+            receipt_refs = [str(ref) for ref in verdict.get("receipt_refs", []) or [] if str(ref)]
+            if not evidence_refs or not receipt_refs:
+                failures.append(f"{capability}:{skill_id}:catalog_positive_missing_evidence_or_receipt")
+        if (capability, skill_id) not in threshold_rows:
+            failures.append(f"{capability}:{skill_id}:missing_threshold_contract")
+
+    for (capability, skill_id), verdict in sorted(catalog_verdicts.items()):
+        if str(verdict.get("verdict") or "") not in {"keep", "replace_candidate"}:
+            continue
+        evidence_refs = [str(ref) for ref in verdict.get("evidence_refs", []) or [] if str(ref)]
+        receipt_refs = [str(ref) for ref in verdict.get("receipt_refs", []) or [] if str(ref)]
+        if not evidence_refs or not receipt_refs:
+            failures.append(f"{capability}:{skill_id}:catalog_positive_missing_evidence_or_receipt")
+
+    positive_pairs = [
+        {
+            "capability": capability,
+            "skill_id": skill_id,
+            "catalog_verdict": str((catalog_verdicts.get((capability, skill_id)) or {}).get("verdict") or ""),
+            "threshold_recommendation": str(
+                (threshold_rows.get((capability, skill_id)) or {}).get("threshold_recommendation") or ""
+            ),
+        }
+        for capability, skill_id in sorted(positive_policy_pairs)
+    ]
+    unique_failures = sorted(set(failures))
+    return {
+        "schema": "nexus.skill_fit_data_shape_pregate.v1",
+        "status": "PASS" if not unique_failures else "RETURN",
+        "runtime_update_allowed": False,
+        "public_benchmark_allowed": False,
+        "summary": {
+            "catalog_pair_count": len(catalog_verdicts),
+            "threshold_pair_count": len(threshold_rows),
+            "positive_pair_count": len(positive_pairs),
+            "failure_count": len(unique_failures),
+        },
+        "positive_pairs": positive_pairs,
+        "failures": unique_failures,
+        "claim_boundary": [
+            "This pregate validates skill-fit artifact shape only.",
+            "It must not update runtime policy or allow public benchmark claims.",
+        ],
+    }
+
+
 def build_skill_fit_status_rollup(
     *,
     promotion_policies: Iterable[Mapping[str, Any]],

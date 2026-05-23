@@ -42,6 +42,8 @@ from nexus.learning.skill_fit_ablation import (
     write_skill_fit_execution_matrix,
     write_skill_promotion_threshold_contract,
 )
+from nexus.learning.skill_fit_ablation_core import SkillFitCatalogIndex
+from nexus.learning.skill_fit_followup import SkillFitRowIndex
 from nexus.learning.skill_fit_status import build_skill_fit_status_rollup
 from scripts.ops.build_skill_fit_ablation_plan import DEFAULT_EXTRA_TASK_MANIFESTS, resolved_extra_task_manifests
 from scripts.ops.run_skill_fit_ablation_matrix import (
@@ -354,6 +356,107 @@ def test_plan_dedupes_gstack_prefixed_skill_aliases():
     skill_ids = [arm["skill_id"] for arm in plan["arms"] if arm["arm_type"] == "skill_ablation"]
 
     assert len({"gstack-investigate", "investigate"}.intersection(skill_ids)) == 1
+
+
+def test_skill_fit_plan_characterizes_public_candidate_selection_contract():
+    pool = _candidate_pool()
+    pool["candidates"].extend(
+        [
+            {
+                "skill_id": "runtime-repair",
+                "source_root": "nexus_repo",
+                "source_type": "nexus_local",
+                "path": "/repo/.agents/skills/runtime-repair/SKILL.md",
+                "sha256": "1" * 64,
+                "capability_candidates": ["repair_and_coding"],
+                "ablation_eligible": True,
+                "runtime_eligible": True,
+                "safety_status": "runtime_reviewed",
+                "evidence_refs": ["skill_status_report:nexus.skill_status.v1"],
+                "load_when": "Repair tasks.",
+            },
+            {
+                "skill_id": "test-driven-development",
+                "source_root": "hermes",
+                "source_type": "reference",
+                "path": "/Users/jameschen/Workspace/hermes-agent/skills/software-development/test-driven-development/SKILL.md",
+                "sha256": "2" * 64,
+                "capability_candidates": ["repair_and_coding"],
+                "ablation_eligible": True,
+                "runtime_eligible": False,
+                "safety_status": "ablation_only",
+                "evidence_refs": ["skill_status_report:nexus.skill_status.v1"],
+                "load_when": "TDD repair loop.",
+            },
+            {
+                "skill_id": "gstack-investigate",
+                "source_root": "agents",
+                "source_type": "reference",
+                "path": "/Users/jameschen/.agents/skills/gstack-investigate/SKILL.md",
+                "sha256": "3" * 64,
+                "capability_candidates": ["repair_and_coding"],
+                "ablation_eligible": True,
+                "runtime_eligible": False,
+                "safety_status": "ablation_only",
+                "evidence_refs": ["skill_status_report:nexus.skill_status.v1"],
+                "load_when": "Debug repair failures.",
+            },
+            {
+                "skill_id": "investigate",
+                "source_root": "agents",
+                "source_type": "reference",
+                "path": "/Users/jameschen/.agents/skills/gstack/.agents/skills/gstack-investigate/SKILL.md",
+                "sha256": "4" * 64,
+                "capability_candidates": ["repair_and_coding"],
+                "ablation_eligible": True,
+                "runtime_eligible": False,
+                "safety_status": "ablation_only",
+                "evidence_refs": ["skill_status_report:nexus.skill_status.v1"],
+                "load_when": "Debug repair failures.",
+            },
+            {
+                "skill_id": "python-debugpy",
+                "source_root": "agents",
+                "source_type": "reference",
+                "path": "/repo/.agents/skills/python-debugpy/SKILL.md",
+                "sha256": "5" * 64,
+                "capability_candidates": ["repair_and_coding"],
+                "ablation_eligible": True,
+                "runtime_eligible": False,
+                "safety_status": "ablation_only",
+                "evidence_refs": ["skill_status_report:nexus.skill_status.v1"],
+                "load_when": "Debug Python code.",
+            },
+            {
+                "skill_id": "grill-me",
+                "source_root": "nexus_repo",
+                "source_type": "nexus_local",
+                "path": "/repo/.agents/skills/grill-me/SKILL.md",
+                "sha256": "6" * 64,
+                "capability_candidates": ["repair_and_coding"],
+                "ablation_eligible": True,
+                "runtime_eligible": True,
+                "safety_status": "runtime_reviewed",
+                "evidence_refs": ["skill_status_report:nexus.skill_status.v1"],
+                "load_when": "Interview the user about a plan.",
+            },
+        ]
+    )
+
+    plan = build_skill_fit_ablation_plan(pool, capability="repair_and_coding", max_skill_arms=4)
+    skill_arms = [arm for arm in plan["arms"] if arm["arm_type"] == "skill_ablation"]
+    skill_ids = [arm["skill_id"] for arm in skill_arms]
+
+    assert skill_ids == ["runtime-repair", "test-driven-development", "gstack-investigate", "hermes-debug"]
+    assert [arm["runtime_eligible"] for arm in skill_arms] == [True, False, False, False]
+    assert skill_arms[1]["source_root"] == "hermes"
+    assert skill_arms[2]["source_root"] == "agents"
+    assert "nexus-tdd" not in skill_ids
+    assert "investigate" not in skill_ids
+    assert "python-debugpy" not in skill_ids
+    assert "grill-me" not in skill_ids
+    assert plan["summary"]["runtime_eligible_skill_arm_count"] == 1
+    assert plan["claim_boundary"][4].startswith("Explicit skill ids are allowed only")
 
 
 def test_plan_blocks_timeout_unstable_repair_discovery_candidates():
@@ -690,6 +793,64 @@ def test_execution_matrix_expands_tasks_by_arms_without_claiming_value():
     assert all(row["runner_env"]["NEXUS_BENCH_ALLOW_ABLATION_SKILL_MOUNTS"] == "1" for row in skill_rows)
     assert all(row["runner_env"]["NEXUS_BENCH_ALLOW_ABLATION_SKILL_MOUNTS"] == "0" for row in wrong_rows)
     assert "not delivery or skill value evidence" in matrix["claim_boundary"][0]
+
+
+def test_execution_matrix_characterizes_public_row_shape_for_all_arm_types():
+    plan = build_skill_fit_ablation_plan(_candidate_pool(), capability="repair_and_coding", max_skill_arms=1)
+    matrix = build_skill_fit_execution_matrix(
+        plan,
+        task_refs=[
+            {"manifest": "scripts/bench/public_benchmark_nexus_value_v1.json", "task_id": "nexus-value-repair-001"}
+        ],
+        max_tasks=1,
+        model="gemini-test-model",
+        runner="scripts/bench/capability_ab_runner.py",
+        skill_status_report="docs/reports/skill-status.json",
+    )
+
+    rows = {row["arm_type"]: row for row in matrix["rows"]}
+    assert tuple(rows) == ("capability_only", "skill_ablation", "wrong_or_quarantined_skill")
+    assert matrix["summary"]["rows_by_capability"] == {"repair_and_coding": 3}
+    assert matrix["summary"]["expected_row_count"] == 3
+
+    for row in rows.values():
+        assert row["row_id"] == f"repair_and_coding::nexus-value-repair-001::{row['arm_id']}"
+        assert row["task_ref"] == {
+            "manifest": "scripts/bench/public_benchmark_nexus_value_v1.json",
+            "task_id": "nexus-value-repair-001",
+        }
+        assert row["model"] == "gemini-test-model"
+        assert row["capability"] == "repair_and_coding"
+        assert row["gate_requirements"] == [
+            "selected",
+            "injected",
+            "used",
+            "evidence_present",
+            "gate_passed",
+            "outcome_contributed",
+        ]
+        assert row["runner_env"]["NEXUS_VALUE_HIDDEN_VERIFIER"] == "1"
+        assert row["runner_env"]["NEXUS_DIRECT_GEMINI_MODEL"] == "gemini-test-model"
+        assert row["runner_env"]["NEXUS_BENCH_SKILL_STATUS_REPORT"] == "docs/reports/skill-status.json"
+        assert json.loads(row["runner_env"]["NEXUS_BENCH_SKILL_MOUNT_REQUESTS"]) == row["skill_mount_requests"]
+        assert row["runner_args"][:4] == ["uv", "run", "python", "scripts/bench/capability_ab_runner.py"]
+        assert row["runner_args"][row["runner_args"].index("--task-id-filter") + 1] == "nexus-value-repair-001"
+        assert row["runner_args"][row["runner_args"].index("--gemini-model") + 1] == "gemini-test-model"
+        assert "--evidence-bundle" in row["runner_args"]
+
+    assert rows["capability_only"]["skill_mount_requests"] == []
+    assert rows["capability_only"]["expected_outcome"] == "baseline_without_skill_mount"
+    assert rows["capability_only"]["runner_env"]["NEXUS_BENCH_ALLOW_ABLATION_SKILL_MOUNTS"] == "0"
+
+    assert rows["skill_ablation"]["skill_mount_requests"] == ["nexus-tdd"]
+    assert rows["skill_ablation"]["source_root"] == "nexus_repo"
+    assert rows["skill_ablation"]["runtime_eligible"] is True
+    assert rows["skill_ablation"]["expected_outcome"] == "must_prove_selected_injected_used_evidence_gate_outcome"
+    assert rows["skill_ablation"]["runner_env"]["NEXUS_BENCH_ALLOW_ABLATION_SKILL_MOUNTS"] == "1"
+
+    assert rows["wrong_or_quarantined_skill"]["skill_mount_requests"] == ["wrong-skill"]
+    assert rows["wrong_or_quarantined_skill"]["expected_outcome"] == "must_return_or_block"
+    assert rows["wrong_or_quarantined_skill"]["runner_env"]["NEXUS_BENCH_ALLOW_ABLATION_SKILL_MOUNTS"] == "0"
 
 
 def test_write_execution_matrix_from_lane_manifest(tmp_path: Path):
@@ -1844,6 +2005,54 @@ def test_skill_fit_catalog_groups_verdicts_by_capability_and_skill_id():
     }
 
 
+def test_skill_fit_catalog_index_groups_rows_by_capability_and_skill_id():
+    summary = {
+        "summary": {"planned_rows": 4, "completed_rows": 4},
+        "results": [
+            {
+                "capability": "repair_and_coding",
+                "arm_type": "capability_only",
+                "row_id": "repair::base",
+            },
+            {
+                "capability": "repair_and_coding",
+                "arm_type": "skill_ablation",
+                "skill_id": "shared-skill",
+                "row_id": "repair::skill",
+            },
+            {
+                "capability": "governance_and_trust",
+                "arm_type": "skill_ablation",
+                "skill_id": "shared-skill",
+                "row_id": "governance::skill",
+            },
+            {
+                "arm_type": "wrong_or_quarantined_skill",
+                "row_id": "negative::skill",
+            },
+        ],
+    }
+
+    index = SkillFitCatalogIndex.from_run_summary(summary)
+
+    assert index.planned_rows == 4
+    assert index.completed_rows == 4
+    assert [row["row_id"] for row in index.capability_only_rows] == ["repair::base"]
+    assert [row["row_id"] for row in index.negative_rows] == ["negative::skill"]
+    assert index.skill_keys == (
+        ("governance_and_trust", "shared-skill"),
+        ("repair_and_coding", "shared-skill"),
+    )
+    assert [row["row_id"] for row in index.by_skill[("repair_and_coding", "shared-skill")]] == [
+        "repair::skill"
+    ]
+    assert [row["row_id"] for row in index.by_skill[("governance_and_trust", "shared-skill")]] == [
+        "governance::skill"
+    ]
+    assert isinstance(index.rows, tuple)
+    assert isinstance(index.by_skill[("repair_and_coding", "shared-skill")], tuple)
+
+
 def test_skill_fit_catalog_returns_when_matrix_incomplete():
     summary = {
         "status": "RETURN",
@@ -2758,6 +2967,62 @@ def test_skill_fit_row_level_rca_recommends_targeted_replay_for_promising_govern
     assert skill["recommendation"] == "targeted_replay"
     assert skill["targeted_replay_row_ids"] == ["gov::t1::skill", "gov::t2::skill"]
     assert skill["rows"][1]["missing_effective_fields"] == ["outcome_contributed"]
+
+
+def test_skill_fit_row_index_groups_baselines_catalog_and_skill_rows_for_rca_and_cost():
+    summary = {
+        "capability": "governance_and_trust",
+        "results": [
+            {
+                "capability": "research_and_source_discipline",
+                "arm_type": "skill_ablation",
+                "skill_id": "research-skill",
+                "row_id": "research::t1::skill",
+                "task_ref": {"manifest": "research.json", "task_id": "t1"},
+            },
+            {
+                "capability": "governance_and_trust",
+                "arm_type": "skill_ablation",
+                "skill_id": "z-last",
+                "row_id": "gov::t2::skill",
+                "task_ref": {"manifest": "gov.json", "task_id": "t2"},
+            },
+            {
+                "capability": "governance_and_trust",
+                "arm_type": "capability_only",
+                "row_id": "gov::t1::capability_only",
+                "task_ref": {"manifest": "gov.json", "task_id": "t1"},
+            },
+            {
+                "capability": "governance_and_trust",
+                "arm_type": "skill_ablation",
+                "skill_id": "a-first",
+                "row_id": "gov::t1::skill",
+                "task_ref": {"manifest": "gov.json", "task_id": "t1"},
+            },
+        ],
+    }
+    catalog = {
+        "skill_verdicts": [
+            {"capability": "governance_and_trust", "skill_id": "z-last", "verdict": "reject"},
+            {"capability": "governance_and_trust", "skill_id": "a-first", "verdict": "needs_more_data"},
+        ],
+    }
+
+    index = SkillFitRowIndex.from_run_summary(summary, catalog, capability="governance_and_trust")
+
+    assert index.capability == "governance_and_trust"
+    assert [row["row_id"] for row in index.rows] == [
+        "gov::t2::skill",
+        "gov::t1::capability_only",
+        "gov::t1::skill",
+    ]
+    assert index.baseline_by_task["gov.json::t1"]["row_id"] == "gov::t1::capability_only"
+    assert index.skill_ids == ("a-first", "z-last")
+    assert [row["row_id"] for row in index.rows_by_skill["a-first"]] == ["gov::t1::skill"]
+    assert index.catalog_by_skill["a-first"]["verdict"] == "needs_more_data"
+    assert isinstance(index.rows, tuple)
+    assert isinstance(index.rows_by_skill["z-last"], tuple)
 
 
 def test_research_candidate_v2_report_excludes_rejected_and_selects_source_discipline_candidates():

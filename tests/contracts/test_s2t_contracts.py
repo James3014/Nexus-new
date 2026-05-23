@@ -214,6 +214,49 @@ def test_s2t_agent_lightning_export_emits_preference_pairs() -> None:
     assert exported["pairs"][0]["rejected_candidate_id"] == "A"
 
 
+def test_s2t_export_selects_highest_scored_failed_rejected_candidate_stably() -> None:
+    first = S2TTraceEvent(
+        task_id="task-1",
+        run_id="run-1",
+        model="gemini-3-flash-preview",
+        mode="shadow",
+        phase="R",
+        risk_tier="high",
+        candidate_set_id="candset-1",
+        candidates=[
+            _candidate("A", selector_score=0.80, verifier_result="fail"),
+            _candidate("B", selector_score=0.70, verifier_result="pass"),
+            _candidate("C", selector_score=0.95, verifier_result="fail"),
+        ],
+        selected_candidate_id="B",
+        verifier_result="pass",
+    )
+    second = S2TTraceEvent(
+        task_id="task-2",
+        run_id="run-2",
+        model="gemini-3-flash-preview",
+        mode="shadow",
+        phase="R",
+        risk_tier="high",
+        candidate_set_id="candset-2",
+        candidates=[
+            _candidate("D", selector_score=0.30, verifier_result="fail"),
+            _candidate("E", selector_score=0.90, verifier_result="pass"),
+            _candidate("F", selector_score=0.60, verifier_result="fail"),
+        ],
+        selected_candidate_id="E",
+        verifier_result="pass",
+    )
+
+    exported = export_agent_lightning_preferences([first, second])
+
+    assert [pair["task_id"] for pair in exported["pairs"]] == ["task-1", "task-2"]
+    assert exported["pairs"][0]["chosen_candidate_id"] == "B"
+    assert exported["pairs"][0]["rejected_candidate_id"] == "C"
+    assert exported["pairs"][1]["chosen_candidate_id"] == "E"
+    assert exported["pairs"][1]["rejected_candidate_id"] == "F"
+
+
 def test_model_training_export_v2_preserves_v1_compat_and_redaction() -> None:
     event = S2TTraceEvent(
         task_id="task-1",

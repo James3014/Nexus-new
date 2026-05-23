@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 from collections import Counter
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Mapping
 
@@ -153,6 +154,59 @@ GOVERNANCE_TASKSET_BUCKETS = {
 }
 
 
+@dataclass(frozen=True)
+class SkillFitRowIndex:
+    """Pre-index skill-fit rows for RCA/cost contracts without policy decisions."""
+
+    capability: str
+    rows: tuple[Mapping[str, Any], ...]
+    baseline_by_task: Mapping[str, Mapping[str, Any]]
+    rows_by_skill: Mapping[str, tuple[Mapping[str, Any], ...]]
+    catalog_by_skill: Mapping[str, Mapping[str, Any]]
+
+    @classmethod
+    def from_run_summary(
+        cls,
+        run_summary: Mapping[str, Any],
+        catalog: Mapping[str, Any] | None = None,
+        *,
+        capability: str = "",
+    ) -> "SkillFitRowIndex":
+        results = tuple(row for row in run_summary.get("results", []) or [] if isinstance(row, Mapping))
+        target_capability = capability or _first_catalog_capability(catalog) or str(run_summary.get("capability") or "")
+        rows = tuple(
+            row for row in results if not target_capability or str(row.get("capability") or "") == target_capability
+        )
+        baseline_by_task = {
+            _row_task_key(row): row
+            for row in rows
+            if str(row.get("arm_type") or "") == "capability_only" and _row_task_key(row)
+        }
+        rows_by_skill: dict[str, list[Mapping[str, Any]]] = {}
+        for row in rows:
+            if str(row.get("arm_type") or "") != "skill_ablation":
+                continue
+            skill_id = str(row.get("skill_id") or "")
+            if skill_id:
+                rows_by_skill.setdefault(skill_id, []).append(row)
+        catalog_by_skill = {
+            str(item.get("skill_id") or ""): item
+            for item in (catalog or {}).get("skill_verdicts", []) or []
+            if isinstance(item, Mapping)
+        }
+        return cls(
+            capability=target_capability,
+            rows=rows,
+            baseline_by_task=baseline_by_task,
+            rows_by_skill={skill_id: tuple(skill_rows) for skill_id, skill_rows in sorted(rows_by_skill.items())},
+            catalog_by_skill=dict(sorted(catalog_by_skill.items())),
+        )
+
+    @property
+    def skill_ids(self) -> tuple[str, ...]:
+        return tuple(self.rows_by_skill.keys())
+
+
 def build_skill_fit_row_level_rca(
     run_summary: Mapping[str, Any],
     catalog: Mapping[str, Any] | None = None,
@@ -163,31 +217,13 @@ def build_skill_fit_row_level_rca(
 ) -> dict[str, Any]:
     """Explain skill-fit outcomes at row granularity without changing promotion state."""
 
-    results = [row for row in run_summary.get("results", []) or [] if isinstance(row, Mapping)]
-    target_capability = capability or _first_catalog_capability(catalog) or str(run_summary.get("capability") or "")
-    capability_results = [
-        row for row in results if not target_capability or str(row.get("capability") or "") == target_capability
-    ]
-    baseline_by_task = {
-        _row_task_key(row): row
-        for row in capability_results
-        if str(row.get("arm_type") or "") == "capability_only" and _row_task_key(row)
-    }
-    catalog_by_skill = {
-        str(item.get("skill_id") or ""): item
-        for item in (catalog or {}).get("skill_verdicts", []) or []
-        if isinstance(item, Mapping)
-    }
-    rows_by_skill: dict[str, list[Mapping[str, Any]]] = {}
-    for row in capability_results:
-        if str(row.get("arm_type") or "") != "skill_ablation":
-            continue
-        skill_id = str(row.get("skill_id") or "")
-        if skill_id:
-            rows_by_skill.setdefault(skill_id, []).append(row)
+    row_index = SkillFitRowIndex.from_run_summary(run_summary, catalog, capability=capability)
+    capability_results = row_index.rows
+    baseline_by_task = row_index.baseline_by_task
+    catalog_by_skill = row_index.catalog_by_skill
 
     skill_analyses = []
-    for skill_id, rows in sorted(rows_by_skill.items()):
+    for skill_id, rows in row_index.rows_by_skill.items():
         effective_rows = [_is_effective_skill_row(row) for row in rows]
         effective_count = sum(1 for item in effective_rows if item)
         tested_rows = len(rows)
@@ -255,7 +291,7 @@ def build_skill_fit_row_level_rca(
     return {
         "schema": "nexus.skill_fit_row_level_rca.v1",
         "status": "PASS" if capability_results else "RETURN",
-        "capability": target_capability,
+        "capability": row_index.capability,
         "summary": {
             "row_count": len(capability_results),
             "baseline_task_count": len(baseline_by_task),
@@ -748,24 +784,11 @@ def build_skill_fit_cost_phase_contract(
 ) -> dict[str, Any]:
     """Summarize skill-fit RCA cost and phase concentration without making delivery claims."""
 
-    results = [row for row in run_summary.get("results", []) or [] if isinstance(row, Mapping)]
-    target_capability = capability or _first_catalog_capability(catalog) or str(run_summary.get("capability") or "")
-    rows = [row for row in results if not target_capability or str(row.get("capability") or "") == target_capability]
-    rows_by_skill: dict[str, list[Mapping[str, Any]]] = {}
-    for row in rows:
-        if str(row.get("arm_type") or "") != "skill_ablation":
-            continue
-        skill_id = str(row.get("skill_id") or "")
-        if skill_id:
-            rows_by_skill.setdefault(skill_id, []).append(row)
-
-    catalog_by_skill = {
-        str(item.get("skill_id") or ""): item
-        for item in (catalog or {}).get("skill_verdicts", []) or []
-        if isinstance(item, Mapping)
-    }
+    row_index = SkillFitRowIndex.from_run_summary(run_summary, catalog, capability=capability)
+    rows = row_index.rows
+    catalog_by_skill = row_index.catalog_by_skill
     skill_costs = []
-    for skill_id, skill_rows in sorted(rows_by_skill.items()):
+    for skill_id, skill_rows in row_index.rows_by_skill.items():
         phase_totals: Counter[str] = Counter()
         row_costs = []
         effective_count = 0
@@ -799,8 +822,8 @@ def build_skill_fit_cost_phase_contract(
         tested_rows = len(skill_rows)
         dominant_phase = _dominant_phase(phase_totals)
         skill_costs.append(
-            {
-                "capability": target_capability,
+                {
+                    "capability": row_index.capability,
                 "skill_id": skill_id,
                 "verdict": str(catalog_by_skill.get(skill_id, {}).get("verdict") or ""),
                 "tested_rows": tested_rows,
@@ -822,8 +845,8 @@ def build_skill_fit_cost_phase_contract(
         )
     return {
         "schema": "nexus.skill_fit_cost_phase_contract.v1",
-        "status": "PASS" if rows_by_skill else "RETURN",
-        "capability": target_capability,
+        "status": "PASS" if row_index.rows_by_skill else "RETURN",
+        "capability": row_index.capability,
         "runtime_update_allowed": False,
         "summary": {
             "row_count": len(rows),

@@ -6,7 +6,9 @@ from typing import Any, Dict, List, Optional, Tuple
 from datetime import datetime
 from nexus.contracts.context_assembly import build_context_assembly_contract
 from nexus.contracts.context_budget import ContextBudgetSource, build_context_budget_receipt
+from nexus.core.context_budget_sources import build_context_budget_sources, estimate_context_tokens
 from nexus.core.context_runtime_adapter import StatelessContextCoordinator
+from nexus.core.context_text_store import ContextTextStore
 from nexus.core.context_view import ContextDependencies, StateView
 from nexus.core.state_contracts import NexusDiagnosis, NexusResearch, NexusState
 from nexus.core.state_io import StateIO
@@ -40,6 +42,7 @@ class ContextHub:
         self.project_root = Path(project_root)
         self.run_dir = Path(run_dir) if (run_dir and str(run_dir) != "None") else None
         self.state_io = StateIO(project_root, run_dir=run_dir)
+        self._text_store = ContextTextStore(self.project_root)
         if strict_deps and deps is None:
             raise ValueError("strict_deps_requires_context_dependencies")
         deps = deps or ContextDependencies()
@@ -91,13 +94,7 @@ class ContextHub:
 
     def load_program_rules(self, md_path: str = "program.md") -> str:
         """讀取 AutoResearch 規則文件。"""
-        path = Path(md_path)
-        if not path.exists():
-            return "# Default: Optimize target file, metric FlashJudge > prev_score"
-        try:
-            return path.read_text(encoding="utf-8")
-        except Exception as e:
-            return f"# Error loading rules: {e}"
+        return self._text_store.load_program_rules(md_path)
 
     def make_pre_routing_decision(
         self,
@@ -252,14 +249,7 @@ class ContextHub:
 
     def _load_last_handoff(self) -> Dict[str, Any]:
         """從 .nexus/state/last_handoff.json 載入跨回合狀態"""
-        handoff_path = self.project_root / ".nexus" / "state" / "last_handoff.json"
-        if handoff_path.exists():
-            try:
-                with open(handoff_path, "r", encoding="utf-8") as f:
-                    return json.load(f)
-            except Exception as e:
-                logger.error(f"⚠️ [ContextHub] Failed to load handoff: {e}")
-        return {}
+        return self._text_store.load_last_handoff()
 
     def _get_l1_index(self) -> str:
         """[L1] 索引層：當前任務指針與狀態摘要 (Handoff Aligned)"""
@@ -376,25 +366,16 @@ class ContextHub:
         state = state_view or self.state_io.load_global_state()
         l0 = self._get_l0_rules()
         l1 = self._get_l1_index()
-        history = getattr(state, "metadata", {}).get("chat_history", []) if state is not None else []
-        sources: list[ContextBudgetSource | Dict[str, Any]] = [
-            ContextBudgetSource("L0:rules", "L0", self._estimate_context_tokens(l0), priority=0, required=True),
-            ContextBudgetSource("L1:index", "L1", self._estimate_context_tokens(l1), priority=1, required=True),
-        ]
-        if history:
-            sources.append(
-                ContextBudgetSource(
-                    "history:recent",
-                    "history",
-                    self._estimate_context_tokens(str(history[-5:])),
-                    priority=20,
-                )
-            )
-        sources.extend(extra_sources or [])
-        return sources
+        return build_context_budget_sources(
+            state=state,
+            l0_rules=l0,
+            l1_index=l1,
+            extra_sources=extra_sources,
+            token_estimator=self._estimate_context_tokens,
+        )
 
     def _estimate_context_tokens(self, value: Any) -> int:
-        return max(1, int(len(str(value)) / 3.8))
+        return estimate_context_tokens(value)
 
     def assemble_context(self, task_id: str, layers: List[int], budget: int = 4000, bayesian_params: Optional[Dict[str, Any]] = None) -> str:
         """
