@@ -3597,3 +3597,21 @@ version_scope:
 - **Root Cause**: The audit encoded the old shallow Click implementation. After extraction, semantic contracts and artifact writes intentionally live in `scripts/engine/commands/*_actions.py`, while the CLI block should only parse arguments, preserve compatibility seams, translate exceptions, and render Action results.
 - **Action Taken**: Updated audits so delegated commands require an Action delegate token in `nexus_cli.py` and semantic/artifact tokens in the Action module. Also passed CLI compatibility seams into learn Actions so older monkeypatch-based fail-closed tests still exercise `_evaluate_learn_semantic_contract`.
 - **Prevention**: When moving CLI behavior into an Action module, update source-token audits in the same slice. Do not re-add semantic/report-write logic to the Click block just to satisfy stale audits; make the audit follow the seam.
+
+## 2026-05-23: Research S2T Runtime Trace Must Stay A Shadow Serialization Leaf
+- **Phenomenon**: Research S2T runtime extraction started with `ModuleNotFoundError: No module named 'nexus.app.research_s2t_runtime'`, proving autoreason candidate shaping and S2T trace / episode payload serialization still lived inside `research_flow_service.py`.
+- **Root Cause**: Earlier Research Flow refactors had already moved RLM trace, skill-mount receipt, and semantic runtime receipt logic, but S2T shadow trace construction remained in the orchestration facade.
+- **Action Taken**: Added `nexus/app/research_s2t_runtime.py` with `autoreason_s2t_candidates(...)` and `record_autoreason_s2t_trace(...)`; `research_flow_service.py` keeps `_autoreason_s2t_candidates` and `_record_autoreason_s2t_trace` as physical aliases. Added module contract, facade alias, and auto-flow regression tests.
+- **Prevention**: Future Research Flow S2T work must snapshot trace payload shape first, keep recursive runtime dispatch closed by default, and avoid expanding this leaf beyond deterministic shadow serialization without a new gate-approved failing test.
+
+## 2026-05-23: Auto-Flow Payload Refactors Must Preserve The Public Envelope
+- **Phenomenon**: Auto-flow payload extraction started with `ModuleNotFoundError: No module named 'nexus.research.flow.auto_flow_payload'`, proving the public report envelope was still assembled inline inside `run_auto_flow`.
+- **Root Cause**: Timing, history, baseline metadata, runtime receipts, and S2T trace leaves had been extracted, but the top-level report dict still mixed guard fields, strategy fields, success criteria, timing, and IO defaults in the orchestration body.
+- **Action Taken**: Added `nexus/research/flow/auto_flow_payload.py` with `AutoFlowPayloadParts` and `build_auto_flow_payload(...)`; `run_auto_flow` now delegates initial envelope assembly while keeping execution accounting and runtime receipts in their existing seams. Added module contract and auto-flow regression tests.
+- **Prevention**: Future auto-flow executor work must first snapshot execution accounting fields (`result.report`, guard fallback, token/cost, wall timing) and keep recursive runtime dispatch closed. Do not hide execution side effects inside the payload builder.
+
+## 2026-05-23: Research Helper Leaves Must Keep Facade Aliases Until Executor Snapshot Exists
+- **Phenomenon**: Research Flow still had many inline helper responsibilities after S2T and payload extraction: runtime state readers, runtime decisions, report IO, doc-fix classification, governance packets, capability evidence, capability planning, and model-training export projection.
+- **Root Cause**: Prior slices deliberately avoided execution branches, leaving safe helper seams in the facade so auto-flow accounting would not drift.
+- **Action Taken**: Added leaf modules for `runtime_state`, `runtime_decision`, `report_io`, `task_classifier`, `governance_packets`, `capability_evidence`, `capability_planning`, and `model_training_export`; `research_flow_service.py` keeps compatibility aliases where tests/imports rely on older names. Added module contract and facade alias tests.
+- **Prevention**: Do not extract `auto_flow_executor.py` by line count alone. First create execution-accounting snapshots for guard fallback, token/cost, wall timing, and provider/model report fields; keep recursive runtime dispatch closed.

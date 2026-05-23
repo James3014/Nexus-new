@@ -2,7 +2,7 @@
 
 Date: `2026-05-22`
 Last status update: `2026-05-23`
-Status: `P0A_P0B_P1A_G8_G2G7_F01_REAL_TELEMETRY_FIDELITY_SNAPSHOT_P2A_SOURCE_SELECTION_EXTERNAL_ADAPTER_INJECTION_SANDBOXED_LOCAL_ADAPTER_EXTERNAL_OFFLINE_CACHE_MANIFEST_P3_NETWORK_PROVIDER_FAILURE_EVIDENCE_ARTIFACTS_SOCKET_BARRIER_DIRECT_WITH_NEXUS_RUNNER_EVIDENCE_BUNDLE_GATE_POSTURE_X1_X3_PAYLOAD_FINALIZER_RUBRIC_BUNDLE_PUBLIC_COST_ACCOUNTING_CONTEXT_PROVIDER_MODEL_LOCK_ROW_SET_MANIFEST_METADATA_PAYLOAD_HEADER_SECTION_COMPUTED_SECTION_CLAIM_POSTURE_SECTION_PAYLOAD_SECTION_CONTEXT_STATIC_GATE_SECTIONS_POSTURE_FINALIZATION_SECTION_PAYLOAD_ASSEMBLY_SECTION_P4_CODE_ACTIONS_SKILLS_SYNC_LIST_REGISTRY_BENCH_SANDBOX_MULTI_AGENT_CREATE_START_STATUS_AUDIT_VERIFY_CLOSE_INTEGRATE_SUBMIT_LEARN_ASK_CONVERGE_SOURCE_LIFECYCLE_PHASE_REPORT_REPORT_INGEST_GATE_RESEARCH_ROUTE_AUTO_FLOW_RUN_BENCHMARK_ACTIONS_P5_POLICY_LOADER_DEEPENED_P9_SQLITE_RETRY_MEMORY_MANAGER_EVIDENCE_SEALING_REPORT_READER_CONTEXTHUB_BUDGET_SOURCES_CONTEXTHUB_TEXT_STORE_RESEARCH_SEMANTIC_RUNTIME_RECEIPTS`
+Status: `P0A_P0B_P1A_G8_G2G7_F01_REAL_TELEMETRY_FIDELITY_SNAPSHOT_P2A_SOURCE_SELECTION_EXTERNAL_ADAPTER_INJECTION_SANDBOXED_LOCAL_ADAPTER_EXTERNAL_OFFLINE_CACHE_MANIFEST_P3_NETWORK_PROVIDER_FAILURE_EVIDENCE_ARTIFACTS_SOCKET_BARRIER_DIRECT_WITH_NEXUS_RUNNER_EVIDENCE_BUNDLE_GATE_POSTURE_X1_X3_PAYLOAD_FINALIZER_RUBRIC_BUNDLE_PUBLIC_COST_ACCOUNTING_CONTEXT_PROVIDER_MODEL_LOCK_ROW_SET_MANIFEST_METADATA_PAYLOAD_HEADER_SECTION_COMPUTED_SECTION_CLAIM_POSTURE_SECTION_PAYLOAD_SECTION_CONTEXT_STATIC_GATE_SECTIONS_POSTURE_FINALIZATION_SECTION_PAYLOAD_ASSEMBLY_SECTION_P4_CODE_ACTIONS_SKILLS_SYNC_LIST_REGISTRY_BENCH_SANDBOX_MULTI_AGENT_CREATE_START_STATUS_AUDIT_VERIFY_CLOSE_INTEGRATE_SUBMIT_LEARN_ASK_CONVERGE_SOURCE_LIFECYCLE_PHASE_REPORT_REPORT_INGEST_GATE_RESEARCH_ROUTE_AUTO_FLOW_RUN_BENCHMARK_ACTIONS_P5_POLICY_LOADER_DEEPENED_P9_SQLITE_RETRY_MEMORY_MANAGER_EVIDENCE_SEALING_REPORT_READER_CONTEXTHUB_BUDGET_SOURCES_CONTEXTHUB_TEXT_STORE_RESEARCH_SEMANTIC_RUNTIME_RECEIPTS_RESEARCH_S2T_RUNTIME_TRACE_RESEARCH_AUTO_FLOW_PAYLOAD`
 Source analysis: `/Users/jameschen/.gemini/antigravity/brain/aff9416a-04e7-48d5-9b10-85410ef6b790/NEXUS_CLEAN_CODE_ANALYSIS.md`
 Updated from: second-pass `improve-codebase-architecture` review
 
@@ -30,6 +30,9 @@ Status legend:
 | Research Flow RLM trace leaf | `DONE` | `nexus/research/flow/rlm_trace.py` owns RLM trace slugging and X/R/A JSONL event writes；`research_flow_service.py` keeps physical aliases。 | module characterization + facade alias tests passed。 |
 | Research runtime receipt skill-mount leaf | `DONE` | `research_receipt_runtime.py` owns runtime skill-mount receipt confirmation and contract building；`research_flow_service.py` keeps physical aliases。 | module characterization + facade alias + skill-mount receipt tests passed。 |
 | Research semantic runtime receipt leaf | `DONE` | `research_semantic_runtime.py` owns judge-panel、ASI constraint、architecture scout、external doc scout、formal report runtime receipt augmentation；`research_flow_service.py` keeps physical alias。 | module characterization + facade alias + semantic auto-flow receipt tests passed。 |
+| Research S2T runtime trace leaf | `DONE` | `research_s2t_runtime.py` owns autoreason candidate shaping and S2T shadow trace / episode payload serialization；`research_flow_service.py` keeps physical aliases。 | module characterization + facade alias + auto-flow S2T regression tests passed。 |
+| Research auto-flow payload leaf | `DONE` | `auto_flow_payload.py` owns public auto-flow report envelope assembly；`run_auto_flow` now delegates payload dict shape instead of constructing it inline。 | module characterization + auto-flow regression tests passed。 |
+| Research flow helper leaves | `DONE_10_TASK_SLICE` | `runtime_state.py`、`runtime_decision.py`、`report_io.py`、`task_classifier.py`、`governance_packets.py`、`capability_evidence.py`、`capability_planning.py`、`model_training_export.py` own formerly inline helper responsibilities；facade keeps physical aliases。 | `tests/research/test_flow_leaf_modules.py` + auto-flow regression tests passed。 |
 | P9 SQLite retry first writer | `DONE` | `ProjectMemoryManager._execute_with_retry` 改用 existing `SQLiteRetryHandler`；busy/locked-only retry，corrupt/schema fail-fast。 | `tests/core/test_memory_manager_sqlite_retry.py`、`tests/infrastructure/test_sqlite_retry.py` passed。 |
 | P9 SQLite retry second writer | `DONE` | `SkillRegistry.upsert` 與 `update_win_rate` 改用 existing `SQLiteRetryHandler`；busy/locked-only retry，non-busy fail-fast。 | `tests/test_skill_sharing.py`、`tests/infrastructure/test_sqlite_retry.py` passed。 |
 | P9 Evidence sealing report reader | `DONE` | `gemini_nexus_report.py::_load_evidence_bundle(require_sealed=...)` opt-in sealed reader；legacy unsealed read-only default preserved。 | `tests/benchmark/test_gemini_nexus_report.py`、`tests/contracts/test_evidence_sealing_barrier.py` passed。 |
@@ -43,7 +46,7 @@ Status legend:
 | Benchmark harness facade | `NO_SPLIT_NOW` | `capability_ab_runner.py` 仍是 benchmark orchestration facade；provider-token、session-worker contamination、telemetry fidelity focused probes 已通過。 | 只有新的 failing evidence 證明某個 side-effect orchestration seam 需要切，才開更小 slice。 |
 | External fixture live clone/setup | `DEFERRED` | offline cache manifest Adapter 已完成；尚未實作 remote clone/setup concrete Adapter。 | 需明確 live-network allowlist、socket/no-network barrier、cache provenance receipt；預設仍 fail-closed。 |
 | CLI root registration | `DONE_ACTION_WIRING_ROOT_REGISTRATION_REMAINS` | `code`、`bench effort`、`skills/registry`、`sandbox run`、`multi-agent`、`learn/ask`、`research` live Click commands 已委派 Action/renderer；`sandbox run` 已接本地 physical runner contract；`research:run` 舊內聯 body 已物理刪除。`nexus_cli.py` 仍保留 Click group registration 與 compat shims。 | 後續只在 CLI output schema / deprecated alias / root-registration audit 出現新 failing evidence 時開小切片；sandbox 後續只允許在 no-network / allowlist / hook policy 有新 failing evidence 時擴張。 |
-| Research flow runtime receipts | `PARTIAL` | RLM trace、runtime skill-mount contract、semantic runtime receipt augmentation leaf 已完成；`research_flow_service.py` 仍可切 auto-flow executor 或 S2T serialization leaf。 | 需 focused tests 證明 payload 不漂移；不可打開 recursive runtime dispatch。 |
+| Research flow runtime receipts | `PARTIAL_EXECUTOR_ONLY` | RLM trace、runtime skill-mount contract、semantic runtime receipt augmentation、S2T shadow trace serialization、auto-flow payload envelope、runtime state、runtime decision、report IO、task classifier、governance packets、capability evidence、capability planning、model training export leaves 已完成；`research_flow_service.py` 仍可切 auto-flow executor。 | 需 focused tests 證明 execution accounting 不漂移；不可打開 recursive runtime dispatch。 |
 | ContextHub storage/retry next leaf | `DEFERRED_CALLER_MAP_DONE_NO_SQLITE` | SQLite-backed fallback / retry leaf 未開；2026-05-23 caller map 證明 current ContextHub path 只有 `ContextTextStore` UTF-8 text/JSON reads 與 budget-source shaping，沒有 `sqlite3` / `SQLiteRetryHandler` writer。 | 只有真 storage responsibility 引入 SQLite-backed fallback，且有 deletion test / busy-locked fixture，才開 code slice；不得改 constructor compatibility / strict deps 行為。 |
 | SQLite transaction manager | `DEFERRED` | `memory_manager.py` 與 `skill_registry.py` 已共用 `SQLiteRetryHandler`；尚未升級成全域 `DatabaseTransactionManager`。 | 需第三個 writer 或重複 transaction-shape duplication 證明 context manager seam 有價值。 |
 | Capability planner / pipeline repair deeper split | `DEFERRED` | 不做 broad split。 | 僅在 policy order / injection equivalence / repair RLM acceptance gate 出現 failing evidence 時重開。 |
@@ -52,9 +55,9 @@ Status legend:
 
 ### 0.3 目前結論
 
-本計劃的「可在不影響 runtime/public gates 下直接完成」部分已完成到下一層：Research semantic runtime receipt leaf 也已切出。剩餘項目不是漏做，而是按 Clean Code / Linus 原則刻意保留在 `PARTIAL` 或 `DEFERRED`：沒有 caller map、deletion test、focused failing evidence 前，不用 file-size-only 理由繼續拆。
+本計劃的「可在不影響 runtime/public gates 下直接完成」部分已完成到下一層：Research semantic runtime receipt leaf、S2T runtime trace leaf、auto-flow payload envelope leaf，加上 8 個 Research helper leaves 都已切出。剩餘項目不是漏做，而是按 Clean Code / Linus 原則刻意保留在 `PARTIAL_EXECUTOR_ONLY` 或 `DEFERRED`：沒有 execution accounting snapshot 前，不用 file-size-only 理由硬拆 executor。
 
-目前可接續開工證據包已整理於 `docs/reports/NEXUS_REFACTOR_REMAINING_START_EVIDENCE_2026-05-23.md`。`SkillRegistry` SQLite retry 第二 writer、`sandbox_actions.py` CLI Action seam、`SandboxRunner.run_task` 本地 physical contract、external fixture offline cache manifest pregate、CLI live Action adapter sweep 已完成。下一個可接續項只剩 evidence-first 類型：benchmark / CLI root registration audit / ContextHub storage / sandbox no-network hardening 仍需依該 evidence report 的 first RED 與 stop condition 啟動。
+目前可接續開工證據包已整理於 `docs/reports/NEXUS_REFACTOR_REMAINING_START_EVIDENCE_2026-05-23.md`。`SkillRegistry` SQLite retry 第二 writer、`sandbox_actions.py` CLI Action seam、`SandboxRunner.run_task` 本地 physical contract、external fixture offline cache manifest pregate、CLI live Action adapter sweep、Research S2T runtime trace leaf、Research auto-flow payload leaf、Research 10-task helper leaf slice 已完成。下一個可接續項只剩 evidence-first 類型：benchmark / CLI root registration audit / ContextHub storage / sandbox no-network hardening / auto-flow executor 仍需依該 evidence report 的 first RED 與 stop condition 啟動。
 
 ### 0.4 未完成項開工證據包
 
@@ -398,6 +401,7 @@ Evidence:
 - `nexus/research/flow/phase_clock.py`
 - `nexus/research/flow/baseline_report.py`
 - `nexus/research/flow/history_signal_store.py`
+- `nexus/research/flow/auto_flow_payload.py`
 - `nexus/research/flow/orchestrator.py`
 - `nexus/engine/repair/audit_evaluator.py`
 - `nexus/engine/repair/escalation_manager.py`

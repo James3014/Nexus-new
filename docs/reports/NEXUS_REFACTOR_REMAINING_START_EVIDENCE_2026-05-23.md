@@ -9,6 +9,10 @@ Status: `READY_FOR_NEXT_SMALL_SLICES`
 | --- | --- | --- |
 | Research semantic runtime receipts | `DONE` | `nexus/app/research_semantic_runtime.py` now owns judge-panel, ASI constraint, architecture scout, external doc scout, harness runtime receipt, and formal report runtime receipt augmentation. |
 | Research Flow compatibility | `DONE` | `research_flow_service.py` keeps `_augment_semantic_runtime_capabilities` as a physical alias to the new Module. |
+| Research S2T runtime trace | `DONE` | `nexus/app/research_s2t_runtime.py` now owns autoreason candidate shaping plus S2T shadow event / episode payload serialization. |
+| Research S2T compatibility | `DONE` | `research_flow_service.py` keeps `_autoreason_s2t_candidates` and `_record_autoreason_s2t_trace` physical aliases to the new Module. |
+| Research auto-flow payload | `DONE` | `nexus/research/flow/auto_flow_payload.py` now owns the public auto-flow report envelope assembly. |
+| Research 10-task helper leaves | `DONE` | `runtime_state.py`, `runtime_decision.py`, `report_io.py`, `task_classifier.py`, `governance_packets.py`, `capability_evidence.py`, `capability_planning.py`, and `model_training_export.py` now own formerly inline Research Flow helper responsibilities. |
 | Focused tests | `PASS` | `tests/app/test_research_flow_service.py::test_research_semantic_runtime_module_writes_judge_panel_receipt` and compatibility / auto-flow semantic receipt tests passed. |
 | Project memory SQLite retry writer | `DONE` | `nexus/core/memory_manager.py::ProjectMemoryManager._execute_with_retry` consumes `SQLiteRetryHandler`; busy/locked and non-busy fail-fast tests passed. |
 | SkillRegistry SQLite retry second writer | `DONE` | `nexus/learning/skill_registry.py::SkillRegistry.upsert` and `update_win_rate` consume `SQLiteRetryHandler`; busy/locked retry and non-busy fail-fast tests passed. |
@@ -49,6 +53,94 @@ Stop condition:
 Verification:
 
 - `uv run pytest tests/test_skill_sharing.py tests/core/test_memory_manager_sqlite_retry.py tests/core/test_memory_manager_write_guard.py tests/infrastructure/test_sqlite_retry.py -q` -> `19 passed`.
+
+## 2A. Completed Research S2T Runtime Trace Leaf
+
+Current reusable Module:
+
+- `nexus/app/research_s2t_runtime.py::record_autoreason_s2t_trace`
+- `nexus/app/research_s2t_runtime.py::autoreason_s2t_candidates`
+
+Why this was accepted:
+
+- It owns a compact, deterministic S2T payload seam: candidate shaping, selector input, JSONL trace append, episode envelope, and cost fields.
+- It keeps recursive runtime dispatch closed; this is only shadow trace serialization.
+- `research_flow_service.py` keeps physical aliases so historical imports and monkeypatch bindings do not drift.
+
+RED / characterization tests:
+
+- `tests/app/test_research_s2t_runtime.py` initially failed with `ModuleNotFoundError: No module named 'nexus.app.research_s2t_runtime'`.
+- `tests/app/test_research_flow_service.py::test_run_auto_flow_populates_autoreason_from_candidate_summaries` initially exposed that the facade still needed `S2TTraceEvent.from_dict` for model-training export.
+
+GREEN:
+
+- Added `research_s2t_runtime.py` and rewired `research_flow_service.py` to delegate `_autoreason_s2t_candidates` / `_record_autoreason_s2t_trace`.
+- Kept `S2TTraceEvent` imported in the facade for the downstream training export contract.
+
+Verification:
+
+- `uv run pytest tests/app/test_research_s2t_runtime.py tests/app/test_research_flow_service.py::test_run_auto_flow_populates_autoreason_from_candidate_summaries -q` -> `3 passed`.
+
+Stop condition:
+
+- Do not extract auto-flow executor in this slice.
+- Do not open recursive runtime dispatch.
+- Any next Research Flow split needs a new focused payload snapshot or deletion test first.
+
+## 2B. Completed Research Auto-Flow Payload Envelope Leaf
+
+Current reusable Module:
+
+- `nexus/research/flow/auto_flow_payload.py::AutoFlowPayloadParts`
+- `nexus/research/flow/auto_flow_payload.py::build_auto_flow_payload`
+
+Why this was accepted:
+
+- It owns the top-level auto-flow report envelope shape: guard, learn phase SLO, strategy, success criteria, initial timing, and IO defaults.
+- It keeps execution, cost accounting, runtime receipt writes, S2T export, and recursive dispatch outside the new Module.
+- It reduces `research_flow_service.py` orchestration body without changing public report schema.
+
+RED / characterization tests:
+
+- `tests/research/test_auto_flow_payload.py` initially failed with `ModuleNotFoundError: No module named 'nexus.research.flow.auto_flow_payload'`.
+
+GREEN:
+
+- Added `auto_flow_payload.py` and rewired `run_auto_flow` to call `build_auto_flow_payload(AutoFlowPayloadParts(...))`.
+
+Verification:
+
+- `uv run pytest tests/research/test_auto_flow_payload.py tests/app/test_research_flow_service.py::test_run_auto_flow_populates_autoreason_from_candidate_summaries -q` -> `2 passed`.
+
+Stop condition:
+
+- This slice only moved envelope assembly.
+- Do not extract baseline/hyper execution branches without a separate execution accounting snapshot.
+- Do not open recursive runtime dispatch.
+
+## 2C. Completed Research 10-Task Helper Leaf Slice
+
+Completed tasks:
+
+1. `research_s2t_runtime.py` owns S2T shadow trace serialization.
+2. `auto_flow_payload.py` owns public auto-flow report envelope assembly.
+3. `runtime_state.py` owns tuning / belief / capability / phase-SLO fast readers.
+4. `runtime_decision.py` owns tier, HITL, claim-check, ASI record, and plateau decisions.
+5. `report_io.py` owns output-file JSON write behavior.
+6. `task_classifier.py` owns strict doc-fix classification.
+7. `governance_packets.py` owns preflight, session, and governance event packets.
+8. `model_training_export.py` owns S2T-backed model training export projection.
+9. `capability_evidence.py` owns swarm/drone/nightshift/research/lancedb/semantic/ultra-review evidence shaping.
+10. `capability_planning.py` owns capability stack compatibility, runtime budget/env skill mounts, and executor flag shaping.
+
+Verification:
+
+- `uv run pytest tests/research/test_flow_leaf_modules.py tests/research/test_auto_flow_payload.py tests/app/test_research_s2t_runtime.py tests/app/test_research_flow_service.py::test_run_auto_flow_populates_autoreason_from_candidate_summaries -q` -> `11 passed`.
+
+Stop condition:
+
+- `auto_flow_executor.py` is still not opened because baseline/hyper execution branch movement requires a separate execution-accounting snapshot covering guard fallback, token/cost, wall timing, and model/provider report fields.
+- Recursive runtime dispatch remains closed.
 
 ## 3. Remaining Items Now Startable
 

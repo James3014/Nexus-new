@@ -5,22 +5,19 @@ import time
 import concurrent.futures
 import importlib.util
 import subprocess
-import shutil
 import re
 import difflib
 import os
 from pathlib import Path
 from datetime import datetime, timezone
 from typing import Any
-from dataclasses import asdict, dataclass
+from dataclasses import asdict
 import click
 
 from nexus.research.local_sprint_mutator import generate_local_candidate, generate_local_companion_edits
 from nexus.research.sprint_service import SprintConfig, run_hyper_sprint, LLMCandidateGenerator, LLMCandidateError, _candidate_summaries
 from nexus.contracts import RLMTraceEvent, RLMTraceWriter
-from nexus.engine.capability_executor_controls import build_executor_controls
 from nexus.engine.capability_planner import CapabilityPlanner
-from nexus.engine.capability_selector import CapabilitySelector
 from nexus.engine.route_decision_adapter import build_route_decision
 from nexus.engine.asi_constraints import ASIConstraintExtractor, ASIConstraintStore
 from nexus.engine.runtime_capability_receipts import emit_harness_runtime_receipts, write_runtime_receipt_json
@@ -33,10 +30,6 @@ from nexus.contracts.learning_experience import (
     project_nexus_policy,
     save_promoted_learning_policy,
 )
-from nexus.contracts.s2t_export import write_model_training_export_v3
-from nexus.contracts.s2t_policy import S2TCandidate, S2TSelector
-from nexus.contracts.s2t_trace import S2TDecisionSpan, S2TEpisodeTrace, S2TTraceEvent, S2TTraceWriter
-from nexus.core.event_bus import NexusEventBus
 from nexus.core.learning_steward import LearningSteward
 from nexus.engine.learning_policy_loader import (
     DEFAULT_PROMOTED_POLICY_PATH,
@@ -57,6 +50,10 @@ from nexus.services.codeintel import analyze_impact, scan_codebase
 from nexus.services.codeintel.dci_locator import locate_dci_evidence, should_enable_dci
 from nexus.app.research_autoreason_runtime import build_autoreason_payload
 from nexus.app.research_receipt_runtime import build_capability_receipt_payloads, runtime_receipt_plan_payload
+from nexus.app.research_s2t_runtime import (
+    autoreason_s2t_candidates as _autoreason_s2t_candidates,
+    record_autoreason_s2t_trace as _record_autoreason_s2t_trace,
+)
 from nexus.research.flow.route_decider import (
     RouteConsensusPayload,
     RouteDecisionPayload,
@@ -81,8 +78,45 @@ from nexus.research.flow.baseline_report import (
     local_baseline_meta,
     strict_baseline_failure_meta,
 )
+from nexus.research.flow.auto_flow_payload import AutoFlowPayloadParts, build_auto_flow_payload
+from nexus.research.flow.capability_evidence import (
+    augment_local_msa_bench_evidence as _augment_local_msa_bench_evidence,
+    candidate_summary_has_swarm_evidence as _candidate_summary_has_swarm_evidence,
+    capability_evidence as _capability_evidence,
+    ultra_review_gate_evidence as _ultra_review_gate_evidence,
+)
+from nexus.research.flow.capability_planning import (
+    benchmark_skill_mount_requests_from_env as _benchmark_skill_mount_requests_from_env,
+    build_capability_plan_and_decision as _build_capability_plan_and_decision,
+    build_route_executor_flags,
+    compose_capability_plan,
+    runtime_capability_budget as _runtime_capability_budget,
+    runtime_skill_overlay_requested as _runtime_skill_overlay_requested,
+)
+from nexus.research.flow.governance_packets import (
+    governance_events_packet as _governance_events_packet,
+    research_preflight_packet as _research_preflight_packet,
+    research_session_packet as _research_session_packet,
+)
 from nexus.research.flow.history_signal_store import HistorySignalStore
+from nexus.research.flow.model_training_export import write_auto_flow_model_training_export
 from nexus.research.flow.phase_clock import AutoFlowPhaseClock, apply_auto_flow_timing_payload
+from nexus.research.flow.report_io import write_output_file as _write_output_file
+from nexus.research.flow.runtime_decision import (
+    asi_record as _asi_record,
+    claim_check_summary as _claim_check_summary,
+    detect_plateau as _detect_plateau,
+    hitl_payload as _hitl_payload,
+    nexus_tier as _nexus_tier,
+)
+from nexus.research.flow.runtime_state import (
+    ParsedTuningKnobs,
+    parse_tuning_knobs as _parse_tuning_knobs,
+    read_belief_confidence_fast,
+    read_capability_tuning_fast,
+    read_phase_slo_summary_fast,
+)
+from nexus.research.flow.task_classifier import is_strictly_doc_fix as _is_strictly_doc_fix
 
 
 RESEARCH_SOURCE_PROJECTS = tuple(research_stack_source_projects())
@@ -100,45 +134,6 @@ def _write_source_text(path: Path, text: str) -> None:
         cache_path.unlink()
     except FileNotFoundError:
         pass
-
-
-@dataclass(frozen=True)
-class ParsedTuningKnobs:
-    candidate_boost: int = 0
-    max_rounds_boost: int = 0
-    stage1_parallel_boost: int = 0
-    baseline_fast_sec: float = 0.0
-    skip_baseline_probe_for_hard: bool = False
-
-
-def _parse_tuning_knobs(payload: dict[str, Any] | None) -> ParsedTuningKnobs:
-    raw = (payload or {}).get("knobs", {}) if isinstance(payload, dict) else {}
-    if not isinstance(raw, dict):
-        return ParsedTuningKnobs()
-    try:
-        candidate_boost = int(raw.get("candidate_boost", 0) or 0)
-    except Exception:
-        candidate_boost = 0
-    try:
-        max_rounds_boost = int(raw.get("max_rounds_boost", 0) or 0)
-    except Exception:
-        max_rounds_boost = 0
-    try:
-        stage1_parallel_boost = int(raw.get("stage1_parallel_boost", 0) or 0)
-    except Exception:
-        stage1_parallel_boost = 0
-    try:
-        baseline_fast_sec = float(raw.get("baseline_fast_sec", 0.0) or 0.0)
-    except Exception:
-        baseline_fast_sec = 0.0
-    skip_baseline_probe_for_hard = bool(raw.get("skip_baseline_probe_for_hard", False))
-    return ParsedTuningKnobs(
-        candidate_boost=max(-2, min(2, candidate_boost)),
-        max_rounds_boost=max(-2, min(2, max_rounds_boost)),
-        stage1_parallel_boost=max(-2, min(2, stage1_parallel_boost)),
-        baseline_fast_sec=max(0.0, baseline_fast_sec),
-        skip_baseline_probe_for_hard=skip_baseline_probe_for_hard,
-    )
 
 
 def _collect_route_signals(
@@ -404,726 +399,6 @@ def _task_with_codeintel_context(task_desc: str, codeintel: dict[str, Any]) -> s
     )
 
 
-def _candidate_summary_has_swarm_evidence(summary: dict[str, Any]) -> bool:
-    hint = str(summary.get("hint") or "").lower()
-    source = str(summary.get("source") or "").lower()
-    return source == "swarm" or ("create:" in hint and "sync:" in hint and "test:" in hint)
-
-
-def _capability_evidence(
-    *,
-    result_report: dict[str, Any],
-    learning_trace: dict[str, Any],
-    nightshift_recommended: bool,
-) -> dict[str, Any]:
-    candidate_summaries = result_report.get("candidate_summaries", [])
-    if not isinstance(candidate_summaries, list):
-        candidate_summaries = []
-    swarm_count = sum(
-        1
-        for item in candidate_summaries
-        if isinstance(item, dict) and _candidate_summary_has_swarm_evidence(item)
-    )
-    swarm_consensus = "candidate_summary_evidence" if swarm_count > 0 else ""
-    swarm_report = {
-        "schema_version": "nexus_swarm_receipt_v1",
-        "source": "hyper_sprint_candidate_summaries",
-        "evidence_count": swarm_count,
-        "consensus": swarm_consensus if swarm_count else "",
-        "evidence_refs": [f"candidate_summary:{idx}" for idx, item in enumerate(candidate_summaries) if isinstance(item, dict) and _candidate_summary_has_swarm_evidence(item)],
-    }
-    drone_crystals = learning_trace.get("drone_crystals", [])
-    if not isinstance(drone_crystals, list):
-        drone_crystals = []
-    drone_artifact_path = str(drone_crystals[0]) if drone_crystals else ""
-    drone_report = {
-        "schema_version": "nexus_drone_receipt_v1",
-        "source": "drone_crystals",
-        "artifact_paths": [str(item) for item in drone_crystals],
-        "artifact_count": len(drone_crystals),
-    }
-    nightshift_report_path = str(learning_trace.get("nightshift_report_path") or result_report.get("nightshift_report_path") or "")
-    nightshift_recovered = bool(
-        learning_trace.get("nightshift_recovered", False)
-        or result_report.get("nightshift_recovered", False)
-    )
-    nightshift_failure_reason = ""
-    if nightshift_recommended and not nightshift_report_path:
-        nightshift_failure_reason = "recommended_without_report"
-    elif nightshift_report_path and not nightshift_recovered:
-        nightshift_failure_reason = "report_without_recovery"
-    nightshift_report = {
-        "schema_version": "nexus_nightshift_receipt_v1",
-        "recommended": bool(nightshift_recommended),
-        "invoked": bool(nightshift_report_path),
-        "recovered": nightshift_recovered,
-        "report_path": nightshift_report_path,
-        "failure_reason": nightshift_failure_reason,
-    }
-    return {
-        "swarm_evidence_count": swarm_count,
-        "swarm_used": False,
-        "swarm_consensus": "candidate_summary_signal" if swarm_count else "",
-        "swarm_report": swarm_report,
-        "drone_invoked_count": len(drone_crystals),
-        "drone_used": len(drone_crystals) > 0,
-        "drone_artifact_path": drone_artifact_path,
-        "drone_report": drone_report,
-        "nightshift_recommended": bool(nightshift_recommended),
-        "nightshift_invoked": bool(nightshift_report_path),
-        "nightshift_recovered": nightshift_recovered,
-        "nightshift_report_path": nightshift_report_path,
-        "nightshift_failure_reason": nightshift_failure_reason,
-        "nightshift_report": nightshift_report,
-    }
-
-
-def _augment_local_msa_bench_evidence(
-    repo_root: Path,
-    *,
-    task_id: str | None,
-    task_desc: str,
-    task_type: str,
-    evidence: dict[str, Any],
-    artifact_verified: bool,
-    route_executor_flags: dict[str, Any] | None = None,
-) -> dict[str, Any]:
-    route_executor_flags = route_executor_flags if isinstance(route_executor_flags, dict) else {}
-    local_swarm_enabled = os.environ.get("NEXUS_ENABLE_LOCAL_SWARM_EXECUTOR", "").strip().lower() in {"1", "true", "yes"}
-    local_swarm_enabled = bool(
-        local_swarm_enabled
-        or route_executor_flags.get("enable_swarm")
-        or route_executor_flags.get("enable_drone")
-        or route_executor_flags.get("enable_nightshift")
-    )
-    text = f"{task_id or ''} {task_desc} {task_type}".lower()
-    if not artifact_verified:
-        return evidence
-
-    updated = dict(evidence)
-    slug = _safe_trace_slug(task_id or task_desc)
-    if local_swarm_enabled and "swarm" in text:
-        quiet_moment = {
-            "schema_version": "nexus_quiet_moment.v1",
-            "event_type": "quiet_moment",
-            "reason": "local_msa_bench_swarm_pre_repair_mutation_boundary",
-            "affected_nodes": ["local_msa_bench_executor", "repair"],
-            "resume_after_seconds": 0,
-            "allowed_actions": ["observe", "report", "rollback"],
-            "production_writes_allowed": False,
-            "observe": {"status": "observed", "production_writes_allowed": False},
-            "rollback": {"status": "armed", "production_writes_allowed": False},
-        }
-        updated["swarm_used"] = True
-        updated["swarm_evidence_count"] = 2
-        updated["swarm_consensus"] = "pass"
-        updated["swarm_report"] = {
-            "schema_version": "nexus_swarm_receipt_v1",
-            "source": "local_msa_bench_executor",
-            "evidence_count": 2,
-            "consensus": "pass",
-            "evidence_refs": [
-                "role:logic:evidence:artifact_verified",
-                "role:regression:evidence:tests_passed",
-            ],
-            "quiet_moment": quiet_moment,
-        }
-        updated["quiet_moment"] = quiet_moment
-    if local_swarm_enabled and "drone" in text:
-        artifact_path = repo_root / ".nexus" / "reports" / "drones" / f"{slug}_local_msa_crystal.json"
-        artifact_path.parent.mkdir(parents=True, exist_ok=True)
-        artifact = {
-            "schema_version": "nexus_drone_artifact_v1",
-            "owner": "local_msa_bench_executor",
-            "task_id": task_id or slug,
-            "artifact_path": str(artifact_path),
-            "verified": True,
-        }
-        artifact_path.write_text(json.dumps(artifact, ensure_ascii=False, indent=2, sort_keys=True), encoding="utf-8")
-        updated["drone_used"] = True
-        updated["drone_invoked_count"] = 1
-        updated["drone_artifact_path"] = str(artifact_path)
-        updated["drone_report"] = {
-            "schema_version": "nexus_drone_receipt_v1",
-            "source": "local_msa_bench_executor",
-            "artifact_paths": [str(artifact_path)],
-            "artifact_count": 1,
-        }
-    if local_swarm_enabled and "nightshift" in text:
-        updated["nightshift_recommended"] = True
-        updated["nightshift_invoked"] = True
-        updated["nightshift_recovered"] = True
-        updated["nightshift_failure_reason"] = ""
-        updated["nightshift_report"] = {
-            "schema_version": "nexus_nightshift_receipt_v1",
-            "source": "local_msa_bench_executor",
-            "recommended": True,
-            "invoked": True,
-            "recovered": True,
-            "report_path": "",
-            "failure_reason": "",
-        }
-    if "route-oracle-research" in text or "research-backed" in text:
-        updated["research_used"] = True
-        updated["research_refs"] = [f"research:{slug}:citation"]
-        updated["research_gate_passed"] = True
-    if "route-oracle-lancedb" in text or "retrieval hits" in text:
-        updated["lancedb_hits"] = 1
-        updated["lancedb_refs"] = [f"lancedb:{slug}:source_id"]
-        updated["lancedb_gate_passed"] = True
-    if "semantic_searcher" in text or "semantic retrieval" in text or "semantic_searcher refs" in text:
-        updated["semantic_searcher_used"] = True
-        updated["semantic_searcher_hits"] = 1
-        updated["semantic_searcher_refs"] = [f"semantic:{slug}:source_id"]
-        updated["semantic_searcher_gate_passed"] = True
-    return updated
-
-
-def _ultra_review_gate_evidence(
-    *,
-    repo_root: Path,
-    task_desc: str,
-    task_id: str | None = None,
-    route_decision: dict[str, Any] | None = None,
-    capability_stack: dict[str, Any] | None = None,
-    claim_check: dict[str, Any] | None = None,
-    route_confidence: float | None = None,
-    hitl: dict[str, Any] | None = None,
-) -> dict[str, Any]:
-    route_decision = route_decision if isinstance(route_decision, dict) else {}
-    controls = route_decision.get("executor_controls") if isinstance(route_decision.get("executor_controls"), dict) else {}
-    governance_layers = route_decision.get("governance_layers")
-    if not isinstance(governance_layers, list):
-        governance_layers = []
-    recommended = bool(controls.get("enable_ultra_review") or "ultra_review" in {str(item) for item in governance_layers})
-    if not recommended:
-        return {
-            "recommended": False,
-            "invoked": False,
-            "gate_passed": None,
-            "report_path": "",
-            "failures": [],
-            "reason": "missing_route_decision" if not route_decision else "not_recommended",
-        }
-    if os.environ.get("NEXUS_ULTRA_REVIEW_DRY_GATE", "").strip().lower() not in {"1", "true", "yes", "on"}:
-        return {
-            "recommended": True,
-            "invoked": False,
-            "gate_passed": None,
-            "report_path": "",
-            "failures": [],
-            "reason": "feature_flag_disabled",
-        }
-    slug = _safe_trace_slug(task_id or task_desc or "route_gate")
-    report_path = repo_root / ".nexus" / "reports" / "ultra_review" / f"{slug}_route_gate_report.json"
-    try:
-        from nexus.engine.ultra_review_service import UltraReviewService
-        from scripts.ops.ultra_gate import evaluate_report
-
-        payload = UltraReviewService(repo_root).run(
-            dry_run=True,
-            task=task_desc,
-            report_path=report_path,
-            sandbox_root=repo_root / ".nexus" / "reports" / "ultra_review" / "route_gate_sandboxes",
-        )
-        if isinstance(claim_check, dict):
-            payload["claim_check"] = claim_check
-            verification = payload.get("verification", {})
-            if not isinstance(verification, dict):
-                verification = {}
-            verification["claim_check_required"] = True
-            payload["verification"] = verification
-        if route_confidence is not None:
-            payload["route_confidence"] = float(route_confidence)
-        if isinstance(hitl, dict):
-            payload["hitl"] = hitl
-        gate_passed, failures = evaluate_report(payload, check_artifacts=True)
-        sandbox_path = payload.get("sandbox_path")
-        if sandbox_path:
-            try:
-                shutil.rmtree(Path(str(sandbox_path)) / "worktree")
-            except OSError:
-                pass
-        return {
-            "recommended": True,
-            "invoked": True,
-            "gate_passed": bool(gate_passed),
-            "report_path": str(report_path),
-            "failures": [str(item) for item in failures],
-            "reason": "dry_gate_passed" if gate_passed else "dry_gate_failed",
-        }
-    except Exception as exc:
-        return {
-            "recommended": True,
-            "invoked": True,
-            "gate_passed": False,
-            "report_path": str(report_path),
-            "failures": [f"{type(exc).__name__}: {exc}"],
-            "reason": "dry_gate_error",
-        }
-
-
-def _nexus_tier(route_features: dict[str, Any], *, force_flow: str | None) -> dict[str, Any]:
-    risk_score = int(route_features.get("risk_score", 0) or 0)
-    high_risk = bool(
-        risk_score >= 50
-        or route_features.get("has_hard_signal")
-        or route_features.get("is_cross_module_task")
-        or force_flow == "hyper_sprint"
-    )
-    if high_risk:
-        reason = "high_risk_or_forced_hyper"
-        tier = "full"
-    else:
-        reason = "low_risk_light_governance"
-        tier = "light"
-    return {"tier": tier, "reason": reason, "risk_score": risk_score}
-
-
-def _claim_check_summary(
-    *,
-    task_desc: str,
-    tests_passed: bool,
-    artifact_summary: dict[str, Any],
-    route: dict[str, Any],
-) -> dict[str, Any]:
-    changed = bool(artifact_summary.get("changed", False))
-    verification_only = bool(artifact_summary.get("verification_only", False))
-    results = [
-        {
-            "claim_id": "tests_passed",
-            "status": "PASS" if tests_passed else "FAIL",
-            "evidence_refs": [str(artifact_summary.get("pytest_cmd", ""))],
-            "reason": "target tests execution",
-        },
-        {
-            "claim_id": "artifact_or_verification",
-            "status": "PASS" if (changed or verification_only) else "FAIL",
-            "evidence_refs": [f"changed:{changed}", f"verification_only:{verification_only}"],
-            "reason": "artifact mutation or verification-only rescue",
-        },
-    ]
-    claim_text = str(task_desc or "").lower()
-    has_claim_word = "claim" in claim_text or "evidence" in claim_text or "verify" in claim_text
-    if has_claim_word:
-        results.append(
-            {
-                "claim_id": "claim_keyword_requires_evidence",
-                "status": "PASS" if tests_passed else "FAIL",
-                "evidence_refs": [f"route_reason:{route.get('recommended_reason', '')}"],
-                "reason": "claim-bearing task must retain executable evidence",
-            }
-        )
-    passed = all(str(item.get("status", "")).upper() == "PASS" for item in results)
-    return {
-        "passed": passed,
-        "results": results,
-    }
-
-
-def _hitl_payload(*, route_confidence: float, route: dict[str, Any], task_id: str | None) -> dict[str, Any]:
-    if route_confidence >= 0.6:
-        return {"attach_session": "", "strategic_guidance": "", "reason": "not_required"}
-    confidence_text = f"{route_confidence:.2f}"
-    hint_mode = ((route.get("route_features", {}) if isinstance(route, dict) else {}) or {}).get("router_hint_mode", "")
-    return {
-        "attach_session": f"hitl-{_safe_trace_slug(task_id or 'task')}",
-        "strategic_guidance": (
-            f"Low confidence route ({confidence_text}); prioritize reversible steps, "
-            f"preserve test evidence, and prefer bounded edits. hint_mode={hint_mode}"
-        ),
-        "reason": "low_confidence_route",
-    }
-
-
-def _asi_record(
-    *,
-    run_id: int,
-    task_desc: str,
-    recommended_flow: str,
-    chosen_flow: str,
-    status: str,
-    error: str,
-    route_confidence: float,
-    execution_family: str = "",
-) -> dict[str, Any]:
-    metric = 1.0 if str(status).upper() == "SUCCESS" else 0.0
-    family = execution_family or f"flow:{recommended_flow or chosen_flow or 'unknown'}"
-    return {
-        "run_id": run_id,
-        "hypothesis": task_desc[:240],
-        "family": family,
-        "metric_name": "success_rate",
-        "metric": metric,
-        "status": "keep" if metric >= 1.0 else "discard",
-        "decision": "keep" if metric >= 1.0 else "discard",
-        "evidence": "artifact_verified" if metric >= 1.0 else "run_failed",
-        "rollback_reason": "" if metric >= 1.0 else (error or "failed"),
-        "next_action_hint": "consider_distant_scout" if metric < 1.0 else "continue",
-        "route_confidence": round(float(route_confidence), 4),
-        "schema_version": "nexus_asi_record_v1",
-    }
-
-
-def _detect_plateau(asi_ledger: list[dict[str, Any]]) -> dict[str, Any]:
-    window = [item for item in asi_ledger[-5:] if isinstance(item, dict)]
-    if len(window) < 4:
-        return {"detected": False, "reason": "insufficient_window"}
-    recent4 = window[-4:]
-    statuses = [str(item.get("status", "")).lower() for item in recent4]
-    if not all(status == "discard" for status in statuses):
-        return {"detected": False, "reason": "status_not_all_discard"}
-    families = [str(item.get("family", "")).strip() for item in recent4]
-    if len(set(families)) != 1:
-        return {"detected": False, "reason": "family_not_stable"}
-    metrics = [float(item.get("metric", 0.0) or 0.0) for item in recent4]
-    metric_span = max(metrics) - min(metrics)
-    if metric_span >= 0.05:
-        return {"detected": False, "reason": "metric_variance_too_high", "metric_span": metric_span}
-    return {
-        "detected": True,
-        "reason": "discard_streak_same_family_low_variance",
-        "family": families[0],
-        "metric_span": metric_span,
-        "next_lane": "DISTANT_SCOUT",
-    }
-
-
-def _research_preflight_packet(*, route: dict[str, Any], route_confidence: float, task_id: str | None) -> dict[str, Any]:
-    context = route.get("research_context", {}) if isinstance(route.get("research_context"), dict) else {}
-    risk_flags = list(context.get("risk_flags", []) or [])
-    blocked_assumptions = list(context.get("blocked_assumptions", []) or [])
-    requires_evidence = bool("claim_uncertainty" in risk_flags or blocked_assumptions)
-    return {
-        "schema": "nexus_research_preflight_v1",
-        "task_id": task_id or _safe_trace_slug(str(route.get("recommended_reason") or "task")),
-        "present": True,
-        "blocked": False,
-        "requires_evidence": requires_evidence,
-        "source_projects": list(RESEARCH_SOURCE_PROJECTS),
-        "research_stack": research_stack_contract(),
-        "route": {
-            "recommended_flow": str(route.get("recommended_flow") or ""),
-            "recommended_reason": str(route.get("recommended_reason") or ""),
-            "research_context": context,
-        },
-        "route_confidence": round(float(route_confidence), 4),
-        "decision": "requires_evidence" if requires_evidence else "allow_with_research_receipt",
-    }
-
-
-def _research_session_packet(
-    *,
-    task_id: str | None,
-    status: str,
-    asi_record: dict[str, Any],
-    route: dict[str, Any],
-    research_preflight: dict[str, Any],
-) -> dict[str, Any]:
-    context = route.get("research_context", {}) if isinstance(route.get("research_context"), dict) else {}
-    return {
-        "schema": "nexus_research_session_v1",
-        "logged": True,
-        "task_id": task_id or _safe_trace_slug(str(asi_record.get("hypothesis") or "task")),
-        "status": str(asi_record.get("status") or ("keep" if str(status).upper() == "SUCCESS" else "discard")),
-        "hypothesis": str(asi_record.get("hypothesis") or ""),
-        "family": str(asi_record.get("family") or ""),
-        "evidence": str(asi_record.get("evidence") or ""),
-        "rollback_reason": str(asi_record.get("rollback_reason") or ""),
-        "next_action_hint": str(asi_record.get("next_action_hint") or context.get("next_action_hint") or ""),
-        "lane": "distant-scout" if "plateau_detected" in set(context.get("risk_flags", []) or []) else "research-runtime",
-        "preflight_decision": str(research_preflight.get("decision") or ""),
-        "source_projects": list(RESEARCH_SOURCE_PROJECTS),
-        "research_stack": research_stack_contract(),
-    }
-
-
-def _governance_events_packet(
-    *,
-    repo_root: Path,
-    task_id: str | None,
-    receipt_slug: str,
-    artifact_verified: bool,
-    claim_probe: dict[str, Any],
-) -> dict[str, Any]:
-    task_ref = task_id or receipt_slug
-    events: list[dict[str, Any]] = []
-    reasons: list[str] = []
-    if not artifact_verified:
-        reasons.append("artifact_unverified")
-    if bool(claim_probe.get("eligible")) and not bool(claim_probe.get("gate_passed")):
-        reasons.append("claim_probe_gate_failed")
-
-    if artifact_verified:
-        events.append(
-            {
-                "event_type": "evidence_accepted",
-                "task_id": task_ref,
-                "evidence_id": f"artifact:{receipt_slug}:tests_passed",
-                "evidence_type": "artifact",
-            }
-        )
-    else:
-        events.append(
-            {
-                "event_type": "audit_failed",
-                "task_id": task_ref,
-                "reason": ",".join(reasons) or "artifact_unverified",
-                "evidence_id": "",
-            }
-        )
-    events.append(
-        {
-            "event_type": "learning_decision",
-            "task_id": task_ref,
-            "action": "INGEST" if artifact_verified else "DISCARD",
-            "reasons": reasons,
-        }
-    )
-
-    try:
-        NexusEventBus.configure(repo_root)
-        for event in events:
-            event_type = str(event.get("event_type") or "")
-            if event_type == "evidence_accepted":
-                NexusEventBus.emit_evidence_accepted(
-                    task_id=task_ref,
-                    evidence_id=str(event.get("evidence_id") or ""),
-                    evidence_type=str(event.get("evidence_type") or ""),
-                )
-            elif event_type == "audit_failed":
-                NexusEventBus.emit_audit_failure(
-                    task_id=task_ref,
-                    reason=str(event.get("reason") or ""),
-                    evidence_id=str(event.get("evidence_id") or ""),
-                )
-            elif event_type == "learning_decision":
-                NexusEventBus.emit_learning_decision(
-                    task_id=task_ref,
-                    action=str(event.get("action") or ""),
-                    reasons=list(event.get("reasons", []) or []),
-                )
-    except Exception:
-        pass
-
-    return {
-        "events": events,
-        "summary": {
-            "event_count": len(events),
-            "event_types": sorted({str(item.get("event_type") or "") for item in events if item.get("event_type")}),
-        },
-    }
-
-
-def read_belief_confidence_fast(repo_root: Path) -> float:
-    path = (repo_root / ".nexus" / "belief_state.json").resolve()
-    if not path.exists():
-        return 1.0
-    try:
-        payload = json.loads(path.read_text(encoding="utf-8"))
-        raw = payload.get("confidence", payload.get("belief_confidence", 1.0))
-        value = float(raw)
-        return min(1.0, max(0.0, value))
-    except Exception:
-        return 1.0
-
-
-def read_capability_tuning_fast(repo_root: Path) -> dict[str, Any]:
-    import os
-
-    override = str(os.environ.get("NEXUS_CAPABILITY_TUNING_FILE", "") or "").strip()
-    if override:
-        path = Path(override).resolve()
-    else:
-        path = (repo_root / ".nexus" / "config" / "capability_tuning.json").resolve()
-    if not path.exists():
-        return {}
-    try:
-        payload = json.loads(path.read_text(encoding="utf-8"))
-        return payload if isinstance(payload, dict) else {}
-    except Exception:
-        return {}
-
-
-def read_phase_slo_summary_fast(repo_root: Path) -> dict[str, Any]:
-    path = (repo_root / ".nexus" / "reports" / "learn" / "phase_slo_summary.json").resolve()
-    if not path.exists():
-        return {"phase_slo_pass": False, "global": {"required_done_ratio": 0.0}, "status": "UNAVAILABLE", "reason": "phase_slo_summary_missing"}
-    try:
-        payload = json.loads(path.read_text(encoding="utf-8"))
-        if not isinstance(payload, dict):
-            raise ValueError("invalid_phase_slo_payload")
-        payload.setdefault("phase_slo_pass", False)
-        payload.setdefault("global", {"required_done_ratio": 0.0})
-        payload.setdefault("status", "SUCCESS")
-        payload.setdefault("reason", "")
-        return payload
-    except Exception:
-        return {"phase_slo_pass": False, "global": {"required_done_ratio": 0.0}, "status": "UNAVAILABLE", "reason": "phase_slo_summary_invalid"}
-
-
-def compose_capability_plan(
-    *,
-    task_desc: str,
-    task_type: str,
-    recommended_flow: str,
-    route_features: dict[str, Any],
-    research_context: dict[str, Any] | None = None,
-    target_file: str | None = None,
-) -> dict[str, Any]:
-    """Compose a compatibility capability_stack from the planner seam."""
-    seed_selected = ["hyper_sprint"] if recommended_flow == "hyper_sprint" else ["baseline"]
-    readiness = route_features.get("candidate_factory_readiness_estimate", {})
-    readiness = readiness if isinstance(readiness, dict) else {}
-    estimated_candidates = int(readiness.get("estimated_candidates", route_features.get("candidate_count", 1)) or 1)
-    candidate_factory_ready = bool(readiness.get("ready", estimated_candidates >= 2))
-    seed_acceleration = ["ddtree"] if candidate_factory_ready and estimated_candidates >= 3 else []
-    research_context = research_context if isinstance(research_context, dict) else {}
-    recommended_caps = {str(item) for item in (research_context.get("recommended_capabilities", []) or []) if str(item)}
-    seed_route = {
-        "recommended_flow": recommended_flow,
-        "route_features": route_features,
-        "research_context": research_context,
-        "route_decision": {
-            "selected_capabilities": seed_selected + (["autoreason"] if "autoreason" in recommended_caps else []),
-            "acceleration_layers": seed_acceleration,
-            "governance_layers": ["ultra_review"] if "ultra_review" in recommended_caps else [],
-        },
-    }
-    plan = CapabilitySelector().select(
-        task_desc=task_desc,
-        task_type=task_type,
-        route=seed_route,
-    )
-    selected = {str(item) for item in plan.selected_capabilities}
-    legacy_selected = ["hyper_sprint"] if "hyper" in selected else ["baseline"]
-    if "autoreason" in selected:
-        legacy_selected.append("autoreason")
-
-    def _reasons(capability: str) -> list[str]:
-        for item in plan.decision_trace:
-            if item.get("capability") == capability:
-                return list(item.get("reasons", []) or [])
-        return []
-
-    return {
-        "schema_version": "legacy_capability_stack_v2_compat",
-        "source": "route_decision_compat",
-        "selected_capabilities": legacy_selected,
-        "acceleration_layers": ["ddtree"] if "ddtree" in selected else [],
-        "governance_layers": ["ultra_review"] if "ultra_review" in selected else [],
-        "explain_caps": [
-            {
-                "capability": "hyper_sprint" if recommended_flow == "hyper_sprint" else "baseline",
-                "enabled": True,
-                "reasons": [f"recommended_flow:{recommended_flow}"],
-                "evidence": ["route.recommended_flow"],
-            },
-            {
-                "capability": "autoreason",
-                "enabled": "autoreason" in selected,
-                "reasons": _reasons("autoreason"),
-                "evidence": ["capability_plan.decision_trace"],
-            },
-            {
-                "capability": "ddtree",
-                "enabled": "ddtree" in selected,
-                "reasons": _reasons("ddtree"),
-                "evidence": ["capability_plan.decision_trace"],
-            },
-            {
-                "capability": "ultra_review",
-                "enabled": "ultra_review" in selected,
-                "reasons": _reasons("ultra_review"),
-                "evidence": ["capability_plan.decision_trace"],
-            },
-        ],
-        "stop_policy": {
-            "type": "a_streak" if "autoreason" in selected else "budget",
-            "threshold": 2 if "autoreason" in selected else 1,
-            "budget_guard": "fail_closed",
-        },
-        "target_file": target_file or "",
-    }
-
-
-def _build_capability_plan_and_decision(
-    *,
-    task_desc: str,
-    task_type: str,
-    route: dict[str, Any],
-    task_id: str | None = None,
-    budget: dict[str, Any] | None = None,
-    skills: list[dict[str, Any]] | None = None,
-) -> tuple[Any, dict[str, Any]]:
-    decision_route = {key: value for key, value in route.items() if key != "capability_stack"}
-    plan = CapabilitySelector().select(
-        task_desc=task_desc,
-        task_type=task_type,
-        route=decision_route,
-        budget=budget,
-        skills=skills,
-    )
-    decision = build_route_decision(
-        task_id=task_id or _safe_trace_slug(task_desc),
-        task_desc=task_desc,
-        task_type=task_type,
-        recommended_flow=str(route.get("recommended_flow") or ""),
-        plan=plan,
-    ).to_dict()
-    return plan, decision
-
-
-def _benchmark_skill_mount_requests_from_env(*, task_id: str | None) -> list[dict[str, str]]:
-    """Parse benchmark-only skill mount requests without changing normal runtime routing."""
-    if not task_id:
-        return []
-    allow_ablation = os.environ.get("NEXUS_BENCH_ALLOW_ABLATION_SKILL_MOUNTS", "").strip().lower()
-    if allow_ablation in {"0", "false", "no", "off"}:
-        return []
-    raw = os.environ.get("NEXUS_BENCH_SKILL_MOUNT_REQUESTS", "").strip()
-    if not raw:
-        return []
-    try:
-        parsed = json.loads(raw)
-    except json.JSONDecodeError:
-        parsed = [item.strip() for item in raw.split(",") if item.strip()]
-    if not isinstance(parsed, list):
-        return []
-    requests: list[dict[str, str]] = []
-    for item in parsed:
-        if isinstance(item, dict):
-            skill_id = str(item.get("skill_id") or item.get("task_id") or "").strip()
-        else:
-            skill_id = str(item).strip()
-        if skill_id:
-            requests.append({"skill_id": skill_id, "source": "benchmark_env_request"})
-    return requests
-
-
-def _runtime_capability_budget(repo_root: Path) -> dict[str, Any]:
-    budget = merge_runtime_learning_policy(repo_root)
-    status_report = os.environ.get("NEXUS_BENCH_SKILL_STATUS_REPORT", "").strip()
-    if status_report:
-        budget["skill_status_report"] = status_report
-    overlay_path = (
-        os.environ.get("NEXUS_SF_RUNTIME_SKILL_POLICY_OVERLAY", "").strip()
-        or os.environ.get("NEXUS_RUNTIME_SKILL_POLICY_OVERLAY", "").strip()
-    )
-    if overlay_path:
-        budget["runtime_skill_policy_overlay_path"] = overlay_path
-    if os.environ.get("NEXUS_BENCH_ALLOW_ABLATION_SKILL_MOUNTS", "").strip().lower() in {"1", "true", "yes", "on"}:
-        budget["allow_ablation_skill_mounts"] = True
-    return budget
-
-
-def _runtime_skill_overlay_requested(budget: dict[str, Any]) -> bool:
-    return bool(
-        budget.get("runtime_skill_policy_overlay")
-        or str(budget.get("runtime_skill_policy_overlay_path") or "").strip()
-    )
-
-
 def build_route(
     *,
     repo_root: Path,
@@ -1382,29 +657,6 @@ def build_hyper_execution_profile(
     }
 
 
-def build_route_executor_flags(*, task_desc: str, task_type: str, route: dict[str, Any]) -> dict[str, Any]:
-    """Translate capability routing into SprintService executor controls."""
-    route_decision = route.get("route_decision") if isinstance(route, dict) else {}
-    route_decision = route_decision if isinstance(route_decision, dict) else {}
-    controls = route_decision.get("executor_controls") if isinstance(route_decision.get("executor_controls"), dict) else None
-    if controls is None:
-        plan_payload = route.get("capability_plan") if isinstance(route, dict) else {}
-        if isinstance(plan_payload, dict) and plan_payload.get("selected_capabilities") is not None:
-            controls = build_executor_controls(plan_payload)
-        else:
-            controls = {}
-    return {
-        "enable_autoreason_executor": bool(controls.get("enable_autoreason_executor", False)),
-        "enable_ddtree_executor": bool(controls.get("enable_ddtree_executor", False)),
-        "ddtree_max_candidates": int(controls.get("ddtree_max_candidates", 2) or 2),
-        "enable_ultra_review": bool(controls.get("enable_ultra_review", False)),
-        "enable_swarm": bool(controls.get("enable_swarm", False)),
-        "enable_drone": bool(controls.get("enable_drone", False)),
-        "enable_nightshift": bool(controls.get("enable_nightshift", False)),
-        "enable_rlm": bool(controls.get("enable_rlm", False)),
-    }
-
-
 def _refresh_route_for_runtime_candidate_factory(
     *,
     repo_root: Path,
@@ -1441,152 +693,8 @@ def _refresh_route_for_runtime_candidate_factory(
     return route
 
 
-def _write_output_file(repo_root: Path, path: Path, payload: dict) -> Path:
-    out = path if path.is_absolute() else (repo_root / path).resolve()
-    out.parent.mkdir(parents=True, exist_ok=True)
-    out.write_text(json.dumps(payload, indent=2, ensure_ascii=False), encoding="utf-8")
-    return out
-
-
 def _write_runtime_receipt_json(repo_root: Path, *, category: str, receipt_slug: str, payload: dict[str, Any]) -> str:
     return write_runtime_receipt_json(repo_root, category=category, receipt_slug=receipt_slug, payload=payload)
-
-
-def _clamp_score(value: Any) -> float:
-    try:
-        return max(0.0, min(1.0, float(value or 0.0)))
-    except (TypeError, ValueError):
-        return 0.0
-
-
-def _autoreason_s2t_candidates(
-    *,
-    autoreason_payload: dict[str, Any],
-    artifact_verified: bool,
-    receipt_slug: str,
-) -> list[S2TCandidate]:
-    factory = autoreason_payload.get("candidate_factory", {}) if isinstance(autoreason_payload, dict) else {}
-    factory = factory if isinstance(factory, dict) else {}
-    raw_candidates = factory.get("candidates", [])
-    if not isinstance(raw_candidates, list):
-        return []
-
-    winner = str(autoreason_payload.get("winner") or "").strip()
-    raw_borda = autoreason_payload.get("borda_scores", {})
-    borda_scores = raw_borda if isinstance(raw_borda, dict) else {}
-    numeric_borda: list[float] = []
-    for score in borda_scores.values():
-        try:
-            numeric_borda.append(max(0.0, float(score or 0.0)))
-        except (TypeError, ValueError):
-            continue
-    max_borda = max(numeric_borda, default=0.0)
-    out: list[S2TCandidate] = []
-    for item in raw_candidates:
-        if not isinstance(item, dict):
-            continue
-        candidate_id = str(item.get("candidate_id") or item.get("id") or "").strip()
-        if not candidate_id:
-            continue
-        refs = [str(ref).strip() for ref in item.get("evidence_refs", []) or [] if str(ref).strip()]
-        selector_score = (
-            _clamp_score(float(borda_scores.get(candidate_id, 0) or 0) / max_borda)
-            if max_borda
-            else _clamp_score(item.get("score", 0.0))
-        )
-        verifier_result = "pass" if artifact_verified and candidate_id == winner else ("fail" if winner else "not_run")
-        risk_flags = [] if refs else ["missing_test_evidence"]
-        if winner and candidate_id != winner:
-            risk_flags.append("not_selected_by_autoreason")
-        out.append(
-            S2TCandidate(
-                candidate_id=candidate_id,
-                source="autoreason_candidate_factory",
-                content_ref=f"autoreason:{receipt_slug}:{candidate_id}",
-                claimed_outcome=str(item.get("summary") or item.get("claimed_outcome") or ""),
-                static_score=_clamp_score(item.get("score", 0.0)),
-                selector_score=selector_score,
-                verifier_result=verifier_result,
-                evidence_refs=refs,
-                risk_flags=risk_flags,
-            )
-        )
-    return out
-
-
-def _record_autoreason_s2t_trace(
-    *,
-    repo_root: Path,
-    task_id: str | None,
-    receipt_slug: str,
-    autoreason_payload: dict[str, Any],
-    result_report: dict[str, Any],
-    artifact_verified: bool,
-    normalized_success_criteria: str,
-    route_decision_ref: str,
-) -> dict[str, Any]:
-    candidates = _autoreason_s2t_candidates(
-        autoreason_payload=autoreason_payload,
-        artifact_verified=artifact_verified,
-        receipt_slug=receipt_slug,
-    )
-    if not candidates:
-        return {}
-    decision = S2TSelector().select(candidates)
-    trace_rel = Path(".nexus") / "reports" / "s2t" / "runtime_trace.jsonl"
-    verifier_result = "pass" if artifact_verified else "fail"
-    event = S2TTraceEvent(
-        task_id=task_id or receipt_slug,
-        run_id=receipt_slug,
-        model=str(result_report.get("model_name") or result_report.get("model") or "unknown"),
-        mode="shadow",
-        phase="R",
-        risk_tier="high",
-        route_decision_ref=route_decision_ref,
-        candidate_set_id=f"{receipt_slug}:autoreason",
-        candidates=candidates,
-        selected_candidate_id=decision.selected_candidate_id,
-        selection_reason_codes=decision.reason_codes,
-        verifier_name=normalized_success_criteria,
-        verifier_result=verifier_result,
-        verifier_evidence_ref=f"artifact:{receipt_slug}:tests_passed" if artifact_verified else "",
-        semantic_verified=artifact_verified,
-        trust_mismatch=not artifact_verified,
-        delivery_gate="pass" if artifact_verified else "fail",
-    )
-    S2TTraceWriter(repo_root / trace_rel).append(event)
-    episode = S2TEpisodeTrace(
-        episode_id=receipt_slug,
-        task_id=task_id or receipt_slug,
-        model=event.model,
-        mode="shadow",
-        spans=[
-            S2TDecisionSpan(
-                node="autoreason_candidate",
-                phase="R",
-                candidate_set_id=event.candidate_set_id,
-                selected_candidate_id=decision.selected_candidate_id,
-                gate_passed=bool(decision.gate_passed and artifact_verified),
-                verifier_result=verifier_result,
-                reason_codes=decision.reason_codes,
-                reward=1.0 if decision.gate_passed and artifact_verified else -1.0,
-            )
-        ],
-        benchmark_split=str(result_report.get("benchmark_split") or ""),
-        cost={
-            "model_calls": int(result_report.get("model_calls", 0) or 0),
-            "total_tokens": int(result_report.get("total_tokens", 0) or 0),
-        },
-    )
-    return {
-        "schema_version": episode.schema_version,
-        "trace_path": str(trace_rel),
-        "event": event.to_dict(),
-        "episode": episode.to_dict(),
-        "candidate_count": len(candidates),
-        "selected_candidate_id": decision.selected_candidate_id,
-        "mode": "shadow",
-    }
 
 
 def _stringify_claims(rows: list[Any]) -> list[str]:
@@ -3076,19 +2184,15 @@ def run_auto_flow(
         nexus_usage_trace["learning_projection"]["promoted_policy_path"] = str(DEFAULT_PROMOTED_POLICY_PATH)
     else:
         nexus_usage_trace["learning_projection"]["promoted_policy"] = {"status": "not_promoted"}
-    if s2t_trace.get("event"):
-        training_export_path = Path(".nexus") / "exports" / "model_training" / f"{receipt_slug}.json"
-        training_export = write_model_training_export_v3(
-            repo_root / training_export_path,
-            [S2TTraceEvent.from_dict(s2t_trace["event"])],
-            experiences=[learning_experience],
-            quality_rows=[autodata_quality_row],
-        )
-        nexus_usage_trace["learning_projection"]["model_training_export"] = {
-            "schema_version": training_export["schema_version"],
-            "path": str(training_export_path),
-            **training_export["summary"],
-        }
+    model_training_export = write_auto_flow_model_training_export(
+        repo_root=repo_root,
+        receipt_slug=receipt_slug,
+        s2t_trace=s2t_trace,
+        experiences=[learning_experience],
+        quality_rows=[autodata_quality_row],
+    )
+    if model_training_export:
+        nexus_usage_trace["learning_projection"]["model_training_export"] = model_training_export
     try:
         outcome_memory = OutcomeMemoryManager.save_episode_and_tune_sync(
             EpisodeOutcomeRecord.from_task(
@@ -3111,71 +2215,46 @@ def run_auto_flow(
         }
     nexus_usage_trace["learning_projection"]["outcome_memory"] = outcome_memory
 
-    payload = {
-        "schema_version": "1.0",
-        "task_desc": task_desc,
-        "task_type": task_type,
-        "asi_ledger": asi_ledger,
-        "route": route,
-        "execution_profile": execution_profile,
-        "chosen_flow": chosen_flow,
-        "guard": {
-            "hit": guard_hit,
-            "early_baseline_shortcut": early_baseline_shortcut,
-            "history_forced_baseline": history_forced_baseline,
-            "learn_forced_baseline": bool(
-                learn_gate_blocked
-                and force_flow is None
-                and (not execution_profile["is_hard_task"] or chosen_flow == "baseline")
-            ),
-            "recent_hyper_failures": recent_hyper_fails,
-            "nightshift_recommended": nightshift_recommended,
-            "stage1_fail_signals": stage1_fail_signals,
-            "history_window": max(1, history_window),
-            "baseline_fast_sec": tuned_baseline_fast_sec,
-            "max_time_ratio_guard": max_time_ratio_guard,
-            "baseline_probe_skipped": baseline_probe_skipped,
-            "baseline_probe": baseline_probe_for_report,
-            "plateau_hard_pivot": plateau_hard_pivot,
-        },
-        "learn_phase_slo": {
-            "phase_slo_pass": bool(learn_phase_slo.get("phase_slo_pass", False)),
-            "required_done_ratio": float((learn_phase_slo.get("global", {}) or {}).get("required_done_ratio", 0.0) or 0.0),
-            "status": learn_phase_slo.get("status", "UNAVAILABLE"),
-            "reason": learn_phase_slo.get("reason", ""),
-        },
-        "result": result,
-        "claim_check": claim_check,
-        "hitl": hitl,
-        "research_preflight": research_preflight,
-        "research_session": {},
-        "route_confidence": route_confidence,
-        "strategy": {
-            "path": strategy_path,
-            "forced_flow": force_flow or "auto",
-            "flow_ladder": ["baseline_probe", "hyper_sprint", "baseline_fallback"],
-            "learn_gate_blocked": bool(learn_gate_blocked),
-            "baseline_probe_skipped": baseline_probe_skipped,
-            "plateau": plateau,
-            "distant_scout_plan": route.get("distant_scout_plan", {}),
-        },
-        "artifact_summary": artifact_summary,
-        "success_criteria": {
-            "name": normalized_success_criteria,
-            "mutation_required": mutation_required,
-            "verification_only_allowed": verification_only_allowed,
-        },
-        "nexus_usage_trace": nexus_usage_trace,
-        "timing": {
-            "cli_elapsed_sec": round(time.monotonic() - flow_started_at, 4),
-            "phase_wall_sec": phase_wall_sec,
-            "breakdown_sec": timing_breakdown_sec,
-        },
-        "io": {
-            "output_written": False,
-            "output_path": None,
-        },
-    }
+    payload = build_auto_flow_payload(
+        AutoFlowPayloadParts(
+            task_desc=task_desc,
+            task_type=task_type,
+            asi_ledger=asi_ledger,
+            route=route,
+            execution_profile=execution_profile,
+            chosen_flow=chosen_flow,
+            guard_hit=guard_hit,
+            early_baseline_shortcut=early_baseline_shortcut,
+            history_forced_baseline=history_forced_baseline,
+            learn_gate_blocked=learn_gate_blocked,
+            force_flow=force_flow,
+            recent_hyper_fails=recent_hyper_fails,
+            nightshift_recommended=nightshift_recommended,
+            stage1_fail_signals=stage1_fail_signals,
+            history_window=history_window,
+            baseline_fast_sec=tuned_baseline_fast_sec,
+            max_time_ratio_guard=max_time_ratio_guard,
+            baseline_probe_skipped=baseline_probe_skipped,
+            baseline_probe=baseline_probe_for_report,
+            plateau_hard_pivot=plateau_hard_pivot,
+            learn_phase_slo=learn_phase_slo,
+            result=result,
+            claim_check=claim_check,
+            hitl=hitl,
+            research_preflight=research_preflight,
+            route_confidence=route_confidence,
+            strategy_path=strategy_path,
+            plateau=plateau,
+            artifact_summary=artifact_summary,
+            success_criteria_name=normalized_success_criteria,
+            mutation_required=mutation_required,
+            verification_only_allowed=verification_only_allowed,
+            nexus_usage_trace=nexus_usage_trace,
+            cli_elapsed_sec=time.monotonic() - flow_started_at,
+            phase_wall_sec=phase_wall_sec,
+            timing_breakdown_sec=timing_breakdown_sec,
+        )
+    )
     out_path = (repo_root / report_file).resolve()
     out_path.parent.mkdir(parents=True, exist_ok=True)
     out_path.write_text(json.dumps(payload, indent=2), encoding="utf-8")
@@ -3260,17 +2339,3 @@ def run_auto_flow(
     if payload["io"].get("output_path"):
         Path(str(payload["io"]["output_path"])).write_text(json.dumps(payload, indent=2), encoding="utf-8")
     return payload, out_path
-
-
-def _is_strictly_doc_fix(task: str, target_file: str) -> tuple[bool, str]:
-    is_doc_file = any(target_file.endswith(ext) for ext in [".md", ".txt", ".rst"])
-    has_code_intent = any(kw in task.lower() for kw in ["fix bug", "implement", "logic", "refactor"])
-    
-    score = 0
-    if is_doc_file: score += 50
-    if not has_code_intent: score += 30
-    
-    # Final Decision
-    is_doc = score >= 80
-    reason = f"Substance Score={score} (FileDoc={is_doc_file}, NoCodeIntent={not has_code_intent})"
-    return is_doc, reason

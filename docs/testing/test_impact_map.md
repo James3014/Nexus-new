@@ -17,8 +17,18 @@
 | nexus/engine/asi_constraints.py | tests/engine/test_asi_constraints.py::test_asi_constraint_extractor_orders_families_and_preserves_evidence_refs, tests/engine/test_asi_constraints.py | active | medium | asi_constraint_ordering_contract |
 | nexus/contracts/s2t_export.py | tests/contracts/test_s2t_contracts.py::test_s2t_agent_lightning_export_emits_preference_pairs, tests/contracts/test_s2t_contracts.py::test_s2t_export_selects_highest_scored_failed_rejected_candidate_stably | active | medium | s2t_export_ordering_contract |
 | nexus/app/research_flow_service.py | tests/app/test_research_flow_service.py::test_runtime_skill_mount_contract_requires_confirmed_capability_receipt, tests/app/test_research_flow_service.py::test_runtime_skill_mount_contract_blocks_unconfirmed_planned_mount | active | high | skill_mount_runtime_contract |
+| nexus/app/research_s2t_runtime.py | tests/app/test_research_s2t_runtime.py, tests/app/test_research_flow_service.py::test_run_auto_flow_populates_autoreason_from_candidate_summaries | active | high | research_s2t_runtime_trace_contract |
 | nexus/app | tests/app | active | medium | app_flow |
 | nexus/research | tests/research | active | medium | research_loop |
+| nexus/research/flow/auto_flow_payload.py | tests/research/test_auto_flow_payload.py, tests/app/test_research_flow_service.py::test_run_auto_flow_populates_autoreason_from_candidate_summaries | active | high | auto_flow_payload_contract |
+| nexus/research/flow/runtime_state.py | tests/research/test_flow_leaf_modules.py, tests/app/test_research_flow_service.py::test_run_auto_flow_populates_autoreason_from_candidate_summaries | active | medium | research_runtime_state_contract |
+| nexus/research/flow/runtime_decision.py | tests/research/test_flow_leaf_modules.py, tests/app/test_research_flow_service.py::test_run_auto_flow_populates_autoreason_from_candidate_summaries | active | high | research_runtime_decision_contract |
+| nexus/research/flow/report_io.py | tests/research/test_flow_leaf_modules.py, tests/app/test_research_flow_service.py::test_run_auto_flow_populates_autoreason_from_candidate_summaries | active | medium | research_report_io_contract |
+| nexus/research/flow/task_classifier.py | tests/research/test_flow_leaf_modules.py | active | medium | research_task_classifier_contract |
+| nexus/research/flow/governance_packets.py | tests/research/test_flow_leaf_modules.py, tests/app/test_research_flow_service.py::test_run_auto_flow_populates_autoreason_from_candidate_summaries | active | high | research_governance_packet_contract |
+| nexus/research/flow/capability_evidence.py | tests/research/test_flow_leaf_modules.py, tests/app/test_research_flow_service.py::test_run_auto_flow_populates_autoreason_from_candidate_summaries | active | high | research_capability_evidence_contract |
+| nexus/research/flow/capability_planning.py | tests/research/test_flow_leaf_modules.py, tests/app/test_research_flow_service.py::test_run_auto_flow_populates_autoreason_from_candidate_summaries | active | high | research_capability_planning_contract |
+| nexus/research/flow/model_training_export.py | tests/app/test_research_flow_service.py::test_run_auto_flow_populates_autoreason_from_candidate_summaries | active | high | research_model_training_export_contract |
 | nexus/benchmark | tests/benchmark | active | medium | benchmark_contract |
 | nexus/connectors | tests/connectors | active | medium | connector_contract |
 | nexus/security | tests/security | active | high | security |
@@ -68,6 +78,9 @@
 | tests/core/test_context_hub_strict_deps.py | tests/core/test_context_hub_strict_deps.py | active | medium | test_contract |
 | tests/contracts/test_s2t_contracts.py | tests/contracts/test_s2t_contracts.py | active | medium | test_contract |
 | tests/engine/test_sandbox_actions.py | tests/engine/test_sandbox_actions.py | active | medium | test_contract |
+| tests/app/test_research_s2t_runtime.py | tests/app/test_research_s2t_runtime.py | active | medium | test_contract |
+| tests/research/test_auto_flow_payload.py | tests/research/test_auto_flow_payload.py | active | medium | test_contract |
+| tests/research/test_flow_leaf_modules.py | tests/research/test_flow_leaf_modules.py | active | medium | test_contract |
 | tests/engine/test_asi_constraints.py | tests/engine/test_asi_constraints.py | active | medium | test_contract |
 | tests/benchmark/test_fixture_materialization.py | tests/benchmark/test_fixture_materialization.py | active | medium | test_contract |
 | docs/testing/test_impact_map.md | tests/ops/test_select_tests.py, tests/ops/test_ci_gate_report_trust_audit.py::test_run_changed_only_check_uses_selector_targets | active | high | jit_selector_contract |
