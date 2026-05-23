@@ -89,6 +89,7 @@
 | docs/plans/NEXUS_CLEAN_CODE_LINUS_REFACTOR_PLAN_2026-05-22.md | tests/ops/test_select_tests.py, tests/ops/test_ci_gate_report_trust_audit.py::test_run_changed_only_check_uses_selector_targets | active | medium | plan_contract |
 | docs/reports/NEXUS_REFACTOR_REMAINING_START_EVIDENCE_2026-05-23.md | tests/ops/test_select_tests.py, tests/ops/test_ci_gate_report_trust_audit.py::test_run_changed_only_check_uses_selector_targets | active | medium | refactor_start_evidence_contract |
 | nexus_wiki_vault/06_Ops/Ops - Learning Closure Matrix.md | tests/ops/test_select_tests.py, tests/ops/test_ci_gate_report_trust_audit.py::test_run_changed_only_check_uses_selector_targets | active | medium | lesson_writeback_contract |
+| nexus_wiki_vault/06_Ops/Ops - Governance Changelog.md | tests/ops/test_select_tests.py, tests/ops/test_ci_gate_report_trust_audit.py::test_run_changed_only_check_uses_selector_targets | active | medium | governance_changelog_contract |
 ## Candidate Legacy Tests
 | 檔案 | 理由 |
 | :--- | :--- |
