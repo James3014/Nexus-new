@@ -10,9 +10,13 @@ Contains verification for:
 import tempfile
 import os
 import json
+import sqlite3
 from dataclasses import asdict
 
+import pytest
+
 from nexus.learning.skill_schema import SkillFrontmatter, SkillSuccessMetric
+from nexus.learning import skill_registry as skill_registry_module
 from nexus.learning.skill_registry import SkillRegistry
 from nexus.learning.skill_exchange import SkillExchange
 from nexus.learning.skill_store import SkillStore
@@ -70,6 +74,66 @@ def test_registry_write_guard_receipt_uses_wal_and_blocks_unqueued_concurrency()
         assert concurrent["status"] == "RETURN"
         assert "write_queue_not_pass" in concurrent["blockers"]
         assert "backoff_not_pass" in concurrent["blockers"]
+
+
+def test_skill_registry_upsert_retries_sqlite_busy_then_success(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
+    db_path = tmp_path / "shared_skills.db"
+    registry = SkillRegistry(db_path)
+    skill = _create_mock_skill("TSK-RETRY", "Retryable skill", "reviewed")
+    original_connect = skill_registry_module.sqlite3.connect
+    execute_calls = {"count": 0}
+
+    class FlakyConnection:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, exc_type, exc, tb):
+            return False
+
+        def execute(self, *args, **kwargs):
+            execute_calls["count"] += 1
+            if execute_calls["count"] == 1:
+                raise sqlite3.OperationalError("database is locked")
+            with original_connect(db_path, timeout=10.0) as conn:
+                return conn.execute(*args, **kwargs)
+
+    monkeypatch.setattr(skill_registry_module.sqlite3, "connect", lambda *_args, **_kwargs: FlakyConnection())
+
+    registry.upsert(skill)
+
+    monkeypatch.setattr(skill_registry_module.sqlite3, "connect", original_connect)
+    assert registry.get_by_task_id("TSK-RETRY")["description"] == "Retryable skill"
+    assert registry.last_sqlite_retry_receipt is not None
+    assert registry.last_sqlite_retry_receipt["status"] == "PASS"
+    assert registry.last_sqlite_retry_receipt["attempts"] == 2
+    assert registry.last_sqlite_retry_receipt["operation_name"] == "skill_registry_upsert"
+
+
+def test_skill_registry_upsert_keeps_non_busy_errors_fail_fast(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+):
+    registry = SkillRegistry(tmp_path / "shared_skills.db")
+
+    class BrokenConnection:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, exc_type, exc, tb):
+            return False
+
+        def execute(self, *_args, **_kwargs):
+            raise sqlite3.OperationalError("database disk image is malformed")
+
+    monkeypatch.setattr(skill_registry_module.sqlite3, "connect", lambda *_args, **_kwargs: BrokenConnection())
+
+    with pytest.raises(sqlite3.OperationalError, match="malformed"):
+        registry.upsert(_create_mock_skill("TSK-BROKEN", "Broken db", "reviewed"))
+
+    assert registry.last_sqlite_retry_receipt is not None
+    assert registry.last_sqlite_retry_receipt["status"] == "RETURN"
+    assert registry.last_sqlite_retry_receipt["attempts"] == 1
+    assert registry.last_sqlite_retry_receipt["blockers"] == ["sqlite_error_not_retryable"]
 
 
 def test_exchange_trust_demotion():

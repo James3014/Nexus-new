@@ -6,6 +6,7 @@ from pathlib import Path
 from datetime import datetime
 
 from nexus.contracts.sqlite_write_guard import build_sqlite_write_guard_receipt
+from nexus.infrastructure.sqlite_retry import SQLiteRetryHandler, is_retryable_sqlite_busy
 
 SQLITE_BUSY_TIMEOUT_MS = 5000
 SQLITE_WRITE_RETRIES = 4
@@ -16,6 +17,7 @@ class ProjectMemoryManager:
     def __init__(self, project_root: Path):
         self.db_path = project_root / ".nexus" / "state" / "project_memory.sqlite"
         self.db_path.parent.mkdir(parents=True, exist_ok=True)
+        self.last_sqlite_retry_receipt: dict | None = None
         self.init_db()
 
     def init_db(self):
@@ -109,24 +111,28 @@ class ProjectMemoryManager:
         return conn
 
     def _execute_with_retry(self, sql: str, params: tuple):
-        last_error: sqlite3.OperationalError | None = None
-        for attempt in range(SQLITE_WRITE_RETRIES):
-            try:
-                with self._connect() as conn:
-                    conn.execute(sql, params)
-                return
-            except sqlite3.OperationalError as exc:
-                if not _is_retryable_sqlite_lock(exc):
-                    raise
-                last_error = exc
-                time.sleep(_sqlite_jitter_delay(attempt))
-        if last_error is not None:
-            raise last_error
+        handler = SQLiteRetryHandler(
+            max_attempts=SQLITE_WRITE_RETRIES,
+            base_delay_sec=0.025,
+            max_delay_sec=0.25,
+        )
+
+        def operation() -> None:
+            with self._connect() as conn:
+                conn.execute(sql, params)
+
+        try:
+            return handler.run(
+                operation,
+                target_path=str(self.db_path),
+                operation_name="project_memory_write",
+            )
+        finally:
+            self.last_sqlite_retry_receipt = handler.last_receipt
 
 
 def _is_retryable_sqlite_lock(exc: sqlite3.OperationalError) -> bool:
-    message = str(exc).lower()
-    return "locked" in message or "busy" in message
+    return is_retryable_sqlite_busy(exc)
 
 
 def _sqlite_jitter_delay(attempt: int) -> float:

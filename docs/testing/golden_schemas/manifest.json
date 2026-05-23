@@ -1,0 +1,10 @@
+{
+  "schema_version": "nexus.golden_schema_manifest.v1",
+  "snapshots": [
+    {
+      "path": "docs/testing/golden_schemas/telemetry_fidelity_snapshot.v1.json",
+      "schema_version": "nexus.telemetry_fidelity_snapshot.v1",
+      "sha256": "40768a48da198c5870571de9adaa4a431b1ac19a68e6c60b23e74032e7a78ed8"
+    }
+  ]
+}

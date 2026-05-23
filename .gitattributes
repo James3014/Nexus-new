@@ -1,0 +1,4 @@
+*.json text eol=lf
+docs/reports/**/*.json text eol=lf
+docs/testing/golden_schemas/*.json text eol=lf
+tests/**/*.json text eol=lf

@@ -1,0 +1,23 @@
+{
+  "description": "Stable telemetry fidelity comparator contract used by Clean Code / Linus refactor gates.",
+  "numeric_tolerance": 0.00001,
+  "required_top_level_keys": [
+    "loaded_paths",
+    "rows",
+    "scores"
+  ],
+  "schema_version": "nexus.telemetry_fidelity_snapshot.v1",
+  "unordered_list_keys": [
+    "loaded_paths",
+    "rows",
+    "scores"
+  ],
+  "volatile_keys": [
+    "created_at",
+    "run_id",
+    "timestamp",
+    "trace_id",
+    "updated_at",
+    "uuid"
+  ]
+}

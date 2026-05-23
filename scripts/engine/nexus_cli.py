@@ -32,6 +32,8 @@ from scripts.engine.commands.research_support import (
     research_preflight_block_payload as _research_preflight_block_payload,
     research_session_preflight as _research_session_preflight,
 )
+from scripts.engine.commands.exception_translation import translate_action_exceptions
+from scripts.engine.commands.sandbox_actions import render_sandbox_run_result, run_sandbox_task
 from scripts.engine.nexus_cli_registry import deprecated_command_registry
 
 def validate_claim_integrity(evidence_path: str):
@@ -3323,12 +3325,12 @@ def sandbox_group():
 
 @sandbox_group.command(name="run")
 @click.option("--task", required=True)
+@translate_action_exceptions
 def sandbox_run_cmd(task):
     """🏗️ Run a task in a physical Git-worktree sandbox."""
-    from nexus.engine.sandbox_runner import SandboxRunner
-    runner = SandboxRunner(repo_root)
-    results = runner.run_task(task)
-    click.secho(f"🏗️ [Sandbox] Execution finished. Success: {results['success']}", fg="cyan")
+    result = run_sandbox_task(repo_root, task)
+    for line in render_sandbox_run_result(result):
+        click.secho(line, fg="cyan")
 
 if __name__ == "__main__":
 

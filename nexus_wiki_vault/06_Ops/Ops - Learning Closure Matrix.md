@@ -3466,6 +3466,42 @@ version_scope:
 - **Action Taken**: Added a focused impact-map row for the start-evidence report that runs selector/impact-map contract tests instead of broad core tests.
 - **Prevention**: Any new refactor report used as gate evidence should get an impact-map self row in the same slice, especially when changed-only validation is part of the closure evidence.
 
+## 2026-05-23: SQLite Retry Evidence Must Be Revalidated Before Successor Writers
+- **Phenomenon**: Before starting the SkillRegistry second-writer slice, `uv run pytest tests/core/test_memory_manager_sqlite_retry.py tests/infrastructure/test_sqlite_retry.py -q` failed because `nexus.core.memory_manager` had no `SQLiteRetryHandler` attribute and `ProjectMemoryManager` had no `last_sqlite_retry_receipt`.
+- **Root Cause**: The plan/report treated the memory-manager first writer as complete, but the current checkout did not actually contain the retry seam integration. Successor work was about to build on stale evidence.
+- **Action Taken**: Restored `ProjectMemoryManager._execute_with_retry` to use `SQLiteRetryHandler`, preserved `_is_retryable_sqlite_lock` as a compatibility wrapper, and reran memory-manager plus infrastructure retry tests.
+- **Prevention**: Before adding a second Adapter for a seam, re-run the first Adapter's focused tests against the live checkout; do not trust plan status alone when the worktree is dirty.
+
+## 2026-05-23: SkillRegistry SQLite Writes Share The Retry Seam
+- **Phenomenon**: SkillRegistry retry tests first failed because `upsert` logged and swallowed `database is locked`, then non-busy SQLite errors also failed to raise and produced no retry receipt.
+- **Root Cause**: `SkillRegistry` had WAL/write-guard reporting, but its concrete writers still called `sqlite3.connect(...).execute(...)` directly and handled all SQLite errors locally instead of using the shared retry Module.
+- **Action Taken**: Added `SkillRegistry._execute_with_retry(...)`, wired `upsert` and `update_win_rate` through `SQLiteRetryHandler`, exposed `last_sqlite_retry_receipt`, and kept non-busy SQLite errors fail-fast after logging.
+- **Prevention**: Future SQLite writers should join `SQLiteRetryHandler` one writer at a time with busy-then-success and non-busy fail-fast tests. Do not promote a global transaction manager until repeated transaction-shape duplication appears across at least three writers.
+
+## 2026-05-23: Impact Map Rows Must Point To Existing Nodeids
+- **Phenomenon**: Changed-only gate failed with `ERROR: not found: tests/ops/test_ci_gate_report_trust_audit.py::test_focused_nodeids_from_impact_map_reads_active_nodeids`, and treated `tests/test_skill_sharing.py` plus `docs/testing/test_impact_map.md` as unmatched fallback paths.
+- **Root Cause**: The impact-map rows for docs/lesson evidence used a nodeid that no longer exists in the current test file, and the edited test file lacked an active self row.
+- **Action Taken**: Replaced stale nodeid references with `tests/ops/test_ci_gate_report_trust_audit.py::test_run_changed_only_check_uses_selector_targets`, and added active rows for `tests/test_skill_sharing.py` and `docs/testing/test_impact_map.md`.
+- **Prevention**: When adding or editing impact-map rows, verify the referenced nodeids with `rg -n "def test_"` before running changed-only CI; stale nodeids convert selector hygiene into false closure evidence.
+
+## 2026-05-23: Shell Regex Backticks Must Be Quoted Literally
+- **Phenomenon**: A stale-plan verification command failed with `zsh:1: command not found: DatabaseTransactionManager` when `rg` searched for a Markdown code span containing backticks.
+- **Root Cause**: The regex was passed in double quotes, so zsh interpreted the backticked text as command substitution before `rg` received the pattern.
+- **Action Taken**: Re-ran the stale-text check with the regex enclosed in single quotes.
+- **Prevention**: When searching Markdown code spans from shell commands, single-quote the `rg` pattern or remove literal backticks from the pattern; do not use double-quoted regex strings around Markdown code spans.
+
+## 2026-05-23: Sandbox CLI Dispatch Needs An Action Seam Before Real Runner Semantics
+- **Phenomenon**: The sandbox Action slice started with `ModuleNotFoundError: No module named 'scripts.engine.commands.sandbox_actions'`, proving `nexus sandbox run` still owned runner dispatch and output formatting inside `nexus_cli.py`; inspection also showed `SandboxRunner` currently has no real `run_task` Interface.
+- **Root Cause**: The Click command encoded a presumed runner Interface inline, so output-schema testing, runner injection, and fail-closed behavior were all coupled to the CLI adapter.
+- **Action Taken**: Added `scripts/engine/commands/sandbox_actions.py` with `SandboxRunResult`, `run_sandbox_task(...)`, and `render_sandbox_run_result(...)`; rewired `sandbox_run_cmd` as a thin translated adapter; added a fail-closed test for runners without `run_task`.
+- **Prevention**: Future physical sandbox execution work should first define and test the real `SandboxRunner.run_task` contract behind the Action seam. Do not make the CLI command invent success or start broad sandbox runner rewrites without a physical execution contract.
+
+## 2026-05-23: External Fixture Live Setup Needs Offline Cache Manifest First
+- **Phenomenon**: External fixture pregate tests failed on `ImportError: cannot import name 'ExternalFixtureCacheManifest'`, proving remote fixture setup still had no pinned offline cache contract between fail-closed adapter injection and any future live clone/setup.
+- **Root Cause**: The sandboxed local Adapter could copy local/file sources safely, but there was no manifest object tying a remote repo/ref identity to a local cache directory and expected file list.
+- **Action Taken**: Added `ExternalFixtureCacheManifest` and `OfflineCachedExternalFixtureAdapter`; remote fixture requests must match pinned `allowed_repo` / `allowed_ref`, declared files must exist in `expected_files`, and materialization delegates to the existing sandboxed local Adapter. Missing manifest, repo/ref mismatch, and `network_allowed=True` all fail closed.
+- **Prevention**: Do not add live `git clone`, `git fetch`, HTTP, SSH, or DNS behavior until a separate live-network allowlist, socket/no-network barrier, and cache provenance receipt are specified and tested.
+
 ## 2026-05-23: Regression Questions Target Path Gaps Must Be Corrected In Wiki Not Code
 - **Phenomenon**: Wiki eval regression test pass rate fell to 20.00% with `MISSING_PAGE` errors for Q01-Q20 because target paths contained Markdown links (e.g. `[System Overview](../00_Home/System Overview.md)`).
 - **Root Cause**: The evaluation script `wiki_eval_regression.py` expects target files as plain file stems or relative script paths, but the regression table used raw Markdown links, making the script fail to locate files. An initial attempt modified the test script's parser to resolve links rather than keeping it frozen.

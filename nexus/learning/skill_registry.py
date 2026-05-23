@@ -14,13 +14,17 @@ from datetime import datetime, timezone
 from dataclasses import asdict
 
 from nexus.contracts.sqlite_write_guard import build_sqlite_write_guard_receipt
+from nexus.infrastructure.sqlite_retry import SQLiteRetryHandler
 from nexus.learning.skill_schema import SkillFrontmatter
 
 logger = logging.getLogger(__name__)
+SQLITE_BUSY_TIMEOUT_SEC = 10.0
+SQLITE_WRITE_RETRIES = 4
 
 class SkillRegistry:
     def __init__(self, db_path: Path):
         self.db_path = db_path
+        self.last_sqlite_retry_receipt: Dict[str, Any] | None = None
         self._init_db()
 
     def _init_db(self):
@@ -119,9 +123,9 @@ class SkillRegistry:
         skill_id = f"{origin_node_id}::{skill.task_id}"
         metric = skill.success_metric
         now = datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
-        
-        try:
-            with sqlite3.connect(self.db_path, timeout=10.0) as conn:
+
+        def operation() -> None:
+            with self._connect() as conn:
                 conn.execute("""
                     INSERT OR REPLACE INTO skills (
                         id, task_id, origin_node_id, trust_level, task_type, keywords,
@@ -173,8 +177,12 @@ class SkillRegistry:
                     skill.created_at,
                     now
                 ))
+
+        try:
+            self._execute_with_retry(operation, operation_name="skill_registry_upsert")
         except sqlite3.Error as exc:
             logger.error("skill_registry_upsert_failed [%s]: %s", skill_id, exc)
+            raise
 
     def search(
         self,
@@ -294,11 +302,33 @@ class SkillRegistry:
         
     def update_win_rate(self, task_id: str, win_rate: float) -> None:
         """Update the win rate of an existing skill by task_id."""
-        try:
-            with sqlite3.connect(self.db_path, timeout=10.0) as conn:
+        def operation() -> None:
+            with self._connect() as conn:
                 conn.execute("UPDATE skills SET win_rate = ? WHERE task_id = ?", (win_rate, task_id))
+
+        try:
+            self._execute_with_retry(operation, operation_name="skill_registry_update_win_rate")
         except sqlite3.Error as exc:
             logger.error("skill_registry_update_winrate_failed [%s]: %s", task_id, exc)
+            raise
+
+    def _connect(self):
+        return sqlite3.connect(self.db_path, timeout=SQLITE_BUSY_TIMEOUT_SEC)
+
+    def _execute_with_retry(self, operation, *, operation_name: str) -> None:
+        handler = SQLiteRetryHandler(
+            max_attempts=SQLITE_WRITE_RETRIES,
+            base_delay_sec=0.025,
+            max_delay_sec=0.25,
+        )
+        try:
+            return handler.run(
+                operation,
+                target_path=str(self.db_path),
+                operation_name=operation_name,
+            )
+        finally:
+            self.last_sqlite_retry_receipt = handler.last_receipt
         
     def get_by_task_id(self, task_id: str) -> Optional[Dict[str, Any]]:
         """Fetch all node variants of a skill by its task_id (favoring local first)."""
