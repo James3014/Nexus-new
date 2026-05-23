@@ -3615,3 +3615,9 @@ version_scope:
 - **Root Cause**: Prior slices deliberately avoided execution branches, leaving safe helper seams in the facade so auto-flow accounting would not drift.
 - **Action Taken**: Added leaf modules for `runtime_state`, `runtime_decision`, `report_io`, `task_classifier`, `governance_packets`, `capability_evidence`, `capability_planning`, and `model_training_export`; `research_flow_service.py` keeps compatibility aliases where tests/imports rely on older names. Added module contract and facade alias tests.
 - **Prevention**: Do not extract `auto_flow_executor.py` by line count alone. First create execution-accounting snapshots for guard fallback, token/cost, wall timing, and provider/model report fields; keep recursive runtime dispatch closed.
+
+## 2026-05-23: Skill-Fit Candidate Indexes Must Stay Pre-Policy
+- **Phenomenon**: The first `SkillFitCandidateIndex` test failed with `ModuleNotFoundError: No module named 'nexus.learning.skill_fit_candidate_index'`, proving candidate selection still lived behind private helpers in the ablation core while follow-up reports duplicated canonical id and negative-control candidate logic.
+- **Root Cause**: Prior skill-fit work had pinned public plan behavior but stopped at tests-only characterization; the reusable candidate-pool seam was still implicit and split across plan construction and follow-up report builders.
+- **Action Taken**: Added frozen `SkillFitCandidateIndex`, routed plan candidate matching / explicit selection / selected-arm ordering / canonical id / negative-control selection through it, and reused the same Module for follow-up canonical id and negative-control selection.
+- **Prevention**: Keep candidate indexes pre-policy. They may sort, filter, canonicalize, and select negative controls, but must not decide promotion, runtime apply, public benchmark eligibility, or skill value claims.

@@ -559,14 +559,14 @@ Decision:
 
 ### 5.6.3 P6A.4 Candidate Selection Public-Plan Characterization
 
-Status: `DONE_TESTS_ONLY_PREGATE`
+Status: `DONE_PROMOTED_TO_CANDIDATE_INDEX`
 
 What changed:
 
 - Added `tests/learning/test_skill_fit_ablation.py::test_skill_fit_plan_characterizes_public_candidate_selection_contract`.
 - The test uses only `build_skill_fit_ablation_plan(...)`.
 - It fixes the current candidate selection contract: one highest-relevance runtime baseline first, then preferred/external distinct candidates, while blocked repair skills, generic skills, and canonical `gstack-` aliases are excluded.
-- No production code changed; this is a characterization test before any future `SkillFitCandidateIndex` extraction.
+- The characterization was promoted into a production `SkillFitCandidateIndex` extraction after bounded inspection showed canonical skill id and negative-control candidate logic was shared by plan construction and follow-up candidate reports.
 
 TDD evidence:
 
@@ -578,9 +578,25 @@ TDD evidence:
 - Changed-only: `uv run scripts/ops/ci_gate.py --changed-only <refactor-slice paths>`
 - Result: `Changed-Only JIT Tests PASSED`.
 
+Candidate-index extraction:
+
+- Added `nexus/learning/skill_fit_candidate_index.py::SkillFitCandidateIndex`.
+- Routed `skill_fit_ablation_core.py` candidate matching, explicit skill selection, selected-arm ordering, canonical id normalization, and negative-control selection through the new Module.
+- Routed `skill_fit_followup.py` canonical id normalization and negative-control selection through the same Module.
+- Added `tests/learning/test_skill_fit_ablation.py::test_skill_fit_candidate_index_preserves_plan_selection_contract`.
+
+RED / GREEN:
+
+- RED: `uv run pytest tests/learning/test_skill_fit_ablation.py::test_skill_fit_candidate_index_preserves_plan_selection_contract -q`
+- Result: `ModuleNotFoundError: No module named 'nexus.learning.skill_fit_candidate_index'`.
+- GREEN: `uv run pytest tests/learning/test_skill_fit_ablation.py::test_skill_fit_candidate_index_preserves_plan_selection_contract tests/learning/test_skill_fit_ablation.py::test_skill_fit_plan_characterizes_public_candidate_selection_contract tests/learning/test_skill_fit_ablation.py::test_plan_dedupes_gstack_prefixed_skill_aliases tests/learning/test_skill_fit_ablation.py::test_research_candidate_v2_report_excludes_rejected_and_selects_source_discipline_candidates tests/learning/test_skill_fit_ablation.py::test_research_candidate_v3_requires_observable_source_discipline_behaviors -q`
+- Result: `5 passed`.
+- Compile: `uv run python -m py_compile nexus/learning/skill_fit_candidate_index.py nexus/learning/skill_fit_ablation_core.py nexus/learning/skill_fit_followup.py tests/learning/test_skill_fit_ablation.py`
+- Result: passed.
+
 Decision:
 
-- Do not extract `SkillFitCandidateIndex` yet. The public contract is now pinned, but candidate selection code has not shown enough duplication or drift to justify a production Module.
+- Do not expand `SkillFitCandidateIndex` into promotion policy, runtime policy, or public benchmark gate logic. It only pre-indexes candidate rows and returns deterministic candidate selections.
 - Do not install a hook. The existing changed-only impact map should cover this by adding the new nodeid to the skill-fit rows.
 
 ### 5.7 P6C Ordered-Data Pregate

@@ -43,6 +43,7 @@ from nexus.learning.skill_fit_ablation import (
     write_skill_promotion_threshold_contract,
 )
 from nexus.learning.skill_fit_ablation_core import SkillFitCatalogIndex
+from nexus.learning.skill_fit_candidate_index import SkillFitCandidateIndex
 from nexus.learning.skill_fit_followup import SkillFitRowIndex
 from nexus.learning.skill_fit_status import build_skill_fit_status_rollup
 from scripts.ops.build_skill_fit_ablation_plan import DEFAULT_EXTRA_TASK_MANIFESTS, resolved_extra_task_manifests
@@ -457,6 +458,65 @@ def test_skill_fit_plan_characterizes_public_candidate_selection_contract():
     assert "grill-me" not in skill_ids
     assert plan["summary"]["runtime_eligible_skill_arm_count"] == 1
     assert plan["claim_boundary"][4].startswith("Explicit skill ids are allowed only")
+
+
+def test_skill_fit_candidate_index_preserves_plan_selection_contract():
+    pool = _candidate_pool()
+    pool["candidates"].extend(
+        [
+            {
+                "skill_id": "runtime-repair",
+                "source_root": "nexus_repo",
+                "source_type": "nexus_local",
+                "path": "/repo/.agents/skills/runtime-repair/SKILL.md",
+                "sha256": "1" * 64,
+                "capability_candidates": ["repair_and_coding"],
+                "ablation_eligible": True,
+                "runtime_eligible": True,
+                "safety_status": "runtime_reviewed",
+                "evidence_refs": ["skill_status_report:nexus.skill_status.v1"],
+                "load_when": "Repair tasks.",
+            },
+            {
+                "skill_id": "test-driven-development",
+                "source_root": "hermes",
+                "source_type": "reference",
+                "path": "/Users/jameschen/.hermes/skills/test-driven-development/SKILL.md",
+                "sha256": "2" * 64,
+                "capability_candidates": ["repair_and_coding"],
+                "ablation_eligible": True,
+                "runtime_eligible": False,
+                "safety_status": "ablation_only",
+                "evidence_refs": ["skill_status_report:nexus.skill_status.v1"],
+                "load_when": "TDD repair loop.",
+            },
+            {
+                "skill_id": "wrong-skill",
+                "source_root": "agents",
+                "source_type": "quarantine",
+                "path": "/skills/wrong/SKILL.md",
+                "sha256": "0" * 64,
+                "capability_candidates": ["planning_and_handoff"],
+                "ablation_eligible": False,
+                "runtime_eligible": False,
+                "safety_status": "quarantined",
+                "evidence_refs": ["skill_status_report:nexus.skill_status.v1"],
+                "load_when": "Planning only.",
+            },
+        ]
+    )
+
+    index = SkillFitCandidateIndex.from_pool(pool)
+
+    assert [row["skill_id"] for row in index.selected_for_capability("repair_and_coding", 2)] == [
+        "runtime-repair",
+        "test-driven-development",
+    ]
+    assert [row["skill_id"] for row in index.explicit_for_capability("repair_and_coding", ["nexus-tdd"])] == [
+        "nexus-tdd"
+    ]
+    assert index.negative_control_for_capability("repair_and_coding")["skill_id"] == "wrong-skill"
+    assert index.canonical_skill_id({"skill_id": "gstack-investigate"}) == "investigate"
 
 
 def test_plan_blocks_timeout_unstable_repair_discovery_candidates():

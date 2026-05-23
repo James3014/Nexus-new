@@ -151,7 +151,7 @@ Tool rerun note:
 
 #### P6A. Skill-fit Data-Shape Pregate
 
-Status: `DONE_INITIAL_PREGATE_ROW_INDEX_CATALOG_INDEX_EXECUTION_MATRIX_AND_CANDIDATE_SELECTION_CHARACTERIZATION_2026-05-23`
+Status: `DONE_INITIAL_PREGATE_ROW_INDEX_CATALOG_INDEX_EXECUTION_MATRIX_CANDIDATE_SELECTION_CHARACTERIZATION_AND_CANDIDATE_INDEX_2026-05-23`
 
 Files:
 
@@ -216,7 +216,15 @@ Completed candidate-selection characterization slice:
 
 - Added public-interface characterization `test_skill_fit_plan_characterizes_public_candidate_selection_contract`.
 - The test fixes the current candidate selection contract through `build_skill_fit_ablation_plan(...)`: one highest-relevance runtime baseline first, then preferred/external distinct candidates, with blocked skills, generic skills, and canonical `gstack-` aliases excluded.
-- No production code was changed; this is evidence for a future `SkillFitCandidateIndex` / candidate-contract Module, not an extraction.
+- This was then promoted into a production extraction because the same canonical id and negative-control candidate logic was used by plan construction and follow-up candidate reports.
+
+Completed candidate-index slice:
+
+- Added frozen `SkillFitCandidateIndex` in `nexus/learning/skill_fit_candidate_index.py`.
+- Routed `skill_fit_ablation_core.py` candidate matching, explicit selection, selected-arm ordering, canonical id normalization, and negative-control selection through that Module.
+- Routed `skill_fit_followup.py` canonical id normalization and negative-control selection through the same Module.
+- Added `test_skill_fit_candidate_index_preserves_plan_selection_contract` as the deletion/characterization test.
+- Added changed-only impact-map rows for `skill_fit_candidate_index.py` and the edited `tests/learning/test_skill_fit_ablation.py` self row.
 
 Evidence:
 
@@ -230,6 +238,8 @@ Evidence:
 - CANDIDATE-SELECTION CHARACTERIZATION RED: initial `test_skill_fit_plan_characterizes_public_candidate_selection_contract` expected fixed `nexus-tdd` first; live public contract selected higher-relevance `runtime-repair` as the single runtime baseline.
 - CANDIDATE-SELECTION CHARACTERIZATION GREEN: `uv run pytest tests/learning/test_skill_fit_ablation.py::test_skill_fit_plan_characterizes_public_candidate_selection_contract -q` -> `1 passed`.
 - CANDIDATE-SELECTION GUARD: `uv run pytest tests/learning/test_skill_fit_ablation.py::test_skill_fit_plan_characterizes_public_candidate_selection_contract tests/learning/test_skill_fit_ablation.py::test_plan_prefers_named_repair_candidates_over_generic_candidates tests/learning/test_skill_fit_ablation.py::test_plan_dedupes_gstack_prefixed_skill_aliases tests/learning/test_skill_fit_ablation.py::test_execution_matrix_characterizes_public_row_shape_for_all_arm_types -q` -> `4 passed`.
+- CANDIDATE-INDEX RED: `uv run pytest tests/learning/test_skill_fit_ablation.py::test_skill_fit_candidate_index_preserves_plan_selection_contract -q` -> `ModuleNotFoundError: No module named 'nexus.learning.skill_fit_candidate_index'`.
+- CANDIDATE-INDEX GREEN: `uv run pytest tests/learning/test_skill_fit_ablation.py::test_skill_fit_candidate_index_preserves_plan_selection_contract tests/learning/test_skill_fit_ablation.py::test_skill_fit_plan_characterizes_public_candidate_selection_contract tests/learning/test_skill_fit_ablation.py::test_plan_dedupes_gstack_prefixed_skill_aliases tests/learning/test_skill_fit_ablation.py::test_research_candidate_v2_report_excludes_rejected_and_selects_source_discipline_candidates tests/learning/test_skill_fit_ablation.py::test_research_candidate_v3_requires_observable_source_discipline_behaviors -q` -> `5 passed`.
 - CHANGED-ONLY: `uv run scripts/ops/ci_gate.py --changed-only <refactor-slice paths>` -> `Changed-Only JIT Tests PASSED`.
 - CHANGED-ONLY LESSON: first changed-only attempt fell back through the edited test file and hit missing local Playwright browser; fixed by adding the test-file self impact row.
 

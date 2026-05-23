@@ -8,6 +8,8 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Mapping
 
+from nexus.learning.skill_fit_candidate_index import SkillFitCandidateIndex
+
 RESEARCH_CANDIDATE_V2_STRONG_SIGNALS = (
     "citation",
     "citations",
@@ -1675,24 +1677,8 @@ def write_research_source_discipline_skill_specs(
 
 
 def _canonical_skill_id(row: Mapping[str, Any]) -> str:
-    return str(row.get("skill_id") or "").strip().removeprefix("gstack-")
+    return SkillFitCandidateIndex.canonical_skill_id(row)
 
 
 def _wrong_or_quarantined_candidate(candidate_pool: Mapping[str, Any], capability: str) -> Mapping[str, Any] | None:
-    candidates = [row for row in candidate_pool.get("candidates", []) if isinstance(row, Mapping)]
-    quarantined = [
-        row
-        for row in candidates
-        if str(row.get("safety_status") or "") == "quarantined"
-        and capability not in {str(item) for item in row.get("capability_candidates", [])}
-    ]
-    wrong_capability = [
-        row
-        for row in candidates
-        if row.get("ablation_eligible") is True
-        and capability not in {str(item) for item in row.get("capability_candidates", [])}
-    ]
-    choices = quarantined or wrong_capability
-    if not choices:
-        return None
-    return sorted(choices, key=lambda row: (str(row.get("sha256") or ""), str(row.get("path") or "")))[0]
+    return SkillFitCandidateIndex.from_pool(candidate_pool).negative_control_for_capability(capability)

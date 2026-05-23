@@ -9,6 +9,8 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Iterable, Mapping
 
+from nexus.learning.skill_fit_candidate_index import SkillFitCandidateIndex
+
 
 REQUIRED_EFFECTIVE_FIELDS = (
     "selected",
@@ -202,118 +204,39 @@ def _stable_digest(*parts: str) -> str:
 
 
 def _matching_candidates(pool: Mapping[str, Any], capability: str) -> list[Mapping[str, Any]]:
-    candidates = [row for row in pool.get("candidates", []) if isinstance(row, Mapping)]
-    blocked = CAPABILITY_DISCOVERY_BLOCKED_SKILLS.get(capability, set())
-    return [
-        row
-        for row in candidates
-        if row.get("ablation_eligible") is True
-        and capability in {str(item) for item in row.get("capability_candidates", [])}
-        and str(row.get("skill_id") or "") not in blocked
-        and _candidate_has_capability_signal(row, capability)
-    ]
+    return SkillFitCandidateIndex.from_pool(pool).matching_for_capability(capability)
 
 
 def _explicit_skill_candidates(pool: Mapping[str, Any], capability: str, skill_ids: Iterable[str]) -> list[Mapping[str, Any]]:
-    wanted = {str(skill_id).strip() for skill_id in skill_ids if str(skill_id).strip()}
-    if not wanted:
-        return []
-    candidates = [row for row in pool.get("candidates", []) if isinstance(row, Mapping)]
-    selected = []
-    seen: set[str] = set()
-    for row in sorted(candidates, key=lambda item: (str(item.get("skill_id") or ""), str(item.get("path") or ""))):
-        skill_id = str(row.get("skill_id") or "")
-        if skill_id not in wanted or skill_id in seen:
-            continue
-        if row.get("ablation_eligible") is not True:
-            continue
-        if capability not in {str(item) for item in row.get("capability_candidates", [])}:
-            continue
-        selected.append(row)
-        seen.add(skill_id)
-    return selected
+    return SkillFitCandidateIndex.from_pool(pool).explicit_for_capability(capability, skill_ids)
 
 
 def _selected_skill_candidates(pool: Mapping[str, Any], capability: str, max_skill_arms: int) -> list[Mapping[str, Any]]:
-    matching = sorted(_matching_candidates(pool, capability), key=lambda row: _candidate_sort_key(row, capability))
-    runtime = [row for row in matching if row.get("runtime_eligible") is True]
-    non_runtime = [row for row in matching if row.get("runtime_eligible") is not True]
-    selected: list[Mapping[str, Any]] = []
-    selected_skill_ids: set[str] = set()
-    if runtime:
-        selected.append(runtime[0])
-        selected_skill_ids.add(_canonical_skill_id(runtime[0]))
-    for row in non_runtime:
-        skill_id = _canonical_skill_id(row)
-        if row in selected or skill_id in selected_skill_ids:
-            continue
-        selected.append(row)
-        selected_skill_ids.add(skill_id)
-        if len(selected) >= max_skill_arms:
-            break
-    for row in runtime[1:]:
-        if len(selected) >= max_skill_arms:
-            break
-        skill_id = _canonical_skill_id(row)
-        if skill_id in selected_skill_ids:
-            continue
-        selected.append(row)
-        selected_skill_ids.add(skill_id)
-    return selected[:max_skill_arms]
+    return SkillFitCandidateIndex.from_pool(pool).selected_for_capability(capability, max_skill_arms)
 
 
 def _canonical_skill_id(row: Mapping[str, Any]) -> str:
-    skill_id = str(row.get("skill_id") or "").strip()
-    return skill_id.removeprefix("gstack-")
+    return SkillFitCandidateIndex.canonical_skill_id(row)
 
 
-def _candidate_sort_key(row: Mapping[str, Any], capability: str) -> tuple[int, int, str, str]:
-    return (
-        0 if row.get("runtime_eligible") is True else 1,
-        _preferred_skill_rank(row, capability),
-        -_candidate_relevance(row, capability),
-        str(row.get("skill_id") or ""),
-        str(row.get("path") or ""),
-    )
+def _candidate_sort_key(row: Mapping[str, Any], capability: str) -> tuple[int, int, int, str, str]:
+    return SkillFitCandidateIndex(()).candidate_sort_key(row, capability)
 
 
 def _preferred_skill_rank(row: Mapping[str, Any], capability: str) -> int:
-    preferred = CAPABILITY_PREFERRED_SKILLS.get(capability, ())
-    skill_id = str(row.get("skill_id") or "")
-    try:
-        return preferred.index(skill_id)
-    except ValueError:
-        return len(preferred)
+    return SkillFitCandidateIndex(()).preferred_skill_rank(row, capability)
 
 
 def _candidate_relevance(row: Mapping[str, Any], capability: str) -> int:
-    text = " ".join(str(row.get(key) or "") for key in ("skill_id", "load_when")).lower()
-    keywords = CAPABILITY_RELEVANCE_KEYWORDS.get(capability, ())
-    return sum(text.count(keyword) for keyword in keywords)
+    return SkillFitCandidateIndex(()).candidate_relevance(row, capability)
 
 
 def _candidate_has_capability_signal(row: Mapping[str, Any], capability: str) -> bool:
-    return _preferred_skill_rank(row, capability) < len(CAPABILITY_PREFERRED_SKILLS.get(capability, ())) or _candidate_relevance(row, capability) > 0
+    return SkillFitCandidateIndex(()).has_capability_signal(row, capability)
 
 
 def _wrong_or_quarantined_candidate(pool: Mapping[str, Any], capability: str) -> Mapping[str, Any] | None:
-    candidates = [row for row in pool.get("candidates", []) if isinstance(row, Mapping)]
-    quarantined = [
-        row
-        for row in candidates
-        if str(row.get("safety_status") or "") == "quarantined"
-        and capability not in {str(item) for item in row.get("capability_candidates", [])}
-    ]
-    wrong_capability = [
-        row
-        for row in candidates
-        if row.get("ablation_eligible") is True
-        and capability not in {str(item) for item in row.get("capability_candidates", [])}
-    ]
-    choices = quarantined or wrong_capability
-    if not choices:
-        return None
-    return sorted(choices, key=lambda row: (str(row.get("sha256") or ""), str(row.get("path") or "")))[0]
+    return SkillFitCandidateIndex.from_pool(pool).negative_control_for_capability(capability)
 
 
 def _skill_arm(row: Mapping[str, Any], *, capability: str, index: int) -> SkillAblationArm:
