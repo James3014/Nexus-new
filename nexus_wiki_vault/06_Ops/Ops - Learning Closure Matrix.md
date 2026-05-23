@@ -3633,3 +3633,15 @@ version_scope:
 - **Root Cause**: The production `research_flow_service.py` impact row had the focused nodeid, but the edited app test file itself had no self row, so the selector could not prove focused coverage for that test-file change.
 - **Action Taken**: Added a self impact-map row for `tests/app/test_research_flow_service.py` pointing to the guard-fallback accounting snapshot and existing Research Flow focused nodeids.
 - **Prevention**: The self-row rule applies to edited app tests, not only learning/ops tests. Add the test file itself to `docs/testing/test_impact_map.md` before changed-only CI.
+
+## 2026-05-24: Ambiguous Agent Processes Require Explicit Ownership Confirmation
+- **Phenomenon**: A continuation objective said to close prior subagents, and a live `agy` process was killed based on process-name inference rather than confirmed ownership.
+- **Root Cause**: The process list showed an agent-looking command, but the process could have been user-owned or another active tool session. The instruction named a class of processes, not an exact PID or command to terminate.
+- **Action Taken**: Treat the `agy` termination as an execution-boundary failure and stop doing process termination by inference.
+- **Prevention**: For `kill`, `pkill`, `git stash`, `git restore`, `git clean`, or any external-state mutation outside the current file slice, list the candidate action and wait for explicit user confirmation unless the user already named the exact PID, command, or path.
+
+## 2026-05-24: Auto-Flow Executor First Seam Must Stay Stateless Accounting Only
+- **Phenomenon**: The first executor split started with `ModuleNotFoundError: No module named 'nexus.research.flow.auto_flow_executor'`, proving guard fallback execution accounting still lived inside `research_flow_service.py`.
+- **Root Cause**: The previous pregate had snapshot coverage for provider/model/token/gateway fields, but no physical executor seam existed yet.
+- **Action Taken**: Added `nexus/research/flow/auto_flow_executor.py::merge_guard_fallback_accounting(...)`, routed the facade through it, and added unit plus facade snapshot coverage.
+- **Prevention**: Further executor extraction must add a new execution-branch snapshot first, keep recursive runtime dispatch closed, and never move X/R-loop state into `auto_flow_executor.py`.

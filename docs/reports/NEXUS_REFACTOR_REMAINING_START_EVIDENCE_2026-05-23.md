@@ -166,6 +166,31 @@ Decision:
 - Do not open recursive runtime dispatch.
 - Do not change provider/token report schema in the executor extraction slice unless a focused failing test requires it.
 
+## 2E. Auto-Flow Executor Accounting Seam
+
+Status: `DONE_FIRST_STATELESS_SEAM`
+
+What changed:
+
+- Added `nexus/research/flow/auto_flow_executor.py`.
+- Extracted guard fallback execution accounting into `merge_guard_fallback_accounting(...)`.
+- `research_flow_service.py` now delegates successful guard fallback provider/model/token/gateway receipt merging to the new seam.
+- The seam is stateless and does not hold X/R-loop counters, retry state, runtime transition state, or recursive dispatch ownership.
+
+RED:
+
+- `uv run pytest tests/research/test_auto_flow_executor.py -q` initially failed with `ModuleNotFoundError: No module named 'nexus.research.flow.auto_flow_executor'`.
+
+Verification:
+
+- `uv run pytest tests/research/test_auto_flow_executor.py tests/app/test_research_flow_service.py::test_hyper_guard_fallback_preserves_gateway_token_source -q` -> `3 passed`.
+
+Decision:
+
+- Further executor work still needs a new execution-branch snapshot before moving baseline / hyper run orchestration.
+- Recursive runtime dispatch remains closed.
+- Process ownership lesson: do not kill ambiguous agent or app processes while executing this plan; list candidate PIDs and require explicit user confirmation unless the user names the exact PID/command.
+
 ## 3. Remaining Items Now Startable
 
 ### 3.1 External Fixture Live Clone / Setup

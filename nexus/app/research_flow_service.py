@@ -79,6 +79,7 @@ from nexus.research.flow.baseline_report import (
     strict_baseline_failure_meta,
 )
 from nexus.research.flow.auto_flow_payload import AutoFlowPayloadParts, build_auto_flow_payload
+from nexus.research.flow.auto_flow_executor import merge_guard_fallback_accounting
 from nexus.research.flow.capability_evidence import (
     augment_local_msa_bench_evidence as _augment_local_msa_bench_evidence,
     candidate_summary_has_swarm_evidence as _candidate_summary_has_swarm_evidence,
@@ -1675,64 +1676,11 @@ def run_auto_flow(
                         and isinstance(hyper_result_for_guard.get("report"), dict)
                     ):
                         hyper_report = hyper_result_for_guard["report"]
-                        result["report"]["guard_fallback_from"] = {
-                            "flow": hyper_result_for_guard.get("flow"),
-                            "elapsed_sec": hyper_result_for_guard.get("elapsed_sec"),
-                            "model_calls": int(hyper_report.get("model_calls", 0) or 0),
-                            "model_name": hyper_report.get("model_name", ""),
-                            "model_patch_generated": bool(hyper_report.get("model_patch_generated", False)),
-                            "fallback_used": bool(hyper_report.get("fallback_used", False)),
-                            "total_tokens": int(hyper_report.get("total_tokens", 0) or 0),
-                            "token_capture_status": hyper_report.get("token_capture_status", "unknown"),
-                            "gateway_stats_present": bool(hyper_report.get("gateway_stats_present", False)),
-                            "gateway_usage_metadata_present": bool(hyper_report.get("gateway_usage_metadata_present", False)),
-                            "gateway_token_source": hyper_report.get("gateway_token_source", "missing"),
-                            "gateway_error_category": hyper_report.get("gateway_error_category", ""),
-                            "gateway_prompt_chars": int(hyper_report.get("gateway_prompt_chars", 0) or 0),
-                            "gateway_payload_chars": int(hyper_report.get("gateway_payload_chars", 0) or 0),
-                            "gateway_total_chars": int(hyper_report.get("gateway_total_chars", 0) or 0),
-                            "gateway_timeout_sec": int(hyper_report.get("gateway_timeout_sec", 0) or 0),
-                            "winner_source": hyper_report.get("winner_source", "unknown"),
-                            "learning_trace": hyper_report.get("learning_trace", {}),
-                        }
-                        result["report"]["model_calls"] = int(result["report"].get("model_calls", 0) or 0) + int(hyper_report.get("model_calls", 0) or 0)
-                        result["report"]["model_name"] = hyper_report.get("model_name", result["report"].get("model_name", ""))
-                        result["report"]["model_patch_generated"] = bool(hyper_report.get("model_patch_generated", False))
-                        result["report"]["fallback_used"] = bool(hyper_report.get("fallback_used", False))
-                        result["report"]["total_tokens"] = int(result["report"].get("total_tokens", 0) or 0) + int(hyper_report.get("total_tokens", 0) or 0)
-                        if hyper_report.get("token_capture_status") == "measured":
-                            result["report"]["token_capture_status"] = "measured"
-                        result["report"]["gateway_stats_present"] = bool(
-                            result["report"].get("gateway_stats_present", False)
-                            or hyper_report.get("gateway_stats_present", False)
-                        )
-                        result["report"]["gateway_usage_metadata_present"] = bool(
-                            result["report"].get("gateway_usage_metadata_present", False)
-                            or hyper_report.get("gateway_usage_metadata_present", False)
-                        )
-                        result["report"]["gateway_token_source"] = hyper_report.get(
-                            "gateway_token_source",
-                            result["report"].get("gateway_token_source", "missing"),
-                        )
-                        result["report"]["gateway_error_category"] = hyper_report.get(
-                            "gateway_error_category",
-                            result["report"].get("gateway_error_category", ""),
-                        )
-                        result["report"]["gateway_prompt_chars"] = max(
-                            int(result["report"].get("gateway_prompt_chars", 0) or 0),
-                            int(hyper_report.get("gateway_prompt_chars", 0) or 0),
-                        )
-                        result["report"]["gateway_payload_chars"] = max(
-                            int(result["report"].get("gateway_payload_chars", 0) or 0),
-                            int(hyper_report.get("gateway_payload_chars", 0) or 0),
-                        )
-                        result["report"]["gateway_total_chars"] = max(
-                            int(result["report"].get("gateway_total_chars", 0) or 0),
-                            int(hyper_report.get("gateway_total_chars", 0) or 0),
-                        )
-                        result["report"]["gateway_timeout_sec"] = max(
-                            int(result["report"].get("gateway_timeout_sec", 0) or 0),
-                            int(hyper_report.get("gateway_timeout_sec", 0) or 0),
+                        result["report"] = merge_guard_fallback_accounting(
+                            result["report"],
+                            hyper_flow=str(hyper_result_for_guard.get("flow", "")),
+                            hyper_elapsed_sec=hyper_result_for_guard.get("elapsed_sec"),
+                            hyper_report=hyper_report,
                         )
                     if fallback_succeeded:
                         chosen_flow = "baseline"
