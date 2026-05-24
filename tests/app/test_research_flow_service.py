@@ -2706,8 +2706,19 @@ def test_cross_module_hyper_failure_can_rescue_with_original_artifact_verificati
             rejection_summary={"pytest_failed": 1},
             attempt_count=5,
             model_calls=5,
+            model_name="gemini-3-flash-preview",
+            model_patch_generated=False,
+            fallback_used=False,
             total_tokens=1234,
             token_capture_status="measured",
+            gateway_stats_present=True,
+            gateway_usage_metadata_present=False,
+            gateway_token_source="stats",
+            gateway_error_category="",
+            gateway_prompt_chars=101,
+            gateway_payload_chars=202,
+            gateway_total_chars=303,
+            gateway_timeout_sec=20,
             learning_trace={"mempalace_verified": True},
             candidates=[
                 SimpleNamespace(
@@ -2752,6 +2763,20 @@ def test_cross_module_hyper_failure_can_rescue_with_original_artifact_verificati
     assert payload["result"]["status"] == "SUCCESS"
     assert payload["artifact_summary"]["changed"] is False
     assert payload["artifact_summary"]["verification_only"] is True
+    report = payload["result"]["report"]
+    assert report["winner_source"] == "verification_only"
+    assert report["verification_only_rescue"] is True
+    assert report["verification_only_from"] == {
+        "flow": "hyper_sprint",
+        "status": "FAILED",
+        "error": "stage1_no_passing_candidate",
+    }
+    assert report["model_calls"] == 5
+    assert report["model_name"] == "gemini-3-flash-preview"
+    assert report["total_tokens"] == 1234
+    assert report["token_capture_status"] == "measured"
+    assert report["gateway_token_source"] == "stats"
+    assert report["gateway_total_chars"] == 303
     trace = payload["nexus_usage_trace"]
     assert trace["gemini_uses_nexus"] is True
     assert trace["usage_valid"] is True

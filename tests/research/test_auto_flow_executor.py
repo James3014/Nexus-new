@@ -1,6 +1,45 @@
 from types import SimpleNamespace
 
-from nexus.research.flow.auto_flow_executor import build_hyper_sprint_report, merge_guard_fallback_accounting
+from nexus.research.flow.auto_flow_executor import (
+    build_hyper_sprint_report,
+    build_verification_only_rescue_report,
+    merge_guard_fallback_accounting,
+)
+
+
+def test_build_verification_only_rescue_report_marks_winner_without_mutating_previous_report():
+    previous = {
+        "flow": "hyper_sprint",
+        "status": "FAILED",
+        "error": "stage1_no_passing_candidate",
+        "report": {
+            "winner_source": "llm",
+            "model_calls": 5,
+            "total_tokens": 1234,
+            "token_capture_status": "measured",
+        },
+    }
+
+    report = build_verification_only_rescue_report(previous, ok=True)
+
+    assert previous["report"] == {
+        "winner_source": "llm",
+        "model_calls": 5,
+        "total_tokens": 1234,
+        "token_capture_status": "measured",
+    }
+    assert report == {
+        "winner_source": "verification_only",
+        "model_calls": 5,
+        "total_tokens": 1234,
+        "token_capture_status": "measured",
+        "verification_only_rescue": True,
+        "verification_only_from": {
+            "flow": "hyper_sprint",
+            "status": "FAILED",
+            "error": "stage1_no_passing_candidate",
+        },
+    }
 
 
 def test_build_hyper_sprint_report_preserves_provider_and_gateway_receipts():

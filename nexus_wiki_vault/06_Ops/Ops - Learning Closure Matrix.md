@@ -3651,3 +3651,9 @@ version_scope:
 - **Root Cause**: The first executor seam covered guard fallback accounting only; direct Hyper report assembly remained inline and mixed provider receipts with candidate-summary Adapter calls.
 - **Action Taken**: Added `build_hyper_sprint_report(...)` to `nexus/research/flow/auto_flow_executor.py` and routed `_run_hyper_apply()` through it while keeping `_candidate_summaries(...)` at the facade call site.
 - **Prevention**: Keep executor report seams stateless and data-only. Do not pull candidate generation, candidate-summary Adapters, X/R-loop state, or recursive dispatch ownership into `auto_flow_executor.py` without a new focused snapshot.
+
+## 2026-05-24: Verification Rescue Extraction Requires Exact Nodeid Lookup
+- **Phenomenon**: The verification-only rescue seam started with `ImportError: cannot import name 'build_verification_only_rescue_report'`, then a focused verification command failed because the nodeid was guessed as `test_cross_module_verification_only_rescue_preserves_nexus_usage`.
+- **Root Cause**: The seam itself was valid, but the facade regression test name was inferred from behavior instead of retrieved from the live test file.
+- **Action Taken**: Added `build_verification_only_rescue_report(...)`, routed `_run_original_verification_rescue()` through it, and reran the exact existing nodeid `test_cross_module_hyper_failure_can_rescue_with_original_artifact_verification`.
+- **Prevention**: Before running focused tests in long refactor slices, use `rg -n "def test_.*<stable_keyword>"` to retrieve exact nodeids. Do not guess test names from behavior summaries.

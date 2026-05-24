@@ -50,6 +50,18 @@ def build_hyper_sprint_report(
     }
 
 
+def build_verification_only_rescue_report(previous_result: Mapping[str, Any], *, ok: bool) -> dict[str, Any]:
+    report = dict(previous_result.get("report", {}) if isinstance(previous_result.get("report"), dict) else {})
+    report["verification_only_rescue"] = bool(ok)
+    report["verification_only_from"] = {
+        "flow": previous_result.get("flow"),
+        "status": previous_result.get("status"),
+        "error": previous_result.get("error"),
+    }
+    report["winner_source"] = "verification_only" if ok else report.get("winner_source", "local")
+    return report
+
+
 def merge_guard_fallback_accounting(
     baseline_report: Mapping[str, Any],
     *,

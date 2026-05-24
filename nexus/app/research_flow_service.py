@@ -79,7 +79,11 @@ from nexus.research.flow.baseline_report import (
     strict_baseline_failure_meta,
 )
 from nexus.research.flow.auto_flow_payload import AutoFlowPayloadParts, build_auto_flow_payload
-from nexus.research.flow.auto_flow_executor import build_hyper_sprint_report, merge_guard_fallback_accounting
+from nexus.research.flow.auto_flow_executor import (
+    build_hyper_sprint_report,
+    build_verification_only_rescue_report,
+    merge_guard_fallback_accounting,
+)
 from nexus.research.flow.capability_evidence import (
     augment_local_msa_bench_evidence as _augment_local_msa_bench_evidence,
     candidate_summary_has_swarm_evidence as _candidate_summary_has_swarm_evidence,
@@ -1438,7 +1442,6 @@ def run_auto_flow(
     def _run_original_verification_rescue(previous_result: dict) -> dict:
         start = time.monotonic()
         _write_source_text(target_path, original_code)
-        report = dict(previous_result.get("report", {}) if isinstance(previous_result.get("report"), dict) else {})
         try:
             res = subprocess.run(pytest_cmd, cwd=repo_root, capture_output=True, text=True, timeout=timeout_sec)
             ok = res.returncode == 0
@@ -1446,13 +1449,7 @@ def run_auto_flow(
         except subprocess.TimeoutExpired:
             ok = False
             err = "original_test_timeout"
-        report["verification_only_rescue"] = bool(ok)
-        report["verification_only_from"] = {
-            "flow": previous_result.get("flow"),
-            "status": previous_result.get("status"),
-            "error": previous_result.get("error"),
-        }
-        report["winner_source"] = "verification_only" if ok else report.get("winner_source", "local")
+        report = build_verification_only_rescue_report(previous_result, ok=ok)
         return {
             "flow": previous_result.get("flow", "hyper_sprint"),
             "status": "SUCCESS" if ok else "FAILED",

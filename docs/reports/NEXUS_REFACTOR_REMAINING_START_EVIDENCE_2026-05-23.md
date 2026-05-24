@@ -235,6 +235,36 @@ Decision:
 - Future executor extraction can move another execution branch only after adding a focused branch snapshot first.
 - Recursive runtime dispatch remains closed.
 
+## 2H. Verification-Only Rescue Report Seam
+
+Status: `DONE_THIRD_STATELESS_SEAM`
+
+What changed:
+
+- Added `build_verification_only_rescue_report(...)` to `nexus/research/flow/auto_flow_executor.py`.
+- `research_flow_service.py::_run_original_verification_rescue()` now delegates report mutation to the executor seam.
+- Strengthened `tests/app/test_research_flow_service.py::test_cross_module_hyper_failure_can_rescue_with_original_artifact_verification` to snapshot provider/model/token/gateway fields after verification-only rescue.
+- The seam is data-only and does not decide when verification-only rescue is allowed; the facade still owns subprocess execution and success criteria routing.
+
+RED:
+
+- `uv run pytest tests/research/test_auto_flow_executor.py -q` initially failed with `ImportError: cannot import name 'build_verification_only_rescue_report'`.
+
+Verification:
+
+- `uv run pytest tests/research/test_auto_flow_executor.py tests/app/test_research_flow_service.py::test_cross_module_hyper_failure_can_rescue_with_original_artifact_verification tests/app/test_research_flow_service.py::test_cross_module_mutation_required_does_not_use_verification_only_rescue -q` -> `6 passed`.
+- `uv run python -m py_compile nexus/research/flow/auto_flow_executor.py nexus/app/research_flow_service.py tests/research/test_auto_flow_executor.py tests/app/test_research_flow_service.py` -> passed.
+
+Process correction:
+
+- A first focused command used a non-existent nodeid, `tests/app/test_research_flow_service.py::test_cross_module_verification_only_rescue_preserves_nexus_usage`, and failed with `not found`.
+- Corrected by searching exact nodeids before rerunning: `test_cross_module_hyper_failure_can_rescue_with_original_artifact_verification`.
+
+Decision:
+
+- Future executor extraction still needs a focused branch snapshot before moving subprocess execution, candidate generation, or routing decisions.
+- Recursive runtime dispatch remains closed.
+
 ## 3. Remaining Items Now Startable
 
 ### 3.1 External Fixture Live Clone / Setup
