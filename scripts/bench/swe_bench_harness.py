@@ -108,7 +108,7 @@ def _write_jsonl(path: Path, rows: list[dict[str, Any]]) -> None:
     path.write_text("\n".join(json.dumps(row, ensure_ascii=False) for row in rows) + "\n", encoding="utf-8")
 
 
-def _run_official_harness(*, repo_root: Path, predictions_path: Path, run_id: str) -> int:
+def _run_official_harness(*, repo_root: Path, predictions_path: Path, run_id: str, dataset_name: str = "princeton-nlp/SWE-bench_Verified", split: str = "test") -> int:
     cmd = [
         "uv",
         "run",
@@ -118,13 +118,15 @@ def _run_official_harness(*, repo_root: Path, predictions_path: Path, run_id: st
         "-m",
         "swebench.harness.run_evaluation",
         "--dataset_name",
-        "princeton-nlp/SWE-bench_Verified",
+        dataset_name,
         "--predictions_path",
         str(predictions_path),
         "--max_workers",
         "8",
         "--run_id",
         run_id,
+        "--split",
+        split,
     ]
     return subprocess.run(cmd, cwd=repo_root).returncode
 
@@ -221,7 +223,15 @@ def main(argv: list[str] | None = None) -> int:
     if args.run_official_harness:
         run_id = f"nexus-swe-bench-{int(time.time())}"
         target = Path(next(iter(written.values())))
-        code = _run_official_harness(repo_root=repo_root, predictions_path=target, run_id=run_id)
+        dataset_name = "ScaleAI/SWE-bench_Pro" if "pro" in str(args.dataset_file).lower() else "princeton-nlp/SWE-bench_Verified"
+        split = "test"
+        code = _run_official_harness(
+            repo_root=repo_root,
+            predictions_path=target,
+            run_id=run_id,
+            dataset_name=dataset_name,
+            split=split
+        )
         metadata["official_harness"] = {
             "requested": True,
             "status": "PASS" if code == 0 else "FAIL",
