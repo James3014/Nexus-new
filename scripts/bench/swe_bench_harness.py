@@ -169,6 +169,8 @@ def build_predictions(
 
 
 def main(argv: list[str] | None = None) -> int:
+    import os
+    os.environ["NEXUS_GEMINI_MODEL_NAME"] = "gemini-3-flash-preview"
     parser = argparse.ArgumentParser(description="SWE-bench Verified wiring harness for Nexus public credibility runs.")
     parser.add_argument("--dataset-file", default=str(DEFAULT_DATASET_FILE))
     parser.add_argument("--mode", default="verified")
