@@ -1,4 +1,68 @@
-from nexus.research.flow.auto_flow_executor import merge_guard_fallback_accounting
+from types import SimpleNamespace
+
+from nexus.research.flow.auto_flow_executor import build_hyper_sprint_report, merge_guard_fallback_accounting
+
+
+def test_build_hyper_sprint_report_preserves_provider_and_gateway_receipts():
+    result = SimpleNamespace(
+        status="SUCCESS",
+        reason="stage1_pass",
+        winner_source="llm",
+        error_codes=[],
+        rejection_summary={},
+        attempt_count=1,
+        model_calls=1,
+        model_name="gemini-3-flash-preview",
+        model_patch_generated=True,
+        fallback_used=False,
+        total_tokens=111,
+        token_capture_status="measured",
+        gateway_stats_present=True,
+        gateway_usage_metadata_present=True,
+        gateway_token_source="usage_metadata",
+        gateway_error_category="",
+        gateway_prompt_chars=12,
+        gateway_payload_chars=34,
+        gateway_total_chars=46,
+        gateway_timeout_sec=20,
+        learning_trace={"distant_scout_execution": {"status": "skipped"}},
+        candidates=[],
+    )
+
+    report = build_hyper_sprint_report(
+        result,
+        effective_stage1_timeout_sec=20,
+        r_phase_breakdown_sec={"setup_sec": 0.1, "hyper_sprint_sec": 0.2},
+        candidate_summaries=[],
+    )
+
+    assert report == {
+        "status": "SUCCESS",
+        "reason": "stage1_pass",
+        "winner_source": "llm",
+        "error_codes": [],
+        "rejection_summary": {},
+        "attempt_count": 1,
+        "model_calls": 1,
+        "model_name": "gemini-3-flash-preview",
+        "model_patch_generated": True,
+        "fallback_used": False,
+        "total_tokens": 111,
+        "token_capture_status": "measured",
+        "gateway_stats_present": True,
+        "gateway_usage_metadata_present": True,
+        "gateway_token_source": "usage_metadata",
+        "gateway_error_category": "",
+        "gateway_prompt_chars": 12,
+        "gateway_payload_chars": 34,
+        "gateway_total_chars": 46,
+        "gateway_timeout_sec": 20,
+        "effective_stage1_timeout_sec": 20,
+        "candidate_summaries": [],
+        "learning_trace": {"distant_scout_execution": {"status": "skipped"}},
+        "distant_scout_execution": {"status": "skipped"},
+        "r_phase_breakdown_sec": {"setup_sec": 0.1, "hyper_sprint_sec": 0.2},
+    }
 
 
 def test_merge_guard_fallback_accounting_preserves_hyper_provider_receipt():

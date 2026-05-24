@@ -210,6 +210,31 @@ Decision:
 - Do not move baseline / hyper orchestration without keeping both snapshots green.
 - Recursive runtime dispatch remains closed.
 
+## 2G. Hyper Sprint Report Builder Seam
+
+Status: `DONE_SECOND_STATELESS_SEAM`
+
+What changed:
+
+- Added `build_hyper_sprint_report(...)` to `nexus/research/flow/auto_flow_executor.py`.
+- `research_flow_service.py::_run_hyper_apply()` now delegates provider/model/token/gateway report assembly to the executor seam.
+- Candidate summary construction stays at the facade call site because it depends on the existing `sprint_service._candidate_summaries(...)` Adapter.
+- The seam remains stateless and does not hold X/R-loop counters, retry state, runtime transition state, or recursive dispatch ownership.
+
+RED:
+
+- `uv run pytest tests/research/test_auto_flow_executor.py -q` initially failed with `ImportError: cannot import name 'build_hyper_sprint_report'`.
+
+Verification:
+
+- `uv run pytest tests/research/test_auto_flow_executor.py tests/app/test_research_flow_service.py::test_forced_hyper_skips_baseline_probe tests/app/test_research_flow_service.py::test_hyper_guard_fallback_preserves_gateway_token_source -q` -> `5 passed`.
+- `uv run python -m py_compile nexus/research/flow/auto_flow_executor.py nexus/app/research_flow_service.py tests/research/test_auto_flow_executor.py` -> passed.
+
+Decision:
+
+- Future executor extraction can move another execution branch only after adding a focused branch snapshot first.
+- Recursive runtime dispatch remains closed.
+
 ## 3. Remaining Items Now Startable
 
 ### 3.1 External Fixture Live Clone / Setup

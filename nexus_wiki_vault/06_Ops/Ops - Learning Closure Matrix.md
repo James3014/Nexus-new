@@ -3645,3 +3645,9 @@ version_scope:
 - **Root Cause**: The previous pregate had snapshot coverage for provider/model/token/gateway fields, but no physical executor seam existed yet.
 - **Action Taken**: Added `nexus/research/flow/auto_flow_executor.py::merge_guard_fallback_accounting(...)`, routed the facade through it, and added unit plus facade snapshot coverage.
 - **Prevention**: Further executor extraction must add a new execution-branch snapshot first, keep recursive runtime dispatch closed, and never move X/R-loop state into `auto_flow_executor.py`.
+
+## 2026-05-24: Hyper Report Builder Extraction Must Keep Candidate Adapters Outside
+- **Phenomenon**: The second executor split started with `ImportError: cannot import name 'build_hyper_sprint_report'`, proving Hyper provider/model/token/gateway report assembly still lived inside `research_flow_service.py`.
+- **Root Cause**: The first executor seam covered guard fallback accounting only; direct Hyper report assembly remained inline and mixed provider receipts with candidate-summary Adapter calls.
+- **Action Taken**: Added `build_hyper_sprint_report(...)` to `nexus/research/flow/auto_flow_executor.py` and routed `_run_hyper_apply()` through it while keeping `_candidate_summaries(...)` at the facade call site.
+- **Prevention**: Keep executor report seams stateless and data-only. Do not pull candidate generation, candidate-summary Adapters, X/R-loop state, or recursive dispatch ownership into `auto_flow_executor.py` without a new focused snapshot.

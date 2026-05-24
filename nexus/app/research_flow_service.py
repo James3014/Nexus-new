@@ -79,7 +79,7 @@ from nexus.research.flow.baseline_report import (
     strict_baseline_failure_meta,
 )
 from nexus.research.flow.auto_flow_payload import AutoFlowPayloadParts, build_auto_flow_payload
-from nexus.research.flow.auto_flow_executor import merge_guard_fallback_accounting
+from nexus.research.flow.auto_flow_executor import build_hyper_sprint_report, merge_guard_fallback_accounting
 from nexus.research.flow.capability_evidence import (
     augment_local_msa_bench_evidence as _augment_local_msa_bench_evidence,
     candidate_summary_has_swarm_evidence as _candidate_summary_has_swarm_evidence,
@@ -1521,34 +1521,13 @@ def run_auto_flow(
             "status": "SUCCESS" if ok else "FAILED",
             "elapsed_sec": round(time.monotonic() - start, 4),
             "error": err,
-                "report": {
-                    "status": res.status,
-                    "reason": res.reason,
-                    "winner_source": res.winner_source,
-                    "error_codes": res.error_codes,
-                    "rejection_summary": res.rejection_summary,
-                    "attempt_count": res.attempt_count,
-                    "model_calls": res.model_calls,
-                    "model_name": getattr(res, "model_name", ""),
-                    "model_patch_generated": bool(getattr(res, "model_patch_generated", False)),
-                    "fallback_used": bool(getattr(res, "fallback_used", False)),
-                    "total_tokens": res.total_tokens,
-                    "token_capture_status": res.token_capture_status,
-                    "gateway_stats_present": bool(getattr(res, "gateway_stats_present", False)),
-                    "gateway_usage_metadata_present": bool(getattr(res, "gateway_usage_metadata_present", False)),
-                    "gateway_token_source": str(getattr(res, "gateway_token_source", "missing") or "missing"),
-                    "gateway_error_category": str(getattr(res, "gateway_error_category", "") or ""),
-                    "gateway_prompt_chars": int(getattr(res, "gateway_prompt_chars", 0) or 0),
-                    "gateway_payload_chars": int(getattr(res, "gateway_payload_chars", 0) or 0),
-                    "gateway_total_chars": int(getattr(res, "gateway_total_chars", 0) or 0),
-                    "gateway_timeout_sec": int(getattr(res, "gateway_timeout_sec", 0) or 0),
-                    "effective_stage1_timeout_sec": effective_stage1_timeout,
-                    "candidate_summaries": _candidate_summaries(list(getattr(res, "candidates", []) or [])),
-                    "learning_trace": res.learning_trace,
-                    "distant_scout_execution": (res.learning_trace or {}).get("distant_scout_execution", {}),
-                    "r_phase_breakdown_sec": breakdown,
-                },
-            }
+            "report": build_hyper_sprint_report(
+                res,
+                effective_stage1_timeout_sec=effective_stage1_timeout,
+                candidate_summaries=_candidate_summaries(list(getattr(res, "candidates", []) or [])),
+                r_phase_breakdown_sec=breakdown,
+            ),
+        }
 
     baseline_probe = None
     early_baseline_shortcut = False

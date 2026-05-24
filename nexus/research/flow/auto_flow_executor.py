@@ -8,6 +8,48 @@ def _int_field(report: Mapping[str, Any], key: str) -> int:
     return int(report.get(key, 0) or 0)
 
 
+def _attr_int(obj: Any, key: str) -> int:
+    return int(getattr(obj, key, 0) or 0)
+
+
+def build_hyper_sprint_report(
+    result: Any,
+    *,
+    effective_stage1_timeout_sec: int,
+    r_phase_breakdown_sec: Mapping[str, Any],
+    candidate_summaries: list[dict[str, Any]],
+) -> dict[str, Any]:
+    learning_trace = getattr(result, "learning_trace", {}) or {}
+    learning_trace = learning_trace if isinstance(learning_trace, dict) else {}
+    return {
+        "status": result.status,
+        "reason": result.reason,
+        "winner_source": result.winner_source,
+        "error_codes": result.error_codes,
+        "rejection_summary": result.rejection_summary,
+        "attempt_count": result.attempt_count,
+        "model_calls": result.model_calls,
+        "model_name": getattr(result, "model_name", ""),
+        "model_patch_generated": bool(getattr(result, "model_patch_generated", False)),
+        "fallback_used": bool(getattr(result, "fallback_used", False)),
+        "total_tokens": result.total_tokens,
+        "token_capture_status": result.token_capture_status,
+        "gateway_stats_present": bool(getattr(result, "gateway_stats_present", False)),
+        "gateway_usage_metadata_present": bool(getattr(result, "gateway_usage_metadata_present", False)),
+        "gateway_token_source": str(getattr(result, "gateway_token_source", "missing") or "missing"),
+        "gateway_error_category": str(getattr(result, "gateway_error_category", "") or ""),
+        "gateway_prompt_chars": _attr_int(result, "gateway_prompt_chars"),
+        "gateway_payload_chars": _attr_int(result, "gateway_payload_chars"),
+        "gateway_total_chars": _attr_int(result, "gateway_total_chars"),
+        "gateway_timeout_sec": _attr_int(result, "gateway_timeout_sec"),
+        "effective_stage1_timeout_sec": effective_stage1_timeout_sec,
+        "candidate_summaries": candidate_summaries,
+        "learning_trace": learning_trace,
+        "distant_scout_execution": learning_trace.get("distant_scout_execution", {}),
+        "r_phase_breakdown_sec": dict(r_phase_breakdown_sec),
+    }
+
+
 def merge_guard_fallback_accounting(
     baseline_report: Mapping[str, Any],
     *,

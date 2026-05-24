@@ -21,7 +21,7 @@
 | nexus/app/research_s2t_runtime.py | tests/app/test_research_s2t_runtime.py, tests/app/test_research_flow_service.py::test_run_auto_flow_populates_autoreason_from_candidate_summaries | active | high | research_s2t_runtime_trace_contract |
 | nexus/app | tests/app | active | medium | app_flow |
 | nexus/research | tests/research | active | medium | research_loop |
-| nexus/research/flow/auto_flow_executor.py | tests/research/test_auto_flow_executor.py, tests/app/test_research_flow_service.py::test_hyper_guard_fallback_preserves_gateway_token_source | active | high | auto_flow_executor_accounting_contract |
+| nexus/research/flow/auto_flow_executor.py | tests/research/test_auto_flow_executor.py, tests/app/test_research_flow_service.py::test_forced_hyper_skips_baseline_probe, tests/app/test_research_flow_service.py::test_hyper_guard_fallback_preserves_gateway_token_source | active | high | auto_flow_executor_accounting_contract |
 | nexus/research/flow/auto_flow_payload.py | tests/research/test_auto_flow_payload.py, tests/app/test_research_flow_service.py::test_run_auto_flow_populates_autoreason_from_candidate_summaries | active | high | auto_flow_payload_contract |
 | nexus/research/flow/runtime_state.py | tests/research/test_flow_leaf_modules.py, tests/app/test_research_flow_service.py::test_run_auto_flow_populates_autoreason_from_candidate_summaries | active | medium | research_runtime_state_contract |
 | nexus/research/flow/runtime_decision.py | tests/research/test_flow_leaf_modules.py, tests/app/test_research_flow_service.py::test_run_auto_flow_populates_autoreason_from_candidate_summaries | active | high | research_runtime_decision_contract |
@@ -69,7 +69,7 @@
 | tests/engine/test_cli_semantic_contract_audit.py | tests/engine/test_cli_semantic_contract_audit.py | active | medium | test_contract |
 | tests/engine/test_bench_actions.py | tests/engine/test_bench_actions.py | active | medium | test_contract |
 | tests/engine/test_code_actions.py | tests/engine/test_code_actions.py | active | medium | test_contract |
-| tests/research/test_auto_flow_executor.py | tests/research/test_auto_flow_executor.py, tests/app/test_research_flow_service.py::test_hyper_guard_fallback_preserves_gateway_token_source | active | high | auto_flow_executor_accounting_contract |
+| tests/research/test_auto_flow_executor.py | tests/research/test_auto_flow_executor.py, tests/app/test_research_flow_service.py::test_forced_hyper_skips_baseline_probe, tests/app/test_research_flow_service.py::test_hyper_guard_fallback_preserves_gateway_token_source | active | high | auto_flow_executor_accounting_contract |
 | tests/engine/test_learn_actions.py | tests/engine/test_learn_actions.py | active | medium | test_contract |
 | tests/engine/test_multi_agent_actions.py | tests/engine/test_multi_agent_actions.py | active | medium | test_contract |
 | tests/engine/test_registry_actions.py | tests/engine/test_registry_actions.py | active | medium | test_contract |
