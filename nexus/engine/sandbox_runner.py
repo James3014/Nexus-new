@@ -185,6 +185,21 @@ socket.socket.connect = _guarded_socket_connect
         )
         return guard_dir
 
+    def build_elastic_profile(
+        self,
+        read_literals: list[str] | None = None,
+        write_literals: list[str] | None = None,
+    ) -> str:
+        """根據讀寫白名單動態拼接 macOS sandbox-exec 的 Profile"""
+        profile = ["(version 1)", "(deny default)", "(deny network-outbound)"]
+        if read_literals:
+            for path in read_literals:
+                profile.append(f'(allow file-read* (literal "{path}"))')
+        if write_literals:
+            for path in write_literals:
+                profile.append(f'(allow file-write* (literal "{path}"))')
+        return "\n".join(profile)
+
     def run_task(
         self,
         task: str,
@@ -194,6 +209,7 @@ socket.socket.connect = _guarded_socket_connect
         timeout_sec: int = 60,
         output_file: str | Path | None = None,
         cleanup: bool = True,
+        elastic_profile: str | None = None,
     ) -> dict[str, Any]:
         """Run an explicit local command inside a copied workspace sandbox."""
         if not command:
@@ -273,13 +289,22 @@ socket.socket.connect = _guarded_socket_connect
             loopback_allowed = True
 
             if self.has_sandbox_exec:
-                active_command = [
-                    "sandbox-exec",
-                    "-p",
-                    "(version 1) (allow default) (deny network-outbound)",
-                ] + command_list
-                barrier_mode = "os_level_sandbox_exec"
-                loopback_allowed = False
+                if elastic_profile:
+                    active_command = [
+                        "sandbox-exec",
+                        "-p",
+                        elastic_profile,
+                    ] + command_list
+                    barrier_mode = "os_level_sandbox_exec"
+                    loopback_allowed = False
+                else:
+                    active_command = [
+                        "sandbox-exec",
+                        "-p",
+                        "(version 1) (allow default) (deny network-outbound)",
+                    ] + command_list
+                    barrier_mode = "os_level_sandbox_exec"
+                    loopback_allowed = False
 
             proc = subprocess.run(
                 active_command,
