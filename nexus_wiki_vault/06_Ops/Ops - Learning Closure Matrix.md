@@ -3675,3 +3675,9 @@ version_scope:
 - **Root Cause**: The launcher and briefing generator had been updated separately, but the delegated-round runner carried its own stale identity preamble.
 - **Action Taken**: Changed the round runner to read `.nexus/reports/enforced_agent_briefing.md`, generating it if missing, and appended only task-specific delegation constraints.
 - **Prevention**: Any enforced-agent identity change must test both the generated briefing and every delegating runner that prepends model context. A round runner must not hard-code an ACTIVE marker; it must inherit the current briefing contract.
+
+## 2026-05-25: CodeIntel Context Facades Must Delegate Existing Leaf Modules
+- **Phenomenon**: The CodeIntel context leaf existed at `nexus/research/flow/codeintel_context.py`, but `_build_codeintel_evidence(...)` in `research_flow_service.py` still carried the full local scan/cache/DCI implementation. A new monkeypatch test failed because the facade did not call the leaf Module.
+- **Root Cause**: Earlier extraction created the leaf and behavior tests but left compatibility helpers as copied implementations instead of physical aliases.
+- **Action Taken**: Changed `_rel_path_for_report`, `_codeintel_run_cache_graph_path`, `_load_codeintel_graph`, `_build_codeintel_evidence`, and `_task_with_codeintel_context` to thinly delegate to `codeintel_context.py`; added a facade-delegation test and impact-map coverage for the leaf and edited app test.
+- **Prevention**: For any claimed Research Flow leaf, test the old facade helper through monkeypatching the leaf Module. Existing behavior tests are necessary but insufficient because copied facade logic can keep passing while the seam is not actually used.

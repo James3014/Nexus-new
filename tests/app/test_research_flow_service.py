@@ -5,7 +5,7 @@ from types import SimpleNamespace
 from pathlib import Path
 from nexus.app import research_flow_service, research_semantic_runtime
 from nexus.research.learn_mode import LearnModeService
-from nexus.research.flow import route_decider, signal_collector
+from nexus.research.flow import codeintel_context, route_decider, signal_collector
 
 
 def test_runtime_skill_mount_contract_requires_confirmed_capability_receipt():
@@ -789,6 +789,31 @@ def test_codeintel_context_is_injected_into_task_text():
     assert "[Nexus CodeIntel]" in text
     assert "impact_report" in text
     assert "risk_score: 42" in text
+
+
+def test_codeintel_evidence_facade_delegates_to_leaf_module(monkeypatch, tmp_path: Path):
+    calls = []
+
+    def fake_build_codeintel_evidence(repo_root: Path, *, target_file: str, task_desc: str) -> dict:
+        calls.append((repo_root, target_file, task_desc))
+        return {
+            "impact_report_present": True,
+            "impact_report_path": ".nexus/reports/codeintel/fake_impact.json",
+            "risk_score": 7,
+            "impacted_files_count": 1,
+            "risk_reason": ["leaf_delegate"],
+        }
+
+    monkeypatch.setattr(codeintel_context, "build_codeintel_evidence", fake_build_codeintel_evidence)
+
+    evidence = research_flow_service._build_codeintel_evidence(
+        tmp_path,
+        target_file="target.py",
+        task_desc="delegate codeintel evidence",
+    )
+
+    assert calls == [(tmp_path, "target.py", "delegate codeintel evidence")]
+    assert evidence["risk_reason"] == ["leaf_delegate"]
 
 
 def test_build_hyper_execution_profile_boosts_hard_bug():
