@@ -1404,6 +1404,9 @@ def resume():
 @click.option("--output-json", is_flag=True)
 def delegate(task_name, report_file, output_json):
     """📡 [Supervisor] Decompose and delegate task to fleet."""
+    if not re.match(r"^[a-zA-Z0-9_\-\s]+$", task_name):
+        click.echo("❌ Invalid task name: only alphanumeric, spaces, dashes, and underscores allowed.")
+        sys.exit(1)
     res = subprocess.run([sys.executable, str(repo_root / "scripts/ops/supervisor_engine.py"), task_name], check=False)
     payload = build_completion_envelope(
         command_name="delegate",
@@ -1981,7 +1984,9 @@ def research_meta_opt(manifest_file, presets_file, report_file, max_wall_time_se
             cmd.append("--llm-baseline")
 
         click.echo(f"🧪 [Meta-Opt] ({idx}/{len(presets)}) preset={preset_name}")
-        proc = subprocess.run(cmd, cwd=repo_root, capture_output=True, text=True, check=False)
+        p = subprocess.Popen(cmd, cwd=repo_root, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+        stdout, stderr = p.communicate()
+        proc = subprocess.CompletedProcess(args=cmd, returncode=p.returncode, stdout=stdout, stderr=stderr)
 
         aggregates = {
             "algorithm_success_rate": 0.0,
