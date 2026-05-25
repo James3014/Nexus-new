@@ -3,7 +3,7 @@ import json
 import subprocess
 from types import SimpleNamespace
 from pathlib import Path
-from nexus.app import research_flow_service
+from nexus.app import research_flow_service, research_semantic_runtime
 from nexus.research.learn_mode import LearnModeService
 from nexus.research.flow import route_decider, signal_collector
 
@@ -3509,6 +3509,41 @@ def test_formal_report_includes_autoreason_discriminator_receipt(tmp_path: Path)
     assert "name=autoreason" in text
     assert "discriminator_fatal:A" in text
     assert "discriminator_critiques:AB:1" in text
+
+
+def test_semantic_runtime_facade_delegates_to_leaf_module(monkeypatch, tmp_path: Path):
+    calls = []
+
+    def fake_augment_semantic_runtime_capabilities(**kwargs):
+        calls.append(kwargs)
+        kwargs["nexus_usage_trace"].setdefault("capabilities", {})["semantic_leaf_called"] = True
+
+    monkeypatch.setattr(
+        research_semantic_runtime,
+        "augment_semantic_runtime_capabilities",
+        fake_augment_semantic_runtime_capabilities,
+    )
+
+    nexus_usage_trace = {"capabilities": {}}
+    research_flow_service._augment_semantic_runtime_capabilities(
+        repo_root=tmp_path,
+        task_id="demo",
+        task_desc="delegate semantic runtime receipts",
+        task_type="public_test_repair",
+        target_file="target.py",
+        receipt_slug="demo",
+        selected_capabilities={"formal_report"},
+        nexus_usage_trace=nexus_usage_trace,
+        route={},
+        asi_ledger=[],
+        plateau={},
+        artifact_verified=True,
+        normalized_success_criteria="patch_and_tests_pass",
+    )
+
+    assert len(calls) == 1
+    assert calls[0]["receipt_slug"] == "demo"
+    assert nexus_usage_trace["capabilities"]["semantic_leaf_called"] is True
 
 
 def test_runtime_receipt_plan_adds_runtime_autoreason_success():
