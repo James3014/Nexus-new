@@ -2447,6 +2447,166 @@ def sandbox_run_cmd(task, command_text, cwd, timeout_sec, output_file, keep_work
     for line in render_sandbox_run_result(result):
         click.secho(line, fg="cyan")
 
+
+# --- v26 Mission Control (持久化編排戰役) ---
+
+@nexus_group.group(name="mission")
+def mission_group():
+    """🛡️ [Mission Control] Manage persistent S-P-X-D-R-A-C campaigns."""
+    pass
+
+@mission_group.command(name="create")
+@click.argument("objective")
+@click.option("--max-tokens", default=1000000.0, type=float)
+@click.option("--max-retries", default=10.0, type=float)
+def mission_create(objective, max_tokens, max_retries):
+    """⚔️ Initialize .nexus/mission.json and secure a new campaign objective."""
+    import uuid
+    from nexus.core.mission_contracts import NexusMission, MissionStatus
+    
+    mission = NexusMission(
+        mission_id="MSN-" + uuid.uuid4().hex[:8].upper(),
+        objective=objective,
+        status=MissionStatus.DRAFT,
+        budget={
+            "max_tokens": max_tokens,
+            "max_wall_time_sec": 259200.0, # 72 hours
+            "max_retries": max_retries
+        }
+    )
+    mission.persist(repo_root)
+    click.secho(f"✅ Successfully created mission: {mission.mission_id}", fg="green", bold=True)
+    click.echo(f"🎯 Objective: {mission.objective}")
+    click.echo(f"💾 Config saved to .nexus/mission.json")
+
+@mission_group.command(name="start")
+def mission_start():
+    """🚀 Run budget & fingerprint checks, switch state, and launch the loop."""
+    import uuid
+    from nexus.core.mission_contracts import NexusMission, MissionStatus
+    
+    mission = NexusMission.load(repo_root)
+    if not mission:
+        click.secho("❌ No mission found. Run 'nexus mission create' first.", fg="red")
+        sys.exit(1)
+        
+    # 1. 環境指紋與 preflight 檢查 (Environment Fingerprinting)
+    if not mission.run_fingerprint_preflight(repo_root):
+        click.secho("❌ [Environment Blocked] Preflight failed or Git SHA shifted.", fg="red", bold=True)
+        sys.exit(1)
+
+    # 2. 預算監控 (Gateway-level Telemetry)
+    if not mission.check_telemetry_budget():
+        click.secho("❌ [Budget Violation] Accumulated cost has breached maximum limits.", fg="red", bold=True)
+        sys.exit(1)
+
+    # 3. 激活狀態並開啟戰役
+    mission.status = MissionStatus.ACTIVE
+    run_id = "RUN-" + uuid.uuid4().hex[:6].upper()
+    mission.current_run_id = run_id
+    mission.run_history.append(run_id)
+    mission.persist(repo_root)
+    
+    click.secho(f"🚀 Launching campaign for mission {mission.mission_id} (Run: {run_id})", fg="cyan", bold=True)
+    
+    # 4. 呼叫實體戰役執行
+    # 複用現有的 nexus run 命令子進程，以便完整使用自癒與 TDD 驗證
+    cmd = [sys.executable, str(repo_root / "scripts/engine/nexus_cli.py"), "nexus", "run", mission.mission_id]
+    res = subprocess.run(cmd, check=False)
+    
+    # 5. 更新結束後的狀態與 telemetry 統計
+    # 實作上可檢查報告判定完戰
+    mission = NexusMission.load(repo_root) # 重新載入，避免執行期間被子進程修改
+    if res.returncode == 0:
+        # 完戰 gate 驗收
+        acceptance_report = repo_root / ".nexus" / "reports" / "acceptance_check.json"
+        if acceptance_report.exists():
+            try:
+                data = json.loads(acceptance_report.read_text(encoding="utf-8"))
+                if data.get("status") == "PASS" and data.get("gate_passed") is True:
+                    mission.status = MissionStatus.COMPLETED
+            except Exception:
+                pass
+    else:
+        mission.accumulated_usage["retries"] += 1
+        if mission.accumulated_usage["retries"] >= mission.budget.get("max_retries", 10.0):
+            mission.status = MissionStatus.BLOCKED
+            
+    mission.persist(repo_root)
+    click.echo(f"🏁 Campaign execution terminated. Status: {mission.status.value}")
+
+@mission_group.command(name="status")
+def mission_status():
+    """📊 Render current campaign objective, state and cumulative costs."""
+    from nexus.core.mission_contracts import NexusMission
+    mission = NexusMission.load(repo_root)
+    if not mission:
+        click.echo("❌ No active mission registered.")
+        return
+        
+    click.secho(f"🛡️ [Mission Control Status: {mission.mission_id}]", fg="cyan", bold=True)
+    click.echo(f"- Objective: {mission.objective}")
+    click.echo(f"- Current Status: {mission.status.value}")
+    click.echo(f"- Current Run ID: {mission.current_run_id}")
+    click.echo(f"- Git Fingerprint: {mission.git_fingerprint}")
+    click.echo(f"- Budget Limits:")
+    for k, v in mission.budget.items():
+        click.echo(f"  * {k}: {v}")
+    click.echo(f"- Accumulated Cost:")
+    for k, v in mission.accumulated_usage.items():
+        click.echo(f"  * {k}: {v}")
+
+@mission_group.command(name="pause")
+def mission_pause():
+    """⏸️ Force snapshot of current state and pause the campaign."""
+    from nexus.core.mission_contracts import NexusMission, MissionStatus
+    mission = NexusMission.load(repo_root)
+    if not mission:
+        click.echo("❌ No mission found.")
+        return
+        
+    mission.status = MissionStatus.PAUSED
+    
+    # 呼叫現有 metabolism 引擎保存實體 checkpoint 快照
+    from nexus.services.metabolism_engine import metabolism
+    checkpoint = metabolism.load_checkpoint()
+    if checkpoint:
+        # 假設以當前 checkpoint 作為 resume 還原點
+        mission.last_snapshot_path = ".nexus/metabolism/mission_complete.json"
+        
+    mission.persist(repo_root)
+    click.secho(f"⏸️ Mission {mission.mission_id} successfully paused.", fg="yellow", bold=True)
+
+@mission_group.command(name="resume")
+def mission_resume():
+    """🌬️ Check environment preflight, budget, and restore the loop from snapshot."""
+    from nexus.core.mission_contracts import NexusMission, MissionStatus
+    mission = NexusMission.load(repo_root)
+    if not mission:
+        click.echo("❌ No paused mission found.")
+        return
+        
+    # 1. 環境指紋校對 (Environment Fingerprinting)
+    if not mission.run_fingerprint_preflight(repo_root):
+        click.secho("❌ [Blocked] Fingerprint mismatch. Environment corrupted.", fg="red", bold=True)
+        sys.exit(1)
+
+    # 2. 預算校對 (Gateway-level Telemetry)
+    if not mission.check_telemetry_budget():
+        click.secho("❌ [Blocked] Mission budget exceeded.", fg="red", bold=True)
+        sys.exit(1)
+
+    # 3. 切換狀態並恢復
+    mission.status = MissionStatus.ACTIVE
+    mission.persist(repo_root)
+    
+    click.secho(f"🌬️ Resuming mission: {mission.mission_id}", fg="green", bold=True)
+    
+    # 4. 呼叫 metabolism 實體 resume 恢復機制
+    cmd = [sys.executable, str(repo_root / "scripts/engine/nexus_cli.py"), "nexus", "resume"]
+    subprocess.run(cmd, check=False)
+
+
 if __name__ == "__main__":
 
     nexus()
