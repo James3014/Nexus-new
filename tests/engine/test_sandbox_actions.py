@@ -185,8 +185,8 @@ def test_default_sandbox_runner_blocks_python_external_socket(tmp_path: Path):
     )
 
     assert result.success is False
-    assert result.raw_result["network_allowed"] is False
-    assert result.raw_result["network_barrier"]["mode"] == "python_sitecustomize"
+    expected_mode = "os_level_sandbox_exec" if sys.platform == "darwin" else "python_sitecustomize"
+    assert result.raw_result["network_barrier"]["mode"] == expected_mode
     assert "Nexus sandbox blocked external network host: example.com:80" in result.raw_result["stderr"]
 
 
@@ -274,3 +274,27 @@ def test_sandbox_run_cli_passes_physical_contract_options(monkeypatch, tmp_path:
             },
         )
     ]
+
+
+def test_default_sandbox_runner_os_level_network_barrier_blocks_non_python_commands(tmp_path: Path):
+    # 此測試僅在支援 sandbox-exec 的 macOS 上執行實體網路阻斷驗證，其它系統跳過
+    if sys.platform != "darwin":
+        pytest.skip("OS-level network barrier utilizing sandbox-exec is only supported on macOS (darwin).")
+
+    # 執行一個試圖存取外部主機的非 Python shell 命令
+    result = run_sandbox_task(
+        tmp_path,
+        "block external shell curl",
+        command=["curl", "-I", "https://www.google.com"],
+        timeout_sec=5,
+    )
+
+    # 斷言其執行失敗
+    assert result.success is False
+    assert result.raw_result["network_allowed"] is False
+    assert result.raw_result["network_barrier"]["mode"] == "os_level_sandbox_exec"
+    assert result.raw_result["network_barrier"]["loopback_allowed"] is False
+    assert result.raw_result["network_barrier"]["external_allowed"] is False
+    # 退出碼應不為 0（在 sandbox-exec 封鎖下通常 curl 回傳 6 或 Operation not permitted 造成的失敗）
+    assert result.raw_result["exit_code"] != 0
+

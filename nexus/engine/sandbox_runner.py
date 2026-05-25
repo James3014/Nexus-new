@@ -8,6 +8,7 @@ import time
 import os
 import json
 import uuid
+import sys
 from dataclasses import dataclass
 from datetime import datetime, timezone
 
@@ -31,6 +32,21 @@ class SandboxRunner:
         self.project_root = project_root
         self.sandbox_base = project_root / ".nexus" / "sandbox"
         self.sandbox_base.mkdir(parents=True, exist_ok=True)
+
+        # 偵測 macOS 特有的 sandbox-exec 是否可用
+        self.has_sandbox_exec = False
+        if sys.platform == "darwin":
+            try:
+                res = subprocess.run(
+                    ["sandbox-exec", "-p", "(version 1) (allow default)", "true"],
+                    capture_output=True,
+                    text=True,
+                    timeout=2,
+                    check=False
+                )
+                self.has_sandbox_exec = res.returncode == 0
+            except Exception:
+                self.has_sandbox_exec = False
 
     def _copy_workspace(self, workspace_path: Path) -> None:
         ignored_names = {
@@ -252,8 +268,21 @@ socket.socket.connect = _guarded_socket_connect
             env["PYTHONPATH"] = os.pathsep.join(
                 part for part in [str(guard_dir), env.get("PYTHONPATH", "")] if part
             )
+            active_command = command_list
+            barrier_mode = "python_sitecustomize"
+            loopback_allowed = True
+
+            if self.has_sandbox_exec:
+                active_command = [
+                    "sandbox-exec",
+                    "-p",
+                    "(version 1) (allow default) (deny network-outbound)",
+                ] + command_list
+                barrier_mode = "os_level_sandbox_exec"
+                loopback_allowed = False
+
             proc = subprocess.run(
-                command_list,
+                active_command,
                 cwd=effective_cwd,
                 env=env,
                 capture_output=True,
@@ -310,8 +339,8 @@ socket.socket.connect = _guarded_socket_connect
                     "git_hooks_allowed": False,
                 },
                 "network_barrier": {
-                    "mode": "python_sitecustomize",
-                    "loopback_allowed": True,
+                    "mode": barrier_mode,
+                    "loopback_allowed": loopback_allowed,
                     "external_allowed": False,
                 },
             }
