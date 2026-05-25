@@ -1,8 +1,30 @@
-use syn::{self, File, Item, Visibility, Signature};
+use syn::{self, Item, Visibility, Signature};
 use std::collections::HashSet;
+use std::collections::HashMap;
+use std::sync::Mutex;
+use std::sync::OnceLock;
+use std::hash::{Hash, Hasher};
+use std::collections::hash_map::DefaultHasher;
+
+static AST_CACHE: OnceLock<Mutex<HashMap<u64, HashSet<String>>>> = OnceLock::new();
+
+fn get_source_hash(source: &str) -> u64 {
+    let mut hasher = DefaultHasher::new();
+    source.hash(&mut hasher);
+    hasher.finish()
+}
 
 /// Extracts all public item signatures (functions, structs, enums, traits) from source code.
 pub fn get_public_api_signatures(source: &str) -> Result<HashSet<String>, String> {
+    let hash = get_source_hash(source);
+    let cache = AST_CACHE.get_or_init(|| Mutex::new(HashMap::new()));
+    
+    if let Ok(map) = cache.lock() {
+        if let Some(sigs) = map.get(&hash) {
+            return Ok(sigs.clone());
+        }
+    }
+
     let file = syn::parse_file(source).map_err(|e| format!("Failed to parse Rust source: {}", e))?;
     let mut signatures = HashSet::new();
 
@@ -45,6 +67,10 @@ pub fn get_public_api_signatures(source: &str) -> Result<HashSet<String>, String
             }
             _ => {}
         }
+    }
+
+    if let Ok(mut map) = cache.lock() {
+        map.insert(hash, signatures.clone());
     }
 
     Ok(signatures)

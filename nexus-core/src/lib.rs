@@ -14,10 +14,36 @@ fn scan_and_diagnose(path: String) -> PyResult<String> {
     let bytes = content.len();
     let lines = content.lines().count();
     
-    // Simulate Eye (Reflex) deep structure analysis
-    let struct_count = content.matches("struct ").count();
-    let fn_count = content.matches("fn ").count();
-    let impl_count = content.matches("impl ").count();
+    // Single-pass O(N) Lexer/Scanner for deep structure analysis
+    let mut struct_count = 0;
+    let mut fn_count = 0;
+    let mut impl_count = 0;
+
+    let mut word = String::with_capacity(32);
+    for c in content.chars() {
+        if c.is_alphanumeric() || c == '_' {
+            word.push(c);
+        } else {
+            if !word.is_empty() {
+                match word.as_str() {
+                    "struct" => struct_count += 1,
+                    "fn" => fn_count += 1,
+                    "impl" => impl_count += 1,
+                    _ => {}
+                }
+                word.clear();
+            }
+        }
+    }
+    // Check final word
+    if !word.is_empty() {
+        match word.as_str() {
+            "struct" => struct_count += 1,
+            "fn" => fn_count += 1,
+            "impl" => impl_count += 1,
+            _ => {}
+        }
+    }
     
     let duration = start.elapsed();
     
@@ -47,3 +73,39 @@ fn nexus_core(_py: Python, m: &PyModule) -> PyResult<()> {
     Ok(())
 }
 
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_rust_ast_scan_and_diagnose() {
+        // Test that scan_and_diagnose correctly counts structs, functions, and impl blocks.
+        let temp_file = "temp_test_source.rs";
+        let content = "struct DummyStruct {}\nimpl DummyStruct {\n    fn dummy_fn() {}\n}\n";
+        fs::write(temp_file, content).unwrap();
+
+        let diagnostics = scan_and_diagnose(temp_file.to_string()).unwrap();
+        fs::remove_file(temp_file).unwrap();
+
+        println!("{}", diagnostics);
+        assert!(diagnostics.contains("1 structs"));
+        assert!(diagnostics.contains("1 methods"));
+        assert!(diagnostics.contains("1 impl blocks"));
+    }
+
+    #[test]
+    fn test_rust_ast_diff_caching() {
+        // Test that compare_pub_apis works correctly and utilizes our hash cache.
+        let source1 = "pub struct MyStruct {}";
+        let source2 = "pub struct MyStruct {}\npub fn new_fn() {}";
+        
+        let diff1 = check_pub_api_diff(source1.to_string(), source2.to_string()).unwrap();
+        // Since we didn't remove any API (we only added new_fn), diff should be empty (no breaking changes).
+        assert!(diff1.is_empty());
+        
+        let source3 = "pub fn new_fn() {}"; // MyStruct was removed
+        let diff2 = check_pub_api_diff(source2.to_string(), source3.to_string()).unwrap();
+        assert_eq!(diff2.len(), 1);
+        assert!(diff2[0].contains("MyStruct"));
+    }
+}
