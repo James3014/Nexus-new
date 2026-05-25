@@ -89,7 +89,12 @@ func (s *swarmServer) callBrainAudit(taskId string, context string) (string, err
 		"stop":      []string{"\n", "###"},
 	})
 	
-	resp, err := client.Post("http://localhost:8080/completion", "application/json", bytes.NewBuffer(payload))
+	brainUrl := os.Getenv("NEXUS_BRAIN_URL")
+	if brainUrl == "" {
+		brainUrl = "http://localhost:8080/completion"
+	}
+	
+	resp, err := client.Post(brainUrl, "application/json", bytes.NewBuffer(payload))
 	if err != nil {
 		return "", err
 	}
@@ -114,8 +119,11 @@ func PathExists(path string) bool {
 }
 
 func main() {
-	// 🛡️ v2.1d Hardened: 確保 UDS 位址格式正確性質分析內容性能
-	udsPath := "/tmp/nexus-core.sock"
+	// 🛡️ v2.1d Hardened: 確保 UDS 位址可配置化並防範鎖定衝突
+	udsPath := os.Getenv("NEXUS_CORE_SOCK")
+	if udsPath == "" {
+		udsPath = "/tmp/nexus-core.sock"
+	}
 
 	// 定義 UDS Dialer (Elite Standard)
 	dialer := func(ctx context.Context, addr string) (net.Conn, error) {
@@ -135,13 +143,20 @@ func main() {
 	defer conn.Close()
 	coreClient := pb.NewNexusCoreClient(conn)
 
-	lis, err := net.Listen("tcp", ":8517")
+	swarmPort := os.Getenv("NEXUS_SWARM_PORT")
+	if swarmPort == "" {
+		swarmPort = ":8517"
+	} else if !strings.HasPrefix(swarmPort, ":") {
+		swarmPort = ":" + swarmPort
+	}
+
+	lis, err := net.Listen("tcp", swarmPort)
 	if err != nil {
-		log.Fatalf("failed to listen: %v", err)
+		log.Fatalf("failed to listen on port %s: %v", swarmPort, err)
 	}
 	s := grpc.NewServer()
 	pb.RegisterNexusSwarmServer(s, &swarmServer{coreClient: coreClient})
-	fmt.Println("📡 [Nexus:Swarm] Bridge Bus listening on :8517 (Hardened/UDS/Elite)")
+	fmt.Printf("📡 [Nexus:Swarm] Bridge Bus listening on %s (Hardened/UDS/Elite)\n", swarmPort)
 	if err := s.Serve(lis); err != nil {
 		log.Fatalf("failed to serve: %v", err)
 	}
