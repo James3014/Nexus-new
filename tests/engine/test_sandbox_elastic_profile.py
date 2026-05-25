@@ -22,8 +22,8 @@ def test_sandbox_runner_builds_elastic_profile_syntax():
     assert "(version 1)" in profile
     assert "(deny default)" in profile
     assert "(deny network-outbound)" in profile
-    assert '(allow file-read* (literal "/tmp/allowed_read"))' in profile
-    assert '(allow file-write* (literal "/tmp/allowed_write"))' in profile
+    assert '(allow file-read* (subpath "/tmp/allowed_read"))' in profile
+    assert '(allow file-write* (subpath "/tmp/allowed_write"))' in profile
 
 
 def test_sandbox_runner_elastic_profile_enforces_kernel_isolation(tmp_path: Path):
@@ -77,3 +77,31 @@ def test_sandbox_runner_elastic_profile_enforces_kernel_isolation(tmp_path: Path
     assert result_bad["success"] is False
     assert not bad_file.exists()
     assert result_bad["exit_code"] != 0
+
+
+def test_sandbox_runner_auto_derives_elastic_profile_from_blast_radius(tmp_path: Path):
+    if sys.platform != "darwin":
+        pytest.skip("Elastic sandbox-exec kernel barrier is only supported on macOS (darwin).")
+
+    runner = SandboxRunner(tmp_path)
+
+    # 建立一個工作區外的 forbidden 目錄，和工作區內的 allowed 目錄
+    forbidden_outside_dir = tmp_path / "forbidden_outside"
+    forbidden_outside_dir.mkdir()
+
+    # 執行 run_task，但不傳入 elastic_profile，啟動自動推導演算法
+    bad_file = forbidden_outside_dir / "should_block.txt"
+    result = runner.run_task(
+        "auto elastic write outside",
+        command=["touch", str(bad_file)],
+        timeout_sec=5,
+        # 故意不傳入 elastic_profile，斷言系統會全自動推導並阻斷
+    )
+
+    # 斷言其執行被 OS 核心沙箱阻斷（退出碼不為 0，且文件未被建立）
+    assert result["success"] is False
+    assert not bad_file.exists()
+    assert result["exit_code"] != 0
+    assert result["network_barrier"]["mode"] == "os_level_sandbox_exec"
+    assert result["network_barrier"]["loopback_allowed"] is False
+

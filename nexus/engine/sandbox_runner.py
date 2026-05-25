@@ -190,14 +190,21 @@ socket.socket.connect = _guarded_socket_connect
         read_literals: list[str] | None = None,
         write_literals: list[str] | None = None,
     ) -> str:
-        """根據讀寫白名單動態拼接 macOS sandbox-exec 的 Profile"""
-        profile = ["(version 1)", "(deny default)", "(deny network-outbound)"]
+        """根據讀寫白名單動態拼接 macOS sandbox-exec 的 Profile (使用 subpath 語意支援子目錄加載)"""
+        profile = [
+            "(version 1)",
+            "(deny default)",
+            "(deny network-outbound)",
+            "(allow process-fork)",
+            "(allow process-exec*)",
+            "(allow file-read*)",
+        ]
         if read_literals:
             for path in read_literals:
-                profile.append(f'(allow file-read* (literal "{path}"))')
+                profile.append(f'(allow file-read* (subpath "{path}"))')
         if write_literals:
             for path in write_literals:
-                profile.append(f'(allow file-write* (literal "{path}"))')
+                profile.append(f'(allow file-write* (subpath "{path}"))')
         return "\n".join(profile)
 
     def run_task(
@@ -290,21 +297,68 @@ socket.socket.connect = _guarded_socket_connect
 
             if self.has_sandbox_exec:
                 if elastic_profile:
-                    active_command = [
-                        "sandbox-exec",
-                        "-p",
-                        elastic_profile,
-                    ] + command_list
-                    barrier_mode = "os_level_sandbox_exec"
-                    loopback_allowed = False
+                    applied_profile = elastic_profile
                 else:
-                    active_command = [
-                        "sandbox-exec",
-                        "-p",
-                        "(version 1) (allow default) (deny network-outbound)",
-                    ] + command_list
-                    barrier_mode = "os_level_sandbox_exec"
-                    loopback_allowed = False
+                    # 動態影響路徑 (Blast Radius) 自動推導演算法
+                    read_paths = [
+                        "/usr",
+                        "/bin",
+                        "/sbin",
+                        "/private",
+                        "/System",
+                        "/Library",
+                        str(workspace_path),
+                    ]
+                    if Path("/opt/homebrew").exists():
+                        read_paths.append("/opt/homebrew")
+                    # 收集所有 Python 運行相關的路徑
+                    python_paths = [
+                        sys.prefix,
+                        sys.base_prefix,
+                        sys.exec_prefix,
+                        sys.base_exec_prefix,
+                    ]
+                    for p in python_paths:
+                        if p:
+                            read_paths.append(p)
+                            try:
+                                resolved = str(Path(p).resolve())
+                                if resolved not in read_paths:
+                                    read_paths.append(resolved)
+                            except Exception:
+                                pass
+
+                    # 額外確保 Python 實體執行檔與符號連結所在之 resolve 目錄在白名單中
+                    try:
+                        real_exec_dir = str(Path(sys.executable).resolve().parent)
+                        if real_exec_dir not in read_paths:
+                            read_paths.append(real_exec_dir)
+                        sym_exec_dir = str(Path(sys.executable).parent)
+                        if sym_exec_dir not in read_paths:
+                            read_paths.append(sym_exec_dir)
+                    except Exception:
+                        pass
+
+                    write_paths = [
+                        str(workspace_path),
+                        "/tmp",
+                        "/private/tmp",
+                    ]
+                    if output_path:
+                        write_paths.append(str(output_path.parent))
+
+                    applied_profile = self.build_elastic_profile(
+                        read_literals=read_paths,
+                        write_literals=write_paths
+                    )
+
+                active_command = [
+                    "sandbox-exec",
+                    "-p",
+                    applied_profile,
+                ] + command_list
+                barrier_mode = "os_level_sandbox_exec"
+                loopback_allowed = False
 
             proc = subprocess.run(
                 active_command,
