@@ -20,14 +20,19 @@ class NodeRecord:
     tls_fingerprint: str = ""
 
 class NodeRegistry:
-    def __init__(self, db_path: Path) -> None:
+    def __init__(self, db_path: Path, timeout: float = 10.0) -> None:
         self.db_path = db_path
+        self.timeout = timeout
         self._init_db()
+
+    def _get_conn(self) -> sqlite3.Connection:
+        conn = sqlite3.connect(str(self.db_path), timeout=self.timeout)
+        conn.execute("PRAGMA journal_mode=WAL")
+        return conn
 
     def _init_db(self) -> None:
         self.db_path.parent.mkdir(parents=True, exist_ok=True)
-        with sqlite3.connect(str(self.db_path)) as conn:
-            conn.execute("PRAGMA journal_mode=WAL")
+        with self._get_conn() as conn:
             conn.execute('''
                 CREATE TABLE IF NOT EXISTS nodes (
                     node_id TEXT PRIMARY KEY,
@@ -43,7 +48,7 @@ class NodeRegistry:
             conn.commit()
 
     def register(self, node: NodeRecord) -> None:
-        with sqlite3.connect(str(self.db_path)) as conn:
+        with self._get_conn() as conn:
             conn.execute('''
                 INSERT INTO nodes (node_id, host, port, status, last_heartbeat, load, capabilities, tls_fingerprint)
                 VALUES (?, ?, ?, ?, ?, ?, ?, ?)
@@ -62,14 +67,14 @@ class NodeRegistry:
             conn.commit()
 
     def deregister(self, node_id: str) -> None:
-        with sqlite3.connect(str(self.db_path)) as conn:
+        with self._get_conn() as conn:
             conn.execute("DELETE FROM nodes WHERE node_id = ?", (node_id,))
             conn.commit()
 
     def discover(self) -> List[NodeRecord]:
         self._prune_stale_nodes()
         records = []
-        with sqlite3.connect(str(self.db_path)) as conn:
+        with self._get_conn() as conn:
             conn.row_factory = sqlite3.Row
             cursor = conn.execute("SELECT * FROM nodes WHERE status = 'ONLINE' OR status = 'DEGRADED'")
             for row in cursor:
@@ -91,7 +96,7 @@ class NodeRegistry:
 
     def heartbeat(self, node_id: str, load: float = 0.0, capabilities: Optional[List[str]] = None) -> None:
         now = time.time()
-        with sqlite3.connect(str(self.db_path)) as conn:
+        with self._get_conn() as conn:
             if capabilities is not None:
                 caps_json = json.dumps(capabilities)
                 conn.execute('''
@@ -109,7 +114,7 @@ class NodeRegistry:
 
     def _prune_stale_nodes(self) -> None:
         now = time.time()
-        with sqlite3.connect(str(self.db_path)) as conn:
+        with self._get_conn() as conn:
             # > 60s -> DEGRADED
             conn.execute("UPDATE nodes SET status = 'DEGRADED' WHERE status = 'ONLINE' AND last_heartbeat < ?", (now - 60,))
             # > 300s -> OFFLINE
@@ -118,7 +123,7 @@ class NodeRegistry:
 
     def get_node(self, node_id: str) -> Optional[NodeRecord]:
         self._prune_stale_nodes()
-        with sqlite3.connect(str(self.db_path)) as conn:
+        with self._get_conn() as conn:
             conn.row_factory = sqlite3.Row
             cursor = conn.execute("SELECT * FROM nodes WHERE node_id = ?", (node_id,))
             row = cursor.fetchone()

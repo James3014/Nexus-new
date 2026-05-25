@@ -7,14 +7,19 @@ import logging
 logger = logging.getLogger(__name__)
 
 class CreditLedger:
-    def __init__(self, db_path: Path) -> None:
+    def __init__(self, db_path: Path, timeout: float = 10.0) -> None:
         self.db_path = db_path
+        self.timeout = timeout
         self._init_db()
+
+    def _get_conn(self) -> sqlite3.Connection:
+        conn = sqlite3.connect(str(self.db_path), timeout=self.timeout)
+        conn.execute("PRAGMA journal_mode=WAL")
+        return conn
 
     def _init_db(self) -> None:
         self.db_path.parent.mkdir(parents=True, exist_ok=True)
-        with sqlite3.connect(str(self.db_path)) as conn:
-            conn.execute("PRAGMA journal_mode=WAL")
+        with self._get_conn() as conn:
             # Create accounts table
             conn.execute('''
                 CREATE TABLE IF NOT EXISTS accounts (
@@ -38,7 +43,7 @@ class CreditLedger:
             conn.commit()
 
     def check_balance(self, tenant_id: str) -> float:
-        with sqlite3.connect(str(self.db_path)) as conn:
+        with self._get_conn() as conn:
             cursor = conn.execute("SELECT balance FROM accounts WHERE tenant_id = ?", (tenant_id,))
             row = cursor.fetchone()
             if row:
@@ -59,7 +64,7 @@ class CreditLedger:
         seller_share = price * 0.9
         fee = price - seller_share
 
-        with sqlite3.connect(str(self.db_path)) as conn:
+        with self._get_conn() as conn:
             try:
                 # Deduct buyer
                 conn.execute("UPDATE accounts SET balance = balance - ? WHERE tenant_id = ?", (price, buyer_id))
@@ -81,7 +86,7 @@ class CreditLedger:
                 return False
 
     def log(self, limit: int = 50) -> List[Dict[str, Any]]:
-        with sqlite3.connect(str(self.db_path)) as conn:
+        with self._get_conn() as conn:
             conn.row_factory = sqlite3.Row
             cursor = conn.execute("SELECT * FROM transactions ORDER BY timestamp DESC LIMIT ?", (limit,))
             return [dict(row) for row in cursor]
