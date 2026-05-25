@@ -3657,3 +3657,9 @@ version_scope:
 - **Root Cause**: The seam itself was valid, but the facade regression test name was inferred from behavior instead of retrieved from the live test file.
 - **Action Taken**: Added `build_verification_only_rescue_report(...)`, routed `_run_original_verification_rescue()` through it, and reran the exact existing nodeid `test_cross_module_hyper_failure_can_rescue_with_original_artifact_verification`.
 - **Prevention**: Before running focused tests in long refactor slices, use `rg -n "def test_.*<stable_keyword>"` to retrieve exact nodeids. Do not guess test names from behavior summaries.
+
+## 2026-05-25: Enforced Briefings Must Start As Bootstrap Candidates
+- **Phenomenon**: The first v2.9 enforced briefing guard tests failed because `_nexus_enforced_briefing.sh` generated `[NEXUS v24 ACTIVE]` and `docs/AGENT_MANDATORY_PROTOCOL.md` still required `[NEXUS v22 ACTIVE]` before any preflight or wearing evidence.
+- **Root Cause**: The runtime briefing generator and the human-readable protocol had drifted from the current report-trust rule: Nexus ACTIVE is a proven state, not a startup slogan.
+- **Action Taken**: Updated the generator, committed briefing, and mandatory protocol to start from `[NEXUS v26 BOOTSTRAP-CANDIDATE]`, and added `tests/ops/test_nexus_enforced_briefing.py` plus impact-map coverage.
+- **Prevention**: Any future Nexus-wearing protocol change must test the generator output, not only the checked-in report. Lock explicit guardrail strings for `FAIL_CLOSED != SUCCESS`, `INFRA_INVALID`, `ROOT_ARTIFACT_LEAK`, ambiguous workspace mutations, and deterministic local rescue claim wording. Because `.nexus` is ignored, force-add only the exact tracked briefing path when its generated content intentionally changes.
