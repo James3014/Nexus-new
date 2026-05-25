@@ -60,13 +60,15 @@ func (s *swarmServer) RunPhase(ctx context.Context, req *pb.PhaseRequest) (*pb.P
 	// (實體執行略，假設成功)
 
 	// 🛡️ v2.2 Neural Brain Audit (Bonsai-8B @ 8080)
-	// 執行後置影子審計，提供戰甲級重構建議性能分析內容分析性能。內容及其其性質分析。
-	auditSummary := "Bridge Slice Verified."
-	if brainResp, err := s.callBrainAudit(req.TaskId, "Plan phase completed successfully."); err == nil {
-		auditSummary = fmt.Sprintf("✅ [Neural:8B Audit] %s", brainResp)
-	} else {
-		fmt.Printf("⚠️ [Swarm:Audit] Brain Proxy Offline: %v\n", err)
-	}
+	// 執行後置影子審計，改為高併發非阻塞異步 goroutine 調度。
+	auditSummary := "Bridge Slice Verified. (Async Audit Triggered)"
+	go func() {
+		if brainResp, err := s.callBrainAudit(req.TaskId, "Plan phase completed successfully."); err == nil {
+			fmt.Printf("✅ [Swarm:AsyncAudit] Success: %s\n", brainResp)
+		} else {
+			fmt.Printf("⚠️ [Swarm:AsyncAudit] Failed / Offline: %v\n", err)
+		}
+	}()
 	
 	return &pb.PhaseOutcome{
 		PhaseId: req.Phase.String(),
