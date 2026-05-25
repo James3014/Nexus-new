@@ -345,3 +345,21 @@ def test_verify_claims_report_integrity_passes_with_nexus_and_worktree_evidence(
         require_worktree_delta=True,
     )
     assert report["passed"] is True
+
+
+def test_verify_claims_git_timeout_handling(tmp_path: Path) -> None:
+    from unittest.mock import patch
+    _init_git_repo(tmp_path)
+    _write_acceptance(tmp_path, status="PASS", gate_passed=True)
+
+    # 模擬 git rev-parse HEAD 時發生 TimeoutExpired 超時
+    with patch("subprocess.check_output", side_effect=subprocess.TimeoutExpired(cmd=["git", "rev-parse", "HEAD"], timeout=15.0)):
+        report = verify_claims(
+            tmp_path,
+            required_paths=[],
+            require_clean=True, # 需要執行 git status
+            require_acceptance_pass=True,
+        )
+        # 由於超時，git 執行失敗，安全閘門應當返回 Fail (passed=False) 而非卡死
+        assert report["passed"] is False
+

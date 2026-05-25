@@ -14,8 +14,20 @@ from nexus.delivery.report_claims import verify_claims_core
 
 
 def _run_git(project_root: Path, args: List[str]) -> str:
+    import time
+    # Proactive self-healing retry logic for transient .git/index.lock
+    lock_path = project_root / ".git" / "index.lock"
+    for _ in range(5):
+        if not lock_path.exists():
+            break
+        time.sleep(0.2)
     try:
-        out = subprocess.check_output(["git", *args], cwd=str(project_root), stderr=subprocess.DEVNULL)
+        out = subprocess.check_output(
+            ["git", *args], 
+            cwd=str(project_root), 
+            stderr=subprocess.DEVNULL,
+            timeout=15.0 # Fail-safe strict timeout to prevent infinite blocking
+        )
         return out.decode("utf-8", errors="replace").rstrip("\n")
     except Exception:
         return ""
