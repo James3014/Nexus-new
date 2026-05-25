@@ -47,6 +47,7 @@
 | scripts/engine/commands/sandbox_actions.py | tests/engine/test_sandbox_actions.py | active | medium | sandbox_cli_action_and_physical_runner_contract |
 | scripts/ops/ci_gate.py | tests/ops/test_ci_gate_report_trust_audit.py, tests/ops/test_ci_gate_closeout_contract.py, tests/ops/test_ci_gate_wiki_sync_block.py | active | high | governance |
 | scripts/ops/_nexus_enforced_briefing.sh | tests/ops/test_nexus_enforced_briefing.py | active | high | enforced_agent_briefing_contract |
+| scripts/ops/run_gemini_nexus_round.sh | tests/ops/test_nexus_enforced_briefing.py | active | high | enforced_agent_briefing_contract |
 | .nexus/reports/enforced_agent_briefing.md | tests/ops/test_nexus_enforced_briefing.py | active | high | enforced_agent_briefing_contract |
 | docs/AGENT_MANDATORY_PROTOCOL.md | tests/ops/test_nexus_enforced_briefing.py, tests/services/test_continuous_learning.py | active | high | mandatory_agent_protocol_contract |
 | scripts/ops/check_skill_catalog_policy.py | tests/learning/test_skill_catalog.py, tests/ops/test_ci_gate_report_trust_audit.py | active | high | skill_catalog_governance |

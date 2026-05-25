@@ -3669,3 +3669,9 @@ version_scope:
 - **Root Cause**: Prior extraction added the leaf Module and behavior tests, but did not prove the compatibility facade actually delegated to the leaf seam. The facade kept duplicated receipt-writing, ASI, scout, external-doc, and formal-report logic.
 - **Action Taken**: Replaced the facade body with a thin delegation to `research_semantic_runtime.augment_semantic_runtime_capabilities(...)`, kept `_write_runtime_receipt_json` and `_stringify_claims` compatibility aliases, and reran discriminator receipt behavior tests.
 - **Prevention**: For Research Flow leaf extractions, add a facade-delegation test that monkeypatches the leaf Module before declaring the old helper a physical alias. Complexity scans must be scoped to `nexus/` or `scripts/` and must exclude vendored or forbidden benchmark trees before their findings are used as refactor evidence.
+
+## 2026-05-25: Delegated Gemini Rounds Must Inherit Current Enforced Briefing
+- **Phenomenon**: Before sending a refactor slice to Gemini 3 Flash, a new contract test failed because `run_gemini_nexus_round.sh` still injected a hard-coded `[NEXUS v22 ACTIVE]` preamble even though the enforced briefing generator had moved to v2.9 bootstrap-candidate semantics.
+- **Root Cause**: The launcher and briefing generator had been updated separately, but the delegated-round runner carried its own stale identity preamble.
+- **Action Taken**: Changed the round runner to read `.nexus/reports/enforced_agent_briefing.md`, generating it if missing, and appended only task-specific delegation constraints.
+- **Prevention**: Any enforced-agent identity change must test both the generated briefing and every delegating runner that prepends model context. A round runner must not hard-code an ACTIVE marker; it must inherit the current briefing contract.

@@ -42,3 +42,12 @@ def test_committed_protocol_matches_runtime_briefing_guardrails():
     assert "FAIL_CLOSED != SUCCESS" in protocol
     assert "INFRA_INVALID" in protocol
     assert "ROOT_ARTIFACT_LEAK" in protocol
+
+
+def test_gemini_round_runner_uses_enforced_briefing_not_legacy_active_preamble():
+    runner = Path("scripts/ops/run_gemini_nexus_round.sh").read_text(encoding="utf-8")
+
+    assert "[NEXUS v22 ACTIVE]" not in runner
+    assert "_nexus_enforced_briefing.sh" in runner
+    assert 'cat "$BRIEFING_PATH"' in runner
+    assert "NEXUS_BOOTSTRAP_INCOMPLETE" in runner

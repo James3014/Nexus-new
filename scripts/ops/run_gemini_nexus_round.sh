@@ -74,18 +74,19 @@ if payload["status"] != "ok":
     raise SystemExit(4)
 PY
 
-# Always force Nexus armor context into delegated Gemini tasks.
-NEXUS_PREAMBLE="$(cat <<'EOF'
-[NEXUS v22 ACTIVE]
+# Always force the current Nexus armor contract into delegated Gemini tasks.
+BRIEFING_PATH="${NEXUS_ENFORCED_BRIEFING_PATH:-.nexus/reports/enforced_agent_briefing.md}"
+if [[ ! -f "$BRIEFING_PATH" ]]; then
+  BRIEFING_PATH="$(bash scripts/ops/_nexus_enforced_briefing.sh "$BRIEFING_PATH")"
+fi
+NEXUS_PREAMBLE="$(cat "$BRIEFING_PATH")
 
-Mandatory operating contract:
-1. Read and follow /Users/jameschen/Workspace/nexus/AGENTS.md and /Users/jameschen/Workspace/nexus/MUSE_PROTO.md.
-2. Execute work through Nexus entrypoints (prefer: uv run scripts/engine/nexus_cli.py ...).
-3. Do not claim completion without command evidence.
-4. Provide: modified files, commands executed, key outputs, residual risks.
-5. If gates fail, report NOT DONE and provide next-round plan.
-EOF
-)"
+Delegated round contract:
+1. Start as NEXUS_BOOTSTRAP_INCOMPLETE until command evidence proves bootstrap and wearing.
+2. Do not use git stash, git clean, git restore, kill, pkill, live provider calls, remote clone, or unrelated file cleanup.
+3. Change only the allowed files named by the task prompt.
+4. Provide modified files, commands executed, key outputs, and residual risks.
+5. If gates fail, report NOT DONE and provide next-round plan."
 
 MERGED_PROMPT_FILE="$(mktemp /tmp/nexus_gemini_prompt.XXXXXX.md)"
 trap 'rm -f "$MERGED_PROMPT_FILE"' EXIT
