@@ -63,19 +63,48 @@ def fuse_hybrid_retrieval_results(
     candidates: list[Mapping[str, Any]],
 ) -> dict[str, Any]:
     blockers = list(query_receipt.get("blockers", []) or [])
-    scored = [_score_candidate(candidate, query_receipt=query_receipt) for candidate in candidates]
+    
+    # 1. 根據原始分數計算 BM25 與 Dense 的降序排序 Rank (1-indexed)
+    sorted_by_bm25 = sorted(
+        candidates,
+        key=lambda c: _float_score(c.get("bm25_score", c.get("bm25"))) or 0.0,
+        reverse=True,
+    )
+    bm25_ranks = {str(c.get("source_id")): rank for rank, c in enumerate(sorted_by_bm25, start=1)}
+    
+    sorted_by_dense = sorted(
+        candidates,
+        key=lambda c: _float_score(c.get("dense_score", c.get("dense"))) or 0.0,
+        reverse=True,
+    )
+    dense_ranks = {str(c.get("source_id")): rank for rank, c in enumerate(sorted_by_dense, start=1)}
+
+    # 2. 調用 _score_candidate 計算評分，傳入各自推導之 Rank 資訊
+    scored = [
+        _score_candidate(
+            candidate,
+            query_receipt=query_receipt,
+            bm25_rank=bm25_ranks.get(str(candidate.get("source_id")), len(candidates) + 1),
+            dense_rank=dense_ranks.get(str(candidate.get("source_id")), len(candidates) + 1),
+        )
+        for candidate in candidates
+    ]
+    
     for index, candidate in enumerate(scored):
         for blocker in candidate.pop("_blockers"):
             blockers.append(f"candidate_{index}:{blocker}")
+            
     top_k = max(0, int(query_receipt.get("top_k") or 0))
     ranked = sorted(scored, key=lambda item: item["score_components"]["fusion"], reverse=True)
     selected_ids = {item["source_id"] for item in ranked[:top_k]}
     results: list[dict[str, Any]] = []
+    
     for rank, item in enumerate(ranked, start=1):
         selected = item["source_id"] in selected_ids and not blockers
         item["selected"] = selected
         item["selected_reason"] = "top_k_hybrid_fusion" if selected else f"rank_{rank}_outside_top_k_or_blocked"
         results.append(item)
+        
     receipt = build_retrieval_receipt(
         query=str(query_receipt.get("query") or ""),
         index_snapshot_id=str(query_receipt.get("index_snapshot_id") or ""),
@@ -118,13 +147,20 @@ def _query_blockers(query: HybridRetrievalQuery) -> list[str]:
     return sorted(set(blockers))
 
 
-def _score_candidate(candidate: Mapping[str, Any], *, query_receipt: Mapping[str, Any]) -> dict[str, Any]:
+def _score_candidate(
+    candidate: Mapping[str, Any],
+    *,
+    query_receipt: Mapping[str, Any],
+    bm25_rank: int = 1,
+    dense_rank: int = 1,
+) -> dict[str, Any]:
     blockers: list[str] = []
     source_id = str(candidate.get("source_id") or "")
     source_path = str(candidate.get("source_path") or "")
     chunk_hash = str(candidate.get("chunk_hash") or "")
     bm25 = _float_score(candidate.get("bm25_score", candidate.get("bm25")))
     dense = _float_score(candidate.get("dense_score", candidate.get("dense")))
+    
     if not source_id:
         blockers.append("missing_source_id")
     if not source_path:
@@ -137,10 +173,19 @@ def _score_candidate(candidate: Mapping[str, Any], *, query_receipt: Mapping[str
     if dense is None:
         blockers.append("missing_dense_score")
         dense = 0.0
+        
     bm25_weight = float(query_receipt.get("bm25_weight") or 0.0)
     dense_weight = float(query_receipt.get("dense_weight") or 0.0)
     total_weight = bm25_weight + dense_weight
-    fusion = 0.0 if total_weight <= 0 else ((bm25 * bm25_weight) + (dense * dense_weight)) / total_weight
+    
+    # 🧪 RRF (Reciprocal Rank Fusion) 核心排名倒數融合公式 (k = 60)
+    if total_weight <= 0:
+        fusion = 0.0
+    else:
+        rrf_bm25 = bm25_weight / (60.0 + bm25_rank)
+        rrf_dense = dense_weight / (60.0 + dense_rank)
+        fusion = (rrf_bm25 + rrf_dense) / total_weight
+        
     return {
         "source_id": source_id,
         "source_path": source_path,
@@ -148,6 +193,8 @@ def _score_candidate(candidate: Mapping[str, Any], *, query_receipt: Mapping[str
         "score_components": {
             "bm25": round(bm25, 6),
             "dense": round(dense, 6),
+            "bm25_rank": bm25_rank,
+            "dense_rank": dense_rank,
             "fusion": round(fusion, 6),
         },
         "_blockers": blockers,
