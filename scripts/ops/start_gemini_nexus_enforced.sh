@@ -17,6 +17,10 @@ python3 scripts/ops/nexus_startup_contract_check.py || {
   echo "❌ [ENFORCEMENT-BLOCK] Startup Contract FAILED. Agent cannot proceed."
   exit 1
 }
+# `NEXUS_RUNNER` is only a startup-contract input. Keeping it in the
+# environment changes Gemini CLI auth/headless behavior and can trigger an
+# interactive browser prompt inside delegated rounds.
+unset NEXUS_RUNNER
 
 if [[ $# -ge 1 ]]; then
   PROMPT_FILE="$1"

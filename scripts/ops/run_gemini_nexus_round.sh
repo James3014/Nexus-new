@@ -26,53 +26,19 @@ if [[ ! -x "$GEMINI_BIN" ]]; then
   echo "Gemini binary not found or not executable: $GEMINI_BIN"
   exit 4
 fi
-
+UV_BIN="${NEXUS_UV_BIN:-/Users/jameschen/.local/bin/uv}"
+if [[ ! -x "$UV_BIN" ]]; then
+  echo "uv binary not found or not executable: $UV_BIN"
+  exit 5
+fi
 echo "[Gemini+Nexus] preflight..."
-python3 - <<'PY'
-import json, subprocess, time
-from pathlib import Path
-
-gemini_bin = "/Users/jameschen/.npm-global/bin/gemini"
-report_path = Path(".nexus/reports/gemini_preflight_round.json")
-report_path.parent.mkdir(parents=True, exist_ok=True)
-
-start = time.time()
-def _as_text(v):
-    if v is None:
-        return ""
-    if isinstance(v, bytes):
-        return v.decode("utf-8", errors="replace")
-    return str(v)
-
-try:
-    proc = subprocess.run(
-        [gemini_bin, "-m", "gemini-3-flash-preview", "-y", "--output-format", "text", "-p", "reply with exactly: OK"],
-        capture_output=True,
-        text=True,
-        timeout=60,
-        cwd=str(Path.cwd()),
-    )
-    out = _as_text(proc.stdout) + _as_text(proc.stderr)
-    ok = proc.returncode == 0 and "OK" in out
-    payload = {
-        "status": "ok" if ok else "fail",
-        "reason": "preflight_ok" if ok else "preflight_failed",
-        "attempts": [{"phase": "preflight", "exit_code": proc.returncode, "elapsed_sec": round(time.time()-start, 4)}],
-        "output": out[-1200:],
-    }
-except subprocess.TimeoutExpired as exc:
-    payload = {
-        "status": "fail",
-        "reason": "preflight_failed",
-        "attempts": [{"phase": "preflight", "exit_code": 124, "classification": "TIMEOUT_WALLCLOCK", "elapsed_sec": round(time.time()-start, 4)}],
-        "output": (_as_text(exc.stdout) + _as_text(exc.stderr))[-1200:],
-    }
-
-report_path.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
-print(json.dumps(payload, ensure_ascii=False))
-if payload["status"] != "ok":
-    raise SystemExit(4)
-PY
+"$UV_BIN" run scripts/ops/gemini_nexus_invoke.py \
+  --preflight \
+  --preflight-only \
+  --prompt "unused" \
+  --report-file ".nexus/reports/gemini_preflight_round.json" \
+  --timeout-sec 80 \
+  --max-retries 0
 
 # Always force the current Nexus armor contract into delegated Gemini tasks.
 BRIEFING_PATH="${NEXUS_ENFORCED_BRIEFING_PATH:-.nexus/reports/enforced_agent_briefing.md}"
@@ -113,7 +79,7 @@ echo "[Gemini+Nexus] dispatch start..."
 # After 1 timeout, we record it and the skill/supervisor should handle fallback
 # Here we just ensure the report is correct and classification is explicit.
 
-uv run scripts/ops/gemini_nexus_invoke.py \
+"$UV_BIN" run scripts/ops/gemini_nexus_invoke.py \
   --prompt-file "$MERGED_PROMPT_FILE" \
   --report-file "$REPORT_FILE" \
   --timeout-sec "$TIMEOUT_SEC" \

@@ -37,6 +37,16 @@ except ImportError:
 AUTH_PROMPT = "Opening authentication page in your browser. Do you want to continue? [Y/n]:"
 
 
+def _gemini_subprocess_env() -> dict[str, str]:
+    env = dict(os.environ)
+    # These flags are Nexus-side routing/contract signals. Passing them through
+    # to the Gemini CLI changes auth/headless behavior on local Code Assist
+    # sessions and can force an interactive browser prompt.
+    env.pop("NEXUS_RUNNER", None)
+    env.pop("GEMINI_SANDBOX", None)
+    return env
+
+
 def _acquire_lock(lock_path: Path) -> bool:
     try:
         # O_EXCL gives us an atomic single-flight lock
@@ -85,7 +95,7 @@ def _run_once(
             stdout=subprocess.PIPE,
             stderr=subprocess.STDOUT,
             text=True,
-            env={**os.environ, "GEMINI_SANDBOX": "true"},
+            env=_gemini_subprocess_env(),
             bufsize=1,
         )
 

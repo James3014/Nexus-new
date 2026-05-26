@@ -1,8 +1,8 @@
 # Nexus Clean Code / Linus 重構計劃
 
 Date: `2026-05-22`
-Last status update: `2026-05-23`
-Status: `P0A_P0B_P1A_G8_G2G7_F01_REAL_TELEMETRY_FIDELITY_SNAPSHOT_P2A_SOURCE_SELECTION_EXTERNAL_ADAPTER_INJECTION_SANDBOXED_LOCAL_ADAPTER_EXTERNAL_OFFLINE_CACHE_MANIFEST_P3_NETWORK_PROVIDER_FAILURE_EVIDENCE_ARTIFACTS_SOCKET_BARRIER_DIRECT_WITH_NEXUS_RUNNER_EVIDENCE_BUNDLE_GATE_POSTURE_X1_X3_PAYLOAD_FINALIZER_RUBRIC_BUNDLE_PUBLIC_COST_ACCOUNTING_CONTEXT_PROVIDER_MODEL_LOCK_ROW_SET_MANIFEST_METADATA_PAYLOAD_HEADER_SECTION_COMPUTED_SECTION_CLAIM_POSTURE_SECTION_PAYLOAD_SECTION_CONTEXT_STATIC_GATE_SECTIONS_POSTURE_FINALIZATION_SECTION_PAYLOAD_ASSEMBLY_SECTION_P4_CODE_ACTIONS_SKILLS_SYNC_LIST_REGISTRY_BENCH_SANDBOX_MULTI_AGENT_CREATE_START_STATUS_AUDIT_VERIFY_CLOSE_INTEGRATE_SUBMIT_LEARN_ASK_CONVERGE_SOURCE_LIFECYCLE_PHASE_REPORT_REPORT_INGEST_GATE_RESEARCH_ROUTE_AUTO_FLOW_RUN_BENCHMARK_ACTIONS_P5_POLICY_LOADER_DEEPENED_P9_SQLITE_RETRY_MEMORY_MANAGER_EVIDENCE_SEALING_REPORT_READER_CONTEXTHUB_BUDGET_SOURCES_CONTEXTHUB_TEXT_STORE_RESEARCH_SEMANTIC_RUNTIME_RECEIPTS_RESEARCH_S2T_RUNTIME_TRACE_RESEARCH_AUTO_FLOW_PAYLOAD`
+Last status update: `2026-05-26`
+Status: `P0A_P0B_P1A_G8_G2G7_F01_REAL_TELEMETRY_FIDELITY_SNAPSHOT_P2A_SOURCE_SELECTION_EXTERNAL_ADAPTER_INJECTION_SANDBOXED_LOCAL_ADAPTER_EXTERNAL_OFFLINE_CACHE_MANIFEST_P3_NETWORK_PROVIDER_FAILURE_EVIDENCE_ARTIFACTS_SOCKET_BARRIER_DIRECT_WITH_NEXUS_RUNNER_EVIDENCE_BUNDLE_GATE_POSTURE_X1_X3_PAYLOAD_FINALIZER_RUBRIC_BUNDLE_PUBLIC_COST_ACCOUNTING_CONTEXT_PROVIDER_MODEL_LOCK_ROW_SET_MANIFEST_METADATA_PAYLOAD_HEADER_SECTION_COMPUTED_SECTION_CLAIM_POSTURE_SECTION_PAYLOAD_SECTION_CONTEXT_STATIC_GATE_SECTIONS_POSTURE_FINALIZATION_SECTION_PAYLOAD_ASSEMBLY_SECTION_P4_CODE_ACTIONS_SKILLS_SYNC_LIST_REGISTRY_BENCH_SANDBOX_MULTI_AGENT_CREATE_START_STATUS_AUDIT_VERIFY_CLOSE_INTEGRATE_SUBMIT_LEARN_ASK_CONVERGE_SOURCE_LIFECYCLE_PHASE_REPORT_REPORT_INGEST_GATE_RESEARCH_ROUTE_AUTO_FLOW_RUN_BENCHMARK_ACTIONS_P5_POLICY_LOADER_DEEPENED_P9_SQLITE_RETRY_MEMORY_MANAGER_EVIDENCE_SEALING_REPORT_READER_CONTEXTHUB_BUDGET_SOURCES_CONTEXTHUB_TEXT_STORE_RESEARCH_SEMANTIC_RUNTIME_RECEIPTS_RESEARCH_S2T_RUNTIME_TRACE_RESEARCH_AUTO_FLOW_PAYLOAD_SRE_SANDBOX_KERNEL_ELASTIC_DDTREE_VETO_MISSION_CONTROL_CLI_SUBPROCESS_SQLITE_TIMEOUT_GO_SWARM_ENV_RUST_AST_SCANNER`
 Source analysis: `/Users/jameschen/.gemini/antigravity/brain/aff9416a-04e7-48d5-9b10-85410ef6b790/NEXUS_CLEAN_CODE_ANALYSIS.md`
 Updated from: second-pass `improve-codebase-architecture` review
 
@@ -38,6 +38,12 @@ Status legend:
 | P9 Evidence sealing report reader | `DONE` | `gemini_nexus_report.py::_load_evidence_bundle(require_sealed=...)` opt-in sealed reader；legacy unsealed read-only default preserved。 | `tests/benchmark/test_gemini_nexus_report.py`、`tests/contracts/test_evidence_sealing_barrier.py` passed。 |
 | ContextHub budget-source leaf | `DONE` | `context_budget_sources.py` owns L0/L1/history/extra source shaping and token estimator。 | `tests/core/test_context_budget_sources.py` + ContextHub deletion test passed。 |
 | ContextHub text-store leaf | `DONE` | `context_text_store.py` owns local `program.md` fallback and `last_handoff.json` UTF-8 JSON fallback；ContextHub facade delegates。 | `tests/core/test_context_text_store.py` + ContextHub deletion test passed；full `ci_gate.py` passed。 |
+| Sandbox kernel / elastic hardening | `DONE_2026_05_26` | `SandboxRunner` 已從 Python child socket barrier 補強到 macOS `sandbox-exec` kernel-level network barrier、elastic sandbox profile、auto-elastic profile 與 dynamic blast radius derivation；`DDTreeAdapter` 加入 test veto policy。 | commits `09ac806f`、`4fe6f389`、`668b612c`；`tests/engine/test_sandbox_actions.py`、`tests/engine/test_sandbox_elastic_profile.py`、`tests/engine/test_ddtree_veto_policy.py`。 |
+| Mission Control v0 | `DONE_2026_05_26` | 新增 persistent campaign state、budget gates、fingerprint/preflight defense 與 `nexus mission create/start/status/pause/resume` CLI group。 | commit `33222ce1`；`nexus/core/mission_contracts.py`、`tests/core/test_mission_control.py`。 |
+| CLI subprocess hardening | `DONE_2026_05_26` | CLI / ops subprocess call sites 加入 command-injection 防線、pipe deadlock 防線、git subprocess timeout 與 `.git/index.lock` transient wait。 | commits `8bd6009a`、`a9f04cc0`；`tests/test_cli_deadlock_and_injection.py`、`tests/ops/test_verify_report_claims.py`。 |
+| SQLite timeout SRE hardening | `DONE_2026_05_26` | `NodeRegistry` 與 `CreditLedger` SQLite connections 增加 timeout/WAL concurrency posture；此為 SRE timeout hardening，不等同全域 transaction manager。 | commit `4ae879c5`；`tests/federation/test_sqlite_concurrency.py`。 |
+| Go swarm env configurability | `DONE_2026_05_26` | Go swarm socket path、TCP port、brain URL 改由環境變數設定，降低 hardcoded runtime coupling。 | commit `761ec85c`；`packages/swarm/cmd/main.go`。 |
+| Rust core AST scanner perf | `DONE_2026_05_26` | `nexus-core` AST scanner 改為 single-pass O(N) 並引入 OnceLock hashing cache，屬 core perf/locality hardening。 | commit `13e0de78`；`nexus-core/src/ast_diff.rs`、`nexus-core/src/lib.rs`。 |
 
 ### 0.2 未完成 / 暫不開工
 
@@ -66,10 +72,10 @@ Status legend:
 | Benchmark orchestration facade | 找到一個 public gate / accounting / provider side-effect drift。 | 鎖定單一 `tests/benchmark/test_capability_ab_runner.py::<nodeid>`；先證明現有行為，再抽一個 seam。 | 不改 public claim gate schema；不開 live provider socket。 |
 | External fixture live clone/setup | offline cache manifest / remote denylist 已完成；下一步只剩 live-network allowlist 與 cache provenance receipt。 | 新 RED 必須先證明 socket/no-network barrier 與 allowlist receipt。 | 沒有 live-network allowlist + no-network barrier 前，不允許 remote clone。 |
 | CLI root registration facade | live Action adapter sweep 已完成；後續只剩 root group registration、compat alias、output schema audit 類工作。 | `tests/engine/test_cli_*::<nodeid>` 先固定 stdout/stderr/exit code。 | Action Module 不 import Click；`KeyboardInterrupt` / `click.Abort` pass-through；不做 broad CLI rewrite。 |
-| Sandbox physical runner | `run_task` 本地 physical contract 已完成：local workspace copy、explicit command、relative cwd、optional output artifact、cleanup、timeout、exit code / stdout / stderr、cwd/output path escape fail-closed。 | 下一個 RED 只允許針對 socket/no-network hard barrier、allowlist、hook policy、artifact provenance 等新增安全約束。 | 不把現有 `run_challenge(repo_url, task)` 偷接成 remote flow；不開 remote clone / fetch / hook；不得宣稱 kernel-level network sandbox。 |
+| Sandbox physical runner | `run_task` 本地 physical contract、Python child socket barrier、macOS `sandbox-exec` kernel-level network barrier、elastic/auto-elastic profile、dynamic blast radius derivation 已完成。 | 下一個 RED 只允許針對 cross-platform Linux sandbox equivalent、explicit live-network allowlist、或 sandbox profile regression 開小切片。 | 不把現有 `run_challenge(repo_url, task)` 偷接成 remote flow；不開 remote clone / fetch / hook；不得把 macOS-only barrier 宣稱成全平台 kernel sandbox。 |
 | Research runtime receipt next leaf | `semantic runtime capability augmentation` 已完成；下一個只剩 auto-flow executor 或 S2T serialization caller map。 | snapshot auto-flow / S2T payload；extract only if payload stable。 | 不開 recursive runtime dispatch；不改 public-safe semantics。 |
 | ContextHub storage/retry next leaf | caller map 已補：current path 無 SQLite writer；下一步只在真 storage responsibility 出現時補 deletion test。 | monkeypatch `ContextHub` facade to prove new leaf use before moving code；若是 SQLite fallback，先寫 busy/locked fixture。 | 不改 constructor compatibility / strict deps；不為 synthetic SQLite writer 寫假 fixture。 |
-| SQLite transaction manager | 已完成 second writer：`SkillRegistry`。 | 下一步只在第三個 writer 或 transaction-shape duplication 出現時新增 context manager RED。 | 不因兩個 writer 已共用 retry helper就立即建立 global transaction manager。 |
+| SQLite transaction manager | 已完成 retry seam writers：`ProjectMemoryManager`、`SkillRegistry`；另完成 SRE timeout writers：`NodeRegistry`、`CreditLedger`。 | 下一步只在第三個 retry-shape writer、跨 writer transaction-shape duplication、或 busy/locked fixture 證明 timeout 不足時新增 context manager RED。 | 不把 connection timeout hardening 誤寫成 full transaction manager；不因多個 writer 存在就跳過 deletion test。 |
 | Planner / repair deeper split | collect failing policy-order / injection / RLM acceptance evidence. | focused failing acceptance nodeid first. | 不做 broad split from line count. |
 | Root hygiene | `docs/info/nexus_flow.*` 已有 tracked retention evidence；若要搬 root entrypoint，仍需 wrapper + reference map + CLI smoke。 | smoke proves old and new entrypoints both work. | 不做 broad move；不把 docs/info topology artifact 誤當 dependency graph evidence。 |
 
@@ -148,6 +154,28 @@ Tool rerun note:
 - The old memory path `/Users/jameschen/.codex/skills/complexity-optimizer/scripts/analyze_complexity.py` is stale.
 - Current scanner path: `/Users/jameschen/Workspace/test/codex-complexity-optimizer/complexity-optimizer/scripts/analyze_complexity.py`.
 - 2026-05-23 scoped reruns against `nexus/learning`, `nexus/core`, and `scripts/ops` kept the same policy: use findings as leads, then require public characterization tests before production extraction.
+
+### 0.7 2026-05-26 Agent 實作後狀態校準
+
+本段補記 2026-05-23 之後其他 agent 已落地的 SRE / runtime hardening / mission-control 工作。這些不是新的 broad refactor 授權，而是把已進入 `main` 的 commits 對齊到本 Clean Code / Linus 計劃的完成狀態，避免後續重複開工。
+
+| Area | Result | Evidence |
+| --- | --- | --- |
+| Sandbox no-network hardening | `DONE_MACOS_KERNEL_AND_ELASTIC_PROFILE` | `09ac806f` 將 non-Python subprocess 納入 macOS `sandbox-exec` kernel-level network barrier；`4fe6f389` 加入 elastic sandbox profile；`668b612c` 加入 auto-elastic profile 與 dynamic blast radius derivation。 |
+| DDTree test veto policy | `DONE` | `4fe6f389` 修改 `nexus/engine/ddtree_adapter.py` 並新增 `tests/engine/test_ddtree_veto_policy.py`，讓 DDTree execution candidate 受測試 veto policy 約束。 |
+| Mission Control v0 | `DONE` | `33222ce1` 新增 `nexus/core/mission_contracts.py`、`tests/core/test_mission_control.py`，並在 `scripts/engine/nexus_cli.py` 加入 `nexus mission` command group。 |
+| CLI / ops subprocess hardening | `DONE` | `8bd6009a` 以 TDD 補 CLI command injection / pipe deadlock 防線；`a9f04cc0` 對 `verify_report_claims.py` git subprocess 加 timeout 與 `.git/index.lock` transient wait。 |
+| SQLite SRE timeout hardening | `DONE_TIMEOUT_ONLY` | `4ae879c5` 對 `nexus/federation/node_registry.py` 與 `nexus/market/credit_ledger.py` 補 SQLite connection timeout / WAL posture，並新增 `tests/federation/test_sqlite_concurrency.py`。這不是 `DatabaseTransactionManager` 完成證據。 |
+| Go swarm config decoupling | `DONE` | `761ec85c` 讓 `packages/swarm/cmd/main.go` 的 socket path、port、brain URL 可由環境變數配置。 |
+| Rust AST scanner perf/locality | `DONE` | `13e0de78` 將 `nexus-core` AST scanner 改為 single-pass O(N)，並加入 OnceLock hashing cache。 |
+
+Updated interpretation:
+
+- `Sandbox physical runner` 不再只是 local Python-child barrier；macOS non-Python command 已有 kernel-level barrier 與 profile elasticity。後續若要更硬，只能開 cross-platform Linux equivalent、explicit allowlist 或 profile regression 小 slice。
+- `Mission Control v0` 已完成，不應再以「mission layer 尚未落地」開新任務；後續只在 budget/preflight/state transition 出現 failing evidence 時補小切片。
+- `SQLite transaction manager` 仍維持 `DEFERRED`：已有 retry writers 與 timeout writers，但 timeout/WAL 不是 transaction context manager，也不是 busy/locked retry semantic 的替代。
+- `Go swarm env configurability` touched `packages/`，屬既有 agent commit；本計劃只記錄，不把 `packages/` 納入後續 Codex 預設可改範圍。
+- `nexus-core` Rust perf work 是完成的 performance/locality hardening；後續若要宣稱效能提升，仍需 profiler/benchmark evidence，不只靠 complexity reasoning。
 
 #### P6A. Skill-fit Data-Shape Pregate
 

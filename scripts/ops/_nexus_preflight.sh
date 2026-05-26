@@ -5,8 +5,9 @@
 echo "🛡️ [Preflight] Initiating v24.0 Environment Alignment..."
 
 # 1. Path Self-Healing (Atomic Symlinking)
-# Ensure Node and Gemini are available from Homebrew or fallback paths
-export PATH="/opt/homebrew/bin:/Users/jameschen/.npm-global/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin:$PATH"
+# Preserve the caller's PATH precedence because Gemini CLI auth/session
+# behavior is sensitive to helper resolution order. Append fallback paths only.
+export PATH="$PATH:/opt/homebrew/bin:/Users/jameschen/.npm-global/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin"
 
 check_binary() {
     if ! command -v "$1" &> /dev/null; then
@@ -35,7 +36,12 @@ check_binary "uv" || exit 1
 
 # 2. Nexus CLI Surface Check
 echo "🛡️ [Preflight] Checking Nexus CLI integrity..."
-uv run scripts/engine/nexus_cli.py --help > /dev/null 2>&1 && echo "✅ Nexus CLI: PASS" || { echo "❌ Nexus CLI: FAIL"; exit 1; }
+if [[ -x ".venv/bin/python" ]]; then
+    NEXUS_CLI_SMOKE=(".venv/bin/python" "scripts/engine/nexus_cli.py" "--help")
+else
+    NEXUS_CLI_SMOKE=("uv" "run" "scripts/engine/nexus_cli.py" "--help")
+fi
+"${NEXUS_CLI_SMOKE[@]}" > /dev/null 2>&1 && echo "✅ Nexus CLI: PASS" || { echo "❌ Nexus CLI: FAIL"; exit 1; }
 
 # 3. Metadata Collection (v24.0 Enhanced)
 COMMIT_SHA=$(git rev-parse --short HEAD)
