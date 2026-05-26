@@ -173,18 +173,72 @@ class SkillsRouter:
         return []
 
     def route_candidates(self, phase: str, context: Dict[str, Any]) -> List[Dict[str, Any]]:
-        """Legacy router entrypoint expected by older tests."""
+        """🛡️ Autonomic Selector Facade for SPXDRAC ecosystem (P29 merged)."""
         phase_key = str(phase or "R").lower()
         decision_id = f"dec_{phase_key}_{int(datetime.now(timezone.utc).timestamp() * 1000)}"
         
-        query = context.get("task_desc", context.get("task_id", ""))
-        candidates = self._msa_search(query, context)
+        # 1. 統一訊號採集 (P3)
+        from nexus.core.capability_signal_set import CapabilitySignalSet
+        signal_set = CapabilitySignalSet.from_context(context, self.project_root, belief_engine=self.p_loop)
+
+        # 2. 安全約束評估 (P4)
+        from nexus.core.capability_constraints import CapabilityConstraints
+        constraints = CapabilityConstraints(self.project_root, mem_palace=self.mem_palace, firewall=self.firewall)
+
+        # 3. 智慧能力動態選擇 (P5 & P7)
+        from nexus.core.capability_selector import CapabilitySelector
+        selector = CapabilitySelector()
+        plan = selector.select_capabilities(signal_set, constraints)
+
+        # 4. 驅動執行與收據累積 (P9 - P11)
+        from nexus.core.executor_controls import ExecutorControls
+        controller = ExecutorControls(self.project_root)
+        
+        # 處理 possible block
+        if isinstance(plan, dict) and plan.get("status") == "BLOCKED":
+            logger.warning("🛡️ [SkillsRouter] Capability Selector BLOCKED execution.")
+            return []
+
+        receipts = controller.execute_plan(plan)
+
+        # 5. [P26] OutcomeMemory 學習寫回
+        try:
+            learning_log = Path(self.project_root) / ".nexus" / "reports" / "learn" / "learning_closure.jsonl"
+            learning_log.parent.mkdir(parents=True, exist_ok=True)
+            with open(learning_log, "a", encoding="utf-8") as handle:
+                for cap_receipt in receipts:
+                    row = {
+                        "plan_id": plan.plan_id,
+                        "task_id": plan.task_id,
+                        "capability_name": cap_receipt.capability_name,
+                        "gate_passed": cap_receipt.gate_passed,
+                        "outcome": cap_receipt.outcome,
+                        "timestamp": cap_receipt.timestamp,
+                    }
+                    handle.write(json.dumps(row, ensure_ascii=False) + "\n")
+        except Exception as e:
+            logger.debug("[OutcomeMemory] learning_closure writeback failed: %s", e)
+
+        # 6. 包裝成果並回傳給舊接口 (向下相容)
+        candidates = []
+        for cap_receipt in receipts:
+            for skill_receipt in cap_receipt.skill_receipts:
+                if skill_receipt.used:
+                    candidates.append({
+                        "skill_id": skill_receipt.skill_id,
+                        "score": 1.0,
+                        "source": "autonomic_selector",
+                        "artifact_found": True,
+                        "decision_id": decision_id,
+                    })
+
+        # Fallback to legacy triggers if no candidate found
         if not candidates:
             candidates = self._inventory_candidates(phase, context)
-            
-        for c in candidates:
-            c["decision_id"] = decision_id
+            for c in candidates:
+                c["decision_id"] = decision_id
 
+        # 記錄 decision log
         run_dir = __import__("pathlib").Path(self.run_dir)
         run_dir.mkdir(parents=True, exist_ok=True)
         log_path = run_dir / "router_decisions.jsonl"
@@ -193,11 +247,12 @@ class SkillsRouter:
             "phase": phase,
             "task_id": context.get("task_id", ""),
             "candidate_count": len(candidates),
-            "fallback_used": False,
+            "fallback_used": len(candidates) == 0,
             "timestamp": datetime.now(timezone.utc).isoformat(),
         }
         with open(log_path, "a", encoding="utf-8") as handle:
             handle.write(json.dumps(row, ensure_ascii=False) + "\n")
+
         return candidates
 
     def _inventory_candidates(self, phase: str, context: Dict[str, Any]) -> List[Dict[str, Any]]:
