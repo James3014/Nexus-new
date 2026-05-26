@@ -71,8 +71,20 @@ class ExecutorControls:
                     )
                     skill_receipts.append(receipt)
 
-                # 3. 執行能力品質 Gate 審計 (Audit phase)
+                # 3. 執行能力品質 Gate 審計 (Audit phase - P15 實體對位)
                 gate_passed = True
+                if cap_name in ("artifact_gate", "claim_gate"):
+                    from pathlib import Path
+
+                    wiki_audit = Path(self.project_root) / "wiki_audit.json"
+                    reports_dir = Path(self.project_root) / ".nexus" / "reports"
+                    # 確認確實有產出 evidence/artifact 報表
+                    has_evidence = wiki_audit.exists() or (
+                        reports_dir.exists() and any(reports_dir.iterdir())
+                    )
+                    if not has_evidence:
+                        gate_passed = False
+
                 mock_cap_evidence_id = f"ev_cap_{cap_name}_{os.urandom(4).hex()}"
 
                 # 4. 產生 CapabilityReceipt (P10 實作)

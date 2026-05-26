@@ -217,8 +217,70 @@ class TestCapabilitySelector(unittest.TestCase):
                 self.assertTrue(skill_receipt.evidence_id.startswith("ev_slot_"))
                 self.assertEqual(skill_receipt.outcome.get("execution_state"), "SUCCESS")
 
+    def test_five_pillars_lancedb_memory_confidence_penalty(self) -> None:
+        """Verify P12 LanceDB connection correctly penalty belief confidence on historical failures."""
+        from unittest.mock import patch, MagicMock
+        import pandas as pd
+
+        context = {
+            "task_id": "test_jit_task",
+            "task_desc": "Refactor router closures",
+        }
+
+        # Mock Path.exists to return True for memory_index.lancedb path
+        mock_exists = MagicMock(return_value=True)
+        # Mock MemoryRepository to return historical failure row
+        mock_df = pd.DataFrame([{"content": "NameError failure recorded during router closures refactoring"}])
+        
+        mock_repo = MagicMock()
+        mock_repo.list_tables.return_value = ["memory_shard_1"]
+        mock_repo.search_fts_across_tables.return_value = mock_df
+
+        with patch("pathlib.Path.exists", mock_exists):
+            with patch("nexus.services.memory_repository.MemoryRepository", return_value=mock_repo):
+                signal_set = CapabilitySignalSet.from_context(
+                    context, self.project_root, belief_engine=None
+                )
+                
+                # Assert belief_confidence was penalized from default 0.7 to 0.5!
+                self.assertEqual(signal_set.belief_confidence, 0.5)
+
+    def test_five_pillars_artifact_gate_fail_closed(self) -> None:
+        """Verify P15 artifact gate correctly fail-closed when no physical evidence exists."""
+        from unittest.mock import patch, MagicMock
+        
+        signal_set = CapabilitySignalSet(
+            task_id="artifact_fail_test",
+            task_desc="Verify fail closed",
+            risk_level="NORMAL",
+            impact_complexity=1.0,
+            belief_confidence=0.9,
+            skills_triggered=[],
+            tenant_id="tenant_a",
+        )
+        mock_palace = MagicMock()
+        mock_palace.verify_context.return_value = {"status": "ALLOWED"}
+        mock_palace.get_skill_constraints.return_value = {"forbid": [], "require": [], "prefer": []}
+        constraints = CapabilityConstraints(self.project_root, mem_palace=mock_palace)
+        
+        plan = self.selector.select_capabilities(signal_set, constraints)
+        
+        # Mock Path.exists to return False for wiki_audit.json and reports
+        mock_exists = MagicMock(return_value=False)
+        controller = ExecutorControls(self.project_root)
+        
+        with patch("pathlib.Path.exists", mock_exists):
+            receipts = controller.execute_plan(plan)
+            
+            # Find artifact_gate receipt
+            art_receipt = next(r for r in receipts if r.capability_name == "artifact_gate")
+            
+            # Assert gate was FAIL-CLOSED (gate_passed is False) due to no physical evidence!
+            self.assertFalse(art_receipt.gate_passed)
+
 
 if __name__ == "__main__":
     unittest.main()
+
 
 

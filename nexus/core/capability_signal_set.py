@@ -42,6 +42,27 @@ class CapabilitySignalSet:
             except Exception:
                 belief_confidence = 0.7
 
+        # 1.1 [P12] 路由接 LanceDB & Memory 實體檢索 (FTS & 語意)
+        # 如果檢索到歷史失敗案例，則進行信心度扣減
+        memory_index_path = Path(project_root) / ".nexus" / "memory" / "memory_index.lancedb"
+        if memory_index_path.exists():
+            try:
+                from nexus.services.memory_repository import MemoryRepository
+
+                repo = MemoryRepository(memory_index_path)
+                tables = repo.list_tables()
+                if tables:
+                    df = repo.search_fts_across_tables(task_desc, list(tables)[:3], limit=2)
+                    if not df.empty:
+                        records = df.to_dict(orient="records")
+                        for rec in records:
+                            content_str = str(rec.get("content", "")).lower()
+                            if "fail" in content_str or "error" in content_str or "nameerror" in content_str:
+                                belief_confidence = round(max(0.1, belief_confidence - 0.2), 4)
+                                break
+            except Exception:
+                pass
+
         # 2. 自動分析 triggers 候選技能
         skills_triggered = []
         inventory_path = Path(project_root) / "scripts" / "skills_inventory.json"
