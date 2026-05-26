@@ -14,6 +14,7 @@ from typing import Any
 from dataclasses import asdict
 import click
 
+from nexus.research.flow.auto_flow_decision import decide_auto_flow_routing, enrich_route_on_plateau
 from nexus.research.local_sprint_mutator import generate_local_candidate, generate_local_companion_edits
 from nexus.research.sprint_service import SprintConfig, run_hyper_sprint, LLMCandidateGenerator, LLMCandidateError, _candidate_summaries
 from nexus.contracts import RLMTraceEvent, RLMTraceWriter
@@ -725,6 +726,152 @@ def _build_runtime_skill_mount_contracts(
     return {"skill_mount_contracts": contracts, "skill_mount_violations": violations}
 
 
+def _build_hidden_contract_local_first_patch(
+    *,
+    trial: int,
+    original_code: str,
+    task_desc: str,
+    route: dict[str, Any],
+    llm_baseline_required: bool,
+) -> tuple[str, str, dict[str, Any]] | None:
+    if os.environ.get("NEXUS_DISABLE_HIDDEN_CONTRACT_FAST_PATH", "").strip().lower() in {"1", "true", "yes"}:
+        return None
+    hidden_fast_path = str(route.get("recommended_reason") or "") == "benchmark_hidden_contract_fast_path"
+    task_lower = task_desc.lower()
+    has_known_hidden_contract_reducer = (
+        ("def apply_events" in original_code and "duplicate event" in task_lower)
+        or (
+            "def build_response" in original_code
+            and "FIELD" in original_code
+            and (
+                "canonical field" in task_lower
+                or "renamed public field" in task_lower
+                or "canonical response" in task_lower
+                or "build_response" in task_lower
+            )
+        )
+    )
+    if not hidden_fast_path or llm_baseline_required or not has_known_hidden_contract_reducer:
+        return None
+    patched = generate_local_candidate(original_code, task_desc, "baseline", trial)
+    if patched == original_code:
+        return None
+    meta = local_baseline_meta()
+    meta["baseline_source_policy"] = "hidden_contract_local_first_before_llm"
+    return patched, "local_hidden_contract_fast_path", meta
+
+
+def _build_baseline_patch(
+    *,
+    trial: int,
+    original_code: str,
+    task_desc: str,
+    route: dict[str, Any],
+    llm_baseline_required: bool,
+    llm_baseline: bool,
+    task_desc_with_codeintel: str,
+    repo_root: Path,
+    task_type: str,
+) -> tuple[str, str, dict[str, Any]]:
+    source_label = "local"
+    fallback_reason = None
+    fallback_meta: dict[str, Any] | None = None
+
+    local_first = _build_hidden_contract_local_first_patch(
+        trial=trial,
+        original_code=original_code,
+        task_desc=task_desc,
+        route=route,
+        llm_baseline_required=llm_baseline_required,
+    )
+    if local_first is not None:
+        return local_first
+    
+    # [NEW: X-2] Prior-Art from Claims
+    try:
+        from nexus.research.learn_mode import LearnModeService
+        svc = LearnModeService(repo_root)
+        prior_fixes = svc.ask(topic="bug-fixes", question=task_desc, top_k=5)
+        if prior_fixes.get("citations"):
+            prior_context = "\n".join([c["claim"] for c in prior_fixes["citations"][:3]])
+            task_desc_for_llm = f"{task_desc_with_codeintel}\n\n[Prior Art]\n{prior_context}"
+        else:
+            task_desc_for_llm = task_desc_with_codeintel
+    except Exception:
+        task_desc_for_llm = task_desc_with_codeintel
+    
+    if llm_baseline:
+        try:
+            # Use a very short timeout for baseline assistance to avoid blocking
+            gen = LLMCandidateGenerator(repo_root, safe_mode=True)
+            patched, meta = gen.generate(source_code=original_code, task=task_desc_for_llm, mutation_hint="baseline", seed=trial)
+            if patched and patched != original_code:
+                meta = dict(meta)
+                if llm_baseline_required:
+                    meta["baseline_llm_required"] = True
+                    meta["baseline_source_policy"] = "strict_llm_no_local_fallback"
+                    return patched, "nexus_llm_baseline", meta
+                return patched, "llm_assisted", meta
+            else:
+                if llm_baseline_required:
+                    return original_code, "nexus_llm_baseline_failed", strict_baseline_failure_meta(
+                        "llm_no_patch",
+                        dict(meta),
+                    )
+                fallback_reason = "llm_generation_empty_fallback_local"
+                fallback_meta = dict(meta)
+                fallback_meta["fallback_used"] = True
+                fallback_meta["gateway_error_category"] = fallback_reason
+        except LLMCandidateError as e:
+            if llm_baseline_required:
+                return original_code, "nexus_llm_baseline_failed", strict_baseline_failure_meta(str(e), e.metadata)
+            fallback_reason = f"llm_error_{str(e).lower()}_fallback_local"
+            fallback_meta = dict(e.metadata)
+            fallback_meta["fallback_used"] = True
+            fallback_meta["gateway_error_category"] = str(e)
+        except Exception as e:
+            err_str = str(e).lower()
+            if "timeout" in err_str:
+                fallback_reason = "timeout"
+            elif any(p in err_str for p in ["quota", "429", "limit"]):
+                fallback_reason = "quota_exhausted"
+            else:
+                fallback_reason = f"llm_error_{err_str}"
+            if llm_baseline_required:
+                return original_code, "nexus_llm_baseline_failed", strict_baseline_failure_meta(fallback_reason)
+            fallback_reason = f"{fallback_reason}_fallback_local"
+    elif llm_baseline_required:
+        return original_code, "nexus_llm_baseline_missing", strict_baseline_failure_meta("llm_baseline_required_missing")
+    
+    patched = generate_local_candidate(original_code, task_desc, "baseline", trial)
+    
+    if patched == original_code and task_type in ["feature", "refactor"]:
+        if "discount" in task_desc.lower():
+            from nexus.research.local_sprint_mutator import _feature_discount_patch
+            patched = _feature_discount_patch(original_code)
+            source_label = "local_conservative_feature"
+        elif "parser" in task_desc.lower() or "refactor" in task_desc.lower():
+            from nexus.research.local_sprint_mutator import _refactor_parser_patch
+            patched = _refactor_parser_patch(original_code)
+            source_label = "local_conservative_refactor"
+        
+    meta = local_baseline_meta()
+    if fallback_reason:
+        meta["baseline_source_policy"] = "fallback_local_due_to_llm_failure"
+        meta["fallback_reason"] = fallback_reason
+        if fallback_meta:
+            meta["fallback_metadata"] = fallback_meta
+    else:
+        meta["baseline_source_policy"] = "local_only_static_rule"
+    meta["fallback_label"] = source_label
+    
+    label = source_label
+    if fallback_reason:
+        label = f"{source_label}({fallback_reason})"
+        
+    return patched, label, fallback_meta or local_baseline_meta(fallback_reason=fallback_reason)
+
+
 def run_auto_flow(
     *,
     repo_root: Path,
@@ -798,7 +945,7 @@ def run_auto_flow(
     tuned_baseline_fast_sec = baseline_fast_sec
     tuned_baseline_fast_sec = max(0.0, float(parsed_knobs.baseline_fast_sec or baseline_fast_sec))
     skip_baseline_probe_for_hard = bool(parsed_knobs.skip_baseline_probe_for_hard)
-    chosen_flow = force_flow or route["recommended_flow"]
+    chosen_flow_input = force_flow or route["recommended_flow"]
     tier_decision = _nexus_tier(
         route.get("route_features", {}) if isinstance(route, dict) else {},
         force_flow=force_flow,
@@ -809,64 +956,49 @@ def run_auto_flow(
         not bool(learn_phase_slo.get("phase_slo_pass", False))
         or float((learn_phase_slo.get("global", {}) or {}).get("required_done_ratio", 0.0) or 0.0) < 0.95
     )
-    if force_flow is None and chosen_flow == "hyper_sprint" and learn_gate_blocked and not execution_profile["is_hard_task"]:
-        chosen_flow = "baseline"
+
     history_store = HistorySignalStore(repo_root)
     recent = history_store.recent_for(target_file=target_file, test_file=test_file)
     asi_ledger = [item.get("asi_record") for item in recent if isinstance(item, dict) and isinstance(item.get("asi_record"), dict)]
     plateau = _detect_plateau(asi_ledger)
-    plateau_hard_pivot = bool(force_flow is None and plateau.get("detected"))
-    if bool(plateau.get("detected")):
-        route_features = route.get("route_features", {}) if isinstance(route.get("route_features"), dict) else {}
-        route_features = {**route_features, "plateau_detected": True, "route_pivot": "distant_scout"}
-        context = route.get("research_context", {}) if isinstance(route.get("research_context"), dict) else {}
-        risk_flags = list(context.get("risk_flags", []) or [])
-        blocked_assumptions = list(context.get("blocked_assumptions", []) or [])
-        if "plateau_detected" not in risk_flags:
-            risk_flags.append("plateau_detected")
-        if "local_micro_tuning_is_enough" not in blocked_assumptions:
-            blocked_assumptions.append("local_micro_tuning_is_enough")
-        context = {
-            **context,
-            "risk_flags": risk_flags,
-            "blocked_assumptions": blocked_assumptions,
-            "next_action_hint": "switch_to_architecture_scout_and_change_family",
-            "route_pivot": "distant_scout",
-        }
-        route_features["blocked_assumptions_count"] = len(blocked_assumptions)
-        route["route_features"] = route_features
-        route["research_context"] = context
-        route["distant_scout_plan"] = DistantScoutPlanner().plan(task_desc=task_desc, plateau=plateau, asi_ledger=asi_ledger)
-        capability_plan, route_decision = _build_capability_plan_and_decision(
+    plateau_detected = bool(plateau.get("detected"))
+
+    if plateau_detected:
+        def build_plan_callback(r: dict[str, Any]):
+            return _build_capability_plan_and_decision(
+                task_desc=task_desc,
+                task_type=task_type,
+                route=r,
+                task_id=task_id,
+                budget=runtime_budget,
+                skills=benchmark_skill_mount_requests,
+            )
+        enrich_route_on_plateau(
+            route=route,
             task_desc=task_desc,
             task_type=task_type,
-            route=route,
-            budget=_runtime_capability_budget(repo_root),
-            skills=benchmark_skill_mount_requests,
+            plateau=plateau,
+            asi_ledger=asi_ledger,
+            build_capability_plan_fn=build_plan_callback,
         )
-        route["capability_plan"] = capability_plan.to_dict()
-        route["route_decision"] = route_decision
-    if force_flow is None and bool(plateau.get("detected")) and chosen_flow == "baseline":
-        chosen_flow = "hyper_sprint"
+
     recent_window = recent[-max(1, history_window):]
-    recent_hyper_fails = sum(1 for item in recent_window if item.get("flow") == "hyper_sprint" and item.get("status") == "FAILED")
-    stage1_fail_signals = sum(
-        1
-        for item in recent_window
-        if item.get("flow") == "hyper_sprint"
-        and item.get("status") == "FAILED"
-        and "stage1_no_passing_candidate" in str(item.get("reason", ""))
+    decisions = decide_auto_flow_routing(
+        chosen_flow=chosen_flow_input,
+        force_flow=force_flow,
+        execution_profile=execution_profile,
+        learn_gate_blocked=learn_gate_blocked,
+        plateau_detected=plateau_detected,
+        recent_window=recent_window,
+        history_fail_threshold=history_fail_threshold,
     )
-    nightshift_recommended = bool(recent_hyper_fails >= 2 or stage1_fail_signals >= 1)
-    history_forced_baseline = False
-    if (
-        force_flow is None
-        and not plateau_hard_pivot
-        and chosen_flow == "hyper_sprint"
-        and recent_hyper_fails >= max(1, history_fail_threshold)
-    ):
-        chosen_flow = "baseline"
-        history_forced_baseline = True
+    chosen_flow = decisions["chosen_flow"]
+    plateau_hard_pivot = decisions["plateau_hard_pivot"]
+    nightshift_recommended = decisions["nightshift_recommended"]
+    history_forced_baseline = decisions["history_forced_baseline"]
+    recent_hyper_fails = decisions["recent_hyper_fails"]
+    stage1_fail_signals = decisions["stage1_fail_signals"]
+
     phase_clock.mark("D")
 
     guard_hit = False
@@ -887,125 +1019,6 @@ def run_auto_flow(
     task_desc_with_codeintel = _task_with_codeintel_context(task_desc, codeintel_evidence)
     timing_breakdown_sec["context_pack_sec"] = round(time.monotonic() - context_started_at, 4)
 
-    def _hidden_contract_local_first_patch(trial: int) -> tuple[str, str, dict[str, Any]] | None:
-        """Use deterministic local repair before spending a model call on known hidden-contract reducers."""
-
-        if os.environ.get("NEXUS_DISABLE_HIDDEN_CONTRACT_FAST_PATH", "").strip().lower() in {"1", "true", "yes"}:
-            return None
-        hidden_fast_path = str(route.get("recommended_reason") or "") == "benchmark_hidden_contract_fast_path"
-        task_lower = task_desc.lower()
-        has_known_hidden_contract_reducer = (
-            ("def apply_events" in original_code and "duplicate event" in task_lower)
-            or (
-                "def build_response" in original_code
-                and "FIELD" in original_code
-                and (
-                    "canonical field" in task_lower
-                    or "renamed public field" in task_lower
-                    or "canonical response" in task_lower
-                    or "build_response" in task_lower
-                )
-            )
-        )
-        if not hidden_fast_path or llm_baseline_required or not has_known_hidden_contract_reducer:
-            return None
-        patched = generate_local_candidate(original_code, task_desc, "baseline", trial)
-        if patched == original_code:
-            return None
-        meta = local_baseline_meta()
-        meta["baseline_source_policy"] = "hidden_contract_local_first_before_llm"
-        return patched, "local_hidden_contract_fast_path", meta
-
-    def _generate_baseline_patch(trial: int = 0) -> tuple[str, str, dict[str, Any]]:
-        """R4: Enhanced baseline generation with LLM fast-fallback and conservative local paths."""
-        source_label = "local"
-        fallback_reason = None
-        fallback_meta: dict[str, Any] | None = None
-
-        local_first = _hidden_contract_local_first_patch(trial)
-        if local_first is not None:
-            return local_first
-        
-        # [NEW: X-2] Prior-Art from Claims
-        try:
-            from nexus.research.learn_mode import LearnModeService
-            svc = LearnModeService(repo_root)
-            prior_fixes = svc.ask(topic="bug-fixes", question=task_desc, top_k=5)
-            if prior_fixes.get("citations"):
-                prior_context = "\n".join([c["claim"] for c in prior_fixes["citations"][:3]])
-                task_desc_for_llm = f"{task_desc_with_codeintel}\n\n[Prior Art]\n{prior_context}"
-            else:
-                task_desc_for_llm = task_desc_with_codeintel
-        except Exception:
-            task_desc_for_llm = task_desc_with_codeintel
-        
-        if llm_baseline:
-            try:
-                # Use a very short timeout for baseline assistance to avoid blocking
-                gen = LLMCandidateGenerator(repo_root, safe_mode=True)
-                # Note: gen.generate internal timeout depends on gateway, but we wrap it here if possible
-                # For now, we trust internal model_chain but monitor for rapid failure
-                patched, meta = gen.generate(source_code=original_code, task=task_desc_for_llm, mutation_hint="baseline", seed=trial)
-                if patched and patched != original_code:
-                    meta = dict(meta)
-                    if llm_baseline_required:
-                        meta["baseline_llm_required"] = True
-                        meta["baseline_source_policy"] = "strict_llm_no_local_fallback"
-                        return patched, "nexus_llm_baseline", meta
-                    return patched, "llm_assisted", meta
-                else:
-                    if llm_baseline_required:
-                        return original_code, "nexus_llm_baseline_failed", strict_baseline_failure_meta(
-                            "llm_no_patch",
-                            dict(meta),
-                        )
-                    fallback_reason = "llm_generation_empty_fallback_local"
-                    fallback_meta = dict(meta)
-                    fallback_meta["fallback_used"] = True
-                    fallback_meta["gateway_error_category"] = fallback_reason
-            except LLMCandidateError as e:
-                if llm_baseline_required:
-                    return original_code, "nexus_llm_baseline_failed", strict_baseline_failure_meta(str(e), e.metadata)
-                fallback_reason = f"llm_error_{str(e).lower()}_fallback_local"
-                fallback_meta = dict(e.metadata)
-                fallback_meta["fallback_used"] = True
-                fallback_meta["gateway_error_category"] = str(e)
-            except Exception as e:
-                err_str = str(e).lower()
-                if "timeout" in err_str:
-                    fallback_reason = "timeout"
-                elif any(p in err_str for p in ["quota", "429", "limit"]):
-                    fallback_reason = "quota_exhausted"
-                else:
-                    fallback_reason = f"llm_error_{err_str}"
-                if llm_baseline_required:
-                    return original_code, "nexus_llm_baseline_failed", strict_baseline_failure_meta(fallback_reason)
-                fallback_reason = f"{fallback_reason}_fallback_local"
-        elif llm_baseline_required:
-            return original_code, "nexus_llm_baseline_missing", strict_baseline_failure_meta("llm_baseline_required_missing")
-        
-        # Local fallback intentionally uses raw task_desc to avoid prior-art keyword pollution
-        # (e.g., stale "flaky/race" hints forcing conservative patch on unrelated tasks).
-        patched = generate_local_candidate(original_code, task_desc, "baseline", trial)
-        
-        # If still no mutation and it's structural, try a generic structural hint as last resort
-        if patched == original_code and task_type in ["feature", "refactor"]:
-            # Last resort: force a pattern match if keywords exist
-            if "discount" in task_desc.lower():
-                from nexus.research.local_sprint_mutator import _feature_discount_patch
-                patched = _feature_discount_patch(original_code)
-                source_label = "local_conservative_feature"
-            elif "parser" in task_desc.lower() or "refactor" in task_desc.lower():
-                from nexus.research.local_sprint_mutator import _refactor_parser_patch
-                patched = _refactor_parser_patch(original_code)
-                source_label = "local_conservative_refactor"
-        
-        label = source_label
-        if fallback_reason:
-            label = f"{source_label}({fallback_reason})"
-            
-        return patched, label, fallback_meta or local_baseline_meta(fallback_reason=fallback_reason)
-
     def _restore_baseline_files(restored_files: dict[Path, str | None], *, keep_target: bool) -> None:
         for path, original_text in restored_files.items():
             should_restore = not (keep_target and path == target_path)
@@ -1024,7 +1037,17 @@ def run_auto_flow(
         companion_edits: dict[Path, str] = {}
         restored_files: dict[Path, str | None] = {}
         try:
-            patched, source, generation_meta = _generate_baseline_patch()
+            patched, source, generation_meta = _build_baseline_patch(
+                trial=0,
+                original_code=original_code,
+                task_desc=task_desc,
+                route=route,
+                llm_baseline_required=llm_baseline_required,
+                llm_baseline=llm_baseline,
+                task_desc_with_codeintel=task_desc_with_codeintel,
+                repo_root=repo_root,
+                task_type=task_type,
+            )
             if patched == original_code:
                 err = "no_mutation_generated"
             else:
@@ -1063,7 +1086,17 @@ def run_auto_flow(
         patched = original_code
         restored_files: dict[Path, str | None] = {}
         try:
-            patched, source, generation_meta = _generate_baseline_patch()
+            patched, source, generation_meta = _build_baseline_patch(
+                trial=0,
+                original_code=original_code,
+                task_desc=task_desc,
+                route=route,
+                llm_baseline_required=llm_baseline_required,
+                llm_baseline=llm_baseline,
+                task_desc_with_codeintel=task_desc_with_codeintel,
+                repo_root=repo_root,
+                task_type=task_type,
+            )
             if patched == original_code:
                 err = "no_mutation_generated"
             else:
