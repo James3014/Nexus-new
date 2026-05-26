@@ -14,6 +14,30 @@ fn get_source_hash(source: &str) -> u64 {
     hasher.finish()
 }
 
+fn extract_fuzzy_signatures(source: &str) -> HashSet<String> {
+    let mut signatures = HashSet::new();
+    for line in source.lines() {
+        let trimmed = line.trim();
+        if trimmed.starts_with("pub ") {
+            let parts: Vec<&str> = trimmed.split_whitespace().collect();
+            if parts.len() >= 3 {
+                let keyword = parts[1];
+                let raw_ident = parts[2];
+                let ident = raw_ident.split(|c| c == '(' || c == '<' || c == '{' || c == ';').next().unwrap_or(raw_ident).trim();
+                if (keyword == "fn" || keyword == "struct" || keyword == "enum" || keyword == "trait") && !ident.is_empty() {
+                    // Normalize standard function formatting to align with format_signature
+                    if keyword == "fn" {
+                        signatures.insert(format!("fn {}", ident));
+                    } else {
+                        signatures.insert(format!("{} {}", keyword, ident));
+                    }
+                }
+            }
+        }
+    }
+    signatures
+}
+
 /// Extracts all public item signatures (functions, structs, enums, traits) from source code.
 pub fn get_public_api_signatures(source: &str) -> Result<HashSet<String>, String> {
     let hash = get_source_hash(source);
@@ -25,49 +49,56 @@ pub fn get_public_api_signatures(source: &str) -> Result<HashSet<String>, String
         }
     }
 
-    let file = syn::parse_file(source).map_err(|e| format!("Failed to parse Rust source: {}", e))?;
-    let mut signatures = HashSet::new();
-
-    for item in file.items {
-        match item {
-            Item::Fn(item_fn) => {
-                if let Visibility::Public(_) = item_fn.vis {
-                    signatures.insert(format_signature(&item_fn.sig));
-                }
-            }
-            Item::Struct(item_struct) => {
-                if let Visibility::Public(_) = item_struct.vis {
-                    // For structs, we track the name and the names of public fields
-                    let mut s = format!("struct {}", item_struct.ident);
-                    let mut fields = vec![];
-                    if let syn::Fields::Named(f) = &item_struct.fields {
-                        for field in &f.named {
-                            if let Visibility::Public(_) = field.vis {
-                                if let Some(id) = &field.ident {
-                                    fields.push(id.to_string());
-                                }
-                            }
+    let file_res = syn::parse_file(source);
+    let signatures = match file_res {
+        Ok(file) => {
+            let mut sigs = HashSet::new();
+            for item in file.items {
+                match item {
+                    Item::Fn(item_fn) => {
+                        if let Visibility::Public(_) = item_fn.vis {
+                            sigs.insert(format_signature(&item_fn.sig));
                         }
                     }
-                    if !fields.is_empty() {
-                        s.push_str(&format!(" {{ {} }}", fields.join(", ")));
+                    Item::Struct(item_struct) => {
+                        if let Visibility::Public(_) = item_struct.vis {
+                            let mut s = format!("struct {}", item_struct.ident);
+                            let mut fields = vec![];
+                            if let syn::Fields::Named(f) = &item_struct.fields {
+                                for field in &f.named {
+                                    if let Visibility::Public(_) = field.vis {
+                                        if let Some(id) = &field.ident {
+                                            fields.push(id.to_string());
+                                        }
+                                    }
+                                }
+                            }
+                            if !fields.is_empty() {
+                                s.push_str(&format!(" {{ {} }}", fields.join(", ")));
+                            }
+                            sigs.insert(s);
+                        }
                     }
-                    signatures.insert(s);
+                    Item::Enum(item_enum) => {
+                        if let Visibility::Public(_) = item_enum.vis {
+                            sigs.insert(format!("enum {}", item_enum.ident));
+                        }
+                    }
+                    Item::Trait(item_trait) => {
+                        if let Visibility::Public(_) = item_trait.vis {
+                            sigs.insert(format!("trait {}", item_trait.ident));
+                        }
+                    }
+                    _ => {}
                 }
             }
-            Item::Enum(item_enum) => {
-                if let Visibility::Public(_) = item_enum.vis {
-                    signatures.insert(format!("enum {}", item_enum.ident));
-                }
-            }
-            Item::Trait(item_trait) => {
-                if let Visibility::Public(_) = item_trait.vis {
-                    signatures.insert(format!("trait {}", item_trait.ident));
-                }
-            }
-            _ => {}
+            sigs
         }
-    }
+        Err(e) => {
+            eprintln!("⚠️ [Perception:Fuzzy] Syn parsing failed: {}. Falling back to fuzzy signatures extractor.", e);
+            extract_fuzzy_signatures(source)
+        }
+    };
 
     if let Ok(mut map) = cache.lock() {
         map.insert(hash, signatures.clone());

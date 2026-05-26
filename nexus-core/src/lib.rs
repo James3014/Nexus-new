@@ -108,4 +108,16 @@ mod tests {
         assert_eq!(diff2.len(), 1);
         assert!(diff2[0].contains("MyStruct"));
     }
+
+    #[test]
+    fn test_rust_ast_diff_syntax_fault_tolerance() {
+        // Test that temporary syntax damage (e.g. unclosed braces or parentheses) fallbacks to fuzzy parsing successfully.
+        let source_broken1 = "pub struct BrokenStruct {\npub fn my_fn(";
+        let source_broken2 = "pub struct BrokenStruct {\n"; // my_fn removed
+        
+        let diff = check_pub_api_diff(source_broken1.to_string(), source_broken2.to_string()).unwrap();
+        // Fuzzy parser should still identify the deletion of my_fn!
+        assert_eq!(diff.len(), 1);
+        assert!(diff[0].contains("my_fn"));
+    }
 }

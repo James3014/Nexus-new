@@ -118,11 +118,34 @@ func PathExists(path string) bool {
 	return !os.IsNotExist(err)
 }
 
+// pingUDS 嘗試快速撥接 UDS；若成功代表伺服器正在運行，若失敗代表殘留。
+func pingUDS(sockPath string) bool {
+	conn, err := net.DialTimeout("unix", sockPath, 300*time.Millisecond)
+	if err != nil {
+		return false
+	}
+	_ = conn.Close()
+	return true
+}
+
 func main() {
-	// 🛡️ v2.1d Hardened: 確保 UDS 位址可配置化並防範鎖定衝突
+	// 🛡️ v2.2 Hardened: UDS 位址可配置化 + 啟動前自癒清除殘留 socket
 	udsPath := os.Getenv("NEXUS_CORE_SOCK")
 	if udsPath == "" {
 		udsPath = "/tmp/nexus-core.sock"
+	}
+
+	// 🔧 UDS 自癒清洗：若 socket 檔案存在但無法連線，視為殘留並強制清除
+	if PathExists(udsPath) {
+		if !pingUDS(udsPath) {
+			log.Printf("⚠️ [Swarm:SelfHeal] Stale UDS socket detected at %s. Removing...", udsPath)
+			if err := os.Remove(udsPath); err != nil {
+				log.Fatalf("❌ [Swarm:SelfHeal] Failed to remove stale socket: %v", err)
+			}
+			log.Printf("✅ [Swarm:SelfHeal] Stale socket removed. Waiting for core service...")
+		} else {
+			log.Printf("✅ [Swarm:Ping] Core UDS is live at %s", udsPath)
+		}
 	}
 
 	// 定義 UDS Dialer (Elite Standard)
@@ -131,8 +154,8 @@ func main() {
 		return d.DialContext(ctx, "unix", addr)
 	}
 
-	// 🔒 使用 insecure 憑證但鎖定 unix dialer 性質分析內容性
-	conn, err := grpc.Dial(udsPath, 
+	// 🔒 使用 insecure 憑證但鎖定 unix dialer
+	conn, err := grpc.Dial(udsPath,
 		grpc.WithTransportCredentials(insecure.NewCredentials()),
 		grpc.WithContextDialer(dialer),
 		grpc.WithBlock(), // 確保連通後才啟動總線

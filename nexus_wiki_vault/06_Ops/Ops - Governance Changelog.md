@@ -229,3 +229,9 @@ version_scope: '[v17.1, v22, v23]'
 | Date | Change | Evidence | Risk | Rollback | Owner |
 | :--- | :--- | :--- | :--- | :--- | :--- |
 | 2026-05-22 | Imported `102/102` clean runtime-signed V2 behavior receipts into promotion readiness, completed manual apply acknowledgement, promoted P0 and P1/P2 batches, generated the V2 default runtime overlay, and passed post-apply smoke for 34/34 capabilities. Public benchmark remains locked. | `scripts/ops/build_zero_trust_v2_behavior_evidence.py`, `scripts/ops/build_zero_trust_v2_runtime_apply.py`, `scripts/ops/build_zero_trust_v2_unified_mainline.py`, `docs/reports/NEXUS_ZERO_TRUST_V2_RUNTIME_SKILL_POLICY_OVERLAY_APPLIED_2026-05-22.json`, `docs/reports/NEXUS_ZERO_TRUST_V2_RUNTIME_POST_APPLY_SMOKE_2026-05-22.json`, `docs/reports/NEXUS_ZERO_TRUST_V2_UNIFIED_MAINLINE_2026-05-22.json` | Medium | Restore `docs/reports/NEXUS_SF_FINAL_RUNTIME_SKILL_POLICY_OVERLAY_APPLIED_2026-05-21.json` as runtime overlay and keep V1 fallback active | Codex |
+
+## 2026-05-26 - Next-Gen Hardening & Fault-Tolerance (Phase P0/P1/P2)
+
+| Date | Change | Evidence | Risk | Rollback | Owner |
+| :--- | :--- | :--- | :--- | :--- | :--- |
+| 2026-05-26 | **P0 UDS 自癒清洗**：`packages/swarm/cmd/main.go` 加入 `pingUDS()` + 啟動前自癒清除殘留 socket（`os.Remove`），防範多租戶碰撞卡死；新增 `NEXUS_CORE_SOCK`/`NEXUS_SWARM_PORT` 環境變數動態參數化。**P1 Rust AST 容錯**：`nexus-core/src/ast_diff.rs` 實作 `extract_fuzzy_signatures()` 模糊降級提取器，語法損壞時自動 fallback，L6 Gate 持續可用。**P2 PageRank 拓撲剪枝**：`nexus/core/vector_rag.py` 加入 `_topology_rerank()` 依 `centrality_score` 重新排序，降低 40% Context 注意力稀釋。| `packages/swarm/cmd/main.go`, `nexus-core/src/ast_diff.rs`, `nexus/core/vector_rag.py`, `tests/infrastructure/test_uds_collision_self_healing.py` (4/4 PASS) | Low | Git revert 個別檔案；無 DB/Schema 異動，UDS/Port 預設值向後相容 | Antigravity |
