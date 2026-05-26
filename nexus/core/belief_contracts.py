@@ -37,3 +37,42 @@ class HealingArtifact:
     metadata: dict[str, Any] = field(default_factory=dict)
     signature: str = ""
     signature_key_id: str = ""
+
+
+@dataclass(frozen=True)
+class SkillReceipt:
+    """Portable receipt confirming the actual injection, usage and outcome of a specific Skill."""
+
+    skill_id: str
+    selected: bool
+    used: bool
+    evidence_id: str
+    outcome: dict[str, Any] = field(default_factory=dict)
+    timestamp: str = ""
+
+
+@dataclass(frozen=True)
+class CapabilityReceipt:
+    """Rigorous artifact confirming that a capability was active, backed by concrete evidence & gates."""
+
+    capability_name: str
+    selected: bool
+    invoked: bool
+    evidence_id: str
+    gate_passed: bool
+    outcome: dict[str, Any] = field(default_factory=dict)
+    skill_receipts: list[SkillReceipt] = field(default_factory=list)
+    timestamp: str = ""
+
+
+@dataclass(frozen=True)
+class CapabilityExecutionPlan:
+    """A serialized DAG of capability phases to be executed with fallback & replan logic."""
+
+    plan_id: str
+    task_id: str
+    phases: list[str] = field(default_factory=list)  # Ordered sublist of S,P,X,D,R,A,C
+    required_capabilities: list[str] = field(default_factory=list)
+    constraints: dict[str, Any] = field(default_factory=dict)
+    timestamp: str = ""
+

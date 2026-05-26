@@ -1,0 +1,118 @@
+from __future__ import annotations
+
+import logging
+from datetime import datetime, timezone
+from typing import Any, Dict, List, Optional
+
+logger = logging.getLogger(__name__)
+
+from nexus.core.belief_contracts import CapabilityExecutionPlan
+from nexus.core.capability_registry import CapabilityRegistry
+from nexus.core.capability_signal_set import CapabilitySignalSet
+from nexus.core.capability_constraints import CapabilityConstraints
+
+
+class CapabilitySelector:
+    """🧠 The single source of truth decision engine that dynamically generates execution plans."""
+
+    def __init__(self, registry: Optional[CapabilityRegistry] = None) -> None:
+        self.registry = registry or CapabilityRegistry()
+
+    def select_capabilities(
+        self,
+        signal_set: CapabilitySignalSet,
+        constraints: CapabilityConstraints,
+    ) -> CapabilityExecutionPlan | Dict[str, Any]:
+        """Evaluate snapshot signals against constraints to produce a serialized ExecutionPlan."""
+        # 1. 安全與倫理過濾 (Ethical Filter Check)
+        verdict = constraints.evaluate_constraints(signal_set)
+        if verdict.get("status") == "BLOCKED":
+            return {
+                "status": "BLOCKED",
+                "reason": verdict.get("reason", "ETHICAL_CONSTRAINT_VIOLATION"),
+                "timestamp": datetime.now(timezone.utc).isoformat(),
+            }
+
+        required_caps: List[str] = []
+        forbidden_rules = verdict.get("forbidden_skills_rules", [])
+
+        # 2. 智慧能力動態選擇演算法 (Autonomic Adaptive Selection)
+        # S (Scope)
+        required_caps.append("mempalace")
+        if signal_set.risk_level in ("HIGH", "CRITICAL"):
+            required_caps.append("policy_capability_gate")
+
+        # P (Plan)
+        required_caps.append("autonomic_router")
+
+        # X (Recon)
+        required_caps.append("codeintel")
+        required_caps.append("lancedb")
+        query_lower = signal_set.task_desc.lower()
+        if "research" in query_lower or "source" in query_lower or "citation" in query_lower:
+            required_caps.append("research")
+            required_caps.append("research_and_source_discipline")
+
+        # D (Decide)
+        required_caps.append("belief")
+        # 🧪 [Round 20] Belief Shift Adaptive Thresholding
+        if signal_set.belief_confidence < 0.65 or signal_set.risk_level == "CRITICAL":
+            required_caps.append("autoreason")
+
+        # R (Repair)
+        if signal_set.impact_complexity > 3.5 or signal_set.risk_level == "CRITICAL":
+            required_caps.append("hyper_sprint")
+            required_caps.append("swarm_multi_agent")
+        else:
+            required_caps.append("repair_loop")
+
+        if "background" in query_lower or "jobs" in query_lower:
+            required_caps.append("drone")
+        if "long" in query_lower or "overnight" in query_lower:
+            required_caps.append("nightshift")
+
+        # A (Audit)
+        required_caps.append("artifact_gate")
+        required_caps.append("claim_gate")
+        if signal_set.risk_level == "CRITICAL" or signal_set.impact_complexity > 4.0:
+            required_caps.append("ultra_review")
+
+        # C (Closure)
+        required_caps.append("learning_closure")
+        required_caps.append("metabolism_resume")
+
+        # 3. 過濾與過濾黑名單規則 (Filter Out Blocked capabilities)
+        final_caps: List[str] = []
+        for cap_name in required_caps:
+            info = self.registry.get_capability(cap_name)
+            if not info:
+                continue
+            # 檢查是否違反宮殿黑名單規則
+            is_forbidden = False
+            for rule in forbidden_rules:
+                if cap_name in str(rule).lower():
+                    is_forbidden = True
+                    break
+            if is_forbidden:
+                logger.warning("🛡️ [Selector] Cap %s skipped due to forbid rule", cap_name)
+                continue
+            final_caps.append(cap_name)
+
+        # 4. 生成階段 DAG (S,P,X,D,R,A,C)
+        phases = ["S", "P", "X", "D", "R", "A", "C"]
+
+        plan_id = f"plan_{signal_set.task_id}_{int(datetime.now(timezone.utc).timestamp())}"
+
+        return CapabilityExecutionPlan(
+            plan_id=plan_id,
+            task_id=signal_set.task_id,
+            phases=phases,
+            required_capabilities=final_caps,
+            constraints={
+                "risk_level": signal_set.risk_level,
+                "belief_confidence": signal_set.belief_confidence,
+                "impact_complexity": signal_set.impact_complexity,
+                "forbidden_rules": forbidden_rules,
+            },
+            timestamp=datetime.now(timezone.utc).isoformat(),
+        )
