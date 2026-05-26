@@ -3681,3 +3681,10 @@ version_scope:
 - **Root Cause**: Earlier extraction created the leaf and behavior tests but left compatibility helpers as copied implementations instead of physical aliases.
 - **Action Taken**: Changed `_rel_path_for_report`, `_codeintel_run_cache_graph_path`, `_load_codeintel_graph`, `_build_codeintel_evidence`, and `_task_with_codeintel_context` to thinly delegate to `codeintel_context.py`; added a facade-delegation test and impact-map coverage for the leaf and edited app test.
 - **Prevention**: For any claimed Research Flow leaf, test the old facade helper through monkeypatching the leaf Module. Existing behavior tests are necessary but insufficient because copied facade logic can keep passing while the seam is not actually used.
+
+## 2026-05-26: Decoupled Decision Engines Must Explicitly Return Downstream Variable Dependencies
+- **Phenomenon**: After extracting Plateau / Flow override logic from `run_auto_flow` into `AutoFlowDecisionEngine`, the full regression test suite failed with `NameError: name 'recent_hyper_fails' is not defined` at payload assembly time.
+- **Root Cause**: The decision overrides and metrics (like `recent_hyper_fails` and `stage1_fail_signals`) were computed internally within the decision engine but were not returned to the outer orchestration scope. Downstream payload assembly still referenced these variables, causing runtime failures.
+- **Action Taken**: Updated the return dictionary of `decide_auto_flow_routing` to include `recent_hyper_fails` and `stage1_fail_signals`, unpacked them inside `run_auto_flow`, and updated test assertions to cover this scale-out. All 103 integration tests passed.
+- **Prevention**: When extracting code sections or nesting variables into a sub-module, audit the downstream scope of the caller to ensure no remaining expressions reference the relocated variables. Return all dependent metrics back to the orchestration layer.
+
