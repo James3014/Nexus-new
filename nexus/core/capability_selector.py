@@ -6,7 +6,7 @@ from typing import Any, Dict, List, Optional
 
 logger = logging.getLogger(__name__)
 
-from nexus.core.belief_contracts import CapabilityExecutionPlan
+from nexus.core.belief_contracts import CapabilityExecutionPlan, SkillSlot
 from nexus.core.capability_registry import CapabilityRegistry
 from nexus.core.capability_signal_set import CapabilitySignalSet
 from nexus.core.capability_constraints import CapabilityConstraints
@@ -98,7 +98,36 @@ class CapabilitySelector:
                 continue
             final_caps.append(cap_name)
 
-        # 4. 生成階段 DAG (S,P,X,D,R,A,C)
+        # 4. 動態裝配 SkillSlots (P7 實作)
+        skill_slots = {}
+        for cap_name in final_caps:
+            info = self.registry.get_capability(cap_name)
+            if not info:
+                continue
+            slots = []
+            # Mode C 且 risk 較高時裝配 Swarm 複數協作 Assembly
+            if "Mode C" in info.allowed_heep_modes and (
+                signal_set.risk_level in ("HIGH", "CRITICAL") or signal_set.impact_complexity > 3.5
+            ):
+                slots.append(
+                    SkillSlot(
+                        role="SCOUT",
+                        skill_id="sf-systematic-codeintel-first-principles-thinking-f95019ea",
+                    )
+                )
+                slots.append(SkillSlot(role="LOGIC", skill_id=info.default_skill))
+                slots.append(
+                    SkillSlot(
+                        role="AUDIT",
+                        skill_id="sf-systematic-artifact_gate-differential-review-461fbd0c",
+                    )
+                )
+            else:
+                # Mode A 或 Mode B，只裝配單一 LOGIC 插槽
+                slots.append(SkillSlot(role="LOGIC", skill_id=info.default_skill))
+            skill_slots[cap_name] = slots
+
+        # 5. 生成階段 DAG (S,P,X,D,R,A,C)
         phases = ["S", "P", "X", "D", "R", "A", "C"]
 
         plan_id = f"plan_{signal_set.task_id}_{int(datetime.now(timezone.utc).timestamp())}"
@@ -108,6 +137,7 @@ class CapabilitySelector:
             task_id=signal_set.task_id,
             phases=phases,
             required_capabilities=final_caps,
+            skill_slots=skill_slots,
             constraints={
                 "risk_level": signal_set.risk_level,
                 "belief_confidence": signal_set.belief_confidence,
@@ -116,3 +146,4 @@ class CapabilitySelector:
             },
             timestamp=datetime.now(timezone.utc).isoformat(),
         )
+

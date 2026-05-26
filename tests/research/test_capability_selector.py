@@ -8,11 +8,13 @@ from nexus.core.capability_registry import CapabilityRegistry
 from nexus.core.capability_signal_set import CapabilitySignalSet
 from nexus.core.capability_constraints import CapabilityConstraints
 from nexus.core.capability_selector import CapabilitySelector
+from nexus.core.executor_controls import ExecutorControls
 from nexus.core.belief_contracts import CapabilityExecutionPlan
 
 
 class TestCapabilitySelector(unittest.TestCase):
     """🛡️ High-fidelity Unit Tests covering the newly decoupled Autonomic Selector Core (P1-P5)."""
+
 
     def setUp(self) -> None:
         self.project_root = str(Path(__file__).resolve().parents[2])
@@ -131,6 +133,92 @@ class TestCapabilitySelector(unittest.TestCase):
         self.assertIn("ultra_review", plan.required_capabilities)
         self.assertNotIn("repair_loop", plan.required_capabilities)  # Decoupled / Replaced!
 
+    def test_selector_dynamic_skill_slots_allocation(self) -> None:
+        """Verify HEEP Mode C Swarm multi-skill assembly and Mode A/B solo allocation."""
+        # 1. Swarm Mode C critical allocation
+        signal_set = CapabilitySignalSet(
+            task_id="swarm_test",
+            task_desc="Swarm test case",
+            risk_level="CRITICAL",
+            impact_complexity=4.0,
+            belief_confidence=0.9,
+            skills_triggered=[],
+            tenant_id="tenant_s",
+        )
+        mock_palace = MagicMock()
+        mock_palace.verify_context.return_value = {"status": "ALLOWED"}
+        mock_palace.get_skill_constraints.return_value = {"forbid": [], "require": [], "prefer": []}
+        constraints = CapabilityConstraints(self.project_root, mem_palace=mock_palace)
+        
+        plan = self.selector.select_capabilities(signal_set, constraints)
+        self.assertIsInstance(plan, CapabilityExecutionPlan)
+        
+        # Verify Swarm Multi-Agent (Mode C) has 3 roles
+        swarm_slots = plan.skill_slots.get("swarm_multi_agent")
+        self.assertIsNotNone(swarm_slots)
+        self.assertEqual(len(swarm_slots), 3)
+        roles = [s.role for s in swarm_slots]
+        self.assertIn("SCOUT", roles)
+        self.assertIn("LOGIC", roles)
+        self.assertIn("AUDIT", roles)
+        
+        # 2. Regular Mode B allocation (only LOGIC role)
+        signal_set_regular = CapabilitySignalSet(
+            task_id="regular_test",
+            task_desc="Simple test case",
+            risk_level="NORMAL",
+            impact_complexity=1.0,
+            belief_confidence=0.9,
+            skills_triggered=[],
+            tenant_id="tenant_s",
+        )
+        plan_regular = self.selector.select_capabilities(signal_set_regular, constraints)
+        repair_slots = plan_regular.skill_slots.get("repair_loop")
+        self.assertIsNotNone(repair_slots)
+        self.assertEqual(len(repair_slots), 1)
+        self.assertEqual(repair_slots[0].role, "LOGIC")
+
+    def test_executor_controls_compiles_receipts(self) -> None:
+        """Verify that ExecutorControls drives the execution plan and compiles all Receipts."""
+        signal_set = CapabilitySignalSet(
+            task_id="receipt_test",
+            task_desc="Verify capability receipts in execution DAG",
+            risk_level="NORMAL",
+            impact_complexity=1.5,
+            belief_confidence=0.8,
+            skills_triggered=[],
+            tenant_id="tenant_r",
+        )
+        mock_palace = MagicMock()
+        mock_palace.verify_context.return_value = {"status": "ALLOWED"}
+        mock_palace.get_skill_constraints.return_value = {"forbid": [], "require": [], "prefer": []}
+        constraints = CapabilityConstraints(self.project_root, mem_palace=mock_palace)
+        
+        plan = self.selector.select_capabilities(signal_set, constraints)
+        self.assertIsInstance(plan, CapabilityExecutionPlan)
+        
+        controller = ExecutorControls(self.project_root)
+        receipts = controller.execute_plan(plan)
+        
+        # Verify receipts count matches required capabilities
+        self.assertEqual(len(receipts), len(plan.required_capabilities))
+        
+        for cap_receipt in receipts:
+            self.assertTrue(cap_receipt.selected)
+            self.assertTrue(cap_receipt.invoked)
+            self.assertTrue(cap_receipt.gate_passed)
+            self.assertTrue(cap_receipt.evidence_id.startswith("ev_cap_"))
+            
+            # Verify internal skill receipts
+            self.assertTrue(len(cap_receipt.skill_receipts) >= 1)
+            for skill_receipt in cap_receipt.skill_receipts:
+                self.assertTrue(skill_receipt.selected)
+                self.assertTrue(skill_receipt.used)
+                self.assertTrue(skill_receipt.evidence_id.startswith("ev_slot_"))
+                self.assertEqual(skill_receipt.outcome.get("execution_state"), "SUCCESS")
+
 
 if __name__ == "__main__":
     unittest.main()
+
+

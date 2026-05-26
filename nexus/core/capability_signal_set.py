@@ -66,6 +66,21 @@ class CapabilitySignalSet:
         except (ValueError, TypeError):
             impact_complexity = 1.0
 
+        # 4. 解析 NEXUS_CAPABILITY_SKILL_MAP.md 以補齊 HEEP 活躍 Skills 訊號
+        map_path = Path(project_root) / "docs" / "info" / "NEXUS_CAPABILITY_SKILL_MAP.md"
+        if map_path.exists():
+            try:
+                content = map_path.read_text(encoding="utf-8")
+                import re
+
+                # 簡單提取所有 markdown 中包圍在 `` 內部的 primary skill 名稱
+                primary_skills = re.findall(r"\|\s*`[^`\s]+`\s*\|\s*`([^`\s]+)`\s*\|", content)
+                for skill in primary_skills:
+                    if skill and skill not in skills_triggered:
+                        skills_triggered.append(skill)
+            except Exception:
+                pass
+
         return cls(
             task_id=task_id,
             task_desc=task_desc,
@@ -76,3 +91,4 @@ class CapabilitySignalSet:
             tenant_id=tenant_id,
             metadata=dict(context),
         )
+

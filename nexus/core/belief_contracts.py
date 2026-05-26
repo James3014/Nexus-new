@@ -66,6 +66,16 @@ class CapabilityReceipt:
 
 
 @dataclass(frozen=True)
+class SkillSlot:
+    """Rigorous HEEP/EMAS Role slot indicating how a skill is deployed within a capability."""
+
+    role: str  # 'SCOUT', 'LOGIC', 'AUDIT'
+    skill_id: str
+    injected: bool = False
+    used: bool = False
+
+
+@dataclass(frozen=True)
 class CapabilityExecutionPlan:
     """A serialized DAG of capability phases to be executed with fallback & replan logic."""
 
@@ -73,6 +83,8 @@ class CapabilityExecutionPlan:
     task_id: str
     phases: list[str] = field(default_factory=list)  # Ordered sublist of S,P,X,D,R,A,C
     required_capabilities: list[str] = field(default_factory=list)
+    skill_slots: dict[str, list[SkillSlot]] = field(default_factory=dict)  # cap_name -> list[SkillSlot]
     constraints: dict[str, Any] = field(default_factory=dict)
     timestamp: str = ""
+
 
