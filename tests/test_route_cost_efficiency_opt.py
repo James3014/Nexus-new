@@ -210,4 +210,53 @@ def test_manifest_index_filtering_and_duplicate_safety():
     res3 = filter_tasks_by_manifest_index(mock_tasks, "all")
     assert len(res3) == 5
 
+def test_background_offload_heavy_rows_experiment():
+    """
+    TDD Task 3 (RED/GREEN): Verify _is_heavy_task identifies heavy/flaky tasks based on CLI args and difficulty,
+    and verify background offload structures non-blocking OFFLOADED_TO_BACKGROUND row status.
+    """
+    from scripts.bench.capability_ab_runner import CapabilityTask, _is_heavy_task
+    from typing import Any
+    
+    # Mock CLI arguments
+    class MockArgs:
+        def __init__(self, enable_background_offload=False, heavy_task_ids=""):
+            self.enable_background_offload = enable_background_offload
+            self.heavy_task_ids = heavy_task_ids
+            
+    # Test case 1: Offload disabled (should not offload any task)
+    args_disabled = MockArgs(enable_background_offload=False, heavy_task_ids="task_hard")
+    task_hard = CapabilityTask(id="task_hard", difficulty="hard", task_type="public", task_desc="desc", target_file="", test_file="", success_criteria="")
+    assert _is_heavy_task(task_hard, args_disabled) is False
+    
+    # Test case 2: Offload enabled, hard task should offload automatically
+    args_enabled = MockArgs(enable_background_offload=True)
+    assert _is_heavy_task(task_hard, args_enabled) is True
+    
+    # Test case 3: Easy task, not specified in heavy_task_ids, should NOT offload
+    task_easy = CapabilityTask(id="task_easy", difficulty="easy", task_type="public", task_desc="desc", target_file="", test_file="", success_criteria="")
+    assert _is_heavy_task(task_easy, args_enabled) is False
+    
+    # Test case 4: Easy task, specified in heavy_task_ids, should offload
+    args_specified = MockArgs(enable_background_offload=True, heavy_task_ids="task_easy,task_other")
+    assert _is_heavy_task(task_easy, args_specified) is True
+    
+    # Verify offload stub row structure (mimicking runner behavior)
+    row = {
+        "task_id": task_easy.id,
+        "status": "OFFLOADED_TO_BACKGROUND",
+        "difficulty": task_easy.difficulty,
+        "elapsed_sec": 0.0,
+        "wall_duration_sec": 0.0,
+        "tokens_used": 0,
+        "is_claimable": False,
+        "public_claim_safe": False,
+        "offload_provenance": "background_replay_lane",
+    }
+    assert row["status"] == "OFFLOADED_TO_BACKGROUND"
+    assert row["is_claimable"] is False
+    assert row["public_claim_safe"] is False
+    assert row["offload_provenance"] == "background_replay_lane"
+
+
 

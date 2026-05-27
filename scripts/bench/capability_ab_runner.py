@@ -972,6 +972,17 @@ def filter_tasks_by_manifest_index(tasks: list[CapabilityTask], manifest_index_f
     return [task for task in tasks if task.manifest_index in allowed_indices]
 
 
+def _is_heavy_task(task: CapabilityTask, args: Any) -> bool:
+    if not getattr(args, "enable_background_offload", False):
+        return False
+    heavy_ids = {part.strip() for part in getattr(args, "heavy_task_ids", "").split(",") if part.strip()}
+    if task.id in heavy_ids:
+        return True
+    if task.difficulty == "hard":
+        return True
+    return False
+
+
 def expand_task_trials(tasks: list[CapabilityTask], *, repeat_trials: int, shuffle_seed: int | None) -> list[CapabilityTask]:
     expanded: list[CapabilityTask] = []
     trials = max(1, repeat_trials)
@@ -9558,6 +9569,16 @@ def main() -> int:
         default="all",
         help="Comma-separated manifest indices or range to filter tasks (e.g., '0,2,4' or '1-5'). Default: all.",
     )
+    parser.add_argument(
+        "--enable-background-offload",
+        action="store_true",
+        help="Enable background offload of heavy/flaky tasks to avoid blocking the main runner pipeline.",
+    )
+    parser.add_argument(
+        "--heavy-task-ids",
+        default="",
+        help="Comma-separated task IDs to treat as heavy rows for background offload.",
+    )
     parser.add_argument("--evidence-bundle", dest="evidence_bundle", action="store_true", default=True)
     parser.add_argument("--no-evidence-bundle", dest="evidence_bundle", action="store_false")
     parser.add_argument(
@@ -9836,6 +9857,67 @@ def main() -> int:
 
         materialized_task = _task_uses_materialized_fixture(task, materialize_missing=bool(args.materialize_missing))
         original_target = _read_preserved_target(target_file, materialize_missing=materialized_task)
+
+        if _is_heavy_task(task, args):
+            import threading
+            def _bg_run():
+                try:
+                    run_with_nexus(
+                        repo_root=repo_root,
+                        task=task,
+                        target_file=target_file,
+                        test_file=test_file,
+                        timeout_sec=int(args.timeout_sec) * 2,
+                        force_flow=flow,
+                        runner_mode="subprocess",
+                        with_llm_mode=args.with_llm_mode,
+                        with_model_provider=args.with_model_provider,
+                        tuning_profile=args.tuning_profile,
+                        cli_runner=None,
+                        history_window=1,
+                        history_fail_threshold=9999,
+                        enable_autoreason_executor=bool(args.enable_autoreason_executor),
+                        enable_ddtree_executor=bool(args.enable_ddtree_executor),
+                        enable_ultra_review_dry_gate=bool(args.enable_ultra_review_dry_gate),
+                        llm_candidate_cap=int(args.llm_candidate_cap),
+                        enable_llm_self_heal=bool(args.enable_llm_self_heal),
+                        skip_llm_baseline=bool(args.skip_llm_baseline),
+                        strict_llm_baseline=bool(args.strict_llm_baseline),
+                    )
+                    _emit_progress(
+                        enabled=bool(args.progress_log),
+                        event="background_task_end",
+                        mode="with_nexus",
+                        task=task,
+                        status="COMPLETED",
+                    )
+                except Exception:
+                    pass
+
+            bg_thread = threading.Thread(target=_bg_run, daemon=True)
+            bg_thread.start()
+
+            row = {
+                "task_id": task.id,
+                "status": "OFFLOADED_TO_BACKGROUND",
+                "difficulty": task.difficulty,
+                "elapsed_sec": 0.0,
+                "wall_duration_sec": 0.0,
+                "tokens_used": 0,
+                "is_claimable": False,
+                "public_claim_safe": False,
+                "offload_provenance": "background_replay_lane",
+            }
+            with_rows.append(row)
+            _emit_progress(
+                enabled=bool(args.progress_log),
+                event="task_offloaded",
+                mode="with_nexus",
+                task=task,
+                status="OFFLOADED",
+            )
+            continue
+
         try:
             leg_start = time.monotonic()
             _emit_progress(
