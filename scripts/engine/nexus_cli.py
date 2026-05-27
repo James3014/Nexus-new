@@ -45,6 +45,45 @@ class SanitizedRunner:
         return subprocess.run(cmd, **kwargs)
 
 
+import asyncio
+
+class AsyncProcessExecutor:
+    """⚡ AsyncProcessExecutor to stream output and prevent OS pipe buffer deadlocks"""
+    
+    @staticmethod
+    async def _read_stream(stream: asyncio.StreamReader, file_writer) -> int:
+        total_len = 0
+        while True:
+            chunk = await stream.read(65536)  # 64KB chunk
+            if not chunk:
+                break
+            total_len += len(chunk)
+            if isinstance(chunk, bytes):
+                file_writer.write(chunk.decode("utf-8", errors="ignore"))
+            else:
+                file_writer.write(chunk)
+        return total_len
+
+    async def run_async(self, cmd: list[str], log_path: Path) -> tuple[int, int, int]:
+        p = await asyncio.create_subprocess_exec(
+            cmd[0],
+            *cmd[1:],
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE
+        )
+        
+        log_path.parent.mkdir(parents=True, exist_ok=True)
+        with open(log_path, "w", encoding="utf-8") as f:
+            stdout_task = asyncio.create_task(self._read_stream(p.stdout, f))
+            stderr_task = asyncio.create_task(self._read_stream(p.stderr, f))
+            
+            stdout_len, stderr_len = await asyncio.gather(stdout_task, stderr_task)
+            await p.wait()
+            
+        return p.returncode or 0, stdout_len, stderr_len
+
+
+
 from nexus.app.oracle_dispatcher import OracleDispatcher
 from nexus.app.oracle_advisor import OracleAdvisor
 from nexus.app import research_flow_service
@@ -2125,9 +2164,18 @@ def research_meta_opt(manifest_file, presets_file, report_file, max_wall_time_se
             cmd.append("--llm-baseline")
 
         click.echo(f"🧪 [Meta-Opt] ({idx}/{len(presets)}) preset={preset_name}")
-        p = subprocess.Popen(cmd, cwd=repo_root, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
-        stdout, stderr = p.communicate()
-        proc = subprocess.CompletedProcess(args=cmd, returncode=p.returncode, stdout=stdout, stderr=stderr)
+        import tempfile
+        with tempfile.NamedTemporaryFile(mode="w+", delete=False) as tmp_log:
+            tmp_log_path = Path(tmp_log.name)
+            
+        try:
+            executor = AsyncProcessExecutor()
+            returncode, stdout_len, stderr_len = asyncio.run(executor.run_async(cmd, tmp_log_path))
+            log_content = tmp_log_path.read_text(encoding="utf-8", errors="ignore")
+            proc = subprocess.CompletedProcess(args=cmd, returncode=returncode, stdout=log_content, stderr="")
+        finally:
+            if tmp_log_path.exists():
+                tmp_log_path.unlink()
 
         aggregates = {
             "algorithm_success_rate": 0.0,
