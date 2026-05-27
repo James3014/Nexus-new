@@ -246,6 +246,8 @@ class CapabilityReceipt:
     executor_id: str = ""
     evidence_refs: tuple[str, ...] = ()
     failure_reason: str = ""
+    semantic_hash: str = ""
+    evidence_alignment: bool = True
 
     @property
     def public_claim_safe(self) -> bool:

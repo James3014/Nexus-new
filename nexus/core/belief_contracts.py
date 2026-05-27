@@ -62,6 +62,8 @@ class CapabilityReceipt:
     gate_passed: bool
     outcome: dict[str, Any] = field(default_factory=dict)
     skill_receipts: list[SkillReceipt] = field(default_factory=list)
+    semantic_hash: str = ""
+    evidence_alignment: bool = True
     timestamp: str = ""
 
 
