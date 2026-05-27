@@ -258,5 +258,76 @@ def test_background_offload_heavy_rows_experiment():
     assert row["public_claim_safe"] is False
     assert row["offload_provenance"] == "background_replay_lane"
 
+def test_gateway_rca_analyzer_tool(tmp_path):
+    """
+    TDD Task 4 (RED/GREEN): Verify gateway_rca_analyzer correctly parses JSONL rows,
+    allocates buckets, and separates gateway overhead from provider wait ratios.
+    """
+    from scripts.ops.gateway_rca_analyzer import analyze_gateway_telemetry, generate_markdown_report
+    
+    # 建立一組 mock 的 jsonl 檔案，帶有不同 payload 和時長
+    mock_rows = [
+        # Call 1: small payload (500 chars), total 5s, provider wait 4s, parse 0.1s
+        {
+            "task_id": "task_1",
+            "gateway_total_chars": 500,
+            "gateway_total_sec": 5.0,
+            "gateway_provider_wait_sec": 4.0,
+            "gateway_parse_sec": 0.1,
+            "status": "SUCCESS"
+        },
+        # Call 2: medium payload (3000 chars), total 10s, provider wait 9s, parse 0.2s, timeout
+        {
+            "task_id": "task_2",
+            "gateway_total_chars": 3000,
+            "gateway_total_sec": 10.0,
+            "gateway_provider_wait_sec": 9.0,
+            "gateway_parse_sec": 0.2,
+            "error_category": "timeout",
+            "status": "FAIL"
+        },
+        # Call 3: unrelated row without gateway telemetry
+        {
+            "task_id": "task_3",
+            "status": "SUCCESS"
+        }
+    ]
+    
+    # 寫入暫存檔案
+    jsonl_file = tmp_path / "mock_telemetry.jsonl"
+    with jsonl_file.open("w", encoding="utf-8") as f:
+        for r in mock_rows:
+            f.write(json.dumps(r) + "\n")
+            
+    # 執行 RCA 分析
+    report = analyze_gateway_telemetry(jsonl_file)
+    
+    # 驗證元數據
+    assert report["metadata"]["total_rows"] == 3
+    assert report["metadata"]["gateway_calls"] == 2
+    assert report["metadata"]["total_timeouts"] == 1
+    
+    # 驗證平均數
+    assert report["averages"]["avg_latency_sec"] == 7.5 # (5 + 10) / 2
+    assert report["averages"]["avg_provider_wait_sec"] == 6.5 # (4 + 9) / 2
+    assert report["averages"]["avg_payload_chars"] == 1750.0 # (500 + 3000) / 2
+    
+    # 驗證拆分佔比
+    # Total wait: 4 + 9 = 13. Total sec: 5 + 10 = 15. Wait ratio = 13/15 = 86.67%
+    assert report["shares"]["provider_wait_share"] == round(13/15, 4)
+    assert report["shares"]["gateway_overhead_share"] == round(2/15, 4)
+    assert report["shares"]["timeout_share_of_gateway"] == 0.5
+    
+    # 驗證 buckets 歸類
+    assert report["buckets"]["0-1k"]["count"] == 1
+    assert report["buckets"]["1k-5k"]["count"] == 1
+    assert report["buckets"]["5k-10k"]["count"] == 0
+    
+    # 驗證 Markdown 報表生成正常
+    md = generate_markdown_report(report)
+    assert "# Gateway Payload & Latency Root Cause Analysis (RCA)" in md
+    assert "observation-only" in md
+
+
 
 

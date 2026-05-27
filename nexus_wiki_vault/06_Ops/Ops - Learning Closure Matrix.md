@@ -3705,3 +3705,10 @@ version_scope:
 - **Root Cause**: Stale or asynchronous background tasks emit partial row logs which must not bypass the formal live aggregation bundle validation required for public claims.
 - **Decision**: Designated the background offload capability as strictly observation-only/experimental. Mandated that partial row outputs cannot promote to public claim status unless a final complete aggregation bundle is generated under full fail-closed gates. Separated experimental routing verdicts from verified promotion gates.
 - **Prevention**: Under no circumstances should background/partial runner artifacts unlock public claim eligibility. Partial rows are only valid as resume seeds or diagnostic tools, and any long-run isolation must remain fail-closed.
+
+## 2026-05-27: Phase 2 Observation-Only Gateway Telemetry RCA Diagnostic Tooling
+- **Phenomenon**: Determining whether high-stakes route-cost wall time regression is caused by provider wait/network latency versus battlesuit gateway CLI boot and parse overhead required a fine-grained, auditable breakdown across payload size buckets.
+- **Root Cause**: Gateway telemetry was previously reported as a single total wall time without separating provider wait, parsing latency, and payload characters, preventing precise component-level attribution.
+- **Decision**: Developed `gateway_rca_analyzer.py` to stream-parse telemetry JSONL files, compute precise provider wait vs. gateway overhead ratios, and aggregate latency/timeout statistics into character-size buckets (e.g., 0-1k, 1k-5k). Enforced that the resulting markdown report is strictly marked as `observation-only` diagnostic telemetry, and does not alter or promote public claims.
+- **Prevention**: Keep diagnostic tools strictly decoupled from the core promotion pipeline. Never allow observation-only latency analysis or timeout exclusions to directly bypass or weaken the fail-closed claim threshold.
+

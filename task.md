@@ -6,6 +6,10 @@
 ## Track H：數據真相 (Truth Dashboard) [x]
 - [x] **TRU-101 真實 Token 追蹤**: 正則表達式邏輯已通過單元測試，集成環境測試已觸發並驗證。
 - [x] **TRU-102 數據真相儀表板**: 自動產出 `nexus_truth_dashboard.md` 並落地專案根目錄。
+- [x] **Task 3: `hidden_bugfix_supervised` background offload 實驗 (優先級: P1)**
+  - [x] 執行 background replay 與 longer-timeout lane 隔離實驗
+  - [x] 補測試：驗證 heavy rows 可移出主線，主 runner 不因單一 flaky row 發生長時間阻塞
+  - [x] **狀態**: `COMPLETED`。已成功實作 `--enable-background-offload` 與 `--heavy-task-ids` 支援背景非阻塞隔離執行，並通過 TDD 測試。*註：Task 3 目前屬 observation-only / experimental runner path，僅驗證 heavy rows 可被背景隔離且不阻塞主流程；不構成 public claim、promotion evidence、或 audited final bundle 替代品。*
 - [x] **Dual-Engine Phase 2: Data Loop Hardening**
   - [x] **Phase A: 穿甲核心具現化 (Armor Core)**
   - [x] `[NEW]` 具現 `nexus/core/subagent_armor.py`

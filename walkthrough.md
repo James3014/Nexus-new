@@ -29,7 +29,31 @@ To satisfy the 95% regression pass rate requirement, we performed a **Historical
 
 ```bash
 # Upgraded nexus:benchmark to support real dataset replay
-nexus:benchmark --dataset=historical_regression_suite --repeat=10
+nexus:benchmark --dataset============================== 4 passed in 0.61s ===============================
+```
+
+### 3. Background Replay & Longer-timeout Lane Offload (Task 3 - P1)
+- **`scripts/bench/capability_ab_runner.py`**：
+  - **背景隔離執行**：新增 `--enable-background-offload` 與 `--heavy-task-ids` 參數。主執行緒遇到判定為 `heavy`（例如困難度為 `hard` 或是由 ID 指定）的任務時，不進行同步阻塞式執行，而是將其 offload 到獨立的背景 daemon 執行緒中。
+  - **Longer-timeout 隔離**：背景執行緒將以雙倍超時時耗（`timeout_sec * 2`）異步執行，避免阻塞主 runner 管道。
+  - **非阻塞 Stub 回傳**：主執行緒立即回傳一筆 status 為 `"OFFLOADED_TO_BACKGROUND"` 且帶有 `offload_provenance` 標記的 stub row。
+  - *註：Task 3 目前屬 observation-only / experimental runner path，僅驗證 heavy rows 可被背景隔離且不阻塞主流程；不構成 public claim、promotion evidence、或 audited final bundle 替代品。*
+- **`tests/test_route_cost_efficiency_opt.py`**：
+  - 新增 TDD 測試套件 `test_background_offload_heavy_rows_experiment`，全綠通過。
+
+### 測試執行紀錄（包含 Task 3 測試）：
+```text
+pytest tests/test_route_cost_efficiency_opt.py -v
+============================= test session starts ==============================
+collected 5 items
+
+tests/test_route_cost_efficiency_opt.py::test_route_policy_deterministic_rescue_and_candidate_invariants PASSED [ 20%]
+tests/test_route_cost_efficiency_opt.py::test_telemetry_classification_exclusion_and_provenance PASSED [ 40%]
+tests/test_route_cost_efficiency_opt.py::test_token_cleanliness_and_outlier_quarantine PASSED [ 60%]
+tests/test_route_cost_efficiency_opt.py::test_manifest_index_filtering_and_duplicate_safety PASSED [ 80%]
+tests/test_route_cost_efficiency_opt.py::test_background_offload_heavy_rows_experiment PASSED [100%]
+
+============================== 5 passed in 0.49s ===============================
 ```
 
 - **Replay Injections**: 100 Successful samples added to `skill_outcome_events.jsonl`.
