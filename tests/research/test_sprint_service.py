@@ -2218,3 +2218,37 @@ def test_inplace_executor_rejects_syntax_error(tmp_path: Path):
     ev = ex.evaluate_candidate(seed=0, hint="h", code="def broken(:\n    pass\n", source="local")
     assert ev.score == 0.0
     assert ev.error.startswith("syntax_error:")
+
+
+def test_truncate_redundant_tests():
+    from nexus.research.sprint_service import _truncate_redundant_tests
+    
+    # Test short file is not truncated
+    short_source = "def test_short():\n    assert True\n"
+    assert _truncate_redundant_tests(short_source, "fix it") == short_source
+    
+    # Test long file is truncated correctly
+    long_source_lines = [
+        "import sys",
+        "from demo import normalize_flag",
+        "",
+        "def test_unrelated_one():",
+        "    assert normalize_flag('abc') == 'abc'",
+        "",
+        "def test_normalize_flag_whitespace():",
+        "    assert normalize_flag('  YES  ') == 'yes'",
+        "",
+        "def test_unrelated_two():",
+        "    assert normalize_flag('123') == '123'",
+        ""
+    ]
+    # Pad to over 80 lines to trigger truncation
+    long_source = "\n".join(long_source_lines) + "\n" * 80
+    
+    truncated = _truncate_redundant_tests(long_source, "Fix normalize_flag_whitespace bug")
+    
+    assert "def test_normalize_flag_whitespace():" in truncated
+    assert "test_unrelated_one" not in truncated
+    assert "test_unrelated_two" not in truncated
+    assert "Truncated other passing tests" in truncated
+

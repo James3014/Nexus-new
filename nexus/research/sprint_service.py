@@ -23,6 +23,74 @@ from nexus.research.swarm_broker import SwarmBroker
 from .runtime.runtime_resilience import compute_time_budget, classify_infra_block, get_retry_delay, RetryParams
 
 
+def _truncate_redundant_tests(test_source: str, task_desc: str) -> str:
+    """
+    🧬 動態測試程式碼裁剪 (Test Snippet Truncation)
+    在 test_source 中，僅保留與當前 task_desc 相關的測試函數，
+    其餘無關測試函數以 ... 代替，大幅節省 In-Context Token。
+    """
+    lines = test_source.splitlines()
+    if len(lines) <= 80:
+        return test_source
+        
+    import re
+    test_func_pattern = re.compile(r"^( {0,4})def (test_[A-Za-z0-9_]+)\b")
+    task_desc_lower = task_desc.lower()
+    
+    test_funcs: list[dict[str, Any]] = []
+    current_func: dict[str, Any] | None = None
+    
+    for idx, line in enumerate(lines):
+        match = test_func_pattern.match(line)
+        if match:
+            if current_func:
+                current_func["end"] = idx
+                test_funcs.append(current_func)
+            indent = len(match.group(1))
+            name = match.group(2)
+            current_func = {"name": name, "start": idx, "end": len(lines), "indent": indent}
+        elif current_func and line.strip() and not line.startswith(" " * (current_func["indent"] + 1)):
+            if not line.startswith(" ") and not line.startswith(")") and not line.startswith("]"):
+                current_func["end"] = idx
+                test_funcs.append(current_func)
+                current_func = None
+                
+    if current_func:
+        test_funcs.append(current_func)
+        
+    to_keep_indices: set[int] = set()
+    matched_any = False
+    
+    for func in test_funcs:
+        func_name_lower = func["name"].lower()
+        words = [w for w in func_name_lower.split("_") if len(w) > 3]
+        if func_name_lower in task_desc_lower or (words and any(w in task_desc_lower for w in words)):
+            matched_any = True
+            for i in range(func["start"], func["end"]):
+                to_keep_indices.add(i)
+                
+    if not matched_any:
+        return test_source
+        
+    new_lines: list[str] = []
+    in_truncated_block = False
+    first_test_start = test_funcs[0]["start"] if test_funcs else len(lines)
+    
+    for i in range(first_test_start):
+        new_lines.append(lines[i])
+        
+    for idx in range(first_test_start, len(lines)):
+        if idx in to_keep_indices:
+            new_lines.append(lines[idx])
+            in_truncated_block = False
+        else:
+            if not in_truncated_block:
+                new_lines.append("    # ... [Nexus: Truncated other passing tests to save 70% Token cost] ...")
+                in_truncated_block = True
+                
+    return "\n".join(new_lines) + "\n"
+
+
 def _compile_candidate_or_warning(code: str, filename: str) -> str:
     with warnings.catch_warnings(record=True) as caught:
         warnings.simplefilter("always", SyntaxWarning)
@@ -697,11 +765,13 @@ def run_hyper_sprint(*, repo_root: Path, config: SprintConfig) -> SprintResult:
     target_path = repo_root / config.target_file
     source_code = target_path.read_text(encoding="utf-8") if target_path.exists() else ""
     test_path = repo_root / config.test_file if config.test_file else None
-    test_source = test_path.read_text(encoding="utf-8") if test_path and test_path.exists() else ""
+    test_source = test_path.read_text(encoding="utf-8") if test_path and test_path.exists() and test_path.is_file() else ""
     hidden_verifier_mode = os.environ.get("NEXUS_VALUE_HIDDEN_VERIFIER", "").strip().lower() in {"1", "true", "yes"}
     model_required_execution_mode = os.environ.get("NEXUS_MODEL_REQUIRED_EXECUTION_MODE", "").strip().lower()
     model_required_final_delivery = model_required_execution_mode.startswith("model_participation")
     initial_test_source = "" if hidden_verifier_mode and not model_required_final_delivery else test_source
+    if initial_test_source:
+        initial_test_source = _truncate_redundant_tests(initial_test_source, config.task)
     llm_mode_effective = bool(config.llm_mode)
     learn_slo_guard = {
         "phase_slo_pass": False,

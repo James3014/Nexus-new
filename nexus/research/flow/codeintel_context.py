@@ -50,7 +50,7 @@ def load_codeintel_graph(path: Path) -> dict[str, Any] | None:
 def build_codeintel_evidence(repo_root: Path, *, target_file: str, task_desc: str) -> dict[str, Any]:
     slug = _safe_codeintel_slug(task_desc)
     report_dir = repo_root / ".nexus" / "reports" / "codeintel"
-    graph_path = codeintel_run_cache_graph_path(repo_root) or report_dir / f"{slug}_code_graph.json"
+    graph_path = codeintel_run_cache_graph_path(repo_root) or report_dir / "shared_code_graph.json"
     scan_report_path = report_dir / f"{slug}_scan.json"
     impact_report_path = report_dir / f"{slug}_impact.json"
     dci_report_path = report_dir / f"{slug}_dci.json"
@@ -135,7 +135,8 @@ def task_with_codeintel_context(task_desc: str, codeintel: dict[str, Any]) -> st
         return task_desc
     risk_reasons = ", ".join(str(item) for item in codeintel.get("risk_reason", []) or []) or "none"
     controls = route_cost_controls_from_env()
-    if str(controls.get("context_mode") or "").lower() == "compact":
+    context_mode = str(controls.get("context_mode") or os.environ.get("NEXUS_CODEINTEL_CONTEXT_MODE", "compact")).lower()
+    if context_mode == "compact":
         dci_context = ""
         if codeintel.get("dci_locator_present"):
             dci_context = (

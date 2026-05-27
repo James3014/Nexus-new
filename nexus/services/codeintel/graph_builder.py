@@ -83,7 +83,7 @@ def matching_modules(imported: str, module_names: list[str], module_set: set[str
     return sorted(matched)
 
 
-def build_graph(root: str | Path) -> dict[str, Any]:
+def build_graph(root: str | Path, cache_data: dict[str, Any] | None = None) -> dict[str, Any]:
     project_root = Path(root).resolve()
     python_files = iter_python_files(project_root)
     modules = {module_name(project_root, path): str(path.relative_to(project_root)) for path in python_files}
@@ -94,20 +94,60 @@ def build_graph(root: str | Path) -> dict[str, Any]:
     edges: list[dict[str, str]] = []
     module_names = sorted(modules)
     module_set = set(module_names)
+    
+    # Incremental AST cache structures
+    new_mtimes: dict[str, float] = {}
+    new_imports: dict[str, list[str]] = {}
+    
+    cached_mtimes = (cache_data.get("meta", {}) or {}).get("mtimes", {}) if cache_data else {}
+    cached_imports = (cache_data.get("meta", {}) or {}).get("imports", {}) if cache_data else {}
+    
     for path in python_files:
+        rel_path = str(path.relative_to(project_root))
         source = module_name(project_root, path)
-        for imported in sorted(imports_for(path)):
+        try:
+            current_mtime = path.stat().st_mtime
+        except Exception:
+            current_mtime = 0.0
+            
+        new_mtimes[rel_path] = current_mtime
+        
+        # Check cache hit using mtime and existence in cache
+        if rel_path in cached_mtimes and cached_mtimes[rel_path] == current_mtime and rel_path in cached_imports:
+            imports = set(cached_imports[rel_path])
+        else:
+            imports = imports_for(path)
+            
+        new_imports[rel_path] = sorted(imports)
+        
+        for imported in sorted(imports):
             for target in matching_modules(imported, module_names, module_set):
                 if target != source:
                     edges.append({"from": source, "to": target, "type": "imports"})
-    return {"nodes": nodes, "edges": edges}
+                    
+    return {
+        "nodes": nodes,
+        "edges": edges,
+        "meta": {
+            "mtimes": new_mtimes,
+            "imports": new_imports
+        }
+    }
 
 
 def scan_codebase(root: str | Path, *, index_path: str | Path | None = None) -> CodeScanResult:
     project_root = Path(root).resolve()
     out_path = Path(index_path) if index_path else project_root / ".nexus" / "reports" / "codeintel" / "code_graph.json"
     out_path = out_path if out_path.is_absolute() else project_root / out_path
-    graph = build_graph(project_root)
+    
+    cache_data = None
+    if out_path.exists():
+        try:
+            cache_data = json.loads(out_path.read_text(encoding="utf-8"))
+        except Exception:
+            cache_data = None
+            
+    graph = build_graph(project_root, cache_data=cache_data)
     out_path.parent.mkdir(parents=True, exist_ok=True)
     out_path.write_text(json.dumps(graph, ensure_ascii=False, indent=2, sort_keys=True), encoding="utf-8")
     return CodeScanResult(
@@ -117,3 +157,4 @@ def scan_codebase(root: str | Path, *, index_path: str | Path | None = None) -> 
         index_path=str(out_path),
         generated_at=datetime.now(UTC).isoformat(),
     )
+

@@ -48,4 +48,13 @@
 - [x] **EXP-002 批量 Replay 驗證**: 確保 10 個案例全數可跑且結果一致。
 
 ---
-**核准狀態：Partial Aligned (TRU-101 Pending)**
+## Track K：難題 Wall Time & Token 底層物理優化 (Hardcore Physical Optimization)
+- [x] **PHY-101 增量 AST 圖掃描**
+- [x] **PHY-102 動態測試程式碼裁剪**
+- [x] **PHY-103 預設 Compact 模式**
+- [x] **PHY-104 實體連網 A/B 評測與數據對決**
+
+---
+**核准狀態：Active Aligned (REALISM_S10 Certified)**
+
+

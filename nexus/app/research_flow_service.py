@@ -1021,7 +1021,7 @@ def run_auto_flow(
 
     def _restore_baseline_files(restored_files: dict[Path, str | None], *, keep_target: bool) -> None:
         for path, original_text in restored_files.items():
-            should_restore = not (keep_target and path == target_path)
+            should_restore = not keep_target
             if should_restore and original_text is None:
                 if path.exists():
                     path.unlink()
