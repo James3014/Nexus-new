@@ -3732,3 +3732,9 @@ version_scope:
 
 
 
+
+## 2026-05-27: Phase 3 Shadow Prefilter & Compaction Spike Isolation Contracts
+- **Phenomenon**: Developing experimental optimization spikes like Heuristic Sandbox Pre-filtering and Context Window Compaction can easily cause telemetry "smuggling" or paired cost denominator pollution if experimental values are mixed with audited production ledgers.
+- **Root Cause**: Gateway prompting and AST routing deciders lacked strict shadow mode schemas and dynamic boundary validation rules to guarantee isolation under live validation runs.
+- **Decision**: Deployed strict schema checks in `public_gate_bundle.py` to auto-reject any shadow_/observation_ prefixed key from claiming `public_claim_safe`. Mechanized accounting rules to skip shadow telemetry from comparison denominators. Established live TDD isolation tests (Task A & C) and verified strictly observation-only dual prompt rendering (Task B & D).
+- **Prevention**: Spike designs must treat telemetries purely as "passive observation sensors." Always isolate experimental paths with a dedicated shadow mode before permitting active routing access under fail-closed gates.

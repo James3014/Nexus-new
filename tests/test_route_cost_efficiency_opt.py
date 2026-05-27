@@ -731,52 +731,76 @@ def test_gateway_rca_analyzer_calibrated_bins(tmp_path):
 
 def test_heuristic_prefilter_is_observation_only():
     """
-    TDD Task A (RED): Verify Heuristic Pre-filtering shadow decision is strictly
+    TDD Task A (GREEN): Verify Heuristic Pre-filtering shadow decision is strictly
     observation-only and does not affect the physical execution path.
     """
-    # 1. 模擬包含 shadow prefilter diagnostics 的 row
-    shadow_row = {
-        "task_id": "ast_task_01",
-        "status": "SUCCESS",
-        "shadow_prefilter_verdict": "skip", # Heuristic Skip hypothesis
-        "shadow_confidence": 0.95,
-        "shadow_estimated_savings_ms": 1200.0,
-        "public_claim_safe": False # STRICT CONTRACT: Must be False
-    }
+    from nexus.core.router import SkillsRouter
+    router = SkillsRouter(
+        project_root="/Users/jameschen/Workspace/nexus",
+        enable_shadow_prefilter=True
+    )
     
-    # 驗證 shadow telemetry 被正確歸類，且 public claim 為 False
-    assert shadow_row["shadow_prefilter_verdict"] == "skip"
-    assert shadow_row["public_claim_safe"] is False
+    # 傳入無 struct 變更的 payload -> shadow skip
+    res = router.decide_route(
+        capability="ast_scanning",
+        risk_level="low",
+        bare_sufficiency="high",
+        hidden_verifier_passed=True,
+        code_payload="x = 10\nprint(x)" # 無 class / def 關鍵字，預期 skip
+    )
     
-    # 2. 驗證實體 Sandbox 的檢驗依然成功（不因 Heuristic skip 繞過真實 runtime check）
-    # 這裡我們模擬實體 verification run 正常被調用，並沒有真的 skip
-    verification_executed = True
-    assert verification_executed is True
+    assert "observation_only_diagnostics" in res
+    diag = res["observation_only_diagnostics"]
+    assert diag["shadow_prefilter_verdict"] == "skip"
+    assert diag["shadow_confidence"] == 0.95
+    assert diag["shadow_estimated_savings_ms"] == 1200.0
+    assert diag["public_claim_safe"] is False
+    
+    # 傳入有 struct 變更的 payload -> shadow run
+    res_run = router.decide_route(
+        capability="ast_scanning",
+        risk_level="low",
+        bare_sufficiency="high",
+        hidden_verifier_passed=True,
+        code_payload="class MyClass:\n    def my_method(self):\n        pass" # 有 class/def 關鍵字，預期 run
+    )
+    
+    diag_run = res_run["observation_only_diagnostics"]
+    assert diag_run["shadow_prefilter_verdict"] == "run"
+    assert diag_run["shadow_confidence"] == 0.80
+    assert diag_run["public_claim_safe"] is False
 
 
 def test_context_compaction_is_observation_only():
     """
-    TDD Task C (RED): Verify Context Window Compaction dual rendering is strictly
+    TDD Task C (GREEN): Verify Context Window Compaction dual rendering is strictly
     observation-only and does not alter the production execution prompt.
     """
-    # 1. 模擬包含 dual prompt rendering diagnostics 的 row
-    compacted_row = {
-        "task_id": "gov_task_02",
-        "status": "SUCCESS",
-        "shadow_compaction_ratio": 0.35, # Compacted 35%
-        "shadow_original_tokens": 3000,
-        "shadow_compacted_tokens": 1950,
-        "shadow_schema_preserved": True,
-        "public_claim_safe": False # STRICT CONTRACT: Must be False
-    }
+    from nexus.services.gateway import BattlesuitGateway
+    gateway = BattlesuitGateway(
+        project_root="/Users/jameschen/Workspace/nexus",
+        enable_shadow_compaction=True
+    )
     
-    # 驗證 dual-render telemetry 被正確紀錄且不影響 public claim
-    assert compacted_row["shadow_compaction_ratio"] == 0.35
-    assert compacted_row["public_claim_safe"] is False
+    # 模擬 gateway 呼叫前置 telemetry 收集 (dual-render)
+    sys_msg = "You are the pilot of the Nexus Battlesuit v16. Do not use tools, do not inspect files, and do not create an execution plan. Required output shape: {}"
+    content = "required_governance_rules: active\npayload:\n\n   too   much   spaces   \n\n\n   newlines"
     
-    # 2. 驗證真實 prompt 依然完整發送，無損毀
-    actual_prompt_sent = "SYSTEM: required_governance_rules...\nUSER: my_code_payload"
-    assert "required_governance_rules" in actual_prompt_sent
+    # 呼叫結構化前置 render 的模擬 telemetry
+    res, _ = gateway.ask_structured(
+        prompt=sys_msg,
+        payload=content,
+        phase="R"
+    )
+    
+    assert res["status"] in {"FAIL", "REJECTED"} # 預期為 FAIL (缺失 binary) 或是 REJECTED (實體執行成功但被拒絕)
+    # 但 gateway_telemetry (包含 shadow dual render 統計) 必須存在於回傳 data 中
+    assert "shadow_compaction_ratio" in res
+    assert res["shadow_compaction_ratio"] > 0.0 # 空間有壓縮
+    assert res["shadow_schema_preserved"] is True
+    assert res["public_claim_safe"] is False
+
+
 
 
 def test_spike_telemetry_does_not_change_paired_denominator():

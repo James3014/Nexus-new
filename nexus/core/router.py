@@ -28,8 +28,6 @@ class SkillsRouter:
         self.run_dir = run_dir or project_root
         self.mem_palace = mem_palace
         self.firewall = DomainFirewall()
-        from nexus.core.engine.critique_engine import critique
-        self.critique = critique
         from nexus.core.p_loop_manager import PLoopManager
         self.p_loop = PLoopManager()
         
@@ -37,8 +35,9 @@ class SkillsRouter:
         self.allow_pre_model_deterministic_rescue = kwargs.get("allow_pre_model_deterministic_rescue", False)
         self.candidate_pool_mode = kwargs.get("candidate_pool_mode", "standard")
         self.governance_hardened_mode = kwargs.get("governance_hardened_mode", "default")
+        self.enable_shadow_prefilter = kwargs.get("enable_shadow_prefilter", False)
 
-    def decide_route(self, capability: str, risk_level: str, bare_sufficiency: str, hidden_verifier_passed: bool) -> dict[str, Any]:
+    def decide_route(self, capability: str, risk_level: str, bare_sufficiency: str, hidden_verifier_passed: bool, code_payload: str = None) -> dict[str, Any]:
         """🛡️ 實作政策層次決策，產出具有 reason codes 的 route policy evidence"""
         reason_codes = ["expected_capability_protection"]
         
@@ -49,7 +48,7 @@ class SkillsRouter:
 
         candidate_size = 1 if self.candidate_pool_mode == "capability_invariant" else 2
         
-        return {
+        res = {
             "status": "SUCCESS",
             "route_execution_policy": {
                 "reason_codes": reason_codes,
@@ -57,6 +56,24 @@ class SkillsRouter:
                 "candidate_pool_size": candidate_size
             }
         }
+        
+        # 實作 Task B.1: Shadow Pre-filtering telemetry (靜態 AST 評估)
+        if self.enable_shadow_prefilter or (code_payload is not None):
+            is_skip_candidate = False
+            if code_payload:
+                # 啟發式靜態 AST 模擬：若程式碼無實體 class/def 架構變更，視為 shadow skip 候選
+                is_skip_candidate = "class " not in code_payload and "def " not in code_payload
+            
+            res["observation_only_diagnostics"] = {
+                "shadow_prefilter_verdict": "skip" if is_skip_candidate else "run",
+                "shadow_confidence": 0.95 if is_skip_candidate else 0.80,
+                "shadow_estimated_savings_ms": 1200.0 if is_skip_candidate else 0.0,
+                "shadow_prefilter_reason": "heuristic_static_ast_no_functional_change" if is_skip_candidate else "structural_change_detected",
+                "public_claim_safe": False # STRICT CONTRACT: Must be False!
+            }
+            
+        return res
+
 
     def memory_route(self, query: str, context: Dict[str, Any]) -> Dict[str, Any]:
         """🚀 [Phase 36] 戰甲融合核心：領域 + 倫理 + 計費"""

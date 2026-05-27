@@ -102,7 +102,7 @@ class BattlesuitGateway:
     取代原有的 LLMClient。不具備主動推理能力，僅負責「物理交接 (Handoff)」。
     """
 
-    def __init__(self, bin_path=None, lock_file=None, project_root=None):
+    def __init__(self, bin_path=None, lock_file=None, project_root=None, **kwargs):
         self.lock_file = lock_file or os.getenv("NEXUS_LOCK_FILE", "/tmp/nexus_battlesuit.lock")
         self.project_root = Path(project_root or ".")
         
@@ -111,6 +111,7 @@ class BattlesuitGateway:
         self.oauth_provider = os.getenv("NEXUS_OAUTH_PROVIDER", "gemini")
         # 🛡️ Compatibility for legacy scripts
         self.llm_bin = self.oauth_provider
+        self.enable_shadow_compaction = kwargs.get("enable_shadow_compaction", False)
         
         # ❌ OPENAI SDK REMOVED (De-LLM-ized)
         self.client = None
@@ -224,6 +225,8 @@ class BattlesuitGateway:
                 dynamic_timeout = max(5, int(timeout_override))
             except ValueError:
                 pass
+            except Exception:
+                pass
 
         gateway_telemetry = {
             "gateway_prompt_chars": len(sys_msg),
@@ -231,6 +234,28 @@ class BattlesuitGateway:
             "gateway_total_chars": len(sys_msg) + len(content),
             "gateway_timeout_sec": dynamic_timeout,
         }
+        
+        # 🛡️ Task D.1: Shadow dual prompt rendering (純觀測實驗)
+        enable_shadow_compaction = os.getenv("NEXUS_GATEWAY_SHADOW_COMPACTION", "0") == "1" or \
+                                   getattr(self, "enable_shadow_compaction", False)
+        if enable_shadow_compaction:
+            orig_chars = len(sys_msg) + len(content)
+            # 模擬壓縮運算
+            compact_sys = sys_msg.replace("Do not use tools, do not inspect files, and do not create an execution plan.", "No tools/files/plans.")
+            compact_content = re.sub(r"[ \t]+", " ", content)
+            compact_content = re.sub(r"\n\n+", "\n", compact_content)
+            compacted_chars = len(compact_sys) + len(compact_content)
+            
+            compaction_ratio = round(1.0 - (compacted_chars / orig_chars), 4) if orig_chars > 0 else 0.0
+            schema_preserved = "required_governance_rules" in compact_sys or "required_governance_rules" in compact_content or \
+                               "Required output shape" in compact_sys
+                               
+            gateway_telemetry["shadow_compaction_ratio"] = compaction_ratio
+            gateway_telemetry["shadow_original_tokens"] = orig_chars // 4
+            gateway_telemetry["shadow_compacted_tokens"] = compacted_chars // 4
+            gateway_telemetry["shadow_schema_preserved"] = schema_preserved
+            gateway_telemetry["public_claim_safe"] = False # STRICT CONTRACT: Must be False!
+
         
         custom_env = build_gemini_env(os.environ.copy())
 
