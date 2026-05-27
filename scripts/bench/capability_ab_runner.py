@@ -5809,6 +5809,7 @@ def run_with_nexus(
                 ),
                 "NEXUS_LLM_SELF_HEAL_ON_PYTEST_FAIL": "1" if effective_llm_self_heal else "0",
                 "NEXUS_DISABLE_DAYSHIFT_OPTIMIZER": "1",
+                "NEXUS_MEMORY_AUTO_INIT": "0",  # 🛡️ 測試套件熱修復：強制子進程跳過 auto-init 建表，避免 SQLite 競爭死鎖
             }
         )
     if task.eligibility_class == "model_required" or require_model_participation_for_run:

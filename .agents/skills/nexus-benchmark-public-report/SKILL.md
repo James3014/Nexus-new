@@ -87,6 +87,38 @@ uv run python scripts/bench/capability_ab_runner.py \
   --evidence-bundle --markdown-report auto --progress-log
 ```
 
+## Cost-Efficiency Rescue Profile
+
+Use this only when diagnosing or proving a Nexus public cost-efficiency lane where deterministic local rescue is an intended Nexus capability, not when making a generic same-model token reduction claim.
+
+Required guard:
+
+```bash
+NEXUS_ALLOW_COST_EFFICIENCY_PRE_MODEL_RESCUE=1
+```
+
+This profile may allow hidden-verifier-backed deterministic pre-model rescue to bypass default `NEXUS_REQUIRE_MODEL_PARTICIPATION=1` / `--strict-llm-baseline` blocking only when the runner records an allowed route-policy reason such as `cost_capped_capability_allows_verified_pre_model_rescue`.
+
+Proof ladder:
+
+1. Run a small `4x1` probe to prove the lane is unblocked and row shape is correct.
+2. Run `12x1` only after the probe shows valid comparison readiness.
+3. Run `12x3` only after `12x1` is clean enough for promotion evidence.
+
+Required row-shape checks before reporting a win:
+
+- with-Nexus rows use `nexus_deterministic_pre_model_rescue` or an equivalent explicit local-rescue label.
+- `model_calls=0` is explained as local deterministic rescue, not a cheaper external model.
+- `token_capture_status` is compatible with local-only execution, such as `not_applicable_local_only`.
+- `public_claim_gate`, `public_verified_delivery_claim_gate`, `public_cost_claim_gate`, and `public_cost_efficiency_claim_gate` are reported separately.
+- Raw JSONL, evidence bundle, report markdown, and outbound prompt ledger are preserved.
+
+Allowed claim shape:
+
+```text
+Under the explicit Nexus cost-efficiency rescue profile, hidden-verifier-backed deterministic local rescue changed verified delivery from <bare>% to <nexus>% and reduced model calls/tokens on eligible lanes. This is a Nexus local-rescue efficiency result, not evidence that the same external model became cheaper.
+```
+
 ## Required Metrics
 
 Report these for both arms:

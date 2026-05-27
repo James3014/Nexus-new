@@ -1,0 +1,4533 @@
+{
+  "directed": false,
+  "multigraph": false,
+  "graph": {},
+  "nodes": [
+    {
+      "label": "main.go",
+      "file_type": "code",
+      "source_file": "swarm/cmd/main.go",
+      "source_location": "L1",
+      "id": "swarm_cmd_main_go",
+      "community": 11,
+      "norm_label": "main.go"
+    },
+    {
+      "label": "swarmServer",
+      "file_type": "code",
+      "source_file": "swarm/cmd/main.go",
+      "source_location": "L21",
+      "id": "cmd_swarmserver",
+      "community": 11,
+      "norm_label": "swarmserver"
+    },
+    {
+      "label": ".RunPhase()",
+      "file_type": "code",
+      "source_file": "swarm/cmd/main.go",
+      "source_location": "L26",
+      "id": "cmd_swarmserver_runphase",
+      "community": 11,
+      "norm_label": ".runphase()"
+    },
+    {
+      "label": ".callBrainAudit()",
+      "file_type": "code",
+      "source_file": "swarm/cmd/main.go",
+      "source_location": "L81",
+      "id": "cmd_swarmserver_callbrainaudit",
+      "community": 11,
+      "norm_label": ".callbrainaudit()"
+    },
+    {
+      "label": "PathExists()",
+      "file_type": "code",
+      "source_file": "swarm/cmd/main.go",
+      "source_location": "L116",
+      "id": "cmd_main_pathexists",
+      "community": 11,
+      "norm_label": "pathexists()"
+    },
+    {
+      "label": "pingUDS()",
+      "file_type": "code",
+      "source_file": "swarm/cmd/main.go",
+      "source_location": "L122",
+      "id": "cmd_main_pinguds",
+      "community": 11,
+      "norm_label": "pinguds()"
+    },
+    {
+      "label": "main()",
+      "file_type": "code",
+      "source_file": "swarm/cmd/main.go",
+      "source_location": "L131",
+      "id": "cmd_main_main",
+      "community": 11,
+      "norm_label": "main()"
+    },
+    {
+      "label": "main_test.go",
+      "file_type": "code",
+      "source_file": "swarm/cmd/main_test.go",
+      "source_location": "L1",
+      "id": "swarm_cmd_main_test_go",
+      "community": 17,
+      "norm_label": "main_test.go"
+    },
+    {
+      "label": "mockCoreClient",
+      "file_type": "code",
+      "source_file": "swarm/cmd/main_test.go",
+      "source_location": "L13",
+      "id": "cmd_mockcoreclient",
+      "community": 17,
+      "norm_label": "mockcoreclient"
+    },
+    {
+      "label": ".LeaseWorktree()",
+      "file_type": "code",
+      "source_file": "swarm/cmd/main_test.go",
+      "source_location": "L17",
+      "id": "cmd_mockcoreclient_leaseworktree",
+      "community": 17,
+      "norm_label": ".leaseworktree()"
+    },
+    {
+      "label": ".CancelLease()",
+      "file_type": "code",
+      "source_file": "swarm/cmd/main_test.go",
+      "source_location": "L24",
+      "id": "cmd_mockcoreclient_cancellease",
+      "community": 17,
+      "norm_label": ".cancellease()"
+    },
+    {
+      "label": "TestRunPhaseAsync()",
+      "file_type": "code",
+      "source_file": "swarm/cmd/main_test.go",
+      "source_location": "L31",
+      "id": "cmd_main_test_testrunphaseasync",
+      "community": 17,
+      "norm_label": "testrunphaseasync()"
+    },
+    {
+      "label": "main.go",
+      "file_type": "code",
+      "source_file": "swarm/cmd/smoke_client/main.go",
+      "source_location": "L1",
+      "id": "swarm_cmd_smoke_client_main_go",
+      "community": 1,
+      "norm_label": "main.go"
+    },
+    {
+      "label": "main()",
+      "file_type": "code",
+      "source_file": "swarm/cmd/smoke_client/main.go",
+      "source_location": "L15",
+      "id": "smoke_client_main_main",
+      "community": 1,
+      "norm_label": "main()"
+    },
+    {
+      "label": "nexus.pb.go",
+      "file_type": "code",
+      "source_file": "swarm/nexus/nexus.pb.go",
+      "source_location": "L1",
+      "id": "swarm_nexus_nexus_pb_go",
+      "community": 0,
+      "norm_label": "nexus.pb.go"
+    },
+    {
+      "label": "PhaseID",
+      "file_type": "code",
+      "source_file": "swarm/nexus/nexus.pb.go",
+      "source_location": "L27",
+      "id": "nexus_phaseid",
+      "community": 0,
+      "norm_label": "phaseid"
+    },
+    {
+      "label": ".Enum()",
+      "file_type": "code",
+      "source_file": "swarm/nexus/nexus.pb.go",
+      "source_location": "L61",
+      "id": "nexus_phaseid_enum",
+      "community": 0,
+      "norm_label": ".enum()"
+    },
+    {
+      "label": ".String()",
+      "file_type": "code",
+      "source_file": "swarm/nexus/nexus.pb.go",
+      "source_location": "L67",
+      "id": "nexus_phaseid_string",
+      "community": 0,
+      "norm_label": ".string()"
+    },
+    {
+      "label": ".Descriptor()",
+      "file_type": "code",
+      "source_file": "swarm/nexus/nexus.pb.go",
+      "source_location": "L71",
+      "id": "nexus_phaseid_descriptor",
+      "community": 0,
+      "norm_label": ".descriptor()"
+    },
+    {
+      "label": ".Type()",
+      "file_type": "code",
+      "source_file": "swarm/nexus/nexus.pb.go",
+      "source_location": "L75",
+      "id": "nexus_phaseid_type",
+      "community": 0,
+      "norm_label": ".type()"
+    },
+    {
+      "label": ".Number()",
+      "file_type": "code",
+      "source_file": "swarm/nexus/nexus.pb.go",
+      "source_location": "L79",
+      "id": "nexus_phaseid_number",
+      "community": 0,
+      "norm_label": ".number()"
+    },
+    {
+      "label": ".EnumDescriptor()",
+      "file_type": "code",
+      "source_file": "swarm/nexus/nexus.pb.go",
+      "source_location": "L84",
+      "id": "nexus_phaseid_enumdescriptor",
+      "community": 0,
+      "norm_label": ".enumdescriptor()"
+    },
+    {
+      "label": "PolicyDecision_SentinelIntents",
+      "file_type": "code",
+      "source_file": "swarm/nexus/nexus.pb.go",
+      "source_location": "L88",
+      "id": "nexus_policydecision_sentinelintents",
+      "community": 0,
+      "norm_label": "policydecision_sentinelintents"
+    },
+    {
+      "label": ".Enum()",
+      "file_type": "code",
+      "source_file": "swarm/nexus/nexus.pb.go",
+      "source_location": "L113",
+      "id": "nexus_policydecision_sentinelintents_enum",
+      "community": 0,
+      "norm_label": ".enum()"
+    },
+    {
+      "label": ".String()",
+      "file_type": "code",
+      "source_file": "swarm/nexus/nexus.pb.go",
+      "source_location": "L119",
+      "id": "nexus_policydecision_sentinelintents_string",
+      "community": 0,
+      "norm_label": ".string()"
+    },
+    {
+      "label": ".Descriptor()",
+      "file_type": "code",
+      "source_file": "swarm/nexus/nexus.pb.go",
+      "source_location": "L123",
+      "id": "nexus_policydecision_sentinelintents_descriptor",
+      "community": 0,
+      "norm_label": ".descriptor()"
+    },
+    {
+      "label": ".Type()",
+      "file_type": "code",
+      "source_file": "swarm/nexus/nexus.pb.go",
+      "source_location": "L127",
+      "id": "nexus_policydecision_sentinelintents_type",
+      "community": 0,
+      "norm_label": ".type()"
+    },
+    {
+      "label": ".Number()",
+      "file_type": "code",
+      "source_file": "swarm/nexus/nexus.pb.go",
+      "source_location": "L131",
+      "id": "nexus_policydecision_sentinelintents_number",
+      "community": 0,
+      "norm_label": ".number()"
+    },
+    {
+      "label": ".EnumDescriptor()",
+      "file_type": "code",
+      "source_file": "swarm/nexus/nexus.pb.go",
+      "source_location": "L136",
+      "id": "nexus_policydecision_sentinelintents_enumdescriptor",
+      "community": 0,
+      "norm_label": ".enumdescriptor()"
+    },
+    {
+      "label": "PhaseOutcome_Status",
+      "file_type": "code",
+      "source_file": "swarm/nexus/nexus.pb.go",
+      "source_location": "L140",
+      "id": "nexus_phaseoutcome_status",
+      "community": 0,
+      "norm_label": "phaseoutcome_status"
+    },
+    {
+      "label": ".Enum()",
+      "file_type": "code",
+      "source_file": "swarm/nexus/nexus.pb.go",
+      "source_location": "L165",
+      "id": "nexus_phaseoutcome_status_enum",
+      "community": 0,
+      "norm_label": ".enum()"
+    },
+    {
+      "label": ".String()",
+      "file_type": "code",
+      "source_file": "swarm/nexus/nexus.pb.go",
+      "source_location": "L171",
+      "id": "nexus_phaseoutcome_status_string",
+      "community": 0,
+      "norm_label": ".string()"
+    },
+    {
+      "label": ".Descriptor()",
+      "file_type": "code",
+      "source_file": "swarm/nexus/nexus.pb.go",
+      "source_location": "L175",
+      "id": "nexus_phaseoutcome_status_descriptor",
+      "community": 0,
+      "norm_label": ".descriptor()"
+    },
+    {
+      "label": ".Type()",
+      "file_type": "code",
+      "source_file": "swarm/nexus/nexus.pb.go",
+      "source_location": "L179",
+      "id": "nexus_phaseoutcome_status_type",
+      "community": 0,
+      "norm_label": ".type()"
+    },
+    {
+      "label": ".Number()",
+      "file_type": "code",
+      "source_file": "swarm/nexus/nexus.pb.go",
+      "source_location": "L183",
+      "id": "nexus_phaseoutcome_status_number",
+      "community": 0,
+      "norm_label": ".number()"
+    },
+    {
+      "label": ".EnumDescriptor()",
+      "file_type": "code",
+      "source_file": "swarm/nexus/nexus.pb.go",
+      "source_location": "L188",
+      "id": "nexus_phaseoutcome_status_enumdescriptor",
+      "community": 0,
+      "norm_label": ".enumdescriptor()"
+    },
+    {
+      "label": "HealthCheckResponse_ServingStatus",
+      "file_type": "code",
+      "source_file": "swarm/nexus/nexus.pb.go",
+      "source_location": "L192",
+      "id": "nexus_healthcheckresponse_servingstatus",
+      "community": 0,
+      "norm_label": "healthcheckresponse_servingstatus"
+    },
+    {
+      "label": ".Enum()",
+      "file_type": "code",
+      "source_file": "swarm/nexus/nexus.pb.go",
+      "source_location": "L214",
+      "id": "nexus_healthcheckresponse_servingstatus_enum",
+      "community": 0,
+      "norm_label": ".enum()"
+    },
+    {
+      "label": ".String()",
+      "file_type": "code",
+      "source_file": "swarm/nexus/nexus.pb.go",
+      "source_location": "L220",
+      "id": "nexus_healthcheckresponse_servingstatus_string",
+      "community": 0,
+      "norm_label": ".string()"
+    },
+    {
+      "label": ".Descriptor()",
+      "file_type": "code",
+      "source_file": "swarm/nexus/nexus.pb.go",
+      "source_location": "L224",
+      "id": "nexus_healthcheckresponse_servingstatus_descriptor",
+      "community": 0,
+      "norm_label": ".descriptor()"
+    },
+    {
+      "label": ".Type()",
+      "file_type": "code",
+      "source_file": "swarm/nexus/nexus.pb.go",
+      "source_location": "L228",
+      "id": "nexus_healthcheckresponse_servingstatus_type",
+      "community": 0,
+      "norm_label": ".type()"
+    },
+    {
+      "label": ".Number()",
+      "file_type": "code",
+      "source_file": "swarm/nexus/nexus.pb.go",
+      "source_location": "L232",
+      "id": "nexus_healthcheckresponse_servingstatus_number",
+      "community": 0,
+      "norm_label": ".number()"
+    },
+    {
+      "label": ".EnumDescriptor()",
+      "file_type": "code",
+      "source_file": "swarm/nexus/nexus.pb.go",
+      "source_location": "L237",
+      "id": "nexus_healthcheckresponse_servingstatus_enumdescriptor",
+      "community": 0,
+      "norm_label": ".enumdescriptor()"
+    },
+    {
+      "label": "LeaseRequest",
+      "file_type": "code",
+      "source_file": "swarm/nexus/nexus.pb.go",
+      "source_location": "L241",
+      "id": "nexus_leaserequest",
+      "community": 9,
+      "norm_label": "leaserequest"
+    },
+    {
+      "label": ".Reset()",
+      "file_type": "code",
+      "source_file": "swarm/nexus/nexus.pb.go",
+      "source_location": "L250",
+      "id": "nexus_leaserequest_reset",
+      "community": 9,
+      "norm_label": ".reset()"
+    },
+    {
+      "label": ".String()",
+      "file_type": "code",
+      "source_file": "swarm/nexus/nexus.pb.go",
+      "source_location": "L257",
+      "id": "nexus_leaserequest_string",
+      "community": 9,
+      "norm_label": ".string()"
+    },
+    {
+      "label": ".ProtoMessage()",
+      "file_type": "code",
+      "source_file": "swarm/nexus/nexus.pb.go",
+      "source_location": "L261",
+      "id": "nexus_leaserequest_protomessage",
+      "community": 9,
+      "norm_label": ".protomessage()"
+    },
+    {
+      "label": ".ProtoReflect()",
+      "file_type": "code",
+      "source_file": "swarm/nexus/nexus.pb.go",
+      "source_location": "L263",
+      "id": "nexus_leaserequest_protoreflect",
+      "community": 9,
+      "norm_label": ".protoreflect()"
+    },
+    {
+      "label": ".Descriptor()",
+      "file_type": "code",
+      "source_file": "swarm/nexus/nexus.pb.go",
+      "source_location": "L276",
+      "id": "nexus_leaserequest_descriptor",
+      "community": 9,
+      "norm_label": ".descriptor()"
+    },
+    {
+      "label": ".GetTaskId()",
+      "file_type": "code",
+      "source_file": "swarm/nexus/nexus.pb.go",
+      "source_location": "L280",
+      "id": "nexus_leaserequest_gettaskid",
+      "community": 9,
+      "norm_label": ".gettaskid()"
+    },
+    {
+      "label": ".GetBranchHint()",
+      "file_type": "code",
+      "source_file": "swarm/nexus/nexus.pb.go",
+      "source_location": "L287",
+      "id": "nexus_leaserequest_getbranchhint",
+      "community": 9,
+      "norm_label": ".getbranchhint()"
+    },
+    {
+      "label": ".GetMetadata()",
+      "file_type": "code",
+      "source_file": "swarm/nexus/nexus.pb.go",
+      "source_location": "L294",
+      "id": "nexus_leaserequest_getmetadata",
+      "community": 9,
+      "norm_label": ".getmetadata()"
+    },
+    {
+      "label": "WorktreeLease",
+      "file_type": "code",
+      "source_file": "swarm/nexus/nexus.pb.go",
+      "source_location": "L301",
+      "id": "nexus_worktreelease",
+      "community": 8,
+      "norm_label": "worktreelease"
+    },
+    {
+      "label": ".Reset()",
+      "file_type": "code",
+      "source_file": "swarm/nexus/nexus.pb.go",
+      "source_location": "L311",
+      "id": "nexus_worktreelease_reset",
+      "community": 8,
+      "norm_label": ".reset()"
+    },
+    {
+      "label": ".String()",
+      "file_type": "code",
+      "source_file": "swarm/nexus/nexus.pb.go",
+      "source_location": "L318",
+      "id": "nexus_worktreelease_string",
+      "community": 8,
+      "norm_label": ".string()"
+    },
+    {
+      "label": ".ProtoMessage()",
+      "file_type": "code",
+      "source_file": "swarm/nexus/nexus.pb.go",
+      "source_location": "L322",
+      "id": "nexus_worktreelease_protomessage",
+      "community": 8,
+      "norm_label": ".protomessage()"
+    },
+    {
+      "label": ".ProtoReflect()",
+      "file_type": "code",
+      "source_file": "swarm/nexus/nexus.pb.go",
+      "source_location": "L324",
+      "id": "nexus_worktreelease_protoreflect",
+      "community": 8,
+      "norm_label": ".protoreflect()"
+    },
+    {
+      "label": ".Descriptor()",
+      "file_type": "code",
+      "source_file": "swarm/nexus/nexus.pb.go",
+      "source_location": "L337",
+      "id": "nexus_worktreelease_descriptor",
+      "community": 8,
+      "norm_label": ".descriptor()"
+    },
+    {
+      "label": ".GetLeaseId()",
+      "file_type": "code",
+      "source_file": "swarm/nexus/nexus.pb.go",
+      "source_location": "L341",
+      "id": "nexus_worktreelease_getleaseid",
+      "community": 8,
+      "norm_label": ".getleaseid()"
+    },
+    {
+      "label": ".GetPath()",
+      "file_type": "code",
+      "source_file": "swarm/nexus/nexus.pb.go",
+      "source_location": "L348",
+      "id": "nexus_worktreelease_getpath",
+      "community": 8,
+      "norm_label": ".getpath()"
+    },
+    {
+      "label": ".GetBranchName()",
+      "file_type": "code",
+      "source_file": "swarm/nexus/nexus.pb.go",
+      "source_location": "L355",
+      "id": "nexus_worktreelease_getbranchname",
+      "community": 8,
+      "norm_label": ".getbranchname()"
+    },
+    {
+      "label": ".GetExpiresAt()",
+      "file_type": "code",
+      "source_file": "swarm/nexus/nexus.pb.go",
+      "source_location": "L362",
+      "id": "nexus_worktreelease_getexpiresat",
+      "community": 8,
+      "norm_label": ".getexpiresat()"
+    },
+    {
+      "label": "HarvestRequest",
+      "file_type": "code",
+      "source_file": "swarm/nexus/nexus.pb.go",
+      "source_location": "L369",
+      "id": "nexus_harvestrequest",
+      "community": 13,
+      "norm_label": "harvestrequest"
+    },
+    {
+      "label": ".Reset()",
+      "file_type": "code",
+      "source_file": "swarm/nexus/nexus.pb.go",
+      "source_location": "L377",
+      "id": "nexus_harvestrequest_reset",
+      "community": 13,
+      "norm_label": ".reset()"
+    },
+    {
+      "label": ".String()",
+      "file_type": "code",
+      "source_file": "swarm/nexus/nexus.pb.go",
+      "source_location": "L384",
+      "id": "nexus_harvestrequest_string",
+      "community": 13,
+      "norm_label": ".string()"
+    },
+    {
+      "label": ".ProtoMessage()",
+      "file_type": "code",
+      "source_file": "swarm/nexus/nexus.pb.go",
+      "source_location": "L388",
+      "id": "nexus_harvestrequest_protomessage",
+      "community": 13,
+      "norm_label": ".protomessage()"
+    },
+    {
+      "label": ".ProtoReflect()",
+      "file_type": "code",
+      "source_file": "swarm/nexus/nexus.pb.go",
+      "source_location": "L390",
+      "id": "nexus_harvestrequest_protoreflect",
+      "community": 13,
+      "norm_label": ".protoreflect()"
+    },
+    {
+      "label": ".Descriptor()",
+      "file_type": "code",
+      "source_file": "swarm/nexus/nexus.pb.go",
+      "source_location": "L403",
+      "id": "nexus_harvestrequest_descriptor",
+      "community": 13,
+      "norm_label": ".descriptor()"
+    },
+    {
+      "label": ".GetLeaseId()",
+      "file_type": "code",
+      "source_file": "swarm/nexus/nexus.pb.go",
+      "source_location": "L407",
+      "id": "nexus_harvestrequest_getleaseid",
+      "community": 13,
+      "norm_label": ".getleaseid()"
+    },
+    {
+      "label": ".GetForceMerge()",
+      "file_type": "code",
+      "source_file": "swarm/nexus/nexus.pb.go",
+      "source_location": "L414",
+      "id": "nexus_harvestrequest_getforcemerge",
+      "community": 13,
+      "norm_label": ".getforcemerge()"
+    },
+    {
+      "label": "CancelLeaseRequest",
+      "file_type": "code",
+      "source_file": "swarm/nexus/nexus.pb.go",
+      "source_location": "L421",
+      "id": "nexus_cancelleaserequest",
+      "community": 12,
+      "norm_label": "cancelleaserequest"
+    },
+    {
+      "label": ".Reset()",
+      "file_type": "code",
+      "source_file": "swarm/nexus/nexus.pb.go",
+      "source_location": "L429",
+      "id": "nexus_cancelleaserequest_reset",
+      "community": 12,
+      "norm_label": ".reset()"
+    },
+    {
+      "label": ".String()",
+      "file_type": "code",
+      "source_file": "swarm/nexus/nexus.pb.go",
+      "source_location": "L436",
+      "id": "nexus_cancelleaserequest_string",
+      "community": 12,
+      "norm_label": ".string()"
+    },
+    {
+      "label": ".ProtoMessage()",
+      "file_type": "code",
+      "source_file": "swarm/nexus/nexus.pb.go",
+      "source_location": "L440",
+      "id": "nexus_cancelleaserequest_protomessage",
+      "community": 12,
+      "norm_label": ".protomessage()"
+    },
+    {
+      "label": ".ProtoReflect()",
+      "file_type": "code",
+      "source_file": "swarm/nexus/nexus.pb.go",
+      "source_location": "L442",
+      "id": "nexus_cancelleaserequest_protoreflect",
+      "community": 12,
+      "norm_label": ".protoreflect()"
+    },
+    {
+      "label": ".Descriptor()",
+      "file_type": "code",
+      "source_file": "swarm/nexus/nexus.pb.go",
+      "source_location": "L455",
+      "id": "nexus_cancelleaserequest_descriptor",
+      "community": 12,
+      "norm_label": ".descriptor()"
+    },
+    {
+      "label": ".GetLeaseId()",
+      "file_type": "code",
+      "source_file": "swarm/nexus/nexus.pb.go",
+      "source_location": "L459",
+      "id": "nexus_cancelleaserequest_getleaseid",
+      "community": 12,
+      "norm_label": ".getleaseid()"
+    },
+    {
+      "label": ".GetReason()",
+      "file_type": "code",
+      "source_file": "swarm/nexus/nexus.pb.go",
+      "source_location": "L466",
+      "id": "nexus_cancelleaserequest_getreason",
+      "community": 12,
+      "norm_label": ".getreason()"
+    },
+    {
+      "label": "PolicyRequest",
+      "file_type": "code",
+      "source_file": "swarm/nexus/nexus.pb.go",
+      "source_location": "L473",
+      "id": "nexus_policyrequest",
+      "community": 3,
+      "norm_label": "policyrequest"
+    },
+    {
+      "label": ".Reset()",
+      "file_type": "code",
+      "source_file": "swarm/nexus/nexus.pb.go",
+      "source_location": "L484",
+      "id": "nexus_policyrequest_reset",
+      "community": 3,
+      "norm_label": ".reset()"
+    },
+    {
+      "label": ".String()",
+      "file_type": "code",
+      "source_file": "swarm/nexus/nexus.pb.go",
+      "source_location": "L491",
+      "id": "nexus_policyrequest_string",
+      "community": 3,
+      "norm_label": ".string()"
+    },
+    {
+      "label": ".ProtoMessage()",
+      "file_type": "code",
+      "source_file": "swarm/nexus/nexus.pb.go",
+      "source_location": "L495",
+      "id": "nexus_policyrequest_protomessage",
+      "community": 3,
+      "norm_label": ".protomessage()"
+    },
+    {
+      "label": ".ProtoReflect()",
+      "file_type": "code",
+      "source_file": "swarm/nexus/nexus.pb.go",
+      "source_location": "L497",
+      "id": "nexus_policyrequest_protoreflect",
+      "community": 3,
+      "norm_label": ".protoreflect()"
+    },
+    {
+      "label": ".Descriptor()",
+      "file_type": "code",
+      "source_file": "swarm/nexus/nexus.pb.go",
+      "source_location": "L510",
+      "id": "nexus_policyrequest_descriptor",
+      "community": 3,
+      "norm_label": ".descriptor()"
+    },
+    {
+      "label": ".GetTaskId()",
+      "file_type": "code",
+      "source_file": "swarm/nexus/nexus.pb.go",
+      "source_location": "L514",
+      "id": "nexus_policyrequest_gettaskid",
+      "community": 3,
+      "norm_label": ".gettaskid()"
+    },
+    {
+      "label": ".GetPhase()",
+      "file_type": "code",
+      "source_file": "swarm/nexus/nexus.pb.go",
+      "source_location": "L521",
+      "id": "nexus_policyrequest_getphase",
+      "community": 3,
+      "norm_label": ".getphase()"
+    },
+    {
+      "label": ".GetAction()",
+      "file_type": "code",
+      "source_file": "swarm/nexus/nexus.pb.go",
+      "source_location": "L528",
+      "id": "nexus_policyrequest_getaction",
+      "community": 3,
+      "norm_label": ".getaction()"
+    },
+    {
+      "label": ".GetContext()",
+      "file_type": "code",
+      "source_file": "swarm/nexus/nexus.pb.go",
+      "source_location": "L535",
+      "id": "nexus_policyrequest_getcontext",
+      "community": 3,
+      "norm_label": ".getcontext()"
+    },
+    {
+      "label": ".GetIntentPrompt()",
+      "file_type": "code",
+      "source_file": "swarm/nexus/nexus.pb.go",
+      "source_location": "L542",
+      "id": "nexus_policyrequest_getintentprompt",
+      "community": 3,
+      "norm_label": ".getintentprompt()"
+    },
+    {
+      "label": "PolicyDecision",
+      "file_type": "code",
+      "source_file": "swarm/nexus/nexus.pb.go",
+      "source_location": "L549",
+      "id": "nexus_policydecision",
+      "community": 7,
+      "norm_label": "policydecision"
+    },
+    {
+      "label": ".Reset()",
+      "file_type": "code",
+      "source_file": "swarm/nexus/nexus.pb.go",
+      "source_location": "L560",
+      "id": "nexus_policydecision_reset",
+      "community": 7,
+      "norm_label": ".reset()"
+    },
+    {
+      "label": ".String()",
+      "file_type": "code",
+      "source_file": "swarm/nexus/nexus.pb.go",
+      "source_location": "L567",
+      "id": "nexus_policydecision_string",
+      "community": 7,
+      "norm_label": ".string()"
+    },
+    {
+      "label": ".ProtoMessage()",
+      "file_type": "code",
+      "source_file": "swarm/nexus/nexus.pb.go",
+      "source_location": "L571",
+      "id": "nexus_policydecision_protomessage",
+      "community": 7,
+      "norm_label": ".protomessage()"
+    },
+    {
+      "label": ".ProtoReflect()",
+      "file_type": "code",
+      "source_file": "swarm/nexus/nexus.pb.go",
+      "source_location": "L573",
+      "id": "nexus_policydecision_protoreflect",
+      "community": 7,
+      "norm_label": ".protoreflect()"
+    },
+    {
+      "label": ".Descriptor()",
+      "file_type": "code",
+      "source_file": "swarm/nexus/nexus.pb.go",
+      "source_location": "L586",
+      "id": "nexus_policydecision_descriptor",
+      "community": 0,
+      "norm_label": ".descriptor()"
+    },
+    {
+      "label": ".GetDecisionId()",
+      "file_type": "code",
+      "source_file": "swarm/nexus/nexus.pb.go",
+      "source_location": "L590",
+      "id": "nexus_policydecision_getdecisionid",
+      "community": 7,
+      "norm_label": ".getdecisionid()"
+    },
+    {
+      "label": ".GetAllow()",
+      "file_type": "code",
+      "source_file": "swarm/nexus/nexus.pb.go",
+      "source_location": "L597",
+      "id": "nexus_policydecision_getallow",
+      "community": 7,
+      "norm_label": ".getallow()"
+    },
+    {
+      "label": ".GetReason()",
+      "file_type": "code",
+      "source_file": "swarm/nexus/nexus.pb.go",
+      "source_location": "L604",
+      "id": "nexus_policydecision_getreason",
+      "community": 7,
+      "norm_label": ".getreason()"
+    },
+    {
+      "label": ".GetIntent()",
+      "file_type": "code",
+      "source_file": "swarm/nexus/nexus.pb.go",
+      "source_location": "L611",
+      "id": "nexus_policydecision_getintent",
+      "community": 7,
+      "norm_label": ".getintent()"
+    },
+    {
+      "label": ".GetEnforcementActions()",
+      "file_type": "code",
+      "source_file": "swarm/nexus/nexus.pb.go",
+      "source_location": "L618",
+      "id": "nexus_policydecision_getenforcementactions",
+      "community": 7,
+      "norm_label": ".getenforcementactions()"
+    },
+    {
+      "label": "PhaseRequest",
+      "file_type": "code",
+      "source_file": "swarm/nexus/nexus.pb.go",
+      "source_location": "L625",
+      "id": "nexus_phaserequest",
+      "community": 10,
+      "norm_label": "phaserequest"
+    },
+    {
+      "label": ".Reset()",
+      "file_type": "code",
+      "source_file": "swarm/nexus/nexus.pb.go",
+      "source_location": "L634",
+      "id": "nexus_phaserequest_reset",
+      "community": 10,
+      "norm_label": ".reset()"
+    },
+    {
+      "label": ".String()",
+      "file_type": "code",
+      "source_file": "swarm/nexus/nexus.pb.go",
+      "source_location": "L641",
+      "id": "nexus_phaserequest_string",
+      "community": 10,
+      "norm_label": ".string()"
+    },
+    {
+      "label": ".ProtoMessage()",
+      "file_type": "code",
+      "source_file": "swarm/nexus/nexus.pb.go",
+      "source_location": "L645",
+      "id": "nexus_phaserequest_protomessage",
+      "community": 10,
+      "norm_label": ".protomessage()"
+    },
+    {
+      "label": ".ProtoReflect()",
+      "file_type": "code",
+      "source_file": "swarm/nexus/nexus.pb.go",
+      "source_location": "L647",
+      "id": "nexus_phaserequest_protoreflect",
+      "community": 10,
+      "norm_label": ".protoreflect()"
+    },
+    {
+      "label": ".Descriptor()",
+      "file_type": "code",
+      "source_file": "swarm/nexus/nexus.pb.go",
+      "source_location": "L660",
+      "id": "nexus_phaserequest_descriptor",
+      "community": 10,
+      "norm_label": ".descriptor()"
+    },
+    {
+      "label": ".GetTaskId()",
+      "file_type": "code",
+      "source_file": "swarm/nexus/nexus.pb.go",
+      "source_location": "L664",
+      "id": "nexus_phaserequest_gettaskid",
+      "community": 10,
+      "norm_label": ".gettaskid()"
+    },
+    {
+      "label": ".GetPhase()",
+      "file_type": "code",
+      "source_file": "swarm/nexus/nexus.pb.go",
+      "source_location": "L671",
+      "id": "nexus_phaserequest_getphase",
+      "community": 10,
+      "norm_label": ".getphase()"
+    },
+    {
+      "label": ".GetContext()",
+      "file_type": "code",
+      "source_file": "swarm/nexus/nexus.pb.go",
+      "source_location": "L678",
+      "id": "nexus_phaserequest_getcontext",
+      "community": 10,
+      "norm_label": ".getcontext()"
+    },
+    {
+      "label": "PhaseOutcome",
+      "file_type": "code",
+      "source_file": "swarm/nexus/nexus.pb.go",
+      "source_location": "L685",
+      "id": "nexus_phaseoutcome",
+      "community": 2,
+      "norm_label": "phaseoutcome"
+    },
+    {
+      "label": ".Reset()",
+      "file_type": "code",
+      "source_file": "swarm/nexus/nexus.pb.go",
+      "source_location": "L696",
+      "id": "nexus_phaseoutcome_reset",
+      "community": 2,
+      "norm_label": ".reset()"
+    },
+    {
+      "label": ".String()",
+      "file_type": "code",
+      "source_file": "swarm/nexus/nexus.pb.go",
+      "source_location": "L703",
+      "id": "nexus_phaseoutcome_string",
+      "community": 2,
+      "norm_label": ".string()"
+    },
+    {
+      "label": ".ProtoMessage()",
+      "file_type": "code",
+      "source_file": "swarm/nexus/nexus.pb.go",
+      "source_location": "L707",
+      "id": "nexus_phaseoutcome_protomessage",
+      "community": 2,
+      "norm_label": ".protomessage()"
+    },
+    {
+      "label": ".ProtoReflect()",
+      "file_type": "code",
+      "source_file": "swarm/nexus/nexus.pb.go",
+      "source_location": "L709",
+      "id": "nexus_phaseoutcome_protoreflect",
+      "community": 2,
+      "norm_label": ".protoreflect()"
+    },
+    {
+      "label": ".Descriptor()",
+      "file_type": "code",
+      "source_file": "swarm/nexus/nexus.pb.go",
+      "source_location": "L722",
+      "id": "nexus_phaseoutcome_descriptor",
+      "community": 2,
+      "norm_label": ".descriptor()"
+    },
+    {
+      "label": ".GetPhaseId()",
+      "file_type": "code",
+      "source_file": "swarm/nexus/nexus.pb.go",
+      "source_location": "L726",
+      "id": "nexus_phaseoutcome_getphaseid",
+      "community": 2,
+      "norm_label": ".getphaseid()"
+    },
+    {
+      "label": ".GetStatus()",
+      "file_type": "code",
+      "source_file": "swarm/nexus/nexus.pb.go",
+      "source_location": "L733",
+      "id": "nexus_phaseoutcome_getstatus",
+      "community": 2,
+      "norm_label": ".getstatus()"
+    },
+    {
+      "label": ".GetSummary()",
+      "file_type": "code",
+      "source_file": "swarm/nexus/nexus.pb.go",
+      "source_location": "L740",
+      "id": "nexus_phaseoutcome_getsummary",
+      "community": 2,
+      "norm_label": ".getsummary()"
+    },
+    {
+      "label": ".GetMutations()",
+      "file_type": "code",
+      "source_file": "swarm/nexus/nexus.pb.go",
+      "source_location": "L747",
+      "id": "nexus_phaseoutcome_getmutations",
+      "community": 2,
+      "norm_label": ".getmutations()"
+    },
+    {
+      "label": ".GetMetrics()",
+      "file_type": "code",
+      "source_file": "swarm/nexus/nexus.pb.go",
+      "source_location": "L754",
+      "id": "nexus_phaseoutcome_getmetrics",
+      "community": 2,
+      "norm_label": ".getmetrics()"
+    },
+    {
+      "label": "MetricEvent",
+      "file_type": "code",
+      "source_file": "swarm/nexus/nexus.pb.go",
+      "source_location": "L761",
+      "id": "nexus_metricevent",
+      "community": 6,
+      "norm_label": "metricevent"
+    },
+    {
+      "label": ".Reset()",
+      "file_type": "code",
+      "source_file": "swarm/nexus/nexus.pb.go",
+      "source_location": "L771",
+      "id": "nexus_metricevent_reset",
+      "community": 6,
+      "norm_label": ".reset()"
+    },
+    {
+      "label": ".String()",
+      "file_type": "code",
+      "source_file": "swarm/nexus/nexus.pb.go",
+      "source_location": "L778",
+      "id": "nexus_metricevent_string",
+      "community": 6,
+      "norm_label": ".string()"
+    },
+    {
+      "label": ".ProtoMessage()",
+      "file_type": "code",
+      "source_file": "swarm/nexus/nexus.pb.go",
+      "source_location": "L782",
+      "id": "nexus_metricevent_protomessage",
+      "community": 6,
+      "norm_label": ".protomessage()"
+    },
+    {
+      "label": ".ProtoReflect()",
+      "file_type": "code",
+      "source_file": "swarm/nexus/nexus.pb.go",
+      "source_location": "L784",
+      "id": "nexus_metricevent_protoreflect",
+      "community": 6,
+      "norm_label": ".protoreflect()"
+    },
+    {
+      "label": ".Descriptor()",
+      "file_type": "code",
+      "source_file": "swarm/nexus/nexus.pb.go",
+      "source_location": "L797",
+      "id": "nexus_metricevent_descriptor",
+      "community": 6,
+      "norm_label": ".descriptor()"
+    },
+    {
+      "label": ".GetTimestamp()",
+      "file_type": "code",
+      "source_file": "swarm/nexus/nexus.pb.go",
+      "source_location": "L801",
+      "id": "nexus_metricevent_gettimestamp",
+      "community": 6,
+      "norm_label": ".gettimestamp()"
+    },
+    {
+      "label": ".GetEventType()",
+      "file_type": "code",
+      "source_file": "swarm/nexus/nexus.pb.go",
+      "source_location": "L808",
+      "id": "nexus_metricevent_geteventtype",
+      "community": 6,
+      "norm_label": ".geteventtype()"
+    },
+    {
+      "label": ".GetValue()",
+      "file_type": "code",
+      "source_file": "swarm/nexus/nexus.pb.go",
+      "source_location": "L815",
+      "id": "nexus_metricevent_getvalue",
+      "community": 6,
+      "norm_label": ".getvalue()"
+    },
+    {
+      "label": ".GetLabels()",
+      "file_type": "code",
+      "source_file": "swarm/nexus/nexus.pb.go",
+      "source_location": "L822",
+      "id": "nexus_metricevent_getlabels",
+      "community": 6,
+      "norm_label": ".getlabels()"
+    },
+    {
+      "label": "ActionResponse",
+      "file_type": "code",
+      "source_file": "swarm/nexus/nexus.pb.go",
+      "source_location": "L829",
+      "id": "nexus_actionresponse",
+      "community": 5,
+      "norm_label": "actionresponse"
+    },
+    {
+      "label": ".Reset()",
+      "file_type": "code",
+      "source_file": "swarm/nexus/nexus.pb.go",
+      "source_location": "L839",
+      "id": "nexus_actionresponse_reset",
+      "community": 5,
+      "norm_label": ".reset()"
+    },
+    {
+      "label": ".String()",
+      "file_type": "code",
+      "source_file": "swarm/nexus/nexus.pb.go",
+      "source_location": "L846",
+      "id": "nexus_actionresponse_string",
+      "community": 5,
+      "norm_label": ".string()"
+    },
+    {
+      "label": ".ProtoMessage()",
+      "file_type": "code",
+      "source_file": "swarm/nexus/nexus.pb.go",
+      "source_location": "L850",
+      "id": "nexus_actionresponse_protomessage",
+      "community": 5,
+      "norm_label": ".protomessage()"
+    },
+    {
+      "label": ".ProtoReflect()",
+      "file_type": "code",
+      "source_file": "swarm/nexus/nexus.pb.go",
+      "source_location": "L852",
+      "id": "nexus_actionresponse_protoreflect",
+      "community": 5,
+      "norm_label": ".protoreflect()"
+    },
+    {
+      "label": ".Descriptor()",
+      "file_type": "code",
+      "source_file": "swarm/nexus/nexus.pb.go",
+      "source_location": "L865",
+      "id": "nexus_actionresponse_descriptor",
+      "community": 5,
+      "norm_label": ".descriptor()"
+    },
+    {
+      "label": ".GetSuccess()",
+      "file_type": "code",
+      "source_file": "swarm/nexus/nexus.pb.go",
+      "source_location": "L869",
+      "id": "nexus_actionresponse_getsuccess",
+      "community": 5,
+      "norm_label": ".getsuccess()"
+    },
+    {
+      "label": ".GetMessage()",
+      "file_type": "code",
+      "source_file": "swarm/nexus/nexus.pb.go",
+      "source_location": "L876",
+      "id": "nexus_actionresponse_getmessage",
+      "community": 5,
+      "norm_label": ".getmessage()"
+    },
+    {
+      "label": ".GetResidueCount()",
+      "file_type": "code",
+      "source_file": "swarm/nexus/nexus.pb.go",
+      "source_location": "L883",
+      "id": "nexus_actionresponse_getresiduecount",
+      "community": 5,
+      "norm_label": ".getresiduecount()"
+    },
+    {
+      "label": ".GetCleanupTrace()",
+      "file_type": "code",
+      "source_file": "swarm/nexus/nexus.pb.go",
+      "source_location": "L890",
+      "id": "nexus_actionresponse_getcleanuptrace",
+      "community": 5,
+      "norm_label": ".getcleanuptrace()"
+    },
+    {
+      "label": "HealthCheckRequest",
+      "file_type": "code",
+      "source_file": "swarm/nexus/nexus.pb.go",
+      "source_location": "L897",
+      "id": "nexus_healthcheckrequest",
+      "community": 15,
+      "norm_label": "healthcheckrequest"
+    },
+    {
+      "label": ".Reset()",
+      "file_type": "code",
+      "source_file": "swarm/nexus/nexus.pb.go",
+      "source_location": "L904",
+      "id": "nexus_healthcheckrequest_reset",
+      "community": 15,
+      "norm_label": ".reset()"
+    },
+    {
+      "label": ".String()",
+      "file_type": "code",
+      "source_file": "swarm/nexus/nexus.pb.go",
+      "source_location": "L911",
+      "id": "nexus_healthcheckrequest_string",
+      "community": 15,
+      "norm_label": ".string()"
+    },
+    {
+      "label": ".ProtoMessage()",
+      "file_type": "code",
+      "source_file": "swarm/nexus/nexus.pb.go",
+      "source_location": "L915",
+      "id": "nexus_healthcheckrequest_protomessage",
+      "community": 15,
+      "norm_label": ".protomessage()"
+    },
+    {
+      "label": ".ProtoReflect()",
+      "file_type": "code",
+      "source_file": "swarm/nexus/nexus.pb.go",
+      "source_location": "L917",
+      "id": "nexus_healthcheckrequest_protoreflect",
+      "community": 15,
+      "norm_label": ".protoreflect()"
+    },
+    {
+      "label": ".Descriptor()",
+      "file_type": "code",
+      "source_file": "swarm/nexus/nexus.pb.go",
+      "source_location": "L930",
+      "id": "nexus_healthcheckrequest_descriptor",
+      "community": 15,
+      "norm_label": ".descriptor()"
+    },
+    {
+      "label": ".GetServiceName()",
+      "file_type": "code",
+      "source_file": "swarm/nexus/nexus.pb.go",
+      "source_location": "L934",
+      "id": "nexus_healthcheckrequest_getservicename",
+      "community": 15,
+      "norm_label": ".getservicename()"
+    },
+    {
+      "label": "HealthCheckResponse",
+      "file_type": "code",
+      "source_file": "swarm/nexus/nexus.pb.go",
+      "source_location": "L941",
+      "id": "nexus_healthcheckresponse",
+      "community": 0,
+      "norm_label": "healthcheckresponse"
+    },
+    {
+      "label": ".Reset()",
+      "file_type": "code",
+      "source_file": "swarm/nexus/nexus.pb.go",
+      "source_location": "L948",
+      "id": "nexus_healthcheckresponse_reset",
+      "community": 0,
+      "norm_label": ".reset()"
+    },
+    {
+      "label": ".String()",
+      "file_type": "code",
+      "source_file": "swarm/nexus/nexus.pb.go",
+      "source_location": "L955",
+      "id": "nexus_healthcheckresponse_string",
+      "community": 0,
+      "norm_label": ".string()"
+    },
+    {
+      "label": ".ProtoMessage()",
+      "file_type": "code",
+      "source_file": "swarm/nexus/nexus.pb.go",
+      "source_location": "L959",
+      "id": "nexus_healthcheckresponse_protomessage",
+      "community": 0,
+      "norm_label": ".protomessage()"
+    },
+    {
+      "label": ".ProtoReflect()",
+      "file_type": "code",
+      "source_file": "swarm/nexus/nexus.pb.go",
+      "source_location": "L961",
+      "id": "nexus_healthcheckresponse_protoreflect",
+      "community": 0,
+      "norm_label": ".protoreflect()"
+    },
+    {
+      "label": ".Descriptor()",
+      "file_type": "code",
+      "source_file": "swarm/nexus/nexus.pb.go",
+      "source_location": "L974",
+      "id": "nexus_healthcheckresponse_descriptor",
+      "community": 0,
+      "norm_label": ".descriptor()"
+    },
+    {
+      "label": ".GetStatus()",
+      "file_type": "code",
+      "source_file": "swarm/nexus/nexus.pb.go",
+      "source_location": "L978",
+      "id": "nexus_healthcheckresponse_getstatus",
+      "community": 0,
+      "norm_label": ".getstatus()"
+    },
+    {
+      "label": "file_nexus_proto_rawDescGZIP()",
+      "file_type": "code",
+      "source_file": "swarm/nexus/nexus.pb.go",
+      "source_location": "L1097",
+      "id": "nexus_nexus_pb_file_nexus_proto_rawdescgzip",
+      "community": 0,
+      "norm_label": "file_nexus_proto_rawdescgzip()"
+    },
+    {
+      "label": "init()",
+      "file_type": "code",
+      "source_file": "swarm/nexus/nexus.pb.go",
+      "source_location": "L1162",
+      "id": "nexus_nexus_pb_init",
+      "community": 0,
+      "norm_label": "init()"
+    },
+    {
+      "label": "file_nexus_proto_init()",
+      "file_type": "code",
+      "source_file": "swarm/nexus/nexus.pb.go",
+      "source_location": "L1163",
+      "id": "nexus_nexus_pb_file_nexus_proto_init",
+      "community": 0,
+      "norm_label": "file_nexus_proto_init()"
+    },
+    {
+      "label": "nexus_grpc.pb.go",
+      "file_type": "code",
+      "source_file": "swarm/nexus/nexus_grpc.pb.go",
+      "source_location": "L1",
+      "id": "swarm_nexus_nexus_grpc_pb_go",
+      "community": 1,
+      "norm_label": "nexus_grpc.pb.go"
+    },
+    {
+      "label": "NexusCoreClient",
+      "file_type": "code",
+      "source_file": "swarm/nexus/nexus_grpc.pb.go",
+      "source_location": "L34",
+      "id": "nexus_nexuscoreclient",
+      "community": 16,
+      "norm_label": "nexuscoreclient"
+    },
+    {
+      "label": "NewNexusCoreClient()",
+      "file_type": "code",
+      "source_file": "swarm/nexus/nexus_grpc.pb.go",
+      "source_location": "L49",
+      "id": "nexus_nexus_grpc_pb_newnexuscoreclient",
+      "community": 11,
+      "norm_label": "newnexuscoreclient()"
+    },
+    {
+      "label": ".LeaseWorktree()",
+      "file_type": "code",
+      "source_file": "swarm/nexus/nexus_grpc.pb.go",
+      "source_location": "L53",
+      "id": "nexus_nexuscoreclient_leaseworktree",
+      "community": 16,
+      "norm_label": ".leaseworktree()"
+    },
+    {
+      "label": ".HarvestWorktree()",
+      "file_type": "code",
+      "source_file": "swarm/nexus/nexus_grpc.pb.go",
+      "source_location": "L63",
+      "id": "nexus_nexuscoreclient_harvestworktree",
+      "community": 16,
+      "norm_label": ".harvestworktree()"
+    },
+    {
+      "label": ".CancelLease()",
+      "file_type": "code",
+      "source_file": "swarm/nexus/nexus_grpc.pb.go",
+      "source_location": "L73",
+      "id": "nexus_nexuscoreclient_cancellease",
+      "community": 16,
+      "norm_label": ".cancellease()"
+    },
+    {
+      "label": ".EvaluatePolicy()",
+      "file_type": "code",
+      "source_file": "swarm/nexus/nexus_grpc.pb.go",
+      "source_location": "L83",
+      "id": "nexus_nexuscoreclient_evaluatepolicy",
+      "community": 16,
+      "norm_label": ".evaluatepolicy()"
+    },
+    {
+      "label": ".HealthCheck()",
+      "file_type": "code",
+      "source_file": "swarm/nexus/nexus_grpc.pb.go",
+      "source_location": "L93",
+      "id": "nexus_nexuscoreclient_healthcheck",
+      "community": 16,
+      "norm_label": ".healthcheck()"
+    },
+    {
+      "label": "NexusCoreServer",
+      "file_type": "code",
+      "source_file": "swarm/nexus/nexus_grpc.pb.go",
+      "source_location": "L108",
+      "id": "nexus_nexuscoreserver",
+      "community": 1,
+      "norm_label": "nexuscoreserver"
+    },
+    {
+      "label": "UnimplementedNexusCoreServer",
+      "file_type": "code",
+      "source_file": "swarm/nexus/nexus_grpc.pb.go",
+      "source_location": "L125",
+      "id": "nexus_unimplementednexuscoreserver",
+      "community": 1,
+      "norm_label": "unimplementednexuscoreserver"
+    },
+    {
+      "label": ".LeaseWorktree()",
+      "file_type": "code",
+      "source_file": "swarm/nexus/nexus_grpc.pb.go",
+      "source_location": "L127",
+      "id": "nexus_unimplementednexuscoreserver_leaseworktree",
+      "community": 1,
+      "norm_label": ".leaseworktree()"
+    },
+    {
+      "label": ".HarvestWorktree()",
+      "file_type": "code",
+      "source_file": "swarm/nexus/nexus_grpc.pb.go",
+      "source_location": "L130",
+      "id": "nexus_unimplementednexuscoreserver_harvestworktree",
+      "community": 1,
+      "norm_label": ".harvestworktree()"
+    },
+    {
+      "label": ".CancelLease()",
+      "file_type": "code",
+      "source_file": "swarm/nexus/nexus_grpc.pb.go",
+      "source_location": "L133",
+      "id": "nexus_unimplementednexuscoreserver_cancellease",
+      "community": 1,
+      "norm_label": ".cancellease()"
+    },
+    {
+      "label": ".EvaluatePolicy()",
+      "file_type": "code",
+      "source_file": "swarm/nexus/nexus_grpc.pb.go",
+      "source_location": "L136",
+      "id": "nexus_unimplementednexuscoreserver_evaluatepolicy",
+      "community": 1,
+      "norm_label": ".evaluatepolicy()"
+    },
+    {
+      "label": ".HealthCheck()",
+      "file_type": "code",
+      "source_file": "swarm/nexus/nexus_grpc.pb.go",
+      "source_location": "L139",
+      "id": "nexus_unimplementednexuscoreserver_healthcheck",
+      "community": 1,
+      "norm_label": ".healthcheck()"
+    },
+    {
+      "label": ".mustEmbedUnimplementedNexusCoreServer()",
+      "file_type": "code",
+      "source_file": "swarm/nexus/nexus_grpc.pb.go",
+      "source_location": "L142",
+      "id": "nexus_unimplementednexuscoreserver_mustembedunimplementednexuscoreserver",
+      "community": 1,
+      "norm_label": ".mustembedunimplementednexuscoreserver()"
+    },
+    {
+      "label": ".testEmbeddedByValue()",
+      "file_type": "code",
+      "source_file": "swarm/nexus/nexus_grpc.pb.go",
+      "source_location": "L143",
+      "id": "nexus_unimplementednexuscoreserver_testembeddedbyvalue",
+      "community": 1,
+      "norm_label": ".testembeddedbyvalue()"
+    },
+    {
+      "label": "UnsafeNexusCoreServer",
+      "file_type": "code",
+      "source_file": "swarm/nexus/nexus_grpc.pb.go",
+      "source_location": "L148",
+      "id": "nexus_unsafenexuscoreserver",
+      "community": 1,
+      "norm_label": "unsafenexuscoreserver"
+    },
+    {
+      "label": "RegisterNexusCoreServer()",
+      "file_type": "code",
+      "source_file": "swarm/nexus/nexus_grpc.pb.go",
+      "source_location": "L152",
+      "id": "nexus_nexus_grpc_pb_registernexuscoreserver",
+      "community": 1,
+      "norm_label": "registernexuscoreserver()"
+    },
+    {
+      "label": "_NexusCore_LeaseWorktree_Handler()",
+      "file_type": "code",
+      "source_file": "swarm/nexus/nexus_grpc.pb.go",
+      "source_location": "L163",
+      "id": "nexus_nexus_grpc_pb_nexuscore_leaseworktree_handler",
+      "community": 1,
+      "norm_label": "_nexuscore_leaseworktree_handler()"
+    },
+    {
+      "label": "_NexusCore_HarvestWorktree_Handler()",
+      "file_type": "code",
+      "source_file": "swarm/nexus/nexus_grpc.pb.go",
+      "source_location": "L181",
+      "id": "nexus_nexus_grpc_pb_nexuscore_harvestworktree_handler",
+      "community": 1,
+      "norm_label": "_nexuscore_harvestworktree_handler()"
+    },
+    {
+      "label": "_NexusCore_CancelLease_Handler()",
+      "file_type": "code",
+      "source_file": "swarm/nexus/nexus_grpc.pb.go",
+      "source_location": "L199",
+      "id": "nexus_nexus_grpc_pb_nexuscore_cancellease_handler",
+      "community": 1,
+      "norm_label": "_nexuscore_cancellease_handler()"
+    },
+    {
+      "label": "_NexusCore_EvaluatePolicy_Handler()",
+      "file_type": "code",
+      "source_file": "swarm/nexus/nexus_grpc.pb.go",
+      "source_location": "L217",
+      "id": "nexus_nexus_grpc_pb_nexuscore_evaluatepolicy_handler",
+      "community": 1,
+      "norm_label": "_nexuscore_evaluatepolicy_handler()"
+    },
+    {
+      "label": "_NexusCore_HealthCheck_Handler()",
+      "file_type": "code",
+      "source_file": "swarm/nexus/nexus_grpc.pb.go",
+      "source_location": "L235",
+      "id": "nexus_nexus_grpc_pb_nexuscore_healthcheck_handler",
+      "community": 1,
+      "norm_label": "_nexuscore_healthcheck_handler()"
+    },
+    {
+      "label": "NexusSwarmClient",
+      "file_type": "code",
+      "source_file": "swarm/nexus/nexus_grpc.pb.go",
+      "source_location": "L295",
+      "id": "nexus_nexusswarmclient",
+      "community": 1,
+      "norm_label": "nexusswarmclient"
+    },
+    {
+      "label": "NewNexusSwarmClient()",
+      "file_type": "code",
+      "source_file": "swarm/nexus/nexus_grpc.pb.go",
+      "source_location": "L306",
+      "id": "nexus_nexus_grpc_pb_newnexusswarmclient",
+      "community": 1,
+      "norm_label": "newnexusswarmclient()"
+    },
+    {
+      "label": ".RunPhase()",
+      "file_type": "code",
+      "source_file": "swarm/nexus/nexus_grpc.pb.go",
+      "source_location": "L310",
+      "id": "nexus_nexusswarmclient_runphase",
+      "community": 1,
+      "norm_label": ".runphase()"
+    },
+    {
+      "label": ".EmitMetrics()",
+      "file_type": "code",
+      "source_file": "swarm/nexus/nexus_grpc.pb.go",
+      "source_location": "L320",
+      "id": "nexus_nexusswarmclient_emitmetrics",
+      "community": 1,
+      "norm_label": ".emitmetrics()"
+    },
+    {
+      "label": "NexusSwarmServer",
+      "file_type": "code",
+      "source_file": "swarm/nexus/nexus_grpc.pb.go",
+      "source_location": "L338",
+      "id": "nexus_nexusswarmserver",
+      "community": 1,
+      "norm_label": "nexusswarmserver"
+    },
+    {
+      "label": "UnimplementedNexusSwarmServer",
+      "file_type": "code",
+      "source_file": "swarm/nexus/nexus_grpc.pb.go",
+      "source_location": "L351",
+      "id": "nexus_unimplementednexusswarmserver",
+      "community": 1,
+      "norm_label": "unimplementednexusswarmserver"
+    },
+    {
+      "label": ".RunPhase()",
+      "file_type": "code",
+      "source_file": "swarm/nexus/nexus_grpc.pb.go",
+      "source_location": "L353",
+      "id": "nexus_unimplementednexusswarmserver_runphase",
+      "community": 1,
+      "norm_label": ".runphase()"
+    },
+    {
+      "label": ".EmitMetrics()",
+      "file_type": "code",
+      "source_file": "swarm/nexus/nexus_grpc.pb.go",
+      "source_location": "L356",
+      "id": "nexus_unimplementednexusswarmserver_emitmetrics",
+      "community": 1,
+      "norm_label": ".emitmetrics()"
+    },
+    {
+      "label": ".mustEmbedUnimplementedNexusSwarmServer()",
+      "file_type": "code",
+      "source_file": "swarm/nexus/nexus_grpc.pb.go",
+      "source_location": "L359",
+      "id": "nexus_unimplementednexusswarmserver_mustembedunimplementednexusswarmserver",
+      "community": 1,
+      "norm_label": ".mustembedunimplementednexusswarmserver()"
+    },
+    {
+      "label": ".testEmbeddedByValue()",
+      "file_type": "code",
+      "source_file": "swarm/nexus/nexus_grpc.pb.go",
+      "source_location": "L360",
+      "id": "nexus_unimplementednexusswarmserver_testembeddedbyvalue",
+      "community": 1,
+      "norm_label": ".testembeddedbyvalue()"
+    },
+    {
+      "label": "UnsafeNexusSwarmServer",
+      "file_type": "code",
+      "source_file": "swarm/nexus/nexus_grpc.pb.go",
+      "source_location": "L365",
+      "id": "nexus_unsafenexusswarmserver",
+      "community": 1,
+      "norm_label": "unsafenexusswarmserver"
+    },
+    {
+      "label": "RegisterNexusSwarmServer()",
+      "file_type": "code",
+      "source_file": "swarm/nexus/nexus_grpc.pb.go",
+      "source_location": "L369",
+      "id": "nexus_nexus_grpc_pb_registernexusswarmserver",
+      "community": 1,
+      "norm_label": "registernexusswarmserver()"
+    },
+    {
+      "label": "_NexusSwarm_RunPhase_Handler()",
+      "file_type": "code",
+      "source_file": "swarm/nexus/nexus_grpc.pb.go",
+      "source_location": "L380",
+      "id": "nexus_nexus_grpc_pb_nexusswarm_runphase_handler",
+      "community": 1,
+      "norm_label": "_nexusswarm_runphase_handler()"
+    },
+    {
+      "label": "_NexusSwarm_EmitMetrics_Handler()",
+      "file_type": "code",
+      "source_file": "swarm/nexus/nexus_grpc.pb.go",
+      "source_location": "L398",
+      "id": "nexus_nexus_grpc_pb_nexusswarm_emitmetrics_handler",
+      "community": 1,
+      "norm_label": "_nexusswarm_emitmetrics_handler()"
+    },
+    {
+      "label": "build.rs",
+      "file_type": "code",
+      "source_file": "core/build.rs",
+      "source_location": "L1",
+      "id": "core_build_rs",
+      "community": 18,
+      "norm_label": "build.rs"
+    },
+    {
+      "label": "main()",
+      "file_type": "code",
+      "source_file": "core/build.rs",
+      "source_location": "L1",
+      "id": "core_build_main",
+      "community": 18,
+      "norm_label": "main()"
+    },
+    {
+      "label": "main.rs",
+      "file_type": "code",
+      "source_file": "core/src/main.rs",
+      "source_location": "L1",
+      "id": "core_src_main_rs",
+      "community": 4,
+      "norm_label": "main.rs"
+    },
+    {
+      "label": "MyCore",
+      "file_type": "code",
+      "source_file": "core/src/main.rs",
+      "source_location": "L33",
+      "id": "src_main_mycore",
+      "community": 4,
+      "norm_label": "mycore"
+    },
+    {
+      "label": ".new()",
+      "file_type": "code",
+      "source_file": "core/src/main.rs",
+      "source_location": "L40",
+      "id": "src_main_mycore_new",
+      "community": 4,
+      "norm_label": ".new()"
+    },
+    {
+      "label": ".call_sentinel()",
+      "file_type": "code",
+      "source_file": "core/src/main.rs",
+      "source_location": "L51",
+      "id": "src_main_mycore_call_sentinel",
+      "community": 4,
+      "norm_label": ".call_sentinel()"
+    },
+    {
+      "label": ".lease_worktree()",
+      "file_type": "code",
+      "source_file": "core/src/main.rs",
+      "source_location": "L84",
+      "id": "src_main_mycore_lease_worktree",
+      "community": 4,
+      "norm_label": ".lease_worktree()"
+    },
+    {
+      "label": ".harvest_worktree()",
+      "file_type": "code",
+      "source_file": "core/src/main.rs",
+      "source_location": "L104",
+      "id": "src_main_mycore_harvest_worktree",
+      "community": 4,
+      "norm_label": ".harvest_worktree()"
+    },
+    {
+      "label": ".cancel_lease()",
+      "file_type": "code",
+      "source_file": "core/src/main.rs",
+      "source_location": "L108",
+      "id": "src_main_mycore_cancel_lease",
+      "community": 4,
+      "norm_label": ".cancel_lease()"
+    },
+    {
+      "label": ".evaluate_policy()",
+      "file_type": "code",
+      "source_file": "core/src/main.rs",
+      "source_location": "L122",
+      "id": "src_main_mycore_evaluate_policy",
+      "community": 4,
+      "norm_label": ".evaluate_policy()"
+    },
+    {
+      "label": ".health_check()",
+      "file_type": "code",
+      "source_file": "core/src/main.rs",
+      "source_location": "L141",
+      "id": "src_main_mycore_health_check",
+      "community": 4,
+      "norm_label": ".health_check()"
+    },
+    {
+      "label": "main()",
+      "file_type": "code",
+      "source_file": "core/src/main.rs",
+      "source_location": "L148",
+      "id": "src_main_main",
+      "community": 4,
+      "norm_label": "main()"
+    },
+    {
+      "label": "test_core_alive()",
+      "file_type": "code",
+      "source_file": "core/src/main.rs",
+      "source_location": "L179",
+      "id": "src_main_test_core_alive",
+      "community": 4,
+      "norm_label": "test_core_alive()"
+    },
+    {
+      "label": "README.md",
+      "file_type": "document",
+      "source_file": "core/README.md",
+      "source_location": "L1",
+      "id": "core_readme_md",
+      "community": 14,
+      "norm_label": "readme.md"
+    },
+    {
+      "label": "Nexus Rust Core v2.8 - Neural Policy Gate",
+      "file_type": "document",
+      "source_file": "core/README.md",
+      "source_location": "L1",
+      "id": "core_readme_nexus_rust_core_v2_8_neural_policy_gate",
+      "community": 14,
+      "norm_label": "nexus rust core v2.8 - neural policy gate"
+    },
+    {
+      "label": "Quickstart",
+      "file_type": "document",
+      "source_file": "core/README.md",
+      "source_location": "L6",
+      "id": "core_readme_quickstart",
+      "community": 14,
+      "norm_label": "quickstart"
+    },
+    {
+      "label": "code:bash (docker run -v $(pwd):/workspace -p 50051:50051 ghcr.io/nexus)",
+      "file_type": "document",
+      "source_file": "core/README.md",
+      "source_location": "L7",
+      "id": "core_readme_codeblock_1",
+      "community": 14,
+      "norm_label": "code:bash (docker run -v $(pwd):/workspace -p 50051:50051 ghcr.io/nexus)"
+    },
+    {
+      "label": "Features",
+      "file_type": "document",
+      "source_file": "core/README.md",
+      "source_location": "L11",
+      "id": "core_readme_features",
+      "community": 14,
+      "norm_label": "features"
+    },
+    {
+      "label": "API",
+      "file_type": "document",
+      "source_file": "core/README.md",
+      "source_location": "L17",
+      "id": "core_readme_api",
+      "community": 14,
+      "norm_label": "api"
+    },
+    {
+      "label": "code:rust (tonic::client::Grpc<PolicyService> -> EvaluatePolicy(intent))",
+      "file_type": "document",
+      "source_file": "core/README.md",
+      "source_location": "L18",
+      "id": "core_readme_codeblock_2",
+      "community": 14,
+      "norm_label": "code:rust (tonic::client::grpc<policyservice> -> evaluatepolicy(intent))"
+    }
+  ],
+  "links": [
+    {
+      "relation": "contains",
+      "confidence": "EXTRACTED",
+      "source_file": "swarm/cmd/main.go",
+      "source_location": "L21",
+      "weight": 1.0,
+      "source": "swarm_cmd_main_go",
+      "target": "cmd_swarmserver",
+      "confidence_score": 1.0
+    },
+    {
+      "relation": "contains",
+      "confidence": "EXTRACTED",
+      "source_file": "swarm/cmd/main.go",
+      "source_location": "L116",
+      "weight": 1.0,
+      "source": "swarm_cmd_main_go",
+      "target": "cmd_main_pathexists",
+      "confidence_score": 1.0
+    },
+    {
+      "relation": "contains",
+      "confidence": "EXTRACTED",
+      "source_file": "swarm/cmd/main.go",
+      "source_location": "L122",
+      "weight": 1.0,
+      "source": "swarm_cmd_main_go",
+      "target": "cmd_main_pinguds",
+      "confidence_score": 1.0
+    },
+    {
+      "relation": "contains",
+      "confidence": "EXTRACTED",
+      "source_file": "swarm/cmd/main.go",
+      "source_location": "L131",
+      "weight": 1.0,
+      "source": "swarm_cmd_main_go",
+      "target": "cmd_main_main",
+      "confidence_score": 1.0
+    },
+    {
+      "relation": "method",
+      "confidence": "EXTRACTED",
+      "source_file": "swarm/cmd/main.go",
+      "source_location": "L26",
+      "weight": 1.0,
+      "source": "cmd_swarmserver",
+      "target": "cmd_swarmserver_runphase",
+      "confidence_score": 1.0
+    },
+    {
+      "relation": "method",
+      "confidence": "EXTRACTED",
+      "source_file": "swarm/cmd/main.go",
+      "source_location": "L81",
+      "weight": 1.0,
+      "source": "cmd_swarmserver",
+      "target": "cmd_swarmserver_callbrainaudit",
+      "confidence_score": 1.0
+    },
+    {
+      "relation": "calls",
+      "context": "call",
+      "confidence": "EXTRACTED",
+      "source_file": "swarm/cmd/main.go",
+      "source_location": "L66",
+      "weight": 1.0,
+      "source": "cmd_swarmserver_runphase",
+      "target": "cmd_swarmserver_callbrainaudit",
+      "confidence_score": 1.0
+    },
+    {
+      "relation": "calls",
+      "context": "call",
+      "confidence": "EXTRACTED",
+      "source_file": "swarm/cmd/main.go",
+      "source_location": "L139",
+      "weight": 1.0,
+      "source": "cmd_main_main",
+      "target": "cmd_main_pathexists",
+      "confidence_score": 1.0
+    },
+    {
+      "relation": "calls",
+      "context": "call",
+      "confidence": "EXTRACTED",
+      "source_file": "swarm/cmd/main.go",
+      "source_location": "L140",
+      "weight": 1.0,
+      "source": "cmd_main_main",
+      "target": "cmd_main_pinguds",
+      "confidence_score": 1.0
+    },
+    {
+      "relation": "calls",
+      "context": "call",
+      "confidence": "INFERRED",
+      "confidence_score": 0.8,
+      "source_file": "swarm/cmd/main.go",
+      "source_location": "L167",
+      "weight": 1.0,
+      "source": "cmd_main_main",
+      "target": "nexus_nexus_grpc_pb_newnexuscoreclient"
+    },
+    {
+      "relation": "calls",
+      "context": "call",
+      "confidence": "INFERRED",
+      "confidence_score": 0.8,
+      "source_file": "swarm/cmd/main.go",
+      "source_location": "L181",
+      "weight": 1.0,
+      "source": "cmd_main_main",
+      "target": "nexus_nexus_grpc_pb_registernexusswarmserver"
+    },
+    {
+      "relation": "contains",
+      "confidence": "EXTRACTED",
+      "source_file": "swarm/cmd/main_test.go",
+      "source_location": "L13",
+      "weight": 1.0,
+      "source": "swarm_cmd_main_test_go",
+      "target": "cmd_mockcoreclient",
+      "confidence_score": 1.0
+    },
+    {
+      "relation": "contains",
+      "confidence": "EXTRACTED",
+      "source_file": "swarm/cmd/main_test.go",
+      "source_location": "L31",
+      "weight": 1.0,
+      "source": "swarm_cmd_main_test_go",
+      "target": "cmd_main_test_testrunphaseasync",
+      "confidence_score": 1.0
+    },
+    {
+      "relation": "method",
+      "confidence": "EXTRACTED",
+      "source_file": "swarm/cmd/main_test.go",
+      "source_location": "L17",
+      "weight": 1.0,
+      "source": "cmd_mockcoreclient",
+      "target": "cmd_mockcoreclient_leaseworktree",
+      "confidence_score": 1.0
+    },
+    {
+      "relation": "method",
+      "confidence": "EXTRACTED",
+      "source_file": "swarm/cmd/main_test.go",
+      "source_location": "L24",
+      "weight": 1.0,
+      "source": "cmd_mockcoreclient",
+      "target": "cmd_mockcoreclient_cancellease",
+      "confidence_score": 1.0
+    },
+    {
+      "relation": "contains",
+      "confidence": "EXTRACTED",
+      "source_file": "swarm/cmd/smoke_client/main.go",
+      "source_location": "L15",
+      "weight": 1.0,
+      "source": "swarm_cmd_smoke_client_main_go",
+      "target": "smoke_client_main_main",
+      "confidence_score": 1.0
+    },
+    {
+      "relation": "calls",
+      "context": "call",
+      "confidence": "INFERRED",
+      "confidence_score": 0.8,
+      "source_file": "swarm/cmd/smoke_client/main.go",
+      "source_location": "L22",
+      "weight": 1.0,
+      "source": "smoke_client_main_main",
+      "target": "nexus_nexus_grpc_pb_newnexusswarmclient"
+    },
+    {
+      "relation": "contains",
+      "confidence": "EXTRACTED",
+      "source_file": "swarm/nexus/nexus.pb.go",
+      "source_location": "L27",
+      "weight": 1.0,
+      "source": "swarm_nexus_nexus_pb_go",
+      "target": "nexus_phaseid",
+      "confidence_score": 1.0
+    },
+    {
+      "relation": "contains",
+      "confidence": "EXTRACTED",
+      "source_file": "swarm/nexus/nexus.pb.go",
+      "source_location": "L88",
+      "weight": 1.0,
+      "source": "swarm_nexus_nexus_pb_go",
+      "target": "nexus_policydecision_sentinelintents",
+      "confidence_score": 1.0
+    },
+    {
+      "relation": "contains",
+      "confidence": "EXTRACTED",
+      "source_file": "swarm/nexus/nexus.pb.go",
+      "source_location": "L140",
+      "weight": 1.0,
+      "source": "swarm_nexus_nexus_pb_go",
+      "target": "nexus_phaseoutcome_status",
+      "confidence_score": 1.0
+    },
+    {
+      "relation": "contains",
+      "confidence": "EXTRACTED",
+      "source_file": "swarm/nexus/nexus.pb.go",
+      "source_location": "L192",
+      "weight": 1.0,
+      "source": "swarm_nexus_nexus_pb_go",
+      "target": "nexus_healthcheckresponse_servingstatus",
+      "confidence_score": 1.0
+    },
+    {
+      "relation": "contains",
+      "confidence": "EXTRACTED",
+      "source_file": "swarm/nexus/nexus.pb.go",
+      "source_location": "L241",
+      "weight": 1.0,
+      "source": "swarm_nexus_nexus_pb_go",
+      "target": "nexus_leaserequest",
+      "confidence_score": 1.0
+    },
+    {
+      "relation": "contains",
+      "confidence": "EXTRACTED",
+      "source_file": "swarm/nexus/nexus.pb.go",
+      "source_location": "L301",
+      "weight": 1.0,
+      "source": "swarm_nexus_nexus_pb_go",
+      "target": "nexus_worktreelease",
+      "confidence_score": 1.0
+    },
+    {
+      "relation": "contains",
+      "confidence": "EXTRACTED",
+      "source_file": "swarm/nexus/nexus.pb.go",
+      "source_location": "L369",
+      "weight": 1.0,
+      "source": "swarm_nexus_nexus_pb_go",
+      "target": "nexus_harvestrequest",
+      "confidence_score": 1.0
+    },
+    {
+      "relation": "contains",
+      "confidence": "EXTRACTED",
+      "source_file": "swarm/nexus/nexus.pb.go",
+      "source_location": "L421",
+      "weight": 1.0,
+      "source": "swarm_nexus_nexus_pb_go",
+      "target": "nexus_cancelleaserequest",
+      "confidence_score": 1.0
+    },
+    {
+      "relation": "contains",
+      "confidence": "EXTRACTED",
+      "source_file": "swarm/nexus/nexus.pb.go",
+      "source_location": "L473",
+      "weight": 1.0,
+      "source": "swarm_nexus_nexus_pb_go",
+      "target": "nexus_policyrequest",
+      "confidence_score": 1.0
+    },
+    {
+      "relation": "contains",
+      "confidence": "EXTRACTED",
+      "source_file": "swarm/nexus/nexus.pb.go",
+      "source_location": "L549",
+      "weight": 1.0,
+      "source": "swarm_nexus_nexus_pb_go",
+      "target": "nexus_policydecision",
+      "confidence_score": 1.0
+    },
+    {
+      "relation": "contains",
+      "confidence": "EXTRACTED",
+      "source_file": "swarm/nexus/nexus.pb.go",
+      "source_location": "L625",
+      "weight": 1.0,
+      "source": "swarm_nexus_nexus_pb_go",
+      "target": "nexus_phaserequest",
+      "confidence_score": 1.0
+    },
+    {
+      "relation": "contains",
+      "confidence": "EXTRACTED",
+      "source_file": "swarm/nexus/nexus.pb.go",
+      "source_location": "L685",
+      "weight": 1.0,
+      "source": "swarm_nexus_nexus_pb_go",
+      "target": "nexus_phaseoutcome",
+      "confidence_score": 1.0
+    },
+    {
+      "relation": "contains",
+      "confidence": "EXTRACTED",
+      "source_file": "swarm/nexus/nexus.pb.go",
+      "source_location": "L761",
+      "weight": 1.0,
+      "source": "swarm_nexus_nexus_pb_go",
+      "target": "nexus_metricevent",
+      "confidence_score": 1.0
+    },
+    {
+      "relation": "contains",
+      "confidence": "EXTRACTED",
+      "source_file": "swarm/nexus/nexus.pb.go",
+      "source_location": "L829",
+      "weight": 1.0,
+      "source": "swarm_nexus_nexus_pb_go",
+      "target": "nexus_actionresponse",
+      "confidence_score": 1.0
+    },
+    {
+      "relation": "contains",
+      "confidence": "EXTRACTED",
+      "source_file": "swarm/nexus/nexus.pb.go",
+      "source_location": "L897",
+      "weight": 1.0,
+      "source": "swarm_nexus_nexus_pb_go",
+      "target": "nexus_healthcheckrequest",
+      "confidence_score": 1.0
+    },
+    {
+      "relation": "contains",
+      "confidence": "EXTRACTED",
+      "source_file": "swarm/nexus/nexus.pb.go",
+      "source_location": "L941",
+      "weight": 1.0,
+      "source": "swarm_nexus_nexus_pb_go",
+      "target": "nexus_healthcheckresponse",
+      "confidence_score": 1.0
+    },
+    {
+      "relation": "contains",
+      "confidence": "EXTRACTED",
+      "source_file": "swarm/nexus/nexus.pb.go",
+      "source_location": "L1097",
+      "weight": 1.0,
+      "source": "swarm_nexus_nexus_pb_go",
+      "target": "nexus_nexus_pb_file_nexus_proto_rawdescgzip",
+      "confidence_score": 1.0
+    },
+    {
+      "relation": "contains",
+      "confidence": "EXTRACTED",
+      "source_file": "swarm/nexus/nexus.pb.go",
+      "source_location": "L1162",
+      "weight": 1.0,
+      "source": "swarm_nexus_nexus_pb_go",
+      "target": "nexus_nexus_pb_init",
+      "confidence_score": 1.0
+    },
+    {
+      "relation": "contains",
+      "confidence": "EXTRACTED",
+      "source_file": "swarm/nexus/nexus.pb.go",
+      "source_location": "L1163",
+      "weight": 1.0,
+      "source": "swarm_nexus_nexus_pb_go",
+      "target": "nexus_nexus_pb_file_nexus_proto_init",
+      "confidence_score": 1.0
+    },
+    {
+      "relation": "method",
+      "confidence": "EXTRACTED",
+      "source_file": "swarm/nexus/nexus.pb.go",
+      "source_location": "L61",
+      "weight": 1.0,
+      "source": "nexus_phaseid",
+      "target": "nexus_phaseid_enum",
+      "confidence_score": 1.0
+    },
+    {
+      "relation": "method",
+      "confidence": "EXTRACTED",
+      "source_file": "swarm/nexus/nexus.pb.go",
+      "source_location": "L67",
+      "weight": 1.0,
+      "source": "nexus_phaseid",
+      "target": "nexus_phaseid_string",
+      "confidence_score": 1.0
+    },
+    {
+      "relation": "method",
+      "confidence": "EXTRACTED",
+      "source_file": "swarm/nexus/nexus.pb.go",
+      "source_location": "L71",
+      "weight": 1.0,
+      "source": "nexus_phaseid",
+      "target": "nexus_phaseid_descriptor",
+      "confidence_score": 1.0
+    },
+    {
+      "relation": "method",
+      "confidence": "EXTRACTED",
+      "source_file": "swarm/nexus/nexus.pb.go",
+      "source_location": "L75",
+      "weight": 1.0,
+      "source": "nexus_phaseid",
+      "target": "nexus_phaseid_type",
+      "confidence_score": 1.0
+    },
+    {
+      "relation": "method",
+      "confidence": "EXTRACTED",
+      "source_file": "swarm/nexus/nexus.pb.go",
+      "source_location": "L79",
+      "weight": 1.0,
+      "source": "nexus_phaseid",
+      "target": "nexus_phaseid_number",
+      "confidence_score": 1.0
+    },
+    {
+      "relation": "method",
+      "confidence": "EXTRACTED",
+      "source_file": "swarm/nexus/nexus.pb.go",
+      "source_location": "L84",
+      "weight": 1.0,
+      "source": "nexus_phaseid",
+      "target": "nexus_phaseid_enumdescriptor",
+      "confidence_score": 1.0
+    },
+    {
+      "relation": "calls",
+      "context": "call",
+      "confidence": "EXTRACTED",
+      "source_file": "swarm/nexus/nexus.pb.go",
+      "source_location": "L68",
+      "weight": 1.0,
+      "source": "nexus_phaseid_string",
+      "target": "nexus_healthcheckresponse_descriptor",
+      "confidence_score": 1.0
+    },
+    {
+      "relation": "calls",
+      "context": "call",
+      "confidence": "EXTRACTED",
+      "source_file": "swarm/nexus/nexus.pb.go",
+      "source_location": "L72",
+      "weight": 1.0,
+      "source": "nexus_phaseid_descriptor",
+      "target": "nexus_healthcheckresponse_descriptor",
+      "confidence_score": 1.0
+    },
+    {
+      "relation": "calls",
+      "context": "call",
+      "confidence": "EXTRACTED",
+      "source_file": "swarm/nexus/nexus.pb.go",
+      "source_location": "L85",
+      "weight": 1.0,
+      "source": "nexus_phaseid_enumdescriptor",
+      "target": "nexus_nexus_pb_file_nexus_proto_rawdescgzip",
+      "confidence_score": 1.0
+    },
+    {
+      "relation": "method",
+      "confidence": "EXTRACTED",
+      "source_file": "swarm/nexus/nexus.pb.go",
+      "source_location": "L113",
+      "weight": 1.0,
+      "source": "nexus_policydecision_sentinelintents",
+      "target": "nexus_policydecision_sentinelintents_enum",
+      "confidence_score": 1.0
+    },
+    {
+      "relation": "method",
+      "confidence": "EXTRACTED",
+      "source_file": "swarm/nexus/nexus.pb.go",
+      "source_location": "L119",
+      "weight": 1.0,
+      "source": "nexus_policydecision_sentinelintents",
+      "target": "nexus_policydecision_sentinelintents_string",
+      "confidence_score": 1.0
+    },
+    {
+      "relation": "method",
+      "confidence": "EXTRACTED",
+      "source_file": "swarm/nexus/nexus.pb.go",
+      "source_location": "L123",
+      "weight": 1.0,
+      "source": "nexus_policydecision_sentinelintents",
+      "target": "nexus_policydecision_sentinelintents_descriptor",
+      "confidence_score": 1.0
+    },
+    {
+      "relation": "method",
+      "confidence": "EXTRACTED",
+      "source_file": "swarm/nexus/nexus.pb.go",
+      "source_location": "L127",
+      "weight": 1.0,
+      "source": "nexus_policydecision_sentinelintents",
+      "target": "nexus_policydecision_sentinelintents_type",
+      "confidence_score": 1.0
+    },
+    {
+      "relation": "method",
+      "confidence": "EXTRACTED",
+      "source_file": "swarm/nexus/nexus.pb.go",
+      "source_location": "L131",
+      "weight": 1.0,
+      "source": "nexus_policydecision_sentinelintents",
+      "target": "nexus_policydecision_sentinelintents_number",
+      "confidence_score": 1.0
+    },
+    {
+      "relation": "method",
+      "confidence": "EXTRACTED",
+      "source_file": "swarm/nexus/nexus.pb.go",
+      "source_location": "L136",
+      "weight": 1.0,
+      "source": "nexus_policydecision_sentinelintents",
+      "target": "nexus_policydecision_sentinelintents_enumdescriptor",
+      "confidence_score": 1.0
+    },
+    {
+      "relation": "calls",
+      "context": "call",
+      "confidence": "EXTRACTED",
+      "source_file": "swarm/nexus/nexus.pb.go",
+      "source_location": "L120",
+      "weight": 1.0,
+      "source": "nexus_policydecision_sentinelintents_string",
+      "target": "nexus_healthcheckresponse_descriptor",
+      "confidence_score": 1.0
+    },
+    {
+      "relation": "calls",
+      "context": "call",
+      "confidence": "EXTRACTED",
+      "source_file": "swarm/nexus/nexus.pb.go",
+      "source_location": "L124",
+      "weight": 1.0,
+      "source": "nexus_policydecision_sentinelintents_descriptor",
+      "target": "nexus_healthcheckresponse_descriptor",
+      "confidence_score": 1.0
+    },
+    {
+      "relation": "calls",
+      "context": "call",
+      "confidence": "EXTRACTED",
+      "source_file": "swarm/nexus/nexus.pb.go",
+      "source_location": "L137",
+      "weight": 1.0,
+      "source": "nexus_policydecision_sentinelintents_enumdescriptor",
+      "target": "nexus_nexus_pb_file_nexus_proto_rawdescgzip",
+      "confidence_score": 1.0
+    },
+    {
+      "relation": "method",
+      "confidence": "EXTRACTED",
+      "source_file": "swarm/nexus/nexus.pb.go",
+      "source_location": "L165",
+      "weight": 1.0,
+      "source": "nexus_phaseoutcome_status",
+      "target": "nexus_phaseoutcome_status_enum",
+      "confidence_score": 1.0
+    },
+    {
+      "relation": "method",
+      "confidence": "EXTRACTED",
+      "source_file": "swarm/nexus/nexus.pb.go",
+      "source_location": "L171",
+      "weight": 1.0,
+      "source": "nexus_phaseoutcome_status",
+      "target": "nexus_phaseoutcome_status_string",
+      "confidence_score": 1.0
+    },
+    {
+      "relation": "method",
+      "confidence": "EXTRACTED",
+      "source_file": "swarm/nexus/nexus.pb.go",
+      "source_location": "L175",
+      "weight": 1.0,
+      "source": "nexus_phaseoutcome_status",
+      "target": "nexus_phaseoutcome_status_descriptor",
+      "confidence_score": 1.0
+    },
+    {
+      "relation": "method",
+      "confidence": "EXTRACTED",
+      "source_file": "swarm/nexus/nexus.pb.go",
+      "source_location": "L179",
+      "weight": 1.0,
+      "source": "nexus_phaseoutcome_status",
+      "target": "nexus_phaseoutcome_status_type",
+      "confidence_score": 1.0
+    },
+    {
+      "relation": "method",
+      "confidence": "EXTRACTED",
+      "source_file": "swarm/nexus/nexus.pb.go",
+      "source_location": "L183",
+      "weight": 1.0,
+      "source": "nexus_phaseoutcome_status",
+      "target": "nexus_phaseoutcome_status_number",
+      "confidence_score": 1.0
+    },
+    {
+      "relation": "method",
+      "confidence": "EXTRACTED",
+      "source_file": "swarm/nexus/nexus.pb.go",
+      "source_location": "L188",
+      "weight": 1.0,
+      "source": "nexus_phaseoutcome_status",
+      "target": "nexus_phaseoutcome_status_enumdescriptor",
+      "confidence_score": 1.0
+    },
+    {
+      "relation": "calls",
+      "context": "call",
+      "confidence": "EXTRACTED",
+      "source_file": "swarm/nexus/nexus.pb.go",
+      "source_location": "L172",
+      "weight": 1.0,
+      "source": "nexus_phaseoutcome_status_string",
+      "target": "nexus_healthcheckresponse_descriptor",
+      "confidence_score": 1.0
+    },
+    {
+      "relation": "calls",
+      "context": "call",
+      "confidence": "EXTRACTED",
+      "source_file": "swarm/nexus/nexus.pb.go",
+      "source_location": "L176",
+      "weight": 1.0,
+      "source": "nexus_phaseoutcome_status_descriptor",
+      "target": "nexus_healthcheckresponse_descriptor",
+      "confidence_score": 1.0
+    },
+    {
+      "relation": "calls",
+      "context": "call",
+      "confidence": "EXTRACTED",
+      "source_file": "swarm/nexus/nexus.pb.go",
+      "source_location": "L189",
+      "weight": 1.0,
+      "source": "nexus_phaseoutcome_status_enumdescriptor",
+      "target": "nexus_nexus_pb_file_nexus_proto_rawdescgzip",
+      "confidence_score": 1.0
+    },
+    {
+      "relation": "method",
+      "confidence": "EXTRACTED",
+      "source_file": "swarm/nexus/nexus.pb.go",
+      "source_location": "L214",
+      "weight": 1.0,
+      "source": "nexus_healthcheckresponse_servingstatus",
+      "target": "nexus_healthcheckresponse_servingstatus_enum",
+      "confidence_score": 1.0
+    },
+    {
+      "relation": "method",
+      "confidence": "EXTRACTED",
+      "source_file": "swarm/nexus/nexus.pb.go",
+      "source_location": "L220",
+      "weight": 1.0,
+      "source": "nexus_healthcheckresponse_servingstatus",
+      "target": "nexus_healthcheckresponse_servingstatus_string",
+      "confidence_score": 1.0
+    },
+    {
+      "relation": "method",
+      "confidence": "EXTRACTED",
+      "source_file": "swarm/nexus/nexus.pb.go",
+      "source_location": "L224",
+      "weight": 1.0,
+      "source": "nexus_healthcheckresponse_servingstatus",
+      "target": "nexus_healthcheckresponse_servingstatus_descriptor",
+      "confidence_score": 1.0
+    },
+    {
+      "relation": "method",
+      "confidence": "EXTRACTED",
+      "source_file": "swarm/nexus/nexus.pb.go",
+      "source_location": "L228",
+      "weight": 1.0,
+      "source": "nexus_healthcheckresponse_servingstatus",
+      "target": "nexus_healthcheckresponse_servingstatus_type",
+      "confidence_score": 1.0
+    },
+    {
+      "relation": "method",
+      "confidence": "EXTRACTED",
+      "source_file": "swarm/nexus/nexus.pb.go",
+      "source_location": "L232",
+      "weight": 1.0,
+      "source": "nexus_healthcheckresponse_servingstatus",
+      "target": "nexus_healthcheckresponse_servingstatus_number",
+      "confidence_score": 1.0
+    },
+    {
+      "relation": "method",
+      "confidence": "EXTRACTED",
+      "source_file": "swarm/nexus/nexus.pb.go",
+      "source_location": "L237",
+      "weight": 1.0,
+      "source": "nexus_healthcheckresponse_servingstatus",
+      "target": "nexus_healthcheckresponse_servingstatus_enumdescriptor",
+      "confidence_score": 1.0
+    },
+    {
+      "relation": "calls",
+      "context": "call",
+      "confidence": "EXTRACTED",
+      "source_file": "swarm/nexus/nexus.pb.go",
+      "source_location": "L221",
+      "weight": 1.0,
+      "source": "nexus_healthcheckresponse_servingstatus_string",
+      "target": "nexus_healthcheckresponse_descriptor",
+      "confidence_score": 1.0
+    },
+    {
+      "relation": "calls",
+      "context": "call",
+      "confidence": "EXTRACTED",
+      "source_file": "swarm/nexus/nexus.pb.go",
+      "source_location": "L225",
+      "weight": 1.0,
+      "source": "nexus_healthcheckresponse_servingstatus_descriptor",
+      "target": "nexus_healthcheckresponse_descriptor",
+      "confidence_score": 1.0
+    },
+    {
+      "relation": "calls",
+      "context": "call",
+      "confidence": "EXTRACTED",
+      "source_file": "swarm/nexus/nexus.pb.go",
+      "source_location": "L238",
+      "weight": 1.0,
+      "source": "nexus_healthcheckresponse_servingstatus_enumdescriptor",
+      "target": "nexus_nexus_pb_file_nexus_proto_rawdescgzip",
+      "confidence_score": 1.0
+    },
+    {
+      "relation": "method",
+      "confidence": "EXTRACTED",
+      "source_file": "swarm/nexus/nexus.pb.go",
+      "source_location": "L250",
+      "weight": 1.0,
+      "source": "nexus_leaserequest",
+      "target": "nexus_leaserequest_reset",
+      "confidence_score": 1.0
+    },
+    {
+      "relation": "method",
+      "confidence": "EXTRACTED",
+      "source_file": "swarm/nexus/nexus.pb.go",
+      "source_location": "L257",
+      "weight": 1.0,
+      "source": "nexus_leaserequest",
+      "target": "nexus_leaserequest_string",
+      "confidence_score": 1.0
+    },
+    {
+      "relation": "method",
+      "confidence": "EXTRACTED",
+      "source_file": "swarm/nexus/nexus.pb.go",
+      "source_location": "L261",
+      "weight": 1.0,
+      "source": "nexus_leaserequest",
+      "target": "nexus_leaserequest_protomessage",
+      "confidence_score": 1.0
+    },
+    {
+      "relation": "method",
+      "confidence": "EXTRACTED",
+      "source_file": "swarm/nexus/nexus.pb.go",
+      "source_location": "L263",
+      "weight": 1.0,
+      "source": "nexus_leaserequest",
+      "target": "nexus_leaserequest_protoreflect",
+      "confidence_score": 1.0
+    },
+    {
+      "relation": "method",
+      "confidence": "EXTRACTED",
+      "source_file": "swarm/nexus/nexus.pb.go",
+      "source_location": "L276",
+      "weight": 1.0,
+      "source": "nexus_leaserequest",
+      "target": "nexus_leaserequest_descriptor",
+      "confidence_score": 1.0
+    },
+    {
+      "relation": "method",
+      "confidence": "EXTRACTED",
+      "source_file": "swarm/nexus/nexus.pb.go",
+      "source_location": "L280",
+      "weight": 1.0,
+      "source": "nexus_leaserequest",
+      "target": "nexus_leaserequest_gettaskid",
+      "confidence_score": 1.0
+    },
+    {
+      "relation": "method",
+      "confidence": "EXTRACTED",
+      "source_file": "swarm/nexus/nexus.pb.go",
+      "source_location": "L287",
+      "weight": 1.0,
+      "source": "nexus_leaserequest",
+      "target": "nexus_leaserequest_getbranchhint",
+      "confidence_score": 1.0
+    },
+    {
+      "relation": "method",
+      "confidence": "EXTRACTED",
+      "source_file": "swarm/nexus/nexus.pb.go",
+      "source_location": "L294",
+      "weight": 1.0,
+      "source": "nexus_leaserequest",
+      "target": "nexus_leaserequest_getmetadata",
+      "confidence_score": 1.0
+    },
+    {
+      "relation": "calls",
+      "context": "call",
+      "confidence": "EXTRACTED",
+      "source_file": "swarm/nexus/nexus.pb.go",
+      "source_location": "L277",
+      "weight": 1.0,
+      "source": "nexus_leaserequest_descriptor",
+      "target": "nexus_nexus_pb_file_nexus_proto_rawdescgzip",
+      "confidence_score": 1.0
+    },
+    {
+      "relation": "method",
+      "confidence": "EXTRACTED",
+      "source_file": "swarm/nexus/nexus.pb.go",
+      "source_location": "L311",
+      "weight": 1.0,
+      "source": "nexus_worktreelease",
+      "target": "nexus_worktreelease_reset",
+      "confidence_score": 1.0
+    },
+    {
+      "relation": "method",
+      "confidence": "EXTRACTED",
+      "source_file": "swarm/nexus/nexus.pb.go",
+      "source_location": "L318",
+      "weight": 1.0,
+      "source": "nexus_worktreelease",
+      "target": "nexus_worktreelease_string",
+      "confidence_score": 1.0
+    },
+    {
+      "relation": "method",
+      "confidence": "EXTRACTED",
+      "source_file": "swarm/nexus/nexus.pb.go",
+      "source_location": "L322",
+      "weight": 1.0,
+      "source": "nexus_worktreelease",
+      "target": "nexus_worktreelease_protomessage",
+      "confidence_score": 1.0
+    },
+    {
+      "relation": "method",
+      "confidence": "EXTRACTED",
+      "source_file": "swarm/nexus/nexus.pb.go",
+      "source_location": "L324",
+      "weight": 1.0,
+      "source": "nexus_worktreelease",
+      "target": "nexus_worktreelease_protoreflect",
+      "confidence_score": 1.0
+    },
+    {
+      "relation": "method",
+      "confidence": "EXTRACTED",
+      "source_file": "swarm/nexus/nexus.pb.go",
+      "source_location": "L337",
+      "weight": 1.0,
+      "source": "nexus_worktreelease",
+      "target": "nexus_worktreelease_descriptor",
+      "confidence_score": 1.0
+    },
+    {
+      "relation": "method",
+      "confidence": "EXTRACTED",
+      "source_file": "swarm/nexus/nexus.pb.go",
+      "source_location": "L341",
+      "weight": 1.0,
+      "source": "nexus_worktreelease",
+      "target": "nexus_worktreelease_getleaseid",
+      "confidence_score": 1.0
+    },
+    {
+      "relation": "method",
+      "confidence": "EXTRACTED",
+      "source_file": "swarm/nexus/nexus.pb.go",
+      "source_location": "L348",
+      "weight": 1.0,
+      "source": "nexus_worktreelease",
+      "target": "nexus_worktreelease_getpath",
+      "confidence_score": 1.0
+    },
+    {
+      "relation": "method",
+      "confidence": "EXTRACTED",
+      "source_file": "swarm/nexus/nexus.pb.go",
+      "source_location": "L355",
+      "weight": 1.0,
+      "source": "nexus_worktreelease",
+      "target": "nexus_worktreelease_getbranchname",
+      "confidence_score": 1.0
+    },
+    {
+      "relation": "method",
+      "confidence": "EXTRACTED",
+      "source_file": "swarm/nexus/nexus.pb.go",
+      "source_location": "L362",
+      "weight": 1.0,
+      "source": "nexus_worktreelease",
+      "target": "nexus_worktreelease_getexpiresat",
+      "confidence_score": 1.0
+    },
+    {
+      "relation": "calls",
+      "context": "call",
+      "confidence": "EXTRACTED",
+      "source_file": "swarm/nexus/nexus.pb.go",
+      "source_location": "L338",
+      "weight": 1.0,
+      "source": "nexus_worktreelease_descriptor",
+      "target": "nexus_nexus_pb_file_nexus_proto_rawdescgzip",
+      "confidence_score": 1.0
+    },
+    {
+      "relation": "method",
+      "confidence": "EXTRACTED",
+      "source_file": "swarm/nexus/nexus.pb.go",
+      "source_location": "L377",
+      "weight": 1.0,
+      "source": "nexus_harvestrequest",
+      "target": "nexus_harvestrequest_reset",
+      "confidence_score": 1.0
+    },
+    {
+      "relation": "method",
+      "confidence": "EXTRACTED",
+      "source_file": "swarm/nexus/nexus.pb.go",
+      "source_location": "L384",
+      "weight": 1.0,
+      "source": "nexus_harvestrequest",
+      "target": "nexus_harvestrequest_string",
+      "confidence_score": 1.0
+    },
+    {
+      "relation": "method",
+      "confidence": "EXTRACTED",
+      "source_file": "swarm/nexus/nexus.pb.go",
+      "source_location": "L388",
+      "weight": 1.0,
+      "source": "nexus_harvestrequest",
+      "target": "nexus_harvestrequest_protomessage",
+      "confidence_score": 1.0
+    },
+    {
+      "relation": "method",
+      "confidence": "EXTRACTED",
+      "source_file": "swarm/nexus/nexus.pb.go",
+      "source_location": "L390",
+      "weight": 1.0,
+      "source": "nexus_harvestrequest",
+      "target": "nexus_harvestrequest_protoreflect",
+      "confidence_score": 1.0
+    },
+    {
+      "relation": "method",
+      "confidence": "EXTRACTED",
+      "source_file": "swarm/nexus/nexus.pb.go",
+      "source_location": "L403",
+      "weight": 1.0,
+      "source": "nexus_harvestrequest",
+      "target": "nexus_harvestrequest_descriptor",
+      "confidence_score": 1.0
+    },
+    {
+      "relation": "method",
+      "confidence": "EXTRACTED",
+      "source_file": "swarm/nexus/nexus.pb.go",
+      "source_location": "L407",
+      "weight": 1.0,
+      "source": "nexus_harvestrequest",
+      "target": "nexus_harvestrequest_getleaseid",
+      "confidence_score": 1.0
+    },
+    {
+      "relation": "method",
+      "confidence": "EXTRACTED",
+      "source_file": "swarm/nexus/nexus.pb.go",
+      "source_location": "L414",
+      "weight": 1.0,
+      "source": "nexus_harvestrequest",
+      "target": "nexus_harvestrequest_getforcemerge",
+      "confidence_score": 1.0
+    },
+    {
+      "relation": "calls",
+      "context": "call",
+      "confidence": "EXTRACTED",
+      "source_file": "swarm/nexus/nexus.pb.go",
+      "source_location": "L404",
+      "weight": 1.0,
+      "source": "nexus_harvestrequest_descriptor",
+      "target": "nexus_nexus_pb_file_nexus_proto_rawdescgzip",
+      "confidence_score": 1.0
+    },
+    {
+      "relation": "method",
+      "confidence": "EXTRACTED",
+      "source_file": "swarm/nexus/nexus.pb.go",
+      "source_location": "L429",
+      "weight": 1.0,
+      "source": "nexus_cancelleaserequest",
+      "target": "nexus_cancelleaserequest_reset",
+      "confidence_score": 1.0
+    },
+    {
+      "relation": "method",
+      "confidence": "EXTRACTED",
+      "source_file": "swarm/nexus/nexus.pb.go",
+      "source_location": "L436",
+      "weight": 1.0,
+      "source": "nexus_cancelleaserequest",
+      "target": "nexus_cancelleaserequest_string",
+      "confidence_score": 1.0
+    },
+    {
+      "relation": "method",
+      "confidence": "EXTRACTED",
+      "source_file": "swarm/nexus/nexus.pb.go",
+      "source_location": "L440",
+      "weight": 1.0,
+      "source": "nexus_cancelleaserequest",
+      "target": "nexus_cancelleaserequest_protomessage",
+      "confidence_score": 1.0
+    },
+    {
+      "relation": "method",
+      "confidence": "EXTRACTED",
+      "source_file": "swarm/nexus/nexus.pb.go",
+      "source_location": "L442",
+      "weight": 1.0,
+      "source": "nexus_cancelleaserequest",
+      "target": "nexus_cancelleaserequest_protoreflect",
+      "confidence_score": 1.0
+    },
+    {
+      "relation": "method",
+      "confidence": "EXTRACTED",
+      "source_file": "swarm/nexus/nexus.pb.go",
+      "source_location": "L455",
+      "weight": 1.0,
+      "source": "nexus_cancelleaserequest",
+      "target": "nexus_cancelleaserequest_descriptor",
+      "confidence_score": 1.0
+    },
+    {
+      "relation": "method",
+      "confidence": "EXTRACTED",
+      "source_file": "swarm/nexus/nexus.pb.go",
+      "source_location": "L459",
+      "weight": 1.0,
+      "source": "nexus_cancelleaserequest",
+      "target": "nexus_cancelleaserequest_getleaseid",
+      "confidence_score": 1.0
+    },
+    {
+      "relation": "method",
+      "confidence": "EXTRACTED",
+      "source_file": "swarm/nexus/nexus.pb.go",
+      "source_location": "L466",
+      "weight": 1.0,
+      "source": "nexus_cancelleaserequest",
+      "target": "nexus_cancelleaserequest_getreason",
+      "confidence_score": 1.0
+    },
+    {
+      "relation": "calls",
+      "context": "call",
+      "confidence": "EXTRACTED",
+      "source_file": "swarm/nexus/nexus.pb.go",
+      "source_location": "L456",
+      "weight": 1.0,
+      "source": "nexus_cancelleaserequest_descriptor",
+      "target": "nexus_nexus_pb_file_nexus_proto_rawdescgzip",
+      "confidence_score": 1.0
+    },
+    {
+      "relation": "method",
+      "confidence": "EXTRACTED",
+      "source_file": "swarm/nexus/nexus.pb.go",
+      "source_location": "L484",
+      "weight": 1.0,
+      "source": "nexus_policyrequest",
+      "target": "nexus_policyrequest_reset",
+      "confidence_score": 1.0
+    },
+    {
+      "relation": "method",
+      "confidence": "EXTRACTED",
+      "source_file": "swarm/nexus/nexus.pb.go",
+      "source_location": "L491",
+      "weight": 1.0,
+      "source": "nexus_policyrequest",
+      "target": "nexus_policyrequest_string",
+      "confidence_score": 1.0
+    },
+    {
+      "relation": "method",
+      "confidence": "EXTRACTED",
+      "source_file": "swarm/nexus/nexus.pb.go",
+      "source_location": "L495",
+      "weight": 1.0,
+      "source": "nexus_policyrequest",
+      "target": "nexus_policyrequest_protomessage",
+      "confidence_score": 1.0
+    },
+    {
+      "relation": "method",
+      "confidence": "EXTRACTED",
+      "source_file": "swarm/nexus/nexus.pb.go",
+      "source_location": "L497",
+      "weight": 1.0,
+      "source": "nexus_policyrequest",
+      "target": "nexus_policyrequest_protoreflect",
+      "confidence_score": 1.0
+    },
+    {
+      "relation": "method",
+      "confidence": "EXTRACTED",
+      "source_file": "swarm/nexus/nexus.pb.go",
+      "source_location": "L510",
+      "weight": 1.0,
+      "source": "nexus_policyrequest",
+      "target": "nexus_policyrequest_descriptor",
+      "confidence_score": 1.0
+    },
+    {
+      "relation": "method",
+      "confidence": "EXTRACTED",
+      "source_file": "swarm/nexus/nexus.pb.go",
+      "source_location": "L514",
+      "weight": 1.0,
+      "source": "nexus_policyrequest",
+      "target": "nexus_policyrequest_gettaskid",
+      "confidence_score": 1.0
+    },
+    {
+      "relation": "method",
+      "confidence": "EXTRACTED",
+      "source_file": "swarm/nexus/nexus.pb.go",
+      "source_location": "L521",
+      "weight": 1.0,
+      "source": "nexus_policyrequest",
+      "target": "nexus_policyrequest_getphase",
+      "confidence_score": 1.0
+    },
+    {
+      "relation": "method",
+      "confidence": "EXTRACTED",
+      "source_file": "swarm/nexus/nexus.pb.go",
+      "source_location": "L528",
+      "weight": 1.0,
+      "source": "nexus_policyrequest",
+      "target": "nexus_policyrequest_getaction",
+      "confidence_score": 1.0
+    },
+    {
+      "relation": "method",
+      "confidence": "EXTRACTED",
+      "source_file": "swarm/nexus/nexus.pb.go",
+      "source_location": "L535",
+      "weight": 1.0,
+      "source": "nexus_policyrequest",
+      "target": "nexus_policyrequest_getcontext",
+      "confidence_score": 1.0
+    },
+    {
+      "relation": "method",
+      "confidence": "EXTRACTED",
+      "source_file": "swarm/nexus/nexus.pb.go",
+      "source_location": "L542",
+      "weight": 1.0,
+      "source": "nexus_policyrequest",
+      "target": "nexus_policyrequest_getintentprompt",
+      "confidence_score": 1.0
+    },
+    {
+      "relation": "calls",
+      "context": "call",
+      "confidence": "EXTRACTED",
+      "source_file": "swarm/nexus/nexus.pb.go",
+      "source_location": "L511",
+      "weight": 1.0,
+      "source": "nexus_policyrequest_descriptor",
+      "target": "nexus_nexus_pb_file_nexus_proto_rawdescgzip",
+      "confidence_score": 1.0
+    },
+    {
+      "relation": "method",
+      "confidence": "EXTRACTED",
+      "source_file": "swarm/nexus/nexus.pb.go",
+      "source_location": "L560",
+      "weight": 1.0,
+      "source": "nexus_policydecision",
+      "target": "nexus_policydecision_reset",
+      "confidence_score": 1.0
+    },
+    {
+      "relation": "method",
+      "confidence": "EXTRACTED",
+      "source_file": "swarm/nexus/nexus.pb.go",
+      "source_location": "L567",
+      "weight": 1.0,
+      "source": "nexus_policydecision",
+      "target": "nexus_policydecision_string",
+      "confidence_score": 1.0
+    },
+    {
+      "relation": "method",
+      "confidence": "EXTRACTED",
+      "source_file": "swarm/nexus/nexus.pb.go",
+      "source_location": "L571",
+      "weight": 1.0,
+      "source": "nexus_policydecision",
+      "target": "nexus_policydecision_protomessage",
+      "confidence_score": 1.0
+    },
+    {
+      "relation": "method",
+      "confidence": "EXTRACTED",
+      "source_file": "swarm/nexus/nexus.pb.go",
+      "source_location": "L573",
+      "weight": 1.0,
+      "source": "nexus_policydecision",
+      "target": "nexus_policydecision_protoreflect",
+      "confidence_score": 1.0
+    },
+    {
+      "relation": "method",
+      "confidence": "EXTRACTED",
+      "source_file": "swarm/nexus/nexus.pb.go",
+      "source_location": "L586",
+      "weight": 1.0,
+      "source": "nexus_policydecision",
+      "target": "nexus_policydecision_descriptor",
+      "confidence_score": 1.0
+    },
+    {
+      "relation": "method",
+      "confidence": "EXTRACTED",
+      "source_file": "swarm/nexus/nexus.pb.go",
+      "source_location": "L590",
+      "weight": 1.0,
+      "source": "nexus_policydecision",
+      "target": "nexus_policydecision_getdecisionid",
+      "confidence_score": 1.0
+    },
+    {
+      "relation": "method",
+      "confidence": "EXTRACTED",
+      "source_file": "swarm/nexus/nexus.pb.go",
+      "source_location": "L597",
+      "weight": 1.0,
+      "source": "nexus_policydecision",
+      "target": "nexus_policydecision_getallow",
+      "confidence_score": 1.0
+    },
+    {
+      "relation": "method",
+      "confidence": "EXTRACTED",
+      "source_file": "swarm/nexus/nexus.pb.go",
+      "source_location": "L604",
+      "weight": 1.0,
+      "source": "nexus_policydecision",
+      "target": "nexus_policydecision_getreason",
+      "confidence_score": 1.0
+    },
+    {
+      "relation": "method",
+      "confidence": "EXTRACTED",
+      "source_file": "swarm/nexus/nexus.pb.go",
+      "source_location": "L611",
+      "weight": 1.0,
+      "source": "nexus_policydecision",
+      "target": "nexus_policydecision_getintent",
+      "confidence_score": 1.0
+    },
+    {
+      "relation": "method",
+      "confidence": "EXTRACTED",
+      "source_file": "swarm/nexus/nexus.pb.go",
+      "source_location": "L618",
+      "weight": 1.0,
+      "source": "nexus_policydecision",
+      "target": "nexus_policydecision_getenforcementactions",
+      "confidence_score": 1.0
+    },
+    {
+      "relation": "calls",
+      "context": "call",
+      "confidence": "EXTRACTED",
+      "source_file": "swarm/nexus/nexus.pb.go",
+      "source_location": "L587",
+      "weight": 1.0,
+      "source": "nexus_policydecision_descriptor",
+      "target": "nexus_nexus_pb_file_nexus_proto_rawdescgzip",
+      "confidence_score": 1.0
+    },
+    {
+      "relation": "method",
+      "confidence": "EXTRACTED",
+      "source_file": "swarm/nexus/nexus.pb.go",
+      "source_location": "L634",
+      "weight": 1.0,
+      "source": "nexus_phaserequest",
+      "target": "nexus_phaserequest_reset",
+      "confidence_score": 1.0
+    },
+    {
+      "relation": "method",
+      "confidence": "EXTRACTED",
+      "source_file": "swarm/nexus/nexus.pb.go",
+      "source_location": "L641",
+      "weight": 1.0,
+      "source": "nexus_phaserequest",
+      "target": "nexus_phaserequest_string",
+      "confidence_score": 1.0
+    },
+    {
+      "relation": "method",
+      "confidence": "EXTRACTED",
+      "source_file": "swarm/nexus/nexus.pb.go",
+      "source_location": "L645",
+      "weight": 1.0,
+      "source": "nexus_phaserequest",
+      "target": "nexus_phaserequest_protomessage",
+      "confidence_score": 1.0
+    },
+    {
+      "relation": "method",
+      "confidence": "EXTRACTED",
+      "source_file": "swarm/nexus/nexus.pb.go",
+      "source_location": "L647",
+      "weight": 1.0,
+      "source": "nexus_phaserequest",
+      "target": "nexus_phaserequest_protoreflect",
+      "confidence_score": 1.0
+    },
+    {
+      "relation": "method",
+      "confidence": "EXTRACTED",
+      "source_file": "swarm/nexus/nexus.pb.go",
+      "source_location": "L660",
+      "weight": 1.0,
+      "source": "nexus_phaserequest",
+      "target": "nexus_phaserequest_descriptor",
+      "confidence_score": 1.0
+    },
+    {
+      "relation": "method",
+      "confidence": "EXTRACTED",
+      "source_file": "swarm/nexus/nexus.pb.go",
+      "source_location": "L664",
+      "weight": 1.0,
+      "source": "nexus_phaserequest",
+      "target": "nexus_phaserequest_gettaskid",
+      "confidence_score": 1.0
+    },
+    {
+      "relation": "method",
+      "confidence": "EXTRACTED",
+      "source_file": "swarm/nexus/nexus.pb.go",
+      "source_location": "L671",
+      "weight": 1.0,
+      "source": "nexus_phaserequest",
+      "target": "nexus_phaserequest_getphase",
+      "confidence_score": 1.0
+    },
+    {
+      "relation": "method",
+      "confidence": "EXTRACTED",
+      "source_file": "swarm/nexus/nexus.pb.go",
+      "source_location": "L678",
+      "weight": 1.0,
+      "source": "nexus_phaserequest",
+      "target": "nexus_phaserequest_getcontext",
+      "confidence_score": 1.0
+    },
+    {
+      "relation": "calls",
+      "context": "call",
+      "confidence": "EXTRACTED",
+      "source_file": "swarm/nexus/nexus.pb.go",
+      "source_location": "L661",
+      "weight": 1.0,
+      "source": "nexus_phaserequest_descriptor",
+      "target": "nexus_nexus_pb_file_nexus_proto_rawdescgzip",
+      "confidence_score": 1.0
+    },
+    {
+      "relation": "method",
+      "confidence": "EXTRACTED",
+      "source_file": "swarm/nexus/nexus.pb.go",
+      "source_location": "L696",
+      "weight": 1.0,
+      "source": "nexus_phaseoutcome",
+      "target": "nexus_phaseoutcome_reset",
+      "confidence_score": 1.0
+    },
+    {
+      "relation": "method",
+      "confidence": "EXTRACTED",
+      "source_file": "swarm/nexus/nexus.pb.go",
+      "source_location": "L703",
+      "weight": 1.0,
+      "source": "nexus_phaseoutcome",
+      "target": "nexus_phaseoutcome_string",
+      "confidence_score": 1.0
+    },
+    {
+      "relation": "method",
+      "confidence": "EXTRACTED",
+      "source_file": "swarm/nexus/nexus.pb.go",
+      "source_location": "L707",
+      "weight": 1.0,
+      "source": "nexus_phaseoutcome",
+      "target": "nexus_phaseoutcome_protomessage",
+      "confidence_score": 1.0
+    },
+    {
+      "relation": "method",
+      "confidence": "EXTRACTED",
+      "source_file": "swarm/nexus/nexus.pb.go",
+      "source_location": "L709",
+      "weight": 1.0,
+      "source": "nexus_phaseoutcome",
+      "target": "nexus_phaseoutcome_protoreflect",
+      "confidence_score": 1.0
+    },
+    {
+      "relation": "method",
+      "confidence": "EXTRACTED",
+      "source_file": "swarm/nexus/nexus.pb.go",
+      "source_location": "L722",
+      "weight": 1.0,
+      "source": "nexus_phaseoutcome",
+      "target": "nexus_phaseoutcome_descriptor",
+      "confidence_score": 1.0
+    },
+    {
+      "relation": "method",
+      "confidence": "EXTRACTED",
+      "source_file": "swarm/nexus/nexus.pb.go",
+      "source_location": "L726",
+      "weight": 1.0,
+      "source": "nexus_phaseoutcome",
+      "target": "nexus_phaseoutcome_getphaseid",
+      "confidence_score": 1.0
+    },
+    {
+      "relation": "method",
+      "confidence": "EXTRACTED",
+      "source_file": "swarm/nexus/nexus.pb.go",
+      "source_location": "L733",
+      "weight": 1.0,
+      "source": "nexus_phaseoutcome",
+      "target": "nexus_phaseoutcome_getstatus",
+      "confidence_score": 1.0
+    },
+    {
+      "relation": "method",
+      "confidence": "EXTRACTED",
+      "source_file": "swarm/nexus/nexus.pb.go",
+      "source_location": "L740",
+      "weight": 1.0,
+      "source": "nexus_phaseoutcome",
+      "target": "nexus_phaseoutcome_getsummary",
+      "confidence_score": 1.0
+    },
+    {
+      "relation": "method",
+      "confidence": "EXTRACTED",
+      "source_file": "swarm/nexus/nexus.pb.go",
+      "source_location": "L747",
+      "weight": 1.0,
+      "source": "nexus_phaseoutcome",
+      "target": "nexus_phaseoutcome_getmutations",
+      "confidence_score": 1.0
+    },
+    {
+      "relation": "method",
+      "confidence": "EXTRACTED",
+      "source_file": "swarm/nexus/nexus.pb.go",
+      "source_location": "L754",
+      "weight": 1.0,
+      "source": "nexus_phaseoutcome",
+      "target": "nexus_phaseoutcome_getmetrics",
+      "confidence_score": 1.0
+    },
+    {
+      "relation": "calls",
+      "context": "call",
+      "confidence": "EXTRACTED",
+      "source_file": "swarm/nexus/nexus.pb.go",
+      "source_location": "L723",
+      "weight": 1.0,
+      "source": "nexus_phaseoutcome_descriptor",
+      "target": "nexus_nexus_pb_file_nexus_proto_rawdescgzip",
+      "confidence_score": 1.0
+    },
+    {
+      "relation": "method",
+      "confidence": "EXTRACTED",
+      "source_file": "swarm/nexus/nexus.pb.go",
+      "source_location": "L771",
+      "weight": 1.0,
+      "source": "nexus_metricevent",
+      "target": "nexus_metricevent_reset",
+      "confidence_score": 1.0
+    },
+    {
+      "relation": "method",
+      "confidence": "EXTRACTED",
+      "source_file": "swarm/nexus/nexus.pb.go",
+      "source_location": "L778",
+      "weight": 1.0,
+      "source": "nexus_metricevent",
+      "target": "nexus_metricevent_string",
+      "confidence_score": 1.0
+    },
+    {
+      "relation": "method",
+      "confidence": "EXTRACTED",
+      "source_file": "swarm/nexus/nexus.pb.go",
+      "source_location": "L782",
+      "weight": 1.0,
+      "source": "nexus_metricevent",
+      "target": "nexus_metricevent_protomessage",
+      "confidence_score": 1.0
+    },
+    {
+      "relation": "method",
+      "confidence": "EXTRACTED",
+      "source_file": "swarm/nexus/nexus.pb.go",
+      "source_location": "L784",
+      "weight": 1.0,
+      "source": "nexus_metricevent",
+      "target": "nexus_metricevent_protoreflect",
+      "confidence_score": 1.0
+    },
+    {
+      "relation": "method",
+      "confidence": "EXTRACTED",
+      "source_file": "swarm/nexus/nexus.pb.go",
+      "source_location": "L797",
+      "weight": 1.0,
+      "source": "nexus_metricevent",
+      "target": "nexus_metricevent_descriptor",
+      "confidence_score": 1.0
+    },
+    {
+      "relation": "method",
+      "confidence": "EXTRACTED",
+      "source_file": "swarm/nexus/nexus.pb.go",
+      "source_location": "L801",
+      "weight": 1.0,
+      "source": "nexus_metricevent",
+      "target": "nexus_metricevent_gettimestamp",
+      "confidence_score": 1.0
+    },
+    {
+      "relation": "method",
+      "confidence": "EXTRACTED",
+      "source_file": "swarm/nexus/nexus.pb.go",
+      "source_location": "L808",
+      "weight": 1.0,
+      "source": "nexus_metricevent",
+      "target": "nexus_metricevent_geteventtype",
+      "confidence_score": 1.0
+    },
+    {
+      "relation": "method",
+      "confidence": "EXTRACTED",
+      "source_file": "swarm/nexus/nexus.pb.go",
+      "source_location": "L815",
+      "weight": 1.0,
+      "source": "nexus_metricevent",
+      "target": "nexus_metricevent_getvalue",
+      "confidence_score": 1.0
+    },
+    {
+      "relation": "method",
+      "confidence": "EXTRACTED",
+      "source_file": "swarm/nexus/nexus.pb.go",
+      "source_location": "L822",
+      "weight": 1.0,
+      "source": "nexus_metricevent",
+      "target": "nexus_metricevent_getlabels",
+      "confidence_score": 1.0
+    },
+    {
+      "relation": "calls",
+      "context": "call",
+      "confidence": "EXTRACTED",
+      "source_file": "swarm/nexus/nexus.pb.go",
+      "source_location": "L798",
+      "weight": 1.0,
+      "source": "nexus_metricevent_descriptor",
+      "target": "nexus_nexus_pb_file_nexus_proto_rawdescgzip",
+      "confidence_score": 1.0
+    },
+    {
+      "relation": "method",
+      "confidence": "EXTRACTED",
+      "source_file": "swarm/nexus/nexus.pb.go",
+      "source_location": "L839",
+      "weight": 1.0,
+      "source": "nexus_actionresponse",
+      "target": "nexus_actionresponse_reset",
+      "confidence_score": 1.0
+    },
+    {
+      "relation": "method",
+      "confidence": "EXTRACTED",
+      "source_file": "swarm/nexus/nexus.pb.go",
+      "source_location": "L846",
+      "weight": 1.0,
+      "source": "nexus_actionresponse",
+      "target": "nexus_actionresponse_string",
+      "confidence_score": 1.0
+    },
+    {
+      "relation": "method",
+      "confidence": "EXTRACTED",
+      "source_file": "swarm/nexus/nexus.pb.go",
+      "source_location": "L850",
+      "weight": 1.0,
+      "source": "nexus_actionresponse",
+      "target": "nexus_actionresponse_protomessage",
+      "confidence_score": 1.0
+    },
+    {
+      "relation": "method",
+      "confidence": "EXTRACTED",
+      "source_file": "swarm/nexus/nexus.pb.go",
+      "source_location": "L852",
+      "weight": 1.0,
+      "source": "nexus_actionresponse",
+      "target": "nexus_actionresponse_protoreflect",
+      "confidence_score": 1.0
+    },
+    {
+      "relation": "method",
+      "confidence": "EXTRACTED",
+      "source_file": "swarm/nexus/nexus.pb.go",
+      "source_location": "L865",
+      "weight": 1.0,
+      "source": "nexus_actionresponse",
+      "target": "nexus_actionresponse_descriptor",
+      "confidence_score": 1.0
+    },
+    {
+      "relation": "method",
+      "confidence": "EXTRACTED",
+      "source_file": "swarm/nexus/nexus.pb.go",
+      "source_location": "L869",
+      "weight": 1.0,
+      "source": "nexus_actionresponse",
+      "target": "nexus_actionresponse_getsuccess",
+      "confidence_score": 1.0
+    },
+    {
+      "relation": "method",
+      "confidence": "EXTRACTED",
+      "source_file": "swarm/nexus/nexus.pb.go",
+      "source_location": "L876",
+      "weight": 1.0,
+      "source": "nexus_actionresponse",
+      "target": "nexus_actionresponse_getmessage",
+      "confidence_score": 1.0
+    },
+    {
+      "relation": "method",
+      "confidence": "EXTRACTED",
+      "source_file": "swarm/nexus/nexus.pb.go",
+      "source_location": "L883",
+      "weight": 1.0,
+      "source": "nexus_actionresponse",
+      "target": "nexus_actionresponse_getresiduecount",
+      "confidence_score": 1.0
+    },
+    {
+      "relation": "method",
+      "confidence": "EXTRACTED",
+      "source_file": "swarm/nexus/nexus.pb.go",
+      "source_location": "L890",
+      "weight": 1.0,
+      "source": "nexus_actionresponse",
+      "target": "nexus_actionresponse_getcleanuptrace",
+      "confidence_score": 1.0
+    },
+    {
+      "relation": "calls",
+      "context": "call",
+      "confidence": "EXTRACTED",
+      "source_file": "swarm/nexus/nexus.pb.go",
+      "source_location": "L866",
+      "weight": 1.0,
+      "source": "nexus_actionresponse_descriptor",
+      "target": "nexus_nexus_pb_file_nexus_proto_rawdescgzip",
+      "confidence_score": 1.0
+    },
+    {
+      "relation": "method",
+      "confidence": "EXTRACTED",
+      "source_file": "swarm/nexus/nexus.pb.go",
+      "source_location": "L904",
+      "weight": 1.0,
+      "source": "nexus_healthcheckrequest",
+      "target": "nexus_healthcheckrequest_reset",
+      "confidence_score": 1.0
+    },
+    {
+      "relation": "method",
+      "confidence": "EXTRACTED",
+      "source_file": "swarm/nexus/nexus.pb.go",
+      "source_location": "L911",
+      "weight": 1.0,
+      "source": "nexus_healthcheckrequest",
+      "target": "nexus_healthcheckrequest_string",
+      "confidence_score": 1.0
+    },
+    {
+      "relation": "method",
+      "confidence": "EXTRACTED",
+      "source_file": "swarm/nexus/nexus.pb.go",
+      "source_location": "L915",
+      "weight": 1.0,
+      "source": "nexus_healthcheckrequest",
+      "target": "nexus_healthcheckrequest_protomessage",
+      "confidence_score": 1.0
+    },
+    {
+      "relation": "method",
+      "confidence": "EXTRACTED",
+      "source_file": "swarm/nexus/nexus.pb.go",
+      "source_location": "L917",
+      "weight": 1.0,
+      "source": "nexus_healthcheckrequest",
+      "target": "nexus_healthcheckrequest_protoreflect",
+      "confidence_score": 1.0
+    },
+    {
+      "relation": "method",
+      "confidence": "EXTRACTED",
+      "source_file": "swarm/nexus/nexus.pb.go",
+      "source_location": "L930",
+      "weight": 1.0,
+      "source": "nexus_healthcheckrequest",
+      "target": "nexus_healthcheckrequest_descriptor",
+      "confidence_score": 1.0
+    },
+    {
+      "relation": "method",
+      "confidence": "EXTRACTED",
+      "source_file": "swarm/nexus/nexus.pb.go",
+      "source_location": "L934",
+      "weight": 1.0,
+      "source": "nexus_healthcheckrequest",
+      "target": "nexus_healthcheckrequest_getservicename",
+      "confidence_score": 1.0
+    },
+    {
+      "relation": "calls",
+      "context": "call",
+      "confidence": "EXTRACTED",
+      "source_file": "swarm/nexus/nexus.pb.go",
+      "source_location": "L931",
+      "weight": 1.0,
+      "source": "nexus_healthcheckrequest_descriptor",
+      "target": "nexus_nexus_pb_file_nexus_proto_rawdescgzip",
+      "confidence_score": 1.0
+    },
+    {
+      "relation": "method",
+      "confidence": "EXTRACTED",
+      "source_file": "swarm/nexus/nexus.pb.go",
+      "source_location": "L948",
+      "weight": 1.0,
+      "source": "nexus_healthcheckresponse",
+      "target": "nexus_healthcheckresponse_reset",
+      "confidence_score": 1.0
+    },
+    {
+      "relation": "method",
+      "confidence": "EXTRACTED",
+      "source_file": "swarm/nexus/nexus.pb.go",
+      "source_location": "L955",
+      "weight": 1.0,
+      "source": "nexus_healthcheckresponse",
+      "target": "nexus_healthcheckresponse_string",
+      "confidence_score": 1.0
+    },
+    {
+      "relation": "method",
+      "confidence": "EXTRACTED",
+      "source_file": "swarm/nexus/nexus.pb.go",
+      "source_location": "L959",
+      "weight": 1.0,
+      "source": "nexus_healthcheckresponse",
+      "target": "nexus_healthcheckresponse_protomessage",
+      "confidence_score": 1.0
+    },
+    {
+      "relation": "method",
+      "confidence": "EXTRACTED",
+      "source_file": "swarm/nexus/nexus.pb.go",
+      "source_location": "L961",
+      "weight": 1.0,
+      "source": "nexus_healthcheckresponse",
+      "target": "nexus_healthcheckresponse_protoreflect",
+      "confidence_score": 1.0
+    },
+    {
+      "relation": "method",
+      "confidence": "EXTRACTED",
+      "source_file": "swarm/nexus/nexus.pb.go",
+      "source_location": "L974",
+      "weight": 1.0,
+      "source": "nexus_healthcheckresponse",
+      "target": "nexus_healthcheckresponse_descriptor",
+      "confidence_score": 1.0
+    },
+    {
+      "relation": "method",
+      "confidence": "EXTRACTED",
+      "source_file": "swarm/nexus/nexus.pb.go",
+      "source_location": "L978",
+      "weight": 1.0,
+      "source": "nexus_healthcheckresponse",
+      "target": "nexus_healthcheckresponse_getstatus",
+      "confidence_score": 1.0
+    },
+    {
+      "relation": "calls",
+      "context": "call",
+      "confidence": "EXTRACTED",
+      "source_file": "swarm/nexus/nexus.pb.go",
+      "source_location": "L975",
+      "weight": 1.0,
+      "source": "nexus_healthcheckresponse_descriptor",
+      "target": "nexus_nexus_pb_file_nexus_proto_rawdescgzip",
+      "confidence_score": 1.0
+    },
+    {
+      "relation": "calls",
+      "context": "call",
+      "confidence": "EXTRACTED",
+      "source_file": "swarm/nexus/nexus.pb.go",
+      "source_location": "L1162",
+      "weight": 1.0,
+      "source": "nexus_nexus_pb_init",
+      "target": "nexus_nexus_pb_file_nexus_proto_init",
+      "confidence_score": 1.0
+    },
+    {
+      "relation": "contains",
+      "confidence": "EXTRACTED",
+      "source_file": "swarm/nexus/nexus_grpc.pb.go",
+      "source_location": "L45",
+      "weight": 1.0,
+      "source": "swarm_nexus_nexus_grpc_pb_go",
+      "target": "nexus_nexuscoreclient",
+      "confidence_score": 1.0
+    },
+    {
+      "relation": "contains",
+      "confidence": "EXTRACTED",
+      "source_file": "swarm/nexus/nexus_grpc.pb.go",
+      "source_location": "L49",
+      "weight": 1.0,
+      "source": "swarm_nexus_nexus_grpc_pb_go",
+      "target": "nexus_nexus_grpc_pb_newnexuscoreclient",
+      "confidence_score": 1.0
+    },
+    {
+      "relation": "contains",
+      "confidence": "EXTRACTED",
+      "source_file": "swarm/nexus/nexus_grpc.pb.go",
+      "source_location": "L108",
+      "weight": 1.0,
+      "source": "swarm_nexus_nexus_grpc_pb_go",
+      "target": "nexus_nexuscoreserver",
+      "confidence_score": 1.0
+    },
+    {
+      "relation": "contains",
+      "confidence": "EXTRACTED",
+      "source_file": "swarm/nexus/nexus_grpc.pb.go",
+      "source_location": "L125",
+      "weight": 1.0,
+      "source": "swarm_nexus_nexus_grpc_pb_go",
+      "target": "nexus_unimplementednexuscoreserver",
+      "confidence_score": 1.0
+    },
+    {
+      "relation": "contains",
+      "confidence": "EXTRACTED",
+      "source_file": "swarm/nexus/nexus_grpc.pb.go",
+      "source_location": "L148",
+      "weight": 1.0,
+      "source": "swarm_nexus_nexus_grpc_pb_go",
+      "target": "nexus_unsafenexuscoreserver",
+      "confidence_score": 1.0
+    },
+    {
+      "relation": "contains",
+      "confidence": "EXTRACTED",
+      "source_file": "swarm/nexus/nexus_grpc.pb.go",
+      "source_location": "L152",
+      "weight": 1.0,
+      "source": "swarm_nexus_nexus_grpc_pb_go",
+      "target": "nexus_nexus_grpc_pb_registernexuscoreserver",
+      "confidence_score": 1.0
+    },
+    {
+      "relation": "contains",
+      "confidence": "EXTRACTED",
+      "source_file": "swarm/nexus/nexus_grpc.pb.go",
+      "source_location": "L163",
+      "weight": 1.0,
+      "source": "swarm_nexus_nexus_grpc_pb_go",
+      "target": "nexus_nexus_grpc_pb_nexuscore_leaseworktree_handler",
+      "confidence_score": 1.0
+    },
+    {
+      "relation": "contains",
+      "confidence": "EXTRACTED",
+      "source_file": "swarm/nexus/nexus_grpc.pb.go",
+      "source_location": "L181",
+      "weight": 1.0,
+      "source": "swarm_nexus_nexus_grpc_pb_go",
+      "target": "nexus_nexus_grpc_pb_nexuscore_harvestworktree_handler",
+      "confidence_score": 1.0
+    },
+    {
+      "relation": "contains",
+      "confidence": "EXTRACTED",
+      "source_file": "swarm/nexus/nexus_grpc.pb.go",
+      "source_location": "L199",
+      "weight": 1.0,
+      "source": "swarm_nexus_nexus_grpc_pb_go",
+      "target": "nexus_nexus_grpc_pb_nexuscore_cancellease_handler",
+      "confidence_score": 1.0
+    },
+    {
+      "relation": "contains",
+      "confidence": "EXTRACTED",
+      "source_file": "swarm/nexus/nexus_grpc.pb.go",
+      "source_location": "L217",
+      "weight": 1.0,
+      "source": "swarm_nexus_nexus_grpc_pb_go",
+      "target": "nexus_nexus_grpc_pb_nexuscore_evaluatepolicy_handler",
+      "confidence_score": 1.0
+    },
+    {
+      "relation": "contains",
+      "confidence": "EXTRACTED",
+      "source_file": "swarm/nexus/nexus_grpc.pb.go",
+      "source_location": "L235",
+      "weight": 1.0,
+      "source": "swarm_nexus_nexus_grpc_pb_go",
+      "target": "nexus_nexus_grpc_pb_nexuscore_healthcheck_handler",
+      "confidence_score": 1.0
+    },
+    {
+      "relation": "contains",
+      "confidence": "EXTRACTED",
+      "source_file": "swarm/nexus/nexus_grpc.pb.go",
+      "source_location": "L302",
+      "weight": 1.0,
+      "source": "swarm_nexus_nexus_grpc_pb_go",
+      "target": "nexus_nexusswarmclient",
+      "confidence_score": 1.0
+    },
+    {
+      "relation": "contains",
+      "confidence": "EXTRACTED",
+      "source_file": "swarm/nexus/nexus_grpc.pb.go",
+      "source_location": "L306",
+      "weight": 1.0,
+      "source": "swarm_nexus_nexus_grpc_pb_go",
+      "target": "nexus_nexus_grpc_pb_newnexusswarmclient",
+      "confidence_score": 1.0
+    },
+    {
+      "relation": "contains",
+      "confidence": "EXTRACTED",
+      "source_file": "swarm/nexus/nexus_grpc.pb.go",
+      "source_location": "L338",
+      "weight": 1.0,
+      "source": "swarm_nexus_nexus_grpc_pb_go",
+      "target": "nexus_nexusswarmserver",
+      "confidence_score": 1.0
+    },
+    {
+      "relation": "contains",
+      "confidence": "EXTRACTED",
+      "source_file": "swarm/nexus/nexus_grpc.pb.go",
+      "source_location": "L351",
+      "weight": 1.0,
+      "source": "swarm_nexus_nexus_grpc_pb_go",
+      "target": "nexus_unimplementednexusswarmserver",
+      "confidence_score": 1.0
+    },
+    {
+      "relation": "contains",
+      "confidence": "EXTRACTED",
+      "source_file": "swarm/nexus/nexus_grpc.pb.go",
+      "source_location": "L365",
+      "weight": 1.0,
+      "source": "swarm_nexus_nexus_grpc_pb_go",
+      "target": "nexus_unsafenexusswarmserver",
+      "confidence_score": 1.0
+    },
+    {
+      "relation": "contains",
+      "confidence": "EXTRACTED",
+      "source_file": "swarm/nexus/nexus_grpc.pb.go",
+      "source_location": "L369",
+      "weight": 1.0,
+      "source": "swarm_nexus_nexus_grpc_pb_go",
+      "target": "nexus_nexus_grpc_pb_registernexusswarmserver",
+      "confidence_score": 1.0
+    },
+    {
+      "relation": "contains",
+      "confidence": "EXTRACTED",
+      "source_file": "swarm/nexus/nexus_grpc.pb.go",
+      "source_location": "L380",
+      "weight": 1.0,
+      "source": "swarm_nexus_nexus_grpc_pb_go",
+      "target": "nexus_nexus_grpc_pb_nexusswarm_runphase_handler",
+      "confidence_score": 1.0
+    },
+    {
+      "relation": "contains",
+      "confidence": "EXTRACTED",
+      "source_file": "swarm/nexus/nexus_grpc.pb.go",
+      "source_location": "L398",
+      "weight": 1.0,
+      "source": "swarm_nexus_nexus_grpc_pb_go",
+      "target": "nexus_nexus_grpc_pb_nexusswarm_emitmetrics_handler",
+      "confidence_score": 1.0
+    },
+    {
+      "relation": "method",
+      "confidence": "EXTRACTED",
+      "source_file": "swarm/nexus/nexus_grpc.pb.go",
+      "source_location": "L53",
+      "weight": 1.0,
+      "source": "nexus_nexuscoreclient",
+      "target": "nexus_nexuscoreclient_leaseworktree",
+      "confidence_score": 1.0
+    },
+    {
+      "relation": "method",
+      "confidence": "EXTRACTED",
+      "source_file": "swarm/nexus/nexus_grpc.pb.go",
+      "source_location": "L63",
+      "weight": 1.0,
+      "source": "nexus_nexuscoreclient",
+      "target": "nexus_nexuscoreclient_harvestworktree",
+      "confidence_score": 1.0
+    },
+    {
+      "relation": "method",
+      "confidence": "EXTRACTED",
+      "source_file": "swarm/nexus/nexus_grpc.pb.go",
+      "source_location": "L73",
+      "weight": 1.0,
+      "source": "nexus_nexuscoreclient",
+      "target": "nexus_nexuscoreclient_cancellease",
+      "confidence_score": 1.0
+    },
+    {
+      "relation": "method",
+      "confidence": "EXTRACTED",
+      "source_file": "swarm/nexus/nexus_grpc.pb.go",
+      "source_location": "L83",
+      "weight": 1.0,
+      "source": "nexus_nexuscoreclient",
+      "target": "nexus_nexuscoreclient_evaluatepolicy",
+      "confidence_score": 1.0
+    },
+    {
+      "relation": "method",
+      "confidence": "EXTRACTED",
+      "source_file": "swarm/nexus/nexus_grpc.pb.go",
+      "source_location": "L93",
+      "weight": 1.0,
+      "source": "nexus_nexuscoreclient",
+      "target": "nexus_nexuscoreclient_healthcheck",
+      "confidence_score": 1.0
+    },
+    {
+      "relation": "method",
+      "confidence": "EXTRACTED",
+      "source_file": "swarm/nexus/nexus_grpc.pb.go",
+      "source_location": "L127",
+      "weight": 1.0,
+      "source": "nexus_unimplementednexuscoreserver",
+      "target": "nexus_unimplementednexuscoreserver_leaseworktree",
+      "confidence_score": 1.0
+    },
+    {
+      "relation": "method",
+      "confidence": "EXTRACTED",
+      "source_file": "swarm/nexus/nexus_grpc.pb.go",
+      "source_location": "L130",
+      "weight": 1.0,
+      "source": "nexus_unimplementednexuscoreserver",
+      "target": "nexus_unimplementednexuscoreserver_harvestworktree",
+      "confidence_score": 1.0
+    },
+    {
+      "relation": "method",
+      "confidence": "EXTRACTED",
+      "source_file": "swarm/nexus/nexus_grpc.pb.go",
+      "source_location": "L133",
+      "weight": 1.0,
+      "source": "nexus_unimplementednexuscoreserver",
+      "target": "nexus_unimplementednexuscoreserver_cancellease",
+      "confidence_score": 1.0
+    },
+    {
+      "relation": "method",
+      "confidence": "EXTRACTED",
+      "source_file": "swarm/nexus/nexus_grpc.pb.go",
+      "source_location": "L136",
+      "weight": 1.0,
+      "source": "nexus_unimplementednexuscoreserver",
+      "target": "nexus_unimplementednexuscoreserver_evaluatepolicy",
+      "confidence_score": 1.0
+    },
+    {
+      "relation": "method",
+      "confidence": "EXTRACTED",
+      "source_file": "swarm/nexus/nexus_grpc.pb.go",
+      "source_location": "L139",
+      "weight": 1.0,
+      "source": "nexus_unimplementednexuscoreserver",
+      "target": "nexus_unimplementednexuscoreserver_healthcheck",
+      "confidence_score": 1.0
+    },
+    {
+      "relation": "method",
+      "confidence": "EXTRACTED",
+      "source_file": "swarm/nexus/nexus_grpc.pb.go",
+      "source_location": "L142",
+      "weight": 1.0,
+      "source": "nexus_unimplementednexuscoreserver",
+      "target": "nexus_unimplementednexuscoreserver_mustembedunimplementednexuscoreserver",
+      "confidence_score": 1.0
+    },
+    {
+      "relation": "method",
+      "confidence": "EXTRACTED",
+      "source_file": "swarm/nexus/nexus_grpc.pb.go",
+      "source_location": "L143",
+      "weight": 1.0,
+      "source": "nexus_unimplementednexuscoreserver",
+      "target": "nexus_unimplementednexuscoreserver_testembeddedbyvalue",
+      "confidence_score": 1.0
+    },
+    {
+      "relation": "calls",
+      "context": "call",
+      "confidence": "EXTRACTED",
+      "source_file": "swarm/nexus/nexus_grpc.pb.go",
+      "source_location": "L169",
+      "weight": 1.0,
+      "source": "nexus_nexus_grpc_pb_nexuscore_leaseworktree_handler",
+      "target": "nexus_unimplementednexuscoreserver_leaseworktree",
+      "confidence_score": 1.0
+    },
+    {
+      "relation": "calls",
+      "context": "call",
+      "confidence": "EXTRACTED",
+      "source_file": "swarm/nexus/nexus_grpc.pb.go",
+      "source_location": "L187",
+      "weight": 1.0,
+      "source": "nexus_nexus_grpc_pb_nexuscore_harvestworktree_handler",
+      "target": "nexus_unimplementednexuscoreserver_harvestworktree",
+      "confidence_score": 1.0
+    },
+    {
+      "relation": "calls",
+      "context": "call",
+      "confidence": "EXTRACTED",
+      "source_file": "swarm/nexus/nexus_grpc.pb.go",
+      "source_location": "L205",
+      "weight": 1.0,
+      "source": "nexus_nexus_grpc_pb_nexuscore_cancellease_handler",
+      "target": "nexus_unimplementednexuscoreserver_cancellease",
+      "confidence_score": 1.0
+    },
+    {
+      "relation": "calls",
+      "context": "call",
+      "confidence": "EXTRACTED",
+      "source_file": "swarm/nexus/nexus_grpc.pb.go",
+      "source_location": "L223",
+      "weight": 1.0,
+      "source": "nexus_nexus_grpc_pb_nexuscore_evaluatepolicy_handler",
+      "target": "nexus_unimplementednexuscoreserver_evaluatepolicy",
+      "confidence_score": 1.0
+    },
+    {
+      "relation": "calls",
+      "context": "call",
+      "confidence": "EXTRACTED",
+      "source_file": "swarm/nexus/nexus_grpc.pb.go",
+      "source_location": "L241",
+      "weight": 1.0,
+      "source": "nexus_nexus_grpc_pb_nexuscore_healthcheck_handler",
+      "target": "nexus_unimplementednexuscoreserver_healthcheck",
+      "confidence_score": 1.0
+    },
+    {
+      "relation": "calls",
+      "context": "call",
+      "confidence": "EXTRACTED",
+      "source_file": "swarm/nexus/nexus_grpc.pb.go",
+      "source_location": "L158",
+      "weight": 1.0,
+      "source": "nexus_nexus_grpc_pb_registernexuscoreserver",
+      "target": "nexus_unimplementednexusswarmserver_testembeddedbyvalue",
+      "confidence_score": 1.0
+    },
+    {
+      "relation": "method",
+      "confidence": "EXTRACTED",
+      "source_file": "swarm/nexus/nexus_grpc.pb.go",
+      "source_location": "L310",
+      "weight": 1.0,
+      "source": "nexus_nexusswarmclient",
+      "target": "nexus_nexusswarmclient_runphase",
+      "confidence_score": 1.0
+    },
+    {
+      "relation": "method",
+      "confidence": "EXTRACTED",
+      "source_file": "swarm/nexus/nexus_grpc.pb.go",
+      "source_location": "L320",
+      "weight": 1.0,
+      "source": "nexus_nexusswarmclient",
+      "target": "nexus_nexusswarmclient_emitmetrics",
+      "confidence_score": 1.0
+    },
+    {
+      "relation": "method",
+      "confidence": "EXTRACTED",
+      "source_file": "swarm/nexus/nexus_grpc.pb.go",
+      "source_location": "L353",
+      "weight": 1.0,
+      "source": "nexus_unimplementednexusswarmserver",
+      "target": "nexus_unimplementednexusswarmserver_runphase",
+      "confidence_score": 1.0
+    },
+    {
+      "relation": "method",
+      "confidence": "EXTRACTED",
+      "source_file": "swarm/nexus/nexus_grpc.pb.go",
+      "source_location": "L356",
+      "weight": 1.0,
+      "source": "nexus_unimplementednexusswarmserver",
+      "target": "nexus_unimplementednexusswarmserver_emitmetrics",
+      "confidence_score": 1.0
+    },
+    {
+      "relation": "method",
+      "confidence": "EXTRACTED",
+      "source_file": "swarm/nexus/nexus_grpc.pb.go",
+      "source_location": "L359",
+      "weight": 1.0,
+      "source": "nexus_unimplementednexusswarmserver",
+      "target": "nexus_unimplementednexusswarmserver_mustembedunimplementednexusswarmserver",
+      "confidence_score": 1.0
+    },
+    {
+      "relation": "method",
+      "confidence": "EXTRACTED",
+      "source_file": "swarm/nexus/nexus_grpc.pb.go",
+      "source_location": "L360",
+      "weight": 1.0,
+      "source": "nexus_unimplementednexusswarmserver",
+      "target": "nexus_unimplementednexusswarmserver_testembeddedbyvalue",
+      "confidence_score": 1.0
+    },
+    {
+      "relation": "calls",
+      "context": "call",
+      "confidence": "EXTRACTED",
+      "source_file": "swarm/nexus/nexus_grpc.pb.go",
+      "source_location": "L386",
+      "weight": 1.0,
+      "source": "nexus_nexus_grpc_pb_nexusswarm_runphase_handler",
+      "target": "nexus_unimplementednexusswarmserver_runphase",
+      "confidence_score": 1.0
+    },
+    {
+      "relation": "calls",
+      "context": "call",
+      "confidence": "EXTRACTED",
+      "source_file": "swarm/nexus/nexus_grpc.pb.go",
+      "source_location": "L399",
+      "weight": 1.0,
+      "source": "nexus_nexus_grpc_pb_nexusswarm_emitmetrics_handler",
+      "target": "nexus_unimplementednexusswarmserver_emitmetrics",
+      "confidence_score": 1.0
+    },
+    {
+      "relation": "calls",
+      "context": "call",
+      "confidence": "EXTRACTED",
+      "source_file": "swarm/nexus/nexus_grpc.pb.go",
+      "source_location": "L375",
+      "weight": 1.0,
+      "source": "nexus_nexus_grpc_pb_registernexusswarmserver",
+      "target": "nexus_unimplementednexusswarmserver_testembeddedbyvalue",
+      "confidence_score": 1.0
+    },
+    {
+      "relation": "contains",
+      "confidence": "EXTRACTED",
+      "source_file": "core/build.rs",
+      "source_location": "L1",
+      "weight": 1.0,
+      "source": "core_build_rs",
+      "target": "core_build_main",
+      "confidence_score": 1.0
+    },
+    {
+      "relation": "contains",
+      "confidence": "EXTRACTED",
+      "source_file": "core/src/main.rs",
+      "source_location": "L33",
+      "weight": 1.0,
+      "source": "core_src_main_rs",
+      "target": "src_main_mycore",
+      "confidence_score": 1.0
+    },
+    {
+      "relation": "contains",
+      "confidence": "EXTRACTED",
+      "source_file": "core/src/main.rs",
+      "source_location": "L148",
+      "weight": 1.0,
+      "source": "core_src_main_rs",
+      "target": "src_main_main",
+      "confidence_score": 1.0
+    },
+    {
+      "relation": "contains",
+      "confidence": "EXTRACTED",
+      "source_file": "core/src/main.rs",
+      "source_location": "L179",
+      "weight": 1.0,
+      "source": "core_src_main_rs",
+      "target": "src_main_test_core_alive",
+      "confidence_score": 1.0
+    },
+    {
+      "relation": "method",
+      "confidence": "EXTRACTED",
+      "source_file": "core/src/main.rs",
+      "source_location": "L40",
+      "weight": 1.0,
+      "source": "src_main_mycore",
+      "target": "src_main_mycore_new",
+      "confidence_score": 1.0
+    },
+    {
+      "relation": "method",
+      "confidence": "EXTRACTED",
+      "source_file": "core/src/main.rs",
+      "source_location": "L51",
+      "weight": 1.0,
+      "source": "src_main_mycore",
+      "target": "src_main_mycore_call_sentinel",
+      "confidence_score": 1.0
+    },
+    {
+      "relation": "method",
+      "confidence": "EXTRACTED",
+      "source_file": "core/src/main.rs",
+      "source_location": "L84",
+      "weight": 1.0,
+      "source": "src_main_mycore",
+      "target": "src_main_mycore_lease_worktree",
+      "confidence_score": 1.0
+    },
+    {
+      "relation": "method",
+      "confidence": "EXTRACTED",
+      "source_file": "core/src/main.rs",
+      "source_location": "L104",
+      "weight": 1.0,
+      "source": "src_main_mycore",
+      "target": "src_main_mycore_harvest_worktree",
+      "confidence_score": 1.0
+    },
+    {
+      "relation": "method",
+      "confidence": "EXTRACTED",
+      "source_file": "core/src/main.rs",
+      "source_location": "L108",
+      "weight": 1.0,
+      "source": "src_main_mycore",
+      "target": "src_main_mycore_cancel_lease",
+      "confidence_score": 1.0
+    },
+    {
+      "relation": "method",
+      "confidence": "EXTRACTED",
+      "source_file": "core/src/main.rs",
+      "source_location": "L122",
+      "weight": 1.0,
+      "source": "src_main_mycore",
+      "target": "src_main_mycore_evaluate_policy",
+      "confidence_score": 1.0
+    },
+    {
+      "relation": "method",
+      "confidence": "EXTRACTED",
+      "source_file": "core/src/main.rs",
+      "source_location": "L141",
+      "weight": 1.0,
+      "source": "src_main_mycore",
+      "target": "src_main_mycore_health_check",
+      "confidence_score": 1.0
+    },
+    {
+      "relation": "calls",
+      "context": "call",
+      "confidence": "EXTRACTED",
+      "source_file": "core/src/main.rs",
+      "source_location": "L89",
+      "weight": 1.0,
+      "source": "src_main_mycore_lease_worktree",
+      "target": "src_main_mycore_new",
+      "confidence_score": 1.0
+    },
+    {
+      "relation": "calls",
+      "context": "call",
+      "confidence": "EXTRACTED",
+      "source_file": "core/src/main.rs",
+      "source_location": "L105",
+      "weight": 1.0,
+      "source": "src_main_mycore_harvest_worktree",
+      "target": "src_main_mycore_new",
+      "confidence_score": 1.0
+    },
+    {
+      "relation": "calls",
+      "context": "call",
+      "confidence": "EXTRACTED",
+      "source_file": "core/src/main.rs",
+      "source_location": "L114",
+      "weight": 1.0,
+      "source": "src_main_mycore_cancel_lease",
+      "target": "src_main_mycore_new",
+      "confidence_score": 1.0
+    },
+    {
+      "relation": "calls",
+      "context": "call",
+      "confidence": "EXTRACTED",
+      "source_file": "core/src/main.rs",
+      "source_location": "L138",
+      "weight": 1.0,
+      "source": "src_main_mycore_evaluate_policy",
+      "target": "src_main_mycore_new",
+      "confidence_score": 1.0
+    },
+    {
+      "relation": "calls",
+      "context": "call",
+      "confidence": "EXTRACTED",
+      "source_file": "core/src/main.rs",
+      "source_location": "L143",
+      "weight": 1.0,
+      "source": "src_main_mycore_health_check",
+      "target": "src_main_mycore_new",
+      "confidence_score": 1.0
+    },
+    {
+      "relation": "calls",
+      "context": "call",
+      "confidence": "EXTRACTED",
+      "source_file": "core/src/main.rs",
+      "source_location": "L154",
+      "weight": 1.0,
+      "source": "src_main_main",
+      "target": "src_main_mycore_new",
+      "confidence_score": 1.0
+    },
+    {
+      "relation": "calls",
+      "context": "call",
+      "confidence": "EXTRACTED",
+      "source_file": "core/src/main.rs",
+      "source_location": "L125",
+      "weight": 1.0,
+      "source": "src_main_mycore_evaluate_policy",
+      "target": "src_main_mycore_call_sentinel",
+      "confidence_score": 1.0
+    },
+    {
+      "relation": "contains",
+      "confidence": "EXTRACTED",
+      "source_file": "core/README.md",
+      "source_location": "L1",
+      "weight": 1.0,
+      "source": "core_readme_md",
+      "target": "core_readme_nexus_rust_core_v2_8_neural_policy_gate",
+      "confidence_score": 1.0
+    },
+    {
+      "relation": "contains",
+      "confidence": "EXTRACTED",
+      "source_file": "core/README.md",
+      "source_location": "L6",
+      "weight": 1.0,
+      "source": "core_readme_nexus_rust_core_v2_8_neural_policy_gate",
+      "target": "core_readme_quickstart",
+      "confidence_score": 1.0
+    },
+    {
+      "relation": "contains",
+      "confidence": "EXTRACTED",
+      "source_file": "core/README.md",
+      "source_location": "L11",
+      "weight": 1.0,
+      "source": "core_readme_nexus_rust_core_v2_8_neural_policy_gate",
+      "target": "core_readme_features",
+      "confidence_score": 1.0
+    },
+    {
+      "relation": "contains",
+      "confidence": "EXTRACTED",
+      "source_file": "core/README.md",
+      "source_location": "L17",
+      "weight": 1.0,
+      "source": "core_readme_nexus_rust_core_v2_8_neural_policy_gate",
+      "target": "core_readme_api",
+      "confidence_score": 1.0
+    },
+    {
+      "relation": "contains",
+      "confidence": "EXTRACTED",
+      "source_file": "core/README.md",
+      "source_location": "L7",
+      "weight": 1.0,
+      "source": "core_readme_quickstart",
+      "target": "core_readme_codeblock_1",
+      "confidence_score": 1.0
+    },
+    {
+      "relation": "contains",
+      "confidence": "EXTRACTED",
+      "source_file": "core/README.md",
+      "source_location": "L18",
+      "weight": 1.0,
+      "source": "core_readme_api",
+      "target": "core_readme_codeblock_2",
+      "confidence_score": 1.0
+    }
+  ],
+  "hyperedges": [],
+  "built_at_commit": "b07f0eb6a7d336142430a6c64ef23ae013255690"
+}

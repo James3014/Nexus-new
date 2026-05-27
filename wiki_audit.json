@@ -1,10 +1,32 @@
 {
-  "total": 88,
-  "passed": 82,
-  "failed": 6,
+  "total": 236,
+  "passed": 226,
+  "failed": 10,
   "waived": 0,
   "expired": 0,
   "details": [
+    {
+      "file": "06_Ecosystem/SDK Quickstart.md",
+      "status": "\u2705",
+      "errors": [],
+      "warnings": []
+    },
+    {
+      "file": "04_State/NEXUS_ALWAYS_ON_LOOP9_STATUS_2026-05-07.md",
+      "status": "\u2705",
+      "errors": [],
+      "warnings": [
+        "Soft Contract: Missing section: ## One-sentence summary",
+        "Soft Contract: Missing section: ## Role / responsibility",
+        "Soft Contract: Missing section: ## Upstream",
+        "Soft Contract: Missing section: ## Downstream",
+        "Soft Contract: Missing section: ## Related modules / files",
+        "Soft Contract: Missing section: ## Source notes",
+        "Soft Contract: Missing section: ## Open questions / conflicts",
+        "Soft Contract: Missing link back to System Overview",
+        "Soft Contract: Missing Source Provenance tag."
+      ]
+    },
     {
       "file": "04_State/State - Lifecycle.md",
       "status": "\u2705",
@@ -18,6 +40,22 @@
       "warnings": []
     },
     {
+      "file": "04_State/NEXUS_FINAL_ACCEPTANCE_MATRIX_2026-05-06.md",
+      "status": "\u2705",
+      "errors": [],
+      "warnings": [
+        "Soft Contract: Missing section: ## One-sentence summary",
+        "Soft Contract: Missing section: ## Role / responsibility",
+        "Soft Contract: Missing section: ## Upstream",
+        "Soft Contract: Missing section: ## Downstream",
+        "Soft Contract: Missing section: ## Related modules / files",
+        "Soft Contract: Missing section: ## Source notes",
+        "Soft Contract: Missing section: ## Open questions / conflicts",
+        "Soft Contract: Missing link back to System Overview",
+        "Soft Contract: Missing Source Provenance tag."
+      ]
+    },
+    {
       "file": "04_Research/RESEARCH_STATUS_REPORT.md",
       "status": "\u2705",
       "errors": [],
@@ -25,6 +63,54 @@
     },
     {
       "file": "04_Research/Research - DeepScientist Integration.md",
+      "status": "\u2705",
+      "errors": [],
+      "warnings": []
+    },
+    {
+      "file": "04_Research/MSA_Routing_Architecture.md",
+      "status": "\u2705",
+      "errors": [],
+      "warnings": []
+    },
+    {
+      "file": "04_Research/Meta-Evolution - The 9 Rings Convergence.md",
+      "status": "\u2705",
+      "errors": [],
+      "warnings": []
+    },
+    {
+      "file": "04_Research/Nexus Combat History Ledger.md",
+      "status": "\u2705",
+      "errors": [],
+      "warnings": []
+    },
+    {
+      "file": "04_Research/SOTA Milestone - Django Death Issue Fix.md",
+      "status": "\u2705",
+      "errors": [],
+      "warnings": []
+    },
+    {
+      "file": "04_Research/Meta-Evolution - The 18 Rings Convergence.md",
+      "status": "\u2705",
+      "errors": [],
+      "warnings": []
+    },
+    {
+      "file": "04_Research/ARCHITECTURAL_GAP_ANALYSIS_V24.md",
+      "status": "\u2705",
+      "errors": [],
+      "warnings": []
+    },
+    {
+      "file": "00_Product/User Stories.md",
+      "status": "\u2705",
+      "errors": [],
+      "warnings": []
+    },
+    {
+      "file": "00_Product/Investor Deck.md",
       "status": "\u2705",
       "errors": [],
       "warnings": []
@@ -42,7 +128,25 @@
       "warnings": []
     },
     {
+      "file": "05_Protocols/CLI_Full_Params.md",
+      "status": "\u2705",
+      "errors": [],
+      "warnings": []
+    },
+    {
       "file": "05_Protocols/Protocol - Evidence Chain.md",
+      "status": "\u2705",
+      "errors": [],
+      "warnings": []
+    },
+    {
+      "file": "05_Protocols/Protocol - Algebraic Reasoning.md",
+      "status": "\u2705",
+      "errors": [],
+      "warnings": []
+    },
+    {
+      "file": "05_Protocols/Protocol - Context Hygiene.md",
       "status": "\u2705",
       "errors": [],
       "warnings": []
@@ -60,7 +164,92 @@
       "warnings": []
     },
     {
+      "file": "05_Protocols/Protocol - Engineering Discipline.md",
+      "status": "\u2705",
+      "errors": [],
+      "warnings": []
+    },
+    {
+      "file": "05_Protocols/Protocol - Dual-Gate Response.md",
+      "status": "\u2705",
+      "errors": [],
+      "warnings": []
+    },
+    {
+      "file": "08_Diffs/Code_to_Wiki_Alignment_Matrix.md",
+      "status": "\u2705",
+      "errors": [],
+      "warnings": []
+    },
+    {
+      "file": "08_Diffs/Diff - v17.1 vs v22 vs v23.md",
+      "status": "\u2705",
+      "errors": [],
+      "warnings": []
+    },
+    {
+      "file": "05_Commercial/Go-to-Market.md",
+      "status": "\u2705",
+      "errors": [],
+      "warnings": []
+    },
+    {
       "file": "09_Roadmap/Phase 6 - Nexus Hardening.md",
+      "status": "\u2705",
+      "errors": [],
+      "warnings": []
+    },
+    {
+      "file": "09_Roadmap/NEXUS_WORKOS_CODEINTEL_ROADMAP_2026-04-28.md",
+      "status": "\u2705",
+      "errors": [],
+      "warnings": [
+        "Soft Contract: Missing section: ## One-sentence summary",
+        "Soft Contract: Missing section: ## Role / responsibility",
+        "Soft Contract: Missing section: ## Upstream",
+        "Soft Contract: Missing section: ## Downstream",
+        "Soft Contract: Missing section: ## Related modules / files",
+        "Soft Contract: Missing section: ## Source notes",
+        "Soft Contract: Missing section: ## Open questions / conflicts",
+        "Soft Contract: Missing link back to System Overview",
+        "Soft Contract: Missing Source Provenance tag."
+      ]
+    },
+    {
+      "file": "09_Roadmap/CAPABILITY_ROUTING_MIGRATION_PLAN_2026-04-29.md",
+      "status": "\u2705",
+      "errors": [],
+      "warnings": [
+        "Soft Contract: Missing section: ## One-sentence summary",
+        "Soft Contract: Missing section: ## Role / responsibility",
+        "Soft Contract: Missing section: ## Upstream",
+        "Soft Contract: Missing section: ## Downstream",
+        "Soft Contract: Missing section: ## Related modules / files",
+        "Soft Contract: Missing section: ## Source notes",
+        "Soft Contract: Missing section: ## Open questions / conflicts",
+        "Soft Contract: Missing link back to System Overview",
+        "Soft Contract: Missing Source Provenance tag."
+      ]
+    },
+    {
+      "file": "10_Analysis_Scans/refactoring_agent_survival_guide.md",
+      "status": "\u274c",
+      "errors": [
+        "Missing YAML Frontmatter",
+        "Missing section: ## One-sentence summary",
+        "Missing section: ## Role / responsibility",
+        "Missing section: ## Upstream",
+        "Missing section: ## Downstream",
+        "Missing section: ## Related modules / files",
+        "Missing section: ## Source notes",
+        "Missing section: ## Open questions / conflicts",
+        "Missing link back to System Overview",
+        "Missing Source Provenance tag."
+      ],
+      "warnings": []
+    },
+    {
+      "file": "01_Specs/Spec - Nexus L1-L7 Realization.md",
       "status": "\u2705",
       "errors": [],
       "warnings": []
@@ -78,10 +267,33 @@
       "warnings": []
     },
     {
+      "file": "06_Ops/Ops - Wisdom Layer v22 Architecture.md",
+      "status": "\u2705",
+      "errors": [],
+      "warnings": []
+    },
+    {
       "file": "06_Ops/Ops - CI Failure Playbook.md",
       "status": "\u2705",
       "errors": [],
       "warnings": []
+    },
+    {
+      "file": "06_Ops/2026-03-19_Phantom_Success_Incident_RCA_and_Prevention.md",
+      "status": "\u2705",
+      "errors": [],
+      "warnings": [
+        "Soft Contract: Missing YAML Frontmatter",
+        "Soft Contract: Missing section: ## One-sentence summary",
+        "Soft Contract: Missing section: ## Role / responsibility",
+        "Soft Contract: Missing section: ## Upstream",
+        "Soft Contract: Missing section: ## Downstream",
+        "Soft Contract: Missing section: ## Related modules / files",
+        "Soft Contract: Missing section: ## Source notes",
+        "Soft Contract: Missing section: ## Open questions / conflicts",
+        "Soft Contract: Missing link back to System Overview",
+        "Soft Contract: Missing Source Provenance tag."
+      ]
     },
     {
       "file": "06_Ops/Ops - Governance SLO Dashboard.md",
@@ -91,6 +303,12 @@
     },
     {
       "file": "06_Ops/Ops - Artifact Retention and Provenance.md",
+      "status": "\u2705",
+      "errors": [],
+      "warnings": []
+    },
+    {
+      "file": "06_Ops/Retry_Escalation_and_Handoff_Policy.md",
       "status": "\u2705",
       "errors": [],
       "warnings": []
@@ -109,11 +327,8 @@
     },
     {
       "file": "06_Ops/Ops - Closeout Hard Gate.md",
-      "status": "\u274c",
-      "errors": [
-        "Invalid Path: 'AGENT_PROTOCOL_v2.md' not found.",
-        "Invalid Path: 'AGENT_PROTOCOL_v2.md' not found."
-      ],
+      "status": "\u2705",
+      "errors": [],
       "warnings": []
     },
     {
@@ -135,11 +350,17 @@
       "warnings": []
     },
     {
+      "file": "06_Ops/NEXUS_V25_9_HARDENING_CRYSTAL.md",
+      "status": "\u2705",
+      "errors": [],
+      "warnings": [
+        "Soft Contract: Missing section: ## Open questions / conflicts"
+      ]
+    },
+    {
       "file": "06_Ops/Ops - Reference Boundary and Archive Policy.md",
-      "status": "\u274c",
-      "errors": [
-        "Invalid Path: 'nexus_wiki_vault-quarantine_isolation/Reference_bulk_archive' not found."
-      ],
+      "status": "\u2705",
+      "errors": [],
       "warnings": []
     },
     {
@@ -209,6 +430,18 @@
       "warnings": []
     },
     {
+      "file": "06_Ops/Ops - Performance Benchmarks.md",
+      "status": "\u2705",
+      "errors": [],
+      "warnings": []
+    },
+    {
+      "file": "06_Ops/Evidence_Bundle_Format.md",
+      "status": "\u2705",
+      "errors": [],
+      "warnings": []
+    },
+    {
       "file": "06_Ops/Ops - Weekly Governance Report.md",
       "status": "\u2705",
       "errors": [],
@@ -216,10 +449,8 @@
     },
     {
       "file": "90_Sources/Source - Operational Scripts Index.md",
-      "status": "\u274c",
-      "errors": [
-        "Invalid Path: 'scripts/engine/nexus_transaction.py' not found."
-      ],
+      "status": "\u2705",
+      "errors": [],
       "warnings": []
     },
     {
@@ -241,10 +472,9 @@
       "warnings": []
     },
     {
-      "file": "07_Compliance/Current_Compliance_Status.md",
+      "file": "07_Compliance/Zero-Trust_V2_Mac_Sandbox_Runtime_Protocol.md",
       "status": "\u274c",
       "errors": [
-        "Missing YAML Frontmatter",
         "Missing section: ## One-sentence summary",
         "Missing section: ## Role / responsibility",
         "Missing section: ## Upstream",
@@ -255,27 +485,34 @@
         "Missing link back to System Overview",
         "Missing Source Provenance tag."
       ],
+      "warnings": []
+    },
+    {
+      "file": "07_Compliance/Governance - Capability Gate and Tool Isolation.md",
+      "status": "\u2705",
+      "errors": [],
+      "warnings": []
+    },
+    {
+      "file": "07_Compliance/Current_Compliance_Status.md",
+      "status": "\u2705",
+      "errors": [],
       "warnings": []
     },
     {
       "file": "07_Compliance/Incident_Trace_Log.md",
-      "status": "\u274c",
-      "errors": [
-        "Missing YAML Frontmatter",
-        "Missing section: ## One-sentence summary",
-        "Missing section: ## Role / responsibility",
-        "Missing section: ## Upstream",
-        "Missing section: ## Downstream",
-        "Missing section: ## Related modules / files",
-        "Missing section: ## Source notes",
-        "Missing section: ## Open questions / conflicts",
-        "Missing link back to System Overview",
-        "Missing Source Provenance tag."
-      ],
+      "status": "\u2705",
+      "errors": [],
       "warnings": []
     },
     {
       "file": "07_Compliance/Compliance_Dashboard.md",
+      "status": "\u2705",
+      "errors": [],
+      "warnings": []
+    },
+    {
+      "file": "07_Compliance/Hallucination_Guard_Scoring_Spec.md",
       "status": "\u2705",
       "errors": [],
       "warnings": []
@@ -293,7 +530,110 @@
       "warnings": []
     },
     {
+      "file": "01_System/Nexus v24.0 Agent Handover & Truth Protocol.md",
+      "status": "\u2705",
+      "errors": [],
+      "warnings": []
+    },
+    {
+      "file": "01_System/Swarm_MultiNode.md",
+      "status": "\u2705",
+      "errors": [],
+      "warnings": []
+    },
+    {
+      "file": "01_System/Supreme_Master_Loop_Spec.md",
+      "status": "\u2705",
+      "errors": [],
+      "warnings": []
+    },
+    {
+      "file": "01_System/Errors_Enum.md",
+      "status": "\u2705",
+      "errors": [],
+      "warnings": []
+    },
+    {
+      "file": "01_System/Identity_Vault.md",
+      "status": "\u2705",
+      "errors": [],
+      "warnings": []
+    },
+    {
+      "file": "01_System/ADR-042_MSA_Physical_Hallucination_Interlock.md",
+      "status": "\u274c",
+      "errors": [
+        "Missing section: ## One-sentence summary",
+        "Missing section: ## Role / responsibility",
+        "Missing section: ## Upstream",
+        "Missing section: ## Downstream",
+        "Missing section: ## Related modules / files",
+        "Missing section: ## Source notes",
+        "Missing section: ## Open questions / conflicts",
+        "Missing link back to System Overview",
+        "Missing Source Provenance tag."
+      ],
+      "warnings": []
+    },
+    {
       "file": "01_System/MUSE_PROTO.md",
+      "status": "\u2705",
+      "errors": [],
+      "warnings": []
+    },
+    {
+      "file": "01_System/Exit_Code_Registry.md",
+      "status": "\u2705",
+      "errors": [],
+      "warnings": []
+    },
+    {
+      "file": "01_System/System Relationship and Dependency Graph.md",
+      "status": "\u2705",
+      "errors": [],
+      "warnings": []
+    },
+    {
+      "file": "01_System/2026-03-19_Nexus_Automated_Executor_Spec.md",
+      "status": "\u2705",
+      "errors": [],
+      "warnings": [
+        "Soft Contract: Missing YAML Frontmatter",
+        "Soft Contract: Missing section: ## One-sentence summary",
+        "Soft Contract: Missing section: ## Role / responsibility",
+        "Soft Contract: Missing section: ## Upstream",
+        "Soft Contract: Missing section: ## Downstream",
+        "Soft Contract: Missing section: ## Related modules / files",
+        "Soft Contract: Missing section: ## Source notes",
+        "Soft Contract: Missing section: ## Open questions / conflicts",
+        "Soft Contract: Missing link back to System Overview",
+        "Soft Contract: Missing Source Provenance tag."
+      ]
+    },
+    {
+      "file": "01_System/SYSTEM_ARCHITECTURE_BLUEPRINT.md",
+      "status": "\u2705",
+      "errors": [],
+      "warnings": [
+        "Soft Contract: Missing section: ## One-sentence summary",
+        "Soft Contract: Missing section: ## Role / responsibility",
+        "Soft Contract: Missing section: ## Upstream",
+        "Soft Contract: Missing section: ## Downstream",
+        "Soft Contract: Missing section: ## Related modules / files",
+        "Soft Contract: Missing section: ## Source notes",
+        "Soft Contract: Missing section: ## Open questions / conflicts",
+        "Soft Contract: Missing link back to System Overview",
+        "Soft Contract: Missing Source Provenance tag."
+      ]
+    },
+    {
+      "file": "01_System/System - Component Maturity Map.md",
+      "status": "\u2705",
+      "errors": [],
+      "warnings": []
+    },
+    {
+      "file": "01_System/Code_Ownership_Matrix.md",
       "status": "\u2705",
       "errors": [],
       "warnings": []
@@ -311,29 +651,61 @@
       "warnings": []
     },
     {
-      "file": "07_Diffs/Diff - v17.1 vs v22 vs v23.md",
+      "file": "01_System/16_CAPABILITY_SPEC_MATRIX.md",
       "status": "\u2705",
       "errors": [],
-      "warnings": []
+      "warnings": [
+        "Soft Contract: Missing section: ## One-sentence summary",
+        "Soft Contract: Missing section: ## Role / responsibility",
+        "Soft Contract: Missing section: ## Upstream",
+        "Soft Contract: Missing section: ## Downstream",
+        "Soft Contract: Missing section: ## Related modules / files",
+        "Soft Contract: Missing section: ## Source notes",
+        "Soft Contract: Missing section: ## Open questions / conflicts",
+        "Soft Contract: Missing link back to System Overview",
+        "Soft Contract: Missing Source Provenance tag."
+      ]
     },
     {
       "file": "02_Modules/Module - State Contracts.md",
       "status": "\u2705",
       "errors": [],
-      "warnings": []
+      "warnings": [
+        "Soft Contract: Missing link back to System Overview"
+      ]
     },
     {
       "file": "02_Modules/Module - Implementation Responsibility Matrix.md",
-      "status": "\u274c",
-      "errors": [
-        "Invalid Path: 'manifest.json' not found."
-      ],
+      "status": "\u2705",
+      "errors": [],
+      "warnings": []
+    },
+    {
+      "file": "02_Modules/Fleet Command System.md",
+      "status": "\u2705",
+      "errors": [],
       "warnings": []
     },
     {
       "file": "02_Modules/Module - Nexus Desk Interface.md",
       "status": "\u2705",
       "errors": [],
+      "warnings": []
+    },
+    {
+      "file": "02_Modules/Research_Flow_Leaf_Architecture.md",
+      "status": "\u274c",
+      "errors": [
+        "Missing section: ## One-sentence summary",
+        "Missing section: ## Role / responsibility",
+        "Missing section: ## Upstream",
+        "Missing section: ## Downstream",
+        "Missing section: ## Related modules / files",
+        "Missing section: ## Source notes",
+        "Missing section: ## Open questions / conflicts",
+        "Missing link back to System Overview",
+        "Missing Source Provenance tag."
+      ],
       "warnings": []
     },
     {
@@ -344,6 +716,12 @@
     },
     {
       "file": "02_Modules/Module - Runtime Services.md",
+      "status": "\u2705",
+      "errors": [],
+      "warnings": []
+    },
+    {
+      "file": "02_Modules/Module - Engine Service Registry.md",
       "status": "\u2705",
       "errors": [],
       "warnings": []
@@ -421,6 +799,18 @@
       "warnings": []
     },
     {
+      "file": "02_Modules/Module - Skill Memory Closed Loop.md",
+      "status": "\u2705",
+      "errors": [],
+      "warnings": []
+    },
+    {
+      "file": "02_Modules/Router_Decision_Flow.md",
+      "status": "\u2705",
+      "errors": [],
+      "warnings": []
+    },
+    {
       "file": "02_Modules/Module - State Lifecycle and Snapshotting.md",
       "status": "\u2705",
       "errors": [],
@@ -445,7 +835,49 @@
       "warnings": []
     },
     {
+      "file": "LLM_Wiki/INGEST_SCOPE_V1.md",
+      "status": "\u2705",
+      "errors": [],
+      "warnings": []
+    },
+    {
+      "file": "LLM_Wiki/EXCLUDE_RULES.md",
+      "status": "\u2705",
+      "errors": [],
+      "warnings": []
+    },
+    {
       "file": "03_Flows/Flow - PXDRAC Runtime.md",
+      "status": "\u2705",
+      "errors": [],
+      "warnings": []
+    },
+    {
+      "file": "03_Flows/Flow - AI-DD QA Automation.md",
+      "status": "\u2705",
+      "errors": [],
+      "warnings": [
+        "Soft Contract: Missing section: ## Open questions / conflicts"
+      ]
+    },
+    {
+      "file": "03_Flows/HEEP_Blocker_Queue_Swarm_Feedback_Loop.md",
+      "status": "\u274c",
+      "errors": [
+        "Missing section: ## One-sentence summary",
+        "Missing section: ## Role / responsibility",
+        "Missing section: ## Upstream",
+        "Missing section: ## Downstream",
+        "Missing section: ## Related modules / files",
+        "Missing section: ## Source notes",
+        "Missing section: ## Open questions / conflicts",
+        "Missing link back to System Overview",
+        "Missing Source Provenance tag."
+      ],
+      "warnings": []
+    },
+    {
+      "file": "03_Flows/Flow - Recursive Auto-Repair.md",
       "status": "\u2705",
       "errors": [],
       "warnings": []
@@ -487,10 +919,32 @@
       "warnings": []
     },
     {
-      "file": "00_Home/Vault Topology.md",
+      "file": "00_Home/README_Agent.md",
       "status": "\u2705",
       "errors": [],
       "warnings": []
+    },
+    {
+      "file": "00_Home/README_Investor.md",
+      "status": "\u2705",
+      "errors": [],
+      "warnings": []
+    },
+    {
+      "file": "00_Home/Vault Topology.md",
+      "status": "\u2705",
+      "errors": [],
+      "warnings": [
+        "Soft Contract: Missing section: ## One-sentence summary",
+        "Soft Contract: Missing section: ## Role / responsibility",
+        "Soft Contract: Missing section: ## Upstream",
+        "Soft Contract: Missing section: ## Downstream",
+        "Soft Contract: Missing section: ## Related modules / files",
+        "Soft Contract: Missing section: ## Source notes",
+        "Soft Contract: Missing section: ## Open questions / conflicts",
+        "Soft Contract: Missing link back to System Overview",
+        "Soft Contract: Missing Source Provenance tag."
+      ]
     },
     {
       "file": "00_Home/CLI Surface Quickstart.md",
@@ -499,7 +953,25 @@
       "warnings": []
     },
     {
+      "file": "00_Home/Wiki Index and Coverage Map.md",
+      "status": "\u2705",
+      "errors": [],
+      "warnings": []
+    },
+    {
+      "file": "00_Home/README_Product.md",
+      "status": "\u2705",
+      "errors": [],
+      "warnings": []
+    },
+    {
       "file": "00_Home/Agent Boot Sequence.md",
+      "status": "\u2705",
+      "errors": [],
+      "warnings": []
+    },
+    {
+      "file": "00_Home/README_Contributor.md",
       "status": "\u2705",
       "errors": [],
       "warnings": []
@@ -535,10 +1007,1336 @@
       "warnings": []
     },
     {
+      "file": "Reference/Role_Guides/Expert_Guide.md",
+      "status": "\u2705",
+      "errors": [],
+      "warnings": []
+    },
+    {
       "file": "Reference/docs/00_PROJECT_INDEX.md",
       "status": "\u2705",
       "errors": [],
       "warnings": []
+    },
+    {
+      "file": "Reference/en/SDK_Quickstart.md",
+      "status": "\u2705",
+      "errors": [],
+      "warnings": []
+    },
+    {
+      "file": "Reference/en/README_Product.md",
+      "status": "\u2705",
+      "errors": [],
+      "warnings": []
+    },
+    {
+      "file": "01_System/ADR/ADR-2026-05-07-teacher-student-sweep-plan.md",
+      "status": "\u2705",
+      "errors": [],
+      "warnings": [
+        "Soft Contract: Missing section: ## One-sentence summary",
+        "Soft Contract: Missing section: ## Role / responsibility",
+        "Soft Contract: Missing section: ## Upstream",
+        "Soft Contract: Missing section: ## Downstream",
+        "Soft Contract: Missing section: ## Related modules / files",
+        "Soft Contract: Missing section: ## Source notes",
+        "Soft Contract: Missing section: ## Open questions / conflicts",
+        "Soft Contract: Missing link back to System Overview",
+        "Soft Contract: Missing Source Provenance tag."
+      ]
+    },
+    {
+      "file": "01_System/ADR/ADR-2026-05-06-audit-cli-and-event-strict-lessons.md",
+      "status": "\u2705",
+      "errors": [],
+      "warnings": [
+        "Soft Contract: Missing section: ## One-sentence summary",
+        "Soft Contract: Missing section: ## Role / responsibility",
+        "Soft Contract: Missing section: ## Upstream",
+        "Soft Contract: Missing section: ## Downstream",
+        "Soft Contract: Missing section: ## Related modules / files",
+        "Soft Contract: Missing section: ## Source notes",
+        "Soft Contract: Missing section: ## Open questions / conflicts",
+        "Soft Contract: Missing link back to System Overview",
+        "Soft Contract: Missing Source Provenance tag."
+      ]
+    },
+    {
+      "file": "01_System/ADR/ADR-2026-05-07-benchmark-contract-route-pollution-lesson.md",
+      "status": "\u2705",
+      "errors": [],
+      "warnings": [
+        "Soft Contract: Missing section: ## One-sentence summary",
+        "Soft Contract: Missing section: ## Role / responsibility",
+        "Soft Contract: Missing section: ## Upstream",
+        "Soft Contract: Missing section: ## Downstream",
+        "Soft Contract: Missing section: ## Related modules / files",
+        "Soft Contract: Missing section: ## Source notes",
+        "Soft Contract: Missing section: ## Open questions / conflicts",
+        "Soft Contract: Missing link back to System Overview",
+        "Soft Contract: Missing Source Provenance tag."
+      ]
+    },
+    {
+      "file": "01_System/ADR/ADR-2026-05-06-P81-P84-s2t-contract-lessons.md",
+      "status": "\u2705",
+      "errors": [],
+      "warnings": [
+        "Soft Contract: Missing section: ## One-sentence summary",
+        "Soft Contract: Missing section: ## Role / responsibility",
+        "Soft Contract: Missing section: ## Upstream",
+        "Soft Contract: Missing section: ## Downstream",
+        "Soft Contract: Missing section: ## Related modules / files",
+        "Soft Contract: Missing section: ## Source notes",
+        "Soft Contract: Missing section: ## Open questions / conflicts",
+        "Soft Contract: Missing link back to System Overview",
+        "Soft Contract: Missing Source Provenance tag."
+      ]
+    },
+    {
+      "file": "01_System/ADR/ADR-2026-05-07-hidden-route-cost-truth-lesson.md",
+      "status": "\u2705",
+      "errors": [],
+      "warnings": [
+        "Soft Contract: Missing section: ## One-sentence summary",
+        "Soft Contract: Missing section: ## Role / responsibility",
+        "Soft Contract: Missing section: ## Upstream",
+        "Soft Contract: Missing section: ## Downstream",
+        "Soft Contract: Missing section: ## Related modules / files",
+        "Soft Contract: Missing section: ## Source notes",
+        "Soft Contract: Missing section: ## Open questions / conflicts",
+        "Soft Contract: Missing link back to System Overview",
+        "Soft Contract: Missing Source Provenance tag."
+      ]
+    },
+    {
+      "file": "01_System/ADR/ADR-2026-05-06-P131-P185-tactical-route-quality-lessons.md",
+      "status": "\u2705",
+      "errors": [],
+      "warnings": [
+        "Soft Contract: Missing section: ## One-sentence summary",
+        "Soft Contract: Missing section: ## Role / responsibility",
+        "Soft Contract: Missing section: ## Upstream",
+        "Soft Contract: Missing section: ## Downstream",
+        "Soft Contract: Missing section: ## Related modules / files",
+        "Soft Contract: Missing section: ## Source notes",
+        "Soft Contract: Missing section: ## Open questions / conflicts",
+        "Soft Contract: Missing link back to System Overview",
+        "Soft Contract: Missing Source Provenance tag."
+      ]
+    },
+    {
+      "file": "01_System/ADR/ADR-2026-05-06-preflash-strict-event-contract-lessons.md",
+      "status": "\u2705",
+      "errors": [],
+      "warnings": [
+        "Soft Contract: Missing section: ## One-sentence summary",
+        "Soft Contract: Missing section: ## Role / responsibility",
+        "Soft Contract: Missing section: ## Upstream",
+        "Soft Contract: Missing section: ## Downstream",
+        "Soft Contract: Missing section: ## Related modules / files",
+        "Soft Contract: Missing section: ## Source notes",
+        "Soft Contract: Missing section: ## Open questions / conflicts",
+        "Soft Contract: Missing link back to System Overview",
+        "Soft Contract: Missing Source Provenance tag."
+      ]
+    },
+    {
+      "file": "01_System/ADR/ADR-2026-05-07-gemini-loop0-same-model-contract-lesson.md",
+      "status": "\u2705",
+      "errors": [],
+      "warnings": [
+        "Soft Contract: Missing section: ## One-sentence summary",
+        "Soft Contract: Missing section: ## Role / responsibility",
+        "Soft Contract: Missing section: ## Upstream",
+        "Soft Contract: Missing section: ## Downstream",
+        "Soft Contract: Missing section: ## Related modules / files",
+        "Soft Contract: Missing section: ## Source notes",
+        "Soft Contract: Missing section: ## Open questions / conflicts",
+        "Soft Contract: Missing link back to System Overview",
+        "Soft Contract: Missing Source Provenance tag."
+      ]
+    },
+    {
+      "file": "01_System/ADR/ADR-2026-05-06-healing-remote-ingress-lessons.md",
+      "status": "\u2705",
+      "errors": [],
+      "warnings": [
+        "Soft Contract: Missing section: ## One-sentence summary",
+        "Soft Contract: Missing section: ## Role / responsibility",
+        "Soft Contract: Missing section: ## Upstream",
+        "Soft Contract: Missing section: ## Downstream",
+        "Soft Contract: Missing section: ## Related modules / files",
+        "Soft Contract: Missing section: ## Source notes",
+        "Soft Contract: Missing section: ## Open questions / conflicts",
+        "Soft Contract: Missing link back to System Overview",
+        "Soft Contract: Missing Source Provenance tag."
+      ]
+    },
+    {
+      "file": "01_System/ADR/ADR-2026-05-06-P61-P75-flash-token-lessons.md",
+      "status": "\u2705",
+      "errors": [],
+      "warnings": [
+        "Soft Contract: Missing section: ## One-sentence summary",
+        "Soft Contract: Missing section: ## Role / responsibility",
+        "Soft Contract: Missing section: ## Upstream",
+        "Soft Contract: Missing section: ## Downstream",
+        "Soft Contract: Missing section: ## Related modules / files",
+        "Soft Contract: Missing section: ## Source notes",
+        "Soft Contract: Missing section: ## Open questions / conflicts",
+        "Soft Contract: Missing link back to System Overview",
+        "Soft Contract: Missing Source Provenance tag."
+      ]
+    },
+    {
+      "file": "01_System/ADR/ADR-2026-05-14-nexus-wearing-gate-stabilization.md",
+      "status": "\u2705",
+      "errors": [],
+      "warnings": [
+        "Soft Contract: Missing section: ## One-sentence summary",
+        "Soft Contract: Missing section: ## Role / responsibility",
+        "Soft Contract: Missing section: ## Upstream",
+        "Soft Contract: Missing section: ## Downstream",
+        "Soft Contract: Missing section: ## Related modules / files",
+        "Soft Contract: Missing section: ## Source notes",
+        "Soft Contract: Missing section: ## Open questions / conflicts",
+        "Soft Contract: Missing link back to System Overview",
+        "Soft Contract: Missing Source Provenance tag."
+      ]
+    },
+    {
+      "file": "01_System/ADR/ADR-2026-05-06-P105-P116-route-tactical-lessons.md",
+      "status": "\u2705",
+      "errors": [],
+      "warnings": [
+        "Soft Contract: Missing section: ## One-sentence summary",
+        "Soft Contract: Missing section: ## Role / responsibility",
+        "Soft Contract: Missing section: ## Upstream",
+        "Soft Contract: Missing section: ## Downstream",
+        "Soft Contract: Missing section: ## Related modules / files",
+        "Soft Contract: Missing section: ## Source notes",
+        "Soft Contract: Missing section: ## Open questions / conflicts",
+        "Soft Contract: Missing link back to System Overview",
+        "Soft Contract: Missing Source Provenance tag."
+      ]
+    },
+    {
+      "file": "01_System/ADR/ADR-2026-05-07-always-on-force-flow-contract-lesson.md",
+      "status": "\u2705",
+      "errors": [],
+      "warnings": [
+        "Soft Contract: Missing section: ## One-sentence summary",
+        "Soft Contract: Missing section: ## Role / responsibility",
+        "Soft Contract: Missing section: ## Upstream",
+        "Soft Contract: Missing section: ## Downstream",
+        "Soft Contract: Missing section: ## Related modules / files",
+        "Soft Contract: Missing section: ## Source notes",
+        "Soft Contract: Missing section: ## Open questions / conflicts",
+        "Soft Contract: Missing link back to System Overview",
+        "Soft Contract: Missing Source Provenance tag."
+      ]
+    },
+    {
+      "file": "01_System/ADR/ADR-2026-05-06-flash-preflight-sandbox-cache-lessons.md",
+      "status": "\u2705",
+      "errors": [],
+      "warnings": [
+        "Soft Contract: Missing section: ## One-sentence summary",
+        "Soft Contract: Missing section: ## Role / responsibility",
+        "Soft Contract: Missing section: ## Upstream",
+        "Soft Contract: Missing section: ## Downstream",
+        "Soft Contract: Missing section: ## Related modules / files",
+        "Soft Contract: Missing section: ## Source notes",
+        "Soft Contract: Missing section: ## Open questions / conflicts",
+        "Soft Contract: Missing link back to System Overview",
+        "Soft Contract: Missing Source Provenance tag."
+      ]
+    },
+    {
+      "file": "01_System/ADR/ADR-2026-05-06-v26-blackboard-handshake-lessons.md",
+      "status": "\u2705",
+      "errors": [],
+      "warnings": [
+        "Soft Contract: Missing section: ## One-sentence summary",
+        "Soft Contract: Missing section: ## Role / responsibility",
+        "Soft Contract: Missing section: ## Upstream",
+        "Soft Contract: Missing section: ## Downstream",
+        "Soft Contract: Missing section: ## Related modules / files",
+        "Soft Contract: Missing section: ## Source notes",
+        "Soft Contract: Missing section: ## Open questions / conflicts",
+        "Soft Contract: Missing link back to System Overview",
+        "Soft Contract: Missing Source Provenance tag."
+      ]
+    },
+    {
+      "file": "01_System/ADR/ADR-2026-05-07-route-ab-infra-invalid-lesson.md",
+      "status": "\u2705",
+      "errors": [],
+      "warnings": [
+        "Soft Contract: Missing section: ## One-sentence summary",
+        "Soft Contract: Missing section: ## Role / responsibility",
+        "Soft Contract: Missing section: ## Upstream",
+        "Soft Contract: Missing section: ## Downstream",
+        "Soft Contract: Missing section: ## Related modules / files",
+        "Soft Contract: Missing section: ## Source notes",
+        "Soft Contract: Missing section: ## Open questions / conflicts",
+        "Soft Contract: Missing link back to System Overview",
+        "Soft Contract: Missing Source Provenance tag."
+      ]
+    },
+    {
+      "file": "01_System/ADR/ADR-2026-05-08-lite-route-preflight-lessons.md",
+      "status": "\u2705",
+      "errors": [],
+      "warnings": [
+        "Soft Contract: Missing section: ## One-sentence summary",
+        "Soft Contract: Missing section: ## Role / responsibility",
+        "Soft Contract: Missing section: ## Upstream",
+        "Soft Contract: Missing section: ## Downstream",
+        "Soft Contract: Missing section: ## Related modules / files",
+        "Soft Contract: Missing section: ## Source notes",
+        "Soft Contract: Missing section: ## Open questions / conflicts",
+        "Soft Contract: Missing link back to System Overview",
+        "Soft Contract: Missing Source Provenance tag."
+      ]
+    },
+    {
+      "file": "01_System/ADR/ADR-2026-05-06-P17-P25-openseeker-lessons.md",
+      "status": "\u2705",
+      "errors": [],
+      "warnings": [
+        "Soft Contract: Missing section: ## One-sentence summary",
+        "Soft Contract: Missing section: ## Role / responsibility",
+        "Soft Contract: Missing section: ## Upstream",
+        "Soft Contract: Missing section: ## Downstream",
+        "Soft Contract: Missing section: ## Related modules / files",
+        "Soft Contract: Missing section: ## Source notes",
+        "Soft Contract: Missing section: ## Open questions / conflicts",
+        "Soft Contract: Missing link back to System Overview",
+        "Soft Contract: Missing Source Provenance tag."
+      ]
+    },
+    {
+      "file": "01_System/ADR/ADR-2026-05-06-runtime-candidate-replan-lessons.md",
+      "status": "\u2705",
+      "errors": [],
+      "warnings": [
+        "Soft Contract: Missing section: ## One-sentence summary",
+        "Soft Contract: Missing section: ## Role / responsibility",
+        "Soft Contract: Missing section: ## Upstream",
+        "Soft Contract: Missing section: ## Downstream",
+        "Soft Contract: Missing section: ## Related modules / files",
+        "Soft Contract: Missing section: ## Source notes",
+        "Soft Contract: Missing section: ## Open questions / conflicts",
+        "Soft Contract: Missing link back to System Overview",
+        "Soft Contract: Missing Source Provenance tag."
+      ]
+    },
+    {
+      "file": "01_System/ADR/ADR-2026-05-06-core-runtime-closure-lessons.md",
+      "status": "\u2705",
+      "errors": [],
+      "warnings": [
+        "Soft Contract: Missing section: ## One-sentence summary",
+        "Soft Contract: Missing section: ## Role / responsibility",
+        "Soft Contract: Missing section: ## Upstream",
+        "Soft Contract: Missing section: ## Downstream",
+        "Soft Contract: Missing section: ## Related modules / files",
+        "Soft Contract: Missing section: ## Source notes",
+        "Soft Contract: Missing section: ## Open questions / conflicts",
+        "Soft Contract: Missing link back to System Overview",
+        "Soft Contract: Missing Source Provenance tag."
+      ]
+    },
+    {
+      "file": "01_System/ADR/ADR-2026-05-06-event-contract-gate-lessons.md",
+      "status": "\u2705",
+      "errors": [],
+      "warnings": [
+        "Soft Contract: Missing section: ## One-sentence summary",
+        "Soft Contract: Missing section: ## Role / responsibility",
+        "Soft Contract: Missing section: ## Upstream",
+        "Soft Contract: Missing section: ## Downstream",
+        "Soft Contract: Missing section: ## Related modules / files",
+        "Soft Contract: Missing section: ## Source notes",
+        "Soft Contract: Missing section: ## Open questions / conflicts",
+        "Soft Contract: Missing link back to System Overview",
+        "Soft Contract: Missing Source Provenance tag."
+      ]
+    },
+    {
+      "file": "01_System/ADR/ADR-2026-05-07-always-on-auto-lane-findings.md",
+      "status": "\u2705",
+      "errors": [],
+      "warnings": [
+        "Soft Contract: Missing section: ## One-sentence summary",
+        "Soft Contract: Missing section: ## Role / responsibility",
+        "Soft Contract: Missing section: ## Upstream",
+        "Soft Contract: Missing section: ## Downstream",
+        "Soft Contract: Missing section: ## Related modules / files",
+        "Soft Contract: Missing section: ## Source notes",
+        "Soft Contract: Missing section: ## Open questions / conflicts",
+        "Soft Contract: Missing link back to System Overview",
+        "Soft Contract: Missing Source Provenance tag."
+      ]
+    },
+    {
+      "file": "01_System/ADR/ADR-2026-05-06-composed-audit-accepted-path-lessons.md",
+      "status": "\u2705",
+      "errors": [],
+      "warnings": [
+        "Soft Contract: Missing section: ## One-sentence summary",
+        "Soft Contract: Missing section: ## Role / responsibility",
+        "Soft Contract: Missing section: ## Upstream",
+        "Soft Contract: Missing section: ## Downstream",
+        "Soft Contract: Missing section: ## Related modules / files",
+        "Soft Contract: Missing section: ## Source notes",
+        "Soft Contract: Missing section: ## Open questions / conflicts",
+        "Soft Contract: Missing link back to System Overview",
+        "Soft Contract: Missing Source Provenance tag."
+      ]
+    },
+    {
+      "file": "01_System/ADR/ADR-2026-05-06-runtime-route-reconcile.md",
+      "status": "\u2705",
+      "errors": [],
+      "warnings": [
+        "Soft Contract: Missing section: ## One-sentence summary",
+        "Soft Contract: Missing section: ## Role / responsibility",
+        "Soft Contract: Missing section: ## Upstream",
+        "Soft Contract: Missing section: ## Downstream",
+        "Soft Contract: Missing section: ## Related modules / files",
+        "Soft Contract: Missing section: ## Source notes",
+        "Soft Contract: Missing section: ## Open questions / conflicts",
+        "Soft Contract: Missing link back to System Overview",
+        "Soft Contract: Missing Source Provenance tag."
+      ]
+    },
+    {
+      "file": "01_System/ADR/ADR-2026-05-06-storage-tenant-read-lessons.md",
+      "status": "\u2705",
+      "errors": [],
+      "warnings": [
+        "Soft Contract: Missing section: ## One-sentence summary",
+        "Soft Contract: Missing section: ## Role / responsibility",
+        "Soft Contract: Missing section: ## Upstream",
+        "Soft Contract: Missing section: ## Downstream",
+        "Soft Contract: Missing section: ## Related modules / files",
+        "Soft Contract: Missing section: ## Source notes",
+        "Soft Contract: Missing section: ## Open questions / conflicts",
+        "Soft Contract: Missing link back to System Overview",
+        "Soft Contract: Missing Source Provenance tag."
+      ]
+    },
+    {
+      "file": "01_System/ADR/ADR-2026-05-06-pipeline-d-composition-lessons.md",
+      "status": "\u2705",
+      "errors": [],
+      "warnings": [
+        "Soft Contract: Missing section: ## One-sentence summary",
+        "Soft Contract: Missing section: ## Role / responsibility",
+        "Soft Contract: Missing section: ## Upstream",
+        "Soft Contract: Missing section: ## Downstream",
+        "Soft Contract: Missing section: ## Related modules / files",
+        "Soft Contract: Missing section: ## Source notes",
+        "Soft Contract: Missing section: ## Open questions / conflicts",
+        "Soft Contract: Missing link back to System Overview",
+        "Soft Contract: Missing Source Provenance tag."
+      ]
+    },
+    {
+      "file": "01_System/ADR/ADR-2026-05-06-event-contract-raw-policy-lessons.md",
+      "status": "\u2705",
+      "errors": [],
+      "warnings": [
+        "Soft Contract: Missing section: ## One-sentence summary",
+        "Soft Contract: Missing section: ## Role / responsibility",
+        "Soft Contract: Missing section: ## Upstream",
+        "Soft Contract: Missing section: ## Downstream",
+        "Soft Contract: Missing section: ## Related modules / files",
+        "Soft Contract: Missing section: ## Source notes",
+        "Soft Contract: Missing section: ## Open questions / conflicts",
+        "Soft Contract: Missing link back to System Overview",
+        "Soft Contract: Missing Source Provenance tag."
+      ]
+    },
+    {
+      "file": "01_System/ADR/ADR-2026-05-08-route-cost-measurement-lessons.md",
+      "status": "\u2705",
+      "errors": [],
+      "warnings": [
+        "Soft Contract: Missing section: ## One-sentence summary",
+        "Soft Contract: Missing section: ## Role / responsibility",
+        "Soft Contract: Missing section: ## Upstream",
+        "Soft Contract: Missing section: ## Downstream",
+        "Soft Contract: Missing section: ## Related modules / files",
+        "Soft Contract: Missing section: ## Source notes",
+        "Soft Contract: Missing section: ## Open questions / conflicts",
+        "Soft Contract: Missing link back to System Overview",
+        "Soft Contract: Missing Source Provenance tag."
+      ]
+    },
+    {
+      "file": "01_System/ADR/ADR-2026-05-06-wiki-closure-gate-lessons.md",
+      "status": "\u2705",
+      "errors": [],
+      "warnings": [
+        "Soft Contract: Missing section: ## One-sentence summary",
+        "Soft Contract: Missing section: ## Role / responsibility",
+        "Soft Contract: Missing section: ## Upstream",
+        "Soft Contract: Missing section: ## Downstream",
+        "Soft Contract: Missing section: ## Related modules / files",
+        "Soft Contract: Missing section: ## Source notes",
+        "Soft Contract: Missing section: ## Open questions / conflicts",
+        "Soft Contract: Missing link back to System Overview",
+        "Soft Contract: Missing Source Provenance tag."
+      ]
+    },
+    {
+      "file": "01_System/ADR/ADR-2026-05-06-ultra-review-delete-diff-lessons.md",
+      "status": "\u2705",
+      "errors": [],
+      "warnings": [
+        "Soft Contract: Missing section: ## One-sentence summary",
+        "Soft Contract: Missing section: ## Role / responsibility",
+        "Soft Contract: Missing section: ## Upstream",
+        "Soft Contract: Missing section: ## Downstream",
+        "Soft Contract: Missing section: ## Related modules / files",
+        "Soft Contract: Missing section: ## Source notes",
+        "Soft Contract: Missing section: ## Open questions / conflicts",
+        "Soft Contract: Missing link back to System Overview",
+        "Soft Contract: Missing Source Provenance tag."
+      ]
+    },
+    {
+      "file": "01_System/ADR/ADR-2026-05-06-preflash-dry-run-artifact-lessons.md",
+      "status": "\u2705",
+      "errors": [],
+      "warnings": [
+        "Soft Contract: Missing section: ## One-sentence summary",
+        "Soft Contract: Missing section: ## Role / responsibility",
+        "Soft Contract: Missing section: ## Upstream",
+        "Soft Contract: Missing section: ## Downstream",
+        "Soft Contract: Missing section: ## Related modules / files",
+        "Soft Contract: Missing section: ## Source notes",
+        "Soft Contract: Missing section: ## Open questions / conflicts",
+        "Soft Contract: Missing link back to System Overview",
+        "Soft Contract: Missing Source Provenance tag."
+      ]
+    },
+    {
+      "file": "01_System/ADR/ADR-2026-05-07-teacher-student-gap-matrix.md",
+      "status": "\u2705",
+      "errors": [],
+      "warnings": [
+        "Soft Contract: Missing section: ## One-sentence summary",
+        "Soft Contract: Missing section: ## Role / responsibility",
+        "Soft Contract: Missing section: ## Upstream",
+        "Soft Contract: Missing section: ## Downstream",
+        "Soft Contract: Missing section: ## Related modules / files",
+        "Soft Contract: Missing section: ## Source notes",
+        "Soft Contract: Missing section: ## Open questions / conflicts",
+        "Soft Contract: Missing link back to System Overview",
+        "Soft Contract: Missing Source Provenance tag."
+      ]
+    },
+    {
+      "file": "01_System/ADR/ADR-2026-05-06-P10-P19-regression-lessons.md",
+      "status": "\u2705",
+      "errors": [],
+      "warnings": [
+        "Soft Contract: Missing section: ## One-sentence summary",
+        "Soft Contract: Missing section: ## Role / responsibility",
+        "Soft Contract: Missing section: ## Upstream",
+        "Soft Contract: Missing section: ## Downstream",
+        "Soft Contract: Missing section: ## Related modules / files",
+        "Soft Contract: Missing section: ## Source notes",
+        "Soft Contract: Missing section: ## Open questions / conflicts",
+        "Soft Contract: Missing link back to System Overview",
+        "Soft Contract: Missing Source Provenance tag."
+      ]
+    },
+    {
+      "file": "01_System/ADR/ADR-2026-05-07-route-signal-cost-tuning-lessons.md",
+      "status": "\u2705",
+      "errors": [],
+      "warnings": [
+        "Soft Contract: Missing section: ## One-sentence summary",
+        "Soft Contract: Missing section: ## Role / responsibility",
+        "Soft Contract: Missing section: ## Upstream",
+        "Soft Contract: Missing section: ## Downstream",
+        "Soft Contract: Missing section: ## Related modules / files",
+        "Soft Contract: Missing section: ## Source notes",
+        "Soft Contract: Missing section: ## Open questions / conflicts",
+        "Soft Contract: Missing link back to System Overview",
+        "Soft Contract: Missing Source Provenance tag."
+      ]
+    },
+    {
+      "file": "01_System/ADR/ADR-2026-05-08-route-cost-local-preflight-lessons.md",
+      "status": "\u2705",
+      "errors": [],
+      "warnings": [
+        "Soft Contract: Missing section: ## One-sentence summary",
+        "Soft Contract: Missing section: ## Role / responsibility",
+        "Soft Contract: Missing section: ## Upstream",
+        "Soft Contract: Missing section: ## Downstream",
+        "Soft Contract: Missing section: ## Related modules / files",
+        "Soft Contract: Missing section: ## Source notes",
+        "Soft Contract: Missing section: ## Open questions / conflicts",
+        "Soft Contract: Missing link back to System Overview",
+        "Soft Contract: Missing Source Provenance tag."
+      ]
+    },
+    {
+      "file": "01_System/ADR/ADR-2026-05-07-learning-export-wrapper-lessons.md",
+      "status": "\u2705",
+      "errors": [],
+      "warnings": [
+        "Soft Contract: Missing section: ## One-sentence summary",
+        "Soft Contract: Missing section: ## Role / responsibility",
+        "Soft Contract: Missing section: ## Upstream",
+        "Soft Contract: Missing section: ## Downstream",
+        "Soft Contract: Missing section: ## Related modules / files",
+        "Soft Contract: Missing section: ## Source notes",
+        "Soft Contract: Missing section: ## Open questions / conflicts",
+        "Soft Contract: Missing link back to System Overview",
+        "Soft Contract: Missing Source Provenance tag."
+      ]
+    },
+    {
+      "file": "01_System/ADR/ADR-2026-05-07-loop2-planner-seam-mismatch-lesson.md",
+      "status": "\u2705",
+      "errors": [],
+      "warnings": [
+        "Soft Contract: Missing section: ## One-sentence summary",
+        "Soft Contract: Missing section: ## Role / responsibility",
+        "Soft Contract: Missing section: ## Upstream",
+        "Soft Contract: Missing section: ## Downstream",
+        "Soft Contract: Missing section: ## Related modules / files",
+        "Soft Contract: Missing section: ## Source notes",
+        "Soft Contract: Missing section: ## Open questions / conflicts",
+        "Soft Contract: Missing link back to System Overview",
+        "Soft Contract: Missing Source Provenance tag."
+      ]
+    },
+    {
+      "file": "01_System/ADR/ADR-2026-05-08-public-credibility-benchmark-lanes.md",
+      "status": "\u2705",
+      "errors": [],
+      "warnings": [
+        "Soft Contract: Missing section: ## One-sentence summary",
+        "Soft Contract: Missing section: ## Role / responsibility",
+        "Soft Contract: Missing section: ## Upstream",
+        "Soft Contract: Missing section: ## Downstream",
+        "Soft Contract: Missing section: ## Related modules / files",
+        "Soft Contract: Missing section: ## Source notes",
+        "Soft Contract: Missing section: ## Open questions / conflicts",
+        "Soft Contract: Missing link back to System Overview",
+        "Soft Contract: Missing Source Provenance tag."
+      ]
+    },
+    {
+      "file": "01_System/ADR/ADR-2026-05-06-brain-governance-artifact-lessons.md",
+      "status": "\u2705",
+      "errors": [],
+      "warnings": [
+        "Soft Contract: Missing section: ## One-sentence summary",
+        "Soft Contract: Missing section: ## Role / responsibility",
+        "Soft Contract: Missing section: ## Upstream",
+        "Soft Contract: Missing section: ## Downstream",
+        "Soft Contract: Missing section: ## Related modules / files",
+        "Soft Contract: Missing section: ## Source notes",
+        "Soft Contract: Missing section: ## Open questions / conflicts",
+        "Soft Contract: Missing link back to System Overview",
+        "Soft Contract: Missing Source Provenance tag."
+      ]
+    },
+    {
+      "file": "01_System/ADR/ADR-2026-05-08-route-oracle-receipt-contract.md",
+      "status": "\u2705",
+      "errors": [],
+      "warnings": [
+        "Soft Contract: Missing section: ## One-sentence summary",
+        "Soft Contract: Missing section: ## Role / responsibility",
+        "Soft Contract: Missing section: ## Upstream",
+        "Soft Contract: Missing section: ## Downstream",
+        "Soft Contract: Missing section: ## Related modules / files",
+        "Soft Contract: Missing section: ## Source notes",
+        "Soft Contract: Missing section: ## Open questions / conflicts",
+        "Soft Contract: Missing link back to System Overview",
+        "Soft Contract: Missing Source Provenance tag."
+      ]
+    },
+    {
+      "file": "01_System/ADR/ADR-2026-05-06-preflash-smoke-test-lessons.md",
+      "status": "\u2705",
+      "errors": [],
+      "warnings": [
+        "Soft Contract: Missing section: ## One-sentence summary",
+        "Soft Contract: Missing section: ## Role / responsibility",
+        "Soft Contract: Missing section: ## Upstream",
+        "Soft Contract: Missing section: ## Downstream",
+        "Soft Contract: Missing section: ## Related modules / files",
+        "Soft Contract: Missing section: ## Source notes",
+        "Soft Contract: Missing section: ## Open questions / conflicts",
+        "Soft Contract: Missing link back to System Overview",
+        "Soft Contract: Missing Source Provenance tag."
+      ]
+    },
+    {
+      "file": "01_System/ADR/ADR-2026-05-06-P76-public-delivery-cost-gates.md",
+      "status": "\u2705",
+      "errors": [],
+      "warnings": [
+        "Soft Contract: Missing section: ## One-sentence summary",
+        "Soft Contract: Missing section: ## Role / responsibility",
+        "Soft Contract: Missing section: ## Upstream",
+        "Soft Contract: Missing section: ## Downstream",
+        "Soft Contract: Missing section: ## Related modules / files",
+        "Soft Contract: Missing section: ## Source notes",
+        "Soft Contract: Missing section: ## Open questions / conflicts",
+        "Soft Contract: Missing link back to System Overview",
+        "Soft Contract: Missing Source Provenance tag."
+      ]
+    },
+    {
+      "file": "01_System/Evolution/LEARNING_EVOLUTION_MANIFESTO.md",
+      "status": "\u2705",
+      "errors": [],
+      "warnings": [
+        "Soft Contract: Missing YAML Frontmatter",
+        "Soft Contract: Missing section: ## One-sentence summary",
+        "Soft Contract: Missing section: ## Role / responsibility",
+        "Soft Contract: Missing section: ## Upstream",
+        "Soft Contract: Missing section: ## Downstream",
+        "Soft Contract: Missing section: ## Related modules / files",
+        "Soft Contract: Missing section: ## Source notes",
+        "Soft Contract: Missing section: ## Open questions / conflicts",
+        "Soft Contract: Missing link back to System Overview",
+        "Soft Contract: Missing Source Provenance tag."
+      ]
+    },
+    {
+      "file": "90_Sources/Legacy_Wiki/P_PHASE_MEMORY_SYNERGY.md",
+      "status": "\u2705",
+      "errors": [],
+      "warnings": [
+        "Soft Contract: Missing YAML Frontmatter",
+        "Soft Contract: Missing section: ## One-sentence summary",
+        "Soft Contract: Missing section: ## Role / responsibility",
+        "Soft Contract: Missing section: ## Upstream",
+        "Soft Contract: Missing section: ## Downstream",
+        "Soft Contract: Missing section: ## Related modules / files",
+        "Soft Contract: Missing section: ## Source notes",
+        "Soft Contract: Missing section: ## Open questions / conflicts",
+        "Soft Contract: Missing link back to System Overview",
+        "Soft Contract: Missing Source Provenance tag."
+      ]
+    },
+    {
+      "file": "90_Sources/Legacy_Wiki/arch_diagnosis_brain_hub.md",
+      "status": "\u2705",
+      "errors": [],
+      "warnings": [
+        "Soft Contract: Missing YAML Frontmatter",
+        "Soft Contract: Missing section: ## One-sentence summary",
+        "Soft Contract: Missing section: ## Role / responsibility",
+        "Soft Contract: Missing section: ## Upstream",
+        "Soft Contract: Missing section: ## Downstream",
+        "Soft Contract: Missing section: ## Related modules / files",
+        "Soft Contract: Missing section: ## Source notes",
+        "Soft Contract: Missing section: ## Open questions / conflicts",
+        "Soft Contract: Missing link back to System Overview",
+        "Soft Contract: Missing Source Provenance tag."
+      ]
+    },
+    {
+      "file": "90_Sources/Legacy_Wiki/arch_diagnosis_memory_context.md",
+      "status": "\u2705",
+      "errors": [],
+      "warnings": [
+        "Soft Contract: Missing YAML Frontmatter",
+        "Soft Contract: Missing section: ## One-sentence summary",
+        "Soft Contract: Missing section: ## Role / responsibility",
+        "Soft Contract: Missing section: ## Upstream",
+        "Soft Contract: Missing section: ## Downstream",
+        "Soft Contract: Missing section: ## Related modules / files",
+        "Soft Contract: Missing section: ## Source notes",
+        "Soft Contract: Missing section: ## Open questions / conflicts",
+        "Soft Contract: Missing link back to System Overview",
+        "Soft Contract: Missing Source Provenance tag."
+      ]
+    },
+    {
+      "file": "90_Sources/Legacy_Wiki/arch_diagnosis_nexus_core.md",
+      "status": "\u2705",
+      "errors": [],
+      "warnings": [
+        "Soft Contract: Missing YAML Frontmatter",
+        "Soft Contract: Missing section: ## One-sentence summary",
+        "Soft Contract: Missing section: ## Role / responsibility",
+        "Soft Contract: Missing section: ## Upstream",
+        "Soft Contract: Missing section: ## Downstream",
+        "Soft Contract: Missing section: ## Related modules / files",
+        "Soft Contract: Missing section: ## Source notes",
+        "Soft Contract: Missing section: ## Open questions / conflicts",
+        "Soft Contract: Missing link back to System Overview",
+        "Soft Contract: Missing Source Provenance tag."
+      ]
+    },
+    {
+      "file": "90_Sources/Legacy_Wiki/critique_brain_hub_layer3_alignment.md",
+      "status": "\u2705",
+      "errors": [],
+      "warnings": [
+        "Soft Contract: Missing YAML Frontmatter",
+        "Soft Contract: Missing section: ## One-sentence summary",
+        "Soft Contract: Missing section: ## Role / responsibility",
+        "Soft Contract: Missing section: ## Upstream",
+        "Soft Contract: Missing section: ## Downstream",
+        "Soft Contract: Missing section: ## Related modules / files",
+        "Soft Contract: Missing section: ## Source notes",
+        "Soft Contract: Missing section: ## Open questions / conflicts",
+        "Soft Contract: Missing link back to System Overview",
+        "Soft Contract: Missing Source Provenance tag."
+      ]
+    },
+    {
+      "file": "90_Sources/Legacy_Wiki/critique_brain_hub_alignment_gap.md",
+      "status": "\u2705",
+      "errors": [],
+      "warnings": [
+        "Soft Contract: Missing YAML Frontmatter",
+        "Soft Contract: Missing section: ## One-sentence summary",
+        "Soft Contract: Missing section: ## Role / responsibility",
+        "Soft Contract: Missing section: ## Upstream",
+        "Soft Contract: Missing section: ## Downstream",
+        "Soft Contract: Missing section: ## Related modules / files",
+        "Soft Contract: Missing section: ## Source notes",
+        "Soft Contract: Missing section: ## Open questions / conflicts",
+        "Soft Contract: Missing link back to System Overview",
+        "Soft Contract: Missing Source Provenance tag."
+      ]
+    },
+    {
+      "file": "90_Sources/Legacy_Wiki/arch_diagnosis_safety_telemetry.md",
+      "status": "\u2705",
+      "errors": [],
+      "warnings": [
+        "Soft Contract: Missing YAML Frontmatter",
+        "Soft Contract: Missing section: ## One-sentence summary",
+        "Soft Contract: Missing section: ## Role / responsibility",
+        "Soft Contract: Missing section: ## Upstream",
+        "Soft Contract: Missing section: ## Downstream",
+        "Soft Contract: Missing section: ## Related modules / files",
+        "Soft Contract: Missing section: ## Source notes",
+        "Soft Contract: Missing section: ## Open questions / conflicts",
+        "Soft Contract: Missing link back to System Overview",
+        "Soft Contract: Missing Source Provenance tag."
+      ]
+    },
+    {
+      "file": "90_Sources/Legacy_Wiki/NEXUS_COGNITIVE_EVOLUTION_PLAN.md",
+      "status": "\u2705",
+      "errors": [],
+      "warnings": [
+        "Soft Contract: Missing YAML Frontmatter",
+        "Soft Contract: Missing section: ## One-sentence summary",
+        "Soft Contract: Missing section: ## Role / responsibility",
+        "Soft Contract: Missing section: ## Upstream",
+        "Soft Contract: Missing section: ## Downstream",
+        "Soft Contract: Missing section: ## Related modules / files",
+        "Soft Contract: Missing section: ## Source notes",
+        "Soft Contract: Missing section: ## Open questions / conflicts",
+        "Soft Contract: Missing link back to System Overview",
+        "Soft Contract: Missing Source Provenance tag."
+      ]
+    },
+    {
+      "file": "90_Sources/Legacy_Wiki/arch_diagnosis_governance_events.md",
+      "status": "\u2705",
+      "errors": [],
+      "warnings": [
+        "Soft Contract: Missing YAML Frontmatter",
+        "Soft Contract: Missing section: ## One-sentence summary",
+        "Soft Contract: Missing section: ## Role / responsibility",
+        "Soft Contract: Missing section: ## Upstream",
+        "Soft Contract: Missing section: ## Downstream",
+        "Soft Contract: Missing section: ## Related modules / files",
+        "Soft Contract: Missing section: ## Source notes",
+        "Soft Contract: Missing section: ## Open questions / conflicts",
+        "Soft Contract: Missing link back to System Overview",
+        "Soft Contract: Missing Source Provenance tag."
+      ]
+    },
+    {
+      "file": "90_Sources/Legacy_Wiki/NEXUS_EVOLUTION_MANIFESTO_v25.5.md",
+      "status": "\u2705",
+      "errors": [],
+      "warnings": [
+        "Soft Contract: Missing YAML Frontmatter",
+        "Soft Contract: Missing section: ## One-sentence summary",
+        "Soft Contract: Missing section: ## Role / responsibility",
+        "Soft Contract: Missing section: ## Upstream",
+        "Soft Contract: Missing section: ## Downstream",
+        "Soft Contract: Missing section: ## Related modules / files",
+        "Soft Contract: Missing section: ## Source notes",
+        "Soft Contract: Missing section: ## Open questions / conflicts",
+        "Soft Contract: Missing link back to System Overview",
+        "Soft Contract: Missing Source Provenance tag."
+      ]
+    },
+    {
+      "file": "90_Sources/Legacy_Wiki/arch_diagnosis_infra_services.md",
+      "status": "\u2705",
+      "errors": [],
+      "warnings": [
+        "Soft Contract: Missing YAML Frontmatter",
+        "Soft Contract: Missing section: ## One-sentence summary",
+        "Soft Contract: Missing section: ## Role / responsibility",
+        "Soft Contract: Missing section: ## Upstream",
+        "Soft Contract: Missing section: ## Downstream",
+        "Soft Contract: Missing section: ## Related modules / files",
+        "Soft Contract: Missing section: ## Source notes",
+        "Soft Contract: Missing section: ## Open questions / conflicts",
+        "Soft Contract: Missing link back to System Overview",
+        "Soft Contract: Missing Source Provenance tag."
+      ]
+    },
+    {
+      "file": "90_Sources/Legacy_Wiki/NEXUS_GOVERNANCE_EXECUTION_PROTOCOL.md",
+      "status": "\u2705",
+      "errors": [],
+      "warnings": [
+        "Soft Contract: Missing YAML Frontmatter",
+        "Soft Contract: Missing section: ## One-sentence summary",
+        "Soft Contract: Missing section: ## Role / responsibility",
+        "Soft Contract: Missing section: ## Upstream",
+        "Soft Contract: Missing section: ## Downstream",
+        "Soft Contract: Missing section: ## Related modules / files",
+        "Soft Contract: Missing section: ## Source notes",
+        "Soft Contract: Missing section: ## Open questions / conflicts",
+        "Soft Contract: Missing link back to System Overview",
+        "Soft Contract: Missing Source Provenance tag."
+      ]
+    },
+    {
+      "file": "90_Sources/Legacy_Wiki/NEXUS_SWARM_EVOLUTION_PROTOCOL.md",
+      "status": "\u2705",
+      "errors": [],
+      "warnings": [
+        "Soft Contract: Missing YAML Frontmatter",
+        "Soft Contract: Missing section: ## One-sentence summary",
+        "Soft Contract: Missing section: ## Role / responsibility",
+        "Soft Contract: Missing section: ## Upstream",
+        "Soft Contract: Missing section: ## Downstream",
+        "Soft Contract: Missing section: ## Related modules / files",
+        "Soft Contract: Missing section: ## Source notes",
+        "Soft Contract: Missing section: ## Open questions / conflicts",
+        "Soft Contract: Missing link back to System Overview",
+        "Soft Contract: Missing Source Provenance tag."
+      ]
+    },
+    {
+      "file": "90_Sources/Legacy_Wiki/REVENUE_ENGINE_SPEC.md",
+      "status": "\u2705",
+      "errors": [],
+      "warnings": [
+        "Soft Contract: Missing YAML Frontmatter",
+        "Soft Contract: Missing section: ## One-sentence summary",
+        "Soft Contract: Missing section: ## Role / responsibility",
+        "Soft Contract: Missing section: ## Upstream",
+        "Soft Contract: Missing section: ## Downstream",
+        "Soft Contract: Missing section: ## Related modules / files",
+        "Soft Contract: Missing section: ## Source notes",
+        "Soft Contract: Missing section: ## Open questions / conflicts",
+        "Soft Contract: Missing link back to System Overview",
+        "Soft Contract: Missing Source Provenance tag."
+      ]
+    },
+    {
+      "file": "90_Sources/Legacy_Wiki/MEMORY_DATABASE_COMPENDIUM.md",
+      "status": "\u2705",
+      "errors": [],
+      "warnings": [
+        "Soft Contract: Missing YAML Frontmatter",
+        "Soft Contract: Missing section: ## One-sentence summary",
+        "Soft Contract: Missing section: ## Role / responsibility",
+        "Soft Contract: Missing section: ## Upstream",
+        "Soft Contract: Missing section: ## Downstream",
+        "Soft Contract: Missing section: ## Related modules / files",
+        "Soft Contract: Missing section: ## Source notes",
+        "Soft Contract: Missing section: ## Open questions / conflicts",
+        "Soft Contract: Missing link back to System Overview",
+        "Soft Contract: Missing Source Provenance tag."
+      ]
+    },
+    {
+      "file": "90_Sources/Legacy_Wiki/NEXUS_EVOLUTION_ONTOLOGY.md",
+      "status": "\u2705",
+      "errors": [],
+      "warnings": [
+        "Soft Contract: Missing YAML Frontmatter",
+        "Soft Contract: Missing section: ## One-sentence summary",
+        "Soft Contract: Missing section: ## Role / responsibility",
+        "Soft Contract: Missing section: ## Upstream",
+        "Soft Contract: Missing section: ## Downstream",
+        "Soft Contract: Missing section: ## Related modules / files",
+        "Soft Contract: Missing section: ## Source notes",
+        "Soft Contract: Missing section: ## Open questions / conflicts",
+        "Soft Contract: Missing link back to System Overview",
+        "Soft Contract: Missing Source Provenance tag."
+      ]
+    },
+    {
+      "file": "90_Sources/Archive/Refactor_History/assign_task_runner_refactor.md",
+      "status": "\u2705",
+      "errors": [],
+      "warnings": [
+        "Soft Contract: Missing section: ## One-sentence summary",
+        "Soft Contract: Missing section: ## Role / responsibility",
+        "Soft Contract: Missing section: ## Upstream",
+        "Soft Contract: Missing section: ## Downstream",
+        "Soft Contract: Missing section: ## Related modules / files",
+        "Soft Contract: Missing section: ## Source notes",
+        "Soft Contract: Missing section: ## Open questions / conflicts",
+        "Soft Contract: Missing link back to System Overview",
+        "Soft Contract: Missing Source Provenance tag."
+      ]
+    },
+    {
+      "file": "90_Sources/Archive/Refactor_History/refactor_autodata_forge_spec.md",
+      "status": "\u2705",
+      "errors": [],
+      "warnings": [
+        "Soft Contract: Missing section: ## One-sentence summary",
+        "Soft Contract: Missing section: ## Role / responsibility",
+        "Soft Contract: Missing section: ## Upstream",
+        "Soft Contract: Missing section: ## Downstream",
+        "Soft Contract: Missing section: ## Related modules / files",
+        "Soft Contract: Missing section: ## Source notes",
+        "Soft Contract: Missing section: ## Open questions / conflicts",
+        "Soft Contract: Missing link back to System Overview",
+        "Soft Contract: Missing Source Provenance tag."
+      ]
+    },
+    {
+      "file": "90_Sources/Archive/Refactor_History/refactor_pipeline_composition_spec.md",
+      "status": "\u2705",
+      "errors": [],
+      "warnings": [
+        "Soft Contract: Missing section: ## One-sentence summary",
+        "Soft Contract: Missing section: ## Role / responsibility",
+        "Soft Contract: Missing section: ## Upstream",
+        "Soft Contract: Missing section: ## Downstream",
+        "Soft Contract: Missing section: ## Related modules / files",
+        "Soft Contract: Missing section: ## Source notes",
+        "Soft Contract: Missing section: ## Open questions / conflicts",
+        "Soft Contract: Missing link back to System Overview",
+        "Soft Contract: Missing Source Provenance tag."
+      ]
+    },
+    {
+      "file": "90_Sources/Archive/Refactor_History/refactor_governance_steward_spec.md",
+      "status": "\u2705",
+      "errors": [],
+      "warnings": [
+        "Soft Contract: Missing section: ## One-sentence summary",
+        "Soft Contract: Missing section: ## Role / responsibility",
+        "Soft Contract: Missing section: ## Upstream",
+        "Soft Contract: Missing section: ## Downstream",
+        "Soft Contract: Missing section: ## Related modules / files",
+        "Soft Contract: Missing section: ## Source notes",
+        "Soft Contract: Missing section: ## Open questions / conflicts",
+        "Soft Contract: Missing link back to System Overview",
+        "Soft Contract: Missing Source Provenance tag."
+      ]
+    },
+    {
+      "file": "90_Sources/Archive/Refactor_History/refactor_belief_contract_spec.md",
+      "status": "\u2705",
+      "errors": [],
+      "warnings": [
+        "Soft Contract: Missing section: ## One-sentence summary",
+        "Soft Contract: Missing section: ## Role / responsibility",
+        "Soft Contract: Missing section: ## Upstream",
+        "Soft Contract: Missing section: ## Downstream",
+        "Soft Contract: Missing section: ## Related modules / files",
+        "Soft Contract: Missing section: ## Source notes",
+        "Soft Contract: Missing section: ## Open questions / conflicts",
+        "Soft Contract: Missing link back to System Overview",
+        "Soft Contract: Missing Source Provenance tag."
+      ]
+    },
+    {
+      "file": "90_Sources/Archive/Refactor_History/refactor_storage_decoupling_spec.md",
+      "status": "\u2705",
+      "errors": [],
+      "warnings": [
+        "Soft Contract: Missing section: ## One-sentence summary",
+        "Soft Contract: Missing section: ## Role / responsibility",
+        "Soft Contract: Missing section: ## Upstream",
+        "Soft Contract: Missing section: ## Downstream",
+        "Soft Contract: Missing section: ## Related modules / files",
+        "Soft Contract: Missing section: ## Source notes",
+        "Soft Contract: Missing section: ## Open questions / conflicts",
+        "Soft Contract: Missing link back to System Overview",
+        "Soft Contract: Missing Source Provenance tag."
+      ]
+    },
+    {
+      "file": "90_Sources/Archive/Refactor_History/refactor_contexthub_provider_spec.md",
+      "status": "\u2705",
+      "errors": [],
+      "warnings": [
+        "Soft Contract: Missing section: ## One-sentence summary",
+        "Soft Contract: Missing section: ## Role / responsibility",
+        "Soft Contract: Missing section: ## Upstream",
+        "Soft Contract: Missing section: ## Downstream",
+        "Soft Contract: Missing section: ## Related modules / files",
+        "Soft Contract: Missing section: ## Source notes",
+        "Soft Contract: Missing section: ## Open questions / conflicts",
+        "Soft Contract: Missing link back to System Overview",
+        "Soft Contract: Missing Source Provenance tag."
+      ]
+    },
+    {
+      "file": "90_Sources/Archive/Refactor_History/refactor_industrial_hardening_v26_spec.md",
+      "status": "\u2705",
+      "errors": [],
+      "warnings": [
+        "Soft Contract: Missing section: ## One-sentence summary",
+        "Soft Contract: Missing section: ## Role / responsibility",
+        "Soft Contract: Missing section: ## Upstream",
+        "Soft Contract: Missing section: ## Downstream",
+        "Soft Contract: Missing section: ## Related modules / files",
+        "Soft Contract: Missing section: ## Source notes",
+        "Soft Contract: Missing section: ## Open questions / conflicts",
+        "Soft Contract: Missing link back to System Overview",
+        "Soft Contract: Missing Source Provenance tag."
+      ]
+    },
+    {
+      "file": "90_Sources/Archive/Refactor_History/refactor_openseeker_alignment_spec.md",
+      "status": "\u2705",
+      "errors": [],
+      "warnings": [
+        "Soft Contract: Missing section: ## One-sentence summary",
+        "Soft Contract: Missing section: ## Role / responsibility",
+        "Soft Contract: Missing section: ## Upstream",
+        "Soft Contract: Missing section: ## Downstream",
+        "Soft Contract: Missing section: ## Related modules / files",
+        "Soft Contract: Missing section: ## Source notes",
+        "Soft Contract: Missing section: ## Open questions / conflicts",
+        "Soft Contract: Missing link back to System Overview",
+        "Soft Contract: Missing Source Provenance tag."
+      ]
+    },
+    {
+      "file": "90_Sources/Archive/Refactor_History/refactor_healing_protocol_spec.md",
+      "status": "\u2705",
+      "errors": [],
+      "warnings": [
+        "Soft Contract: Missing section: ## One-sentence summary",
+        "Soft Contract: Missing section: ## Role / responsibility",
+        "Soft Contract: Missing section: ## Upstream",
+        "Soft Contract: Missing section: ## Downstream",
+        "Soft Contract: Missing section: ## Related modules / files",
+        "Soft Contract: Missing section: ## Source notes",
+        "Soft Contract: Missing section: ## Open questions / conflicts",
+        "Soft Contract: Missing link back to System Overview",
+        "Soft Contract: Missing Source Provenance tag."
+      ]
+    },
+    {
+      "file": "90_Sources/Legacy_Wiki/drafts/EV-3.md",
+      "status": "\u2705",
+      "errors": [],
+      "warnings": [
+        "Soft Contract: Missing YAML Frontmatter",
+        "Soft Contract: Missing section: ## One-sentence summary",
+        "Soft Contract: Missing section: ## Role / responsibility",
+        "Soft Contract: Missing section: ## Upstream",
+        "Soft Contract: Missing section: ## Downstream",
+        "Soft Contract: Missing section: ## Related modules / files",
+        "Soft Contract: Missing section: ## Source notes",
+        "Soft Contract: Missing section: ## Open questions / conflicts",
+        "Soft Contract: Missing link back to System Overview",
+        "Soft Contract: Missing Source Provenance tag."
+      ]
+    },
+    {
+      "file": "90_Sources/Legacy_Wiki/drafts/EV-7.md",
+      "status": "\u2705",
+      "errors": [],
+      "warnings": [
+        "Soft Contract: Missing YAML Frontmatter",
+        "Soft Contract: Missing section: ## One-sentence summary",
+        "Soft Contract: Missing section: ## Role / responsibility",
+        "Soft Contract: Missing section: ## Upstream",
+        "Soft Contract: Missing section: ## Downstream",
+        "Soft Contract: Missing section: ## Related modules / files",
+        "Soft Contract: Missing section: ## Source notes",
+        "Soft Contract: Missing section: ## Open questions / conflicts",
+        "Soft Contract: Missing link back to System Overview",
+        "Soft Contract: Missing Source Provenance tag."
+      ]
+    },
+    {
+      "file": "90_Sources/Legacy_Wiki/drafts/EV-6.md",
+      "status": "\u2705",
+      "errors": [],
+      "warnings": [
+        "Soft Contract: Missing YAML Frontmatter",
+        "Soft Contract: Missing section: ## One-sentence summary",
+        "Soft Contract: Missing section: ## Role / responsibility",
+        "Soft Contract: Missing section: ## Upstream",
+        "Soft Contract: Missing section: ## Downstream",
+        "Soft Contract: Missing section: ## Related modules / files",
+        "Soft Contract: Missing section: ## Source notes",
+        "Soft Contract: Missing section: ## Open questions / conflicts",
+        "Soft Contract: Missing link back to System Overview",
+        "Soft Contract: Missing Source Provenance tag."
+      ]
+    },
+    {
+      "file": "90_Sources/Legacy_Wiki/drafts/EV-2.md",
+      "status": "\u2705",
+      "errors": [],
+      "warnings": [
+        "Soft Contract: Missing YAML Frontmatter",
+        "Soft Contract: Missing section: ## One-sentence summary",
+        "Soft Contract: Missing section: ## Role / responsibility",
+        "Soft Contract: Missing section: ## Upstream",
+        "Soft Contract: Missing section: ## Downstream",
+        "Soft Contract: Missing section: ## Related modules / files",
+        "Soft Contract: Missing section: ## Source notes",
+        "Soft Contract: Missing section: ## Open questions / conflicts",
+        "Soft Contract: Missing link back to System Overview",
+        "Soft Contract: Missing Source Provenance tag."
+      ]
+    },
+    {
+      "file": "90_Sources/Legacy_Wiki/drafts/draft_EV-c5b52f5c-000_20260408_005256.md",
+      "status": "\u2705",
+      "errors": [],
+      "warnings": [
+        "Soft Contract: Missing YAML Frontmatter",
+        "Soft Contract: Missing section: ## One-sentence summary",
+        "Soft Contract: Missing section: ## Role / responsibility",
+        "Soft Contract: Missing section: ## Upstream",
+        "Soft Contract: Missing section: ## Downstream",
+        "Soft Contract: Missing section: ## Related modules / files",
+        "Soft Contract: Missing section: ## Source notes",
+        "Soft Contract: Missing section: ## Open questions / conflicts",
+        "Soft Contract: Missing link back to System Overview",
+        "Soft Contract: Missing Source Provenance tag."
+      ]
+    },
+    {
+      "file": "90_Sources/Legacy_Wiki/drafts/EV-9.md",
+      "status": "\u2705",
+      "errors": [],
+      "warnings": [
+        "Soft Contract: Missing YAML Frontmatter",
+        "Soft Contract: Missing section: ## One-sentence summary",
+        "Soft Contract: Missing section: ## Role / responsibility",
+        "Soft Contract: Missing section: ## Upstream",
+        "Soft Contract: Missing section: ## Downstream",
+        "Soft Contract: Missing section: ## Related modules / files",
+        "Soft Contract: Missing section: ## Source notes",
+        "Soft Contract: Missing section: ## Open questions / conflicts",
+        "Soft Contract: Missing link back to System Overview",
+        "Soft Contract: Missing Source Provenance tag."
+      ]
+    },
+    {
+      "file": "90_Sources/Legacy_Wiki/drafts/EV-8.md",
+      "status": "\u2705",
+      "errors": [],
+      "warnings": [
+        "Soft Contract: Missing YAML Frontmatter",
+        "Soft Contract: Missing section: ## One-sentence summary",
+        "Soft Contract: Missing section: ## Role / responsibility",
+        "Soft Contract: Missing section: ## Upstream",
+        "Soft Contract: Missing section: ## Downstream",
+        "Soft Contract: Missing section: ## Related modules / files",
+        "Soft Contract: Missing section: ## Source notes",
+        "Soft Contract: Missing section: ## Open questions / conflicts",
+        "Soft Contract: Missing link back to System Overview",
+        "Soft Contract: Missing Source Provenance tag."
+      ]
+    },
+    {
+      "file": "90_Sources/Legacy_Wiki/drafts/EV-5.md",
+      "status": "\u2705",
+      "errors": [],
+      "warnings": [
+        "Soft Contract: Missing YAML Frontmatter",
+        "Soft Contract: Missing section: ## One-sentence summary",
+        "Soft Contract: Missing section: ## Role / responsibility",
+        "Soft Contract: Missing section: ## Upstream",
+        "Soft Contract: Missing section: ## Downstream",
+        "Soft Contract: Missing section: ## Related modules / files",
+        "Soft Contract: Missing section: ## Source notes",
+        "Soft Contract: Missing section: ## Open questions / conflicts",
+        "Soft Contract: Missing link back to System Overview",
+        "Soft Contract: Missing Source Provenance tag."
+      ]
+    },
+    {
+      "file": "90_Sources/Legacy_Wiki/drafts/EV-1.md",
+      "status": "\u2705",
+      "errors": [],
+      "warnings": [
+        "Soft Contract: Missing YAML Frontmatter",
+        "Soft Contract: Missing section: ## One-sentence summary",
+        "Soft Contract: Missing section: ## Role / responsibility",
+        "Soft Contract: Missing section: ## Upstream",
+        "Soft Contract: Missing section: ## Downstream",
+        "Soft Contract: Missing section: ## Related modules / files",
+        "Soft Contract: Missing section: ## Source notes",
+        "Soft Contract: Missing section: ## Open questions / conflicts",
+        "Soft Contract: Missing link back to System Overview",
+        "Soft Contract: Missing Source Provenance tag."
+      ]
+    },
+    {
+      "file": "90_Sources/Legacy_Wiki/drafts/EV-0.md",
+      "status": "\u2705",
+      "errors": [],
+      "warnings": [
+        "Soft Contract: Missing YAML Frontmatter",
+        "Soft Contract: Missing section: ## One-sentence summary",
+        "Soft Contract: Missing section: ## Role / responsibility",
+        "Soft Contract: Missing section: ## Upstream",
+        "Soft Contract: Missing section: ## Downstream",
+        "Soft Contract: Missing section: ## Related modules / files",
+        "Soft Contract: Missing section: ## Source notes",
+        "Soft Contract: Missing section: ## Open questions / conflicts",
+        "Soft Contract: Missing link back to System Overview",
+        "Soft Contract: Missing Source Provenance tag."
+      ]
+    },
+    {
+      "file": "90_Sources/Legacy_Wiki/drafts/EV-4.md",
+      "status": "\u2705",
+      "errors": [],
+      "warnings": [
+        "Soft Contract: Missing YAML Frontmatter",
+        "Soft Contract: Missing section: ## One-sentence summary",
+        "Soft Contract: Missing section: ## Role / responsibility",
+        "Soft Contract: Missing section: ## Upstream",
+        "Soft Contract: Missing section: ## Downstream",
+        "Soft Contract: Missing section: ## Related modules / files",
+        "Soft Contract: Missing section: ## Source notes",
+        "Soft Contract: Missing section: ## Open questions / conflicts",
+        "Soft Contract: Missing link back to System Overview",
+        "Soft Contract: Missing Source Provenance tag."
+      ]
     },
     {
       "file": ".nexus/graph/Community_1.md",
@@ -563,6 +2361,108 @@
       "status": "\u2705",
       "errors": [],
       "warnings": []
+    },
+    {
+      "file": "10_Analysis_Scans/codegraph_audit/codegraph_status.md",
+      "status": "\u274c",
+      "errors": [
+        "Missing YAML Frontmatter",
+        "Missing section: ## One-sentence summary",
+        "Missing section: ## Role / responsibility",
+        "Missing section: ## Upstream",
+        "Missing section: ## Downstream",
+        "Missing section: ## Related modules / files",
+        "Missing section: ## Source notes",
+        "Missing section: ## Open questions / conflicts",
+        "Missing link back to System Overview",
+        "Missing Source Provenance tag."
+      ],
+      "warnings": []
+    },
+    {
+      "file": "10_Analysis_Scans/codegraph_audit/codegraph_files.md",
+      "status": "\u274c",
+      "errors": [
+        "Missing YAML Frontmatter",
+        "Missing section: ## One-sentence summary",
+        "Missing section: ## Role / responsibility",
+        "Missing section: ## Upstream",
+        "Missing section: ## Downstream",
+        "Missing section: ## Related modules / files",
+        "Missing section: ## Source notes",
+        "Missing section: ## Open questions / conflicts",
+        "Missing link back to System Overview",
+        "Missing Source Provenance tag."
+      ],
+      "warnings": []
+    },
+    {
+      "file": "10_Analysis_Scans/codex_complexity/complexity_optimizer_report.md",
+      "status": "\u274c",
+      "errors": [
+        "Missing YAML Frontmatter",
+        "Missing section: ## One-sentence summary",
+        "Missing section: ## Role / responsibility",
+        "Missing section: ## Upstream",
+        "Missing section: ## Downstream",
+        "Missing section: ## Related modules / files",
+        "Missing section: ## Source notes",
+        "Missing section: ## Open questions / conflicts",
+        "Missing link back to System Overview",
+        "Missing Source Provenance tag."
+      ],
+      "warnings": []
+    },
+    {
+      "file": "10_Analysis_Scans/repomix/repomix_complete.md",
+      "status": "\u274c",
+      "errors": [
+        "Missing YAML Frontmatter",
+        "Missing section: ## One-sentence summary",
+        "Missing section: ## Role / responsibility",
+        "Missing section: ## Upstream",
+        "Missing section: ## Downstream",
+        "Missing section: ## Related modules / files",
+        "Missing section: ## Source notes",
+        "Missing section: ## Open questions / conflicts",
+        "Missing link back to System Overview",
+        "Missing Source Provenance tag."
+      ],
+      "warnings": []
+    },
+    {
+      "file": "10_Analysis_Scans/graphify/GRAPH_REPORT.md",
+      "status": "\u274c",
+      "errors": [
+        "Missing YAML Frontmatter",
+        "Missing section: ## One-sentence summary",
+        "Missing section: ## Role / responsibility",
+        "Missing section: ## Upstream",
+        "Missing section: ## Downstream",
+        "Missing section: ## Related modules / files",
+        "Missing section: ## Source notes",
+        "Missing section: ## Open questions / conflicts",
+        "Missing link back to System Overview",
+        "Missing Source Provenance tag."
+      ],
+      "warnings": []
+    },
+    {
+      "file": "04_Research/Data_Engineering/NEXUS_FULL_SPECTRUM_DATA_ENGINEERING_ATLAS.md",
+      "status": "\u2705",
+      "errors": [],
+      "warnings": [
+        "Soft Contract: Missing YAML Frontmatter",
+        "Soft Contract: Missing section: ## One-sentence summary",
+        "Soft Contract: Missing section: ## Role / responsibility",
+        "Soft Contract: Missing section: ## Upstream",
+        "Soft Contract: Missing section: ## Downstream",
+        "Soft Contract: Missing section: ## Related modules / files",
+        "Soft Contract: Missing section: ## Source notes",
+        "Soft Contract: Missing section: ## Open questions / conflicts",
+        "Soft Contract: Missing link back to System Overview",
+        "Soft Contract: Missing Source Provenance tag."
+      ]
     }
   ]
 }

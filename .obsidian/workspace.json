@@ -13,68 +13,12 @@
             "state": {
               "type": "markdown",
               "state": {
-                "file": "01_Operations/WORKFLOW.md",
+                "file": "docs/info/NEXUS_CAPABILITY_SKILL_MAP.md",
                 "mode": "source",
                 "source": false
               },
               "icon": "lucide-file",
-              "title": "WORKFLOW"
-            }
-          },
-          {
-            "id": "483ec7286397532a",
-            "type": "leaf",
-            "state": {
-              "type": "markdown",
-              "state": {
-                "file": "evolution/docs/specs/NEXUS_PHANTOM_GUARD_SPEC.md",
-                "mode": "source",
-                "source": false
-              },
-              "icon": "lucide-file",
-              "title": "NEXUS_PHANTOM_GUARD_SPEC"
-            }
-          },
-          {
-            "id": "70a0e354bad7d784",
-            "type": "leaf",
-            "state": {
-              "type": "markdown",
-              "state": {
-                "file": "evolution/docs/specs/NEXUS_REFACTOR_GUIDE_SPEC.md",
-                "mode": "source",
-                "source": false
-              },
-              "icon": "lucide-file",
-              "title": "NEXUS_REFACTOR_GUIDE_SPEC"
-            }
-          },
-          {
-            "id": "b15781390dcc996d",
-            "type": "leaf",
-            "state": {
-              "type": "markdown",
-              "state": {
-                "file": "evolution/docs/specs/NEXUS_LEARNING_SPEC.md",
-                "mode": "source",
-                "source": false
-              },
-              "icon": "lucide-file",
-              "title": "NEXUS_LEARNING_SPEC"
-            }
-          },
-          {
-            "id": "247f1945860900ee",
-            "type": "leaf",
-            "state": {
-              "type": "markdown",
-              "state": {
-                "file": "docs/Chatgpt 評價.md",
-                "mode": "source",
-                "source": false
-              },
-              "icon": "lucide-file",
-              "title": "Chatgpt 評價"
+              "title": "NEXUS_CAPABILITY_SKILL_MAP"
             }
           }
         ]
@@ -134,7 +78,8 @@
       }
     ],
     "direction": "horizontal",
-    "width": 376.5
+    "width": 300.5,
+    "collapsed": true
   },
   "right": {
     "id": "1a386102a6bc576a",
@@ -239,43 +184,53 @@
       "bases:建立新的 base": false
     }
   },
-  "active": "469322156ea657be",
+  "active": "787f356ec3100ac6",
   "lastOpenFiles": [
-    "nexus_wiki_vault/06_Ops/Ops - Query Writeback Policy.md",
-    "scripts/ops/wiki_capability_coverage_audit.py",
-    "nexus_wiki_vault/06_Ops/Ops - Wiki Page Type Contracts.md",
-    "nexus_wiki_vault/06_Ops/Ops - Ownership and Review SLA.md",
-    "nexus_wiki_vault/06_Ops/Ops - Wiki Link Integrity.md",
-    "nexus_wiki_vault/06_Ops/Ops - Truth Claims Command Policy.md",
-    "nexus_wiki_vault/06_Ops/Ops - Governance SLO Dashboard.md",
-    "scripts/ops/wiki_owner_audit.py",
-    "scripts/ops/wiki_link_audit.py",
-    "scripts/ops/wiki_changelog_autodraft.py",
-    "scripts/ops/wiki_slo_dashboard.py",
-    "nexus_wiki_vault/02_Modules/Module - Dual Phase Diagnosis.md",
-    "nexus_wiki_vault/02_Modules/Module - Metadata Collectors.md",
-    "nexus_wiki_vault/02_Modules/Module - CLI Commands Service.md",
-    "scripts/ops/wiki_truth_claims_check.py",
-    "nexus_wiki_vault/02_Modules/Module - Nexus Desk Interface.md",
-    "nexus_wiki_vault/02_Modules/Module - Advanced Core Intelligence.md",
-    "nexus_wiki_vault/02_Modules/Module - Domain Services and Adapters.md",
-    "nexus_wiki_vault/90_Sources/Source - Operational Scripts Index.md",
-    "nexus_wiki_vault/02_Modules/Module - Intelligence and Logic (Remaining Core).md",
-    "nexus_wiki_vault/02_Modules/Module - Task Scheduling and Swarm Adapters.md",
-    "nexus_wiki_vault/02_Modules/Module - Intelligence and Context Core.md",
-    "nexus_wiki_vault/02_Modules/Module - Security and Tool Guard Registry.md",
-    "nexus_wiki_vault/02_Modules/Module - State Lifecycle and Snapshotting.md",
-    "nexus_wiki_vault/02_Modules/Module - Platform Core Registry.md",
-    "nexus_wiki_vault/02_Modules/Module - Policy and Learning Governance.md",
-    "nexus_wiki_vault/02_Modules/Module - Memory Pipeline Deep Dive.md",
-    "nexus_wiki_vault/02_Modules/Module - Guard and Gate Control.md",
-    "nexus_wiki_vault/02_Modules/Module - Core Orchestrator Deep Dive.md",
-    "nexus_wiki_vault/02_Modules/Module%20-%20Policy%20and%20Learning%20Governance.md",
-    "nexus_wiki_vault/02_Modules/Module%20-%20Memory%20Pipeline%20Deep%20Dive.md",
-    "nexus_wiki_vault/02_Modules/Module%20-%20Guard%20and%20Gate%20Control.md",
-    "scripts/ops/wiki_drift_audit.py",
-    "scripts/ops/wiki_coverage_audit.py",
-    "scripts/ops/__pycache__/wiki_linter.cpython-312.pyc",
-    "wiki_audit.json"
+    "tests/test_uv_cache_isolation.py",
+    "tests/test_governance_telemetry_closure.py",
+    "tests/__pycache__/test_uv_cache_isolation.cpython-314-pytest-9.0.2.pyc",
+    "tests/__pycache__/test_governance_telemetry_closure.cpython-314-pytest-9.0.2.pyc",
+    "tests/test_semantic_receipt_gate.py",
+    "nexus/core/policy_drift.py",
+    "nexus/core/__pycache__/policy_drift.cpython-314.pyc",
+    "tests/__pycache__/test_semantic_receipt_gate.cpython-314-pytest-9.0.2.pyc",
+    "packages/graphify-out/cache/stat-index.json",
+    "packages/graphify-out/graph.html",
+    "packages/graphify-out/GRAPH_REPORT.md",
+    "packages/graphify-out/graph.json",
+    "nexus-core/graphify-out/GRAPH_REPORT.md",
+    "implementation_plan.md",
+    "teleport_task_59/vagrant/README.md",
+    "teleport_task_59/lib/srv/desktop/README.md",
+    "teleport_task_59/lib/restrictedsession/bytecode/README.md",
+    "teleport_task_59/lib/fuzz/README.md",
+    "teleport_task_59/lib/bpf/bytecode/README.md",
+    "teleport_task_59/lib/auth/webauthn/httpserver/README.md",
+    "teleport_task_59/examples/workflows/README.md",
+    "teleport_task_59/examples/local-cluster/README.md",
+    "teleport_task_59/examples/chart/teleport/README.md",
+    "teleport_task_59/examples/chart/teleport/HIGHAVAILABILITY.md",
+    "teleport_task_59/examples/chart/teleport-daemonset/README.md",
+    "teleport_task_59/examples/chart/teleport-auto-trustedcluster/README.md",
+    "teleport_task_59/examples/aws/cloudformation/img/aws-cf-oss-teleport.png",
+    "teleport_task_59/examples/aws/cloudformation/img/aws-cf-oss-teleport-img.png",
+    "teleport_task_59/examples/aws/cloudformation/README.md",
+    "teleport_task_59/docs/img/teleport-sso/custom-content@2x.png",
+    "teleport_task_59/docs/img/teleport-kubernetes-outside.svg",
+    "teleport_task_59/docs/img/teleport-k8s-pod.svg",
+    "teleport_task_59/docs/img/sso/onelogin/onelogin-saml-8.png",
+    "teleport_task_59/docs/img/sso/onelogin/onelogin-saml-7.png",
+    "teleport_task_59/docs/img/sso/onelogin/onelogin-saml-6.png",
+    "teleport_task_59/docs/img/sessions.png",
+    "teleport_task_59/docs/img/server-access/subdomains.png",
+    "teleport_task_59/docker/README.md",
+    "teleport_task_59/build.assets/webapps/README.md",
+    "teleport_task_59/assets/monitoring/README.md",
+    "teleport_task_59/assets/loadtest/network/README.md",
+    "teleport_task_59/assets/loadtest/etcd/README.md",
+    "teleport_task_59/assets/loadtest/README.md",
+    "teleport_task_59/assets/aws/cloudformation/README.md",
+    "teleport_task_59/assets/loadtest/cluster/README.md",
+    "teleport_task_59/rfd/0075-snowflake-support.md"
   ]
 }

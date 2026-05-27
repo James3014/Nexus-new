@@ -1,0 +1,334 @@
+{
+  "directed": false,
+  "multigraph": false,
+  "graph": {},
+  "nodes": [
+    {
+      "label": "lib.rs",
+      "file_type": "code",
+      "source_file": "src/lib.rs",
+      "source_location": "L1",
+      "id": "src_lib_rs",
+      "community": 1,
+      "norm_label": "lib.rs"
+    },
+    {
+      "label": "scan_and_diagnose()",
+      "file_type": "code",
+      "source_file": "src/lib.rs",
+      "source_location": "L9",
+      "id": "src_lib_scan_and_diagnose",
+      "community": 1,
+      "norm_label": "scan_and_diagnose()"
+    },
+    {
+      "label": "check_pub_api_diff()",
+      "file_type": "code",
+      "source_file": "src/lib.rs",
+      "source_location": "L65",
+      "id": "src_lib_check_pub_api_diff",
+      "community": 1,
+      "norm_label": "check_pub_api_diff()"
+    },
+    {
+      "label": "nexus_core()",
+      "file_type": "code",
+      "source_file": "src/lib.rs",
+      "source_location": "L70",
+      "id": "src_lib_nexus_core",
+      "community": 1,
+      "norm_label": "nexus_core()"
+    },
+    {
+      "label": "test_rust_ast_scan_and_diagnose()",
+      "file_type": "code",
+      "source_file": "src/lib.rs",
+      "source_location": "L81",
+      "id": "src_lib_test_rust_ast_scan_and_diagnose",
+      "community": 1,
+      "norm_label": "test_rust_ast_scan_and_diagnose()"
+    },
+    {
+      "label": "test_rust_ast_diff_caching()",
+      "file_type": "code",
+      "source_file": "src/lib.rs",
+      "source_location": "L97",
+      "id": "src_lib_test_rust_ast_diff_caching",
+      "community": 1,
+      "norm_label": "test_rust_ast_diff_caching()"
+    },
+    {
+      "label": "test_rust_ast_diff_syntax_fault_tolerance()",
+      "file_type": "code",
+      "source_file": "src/lib.rs",
+      "source_location": "L113",
+      "id": "src_lib_test_rust_ast_diff_syntax_fault_tolerance",
+      "community": 1,
+      "norm_label": "test_rust_ast_diff_syntax_fault_tolerance()"
+    },
+    {
+      "label": "ast_diff.rs",
+      "file_type": "code",
+      "source_file": "src/ast_diff.rs",
+      "source_location": "L1",
+      "id": "src_ast_diff_rs",
+      "community": 0,
+      "norm_label": "ast_diff.rs"
+    },
+    {
+      "label": "get_source_hash()",
+      "file_type": "code",
+      "source_file": "src/ast_diff.rs",
+      "source_location": "L11",
+      "id": "src_ast_diff_get_source_hash",
+      "community": 0,
+      "norm_label": "get_source_hash()"
+    },
+    {
+      "label": "extract_fuzzy_signatures()",
+      "file_type": "code",
+      "source_file": "src/ast_diff.rs",
+      "source_location": "L17",
+      "id": "src_ast_diff_extract_fuzzy_signatures",
+      "community": 0,
+      "norm_label": "extract_fuzzy_signatures()"
+    },
+    {
+      "label": "get_public_api_signatures()",
+      "file_type": "code",
+      "source_file": "src/ast_diff.rs",
+      "source_location": "L42",
+      "id": "src_ast_diff_get_public_api_signatures",
+      "community": 0,
+      "norm_label": "get_public_api_signatures()"
+    },
+    {
+      "label": "format_signature()",
+      "file_type": "code",
+      "source_file": "src/ast_diff.rs",
+      "source_location": "L110",
+      "id": "src_ast_diff_format_signature",
+      "community": 0,
+      "norm_label": "format_signature()"
+    },
+    {
+      "label": "quote_tokens()",
+      "file_type": "code",
+      "source_file": "src/ast_diff.rs",
+      "source_location": "L116",
+      "id": "src_ast_diff_quote_tokens",
+      "community": 0,
+      "norm_label": "quote_tokens()"
+    },
+    {
+      "label": "compare_pub_apis()",
+      "file_type": "code",
+      "source_file": "src/ast_diff.rs",
+      "source_location": "L124",
+      "id": "src_ast_diff_compare_pub_apis",
+      "community": 0,
+      "norm_label": "compare_pub_apis()"
+    }
+  ],
+  "links": [
+    {
+      "relation": "contains",
+      "confidence": "EXTRACTED",
+      "source_file": "src/lib.rs",
+      "source_location": "L9",
+      "weight": 1.0,
+      "source": "src_lib_rs",
+      "target": "src_lib_scan_and_diagnose",
+      "confidence_score": 1.0
+    },
+    {
+      "relation": "contains",
+      "confidence": "EXTRACTED",
+      "source_file": "src/lib.rs",
+      "source_location": "L65",
+      "weight": 1.0,
+      "source": "src_lib_rs",
+      "target": "src_lib_check_pub_api_diff",
+      "confidence_score": 1.0
+    },
+    {
+      "relation": "contains",
+      "confidence": "EXTRACTED",
+      "source_file": "src/lib.rs",
+      "source_location": "L70",
+      "weight": 1.0,
+      "source": "src_lib_rs",
+      "target": "src_lib_nexus_core",
+      "confidence_score": 1.0
+    },
+    {
+      "relation": "contains",
+      "confidence": "EXTRACTED",
+      "source_file": "src/lib.rs",
+      "source_location": "L81",
+      "weight": 1.0,
+      "source": "src_lib_rs",
+      "target": "src_lib_test_rust_ast_scan_and_diagnose",
+      "confidence_score": 1.0
+    },
+    {
+      "relation": "contains",
+      "confidence": "EXTRACTED",
+      "source_file": "src/lib.rs",
+      "source_location": "L97",
+      "weight": 1.0,
+      "source": "src_lib_rs",
+      "target": "src_lib_test_rust_ast_diff_caching",
+      "confidence_score": 1.0
+    },
+    {
+      "relation": "contains",
+      "confidence": "EXTRACTED",
+      "source_file": "src/lib.rs",
+      "source_location": "L113",
+      "weight": 1.0,
+      "source": "src_lib_rs",
+      "target": "src_lib_test_rust_ast_diff_syntax_fault_tolerance",
+      "confidence_score": 1.0
+    },
+    {
+      "relation": "calls",
+      "context": "call",
+      "confidence": "EXTRACTED",
+      "source_file": "src/lib.rs",
+      "source_location": "L87",
+      "weight": 1.0,
+      "source": "src_lib_test_rust_ast_scan_and_diagnose",
+      "target": "src_lib_scan_and_diagnose",
+      "confidence_score": 1.0
+    },
+    {
+      "relation": "calls",
+      "context": "call",
+      "confidence": "EXTRACTED",
+      "source_file": "src/lib.rs",
+      "source_location": "L102",
+      "weight": 1.0,
+      "source": "src_lib_test_rust_ast_diff_caching",
+      "target": "src_lib_check_pub_api_diff",
+      "confidence_score": 1.0
+    },
+    {
+      "relation": "calls",
+      "context": "call",
+      "confidence": "EXTRACTED",
+      "source_file": "src/lib.rs",
+      "source_location": "L118",
+      "weight": 1.0,
+      "source": "src_lib_test_rust_ast_diff_syntax_fault_tolerance",
+      "target": "src_lib_check_pub_api_diff",
+      "confidence_score": 1.0
+    },
+    {
+      "relation": "contains",
+      "confidence": "EXTRACTED",
+      "source_file": "src/ast_diff.rs",
+      "source_location": "L11",
+      "weight": 1.0,
+      "source": "src_ast_diff_rs",
+      "target": "src_ast_diff_get_source_hash",
+      "confidence_score": 1.0
+    },
+    {
+      "relation": "contains",
+      "confidence": "EXTRACTED",
+      "source_file": "src/ast_diff.rs",
+      "source_location": "L17",
+      "weight": 1.0,
+      "source": "src_ast_diff_rs",
+      "target": "src_ast_diff_extract_fuzzy_signatures",
+      "confidence_score": 1.0
+    },
+    {
+      "relation": "contains",
+      "confidence": "EXTRACTED",
+      "source_file": "src/ast_diff.rs",
+      "source_location": "L42",
+      "weight": 1.0,
+      "source": "src_ast_diff_rs",
+      "target": "src_ast_diff_get_public_api_signatures",
+      "confidence_score": 1.0
+    },
+    {
+      "relation": "contains",
+      "confidence": "EXTRACTED",
+      "source_file": "src/ast_diff.rs",
+      "source_location": "L110",
+      "weight": 1.0,
+      "source": "src_ast_diff_rs",
+      "target": "src_ast_diff_format_signature",
+      "confidence_score": 1.0
+    },
+    {
+      "relation": "contains",
+      "confidence": "EXTRACTED",
+      "source_file": "src/ast_diff.rs",
+      "source_location": "L116",
+      "weight": 1.0,
+      "source": "src_ast_diff_rs",
+      "target": "src_ast_diff_quote_tokens",
+      "confidence_score": 1.0
+    },
+    {
+      "relation": "contains",
+      "confidence": "EXTRACTED",
+      "source_file": "src/ast_diff.rs",
+      "source_location": "L124",
+      "weight": 1.0,
+      "source": "src_ast_diff_rs",
+      "target": "src_ast_diff_compare_pub_apis",
+      "confidence_score": 1.0
+    },
+    {
+      "relation": "calls",
+      "context": "call",
+      "confidence": "EXTRACTED",
+      "source_file": "src/ast_diff.rs",
+      "source_location": "L43",
+      "weight": 1.0,
+      "source": "src_ast_diff_get_public_api_signatures",
+      "target": "src_ast_diff_get_source_hash",
+      "confidence_score": 1.0
+    },
+    {
+      "relation": "calls",
+      "context": "call",
+      "confidence": "EXTRACTED",
+      "source_file": "src/ast_diff.rs",
+      "source_location": "L99",
+      "weight": 1.0,
+      "source": "src_ast_diff_get_public_api_signatures",
+      "target": "src_ast_diff_extract_fuzzy_signatures",
+      "confidence_score": 1.0
+    },
+    {
+      "relation": "calls",
+      "context": "call",
+      "confidence": "EXTRACTED",
+      "source_file": "src/ast_diff.rs",
+      "source_location": "L60",
+      "weight": 1.0,
+      "source": "src_ast_diff_get_public_api_signatures",
+      "target": "src_ast_diff_format_signature",
+      "confidence_score": 1.0
+    },
+    {
+      "relation": "calls",
+      "context": "call",
+      "confidence": "EXTRACTED",
+      "source_file": "src/ast_diff.rs",
+      "source_location": "L125",
+      "weight": 1.0,
+      "source": "src_ast_diff_compare_pub_apis",
+      "target": "src_ast_diff_get_public_api_signatures",
+      "confidence_score": 1.0
+    }
+  ],
+  "hyperedges": [],
+  "built_at_commit": "b07f0eb6a7d336142430a6c64ef23ae013255690"
+}

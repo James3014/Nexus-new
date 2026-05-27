@@ -16,7 +16,7 @@ def run_live_test():
     print(f"  > Audit Status: {audit_a['status']}")
     print(f"  > Density Score: {audit_a['density_score']:.2f}")
     
-    state_a = NexusState()
+    state_a = NexusState(task_id="test-task-a")
     state_a.health_metrics.outcome_quality = 1.0 # 假設功能測試 100% 過
     state_a.metadata["plan_density_score"] = audit_a["density_score"]
     
@@ -36,7 +36,7 @@ def run_live_test():
     print(f"  > Audit Status: {audit_b['status']}")
     print(f"  > Density Score: {audit_b['density_score']:.2f}")
     
-    state_b = NexusState()
+    state_b = NexusState(task_id="test-task-b")
     state_b.health_metrics.outcome_quality = 1.0
     state_b.metadata["plan_density_score"] = audit_b["density_score"]
     state_b.metadata["thinking_depth_score"] = audit_b["thinking_depth_score"]

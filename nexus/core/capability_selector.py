@@ -33,53 +33,65 @@ class CapabilitySelector:
                 "timestamp": datetime.now(timezone.utc).isoformat(),
             }
 
+        import os
+        is_light_route = os.environ.get("NEXUS_LIGHT_ROUTE", "0") == "1"
+        is_light_force = os.environ.get("NEXUS_LIGHT_ROUTE_FORCE", "0") == "1"
+
         required_caps: List[str] = []
         forbidden_rules = verdict.get("forbidden_skills_rules", [])
 
         # 2. 智慧能力動態選擇演算法 (Autonomic Adaptive Selection)
-        # S (Scope)
-        required_caps.append("mempalace")
-        if signal_set.risk_level in ("HIGH", "CRITICAL"):
-            required_caps.append("policy_capability_gate")
-
-        # P (Plan)
-        required_caps.append("autonomic_router")
-
-        # X (Recon)
-        required_caps.append("codeintel")
-        required_caps.append("lancedb")
-        query_lower = signal_set.task_desc.lower()
-        if "research" in query_lower or "source" in query_lower or "citation" in query_lower:
-            required_caps.append("research")
-            required_caps.append("research_and_source_discipline")
-
-        # D (Decide)
-        required_caps.append("belief")
-        # 🧪 [Round 20] Belief Shift Adaptive Thresholding
-        if signal_set.belief_confidence < 0.65 or signal_set.risk_level == "CRITICAL":
-            required_caps.append("autoreason")
-
-        # R (Repair)
-        if signal_set.impact_complexity > 3.5 or signal_set.risk_level == "CRITICAL":
-            required_caps.append("hyper_sprint")
-            required_caps.append("swarm_multi_agent")
+        # 🚀 智慧自適應：當自動評估為 LOW 風險且複雜度極低時，預設自動啟用輕量路由分流以優化 Always-on 商用 ROI
+        is_light_auto = (signal_set.risk_level == "LOW" and signal_set.impact_complexity <= 3.0)
+        if (is_light_route and signal_set.risk_level not in ("HIGH", "CRITICAL") and signal_set.impact_complexity <= 3.0) or is_light_force or is_light_auto:
+            # 🚀 輕量路由模式下，只保留最核心的 S-P-R-C 骨幹能力，跳過重度沙盒與多重自癒模組
+            required_caps = ["mempalace", "autonomic_router", "belief", "repair_loop", "learning_closure"]
+            phases = ["S", "P", "R", "C"]
         else:
-            required_caps.append("repair_loop")
+            phases = ["S", "P", "X", "D", "R", "A", "C"]
+            # S (Scope)
+            required_caps.append("mempalace")
+            if signal_set.risk_level in ("HIGH", "CRITICAL"):
+                required_caps.append("policy_capability_gate")
 
-        if "background" in query_lower or "jobs" in query_lower:
-            required_caps.append("drone")
-        if "long" in query_lower or "overnight" in query_lower:
-            required_caps.append("nightshift")
+            # P (Plan)
+            required_caps.append("autonomic_router")
 
-        # A (Audit)
-        required_caps.append("artifact_gate")
-        required_caps.append("claim_gate")
-        if signal_set.risk_level == "CRITICAL" or signal_set.impact_complexity > 4.0:
-            required_caps.append("ultra_review")
+            # X (Recon)
+            required_caps.append("codeintel")
+            required_caps.append("lancedb")
+            query_lower = signal_set.task_desc.lower()
+            if "research" in query_lower or "source" in query_lower or "citation" in query_lower:
+                required_caps.append("research")
+                required_caps.append("research_and_source_discipline")
 
-        # C (Closure)
-        required_caps.append("learning_closure")
-        required_caps.append("metabolism_resume")
+            # D (Decide)
+            required_caps.append("belief")
+            # 🧪 [Round 20] Belief Shift Adaptive Thresholding
+            if signal_set.belief_confidence < 0.65 or signal_set.risk_level == "CRITICAL":
+                required_caps.append("autoreason")
+
+            # R (Repair)
+            if signal_set.impact_complexity > 3.5 or signal_set.risk_level == "CRITICAL":
+                required_caps.append("hyper_sprint")
+                required_caps.append("swarm_multi_agent")
+            else:
+                required_caps.append("repair_loop")
+
+            if "background" in query_lower or "jobs" in query_lower:
+                required_caps.append("drone")
+            if "long" in query_lower or "overnight" in query_lower:
+                required_caps.append("nightshift")
+
+            # A (Audit)
+            required_caps.append("artifact_gate")
+            required_caps.append("claim_gate")
+            if signal_set.risk_level == "CRITICAL" or signal_set.impact_complexity > 4.0:
+                required_caps.append("ultra_review")
+
+            # C (Closure)
+            required_caps.append("learning_closure")
+            required_caps.append("metabolism_resume")
 
         # 3. 過濾與過濾黑名單規則 (Filter Out Blocked capabilities)
         final_caps: List[str] = []
@@ -108,7 +120,7 @@ class CapabilitySelector:
             # Mode C 且 risk 較高時裝配 Swarm 複數協作 Assembly
             if "Mode C" in info.allowed_heep_modes and (
                 signal_set.risk_level in ("HIGH", "CRITICAL") or signal_set.impact_complexity > 3.5
-            ):
+            ) and not is_light_route:
                 slots.append(
                     SkillSlot(
                         role="SCOUT",
@@ -128,7 +140,6 @@ class CapabilitySelector:
             skill_slots[cap_name] = slots
 
         # 5. 生成階段 DAG (S,P,X,D,R,A,C)
-        phases = ["S", "P", "X", "D", "R", "A", "C"]
 
         plan_id = f"plan_{signal_set.task_id}_{int(datetime.now(timezone.utc).timestamp())}"
 

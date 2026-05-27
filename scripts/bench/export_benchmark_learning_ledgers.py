@@ -5,7 +5,7 @@ import json
 from pathlib import Path
 from typing import Any
 
-from scripts.bench.route_cost_optimizer import LOCAL_SUCCESS_SOURCES, PROVIDER_TOKEN_SOURCES
+from scripts.bench.cost_evidence_classifier import LOCAL_SUCCESS_SOURCES, PROVIDER_TOKEN_SOURCES
 
 
 def _load_json(path: Path) -> dict[str, Any]:

@@ -51,6 +51,22 @@ class SkillReceipt:
     timestamp: str = ""
 
 
+class TelemetryReasonCodes:
+    SUCCESS = "T000"
+    TELEMETRY_MISSING = "T001"
+    WALL_TIME_INVALID = "T002"
+    TOKEN_USAGE_INVALID = "T003"
+    OVERHEAD_INVALID = "T004"
+    ALIGNMENT_FAILED = "T005"
+
+
+@dataclass(frozen=True)
+class TelemetryVerificationResult:
+    is_valid: bool
+    reason_code: str
+    reason: str
+
+
 @dataclass(frozen=True)
 class CapabilityReceipt:
     """Rigorous artifact confirming that a capability was active, backed by concrete evidence & gates."""
@@ -68,22 +84,27 @@ class CapabilityReceipt:
     timestamp: str = ""
 
     @property
-    def is_claimable(self) -> bool:
+    def verify_telemetry(self) -> TelemetryVerificationResult:
         if not self.evidence_alignment:
-            return False
+            return TelemetryVerificationResult(False, TelemetryReasonCodes.ALIGNMENT_FAILED, "Evidence alignment verification failed")
         if not self.telemetries:
-            return False
-        # Verify all 4 major telemetries are present and valid
+            return TelemetryVerificationResult(False, TelemetryReasonCodes.TELEMETRY_MISSING, "Telemetry data is empty or missing")
+        
         required_keys = ("wall_time_ms", "token_usage", "provider_costs", "overhead_ms")
         for key in required_keys:
             if key not in self.telemetries:
-                return False
-        # wall_time_ms and token_usage must be strictly greater than 0
+                return TelemetryVerificationResult(False, TelemetryReasonCodes.TELEMETRY_MISSING, f"Required telemetry key missing: {key}")
+                
         if self.telemetries.get("wall_time_ms", 0) <= 0:
-            return False
+            return TelemetryVerificationResult(False, TelemetryReasonCodes.WALL_TIME_INVALID, "wall_time_ms must be strictly greater than 0")
         if self.telemetries.get("token_usage", 0) <= 0:
-            return False
-        return True
+            return TelemetryVerificationResult(False, TelemetryReasonCodes.TOKEN_USAGE_INVALID, "token_usage must be strictly greater than 0")
+            
+        return TelemetryVerificationResult(True, TelemetryReasonCodes.SUCCESS, "Telemetry verification passed successfully")
+
+    @property
+    def is_claimable(self) -> bool:
+        return self.verify_telemetry.is_valid
 
 
 @dataclass(frozen=True)

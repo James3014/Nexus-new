@@ -168,6 +168,7 @@ def _run_tests(case_dir: Path, timeout_sec: int) -> bool:
 
 def _resolve_gemini_bin() -> str:
     candidates = [
+        "/Users/jameschen/.local/bin/agy",
         os.getenv("NEXUS_GEMINI_BIN", ""),
         "/Users/jameschen/.npm-global/bin/gemini",
         "/opt/homebrew/bin/gemini",
@@ -342,26 +343,90 @@ def _run_gemini_patch(
     nexus_profile: str = "core",
 ) -> dict[str, Any]:
     prompt = _build_gemini_prompt(task, case_dir, mode=mode, nexus_profile=nexus_profile)
-    cmd = [_resolve_gemini_bin(), "-m", model, "-p", prompt, "--output-format", "json"]
-    if os.getenv("NEXUS_GEMINI_YOLO", "").strip().lower() in {"1", "true", "yes", "on", "yolo"}:
-        cmd.insert(1, "-y")
+    bin_path = _resolve_gemini_bin()
+    if "agy" in str(bin_path):
+        cmd = [bin_path, "--dangerously-skip-permissions", "--print", prompt]
+    else:
+        cmd = [bin_path, "-m", model, "-p", prompt, "--output-format", "json"]
+        if os.getenv("NEXUS_GEMINI_YOLO", "").strip().lower() in {"1", "true", "yes", "on", "yolo"}:
+            cmd.insert(1, "-y")
     env = os.environ.copy()
     env["HOME"] = "/Users/jameschen"
     env["PATH"] = f"/opt/homebrew/bin:/Users/jameschen/.npm-global/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin:{env.get('PATH', '')}"
-    try:
-        res = subprocess.run(cmd, cwd=case_dir, env=env, text=True, capture_output=True, timeout=timeout_sec, check=False)
-    except subprocess.TimeoutExpired as exc:
-        return {
-            "regression_test_added": False,
-            "unrelated_change": False,
-            "root_cause": "",
-            "written_files": [],
-            "model_calls": 1,
-            "total_tokens": 0,
-            "token_capture_status": "timeout",
-            "gemini_returncode": None,
-            "error": f"gemini_timeout:{exc}",
-        }
+    
+    if "agy" in str(bin_path):
+        import pty
+        import select
+        master, slave = pty.openpty()
+        try:
+            p = subprocess.Popen(
+                cmd,
+                cwd=case_dir,
+                env=env,
+                stdin=slave,
+                stdout=slave,
+                stderr=slave,
+                text=True,
+                close_fds=True,
+            )
+            os.close(slave)
+            
+            output_chunks = []
+            start_time = time.time()
+            while True:
+                if time.time() - start_time > timeout_sec:
+                    p.kill()
+                    return {
+                        "regression_test_added": False,
+                        "unrelated_change": False,
+                        "root_cause": "",
+                        "written_files": [],
+                        "model_calls": 1,
+                        "total_tokens": 0,
+                        "token_capture_status": "timeout",
+                        "gemini_returncode": None,
+                        "error": "gemini_timeout: PTY execution timed out",
+                    }
+                try:
+                    r, _, _ = select.select([master], [], [], 0.5)
+                    if master in r:
+                        data = os.read(master, 4096)
+                        if not data:
+                            break
+                        output_chunks.append(data.decode("utf-8", errors="ignore"))
+                    else:
+                        if p.poll() is not None:
+                            break
+                except OSError:
+                    break
+            p.wait(timeout=5)
+            res_stdout = "".join(output_chunks)
+            res = subprocess.CompletedProcess(
+                args=cmd,
+                returncode=p.returncode,
+                stdout=res_stdout,
+                stderr="",
+            )
+        finally:
+            try:
+                os.close(master)
+            except:
+                pass
+    else:
+        try:
+            res = subprocess.run(cmd, cwd=case_dir, env=env, text=True, capture_output=True, timeout=timeout_sec, check=False)
+        except subprocess.TimeoutExpired as exc:
+            return {
+                "regression_test_added": False,
+                "unrelated_change": False,
+                "root_cause": "",
+                "written_files": [],
+                "model_calls": 1,
+                "total_tokens": 0,
+                "token_capture_status": "timeout",
+                "gemini_returncode": None,
+                "error": f"gemini_timeout:{exc}",
+            }
     tokens, token_status = _parse_total_tokens(res.stdout)
     payload = _parse_gemini_payload(res.stdout)
     before_note = case_dir / "notes" / "user_draft.md"
@@ -454,6 +519,10 @@ def _run_full_nexus_learn_chain(
         str(target),
         "--topic",
         topic,
+        "--task-desc",
+        task.task_desc,
+        "--difficulty",
+        task.difficulty,
         "--report-file",
         str(ingest_report),
         "--markdown-report-file",
@@ -468,6 +537,10 @@ def _run_full_nexus_learn_chain(
         "learn:converge",
         "--topic",
         topic,
+        "--task-desc",
+        task.task_desc,
+        "--difficulty",
+        task.difficulty,
         "--max-rounds",
         "1",
         "--question-count",
@@ -754,11 +827,13 @@ def _run_full_nexus_patch(
     target = _primary_target_for_task(case_dir, task)
     before_note = case_dir / "notes" / "user_draft.md"
     before_note_text = before_note.read_text(encoding="utf-8") if before_note.exists() else None
+    
     learn_info = _run_full_nexus_learn_chain(
         case_dir,
         task,
         timeout_sec=min(timeout_sec, 20),
     )
+
     payload, report_file = _run_full_nexus_auto_flow_patch(
         case_dir,
         task,
@@ -837,23 +912,51 @@ def _run_full_nexus_patch(
 def _root_cause_matches(actual: str, expected: str, *, fixture_kind: str = "") -> bool:
     lowered = actual.lower()
     concept_groups = {
-        "flag_normalization": [["flag", "normal"], ["strip", "whitespace"], ["lower", "case", "uppercase"]],
-        "pricing_refactor": [["tax"], ["invoice", "total", "subtotal"]],
-        "missing_test_retry": [["retry", "backoff", "function", "compute_backoff"], ["exponential", "constant", "hardcoded"], ["test", "regression", "coverage", "edge"]],
-        "dirty_slug": [["slug"], ["whitespace", "space"], ["collapse", "replace", "hyphen"]],
-        "timeout_polling": [["poll", "loop"], ["limit", "bounded", "unbounded", "infinite"], ["sleep", "retry"]],
-        "nightshift_escalation": [["nightshift", "escalation"], ["trigger", "reason", "stage1"], ["cross", "module", "persist"]],
-        "nightshift_audit_bridge": [["nightshift", "audit", "bridge"], ["stage1", "reason"], ["helper", "metadata", "cross", "module"]],
+        "flag_normalization": [
+            ["flag", "normal", "旗標", "特徵", "規格"], 
+            ["strip", "whitespace", "去空白", "空格", "首尾"], 
+            ["lower", "case", "uppercase", "轉小寫", "大小寫", "小寫"]
+        ],
+        "pricing_refactor": [
+            ["tax", "稅額", "計算稅"], 
+            ["invoice", "total", "subtotal", "發票", "總計", "小計"]
+        ],
+        "missing_test_retry": [
+            ["retry", "backoff", "function", "compute_backoff", "重試", "退避"], 
+            ["exponential", "constant", "hardcoded", "指數", "常數", "硬編碼"], 
+            ["test", "regression", "coverage", "edge", "測試", "回歸", "覆蓋率"]
+        ],
+        "dirty_slug": [
+            ["slug", "別名", "網址縮略名"], 
+            ["whitespace", "space", "空白", "空格"], 
+            ["collapse", "replace", "hyphen", "合併", "替換", "連字號"]
+        ],
+        "timeout_polling": [
+            ["poll", "loop", "輪詢", "循環"], 
+            ["limit", "bounded", "unbounded", "infinite", "限制", "邊界", "無限"], 
+            ["sleep", "retry", "等待", "延遲"]
+        ],
+        "nightshift_escalation": [
+            ["nightshift", "escalation", "夜班", "升級"], 
+            ["trigger", "reason", "stage1", "觸發", "原因", "階段"], 
+            ["cross", "module", "persist", "跨模組", "持久化"]
+        ],
+        "nightshift_audit_bridge": [
+            ["nightshift", "audit", "bridge", "夜班", "審計", "橋接"], 
+            ["stage1", "reason", "階段一", "原因"], 
+            ["helper", "metadata", "cross", "module", "輔助", "元數據", "跨模組"]
+        ],
     }
     groups = concept_groups.get(fixture_kind)
     if groups:
         matched_groups = sum(1 for group in groups if any(term in lowered for term in group))
         return matched_groups >= min(2, len(groups))
-    actual_words = set(re.findall(r"[a-z0-9_]+", actual.lower()))
-    expected_words = [word for word in re.findall(r"[a-z0-9_]+", expected.lower()) if len(word) > 2]
+    # 支援繁簡中文分詞 fallback
+    actual_words = set(re.findall(r"[\u4e00-\u9fffA-Za-z0-9_]+", actual.lower()))
+    expected_words = [word for word in re.findall(r"[\u4e00-\u9fffA-Za-z0-9_]+", expected.lower()) if len(word) >= 2]
     if not expected_words:
         return bool(actual.strip())
-    hits = sum(1 for word in expected_words if word in actual_words or any(word in actual for actual in actual_words))
+    hits = sum(1 for word in expected_words if word in actual_words or any(word in act or act in word for act in actual_words))
     return hits >= min(2, len(expected_words))
 
 

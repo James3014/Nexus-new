@@ -32,10 +32,15 @@ def test_evidence_replay_artifact_generation():
         # Verify the returned dict structure
         assert res["physical_gate_passed"] is True
         assert res["semantic_gate_passed"] is True
+        assert res["evidence_bundle_referenced"] is True
+        assert res["contract_repro_valid"] is True
         assert "replay_artifact_path" in res
         
         replay_path = Path(res["replay_artifact_path"])
         assert replay_path.exists()
+        
+        # Verify the physical replay contract via DualGateVerifier
+        assert verifier.validate_replay_contract(replay_path) is True
         
         # Verify the physical replay artifact contents
         replay_data = json.loads(replay_path.read_text(encoding="utf-8"))

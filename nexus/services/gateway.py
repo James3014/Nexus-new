@@ -251,6 +251,12 @@ class BattlesuitGateway:
                 category="binary_missing",
             ), "gemini_missing"
 
+        # 🚀 [Compact Prompt Gateway] 壓縮 System Prompt 與 Context 以降低 Token 消耗與 Wall-time
+        if os.getenv("NEXUS_GATEWAY_COMPACT_PROMPT", "0") == "1":
+            sys_msg = sys_msg.replace("Do not use tools, do not inspect files, and do not create an execution plan.", "No tools/files/plans.")
+            content = re.sub(r"[ \t]+", " ", content)
+            content = re.sub(r"\n\n+", "\n", content)
+
         invocation_build_start = time.monotonic()
         invocation = build_gemini_cli_invocation(
             prompt=sys_msg,

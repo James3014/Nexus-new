@@ -30,7 +30,9 @@ class CapabilitySignalSet:
         task_id = str(context.get("task_id", context.get("task_desc", "default_task")))
         task_desc = str(context.get("task_desc", context.get("query", "")))
         tenant_id = str(context.get("tenant_id", "default"))
-        risk_level = str(context.get("risk_level", "NORMAL")).upper()
+        # 🛡️ 智慧路由對齊：優先讀取 local_reflex 自動識別的風險層級
+        raw_risk = context.get("risk_level") or context.get("local_reflex_risk_level") or "NORMAL"
+        risk_level = str(raw_risk).upper()
         if risk_level not in ("LOW", "NORMAL", "HIGH", "CRITICAL"):
             risk_level = "NORMAL"
 

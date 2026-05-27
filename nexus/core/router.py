@@ -56,7 +56,23 @@ class SkillsRouter:
             return {"status": "FORBIDDEN", "reason": f"Skill {skill_id} unauthorized for {current_domain}"}
 
         if mode == "dual":
-            palace_result = self._palace_search(query, tenant_id)
+            import os
+            is_light_route = os.environ.get("NEXUS_LIGHT_ROUTE", "0") == "1"
+            # 讀取當前 belief 信心狀態
+            confidence = 1.0
+            if hasattr(self.p_loop, "confidence"):
+                confidence = float(self.p_loop.confidence)
+            elif isinstance(self.p_loop, dict) and "confidence" in self.p_loop:
+                confidence = float(self.p_loop["confidence"])
+            elif hasattr(self.p_loop, "current_belief") and hasattr(self.p_loop.current_belief, "confidence"):
+                confidence = float(self.p_loop.current_belief.confidence)
+
+            if is_light_route and confidence >= 0.85:
+                # 🚀 高信心狀態 + 輕量路由：自律跳過 LanceDB 全文檢索
+                palace_result = {"status": "SUCCESS", "hit_rate": 0.0, "results": [], "tenant": tenant_id}
+            else:
+                palace_result = self._palace_search(query, tenant_id)
+
             palace_hit = float(palace_result.get("hit_rate", 0.0))
             if palace_hit >= min_palace_hit:
                 return {
