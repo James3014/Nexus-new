@@ -248,16 +248,29 @@ class CapabilityReceipt:
     failure_reason: str = ""
     semantic_hash: str = ""
     evidence_alignment: bool = True
+    telemetries: dict[str, Any] = field(default_factory=dict)
 
     @property
     def public_claim_safe(self) -> bool:
-        return bool(
+        basic_ok = bool(
             self.selected
             and self.invoked
             and self.evidence_present
             and self.gate_passed
             and self.outcome_contributed
+            and self.evidence_alignment
         )
+        if not basic_ok:
+            return False
+        
+        # Telemetry must be fully complete and present to allow public claim promotion
+        if not self.telemetries:
+            return False
+        required_keys = ("wall_time_ms", "token_usage", "provider_costs", "overhead_ms")
+        for key in required_keys:
+            if key not in self.telemetries:
+                return False
+        return True
 
     def to_dict(self) -> dict[str, Any]:
         return asdict(self) | {

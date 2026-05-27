@@ -7,7 +7,17 @@ from typing import Any
 class DualGateVerifier:
     """🛡️ Dual-Gate Verifier: checks physical existence (Gate 1) and semantic alignment (Gate 2)"""
     
-    def verify_receipt(self, evidence_path: str | Path | None, intent: str) -> dict[str, Any]:
+    def verify_receipt(
+        self,
+        evidence_path: str | Path | None,
+        intent: str,
+        repro_command: str = "",
+        timeout_sec: int = 0,
+        cwd: str = ""
+    ) -> dict[str, Any]:
+        import json
+        import hashlib
+        
         result = {
             "physical_gate_passed": False,
             "semantic_gate_passed": False,
@@ -38,7 +48,6 @@ class DualGateVerifier:
         # Mock-fallback based on intent feature mapping & consistency checks
         try:
             content = path.read_text(encoding="utf-8", errors="ignore")
-            # Extract keywords from intent
             keywords = [kw.lower() for kw in re.findall(r"\b[a-zA-Z0-9_\-]+\b", intent) if len(kw) > 3]
             
             matches = 0
@@ -49,7 +58,6 @@ class DualGateVerifier:
             match_ratio = (matches / len(keywords)) if keywords else 1.0
             result["alignment_confidence"] = round(match_ratio, 2)
             
-            # Semantic alignment is successful if confidence meets the threshold (e.g. >= 0.4 or if intent has low complexity)
             if match_ratio >= 0.4 or not keywords:
                 result["semantic_gate_passed"] = True
                 result["reason"] = f"Evidence aligned with intent (confidence: {match_ratio:.2f}) (Gate 2 PASSED)"
@@ -57,6 +65,34 @@ class DualGateVerifier:
                 result["reason"] = f"Semantic mismatch: intent keywords {keywords} not found in output (Gate 2 FAILED)"
         except Exception as exc:
             result["reason"] = f"Error performing semantic verification: {exc} (Gate 2 FAILED)"
+            
+        # P3:流式產出可重放證據 Artifact
+        try:
+            intent_hash = hashlib.md5(f"{intent}_{path}".encode("utf-8")).hexdigest()[:12]
+            reports_dir = path.parent.parent / ".nexus" / "reports"
+            if not reports_dir.exists():
+                # Fallback to local .nexus/reports relative to workspace
+                reports_dir = Path("/Users/jameschen/Workspace/nexus/.nexus/reports")
+            reports_dir.mkdir(parents=True, exist_ok=True)
+            
+            replay_path = reports_dir / f"gate_replay_{intent_hash}.json"
+            replay_payload = {
+                "evidence_id": f"ev_replay_{intent_hash}",
+                "repro_command": repro_command or "uv run pytest",
+                "timeout_sec": timeout_sec or 60,
+                "cwd": cwd or os.getcwd(),
+                "pass_fail_evidence": {
+                    "physical_gate_passed": result["physical_gate_passed"],
+                    "semantic_gate_passed": result["semantic_gate_passed"],
+                    "evidence_size_bytes": result["evidence_size_bytes"],
+                    "alignment_confidence": result["alignment_confidence"],
+                    "reason": result["reason"]
+                }
+            }
+            replay_path.write_text(json.dumps(replay_payload, indent=2, ensure_ascii=False), encoding="utf-8")
+            result["replay_artifact_path"] = str(replay_path.resolve())
+        except Exception as exc:
+            result["reason"] += f" | (Replay artifact generation error: {exc})"
             
         return result
 
