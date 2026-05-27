@@ -56,6 +56,49 @@ tests/test_route_cost_efficiency_opt.py::test_background_offload_heavy_rows_expe
 ============================== 5 passed in 0.49s ===============================
 ```
 
+### 4. Gateway Telemetry RCA Diagnostic Tooling (Task 4 - P1)
+- **`scripts/ops/gateway_rca_analyzer.py`**：
+  - 開發了一套專門用於 `observation-only` 的時延根因分析工具。
+  - 能精確從 telemetry JSONL 檔案中計算並分拆出 Gateway 內部開銷（CLI 啟動、JSON 解析）與實體 Provider 等待時間（Wait Ratio），並以 Markdown 格式輸出 payload 分組桶的詳細統計。
+  - 嚴格鎖定本報表為 `observation-only`，不干預 public cost claim。
+- **`tests/test_route_cost_efficiency_opt.py`**：
+  - 新增了 TDD 測試套件 `test_gateway_rca_analyzer_tool`，以驗證 payload 分組桶與 wait ratio 的計算正確性，全部通過。
+
+### 5. `context_sync_capped` Async Vector 離線 Spike TDD RED 驗收 (Task 5 - P1)
+- **`tests/test_route_cost_efficiency_opt.py`**：
+  - 新增 `test_context_sync_capped_offline_async_vector_spike_and_receipt_lite` 測試。
+  - 成功定義了 `context_sync_capped` 之下離線 async vector 檢索與 receipt-lite 產出之介面合約（RED 紅燈）。這為後續 green-phase 提供精準的 interface-first 目標。
+
+---
+
+## 🧪 最終 TDD 測試驗證證據 (TDD Proof of Success)
+
+我們為 Phase 2 設計的所有 TDD 測試套件在本地執行完全通過，紅燈部分如預期呈紅燈：
+
+```bash
+pytest tests/test_route_cost_efficiency_opt.py -v
+```
+
+### 測試執行紀錄：
+```text
+============================= test session starts ==============================
+platform darwin -- Python 3.14.4, pytest-9.0.2, pluggy-1.6.0
+collected 7 items
+
+tests/test_route_cost_efficiency_opt.py::test_route_policy_deterministic_rescue_and_candidate_invariants PASSED [ 14%]
+tests/test_route_cost_efficiency_opt.py::test_telemetry_classification_exclusion_and_provenance PASSED [ 28%]
+tests/test_route_cost_efficiency_opt.py::test_token_cleanliness_and_outlier_quarantine PASSED [ 42%]
+tests/test_route_cost_efficiency_opt.py::test_manifest_index_filtering_and_duplicate_safety PASSED [ 57%]
+tests/test_route_cost_efficiency_opt.py::test_background_offload_heavy_rows_experiment PASSED [ 71%]
+tests/test_route_cost_efficiency_opt.py::test_gateway_rca_analyzer_tool PASSED [ 85%]
+tests/test_route_cost_efficiency_opt.py::test_context_sync_capped_offline_async_vector_spike_and_receipt_lite FAILED [100%]
+
+=========================== short test summary info ============================
+FAILED tests/test_route_cost_efficiency_opt.py::test_context_sync_capped_offline_async_vector_spike_and_receipt_lite
+========================= 1 failed, 6 passed in 0.52s ==========================
+```
+
+
 - **Replay Injections**: 100 Successful samples added to `skill_outcome_events.jsonl`.
 - **AutoTune Application**: `nexus:skills-autotune --apply` (Neutralized drift).
 - **Final Gate Execution**: `nexus:acceptance-check --window=50`
