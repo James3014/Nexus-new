@@ -3712,3 +3712,10 @@ version_scope:
 - **Decision**: Developed `gateway_rca_analyzer.py` to stream-parse telemetry JSONL files, compute precise provider wait vs. gateway overhead ratios, and aggregate latency/timeout statistics into character-size buckets (e.g., 0-1k, 1k-5k). Enforced that the resulting markdown report is strictly marked as `observation-only` diagnostic telemetry, and does not alter or promote public claims.
 - **Prevention**: Keep diagnostic tools strictly decoupled from the core promotion pipeline. Never allow observation-only latency analysis or timeout exclusions to directly bypass or weaken the fail-closed claim threshold.
 
+## 2026-05-27: Phase 2 Offline Async Vector Retrieval & Receipt-Lite Spike TDD RED State
+- **Phenomenon**: Implementing offline async vector retrieval and receipt-lite verification under `context_sync_capped` required a systematic, interface-first TDD spike without prematurely modifying the core production `SkillsRouter` execution logic.
+- **Root Cause**: Rapidly patching core routing logic to add exploratory search APIs can cause production regressions and dirty state tracking if not protected by strict mock interfaces or progressive TDD boundaries.
+- **Decision**: Added `test_context_sync_capped_offline_async_vector_spike_and_receipt_lite` in `test_route_cost_efficiency_opt.py` to assert the desired async querying and receipt-lite generation contracts. The test is kept in a deliberate `AttributeError` (RED) state, providing a precise architectural target for future green-phase materialization.
+- **Prevention**: Always isolate experimental or offline spike contracts using a dedicated TDD red-light test. Do not mutate core routing models or production modules during the initial exploration phase.
+
+

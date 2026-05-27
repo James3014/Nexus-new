@@ -329,5 +329,46 @@ def test_gateway_rca_analyzer_tool(tmp_path):
     assert "observation-only" in md
 
 
+@pytest.mark.asyncio
+async def test_context_sync_capped_offline_async_vector_spike_and_receipt_lite():
+    """
+    TDD Task 5 (RED): Offline spike for context_sync_capped async vector retrieval
+    and receipt-lite validation.
+    This test specifies the desired interface for asynchronous offline vector queries
+    and compact receipt-lite evidence generation under the context_sync_capped lane.
+    Running this test will yield an AttributeError (RED) because the production core
+    remains untouched.
+    """
+    router = SkillsRouter(
+        project_root="/Users/jameschen/Workspace/nexus",
+        route_lane="context_sync_capped",
+        enable_offline_vector_sync=True,
+        vector_db_capped_size=1000
+    )
+    
+    # Desired interface for async offline vector sync
+    # This call is expected to fail with AttributeError as production core is unmodified
+    vector_results = await router.async_query_offline_vectors(
+        query="find_relevant_ast_nodes",
+        top_k=3,
+        max_duration_ms=100
+    )
+    
+    assert len(vector_results) > 0
+    assert vector_results[0]["score"] >= 0.8
+    
+    # Desired interface for receipt-lite generation
+    receipt = router.generate_receipt_lite(
+        capability="context_sync_capped",
+        selection_source="offline_vector_sync_lite",
+        metrics={"search_latency_ms": 12.5, "vector_hits": len(vector_results)}
+    )
+    
+    assert receipt["selection_source"] == "offline_vector_sync_lite"
+    assert receipt["gate_passed"] is True
+    assert "context_sync_capped" in receipt["evidence_refs"]
+
+
+
 
 
