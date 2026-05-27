@@ -111,3 +111,103 @@ def test_telemetry_classification_exclusion_and_provenance():
     
     assert decision_failed_exclusion.status == "REGRESSED"
     assert "wall_cost_not_improved" in decision_failed_exclusion.failures
+
+def test_token_cleanliness_and_outlier_quarantine():
+    """
+    TDD Phase 3 (RED): Verify Task 1 (P0) token cleanliness and outlier quarantine gates.
+    1. Token cleanliness: if model call occurred (model_calls > 0) but tokens are missing (token_usage <= 0 or missing),
+       the row is infra-invalid, verify_telemetry is invalid, and is_claimable is False.
+    2. Outlier gate: if gateway_token_outlier_reason == "stats_outlier_possible_cumulative",
+       verify_telemetry is invalid (is_claimable is False) and public_claim_safe is False.
+    """
+    # Test case 1: Model call occurred but tokens are 0
+    rcpt_missing_tokens = CoreReceipt(
+        capability_name="test_cap",
+        selected=True,
+        invoked=True,
+        evidence_id="ev_123",
+        gate_passed=True,
+        telemetries={
+            "wall_time_ms": 5000,
+            "token_usage": 0,
+            "provider_costs": 0.02,
+            "overhead_ms": 300,
+            "model_calls": 1,
+            "has_infra_invalid": True,
+            "infra_invalid_reason": "token_cleanliness_missing_tokens"
+        }
+    )
+    assert rcpt_missing_tokens.verify_telemetry.is_valid is False
+    assert rcpt_missing_tokens.is_claimable is False
+    
+    # Test case 2: Outlier detected
+    rcpt_outlier_core = CoreReceipt(
+        capability_name="test_cap",
+        selected=True,
+        invoked=True,
+        evidence_id="ev_123",
+        gate_passed=True,
+        telemetries={
+            "wall_time_ms": 5000,
+            "token_usage": 1000,
+            "provider_costs": 0.02,
+            "overhead_ms": 300,
+            "model_calls": 1,
+            "gateway_token_outlier_reason": "stats_outlier_possible_cumulative"
+        }
+    )
+    assert rcpt_outlier_core.verify_telemetry.is_valid is False
+    assert rcpt_outlier_core.is_claimable is False
+
+    rcpt_outlier_engine = EngineReceipt(
+        name="test_cap",
+        selected=True,
+        invoked=True,
+        evidence_present=True,
+        gate_passed=True,
+        outcome_contributed=True,
+        telemetries={
+            "wall_time_ms": 5000,
+            "token_usage": 1000,
+            "provider_costs": 0.02,
+            "overhead_ms": 300,
+            "model_calls": 1,
+            "gateway_token_outlier_reason": "stats_outlier_possible_cumulative"
+        }
+    )
+    assert rcpt_outlier_engine.public_claim_safe is False
+
+def test_manifest_index_filtering_and_duplicate_safety():
+    """
+    TDD Task 2 (RED/GREEN): Verify filter_tasks_by_manifest_index successfully parses
+    index ranges and comma-separated indices, and handles duplicate task IDs without contamination.
+    """
+    from scripts.bench.capability_ab_runner import CapabilityTask, filter_tasks_by_manifest_index
+    
+    # 建立一組含有重複 ID 的 Mock Tasks
+    mock_tasks = [
+        CapabilityTask(id="task_A", difficulty="easy", task_type="public", task_desc="desc", target_file="", test_file="", success_criteria="", manifest_index=0),
+        CapabilityTask(id="task_B", difficulty="easy", task_type="public", task_desc="desc", target_file="", test_file="", success_criteria="", manifest_index=1),
+        CapabilityTask(id="task_A", difficulty="easy", task_type="public", task_desc="desc", target_file="", test_file="", success_criteria="", manifest_index=2), # 重複的 ID
+        CapabilityTask(id="task_C", difficulty="easy", task_type="public", task_desc="desc", target_file="", test_file="", success_criteria="", manifest_index=3),
+        CapabilityTask(id="task_D", difficulty="easy", task_type="public", task_desc="desc", target_file="", test_file="", success_criteria="", manifest_index=4),
+    ]
+    
+    # 測試個別 index 篩選
+    res1 = filter_tasks_by_manifest_index(mock_tasks, "0,2")
+    assert len(res1) == 2
+    assert [t.manifest_index for t in res1] == [0, 2]
+    # 即便 A 重複，但因使用 manifest index，第一個和第三個 task A 被精確選出，不影響第二個或其他 task
+    assert [t.id for t in res1] == ["task_A", "task_A"]
+    
+    # 測試 range 篩選
+    res2 = filter_tasks_by_manifest_index(mock_tasks, "1-3")
+    assert len(res2) == 3
+    assert [t.manifest_index for t in res2] == [1, 2, 3]
+    assert [t.id for t in res2] == ["task_B", "task_A", "task_C"]
+    
+    # 測試 "all" 或是空字串
+    res3 = filter_tasks_by_manifest_index(mock_tasks, "all")
+    assert len(res3) == 5
+
+

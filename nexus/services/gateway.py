@@ -159,6 +159,8 @@ class BattlesuitGateway:
             "violations": [],
             "tokens_used": 0,
             "error_category": category,
+            "has_infra_invalid": True,
+            "infra_invalid_reason": f"gateway_{category}",
         }
         if isinstance(telemetry, dict):
             result.update(telemetry)
@@ -418,6 +420,9 @@ class BattlesuitGateway:
             data.setdefault("violations", [])
             data["tokens_used"] = tokens_total
             data["token_capture_status"] = capture_status
+            if tokens_total <= 0:
+                data["has_infra_invalid"] = True
+                data["infra_invalid_reason"] = "token_cleanliness_missing_tokens"
             if isinstance(token_info, dict):
                 data["gateway_stats_present"] = bool(token_info.get("gateway_stats_present", False))
                 data["gateway_usage_metadata_present"] = bool(token_info.get("gateway_usage_metadata_present", False))

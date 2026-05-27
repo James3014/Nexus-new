@@ -98,6 +98,12 @@ class CapabilityReceipt:
         if self.telemetries.get("has_infra_invalid", False):
             return TelemetryVerificationResult(False, TelemetryReasonCodes.TELEMETRY_MISSING, "Telemetry carries infra-invalid reason codes")
 
+        if self.telemetries.get("model_calls", 0) > 0 and self.telemetries.get("token_usage", 0) <= 0:
+            return TelemetryVerificationResult(False, TelemetryReasonCodes.TOKEN_USAGE_INVALID, "Model call occurred but tokens are missing (infra-invalid)")
+
+        if self.telemetries.get("gateway_token_outlier_reason") == "stats_outlier_possible_cumulative":
+            return TelemetryVerificationResult(False, TelemetryReasonCodes.TOKEN_USAGE_INVALID, "Stats outlier possible cumulative detected, public cost claim blocked")
+
         required_keys = ("wall_time_ms", "token_usage", "provider_costs", "overhead_ms")
         for key in required_keys:
             if key not in self.telemetries:

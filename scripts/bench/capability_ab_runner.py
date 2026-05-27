@@ -174,6 +174,7 @@ class CapabilityTask:
     token_budget: int | None = None
     wall_time_budget_sec: float | None = None
     public_claim_allowed_metrics: tuple[str, ...] = ()
+    manifest_index: int = -1
 
 
 @dataclass(frozen=True)
@@ -845,7 +846,7 @@ def load_tasks(path: str | Path) -> list[CapabilityTask]:
     manifest_hash = hashlib.sha256(raw_text.encode("utf-8")).hexdigest()
     tasks_raw = payload.get("tasks", [])
     tasks: list[CapabilityTask] = []
-    for row in tasks_raw:
+    for idx, row in enumerate(tasks_raw):
         category = str(row.get("category", ""))
         task_type = str(row.get("task_type", f"public_{category}" if category else "task"))
         cost_budget = row.get("cost_budget")
@@ -874,6 +875,7 @@ def load_tasks(path: str | Path) -> list[CapabilityTask]:
                 token_budget=int(row["token_budget"]) if row.get("token_budget") is not None else None,
                 wall_time_budget_sec=float(row["wall_time_budget_sec"]) if row.get("wall_time_budget_sec") is not None else None,
                 public_claim_allowed_metrics=tuple(str(item) for item in row.get("public_claim_allowed_metrics", []) or []),
+                manifest_index=idx,
             )
         )
     return tasks
@@ -947,6 +949,29 @@ def filter_tasks_by_id(tasks: list[CapabilityTask], task_id_filter: str) -> list
     return [task for task in tasks if task.id in allowed]
 
 
+def filter_tasks_by_manifest_index(tasks: list[CapabilityTask], manifest_index_filter: str) -> list[CapabilityTask]:
+    if manifest_index_filter.strip().lower() in {"", "all"}:
+        return tasks
+    allowed_indices: set[int] = set()
+    parts = [part.strip() for part in manifest_index_filter.split(",") if part.strip()]
+    for part in parts:
+        if "-" in part:
+            try:
+                start_str, end_str = part.split("-", 1)
+                start = int(start_str.strip())
+                end = int(end_str.strip())
+                for i in range(start, end + 1):
+                    allowed_indices.add(i)
+            except ValueError:
+                pass
+        else:
+            try:
+                allowed_indices.add(int(part))
+            except ValueError:
+                pass
+    return [task for task in tasks if task.manifest_index in allowed_indices]
+
+
 def expand_task_trials(tasks: list[CapabilityTask], *, repeat_trials: int, shuffle_seed: int | None) -> list[CapabilityTask]:
     expanded: list[CapabilityTask] = []
     trials = max(1, repeat_trials)
@@ -977,6 +1002,7 @@ def expand_task_trials(tasks: list[CapabilityTask], *, repeat_trials: int, shuff
                     token_budget=task.token_budget,
                     wall_time_budget_sec=task.wall_time_budget_sec,
                     public_claim_allowed_metrics=task.public_claim_allowed_metrics,
+                    manifest_index=task.manifest_index,
                 )
             )
     if shuffle_seed is not None:
@@ -9527,6 +9553,11 @@ def main() -> int:
         default="all",
         help="Comma-separated task id allowlist for targeted replay. Default: all.",
     )
+    parser.add_argument(
+        "--manifest-index-filter",
+        default="all",
+        help="Comma-separated manifest indices or range to filter tasks (e.g., '0,2,4' or '1-5'). Default: all.",
+    )
     parser.add_argument("--evidence-bundle", dest="evidence_bundle", action="store_true", default=True)
     parser.add_argument("--no-evidence-bundle", dest="evidence_bundle", action="store_false")
     parser.add_argument(
@@ -9645,9 +9676,12 @@ def main() -> int:
             )
         )
         return 2
-    filtered_tasks = filter_tasks_by_id(
-        filter_tasks_by_repo_kind(load_tasks(args.tasks_file), args.repo_kind_filter),
-        args.task_id_filter,
+    filtered_tasks = filter_tasks_by_manifest_index(
+        filter_tasks_by_id(
+            filter_tasks_by_repo_kind(load_tasks(args.tasks_file), args.repo_kind_filter),
+            args.task_id_filter,
+        ),
+        args.manifest_index_filter,
     )
     selected_tasks = select_tasks(filtered_tasks, difficulty=args.difficulty, max_tasks=args.max_tasks)
     tasks = expand_task_trials(

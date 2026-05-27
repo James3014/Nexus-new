@@ -3693,3 +3693,9 @@ version_scope:
 - **Root Cause**: Telemetry deductions directly altered wall time, and backfilling allowed estimated metrics to unlock public claim promotions.
 - **Decision**: Locked down router policies (`allow_pre_model_deterministic_rescue` and capability-invariant candidate pool), separated telemetry classification from wall-time deduction, restricted estimated backfills to `OBSERVATION_ONLY`, and added a full-bundle integration contract suite.
 - **Prevention**: Enforce row-keyed telemetry hygiene and audit provenance strictly before promotion; verify with AST-level pre-commit preflights and full-bundle runner tests.
+
+## 2026-05-27: Phase 2 Route-Cost Token Cleanliness and Manifest-Index Continuation
+- **Phenomenon**: Large-lane benchmarks can suffer from noisy telemetry (such as missing token statistics on completed model calls) and duplication of task IDs, causing replay contamination and public claim promotion leaks.
+- **Root Cause**: Gateway errors and missing token telemetry were not strictly mapped to `infra-invalid` status in belief validation, and replaying tasks relied on `task-id-only` filtering which cannot uniquely identify identical task IDs.
+- **Decision**: Implemented strict token-cleanliness validation (rejecting completed model calls with zero tokens) and stats cumulative outlier gating in `belief_contracts.py` and `capability_contracts.py`. Tagged gateway failures as `infra-invalid` inside `gateway.py`. Enhanced `capability_ab_runner.py` with unique `manifest_index` mapping and index-range filtering (`--manifest-index-filter`) to enforce robust continuation without contamination.
+- **Prevention**: Reject public claims when `has_infra_invalid=True` or `gateway_token_outlier_reason` indicates cumulative outliers. Always unique-key task instances with their raw manifest-order index to support robust, duplicate-safe partial replays.
