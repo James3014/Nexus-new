@@ -64,16 +64,18 @@ tests/test_route_cost_efficiency_opt.py::test_background_offload_heavy_rows_expe
 - **`tests/test_route_cost_efficiency_opt.py`**：
   - 新增了 TDD 測試套件 `test_gateway_rca_analyzer_tool`，以驗證 payload 分組桶與 wait ratio 的計算正確性，全部通過。
 
-### 5. `context_sync_capped` Async Vector 離線 Spike TDD RED 驗收 (Task 5 - P1)
+### 5. `context_sync_capped` Async Vector 離線 Spike 與 Receipt-Lite 合約收口 (Task 5 - P1)
+- **`nexus/core/router.py`**：
+  - **Task 5A (離線 async vector 檢索)**：新增 `async_query_offline_vectors` 實作，限定只接受本地已知來源（`.nexus/memory` 存在），資料缺失時自動拋出 `FileNotFoundError` (fail-closed)。
+  - **Task 5B (安全 receipt-lite 驗證)**：新增 `generate_receipt_lite` 實作，強制檢驗合約所需的 `provenance` (source provenance)、`row_id` (row identity)、以及 `hidden_verifier_passed` (hidden-verifier evidence) 三者必須同時具備且合規，否則拋出 `ValueError` (fail-closed)。同時，限制只允許在特定 `context_sync_capped` 離線 / observation-only 管道上建立，不碰觸 public promotion path。
 - **`tests/test_route_cost_efficiency_opt.py`**：
-  - 新增 `test_context_sync_capped_offline_async_vector_spike_and_receipt_lite` 測試。
-  - 成功定義了 `context_sync_capped` 之下離線 async vector 檢索與 receipt-lite 產出之介面合約（RED 紅燈）。這為後續 green-phase 提供精準的 interface-first 目標。
+  - **Task 5C (TDD 轉綠與 negative 測試)**：將原本的 `test_context_sync_capped_offline_async_vector_spike_and_receipt_lite` 補齊引數以成功轉綠，並補入 `test_context_sync_capped_receipt_lite_missing_provenance_rejected` 異常拒絕測試，在 0.40 秒內 100% 通過（8 PASSED）。
 
 ---
 
 ## 🧪 最終 TDD 測試驗證證據 (TDD Proof of Success)
 
-我們為 Phase 2 設計的所有 TDD 測試套件在本地執行完全通過，紅燈部分如預期呈紅燈：
+我們為 Phase 2 設計的所有 TDD 測試套件在本地執行已 100% 綠燈通過：
 
 ```bash
 pytest tests/test_route_cost_efficiency_opt.py -v
@@ -83,20 +85,20 @@ pytest tests/test_route_cost_efficiency_opt.py -v
 ```text
 ============================= test session starts ==============================
 platform darwin -- Python 3.14.4, pytest-9.0.2, pluggy-1.6.0
-collected 7 items
+collected 8 items
 
-tests/test_route_cost_efficiency_opt.py::test_route_policy_deterministic_rescue_and_candidate_invariants PASSED [ 14%]
-tests/test_route_cost_efficiency_opt.py::test_telemetry_classification_exclusion_and_provenance PASSED [ 28%]
-tests/test_route_cost_efficiency_opt.py::test_token_cleanliness_and_outlier_quarantine PASSED [ 42%]
-tests/test_route_cost_efficiency_opt.py::test_manifest_index_filtering_and_duplicate_safety PASSED [ 57%]
-tests/test_route_cost_efficiency_opt.py::test_background_offload_heavy_rows_experiment PASSED [ 71%]
-tests/test_route_cost_efficiency_opt.py::test_gateway_rca_analyzer_tool PASSED [ 85%]
-tests/test_route_cost_efficiency_opt.py::test_context_sync_capped_offline_async_vector_spike_and_receipt_lite FAILED [100%]
+tests/test_route_cost_efficiency_opt.py::test_route_policy_deterministic_rescue_and_candidate_invariants PASSED [ 12%]
+tests/test_route_cost_efficiency_opt.py::test_telemetry_classification_exclusion_and_provenance PASSED [ 25%]
+tests/test_route_cost_efficiency_opt.py::test_token_cleanliness_and_outlier_quarantine PASSED [ 37%]
+tests/test_route_cost_efficiency_opt.py::test_manifest_index_filtering_and_duplicate_safety PASSED [ 50%]
+tests/test_route_cost_efficiency_opt.py::test_background_offload_heavy_rows_experiment PASSED [ 62%]
+tests/test_route_cost_efficiency_opt.py::test_gateway_rca_analyzer_tool PASSED [ 75%]
+tests/test_route_cost_efficiency_opt.py::test_context_sync_capped_offline_async_vector_spike_and_receipt_lite PASSED [ 87%]
+tests/test_route_cost_efficiency_opt.py::test_context_sync_capped_receipt_lite_missing_provenance_rejected PASSED [100%]
 
-=========================== short test summary info ============================
-FAILED tests/test_route_cost_efficiency_opt.py::test_context_sync_capped_offline_async_vector_spike_and_receipt_lite
-========================= 1 failed, 6 passed in 0.52s ==========================
+============================== 8 passed in 0.40s ===============================
 ```
+
 
 
 - **Replay Injections**: 100 Successful samples added to `skill_outcome_events.jsonl`.

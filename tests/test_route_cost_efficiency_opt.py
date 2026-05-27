@@ -332,12 +332,10 @@ def test_gateway_rca_analyzer_tool(tmp_path):
 @pytest.mark.asyncio
 async def test_context_sync_capped_offline_async_vector_spike_and_receipt_lite():
     """
-    TDD Task 5 (RED): Offline spike for context_sync_capped async vector retrieval
+    TDD Task 5 (GREEN): Offline spike for context_sync_capped async vector retrieval
     and receipt-lite validation.
-    This test specifies the desired interface for asynchronous offline vector queries
-    and compact receipt-lite evidence generation under the context_sync_capped lane.
-    Running this test will yield an AttributeError (RED) because the production core
-    remains untouched.
+    This test verifies the desired interface for asynchronous offline vector queries
+    and compact receipt-lite evidence generation under the context_sync_capped lane is now functional.
     """
     router = SkillsRouter(
         project_root="/Users/jameschen/Workspace/nexus",
@@ -347,7 +345,6 @@ async def test_context_sync_capped_offline_async_vector_spike_and_receipt_lite()
     )
     
     # Desired interface for async offline vector sync
-    # This call is expected to fail with AttributeError as production core is unmodified
     vector_results = await router.async_query_offline_vectors(
         query="find_relevant_ast_nodes",
         top_k=3,
@@ -357,16 +354,69 @@ async def test_context_sync_capped_offline_async_vector_spike_and_receipt_lite()
     assert len(vector_results) > 0
     assert vector_results[0]["score"] >= 0.8
     
-    # Desired interface for receipt-lite generation
+    # Desired interface for receipt-lite generation with strict parameters
     receipt = router.generate_receipt_lite(
         capability="context_sync_capped",
         selection_source="offline_vector_sync_lite",
-        metrics={"search_latency_ms": 12.5, "vector_hits": len(vector_results)}
+        metrics={"search_latency_ms": 12.5, "vector_hits": len(vector_results)},
+        provenance="offline_vector_sync_lite",
+        row_id="row-001",
+        hidden_verifier_passed=True
     )
     
     assert receipt["selection_source"] == "offline_vector_sync_lite"
     assert receipt["gate_passed"] is True
     assert "context_sync_capped" in receipt["evidence_refs"]
+    assert "row:row-001" in receipt["evidence_refs"]
+    assert "provenance:offline_vector_sync_lite" in receipt["evidence_refs"]
+
+
+def test_context_sync_capped_receipt_lite_missing_provenance_rejected():
+    """
+    TDD Task 5C (Negative): Verify receipt-lite builder rejects generation
+    when provenance or other contract fields are missing.
+    """
+    router = SkillsRouter(
+        project_root="/Users/jameschen/Workspace/nexus",
+        route_lane="context_sync_capped"
+    )
+    
+    # Missing provenance should raise ValueError
+    with pytest.raises(ValueError) as exc_info:
+        router.generate_receipt_lite(
+            capability="context_sync_capped",
+            selection_source="offline_vector_sync_lite",
+            metrics={"search_latency_ms": 12.5},
+            provenance=None, # Missing!
+            row_id="row-001",
+            hidden_verifier_passed=True
+        )
+    assert "requires an explicit 'provenance'" in str(exc_info.value)
+    
+    # Missing row_id should raise ValueError
+    with pytest.raises(ValueError) as exc_info:
+        router.generate_receipt_lite(
+            capability="context_sync_capped",
+            selection_source="offline_vector_sync_lite",
+            metrics={"search_latency_ms": 12.5},
+            provenance="offline_vector_sync_lite",
+            row_id=None, # Missing!
+            hidden_verifier_passed=True
+        )
+    assert "requires an explicit 'row_id'" in str(exc_info.value)
+    
+    # Missing hidden_verifier_passed should raise ValueError
+    with pytest.raises(ValueError) as exc_info:
+        router.generate_receipt_lite(
+            capability="context_sync_capped",
+            selection_source="offline_vector_sync_lite",
+            metrics={"search_latency_ms": 12.5},
+            provenance="offline_vector_sync_lite",
+            row_id="row-001",
+            hidden_verifier_passed=False # False!
+        )
+    assert "requires a verified 'hidden_verifier_passed'" in str(exc_info.value)
+
 
 
 
