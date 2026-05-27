@@ -12,6 +12,24 @@
   - [x] `[MODIFY]` 注入 `scripts/engine/nexus_cli.py` (`nexus:runner` 與 `_enforce_armor`)
   - [x] `[NEW]` 具現 `tests/governance/test_subagent_armor.py`
 
+- [x] **P3: Evidence-plane Consume 與可重放證據 Artifact**
+  - [x] 撰寫 `test_governance_telemetry_closure.py` 中的實體可重放測試案例（紅燈）
+  - [x] 升級 `DualGateVerifier.verify_receipt`，強制產生包含 `repro_command`、`timeout_sec`、`cwd`、`pass_fail_evidence` 的 JSON 實體證據檔案
+  - [x] 在 `.nexus/reports/` 目錄下流式寫入 `.json` 證據包，將其路徑回傳給 `evidence_bundle`
+  - [x] 驗證並通過 P3 測試案例（綠燈）
+
+- [x] **P4: Sanitized Runner 的 UV 快取隔離與權限防禦**
+  - [x] 撰寫 `test_uv_cache_isolation.py` 快取與權限異常防禦測試案例（紅燈）
+  - [x] 修改 `AsyncProcessExecutor.run_async` 異步啟動時，自動注入 `UV_CACHE_DIR` 獨立環境變數至 workspace `.tmp/uv-cache`
+  - [x] 對 `PermissionError` 進行安全捕獲、日誌自癒報警與 fallback 降級處理
+  - [x] 驗證並通過 P4 測試案例（綠燈）
+
+- [x] **P5: Eligibility Completeness 與 Telemetry 遙測收口**
+  - [x] 撰寫預期 expected receipts 遙測與 eligibility 完整性測試（紅燈）
+  - [x] 升級 core/engine 的 `CapabilityReceipt` schema 欄位，新增 `telemetries`，更新 `is_claimable` 與 `public_claim_safe` 遙測限制門檻
+  - [x] 將遙測寫入 beliefs / closeout 合約，確保 promotion 流程完全對齊
+  - [x] 驗證並通過 P5 測試案例（綠燈）
+
 - [x] **Phase B: 物理鏈集成 (Chain Integration)**
   - [x] `[MODIFY]` 注入 `scripts/core/parallel_spawner.py` (盔甲注入、Handoff 協議、超時回滾)
   - [x] `[MODIFY]` 注入 `nexus/engine/phases/repair.py` (分身 JSON 回傳模式)

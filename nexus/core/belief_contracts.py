@@ -64,7 +64,26 @@ class CapabilityReceipt:
     skill_receipts: list[SkillReceipt] = field(default_factory=list)
     semantic_hash: str = ""
     evidence_alignment: bool = True
+    telemetries: dict[str, Any] = field(default_factory=dict)
     timestamp: str = ""
+
+    @property
+    def is_claimable(self) -> bool:
+        if not self.evidence_alignment:
+            return False
+        if not self.telemetries:
+            return False
+        # Verify all 4 major telemetries are present and valid
+        required_keys = ("wall_time_ms", "token_usage", "provider_costs", "overhead_ms")
+        for key in required_keys:
+            if key not in self.telemetries:
+                return False
+        # wall_time_ms and token_usage must be strictly greater than 0
+        if self.telemetries.get("wall_time_ms", 0) <= 0:
+            return False
+        if self.telemetries.get("token_usage", 0) <= 0:
+            return False
+        return True
 
 
 @dataclass(frozen=True)

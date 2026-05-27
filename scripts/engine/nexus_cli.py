@@ -65,20 +65,49 @@ class AsyncProcessExecutor:
         return total_len
 
     async def run_async(self, cmd: list[str], log_path: Path) -> tuple[int, int, int]:
-        p = await asyncio.create_subprocess_exec(
-            cmd[0],
-            *cmd[1:],
-            stdout=asyncio.subprocess.PIPE,
-            stderr=asyncio.subprocess.PIPE
-        )
+        import os
+        env = os.environ.copy()
+        # Secure UV cache isolation to prevent permission collision
+        workspace_tmp = Path("/Users/jameschen/Workspace/nexus/.tmp/uv-cache")
+        env["UV_CACHE_DIR"] = str(workspace_tmp.resolve())
         
-        log_path.parent.mkdir(parents=True, exist_ok=True)
-        with open(log_path, "w", encoding="utf-8") as f:
+        try:
+            p = await asyncio.create_subprocess_exec(
+                cmd[0],
+                *cmd[1:],
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.PIPE,
+                env=env
+            )
+        except Exception as exc:
+            # Safe recovery if process creation itself fails
+            return 1, 0, 0
+        
+        stdout_len = 0
+        stderr_len = 0
+        
+        # P4: Auto-capture and heal from PermissionError / OSError on logs
+        try:
+            log_path.parent.mkdir(parents=True, exist_ok=True)
+            f = open(log_path, "w", encoding="utf-8")
+            close_file = True
+        except (PermissionError, OSError) as exc:
+            import sys
+            # Falling back gracefully to stderr/sys.stdout mock writing to avoid crash
+            f = sys.stderr
+            close_file = False
+            # Print self-healing warn
+            print(f"⚠️ [Self-Healing] Log path unwritable due to: {exc}. Gracefully falling back.")
+            
+        try:
             stdout_task = asyncio.create_task(self._read_stream(p.stdout, f))
             stderr_task = asyncio.create_task(self._read_stream(p.stderr, f))
             
             stdout_len, stderr_len = await asyncio.gather(stdout_task, stderr_task)
             await p.wait()
+        finally:
+            if close_file:
+                f.close()
             
         return p.returncode or 0, stdout_len, stderr_len
 
