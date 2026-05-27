@@ -197,29 +197,31 @@ def validate_observation_vs_public_claim_boundary(
     capability_receipts: list[dict[str, Any]],
     public_promotion_readiness: bool
 ) -> bool:
-    """🛡️ Task 10: 驗證 observation-only 與 public claim 邊界物理隔離。
-    若發現有離線 (offline_vector_sync_lite) 或是背景隔離 (background_replay_lane)
-    的 receipt 被標記為 public_claim_safe，或當 promotion readiness 為 True 時
-    包含了離線/背景 receipt，必須立刻 Fail-closed 拋出 ValueError 阻斷偷渡。
+    """🛡️ Task A.1 & 10: 驗證 observation-only 與 public claim 邊界物理隔離。
+    若發現有離線 (offline_vector_sync_lite)、背景隔離 (background_replay_lane)、
+    或是任何包含 shadow_/observation_ 前綴欄位的 receipt 被標記為 public_claim_safe，
+    或當 promotion readiness 為 True 時包含了這些 rows，必須立刻 Fail-closed 拋出 ValueError 阻斷偷渡。
     """
     for rcpt in capability_receipts:
         is_offline = rcpt.get("selection_source") == "offline_vector_sync_lite"
         is_background = rcpt.get("offload_provenance") == "background_replay_lane" or rcpt.get("status") == "OFFLOADED_TO_BACKGROUND"
+        is_shadow = any(str(k).startswith("shadow_") or str(k).startswith("observation_") for k in rcpt.keys())
         
-        # 隔離守則 1：離線或背景 offload row 絕不允許被標記為 public_claim_safe
-        if (is_offline or is_background) and rcpt.get("public_claim_safe", False):
+        # 隔離守則 1：離線、背景或 shadow offload row 絕不允許被標記為 public_claim_safe
+        if (is_offline or is_background or is_shadow) and rcpt.get("public_claim_safe", False):
             raise ValueError(
-                f"Security Violation: Observation-only artifact (source: {rcpt.get('selection_source')}) "
+                f"Security Violation: Observation-only artifact (source: {rcpt.get('selection_source') or 'shadow_telemetry'}) "
                 f"attempted to bypass quarantine and claim public_claim_safe."
             )
             
         # 隔離守則 2：若當前 promotion 準備就緒，代表整個 bundle 是 public ready，
-        # 此時 bundle 內絕對不允許含有任何離線/背景等未經 formal audit 的 receipt
-        if public_promotion_readiness and (is_offline or is_background):
+        # 此時 bundle 內絕對不允許含有任何離線、背景或 shadow telemetry 等未經 formal audit 的 receipt
+        if public_promotion_readiness and (is_offline or is_background or is_shadow):
             raise ValueError(
-                f"Security Violation: Offline or background-offloaded evidence "
+                f"Security Violation: Offline, background-offloaded, or shadow evidence "
                 f"found inside a public promotion ready bundle."
             )
             
     return True
+
 
