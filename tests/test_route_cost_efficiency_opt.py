@@ -655,6 +655,81 @@ def test_observation_vs_public_claim_boundary_isolation():
     assert "found inside a public promotion ready bundle" in str(exc_info.value)
 
 
+def test_gateway_rca_analyzer_calibrated_bins(tmp_path):
+    """
+    TDD Task 11 (GREEN): Verify dynamic threshold calibration and parse overhead
+    tracking in gateway_rca_analyzer.py.
+    This test runs the analyzer with custom bins (e.g., [2000, 8000]) and verifies:
+    1. Buckets are dynamically named ("0-2k", "2k-8k", "8k+").
+    2. Average JSON parse times are correctly tracked for each bucket.
+    3. The generated markdown contains custom bucket keys and diagnostic boundaries.
+    """
+    from scripts.ops.gateway_rca_analyzer import analyze_gateway_telemetry, generate_markdown_report
+    
+    # 1. 建立包含 4 筆 row 的模擬日誌，帶有不同時長與解析時間
+    mock_runner_rows = [
+        # Bucket: 0-2k (chars: 500 < 2000)
+        {"task_id": "t1", "gateway_total_chars": 500, "gateway_total_sec": 3.0, "gateway_provider_wait_sec": 2.5, "gateway_parse_sec": 0.05, "status": "SUCCESS"},
+        # Bucket: 2k-8k (chars: 5000 >= 2000 and < 8000)
+        {"task_id": "t2", "gateway_total_chars": 5000, "gateway_total_sec": 8.0, "gateway_provider_wait_sec": 7.0, "gateway_parse_sec": 0.15, "status": "SUCCESS"},
+        # Bucket: 8k+ (chars: 9000 >= 8000)
+        {"task_id": "t3", "gateway_total_chars": 9000, "gateway_total_sec": 12.0, "gateway_provider_wait_sec": 10.0, "gateway_parse_sec": 0.25, "status": "SUCCESS"},
+        # Bucket: 8k+ (chars: 12000 >= 8000, timeout)
+        {"task_id": "t4", "gateway_total_chars": 12000, "gateway_total_sec": 15.0, "gateway_provider_wait_sec": 13.0, "gateway_parse_sec": 0.35, "error_category": "timeout", "status": "FAIL"}
+    ]
+    
+    # 寫入模擬日誌檔案
+    log_file = tmp_path / "calibrated_runner_slice.jsonl"
+    with log_file.open("w", encoding="utf-8") as f:
+        for row in mock_runner_rows:
+            f.write(json.dumps(row) + "\n")
+            
+    # 2. 執行帶有自定義分桶的 RCA 統計
+    custom_bins = [2000, 8000]
+    report = analyze_gateway_telemetry(log_file, bins=custom_bins)
+    
+    # 驗證元數據與配置桶
+    assert report["metadata"]["total_rows"] == 4
+    assert report["metadata"]["configured_bins"] == custom_bins
+    
+    # 驗證特定 bucket 歸類與 count
+    assert report["buckets"]["0-2k"]["count"] == 1
+    assert report["buckets"]["2k-8k"]["count"] == 1
+    assert report["buckets"]["8k+"]["count"] == 2
+    
+    # 驗證每個 bucket 的解析時間累加正確性
+    assert report["buckets"]["0-2k"]["parse_sec"] == 0.05
+    assert report["buckets"]["2k-8k"]["parse_sec"] == 0.15
+    assert report["buckets"]["8k+"]["parse_sec"] == 0.60  # 0.25 + 0.35
+    
+    # 3. 產出 Markdown 並驗收
+    md = generate_markdown_report(report)
+    assert "# Gateway Payload & Latency Root Cause Analysis (RCA)" in md
+    assert "Avg Parse/Setup (s)" in md
+    assert "[2000, 8000]" in md
+    assert "| 0-2k | 1 |" in md
+    assert "| 2k-8k | 1 |" in md
+    assert "| 8k+ | 2 |" in md
+    
+    # 4. 驗證該分析結果完全不影響 verdict 判定，100% 保持在診斷層
+    from scripts.bench.public_gate_bundle import derive_cost_efficiency_decision
+    decision = derive_cost_efficiency_decision(
+        delivery_gate_passed=True,
+        delivery_gate_failures=[],
+        cost_gate_failures=[],
+        wall_cost_ratio_with_over_without=0.85,
+        token_cost_ratio_with_over_without=0.85,
+        model_call_ratio_with_over_without=0.85,
+        retry_cost_share_wall=0.0,
+        retry_cost_share_tokens=0.0,
+        wall_ledger_invalid=False,
+        warning_ledger_invalid=False,
+        valid_comparison_ready=True
+    )
+    assert decision.status == "IMPROVED"
+
+
+
 
 
 

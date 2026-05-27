@@ -4,10 +4,42 @@ import sys
 from pathlib import Path
 from typing import Any, Dict, List
 
-def analyze_gateway_telemetry(jsonl_path: str | Path) -> Dict[str, Any]:
+def analyze_gateway_telemetry(jsonl_path: str | Path, bins: List[int] = None) -> Dict[str, Any]:
     src = Path(jsonl_path)
     if not src.exists():
         raise FileNotFoundError(f"Source file not found: {jsonl_path}")
+
+    if bins is None:
+        bins = [1000, 5000, 10000]
+    else:
+        bins = sorted(bins)
+
+    # Format values for bucket keys
+    def format_val(val: int) -> str:
+        if val >= 1000 and val % 1000 == 0:
+            return f"{val // 1000}k"
+        return str(val)
+
+    # Generate bucket keys dynamically
+    bucket_keys: List[str] = []
+    for i, b in enumerate(bins):
+        if i == 0:
+            bucket_keys.append(f"0-{format_val(b)}")
+        else:
+            bucket_keys.append(f"{format_val(bins[i-1])}-{format_val(b)}")
+    bucket_keys.append(f"{format_val(bins[-1])}+")
+
+    # Initialize buckets with parser tracking
+    buckets: Dict[str, Dict[str, Any]] = {
+        key: {
+            "count": 0,
+            "total_sec": 0.0,
+            "provider_wait_sec": 0.0,
+            "parse_sec": 0.0,
+            "timeouts": 0
+        }
+        for key in bucket_keys
+    }
 
     rows: List[Dict[str, Any]] = []
     with src.open("r", encoding="utf-8") as f:
@@ -27,15 +59,6 @@ def analyze_gateway_telemetry(jsonl_path: str | Path) -> Dict[str, Any]:
     total_provider_wait_sec = 0.0
     total_parse_sec = 0.0
     total_chars = 0
-    
-    # Bucket definitions by payload size (in chars)
-    # Buckets: "0-1k", "1k-5k", "5k-10k", "10k+"
-    buckets: Dict[str, Dict[str, Any]] = {
-        "0-1k": {"count": 0, "total_sec": 0.0, "provider_wait_sec": 0.0, "timeouts": 0},
-        "1k-5k": {"count": 0, "total_sec": 0.0, "provider_wait_sec": 0.0, "timeouts": 0},
-        "5k-10k": {"count": 0, "total_sec": 0.0, "provider_wait_sec": 0.0, "timeouts": 0},
-        "10k+": {"count": 0, "total_sec": 0.0, "provider_wait_sec": 0.0, "timeouts": 0},
-    }
 
     for row in rows:
         total_sec = float(row.get("gateway_total_sec") or row.get("gateway_process_sec") or 0.0)
@@ -57,19 +80,17 @@ def analyze_gateway_telemetry(jsonl_path: str | Path) -> Dict[str, Any]:
             if is_timeout:
                 timeouts += 1
 
-            # Determine bucket
-            if chars < 1000:
-                b_key = "0-1k"
-            elif chars < 5000:
-                b_key = "1k-5k"
-            elif chars < 10000:
-                b_key = "5k-10k"
-            else:
-                b_key = "10k+"
+            # Determine dynamic bucket
+            b_key = bucket_keys[-1]
+            for i, b in enumerate(bins):
+                if chars < b:
+                    b_key = bucket_keys[i]
+                    break
                 
             buckets[b_key]["count"] += 1
             buckets[b_key]["total_sec"] += total_sec
             buckets[b_key]["provider_wait_sec"] += provider_wait
+            buckets[b_key]["parse_sec"] += parse_sec
             if is_timeout:
                 buckets[b_key]["timeouts"] += 1
 
@@ -89,6 +110,7 @@ def analyze_gateway_telemetry(jsonl_path: str | Path) -> Dict[str, Any]:
             "total_rows": total_rows,
             "gateway_calls": gateway_calls,
             "total_timeouts": timeouts,
+            "configured_bins": bins
         },
         "averages": {
             "avg_latency_sec": round(avg_total_sec, 4),
@@ -122,11 +144,12 @@ def generate_markdown_report(report: Dict[str, Any]) -> str:
     md.append(f"- **總行數**: `{meta['total_rows']}`")
     md.append(f"- **實體 Gateway 呼叫數**: `{meta['gateway_calls']}`")
     md.append(f"- **總超時次數 (Gateway Timeouts)**: `{meta['total_timeouts']}`")
+    md.append(f"- **分桶閾值配置 (Calibrated Bins)**: `{meta['configured_bins']}`")
     md.append("")
     md.append("## ⏱️ 平均時延與負載 (Averages)")
     md.append(f"- **平均總時延 (Avg Latency)**: `{averages['avg_latency_sec']}s`")
     md.append(f"- **平均 Provider 等待時延 (Avg Provider Wait)**: `{averages['avg_provider_wait_sec']}s`")
-    md.append(f"- **平均 JSON 解析時延 (Avg Parse Time)**: `{averages['avg_parse_sec']}s`")
+    md.append(f"- **平均 JSON 解析與 Battlesuit 建立時延 (Avg Parse/Setup)**: `{averages['avg_parse_sec']}s`")
     md.append(f"- **平均 Payload 長度 (Avg Payload Chars)**: `{averages['avg_payload_chars']} chars`")
     md.append("")
     md.append("## 🎯 時延拆分佔比 (Latency Breakdown Shares)")
@@ -134,25 +157,34 @@ def generate_markdown_report(report: Dict[str, Any]) -> str:
     md.append(f"- **Gateway 內部開銷佔比 (Gateway Overhead Share)**: `{shares['gateway_overhead_share'] * 100:.2f}%`")
     md.append(f"- **超時佔比 (Timeout Share of Gateway Calls)**: `{shares['timeout_share_of_gateway'] * 100:.2f}%`")
     md.append("")
-    md.append("## 📦 負載大小分組分析 (Payload Size Buckets)")
-    md.append("| Payload Bucket | Call Count | Avg Latency (s) | Avg Provider Wait (s) | Timeouts |")
-    md.append("| --- | --- | --- | --- | --- |")
+    md.append("## 📦 負載大小分組分析 (Payload Size Buckets with Parse Overhead)")
+    md.append("| Payload Bucket | Call Count | Avg Latency (s) | Avg Provider Wait (s) | Avg Parse/Setup (s) | Timeouts |")
+    md.append("| --- | --- | --- | --- | --- | --- |")
     
     for b_key, b_data in buckets.items():
         count = b_data["count"]
         avg_lat = b_data["total_sec"] / count if count > 0 else 0.0
         avg_wait = b_data["provider_wait_sec"] / count if count > 0 else 0.0
-        md.append(f"| {b_key} | {count} | {avg_lat:.4f}s | {avg_wait:.4f}s | {b_data['timeouts']} |")
+        avg_parse = b_data["parse_sec"] / count if count > 0 else 0.0
+        md.append(f"| {b_key} | {count} | {avg_lat:.4f}s | {avg_wait:.4f}s | {avg_parse:.4f}s | {b_data['timeouts']} |")
         
     return "\n".join(md)
 
 if __name__ == "__main__":
     if len(sys.argv) < 2:
-        print("Usage: python3 gateway_rca_analyzer.py <path_to_jsonl>")
+        print("Usage: python3 gateway_rca_analyzer.py <path_to_jsonl> [bin1,bin2,...]")
         sys.exit(1)
         
+    custom_bins = None
+    if len(sys.argv) > 2:
+        try:
+            custom_bins = [int(x) for x in sys.argv[2].split(",")]
+        except ValueError:
+            print("Error: Bins must be comma-separated integers.")
+            sys.exit(1)
+
     try:
-        report_data = analyze_gateway_telemetry(sys.argv[1])
+        report_data = analyze_gateway_telemetry(sys.argv[1], bins=custom_bins)
         print(generate_markdown_report(report_data))
     except Exception as e:
         print(f"Error executing analyzer: {e}")
