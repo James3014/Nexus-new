@@ -74,3 +74,20 @@ def test_cli_output_deadlock():
         presets_file.unlink()
     if manifest_file.exists():
         manifest_file.unlink()
+
+def test_cli_command_injection_sanitized_runner():
+    """
+    TDD Phase (RED): Verify SanitizedRunner and AllowedTaskRegistry correctly
+    sanitize inputs, enforce task name allowed formats, and prevent execution.
+    """
+    from scripts.engine.nexus_cli import SanitizedRunner
+    
+    # 1. Test validate_task_name
+    assert SanitizedRunner.validate_task_name("valid-task_name 123") is True
+    assert SanitizedRunner.validate_task_name("bad; rm -rf") is False
+    assert SanitizedRunner.validate_task_name("bad$(exec)") is False
+    
+    # 2. Test sanitize_arg
+    assert SanitizedRunner.sanitize_arg("hello") == "hello"
+    assert SanitizedRunner.sanitize_arg("hello; world") == "'hello; world'"
+
