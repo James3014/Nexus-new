@@ -23,7 +23,7 @@ class SkillsRouter:
         return highest_idx
 
     """🔀 Nexus v26.0 General Contractor Hardened Router."""
-    def __init__(self, project_root: str, run_dir: str = None, mem_palace: Any = None):
+    def __init__(self, project_root: str, run_dir: str = None, mem_palace: Any = None, **kwargs):
         self.project_root = project_root
         self.run_dir = run_dir or project_root
         self.mem_palace = mem_palace
@@ -32,6 +32,31 @@ class SkillsRouter:
         self.critique = critique
         from nexus.core.p_loop_manager import PLoopManager
         self.p_loop = PLoopManager()
+        
+        # 政策層次合約優化屬性
+        self.allow_pre_model_deterministic_rescue = kwargs.get("allow_pre_model_deterministic_rescue", False)
+        self.candidate_pool_mode = kwargs.get("candidate_pool_mode", "standard")
+        self.governance_hardened_mode = kwargs.get("governance_hardened_mode", "default")
+
+    def decide_route(self, capability: str, risk_level: str, bare_sufficiency: str, hidden_verifier_passed: bool) -> dict[str, Any]:
+        """🛡️ 實作政策層次決策，產出具有 reason codes 的 route policy evidence"""
+        reason_codes = ["expected_capability_protection"]
+        
+        pre_model_deterministic_allowed = False
+        if self.allow_pre_model_deterministic_rescue and risk_level == "low" and bare_sufficiency == "high" and hidden_verifier_passed:
+            reason_codes.append("cost_capped_capability_allows_verified_pre_model_rescue")
+            pre_model_deterministic_allowed = True
+
+        candidate_size = 1 if self.candidate_pool_mode == "capability_invariant" else 2
+        
+        return {
+            "status": "SUCCESS",
+            "route_execution_policy": {
+                "reason_codes": reason_codes,
+                "pre_model_deterministic_rescue_allowed": pre_model_deterministic_allowed,
+                "candidate_pool_size": candidate_size
+            }
+        }
 
     def memory_route(self, query: str, context: Dict[str, Any]) -> Dict[str, Any]:
         """🚀 [Phase 36] 戰甲融合核心：領域 + 倫理 + 計費"""

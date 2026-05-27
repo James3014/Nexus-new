@@ -266,6 +266,15 @@ class CapabilityReceipt:
         # Telemetry must be fully complete and present to allow public claim promotion
         if not self.telemetries:
             return False
+            
+        # Row-Keyed Hygiene and Source Classification checks
+        source = self.telemetries.get("telemetry_source", "measured")
+        if source in ("estimated", "unknown"):
+            return False
+            
+        if self.telemetries.get("has_infra_invalid", False):
+            return False
+
         required_keys = ("wall_time_ms", "token_usage", "provider_costs", "overhead_ms")
         for key in required_keys:
             if key not in self.telemetries:

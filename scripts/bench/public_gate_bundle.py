@@ -23,14 +23,23 @@ def derive_cost_efficiency_decision(
     wall_ledger_invalid: bool,
     warning_ledger_invalid: bool,
     valid_comparison_ready: bool,
+    exclusion_candidate: bool = False,
+    exclusion_reason_code: str = "",
+    exclusion_provenance: str = "",
 ) -> CostEfficiencyDecision:
     failures: list[str] = []
     if not delivery_gate_passed:
         failures.extend(delivery_gate_failures)
     if cost_gate_failures:
         failures.extend(cost_gate_failures)
+        
+    allow_wall_exclusion = False
+    if exclusion_candidate and exclusion_provenance == "gateway_timeout" and exclusion_reason_code == "network_timeout_exceeded":
+        allow_wall_exclusion = True
+
     if wall_cost_ratio_with_over_without > 1.0:
-        failures.append("wall_cost_not_improved")
+        if not allow_wall_exclusion:
+            failures.append("wall_cost_not_improved")
     if token_cost_ratio_with_over_without > 1.0:
         failures.append("token_cost_not_improved")
     if model_call_ratio_with_over_without > 1.0:

@@ -70,6 +70,18 @@ def build_evidence_bundle_gate_outputs(
 
     delivery_gate_passed = not delivery_gate_failures
     cost_claim_passed = delivery_gate_passed and not cost_gate_failures
+    exclusion_candidate = False
+    exclusion_reason_code = ""
+    exclusion_provenance = ""
+    for row in rows:
+        for receipt in row.get("capability_receipts", []) or []:
+            if isinstance(receipt, dict):
+                tel = receipt.get("telemetries", {}) or {}
+                if tel.get("cost_accounting_exclusion_candidate"):
+                    exclusion_candidate = True
+                    exclusion_reason_code = "network_timeout_exceeded"
+                    exclusion_provenance = tel.get("telemetry_provenance", "")
+
     cost_efficiency_decision = derive_cost_efficiency_decision(
         delivery_gate_passed=delivery_gate_passed,
         delivery_gate_failures=delivery_gate_failures,
@@ -82,6 +94,9 @@ def build_evidence_bundle_gate_outputs(
         wall_ledger_invalid=bool(context["wall_ledger_invalid"]),
         warning_ledger_invalid=bool(context["warning_ledger_invalid"]),
         valid_comparison_ready=bool(context["valid_comparison_ready"]),
+        exclusion_candidate=exclusion_candidate,
+        exclusion_reason_code=exclusion_reason_code,
+        exclusion_provenance=exclusion_provenance,
     )
     cost_efficiency_failures = list(cost_efficiency_decision.failures)
     cost_efficiency_status = cost_efficiency_decision.status

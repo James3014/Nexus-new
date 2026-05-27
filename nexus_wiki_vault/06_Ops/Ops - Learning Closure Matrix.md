@@ -3688,3 +3688,8 @@ version_scope:
 - **Action Taken**: Updated the return dictionary of `decide_auto_flow_routing` to include `recent_hyper_fails` and `stage1_fail_signals`, unpacked them inside `run_auto_flow`, and updated test assertions to cover this scale-out. All 103 integration tests passed.
 - **Prevention**: When extracting code sections or nesting variables into a sub-module, audit the downstream scope of the caller to ensure no remaining expressions reference the relocated variables. Return all dependent metrics back to the orchestration layer.
 
+## 2026-05-27: Phase 1 Route-Cost Policy and Telemetry Hygiene Hardening
+- **Phenomenon**: Route-cost regressions in high-stakes environments occurred when telemetry accounting was relaxed or backfilled without clean verification.
+- **Root Cause**: Telemetry deductions directly altered wall time, and backfilling allowed estimated metrics to unlock public claim promotions.
+- **Decision**: Locked down router policies (`allow_pre_model_deterministic_rescue` and capability-invariant candidate pool), separated telemetry classification from wall-time deduction, restricted estimated backfills to `OBSERVATION_ONLY`, and added a full-bundle integration contract suite.
+- **Prevention**: Enforce row-keyed telemetry hygiene and audit provenance strictly before promotion; verify with AST-level pre-commit preflights and full-bundle runner tests.

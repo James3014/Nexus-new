@@ -90,6 +90,14 @@ class CapabilityReceipt:
         if not self.telemetries:
             return TelemetryVerificationResult(False, TelemetryReasonCodes.TELEMETRY_MISSING, "Telemetry data is empty or missing")
         
+        # Row-Keyed Hygiene and Source Classification checks
+        source = self.telemetries.get("telemetry_source", "measured")
+        if source in ("estimated", "unknown"):
+            return TelemetryVerificationResult(False, TelemetryReasonCodes.TELEMETRY_MISSING, "Estimated or unknown telemetry is observation-only and cannot be claimed")
+            
+        if self.telemetries.get("has_infra_invalid", False):
+            return TelemetryVerificationResult(False, TelemetryReasonCodes.TELEMETRY_MISSING, "Telemetry carries infra-invalid reason codes")
+
         required_keys = ("wall_time_ms", "token_usage", "provider_costs", "overhead_ms")
         for key in required_keys:
             if key not in self.telemetries:
