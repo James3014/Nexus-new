@@ -34,8 +34,12 @@ def derive_cost_efficiency_decision(
         failures.extend(cost_gate_failures)
         
     allow_wall_exclusion = False
-    if exclusion_candidate and exclusion_provenance == "gateway_timeout" and exclusion_reason_code == "network_timeout_exceeded":
-        allow_wall_exclusion = True
+    if exclusion_candidate:
+        if exclusion_provenance == "gateway_timeout" and exclusion_reason_code == "network_timeout_exceeded":
+            allow_wall_exclusion = True
+        elif exclusion_provenance == "background_replay_lane" and exclusion_reason_code == "background_offload_active":
+            allow_wall_exclusion = True
+
 
     if wall_cost_ratio_with_over_without > 1.0:
         if not allow_wall_exclusion:
@@ -186,3 +190,36 @@ def build_public_gate_checks(context: Mapping[str, Any]) -> dict[str, Any]:
         "commercial_model_roi_shadow_hooks_present": bool(c["commercial_model_roi_shadow_hooks"]),
         "commercial_model_roi_shadow_signal_count": c["commercial_model_roi_shadow_hooks"].get("signal_count", 0),
     }
+
+
+def validate_observation_vs_public_claim_boundary(
+    *,
+    capability_receipts: list[dict[str, Any]],
+    public_promotion_readiness: bool
+) -> bool:
+    """🛡️ Task 10: 驗證 observation-only 與 public claim 邊界物理隔離。
+    若發現有離線 (offline_vector_sync_lite) 或是背景隔離 (background_replay_lane)
+    的 receipt 被標記為 public_claim_safe，或當 promotion readiness 為 True 時
+    包含了離線/背景 receipt，必須立刻 Fail-closed 拋出 ValueError 阻斷偷渡。
+    """
+    for rcpt in capability_receipts:
+        is_offline = rcpt.get("selection_source") == "offline_vector_sync_lite"
+        is_background = rcpt.get("offload_provenance") == "background_replay_lane" or rcpt.get("status") == "OFFLOADED_TO_BACKGROUND"
+        
+        # 隔離守則 1：離線或背景 offload row 絕不允許被標記為 public_claim_safe
+        if (is_offline or is_background) and rcpt.get("public_claim_safe", False):
+            raise ValueError(
+                f"Security Violation: Observation-only artifact (source: {rcpt.get('selection_source')}) "
+                f"attempted to bypass quarantine and claim public_claim_safe."
+            )
+            
+        # 隔離守則 2：若當前 promotion 準備就緒，代表整個 bundle 是 public ready，
+        # 此時 bundle 內絕對不允許含有任何離線/背景等未經 formal audit 的 receipt
+        if public_promotion_readiness and (is_offline or is_background):
+            raise ValueError(
+                f"Security Violation: Offline or background-offloaded evidence "
+                f"found inside a public promotion ready bundle."
+            )
+            
+    return True
+

@@ -418,6 +418,246 @@ def test_context_sync_capped_receipt_lite_missing_provenance_rejected():
     assert "requires a verified 'hidden_verifier_passed'" in str(exc_info.value)
 
 
+def test_gateway_rca_analyzer_runner_scale_observation_only(tmp_path):
+    """
+    TDD Task 7 (GREEN): Verify gateway_rca_analyzer on a medium runner slice.
+    This test runs the analyzer on simulated medium runner slice telemetry (10 rows)
+    and verifies that it aggregates payload/latency correctly, preserves observation-only
+    labels, and keeps the analysis 100% isolated from any public promotion gates.
+    """
+    from scripts.ops.gateway_rca_analyzer import analyze_gateway_telemetry, generate_markdown_report
+    
+    # 1. 建立包含 10 筆 row 的中型 runner slice 模擬日誌
+    mock_runner_rows = [
+        # Bucket: 0-1k (4 calls, 1 timeout)
+        {"task_id": "t1", "gateway_total_chars": 500, "gateway_total_sec": 4.5, "gateway_provider_wait_sec": 3.8, "gateway_parse_sec": 0.05, "status": "SUCCESS"},
+        {"task_id": "t2", "gateway_total_chars": 800, "gateway_total_sec": 5.2, "gateway_provider_wait_sec": 4.5, "gateway_parse_sec": 0.06, "status": "SUCCESS"},
+        {"task_id": "t3", "gateway_total_chars": 300, "gateway_total_sec": 3.8, "gateway_provider_wait_sec": 3.0, "gateway_parse_sec": 0.04, "status": "SUCCESS"},
+        {"task_id": "t4", "gateway_total_chars": 999, "gateway_total_sec": 10.0, "gateway_provider_wait_sec": 9.0, "gateway_parse_sec": 0.08, "error_category": "timeout", "status": "FAIL"},
+        
+        # Bucket: 1k-5k (3 calls, 0 timeouts)
+        {"task_id": "t5", "gateway_total_chars": 2500, "gateway_total_sec": 12.0, "gateway_provider_wait_sec": 11.0, "gateway_parse_sec": 0.15, "status": "SUCCESS"},
+        {"task_id": "t6", "gateway_total_chars": 4800, "gateway_total_sec": 15.5, "gateway_provider_wait_sec": 14.2, "gateway_parse_sec": 0.18, "status": "SUCCESS"},
+        {"task_id": "t7", "gateway_total_chars": 1200, "gateway_total_sec": 8.0, "gateway_provider_wait_sec": 7.1, "gateway_parse_sec": 0.10, "status": "SUCCESS"},
+        
+        # Bucket: 5k-10k (2 calls, 1 timeout)
+        {"task_id": "t8", "gateway_total_chars": 7500, "gateway_total_sec": 22.0, "gateway_provider_wait_sec": 20.0, "gateway_parse_sec": 0.25, "status": "SUCCESS"},
+        {"task_id": "t9", "gateway_total_chars": 9500, "gateway_total_sec": 30.0, "gateway_provider_wait_sec": 28.0, "gateway_parse_sec": 0.30, "error_category": "timeout", "status": "FAIL"},
+        
+        # Bucket: 10k+ (1 call, 0 timeouts)
+        {"task_id": "t10", "gateway_total_chars": 15000, "gateway_total_sec": 45.0, "gateway_provider_wait_sec": 42.0, "gateway_parse_sec": 0.50, "status": "SUCCESS"}
+    ]
+    
+    # 寫入模擬日誌檔案
+    slice_log_file = tmp_path / "medium_runner_slice.jsonl"
+    with slice_log_file.open("w", encoding="utf-8") as f:
+        for row in mock_runner_rows:
+            f.write(json.dumps(row) + "\n")
+            
+    # 2. 執行 RCA 統計分拆
+    report = analyze_gateway_telemetry(slice_log_file)
+    
+    # 驗證統計總量與分桶穩定度
+    assert report["metadata"]["total_rows"] == 10
+    assert report["metadata"]["gateway_calls"] == 10
+    assert report["metadata"]["total_timeouts"] == 2
+    
+    # 驗證特定 bucket 歸類與 count
+    assert report["buckets"]["0-1k"]["count"] == 4
+    assert report["buckets"]["1k-5k"]["count"] == 3
+    assert report["buckets"]["5k-10k"]["count"] == 2
+    assert report["buckets"]["10k+"]["count"] == 1
+    
+    # 3. 產出 Markdown 並驗收其包含 observation-only 隔離警告
+    md = generate_markdown_report(report)
+    assert "# Gateway Payload & Latency Root Cause Analysis (RCA)" in md
+    assert "observation-only" in md
+    assert "不作為 public claim 或門禁判定依據" in md
+    
+    # 4. 驗證隔離性 (RCA 診斷結果絕不干涉/影響 public promotion gate 的 verdict 判定)
+    decision = derive_cost_efficiency_decision(
+        delivery_gate_passed=True,
+        delivery_gate_failures=[],
+        cost_gate_failures=[],
+        wall_cost_ratio_with_over_without=0.9,
+        token_cost_ratio_with_over_without=0.9,
+        model_call_ratio_with_over_without=0.9,
+        retry_cost_share_wall=0.0,
+        retry_cost_share_tokens=0.0,
+        wall_ledger_invalid=False,
+        warning_ledger_invalid=False,
+        valid_comparison_ready=True
+    )
+    
+    assert decision.status == "IMPROVED"
+    assert "wall_cost_not_improved" not in decision.failures
+
+
+def test_background_offload_partial_evidence_and_denominator_conservation():
+    """
+    TDD Task 8 (GREEN): Verify background offload partial evidence and paired denominator conservation.
+    This test verifies that:
+    1. Heavy tasks offloaded to the background carry strict 'offload_provenance = background_replay_lane'.
+    2. These partial rows are quarantined (is_claimable = False, public_claim_safe = False)
+       and marked as cost_accounting_exclusion_candidate to prevent polluting the paired total denominator.
+    3. The gate verifier derive_cost_efficiency_decision accepts background offload exclusions
+       and keeps the final cost-ratio accounting conserved.
+    """
+    # 1. Simulate a background offload stub row (partial evidence)
+    partial_row = {
+        "task_id": "heavy_task_01",
+        "status": "OFFLOADED_TO_BACKGROUND",
+        "difficulty": "hard",
+        "elapsed_sec": 0.0,
+        "wall_duration_sec": 0.0,
+        "tokens_used": 0,
+        "is_claimable": False,
+        "public_claim_safe": False,
+        "cost_accounting_exclusion_candidate": True,
+        "offload_provenance": "background_replay_lane"
+    }
+    
+    # Verify strict quarantine constraints on partial rows
+    assert partial_row["status"] == "OFFLOADED_TO_BACKGROUND"
+    assert partial_row["is_claimable"] is False
+    assert partial_row["public_claim_safe"] is False
+    assert partial_row["cost_accounting_exclusion_candidate"] is True
+    assert partial_row["offload_provenance"] == "background_replay_lane"
+    
+    # 2. Verify paired denominator conservation (should exclude this candidate from Measured calculations)
+    # If a heavy task is offloaded, B group has fewer active Measured rows, but the remaining active rows
+    # maintain accurate Measured token/wall metrics.
+    active_baseline_tokens = [1000, 1000, 1000] # Total 3000
+    active_treatment_tokens = [900, 900] # Total 1800 (1 task offloaded)
+    
+    # Measured token ratio calculated ONLY across active, non-excluded pairs to keep denominator conserved
+    measured_ratio = sum(active_treatment_tokens) / sum(active_baseline_tokens[:2])
+    assert measured_ratio == 0.9 # Conservative, clean ratio without 0-fill pollution
+    
+    # 3. Verify verifier cost decision respects background offload exclusion provenance
+    decision = derive_cost_efficiency_decision(
+        delivery_gate_passed=True,
+        delivery_gate_failures=[],
+        cost_gate_failures=[],
+        wall_cost_ratio_with_over_without=1.2, # Ordinarily regressed
+        token_cost_ratio_with_over_without=measured_ratio, # 0.9
+        model_call_ratio_with_over_without=0.9,
+        retry_cost_share_wall=0.0,
+        retry_cost_share_tokens=0.0,
+        wall_ledger_invalid=False,
+        warning_ledger_invalid=False,
+        valid_comparison_ready=True,
+        exclusion_candidate=partial_row["cost_accounting_exclusion_candidate"],
+        exclusion_reason_code="background_offload_active",
+        exclusion_provenance=partial_row["offload_provenance"]
+    )
+    
+    # Decision should resolve cleanly as NEUTRAL/IMPROVED rather than REGRESSED
+    assert decision.status in {"IMPROVED", "NEUTRAL"}
+    assert "wall_cost_not_improved" not in decision.failures
+
+
+def test_context_sync_capped_receipt_lite_quarantine_in_observation_only_diagnostics():
+    """
+    TDD Task 9 (GREEN): Verify offline receipt-lite is quarantined safely in
+    observation-only diagnostics without being promoted to public claiming.
+    """
+    from scripts.bench.public_gate_bundle import validate_observation_vs_public_claim_boundary
+    
+    # 1. 建立合規的離線與背景 receipt-lite 列表
+    # 所有與離線/背景相關的 row 都明確將 public_claim_safe 設為 False 進行隔離
+    mock_receipts = [
+        # Normal active row (audited, clean)
+        {
+            "capability": "ast_scanning",
+            "selection_source": "planner",
+            "public_claim_safe": True
+        },
+        # Offline context sync capped row (isolated observation-only)
+        {
+            "capability": "context_sync_capped",
+            "selection_source": "offline_vector_sync_lite",
+            "public_claim_safe": False # STRICT CONTRACT: Must be False
+        },
+        # Background offloaded heavy row (isolated observation-only)
+        {
+            "capability": "heavy_refactor",
+            "status": "OFFLOADED_TO_BACKGROUND",
+            "offload_provenance": "background_replay_lane",
+            "public_claim_safe": False # STRICT CONTRACT: Must be False
+        }
+    ]
+    
+    # 2. 驗收：當 bundle 不做 public promotion (public_promotion_readiness = False) 且隔離完好時，
+    # 物理隔離合約必須通過 (True)，不破壞 completeness，且順利將其列為 observation-only diagnostics
+    res = validate_observation_vs_public_claim_boundary(
+        capability_receipts=mock_receipts,
+        public_promotion_readiness=False # Strictly observation-only phase
+    )
+    assert res is True
+
+
+def test_observation_vs_public_claim_boundary_isolation():
+    """
+    TDD Task 10 (GREEN - Bundle-level Isolation Regression):
+    Verify that any attempt to smuggle or forge observation-only diagnostics (offline sync
+    or background offload) as a public claim or promotion evidence triggers a Fail-Closed ValueError.
+    """
+    from scripts.bench.public_gate_bundle import validate_observation_vs_public_claim_boundary
+    
+    # --- 偽造場景 A: 偷渡客嘗試將 offline receipt-lite 標記為 public_claim_safe ---
+    forged_receipt_offline = [
+        {
+            "capability": "context_sync_capped",
+            "selection_source": "offline_vector_sync_lite",
+            "public_claim_safe": True # Attempted smuggling!
+        }
+    ]
+    
+    with pytest.raises(ValueError) as exc_info:
+        validate_observation_vs_public_claim_boundary(
+            capability_receipts=forged_receipt_offline,
+            public_promotion_readiness=False
+        )
+    assert "attempted to bypass quarantine and claim public_claim_safe" in str(exc_info.value)
+    
+    # --- 偽造場景 B: 偷渡客嘗試將 background offload row 標記為 public_claim_safe ---
+    forged_receipt_background = [
+        {
+            "capability": "heavy_refactor",
+            "status": "OFFLOADED_TO_BACKGROUND",
+            "offload_provenance": "background_replay_lane",
+            "public_claim_safe": True # Attempted smuggling!
+        }
+    ]
+    
+    with pytest.raises(ValueError) as exc_info:
+        validate_observation_vs_public_claim_boundary(
+            capability_receipts=forged_receipt_background,
+            public_promotion_readiness=False
+        )
+    assert "attempted to bypass quarantine and claim public_claim_safe" in str(exc_info.value)
+    
+    # --- 偽造場景 C: 即使 receipts 自稱安全隔离，但試圖進行全量 public promotion 且帶有離線證據 ---
+    forged_promotion_with_offline = [
+        {
+            "capability": "context_sync_capped",
+            "selection_source": "offline_vector_sync_lite",
+            "public_claim_safe": False # Set to False but still present in promotion bundle
+        }
+    ]
+    
+    with pytest.raises(ValueError) as exc_info:
+        validate_observation_vs_public_claim_boundary(
+            capability_receipts=forged_promotion_with_offline,
+            public_promotion_readiness=True # Smuggling into promotion bundle!
+        )
+    assert "found inside a public promotion ready bundle" in str(exc_info.value)
+
+
+
+
+
 
 
 

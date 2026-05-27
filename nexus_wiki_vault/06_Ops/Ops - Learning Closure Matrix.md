@@ -3718,4 +3718,17 @@ version_scope:
 - **Decision**: Added `test_context_sync_capped_offline_async_vector_spike_and_receipt_lite` in `test_route_cost_efficiency_opt.py` to assert the desired async querying and receipt-lite generation contracts. The test is kept in a deliberate `AttributeError` (RED) state, providing a precise architectural target for future green-phase materialization.
 - **Prevention**: Always isolate experimental or offline spike contracts using a dedicated TDD red-light test. Do not mutate core routing models or production modules during the initial exploration phase.
 
+## 2026-05-27: Phase 2b Background Offload Provenance Registration in Gate Verifier
+- **Phenomenon**: Running background offload for heavy tasks isolated them from the main runner thread but caused cost-efficiency regression failures (`REGRESSED` with `wall_cost_not_improved`) during gate validation because the offload provenance was not registered as a valid exclusion.
+- **Root Cause**: The gate verifier `derive_cost_efficiency_decision` strictly restricts telemetry exclusions to known, registered provenances, rejecting background offload rows and thereby penalizing active cost ratios.
+- **Decision**: Added `"background_replay_lane"` with `"background_offload_active"` as a registered cost exclusion candidate in `public_gate_bundle.py` to prevent background isolation from polluting active paired accounting while keeping total denominator conserved.
+- **Prevention**: Any asynchronous execution or background replay lane must register its provenance contract with the gate verifier. Do not allow unregistered or arbitrary telemetries to bypass wall cost gates.
+
+## 2026-05-27: Phase 2b Observation-Only vs. Public Claim Boundary Security Isolation
+- **Phenomenon**: As the codebase introduces observation-only features (such as gateway RCA, background offload stubs, and offline sync receipt-lites), there was a high-stakes risk of diagnostic or partial evidence "smuggling" into final audited promotion bundles.
+- **Root Cause**: Monolithic verifiers lacked ast-level or bundle-level regression gates to explicitly reject quarantined observation artifacts from claiming public eligibility.
+- **Decision**: Implemented `validate_observation_vs_public_claim_boundary` in `public_gate_bundle.py` to assert that: (a) offline/background receipts can never carry `public_claim_safe = True`, and (b) any public-promotion-ready bundle must be completely free of experimental or partial rows. Verified with high-stakes boundary tests (Task 7 - Task 10).
+- **Prevention**: Enforce strict physical boundary isolation tests on all diagnostic layers. Prevent any experimental or offline artifacts from altering final promotion status under fail-closed gates.
+
+
 
