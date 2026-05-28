@@ -8821,7 +8821,17 @@ def _history_policy_name(*, neutralize_history: bool, allow_learning_loop: bool)
     return "per_task_reset"
 
 
-def _hidden_verifier_mode_enabled() -> bool:
+def _hidden_verifier_mode_enabled(config: "dict | None" = None) -> bool:
+    """PR3: Check hidden verifier mode from config dict first, then fall back to env.
+
+    Args:
+        config: Optional runner config dict. If provided and contains
+                'hidden_verifier_mode': True, returns True without env lookup.
+                This ensures CLI-flag-derived config is the authoritative source,
+                avoiding preflight/subprocess source inconsistency.
+    """
+    if config is not None and bool(config.get("hidden_verifier_mode")):
+        return True
     return os.environ.get("NEXUS_VALUE_HIDDEN_VERIFIER", "").strip().lower() in {"1", "true", "yes"}
 
 
@@ -9561,6 +9571,17 @@ def main() -> int:
     )
     parser.add_argument("--force-learn-slo-ready", action="store_true")
     parser.add_argument(
+        "--enable-hidden-verifier",
+        action="store_true",
+        default=False,
+        help=(
+            "Enable hidden verifier mode for this run. Maps the CLI flag into the runner config "
+            "so that preflight, row writing, and evidence bundle all read the same authoritative "
+            "source. Equivalent to setting NEXUS_VALUE_HIDDEN_VERIFIER=1 but propagated explicitly "
+            "from the parsed args rather than as an implicit env side-effect."
+        ),
+    )
+    parser.add_argument(
         "--neutralize-history",
         dest="neutralize_history",
         action="store_true",
@@ -9667,6 +9688,11 @@ def main() -> int:
         _req_model = str(os.environ.get("NEXUS_GEMINI_MODEL_NAME") or "").strip()
         if _req_model and not os.environ.get("NEXUS_DIRECT_GEMINI_MODEL"):
             os.environ["NEXUS_DIRECT_GEMINI_MODEL"] = _req_model
+    # PR3: hidden verifier source convergence — explicit CLI flag → env mapping.
+    # This is an intentional, documented propagation (not an implicit side-effect).
+    # All downstream calls to _hidden_verifier_mode_enabled() will read from this env.
+    if getattr(args, "enable_hidden_verifier", False):
+        os.environ["NEXUS_VALUE_HIDDEN_VERIFIER"] = "1"
     if args.session_worker:
         os.environ["NEXUS_GEMINI_SESSION_WORKER"] = "1"
         os.environ["NEXUS_CODEX_SESSION_WORKER"] = "1"
