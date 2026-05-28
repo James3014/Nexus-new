@@ -27,6 +27,24 @@ RECEIPT_LITE_FLAGS = (
     "preflight_receipt_lite",
 )
 
+# LANE_DEFAULT_CONTROLS mirrors nexus/engine/lane_policy_defaults.py.
+# Kept here as a local constant to avoid cross-layer imports.
+# Reason-code suffix mapping: control key -> reason_code appended when that control is active.
+LANE_DEFAULT_CONTROLS: dict[str, dict[str, str]] = {
+    "hidden_bugfix_supervised": {
+        "allow_pre_model_deterministic_rescue": "lane_default_pre_model_rescue",
+    },
+    "governance_hardened": {
+        "skip_llm_baseline": "lane_default_skip_baseline",
+    },
+    "governance_hardened_capped": {
+        "skip_llm_baseline": "lane_default_skip_baseline",
+    },
+    "context_sync_capped": {
+        "supervised_bare_first": "lane_default_supervised_bare_first",
+    },
+}
+
 
 @dataclass(frozen=True)
 class RouteExecutionPolicy:
@@ -197,6 +215,12 @@ def decide_route_execution_policy(
     )
     if not supervised_allowed and (route_cost_controls.get("supervised_bare_first") is True or baseline_fast_path):
         reasons.append("supervised_bare_first_blocked")
+
+    # Annotate lane-default reason codes so route evidence reflects the origin of each control.
+    lane = str(route_cost_controls.get("route_lane") or "")
+    for control_key, reason_code in LANE_DEFAULT_CONTROLS.get(lane, {}).items():
+        if route_cost_controls.get(control_key) is True:
+            reasons.append(reason_code)
 
     return RouteExecutionPolicy(
         supervised_bare_first_allowed=supervised_allowed,

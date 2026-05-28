@@ -1112,6 +1112,82 @@ def test_route_execution_policy_blocks_required_protected_pre_model_rescue():
     assert "pre_model_rescue_configured_but_blocked" in policy.reason_codes
 
 
+def test_route_execution_policy_records_lane_default_pre_model_rescue_for_hidden_bugfix():
+    policy = decide_route_execution_policy(
+        route_cost_controls={
+            "route_lane": "hidden_bugfix_supervised",
+            "context_mode": "compact",
+            "max_rounds": 1,
+            "disable_research": True,
+            "allow_pre_model_deterministic_rescue": True,
+            "preflight_receipt_lite": True,
+        },
+        llm_enabled=True,
+        hidden_verifier_required=True,
+        eligibility_class="standard",
+        local_reflex_risk_level="low",
+        local_reflex_bare_sufficiency="high",
+    )
+    assert policy.pre_model_deterministic_rescue_allowed is True
+    assert "lane_default_pre_model_rescue" in policy.reason_codes
+
+
+def test_route_execution_policy_records_lane_default_skip_baseline_for_governance_hardened():
+    policy = decide_route_execution_policy(
+        route_cost_controls={
+            "route_lane": "governance_hardened",
+            "context_mode": "compact",
+            "max_rounds": 1,
+            "disable_research": True,
+            "skip_llm_baseline": True,
+        },
+        llm_enabled=True,
+        hidden_verifier_required=True,
+        eligibility_class="standard",
+        local_reflex_risk_level="low",
+        local_reflex_bare_sufficiency="high",
+    )
+    assert "lane_default_skip_baseline" in policy.reason_codes
+
+
+def test_route_execution_policy_records_lane_default_supervised_bare_first_for_context_sync():
+    policy = decide_route_execution_policy(
+        route_cost_controls={
+            "route_lane": "context_sync_capped",
+            "context_mode": "compact",
+            "max_rounds": 1,
+            "disable_research": True,
+            "supervised_bare_first": True,
+        },
+        llm_enabled=True,
+        hidden_verifier_required=True,
+        eligibility_class="standard",
+        local_reflex_risk_level="low",
+        local_reflex_bare_sufficiency="high",
+    )
+    assert policy.supervised_bare_first_allowed is True
+    assert "lane_default_supervised_bare_first" in policy.reason_codes
+
+
+def test_route_execution_policy_no_lane_default_codes_for_unrelated_lane():
+    policy = decide_route_execution_policy(
+        route_cost_controls={
+            "route_lane": "hidden_lite",
+            "context_mode": "compact",
+            "max_rounds": 1,
+            "disable_research": True,
+            "lite_route": True,
+        },
+        llm_enabled=True,
+        hidden_verifier_required=True,
+        eligibility_class="standard",
+        local_reflex_risk_level="low",
+        local_reflex_bare_sufficiency="high",
+    )
+    lane_default_codes = [c for c in policy.reason_codes if c.startswith("lane_default_")]
+    assert lane_default_codes == [], f"Unexpected lane_default codes: {lane_default_codes}"
+
+
 @pytest.mark.parametrize(
     "route_lane",
     [
