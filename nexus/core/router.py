@@ -1,6 +1,7 @@
 import json
 import logging
 import hashlib
+import os
 from datetime import datetime, timezone
 from typing import Dict, Any, List
 from pathlib import Path
@@ -69,10 +70,27 @@ class SkillsRouter:
                 "shadow_confidence": 0.95 if is_skip_candidate else 0.80,
                 "shadow_estimated_savings_ms": 1200.0 if is_skip_candidate else 0.0,
                 "shadow_prefilter_reason": "heuristic_static_ast_no_functional_change" if is_skip_candidate else "structural_change_detected",
-                "public_claim_safe": False # STRICT CONTRACT: Must be False!
+                "public_claim_safe": False, # STRICT CONTRACT: Must be False!
+                "timestamp": datetime.now(timezone.utc).isoformat(),
+                "run_id": os.getenv("NEXUS_RUN_ID", "run_unknown"),
+                "task_kind": capability,
+                "provider_path": "gemini",
+                "route_strategy": self.governance_hardened_mode
             }
             
+            # Task A3: 寫入獨立的 shadow_telemetry.jsonl
+            try:
+                log_dir = Path(self.project_root) / ".nexus" / "reports"
+                log_dir.mkdir(parents=True, exist_ok=True)
+                log_file = log_dir / "shadow_telemetry.jsonl"
+                with open(log_file, "a", encoding="utf-8") as h:
+                    h.write(json.dumps(res["observation_only_diagnostics"], ensure_ascii=False) + "\n")
+            except Exception as e:
+                logger.debug("Failed to write prefilter shadow telemetry: %s", e)
+            
         return res
+
+
 
 
     def memory_route(self, query: str, context: Dict[str, Any]) -> Dict[str, Any]:

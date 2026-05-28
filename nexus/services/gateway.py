@@ -1,5 +1,6 @@
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
+from datetime import datetime, timezone
 import subprocess
 import json
 import logging
@@ -21,6 +22,7 @@ from nexus.services.gemini_cli import (
 )
 
 logger = logging.getLogger(__name__)
+
 
 
 def _run_cli_with_hard_timeout(
@@ -250,11 +252,31 @@ class BattlesuitGateway:
             schema_preserved = "required_governance_rules" in compact_sys or "required_governance_rules" in compact_content or \
                                "Required output shape" in compact_sys
                                
-            gateway_telemetry["shadow_compaction_ratio"] = compaction_ratio
-            gateway_telemetry["shadow_original_tokens"] = orig_chars // 4
-            gateway_telemetry["shadow_compacted_tokens"] = compacted_chars // 4
-            gateway_telemetry["shadow_schema_preserved"] = schema_preserved
-            gateway_telemetry["public_claim_safe"] = False # STRICT CONTRACT: Must be False!
+            gateway_telemetry.update({
+                "shadow_compaction_ratio": compaction_ratio,
+                "shadow_original_tokens": orig_chars // 4,
+                "shadow_compacted_tokens": compacted_chars // 4,
+                "shadow_schema_preserved": schema_preserved,
+                "public_claim_safe": False, # STRICT CONTRACT: Must be False!
+                "prompt_render_id": f"render_{model_name}_{int(time.time() * 1000)}",
+                "timestamp": datetime.now(timezone.utc).isoformat(),
+                "run_id": os.getenv("NEXUS_RUN_ID", "run_unknown"),
+                "task_kind": "gateway_completion",
+                "provider_path": "gemini",
+                "route_strategy": "shadow_compaction_only"
+            })
+
+            # Task A3: 寫入獨立的 shadow_telemetry.jsonl
+            try:
+                log_dir = Path(self.project_root) / ".nexus" / "reports"
+                log_dir.mkdir(parents=True, exist_ok=True)
+                log_file = log_dir / "shadow_telemetry.jsonl"
+                with open(log_file, "a", encoding="utf-8") as h:
+                    h.write(json.dumps(gateway_telemetry, ensure_ascii=False) + "\n")
+            except Exception as e:
+                logger.debug("Failed to write compaction shadow telemetry: %s", e)
+
+
 
         
         custom_env = build_gemini_env(os.environ.copy())
