@@ -2639,3 +2639,50 @@ def test_capability_planner_drops_unbacked_bdd_and_failure_sensors_for_ops_route
     assert "semantic_failure_sensor" not in selected
     relevance = plan["signal_snapshot"]["harness_relevance_policy"]
     assert set(relevance["downgraded"]) == {"bdd_acceptance_skill", "semantic_failure_sensor"}
+
+
+def test_lane_policy_defaults_resolution_snapshot(tmp_path):
+    controls_bugfix = route_cost_controls_for_task(
+        tmp_path,
+        "task-1",
+        budget={"route_cost_policy": {"current_route_lane": "hidden_bugfix_supervised", "source": "test"}},
+    )
+    assert controls_bugfix.get("allow_pre_model_deterministic_rescue") is True
+
+    controls_gov = route_cost_controls_for_task(
+        tmp_path,
+        "task-2",
+        budget={"route_cost_policy": {"current_route_lane": "governance_hardened", "source": "test"}},
+    )
+    assert controls_gov.get("skip_llm_baseline") is True
+
+    controls_context = route_cost_controls_for_task(
+        tmp_path,
+        "task-3",
+        budget={"route_cost_policy": {"current_route_lane": "context_sync_capped", "source": "test"}},
+    )
+    assert controls_context.get("supervised_bare_first") is True
+
+    budget_override = {
+        "route_cost_policy": {
+            "source": "test",
+            "current_route_lane": "context_sync_capped",
+            "feature_rules": [
+                {
+                    "id": "rule-1",
+                    "match": {"task_type": "public_docs_code_sync"},
+                    "controls": {
+                        "supervised_bare_first": False,
+                    }
+                }
+            ]
+        }
+    }
+    controls_override = route_cost_controls_for_task(
+        tmp_path,
+        "task-4",
+        budget=budget_override,
+        route_features={"task_type": "public_docs_code_sync"}
+    )
+    assert "supervised_bare_first" not in controls_override or controls_override.get("supervised_bare_first") is False
+

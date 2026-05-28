@@ -7,6 +7,7 @@ from pathlib import Path
 from typing import Any
 
 from nexus.engine.learning_policy_store import DEFAULT_LEARNING_POLICY_STORE, LearningPolicyStore
+from nexus.engine.lane_policy_defaults import LANE_POLICY_DEFAULTS
 
 DEFAULT_PROMOTED_POLICY_PATH = Path(".nexus") / "policy" / "promoted_learning_policy.json"
 DEFAULT_DYNAMIC_LEARNING_POLICY_PATH = Path(".nexus") / "memory" / "dynamic_learning_policy.json"
@@ -381,39 +382,56 @@ def route_cost_controls_for_task(
     feature_controls = _controls_from_feature_rules(policy.get("feature_rules", []), route_features or {})
     task_id = str(task_id)
     lane = feature_controls.get("route_lane") or policy.get("current_route_lane")
+    lane_defaults = LANE_POLICY_DEFAULTS.get(lane, {}) if lane else {}
+
+    def resolve_bool_control(key: str, task_list_name: str | None = None) -> bool:
+        if task_list_name and task_id in set(policy.get(task_list_name, []) or []):
+            return True
+        if key in feature_controls:
+            return bool(feature_controls[key])
+        global_key = f"current_{key}"
+        if global_key in policy:
+            return bool(policy[global_key])
+        if key in lane_defaults:
+            return bool(lane_defaults[key])
+        return False
+
+    def resolve_int_control(key: str) -> int | None:
+        if key == "candidate_cap" and task_id in overrides:
+            return overrides[task_id]
+        if key in feature_controls:
+            return feature_controls[key]
+        global_key = f"current_{key}"
+        if global_key in policy:
+            return policy[global_key]
+        if key in lane_defaults:
+            return lane_defaults[key]
+        return None
+
+    def resolve_str_control(key: str) -> str | None:
+        if key in feature_controls:
+            return feature_controls[key]
+        global_key = f"current_{key}"
+        if global_key in policy:
+            return policy[global_key]
+        if key in lane_defaults:
+            return lane_defaults[key]
+        return None
+
     controls: dict[str, Any] = {
-        "candidate_cap": overrides.get(task_id) or feature_controls.get("candidate_cap") or policy.get("current_candidate_cap"),
-        "lite_route": bool(policy.get("current_lite_route", False))
-        or bool(feature_controls.get("lite_route", False))
-        or task_id in set(policy.get("lite_route_tasks", []) or []),
-        "hold": bool(policy.get("current_hold", False))
-        or bool(feature_controls.get("hold", False))
-        or task_id in set(policy.get("hold_tasks", []) or []),
-        "supervised_bare_first": bool(policy.get("current_supervised_bare_first", False))
-        or bool(feature_controls.get("supervised_bare_first", False)),
-        "allow_medium_risk_supervised_bare_first": bool(
-            policy.get("current_allow_medium_risk_supervised_bare_first", False)
-        )
-        or bool(feature_controls.get("allow_medium_risk_supervised_bare_first", False)),
-        "allow_high_risk_supervised_bare_first": bool(
-            policy.get("current_allow_high_risk_supervised_bare_first", False)
-        )
-        or bool(feature_controls.get("allow_high_risk_supervised_bare_first", False)),
-        "allow_pre_model_deterministic_rescue": bool(
-            policy.get("current_allow_pre_model_deterministic_rescue", False)
-        )
-        or bool(feature_controls.get("allow_pre_model_deterministic_rescue", False))
-        or (lane == "hidden_bugfix_supervised"),
-        "skip_llm_baseline": bool(policy.get("current_skip_llm_baseline", False))
-        or bool(feature_controls.get("skip_llm_baseline", False))
-        or (lane in {"governance_hardened", "governance_hardened_capped"}),
-        "disable_research": bool(policy.get("current_disable_research", False))
-        or bool(feature_controls.get("disable_research", False)),
-        "max_rounds": feature_controls.get("max_rounds") or policy.get("current_max_rounds"),
-        "context_mode": feature_controls.get("context_mode") or policy.get("current_context_mode"),
+        "candidate_cap": resolve_int_control("candidate_cap"),
+        "lite_route": resolve_bool_control("lite_route", "lite_route_tasks"),
+        "hold": resolve_bool_control("hold", "hold_tasks"),
+        "supervised_bare_first": resolve_bool_control("supervised_bare_first"),
+        "allow_medium_risk_supervised_bare_first": resolve_bool_control("allow_medium_risk_supervised_bare_first"),
+        "allow_high_risk_supervised_bare_first": resolve_bool_control("allow_high_risk_supervised_bare_first"),
+        "allow_pre_model_deterministic_rescue": resolve_bool_control("allow_pre_model_deterministic_rescue"),
+        "skip_llm_baseline": resolve_bool_control("skip_llm_baseline"),
+        "disable_research": resolve_bool_control("disable_research"),
+        "max_rounds": resolve_int_control("max_rounds"),
+        "context_mode": resolve_str_control("context_mode"),
         "route_lane": lane,
-        "require_llm_baseline": bool(policy.get("current_require_llm_baseline", False))
-        or bool(feature_controls.get("require_llm_baseline", False)),
+        "require_llm_baseline": resolve_bool_control("require_llm_baseline"),
     }
     if any(value not in (None, "", False) for value in controls.values()):
         controls["policy_source"] = str(feature_controls.get("policy_source") or policy.get("source") or "")
@@ -613,34 +631,22 @@ def _controls_from_feature_rules(rules: Any, route_features: dict[str, Any]) -> 
             continue
         if _feature_rule_matches(match, normalized):
             out: dict[str, Any] = {}
-            if _is_positive_int(controls.get("candidate_cap")):
-                out["candidate_cap"] = int(controls["candidate_cap"])
-            if controls.get("lite_route") is True:
-                out["lite_route"] = True
-            if controls.get("hold") is True:
-                out["hold"] = True
-            if controls.get("supervised_bare_first") is True:
-                out["supervised_bare_first"] = True
-            if controls.get("allow_medium_risk_supervised_bare_first") is True:
-                out["allow_medium_risk_supervised_bare_first"] = True
-            if controls.get("allow_high_risk_supervised_bare_first") is True:
-                out["allow_high_risk_supervised_bare_first"] = True
-            if controls.get("allow_pre_model_deterministic_rescue") is True:
-                out["allow_pre_model_deterministic_rescue"] = True
-            if controls.get("skip_llm_baseline") is True:
-                out["skip_llm_baseline"] = True
-            if controls.get("require_llm_baseline") is True:
-                out["require_llm_baseline"] = True
-            if controls.get("disable_research") is True:
-                out["disable_research"] = True
-            if _is_positive_int(controls.get("max_rounds")):
-                out["max_rounds"] = int(controls["max_rounds"])
-            context_mode = str(controls.get("context_mode") or "").strip()
-            if context_mode:
-                out["context_mode"] = context_mode
-            route_lane = str(controls.get("route_lane") or "").strip()
-            if route_lane:
-                out["route_lane"] = route_lane
+            for key in [
+                "candidate_cap", "lite_route", "hold", "supervised_bare_first",
+                "allow_medium_risk_supervised_bare_first", "allow_high_risk_supervised_bare_first",
+                "allow_pre_model_deterministic_rescue", "skip_llm_baseline", "require_llm_baseline",
+                "disable_research", "max_rounds", "context_mode", "route_lane"
+            ]:
+                if key in controls:
+                    val = controls[key]
+                    if key in {"candidate_cap", "max_rounds"}:
+                        if _is_positive_int(val):
+                            out[key] = int(val)
+                    elif key in {"context_mode", "route_lane"}:
+                        if str(val).strip():
+                            out[key] = str(val).strip()
+                    else:
+                        out[key] = bool(val)
             out["policy_source"] = str(rule.get("id") or "")
             return out
     return {}
