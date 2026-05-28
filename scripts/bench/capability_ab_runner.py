@@ -9263,6 +9263,15 @@ def build_public_benchmark_preflight(args: argparse.Namespace, *, repo_root: Pat
         failures.append("outbound_prompt_ledger_required_for_sanitized_export")
     if env_model and direct_model and env_model != direct_model:
         failures.append("model_lock_mismatch")
+    # PR1: explicit same-model baseline enforcement — fail closed if bare arm is not a real provider path.
+    require_same_model_baseline = bool(getattr(args, "require_same_model_baseline", False))
+    if require_same_model_baseline:
+        if args.without_mode not in {"gemini", "codex"}:
+            failures.append("same_model_required_but_bare_arm_is_local")
+        elif not direct_model:
+            failures.append("same_model_required_but_direct_model_env_missing")
+        elif env_model and direct_model and env_model != direct_model:
+            failures.append("same_model_required_but_model_names_differ")
     if args.without_mode in {"gemini", "codex"} and args.with_llm_mode == "off":
         warnings.append(f"with_nexus_llm_off_while_bare_uses_{args.without_mode}")
     if not _hidden_verifier_mode_enabled():
@@ -9507,6 +9516,16 @@ def main() -> int:
         help="Fail closed unless the Nexus treatment arm is allowed to auto-route without forced Hyper shortcuts.",
     )
     parser.add_argument("--without-mode", choices=["service", "bare", "gemini", "codex"], default="bare")
+    parser.add_argument(
+        "--require-same-model-baseline",
+        action="store_true",
+        default=False,
+        help=(
+            "Enforce same-model symmetric baseline: forces --without-mode gemini and validates that "
+            "NEXUS_GEMINI_MODEL_NAME matches NEXUS_DIRECT_GEMINI_MODEL. Preflight fails closed if "
+            "bare arm is not a real provider path or models differ."
+        ),
+    )
     parser.add_argument("--force-learn-slo-ready", action="store_true")
     parser.add_argument(
         "--neutralize-history",
@@ -9607,6 +9626,14 @@ def main() -> int:
     args = parser.parse_args()
     if args.gemini_model:
         os.environ["NEXUS_GEMINI_MODEL_NAME"] = str(args.gemini_model).strip()
+    # PR1: same-model baseline enforcement — map flag into without_mode and env before preflight.
+    # This must happen BEFORE build_public_benchmark_preflight reads env_model/direct_model.
+    if getattr(args, "require_same_model_baseline", False):
+        args.without_mode = "gemini"
+        # Propagate gemini-model to direct model env if not already set, so same_model check passes.
+        _req_model = str(os.environ.get("NEXUS_GEMINI_MODEL_NAME") or "").strip()
+        if _req_model and not os.environ.get("NEXUS_DIRECT_GEMINI_MODEL"):
+            os.environ["NEXUS_DIRECT_GEMINI_MODEL"] = _req_model
     if args.session_worker:
         os.environ["NEXUS_GEMINI_SESSION_WORKER"] = "1"
         os.environ["NEXUS_CODEX_SESSION_WORKER"] = "1"
