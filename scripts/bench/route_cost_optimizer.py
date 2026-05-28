@@ -138,6 +138,10 @@ def _cost_evidence_class(row: dict[str, Any]) -> str:
     if int(_num(row, "model_calls")) <= 0:
         return "rescue_only_no_model_call" if source in LOCAL_SUCCESS_SOURCES or source.startswith("local_preflight") else "no_model_call"
     if source in LOCAL_SUCCESS_SOURCES or source.startswith("local_preflight"):
+        if int(_num(row, "model_calls")) > 0:
+            if _measured_token_only(row):
+                return "rescue_with_model_fallback_measured"
+            return "rescue_with_model_fallback"
         return "rescue_only_local_success"
     if not _measured_token_only(row):
         return "token_unreliable"

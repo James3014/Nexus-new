@@ -977,3 +977,57 @@ def test_shadow_telemetry_dataset_hygiene_strict():
             public_promotion_readiness=True
         )
     assert "found inside a public promotion ready bundle" in str(exc_info.value)
+
+
+def test_paired_row_token_accounting_and_cost_evidence_class():
+    from scripts.bench.cost_evidence_classifier import annotate_cost_evidence
+
+    # 情形 1: local_success + model_calls=0 -> rescue_only_no_model_call
+    row_local_only = {
+        "nexus_winner_source": "local",
+        "model_calls": 0,
+        "token_capture_status": "not_applicable_local_only",
+        "total_tokens": 0,
+    }
+    annotate_cost_evidence(row_local_only)
+    assert row_local_only["cost_evidence_class"] == "rescue_only_no_model_call"
+    assert row_local_only["clean_model_cost_evidence"] is False
+
+    # 情形 2: local_success + model_calls>0 + measured tokens -> rescue_with_model_fallback_measured
+    row_fallback_measured = {
+        "nexus_winner_source": "local",
+        "model_calls": 1,
+        "token_capture_status": "measured",
+        "gateway_token_source": "stats",
+        "token_measured": True,
+        "total_tokens": 100,
+    }
+    annotate_cost_evidence(row_fallback_measured)
+    assert row_fallback_measured["cost_evidence_class"] == "rescue_with_model_fallback_measured"
+    assert row_fallback_measured["clean_model_cost_evidence"] is False # 不能提升為 clean model cost
+
+    # 情形 3: local_success + model_calls>0 + estimated tokens -> rescue_with_model_fallback
+    row_fallback_estimated = {
+        "nexus_winner_source": "local",
+        "model_calls": 1,
+        "token_capture_status": "estimated",
+        "gateway_token_source": "estimated",
+        "total_tokens": 100,
+    }
+    annotate_cost_evidence(row_fallback_estimated)
+    assert row_fallback_estimated["cost_evidence_class"] == "rescue_with_model_fallback"
+    assert row_fallback_estimated["clean_model_cost_evidence"] is False
+
+    # 情形 4: model winner + measured tokens -> clean_model_cost
+    row_model_clean = {
+        "nexus_winner_source": "model",
+        "model_calls": 1,
+        "token_capture_status": "measured",
+        "gateway_token_source": "stats",
+        "token_measured": True,
+        "total_tokens": 100,
+    }
+    annotate_cost_evidence(row_model_clean)
+    assert row_model_clean["cost_evidence_class"] == "clean_model_cost"
+    assert row_model_clean["clean_model_cost_evidence"] is True
+

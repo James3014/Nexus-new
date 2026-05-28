@@ -166,7 +166,13 @@ def annotate_cost_evidence(row: dict[str, Any]) -> dict[str, Any]:
             "rescue_only_no_model_call" if local_success or row.get("nexus_internal_delivery_valid") else "no_model_call"
         )
     elif local_success:
-        cost_evidence_class = "rescue_only_local_success"
+        if model_calls > 0:
+            if row["provider_token_measured"]:
+                cost_evidence_class = "rescue_with_model_fallback_measured"
+            else:
+                cost_evidence_class = "rescue_with_model_fallback"
+        else:
+            cost_evidence_class = "rescue_only_local_success"
     elif not row["provider_token_measured"] or not row["token_reliable"]:
         cost_evidence_class = "token_unreliable"
     else:
