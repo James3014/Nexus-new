@@ -3745,3 +3745,24 @@ version_scope:
 - **Decision**: Calibrated prefilter and compaction schemas to include complete decision metadata, and asserted `run_id` stability inside strict TDD hygiene tests (`test_shadow_telemetry_dataset_hygiene_strict`) to eliminate fallback run_unknown debts. Merged all boundary validation directly into the existing `validate_observation_vs_public_claim_boundary` to prevent semantic bifurcation, and split the final markdown report (`PHASE4_BENCHMARK_REPORT.md`) into physical columns to visually quarantine experimental stats. Deployed strata-aware offline analysis tools (`analyze_shadow_prefilter.py` and `analyze_shadow_compaction.py`) with Boring formats (`JSON summary + CSV details`), proving a clean `PROPOSAL_ELIGIBLE` verdict over N=15 strata-aligned samples.
 - **Prevention**: All spike and optimization analyses must be evaluated across distinct task strata rather than aggregated aggregates. Standardize offline reports with standard JSON/CSV boundaries, and enforce that experimental validators strictly hook into unified preflight gate contracts to prevent twin-truth systems.
 
+## 2026-05-28: Nexus L5.7 / v26.0 兩個平面、四層契約實作與 A/B Gate 判讀
+
+- **Phenomenon**: Light Routing 優化過程中，「execution 成功」「model participation 完整」「可公開宣稱」「商業 ROI 可審計」被混淆成單一通過條件，導致 local-only delivery 偷渡成 source-promotion-ready 結論，或 observation-only telemetry 混入 public cost claim。
+- **Root Cause**:
+  1. `configured-but-blocked` 路由原因碼與 `active deterministic rescue` 未物理分離，被阻斷 reason code 被下游誤判為有效 route policy evidence。
+  2. receipt-lite、expected capability receipt coverage 與 public-safe receipt backfill 未硬性區分 `evidence_present` / `gate_passed` / `public_claim_safe` 三個獨立欄位。
+  3. `bare arm` 未設為真正 same-model provider path → `model_mismatch` 阻斷 source promotion。
+  4. `--with-llm-mode` 未指定時 runner 預設走 local deterministic path，`avg_model_calls=0` 但 wall_time 看起來正常，製造假執行感。
+- **Decision**:
+  1. L1 `lane_capability_contract.py`：HYPER_ONLY 強制回退；`configured_but_blocked` / `is_active_rescue` 物理分離欄位。
+  2. L2 `receipt_causality_contract.py`：六大核心欄位缺一拋 `ValueError`；`planner_only` / `observation_only` / `local_only` source 嚴禁偷渡。
+  3. L3 `route_policy_evidence_contract.py`：route decision 序列化；policy vs winner 不一致 100% fail-closed；blocked lane 永遠無 winner。
+  4. L4 `public_telemetry_boundary_contract.py`：`provider_token_completeness < 1.0` 即阻斷；shadow/experimental 嚴禁下游消費；`public_claim_safe=True` 傳入即拋 `ValueError`；wall-ledger 殘差 > 5% 即阻斷。
+  5. 30 項回歸測試全 PASS（0.12s）。兩輪 A/B：Run 1 local → 三 gate 正確 fail-closed；Run 2 hard LLM → `EXECUTION_READY + EVIDENCE_READY` PASS，`SOURCE_PROMOTION + COMMERCIAL` 正確 RETURN/FAIL。
+- **Prevention**:
+  1. A/B 必須指定 `--with-llm-mode hard`；預設 local 不得視為 same-model paired evidence。
+  2. `bare arm` 必須為 direct gemini provider path，否則 `model_mismatch` 永遠阻斷 source promotion。
+  3. 公開宣稱必要前提（按序）：`hidden_verifier_mode=True` → same_model paired → outbound_prompt_ledger clean → `provider_token_completeness=1.0` → wall_ledger conserved → x3_promotion gate。六件缺一即 RETURN。
+  4. `EXECUTION_READY` 通過不等於 `SOURCE_PROMOTION_READY`；`EVIDENCE_READY` 通過不等於 `COMMERCIAL_BASIS_READY`；四段 gate 必須獨立判讀，不得以前段成功推斷後段。
+
+
