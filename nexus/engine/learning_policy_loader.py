@@ -380,6 +380,7 @@ def route_cost_controls_for_task(
     overrides = overrides if isinstance(overrides, dict) else {}
     feature_controls = _controls_from_feature_rules(policy.get("feature_rules", []), route_features or {})
     task_id = str(task_id)
+    lane = feature_controls.get("route_lane") or policy.get("current_route_lane")
     controls: dict[str, Any] = {
         "candidate_cap": overrides.get(task_id) or feature_controls.get("candidate_cap") or policy.get("current_candidate_cap"),
         "lite_route": bool(policy.get("current_lite_route", False))
@@ -401,14 +402,16 @@ def route_cost_controls_for_task(
         "allow_pre_model_deterministic_rescue": bool(
             policy.get("current_allow_pre_model_deterministic_rescue", False)
         )
-        or bool(feature_controls.get("allow_pre_model_deterministic_rescue", False)),
+        or bool(feature_controls.get("allow_pre_model_deterministic_rescue", False))
+        or (lane == "hidden_bugfix_supervised"),
         "skip_llm_baseline": bool(policy.get("current_skip_llm_baseline", False))
-        or bool(feature_controls.get("skip_llm_baseline", False)),
+        or bool(feature_controls.get("skip_llm_baseline", False))
+        or (lane in {"governance_hardened", "governance_hardened_capped"}),
         "disable_research": bool(policy.get("current_disable_research", False))
         or bool(feature_controls.get("disable_research", False)),
         "max_rounds": feature_controls.get("max_rounds") or policy.get("current_max_rounds"),
         "context_mode": feature_controls.get("context_mode") or policy.get("current_context_mode"),
-        "route_lane": feature_controls.get("route_lane") or policy.get("current_route_lane"),
+        "route_lane": lane,
         "require_llm_baseline": bool(policy.get("current_require_llm_baseline", False))
         or bool(feature_controls.get("require_llm_baseline", False)),
     }
