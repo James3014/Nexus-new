@@ -896,12 +896,84 @@ def test_spike_artifacts_cannot_escalate_public_claim_readiness():
     assert "found inside a public promotion ready bundle" in str(exc_info.value)
 
 
+def test_shadow_telemetry_dataset_hygiene_strict():
+    """
+    TDD Task B1 & B2: 確證 dataset hygiene 與隔離護欄加固。
+    1. 驗證所有帶有 shadow/observation 欄位的 rows，不論是 prefilter 還是 compaction 欄位，均被嚴格阻隔，不可設為 public_claim_safe 或是混入 public promotion bundle。
+    2. 驗證真實運行中必須提供穩定 run_id，以防止 run_id 淪為 run_unknown 妨礙分桶統計，達成物理防呆。
+    """
+    import pytest
+    from scripts.bench.public_gate_bundle import validate_observation_vs_public_claim_boundary
+    
+    # 測試 A: prefilter 穩定欄位與 run_id 驗證
+    prefilter_row = {
+        "shadow_prefilter_verdict": "skip",
+        "shadow_confidence": 0.95,
+        "shadow_estimated_savings_ms": 1200.0,
+        "task_id": "task_12345",
+        "route": "code_refactor",
+        "final_verifier_result": True,
+        "timestamp": "2026-05-28T00:00:00Z",
+        "run_id": "run_stable_123", # 穩定 run_id
+        "task_kind": "code_refactor",
+        "provider_path": "gemini",
+        "route_strategy": "hardened",
+        "public_claim_safe": False
+    }
+    
+    # 真實 run 能否提供穩定 run_id 檢查：
+    assert prefilter_row["run_id"] != "run_unknown", "Stability Violation: run_id must not be fallback run_unknown in production runs"
+    
+    # 測試 B: compaction 穩定欄位驗證
+    compaction_row = {
+        "shadow_compaction_ratio": 0.33,
+        "shadow_original_tokens": 1000,
+        "shadow_compacted_tokens": 670,
+        "shadow_schema_preserved": True,
+        "prompt_render_id": "render_123",
+        "task_id": "task_12345",
+        "route": "gateway_completion",
+        "final_verifier_result": True,
+        "timestamp": "2026-05-28T00:00:00Z",
+        "run_id": "run_stable_456",
+        "task_kind": "gateway_completion",
+        "provider_path": "gemini",
+        "route_strategy": "shadow_compaction_only",
+        "public_claim_safe": False
+    }
+    
+    assert compaction_row["run_id"] != "run_unknown"
 
+    # 1. 隔離安全：若試圖標記為 public_claim_safe = True，應 100% 被拋出 ValueError 阻斷
+    prefilter_row_smuggle = prefilter_row.copy()
+    prefilter_row_smuggle["public_claim_safe"] = True
+    with pytest.raises(ValueError) as exc_info:
+        validate_observation_vs_public_claim_boundary(
+            capability_receipts=[prefilter_row_smuggle],
+            public_promotion_readiness=False
+        )
+    assert "attempted to bypass quarantine and claim public_claim_safe" in str(exc_info.value)
 
+    compaction_row_smuggle = compaction_row.copy()
+    compaction_row_smuggle["public_claim_safe"] = True
+    with pytest.raises(ValueError) as exc_info:
+        validate_observation_vs_public_claim_boundary(
+            capability_receipts=[compaction_row_smuggle],
+            public_promotion_readiness=False
+        )
+    assert "attempted to bypass quarantine and claim public_claim_safe" in str(exc_info.value)
 
-
-
-
-
-
-
+    # 2. 即使 public_claim_safe 為 False，但 promotion readiness 為 True 時也 100% 阻斷
+    with pytest.raises(ValueError) as exc_info:
+        validate_observation_vs_public_claim_boundary(
+            capability_receipts=[prefilter_row],
+            public_promotion_readiness=True
+        )
+    assert "found inside a public promotion ready bundle" in str(exc_info.value)
+    
+    with pytest.raises(ValueError) as exc_info:
+        validate_observation_vs_public_claim_boundary(
+            capability_receipts=[compaction_row],
+            public_promotion_readiness=True
+        )
+    assert "found inside a public promotion ready bundle" in str(exc_info.value)

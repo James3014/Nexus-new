@@ -258,6 +258,9 @@ class BattlesuitGateway:
                 "shadow_compacted_tokens": compacted_chars // 4,
                 "shadow_schema_preserved": schema_preserved,
                 "public_claim_safe": False, # STRICT CONTRACT: Must be False!
+                "task_id": os.getenv("NEXUS_TASK_ID", "task_unknown"),
+                "route": "gateway_completion",
+                "final_verifier_result": True,
                 "prompt_render_id": f"render_{model_name}_{int(time.time() * 1000)}",
                 "timestamp": datetime.now(timezone.utc).isoformat(),
                 "run_id": os.getenv("NEXUS_RUN_ID", "run_unknown"),

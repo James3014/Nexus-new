@@ -71,6 +71,9 @@ class SkillsRouter:
                 "shadow_estimated_savings_ms": 1200.0 if is_skip_candidate else 0.0,
                 "shadow_prefilter_reason": "heuristic_static_ast_no_functional_change" if is_skip_candidate else "structural_change_detected",
                 "public_claim_safe": False, # STRICT CONTRACT: Must be False!
+                "task_id": os.getenv("NEXUS_TASK_ID", "task_unknown"),
+                "route": capability,
+                "final_verifier_result": hidden_verifier_passed,
                 "timestamp": datetime.now(timezone.utc).isoformat(),
                 "run_id": os.getenv("NEXUS_RUN_ID", "run_unknown"),
                 "task_kind": capability,
