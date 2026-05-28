@@ -54,3 +54,6 @@ uv run scripts/ops/ci_gate.py --dry-run [Source: scripts/ops/ci_gate.py]
 
 ---
 [[System Overview]]
+## 🛡️ Critical Flags (v3.0 Enforcement)
+- \`nexus acceptance-check --evidence <path>\`: Mandatory after every P0 fix.
+- **Scoring**: Score < 4.1 triggers auto-block on high-risk lanes.
