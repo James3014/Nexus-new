@@ -222,7 +222,72 @@ class PublicTelemetryBoundaryContract:
     # ──────────────────────────────────────────
     # 內部工具方法
     # ──────────────────────────────────────────
+
+    def evaluate_batch_promotion_boundary(self, rows: List[Dict[str, Any]]) -> Dict[str, Any]:
+        """
+        PR2: Batch-level evidence aggregation — 包裝既有 row-level signals，不創新定義。
+
+        從 runner row 的既有欄位計算 batch 級指標，供 evidence bundle 消費：
+        - provider_token_completeness_rate: 包裝 `provider_token_measured` (已由 _row_has_measured_provider_tokens 判定)
+        - wall_ledger_conserved_rate: 包裝既有 wall-ledger classification
+        - telemetry_invalid_rate: 包裝 `has_infra_invalid` / `telemetry_invalid` row signals
+
+        Returns:
+            dict with keys: provider_token_completeness_rate, wall_ledger_conserved_rate,
+                            telemetry_invalid_rate, eligible_n, observation_only_n, schema
+        """
+        eligible = [r for r in rows if bool(r.get("run_eligible", True))]
+        n = len(eligible)
+        if n == 0:
+            return {
+                "schema": "nexus_batch_promotion_boundary_v1",
+                "eligible_n": 0,
+                "provider_token_completeness_rate": None,
+                "wall_ledger_conserved_rate": None,
+                "telemetry_invalid_rate": None,
+                "observation_only_n": 0,
+            }
+
+        # 1. provider_token_completeness_rate — 包裝 provider_token_measured row signal
+        #    (即 _row_has_measured_provider_tokens 判定結果；runner 已將其寫入 row 級欄位)
+        provider_complete = sum(
+            1 for r in eligible
+            if bool(r.get("provider_token_measured", False))
+            and bool(r.get("token_reliable", True))
+            and not bool(r.get("has_infra_invalid", False))
+        )
+
+        # 2. wall_ledger_conserved_rate — 包裝既有 wall-ledger classification
+        #    conserved = row 不是 telemetry_invalid，且 wall-ledger 條目類型非 zero_fill/observation_only
+        wall_ledger_conserved = sum(
+            1 for r in eligible
+            if not bool(r.get("telemetry_invalid", False))
+            and self.classify_wall_ledger_entry(r) not in {"zero_fill", "observation_only"}
+        )
+
+        # 3. telemetry_invalid_rate — 包裝 has_infra_invalid + telemetry_invalid row signals
+        telemetry_invalid = sum(
+            1 for r in eligible
+            if bool(r.get("has_infra_invalid", False)) or bool(r.get("telemetry_invalid", False))
+        )
+
+        # 4. observation_only_n — 包裝既有 OBSERVATION_ONLY_TELEMETRY_SOURCES 分類
+        observation_only = sum(
+            1 for r in eligible
+            if self._classify_telemetry_source(str(r.get("telemetry_source", "measured"))) == "observation_only"
+        )
+
+        return {
+            "schema": "nexus_batch_promotion_boundary_v1",
+            "eligible_n": n,
+            "provider_token_completeness_rate": round(provider_complete / n, 4),
+            "wall_ledger_conserved_rate": round(wall_ledger_conserved / n, 4),
+            "telemetry_invalid_rate": round(telemetry_invalid / n, 4),
+            "observation_only_n": observation_only,
+        }
+
     def _classify_telemetry_source(self, source: str) -> str:
+
         if source in OBSERVATION_ONLY_TELEMETRY_SOURCES:
             return "observation_only"
         if source in ("measured", "gateway", "provider_reported"):

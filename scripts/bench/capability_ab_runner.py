@@ -835,8 +835,41 @@ def _summarize_benchmark_rows(rows: list[dict[str, Any]]) -> dict[str, dict[str,
                     if row.get("model_uplift_ineligible_reason")
                 }
             ),
+            # PR2: batch-level evidence aggregation — wraps existing row signals, no new taxonomy.
+            # provider_token_completeness_rate: rows with provider_token_measured=True + token_reliable + no infra_invalid
+            "provider_token_completeness_rate": round(
+                sum(
+                    1 for row in eligible
+                    if bool(row.get("provider_token_measured", False))
+                    and bool(row.get("token_reliable", True))
+                    and not bool(row.get("has_infra_invalid", False))
+                ) / len(eligible),
+                4,
+            ) if eligible else None,
+            # wall_ledger_conserved_rate: wraps existing wall-ledger telemetry_source classification
+            "wall_ledger_conserved_rate": round(
+                sum(
+                    1 for row in eligible
+                    if not bool(row.get("telemetry_invalid", False))
+                    and str(row.get("telemetry_source", "measured")) not in {
+                        "zero_fill", "included_in_parent", "shadow", "experimental",
+                        "observation_only", "estimated", "synthetic",
+                    }
+                ) / len(eligible),
+                4,
+            ) if eligible else None,
+            # telemetry_invalid_rate: rows with has_infra_invalid=True or telemetry_invalid=True
+            "telemetry_invalid_rate": round(
+                sum(
+                    1 for row in eligible
+                    if bool(row.get("has_infra_invalid", False)) or bool(row.get("telemetry_invalid", False))
+                ) / len(eligible),
+                4,
+            ) if eligible else None,
         }
     return summary
+
+
 
 
 def load_tasks(path: str | Path) -> list[CapabilityTask]:
