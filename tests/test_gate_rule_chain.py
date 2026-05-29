@@ -11,6 +11,7 @@ from nexus.core.gate_rules_builtin import (
     CostRatioRule,
     DenominatorRule,
     BlockerCleanRule,
+    WallRatioRule,
 )
 
 
@@ -97,6 +98,43 @@ class TestGateRuleChain(unittest.TestCase):
         res_fail = rule.evaluate({"blockers": ["CRITICAL_SEVERITY_BUG"]})
         self.assertFalse(res_fail.passed)
         self.assertEqual(res_fail.reason_code, "ACTIVE_BLOCKERS_PRESENT")
+
+    def test_wall_ratio_rule_blocks_above_1_8(self):
+        rule = WallRatioRule(max_ratio=1.8)
+        # Fails when wall cost ratio exceeds bounds
+        res_fail = rule.evaluate({"wall_cost_ratio": 2.0})
+        self.assertFalse(res_fail.passed)
+        self.assertEqual(res_fail.reason_code, "WALL_RATIO_EXCEEDED")
+
+    def test_wall_ratio_rule_passes_below_threshold(self):
+        rule = WallRatioRule(max_ratio=1.8)
+        # Passes when wall cost ratio is within bounds
+        res_pass = rule.evaluate({"wall_cost_ratio": 1.2})
+        self.assertTrue(res_pass.passed)
+
+    def test_should_proceed_d_phase_uses_rule_chain(self):
+        evaluator = GateEvaluator()
+        forecast = {
+            "roi_score": 0.8,
+            "token_cost_ratio": 1.5,
+            "wall_cost_ratio": 2.0,
+        }
+        risk = {"reject_prob": 0.1}
+        passed, reason = evaluator.should_proceed("D", forecast, risk)
+        self.assertFalse(passed)
+        self.assertIn("CostRatioRule", reason)
+
+    def test_should_proceed_d_phase_passes_clean_ratios(self):
+        evaluator = GateEvaluator()
+        forecast = {
+            "roi_score": 0.8,
+            "token_cost_ratio": 0.9,
+            "wall_cost_ratio": 1.1,
+        }
+        risk = {"reject_prob": 0.1}
+        passed, reason = evaluator.should_proceed("D", forecast, risk)
+        self.assertTrue(passed)
+        self.assertEqual(reason, "passed_p_to_d_gate")
 
 
 if __name__ == "__main__":

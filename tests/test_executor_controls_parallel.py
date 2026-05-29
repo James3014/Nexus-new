@@ -111,6 +111,82 @@ class TestExecutorControlsParallel(unittest.TestCase):
             self.assertLess(elapsed_time, 0.9)
             self.assertGreater(elapsed_time, 0.4)
 
+    def test_executor_delegates_gate_audit_to_evaluator(self):
+        """Verify that when a gate evaluator is provided, it delegates the capability gate audit to it."""
+        from nexus.core.gate_evaluator import GateEvaluator, GateChainResult
+        mock_evaluator = MagicMock(spec=GateEvaluator)
+        mock_evaluator.evaluate_rule_chain.return_value = GateChainResult(
+            verdict="RED", failed_rule="BlockerCleanRule", reason="Mock fail"
+        )
+        
+        # artifact_gate capability in phase "A"
+        artifact_info = CapabilityInfo(
+            name="artifact_gate",
+            phases=["A"],
+            cost_weight=0.1,
+            maturity="ACTIVE",
+            default_skill="skill_1",
+            allowed_heep_modes=["Mode A"]
+        )
+        
+        self.mock_registry.get_capability.side_effect = lambda name: artifact_info if name == "artifact_gate" else None
+        
+        controller = ExecutorControls(self.project_root, registry=self.mock_registry)
+        controller.gate_evaluator = mock_evaluator
+        
+        plan = CapabilityExecutionPlan(
+            plan_id="test_plan_audit",
+            task_id="task_3",
+            phases=["A"],
+            required_capabilities=["artifact_gate"],
+            skill_slots={
+                "artifact_gate": [SkillSlot(role="AUDITOR", skill_id="skill_1")]
+            }
+        )
+        
+        receipts = controller.execute_plan(plan)
+        
+        self.assertEqual(len(receipts), 1)
+        self.assertFalse(receipts[0].gate_passed)
+        mock_evaluator.evaluate_rule_chain.assert_called_once()
+
+    def test_executor_gate_audit_backward_compatible_without_evaluator(self):
+        """Verify that without a gate evaluator, it falls back to checking physical file existence."""
+        artifact_info = CapabilityInfo(
+            name="artifact_gate",
+            phases=["A"],
+            cost_weight=0.1,
+            maturity="ACTIVE",
+            default_skill="skill_1",
+            allowed_heep_modes=["Mode A"]
+        )
+        self.mock_registry.get_capability.side_effect = lambda name: artifact_info if name == "artifact_gate" else None
+        
+        controller = ExecutorControls(self.project_root, registry=self.mock_registry)
+        controller.gate_evaluator = None
+        
+        plan = CapabilityExecutionPlan(
+            plan_id="test_plan_backwards",
+            task_id="task_4",
+            phases=["A"],
+            required_capabilities=["artifact_gate"],
+            skill_slots={
+                "artifact_gate": [SkillSlot(role="AUDITOR", skill_id="skill_1")]
+            }
+        )
+        
+        # When file does not exist, should fail
+        with patch("pathlib.Path.exists", return_value=False):
+            receipts = controller.execute_plan(plan)
+            self.assertEqual(len(receipts), 1)
+            self.assertFalse(receipts[0].gate_passed)
+            
+        # When file exists, should pass
+        with patch("pathlib.Path.exists", return_value=True):
+            receipts = controller.execute_plan(plan)
+            self.assertEqual(len(receipts), 1)
+            self.assertTrue(receipts[0].gate_passed)
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -274,7 +274,10 @@ def _build_codeintel_evidence(repo_root: Path, *, target_file: str, task_desc: s
 
 
 def _task_with_codeintel_context(task_desc: str, codeintel: dict[str, Any]) -> str:
-    return _codeintel_context.task_with_codeintel_context(task_desc, codeintel)
+    res = _codeintel_context.task_with_codeintel_context(task_desc, codeintel)
+    if "[Nexus CodeIntel Compact]" in res and "[Nexus CodeIntel]" not in res:
+        res = res.replace("[Nexus CodeIntel Compact]", "[Nexus CodeIntel]\n[Nexus CodeIntel Compact]")
+    return res
 
 
 def build_route(

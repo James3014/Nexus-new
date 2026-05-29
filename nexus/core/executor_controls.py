@@ -14,9 +14,15 @@ from nexus.core.capability_registry import CapabilityRegistry
 class ExecutorControls:
     """⚙️ The Execution Controller driving HEEP plans and compiling immutable Receipts."""
 
-    def __init__(self, project_root: str, registry: Optional[CapabilityRegistry] = None) -> None:
+    def __init__(
+        self,
+        project_root: str,
+        registry: Optional[CapabilityRegistry] = None,
+        gate_evaluator: Optional[Any] = None,
+    ) -> None:
         self.project_root = project_root
         self.registry = registry or CapabilityRegistry()
+        self.gate_evaluator = gate_evaluator
 
     def execute_plan(self, plan: CapabilityExecutionPlan) -> List[CapabilityReceipt]:
         """Drive the CapabilityExecutionPlan phases, executing HEEP slots and return receipts."""
@@ -79,17 +85,34 @@ class ExecutorControls:
 
                     # 3. 執行能力品質 Gate 審計 (Audit phase - P15 實體對位)
                     gate_passed = True
-                    if cap_name in ("artifact_gate", "claim_gate"):
-                        from pathlib import Path
-
-                        wiki_audit = Path(self.project_root) / "wiki_audit.json"
-                        reports_dir = Path(self.project_root) / ".nexus" / "reports"
-                        # 確認確實有產出 evidence/artifact 報表
-                        has_evidence = wiki_audit.exists() or (
-                            reports_dir.exists() and any(reports_dir.iterdir())
+                    if self.gate_evaluator is not None:
+                        blockers = []
+                        if cap_name in ("artifact_gate", "claim_gate"):
+                            from pathlib import Path
+                            wiki_audit = Path(self.project_root) / "wiki_audit.json"
+                            reports_dir = Path(self.project_root) / ".nexus" / "reports"
+                            has_evidence = wiki_audit.exists() or (
+                                reports_dir.exists() and any(reports_dir.iterdir())
+                            )
+                            if not has_evidence:
+                                blockers.append("MISSING_EVIDENCE_REPORTS")
+                        from nexus.core.gate_rules_builtin import BlockerCleanRule
+                        chain_res = self.gate_evaluator.evaluate_rule_chain(
+                            [BlockerCleanRule()], {"blockers": blockers}
                         )
-                        if not has_evidence:
-                            gate_passed = False
+                        gate_passed = (chain_res.verdict == "GREEN")
+                    else:
+                        if cap_name in ("artifact_gate", "claim_gate"):
+                            from pathlib import Path
+
+                            wiki_audit = Path(self.project_root) / "wiki_audit.json"
+                            reports_dir = Path(self.project_root) / ".nexus" / "reports"
+                            # 確認確實有產出 evidence/artifact 報表
+                            has_evidence = wiki_audit.exists() or (
+                                reports_dir.exists() and any(reports_dir.iterdir())
+                            )
+                            if not has_evidence:
+                                gate_passed = False
 
                     mock_cap_evidence_id = f"ev_cap_{cap_name}_{os.urandom(4).hex()}"
 

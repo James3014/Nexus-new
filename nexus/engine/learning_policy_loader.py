@@ -283,7 +283,7 @@ def merge_runtime_s2t_policy_draft(
     return merged
 
 
-def load_route_cost_policy_budget_from_env() -> dict[str, Any]:
+def _parse_route_cost_controls_env() -> dict[str, Any]:
     raw = os.environ.get("NEXUS_ROUTE_COST_CONTROLS", "").strip()
     if not raw:
         return {}
@@ -292,6 +292,13 @@ def load_route_cost_policy_budget_from_env() -> dict[str, Any]:
     except ValueError:
         return {}
     if not isinstance(controls, dict):
+        return {}
+    return controls
+
+
+def load_route_cost_policy_budget_from_env() -> dict[str, Any]:
+    controls = _parse_route_cost_controls_env()
+    if not controls:
         return {}
     policy: dict[str, Any] = {"source": str(controls.get("policy_source") or "env:NEXUS_ROUTE_COST_CONTROLS")}
     if controls.get("lite_route") is True:
@@ -329,14 +336,8 @@ def load_route_cost_policy_budget_from_env() -> dict[str, Any]:
 
 
 def route_cost_controls_from_env() -> dict[str, Any]:
-    raw = os.environ.get("NEXUS_ROUTE_COST_CONTROLS", "").strip()
-    if not raw:
-        return {}
-    try:
-        controls = json.loads(raw)
-    except ValueError:
-        return {}
-    if not isinstance(controls, dict):
+    controls = _parse_route_cost_controls_env()
+    if not controls:
         return {}
     allowed = {
         "candidate_cap",

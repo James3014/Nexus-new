@@ -157,6 +157,10 @@ def annotate_cost_evidence(row: dict[str, Any]) -> dict[str, Any]:
         runner_overhead_polluted=model_attempt_runner_overhead_polluted(row),
         local_success=local_success,
         nexus_internal_delivery_valid=bool(row.get("nexus_internal_delivery_valid", False)),
+        model_fallback_then_local_rescue=bool(
+            row.get("bounded_nexus_rescue_used", False)
+            or (bool(row.get("nexus_rescued", False)) and model_calls > 0)
+        ),
     )
     cost_evidence_class = cost_evidence_class_enum.value
     clean_model_cost_evidence = cost_evidence_class == "clean_model_cost"

@@ -114,6 +114,14 @@ class GateEvaluator:
                 reason = f"POLICY_VIOLATION[D-RISK]: {reject_prob:.2f} exceeds safety limit {self.policy.max_risk_prob}."
                 return False, reason
                 
+            # Pluggable rule chain check for CostRatioRule and WallRatioRule
+            from nexus.core.gate_rules_builtin import CostRatioRule, WallRatioRule
+            rules = [CostRatioRule(), WallRatioRule()]
+            chain_res = self.evaluate_rule_chain(rules, forecast)
+            if chain_res.verdict == "RED":
+                reason = f"POLICY_VIOLATION[D-CHAIN]: Pluggable cost rule chain rejected. Failed rule: {chain_res.failed_rule}. Reason: {chain_res.reason}"
+                return False, reason
+                
             return True, "passed_p_to_d_gate"
 
         # 審計與驗證判定 (Phase V/A)

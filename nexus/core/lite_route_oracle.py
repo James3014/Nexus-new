@@ -22,6 +22,7 @@ def should_use_lite_route(
     belief_confidence: float,
     lane_name: Optional[str] = None,
     capability_name: Optional[str] = None,
+    route_cost_controls: Optional[dict] = None,
 ) -> LiteRouteDecision:
     """🛡️ Pure function SSOT for LiteRoute classification decisions."""
     # Convert inputs to standard formats
@@ -35,12 +36,18 @@ def should_use_lite_route(
             skipped_phases=["X", "D", "A"],
         )
 
-    # 2. Check if lane is policy-defined as receipt-lite
-    if lane_name and lane_name in GATE_ONLY_RECEIPT_LITE_LANES:
+    # Resolve effective lane with optional controls override
+    effective_lane = lane_name
+    if route_cost_controls and "route_lane" in route_cost_controls:
+        effective_lane = route_cost_controls["route_lane"]
+
+    # 2. Check if lane is policy-defined as receipt-lite (with context_sync_capped support)
+    if effective_lane and (effective_lane in GATE_ONLY_RECEIPT_LITE_LANES or effective_lane == "context_sync_capped"):
+        skipped = ["X", "A"] if effective_lane == "context_sync_capped" else ["X", "D", "A"]
         return LiteRouteDecision(
             is_lite=True,
             reason="lane_policy_gate_only_receipt_lite",
-            skipped_phases=["X", "D", "A"],
+            skipped_phases=skipped,
         )
 
     # 3. Check if capability is policy-defined as receipt-lite
@@ -71,6 +78,14 @@ def should_use_lite_route(
         return LiteRouteDecision(
             is_lite=True,
             reason="auto_lite_low_risk_low_complexity",
+            skipped_phases=["X", "D", "A"],
+        )
+
+    # 5b. Autonomic lite routing for normal-risk, low-complexity tasks with high belief confidence (excl. default 1.0)
+    if risk_upper == "NORMAL" and impact_complexity <= 3.0 and 0.85 <= belief_confidence < 1.0:
+        return LiteRouteDecision(
+            is_lite=True,
+            reason="auto_lite_normal_risk_high_confidence",
             skipped_phases=["X", "D", "A"],
         )
 

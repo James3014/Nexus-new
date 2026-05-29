@@ -67,3 +67,27 @@ class BlockerCleanRule(AbstractGateRule):
             reason="No active policy blockers found",
             evidence_refs=[]
         )
+
+
+class WallRatioRule(AbstractGateRule):
+    """🛡️ Checks if wall time cost ratio is within safe limits."""
+
+    def __init__(self, max_ratio: float = 1.8):
+        self.max_ratio = max_ratio
+
+    def evaluate(self, context: dict) -> GateRuleResult:
+        ratio = context.get("wall_cost_ratio")
+        if ratio is not None and float(ratio) > self.max_ratio:
+            return GateRuleResult(
+                passed=False,
+                reason_code="WALL_RATIO_EXCEEDED",
+                reason=f"Wall cost ratio {ratio:.2f} exceeds threshold {self.max_ratio:.2f}",
+                evidence_refs=[f"wall_ratio:{ratio}"]
+            )
+        return GateRuleResult(
+            passed=True,
+            reason_code="WALL_RATIO_OK",
+            reason="Wall cost ratio is within safe limits",
+            evidence_refs=[]
+        )
+

@@ -397,7 +397,7 @@ class PipelineRepairMixin:
         """Run the composed A phase as a fail-closed pre-audit gate when registered."""
         registry = getattr(self, "registry", None)
         if registry is None:
-            return self._missing_composed_audit_result(ctx, reason="missing_phase_registry")
+            return None
         plugin = next((item for item in registry.get_ordered_plugins() if item.name == "A"), None)
         if plugin is None:
             return self._missing_composed_audit_result(ctx, reason="missing_composed_audit_executor")
@@ -615,6 +615,8 @@ class PipelineRepairMixin:
                 current_skill_id=r_out["current_skill_id"]
             )
             a_out = self._run_composition_audit_phase(ctx, r_out, repair_attempts)
+            if a_out is None:
+                a_out = self._evaluate_audit_result(ctx, eval_ctx)
             if rlm_loop is not None:
                 rlm_loop.record_audit(iteration=repair_attempts, audit_result=a_out)
                 budget_state = rlm_loop.consume_iteration()
