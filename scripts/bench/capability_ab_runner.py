@@ -4458,7 +4458,7 @@ def _ask_direct_codex_patch(*, prompt: str, timeout_sec: int) -> tuple[dict[str,
 
 
 def _ask_direct_gemini_flash_patch(*, prompt: str, timeout_sec: int) -> tuple[dict[str, Any], str]:
-    gemini_bin = shutil.which("gemini") or DEFAULT_GEMINI_BIN
+    gemini_bin = os.environ.get("NEXUS_GEMINI_BIN") or shutil.which("gemini") or DEFAULT_GEMINI_BIN
     model_name = str(os.environ.get("NEXUS_GEMINI_MODEL_NAME") or os.environ.get("NEXUS_DIRECT_GEMINI_MODEL") or "gemini-3.1-pro-preview")
     if not Path(gemini_bin).exists():
         return {"status": "FAIL", "error_category": "binary_missing", "tokens_used": 0, "model_name": model_name}, "gemini_missing"
@@ -5894,6 +5894,8 @@ def run_with_nexus(
     if effective_enable_ddtree_executor:
         bench_env_updates["NEXUS_DDTREE_EXECUTOR"] = "1"
     bench_env_updates["NEXUS_LLM_CANDIDATE_CAP"] = str(effective_llm_candidate_cap)
+    bench_env_updates["NEXUS_TASK_DIFFICULTY"] = task.difficulty
+    bench_env_updates["NEXUS_TASK_ID"] = task.id
     if route_cost_controls:
         bench_env_updates["NEXUS_ROUTE_COST_CONTROLS"] = json.dumps(route_cost_controls, ensure_ascii=False, sort_keys=True)
     if requested_skill_mounts:
@@ -6622,6 +6624,45 @@ def run_with_nexus(
 
 
 def run_without_nexus(
+    *,
+    repo_root: Path,
+    task: CapabilityTask,
+    target_file: str,
+    test_file: str,
+    timeout_sec: int,
+    force_flow: str | None,
+    history_window: int = 1,
+    history_fail_threshold: int = 9999,
+    mode: str = "service",
+) -> dict[str, Any]:
+    prev_diff = os.environ.get("NEXUS_TASK_DIFFICULTY")
+    prev_id = os.environ.get("NEXUS_TASK_ID")
+    os.environ["NEXUS_TASK_DIFFICULTY"] = task.difficulty
+    os.environ["NEXUS_TASK_ID"] = task.id
+    try:
+        return _run_without_nexus_impl(
+            repo_root=repo_root,
+            task=task,
+            target_file=target_file,
+            test_file=test_file,
+            timeout_sec=timeout_sec,
+            force_flow=force_flow,
+            history_window=history_window,
+            history_fail_threshold=history_fail_threshold,
+            mode=mode,
+        )
+    finally:
+        if prev_diff is None:
+            os.environ.pop("NEXUS_TASK_DIFFICULTY", None)
+        else:
+            os.environ["NEXUS_TASK_DIFFICULTY"] = prev_diff
+        if prev_id is None:
+            os.environ.pop("NEXUS_TASK_ID", None)
+        else:
+            os.environ["NEXUS_TASK_ID"] = prev_id
+
+
+def _run_without_nexus_impl(
     *,
     repo_root: Path,
     task: CapabilityTask,
