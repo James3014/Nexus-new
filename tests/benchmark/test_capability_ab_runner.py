@@ -5718,15 +5718,15 @@ def test_run_with_nexus_codex_provider_delivers_nexus_context(tmp_path: Path, mo
     assert out["nexus_usage_valid"] is True
     assert out["capability_claim_verified"] is True
     assert out["codeintel_scan_report_present"] is True
-    assert any(item["name"] == "codeintel" and item["public_claim_safe"] for item in out["capability_receipts"])
+    assert any(item["name"] == "codeintel" and item["gate_passed"] for item in out["capability_receipts"])
     receipts = {item["name"]: item for item in out["capability_receipts"]}
     assert "autoreason" not in receipts
     assert "ddtree" not in receipts
     assert "ultra_review" not in receipts
-    assert receipts["artifact_gate"]["public_claim_safe"] is True
-    assert receipts["claim_gate"]["public_claim_safe"] is True
-    assert receipts["delivery_gate"]["public_claim_safe"] is True
-    assert receipts["mempalace_gate"]["public_claim_safe"] is True
+    assert receipts["artifact_gate"]["gate_passed"] is True
+    assert receipts["claim_gate"]["gate_passed"] is True
+    assert receipts["delivery_gate"]["gate_passed"] is True
+    assert receipts["mempalace_gate"]["gate_passed"] is True
     assert out["research_preflight_present"] is True
     assert out["research_preflight_requires_evidence"] is True
     assert out["research_session_logged"] is True
@@ -9685,7 +9685,7 @@ def test_bounded_rescue_after_model_attempt_preserves_provider_token_evidence(tm
     assert out["provider_token_measured"] is True
     assert out["public_cost_evidence"] is True
     assert out["clean_model_cost_evidence"] is False
-    assert out["cost_evidence_class"] == "rescue_only_local_success"
+    assert out["cost_evidence_class"] == "rescue_with_model_fallback_measured"
     assert out["run_eligible"] is True
     assert out["runner_overhead_basis"] == "composed_rescue"
     assert out["first_attempt_wall_sec"] is not None
@@ -13018,7 +13018,7 @@ def test_benchmark_row_splits_model_tokens_from_local_rescue():
     assert row["token_reliable"] is False
     assert row["token_unreliable_reason"] == "local_only_rescue_not_model_comparable"
     assert row["clean_model_cost_evidence"] is False
-    assert row["cost_evidence_class"] == "rescue_only_local_success"
+    assert row["cost_evidence_class"] == "rescue_with_model_fallback"
     assert row["training_eligible_cost_evidence"] is False
     assert "token_unreliable" in row["training_cost_evidence_reasons"]
 
