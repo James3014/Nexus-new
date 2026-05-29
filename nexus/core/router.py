@@ -31,6 +31,8 @@ class SkillsRouter:
         self.firewall = DomainFirewall()
         from nexus.core.p_loop_manager import PLoopManager
         self.p_loop = PLoopManager()
+        from nexus.core.critique_engine import critique
+        self.critique = critique
         
         # 政策層次合約優化屬性
         self.allow_pre_model_deterministic_rescue = kwargs.get("allow_pre_model_deterministic_rescue", False)
@@ -119,8 +121,6 @@ class SkillsRouter:
             return {"status": "FORBIDDEN", "reason": f"Skill {skill_id} unauthorized for {current_domain}"}
 
         if mode == "dual":
-            import os
-            is_light_route = os.environ.get("NEXUS_LIGHT_ROUTE", "0") == "1"
             # 讀取當前 belief 信心狀態
             confidence = 1.0
             if hasattr(self.p_loop, "confidence"):
@@ -130,7 +130,17 @@ class SkillsRouter:
             elif hasattr(self.p_loop, "current_belief") and hasattr(self.p_loop.current_belief, "confidence"):
                 confidence = float(self.p_loop.current_belief.confidence)
 
-            if is_light_route and confidence >= 0.85:
+            from nexus.core.lite_route_oracle import should_use_lite_route
+            lane_name = context.get("lane") or context.get("lane_name")
+            lite_decision = should_use_lite_route(
+                risk_level=context.get("risk_level", "NORMAL"),
+                impact_complexity=float(context.get("impact_complexity", 1.0)),
+                belief_confidence=confidence,
+                lane_name=lane_name,
+                capability_name=skill_id,
+            )
+
+            if lite_decision.is_lite and confidence >= 0.85:
                 # 🚀 高信心狀態 + 輕量路由：自律跳過 LanceDB 全文檢索
                 palace_result = {"status": "SUCCESS", "hit_rate": 0.0, "results": [], "tenant": tenant_id}
             else:

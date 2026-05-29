@@ -33,20 +33,23 @@ class CapabilitySelector:
                 "timestamp": datetime.now(timezone.utc).isoformat(),
             }
 
-        import os
-        is_light_route = os.environ.get("NEXUS_LIGHT_ROUTE", "0") == "1"
-        is_light_force = os.environ.get("NEXUS_LIGHT_ROUTE_FORCE", "0") == "1"
+        from nexus.core.lite_route_oracle import should_use_lite_route
+        lane_name = signal_set.metadata.get("lane") or signal_set.metadata.get("lane_name")
+        lite_decision = should_use_lite_route(
+            risk_level=signal_set.risk_level,
+            impact_complexity=signal_set.impact_complexity,
+            belief_confidence=signal_set.belief_confidence,
+            lane_name=lane_name,
+        )
 
         required_caps: List[str] = []
         forbidden_rules = verdict.get("forbidden_skills_rules", [])
 
         # 2. 智慧能力動態選擇演算法 (Autonomic Adaptive Selection)
-        # 🚀 智慧自適應：當自動評估為 LOW 風險且複雜度極低時，預設自動啟用輕量路由分流以優化 Always-on 商用 ROI
-        is_light_auto = (signal_set.risk_level == "LOW" and signal_set.impact_complexity <= 3.0)
-        if (is_light_route and signal_set.risk_level not in ("HIGH", "CRITICAL") and signal_set.impact_complexity <= 3.0) or is_light_force or is_light_auto:
+        if lite_decision.is_lite:
             # 🚀 輕量路由模式下，只保留最核心的 S-P-R-C 骨幹能力，跳過重度沙盒與多重自癒模組
             required_caps = ["mempalace", "autonomic_router", "belief", "repair_loop", "learning_closure"]
-            phases = ["S", "P", "R", "C"]
+            phases = [p for p in ["S", "P", "X", "D", "R", "A", "C"] if p not in lite_decision.skipped_phases]
         else:
             phases = ["S", "P", "X", "D", "R", "A", "C"]
             # S (Scope)
@@ -120,7 +123,7 @@ class CapabilitySelector:
             # Mode C 且 risk 較高時裝配 Swarm 複數協作 Assembly
             if "Mode C" in info.allowed_heep_modes and (
                 signal_set.risk_level in ("HIGH", "CRITICAL") or signal_set.impact_complexity > 3.5
-            ) and not is_light_route:
+            ) and not lite_decision.is_lite:
                 slots.append(
                     SkillSlot(
                         role="SCOUT",

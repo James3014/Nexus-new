@@ -2,6 +2,7 @@
 import typing
 from dataclasses import dataclass, field
 
+
 @dataclass
 class AcceptancePolicy:
     """
@@ -66,6 +67,27 @@ def _ratio(value: typing.Any) -> float:
     return raw / 100.0 if raw > 1.0 else raw
 
 
+@dataclass(frozen=True)
+class GateRuleResult:
+    passed: bool
+    reason_code: str
+    reason: str
+    evidence_refs: typing.List[str] = field(default_factory=list)
+
+
+class AbstractGateRule(typing.Protocol):
+    """🛡️ Protocol interface for all gate evaluation rules."""
+    def evaluate(self, context: dict) -> GateRuleResult:
+        ...
+
+
+@dataclass(frozen=True)
+class GateChainResult:
+    verdict: str  # "GREEN" or "RED"
+    failed_rule: typing.Optional[str] = None
+    reason: typing.Optional[str] = None
+    evidence_refs: typing.List[str] = field(default_factory=list)
+
 
 class GateEvaluator:
     """
@@ -115,3 +137,29 @@ class GateEvaluator:
             return 0.0
         passed_count = sum(1 for r in gate_results if r.get("passed"))
         return (passed_count / len(gate_results)) * 100.0
+
+    def evaluate_rule_chain(
+        self,
+        rules: typing.List[AbstractGateRule],
+        context: dict,
+    ) -> GateChainResult:
+        """⚖️ Evaluate a pluggable rule chain, short-circuiting on failure."""
+        all_evidence = []
+        for rule in rules:
+            res = rule.evaluate(context)
+            all_evidence.extend(res.evidence_refs)
+            if not res.passed:
+                rule_name = type(rule).__name__
+                if hasattr(rule, "name"):
+                    rule_name = getattr(rule, "name")
+                return GateChainResult(
+                    verdict="RED",
+                    failed_rule=rule_name,
+                    reason=res.reason,
+                    evidence_refs=all_evidence,
+                )
+        return GateChainResult(
+            verdict="GREEN",
+            evidence_refs=all_evidence,
+        )
+
