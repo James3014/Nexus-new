@@ -8,10 +8,12 @@ from pathlib import Path
 from typing import Any, Mapping
 
 
-def load_blockers(policy_path: Path | str) -> list[dict[str, Any]]:
+def load_blockers(policy_path: Path | str | None) -> list[dict[str, Any]]:
     """
     載入合約 combine blockers 的 RCA 檔案。
     """
+    if policy_path is None:
+        return []
     path = Path(policy_path)
     if not path.exists():
         return []
@@ -24,11 +26,15 @@ def load_blockers(policy_path: Path | str) -> list[dict[str, Any]]:
         return []
 
 
+MIN_COMMERCIAL_PROMOTION_DENOMINATOR = 100
+
+
 def run_audited_combine(
     chunks_path: Path | str | None,
     policy_path: Path | str = ".nexus/policy/combine_blockers_rca.json",
     mock_chunks: list[dict[str, Any]] | None = None,
     use_local_oracle: bool = False,
+    strict_promotion: bool = False,
 ) -> tuple[bool, dict[str, Any]]:
     """
     執行 7R Audited Combine rollup 審計。
@@ -111,6 +117,13 @@ def run_audited_combine(
             dimension_results["promotion_readiness"]["failures"].append(chunk_id)
         else:
             dimension_results["promotion_readiness"]["count"] += 1
+
+    # 8R TDD Slice 3: Promotion Readiness 100/100 嚴格檢驗
+    if strict_promotion and len(chunks) < MIN_COMMERCIAL_PROMOTION_DENOMINATOR:
+        dimension_results["promotion_readiness"]["pass"] = False
+        dimension_results["promotion_readiness"]["failures"].append(
+            f"denominator_insufficient_under_{MIN_COMMERCIAL_PROMOTION_DENOMINATOR}_actual_{len(chunks)}"
+        )
 
     # 五維度綜合判定
     five_dimensions_ok = all(res["pass"] for res in dimension_results.values())

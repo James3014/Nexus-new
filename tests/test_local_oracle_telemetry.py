@@ -80,3 +80,41 @@ def test_local_oracle_cli_execution(tmp_path):
     )
     assert exit_code == 0
 
+
+def test_audited_combine_promotion_readiness_strict_denom():
+    # 模擬 12 筆 chunks (少於 100 筆的商業門檻)
+    mock_chunks = [
+        {
+            "id": f"chunk-{idx}",
+            "delivery_passed": True,
+            "ledger_passed": True,
+            "token_passed": True,
+            "token_cleanliness_passed": True,
+            "promotion_readiness_passed": True,
+            "cost_passed": True,
+            "cost_evidence_class": "clean_model_cost"
+        }
+        for idx in range(12)
+    ]
+    
+    # 1. 預設非嚴格模式下，12 筆應能通過 promotion readiness
+    success_ok, report_ok = run_audited_combine(
+        chunks_path=None,
+        policy_path=None,
+        mock_chunks=mock_chunks,
+        strict_promotion=False
+    )
+    assert success_ok is True
+    assert report_ok["dimension_details"]["promotion_readiness"]["pass"] is True
+
+    # 2. 啟用 strict_promotion 嚴格模式下，因為少於 100 筆，應直接判定 promotion_readiness 為 False
+    success_fail, report_fail = run_audited_combine(
+        chunks_path=None,
+        policy_path=None,
+        mock_chunks=mock_chunks,
+        strict_promotion=True
+    )
+    assert success_fail is False
+    assert report_fail["dimension_details"]["promotion_readiness"]["pass"] is False
+
+

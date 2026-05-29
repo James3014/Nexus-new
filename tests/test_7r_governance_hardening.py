@@ -8,6 +8,11 @@ from scripts.bench.preflight_7r_restart import run_preflight
 from scripts.bench.audited_combine_gate import run_audited_combine
 
 def test_preflight_dual_denominator_mismatch():
+    # 清理殘留報告以避免 active blocker 攔截干擾
+    report_file = Path("docs/reports/7R_claim_separation_report.md")
+    if report_file.exists():
+        report_file.unlink()
+
     # 斷言當 selected 與 execution-safe 分母不一致時，preflight 應回傳 4 (Fail-Closed)
     exit_code = run_preflight(
         manifest_path=None,
@@ -55,3 +60,35 @@ def test_fail_fast_row_aborted_behavior(tmp_path):
     assert claim_sep_file.exists()
     content = claim_sep_file.read_text(encoding="utf-8")
     assert "CLAIM SEPARATION" in content or "Observation-Only" in content
+
+
+def test_preflight_active_blocker_claim_separation_abort(tmp_path):
+    # 物理創建一個 Verdict 為 RED / Blocked 的 7R_claim_separation_report.md
+    reports_dir = Path("docs/reports")
+    reports_dir.mkdir(parents=True, exist_ok=True)
+    report_file = reports_dir / "7R_claim_separation_report.md"
+    
+    # 寫入 RED verdict
+    report_file.write_text("Status Verdict: 🔴 RED / Blocked\n", encoding="utf-8")
+
+    # 預期因為有未解決的 RED Blocker 報告存在，preflight 直接返回 6 阻斷
+    exit_code = run_preflight(
+        manifest_path=None,
+        expected_selected=100,
+        expected_execution_safe=100,
+        mock_selected_count=100,
+        mock_execution_safe_count=100
+    )
+    assert exit_code == 6
+
+    # 清理掉，斷言沒有 RED report 時，preflight 能正常通過為 0
+    report_file.unlink()
+    exit_code_ok = run_preflight(
+        manifest_path=None,
+        expected_selected=100,
+        expected_execution_safe=100,
+        mock_selected_count=100,
+        mock_execution_safe_count=100
+    )
+    assert exit_code_ok == 0
+

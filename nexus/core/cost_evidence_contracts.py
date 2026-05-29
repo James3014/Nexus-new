@@ -5,6 +5,7 @@ from typing import Any
 
 # SSOT constants for overhead redaction
 RUNNER_AST_PARSER_OVERHEAD_MS = 150.0
+MAX_COMMERCIAL_TOKEN_COST_RATIO = 1.2
 
 
 class CostEvidenceClass(str, Enum):
@@ -27,12 +28,17 @@ def derive_cost_evidence_class(
     runner_overhead_polluted: bool,
     local_success: bool,
     nexus_internal_delivery_valid: bool = False,
+    token_cost_ratio: float = 1.0,
 ) -> CostEvidenceClass:
     """Core SSOT contract function to classify route cost evidence.
 
     Ensures consistent classification across the classifier, optimizer, evidence bundle,
     and persistent worker dashboard.
     """
+    # 8R TDD Slice 1: Commercial Cost 降級閘門
+    if token_cost_ratio > MAX_COMMERCIAL_TOKEN_COST_RATIO:
+        return CostEvidenceClass.TOKEN_UNRELIABLE
+
     clean_model_cost_evidence = bool(
         model_calls > 0
         and provider_token_measured

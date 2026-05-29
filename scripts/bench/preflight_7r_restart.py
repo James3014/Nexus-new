@@ -50,6 +50,18 @@ def run_preflight(
     """
     print("=== [Nexus] 7R Restart Preflight Core Checklist ===")
     
+    # 8R TDD Slice 2: Preflight Active Blocker 阻斷器
+    claim_sep_file = Path("docs/reports/7R_claim_separation_report.md")
+    if claim_sep_file.exists():
+        try:
+            content = claim_sep_file.read_text(encoding="utf-8")
+            if "Status Verdict: 🔴 RED / Blocked" in content or "Status Verdict: RED / Blocked" in content:
+                print("❌ [FAIL-CLOSED] [Active Blocker] 檢測到有未解決且狀態為 RED 的 Claim Separation 報告！Preflight 阻斷。")
+                print("  - 請工程師優先前往 docs/reports/7R_claim_separation_report.md 進行 targeted RCA/replay 排除！")
+                return 6
+        except Exception as e:
+            print(f"⚠️ 讀取 Claim Separation 報告異常: {e}")
+    
     # 1. 檢查 Abort Seams
     seams = check_abort_seams()
     seams_ok = True
