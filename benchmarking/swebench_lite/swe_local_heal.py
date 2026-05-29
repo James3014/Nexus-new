@@ -53,10 +53,8 @@ def ollama_generate(system_prompt: str, user_prompt: str, timeout: int = 1200) -
 class Localizer:
     def locate(self, issue_description: str, repo_dir: Path, max_files: int = 2) -> List[Tuple[str, str]]:
         import re
-        # 抓取包含問題中的重要字詞（包含 separable, separability 等）
         tokens = set(re.findall(r'\b([a-z][a-z_0-9]{3,})\b', issue_description.lower()))
-        # 加入常規 astropy bug 檔案特徵字
-        tokens.update(["separable", "separability", "compound"])
+        tokens.update(["timeseries", "required", "column", "binned", "core"])
         
         scored = []
         for pyfile in repo_dir.rglob("*.py"):
@@ -65,12 +63,13 @@ class Localizer:
             if any(p in rel_str for p in ("test", "__pycache__", ".tox", "build", "dist")):
                 continue
             
-            # 給予直接檔名匹配更高的權重
             score = 0
-            if "separable" in pyfile.name.lower() or "separability" in pyfile.name.lower():
-                score += 15
+            if "timeseries" in pyfile.name.lower() or "binned" in pyfile.name.lower():
+                score += 25
+            if "core.py" in pyfile.name.lower() and "timeseries" in rel_str:
+                score += 40
             
-            score += sum(3 if tok in pyfile.name.lower() else 1 for tok in tokens if tok in rel_str)
+            score += sum(5 if tok in pyfile.name.lower() else 1 for tok in tokens if tok in rel_str)
             if score > 0:
                 scored.append((score, pyfile, rel))
         
@@ -79,9 +78,8 @@ class Localizer:
         for _, pyfile, rel in scored[:max_files]:
             try:
                 content = pyfile.read_text(encoding="utf-8", errors="replace")
-                # Truncate to save prompt space
-                if len(content) > 2000:
-                    content = content[:2000] + "\n... [truncated]"
+                if len(content) > 3000:
+                    content = content[:3000] + "\n... [truncated]"
                 result.append((str(rel), content))
             except Exception:
                 pass
