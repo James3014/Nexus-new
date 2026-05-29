@@ -484,6 +484,30 @@ def build_skill_fit_execution_matrix(
         for item in task_refs
         if str(item.get("manifest") or "") and str(item.get("task_id") or "")
     ][:max_tasks]
+
+    # Preflight validation for unsupported tasks (e.g. external without setup adapter)
+    unsupported_blocked = False
+    block_reason = ""
+    for task_ref in selected_tasks:
+        manifest_path = task_ref["manifest"]
+        task_id = task_ref["task_id"]
+        try:
+            payload = json.loads(Path(manifest_path).read_text(encoding="utf-8"))
+            for t in payload.get("tasks", []) or []:
+                if not isinstance(t, Mapping):
+                    continue
+                if str(t.get("id") or t.get("task_id") or "") == task_id:
+                    repo_kind = str(t.get("repo_kind") or "")
+                    setup_adapter = t.get("setup_adapter")
+                    if repo_kind == "external" and not setup_adapter:
+                        unsupported_blocked = True
+                        block_reason = f"Unsupported external task {task_id} without setup_adapter found in manifest."
+                        break
+            if unsupported_blocked:
+                break
+        except Exception:
+            pass
+
     rows_by_arm_type: dict[str, list[dict[str, Any]]] = {
         "capability_only": [],
         "skill_ablation": [],
@@ -571,7 +595,7 @@ def build_skill_fit_execution_matrix(
     rows_by_capability = Counter(str(row.get("capability") or "") for row in rows)
     return {
         "schema": "nexus.skill_fit_execution_matrix.v1",
-        "status": "PASS" if rows and len(rows) == expected_rows else "RETURN",
+        "status": "RETURN" if unsupported_blocked else ("PASS" if rows and len(rows) == expected_rows else "RETURN"),
         "plan_schema": plan.get("schema", ""),
         "capability": plan.get("capability", ""),
         "summary": {
@@ -582,6 +606,7 @@ def build_skill_fit_execution_matrix(
             "row_count": len(rows),
             "expected_row_count": expected_rows,
             "model": model,
+            "block_reason": block_reason,
         },
         "claim_boundary": [
             "This matrix schedules ablation rows; it is not delivery or skill value evidence.",

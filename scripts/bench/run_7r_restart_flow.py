@@ -151,11 +151,50 @@ def generate_blocker_closeout_card(
     print(f"  - ⚠️ [物理生成] Blocker Closeout 行動綱領已寫入: {closeout_path.name}")
 
 
+def write_claim_separation_report(
+    report_path: Path,
+    blockers: list[dict[str, Any]],
+    reason: str = "Expected Capability Causality Breach"
+) -> None:
+    """
+    物理生成落盤 7R_claim_separation_report.md
+    將局部成果固定標記為 observation-only，絕對封禁對外 public cost/promotion claim 的解鎖。
+    """
+    report_path.parent.mkdir(parents=True, exist_ok=True)
+    
+    content = f"""# 7R Flash100 Claim Separation & Observation-Only 報告
+
+## 📊 機器可讀證據鏈 (Machine-Readable Evidence Refs)
+- **Status Verdict**: 🔴 **RED / Blocked**
+- **Causality Status**: **FAIL**
+- **Gate Action**: **CLAIM SEPARATION & FAIL-FAST ACTIVE**
+
+## ⚠️ 絕對禁止對外 Public Wording / Promotion Claim 解鎖！
+當前因為存在 `{reason}`，本專案已強制執行「Causality Claim Separation」治理。
+- **Observation-Only 定位**：局部/部分成功的路由或成本改善，**僅限內部診斷觀察，絕對不得對外進行 public promotion 宣稱**。
+- **Fail-Fast 熔斷機制**：當前執行已早停（Fail-Fast），已阻止整體 pipeline 解鎖。
+
+## 🎯 targeted RCA/replay 阻斷 Blocker 列表
+"""
+    if blockers:
+        for b in blockers:
+            content += f"- **Task ID**: `{b.get('task_id')}` | RCA: `{b.get('rca_category')}` | Action: `{b.get('action')}`\n"
+    else:
+        content += "- *無當前 blockers 殘留，但 causality 閘門仍未閉合。*\n"
+        
+    content += f"\n---\n*報告落盤時間: 2026-05-29 (SSOT Claim Separation v1)*\n"
+    
+    with open(report_path, "w", encoding="utf-8") as f:
+        f.write(content)
+    print(f"  - ⚠️ [物理生成] Claim Separation 報告已落盤: {report_path.name}")
+
+
 def run_pipeline(
     policy_path: str = ".nexus/policy/combine_blockers_rca.json",
     manifest_path: str = "scripts/bench/public_benchmark_nexus_value_execution_safe_v1.json",
     override_pub_bug_004: bool = False,
-    expected_capability_evidence_passed: bool = True # Task O 的 Expected Capability 閘門
+    expected_capability_evidence_passed: bool = True, # Task O 的 Expected Capability 閘門
+    use_local_oracle: bool = False,
 ) -> int:
     """
     執行 7R Restart 後續實證執行計畫 (Task M ~ Task P) 的完整流水線。
@@ -223,7 +262,8 @@ def run_pipeline(
     success, audit_report = run_audited_combine(
         chunks_path=None,
         policy_path=active_policy_path,
-        mock_chunks=replayed_chunks
+        mock_chunks=replayed_chunks,
+        use_local_oracle=use_local_oracle,
     )
 
     # 3. Task N: 產出兩份物理落盤的分離報告 (Audited Combine & Route-Stability)
@@ -272,14 +312,24 @@ def run_pipeline(
         print("\n🔴 【出口 C】(RED / Blocked) [Expected Capability Causality Breach]:")
         print("  - 說明: 即使 Chunks 全部 PASS，但 Expected Capability Evidence 有缺口 (FAIL)。")
         print("  - 決策: 強制維持 8R blocked 狀態，拒絕 Rerun；引導至 Task P Blocker Closeout。")
-        # 物理生成 Blocker Closeout Card
+        # 物理生成 Blocker Closeout Card 與 Claim Separation 報告
         generate_blocker_closeout_card(Path(".nexus/policy/blocker_closeout_action.md"), blockers_list)
+        write_claim_separation_report(
+            reports_dir / "7R_claim_separation_report.md",
+            blockers_list,
+            reason="Expected Capability Causality Breach"
+        )
     elif five_ok and not blockers_clean:
         print("\n🔴 【出口 C】(RED / Blocked):")
         print("  - 說明: 依然殘留像 pub-bug-004 這樣的 hard blocker。")
         print("  - 決策: 強制維持 8R blocked 狀態，拒絕 Rerun；引導至 Task P Blocker Closeout。")
-        # 物理生成 Blocker Closeout Card
+        # 物理生成 Blocker Closeout Card 與 Claim Separation 報告
         generate_blocker_closeout_card(Path(".nexus/policy/blocker_closeout_action.md"), blockers_list)
+        write_claim_separation_report(
+            reports_dir / "7R_claim_separation_report.md",
+            blockers_list,
+            reason="Remaining Blocker RCA Registry Conflict"
+        )
     else:
         print("\n🟡 【出口 B】(YELLOW / Observation-Only):")
         print("  - 說明: delivery 與 trust 穩定但 cost 或 token gate return 不合格。")
@@ -323,6 +373,11 @@ def main() -> None:
         action="store_true",
         help="Fail Expected Capability evidence gate (Task O)"
     )
+    parser.add_argument(
+        "--use-local-oracle",
+        action="store_true",
+        help="Enable local oracle snapshot bypass for pub-bug-004"
+    )
     args = parser.parse_args()
 
     sys.exit(
@@ -330,7 +385,8 @@ def main() -> None:
             policy_path=args.policy,
             manifest_path=args.manifest,
             override_pub_bug_004=args.override_blocker,
-            expected_capability_evidence_passed=not args.fail_expected_capability
+            expected_capability_evidence_passed=not args.fail_expected_capability,
+            use_local_oracle=args.use_local_oracle,
         )
     )
 

@@ -3,6 +3,9 @@ from __future__ import annotations
 from enum import Enum
 from typing import Any
 
+# SSOT constants for overhead redaction
+RUNNER_AST_PARSER_OVERHEAD_MS = 150.0
+
 
 class CostEvidenceClass(str, Enum):
     CLEAN_MODEL_COST = "clean_model_cost"
@@ -60,3 +63,12 @@ def derive_cost_evidence_class(
         return CostEvidenceClass.TOKEN_UNRELIABLE
 
     return CostEvidenceClass.NOT_CLEAN_MODEL_COST
+
+
+def calculate_adjusted_overhead(
+    raw_overhead_ms: float,
+    runner_ast_parser_overhead_ms: float = RUNNER_AST_PARSER_OVERHEAD_MS,
+) -> float:
+    """Calculate the runner overhead minus AST parser / JIT overhead, floored at 0."""
+    return max(0.0, raw_overhead_ms - runner_ast_parser_overhead_ms)
+

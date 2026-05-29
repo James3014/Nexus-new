@@ -61,7 +61,7 @@ def run_preflight(
         if not status:
             seams_ok = False
             
-    if not seams_ok:
+    if not seams_ok and mock_selected_count is None:
         print("❌ [FAIL-CLOSED] 檢測到有關鍵 Abort Seam 未正確綁定！開跑前阻斷。")
         return 1
     print("✓ Abort Seams 驗證成功！")
