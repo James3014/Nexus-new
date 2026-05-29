@@ -3766,3 +3766,8 @@ version_scope:
   4. `EXECUTION_READY` 通過不等於 `SOURCE_PROMOTION_READY`；`EVIDENCE_READY` 通過不等於 `COMMERCIAL_BASIS_READY`；四段 gate 必須獨立判讀，不得以前段成功推斷後段。
 
 
+## 2026-05-30: Decoupled LLM Client Token Capture Mock Target Drift
+- **Phenomenon**: `tests/test_token_pipeline_contract.py::test_llm_client_token_capture` failed with `AssertionError: assert 29746 == 1420`.
+- **Root Cause**: `LLMClient.ask` internal forwarding mechanism migrated to `_run_cli_with_hard_timeout` using `subprocess.Popen` instead of `subprocess.run`, leaving the test mock target ineffective.
+- **Decision**: Decoupled mock target from standard `subprocess.run` to `nexus.services.gateway._run_cli_with_hard_timeout` and successfully bypassed anti-token fallback estimates.
+- **Prevention**: Ensure service test coverage patch targets are structurally aligned with current production CLI forwarding adapters rather than global standard library functions.

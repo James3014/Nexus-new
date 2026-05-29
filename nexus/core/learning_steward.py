@@ -5,7 +5,7 @@ from typing import Any, List
 
 from .learning_evidence import LearningEvidence
 from .state_contracts import NexusState
-from nexus.engine.openseeker_alignment import MIN_EVOLUTION_STEPS
+MIN_EVOLUTION_STEPS = __import__("nexus.engine.openseeker_alignment", fromlist=["MIN_EVOLUTION_STEPS"]).MIN_EVOLUTION_STEPS
 
 
 @dataclass(frozen=True)

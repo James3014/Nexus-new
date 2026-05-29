@@ -35,29 +35,10 @@ GATE_ONLY_SUPERVISED_CAPABILITIES = frozenset(
     }
 )
 PREFLIGHT_SUPERVISED_CAPABILITIES = frozenset({"codeintel", "memory"})
-GATE_ONLY_RECEIPT_LITE_LANES = frozenset(
-    {
-        "feature_reflex",
-        "governance_hardened",
-        "governance_hardened_capped",
-        "hidden_bugfix_supervised",
-        "trust_supervised_scope_only",
-    }
-)
-ROUTE_ORACLE_RECEIPT_LITE_CAPABILITIES = frozenset({"swarm", "ultra_review"})
-DETERMINISTIC_ROUTE_ORACLE_RECEIPT_LITE_CAPABILITIES = frozenset(
-    {
-        "autoreason",
-        "bdd_acceptance_skill",
-        "ddtree",
-        "drone",
-        "lancedb",
-        "nightshift",
-        "research",
-        "semantic_failure_sensor",
-        "semantic_searcher",
-        "swarm_quiet_moment",
-    }
+from nexus.core.lite_route_oracle import (
+    GATE_ONLY_RECEIPT_LITE_LANES,
+    ROUTE_ORACLE_RECEIPT_LITE_CAPABILITIES,
+    DETERMINISTIC_ROUTE_ORACLE_RECEIPT_LITE_CAPABILITIES,
 )
 
 

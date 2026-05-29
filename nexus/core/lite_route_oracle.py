@@ -2,10 +2,29 @@ import os
 from dataclasses import dataclass
 from typing import List, Optional
 
-from nexus.engine.learning_policy_loader import (
-    GATE_ONLY_RECEIPT_LITE_LANES,
-    ROUTE_ORACLE_RECEIPT_LITE_CAPABILITIES,
-    DETERMINISTIC_ROUTE_ORACLE_RECEIPT_LITE_CAPABILITIES,
+GATE_ONLY_RECEIPT_LITE_LANES = frozenset(
+    {
+        "feature_reflex",
+        "governance_hardened",
+        "governance_hardened_capped",
+        "hidden_bugfix_supervised",
+        "trust_supervised_scope_only",
+    }
+)
+ROUTE_ORACLE_RECEIPT_LITE_CAPABILITIES = frozenset({"swarm", "ultra_review"})
+DETERMINISTIC_ROUTE_ORACLE_RECEIPT_LITE_CAPABILITIES = frozenset(
+    {
+        "autoreason",
+        "bdd_acceptance_skill",
+        "ddtree",
+        "drone",
+        "lancedb",
+        "nightshift",
+        "research",
+        "semantic_failure_sensor",
+        "semantic_searcher",
+        "swarm_quiet_moment",
+    }
 )
 
 

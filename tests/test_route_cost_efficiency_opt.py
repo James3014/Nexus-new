@@ -1001,6 +1001,7 @@ def test_paired_row_token_accounting_and_cost_evidence_class():
         "gateway_token_source": "stats",
         "token_measured": True,
         "total_tokens": 100,
+        "nexus_rescued": True,
     }
     annotate_cost_evidence(row_fallback_measured)
     assert row_fallback_measured["cost_evidence_class"] == "rescue_with_model_fallback_measured"
@@ -1013,6 +1014,7 @@ def test_paired_row_token_accounting_and_cost_evidence_class():
         "token_capture_status": "estimated",
         "gateway_token_source": "estimated",
         "total_tokens": 100,
+        "nexus_rescued": True,
     }
     annotate_cost_evidence(row_fallback_estimated)
     assert row_fallback_estimated["cost_evidence_class"] == "rescue_with_model_fallback"

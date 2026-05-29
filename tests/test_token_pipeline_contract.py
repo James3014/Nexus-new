@@ -17,7 +17,7 @@ def mock_llm_output():
 
 def test_llm_client_token_capture(mock_llm_output):
     client = LLMClient(project_root=".")
-    with patch("subprocess.run") as mock_run:
+    with patch("nexus.services.gateway._run_cli_with_hard_timeout") as mock_run:
         mock_run.return_value = MagicMock(
             stdout=mock_llm_output, stderr="", returncode=0
         )
