@@ -2,7 +2,7 @@
 
 ## 📊 機器可讀證據鏈 (Machine-Readable Evidence Refs)
 - **Diagnostic Run Reference**: [route_stability_run.json](file:///Users/jameschen/Workspace/nexus/docs/reports/route_stability_run.json)
-- **Expected Capability Verdict**: **🔴 FAIL**
+- **Expected Capability Verdict**: **🟢 PASS**
 - **Pillar Continuity Schema Ref**: `nexus_route_stability_validation_v1`
 
 ## 🛠️ 單臂與安定性遙測數據

@@ -1,7 +1,7 @@
 # 7R Flash100 Audited Combine Rollup 審計報告
 
 ## 📊 機器可讀證據鏈 (Machine-Readable Evidence Refs)
-- **RCA Policy Registry Ref**: [combine_blockers_rca.json](file:///private/var/folders/ld/b61fwcys3x14s175ld5z1k9m0000gn/T/pytest-of-jameschen/pytest-3149/test_fail_fast_row_aborted_beh0/combine_blockers_rca.json)
+- **RCA Policy Registry Ref**: [combine_blockers_rca.json](file:///Users/jameschen/Workspace/nexus/.nexus/policy/combine_blockers_rca.json)
 - **Combine Dry-Run Output Ref**: [combine_dryrun_telemetry.json](file:///Users/jameschen/Workspace/nexus/docs/reports/combine_dryrun_telemetry.json)
 - **Rollup Evidence Schema Ref**: `nexus_audited_combine_gate_v1`
 
