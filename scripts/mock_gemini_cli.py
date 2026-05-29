@@ -29,14 +29,14 @@ def get_model_and_options(difficulty: str = None) -> tuple[str, dict]:
         "temperature": 0.1,
         "num_gpu": int(os.environ.get("NEXUS_OLLAMA_NUM_GPU", "99")),
         "num_thread": int(os.environ.get("NEXUS_OLLAMA_NUM_THREAD", "8")),
-        "num_ctx": 32768,
-        "num_predict": 4096,
+        "num_ctx": 12288,
+        "num_predict": 2048,
     }
     
     # Optimize context size for easy difficulty to run even faster
     if difficulty == "easy":
-        options["num_ctx"] = 16384
-        options["num_predict"] = 2048
+        options["num_ctx"] = 8192
+        options["num_predict"] = 1024
 
     return model_name, options
 

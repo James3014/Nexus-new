@@ -3920,6 +3920,17 @@ def _run_receipt_first_probe_payload(
 ) -> dict[str, Any] | None:
     if not (_receipt_first_enabled() or required) or not task.expected_capabilities:
         return None
+    
+    use_local = os.environ.get("USE_LOCAL_OLLAMA", "").strip().lower() in {"1", "true", "yes", "on"}
+    upper_cap = 300 if use_local else 90
+    env_cap_raw = os.environ.get("NEXUS_BENCH_NEXUS_TIMEOUT_CAP")
+    if env_cap_raw:
+        try:
+            upper_cap = int(env_cap_raw)
+        except ValueError:
+            pass
+    effective_timeout = max(10, min(upper_cap, timeout_sec))
+
     args = [
         "nexus",
         "research:auto-flow",
@@ -3942,7 +3953,7 @@ def _run_receipt_first_probe_payload(
         "--candidate-count",
         str(max(1, candidate_cap)),
         "--timeout-sec",
-        str(max(10, min(90, timeout_sec))),
+        str(effective_timeout),
         "--output-json",
     ]
     if force_flow:
@@ -3965,11 +3976,11 @@ def _run_receipt_first_probe_payload(
             _nexus_cli_subprocess_cmd(args),
             cwd=repo_root,
             env=env,
-            timeout_sec=max(10, min(90, timeout_sec)),
+            timeout_sec=effective_timeout,
         )
         return _extract_json_payload(res.stdout or "")
     except subprocess.TimeoutExpired as exc:
-        return _with_nexus_timeout_payload(task=task, timeout_sec=max(10, min(90, timeout_sec)), exc=exc)
+        return _with_nexus_timeout_payload(task=task, timeout_sec=effective_timeout, exc=exc)
     finally:
         _restore_preserved_target(target_file, original_target)
 
