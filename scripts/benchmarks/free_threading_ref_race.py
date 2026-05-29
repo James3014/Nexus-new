@@ -8,19 +8,19 @@ class HardenedAtomicObject:
         self.name = name
         self.ref_count = 1
         self._is_alive = True
-        self._lock = threading.Lock() # 模擬原子 CAS 指令
+        self.lock = threading.Lock()
 
     def dec_ref(self):
-        with self._lock:
+        with self.lock:
             self.ref_count -= 1
             if self.ref_count == 0:
-                # 原子性地標記死亡
                 self._is_alive = False
 
     def get_weak_ref(self):
-        # 🛡️ v23 Formal Fix: 在同一個原子視窗中執行 Liveness 檢查
-        with self._lock:
-            if self._is_alive:
+        with self.lock:
+            alive = self._is_alive
+            time.sleep(0.01) # 擴大競態視窗：在此期間物件死亡
+            if alive:
                 return True
             return False
 
