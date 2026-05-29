@@ -7,27 +7,25 @@ class HardenedBarrier:
     def __init__(self, parties):
         self.parties = parties
         self.count = 0
-        self.generation = 0 
         self.cond = asyncio.Condition()
 
     async def wait(self):
         async with self.cond:
-            local_gen = self.generation
             self.count += 1
             if self.count == self.parties:
                 self.cond.notify_all()
                 self.count = 0
-                self.generation += 1
                 return 0
             
             try:
-                while local_gen == self.generation:
-                    await self.cond.wait()
+                await self.cond.wait()
             except asyncio.CancelledError:
-                if local_gen == self.generation:
-                    self.count -= 1
+                self.count -= 1
                 raise
-            return self.count
+            finally:
+                # Ensure the count is always consistent even if a task is cancelled
+                if self.count < 0:
+                    self.count = 0
 
 async def run_challenge():
     parties = 2
