@@ -1,6 +1,6 @@
-from __future__ import annotations
-
 from typing import Any
+
+from nexus.core.cost_evidence_contracts import derive_cost_evidence_class
 
 
 PROVIDER_TOKEN_SOURCES = {"stats", "usage_metadata", "codex_stdout"}
@@ -150,33 +150,16 @@ def annotate_cost_evidence(row: dict[str, Any]) -> dict[str, Any]:
         or row["rescue_cost_status"].startswith("local")
         or bool(row.get("nexus_rescued", False))
     )
-    clean_model_cost_evidence = bool(
-        model_calls > 0
-        and row["provider_token_measured"]
-        and row["token_reliable"]
-        and not model_attempt_runner_overhead_polluted(row)
-        and not local_success
+    cost_evidence_class_enum = derive_cost_evidence_class(
+        model_calls=model_calls,
+        provider_token_measured=row["provider_token_measured"],
+        token_reliable=row["token_reliable"],
+        runner_overhead_polluted=model_attempt_runner_overhead_polluted(row),
+        local_success=local_success,
+        nexus_internal_delivery_valid=bool(row.get("nexus_internal_delivery_valid", False)),
     )
-    if clean_model_cost_evidence:
-        cost_evidence_class = "clean_model_cost"
-    elif model_attempt_runner_overhead_polluted(row):
-        cost_evidence_class = "runner_overhead_polluted"
-    elif model_calls <= 0:
-        cost_evidence_class = (
-            "rescue_only_no_model_call" if local_success or row.get("nexus_internal_delivery_valid") else "no_model_call"
-        )
-    elif local_success:
-        if model_calls > 0:
-            if row["provider_token_measured"]:
-                cost_evidence_class = "rescue_with_model_fallback_measured"
-            else:
-                cost_evidence_class = "rescue_with_model_fallback"
-        else:
-            cost_evidence_class = "rescue_only_local_success"
-    elif not row["provider_token_measured"] or not row["token_reliable"]:
-        cost_evidence_class = "token_unreliable"
-    else:
-        cost_evidence_class = "not_clean_model_cost"
+    cost_evidence_class = cost_evidence_class_enum.value
+    clean_model_cost_evidence = cost_evidence_class == "clean_model_cost"
     row["local_success_source"] = local_success
     row["clean_model_cost_evidence"] = clean_model_cost_evidence
     row["cost_evidence_class"] = cost_evidence_class

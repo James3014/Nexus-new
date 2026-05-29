@@ -11,6 +11,7 @@ from scripts.bench.cost_evidence_classifier import (
     model_attempt_runner_overhead_polluted,
     row_has_measured_provider_tokens,
 )
+from nexus.core.cost_evidence_contracts import derive_cost_evidence_class
 
 
 @dataclass(frozen=True)
@@ -130,22 +131,16 @@ def _cost_evidence_class(row: dict[str, Any]) -> str:
     explicit = str(row.get("cost_evidence_class") or "").strip()
     if explicit:
         return explicit
-    if _clean_model_cost_evidence(row):
-        return "clean_model_cost"
-    if _runner_overhead_polluted(row):
-        return "runner_overhead_polluted"
     source = str(row.get("nexus_winner_source") or "").strip()
-    if int(_num(row, "model_calls")) <= 0:
-        return "rescue_only_no_model_call" if source in LOCAL_SUCCESS_SOURCES or source.startswith("local_preflight") else "no_model_call"
-    if source in LOCAL_SUCCESS_SOURCES or source.startswith("local_preflight"):
-        if int(_num(row, "model_calls")) > 0:
-            if _measured_token_only(row):
-                return "rescue_with_model_fallback_measured"
-            return "rescue_with_model_fallback"
-        return "rescue_only_local_success"
-    if not _measured_token_only(row):
-        return "token_unreliable"
-    return "not_clean_model_cost"
+    local_success = bool(source in LOCAL_SUCCESS_SOURCES or source.startswith("local_preflight"))
+    return derive_cost_evidence_class(
+        model_calls=int(_num(row, "model_calls")),
+        provider_token_measured=_measured_token_only(row),
+        token_reliable=bool(row.get("token_reliable", True)),
+        runner_overhead_polluted=_runner_overhead_polluted(row),
+        local_success=local_success,
+        nexus_internal_delivery_valid=bool(row.get("nexus_internal_delivery_valid", False)),
+    ).value
 
 
 def _runner_overhead_polluted(row: dict[str, Any]) -> bool:

@@ -7,7 +7,7 @@ from pathlib import Path
 from typing import Any
 
 from nexus.engine.learning_policy_store import DEFAULT_LEARNING_POLICY_STORE, LearningPolicyStore
-from nexus.engine.lane_policy_defaults import LANE_POLICY_DEFAULTS
+from nexus.core.lane_policy_defaults import LANE_POLICY_DEFAULTS
 
 DEFAULT_PROMOTED_POLICY_PATH = Path(".nexus") / "policy" / "promoted_learning_policy.json"
 DEFAULT_DYNAMIC_LEARNING_POLICY_PATH = Path(".nexus") / "memory" / "dynamic_learning_policy.json"
