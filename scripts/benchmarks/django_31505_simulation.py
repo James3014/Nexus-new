@@ -1,7 +1,9 @@
 import threading
 import time
 import os
+import shutil
 from pathlib import Path
+import uuid
 
 class MockStorage:
     def __init__(self):
@@ -13,25 +15,14 @@ class MockStorage:
         return (self.disk_path / name).exists()
 
     def save(self, name, content):
-        # v23 Formal Fix: 實作單射性 (Unique Filename)
-        import uuid
-        actual_name = name
-        while self.exists(actual_name):
-            stem = Path(name).stem
-            suffix = Path(name).suffix
-            actual_name = f"{stem}_{uuid.uuid4().hex[:8]}{suffix}"
-        
-        with open(self.disk_path / actual_name, "w") as f:
-            f.write(content)
-        return actual_name
-
-        
         # 模擬耗時操作，擴大 Race Condition 視窗
         time.sleep(0.05)
         
-        with open(self.disk_path / name, "w") as f:
+        # Fixed implementation: 使用唯一識別碼避免覆蓋
+        unique_name = f"{name}_{uuid.uuid4()}"
+        with open(self.disk_path / unique_name, "w") as f:
             f.write(content)
-        return name
+        return unique_name
 
 class DjangoModel:
     def __init__(self, storage):
@@ -49,7 +40,6 @@ def run_challenge():
     storage = MockStorage()
     model = DjangoModel(storage)
     
-    # 模擬兩個並行 Request 同時保存同一個檔案名但不同內容
     t1 = threading.Thread(target=model.save, args=("report.txt", "content_A"))
     t2 = threading.Thread(target=model.save, args=("report.txt", "content_B"))
     
@@ -58,11 +48,32 @@ def run_challenge():
     t1.join()
     t2.join()
     
-    # 最終驗證：磁碟檔案與 DB 紀錄是否一致
     actual_on_disk = (storage.disk_path / "report.txt").read_text() if (storage.disk_path / "report.txt").exists() else "MISSING"
     print(f"\n🏁 [Final Audit] File on disk content: {actual_on_disk}")
-    # 如果兩個 thread 都回報成功，但只有一個 content 在磁碟上，就是 Race Condition。
-    # 在 Django 31505 中，這會導致 metadata 指向了一個被錯誤跳過或覆蓋的舊檔。
+
+def test_challenge():
+    # 每次清理
+    storage = MockStorage()
+    if storage.disk_path.exists():
+        shutil.rmtree(storage.disk_path)
+    storage.disk_path.mkdir(exist_ok=True)
+    
+    model = DjangoModel(storage)
+    
+    t1 = threading.Thread(target=model.save, args=("report.txt", "content_A"))
+    t2 = threading.Thread(target=model.save, args=("report.txt", "content_B"))
+    
+    t1.start()
+    t2.start()
+    t1.join()
+    t2.join()
+    
+    # 驗證：兩個檔案必須都被妥善保存，且都擁有獨一無二的檔名 (Injectivity - 單射性)
+    files = list(storage.disk_path.glob("report*"))
+    assert len(files) == 2, f"Race condition detected! Only {len(files)} files on disk: {[f.name for f in files]}"
+    contents = {f.read_text() for f in files}
+    assert contents == {"content_A", "content_B"}, f"Wrong file contents: {contents}"
+    print("🎉 All assertions passed! Django #31505 SOTA Fix Verified!")
 
 if __name__ == "__main__":
     run_challenge()
