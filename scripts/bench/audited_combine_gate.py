@@ -197,11 +197,17 @@ def main() -> None:
         default=".nexus/policy/combine_blockers_rca.json",
         help="Path to combine blockers RCA registry"
     )
+    parser.add_argument(
+        "--strict-promotion",
+        action="store_true",
+        help="Enable strict 100-denominator commercial promotion gate"
+    )
     args = parser.parse_args()
 
     success, _ = run_audited_combine(
         chunks_path=args.chunks,
-        policy_path=args.policy
+        policy_path=args.policy,
+        strict_promotion=args.strict_promotion
     )
     sys.exit(0 if success else 1)
 
