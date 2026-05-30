@@ -53,7 +53,9 @@ class HealPipeline:
             "=======\n"
             "[new code]\n"
             ">>>>>>> REPLACE\n"
-            "Make minimum impact changes to resolve the issue. Output ONLY blocks. No conversational text."
+            "Make minimum impact changes to resolve the issue. Output ONLY blocks. No conversational text.\n"
+            "NEVER apologize. NEVER say you cannot help. NEVER ask the user for clarification.\n"
+            "You have ALL the source code needed. Output ONLY SEARCH/REPLACE blocks."
         )
         
         file_ctx = "\n\n".join(f"=== FILE: {fname} ===\n{content}" for fname, content in ctx.localized_files)
@@ -202,9 +204,9 @@ class HealPipeline:
             return ""
 
     def _handle_retry(self, ctx: HealContext, error: PatchError) -> HealContext:
-        # 自適應 Context 預算縮減：如果是空區塊錯誤且 localized 檔案太多，主動把 context 減小
+        # 自適應 Context 預算縮減：如果是空區塊錯誤且 localized 檔案太多，主動把 context 減小至 top-1 檔案
         if error.kind == PatchErrorKind.NO_BLOCKS_FOUND and len(ctx.localized_files) > 1:
-            ctx.localized_files = ctx.localized_files[:min(2, len(ctx.localized_files))]
+            ctx.localized_files = ctx.localized_files[:1]
             file_ctx = "\n\n".join(f"=== FILE: {fname} ===\n{content}" for fname, content in ctx.localized_files)
             ctx.user_prompt = f"Bug Report:\n{ctx.problem_statement[:1500]}\n\nSource Code:\n{file_ctx}\n\nOutput SEARCH/REPLACE block(s):"
 
