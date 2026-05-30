@@ -106,7 +106,8 @@ class SearchReplaceParser:
             # 若字串長度適中，才進行 regex 寬鬆空白匹配
             if len(s_no_doc.strip()) < 150:
                 escaped_s = re.escape(s_no_doc.strip())
-                regex_pattern = re.sub(r'\\\s+', r'\\s*', escaped_s)
+                # 使用限制重複的 \\s* 搭配避免回溯的寫法，防止極大/極複雜區塊回溯卡死
+                regex_pattern = re.sub(r'\\\s+', r'\\s{0,20}', escaped_s)
                 try:
                     match_obj = re.search(regex_pattern, orig_content)
                     if match_obj:
@@ -194,7 +195,7 @@ class SearchReplaceParser:
 
         # 將 complete_part 轉為空白不敏感的正則表達式以進行唯一錨定
         escaped_complete = re.escape(complete_part)
-        regex_complete = re.sub(r'\\\s+', r'\\s*', escaped_complete)
+        regex_complete = re.sub(r'\\\s+', r'\\s{0,20}', escaped_complete)
 
         matches = list(re.finditer(regex_complete, file_content))
         if len(matches) != 1:
@@ -275,15 +276,16 @@ class SearchReplaceParser:
             search_range_end = min(len(file_content), norm_start + len(s_stripped) + 200)
         
         # 尋找與 norm_search 歸一化後完全一致的子字串
-        for i in range(search_range_start, search_range_end):
-            # 視窗長度限制：超大字串限制更窄的誤差容許度 (0.9 ~ 1.1) 以防止 CPU 卡死
-            if len(s_stripped) > 250:
-                min_len = int(0.9 * len(s_stripped))
-                max_len = int(1.1 * len(s_stripped))
-            else:
-                min_len = int(0.5 * len(s_stripped))
-                max_len = int(2.0 * len(s_stripped))
+        # 為了避免 sre_ucs1_match 正則災難性回溯瓶頸，此處進行純字串歸一化快速比對，禁止使用 regex。
+        len_s = len(s_stripped)
+        if len_s > 250:
+            min_len = int(0.9 * len_s)
+            max_len = int(1.1 * len_s)
+        else:
+            min_len = int(0.5 * len_s)
+            max_len = int(2.0 * len_s)
 
+        for i in range(search_range_start, search_range_end):
             for length in range(min_len, max_len + 1):
                 if i + length > len(file_content):
                     break
@@ -291,7 +293,6 @@ class SearchReplaceParser:
                 norm_sub = self._normalize_whitespace(self._normalize_quotes(sub_str))
                 if norm_sub == norm_search:
                     return sub_str, sub_str
-
 
         return "", ""
 
