@@ -162,6 +162,7 @@ class SearchReplaceParser:
         截斷自癒匹配演算法 (Fuzzy Truncated Matcher)：
         當搜尋區塊在最後一行被半路切斷時，嘗試用前 N-1 行完整行進行唯一錨定，
         並自癒對齊最後一行的殘缺前綴。支援縮排容錯。
+        為了避免 sre_ucs1_count 正則災難性回溯瓶頸，此處進行純字串快速比對，禁止使用 regex。
         """
         search_stripped = search_text.strip()
         lines = search_stripped.splitlines()
@@ -174,17 +175,39 @@ class SearchReplaceParser:
         if not complete_part or not last_line_prefix:
             return "", ""
 
-        # 將 complete_part 轉為空白不敏感的正則表達式以進行唯一錨定
-        escaped_complete = re.escape(complete_part)
-        regex_complete = re.sub(r'\\\s+', r'\\s{0,20}', escaped_complete)
+        # 使用純字串 count & find 來尋找唯一錨點，完全阻斷 regex 回溯
+        norm = Normalizer()
+        norm_complete = norm.normalize(complete_part)
+        norm_file = norm.normalize(file_content)
 
-        matches = list(re.finditer(regex_complete, file_content))
-        if len(matches) != 1:
+        count = norm_file.count(norm_complete)
+        if count != 1:
             return "", ""
 
-        match_obj = matches[0]
-        verbatim_complete = match_obj.group(0)
-        end_idx = match_obj.end()
+        norm_start = norm_file.find(norm_complete)
+        # 滑動視窗在錨點偏移 50 字元內比對完整字串以提取正確的 verbatim_complete
+        search_range_start = max(0, norm_start - 50)
+        search_range_end = min(len(file_content), norm_start + len(complete_part) + 50)
+        
+        verbatim_complete = ""
+        len_c = len(complete_part)
+        min_len = int(0.9 * len_c)
+        max_len = int(1.1 * len_c)
+
+        for i in range(search_range_start, search_range_end):
+            for length in range(min_len, max_len + 1):
+                if i + length > len(file_content):
+                    break
+                sub_str = file_content[i:i+length]
+                if norm.normalize(sub_str) == norm_complete:
+                    verbatim_complete = sub_str
+                    end_idx = i + length
+                    break
+            if verbatim_complete:
+                break
+
+        if not verbatim_complete:
+            return "", ""
 
         # 從 end_idx 往後尋找緊隨其後的非空行
         remaining_content = file_content[end_idx:]
