@@ -1,5 +1,5 @@
 import pytest
-from nexus.services.local_heal.parser import EnvContextPerceiver, ASTMicroMerger
+from nexus.services.local_heal.micromerger import EnvContextPerceiver, ASTMicroMerger
 
 def test_env_context_perceiver_indentation():
     perceiver = EnvContextPerceiver()

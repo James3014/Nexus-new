@@ -140,7 +140,7 @@ class HealPipeline:
         return ctx
 
     def _localize(self, ctx: HealContext) -> HealContext:
-        raw_files = self.localizer.locate(ctx.problem_statement, ctx.repo_dir, max_files=3)
+        raw_files = self.localizer.locate(ctx.problem_statement, ctx.repo_dir, max_files=8)
         
         # 整合 AST FunctionLocalizer 對大檔案進行緊湊裁剪
         from nexus.services.local_heal.function_localizer import FunctionLocalizer
@@ -157,8 +157,25 @@ class HealPipeline:
 
     def _generate_patch(self, ctx: HealContext) -> str:
         try:
-            return self.ollama_generate(ctx.system_prompt, ctx.user_prompt)
-        except Exception:
+            response = self.ollama_generate(ctx.system_prompt, ctx.user_prompt)
+            # 寫入 LLM 除錯日誌
+            from pathlib import Path
+            log_dir = Path("/Users/jameschen/Workspace/nexus/scratch")
+            log_dir.mkdir(parents=True, exist_ok=True)
+            log_file = log_dir / "llm_trace.log"
+            with open(log_file, "a", encoding="utf-8") as f:
+                f.write(f"\n\n=== ATTEMPT {ctx.attempt} FOR {ctx.instance_id} ===\n")
+                f.write(f"--- SYSTEM PROMPT ---\n{ctx.system_prompt}\n")
+                f.write(f"--- USER PROMPT ---\n{ctx.user_prompt}\n")
+                f.write(f"--- RESPONSE ---\n{response}\n")
+                f.write("="*80 + "\n")
+            return response
+        except Exception as e:
+            from pathlib import Path
+            log_dir = Path("/Users/jameschen/Workspace/nexus/scratch")
+            log_dir.mkdir(parents=True, exist_ok=True)
+            with open(log_dir / "llm_trace.log", "a", encoding="utf-8") as f:
+                f.write(f"\n\n=== EXCEPTION FOR {ctx.instance_id} ===\n{str(e)}\n")
             return ""
 
     def _handle_retry(self, ctx: HealContext, error: PatchError) -> HealContext:

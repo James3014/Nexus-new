@@ -1,5 +1,5 @@
 import pytest
-from nexus.services.local_heal.parser import LockGranularityChecker, AtomicBlockSynthesizer
+from nexus.services.local_heal.concurrency import LockGranularityChecker, AtomicBlockSynthesizer
 
 def test_lock_granularity_checker_race_window():
     checker = LockGranularityChecker()

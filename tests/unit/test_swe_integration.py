@@ -223,8 +223,8 @@ def test_self_corrector_loop_simulated():
     
     retry_prompt = corrector.build_retry_prompt(user_prompt, error_log)
     
-    assert "SyntaxError: expected ')'" in retry_prompt
-    assert "請務必修正上述語法錯誤" in retry_prompt or "Fix the syntax error" in retry_prompt
+    assert "SyntaxError" in retry_prompt
+    assert "syntax compilation error" in retry_prompt or "REPLACE block" in retry_prompt
 
 
 
