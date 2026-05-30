@@ -264,16 +264,26 @@ class SearchReplaceParser:
         norm_start = norm_file.find(norm_search)
 
         # 3. 滑動視窗精準還原 verbatim 段落
-        # 由於歸一化前後檔案長度高度相似，verbatim 起點必然在 norm_start 附近
-        # 我們限制搜尋範圍在 [norm_start - 200, norm_start + 200] 內
-        search_range_start = max(0, norm_start - 200)
-        search_range_end = min(len(file_content), norm_start + len(s_stripped) + 200)
+        # 為了防範大區塊或極度複雜 regex 在歸一化滑動視窗中產生災難性比對負載：
+        # 如果搜尋文字長度大於 250，且並非 100% 精準匹配，我們應限制長度或直接使用快速錨定剪枝。
+        if len(s_stripped) > 250:
+            # 針對超大字串，只在 50 個字元偏移內比對，如果找不到立即退出
+            search_range_start = max(0, norm_start - 50)
+            search_range_end = min(len(file_content), norm_start + len(s_stripped) + 50)
+        else:
+            search_range_start = max(0, norm_start - 200)
+            search_range_end = min(len(file_content), norm_start + len(s_stripped) + 200)
         
         # 尋找與 norm_search 歸一化後完全一致的子字串
         for i in range(search_range_start, search_range_end):
-            # 視窗長度應在 [0.5 * len(s_stripped), 2.0 * len(s_stripped)] 之間
-            min_len = int(0.5 * len(s_stripped))
-            max_len = int(2.0 * len(s_stripped))
+            # 視窗長度限制：超大字串限制更窄的誤差容許度 (0.9 ~ 1.1) 以防止 CPU 卡死
+            if len(s_stripped) > 250:
+                min_len = int(0.9 * len(s_stripped))
+                max_len = int(1.1 * len(s_stripped))
+            else:
+                min_len = int(0.5 * len(s_stripped))
+                max_len = int(2.0 * len(s_stripped))
+
             for length in range(min_len, max_len + 1):
                 if i + length > len(file_content):
                     break
@@ -281,6 +291,7 @@ class SearchReplaceParser:
                 norm_sub = self._normalize_whitespace(self._normalize_quotes(sub_str))
                 if norm_sub == norm_search:
                     return sub_str, sub_str
+
 
         return "", ""
 
