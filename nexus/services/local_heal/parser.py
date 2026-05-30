@@ -231,52 +231,57 @@ class SearchReplaceParser:
         return "", ""
 
     def _normalize_quotes(self, text: str) -> str:
-        # 統一將所有雙引號 `"` 替換為單引號 `'`（並統一處理轉義的 `\'` 到 `'`，以及雙單引號 `''` 到 `'` 以完全歸一化）
+        return Normalizer().normalize_quotes(text)
+
+    def _normalize_whitespace(self, text: str) -> str:
+        return Normalizer().normalize_whitespace(text)
+
+    def _match_normalized_search(self, file_content: str, search_text: str) -> Tuple[str, str]:
+        return SlidingWindowMatcher().match(file_content, search_text)
+
+
+class Normalizer:
+    """負責代碼空格與引號歸一化的專職組件 (SoC / Clean Code)"""
+    def normalize_quotes(self, text: str) -> str:
         normalized = text.replace('"', "'")
         normalized = normalized.replace("\\'", "'")
         normalized = normalized.replace("''", "'")
         return normalized
 
-    def _normalize_whitespace(self, text: str) -> str:
-        # 收縮所有連續空白為單一空格
+    def normalize_whitespace(self, text: str) -> str:
         return " ".join(text.split())
 
-    def _match_normalized_search(self, file_content: str, search_text: str) -> Tuple[str, str]:
-        """
-        全域對齊模糊匹配演算法：對引號與空格進行歸一化以進行寬鬆匹配，
-        並在檔案中唯一定位後還原出真實的 verbatim 區塊。支援極高容錯的滑動視窗匹配。
-        """
+    def normalize(self, text: str) -> str:
+        return self.normalize_whitespace(self.normalize_quotes(text))
+
+
+class SlidingWindowMatcher:
+    """負責高速且阻斷 Catastrophic Backtracking 的滑動視窗模糊匹配器 (Linus 原則)"""
+    def match(self, file_content: str, search_text: str) -> Tuple[str, str]:
         s_stripped = search_text.strip()
         if not s_stripped:
             return "", ""
 
-        # 1. 歸一化搜尋文字與檔案內容
-        norm_search = self._normalize_whitespace(self._normalize_quotes(s_stripped))
+        norm = Normalizer()
+        norm_search = norm.normalize(s_stripped)
         if not norm_search:
             return "", ""
 
-        norm_file = self._normalize_whitespace(self._normalize_quotes(file_content))
+        norm_file = norm.normalize(file_content)
 
-        # 2. 檢查是否在歸一化內容中唯一存在
         count = norm_file.count(norm_search)
         if count != 1:
             return "", ""
 
         norm_start = norm_file.find(norm_search)
 
-        # 3. 滑動視窗精準還原 verbatim 段落
-        # 為了防範大區塊或極度複雜 regex 在歸一化滑動視窗中產生災難性比對負載：
-        # 如果搜尋文字長度大於 250，且並非 100% 精準匹配，我們應限制長度或直接使用快速錨定剪枝。
         if len(s_stripped) > 250:
-            # 針對超大字串，只在 50 個字元偏移內比對，如果找不到立即退出
             search_range_start = max(0, norm_start - 50)
             search_range_end = min(len(file_content), norm_start + len(s_stripped) + 50)
         else:
             search_range_start = max(0, norm_start - 200)
             search_range_end = min(len(file_content), norm_start + len(s_stripped) + 200)
-        
-        # 尋找與 norm_search 歸一化後完全一致的子字串
-        # 為了避免 sre_ucs1_match 正則災難性回溯瓶頸，此處進行純字串歸一化快速比對，禁止使用 regex。
+
         len_s = len(s_stripped)
         if len_s > 250:
             min_len = int(0.9 * len_s)
@@ -290,11 +295,31 @@ class SearchReplaceParser:
                 if i + length > len(file_content):
                     break
                 sub_str = file_content[i:i+length]
-                norm_sub = self._normalize_whitespace(self._normalize_quotes(sub_str))
+                norm_sub = norm.normalize(sub_str)
                 if norm_sub == norm_search:
                     return sub_str, sub_str
 
         return "", ""
+
+
+class HealDecisionEngine:
+    """負責分析錯誤並給予最精確的 TDD 自癒決策引導 (SoC)"""
+    def get_retry_prompt(self, original_prompt: str, error_msg: str) -> str:
+        if "SyntaxError" in error_msg:
+            return (
+                f"{original_prompt}\n\n"
+                f"[SYSTEM FEEDBACK] Your previous patch caused a syntax parsing error:\n"
+                f"--> {error_msg}\n"
+                f"Please carefully inspect brackets, indentation, commas and quotes, "
+                f"and output a corrected SEARCH/REPLACE block with perfect Python syntax."
+            )
+        else:
+            return (
+                f"{original_prompt}\n\n"
+                f"[SYSTEM FEEDBACK] Your previous SEARCH block did not match the original code:\n"
+                f"--> {error_msg}\n"
+                f"Please ensure you copy the target code verbatim into the SEARCH block and try again."
+            )
 
 
 
