@@ -162,7 +162,8 @@ class HealPipeline:
         return ctx
 
     def _localize(self, ctx: HealContext) -> HealContext:
-        raw_files = self.localizer.locate(ctx.problem_statement, ctx.repo_dir, max_files=3)
+        ranked = self.localizer.rank_files(ctx.problem_statement, ctx.repo_dir, max_files=3)
+        raw_files = self.localizer.extract_relevant_code(ranked)
         
         # 整合 AST FunctionLocalizer 對大檔案進行緊湊裁剪
         from nexus.services.local_heal.function_localizer import FunctionLocalizer
