@@ -54,7 +54,7 @@ class Localizer:
     def locate(self, issue_description: str, repo_dir: Path, max_files: int = 2) -> List[Tuple[str, str]]:
         import re
         tokens = set(re.findall(r'\b([a-z][a-z_0-9]{3,})\b', issue_description.lower()))
-        tokens.update(["timeseries", "required", "column", "binned", "core"])
+        tokens.update(["ndarray", "mixin", "table", "structured", "column"])
         
         scored = []
         for pyfile in repo_dir.rglob("*.py"):
@@ -64,10 +64,10 @@ class Localizer:
                 continue
             
             score = 0
-            if "timeseries" in pyfile.name.lower() or "binned" in pyfile.name.lower():
+            if "table.py" in pyfile.name.lower() and "table" in rel_str:
+                score += 45
+            if "ndarray" in pyfile.name.lower():
                 score += 25
-            if "core.py" in pyfile.name.lower() and "timeseries" in rel_str:
-                score += 40
             
             score += sum(5 if tok in pyfile.name.lower() else 1 for tok in tokens if tok in rel_str)
             if score > 0:
