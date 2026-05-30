@@ -8,6 +8,7 @@ class PatchErrorKind(Enum):
     FILE_NOT_FOUND = auto()      # 目標檔案不存在
     NO_BLOCKS_FOUND = auto()     # LLM 輸出中未包含任何有效的 SEARCH/REPLACE 區塊
     NO_EFFECTIVE_CODE_CHANGE = auto() # 變更僅涉及 docstrings、註解或排版，無實質邏輯代碼變更
+    SEARCH_HAS_PLACEHOLDER = auto()   # SEARCH 區塊含有省略號 (如 '# ...')，導致匹配失敗
 
 
 @dataclass

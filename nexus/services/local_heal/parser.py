@@ -4,7 +4,22 @@ from typing import List, Dict
 class SearchReplaceParser:
     """單一功能：解析 LLM 輸出的 SEARCH/REPLACE 語法區塊 (SRP)"""
 
-    def parse_blocks(self, llm_output: str) -> List[Dict[str, str]]:
+    def _clean_content(self, text: str) -> Tuple[str, bool]:
+        # 深度清洗 markdown fence
+        cleaned = re.sub(r'```[a-zA-Z0-9]*\n?', '', text)
+        cleaned = cleaned.strip()
+        
+        # 檢測 placeholder 省略號
+        has_placeholder = False
+        if any(ph in cleaned for ph in ("# ...", "// ...", "/* ...", "... existing", "existing code")):
+            has_placeholder = True
+        elif "..." in cleaned:
+            if not re.search(r'=\s*\.\.\.', cleaned) and not re.search(r'\[\s*\.\.\.\s*\]', cleaned):
+                has_placeholder = True
+                
+        return cleaned, has_placeholder
+
+    def parse_blocks(self, llm_output: str) -> List[Dict[str, Any]]:
         blocks = []
         
         # 1. Custom 格式解析
@@ -14,16 +29,17 @@ class SearchReplaceParser:
             re.DOTALL
         )
         for match in custom_pattern.finditer(llm_output):
-            search_content = match.group(2)
-            replace_content = match.group(3)
-            search_content = re.sub(r'^```[a-zA-Z0-9]*\n', '', search_content)
-            search_content = re.sub(r'\n```$', '', search_content)
-            replace_content = re.sub(r'^```[a-zA-Z0-9]*\n', '', replace_content)
-            replace_content = re.sub(r'\n```$', '', replace_content)
+            raw_search = match.group(2)
+            raw_replace = match.group(3)
+            
+            search_content, has_ph_search = self._clean_content(raw_search)
+            replace_content, has_ph_replace = self._clean_content(raw_replace)
+            
             blocks.append({
                 "file": match.group(1).strip(),
                 "search": search_content,
-                "replace": replace_content
+                "replace": replace_content,
+                "has_placeholder": has_ph_search or has_ph_replace
             })
             
         # 2. Aider 格式解析 (SOTA Fuzzy Parser)
@@ -32,14 +48,11 @@ class SearchReplaceParser:
             re.DOTALL
         )
         for match in aider_block_pattern.finditer(llm_output):
-            search_content = match.group(1)
-            replace_content = match.group(2)
+            raw_search = match.group(1)
+            raw_replace = match.group(2)
             
-            # 清除 markdown codeblock 標籤
-            search_content = re.sub(r'^```[a-zA-Z0-9]*\n', '', search_content)
-            search_content = re.sub(r'\n```$', '', search_content)
-            replace_content = re.sub(r'^```[a-zA-Z0-9]*\n', '', replace_content)
-            replace_content = re.sub(r'\n```$', '', replace_content)
+            search_content, has_ph_search = self._clean_content(raw_search)
+            replace_content, has_ph_replace = self._clean_content(raw_replace)
             
             # 尋找該區塊前方最近的 "FILE: ..." 或看起來像路徑的檔名
             start_pos = match.start()
@@ -61,7 +74,8 @@ class SearchReplaceParser:
                 blocks.append({
                     "file": file_name,
                     "search": search_content,
-                    "replace": replace_content
+                    "replace": replace_content,
+                    "has_placeholder": has_ph_search or has_ph_replace
                 })
 
             

@@ -60,6 +60,15 @@ class SelfCorrector:
                 f"2. Changing docstrings or typos in comments will NOT solve the issue and will be rejected.\n"
                 f"Output a valid SEARCH/REPLACE block that implements functional code changes."
             )
+        elif error.kind == PatchErrorKind.SEARCH_HAS_PLACEHOLDER:
+            retry_instruction = (
+                f"CRITICAL ERROR: Your previous SEARCH/REPLACE block contains placeholder comments (such as '# ...', '# ... existing code ...', or '...')!\n"
+                f"--> {error.message}\n\n"
+                f"Please do the following:\n"
+                f"1. You MUST copy the target code character-for-character, completely and exactly, into your SEARCH block.\n"
+                f"2. NEVER use '# ...' or other comments to skip existing code in either SEARCH or REPLACE blocks.\n"
+                f"Output the fully written SEARCH/REPLACE block without any placeholder shortcuts."
+            )
         else:
             retry_instruction = (
                 f"Your previous attempt encountered an issue:\n"

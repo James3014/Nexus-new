@@ -86,6 +86,15 @@ class HealPipeline:
                 ctx = self._handle_retry(ctx, err)
                 continue
 
+            if any(b.get("has_placeholder") for b in blocks):
+                err = PatchError(
+                    kind=PatchErrorKind.SEARCH_HAS_PLACEHOLDER,
+                    message="Your SEARCH or REPLACE block contains placeholder comments like '# ...' or '...'. You MUST copy the entire code exactly without omitting anything."
+                )
+                ctx.errors.append(err)
+                ctx = self._handle_retry(ctx, err)
+                continue
+
             applied_diffs = []
             has_error = False
 
