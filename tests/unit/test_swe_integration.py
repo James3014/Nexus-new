@@ -192,6 +192,42 @@ def test_parser_handles_14182_rst_exact_astropy_mismatch(tmp_path):
     assert success is False
 
 
+def test_syntax_validator_rejects_broken_code():
+    from nexus.services.local_heal.validator import validate_syntax
+    
+    ok_code = """
+def check_me():
+    return True
+"""
+    success, err = validate_syntax(ok_code)
+    assert success is True
+    assert err == ""
+
+    bad_code = """
+def check_me(
+    return True
+"""
+    success, err = validate_syntax(bad_code)
+    assert success is False
+    assert "SyntaxError" in err
+
+
+def test_self_corrector_loop_simulated():
+    from nexus.services.local_heal.corrector import SelfCorrector
+    
+    corrector = SelfCorrector()
+    
+    # 模擬當前測試失敗或語法錯誤的引導提示生成
+    user_prompt = "Bug Report:\nsome bug\nSource Code:\nsome source"
+    error_log = "SyntaxError: expected ')'"
+    
+    retry_prompt = corrector.build_retry_prompt(user_prompt, error_log)
+    
+    assert "SyntaxError: expected ')'" in retry_prompt
+    assert "請務必修正上述語法錯誤" in retry_prompt or "Fix the syntax error" in retry_prompt
+
+
+
 
 
 
