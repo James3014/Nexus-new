@@ -46,3 +46,72 @@ END"""
     updated_content = target_file.read_text()
     assert "hello nexus" in updated_content
     assert "hello world" not in updated_content
+
+def test_parser_handles_truncated_search(tmp_path):
+    from nexus.services.local_heal.parser import SearchReplaceParser
+    
+    file_content = """def world_to_array_index(self, *world_objects):
+    \"\"\"
+    Convert world coordinates (represented by Astropy objects) to array
+    indices.
+
+    If `~astropy.wcs.wcsapi.BaseLowLevelWCS.pixel_n_dim` is ``1``, this
+    method returns a single scalar or array, otherwise a tuple of scalars or
+    arrays is returned. See
+    `~astropy.wcs.wcsapi.BaseLowLevelWCS.world_to_array_index_values` ...
+"""
+    target_file = tmp_path / "dummy.py"
+    target_file.write_text(file_content)
+
+    search_text = """def world_to_array_index(self, *world_objects):
+    \"\"\"
+    Convert world coordinates (represented by Astropy objects) to array
+    indices.
+
+    If `~astropy.wcs.wcsapi.BaseLowLevelWCS.pixel_n_dim` is ``1``, this
+    method returns a single scalar or array, otherwise a tuple of scalars or
+    arrays is returned. See
+    `~astropy.wcs.wc"""
+    
+    replace_text = """def world_to_array_index(self, *world_objects):
+    # This is replaced successfully!
+    pass"""
+    
+    parser = SearchReplaceParser()
+    success, diff = parser.apply_and_diff(target_file, search_text, replace_text)
+    
+    assert success is True
+    assert "# This is replaced successfully!" in target_file.read_text()
+
+def test_parser_handles_pure_code_truncated_search(tmp_path):
+    from nexus.services.local_heal.parser import SearchReplaceParser
+    
+    file_content = """def calculate_total(price, tax, discount):
+    subtotal = price + tax
+    total = subtotal - discount
+    return total
+"""
+    target_file = tmp_path / "dummy.py"
+    target_file.write_text(file_content)
+
+    search_text = """def calculate_total(price, tax, discount):
+    subtotal = price + tax
+    total = sub"""
+    
+    replace_text = """def calculate_total(price, tax, discount):
+    subtotal = price + tax
+    total = subtotal - discount - 5
+    return total"""
+    
+    parser = SearchReplaceParser()
+    success, diff = parser.apply_and_diff(target_file, search_text, replace_text)
+    
+    assert success is True
+    assert target_file.read_text() == """def calculate_total(price, tax, discount):
+    subtotal = price + tax
+    total = subtotal - discount - 5
+    return total
+"""
+
+
+
