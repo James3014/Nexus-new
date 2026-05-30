@@ -26,24 +26,44 @@ class SearchReplaceParser:
                 "replace": replace_content
             })
             
-        # 2. Aider 格式解析
-        aider_pattern = re.compile(
-            r'FILE:\s*([^\n]+)\s*\n'
+        # 2. Aider 格式解析 (SOTA Fuzzy Parser)
+        aider_block_pattern = re.compile(
             r'<<<<<<< SEARCH\s*\n(.*?)\n=======\n(.*?)\n>>>>>>>(?:\s*REPLACE)?',
             re.DOTALL
         )
-        for match in aider_pattern.finditer(llm_output):
-            search_content = match.group(2)
-            replace_content = match.group(3)
+        for match in aider_block_pattern.finditer(llm_output):
+            search_content = match.group(1)
+            replace_content = match.group(2)
+            
+            # 清除 markdown codeblock 標籤
             search_content = re.sub(r'^```[a-zA-Z0-9]*\n', '', search_content)
             search_content = re.sub(r'\n```$', '', search_content)
             replace_content = re.sub(r'^```[a-zA-Z0-9]*\n', '', replace_content)
             replace_content = re.sub(r'\n```$', '', replace_content)
-            blocks.append({
-                "file": match.group(1).strip(),
-                "search": search_content,
-                "replace": replace_content
-            })
+            
+            # 尋找該區塊前方最近的 "FILE: ..." 或看起來像路徑的檔名
+            start_pos = match.start()
+            prefix = llm_output[:start_pos]
+            
+            # 從字尾往前找匹配的檔名
+            file_match = re.findall(r'(?:FILE|File):\s*([a-zA-Z0-9_\-\./\+]+)', prefix)
+            file_name = ""
+            if file_match:
+                file_name = file_match[-1].strip().strip('`*# ')
+            
+            # 容錯：如果找不到 FILE:，但 prefix 裡面有顯式的 python 檔案路徑
+            if not file_name:
+                path_match = re.findall(r'([a-zA-Z0-9_\-\./\+]+\.py)', prefix)
+                if path_match:
+                    file_name = path_match[-1].strip().strip('`*# ')
+                    
+            if file_name:
+                blocks.append({
+                    "file": file_name,
+                    "search": search_content,
+                    "replace": replace_content
+                })
+
             
         return blocks
 

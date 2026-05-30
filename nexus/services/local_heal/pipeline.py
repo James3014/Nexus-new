@@ -5,10 +5,11 @@ from typing import List, Tuple, Dict, Any, Optional
 from nexus.services.local_heal.localizer import Localizer
 from nexus.services.local_heal.parser import SearchReplaceParser
 from nexus.services.local_heal.patcher import Patcher, PatchResult
-from nexus.services.local_heal.validator import validate_syntax
+from nexus.services.local_heal.validator import validate_syntax, validate_effective_change
 from nexus.services.local_heal.corrector import SelfCorrector
 from nexus.services.local_heal.context_budget import ContextBudgetManager
 from nexus.services.local_heal.errors import PatchError, PatchErrorKind
+
 
 @dataclass
 class HealContext:
@@ -62,6 +63,11 @@ class HealPipeline:
         while ctx.attempt <= ctx.max_tries:
             ctx.errors.clear()
             
+            # 還原 git 所有修改與未追蹤檔案，確保每次 Attempt 都基於絕對乾淨的 pristine 基線
+            import subprocess
+            subprocess.run(["git", "checkout", "--", "."], cwd=str(ctx.repo_dir), capture_output=True)
+            subprocess.run(["git", "clean", "-fd"], cwd=str(ctx.repo_dir), capture_output=True)
+            
             # Stage 2: 呼叫 LLM 生成 Patch
             response = self._generate_patch(ctx)
             if not response:
@@ -70,7 +76,10 @@ class HealPipeline:
             # Stage 3: 解析與責任鏈匹配替換
             blocks = self.parser.parse_blocks(response)
             if not blocks:
-                err = PatchError(kind=PatchErrorKind.SEARCH_MISMATCH, message="LLM output no SEARCH/REPLACE blocks.")
+                err = PatchError(
+                    kind=PatchErrorKind.NO_BLOCKS_FOUND, 
+                    message="LLM output no SEARCH/REPLACE blocks. You must format your response strictly using SEARCH/REPLACE blocks."
+                )
                 ctx.errors.append(err)
                 ctx = self._handle_retry(ctx, err)
                 continue
@@ -125,6 +134,18 @@ class HealPipeline:
                     has_error = True
                     break
 
+                # 4.5: 靜態 AST 邏輯有效性檢驗 (防堵投機修改 docstring 假綠燈)
+                is_effective, effective_err = validate_effective_change(file_content, patch_res.new_content)
+                if not is_effective:
+                    err = PatchError(
+                        kind=PatchErrorKind.NO_EFFECTIVE_CODE_CHANGE,
+                        message=effective_err,
+                        file_path=b["file"]
+                    )
+                    ctx.errors.append(err)
+                    has_error = True
+                    break
+
                 # 套用成功，暫存變更並更新檔案
                 target_path.write_text(patch_res.new_content, encoding="utf-8")
                 applied_diffs.append(patch_res.diff)
@@ -137,10 +158,11 @@ class HealPipeline:
                 latest_err = ctx.errors[-1]
                 ctx = self._handle_retry(ctx, latest_err)
 
+
         return ctx
 
     def _localize(self, ctx: HealContext) -> HealContext:
-        raw_files = self.localizer.locate(ctx.problem_statement, ctx.repo_dir, max_files=8)
+        raw_files = self.localizer.locate(ctx.problem_statement, ctx.repo_dir, max_files=3)
         
         # 整合 AST FunctionLocalizer 對大檔案進行緊湊裁剪
         from nexus.services.local_heal.function_localizer import FunctionLocalizer
@@ -151,8 +173,8 @@ class HealPipeline:
             focused = fn_localizer.build_focused_context(path, content, ctx.problem_statement)
             reduced_files.append((path, focused))
             
-        # 整合 Context Budget Manager 進行自適應裁剪
-        ctx.localized_files = self.budget_manager.fit_source_files(reduced_files)
+        # 整合 Context Budget Manager 進行硬性預算限制與自適應裁剪
+        ctx.localized_files = self.budget_manager.enforce_hard_limit(reduced_files)
         return ctx
 
     def _generate_patch(self, ctx: HealContext) -> str:
@@ -179,9 +201,16 @@ class HealPipeline:
             return ""
 
     def _handle_retry(self, ctx: HealContext, error: PatchError) -> HealContext:
+        # 自適應 Context 預算縮減：如果是空區塊錯誤且 localized 檔案太多，主動把 context 減小
+        if error.kind == PatchErrorKind.NO_BLOCKS_FOUND and len(ctx.localized_files) > 1:
+            ctx.localized_files = ctx.localized_files[:min(2, len(ctx.localized_files))]
+            file_ctx = "\n\n".join(f"=== FILE: {fname} ===\n{content}" for fname, content in ctx.localized_files)
+            ctx.user_prompt = f"Bug Report:\n{ctx.problem_statement[:1500]}\n\nSource Code:\n{file_ctx}\n\nOutput SEARCH/REPLACE block(s):"
+
         # 首先進行重試 Prompt 壓縮去重，防堵線性膨脹
         compressed_base = self.budget_manager.compress_retry_prompt(ctx.user_prompt, error.message)
         # 用 HUD 分流器構建精確的引導提示
         ctx.user_prompt = self.corrector.build_retry_prompt(compressed_base, error)
         ctx.attempt += 1
         return ctx
+

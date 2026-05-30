@@ -41,6 +41,25 @@ class SelfCorrector:
                 f"Please ensure you copy the target source code EXACTLY character-for-character into your SEARCH block, "
                 f"including all whitespaces, comments, and line indentations, and output the SEARCH/REPLACE block again."
             )
+        elif error.kind == PatchErrorKind.NO_BLOCKS_FOUND:
+            retry_instruction = (
+                f"CRITICAL ERROR: Your previous response contained ZERO SEARCH/REPLACE blocks!\n"
+                f"You MUST use the exact `<<<<<<< SEARCH` and `>>>>>>> REPLACE` block format to suggest edits.\n\n"
+                f"Rules you MUST follow:\n"
+                f"1. Do NOT write conversational text or explanations. Only output code blocks.\n"
+                f"2. Do NOT apologize or ask the user to provide the target code. You have all the source code you need in the prompt.\n"
+                f"3. Make sure to specify the file name clearly, e.g., 'FILE: path/to/file.py' right before the SEARCH/REPLACE block.\n"
+                f"4. You must find the code to change in the provided file contents and output a valid SEARCH/REPLACE block now."
+            )
+        elif error.kind == PatchErrorKind.NO_EFFECTIVE_CODE_CHANGE:
+            retry_instruction = (
+                f"CRITICAL ERROR: Your previous patch only modified docstrings, comments, or formatting, but made NO functional code logic changes!\n"
+                f"--> {error.message}\n\n"
+                f"Please do the following:\n"
+                f"1. You MUST modify the actual Python logic/statements/functions to fix the described bug.\n"
+                f"2. Changing docstrings or typos in comments will NOT solve the issue and will be rejected.\n"
+                f"Output a valid SEARCH/REPLACE block that implements functional code changes."
+            )
         else:
             retry_instruction = (
                 f"Your previous attempt encountered an issue:\n"
@@ -49,3 +68,4 @@ class SelfCorrector:
             )
 
         return original_user_prompt + header + retry_instruction
+
