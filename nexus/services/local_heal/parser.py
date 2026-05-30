@@ -97,26 +97,7 @@ class SearchReplaceParser:
                 new_content = re.sub(r'\b([a-zA-Z_0-9]+)\s+\1\b', r'\1', new_content)
 
         if new_content == orig_content:
-            # 5. 嘗試正則縮排/空格模糊匹配 (Docstring-stripped)
-            # 防範災難性回溯：如果 SEARCH 區塊含有大量正則關鍵字或長度過長（超過 150 字元），改用更安全的行定位匹配
-            docstring_pattern = re.compile(r'"{3}.*?"{3}', re.DOTALL)
-            s_no_doc = docstring_pattern.sub('', s_stripped)
-            r_no_doc = docstring_pattern.sub('', r_stripped)
-            
-            # 若字串長度適中，才進行 regex 寬鬆空白匹配
-            if len(s_no_doc.strip()) < 150:
-                escaped_s = re.escape(s_no_doc.strip())
-                # 使用限制重複的 \\s* 搭配避免回溯的寫法，防止極大/極複雜區塊回溯卡死
-                regex_pattern = re.sub(r'\\\s+', r'\\s{0,20}', escaped_s)
-                try:
-                    match_obj = re.search(regex_pattern, orig_content)
-                    if match_obj:
-                        verbatim_match = match_obj.group(0)
-                        new_content = orig_content.replace(verbatim_match, r_no_doc.strip(), 1)
-                        new_content = re.sub(r'([a-zA-Z_0-9]{3,})\1', r'\1', new_content)
-                        new_content = re.sub(r'\b([a-zA-Z_0-9]+)\s+\1\b', r'\1', new_content)
-                except Exception:
-                    pass
+            pass
 
 
         if new_content == orig_content:
