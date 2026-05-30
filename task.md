@@ -13,6 +13,49 @@
 - [x] **Dual-Engine Phase 2: Data Loop Hardening**
   - [x] **Phase A: 穿甲核心具現化 (Armor Core)**
   - [x] `[NEW]` 具現 `nexus/core/subagent_armor.py`
+  - [x] # local_heal 解題率提升 Task List
+Branch: `feature/local-heal-patch-rate-20260530`
+
+## P0 — 修復 closest_hint（corrector 傳錯片段）
+- [x] RED: `test_closest_snippet_finder_returns_actual_nearest` — 驗證舊 pipeline 傳了錯誤 the hint
+- [x] GREEN: `pipeline.py` 改用 `find_closest_snippet` 找真正最近的片段
+- [x] RED: `test_corrector_retry_prompt_contains_real_snippet` — 驗證 retry prompt 含真實片段
+- [x] GREEN: `corrector.py` 確保 `closest_match` 正確傳入
+- [x] COMMIT: `fix(local-heal): corrector closest_hint now uses difflib nearest snippet`
+
+## P1 — 放寬 ExactMatch / StrippedMatch 尾端條件
+- [x] RED: `test_exact_match_no_trailing_newline_still_works`
+- [x] GREEN: `matcher.py` 移除 `end_char_idx in ('\n', '\r')` 約束
+- [x] RED: `test_stripped_match_mid_file_no_newline`
+- [x] GREEN: 同上修改確保兩個測試通過
+- [x] REFAC: 確認其他策略不受影響
+- [x] COMMIT: `fix(matcher): relax ExactMatch/StrippedMatch line-end constraint`
+
+## P2 — 加入 DiffLibFuzzyMatcher (Level 3.5)
+- [x] RED: `test_difflib_fuzzy_matcher_whitespace_drift` — 搜尋有空格差異的 block
+- [x] GREEN: `matcher.py` 內新增 `DiffLibFuzzyMatcher` class，插入 NormalizedMatch 之前
+- [x] RED: `test_match_chain_uses_difflib_before_normalized`
+- [x] GREEN: `MatchChain` 更新策略順序
+- [x] COMMIT: `feat(matcher): add DiffLibFuzzyMatcher as Level 3.5 strategy`
+
+## P3 — 拆出 FunctionLocalizer（函數層定位）
+- [x] RED: `test_function_localizer_extracts_correct_function`
+- [x] GREEN: 新增 `nexus/services/local_heal/function_localizer.py`
+- [x] RED: `test_function_localizer_scores_functions_by_issue`
+- [x] GREEN: 實作 `score_functions` 與 `build_focused_context`
+- [x] RED: `test_pipeline_uses_function_level_context`
+- [x] GREEN: `pipeline.py` `_localize` 整合 `FunctionLocalizer`
+- [x] COMMIT: `feat(local-heal): add FunctionLocalizer for function-level context reduction`
+
+## P4 — 簡化 Prompt 格式（減少 token 壓力）
+- [x] RED: `test_parser_aider_format_parsed_correctly`
+- [x] GREEN: `parser.py` 新增 aider `<<<<<<< SEARCH` 格式解析
+- [x] GREEN: `pipeline.py` system prompt 簡化到 2 條規則，支援兩種格式
+- [x] COMMIT: `refactor(prompt): simplify system prompt and support aider format`
+
+## 驗收
+- [x] `uv run pytest tests/unit/test_match_chain.py tests/unit/test_local_heal_decoupled.py tests/unit/test_function_localizer.py -q`
+- [x] 重跑 10 題 SWE-bench，解題率 ≥ 6/10
   - [x] `[MODIFY]` 注入 `scripts/engine/nexus_cli.py` (`nexus:runner` 與 `_enforce_armor`)
   - [x] `[NEW]` 具現 `tests/governance/test_subagent_armor.py`
 

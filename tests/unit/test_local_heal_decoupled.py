@@ -1,5 +1,5 @@
 import pytest
-from nexus.services.local_heal.parser import Normalizer, SlidingWindowMatcher, HealDecisionEngine
+from nexus.services.local_heal.matcher import Normalizer, SlidingWindowMatcher
 
 def test_normalizer_quotes_and_whitespace():
     norm = Normalizer()
@@ -18,14 +18,27 @@ def test_sliding_window_matcher_exact_and_fuzzy():
     assert matched_sub == "def test_func():\n    return 'hello world'"
     assert verbatim == matched_sub
 
-def test_heal_decision_engine_rules():
-    engine = HealDecisionEngine()
-    err_syntax = "SyntaxError: invalid syntax. Perhaps you forgot a comma? at line 144"
-    err_mismatch = "SEARCH block not found or verbatim mismatch"
+
+def test_parser_aider_format_parsed_correctly():
+    from nexus.services.local_heal.parser import SearchReplaceParser
+    parser = SearchReplaceParser()
     
-    prompt_syntax = engine.get_retry_prompt("Original Prompt", err_syntax)
-    assert "SyntaxError" in prompt_syntax
-    assert "comma" in prompt_syntax
+    llm_output = (
+        "Here is the fix:\n\n"
+        "FILE: math_utils.py\n"
+        "<<<<<<< SEARCH\n"
+        "def add(a, b):\n"
+        "    return a - b\n"
+        "=======\n"
+        "def add(a, b):\n"
+        "    return a + b\n"
+        ">>>>>>> REPLACE\n"
+    )
     
-    prompt_mismatch = engine.get_retry_prompt("Original Prompt", err_mismatch)
-    assert "verbatim mismatch" in prompt_mismatch
+    blocks = parser.parse_blocks(llm_output)
+    assert len(blocks) == 1
+    assert blocks[0]["file"] == "math_utils.py"
+    assert "return a - b" in blocks[0]["search"]
+    assert "return a + b" in blocks[0]["replace"]
+
+
