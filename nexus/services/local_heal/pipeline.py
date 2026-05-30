@@ -37,10 +37,23 @@ class HealPipeline:
         self.budget_manager = ContextBudgetManager()
         self.ollama_generate = ollama_generate_fn
 
+    def _write_trace(self, ctx: HealContext, message: str) -> None:
+        from pathlib import Path
+        log_dir = Path("/Users/jameschen/Workspace/nexus/scratch")
+        log_dir.mkdir(parents=True, exist_ok=True)
+        log_file = log_dir / "llm_trace.log"
+        try:
+            with open(log_file, "a", encoding="utf-8") as f:
+                f.write(f"\n[{ctx.instance_id}] {message}\n")
+        except Exception:
+            pass
+
     def run(self, ctx: HealContext) -> HealContext:
+        self._write_trace(ctx, f"=== PIPELINE START {ctx.instance_id} ===")
         # Stage 1: 定位相關檔案
         ctx = self._localize(ctx)
         if not ctx.localized_files:
+            self._write_trace(ctx, f"=== PIPELINE END {ctx.instance_id} localized_files=empty ===")
             return ctx
 
         # 初始化 System Prompt 與原始 User Prompt
@@ -169,24 +182,28 @@ class HealPipeline:
                 latest_err = ctx.errors[-1]
                 ctx = self._handle_retry(ctx, latest_err)
 
-
+        self._write_trace(ctx, f"=== PIPELINE END {ctx.instance_id} patch_len={len(ctx.final_patch)} attempt={ctx.attempt} ===")
         return ctx
 
     def _localize(self, ctx: HealContext) -> HealContext:
-        ranked = self.localizer.rank_files(ctx.problem_statement, ctx.repo_dir, max_files=3)
-        raw_files = self.localizer.extract_relevant_code(ranked)
-        
-        # 整合 AST FunctionLocalizer 對大檔案進行緊湊裁剪
-        from nexus.services.local_heal.function_localizer import FunctionLocalizer
-        fn_localizer = FunctionLocalizer()
-        
-        reduced_files = []
-        for path, content in raw_files:
-            focused = fn_localizer.build_focused_context(path, content, ctx.problem_statement)
-            reduced_files.append((path, focused))
+        try:
+            ranked = self.localizer.rank_files(ctx.problem_statement, ctx.repo_dir, max_files=3)
+            raw_files = self.localizer.extract_relevant_code(ranked)
             
-        # 整合 Context Budget Manager 進行硬性預算限制與自適應裁剪
-        ctx.localized_files = self.budget_manager.enforce_hard_limit(reduced_files)
+            # 整合 AST FunctionLocalizer 對大檔案進行緊湊裁剪
+            from nexus.services.local_heal.function_localizer import FunctionLocalizer
+            fn_localizer = FunctionLocalizer()
+            
+            reduced_files = []
+            for path, content in raw_files:
+                focused = fn_localizer.build_focused_context(path, content, ctx.problem_statement)
+                reduced_files.append((path, focused))
+                
+            # 整合 Context Budget Manager 進行硬性預算限制與自適應裁剪
+            ctx.localized_files = self.budget_manager.enforce_hard_limit(reduced_files)
+        except Exception as e:
+            self._write_trace(ctx, f"LOCALIZE_EXCEPTION: {str(e)}")
+            ctx.localized_files = []
         return ctx
 
     def _generate_patch(self, ctx: HealContext) -> str:
