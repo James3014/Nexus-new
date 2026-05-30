@@ -49,41 +49,7 @@ def ollama_generate(system_prompt: str, user_prompt: str, timeout: int = 1200) -
         data = json.loads(resp.read())
         return data.get("response", "")
 
-# Decoupled Localizer Heuristics (no LanceDB dependency for offline testing)
-class Localizer:
-    def locate(self, issue_description: str, repo_dir: Path, max_files: int = 2) -> List[Tuple[str, str]]:
-        import re
-        tokens = set(re.findall(r'\b([a-z][a-z_0-9]{3,})\b', issue_description.lower()))
-        tokens.update(["ndarray", "mixin", "table", "structured", "column"])
-        
-        scored = []
-        for pyfile in repo_dir.rglob("*.py"):
-            rel = pyfile.relative_to(repo_dir)
-            rel_str = str(rel).lower()
-            if any(p in rel_str for p in ("test", "__pycache__", ".tox", "build", "dist")):
-                continue
-            
-            score = 0
-            if "table.py" in pyfile.name.lower() and "table" in rel_str:
-                score += 45
-            if "ndarray" in pyfile.name.lower():
-                score += 25
-            
-            score += sum(5 if tok in pyfile.name.lower() else 1 for tok in tokens if tok in rel_str)
-            if score > 0:
-                scored.append((score, pyfile, rel))
-        
-        scored.sort(key=lambda x: -x[0])
-        result = []
-        for _, pyfile, rel in scored[:max_files]:
-            try:
-                content = pyfile.read_text(encoding="utf-8", errors="replace")
-                if len(content) > 3000:
-                    content = content[:3000] + "\n... [truncated]"
-                result.append((str(rel), content))
-            except Exception:
-                pass
-        return result
+from nexus.services.local_heal.localizer import Localizer
 
 def main():
     parser = argparse.ArgumentParser()

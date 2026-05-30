@@ -1,22 +1,58 @@
 import pytest
+import tempfile
+from pathlib import Path
 from unittest.mock import MagicMock
 from nexus.services.local_heal.localizer import Localizer
 
-def test_localizer_returns_relevant_files():
-    # 建立 mock 的 repository 或 LanceDB 查詢 seam
-    mock_repo = MagicMock()
-    mock_repo.search_fts.return_value = [
-        {"source_path": "nexus/services/gateway.py", "record_id": "r1"},
-        {"source_path": "nexus/services/predictor.py", "record_id": "r2"}
-    ]
-    
-    localizer = Localizer(repository=mock_repo)
-    results = localizer.locate(issue_description="gateway high latency issue")
-    
-    # 驗證返回結果是否正確解耦為檔案清單與分數資訊
-    assert len(results) == 2
-    assert results[0]["file_path"] == "nexus/services/gateway.py"
-    assert results[1]["file_path"] == "nexus/services/predictor.py"
+def test_hybrid_localizer_with_bm25_and_ast():
+    with tempfile.TemporaryDirectory() as tmp_dir:
+        tmp_path = Path(tmp_dir)
+        
+        # 1. 建立一些測試 Python 檔案
+        file_a = tmp_path / "gateway.py"
+        file_a.write_text(
+            "class GatewayService:\n"
+            "    def handle_request(self):\n"
+            "        pass\n", 
+            encoding="utf-8"
+        )
+        
+        file_b = tmp_path / "predictor.py"
+        file_b.write_text(
+            "class LatencyPredictor:\n"
+            "    def predict_latency(self):\n"
+            "        pass\n", 
+            encoding="utf-8"
+        )
+        
+        file_c = tmp_path / "unrelated.py"
+        file_c.write_text(
+            "class UnrelatedWorker:\n"
+            "    def execute(self):\n"
+            "        pass\n", 
+            encoding="utf-8"
+        )
+
+        localizer = Localizer()
+        
+        # 2. 測試 BM25 檢索
+        results = localizer.locate(
+            issue_description="predictor class latency issue in prediction", 
+            repo_dir=tmp_path, 
+            max_files=1
+        )
+        
+        assert len(results) == 1
+        assert results[0][0] == "predictor.py"
+        
+        # 3. 測試 AST Boost
+        results_ast = localizer.locate(
+            issue_description="GatewayService handle_request is broken", 
+            repo_dir=tmp_path, 
+            max_files=1
+        )
+        assert len(results_ast) == 1
+        assert results_ast[0][0] == "gateway.py"
 
 def test_sandbox_executor_runs_test_and_summarizes():
     from nexus.services.local_heal.sandbox import SandboxExecutor
@@ -60,5 +96,3 @@ def test_patch_evaluator_decides_rollback_on_failed_attempts():
     # 第二個 patch：0 個錯誤 (改善)
     action2 = evaluator.evaluate_attempt(failed_test_count=0, patch_hash="h2")
     assert action2["action"] == "accept"
-
-
