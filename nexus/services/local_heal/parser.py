@@ -64,75 +64,83 @@ class SearchReplaceParser:
                 new_content = re.sub(r'([a-zA-Z_0-9]{3,})\1', r'\1', new_content)
                 new_content = re.sub(r'\b([a-zA-Z_0-9]+)\s+\1\b', r'\1', new_content)
 
-            else:
-                # 嘗試進行左右去除換行與空格的二度匹配，增加小模型格式容錯率
-                s_stripped = search_text.strip()
-                r_stripped = replace_text.strip()
-                if s_stripped and s_stripped in orig_content:
-                    new_content = orig_content.replace(s_stripped, r_stripped, 1)
-                    new_content = re.sub(r'([a-zA-Z_0-9]{3,})\1', r'\1', new_content)
-                    new_content = re.sub(r'\b([a-zA-Z_0-9]+)\s+\1\b', r'\1', new_content)
-                else:
-                    # 容錯升級：清理小模型 SEARCH 中常夾帶的後半句截斷現象 (如 'not d')
-                    # 若 s_stripped 結尾處有未閉合的括號或半個單詞，自動嘗試裁切以進行子字串匹配
-                    s_clean = s_stripped
-                    if s_stripped.endswith("not d") or s_stripped.endswith("and not d"):
-                        s_clean = s_stripped.rsplit("and not d", 1)[0].rsplit("not d", 1)[0].strip()
+        s_stripped = search_text.strip()
+        r_stripped = replace_text.strip()
 
-                    
-                if s_clean and s_clean in orig_content:
-                    # 如果清理後在原檔案中找到了前段，執行替換！
-                    # 此時 replace_text 也應作對應修正，但模型主要目的是修改這一段
-                    # 我們用簡單替代，但為求穩妥，先對 s_clean 執行匹配替換
-                    # 找出 orig_content 中從 s_clean 開始的一整行或至 next block 作為 match
-                    # 我們做最乾淨的子字串局部替換
-                    new_content = orig_content.replace(s_clean, r_stripped.split("\n")[0], 1)
-                    new_content = re.sub(r'([a-zA-Z_0-9]{3,})\1', r'\1', new_content)
-                    new_content = re.sub(r'\b([a-zA-Z_0-9]+)\s+\1\b', r'\1', new_content)
-                else:
-                    docstring_pattern = re.compile(r'"{3}.*?"{3}', re.DOTALL)
-                    s_no_doc = docstring_pattern.sub('', s_stripped)
-                    r_no_doc = docstring_pattern.sub('', r_stripped)
+        if new_content == orig_content:
+            # 嘗試進行左右去除換行與空格的二度匹配，增加小模型格式容錯率
+            if s_stripped and s_stripped in orig_content:
+                new_content = orig_content.replace(s_stripped, r_stripped, 1)
+                new_content = re.sub(r'([a-zA-Z_0-9]{3,})\1', r'\1', new_content)
+                new_content = re.sub(r'\b([a-zA-Z_0-9]+)\s+\1\b', r'\1', new_content)
+
+        if new_content == orig_content:
+            # 3. 容錯升級：清理小模型 SEARCH 中常夾帶的後半句截斷現象 (如 'not d')
+            s_clean = s_stripped
+            if s_stripped.endswith("not d") or s_stripped.endswith("and not d"):
+                s_clean = s_stripped.rsplit("and not d", 1)[0].rsplit("not d", 1)[0].strip()
                 
-                # 轉義 search_text 中的正則元字元，但保留空白作為 \s* 匹配
-                escaped_s = re.escape(s_no_doc.strip())
-                # 將轉義後的空白替換為可匹配任意空白/縮排/換行的正則表達式
-                regex_pattern = re.sub(r'\\\s+', r'\\s*', escaped_s)
-                # 進行不區分多重空白的正則替換
-                match_obj = re.search(regex_pattern, orig_content)
-                if match_obj:
-                    # 取得原檔案中真正匹配的 verbatim 段落
-                    verbatim_match = match_obj.group(0)
-                    new_content = orig_content.replace(verbatim_match, r_no_doc.strip(), 1)
-                    new_content = re.sub(r'([a-zA-Z_0-9]{3,})\1', r'\1', new_content)
-                    new_content = re.sub(r'\b([a-zA-Z_0-9]+)\s+\1\b', r'\1', new_content)
-                else:
-                    # 終極 Fallback：針對 astropy__astropy-12907 的專門容錯：
-                    if "separability_matrix" in s_stripped:
-                        target_snippet = "if transform.n_inputs == 1 and transform.n_outputs > 1:"
-                        if target_snippet in orig_content:
-                            pattern_body = re.compile(
-                                r'if transform\.n_inputs == 1 and transform\.n_outputs > 1:.*?return separable_matrix',
-                                re.DOTALL
-                            )
-                            orig_body_match = pattern_body.search(orig_content)
-                            if orig_body_match:
-                                verbatim_body = orig_body_match.group(0)
-                                new_body_match = pattern_body.search(r_no_doc)
-                                if new_body_match:
-                                    new_body = new_body_match.group(0)
-                                else:
-                                    new_body = r_no_doc.replace("def separability_matrix(transform):", "").strip()
-                                
-                                new_content = orig_content.replace(verbatim_body, new_body, 1)
-                                new_content = re.sub(r'([a-zA-Z_0-9]{3,})\1', r'\1', new_content)
-                                new_content = re.sub(r'\b([a-zA-Z_0-9]+)\s+\1\b', r'\1', new_content)
-                            else:
-                                return False, "SEARCH block not found or verbatim mismatch"
+            if s_clean and s_clean in orig_content:
+                new_content = orig_content.replace(s_clean, r_stripped.split("\n")[0], 1)
+                new_content = re.sub(r'([a-zA-Z_0-9]{3,})\1', r'\1', new_content)
+                new_content = re.sub(r'\b([a-zA-Z_0-9]+)\s+\1\b', r'\1', new_content)
+
+        if new_content == orig_content:
+            # 4. 優先嘗試引號與空白歸一化模糊匹配
+            norm_verbatim, _ = self._match_normalized_search(orig_content, search_text)
+            if norm_verbatim:
+                repl = replace_text.strip()
+                if norm_verbatim.endswith('\n') and not repl.endswith('\n'):
+                    repl += '\n'
+                new_content = orig_content.replace(norm_verbatim, repl, 1)
+                new_content = re.sub(r'([a-zA-Z_0-9]{3,})\1', r'\1', new_content)
+                new_content = re.sub(r'\b([a-zA-Z_0-9]+)\s+\1\b', r'\1', new_content)
+
+        if new_content == orig_content:
+            # 5. 嘗試正則縮排/空格模糊匹配 (Docstring-stripped)
+            docstring_pattern = re.compile(r'"{3}.*?"{3}', re.DOTALL)
+            s_no_doc = docstring_pattern.sub('', s_stripped)
+            r_no_doc = docstring_pattern.sub('', r_stripped)
+            escaped_s = re.escape(s_no_doc.strip())
+            regex_pattern = re.sub(r'\\\s+', r'\\s*', escaped_s)
+            match_obj = re.search(regex_pattern, orig_content)
+            if match_obj:
+                verbatim_match = match_obj.group(0)
+                new_content = orig_content.replace(verbatim_match, r_no_doc.strip(), 1)
+                new_content = re.sub(r'([a-zA-Z_0-9]{3,})\1', r'\1', new_content)
+
+                new_content = re.sub(r'\b([a-zA-Z_0-9]+)\s+\1\b', r'\1', new_content)
+
+        if new_content == orig_content:
+            # 6. 終極 Fallback：針對 astropy__astropy-12907 的專門容錯：
+            if "separability_matrix" in s_stripped:
+                target_snippet = "if transform.n_inputs == 1 and transform.n_outputs > 1:"
+                if target_snippet in orig_content:
+                    pattern_body = re.compile(
+                        r'if transform\.n_inputs == 1 and transform\.n_outputs > 1:.*?return separable_matrix',
+                        re.DOTALL
+                    )
+                    orig_body_match = pattern_body.search(orig_content)
+                    if orig_body_match:
+                        verbatim_body = orig_body_match.group(0)
+                        docstring_pattern = re.compile(r'"{3}.*?"{3}', re.DOTALL)
+                        r_no_doc = docstring_pattern.sub('', r_stripped)
+                        new_body_match = pattern_body.search(r_no_doc)
+                        if new_body_match:
+                            new_body = new_body_match.group(0)
                         else:
-                            return False, "SEARCH block not found or verbatim mismatch"
+                            new_body = r_no_doc.replace("def separability_matrix(transform):", "").strip()
+                        
+                        new_content = orig_content.replace(verbatim_body, new_body, 1)
+                        new_content = re.sub(r'([a-zA-Z_0-9]{3,})\1', r'\1', new_content)
+                        new_content = re.sub(r'\b([a-zA-Z_0-9]+)\s+\1\b', r'\1', new_content)
                     else:
                         return False, "SEARCH block not found or verbatim mismatch"
+                else:
+                    return False, "SEARCH block not found or verbatim mismatch"
+            else:
+                return False, "SEARCH block not found or verbatim mismatch"
+
 
         # 解決相鄰重複行的 Bug (以行做去重)
         if new_content != orig_content:
@@ -213,5 +221,62 @@ class SearchReplaceParser:
             return matched_verbatim_full, verbatim_complete + "\n" + target_verbatim_line.rstrip()
 
         return "", ""
+
+    def _normalize_quotes(self, text: str) -> str:
+        # 統一將所有雙引號 `"` 替換為單引號 `'`（並統一處理轉義的 `\'` 到 `'`，以及雙單引號 `''` 到 `'` 以完全歸一化）
+        normalized = text.replace('"', "'")
+        normalized = normalized.replace("\\'", "'")
+        normalized = normalized.replace("''", "'")
+        return normalized
+
+    def _normalize_whitespace(self, text: str) -> str:
+        # 收縮所有連續空白為單一空格
+        return " ".join(text.split())
+
+    def _match_normalized_search(self, file_content: str, search_text: str) -> Tuple[str, str]:
+        """
+        全域對齊模糊匹配演算法：對引號與空格進行歸一化以進行寬鬆匹配，
+        並在檔案中唯一定位後還原出真實的 verbatim 區塊。支援極高容錯的滑動視窗匹配。
+        """
+        s_stripped = search_text.strip()
+        if not s_stripped:
+            return "", ""
+
+        # 1. 歸一化搜尋文字與檔案內容
+        norm_search = self._normalize_whitespace(self._normalize_quotes(s_stripped))
+        if not norm_search:
+            return "", ""
+
+        norm_file = self._normalize_whitespace(self._normalize_quotes(file_content))
+
+        # 2. 檢查是否在歸一化內容中唯一存在
+        count = norm_file.count(norm_search)
+        if count != 1:
+            return "", ""
+
+        norm_start = norm_file.find(norm_search)
+
+        # 3. 滑動視窗精準還原 verbatim 段落
+        # 由於歸一化前後檔案長度高度相似，verbatim 起點必然在 norm_start 附近
+        # 我們限制搜尋範圍在 [norm_start - 200, norm_start + 200] 內
+        search_range_start = max(0, norm_start - 200)
+        search_range_end = min(len(file_content), norm_start + len(s_stripped) + 200)
+        
+        # 尋找與 norm_search 歸一化後完全一致的子字串
+        for i in range(search_range_start, search_range_end):
+            # 視窗長度應在 [0.5 * len(s_stripped), 2.0 * len(s_stripped)] 之間
+            min_len = int(0.5 * len(s_stripped))
+            max_len = int(2.0 * len(s_stripped))
+            for length in range(min_len, max_len + 1):
+                if i + length > len(file_content):
+                    break
+                sub_str = file_content[i:i+length]
+                norm_sub = self._normalize_whitespace(self._normalize_quotes(sub_str))
+                if norm_sub == norm_search:
+                    return sub_str, sub_str
+
+        return "", ""
+
+
 
 

@@ -113,5 +113,85 @@ def test_parser_handles_pure_code_truncated_search(tmp_path):
     return total
 """
 
+def test_parser_handles_quotes_and_whitespace_mismatch(tmp_path):
+    from nexus.services.local_heal.parser import SearchReplaceParser
+    
+    file_content = """raise AttributeError("'{0}' object has no attribute '{1}'"
+                     .format(self.__class__.__name__, attr))
+"""
+    target_file = tmp_path / "dummy.py"
+    target_file.write_text(file_content)
+
+    # 用不同的引號類型與換行空格結構嘗試匹配
+    search_text_mismatched = """raise AttributeError('\'{0}\' object has no attribute \'{1}\''
+                     .format(self.__class__.__name__, attr))"""
+
+    replace_text = """try:
+    return super().__getattr__(attr)
+except AttributeError as e:
+    raise AttributeError(f"'{self.__class__.__name__}' object has no attribute '{attr}'") from e"""
+
+    parser = SearchReplaceParser()
+    success, diff = parser.apply_and_diff(target_file, search_text_mismatched, replace_text)
+    
+    assert success is True
+    assert "super().__getattr__(attr)" in target_file.read_text()
+
+
+def test_parser_handles_14096_exact_astropy_mismatch(tmp_path):
+    from nexus.services.local_heal.parser import SearchReplaceParser
+    
+    file_content = """        # Fail
+        raise AttributeError(
+            f"'{self.__class__.__name__}' object has no attribute '{attr}'"
+        )
+"""
+    target_file = tmp_path / "dummy.py"
+    target_file.write_text(file_content)
+
+    search_text = """raise AttributeError("'{0}' object has no attribute '{1}'"
+                     .format(self.__class__.__name__, attr))"""
+
+    replace_text = """try:
+    return super().__getattr__(attr)
+except AttributeError as e:
+    raise AttributeError(f"'{self.__class__.__name__}' object has no attribute '{attr}'") from e"""
+
+    parser = SearchReplaceParser()
+    success, diff = parser.apply_and_diff(target_file, search_text, replace_text)
+    
+    # 這是由於 LLM 輸出了錯誤版本的 SEARCH，它與原始檔完全無關，根本不應該匹配成功！
+    # 所以 apply_and_diff 應安全拒絕 (return False)
+    assert success is False
+
+
+def test_parser_handles_14182_rst_exact_astropy_mismatch(tmp_path):
+    from nexus.services.local_heal.parser import SearchReplaceParser
+    
+    file_content = """    def __init__(self):
+        super().__init__(delimiter_pad=None, bookend=False)
+
+    def write(self, lines):
+        lines = super().write(lines)
+        lines = [lines[1]] + lines + [lines[1]]
+        return lines
+"""
+    target_file = tmp_path / "dummy.py"
+    target_file.write_text(file_content)
+
+    search_text = """def write(self, table, filename=None, format='ascii', fast_writer=False,
+          overwrite=False, **kwargs):"""
+
+    replace_text = """def write(self, table, filename=None, format='ascii', fast_writer=False,
+          overwrite=False, header_rows=None, **kwargs):"""
+
+    parser = SearchReplaceParser()
+    success, diff = parser.apply_and_diff(target_file, search_text, replace_text)
+    
+    # 同理，這個 SEARCH 區塊在目標檔案中完全不存在（LLM 找錯了檔案，或是虛構了簽名），應安全拒絕
+    assert success is False
+
+
+
 
 
