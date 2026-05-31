@@ -11,29 +11,41 @@ class PatchResult:
     new_content: str
     diff: str
     error_message: Optional[str] = None
+    
+    # --- 審計產物 (Audit Artifacts) ---
+    is_auto_corrected: bool = False
+    similarity: float = 1.0
+    strategy_used: str = "Exact"
+    resolved_span: Tuple[int, int] = (0, 0) # (start_char, end_char)
 
 class Patcher:
-    """單一功能：負責將 SEARCH 替換為 REPLACE，產出 Unified Diff，不直接寫入實體檔案 (SRP)"""
+    """🛠️ Nexus Patcher: 負責將 SEARCH 替換為 REPLACE，支援有邊界的精度補償 (Bounded Compensation)"""
 
-    def __init__(self):
+    def __init__(self, fuzzy_threshold: float = 0.85):
         self.match_chain = MatchChain()
-
-    def _dedup_tokens(self, content: str) -> str:
-        """解決因重複生成或引號導致的相鄰 token 無縫重複 Bug (DRY 優化)"""
-        content = re.sub(r'\b([a-zA-Z_0-9]+)\s+\1\b', r'\1', content)
-        return content
+        self.fuzzy_threshold = fuzzy_threshold
 
     def apply_patch(self, file_content: str, search_text: str, replace_text: str) -> PatchResult:
+        if search_text == "WHOLE_FILE":
+            new_content = replace_text
+            orig_lines = file_content.splitlines(keepends=True)
+            new_lines = new_content.splitlines(keepends=True)
+            diff_lines = list(difflib.unified_diff(orig_lines, new_lines, fromfile="a/file", tofile="b/file", lineterm='\n'))
+            return PatchResult(success=True, new_content=new_content, diff="".join(diff_lines), strategy_used="FullFileReplace")
+
         orig_content = file_content
+        search_stripped = search_text.strip()
         
-        # 使用 MatchChain 進行分層責任鏈匹配
+        # 1. 執行標準責任鏈匹配
         match_res = self.match_chain.find_match(orig_content, search_text, replace_text)
+        
         if match_res is None:
             return PatchResult(
                 success=False,
                 new_content=orig_content,
                 diff="",
-                error_message="SEARCH block not found or verbatim mismatch"
+                error_message="SEARCH block not found or verbatim mismatch",
+                strategy_used="None"
             )
 
         verbatim_match = match_res.verbatim_text
@@ -45,37 +57,29 @@ class Patcher:
         elif not verbatim_match.endswith('\n') and repl.endswith('\n'):
             repl = repl.rstrip('\n')
             
-        # 若是 truncated 且替換程式包含多餘換行對齊，確保不殘存 duplicate suffix
-        new_content = orig_content.replace(verbatim_match, repl, 1)
-        # 移除過度積極的 _dedup_tokens，以防止正常的重複 token 或 truncated 部分語意受損，
-        # 僅用在非常明確的 duplicate-word 特徵上
-        new_content = self._dedup_tokens(new_content)
-
-        # 解決相鄰重複行的 Bug (以行做去重)
-        lines = new_content.splitlines(keepends=True)
-        deduped_lines = []
-        for line in lines:
-            if deduped_lines and line.strip() and line.strip() == deduped_lines[-1].strip():
-                stripped_line = line.strip()
-                if stripped_line in ("pass", "else:", "return", "continue", "break"):
-                    deduped_lines.append(line)
-                    continue
-                continue
-            deduped_lines.append(line)
-        new_content = "".join(deduped_lines)
+        # 執行替換
+        start_idx = orig_content.find(verbatim_match)
+        if start_idx == -1: 
+             return PatchResult(success=False, new_content=orig_content, diff="", error_message="Internal index error")
+             
+        end_idx = start_idx + len(verbatim_match)
+        new_content = orig_content[:start_idx] + repl + orig_content[end_idx:]
 
         # 產生 Unified Diff
         orig_lines = orig_content.splitlines(keepends=True)
         new_lines = new_content.splitlines(keepends=True)
-        diff_lines = list(difflib.unified_diff(
-            orig_lines, new_lines,
-            fromfile="a/file",
-            tofile="b/file",
-            lineterm='\n'
-        ))
+        diff_lines = list(difflib.unified_diff(orig_lines, new_lines, fromfile="a/file", tofile="b/file", lineterm='\n'))
+        
+        # 只要找到了匹配，但匹配的原文與模型輸入不一致，即為「自動校正」
+        is_auto = (verbatim_match.strip() != search_stripped)
+        sim = difflib.SequenceMatcher(None, search_stripped, verbatim_match.strip()).ratio()
         
         return PatchResult(
             success=True,
             new_content=new_content,
-            diff="".join(diff_lines)
+            diff="".join(diff_lines),
+            is_auto_corrected=is_auto,
+            similarity=sim,
+            strategy_used=match_res.strategy_name,
+            resolved_span=(start_idx, end_idx)
         )
