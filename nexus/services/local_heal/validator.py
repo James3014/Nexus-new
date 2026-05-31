@@ -1,10 +1,9 @@
 import ast
+import re
 from typing import Tuple
 
 def validate_syntax(code: str) -> Tuple[bool, str]:
-    """
-    在記憶體中利用 AST 靜態編譯代碼，驗證其是否包含語法錯誤。
-    """
+    """在記憶體中利用 AST 靜態編譯代碼，驗證其是否包含語法錯誤。"""
     try:
         ast.parse(code)
         return True, ""
@@ -13,11 +12,21 @@ def validate_syntax(code: str) -> Tuple[bool, str]:
     except Exception as e:
         return False, f"SyntaxError: {str(e)}"
 
+def validate_name_sanity(code: str) -> Tuple[bool, str]:
+    """
+    檢查代碼中是否存在常見的 LLM 佔位符或拼寫錯誤 (Spirit Alignment)。
+    """
+    slop_patterns = [
+        r'placeholder', r'your_code_here', r'modify_this',
+        r'\.\.\.', r'FIXME', r'TODO: implementation'
+    ]
+    for pattern in slop_patterns:
+        if re.search(pattern, code, re.IGNORECASE):
+            return False, f"Name sanity failed: Found disallowed placeholder pattern '{pattern}'"
+    return True, ""
 
 def _strip_docstrings_and_comments(node):
-    """
-    遞迴移除 AST 節點中的 docstrings/expression strings 還有字串常量。
-    """
+    """遞迴移除 AST 節點中的 docstrings。"""
     if isinstance(node, (ast.FunctionDef, ast.ClassDef, ast.Module)):
         if (node.body and 
             isinstance(node.body[0], ast.Expr) and 
@@ -27,31 +36,22 @@ def _strip_docstrings_and_comments(node):
             
     for child in ast.iter_child_nodes(node):
         _strip_docstrings_and_comments(child)
-        
     return node
 
-
 def _get_logical_ast_dump(code: str) -> str:
-    """
-    取得代碼移除 docstring 後的 AST dump 字串。
-    """
+    """取得代碼移除 docstring 後的 AST dump 字串。"""
     try:
         tree = ast.parse(code)
         tree = _strip_docstrings_and_comments(tree)
-        # include_attributes=False 能防止行號/列號等排版變動影響比對
         return ast.dump(tree, include_attributes=False)
     except Exception:
         return ""
 
-
 def validate_effective_change(old_code: str, new_code: str) -> Tuple[bool, str]:
-    """
-    判斷新代碼相較於舊代碼是否包含實質邏輯代碼變更。
-    """
+    """判斷新代碼相較於舊代碼是否包含實質邏輯代碼變更。"""
     old_dump = _get_logical_ast_dump(old_code)
     new_dump = _get_logical_ast_dump(new_code)
     
     if old_dump == new_dump:
-        return False, "The patch only modified docstrings, comments, formatting, or comments. No functional code logic was changed."
+        return False, "The patch only modified docstrings, comments, or formatting. No functional code logic was changed."
     return True, ""
-
