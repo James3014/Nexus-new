@@ -154,6 +154,30 @@ def test_capability_planner_selects_semantic_research_runtime_capabilities():
     } <= selected
 
 
+def test_capability_planner_research_isolation_snapshot_stays_minimal():
+    plan = CapabilityPlanner().plan(
+        task_desc="Investigate cross-module timeout behavior with unknown ownership.",
+        task_type="bugfix",
+        route={
+            "should_research": True,
+            "route_features": {
+                "risk_score": 55,
+                "is_cross_module_task": True,
+                "adjusted_root_cause_confidence": 0.62,
+            },
+        },
+        codeintel={"impact_report_present": True},
+    ).to_dict()
+
+    policy = plan["signal_snapshot"]["research_isolation_policy"]
+    assert policy == {
+        "level": "L1",
+        "goal_visibility": "masked",
+        "output_mode": "facts_only",
+        "confirmation_required": False,
+    }
+
+
 def test_capability_planner_downgrades_optional_cost_but_keeps_gates():
     plan = CapabilityPlanner().plan(
         task_desc="Fix long cross-module timeout",
@@ -2685,4 +2709,3 @@ def test_lane_policy_defaults_resolution_snapshot(tmp_path):
         route_features={"task_type": "public_docs_code_sync"}
     )
     assert "supervised_bare_first" not in controls_override or controls_override.get("supervised_bare_first") is False
-

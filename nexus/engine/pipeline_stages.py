@@ -10,6 +10,10 @@ from nexus.events.contracts import NexusEvent
 from nexus.engine.direct_mode import analyze_task_spec
 from nexus.research.research_pack import build_research_pack
 from nexus.research.learn.policy_runtime import decide_research_engine, load_phase_policy
+from nexus.research.contamination_guard import evaluate_research_contamination
+from nexus.research.isolation_policy import decide_research_isolation
+from nexus.research.masked_brief import brief_to_research_task, build_masked_research_brief
+from nexus.research.research_facts import build_isolation_receipt, build_research_facts
 
 logger = logging.getLogger(__name__)
 
@@ -335,14 +339,79 @@ class PipelineStagesMixin:
 
     def _run_standard_phase(self, ctx: PipelineContextProtocol, res_decision: Any) -> Dict[str, Any]:
         from nexus.research.research_pack import ResearchContext
-        legacy_pack = ctx.researcher.run(ctx.state, {"task": ctx.task_desc})
+        isolation = self._resolve_research_isolation(ctx)
+        research_task = ctx.task_desc
+        masked_brief = None
+        if isolation.goal_visibility.value in {"masked", "none"}:
+            masked_brief = build_masked_research_brief(
+                task_desc=ctx.task_desc,
+                metadata={**(ctx.state.metadata or {}), "task_id": ctx.task_id},
+                decision=isolation,
+            )
+            research_task = brief_to_research_task(masked_brief)
+            ctx.state.metadata["masked_research_brief"] = masked_brief.to_dict()
+
+        legacy_pack = ctx.researcher.run(
+            ctx.state,
+            {"task": research_task, "masked_research_brief": masked_brief.to_dict() if masked_brief else None},
+        )
         res_ctx = ResearchContext(
-            task=ctx.task_desc, mode="external", source=str(legacy_pack.get("source", "INTERNAL")),
+            task=research_task, mode="external", source=str(legacy_pack.get("source", "INTERNAL")),
             reason=res_decision.reason, status=str(legacy_pack.get("status", "FAIL")),
             findings=list(legacy_pack.get("findings", []) or []),
             raw=legacy_pack, rounds=res_decision.rounds, time_sec=0.0
         )
-        return build_research_pack(res_ctx)
+        research_pack = build_research_pack(res_ctx)
+        if isolation.output_mode.value != "facts_only":
+            ctx.state.metadata["research_isolation_decision"] = isolation.to_dict()
+            return research_pack
+
+        visibility = {
+            "research_masked": True,
+            "isolation_level": isolation.level.value,
+            "goal_visibility": isolation.goal_visibility.value,
+            "research_agent_saw_user_goal": False,
+            "forbidden_fields_removed": isolation.forbidden_fields,
+        }
+        facts = build_research_facts(research_pack=research_pack, visibility_receipt=visibility)
+        guard = evaluate_research_contamination(facts.to_dict())
+        artifact_refs = (f"research:facts:{ctx.task_id}",)
+        receipt = build_isolation_receipt(
+            decision=isolation,
+            guard_result=guard,
+            artifact_schema=facts.schema_version,
+            artifact_refs=artifact_refs,
+        )
+        payload = facts.to_dict()
+        payload["research_isolation_receipt"] = receipt.to_dict()
+        payload["research_contamination_guard"] = guard.to_dict()
+        payload["research_refs"] = list(artifact_refs)
+        payload["research_gate_passed"] = guard.passed
+        payload["research_used"] = True
+        ctx.state.metadata["research_isolation_decision"] = isolation.to_dict()
+        ctx.state.metadata["research_isolation_receipt"] = receipt.to_dict()
+        return payload
+
+    def _resolve_research_isolation(self, ctx: PipelineContextProtocol):
+        metadata = ctx.state.metadata or {}
+        route_features = metadata.get("route_features", {})
+        route_features = route_features if isinstance(route_features, dict) else {}
+        route_cost_policy = metadata.get("route_cost_policy", {})
+        route_cost_policy = route_cost_policy if isinstance(route_cost_policy, dict) else {}
+        codeintel = metadata.get("codeintel", {})
+        codeintel = codeintel if isinstance(codeintel, dict) else {}
+        expected = metadata.get("route_oracle_expected_capabilities", ()) or ()
+        if not isinstance(expected, (list, tuple, set)):
+            expected = ()
+        return decide_research_isolation(
+            task_desc=ctx.task_desc,
+            task_type=ctx.task_type,
+            route_features=route_features,
+            codeintel=codeintel,
+            route_cost_policy=route_cost_policy,
+            route_oracle_expected_capabilities=tuple(str(item) for item in expected),
+            metadata=metadata,
+        )
 
     def _persist_research_pack(self, ctx: PipelineContextProtocol, decision_id: str):
         import json

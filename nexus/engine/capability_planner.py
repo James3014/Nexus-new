@@ -19,6 +19,7 @@ from nexus.engine.planner.skill_mount_evidence import (
 )
 from nexus.engine.route_signal_adapter import build_replan_trace, build_signal_snapshot
 from nexus.engine.capability_signals import build_capability_constraints, build_capability_signals
+from nexus.research.isolation_policy import decide_research_isolation
 
 PENDING_EXECUTOR_CAPABILITIES: set[str] = set()
 
@@ -783,7 +784,16 @@ class CapabilityPlanner:
             selected_capabilities=[name for name, state in states.items() if state in {"required", "conditional"}],
         )
         semantic_failure_sensor = build_semantic_failure_snapshot(route=route, task_desc=task_desc)
-
+        route_features = route.get("route_features", {}) if isinstance(route.get("route_features", {}), dict) else {}
+        research_isolation = decide_research_isolation(
+            task_desc=task_desc,
+            task_type=task_type,
+            route_features=route_features,
+            codeintel=codeintel,
+            route_cost_policy=route_cost_policy,
+            route_oracle_expected_capabilities=getattr(signals, "route_oracle_expected_capabilities", ()) or (),
+            metadata={},
+        )
         leverage_roles = ssd_route_map.get("leverage_roles", {})
         score, decision_trace = build_decision_trace(
             nodes=self.nodes,
@@ -809,6 +819,12 @@ class CapabilityPlanner:
         )
         signal_snapshot["recommended_flow_source"] = "route.recommended_flow"
         signal_snapshot["planner_version"] = "capability_planner_v1"
+        signal_snapshot["research_isolation_policy"] = {
+            "level": research_isolation.level.value,
+            "goal_visibility": research_isolation.goal_visibility.value,
+            "output_mode": research_isolation.output_mode.value,
+            "confirmation_required": research_isolation.level.value == "L2",
+        }
         if learning_policy:
             signal_snapshot["learning_policy"] = {
                 "influenced": True,

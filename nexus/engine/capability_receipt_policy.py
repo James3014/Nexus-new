@@ -91,6 +91,7 @@ RECEIPT_BACKED_CAPABILITIES = frozenset(
         "learn_mode",
         "learn_phase_slo",
         "learn_scheduler",
+        "local_heal",
         "memory",
         "mempalace_gate",
         "meta_opt",

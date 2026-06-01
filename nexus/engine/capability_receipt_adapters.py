@@ -506,6 +506,34 @@ class ResearchReceiptAdapter:
     def build(self, *, claim_verified: bool, payload: dict[str, Any]) -> CapabilityReceipt:
         refs = _as_refs(payload.get("research_refs") or payload.get("research_ref") or payload.get("research_report_path"))
         substantive_refs = [ref for ref in refs if not str(ref).endswith(":route_selected")]
+        isolation_receipt = payload.get("research_isolation_receipt")
+        isolation_receipt = isolation_receipt if isinstance(isolation_receipt, dict) else {}
+        if isolation_receipt and isolation_receipt.get("isolation_level") != "L0":
+            artifact_refs = _as_refs(isolation_receipt.get("artifact_refs"))
+            refs = list(dict.fromkeys([*refs, *artifact_refs]))
+            substantive_refs = [ref for ref in refs if not str(ref).endswith(":route_selected")]
+            invoked = bool(payload.get("research_used") or payload.get("should_research") or refs)
+            facts_only_ok = (
+                isolation_receipt.get("artifact_schema") == "research_facts.v1"
+                and isolation_receipt.get("facts_only_guard_passed") is True
+            )
+            gate_passed = bool(substantive_refs and facts_only_ok and _as_bool(payload.get("research_gate_passed", False)))
+            return CapabilityReceipt(
+                name=self.name,
+                selected=True,
+                invoked=invoked,
+                evidence_present=bool(substantive_refs),
+                gate_passed=gate_passed,
+                outcome_contributed=bool(gate_passed and claim_verified),
+                executor_id=self.name,
+                evidence_refs=tuple(refs),
+                failure_reason=selected_failure_reason(
+                    selected=True,
+                    invoked=invoked,
+                    evidence_refs=substantive_refs,
+                    gate_passed=gate_passed,
+                ),
+            )
         invoked = bool(payload.get("research_used") or payload.get("should_research") or refs)
         gate_passed = bool(substantive_refs and _as_bool(payload.get("research_gate_passed", False)))
         telemetries: dict[str, Any] = {}

@@ -29108,3 +29108,21 @@ END
 [astropy__astropy-12907] Env denoise attempted=False succeeded=False reason=UNSUPPORTED
 
 [astropy__astropy-12907] ❌ FAIL-CLOSED: Bug was not physically reproduced. Aborting.
+
+[astropy__astropy-12907] === NEXUS ORCHESTRATION START astropy__astropy-12907 ===
+
+[astropy__astropy-12907] [Phase 1] Building physical evidence...
+
+[astropy__astropy-12907] Model decision phase=reproduction model=qwen2.5-coder:7b timeout=180 reason=repro_logic_extraction_ollama
+
+[astropy__astropy-12907] ❌ FAIL-CLOSED: Bug was not physically reproduced. Aborting.
+
+[astropy__astropy-12907] === NEXUS ORCHESTRATION START astropy__astropy-12907 ===
+
+[astropy__astropy-12907] [Phase 1] Building physical evidence...
+
+[astropy__astropy-12907] Model decision phase=reproduction model=qwen2.5-coder:7b timeout=180 reason=repro_logic_extraction_ollama
+
+[astropy__astropy-12907] Env denoise attempted=False succeeded=False reason=UNSUPPORTED
+
+[astropy__astropy-12907] ❌ FAIL-CLOSED: Bug was not physically reproduced. Aborting.
