@@ -39,18 +39,31 @@ class ResearchIsolationDecision:
         payload["output_mode"] = self.output_mode.value
         return payload
 
+@dataclass(frozen=True)
+class ResearchIsolationPolicy:
+    schema_version: str = "research_isolation_policy.v1"
+    level: ResearchIsolationLevel = ResearchIsolationLevel.L0
+    goal_visibility: ResearchGoalVisibility = ResearchGoalVisibility.FULL
+    facts_only: bool = False
+    confirmation_required: bool = False
+
+    def to_dict(self) -> dict[str, Any]:
+        payload = asdict(self)
+        payload["level"] = self.level.value
+        payload["goal_visibility"] = self.goal_visibility.value
+        return payload
+
 
 @dataclass(frozen=True)
 class MaskedResearchBrief:
     schema_version: str = "masked_research_brief.v1"
-    task_label: str = ""
+    scope: tuple[str, ...] = ()
+    symbols: tuple[str, ...] = ()
+    trace: tuple[str, ...] = ()
     observed_behavior: tuple[str, ...] = ()
-    target_files: tuple[str, ...] = ()
-    target_symbols: tuple[str, ...] = ()
-    process_names: tuple[str, ...] = ()
-    error_strings: tuple[str, ...] = ()
-    test_failures: tuple[str, ...] = ()
-    research_questions: tuple[str, ...] = ()
+    
+    # Internal metadata (for audit but not exposed to research agent)
+    task_label: str = ""
     allowed_sources: tuple[str, ...] = ()
     forbidden_fields_removed: tuple[str, ...] = ()
     goal_visibility: str = ResearchGoalVisibility.MASKED.value
@@ -86,16 +99,16 @@ class ContaminationGuardResult:
 
 
 @dataclass(frozen=True)
-class ResearchIsolationReceipt:
-    schema_version: str = "research_isolation_receipt.v1"
-    research_masked: bool = False
-    isolation_level: str = ResearchIsolationLevel.L0.value
-    goal_visibility: str = ResearchGoalVisibility.FULL.value
-    research_agent_saw_user_goal: bool = True
-    output_mode: str = ResearchOutputMode.NORMAL.value
-    facts_only_guard_passed: bool = True
+class ResearchReceipt:
+    schema_version: str = "research_receipt.v1"
+    policy_level: str = ResearchIsolationLevel.L0.value
+    brief_masked: bool = False
+    facts_artifact_present: bool = False
+    contamination_detected: bool = False
+    gate_passed: bool = False
+    
+    # Audit detail
     design_terms_detected: tuple[str, ...] = ()
-    artifact_schema: str = "research_pack.v1"
     artifact_refs: tuple[str, ...] = ()
 
     def to_dict(self) -> dict[str, Any]:
