@@ -56,6 +56,13 @@ class OperationalContext:
     runner_completed: bool = False
     python_executable: str = ""
     auto_heal_enabled: bool = False
+    wall_time_sec: float = 0.0
+    token_telemetry_status: str = "not_applicable"
+    token_total_estimated: int = 0
+    syntax_gate_passed: bool = True
+    prompt_variant_id: str = "default"
+    refusal_detected: bool = False
+    empty_response: bool = False
     env_denoise: Dict[str, Any] = field(default_factory=dict)
     env_resolution: Dict[str, Any] = field(default_factory=dict)
 

@@ -17,7 +17,9 @@ def test_reproduction_phase_success():
     runner = MagicMock()
     runner.run_repro.return_value = (True, "physical evidence found")
     
-    phase = ReproductionPhase(repro_runner=runner)
+    denoiser = MagicMock()
+    
+    phase = ReproductionPhase(repro_runner=runner, env_denoiser=denoiser)
     result = phase.execute(ctx)
     
     assert result.success is True
@@ -38,7 +40,9 @@ def test_reproduction_phase_env_failure():
     runner.run_repro.return_value = (False, "ModuleNotFoundError: numpy")
     runner.is_environment_failure.return_value = True
     
-    phase = ReproductionPhase(repro_runner=runner)
+    denoiser = MagicMock()
+    
+    phase = ReproductionPhase(repro_runner=runner, env_denoiser=denoiser)
     result = phase.execute(ctx)
     
     assert result.success is False
