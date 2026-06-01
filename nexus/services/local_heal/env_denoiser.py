@@ -150,13 +150,17 @@ class EnvDenoiser:
             )
 
     def prepare_from_evidence(self, evidence: str) -> EnvDenoiseResult:
-        # 1. 處理 Astropy 特有的 Source Checkout 失敗
+        # 1. 處理 Astropy 特有的 Source Checkout 失敗 (優先級最高)
         if self._looks_like_astropy_source_checkout_failure(evidence):
             return self._prepare_astropy_build(evidence)
 
-        # 2. [NEW] 處理通用的 ModuleNotFoundError
+        # 2. 處理通用的 ModuleNotFoundError
         missing_pkg = self._extract_missing_module(evidence)
         if missing_pkg:
+            # 禁止安裝正在修復的目標包
+            if missing_pkg == "astropy":
+                return self._prepare_astropy_build(evidence)
+
             # 對於某些套件，其安裝名稱與導入名稱不同
             install_map = {
                 "erfa": "pyerfa",
@@ -430,5 +434,7 @@ class EnvDenoiser:
             "extension modules are built",
             "build_ext --inplace",
             "cannot import name '_compiler' from 'astropy.utils'",
+            "partially initialized module 'astropy",
+            "circular import",
         )
         return any(marker in lowered for marker in markers)

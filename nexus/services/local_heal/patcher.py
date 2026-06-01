@@ -5,6 +5,8 @@ from dataclasses import dataclass
 
 from nexus.services.local_heal.matcher import MatchChain, MatchResult
 
+from nexus.services.local_heal.validator import validate_syntax
+
 @dataclass
 class PatchResult:
     success: bool
@@ -17,6 +19,7 @@ class PatchResult:
     similarity: float = 1.0
     strategy_used: str = "Exact"
     resolved_span: Tuple[int, int] = (0, 0) # (start_char, end_char)
+    syntax_gate_passed: bool = True
 
 class Patcher:
     """🛠️ Nexus Patcher: 負責將 SEARCH 替換為 REPLACE，支援有邊界的精度補償 (Bounded Compensation)"""
@@ -25,9 +28,16 @@ class Patcher:
         self.match_chain = MatchChain()
         self.fuzzy_threshold = fuzzy_threshold
 
-    def apply_patch(self, file_content: str, search_text: str, replace_text: str, context_hints: list[str] = None) -> PatchResult:
+    def apply_patch(self, file_content: str, search_text: str, replace_text: str, context_hints: list[str] = None, validate_syntax_gate: bool = False) -> PatchResult:
         if search_text == "WHOLE_FILE":
             new_content = replace_text
+            
+            # 可選的語法前檢 (Syntax Preflight)
+            if validate_syntax_gate:
+                is_valid, syntax_err = validate_syntax(new_content)
+                if not is_valid:
+                    return PatchResult(success=False, new_content=file_content, diff="", error_message=f"SYNTAX_ERROR:{syntax_err}", syntax_gate_passed=False, strategy_used="FullFileReplace")
+
             orig_lines = file_content.splitlines(keepends=True)
             new_lines = new_content.splitlines(keepends=True)
             diff_lines = list(difflib.unified_diff(orig_lines, new_lines, fromfile="a/file", tofile="b/file", lineterm='\n'))
@@ -51,13 +61,11 @@ class Patcher:
         # 2. 執行替換與邊界判定
         verbatim_match = match_res.verbatim_text
         repl = replace_text
+        sim = match_res.similarity
         
-        # 相似度計算
+        # 相似度判定 (Bounded Compensation)
         is_verbatim = (verbatim_match.strip() == search_stripped)
-        sim = difflib.SequenceMatcher(None, search_stripped, verbatim_match.strip()).ratio()
         
-        # Phase 3 Alignment: 嚴格收斂自動校正條件 (Bounded Compensation)
-        # 僅允許極高相似度的微小偏移（如空格、引號）
         if not is_verbatim and sim < self.fuzzy_threshold:
              return PatchResult(
                 success=False,
@@ -65,7 +73,7 @@ class Patcher:
                 diff="",
                 error_message=f"SEARCH block found but similarity too low ({sim:.2f} < {self.fuzzy_threshold})",
                 strategy_used=match_res.strategy_name,
-                similarity=sim # 確保失敗時也記錄真實相似度
+                similarity=sim
             )
 
         # 確保完全行替換的尾端對齊一致
@@ -81,6 +89,20 @@ class Patcher:
              
         end_idx = start_idx + len(verbatim_match)
         new_content = orig_content[:start_idx] + repl + orig_content[end_idx:]
+
+        # 可選的語法前檢 (Syntax Preflight)
+        if validate_syntax_gate:
+            is_valid, syntax_err = validate_syntax(new_content)
+            if not is_valid:
+                return PatchResult(
+                    success=False, 
+                    new_content=orig_content, 
+                    diff="", 
+                    error_message=f"SYNTAX_ERROR:{syntax_err}", 
+                    syntax_gate_passed=False,
+                    strategy_used=match_res.strategy_name,
+                    similarity=sim
+                )
 
         # 產生 Unified Diff
         orig_lines = orig_content.splitlines(keepends=True)

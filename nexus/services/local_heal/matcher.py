@@ -23,6 +23,7 @@ class MatchResult:
     strategy_name: str
     verbatim_text: str       # 從檔案中提取到的原始真實程式碼
     normalized_search: str   # 歸一化的搜尋區塊
+    similarity: float = 1.0  # 匹配相似度
 
 
 class MatchStrategy(Protocol):
@@ -256,7 +257,8 @@ class DiffLibFuzzyMatcher:
             return MatchResult(
                 strategy_name="DiffLibFuzzyMatcher",
                 verbatim_text=closest,
-                normalized_search=s_stripped
+                normalized_search=s_stripped,
+                similarity=ratio
             )
         return None
 

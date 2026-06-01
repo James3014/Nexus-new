@@ -26,36 +26,43 @@ class SelfCorrector:
                 f"Output the fully corrected SEARCH/REPLACE block with perfect Python syntax."
             )
         elif error.kind == PatchErrorKind.SEARCH_MISMATCH:
-            # Phase 2: 強化 HUD 提示契約 (Literal Copy Mode)
+            # Phase 4 Upgrade: Authoritative Canonical Copy-Paste
             closest_hint = ""
             if error.closest_match:
-                # 判斷是否為高品質匹配 (由 Patcher/Matcher 標記或在此推斷)
-                # 這裡暫時以提示內容存在作為基礎
                 closest_hint = (
                     f"### [NEXUS CANONICAL SOURCE CODE FOUND]\n"
-                    f"The battlesuit has located the EXACT section you likely intended to change:\n"
+                    f"The battlesuit has located the EXACT section in the file. You MUST copy the code below CHARACTER-FOR-CHARACTER into your SEARCH block:\n"
                     f"```python\n{error.closest_match}\n```\n\n"
-                    f"CRITICAL CONTRACT:\n"
-                    f"1. You MUST copy the code above CHARACTER-FOR-CHARACTER into your SEARCH block.\n"
-                    f"2. Do NOT change variable names, quotes, or indentation in the SEARCH block.\n"
-                    f"3. Only apply your logic changes inside the REPLACE block.\n"
+                    f"CONTRACT:\n"
+                    f"1. Copy the canonical snippet above exactly. Do NOT fix typos or change formatting in the SEARCH block.\n"
+                    f"2. Apply your intended fix ONLY in the REPLACE block.\n"
                 )
             
             retry_instruction = (
-                f"Your previous SEARCH block did not match the original code in the file.\n"
+                f"CRITICAL ERROR: Your previous SEARCH block did not match the file content.\n"
                 f"--> {error.message}\n\n"
                 f"{closest_hint}"
-                f"Please output a corrected SEARCH/REPLACE block now, ensuring perfect literal alignment with the source."
+                f"Output the corrected SEARCH/REPLACE block now."
+            )
+        elif error.kind == PatchErrorKind.REFUSAL_DETECTED:
+             retry_instruction = (
+                f"CRITICAL DIRECTIVE: You previously apologized or refused to provide a fix.\n"
+                f"As a Senior Nexus Engineer, you ARE capable of this task. All necessary source code and context are provided.\n"
+                f"Do NOT apologize. Do NOT state limitations. Simply analyze the logic and provide the SEARCH/REPLACE block now."
+            )
+        elif error.kind == PatchErrorKind.EMPTY_RESPONSE:
+            retry_instruction = (
+                f"CRITICAL ERROR: Your previous response was EMPTY!\n"
+                f"You MUST provide a fix using the SEARCH/REPLACE format. If you need more information, assume the provided code context is sufficient."
             )
         elif error.kind == PatchErrorKind.NO_BLOCKS_FOUND:
             retry_instruction = (
                 f"CRITICAL ERROR: Your previous response contained ZERO SEARCH/REPLACE blocks!\n"
-                f"You MUST use the exact `<<<<<<< SEARCH` and `>>>>>>> REPLACE` block format to suggest edits.\n\n"
-                f"Rules you MUST follow:\n"
-                f"1. Do NOT write conversational text or explanations. Only output code blocks.\n"
-                f"2. Do NOT apologize or ask the user to provide the target code. You have all the source code you need in the prompt.\n"
-                f"3. Make sure to specify the file name clearly, e.g., 'FILE: path/to/file.py' right before the SEARCH/REPLACE block.\n"
-                f"4. You must find the code to change in the provided file contents and output a valid SEARCH/REPLACE block now."
+                f"You MUST use the exact `<<<<<<< SEARCH` and `>>>>>>> REPLACE` format.\n\n"
+                f"Rules:\n"
+                f"1. NO conversation. NO explanations.\n"
+                f"2. Specify the file clearly: 'FILE: path/to/file.py' before the block.\n"
+                f"Output a valid SEARCH/REPLACE block now."
             )
         elif error.kind == PatchErrorKind.NO_EFFECTIVE_CODE_CHANGE:
             message = str(error.message or "")
