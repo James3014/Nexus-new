@@ -7,7 +7,7 @@ class ContextBudgetConfig:
     max_ctx_tokens: int = 8192
     prompt_overhead_tokens: int = 800
     problem_max_tokens: int = 1500
-    source_budget_tokens: int = 5000
+    source_budget_tokens: int = 3000
     chars_per_token: float = 3.5  # 粗略轉換率
 
 

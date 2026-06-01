@@ -1100,9 +1100,44 @@ class JitValidationReceiptAdapter(GenericCapabilityReceiptAdapter):
         )
 
 
+class LocalHealReceiptAdapter:
+    name = "local_heal"
+
+    def build(self, *, claim_verified: bool, payload: dict[str, Any]) -> CapabilityReceipt:
+        # 提取證據路徑
+        refs = [
+            payload.get("repro_log_path"),
+            payload.get("patch_diff_path"),
+            payload.get("verification_report_path"),
+        ]
+        refs = [str(r) for r in refs if r]
+        
+        invoked = bool(payload.get("invoked") or refs)
+        gate_passed = bool(payload.get("solve_eligible") and payload.get("verification_passed"))
+        
+        telemetries = {
+            "reasoning_mode": payload.get("reasoning_mode", "INTUITIVE"),
+            "similarity": payload.get("patch_similarity", 0.0),
+            "is_auto_corrected": payload.get("is_auto_corrected", False),
+            "resolved_span": payload.get("resolved_span"),
+        }
+        
+        return merge_capability_receipt(
+            name=self.name,
+            selected=True,
+            invoked=invoked,
+            evidence_refs=refs,
+            gate_passed=gate_passed,
+            outcome_contributed=bool(gate_passed and claim_verified),
+            executor_id="local_heal_battlesuit",
+            telemetries=telemetries,
+        )
+
+
 RECEIPT_ADAPTERS: dict[str, CapabilityReceiptAdapter] = {
     adapter.name: adapter
     for adapter in (
+        LocalHealReceiptAdapter(),
         CodeIntelReceiptAdapter(),
         AutoreasonReceiptAdapter(),
         JudgePanelReceiptAdapter(),

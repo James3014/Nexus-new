@@ -42,3 +42,42 @@ def test_parser_rejects_placeholder_search():
     blocks = parser.parse_blocks(llm_output_placeholder)
     assert len(blocks) == 1
     assert blocks[0].get("has_placeholder") is True
+
+
+def test_parser_accepts_inline_simple_search_replace_headers():
+    parser = SearchReplaceParser()
+
+    llm_output = (
+        "FILE: astropy/modeling/separable.py\n"
+        "SEARCH: def _separable(transform):\n"
+        "    return old_value\n"
+        "REPLACE: def _separable(transform):\n"
+        "    return new_value\n"
+        "END"
+    )
+
+    blocks = parser.parse_blocks(llm_output)
+
+    assert len(blocks) == 1
+    assert blocks[0]["file"] == "astropy/modeling/separable.py"
+    assert blocks[0]["search"].startswith("def _separable")
+    assert blocks[0]["replace"].startswith("def _separable")
+
+
+def test_parser_accepts_final_simple_block_without_end_marker():
+    parser = SearchReplaceParser()
+
+    llm_output = (
+        "FILE: astropy/modeling/separable.py\n"
+        "SEARCH: def _separable(transform):\n"
+        "    return old_value\n"
+        "\n"
+        "REPLACE: def _separable(transform):\n"
+        "    return new_value\n"
+    )
+
+    blocks = parser.parse_blocks(llm_output)
+
+    assert len(blocks) == 1
+    assert blocks[0]["search"].startswith("def _separable")
+    assert blocks[0]["replace"].startswith("def _separable")

@@ -1,10 +1,72 @@
+import inspect
+import json
+import re
+from typing import Any, Dict
+
 class Planner:
-    def create_plan(self, problem: str, evidence: str) -> dict:
-        strategy = "General repair."
-        if "race condition" in problem.lower() or "counter" in problem.lower():
-            strategy = "1. Import threading. 2. Initialize self.lock = threading.Lock() in __init__. 3. Wrap the increment logic with 'with self.lock:' to ensure atomicity."
-        
-        return {
-            "search_symbols": ["SharedCounter", "increment"],
-            "repair_strategy": strategy
-        }
+    def __init__(self, ollama_generate_fn: Any = None):
+        self.ollama_generate = ollama_generate_fn
+
+    def _generate(
+        self,
+        system: str,
+        prompt: str,
+        *,
+        model_name: str | None = None,
+        timeout_seconds: int | None = None,
+    ) -> str:
+        if not model_name:
+            return self.ollama_generate(system, prompt)
+        try:
+            sig = inspect.signature(self.ollama_generate)
+            kwargs = {}
+            if "model" in sig.parameters:
+                kwargs["model"] = model_name
+            if "timeout" in sig.parameters and timeout_seconds is not None:
+                kwargs["timeout"] = timeout_seconds
+            if kwargs:
+                return self.ollama_generate(system, prompt, **kwargs)
+        except (TypeError, ValueError):
+            pass
+        return self.ollama_generate(system, prompt)
+
+    def create_plan(
+        self,
+        problem: str,
+        evidence: str,
+        *,
+        model_name: str | None = None,
+        timeout_seconds: int | None = None,
+    ) -> dict:
+        if not self.ollama_generate:
+            # Fallback for unit tests if needed
+            return {
+                "search_symbols": [],
+                "repair_strategy": "General repair.",
+                "violated_invariants": []
+            }
+
+        prompt = f"""
+You are a software architect. Analyze the bug report and reproduction evidence to create a repair plan.
+Output a JSON object with:
+1. "search_symbols": List of critical class/function names likely involved.
+2. "repair_strategy": A concise step-by-step strategy.
+3. "violated_invariants": List of semantic or algebraic invariants that are broken.
+
+Bug Report:
+{problem}
+
+Reproduction Evidence:
+{evidence}
+
+JSON Output:
+"""
+        response = self._generate("", prompt, model_name=model_name, timeout_seconds=timeout_seconds)
+        try:
+            # 提取 JSON
+            match = re.search(r"(\{.*\})", response, re.DOTALL)
+            if match:
+                return json.loads(match.group(1))
+            return {"search_symbols": [], "repair_strategy": response, "violated_invariants": []}
+        except Exception:
+            return {"search_symbols": [], "repair_strategy": "Failed to parse plan", "violated_invariants": []}

@@ -18,3 +18,4 @@ class PatchError:
     file_path: str | None = None
     line_number: int | None = None
     closest_match: str | None = None  # 最接近的匹配代碼（用於提供給模型的 HUD 微調提示）
+    failed_search_text: str | None = None # 導致 Mismatch 的原始搜尋內容

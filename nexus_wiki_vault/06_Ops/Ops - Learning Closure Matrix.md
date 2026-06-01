@@ -3771,3 +3771,57 @@ version_scope:
 - **Root Cause**: `LLMClient.ask` internal forwarding mechanism migrated to `_run_cli_with_hard_timeout` using `subprocess.Popen` instead of `subprocess.run`, leaving the test mock target ineffective.
 - **Decision**: Decoupled mock target from standard `subprocess.run` to `nexus.services.gateway._run_cli_with_hard_timeout` and successfully bypassed anti-token fallback estimates.
 - **Prevention**: Ensure service test coverage patch targets are structurally aligned with current production CLI forwarding adapters rather than global standard library functions.
+
+## 2026-05-31: Local Heal Reproduction Receipt and Phase Timeout Closure
+- **Phenomenon**: `astropy__astropy-13033` originally produced `patch_len=0` with an ambiguous `NO_PATCH` receipt, and the 14B patch stage could occupy the runner until manual interruption.
+- **Root Cause**: Local Heal inferred `reproduced` from any non-empty evidence text, lacked explicit model-empty failure classification, and used a global Ollama timeout instead of phase-level budgets.
+- **Decision**: Added explicit `HealContext.reproduced` and `failure_reason`, routed reproduction/planning through 7B with 120s budgets, routed algebraic patching through 14B with a 180s budget, and recorded `model_decisions` in repair receipts. Empty patch-model output now fails closed as `MODEL_EMPTY_RESPONSE`.
+- **Prevention**: Every Local Heal run must preserve phase-level model decisions and timeout budgets in the receipt. Empty model output, reproduction failure, localization failure, and verifier failure must remain separate failure reasons; never promote `patch_len=0` as a solved task.
+
+## 2026-05-31: Astropy Source-Checkout Import Failure Is Not Bug Reproduction
+- **Phenomenon**: `astropy__astropy-13033` generated non-zero reproduction evidence, but the captured stack was `ImportError: trying to import astropy from within a source checkout ... extension modules are built`, not the task's semantic failure.
+- **Root Cause**: `ReproductionRunner.run_repro` treated every non-zero process exit as a successful bug reproduction, so environment/build failures advanced into planning/localization/patching and wasted 14B patch budget.
+- **Decision**: Added an environment-failure classifier for known astropy source-checkout/build-extension import failures. Such runs now return `reproduced=false`, stop before planning, and write `REPRO_ENVIRONMENT_FAILURE` to the repair receipt.
+- **Prevention**: Reproduction gates must distinguish semantic bug failure from environment setup failure before any model patch call. For SWE-bench tasks, source checkout/import/build failures should trigger env-denoise or sandbox setup work, not patch synthesis.
+
+## 2026-05-31: Concurrency Benchmark Interface Drift
+- **Phenomenon**: The 10-task concurrency baseline failed only on `deepswe_task5_counter_race` with `AttributeError: module ... has no attribute test_challenge`.
+- **Root Cause**: The benchmark file had drifted into a truncated method fragment and no longer exported the common `test_challenge()` interface used by the local race suite.
+- **Decision**: Restored the task module to a complete `Counter` challenge with explicit lock protection and a `test_challenge()` entrypoint consistent with the other DeepSWE race fixtures.
+- **Prevention**: Before using local benchmark tasks as Nexus repair targets, run the interface smoke suite first. Interface drift must be fixed separately from repair-loop performance, otherwise Nexus will optimize against a broken harness rather than a concurrency bug.
+
+## 2026-05-31: Astropy Env Denoise Requires Version-Parity Reasons
+- **Phenomenon**: `astropy__astropy-13033` advanced past the missing `extension_helpers` failure but still failed during C extension compilation with `PyWtbarr_traverse` incompatible function pointer errors under Python 3.12.
+- **Root Cause**: The denoise path treated all compat-Python build failures as one generic `ASTROPY_BUILD_EXT_WITH_COMPAT_PYTHON` result, masking whether the next action should be dependency discovery, older interpreter provisioning, or semantic bug repair.
+- **Decision**: Added explicit `extension_helpers` support-path discovery and classified compat-Python ABI failures as `ASTROPY_COMPAT_BUILD_ABI_FAILURE` in the repair receipt.
+- **Prevention**: Environment denoise must keep dependency, interpreter, and C-ABI failures as separate receipt reasons. For old SWE-bench Astropy tasks, do not call the model until the runner proves version-parity reproduction against a supported Python environment.
+
+## 2026-06-01: Astropy Version-Parity Preflight Must Check Imports
+- **Phenomenon**: Local Heal could discover a Python 3.9/3.10 interpreter, but that alone did not prove an Astropy SWE-bench task could build or reproduce. The local 3.10 runtime lacked `numpy` and `extension_helpers`; the system Python 3.9 lacked `extension_helpers`.
+- **Root Cause**: The first version-parity gate checked only interpreter minor version, which could create a false `READY` state before old Astropy dependencies were present.
+- **Decision**: Extended `EnvResolver` with uv/interpreter discovery, `NEXUS_ASTROPY_LEGACY_PYTHON` override support, and required-import probing. Missing imports now classify as `ASTROPY_DEPENDENCY_MISSING`.
+- **Prevention**: SWE-bench environment gates must verify interpreter and dependency parity before cloning, reproducing, or invoking a model. Interpreter readiness and dependency readiness are separate receipt facts.
+
+## 2026-06-01: Local Heal Manifest Runner Needs Preflight Isolation
+- **Phenomenon**: A 20-task Local Heal manifest run lost partial JSONL output when interrupted and initially let a local concurrency task trigger repo-wide localization across the Nexus checkout.
+- **Root Cause**: The runner wrote predictions only after the whole batch completed and did not anchor local benchmark tasks to their manifest `local_path` before invoking the pipeline.
+- **Decision**: Added a fixed 20-task manifest, environment resolver, per-row streaming JSONL writes, local-path localization anchoring, zero-model `--preflight_only`, and a manifest summary report that groups solved, preflight-ready, env-blocked, no-repro, model-blocked, and other blocked rows.
+- **Prevention**: Batch repair runners must stream one receipt-backed row per task and must localize local fixtures from manifest paths before any repo-wide search. Local-only manifest slices must not load SWE-bench datasets. Preflight-ready rows must be labeled `PREFLIGHT_READY`, never `SOLVED`, because readiness is not semantic repair. Summary generation must run after JSONL creation, not in parallel with its producer.
+
+## 2026-06-01: Local Provider Fallback Contaminates Formal Solver Evidence
+- **Phenomenon**: LM Studio `qwen3.5-9b` repair attempts could silently fall back to Ollama 14B on provider errors, and runner JSONL rows could keep an empty `failure_reason` even when the receipt recorded `MODEL_EMPTY_RESPONSE`.
+- **Root Cause**: The model adapter mixed provider failover with formal benchmark execution, and the JSONL row builder trusted `ctx.failure_reason` directly instead of deriving from the receipt-backed failure classifier.
+- **Decision**: Removed LM Studio to Ollama fallback from `nexus_local_generate`, kept provider errors explicit, and introduced `build_result_row()` / `failure_reason_for_result()` so unsolved rows read receipt failure reasons and otherwise fail closed to `NO_PATCH`.
+- **Prevention**: Formal local-model + Nexus runs must be provider-pure unless an explicit experiment lane says otherwise. Every unsolved row must carry a non-empty failure reason; empty JSONL reasons invalidate batch evidence even if receipt files contain the truth.
+
+## 2026-06-01: Provider Intent Must Be Explicit Before Repair Runs
+- **Phenomenon**: The local-heal runner was briefly interpreted as accidentally reverting to Ollama, while the intended current lane was actually Ollama `qwen2.5-coder:7b/14b` because LM Studio was unstable during long runs.
+- **Root Cause**: Model routing names and tests still carried stale LM Studio/qwen3.5 assumptions, so provider intent was not encoded as a crisp policy contract.
+- **Decision**: Re-aligned `LocalModelPolicy` and runner tests around the current formal lane: `qwen2.5-coder:7b` for reproduction/planning and `qwen2.5-coder:14b` for algebraic patch synthesis. The manifest runner defaults to Ollama qwen2.5 unless a model is passed explicitly.
+- **Prevention**: Before running formal benchmark tasks, verify the model route in tests and trace logs. Provider changes must update policy tests, runner defaults, and user-facing run notes together.
+
+## 2026-06-01: New Phase Skeletons Need Real Imports And Real Tests
+- **Phenomenon**: Step 5 orchestration files existed, but `env_denoiser.py` contained a literal `...` inside `_prepare_astropy_build`, and `tests/unit/test_orchestrator.py` tested a locally redefined orchestrator rather than production `HealOrchestrator`.
+- **Root Cause**: Skeleton generation advanced ahead of collection-level pytest and allowed placeholder code and fake-local test doubles to masquerade as infrastructure progress.
+- **Decision**: Restored executable env-denoise behavior for Astropy build rescue, changed the orchestrator test to import the production class, added exception containment and receipt-hook behavior, and added a real PatchSynthesis + Verification orchestrator smoke.
+- **Prevention**: Refactor skeletons must pass import/collection tests before being treated as complete. Tests for new orchestration classes must import production symbols, not reimplement the class under test inside the test file.

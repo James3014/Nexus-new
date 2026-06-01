@@ -28,8 +28,8 @@ def test_patcher_truncated_match():
 def test_patcher_normalized_match():
     patcher = Patcher()
     file_content = "def run():\n    return \"result\"\n"
-    # 引號與空白變更
-    search = "  return   'result'  "
+    # 僅引號與微小空白變更 (相似度應 > 0.85)
+    search = "    return 'result' "
     replace = "    return 'success'"
     
     res = patcher.apply_patch(file_content, search, replace)

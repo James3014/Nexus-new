@@ -42,3 +42,20 @@ def test_parser_aider_format_parsed_correctly():
     assert "return a + b" in blocks[0]["replace"]
 
 
+def test_parser_create_file_block_parsed_as_create_operation():
+    from nexus.services.local_heal.parser import SearchReplaceParser
+    parser = SearchReplaceParser()
+
+    blocks = parser.parse_blocks(
+        "CREATE FILE: pkg/new_transform.py\n"
+        "<<<<<<< CONTENT\n"
+        "def transform():\n"
+        "    return 'created'\n"
+        ">>>>>>> CONTENT\n"
+    )
+
+    assert len(blocks) == 1
+    assert blocks[0]["operation"] == "create"
+    assert blocks[0]["file"] == "pkg/new_transform.py"
+    assert "def transform" in blocks[0]["replace"]
+

@@ -1,125 +1,46 @@
-# Nexus 自動化與數據真相 (Automation & Truth Protocol)
+# 🛡️ LocalHeal Surgical Plan: Precision Battlesuit Refactoring
 
-## 🎯 目標
-將 Nexus 治理從「文件結案」升級為「數據驅動的自動化防線」，確保所有指標可透過實測數據（Tokens, Drift, Pass/Fail）證偽。
+## 🎯 核心目標
+消除 `SEARCH_MISMATCH` 的跨函數漂移，將 LocalHeal 從「直覺修補」升級為「高精度代數戰甲」，並完成 Phase 3 數據合約與治理審計對接。
 
-## Track H：數據真相 (Truth Dashboard) [x]
-- [x] **TRU-101 真實 Token 追蹤**: 正則表達式邏輯已通過單元測試，集成環境測試已觸發並驗證。
-- [x] **TRU-102 數據真相儀表板**: 自動產出 `nexus_truth_dashboard.md` 並落地專案根目錄。
-- [x] **Task 3: `hidden_bugfix_supervised` background offload 實驗 (優先級: P1)**
-  - [x] 執行 background replay 與 longer-timeout lane 隔離實驗
-  - [x] 補測試：驗證 heavy rows 可移出主線，主 runner 不因單一 flaky row 發生長時間阻塞
-  - [x] **狀態**: `COMPLETED`。已成功實作 `--enable-background-offload` 與 `--heavy-task-ids` 支援背景非阻塞隔離執行，並通過 TDD 測試。*註：Task 3 目前屬 observation-only / experimental runner path，僅驗證 heavy rows 可被背景隔離且不阻塞主流程；不構成 public claim、promotion evidence、或 audited final bundle 替代品。*
-- [x] **Dual-Engine Phase 2: Data Loop Hardening**
-  - [x] **Phase A: 穿甲核心具現化 (Armor Core)**
-  - [x] `[NEW]` 具現 `nexus/core/subagent_armor.py`
-  - [x] # local_heal 解題率提升 Task List
-Branch: `feature/local-heal-patch-rate-20260530`
+## 📅 實作路線圖 (2026-05-31 ~ 2026-06-04)
 
-## P0 — 修復 closest_hint（corrector 傳錯片段）
-- [x] RED: `test_closest_snippet_finder_returns_actual_nearest` — 驗證舊 pipeline 傳了錯誤 the hint
-- [x] GREEN: `pipeline.py` 改用 `find_closest_snippet` 找真正最近的片段
-- [x] RED: `test_corrector_retry_prompt_contains_real_snippet` — 驗證 retry prompt 含真實片段
-- [x] GREEN: `corrector.py` 確保 `closest_match` 正確傳入
-- [x] COMMIT: `fix(local-heal): corrector closest_hint now uses difflib nearest snippet`
+### Phase 0: 基礎設施與回歸基準 (Infrastructure & Base Tests)
+- [x] **T0-1**: 補齊 `nexus/services/local_heal/interface.py` 或修復測試導入路徑。
+- [x] **T0-2**: 建立最小 Smoke Tests 覆蓋：`patcher`, `corrector`, `matcher`, `pipeline`。
+- [x] **T0-3**: 將 `astropy-13033` 失敗樣本固化為 Regression Fixture。
 
-## P1 — 放寬 ExactMatch / StrippedMatch 尾端條件
-- [x] RED: `test_exact_match_no_trailing_newline_still_works`
-- [x] GREEN: `matcher.py` 移除 `end_char_idx in ('\n', '\r')` 約束
-- [x] RED: `test_stripped_match_mid_file_no_newline`
-- [x] GREEN: 同上修改確保兩個測試通過
-- [x] REFAC: 確認其他策略不受影響
-- [x] COMMIT: `fix(matcher): relax ExactMatch/StrippedMatch line-end constraint`
+### Phase 1: Matcher 漂移杜絕 (Anti-Drift Matcher)
+- [x] **T1-1**: 限制 `closest_match` 檢索順序：已定位檔案 > 已定位函數 > 已定位 Span。
+- [x] **T1-2**: 引入語義與結構權重：同函數、同 Exception Type、同縮排優先。
+- [x] **T1-3**: 衝突處理：多候選高度接近時強制 RETURN/Fail-closed，禁止盲選。
+- [x] **T1-4**: 對 `ValueError`/`TypeError` 等關鍵語義標籤設置漂移懲罰 (Hard Penalty)。
 
-## P2 — 加入 DiffLibFuzzyMatcher (Level 3.5)
-- [x] RED: `test_difflib_fuzzy_matcher_whitespace_drift` — 搜尋有空格差異的 block
-- [x] GREEN: `matcher.py` 內新增 `DiffLibFuzzyMatcher` class，插入 NormalizedMatch 之前
-- [x] RED: `test_match_chain_uses_difflib_before_normalized`
-- [x] GREEN: `MatchChain` 更新策略順序
-- [x] COMMIT: `feat(matcher): add DiffLibFuzzyMatcher as Level 3.5 strategy`
+### Phase 2: HUD Retry 契約強化 (HUD Feedback Upgrade)
+- [x] **T2-1**: 升級 HUD 文案，區分 `canonical_snippet` 與 `fallback_snippet`。
+- [x] **T2-2**: 若存在安全候選，重試 Prompt 只提供該 Span 的 Canonical 原文。
+- [x] **T2-3**: 強制模型契約：要求 SEARCH 區塊必須 literal copy，嚴禁改寫語義。
+- [x] **T2-4**: 實作二輪重試的 `Span-anchored Copy Mode`。
 
-## P3 — 拆出 FunctionLocalizer（函數層定位）
-- [x] RED: `test_function_localizer_extracts_correct_function`
-- [x] GREEN: 新增 `nexus/services/local_heal/function_localizer.py`
-- [x] RED: `test_function_localizer_scores_functions_by_issue`
-- [x] GREEN: 實作 `score_functions` 與 `build_focused_context`
-- [x] RED: `test_pipeline_uses_function_level_context`
-- [x] GREEN: `pipeline.py` `_localize` 整合 `FunctionLocalizer`
-- [x] COMMIT: `feat(local-heal): add FunctionLocalizer for function-level context reduction`
+### Phase 3: Bounded Auto-Correction 收斂 (Safe Compensation)
+- [x] **T3-1**: 限制 Auto-correct 觸發條件：必須滿足「單一高相似候選 + 明確 resolved_span + 結構一致」。
+- [x] **T3-2**: 提高相似度閾值 (Similarity Threshold) 並禁止跨塊/跨函數補償。
+- [x] **T3-3**: 在 `is_auto_corrected=True` 時強制記錄匹配原文與 Span 證據。
 
-## P4 — 簡化 Prompt 格式（減少 token 壓力）
-- [x] RED: `test_parser_aider_format_parsed_correctly`
-- [x] GREEN: `parser.py` 新增 aider `<<<<<<< SEARCH` 格式解析
-- [x] GREEN: `pipeline.py` system prompt 簡化到 2 條規則，支援兩種格式
-- [x] COMMIT: `refactor(prompt): simplify system prompt and support aider format`
+### Phase 4: Phase 3 數據合約對位 (Algebraic Contract Alignment)
+- [x] **T4-1**: Planning 階段正式對接 `NexusDiagnosis` (填寫 `reasoning_mode`, `violated_invariants`)。
+- [x] **T4-2**: Repair 階段對接 `NexusRepair` (填寫 `rewrite_trace`, `risk_delta`)。
+- [x] **T4-3**: 根據問題難度自動升級 `reasoning_mode` 為 `ALGEBRAIC` (針對 astropy 等數學語義題)。
 
-## 驗收
-- [x] `uv run pytest tests/unit/test_match_chain.py tests/unit/test_local_heal_decoupled.py tests/unit/test_function_localizer.py -q`
-- [x] 重跑 10 題 SWE-bench，解題率 ≥ 6/10
-  - [x] `[MODIFY]` 注入 `scripts/engine/nexus_cli.py` (`nexus:runner` 與 `_enforce_armor`)
-  - [x] `[NEW]` 具現 `tests/governance/test_subagent_armor.py`
-
-- [x] **P3: Evidence-plane Consume 與可重放證據 Artifact**
-  - [x] 撰寫 `test_governance_telemetry_closure.py` 中的實體可重放測試案例（紅燈）
-  - [x] 升級 `DualGateVerifier.verify_receipt`，強制產生包含 `repro_command`、`timeout_sec`、`cwd`、`pass_fail_evidence` 的 JSON 實體證據檔案
-  - [x] 在 `.nexus/reports/` 目錄下流式寫入 `.json` 證據包，將其路徑回傳給 `evidence_bundle`
-  - [x] 驗證並通過 P3 測試案例（綠燈）
-
-- [x] **P4: Sanitized Runner 的 UV 快取隔離與權限防禦**
-  - [x] 撰寫 `test_uv_cache_isolation.py` 快取與權限異常防禦測試案例（紅燈）
-  - [x] 修改 `AsyncProcessExecutor.run_async` 異步啟動時，自動注入 `UV_CACHE_DIR` 獨立環境變數至 workspace `.tmp/uv-cache`
-  - [x] 對 `PermissionError` 進行安全捕獲、日誌自癒報警與 fallback 降級處理
-  - [x] 驗證並通過 P4 測試案例（綠燈）
-
-- [x] **P5: Eligibility Completeness 與 Telemetry 遙測收口**
-  - [x] 撰寫預期 expected receipts 遙測與 eligibility 完整性測試（紅燈）
-  - [x] 升級 core/engine 的 `CapabilityReceipt` schema 欄位，新增 `telemetries`，更新 `is_claimable` 與 `public_claim_safe` 遙測限制門檻
-  - [x] 將遙測寫入 beliefs / closeout 合約，確保 promotion 流程完全對齊
-  - [x] 驗證並通過 P5 測試案例（綠燈）
-
-- [x] **Phase B: 物理鏈集成 (Chain Integration)**
-  - [x] `[MODIFY]` 注入 `scripts/core/parallel_spawner.py` (盔甲注入、Handoff 協議、超時回滾)
-  - [x] `[MODIFY]` 注入 `nexus/engine/phases/repair.py` (分身 JSON 回傳模式)
-  - [x] `[MODIFY]` 注入 `nexus/engine/coordinator.py` (收攏結果與知識結晶化)
-
-- [x] **Phase C: 終極驗收 (Verification)**
-  - [x] `[RUN]` 執行 `pytest tests/governance/test_subagent_armor.py`
-  - [x] `[RUN]` 執行 `nexus_cli.py nexus:status --aos-full`
-  - [x] `[DOC]` 產出 Walkthrough 分身治理結報
-雙子星報告
-- [x] **P11.1 環境清場與基建 (Infrastructure)**
-    - [x] `minikube delete --all --purge`
-    - [x] `brew install minikube kubectl helm`
-    - [x] `minikube start --nodes 5 --cpus 2 --memory 4096 --driver=docker`
-- [x] **P11.2 鏡像構建與模型密封 (Dockerfile)**
-    - [x] `docker build -t nexus:v18.4-ollama .` (密封 Llama 3.1)
-    - [x] `minikube image load nexus:v18.4-ollama`
-- [x] **P11.3 Swarm 集群佈署 (Deployment)**
-    - [x] `helm install nexus-swarm ./nexus-chart --namespace nexus --create-namespace`
-    - [x] `kubectl scale deployment nexus-swarm -n nexus --replicas=10`
-- [x] **P11.4 200 併發基準測試 (Benchmark)**
-    - [x] `benchmark_suite.py --k8s --tasks=200 --concurrency=20 --per-pod-limit=2`
-- [x] **P11.5 最終認證與回報 (Certification)**
-    - [x] 提取 `p11_swarm.log` 指標
-    - [x] 完成 v18.4 正式晉升對位
-
-## Track I：自動化回歸 (CI & Pytest) [x]
-- [x] **AUT-101 Pytest 規格化**: 重構 `tests/test_v9_regression_p1.py`。
-- [x] **AUT-102 CI Lane 實作**: 建立 `scripts/ci_gate.py` 無捲標自動化測試流。
-- [x] **AUT-103 測試補全**: 建立 `tests/test_llm_token_regex.py` 參數化驗證證據。
-
-## Track J：案例擴展 (Case Expansion) [x]
-- [x] **EXP-001 案例補齊至 10 個**: 覆蓋 Bug/Feature/DI/Fast/Audit 等情境。
-- [x] **EXP-002 批量 Replay 驗證**: 確保 10 個案例全數可跑且結果一致。
+### Phase 5: 治理收口與證據密封 (Governance & Sealing)
+- [x] **T5-1**: LocalHeal Adapter 標準化輸出：`selected`, `invoked`, `evidence_present`, `gate_passed`, `evidence_refs`, `telemetries`。
+- [x] **T5-2**: 對接 `evidence_barrier`，確保無證據、無密封的產物無法過 Gate。
 
 ---
-## Track K：難題 Wall Time & Token 底層物理優化 (Hardcore Physical Optimization)
-- [x] **PHY-101 增量 AST 圖掃描**
-- [x] **PHY-102 動態測試程式碼裁剪**
-- [x] **PHY-103 預設 Compact 模式**
-- [x] **PHY-104 實體連網 A/B 評測與數據對決**
 
----
-**核准狀態：Active Aligned (REALISM_S10 Certified)**
+## 📈 成功標準 (Acceptance Criteria)
+1. **漂移消除**: `astropy-13033` 的 Mismatch Feedback 不再跳向不相關的 `TypeError` 片段。 (Verified 🟢)
+2. **治理合規**: 每次成功 Run 必須產出含 `evidence_refs` 與 `telemetries` 的 `CapabilityReceipt`。 (Infrastructure Ready 🟢)
+3. **可歸因性**: 失敗日誌能明確分辨是 Matcher 漂移、Patcher Guard 拒絕、模型推理錯、還是 Verification 擋下。 (Verified 🟢)
 
-
+[NEXUS STATUS: Phase 0-5 COMPLETED]

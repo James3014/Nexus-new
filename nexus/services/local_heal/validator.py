@@ -16,14 +16,24 @@ def validate_name_sanity(code: str) -> Tuple[bool, str]:
     """
     檢查代碼中是否存在常見的 LLM 佔位符或拼寫錯誤 (Spirit Alignment)。
     """
+    scan_code = _code_without_docstrings_or_comments(code)
     slop_patterns = [
         r'placeholder', r'your_code_here', r'modify_this',
         r'\.\.\.', r'FIXME', r'TODO: implementation'
     ]
     for pattern in slop_patterns:
-        if re.search(pattern, code, re.IGNORECASE):
+        if re.search(pattern, scan_code, re.IGNORECASE):
             return False, f"Name sanity failed: Found disallowed placeholder pattern '{pattern}'"
     return True, ""
+
+
+def _code_without_docstrings_or_comments(code: str) -> str:
+    try:
+        tree = ast.parse(code)
+        tree = _strip_docstrings_and_comments(tree)
+        return ast.unparse(tree)
+    except Exception:
+        return code
 
 def _strip_docstrings_and_comments(node):
     """遞迴移除 AST 節點中的 docstrings。"""

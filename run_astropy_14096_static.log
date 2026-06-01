@@ -1,0 +1,9 @@
+🚀 Starting STATIC LocalHeal for astropy__astropy-14096-STATIC...
+Traceback (most recent call last):
+  File "/Users/jameschen/Workspace/nexus/run_astropy_14096_no_env.py", line 67, in <module>
+    main()
+    ~~~~^^
+  File "/Users/jameschen/Workspace/nexus/run_astropy_14096_no_env.py", line 49, in main
+    ctx.user_prompt = pipeline.budget_manager.build_initial_prompt(ctx.problem_statement, ctx.repro_evidence, ctx.localized_files)
+                      ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+AttributeError: 'ContextBudgetManager' object has no attribute 'build_initial_prompt'

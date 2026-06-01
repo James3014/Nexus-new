@@ -240,18 +240,18 @@ class DiffLibFuzzyMatcher:
         self.threshold = threshold
         self.normalizer = Normalizer()
 
-    def match(self, file_content: str, search_text: str, replace_text: str = "") -> Optional[MatchResult]:
+    def match(self, file_content: str, search_text: str, replace_text: str = "", context_hints: list[str] = None) -> Optional[MatchResult]:
         import difflib
         s_stripped = search_text.strip()
         if not s_stripped:
             return None
 
         from nexus.services.local_heal.closest_snippet import find_closest_snippet
-        closest = find_closest_snippet(file_content, s_stripped)
+        closest = find_closest_snippet(file_content, s_stripped, context_hints=context_hints)
         if not closest:
             return None
 
-        ratio = difflib.SequenceMatcher(None, s_stripped, closest).ratio()
+        ratio = difflib.SequenceMatcher(None, s_stripped, closest.strip()).ratio()
         if ratio >= self.threshold:
             return MatchResult(
                 strategy_name="DiffLibFuzzyMatcher",
@@ -276,11 +276,19 @@ class MatchChain:
         else:
             self.strategies = strategies
 
-    def find_match(self, file_content: str, search_text: str, replace_text: str = "") -> Optional[MatchResult]:
+    def find_match(self, file_content: str, search_text: str, replace_text: str = "", context_hints: list[str] = None) -> Optional[MatchResult]:
         for strategy in self.strategies:
-            res = strategy.match(file_content, search_text, replace_text)
-            if res is not None:
-                return res
+            # 支援動態分發 context_hints 到支援它的策略
+            if hasattr(strategy, "match"):
+                import inspect
+                sig = inspect.signature(strategy.match)
+                if "context_hints" in sig.parameters:
+                    res = strategy.match(file_content, search_text, replace_text, context_hints=context_hints)
+                else:
+                    res = strategy.match(file_content, search_text, replace_text)
+                
+                if res is not None:
+                    return res
         return None
 
 
