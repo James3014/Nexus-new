@@ -127,16 +127,20 @@ def build_dataset_task(
     env_profile: str = "python-default",
     manifest_task_id: str | None = None,
     expected_stop_layer: str = "verification",
+    expected_reason_family: str = "SOLVED",
     probe_goal: str = "general-repair",
 ) -> dict[str, Any]:
+    # Use manifest_task_id if available to avoid report path collisions
+    instance_id = manifest_task_id if manifest_task_id else item["instance_id"]
     return {
-        "instance_id": item["instance_id"],
+        "instance_id": instance_id,
         "manifest_task_id": manifest_task_id,
         "repo": item["repo"],
         "commit": item["base_commit"],
         "problem_statement": item["problem_statement"],
         "env_profile": env_profile,
         "expected_stop_layer": expected_stop_layer,
+        "expected_reason_family": expected_reason_family,
         "probe_goal": probe_goal,
         "local_mode": False,
     }
@@ -161,6 +165,7 @@ def build_tasks_from_manifest_specs(
                     env_profile=spec.env_profile,
                     manifest_task_id=spec.task_id,
                     expected_stop_layer=spec.expected_stop_layer,
+                    expected_reason_family=spec.expected_reason_family,
                     probe_goal=spec.probe_goal,
                 )
             )
@@ -269,6 +274,9 @@ def build_result_row(task: dict[str, Any], res_ctx: Any) -> dict[str, Any]:
         "solve_eligible": bool(getattr(res_ctx, "solve_eligible", False)),
         "failure_reason": failure_reason_for_result(res_ctx),
         "receipt_path": getattr(res_ctx, "receipt_path", ""),
+        "wall_time_sec_measured": float(getattr(res_ctx, "wall_time_sec", 0.0) or 0.0),
+        "token_telemetry_status": str(getattr(res_ctx, "token_telemetry_status", "not_applicable") or "not_applicable"),
+        "token_total_estimated": int(getattr(res_ctx, "token_total_estimated", 0) or 0),
     }
 
 
@@ -421,7 +429,11 @@ def main():
                     ctx.repro_script = task["repro_script"]
                     ctx.localized_files = localized_files_for_task(task)
                     apply_env_resolution(ctx, env_resolution)
+                    import time
+                    start_wall = time.time()
                     res_ctx = pipeline.run(ctx)
+                    res_ctx.wall_time_sec = time.time() - start_wall
+                    res_ctx.token_telemetry_status = "estimated"
                 else:
                     repo_dir = tmp / iid.replace("/", "__").replace(".", "_")
                     if repo_dir.exists():
@@ -461,7 +473,11 @@ def main():
                     if args.repro_script_file:
                         ctx.repro_script = Path(args.repro_script_file).read_text(encoding="utf-8")
                     apply_env_resolution(ctx, env_resolution)
+                    import time
+                    start_wall = time.time()
                     res_ctx = pipeline.run(ctx)
+                    res_ctx.wall_time_sec = time.time() - start_wall
+                    res_ctx.token_telemetry_status = "estimated"
 
                 if res_ctx.solve_eligible:
                     print("  ✅ SUCCESS: Solve eligible!")

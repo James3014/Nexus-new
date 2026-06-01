@@ -35,7 +35,7 @@ def _error_reason(ctx: Any) -> str:
 
 
 def _failure_class(ctx: Any) -> str:
-    reason = _error_reason(ctx)
+    reason = str(_error_reason(ctx))
     if "AttributeError" in reason or "has no attribute" in reason:
         return "hallucinated_api"
     if "MODEL_TIMEOUT" in reason:
@@ -44,11 +44,11 @@ def _failure_class(ctx: Any) -> str:
         return "oom"
     if "syntax" in reason.lower() or "IndentationError" in reason:
         return "syntax_invalid"
-    if "ENV_" in reason or "ImportError" in reason:
+    if any(kw in reason for kw in ["ENV_", "ENVIRONMENT", "ImportError", "VIOLATION", "MISSING", "REPRO_"]):
         return "env_noise"
-    if "NO_BLOCKS_FOUND" in reason or "NO_PATCH" in reason:
+    if "NO_BLOCKS_FOUND" in reason or "NO_PATCH" in reason or "SEARCH_MISMATCH" in reason or "REFUSAL" in reason:
         return "patch_mismatch"
-    if "VERIFICATION_FAILED" in reason or "AssertionError" in reason:
+    if "VERIFICATION_FAILED" in reason or "AssertionError" in reason or "LOGIC_REGRESSION" in reason:
         return "semantic_wrong"
     return "unknown"
 
@@ -111,6 +111,21 @@ def build_repair_receipt(ctx: Any, *, model_name: str = "nexus-local-heal") -> d
     family_matched = (actual_family == expected_family)
     stop_layer_matched = layer_matched and family_matched
 
+    # 萃取模型分工資訊
+    search_model = "unknown"
+    patch_model = "unknown"
+    for decision in model_decisions:
+        phase = decision.get("phase")
+        model = decision.get("model", "unknown")
+        if phase in ["planning", "reproduction"]:
+            search_model = model.split(":")[-1] if ":" in model else model
+        elif phase == "patch":
+            patch_model = model.split(":")[-1] if ":" in model else model
+
+    model_split = f"search={search_model}/patch={patch_model}"
+    if not any(d.get("model") for d in model_decisions):
+        model_split = "rescue=0-call"
+
     return {
         "schema": "nexus.local_heal.repair_receipt.v1",
         "instance_id": getattr(ctx, "instance_id", ""),
@@ -127,7 +142,7 @@ def build_repair_receipt(ctx: Any, *, model_name: str = "nexus-local-heal") -> d
         "eval_metrics": {
             "repro_status": repro_status,
             "failure_class": actual_family,
-            "model_phase_split": f"search=7b/patch={ctx.telemetries.get('patch_model', '7b')}/rescue=0-call" if hasattr(ctx, 'telemetries') else "unknown",
+            "model_phase_split": model_split,
             "context_bytes_before_after": f"{getattr(ctx, 'initial_ctx_len', 0)}/{getattr(ctx, 'final_ctx_len', 0)}",
             "resolved_span_len": int(getattr(ctx, "resolved_span_len", 0) or 0),
             "retry_count": int(getattr(ctx, "attempt", 0) or 0),
@@ -137,7 +152,16 @@ def build_repair_receipt(ctx: Any, *, model_name: str = "nexus-local-heal") -> d
             "stop_layer_matched": stop_layer_matched,
             "layer_matched": layer_matched,
             "family_matched": family_matched,
-            "claimability": "public_safe" if getattr(ctx, "solve_eligible", False) else "observation_only"
+            "wall_time_sec_measured": float(getattr(ctx, "wall_time_sec", 0.0) or 0.0),
+            "token_telemetry_status": str(getattr(ctx, "token_telemetry_status", "not_applicable") or "not_applicable"),
+            "token_total_estimated": int(getattr(ctx, "token_total_estimated", 0) or 0),
+            "syntax_gate_passed": bool(getattr(ctx, "syntax_gate_passed", True)),
+            "claimability": "public_safe" if getattr(ctx, "solve_eligible", False) else "observation_only",
+            "diagnostics": {
+                "prompt_variant_id": str(getattr(ctx, "prompt_variant_id", "default") or "default"),
+                "refusal_detected": bool(getattr(ctx, "refusal_detected", False)),
+                "empty_response": bool(getattr(ctx, "empty_response", False)),
+            }
         },
         "patch_paths": patch_paths,
         "evidence_refs": [

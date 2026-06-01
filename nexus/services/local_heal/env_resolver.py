@@ -105,6 +105,21 @@ ENV_REQUIREMENTS: dict[str, EnvRequirement] = {
         override_env_var="NEXUS_ASTROPY_311_PYTHON",
         auto_heal_enabled=False,
     ),
+    "astropy-311-modern": EnvRequirement(
+        profile="astropy-311-modern",
+        python_candidates=(
+            ".venv_astropy_311/bin/python",
+            "python3.11",
+        ),
+        allowed_python=((3, 11),),
+        required_imports=("numpy", "extension_helpers", "setuptools", "typing.Self"),
+        package_constraints={},
+        missing_reason="ASTROPY_311_MODERN_VERSION_PARITY_MISSING",
+        dependency_missing_reason="ASTROPY_311_MODERN_DEPENDENCY_MISSING",
+        constraint_violation_reason="ASTROPY_311_MODERN_NUMPY_VERSION_VIOLATION",
+        override_env_var="NEXUS_ASTROPY_311_MODERN_PYTHON",
+        auto_heal_enabled=True,
+    ),
 }
 
 

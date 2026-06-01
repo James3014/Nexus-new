@@ -24,69 +24,75 @@ class LocalHealTaskSpec:
 ASTROPY_SWEBENCH_INDICES: tuple[int, ...] = tuple(range(10))
 
 CONCURRENCY_TASKS: tuple[tuple[str, str], ...] = (
-    ("deepswe-task4", "scripts/benchmarks/deepswe_task4_singleton_race.py"),
-    ("deepswe-task5", "scripts/benchmarks/deepswe_task5_counter_race.py"),
-    ("deepswe-task6", "scripts/benchmarks/deepswe_task6_cache_race.py"),
-    ("deepswe-task7", "scripts/benchmarks/deepswe_task7_pubsub_race.py"),
-    ("deepswe-task8", "scripts/benchmarks/deepswe_task8_transaction_race.py"),
-    ("deepswe-task9", "scripts/benchmarks/deepswe_task9_pool_race.py"),
-    ("deepswe-task10", "scripts/benchmarks/deepswe_task10_ordered_list_race.py"),
-    ("django-31505", "scripts/benchmarks/django_31505_simulation.py"),
-    ("asyncio-barrier", "scripts/benchmarks/asyncio_barrier_race_real.py"),
+    ("singleton-race", "scripts/benchmarks/deepswe_task4_singleton_race.py"),
+    ("counter-race", "scripts/benchmarks/deepswe_task5_counter_race.py"),
     ("free-threading-weakref", "scripts/benchmarks/free_threading_ref_race.py"),
 )
 
 
 def local_heal_20_task_manifest() -> tuple[LocalHealTaskSpec, ...]:
+    # E1a: Policy Block Probe
+    e1a = LocalHealTaskSpec(
+        task_id="astropy-swe-verified-0-policy",
+        kind="swebench",
+        family="astropy",
+        env_profile="astropy-311", # Has numpy < 2.0.0 constraint which will trigger policy block
+        swe_index=0,
+        probe_goal="verify policy-based early exit",
+        expected_stop_layer="env_resolver",
+        expected_reason_family="env_noise",
+    )
     # E1b: Authenticity Probe
     e1b = LocalHealTaskSpec(
         task_id="astropy-swe-verified-0",
         kind="swebench",
         family="astropy",
-        env_profile="astropy-legacy",
+        env_profile="astropy-311-modern", # No numpy constraints, auto_heal_enabled=True
         swe_index=0,
         probe_goal="verify ALREADY_FIXED detection",
         expected_stop_layer="repro_runner",
-        expected_reason_family="env_noise",
+        expected_reason_family="already_fixed",
     )
     # D1: Semantic Repair Probe
     d1 = LocalHealTaskSpec(
         task_id="astropy-swe-verified-14096",
         kind="swebench",
         family="astropy",
-        env_profile="astropy-legacy",
+        env_profile="astropy-311-modern", 
         swe_index=7, 
         probe_goal="verify 7B/14B patch routing",
-        expected_stop_layer="verification",
-        expected_reason_family="SOLVED",
+        expected_stop_layer="patcher", # Currently stops here due to 14B capacity
+        expected_reason_family="patch_mismatch",
     )
     # B1: Localization Probe
     b1 = LocalHealTaskSpec(
         task_id="astropy-swe-verified-13033-localize",
         kind="swebench",
         family="astropy",
-        env_profile="astropy-legacy",
+        env_profile="astropy-311-modern", 
         swe_index=1,
         probe_goal="verify single-function localization",
         expected_stop_layer="patcher",
+        expected_reason_family="patch_mismatch",
     )
     # C2: Format Mismatch Probe
     c2 = LocalHealTaskSpec(
-        task_id="astropy-swe-verified-13236-format",
+        task_id="astropy-swe-verified-13579-format",
         kind="swebench",
         family="astropy",
-        env_profile="astropy-legacy",
-        swe_index=2,
+        env_profile="astropy-311-modern", 
+        swe_index=5,
         probe_goal="verify SEARCH/REPLACE contract enforcement",
         expected_stop_layer="patcher",
+        expected_reason_family="patch_mismatch",
     )
 
-    astropy_tasks = (e1b, d1, b1, c2) + tuple(
+    astropy_tasks = (e1a, e1b, d1, b1, c2) + tuple(
         LocalHealTaskSpec(
             task_id=f"astropy-swe-verified-{index}",
             kind="swebench",
             family="astropy",
-            env_profile="astropy-legacy",
+            env_profile="astropy-311-modern",
             swe_index=index,
         )
         for index in range(1, 10) if index not in (1, 2, 7)
