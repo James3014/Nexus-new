@@ -1,0 +1,32 @@
+# Nexus Rust Migration: Move-Now List (Phase 1)
+# 根據 Runtime Profiling 與 ROI 評級鎖定的首批遷移模組
+
+priority_modules:
+  - name: "FastMatcher / AST Scanner"
+    target: "lib.rs / scanner.rs"
+    problem: "O(K*N) Redundant file scanning (avg 8.2s impact)."
+    roi: "CRITICAL"
+    status: "READY_FOR_SPEC"
+
+  - name: "SafePipe / Runner Kernel"
+    target: "lib.rs / process.rs"
+    problem: "Pipe buffer saturation deadlocks (up to 45s loss)."
+    roi: "HIGH"
+    status: "READY_FOR_SPEC"
+
+  - name: "FlowStateMachine"
+    target: "lib.rs / state_machine.rs"
+    problem: "GIL contention in Oracle dispatcher (2.1s overhead)."
+    roi: "MEDIUM"
+    status: "ALIGNED_WITH_7B_SKELETON"
+
+  - name: "ReceiptVerifier / Sealer"
+    target: "lib.rs / receipt.rs"
+    problem: "Evidence sealing barrier needs fail-closed physical implementation."
+    roi: "SAFETY_MANDATORY"
+    status: "GOVERNANCE_LOCKED"
+
+non_rust_boundary:
+  - "External Capability Policy (JSON)"
+  - "Task Route Policy (Dynamic)"
+  - "Commercial Cost Gates"

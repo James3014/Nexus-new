@@ -41,6 +41,8 @@ class TaskNode:
     criteria_passed: bool = False
     belief_confidence: float = 1.0  # [Belief] 注入
 
+from nexus.bridge.fast_matcher import FastMatcherBridge
+
 class CampaignGeneral:
     """
     指揮官層級：負責史詩級 DAG 規劃與 L3 並行調度。
@@ -51,6 +53,7 @@ class CampaignGeneral:
         self.max_nodes = 25  # 史詩級任務上限
         self.burst_count = 0
         self.weights = self.load_feedback_weights()
+        self.matcher = FastMatcherBridge(project_root)
 
     def load_feedback_weights(self) -> Dict[str, float]:
         """從歷史報告載入回饋權重。"""
@@ -119,6 +122,10 @@ class CampaignGeneral:
         [P] Plan: 史詩級拆解引擎 (L4 DecompositionAgent)
         根據 macro_intent 的複雜度、關鍵字與 學習權重，動態生成任務圖。
         """
+        # 🧪 [Shadow Mode] 執行感知掃描並進行 Rust 對位
+        perception_patterns = ["*.py", "Cargo.toml", "Dockerfile*"]
+        self.matcher.scan(perception_patterns, use_shadow=True)
+
         if seed is not None:
             import random
             random.seed(seed)
