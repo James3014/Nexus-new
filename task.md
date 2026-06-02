@@ -43,3 +43,20 @@
 3. **Rust 就緒**: 完成 `RUST_MIGRATION_MAP_V1`，核心模組邊界清晰。 (VERIFIED)
 
 [NEXUS STATUS: PRE-RUST HARDENING PROGRAM FULLY COMPLETED AND SEALED]
+
+# 🦀 Nexus Master Plan: Rust Migration (v9.0)
+
+## 🎯 核心目標
+將穩定核心模組遷移至 Rust Kernel，提升效能並固化治理邏輯。
+
+## 📅 當前主線 (Mainline: Phase R1 & R2)
+
+### Phase R1: Rust Kernel Scaffold (地基)
+- [x] **TR1.1**: 建立 Rust Kernel Crate (`nexus-core-rs`) (DONE).
+- [x] **TR1.2**: 實裝 JSON IPC 橋接邊界與 Python 適配器 (DONE).
+- [x] **TR1.3**: 整合 Smoke Test 與 CI 骨架 (DONE).
+
+### Phase R2: AST Scanner & Move-Later Modules (效能與治理)
+- [x] **TR2.1**: 實裝 Single-pass AST State Machine 掃描器 (DONE).
+- [x] **TR2.2**: 建立 O(N) 掃描驗證、回放引擎與污染檢查核心 (DONE).
+- [x] **TR2.3**: 整合全模組 Dual-run 測試集 (DONE).
