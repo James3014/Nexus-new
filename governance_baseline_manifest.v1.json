@@ -1,0 +1,35 @@
+{
+  "schema_version": "governance_baseline_manifest.v1",
+  "identity": {
+    "commit_sha": "708b362ea",
+    "nexus_version": "v3.0.9",
+    "status": "FULL_HORIZON_SEALED"
+  },
+  "governance_chain": {
+    "A_research": {
+      "policy": "ResearchIsolationPolicy.v1",
+      "receipt": "research_receipt.v1",
+      "gate": "ContaminationGuard"
+    },
+    "B_route": {
+      "policy": "RouteDecisionRationale.v1",
+      "receipt": "route_decision_receipt.v1",
+      "registry": "RouteRationaleCode"
+    },
+    "C_prepatch": {
+      "policy": "PrePatchPreparationPolicy.v1",
+      "receipt": "pre_patch_input_receipt.v1",
+      "boundary": "patch_invocation_boundary_receipt.v1"
+    },
+    "D_autonomy": {
+      "policy": "LocalModelSuitabilityMatrix.v1",
+      "receipt": "autonomy_observation_receipt.v1",
+      "thresholds": {
+        "success_rate": 0.8,
+        "syntax_pass_rate": 0.9
+      }
+    }
+  },
+  "freeze_date": "2026-06-02",
+  "promotion_allowed": false
+}
