@@ -1,32 +1,31 @@
-# 🧬 Nexus Phase 7: Controlled Experiment & Autonomy Operations
+# 🛡️ Nexus Master Plan: Pre-Rust Hardening (v8.0)
 
 ## 🎯 核心目標
-將已封存的 A-D 治理鏈轉化為可持續的運行制度。透過 270 天的受控實驗與分階段放行，在維持 fail-closed 的前提下，實現數據驅動的成本自治與效能優化。
+在 Rust 遷移前，將 Nexus 升級為具備「前置作業系統」能力的自治框架。實裝 9-15 號工程標準，包含程式化流程控制、CRISPY 文件契約與預算治理。
 
-## 📅 實作里程碑 (2026-06-02 ~ 2027-03-01)
+## 📅 當前主線 (Mainline: Stage 0 & 1)
 
-### Milestone 1: Phase 7-A 治理基線凍結 (Baseline Freeze)
-- [ ] **T7.1**: 發布 `governance_baseline_manifest.v1.json`，鎖定 Commit `708b362ea`。
-- [ ] **T7.2**: 建立 `failure_taxonomy_v1.md`，統一 A-D 段失敗定義。
-- [ ] **T7.3**: 建立 A/B/C/D 四段 Replay 樣本池與自動化驗證。
+### Stage 0: Baseline Alignment (基線對齊)
+- [ ] **T8.0.1**: 修正 Master 與 Index 身份標識分叉 (`v3.1.0` vs `v3.1.1`)。
+- [ ] **T8.0.2**: 建立 `PRE_RUST_HARDENING_SPEC.md` 母文件。
+- [ ] **T8.0.3**: 封存 Stage 0 對齊報告。
 
-### Milestone 2: Phase 7-B 受控實驗擴張 (Observation Expansion)
-- [ ] **T7.4**: 執行 30-90 天的 Observation-only 擴大樣本收集。
-- [ ] **T7.5**: 產出月度治理指標板 (Governance Dashboard)。
+### Stage 1: Intent & Flow Control (流程控制)
+- [ ] **T8.1.1**: 實裝 `IntentIntakeClassifier`，判定 `interaction_mode`。
+- [ ] **T8.1.2**: 實裝程式化狀態機，攔截非法跳步 (e.g., Skip Design)。
+- [ ] **T8.1.3**: 新增 `state_transition_receipt.v1` 審計收據。
 
-### Milestone 3: Phase 7-C 策略收斂與政策化 (Policy Formulation)
-- [ ] **T7.6**: 定義各任務類別 (Task Class) 的 Autonomy Policy 分級。
-- [ ] **T7.7**: 實裝一鍵回滾 (One-click Rollback) 與 RCA 模板。
-
-### Milestone 4: Phase 7-D 有限放行與自治實驗 (Limited Rollout)
-- [ ] **T7.8**: 啟動特定類別的窄門 Canary 實驗。
-- [ ] **T7.9**: 產出最終自治效能結案報告。
+### Stage 2-5: CRISPY & Budget (預告)
+- [ ] **T8.2**: CRISPY 五文件產物實體化。
+- [ ] **T8.3**: 垂直切規劃器 (Vertical Slice Planner) 實裝。
+- [ ] **T8.4**: 指令預算守衛 (Budget Governor) 實裝。
 
 ---
 
 ## 📈 成功標準 (Acceptance Criteria)
-1. **基線不動**: 任何優化實驗不得導致 stop-layer 一致性下滑。
-2. **數據完整**: 100% 的 Canary Run 必須具備對應的理由碼與邊界收據。
-3. **治理守恆**: 維持 `Promotion Effect: NONE`，不污染公共門禁。
+1. **流程強制**: 系統能物理阻斷未經 Design 確認的 EXECUTE 請求。
+2. **證據連續**: 每一項實作必須具備 `Design -> Outline -> Plan` 的完整 MD 證據鏈。
+3. **Rust 就緒**: 完成 `RUST_MIGRATION_MAP_V1`，核心模組邊界清晰。
 
-[NEXUS STATUS: PHASE 7 OPERATIONS INITIATED]
+[NEXUS STATUS: PRE-RUST HARDENING PROGRAM INITIATED]
+
