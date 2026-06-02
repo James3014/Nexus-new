@@ -1,9 +1,9 @@
 # 🛡️ Nexus Pre-Rust Hardening Specification (v1.0)
 ## From Governance Components to Autonomous Operating System
 
-> **Status**: IN PROGRESS (Stage 4 Sealed)
-> **Latest Commit SHA**: 272398387
-> **Nexus Identity**: 272398387 + v3.2.4 RUNTIME-ALIGNED
+> **Status**: COMPLETED (All Stages Sealed)
+> **Latest Commit SHA**: 58cc591b2
+> **Nexus Identity**: 58cc591b2 + v3.2.7 RUNTIME-ALIGNED
 > **Position**: This specification integrates engineering standards 9-15 to build a formalized "Front-end Operating System" before Rust migration.
 > **Objective**: Implement programmable flow control, CRISPY documentation artifacts, and budget-aware autonomy.
 
@@ -18,8 +18,8 @@
 | **Stage 2** | CRISPY Documents | 實體化 `Questions`, `Research`, `Design`, `Outline`, `Plan` 產物。 | **SEALED** |
 | **Stage 3** | Vertical Slice Planning| 強制垂直增量實作契約，禁止水平切分。 | **SEALED** |
 | **Stage 4** | Instruction Budget | 實裝 `BudgetGovernor` 與自動 Compaction 記錄。 | **SEALED** |
-| **Stage 5** | Team Alignment Gate | 將人類對齊 (Human Review) 前移至設計與大綱階段。 | **IN-PROGRESS** |
-| **Stage 6** | Rust Readiness | 產出 `RUST_MIGRATION_MAP_V1` 與模組分級。 | PLANNED |
+| **Stage 5** | Team Alignment Gate | 將人類對齊 (Human Review) 前移至設計與大綱階段。 | **SEALED** |
+| **Stage 6** | Rust Readiness | 產出 `RUST_MIGRATION_MAP_V1` 與模組分級。 | **SEALED** |
 
 ---
 
@@ -47,6 +47,11 @@
 - **Action**: Auto-downgrade (Summarize history -> Targeted retrieval -> Facts-only research).
 - **Output**: `task_compaction_receipt.v1` with compression ratio and reason codes.
 
+### C5. Team Alignment Gate
+- **Input**: `alignment_approval_receipt.v1`.
+- **Checkpoint**: Must obtain explicit approval for Design/Outline before entering Plan/Execute.
+- **Handoff**: Generate `handoff_bundle.v1` for reviewer visibility.
+
 ---
 
 ## 3. 治理出口與 Blocker Codes
@@ -55,6 +60,7 @@
 - `RESEARCH_CONTAINS_DESIGN`: 研究階段設計污染攔截。
 - `HORIZONTAL_SLICE_DETECTED`: 水平切分大綱攔截。
 - `BUDGET_PRESSURE_CRITICAL_EXECUTION_BLOCKED`: 預算超限強制攔截。
+- `DESIGN_APPROVAL_REQUIRED`: 設計未核准攔截。
 
 ---
-**NEXUS IDENTITY: 272398387 + v3.2.4 RUNTIME-ALIGNED**
+**NEXUS IDENTITY: 58cc591b2 + v3.2.7 RUNTIME-ALIGNED**
