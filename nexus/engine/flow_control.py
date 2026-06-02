@@ -78,21 +78,12 @@ class IntentIntakeClassifier:
 
 
 class FlowStateMachine:
-    """Stage 1: 程式化狀態機，強制執行合法流程轉移"""
+    """Stage 2: Rust 驅動的狀態機，強制執行合法流程轉移"""
 
-    VALID_TRANSITIONS = {
-        FlowState.INTAKE: [FlowState.CLARIFY, FlowState.OUTLINE, FlowState.PLAN],
-        FlowState.CLARIFY: [FlowState.OUTLINE, FlowState.RESEARCH, FlowState.ESCALATE],
-        FlowState.OUTLINE: [FlowState.PLAN, FlowState.RESEARCH, FlowState.REPLAN],
-        FlowState.RESEARCH: [FlowState.DESIGN, FlowState.OUTLINE, FlowState.PLAN], # Note: DESIGN will be added in Stage 2
-        FlowState.PLAN: [FlowState.EXECUTE, FlowState.REPLAN, FlowState.HUMAN_REVIEW],
-        FlowState.EXECUTE: [FlowState.VERIFY, FlowState.ESCALATE],
-        FlowState.VERIFY: [FlowState.CLOSE, FlowState.REPLAN],
-        FlowState.REPLAN: [FlowState.PLAN, FlowState.OUTLINE],
-        FlowState.HUMAN_REVIEW: [FlowState.PLAN, FlowState.CLOSE, FlowState.BLOCKED_POLICY],
-    }
+    def __init__(self):
+        from nexus.engine.governance_bridge import GovernanceBridge
+        self.bridge = GovernanceBridge()
 
     def validate_transition(self, current: FlowState, next_state: FlowState) -> bool:
-        if current == next_state:
-            return True
-        return next_state in self.VALID_TRANSITIONS.get(current, [])
+        # 將 Python 枚舉轉為字串傳遞給 Rust
+        return self.bridge.can_transition(current.value, next_state.value)
