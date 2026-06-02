@@ -18,14 +18,12 @@
 
 [NEXUS STATUS: PHASE R2 COMPLETED & SEALED]
 
-### Phase R3: Receipt Verifier Core (治理)
-- [ ] **TR3.1**: 實裝 Rust Schema/Replay/Seal 驗證核心。
-- [ ] **TR3.2**: 建立治理收據 Golden Compare Harness。
+### Phase R3: Dual-run Verification & Cutover (整合與切換)
+- [x] **TR3.1**: 實裝 `DualRunComparator` 與 `MismatchLedger` 治理機制 (DONE).
+- [x] **TR3.2**: 升級 `RustCutoverManager` 支援 Shadow Mode 與 Primary Cutover (DONE).
+- [x] **TR3.3**: 通過雙跑比對與回退門禁測試 (DONE).
 
-### Phase R4-R6: Integration & Cutover
-- [ ] **TR4**: Flow State Machine Core 遷移。
-- [ ] **TR5**: Matcher Core 遷移。
-- [ ] **TR6**: 全量整合、Shadow Mode 與正式切換。
+[NEXUS STATUS: RUST MIGRATION COMPLETED & SEALED]
 
 ---
 

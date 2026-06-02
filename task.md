@@ -60,3 +60,8 @@
 - [x] **TR2.1**: 實裝 Single-pass AST State Machine 掃描器 (DONE).
 - [x] **TR2.2**: 建立 O(N) 掃描驗證、回放引擎與污染檢查核心 (DONE).
 - [x] **TR2.3**: 整合全模組 Dual-run 測試集 (DONE).
+
+### Phase R3: Dual-run Verification & Cutover (整合與切換)
+- [x] **TR3.1**: 實裝 `DualRunComparator` 與 `MismatchLedger` 治理機制 (DONE).
+- [x] **TR3.2**: 建立 Shadow Mode 與 Primary Cutover 灰度切換機制 (DONE).
+- [x] **TR3.3**: 通過跨語言行為一致性審計 (DONE).
