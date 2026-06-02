@@ -3,7 +3,7 @@ use pyo3::prelude::*;
 pub mod governance;
 
 use crate::governance::types::FlowState;
-use crate::governance::state_machine::TransitionGuard;
+use crate::governance::transition_engine::TransitionEngine;
 use crate::governance::normalizer::IntentNormalizer;
 
 #[pyfunction]
@@ -11,7 +11,7 @@ use crate::governance::normalizer::IntentNormalizer;
 fn can_transition_py(from: &str, to: &str) -> PyResult<bool> {
     let from_enum = match_state(from);
     let to_enum = match_state(to);
-    Ok(TransitionGuard::can_transition(from_enum, to_enum).is_ok())
+    Ok(TransitionEngine::can_transition(from_enum, to_enum).is_ok())
 }
 
 #[pyfunction]

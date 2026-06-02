@@ -56,12 +56,12 @@ mod tests {
     use serde_json;
 
     #[test]
-    fn test_flow_state_serialization() {
-        let state = FlowState::Intake;
-        let serialized = serde_json::to_string(&state).unwrap();
-        assert_eq!(serialized, "\"Intake\"");
+    fn test_type_stability() {
+        let state = FlowState::Research;
+        let s = serde_json::to_string(&state).unwrap();
+        assert_eq!(s, "\"Research\"");
         
-        let deserialized: FlowState = serde_json::from_str("\"Intake\"").unwrap();
-        assert_eq!(deserialized, state);
+        let d = Decision::Allow;
+        assert_eq!(serde_json::to_string(&d).unwrap(), "\"Allow\"");
     }
 }
