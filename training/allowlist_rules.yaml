@@ -1,0 +1,41 @@
+# Nexus Skeleton Weight-Inclusion Allowlist (v1.1)
+# 定義哪些規則與邏輯可進權重 (SFT)，哪些必須維持在外部 Runtime (Nexus Control Plane)
+
+governance_rules:
+  - name: "P-X-D-R-A-C Phase Transitions"
+    type: "Workflow"
+    action: "INCLUDE"
+    reason: "42% stable path ratio; fundamental brain-stem logic."
+    
+  - name: "Hallucination Hard Floor (Language)"
+    type: "Safety"
+    action: "INCLUDE"
+    reason: "Internalize the 'tone' and 'checking patterns' of defense."
+    external_guard_required: true  # 必須保留外部 HallucinationGuard 評分機制
+    
+  - name: "Receipt-lite Rescue Syntax"
+    type: "Recovery"
+    action: "INCLUDE"
+    reason: "0 model call rescue syntax is deterministic and stable."
+    external_guard_required: true  # 必須保留 external_capability_policy 控制權，模型僅負責建議與語法，不自授權。
+    
+  - name: "Oracle Route Policy"
+    type: "Dynamic"
+    action: "EXCLUDE"
+    reason: "High change frequency (9 changes/90d); must stay in external JSON."
+    
+  - name: "Provider Cost Gates"
+    type: "Telemetry"
+    action: "EXCLUDE"
+    reason: "External business logic; changes based on pricing/credits."
+
+output_formats:
+  - name: "Verification Receipt Schema"
+    type: "Format"
+    action: "INCLUDE"
+    reason: "Model should output ready-to-seal JSON receipts by default."
+    
+  - name: "Patch Algebra (Syntax)"
+    type: "Technical"
+    action: "EXCLUDE"
+    reason: "Reserved for 14B; 7B focuses on 'where' to patch, not 'how'."

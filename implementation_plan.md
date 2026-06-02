@@ -17,11 +17,16 @@ LocalHeal 已完成多階段編排、7B/14B 分流與治理收口。審計數據
 *   **Task 4E — Prompt Purity Spike**: 在觀測分流下實驗極簡 Aider 提示詞契約。
 *   **Task 4F — Refusal Recovery Spike**: 實驗拒絕感知補償指令。
 
-### 🚩 Milestone 4: Phase 5 Controlled Canary (受控實戰驗證)
-*   **Task 5A — Canary Execution Contract**: 建立正式的 Canary 執行契約、Runbook 與 Checklist。
-*   **Task 5B — Small-Scale Canary Run**: 執行第一輪小流量驗證，量測 Stop-layer 一致性與成本改善。
-*   **Task 5C — Failure Bucket Convergence**: 針對 `SYNTAX_INVALID`、`SEARCH_MISMATCH` 等高頻失敗桶進行定向優化。
-*   **Task 5D — Closeout & Recommendation**: 產出最終審計結論（HOLD / EXPAND / REVERT）。
+### 🚩 Milestone 4: Phase 5 Controlled Canary Governance (治理收斂)
+*   **Task 5A — Canary Execution Contract**: 建立正式的 Canary 執行契約、Runbook 與 Checklist (Completed)。
+*   **Task 5B — Governance Baseline Sealing**: 以前序 Phase 4 Probe 數據作為准入基線，封存治理邊界 (Sealed)。
+*   **Task 5C — Small-Scale Canary Ready**: 準備第一輪小流量驗證樣本，定義 Canary Receipt Schema。
+
+### 🚩 Milestone 5: Phase 6 Implementation Plan Formalization (架構封裝)
+*   **Workstream A — Research Isolation Policy**: 定義 L0-L2 隔離分級與研究收據合約 (Plan Formalized)。
+*   **Workstream B — Route Decision Intelligence**: 建立路由可解釋性 Rationale 與原因碼註冊表 (Plan Formalized)。
+*   **Workstream C — Pre-Patch Preparation Layer**: 定義補丁前置預處理與 Reject Taxonomy (Plan Formalized)。
+*   **Workstream D — Cost-Aware Autonomy**: 定義 observation-only 本地模型適配度基準 (Plan Formalized)。
 
 ## 3. 執行原則 (Principles)
 - **Measured-Only**: 所有新增遙測維持 observation-only，不影響 public claim 或 promotion 門禁。
