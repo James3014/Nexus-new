@@ -29,12 +29,21 @@ fn normalize_intent_py(raw: &str) -> PyResult<Option<(String, String, String, St
 }
 
 fn match_state(s: &str) -> FlowState {
-    // 🛡️ 委託給 Normalizer 的解析邏輯，確保 SSOT。
-    // 這是一個特殊的簡化版本，用於 Bridge 入口。
-    let mock_label = format!("P:{}", s);
-    match IntentNormalizer::normalize(&mock_label) {
-        Ok(intent) => intent.phase,
-        Err(_) => FlowState::Unknown
+    match s.to_uppercase().as_str() {
+        "PLAN" | "P" => FlowState::Plan,
+        "EXECUTE" | "X" | "D" => FlowState::Execute,
+        "VERIFY" | "R" => FlowState::Verify,
+        "INTAKE" | "S" => FlowState::Intake,
+        "CLOSE" | "A" | "C" => FlowState::Close,
+        "ESCALATE" => FlowState::Escalate,
+        "STOP" => FlowState::Stop,
+        "CLARIFY" => FlowState::Clarify,
+        "OUTLINE" => FlowState::Outline,
+        "RESEARCH" => FlowState::Research,
+        "DESIGN" => FlowState::Design,
+        "REPLAN" => FlowState::Replan,
+        "HUMAN_REVIEW" => FlowState::HumanReview,
+        _ => FlowState::Unknown,
     }
 }
 

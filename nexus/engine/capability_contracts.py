@@ -23,6 +23,8 @@ class FlowState(str, Enum):
     HUMAN_REVIEW = "HUMAN_REVIEW"
     BLOCKED_BUDGET = "BLOCKED_BUDGET"
     BLOCKED_POLICY = "BLOCKED_POLICY"
+    STOP = "STOP"
+    UNKNOWN = "UNKNOWN"
 
 
 @dataclass(frozen=True)

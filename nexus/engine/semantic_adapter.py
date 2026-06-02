@@ -23,11 +23,16 @@ class SemanticAdapter:
             
         route_str, decision_str, phase_str, confidence_str = normalized
         
-        # 簡單映射回 Python 的 FlowState Enum (作為內部通訊用，物理攔截仍在 Rust)
+        # 簡單映射回 Python 的 FlowState Enum
         try:
             phase = FlowState(phase_str)
         except ValueError:
             phase = FlowState.UNKNOWN
+
+        # 🛡️ [NEXUS v2.4] EscalationPolicy
+        # 若狀態為 UNKNOWN 或決策為 STOP/REJECT，一律強制降級為 ESCALATE
+        if phase == FlowState.UNKNOWN or decision_str in ["STOP", "REJECT"]:
+            return ("LARGE", "STOP", FlowState.ESCALATE, "LOW")
 
         return (route_str, decision_str, phase, confidence_str)
 

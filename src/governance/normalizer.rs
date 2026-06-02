@@ -12,6 +12,7 @@ lazy_static! {
 
 pub struct IntentNormalizer;
 
+#[derive(Debug)]
 pub struct NormalizedIntent {
     pub route: Route,
     pub decision: Decision,
