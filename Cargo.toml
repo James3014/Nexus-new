@@ -1,0 +1,18 @@
+[package]
+name = "nexus_core"
+version = "0.1.0"
+edition = "2024"
+
+[lib]
+name = "nexus_core"
+crate-type = ["cdylib"]
+
+[dependencies]
+pyo3 = { version = "0.23", features = ["extension-module"] }
+ignore = "0.4"
+glob = "0.3"
+rayon = "1.10"
+serde_json = "1.0"
+serde = { version = "1.0", features = ["derive"] }
+thiserror = "2.0.11"
+lazy_static = "1.5"
