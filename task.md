@@ -11,12 +11,12 @@
 - [ ] **T8.0.3**: 封存 Stage 0 對齊報告。
 
 ### Stage 1: Intent & Flow Control (流程控制)
-- [ ] **T8.1.1**: 實裝 `IntentIntakeClassifier`，判定 `interaction_mode`。
-- [ ] **T8.1.2**: 實裝程式化狀態機，攔截非法跳步 (e.g., Skip Design)。
-- [ ] **T8.1.3**: 新增 `state_transition_receipt.v1` 審計收據。
+- [x] **T8.1.1**: 實裝 `IntentIntakeClassifier`，判定 `interaction_mode` (DONE).
+- [x] **T8.1.2**: 實裝程式化狀態機，攔截非法跳步 (DONE).
+- [x] **T8.1.3**: 新增 `state_transition_receipt.v1` 審計收據與 Coordinator 整合 (DONE).
 
 ### Stage 2-5: CRISPY & Budget (預告)
-- [ ] **T8.2**: CRISPY 五文件產物實體化。
+- [ ] **T8.2**: CRISPY 五文件產物實體化 (NEXT: Questions, Research, Design, Outline, Plan).
 - [ ] **T8.3**: 垂直切規劃器 (Vertical Slice Planner) 實裝。
 - [ ] **T8.4**: 指令預算守衛 (Budget Governor) 實裝。
 

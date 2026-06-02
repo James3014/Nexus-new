@@ -1128,6 +1128,54 @@ class JitValidationReceiptAdapter(GenericCapabilityReceiptAdapter):
         )
 
 
+class IntentIntakeReceiptAdapter:
+    name = "intent_intake"
+
+    def build(self, *, claim_verified: bool, payload: dict[str, Any]) -> CapabilityReceipt:
+        mode = payload.get("interaction_mode", "direct")
+        initial = payload.get("initial_state", "PLAN")
+        refs = [f"mode:{mode}", f"initial_state:{initial}"]
+        if payload.get("confirmation_checkpoint"):
+            refs.append(f"checkpoint:{payload.get('confirmation_checkpoint')}")
+        
+        invoked = True
+        gate_passed = True # Intake always passes if produced
+        return merge_capability_receipt(
+            name=self.name,
+            selected=True,
+            invoked=invoked,
+            evidence_refs=refs,
+            gate_passed=gate_passed,
+            outcome_contributed=True,
+            executor_id="intent_intake_classifier",
+            telemetries=payload.get("telemetries", {})
+        )
+
+
+class StateTransitionReceiptAdapter:
+    name = "state_transition"
+
+    def build(self, *, claim_verified: bool, payload: dict[str, Any]) -> CapabilityReceipt:
+        prev = payload.get("previous_state", "UNKNOWN")
+        curr = payload.get("current_state", "UNKNOWN")
+        reason = payload.get("transition_reason", "")
+        refs = [f"from:{prev}", f"to:{curr}"]
+        if reason:
+            refs.append(f"reason:{reason}")
+            
+        invoked = True
+        gate_passed = bool(payload.get("gate_passed", True))
+        return merge_capability_receipt(
+            name=self.name,
+            selected=True,
+            invoked=invoked,
+            evidence_refs=refs,
+            gate_passed=gate_passed,
+            outcome_contributed=gate_passed,
+            executor_id="flow_state_machine",
+        )
+
+
 class LocalHealReceiptAdapter:
     name = "local_heal"
 
@@ -1193,6 +1241,8 @@ RECEIPT_ADAPTERS: dict[str, CapabilityReceiptAdapter] = {
         RepairLoopReceiptAdapter(),
         MsaRouterReceiptAdapter(),
         JitValidationReceiptAdapter(),
+        IntentIntakeReceiptAdapter(),
+        StateTransitionReceiptAdapter(),
         GenericCapabilityReceiptAdapter("acceptance_check", evidence_keys=("acceptance_refs", "acceptance_report", "acceptance_report_path")),
         GenericCapabilityReceiptAdapter("autonomic_router", evidence_keys=("autonomic_route_refs", "autonomic_route", "policy_reason")),
         GenericCapabilityReceiptAdapter("benchmark", evidence_keys=("benchmark_refs", "benchmark_report", "benchmark_report_path", "public_claim_gate_ref")),

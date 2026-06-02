@@ -1,10 +1,50 @@
 from __future__ import annotations
 
 from dataclasses import asdict, dataclass, field
+from enum import Enum
 from typing import Any
 
 
 PHASES = ("S", "P", "X", "D", "R", "A", "C")
+
+
+class FlowState(str, Enum):
+    INTAKE = "INTAKE"
+    CLARIFY = "CLARIFY"
+    OUTLINE = "OUTLINE"
+    RESEARCH = "RESEARCH"
+    DESIGN = "DESIGN"
+    PLAN = "PLAN"
+    EXECUTE = "EXECUTE"
+    VERIFY = "VERIFY"
+    CLOSE = "CLOSE"
+    REPLAN = "REPLAN"
+    ESCALATE = "ESCALATE"
+    HUMAN_REVIEW = "HUMAN_REVIEW"
+    BLOCKED_BUDGET = "BLOCKED_BUDGET"
+    BLOCKED_POLICY = "BLOCKED_POLICY"
+
+
+@dataclass(frozen=True)
+class StateTransitionReceipt:
+    schema_version: str = "state_transition_receipt.v1"
+    task_id: str = ""
+    previous_state: FlowState = FlowState.INTAKE
+    current_state: FlowState = FlowState.INTAKE
+    transition_reason: str = ""
+    gate_passed: bool = True
+    metadata: dict[str, Any] = field(default_factory=dict)
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "schema_version": self.schema_version,
+            "task_id": self.task_id,
+            "previous_state": self.previous_state.value,
+            "current_state": self.current_state.value,
+            "transition_reason": self.transition_reason,
+            "gate_passed": self.gate_passed,
+            "metadata": self.metadata,
+        }
 
 
 def normalize_risk_score(value: Any) -> dict[str, Any]:

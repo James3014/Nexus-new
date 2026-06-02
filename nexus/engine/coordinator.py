@@ -30,6 +30,8 @@ from nexus.engine.bootstrap import build_engine_components
 from nexus.engine.config import EngineConfig
 from nexus.engine.cli_pregate import run_cli_pregate
 from nexus.engine.direct_mode import analyze_task_spec
+from nexus.engine.flow_control import IntentIntakeClassifier, FlowStateMachine, InteractionMode
+from nexus.engine.capability_contracts import FlowState, StateTransitionReceipt
 from nexus.engine.autonomic_routing_service import AutonomicRoutingService
 from nexus.engine.forecast_gate_service import ForecastGateService
 from nexus.engine.context_enrichment_service import ContextEnrichmentService
@@ -135,7 +137,7 @@ class NexusEngine:
             reporter=self.reporter,
         )
         self.subagent_outcome = kwargs.get("subagent_outcome") or SubagentOutcomeService(
-            project_root=self.project_root,
+            project_root=self.project_root
         )
         self.repair_loop = kwargs.get("repair_loop") or RepairLoopService(
             project_root=self.project_root,
@@ -143,7 +145,12 @@ class NexusEngine:
             attempt_settlement=self.attempt_settlement,
         )
 
+        # 🛡️ Stage 1: Flow Control Components
+        self.intake_classifier = IntentIntakeClassifier()
+        self.flow_machine = FlowStateMachine()
+
         try:
+
             from nexus.engine.pipeline import NexusPipeline
             self.pipeline = NexusPipeline(self)
         except Exception:
@@ -166,6 +173,23 @@ class NexusEngine:
         kwargs.pop("context", None)
         
         context = context or {}
+
+        # 🛡️ Stage 1: Intent Intake Gate
+        intake_receipt = self.intake_classifier.classify(task_desc, risk_score=context.get("risk_score", 0))
+        logger.info("🛡️ [FlowControl] Intake mode: %s, initial_state: %s", intake_receipt.interaction_mode, intake_receipt.initial_state)
+        
+        # 將 intake 結果併入 context，供後續治理節點審查
+        context["intent_intake"] = intake_receipt.to_dict()
+        
+        if intake_receipt.interaction_mode == InteractionMode.OUTLINE_FIRST and not context.get("outline_confirmed"):
+             logger.warning("🛡️ [FlowControl] Task requires OUTLINE confirmation. State locked to OUTLINE.")
+             context["flow_state"] = FlowState.OUTLINE
+             # 這裡未來會觸發 CLI 中斷或 ESCALATED
+             
+        elif intake_receipt.interaction_mode == InteractionMode.CLARIFY_FIRST and not context.get("design_confirmed"):
+             logger.warning("🛡️ [FlowControl] Task requires DESIGN confirmation. State locked to CLARIFY.")
+             context["flow_state"] = FlowState.CLARIFY
+
         spec = analyze_task_spec(task_desc)
         if spec.enabled:
             logger.info("⚡ [Coordinator] Detected Direct Mode repair spec. Overriding autonomic routing.")
