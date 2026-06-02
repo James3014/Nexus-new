@@ -22,6 +22,12 @@ class PrePatchPreparationPolicy:
     enforce_refusal_detection: bool = True
     max_input_chars: int = 50000
 
+@dataclass(frozen=True)
+class PrePatchGateDecision:
+    """Pre-patch 閘口決策"""
+    should_invoke_patch: bool
+    reject_class: PrePatchRejectClass = PrePatchRejectClass.NONE
+    reason: str = ""
 
 @dataclass(frozen=True)
 class PrePatchInputReceipt:
@@ -40,6 +46,19 @@ class PrePatchInputReceipt:
         data = asdict(self)
         data["classification"] = self.classification.value
         return data
+
+@dataclass(frozen=True)
+class PatchInvocationBoundaryReceipt:
+    """Phase 6 補丁調用邊界收據，證明攔截效力"""
+    schema_version: str = "patch_invocation_boundary_receipt.v1"
+    task_id: str = ""
+    patch_phase_invoked: bool = False
+    blocked_before_patch: bool = False
+    reject_class: str = "none"
+    input_origin: str = "unknown"
+
+    def to_dict(self) -> dict[str, Any]:
+        return asdict(self)
 
 
 class PatchInputClassifier:
@@ -69,6 +88,16 @@ class PatchInputClassifier:
             return PrePatchRejectClass.MISSING_PATCH_BODY
             
         return PrePatchRejectClass.NONE
+
+    def make_decision(self, raw_text: str) -> PrePatchGateDecision:
+        reject_cls = self.classify(raw_text)
+        if reject_cls == PrePatchRejectClass.NONE:
+            return PrePatchGateDecision(should_invoke_patch=True)
+        return PrePatchGateDecision(
+            should_invoke_patch=False,
+            reject_class=reject_cls,
+            reason=f"Rejected by classifier: {reject_cls.value}"
+        )
 
 
 class PatchInputSanitizer:
