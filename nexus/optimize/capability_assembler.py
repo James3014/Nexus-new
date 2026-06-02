@@ -1,19 +1,18 @@
-from typing import Dict, List
+from typing import List, Dict
 
 class CapabilityAssembler:
     """
-    🛠️ Nexus Capability Assembler (v2.5)
-    職責: 將推薦流程轉化為「Core + Optional」能力鏈。
-    實現兩段式加載 (Lazy Activation)。
+    🛠️ Task 3: CapabilityAssembler
+    職責: 將 Flow 轉化為「Core + Optional」兩段式鏈結。
     """
     @staticmethod
-    def assemble_chain(flow: str) -> Dict[str, List[str]]:
+    def assemble_chains(flow: str) -> Dict[str, List[str]]:
         core = ["claim_gate", "delivery_gate"]
         optional = []
-        
-        if flow == "hyper_sprint":
-            core.append("artifact_gate")
-            # 預設將重型工具放入可選鏈，不進入核心路徑
+
+        if flow in ["hyper_sprint", "lite_supervised"]:
+            core.append("harness_preflight_sensor")
+            # 預設將重型工具移至可選鏈
             optional.extend(["codeintel", "mempalace_gate"])
             
         return {"core": core, "optional": optional}

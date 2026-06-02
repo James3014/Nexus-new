@@ -2,21 +2,20 @@ from typing import Dict, Any
 
 class RouteOracle:
     """
-    ⚖️ Nexus Route Oracle (v2.5)
-    職責: 純粹的決策邏輯。依據風險與信心，判定推薦流程。
+    ⚖️ Task 1: RouteOracle
+    職責: 單一 Admission 出口。依據風險分數與證據充足度決定推薦路徑。
     """
     @staticmethod
-    def decide_route(risk_score: int, bare_sufficiency: str) -> Dict[str, Any]:
-        # 1. 低風險分流
+    def decide_route(context: Dict[str, Any]) -> Dict[str, Any]:
+        risk_score = context.get("risk_score", 100)
+        bare_sufficiency = context.get("bare_sufficiency", "low")
+
+        # risk=low 必走 lite
         if risk_score < 30:
-            return {"flow": "baseline", "lite_preferred": True, "reason": "low_risk_auto_pass"}
+            return {"flow": "baseline", "lite_preferred": True, "reason": "low_risk_auto"}
         
-        # 2. 中風險分流 (Admission Calibration)
+        # risk 30-60 不得直接 full hypersprint
         if 30 <= risk_score <= 60 and bare_sufficiency == "high":
-            return {"flow": "lite_supervised", "lite_preferred": True, "reason": "bounded_medium_risk"}
+            return {"flow": "lite_supervised", "lite_preferred": True, "reason": "medium_risk_bounded"}
             
-        # 3. 高風險分流
-        if risk_score > 60:
-            return {"flow": "hyper_sprint", "lite_preferred": False, "reason": "high_risk_forced_hyper"}
-            
-        return {"flow": "baseline", "lite_preferred": False, "reason": "default_fallback"}
+        return {"flow": "hyper_sprint", "lite_preferred": False, "reason": "high_risk_or_uncertain"}

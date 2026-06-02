@@ -2,21 +2,18 @@ import unittest
 from nexus.optimize.capability_assembler import CapabilityAssembler
 
 class TestCapabilityAssembler(unittest.TestCase):
-    """
-    [NEXUS v2.5] TDD Task 2: CapabilityAssembler
-    驗證：裝配器是否能將能力鏈切分為 Core 與 Optional。
-    """
-    def test_baseline_assembly(self):
-        # Baseline 應僅包含核心鏈
-        res = CapabilityAssembler.assemble_chain(flow="baseline")
+    def test_core_vs_optional_separation(self):
+        """Task 3: core/optional 分離，baseline 不含 heavy chain"""
+        res = CapabilityAssembler.assemble_chains("baseline")
         self.assertIn("delivery_gate", res["core"])
         self.assertEqual(len(res["optional"]), 0)
 
     def test_hyper_assembly_pruning(self):
-        # Hyper 候選狀態下，重型工具不應出現在 Core 鏈
-        res = CapabilityAssembler.assemble_chain(flow="hyper_sprint")
+        """Task 3: capability list 單一出口"""
+        res = CapabilityAssembler.assemble_chains("hyper_sprint")
+        # 重型工具應被分配到 optional
+        self.assertIn("codeintel", res["optional"])
         self.assertNotIn("codeintel", res["core"])
-        self.assertNotIn("mempalace_gate", res["core"])
 
 if __name__ == "__main__":
     unittest.main()
