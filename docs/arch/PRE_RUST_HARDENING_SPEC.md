@@ -1,7 +1,9 @@
 # 🛡️ Nexus Pre-Rust Hardening Specification (v1.0)
 ## From Governance Components to Autonomous Operating System
 
-> **Status**: INITIATED (Stage 0: Baseline Alignment)
+> **Status**: IN PROGRESS (Stage 1 Sealed)
+> **Latest Commit SHA**: 8850ab191
+> **Nexus Identity**: 8850ab191 + v3.2.1 RUNTIME-ALIGNED
 > **Position**: This specification integrates engineering standards 9-15 to build a formalized "Front-end Operating System" before Rust migration.
 > **Objective**: Implement programmable flow control, CRISPY documentation artifacts, and budget-aware autonomy.
 
@@ -11,9 +13,9 @@
 
 | 階段 | 名稱 | 核心目標 | 狀態 |
 |---|---|---|---|
-| **Stage 0** | Baseline Alignment | 對齊身份、版本與治理基線，消除文件分叉。 | **IN-PROGRESS** |
-| **Stage 1** | Intent & Flow Control | 實裝 `IntentIntakeClassifier` 與程式化狀態機。 | PLANNED |
-| **Stage 2** | CRISPY Documents | 實體化 `Questions`, `Research`, `Design`, `Outline`, `Plan` 產物。 | PLANNED |
+| **Stage 0** | Baseline Alignment | 對齊身份、版本與治理基線，消除文件分叉。 | **SEALED** |
+| **Stage 1** | Intent & Flow Control | 實裝 `IntentIntakeClassifier` 與程式化狀態機。 | **SEALED** |
+| **Stage 2** | CRISPY Documents | 實體化 `Questions`, `Research`, `Design`, `Outline`, `Plan` 產物。 | **IN-PROGRESS** |
 | **Stage 3** | Vertical Slice Planning| 強制垂直增量實作契約，禁止水平切分。 | PLANNED |
 | **Stage 4** | Instruction Budget | 實裝 `BudgetGovernor` 與自動 Compaction 記錄。 | PLANNED |
 | **Stage 5** | Team Alignment Gate | 將人類對齊 (Human Review) 前移至設計與大綱階段。 | PLANNED |
