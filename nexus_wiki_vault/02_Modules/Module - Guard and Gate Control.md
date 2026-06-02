@@ -4,13 +4,12 @@ aliases:
 - Nexus Guard
 - Security Gate
 confidence: high
-last_compiled: 2026-04-06
+last_compiled: 2026-06-02
 owner: agent
 related_pages:
 - '[Module - Security and Tool Guard Registry](Module - Security and Tool Guard Registry.md)'
-- '[Module - Implementation Responsibility
-  Matrix](Module - Implementation Responsibility Matrix.md)'
-source_of_truth: nexus/core/capability_gate.py
+- '[Module - Implementation Responsibility Matrix](Module - Implementation Responsibility Matrix.md)'
+source_of_truth: src/governance/mod.rs
 status: active
 tags:
 - core
@@ -18,56 +17,43 @@ tags:
 - gate
 - security
 - access
+- rust
 title: Module - Guard and Gate Control
 type: module
 version_scope:
-- v22
-- v23
+- v24.0
+- v26
 ---
 
-
-
-# Module - Guard and Gate Control
+# Module - Guard and Gate Control (Hybrid v24.0)
 
 ## One-sentence summary
-本頁深入解析 Nexus 的安全閘門實作、工具權限動態判定與基於 Phase 的執行沙盒化機制。 [Source: nexus/core/capability_gate.py]
+本頁解析 Nexus v24.0 的物理安全閘門實作，核心決策已全面下沉至 Rust Kernel，實現語義建議與物理裁決的絕對隔離。 [Source: src/governance/mod.rs]
 
 ## Role / responsibility
-- **權限閘門 (Capability Gate)**: 作為工具調用的最終檢查點，驗證當前 Phase 是否具備執行權限。
-- **安全護欄 (Safety Guards)**: 在代碼修改、系統指令執行前進行靜態與動態掃描。
-- **身分驗證**: 確保工具調用方符合該項權限的「指紋」特徵。
+- **物理裁決 (Physical Enforcement)**: 透過 Rust `TransitionGuard` 強制執行合法狀態轉移，模型無權直接修改狀態。
+- **語法隔離 (LangSec Guard)**: 透過 `IntentNormalizer` 驗證模型輸出是否符合 Formal Grammar，徹底阻斷自然語言幻覺。
+- **Fail-Closed 預設**: 任何不合規、未知或低信心的語義標籤，一律強制引導至 `ESCALATE` 或 `STOP`。
 
-## Guard Logic Registry (護欄邏輯登記)
+## Governance Kernel Components (Rust 硬核組件)
 
 | Logic Component | Responsibility (職責) | Source (Path) |
 |---|---|---|
-| **Capability Gate** | 統籌工具存取權限的開關與驗證。 | [Source: nexus/core/capability_gate.py] |
-| **Tool Lock** | 硬性禁止在非預期階段調用特定敏感工具。 | [Source: nexus/core/tool_lockdown.py] |
-| **ACL Engine** | 具體執行權限清單 (Allowlist) 的查詢與匹配。 | [Source: nexus/core/access_control_list.py] |
-| **Injection Guard** | 檢測並防止針對工具參數的惡意注入攻擊。 | [Source: nexus/core/jit_tool_injector.py] |
-| **Autonomous Repair** | **[Phase 8]** 偵測失敗並驅動 ReAct 修復迴圈。 | [Source: scripts/ops/autonomous_repair_loop.py] |
-| **Rollback Guard** | **[Phase 8]** 確保修復失敗時能安全撤回髒修改。 | [Source: scripts/ops/rollback_guard.py] |
-| **Critique Engine** | **[Phase 8]** 反合理化邏輯，防止 Agent 規避測試。 | [Source: scripts/engine/critique_engine.py] |
+| **TransitionEngine** | 執行 P-X-D-R-A-C 狀態機計算，攔截非法跳步。 | [Source: src/governance/transition_engine.rs] |
+| **BlockerEngine** | 判定政策性阻斷 (如 Horizontal Slice, design-in-research)。 | [Source: src/governance/blocker_engine.rs] |
+| **ContractEngine** | 驗證各 Phase 輸出 Payload 的強型別完整性。 | [Source: src/governance/contract_engine.rs] |
+| **IntentNormalizer** | **[LangSec]** 標籤識別與正規化，阻斷非正規文法。 | [Source: src/governance/normalizer.rs] |
+| **SemanticAdapter** | 語義接口封裝，實施自動 Escalation 降級策略。 | [Source: nexus/engine/semantic_adapter.py] |
 
-## Upstream
-- **[System Overview](../00_Home/System Overview.md)**: 安全架構全景。
-- **[Module - Security and Tool Guard Registry](Module - Security and Tool Guard Registry.md)**: 提供權限清單與組件實體。
+## Physical Enforcement Gate (物理強制執行 - Protocol v2.9)
 
-## Downstream
-- **[Module - Implementation Responsibility Matrix](Module - Implementation Responsibility Matrix.md)**: 映射至物理檔案。
-- **[[Ops - CI/CD Promotion Gate]]**: 安全閘門狀態作為核心發版基準。
+依據 **🛡️ AGENT 強制執行規約 v2.9**，Nexus 採用「物理攔截」作為執行保障：
+1. **標籤化通訊**: 模型僅輸出極簡標籤 (r:x, d:x, p:x)，不生成 JSON。
+2. **三層測試網**: 每次提交必須通過 Rust Unit + Python Contract + E2E Regression。
+3. **Escalation 逃生艙**: 任何異常（如超時、幻覺、對抗要求）自動觸發 `ESCALATE` 狀態。
 
-## Related modules / files
-- `nexus/core/capability_gate.py`: 權限閘門。 [Code: nexus/core/capability_gate.py]
-- `nexus/core/access_control_list.py`: 存取控制。 [Code: nexus/core/access_control_list.py]
-- `scripts/ops/ci_gate.py`: 控制所有物理守門與自癒觸發。
-
-## Physical Enforcement Gate (物理強制執行 - Protocol v2.1)
-
-依據 **🛡️ AGENT 強制執行規約 v2.1**，Nexus 採用「物理預檢」作為執行前置：
-1. **儀式啟動**: 每次啟動必須通過 `_nexus_preflight.sh`。
-2. **存證檢查**: 任務結算必須產生 `acceptance_summary.json` 並通過 `contract-check`。
-3. **路徑硬化**: 在 Mac 環境下強制鎖定 `uv` 執行路徑，防止環境漂移導致的守門失效。
+## Source notes
+- v24.0 Engine Spec: 要求治理裁決必須在 5ms 內由 Rust Kernel 完成，嚴禁在 Python 層進行二次邏輯修補。 [Source: docs/perplexity/RELEASE_NOTE_v2.3.md]
 
 ## Source notes
 - v22 Engine Spec: 要求安全性檢查必須在工具真正執行前 10ms 內完成鎖定。 [Source: MUSE-NEXUS-Engine-Specification-v22-Eternal.md]

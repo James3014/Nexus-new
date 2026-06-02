@@ -3,53 +3,64 @@ aliases:
 - Runtime Flow
 - Orchestration Sequence
 confidence: high
-last_compiled: 2026-04-06
+last_compiled: 2026-06-02
 owner: agent
 related_pages:
 - '[State - Lifecycle](../04_State/State - Lifecycle.md)'
-- '[Evidence Map](../05_Protocols/Protocol - Evidence Map.md)|[[Protocol - [[Protocol - Evidence Map|Evidence
-  Map]]|Protocol - [Evidence Map](../05_Protocols/Protocol - Evidence Map.md)]]]]'
+- '[Evidence Map](../05_Protocols/Protocol - Evidence Map.md)'
 - '[System Overview](../00_Home/System Overview.md)'
-- '[Unknowns](../01_System/System - Unknowns and Conflicts.md) and Conflicts|[[System - [[System
-  - Unknowns and Conflicts|Unknowns]] and Conflicts|System - [[System - Unknowns and
-  Conflicts|Unknowns]] and Conflicts]]]]'
-source_of_truth: scripts/engine/nexus_cli.py
+source_of_truth: src/governance/transition_engine.rs
 status: active
 tags:
 - flow
 - runtime
 - orchestration
-- - - SYSTEM_ARCHITECTURE_BLUEPRINT|pxdrac
-title: Flow - [[SYSTEM_ARCHITECTURE_BLUEPRINT|PXDRAC]] Runtime
+- rust
+- hybrid
+title: Flow - PXDRAC Runtime (Hybrid v24.0)
 type: flow
 version_scope:
-- v22
-- v23
+- v24.0
+- v26
 ---
 
-
-
-# Flow - [[SYSTEM_ARCHITECTURE_BLUEPRINT|PXDRAC]] Runtime
+# Flow - PXDRAC Runtime (Hybrid v24.0)
 
 ## One-sentence summary
-本頁描述 Nexus 任務執行的實體調度序列，涵蓋從目標解構到經驗落盤的完整循環。 [Source: MUSE-NEXUS-Engine-Specification-v22-Eternal.md] [Source: Spec v22] [Code: scripts/engine/nexus_cli.py] [code: nexus_cli.py]
+本頁描述 Nexus v24.0 的實體調度序列，所有相位轉移均由 Rust Kernel 進行物理級裁決與 Fail-Closed 保障。 [Source: src/governance/transition_engine.rs]
 
 ## Role / responsibility
-- 本頁描述 Nexus 任務執行的實體調度序列，涵蓋從目標解構到經驗落盤的完整循環。 [Source: MUSE-NEXUS-Engine-Specification-v22-Eternal.md] [Code: scripts/engine/nexus_cli.py]
-- **序列控制**: 確保 P -> X -> D -> R -> A -> C 相位的物理連續性。
-- **工件交接**: 規範各相位產出物如何進入下一個 Phase Runner。 [Source: nexus/core/handoff_bundle.py]
-- **異常處理**: 定義在任何相位失敗時的 Rollback 路徑。 [Source: scripts/engine/nexus_cli.py]
+- **物理連續性 (Physical Continuity)**: 由 Rust `TransitionEngine` 確保 P -> X -> D -> R -> A -> C 相位的絕對順序，禁止任何未經授權的跳步。
+- **標籤導向調度 (Tag-Driven Orchestration)**: 模型僅提供語義標籤 (r:x, d:x, p:x)，不控制最終的 JSON 結構。
+- **自動化 Receipt 補全**: 當 Rust Kernel 許可轉移後，由 Python 層依據 `TypedContract` 自動補全標準治理證據。
 
-## Runtime Sequence Matrix
+## Hybrid Runtime Sequence Matrix
 
-| Phase | Runner | Key Artifact | Source Provenance |
+| Phase | Semantic Target | Hard Enforcement (Rust) | Key Artifact (Typed Receipt) |
 |---|---|---|---|
-| **P** (Plan) | `nexus_plan` | `plan.json` | [Reference: plan_schema.json] |
-| **X** (Explore) | `nexus_explore` | `explore_report.json` | [Source: scripts/ops/nexus_explore.py] |
-| **D** (Diagnose) | `nexus_diagnose` | `diagnosis.json` | [Reference: diagnosis_schema.json] |
-| **R** (Repair) | `nexus_repair` | `repair_final.json` | [Reference: repair_final_schema.json] |
-| **A** (Audit) | `nexus_audit` | `audit_result.json` | [Reference: audit_result_schema.json] |
-| **C** (Crystal) | `nexus_crystal` | `manifest.json` | [Reference: manifest_schema.json] |
+| **P** (Plan) | `p:1` | `TransitionGuard(INTAKE -> PLAN)` | `plan_receipt.v2` |
+| **X** (Explore) | `p:x` | `ContaminationGuard` | `explore_receipt.v2` |
+| **D** (Diagnose) | `p:3` | `TransitionGuard(PLAN -> EXECUTE)` | `diagnosis_receipt.v2` |
+| **R** (Repair) | `p:3` | `TypedContract(EXECUTE)` | `repair_receipt.v2` |
+| **A** (Audit) | `p:4` | `ReceiptVerifier(VERIFY)` | `audit_receipt.v2` |
+| **C** (Crystal) | `p:6` | `TransitionGuard(VERIFY -> CLOSE)` | `closure_receipt.v2` |
+
+## Upstream
+- **Semantic Adapter**: 提供 7B/14B 的意圖判定標籤。
+- **[State - Lifecycle](../04_State/State - Lifecycle.md)**: 提供相位的 SSOT 定義。
+
+## Downstream
+- **Rust Governance Kernel**: 執行最終的物理攔截與裁決。
+- **[Protocol - Evidence Map](../05_Protocols/Protocol - Evidence Map.md)**: 儲存經 Rust 驗證後的物理工件鏈。
+
+## Related modules / files
+- `src/governance/transition_engine.rs`: 核心轉移引擎。
+- `nexus/engine/semantic_adapter.py`: 語義標籤適配器。
+- `nexus/engine/governance_bridge.py`: Python ↔ Rust 橋接層。
+
+## Source notes
+- v24.0 Pivot: 徹底廢棄了模型直出完整治理 JSON 的模式，改為「語義標籤 + 物理狀態機」的 Hybrid 模式。 [Source: docs/perplexity/RELEASE_NOTE_v2.3.md]
+
 
 ## Upstream
 - **User Intent**: 原始任務描述。

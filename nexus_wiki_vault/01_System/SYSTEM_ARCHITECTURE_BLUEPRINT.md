@@ -1,90 +1,89 @@
 ---
 ai_role: System Architect
 ai_scope: Project Nexus / Core Engine
-date: 2026-03-17
+date: 2026-06-02
 domain: Architecture/Design
 level: Verified
 priority: Critical
 status: Active
-era: ERA-C
+era: ERA-D (Rust-Hardened)
 tags:
 - Nexus
 - Architecture
-- Lifecycle
-- Blueprint
+- Rust-Kernel
+- Hybrid-Governance
 - SSoT
-title: Nexus System Architecture & Lifecycle Blueprint (v9)
+title: Nexus System Architecture & Lifecycle Blueprint (v24.0)
 type: specification
 prescription_drill: Architecture Integrity Audit
 safe_stage: Protected Spec
-scenario_diagnosis: Defining the industrial-grade orchestration logic and phase-based lifecycle for Nexus v9.
+scenario_diagnosis: Implementing Hybrid Governance 2.4 with Rust-based physical enforcement.
 ---
 
-# 🛡️ Nexus System Architecture & Lifecycle Blueprint (v9)
+# 🛡️ Nexus System Architecture & Lifecycle Blueprint (v24.0)
 
 > [!abstract] 核心意圖
-> 本文件定義 Nexus 系統的工業級架構與生命週期規範。v9 正式化 DX/XD 變體、quick/direct/full/conversation 模式與 X 階段 provider fallback，確保複雜任務的原子化執行、知識回灌與自動化治理。
+> 本文件定義 Nexus v24.0 (Hybrid Governance 2.4) 的工業級架構。系統已全面轉向以 **Rust Governance Kernel** 為核心的物理硬治理模式。模型不再負責生成治理產物，僅作為語義建議者（Semantic Suggester），確保系統在任何模型失效或幻覺下均能維持 Fail-Closed。
 
 ---
 
 ## 🧭 Agent-Guide
-- **核心定位**: 此文件為 Nexus v9 架構的最高行為準則。
-- **適用場景**: 當開發新 Phase、調整路由邏輯或重構 Worker 角色時，必須以此為基準。
-- **治理邏輯**: 嚴禁在未修改本藍圖的情況下，私自變更 `phase transition`、`ContextHub` 的決策權重或 `mode gate`。 ✅
-
-## 🗂️ Agent-Index
-1. **Overall Architecture** (總體架構圖) ✅
-2. **Lifecycle Flow** (生命週期主流程與詳細流程圖) ✅
-3. **Core Components** (Commander, ContextHub, Skills Router) ✅
-4. **Execution Layer** (Worker / Callsign Layer) ✅
-5. **Governance & Audit** (Verification, Codex-Loop, 退回邏輯) ✅
-6. **Knowledge Ecosystem** (External Research, Learning System, Crystallization) ✅
-7. **Assets & Benchmarks** (Offline Case / Benchmark 系統) ✅
-
-## ⚡ Agent-Actions
-- **If** 任務進入 `A 階段 (Audit)` 失敗 -> **Then** 依據本文件第 11 節執行「定向退回」邏輯。 ✅
-- **If** 偵測到內部知識缺口 -> **Then** 強制觸發 `X 階段 (External Research)` 並產出 `researchpack.json`。 ✅
-- **If** 任務完成 -> **Then** 執行 `C 階段 (Crystallize)` 並更新 `Daily_Log` 與 `LanceDB`。 ✅
+- **核心定位**: 此文件為 Nexus Hybrid 架構的最高行為準則。
+- **適用場景**: 當調整狀態轉移、Blocker 判定或模型接口時，必須以此為基準。
+- **治理邏輯**: 嚴禁在未修改 Rust Kernel (`nexus_core`) 的情況下變更狀態機轉移矩陣。 ✅
 
 ---
 
-## 1. Nexus 總體架構圖 (System Architecture)
+## 1. Nexus 總體架構圖 (System Architecture v24)
 
 ```mermaid
 graph TD
-    Sir[Sir / 任務來源] --> Commander[Commander / Runner / State Machine]
-    Commander --> TaskRunner[Task Runner / Manifest Scheduler]
-    TaskRunner --> ContextHub[ContextHub]
-    ContextHub --> SkillsRouter[Skills Router]
-    SkillsRouter --> Worker[Worker / Callsign Execution]
-    Worker --> Governance[Verification / Governance]
-    Governance --> Audit[A 階段：Codex-Loop Reviewer]
-    Audit -- PASS --> Crystallize[C 階段：Crystallize / Wrap-up]
-    Audit -- FAIL --> Commander
-    Crystallize --> Learning[Long-term Learning / Case / Benchmark Systems]
-    Learning --> ContextHub
+    Sir[Sir / 任務來源] --> Bridge[Orchestrator Bridge / Python]
+    Bridge --> Semantic[Semantic Adapter / LLM 7B-70B]
+    Semantic -- Minimal Tags --> Kernel[Rust Governance Kernel / nexus_core.so]
+    Kernel --> FSM[FlowStateMachine / TransitionGuard]
+    Kernel --> Validator[BlockerEngine / ContractEngine]
+    FSM -- ALLOW --> Success[Next Phase / Artifact Generation]
+    FSM -- REJECT/STOP --> Fail[ESCALATE / Hard Stop]
+    Validator -- PASS --> Receipt[ReceiptEngine / Auto-JSON]
+    Receipt --> Audit[Audit Trail / LanceDB]
 ```
 
 ---
 
-## 2. 生命周期主流程圖 (Lifecycle Main)
+## 2. 生命周期主流程 (PXDRAC Hybrid)
 
-正式生命周期主軌遵循 **P → D → X → R → A → C** 軌跡（DX-default）：
+正式生命周期遵循 **P → X → D → R → A → C** 軌跡，由 Rust 物理層強制執行：
 
-- **P** = Plan / Scout (計畫與探索)
-- **D** = Diagnose (診斷與分析)
-- **X** = External Research (外部研究，選用)
-- **R** = Repair / Produce (執行與產出)
-- **A** = Audit / Codex-Loop (審核與循環)
-- **C** = Crystallize / Wrap-up (結晶與收尾)
+- **P** (Plan): 任務解構與規劃（由 Rust 驗證 `task_breakdown`）。
+- **X** (Explore): 外部研究（選用，由 `ContaminationGuard` 監控）。
+- **D** (Diagnose): 根因分析（由 Rust 驗證 `root_cause`）。
+- **R** (Repair): 實作執行（由 `TypedContract` 檢查產物）。
+- **A** (Audit): 證據審計（由 `ReceiptVerifier` 進行跨層對齊）。
+- **C** (Crystallize): 知識結晶（由 `CrystallizationEngine` 寫入 LanceDB）。
 
-v9 補充：
-- **預設主軌**：`DX`（先 Diagnose 再 External Research）。
-- **合法變體**：`XD`（先 External Research 再 Diagnose），僅在高不確定任務觸發。
-- **XD 觸發條件**（任一命中）：
-  - 第三方 SDK / 協議型整合（如 Stripe/WebSocket/複雜 Webhook）
-  - `needs_research=true`
-  - 高未知度任務（ContextHub 評分達門檻）
+---
+
+## 3. 治理分層責任 (Responsibility Matrix)
+
+| 層級 | 組件 | 核心職責 |
+| :--- | :--- | :--- |
+| **語義層** | LLM + Semantic Adapter | 意圖識別、語義標籤化 (r:x, d:x, p:x)。 |
+| **裁決層** | **Rust Governance Kernel** | 物理狀態機、非法跳步攔截、Blocker 判定、Fail-Closed。 |
+| **編排層** | Python Orchestrator | I/O 處理、工具鏈接線、自動化 Receipt 補全。 |
+| **資料層** | LanceDB + Memory | 歷史軌跡、成功模式、Long-term Learning。 |
+
+---
+
+## 4. 關鍵安全機制 (Safety Guards)
+
+### 4.1 LangSec 語法識別器
+模型輸出必須符合嚴格的標籤文法。任何自然語言「回聲」或幻覺將被 Rust `IntentNormalizer` 在進核心前物理阻斷，並安全降級至 `ESCALATE`。
+
+### 4.2 三層測試矩陣
+1. **Unit (Rust)**: 驗證狀態機與契約邏輯。
+2. **Contract (Python)**: 驗證模型無關性與隔離度。
+3. **E2E Regression**: 驗證全鏈路回歸穩定性。
 
 ---
 
