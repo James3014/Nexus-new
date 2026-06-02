@@ -111,22 +111,8 @@ def coerce_long_gemini_answer(
     user_request: str,
     raw_text: str,
     finish_reason: str,
-    second_pass_fn=compress_long_gemini_answer,
 ) -> str:
-    try:
-        parsed = json.loads(raw_text)
-        if isinstance(parsed, dict):
-            return format_gemini_fastlane_response(raw_text)
-    except Exception as e:
-        import logging
-        logging.getLogger(__name__).error("gemini_json_coercion_failed: %s", e)
-
-    if finish_reason == "MAX_TOKENS" or len(raw_text) > 500:
-        try:
-            compressed = second_pass_fn(session, user_request, raw_text)
-            return format_gemini_fastlane_response(compressed)
-        except Exception:
-            return raw_text
+    """[SIMPLIFIED] 僅保留純文字回傳。治理與正規化交由 SemanticAdapter。"""
     return raw_text
 
 
@@ -141,21 +127,13 @@ def chat_via_gemini_api(session: PilotSession, user_request: str) -> str:
         headers={"Content-Type": "application/json"},
         timeout=15.0,
     )
-    data = json.loads(response.text)
-    candidates = data.get("candidates", [])
+    # 此處解析 HTTP 封裝，不屬於治理判斷。
+    raw_http_data = json.loads(response.text)
+    candidates = raw_http_data.get("candidates", [])
     if not candidates:
         raise RuntimeError("Gemini returned no candidates")
 
     candidate = candidates[0]
     parts = candidate.get("content", {}).get("parts", [])
     text = "".join(part.get("text", "") for part in parts).strip()
-    if not text:
-        raise RuntimeError("Gemini returned empty text")
-    if len(user_request) > LONG_INPUT_THRESHOLD:
-        return coerce_long_gemini_answer(
-            session=session,
-            user_request=user_request,
-            raw_text=text,
-            finish_reason=candidate.get("finishReason", ""),
-        )
     return text
