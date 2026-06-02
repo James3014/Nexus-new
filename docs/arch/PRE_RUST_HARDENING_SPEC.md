@@ -1,9 +1,9 @@
 # 🛡️ Nexus Pre-Rust Hardening Specification (v1.0)
 ## From Governance Components to Autonomous Operating System
 
-> **Status**: IN PROGRESS (Stage 1 Sealed)
-> **Latest Commit SHA**: 8850ab191
-> **Nexus Identity**: 8850ab191 + v3.2.1 RUNTIME-ALIGNED
+> **Status**: IN PROGRESS (Stage 3 Sealed)
+> **Latest Commit SHA**: 708b362ea
+> **Nexus Identity**: 708b362ea + v3.2.3 RUNTIME-ALIGNED
 > **Position**: This specification integrates engineering standards 9-15 to build a formalized "Front-end Operating System" before Rust migration.
 > **Objective**: Implement programmable flow control, CRISPY documentation artifacts, and budget-aware autonomy.
 
@@ -15,9 +15,9 @@
 |---|---|---|---|
 | **Stage 0** | Baseline Alignment | 對齊身份、版本與治理基線，消除文件分叉。 | **SEALED** |
 | **Stage 1** | Intent & Flow Control | 實裝 `IntentIntakeClassifier` 與程式化狀態機。 | **SEALED** |
-| **Stage 2** | CRISPY Documents | 實體化 `Questions`, `Research`, `Design`, `Outline`, `Plan` 產物。 | **IN-PROGRESS** |
-| **Stage 3** | Vertical Slice Planning| 強制垂直增量實作契約，禁止水平切分。 | PLANNED |
-| **Stage 4** | Instruction Budget | 實裝 `BudgetGovernor` 與自動 Compaction 記錄。 | PLANNED |
+| **Stage 2** | CRISPY Documents | 實體化 `Questions`, `Research`, `Design`, `Outline`, `Plan` 產物。 | **SEALED** |
+| **Stage 3** | Vertical Slice Planning| 強制垂直增量實作契約，禁止水平切分。 | **SEALED** |
+| **Stage 4** | Instruction Budget | 實裝 `BudgetGovernor` 與自動 Compaction 記錄。 | **IN-PROGRESS** |
 | **Stage 5** | Team Alignment Gate | 將人類對齊 (Human Review) 前移至設計與大綱階段。 | PLANNED |
 | **Stage 6** | Rust Readiness | 產出 `RUST_MIGRATION_MAP_V1` 與模組分級。 | PLANNED |
 
@@ -40,6 +40,7 @@
 ### C3. Vertical Slice Contract
 - Every slice must cross UI/API/Service/Data/Verify layers.
 - Mandatory `verify_command` and `rollback_hint` per slice.
+- `HORIZONTAL_SLICE_DETECTED` gate enforces incremental delivery.
 
 ---
 
@@ -50,4 +51,4 @@
 - `HORIZONTAL_SLICE_DETECTED`: 水平切分大綱攔截。
 
 ---
-**NEXUS IDENTITY: ff5a972fd + v3.1.1 RUNTIME-ALIGNED**
+**NEXUS IDENTITY: 708b362ea + v3.2.3 RUNTIME-ALIGNED**
