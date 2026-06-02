@@ -51,3 +51,8 @@ events_sourced.jsonl
 知識庫/99_Inbox/*全文提取.md
 str(REPO_ROOT)/
 <MagicMock name='mock.run_dir.__truediv__()' id='*'>
+
+
+# Added by cargo
+
+/target

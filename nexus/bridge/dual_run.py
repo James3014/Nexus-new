@@ -16,6 +16,7 @@ class MismatchEntry:
     rs_output: Any
     match: bool
     diff_reason: Optional[str] = None
+    diff_details: Dict[str, List[str]] = field(default_factory=dict) # 新增：詳細差異項目
     timestamp: float = field(default_factory=time.time)
 
     def to_dict(self) -> Dict[str, Any]:

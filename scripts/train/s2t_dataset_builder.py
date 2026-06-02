@@ -51,7 +51,7 @@ def main():
         for line in f:
             event = json.loads(line)
             # 只取成功的穩定且訓練合規的路徑
-            if event.get("success") == 1 and event.get("training_eligible") == True:
+            if event.get("success") == 1 and event.get("training_eligible", True) == True:
                 samples.append(build_sft_sample(event, allowlist))
     
     with open(OUTPUT_PATH, "w") as f:
