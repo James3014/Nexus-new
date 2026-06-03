@@ -55,13 +55,15 @@ class CommitteeControllerV263:
         calibrated_data = self.calibrator.calibrate(all_verdicts, 0.7)
         selection_res = self.decision_policy.evaluate_and_decide(calibrated_data, calibrated_data["calibrated_confidence"])
         
-        # 4. Feedback & Retry
+        # 4. Feedback & Retry (Decoupled Data-Flow)
         if selection_res.abstained:
-            directive = FeedbackRouter.map_verdicts(all_verdicts)
-            retry_action = RetryPolicy.decide(directive, len(candidates))
+            # Stage 1: Map (Mapper)
+            patterns = FeedbackRouter.map_verdicts(all_verdicts)
+            # Stage 2: Decide (Decider)
+            retry_action = RetryPolicy.decide(patterns, len(candidates))
             
             if retry_action.action != "ABSTAIN":
-                print(f"🔄 [Feedback] Triggering {retry_action.action} with hints: {retry_action.strategies}")
+                print(f"🔄 [Feedback] Action: {retry_action.action} | Patterns: {[p.pattern_code for p in patterns]}")
         
         return CommitteeReceipt(
             task_id=self.task_id,
