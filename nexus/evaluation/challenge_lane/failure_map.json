@@ -1,0 +1,15 @@
+{
+  "deepswe-v5-100": "RECOVERED",
+  "deepswe-v5-101": "verification_blind_spot",
+  "deepswe-v5-102": "RECOVERED",
+  "deepswe-v5-103": "RECOVERED",
+  "deepswe-v5-104": "coverage_low",
+  "deepswe-v5-105": "RECOVERED",
+  "deepswe-v5-106": "RECOVERED",
+  "deepswe-v5-107": "RECOVERED",
+  "deepswe-v5-108": "selection_low_confidence",
+  "deepswe-v5-109": "RECOVERED",
+  "deepswe-v5-110": "semantic_mismatch",
+  "deepswe-v5-111": "RECOVERED",
+  "deepswe-v5-112": "verification_blind_spot"
+}
