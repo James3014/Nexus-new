@@ -21,90 +21,137 @@ class LocalHealTaskSpec:
     expected_reason_family: str = "SOLVED"
 
 
-ASTROPY_SWEBENCH_INDICES: tuple[int, ...] = tuple(range(10))
+ASTROPY_SWEBENCH_TASKS = [
+    (0, "astropy__astropy-12907"),
+    (1, "astropy__astropy-13033"),
+    (2, "astropy__astropy-13236"),
+    (3, "astropy__astropy-13398"),
+    (4, "astropy__astropy-13453"),
+    (5, "astropy__astropy-13579"),
+    (6, "astropy__astropy-13977"),
+    (7, "astropy__astropy-14096"),
+    (8, "astropy__astropy-14182"),
+    (9, "astropy__astropy-14309"),
+]
 
-CONCURRENCY_TASKS: tuple[tuple[str, str], ...] = (
-    ("singleton-race", "scripts/benchmarks/deepswe_task4_singleton_race.py"),
-    ("counter-race", "scripts/benchmarks/deepswe_task5_counter_race.py"),
+NEW_DEEPSWE_TASKS_V2 = [
+    (10, "astropy__astropy-14365"),
+    (11, "astropy__astropy-14369"),
+    (12, "astropy__astropy-14508"),
+    (13, "astropy__astropy-14539"),
+    (14, "astropy__astropy-14598"),
+    (15, "astropy__astropy-14995"),
+    (16, "astropy__astropy-7166"),
+    (17, "astropy__astropy-7336"),
+    (18, "astropy__astropy-7606"),
+    (19, "astropy__astropy-7671"),
+    (20, "astropy__astropy-8707"),
+    (21, "astropy__astropy-8872"),
+    (22, "django__django-10097"),
+    (23, "django__django-10554"),
+    (24, "django__django-10880"),
+    (25, "django__django-10914"),
+    (26, "django__django-10973"),
+    (27, "django__django-10999"),
+    (28, "django__django-11066"),
+    (29, "django__django-11087"),
+]
+
+NEW_DEEPSWE_TASKS_V3 = [
+    (30, "django__django-11095"),
+    (31, "django__django-11099"),
+    (32, "django__django-11119"),
+    (33, "django__django-11133"),
+    (34, "django__django-11138"),
+    (35, "django__django-11141"),
+    (36, "django__django-11149"),
+    (37, "django__django-11163"),
+    (38, "django__django-11179"),
+    (39, "django__django-11206"),
+    (40, "django__django-11211"),
+    (41, "django__django-11239"),
+    (42, "django__django-11265"),
+    (43, "django__django-11276"),
+    (44, "django__django-11292"),
+    (45, "django__django-11299"),
+    (46, "django__django-11333"),
+    (47, "django__django-11400"),
+    (48, "django__django-11433"),
+    (49, "django__django-11451"),
+]
+
+CONCURRENCY_TASKS = [
+    ("deepswe-task4", "scripts/benchmarks/deepswe_task4_singleton_race.py"),
+    ("deepswe-task5", "scripts/benchmarks/deepswe_task5_counter_race.py"),
+    ("deepswe-task6", "scripts/benchmarks/deepswe_task6_cache_race.py"),
+    ("deepswe-task7", "scripts/benchmarks/deepswe_task7_pubsub_race.py"),
+    ("deepswe-task8", "scripts/benchmarks/deepswe_task8_transaction_race.py"),
+    ("deepswe-task9", "scripts/benchmarks/deepswe_task9_pool_race.py"),
+    ("deepswe-task10", "scripts/benchmarks/deepswe_task10_ordered_list_race.py"),
+    ("django-31505", "scripts/benchmarks/django_31505_simulation.py"),
+    ("asyncio-barrier", "scripts/benchmarks/asyncio_barrier_race_real.py"),
     ("free-threading-weakref", "scripts/benchmarks/free_threading_ref_race.py"),
-)
+]
 
 
 def local_heal_20_task_manifest() -> tuple[LocalHealTaskSpec, ...]:
-    # E1a: Policy Block Probe
-    e1a = LocalHealTaskSpec(
-        task_id="astropy-swe-verified-0-policy",
-        kind="swebench",
-        family="astropy",
-        env_profile="astropy-311", # Has numpy < 2.0.0 constraint which will trigger policy block
-        swe_index=0,
-        probe_goal="verify policy-based early exit",
-        expected_stop_layer="env_resolver",
-        expected_reason_family="env_noise",
-    )
-    # E1b: Authenticity Probe
-    e1b = LocalHealTaskSpec(
-        task_id="astropy-swe-verified-0",
-        kind="swebench",
-        family="astropy",
-        env_profile="astropy-311-modern", # No numpy constraints, auto_heal_enabled=True
-        swe_index=0,
-        probe_goal="verify ALREADY_FIXED detection",
-        expected_stop_layer="repro_runner",
-        expected_reason_family="already_fixed",
-    )
-    # D1: Semantic Repair Probe
-    d1 = LocalHealTaskSpec(
-        task_id="astropy-swe-verified-14096",
-        kind="swebench",
-        family="astropy",
-        env_profile="astropy-311-modern", 
-        swe_index=7, 
-        probe_goal="verify 7B/14B patch routing",
-        expected_stop_layer="patcher", # Currently stops here due to 14B capacity
-        expected_reason_family="patch_mismatch",
-    )
-    # B1: Localization Probe
-    b1 = LocalHealTaskSpec(
-        task_id="astropy-swe-verified-13033-localize",
-        kind="swebench",
-        family="astropy",
-        env_profile="astropy-311-modern", 
-        swe_index=1,
-        probe_goal="verify single-function localization",
-        expected_stop_layer="patcher",
-        expected_reason_family="patch_mismatch",
-    )
-    # C2: Format Mismatch Probe
-    c2 = LocalHealTaskSpec(
-        task_id="astropy-swe-verified-13579-format",
-        kind="swebench",
-        family="astropy",
-        env_profile="astropy-311-modern", 
-        swe_index=5,
-        probe_goal="verify SEARCH/REPLACE contract enforcement",
-        expected_stop_layer="patcher",
-        expected_reason_family="patch_mismatch",
-    )
-
-    astropy_tasks = (e1a, e1b, d1, b1, c2) + tuple(
+    astropy_specs = tuple(
         LocalHealTaskSpec(
-            task_id=f"astropy-swe-verified-{index}",
+            task_id=f"astropy-swe-verified-{idx}",
             kind="swebench",
             family="astropy",
             env_profile="astropy-311-modern",
-            swe_index=index,
+            swe_index=idx,
+            instance_id=iid
         )
-        for index in range(1, 10) if index not in (1, 2, 7)
+        for idx, iid in ASTROPY_SWEBENCH_TASKS
     )
-    concurrency_tasks = tuple(
+    
+    concurrency_specs = tuple(
         LocalHealTaskSpec(
-            task_id=task_id,
+            task_id=tid,
             kind="local_concurrency",
             family="concurrency",
             env_profile="python-default",
-            local_path=local_path,
+            local_path=lpath,
         )
-        for task_id, local_path in CONCURRENCY_TASKS
+        for tid, lpath in CONCURRENCY_TASKS
     )
-    return astropy_tasks + concurrency_tasks
+    
+    return astropy_specs + concurrency_specs
+
+
+def local_heal_40_task_manifest() -> tuple[LocalHealTaskSpec, ...]:
+    v20 = local_heal_20_task_manifest()
+    
+    new_specs = tuple(
+        LocalHealTaskSpec(
+            task_id=f"deepswe-v2-{idx}",
+            kind="swebench",
+            family="mixed",
+            env_profile="python-default",
+            swe_index=idx,
+            instance_id=iid
+        )
+        for idx, iid in NEW_DEEPSWE_TASKS_V2
+    )
+    
+    return v20 + new_specs
+
+
+def local_heal_60_task_manifest() -> tuple[LocalHealTaskSpec, ...]:
+    v40 = local_heal_40_task_manifest()
+    
+    new_specs = tuple(
+        LocalHealTaskSpec(
+            task_id=f"deepswe-v3-{idx}",
+            kind="swebench",
+            family="django",
+            env_profile="python-default",
+            swe_index=idx,
+            instance_id=iid
+        )
+        for idx, iid in NEW_DEEPSWE_TASKS_V3
+    )
+    
+    return v40 + new_specs
