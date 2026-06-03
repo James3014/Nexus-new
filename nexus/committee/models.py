@@ -33,12 +33,17 @@ class ComparatorVote:
 
 @dataclass(frozen=True)
 class CommitteeReceipt:
-    """[NEXUS v26] 委員會決策收據"""
+    """[NEXUS v26] 委員會決議收據"""
     task_id: str
     k: int
     candidates: List[ProposalCandidate]
     verdicts: List[CriticVerdict]
     winner_id: Optional[str]
-    failure_bucket: Optional[str] = None # coverage/selection/verifier/integration
+    # 失敗分桶：coverage/selection/verifier/integration/abstain
+    failure_bucket: Optional[str] = None 
+    # 棄權細分：low_verifier_gap / low_diversity / ambiguous_top2
+    abstain_reason: Optional[str] = None
+    confidence: float = 0.0
     wall_time_ms: float = 0.0
     total_cost: float = 0.0
+
