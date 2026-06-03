@@ -2,11 +2,13 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from pathlib import Path
+import os
 from typing import List, Tuple, Dict, Any, Optional
 
 from nexus.services.local_heal.context import HealContext as HealContextV2, OperationalContext, GovernanceContext
 from nexus.services.local_heal.interface import IPhase, PhaseResult
 from nexus.services.local_heal.orchestrator import HealOrchestrator
+from nexus.services.local_heal.committee_orchestrator import CommitteeOrchestrator
 from nexus.services.local_heal.governance_gate import GovernanceGate
 from nexus.services.local_heal.receipt import write_repair_receipt
 
@@ -174,7 +176,9 @@ class HealPipeline:
             )
         ]
         
-        orchestrator = HealOrchestrator(
+        orchestrator_cls = CommitteeOrchestrator if os.getenv("NEXUS_USE_COMMITTEE", "0") == "1" else HealOrchestrator
+        
+        orchestrator = orchestrator_cls(
             phases=phases,
             governance_gate=GovernanceGate(),
             receipt_writer=write_repair_receipt
