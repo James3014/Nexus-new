@@ -44,6 +44,13 @@ class CommitteeReceipt:
     # 棄權細分：low_verifier_gap / low_diversity / ambiguous_top2
     abstain_reason: Optional[str] = None
     confidence: float = 0.0
+    verifier_gap: float = 0.0
+    oracle_gap_estimate: float = 0.0
+    diversity_flag: bool = True
     wall_time_ms: float = 0.0
     total_cost: float = 0.0
+
+    @property
+    def abstained(self) -> bool:
+        return self.winner_id is None
 

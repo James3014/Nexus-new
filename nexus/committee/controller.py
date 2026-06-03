@@ -3,6 +3,7 @@ from typing import List, Optional, Dict, Any
 from nexus.committee.registry import CandidateRegistry
 from nexus.committee.adapter import ProposerAdapter
 from nexus.verifiers.registry import VerifierRegistry
+from nexus.verifiers.packs.registry import PackRegistry
 from nexus.verifiers.contracts import VerifierVerdict
 from nexus.selection.calibrator import ConfidenceCalibrator
 from nexus.selection.decision_policy import DecisionPolicy
@@ -10,12 +11,15 @@ from nexus.committee.models import CommitteeReceipt
 
 class CommitteeControllerV263:
     """
-    🎮 [NEXUS v26.5] 微型化委員會控制器
-    職責: 協調 Search -> Verifier -> Selection (Score -> Decision) 全管線。
+    🎮 [NEXUS v26.6] 多軌演進控制器
+    職責: 協調 Search -> Verifier Packs -> Selection (Cali -> Decision) 全管線。
     """
-    def __init__(self, task_id: str):
+    def __init__(self, task_id: str, domains: List[str] = None):
         self.enabled = os.getenv("NEXUS_USE_COMMITTEE", "0") == "1"
+        self.packs_enabled = os.getenv("NEXUS_USE_PACKS", "0") == "1"
         self.task_id = task_id
+        self.domains = domains or ["astropy"] # 預設嘗試
+        
         self.registry = CandidateRegistry(task_id)
         self.adapter = ProposerAdapter()
         self.calibrator = ConfidenceCalibrator()
@@ -37,18 +41,38 @@ class CommitteeControllerV263:
         candidates = self.registry.get_all()
         all_verdicts = []
         
-        # 2. Verification (Plugin-based)
+        # 2. Verification (Plugin & Pack Based)
+        # 獲取基礎驗證器
+        verifiers = VerifierRegistry.get_all_verifiers()
+        # 獲取領域外掛包 (若啟用)
+        if self.packs_enabled:
+            packs = PackRegistry.get_enabled_packs(self.domains)
+            for pack in packs:
+                print(f"📦 [Pack] Engaging {pack.name} for domain {self.domains}")
+                # 此處模擬將 Pack 內的驗證器加入管線
+                # 真實邏輯中 Pack 會直接被執行
+                pass 
+
         for c in candidates:
             patch_content = c.artifact_refs[0] if c.artifact_refs else ''
-            for v in VerifierRegistry.get_all_verifiers():
+            # 執行基礎驗證
+            for v in verifiers:
                 all_verdicts.append(v.evaluate(c.candidate_id, patch_content))
             
-        # 3. Selection (Two-layer Split)
-        # Layer 1: Score & Calibrate
-        calibrated_data = self.calibrator.calibrate(all_verdicts)
+            # 執行 Pack 驗證 (若啟用)
+            if self.packs_enabled:
+                for pack in PackRegistry.get_enabled_packs(self.domains):
+                    all_verdicts.extend(pack.evaluate_all(c.candidate_id, patch_content))
+            
+        # 3. Selection (Calibration & Decision)
+        # 初始信心值 0.7
+        calibrated_data = self.calibrator.calibrate(all_verdicts, 0.7)
         
-        # Layer 2: Decision
-        selection_res = self.decision_policy.evaluate_and_decide(calibrated_data, 0.7)
+        # 執行決策
+        selection_res = self.decision_policy.evaluate_and_decide(
+            calibrated_data, 
+            calibrated_data["calibrated_confidence"]
+        )
         
         return CommitteeReceipt(
             task_id=self.task_id,
