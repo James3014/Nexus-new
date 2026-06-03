@@ -80,6 +80,49 @@ NEW_DEEPSWE_TASKS_V3 = [
     (49, "django__django-11451"),
 ]
 
+NEW_DEEPSWE_TASKS_V4 = [
+    (50, "django__django-11477"),
+    (51, "django__django-11490"),
+    (52, "django__django-11532"),
+    (53, "django__django-11551"),
+    (54, "django__django-11555"),
+    (55, "django__django-11603"),
+    (56, "django__django-11728"),
+    (57, "django__django-11734"),
+    (58, "django__django-11740"),
+    (59, "django__django-11749"),
+    (60, "django__django-11790"),
+    (61, "django__django-11815"),
+    (62, "django__django-11820"),
+    (63, "django__django-11848"),
+    (64, "django__django-11880"),
+    (65, "django__django-11885"),
+    (66, "django__django-11951"),
+    (67, "django__django-11964"),
+    (68, "django__django-11999"),
+    (69, "django__django-12039"),
+    (70, "django__django-12050"),
+    (71, "django__django-12125"),
+    (72, "django__django-12143"),
+    (73, "django__django-12155"),
+    (74, "django__django-12193"),
+    (75, "django__django-12209"),
+    (76, "django__django-12262"),
+    (77, "django__django-12273"),
+    (78, "django__django-12276"),
+    (79, "django__django-12304"),
+    (80, "django__django-12308"),
+    (81, "django__django-12325"),
+    (82, "django__django-12406"),
+    (83, "django__django-12419"),
+    (84, "django__django-12663"),
+    (85, "django__django-12708"),
+    (86, "django__django-12713"),
+    (87, "django__django-12741"),
+    (88, "django__django-12754"),
+    (89, "django__django-12774"),
+]
+
 CONCURRENCY_TASKS = [
     ("deepswe-task4", "scripts/benchmarks/deepswe_task4_singleton_race.py"),
     ("deepswe-task5", "scripts/benchmarks/deepswe_task5_counter_race.py"),
@@ -155,3 +198,21 @@ def local_heal_60_task_manifest() -> tuple[LocalHealTaskSpec, ...]:
     )
     
     return v40 + new_specs
+
+
+def local_heal_100_task_manifest() -> tuple[LocalHealTaskSpec, ...]:
+    v60 = local_heal_60_task_manifest()
+    
+    new_specs = tuple(
+        LocalHealTaskSpec(
+            task_id=f"deepswe-v4-{idx}",
+            kind="swebench",
+            family="django",
+            env_profile="python-default",
+            swe_index=idx,
+            instance_id=iid
+        )
+        for idx, iid in NEW_DEEPSWE_TASKS_V4
+    )
+    
+    return v60 + new_specs
