@@ -1,0 +1,7 @@
+{
+    "gates": {
+        "error_rate_max": 0.03,
+        "p95_latency_ms_max": 200,
+        "replay_mismatch_allowed": 0
+    }
+}

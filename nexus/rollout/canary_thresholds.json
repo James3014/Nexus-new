@@ -1,0 +1,6 @@
+{
+    "batch_size": 5,
+    "error_rate_threshold": 0.02,
+    "latency_p99_ms": 500,
+    "auto_rollback": true
+}
