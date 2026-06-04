@@ -31,3 +31,7 @@ class LoopMonitor:
             "avg_variance": round(avg_variance, 3),
             "safety_halt": False
         }
+
+    @staticmethod
+    def detect_oscillation(history: List[float]) -> bool:
+        return bool(LoopMonitor.evaluate_loop_stability(history)["safety_halt"])
