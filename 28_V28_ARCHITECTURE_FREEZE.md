@@ -41,9 +41,17 @@
 
 ---
 
-## 🛠️ 遷移工具 (`BackfillService`)
-- 舊版 v27/v28.0 數據必須通過遷移工具對齊上述契約。
+## 🛠️ 遷移與回歸 (Migration & Regression)
+- 舊版 v27/v28.0 數據必須通過 `BackfillService` 對齊上述契約。
 - 缺失指標統一標記為 `BACKFILL_NEEDED`，嚴禁虛假晉升。
+- **回歸基線**：已固化於 `docs/governance/v28.2_REGRESSION_BASELINE.md`。
+
+---
+
+## 🏁 最終判定
+**v28.2 OPERATIONAL STATUS: STABLE BASELINE**
+**驗證證據**：39 verified contract/integration tests passed.
+**限制**：僅允許新增測試以強化邊界，嚴禁未經 RFC 變更四層核心合約。
 
 ---
 [SSOT: V28_ARCHITECTURE_FREEZE_MANIFEST]
