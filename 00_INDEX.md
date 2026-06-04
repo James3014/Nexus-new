@@ -8,6 +8,7 @@
 - **07_MASTER_LOOP_SPEC.md**: Nexus 核心迴圈、expected_stop_layer 契約與 fail-closed 邏輯。
 - **09_SWARM_PROTOCOL.md**: 多節點協作協議。
 - **21_LEARNING_CLOSURE_MATRIX.md**: 歷史教訓與知識閉環。
+- **28_V28_ARCHITECTURE_FREEZE.md**: v28 運營基線與核心介面凍結規範。
 - **29_FIXTURES_AND_VERIFICATION_RECEIPTS.md**: 實用範例與審計收據。
 
 ---
