@@ -1,6 +1,6 @@
 import re
 from typing import List, Dict, Any
-from nexus.verifiers.contracts import VerifierVerdict, EvidenceRef
+from nexus.verifiers.contracts import VerifierVerdict, EvidenceRef, FailureTag
 
 class NameSanityVerifier:
     """
@@ -18,7 +18,6 @@ class NameSanityVerifier:
         aliases = re.findall(r'as\s+([a-zA-Z0-9_]+)', patch)
         
         allowed = set(imports + aliases + ['os', 'sys', 'time', 'numpy', 'np', 'pandas', 'pd'])
-        
         missing = [u for u in usages if u not in allowed]
         
         if missing:
@@ -27,7 +26,7 @@ class NameSanityVerifier:
                 candidate_id=candidate_id, 
                 passed=False, 
                 score=-5.0, 
-                failure_tags=[f'MISSING: {missing}']
+                failure_tags=[FailureTag(code='NAME_ERROR', description=f'MISSING: {missing}')]
             )
             
         return VerifierVerdict(
@@ -35,5 +34,5 @@ class NameSanityVerifier:
             candidate_id=candidate_id, 
             passed=True, 
             score=2.0 if usages else 1.0, 
-            failure_tags=['SUCCESS']
+            failure_tags=[FailureTag(code='SUCCESS', description='All imports resolved')]
         )

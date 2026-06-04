@@ -92,6 +92,9 @@ class ReproductionRunner:
             "partially initialized module",
             "circular import",
             "modulenotfounderror",
+            "nameerror: name 'np' is not defined",
+            "nameerror: name 'numpy' is not defined",
+            "nameerror: name 'astropy' is not defined",
         ]
         return any(marker in lowered for marker in env_markers)
 

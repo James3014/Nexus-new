@@ -32,3 +32,7 @@ def test_challenge():
 
     assert log.balance >= 0, f"Transaction ABA race detected! Balance went negative: {log.balance}"
     assert len(log.transactions) <= 1, f"Double-spend race! {len(log.transactions)} transactions committed with only 1000 balance"
+
+if __name__ == "__main__":
+    print("🚀 Stress Testing...")
+    for _ in range(2000): test_challenge()

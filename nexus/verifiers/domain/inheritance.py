@@ -1,5 +1,5 @@
 from typing import List, Dict, Any
-from nexus.verifiers.models import VerifierVerdict
+from nexus.verifiers.contracts import VerifierVerdict, EvidenceRef, FailureTag
 
 class DeepInheritanceVerifier:
     """
@@ -10,6 +10,18 @@ class DeepInheritanceVerifier:
     def evaluate(candidate_id: str, patch: str) -> VerifierVerdict:
         # 模擬：檢查是否在 __getattr__ 中正確處理了遞迴深度
         if "__getattr__" in patch and "super()" not in patch:
-            return VerifierVerdict("inheritance", candidate_id, False, 0.1, "MISSING_SUPER_CALL_IN_GETATTR", "MRO_RISK")
+            return VerifierVerdict(
+                verifier_name="inheritance", 
+                candidate_id=candidate_id, 
+                passed=False, 
+                score=0.1, 
+                failure_tags=[FailureTag(code="MRO_RISK", description="MISSING_SUPER_CALL_IN_GETATTR")]
+            )
             
-        return VerifierVerdict("inheritance", candidate_id, True, 1.0, "INHERITANCE_STRUCTURE_OK")
+        return VerifierVerdict(
+            verifier_name="inheritance", 
+            candidate_id=candidate_id, 
+            passed=True, 
+            score=1.0,
+            failure_tags=[FailureTag(code="SUCCESS", description="INHERITANCE_STRUCTURE_OK")]
+        )

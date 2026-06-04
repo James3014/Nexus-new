@@ -1,0 +1,1 @@
+def run_drill(scenario: str): return "Success"

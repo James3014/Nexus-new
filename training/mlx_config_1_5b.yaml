@@ -1,0 +1,19 @@
+# Nexus SLM 1.5B Training Config (Flow Internalization)
+model: "Qwen/Qwen2.5-1.5B-Instruct"
+data: "training/mlx_data_1_5b_repair"
+train: true
+iters: 200
+batch_size: 2
+max_seq_length: 1024
+steps_per_report: 10
+steps_per_eval: 50
+learning_rate: 1e-5
+save_every: 50
+adapter_path: "training/adapters_1_5b"
+num_layers: 8
+grad_checkpoint: true
+lora_parameters:
+  rank: 8
+  alpha: 32
+  scale: 4.0
+  dropout: 0.05

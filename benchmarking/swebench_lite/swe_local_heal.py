@@ -105,6 +105,7 @@ def build_tasks_from_manifest(
         local_heal_40_task_manifest,
         local_heal_60_task_manifest,
         local_heal_100_task_manifest,
+        local_heal_113_task_manifest,
     )
     if manifest_name == "local-heal-20":
         specs = local_heal_20_task_manifest()
@@ -114,6 +115,8 @@ def build_tasks_from_manifest(
         specs = local_heal_60_task_manifest()
     elif manifest_name == "local-heal-100":
         specs = local_heal_100_task_manifest()
+    elif manifest_name == "local-heal-113":
+        specs = local_heal_113_task_manifest()
     else:
         raise ValueError(f"Unknown task manifest: {manifest_name}")
         
@@ -196,7 +199,7 @@ def main() -> None:
     )
     parser.add_argument(
         "--task_manifest",
-        choices=["local-heal-20", "local-heal-40", "local-heal-60", "local-heal-100"],
+        choices=["local-heal-20", "local-heal-40", "local-heal-60", "local-heal-100", "local-heal-113"],
         help="Run a fixed local-heal task manifest",
     )
     parser.add_argument(

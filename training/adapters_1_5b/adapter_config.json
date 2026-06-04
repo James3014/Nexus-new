@@ -1,0 +1,42 @@
+{
+    "adapter_path": "training/adapters_1_5b",
+    "batch_size": 2,
+    "clear_cache_threshold": 0,
+    "config": "training/mlx_config_1_5b.yaml",
+    "data": "training/mlx_data_1_5b",
+    "fine_tune_type": "lora",
+    "grad_accumulation_steps": 1,
+    "grad_checkpoint": true,
+    "iters": 100,
+    "learning_rate": 2e-05,
+    "lora_parameters": {
+        "rank": 8,
+        "alpha": 32,
+        "scale": 4.0,
+        "dropout": 0.05
+    },
+    "lr_schedule": null,
+    "mask_prompt": false,
+    "max_seq_length": 1024,
+    "model": "Qwen/Qwen2.5-1.5B-Instruct",
+    "num_layers": 8,
+    "optimizer": "adam",
+    "optimizer_config": {
+        "adam": {},
+        "adamw": {},
+        "muon": {},
+        "sgd": {},
+        "adafactor": {}
+    },
+    "project_name": null,
+    "report_to": null,
+    "resume_adapter_file": null,
+    "save_every": 50,
+    "seed": 0,
+    "steps_per_eval": 50,
+    "steps_per_report": 10,
+    "test": false,
+    "test_batches": 500,
+    "train": true,
+    "val_batches": 25
+}

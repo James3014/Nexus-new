@@ -17,15 +17,15 @@ class TestPluginArchitecture(unittest.TestCase):
         controller = CommitteeControllerV263("test-plugin")
         controller.enabled = True
         
-        # 提供一個會觸發 NameError 的候選
-        proposals = [{"model": "7B", "attempt": 1, "raw_label": "r:0,p:3", "artifacts": ["np.arange(10)"]}]
+        # 提供一個會觸發 NAME_ERROR 的候選 (使用未授權的 foo)
+        proposals = [{"model": "7B", "attempt": 1, "raw_label": "r:0,p:3", "artifacts": ["foo.arange(10)"]}]
         
         receipt = controller.process_proposals(proposals)
         
         # 3. 驗證結果：應包含來自 name_sanity 的裁決
         v_names = [v.verifier_name for v in receipt.verdicts]
         self.assertIn("name_sanity", v_names)
-        # 由於未 import np，應為 False
+        # 由於未 import foo，應為 False
         self.assertFalse(receipt.verdicts[0].passed)
 
 if __name__ == "__main__":

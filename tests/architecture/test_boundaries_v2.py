@@ -4,8 +4,8 @@ from pathlib import Path
 
 class TestArchitectureBoundariesV2(unittest.TestCase):
     """
-    [Task T15] 物理鎖定五個 Bounded Contexts。
-    核心原則：禁止 Controller 直接接觸實作細節，禁止逆向依賴。
+    [Task T17] 物理鎖定 v26.6 五大 Bounded Contexts。
+    核心原則：禁止逆向依賴，禁止橫向污染 (Cali vs Packs)。
     """
     
     def _check_illegal_imports(self, folder: str, forbidden: list[str]):
@@ -22,15 +22,21 @@ class TestArchitectureBoundariesV2(unittest.TestCase):
                                 self.fail(f"❌ ARCHITECTURE VIOLATION: {p} imports forbidden module '{module}'")
 
     def test_search_context_isolation(self):
-        # Search 應該是獨立的生成器，不應依賴 Selection 或 Verifiers
         self._check_illegal_imports("nexus/search", ["nexus.selection", "nexus.verifiers"])
 
     def test_selection_context_purity(self):
-        # Selection 只負責決策政策，不應依賴 Search 的採樣細節
         self._check_illegal_imports("nexus/selection", ["nexus.search", "nexus.env"])
 
+    def test_calibration_context_isolation(self):
+        # Calibration 應為純淨的數學校準層，不應依賴領域外掛或決策政策
+        self._check_illegal_imports("nexus/calibration", ["nexus.verifiers.packs", "nexus.selection"])
+
+    def test_packs_context_isolation(self):
+        # Packs 應為純淨的領域邏輯，不應依賴全域選優政策
+        self._check_illegal_imports("nexus/verifiers/packs", ["nexus.selection"])
+
     def test_controller_dependency_direction(self):
-        # Controller 作為 Orchestrator，應依賴各 Context 的 API，但不應依賴具體的 Domain 實作
+        # Controller 不應依賴具體的 Domain 實作
         self._check_illegal_imports("nexus/committee", ["nexus.verifiers.domain"])
 
 if __name__ == "__main__":

@@ -37,3 +37,7 @@ def test_challenge():
 
     bus.publish("test_event")
     assert len(received) == 20, f"Publisher-Subscriber race! Expected 20 handlers but only {len(received)} received the event"
+
+if __name__ == "__main__":
+    print("🚀 Stress Testing...")
+    for _ in range(2000): test_challenge()

@@ -39,3 +39,7 @@ def test_challenge():
         t.join()
 
     assert pool.peak <= 5, f"Connection pool race! Peak connections exceeded limit: {pool.peak} > 5"
+
+if __name__ == "__main__":
+    print("🚀 Stress Testing...")
+    for _ in range(2000): test_challenge()

@@ -28,5 +28,7 @@ def test_challenge():
     assert counter.value == thread_count, f"Counter race detected: {counter.value} != {thread_count}"
 
 
+
 if __name__ == "__main__":
-    test_challenge()
+    print("🚀 Stress Testing...")
+    for _ in range(2000): test_challenge()

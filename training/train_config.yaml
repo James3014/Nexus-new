@@ -1,0 +1,8 @@
+base_model: Qwen2.5-Coder-7B-Instruct
+dataset: training/dataset_sft_skeleton_v1.jsonl
+lora_rank: 16
+memory_target: 16GB
+quantization: 4-bit
+target_modules:
+- q_proj
+- v_proj

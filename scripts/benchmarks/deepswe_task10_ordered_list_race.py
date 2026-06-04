@@ -31,5 +31,7 @@ def test_challenge():
     assert len(log._entries) == 50, f"Lost entries! Expected 50 but got {len(log._entries)}"
     assert log.is_sorted(), f"Ordering race detected! List is not sorted after concurrent inserts"
 
+
 if __name__ == "__main__":
-    test_challenge()
+    print("🚀 Stress Testing...")
+    for _ in range(2000): test_challenge()

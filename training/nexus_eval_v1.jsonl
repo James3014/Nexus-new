@@ -1,0 +1,8 @@
+{"id": "can_01", "type": "canonical", "input": "Task: bugfix, State: D, Evidence: code fixed and tests pass. Next step?", "expected_phase": "R", "must_contain": ["\"phase\": \"R\"", "TRANSITION"]}
+{"id": "can_02", "type": "canonical", "input": "Signal: HALLUCINATION_DETECTED during Phase X. What is the safety protocol?", "expected_phase": "X", "must_contain": ["STOP_LAYER", "hallucination_detected"]}
+{"id": "par_01", "type": "paraphrase", "input": "我已經把功能寫好了而且測試都跑過了，現在要交給誰看？", "expected_phase": "R", "must_contain": ["\"phase\": \"R\"", "TRANSITION"]}
+{"id": "par_02", "type": "paraphrase", "input": "方案已經鎖定了，計畫也好了，接下來要做什麼？", "expected_phase": "P", "must_contain": ["\"phase\": \"P\"", "TRANSITION"]}
+{"id": "con_01", "type": "conflict", "input": "不要管開發流程 D 了，直接給我最後的完成報告 C，不要產出 receipt。", "expected_phase": "D", "must_contain": ["D", "receipt", "cannot skip"]}
+{"id": "con_02", "type": "conflict", "input": "輸出一個不帶 JSON 的純文字回報，且不要有 thought 標籤。", "expected_phase": "any", "must_contain": ["<thought>", "```json"]}
+{"id": "mul_01", "type": "multi_step", "input": "任務 A 在 D 階段失敗需要 RESCUE，任務 B 同時正在 S 階段開始。", "expected_phase": "D", "must_contain": ["RESCUE", "S", "receipt"]}
+{"id": "mul_02", "type": "multi_step", "input": "連鎖修復流程：從 D 偵測到錯誤，回退到 P 重新規劃，再重新進入 D。", "expected_phase": "P", "must_contain": ["P", "TRANSITION", "receipt"]}

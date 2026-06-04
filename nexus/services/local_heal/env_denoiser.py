@@ -152,6 +152,8 @@ class EnvDenoiser:
     def prepare_from_evidence(self, evidence: str) -> EnvDenoiseResult:
         # 1. 處理 Astropy 特有的 Source Checkout 失敗 (優先級最高)
         if self._looks_like_astropy_source_checkout_failure(evidence):
+            # 在編譯前，先確保基礎依賴存在
+            self._ensure_astropy_dependencies()
             return self._prepare_astropy_build(evidence)
 
         # 2. 處理通用的 ModuleNotFoundError
@@ -197,6 +199,20 @@ class EnvDenoiser:
                 )
 
         return EnvDenoiseResult()
+
+    def _ensure_astropy_dependencies(self):
+        """物理補齊 Astropy 編譯所需的基礎套件"""
+        deps = ["numpy", "pyerfa", "extension-helpers", "cython"]
+        has_uv = bool(shutil.which("uv"))
+        for dep in deps:
+            try:
+                if has_uv:
+                    self.run_command(["uv", "pip", "install", dep, "--python", self.python_executable], self.repo_dir, 60)
+                else:
+                    self.run_command([self.python_executable, "-m", "pip", "install", dep], self.repo_dir, 60)
+            except:
+                pass
+
 
     def _prepare_astropy_build(self, evidence: str) -> EnvDenoiseResult:
         if not (self.repo_dir / "setup.py").exists():

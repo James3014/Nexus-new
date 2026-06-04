@@ -37,3 +37,7 @@ def test_challenge():
     unique_results = set(results)
     assert len(unique_results) == 1, f"Cache race detected! Multiple values computed: {unique_results}"
     assert len(call_count) == 1, f"Cache computed {len(call_count)} times instead of 1! Race condition!"
+
+if __name__ == "__main__":
+    print("🚀 Stress Testing...")
+    for _ in range(2000): test_challenge()

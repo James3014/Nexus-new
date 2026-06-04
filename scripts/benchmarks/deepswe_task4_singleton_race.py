@@ -22,3 +22,7 @@ def test_challenge():
 
     for t in threads:
         t.join()
+
+if __name__ == "__main__":
+    print("🚀 Stress Testing...")
+    for _ in range(2000): test_challenge()
