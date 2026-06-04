@@ -1,0 +1,22 @@
+{
+    "version": "v27.2",
+    "status": "HARD_FROZEN",
+    "components": {
+        "common_core": "active",
+        "routing": "active",
+        "experimental_sandbox": "active",
+        "unified_ranking": "active",
+        "canary_guard": "active"
+    },
+    "sealed_families": [
+        "Concurrency_Race_Condition",
+        "Django_ORM_Migration",
+        "Astropy_IO_FITS",
+        "Django_Core_Logic",
+        "Astropy_Astrophysics"
+    ],
+    "pending_families": [
+        "Cross_Domain_Experimental"
+    ],
+    "fingerprint": "3bab6973c4280dac41e1ee8672912ab2eb6809b0d8dab22be4b44a1791afaeec"
+}

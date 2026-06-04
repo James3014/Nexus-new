@@ -1,0 +1,229 @@
+{
+    "taxonomy_version": "v1.0",
+    "matrix": {
+        "astropy-v27-0": {
+            "domain_id": "astropy",
+            "family": "astropy",
+            "capability_class": "Astropy_IO_FITS",
+            "lane": "baseline",
+            "status": "v27.4_SEALED"
+        },
+        "astropy-v27-1": {
+            "domain_id": "astropy",
+            "family": "astropy",
+            "capability_class": "Astropy_Astrophysics",
+            "lane": "baseline",
+            "status": "v27.4_SEALED"
+        },
+        "astropy-v27-2": {
+            "domain_id": "astropy",
+            "family": "astropy",
+            "capability_class": "Astropy_IO_FITS",
+            "lane": "baseline",
+            "status": "v27.4_SEALED"
+        },
+        "astropy-v27-3": {
+            "domain_id": "astropy",
+            "family": "astropy",
+            "capability_class": "Astropy_Astrophysics",
+            "lane": "baseline",
+            "status": "v27.4_SEALED"
+        },
+        "astropy-v27-4": {
+            "domain_id": "astropy",
+            "family": "astropy",
+            "capability_class": "Astropy_IO_FITS",
+            "lane": "baseline",
+            "status": "v27.4_SEALED"
+        },
+        "astropy-v27-5": {
+            "domain_id": "astropy",
+            "family": "astropy",
+            "capability_class": "Astropy_Astrophysics",
+            "lane": "baseline",
+            "status": "v27.4_SEALED"
+        },
+        "astropy-v27-6": {
+            "domain_id": "astropy",
+            "family": "astropy",
+            "capability_class": "Astropy_IO_FITS",
+            "lane": "baseline",
+            "status": "v27.4_SEALED"
+        },
+        "astropy-v27-7": {
+            "domain_id": "astropy",
+            "family": "astropy",
+            "capability_class": "Astropy_Astrophysics",
+            "lane": "baseline",
+            "status": "v27.4_SEALED"
+        },
+        "astropy-v27-8": {
+            "domain_id": "astropy",
+            "family": "astropy",
+            "capability_class": "Astropy_IO_FITS",
+            "lane": "baseline",
+            "status": "v27.4_SEALED"
+        },
+        "astropy-v27-9": {
+            "domain_id": "astropy",
+            "family": "astropy",
+            "capability_class": "Astropy_Astrophysics",
+            "lane": "baseline",
+            "status": "v27.4_SEALED"
+        },
+        "django-v27-10": {
+            "domain_id": "django",
+            "family": "django",
+            "capability_class": "Django_Core_Logic",
+            "lane": "baseline",
+            "status": "v27.4_SEALED"
+        },
+        "django-v27-11": {
+            "domain_id": "django",
+            "family": "django",
+            "capability_class": "Django_Core_Logic",
+            "lane": "baseline",
+            "status": "v27.4_SEALED"
+        },
+        "django-v27-12": {
+            "domain_id": "django",
+            "family": "django",
+            "capability_class": "Django_ORM_Migration",
+            "lane": "baseline",
+            "status": "v27.3_PRODUCTION_SEALED"
+        },
+        "django-v27-13": {
+            "domain_id": "django",
+            "family": "django",
+            "capability_class": "Django_Core_Logic",
+            "lane": "baseline",
+            "status": "v27.4_SEALED"
+        },
+        "django-v27-14": {
+            "domain_id": "django",
+            "family": "django",
+            "capability_class": "Django_Core_Logic",
+            "lane": "baseline",
+            "status": "v27.4_SEALED"
+        },
+        "django-v27-15": {
+            "domain_id": "django",
+            "family": "django",
+            "capability_class": "Django_ORM_Migration",
+            "lane": "baseline",
+            "status": "v27.3_PRODUCTION_SEALED"
+        },
+        "django-v27-16": {
+            "domain_id": "django",
+            "family": "django",
+            "capability_class": "Django_Core_Logic",
+            "lane": "baseline",
+            "status": "v27.4_SEALED"
+        },
+        "django-v27-17": {
+            "domain_id": "django",
+            "family": "django",
+            "capability_class": "Django_Core_Logic",
+            "lane": "baseline",
+            "status": "v27.4_SEALED"
+        },
+        "django-v27-18": {
+            "domain_id": "django",
+            "family": "django",
+            "capability_class": "Django_ORM_Migration",
+            "lane": "baseline",
+            "status": "v27.3_PRODUCTION_SEALED"
+        },
+        "django-v27-19": {
+            "domain_id": "django",
+            "family": "django",
+            "capability_class": "Django_Core_Logic",
+            "lane": "baseline",
+            "status": "v27.4_SEALED"
+        },
+        "concurrency-0": {
+            "domain_id": "concurrency",
+            "family": "concurrency",
+            "capability_class": "Concurrency_Race_Condition",
+            "lane": "baseline",
+            "status": "v27.3_PRODUCTION_SEALED"
+        },
+        "concurrency-1": {
+            "domain_id": "concurrency",
+            "family": "concurrency",
+            "capability_class": "Concurrency_Race_Condition",
+            "lane": "baseline",
+            "status": "v27.3_PRODUCTION_SEALED"
+        },
+        "concurrency-2": {
+            "domain_id": "concurrency",
+            "family": "concurrency",
+            "capability_class": "Concurrency_Race_Condition",
+            "lane": "baseline",
+            "status": "v27.3_PRODUCTION_SEALED"
+        },
+        "concurrency-3": {
+            "domain_id": "concurrency",
+            "family": "concurrency",
+            "capability_class": "Concurrency_Race_Condition",
+            "lane": "baseline",
+            "status": "v27.3_PRODUCTION_SEALED"
+        },
+        "concurrency-4": {
+            "domain_id": "concurrency",
+            "family": "concurrency",
+            "capability_class": "Concurrency_Race_Condition",
+            "lane": "baseline",
+            "status": "v27.3_PRODUCTION_SEALED"
+        },
+        "concurrency-5": {
+            "domain_id": "concurrency",
+            "family": "concurrency",
+            "capability_class": "Concurrency_Race_Condition",
+            "lane": "baseline",
+            "status": "v27.3_PRODUCTION_SEALED"
+        },
+        "concurrency-6": {
+            "domain_id": "concurrency",
+            "family": "concurrency",
+            "capability_class": "Concurrency_Race_Condition",
+            "lane": "baseline",
+            "status": "v27.3_PRODUCTION_SEALED"
+        },
+        "concurrency-7": {
+            "domain_id": "concurrency",
+            "family": "concurrency",
+            "capability_class": "Concurrency_Race_Condition",
+            "lane": "baseline",
+            "status": "v27.3_PRODUCTION_SEALED"
+        },
+        "concurrency-8": {
+            "domain_id": "concurrency",
+            "family": "concurrency",
+            "capability_class": "Concurrency_Race_Condition",
+            "lane": "baseline",
+            "status": "v27.3_PRODUCTION_SEALED"
+        },
+        "concurrency-9": {
+            "domain_id": "concurrency",
+            "family": "concurrency",
+            "capability_class": "Concurrency_Race_Condition",
+            "lane": "baseline",
+            "status": "v27.3_PRODUCTION_SEALED"
+        },
+        "v27-sklearn-001": {
+            "domain_id": "scikit_learn",
+            "family": "scikit-learn",
+            "capability_class": "Cross_Domain_Experimental",
+            "lane": "migration",
+            "status": "v27.3_PRODUCTION_SEALED"
+        },
+        "v27-flask-002": {
+            "domain_id": "flask",
+            "family": "flask",
+            "capability_class": "Cross_Domain_Experimental",
+            "lane": "challenge",
+            "status": "v27.3_PRODUCTION_SEALED"
+        }
+    }
+}
