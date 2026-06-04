@@ -1,0 +1,32 @@
+{
+    "version": "v27.1",
+    "sealed_at": "2026-06-03T22:41:22.738538",
+    "manifest_fingerprint": "b11e8069f79646d82c8bd9810b39f4330e37ec59d1dee113b222648096251277",
+    "verification_bundle": {
+        "bundle_id": "B-779db556",
+        "manifest_hash": "b11e8069f79646d82c8bd9810b39f4330e37ec59d1dee113b222648096251277",
+        "promotion_receipt_id": "P-v27.1-FINAL",
+        "rejection_receipt_ids": [
+            "R-OK",
+            "R-DRIFT-STOPPED"
+        ],
+        "drift_status": "STABLE",
+        "bundle_hash": "779db556371542e37e36ce72f207c2786f73730ad65f7d304a0069d8069ded5c"
+    },
+    "operational_metrics": {
+        "timestamp": "2026-06-03T22:41:22.738523",
+        "manifest_pass_rate": 1.0,
+        "promotion_success_rate": 0.92,
+        "seal_integrity_rate": 1.0,
+        "drift_incident_count": 0,
+        "mean_time_to_convergence_ms": 45000.0,
+        "gate_verdicts": []
+    },
+    "approved_adr_freeze": {
+        "ADR-0010": "75a897ad3",
+        "ADR-0011": "b11e8069f",
+        "ADR-0012": "46d0c5ad2",
+        "ADR-0013": "8e0f9c2d1",
+        "ADR-0014": "f5a2b1c3d"
+    }
+}
