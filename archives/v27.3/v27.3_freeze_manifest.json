@@ -1,0 +1,12 @@
+{
+    "version": "v27.3",
+    "timestamp": 1780528156.674977,
+    "sealed_families": [
+        "Django",
+        "Astropy",
+        "Concurrency",
+        "Routing"
+    ],
+    "integrity": "VERIFIED",
+    "fingerprint": "5ade909a10a7b695063d94d4f910cb40fe9b9f2a29e44652023dfceb0dc980e3"
+}
