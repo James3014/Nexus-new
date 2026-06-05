@@ -1988,6 +1988,64 @@ def research_auto_flow(
         raise SystemExit(result.exit_code)
 
 
+@nexus_group.group(name="report")
+def report_group():
+    """📊 Nexus Report Governance & Trust Audit"""
+    pass
+
+
+@report_group.command(name="trust-audit")
+@click.option("--report-file", type=click.Path(exists=True), required=True)
+@click.option("--output", "output_path", default=".nexus/reports/trust_audit_result.json", show_default=True)
+def trust_audit(report_file, output_path):
+    """🔍 [v26] Run semantic consistency check on a report and lock via delivery-gate."""
+    import json
+    from pathlib import Path
+    
+    click.secho(f"🔎 [Trust-Audit] Auditing: {report_file}", fg="cyan", bold=True)
+    report_path = Path(report_file)
+    data = json.loads(report_path.read_text(encoding="utf-8"))
+    
+    status = data.get("status", "UNKNOWN")
+    artifacts = data.get("artifact_paths", [])
+    failures = []
+    
+    # 1. 物理存在性檢查
+    for art in artifacts:
+        art_path = REPO_ROOT / art
+        if not art_path.exists():
+            failures.append(f"missing_artifact:{art}")
+        else:
+            # 2. 內容一致性檢查 (簡化版：若 status 為 SUCCESS，內容不應含顯著 Error)
+            if status == "SUCCESS":
+                content = art_path.read_text(encoding="utf-8").upper()
+                if "ERROR" in content and "SUCCESS" not in content:
+                    failures.append(f"integrity_mismatch:{art}")
+
+    audit_status = "VERIFIED" if not failures else "REJECTED"
+    result = {
+        "audit_timestamp": datetime.now(timezone.utc).isoformat(),
+        "report_source": str(report_path),
+        "status": audit_status,
+        "failures": failures,
+        "commit_sha": subprocess.check_output(["git", "rev-parse", "--short", "HEAD"]).decode().strip()
+    }
+    
+    out_p = Path(output_path)
+    out_p.parent.mkdir(parents=True, exist_ok=True)
+    out_p.write_text(json.dumps(result, indent=2, ensure_ascii=False), encoding="utf-8")
+    
+    click.echo(json.dumps(result, indent=2))
+    
+    if audit_status == "REJECTED":
+        click.secho(f"❌ [Trust-Audit] Audit REJECTED: {failures}", fg="red", bold=True)
+        sys.exit(1)
+    
+    click.secho("✅ [Trust-Audit] Audit PASSED. Locking via delivery-gate...", fg="green")
+    # 自動鎖定
+    subprocess.run([sys.executable, str(Path(__file__).resolve()), "nexus", "delivery-gate", "--evidence", str(out_p)], check=True)
+
+
 @nexus_group.command(name="ultra-review")
 @click.option("--task", default="ultra review", show_default=True)
 @click.option("--dry-run/--no-dry-run", default=True, show_default=True)

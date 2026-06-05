@@ -44,20 +44,17 @@ def test_extract_relevant_code_formats_correctly(tmp_path):
 
 def test_extract_relevant_code_uses_query_for_symbol_level_refinement(tmp_path):
     file_path = tmp_path / "timeseries.py"
-    unrelated = "\n".join(
-        f"def unrelated_{i}():\n    return {i}\n"
-        for i in range(220)
-    )
-    target = (
+    content = (
+        "def unrelated_func():\n"
+        "    pass\n\n"
         "class TimeSeries:\n"
         "    def remove_column(self, name):\n"
         "        if name in self._required_columns:\n"
         "            raise ValueError(name)\n"
     )
-    content = unrelated + "\n" + target
     file_path.write_text(content, encoding="utf-8")
 
-    localizer = Localizer()
+    localizer = Localizer(refine_threshold=0)
     extracted = localizer.extract_relevant_code(
         [(
             100.0,
@@ -73,7 +70,7 @@ def test_extract_relevant_code_uses_query_for_symbol_level_refinement(tmp_path):
     _, refined = extracted[0]
     assert "remove_column" in refined
     assert "_required_columns" in refined
-    assert "unrelated_0" not in refined
+    assert "unrelated_func" not in refined
 
 
 def test_rank_files_ignores_absolute_paths_outside_repo(tmp_path):
@@ -123,3 +120,39 @@ def test_rank_files_prioritizes_ast_symbol_matches(tmp_path):
     )
 
     assert ranked[0][1]["path"] == "core.py"
+
+
+def test_refine_by_functions_excludes_class_definition(tmp_path):
+    file_path = tmp_path / "large_class.py"
+    content = (
+        "class HugeClass:\n"
+        "    class_var = 'huge_metadata_info' * 100\n"
+        "    def other_method1(self):\n"
+        "        pass\n"
+        "    def other_method2(self):\n"
+        "        pass\n"
+        "    def target_method(self):\n"
+        "        return 'find_me'\n"
+    )
+    file_path.write_text(content, encoding="utf-8")
+    
+    localizer = Localizer(refine_threshold=0)
+    extracted = localizer.extract_relevant_code(
+        [(
+            100.0,
+            {
+                "path": "large_class.py",
+                "content": content,
+                "file_path": file_path,
+            },
+        )],
+        query="def target_method",
+    )
+    _, refined = extracted[0]
+    
+    # 1. target method must be extracted
+    assert "target_method" in refined
+    assert "find_me" in refined
+    # 2. Entire class definition body or class_var must NOT be extracted
+    assert "class_var" not in refined
+    assert "class HugeClass" not in refined

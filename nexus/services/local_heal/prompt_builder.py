@@ -11,10 +11,14 @@ class PromptBuilder:
             "CONTRACT:\n"
             "1. Output ONLY SEARCH/REPLACE blocks.\n"
             "2. Format: 'FILE: <path>' then '<<<<<<< SEARCH\\n<original>\\n=======\\n<fixed>\\n>>>>>>> REPLACE'.\n"
-            "3. The SEARCH section must match the source code character-for-character.\n"
-            "4. NO CONVERSATION. NO MARKDOWN outside blocks. NO apologies.\n"
-            "5. NO PLACEHOLDERS: Never use '# ...' or comments to represent existing code.\n"
-            "6. NO REDEFINITION: Do not create a duplicate top-level class or function; modify the existing definition in place."
+            "3. The SEARCH section must match the source code character-for-character, verbatim from the provided SOURCE CONTEXT.\n"
+            "4. WARNING: Code snippets in the [TASK] description may be outdated or incorrect. You MUST match the SEARCH block against the code inside [SOURCE CONTEXT], NOT the [TASK] description.\n"
+            "5. NO CONVERSATION. NO MARKDOWN outside blocks. NO apologies.\n"
+            "6. NO PLACEHOLDERS: Never use '# ...', '... [truncated]', '...', or comments to represent existing code. The SEARCH block must contain complete, verbatim, un-truncated original lines.\n"
+            "7. NO REDEFINITION: Do not create a duplicate top-level class or function; modify the existing definition in place.\n\n"
+            "SENIOR ENGINEERING RULES:\n"
+            "- Python AttributeError Safety: If fixing dynamic attribute lookup (e.g. `__getattr__`), be extremely cautious about AttributeError shadowing. Under the Python descriptor protocol, properties raising AttributeError fallback to `__getattr__`. Consider delegating back to `__getattribute__` or correctly forwarding inner exceptions to prevent masking tracebacks.\n"
+            "- Case-Insensitive Protocol Robustness: When parsing formats or commands that are case-insensitive by design (e.g., QDP, email headers), always ensure your regular expressions or matching logic are case-insensitive (e.g., using `re.IGNORECASE` or inline `(?i)` flag) to avoid crashes on lowercase input."
         )
 
     @staticmethod
@@ -41,5 +45,6 @@ class PromptBuilder:
             f"[INVARIANTS]\n{invariants_str}\n\n"
             f"[SOURCE CONTEXT]\n{files_section}"
             f"CRITICAL: Modify the existing code IN-PLACE. Do NOT duplicate or redefine existing top-level classes/functions.\n"
+            f"CRITICAL: Match the SEARCH block exactly against the [SOURCE CONTEXT] files. Do NOT use the obsolete snippets from the [TASK] description.\n"
             f"Produce the SEARCH/REPLACE blocks now."
         )

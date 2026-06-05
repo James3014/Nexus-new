@@ -5,8 +5,9 @@ from typing import Any, Dict, List, Tuple
 from rank_bm25 import BM25Okapi
 
 class Localizer:
-    def __init__(self, repository: Any = None):
+    def __init__(self, repository: Any = None, refine_threshold: int = 5000):
         self.repository = repository
+        self.refine_threshold = refine_threshold
 
     def _tokenize(self, text: str) -> List[str]:
         return re.findall(r'\b[a-zA-Z_0-9]{2,}\b', text.lower())
@@ -117,7 +118,7 @@ class Localizer:
             content = doc["content"]
             active_query = query or doc.get("issue_desc", "")
             # 若檔案太長，嘗試進行函式級精煉
-            if len(content) > 5000 and active_query:
+            if len(content) > self.refine_threshold and active_query:
                 refined = self.refine_by_functions(doc["path"], content, active_query)
                 if refined:
                     content = refined
@@ -136,7 +137,7 @@ class Localizer:
             lines = content.splitlines()
 
             for node in ast.walk(tree):
-                if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
+                if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
                     start = node.lineno - 1
                     end = getattr(node, "end_lineno", node.lineno + 10)
                     body = "\n".join(lines[max(0, start-2):end+1]) # 帶 2 行 context

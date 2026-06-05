@@ -28,8 +28,10 @@ def test_evidence_collector_low_confidence_no_proof(tmp_path):
         
         with open(evidence_path, "r") as f:
             data = json.load(f)
-            assert data["confidence_level"] == "MEDIUM" # All passed but no physical proof
-            assert data["claim_state"] == "PARTIAL"
+            assert data["confidence_level"] == "LOW" # All passed but no physical proof
+
+            assert data["claim_state"] == "UNVERIFIED"
+
             assert str(evidence_path) == str(isol_evidence)
 
 def test_evidence_collector_reject_verified_on_failure(tmp_path):

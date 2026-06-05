@@ -25,6 +25,15 @@ def get_task_manifest_specs() -> Tuple[LocalHealTaskSpec, ...]:
 
 
 def build_task_from_spec(spec: LocalHealTaskSpec, dataset: Any) -> dict:
+    if spec.kind != "swebench":
+        local_file = NEXUS_ROOT / (spec.local_path or "")
+        return {
+            "instance_id": spec.instance_id,
+            "manifest_task_id": spec.task_id,
+            "repo_dir": NEXUS_ROOT,
+            "problem_statement": f"Fix race condition in {local_file.name}",
+            "env_profile": spec.env_profile,
+        }
     instance = next((row for row in dataset if row["instance_id"] == spec.instance_id), None)
     if not instance:
         raise ValueError(f"Task {spec.task_id} not found in dataset")

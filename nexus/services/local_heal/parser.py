@@ -5,7 +5,7 @@ from pathlib import Path
 class SearchReplaceParser:
     def _clean_content(self, text: str) -> Tuple[str, bool]:
         cleaned = re.sub(r'```[a-zA-Z0-9]*\n?', '', text).strip()
-        has_placeholder = any(ph in cleaned for ph in ("# ...", "// ...", "... existing"))
+        has_placeholder = any(ph in cleaned for ph in ("# ...", "// ...", "... existing", "... [truncated]", "...", "…"))
         return cleaned, has_placeholder
 
     def parse_blocks(self, llm_output: str) -> List[Dict[str, Any]]:

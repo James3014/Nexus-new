@@ -89,7 +89,13 @@ def build_task_from_spec(
 ) -> dict[str, Any]:
     from nexus.services.local_heal.env_resolver import EnvResolver, requirement_for_profile
     resolver = EnvResolver()
-    resolution = resolver.resolve(requirement_for_profile(spec.env_profile))
+    env_profile = spec.env_profile
+    if env_profile == "python-default" and spec.instance_id:
+        if "astropy" in spec.instance_id:
+            env_profile = "astropy-legacy"
+        elif "django" in spec.instance_id:
+            env_profile = "django-legacy"
+    resolution = resolver.resolve(requirement_for_profile(env_profile))
     python_exe = os.path.abspath(resolution.python_executable) if resolution.ready else ""
 
     if spec.kind == "swebench":
@@ -109,7 +115,7 @@ def build_task_from_spec(
             "family": spec.family,
             "repo_dir": root_dir,
             "problem_statement": instance["problem_statement"],
-            "env_profile": spec.env_profile,
+            "env_profile": env_profile,
             "swe_index": spec.swe_index,
             "domain_id": spec.domain_id,
             "lane": spec.lane,
@@ -128,7 +134,7 @@ def build_task_from_spec(
         "family": spec.family,
         "repo_dir": root_dir,
         "local_path": local_file,
-        "env_profile": spec.env_profile,
+        "env_profile": env_profile,
         "swe_index": spec.swe_index,
         "domain_id": spec.domain_id,
         "lane": spec.lane,
@@ -347,12 +353,10 @@ def main() -> None:
             matched_spec = next((s for s in specs if s.instance_id == args.instance_id), None)
             if matched_spec:
                 env_profile = matched_spec.env_profile
-            else:
-                if "astropy" in args.instance_id:
-                    env_profile = "astropy-legacy"
-                elif "django" in args.instance_id:
-                    env_profile = "django-legacy"
         except Exception:
+            pass
+
+        if env_profile == "python-default":
             if "astropy" in args.instance_id:
                 env_profile = "astropy-legacy"
             elif "django" in args.instance_id:

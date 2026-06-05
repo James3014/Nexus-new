@@ -43,7 +43,7 @@
 <!-- gitnexus:start -->
 # GitNexus — Code Intelligence
 
-This project is indexed by GitNexus as **Nexus** (65758 symbols, 97593 relationships, 300 execution flows). Use the GitNexus MCP tools to understand code, assess impact, and navigate safely.
+This project is indexed by GitNexus as **actionlint** (64513 symbols, 93545 relationships, 300 execution flows). Use the GitNexus MCP tools to understand code, assess impact, and navigate safely.
 
 > If any GitNexus tool warns the index is stale, run `npx gitnexus analyze` in terminal first.
 
@@ -66,10 +66,10 @@ This project is indexed by GitNexus as **Nexus** (65758 symbols, 97593 relations
 
 | Resource | Use for |
 |----------|---------|
-| `gitnexus://repo/Nexus/context` | Codebase overview, check index freshness |
-| `gitnexus://repo/Nexus/clusters` | All functional areas |
-| `gitnexus://repo/Nexus/processes` | All execution flows |
-| `gitnexus://repo/Nexus/process/{name}` | Step-by-step execution trace |
+| `gitnexus://repo/actionlint/context` | Codebase overview, check index freshness |
+| `gitnexus://repo/actionlint/clusters` | All functional areas |
+| `gitnexus://repo/actionlint/processes` | All execution flows |
+| `gitnexus://repo/actionlint/process/{name}` | Step-by-step execution trace |
 
 ## CLI
 
@@ -81,25 +81,5 @@ This project is indexed by GitNexus as **Nexus** (65758 symbols, 97593 relations
 | Rename / extract / split / refactor | `.claude/skills/gitnexus/gitnexus-refactoring/SKILL.md` |
 | Tools, resources, schema reference | `.claude/skills/gitnexus/gitnexus-guide/SKILL.md` |
 | Index, status, clean, wiki CLI commands | `.claude/skills/gitnexus/gitnexus-cli/SKILL.md` |
-| Work in the Ops area (984 symbols) | `.claude/skills/generated/ops/SKILL.md` |
-| Work in the Engine area (453 symbols) | `.claude/skills/generated/engine/SKILL.md` |
-| Work in the Bench area (449 symbols) | `.claude/skills/generated/bench/SKILL.md` |
-| Work in the Learning area (372 symbols) | `.claude/skills/generated/learning/SKILL.md` |
-| Work in the Contracts area (210 symbols) | `.claude/skills/generated/contracts/SKILL.md` |
-| Work in the Research area (207 symbols) | `.claude/skills/generated/research/SKILL.md` |
-| Work in the Services area (200 symbols) | `.claude/skills/generated/services/SKILL.md` |
-| Work in the Benchmark area (151 symbols) | `.claude/skills/generated/benchmark/SKILL.md` |
-| Work in the Commands area (137 symbols) | `.claude/skills/generated/commands/SKILL.md` |
-| Work in the Tests area (132 symbols) | `.claude/skills/generated/tests/SKILL.md` |
-| Work in the Mempalace area (118 symbols) | `.claude/skills/generated/mempalace/SKILL.md` |
-| Work in the Scripts area (99 symbols) | `.claude/skills/generated/scripts/SKILL.md` |
-| Work in the Flipt area (89 symbols) | `.claude/skills/generated/flipt/SKILL.md` |
-| Work in the Health area (87 symbols) | `.claude/skills/generated/health/SKILL.md` |
-| Work in the Governance area (69 symbols) | `.claude/skills/generated/governance/SKILL.md` |
-| Work in the Scratch area (61 symbols) | `.claude/skills/generated/scratch/SKILL.md` |
-| Work in the Orchestrator area (56 symbols) | `.claude/skills/generated/orchestrator/SKILL.md` |
-| Work in the App area (50 symbols) | `.claude/skills/generated/app/SKILL.md` |
-| Work in the Pilot_cli area (45 symbols) | `.claude/skills/generated/pilot-cli/SKILL.md` |
-| Work in the Sql area (44 symbols) | `.claude/skills/generated/sql/SKILL.md` |
 
 <!-- gitnexus:end -->
