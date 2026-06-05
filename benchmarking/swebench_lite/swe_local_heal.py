@@ -460,6 +460,12 @@ def main() -> None:
                 if repro_path.exists():
                     ctx.repro_script = repro_path.read_text()
 
+            # 優先加載 Antigravity 準備的專家級重現腳本，確保重現環境 100% 成功
+            expert_repro_path = NEXUS_ROOT / ".nexus" / "expert_repro" / task["instance_id"] / "reproduce_bug.py"
+            if expert_repro_path.exists():
+                print(f"  🧠 Loaded expert repro script for {task['instance_id']}")
+                ctx.repro_script = expert_repro_path.read_text(encoding="utf-8")
+
             try:
                 telemetry_store.records = []
                 res_ctx = pipeline.run(ctx)
