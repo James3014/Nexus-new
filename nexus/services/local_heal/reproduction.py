@@ -2,8 +2,22 @@ import subprocess
 import os
 import re
 import inspect
+import ast
+import traceback
 from pathlib import Path
 from typing import Any, Tuple
+
+class SyntaxValidator:
+    """🔍 SyntaxValidator: 靜態 Python 語法驗證器，實踐 Fail-Fast 原則"""
+    @staticmethod
+    def validate_syntax(code: str) -> Tuple[bool, str | None]:
+        try:
+            ast.parse(code)
+            return True, None
+        except (SyntaxError, IndentationError) as e:
+            tb = "".join(traceback.format_exception_only(type(e), e))
+            return False, tb.strip()
+
 
 class ReproductionRunner:
     """🧪 ReproductionRunner: 負責建立物理失敗證據 (Nexus v2.9 Hardened)"""
@@ -147,6 +161,12 @@ class ReproductionRunner:
         script_code = self.clean_repro_script(script_code)
         if "```" in script_code:
             return False, "Invalid repro script: markdown fence remains after sanitization."
+
+        # 靜態語法檢查 Fail-Fast 防線
+        is_valid, err_msg = SyntaxValidator.validate_syntax(script_code)
+        if not is_valid:
+            return False, f"SyntaxError in generated script:\n{err_msg}"
+
         repro_path = self.repo_dir / "reproduce_bug.py"
         try:
             # 硬化：路徑注入必須在最前面，否則會載入到 venv 裡已安裝的 astropy

@@ -19,7 +19,7 @@ def test_reproduction_phase_success():
     
     denoiser = MagicMock()
     
-    phase = ReproductionPhase(repro_runner=runner, env_denoiser=denoiser)
+    phase = ReproductionPhase(repro_runner=runner, env_denoiser=denoiser, ollama_generate_fn=MagicMock())
     result = phase.execute(ctx)
     
     assert result.success is True
@@ -42,7 +42,7 @@ def test_reproduction_phase_env_failure():
     
     denoiser = MagicMock()
     
-    phase = ReproductionPhase(repro_runner=runner, env_denoiser=denoiser)
+    phase = ReproductionPhase(repro_runner=runner, env_denoiser=denoiser, ollama_generate_fn=MagicMock())
     result = phase.execute(ctx)
     
     assert result.success is False
