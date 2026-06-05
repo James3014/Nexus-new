@@ -1,10 +1,12 @@
 use pyo3::prelude::*;
 
 pub mod governance;
+pub mod fast_matcher;
 
 use crate::governance::types::FlowState;
 use crate::governance::transition_engine::TransitionEngine;
 use crate::governance::normalizer::IntentNormalizer;
+use crate::fast_matcher::{fast_scan, FileMetadata};
 
 #[pyfunction]
 #[pyo3(name = "can_transition")]
@@ -51,5 +53,8 @@ fn match_state(s: &str) -> FlowState {
 fn nexus_core(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(can_transition_py, m)?)?;
     m.add_function(wrap_pyfunction!(normalize_intent_py, m)?)?;
+    m.add_function(wrap_pyfunction!(fast_scan, m)?)?;
+    m.add_class::<FileMetadata>()?;
     Ok(())
 }
+
