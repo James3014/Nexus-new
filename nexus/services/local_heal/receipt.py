@@ -90,6 +90,19 @@ def build_repair_receipt(ctx: Any, *, model_name: str = "nexus-local-heal") -> d
 
     model_decisions = list(getattr(ctx, "model_decisions", []) or [])
     
+    # Attempt to inject runtime telemetry from swe_local_heal
+    try:
+        from benchmarking.swebench_lite.swe_local_heal import telemetry_store
+        if hasattr(telemetry_store, "records") and telemetry_store.records:
+            total_tokens = sum(r.get("prompt_eval_count", 0) + r.get("eval_count", 0) for r in telemetry_store.records)
+            ctx.op.token_total_estimated = total_tokens
+            ctx.op.token_telemetry_status = "success"
+            for idx, record in enumerate(telemetry_store.records):
+                if idx < len(model_decisions):
+                    model_decisions[idx]["telemetry"] = record
+    except Exception:
+        pass
+    
     # 決定 gate_exit
     if env_failed:
         gate_exit = "env_resolver"
