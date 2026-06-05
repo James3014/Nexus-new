@@ -16,6 +16,10 @@ def validate_name_sanity(code: str) -> Tuple[bool, str]:
     """
     檢查代碼中是否存在常見的 LLM 佔位符或拼寫錯誤 (Spirit Alignment)。
     """
+    duplicate_name = _find_duplicate_top_level_definition(code)
+    if duplicate_name:
+        return False, f"Name sanity failed: Duplicate top-level definition '{duplicate_name}'"
+
     scan_code = _code_without_docstrings_or_comments(code)
     slop_patterns = [
         r'placeholder', r'your_code_here', r'modify_this',
@@ -25,6 +29,23 @@ def validate_name_sanity(code: str) -> Tuple[bool, str]:
         if re.search(pattern, scan_code, re.IGNORECASE):
             return False, f"Name sanity failed: Found disallowed placeholder pattern '{pattern}'"
     return True, ""
+
+
+def _find_duplicate_top_level_definition(code: str) -> str:
+    try:
+        tree = ast.parse(code)
+    except SyntaxError:
+        return ""
+
+    seen = set()
+    for node in tree.body:
+        if not isinstance(node, (ast.ClassDef, ast.FunctionDef, ast.AsyncFunctionDef)):
+            continue
+        key = (type(node), node.name)
+        if key in seen:
+            return node.name
+        seen.add(key)
+    return ""
 
 
 def _code_without_docstrings_or_comments(code: str) -> str:

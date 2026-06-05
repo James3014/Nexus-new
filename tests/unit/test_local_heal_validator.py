@@ -27,3 +27,20 @@ def example():
 
     assert valid is False
     assert "placeholder" in message.lower()
+
+
+def test_validate_name_sanity_rejects_duplicate_top_level_class_redefinition():
+    code = """
+class InventoryCounter:
+    def __init__(self):
+        self.count = 0
+
+class InventoryCounter:
+    def __init__(self):
+        self.count = 0
+"""
+
+    valid, message = validate_name_sanity(code)
+
+    assert valid is False
+    assert "duplicate top-level definition" in message.lower()

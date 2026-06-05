@@ -30,6 +30,7 @@ class VerificationPhase(IPhase):
 
             if ctx.op.hidden_verifier_passed:
                 ctx.op.solve_eligible = True
+                ctx.op.failure_reason = ""
                 return PhaseResult(success=True)
             else:
                 ctx.op.solve_eligible = False

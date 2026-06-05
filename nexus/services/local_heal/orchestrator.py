@@ -72,6 +72,8 @@ class HealOrchestrator:
                         err_kind = PatchErrorKind.REFUSAL_DETECTED
                     elif "MODEL_EMPTY_RESPONSE" in patch_res.error_reason:
                         err_kind = PatchErrorKind.EMPTY_RESPONSE
+                    elif "NAME_SANITY_ERROR" in patch_res.error_reason:
+                        err_kind = PatchErrorKind.NAME_SANITY_ERROR
 
                     err = PatchError(kind=err_kind, message=patch_res.error_reason)
                     

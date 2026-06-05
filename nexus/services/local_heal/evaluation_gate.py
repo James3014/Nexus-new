@@ -22,8 +22,9 @@ class EvaluationGate:
             env = os.environ.copy()
             benchmarks_dir = str(self.repo_dir / "scripts/benchmarks")
             env["PYTHONPATH"] = f"{str(self.repo_dir)}:{benchmarks_dir}:{env.get('PYTHONPATH', '')}"
+            test_timeout = int(os.environ.get("NEXUS_TEST_TIMEOUT_SECONDS", "300"))
             try:
-                res = subprocess.run(cmd, cwd=str(self.repo_dir), capture_output=True, text=True, timeout=60, env=env)
+                res = subprocess.run(cmd, cwd=str(self.repo_dir), capture_output=True, text=True, timeout=test_timeout, env=env)
                 results.append(TestResult(test_id=" ".join(cmd), passed=(res.returncode == 0), output=res.stdout + res.stderr))
             except Exception as e:
                 results.append(TestResult(test_id=" ".join(cmd), passed=False, output=str(e)))
@@ -42,8 +43,9 @@ class EvaluationGate:
             env = os.environ.copy()
             benchmarks_dir = str(self.repo_dir / "scripts/benchmarks")
             env["PYTHONPATH"] = f"{str(self.repo_dir)}:{benchmarks_dir}:{env.get('PYTHONPATH', '')}"
+            test_timeout = int(os.environ.get("NEXUS_TEST_TIMEOUT_SECONDS", "300"))
             try:
-                res = subprocess.run(cmd, cwd=str(self.repo_dir), capture_output=True, text=True, timeout=60, env=env)
+                res = subprocess.run(cmd, cwd=str(self.repo_dir), capture_output=True, text=True, timeout=test_timeout, env=env)
                 results.append(TestResult(test_id=" ".join(cmd), passed=(res.returncode == 0), output=res.stdout + res.stderr, is_hidden=True))
             except Exception as e:
                 results.append(TestResult(test_id=" ".join(cmd), passed=False, output=str(e), is_hidden=True))

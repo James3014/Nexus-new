@@ -34,6 +34,7 @@ class PlanningPhase(IPhase):
                 ctx.op.repro_evidence,
                 model_name=plan_decision["model"],
                 timeout_seconds=plan_decision["timeout_seconds"],
+                options=plan_decision.get("ollama_options"),
             )
             return PhaseResult(success=True)
         except Exception as exc:

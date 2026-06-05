@@ -11,15 +11,15 @@ class ModelProfile:
     """
     @classmethod
     def get_api_type(cls, model_name: str) -> str:
-        if model_name.startswith("gemma4"):
-            return "chat"
         return "generate"
+
     @classmethod
     def get_options(cls, model_name: str) -> Dict[str, Any]:
-        if model_name.startswith("gemma4"):
+        if "14b" in model_name:
             return {
-                "num_predict": 3072,
-                "num_ctx": 8192,
+                "temperature": 0.0,
+                "num_predict": 8192,
+                "num_ctx": 16384,
             }
         else:
             return {
@@ -38,11 +38,11 @@ class LocalModelPolicy:
     """
 
     OLLAMA_SMALL = os.environ.get("NEXUS_OLLAMA_SMALL_MODEL", "qwen2.5-coder:7b")
-    OLLAMA_LARGE = os.environ.get("NEXUS_OLLAMA_MODEL", "gemma4:12b")
+    OLLAMA_LARGE = os.environ.get("NEXUS_OLLAMA_MODEL", "qwen2.5-coder:14b")
     
-    SEARCH_TIMEOUT_SECONDS = 120
-    PATCH_TIMEOUT_SECONDS = int(os.environ.get("NEXUS_PATCH_TIMEOUT_SECONDS", "600"))
-    REPRO_TIMEOUT_SECONDS = 180
+    SEARCH_TIMEOUT_SECONDS = int(os.environ.get("NEXUS_SEARCH_TIMEOUT_SECONDS", "600"))
+    PATCH_TIMEOUT_SECONDS = int(os.environ.get("NEXUS_PATCH_TIMEOUT_SECONDS", "1200"))
+    REPRO_TIMEOUT_SECONDS = int(os.environ.get("NEXUS_REPRO_TIMEOUT_SECONDS", "600"))
 
     @classmethod
     def select_model(cls, task_type: str, phase: str, context: Dict[str, Any]) -> Dict[str, Any]:

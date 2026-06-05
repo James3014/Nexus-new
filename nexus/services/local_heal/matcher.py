@@ -12,6 +12,8 @@ class Normalizer:
         return normalized
 
     def normalize_whitespace(self, text: str) -> str:
+        # 🛡️ 戰甲：移除所有換行與連續空白，達成 Whitespace-Agnostic
+        text = text.replace("\n", " ").replace("\r", " ")
         return " ".join(text.split())
 
     def normalize(self, text: str) -> str:

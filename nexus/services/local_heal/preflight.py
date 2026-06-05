@@ -56,3 +56,11 @@ def build_preflight_rows(
             }
         )
     return rows
+
+
+def run_preflight_for_spec(
+    spec: LocalHealTaskSpec,
+    root_dir: Path,
+    resolver: EnvResolver | None = None,
+) -> dict[str, object]:
+    return build_preflight_rows((spec,), root_dir=root_dir, resolver=resolver)[0]

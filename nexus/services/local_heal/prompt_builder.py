@@ -6,7 +6,7 @@ class PromptBuilder:
 
     @staticmethod
     def build_patch_system_prompt(model_name: str | None = None) -> str:
-        base = (
+        return (
             "You are a Senior Nexus Engineer. Output surgically precise Python edits.\n\n"
             "CONTRACT:\n"
             "1. Output ONLY SEARCH/REPLACE blocks.\n"
@@ -16,13 +16,6 @@ class PromptBuilder:
             "5. NO PLACEHOLDERS: Never use '# ...' or comments to represent existing code.\n"
             "6. NO REDEFINITION: Do not create a duplicate top-level class or function; modify the existing definition in place."
         )
-        if model_name and model_name.startswith("gemma4"):
-            base += (
-                "\n\n"
-                "CRITICAL: Keep your thinking process extremely brief (under 100 words). "
-                "Focus your analysis on the previous error, then output the SEARCH/REPLACE blocks immediately."
-            )
-        return base
 
     @staticmethod
     def build_patch_user_prompt(

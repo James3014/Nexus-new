@@ -19,18 +19,15 @@ from nexus.services.local_heal.task_manifest import (
 NEXUS_ROOT = Path(__file__).parent.parent.parent.resolve()
 LOCAL_HEAL_ROOT = Path(os.environ.get("NEXUS_LOCAL_HEAL_ROOT_DIR", str(NEXUS_ROOT))).resolve()
 OLLAMA_MODEL = "qwen2.5-coder:14b"
-DEFAULT_OLLAMA_TIMEOUT_SECONDS = 180
+DEFAULT_OLLAMA_TIMEOUT_SECONDS = 1200
 DEFAULT_OLLAMA_NUM_CTX = 4096
 DEFAULT_OLLAMA_NUM_PREDICT = 768
 
 
-import threading
+from nexus.services.local_heal.client import OllamaClient
+from nexus.services.local_heal.telemetry import TelemetryCollector
 
-class TelemetryStore(threading.local):
-    def __init__(self):
-        self.records = []
-
-telemetry_store = TelemetryStore()
+telemetry_store = TelemetryCollector()
 
 
 def nexus_local_generate(
@@ -53,54 +50,16 @@ def nexus_local_generate(
             "num_predict": int(os.environ.get("NEXUS_OLLAMA_NUM_PREDICT", DEFAULT_OLLAMA_NUM_PREDICT)),
         }
 
-    if api_type == "chat":
-        payload_data = {
-            "model": selected_model,
-            "messages": [
-                {"role": "system", "content": system_prompt},
-                {"role": "user", "content": user_prompt}
-            ],
-            "stream": False,
-            "options": resolved_options,
-        }
-        url_path = "/api/chat"
-    else:
-        payload_data = {
-            "model": selected_model,
-            "system": system_prompt,
-            "prompt": user_prompt,
-            "stream": False,
-            "options": resolved_options,
-        }
-        url_path = "/api/generate"
-
-    payload = json.dumps(payload_data).encode()
-    req = urllib.request.Request(
-        f"{endpoint}{url_path}",
-        data=payload,
-        headers={"Content-Type": "application/json"},
-        method="POST",
+    client = OllamaClient(
+        model=selected_model,
+        endpoint=endpoint,
+        log_path="/Users/jameschen/Workspace/nexus/ollama_calls.log",
+        telemetry_collector=telemetry_store
     )
-    with urllib.request.urlopen(req, timeout=effective_timeout) as resp:
-        data = json.loads(resp.read())
-        
-        # Record detailed telemetry if active
-        if hasattr(telemetry_store, "records"):
-            call_telemetry = {
-                "model": selected_model,
-                "api_type": api_type,
-                "total_duration_ms": round(data.get("total_duration", 0) / 1e6, 2),
-                "load_duration_ms": round(data.get("load_duration", 0) / 1e6, 2),
-                "prompt_eval_count": data.get("prompt_eval_count", 0),
-                "eval_count": data.get("eval_count", 0),
-                "prompt_eval_duration_ms": round(data.get("prompt_eval_duration", 0) / 1e6, 2),
-                "eval_duration_ms": round(data.get("eval_duration", 0) / 1e6, 2),
-            }
-            telemetry_store.records.append(call_telemetry)
-            
-        if api_type == "chat":
-            return data.get("message", {}).get("content", "")
-        return data.get("response", "")
+
+    if api_type == "chat":
+        return client.chat(system_prompt, user_prompt, effective_timeout, resolved_options)
+    return client.generate(system_prompt, user_prompt, effective_timeout, resolved_options)
 
 
 ollama_generate = nexus_local_generate
@@ -128,6 +87,11 @@ def build_task_from_spec(
     *,
     root_dir: Path,
 ) -> dict[str, Any]:
+    from nexus.services.local_heal.env_resolver import EnvResolver, requirement_for_profile
+    resolver = EnvResolver()
+    resolution = resolver.resolve(requirement_for_profile(spec.env_profile))
+    python_exe = os.path.abspath(resolution.python_executable) if resolution.ready else ""
+
     if spec.kind == "swebench":
         instance = None
         if spec.swe_index is not None and spec.swe_index < len(dataset):
@@ -153,6 +117,7 @@ def build_task_from_spec(
             "expected_reason_family": spec.expected_reason_family,
             "probe_goal": spec.probe_goal,
             "local_mode": False,
+            "python_executable": python_exe,
         }
 
     local_file = root_dir / spec.local_path
@@ -172,6 +137,7 @@ def build_task_from_spec(
         "expected_reason_family": spec.expected_reason_family,
         "probe_goal": spec.probe_goal,
         "local_mode": True,
+        "python_executable": python_exe,
     }
 
 
@@ -205,6 +171,7 @@ def build_tasks_from_manifest(
         local_heal_60_task_manifest,
         local_heal_100_task_manifest,
         local_heal_113_task_manifest,
+        local_heal_batch1_task_manifest,
     )
     if manifest_name == "local-heal-20":
         specs = local_heal_20_task_manifest()
@@ -216,6 +183,8 @@ def build_tasks_from_manifest(
         specs = local_heal_100_task_manifest()
     elif manifest_name == "local-heal-113":
         specs = local_heal_113_task_manifest()
+    elif manifest_name == "local-heal-batch1":
+        specs = local_heal_batch1_task_manifest()
     else:
         raise ValueError(f"Unknown task manifest: {manifest_name}")
         
@@ -317,7 +286,7 @@ def main() -> None:
     )
     parser.add_argument(
         "--task_manifest",
-        choices=["local-heal-20", "local-heal-40", "local-heal-60", "local-heal-100", "local-heal-113"],
+        choices=["local-heal-20", "local-heal-40", "local-heal-60", "local-heal-100", "local-heal-113", "local-heal-batch1"],
         help="Run a fixed local-heal task manifest",
     )
     parser.add_argument(
@@ -370,19 +339,54 @@ def main() -> None:
         if not instance:
             print(f"❌ Error: Instance {args.instance_id} not found in dataset")
             return
+
+        env_profile = "python-default"
+        try:
+            from nexus.services.local_heal.task_manifest import local_heal_113_task_manifest
+            specs = local_heal_113_task_manifest()
+            matched_spec = next((s for s in specs if s.instance_id == args.instance_id), None)
+            if matched_spec:
+                env_profile = matched_spec.env_profile
+            else:
+                if "astropy" in args.instance_id:
+                    env_profile = "astropy-legacy"
+                elif "django" in args.instance_id:
+                    env_profile = "django-legacy"
+        except Exception:
+            if "astropy" in args.instance_id:
+                env_profile = "astropy-legacy"
+            elif "django" in args.instance_id:
+                env_profile = "django-legacy"
+
+        from nexus.services.local_heal.env_resolver import EnvResolver, requirement_for_profile
+        resolver = EnvResolver()
+        resolution = resolver.resolve(requirement_for_profile(env_profile))
+        python_exe = os.path.abspath(resolution.python_executable) if resolution.ready else ""
+
+        repo_name = "astropy" if "astropy" in args.instance_id else "django" if "django" in args.instance_id else ""
+        task_repo_dir = LOCAL_HEAL_ROOT
+        if repo_name:
+            task_repo_dir = LOCAL_HEAL_ROOT / ".nexus" / "workspaces" / repo_name
+
         tasks = [
             {
                 "instance_id": instance["instance_id"],
-                "repo_dir": LOCAL_HEAL_ROOT,
+                "repo_dir": task_repo_dir,
                 "problem_statement": instance["problem_statement"],
-                "env_profile": "python-default",
+                "env_profile": env_profile,
                 "local_mode": False,
+                "python_executable": python_exe,
             }
         ]
     elif args.task_manifest:
         tasks = build_tasks_from_manifest(
             args.task_manifest, dataset, root_dir=LOCAL_HEAL_ROOT
         )
+        for t in tasks:
+            inst_id = t["instance_id"]
+            repo_name = "astropy" if "astropy" in inst_id else "django" if "django" in inst_id else ""
+            if repo_name:
+                t["repo_dir"] = LOCAL_HEAL_ROOT / ".nexus" / "workspaces" / repo_name
         if args.resume_from:
             completed = read_resume_task_ids(
                 args.resume_from, mode="preflight" if args.preflight_only else "repair"

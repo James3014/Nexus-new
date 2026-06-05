@@ -69,7 +69,8 @@ class ReproductionPhase(IPhase):
                 "You are a QA engineer.",
                 prompt,
                 model_name=decision["model"],
-                timeout_seconds=decision["timeout_seconds"]
+                timeout_seconds=decision["timeout_seconds"],
+                options=decision.get("ollama_options")
             )
             if not response:
                 ctx.op.failure_reason = "MODEL_TIMEOUT" if decision["timeout_seconds"] < 10 else "NO_REPRO_SCRIPT"
@@ -100,7 +101,7 @@ class ReproductionPhase(IPhase):
                     decision["detail"] = detail[:500]
                 return
 
-    def _call_model(self, system_prompt: str, user_prompt: str, *, model_name: str, timeout_seconds: int | None = None) -> str:
+    def _call_model(self, system_prompt: str, user_prompt: str, *, model_name: str, timeout_seconds: int | None = None, options: dict[str, Any] | None = None) -> str:
         try:
             sig = inspect.signature(self.ollama_generate)
             kwargs = {}
@@ -108,6 +109,8 @@ class ReproductionPhase(IPhase):
                 kwargs["model"] = model_name
             if "timeout" in sig.parameters and timeout_seconds is not None:
                 kwargs["timeout"] = timeout_seconds
+            if "options" in sig.parameters and options is not None:
+                kwargs["options"] = options
             if kwargs:
                 return self.ollama_generate(system_prompt, user_prompt, **kwargs)
         except (TypeError, ValueError):

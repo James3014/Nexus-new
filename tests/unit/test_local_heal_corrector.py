@@ -34,3 +34,16 @@ def test_corrector_keeps_no_logic_change_warning_for_static_no_effective_change(
 
     assert "only modified docstrings" in prompt
     assert "visible verification still failed" not in prompt
+
+
+def test_corrector_routes_name_sanity_to_in_place_definition_retry():
+    corrector = SelfCorrector()
+    error = PatchError(
+        kind=PatchErrorKind.NAME_SANITY_ERROR,
+        message="Duplicate top-level definition 'InventoryCounter'",
+    )
+
+    prompt = corrector.build_retry_prompt("Original prompt", error)
+
+    assert "Do NOT create or redefine" in prompt
+    assert "Modify the existing definition in place" in prompt

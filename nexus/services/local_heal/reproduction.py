@@ -184,12 +184,13 @@ class ReproductionRunner:
             env.pop("VIRTUAL_ENV", None)
 
             # 使用 -I (Isolated) 模式
+            repro_run_timeout = int(os.environ.get("NEXUS_REPRO_RUN_TIMEOUT_SECONDS", "180"))
             res = subprocess.run(
                 [self.python_executable, "-I", "reproduce_bug.py"],
                 cwd=str(self.repo_dir),
                 capture_output=True,
                 text=True,
-                timeout=30,
+                timeout=repro_run_timeout,
                 env=env
             )
 

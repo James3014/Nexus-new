@@ -14,6 +14,7 @@ class Planner:
         *,
         model_name: str | None = None,
         timeout_seconds: int | None = None,
+        options: dict[str, Any] | None = None,
     ) -> str:
         if not model_name:
             return self.ollama_generate(system, prompt)
@@ -24,6 +25,8 @@ class Planner:
                 kwargs["model"] = model_name
             if "timeout" in sig.parameters and timeout_seconds is not None:
                 kwargs["timeout"] = timeout_seconds
+            if "options" in sig.parameters and options is not None:
+                kwargs["options"] = options
             if kwargs:
                 return self.ollama_generate(system, prompt, **kwargs)
         except (TypeError, ValueError):
@@ -37,6 +40,7 @@ class Planner:
         *,
         model_name: str | None = None,
         timeout_seconds: int | None = None,
+        options: dict[str, Any] | None = None,
     ) -> dict:
         if not self.ollama_generate:
             # Fallback for unit tests if needed
@@ -61,7 +65,7 @@ Reproduction Evidence:
 
 JSON Output:
 """
-        response = self._generate("", prompt, model_name=model_name, timeout_seconds=timeout_seconds)
+        response = self._generate("", prompt, model_name=model_name, timeout_seconds=timeout_seconds, options=options)
         try:
             # 提取 JSON
             match = re.search(r"(\{.*\})", response, re.DOTALL)

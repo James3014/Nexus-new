@@ -120,6 +120,16 @@ ENV_REQUIREMENTS: dict[str, EnvRequirement] = {
         override_env_var="NEXUS_ASTROPY_311_MODERN_PYTHON",
         auto_heal_enabled=True,
     ),
+    "django-legacy": EnvRequirement(
+        profile="django-legacy",
+        python_candidates=(
+            ".venv_django/bin/python",
+            "python3.9",
+            "python3.10",
+        ),
+        allowed_python=((3, 9), (3, 10)),
+        missing_reason="DJANGO_VERSION_PARITY_MISSING",
+    ),
 }
 
 
