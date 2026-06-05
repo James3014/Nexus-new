@@ -5,16 +5,24 @@ class PromptBuilder:
     """🛡️ Nexus Prompt Engineering & Contract Management (Linus Principles: Explicit & Reliable)"""
 
     @staticmethod
-    def build_patch_system_prompt() -> str:
-        return (
+    def build_patch_system_prompt(model_name: str | None = None) -> str:
+        base = (
             "You are a Senior Nexus Engineer. Output surgically precise Python edits.\n\n"
             "CONTRACT:\n"
             "1. Output ONLY SEARCH/REPLACE blocks.\n"
             "2. Format: 'FILE: <path>' then '<<<<<<< SEARCH\\n<original>\\n=======\\n<fixed>\\n>>>>>>> REPLACE'.\n"
             "3. The SEARCH section must match the source code character-for-character.\n"
             "4. NO CONVERSATION. NO MARKDOWN outside blocks. NO apologies.\n"
-            "5. NO PLACEHOLDERS: Never use '# ...' or comments to represent existing code."
+            "5. NO PLACEHOLDERS: Never use '# ...' or comments to represent existing code.\n"
+            "6. NO REDEFINITION: Do not create a duplicate top-level class or function; modify the existing definition in place."
         )
+        if model_name and model_name.startswith("gemma4"):
+            base += (
+                "\n\n"
+                "CRITICAL: Keep your thinking process extremely brief (under 100 words). "
+                "Focus your analysis on the previous error, then output the SEARCH/REPLACE blocks immediately."
+            )
+        return base
 
     @staticmethod
     def build_patch_user_prompt(
@@ -39,5 +47,6 @@ class PromptBuilder:
             f"[STRATEGY: {reasoning_mode}]\n{strategy}\n"
             f"[INVARIANTS]\n{invariants_str}\n\n"
             f"[SOURCE CONTEXT]\n{files_section}"
+            f"CRITICAL: Modify the existing code IN-PLACE. Do NOT duplicate or redefine existing top-level classes/functions.\n"
             f"Produce the SEARCH/REPLACE blocks now."
         )

@@ -15,10 +15,17 @@ from nexus.services.local_heal.prompt_builder import PromptBuilder
 
 class PatchSynthesisPhase(IPhase):
     """Phase 4: Targeted Edit (單次補丁生成與套用)"""
-    def __init__(self, parser: SearchReplaceParser, patcher: Patcher, ollama_generate_fn: Any):
+    def __init__(
+        self,
+        parser: SearchReplaceParser,
+        patcher: Patcher,
+        ollama_generate_fn: Any | None = None,
+        *,
+        model_client: Any | None = None,
+    ):
         self.parser = parser
         self.patcher = patcher
-        self.ollama_generate = ollama_generate_fn
+        self.ollama_generate = ollama_generate_fn or model_client
 
     def execute(self, ctx: HealContext) -> PhaseResult:
         # 1. 準備 Prompt (如果尚未準備)
@@ -42,6 +49,8 @@ class PatchSynthesisPhase(IPhase):
             ctx,
             model_name=patch_decision["model"],
             timeout_seconds=patch_decision["timeout_seconds"],
+            options=patch_decision.get("ollama_options"),
+            api_type=patch_decision.get("api_type", "generate"),
         )
         if not response:
             ctx.op.empty_response = True
@@ -132,18 +141,23 @@ class PatchSynthesisPhase(IPhase):
             context={
                 "reasoning_mode": ctx.op.reasoning_mode,
                 "file_count": len(ctx.op.localized_files) or 1,
+                "attempt": ctx.op.attempt,
+                "failure_reason": ctx.op.failure_reason,
             },
         )
         ctx.op.model_decisions.append({"phase": phase, **decision})
         return decision
 
-    def _generate_patch(self, ctx: HealContext, *, model_name: str, timeout_seconds: int) -> str:
+    def _generate_patch(self, ctx: HealContext, *, model_name: str, timeout_seconds: int, options: dict | None = None, api_type: str = "generate") -> str:
         try:
+            system_prompt = PromptBuilder.build_patch_system_prompt(model_name=model_name)
             response = self._call_model(
-                ctx.op.system_prompt,
+                system_prompt,
                 ctx.op.user_prompt,
                 model_name=model_name,
                 timeout_seconds=timeout_seconds,
+                options=options,
+                api_type=api_type,
             )
             model_text_reason = classify_model_text(response)
             if model_text_reason:
@@ -165,7 +179,7 @@ class PatchSynthesisPhase(IPhase):
                     decision["detail"] = detail[:500]
                 return
 
-    def _call_model(self, system_prompt: str, user_prompt: str, *, model_name: str, timeout_seconds: int | None = None) -> str:
+    def _call_model(self, system_prompt: str, user_prompt: str, *, model_name: str, timeout_seconds: int | None = None, options: dict | None = None, api_type: str = "generate") -> str:
         try:
             sig = inspect.signature(self.ollama_generate)
             kwargs = {}
@@ -173,6 +187,10 @@ class PatchSynthesisPhase(IPhase):
                 kwargs["model"] = model_name
             if "timeout" in sig.parameters and timeout_seconds is not None:
                 kwargs["timeout"] = timeout_seconds
+            if "options" in sig.parameters and options is not None:
+                kwargs["options"] = options
+            if "api_type" in sig.parameters:
+                kwargs["api_type"] = api_type
             if kwargs:
                 return self.ollama_generate(system_prompt, user_prompt, **kwargs)
         except (TypeError, ValueError):

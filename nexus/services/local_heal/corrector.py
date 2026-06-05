@@ -1,3 +1,5 @@
+from typing import Any
+
 from nexus.services.local_heal.errors import PatchError, PatchErrorKind
 
 class SelfCorrector:
@@ -13,6 +15,11 @@ class SelfCorrector:
                 error = PatchError(kind=PatchErrorKind.SYNTAX_ERROR, message=error)
             else:
                 error = PatchError(kind=PatchErrorKind.SEARCH_MISMATCH, message=error)
+
+        # Strip any existing HUD warnings to prevent prompt accumulation and bloat
+        marker = "\n\n⚠️ [NEXUS BATTLESUIT HUD: CRITICAL WARNING - PREVIOUS ATTEMPT FAILED]"
+        if marker in original_user_prompt:
+            original_user_prompt = original_user_prompt.split(marker)[0]
 
         header = "\n\n⚠️ [NEXUS BATTLESUIT HUD: CRITICAL WARNING - PREVIOUS ATTEMPT FAILED]\n"
         
@@ -93,6 +100,16 @@ class SelfCorrector:
                 f"1. You MUST copy the target code character-for-character, completely and exactly, into your SEARCH block.\n"
                 f"2. NEVER use '# ...' or other comments to skip existing code in either SEARCH or REPLACE blocks.\n"
                 f"Output the fully written SEARCH/REPLACE block without any placeholder shortcuts."
+            )
+        elif error.kind == PatchErrorKind.NAME_SANITY_ERROR:
+            retry_instruction = (
+                f"CRITICAL ERROR: Your previous patch failed Nexus code sanity checks.\n"
+                f"--> {error.message}\n\n"
+                f"Please do the following:\n"
+                f"1. Do NOT create or redefine a top-level class or function that already exists in the file.\n"
+                f"2. Modify the existing definition in place using one precise SEARCH/REPLACE block.\n"
+                f"3. Keep unrelated imports, classes, functions, and tests unchanged.\n"
+                f"Output the corrected SEARCH/REPLACE block now."
             )
         else:
             retry_instruction = (
