@@ -12,31 +12,28 @@ type: research
 version_scope: '[v22.2, v23]'
 ---
 
-# 🧬 Research Status: DeepScientist Hardened (v22.2.1)
+# 🧬 Research Status: RLM & Singularity Hardening (v26.1)
 
 ## One-sentence summary
-記錄 Nexus Singularity OS 與 DeepScientist 研究框架的高級硬化整合狀態與 Phase 8 展望。 [Source: MUSE-NEXUS-Engine-Specification-v22-Eternal.md]
+記錄 Nexus Singularity OS 與 RLM 遞迴學習機的深度硬化整合狀態與 v26 演進路徑。
 
-## Role / responsibility
-- **整合記錄**: 指導 `context_hub.py` 與研究邏輯。 [Source: scripts/engine/intent_classifier.py]
-- **穩定度錨點**: 確保 Swarm-100 併發環境下的原子性與貝葉斯演化。
+## 🚀 Research 2.5 (RLM & Bayesian Convergence)
+- **RLM (Recursive Learning Machine)**: 已實作具備 `trace_budget` 的局部收斂迴路。
+- **Bayesian Warm-Start**: `NightShift` 引入高斯過程優化，透過歷史 `optimization_curve.csv` 實現溫啟動，加速修復收斂。
+- **Public Benchmark Reporting**: 實作 `nexus-benchmark-public-report` 職能，產出具備物理收據證據的對外評測報告。
 
-## 🎯 整合概況
-本文件記錄了 Nexus Singularity OS 與 DeepScientist 研究框架的深度硬化整合成果。系統已通過 Swarm-100（100 筆並發）高壓測試，具備工業級穩定度。
+## 🧬 研究循環 (P-X-D-R-A-C v26)
+- **P (Plan)**: **Dual-Loop** 策劃環，產出 `Task Manifest`。
+- **X (X-Ray)**: 遞迴依賴圖譜分析。
+- **D (Diagnose)**: **Autoreason** 候選方案評審啟動。
+- **R (Realize)**: **RLM Recursive Repair** 執行。
+- **A (Audit)**: **v24.1 Canonical Receipt** 8 點誠信核驗。
+- **C (Crystallize)**: 記憶結晶化至 **MemPalace** 並執行 Arweave 蒸餾。
 
-### 🚀 Research 2.0 (Gladiator & MemPalace) [2026-04-13 新增]
-- **語義多樣化 (Codex Pivot)**: `ResearchPolicy` 具備語義偏移能力，動態生成高熵戰術。
-- **物理隔離沙盒 (Swarm Gladiator)**: 引入 `SwarmBroker`，實現 `.nexus-swarm-*` 的動態租用與物理隔離平行測試，徹底消除代碼覆寫競爭。
-- **顧問升級門檻 (AgentOpt Gate)**: 當根因信心度 `< 0.6` 時，自動觸發 Codex 介入警告，實現「便宜模型執行，強模型審計」的優雅降級。
-- **記憶代謝與永生 (Memory Metabolism)**: 戰勝策略將通過 AAAK Judge (MemPalace) 雜訊壓縮，原子寫入 LanceDB (向量) 與 SQLite (索引)，並獲取 Arweave TX ID，實現跨 Session 知識傳承。
-
-### 🧬 研究循環 (P-D-X-R-A-C)
-- **P (Plan)**: 由 `context_hub.py` 驅動，整合 `FindingsCard` 記憶注入。
-- **D (Design)**: `gear.py (v18.4)` 與 `SkillRouter` 動態分發。
-- **X (X-Ray)**: `xray_service.py` 產出研究依賴圖譜。
-- **R (Realize)**: `nightshift.py (v7.5)` 注入 **貝葉斯優化 (Gaussian Process)** 與 **原子鎖 (`O_EXCL`)**。
-- **A (Audit)**: 自動產出 `optimization_curve.csv` 與 Mermaid 演化地圖。
-- **C (Consensus)**: 記憶結晶化至 `.nexus/memory/` 並通過治理審計。
+## 🛡️ 核心特徵
+1. **遞迴自癒 (Recursive Self-Heal)**: RLM 支援多輪補丁修正，直到通過物理 Gate。
+2. **證據驅動 (Evidence-Driven)**: 每一輪研究必須產出 `artifact`，否則視為無效。
+3. **治理對位**: 通過 v26 標準的 19+ 層治理審計。
 
 ## 🛡️ 核心特徵
 1. **原子併發 (Atomic Concurrency)**: 支援 20+ 工作緒、100+ 任務同時運行而不產生 Git 衝突。

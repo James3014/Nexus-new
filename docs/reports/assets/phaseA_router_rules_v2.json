@@ -1,0 +1,24 @@
+{
+  "version": "2026-04-28.v2",
+  "policy": "priority-first-then-score",
+  "priority_order": [
+    "workos-trial-build-playbook",
+    "workos-live-preview-debug-loop",
+    "safe-preview-boundary-gate",
+    "live-data-delivery-profile-gate",
+    "acceptance-evidence-failclosed",
+    "pm-eval-first-planner",
+    "agent-longrun-task-tracker",
+    "autonomous-task-director"
+  ],
+  "rules": {
+    "workos-trial-build-playbook": ["work\\s*os", "trial", "試作", "seed", "workflow 模板", "最小可驗證"],
+    "workos-live-preview-debug-loop": ["root cause", "回歸驗證", "體感", "debug", "preview 卡住", "user path"],
+    "safe-preview-boundary-gate": ["preview", "最小暴露", "回滾", "權限", "後台", "審計"],
+    "live-data-delivery-profile-gate": ["mock", "live", "交付層級", "核准", "gate"],
+    "acceptance-evidence-failclosed": ["驗收", "證據", "pass", "fail", "machine-checkable", "可重跑"],
+    "pm-eval-first-planner": ["eval", "可測", "模糊", "嚴重錯誤", "成功"],
+    "agent-longrun-task-tracker": ["長時", "狀態機", "blocked", "in_progress", "stop-loss", "追蹤"],
+    "autonomous-task-director": ["8小時", "少打擾", "中斷", "優先序", "不可逆", "高風險", "自治"]
+  }
+}

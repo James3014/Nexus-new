@@ -943,6 +943,38 @@ def _write_delta_artifacts(project_root: Path, state: Any, success: bool, source
     return {"index_delta": index_delta, "spec_delta": spec_delta}
 
 
+def write_formal_lesson(repo_root: Path, state: Any, audit_result: Optional[Dict[str, Any]] = None):
+    """將代數推理（Formal Reasoning）的結果寫入 lessonevents.jsonl (v26)"""
+    event_path = repo_root / ".nexus" / "events" / "lessonevents.jsonl"
+    
+    # 嘗試從 state 或傳入參數獲取 audit 資訊
+    audit = audit_result or getattr(state, "last_audit", {}) or {}
+    reasoning_mode = audit.get("reasoning_mode", "INTUITIVE")
+    
+    if reasoning_mode != "FORMAL":
+        return
+
+    event = {
+        "event_id": f"L-FORMAL-{state.task_id}-{int(datetime.now(timezone.utc).timestamp())}",
+        "timestamp": utc_now_iso(),
+        "type": "FORMAL_REASONING_OUTCOME",
+        "details": {
+            "task_id": state.task_id,
+            "gate_passed": audit.get("formal_gate_passed", False),
+            "coverage": audit.get("obligation_coverage_pct", 0.0),
+            "summary": audit.get("summary", "N/A"),
+            "audit_notes": audit.get("audit_notes_formal", [])
+        }
+    }
+    
+    derivation = getattr(state, "derivation", None)
+    if derivation:
+        event["details"]["derivation_steps_count"] = len(getattr(derivation, "steps", []))
+        event["details"]["invariants"] = getattr(derivation, "invariants", [])
+        
+    _append_jsonl(event_path, event)
+
+
 def finalize_learning_loop(
     project_root: Path | str,
     state: Any,
@@ -975,6 +1007,12 @@ def finalize_learning_loop(
             card = FindingsCard.from_lesson_event(event)
             store.write(card)
             upsert_lesson_event(root / ".nexus" / "knowledge" / "lesson_events.jsonl", event)
+
+    # 🧬 [v26] Formal Lesson Writeback
+    try:
+        write_formal_lesson(root, state)
+    except Exception as e:
+        logging.warning(f"⚠️ [v26] Formal Lesson writeback failed: {e}")
 
     # 🧬 [Phase 13] Bayesian-Adaptive Skill Win Rate
     try:

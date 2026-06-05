@@ -34,8 +34,15 @@ version_scope: '[v30]'
 - **最高規約**: [[01_System/MUSE_PROTO|MUSE_PROTO v2.4]]
 - **進化白皮書**: [[01_System/Evolution/LEARNING_EVOLUTION_MANIFESTO|Evolution Manifesto]]
 - **架構藍圖**: [[01_System/SYSTEM_ARCHITECTURE_BLUEPRINT|System Blueprint]]
+- **能力矩陣**: [[02_Modules/Module - Capability Matrix|Capability Matrix (v26)]]
+- **路由協議**: [[05_Protocols/Protocol - Capability Routing|Capability Routing Protocol]]
 - **CLI 手冊**: [[05_Protocols/CLI_Full_Params|CLI Full Parameters]]
 - **能力矩陣**: [[01_System/16_CAPABILITY_SPEC_MATRIX|Capability Matrix]]
+
+### 🗺️ 專案計劃與狀態 (Status & Plans)
+- **[能力路由狀態總表 (2026-04-30)](../../docs/arch/CAPABILITY_ROUTE_STATUS_2026-04-30.md)**
+- **[能力路由遷移計劃 (2026-04-29)](../../docs/arch/CAPABILITY_ROUTING_MIGRATION_PLAN_2026-04-29.md)**
+- **[智慧路由整合長計劃 v2](../../docs/arch/NEXUS_ROUTING_LONG_PLAN_V2.md)**
 
 ### 📜 追溯 Nexus (Trace)
 面向審計與歷史。

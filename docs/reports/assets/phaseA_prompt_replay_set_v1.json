@@ -1,0 +1,37 @@
+{
+  "version": "2026-04-28.v1",
+  "topic": "nexus-skill-routing-real-prompt-replay",
+  "cases": [
+    {"id": "ATD-01", "skill": "autonomous-task-director", "type": "should_trigger", "prompt": "請你接手這個跨三階段任務，8小時內自己跑完，除非遇到高風險才回報。", "expected": {"hit": true, "must_include": ["Execution Contract", "P0/P1/P2", "Escalation"]}},
+    {"id": "ATD-02", "skill": "autonomous-task-director", "type": "should_not_trigger", "prompt": "幫我潤飾這段產品文案，語氣更有說服力。", "expected": {"hit": false}},
+    {"id": "ATD-03", "skill": "autonomous-task-director", "type": "paraphrase", "prompt": "我不想被頻繁打擾，你直接按優先序跑，只有憑證或不可逆風險才叫我。", "expected": {"hit": true, "must_include": ["中斷規則", "stop-loss"]}},
+
+    {"id": "AEF-01", "skill": "acceptance-evidence-failclosed", "type": "should_trigger", "prompt": "不要再口頭說 pass，請把每個驗收項目改成可重跑證據，缺一項就 fail。", "expected": {"hit": true, "must_include": ["Acceptance Matrix", "Evidence path", "PASS | FAIL"]}},
+    {"id": "AEF-02", "skill": "acceptance-evidence-failclosed", "type": "should_not_trigger", "prompt": "幫我整理今天會議重點成三段摘要。", "expected": {"hit": false}},
+    {"id": "AEF-03", "skill": "acceptance-evidence-failclosed", "type": "paraphrase", "prompt": "我只接受 machine-checkable 驗收，沒有輸出路徑就當沒完成。", "expected": {"hit": true, "must_include": ["fail-closed", "Top 3 blockers"]}},
+
+    {"id": "SPG-01", "skill": "safe-preview-boundary-gate", "type": "should_trigger", "prompt": "要開外部 preview 給客戶試用，先幫我做最小暴露與回滾門。", "expected": {"hit": true, "must_include": ["最小暴露", "審計", "回滾"]}},
+    {"id": "SPG-02", "skill": "safe-preview-boundary-gate", "type": "should_not_trigger", "prompt": "幫我把這份內部筆記重排成目錄。", "expected": {"hit": false}},
+    {"id": "SPG-03", "skill": "safe-preview-boundary-gate", "type": "paraphrase", "prompt": "預覽要分級權限，禁止直接把後台整包露出去。", "expected": {"hit": true, "must_include": ["權限分級", "禁止事項"]}},
+
+    {"id": "LDP-01", "skill": "live-data-delivery-profile-gate", "type": "should_trigger", "prompt": "這次交付要明確標註 mock 還是 live，沒有真人核准不能自動切 live。", "expected": {"hit": true, "must_include": ["mock/live", "human approval"]}},
+    {"id": "LDP-02", "skill": "live-data-delivery-profile-gate", "type": "should_not_trigger", "prompt": "幫我把錯字修掉就好，不用流程。", "expected": {"hit": false}},
+    {"id": "LDP-03", "skill": "live-data-delivery-profile-gate", "type": "paraphrase", "prompt": "交付層級先定義，任何 live 動作都要先過 gate。", "expected": {"hit": true, "must_include": ["delivery profile", "gate"]}},
+
+    {"id": "PEP-01", "skill": "pm-eval-first-planner", "type": "should_trigger", "prompt": "需求還很模糊，先幫我定義可測 eval 規格再開發。", "expected": {"hit": true, "must_include": ["好/壞結果", "轉真人條件"]}},
+    {"id": "PEP-02", "skill": "pm-eval-first-planner", "type": "should_not_trigger", "prompt": "幫我把段落改短一點。", "expected": {"hit": false}},
+    {"id": "PEP-03", "skill": "pm-eval-first-planner", "type": "paraphrase", "prompt": "先把可量測成功與嚴重錯誤邊界寫清楚，再進入實作。", "expected": {"hit": true, "must_include": ["eval", "嚴重錯誤界線"]}},
+
+    {"id": "ALT-01", "skill": "agent-longrun-task-tracker", "type": "should_trigger", "prompt": "這是長時任務，請用狀態機追蹤 pending/in_progress/blocked/completed。", "expected": {"hit": true, "must_include": ["狀態機", "Blocker Ledger"]}},
+    {"id": "ALT-02", "skill": "agent-longrun-task-tracker", "type": "should_not_trigger", "prompt": "幫我翻譯這一句英文就好。", "expected": {"hit": false}},
+    {"id": "ALT-03", "skill": "agent-longrun-task-tracker", "type": "paraphrase", "prompt": "只允許一個 in_progress，連續三輪沒進展就升級 blocked。", "expected": {"hit": true, "must_include": ["single in_progress", "3 次無進展"]}},
+
+    {"id": "WTB-01", "skill": "workos-trial-build-playbook", "type": "should_trigger", "prompt": "幫我做 Work OS 試作，要求可重跑驗收與可回滾。", "expected": {"hit": true, "must_include": ["seed data", "可重跑", "回滾"]}},
+    {"id": "WTB-02", "skill": "workos-trial-build-playbook", "type": "should_not_trigger", "prompt": "幫我想三個簡報標題。", "expected": {"hit": false}},
+    {"id": "WTB-03", "skill": "workos-trial-build-playbook", "type": "paraphrase", "prompt": "先走最小可驗證路徑做 trial，完成資料模型與 workflow 模板。", "expected": {"hit": true, "must_include": ["最小可驗證", "workflow 模板"]}},
+
+    {"id": "WLD-01", "skill": "workos-live-preview-debug-loop", "type": "should_trigger", "prompt": "使用者回報 preview 卡住，請做 root cause -> patch -> 回歸驗證 -> 風險掃描。", "expected": {"hit": true, "must_include": ["root cause", "回歸驗證", "user_path_improved"]}},
+    {"id": "WLD-02", "skill": "workos-live-preview-debug-loop", "type": "should_not_trigger", "prompt": "幫我把這個文件改成條列式。", "expected": {"hit": false}},
+    {"id": "WLD-03", "skill": "workos-live-preview-debug-loop", "type": "paraphrase", "prompt": "我只在意體感問題，請快速閉環到使用者路徑真的改善。", "expected": {"hit": true, "must_include": ["體感問題", "User Path Improved"]}}
+  ]
+}

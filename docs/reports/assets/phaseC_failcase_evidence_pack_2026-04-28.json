@@ -1,0 +1,177 @@
+{
+  "failed_cases": [
+    {
+      "id": "B02",
+      "question": "根據 ARCHITECTURE.md，GitNexus 主要提供哪些介面形態？",
+      "expected_keywords": [
+        "CLI",
+        "MCP",
+        "Web UI"
+      ],
+      "actual_status": "ANSWERED",
+      "routing_mode": "strict_topic",
+      "topic_pack_selected": "gitnexus-project",
+      "claims_used": 5,
+      "token_coverage": 1.0,
+      "top_claims": [
+        {
+          "source_url": "file:///Users/jameschen/Workspace/nexus/docs/external/GitNexus/ARCHITECTURE.md",
+          "span": [
+            0,
+            25
+          ],
+          "claim": "# Architecture — GitNexus"
+        },
+        {
+          "source_url": "file:///Users/jameschen/Workspace/nexus/docs/external/GitNexus/README.md",
+          "span": [
+            11,
+            92
+          ],
+          "claim": "**⚠️ Important Notice:** GitNexus has NO official cryptocurrency, token, or coin."
+        },
+        {
+          "source_url": "file:///Users/jameschen/Workspace/nexus/docs/external/GitNexus/README.md",
+          "span": [
+            92,
+            140
+          ],
+          "claim": "Any token/coin using the GitNexus name on Pump."
+        },
+        {
+          "source_url": "file:///Users/jameschen/Workspace/nexus/docs/external/GitNexus/README.md",
+          "span": [
+            253,
+            324
+          ],
+          "claim": "Do not purchase any cryptocurrency claiming association with GitNexus."
+        },
+        {
+          "source_url": "file:///Users/jameschen/Workspace/nexus/docs/external/GitNexus/README.md",
+          "span": [
+            837,
+            859
+          ],
+          "claim": "com/package/gitnexus\">"
+        }
+      ],
+      "answer_preview": "- # Architecture — GitNexus [file:///Users/jameschen/Workspace/nexus/docs/external/GitNexus/ARCHITECTURE.md#span=0-25]\n- **⚠️ Important Notice:** GitNexus has NO official cryptocurrency, token, or coin. [file:///Users/jameschen/Workspace/nexus/docs/external/GitNexus/README.md#span=11-92]\n- Any token/coin using the GitNexus name on Pump. [file:///Users/jameschen/Workspace/nexus/docs/external/GitNexus/README.md#span=92-140]\n- Do not purchase any cryptocurrency claiming association with GitNexus. ["
+    },
+    {
+      "id": "B08",
+      "question": "根據 gitnexus/README.md，語言支援包含哪些代表語言？",
+      "expected_keywords": [
+        "TypeScript",
+        "Python",
+        "Java",
+        "Go",
+        "Rust"
+      ],
+      "actual_status": "ANSWERED",
+      "routing_mode": "strict_topic",
+      "topic_pack_selected": "gitnexus-project",
+      "claims_used": 5,
+      "token_coverage": 1.0,
+      "top_claims": [
+        {
+          "source_url": "file:///Users/jameschen/Workspace/nexus/docs/external/GitNexus/README.md",
+          "span": [
+            12284,
+            12382
+          ],
+          "claim": "| `gitnexus://repos`                      | List all indexed repositories (read this first)      |"
+        },
+        {
+          "source_url": "file:///Users/jameschen/Workspace/nexus/docs/external/GitNexus/gitnexus/README.md",
+          "span": [
+            4573,
+            4640
+          ],
+          "claim": "| `gitnexus://repos` | List all indexed repositories (read first) |"
+        },
+        {
+          "source_url": "file:///Users/jameschen/Workspace/nexus/docs/external/GitNexus/README.md",
+          "span": [
+            11,
+            92
+          ],
+          "claim": "**⚠️ Important Notice:** GitNexus has NO official cryptocurrency, token, or coin."
+        },
+        {
+          "source_url": "file:///Users/jameschen/Workspace/nexus/docs/external/GitNexus/README.md",
+          "span": [
+            92,
+            140
+          ],
+          "claim": "Any token/coin using the GitNexus name on Pump."
+        },
+        {
+          "source_url": "file:///Users/jameschen/Workspace/nexus/docs/external/GitNexus/README.md",
+          "span": [
+            253,
+            324
+          ],
+          "claim": "Do not purchase any cryptocurrency claiming association with GitNexus."
+        }
+      ],
+      "answer_preview": "- | `gitnexus://repos`                      | List all indexed repositories (read this first)      | [file:///Users/jameschen/Workspace/nexus/docs/external/GitNexus/README.md#span=12284-12382]\n- | `gitnexus://repos` | List all indexed repositories (read first) | [file:///Users/jameschen/Workspace/nexus/docs/external/GitNexus/gitnexus/README.md#span=4573-4640]\n- **⚠️ Important Notice:** GitNexus has NO official cryptocurrency, token, or coin. [file:///Users/jameschen/Workspace/nexus/docs/external"
+    },
+    {
+      "id": "B09",
+      "question": "根據 README，GitNexus 的授權與商業使用提醒是什麼？",
+      "expected_keywords": [
+        "PolyForm",
+        "Noncommercial",
+        "license"
+      ],
+      "actual_status": "ANSWERED",
+      "routing_mode": "strict_topic",
+      "topic_pack_selected": "gitnexus-project",
+      "claims_used": 5,
+      "token_coverage": 1.0,
+      "top_claims": [
+        {
+          "source_url": "file:///Users/jameschen/Workspace/nexus/docs/external/GitNexus/README.md",
+          "span": [
+            12284,
+            12382
+          ],
+          "claim": "| `gitnexus://repos`                      | List all indexed repositories (read this first)      |"
+        },
+        {
+          "source_url": "file:///Users/jameschen/Workspace/nexus/docs/external/GitNexus/gitnexus/README.md",
+          "span": [
+            4573,
+            4640
+          ],
+          "claim": "| `gitnexus://repos` | List all indexed repositories (read first) |"
+        },
+        {
+          "source_url": "file:///Users/jameschen/Workspace/nexus/docs/external/GitNexus/README.md",
+          "span": [
+            11,
+            92
+          ],
+          "claim": "**⚠️ Important Notice:** GitNexus has NO official cryptocurrency, token, or coin."
+        },
+        {
+          "source_url": "file:///Users/jameschen/Workspace/nexus/docs/external/GitNexus/README.md",
+          "span": [
+            92,
+            140
+          ],
+          "claim": "Any token/coin using the GitNexus name on Pump."
+        },
+        {
+          "source_url": "file:///Users/jameschen/Workspace/nexus/docs/external/GitNexus/README.md",
+          "span": [
+            253,
+            324
+          ],
+          "claim": "Do not purchase any cryptocurrency claiming association with GitNexus."
+        }
+      ],
+      "answer_preview": "- | `gitnexus://repos`                      | List all indexed repositories (read this first)      | [file:///Users/jameschen/Workspace/nexus/docs/external/GitNexus/README.md#span=12284-12382]\n- | `gitnexus://repos` | List all indexed repositories (read first) | [file:///Users/jameschen/Workspace/nexus/docs/external/GitNexus/gitnexus/README.md#span=4573-4640]\n- **⚠️ Important Notice:** GitNexus has NO official cryptocurrency, token, or coin. [file:///Users/jameschen/Workspace/nexus/docs/external"
+    }
+  ]
+}
