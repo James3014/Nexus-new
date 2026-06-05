@@ -3,6 +3,7 @@ import json
 import os
 import sys
 import time
+import urllib.request
 from pathlib import Path
 from typing import Any
 
@@ -12,9 +13,97 @@ from nexus.services.local_heal.task_manifest import (
     LocalHealTaskSpec,
     local_heal_20_task_manifest,
     local_heal_40_task_manifest,
+    local_heal_113_task_manifest,
 )
 
 NEXUS_ROOT = Path(__file__).parent.parent.parent.resolve()
+LOCAL_HEAL_ROOT = Path(os.environ.get("NEXUS_LOCAL_HEAL_ROOT_DIR", str(NEXUS_ROOT))).resolve()
+OLLAMA_MODEL = "qwen2.5-coder:14b"
+DEFAULT_OLLAMA_TIMEOUT_SECONDS = 180
+DEFAULT_OLLAMA_NUM_CTX = 4096
+DEFAULT_OLLAMA_NUM_PREDICT = 768
+
+
+import threading
+
+class TelemetryStore(threading.local):
+    def __init__(self):
+        self.records = []
+
+telemetry_store = TelemetryStore()
+
+
+def nexus_local_generate(
+    system_prompt: str,
+    user_prompt: str,
+    timeout: int | None = None,
+    model: str | None = None,
+    options: dict[str, Any] | None = None,
+    api_type: str = "generate",
+) -> str:
+    selected_model = model or os.environ.get("NEXUS_OLLAMA_MODEL") or OLLAMA_MODEL
+    effective_timeout = timeout or DEFAULT_OLLAMA_TIMEOUT_SECONDS
+    endpoint = os.environ.get("NEXUS_OLLAMA_ENDPOINT", "http://localhost:11434").rstrip("/")
+
+    resolved_options = options
+    if resolved_options is None:
+        resolved_options = {
+            "temperature": 0.0,
+            "num_ctx": int(os.environ.get("NEXUS_OLLAMA_NUM_CTX", DEFAULT_OLLAMA_NUM_CTX)),
+            "num_predict": int(os.environ.get("NEXUS_OLLAMA_NUM_PREDICT", DEFAULT_OLLAMA_NUM_PREDICT)),
+        }
+
+    if api_type == "chat":
+        payload_data = {
+            "model": selected_model,
+            "messages": [
+                {"role": "system", "content": system_prompt},
+                {"role": "user", "content": user_prompt}
+            ],
+            "stream": False,
+            "options": resolved_options,
+        }
+        url_path = "/api/chat"
+    else:
+        payload_data = {
+            "model": selected_model,
+            "system": system_prompt,
+            "prompt": user_prompt,
+            "stream": False,
+            "options": resolved_options,
+        }
+        url_path = "/api/generate"
+
+    payload = json.dumps(payload_data).encode()
+    req = urllib.request.Request(
+        f"{endpoint}{url_path}",
+        data=payload,
+        headers={"Content-Type": "application/json"},
+        method="POST",
+    )
+    with urllib.request.urlopen(req, timeout=effective_timeout) as resp:
+        data = json.loads(resp.read())
+        
+        # Record detailed telemetry if active
+        if hasattr(telemetry_store, "records"):
+            call_telemetry = {
+                "model": selected_model,
+                "api_type": api_type,
+                "total_duration_ms": round(data.get("total_duration", 0) / 1e6, 2),
+                "load_duration_ms": round(data.get("load_duration", 0) / 1e6, 2),
+                "prompt_eval_count": data.get("prompt_eval_count", 0),
+                "eval_count": data.get("eval_count", 0),
+                "prompt_eval_duration_ms": round(data.get("prompt_eval_duration", 0) / 1e6, 2),
+                "eval_duration_ms": round(data.get("eval_duration", 0) / 1e6, 2),
+            }
+            telemetry_store.records.append(call_telemetry)
+            
+        if api_type == "chat":
+            return data.get("message", {}).get("content", "")
+        return data.get("response", "")
+
+
+ollama_generate = nexus_local_generate
 
 
 def build_result_row(task: dict[str, Any], res_ctx: HealContext) -> dict[str, Any]:
@@ -22,14 +111,14 @@ def build_result_row(task: dict[str, Any], res_ctx: HealContext) -> dict[str, An
         "instance_id": task["instance_id"],
         "manifest_task_id": task.get("manifest_task_id", ""),
         "env_profile": task.get("env_profile", "python-default"),
-        "model_patch": res_ctx.final_patch,
+        "model_patch": getattr(res_ctx, "final_patch", ""),
         "model_name_or_path": "nexus-local-heal-v17",
-        "solve_eligible": res_ctx.solve_eligible,
+        "solve_eligible": getattr(res_ctx, "solve_eligible", False),
         "failure_reason": failure_reason_for_result(res_ctx),
-        "receipt_path": str(res_ctx.receipt_path),
-        "wall_time_sec_measured": res_ctx.wall_time_sec,
-        "token_telemetry_status": res_ctx.token_telemetry_status,
-        "token_total_estimated": res_ctx.token_total_estimated,
+        "receipt_path": str(getattr(res_ctx, "receipt_path", "")),
+        "wall_time_sec_measured": getattr(res_ctx, "wall_time_sec", 0.0),
+        "token_telemetry_status": getattr(res_ctx, "token_telemetry_status", "unknown"),
+        "token_total_estimated": getattr(res_ctx, "token_total_estimated", 0),
     }
 
 
@@ -52,9 +141,14 @@ def build_task_from_spec(
         return {
             "instance_id": instance["instance_id"],
             "manifest_task_id": spec.task_id,
+            "kind": spec.kind,
+            "family": spec.family,
             "repo_dir": root_dir,
             "problem_statement": instance["problem_statement"],
             "env_profile": spec.env_profile,
+            "swe_index": spec.swe_index,
+            "domain_id": spec.domain_id,
+            "lane": spec.lane,
             "expected_stop_layer": spec.expected_stop_layer,
             "expected_reason_family": spec.expected_reason_family,
             "probe_goal": spec.probe_goal,
@@ -65,9 +159,14 @@ def build_task_from_spec(
     return {
         "instance_id": f"local_fix_{local_file.name}",
         "manifest_task_id": spec.task_id,
+        "kind": spec.kind,
+        "family": spec.family,
         "repo_dir": root_dir,
         "local_path": local_file,
         "env_profile": spec.env_profile,
+        "swe_index": spec.swe_index,
+        "domain_id": spec.domain_id,
+        "lane": spec.lane,
         "problem_statement": f"Fix race condition in {local_file.name}",
         "expected_stop_layer": spec.expected_stop_layer,
         "expected_reason_family": spec.expected_reason_family,
@@ -98,7 +197,7 @@ def build_tasks_from_manifest(
     manifest_name: str,
     dataset: Any,
     *,
-    root_dir: Path = NEXUS_ROOT,
+    root_dir: Path = LOCAL_HEAL_ROOT,
 ) -> list[dict[str, Any]]:
     from nexus.services.local_heal.task_manifest import (
         local_heal_20_task_manifest,
@@ -163,9 +262,9 @@ def read_resume_task_ids(path: str | Path | None, *, mode: str) -> set[str]:
             if not tid:
                 continue
 
-            if mode == "repair" and (row.get("solve_eligible") or row.get("failure_reason")):
+            if mode == "repair" and row.get("solve_eligible"):
                 completed.add(tid)
-            elif mode == "preflight" and (row.get("preflight_ready") or row.get("failure_reason")):
+            elif mode == "preflight" and row.get("preflight_ready"):
                 completed.add(tid)
     return completed
 
@@ -178,13 +277,32 @@ def filter_tasks_for_resume(
     ]
 
 
+def filter_specs_for_resume(
+    specs: tuple[LocalHealTaskSpec, ...], completed_task_ids: set[str]
+) -> tuple[LocalHealTaskSpec, ...]:
+    return tuple(spec for spec in specs if spec.task_id not in completed_task_ids)
+
+
 def failure_reason_for_result(res_ctx: Any) -> str:
     explicit = str(getattr(res_ctx, "failure_reason", "") or "").strip()
     if explicit:
         return explicit
 
+    receipt_path = Path(str(getattr(res_ctx, "receipt_path", "") or ""))
+    if receipt_path.exists():
+        try:
+            receipt = json.loads(receipt_path.read_text(encoding="utf-8"))
+            receipt_reason = str(receipt.get("failure_reason") or "").strip()
+            if receipt_reason:
+                return receipt_reason
+        except (OSError, json.JSONDecodeError):
+            pass
+
     if not getattr(res_ctx, "reproduced", True):
         return "REPRO_NOT_REPRODUCED"
+
+    if not getattr(res_ctx, "solve_eligible", False):
+        return "NO_PATCH"
 
     return "UNKNOWN_FAILURE"
 
@@ -238,7 +356,7 @@ def main() -> None:
         tasks = [
             {
                 "instance_id": f"local_fix_{Path(args.local_path).name}",
-                "repo_dir": NEXUS_ROOT,
+                "repo_dir": LOCAL_HEAL_ROOT,
                 "local_path": args.local_path,
                 "env_profile": "python-default",
                 "problem_statement": f"Fix issues in {args.local_path}",
@@ -255,7 +373,7 @@ def main() -> None:
         tasks = [
             {
                 "instance_id": instance["instance_id"],
-                "repo_dir": NEXUS_ROOT,
+                "repo_dir": LOCAL_HEAL_ROOT,
                 "problem_statement": instance["problem_statement"],
                 "env_profile": "python-default",
                 "local_mode": False,
@@ -263,7 +381,7 @@ def main() -> None:
         ]
     elif args.task_manifest:
         tasks = build_tasks_from_manifest(
-            args.task_manifest, dataset, root_dir=NEXUS_ROOT
+            args.task_manifest, dataset, root_dir=LOCAL_HEAL_ROOT
         )
         if args.resume_from:
             completed = read_resume_task_ids(
@@ -275,7 +393,7 @@ def main() -> None:
         tasks = [
             {
                 "instance_id": row["instance_id"],
-                "repo_dir": NEXUS_ROOT,
+                "repo_dir": LOCAL_HEAL_ROOT,
                 "problem_statement": row["problem_statement"],
                 "env_profile": "python-default",
                 "local_mode": False,
@@ -286,8 +404,6 @@ def main() -> None:
     if not tasks:
         print("ℹ️ No tasks to process.")
         return
-
-    from mock_gemini import ollama_generate
 
     pipeline = HealPipeline(
         ollama_generate_fn=ollama_generate, hidden_verifier=args.hidden_verifier
@@ -325,10 +441,14 @@ def main() -> None:
                 from nexus.services.local_heal.preflight import run_preflight_for_spec
                 spec = LocalHealTaskSpec(
                     task_id=task.get("manifest_task_id", "manual"),
-                    kind="local_concurrency" if task.get("local_mode") else "swebench",
-                    family="concurrency" if task.get("local_mode") else "swebench",
+                    kind=task.get("kind", "local_concurrency" if task.get("local_mode") else "swebench"),
+                    family=task.get("family", "concurrency" if task.get("local_mode") else "swebench"),
                     env_profile=task.get("env_profile", "python-default"),
+                    swe_index=task.get("swe_index"),
+                    instance_id=task.get("instance_id"),
                     local_path=str(task.get("local_path", "")) if task.get("local_mode") else None,
+                    domain_id=task.get("domain_id", "legacy"),
+                    lane=task.get("lane", "baseline"),
                 )
                 preflight_row = run_preflight_for_spec(spec, Path(task["repo_dir"]))
                 out_file.write(json.dumps(preflight_row) + "\n")
@@ -341,9 +461,21 @@ def main() -> None:
                     ctx.repro_script = repro_path.read_text()
 
             try:
+                telemetry_store.records = []
                 res_ctx = pipeline.run(ctx)
                 res_ctx.wall_time_sec = time.time() - start_wall
-                res_ctx.token_telemetry_status = "estimated"
+                
+                # Merge Ollama telemetry details into the context
+                if telemetry_store.records:
+                    total_tokens = sum(r.get("prompt_eval_count", 0) + r.get("eval_count", 0) for r in telemetry_store.records)
+                    res_ctx.token_total_estimated = total_tokens
+                    res_ctx.token_telemetry_status = "success"
+                    
+                    for idx, record in enumerate(telemetry_store.records):
+                        if idx < len(res_ctx.model_decisions):
+                            res_ctx.model_decisions[idx]["telemetry"] = record
+                else:
+                    res_ctx.token_telemetry_status = "estimated"
 
                 if res_ctx.solve_eligible:
                     print("  ✅ SUCCESS: Solve eligible!")
