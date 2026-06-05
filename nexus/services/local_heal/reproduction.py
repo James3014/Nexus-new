@@ -134,7 +134,9 @@ class ReproductionRunner:
             (
                 "Write a single Python script that reproduces the issue below. "
                 "Output only Python code, no markdown fences, no explanation. "
-                "The script must exit with a non-zero status when the bug is present.\n\n"
+                "CRITICAL: The script must use explicit 'assert' statements, raise exceptions, "
+                "or perform check-failed verifications so that it guarantees exiting with a "
+                "non-zero status when the bug is present.\n\n"
                 f"Issue:\n{problem}"
             ),
         )
