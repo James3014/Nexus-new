@@ -113,3 +113,21 @@ class ResearchReceipt:
 
     def to_dict(self) -> dict[str, Any]:
         return asdict(self)
+
+
+@dataclass(frozen=True)
+class ResearchIsolationReceipt:
+    schema_version: str = "research_isolation_receipt.v1"
+    research_masked: bool = False
+    isolation_level: str = ResearchIsolationLevel.L0.value
+    goal_visibility: str = ResearchGoalVisibility.FULL.value
+    research_agent_saw_user_goal: bool = True
+    output_mode: str = ResearchOutputMode.NORMAL.value
+    facts_only_guard_passed: bool = True
+    design_terms_detected: tuple[str, ...] = ()
+    artifact_schema: str = "research_pack.v1"
+    artifact_refs: tuple[str, ...] = ()
+
+    def to_dict(self) -> dict[str, Any]:
+        return asdict(self)
+
