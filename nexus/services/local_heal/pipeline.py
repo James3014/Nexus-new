@@ -20,8 +20,8 @@ from nexus.services.local_heal.phases.patch_synthesis import PatchSynthesisPhase
 from nexus.services.local_heal.phases.verification import VerificationPhase
 
 # 導入工具組
-from nexus.services.local_heal.localizer import Localizer
-from nexus.services.local_heal.parser import SearchReplaceParser
+from nexus.services.local_heal.granular_localizer import GranularMethodLocalizer
+from nexus.services.local_heal.protocol import SolidSearchReplaceProtocol
 from nexus.services.local_heal.patcher import Patcher
 from nexus.services.local_heal.reproduction import ReproductionRunner
 from nexus.services.local_heal.planner import Planner
@@ -142,8 +142,8 @@ class HealPipeline:
         self.ollama_generate = ollama_generate_fn
         self.hidden_verifier = hidden_verifier
         # 暴露屬性以供 monkeypatch 測試
-        self.localizer = Localizer()
-        self.parser = SearchReplaceParser()
+        self.localizer = GranularMethodLocalizer()
+        self.parser = SolidSearchReplaceProtocol()
         self.patcher = Patcher()
         self.planner = Planner(ollama_generate_fn=ollama_generate_fn)
         self.budget_manager = ContextBudgetManager()

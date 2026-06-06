@@ -178,20 +178,15 @@ class ReproductionRunner:
             )
             repro_path.write_text(path_injection + script_code, encoding="utf-8")
 
-            env = os.environ.copy()
-            env.pop("PYTHONPATH", None)
-            env.pop("PYTHONHOME", None)
-            env.pop("VIRTUAL_ENV", None)
-
-            # 使用 -I (Isolated) 模式
+            # 不使用 -I 模式以利繼承環境
             repro_run_timeout = int(os.environ.get("NEXUS_REPRO_RUN_TIMEOUT_SECONDS", "180"))
             res = subprocess.run(
-                [self.python_executable, "-I", "reproduce_bug.py"],
+                [self.python_executable, "reproduce_bug.py"],
                 cwd=str(self.repo_dir),
                 capture_output=True,
                 text=True,
                 timeout=repro_run_timeout,
-                env=env
+                env=os.environ
             )
 
             output = res.stdout + res.stderr
