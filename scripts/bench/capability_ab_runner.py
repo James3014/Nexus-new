@@ -3168,50 +3168,88 @@ HIDDEN_RETRY_GOVERNANCE_CONTRACT = (
 )
 
 
+class FailureClassifierRule:
+    def match(self, text: str) -> HiddenRetryDecision | None:
+        raise NotImplementedError
+
+
+class CodeExceptionRule(FailureClassifierRule):
+    def match(self, text: str) -> HiddenRetryDecision | None:
+        if any(
+            marker in text
+            for marker in (
+                "assertionerror",
+                "e       assert",
+                "modulenotfounderror",
+                "importerror",
+                "nameerror",
+                "attributeerror",
+                "canonical output field",
+                "missing phase reason",
+            )
+        ):
+            return HiddenRetryDecision("narrow_assertion_failure", "minimal_patch", True)
+        return None
+
+
+class SystemInfraRule(FailureClassifierRule):
+    def match(self, text: str) -> HiddenRetryDecision | None:
+        if any(
+            marker in text
+            for marker in (
+                "benchmark_task_deadline",
+                "operation not permitted",
+                "permission denied",
+                "no such file or directory",
+                ".cache/uv",
+                "timed out",
+                "timeout",
+            )
+        ):
+            return HiddenRetryDecision("infra_failure", "skipped_infra", False)
+        return None
+
+
+class SecurityGovernanceRule(FailureClassifierRule):
+    def match(self, text: str) -> HiddenRetryDecision | None:
+        if any(
+            marker in text
+            for marker in (
+                "must be blocked",
+                "policy",
+                "governance",
+                "security",
+                "privacy",
+                "delete_file",
+                "rm -rf",
+                "trust mismatch",
+            )
+        ):
+            return HiddenRetryDecision("broad_contract_failure", "full_hyper", True)
+        return None
+
+
+class FallbackRule(FailureClassifierRule):
+    def match(self, text: str) -> HiddenRetryDecision | None:
+        return HiddenRetryDecision("unclassified_hidden_verifier_failure", "full_hyper", True)
+
+
+_CLASSIFIER_RULES: list[FailureClassifierRule] = [
+    CodeExceptionRule(),
+    SystemInfraRule(),
+    SecurityGovernanceRule(),
+    FallbackRule(),
+]
+
+
 def _classify_hidden_retry_failure(failure_tail: str) -> HiddenRetryDecision:
     text = failure_tail.lower()
-    if any(
-        marker in text
-        for marker in (
-            "benchmark_task_deadline",
-            "operation not permitted",
-            "permission denied",
-            "no such file or directory",
-            ".cache/uv",
-            "timed out",
-            "timeout",
-        )
-    ):
-        return HiddenRetryDecision("infra_failure", "skipped_infra", False)
-    if any(
-        marker in text
-        for marker in (
-            "assertionerror",
-            "e       assert",
-            "modulenotfounderror",
-            "importerror",
-            "nameerror",
-            "attributeerror",
-            "canonical output field",
-            "missing phase reason",
-        )
-    ):
-        return HiddenRetryDecision("narrow_assertion_failure", "minimal_patch", True)
-    if any(
-        marker in text
-        for marker in (
-            "must be blocked",
-            "policy",
-            "governance",
-            "security",
-            "privacy",
-            "delete_file",
-            "rm -rf",
-            "trust mismatch",
-        )
-    ):
-        return HiddenRetryDecision("broad_contract_failure", "full_hyper", True)
+    for rule in _CLASSIFIER_RULES:
+        decision = rule.match(text)
+        if decision is not None:
+            return decision
     return HiddenRetryDecision("unclassified_hidden_verifier_failure", "full_hyper", True)
+
 
 
 def _hidden_retry_decision_for_failure(
@@ -4330,6 +4368,12 @@ def _external_model_name_for_provider(provider: str) -> str:
     provider_name = str(provider or "").strip().lower()
     if provider_name == "codex":
         return str(os.environ.get("NEXUS_CODEX_MODEL_NAME") or os.environ.get("NEXUS_DIRECT_CODEX_MODEL") or "gpt-5.5")
+    if provider_name == "ollama":
+        return str(
+            os.environ.get("NEXUS_OLLAMA_ACTIVE_MODEL")
+            or os.environ.get("NEXUS_OLLAMA_MODEL")
+            or "qwen2.5-coder:14b"
+        )
     if provider_name == "gemini":
         return str(
             os.environ.get("NEXUS_GEMINI_MODEL_NAME")
@@ -4337,6 +4381,17 @@ def _external_model_name_for_provider(provider: str) -> str:
             or "gemini-3.1-pro-preview"
         )
     return str(provider or "")
+
+
+def _ollama_model_for_task(task: CapabilityTask) -> str:
+    difficulty = str(task.difficulty or "").strip().upper()
+    if difficulty in {"EASY", "MEDIUM", "HARD"}:
+        model = str(os.environ.get(f"NEXUS_OLLAMA_MODEL_{difficulty}") or "").strip()
+        if model:
+            return model
+    if difficulty == "EASY":
+        return str(os.environ.get("NEXUS_OLLAMA_SMALL_MODEL") or os.environ.get("NEXUS_OLLAMA_MODEL") or "qwen2.5-coder:7b")
+    return str(os.environ.get("NEXUS_OLLAMA_MODEL") or "qwen2.5-coder:14b")
 
 
 def _ask_direct_codex_patch(*, prompt: str, timeout_sec: int) -> tuple[dict[str, Any], str]:
@@ -5501,13 +5556,13 @@ def run_with_nexus(
             )
             return _finalize_with_nexus_row(
                 local_row,
-                provider=with_model_provider if with_model_provider in {"gemini", "codex"} else "gemini",
+                provider=with_model_provider if with_model_provider in {"gemini", "codex", "ollama"} else "gemini",
                 model_required=True,
                 nexus_required=True,
                 task=task,
                 repo_root=repo_root,
             )
-    if llm_enabled and supervised_bare_allowed:
+    if llm_enabled and supervised_bare_allowed and with_model_provider in {"gemini", "codex"}:
         supervised_bare_attempt = run_without_nexus(
             repo_root=repo_root,
             task=task,
@@ -5608,7 +5663,7 @@ def run_with_nexus(
             )
             return _finalize_with_nexus_row(
                 supervised,
-                provider="gemini",
+                provider=with_model_provider,
                 model_required=True,
                 nexus_required=True,
                 task=task,
@@ -5765,7 +5820,7 @@ def run_with_nexus(
                 )
                 return _finalize_with_nexus_row(
                     supervised,
-                    provider="gemini",
+                    provider=with_model_provider,
                     model_required=True,
                     nexus_required=True,
                     task=task,
@@ -5875,9 +5930,15 @@ def run_with_nexus(
         )
     bench_env_updates: dict[str, str] = {}
     if llm_enabled:
+        active_ollama_model = _ollama_model_for_task(task) if with_model_provider == "ollama" else ""
+        model_env_name = (
+            active_ollama_model
+            if with_model_provider == "ollama"
+            else str(os.environ.get("NEXUS_GEMINI_MODEL_NAME") or "gemini-3.1-pro-preview")
+        )
         bench_env_updates.update(
             {
-                "NEXUS_GEMINI_MODEL_NAME": str(os.environ.get("NEXUS_GEMINI_MODEL_NAME") or "gemini-3.1-pro-preview"),
+                "NEXUS_GEMINI_MODEL_NAME": model_env_name,
                 "NEXUS_FORCE_LLM_DESPITE_LEARN_SLO": "1",
                 "NEXUS_GATEWAY_MAX_RETRIES": "1",
                 "NEXUS_GATEWAY_TIMEOUT_SEC": _benchmark_gateway_timeout_sec(
@@ -5893,6 +5954,14 @@ def run_with_nexus(
                 "NEXUS_MEMORY_AUTO_INIT": "0",  # 🛡️ 測試套件熱修復：強制子進程跳過 auto-init 建表，避免 SQLite 競爭死鎖
             }
         )
+        if with_model_provider == "ollama":
+            bench_env_updates.update(
+                {
+                    "NEXUS_OAUTH_PROVIDER": "ollama",
+                    "NEXUS_OLLAMA_ACTIVE_MODEL": active_ollama_model,
+                    "NEXUS_OLLAMA_MODEL": str(os.environ.get("NEXUS_OLLAMA_MODEL") or active_ollama_model),
+                }
+            )
     if task.eligibility_class == "model_required" or require_model_participation_for_run:
         bench_env_updates["NEXUS_DISABLE_LOCAL_PREFLIGHT_BEFORE_LLM"] = "1"
         bench_env_updates["NEXUS_DISABLE_HIDDEN_CONTRACT_FAST_PATH"] = "1"
@@ -6620,7 +6689,7 @@ def run_with_nexus(
     try:
         return _finalize_with_nexus_row(
             row,
-            provider="gemini" if llm_enabled else "local",
+            provider=with_model_provider if llm_enabled else "local",
             model_required=llm_enabled,
             nexus_required=llm_enabled,
             task=task,
@@ -8732,6 +8801,8 @@ def write_evidence_bundle(
             "direct_model_name": str(os.environ.get("NEXUS_DIRECT_GEMINI_MODEL") or ""),
             "codex_model_name": str(os.environ.get("NEXUS_CODEX_MODEL_NAME") or ""),
             "direct_codex_model_name": str(os.environ.get("NEXUS_DIRECT_CODEX_MODEL") or ""),
+            "ollama_model_name": str(os.environ.get("NEXUS_OLLAMA_MODEL") or ""),
+            "ollama_active_model": str(os.environ.get("NEXUS_OLLAMA_ACTIVE_MODEL") or ""),
             "prompt_transport": str(os.environ.get("NEXUS_GATEWAY_PROMPT_TRANSPORT") or ""),
             "compact_prompt": os.environ.get("NEXUS_GATEWAY_COMPACT_PROMPT", "").strip().lower() in {"1", "true", "yes"},
         },
@@ -9182,7 +9253,7 @@ def _build_preflight_sentinel(
         "wall_ledger_required": bool(getattr(args, "evidence_bundle", False)),
         "infra_quarantine_required": not bool(getattr(args, "nexus_only", False)),
         "provider_token_measured_required": getattr(args, "without_mode", "") in {"gemini", "codex"}
-        or getattr(args, "with_model_provider", "") in {"gemini", "codex"},
+        or getattr(args, "with_model_provider", "") in {"gemini", "codex", "ollama"},
         "hidden_verifier_required": True,
         "hidden_verifier_enabled": _hidden_verifier_mode_enabled(),
         "single_variable_gate": True,
@@ -9424,6 +9495,8 @@ def build_public_benchmark_preflight(args: argparse.Namespace, *, repo_root: Pat
         "model_lock": {
             "env_model_name": env_model,
             "direct_model_name": direct_model,
+            "ollama_model_name": str(os.environ.get("NEXUS_OLLAMA_MODEL") or ""),
+            "ollama_active_model": str(os.environ.get("NEXUS_OLLAMA_ACTIVE_MODEL") or ""),
             "same_model": bool(env_model and direct_model and env_model == direct_model),
             "without_mode": args.without_mode,
             "with_llm_mode": args.with_llm_mode,
@@ -9532,7 +9605,7 @@ def main() -> int:
     parser.add_argument("--with-llm-mode", choices=["off", "hard", "all"], default="off")
     parser.add_argument(
         "--with-model-provider",
-        choices=["gemini", "codex"],
+        choices=["gemini", "codex", "ollama"],
         default="gemini",
         help="LLM provider for the Nexus treatment arm when --with-llm-mode enables model calls.",
     )
@@ -9732,6 +9805,12 @@ def main() -> int:
     args = parser.parse_args()
     if args.gemini_model:
         os.environ["NEXUS_GEMINI_MODEL_NAME"] = str(args.gemini_model).strip()
+    if args.with_model_provider == "gemini" and _truthy_env("USE_LOCAL_OLLAMA"):
+        args.with_model_provider = "ollama"
+    if args.with_model_provider == "ollama":
+        os.environ["NEXUS_OAUTH_PROVIDER"] = "ollama"
+        os.environ.setdefault("NEXUS_OLLAMA_MODEL", _external_model_name_for_provider("ollama"))
+        os.environ["NEXUS_GEMINI_MODEL_NAME"] = _external_model_name_for_provider("ollama")
     # PR1: same-model baseline enforcement — map flag into without_mode and env before preflight.
     # This must happen BEFORE build_public_benchmark_preflight reads env_model/direct_model.
     if getattr(args, "require_same_model_baseline", False):
@@ -9918,7 +9997,7 @@ def main() -> int:
                         "warning_ledger_required": True,
                         "wall_ledger_required": True,
                         "provider_token_measured_required": args.without_mode in {"gemini", "codex"}
-                        or args.with_model_provider in {"gemini", "codex"},
+                        or args.with_model_provider in {"gemini", "codex", "ollama"},
                         "runner_command": " ".join(sys.argv),
                         "timeout_sec": int(args.timeout_sec),
                         "total_timeout_sec": int(args.total_timeout_sec),
@@ -10364,7 +10443,7 @@ def main() -> int:
                     "warning_ledger_required": True,
                     "wall_ledger_required": True,
                     "provider_token_measured_required": args.without_mode in {"gemini", "codex"}
-                    or (not bool(args.without_only) and args.with_model_provider in {"gemini", "codex"}),
+                    or (not bool(args.without_only) and args.with_model_provider in {"gemini", "codex", "ollama"}),
                     "runner_command": " ".join(sys.argv),
                     "timeout_sec": int(args.timeout_sec),
                     "total_timeout_sec": int(args.total_timeout_sec),

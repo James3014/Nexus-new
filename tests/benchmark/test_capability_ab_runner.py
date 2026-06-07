@@ -1466,6 +1466,14 @@ def test_hidden_retry_classifier_selects_minimal_full_and_infra_lanes():
     assert broad.lane == "full_hyper"
     assert broad.retry is True
 
+    # AssertionError containing 'timeout' variable names should NOT be classified as infra_failure
+    timeout_var = _classify_hidden_retry_failure(
+        "E       AssertionError: assert {'timeout': None} == {'timeout': 10}"
+    )
+    assert timeout_var.classifier == "narrow_assertion_failure"
+    assert timeout_var.lane == "minimal_patch"
+    assert timeout_var.retry is True
+
     compact = _hidden_retry_decision_for_failure(
         "hidden failed: missing phase reason",
         {"context_mode": "compact", "candidate_cap": 1, "max_rounds": 1},
@@ -1476,6 +1484,41 @@ def test_hidden_retry_classifier_selects_minimal_full_and_infra_lanes():
     ambiguous_compact = _hidden_retry_decision_for_failure("hidden failed: output mismatch", {"context_mode": "compact"})
     assert ambiguous_compact.classifier == "compact_hidden_verifier_failure"
     assert ambiguous_compact.lane == "minimal_patch"
+
+
+def test_failure_classifier_rules_individually():
+    from scripts.bench.capability_ab_runner import (
+        FailureClassifierRule,
+        CodeExceptionRule,
+        SystemInfraRule,
+        SecurityGovernanceRule,
+        FallbackRule,
+    )
+
+    # 1. 測試 CodeExceptionRule 獨立匹配
+    code_rule = CodeExceptionRule()
+    assert code_rule.match("assertionerror") is not None
+    assert code_rule.match("e       assert dict == dict") is not None
+    assert code_rule.match("assertionerror with timeout variable") is not None
+    assert code_rule.match("clean run, no exceptions") is None
+
+    # 2. 測試 SystemInfraRule 獨立匹配
+    infra_rule = SystemInfraRule()
+    assert infra_rule.match("operation not permitted") is not None
+    assert infra_rule.match("timed out") is not None
+    assert infra_rule.match("assertionerror") is None
+
+    # 3. 測試 SecurityGovernanceRule 獨立匹配
+    gov_rule = SecurityGovernanceRule()
+    assert gov_rule.match("delete_file must be blocked by policy") is not None
+    assert gov_rule.match("trust mismatch") is not None
+    assert gov_rule.match("assertionerror") is None
+
+    # 4. 測試 FallbackRule 預設匹配
+    fallback = FallbackRule()
+    assert fallback.match("any random error") is not None
+    assert fallback.match("any random error").classifier == "unclassified_hidden_verifier_failure"
+
 
 
 def test_pytest_verifier_cmd_uses_current_python():
