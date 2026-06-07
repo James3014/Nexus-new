@@ -768,7 +768,10 @@ def run_hyper_sprint(*, repo_root: Path, config: SprintConfig) -> SprintResult:
     test_source = test_path.read_text(encoding="utf-8") if test_path and test_path.exists() and test_path.is_file() else ""
     hidden_verifier_mode = os.environ.get("NEXUS_VALUE_HIDDEN_VERIFIER", "").strip().lower() in {"1", "true", "yes"}
     model_required_execution_mode = os.environ.get("NEXUS_MODEL_REQUIRED_EXECUTION_MODE", "").strip().lower()
-    model_required_final_delivery = model_required_execution_mode.startswith("model_participation")
+    model_required_final_delivery = (
+        model_required_execution_mode.startswith("model_participation")
+        or os.environ.get("NEXUS_REQUIRE_MODEL_PARTICIPATION", "").strip().lower() in {"1", "true", "yes"}
+    )
     initial_test_source = "" if hidden_verifier_mode and not model_required_final_delivery else test_source
     if initial_test_source:
         initial_test_source = _truncate_redundant_tests(initial_test_source, config.task)
@@ -1448,7 +1451,7 @@ def run_hyper_sprint(*, repo_root: Path, config: SprintConfig) -> SprintResult:
             if (
                 self_heal_enabled
                 and llm_generator is not None
-                and used_source.startswith("llm")
+                and (used_source.startswith("llm") or model_required_final_delivery)
                 and ev.score < 1.0
                 and "quota" not in error_codes
             ):

@@ -118,9 +118,10 @@ def test_run_hyper_sprint_collects_pool_when_route_enables_ddtree(monkeypatch, t
 
         def evaluate_candidate(self, **kwargs):
             seed = kwargs["seed"]
+            score = 1.0 if seed == 2 else (0.8 if seed == 0 else 0.5)
             return CandidateEval(
                 seed=seed,
-                score=1.0,
+                score=score,
                 candidate_code=kwargs["code"],
                 source=kwargs["source"],
                 stdout="pytest passed" if seed == 2 else "",
@@ -180,12 +181,13 @@ def test_run_hyper_sprint_uses_local_support_pool_for_ddtree_cost_cap(monkeypatc
             pass
 
         def evaluate_candidate(self, **kwargs):
+            stdout = "pytest passed" if kwargs["source"] == "llm" else ""
             return CandidateEval(
                 seed=kwargs["seed"],
                 score=1.0,
                 candidate_code=kwargs["code"],
                 source=kwargs["source"],
-                stdout="pytest passed",
+                stdout=stdout,
             )
 
     monkeypatch.setenv(
@@ -2251,4 +2253,74 @@ def test_truncate_redundant_tests():
     assert "test_unrelated_one" not in truncated
     assert "test_unrelated_two" not in truncated
     assert "Truncated other passing tests" in truncated
+
+
+def test_run_hyper_sprint_self_heals_when_llm_first_round_falls_back_to_local_for_model_required(monkeypatch, tmp_path: Path):
+    _write_ready_learn_slo(tmp_path)
+    target = tmp_path / "demo.py"
+    target.write_text("print('x')\n", encoding="utf-8")
+
+    llm_calls = []
+
+    class FakeLLMGenerator:
+        model_chain = ["qwen2.5-coder:14b"]
+        def __init__(self, *args, **kwargs):
+            pass
+
+        def generate(self, *args, **kwargs):
+            llm_calls.append(kwargs.get("mutation_hint", ""))
+            # 第一次調用（沒有 "self_heal" 標記）拋出 exception，模擬超時
+            if "self_heal" not in kwargs.get("mutation_hint", ""):
+                raise RuntimeError("HTTP 500 Ollama timeout simulating exception")
+            # 第二次調用（自癒調用）成功生成
+            return "print('success')\n", {
+                "source": "llm_self_heal",
+                "model_calls": 1,
+                "model_name": "qwen2.5-coder:14b",
+                "tokens_used": 150,
+                "token_capture_status": "measured"
+            }
+
+    class FakeLocalGenerator:
+        source = "local"
+        def __init__(self, *args, **kwargs):
+            pass
+        def generate(self, *args, **kwargs):
+            return "print('local')\n", {"source": "local", "model_calls": 0}
+
+    class FakeExecutor:
+        def __init__(self, *args, **kwargs):
+            pass
+
+        def evaluate_candidate(self, **kwargs):
+            # 只有 llm_self_heal 生成的 patch 才給過
+            score = 1.0 if kwargs["source"] == "llm_self_heal" else 0.0
+            return CandidateEval(
+                seed=kwargs["seed"],
+                score=score,
+                candidate_code=kwargs["code"],
+                source=kwargs["source"],
+                error="test failed" if score == 0.0 else ""
+            )
+
+    monkeypatch.setenv("NEXUS_REQUIRE_MODEL_PARTICIPATION", "1")
+    monkeypatch.setenv("NEXUS_MODEL_REQUIRED_EXECUTION_MODE", "model_participation_only")
+    monkeypatch.setenv("NEXUS_LLM_SELF_HEAL_ON_PYTEST_FAIL", "1")
+    monkeypatch.setattr("nexus.research.sprint_service.LLMCandidateGenerator", FakeLLMGenerator)
+    monkeypatch.setattr("nexus.research.sprint_service.LocalCandidateGenerator", FakeLocalGenerator)
+    monkeypatch.setattr("nexus.research.sprint_service.SprintExecutor", FakeExecutor)
+
+    cfg = SprintConfig(
+        task="fix",
+        target_file="demo.py",
+        candidate_count=1,
+        llm_mode=True,
+        safe_mode=True
+    )
+    res = run_hyper_sprint(repo_root=tmp_path, config=cfg)
+    
+    assert res.status == "SUCCESS"
+    assert res.winner_source == "llm_self_heal"
+    assert any("self_heal_after_pytest_failed" in h for h in llm_calls)
+
 

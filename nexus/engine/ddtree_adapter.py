@@ -20,6 +20,8 @@ class DDTreeAdapter:
         candidates: list[dict],
         enabled: bool = True,
         max_candidates: int = 2,
+        task_desc: str = "",
+        **kwargs,
     ) -> dict:
         if not enabled:
             return {
@@ -74,6 +76,7 @@ class DDTreeAdapter:
 
         return {
             "schema": "nexus_ddtree_plan_v2",
+            "enabled": True,
             "eligible": True,
             "selected_candidate_ids": ordered_selected_ids,
             "actual_saved_steps": actual_saved,
