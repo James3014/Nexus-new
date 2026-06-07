@@ -1,28 +1,18 @@
-# 🛡️ Nexus Master Plan: Long-Term Operations (v10.0)
+# 🛡️ Nexus Master Taskboard: Surgical Intelligence (v1.0)
 
-## 🎯 核心目標
-建立制度化的監控、治理與學習閉環，確保 Rust 內核在長期運營中維持高性能與高可靠。
+## 📋 任務清單 (TODO)
 
-## 📅 當前運營主線 (Operational Mainline)
+### [P1] 模組化基礎
+- [ ] **T1.1**: 實作 `SurgicalRetriever` (職責：檔案粗定位)
+- [ ] **T1.2**: 實作 `SurgicalSlicer` (職責：函式級精準切片)
+- [ ] **T1.3**: 實作 `SurgicalPacker` (職責：預算動態封裝)
 
-### 🩺 穩定性監控 (Stability & Monitoring)
-- [ ] **T10.1.1**: 實施每日 `Mismatch Ledger` 巡檢。
-- [ ] **T10.1.2**: 建立每週 Rust Kernel 效能週報機制。
-- [ ] **T10.1.3**: 執行首輪 `Rollback Drill` (回退演練)。
+### [P2] TDD 驗證
+- [ ] **T2.1**: 撰寫 `tests/unit/test_surgical_slicer.py` (包含 astropy-12907 測試案例)
+- [ ] **T2.2**: 撰寫 `tests/unit/test_surgical_packer.py` (驗證純淨代碼產出)
 
-### 🧠 學習閉環實體化 (Learning Closure)
-- [ ] **T10.2.1**: 將 `21_LEARNING_CLOSURE_MATRIX.md` 轉化為自動化驗證清單。
-- [ ] **T10.2.2**: 針對 4 類核心風險建立持續監控指標。
+### [P3] 系統集成
+- [ ] **T3.1**: 重構 `Localizer` Facade
+- [ ] **T3.2**: 執行 `astropy-12907` 最終挑戰
 
-### ⚖️ 版本與成本治理 (Governance & Cost)
-- [ ] **T10.3.1**: 執行月度版本收斂 (Index & Master 對齊)。
-- [ ] **T10.3.2**: 持續追蹤並優化自治路徑成本效率。
-
----
-
-## 📈 運營成功指標 (Operational KPIs)
-1. **Drift-Zero**: 核心模組 (AST, Flow, Receipt) 的 Mismatch 率趨近於零。
-2. **Rollback-Ready**: 回退機制演練成功率 100%。
-3. **Closure-Active**: 任何新發現的失敗型態 48 小時內納入 Learning Matrix。
-
-[NEXUS STATUS: LONG-TERM OPERATIONS INITIATED]
+[NEXUS STATUS: SURGICAL_INTEL_INITIATED]
