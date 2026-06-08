@@ -1,13 +1,18 @@
 import ast
+import textwrap
 from pathlib import Path
 from dataclasses import dataclass
-from typing import List, Dict
+from typing import List, Dict, Set, Any
+
+from nexus.engine.value_flow_scorer import ValueFlowScorer
 
 @dataclass
 class SliceResult:
     code_content: str
     dependencies: List[str]
     token_estimate: int
+    scores: Dict[str, float] = None # type: ignore
+    shadow_rank: List[str] = None # type: ignore
 
 class SurgicalSlicer:
     def __init__(self, file_path: Path):
@@ -15,13 +20,31 @@ class SurgicalSlicer:
         self.source = self.file_path.read_text(encoding="utf-8")
         self.tree = ast.parse(self.source)
 
-    def slice_function(self, target_name: str, max_depth: int = 5) -> SliceResult:
+    def slice_function(self, target_name: str, max_depth: int = 5, criteria: Set[str] = None) -> SliceResult:
         collected = {}
         target = self._find(target_name)
         if target: self._collect(target, collected, 0, max_depth)
+        
+        # --- Value-Flow Reranking (Shadow Mode) ---
+        scorer = ValueFlowScorer(criteria or {target_name})
+        node_scores = {}
+        for name, node in collected.items():
+            reasons = []
+            node_scores[name] = scorer.score_node(node, reasons)
+            
+        # 排序節點：分數高者優先
+        sorted_names = sorted(collected.keys(), key=lambda n: node_scores[n], reverse=True)
+        
         imps = [ast.unparse(n) for n in self.tree.body if isinstance(n, (ast.Import, ast.ImportFrom))]
-        code = "\n".join(imps) + "\n\n# Slice\n" + "\n\n".join([ast.unparse(n) for n in collected.values()])
-        return SliceResult(code, list(collected.keys()), len(code)//4)
+        
+        # 組合代碼 (依據排名)
+        code_parts = ["\n".join(imps), "\n# --- Value-Flow Sorted Slice ---"]
+        for name in sorted_names:
+            code_parts.append(f"# Score: {node_scores[name]} | Symbol: {name}")
+            code_parts.append(ast.unparse(collected[name]))
+            
+        code = "\n\n".join(code_parts)
+        return SliceResult(code, list(collected.keys()), len(code)//4, node_scores, sorted_names)
 
     def _find(self, name):
         for n in ast.walk(self.tree):
