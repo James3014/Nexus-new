@@ -22,6 +22,13 @@ from nexus.services.gemini_cli import (
     DEFAULT_NODE_CANDIDATES,
 )
 
+from nexus.engine.micro_swarm_trigger import MicroSwarmTrigger
+from nexus.engine.micro_swarm_lane import MicroSwarmLane
+from nexus.engine.swarm_compare import SwarmCompare
+from nexus.engine.audit_rejection_receipt import AuditRejectionReceipt
+from nexus.engine.repair_plan import RepairPlan
+from nexus.engine.micro_oracle_runner import MicroOracleRunner
+
 logger = logging.getLogger(__name__)
 
 
@@ -109,6 +116,11 @@ class BattlesuitGateway:
         self.lock_file = lock_file or os.getenv("NEXUS_LOCK_FILE", "/tmp/nexus_battlesuit.lock")
         self.project_root = Path(project_root or ".")
         
+        # 🐝 Governed Micro-Swarm (受控微蜂群)
+        self.swarm_trigger = MicroSwarmTrigger()
+        self.swarm_lane = MicroSwarmLane(self.project_root)
+        self.swarm_compare = SwarmCompare()
+        
         # 🛡️ Battlesuit Origin: 僅支援 OAuth CLI 與物理 Handoff
         self.use_oauth = True
         self.oauth_provider = (os.getenv("NEXUS_OAUTH_PROVIDER", "gemini").strip().lower() or "gemini")
@@ -191,6 +203,77 @@ class BattlesuitGateway:
                 return os.getenv("NEXUS_OLLAMA_MODEL", "qwen2.5-coder:14b")
         return "gemini-3-flash-preview" if phase in ["R", "A"] else "gemini-2.5-flash-lite"
 
+
+    def surgical_ask(
+        self, 
+        task: str, 
+        symbols: List[str], 
+        phase: str = "R", 
+        rejection_receipt: Optional[AuditRejectionReceipt] = None,
+        attempt: int = 1
+    ) -> tuple[Any, str]:
+        """
+        🛡️ Surgical Ask v4.5: 受控微蜂群探索
+        """
+        from nexus.engine.surgical_intel_service import SurgicalIntelligence
+        intel = SurgicalIntelligence(self.project_root)
+        
+        surgical_context = []
+        for sym in symbols:
+            context = intel.provide_context(sym)
+            if context:
+                surgical_context.append(f"### [Surgical Context: {sym}]\n{context}")
+        
+        if rejection_receipt:
+            surgical_context.append(rejection_receipt.format_as_constraint_prompt())
+            
+        combined_payload = "\n\n".join(surgical_context)
+
+        # 🐝 蜂群觸發判定 (Governed Micro-Swarm)
+        should_swarm = self.swarm_trigger.should_trigger(
+            state_metadata={}, # TODO: 傳入真實 metadata
+            rejection_receipt=rejection_receipt,
+            attempt=attempt
+        )
+        
+        if should_swarm:
+            logger.info("🐝 [Gateway] Triggering Governed Micro-Swarm for deep exploration.")
+            task_id = os.getenv("NEXUS_TASK_ID", "task")
+            
+            # 執行蜂群搜尋
+            branches = self.swarm_lane.execute_governed_swarm(
+                task_id=task_id,
+                task_desc=task,
+                base_prompt=task,
+                context_payload=combined_payload,
+                gateway_ask_fn=self.ask,
+                state_metadata={}
+            )
+            
+            if branches:
+                best = self.swarm_compare.select_best(branches)
+                
+                # 產出微蜂群收據
+                from nexus.engine.branch_receipt import MicroSwarmReceipt
+                receipt = MicroSwarmReceipt(
+                    task_id=task_id,
+                    swarm_triggered=True,
+                    trigger_reason=rejection_receipt.rejection_class if rejection_receipt else "forced",
+                    branch_count=len(branches),
+                    selected_candidate=best["branch_id"],
+                    branches=branches
+                )
+                
+                # 影子模式日誌 (Shadow Mode Logging)
+                receipt_path = self.project_root / ".nexus" / "reports" / f"swarm_receipt_{task_id}.json"
+                receipt_path.parent.mkdir(parents=True, exist_ok=True)
+                receipt_path.write_text(receipt.to_json(), encoding="utf-8")
+                logger.info("📦 [Gateway] Micro-Swarm Receipt saved to: %s", receipt_path)
+                
+                return best["data"], best["raw_text"]
+
+        # 回退至單一路徑
+        return self.ask(task, combined_payload, phase=phase)
 
     def ask(self, prompt, payload, phase="P", second_opinion=False):
         """
