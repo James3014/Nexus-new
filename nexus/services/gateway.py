@@ -11,6 +11,7 @@ import os
 import sys
 import signal
 import time
+import urllib.request
 
 from nexus.services.gemini_cli import (
     build_gemini_env,
@@ -110,7 +111,7 @@ class BattlesuitGateway:
         
         # 🛡️ Battlesuit Origin: 僅支援 OAuth CLI 與物理 Handoff
         self.use_oauth = True
-        self.oauth_provider = os.getenv("NEXUS_OAUTH_PROVIDER", "gemini")
+        self.oauth_provider = (os.getenv("NEXUS_OAUTH_PROVIDER", "gemini").strip().lower() or "gemini")
         # 🛡️ Compatibility for legacy scripts
         self.llm_bin = self.oauth_provider
         self.enable_shadow_compaction = kwargs.get("enable_shadow_compaction", False)
@@ -182,7 +183,14 @@ class BattlesuitGateway:
 
     def model_selector(self, phase: str) -> str:
         """被動映射模型名稱。"""
+        if self.oauth_provider == "ollama":
+            phase_upper = str(phase).upper()
+            if phase_upper in {"P", "R", "X"}:
+                return os.getenv("NEXUS_OLLAMA_SMALL_MODEL", "qwen2.5-coder:7b")
+            else:
+                return os.getenv("NEXUS_OLLAMA_MODEL", "qwen2.5-coder:14b")
         return "gemini-3-flash-preview" if phase in ["R", "A"] else "gemini-2.5-flash-lite"
+
 
     def ask(self, prompt, payload, phase="P", second_opinion=False):
         """
@@ -235,6 +243,7 @@ class BattlesuitGateway:
             "gateway_payload_chars": len(content),
             "gateway_total_chars": len(sys_msg) + len(content),
             "gateway_timeout_sec": dynamic_timeout,
+            "provider_path": self.oauth_provider,
         }
         
         # 🛡️ Task D.1: Shadow dual prompt rendering (純觀測實驗)
@@ -265,7 +274,7 @@ class BattlesuitGateway:
                 "timestamp": datetime.now(timezone.utc).isoformat(),
                 "run_id": os.getenv("NEXUS_RUN_ID", "run_unknown"),
                 "task_kind": "gateway_completion",
-                "provider_path": "gemini",
+                "provider_path": self.oauth_provider,
                 "route_strategy": "shadow_compaction_only"
             })
 
@@ -308,6 +317,15 @@ class BattlesuitGateway:
             sys_msg = sys_msg.replace("Do not use tools, do not inspect files, and do not create an execution plan.", "No tools/files/plans.")
             content = re.sub(r"[ \t]+", " ", content)
             content = re.sub(r"\n\n+", "\n", content)
+
+        if self.oauth_provider == "ollama":
+            return self._ask_via_ollama(
+                content=content,
+                model_name=model_name,
+                sys_msg=sys_msg,
+                timeout_sec=dynamic_timeout,
+                gateway_telemetry=gateway_telemetry,
+            )
 
         invocation_build_start = time.monotonic()
         invocation = build_gemini_cli_invocation(
@@ -431,6 +449,163 @@ class BattlesuitGateway:
             tmp_payload.unlink()
         category = "timeout" if str(last_err).strip().upper() == "TIMEOUT" else "gateway_error"
         return self._build_error_result(f"Gateway Exhausted: {last_err}", category=category, telemetry=gateway_telemetry), last_err
+
+    def _ollama_api_type(self, model_name: str) -> str:
+        override = os.getenv("NEXUS_OLLAMA_API_TYPE", "").strip().lower()
+        if override in {"generate", "chat"}:
+            return override
+        if str(model_name).startswith("gemma4"):
+            return "chat"
+        try:
+            from nexus.engine.local_model_policy import LocalModelPolicy
+
+            api_type = str(LocalModelPolicy.get_api_type(model_name) or "").strip().lower()
+            if api_type in {"generate", "chat"}:
+                return api_type
+        except Exception:
+            pass
+        return "generate"
+
+    def _ollama_options(self, model_name: str) -> Dict[str, Any]:
+        try:
+            from nexus.engine.local_model_policy import LocalModelPolicy
+
+            options = dict(LocalModelPolicy.get_options(model_name) or {})
+        except Exception:
+            options = {}
+        for env_key, option_key, caster in (
+            ("NEXUS_OLLAMA_NUM_CTX", "num_ctx", int),
+            ("NEXUS_OLLAMA_NUM_PREDICT", "num_predict", int),
+            ("NEXUS_OLLAMA_TEMPERATURE", "temperature", float),
+        ):
+            raw = os.getenv(env_key)
+            if raw is None or str(raw).strip() == "":
+                continue
+            try:
+                options[option_key] = caster(raw)
+            except ValueError:
+                continue
+        return options
+
+    def _ask_via_ollama(
+        self,
+        *,
+        content: str,
+        model_name: str,
+        sys_msg: str,
+        timeout_sec: int,
+        gateway_telemetry: Dict[str, Any],
+    ) -> tuple[Any, str]:
+        endpoint = os.getenv("NEXUS_OLLAMA_ENDPOINT", "http://localhost:11434").rstrip("/")
+        api_type = self._ollama_api_type(model_name)
+        options = self._ollama_options(model_name)
+        invocation_build_start = time.monotonic()
+        if api_type == "chat":
+            path = "/api/chat"
+            request_payload: Dict[str, Any] = {
+                "model": model_name,
+                "messages": [
+                    {"role": "system", "content": sys_msg},
+                    {"role": "user", "content": content},
+                ],
+                "stream": False,
+            }
+        else:
+            path = "/api/generate"
+            request_payload = {
+                "model": model_name,
+                "system": sys_msg,
+                "prompt": content,
+                "stream": False,
+            }
+        if options:
+            request_payload["options"] = options
+        invocation_build_sec = round(time.monotonic() - invocation_build_start, 4)
+        gateway_telemetry.update(
+            {
+                "gateway_invocation_build_sec": invocation_build_sec,
+                "ollama_endpoint": endpoint,
+                "ollama_api_type": api_type,
+                "model_name": model_name,
+                "provider": "ollama",
+            }
+        )
+
+        req = urllib.request.Request(
+            f"{endpoint}{path}",
+            data=json.dumps(request_payload).encode("utf-8"),
+            headers={"Content-Type": "application/json"},
+            method="POST",
+        )
+        process_start = time.monotonic()
+        try:
+            with urllib.request.urlopen(req, timeout=max(1, int(timeout_sec))) as resp:
+                raw_body = resp.read().decode("utf-8", errors="replace")
+            process_sec = round(time.monotonic() - process_start, 4)
+            parse_start = time.monotonic()
+            payload = json.loads(raw_body)
+            if api_type == "chat":
+                output_text = str(((payload.get("message") or {}) if isinstance(payload, dict) else {}).get("content") or "")
+            else:
+                output_text = str(payload.get("response") or "")
+            prompt_tokens = int(payload.get("prompt_eval_count", 0) or 0)
+            completion_tokens = int(payload.get("eval_count", 0) or 0)
+            total_tokens = prompt_tokens + completion_tokens
+            token_source = "ollama_eval_counts"
+            capture_status = "measured"
+            if total_tokens <= 0:
+                total_tokens = max(1, (len(sys_msg) + len(content) + len(output_text)) // 4)
+                token_source = "estimated_from_chars"
+                capture_status = "estimated"
+            token_info = {
+                "total_tokens": total_tokens,
+                "raw_provider_total_tokens": total_tokens,
+                "raw_provider_token_source": token_source,
+                "gateway_stats_present": token_source == "ollama_eval_counts",
+                "gateway_usage_metadata_present": token_source == "ollama_eval_counts",
+                "gateway_token_source": token_source,
+                "provider_stats_cumulative_suspected": False,
+                "token_ledger_status": "provider_measured" if capture_status == "measured" else "estimated",
+                "token_ledger_source": token_source,
+                "token_ledger_normalized_tokens": total_tokens,
+                "token_ledger_raw_provider_total_tokens": total_tokens,
+            }
+            parse_sec = round(time.monotonic() - parse_start, 4)
+            gateway_telemetry.update(
+                {
+                    "gateway_process_sec": process_sec,
+                    "gateway_provider_wait_sec": process_sec,
+                    "gateway_parse_sec": parse_sec,
+                    "gateway_total_sec": round(invocation_build_sec + process_sec + parse_sec, 4),
+                }
+            )
+            parsed_data, parsed_raw = self._parse_json_result(
+                output_text,
+                total_tokens,
+                capture_status,
+                token_info,
+                gateway_telemetry,
+            )
+            if isinstance(parsed_data, dict):
+                parsed_data["model_name"] = model_name
+                parsed_data["provider"] = "ollama"
+            return parsed_data, parsed_raw
+        except Exception as exc:  # noqa: BLE001
+            gateway_telemetry.update(
+                {
+                    "gateway_process_sec": round(time.monotonic() - process_start, 4),
+                    "gateway_provider_wait_sec": round(time.monotonic() - process_start, 4),
+                    "gateway_total_sec": round(invocation_build_sec + max(0.0, time.monotonic() - process_start), 4),
+                }
+            )
+            result = self._build_error_result(
+                f"Ollama gateway exhausted: {type(exc).__name__}: {exc}",
+                category="ollama_gateway_error",
+                telemetry=gateway_telemetry,
+            )
+            result["model_name"] = model_name
+            result["provider"] = "ollama"
+            return result, str(exc)
 
     def _resolve_binary(
         self,

@@ -202,3 +202,22 @@ def test_gateway_timeout_override_can_extend_budget(monkeypatch):
     assert data["status"] == "PASS"
     assert data["gateway_timeout_sec"] == 180
     assert captured["timeout_sec"] == 180
+
+
+def test_gateway_model_selector_ollama_dynamic_routing(monkeypatch):
+    monkeypatch.setenv("NEXUS_OAUTH_PROVIDER", "ollama")
+    monkeypatch.setenv("NEXUS_OLLAMA_SMALL_MODEL", "qwen2.5-coder:7b")
+    monkeypatch.setenv("NEXUS_OLLAMA_MODEL", "qwen2.5-coder:14b")
+
+    gateway = BattlesuitGateway(project_root=".")
+    
+    # 規劃/重現/定位等前期階段
+    assert gateway.model_selector("P") == "qwen2.5-coder:7b"
+    assert gateway.model_selector("R") == "qwen2.5-coder:7b"
+    assert gateway.model_selector("X") == "qwen2.5-coder:7b"
+    
+    # 代碼生成/修復/診斷等後期精確階段
+    assert gateway.model_selector("A") == "qwen2.5-coder:14b"
+    assert gateway.model_selector("D") == "qwen2.5-coder:14b"
+    assert gateway.model_selector("C") == "qwen2.5-coder:14b"
+
