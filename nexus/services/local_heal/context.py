@@ -56,6 +56,7 @@ class OperationalContext:
     runner_completed: bool = False
     python_executable: str = ""
     auto_heal_enabled: bool = False
+    skip_reproduction: bool = False
     wall_time_sec: float = 0.0
     token_telemetry_status: str = "not_applicable"
     token_total_estimated: int = 0

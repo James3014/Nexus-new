@@ -14,18 +14,22 @@ class ModelProfile:
         return "generate"
 
     @classmethod
-    def get_options(cls, model_name: str) -> Dict[str, Any]:
+    def get_options(cls, model_name: str, attempt: int = 1) -> Dict[str, Any]:
+        """Return model options. Temperature scales up on retries for diversity."""
+        # P0-2: Use full context capacity — qwen2.5-coder:7b supports 32K, 14b 128K
+        # P1-1: Temperature scaling on retry to break deterministic failure loops
+        temperature = 0.0 if attempt <= 1 else min(0.4, (attempt - 1) * 0.2)
         if "14b" in model_name:
             return {
-                "temperature": 0.0,
+                "temperature": temperature,
                 "num_predict": 8192,
-                "num_ctx": 16384,
+                "num_ctx": 32768,  # was 16384
             }
         else:
             return {
-                "temperature": 0.0,
-                "num_predict": 768,
-                "num_ctx": 4096,
+                "temperature": temperature,
+                "num_predict": 4096,  # was 768 — critical fix
+                "num_ctx": 16384,    # was 4096 — critical fix
             }
 
 
@@ -90,12 +94,12 @@ class LocalModelPolicy:
                 reason = "mechanical_repair_efficiency_ollama"
                 timeout_seconds = 420
 
-        options = ModelProfile.get_options(model)
+        options = ModelProfile.get_options(model, attempt=attempt)
         api_type = ModelProfile.get_api_type(model)
         return {
             "model": model,
             "reason_code": reason,
-            "policy_version": "v2.1-ollama-qwen25",
+            "policy_version": "v2.2-ollama-qwen25-ctx16k",
             "timeout_seconds": timeout_seconds,
             "ollama_options": options,
             "api_type": api_type,

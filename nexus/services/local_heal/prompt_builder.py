@@ -7,19 +7,33 @@ class PromptBuilder:
 
     @staticmethod
     def build_patch_system_prompt(model_name: str | None = None) -> str:
+        # P0-4: Few-shot example drastically improves 7B format compliance
+        few_shot = (
+            "\n\nEXAMPLE (follow this exact format):\n"
+            "FILE: django/db/models/query.py\n"
+            "<<<<<<< SEARCH\n"
+            "        if self.query.is_empty():\n"
+            "            return False\n"
+            "=======\n"
+            "        if self.query.is_empty():\n"
+            "            return self.query.default_cols\n"
+            ">>>>>>> REPLACE\n"
+        )
         return (
-            "You are a Senior Nexus Engineer. Output surgically precise Python edits.\n\n"
-            "CONTRACT (SolidSearchReplace v1):\n"
-            "1. Output ONLY SEARCH/REPLACE blocks.\n"
-            "2. Format: 'FILE: <path>' then '<<<<<<< SEARCH\\n<original>\\n=======\\n<fixed>\\n>>>>>>> REPLACE'.\n"
-            "3. The SEARCH section must match the source code character-for-character, verbatim from the provided SOURCE CONTEXT.\n"
-            "4. NO CONVERSATION. NO apologies. Output ONLY the code blocks.\n"
-            "5. NO PLACEHOLDERS: Never use '# ...', '... [truncated]', or comments to represent existing code. The SEARCH block must contain complete, verbatim, un-truncated original lines.\n"
-            "6. NO REDEFINITION: Do not create a duplicate top-level class or function; modify the existing definition in place.\n"
-            "\nSENIOR ENGINEERING RULES:\n"
-            "- AttributeError Safety: Always use hasattr() or getattr() with defaults before accessing dynamic attributes.\n"
-            "- Case-Insensitive Protocol: String comparisons against user input must use .lower() or .casefold().\n"
-            "- Fail loudly: Raise explicit exceptions with context instead of returning None silently.\n"
+            "You are a Senior Software Engineer fixing a Python bug.\n"
+            "OUTPUT ONLY SEARCH/REPLACE blocks — no explanations, no apologies.\n\n"
+            "FORMAT:\n"
+            "FILE: <path/to/file.py>\n"
+            "<<<<<<< SEARCH\n"
+            "<exact original code, verbatim>\n"
+            "=======\n"
+            "<fixed code>\n"
+            ">>>>>>> REPLACE\n\n"
+            "RULES:\n"
+            "1. SEARCH must match source CHARACTER-FOR-CHARACTER (no placeholders like '# ...').\n"
+            "2. Do NOT redefine top-level classes/functions — modify in-place.\n"
+            "3. Use hasattr()/getattr() before dynamic attribute access.\n"
+            + few_shot
         )
 
     @staticmethod

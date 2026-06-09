@@ -93,6 +93,12 @@ class ReproductionPhase(IPhase):
             ctx.op.reproduced = True
             return PhaseResult(success=True)
 
+        # P0: SWE-bench mode — skip unreliable LLM reproduction, use issue description as evidence
+        if ctx.op.skip_reproduction:
+            ctx.op.repro_evidence = ctx.op.problem_statement[:3000]
+            ctx.op.reproduced = True
+            return PhaseResult(success=True)
+
         input_data = ReproductionInput(
             instance_id=ctx.op.instance_id,
             repo_dir=ctx.op.repo_dir,

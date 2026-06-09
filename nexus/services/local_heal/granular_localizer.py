@@ -86,7 +86,7 @@ class GranularMethodLocalizer:
         self,
         issue_description: str,
         repo_dir: Path,
-        max_files: int = 3,
+        max_files: int = 5,  # P0-3: raised from 3 — prevents correct file being eliminated
         search_symbols: List[str] | None = None,
     ) -> List[Tuple[float, Dict[str, Any]]]:
         explicit_paths = self._extract_paths_from_issue(issue_description)

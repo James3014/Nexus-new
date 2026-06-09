@@ -183,11 +183,26 @@ class HealOrchestrator:
                 ctx.op.receipt_path = str(self.receipt_writer(ctx))
 
     def _reset_workspace(self, ctx: HealContext) -> None:
-        current_root = Path("/Users/jameschen/Workspace/nexus").resolve()
+        # P1-3: Portable root detection — use env var or fall back to detecting via git
+        import os
+        nexus_root_env = os.environ.get("NEXUS_ROOT", "")
+        if nexus_root_env:
+            current_root = Path(nexus_root_env).resolve()
+        else:
+            # Detect project root as the nearest ancestor with a .git
+            candidate = Path(__file__).resolve()
+            current_root = candidate
+            for _ in range(8):
+                if (candidate / ".git").exists():
+                    current_root = candidate
+                    break
+                candidate = candidate.parent
+
         if ctx.op.repo_dir.resolve() == current_root:
             return
 
-        if not ctx.op.repo_dir or not (ctx.op.repo_dir / ".git").exists(): return
+        if not ctx.op.repo_dir or not (ctx.op.repo_dir / ".git").exists():
+            return
         subprocess.run(["git", "checkout", "--", "."], cwd=str(ctx.op.repo_dir), capture_output=True)
         subprocess.run(["git", "clean", "-fd"], cwd=str(ctx.op.repo_dir), capture_output=True)
 

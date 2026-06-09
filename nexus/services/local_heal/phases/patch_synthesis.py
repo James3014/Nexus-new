@@ -188,13 +188,37 @@ class PatchSynthesisPhase(IPhase):
             # A. [MatchGate] 逐字匹配與占位符阻斷
             match_res = self.parser.validate(intent, source_text)
             if not match_res.is_valid:
-                model_decisions[-1]["status"] = match_res.error.kind.name
-                return PatchSynthesisOutput(
-                    success=False,
-                    final_patch="",
-                    model_decisions=model_decisions,
-                    error_reason=match_res.error.kind.name
-                )
+                # P0-3b: Cross-file SEARCH fallback
+                # When model declares wrong FILE (e.g., column.py vs table.py),
+                # scan all localized files to find the actual match location.
+                corrected = False
+                for alt_rel_path, alt_content_unused in input_data.localized_files:
+                    alt_path = input_data.repo_dir / alt_rel_path
+                    if not alt_path.exists() or alt_path == target_path:
+                        continue
+                    alt_text = alt_path.read_text(encoding="utf-8", errors="replace")
+                    alt_res = self.parser.validate(intent, alt_text)
+                    if alt_res.is_valid:
+                        # Found real target — auto-correct and continue
+                        intent = type(intent)(
+                            file_path=alt_rel_path,
+                            search=intent.search,
+                            replace=intent.replace,
+                            operation=intent.operation,
+                        )
+                        target_path = alt_path
+                        source_text = alt_text
+                        match_res = alt_res
+                        corrected = True
+                        break
+                if not corrected:
+                    model_decisions[-1]["status"] = match_res.error.kind.name
+                    return PatchSynthesisOutput(
+                        success=False,
+                        final_patch="",
+                        model_decisions=model_decisions,
+                        error_reason=match_res.error.kind.name
+                    )
 
             # B. [SyntaxGate] 語法編譯檢查 (ast.parse)
             syntax_res = SyntaxGate.check(intent, source_text)

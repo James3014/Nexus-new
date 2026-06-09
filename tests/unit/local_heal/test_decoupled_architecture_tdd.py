@@ -162,7 +162,9 @@ def test_planning_phase_stateless_run():
     
     out = phase.run(inp)
     assert out.success is True
-    assert out.plan["search_symbols"] == ["FooClass"]
+    # P0-5: DeterministicSymbolExtractor merges symbols from problem + evidence;
+    # "FooClass" from problem and "AssertionError" from evidence are both valid.
+    assert "FooClass" in out.plan["search_symbols"]
     assert len(llm_client.calls) == 1
     assert llm_client.calls[0]["model"] == "qwen2.5-coder:7b"
 
@@ -221,3 +223,141 @@ def test_verification_phase_stateless_run(tmp_path):
     assert out.success is True
     assert out.hidden_verifier_passed is True
     assert out.solve_eligible is True
+
+
+# ─── P0 Fix Tests ─────────────────────────────────────────────────────────────
+
+def test_skip_reproduction_uses_problem_statement_as_evidence():
+    """P0-1: When skip_reproduction=True, ReproductionPhase must bypass LLM
+    and use problem_statement[:3000] as repro_evidence."""
+    from nexus.services.local_heal.context import HealContext, OperationalContext, GovernanceContext
+
+    runner = StubReproductionRunner(success=False, evidence="")
+    denoiser = StubEnvDenoiser(succeeded=False)
+    phase = ReproductionPhase(repro_runner=runner, env_denoiser=denoiser)
+
+    ctx = HealContext(
+        op=OperationalContext(
+            instance_id="test-skip",
+            repo_dir=Path("/tmp"),
+            problem_statement="Fix the `NdarrayMixin` structured array bug.",
+            skip_reproduction=True,
+        ),
+        gov=GovernanceContext()
+    )
+
+    result = phase.execute(ctx)
+    assert result.success is True
+    assert ctx.op.reproduced is True
+    assert "NdarrayMixin" in ctx.op.repro_evidence
+
+
+def test_deterministic_symbol_extractor_backtick():
+    """P0-5: DeterministicSymbolExtractor must find backtick-enclosed identifiers."""
+    from nexus.services.local_heal.planner import DeterministicSymbolExtractor
+
+    problem = "The `NdarrayMixin` class in `astropy.table.column` fails when `Column` receives structured data."
+    symbols = DeterministicSymbolExtractor.extract(problem)
+
+    assert "NdarrayMixin" in symbols
+    assert "Column" in symbols
+
+
+def test_deterministic_symbol_extractor_camelcase():
+    """P0-5: CamelCase class names in prose should be extracted."""
+    from nexus.services.local_heal.planner import DeterministicSymbolExtractor
+
+    problem = "QuerySet.filter() raises AttributeError when using TemporalModel with TimezoneMixin."
+    symbols = DeterministicSymbolExtractor.extract(problem)
+
+    assert "QuerySet" in symbols
+    assert "AttributeError" in symbols
+
+
+def test_deterministic_symbol_extractor_no_noise():
+    """P0-5: Common Python keywords should be filtered out."""
+    from nexus.services.local_heal.planner import DeterministicSymbolExtractor
+
+    problem = "import return class def self true false none"
+    symbols = DeterministicSymbolExtractor.extract(problem)
+
+    assert "import" not in symbols
+    assert "return" not in symbols
+    assert "self" not in symbols
+
+
+def test_context_window_expansion():
+    """P0-2: 7B model must have num_ctx=16384 and num_predict=4096."""
+    from nexus.engine.local_model_policy import ModelProfile
+
+    opts_7b = ModelProfile.get_options("qwen2.5-coder:7b", attempt=1)
+    assert opts_7b["num_ctx"] == 16384
+    assert opts_7b["num_predict"] == 4096
+    assert opts_7b["temperature"] == 0.0
+
+    opts_14b = ModelProfile.get_options("qwen2.5-coder:14b", attempt=1)
+    assert opts_14b["num_ctx"] == 32768
+    assert opts_14b["num_predict"] == 8192
+
+
+def test_temperature_scaling_on_retry():
+    """P1-1: Temperature must increase on retry attempts to break failure loops."""
+    from nexus.engine.local_model_policy import ModelProfile
+
+    opts_attempt1 = ModelProfile.get_options("qwen2.5-coder:7b", attempt=1)
+    opts_attempt2 = ModelProfile.get_options("qwen2.5-coder:7b", attempt=2)
+    opts_attempt3 = ModelProfile.get_options("qwen2.5-coder:7b", attempt=3)
+
+    assert opts_attempt1["temperature"] == 0.0
+    assert opts_attempt2["temperature"] > 0.0
+    assert opts_attempt3["temperature"] > opts_attempt2["temperature"]
+    assert opts_attempt3["temperature"] <= 0.4  # capped
+
+
+def test_cross_file_search_fallback(tmp_path):
+    """P0-3b: When model declares wrong FILE but SEARCH matches a localized file,
+    PatchSynthesisPhase must auto-correct the file path and apply the patch."""
+    # Create two files: column.py (wrong, declared) and table.py (correct, has code)
+    column_py = tmp_path / "column.py"
+    table_py = tmp_path / "table.py"
+    column_py.write_text("class Column:\n    pass\n", encoding="utf-8")
+    table_py.write_text(
+        "def _convert_data(data):\n    if isinstance(data, int):\n        return float(data)\n    return data\n",
+        encoding="utf-8"
+    )
+
+    parser = SolidSearchReplaceProtocol()
+    patcher = Patcher()
+
+    # LLM output declares FILE: column.py but SEARCH block matches table.py
+    llm_response = (
+        "FILE: column.py\n"
+        "<<<<<<< SEARCH\n"
+        "    if isinstance(data, int):\n"
+        "        return float(data)\n"
+        "=======\n"
+        "    if isinstance(data, (int, str)):\n"
+        "        return float(data)\n"
+        ">>>>>>> REPLACE\n"
+    )
+    llm_client = DummyLLMClient(llm_response)
+
+    phase = PatchSynthesisPhase(parser=parser, patcher=patcher, llm_client=llm_client)
+    inp = PatchSynthesisInput(
+        instance_id="test-crossfile",
+        problem_statement="Fix data conversion",
+        repro_evidence="TypeError",
+        plan={"search_symbols": ["_convert_data"], "repair_strategy": "fix", "violated_invariants": []},
+        localized_files=[("column.py", column_py.read_text()), ("table.py", table_py.read_text())],
+        repo_dir=tmp_path,
+        reasoning_mode="INTUITIVE",
+        attempt=1,
+        max_tries=3,
+    )
+
+    out = phase.run(inp)
+    # Should succeed by auto-correcting to table.py
+    assert out.success is True, f"Expected cross-file fallback to succeed, got: {out.error_reason}"
+    # table.py should be patched
+    patched = table_py.read_text()
+    assert "(int, str)" in patched
