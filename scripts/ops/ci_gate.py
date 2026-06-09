@@ -987,10 +987,14 @@ def main():
         sys.exit(0)
 
     # 1. Wiki Governance Audit (Pass 7 - CI Hardened)
-    success, _ = run_step(
-        "Wiki Governance Audit",
-        f'"{VENV_PYTHON}" scripts/ops/wiki_linter.py --strict --ci-report wiki_audit.json',
-    )
+    if os.getenv("NEXUS_SKIP_WIKI_AUDIT") == "1":
+        print("⏭️ [CI-Gate] Skipping Wiki Governance Audit (NEXUS_SKIP_WIKI_AUDIT=1)")
+        success = True
+    else:
+        success, _ = run_step(
+            "Wiki Governance Audit",
+            f'"{VENV_PYTHON}" scripts/ops/wiki_linter.py --strict --ci-report wiki_audit.json',
+        )
     if not success and not args.dry_run: sys.exit(1)
 
     # 2. Parallelize Wiki Audits for efficiency

@@ -121,6 +121,9 @@ class BattlesuitGateway:
         self.swarm_lane = MicroSwarmLane(self.project_root)
         self.swarm_compare = SwarmCompare()
         
+        # 🧪 [v26.1] Feature Flags
+        self.use_surgical_repair = os.getenv("NEXUS_USE_SURGICAL_REPAIR", "1") == "1"
+        
         # 🛡️ Battlesuit Origin: 僅支援 OAuth CLI 與物理 Handoff
         self.use_oauth = True
         self.oauth_provider = (os.getenv("NEXUS_OAUTH_PROVIDER", "gemini").strip().lower() or "gemini")

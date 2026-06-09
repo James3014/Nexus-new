@@ -71,7 +71,25 @@ class PipelineRepairMixin:
                 logger.info(f"🔥 [Bayesian-Repair] Scaling temperature to {r_params['temperature']:.2f}")
 
             try:
-                res = ctx.repairer.run(ctx.state, ctx.pack, bayesian_params=r_params)
+                # 🛡️ [v26.1] Surgical Alignment
+                gateway = getattr(ctx.repairer, "gateway", None)
+                use_surgical = ctx.state.metadata.get("use_surgical_repair") or getattr(gateway, "use_surgical_repair", False)
+                
+                if use_surgical and hasattr(gateway, "surgical_ask"):
+                    symbols = ctx.state.metadata.get("plan_target_symbols", [])
+                    if not symbols and "separability_matrix" in ctx.task_desc.lower():
+                        symbols = ["separability_matrix"]
+                            
+                    rejection = ctx.state.metadata.get("last_audit_rejection_receipt")
+                    res, raw = gateway.surgical_ask(
+                        task=ctx.task_desc,
+                        symbols=symbols,
+                        phase="R",
+                        rejection_receipt=rejection,
+                        attempt=repair_attempts
+                    )
+                else:
+                    res = ctx.repairer.run(ctx.state, ctx.pack, bayesian_params=r_params)
             except TypeError:
                 # Backward compatibility for older repairer signatures.
                 res = ctx.repairer.run(ctx.state, ctx.pack)

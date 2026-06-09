@@ -103,6 +103,15 @@ def evaluate_audit_result(
         owner._update_meta_counter(ctx, "anti_hallucination_block_count")
         NexusEventBus.publish("phantom_detected", {"task_id": ctx.state.task_id, "reason": phantom_reason})
 
+    # 🛡️ [v26.1] Extract Structural Rejection Contract
+    if status == "REJECTED" and isinstance(result_object, dict):
+        contract_data = result_object.get("rejection_contract")
+        if contract_data:
+            from nexus.engine.audit_rejection_receipt import AuditRejectionReceipt
+            receipt = AuditRejectionReceipt(contract_data)
+            ctx.state.metadata["last_audit_rejection_receipt"] = receipt
+            logger.info("📦 [Audit] Structural Rejection Contract captured: %s", receipt.rejection_class)
+
     # === NEW: Independent Evidence Verification ===
     if mock_env:
         # Keep fail-closed verifier semantics even in mock environments.
