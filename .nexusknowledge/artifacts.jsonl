@@ -2,3 +2,4 @@
 {"id": "A-RISKY-001", "status": "active", "content": "Legacy implementation", "layer": 1}
 {"artifact_id": "A-PROOP-CERT-001", "status": "VALID", "linked_belief": "B-PROTOCOL-V1", "hash": "old-hash-123"}
 {"artifact_id": "A-PROOP-CERT-001", "status": "VALID", "linked_belief": "B-PROTOCOL-V1", "hash": "old-hash-123"}
+{"id": "A-1780980895.755881", "wing": "CODE", "room": "GENERAL", "type": "artifact", "content": "Task feat-1780980612 (nexus:feature): Result=False", "layer": 2, "status": "active", "timestamp": "2026-06-09T04:54:55.755930+00:00"}
