@@ -146,22 +146,34 @@ class RepairPhaseHandler(BasePhaseHandler):
                 attempt=repair_attempts
             )
             
-            # 3. 硬化套用 (Hardened Apply)
+            # 3. 硬化套用 (Hardened Apply) 與 唯一目標探索
+            from nexus.engine.patch.target_discovery import TargetFileDiscovery
             from nexus.engine.direct_mode import extract_target_files
-            target_files = extract_target_files(task)
-            if not target_files: target_files = extract_target_files(raw)
             
-            target_file = target_files[0] if target_files else state.metadata.get("target_file")
-            if target_file:
-                logger.info(f"🔪 [R-Stage:Apply] Targeting file: {target_file}")
-                apply_res = gateway.apply_patch_v2(state.task_id, str(target_file), raw)
+            discovery = TargetFileDiscovery()
+            context_files = extract_target_files(task)
+            
+            if not context_files:
+                context_file_from_meta = state.metadata.get("target_file")
+                if context_file_from_meta:
+                    context_files = [context_file_from_meta]
+            
+            resolution = discovery.resolve(raw, context_files=context_files)
+            
+            if resolution.resolved and resolution.target_file:
+                logger.info(f"🔪 [R-Stage:Apply] Targeting file: {resolution.target_file}")
+                apply_res = gateway.apply_patch_v2(state.task_id, str(resolution.target_file), raw)
                 local_result = {
                     "status": "APPROVED" if apply_res.get("success") else "FAILED",
                     "result_object": apply_res
                 }
             else:
-                logger.warning("⚠️ [R-Stage:Apply] Target file missing. Falling back.")
-                local_result = res
+                # 🚫 嚴格禁止向舊路徑 Fallback
+                logger.error(f"🛑 [R-Stage:Apply] Target resolution failed: {resolution.reason}. Rejecting patch.")
+                local_result = {
+                    "status": "FAILED",
+                    "error": f"Target resolution failed: {resolution.reason}"
+                }
 
         # 🛡️ [Phase 2.3] 自癒感官啟動 (Self-Healing Research)
         # 被觸發條件：初次修復失敗且診斷指示錯誤類型內容內容及性能分析內容及其內容內容
