@@ -1,0 +1,223 @@
+import pytest
+from pathlib import Path
+from typing import Dict, Any, Tuple, List
+
+from nexus.services.local_heal.reasoning_router import ReasoningRouter
+from nexus.services.local_heal.llm_client import ILLMClient, OllamaLLMClient
+from nexus.services.local_heal.interface import (
+    PlanningInput, PlanningOutput, PatchSynthesisInput,
+    ReproductionInput, ReproductionOutput,
+    LocalizationInput, LocalizationOutput,
+    VerificationInput, VerificationOutput
+)
+from nexus.services.local_heal.phases.planning import PlanningPhase
+from nexus.services.local_heal.planner import Planner
+from nexus.services.local_heal.phases.patch_synthesis import PatchSynthesisPhase
+from nexus.services.local_heal.protocol import SolidSearchReplaceProtocol
+from nexus.services.local_heal.patcher import Patcher
+from nexus.services.local_heal.phases.reproduction import ReproductionPhase
+from nexus.services.local_heal.phases.localization import LocalizationPhase
+from nexus.services.local_heal.phases.verification import VerificationPhase
+from nexus.services.local_heal.granular_localizer import LocalizationBundle
+
+# 1. Mock LLM client implementation
+class DummyLLMClient(ILLMClient):
+    def __init__(self, response_text: str):
+        self.response_text = response_text
+        self.calls = []
+
+    def generate(
+        self,
+        system_prompt: str,
+        user_prompt: str,
+        model: str,
+        timeout: int | None = None,
+        options: Dict[str, Any] | None = None,
+        api_type: str = "generate"
+    ) -> str:
+        self.calls.append({
+            "system": system_prompt,
+            "user": user_prompt,
+            "model": model,
+            "timeout": timeout,
+            "options": options,
+            "api_type": api_type
+        })
+        return self.response_text
+
+
+# 2. Mock program entities
+class StubReproductionRunner:
+    def __init__(self, success: bool, evidence: str):
+        self.success = success
+        self.evidence = evidence
+        self.python_executable = "python3"
+
+    def run_repro(self, script_content: str) -> Tuple[bool, str]:
+        return self.success, self.evidence
+
+    def is_environment_failure(self, evidence: str) -> bool:
+        return "ModuleNotFoundError" in evidence
+
+
+class StubEnvDenoiser:
+    def __init__(self, succeeded: bool):
+        self.succeeded = succeeded
+        self.python_executable = "/bin/python"
+
+    def prepare_from_evidence(self, evidence: str):
+        class DenoiseResult:
+            def __init__(self, succ, py):
+                self.succeeded = succ
+                self.python_executable = py
+            def to_receipt(self):
+                return {"succeeded": self.succeeded}
+        return DenoiseResult(self.succeeded, self.python_executable)
+
+
+class StubLocalizer:
+    def rank_files(self, query: str, repo_dir: Path, search_symbols: List[str] = None):
+        return [(1.0, {"path": "foo.py", "content": "class Foo: pass"})]
+
+    def localize(self, path: str, content: str, query: str) -> LocalizationBundle:
+        return LocalizationBundle(
+            file_path=path,
+            primary_snippet=content,
+            slice_reason="Surgical slice",
+            confidence=0.9
+        )
+
+
+class StubBudgetManager:
+    def enforce_hard_limit(self, files: List[Tuple[str, str]]) -> List[Tuple[str, str]]:
+        return files
+
+
+class StubTestResult:
+    def __init__(self, passed: bool):
+        self.passed = passed
+
+
+class StubEvaluationGate:
+    def __init__(self, passed: bool):
+        self.passed = passed
+
+    def run_visible_tests(self, commands: List[List[str]]) -> List[Any]:
+        return [StubTestResult(self.passed)]
+
+    def run_hidden_verifier(self, args: List[str]) -> List[Any]:
+        return [StubTestResult(self.passed)]
+
+    def get_redacted_report(self, visible: List[Any], hidden: List[Any]) -> str:
+        return "Verification report."
+
+
+# 3. Unit Tests
+def test_reasoning_router_defaults():
+    router = ReasoningRouter()
+    mode_astropy = router.route("Consider fixing structured array ndarray mixin in astropy", Path("/repo/astropy"))
+    assert mode_astropy == "ALGEBRAIC"
+
+    mode_django = router.route("Fix query filter bug in django", Path("/repo/django"))
+    assert mode_django == "INTUITIVE"
+
+
+def test_reasoning_router_custom_rule():
+    router = ReasoningRouter()
+    router.register_rule(lambda stmt, path: "ALGEBRAIC" if "matrix" in stmt else None)
+
+    mode = router.route("Fix matrix multiplication performance", Path("/repo/math"))
+    assert mode == "ALGEBRAIC"
+
+
+def test_ollama_llm_client_reflection():
+    calls = []
+    def generate_fn_with_extra(sys, usr, model=None, timeout=None, options=None):
+        calls.append({"model": model, "timeout": timeout, "options": options})
+        return "reflect_ok"
+
+    client = OllamaLLMClient(generate_fn_with_extra)
+    res = client.generate("sys", "usr", model="qwen", timeout=120, options={"temp": 0})
+    
+    assert res == "reflect_ok"
+    assert len(calls) == 1
+    assert calls[0]["model"] == "qwen"
+    assert calls[0]["timeout"] == 120
+    assert calls[0]["options"] == {"temp": 0}
+
+
+def test_planning_phase_stateless_run():
+    response_json = '{"search_symbols": ["FooClass"], "repair_strategy": "Fix foo.", "violated_invariants": []}'
+    llm_client = DummyLLMClient(response_json)
+    
+    planner = Planner(llm_client=llm_client)
+    phase = PlanningPhase(planner=planner)
+    
+    inp = PlanningInput(
+        problem_statement="Fix bug in FooClass",
+        repro_evidence="AssertionError",
+        repo_dir=Path("/tmp/foo"),
+        reasoning_mode="INTUITIVE"
+    )
+    
+    out = phase.run(inp)
+    assert out.success is True
+    assert out.plan["search_symbols"] == ["FooClass"]
+    assert len(llm_client.calls) == 1
+    assert llm_client.calls[0]["model"] == "qwen2.5-coder:7b"
+
+
+def test_reproduction_phase_stateless_run():
+    runner = StubReproductionRunner(success=True, evidence="Assertion failed successfully.")
+    denoiser = StubEnvDenoiser(succeeded=False)
+    phase = ReproductionPhase(repro_runner=runner, env_denoiser=denoiser)
+
+    inp = ReproductionInput(
+        instance_id="task-1",
+        repo_dir=Path("/tmp/repo"),
+        problem_statement="Failure issue",
+        repro_script="assert False",
+        python_executable="python3"
+    )
+
+    out = phase.run(inp)
+    assert out.success is True
+    assert out.reproduced is True
+    assert out.repro_evidence == "Assertion failed successfully."
+
+
+def test_localization_phase_stateless_run():
+    localizer = StubLocalizer()
+    budget_mgr = StubBudgetManager()
+    phase = LocalizationPhase(localizer=localizer, budget_manager=budget_mgr)
+
+    inp = LocalizationInput(
+        problem_statement="Repair bug",
+        repro_evidence="Error",
+        repo_dir=Path("/tmp/repo"),
+        plan={"search_symbols": ["Foo"]}
+    )
+
+    out = phase.run(inp)
+    assert out.success is True
+    assert len(out.localized_files) == 1
+    assert out.localized_files[0][0] == "foo.py"
+
+
+def test_verification_phase_stateless_run(tmp_path):
+    eval_gate = StubEvaluationGate(passed=True)
+    phase = VerificationPhase(eval_gate=eval_gate, hidden_required=True)
+
+    inp = VerificationInput(
+        instance_id="task-1",
+        repo_dir=tmp_path,
+        problem_statement="Problem",
+        final_patch="diff ...",
+        repro_script="print('OK')",
+        python_executable="python3"
+    )
+
+    out = phase.run(inp)
+    assert out.success is True
+    assert out.hidden_verifier_passed is True
+    assert out.solve_eligible is True

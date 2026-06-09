@@ -3,9 +3,16 @@ import json
 import re
 from typing import Any, Dict
 
+from nexus.services.local_heal.llm_client import ILLMClient, OllamaLLMClient
+
 class Planner:
-    def __init__(self, ollama_generate_fn: Any = None):
-        self.ollama_generate = ollama_generate_fn
+    def __init__(self, ollama_generate_fn: Any = None, llm_client: ILLMClient | None = None):
+        if llm_client:
+            self.llm_client = llm_client
+        elif ollama_generate_fn:
+            self.llm_client = OllamaLLMClient(ollama_generate_fn)
+        else:
+            self.llm_client = None
 
     def _generate(
         self,
@@ -16,22 +23,15 @@ class Planner:
         timeout_seconds: int | None = None,
         options: dict[str, Any] | None = None,
     ) -> str:
-        if not model_name:
-            return self.ollama_generate(system, prompt)
-        try:
-            sig = inspect.signature(self.ollama_generate)
-            kwargs = {}
-            if "model" in sig.parameters:
-                kwargs["model"] = model_name
-            if "timeout" in sig.parameters and timeout_seconds is not None:
-                kwargs["timeout"] = timeout_seconds
-            if "options" in sig.parameters and options is not None:
-                kwargs["options"] = options
-            if kwargs:
-                return self.ollama_generate(system, prompt, **kwargs)
-        except (TypeError, ValueError):
-            pass
-        return self.ollama_generate(system, prompt)
+        if not self.llm_client:
+            return ""
+        return self.llm_client.generate(
+            system_prompt=system,
+            user_prompt=prompt,
+            model=model_name or "qwen2.5-coder:7b",
+            timeout=timeout_seconds,
+            options=options
+        )
 
     def create_plan(
         self,
@@ -42,7 +42,7 @@ class Planner:
         timeout_seconds: int | None = None,
         options: dict[str, Any] | None = None,
     ) -> dict:
-        if not self.ollama_generate:
+        if not self.llm_client:
             # Fallback for unit tests if needed
             return {
                 "search_symbols": [],

@@ -23,11 +23,16 @@ def validate_name_sanity(code: str) -> Tuple[bool, str]:
     scan_code = _code_without_docstrings_or_comments(code)
     slop_patterns = [
         r'placeholder', r'your_code_here', r'modify_this',
-        r'\.\.\.', r'FIXME', r'TODO: implementation'
+        r'FIXME', r'TODO: implementation'
     ]
     for pattern in slop_patterns:
         if re.search(pattern, scan_code, re.IGNORECASE):
             return False, f"Name sanity failed: Found disallowed placeholder pattern '{pattern}'"
+            
+    # 對於 '...' 僅在它單獨成行時進行攔截，避免誤判程式碼內合法的 Ellipsis (如 tbl[...].to_pandas(...) 等)
+    if re.search(r'^\s*\.\.\.\s*$', scan_code, re.MULTILINE):
+        return False, "Name sanity failed: Found disallowed placeholder pattern '...'"
+        
     return True, ""
 
 

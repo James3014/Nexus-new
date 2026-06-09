@@ -15,25 +15,49 @@ class LocalizationBundle:
     confidence: float = 0.0
     fallback_mode: str | None = None
 
-    def to_context_string(self) -> str:
+    @staticmethod
+    def _annotate_with_lineno(snippet: str, start_line: int = 1) -> str:
+        """為每行加上行號標記，讓模型可以精確定位 verbatim 代碼位置"""
+        lines = snippet.splitlines()
+        annotated = []
+        for i, line in enumerate(lines):
+            annotated.append(f"{start_line + i:4d} | {line}")
+        return "\n".join(annotated)
+
+    def to_context_string(self, annotate_lines: bool = True) -> str:
         parts = [f"### FILE: {self.file_path}"]
         if self.fallback_mode == "file_scope":
-            parts.append(self.primary_snippet)
+            if annotate_lines:
+                parts.append("# NOTE: Line numbers shown for reference. Your SEARCH block must use verbatim code WITHOUT line numbers.")
+                parts.append(self._annotate_with_lineno(self.primary_snippet))
+            else:
+                parts.append(self.primary_snippet)
             return "\n".join(parts)
-            
+
         parts.append(f"# Refined snippets for {self.file_path}")
-        parts.append(f"## Primary Target:\n{self.primary_snippet}\n")
-        
+        parts.append("# NOTE: Line numbers shown for reference. SEARCH block must copy code verbatim WITHOUT line numbers.")
+        parts.append(f"## Primary Target:")
+        if annotate_lines:
+            parts.append(self._annotate_with_lineno(self.primary_snippet))
+        else:
+            parts.append(self.primary_snippet)
+        parts.append("")
+
         if self.supporting_snippets:
             parts.append("## Supporting Helpers:")
             for s in self.supporting_snippets:
-                parts.append(f"{s}\n")
-                
+                if annotate_lines:
+                    parts.append(self._annotate_with_lineno(s))
+                else:
+                    parts.append(s)
+                parts.append("")
+
         if self.related_definitions:
             parts.append("## Related Definitions (Regex/Constants):")
             for d in self.related_definitions:
-                parts.append(f"{d}\n")
-                
+                parts.append(d)
+                parts.append("")
+
         return "\n".join(parts)
 
 class GranularMethodLocalizer:
@@ -79,7 +103,7 @@ class GranularMethodLocalizer:
         py_files = list(repo_dir.rglob("*.py"))
         for pyfile in py_files:
             rel_path = str(pyfile.relative_to(repo_dir))
-            if any(p in rel_path.lower() for p in ("test", "__pycache__", "build", "docs")): continue
+            if any(p in rel_path.lower() for p in ("test", "__pycache__", "build", "docs", ".venv", "site-packages", "egg-info")): continue
             try:
                 content = pyfile.read_text(encoding="utf-8", errors="replace")
                 if content.strip():
@@ -88,13 +112,22 @@ class GranularMethodLocalizer:
 
         if not documents: return []
         
-        tokenized_corpus = [self._tokenize(doc["content"][:4000]) for doc in documents]
+        tokenized_corpus = [self._tokenize(doc["content"]) for doc in documents]
         bm25 = BM25Okapi(tokenized_corpus)
         bm25_scores = bm25.get_scores(self._tokenize(issue_description))
 
+        # Symbol Grep Boost: large files (e.g. table.py 150KB) get TF-penalised by BM25,
+        # so we add 500 per matching symbol found in the full content.
+        # This ensures the file that *actually contains* the key symbols is not buried.
+        symbol_bonus = 500.0
         scored_docs = []
         for idx, doc in enumerate(documents):
             score = float(bm25_scores[idx])
+            if search_symbols:
+                full_content = doc["content"]
+                for sym in search_symbols:
+                    if sym and re.search(r'\b' + re.escape(sym) + r'\b', full_content):
+                        score += symbol_bonus
             scored_docs.append((score, doc))
         scored_docs.sort(key=lambda x: -x[0])
         return scored_docs[:max_files]

@@ -7,7 +7,7 @@ class ContextBudgetConfig:
     max_ctx_tokens: int = 8192
     prompt_overhead_tokens: int = 800
     problem_max_tokens: int = 1500
-    source_budget_tokens: int = 3000
+    source_budget_tokens: int = 12000
     chars_per_token: float = 3.5  # 粗略轉換率
 
 
@@ -20,8 +20,7 @@ class ContextBudgetManager:
     def fit_source_files(self, files: List[Tuple[str, str]]) -> List[Tuple[str, str]]:
         """
         根據 source_budget_tokens 動態裁切定位到的原始碼檔案。
-        若超出預算，優先保留高相關性檔案的完整上下文，依序剔除低相關性（後面的）檔案。
-        如果最核心的檔案也超出 budget，則對其進行截斷。
+        若超出預算，優先保留高相關性檔案的完整上下文，對後續檔案做局部截斷以保全上下文，而不直接剔除。
         """
         max_chars = int(self.config.source_budget_tokens * self.config.chars_per_token)
         
@@ -38,18 +37,15 @@ class ContextBudgetManager:
                 fitted_files.append((name, content))
                 current_chars += file_len
             else:
-                if not fitted_files:
-                    # 第一個檔案就超額，對其截斷
-                    truncated_len = max(5, max_chars - 25)
-                    truncated_content = content[:truncated_len] + "\n... [truncated for context window limits]"
+                remaining_budget = max_chars - current_chars
+                if remaining_budget >= 1000:
+                    truncated_len = remaining_budget - 50
+                    truncated_content = content[:truncated_len] + f"\n... [truncated for context window limits, remaining budget: {remaining_budget} chars]"
                     fitted_files.append((name, truncated_content))
                     current_chars += len(truncated_content)
-                elif file_len <= 10:
-                    # 容許極小檔案滑入，避免因前述截斷後的後綴長度超額而直接丟棄重要小檔案
-                    fitted_files.append((name, content))
-                    current_chars += file_len
                 else:
-                    break
+                    # 預算過低時繼續找有沒有更小的重要檔案可以塞入，不提前中斷
+                    continue
 
         return fitted_files
 
