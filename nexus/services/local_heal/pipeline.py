@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+from datetime import datetime
 from pathlib import Path
 import os
 from typing import List, Tuple, Dict, Any, Optional
@@ -148,10 +149,24 @@ class HealPipeline:
         self.planner = Planner(ollama_generate_fn=ollama_generate_fn)
         self.budget_manager = ContextBudgetManager()
 
+    # --- Trace / Telemetry Helpers ---
+    TRACE_LOG_PATH = Path("/Users/jameschen/Workspace/nexus/scratch/llm_trace.log")
+
+    @classmethod
+    def _write_trace(cls, message: str) -> None:
+        try:
+            cls.TRACE_LOG_PATH.parent.mkdir(parents=True, exist_ok=True)
+            with open(cls.TRACE_LOG_PATH, "a", encoding="utf-8") as f:
+                ts = datetime.now().strftime("%Y-%m-%dT%H:%M:%S")
+                f.write(f"[{ts}] {message}\n")
+        except Exception:
+            pass
+
     def run(self, ctx: HealContext) -> HealContext:
         """
         將舊版 Context 轉換為 V2，透過 Orchestrator 執行，再轉回舊版回傳。
         """
+        self._write_trace(f"=== PIPELINE START {ctx.instance_id} ===")
         v2_ctx = ctx.to_v2()
         
         # 初始化環境感知的服務 (使用 factory 以供測試 monkeypatch)
@@ -189,6 +204,7 @@ class HealPipeline:
         
         # 同步回原 Context (In-place)
         ctx.sync_from_v2(v2_result)
+        self._write_trace(f"=== PIPELINE END {ctx.instance_id} solve_eligible={ctx.solve_eligible} ===")
         return ctx
 
     # --- Shim Methods for Testing Compatibility ---
@@ -201,7 +217,12 @@ class HealPipeline:
     def _localize(self, ctx: HealContext) -> HealContext:
         # 單獨調用定位階段 (供測試使用)
         v2_ctx = ctx.to_v2()
-        phase = LocalizationPhase(localizer=self.localizer, budget_manager=self.budget_manager)
-        phase.execute(v2_ctx)
+        try:
+            phase = LocalizationPhase(localizer=self.localizer, budget_manager=self.budget_manager)
+            phase.execute(v2_ctx)
+        except Exception as exc:
+            self._write_trace(f"LOCALIZE_EXCEPTION instance={ctx.instance_id} error={exc}")
+            ctx.localized_files = []
+            return ctx
         ctx.sync_from_v2(v2_ctx)
         return ctx

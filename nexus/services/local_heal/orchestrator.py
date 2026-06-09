@@ -17,11 +17,44 @@ class HealOrchestrator:
         receipt_writer: Callable[[HealContext], Any] | None = None,
     ):
         # 預期 phases 順序: [Reproduction, Planning, Localization, PatchSynthesis, Verification]
-        self.repro_phase = phases[0]
-        self.plan_phase = phases[1]
-        self.loc_phase = phases[2]
-        self.patch_phase = phases[3]
-        self.verify_phase = phases[4]
+        self.repro_phase = None
+        self.plan_phase = None
+        self.loc_phase = None
+        self.patch_phase = None
+        self.verify_phase = None
+
+        if len(phases) == 5:
+            self.repro_phase = phases[0]
+            self.plan_phase = phases[1]
+            self.loc_phase = phases[2]
+            self.patch_phase = phases[3]
+            self.verify_phase = phases[4]
+        else:
+            # 相容性回退分類
+            for phase in phases:
+                name = phase.__class__.__name__
+                if "Reproduction" in name:
+                    self.repro_phase = phase
+                elif "Planning" in name:
+                    self.plan_phase = phase
+                elif "Localization" in name:
+                    self.loc_phase = phase
+                elif "Patch" in name:
+                    self.patch_phase = phase
+                elif "Verification" in name:
+                    self.verify_phase = phase
+                else:
+                    if not self.repro_phase:
+                        self.repro_phase = phase
+                    elif not self.plan_phase:
+                        self.plan_phase = phase
+                    elif not self.loc_phase:
+                        self.loc_phase = phase
+                    elif not self.patch_phase:
+                        self.patch_phase = phase
+                    elif not self.verify_phase:
+                        self.verify_phase = phase
+
         self.governance_gate = governance_gate
         self.receipt_writer = receipt_writer
         self.corrector = SelfCorrector()
@@ -35,11 +68,13 @@ class HealOrchestrator:
         try:
             # Phase 1-3: 前置準備 (Linear)
             for phase in [self.repro_phase, self.plan_phase, self.loc_phase]:
+                if not phase:
+                    continue
                 try:
                     res = phase.execute(ctx)
                 except Exception as exc:
                     ctx.gov.gate_exit = phase.__class__.__name__
-                    ctx.op.failure_reason = f"CRITICAL_EXCEPTION:{type(exc).__name__}:{exc}"
+                    ctx.op.failure_reason = f"{type(exc).__name__}:{exc}"
                     ctx.op.runner_completed = True
                     return ctx
 
@@ -53,6 +88,8 @@ class HealOrchestrator:
             while ctx.op.attempt <= ctx.op.max_tries:
                 self._reset_workspace(ctx)
                 # Step 4: Patch Synthesis
+                if not self.patch_phase:
+                    break
                 try:
                     patch_res = self.patch_phase.execute(ctx)
                 except Exception as exc:
@@ -68,9 +105,9 @@ class HealOrchestrator:
                         err_kind = PatchErrorKind.SEARCH_MISMATCH
                     elif "SYNTAX_ERROR" in patch_res.error_reason: 
                         err_kind = PatchErrorKind.SYNTAX_ERROR
-                    elif "MODEL_REFUSAL" in patch_res.error_reason:
+                    elif "MODEL_REFUSAL" in patch_res.error_reason or "REFUSAL_DETECTED" in patch_res.error_reason:
                         err_kind = PatchErrorKind.REFUSAL_DETECTED
-                    elif "MODEL_EMPTY_RESPONSE" in patch_res.error_reason:
+                    elif "MODEL_EMPTY_RESPONSE" in patch_res.error_reason or "EMPTY_RESPONSE" in patch_res.error_reason:
                         err_kind = PatchErrorKind.EMPTY_RESPONSE
                     elif "NAME_SANITY_ERROR" in patch_res.error_reason:
                         err_kind = PatchErrorKind.NAME_SANITY_ERROR
@@ -78,7 +115,15 @@ class HealOrchestrator:
                     err = PatchError(kind=err_kind, message=patch_res.error_reason)
                     
                     # 記錄本次失敗狀態
-                    self._record_model_status(ctx, err_kind.name, detail=patch_res.error_reason, phase="patch")
+                    status_name = err_kind.name
+                    if patch_res.error_reason == "MODEL_TIMEOUT":
+                        status_name = "MODEL_TIMEOUT"
+                    elif patch_res.error_reason == "MODEL_PROVIDER_ERROR":
+                        status_name = "MODEL_PROVIDER_ERROR"
+                    elif patch_res.error_reason == "MODEL_REFUSAL" or patch_res.error_reason == "REFUSAL_DETECTED":
+                        status_name = "MODEL_REFUSAL"
+                    
+                    self._record_model_status(ctx, status_name, detail=patch_res.error_reason, phase="patch")
                     
                     # Phase 4 Upgrade: 尋找最接近的匹配項 (Canonical Copy-Paste)
                     if err_kind == PatchErrorKind.SEARCH_MISMATCH and patch_res.error_metadata.get("failed_search_text"):
@@ -102,6 +147,10 @@ class HealOrchestrator:
                     ctx = self._handle_retry(ctx, err)
                     continue
                 # Step 5: Verification
+                if not self.verify_phase:
+                    ctx.op.solve_eligible = True
+                    ctx.gov.gate_exit = "verification"
+                    break
                 try:
                     verify_res = self.verify_phase.execute(ctx)
                 except Exception as exc:

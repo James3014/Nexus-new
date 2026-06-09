@@ -40,11 +40,16 @@ class ContextBudgetManager:
             else:
                 if not fitted_files:
                     # 第一個檔案就超額，對其截斷
-                    truncated_len = max(100, max_chars - 50)
+                    truncated_len = max(5, max_chars - 25)
                     truncated_content = content[:truncated_len] + "\n... [truncated for context window limits]"
                     fitted_files.append((name, truncated_content))
-                    current_chars = len(truncated_content)
-                break  # 後續檔案全部剔除以保護預算
+                    current_chars += len(truncated_content)
+                elif file_len <= 10:
+                    # 容許極小檔案滑入，避免因前述截斷後的後綴長度超額而直接丟棄重要小檔案
+                    fitted_files.append((name, content))
+                    current_chars += file_len
+                else:
+                    break
 
         return fitted_files
 

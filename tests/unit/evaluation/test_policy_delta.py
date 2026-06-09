@@ -17,9 +17,9 @@ class TestPolicyDelta(unittest.TestCase):
         # 情境 B: 定向攻堅 - 低信心 (模擬新策略)
         # 此處為 TDD 預留位：未來微調 RetryPolicy 後，此測試應通過
         p_low_conf = [FailurePattern("SELECTION_LOW_CONFIDENCE", "x", 0.7)]
-        # 目前 RetryPolicy 尚未定義此 Pattern，應回傳 ABSTAIN
+        # 已定義此 Pattern，應回傳 EXPLORE
         res_b = RetryPolicy.decide(p_low_conf, 3)
-        self.assertEqual(res_b.action, "ABSTAIN")
+        self.assertEqual(res_b.action, "EXPLORE")
 
 if __name__ == "__main__":
     unittest.main()

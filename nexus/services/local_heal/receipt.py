@@ -140,7 +140,7 @@ def build_repair_receipt(ctx: Any, *, model_name: str = "nexus-local-heal") -> d
         model_split = "rescue=0-call"
 
     return {
-        "schema": "nexus.local_heal.canary_receipt.v1",
+        "schema": "nexus.local_heal.repair_receipt.v1",
         "instance_id": getattr(ctx, "instance_id", ""),
         "model_name_or_path": model_name,
         "runner_completed": bool(getattr(ctx, "runner_completed", False)),

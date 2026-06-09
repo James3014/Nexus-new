@@ -61,6 +61,8 @@ class OllamaClient:
                     api_type = path.split("/")[-1]
                     self.telemetry_collector.record_call(self.model, api_type, data)
                 return data
+        except (TimeoutError, ConnectionRefusedError):
+            raise
         except Exception as e:
             err_data = {"error": f"{type(e).__name__}: {str(e)}"}
             self._log_call(payload, err_data)

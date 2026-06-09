@@ -50,19 +50,32 @@ class SolidSearchReplaceProtocol:
         # result looks like: ["junk before", "path1", "content1", "path2", "content2"]
         
         intents = []
-        if len(file_sections) < 2:
-            # 嘗試無 FILE 的 fallback (針對 14b 可能省略 header 的情況)
-            return self._parse_no_header_fallback(raw_output)
+        if len(file_sections) >= 2:
+            for i in range(1, len(file_sections), 2):
+                file_path = file_sections[i].strip()
+                content = file_sections[i+1]
+                
+                for match in self.sr_pattern.finditer(content):
+                    intents.append(PatchIntent(
+                        file_path=file_path,
+                        search=match.group(1),
+                        replace=match.group(2)
+                    ))
+        
+        # 2. 嘗試無 FILE 的 fallback (針對 14b 可能省略 header 的情況)
+        if not intents and len(file_sections) < 2:
+            fallback_res = self._parse_no_header_fallback(raw_output)
+            if not isinstance(fallback_res, PatchError):
+                intents = fallback_res
 
-        for i in range(1, len(file_sections), 2):
-            file_path = file_sections[i].strip()
-            content = file_sections[i+1]
-            
-            for match in self.sr_pattern.finditer(content):
+        # 3. 舊版簡約格式的相容 Fallback (SEARCH:/REPLACE:/END)
+        if not intents:
+            simple_pattern = re.compile(r'FILE:\s*([^\n]+)\s*\nSEARCH:\s*(?:\n)?(.*?)\nREPLACE:\s*(?:\n)?(.*?)(?:\nEND\s*|$)', re.DOTALL)
+            for match in simple_pattern.finditer(raw_output):
                 intents.append(PatchIntent(
-                    file_path=file_path,
-                    search=match.group(1),
-                    replace=match.group(2)
+                    file_path=match.group(1).strip(),
+                    search=match.group(2),
+                    replace=match.group(3)
                 ))
         
         if not intents:

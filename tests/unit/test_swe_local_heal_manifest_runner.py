@@ -82,7 +82,7 @@ def test_ollama_generate_propagates_timeout_for_pipeline_classification(monkeypa
     def raise_timeout(*args, **kwargs):
         raise TimeoutError("timed out")
 
-    monkeypatch.setattr("benchmarking.swebench_lite.swe_local_heal.urllib.request.urlopen", raise_timeout)
+    monkeypatch.setattr("nexus.services.local_heal.client.urllib.request.urlopen", raise_timeout)
 
     with pytest.raises(TimeoutError):
         ollama_generate("", "patch please", timeout=1, model="qwen2.5-coder:14b")
@@ -96,7 +96,7 @@ def test_default_local_generate_uses_ollama_when_provider_is_ollama(monkeypatch)
         raise ConnectionRefusedError("ollama unavailable")
 
     monkeypatch.delenv("NEXUS_LOCAL_MODEL", raising=False)
-    monkeypatch.setattr("benchmarking.swebench_lite.swe_local_heal.urllib.request.urlopen", raise_provider_error)
+    monkeypatch.setattr("nexus.services.local_heal.client.urllib.request.urlopen", raise_provider_error)
 
     with pytest.raises(ConnectionRefusedError):
         nexus_local_generate("", "patch please", timeout=1)

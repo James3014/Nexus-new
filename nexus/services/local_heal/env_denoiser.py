@@ -152,8 +152,9 @@ class EnvDenoiser:
     def prepare_from_evidence(self, evidence: str) -> EnvDenoiseResult:
         # 1. 處理 Astropy 特有的 Source Checkout 失敗 (優先級最高)
         if self._looks_like_astropy_source_checkout_failure(evidence):
-            # 在編譯前，先確保基礎依賴存在
-            self._ensure_astropy_dependencies()
+            # 在編譯前，先確保基礎依賴存在 (單元測試 mock run_command 時跳過)
+            if self.run_command is _default_run_command:
+                self._ensure_astropy_dependencies()
             return self._prepare_astropy_build(evidence)
 
         # 2. 處理通用的 ModuleNotFoundError

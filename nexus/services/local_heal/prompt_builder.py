@@ -16,6 +16,10 @@ class PromptBuilder:
             "4. NO CONVERSATION. NO apologies. Output ONLY the code blocks.\n"
             "5. NO PLACEHOLDERS: Never use '# ...', '... [truncated]', or comments to represent existing code. The SEARCH block must contain complete, verbatim, un-truncated original lines.\n"
             "6. NO REDEFINITION: Do not create a duplicate top-level class or function; modify the existing definition in place.\n"
+            "\nSENIOR ENGINEERING RULES:\n"
+            "- AttributeError Safety: Always use hasattr() or getattr() with defaults before accessing dynamic attributes.\n"
+            "- Case-Insensitive Protocol: String comparisons against user input must use .lower() or .casefold().\n"
+            "- Fail loudly: Raise explicit exceptions with context instead of returning None silently.\n"
         )
 
     @staticmethod

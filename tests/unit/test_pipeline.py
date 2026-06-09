@@ -250,7 +250,7 @@ def test_pipeline_records_tsp_model_decisions_for_astropy(tmp_path):
     assert res_ctx.solve_eligible is True
     assert calls[:2] == ["qwen2.5-coder:7b", "qwen2.5-coder:14b"]
     assert [item["phase"] for item in res_ctx.model_decisions[:2]] == ["planning", "patch"]
-    assert [item["timeout_seconds"] for item in res_ctx.model_decisions[:2]] == [120, 600]
+    assert [item["timeout_seconds"] for item in res_ctx.model_decisions[:2]] == [600, 1200]
 
 
 def test_pipeline_passes_phase_timeouts_to_model_calls(tmp_path):
@@ -287,7 +287,7 @@ def test_pipeline_passes_phase_timeouts_to_model_calls(tmp_path):
     res_ctx = pipeline.run(ctx)
 
     assert res_ctx.solve_eligible is True
-    assert calls[:2] == [("qwen2.5-coder:7b", 120), ("qwen2.5-coder:14b", 600)]
+    assert calls[:2] == [("qwen2.5-coder:7b", 600), ("qwen2.5-coder:14b", 1200)]
 
 
 def test_pipeline_empty_patch_response_records_model_empty_response(tmp_path):

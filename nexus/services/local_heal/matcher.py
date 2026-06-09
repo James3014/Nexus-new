@@ -37,12 +37,19 @@ class MatchStrategy(Protocol):
 class ExactMatch:
     """Level 1: 完美字面匹配"""
     def match(self, file_content: str, search_text: str, replace_text: str = "") -> Optional[MatchResult]:
-        if search_text in file_content:
-            return MatchResult(
-                strategy_name="ExactMatch",
-                verbatim_text=search_text,
-                normalized_search=search_text
-            )
+        start = 0
+        while True:
+            idx = file_content.find(search_text, start)
+            if idx == -1:
+                break
+            end_idx = idx + len(search_text)
+            if end_idx >= len(file_content) or file_content[end_idx] in ('\n', '\r'):
+                return MatchResult(
+                    strategy_name="ExactMatch",
+                    verbatim_text=search_text,
+                    normalized_search=search_text
+                )
+            start = idx + 1
         return None
 
 
@@ -50,12 +57,21 @@ class StrippedMatch:
     """Level 2: 忽略首尾空白的字面匹配 ( Enforces perfect line boundary )"""
     def match(self, file_content: str, search_text: str, replace_text: str = "") -> Optional[MatchResult]:
         s_stripped = search_text.strip()
-        if s_stripped and s_stripped in file_content:
-            return MatchResult(
-                strategy_name="StrippedMatch",
-                verbatim_text=s_stripped,
-                normalized_search=s_stripped
-            )
+        if not s_stripped:
+            return None
+        start = 0
+        while True:
+            idx = file_content.find(s_stripped, start)
+            if idx == -1:
+                break
+            end_idx = idx + len(s_stripped)
+            if end_idx >= len(file_content) or file_content[end_idx] in ('\n', '\r'):
+                return MatchResult(
+                    strategy_name="StrippedMatch",
+                    verbatim_text=s_stripped,
+                    normalized_search=s_stripped
+                )
+            start = idx + 1
         return None
 
 
