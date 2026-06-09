@@ -78,19 +78,7 @@ class PatchSynthesisPhase(IPhase):
                 if hud_retry_info:
                     user_prompt += hud_retry_info
 
-        # 1. 準備治理化 Prompt
-        if not system_prompt:
-            system_prompt = PromptBuilder.build_patch_system_prompt()
-        if not user_prompt:
-            user_prompt = PromptBuilder.build_patch_user_prompt(
-                input_data.problem_statement,
-                input_data.repro_evidence,
-                input_data.plan,
-                input_data.localized_files,
-                reasoning_mode=input_data.reasoning_mode
-            )
-
-        # 2. 模型分流與生成
+        # 1. 模型分流與生成（先取得模型以支援 Slim Prompt 選擇）
         patch_decision = LocalModelPolicy.select_model(
             task_type="swe_repair",
             phase="patch",
@@ -102,6 +90,18 @@ class PatchSynthesisPhase(IPhase):
             },
         )
         model_decisions.append({"phase": "patch", **patch_decision})
+
+        # 2. 準備治理化 Prompt
+        if not system_prompt:
+            system_prompt = PromptBuilder.build_patch_system_prompt(patch_decision["model"])
+        if not user_prompt:
+            user_prompt = PromptBuilder.build_patch_user_prompt(
+                input_data.problem_statement,
+                input_data.repro_evidence,
+                input_data.plan,
+                input_data.localized_files,
+                reasoning_mode=input_data.reasoning_mode
+            )
 
         if not self.llm_client:
             return PatchSynthesisOutput(

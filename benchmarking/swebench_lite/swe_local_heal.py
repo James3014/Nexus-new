@@ -439,6 +439,7 @@ def main() -> None:
                 expected_reason_family=task.get("expected_reason_family", "SOLVED"),
             )
             ctx.auto_heal_enabled = True
+            ctx.skip_reproduction = os.environ.get("NEXUS_SKIP_REPRODUCTION") == "1" or os.environ.get("NEXUS_SKIP_REPRODUCTION", "").lower() == "true"
             ctx.python_executable = task.get("python_executable", "")
             ctx.local_mode = task.get("local_mode", False)
             if ctx.local_mode:

@@ -61,6 +61,7 @@ class HealContext:
     env_resolution: Dict[str, Any] = field(default_factory=dict)
     python_executable: str = ""
     auto_heal_enabled: bool = False
+    skip_reproduction: bool = False
     wall_time_sec: float = 0.0
     token_telemetry_status: str = "not_applicable"
     token_total_estimated: int = 0
@@ -110,6 +111,7 @@ class HealContext:
             refusal_detected=self.refusal_detected,
             empty_response=self.empty_response,
             reasoning_mode=self.reasoning_mode,
+            skip_reproduction=self.skip_reproduction,
         )
         gov = GovernanceContext(
             expected_stop_layer=self.expected_stop_layer,

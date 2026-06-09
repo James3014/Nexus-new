@@ -19,6 +19,26 @@ class PromptBuilder:
             "            return self.query.default_cols\n"
             ">>>>>>> REPLACE\n"
         )
+        
+        is_7b = False
+        if model_name and "7b" in model_name.lower():
+            is_7b = True
+
+        if is_7b:
+            # Slim prompt (< 150 tokens) for 7B models
+            return (
+                "You are a Senior Python Developer. Output ONLY SEARCH/REPLACE blocks (no explanations).\n\n"
+                "Format:\n"
+                "FILE: <path>\n"
+                "<<<<<<< SEARCH\n"
+                "<exact original code>\n"
+                "=======\n"
+                "<fixed code>\n"
+                ">>>>>>> REPLACE\n"
+                "Rules: 1. SEARCH must match source exactly. 2. Modify in-place.\n"
+                + few_shot
+            )
+
         return (
             "You are a Senior Software Engineer fixing a Python bug.\n"
             "OUTPUT ONLY SEARCH/REPLACE blocks — no explanations, no apologies.\n\n"

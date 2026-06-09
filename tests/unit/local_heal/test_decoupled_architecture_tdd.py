@@ -361,3 +361,38 @@ def test_cross_file_search_fallback(tmp_path):
     # table.py should be patched
     patched = table_py.read_text()
     assert "(int, str)" in patched
+
+
+def test_slim_prompt_for_7b():
+    """P1-2: PromptBuilder.build_patch_system_prompt must return a slim prompt
+    containing '<path>' and shorter description if the model name contains '7b'."""
+    from nexus.services.local_heal.prompt_builder import PromptBuilder
+
+    slim_prompt = PromptBuilder.build_patch_system_prompt("qwen2.5-coder:7b")
+    full_prompt = PromptBuilder.build_patch_system_prompt("qwen2.5-coder:14b")
+
+    # Slim prompt should be noticeably shorter than full prompt
+    assert len(slim_prompt) < len(full_prompt)
+    assert "FILE: <path>" in slim_prompt
+    assert "CHARACTER-FOR-CHARACTER" not in slim_prompt
+    assert "hasattr()/getattr()" not in slim_prompt
+    
+    # Check that full prompt still has the detailed rules
+    assert "FILE: <path/to/file.py>" in full_prompt
+    assert "CHARACTER-FOR-CHARACTER" in full_prompt
+
+
+def test_legacy_heal_context_skip_reproduction():
+    """P0-1 End-to-End: Legacy HealContext wrapper must support skip_reproduction
+    and pass it properly when converted to V2 operational context."""
+    from nexus.services.local_heal.pipeline import HealContext
+
+    ctx = HealContext(
+        instance_id="test-legacy-skip",
+        repo_dir=Path("/tmp"),
+        problem_statement="Fix it."
+    )
+    ctx.skip_reproduction = True
+
+    v2_ctx = ctx.to_v2()
+    assert v2_ctx.op.skip_reproduction is True
