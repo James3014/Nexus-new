@@ -77,8 +77,17 @@ class PipelineRepairMixin:
                 
                 if use_surgical and hasattr(gateway, "surgical_ask"):
                     symbols = ctx.state.metadata.get("plan_target_symbols", [])
-                    if not symbols and "separability_matrix" in ctx.task_desc.lower():
-                        symbols = ["separability_matrix"]
+                    if not symbols:
+                        # 啟發式提取關鍵符號
+                        if "separability_matrix" in ctx.task_desc.lower():
+                            symbols = ["separability_matrix"]
+                        elif "timeseries" in ctx.task_desc.lower():
+                            symbols = ["TimeSeries"]
+                        else:
+                            # 提取第一個看起來像類別的名詞
+                            match = re.search(r'\b([A-Z][a-zA-Z0-9_]{3,})\b', ctx.task_desc)
+                            if match:
+                                symbols = [match.group(1)]
                             
                     rejection = ctx.state.metadata.get("last_audit_rejection_receipt")
                     res, raw = gateway.surgical_ask(
