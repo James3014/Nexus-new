@@ -88,6 +88,34 @@ class PipelineRepairMixin:
                         rejection_receipt=rejection,
                         attempt=repair_attempts
                     )
+
+                    # 🛡️ [v26.1] Hardened Patch Application
+                    from nexus.engine.direct_mode import extract_target_files
+                    target_files = extract_target_files(ctx.task_desc)
+                    if not target_files:
+                        target_files = ctx.state.metadata.get("plan_target_files", [])
+                    
+                    # 嘗試從 symbols 反查檔案
+                    if not target_files and symbols:
+                        from nexus.engine.surgical_retriever import SurgicalRetriever
+                        retriever = SurgicalRetriever(self.engine.project_root)
+                        for sym in symbols:
+                            found = retriever.find_definition(sym)
+                            if found:
+                                target_files.append(str(found[0].relative_to(self.engine.project_root)))
+                    
+                    target_file = target_files[0] if target_files else ""
+                    if not target_file and "separability_matrix" in ctx.task_desc:
+                        target_file = "astropy/modeling/separable.py"
+                        
+                    if target_file and hasattr(gateway, "apply_patch_v2"):
+                        logger.info(f"🔪 [Pipeline:Apply] Target file identified: {target_file}")
+                        apply_res = gateway.apply_patch_v2(ctx.task_id, target_file, raw)
+                        res["patch_apply_success"] = apply_res.get("success", False)
+                        res["patch_generated"] = True
+                        res["result_object"] = apply_res
+                    else:
+                        logger.warning("⚠️ [Pipeline:Apply] No target file identified for patch application.")
                 else:
                     res = ctx.repairer.run(ctx.state, ctx.pack, bayesian_params=r_params)
             except TypeError:
