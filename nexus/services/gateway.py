@@ -28,6 +28,7 @@ from nexus.engine.swarm_compare import SwarmCompare
 from nexus.engine.audit_rejection_receipt import AuditRejectionReceipt
 from nexus.engine.repair_plan import RepairPlan
 from nexus.engine.micro_oracle_runner import MicroOracleRunner
+from nexus.engine.patch.apply_engine import PatchApplyEngine
 
 logger = logging.getLogger(__name__)
 
@@ -120,6 +121,7 @@ class BattlesuitGateway:
         self.swarm_trigger = MicroSwarmTrigger()
         self.swarm_lane = MicroSwarmLane(self.project_root)
         self.swarm_compare = SwarmCompare()
+        self.patch_engine = PatchApplyEngine(self.project_root)
         
         # 🧪 [v26.1] Feature Flags
         self.use_surgical_repair = os.getenv("NEXUS_USE_SURGICAL_REPAIR", "1") == "1"
@@ -156,6 +158,12 @@ class BattlesuitGateway:
         "status": "APPROVED | REJECTED | FAIL",
         "summary": "Short explanation",
         "violations": ["list of rule violations"],
+        "rejection_contract": {
+            "rejection_class": "test_regression_risk | style_contract_violation | semantic_incomplete | api_breakage | semantic_reasoning_ceiling",
+            "minimal_counterexample": "Smallest failing code snippet or scenario",
+            "repair_constraint": "Specific hard constraint for the next retry",
+            "forbidden_repeat_signature": "Identifier for the rejected logic"
+        }
     }
 
     def _build_system_instruction(
@@ -216,7 +224,7 @@ class BattlesuitGateway:
         attempt: int = 1
     ) -> tuple[Any, str]:
         """
-        🛡️ Surgical Ask v4.5: 受控微蜂群探索
+        🛡️ Surgical Ask v4.5: 受控微蜂群探索與語義升階
         """
         from nexus.engine.surgical_intel_service import SurgicalIntelligence
         intel = SurgicalIntelligence(self.project_root)
@@ -232,9 +240,16 @@ class BattlesuitGateway:
             
         combined_payload = "\n\n".join(surgical_context)
 
+        # 1. 檢測語義推理上限 (Semantic Reasoning Ceiling)
+        is_ceiling = rejection_receipt and rejection_receipt.rejection_class == "semantic_reasoning_ceiling"
+        forced_model = None
+        if is_ceiling and self.oauth_provider == "ollama":
+            forced_model = os.getenv("NEXUS_OLLAMA_MODEL", "qwen2.5-coder:14b")
+            logger.warning("🚀 [Gateway:Escalate] Semantic ceiling detected. Forcing 14b model for repair.")
+
         # 🐝 蜂群觸發判定 (Governed Micro-Swarm)
         should_swarm = self.swarm_trigger.should_trigger(
-            state_metadata={}, # TODO: 傳入真實 metadata
+            state_metadata={},
             rejection_receipt=rejection_receipt,
             attempt=attempt
         )
@@ -271,12 +286,17 @@ class BattlesuitGateway:
                 receipt_path = self.project_root / ".nexus" / "reports" / f"swarm_receipt_{task_id}.json"
                 receipt_path.parent.mkdir(parents=True, exist_ok=True)
                 receipt_path.write_text(receipt.to_json(), encoding="utf-8")
-                logger.info("📦 [Gateway] Micro-Swarm Receipt saved to: %s", receipt_path)
                 
                 return best["data"], best["raw_text"]
 
         # 回退至單一路徑
-        return self.ask(task, combined_payload, phase=phase)
+        return self.ask_structured(task, combined_payload, phase=phase, model_name=forced_model)
+
+    def apply_patch_v2(self, task_id: str, target_file: str, raw_patch: str) -> Dict[str, Any]:
+        """
+        🛡️ Patch Apply v2: 硬化套用接口
+        """
+        return self.patch_engine.apply_patch(task_id, target_file, raw_patch)
 
     def ask(self, prompt, payload, phase="P", second_opinion=False):
         """
