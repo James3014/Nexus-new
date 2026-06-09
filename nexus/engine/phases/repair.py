@@ -123,6 +123,46 @@ class RepairPhaseHandler(BasePhaseHandler):
             # Swarm-gated repair stub (Day 4 完整實作)
             local_result = self._swarm_repair(state, Path(self.project_root), heal_decision["selected_route"], context)
 
+        # 🛡️ [v26.1] Hardened Patch Application Alignment
+        if (local_result is None or local_result.get("status") == "REJECTED") and os.getenv("NEXUS_USE_SURGICAL_REPAIR") == "1":
+            logger.info("🔪 [R-Stage:Surgical] Local repair rejected. Escalating to Hardened Patch Pipeline.")
+            from nexus.services.gateway import BattlesuitGateway
+            gateway = BattlesuitGateway(project_root=self.project_root)
+            
+            # 1. 提取符號與反饋
+            symbols = state.metadata.get("plan_target_symbols", [])
+            if not symbols:
+                if "separability_matrix" in task.lower(): symbols = ["separability_matrix"]
+                elif "timeseries" in task.lower(): symbols = ["TimeSeries"]
+                
+            rejection = state.metadata.get("last_audit_rejection_receipt")
+            
+            # 2. 執行手術級修復請求
+            res, raw = gateway.surgical_ask(
+                task=task,
+                symbols=symbols,
+                phase="R",
+                rejection_receipt=rejection,
+                attempt=repair_attempts
+            )
+            
+            # 3. 硬化套用 (Hardened Apply)
+            from nexus.engine.direct_mode import extract_target_files
+            target_files = extract_target_files(task)
+            if not target_files: target_files = extract_target_files(raw)
+            
+            target_file = target_files[0] if target_files else state.metadata.get("target_file")
+            if target_file:
+                logger.info(f"🔪 [R-Stage:Apply] Targeting file: {target_file}")
+                apply_res = gateway.apply_patch_v2(state.task_id, str(target_file), raw)
+                local_result = {
+                    "status": "APPROVED" if apply_res.get("success") else "FAILED",
+                    "result_object": apply_res
+                }
+            else:
+                logger.warning("⚠️ [R-Stage:Apply] Target file missing. Falling back.")
+                local_result = res
+
         # 🛡️ [Phase 2.3] 自癒感官啟動 (Self-Healing Research)
         # 被觸發條件：初次修復失敗且診斷指示錯誤類型內容內容及性能分析內容及其內容內容
         if local_result is None or local_result.get("status") == "FAILED":
