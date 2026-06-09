@@ -102,6 +102,10 @@ class PipelineRepairMixin:
                     from nexus.engine.direct_mode import extract_target_files
                     target_files = extract_target_files(ctx.task_desc)
                     if not target_files:
+                        # 嘗試從模型產出的 raw_text 中提取路徑
+                        target_files = extract_target_files(raw)
+                    
+                    if not target_files:
                         target_files = ctx.state.metadata.get("plan_target_files", [])
                     
                     # 嘗試從 symbols 反查檔案
@@ -124,7 +128,7 @@ class PipelineRepairMixin:
                         res["patch_generated"] = True
                         res["result_object"] = apply_res
                     else:
-                        logger.warning("⚠️ [Pipeline:Apply] No target file identified for patch application.")
+                        logger.warning(f"⚠️ [Pipeline:Apply] No target file identified. (Found files: {target_files})")
                 else:
                     res = ctx.repairer.run(ctx.state, ctx.pack, bayesian_params=r_params)
             except TypeError:
