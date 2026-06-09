@@ -18,7 +18,7 @@ Multi-context layout defined in `CONTEXT-MAP.md`. See `docs/agents/domain.md`.
 <!-- gitnexus:start -->
 # GitNexus — Code Intelligence
 
-This project is indexed by GitNexus as **actionlint** (64513 symbols, 93545 relationships, 300 execution flows). Use the GitNexus MCP tools to understand code, assess impact, and navigate safely.
+This project is indexed by GitNexus as **actionlint** (65342 symbols, 94771 relationships, 300 execution flows). Use the GitNexus MCP tools to understand code, assess impact, and navigate safely.
 
 > If any GitNexus tool warns the index is stale, run `npx gitnexus analyze` in terminal first.
 

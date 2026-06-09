@@ -158,7 +158,7 @@ class RepairPhaseHandler(BasePhaseHandler):
                 if context_file_from_meta:
                     context_files = [context_file_from_meta]
             
-            resolution = discovery.resolve(raw, context_files=context_files)
+            resolution = discovery.resolve(raw, context_files=context_files, project_root=self.project_root)
             
             if resolution.resolved and resolution.target_file:
                 logger.info(f"🔪 [R-Stage:Apply] Targeting file: {resolution.target_file}")
