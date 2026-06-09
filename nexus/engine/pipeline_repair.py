@@ -75,6 +75,7 @@ class PipelineRepairMixin:
                 gateway = getattr(ctx.repairer, "gateway", None)
                 use_surgical = ctx.state.metadata.get("use_surgical_repair") or getattr(gateway, "use_surgical_repair", False)
                 
+                print(f"DEBUG_GATEWAY: gateway={gateway}, use_surgical={use_surgical}, has_surgical_ask={hasattr(gateway, 'surgical_ask')}")
                 if use_surgical and hasattr(gateway, "surgical_ask"):
                     symbols = ctx.state.metadata.get("plan_target_symbols", [])
                     if not symbols:
