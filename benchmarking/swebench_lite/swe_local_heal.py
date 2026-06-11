@@ -66,18 +66,39 @@ ollama_generate = nexus_local_generate
 
 
 def build_result_row(task: dict[str, Any], res_ctx: HealContext) -> dict[str, Any]:
+    receipt_path_str = str(getattr(res_ctx, "receipt_path", "") or "")
+    receipt_path = Path(receipt_path_str)
+    
+    receipt_data = {}
+    if receipt_path.exists():
+        try:
+            receipt_data = json.loads(receipt_path.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError):
+            pass
+
+    solve_eligible = receipt_data.get("solve_eligible", getattr(res_ctx, "solve_eligible", False))
+    failure_reason = receipt_data.get("failure_reason", "")
+    model_decisions = receipt_data.get("model_decisions", getattr(res_ctx, "model_decisions", []))
+    token_telemetry_status = receipt_data.get("token_telemetry_status", getattr(res_ctx, "token_telemetry_status", "unknown"))
+    token_total_estimated = receipt_data.get("token_total_estimated", getattr(res_ctx, "token_total_estimated", 0))
+
+    if not failure_reason:
+        # Fallback to older failure inference only if receipt is missing or empty
+        failure_reason = failure_reason_for_result(res_ctx)
+
     return {
         "instance_id": task["instance_id"],
         "manifest_task_id": task.get("manifest_task_id", ""),
         "env_profile": task.get("env_profile", "python-default"),
         "model_patch": getattr(res_ctx, "final_patch", ""),
         "model_name_or_path": "nexus-local-heal-v17",
-        "solve_eligible": getattr(res_ctx, "solve_eligible", False),
-        "failure_reason": failure_reason_for_result(res_ctx),
-        "receipt_path": str(getattr(res_ctx, "receipt_path", "")),
+        "solve_eligible": solve_eligible,
+        "failure_reason": failure_reason,
+        "receipt_path": receipt_path_str,
         "wall_time_sec_measured": getattr(res_ctx, "wall_time_sec", 0.0),
-        "token_telemetry_status": getattr(res_ctx, "token_telemetry_status", "unknown"),
-        "token_total_estimated": getattr(res_ctx, "token_total_estimated", 0),
+        "token_telemetry_status": token_telemetry_status,
+        "token_total_estimated": token_total_estimated,
+        "model_decisions": model_decisions,
     }
 
 
@@ -282,6 +303,59 @@ def failure_reason_for_result(res_ctx: Any) -> str:
     return "UNKNOWN_FAILURE"
 
 
+def ensure_workspace_state(task: dict[str, Any]) -> None:
+    """確保 Workspace 處於正確的 Commit 且 C 擴展已編譯"""
+    repo_dir = Path(task["repo_dir"]).resolve()
+    base_commit = task.get("base_commit")
+    python_exe = task.get("python_executable", "python3")
+    import subprocess
+
+    if not task.get("local_mode"):
+        nexus_workspaces_dir = (NEXUS_ROOT / ".nexus" / "workspaces").resolve()
+        if not str(repo_dir).startswith(str(nexus_workspaces_dir)):
+            raise RuntimeError(f"WORKSPACE_SAFETY_VIOLATION: Cannot run destructive git commands outside of {nexus_workspaces_dir}. Attempted on: {repo_dir}")
+
+    if not (repo_dir / ".git").exists():
+        if task.get("local_mode"):
+            return # Do not clone in local_mode
+            
+        # 自動 Clone
+        repo_map = {
+            "astropy": "https://github.com/astropy/astropy.git",
+            "django": "https://github.com/django/django.git",
+            "requests": "https://github.com/psf/requests.git",
+            "flask": "https://github.com/pallets/flask.git",
+            "sympy": "https://github.com/sympy/sympy.git",
+            "pytest": "https://github.com/pytest-dev/pytest.git",
+        }
+        repo_key = next((k for k in repo_map if k in task["instance_id"]), None)
+        if repo_key:
+            print(f"  📥 Workspace missing. Cloning {repo_key}...")
+            repo_dir.parent.mkdir(parents=True, exist_ok=True)
+            res = subprocess.run(["git", "clone", repo_map[repo_key], str(repo_dir)], capture_output=True)
+            if res.returncode != 0:
+                raise RuntimeError(f"WORKSPACE_CLONE_FAILURE: {res.stderr.decode('utf-8')[:200]}")
+
+    if base_commit and (repo_dir / ".git").exists():
+        print(f"  ⚓ Switching to base commit: {base_commit}")
+        # 1. Checkout
+        res = subprocess.run(["git", "checkout", "-f", base_commit], cwd=str(repo_dir), capture_output=True)
+        if res.returncode != 0:
+            raise RuntimeError(f"WORKSPACE_CHECKOUT_FAILURE: {res.stderr.decode('utf-8')[:200]}")
+            
+        res = subprocess.run(["git", "clean", "-fd"], cwd=str(repo_dir), capture_output=True)
+        if res.returncode != 0:
+            raise RuntimeError(f"WORKSPACE_CLEAN_FAILURE: {res.stderr.decode('utf-8')[:200]}")
+
+        # 2. Compile (如果是 Astropy)
+        if "astropy" in task["instance_id"]:
+            print("  ⚙️ Compiling Astropy C extensions (build_ext --inplace)...")
+            build_cmd = [python_exe, "setup.py", "build_ext", "--inplace"]
+            res = subprocess.run(build_cmd, cwd=str(repo_dir), capture_output=True, text=True)
+            if res.returncode != 0:
+                print(f"  ⚠️ Compilation warning (RC={res.returncode}): {res.stderr[:200]}...")
+
+
 def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument("--limit", type=int, default=1)
@@ -429,6 +503,20 @@ def main() -> None:
             print(
                 f"[{i+1}/{len(tasks)}] Processing {task['instance_id']} (Profile: {task.get('env_profile')})"
             )
+
+            try:
+                ensure_workspace_state(task)
+            except Exception as e:
+                print(f"  💥 WORKSPACE ERROR: {e}")
+                row = {
+                    "instance_id": task["instance_id"],
+                    "manifest_task_id": task.get("manifest_task_id", ""),
+                    "solve_eligible": False,
+                    "failure_reason": str(e).split(":")[0], # E.g., WORKSPACE_SAFETY_VIOLATION
+                }
+                out_file.write(json.dumps(row) + "\n")
+                out_file.flush()
+                continue
 
             start_wall = time.time()
             ctx = HealContext(

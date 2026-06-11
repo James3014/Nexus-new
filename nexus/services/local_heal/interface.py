@@ -23,6 +23,8 @@ class ReproductionOutput:
     reproduced: bool
     repro_evidence: str
     error_reason: str = ""
+    env_denoise: Dict[str, Any] = field(default_factory=dict)
+    model_decision: Dict[str, Any] = field(default_factory=dict)
 
 @dataclass(frozen=True)
 class PlanningInput:

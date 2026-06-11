@@ -30,13 +30,17 @@ class ReproductionPhase(IPhase):
     def run(self, input_data: ReproductionInput, auto_heal_enabled: bool = False) -> ReproductionOutput:
         """Stateless TDD-ready execution logic."""
         repro_script = input_data.repro_script
+        model_decision: Dict[str, Any] = {}
+        env_denoise_receipt: Dict[str, Any] = {}
         
         # 1. 產生重現腳本
         if not repro_script:
             decision = LocalModelPolicy.select_model(task_type="swe_repair", phase="reproduction", context={})
+            model_decision = {"phase": "reproduction", **decision}
             prompt = f"Please generate a Python script to reproduce the following issue:\n\n{input_data.problem_statement}\n\nOutput ONLY the script content."
             if not self.llm_client:
-                return ReproductionOutput(success=False, reproduced=False, repro_evidence="", error_reason="NO_LLM_CLIENT")
+                model_decision["status"] = "NO_LLM_CLIENT"
+                return ReproductionOutput(success=False, reproduced=False, repro_evidence="", error_reason="NO_LLM_CLIENT", model_decision=model_decision)
             try:
                 response = self.llm_client.generate(
                     system_prompt="You are a QA engineer.",
@@ -46,7 +50,8 @@ class ReproductionPhase(IPhase):
                     options=decision.get("ollama_options")
                 )
                 if not response:
-                    return ReproductionOutput(success=False, reproduced=False, repro_evidence="", error_reason="NO_REPRO_SCRIPT")
+                    model_decision["status"] = "NO_REPRO_SCRIPT"
+                    return ReproductionOutput(success=False, reproduced=False, repro_evidence="", error_reason="NO_REPRO_SCRIPT", model_decision=model_decision)
                 
                 clean_script = response
                 if "```" in response:
@@ -58,7 +63,9 @@ class ReproductionPhase(IPhase):
                 repro_script = clean_script
             except Exception as e:
                 reason = classify_model_exception(e)
-                return ReproductionOutput(success=False, reproduced=False, repro_evidence="", error_reason="NO_REPRO_SCRIPT")
+                model_decision["status"] = reason
+                model_decision["detail"] = str(e)[:500]
+                return ReproductionOutput(success=False, reproduced=False, repro_evidence="", error_reason=reason, model_decision=model_decision)
 
         # 2. 執行重現
         success, evidence = self.repro_runner.run_repro(repro_script)
@@ -71,6 +78,14 @@ class ReproductionPhase(IPhase):
             and self.repro_runner.is_environment_failure(evidence)
         ):
             denoise_result = self.env_denoiser.prepare_from_evidence(evidence)
+            if hasattr(denoise_result, "to_receipt"):
+                env_denoise_receipt = dict(denoise_result.to_receipt())
+            else:
+                env_denoise_receipt = {
+                    "attempted": getattr(denoise_result, "attempted", False),
+                    "succeeded": getattr(denoise_result, "succeeded", False),
+                    "reason": getattr(denoise_result, "reason", "")
+                }
             if denoise_result.succeeded:
                 python_executable = getattr(denoise_result, "python_executable", "")
                 if python_executable:
@@ -84,9 +99,9 @@ class ReproductionPhase(IPhase):
                 reason = "REPRO_NOT_REPRODUCED"
             else:
                 reason = "REPRO_EVIDENCE_TOO_SHORT"
-            return ReproductionOutput(success=False, reproduced=False, repro_evidence=evidence, error_reason=reason)
+            return ReproductionOutput(success=False, reproduced=False, repro_evidence=evidence, error_reason=reason, env_denoise=env_denoise_receipt, model_decision=model_decision)
 
-        return ReproductionOutput(success=True, reproduced=True, repro_evidence=evidence)
+        return ReproductionOutput(success=True, reproduced=True, repro_evidence=evidence, env_denoise=env_denoise_receipt, model_decision=model_decision)
 
     def execute(self, ctx: HealContext) -> PhaseResult:
         if ctx.op.repro_evidence:
@@ -111,6 +126,10 @@ class ReproductionPhase(IPhase):
         
         ctx.op.repro_evidence = output.repro_evidence
         ctx.op.reproduced = output.reproduced
+        if output.env_denoise:
+            ctx.op.env_denoise = output.env_denoise
+        if output.model_decision:
+            ctx.op.model_decisions.append(output.model_decision)
         
         if not output.success:
             return PhaseResult(success=False, exit_layer="repro_runner", error_reason=output.error_reason)

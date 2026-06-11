@@ -3,6 +3,9 @@ import ast
 from pathlib import Path
 from typing import Any, Dict, List, Tuple
 from rank_bm25 import BM25Okapi
+import logging
+
+logger = logging.getLogger(__name__)
 
 class Localizer:
     def __init__(self, repository: Any = None, refine_threshold: int = 5000):
@@ -22,7 +25,7 @@ class Localizer:
         max_files: int = 3,
         search_symbols: List[str] | None = None,
     ) -> List[Tuple[float, Dict[str, Any]]]:
-        print(f"🔍 [Localizer] Scanning {repo_dir} for relevant files...", flush=True)
+        logger.info(f"🔍 [Localizer] Scanning {repo_dir} for relevant files...")
         explicit_paths = self._extract_paths_from_issue(issue_description)
 
         # 優先處理明確路徑
@@ -48,17 +51,17 @@ class Localizer:
                 }))
 
         if found_explicit:
-            print(f"✅ [Localizer] Found {len(found_explicit)} explicit files from issue description.")
+            logger.info(f"✅ [Localizer] Found {len(found_explicit)} explicit files from issue description.")
             return found_explicit[:max_files]
 
         documents = []
         py_files = list(repo_dir.rglob("*.py"))
         total = len(py_files)
-        print(f"📂 [Localizer] Indexing {total} files...", flush=True)
+        logger.info(f"📂 [Localizer] Indexing {total} files...")
 
         for i, pyfile in enumerate(py_files):
             if i % 500 == 0 and i > 0:
-                print(f"  → Indexed {i}/{total} files...", flush=True)
+                logger.info(f"  → Indexed {i}/{total} files...")
             rel_path = str(pyfile.relative_to(repo_dir))
             if any(p in rel_path.lower() for p in ("test", "__pycache__", ".tox", "build", "dist", "cextern", "docs")): continue
             try:
@@ -69,7 +72,7 @@ class Localizer:
             except: pass
 
         if not documents: return []
-        print(f"🧠 [Localizer] Running BM25 scoring on {len(documents)} candidates...", flush=True)
+        logger.info(f"🧠 [Localizer] Running BM25 scoring on {len(documents)} candidates...")
         tokenized_corpus = [self._tokenize(doc["content"][:4000]) for doc in documents]
         bm25 = BM25Okapi(tokenized_corpus)
         bm25_scores = bm25.get_scores(self._tokenize(issue_description))

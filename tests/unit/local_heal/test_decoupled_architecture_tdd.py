@@ -396,3 +396,41 @@ def test_legacy_heal_context_skip_reproduction():
 
     v2_ctx = ctx.to_v2()
     assert v2_ctx.op.skip_reproduction is True
+
+def test_local_model_policy_routing():
+    from nexus.engine.local_model_policy import LocalModelPolicy
+    import os
+
+    # planning -> 7B
+    decision = LocalModelPolicy.select_model(task_type="repair", phase="planning", context={})
+    assert decision["model"] == "qwen2.5-coder:7b"
+    assert "scaffolding" in decision["reason_code"]
+
+    # reproduction -> 7B
+    decision = LocalModelPolicy.select_model(task_type="repair", phase="reproduction", context={})
+    assert decision["model"] == "qwen2.5-coder:7b"
+    assert "repro" in decision["reason_code"]
+
+    # first mechanical patch -> 7B
+    decision = LocalModelPolicy.select_model(task_type="repair", phase="patch", context={"attempt": 1, "reasoning_mode": "INTUITIVE"})
+    assert decision["model"] == "qwen2.5-coder:7b"
+    assert "mechanical" in decision["reason_code"]
+
+    # algebraic patch -> 14B
+    decision = LocalModelPolicy.select_model(task_type="repair", phase="patch", context={"attempt": 1, "reasoning_mode": "ALGEBRAIC"})
+    assert decision["model"] == "qwen2.5-coder:14b"
+    assert "algebraic" in decision["reason_code"]
+
+    # retry patch -> 14B by default
+    decision = LocalModelPolicy.select_model(task_type="repair", phase="patch", context={"attempt": 2})
+    assert decision["model"] == "qwen2.5-coder:14b"
+    assert "retry_precision_escalation_ollama" == decision["reason_code"]
+
+    # NEXUS_DISABLE_14B_RETRY=1 -> retry stays 7B
+    os.environ["NEXUS_DISABLE_14B_RETRY"] = "1"
+    try:
+        decision = LocalModelPolicy.select_model(task_type="repair", phase="patch", context={"attempt": 2})
+        assert decision["model"] == "qwen2.5-coder:7b"
+        assert "fallback_to_7b" in decision["reason_code"]
+    finally:
+        del os.environ["NEXUS_DISABLE_14B_RETRY"]

@@ -77,13 +77,18 @@ class LocalModelPolicy:
 
         # 2. 正式執行階段 (Patch/Repair)
         elif phase == "patch":
+            disable_14b_retry = os.environ.get("NEXUS_DISABLE_14B_RETRY", "0") == "1"
             if "NAME_SANITY_ERROR" in failure_reason:
                 model = large_model
                 reason = "name_sanity_retry_precision_ollama"
                 timeout_seconds = cls.PATCH_TIMEOUT_SECONDS
             elif attempt > 1:
-                model = large_model
-                reason = "retry_precision_escalation_ollama"
+                if disable_14b_retry:
+                    model = small_model
+                    reason = "retry_precision_escalation_ollama_fallback_to_7b"
+                else:
+                    model = large_model
+                    reason = "retry_precision_escalation_ollama"
                 timeout_seconds = cls.PATCH_TIMEOUT_SECONDS
             elif reasoning_mode == "ALGEBRAIC":
                 model = large_model

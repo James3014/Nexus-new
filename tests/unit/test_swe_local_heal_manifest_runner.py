@@ -208,3 +208,51 @@ def test_filter_specs_for_resume_skips_only_ready_specs():
     remaining = filter_specs_for_resume(specs, {"deepswe-task4"})
 
     assert [spec.task_id for spec in remaining] == ["asyncio-barrier"]
+
+def test_build_result_row_receipt_true_yields_true(tmp_path):
+    receipt_path = tmp_path / "receipt_true.json"
+    import json
+    receipt_path.write_text(json.dumps({"solve_eligible": True, "failure_reason": ""}), encoding="utf-8")
+    ctx = SimpleNamespace(
+        final_patch="diff",
+        solve_eligible=False, # Should be overridden by receipt
+        failure_reason="",
+        receipt_path=str(receipt_path),
+        model_decisions=[]
+    )
+    task = {"instance_id": "i1"}
+    row = build_result_row(task, ctx)
+    assert row["solve_eligible"] is True
+
+def test_build_result_row_receipt_false_yields_false(tmp_path):
+    receipt_path = tmp_path / "receipt_false.json"
+    import json
+    receipt_path.write_text(json.dumps({"solve_eligible": False, "failure_reason": "MODEL_TIMEOUT"}), encoding="utf-8")
+    ctx = SimpleNamespace(
+        final_patch="diff",
+        solve_eligible=True, # Should be overridden by receipt
+        failure_reason="",
+        receipt_path=str(receipt_path),
+        model_decisions=[]
+    )
+    task = {"instance_id": "i1"}
+    row = build_result_row(task, ctx)
+    assert row["solve_eligible"] is False
+    assert row["failure_reason"] == "MODEL_TIMEOUT"
+
+def test_build_result_row_contains_provider_evidence(tmp_path):
+    receipt_path = tmp_path / "receipt_evidence.json"
+    import json
+    receipt_path.write_text(json.dumps({"solve_eligible": True, "model_decisions": [{"model": "qwen2.5-coder:14b", "provider": "ollama"}]}), encoding="utf-8")
+    ctx = SimpleNamespace(
+        final_patch="diff",
+        solve_eligible=False,
+        failure_reason="",
+        receipt_path=str(receipt_path),
+        model_decisions=[]
+    )
+    task = {"instance_id": "i1"}
+    row = build_result_row(task, ctx)
+    assert len(row["model_decisions"]) == 1
+    assert "qwen" in row["model_decisions"][0]["model"]
+    assert "ollama" in row["model_decisions"][0]["provider"]
