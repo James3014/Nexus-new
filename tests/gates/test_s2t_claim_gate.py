@@ -37,3 +37,50 @@ def test_s2t_claim_gate_passes_verified_public_claim_with_evidence() -> None:
 
     assert decision.passed is True
     assert decision.selected_candidate_id == "A"
+
+
+def test_s2t_strict_gate_advisor_triggers_on_matching_canary() -> None:
+    import hashlib
+    triggered_task_id = ""
+    for i in range(100):
+        tid = f"test-task-{i}"
+        h = int(hashlib.md5(tid.encode('utf-8')).hexdigest(), 16) % 100
+        if h < 10:
+            triggered_task_id = tid
+            break
+            
+    assert triggered_task_id != ""
+    
+    decision = S2TStrictRuntimeGate().evaluate(
+        task_id=triggered_task_id,
+        risk_tier="medium",
+        candidates=[_candidate()],
+        verifier_result="pass",
+    )
+    
+    assert decision.advisor_used is True
+    assert decision.advisor_selected_candidate_id == "A"
+    assert decision.advisor_outcome_status == "active_advising"
+
+
+def test_s2t_strict_gate_advisor_ignores_non_matching_canary() -> None:
+    import hashlib
+    ignored_task_id = ""
+    for i in range(100):
+        tid = f"test-task-{i}"
+        h = int(hashlib.md5(tid.encode('utf-8')).hexdigest(), 16) % 100
+        if h >= 10:
+            ignored_task_id = tid
+            break
+            
+    assert ignored_task_id != ""
+    
+    decision = S2TStrictRuntimeGate().evaluate(
+        task_id=ignored_task_id,
+        risk_tier="medium",
+        candidates=[_candidate()],
+        verifier_result="pass",
+    )
+    
+    assert decision.advisor_used is False
+    assert decision.advisor_selected_candidate_id == ""
