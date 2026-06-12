@@ -1,13 +1,16 @@
 #!/usr/bin/env python3
 """
-🧪 Nexus Phase 5.3: S2T Shadow Evaluation Runner
+🧪 Nexus Phase 5.3-real: Fail-Closed Real Shadow Evaluation Runner
 此腳本載入匯出的學生數據，執行影子評估並計算 parse rate, compliance rate, trust mismatch 且產出評估報告。
-支援實體模型推論 (--run-real) 與快速本機仿真器模式。
+實作硬性 Fail-closed 規則，不允許實體加載失敗自動退避至仿真器。
 """
 import os
 import sys
 import json
 import argparse
+import hashlib
+import subprocess
+import time
 from pathlib import Path
 
 # 加入專案根目錄至 Path
@@ -16,12 +19,43 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 from nexus.contracts.s2t_policy import S2TSelector, S2TCandidate
 from scripts.train.smoke_test_adapter import validate_json_schema
 
-def run_shadow_eval(dataset_path: Path, output_report_path: Path, run_real: bool, device: str, timeout_sec: int, offline: bool):
+def calc_sha256(filepath):
+    """計算指定檔案的 SHA256 雜湊"""
+    sha256 = hashlib.sha256()
+    with open(filepath, 'rb') as f:
+        while chunk := f.read(8192):
+            sha256.update(chunk)
+    return sha256.hexdigest()
+
+def get_git_commit_hash():
+    """取得當前 Git HEAD commit hash"""
+    try:
+        return subprocess.check_output(
+            ["git", "rev-parse", "HEAD"], 
+            stderr=subprocess.DEVNULL, 
+            text=True
+        ).strip()
+    except Exception:
+        return "unknown"
+
+def run_shadow_eval(dataset_path: Path, output_report_path: Path, run_real: bool, device: str, timeout_sec: int, offline: bool, emulator: bool):
     print(f"🔎 Starting S2T Shadow Evaluation on {dataset_path}...")
     
+    # 決定 eval_mode
+    if run_real and emulator:
+        print("❌ Error: --run-real and --emulator are mutually exclusive.")
+        sys.exit(1)
+    if run_real:
+        eval_mode = "real"
+    elif emulator:
+        eval_mode = "emulator"
+    else:
+        print("❌ Error: Must specify either --run-real or --emulator.")
+        sys.exit(1)
+        
     if not dataset_path.exists():
         print(f"❌ Dataset not found: {dataset_path}")
-        return False
+        sys.exit(1)
         
     rows = []
     with open(dataset_path, "r", encoding="utf-8") as f:
@@ -30,11 +64,11 @@ def run_shadow_eval(dataset_path: Path, output_report_path: Path, run_real: bool
                 rows.append(json.loads(line))
                 
     total_rows = len(rows)
-    print(f"📊 Loaded {total_rows} evaluation rows.")
+    print(f"📊 Loaded {total_rows} evaluation rows. Mode: {eval_mode}")
     
     if total_rows == 0:
         print("❌ Evaluation dataset is empty.")
-        return False
+        sys.exit(1)
         
     # 如果是 run_real 則會需要 ML 庫
     model = None
@@ -68,8 +102,9 @@ def run_shadow_eval(dataset_path: Path, output_report_path: Path, run_real: bool
             model.eval()
             print("✅ Real 3B model and adapter loaded successfully.")
         except Exception as e:
-            print(f"⚠️ Failed to load real model: {e}. Falling back to S2T Emulator.")
-            run_real = False
+            # 實體載入出錯：必須硬性 Fail-closed 直接結束，不允許 fallback
+            print(f"❌ Fail-closed: Real model load failed: {e}")
+            sys.exit(1)
 
     parsed_count = 0
     compliant_count = 0
@@ -86,7 +121,6 @@ def run_shadow_eval(dataset_path: Path, output_report_path: Path, run_real: bool
         target = row.get("target", {})
         
         candidates_data = inputs.get("candidate_summaries", [])
-        # 轉換為 S2TCandidate
         candidates = []
         for c in candidates_data:
             candidates.append(S2TCandidate(
@@ -103,10 +137,8 @@ def run_shadow_eval(dataset_path: Path, output_report_path: Path, run_real: bool
         baseline_decision = selector_baseline.select(candidates)
         baseline_id = baseline_decision.selected_candidate_id
         
-        # 取得預測
         response_json = None
         if run_real and model and tokenizer:
-            # 實體模型推論
             try:
                 input_str = f"Route Features: {inputs.get('route_features')}\nCandidates: {candidates_data}"
                 messages = [
@@ -135,10 +167,10 @@ def run_shadow_eval(dataset_path: Path, output_report_path: Path, run_real: bool
                     response = response.split("```")[1].split("```")[0].strip()
                 response_json = json.loads(response)
             except Exception as e:
-                response_json = None
+                print(f"❌ Real generation error: {e}")
+                sys.exit(1) # Fail-closed
         else:
             # 仿真器模擬學生模型輸出
-            # 模擬出 100% parseable 與符合 schema 的預測，多數符合 target
             response_json = {
                 "selected_candidate_id": target.get("selected_candidate_id"),
                 "selection_reason_codes": target.get("selection_reason_codes", ["matches_route_decision"]),
@@ -155,17 +187,12 @@ def run_shadow_eval(dataset_path: Path, output_report_path: Path, run_real: bool
                 pred_id = response_json.get("selected_candidate_id")
                 if pred_id != baseline_id:
                     override_count += 1
-                    # 如果預測的候選人與 target 吻合，則視為 override 且 verified 成功
                     if pred_id == target.get("selected_candidate_id"):
                         override_verified_count += 1
                 
                 if response_json.get("abstain_reason"):
                     abstain_count += 1
-            else:
-                # 不合規
-                pass
                 
-        # 統計 trust mismatch (合成數據皆為 False)
         if row.get("trust_mismatch", False):
             trust_mismatch_count += 1
             
@@ -175,10 +202,31 @@ def run_shadow_eval(dataset_path: Path, output_report_path: Path, run_real: bool
     trust_mismatch_rate = trust_mismatch_count / total_rows
     override_rate = override_count / total_rows
     override_verified_rate = override_verified_count / total_rows
+    real_gate_passed = (
+        eval_mode == "real"
+        and compliance_rate >= 0.95
+        and parse_rate >= 0.95
+        and trust_mismatch_rate <= 0.05
+    )
+    reason_codes = [] if real_gate_passed else (
+        ["emulator_mode_observation_only"]
+        if eval_mode == "emulator"
+        else ["real_eval_threshold_not_met"]
+    )
+    
+    # 溯源雜湊讀取
+    dataset_sha256 = calc_sha256(dataset_path) if dataset_path.exists() else "unknown"
+    safetensors_path = Path("training/adapters/qwen3b_s2t_adapter/adapter_model.safetensors")
+    adapter_sha256 = calc_sha256(safetensors_path) if safetensors_path.exists() else "unknown"
+    commit_sha = get_git_commit_hash()
     
     report = {
         "schema": "nexus_s2t_shadow_eval_report_v1",
-        "timestamp": 1781266800.0,
+        "timestamp": time.time(),
+        "eval_mode": eval_mode,
+        "adapter_sha256": adapter_sha256,
+        "dataset_sha256": dataset_sha256,
+        "commit_sha": commit_sha,
         "metrics": {
             "eligible_rows": total_rows,
             "json_parse_rate": parse_rate,
@@ -187,21 +235,21 @@ def run_shadow_eval(dataset_path: Path, output_report_path: Path, run_real: bool
             "selector_override_rate": override_rate,
             "selector_override_verified_rate": override_verified_rate,
             "abstain_rate": abstain_count / total_rows,
-            "original_top1_verified_rate": 0.85, # 基準
+            "original_top1_verified_rate": 0.85,
             "heldout_win_rate": 0.95
         },
         "promotion_gate": {
-            "status": "PASSED" if (compliance_rate >= 0.95 and parse_rate >= 0.95 and trust_mismatch_rate <= 0.05) else "FAILED",
-            "reason_codes": []
+            "status": "PASSED" if real_gate_passed else "OBSERVATION_ONLY" if eval_mode == "emulator" else "FAILED",
+            "reason_codes": reason_codes
         }
     }
     
-    # 寫出 report
     output_report_path.parent.mkdir(parents=True, exist_ok=True)
     with open(output_report_path, "w", encoding="utf-8") as f:
         json.dump(report, f, indent=2, ensure_ascii=False)
         
     print(f"🎉 Shadow evaluation complete. Output saved to {output_report_path}")
+    print(f"  Mode:                  {eval_mode}")
     print(f"  JSON Parse Rate:       {parse_rate * 100:.1f}%")
     print(f"  Schema Compliance:     {compliance_rate * 100:.1f}%")
     print(f"  Override Verified Lift: {override_verified_rate * 100:.1f}%")
@@ -216,6 +264,7 @@ if __name__ == "__main__":
     parser.add_argument("--device", type=str, default="auto")
     parser.add_argument("--timeout-sec", type=int, default=30)
     parser.add_argument("--offline", action="store_true")
+    parser.add_argument("--emulator", action="store_true")
     args = parser.parse_args()
     
-    run_shadow_eval(args.dataset, args.output, args.run_real, args.device, args.timeout_sec, args.offline)
+    run_shadow_eval(args.dataset, args.output, args.run_real, args.device, args.timeout_sec, args.offline, args.emulator)

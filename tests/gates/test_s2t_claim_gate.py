@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from nexus.contracts.s2t_policy import S2TCandidate
-from nexus.services.s2t_strict import S2TStrictRuntimeGate
+from nexus.services.s2t_strict import S2TStrictRuntimeGate, S2T3BAdvisor
 
 
 def _candidate(candidate_id: str = "A", *, verifier_result: str = "pass") -> S2TCandidate:
@@ -51,7 +51,9 @@ def test_s2t_strict_gate_advisor_triggers_on_matching_canary() -> None:
             
     assert triggered_task_id != ""
     
-    decision = S2TStrictRuntimeGate().evaluate(
+    gate = S2TStrictRuntimeGate(advisor=S2T3BAdvisor(force_simulation=True))
+
+    decision = gate.evaluate(
         task_id=triggered_task_id,
         risk_tier="medium",
         candidates=[_candidate()],
@@ -61,6 +63,34 @@ def test_s2t_strict_gate_advisor_triggers_on_matching_canary() -> None:
     assert decision.advisor_used is True
     assert decision.advisor_selected_candidate_id == "A"
     assert decision.advisor_outcome_status == "active_advising"
+
+
+def test_s2t_strict_gate_advisor_abstains_when_model_missing(tmp_path) -> None:
+    import hashlib
+
+    triggered_task_id = ""
+    for i in range(100):
+        tid = f"test-task-{i}"
+        h = int(hashlib.md5(tid.encode('utf-8')).hexdigest(), 16) % 100
+        if h < 10:
+            triggered_task_id = tid
+            break
+
+    gate = S2TStrictRuntimeGate(
+        advisor=S2T3BAdvisor(adapter_path=str(tmp_path / "missing-adapter")),
+        evidence_log_path=tmp_path / "evidence.jsonl",
+    )
+
+    decision = gate.evaluate(
+        task_id=triggered_task_id,
+        risk_tier="medium",
+        candidates=[_candidate()],
+        verifier_result="pass",
+    )
+
+    assert decision.advisor_used is True
+    assert decision.advisor_selected_candidate_id == ""
+    assert decision.advisor_outcome_status.startswith("abstained: model_not_loaded")
 
 
 def test_s2t_strict_gate_advisor_ignores_non_matching_canary() -> None:
@@ -84,3 +114,46 @@ def test_s2t_strict_gate_advisor_ignores_non_matching_canary() -> None:
     
     assert decision.advisor_used is False
     assert decision.advisor_selected_candidate_id == ""
+
+
+def test_s2t_strict_gate_evidence_log_format(tmp_path) -> None:
+    import hashlib
+    import json
+    # Find a task_id that matches the 10% canary
+    triggered_task_id = ""
+    for i in range(100):
+        tid = f"test-task-{i}"
+        h = int(hashlib.md5(tid.encode('utf-8')).hexdigest(), 16) % 100
+        if h < 10:
+            triggered_task_id = tid
+            break
+            
+    assert triggered_task_id != ""
+    
+    log_file = tmp_path / "evidence.jsonl"
+    gate = S2TStrictRuntimeGate(
+        advisor=S2T3BAdvisor(force_simulation=True),
+        evidence_log_path=log_file
+    )
+    
+    decision = gate.evaluate(
+        task_id=triggered_task_id,
+        risk_tier="medium",
+        candidates=[_candidate()],
+        verifier_result="pass",
+    )
+    
+    assert log_file.exists()
+    lines = log_file.read_text().strip().split("\n")
+    assert len(lines) == 1
+    
+    row = json.loads(lines[0])
+    assert row["task_id"] == triggered_task_id
+    assert row["risk_tier"] == "medium"
+    assert row["baseline_selected_id"] == "A"
+    assert row["advisor_selected_id"] == "A"
+    assert row["advisor_parse_schema_verdict"] == "pass"
+    assert row["verifier_result"] == "pass"
+    assert row["trust_mismatch"] is False
+    assert "timestamp_utc" in row
+    assert row["advisor_status"] == "active_advising"

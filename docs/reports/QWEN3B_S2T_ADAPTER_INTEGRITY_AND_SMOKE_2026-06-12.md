@@ -2,7 +2,7 @@
 
 - **日期**: 2026-06-12
 - **原始提交 Commit**: `99ec5850d2422caa6a45308639113ad9868e1066`
-- **適配器等級 (Adapter Status)**: `synthetic smoke adapter, not runtime adoption candidate`
+- **適配器等級 (Adapter Status)**: `canary advisor scaffold committed; real 3B advisory pending`
 
 > [!WARNING]
 > 本適配器僅使用嵌入式合成數據集 (`sim-task-0..34`) 進行訓練，主要用於驗證流程及工具鏈偵錯。**嚴禁**將此適配器部署至生產環境、作為預設路由，或將其混入任何運行時的 Gate 中。
@@ -65,6 +65,6 @@ python3 scripts/train/smoke_test_adapter.py --run-real --offline --device auto -
 - **[x] 訓練腳本安全化**: 已移除 `finetune_3b_student.py` 中所有的外部匿名上傳邏輯與 `verify=False` 參數。
 - **[x] Phase 4.6 Adapter Manifest 鎖定**: 已生成結構化 `qwen3b_s2t_adapter_manifest.json` 綁定 commit `99ec5850`，並通過 `--verify-manifest` 校驗。
 - **[ ] Phase 5.1 影子評估實體載入**: 通過 `--run-real --offline` 進行模型載入與固定 prompt JSON 輸出 Schema 比對。
-- **[ ] Phase 5.2 影子數據鏈修復**: 修復 `selected_candidate_id: null` 問題，只保留 `physical_verified=true`，產生 30+ 筆真實 shadow rows。
-- **[ ] Phase 5.3 影子評估 Gate**: 評估 trust_mismatch_rate 不上升，且 selector 分歧附 reason code，確保 parse/compliance 均 >= 95%。
+- **[x] Phase 5.2-hard 影子數據鏈修復**: 已收緊為明確 `physical_verified=true` / `semantic_verified=true` / `claim_verified=true`，產生 35 筆去重 shadow rows，含 train/heldout split 與 source event hash。
+- **[ ] Phase 5.3-real 影子評估 Gate**: `--emulator` 僅可產生 `OBSERVATION_ONLY` 報告；正式 Gate 仍需 `--run-real --offline` 通過，且 trust_mismatch_rate 不上升、selector 分歧附 reason code、parse/compliance 均 >= 95%。
 - **[ ] Phase 6 運行時採用 Gate**: 僅以 strict-gated advisory (建議模式) 小比例放量運行，最終裁決仍歸 Rust 驗證器。

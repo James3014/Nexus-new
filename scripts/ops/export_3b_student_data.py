@@ -25,14 +25,20 @@ def redact_payload(data: Any) -> Any:
     return data
 
 def export_student_data(input_path: Path, output_path: Path, card_path: Path):
+    import hashlib
     stats = {
         "total_read": 0,
         "exported": 0,
+        "exported_train": 0,
+        "exported_heldout": 0,
         "filtered_null_candidate": 0,
         "filtered_no_evidence": 0,
         "filtered_no_model": 0,
-        "filtered_trust_mismatch": 0
+        "filtered_trust_mismatch": 0,
+        "filtered_duplicate_task": 0
     }
+    
+    seen_task_ids = set()
     
     with open(input_path, "r") as f_in, open(output_path, "w") as f_out:
         for line in f_in:
@@ -46,19 +52,13 @@ def export_student_data(input_path: Path, output_path: Path, card_path: Path):
                     stats["filtered_null_candidate"] += 1
                     continue
                 
-                # 2. Verifier Evidence Check (Requires physical/semantic verification)
+                # 2. Verifier Evidence Check (Requires physical/semantic verification strictly)
                 physical_verified = (
-                    event.get("physical_verified", False) or 
-                    event.get("semantic_verified", False) or 
-                    event.get("gate", {}).get("claim_verified", False)
+                    event.get("physical_verified") is True or 
+                    event.get("semantic_verified") is True or 
+                    event.get("gate", {}).get("claim_verified") is True
                 )
-                has_evidence = bool(
-                    physical_verified or 
-                    event.get("verifier_evidence_ref") or 
-                    event.get("proof_present") or 
-                    event.get("verifier_result") == "pass"
-                )
-                if not has_evidence:
+                if not physical_verified:
                     stats["filtered_no_evidence"] += 1
                     continue
                 
@@ -74,9 +74,27 @@ def export_student_data(input_path: Path, output_path: Path, card_path: Path):
                     stats["filtered_trust_mismatch"] += 1
                     continue
                 
+                # 5. Task ID Deduplication
+                task_id = event.get("task_id")
+                if not task_id:
+                    task_id = f"unknown-task-{stats['total_read']}"
+                if task_id in seen_task_ids:
+                    stats["filtered_duplicate_task"] += 1
+                    continue
+                seen_task_ids.add(task_id)
+                
+                # 6. Heldout Split (deterministic 80/20 train/heldout based on task_id)
+                h_val = int(hashlib.md5(task_id.encode('utf-8')).hexdigest(), 16)
+                split = "heldout" if (h_val % 5) == 0 else "train"
+                
+                # Calculate source event hash
+                source_event_hash = hashlib.sha256(line.strip().encode('utf-8')).hexdigest()
+                
                 # 建立符合 S2T Student Schema 的結構
                 student_row = {
-                    "task_id": event.get("task_id"),
+                    "task_id": task_id,
+                    "source_event_hash": source_event_hash,
+                    "split": split,
                     "model": model_name,
                     "input": {
                         "risk_tier": event.get("risk_tier", "medium"),
@@ -97,6 +115,10 @@ def export_student_data(input_path: Path, output_path: Path, card_path: Path):
                 
                 f_out.write(json.dumps(student_row, ensure_ascii=False) + "\n")
                 stats["exported"] += 1
+                if split == "train":
+                    stats["exported_train"] += 1
+                else:
+                    stats["exported_heldout"] += 1
             except Exception:
                 continue
     
