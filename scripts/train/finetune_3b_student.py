@@ -54,13 +54,21 @@ def main():
     parser.add_argument("--epochs", type=int, default=3)
     parser.add_argument("--batch_size", type=int, default=4)
     parser.add_argument("--learning_rate", type=float, default=2e-4)
+    parser.add_argument("--upload", action="store_true", help="Opt-in to upload tarball to external file sharing services (bashupload/transfer.sh).")
     args, unknown = parser.parse_known_args()
 
-    # 1. 載入與預處理資料集 (Self-Contained Embedded Dataset)
-    print("📖 Loading embedded dataset...")
+    # 1. 載入與預處理資料集
     import json
-    from datasets import Dataset
-    embedded_data_json = """[
+    from datasets import Dataset, load_dataset
+
+    if os.path.exists(args.data_path):
+        print(f"📖 Loading real dataset from {args.data_path}...")
+        dataset = load_dataset("json", data_files=args.data_path, split="train")
+        use_embedded = False
+    else:
+        print(f"⚠️ Data path '{args.data_path}' not found. Loading embedded synthetic dataset as smoke fixture...")
+        use_embedded = True
+        embedded_data_json = """[
   {
     "task_id": "sim-task-0",
     "model": "gemini-3-flash-preview",
@@ -2092,7 +2100,7 @@ def main():
     }
   }
 ]"""
-    dataset = Dataset.from_list(json.loads(embedded_data_json))
+        dataset = Dataset.from_list(json.loads(embedded_data_json))
     dataset = dataset.map(format_prompt)
     dataset = dataset.train_test_split(test_size=0.1)
 
@@ -2170,38 +2178,42 @@ def main():
     tokenizer.save_pretrained(final_output)
     print("✅ Done!")
 
-    # 8. 自動打包並上傳至外部臨時儲存，解決 VM 自動回收與下載限制
+    # 8. 自動打包，解決 VM 自動回收
     try:
         import shutil
-        import requests
-        import urllib3
-        urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
-        
         print("📦 Packaging adapter weights...")
         archive_path = shutil.make_archive("/content/qwen3b_s2t_adapter", "gztar", final_output)
         print(f"📦 Archive created at {archive_path}.")
         
-        print("📦 Uploading to bashupload.com...")
-        try:
-            with open(archive_path, 'rb') as f:
-                response = requests.put('https://bashupload.com/qwen3b_s2t_adapter.tar.gz', data=f, verify=False)
-                if response.status_code in [200, 201]:
-                    print(f"🚀 BASHUPLOAD_URL: {response.text.strip()}")
-                else:
-                    print(f"❌ Bashupload failed with status: {response.status_code}")
-        except Exception as e:
-            print("❌ Bashupload error:", e)
+        # 僅在顯式指定 --upload 時進行匿名上傳
+        if args.upload:
+            import requests
+            import urllib3
+            urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
+            
+            print("📦 Uploading to bashupload.com...")
+            try:
+                with open(archive_path, 'rb') as f:
+                    response = requests.put('https://bashupload.com/qwen3b_s2t_adapter.tar.gz', data=f, verify=False)
+                    if response.status_code in [200, 201]:
+                        print(f"🚀 BASHUPLOAD_URL: {response.text.strip()}")
+                    else:
+                        print(f"❌ Bashupload failed with status: {response.status_code}")
+            except Exception as e:
+                print("❌ Bashupload error:", e)
 
-        print("📦 Uploading to transfer.sh...")
-        try:
-            with open(archive_path, 'rb') as f:
-                response = requests.put('https://transfer.sh/qwen3b_s2t_adapter.tar.gz', data=f, verify=False)
-                if response.status_code in [200, 201]:
-                    print(f"🚀 TRANSFER_SH_URL: {response.text.strip()}")
-                else:
-                    print(f"❌ Transfer.sh failed with status: {response.status_code}")
-        except Exception as e:
-            print("❌ Transfer.sh error:", e)
+            print("📦 Uploading to transfer.sh...")
+            try:
+                with open(archive_path, 'rb') as f:
+                    response = requests.put('https://transfer.sh/qwen3b_s2t_adapter.tar.gz', data=f, verify=False)
+                    if response.status_code in [200, 201]:
+                        print(f"🚀 TRANSFER_SH_URL: {response.text.strip()}")
+                    else:
+                        print(f"❌ Transfer.sh failed with status: {response.status_code}")
+            except Exception as e:
+                print("❌ Transfer.sh error:", e)
+        else:
+            print("ℹ️ Skipping external upload (opt-in only).")
             
     except Exception as e:
         print("❌ Error packaging/uploading adapter:", e)

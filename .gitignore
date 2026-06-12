@@ -56,3 +56,8 @@ str(REPO_ROOT)/
 # Added by cargo
 
 /target
+
+# Fine-tuned 3B student adapter and weight artifacts
+training/adapters/
+scratch/qwen3b_s2t_adapter.tar.gz
+.nexus/training/adapters/
