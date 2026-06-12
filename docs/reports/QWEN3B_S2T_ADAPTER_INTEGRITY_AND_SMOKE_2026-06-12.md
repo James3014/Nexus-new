@@ -1,7 +1,7 @@
 # Qwen2.5-3B-Instruct S2T 適配器完整性與 Smoke 測試報告
 
 - **日期**: 2026-06-12
-- **原始提交 Commit**: `72c24f16`
+- **原始提交 Commit**: `99ec5850d2422caa6a45308639113ad9868e1066`
 - **適配器等級 (Adapter Status)**: `synthetic smoke adapter, not runtime adoption candidate`
 
 > [!WARNING]
@@ -12,7 +12,7 @@
 
 ## 🔒 適配器 SHA-256 校驗和 (Checksums)
 
-這些雜湊值鎖定了本地下載的微調適配器產物。本地的 Smoke 測試腳本會對其進行雙向校驗。
+這些雜湊值鎖定了本地下載的微調適適配器產物。本地的 Smoke 測試腳本會對其進行雙向校驗。
 
 | 檔案名稱 | SHA-256 雜湊值 |
 | --- | --- |
@@ -45,7 +45,13 @@
 python3 scripts/train/smoke_test_adapter.py --verify-report docs/reports/QWEN3B_S2T_ADAPTER_INTEGRITY_AND_SMOKE_2026-06-12.md
 ```
 
-### 2. 實體載入 Smoke 測試 (選用 Phase 5 前置條件)
+### 2. 結構化清單校驗 (Provenance Lock Gate)
+欲使用程式化的 JSON 清單進行最嚴格的檔案大小、雜湊值及 Git Commit 追溯校驗（推薦）：
+```bash
+python3 scripts/train/smoke_test_adapter.py --verify-manifest docs/reports/qwen3b_s2t_adapter_manifest.json
+```
+
+### 3. 實體載入 Smoke 測試 (選用 Phase 5 前置條件)
 欲在本地進行模型與適配器的合併載入測試，並驗證輸出 JSON Schema 合規性（使用本地快取權重，不聯網）：
 ```bash
 python3 scripts/train/smoke_test_adapter.py --run-real --offline --device auto --timeout-sec 30
@@ -57,5 +63,8 @@ python3 scripts/train/smoke_test_adapter.py --run-real --offline --device auto -
 
 - **[x] Git 污染防禦**: `.gitignore` 中已註冊忽略 `training/adapters/`、`scratch/qwen3b_s2t_adapter.tar.gz` 及 `.nexus/training/adapters/`。
 - **[x] 訓練腳本安全化**: 已移除 `finetune_3b_student.py` 中所有的外部匿名上傳邏輯與 `verify=False` 參數。
-- **[ ] Phase 5 影子評估 Gate**: 收集 30+ 筆真實 Trace 數據，比較 Rule Baseline，且必須保證 `trust_mismatch_rate` 不上升。
-- **[ ] Phase 6 運行時採用 Gate**: 僅能以 Strict-gated advisory (建議模式) 形式運行，嚴禁作為預設自動導航路由。
+- **[x] Phase 4.6 Adapter Manifest 鎖定**: 已生成結構化 `qwen3b_s2t_adapter_manifest.json` 綁定 commit `99ec5850`，並通過 `--verify-manifest` 校驗。
+- **[ ] Phase 5.1 影子評估實體載入**: 通過 `--run-real --offline` 進行模型載入與固定 prompt JSON 輸出 Schema 比對。
+- **[ ] Phase 5.2 影子數據鏈修復**: 修復 `selected_candidate_id: null` 問題，只保留 `physical_verified=true`，產生 30+ 筆真實 shadow rows。
+- **[ ] Phase 5.3 影子評估 Gate**: 評估 trust_mismatch_rate 不上升，且 selector 分歧附 reason code，確保 parse/compliance 均 >= 95%。
+- **[ ] Phase 6 運行時採用 Gate**: 僅以 strict-gated advisory (建議模式) 小比例放量運行，最終裁決仍歸 Rust 驗證器。

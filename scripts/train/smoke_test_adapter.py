@@ -89,6 +89,148 @@ def calculate_sha256(filepath):
             sha256.update(chunk)
     return sha256.hexdigest()
 
+def get_git_commit_hash():
+    """取得當前的 Git commit HEAD 雜湊"""
+    import subprocess
+    try:
+        commit_hash = subprocess.check_output(
+            ["git", "rev-parse", "HEAD"], 
+            stderr=subprocess.DEVNULL, 
+            text=True
+        ).strip()
+        return commit_hash
+    except Exception:
+        return "unknown"
+
+def write_manifest(adapter_dir, manifest_path):
+    """計算並寫出適配器的結構化 Manifest JSON 檔案"""
+    print(f"📝 Generating Adapter Manifest to {manifest_path}...")
+    
+    config_path = os.path.join(adapter_dir, "adapter_config.json")
+    if not os.path.exists(config_path):
+        print(f"❌ Cannot write manifest: adapter_config.json not found in {adapter_dir}")
+        return False
+        
+    with open(config_path, 'r') as f:
+        config = json.load(f)
+        
+    required_files = [
+        "adapter_config.json",
+        "adapter_model.safetensors",
+        "tokenizer.json",
+        "tokenizer_config.json",
+        "chat_template.jinja",
+        "README.md"
+    ]
+    
+    files_data = {}
+    for fn in required_files:
+        fp = os.path.join(adapter_dir, fn)
+        if not os.path.exists(fp):
+            print(f"❌ Cannot write manifest: required file {fn} is missing.")
+            return False
+        size = os.path.getsize(fp)
+        sha256 = calculate_sha256(fp)
+        files_data[fn] = {
+            "size": size,
+            "sha256": sha256
+        }
+        
+    manifest = {
+        "adapter_dir": adapter_dir,
+        "base_model_name_or_path": config.get("base_model_name_or_path"),
+        "peft_type": config.get("peft_type"),
+        "r": config.get("r"),
+        "target_modules": config.get("target_modules"),
+        "training_data_hash": "sim_dataset_smoke_fixture",
+        "commit_hash": get_git_commit_hash(),
+        "files": files_data
+    }
+    
+    os.makedirs(os.path.dirname(manifest_path), exist_ok=True)
+    with open(manifest_path, 'w', encoding='utf-8') as f:
+        json.dump(manifest, f, indent=2, ensure_ascii=False)
+        
+    print(f"🎉 Manifest successfully written to {manifest_path}")
+    return True
+
+def verify_manifest(adapter_dir, manifest_path):
+    """載入 manifest 並驗證適配器檔案、設定以及 Git 軌跡"""
+    print(f"🛡️ Verifying adapter using Manifest: {manifest_path}")
+    if not os.path.exists(manifest_path):
+        print(f"❌ Manifest file not found: {manifest_path}")
+        return False
+        
+    try:
+        with open(manifest_path, 'r', encoding='utf-8') as f:
+            manifest = json.load(f)
+    except Exception as e:
+        print(f"❌ Failed to parse manifest JSON: {e}")
+        return False
+        
+    base_model = manifest.get("base_model_name_or_path")
+    peft_type = manifest.get("peft_type")
+    r = manifest.get("r")
+    target_modules = manifest.get("target_modules", [])
+    
+    if base_model != "Qwen/Qwen2.5-3B-Instruct":
+        print(f"❌ Manifest Base Model Mismatch: {base_model}")
+        return False
+    if peft_type != "LORA":
+        print(f"❌ Manifest PEFT Type Mismatch: {peft_type}")
+        return False
+    if r != 16:
+        print(f"❌ Manifest rank r Mismatch: {r}")
+        return False
+        
+    required_projections = ["q_proj", "k_proj", "v_proj", "o_proj", "gate_proj", "up_proj", "down_proj"]
+    missing_modules = [m for m in required_projections if m not in target_modules]
+    if missing_modules:
+        print(f"❌ Manifest Target Modules missing required projections: {missing_modules}")
+        return False
+        
+    files_data = manifest.get("files", {})
+    if not files_data:
+        print("❌ Manifest contains no files data.")
+        return False
+        
+    for fn, meta in files_data.items():
+        fp = os.path.join(adapter_dir, fn)
+        if not os.path.exists(fp):
+            print(f"❌ File missing from disk: {fn}")
+            return False
+            
+        expected_size = meta.get("size")
+        expected_sha256 = meta.get("sha256")
+        
+        actual_size = os.path.getsize(fp)
+        if actual_size != expected_size:
+            print(f"❌ File size mismatch for {fn}: Expected {expected_size}, got {actual_size}")
+            return False
+            
+        actual_sha256 = calculate_sha256(fp)
+        if actual_sha256 != expected_sha256:
+            print(f"❌ File SHA-256 mismatch for {fn}!")
+            print(f"  Expected: {expected_sha256}")
+            print(f"  Actual:   {actual_sha256}")
+            return False
+            
+        print(f"✅ {fn} checked: size and SHA-256 match.")
+        
+    current_commit = get_git_commit_hash()
+    manifest_commit = manifest.get("commit_hash", "unknown")
+    print(f"🔎 Provenance Git Commit Check:")
+    print(f"  Current HEAD Commit: {current_commit}")
+    print(f"  Manifest Commit:     {manifest_commit}")
+    if current_commit != manifest_commit:
+        print("⚠️ Warning: Current Git HEAD does not match the commit that generated this manifest.")
+    else:
+        print("✅ Git provenance commit MATCH.")
+        
+    print("🎉 Manifest-based Integrity Check PASSED.")
+    return True
+
+
 def validate_json_schema(data):
     """嚴格校驗輸出 JSON 是否符合 S2T 決策 Schema"""
     if not isinstance(data, dict):
@@ -390,11 +532,13 @@ def main():
     parser.add_argument("--timeout-sec", type=int, default=None, help="Strict timeout in seconds for physical smoke test.")
     parser.add_argument("--write-report-checksums", action="store_true", help="Print checksums in markdown format for copying to report.")
     parser.add_argument("--verify-report", type=str, default="docs/reports/QWEN3B_S2T_ADAPTER_INTEGRITY_AND_SMOKE_2026-06-12.md", help="Path to report markdown to verify adapter hash against.")
+    parser.add_argument("--write-manifest", type=str, default=None, help="Write structural adapter manifest to path.")
+    parser.add_argument("--verify-manifest", type=str, default=None, help="Path to structural adapter manifest to verify against.")
     args = parser.parse_args()
     
     adapter_path = args.adapter_dir
     
-    # Python argparse 會自動把 '-' 轉換成 '_'，所以屬性名稱是 write_report_checksums
+    # 1. 輸出 Checksums
     if args.write_report_checksums:
         print("📝 SHA256 Checksums for Report:")
         for fn in os.listdir(adapter_path):
@@ -403,15 +547,29 @@ def main():
                 h = calculate_sha256(fp)
                 print(f"| `{fn}` | `{h}` |")
         return
-        
-    # 執行 Mock 完整性驗證 (預設執行)
-    mock_success = run_mock_integrity(adapter_path, verify_report_path=args.verify_report)
-    if not mock_success:
-        print("❌ Mock Integrity Check FAILED.")
-        sys.exit(1)
-    print("🎉 Mock Integrity Check PASSED.")
+
+    # 2. 產出 Manifest 模式
+    if args.write_manifest:
+        success = write_manifest(adapter_path, args.write_manifest)
+        if not success:
+            sys.exit(1)
+        return
+
+    # 3. 驗證 Manifest 模式
+    if args.verify_manifest:
+        manifest_success = verify_manifest(adapter_path, args.verify_manifest)
+        if not manifest_success:
+            print("❌ Manifest Verification FAILED.")
+            sys.exit(1)
+    else:
+        # 4. 預設 Mock 完整性驗證 (使用 Report)
+        mock_success = run_mock_integrity(adapter_path, verify_report_path=args.verify_report)
+        if not mock_success:
+            print("❌ Mock Integrity Check FAILED.")
+            sys.exit(1)
+        print("🎉 Mock Integrity Check PASSED.")
     
-    # 執行實體加載 (可選)
+    # 5. 執行實體加載 (可選)
     if args.run_real:
         physical_success = run_physical_smoke(adapter_path, args.device, args.max_new_tokens, args.offline, timeout_sec=args.timeout_sec)
         if not physical_success:

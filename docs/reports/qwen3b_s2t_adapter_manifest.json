@@ -1,0 +1,43 @@
+{
+  "adapter_dir": "training/adapters/qwen3b_s2t_adapter",
+  "base_model_name_or_path": "Qwen/Qwen2.5-3B-Instruct",
+  "peft_type": "LORA",
+  "r": 16,
+  "target_modules": [
+    "v_proj",
+    "gate_proj",
+    "k_proj",
+    "up_proj",
+    "q_proj",
+    "down_proj",
+    "o_proj"
+  ],
+  "training_data_hash": "sim_dataset_smoke_fixture",
+  "commit_hash": "99ec5850d2422caa6a45308639113ad9868e1066",
+  "files": {
+    "adapter_config.json": {
+      "size": 1103,
+      "sha256": "a13cdbe6188f2a60f2fafdc51706a8460cfba7df996904d638d63a63bf46dd0d"
+    },
+    "adapter_model.safetensors": {
+      "size": 59934640,
+      "sha256": "6f2d7923bcfa93cfa1d4e4be0eb25ae6578d95f2ebec785cbe61e5bf89e2ca6c"
+    },
+    "tokenizer.json": {
+      "size": 11421892,
+      "sha256": "3fd169731d2cbde95e10bf356d66d5997fd885dd8dbb6fb4684da3f23b2585d8"
+    },
+    "tokenizer_config.json": {
+      "size": 691,
+      "sha256": "fbb05e8a722a05e92e8da2eabbb5820bbdd0d1482351a38cb14efa52fc8bdadb"
+    },
+    "chat_template.jinja": {
+      "size": 2507,
+      "sha256": "cd8e9439f0570856fd70470bf8889ebd8b5d1107207f67a5efb46e342330527f"
+    },
+    "README.md": {
+      "size": 5214,
+      "sha256": "a6f7b9573427cf03af8c5204cd9074efe8b86980790a1053283391b90168af40"
+    }
+  }
+}
