@@ -1,19 +1,20 @@
-# Qwen2.5-3B-Instruct S2T Adapter Integrity and Smoke Test Report
+# Qwen2.5-3B-Instruct S2T 適配器完整性與 Smoke 測試報告
 
-- **Date**: 2026-06-12
-- **Originating Commit**: `72c24f16`
-- **Adapter Status**: `synthetic smoke adapter, not runtime adoption candidate`
+- **日期**: 2026-06-12
+- **原始提交 Commit**: `72c24f16`
+- **適配器等級 (Adapter Status)**: `synthetic smoke adapter, not runtime adoption candidate`
 
 > [!WARNING]
-> This adapter was trained on an embedded synthetic dataset (`sim-task-0..34`) for setup validation and toolchain debugging. It is strictly forbidden to deploy this adapter to production, utilize it as a default router, or smuggle it into runtime gates. Promotion to a runtime candidate requires passing the shadow evaluation phase with at least 30+ eligible real S2T trace rows.
+> 本適配器僅使用嵌入式合成數據集 (`sim-task-0..34`) 進行訓練，主要用於驗證流程及工具鏈偵錯。**嚴禁**將此適配器部署至生產環境、作為預設路由，或將其混入任何運行時的 Gate 中。
+> 若要晉升為運行時候選對象 (runtime candidate)，必須通過 Phase 5 影子評估階段，且至少需要 30 筆以上合格的真實 S2T Trace 數據。
 
 ---
 
-## 🔒 Adapter Checksums (SHA-256)
+## 🔒 適配器 SHA-256 校驗和 (Checksums)
 
-These hashes lock the downloaded fine-tuning output assets locally. They are verified bi-directionally by the local smoke test script.
+這些雜湊值鎖定了本地下載的微調適配器產物。本地的 Smoke 測試腳本會對其進行雙向校驗。
 
-| File Name | SHA-256 Checksum |
+| 檔案名稱 | SHA-256 雜湊值 |
 | --- | --- |
 | `adapter_model.safetensors` | `6f2d7923bcfa93cfa1d4e4be0eb25ae6578d95f2ebec785cbe61e5bf89e2ca6c` |
 | `adapter_config.json` | `a13cdbe6188f2a60f2fafdc51706a8460cfba7df996904d638d63a63bf46dd0d` |
@@ -24,37 +25,37 @@ These hashes lock the downloaded fine-tuning output assets locally. They are ver
 
 ---
 
-## 🛠️ PEFT configuration Verification Specs
+## 🛠️ PEFT 配置驗證規格
 
-- **Base Model**: `Qwen/Qwen2.5-3B-Instruct`
-- **PEFT Type**: `LORA`
+- **基礎模型 (Base Model)**: `Qwen/Qwen2.5-3B-Instruct`
+- **PEFT 類型**: `LORA`
 - **LoRA Rank (r)**: `16`
 - **LoRA Alpha (alpha)**: `32`
-- **Target Modules**: `["q_proj", "k_proj", "v_proj", "o_proj", "gate_proj", "up_proj", "down_proj"]`
-- **Bias Setting**: `none`
-- **Task Type**: `CAUSAL_LM`
+- **目標模組 (Target Modules)**: `["q_proj", "k_proj", "v_proj", "o_proj", "gate_proj", "up_proj", "down_proj"]`
+- **Bias 設定**: `none`
+- **任務類型**: `CAUSAL_LM`
 
 ---
 
-## 🧪 Verification Commands
+## 🧪 驗證執行指令
 
-### 1. Mock Integrity Verification (Required Gate)
-To verify files exist, sizes are non-zero, PEFT parameters are correct, and checksums match this report, run:
+### 1. Mock 完整性校驗 (必要 Gate)
+欲驗證檔案存在性、大小是否大於 0、PEFT 參數正確性以及雜湊值是否與此報告一致，請執行：
 ```bash
 python3 scripts/train/smoke_test_adapter.py --verify-report docs/reports/QWEN3B_S2T_ADAPTER_INTEGRITY_AND_SMOKE_2026-06-12.md
 ```
 
-### 2. Physical Load Smoke Verification (Optional Phase 5 Pre-gate)
-To perform a dry run of the unified model loading and test output JSON schema compliance offline (using cached files only):
+### 2. 實體載入 Smoke 測試 (選用 Phase 5 前置條件)
+欲在本地進行模型與適配器的合併載入測試，並驗證輸出 JSON Schema 合規性（使用本地快取權重，不聯網）：
 ```bash
-python3 scripts/train/smoke_test_adapter.py --run-real --offline --device cpu
+python3 scripts/train/smoke_test_adapter.py --run-real --offline --device auto --timeout-sec 30
 ```
 
 ---
 
-## 🏁 Gate Invariants and Adoption Checklist
+## 🏁 Gate 判定與採用檢查清單
 
-- **[x] Git Pollution Defense**: `training/adapters/`, `scratch/qwen3b_s2t_adapter.tar.gz`, and `.nexus/training/adapters/` are registered in `.gitignore`.
-- **[x] Trainer Sanitization**: Removed all anonymous external upload fallbacks in `finetune_3b_student.py` (external uploading is now strict opt-in via `--upload`).
-- **[ ] Phase 5 Shadow Evaluation Gate**: Minimum 30+ eligible real trace rows comparison, positive `selector_override_verified_rate` lift, and zero `trust_mismatch_rate` increase.
-- **[ ] Phase 6 Runtime Adoption Gate**: Strict-gated feature-flag advisory mode only; no default replacement of autopilot routers or receipt verifiers.
+- **[x] Git 污染防禦**: `.gitignore` 中已註冊忽略 `training/adapters/`、`scratch/qwen3b_s2t_adapter.tar.gz` 及 `.nexus/training/adapters/`。
+- **[x] 訓練腳本安全化**: 已移除 `finetune_3b_student.py` 中所有的外部匿名上傳邏輯與 `verify=False` 參數。
+- **[ ] Phase 5 影子評估 Gate**: 收集 30+ 筆真實 Trace 數據，比較 Rule Baseline，且必須保證 `trust_mismatch_rate` 不上升。
+- **[ ] Phase 6 運行時採用 Gate**: 僅能以 Strict-gated advisory (建議模式) 形式運行，嚴禁作為預設自動導航路由。

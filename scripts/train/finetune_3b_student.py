@@ -54,7 +54,6 @@ def main():
     parser.add_argument("--epochs", type=int, default=3)
     parser.add_argument("--batch_size", type=int, default=4)
     parser.add_argument("--learning_rate", type=float, default=2e-4)
-    parser.add_argument("--upload", action="store_true", help="Opt-in to upload tarball to external file sharing services (bashupload/transfer.sh).")
     args, unknown = parser.parse_known_args()
 
     # 1. 載入與預處理資料集
@@ -2184,39 +2183,8 @@ def main():
         print("📦 Packaging adapter weights...")
         archive_path = shutil.make_archive("/content/qwen3b_s2t_adapter", "gztar", final_output)
         print(f"📦 Archive created at {archive_path}.")
-        
-        # 僅在顯式指定 --upload 時進行匿名上傳
-        if args.upload:
-            import requests
-            import urllib3
-            urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
-            
-            print("📦 Uploading to bashupload.com...")
-            try:
-                with open(archive_path, 'rb') as f:
-                    response = requests.put('https://bashupload.com/qwen3b_s2t_adapter.tar.gz', data=f, verify=False)
-                    if response.status_code in [200, 201]:
-                        print(f"🚀 BASHUPLOAD_URL: {response.text.strip()}")
-                    else:
-                        print(f"❌ Bashupload failed with status: {response.status_code}")
-            except Exception as e:
-                print("❌ Bashupload error:", e)
-
-            print("📦 Uploading to transfer.sh...")
-            try:
-                with open(archive_path, 'rb') as f:
-                    response = requests.put('https://transfer.sh/qwen3b_s2t_adapter.tar.gz', data=f, verify=False)
-                    if response.status_code in [200, 201]:
-                        print(f"🚀 TRANSFER_SH_URL: {response.text.strip()}")
-                    else:
-                        print(f"❌ Transfer.sh failed with status: {response.status_code}")
-            except Exception as e:
-                print("❌ Transfer.sh error:", e)
-        else:
-            print("ℹ️ Skipping external upload (opt-in only).")
-            
     except Exception as e:
-        print("❌ Error packaging/uploading adapter:", e)
+        print("❌ Error packaging adapter:", e)
 
 if __name__ == "__main__":
     main()

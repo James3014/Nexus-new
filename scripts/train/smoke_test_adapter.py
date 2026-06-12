@@ -228,142 +228,168 @@ def run_mock_integrity(adapter_dir, verify_report_path=None):
                 else:
                     print(f"✅ Hash MATCH for {fn}: {expected_hash[:8]}...")
             else:
-                print(f"⚠️ Warning: Could not find expected hash for {fn} in the report.")
+                print(f"❌ Could not find expected hash for {fn} in the report.")
+                return False
                 
     return True
 
-def run_physical_smoke(adapter_dir, device, max_tokens, offline):
+def run_physical_smoke(adapter_dir, device, max_tokens, offline, timeout_sec=None):
     """實體加載測試：載入 base model + LoRA 並測試產物格式"""
     print("🚀 Running Physical Load Smoke Test...")
     
-    try:
-        import torch
-        from transformers import AutoModelForCausalLM, AutoTokenizer
-        from peft import PeftModel
-    except ImportError:
-        print("❌ ML Libraries (torch, transformers, peft) not installed. Cannot run physical smoke.")
-        return False
+    import signal
+    if timeout_sec and timeout_sec > 0:
+        def handler(signum, frame):
+            raise TimeoutError(f"Physical smoke test execution timed out after {timeout_sec} seconds")
+        signal.signal(signal.SIGALRM, handler)
+        signal.alarm(timeout_sec)
+        print(f"⏱️ Timeout set to {timeout_sec} seconds.")
 
-    # 本地只使用快取，不聯網下載
-    kwargs = {}
-    if offline:
-        print("ℹ️ Offline mode active. Only local Hugging Face cache will be used.")
-        kwargs["local_files_only"] = True
-        
-    base_model_id = "Qwen/Qwen2.5-3B-Instruct"
-    
-    print(f"🤖 Loading tokenizer for {base_model_id}...")
     try:
-        tokenizer = AutoTokenizer.from_pretrained(base_model_id, trust_remote_code=True, **kwargs)
-    except Exception as e:
-        print(f"❌ Failed to load tokenizer locally (is model cached?): {e}")
-        return False
-        
-    print(f"💾 Loading base model {base_model_id} on device '{device}'...")
-    
-    # 依據 device 使用對應精度
-    torch_dtype = torch.float16 if device in ["cuda", "mps"] else torch.float32
-    
-    try:
-        base_model = AutoModelForCausalLM.from_pretrained(
-            base_model_id,
-            torch_dtype=torch_dtype,
-            device_map=device if device != "mps" else None,
-            trust_remote_code=True,
-            **kwargs
-        )
-        if device == "mps":
-            base_model = base_model.to("mps")
-    except Exception as e:
-        print(f"❌ Failed to load base model (is model cached?): {e}")
-        return False
-        
-    print(f"⚡ Loading PEFT adapter from {adapter_dir}...")
-    try:
-        model = PeftModel.from_pretrained(base_model, adapter_dir, **kwargs)
-        model.eval()
-    except Exception as e:
-        print(f"❌ Failed to merge adapter weights: {e}")
-        return False
-        
-    print("✅ Model loaded successfully. Starting prompt generation smoke...")
-    
-    parsed_count = 0
-    compliant_count = 0
-    total_prompts = len(TEST_PROMPTS)
-    
-    for idx, sample in enumerate(TEST_PROMPTS):
-        input_str = f"Route Features: {sample['input']['route_features']}\nCandidates: {sample['input']['candidate_summaries']}"
-        
-        messages = [
-            {"role": "system", "content": SYSTEM_PROMPT},
-            {"role": "user", "content": input_str}
-        ]
-        
-        # 使用 Qwen ChatML template 格式化
-        text = tokenizer.apply_chat_template(messages, tokenize=False, add_generation_prompt=True)
-        model_inputs = tokenizer([text], return_tensors="pt").to(device)
-        
-        print(f"\n--- [Prompt {idx+1}/{total_prompts}] ---")
         try:
-            with torch.no_grad():
-                generated_ids = model.generate(
-                    **model_inputs,
-                    max_new_tokens=max_tokens,
-                    pad_token_id=tokenizer.eos_token_id
-                )
-            # 取得輸出文本
-            generated_ids = [
-                output_ids[len(input_ids):] for input_ids, output_ids in zip(model_inputs.input_ids, generated_ids)
+            import torch
+            from transformers import AutoModelForCausalLM, AutoTokenizer
+            from peft import PeftModel
+        except ImportError:
+            print("❌ ML Libraries (torch, transformers, peft) not installed. Cannot run physical smoke.")
+            return False
+
+        if device == "auto":
+            if torch.cuda.is_available():
+                device = "cuda"
+            elif hasattr(torch.backends, "mps") and torch.backends.mps.is_available():
+                device = "mps"
+            else:
+                device = "cpu"
+            print(f"ℹ️ Dynamically selected device: '{device}'")
+
+        # 本地只使用快取，不聯網下載
+        kwargs = {}
+        if offline:
+            print("ℹ️ Offline mode active. Only local Hugging Face cache will be used.")
+            kwargs["local_files_only"] = True
+            
+        base_model_id = "Qwen/Qwen2.5-3B-Instruct"
+        
+        print(f"🤖 Loading tokenizer for {base_model_id}...")
+        try:
+            tokenizer = AutoTokenizer.from_pretrained(base_model_id, trust_remote_code=True, **kwargs)
+        except Exception as e:
+            print(f"❌ Failed to load tokenizer locally (is model cached?): {e}")
+            return False
+            
+        print(f"💾 Loading base model {base_model_id} on device '{device}'...")
+        
+        # 依據 device 使用對應精度
+        torch_dtype = torch.float16 if device in ["cuda", "mps"] else torch.float32
+        
+        try:
+            base_model = AutoModelForCausalLM.from_pretrained(
+                base_model_id,
+                torch_dtype=torch_dtype,
+                device_map=device if device != "mps" else None,
+                trust_remote_code=True,
+                **kwargs
+            )
+            if device == "mps":
+                base_model = base_model.to("mps")
+        except Exception as e:
+            print(f"❌ Failed to load base model (is model cached?): {e}")
+            return False
+            
+        print(f"⚡ Loading PEFT adapter from {adapter_dir}...")
+        try:
+            model = PeftModel.from_pretrained(base_model, adapter_dir, **kwargs)
+            model.eval()
+        except Exception as e:
+            print(f"❌ Failed to merge adapter weights: {e}")
+            return False
+            
+        print("✅ Model loaded successfully. Starting prompt generation smoke...")
+        
+        parsed_count = 0
+        compliant_count = 0
+        total_prompts = len(TEST_PROMPTS)
+        
+        for idx, sample in enumerate(TEST_PROMPTS):
+            input_str = f"Route Features: {sample['input']['route_features']}\nCandidates: {sample['input']['candidate_summaries']}"
+            
+            messages = [
+                {"role": "system", "content": SYSTEM_PROMPT},
+                {"role": "user", "content": input_str}
             ]
-            response = tokenizer.batch_decode(generated_ids, skip_special_tokens=True)[0]
-            print(f"Raw Output:\n{response}")
             
-            # 1. 嘗試 parse JSON
+            # 使用 Qwen ChatML template 格式化
+            text = tokenizer.apply_chat_template(messages, tokenize=False, add_generation_prompt=True)
+            model_inputs = tokenizer([text], return_tensors="pt").to(device)
+            
+            print(f"\n--- [Prompt {idx+1}/{total_prompts}] ---")
             try:
-                # 剔除可能存在的 markdown tags
-                clean_response = response.strip()
-                if clean_response.startswith("```json"):
-                    clean_response = clean_response.split("```json")[1].split("```")[0].strip()
-                elif clean_response.startswith("```"):
-                    clean_response = clean_response.split("```")[1].split("```")[0].strip()
-                    
-                parsed_json = json.loads(clean_response)
-                parsed_count += 1
+                with torch.no_grad():
+                    generated_ids = model.generate(
+                        **model_inputs,
+                        max_new_tokens=max_tokens,
+                        pad_token_id=tokenizer.eos_token_id
+                    )
+                # 取得輸出文本
+                generated_ids = [
+                    output_ids[len(input_ids):] for input_ids, output_ids in zip(model_inputs.input_ids, generated_ids)
+                ]
+                response = tokenizer.batch_decode(generated_ids, skip_special_tokens=True)[0]
+                print(f"Raw Output:\n{response}")
                 
-                # 2. 驗證 schema 合規性
-                is_valid, reason = validate_json_schema(parsed_json)
-                if is_valid:
-                    compliant_count += 1
-                    print("✅ Schema Verdict: COMPLIANT")
-                else:
-                    print(f"❌ Schema Verdict: NON-COMPLIANT (Reason: {reason})")
-            except json.JSONDecodeError as je:
-                print(f"❌ Failed to parse output as JSON: {je}")
-        except Exception as ge:
-            print(f"❌ Generation error: {ge}")
-            
-    print("\n=========================================")
-    print(f"📊 Smoke Test Summary (Physical Mode)")
-    print(f"JSON Parse Rate:       {parsed_count}/{total_prompts} ({parsed_count/total_prompts * 100:.1f}%)")
-    print(f"Schema Compliance:     {compliant_count}/{total_prompts} ({compliant_count/total_prompts * 100:.1f}%)")
-    print("=========================================")
-    
-    if compliant_count == total_prompts:
-        return True
-    else:
-        print("⚠️ Warning: Not all generations were schema-compliant.")
+                # 1. 嘗試 parse JSON
+                try:
+                    # 剔除可能存在的 markdown tags
+                    clean_response = response.strip()
+                    if clean_response.startswith("```json"):
+                        clean_response = clean_response.split("```json")[1].split("```")[0].strip()
+                    elif clean_response.startswith("```"):
+                        clean_response = clean_response.split("```")[1].split("```")[0].strip()
+                        
+                    parsed_json = json.loads(clean_response)
+                    parsed_count += 1
+                    
+                    # 2. 驗證 schema 合規性
+                    is_valid, reason = validate_json_schema(parsed_json)
+                    if is_valid:
+                        compliant_count += 1
+                        print("✅ Schema Verdict: COMPLIANT")
+                    else:
+                        print(f"❌ Schema Verdict: NON-COMPLIANT (Reason: {reason})")
+                except json.JSONDecodeError as je:
+                    print(f"❌ Failed to parse output as JSON: {je}")
+            except Exception as ge:
+                print(f"❌ Generation error: {ge}")
+                
+        print("\n=========================================")
+        print(f"📊 Smoke Test Summary (Physical Mode)")
+        print(f"JSON Parse Rate:       {parsed_count}/{total_prompts} ({parsed_count/total_prompts * 100:.1f}%)")
+        print(f"Schema Compliance:     {compliant_count}/{total_prompts} ({compliant_count/total_prompts * 100:.1f}%)")
+        print("=========================================")
+        
+        if compliant_count == total_prompts:
+            return True
+        else:
+            print("⚠️ Warning: Not all generations were schema-compliant.")
+            return False
+    except TimeoutError as te:
+        print(f"❌ {te}")
         return False
+    finally:
+        if timeout_sec and timeout_sec > 0:
+            signal.alarm(0)
 
 def main():
     parser = argparse.ArgumentParser(description="Nexus 3B Student Adapter Integrity and Smoke Test Runner")
     parser.add_argument("--adapter_dir", type=str, default="training/adapters/qwen3b_s2t_adapter")
     parser.add_argument("--run-real", action="store_true", help="Run physical loading and token generation.")
-    parser.add_argument("--device", type=str, default="cpu", choices=["cpu", "cuda", "mps"], help="Device to use for real run.")
+    parser.add_argument("--device", type=str, default="auto", choices=["auto", "cpu", "cuda", "mps"], help="Device to use for real run.")
     parser.add_argument("--max-new-tokens", type=int, default=128, help="Max output tokens for generation.")
     parser.add_argument("--offline", action="store_true", help="Only use local caches, do not hit HF network.")
+    parser.add_argument("--timeout-sec", type=int, default=None, help="Strict timeout in seconds for physical smoke test.")
     parser.add_argument("--write-report-checksums", action="store_true", help="Print checksums in markdown format for copying to report.")
-    parser.add_argument("--verify-report", type=str, default=None, help="Path to report markdown to verify adapter hash against.")
+    parser.add_argument("--verify-report", type=str, default="docs/reports/QWEN3B_S2T_ADAPTER_INTEGRITY_AND_SMOKE_2026-06-12.md", help="Path to report markdown to verify adapter hash against.")
     args = parser.parse_args()
     
     adapter_path = args.adapter_dir
@@ -387,7 +413,7 @@ def main():
     
     # 執行實體加載 (可選)
     if args.run_real:
-        physical_success = run_physical_smoke(adapter_path, args.device, args.max_new_tokens, args.offline)
+        physical_success = run_physical_smoke(adapter_path, args.device, args.max_new_tokens, args.offline, timeout_sec=args.timeout_sec)
         if not physical_success:
             print("❌ Physical load smoke test FAILED.")
             sys.exit(1)
