@@ -88,11 +88,13 @@ class S2T3BAdvisor:
                 for c in candidates
             ]
             input_str = f"Route Features: risk_tier={risk_tier}\nCandidates: {candidate_summaries}"
+            system_prompt = (
+                "You are a Nexus Routing Selector Assistant. Your task is to select the best candidate "
+                "and provide selection reason codes and required verifiers based on the route features "
+                "and candidate summaries. You must strictly output the target JSON."
+            )
             messages = [
-                {
-                    "role": "system",
-                    "content": "You are a S2T selection advisor. Output JSON with selected_candidate_id and selection_reason_codes."
-                },
+                {"role": "system", "content": system_prompt},
                 {"role": "user", "content": input_str}
             ]
             text = self.tokenizer.apply_chat_template(messages, tokenize=False, add_generation_prompt=True)
@@ -110,12 +112,18 @@ class S2T3BAdvisor:
             if "```" in response:
                 response = response.split("```")[1].split("```")[0].strip()
             
-            response_json = json.loads(response)
-            if "selected_candidate_id" not in response_json:
+            try:
+                response_json = json.loads(response)
+            except Exception:
+                import ast
+                try:
+                    response_json = ast.literal_eval(response)
+                except Exception:
+                    return {"abstain_reason": "fail_parse"}
+
+            if not isinstance(response_json, dict) or "selected_candidate_id" not in response_json:
                 return {"abstain_reason": "invalid_schema"}
             return response_json
-        except json.JSONDecodeError:
-            return {"abstain_reason": "fail_parse"}
         except Exception as e:
             return {"abstain_reason": f"generation_or_parse_failed: {e}"}
 

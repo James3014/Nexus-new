@@ -77,6 +77,8 @@ def run_shadow_eval(dataset_path: Path, output_report_path: Path, run_real: bool
         print("🤖 Attempting to load real 3B model for prediction...")
         try:
             import torch
+            torch.set_num_threads(1)
+            torch.set_num_interop_threads(1)
             from transformers import AutoModelForCausalLM, AutoTokenizer
             from peft import PeftModel
             
@@ -88,16 +90,26 @@ def run_shadow_eval(dataset_path: Path, output_report_path: Path, run_real: bool
                 kwargs["local_files_only"] = True
                 
             tokenizer = AutoTokenizer.from_pretrained(base_model_id, trust_remote_code=True, **kwargs)
-            torch_dtype = torch.float16 if device in ["cuda", "mps"] else torch.float32
+            # Use bfloat16 to avoid expensive float32 conversions and reduce RAM usage on CPU
+            torch_dtype = torch.bfloat16
+            
+            # Safe device map resolution to avoid deadlock on Mac CPU
+            import torch
+            device_map = None
+            if device == "cuda":
+                device_map = "cuda"
+            elif device == "auto" and torch.cuda.is_available():
+                device_map = "auto"
+                
             base_model = AutoModelForCausalLM.from_pretrained(
                 base_model_id,
                 torch_dtype=torch_dtype,
-                device_map=device if device != "mps" else None,
+                device_map=device_map,
                 trust_remote_code=True,
                 **kwargs
             )
-            if device == "mps":
-                base_model = base_model.to("mps")
+            if device in ["mps", "cpu"]:
+                base_model = base_model.to(device)
             model = PeftModel.from_pretrained(base_model, adapter_dir, **kwargs)
             model.eval()
             print("✅ Real 3B model and adapter loaded successfully.")
@@ -139,10 +151,16 @@ def run_shadow_eval(dataset_path: Path, output_report_path: Path, run_real: bool
         
         response_json = None
         if run_real and model and tokenizer:
+            response = ""
             try:
                 input_str = f"Route Features: {inputs.get('route_features')}\nCandidates: {candidates_data}"
+                system_prompt = (
+                    "You are a Nexus Routing Selector Assistant. Your task is to select the best candidate "
+                    "and provide selection reason codes and required verifiers based on the route features "
+                    "and candidate summaries. You must strictly output the target JSON."
+                )
                 messages = [
-                    {"role": "system", "content": "You are a Nexus Routing Selector Assistant. Output strictly JSON."},
+                    {"role": "system", "content": system_prompt},
                     {"role": "user", "content": input_str}
                 ]
                 text = tokenizer.apply_chat_template(messages, tokenize=False, add_generation_prompt=True)
@@ -165,8 +183,14 @@ def run_shadow_eval(dataset_path: Path, output_report_path: Path, run_real: bool
                     response = response.split("```json")[1].split("```")[0].strip()
                 elif response.startswith("```"):
                     response = response.split("```")[1].split("```")[0].strip()
-                response_json = json.loads(response)
+                
+                try:
+                    response_json = json.loads(response)
+                except Exception:
+                    import ast
+                    response_json = ast.literal_eval(response)
             except Exception as e:
+                print(f"Raw response: {repr(response)}")
                 print(f"❌ Real generation error: {e}")
                 sys.exit(1) # Fail-closed
         else:
