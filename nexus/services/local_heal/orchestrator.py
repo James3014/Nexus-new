@@ -6,6 +6,7 @@ from nexus.services.local_heal.context import HealContext
 from nexus.services.local_heal.governance_gate import GovernanceGate
 from nexus.services.local_heal.corrector import SelfCorrector
 from nexus.services.local_heal.errors import PatchError, PatchErrorKind
+from nexus.services.local_heal.evidence_compactor import EvidenceCompactor
 
 class HealOrchestrator:
     """🛡️ Nexus Heal Orchestrator (Modular / Strategy-Driven / Fail-Closed)"""
@@ -84,9 +85,8 @@ class HealOrchestrator:
                     ctx.op.runner_completed = True
                     return ctx
 
-            # 強制截斷證據，防止 Phase 4-5 上下文爆炸
-            if len(ctx.op.repro_evidence) > 3000:
-                ctx.op.repro_evidence = ctx.op.repro_evidence[-3000:]
+            # 結構化壓縮證據，防止 Phase 4-5 上下文爆炸
+            ctx.op.repro_evidence = EvidenceCompactor.compact(ctx.op.repro_evidence, limit=3000)
 
             # Phase 4-5: 迭代修復迴圈
             while ctx.op.attempt <= ctx.op.max_tries:

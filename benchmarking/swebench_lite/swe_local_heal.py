@@ -68,7 +68,7 @@ ollama_generate = nexus_local_generate
 def build_result_row(task: dict[str, Any], res_ctx: HealContext) -> dict[str, Any]:
     receipt_path_str = str(getattr(res_ctx, "receipt_path", "") or "")
     receipt_path = Path(receipt_path_str)
-    
+
     receipt_data = {}
     if receipt_path.exists():
         try:
@@ -125,7 +125,7 @@ def build_task_from_spec(
             instance = dataset[spec.swe_index]
         elif spec.instance_id:
             instance = next((row for row in dataset if row["instance_id"] == spec.instance_id), None)
-            
+
         if not instance:
             raise ValueError(f"Task {spec.task_id} not found in dataset")
 
@@ -214,7 +214,7 @@ def build_tasks_from_manifest(
         specs = local_heal_batch1_task_manifest()
     else:
         raise ValueError(f"Unknown task manifest: {manifest_name}")
-        
+
     return build_tasks_from_manifest_specs(
         specs,
         dataset=dataset,
@@ -318,7 +318,7 @@ def ensure_workspace_state(task: dict[str, Any]) -> None:
     if not (repo_dir / ".git").exists():
         if task.get("local_mode"):
             return # Do not clone in local_mode
-            
+
         # 自動 Clone
         repo_map = {
             "astropy": "https://github.com/astropy/astropy.git",
@@ -342,7 +342,7 @@ def ensure_workspace_state(task: dict[str, Any]) -> None:
         res = subprocess.run(["git", "checkout", "-f", base_commit], cwd=str(repo_dir), capture_output=True)
         if res.returncode != 0:
             raise RuntimeError(f"WORKSPACE_CHECKOUT_FAILURE: {res.stderr.decode('utf-8')[:200]}")
-            
+
         res = subprocess.run(["git", "clean", "-fd"], cwd=str(repo_dir), capture_output=True)
         if res.returncode != 0:
             raise RuntimeError(f"WORKSPACE_CLEAN_FAILURE: {res.stderr.decode('utf-8')[:200]}")
@@ -601,13 +601,13 @@ def main() -> None:
                 telemetry_store.records = []
                 res_ctx = pipeline.run(ctx)
                 res_ctx.wall_time_sec = time.time() - start_wall
-                
+
                 # Merge Ollama telemetry details into the context
                 if telemetry_store.records:
                     total_tokens = sum(r.get("prompt_eval_count", 0) + r.get("eval_count", 0) for r in telemetry_store.records)
                     res_ctx.token_total_estimated = total_tokens
                     res_ctx.token_telemetry_status = "success"
-                    
+
                     for idx, record in enumerate(telemetry_store.records):
                         if idx < len(res_ctx.model_decisions):
                             res_ctx.model_decisions[idx]["telemetry"] = record

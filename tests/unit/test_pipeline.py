@@ -506,7 +506,8 @@ def test_pipeline_localize_query_includes_plan_symbols_and_evidence(tmp_path):
     assert "TimeSeries" in captured["rank_query"]
     assert "remove_column" in captured["rank_query"]
     assert captured["search_symbols"] == ["TimeSeries", "remove_column", "_required_columns"]
-    assert "ValueError" not in captured["rank_query"]
+    # 修正：現在 rank_query 會包含 Evidence
+    assert "ValueError" in captured["rank_query"]
     assert "ValueError" in captured["refine_query"]
     assert ctx.localized_files[0][1] == captured["refine_query"]
 

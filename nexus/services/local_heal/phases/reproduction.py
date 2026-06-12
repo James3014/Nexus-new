@@ -8,6 +8,7 @@ from nexus.services.local_heal.context import HealContext
 from nexus.engine.local_model_policy import LocalModelPolicy
 from nexus.services.local_heal.model_result import classify_model_exception
 from nexus.services.local_heal.llm_client import ILLMClient, OllamaLLMClient
+from nexus.services.local_heal.evidence_compactor import EvidenceCompactor
 
 class ReproductionPhase(IPhase):
     """Phase 1: Reproduction (建立物理證據)"""
@@ -145,13 +146,13 @@ class ReproductionPhase(IPhase):
                 reason = "REPRO_NOT_REPRODUCED"
             else:
                 reason = "REPRO_EVIDENCE_TOO_SHORT"
-            
-            # 即使失敗也截斷證據
-            truncated_evidence = evidence[-3000:] if len(evidence) > 3000 else evidence
+
+            # 結構化壓縮證據
+            truncated_evidence = EvidenceCompactor.compact(evidence, limit=3000)
             return ReproductionOutput(success=False, reproduced=False, repro_evidence=truncated_evidence, error_reason=reason, env_denoise=env_denoise_receipt, model_decision=model_decision)
 
-        # 成功重現時也截斷證據以防 Context 爆炸
-        truncated_evidence = evidence[-3000:] if len(evidence) > 3000 else evidence
+        # 成功重現時也壓縮證據以防 Context 爆炸
+        truncated_evidence = EvidenceCompactor.compact(evidence, limit=3000)
         return ReproductionOutput(success=True, reproduced=True, repro_evidence=truncated_evidence, env_denoise=env_denoise_receipt, model_decision=model_decision)
 
     def execute(self, ctx: HealContext) -> PhaseResult:

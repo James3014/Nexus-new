@@ -19,7 +19,7 @@ class PromptBuilder:
             "            return self.query.default_cols\n"
             ">>>>>>> REPLACE\n"
         )
-        
+
         is_7b = False
         if model_name and "7b" in model_name.lower():
             is_7b = True
@@ -77,7 +77,7 @@ class PromptBuilder:
         for path, content in localized_files:
             files_section += f"### FILE: {path}\n{content}\n\n"
             choice_set.append(path)
-        
+
         choice_str = ", ".join(choice_set)
 
         strategy = plan.get("repair_strategy", "Apply surgical fix.")
