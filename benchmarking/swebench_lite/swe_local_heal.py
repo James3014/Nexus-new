@@ -19,7 +19,7 @@ from nexus.services.local_heal.task_manifest import (
 NEXUS_ROOT = Path(__file__).parent.parent.parent.resolve()
 LOCAL_HEAL_ROOT = Path(os.environ.get("NEXUS_LOCAL_HEAL_ROOT_DIR", str(NEXUS_ROOT))).resolve()
 OLLAMA_MODEL = "qwen2.5-coder:14b"
-DEFAULT_OLLAMA_TIMEOUT_SECONDS = 1200
+DEFAULT_OLLAMA_TIMEOUT_SECONDS = 420
 DEFAULT_OLLAMA_NUM_CTX = 4096
 DEFAULT_OLLAMA_NUM_PREDICT = 768
 
@@ -348,7 +348,7 @@ def ensure_workspace_state(task: dict[str, Any]) -> None:
             raise RuntimeError(f"WORKSPACE_CLEAN_FAILURE: {res.stderr.decode('utf-8')[:200]}")
 
         # 2. Compile (如果是 Astropy)
-        if "astropy" in task["instance_id"]:
+        if "astropy" in task["instance_id"] and os.environ.get("NEXUS_NO_COMPILE") != "1":
             print("  ⚙️ Compiling Astropy C extensions (build_ext --inplace)...")
             build_cmd = [python_exe, "setup.py", "build_ext", "--inplace"]
             res = subprocess.run(build_cmd, cwd=str(repo_dir), capture_output=True, text=True)
@@ -360,17 +360,22 @@ def ensure_workspace_state(task: dict[str, Any]) -> None:
             patch_marker = repo_dir / ".nexus_patched_310"
             if not patch_marker.exists():
                 print("  🩹 Applying SymPy compatibility patches (combined)...")
-                # 效能優化：合併多個 sed 並先用 grep 過濾
+                # P0-4: 擴大搜尋範圍至 'collections' 以涵蓋 MutableSet 等直接引用
                 combined_patch = (
-                    f"grep -rIl 'from collections import' {repo_dir}/sympy | "
-                    f"xargs sed -i '' "
+                    f"grep -rIl 'collections' {repo_dir}/sympy | "
+                    f"xargs -I {{}} sed -i '' "
                     f"-e 's/from collections import Mapping, defaultdict/from collections import defaultdict; from collections.abc import Mapping/g' "
                     f"-e 's/from collections import Mapping/from collections.abc import Mapping/g' "
                     f"-e 's/from collections import Callable/from collections.abc import Callable/g' "
                     f"-e 's/from collections import MutableSet/from collections.abc import MutableSet/g' "
+                    f"-e 's/from collections import MutableMapping/from collections.abc import MutableMapping/g' "
+                    f"-e 's/collections.MutableSet/collections.abc.MutableSet/g' "
+                    f"-e 's/collections.Mapping/collections.abc.Mapping/g' "
+                    f"-e 's/collections.Callable/collections.abc.Callable/g' "
+                    f"-e 's/collections.Iterable/collections.abc.Iterable/g' "
                     f"-e 's/from collections import Container/from collections.abc import Container/g' "
-                    f"-e 's/from collections import Iterable/from collections.abc import Iterable/g'"
-                    " 2>/dev/null || true"
+                    f"-e 's/from collections import Iterable/from collections.abc import Iterable/g' "
+                    f"{{}} 2>/dev/null || true"
                 )
                 subprocess.run(combined_patch, shell=True)
                 patch_marker.touch()
@@ -381,6 +386,7 @@ def ensure_workspace_state(task: dict[str, Any]) -> None:
 def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument("--limit", type=int, default=1)
+    parser.add_argument("--no-compile", action="store_true", help="Skip compilation")
     parser.add_argument("--index", type=int, default=0)
     parser.add_argument("--instance_id", type=str, help="Specific instance ID to run")
     parser.add_argument(

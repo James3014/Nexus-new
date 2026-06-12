@@ -88,6 +88,12 @@ class HealOrchestrator:
             # 結構化壓縮證據，防止 Phase 4-5 上下文爆炸
             ctx.op.repro_evidence = EvidenceCompactor.compact(ctx.op.repro_evidence, limit=3000)
 
+            # 上下文容量保護：若定位檔案過多或過大，則動態縮減以防模型超時
+            total_snippet_len = sum(len(f[1]) for f in ctx.op.localized_files)
+            if total_snippet_len > 10000 and len(ctx.op.localized_files) > 3:
+                # 僅保留前 3 個最重要的檔案 (Top-3)
+                ctx.op.localized_files = ctx.op.localized_files[:3]
+
             # Phase 4-5: 迭代修復迴圈
             while ctx.op.attempt <= ctx.op.max_tries:
                 self._reset_workspace(ctx)
@@ -147,6 +153,10 @@ class HealOrchestrator:
                         ctx.op.failure_reason = patch_res.error_reason
                     else:
                         ctx.op.failure_reason = f"{err_kind.name}:{patch_res.error_reason}"
+
+                    # Fail-fast: do not retry infrastructure or extreme timeout errors
+                    if "MODEL_TIMEOUT" in patch_res.error_reason or "MODEL_PROVIDER_ERROR" in patch_res.error_reason:
+                        break
 
                     ctx = self._handle_retry(ctx, err)
                     continue

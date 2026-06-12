@@ -48,7 +48,7 @@ def test_local_model_policy_routes_algebraic_patch_to_ollama_large_by_default(mo
 
     assert decision["model"] == "qwen2.5-coder:14b"
     assert decision["reason_code"] == "algebraic_precision_requirement_ollama"
-    assert decision["timeout_seconds"] == 1200
+    assert decision["timeout_seconds"] == 420
 
 
 def test_local_model_policy_routes_patch_retry_to_large_model(monkeypatch):
@@ -64,7 +64,7 @@ def test_local_model_policy_routes_patch_retry_to_large_model(monkeypatch):
 
     assert decision["model"] == "qwen2.5-coder:14b"
     assert decision["reason_code"] == "retry_precision_escalation_ollama"
-    assert decision["timeout_seconds"] == 1200
+    assert decision["timeout_seconds"] == 420
 
 
 def test_local_model_policy_routes_name_sanity_retry_to_large_model(monkeypatch):
@@ -84,7 +84,7 @@ def test_local_model_policy_routes_name_sanity_retry_to_large_model(monkeypatch)
 
     assert decision["model"] == "qwen2.5-coder:14b"
     assert decision["reason_code"] == "name_sanity_retry_precision_ollama"
-    assert decision["timeout_seconds"] == 1200
+    assert decision["timeout_seconds"] == 420
 
 
 def test_model_profile_resolution(monkeypatch):

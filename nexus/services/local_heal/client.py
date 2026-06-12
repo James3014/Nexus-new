@@ -61,12 +61,28 @@ class OllamaClient:
                     api_type = path.split("/")[-1]
                     self.telemetry_collector.record_call(self.model, api_type, data)
                 return data
-        except (TimeoutError, ConnectionRefusedError):
+        except urllib.error.HTTPError as e:
+            # P0: Catch 500/400 errors from Ollama (e.g. llama-server missing)
+            try:
+                error_body = e.read().decode("utf-8")
+                error_json = json.loads(error_body)
+                error_msg = error_json.get("error", str(e))
+            except Exception:
+                error_msg = str(e)
+            
+            err_data = {"error": f"OllamaHTTPError: {error_msg}"}
+            self._log_call(payload, err_data)
+            # Raise to let the phase classify it as PROVIDER_ERROR
+            raise RuntimeError(f"MODEL_PROVIDER_ERROR: {error_msg}") from e
+        except (TimeoutError, ConnectionRefusedError, urllib.error.URLError) as e:
+            # P0: Connection refused or network unreachable
+            err_data = {"error": f"{type(e).__name__}: {str(e)}"}
+            self._log_call(payload, err_data)
             raise
         except Exception as e:
             err_data = {"error": f"{type(e).__name__}: {str(e)}"}
             self._log_call(payload, err_data)
-            return None
+            raise RuntimeError(f"MODEL_PROVIDER_ERROR: {type(e).__name__}: {str(e)}") from e
 
     def _log_call(self, request_payload: Dict[str, Any], response_data: Dict[str, Any]) -> None:
         if not self.log_path:

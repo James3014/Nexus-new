@@ -41,11 +41,18 @@ class LocalModelPolicy:
     repro/planning and qwen2.5-coder:14b for precision patch retries on Mac.
     """
 
+    # P0-4: Clarify environment variables to prevent accidental overrides
+    # Priority: Explicit Large > Default 14b > Fallback to Legacy generic
     OLLAMA_SMALL = os.environ.get("NEXUS_OLLAMA_SMALL_MODEL", "qwen2.5-coder:7b")
-    OLLAMA_LARGE = os.environ.get("NEXUS_OLLAMA_MODEL", "qwen2.5-coder:14b")
+    OLLAMA_LARGE = os.environ.get("NEXUS_OLLAMA_LARGE_MODEL", "qwen2.5-coder:14b")
+    if os.environ.get("NEXUS_OLLAMA_MODEL") and "NEXUS_OLLAMA_LARGE_MODEL" not in os.environ:
+        # 僅在未指定 Large 且存在舊變數時才回退 (但如果舊變數是 7b 則警告)
+        old_val = os.environ.get("NEXUS_OLLAMA_MODEL")
+        if "7b" not in old_val.lower():
+            OLLAMA_LARGE = old_val
     
     SEARCH_TIMEOUT_SECONDS = int(os.environ.get("NEXUS_SEARCH_TIMEOUT_SECONDS", "600"))
-    PATCH_TIMEOUT_SECONDS = int(os.environ.get("NEXUS_PATCH_TIMEOUT_SECONDS", "1200"))
+    PATCH_TIMEOUT_SECONDS = int(os.environ.get("NEXUS_PATCH_TIMEOUT_SECONDS", "420"))
     REPRO_TIMEOUT_SECONDS = int(os.environ.get("NEXUS_REPRO_TIMEOUT_SECONDS", "600"))
 
     @classmethod
