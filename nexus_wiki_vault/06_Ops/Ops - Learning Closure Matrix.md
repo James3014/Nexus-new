@@ -55,6 +55,8 @@ version_scope:
 | Evidence auto-merge poisoning | 多 Agent 並行時 evidence ledger/graph 自動合併可能吞掉 corrupt input 或超大 artifact | 只對 append-only/commutative evidence formats 啟用 union-merge，並要求 parse/schema validation、size cap、node/record cap 皆 PASS | `pytest tests/contracts/test_hard_gate_compatibility.py` |
 | Plan patch anchor drift | 計劃文件文字與記憶中的段落錨點不同，導致 patch 無法匹配 | 修改計劃前先用 heading/line range 重新定位，再用最小上下文 patch；避免靠記憶中的句子當錨點 | `sed -n '<range>p' docs/plans/<plan>.md` before patch |
 | Document-to-test path drift | 測試回歸通過率因 Wiki 中的連結格式 (如 [Link](Path)) 導致 MISSING_PAGE 失敗 | 禁止修改門禁腳本來包容格式錯誤，必須將 Wiki 修正為與代碼結構相符的純文字路徑 | `scripts/ops/wiki_eval_regression.py` |
+| Real-world LLM format drift in Shadow Eval | 模擬測試全綠，但真實模型因單雙引號與 null/None 混合格式崩潰退出 (Fail-Closed) | 1. 實現 Robust JSON/Python Dict 雙向轉換解析器；2. 評估腳本解析失敗降級為 Warning 不中斷任務；3. 本地執行 python 必須加 -u (unbuffered) 以即時輸出日誌 | `pytest tests/gates/test_s2t_claim_gate.py` |
+
 
 ## Upstream
 - `06_Ops/Ops - Wiki Drift Audit.md`: 漂移訊號來源。 [Source: 06_Ops/Ops - Wiki Drift Audit.md]

@@ -17,6 +17,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 
 from nexus.contracts.s2t_policy import S2TSelector, S2TCandidate
+from nexus.services.s2t_strict import robust_json_parse
 from scripts.train.smoke_test_adapter import validate_json_schema
 
 def calc_sha256(filepath):
@@ -185,12 +186,11 @@ def run_shadow_eval(dataset_path: Path, output_report_path: Path, run_real: bool
                     response = response.split("```")[1].split("```")[0].strip()
                 
                 try:
-                    response_json = json.loads(response)
-                except Exception:
-                    import ast
-                    response_json = ast.literal_eval(response)
+                    response_json = robust_json_parse(response)
+                except Exception as parse_err:
+                    print(f"⚠️ Row {idx} Parse Warning: {parse_err}. Raw response: {repr(response)}")
+                    response_json = None
             except Exception as e:
-                print(f"Raw response: {repr(response)}")
                 print(f"❌ Real generation error: {e}")
                 sys.exit(1) # Fail-closed
         else:
@@ -204,9 +204,11 @@ def run_shadow_eval(dataset_path: Path, output_report_path: Path, run_real: bool
             
         if response_json:
             parsed_count += 1
-            is_valid, _ = validate_json_schema(response_json)
+            is_valid, err_msg = validate_json_schema(response_json)
             if is_valid:
                 compliant_count += 1
+            else:
+                print(f"⚠️ Row {idx} Schema Compliance Fail: {err_msg}. JSON: {response_json}")
                 
                 pred_id = response_json.get("selected_candidate_id")
                 if pred_id != baseline_id:

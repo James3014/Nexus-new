@@ -19,6 +19,40 @@ class S2TStrictDecision:
     advisor_selected_candidate_id: str = ""
     advisor_outcome_status: str = "not_run"
 
+def robust_json_parse(response: str) -> dict:
+    """Robustly parse Qwen model response, translating between JSON/Python dict and handling null/None/true/False."""
+    # 1. 嘗試直接 json.loads
+    try:
+        return json.loads(response)
+    except Exception:
+        pass
+
+    import re
+
+    # 2. 轉換為 JSON 標準格式 (最優解：單引號轉雙引號，以標準 JSON parser 解析，防止破壞字串內部的關鍵詞)
+    try:
+        cleaned = response.replace("'", '"')
+        cleaned = re.sub(r'\bNone\b', 'null', cleaned)
+        cleaned = re.sub(r'\bTrue\b', 'true', cleaned)
+        cleaned = re.sub(r'\bFalse\b', 'false', cleaned)
+        return json.loads(cleaned)
+    except Exception:
+        pass
+
+    # 3. 作為 fallback，使用 ast.literal_eval
+    try:
+        import ast
+        py_str = response
+        py_str = re.sub(r'\bnull\b', 'None', py_str)
+        py_str = re.sub(r'\btrue\b', 'True', py_str)
+        py_str = re.sub(r'\bfalse\b', 'False', py_str)
+        parsed = ast.literal_eval(py_str)
+        if isinstance(parsed, dict):
+            return parsed
+        raise ValueError("Parsed object is not a dictionary")
+    except Exception as e:
+        raise ValueError(f"Failed to parse response: {e}")
+
 
 class S2T3BAdvisor:
     """Interface for Qwen base + LoRA adapter inference."""
@@ -113,13 +147,9 @@ class S2T3BAdvisor:
                 response = response.split("```")[1].split("```")[0].strip()
             
             try:
-                response_json = json.loads(response)
+                response_json = robust_json_parse(response)
             except Exception:
-                import ast
-                try:
-                    response_json = ast.literal_eval(response)
-                except Exception:
-                    return {"abstain_reason": "fail_parse"}
+                return {"abstain_reason": "fail_parse"}
 
             if not isinstance(response_json, dict) or "selected_candidate_id" not in response_json:
                 return {"abstain_reason": "invalid_schema"}

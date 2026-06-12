@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from nexus.contracts.s2t_policy import S2TCandidate
-from nexus.services.s2t_strict import S2TStrictRuntimeGate, S2T3BAdvisor
+from nexus.services.s2t_strict import S2TStrictRuntimeGate, S2T3BAdvisor, robust_json_parse
 
 
 def _candidate(candidate_id: str = "A", *, verifier_result: str = "pass") -> S2TCandidate:
@@ -157,3 +157,34 @@ def test_s2t_strict_gate_evidence_log_format(tmp_path) -> None:
     assert row["trust_mismatch"] is False
     assert "timestamp_utc" in row
     assert row["advisor_status"] == "active_advising"
+
+
+def test_robust_json_parse_various_formats() -> None:
+    # 1. Standard JSON with null and true
+    json_str = '{"selected_candidate_id": "cand-fail-33", "required_verifier": null, "valid": true}'
+    res = robust_json_parse(json_str)
+    assert res["selected_candidate_id"] == "cand-fail-33"
+    assert res["required_verifier"] is None
+    assert res["valid"] is True
+
+    # 2. Standard Python Dict with single quotes and None/True
+    py_dict_str = "{'selected_candidate_id': 'cand-fail-33', 'required_verifier': None, 'valid': True}"
+    res = robust_json_parse(py_dict_str)
+    assert res["selected_candidate_id"] == "cand-fail-33"
+    assert res["required_verifier"] is None
+    assert res["valid"] is True
+
+    # 3. Mixed format (single quotes but null and true)
+    mixed_str = "{'selected_candidate_id': 'cand-fail-33', 'required_verifier': null, 'valid': true}"
+    res = robust_json_parse(mixed_str)
+    assert res["selected_candidate_id"] == "cand-fail-33"
+    assert res["required_verifier"] is None
+    assert res["valid"] is True
+
+    # 4. Dictionary containing "null", "None", "true", "True" as substring or string value
+    boundary_str = "{'selected_candidate_id': 'cand-null-33', 'reason': 'annull', 'flag': 'None_id'}"
+    res = robust_json_parse(boundary_str)
+    assert res["selected_candidate_id"] == "cand-null-33"
+    assert res["reason"] == "annull"
+    assert res["flag"] == "None_id"
+
