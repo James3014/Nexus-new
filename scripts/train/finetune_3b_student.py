@@ -46,12 +46,27 @@ def main():
     parser.add_argument("--epochs", type=int, default=3)
     parser.add_argument("--batch_size", type=int, default=4)
     parser.add_argument("--learning_rate", type=float, default=2e-4)
-    args = parser.parse_args()
+    args, unknown = parser.parse_known_args()
 
     # 1. 載入與預處理資料集
     if not os.path.exists(args.data_path):
-        print(f"❌ Data path not found: {args.data_path}")
-        sys.exit(1)
+        fn = os.path.basename(args.data_path)
+        candidates = [
+            fn,
+            os.path.join("/content", fn),
+            os.path.join("/root", fn),
+            os.path.join("/", fn),
+            os.path.join(os.getcwd(), fn)
+        ]
+        found = False
+        for path in candidates:
+            if os.path.exists(path):
+                args.data_path = path
+                found = True
+                break
+        if not found:
+            print(f"❌ Data path not found. Searched candidates: {candidates}. Current dir is {os.getcwd()}, contents: {os.listdir('.') if os.path.exists('.') else []}")
+            sys.exit(1)
 
     print(f"📖 Loading dataset from {args.data_path}...")
     dataset = load_dataset("json", data_files=args.data_path, split="train")
