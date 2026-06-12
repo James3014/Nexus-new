@@ -52,4 +52,6 @@ def find_closest_snippet(file_content: str, search_text: str, context_hints: lis
                 best_ratio = ratio
                 best_snippet = candidate
                 
+    if best_ratio < 0.4:
+        return ""
     return best_snippet

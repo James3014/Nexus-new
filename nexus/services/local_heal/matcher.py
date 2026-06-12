@@ -204,7 +204,7 @@ class TruncatedMatch:
                     replace_stripped_lines = [r.strip() for r in replace_text.splitlines() if r.strip()]
                     
                     # 如果下一行已經包含在 replace_text 的尾端，將它併入 matched_verbatim_full 中整塊替換，避免尾部重疊重複
-                    if stripped_next in replace_stripped_lines or stripped_next == "return total":
+                    if stripped_next in replace_stripped_lines:
                         matched_verbatim_full += next_line
                     else:
                         break

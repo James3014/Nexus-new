@@ -47,3 +47,15 @@ def test_corrector_routes_name_sanity_to_in_place_definition_retry():
 
     assert "Do NOT create or redefine" in prompt
     assert "Modify the existing definition in place" in prompt
+
+def test_corrector_search_mismatch_fallback_when_closest_match_empty():
+    corrector = SelfCorrector()
+    error = PatchError(
+        kind=PatchErrorKind.SEARCH_MISMATCH,
+        message="SEARCH mismatch in test.py",
+        closest_match=None
+    )
+    prompt = corrector.build_retry_prompt("Original prompt", error)
+    assert "CANONICAL SNIPPET NOT FOUND" in prompt
+    assert "Please carefully check the [SOURCE CONTEXT]" in prompt
+

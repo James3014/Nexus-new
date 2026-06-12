@@ -107,6 +107,13 @@ class SolidSearchReplaceProtocol:
                 intent.search = intent.search.rstrip()
                 return ValidationResult(is_valid=True)
                 
+            # P0-1: 整合 MatchChain fuzzy fallback
+            from nexus.services.local_heal.matcher import MatchChain
+            match_res = MatchChain().find_match(source_text, intent.search, intent.replace)
+            if match_res is not None and match_res.similarity >= 0.85:
+                intent.search = match_res.verbatim_text
+                return ValidationResult(is_valid=True, telemetry={"strategy_used": match_res.strategy_name, "similarity": match_res.similarity})
+                
             return ValidationResult(is_valid=False, error=PatchError(kind=PatchErrorKind.SEARCH_MISMATCH, message=f"SEARCH mismatch in {intent.file_path}"))
             
         return ValidationResult(is_valid=True)

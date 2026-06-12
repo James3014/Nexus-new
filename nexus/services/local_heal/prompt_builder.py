@@ -9,7 +9,7 @@ class PromptBuilder:
     def build_patch_system_prompt(model_name: str | None = None) -> str:
         # P0-4: Few-shot example drastically improves 7B format compliance
         few_shot = (
-            "\n\nEXAMPLE (follow this exact format):\n"
+            "\n\nEXAMPLE 1 (follow this exact format):\n"
             "FILE: django/db/models/query.py\n"
             "<<<<<<< SEARCH\n"
             "        if self.query.is_empty():\n"
@@ -17,6 +17,19 @@ class PromptBuilder:
             "=======\n"
             "        if self.query.is_empty():\n"
             "            return self.query.default_cols\n"
+            ">>>>>>> REPLACE\n"
+            "\n"
+            "EXAMPLE 2:\n"
+            "FILE: astropy/coordinates/angles.py\n"
+            "<<<<<<< SEARCH\n"
+            "    def __str__(self):\n"
+            "        return self.to_string()\n"
+            "=======\n"
+            "    def __str__(self):\n"
+            "        try:\n"
+            "            return self.to_string()\n"
+            "        except Exception:\n"
+            "            return super().__str__()\n"
             ">>>>>>> REPLACE\n"
         )
 
@@ -35,7 +48,10 @@ class PromptBuilder:
                 "=======\n"
                 "<fixed code>\n"
                 ">>>>>>> REPLACE\n"
-                "Rules: 1. SEARCH must match source exactly. 2. Modify in-place.\n"
+                "Rules:\n"
+                "1. SEARCH must match source exactly character-for-character.\n"
+                "2. NO placeholders (e.g. '# ...') in SEARCH or REPLACE block. You must write full code.\n"
+                "3. Modify existing code in-place.\n"
                 + few_shot
             )
 
@@ -50,9 +66,10 @@ class PromptBuilder:
             "<fixed code>\n"
             ">>>>>>> REPLACE\n\n"
             "RULES:\n"
-            "1. SEARCH must match source CHARACTER-FOR-CHARACTER (no placeholders like '# ...').\n"
-            "2. Do NOT redefine top-level classes/functions — modify in-place.\n"
-            "3. Use hasattr()/getattr() before dynamic attribute access.\n"
+            "1. SEARCH must match source CHARACTER-FOR-CHARACTER.\n"
+            "2. NO placeholders (e.g. '# ...', '// ...', '... existing code ...') in SEARCH or REPLACE blocks. You must write out the complete code.\n"
+            "3. Do NOT redefine top-level classes/functions — modify in-place.\n"
+            "4. Use hasattr()/getattr() before dynamic attribute access.\n"
             + few_shot
         )
 
@@ -90,6 +107,7 @@ class PromptBuilder:
             f"[REPRODUCTION]\n{repro_evidence}\n\n"
             f"[STRATEGY: {reasoning_mode}]\n{strategy}\n"
             f"[INVARIANTS]\n{invariants_str}\n\n"
+            f"⚠️ CRITICAL: NO placeholders (e.g., '# ...', '... existing code ...') are allowed. You MUST write out the complete, actual code inside REPLACE block.\n"
             f"⚠️ CRITICAL: You MUST only modify files listed in the [SOURCE CONTEXT] below.\n"
             f"Allowed files: {choice_str}\n\n"
             f"⚠️ VERBATIM RULE: The code below is extracted CHARACTER-FOR-CHARACTER from the actual source files.\n"

@@ -574,9 +574,9 @@ class BattlesuitGateway:
 
     def _ollama_options(self, model_name: str) -> Dict[str, Any]:
         try:
-            from nexus.engine.local_model_policy import LocalModelPolicy
+            from nexus.engine.local_model_policy import ModelProfile
 
-            options = dict(LocalModelPolicy.get_options(model_name) or {})
+            options = dict(ModelProfile.get_options(model_name) or {})
         except Exception:
             options = {}
         for env_key, option_key, caster in (
@@ -588,7 +588,11 @@ class BattlesuitGateway:
             if raw is None or str(raw).strip() == "":
                 continue
             try:
-                options[option_key] = caster(raw)
+                val = caster(raw)
+                if option_key == "num_ctx" and option_key in options:
+                    options[option_key] = max(options[option_key], val)
+                else:
+                    options[option_key] = val
             except ValueError:
                 continue
         return options

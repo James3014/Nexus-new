@@ -101,7 +101,8 @@ def test_model_profile_resolution(monkeypatch):
     assert qwen_decision["model"] == "qwen2.5-coder:7b"
     assert qwen_decision["api_type"] == "generate"
     assert qwen_decision["ollama_options"]["temperature"] == 0.0
-    assert qwen_decision["ollama_options"]["num_predict"] == 768
+    assert qwen_decision["ollama_options"]["num_predict"] == 4096
+    assert qwen_decision["ollama_options"]["num_ctx"] == 16384
 
     # Test Qwen 14b profile options
     qwen14b_decision = LocalModelPolicy.select_model(
@@ -111,9 +112,9 @@ def test_model_profile_resolution(monkeypatch):
     )
     assert qwen14b_decision["model"] == "qwen2.5-coder:14b"
     assert qwen14b_decision["api_type"] == "generate"
-    assert qwen14b_decision["ollama_options"]["temperature"] == 0.0
+    assert qwen14b_decision["ollama_options"]["temperature"] == 0.2
     assert qwen14b_decision["ollama_options"]["num_predict"] == 8192
-    assert qwen14b_decision["ollama_options"]["num_ctx"] == 16384
+    assert qwen14b_decision["ollama_options"]["num_ctx"] == 32768
 
 
 def test_prompt_builder_adapts_to_model_characteristics():
@@ -145,4 +146,31 @@ def test_self_corrector_prevents_warning_accumulation():
     assert second_retry.count("⚠️ [NEXUS BATTLESUIT HUD: CRITICAL WARNING - PREVIOUS ATTEMPT FAILED]") == 1
     assert "Duplicate definition" in second_retry
     assert "Syntax error at line 5" not in second_retry
+
+def test_gateway_ollama_options_downscaling_protection(monkeypatch):
+    import sys
+    from unittest.mock import MagicMock
+    # Mock missing engine modules to prevent import error in test environment
+    sys.modules["nexus.engine.execution"] = MagicMock()
+    sys.modules["nexus.engine.execution.phase_timer"] = MagicMock()
+    sys.modules["nexus.engine.patch.apply_engine"] = MagicMock()
+    
+    monkeypatch.setenv("NEXUS_OLLAMA_NUM_CTX", "12288")
+    from nexus.services.gateway import BattlesuitGateway
+    
+    gateway_inst = BattlesuitGateway.__new__(BattlesuitGateway)
+    
+    # 測試 7b
+    options_7b = gateway_inst._ollama_options("qwen2.5-coder:7b")
+    assert options_7b["num_ctx"] == 16384
+
+    # 測試 14b
+    options_14b = gateway_inst._ollama_options("qwen2.5-coder:14b")
+    assert options_14b["num_ctx"] == 32768
+
+    # 測試如果環境變數設為更大值 65536
+    monkeypatch.setenv("NEXUS_OLLAMA_NUM_CTX", "65536")
+    options_large_env = gateway_inst._ollama_options("qwen2.5-coder:14b")
+    assert options_large_env["num_ctx"] == 65536
+
 

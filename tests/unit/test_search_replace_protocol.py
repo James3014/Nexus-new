@@ -86,3 +86,14 @@ def test_syntax_gate_invalid_python():
     assert not res.is_valid
     assert res.error.kind == PatchErrorKind.SYNTAX_ERROR
     assert "SyntaxError" in res.error.message
+
+def test_protocol_validate_match_chain_fallback():
+    # 建立一個因縮排漂移而無法 verbatim match 的 intent
+    intent = PatchIntent("test.py", "def foo():\n  return 42", "def foo():\n  return 100")
+    source = "def foo():\n    return 42\n"  # 縮排是 4 個空格而非 2 個
+    protocol = SolidSearchReplaceProtocol()
+    res = protocol.validate(intent, source)
+    assert res.is_valid
+    # 驗證 intent.search 是否被 auto-heal 為 verbatim 原始碼 (4空格縮排，且包含尾部換行符)
+    assert intent.search == "def foo():\n    return 42\n"
+

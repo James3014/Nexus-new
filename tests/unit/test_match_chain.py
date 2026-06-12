@@ -53,3 +53,10 @@ def test_difflib_fuzzy_matcher_whitespace_drift():
     res = matcher.match(file_content, search_text)
     assert res is not None
     assert "def foo" in res.verbatim_text
+
+def test_closest_snippet_finder_ratio_threshold():
+    file_content = "x = 1\ny = 2\ndef foo():\n    return x + y\n"
+    search_text = "def bar_completely_different():\n    pass"
+    result = find_closest_snippet(file_content, search_text)
+    assert result == ""
+

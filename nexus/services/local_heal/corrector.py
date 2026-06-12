@@ -44,6 +44,11 @@ class SelfCorrector:
                     f"1. Copy the canonical snippet above exactly. Do NOT fix typos or change formatting in the SEARCH block.\n"
                     f"2. Apply your intended fix ONLY in the REPLACE block.\n"
                 )
+            else:
+                closest_hint = (
+                    f"### [NEXUS WARNING: CANONICAL SNIPPET NOT FOUND]\n"
+                    f"The battlesuit could not verify your SEARCH block in the file. Please carefully check the [SOURCE CONTEXT] below in the prompt and ensure your SEARCH block matches the file content character-for-character, including indentation and newlines.\n"
+                )
             
             retry_instruction = (
                 f"CRITICAL ERROR: Your previous SEARCH block did not match the file content.\n"
