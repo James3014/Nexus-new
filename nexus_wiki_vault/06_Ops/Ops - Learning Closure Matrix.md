@@ -3879,3 +3879,22 @@ version_scope:
 - **Root Cause**: The self-heal trigger condition was coupled with the assumption that the first round must succeed with an LLM-owned candidate, overlooking that a fallback to local is possible and needs self-healing when LLM delivery is mandatory.
 - **Decision**: Unbind the self-heal trigger condition from `used_source.startswith("llm")` when `model_required_final_delivery` is active. This allows LLM self-healing to invoke the model in subsequent rounds to attempt a model-owned correction.
 - **Prevention**: Decouple final delivery constraints from intermediate candidate source states in iterative repair loops.
+
+| Date | ID | Family | Lesson | Action |
+| :--- | :--- | :--- | :--- | :--- |
+| 2026-06-11 | SYMPY_ENV | ENV_PROFILE_MISCONFIGURATION | SymPy depends on mpmath. Global python3 has it but local uv envs might not. | Added sympy-default profile to EnvResolver. |
+| 2026-06-11 | LARGE_REPO_LOC | PERFORMANCE_BOTTLENECK | Reading all .py files in large repos (SymPy) for BM25 is too slow (>15min). | Optimized Localization to prioritize Traceback paths/lines. |
+| 2026-06-11 | ZOMBIE_POLLUTION | WORKSPACE_POLLUTION | Stale background processes write confusing data to shared logs. | Added pkill/cleanup step to Agent bootstrap. |
+
+| Date | ID | Family | Lesson | Action |
+| :--- | :--- | :--- | :--- | :--- |
+| 2026-06-12 | SYMPY_HARNESS_SLOWNESS | HARNESS_EFFICIENCY | Repeatedly scanning 10k+ files in large repos (SymPy) via multiple find+sed calls paralyzes the harness. | Combined sed expressions and added idempotency marker (.nexus_patched_310). |
+| 2026-06-12 | EVIDENCE_BLOAT | CONTEXT_PACKING | Large Tracebacks/Logs (50k+ chars) in repro_evidence lead to context explosion and 14B model hangs. | Implemented global truncation to 3000 chars in Orchestrator. |
+| 2026-06-12 | REDUNDANT_REPRO | PIPELINE_EFFICIENCY | Redundant calls to run_repro inside and outside Phase loops double the reproduction time. | Optimized Phase 1 logic to track success state correctly. |
+| 2026-06-12 | HALLUCINATED_PATHS | MODEL_HALUCINATION | Models hallucinate nonexistent paths (e.g., data_processor.py) if not strictly anchored to Source Context. | Enhanced PromptBuilder to explicitly list Allowed Files in a choice set. |
+
+| Date | ID | Family | Lesson | Action |
+| :--- | :--- | :--- | :--- | :--- |
+| 2026-06-12 | ASTROPY_ENV | ENV_PROFILE_MISCONFIGURATION | Astropy requires erfa/pyerfa for basic functionality. | Added erfa to required_imports in astropy-legacy profile. |
+| 2026-06-12 | METADATA_LOSS | HARNESS_LOGIC_ERROR | swe_local_heal.py missed passing base_commit for single-task runs. | Fixed task dict construction in main(). |
+| 2026-06-12 | RECEIPT_VOLATILITY | PERSISTENCE_WEAKNESS | Pipeline cancellation results in complete loss of Phase progress in receipts. | Noted for future: need atomic phase persistence. |

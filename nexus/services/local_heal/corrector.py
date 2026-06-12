@@ -5,7 +5,7 @@ from nexus.services.local_heal.errors import PatchError, PatchErrorKind
 class SelfCorrector:
     """管理與 LLM 互動的自我糾錯循環 (Self-Correction Loop)，實現 HUDFeedbackRouter 精確分流"""
 
-    def build_retry_prompt(self, original_user_prompt: str, error: Any) -> str:
+    def build_retry_prompt(self, original_user_prompt: str, error: Any, targeted_files: str = "") -> str:
         """
         結合原始 User Prompt 與錯誤類型，分流生成最精確的重試引導 Prompt
         """
@@ -63,12 +63,14 @@ class SelfCorrector:
                 f"You MUST provide a fix using the SEARCH/REPLACE format. If you need more information, assume the provided code context is sufficient."
             )
         elif error.kind == PatchErrorKind.NO_BLOCKS_FOUND:
+            file_hint = f"Focus ONLY on modifying the following files: {targeted_files}\n" if targeted_files else ""
             retry_instruction = (
-                f"CRITICAL ERROR: Your previous response contained ZERO SEARCH/REPLACE blocks!\n"
+                f"CRITICAL ERROR: Your previous response contained ZERO SEARCH/REPLACE blocks (or you modified a non-existent file)!\n"
                 f"You MUST use the exact `<<<<<<< SEARCH` and `>>>>>>> REPLACE` format.\n\n"
+                f"{file_hint}"
                 f"Rules:\n"
-                f"1. NO conversation. NO explanations.\n"
-                f"2. Specify the file clearly: 'FILE: path/to/file.py' before the block.\n"
+                f"1. NO conversation. NO explanations. NO examples.\n"
+                f"2. Specify the file clearly: 'FILE: path/to/file.py' before the block. Use ONLY files provided in the context.\n"
                 f"Output a valid SEARCH/REPLACE block now."
             )
         elif error.kind == PatchErrorKind.NO_EFFECTIVE_CODE_CHANGE:

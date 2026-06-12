@@ -73,8 +73,12 @@ class PromptBuilder:
 
         # 2. Context Compaction
         files_section = ""
+        choice_set = []
         for path, content in localized_files:
             files_section += f"### FILE: {path}\n{content}\n\n"
+            choice_set.append(path)
+        
+        choice_str = ", ".join(choice_set)
 
         strategy = plan.get("repair_strategy", "Apply surgical fix.")
         invariants = plan.get("violated_invariants", [])
@@ -86,11 +90,13 @@ class PromptBuilder:
             f"[REPRODUCTION]\n{repro_evidence}\n\n"
             f"[STRATEGY: {reasoning_mode}]\n{strategy}\n"
             f"[INVARIANTS]\n{invariants_str}\n\n"
+            f"⚠️ CRITICAL: You MUST only modify files listed in the [SOURCE CONTEXT] below.\n"
+            f"Allowed files: {choice_str}\n\n"
             f"⚠️ VERBATIM RULE: The code below is extracted CHARACTER-FOR-CHARACTER from the actual source files.\n"
             f"Your SEARCH block MUST be copied exactly from here. Do NOT rewrite, paraphrase, or invent code.\n"
             f"Line numbers (e.g. '  42 | ') are for reference ONLY — exclude them from your SEARCH block.\n\n"
             f"[SOURCE CONTEXT]\n{files_section}"
             f"CRITICAL: Modify the existing code IN-PLACE using the SEARCH/REPLACE protocol.\n"
             f"CRITICAL: Match the SEARCH block EXACTLY against the [SOURCE CONTEXT].\n"
-            f"Produce the SEARCH/REPLACE blocks now."
+            f"Produce the SEARCH/REPLACE blocks now for the files: {choice_str}"
         )

@@ -25,6 +25,8 @@ class DeterministicSymbolExtractor:
         'python', 'error', 'traceback', 'none', 'true', 'false', 'self',
         'import', 'return', 'class', 'def', 'int', 'str', 'list', 'dict',
         'tuple', 'set', 'type', 'any', 'bool', 'float', 'print',
+        'django', 'auth', 'contrib', 'models', 'fields', 'db', 'utils', 'test',
+        'validator', 'validators', 'username', 'user'
     })
 
     @classmethod

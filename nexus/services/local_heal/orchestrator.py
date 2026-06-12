@@ -84,6 +84,10 @@ class HealOrchestrator:
                     ctx.op.runner_completed = True
                     return ctx
 
+            # 強制截斷證據，防止 Phase 4-5 上下文爆炸
+            if len(ctx.op.repro_evidence) > 3000:
+                ctx.op.repro_evidence = ctx.op.repro_evidence[-3000:]
+
             # Phase 4-5: 迭代修復迴圈
             while ctx.op.attempt <= ctx.op.max_tries:
                 self._reset_workspace(ctx)
@@ -207,7 +211,8 @@ class HealOrchestrator:
         subprocess.run(["git", "clean", "-fd"], cwd=str(ctx.op.repo_dir), capture_output=True)
 
     def _handle_retry(self, ctx: HealContext, error: PatchError) -> HealContext:
-        ctx.op.user_prompt = self.corrector.build_retry_prompt(ctx.op.user_prompt, error)
+        targeted_files = ", ".join([f[0] for f in getattr(ctx.op, "localized_files", [])])
+        ctx.op.user_prompt = self.corrector.build_retry_prompt(ctx.op.user_prompt, error, targeted_files=targeted_files)
         ctx.op.attempt += 1
         return ctx
 

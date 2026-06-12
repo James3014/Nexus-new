@@ -28,54 +28,99 @@ class ReproductionPhase(IPhase):
             self.llm_client = None
 
     def run(self, input_data: ReproductionInput, auto_heal_enabled: bool = False) -> ReproductionOutput:
-        """Stateless TDD-ready execution logic."""
+        """Stateless TDD-ready execution logic with self-correction retry loop."""
         repro_script = input_data.repro_script
         model_decision: Dict[str, Any] = {}
         env_denoise_receipt: Dict[str, Any] = {}
-        
-        # 1. 產生重現腳本
+        success = False
+        evidence = ""
+
+        # 1. 產生重現腳本 (含 Self-Correction Retry Loop)
         if not repro_script:
             decision = LocalModelPolicy.select_model(task_type="swe_repair", phase="reproduction", context={})
             model_decision = {"phase": "reproduction", **decision}
-            prompt = f"Please generate a Python script to reproduce the following issue:\n\n{input_data.problem_statement}\n\nOutput ONLY the script content."
+
+            base_prompt = (
+                f"Please generate a Python script to reproduce the following issue:\n\n"
+                f"{input_data.problem_statement}\n\n"
+                f"CRITICAL REQUIREMENTS:\n"
+                f"1. The script MUST contain an `assert` statement that fails (raises AssertionError) if the bug is present.\n"
+                f"2. Or, if the bug is an exception, catch the exception, print it, and explicitly call `sys.exit(1)`.\n"
+                f"3. If the bug is fixed/absent, the script MUST exit cleanly with code 0.\n"
+                f"4. Be very careful with imports. Only import modules that are mentioned in the issue or standard library.\n"
+                f"5. Output ONLY the Python script content enclosed in ```python...```.\n"
+            )
+
             if not self.llm_client:
                 model_decision["status"] = "NO_LLM_CLIENT"
                 return ReproductionOutput(success=False, reproduced=False, repro_evidence="", error_reason="NO_LLM_CLIENT", model_decision=model_decision)
-            try:
-                response = self.llm_client.generate(
-                    system_prompt="You are a QA engineer.",
-                    user_prompt=prompt,
-                    model=decision["model"],
-                    timeout=decision["timeout_seconds"],
-                    options=decision.get("ollama_options")
-                )
-                if not response:
-                    model_decision["status"] = "NO_REPRO_SCRIPT"
-                    return ReproductionOutput(success=False, reproduced=False, repro_evidence="", error_reason="NO_REPRO_SCRIPT", model_decision=model_decision)
-                
-                clean_script = response
-                if "```" in response:
-                    match = re.search(r"```[a-zA-Z0-9]*\n(.*?)\n```", response, re.DOTALL)
-                    if match:
-                        clean_script = match.group(1)
-                    else:
-                        clean_script = response.replace("```", "")
-                repro_script = clean_script
-            except Exception as e:
-                reason = classify_model_exception(e)
-                model_decision["status"] = reason
-                model_decision["detail"] = str(e)[:500]
-                return ReproductionOutput(success=False, reproduced=False, repro_evidence="", error_reason=reason, model_decision=model_decision)
 
-        # 2. 執行重現
-        success, evidence = self.repro_runner.run_repro(repro_script)
-        
+            max_retries = 2 # 減少重試次數以節省時間
+            current_prompt = base_prompt
+            last_error = ""
+
+            for attempt in range(max_retries):
+                try:
+                    response = self.llm_client.generate(
+                        system_prompt="You are a QA engineer. Your ONLY goal is to write a Python script that reproduces the bug described.",
+                        user_prompt=current_prompt,
+                        model=decision["model"],
+                        timeout=decision["timeout_seconds"],
+                        options=decision.get("ollama_options")
+                    )
+                    if not response:
+                        continue
+
+                    clean_script = response
+                    if "```" in response:
+                        match = re.search(r"```[a-zA-Z0-9]*\n(.*?)\n```", response, re.DOTALL)
+                        if match:
+                            clean_script = match.group(1)
+                        else:
+                            clean_script = response.replace("```", "")
+                    repro_script = clean_script
+
+                    # 測試執行生成的腳本
+                    success, evidence = self.repro_runner.run_repro(repro_script)
+
+                    # 如果成功 (Return code != 0, 觸發 assert 或 exception)，跳出迴圈
+                    if success:
+                        break
+
+                    # 如果失敗，判斷是否為腳本本身的語法或匯入錯誤
+                    if "ImportError" in evidence or "ModuleNotFoundError" in evidence or "SyntaxError" in evidence or "NameError" in evidence:
+                        # 將錯誤反饋給模型，要求修正
+                        current_prompt = (
+                            f"{base_prompt}\n\n"
+                            f"Your previous script failed with the following error:\n"
+                            f"```\n{evidence[-1000:]}\n```\n\n"
+                            f"Please fix the imports or syntax errors and provide the corrected script."
+                        )
+                        last_error = evidence
+                        continue
+                    else:
+                        # 如果不是明顯的腳本錯誤，跳出交給後續的 EnvDenoiser 或判定
+                        break
+
+                except Exception as e:
+                    reason = classify_model_exception(e)
+                    model_decision["status"] = reason
+                    model_decision["detail"] = str(e)[:500]
+                    return ReproductionOutput(success=False, reproduced=False, repro_evidence="", error_reason=reason, model_decision=model_decision)
+
+            if not repro_script:
+                model_decision["status"] = "NO_REPRO_SCRIPT"
+                return ReproductionOutput(success=False, reproduced=False, repro_evidence=last_error, error_reason="NO_REPRO_SCRIPT", model_decision=model_decision)
+        else:
+            # 如果輸入已經有腳本，則執行一次
+            success, evidence = self.repro_runner.run_repro(repro_script)
+
         # 3. 自動環境自癒
         if (
             not success
             and repro_script
             and auto_heal_enabled
-            and self.repro_runner.is_environment_failure(evidence)
+            and getattr(self, "env_denoiser", None)
         ):
             denoise_result = self.env_denoiser.prepare_from_evidence(evidence)
             if hasattr(denoise_result, "to_receipt"):
@@ -90,6 +135,7 @@ class ReproductionPhase(IPhase):
                 python_executable = getattr(denoise_result, "python_executable", "")
                 if python_executable:
                     self.repro_runner.python_executable = python_executable
+                # 換環境後重跑
                 success, evidence = self.repro_runner.run_repro(repro_script)
 
         if not success or not evidence or len(evidence.strip()) < 10:
@@ -99,9 +145,14 @@ class ReproductionPhase(IPhase):
                 reason = "REPRO_NOT_REPRODUCED"
             else:
                 reason = "REPRO_EVIDENCE_TOO_SHORT"
-            return ReproductionOutput(success=False, reproduced=False, repro_evidence=evidence, error_reason=reason, env_denoise=env_denoise_receipt, model_decision=model_decision)
+            
+            # 即使失敗也截斷證據
+            truncated_evidence = evidence[-3000:] if len(evidence) > 3000 else evidence
+            return ReproductionOutput(success=False, reproduced=False, repro_evidence=truncated_evidence, error_reason=reason, env_denoise=env_denoise_receipt, model_decision=model_decision)
 
-        return ReproductionOutput(success=True, reproduced=True, repro_evidence=evidence, env_denoise=env_denoise_receipt, model_decision=model_decision)
+        # 成功重現時也截斷證據以防 Context 爆炸
+        truncated_evidence = evidence[-3000:] if len(evidence) > 3000 else evidence
+        return ReproductionOutput(success=True, reproduced=True, repro_evidence=truncated_evidence, env_denoise=env_denoise_receipt, model_decision=model_decision)
 
     def execute(self, ctx: HealContext) -> PhaseResult:
         if ctx.op.repro_evidence:
@@ -123,14 +174,14 @@ class ReproductionPhase(IPhase):
         )
 
         output = self.run(input_data, auto_heal_enabled=ctx.op.auto_heal_enabled)
-        
+
         ctx.op.repro_evidence = output.repro_evidence
         ctx.op.reproduced = output.reproduced
         if output.env_denoise:
             ctx.op.env_denoise = output.env_denoise
         if output.model_decision:
             ctx.op.model_decisions.append(output.model_decision)
-        
+
         if not output.success:
             return PhaseResult(success=False, exit_layer="repro_runner", error_reason=output.error_reason)
 

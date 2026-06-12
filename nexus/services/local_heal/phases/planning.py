@@ -1,3 +1,4 @@
+import os
 from typing import Any, Dict
 from nexus.services.local_heal.interface import IPhase, PhaseResult, PlanningInput, PlanningOutput
 from nexus.services.local_heal.planner import Planner
@@ -6,6 +7,7 @@ from nexus.engine.local_model_policy import LocalModelPolicy
 from nexus.services.local_heal.model_result import classify_model_exception
 from nexus.services.local_heal.reasoning_router import ReasoningRouter
 from nexus.services.local_heal.llm_client import ILLMClient
+from nexus.services.local_heal.planner import DeterministicSymbolExtractor
 
 class PlanningPhase(IPhase):
     """Phase 2: Planning (戰略規劃)"""
@@ -65,7 +67,15 @@ class PlanningPhase(IPhase):
         ctx.op.model_decisions.append({"phase": "planning", "model": "qwen2.5-coder:7b"})  # Placeholder decision
 
         # 3. 呼叫解耦執行
-        output = self.run(input_data)
+        if os.environ.get("NEXUS_FAST_MODE") == "1":
+            det_symbols = DeterministicSymbolExtractor.extract(input_data.problem_statement, input_data.repro_evidence)
+            output = PlanningOutput(
+                success=True,
+                plan={"search_symbols": det_symbols, "repair_strategy": "FAST_MODE: Deterministic extraction", "violated_invariants": []},
+                model_decision={"phase": "planning", "model": "deterministic"}
+            )
+        else:
+            output = self.run(input_data)
         
         # 覆蓋回 model_decisions
         ctx.op.model_decisions[-1] = {"phase": "planning", **output.model_decision}

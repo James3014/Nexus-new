@@ -355,6 +355,28 @@ def ensure_workspace_state(task: dict[str, Any]) -> None:
             if res.returncode != 0:
                 print(f"  ⚠️ Compilation warning (RC={res.returncode}): {res.stderr[:200]}...")
 
+        # 3. Apply SymPy compatibility patches for Python 3.10+
+        if "sympy" in str(repo_dir):
+            patch_marker = repo_dir / ".nexus_patched_310"
+            if not patch_marker.exists():
+                print("  🩹 Applying SymPy compatibility patches (combined)...")
+                # 效能優化：合併多個 sed 並先用 grep 過濾
+                combined_patch = (
+                    f"grep -rIl 'from collections import' {repo_dir}/sympy | "
+                    f"xargs sed -i '' "
+                    f"-e 's/from collections import Mapping, defaultdict/from collections import defaultdict; from collections.abc import Mapping/g' "
+                    f"-e 's/from collections import Mapping/from collections.abc import Mapping/g' "
+                    f"-e 's/from collections import Callable/from collections.abc import Callable/g' "
+                    f"-e 's/from collections import MutableSet/from collections.abc import MutableSet/g' "
+                    f"-e 's/from collections import Container/from collections.abc import Container/g' "
+                    f"-e 's/from collections import Iterable/from collections.abc import Iterable/g'"
+                    " 2>/dev/null || true"
+                )
+                subprocess.run(combined_patch, shell=True)
+                patch_marker.touch()
+            else:
+                print("  ✅ SymPy compatibility patches already applied.")
+
 
 def main() -> None:
     parser = argparse.ArgumentParser()
@@ -435,20 +457,28 @@ def main() -> None:
                 env_profile = "astropy-legacy"
             elif "django" in args.instance_id:
                 env_profile = "django-legacy"
+            elif "sympy" in args.instance_id:
+                env_profile = "sympy-default"
 
         from nexus.services.local_heal.env_resolver import EnvResolver, requirement_for_profile
         resolver = EnvResolver()
         resolution = resolver.resolve(requirement_for_profile(env_profile))
         python_exe = os.path.abspath(resolution.python_executable) if resolution.ready else ""
 
-        repo_name = "astropy" if "astropy" in args.instance_id else "django" if "django" in args.instance_id else ""
+        repo_name = "astropy" if "astropy" in args.instance_id else "django" if "django" in args.instance_id else "sympy" if "sympy" in args.instance_id else "requests" if "requests" in args.instance_id else "flask" if "flask" in args.instance_id else ""
         task_repo_dir = LOCAL_HEAL_ROOT
         if repo_name:
             task_repo_dir = LOCAL_HEAL_ROOT / ".nexus" / "workspaces" / repo_name
+        else:
+            # Fallback to instance_id prefix if recognized structure
+            parts = args.instance_id.split("__")
+            if len(parts) == 2:
+                task_repo_dir = LOCAL_HEAL_ROOT / ".nexus" / "workspaces" / parts[0].replace("psf", "requests").replace("pallets", "flask")
 
         tasks = [
             {
                 "instance_id": instance["instance_id"],
+                "base_commit": instance.get("base_commit"),
                 "repo_dir": task_repo_dir,
                 "problem_statement": instance["problem_statement"],
                 "env_profile": env_profile,
@@ -462,9 +492,13 @@ def main() -> None:
         )
         for t in tasks:
             inst_id = t["instance_id"]
-            repo_name = "astropy" if "astropy" in inst_id else "django" if "django" in inst_id else ""
+            repo_name = "astropy" if "astropy" in inst_id else "django" if "django" in inst_id else "sympy" if "sympy" in inst_id else "requests" if "requests" in inst_id else "flask" if "flask" in inst_id else ""
             if repo_name:
-                t["repo_dir"] = LOCAL_HEAL_ROOT / ".nexus" / "workspaces" / repo_name
+                t["repo_dir"] = str(LOCAL_HEAL_ROOT / ".nexus" / "workspaces" / repo_name)
+            else:
+                parts = inst_id.split("__")
+                if len(parts) == 2:
+                    t["repo_dir"] = str(LOCAL_HEAL_ROOT / ".nexus" / "workspaces" / parts[0].replace("psf", "requests").replace("pallets", "flask"))
         if args.resume_from:
             completed = read_resume_task_ids(
                 args.resume_from, mode="preflight" if args.preflight_only else "repair"

@@ -17,6 +17,7 @@ class LocalizationPhase(IPhase):
             rank_query = self.localizer.build_query(
                 input_data.problem_statement,
                 search_symbols=input_data.plan.get("search_symbols", []),
+                evidence=input_data.repro_evidence
             )
         else:
             rank_query = input_data.problem_statement

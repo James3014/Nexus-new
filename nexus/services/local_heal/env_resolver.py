@@ -81,7 +81,7 @@ ENV_REQUIREMENTS: dict[str, EnvRequirement] = {
             "python3.10",
         ),
         allowed_python=((3, 9), (3, 10)),
-        required_imports=("numpy", "extension_helpers", "setuptools"),
+        required_imports=("numpy", "extension_helpers", "setuptools", "erfa"),
         required_attributes={"importlib.metadata": ("packages_distributions",)},
         package_constraints={"numpy": "<2.0.0"},
         missing_reason="ASTROPY_VERSION_PARITY_MISSING",
@@ -129,6 +129,13 @@ ENV_REQUIREMENTS: dict[str, EnvRequirement] = {
         ),
         allowed_python=((3, 9), (3, 10)),
         missing_reason="DJANGO_VERSION_PARITY_MISSING",
+    ),
+    "sympy-default": EnvRequirement(
+        profile="sympy-default",
+        python_candidates=("python3",),
+        required_imports=("mpmath",),
+        missing_reason="SYMPY_VERSION_PARITY_MISSING",
+        dependency_missing_reason="SYMPY_MPMATH_MISSING",
     ),
 }
 
