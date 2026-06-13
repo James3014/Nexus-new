@@ -281,4 +281,100 @@ def test_s2t_strict_gate_advisor_forced_by_env(tmp_path, monkeypatch) -> None:
     assert decision.advisor_outcome_status == "active_advising"
 
 
+def test_s2t_strict_gate_advisor_rejects_failed_candidate(tmp_path, monkeypatch) -> None:
+    # 測試當 advisor 推薦了 verifier_result = "fail" 的候選人時，Gate 必須進行過濾並拒絕該推薦，回退到 baseline 決策
+    monkeypatch.setenv("NEXUS_S2T_3B_ADVISOR_FORCE", "1")
+    
+    # 模擬 3B 模型返回選擇 "B" 候選人，而 "B" 是失敗的候選人
+    class MockAdvisor(S2T3BAdvisor):
+        def advise(self, risk_tier, candidates):
+            return {
+                "selected_candidate_id": "B",
+                "selection_reason_codes": ["mock_test_fail"],
+                "required_verifier": None,
+                "abstain_reason": None
+            }
+            
+    log_file = tmp_path / "semantic_fail_evidence.jsonl"
+    gate = S2TStrictRuntimeGate(
+        advisor=MockAdvisor(),
+        evidence_log_path=log_file
+    )
+    
+    candidates = [
+        _candidate("A", verifier_result="pass"),
+        _candidate("B", verifier_result="fail")
+    ]
+    
+    decision = gate.evaluate(
+        task_id="test-task-semantic-fail",
+        risk_tier="medium",
+        candidates=candidates,
+        verifier_result="pass",
+    )
+    
+    # 1. 驗證最終決策由 baseline 控制（選擇了 "A"），不受 "B" 影響
+    assert decision.passed is True
+    assert decision.selected_candidate_id == "A"
+    
+    # 2. 驗證 advisor 的推薦被過濾，決策置空，且狀態記錄為 advisor_semantic_rejected
+    assert decision.advisor_used is True
+    assert decision.advisor_selected_candidate_id == ""
+    assert decision.advisor_outcome_status == "abstained: advisor_semantic_rejected"
+    
+    # 3. 驗證 telemetry 寫入
+    import json
+    lines = log_file.read_text().strip().split("\n")
+    row = json.loads(lines[0])
+    assert row["advisor_selected_id"] == ""
+    assert row["advisor_parse_schema_verdict"] == "advisor_semantic_rejected"
+    assert row["advisor_status"] == "abstained: advisor_semantic_rejected"
+
+
+def test_s2t_strict_gate_advisor_rejects_empty_evidence_candidate(tmp_path, monkeypatch) -> None:
+    # 測試當 advisor 推薦了 evidence_refs 為空的候選人時，Gate 必須過濾該推薦
+    monkeypatch.setenv("NEXUS_S2T_3B_ADVISOR_FORCE", "1")
+    
+    class MockAdvisor(S2T3BAdvisor):
+        def advise(self, risk_tier, candidates):
+            return {
+                "selected_candidate_id": "B",
+                "selection_reason_codes": ["mock_test_empty_evidence"],
+                "required_verifier": None,
+                "abstain_reason": None
+            }
+            
+    log_file = tmp_path / "empty_evidence_evidence.jsonl"
+    gate = S2TStrictRuntimeGate(
+        advisor=MockAdvisor(),
+        evidence_log_path=log_file
+    )
+    
+    # B 候選人其 evidence_refs 為空
+    cand_b = S2TCandidate(
+        candidate_id="B",
+        source="repair_pass",
+        content_ref="",
+        selector_score=0.8,
+        verifier_result="pass",
+        evidence_refs=[]
+    )
+    
+    candidates = [
+        _candidate("A", verifier_result="pass"),
+        cand_b
+    ]
+    
+    decision = gate.evaluate(
+        task_id="test-task-empty-evidence",
+        risk_tier="medium",
+        candidates=candidates,
+        verifier_result="pass",
+    )
+    
+    assert decision.selected_candidate_id == "A"
+    assert decision.advisor_selected_candidate_id == ""
+    assert decision.advisor_outcome_status == "abstained: advisor_semantic_rejected"
+
+
 

@@ -166,7 +166,11 @@ class S2T3BAdvisor:
 
         try:
             candidate_summaries = [
-                {"id": c.candidate_id, "cost": c.selector_score}
+                {
+                    "id": c.candidate_id,
+                    "cost": c.selector_score,
+                    "verifier_result": c.verifier_result,
+                }
                 for c in candidates
             ]
             input_str = f"Route Features: risk_tier={risk_tier}\nCandidates: {candidate_summaries}"
@@ -174,6 +178,10 @@ class S2T3BAdvisor:
                 "You are a Nexus Routing Selector Assistant. Your task is to select the best candidate "
                 "and provide selection reason codes and required verifiers based on the route features "
                 "and candidate summaries.\n"
+                "Safety Rule: You MUST NOT select any candidate with verifier_result='fail'. "
+                "Prefer candidates with verifier_result='pass'. "
+                "If there are no passing candidates or evidence is insufficient, you must abstain by "
+                "setting selected_candidate_id to null and providing an abstain_reason.\n"
                 "You must strictly output a valid JSON object. Do NOT wrap output in markdown blocks (e.g. ```json). "
                 "Do NOT use single quotes for JSON keys or string values (do NOT output Python dict format). "
                 "Every output MUST strictly contain all 4 required keys: 'selected_candidate_id', 'selection_reason_codes', "
@@ -289,16 +297,49 @@ class S2TStrictRuntimeGate:
                     advisor_verdict = res["abstain_reason"]
                     advisor_status = f"abstained: {res['abstain_reason']}"
                 else:
-                    advisor_selected_id = res.get("selected_candidate_id", "")
-                    if advisor_selected_id:
-                        advisor_verdict = "pass"
-                        advisor_status = "active_advising"
+                    raw_id = res.get("selected_candidate_id", "")
+                    if raw_id:
+                        # 🔍 Phase A3: Post-processing Semantic Safety Gate
+                        matched_cand = next((c for c in candidates if str(c.candidate_id) == str(raw_id)), None)
+                        
+                        # 嚴格校驗：必須存在、必須通過、必須有證據
+                        is_safe = (
+                            matched_cand is not None 
+                            and matched_cand.verifier_result == "pass" 
+                            and bool(matched_cand.evidence_refs)
+                        )
+                        
+                        if not is_safe:
+                            advisor_selected_id = ""
+                            advisor_verdict = "advisor_semantic_rejected"
+                            advisor_status = "abstained: advisor_semantic_rejected"
+                        else:
+                            advisor_selected_id = str(raw_id)
+                            advisor_verdict = "pass"
+                            advisor_status = "active_advising"
                     else:
                         advisor_selected_id = ""
                         advisor_verdict = "fail_schema"
                         advisor_status = "abstained: missing_selected_candidate_id"
                 
-        # 4. 記錄 Per-row Evidence
+        # 4. 決策融合 (Assisted Mode)
+        final_selected_id = selection.selected_candidate_id
+        assisted_decision_applied = False
+        
+        assisted_mode = os.environ.get("NEXUS_S2T_3B_ASSISTED_MODE", "0")
+        allowed_risk = os.environ.get("NEXUS_S2T_3B_ALLOWED_RISK", "low")
+        
+        # 只有在 advisor 有效推薦且 risk_tier 符合時才考慮 assisted
+        if run_advisor and advisor_selected_id and (risk_tier == allowed_risk or allowed_risk == "any"):
+            if assisted_mode == "low_risk" or assisted_mode == "1":
+                # 實施正式 Override
+                final_selected_id = advisor_selected_id
+                assisted_decision_applied = True
+            elif assisted_mode == "dry_run":
+                # 記錄 dry_run 意向但不實際 Override
+                assisted_decision_applied = False
+        
+        # 5. 記錄 Per-row Evidence
         if run_advisor:
             trust_mismatch = (verifier_result != "pass")
             evidence_row = {
@@ -311,6 +352,9 @@ class S2TStrictRuntimeGate:
                 "trust_mismatch": trust_mismatch,
                 "advisor_status": advisor_status,
                 "gate_passed": gate_result.gate_passed,
+                "assisted_mode": assisted_mode,
+                "assisted_decision_applied": assisted_decision_applied,
+                "final_selected_id": final_selected_id,
                 "timestamp_utc": datetime.datetime.now(datetime.timezone.utc).isoformat()
             }
             try:
@@ -322,7 +366,7 @@ class S2TStrictRuntimeGate:
                 
         return S2TStrictDecision(
             passed=gate_result.gate_passed,
-            selected_candidate_id=selection.selected_candidate_id,
+            selected_candidate_id=final_selected_id,
             failure_reason=gate_result.failure_reason,
             reason_codes=tuple(selection.reason_codes),
             advisor_used=run_advisor,

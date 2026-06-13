@@ -91,7 +91,7 @@ def run_shadow_eval(dataset_path: Path, output_report_path: Path, run_real: bool
                 
             tokenizer = AutoTokenizer.from_pretrained(base_model_id, trust_remote_code=True, **kwargs)
             # Use bfloat16 to avoid expensive float32 conversions and reduce RAM usage on CPU
-            torch_dtype = torch.bfloat16
+            torch_dtype = torch.float16 if device == "mps" else torch.bfloat16
             
             # Safe device map resolution to avoid deadlock on Mac CPU
             import torch
