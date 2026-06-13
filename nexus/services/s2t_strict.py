@@ -3,6 +3,7 @@ from __future__ import annotations
 import hashlib
 import json
 import datetime
+import logging
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -173,6 +174,87 @@ class S2T3BAdvisor:
             self._load_error = str(exc)
 
     def advise(self, risk_tier: str, candidates: list[S2TCandidate]) -> dict:
+        import os
+        
+        # 模式：NEXUS_S2T_3B_USE_OLLAMA 預設為 "1" (啟用)
+        use_ollama = os.environ.get("NEXUS_S2T_3B_USE_OLLAMA", "1") == "1"
+        if use_ollama:
+            return self._advise_via_ollama(risk_tier, candidates)
+        return self._advise_via_transformers(risk_tier, candidates)
+
+    def _advise_via_ollama(self, risk_tier: str, candidates: list[S2TCandidate]) -> dict:
+        import urllib.request
+        import json
+        import os
+        
+        endpoint = os.getenv("NEXUS_OLLAMA_ENDPOINT", "http://localhost:11434").rstrip("/")
+        model_name = os.getenv("NEXUS_S2T_3B_OLLAMA_MODEL", "qwen2.5-s2t-advisor:3b")
+        
+        candidate_summaries = [
+            {
+                "id": c.candidate_id,
+                "cost": c.selector_score,
+                "verifier_result": c.verifier_result,
+            }
+            for c in candidates
+        ]
+        input_str = f"Route Features: risk_tier={risk_tier}\nCandidates: {candidate_summaries}"
+        system_prompt = (
+            "You are a Nexus Routing Selector Assistant. Your task is to select the best candidate "
+            "and provide selection reason codes and required verifiers based on the route features "
+            "and candidate summaries.\n"
+            "Safety Rule: You MUST NOT select any candidate with verifier_result='fail'. "
+            "Prefer candidates with verifier_result='pass'. "
+            "If there are no passing candidates or evidence is insufficient, you must abstain by "
+            "setting selected_candidate_id to null and providing an abstain_reason.\n"
+            "You must strictly output a valid JSON object. Do NOT wrap output in markdown blocks (e.g. ```json). "
+            "Do NOT use single quotes for JSON keys or string values (do NOT output Python dict format). "
+            "Every output MUST strictly contain all 4 required keys: 'selected_candidate_id', 'selection_reason_codes', "
+            "'required_verifier', 'abstain_reason'. The 'required_verifier' field MUST be null or one of the following "
+            "allowed verifiers: ['pytest', 'claim_gate', 'delivery_gate', 'hidden_verifier']."
+        )
+        
+        request_payload = {
+            "model": model_name,
+            "system": system_prompt,
+            "prompt": input_str,
+            "stream": False,
+            "options": {
+                "temperature": 0.0,
+                "top_p": 0.1,
+            }
+        }
+        
+        try:
+            req = urllib.request.Request(
+                f"{endpoint}/api/generate",
+                data=json.dumps(request_payload).encode("utf-8"),
+                headers={"Content-Type": "application/json"},
+                method="POST"
+            )
+            with urllib.request.urlopen(req, timeout=10) as resp:
+                raw_body = resp.read().decode("utf-8", errors="replace")
+                payload = json.loads(raw_body)
+                output_text = str(payload.get("response") or "").strip()
+                
+            # 剔除 possible markdown
+            if output_text.startswith("```json"):
+                output_text = output_text.split("```json")[1].split("```")[0].strip()
+            elif output_text.startswith("```"):
+                output_text = output_text.split("```")[1].split("```")[0].strip()
+                
+            parsed = robust_json_parse(output_text)
+            if isinstance(parsed, dict) and "selected_candidate_id" in parsed:
+                return parsed
+            return {"abstain_reason": f"invalid_schema_from_ollama: {output_text}"}
+        except Exception as exc:
+            # Fallback
+            logging.getLogger(__name__).warning(
+                "Ollama 3B Advisor call failed (%s). Falling back to native python load.", exc
+            )
+            return self._advise_via_transformers(risk_tier, candidates)
+
+    def _advise_via_transformers(self, risk_tier: str, candidates: list[S2TCandidate]) -> dict:
         self._lazy_load()
         if self._use_simulation:
             if not candidates:
