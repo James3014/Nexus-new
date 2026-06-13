@@ -57,6 +57,14 @@ Nexus 不是另一個 agent，而是治理作業系統與能力戰甲：
 - 根目錄 `task_*.patch`、`*_test.patch`、`element_task_*` 預設是 `ROOT_ARTIFACT_LEAK`，除非任務明確要求保留。
 - 禁止未授權修改 `.obsidian/`、`benchmarks/`、`logs/`、`nexus_swarm/`、`packages/`。
 
+## 4.5) 環境變數與運行門禁 (強制 3B Advisor)
+- 為了確保在測試、評估或解題任務中 100% 啟用 Qwen 3B S2T Advisor v2 輔助決策，Agent 在執行所有任務與測試指令時，**必須**在環境中設定或預載：
+  ```bash
+  NEXUS_S2T_3B_ADVISOR_ENABLED=1
+  NEXUS_S2T_3B_ADVISOR_FORCE=1
+  ```
+- 當 `NEXUS_S2T_3B_ADVISOR_FORCE=1` 時，系統將繞過 10% Canary 分流限制，對所有推理行進行 100% 決策覆蓋與遙測審計。
+
 ## 5) Gates
 一般任務至少回報：
 1. `delivery_gate`

@@ -250,7 +250,7 @@ class S2TStrictRuntimeGate:
             verifier_evidence_ref=verifier_evidence_ref,
         )
         
-        # 2. 10% 顧問分流判定 (基於 task_id hash)
+        # 2. 顧問分流與強制判定 (基於 task_id hash 10% 或 NEXUS_S2T_3B_ADVISOR_FORCE="1")
         run_advisor = False
         advisor_selected_id = ""
         advisor_verdict = "not_run"
@@ -259,15 +259,20 @@ class S2TStrictRuntimeGate:
         # 讀取環境變數 Kill Switch，若為 0 則關閉 advisor
         import os
         env_enabled = os.environ.get("NEXUS_S2T_3B_ADVISOR_ENABLED") != "0"
+        env_force = os.environ.get("NEXUS_S2T_3B_ADVISOR_FORCE") == "1"
         
-        if self.advisor_enabled and task_id:
-            # 取得 task_id hash
-            h_val = int(hashlib.md5(task_id.encode('utf-8')).hexdigest(), 16)
-            if (h_val % 100) < 10:
+        if self.advisor_enabled and (task_id or env_force):
+            is_canary = False
+            if task_id:
+                h_val = int(hashlib.md5(task_id.encode('utf-8')).hexdigest(), 16)
+                if (h_val % 100) < 10:
+                    is_canary = True
+            
+            if env_force or is_canary:
                 if env_enabled:
                     run_advisor = True
                 else:
-                    # 即使命中 10% canary，但因 Kill Switch 關閉，記錄為停用且標記為 telemetry 欄位
+                    # 即使命中，但因 Kill Switch 關閉，記錄為停用且標記為 telemetry 欄位
                     run_advisor = True
                     advisor_status = "advisor_disabled"
                     advisor_verdict = "not_run"

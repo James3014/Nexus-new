@@ -246,3 +246,39 @@ def test_s2t_advisor_kill_switch(tmp_path, monkeypatch) -> None:
     assert row["advisor_parse_schema_verdict"] == "not_run"
 
 
+def test_s2t_strict_gate_advisor_forced_by_env(tmp_path, monkeypatch) -> None:
+    # 測試當 NEXUS_S2T_3B_ADVISOR_FORCE = "1" 時，即使 task_id 不符合 10% canary 也要強制執行 advisor
+    monkeypatch.setenv("NEXUS_S2T_3B_ADVISOR_FORCE", "1")
+    
+    # 找一個不符合 10% canary 的 task_id
+    import hashlib
+    ignored_task_id = ""
+    for i in range(100):
+        tid = f"ignored-task-{i}"
+        h = int(hashlib.md5(tid.encode('utf-8')).hexdigest(), 16) % 100
+        if h >= 10:
+            ignored_task_id = tid
+            break
+            
+    assert ignored_task_id != ""
+    
+    log_file = tmp_path / "forced_evidence.jsonl"
+    gate = S2TStrictRuntimeGate(
+        advisor=S2T3BAdvisor(force_simulation=True),
+        evidence_log_path=log_file
+    )
+    
+    decision = gate.evaluate(
+        task_id=ignored_task_id,
+        risk_tier="medium",
+        candidates=[_candidate()],
+        verifier_result="pass",
+    )
+    
+    # 即使 task_id 本應被 ignored，但因為 env_force 設為 1，所以 advisor 必須被使用
+    assert decision.advisor_used is True
+    assert decision.advisor_selected_candidate_id == "A"
+    assert decision.advisor_outcome_status == "active_advising"
+
+
+
