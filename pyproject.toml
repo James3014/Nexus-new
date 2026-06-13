@@ -67,7 +67,7 @@ slack = ["slack-sdk", "websocket-client"]
 graph = ["langgraph"]
 
 [tool.poetry.scripts]
-nexus = "scripts.engine.nexus_cli:cli"
+nexus = "scripts.engine.nexus_cli:nexus"
 
 [build-system]
 requires = ["poetry-core>=1.0.0"]

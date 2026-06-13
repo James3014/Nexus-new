@@ -1,13 +1,23 @@
 # Nexus Module Inventory & P3 Readiness Audit
 
-## 📊 Module Classification
+## 📊 Module Classification (Field Audit: 2026-06-14)
 
-| Status | Directories | Description |
-|--------|-------------|-------------|
-| **Active** | `engine/`, `core/`, `app/`, `state/`, `telemetry/` | Core P-X-D-R-A-C infrastructure. |
-| **Experimental** | `experimental/`, `market/`, `federation/` | Future features, currently non-critical. |
-| **Legacy** | `pilot_cli/`, `abstention/`, `calibration/` | Older v16-v22 components, candidate for deprecation. |
-| **Benchmark** | `benchmarks/`, `evals/`, `evaluation/` | Test suites and SWE-bench integration. |
+Total Packages: 85+
+
+### 🟢 Active & Tested (High Integrity)
+*Evidence: Packages with established `__init__.py` and matching `test_*.py` in the test suite.*
+
+`ci/`, `classification/`, `contracts/`, `core/`, `delivery/`, `engine/`, `env/`, `evaluation/`, `evidence/`, `gate/`, `health/`, `memory/`, `orchestrator/`, `policy/`, `problem/`, `release/`, `replay/`, `research/`, `search/`, `state/`, `telemetry/`
+
+### 🟡 Active but Untested (Stability Risk)
+*Evidence: Packages found in `nexus/` with logic but no direct unit test coverage detected.*
+
+`abstention/`, `benchmarks/`, `calibration/`, `evals/`, `events/`, `experimental/`, `federation/`, `feedback/`, `guardrails/`, `lanes/`, `lifecycle/`, `market/`, `ops/`, `problem_ingress/`, `receipts/`, `retry_policy/`, `rollout/`, `selection/`, `services/`, `tracing/`, `utils/`, `verifiers/`
+
+### ⚪ Inert or Placeholder (Architecture Debt)
+*Evidence: Directories appearing as empty placeholders or legacy scripts without core library integration.*
+
+`api/`, `app/`, `autopilot/`, `benchmark/`, `bridge/`, `cli/`, `config/`, `connectors/`, `demo/`, `domain/`, `drills/`, `experiments/`, `governance/`, `infrastructure/`, `ingress/`, `knowledge/`, `models/`, `optimize/`, `oracle/`, `override/`, `plugins/`, `reactions/`, `reports/`, `resilience/`, `schemas/`, `scripts/`, `skills/`
 
 ## 🦀 Rust Crate Boundary Audit
 
