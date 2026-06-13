@@ -1,0 +1,40 @@
+name: Nexus Lint CI
+
+on:
+  push:
+    branches: [main, master, 'feature/**']
+  pull_request:
+    branches: [main, master]
+  workflow_dispatch:
+
+jobs:
+  lint:
+    name: Run Ruff Lint
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python 3.12
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install uv
+        run: curl -LsSf https://astral.sh/uv/install.sh | sh
+
+      - name: Install dependencies
+        run: |
+          uv sync --frozen --all-groups
+        env:
+          UV_SYSTEM_PYTHON: 0
+
+      - name: Run Ruff Check
+        run: |
+          uv run ruff check nexus tests
+      
+      - name: Run Ruff Format (Check Only)
+        run: |
+          uv run ruff format --check nexus tests

@@ -70,4 +70,22 @@ build-backend = "poetry.core.masonry.api"
 [dependency-groups]
 dev = [
     "pytest>=9.0.3",
+    "ruff>=0.4.0",
 ]
+
+[tool.ruff]
+# Target Python version
+target-version = "py310"
+line-length = 100
+
+[tool.ruff.lint]
+# Conservative baseline rules:
+# E: Error, F: Pyflakes, I: Isort
+select = ["E", "F", "I"]
+ignore = []
+
+# Allow fix for specific rules
+fixable = ["I"]
+
+[tool.ruff.lint.isort]
+known-first-party = ["nexus"]
