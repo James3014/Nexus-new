@@ -58,6 +58,7 @@ def test_run_bug_prepares_workspace_and_routes_workflow():
     reporter = MagicMock()
     engine, patches, stack = _build_engine(config, reporter=reporter)
     try:
+        engine.pipeline = None
         engine._execute_task_workflow = MagicMock(return_value=True)
 
         result = engine.run_bug(bug_id="bug-123", desc="fix it")
@@ -81,6 +82,7 @@ def test_run_feature_sets_swarm_context_before_workflow():
     reporter = MagicMock()
     engine, _, stack = _build_engine(config, reporter=reporter)
     try:
+        engine.pipeline = None
         engine._execute_task_workflow = MagicMock(return_value=True)
 
         result = engine.run_feature(task_id="feat-1", task="build it", context={"swarm_mode": True})
@@ -299,5 +301,16 @@ def test_execute_task_workflow_delegates_repair_attempt_and_aborts():
         assert result is False
         engine.repair_setup.prepare.assert_called_once_with(state=state, target_env=ANY)
         engine.repair_loop.run.assert_called_once()
+    finally:
+        stack.close()
+
+
+def test_engine_add_step_to_history():
+    config = EngineConfig(project_root=Path("/tmp/nexus_test"), run_dir=Path("/tmp/nexus_test/runs/test-run"), silent=True)
+    engine, _, stack = _build_engine(config, reporter=MagicMock())
+    try:
+        state = NexusState(task_id="test-history-1")
+        # Ensure calling _add_step_to_history does not raise AttributeError and runs successfully
+        engine._add_step_to_history(state, "P", {"test_key": "test_val"})
     finally:
         stack.close()

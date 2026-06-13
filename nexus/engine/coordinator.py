@@ -156,6 +156,10 @@ class NexusEngine:
         except Exception:
             self.pipeline = None
 
+    def _add_step_to_history(self, state: Any, phase: str, metadata: dict | None = None) -> None:
+        """記錄執行步驟到歷史紀錄中 (Stub 預留)"""
+        logger.info("🎬 [History] Phase %s recorded: %s", phase, metadata)
+
     def _detect_direct_mode(self, task_desc: str) -> bool:
         return analyze_task_spec(task_desc).enabled
 
@@ -219,9 +223,7 @@ class NexusEngine:
                     **kwargs,
                 )
             )
-        if not has_runtime_phases:
-            return bool(self._execute_task_workflow(task_id, f"nexus:{task_type}", state=kwargs.get("state")))
-        return bool(self._execute_task_workflow(task_id, f"nexus:{task_type}", state=None))
+        return bool(self._execute_task_workflow(task_id, f"nexus:{task_type}", state=kwargs.get("state")))
 
     def run_bug(self, bug_id: str = "", desc: str = "", **kwargs):
         """執行 Bug 修復循環"""
