@@ -27,7 +27,7 @@ jobs:
 
       - name: Install dependencies
         run: |
-          uv sync --frozen --all-groups
+          uv sync --frozen --all-groups --all-extras
         env:
           UV_SYSTEM_PYTHON: 0
 
