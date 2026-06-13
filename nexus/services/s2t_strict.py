@@ -258,89 +258,102 @@ class S2TStrictRuntimeGate:
             verifier_evidence_ref=verifier_evidence_ref,
         )
         
-        # 2. 顧問分流與強制判定 (基於 task_id hash 10% 或 NEXUS_S2T_3B_ADVISOR_FORCE="1")
+        # 2. 顧問分流與環境策略讀取 (Rollout Control)
+        import os
+
+        # 模式列舉與初始狀態
+        # [off, observation, dry_run, low_risk, medium_observation]
+        assisted_mode = os.environ.get("NEXUS_S2T_3B_ASSISTED_MODE", "0").lower()
+        if assisted_mode in ("0", "false"): assisted_mode = "off"
+        elif assisted_mode in ("1", "true"): assisted_mode = "low_risk"
+
+        canary_rate = int(os.environ.get("NEXUS_S2T_3B_CANARY_RATE", "10"))
+        env_enabled = os.environ.get("NEXUS_S2T_3B_ADVISOR_ENABLED") != "0"
+        env_force = os.environ.get("NEXUS_S2T_3B_ADVISOR_FORCE") == "1"
+
         run_advisor = False
         advisor_selected_id = ""
         advisor_verdict = "not_run"
         advisor_status = "not_run"
-        
-        # 讀取環境變數 Kill Switch，若為 0 則關閉 advisor
-        import os
-        env_enabled = os.environ.get("NEXUS_S2T_3B_ADVISOR_ENABLED") != "0"
-        env_force = os.environ.get("NEXUS_S2T_3B_ADVISOR_FORCE") == "1"
-        
-        if self.advisor_enabled and (task_id or env_force):
-            is_canary = False
+
+        # 決定是否啟動 Advisor 推理
+        if env_enabled and (task_id or env_force):
+            is_in_rate_bucket = False
             if task_id:
                 h_val = int(hashlib.md5(task_id.encode('utf-8')).hexdigest(), 16)
-                if (h_val % 100) < 10:
-                    is_canary = True
-            
-            if env_force or is_canary:
-                if env_enabled:
-                    run_advisor = True
+                if (h_val % 100) < canary_rate:
+                    is_in_rate_bucket = True
+
+            # 觸發條件：強制、在採樣率內、或特定模式需求
+            should_trigger = env_force or is_in_rate_bucket
+
+            if should_trigger:
+                if assisted_mode == "off":
+                    advisor_status = "advisor_disabled_by_mode"
                 else:
-                    # 即使命中，但因 Kill Switch 關閉，記錄為停用且標記為 telemetry 欄位
                     run_advisor = True
-                    advisor_status = "advisor_disabled"
-                    advisor_verdict = "not_run"
-                    
+
         if run_advisor:
-            if advisor_status == "advisor_disabled":
-                # Kill switch 啟用，跳過模型推理與 lazy_load 載入
-                pass
+            # 3. 調用 3B 學生模型顧問進行輔助決策
+            res = self.advisor.advise(risk_tier, candidates)
+            if res.get("abstain_reason") is not None:
+                advisor_selected_id = ""
+                advisor_verdict = res["abstain_reason"]
+                advisor_status = f"abstained: {res['abstain_reason']}"
             else:
-                # 3. 調用 3B 學生模型顧問進行輔助決策
-                res = self.advisor.advise(risk_tier, candidates)
-                if res.get("abstain_reason") is not None:
-                    advisor_selected_id = ""
-                    advisor_verdict = res["abstain_reason"]
-                    advisor_status = f"abstained: {res['abstain_reason']}"
-                else:
-                    raw_id = res.get("selected_candidate_id", "")
-                    if raw_id:
-                        # 🔍 Phase A3: Post-processing Semantic Safety Gate
-                        matched_cand = next((c for c in candidates if str(c.candidate_id) == str(raw_id)), None)
-                        
-                        # 嚴格校驗：必須存在、必須通過、必須有證據
-                        is_safe = (
-                            matched_cand is not None 
-                            and matched_cand.verifier_result == "pass" 
-                            and bool(matched_cand.evidence_refs)
-                        )
-                        
-                        if not is_safe:
-                            advisor_selected_id = ""
-                            advisor_verdict = "advisor_semantic_rejected"
-                            advisor_status = "abstained: advisor_semantic_rejected"
-                        else:
-                            advisor_selected_id = str(raw_id)
-                            advisor_verdict = "pass"
-                            advisor_status = "active_advising"
-                    else:
+                raw_id = res.get("selected_candidate_id", "")
+                if raw_id:
+                    # 🔍 Phase A3: Post-processing Semantic Safety Gate
+                    matched_cand = next((c for c in candidates if str(c.candidate_id) == str(raw_id)), None)
+
+                    # 嚴格校驗：必須存在、必須通過、必須有證據
+                    is_safe = (
+                        matched_cand is not None 
+                        and matched_cand.verifier_result == "pass" 
+                        and bool(matched_cand.evidence_refs)
+                    )
+
+                    if not is_safe:
                         advisor_selected_id = ""
-                        advisor_verdict = "fail_schema"
-                        advisor_status = "abstained: missing_selected_candidate_id"
-                
-        # 4. 決策融合 (Assisted Mode)
+                        advisor_verdict = "advisor_semantic_rejected"
+                        advisor_status = "abstained: advisor_semantic_rejected"
+                    else:
+                        advisor_selected_id = str(raw_id)
+                        advisor_verdict = "pass"
+                        advisor_status = "active_advising"
+                else:
+                    advisor_selected_id = ""
+                    advisor_verdict = "fail_schema"
+                    advisor_status = "abstained: missing_selected_candidate_id"
+
+        # 4. 決策融合與風險限制 (Assisted Mode Decision)
         final_selected_id = selection.selected_candidate_id
         assisted_decision_applied = False
-        
-        assisted_mode = os.environ.get("NEXUS_S2T_3B_ASSISTED_MODE", "0")
+
+        # 風控邊界
         allowed_risk = os.environ.get("NEXUS_S2T_3B_ALLOWED_RISK", "low")
-        
-        # 只有在 advisor 有效推薦且 risk_tier 符合時才考慮 assisted
-        if run_advisor and advisor_selected_id and (risk_tier == allowed_risk or allowed_risk == "any"):
-            if assisted_mode == "low_risk" or assisted_mode == "1":
-                # 實施正式 Override
+
+        # 決策執行邏輯
+        if run_advisor and advisor_selected_id:
+            # A. 針對 low_risk 模式且風險符合
+            if assisted_mode == "low_risk" and risk_tier == "low":
                 final_selected_id = advisor_selected_id
                 assisted_decision_applied = True
+
+            # B. 針對 dry_run (不限風險，僅紀錄意向)
             elif assisted_mode == "dry_run":
-                # 記錄 dry_run 意向但不實際 Override
                 assisted_decision_applied = False
-        
-        # 5. 記錄 Per-row Evidence
-        if run_advisor:
+
+            # C. 針對 medium_observation (僅紀錄意向)
+            elif assisted_mode == "medium_observation" and risk_tier == "medium":
+                assisted_decision_applied = False
+
+            # D. observation 模式 (全風險紀錄，不執行)
+            elif assisted_mode == "observation":
+                assisted_decision_applied = False
+
+        # 5. 記錄 Per-row Evidence (B0 Monitoring)
+        if run_advisor or (task_id and (env_force or (int(hashlib.md5(task_id.encode('utf-8')).hexdigest(), 16) % 100) < canary_rate)):
             trust_mismatch = (verifier_result != "pass")
             evidence_row = {
                 "task_id": task_id,
@@ -353,6 +366,7 @@ class S2TStrictRuntimeGate:
                 "advisor_status": advisor_status,
                 "gate_passed": gate_result.gate_passed,
                 "assisted_mode": assisted_mode,
+                "canary_rate": canary_rate,
                 "assisted_decision_applied": assisted_decision_applied,
                 "final_selected_id": final_selected_id,
                 "timestamp_utc": datetime.datetime.now(datetime.timezone.utc).isoformat()
