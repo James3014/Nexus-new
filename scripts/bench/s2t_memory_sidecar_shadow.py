@@ -60,6 +60,27 @@ class MemorySidecarAdvisor(S2T3BAdvisor):
 
         if self._use_simulation:
             # Mock successful checkpoint for testing infrastructure
+            # Correct logic: if only log is present and its very short, or no receipt
+            if not artifacts.get("receipt") and len(artifacts.get("log", "")) < 100:
+                 return {
+                    "schema": "nexus.s2t_memory_sidecar_checkpoint.v1",
+                    "task_id": task_id,
+                    "mode": "unknown",
+                    "summary": "Abstained due to insufficient evidence.",
+                    "completed_steps": [],
+                    "open_blockers": [],
+                    "failure_family": None,
+                    "evidence_refs": [],
+                    "modified_files": [],
+                    "test_commands": [],
+                    "test_results": [],
+                    "next_action": "wait_for_instruction",
+                    "claim_boundary": "unknown",
+                    "do_not_repeat": [],
+                    "confidence": "low",
+                    "abstain_reason": "insufficient_input_evidence"
+                }
+            
             return {
                 "schema": "nexus.s2t_memory_sidecar_checkpoint.v1",
                 "task_id": task_id,
