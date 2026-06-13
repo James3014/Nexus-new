@@ -1,0 +1,686 @@
+[
+  {
+    "package": "abstention",
+    "status_icon": "\ud83d\udfe1",
+    "category": "Active but Untested",
+    "has_init": true,
+    "test_count": 0,
+    "evidence_basis": "no tests detected",
+    "path": "nexus/abstention/"
+  },
+  {
+    "package": "api",
+    "status_icon": "\u26aa",
+    "category": "Inert or Placeholder",
+    "has_init": false,
+    "test_count": 1,
+    "evidence_basis": "has tests",
+    "path": "nexus/api/"
+  },
+  {
+    "package": "app",
+    "status_icon": "\u26aa",
+    "category": "Inert or Placeholder",
+    "has_init": false,
+    "test_count": 0,
+    "evidence_basis": "no tests detected",
+    "path": "nexus/app/"
+  },
+  {
+    "package": "autopilot",
+    "status_icon": "\u26aa",
+    "category": "Inert or Placeholder",
+    "has_init": false,
+    "test_count": 0,
+    "evidence_basis": "no tests detected",
+    "path": "nexus/autopilot/"
+  },
+  {
+    "package": "benchmark",
+    "status_icon": "\u26aa",
+    "category": "Inert or Placeholder",
+    "has_init": false,
+    "test_count": 1,
+    "evidence_basis": "has tests",
+    "path": "nexus/benchmark/"
+  },
+  {
+    "package": "benchmarks",
+    "status_icon": "\ud83d\udfe1",
+    "category": "Active but Untested",
+    "has_init": true,
+    "test_count": 0,
+    "evidence_basis": "no tests detected",
+    "path": "nexus/benchmarks/"
+  },
+  {
+    "package": "bridge",
+    "status_icon": "\u26aa",
+    "category": "Inert or Placeholder",
+    "has_init": false,
+    "test_count": 0,
+    "evidence_basis": "no tests detected",
+    "path": "nexus/bridge/"
+  },
+  {
+    "package": "calibration",
+    "status_icon": "\ud83d\udfe1",
+    "category": "Active but Untested",
+    "has_init": true,
+    "test_count": 0,
+    "evidence_basis": "no tests detected",
+    "path": "nexus/calibration/"
+  },
+  {
+    "package": "ci",
+    "status_icon": "\ud83d\udfe2",
+    "category": "Active & Tested",
+    "has_init": true,
+    "test_count": 10,
+    "evidence_basis": "has tests",
+    "path": "nexus/ci/"
+  },
+  {
+    "package": "classification",
+    "status_icon": "\ud83d\udfe2",
+    "category": "Active & Tested",
+    "has_init": true,
+    "test_count": 1,
+    "evidence_basis": "has tests",
+    "path": "nexus/classification/"
+  },
+  {
+    "package": "cli",
+    "status_icon": "\u26aa",
+    "category": "Inert or Placeholder",
+    "has_init": false,
+    "test_count": 22,
+    "evidence_basis": "has tests",
+    "path": "nexus/cli/"
+  },
+  {
+    "package": "committee",
+    "status_icon": "\ud83d\udfe1",
+    "category": "Active but Untested",
+    "has_init": true,
+    "test_count": 0,
+    "evidence_basis": "no tests detected",
+    "path": "nexus/committee/"
+  },
+  {
+    "package": "config",
+    "status_icon": "\u26aa",
+    "category": "Inert or Placeholder",
+    "has_init": false,
+    "test_count": 2,
+    "evidence_basis": "has tests",
+    "path": "nexus/config/"
+  },
+  {
+    "package": "connectors",
+    "status_icon": "\u26aa",
+    "category": "Inert or Placeholder",
+    "has_init": false,
+    "test_count": 0,
+    "evidence_basis": "no tests detected",
+    "path": "nexus/connectors/"
+  },
+  {
+    "package": "contracts",
+    "status_icon": "\ud83d\udfe2",
+    "category": "Active & Tested",
+    "has_init": true,
+    "test_count": 2,
+    "evidence_basis": "has tests",
+    "path": "nexus/contracts/"
+  },
+  {
+    "package": "core",
+    "status_icon": "\ud83d\udfe2",
+    "category": "Active & Tested",
+    "has_init": true,
+    "test_count": 5,
+    "evidence_basis": "has tests",
+    "path": "nexus/core/"
+  },
+  {
+    "package": "delivery",
+    "status_icon": "\ud83d\udfe2",
+    "category": "Active & Tested",
+    "has_init": true,
+    "test_count": 1,
+    "evidence_basis": "has tests",
+    "path": "nexus/delivery/"
+  },
+  {
+    "package": "demo",
+    "status_icon": "\u26aa",
+    "category": "Inert or Placeholder",
+    "has_init": false,
+    "test_count": 0,
+    "evidence_basis": "no tests detected",
+    "path": "nexus/demo/"
+  },
+  {
+    "package": "domain",
+    "status_icon": "\u26aa",
+    "category": "Inert or Placeholder",
+    "has_init": false,
+    "test_count": 2,
+    "evidence_basis": "has tests",
+    "path": "nexus/domain/"
+  },
+  {
+    "package": "drills",
+    "status_icon": "\u26aa",
+    "category": "Inert or Placeholder",
+    "has_init": false,
+    "test_count": 0,
+    "evidence_basis": "no tests detected",
+    "path": "nexus/drills/"
+  },
+  {
+    "package": "engine",
+    "status_icon": "\ud83d\udfe2",
+    "category": "Active & Tested",
+    "has_init": true,
+    "test_count": 3,
+    "evidence_basis": "has tests",
+    "path": "nexus/engine/"
+  },
+  {
+    "package": "env",
+    "status_icon": "\ud83d\udfe2",
+    "category": "Active & Tested",
+    "has_init": true,
+    "test_count": 4,
+    "evidence_basis": "has tests",
+    "path": "nexus/env/"
+  },
+  {
+    "package": "evals",
+    "status_icon": "\ud83d\udfe1",
+    "category": "Active but Untested",
+    "has_init": true,
+    "test_count": 0,
+    "evidence_basis": "no tests detected",
+    "path": "nexus/evals/"
+  },
+  {
+    "package": "evaluation",
+    "status_icon": "\ud83d\udfe1",
+    "category": "Active but Untested",
+    "has_init": true,
+    "test_count": 0,
+    "evidence_basis": "no tests detected",
+    "path": "nexus/evaluation/"
+  },
+  {
+    "package": "events",
+    "status_icon": "\ud83d\udfe1",
+    "category": "Active but Untested",
+    "has_init": true,
+    "test_count": 0,
+    "evidence_basis": "no tests detected",
+    "path": "nexus/events/"
+  },
+  {
+    "package": "evidence",
+    "status_icon": "\ud83d\udfe2",
+    "category": "Active & Tested",
+    "has_init": true,
+    "test_count": 18,
+    "evidence_basis": "has tests",
+    "path": "nexus/evidence/"
+  },
+  {
+    "package": "executors",
+    "status_icon": "\ud83d\udfe1",
+    "category": "Active but Untested",
+    "has_init": true,
+    "test_count": 0,
+    "evidence_basis": "no tests detected",
+    "path": "nexus/executors/"
+  },
+  {
+    "package": "experimental",
+    "status_icon": "\ud83d\udfe2",
+    "category": "Active & Tested",
+    "has_init": true,
+    "test_count": 1,
+    "evidence_basis": "has tests",
+    "path": "nexus/experimental/"
+  },
+  {
+    "package": "experiments",
+    "status_icon": "\u26aa",
+    "category": "Inert or Placeholder",
+    "has_init": false,
+    "test_count": 0,
+    "evidence_basis": "no tests detected",
+    "path": "nexus/experiments/"
+  },
+  {
+    "package": "federation",
+    "status_icon": "\ud83d\udfe1",
+    "category": "Active but Untested",
+    "has_init": true,
+    "test_count": 0,
+    "evidence_basis": "no tests detected",
+    "path": "nexus/federation/"
+  },
+  {
+    "package": "feedback",
+    "status_icon": "\ud83d\udfe1",
+    "category": "Active but Untested",
+    "has_init": true,
+    "test_count": 0,
+    "evidence_basis": "no tests detected",
+    "path": "nexus/feedback/"
+  },
+  {
+    "package": "gate",
+    "status_icon": "\ud83d\udfe2",
+    "category": "Active & Tested",
+    "has_init": true,
+    "test_count": 8,
+    "evidence_basis": "has tests",
+    "path": "nexus/gate/"
+  },
+  {
+    "package": "governance",
+    "status_icon": "\u26aa",
+    "category": "Inert or Placeholder",
+    "has_init": false,
+    "test_count": 12,
+    "evidence_basis": "has tests",
+    "path": "nexus/governance/"
+  },
+  {
+    "package": "guardrails",
+    "status_icon": "\ud83d\udfe1",
+    "category": "Active but Untested",
+    "has_init": true,
+    "test_count": 0,
+    "evidence_basis": "no tests detected",
+    "path": "nexus/guardrails/"
+  },
+  {
+    "package": "health",
+    "status_icon": "\ud83d\udfe2",
+    "category": "Active & Tested",
+    "has_init": true,
+    "test_count": 5,
+    "evidence_basis": "has tests",
+    "path": "nexus/health/"
+  },
+  {
+    "package": "infrastructure",
+    "status_icon": "\u26aa",
+    "category": "Inert or Placeholder",
+    "has_init": false,
+    "test_count": 0,
+    "evidence_basis": "no tests detected",
+    "path": "nexus/infrastructure/"
+  },
+  {
+    "package": "ingress",
+    "status_icon": "\u26aa",
+    "category": "Inert or Placeholder",
+    "has_init": false,
+    "test_count": 0,
+    "evidence_basis": "no tests detected",
+    "path": "nexus/ingress/"
+  },
+  {
+    "package": "knowledge",
+    "status_icon": "\u26aa",
+    "category": "Inert or Placeholder",
+    "has_init": false,
+    "test_count": 2,
+    "evidence_basis": "has tests",
+    "path": "nexus/knowledge/"
+  },
+  {
+    "package": "lanes",
+    "status_icon": "\ud83d\udfe1",
+    "category": "Active but Untested",
+    "has_init": true,
+    "test_count": 0,
+    "evidence_basis": "no tests detected",
+    "path": "nexus/lanes/"
+  },
+  {
+    "package": "learning",
+    "status_icon": "\u26aa",
+    "category": "Inert or Placeholder",
+    "has_init": false,
+    "test_count": 3,
+    "evidence_basis": "has tests",
+    "path": "nexus/learning/"
+  },
+  {
+    "package": "lifecycle",
+    "status_icon": "\ud83d\udfe1",
+    "category": "Active but Untested",
+    "has_init": true,
+    "test_count": 0,
+    "evidence_basis": "no tests detected",
+    "path": "nexus/lifecycle/"
+  },
+  {
+    "package": "market",
+    "status_icon": "\ud83d\udfe1",
+    "category": "Active but Untested",
+    "has_init": true,
+    "test_count": 0,
+    "evidence_basis": "no tests detected",
+    "path": "nexus/market/"
+  },
+  {
+    "package": "memory",
+    "status_icon": "\ud83d\udfe2",
+    "category": "Active & Tested",
+    "has_init": true,
+    "test_count": 8,
+    "evidence_basis": "has tests",
+    "path": "nexus/memory/"
+  },
+  {
+    "package": "models",
+    "status_icon": "\u26aa",
+    "category": "Inert or Placeholder",
+    "has_init": false,
+    "test_count": 1,
+    "evidence_basis": "has tests",
+    "path": "nexus/models/"
+  },
+  {
+    "package": "observability",
+    "status_icon": "\ud83d\udfe1",
+    "category": "Active but Untested",
+    "has_init": true,
+    "test_count": 0,
+    "evidence_basis": "no tests detected",
+    "path": "nexus/observability/"
+  },
+  {
+    "package": "ops",
+    "status_icon": "\ud83d\udfe1",
+    "category": "Active but Untested",
+    "has_init": true,
+    "test_count": 0,
+    "evidence_basis": "no tests detected",
+    "path": "nexus/ops/"
+  },
+  {
+    "package": "optimize",
+    "status_icon": "\u26aa",
+    "category": "Inert or Placeholder",
+    "has_init": false,
+    "test_count": 1,
+    "evidence_basis": "has tests",
+    "path": "nexus/optimize/"
+  },
+  {
+    "package": "oracle",
+    "status_icon": "\u26aa",
+    "category": "Inert or Placeholder",
+    "has_init": false,
+    "test_count": 0,
+    "evidence_basis": "no tests detected",
+    "path": "nexus/oracle/"
+  },
+  {
+    "package": "orchestrator",
+    "status_icon": "\ud83d\udfe2",
+    "category": "Active & Tested",
+    "has_init": true,
+    "test_count": 3,
+    "evidence_basis": "has tests",
+    "path": "nexus/orchestrator/"
+  },
+  {
+    "package": "override",
+    "status_icon": "\u26aa",
+    "category": "Inert or Placeholder",
+    "has_init": false,
+    "test_count": 0,
+    "evidence_basis": "no tests detected",
+    "path": "nexus/override/"
+  },
+  {
+    "package": "pilot_cli",
+    "status_icon": "\ud83d\udfe1",
+    "category": "Active but Untested",
+    "has_init": true,
+    "test_count": 0,
+    "evidence_basis": "no tests detected",
+    "path": "nexus/pilot_cli/"
+  },
+  {
+    "package": "plugins",
+    "status_icon": "\u26aa",
+    "category": "Inert or Placeholder",
+    "has_init": false,
+    "test_count": 0,
+    "evidence_basis": "no tests detected",
+    "path": "nexus/plugins/"
+  },
+  {
+    "package": "policy",
+    "status_icon": "\ud83d\udfe2",
+    "category": "Active & Tested",
+    "has_init": true,
+    "test_count": 7,
+    "evidence_basis": "has tests",
+    "path": "nexus/policy/"
+  },
+  {
+    "package": "problem",
+    "status_icon": "\ud83d\udfe2",
+    "category": "Active & Tested",
+    "has_init": true,
+    "test_count": 5,
+    "evidence_basis": "has tests",
+    "path": "nexus/problem/"
+  },
+  {
+    "package": "problem_ingress",
+    "status_icon": "\ud83d\udfe1",
+    "category": "Active but Untested",
+    "has_init": true,
+    "test_count": 0,
+    "evidence_basis": "no tests detected",
+    "path": "nexus/problem_ingress/"
+  },
+  {
+    "package": "reactions",
+    "status_icon": "\u26aa",
+    "category": "Inert or Placeholder",
+    "has_init": false,
+    "test_count": 0,
+    "evidence_basis": "no tests detected",
+    "path": "nexus/reactions/"
+  },
+  {
+    "package": "receipts",
+    "status_icon": "\ud83d\udfe1",
+    "category": "Active but Untested",
+    "has_init": true,
+    "test_count": 0,
+    "evidence_basis": "no tests detected",
+    "path": "nexus/receipts/"
+  },
+  {
+    "package": "release",
+    "status_icon": "\ud83d\udfe2",
+    "category": "Active & Tested",
+    "has_init": true,
+    "test_count": 2,
+    "evidence_basis": "has tests",
+    "path": "nexus/release/"
+  },
+  {
+    "package": "replay",
+    "status_icon": "\ud83d\udfe2",
+    "category": "Active & Tested",
+    "has_init": true,
+    "test_count": 5,
+    "evidence_basis": "has tests",
+    "path": "nexus/replay/"
+  },
+  {
+    "package": "reports",
+    "status_icon": "\u26aa",
+    "category": "Inert or Placeholder",
+    "has_init": false,
+    "test_count": 0,
+    "evidence_basis": "no tests detected",
+    "path": "nexus/reports/"
+  },
+  {
+    "package": "research",
+    "status_icon": "\ud83d\udfe2",
+    "category": "Active & Tested",
+    "has_init": true,
+    "test_count": 14,
+    "evidence_basis": "has tests",
+    "path": "nexus/research/"
+  },
+  {
+    "package": "resilience",
+    "status_icon": "\u26aa",
+    "category": "Inert or Placeholder",
+    "has_init": false,
+    "test_count": 0,
+    "evidence_basis": "no tests detected",
+    "path": "nexus/resilience/"
+  },
+  {
+    "package": "retry_policy",
+    "status_icon": "\ud83d\udfe1",
+    "category": "Active but Untested",
+    "has_init": true,
+    "test_count": 0,
+    "evidence_basis": "no tests detected",
+    "path": "nexus/retry_policy/"
+  },
+  {
+    "package": "rollout",
+    "status_icon": "\ud83d\udfe1",
+    "category": "Active but Untested",
+    "has_init": true,
+    "test_count": 0,
+    "evidence_basis": "no tests detected",
+    "path": "nexus/rollout/"
+  },
+  {
+    "package": "schemas",
+    "status_icon": "\u26aa",
+    "category": "Inert or Placeholder",
+    "has_init": false,
+    "test_count": 0,
+    "evidence_basis": "no tests detected",
+    "path": "nexus/schemas/"
+  },
+  {
+    "package": "scripts",
+    "status_icon": "\u26aa",
+    "category": "Inert or Placeholder",
+    "has_init": false,
+    "test_count": 0,
+    "evidence_basis": "no tests detected",
+    "path": "nexus/scripts/"
+  },
+  {
+    "package": "search",
+    "status_icon": "\ud83d\udfe2",
+    "category": "Active & Tested",
+    "has_init": true,
+    "test_count": 1,
+    "evidence_basis": "has tests",
+    "path": "nexus/search/"
+  },
+  {
+    "package": "security",
+    "status_icon": "\ud83d\udfe1",
+    "category": "Active but Untested",
+    "has_init": true,
+    "test_count": 0,
+    "evidence_basis": "no tests detected",
+    "path": "nexus/security/"
+  },
+  {
+    "package": "selection",
+    "status_icon": "\ud83d\udfe1",
+    "category": "Active but Untested",
+    "has_init": true,
+    "test_count": 0,
+    "evidence_basis": "no tests detected",
+    "path": "nexus/selection/"
+  },
+  {
+    "package": "services",
+    "status_icon": "\ud83d\udfe1",
+    "category": "Active but Untested",
+    "has_init": true,
+    "test_count": 0,
+    "evidence_basis": "no tests detected",
+    "path": "nexus/services/"
+  },
+  {
+    "package": "skills",
+    "status_icon": "\u26aa",
+    "category": "Inert or Placeholder",
+    "has_init": false,
+    "test_count": 5,
+    "evidence_basis": "has tests",
+    "path": "nexus/skills/"
+  },
+  {
+    "package": "state",
+    "status_icon": "\ud83d\udfe2",
+    "category": "Active & Tested",
+    "has_init": true,
+    "test_count": 7,
+    "evidence_basis": "has tests",
+    "path": "nexus/state/"
+  },
+  {
+    "package": "telemetry",
+    "status_icon": "\ud83d\udfe2",
+    "category": "Active & Tested",
+    "has_init": true,
+    "test_count": 2,
+    "evidence_basis": "has tests",
+    "path": "nexus/telemetry/"
+  },
+  {
+    "package": "tracing",
+    "status_icon": "\ud83d\udfe1",
+    "category": "Active but Untested",
+    "has_init": true,
+    "test_count": 0,
+    "evidence_basis": "no tests detected",
+    "path": "nexus/tracing/"
+  },
+  {
+    "package": "utils",
+    "status_icon": "\ud83d\udfe1",
+    "category": "Active but Untested",
+    "has_init": true,
+    "test_count": 0,
+    "evidence_basis": "no tests detected",
+    "path": "nexus/utils/"
+  },
+  {
+    "package": "verifiers",
+    "status_icon": "\ud83d\udfe1",
+    "category": "Active but Untested",
+    "has_init": true,
+    "test_count": 0,
+    "evidence_basis": "no tests detected",
+    "path": "nexus/verifiers/"
+  }
+]

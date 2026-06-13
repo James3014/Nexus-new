@@ -247,8 +247,26 @@ class NexusCLI:
 
 @click.group()
 def nexus():
-    """⚖️ Nexus v23.7 Fleet Command & Sensory CLI"""
+    """⚖️ Nexus v28.3.0 Fleet Command & Sensory CLI"""
     pass
+
+# UX Convergence: Direct Top-Level Commands
+@nexus.command(name="status")
+@click.option("--json", "as_json", is_flag=True)
+@click.pass_context
+def top_status(ctx, as_json):
+    """📊 [Direct] Show system status and trust scores."""
+    ctx.invoke(status, as_json=as_json)
+
+@nexus.command(name="run")
+@click.option("--task", "task_id", required=True)
+@click.option("--complexity", default="medium")
+@click.option("--output-file")
+@click.option("--report-file")
+@click.pass_context
+def top_run(ctx, task_id, complexity, output_file, report_file):
+    """🚀 [Direct] Execute task with autonomic governance."""
+    ctx.invoke(run, task_id=task_id, complexity=complexity, output_file=output_file, report_file=report_file)
 
 
 def _blocked_deprecated(old: str, new: str | None = None):

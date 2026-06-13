@@ -68,8 +68,14 @@ def run_all():
         test_5_crm_integration()
     ]
     
+    import subprocess
+    try:
+        commit_sha = subprocess.check_output(["git", "rev-parse", "HEAD"]).decode("utf-8").strip()
+    except:
+        commit_sha = "unknown"
+    
     report = {
-        "commit_sha": "d11aaff8d8cd10234dbfec74e2d5a6a012796cce",
+        "commit_sha": commit_sha,
         "timestamp": time.time(),
         "nexus_participation_ratio": 0.85,
         "results": results,
