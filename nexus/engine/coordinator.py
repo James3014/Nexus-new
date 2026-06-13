@@ -198,7 +198,7 @@ class NexusEngine:
             if spec.target_files:
                 prior_targets = [str(p) for p in (context.get("target_files") or [])]
                 context["target_files"] = list(dict.fromkeys(prior_targets + spec.target_files))
-            if spec.verify_commands and not context.get("verify_commands"):
+            if spec.verify_commands:
                 context["verify_commands"] = spec.verify_commands
         has_runtime_phases = isinstance(self.phases, dict) and all(
             hasattr(p, "run") for p in self.phases.values() if p is not None
