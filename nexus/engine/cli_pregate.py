@@ -6,6 +6,7 @@ import logging
 import os
 import sys
 import json
+from nexus.engine.target_env_context import TargetEnvContext
 
 logger = logging.getLogger(__name__)
 
@@ -26,14 +27,20 @@ def _get_venv_python(project_root: Path) -> str:
     return sys.executable
 
 def run_cli_pregate(
-    project_root: Path | str,
+    project_root: Path | str | TargetEnvContext,
     commands: List[str],
     timeout_per_cmd: int = 60,
 ) -> Tuple[bool, List[dict]]:
     """
     執行驗證指令列表，回傳 (all_passed, results)
     """
-    project_root = Path(project_root)
+    if isinstance(project_root, TargetEnvContext):
+        target_repo_root = project_root.target_repo_root
+        target_venv = project_root.target_venv
+    else:
+        target_repo_root = Path(project_root)
+        target_venv = target_repo_root / ".venv"
+
     if not commands:
         # === CHANGED: 空指令 → UNVERIFIED（非 pass） ===
         return False, [{
@@ -45,9 +52,18 @@ def run_cli_pregate(
         }]
     
     env = os.environ.copy()
-    venv_bin = str(project_root / ".venv" / "bin")
-    env["PATH"] = f"{venv_bin}{os.pathsep}{env.get('PATH', '')}"
-    env["PYTHONPATH"] = f"{project_root}{os.pathsep}{env.get('PYTHONPATH', '')}"
+    if target_venv:
+        # Mac/Linux
+        venv_bin = target_venv / "bin"
+        if not venv_bin.exists():
+            # Windows
+            venv_bin = target_venv / "Scripts"
+        venv_bin_str = str(venv_bin)
+    else:
+        venv_bin_str = str(target_repo_root / ".venv" / "bin")
+        
+    env["PATH"] = f"{venv_bin_str}{os.pathsep}{env.get('PATH', '')}"
+    env["PYTHONPATH"] = f"{target_repo_root}{os.pathsep}{env.get('PYTHONPATH', '')}"
     
     results = []
     all_passed = True
@@ -58,7 +74,7 @@ def run_cli_pregate(
             proc = subprocess.run(
                 cmd,
                 shell=True,
-                cwd=project_root,
+                cwd=target_repo_root,
                 capture_output=True,
                 text=True,
                 timeout=timeout_per_cmd,
@@ -102,32 +118,82 @@ def run_cli_pregate(
     
     return all_passed, results
 
-def _auto_detect_verify_commands(project_root: Path) -> List[str]:
-    """根據專案語言自動推斷驗證指令"""
-    cmds = []
-    venv_python = _get_venv_python(project_root)
+def detect_project_language(root: Path) -> set[str]:
+    """根據目錄中的檔案偵測專案語言"""
+    langs = set()
+    if (root / "pytest.ini").exists() or (root / "pyproject.toml").exists() or (root / "setup.py").exists() or (root / "requirements.txt").exists():
+        langs.add("python")
+    if (root / "Cargo.toml").exists():
+        langs.add("rust")
+    if (root / "go.mod").exists():
+        langs.add("go")
     
-    # Python
-    if (project_root / "pytest.ini").exists() or (project_root / "pyproject.toml").exists():
-        cmds.append(f"{venv_python} -m pytest --tb=short -q")
-    
-    # Rust
-    if (project_root / "Cargo.toml").exists():
-        cmds.append("cargo test --lib 2>&1")
-    
-    # Go
-    if (project_root / "go.mod").exists():
-        cmds.append("go test ./... 2>&1")
-
-    # Node.js
-    package_json = project_root / "package.json"
+    package_json = root / "package.json"
     if package_json.exists():
-        try:
-            data = json.loads(package_json.read_text(encoding="utf-8"))
-            scripts = data.get("scripts", {}) if isinstance(data, dict) else {}
-            if isinstance(scripts, dict) and scripts.get("test"):
-                cmds.append("npm test --silent 2>&1")
-        except Exception as exc:
-            logger.debug("package_json_parse_failed: %s", exc)
+        langs.add("node")
+    return langs
+
+def resolve_target_python(ctx: TargetEnvContext) -> str:
+    """
+    優先從 target_venv 尋找 Python 直譯器，
+    若無則 fallback 到 target_repo_root / .venv，最後 fallback 到 sys.executable。
+    """
+    if ctx.target_venv:
+        # Mac/Linux
+        python_bin = ctx.target_venv / "bin" / "python3"
+        if not python_bin.exists():
+            # Windows
+            python_bin = ctx.target_venv / "Scripts" / "python.exe"
+        if python_bin.exists():
+            return str(python_bin)
+        
+        if (ctx.target_venv / "bin" / "python").exists():
+            return str(ctx.target_venv / "bin" / "python")
+        if ctx.target_venv.is_file() and os.access(ctx.target_venv, os.X_OK):
+            return str(ctx.target_venv)
+
+    python_bin = ctx.target_repo_root / ".venv" / "bin" / "python3"
+    if not python_bin.exists():
+        python_bin = ctx.target_repo_root / ".venv" / "Scripts" / "python.exe"
+    if python_bin.exists():
+        return str(python_bin)
+
+    return sys.executable
+
+def build_verify_commands(ctx: TargetEnvContext) -> list[str]:
+    """根據 TargetEnvContext 自動偵測並構建驗證指令"""
+    cmds = []
+    langs = detect_project_language(ctx.target_repo_root)
     
+    if "python" in langs:
+        venv_python = resolve_target_python(ctx)
+        cmds.append(f"{venv_python} -m pytest --tb=short -q")
+        
+    if "rust" in langs:
+        cmds.append("cargo test --lib 2>&1")
+        
+    if "go" in langs:
+        cmds.append("go test ./... 2>&1")
+        
+    if "node" in langs:
+        package_json = ctx.target_repo_root / "package.json"
+        if package_json.exists():
+            try:
+                data = json.loads(package_json.read_text(encoding="utf-8"))
+                scripts = data.get("scripts", {}) if isinstance(data, dict) else {}
+                if isinstance(scripts, dict) and scripts.get("test"):
+                    cmds.append("npm test --silent 2>&1")
+            except Exception as exc:
+                logger.debug("package_json_parse_failed: %s", exc)
+                
     return cmds
+
+def _auto_detect_verify_commands(project_root: Path) -> List[str]:
+    """根據專案語言自動推斷驗證指令 (Deprecated)"""
+    ctx = TargetEnvContext(
+        engine_root=project_root,
+        target_repo_root=project_root,
+        target_venv=None,
+        run_dir=None
+    )
+    return build_verify_commands(ctx)

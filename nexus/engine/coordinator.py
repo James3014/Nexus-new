@@ -441,8 +441,11 @@ class NexusEngine:
             
         logger.info("🔮 [Nexus:Predict] Scanning environment for task: %s", task_id)
         
+        from nexus.engine.target_env_context import resolve_target_env
+        target_env = resolve_target_env(self.project_root, task_id, self.run_dir)
+
         try:
-            setup = self.repair_setup.prepare(state=state)
+            setup = self.repair_setup.prepare(state=state, target_env=target_env)
             if not setup.get("proceed"):
                 return False
             verify_cmds = list(setup.get("verify_cmds") or [])
@@ -461,6 +464,7 @@ class NexusEngine:
                 skill_registry=getattr(self, "skill_registry", None),
                 wisdom_vault=getattr(self, "wisdom_vault", None),
                 max_attempts=3,
+                target_env=target_env,
             )
         finally:
             # ⚓ 物理下沉：狀態主權硬化 (Harvest)

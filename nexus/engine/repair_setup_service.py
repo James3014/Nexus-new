@@ -5,6 +5,7 @@ from pathlib import Path
 from typing import Any, Callable
 
 from nexus.engine.cli_pregate import _auto_detect_verify_commands
+from nexus.engine.target_env_context import TargetEnvContext
 
 
 logger = logging.getLogger(__name__)
@@ -28,7 +29,7 @@ class RepairSetupService:
         self.federation = federation
         self.detect_verify_commands_fn = detect_verify_commands_fn
 
-    def prepare(self, *, state: Any) -> dict[str, Any]:
+    def prepare(self, *, state: Any, target_env: TargetEnvContext | None = None) -> dict[str, Any]:
         state.current_phase = "A"
         logger.info("[%s] [Phase A] Hardening audit (AST X-Ray Scan)...", state.task_id)
         generated_code = state.metadata.get("generated_code", "")
@@ -70,8 +71,15 @@ class RepairSetupService:
         else:
             logger.warning("🛑 [NSP:Sensing] Quorum FAIL. Transition: ISOLATED -> FALLBACK_LOCAL")
 
-        verify_cmds = self.detect_verify_commands_fn(self.project_root)
-        skip_pregate = bool(not verify_cmds and not (self.project_root / ".git").exists())
+        if target_env is not None:
+            from nexus.engine.cli_pregate import build_verify_commands
+            verify_cmds = build_verify_commands(target_env)
+            root_for_git = target_env.target_repo_root
+        else:
+            verify_cmds = self.detect_verify_commands_fn(self.project_root)
+            root_for_git = self.project_root
+
+        skip_pregate = bool(not verify_cmds and not (root_for_git / ".git").exists())
         return {
             "proceed": True,
             "reason": "ok",

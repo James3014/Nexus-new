@@ -3,6 +3,7 @@ from __future__ import annotations
 import logging
 from pathlib import Path
 from typing import Any
+from nexus.engine.target_env_context import TargetEnvContext
 
 
 logger = logging.getLogger(__name__)
@@ -31,6 +32,7 @@ class RepairLoopService:
         skill_registry: Any = None,
         wisdom_vault: Any = None,
         max_attempts: int = 3,
+        target_env: TargetEnvContext | None = None,
     ) -> bool:
         state.current_phase = "R"
         for attempt in range(1, max_attempts + 1):
@@ -47,6 +49,7 @@ class RepairLoopService:
                 reflex_loop=reflex_loop,
                 skill_registry=skill_registry,
                 wisdom_vault=wisdom_vault,
+                target_env=target_env,
             )
             if attempt_result.get("status") == "abort":
                 break

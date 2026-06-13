@@ -2,6 +2,7 @@ from typing import Any, Dict, List, Optional, Tuple, Union
 import logging
 import time
 import subprocess
+import re
 from dataclasses import dataclass
 from pathlib import Path
 from nexus.learning.knowledge_index import KnowledgeIndex
@@ -412,6 +413,9 @@ class PipelineRepairMixin:
             ctx.state.metadata["pregate_skip_reason"] = "mock_engine_environment"
             return current_status
         try:
+            from nexus.engine.target_env_context import resolve_target_env
+            target_env = resolve_target_env(self.engine.project_root, ctx.task_id, getattr(self.engine, "run_dir", None))
+
             verify_cmds = list(ctx.state.metadata.get("verification_commands", []))
             # Allow injection of specific verify commands via pack
             pack_verify = ctx.pack.get("verify_commands", [])
@@ -420,7 +424,8 @@ class PipelineRepairMixin:
 
             # Fallback to automatic discovery if no commands provided
             if not verify_cmds:
-                verify_cmds = _auto_detect_verify_commands(self.engine.project_root)
+                from nexus.engine.cli_pregate import build_verify_commands
+                verify_cmds = build_verify_commands(target_env)
 
             if not verify_cmds:
                 ctx.state.metadata["pregate_skip"] = True
@@ -432,7 +437,7 @@ class PipelineRepairMixin:
                 return current_status
 
             logger.info("🚦 CLI Pre-Gate Triggered: Running %d verify commands", len(verify_cmds))
-            passed, results = run_cli_pregate(self.engine.project_root, verify_cmds, timeout_per_cmd=60)
+            passed, results = run_cli_pregate(target_env, verify_cmds, timeout_per_cmd=60)
 
             # Log results to metadata
             ctx.state.metadata["cli_pregate_results"] = results

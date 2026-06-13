@@ -6,6 +6,7 @@ from pathlib import Path
 from typing import Any, Callable
 
 from nexus.engine.cli_pregate import run_cli_pregate
+from nexus.engine.target_env_context import TargetEnvContext
 from nexus.learning.lewm_predictor import LeWMPredictor
 
 
@@ -42,6 +43,7 @@ class RepairAttemptService:
         reflex_loop: Any = None,
         skill_registry: Any = None,
         wisdom_vault: Any = None,
+        target_env: TargetEnvContext | None = None,
     ) -> dict[str, Any]:
         if state.metadata.get("sim_lewm"):
             lewm = self.lewm_cls()
@@ -68,7 +70,17 @@ class RepairAttemptService:
             logger.info("⚔️ [BattleSwarm] Triggering Layer 4 Parallel Repair with %d workers...", workers)
 
             def swarm_worker(_strategy, wt_path, _tid, _desc, _ctx):
-                wt_passed, wt_gates = self.run_cli_pregate_fn(project_root=wt_path, commands=verify_cmds)
+                if target_env is not None:
+                    wt_env = TargetEnvContext(
+                        engine_root=target_env.engine_root,
+                        target_repo_root=Path(wt_path),
+                        target_venv=target_env.target_venv,
+                        run_dir=target_env.run_dir
+                    )
+                    pregate_root = wt_env
+                else:
+                    pregate_root = wt_path
+                wt_passed, wt_gates = self.run_cli_pregate_fn(project_root=pregate_root, commands=verify_cmds)
                 score = (sum(1 for g in wt_gates if g["passed"]) / max(len(wt_gates), 1)) * 10.0
                 return {"passed": wt_passed, "score": score}
 
@@ -106,7 +118,8 @@ class RepairAttemptService:
                         "gate_results": [{"status": "PASSED_VIA_SWARM", "passed": True}],
                     }
 
-                passed, gate_results = self.run_cli_pregate_fn(project_root=run_dir, commands=verify_cmds)
+                effective_project_root = target_env if target_env is not None else run_dir
+                passed, gate_results = self.run_cli_pregate_fn(project_root=effective_project_root, commands=verify_cmds)
                 return {"status": "ok", "passed": bool(passed), "gate_results": gate_results}
             finally:
                 battle_swarm.cleanup(battle_result)
@@ -126,5 +139,6 @@ class RepairAttemptService:
                 ],
             }
 
-        passed, gate_results = self.run_cli_pregate_fn(project_root=run_dir, commands=verify_cmds)
+        effective_project_root = target_env if target_env is not None else run_dir
+        passed, gate_results = self.run_cli_pregate_fn(project_root=effective_project_root, commands=verify_cmds)
         return {"status": "ok", "passed": bool(passed), "gate_results": gate_results}

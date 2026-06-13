@@ -1,6 +1,6 @@
 from contextlib import ExitStack
 from pathlib import Path
-from unittest.mock import MagicMock, patch
+from unittest.mock import MagicMock, patch, ANY
 
 from nexus.core.state_contracts import NexusState
 from nexus.engine.config import EngineConfig
@@ -297,7 +297,7 @@ def test_execute_task_workflow_delegates_repair_attempt_and_aborts():
         result = engine._execute_task_workflow("repair-attempt-1", "nexus:bug", state=state)
 
         assert result is False
-        engine.repair_setup.prepare.assert_called_once_with(state=state)
+        engine.repair_setup.prepare.assert_called_once_with(state=state, target_env=ANY)
         engine.repair_loop.run.assert_called_once()
     finally:
         stack.close()
