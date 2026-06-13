@@ -38,3 +38,29 @@ def test_resolve_target_env_sympy(tmp_path):
     assert ctx.engine_root == tmp_path
     assert ctx.target_repo_root == sympy_repo
     assert ctx.target_venv == sympy_venv
+
+def test_resolve_target_env_by_desc(tmp_path):
+    from nexus.engine.target_env_context import resolve_target_env
+    
+    sympy_repo = tmp_path / ".nexus" / "workspaces" / "sympy"
+    sympy_repo.mkdir(parents=True)
+    sympy_venv = tmp_path / ".venv_sympy"
+    sympy_venv.mkdir()
+    
+    ctx = resolve_target_env(tmp_path, "bug-123456", task_desc="sympy__sympy-12096")
+    assert ctx.engine_root == tmp_path
+    assert ctx.target_repo_root == sympy_repo
+    assert ctx.target_venv == sympy_venv
+
+def test_resolve_target_env_by_desc(tmp_path):
+    from nexus.engine.target_env_context import resolve_target_env
+    
+    sympy_repo = tmp_path / ".nexus" / "workspaces" / "sympy"
+    sympy_repo.mkdir(parents=True)
+    sympy_venv = tmp_path / ".venv_sympy"
+    sympy_venv.mkdir()
+    
+    ctx = resolve_target_env(tmp_path, "bug-123456", task_desc="sympy__sympy-12096")
+    assert ctx.engine_root == tmp_path
+    assert ctx.target_repo_root == sympy_repo
+    assert ctx.target_venv == sympy_venv

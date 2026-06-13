@@ -9,10 +9,11 @@ class TargetEnvContext:
     target_venv: Path | None = None # 目標專案的虛擬環境路徑
     run_dir: Path | None = None     # 階段性執行日誌目錄
 
-def resolve_target_env(engine_root: Path, task_id: str, run_dir: Path | None = None) -> TargetEnvContext:
-    """根據 task_id 自動推斷被解題專案的 workspace 與 venv"""
+def resolve_target_env(engine_root: Path, task_id: str, run_dir: Path | None = None, task_desc: str | None = None) -> TargetEnvContext:
+    """根據 task_id 或 task_desc 自動推斷被解題專案的 workspace 與 venv"""
     engine_root = Path(engine_root)
     task_id_lower = str(task_id or "").lower()
+    task_desc_lower = str(task_desc or "").lower()
     
     target_repo_root = engine_root
     target_venv = None
@@ -26,7 +27,7 @@ def resolve_target_env(engine_root: Path, task_id: str, run_dir: Path | None = N
     }
     
     for key, (repo_folder, venv_folder) in supported_repos.items():
-        if key in task_id_lower:
+        if key in task_id_lower or key in task_desc_lower:
             candidate_repo = engine_root / ".nexus" / "workspaces" / repo_folder
             candidate_venv = engine_root / f".venv_{venv_folder}"
             

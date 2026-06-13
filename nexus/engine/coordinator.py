@@ -442,7 +442,7 @@ class NexusEngine:
         logger.info("🔮 [Nexus:Predict] Scanning environment for task: %s", task_id)
         
         from nexus.engine.target_env_context import resolve_target_env
-        target_env = resolve_target_env(self.project_root, task_id, self.run_dir)
+        target_env = resolve_target_env(self.project_root, task_id, self.run_dir, task_desc=task_desc)
 
         try:
             setup = self.repair_setup.prepare(state=state, target_env=target_env)

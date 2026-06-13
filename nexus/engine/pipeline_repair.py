@@ -414,7 +414,7 @@ class PipelineRepairMixin:
             return current_status
         try:
             from nexus.engine.target_env_context import resolve_target_env
-            target_env = resolve_target_env(self.engine.project_root, ctx.task_id, getattr(self.engine, "run_dir", None))
+            target_env = resolve_target_env(self.engine.project_root, ctx.task_id, getattr(self.engine, "run_dir", None), task_desc=ctx.task_desc)
 
             verify_cmds = list(ctx.state.metadata.get("verification_commands", []))
             # Allow injection of specific verify commands via pack
