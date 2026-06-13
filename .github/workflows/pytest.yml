@@ -32,8 +32,25 @@ jobs:
           UV_SYSTEM_PYTHON: 0
 
       - name: Run Pytest (Fail Fast)
+        id: run-pytest
         run: |
-          uv run pytest tests/ -x -v --timeout=300
+          uv run pytest tests/ -x -v --timeout=300 --junitxml=pytest-report.xml > pytest-stdout.log 2>&1
         env:
           NEXUS_TEST_MODE: CI
           PYTHONPATH: .
+
+      - name: Capture Failure Tail
+        if: failure()
+        run: |
+          echo "## ❌ Pytest Failure Tail" >> $GITHUB_STEP_SUMMARY
+          tail -n 100 pytest-stdout.log >> $GITHUB_STEP_SUMMARY
+
+      - name: Archive Test Results 📦
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: pytest-results-${{ github.sha }}
+          path: |
+            pytest-report.xml
+            pytest-stdout.log
+          retention-days: 7

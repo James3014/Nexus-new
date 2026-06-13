@@ -36,22 +36,33 @@ jobs:
         env:
           UV_SYSTEM_PYTHON: 0
 
-      - name: Run Ruff Check (Changed Files Only)
+      - name: Detect Changed Files (Commit-safe vs PR-safe)
+        id: files
         run: |
-          # Get list of changed python files
-          CHANGED_FILES=$(git diff --name-only --diff-filter=ACMR origin/main...HEAD -- '*.py')
-          if [ -n "$CHANGED_FILES" ]; then
-            echo "Linting: $CHANGED_FILES"
-            uv run ruff check $CHANGED_FILES
+          if [ "${{ github.event_name }}" == "pull_request" ]; then
+            echo "Mode: PR-safe (diff against origin/main)"
+            FILES=$(git diff --name-only --diff-filter=ACMR origin/main...HEAD -- '*.py')
           else
-            echo "No changed python files to lint."
+            echo "Mode: Commit-safe (diff against HEAD~1)"
+            # Handle cases where HEAD~1 might not exist (e.g. initial commit)
+            FILES=$(git diff --name-only --diff-filter=ACMR HEAD~1...HEAD -- '*.py' || git ls-files -- '*.py')
           fi
+          
+          # Clean up whitespace and newlines for GitHub output
+          FILES_CLEAN=$(echo $FILES | tr '\n' ' ')
+          echo "changed_files=$FILES_CLEAN" >> $GITHUB_OUTPUT
+          echo "Detected files: $FILES_CLEAN"
+
+      - name: Run Ruff Check
+        if: steps.files.outputs.changed_files != ''
+        run: |
+          uv run ruff check ${{ steps.files.outputs.changed_files }}
       
-      - name: Run Ruff Format (Check Only, Changed Files)
+      - name: Run Ruff Format (Check Only)
+        if: steps.files.outputs.changed_files != ''
         run: |
-          CHANGED_FILES=$(git diff --name-only --diff-filter=ACMR origin/main...HEAD -- '*.py')
-          if [ -n "$CHANGED_FILES" ]; then
-            uv run ruff format --check $CHANGED_FILES
-          else
-            echo "No changed python files to format check."
-          fi
+          uv run ruff format --check ${{ steps.files.outputs.changed_files }}
+
+      - name: No Python Changes
+        if: steps.files.outputs.changed_files == ''
+        run: echo "No changed python files to lint."
