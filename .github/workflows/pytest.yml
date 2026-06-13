@@ -33,7 +33,7 @@ jobs:
 
       - name: Run Pytest (Fail Fast)
         run: |
-          uv run pytest tests/ -x -v
+          uv run pytest tests/ -x -v --timeout=300
         env:
           NEXUS_TEST_MODE: CI
           PYTHONPATH: .

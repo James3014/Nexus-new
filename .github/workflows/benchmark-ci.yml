@@ -68,18 +68,12 @@ jobs:
           cat benchmark_summary.md >> $GITHUB_STEP_SUMMARY
 
       # ── 6. Save Results ────────────────────────────────────────
-      - name: "Commit Benchmark Results"
+      - name: "Organize Results"
         run: |
           RESULT_DIR="benchmark_results/$(date +'%Y-%m-%d')"
           mkdir -p "$RESULT_DIR"
           cp ci_benchmark_results.jsonl "$RESULT_DIR/results.jsonl"
           cp benchmark_summary.md "$RESULT_DIR/report.md"
-
-          git config --global user.name "nexus-benchmark[bot]"
-          git config --global user.email "nexus-bot@muse-core.ai"
-          git add benchmark_results/
-          git diff --staged --quiet || git commit -m "📊 Benchmark CI: $(date +'%Y-%m-%d') [skip ci]"
-          git push origin HEAD:main || echo "Push skipped (no changes)"
 
       # ── 7. Upload Artifacts ────────────────────────────────────
       - name: "Upload Artifacts"

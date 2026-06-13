@@ -36,10 +36,13 @@ jobs:
           MUSE_RUN_CODEX_LOOP: 1
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Commit Evolutions 🚀
-        run: |
-          git config --global user.name "Nexus-AutoResearch[bot]"
-          git config --global user.email "nexus-bot@muse-core.ai"
-          git add .
-          git commit -m "🌙 Night Shift Evolution: $(date +'%Y-%m-%d')" || echo "No changes to commit"
-          git push origin main
+      - name: Archive Evolutions 📦
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: nightshift-evolution-${{ github.sha }}
+          path: |
+            tracelog.jsonl
+            evolve_trace.log
+            *.patch
+          retention-days: 14

@@ -69,7 +69,9 @@ python3 scripts/engine/nexus_cli.py nexus acceptance-check --full-chain "voice n
 
 ## 🗺️ Navigation | 導航
 
-For detailed project architecture, refactor roadmap, and script ownership, please refer to the **[Project Index (docs/INDEX.md)](docs/INDEX.md)**。
+- **[Project Index (docs/INDEX.md)](docs/INDEX.md)**: Detailed project architecture and roadmap.
+- **[Competitive Analysis (docs/product/competitive-analysis.md)](docs/product/competitive-analysis.md)**: How Nexus differs from Copilot, Cursor, and Devin.
+- **[Product Requirements Document (docs/product/prd.md)](docs/product/prd.md)**: Problem statement, user personas, and core workflows.
 
 ---
 **Nexus v28.3.0: The engine that grows with the project.** 🫡🦾💎🚀✨🚩

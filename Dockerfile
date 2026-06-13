@@ -1,15 +1,57 @@
-FROM python:3.12-slim
-RUN apt-get update && apt-get install -y curl ca-certificates git && rm -rf /var/lib/apt/lists/*
+# Build stage
+FROM python:3.12-slim AS builder
+
+ENV PYTHONUNBUFFERED=1 \
+    PYTHONDONTWRITEBYTECODE=1 \
+    UV_COMPILE_BYTECODE=1
+
 WORKDIR /app
+
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    curl \
+    ca-certificates \
+    git \
+    build-essential \
+    && rm -rf /var/lib/apt/lists/*
+
+RUN curl -LsSf https://astral.sh/uv/install.sh | sh
+ENV PATH="/root/.local/bin:$PATH"
+
+COPY pyproject.toml uv.lock ./
+RUN uv sync --frozen --no-dev --no-install-project
+
 COPY . .
-RUN pip install uv && uv pip install sentence-transformers lancedb requests arweave-python-client cryptography
+RUN uv sync --frozen --no-dev
 
-# Ollama $0 Reasoning Layer (v18.4)
-RUN curl -fsSL https://ollama.ai/install.sh | sh && \
-    (ollama serve &) && sleep 30 && \
-    ollama pull llama3.1:8b-q4_0 && pkill ollama
+# Runtime stage
+FROM python:3.12-slim
 
-ENV LLM_PROVIDER=ollama MODEL=llama3.1:8b-q4_0 NEXUS_HOME=/data/.nexus
+ENV PYTHONUNBUFFERED=1 \
+    PYTHONDONTWRITEBYTECODE=1 \
+    PATH="/app/.venv/bin:$PATH" \
+    NEXUS_HOME=/data/.nexus
+
+WORKDIR /app
+
+# Install runtime dependencies
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    curl \
+    ca-certificates \
+    && rm -rf /var/lib/apt/lists/*
+
+# Create non-root user
+RUN groupadd -g 1000 nexus && \
+    useradd -u 1000 -g nexus -s /bin/sh -m nexus && \
+    mkdir -p /data/.nexus && \
+    chown -R nexus:nexus /app /data
+
+COPY --from=builder --chown=nexus:nexus /app/.venv /app/.venv
+COPY --from=builder --chown=nexus:nexus /app /app
+
+USER nexus
+
 VOLUME ["/data"]
 EXPOSE 8516 9192
-CMD ollama serve & uv run scripts/engine/nexus_cli.py health --full
+
+# Entrypoint for CLI usage
+CMD ["python", "scripts/engine/nexus_cli.py", "status"]

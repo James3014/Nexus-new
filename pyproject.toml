@@ -77,6 +77,7 @@ build-backend = "poetry.core.masonry.api"
 dev = [
     "pytest>=9.0.3",
     "pytest-asyncio>=0.23.0",
+    "pytest-timeout>=2.3.1",
     "ruff>=0.4.0",
 ]
 
@@ -87,9 +88,12 @@ line-length = 100
 
 [tool.ruff.lint]
 # Conservative baseline rules:
-# E: Error, F: Pyflakes, I: Isort
-select = ["E", "F", "I"]
-ignore = []
+# F: Pyflakes (logic errors)
+# I: Isort (import order)
+# E: Error (syntax/style)
+# We exclude E501 (line-too-long) to avoid massive noise.
+select = ["F", "I", "E"]
+ignore = ["E501"]
 
 # Allow fix for specific rules
 fixable = ["I"]

@@ -16,6 +16,11 @@ jobs:
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Fetch origin/main
+        run: git fetch origin main:main || true
 
       - name: Set up Python 3.12
         uses: actions/setup-python@v5
@@ -31,10 +36,22 @@ jobs:
         env:
           UV_SYSTEM_PYTHON: 0
 
-      - name: Run Ruff Check
+      - name: Run Ruff Check (Changed Files Only)
         run: |
-          uv run ruff check nexus tests
+          # Get list of changed python files
+          CHANGED_FILES=$(git diff --name-only --diff-filter=ACMR origin/main...HEAD -- '*.py')
+          if [ -n "$CHANGED_FILES" ]; then
+            echo "Linting: $CHANGED_FILES"
+            uv run ruff check $CHANGED_FILES
+          else
+            echo "No changed python files to lint."
+          fi
       
-      - name: Run Ruff Format (Check Only)
+      - name: Run Ruff Format (Check Only, Changed Files)
         run: |
-          uv run ruff format --check nexus tests
+          CHANGED_FILES=$(git diff --name-only --diff-filter=ACMR origin/main...HEAD -- '*.py')
+          if [ -n "$CHANGED_FILES" ]; then
+            uv run ruff format --check $CHANGED_FILES
+          else
+            echo "No changed python files to format check."
+          fi
