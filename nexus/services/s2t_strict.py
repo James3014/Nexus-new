@@ -131,20 +131,44 @@ class S2T3BAdvisor:
             import torch
             from transformers import AutoModelForCausalLM, AutoTokenizer
             from peft import PeftModel
+            import logging
             
             if not Path(self.adapter_path).exists():
                 raise FileNotFoundError(f"Adapter path {self.adapter_path} not found")
 
             self.tokenizer = AutoTokenizer.from_pretrained(self.base_model_path, trust_remote_code=True)
-            self.model = AutoModelForCausalLM.from_pretrained(
-                self.base_model_path,
-                device_map="auto",
-                torch_dtype=torch.float16,
-                trust_remote_code=True
-            )
-            self.model = PeftModel.from_pretrained(self.model, self.adapter_path)
-            self.model.eval()
-            self._is_loaded = True
+            
+            try:
+                # 優先嘗試預設 fp16 + device_map="auto"
+                device_map = "auto"
+                torch_dtype = torch.float16
+                # 若無 CUDA 且無 MPS，則避開 device_map="auto" 以防加速庫崩潰
+                if not torch.cuda.is_available() and not torch.backends.mps.is_available():
+                    device_map = None
+                    torch_dtype = torch.float32
+
+                self.model = AutoModelForCausalLM.from_pretrained(
+                    self.base_model_path,
+                    device_map=device_map,
+                    torch_dtype=torch_dtype,
+                    trust_remote_code=True
+                )
+                self.model = PeftModel.from_pretrained(self.model, self.adapter_path)
+                self.model.eval()
+                self._is_loaded = True
+            except Exception as load_err:
+                logging.getLogger(__name__).warning(
+                    "Default 3B loading failed (%s). Retrying with CPU/FP32 fallback...", load_err
+                )
+                # Fallback to pure CPU and float32 loading (proven stable on macOS CPU/MPS)
+                self.model = AutoModelForCausalLM.from_pretrained(
+                    self.base_model_path,
+                    torch_dtype=torch.float32,
+                    trust_remote_code=True
+                )
+                self.model = PeftModel.from_pretrained(self.model, self.adapter_path)
+                self.model.eval()
+                self._is_loaded = True
         except Exception as exc:
             self._load_error = str(exc)
 
