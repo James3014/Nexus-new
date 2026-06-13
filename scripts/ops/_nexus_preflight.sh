@@ -1,8 +1,8 @@
 #!/bin/bash
-# 🛡️ Nexus Physical Preflight v24.0 Eternal (Self-Healing Enabled)
+# 🛡️ Nexus Physical Preflight v28.3.0 Eternal (Self-Healing Enabled)
 # Identity: Nexus Battlesuit Environment Alignment Protocol
 
-echo "🛡️ [Preflight] Initiating v24.0 Environment Alignment..."
+echo "🛡️ [Preflight] Initiating v28.3.0 Environment Alignment..."
 
 # 1. Path Self-Healing (Atomic Symlinking)
 # Preserve the caller's PATH precedence because Gemini CLI auth/session
@@ -43,12 +43,12 @@ else
 fi
 "${NEXUS_CLI_SMOKE[@]}" > /dev/null 2>&1 && echo "✅ Nexus CLI: PASS" || { echo "❌ Nexus CLI: FAIL"; exit 1; }
 
-# 3. Metadata Collection (v24.0 Enhanced)
+# 3. Metadata Collection (v28.3.0 Enhanced)
 COMMIT_SHA=$(git rev-parse --short HEAD)
 SWARM_COUNT=$(ls -d .nexus-swarm-* 2>/dev/null | wc -l | xargs)
 TIMESTAMP=$(date +"%Y-%m-%d %H:%M:%S")
 
-echo "[NEXUS v24.0 ACTIVE] Preflight complete at $TIMESTAMP."
+echo "[NEXUS v28.3.0 ACTIVE] Preflight complete at $TIMESTAMP."
 echo "  Commit SHA: $COMMIT_SHA"
 echo "  50 Swarm Status: $SWARM_COUNT directories ready"
 echo "  Environment: PRODUCTION-READY"
