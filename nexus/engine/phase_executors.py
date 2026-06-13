@@ -15,6 +15,9 @@ class HandlerPhaseExecutor:
     handler: Any
     result_binder: Callable[[Any, dict[str, Any]], None] | None = None
 
+    def run(self, *args: Any, **kwargs: Any) -> Any:
+        return self.handler.run(*args, **kwargs)
+
     @property
     def name(self) -> str:
         return str(getattr(self.handler, "name", ""))

@@ -65,7 +65,7 @@ class LocalizationPhase(IPhase):
         localized_files = []
         model_decisions = []
         for bundle in bundles:
-            localized_files.append((bundle.file_path, bundle.to_context_string()))
+            localized_files.append((bundle.file_path, bundle.build_context()))
             model_decisions.append({
                 "phase": "localization",
                 "file": bundle.file_path,

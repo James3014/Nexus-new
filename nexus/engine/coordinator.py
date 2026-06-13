@@ -201,7 +201,7 @@ class NexusEngine:
             if spec.verify_commands:
                 context["verify_commands"] = spec.verify_commands
         has_runtime_phases = isinstance(self.phases, dict) and all(
-            hasattr(p, "run") for p in self.phases.values() if p is not None
+            (hasattr(p, "run") or hasattr(p, "execute")) for p in self.phases.values() if p is not None
         )
         is_pipeline_mock = False
         try:
