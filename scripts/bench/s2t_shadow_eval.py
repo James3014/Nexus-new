@@ -119,6 +119,7 @@ def run_shadow_eval(dataset_path: Path, output_report_path: Path, run_real: bool
             print(f"❌ Fail-closed: Real model load failed: {e}")
             sys.exit(1)
 
+    failures = []
     parsed_count = 0
     compliant_count = 0
     trust_mismatch_count = 0
@@ -210,6 +211,27 @@ def run_shadow_eval(dataset_path: Path, output_report_path: Path, run_real: bool
             else:
                 print(f"⚠️ Row {idx} Schema Compliance Fail: {err_msg}. JSON: {response_json}")
                 
+                # 判定 error 類別
+                error_type = "other"
+                if "abstain_reason" in err_msg:
+                    error_type = "missing_abstain_reason"
+                elif "required_verifier" in err_msg:
+                    if response_json.get("required_verifier") == "none":
+                        error_type = "string_none_instead_of_null"
+                    elif response_json.get("required_verifier") in ["cost", "cost_calculator", "cost_estimation", "cost_calculated", "re-evalute_candidates", "re-evalute_candidates_or_route", "verifier-check-candidate-costs", "re-eval_with_costs", "re-eval_with_human", "reconciliation"]:
+                        error_type = "freeform_verifier_name"
+                    else:
+                        error_type = "invalid_required_verifier"
+                
+                failures.append({
+                    "task_id": task_id,
+                    "error_type": error_type,
+                    "error_msg": err_msg,
+                    "input": inputs,
+                    "prediction": response_json,
+                    "correct_target": target
+                })
+                
                 pred_id = response_json.get("selected_candidate_id")
                 if pred_id != baseline_id:
                     override_count += 1
@@ -275,6 +297,14 @@ def run_shadow_eval(dataset_path: Path, output_report_path: Path, run_real: bool
         json.dump(report, f, indent=2, ensure_ascii=False)
         
     print(f"🎉 Shadow evaluation complete. Output saved to {output_report_path}")
+    
+    # 寫入 failures jsonl 作為 SFT repair dataset
+    failures_output_path = output_report_path.parent / "s2t_shadow_eval_failures.jsonl"
+    with open(failures_output_path, "w", encoding="utf-8") as f:
+        for fail in failures:
+            f.write(json.dumps(fail, ensure_ascii=False) + "\n")
+    print(f"⚠️ Dumped {len(failures)} schema failures to {failures_output_path}")
+    
     print(f"  Mode:                  {eval_mode}")
     print(f"  JSON Parse Rate:       {parse_rate * 100:.1f}%")
     print(f"  Schema Compliance:     {compliance_rate * 100:.1f}%")
