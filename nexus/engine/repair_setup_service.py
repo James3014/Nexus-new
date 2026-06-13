@@ -71,13 +71,18 @@ class RepairSetupService:
         else:
             logger.warning("🛑 [NSP:Sensing] Quorum FAIL. Transition: ISOLATED -> FALLBACK_LOCAL")
 
-        if target_env is not None:
-            from nexus.engine.cli_pregate import build_verify_commands
-            verify_cmds = build_verify_commands(target_env)
-            root_for_git = target_env.target_repo_root
+        verify_cmds = state.metadata.get("verify_commands")
+        if not verify_cmds:
+            if target_env is not None:
+                from nexus.engine.cli_pregate import build_verify_commands
+                verify_cmds = build_verify_commands(target_env)
+                root_for_git = target_env.target_repo_root
+            else:
+                verify_cmds = self.detect_verify_commands_fn(self.project_root)
+                root_for_git = self.project_root
         else:
-            verify_cmds = self.detect_verify_commands_fn(self.project_root)
-            root_for_git = self.project_root
+            verify_cmds = list(verify_cmds)
+            root_for_git = target_env.target_repo_root if target_env is not None else self.project_root
 
         skip_pregate = bool(not verify_cmds and not (root_for_git / ".git").exists())
         return {
