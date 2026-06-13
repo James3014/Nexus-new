@@ -26,13 +26,14 @@ def _get_venv_python(project_root: Path) -> str:
     return sys.executable
 
 def run_cli_pregate(
-    project_root: Path,
+    project_root: Path | str,
     commands: List[str],
     timeout_per_cmd: int = 60,
 ) -> Tuple[bool, List[dict]]:
     """
     執行驗證指令列表，回傳 (all_passed, results)
     """
+    project_root = Path(project_root)
     if not commands:
         # === CHANGED: 空指令 → UNVERIFIED（非 pass） ===
         return False, [{
