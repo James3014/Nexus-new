@@ -1,0 +1,107 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "S2T Memory Sidecar Checkpoint",
+  "type": "object",
+  "properties": {
+    "schema": {
+      "type": "string",
+      "const": "nexus.s2t_memory_sidecar_checkpoint.v1"
+    },
+    "task_id": {
+      "type": "string"
+    },
+    "mode": {
+      "type": "string",
+      "enum": [
+        "bootstrapping",
+        "optimization",
+        "core_advisor_monitoring",
+        "unknown"
+      ]
+    },
+    "summary": {
+      "type": "string"
+    },
+    "completed_steps": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "open_blockers": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "failure_family": {
+      "type": ["string", "null"]
+    },
+    "evidence_refs": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "modified_files": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "test_commands": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "test_results": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "next_action": {
+      "type": "string"
+    },
+    "claim_boundary": {
+      "type": "string",
+      "enum": [
+        "observation_only",
+        "verified",
+        "blocked",
+        "unknown"
+      ]
+    },
+    "do_not_repeat": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "confidence": {
+      "type": "string",
+      "enum": [
+        "low",
+        "medium",
+        "high"
+      ]
+    },
+    "abstain_reason": {
+      "type": ["string", "null"]
+    }
+  },
+  "required": [
+    "schema",
+    "task_id",
+    "mode",
+    "summary",
+    "completed_steps",
+    "open_blockers",
+    "evidence_refs",
+    "next_action",
+    "claim_boundary",
+    "confidence"
+  ],
+  "additionalProperties": false
+}
