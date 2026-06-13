@@ -217,7 +217,7 @@ class S2TStrictRuntimeGate:
         if run_advisor:
             # 3. 調用 3B 學生模型顧問進行輔助決策
             res = self.advisor.advise(risk_tier, candidates)
-            if "abstain_reason" in res:
+            if res.get("abstain_reason") is not None:
                 advisor_selected_id = ""
                 advisor_verdict = res["abstain_reason"]
                 advisor_status = f"abstained: {res['abstain_reason']}"
