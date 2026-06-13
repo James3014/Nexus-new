@@ -54,6 +54,41 @@ def robust_json_parse(response: str) -> dict:
         raise ValueError(f"Failed to parse response: {e}")
 
 
+def _verify_adapter_provenance(adapter_path: str) -> None:
+    path = Path(adapter_path).resolve()
+    adapter_id = path.name
+    
+    # 尋找專案根目錄下的 registry
+    project_root = Path(__file__).resolve().parents[2]
+    registry_file = project_root / ".nexus" / "registry" / "s2t_adapters" / f"{adapter_id}.json"
+    
+    if not registry_file.exists():
+        raise ValueError(f"Provenance Lock Fail: Adapter {adapter_id} is not registered in registry {registry_file}")
+        
+    with open(registry_file, "r", encoding="utf-8") as f:
+        registry_data = json.load(f)
+        
+    for filename, file_meta in registry_data.get("files", {}).items():
+        file_path = path / filename
+        if not file_path.exists():
+            raise FileNotFoundError(f"Provenance Lock Fail: Required registered file {filename} is missing in {path}")
+            
+        # 計算實體雜湊
+        sha256 = hashlib.sha256()
+        with open(file_path, "rb") as bf:
+            while chunk := bf.read(8192):
+                sha256.update(chunk)
+        real_hash = sha256.hexdigest()
+        
+        expected_hash = file_meta.get("sha256")
+        if real_hash != expected_hash:
+            raise ValueError(
+                f"Provenance Lock Fail: Checksum mismatch for {filename}.\n"
+                f"Expected: {expected_hash}\n"
+                f"Got:      {real_hash}"
+            )
+
+
 class S2T3BAdvisor:
     """Interface for Qwen base + LoRA adapter inference."""
 
@@ -79,6 +114,19 @@ class S2T3BAdvisor:
             self._use_simulation = True
             return
             
+        # 1. Kill Switch 檢查
+        import os
+        if os.environ.get("NEXUS_S2T_3B_ADVISOR_ENABLED") == "0":
+            self._load_error = "advisor_disabled"
+            return
+            
+        # 2. Provenance Lock 註冊與完整性檢查
+        try:
+            _verify_adapter_provenance(self.adapter_path)
+        except Exception as prov_err:
+            self._load_error = f"provenance_lock_failed: {prov_err}"
+            return
+
         try:
             import torch
             from transformers import AutoModelForCausalLM, AutoTokenizer
@@ -208,28 +256,42 @@ class S2TStrictRuntimeGate:
         advisor_verdict = "not_run"
         advisor_status = "not_run"
         
+        # 讀取環境變數 Kill Switch，若為 0 則關閉 advisor
+        import os
+        env_enabled = os.environ.get("NEXUS_S2T_3B_ADVISOR_ENABLED") != "0"
+        
         if self.advisor_enabled and task_id:
             # 取得 task_id hash
             h_val = int(hashlib.md5(task_id.encode('utf-8')).hexdigest(), 16)
             if (h_val % 100) < 10:
-                run_advisor = True
-                
-        if run_advisor:
-            # 3. 調用 3B 學生模型顧問進行輔助決策
-            res = self.advisor.advise(risk_tier, candidates)
-            if res.get("abstain_reason") is not None:
-                advisor_selected_id = ""
-                advisor_verdict = res["abstain_reason"]
-                advisor_status = f"abstained: {res['abstain_reason']}"
-            else:
-                advisor_selected_id = res.get("selected_candidate_id", "")
-                if advisor_selected_id:
-                    advisor_verdict = "pass"
-                    advisor_status = "active_advising"
+                if env_enabled:
+                    run_advisor = True
                 else:
+                    # 即使命中 10% canary，但因 Kill Switch 關閉，記錄為停用且標記為 telemetry 欄位
+                    run_advisor = True
+                    advisor_status = "advisor_disabled"
+                    advisor_verdict = "not_run"
+                    
+        if run_advisor:
+            if advisor_status == "advisor_disabled":
+                # Kill switch 啟用，跳過模型推理與 lazy_load 載入
+                pass
+            else:
+                # 3. 調用 3B 學生模型顧問進行輔助決策
+                res = self.advisor.advise(risk_tier, candidates)
+                if res.get("abstain_reason") is not None:
                     advisor_selected_id = ""
-                    advisor_verdict = "fail_schema"
-                    advisor_status = "abstained: missing_selected_candidate_id"
+                    advisor_verdict = res["abstain_reason"]
+                    advisor_status = f"abstained: {res['abstain_reason']}"
+                else:
+                    advisor_selected_id = res.get("selected_candidate_id", "")
+                    if advisor_selected_id:
+                        advisor_verdict = "pass"
+                        advisor_status = "active_advising"
+                    else:
+                        advisor_selected_id = ""
+                        advisor_verdict = "fail_schema"
+                        advisor_status = "abstained: missing_selected_candidate_id"
                 
         # 4. 記錄 Per-row Evidence
         if run_advisor:

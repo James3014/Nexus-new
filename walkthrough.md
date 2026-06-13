@@ -142,3 +142,29 @@ tests/gates/test_s2t_delivery_gate.py::test_s2t_delivery_gate_passes_verified_ca
   - **Promotion Gate Status**: **`PASSED`** (原為 `FAILED`)
 
 此結果成功驗證了 v2 學生模型適配器在合規性上的收斂。3B 學生模型已具備作為觀察 Canary 的格式完備性，下一步可正式開啟 Canary Telemetry observation 觀察。
+
+---
+
+## 🔒 3B 正式上線前加固開發完成報告 (Phase 0, 1, 2 & 7)
+
+我們已嚴格落實正式生產上線前所需的安全防禦與遙測門禁，具體產出如下：
+
+### 1. HEAD-bound 評估報告鎖定 (Phase 0)
+* **評估報告**：[.nexus/metrics/s2t_shadow_eval_v2_head_report.json](file:///Users/jameschen/Workspace/nexus/.nexus/metrics/s2t_shadow_eval_v2_head_report.json)
+* **綁定 Commit**: `c6c6fe5bfe440a00b2804fd37d0f30cba66500c9` (當前最新 HEAD)
+* **門禁指標**：`schema_compliance_rate=100.0%`、`trust_mismatch_rate=0`、`promotion_gate.status=PASSED` 完美達成。
+
+### 2. Runtime 環境與真實推理驗證 (Phase 1)
+* 在啟用 `peft 0.19.1` 的環境下重跑 `verify_canary_telemetry.py`，成功通過 `active_advising` 真實 3B 推理遙測，產出 [.nexus/metrics/s2t_runtime_canary_test.jsonl](file:///Users/jameschen/Workspace/nexus/.nexus/metrics/s2t_runtime_canary_test.jsonl)。
+
+### 3. Adapter Registry & Provenance Lock (Phase 2)
+* **註冊表**：[.nexus/registry/s2t_adapters/qwen3b_s2t_adapter_v2.json](file:///Users/jameschen/Workspace/nexus/.nexus/registry/s2t_adapters/qwen3b_s2t_adapter_v2.json) (強制追蹤至 Git 版本庫中)。
+* **發佈報告**：[QWEN3B_S2T_ADAPTER_V2_RELEASE_CANDIDATE_2026-06-13.md](file:///Users/jameschen/Workspace/nexus/docs/reports/QWEN3B_S2T_ADAPTER_V2_RELEASE_CANDIDATE_2026-06-13.md)。
+* **防護實作**：若適配器未於 registry 註冊或實體檔案雜湊與註冊值不符，`s2t_strict.py` 拒絕載入並 Fail-closed 阻斷，並在日誌記錄 `provenance_lock_failed`。
+
+### 4. Kill Switch 與 Rollback 機制 (Phase 7)
+* **開關控制**：讀取環境變數 `NEXUS_S2T_3B_ADVISOR_ENABLED`。若設為 `"0"`：
+  - 100% 避免模型 lazy_load 載入。
+  - Telemetry 日誌中將此流量標記為 `advisor_disabled`、`advisor_parse_schema_verdict="not_run"`。
+* **單元測試**：於 `tests/gates/test_s2t_claim_gate.py` 新增 `test_s2t_advisor_provenance_lock` 與 `test_s2t_advisor_kill_switch`，共 **11 筆測試全數 PASSED**。
+

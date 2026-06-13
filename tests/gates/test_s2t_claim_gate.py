@@ -188,3 +188,61 @@ def test_robust_json_parse_various_formats() -> None:
     assert res["reason"] == "annull"
     assert res["flag"] == "None_id"
 
+
+def test_s2t_advisor_provenance_lock(tmp_path) -> None:
+    # 測試未註冊或不存在的 adapter_path，應該拋出錯誤並記錄為 provenance_lock_failed
+    advisor = S2T3BAdvisor(adapter_path="training/adapters/non_existent_adapter_xyz")
+    res = advisor.advise("medium", [])
+    assert "abstain_reason" in res
+    assert "provenance_lock_failed" in res["abstain_reason"]
+
+
+def test_s2t_advisor_kill_switch(tmp_path, monkeypatch) -> None:
+    # 測試當環境變數 NEXUS_S2T_3B_ADVISOR_ENABLED = "0" 時，S2TStrictRuntimeGate 應該正確跳過載入與模型推論
+    monkeypatch.setenv("NEXUS_S2T_3B_ADVISOR_ENABLED", "0")
+    
+    import hashlib
+    import json
+    triggered_task_id = ""
+    for i in range(100):
+        tid = f"killswitch-task-{i}"
+        h = int(hashlib.md5(tid.encode('utf-8')).hexdigest(), 16) % 100
+        if h < 10:
+            triggered_task_id = tid
+            break
+            
+    assert triggered_task_id != ""
+    
+    log_file = tmp_path / "killswitch_evidence.jsonl"
+    gate = S2TStrictRuntimeGate(
+        advisor=S2T3BAdvisor(force_simulation=False), # 不強制 simulation，預期會跑真實分支
+        evidence_log_path=log_file
+    )
+    
+    decision = gate.evaluate(
+        task_id=triggered_task_id,
+        risk_tier="medium",
+        candidates=[_candidate()],
+        verifier_result="pass",
+    )
+    
+    # 1. 驗證決策未受影響，仍然由 baseline 正常產出
+    assert decision.passed is True
+    assert decision.selected_candidate_id == "A"
+    
+    # 2. 驗證 10% canary 遙測正常記錄為 advisor_disabled 且未加載模型
+    assert decision.advisor_used is True
+    assert decision.advisor_outcome_status == "advisor_disabled"
+    assert decision.advisor_selected_candidate_id == ""
+    
+    # 3. 驗證寫入的遙測日誌
+    assert log_file.exists()
+    lines = log_file.read_text().strip().split("\n")
+    assert len(lines) == 1
+    row = json.loads(lines[0])
+    
+    assert row["task_id"] == triggered_task_id
+    assert row["advisor_status"] == "advisor_disabled"
+    assert row["advisor_parse_schema_verdict"] == "not_run"
+
+
