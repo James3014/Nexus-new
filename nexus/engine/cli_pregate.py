@@ -51,6 +51,18 @@ def run_cli_pregate(
             "reason": "No verification commands detected. Cannot confirm repair success."
         }]
     
+    # 🔍 Sanitization: Replace polluted absolute engine python path with relative python3/python
+    sanitized_commands = []
+    engine_venv_python = str(Path(sys.executable).resolve())
+    for cmd in commands:
+        if engine_venv_python in cmd:
+            cmd = cmd.replace(engine_venv_python, "python3")
+        engine_default_venv = "/Users/jameschen/Workspace/nexus/.venv/bin/python3"
+        if engine_default_venv in cmd:
+            cmd = cmd.replace(engine_default_venv, "python3")
+        sanitized_commands.append(cmd)
+    commands = sanitized_commands
+    
     env = os.environ.copy()
     if target_venv:
         # Mac/Linux

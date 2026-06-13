@@ -91,9 +91,7 @@ def build_engine_components(config: Any, kwargs: Dict[str, Any]) -> Dict[str, An
         hub.assemble_feature_pack = context_hub.assemble_feature_pack
 
     phase_factory = PhaseFactory(project_root=project_root, run_dir=run_dir, hub=hub)
-    phase_executors = kwargs.get("phase_executors") or {
-        phase: phase_factory.create_phase(phase) for phase in ("P", "X", "D", "A")
-    }
+    phase_executors = kwargs.get("phase_executors") or phase_factory.create_all()
 
     components = {
         "run_dir": run_dir,
@@ -123,7 +121,7 @@ def build_engine_components(config: Any, kwargs: Dict[str, Any]) -> Dict[str, An
         "reflex_loop": ReflexLoop(str(project_root), memory_service=memory),
         "reporter": kwargs.get("reporter", hub),
         "phase_executors": phase_executors,
-        "phases": kwargs.get("phases", {"P": "Planner", "D": "Diagnose", "R": "Repair", "X": "Research"}),
+        "phases": kwargs.get("phases", phase_executors),
         "federation": FederationLayer(project_root),
         "vector_cache": VectorCache(project_root / ".nexus" / "vector_db"),
         "neural_aggregator": NexusNeuralAggregator(),
