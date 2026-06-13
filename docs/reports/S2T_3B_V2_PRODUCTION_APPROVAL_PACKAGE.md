@@ -31,12 +31,14 @@ NEXUS_S2T_3B_ALLOWED_RISK=low
 - **Monitoring**: Continuous telemetry logging to `.nexus/metrics/s2t_runtime_adoption_evidence.jsonl`.
 
 ## 5. Deployment Instructions
-1. Ensure `368e0060` or later is deployed.
+1. Ensure `a860fa66` or later is deployed.
 2. Verify adapter registry lock for `qwen3b_s2t_adapter_v2`.
 3. Apply the production deployment policy to the runtime environment.
 4. Monitor telemetry for the first 24 hours of 100% low-risk assistance.
 
 ## 6. Approval Sign-off
 Confirmed by Nexus v26 Active Agent.
-Commit: 368e0060
-SHA: 368e0060fe399909683835eacb9fa4a010f51cdf
+Commit: a860fa66
+SHA: a860fa661396ddbe30f65a807036f516f870897f
+Status: VERIFIED_HEAD_LOCKED
+Date: 2026-06-14 00:20 UTC
