@@ -39,7 +39,7 @@ def get_git_commit_hash():
     except Exception:
         return "unknown"
 
-def run_shadow_eval(dataset_path: Path, output_report_path: Path, run_real: bool, device: str, timeout_sec: int, offline: bool, emulator: bool):
+def run_shadow_eval(dataset_path: Path, output_report_path: Path, run_real: bool, device: str, timeout_sec: int, offline: bool, emulator: bool, adapter_dir: str = "training/adapters/qwen3b_s2t_adapter"):
     print(f"🔎 Starting S2T Shadow Evaluation on {dataset_path}...")
     
     # 決定 eval_mode
@@ -84,7 +84,6 @@ def run_shadow_eval(dataset_path: Path, output_report_path: Path, run_real: bool
             from peft import PeftModel
             
             base_model_id = "Qwen/Qwen2.5-3B-Instruct"
-            adapter_dir = "training/adapters/qwen3b_s2t_adapter"
             
             kwargs = {}
             if offline:
@@ -159,7 +158,12 @@ def run_shadow_eval(dataset_path: Path, output_report_path: Path, run_real: bool
                 system_prompt = (
                     "You are a Nexus Routing Selector Assistant. Your task is to select the best candidate "
                     "and provide selection reason codes and required verifiers based on the route features "
-                    "and candidate summaries. You must strictly output the target JSON."
+                    "and candidate summaries.\n"
+                    "You must strictly output a valid JSON object. Do NOT wrap output in markdown blocks (e.g. ```json). "
+                    "Do NOT use single quotes for JSON keys or string values (do NOT output Python dict format). "
+                    "Every output MUST strictly contain all 4 required keys: 'selected_candidate_id', 'selection_reason_codes', "
+                    "'required_verifier', 'abstain_reason'. The 'required_verifier' field MUST be null or one of the following "
+                    "allowed verifiers: ['pytest', 'claim_gate', 'delivery_gate', 'hidden_verifier']."
                 )
                 messages = [
                     {"role": "system", "content": system_prompt},
@@ -216,9 +220,10 @@ def run_shadow_eval(dataset_path: Path, output_report_path: Path, run_real: bool
                 if "abstain_reason" in err_msg:
                     error_type = "missing_abstain_reason"
                 elif "required_verifier" in err_msg:
-                    if response_json.get("required_verifier") == "none":
+                    req_ver = response_json.get("required_verifier") if isinstance(response_json, dict) else None
+                    if req_ver == "none":
                         error_type = "string_none_instead_of_null"
-                    elif response_json.get("required_verifier") in ["cost", "cost_calculator", "cost_estimation", "cost_calculated", "re-evalute_candidates", "re-evalute_candidates_or_route", "verifier-check-candidate-costs", "re-eval_with_costs", "re-eval_with_human", "reconciliation"]:
+                    elif req_ver in ["cost", "cost_calculator", "cost_estimation", "cost_calculated", "re-evalute_candidates", "re-evalute_candidates_or_route", "verifier-check-candidate-costs", "re-eval_with_costs", "re-eval_with_human", "reconciliation"]:
                         error_type = "freeform_verifier_name"
                     else:
                         error_type = "invalid_required_verifier"
@@ -232,6 +237,8 @@ def run_shadow_eval(dataset_path: Path, output_report_path: Path, run_real: bool
                     "correct_target": target
                 })
                 
+            # 將指標累加與 baseline 比較邏輯移至外層，並加上 dict 實體防護，以防 response_json 不是 dict (例如是 list) 造成屬性錯誤
+            if isinstance(response_json, dict):
                 pred_id = response_json.get("selected_candidate_id")
                 if pred_id != baseline_id:
                     override_count += 1
@@ -264,7 +271,7 @@ def run_shadow_eval(dataset_path: Path, output_report_path: Path, run_real: bool
     
     # 溯源雜湊讀取
     dataset_sha256 = calc_sha256(dataset_path) if dataset_path.exists() else "unknown"
-    safetensors_path = Path("training/adapters/qwen3b_s2t_adapter/adapter_model.safetensors")
+    safetensors_path = Path(adapter_dir) / "adapter_model.safetensors"
     adapter_sha256 = calc_sha256(safetensors_path) if safetensors_path.exists() else "unknown"
     commit_sha = get_git_commit_hash()
     
@@ -321,6 +328,7 @@ if __name__ == "__main__":
     parser.add_argument("--timeout-sec", type=int, default=30)
     parser.add_argument("--offline", action="store_true")
     parser.add_argument("--emulator", action="store_true")
+    parser.add_argument("--adapter-dir", type=str, default="training/adapters/qwen3b_s2t_adapter")
     args = parser.parse_args()
     
-    run_shadow_eval(args.dataset, args.output, args.run_real, args.device, args.timeout_sec, args.offline, args.emulator)
+    run_shadow_eval(args.dataset, args.output, args.run_real, args.device, args.timeout_sec, args.offline, args.emulator, args.adapter_dir)

@@ -11,10 +11,9 @@ import subprocess
 # 自動在遠端 Fresh 環境安裝依賴套件
 try:
     import trl
-    import bitsandbytes
 except ImportError:
     print("📦 Installing dependencies on fresh Colab VM...")
-    subprocess.check_call([sys.executable, "-m", "pip", "install", "torch", "transformers", "datasets", "peft", "trl", "bitsandbytes", "accelerate"])
+    subprocess.check_call([sys.executable, "-m", "pip", "install", "torch", "transformers", "datasets", "peft", "trl", "accelerate"])
 
 import torch
 import argparse
@@ -31,16 +30,30 @@ from trl import SFTConfig, SFTTrainer
 SYSTEM_PROMPT = (
     "You are a Nexus Routing Selector Assistant. Your task is to select the best candidate "
     "and provide selection reason codes and required verifiers based on the route features "
-    "and candidate summaries. You must strictly output the target JSON."
+    "and candidate summaries.\n"
+    "You must strictly output a valid JSON object. Do NOT wrap output in markdown blocks (e.g. ```json). "
+    "Do NOT use single quotes for JSON keys or string values (do NOT output Python dict format). "
+    "Every output MUST strictly contain all 4 required keys: 'selected_candidate_id', 'selection_reason_codes', "
+    "'required_verifier', 'abstain_reason'. The 'required_verifier' field MUST be null or one of the following "
+    "allowed verifiers: ['pytest', 'claim_gate', 'delivery_gate', 'hidden_verifier']."
 )
+
+ALLOWED_VERIFIERS = ["pytest", "claim_gate", "delivery_gate", "hidden_verifier"]
 
 def format_prompt(sample):
     """將 SFT 資料格式化為對話範本格式 (ChatML)"""
+    target_data = sample.get('correct_target') if 'correct_target' in sample else sample.get('target')
+    reminder = sample.get('contract_reminder', '')
+    
+    system_content = SYSTEM_PROMPT
+    if reminder:
+        system_content = f"{SYSTEM_PROMPT}\n{reminder}"
+        
     input_str = f"Route Features: {sample['input']['route_features']}\nCandidates: {sample['input']['candidate_summaries']}"
-    target_str = str(sample['target'])
+    target_str = str(target_data)
     
     messages = [
-        {"role": "system", "content": SYSTEM_PROMPT},
+        {"role": "system", "content": system_content},
         {"role": "user", "content": input_str},
         {"role": "assistant", "content": target_str}
     ]
@@ -63,6 +76,25 @@ def main():
     if os.path.exists(args.data_path):
         print(f"📖 Loading real dataset from {args.data_path}...")
         dataset = load_dataset("json", data_files=args.data_path, split="train")
+        
+        # 🛡️ Label Validator: 訓練前掃描所有 target，不合格直接 fail closed
+        print("🛡️ Running pre-training Label Validator contract check...")
+        for idx, sample in enumerate(dataset):
+            target_data = sample.get('correct_target') if 'correct_target' in sample else sample.get('target')
+            if not target_data:
+                raise ValueError(f"Label Validator Gate Fail: Missing target data in sample {idx}")
+            
+            # 1. 驗證 4 個 required keys
+            for key in ["selected_candidate_id", "selection_reason_codes", "required_verifier", "abstain_reason"]:
+                if key not in target_data:
+                    raise ValueError(f"Label Validator Gate Fail: Missing key '{key}' in sample {idx} target")
+            
+            # 2. 驗證 required_verifier enum
+            v = target_data["required_verifier"]
+            if v is not None and v not in ALLOWED_VERIFIERS:
+                raise ValueError(f"Label Validator Gate Fail: Invalid verifier '{v}' in sample {idx} target. Must be one of {ALLOWED_VERIFIERS} or null")
+        print("✅ Pre-training Label Validator contract check PASSED.")
+        
         use_embedded = False
     else:
         print(f"⚠️ Data path '{args.data_path}' not found. Loading embedded synthetic dataset as smoke fixture...")
@@ -2109,22 +2141,31 @@ def main():
     tokenizer.pad_token = tokenizer.eos_token
     tokenizer.padding_side = "right"
 
-    # 3. 載入量化模型 (4-bit QLoRA)
-    print("💾 Loading model in 4-bit quantization...")
-    bnb_config = BitsAndBytesConfig(
-        load_in_4bit=True,
-        bnb_4bit_quant_type="nf4",
-        bnb_4bit_compute_dtype=torch.bfloat16,
-        bnb_4bit_use_double_quant=True,
-    )
-
-    model = AutoModelForCausalLM.from_pretrained(
-        args.model_id,
-        quantization_config=bnb_config,
-        device_map="auto",
-        trust_remote_code=True,
-    )
-    model = prepare_model_for_kbit_training(model)
+    # 3. 載入模型 (根據 CUDA 是否可用決定是否使用 4-bit 量化與 QLoRA)
+    use_cuda = torch.cuda.is_available()
+    if use_cuda:
+        print("💾 Loading model in 4-bit quantization (CUDA GPU)...")
+        bnb_config = BitsAndBytesConfig(
+            load_in_4bit=True,
+            bnb_4bit_quant_type="nf4",
+            bnb_4bit_compute_dtype=torch.bfloat16,
+            bnb_4bit_use_double_quant=True,
+        )
+        model = AutoModelForCausalLM.from_pretrained(
+            args.model_id,
+            quantization_config=bnb_config,
+            device_map="auto",
+            trust_remote_code=True,
+        )
+        model = prepare_model_for_kbit_training(model)
+    else:
+        print("💾 CUDA not available. Loading model in float32 (CPU)...")
+        model = AutoModelForCausalLM.from_pretrained(
+            args.model_id,
+            device_map={"": "cpu"},
+            torch_dtype=torch.float32,
+            trust_remote_code=True,
+        )
 
     # 4. 設定 LoRA 參數
     peft_config = LoraConfig(
@@ -2136,18 +2177,19 @@ def main():
         task_type="CAUSAL_LM",
     )
 
-    # 5. 設定訓練引數
+    # 5. 設定訓練引數 (自適應優化器與精確度)
     training_args = SFTConfig(
         output_dir=args.output_dir,
         num_train_epochs=args.epochs,
         per_device_train_batch_size=args.batch_size,
         gradient_accumulation_steps=2,
-        optim="paged_adamw_32bit",
+        optim="paged_adamw_32bit" if use_cuda else "adamw_torch",
         save_steps=50,
         logging_steps=10,
         learning_rate=args.learning_rate,
         weight_decay=0.01,
-        bf16=True,
+        bf16=use_cuda,
+        use_cpu=not use_cuda,
         lr_scheduler_type="cosine",
         warmup_ratio=0.03,
         eval_strategy="steps",
@@ -2171,7 +2213,10 @@ def main():
     trainer.train()
 
     # 7. 儲存微調好的 Adapter
-    final_output = os.path.join(args.output_dir, "qwen3b_s2t_adapter")
+    if args.output_dir.endswith("qwen3b_s2t_adapter") or args.output_dir.endswith("qwen3b_s2t_adapter_v2"):
+        final_output = args.output_dir
+    else:
+        final_output = os.path.join(args.output_dir, "qwen3b_s2t_adapter")
     print(f"🎉 Saving adapter weights to {final_output}...")
     trainer.model.save_pretrained(final_output)
     tokenizer.save_pretrained(final_output)
