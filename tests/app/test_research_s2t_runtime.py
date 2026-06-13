@@ -34,7 +34,8 @@ def _autoreason_payload() -> dict:
     }
 
 
-def test_research_s2t_runtime_records_shadow_trace_payload(tmp_path: Path):
+def test_research_s2t_runtime_records_shadow_trace_payload(tmp_path: Path, monkeypatch):
+    monkeypatch.setenv("NEXUS_S2T_3B_ADVISOR_FORCE", "0")
     payload = record_autoreason_s2t_trace(
         repo_root=tmp_path,
         task_id="task-1",

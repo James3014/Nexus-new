@@ -89,9 +89,30 @@ def record_autoreason_s2t_trace(
     if not candidates:
         return {}
 
-    decision = S2TSelector().select(candidates)
-    trace_rel = Path(".nexus") / "reports" / "s2t" / "runtime_trace.jsonl"
+    import os
+    from nexus.services.s2t_strict import S2TStrictRuntimeGate
     verifier_result = "pass" if artifact_verified else "fail"
+    
+    old_force = os.environ.get("NEXUS_S2T_3B_ADVISOR_FORCE")
+    if old_force != "0":
+        os.environ["NEXUS_S2T_3B_ADVISOR_FORCE"] = "1"
+    try:
+        gate = S2TStrictRuntimeGate()
+        decision = gate.evaluate(
+            task_id=task_id or receipt_slug or "",
+            risk_tier="high",
+            candidates=candidates,
+            verifier_result=verifier_result,
+            verifier_evidence_ref=f"artifact:{receipt_slug}:tests_passed" if artifact_verified else "",
+        )
+    finally:
+        if old_force != "0":
+            if old_force is None:
+                os.environ.pop("NEXUS_S2T_3B_ADVISOR_FORCE", None)
+            else:
+                os.environ["NEXUS_S2T_3B_ADVISOR_FORCE"] = old_force
+    
+    trace_rel = Path(".nexus") / "reports" / "s2t" / "runtime_trace.jsonl"
     event = S2TTraceEvent(
         task_id=task_id or receipt_slug,
         run_id=receipt_slug,
@@ -123,10 +144,10 @@ def record_autoreason_s2t_trace(
                 phase="R",
                 candidate_set_id=event.candidate_set_id,
                 selected_candidate_id=decision.selected_candidate_id,
-                gate_passed=bool(decision.gate_passed and artifact_verified),
+                gate_passed=bool(decision.passed and artifact_verified),
                 verifier_result=verifier_result,
                 reason_codes=decision.reason_codes,
-                reward=1.0 if decision.gate_passed and artifact_verified else -1.0,
+                reward=1.0 if decision.passed and artifact_verified else -1.0,
             )
         ],
         benchmark_split=str(result_report.get("benchmark_split") or ""),
