@@ -3,6 +3,12 @@ from types import SimpleNamespace
 from unittest.mock import patch
 
 from nexus.services.gateway import BattlesuitGateway
+import pytest
+
+
+@pytest.fixture(autouse=True)
+def setup_default_provider(monkeypatch):
+    monkeypatch.setenv("NEXUS_OAUTH_PROVIDER", "gemini")
 
 
 def test_gateway_uses_response_key_from_gemini_cli_json():
@@ -220,4 +226,18 @@ def test_gateway_model_selector_ollama_dynamic_routing(monkeypatch):
     assert gateway.model_selector("A") == "qwen2.5-coder:14b"
     assert gateway.model_selector("D") == "qwen2.5-coder:14b"
     assert gateway.model_selector("C") == "qwen2.5-coder:14b"
+
+
+def test_gateway_oauth_provider_auto_detect_ollama_available(monkeypatch):
+    monkeypatch.setenv("NEXUS_OAUTH_PROVIDER", "auto")
+    with patch("nexus.services.gateway.BattlesuitGateway._ollama_available", return_value=True):
+        gateway = BattlesuitGateway(project_root=".")
+        assert gateway.oauth_provider == "ollama"
+
+
+def test_gateway_oauth_provider_auto_detect_ollama_unavailable(monkeypatch):
+    monkeypatch.setenv("NEXUS_OAUTH_PROVIDER", "auto")
+    with patch("nexus.services.gateway.BattlesuitGateway._ollama_available", return_value=False):
+        gateway = BattlesuitGateway(project_root=".")
+        assert gateway.oauth_provider == "gemini"
 

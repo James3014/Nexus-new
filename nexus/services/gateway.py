@@ -128,7 +128,12 @@ class BattlesuitGateway:
         
         # 🛡️ Battlesuit Origin: 僅支援 OAuth CLI 與物理 Handoff
         self.use_oauth = True
-        self.oauth_provider = (os.getenv("NEXUS_OAUTH_PROVIDER", "gemini").strip().lower() or "gemini")
+        self.oauth_provider = (os.getenv("NEXUS_OAUTH_PROVIDER", "auto").strip().lower() or "auto")
+        if self.oauth_provider == "auto":
+            if self._ollama_available():
+                self.oauth_provider = "ollama"
+            else:
+                self.oauth_provider = "gemini"
         # 🛡️ Compatibility for legacy scripts
         self.llm_bin = self.oauth_provider
         self.enable_shadow_compaction = kwargs.get("enable_shadow_compaction", False)
@@ -141,6 +146,18 @@ class BattlesuitGateway:
             self.prompt_builder = PromptBuilder(str(self.project_root))
         except (ImportError, TypeError):
             self.prompt_builder = None # type: ignore
+
+    def _ollama_available(self) -> bool:
+        """偵測本地 Ollama 是否可用。"""
+        endpoint = os.getenv("NEXUS_OLLAMA_ENDPOINT", "http://localhost:11434").rstrip("/")
+        try:
+            req = urllib.request.Request(f"{endpoint}/api/tags", method="GET")
+            with urllib.request.urlopen(req, timeout=1.5) as resp:
+                if resp.status == 200:
+                    return True
+        except Exception:
+            pass
+        return False
 
     def get_anti_token_estimate(self) -> int:
         """估計戰甲外部消耗量。"""
