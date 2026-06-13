@@ -60,7 +60,7 @@ class S2T3BAdvisor:
     def __init__(
         self,
         base_model_path: str = "Qwen/Qwen2.5-3B-Instruct",
-        adapter_path: str = "training/adapters/qwen3b_s2t_adapter",
+        adapter_path: str = "training/adapters/qwen3b_s2t_adapter_v2",
         force_simulation: bool = False
     ) -> None:
         self.base_model_path = base_model_path
@@ -125,7 +125,12 @@ class S2T3BAdvisor:
             system_prompt = (
                 "You are a Nexus Routing Selector Assistant. Your task is to select the best candidate "
                 "and provide selection reason codes and required verifiers based on the route features "
-                "and candidate summaries. You must strictly output the target JSON."
+                "and candidate summaries.\n"
+                "You must strictly output a valid JSON object. Do NOT wrap output in markdown blocks (e.g. ```json). "
+                "Do NOT use single quotes for JSON keys or string values (do NOT output Python dict format). "
+                "Every output MUST strictly contain all 4 required keys: 'selected_candidate_id', 'selection_reason_codes', "
+                "'required_verifier', 'abstain_reason'. The 'required_verifier' field MUST be null or one of the following "
+                "allowed verifiers: ['pytest', 'claim_gate', 'delivery_gate', 'hidden_verifier']."
             )
             messages = [
                 {"role": "system", "content": system_prompt},
@@ -143,7 +148,10 @@ class S2T3BAdvisor:
             ]
             response = self.tokenizer.batch_decode(generated_ids, skip_special_tokens=True)[0].strip()
             
-            if "```" in response:
+            # 剔除可能存在的 markdown
+            if response.startswith("```json"):
+                response = response.split("```json")[1].split("```")[0].strip()
+            elif response.startswith("```"):
                 response = response.split("```")[1].split("```")[0].strip()
             
             try:
