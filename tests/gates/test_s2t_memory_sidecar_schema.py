@@ -80,6 +80,6 @@ def test_shadow_runner_output(tmp_path):
     jsonschema.validate(instance=checkpoint, schema=schema_data)
     
     assert checkpoint["claim_boundary"] == "observation_only"
-    assert checkpoint["mode"] == "bootstrapping"
+    assert checkpoint["mode"] == "optimization"
     assert "input_hashes" in data
     assert data["input_hashes"]["log"] is not None
