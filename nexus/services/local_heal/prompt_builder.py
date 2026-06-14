@@ -7,7 +7,7 @@ class PromptBuilder:
     """🛡️ Nexus Prompt Engineering & Contract Management (Linus Principles: Explicit & Reliable)"""
 
     @staticmethod
-    def build_patch_system_prompt(model_name: str | None = None) -> str:
+    def build_patch_system_prompt(model_name: str | None = None, interleaved: bool = False) -> str:
         # Compact few-shot (one example, ~40 tokens)
         few_shot = (
             "\nEXAMPLE:\nFILE: src/utils.py\n"
@@ -16,12 +16,24 @@ class PromptBuilder:
         )
 
         is_7b = model_name and "7b" in model_name.lower()
+        
+        # Interleaved mode: add reasoning section for planning + patch in one call
+        reasoning_section = ""
+        if interleaved:
+            reasoning_section = (
+                "\nBefore producing the patch, briefly analyze:\n"
+                "1. Which symbols/functions are involved\n"
+                "2. What the root cause is\n"
+                "3. The minimal fix needed\n"
+                "Then produce the SEARCH/REPLACE patch.\n"
+            )
 
         if is_7b:
             return (
                 "Output ONLY SEARCH/REPLACE blocks. No explanations.\n\n"
                 "FILE: <path>\n<<<<<<< SEARCH\n<original>\n=======\n<fixed>\n>>>>>>> REPLACE\n\n"
                 "Rules: SEARCH must match exactly. No placeholders. Write full code."
+                + reasoning_section
                 + few_shot
             )
 
@@ -32,6 +44,7 @@ class PromptBuilder:
             "1. SEARCH matches source character-for-character.\n"
             "2. No placeholders ('# ...', '... code ...'). Write complete code.\n"
             "3. Modify in-place. Use hasattr()/getattr() for dynamic access."
+            + reasoning_section
             + few_shot
         )
 

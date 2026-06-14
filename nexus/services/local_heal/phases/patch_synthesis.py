@@ -84,9 +84,13 @@ class PatchSynthesisPhase(IPhase):
         )
         model_decisions.append({"phase": "patch", **patch_decision})
 
-        # 3. 準備治理化 Prompt
+        # 3. 準備治理化 Prompt — use interleaved mode if planning was LLM-based
+        use_interleaved = not input_data.plan.get("repair_strategy", "").startswith("FAST_MODE")
         if not system_prompt:
-            system_prompt = PromptBuilder.build_patch_system_prompt(patch_decision["model"])
+            system_prompt = PromptBuilder.build_patch_system_prompt(
+                patch_decision["model"], 
+                interleaved=use_interleaved
+            )
 
         # 追加上一輪失敗的 HUD 警告資訊
         hud_retry_info = ""
