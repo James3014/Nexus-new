@@ -186,7 +186,30 @@ class S2T3BAdvisor:
         # PACT dual-output: shadow mode
         if os.environ.get("NEXUS_S2T_PACT_ENABLED", "0") == "1":
             from nexus.contracts.pact import pact_from_advisor_output
-            pact = pact_from_advisor_output(task_id, risk_tier, candidates, result)
+            
+            # Skill memory injection (Slice B)
+            skill_hints = []
+            memory_hints = []
+            if os.environ.get("NEXUS_S2T_SKILL_MEMORY_ENABLED", "0") == "1":
+                from nexus.learning.skill_memory_index import SkillMemoryIndex
+                from pathlib import Path
+                index = SkillMemoryIndex(Path(__file__).resolve().parents[2])
+                
+                # Query skill history for each candidate
+                for c in candidates:
+                    skill_id = c.candidate_id if hasattr(c, "candidate_id") else c.get("id", "")
+                    if skill_id:
+                        record = index.query_skill_history(skill_id)
+                        if record.reuse_count > 0:
+                            skill_hints.append(f"{skill_id}:{record.recent_success_rate:.0%}")
+                        if record.recent_failure_modes:
+                            memory_hints.append(f"{skill_id}:failures={','.join(record.recent_failure_modes[:2])}")
+            
+            pact = pact_from_advisor_output(
+                task_id, risk_tier, candidates, result,
+                skill_hints=skill_hints,
+                memory_hints=memory_hints,
+            )
             result["_pact"] = pact.to_dict()
         
         return result

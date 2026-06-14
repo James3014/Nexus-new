@@ -78,6 +78,8 @@ def pact_from_advisor_output(
     risk_tier: str,
     candidates: list,
     advisor_output: dict,
+    skill_hints: List[str] = None,
+    memory_hints: List[str] = None,
 ) -> PACTRecord:
     """Convert advisor output to PACT record."""
     candidate_ids = [c.candidate_id if hasattr(c, "candidate_id") else c.get("id", "") for c in candidates]
@@ -89,8 +91,8 @@ def pact_from_advisor_output(
         recommended_candidate_id=advisor_output.get("selected_candidate_id"),
         selection_reason_codes=advisor_output.get("selection_reason_codes", []),
         evidence_refs=[],
-        skill_hints=[],
-        memory_hints=[],
+        skill_hints=skill_hints or [],
+        memory_hints=memory_hints or [],
         abstain_reason=advisor_output.get("abstain_reason", ""),
         observation_only=True,
     )
