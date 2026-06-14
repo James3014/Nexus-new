@@ -66,13 +66,14 @@ class PlanningPhase(IPhase):
 
         ctx.op.model_decisions.append({"phase": "planning", "model": "qwen2.5-coder:7b"})  # Placeholder decision
 
-        # 3. 呼叫解耦執行
-        if os.environ.get("NEXUS_FAST_MODE") == "1":
+        # 3. 呼叫解耦執行 — FAST mode if router says so OR env var set
+        use_fast = reasoning_mode == "FAST" or os.environ.get("NEXUS_FAST_MODE") == "1"
+        if use_fast:
             det_symbols = DeterministicSymbolExtractor.extract(input_data.problem_statement, input_data.repro_evidence)
             output = PlanningOutput(
                 success=True,
                 plan={"search_symbols": det_symbols, "repair_strategy": "FAST_MODE: Deterministic extraction", "violated_invariants": []},
-                model_decision={"phase": "planning", "model": "deterministic"}
+                model_decision={"phase": "planning", "model": "deterministic", "reasoning_mode": "FAST"}
             )
         else:
             output = self.run(input_data)

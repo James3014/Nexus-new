@@ -5,12 +5,26 @@ class ReasoningRouter:
     """
     🛡️ Dynamic Reasoning Router
     Decouples domain-specific rules for selecting LLM reasoning modes.
+    Modes: FAST (deterministic), INTUITIVE (light LLM), ALGEBRAIC (heavy reasoning)
     """
     def __init__(self, default_mode: str = "INTUITIVE"):
         self.default_mode = default_mode
         self._rules: List[Callable[[str, Path], str | None]] = []
         
-        # Register default algebraic rule (e.g., astropy, sympy)
+        # Rule 1: Simple bug fixes → FAST (deterministic extraction, no LLM)
+        # Covers: import errors, missing imports, simple typos, naming issues
+        self.register_rule(
+            lambda stmt, path: "FAST" if any(
+                kw in stmt.lower()
+                for kw in [
+                    "add import", "missing import", "import error",
+                    "fix typo", "rename", "add ", "remove ",
+                    "missing ", "unused ",
+                ]
+            ) and len(stmt) < 200 else None
+        )
+        
+        # Rule 2: Algebraic/scientific domains → ALGEBRAIC
         self.register_rule(
             lambda stmt, path: "ALGEBRAIC" if any(
                 kw in stmt.lower() or kw in str(path).lower() 
