@@ -102,6 +102,7 @@ class PatchSynthesisPhase(IPhase):
             reasoning_mode=input_data.reasoning_mode,
             failure_reason=input_data.failure_reason or "",
             attempt=input_data.attempt,
+            project_root=input_data.repo_dir,
         )
         if hud_retry_info:
             user_prompt += hud_retry_info

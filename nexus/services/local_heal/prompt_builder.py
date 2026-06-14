@@ -1,6 +1,7 @@
 from typing import List, Tuple, Dict, Any
 from pathlib import Path
 from nexus.services.local_heal.knowledge_injector import ParserHardeningKnowledgeInjector
+from nexus.services.local_heal.failure_memory import build_failure_context
 
 class PromptBuilder:
     """🛡️ Nexus Prompt Engineering & Contract Management (Linus Principles: Explicit & Reliable)"""
@@ -43,6 +44,7 @@ class PromptBuilder:
         reasoning_mode: str = "INTUITIVE",
         failure_reason: str = "",
         attempt: int = 1,
+        project_root: Path | None = None,
     ) -> str:
         # 1. 自動偵測並注入領域知識 (Knowledge Slicing)
         hardening_context = ""
@@ -72,12 +74,20 @@ class PromptBuilder:
                 f"DO NOT repeat the same mistake. Analyze why it failed and produce a DIFFERENT fix.\n"
             )
 
+        # 4. Failure memory bank (past failures from other tasks)
+        failure_memory_section = ""
+        if project_root:
+            failure_context = build_failure_context(project_root)
+            if failure_context:
+                failure_memory_section = f"\n{failure_context}\n"
+
         return (
             f"{hardening_context}\n"
             f"[TASK]\n{problem_statement}\n\n"
             f"[REPRODUCTION]\n{repro_evidence}\n\n"
             f"[STRATEGY: {reasoning_mode}]\n{strategy}\n"
             f"{retry_section}"
+            f"{failure_memory_section}"
             f"Allowed files: {choice_str}\n"
             f"⚠️ Rules: No placeholders. SEARCH matches source exactly. Modify in-place.\n\n"
             f"[SOURCE CONTEXT]\n{files_section}"
