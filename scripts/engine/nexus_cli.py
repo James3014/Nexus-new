@@ -6,6 +6,8 @@ import json
 import subprocess
 import time
 from pathlib import Path
+import faulthandler
+faulthandler.enable()
 
 import yaml
 import click

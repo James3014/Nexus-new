@@ -4055,6 +4055,7 @@ def _run_process_group(
         stdout_path = Path(tmp) / "stdout.txt"
         stderr_path = Path(tmp) / "stderr.txt"
         with stdout_path.open("w+", encoding="utf-8") as stdout_file, stderr_path.open("w+", encoding="utf-8") as stderr_file:
+            start_time = time.monotonic()
             proc = subprocess.Popen(
                 cmd,
                 cwd=cwd,
@@ -4071,6 +4072,9 @@ def _run_process_group(
                 if returncode is not None:
                     stdout_file.flush()
                     stderr_file.flush()
+                    elapsed = time.monotonic() - start_time
+                    cmd_str = " ".join(cmd[:3])
+                    print(f"⏱️  [Process Group: {cmd_str}...] Finished in {elapsed:.2f}s with code {returncode}", flush=True)
                     return subprocess.CompletedProcess(
                         cmd,
                         returncode,

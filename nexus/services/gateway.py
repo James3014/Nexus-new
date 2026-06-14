@@ -636,6 +636,7 @@ class BattlesuitGateway:
                     {"role": "user", "content": content},
                 ],
                 "stream": False,
+                "keep_alive": "30m",
             }
         else:
             path = "/api/generate"
@@ -644,6 +645,7 @@ class BattlesuitGateway:
                 "system": sys_msg,
                 "prompt": content,
                 "stream": False,
+                "keep_alive": "30m",
             }
         if options:
             request_payload["options"] = options

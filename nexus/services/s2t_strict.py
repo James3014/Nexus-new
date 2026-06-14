@@ -219,6 +219,7 @@ class S2T3BAdvisor:
             "system": system_prompt,
             "prompt": input_str,
             "stream": False,
+            "keep_alive": "30m",
             "options": {
                 "temperature": 0.0,
                 "top_p": 0.1,
@@ -232,7 +233,8 @@ class S2T3BAdvisor:
                 headers={"Content-Type": "application/json"},
                 method="POST"
             )
-            with urllib.request.urlopen(req, timeout=10) as resp:
+            timeout_val = int(os.getenv("NEXUS_S2T_3B_OLLAMA_TIMEOUT_SEC", "120"))
+            with urllib.request.urlopen(req, timeout=timeout_val) as resp:
                 raw_body = resp.read().decode("utf-8", errors="replace")
                 payload = json.loads(raw_body)
                 output_text = str(payload.get("response") or "").strip()
@@ -248,6 +250,9 @@ class S2T3BAdvisor:
                 return parsed
             return {"abstain_reason": f"invalid_schema_from_ollama: {output_text}"}
         except Exception as exc:
+            import traceback
+            print(f"🚨🚨555 [S2T Advisor Ollama Error]: {type(exc).__name__}: {exc}", flush=True)
+            traceback.print_exc()
             # Fallback
             logging.getLogger(__name__).warning(
                 "Ollama 3B Advisor call failed (%s). Falling back to native python load.", exc
