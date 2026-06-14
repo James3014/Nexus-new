@@ -10,6 +10,18 @@ class SurgicalContextBuilder:
         self.max_context_lines = max_context_lines
         self.window_size = window_size
 
+    def _dynamic_window(self, total_lines: int, anchor_idx: int) -> int:
+        """Compute window size based on file size and anchor position."""
+        if total_lines <= 100:
+            return min(30, total_lines // 2)
+        if total_lines <= 300:
+            return min(75, total_lines // 3)
+        # Large file: adaptive based on anchor position
+        edge_margin = min(50, total_lines // 10)
+        if anchor_idx < edge_margin or anchor_idx > total_lines - edge_margin:
+            return min(100, total_lines // 4)
+        return self.window_size
+
     def build_annotated_context(
         self,
         repo_dir: Path,
@@ -45,8 +57,9 @@ class SurgicalContextBuilder:
                 anchor_line_idx = idx
                 
         # 進行滑動視窗切片
-        start_idx = max(0, anchor_line_idx - self.window_size)
-        end_idx = min(len(source_lines), anchor_line_idx + self.window_size + 1)
+        dyn_window = self._dynamic_window(len(source_lines), anchor_line_idx)
+        start_idx = max(0, anchor_line_idx - dyn_window)
+        end_idx = min(len(source_lines), anchor_line_idx + dyn_window + 1)
         
         return self._format_lines(source_lines, start_idx, end_idx, rel_path)
 
