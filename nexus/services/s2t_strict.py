@@ -250,10 +250,6 @@ class S2T3BAdvisor:
                 return parsed
             return {"abstain_reason": f"invalid_schema_from_ollama: {output_text}"}
         except Exception as exc:
-            import traceback
-            print(f"🚨🚨555 [S2T Advisor Ollama Error]: {type(exc).__name__}: {exc}", flush=True)
-            traceback.print_exc()
-            # Fallback
             logging.getLogger(__name__).warning(
                 "Ollama 3B Advisor call failed (%s). Falling back to native python load.", exc
             )
