@@ -277,7 +277,11 @@ class BattlesuitGateway:
                 if file_path.exists():
                     try:
                         file_content = file_path.read_text(encoding="utf-8")
-                        surgical_context.append(f"### [Target File: {tf}]\n```\n{file_content}\n```")
+                        # Extract only the first 50 lines (imports section) for patch generation
+                        lines = file_content.split('\n')
+                        relevant_lines = lines[:50]  # Usually imports are in first 50 lines
+                        truncated = '\n'.join(relevant_lines)
+                        surgical_context.append(f"### [Target File (first 50 lines): {tf}]\n```\n{truncated}\n```")
                     except Exception:
                         pass
             
@@ -649,6 +653,9 @@ class BattlesuitGateway:
                     options[option_key] = val
             except ValueError:
                 continue
+        # Default num_predict limit to prevent excessive generation
+        if "num_predict" not in options:
+            options["num_predict"] = 512
         return options
 
     def _ask_via_ollama(
@@ -848,7 +855,9 @@ class BattlesuitGateway:
                     token_info.get("token_ledger_raw_provider_total_tokens", 0) or 0
                 )
             if isinstance(gateway_telemetry, dict):
-                data.update(gateway_telemetry)
+                # Don't let gateway_telemetry override tokens_used
+                telemetry_copy = {k: v for k, v in gateway_telemetry.items() if k != "tokens_used"}
+                data.update(telemetry_copy)
             
             return data, raw_text
             
