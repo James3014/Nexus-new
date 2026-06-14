@@ -3,9 +3,6 @@ import logging
 from typing import List, Dict, Any, Optional
 from pathlib import Path
 from datetime import datetime, timezone
-import lancedb
-import pandas as pd
-from sentence_transformers import SentenceTransformer
 
 logger = logging.getLogger(__name__)
 
@@ -20,22 +17,35 @@ class PredictiveAuditor:
         self.project_root = Path(project_root)
         self.db_path = self.project_root / ".nexus/memory/memory_index.lancedb"
         
-        # Consistent embedding model for alignment
-        self.model = SentenceTransformer('all-MiniLM-L6-v2')
+        self._model = None
+        self._db = None
+        self._table = None
         self._init_db()
-
+    
+    @property
+    def model(self):
+        if self._model is None:
+            from sentence_transformers import SentenceTransformer
+            self._model = SentenceTransformer('all-MiniLM-L6-v2')
+        return self._model
+    
     def _init_db(self):
         """🛡️ Connect to wisdom_registry table."""
         try:
-            self.db = lancedb.connect(str(self.db_path))
-            if "wisdom_registry" not in self.db.list_tables():
+            import lancedb
+            self._db = lancedb.connect(str(self.db_path))
+            if "wisdom_registry" not in self._db.list_tables():
                 logger.warning("⚠️ [Auditor] wisdom_registry table not found. Run 'nexus wisdom sync' first.")
-                self.table = None
+                self._table = None
             else:
-                self.table = self.db.open_table("wisdom_registry")
+                self._table = self._db.open_table("wisdom_registry")
         except Exception as e:
             logger.error(f"❌ [Auditor] Failed to connect to LanceDB: {e}")
-            self.table = None
+            self._table = None
+    
+    @property
+    def table(self):
+        return self._table
 
     def audit_risk(self, pack_data: Dict[str, Any]) -> Dict[str, Any]:
         """🔍 AUDIT: Calculate risk score for a given implementation pack."""

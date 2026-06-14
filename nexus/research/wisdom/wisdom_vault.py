@@ -1,16 +1,28 @@
 import os
 import json
-import lancedb
 from pathlib import Path
 from datetime import datetime
-from nexus.services.memory_embedding import get_model
 
 class WisdomVault:
     def __init__(self, db_path=str(__import__("pathlib").Path(__file__).resolve().parents[3] / ".nexus/vector_db/")):
         self.db_path = os.path.expanduser(db_path)
-        self.model = get_model()
-        self.db = lancedb.connect(self.db_path)
-        self.table_name = "nexus_knowledge" # 原生核心智慧表
+        self._model = None
+        self._db = None
+        self.table_name = "nexus_knowledge"
+        
+    @property
+    def model(self):
+        if self._model is None:
+            from nexus.services.memory_embedding import get_model
+            self._model = get_model()
+        return self._model
+    
+    @property
+    def db(self):
+        if self._db is None:
+            import lancedb
+            self._db = lancedb.connect(self.db_path)
+        return self._db
         
     def ingest_mirror_batch(self, mirror_dir="/tmp/nexus_mirror"):
         mirror_path = Path(mirror_dir)

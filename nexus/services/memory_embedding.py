@@ -5,7 +5,6 @@ P2-A: Local-First Embedding Service
 
 from typing import List
 import logging
-from sentence_transformers import SentenceTransformer
 
 # 核心配置
 MODEL_NAME = "all-MiniLM-L6-v2"
@@ -17,10 +16,11 @@ class EmbeddingError(RuntimeError):
 # 全域模型快取 (Singleton)
 _MODEL_CACHE = None
 
-def get_model() -> SentenceTransformer:
+def get_model():
     global _MODEL_CACHE
     if _MODEL_CACHE is None:
         try:
+            from sentence_transformers import SentenceTransformer
             # 優先加載本地快取，若無則下載
             _MODEL_CACHE = SentenceTransformer(MODEL_NAME)
         except Exception as e:
