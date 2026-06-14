@@ -99,7 +99,9 @@ class PatchSynthesisPhase(IPhase):
             input_data.repro_evidence,
             input_data.plan,
             surgical_files,
-            reasoning_mode=input_data.reasoning_mode
+            reasoning_mode=input_data.reasoning_mode,
+            failure_reason=input_data.failure_reason or "",
+            attempt=input_data.attempt,
         )
         if hud_retry_info:
             user_prompt += hud_retry_info

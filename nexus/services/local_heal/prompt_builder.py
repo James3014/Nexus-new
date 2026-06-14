@@ -79,7 +79,9 @@ class PromptBuilder:
         repro_evidence: str,
         plan: Dict[str, Any],
         localized_files: List[Tuple[str, str]],
-        reasoning_mode: str = "INTUITIVE"
+        reasoning_mode: str = "INTUITIVE",
+        failure_reason: str = "",
+        attempt: int = 1,
     ) -> str:
         # 1. 自動偵測並注入領域知識 (Knowledge Slicing)
         hardening_context = ""
@@ -101,12 +103,21 @@ class PromptBuilder:
         invariants = plan.get("violated_invariants", [])
         invariants_str = "\n".join(f"- {inv}" for inv in invariants) if invariants else "N/A"
 
+        # 3. Retry failure context injection
+        retry_section = ""
+        if attempt > 1 and failure_reason:
+            retry_section = (
+                f"\n⚠️ [RETRY CONTEXT] Previous attempt #{attempt-1} FAILED: {failure_reason}\n"
+                f"DO NOT repeat the same mistake. Analyze why it failed and produce a DIFFERENT fix.\n"
+            )
+
         return (
             f"{hardening_context}\n"
             f"[TASK]\n{problem_statement}\n\n"
             f"[REPRODUCTION]\n{repro_evidence}\n\n"
             f"[STRATEGY: {reasoning_mode}]\n{strategy}\n"
             f"[INVARIANTS]\n{invariants_str}\n\n"
+            f"{retry_section}"
             f"⚠️ CRITICAL: NO placeholders (e.g., '# ...', '... existing code ...') are allowed. You MUST write out the complete, actual code inside REPLACE block.\n"
             f"⚠️ CRITICAL: You MUST only modify files listed in the [SOURCE CONTEXT] below.\n"
             f"Allowed files: {choice_str}\n\n"
