@@ -8,6 +8,7 @@ from nexus.services.local_heal.corrector import SelfCorrector
 from nexus.services.local_heal.errors import PatchError, PatchErrorKind
 from nexus.services.local_heal.evidence_compactor import EvidenceCompactor
 from nexus.services.local_heal.latency_ledger import LatencyLedger
+from nexus.services.local_heal.role_contract import build_role_receipt, RoleReceipt
 
 class HealOrchestrator:
     """🛡️ Nexus Heal Orchestrator (Modular / Strategy-Driven / Fail-Closed)"""
@@ -75,6 +76,7 @@ class HealOrchestrator:
             wall_start=time.monotonic(),
         )
         ctx.op._latency_ledger = ledger  # Attach for receipt export
+        ctx.op._role_receipts = []  # Track role drift
         
         try:
             # Phase 1-3: 前置準備 (Linear)
@@ -102,6 +104,15 @@ class HealOrchestrator:
                     ctx.op.failure_reason = res.error_reason
                     ctx.op.runner_completed = True
                     return ctx
+                
+                # Record role receipt for this phase
+                model_name = self._get_model_for_phase(ctx, phase_name)
+                if model_name:
+                    role_receipt = build_role_receipt(phase_name, model_name)
+                    ctx.op._role_receipts.append(role_receipt)
+                    if role_receipt.role_drift_detected:
+                        logger.warning(f"Role drift detected: {role_receipt}")
+                
                 ledger.end_phase(pt, success=True)
 
             # 結構化壓縮證據，防止 Phase 4-5 上下文爆炸
@@ -260,6 +271,13 @@ class HealOrchestrator:
         ctx.op.user_prompt = self.corrector.build_retry_prompt(ctx.op.user_prompt, error, targeted_files=targeted_files)
         ctx.op.attempt += 1
         return ctx
+    
+    def _get_model_for_phase(self, ctx: HealContext, phase_name: str) -> str:
+        """Extract the model name used for a given phase from model_decisions."""
+        for decision in reversed(ctx.op.model_decisions):
+            if decision.get("phase") == phase_name:
+                return decision.get("model", "")
+        return ""
 
     def _record_model_status(self, ctx: HealContext, status: str, detail: str = "", *, phase: str | None = None) -> None:
         for decision in reversed(ctx.op.model_decisions):
