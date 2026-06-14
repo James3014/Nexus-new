@@ -54,7 +54,7 @@ def test_checkpoint_schema_missing_required(schema):
 def test_shadow_runner_output(tmp_path):
     output_file = tmp_path / "shadow.jsonl"
     log_file = tmp_path / "test.log"
-    log_file.write_text("dummy log content")
+    log_file.write_text("x" * 150)
     
     # Run shadow runner in mock mode
     cmd = [

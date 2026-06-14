@@ -89,6 +89,8 @@ def build_engine_components(config: Any, kwargs: Dict[str, Any]) -> Dict[str, An
         
     if not hasattr(hub, "assemble_feature_pack"):
         hub.assemble_feature_pack = context_hub.assemble_feature_pack
+    if not hasattr(hub, "assemble_diag_pack"):
+        hub.assemble_diag_pack = context_hub.assemble_diag_pack
 
     phase_factory = PhaseFactory(project_root=project_root, run_dir=run_dir, hub=hub)
     phase_executors = kwargs.get("phase_executors") or phase_factory.create_all()

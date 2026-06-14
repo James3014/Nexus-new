@@ -94,9 +94,9 @@ class NexusCommandService:
         import time
         bug_id = request.task_id or f"bug-{int(time.time())}"
         merged_context = dict(request.execution_context or {})
+        merged_context.setdefault("benchmark_run", True)
         if request.plan_only:
             # Dry-run should be deterministic and fast
-            merged_context.setdefault("benchmark_run", True)
             merged_context.setdefault("auto_repair_enabled", False)
         
         success = self.engine.run_bug(
@@ -123,7 +123,7 @@ class NexusCommandService:
     def execute_feature(self, request: TaskRequest):
         """Execute a feature task through the sole delivery-aware service boundary."""
         import time
-        context = {"delivery_mode": request.delivery_mode}
+        context = {"delivery_mode": request.delivery_mode, "benchmark_run": True}
         if request.swarm_mode:
             context["swarm_mode"] = True
         if request.use_sota_cache:
