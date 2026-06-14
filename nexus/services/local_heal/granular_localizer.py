@@ -221,6 +221,12 @@ class GranularMethodLocalizer:
                 body = "\n".join(lines[max(0, start-1):end+1])
                 body_tokens = set(self._tokenize(body))
                 
+                # Extract function calls for call graph
+                calls = set()
+                for child in ast.walk(node):
+                    if isinstance(child, ast.Call) and isinstance(child.func, ast.Name):
+                        calls.add(child.func.id)
+                
                 score = 0.0
                 # A. 符號命中分
                 overlap = len(query_tokens.intersection(body_tokens))
@@ -236,7 +242,7 @@ class GranularMethodLocalizer:
                 if any(kw in body.lower() for kw in parser_keywords):
                     score += 15.0
                 
-                # C. 修補分 (邏輯密集度)
+                # D. 修補分 (邏輯密集度)
                 if any(kw in body for kw in ["if ", "elif ", "re.compile", ".upper()", "ValueError"]):
                     score += 10.0
                 
@@ -245,11 +251,20 @@ class GranularMethodLocalizer:
                     "content": body,
                     "score": score,
                     "lineno": node.lineno,
-                    "end_lineno": end
+                    "end_lineno": end,
+                    "calls": calls,
                 })
 
             # 3. 組裝 Bundle
             sorted_snippets = sorted(snippets, key=lambda x: -x["score"])
+            
+            # 4. Call graph boost: functions called by top-scored function get +20
+            if sorted_snippets:
+                top_calls = sorted_snippets[0].get("calls", set())
+                for s in sorted_snippets[1:]:
+                    if s["name"] in top_calls:
+                        s["score"] += 20.0
+                sorted_snippets = sorted(sorted_snippets, key=lambda x: -x["score"])
 
             primary = sorted_snippets[0]
             
