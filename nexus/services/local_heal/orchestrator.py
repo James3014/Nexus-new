@@ -7,6 +7,7 @@ from nexus.services.local_heal.governance_gate import GovernanceGate
 from nexus.services.local_heal.corrector import SelfCorrector
 from nexus.services.local_heal.errors import PatchError, PatchErrorKind
 from nexus.services.local_heal.evidence_compactor import EvidenceCompactor
+from nexus.services.local_heal.latency_ledger import LatencyLedger
 
 class HealOrchestrator:
     """🛡️ Nexus Heal Orchestrator (Modular / Strategy-Driven / Fail-Closed)"""
@@ -66,24 +67,42 @@ class HealOrchestrator:
         """
         import time
         start_wall = time.time()
+        
+        # Latency Ledger: observation-only timing
+        ledger = LatencyLedger(
+            task_id=getattr(ctx.op, "task_id", ""),
+            instance_id=getattr(ctx.op, "instance_id", ""),
+            wall_start=time.monotonic(),
+        )
+        ctx.op._latency_ledger = ledger  # Attach for receipt export
+        
         try:
             # Phase 1-3: 前置準備 (Linear)
-            for phase in [self.repro_phase, self.plan_phase, self.loc_phase]:
+            phase_map = [
+                ("reproduction", self.repro_phase),
+                ("planning", self.plan_phase),
+                ("localization", self.loc_phase),
+            ]
+            for phase_name, phase in phase_map:
                 if not phase:
                     continue
+                pt = ledger.start_phase(phase_name)
                 try:
                     res = phase.execute(ctx)
                 except Exception as exc:
+                    ledger.end_phase(pt, success=False, error=str(exc)[:200])
                     ctx.gov.gate_exit = phase.__class__.__name__
                     ctx.op.failure_reason = f"{type(exc).__name__}:{exc}"
                     ctx.op.runner_completed = True
                     return ctx
 
                 if not res.success:
+                    ledger.end_phase(pt, success=False, error=res.error_reason[:200])
                     ctx.gov.gate_exit = res.exit_layer or "unknown"
                     ctx.op.failure_reason = res.error_reason
                     ctx.op.runner_completed = True
                     return ctx
+                ledger.end_phase(pt, success=True)
 
             # 結構化壓縮證據，防止 Phase 4-5 上下文爆炸
             ctx.op.repro_evidence = EvidenceCompactor.compact(ctx.op.repro_evidence, limit=3000)
@@ -100,9 +119,11 @@ class HealOrchestrator:
                 # Step 4: Patch Synthesis
                 if not self.patch_phase:
                     break
+                pt_patch = ledger.start_phase(f"patch_attempt_{ctx.op.attempt}")
                 try:
                     patch_res = self.patch_phase.execute(ctx)
                 except Exception as exc:
+                    ledger.end_phase(pt_patch, success=False, error=str(exc)[:200])
                     ctx.gov.gate_exit = "patcher"
                     ctx.op.failure_reason = f"PATCH_EXCEPTION:{type(exc).__name__}:{exc}"
                     ctx.op.final_patch = ""
@@ -156,27 +177,36 @@ class HealOrchestrator:
 
                     # Fail-fast: do not retry infrastructure or extreme timeout errors
                     if "MODEL_TIMEOUT" in patch_res.error_reason or "MODEL_PROVIDER_ERROR" in patch_res.error_reason:
+                        ledger.end_phase(pt_patch, success=False, error=patch_res.error_reason[:200])
                         break
 
+                    ledger.end_phase(pt_patch, success=False, error=patch_res.error_reason[:200])
                     ctx = self._handle_retry(ctx, err)
                     continue
+                
+                ledger.end_phase(pt_patch, success=True)
+                
                 # Step 5: Verification
                 if not self.verify_phase:
                     ctx.op.solve_eligible = True
                     ctx.gov.gate_exit = "verification"
                     break
+                pt_verify = ledger.start_phase(f"verify_attempt_{ctx.op.attempt}")
                 try:
                     verify_res = self.verify_phase.execute(ctx)
                 except Exception as exc:
+                    ledger.end_phase(pt_verify, success=False, error=str(exc)[:200])
                     ctx.gov.gate_exit = "verification"
                     ctx.op.failure_reason = f"VERIFY_EXCEPTION:{type(exc).__name__}:{exc}"
                     ctx.op.final_patch = ""
                     break
 
                 if verify_res.success:
+                    ledger.end_phase(pt_verify, success=True)
                     ctx.gov.gate_exit = "verification"
                     break
                 else:
+                    ledger.end_phase(pt_verify, success=False, error=verify_res.error_reason[:200])
                     ctx.op.final_patch = "" # 驗證失敗需清除補丁
                     err = PatchError(kind=PatchErrorKind.LOGIC_REGRESSION, message=f"Verification failed: {verify_res.error_reason}")
                     ctx.op.failure_reason = f"LOGIC_REGRESSION:{verify_res.error_reason}"
@@ -191,6 +221,11 @@ class HealOrchestrator:
             
         finally:
             ctx.op.wall_time_sec = time.time() - start_wall
+            # Finalize latency ledger
+            ledger.wall_end = time.monotonic()
+            ledger.retry_count = max(0, ctx.op.attempt - 1)
+            ledger.finalize()
+            ctx.op._latency_ledger = ledger
             # 執行審計與收據寫入 (保證不論如何都會執行)
             self.governance_gate.audit(ctx)
             if self.receipt_writer:

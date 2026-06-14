@@ -191,6 +191,7 @@ def build_repair_receipt(ctx: Any, *, model_name: str = "nexus-local-heal") -> d
             "env_denoise": dict(getattr(ctx, "env_denoise", {}) or {}),
             "env_resolution": dict(getattr(ctx, "env_resolution", {}) or {}),
         },
+        "latency_ledger": getattr(ctx, "_latency_ledger", None) and getattr(ctx._latency_ledger, "to_dict", lambda: {})() or None,
     }
 
 
