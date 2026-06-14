@@ -88,6 +88,9 @@ from scripts.bench.route_execution_policy import (
 )
 from scripts.bench.taskset_contract import build_taskset_contract
 
+# Phase 6: Module-level persistent worker handle
+persistent_worker_proc = None
+
 from nexus.app.research_flow_service import (
     _build_codeintel_evidence,
     _skill_mount_receipt_names,
@@ -144,6 +147,10 @@ class BenchmarkTotalTimeout(RuntimeError):
 
 def _nexus_cli_subprocess_cmd(args: list[str]) -> list[str]:
     python_bin = os.environ.get("NEXUS_BENCH_SUBPROCESS_PYTHON", "").strip()
+    if not python_bin:
+        venv_python = Path(".venv/bin/python")
+        if venv_python.exists():
+            python_bin = str(venv_python)
     if python_bin:
         return [python_bin, "scripts/engine/nexus_cli.py", *args]
     return ["uv", "run", "scripts/engine/nexus_cli.py", *args]
@@ -4051,6 +4058,38 @@ def _run_process_group(
     env: dict[str, str],
     timeout_sec: int,
 ) -> subprocess.CompletedProcess[str]:
+    # Phase 6: Use persistent worker if available
+    if persistent_worker_proc is not None:
+        import json as _json
+        import select
+        task_payload = {
+            "action": "run_cli",
+            "args": cmd[2:] if len(cmd) > 2 else [],  # Skip python and nexus_cli.py
+            "env": {k: v for k, v in env.items() if k.startswith("NEXUS_")},
+            "timeout_sec": timeout_sec,
+            "cwd": str(cwd),
+        }
+        persistent_worker_proc.stdin.write(_json.dumps(task_payload) + "\n")
+        persistent_worker_proc.stdin.flush()
+        # Use select() with timeout to prevent deadlock if worker hangs
+        ready, _, _ = select.select([persistent_worker_proc.stdout], [], [], timeout_sec)
+        if ready:
+            result_line = persistent_worker_proc.stdout.readline()
+            if result_line:
+                result = _json.loads(result_line)
+                return subprocess.CompletedProcess(
+                    cmd,
+                    result.get("returncode", -1),
+                    result.get("stdout", ""),
+                    result.get("stderr", ""),
+                )
+        # Worker timed out or hung — kill and fallback to direct execution
+        try:
+            persistent_worker_proc.kill()
+        except Exception:
+            pass
+        persistent_worker_proc = None
+
     with tempfile.TemporaryDirectory(prefix="nexus-bench-proc-") as tmp:
         stdout_path = Path(tmp) / "stdout.txt"
         stderr_path = Path(tmp) / "stderr.txt"
@@ -5849,6 +5888,7 @@ def run_with_nexus(
         supervised_bare_attempt is not None
         and route_cost_controls.get("lite_route") is True
         and str(supervised_bare_attempt.get("semantic_status") or "") != "VERIFIED"
+        and not effective_strict_llm_baseline
     ):
         effective_skip_llm_baseline = True
     if force_flow_defer_reason and not skip_llm_baseline:
@@ -9558,6 +9598,7 @@ def build_public_benchmark_preflight(args: argparse.Namespace, *, repo_root: Pat
 
 
 def main() -> int:
+    global persistent_worker_proc
     parser = argparse.ArgumentParser(description="Run capability A/B benchmark: with_nexus vs without_nexus.")
     parser.add_argument("--tasks-file", default="scripts/bench/capability_tasks_v1.json")
     parser.add_argument(
@@ -9805,6 +9846,12 @@ def main() -> int:
         choices=["preserve_target", "worktree"],
         default="preserve_target",
         help="preserve_target restores target files after each leg; worktree is reserved for clean worktree execution.",
+    )
+    parser.add_argument(
+        "--persistent-worker",
+        action="store_true",
+        default=False,
+        help="Use persistent worker to eliminate cold start overhead (~10-15s per task).",
     )
     args = parser.parse_args()
     if args.gemini_model:
@@ -10056,6 +10103,30 @@ def main() -> int:
     timed_out = False
     effective_total_timeout_sec = _effective_total_timeout_sec(int(args.total_timeout_sec), int(args.stop_loss_sec))
     previous_timeout_handler = _install_total_timeout(effective_total_timeout_sec)
+
+    # Phase 6: Persistent worker for cold start elimination
+    if getattr(args, "persistent_worker", False):
+        print("⚡ [Phase 6] Starting persistent worker...", file=sys.stderr, flush=True)
+        import subprocess as _persistent_subprocess
+        _worker_script = str(repo_root / "scripts" / "bench" / "persistent_worker.py")
+        persistent_worker_proc = _persistent_subprocess.Popen(
+            [sys.executable, _worker_script],
+            stdin=_persistent_subprocess.PIPE,
+            stdout=_persistent_subprocess.PIPE,
+            stderr=_persistent_subprocess.PIPE,
+            text=True,
+        )
+        # Wait for worker to be ready with timeout
+        import select as _select
+        ready, _, _ = _select.select([persistent_worker_proc.stdout], [], [], 30)
+        if ready:
+            _worker_ready_line = persistent_worker_proc.stdout.readline()
+            print(f"⚡ [Phase 6] Worker ready: {_worker_ready_line.strip()}", file=sys.stderr, flush=True)
+        else:
+            print("⚡ [Phase 6] Worker startup timeout, falling back to direct execution", file=sys.stderr, flush=True)
+            persistent_worker_proc.kill()
+            persistent_worker_proc = None
+
     with_tasks = [] if bool(args.without_only) else tasks
     for task in with_tasks:
         if _budget_exceeded(run_start, effective_total_timeout_sec):
@@ -10523,6 +10594,17 @@ def main() -> int:
             ensure_ascii=False,
         )
     )
+
+    # Phase 6: Shutdown persistent worker
+    if persistent_worker_proc is not None:
+        try:
+            persistent_worker_proc.stdin.write('{"action": "shutdown"}\n')
+            persistent_worker_proc.stdin.flush()
+            persistent_worker_proc.wait(timeout=5)
+            print("⚡ [Phase 6] Worker shut down cleanly.", file=sys.stderr, flush=True)
+        except Exception:
+            persistent_worker_proc.kill()
+
     return 0
 
 
