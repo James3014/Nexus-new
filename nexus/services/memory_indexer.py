@@ -8,11 +8,7 @@ import hashlib
 from pathlib import Path
 from typing import Any, Dict, Iterable, List, Optional
 import logging
-import lancedb
-from lancedb.pydantic import Vector, LanceModel
 from datetime import datetime, timezone, timedelta
-
-from nexus.services.memory_embedding import embed_texts, EMBED_DIM
 
 # 配置
 TABLE_NAME = "memory_index"
@@ -23,15 +19,8 @@ QUOTA_RUN_MANIFESTS = 50
 QUOTA_OUTCOME_EVENTS = 1000
 _DB_CACHE: Dict[str, Any] = {}
 
-class IndexerError(RuntimeError):
-    pass
-
-def stable_hash(*parts: str) -> str:
-    """生成穩定 ID 用於冪等 Upsert"""
-    joined = "||".join(str(p or "") for p in parts)
-    return hashlib.sha256(joined.encode("utf-8")).hexdigest()
-
 def connect_memory_db(repo_root: Path):
+    import lancedb
     db_path = repo_root / DB_CORE_PATH
     db_path.parent.mkdir(parents=True, exist_ok=True)
     key = str(db_path.resolve())
@@ -40,24 +29,33 @@ def connect_memory_db(repo_root: Path):
     return _DB_CACHE[key]
 
 # P2-A Schema 定義 (對齊 v22 治理欄位)
-class MemoryIndexRecord(LanceModel):
-    record_id: str
-    record_type: str
-    task_id: str
-    trace_id: str
-    decision_id: str
-    phase: str
-    category: str
-    trust_tier: str
-    source_type: str
-    contract_version: str
-    created_at_utc: str
-    score_hint: float
-    payload_json: str
-    embedding: Vector(EMBED_DIM)
+def _get_lancedb_types():
+    from lancedb.pydantic import Vector, LanceModel
+    from nexus.services.memory_embedding import EMBED_DIM
+    return Vector, LanceModel, EMBED_DIM
+
+def _make_record_class():
+    Vector, LanceModel, EMBED_DIM = _get_lancedb_types()
+    class MemoryIndexRecord(LanceModel):
+        record_id: str
+        record_type: str
+        task_id: str
+        trace_id: str
+        decision_id: str
+        phase: str
+        category: str
+        trust_tier: str
+        source_type: str
+        contract_version: str
+        created_at_utc: str
+        score_hint: float
+        payload_json: str
+        embedding: Vector(EMBED_DIM)
+    return MemoryIndexRecord
 
 def ensure_table(db):
     """建立獲取 LanceDB 表結構 (384-dim)"""
+    MemoryIndexRecord = _make_record_class()
     try:
         return db.open_table(TABLE_NAME)
     except Exception:
@@ -264,6 +262,7 @@ def rebuild_memory_index(repo_root: Path) -> Dict[str, Any]:
         return {"status": "ok", "message": "Index up to date.", "records_processed": 0}
         
     # 3. 向量化新紀錄
+    from nexus.services.memory_embedding import embed_texts
     texts = [build_embedding_text(r) for r in new_records]
     embeddings = embed_texts(texts)
     

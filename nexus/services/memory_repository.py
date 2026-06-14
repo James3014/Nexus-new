@@ -4,20 +4,13 @@ import time
 import hashlib
 from pathlib import Path
 from typing import Dict, Any, List, Optional
-import pandas as pd
+
 try:
     from nexus.core.ui import InfrastructureError
 except (ImportError, ModuleNotFoundError):
     class InfrastructureError(RuntimeError):
         """Fallback for Nexus Infrastructure errors when core modules are missing."""
         pass
-
-try:
-    import lancedb
-    import numpy as np
-except ModuleNotFoundError:
-    lancedb = None
-    np = None
 
 logger = logging.getLogger(__name__)
 
@@ -75,8 +68,9 @@ class MemoryRepository:
         return f"aaak:{digest}:{compressed} [dialect_fallback]"
 
     def _get_db(self):
-        if self._db is None and lancedb:
+        if self._db is None:
             try:
+                import lancedb
                 self.db_path.parent.mkdir(parents=True, exist_ok=True)
                 self._db = lancedb.connect(self.db_path)
             except Exception as e:
@@ -204,14 +198,16 @@ class MemoryRepository:
                 logger.debug("LanceDB full-table delete skipped for %s", table_name)
         table.add(rows)
 
-    def get_all_rows(self, table_name: str) -> pd.DataFrame:
+    def get_all_rows(self, table_name: str):
+        import pandas as pd
         db = self._get_db()
         if db is None or table_name not in db.list_tables():
             return pd.DataFrame()
         return db.open_table(table_name).to_pandas()
 
-    def search_fts_across_tables(self, query: str, tables: List[str], limit: int = 10) -> pd.DataFrame:
+    def search_fts_across_tables(self, query: str, tables: List[str], limit: int = 10):
         """🚀 跨表全文搜尋 (NexusFS grep 的後端)。"""
+        import pandas as pd
         all_results = []
         for table_name in tables:
             try:
@@ -231,8 +227,9 @@ class MemoryRepository:
             combined = combined.sort_values("_score", ascending=False).head(limit)
         return combined
 
-    def search_fts(self, table_name: str, query: str, limit: int = 10, fallback_columns: List[str] = None) -> pd.DataFrame:
+    def search_fts(self, table_name: str, query: str, limit: int = 10, fallback_columns: List[str] = None):
         """執行單表全文搜尋。"""
+        import pandas as pd
         db = self._get_db()
         if db is None or table_name not in db.list_tables():
             return pd.DataFrame()
@@ -244,8 +241,9 @@ class MemoryRepository:
         except Exception:
             # 如果 FTS 索引不存在，退回到關鍵字過濾
             df = table.to_pandas()
-            if df.empty or not fallback_columns or np is None:
+            if df.empty or not fallback_columns:
                 return pd.DataFrame()
             
+            import numpy as np
             mask = np.column_stack([df[col].str.contains(query, case=False, na=False) for col in fallback_columns]).any(axis=1)
             return df[mask].head(limit)

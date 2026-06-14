@@ -7,7 +7,6 @@ from pathlib import Path
 from typing import Dict, List, Optional
 import json
 from datetime import datetime, timezone, timedelta
-import pandas as pd
 
 from nexus.services.memory_indexer import connect_memory_db, TABLE_NAME
 
@@ -20,6 +19,7 @@ def compute_phase_health(repo_root: Path, phase: str, window_days: int = 90) -> 
     - health_score: 0.8 * Success + 0.2 * Pattern Reuse
     """
     try:
+        import pandas as pd
         db = connect_memory_db(repo_root)
         table = db.open_table(TABLE_NAME)
         
