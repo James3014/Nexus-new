@@ -183,18 +183,31 @@ class BattlesuitGateway:
         }
     }
 
+    PATCH_SCHEMA_INSTRUCTION = (
+        "You are a code repair agent. Generate a patch using Aider-style Search/Replace blocks. "
+        "Output format: <<<<<<< SEARCH\\n<exact lines to find>\\n=======\\n<replacement lines>\\n>>>>>>> REPLACE\\n\\n"
+        "Rules:\n"
+        "- Include enough context lines to make the search block unique\n"
+        "- Preserve exact whitespace and indentation\n"
+        "- Return ONLY the Search/Replace blocks, no explanations, no comments\n"
+        "- Do NOT add comments like '# add this line' or '# <<<...>>>' inside the patch\n"
+        "- If multiple changes needed, use multiple blocks\n"
+    )
+
     def _build_system_instruction(
         self,
-        output_schema: Dict[str, Any],
+        output_schema: Optional[Dict[str, Any]],
         system_instruction: Optional[str] = None,
     ) -> str:
         base = system_instruction or "You are the pilot of the Nexus Battlesuit v16."
-        return (
-            f"{base} "
-            "Do not use tools, do not inspect files, and do not create an execution plan. "
-            "Return ONLY valid JSON. Do not wrap the answer in markdown. "
-            f"Required output shape: {json.dumps(output_schema, ensure_ascii=False)}"
-        )
+        parts = [
+            f"{base}",
+            "Do not use tools, do not inspect files, and do not create an execution plan.",
+        ]
+        if output_schema is not None:
+            parts.append("Return ONLY valid JSON. Do not wrap the answer in markdown.")
+            parts.append(f"Required output shape: {json.dumps(output_schema, ensure_ascii=False)}")
+        return " ".join(parts)
 
     def _build_error_result(self, summary, category="gateway_error", telemetry: Optional[Dict[str, Any]] = None):
         result = {
@@ -244,6 +257,7 @@ class BattlesuitGateway:
         🛡️ Surgical Ask v4.5: 受控微蜂群探索與語義升階
         """
         from nexus.engine.surgical_intel_service import SurgicalIntelligence
+        from nexus.engine.direct_mode import extract_target_files
         intel = SurgicalIntelligence(self.project_root)
         
         surgical_context = []
@@ -254,6 +268,18 @@ class BattlesuitGateway:
         
         if rejection_receipt:
             surgical_context.append(rejection_receipt.format_as_constraint_prompt())
+        
+        # For R phase, include target file content so model can generate accurate patches
+        if phase == "R":
+            target_files = extract_target_files(task)
+            for tf in target_files[:1]:  # First target file
+                file_path = self.project_root / tf
+                if file_path.exists():
+                    try:
+                        file_content = file_path.read_text(encoding="utf-8")
+                        surgical_context.append(f"### [Target File: {tf}]\n```\n{file_content}\n```")
+                    except Exception:
+                        pass
             
         combined_payload = "\n\n".join(surgical_context)
 
@@ -307,6 +333,16 @@ class BattlesuitGateway:
                 return best["data"], best["raw_text"]
 
         # 回退至單一路徑
+        # For R phase, use patch generation instruction instead of rejection schema
+        if phase == "R":
+            return self.ask_structured(
+                task, 
+                combined_payload, 
+                phase=phase, 
+                model_name=forced_model,
+                system_instruction=self.PATCH_SCHEMA_INSTRUCTION,
+                output_schema=None,  # Let model produce free-form Search/Replace blocks
+            )
         return self.ask_structured(task, combined_payload, phase=phase, model_name=forced_model)
 
     def apply_patch_v2(self, task_id: str, target_file: str, raw_patch: str) -> Dict[str, Any]:
@@ -340,7 +376,8 @@ class BattlesuitGateway:
         """Night Shift / automation path: request arbitrary structured JSON through the battlesuit."""
         selected_model = model_name or self.model_selector(phase)
         full_content = f"{prompt}\n\n[PAYLOAD]\n{payload}"
-        schema = output_schema or self.OUTPUT_SCHEMA
+        # Only use OUTPUT_SCHEMA if explicitly requested (not None)
+        schema = output_schema if output_schema is not None else (self.OUTPUT_SCHEMA if system_instruction is None else None)
         sys_msg = self._build_system_instruction(schema, system_instruction)
         return self._ask_via_cli(full_content, selected_model, sys_msg)
 
@@ -753,7 +790,23 @@ class BattlesuitGateway:
         return extract_token_info(payload)
 
     def _parse_json_result(self, raw_text, tokens_total, capture_status, token_info=None, gateway_telemetry=None):
-        """解析模型產出的 JSON 內容。"""
+        """解析模型產出的 JSON 內容，或直接回傳 Search/Replace 格式。"""
+        # Check if output is Search/Replace format (for R phase patch generation)
+        if "<<<<<<< SEARCH" in raw_text and ">>>>>>> REPLACE" in raw_text:
+            data = {
+                "status": "APPROVED",
+                "summary": "Patch generated in Search/Replace format",
+                "violations": [],
+                "patch_raw": raw_text,
+            }
+            data["tokens_used"] = tokens_total
+            data["token_capture_status"] = capture_status
+            if isinstance(token_info, dict):
+                data.update(token_info)
+            if isinstance(gateway_telemetry, dict):
+                data.update(gateway_telemetry)
+            return data, raw_text
+        
         try:
             try:
                 data = json.loads(raw_text)

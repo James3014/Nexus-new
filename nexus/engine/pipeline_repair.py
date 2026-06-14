@@ -61,7 +61,9 @@ class PipelineRepairMixin:
         with tracer.phase_span('R', task_id=ctx.task_id) as r_span:
             composed = self._run_composition_repair_phase(ctx, repair_attempts)
             if composed is not None:
+                logger.info("🛡️ [Pipeline:R] Composition repair returned result")
                 return composed
+            logger.info("🛡️ [Pipeline:R] Composition repair returned None, falling through")
 
             self._prepare_repair_context(ctx, repair_attempts)
 
@@ -182,6 +184,14 @@ class PipelineRepairMixin:
             }
         )
         result = plugin.execute(self, ctx)
+        # Record token usage from composition repair phase
+        result_mutations = dict(getattr(result, "mutations", None) or {})
+        tokens_used = result_mutations.get("tokens_used")
+        token_raw = result_mutations.get("token_raw_model")
+        logger.info("🛡️ [Pipeline:R] Composition result: tokens_used=%s, token_raw=%s", tokens_used, token_raw)
+        if tokens_used or token_raw:
+            logger.info("🛡️ [Pipeline:R] Recording tokens to accumulator")
+            ctx.accumulator.record(ctx.state, "R", result_mutations, overhead=100)
         normalized = self._normalize_composed_repair_result(ctx, result, repair_attempts)
         mutations = normalized.mutations
         status = normalized.status

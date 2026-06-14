@@ -165,14 +165,20 @@ class RepairPhaseHandler(BasePhaseHandler):
                 apply_res = gateway.apply_patch_v2(state.task_id, str(resolution.target_file), raw)
                 local_result = {
                     "status": "APPROVED" if apply_res.get("success") else "FAILED",
-                    "result_object": apply_res
+                    "result_object": apply_res,
+                    "tokens_used": res.get("tokens_used", 0),
+                    "token_raw_model": res.get("raw_provider_total_tokens", 0),
+                    "token_capture_status": res.get("token_capture_status", "measured"),
                 }
             else:
                 # 🚫 嚴格禁止向舊路徑 Fallback
                 logger.error(f"🛑 [R-Stage:Apply] Target resolution failed: {resolution.reason}. Rejecting patch.")
                 local_result = {
                     "status": "FAILED",
-                    "error": f"Target resolution failed: {resolution.reason}"
+                    "error": f"Target resolution failed: {resolution.reason}",
+                    "tokens_used": res.get("tokens_used", 0),
+                    "token_raw_model": res.get("raw_provider_total_tokens", 0),
+                    "token_capture_status": res.get("token_capture_status", "measured"),
                 }
 
         # 🛡️ [Phase 2.3] 自癒感官啟動 (Self-Healing Research)

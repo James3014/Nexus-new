@@ -71,6 +71,7 @@ def test_s2t_strict_gate_advisor_triggers_on_matching_canary(monkeypatch) -> Non
 def test_s2t_strict_gate_advisor_abstains_when_model_missing(tmp_path, monkeypatch) -> None:
     import hashlib
     monkeypatch.setenv("NEXUS_S2T_3B_ASSISTED_MODE", "observation")
+    monkeypatch.setenv("NEXUS_S2T_3B_USE_OLLAMA", "0")
 
     triggered_task_id = ""
     for i in range(100):
@@ -197,10 +198,15 @@ def test_robust_json_parse_various_formats() -> None:
 
 def test_s2t_advisor_provenance_lock(tmp_path) -> None:
     # 測試未註冊或不存在的 adapter_path，應該拋出錯誤並記錄為 provenance_lock_failed
-    advisor = S2T3BAdvisor(adapter_path="training/adapters/non_existent_adapter_xyz")
-    res = advisor.advise("medium", [])
-    assert "abstain_reason" in res
-    assert "provenance_lock_failed" in res["abstain_reason"]
+    import os
+    os.environ["NEXUS_S2T_3B_USE_OLLAMA"] = "0"
+    try:
+        advisor = S2T3BAdvisor(adapter_path="training/adapters/non_existent_adapter_xyz")
+        res = advisor.advise("medium", [])
+        assert "abstain_reason" in res
+        assert "provenance_lock_failed" in res["abstain_reason"]
+    finally:
+        os.environ.pop("NEXUS_S2T_3B_USE_OLLAMA", None)
 
 
 def test_s2t_advisor_kill_switch(tmp_path, monkeypatch) -> None:
