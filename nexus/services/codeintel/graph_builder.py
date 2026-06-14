@@ -26,7 +26,7 @@ IGNORED_DIRS = {
 def iter_python_files(root: Path) -> list[Path]:
     files: list[Path] = []
     for dirpath, dirnames, filenames in os.walk(root):
-        dirnames[:] = sorted(name for name in dirnames if name not in IGNORED_DIRS)
+        dirnames[:] = sorted(name for name in dirnames if name not in IGNORED_DIRS and not name.startswith(".venv") and not name.startswith("."))
         base = Path(dirpath)
         for filename in sorted(filenames):
             if filename.endswith(".py"):

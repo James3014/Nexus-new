@@ -1009,7 +1009,10 @@ def run_auto_flow(
     target_path = (repo_root / target_file).resolve()
     if not target_path.exists():
         raise click.ClickException(f"Target file not found: {target_file}")
-    pytest_cmd = ["uv", "run", "pytest", "-q", "--maxfail=1", test_file]
+    pytest_bin = str((repo_root / ".venv" / "bin" / "pytest").resolve())
+    if not Path(pytest_bin).exists():
+        pytest_bin = "pytest"
+    pytest_cmd = [pytest_bin, "-q", "--maxfail=1", test_file]
     original_code = target_path.read_text(encoding="utf-8")
     timing_breakdown_sec["target_io_sec"] = round(time.monotonic() - setup_started_at, 4)
     normalized_success_criteria = (success_criteria or "all_target_tests_pass").strip()
@@ -1485,7 +1488,7 @@ def run_auto_flow(
     artifact_refs = [f"artifact:{receipt_slug}:tests_passed"] if artifact_verified else []
     claim_refs = [f"claim:{receipt_slug}:verified_delivery"] if artifact_verified else []
     belief_refs = [f"belief:{receipt_slug}:confidence:{float(execution_profile.get('belief_confidence', 1.0) or 1.0):.2f}"] if artifact_verified else []
-    mempalace_refs = [f"mempalace:{receipt_slug}:policy_checked"] if artifact_verified and (mempalace_active or governance_needed) else []
+    mempalace_refs = [f"mempalace:{receipt_slug}:policy_checked" if (mempalace_active or governance_needed) else f"mempalace:{receipt_slug}:bypass_non_llm"] if artifact_verified else []
     nexus_usage_trace = {
         "gemini_uses_nexus": bool(gemini_invoked),
         "nexus_context_delivered": True,
