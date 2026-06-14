@@ -7,69 +7,30 @@ class PromptBuilder:
 
     @staticmethod
     def build_patch_system_prompt(model_name: str | None = None) -> str:
-        # P0-4: Few-shot example drastically improves 7B format compliance
+        # Compact few-shot (one example, ~40 tokens)
         few_shot = (
-            "\n\nEXAMPLE 1 (follow this exact format):\n"
-            "FILE: django/db/models/query.py\n"
-            "<<<<<<< SEARCH\n"
-            "        if self.query.is_empty():\n"
-            "            return False\n"
-            "=======\n"
-            "        if self.query.is_empty():\n"
-            "            return self.query.default_cols\n"
-            ">>>>>>> REPLACE\n"
-            "\n"
-            "EXAMPLE 2:\n"
-            "FILE: astropy/coordinates/angles.py\n"
-            "<<<<<<< SEARCH\n"
-            "    def __str__(self):\n"
-            "        return self.to_string()\n"
-            "=======\n"
-            "    def __str__(self):\n"
-            "        try:\n"
-            "            return self.to_string()\n"
-            "        except Exception:\n"
-            "            return super().__str__()\n"
-            ">>>>>>> REPLACE\n"
+            "\nEXAMPLE:\nFILE: src/utils.py\n"
+            "<<<<<<< SEARCH\n    return os.path.join(a, b)\n=======\n"
+            "    return os.path.join(a, b) if a and b else ''\n>>>>>>> REPLACE\n"
         )
 
-        is_7b = False
-        if model_name and "7b" in model_name.lower():
-            is_7b = True
+        is_7b = model_name and "7b" in model_name.lower()
 
         if is_7b:
-            # Slim prompt (< 150 tokens) for 7B models
             return (
-                "You are a Senior Python Developer. Output ONLY SEARCH/REPLACE blocks (no explanations).\n\n"
-                "Format:\n"
-                "FILE: <path>\n"
-                "<<<<<<< SEARCH\n"
-                "<exact original code>\n"
-                "=======\n"
-                "<fixed code>\n"
-                ">>>>>>> REPLACE\n"
-                "Rules:\n"
-                "1. SEARCH must match source exactly character-for-character.\n"
-                "2. NO placeholders (e.g. '# ...') in SEARCH or REPLACE block. You must write full code.\n"
-                "3. Modify existing code in-place.\n"
+                "Output ONLY SEARCH/REPLACE blocks. No explanations.\n\n"
+                "FILE: <path>\n<<<<<<< SEARCH\n<original>\n=======\n<fixed>\n>>>>>>> REPLACE\n\n"
+                "Rules: SEARCH must match exactly. No placeholders. Write full code."
                 + few_shot
             )
 
         return (
-            "You are a Senior Software Engineer fixing a Python bug.\n"
-            "OUTPUT ONLY SEARCH/REPLACE blocks — no explanations, no apologies.\n\n"
-            "FORMAT:\n"
-            "FILE: <path/to/file.py>\n"
-            "<<<<<<< SEARCH\n"
-            "<exact original code, verbatim>\n"
-            "=======\n"
-            "<fixed code>\n"
-            ">>>>>>> REPLACE\n\n"
-            "RULES:\n"
-            "1. SEARCH must match source CHARACTER-FOR-CHARACTER.\n"
-            "2. NO placeholders (e.g. '# ...', '// ...', '... existing code ...') in SEARCH or REPLACE blocks. You must write out the complete code.\n"
-            "3. Do NOT redefine top-level classes/functions — modify in-place.\n"
-            "4. Use hasattr()/getattr() before dynamic attribute access.\n"
+            "Output ONLY SEARCH/REPLACE blocks — no explanations.\n\n"
+            "FILE: <path>\n<<<<<<< SEARCH\n<verbatim original>\n=======\n<fixed>\n>>>>>>> REPLACE\n\n"
+            "Rules:\n"
+            "1. SEARCH matches source character-for-character.\n"
+            "2. No placeholders ('# ...', '... code ...'). Write complete code.\n"
+            "3. Modify in-place. Use hasattr()/getattr() for dynamic access."
             + few_shot
         )
 
@@ -116,16 +77,9 @@ class PromptBuilder:
             f"[TASK]\n{problem_statement}\n\n"
             f"[REPRODUCTION]\n{repro_evidence}\n\n"
             f"[STRATEGY: {reasoning_mode}]\n{strategy}\n"
-            f"[INVARIANTS]\n{invariants_str}\n\n"
             f"{retry_section}"
-            f"⚠️ CRITICAL: NO placeholders (e.g., '# ...', '... existing code ...') are allowed. You MUST write out the complete, actual code inside REPLACE block.\n"
-            f"⚠️ CRITICAL: You MUST only modify files listed in the [SOURCE CONTEXT] below.\n"
-            f"Allowed files: {choice_str}\n\n"
-            f"⚠️ VERBATIM RULE: The code below is extracted CHARACTER-FOR-CHARACTER from the actual source files.\n"
-            f"Your SEARCH block MUST be copied exactly from here. Do NOT rewrite, paraphrase, or invent code.\n"
-            f"Line numbers (e.g. '  42 | ') are for reference ONLY — exclude them from your SEARCH block.\n\n"
+            f"Allowed files: {choice_str}\n"
+            f"⚠️ Rules: No placeholders. SEARCH matches source exactly. Modify in-place.\n\n"
             f"[SOURCE CONTEXT]\n{files_section}"
-            f"CRITICAL: Modify the existing code IN-PLACE using the SEARCH/REPLACE protocol.\n"
-            f"CRITICAL: Match the SEARCH block EXACTLY against the [SOURCE CONTEXT].\n"
-            f"Produce the SEARCH/REPLACE blocks now for the files: {choice_str}"
+            f"Produce SEARCH/REPLACE blocks for: {choice_str}"
         )
