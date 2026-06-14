@@ -16,20 +16,20 @@ class ModelProfile:
     @classmethod
     def get_options(cls, model_name: str, attempt: int = 1) -> Dict[str, Any]:
         """Return model options. Temperature scales up on retries for diversity."""
-        # P0-2: Use full context capacity — qwen2.5-coder:7b supports 32K, 14b 128K
-        # P1-1: Temperature scaling on retry to break deterministic failure loops
         temperature = 0.0 if attempt <= 1 else min(0.4, (attempt - 1) * 0.2)
         if "14b" in model_name:
+            num_ctx = int(os.environ.get("NEXUS_OLLAMA_NUM_CTX", "8192"))
             return {
                 "temperature": temperature,
-                "num_predict": 8192,
-                "num_ctx": 32768,  # was 16384
+                "num_predict": 512,
+                "num_ctx": num_ctx,
             }
         else:
+            num_ctx = int(os.environ.get("NEXUS_OLLAMA_NUM_CTX", "16384"))
             return {
                 "temperature": temperature,
-                "num_predict": 4096,  # was 768 — critical fix
-                "num_ctx": 16384,    # was 4096 — critical fix
+                "num_predict": 512,
+                "num_ctx": num_ctx,
             }
 
 
