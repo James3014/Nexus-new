@@ -173,14 +173,23 @@ class S2T3BAdvisor:
         except Exception as exc:
             self._load_error = str(exc)
 
-    def advise(self, risk_tier: str, candidates: list[S2TCandidate]) -> dict:
+    def advise(self, risk_tier: str, candidates: list[S2TCandidate], task_id: str = "") -> dict:
         import os
         
         # 模式：NEXUS_S2T_3B_USE_OLLAMA 預設為 "1" (啟用)
         use_ollama = os.environ.get("NEXUS_S2T_3B_USE_OLLAMA", "1") == "1"
         if use_ollama:
-            return self._advise_via_ollama(risk_tier, candidates)
-        return self._advise_via_transformers(risk_tier, candidates)
+            result = self._advise_via_ollama(risk_tier, candidates)
+        else:
+            result = self._advise_via_transformers(risk_tier, candidates)
+        
+        # PACT dual-output: shadow mode
+        if os.environ.get("NEXUS_S2T_PACT_ENABLED", "0") == "1":
+            from nexus.contracts.pact import pact_from_advisor_output
+            pact = pact_from_advisor_output(task_id, risk_tier, candidates, result)
+            result["_pact"] = pact.to_dict()
+        
+        return result
 
     def _advise_via_ollama(self, risk_tier: str, candidates: list[S2TCandidate]) -> dict:
         import urllib.request
