@@ -19,3 +19,10 @@
 
 ## 🛠️ 驗證工具
 - **[ ✅ 一鍵全鏈驗證](deploy-p5-day2.sh)**: 執行 `deploy-p5-day2.sh` 以確保運維流程可用性。
+
+## ⚖️ CLI 表面積與環境變數注入協定 (Parity-Safe Injection)
+為防止在擴充 CLI 能力時破壞 AST `ParityAuditor` 的簽名審計，所有非 positional/keyword 預置參數必須通過環境變數注入 (Environment Variable Injection)，而不得修改 `run_shadow_eval` 的 Python 頂層函數簽名。
+* **變數名稱**：`NEXUS_ABSTAIN_DATASET_PATH`
+* **對應 CLI 參數**：`--abstain-dataset` (由 `scripts/bench/s2t_shadow_eval.py` 在 `__main__` 解析時自動寫入)
+* **用途**：在不改變 Python 公開簽名的前提下，作為 parity-safe 的 runtime injection 管道傳遞可選的放棄評估資料集路徑。
+

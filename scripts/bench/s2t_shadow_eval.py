@@ -319,6 +319,47 @@ def run_shadow_eval(dataset_path: Path, output_report_path: Path, run_real: bool
             }
             
         if response_json:
+            # 外部 fail-closed 決策硬化 (Gated Safety Hardening)
+            if isinstance(response_json, dict):
+                budget_data = inputs.get("budget", {})
+                max_cost = budget_data.get("max_cost")
+                all_fail = len(candidates) > 0 and all(c.verifier_result == "fail" for c in candidates)
+                selected_id = response_json.get("selected_candidate_id")
+                selected_cand = next((c for c in candidates if c.candidate_id == selected_id), None) if selected_id else None
+                
+                force_abstain = False
+                abstain_reason_override = None
+                
+                if len(candidates) == 0:
+                    force_abstain = True
+                    abstain_reason_override = "no_candidates_provided"
+                elif all_fail:
+                    force_abstain = True
+                    abstain_reason_override = "all_candidates_failed_verifier"
+                elif selected_cand:
+                    if selected_cand.verifier_result == "fail":
+                        force_abstain = True
+                        abstain_reason_override = "selected_candidate_failed_verifier"
+                    elif max_cost is not None and selected_cand.static_score > max_cost:
+                        force_abstain = True
+                        abstain_reason_override = "no_valid_candidate_within_budget"
+                
+                req_verifier = response_json.get("required_verifier")
+                allowed_verifiers = ['pytest', 'claim_gate', 'delivery_gate', 'hidden_verifier', None]
+                if req_verifier not in allowed_verifiers:
+                    force_abstain = True
+                    abstain_reason_override = "unsupported_required_verifier"
+                    
+                if force_abstain:
+                    if response_json.get("selected_candidate_id") is not None:
+                        print(f"🚨 [Fail-Closed Gating] Force Abstain on Row {idx} (Task {task_id}). Reason: {abstain_reason_override}. Original Pred: {response_json.get('selected_candidate_id')}")
+                        response_json["selected_candidate_id"] = None
+                        response_json["abstain_reason"] = abstain_reason_override
+                        if isinstance(response_json.get("selection_reason_codes"), list):
+                            response_json["selection_reason_codes"].append("unsafe_non_abstain_fallback")
+                        else:
+                            response_json["selection_reason_codes"] = ["unsafe_non_abstain_fallback"]
+
             parsed_count += 1
             is_valid, err_msg = validate_json_schema(response_json)
             if is_valid:
