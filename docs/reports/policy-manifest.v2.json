@@ -166,6 +166,34 @@
           "timestamp": "2026-06-15T00:00:00Z",
           "diff_summary": "Baseline freeze",
           "lane": "soft"
+        },
+        {
+          "version": "P-BUDGET-01.1.0.override",
+          "timestamp": "2026-06-15T01:59:53.216361+00:00",
+          "diff_summary": "Override applied: Integration test override",
+          "lane": "soft",
+          "override_id": "OVR-2026-06-15-015953-22d780de"
+        },
+        {
+          "version": "P-BUDGET-01.1.0.override",
+          "timestamp": "2026-06-15T02:01:33.286713+00:00",
+          "diff_summary": "Override applied: Integration test override",
+          "lane": "soft",
+          "override_id": "OVR-2026-06-15-020133-8d4075d2"
+        },
+        {
+          "version": "P-BUDGET-01.1.0.override",
+          "timestamp": "2026-06-15T02:01:56.854926+00:00",
+          "diff_summary": "Override applied: Integration test override",
+          "lane": "soft",
+          "override_id": "OVR-2026-06-15-020156-5adae11a"
+        },
+        {
+          "version": "P-BUDGET-01.1.0.override",
+          "timestamp": "2026-06-15T02:13:09.603261+00:00",
+          "diff_summary": "Override applied: Integration test override",
+          "lane": "soft",
+          "override_id": "OVR-2026-06-15-021309-5211f51d"
         }
       ]
     },
@@ -547,7 +575,9 @@
       "schema_version": "v1.0",
       "commit_sha": "1c9dce65",
       "status_tag": "code-backed",
-      "test_entrypoints": [],
+      "test_entrypoints": [
+        "tests/delivery/test_completion_gate.py"
+      ],
       "receipt_type": "CompletionResult",
       "rollback_drill_status": "no-drill",
       "promotion_allowed": false,
@@ -622,6 +652,66 @@
           "timestamp": "2026-06-15T00:00:00Z",
           "diff_summary": "Baseline freeze",
           "lane": "soft"
+        },
+        {
+          "version": "P-LEARN-01.1.0.override",
+          "timestamp": "2026-06-15T01:59:53.345482+00:00",
+          "diff_summary": "Override applied: Rollback test",
+          "lane": "soft",
+          "override_id": "OVR-2026-06-15-015953-45f23dae"
+        },
+        {
+          "version": "P-LEARN-01.rollback",
+          "timestamp": "2026-06-15T01:59:53.408412+00:00",
+          "diff_summary": "Rollback from override OVR-2026-06-15-015953-45f23dae to P-LEARN-01.1.0.0",
+          "lane": "soft",
+          "rollback_from": "OVR-2026-06-15-015953-45f23dae",
+          "rollback_to": "P-LEARN-01.1.0.0"
+        },
+        {
+          "version": "P-LEARN-01.1.0.override",
+          "timestamp": "2026-06-15T02:01:33.415940+00:00",
+          "diff_summary": "Override applied: Rollback test",
+          "lane": "soft",
+          "override_id": "OVR-2026-06-15-020133-7b23694c"
+        },
+        {
+          "version": "P-LEARN-01.rollback",
+          "timestamp": "2026-06-15T02:01:33.479015+00:00",
+          "diff_summary": "Rollback from override OVR-2026-06-15-020133-7b23694c to P-LEARN-01.1.0.0",
+          "lane": "soft",
+          "rollback_from": "OVR-2026-06-15-020133-7b23694c",
+          "rollback_to": "P-LEARN-01.1.0.0"
+        },
+        {
+          "version": "P-LEARN-01.1.0.override",
+          "timestamp": "2026-06-15T02:01:56.981571+00:00",
+          "diff_summary": "Override applied: Rollback test",
+          "lane": "soft",
+          "override_id": "OVR-2026-06-15-020156-767ff23e"
+        },
+        {
+          "version": "P-LEARN-01.rollback",
+          "timestamp": "2026-06-15T02:01:57.043486+00:00",
+          "diff_summary": "Rollback from override OVR-2026-06-15-020156-767ff23e to P-LEARN-01.1.0.0",
+          "lane": "soft",
+          "rollback_from": "OVR-2026-06-15-020156-767ff23e",
+          "rollback_to": "P-LEARN-01.1.0.0"
+        },
+        {
+          "version": "P-LEARN-01.1.0.override",
+          "timestamp": "2026-06-15T02:13:09.738382+00:00",
+          "diff_summary": "Override applied: Rollback test",
+          "lane": "soft",
+          "override_id": "OVR-2026-06-15-021309-1d002786"
+        },
+        {
+          "version": "P-LEARN-01.rollback",
+          "timestamp": "2026-06-15T02:13:09.807261+00:00",
+          "diff_summary": "Rollback from override OVR-2026-06-15-021309-1d002786 to P-LEARN-01.1.0.0",
+          "lane": "soft",
+          "rollback_from": "OVR-2026-06-15-021309-1d002786",
+          "rollback_to": "P-LEARN-01.1.0.0"
         }
       ]
     },
@@ -710,6 +800,34 @@
           "timestamp": "2026-06-15T00:00:00Z",
           "diff_summary": "Baseline freeze",
           "lane": "soft"
+        },
+        {
+          "version": "P-BELIEF-01.1.0.override",
+          "timestamp": "2026-06-15T01:59:55.224206+00:00",
+          "diff_summary": "Override applied: Expiry test",
+          "lane": "soft",
+          "override_id": "OVR-2026-06-15-015955-f75d9a04"
+        },
+        {
+          "version": "P-BELIEF-01.1.0.override",
+          "timestamp": "2026-06-15T02:01:35.810128+00:00",
+          "diff_summary": "Override applied: Expiry test",
+          "lane": "soft",
+          "override_id": "OVR-2026-06-15-020135-61f7ef63"
+        },
+        {
+          "version": "P-BELIEF-01.1.0.override",
+          "timestamp": "2026-06-15T02:01:59.246363+00:00",
+          "diff_summary": "Override applied: Expiry test",
+          "lane": "soft",
+          "override_id": "OVR-2026-06-15-020159-1f0be0d5"
+        },
+        {
+          "version": "P-BELIEF-01.1.0.override",
+          "timestamp": "2026-06-15T02:13:12.693211+00:00",
+          "diff_summary": "Override applied: Expiry test",
+          "lane": "soft",
+          "override_id": "OVR-2026-06-15-021312-8678ab12"
         }
       ]
     },
@@ -779,7 +897,7 @@
       "status_tag": "code-backed",
       "test_entrypoints": [
         "nexus-core-rs/src/flow_machine.rs::tests (27 tests)",
-        "tests/integration/test_rust_wave3_cutover.py (4 tests, dual-run mismatch=0)"
+        "tests/integration/test_rust_wave3_cutover.py"
       ],
       "receipt_type": "TransitionValidation",
       "rollback_drill_status": "drilled-2026-06-15",
