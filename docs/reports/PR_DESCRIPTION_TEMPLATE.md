@@ -1,0 +1,63 @@
+# PR Description Template
+
+**PR Title**: `Implement Nexus Local Collaboration Roadmap v3 for limited assisted adoption review`
+
+---
+
+## PR 內文範本
+
+This PR implements the Roadmap v3 baseline for local collaboration under fail-closed runtime governance, including runtime fitness telemetry, rollback drill evidence, optional 1.5B gatekeeper hints, 7B/14B deliberation scaffolding, experimental shadow gating, and limited assisted adoption dossier artifacts. No runtime default change is introduced, and authority remains with the Rust/Python fail-closed runtime, verifier, claim gate, and delivery gate.
+
+---
+
+### 🚀 Key Deliverables
+
+1. **Phase 0: Runtime Fitness Baseline**
+   - Telemetry indicators (Model Load, Cold-Start, TTFT, Steady-state TPS, Thought/Answer ratio) solidified for 3B, 7B, and 14B models.
+   - Quantified latency penalty differences for short vs long workloads.
+   - Ref: [multi_model_runtime_baseline_report.md](file://docs/reports/multi_model_runtime_baseline_report.md)
+
+2. **Phase 1: Rust & Policy Alignment**
+   - Built a comprehensive Rollback Drill Matrix for all 27 baseline policies.
+   - Verified fail-closed and fallback behaviors of the Rust Kernel (`receipt_verifier`, `flow_machine`) under multiple simulation modes.
+   - Updated the Policy Baseline Manifest (`v1.0.0`) to log all 27 policies as drilled and eligible for promotion.
+   - Ref: [policy-rollback-drill-matrix.md](file://docs/reports/policy-rollback-drill-matrix.md), [rust-kernel-rollback-drill-2026-06-15.md](file://docs/reports/rust-kernel-rollback-drill-2026-06-15.md), [policy-baseline-manifest.v1.json](file://docs/reports/policy-baseline-manifest.v1.json)
+
+3. **Phase 3: Optional 1.5B Gatekeeper**
+   - Implemented `OptionalGatekeeper15B` for front-door screening and Gatekeeper V2 Schema hints.
+   - Designed E2E latency optimization checks to avoid triggering high-cost models (7B/14B) for short workloads.
+   - Passed all unit tests.
+   - Ref: [experimental_gate.py](file://nexus/gate/experimental_gate.py)
+
+4. **Phase 4: 7B/14B Deliberation Lane Scaffold**
+   - Created `LocalDeliberationLane` scaffold with robust fail-closed fallbacks and simulation modes.
+   - Introduced `DeliberationFitness` metrics evaluating agreement rates, confidence scores, and thought densities.
+   - Passed all TDD unit tests.
+   - Ref: [local_deliberation_lane.py](file://nexus/services/local_deliberation_lane.py), [test_local_deliberation_lane.py](file://tests/unit/test_local_deliberation_lane.py), [local_deliberation_lane_scaffold_report.md](file://docs/reports/local_deliberation_lane_scaffold_report.md)
+
+5. **Phase 5: Experimental Shadow Gate**
+   - Implemented `ExperimentalArchitectureGate.check_maturity` checklist (requires: `rollback_path`, `token_budget`, `runtime_fitness_report`).
+   - Forces shadow-first execution if model maturity check fails.
+   - Ref: [experimental_gate.py](file://nexus/gate/experimental_gate.py), [test_experimental_gate.py](file://tests/gates/test_experimental_gate.py)
+
+6. **Phase 6: Limited Assisted Adoption**
+   - Formulated detailed Assisted Adoption Dossier outlining allowed first mount boundaries, three lines of defense, and red lines.
+   - Ref: [limited_assisted_adoption_dossier.md](file://docs/reports/limited_assisted_adoption_dossier.md)
+
+---
+
+### 🛡️ Governance & Architectural Boundaries (Strictly Observed)
+
+- **3B remains the advisor main track**: Kept shadow-only.
+- **7B/14B relegate to Deliberation Lane only**: Allowed only in high-uncertainty/high-value/research task boundaries; no L0 authority.
+- **1.5B remains an optional gatekeeper**: Reconfirmed it is non-blocking and optional.
+- **Zero runtime default changes**: No default runtime changes are introduced to the L0 core without further limited mount approval.
+
+---
+
+### 🧪 Verification Evidence
+
+- **Rust core unit tests**: 38/38 passed.
+- **IPC integration tests**: 13/13 passed.
+- **Deliberation Lane unit tests**: 4/4 passed.
+- **Gatekeeper & Maturity unit tests**: 7/7 passed.
