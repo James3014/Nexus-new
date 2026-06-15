@@ -13,6 +13,8 @@ class SliceResult:
     token_estimate: int
     scores: Dict[str, float] = None # type: ignore
     shadow_rank: List[str] = None # type: ignore
+    start_line: int = 0
+    end_line: int = 0
 
 class SurgicalSlicer:
     def __init__(self, file_path: Path):
@@ -23,7 +25,13 @@ class SurgicalSlicer:
     def slice_function(self, target_name: str, max_depth: int = 5, criteria: Set[str] = None) -> SliceResult:
         collected = {}
         target = self._find(target_name)
-        if target: self._collect(target, collected, 0, max_depth)
+        
+        start_line = 0
+        end_line = 0
+        if target:
+            start_line = target.lineno if hasattr(target, "lineno") else 0
+            end_line = target.end_lineno if hasattr(target, "end_lineno") else 0
+            self._collect(target, collected, 0, max_depth)
         
         # --- Value-Flow Reranking (Shadow Mode) ---
         scorer = ValueFlowScorer(criteria or {target_name})
@@ -44,7 +52,15 @@ class SurgicalSlicer:
             code_parts.append(ast.unparse(collected[name]))
             
         code = "\n\n".join(code_parts)
-        return SliceResult(code, list(collected.keys()), len(code)//4, node_scores, sorted_names)
+        return SliceResult(
+            code_content=code,
+            dependencies=list(collected.keys()),
+            token_estimate=len(code)//4,
+            scores=node_scores,
+            shadow_rank=sorted_names,
+            start_line=start_line,
+            end_line=end_line
+        )
 
     def _find(self, name):
         for n in ast.walk(self.tree):

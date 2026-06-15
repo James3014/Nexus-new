@@ -164,12 +164,48 @@ class VectorRAG:
         logger.info(f"🔍 [VectorRAG] Query returned {len(results)} matches for: {task_query[:30]}...")
         return results
 
-    def format_for_prompt(self, results: List[Dict[str, Any]]) -> str:
+    def query_multigranularity(self, task_query: str, k: int = 5) -> Dict[str, List[Dict[str, Any]]]:
         """
-        將檢索結果格式化為 LLM 可讀的上下文塊。
+        執行語義搜索並按粒度 (file, class, function, line) 將結果分組。
+        """
+        raw_results = self.query(task_query, k=k*3)
+        grouped = {
+            "file": [],
+            "class": [],
+            "function": [],
+            "line": []
+        }
+        for res in raw_results:
+            gran = str(res.get("granularity") or "file").lower()
+            if gran in grouped:
+                grouped[gran].append(res)
+            else:
+                grouped["file"].append(res)
+                
+        # 限制每組最多返回 k 個結果
+        for gran in grouped:
+            grouped[gran] = grouped[gran][:k]
+        return grouped
+
+    def format_for_prompt(self, results: List[Dict[str, Any]] | Dict[str, List[Dict[str, Any]]]) -> str:
+        """
+        將檢索結果格式化為 LLM 可讀的上下文塊。支援列表與多粒度字典。
         """
         if not results:
             return ""
+
+        if isinstance(results, dict):
+            prompt_block = "\n### 🧬 多粒度歷史成功模式 (MULTIGRANULAR REUSED PATTERNS)\n"
+            has_content = False
+            for gran, items in results.items():
+                if items:
+                    has_content = True
+                    prompt_block += f"\n[{gran.upper()} LEVEL]\n"
+                    for idx, res in enumerate(items):
+                        prompt_block += f"  {idx+1}. [模式] {res.get('task')}\n"
+                        if "resolution" in res:
+                            prompt_block += f"     [解法] {res.get('resolution')}\n"
+            return prompt_block if has_content else ""
 
         prompt_block = "\n### 🧬 歷史成功模式 (REUSED PATTERNS)\n"
         for i, res in enumerate(results):
