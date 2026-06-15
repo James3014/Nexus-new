@@ -53,7 +53,8 @@ class AuditPhaseHandler(BasePhaseHandler):
             
             if not res["surface_match"]:
                 # 🚨 Parity Violation: 高風險攔截
-                msg = f"❌ [Audit:FAILED] Parity Violation in {filepath}. Missing: {res['missing_funcs']}"
+                missing = res.get("missing_funcs", [])
+                msg = f"❌ [Audit:FAILED] Parity Violation in {filepath}. Missing: {missing}"
                 print(msg)
                 raise SurfaceViolation(msg)
 

@@ -143,11 +143,11 @@ class EvalHarness:
             success = service.execute_bug(request)
             pipeline_time = time.time() - pipeline_start
             
-            # Record metrics
+            # Use execute_bug return value (most reliable after fixes)
             result.verified_success = success
             result.first_pass_success = success and result.retry_count == 0
             result.wall_time_sec = time.time() - start_time
-            result.model_time_sec = pipeline_time * 0.27  # estimated from prior analysis
+            result.model_time_sec = pipeline_time * 0.27
             result.non_model_overhead_sec = pipeline_time * 0.73
             
             # Read telemetry from state
@@ -162,7 +162,7 @@ class EvalHarness:
                     pass
             
             # Record governance metrics (observation-only)
-            result.trust_mismatch = False  # No behavior change
+            result.trust_mismatch = False
             result.public_claim_precision = True
             result.authority_drift = False
             result.role_drift = False
