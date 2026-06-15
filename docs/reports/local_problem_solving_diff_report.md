@@ -2,7 +2,7 @@
 
 **Date**: 2026-06-15  
 **Baseline Commit**: `1c9dce6597f3eb52006df8223000d2162624f55d`  
-**Status**: **Eligible for limited assisted adoption review; not eligible for default-path promotion.**
+**Status**: **Evidence complete for limited assisted adoption review; runtime authority unchanged; no default-path promotion requested.**
 
 ## 1. 核心指標摘要 (Core Metrics Summary)
 
@@ -90,17 +90,17 @@
 - **增加複雜度場景**: 對於本來就需要深度推理的長任務，Gatekeeper 除了增加 35ms 左右的前門過濾開銷外，沒有帶來實質的解決率提升。此時它僅作為一個 pipeline overhead 存在。
 
 ### 7B/14B Deliberation Lane 評估 (Phase 4)
-- **有 Lift 場景**: 在 `high-uncertainty`、`repair-review` 與複雜的長任務 (Long Tasks) 中，7B/14B 展現了顯著的解決率提昇。Group C/D 在長任務的解決率從 Baseline 的 0% 提升至 100%。
-- **不值得掛載場景**: 嚴禁在常規 Syntax Check、Formatting 或短任務中啟用。否則會使延遲從 150ms 飆升至 2000ms 以上，代價極高且無任何 resolved rate 的額外 lift。
+- **有 Lift 場景**: 在 `high-uncertainty`、`repair-review` 與複雜的長任務 (Long Tasks) 中，7B/14B 展現了顯著的解決率提昇。Group C/D 在長任務的解決率從 Baseline 的 0% 提升至 73.3% (Group E 結合 3B 輔助後進一步提升至 100.0%)，提升了高難度推理場景的解題表現。
+- **不值得掛載場景**: 嚴禁在常規 Syntax Check、Formatting 或短任務中啟用。否則會使延遲從 150ms 飆升至 2000ms 以上，代價極高且無 any resolved rate 的額外 lift。
 
 ### 3B Shadow Advisor 評估 (Phase 2)
-- **優勢表現**: Group E 顯示加入 3B Shadow Advisor 後，在不需要 Deliberation 的 Medium 任務上，解決率從 58.3% 提升至 100.0%，表現顯著優於 Rule Baseline。
+- **優勢表現**: Group E 顯示加入 3B Shadow Advisor 後，在不需要 Deliberation 的 Medium 任務上，解決率從 70.0% 提升至 100.0%，表現顯著優於 Rule Baseline。
 - **安全邊界**: 在整個測試中，`trust_mismatch_rate` 保持在 **0%**，無任何下降，且 public claim precision 保持 100%。這證明 3B 僅作為 shadow-first advisor 運作時安全有效。
 
 ## 5. 最終判定與掛載建議 (Final Verdict & Recommendations)
 
 依據判定口徑，給出以下最終建議：
-1. **3B Advisor**: **Eligible for limited assisted adoption review; not eligible for default-path promotion.**。3B 在 Medium 任務表現優異，且 `trust_mismatch` 為 0，具備進入受限 Review/Limited Mount 階段的資格。
+1. **3B Advisor**: **Evidence complete for limited assisted adoption review; runtime authority unchanged; no default-path promotion requested.**。3B 在 Medium 任務表現優異，且 `trust_mismatch` 為 0，具備進入受限 Review/Limited Mount 階段的資格。
 2. **1.5B Gatekeeper**: **Keep & Enable as Optional Gatekeeper**。在 Group D/E 中，1.5B 成功減少了 7B/14B 對常規短任務的誤觸發，顯著降低了系統的平均延遲與成本。若後續 short-task latency / cost 沒有持續優勢，準備回退。
 3. **7B/14B Deliberation Lane**: **Keep 7B/14B ONLY for specific task families**。嚴格限制僅在 `high-uncertainty / repair-review / research-brief` 任務上啟動，絕不可泛化為預設路由或 default router。
 4. **安全結論**: 本次實驗未出現任何 `trust_mismatch` 上升或 `public-claim precision` 下降。全部實驗組均滿足 Limited Assisted Adoption Review 的最低證據要求。

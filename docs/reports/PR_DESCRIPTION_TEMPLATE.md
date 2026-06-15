@@ -52,10 +52,14 @@ No runtime default change is introduced, and authority remains entirely with the
 
 ### 🛡️ Governance & Architectural Boundaries (Strictly Observed)
 
-- **3B remains the advisor main track**: Kept shadow-only.
-- **7B/14B relegate to Deliberation Lane only**: Allowed only in high-uncertainty/high-value/research task boundaries; no L0 authority.
-- **1.5B remains an optional gatekeeper**: Reconfirmed it is non-blocking and optional.
-- **Zero runtime default changes**: No default runtime changes are introduced to the L0 core without further limited mount approval.
+1. **3B Advisor = limited assist only**: Kept shadow-only. No runtime decision authority.
+2. **1.5B Gatekeeper = optional front-door hint**: Non-blocking and optional. If latency/cost advantages disappear, rollback to rules immediately.
+3. **7B/14B Deliberation = specific task families only**: Whitelisted task families only (`high-uncertainty / repair-review / research-brief`).
+4. **Strict Red Lines**:
+   - **No default router replacement**: No model can replace the default router path.
+   - **No verifier/claim gate/delivery gate replacement**: L0 security verifiers and gates remain unchanged.
+   - **No policy auto-mutation**: Zero automatic policy modifications allowed; human sign-off required.
+   - **Mandatory fallback & feature flags**: Fallbacks to baseline rules must be preserved and verified.
 
 ---
 

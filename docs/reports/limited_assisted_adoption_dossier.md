@@ -8,22 +8,33 @@
 ---
 
 ## 1. 概述
-本 Dossier 定義了 3B, 7B, 14B 模型在 Nexus 運行時 (Runtime) 的 **受限輔助掛載點 (Limited Assisted Mount Points)** 與安全防禦合約。所有掛載均只提供輔助決策 (Advisory)，嚴禁觸碰 L0 治理權威。
+本 Dossier 定義了 1.5B, 3B, 7B, 14B 模型在 Nexus 運行時 (Runtime) 的 **受限輔助掛載點 (Limited Assisted Mount Points)** 與安全防禦合約。所有掛載均只提供輔助決策 (Advisory)，嚴禁觸碰 L0 治理權威。
 
 ---
 
 ## 2. 申請掛載點與權限邊界 (Mount Points & Boundaries)
 
+### 📌 模型掛載規則 (Mounting Rules)
+1. **3B Advisor = limited assist only**: 僅在輔助（Advisory）模式下運作，無 runtime 決策權，且只限於 shadow-first/strict-gated 場景。
+2. **1.5B Gatekeeper = optional front-door hint**: 作為非阻塞、可選的前置篩選層。只要 telemetry 顯示其在 short-task 的延遲（latency）或成本（cost）優勢不再成立，必須隨時退避回退（rollback-ready）。
+3. **7B/14B Deliberation = specific task families only**: 嚴格限制僅能在特定任務的白名單內啟動，絕不可泛化為 default path。
+   - **允許任務白名單 (Deliberation Whitelist)**:
+     - `high-uncertainty` (高不確定性任務)
+     - `repair-review` (修復評估任務)
+     - `research-brief` (研究簡報與分析任務)
+
 | Model Role | Applied Mount Point | Authority Level | Enforcement Mechanism |
 | :--- | :--- | :--- | :--- |
+| **1.5B Gatekeeper**| Optional front-door screening | **Advisory Only** | Optional non-blocking bypass + rollback to default rules |
 | **3B Advisor** | strict-gated repair / route-review nodes | **Advisory Only** (No decision authority) | `NEXUS_S2T_3B_ASSISTED_MODE=low_risk` + Rust verifier validation |
 | **7B Reasoner** | LocalDeliberationLane (Worker) | **Advisory Only** (No decision authority) | Selective triggering + 14B synthesis gate |
 | **14B Synthesizer**| LocalDeliberationLane (Judge) | **Advisory Only** (No decision authority) | `is_mature_for_main_path` checks + shadow observations |
 
 ### 🚫 絕對紅線邊界 (Strict Red Lines)
-1. **不得** 取代 L0 Runtime default router 或預設決策。
-2. **不得** 取代 `receipt_verifier` 與 `hallucination_guard` (Verifier/Claim Gate)。
-3. **絕對禁止** 模型自動修改或更新 Policy (例如 `promotion_allowed` 唯有通過 human-in-the-loop 才可修改)。
+1. **嚴禁取代 default router**: 不得將任何模型（含 1.5B, 3B, 7B, 14B）升級或替換為預設的 L0 Runtime default router。
+2. **嚴禁取代 verifier / claim gate / delivery gate**: 不得取代核心的 `receipt_verifier`、`hallucination_guard`、`delivery_gate` 等 L0 安全與核銷機制。
+3. **嚴禁自動 policy mutation**: 絕對禁止模型自主修改、更新或發佈任何安全策略與路由配置（如 `promotion_allowed` 等策略變更，僅能通過 Human-in-the-loop 人工審查與簽署）。
+4. **必須具備 fallback/feature flag/rollback 機制**: 所有的模型掛載必須保留 feature flag 物理開關，若模型失效必須能在毫秒級內無縫退避（fallback）至 rule-based 靜態策略。
 
 ---
 
