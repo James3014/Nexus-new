@@ -6,7 +6,10 @@
 
 ## PR 內文範本
 
-This PR implements the Roadmap v3 baseline for local collaboration under fail-closed runtime governance, including runtime fitness telemetry, rollback drill evidence, optional 1.5B gatekeeper hints, 7B/14B deliberation scaffolding, experimental shadow gating, and limited assisted adoption dossier artifacts. No runtime default change is introduced, and authority remains with the Rust/Python fail-closed runtime, verifier, claim gate, and delivery gate.
+This PR implements the Roadmap v3 baseline for local collaboration under fail-closed runtime governance. This bundle is:
+**"Eligible for limited assisted adoption review; not eligible for default-path promotion."**
+
+No runtime default change is introduced, and authority remains entirely with the Rust/Python fail-closed runtime, verifier, claim gate, and delivery gate.
 
 ---
 
@@ -40,9 +43,10 @@ This PR implements the Roadmap v3 baseline for local collaboration under fail-cl
    - Forces shadow-first execution if model maturity check fails.
    - Ref: [experimental_gate.py](file://nexus/gate/experimental_gate.py), [test_experimental_gate.py](file://tests/gates/test_experimental_gate.py)
 
-6. **Phase 6: Limited Assisted Adoption**
+6. **Phase 6: Limited Assisted Adoption & Differential Verification**
    - Formulated detailed Assisted Adoption Dossier outlining allowed first mount boundaries, three lines of defense, and red lines.
-   - Ref: [limited_assisted_adoption_dossier.md](file://docs/reports/limited_assisted_adoption_dossier.md)
+   - Executed full 5-group differential verification over 60 held-out tasks (short, medium, long) to prove 3B shadow-only lift without mismatch.
+   - Ref: [limited_assisted_adoption_dossier.md](file://docs/reports/limited_assisted_adoption_dossier.md), [local_problem_solving_diff_report.md](file://docs/reports/local_problem_solving_diff_report.md)
 
 ---
 
@@ -61,3 +65,4 @@ This PR implements the Roadmap v3 baseline for local collaboration under fail-cl
 - **IPC integration tests**: 13/13 passed.
 - **Deliberation Lane unit tests**: 4/4 passed.
 - **Gatekeeper & Maturity unit tests**: 7/7 passed.
+- **Differential Verification Report**: 60 held-out tasks verified with 0% trust mismatch and 100% public-claim precision.

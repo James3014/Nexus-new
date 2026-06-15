@@ -1,8 +1,8 @@
 # Limited Assisted Adoption Dossier (Phase 6)
 
 **Date**: 2026-06-15  
-**Version**: v1.0.0  
-**Status**: **READY FOR REVIEW / PROMOTION ELIGIBLE**  
+**Version**: v1.0.1  
+**Status**: **Eligible for limited assisted adoption review; not eligible for default-path promotion.**  
 **Governing spec**: [NEXUS_LOCAL_COLLABORATION_ROADMAP_V3.md](file://../roadmap/NEXUS_LOCAL_COLLABORATION_ROADMAP_V3.md)
 
 ---
@@ -36,9 +36,10 @@
 2. **第二道防線：平滑退避 (Smooth Fallback)**:
    - 任何模型連線失敗、超時 (超過 500ms) 或輸出格式錯誤，核心直接退避至 Python/Rule-based baseline 實作，確保系統不崩潰。
 3. **第三道防線：每列證據審計 (Per-row Evidence Logging)**:
-   - 所有 shadow 決策與 baseline 決策對比均寫入 `.nexus/metrics/s2t_shadow_contract_evidence.jsonl`，定時審計 `trust_mismatch_rate` 與 `fallback_triggered` 率。
+   - 所有 shadow 決策與 baseline 決策對比均記錄至 `.nexus/metrics/s2t_shadow_contract_evidence.jsonl`，定時審計 `trust_mismatch_rate` 與 `fallback_triggered` 率。
 
 ---
 
 ## 4. 驗收與簽收結論
-經評估，本 limited assist 掛載策略與 Roadmap v3 治理原則 100% 對齊。3B 推薦模型、7B/14B 協商車道均已通過物理代價量化與回滾演練。本 Dossier 定性為 `READY_FOR_REVIEW`，準備提交 Limited Mount 審查。
+經評估，本 limited assist 掛載策略與 Roadmap v3 治理原則 100% 對齊。3B 推薦模型、7B/14B 協商車道均已通過物理代價量化與回滾演練。本 Dossier 判定口徑為：
+`Eligible for limited assisted adoption review; not eligible for default-path promotion.`
