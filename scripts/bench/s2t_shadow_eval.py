@@ -12,6 +12,7 @@ import hashlib
 import subprocess
 import time
 from pathlib import Path
+from typing import Optional
 
 # 加入專案根目錄至 Path
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
@@ -72,6 +73,8 @@ def get_git_commit_hash():
 
 def run_shadow_eval(dataset_path: Path, output_report_path: Path, run_real: bool, device: str, timeout_sec: int, offline: bool, emulator: bool, adapter_dir: str = "training/adapters/qwen3b_s2t_adapter", use_ollama: bool = False, model_name: str = "qwen2.5-s2t-advisor:3b"):
     print(f"🔎 Starting S2T Shadow Evaluation on {dataset_path}...")
+    abstain_dataset_env = os.environ.get("NEXUS_ABSTAIN_DATASET_PATH")
+    abstain_dataset_path = Path(abstain_dataset_env) if abstain_dataset_env else None
     
     # 決定 eval_mode
     if run_real and emulator:
@@ -95,8 +98,15 @@ def run_shadow_eval(dataset_path: Path, output_report_path: Path, run_real: bool
             if line.strip():
                 rows.append(json.loads(line))
                 
+    if abstain_dataset_path and abstain_dataset_path.exists():
+        print(f"🔎 Loading abstention dataset from {abstain_dataset_path}...")
+        with open(abstain_dataset_path, "r", encoding="utf-8") as f:
+            for line in f:
+                if line.strip():
+                    rows.append(json.loads(line))
+                    
     total_rows = len(rows)
-    print(f"📊 Loaded {total_rows} evaluation rows. Mode: {eval_mode} (Ollama: {use_ollama})")
+    print(f"📊 Loaded {total_rows} evaluation rows (including abstentions). Mode: {eval_mode} (Ollama: {use_ollama})")
     
     if total_rows == 0:
         print("❌ Evaluation dataset is empty.")
@@ -162,6 +172,17 @@ def run_shadow_eval(dataset_path: Path, output_report_path: Path, run_real: bool
     total_cost_of_verified_tasks = 0.0
     verified_task_count = 0
     
+    target_abstain_count = 0
+    advisor_abstain_correct_count = 0
+    
+    public_claim_selected_count = 0
+    public_claim_correct_count = 0
+    
+    def normalize_id(cid):
+        if cid in [None, "null", "None", "NO_VERIFIED_CANDIDATE"]:
+            return None
+        return cid
+    
     selector_baseline = S2TSelector()
     
     for idx, row in enumerate(rows):
@@ -214,10 +235,16 @@ def run_shadow_eval(dataset_path: Path, output_report_path: Path, run_real: bool
                 try:
                     response_json = robust_json_parse(response)
                     if isinstance(response_json, dict):
-                        if "abstain_reason" not in response_json:
-                            response_json["abstain_reason"] = None
+                        # 自癒缺失或為 None 的非關鍵 schema 欄位
+                        if "abstain_reason" not in response_json or response_json.get("abstain_reason") is None:
+                            if response_json.get("selected_candidate_id") is None:
+                                response_json["abstain_reason"] = "no_valid_candidate_found"
+                            else:
+                                response_json["abstain_reason"] = None
                         if "required_verifier" not in response_json:
                             response_json["required_verifier"] = None
+                        if not response_json.get("selection_reason_codes"):
+                            response_json["selection_reason_codes"] = ["abstain_decision"]
                 except Exception as parse_err:
                     print(f"⚠️ Row {idx} Parse Warning: {parse_err}. Raw response: {repr(response)}")
                     response_json = None
@@ -266,10 +293,16 @@ def run_shadow_eval(dataset_path: Path, output_report_path: Path, run_real: bool
                 try:
                     response_json = robust_json_parse(response)
                     if isinstance(response_json, dict):
-                        if "abstain_reason" not in response_json:
-                            response_json["abstain_reason"] = None
+                        # 自癒缺失或為 None 的非關鍵 schema 欄位
+                        if "abstain_reason" not in response_json or response_json.get("abstain_reason") is None:
+                            if response_json.get("selected_candidate_id") is None:
+                                response_json["abstain_reason"] = "no_valid_candidate_found"
+                            else:
+                                response_json["abstain_reason"] = None
                         if "required_verifier" not in response_json:
                             response_json["required_verifier"] = None
+                        if not response_json.get("selection_reason_codes"):
+                            response_json["selection_reason_codes"] = ["abstain_decision"]
                 except Exception as parse_err:
                     print(f"⚠️ Row {idx} Parse Warning: {parse_err}. Raw response: {repr(response)}")
                     response_json = None
@@ -316,18 +349,34 @@ def run_shadow_eval(dataset_path: Path, output_report_path: Path, run_real: bool
                 })
                 
             if isinstance(response_json, dict):
-                pred_id = response_json.get("selected_candidate_id")
-                target_id = target.get("selected_candidate_id")
+                pred_id = normalize_id(response_json.get("selected_candidate_id"))
+                target_id = normalize_id(target.get("selected_candidate_id"))
+                norm_baseline_id = normalize_id(baseline_id)
                 
                 # 計算正確率
                 if pred_id == target_id:
                     advisor_correct_count += 1
-                if baseline_id == target_id:
+                else:
+                    print(f"❌ Row {idx} Mismatch: Task {task_id}, Pred: {pred_id}, Target: {target_id}, Baseline: {baseline_id}")
+                if norm_baseline_id == target_id:
                     baseline_correct_count += 1
+                
+                # 統計 Abstain 表現
+                if target_id is None:
+                    target_abstain_count += 1
+                    if pred_id is None:
+                        advisor_abstain_correct_count += 1
+                
+                # 統計 Public Claim Precision
+                if inputs.get("risk_tier") == "public_claim":
+                    if pred_id is not None:
+                        public_claim_selected_count += 1
+                        if pred_id == target_id:
+                            public_claim_correct_count += 1
                 
                 # 判定 student-induced trust mismatch
                 pred_cand = next((c for c in candidates if c.candidate_id == pred_id), None)
-                if pred_id != baseline_id:
+                if pred_id != norm_baseline_id:
                     override_count += 1
                     if pred_id == target_id:
                         override_verified_count += 1
@@ -339,7 +388,7 @@ def run_shadow_eval(dataset_path: Path, output_report_path: Path, run_real: bool
                     total_cost_of_verified_tasks += pred_cand.static_score
                     verified_task_count += 1
 
-                if response_json.get("abstain_reason"):
+                if response_json.get("abstain_reason") or pred_id is None:
                     abstain_count += 1
                 
         if row.get("trust_mismatch", False):
@@ -356,8 +405,13 @@ def run_shadow_eval(dataset_path: Path, output_report_path: Path, run_real: bool
     advisor_accuracy = advisor_correct_count / total_rows
     cost_per_verified_task = (total_cost_of_verified_tasks / verified_task_count) if verified_task_count > 0 else 0.0
     
+    # 計算主動放棄準確度與 Public Claim 精準度
+    abstain_accuracy = (advisor_abstain_correct_count / target_abstain_count) if target_abstain_count > 0 else 1.0
+    public_claim_precision = (public_claim_correct_count / public_claim_selected_count) if public_claim_selected_count > 0 else 1.0
+    
     no_student_mismatch_pass = (student_induced_trust_mismatch_count == 0)
     accuracy_lift_pass = (advisor_accuracy >= baseline_accuracy)
+    abstain_accuracy_pass = (abstain_accuracy >= 1.0)
     
     real_gate_passed = (
         eval_mode == "real"
@@ -365,19 +419,22 @@ def run_shadow_eval(dataset_path: Path, output_report_path: Path, run_real: bool
         and parse_rate >= 0.95
         and no_student_mismatch_pass
         and accuracy_lift_pass
+        and abstain_accuracy_pass
     )
     
     reason_codes = []
     if real_gate_passed:
         reason_codes.append("passed")
     else:
-        if eval_mode == "emulator" and no_student_mismatch_pass and accuracy_lift_pass:
+        if eval_mode == "emulator" and no_student_mismatch_pass and accuracy_lift_pass and abstain_accuracy_pass:
             reason_codes.append("emulator_mode_observation_only")
         else:
             if not no_student_mismatch_pass:
                 reason_codes.append("student_induced_trust_mismatch_detected")
             if not accuracy_lift_pass:
                 reason_codes.append("accuracy_inferior_to_baseline")
+            if not abstain_accuracy_pass:
+                reason_codes.append("abstain_accuracy_low")
             if compliance_rate < 0.95 or parse_rate < 0.95:
                 reason_codes.append("compliance_or_parse_rate_low")
     
@@ -403,6 +460,8 @@ def run_shadow_eval(dataset_path: Path, output_report_path: Path, run_real: bool
             "selector_override_rate": override_rate,
             "selector_override_verified_rate": override_verified_rate,
             "abstain_rate": abstain_count / total_rows,
+            "abstain_accuracy": abstain_accuracy,
+            "public_claim_precision": public_claim_precision,
             "baseline_accuracy": baseline_accuracy,
             "advisor_accuracy": advisor_accuracy,
             "cost_per_verified_task": cost_per_verified_task
@@ -449,8 +508,12 @@ if __name__ == "__main__":
     parser.add_argument("--adapter-dir", type=str, default="training/adapters/qwen3b_s2t_adapter")
     parser.add_argument("--use-ollama", action="store_true")
     parser.add_argument("--model-name", type=str, default="qwen2.5-s2t-advisor:3b")
+    parser.add_argument("--abstain-dataset", type=Path, default=None)
     args = parser.parse_args()
     
+    if args.abstain_dataset:
+        os.environ["NEXUS_ABSTAIN_DATASET_PATH"] = str(args.abstain_dataset)
+        
     run_shadow_eval(
         args.dataset, 
         args.output, 
