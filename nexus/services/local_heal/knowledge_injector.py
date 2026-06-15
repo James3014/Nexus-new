@@ -17,7 +17,8 @@ class ParserHardeningKnowledgeInjector:
         "attribute_safety": {
             "rules": [
                 "Recursion Prevention: If implementing __getattr__, explicitly check if the attribute starts with an underscore. If so, raise AttributeError immediately.",
-                "Attribute Shadowing: Avoid using getattr(self, ...) inside __getattr__ without a safe default or explicit check to prevent infinite recursion loop."
+                "Attribute Shadowing: Avoid using getattr(self, ...) inside __getattr__ without a safe default or explicit check to prevent infinite recursion loop.",
+                "Descriptor Error Propagation: If an attribute is a descriptor/property in the class MRO (i.e. present in cls.__dict__ and has a __get__ method) but fell back to __getattr__, it means the property getter itself raised AttributeError. To let the original AttributeError propagate instead of raising a misleading 'object has no attribute' error, you must re-evaluate it at the start of __getattr__ using the following exact code:\n\nfor cls in self.__class__.__mro__:\n    if attr in cls.__dict__:\n        val = cls.__dict__[attr]\n        if hasattr(val, '__get__'):\n            return val.__get__(self, self.__class__)"
             ],
             "evidence_ref": ["astropy-14096"]
         }

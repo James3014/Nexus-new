@@ -214,7 +214,11 @@ def test_pipeline_hidden_verifier_required_fails_closed(tmp_path):
     assert "hidden verifier" in res_ctx.evaluation_report.lower()
 
 
-def test_pipeline_records_tsp_model_decisions_for_astropy(tmp_path):
+def test_pipeline_records_tsp_model_decisions_for_astropy(tmp_path, monkeypatch):
+    from nexus.engine.local_model_policy import LocalModelPolicy
+    monkeypatch.setattr(LocalModelPolicy, "OLLAMA_LARGE", "qwen2.5-coder:14b")
+    monkeypatch.setattr(LocalModelPolicy, "PATCH_TIMEOUT_SECONDS", 420)
+
     file_path = tmp_path / "hello.py"
     file_path.write_text("def hello():\n    return False\n", encoding="utf-8")
     calls = []
@@ -253,7 +257,11 @@ def test_pipeline_records_tsp_model_decisions_for_astropy(tmp_path):
     assert [item["timeout_seconds"] for item in res_ctx.model_decisions[:2]] == [600, 420]
 
 
-def test_pipeline_passes_phase_timeouts_to_model_calls(tmp_path):
+def test_pipeline_passes_phase_timeouts_to_model_calls(tmp_path, monkeypatch):
+    from nexus.engine.local_model_policy import LocalModelPolicy
+    monkeypatch.setattr(LocalModelPolicy, "OLLAMA_LARGE", "qwen2.5-coder:14b")
+    monkeypatch.setattr(LocalModelPolicy, "PATCH_TIMEOUT_SECONDS", 420)
+
     file_path = tmp_path / "hello.py"
     file_path.write_text("def hello():\n    return False\n", encoding="utf-8")
     calls = []

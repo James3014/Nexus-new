@@ -43,7 +43,8 @@ class PromptBuilder:
             "Rules:\n"
             "1. SEARCH matches source character-for-character.\n"
             "2. No placeholders ('# ...', '... code ...'). Write complete code.\n"
-            "3. Modify in-place. Use hasattr()/getattr() for dynamic access."
+            "3. Modify in-place. Use hasattr()/getattr() for dynamic access.\n"
+            "4. Indentation: The indentation of the code inside the REPLACE block must match the surrounding indentation exactly. Do not shift indentation levels."
             + reasoning_section
             + few_shot
         )

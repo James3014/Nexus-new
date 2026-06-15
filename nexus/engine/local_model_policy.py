@@ -21,7 +21,7 @@ class ModelProfile:
             num_ctx = int(os.environ.get("NEXUS_OLLAMA_NUM_CTX", "8192"))
             return {
                 "temperature": temperature,
-                "num_predict": 512,
+                "num_predict": int(os.environ.get("NEXUS_OLLAMA_NUM_PREDICT_PATCH", "1024")),
                 "num_ctx": num_ctx,
             }
         else:
@@ -44,7 +44,7 @@ class LocalModelPolicy:
     # P0-4: Clarify environment variables to prevent accidental overrides
     # Priority: Explicit Large > Default 14b > Fallback to Legacy generic
     OLLAMA_SMALL = os.environ.get("NEXUS_OLLAMA_SMALL_MODEL", "qwen2.5-coder:7b")
-    OLLAMA_LARGE = os.environ.get("NEXUS_OLLAMA_LARGE_MODEL", "qwen2.5-coder:14b")
+    OLLAMA_LARGE = os.environ.get("NEXUS_OLLAMA_LARGE_MODEL", "qwen2.5-coder:14b-instruct-q3_K_M")
     if os.environ.get("NEXUS_OLLAMA_MODEL") and "NEXUS_OLLAMA_LARGE_MODEL" not in os.environ:
         # 僅在未指定 Large 且存在舊變數時才回退 (但如果舊變數是 7b 則警告)
         old_val = os.environ.get("NEXUS_OLLAMA_MODEL")
@@ -52,7 +52,7 @@ class LocalModelPolicy:
             OLLAMA_LARGE = old_val
     
     SEARCH_TIMEOUT_SECONDS = int(os.environ.get("NEXUS_SEARCH_TIMEOUT_SECONDS", "600"))
-    PATCH_TIMEOUT_SECONDS = int(os.environ.get("NEXUS_PATCH_TIMEOUT_SECONDS", "420"))
+    PATCH_TIMEOUT_SECONDS = int(os.environ.get("NEXUS_PATCH_TIMEOUT_SECONDS", "900"))
     REPRO_TIMEOUT_SECONDS = int(os.environ.get("NEXUS_REPRO_TIMEOUT_SECONDS", "600"))
 
     @classmethod

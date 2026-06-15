@@ -20,7 +20,7 @@ def test_orchestrator_flow():
     p1.execute.return_value = PhaseResult(success=True)
     
     p2 = MagicMock(spec=IPhase)
-    p2.execute.return_value = PhaseResult(success=False, exit_layer="test_layer", error_reason="TEST_FAIL")
+    p2.execute.return_value = PhaseResult(success=False, exit_layer="test_layer", failure_reason="TEST_FAIL")
     
     gate = MagicMock(spec=GovernanceGate)
     

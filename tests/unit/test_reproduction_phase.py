@@ -47,7 +47,7 @@ def test_reproduction_phase_env_failure():
     
     assert result.success is False
     assert result.exit_layer == "repro_runner"
-    assert result.error_reason == "REPRO_ENVIRONMENT_FAILURE"
+    assert result.failure_reason == "REPRO_ENVIRONMENT_FAILURE"
 
 def test_reproduction_phase_provider_error():
     op = OperationalContext(
@@ -69,7 +69,7 @@ def test_reproduction_phase_provider_error():
     result = phase.execute(ctx)
     
     assert result.success is False
-    assert result.error_reason == "MODEL_PROVIDER_ERROR"
+    assert result.failure_reason == "MODEL_PROVIDER_ERROR"
     assert "MODEL_PROVIDER_ERROR" in ctx.op.model_decisions[-1]["status"]
 
 def test_reproduction_phase_empty_response():
@@ -91,7 +91,7 @@ def test_reproduction_phase_empty_response():
     result = phase.execute(ctx)
     
     assert result.success is False
-    assert result.error_reason == "NO_REPRO_SCRIPT"
+    assert result.failure_reason == "NO_REPRO_SCRIPT"
     assert ctx.op.model_decisions[-1]["status"] == "NO_REPRO_SCRIPT"
 
 def test_reproduction_phase_env_denoise_failed():
@@ -121,7 +121,7 @@ def test_reproduction_phase_env_denoise_failed():
     result = phase.execute(ctx)
     
     assert result.success is False
-    assert result.error_reason == "REPRO_ENVIRONMENT_FAILURE"
+    assert result.failure_reason == "REPRO_ENVIRONMENT_FAILURE"
     assert ctx.op.env_denoise.get("attempted") is True
     assert ctx.op.env_denoise.get("succeeded") is False
 

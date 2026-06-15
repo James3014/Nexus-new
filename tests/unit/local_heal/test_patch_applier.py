@@ -67,7 +67,7 @@ def test_patch_applier_match_gate_failure(tmp_path):
     )
     
     assert res.success is False
-    assert res.error_reason == "SEARCH_MISMATCH"
+    assert res.failure_reason == "SEARCH_MISMATCH"
 
 def test_patch_applier_syntax_gate_failure(tmp_path):
     file_path = tmp_path / "calc.py"
@@ -98,4 +98,4 @@ def test_patch_applier_syntax_gate_failure(tmp_path):
     
     assert res.success is False
     assert res.syntax_gate_passed is False
-    assert res.error_reason == "SYNTAX_ERROR"
+    assert res.failure_reason == "SYNTAX_ERROR"

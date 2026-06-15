@@ -101,5 +101,5 @@ def test_patch_synthesis_phase_rejects_duplicate_top_level_redefinition(tmp_path
     result = phase.execute(ctx)
 
     assert result.success is False
-    assert result.error_reason == "NAME_SANITY_ERROR"
+    assert result.failure_reason == "NAME_SANITY_ERROR"
     assert target.read_text(encoding="utf-8") == original

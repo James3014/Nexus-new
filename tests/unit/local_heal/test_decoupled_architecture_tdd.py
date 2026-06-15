@@ -357,7 +357,7 @@ def test_cross_file_search_fallback(tmp_path):
 
     out = phase.run(inp)
     # Should succeed by auto-correcting to table.py
-    assert out.success is True, f"Expected cross-file fallback to succeed, got: {out.error_reason}"
+    assert out.success is True, f"Expected cross-file fallback to succeed, got: {out.failure_reason}"
     # table.py should be patched
     patched = table_py.read_text()
     assert "(int, str)" in patched

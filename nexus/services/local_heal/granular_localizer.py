@@ -272,7 +272,9 @@ class GranularMethodLocalizer:
             # 如果函數體超過 30 行且有精確行號命中，則僅提供行號附近的 +/- 15 行
             primary_body = primary["content"]
             method_lines = primary_body.splitlines()
-            if len(method_lines) > 30:
+            # P0-4: Surgical crop only for very long functions (>50 lines)
+            # Use ±30 line window to give enough context for full method comprehension
+            if len(method_lines) > 50:
                 # 尋找與 target_linenos 最匹配的行
                 hit_line = -1
                 for t_line in target_linenos:
@@ -283,8 +285,8 @@ class GranularMethodLocalizer:
                 if hit_line != -1:
                     # 換算成 snippet 內部的相對行號 (0-indexed for slice)
                     rel_hit = hit_line - primary["lineno"]
-                    start_idx = max(0, rel_hit - 15)
-                    end_idx = min(len(method_lines), rel_hit + 16)
+                    start_idx = max(0, rel_hit - 30)
+                    end_idx = min(len(method_lines), rel_hit + 31)
                     cropped_body = "\n".join(method_lines[start_idx:end_idx])
                     
                     # 更新 primary 資訊

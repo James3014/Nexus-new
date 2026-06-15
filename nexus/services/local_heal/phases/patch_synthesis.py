@@ -45,8 +45,15 @@ class PatchSynthesisPhase(IPhase):
         system_prompt = input_data.system_prompt
 
         # 1. 外科手術級 Localized Context 準備
+        # Filter out repro/test scripts — they are not patch targets (created/deleted by verification)
+        _PATCH_BLACKLIST = {"reproduce_bug.py", "repro.py", "test_repro.py"}
+        patchable_files = [
+            (rel_path, content)
+            for rel_path, content in input_data.localized_files
+            if Path(rel_path).name not in _PATCH_BLACKLIST
+        ]
         surgical_files = []
-        for rel_path, content in input_data.localized_files:
+        for rel_path, content in patchable_files:
             target_path = input_data.repo_dir / rel_path
             if not target_path.exists():
                 found = list(input_data.repo_dir.rglob(Path(rel_path).name))
@@ -212,7 +219,7 @@ class PatchSynthesisPhase(IPhase):
         ctx.op.empty_response = output.empty_response
 
         if not output.success:
-            ctx.op.failure_reason = output.error_reason
-            return PhaseResult(success=False, exit_layer="patcher", error_reason=output.error_reason)
+            ctx.op.failure_reason = output.failure_reason
+            return PhaseResult(success=False, exit_layer="patcher", failure_reason=output.failure_reason)
 
         return PhaseResult(success=True)
