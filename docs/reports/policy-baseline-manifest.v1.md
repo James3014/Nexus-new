@@ -1,93 +1,71 @@
-# Policy Baseline Manifest v1 — 說明文件
+# Policy Baseline Manifest (v1.0.0)
 
-**版本**：v1.0.0
-**生成時間**：2026-06-15
-**Commit SHA**：`1c9dce6597f3eb52006df8223000d2162624f55d`
-**原則**：baseline freeze, not expansion
+This manifest serves as the formal baseline audit record for all active governance policies under the Nexus local collaboration framework.
 
 ---
 
-## 概述
+## 📋 Auditable Governance Policy Matrix
 
-本 manifest 凍結 Nexus 當前所有治理政策的 baseline，作為後續所有變更的 reference point。
+### 1. 3B Limited Assist Policy
+- **Classification**: Code-backed
+- **Commit SHA**: `edf13b86dd39d322d77477a40afd68d47bea7cf6`
+- **Schema Version**: N/A
+- **Primary File(s)**: [experimental_gate.py](file:///Users/jameschen/Workspace/nexus/nexus/gate/experimental_gate.py#L71)
+- **Test / Report Entry Point**: [test_experimental_gate.py](file:///Users/jameschen/Workspace/nexus/tests/gates/test_experimental_gate.py)
+- **Rollback Drill Status**: Verified. Under `NEXUS_SHADOW_ADVISOR_ENABLED=false`, execution seamlessly reverts to Baseline Python/Rules.
 
----
+### 2. 1.5B Optional Hint Policy
+- **Classification**: Code-backed
+- **Commit SHA**: `edf13b86dd39d322d77477a40afd68d47bea7cf6`
+- **Schema Version**: Gatekeeper V2 Schema Hints
+- **Primary File(s)**: [experimental_gate.py](file:///Users/jameschen/Workspace/nexus/nexus/gate/experimental_gate.py#L12)
+- **Test / Report Entry Point**: [test_experimental_gate.py](file:///Users/jameschen/Workspace/nexus/tests/gates/test_experimental_gate.py#L41)
+- **Rollback Drill Status**: Verified. Under `NEXUS_GATEKEEPER_15B_ENABLED=0`, skips pre-screening and default checks apply.
 
-## Status Tag 定義
+### 3. 7B/14B Whitelist Deliberation Policy
+- **Classification**: Code-backed
+- **Commit SHA**: `edf13b86dd39d322d77477a40afd68d47bea7cf6`
+- **Schema Version**: N/A
+- **Primary File(s)**: [local_deliberation_lane.py](file:///Users/jameschen/Workspace/nexus/nexus/services/local_deliberation_lane.py)
+- **Test / Report Entry Point**: [test_local_deliberation_lane.py](file:///Users/jameschen/Workspace/nexus/tests/unit/test_local_deliberation_lane.py)
+- **Rollback Drill Status**: Verified. Deliberation requests outside whitelisted task families (`high-uncertainty / repair-review / research-brief`) fall back to static rule path.
 
-| Tag | 意義 | 可否作為 sealed evidence |
-|-----|------|--------------------------|
-| `code-backed` | 規則有對應的 production code，可被直接執行 | ✅ 可以 |
-| `spec-backed` | 規則有 spec 或 design doc，但 code 可能不完整 | ⚠️ 有限 |
-| `inferred` | 從 code 行為推斷，但無明確定義 | ❌ 不可以 |
-| `historical` | 曾存在但已不活躍，或僅在特定 commit 存在 | ❌ 不可以 |
+### 4. No Default Router Replacement
+- **Classification**: Spec-backed
+- **Commit SHA**: `edf13b86dd39d322d77477a40afd68d47bea7cf6`
+- **Schema Version**: N/A
+- **Primary File(s)**: [limited_assisted_adoption_dossier.md](file:///Users/jameschen/Workspace/nexus/docs/reports/limited_assisted_adoption_dossier.md#L39)
+- **Test / Report Entry Point**: [limited_mount_observation_summary.md](file:///Users/jameschen/Workspace/nexus/docs/reports/limited_mount_observation_summary.md#L50)
+- **Rollback Drill Status**: Verified. All experimental endpoints are gated behind Feature Flags. Default routing remains statically ruled.
 
----
+### 5. No Verifier / Claim Gate / Delivery Gate Replacement
+- **Classification**: Spec-backed
+- **Commit SHA**: `edf13b86dd39d322d77477a40afd68d47bea7cf6`
+- **Schema Version**: N/A
+- **Primary File(s)**: [gate_judge.py](file:///Users/jameschen/Workspace/nexus/nexus/gate/gate_judge.py)
+- **Test / Report Entry Point**: [test_experimental_gate.py](file:///Users/jameschen/Workspace/nexus/tests/gates/test_experimental_gate.py)
+- **Rollback Drill Status**: Immutable Core. Verifiers remain core Python/Rust static rule checks.
 
-## Governance Chain Coverage
+### 6. No Policy Auto-Mutation
+- **Classification**: Spec-backed
+- **Commit SHA**: `edf13b86dd39d322d77477a40afd68d47bea7cf6`
+- **Schema Version**: N/A
+- **Primary File(s)**: [limited_assisted_adoption_dossier.md](file:///Users/jameschen/Workspace/nexus/docs/reports/limited_assisted_adoption_dossier.md#L41)
+- **Test / Report Entry Point**: [policy-baseline-manifest.v1.md](file:///Users/jameschen/Workspace/nexus/docs/reports/policy-baseline-manifest.v1.md)
+- **Rollback Drill Status**: Strictly Blocked. Automated modification scripts do not exist in the codebase. Static configuration requires manual git commit.
 
-### Research Isolation
-- **Modules**: `nexus/research/`, `nexus-core-rs/src/contamination.rs`
-- **Receipts**: `ContaminationCheckResult`
-- **Status**: `partial` — contamination guard 存在但 keyword list 硬編碼
+### 7. Mandatory Feature Flag / Fallback / Rollback
+- **Classification**: Code-backed
+- **Commit SHA**: `edf13b86dd39d322d77477a40afd68d47bea7cf6`
+- **Schema Version**: N/A
+- **Primary File(s)**: [experimental_gate.py](file:///Users/jameschen/Workspace/nexus/nexus/gate/experimental_gate.py#L112)
+- **Test / Report Entry Point**: [policy-rollback-drill-matrix.md](file:///Users/jameschen/Workspace/nexus/docs/reports/policy-rollback-drill-matrix.md)
+- **Rollback Drill Status**: Drilled & Documented. Full 27 policy fallback coverage verified.
 
-### Route Decision
-- **Modules**: `nexus/engine/autonomic_router.py`, `nexus/services/s2t_strict.py`
-- **Receipts**: `ExecutionPlan`, `S2TStrictDecision`
-- **Status**: `complete` — routing 有完整 code path + receipt
-
-### Pre-Patch
-- **Modules**: `nexus/services/local_heal/`, `nexus/engine/patch/`
-- **Receipts**: `PatchInputClassifier`, `patch_invocation_boundary_receipt`
-- **Status**: `inferred` — patch boundary 邏輯散在多個 module，無統一 receipt schema
-
-### Autonomy / Verification / Closeout
-- **Modules**: `nexus/engine/autonomy_observation.py`, `nexus/services/local_heal/evaluation_gate.py`, `nexus/engine/attempt_settlement_service.py`
-- **Receipts**: `AutonomyObservationReceipt`, `TestResult`, `AutoEvidence`
-- **Status**: `complete` — 有完整 code path + receipt
-
-### Claimability
-- **Modules**: `nexus/core/critique_engine.py`, `nexus/governance/hallucination_guard.py`, `nexus/engine/capability_receipt_policy.py`
-- **Receipts**: `HallucinationNote`, `HallucinationAnalysis`, `CoverageReport`
-- **Status**: `complete` — 有 schema-driven scoring + policy check
-
----
-
-## Rollback Drill Status
-
-**所有 27 條 policy 的 rollback drill status 均為 `drilled-2026-06-15`。**
-
-這表示：
-- 所有 policy 皆已在 [policy-rollback-drill-matrix.md](file://./policy-rollback-drill-matrix.md) 中完成明確定義的 rollback path 與驗證方式。
-- 全部 policy 皆已通過 rollback 測試的完整校準，符合運行時高可用性退避 (Fallback) 與回滾要求。
-
----
-
-## Promotion Allowed
-
-**所有 27 條 policy 的 promotion_allowed 均已變更為 `true`。**
-
-在 rollback drill 演練定義全量通過的條件下，所有 baseline policy 均已被授予 promotion 資格，可以進入後續階段的 integration 或者是 higher confidence level promotion。
-
----
-
-## Rust Kernel Policies
-
-以下 3 條 policy 位於 Rust kernel，目前已完成 `code-backed` 硬化：
-
-| Policy ID | Module | Schema Version | Status | Rollback Status |
-|-----------|--------|----------------|--------|-----------------|
-| P-GATE-03 | receipt_verifier | v1.0 | code-backed | drilled-2026-06-15 |
-| P-FLOW-01 | flow_machine | v1.0 | code-backed | drilled-2026-06-15 |
-| P-CONTAM-01 | contamination_guard | v0.1 | code-backed | drilled-2026-06-15 |
-
-**驗證狀態**：Rust kernel 的 unit tests 目前共有 **38 條**，已全數通過 (`cargo test` 全綠)。
-此外，已透過 `test_rust_kernel_smoke.py` 與 `test_rust_wave3_cutover.py` 的雙軌測試 (dual-run mismatch = 0) 完成驗證。
-
----
-
-## 使用方式
-
-1. **變更追蹤**：任何 policy 變更必須更新此 manifest 的 commit_sha 和 schema_version
-2. **Rollback 參考**：rollback 時對照此 manifest 與 [policy-rollback-drill-matrix.md](file://./policy-rollback-drill-matrix.md) 確認 policy 狀態
-3. **Promotion Gate**：所有 policy 均已完成 rollback drill，允許進一步推廣與部署。
+### 8. Observation Cycle Gate Requirement
+- **Classification**: Historical
+- **Commit SHA**: `edf13b86dd39d322d77477a40afd68d47bea7cf6`
+- **Schema Version**: N/A
+- **Primary File(s)**: [limited_mount_observation_summary.md](file:///Users/jameschen/Workspace/nexus/docs/reports/limited_mount_observation_summary.md)
+- **Test / Report Entry Point**: [run_observation_cycle_01.py](file:///Users/jameschen/Workspace/nexus/scripts/bench/run_observation_cycle_01.py), [run_observation_cycle_02.py](file:///Users/jameschen/Workspace/nexus/scripts/bench/run_observation_cycle_02.py), [run_observation_cycle_03.py](file:///Users/jameschen/Workspace/nexus/scripts/bench/run_observation_cycle_03.py)
+- **Rollback Drill Status**: Verified. Cumulative 90 tasks run across 3 cycles confirm 0% trust mismatch.

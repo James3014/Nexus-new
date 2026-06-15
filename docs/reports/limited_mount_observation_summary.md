@@ -17,7 +17,7 @@
 ### 📌 歷次觀測分支錨點 (Commit Anchors)
 - **Cycle 1**: `65bedd4b531327c1cfb0d196d6d0b6a4eb1584bd`
 - **Cycle 2**: `fbb3b5efcdc955b41458014d05f5d1312ce231b1`
-- **Cycle 3 / Summary**: 將由最終本 PR 合併 commit 封存。
+- **Cycle 3 / Summary**: `edf13b86dd39d322d77477a40afd68d47bea7cf6`  
 
 ### 📊 三輪觀測核心指標彙總比較 (Multi-Cycle Telemetry Matrix)
 

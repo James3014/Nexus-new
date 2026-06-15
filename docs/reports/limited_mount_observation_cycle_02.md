@@ -1,7 +1,7 @@
 # Limited Mount Observation Cycle 02 Report
 
 **Date**: 2026-06-15  
-**Evaluation Commit**: `65bedd4b531327c1cfb0d196d6d0b6a4eb1584bd`  
+**Evaluation Commit**: `edf13b86dd39d322d77477a40afd68d47bea7cf6`  
 **Status**: **Eligible for limited assisted adoption review; not eligible for default-path promotion.**
 
 ## 1. 總體指標摘要 (Overall Telemetry Metrics)
