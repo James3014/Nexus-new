@@ -76,15 +76,17 @@
 
 ## Rust Kernel Policies
 
-以下 5 條 policy 位於 Rust kernel，目前為 `spec-backed` 狀態：
+以下 3 條 policy 位於 Rust kernel，目前已完成 `code-backed` 硬化：
 
 | Policy ID | Module | Schema Version | Status |
 |-----------|--------|----------------|--------|
-| P-GATE-03 | receipt_verifier | v0.1 | spec-backed |
-| P-FLOW-01 | flow_machine | v0.1 | spec-backed |
-| P-CONTAM-01 | contamination_guard | v0.1 | spec-backed |
+| P-GATE-03 | receipt_verifier | v1.0 | code-backed |
+| P-FLOW-01 | flow_machine | v1.0 | code-backed |
+| P-CONTAM-01 | contamination_guard | v0.1 | code-backed |
 
-**注意**：Rust kernel 的 unit tests 目前為 0，不滿足驗收條件。
+**驗證狀態**：Rust kernel 的 unit tests 目前共有 **38 條**，已全數通過 (`cargo test` 全綠)，滿足驗收條件。
+且 `P-GATE-03` 與 `P-FLOW-01` 已於 2026-06-15 完成首輪 rollback drill 演練。
+
 
 ---
 
@@ -100,7 +102,7 @@
 ## Next Steps
 
 1. 為每條 `no-drill` policy 建立 rollback drill
-2. 為 Rust kernel 建立 unit tests
+2. [已完成] 為 Rust kernel 建立 unit tests (38 tests passed)
 3. 將 `inferred` 和 `historical` 條目升級為 `code-backed` 或明確標記為 deprecated
 4. 建立 manifest 自動更新 CI pipeline
 

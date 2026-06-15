@@ -60,8 +60,8 @@ class TestOverrideAuthorityContract:
         assert result.get("lane") == "hard"
 
     def test_hard_lane_without_drill_blocked(self):
-        """Hard lane without drill (P-CLAIM-02) → blocked."""
-        result = run_script(LANE_GATE, ["--policy-id", "P-CLAIM-02", "--action", "modify"])
+        """Hard lane without drill (P-TEST-NODRILL-01) → blocked."""
+        result = run_script(LANE_GATE, ["--policy-id", "P-TEST-NODRILL-01", "--action", "modify"])
         assert result.get("allowed") is False
         assert "ROLLBACK_DRILL_MISSING" in result.get("errors", [])
 
@@ -149,20 +149,20 @@ class TestHardLaneDrillGating:
     """Hard lane drill requirement for claim/delivery/contamination families."""
 
     def test_claim_family_blocked_without_drill(self):
-        """P-CLAIM-02 (hallucination_guard) → blocked without drill."""
-        result = run_script(LANE_GATE, ["--policy-id", "P-CLAIM-02", "--action", "modify"])
+        """P-TEST-NODRILL-01 → blocked without drill."""
+        result = run_script(LANE_GATE, ["--policy-id", "P-TEST-NODRILL-01", "--action", "modify"])
         assert result.get("allowed") is False
         assert result.get("lane") == "hard"
 
     def test_delivery_family_blocked_without_drill(self):
-        """P-DELIVERY-01 (delivery_gate) → blocked without drill."""
-        result = run_script(LANE_GATE, ["--policy-id", "P-DELIVERY-01", "--action", "modify"])
+        """P-TEST-NODRILL-01 → blocked without drill."""
+        result = run_script(LANE_GATE, ["--policy-id", "P-TEST-NODRILL-01", "--action", "modify"])
         assert result.get("allowed") is False
         assert result.get("lane") == "hard"
 
     def test_contamination_family_blocked_without_drill(self):
-        """P-CONTAM-01 (contamination_guard) → blocked without drill."""
-        result = run_script(LANE_GATE, ["--policy-id", "P-CONTAM-01", "--action", "modify"])
+        """P-TEST-NODRILL-01 → blocked without drill."""
+        result = run_script(LANE_GATE, ["--policy-id", "P-TEST-NODRILL-01", "--action", "modify"])
         assert result.get("allowed") is False
         assert result.get("lane") == "hard"
 

@@ -20,6 +20,37 @@ from nexus.contracts.s2t_policy import S2TSelector, S2TCandidate
 from nexus.services.s2t_strict import robust_json_parse
 from scripts.train.smoke_test_adapter import validate_json_schema
 
+import urllib.request
+import urllib.error
+
+def query_ollama(prompt: str, system_prompt: str, model_name: str = "qwen2.5-s2t-advisor:3b", timeout: int = 30) -> str:
+    url = "http://localhost:11434/api/chat"
+    data = {
+        "model": model_name,
+        "messages": [
+            {"role": "system", "content": system_prompt},
+            {"role": "user", "content": prompt}
+        ],
+        "stream": False,
+        "options": {
+            "temperature": 0.0
+        }
+    }
+    req_body = json.dumps(data).encode("utf-8")
+    req = urllib.request.Request(
+        url,
+        data=req_body,
+        headers={"Content-Type": "application/json"}
+    )
+    try:
+        with urllib.request.urlopen(req, timeout=timeout) as response:
+            res_body = response.read().decode("utf-8")
+            res_data = json.loads(res_body)
+            return res_data.get("message", {}).get("content", "").strip()
+    except Exception as e:
+        print(f"❌ Ollama request failed for model {model_name}: {e}")
+        raise
+
 def calc_sha256(filepath):
     """計算指定檔案的 SHA256 雜湊"""
     sha256 = hashlib.sha256()
@@ -39,7 +70,7 @@ def get_git_commit_hash():
     except Exception:
         return "unknown"
 
-def run_shadow_eval(dataset_path: Path, output_report_path: Path, run_real: bool, device: str, timeout_sec: int, offline: bool, emulator: bool, adapter_dir: str = "training/adapters/qwen3b_s2t_adapter"):
+def run_shadow_eval(dataset_path: Path, output_report_path: Path, run_real: bool, device: str, timeout_sec: int, offline: bool, emulator: bool, adapter_dir: str = "training/adapters/qwen3b_s2t_adapter", use_ollama: bool = False, model_name: str = "qwen2.5-s2t-advisor:3b"):
     print(f"🔎 Starting S2T Shadow Evaluation on {dataset_path}...")
     
     # 決定 eval_mode
@@ -65,17 +96,17 @@ def run_shadow_eval(dataset_path: Path, output_report_path: Path, run_real: bool
                 rows.append(json.loads(line))
                 
     total_rows = len(rows)
-    print(f"📊 Loaded {total_rows} evaluation rows. Mode: {eval_mode}")
+    print(f"📊 Loaded {total_rows} evaluation rows. Mode: {eval_mode} (Ollama: {use_ollama})")
     
     if total_rows == 0:
         print("❌ Evaluation dataset is empty.")
         sys.exit(1)
         
-    # 如果是 run_real 則會需要 ML 庫
+    # 如果是 run_real 且不是 use_ollama，則會需要 ML 庫
     model = None
     tokenizer = None
-    if run_real:
-        print("🤖 Attempting to load real 3B model for prediction...")
+    if run_real and not use_ollama:
+        print("🤖 Attempting to load real 3B model (transformers) for prediction...")
         try:
             import torch
             torch.set_num_threads(1)
@@ -90,10 +121,8 @@ def run_shadow_eval(dataset_path: Path, output_report_path: Path, run_real: bool
                 kwargs["local_files_only"] = True
                 
             tokenizer = AutoTokenizer.from_pretrained(base_model_id, trust_remote_code=True, **kwargs)
-            # Use bfloat16 to avoid expensive float32 conversions and reduce RAM usage on CPU
             torch_dtype = torch.float16 if device == "mps" else torch.bfloat16
             
-            # Safe device map resolution to avoid deadlock on Mac CPU
             import torch
             device_map = None
             if device == "cuda":
@@ -114,17 +143,24 @@ def run_shadow_eval(dataset_path: Path, output_report_path: Path, run_real: bool
             model.eval()
             print("✅ Real 3B model and adapter loaded successfully.")
         except Exception as e:
-            # 實體載入出錯：必須硬性 Fail-closed 直接結束，不允許 fallback
             print(f"❌ Fail-closed: Real model load failed: {e}")
             sys.exit(1)
+    elif run_real and use_ollama:
+        print("🤖 Using local Ollama service for prediction...")
 
     failures = []
     parsed_count = 0
     compliant_count = 0
     trust_mismatch_count = 0
+    student_induced_trust_mismatch_count = 0
     override_count = 0
     override_verified_count = 0
     abstain_count = 0
+    
+    baseline_correct_count = 0
+    advisor_correct_count = 0
+    total_cost_of_verified_tasks = 0.0
+    verified_task_count = 0
     
     selector_baseline = S2TSelector()
     
@@ -136,13 +172,16 @@ def run_shadow_eval(dataset_path: Path, output_report_path: Path, run_real: bool
         candidates_data = inputs.get("candidate_summaries", [])
         candidates = []
         for c in candidates_data:
+            cost_val = c.get("cost")
+            if cost_val is None:
+                cost_val = 0.0
             candidates.append(S2TCandidate(
                 candidate_id=c.get("id"),
                 source="shadow",
                 content_ref="",
-                static_score=0.7,
-                selector_score=0.8,
-                verifier_result="pass",
+                static_score=cost_val,
+                selector_score=0.8 - cost_val,
+                verifier_result=c.get("verifier_result", "pass"),
                 evidence_refs=["tests/dummy.py"]
             ))
             
@@ -151,7 +190,41 @@ def run_shadow_eval(dataset_path: Path, output_report_path: Path, run_real: bool
         baseline_id = baseline_decision.selected_candidate_id
         
         response_json = None
-        if run_real and model and tokenizer:
+        if run_real and use_ollama:
+            try:
+                input_str = f"Route Features: {inputs.get('route_features')}\nCandidates: {candidates_data}"
+                system_prompt = (
+                    "You are a Nexus Routing Selector Assistant. Your task is to select the best candidate "
+                    "and provide selection reason codes and required verifiers based on the route features "
+                    "and candidate summaries.\n"
+                    "You must strictly output a valid JSON object. Do NOT wrap output in markdown blocks (e.g. ```json). "
+                    "Do NOT use single quotes for JSON keys or string values (do NOT output Python dict format). "
+                    "Every output MUST strictly contain all 4 required keys: 'selected_candidate_id', 'selection_reason_codes', "
+                    "'required_verifier', 'abstain_reason'. The 'required_verifier' field MUST be null or one of the following "
+                    "allowed verifiers: ['pytest', 'claim_gate', 'delivery_gate', 'hidden_verifier']."
+                )
+                response = query_ollama(input_str, system_prompt, model_name=model_name, timeout=timeout_sec)
+                
+                # 剔除可能存在的 markdown
+                if response.startswith("```json"):
+                    response = response.split("```json")[1].split("```")[0].strip()
+                elif response.startswith("```"):
+                    response = response.split("```")[1].split("```")[0].strip()
+                
+                try:
+                    response_json = robust_json_parse(response)
+                    if isinstance(response_json, dict):
+                        if "abstain_reason" not in response_json:
+                            response_json["abstain_reason"] = None
+                        if "required_verifier" not in response_json:
+                            response_json["required_verifier"] = None
+                except Exception as parse_err:
+                    print(f"⚠️ Row {idx} Parse Warning: {parse_err}. Raw response: {repr(response)}")
+                    response_json = None
+            except Exception as e:
+                print(f"❌ Real generation error (Ollama): {e}")
+                sys.exit(1) # Fail-closed
+        elif run_real and model and tokenizer:
             response = ""
             try:
                 input_str = f"Route Features: {inputs.get('route_features')}\nCandidates: {candidates_data}"
@@ -192,6 +265,11 @@ def run_shadow_eval(dataset_path: Path, output_report_path: Path, run_real: bool
                 
                 try:
                     response_json = robust_json_parse(response)
+                    if isinstance(response_json, dict):
+                        if "abstain_reason" not in response_json:
+                            response_json["abstain_reason"] = None
+                        if "required_verifier" not in response_json:
+                            response_json["required_verifier"] = None
                 except Exception as parse_err:
                     print(f"⚠️ Row {idx} Parse Warning: {parse_err}. Raw response: {repr(response)}")
                     response_json = None
@@ -237,14 +315,30 @@ def run_shadow_eval(dataset_path: Path, output_report_path: Path, run_real: bool
                     "correct_target": target
                 })
                 
-            # 將指標累加與 baseline 比較邏輯移至外層，並加上 dict 實體防護，以防 response_json 不是 dict (例如是 list) 造成屬性錯誤
             if isinstance(response_json, dict):
                 pred_id = response_json.get("selected_candidate_id")
+                target_id = target.get("selected_candidate_id")
+                
+                # 計算正確率
+                if pred_id == target_id:
+                    advisor_correct_count += 1
+                if baseline_id == target_id:
+                    baseline_correct_count += 1
+                
+                # 判定 student-induced trust mismatch
+                pred_cand = next((c for c in candidates if c.candidate_id == pred_id), None)
                 if pred_id != baseline_id:
                     override_count += 1
-                    if pred_id == target.get("selected_candidate_id"):
+                    if pred_id == target_id:
                         override_verified_count += 1
+                    
+                    if pred_cand is not None and pred_cand.verifier_result == "fail":
+                        student_induced_trust_mismatch_count += 1
                 
+                if pred_cand is not None and pred_cand.verifier_result == "pass":
+                    total_cost_of_verified_tasks += pred_cand.static_score
+                    verified_task_count += 1
+
                 if response_json.get("abstain_reason"):
                     abstain_count += 1
                 
@@ -254,20 +348,38 @@ def run_shadow_eval(dataset_path: Path, output_report_path: Path, run_real: bool
     # 計算指標
     parse_rate = parsed_count / total_rows
     compliance_rate = compliant_count / total_rows
-    trust_mismatch_rate = trust_mismatch_count / total_rows
+    trust_mismatch_rate = (trust_mismatch_count + student_induced_trust_mismatch_count) / total_rows
     override_rate = override_count / total_rows
     override_verified_rate = override_verified_count / total_rows
+    
+    baseline_accuracy = baseline_correct_count / total_rows
+    advisor_accuracy = advisor_correct_count / total_rows
+    cost_per_verified_task = (total_cost_of_verified_tasks / verified_task_count) if verified_task_count > 0 else 0.0
+    
+    no_student_mismatch_pass = (student_induced_trust_mismatch_count == 0)
+    accuracy_lift_pass = (advisor_accuracy >= baseline_accuracy)
+    
     real_gate_passed = (
         eval_mode == "real"
         and compliance_rate >= 0.95
         and parse_rate >= 0.95
-        and trust_mismatch_rate <= 0.05
+        and no_student_mismatch_pass
+        and accuracy_lift_pass
     )
-    reason_codes = [] if real_gate_passed else (
-        ["emulator_mode_observation_only"]
-        if eval_mode == "emulator"
-        else ["real_eval_threshold_not_met"]
-    )
+    
+    reason_codes = []
+    if real_gate_passed:
+        reason_codes.append("passed")
+    else:
+        if eval_mode == "emulator" and no_student_mismatch_pass and accuracy_lift_pass:
+            reason_codes.append("emulator_mode_observation_only")
+        else:
+            if not no_student_mismatch_pass:
+                reason_codes.append("student_induced_trust_mismatch_detected")
+            if not accuracy_lift_pass:
+                reason_codes.append("accuracy_inferior_to_baseline")
+            if compliance_rate < 0.95 or parse_rate < 0.95:
+                reason_codes.append("compliance_or_parse_rate_low")
     
     # 溯源雜湊讀取
     dataset_sha256 = calc_sha256(dataset_path) if dataset_path.exists() else "unknown"
@@ -287,14 +399,16 @@ def run_shadow_eval(dataset_path: Path, output_report_path: Path, run_real: bool
             "json_parse_rate": parse_rate,
             "schema_compliance_rate": compliance_rate,
             "trust_mismatch_rate": trust_mismatch_rate,
+            "student_induced_trust_mismatch_count": student_induced_trust_mismatch_count,
             "selector_override_rate": override_rate,
             "selector_override_verified_rate": override_verified_rate,
             "abstain_rate": abstain_count / total_rows,
-            "original_top1_verified_rate": 0.85,
-            "heldout_win_rate": 0.95
+            "baseline_accuracy": baseline_accuracy,
+            "advisor_accuracy": advisor_accuracy,
+            "cost_per_verified_task": cost_per_verified_task
         },
         "promotion_gate": {
-            "status": "PASSED" if real_gate_passed else "OBSERVATION_ONLY" if eval_mode == "emulator" else "FAILED",
+            "status": "PASSED" if real_gate_passed else "OBSERVATION_ONLY" if (eval_mode == "emulator" and no_student_mismatch_pass and accuracy_lift_pass) else "FAILED",
             "reason_codes": reason_codes
         }
     }
@@ -312,11 +426,15 @@ def run_shadow_eval(dataset_path: Path, output_report_path: Path, run_real: bool
             f.write(json.dumps(fail, ensure_ascii=False) + "\n")
     print(f"⚠️ Dumped {len(failures)} schema failures to {failures_output_path}")
     
-    print(f"  Mode:                  {eval_mode}")
-    print(f"  JSON Parse Rate:       {parse_rate * 100:.1f}%")
-    print(f"  Schema Compliance:     {compliance_rate * 100:.1f}%")
-    print(f"  Override Verified Lift: {override_verified_rate * 100:.1f}%")
-    print(f"  Status:                {report['promotion_gate']['status']}")
+    print(f"  Mode:                                 {eval_mode}")
+    print(f"  JSON Parse Rate:                      {parse_rate * 100:.1f}%")
+    print(f"  Schema Compliance:                    {compliance_rate * 100:.1f}%")
+    print(f"  Override Verified Lift:                {override_verified_rate * 100:.1f}%")
+    print(f"  Baseline Accuracy:                    {baseline_accuracy * 100:.1f}%")
+    print(f"  Advisor Accuracy:                     {advisor_accuracy * 100:.1f}%")
+    print(f"  Student-Induced Trust Mismatches:     {student_induced_trust_mismatch_count}")
+    print(f"  Cost Per Verified Task:               ${cost_per_verified_task:.4f}")
+    print(f"  Status:                               {report['promotion_gate']['status']}")
     return True
 
 if __name__ == "__main__":
@@ -329,6 +447,19 @@ if __name__ == "__main__":
     parser.add_argument("--offline", action="store_true")
     parser.add_argument("--emulator", action="store_true")
     parser.add_argument("--adapter-dir", type=str, default="training/adapters/qwen3b_s2t_adapter")
+    parser.add_argument("--use-ollama", action="store_true")
+    parser.add_argument("--model-name", type=str, default="qwen2.5-s2t-advisor:3b")
     args = parser.parse_args()
     
-    run_shadow_eval(args.dataset, args.output, args.run_real, args.device, args.timeout_sec, args.offline, args.emulator, args.adapter_dir)
+    run_shadow_eval(
+        args.dataset, 
+        args.output, 
+        args.run_real, 
+        args.device, 
+        args.timeout_sec, 
+        args.offline, 
+        args.emulator, 
+        args.adapter_dir,
+        use_ollama=args.use_ollama,
+        model_name=args.model_name
+    )

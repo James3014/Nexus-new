@@ -39,7 +39,7 @@
       "status_tag": "code-backed",
       "test_entrypoints": [],
       "receipt_type": "ExecutionPlan",
-      "rollback_drill_status": "no-drill",
+      "rollback_drill_status": "drilled-2026-06-15",
       "promotion_allowed": false,
       "lane": "soft",
       "risk_tier": "low",
@@ -67,7 +67,7 @@
       "status_tag": "code-backed",
       "test_entrypoints": [],
       "receipt_type": "ExecutionPlan",
-      "rollback_drill_status": "no-drill",
+      "rollback_drill_status": "drilled-2026-06-15",
       "promotion_allowed": false,
       "lane": "soft",
       "risk_tier": "low",
@@ -95,7 +95,7 @@
       "status_tag": "code-backed",
       "test_entrypoints": [],
       "receipt_type": "ExecutionPlan",
-      "rollback_drill_status": "no-drill",
+      "rollback_drill_status": "drilled-2026-06-15",
       "promotion_allowed": false,
       "lane": "soft",
       "risk_tier": "low",
@@ -123,7 +123,7 @@
       "status_tag": "code-backed",
       "test_entrypoints": [],
       "receipt_type": "ExecutionPlan",
-      "rollback_drill_status": "no-drill",
+      "rollback_drill_status": "drilled-2026-06-15",
       "promotion_allowed": false,
       "lane": "soft",
       "risk_tier": "low",
@@ -151,7 +151,7 @@
       "status_tag": "code-backed",
       "test_entrypoints": [],
       "receipt_type": "TaskCompactionReceipt",
-      "rollback_drill_status": "no-drill",
+      "rollback_drill_status": "drilled-2026-06-15",
       "promotion_allowed": false,
       "lane": "soft",
       "risk_tier": "low",
@@ -194,6 +194,13 @@
           "diff_summary": "Override applied: Integration test override",
           "lane": "soft",
           "override_id": "OVR-2026-06-15-021309-5211f51d"
+        },
+        {
+          "version": "P-BUDGET-01.1.0.override",
+          "timestamp": "2026-06-15T10:27:08.530585+00:00",
+          "diff_summary": "Override applied: Integration test override",
+          "lane": "soft",
+          "override_id": "OVR-2026-06-15-102708-270dd06a"
         }
       ]
     },
@@ -209,7 +216,7 @@
         "tests/engine/test_capability_planner.py"
       ],
       "receipt_type": "CapabilityPlan",
-      "rollback_drill_status": "no-drill",
+      "rollback_drill_status": "drilled-2026-06-15",
       "promotion_allowed": false,
       "lane": "soft",
       "risk_tier": "medium",
@@ -239,7 +246,7 @@
         "tests/engine/test_capability_planner.py"
       ],
       "receipt_type": "CapabilityPlan",
-      "rollback_drill_status": "no-drill",
+      "rollback_drill_status": "drilled-2026-06-15",
       "promotion_allowed": false,
       "lane": "soft",
       "risk_tier": "medium",
@@ -270,7 +277,7 @@
         "tests/gates/test_s2t_rollout_control.py"
       ],
       "receipt_type": "S2TStrictDecision",
-      "rollback_drill_status": "drilled-2026-06-14",
+      "rollback_drill_status": "drilled-2026-06-15",
       "promotion_allowed": false,
       "lane": "hard",
       "risk_tier": "high",
@@ -300,7 +307,7 @@
         "tests/gates/test_s2t_claim_gate.py"
       ],
       "receipt_type": "S2TStrictDecision",
-      "rollback_drill_status": "drilled-2026-06-14",
+      "rollback_drill_status": "drilled-2026-06-15",
       "promotion_allowed": false,
       "lane": "hard",
       "risk_tier": "high",
@@ -331,7 +338,7 @@
         "tests/gates/test_s2t_rollout_control.py"
       ],
       "receipt_type": "S2TStrictDecision",
-      "rollback_drill_status": "drilled-2026-06-14",
+      "rollback_drill_status": "drilled-2026-06-15",
       "promotion_allowed": false,
       "lane": "hard",
       "risk_tier": "high",
@@ -359,7 +366,7 @@
       "status_tag": "code-backed",
       "test_entrypoints": [],
       "receipt_type": "CostPrediction",
-      "rollback_drill_status": "no-drill",
+      "rollback_drill_status": "drilled-2026-06-15",
       "promotion_allowed": false,
       "lane": "soft",
       "risk_tier": "low",
@@ -402,7 +409,7 @@
       "status_tag": "code-backed",
       "test_entrypoints": [],
       "receipt_type": "ToolsJson",
-      "rollback_drill_status": "no-drill",
+      "rollback_drill_status": "drilled-2026-06-15",
       "promotion_allowed": false,
       "lane": "soft",
       "risk_tier": "medium",
@@ -430,7 +437,7 @@
       "status_tag": "code-backed",
       "test_entrypoints": [],
       "receipt_type": "TestResult",
-      "rollback_drill_status": "no-drill",
+      "rollback_drill_status": "drilled-2026-06-15",
       "promotion_allowed": false,
       "lane": "shadow",
       "risk_tier": "low",
@@ -489,7 +496,7 @@
       "status_tag": "code-backed",
       "test_entrypoints": [],
       "receipt_type": "HallucinationNote",
-      "rollback_drill_status": "no-drill",
+      "rollback_drill_status": "drilled-2026-06-15",
       "promotion_allowed": false,
       "lane": "soft",
       "risk_tier": "medium",
@@ -519,7 +526,7 @@
         "tests/core/test_hallucination_guard.py"
       ],
       "receipt_type": "HallucinationAnalysis",
-      "rollback_drill_status": "no-drill",
+      "rollback_drill_status": "drilled-2026-06-15",
       "promotion_allowed": false,
       "lane": "hard",
       "risk_tier": "critical",
@@ -549,7 +556,7 @@
         "tests/engine/test_capability_receipt_policy.py"
       ],
       "receipt_type": "CoverageReport",
-      "rollback_drill_status": "no-drill",
+      "rollback_drill_status": "drilled-2026-06-15",
       "promotion_allowed": false,
       "lane": "hard",
       "risk_tier": "critical",
@@ -579,7 +586,7 @@
         "tests/delivery/test_completion_gate.py"
       ],
       "receipt_type": "CompletionResult",
-      "rollback_drill_status": "no-drill",
+      "rollback_drill_status": "drilled-2026-06-15",
       "promotion_allowed": false,
       "lane": "hard",
       "risk_tier": "critical",
@@ -609,7 +616,7 @@
         "tests/delivery/test_contract.py"
       ],
       "receipt_type": "DeliveryContract",
-      "rollback_drill_status": "no-drill",
+      "rollback_drill_status": "drilled-2026-06-15",
       "promotion_allowed": false,
       "lane": "hard",
       "risk_tier": "critical",
@@ -637,7 +644,7 @@
       "status_tag": "code-backed",
       "test_entrypoints": [],
       "receipt_type": "DriftReport",
-      "rollback_drill_status": "no-drill",
+      "rollback_drill_status": "drilled-2026-06-15",
       "promotion_allowed": false,
       "lane": "soft",
       "risk_tier": "medium",
@@ -712,6 +719,21 @@
           "lane": "soft",
           "rollback_from": "OVR-2026-06-15-021309-1d002786",
           "rollback_to": "P-LEARN-01.1.0.0"
+        },
+        {
+          "version": "P-LEARN-01.1.0.override",
+          "timestamp": "2026-06-15T10:27:08.681836+00:00",
+          "diff_summary": "Override applied: Rollback test",
+          "lane": "soft",
+          "override_id": "OVR-2026-06-15-102708-7f6685b2"
+        },
+        {
+          "version": "P-LEARN-01.rollback",
+          "timestamp": "2026-06-15T10:27:08.756855+00:00",
+          "diff_summary": "Rollback from override OVR-2026-06-15-102708-7f6685b2 to P-LEARN-01.1.0.0",
+          "lane": "soft",
+          "rollback_from": "OVR-2026-06-15-102708-7f6685b2",
+          "rollback_to": "P-LEARN-01.1.0.0"
         }
       ]
     },
@@ -727,7 +749,7 @@
         "tests/unit/governance/test_drift_stop_gate.py"
       ],
       "receipt_type": "DriftReport",
-      "rollback_drill_status": "no-drill",
+      "rollback_drill_status": "drilled-2026-06-15",
       "promotion_allowed": false,
       "lane": "soft",
       "risk_tier": "medium",
@@ -755,7 +777,7 @@
       "status_tag": "code-backed",
       "test_entrypoints": [],
       "receipt_type": "AutonomyObservationReceipt",
-      "rollback_drill_status": "no-drill",
+      "rollback_drill_status": "drilled-2026-06-15",
       "promotion_allowed": false,
       "lane": "shadow",
       "risk_tier": "low",
@@ -785,7 +807,7 @@
         "tests/core/test_belief_engine.py"
       ],
       "receipt_type": "BeliefUpdate",
-      "rollback_drill_status": "no-drill",
+      "rollback_drill_status": "drilled-2026-06-15",
       "promotion_allowed": false,
       "lane": "soft",
       "risk_tier": "low",
@@ -828,6 +850,13 @@
           "diff_summary": "Override applied: Expiry test",
           "lane": "soft",
           "override_id": "OVR-2026-06-15-021312-8678ab12"
+        },
+        {
+          "version": "P-BELIEF-01.1.0.override",
+          "timestamp": "2026-06-15T10:27:11.396618+00:00",
+          "diff_summary": "Override applied: Expiry test",
+          "lane": "soft",
+          "override_id": "OVR-2026-06-15-102711-4bc3a453"
         }
       ]
     },
@@ -841,7 +870,7 @@
       "status_tag": "code-backed",
       "test_entrypoints": [],
       "receipt_type": "ContextAssemblyContract",
-      "rollback_drill_status": "no-drill",
+      "rollback_drill_status": "drilled-2026-06-15",
       "promotion_allowed": false,
       "lane": "soft",
       "risk_tier": "medium",
@@ -869,7 +898,7 @@
       "status_tag": "code-backed",
       "test_entrypoints": [],
       "receipt_type": "AutoEvidence",
-      "rollback_drill_status": "no-drill",
+      "rollback_drill_status": "drilled-2026-06-15",
       "promotion_allowed": false,
       "lane": "soft",
       "risk_tier": "medium",
@@ -930,7 +959,7 @@
         "tests/integration/test_rust_kernel_smoke.py::test_rust_kernel_contamination_check"
       ],
       "receipt_type": "ContaminationCheckResult",
-      "rollback_drill_status": "no-drill",
+      "rollback_drill_status": "drilled-2026-06-15",
       "promotion_allowed": false,
       "lane": "hard",
       "risk_tier": "high",
@@ -947,11 +976,41 @@
           "lane": "hard"
         }
       ]
+    },
+    {
+      "policy_id": "P-TEST-NODRILL-01",
+      "phase": "Intake",
+      "owner_module": "test_module",
+      "source_file": "tests/test_policy_manager.py",
+      "schema_version": "v1.0",
+      "commit_sha": "1c9dce65",
+      "status_tag": "spec-backed",
+      "test_entrypoints": [
+        "tests/test_policy_manager.py"
+      ],
+      "receipt_type": "TestReceipt",
+      "rollback_drill_status": "no-drill",
+      "promotion_allowed": false,
+      "lane": "hard",
+      "risk_tier": "low",
+      "authority_impact": "none",
+      "claim_impact": "none",
+      "cutover_impact": "none",
+      "override_mode": "allowed_with_receipt",
+      "expiry": null,
+      "version_history": [
+        {
+          "version": "P-TEST-NODRILL-01.1.0.0",
+          "timestamp": "2026-06-15T00:00:00Z",
+          "diff_summary": "Test policy",
+          "lane": "hard"
+        }
+      ]
     }
   ],
   "summary": {
-    "total_policies": 27,
-    "hard_lane": 10,
+    "total_policies": 28,
+    "hard_lane": 11,
     "soft_lane": 15,
     "shadow_lane": 2,
     "code_backed": 27,
