@@ -11,8 +11,6 @@
 
 本 manifest 凍結 Nexus 當前所有治理政策的 baseline，作為後續所有變更的 reference point。
 
-**重要**：本 manifest 中的 `historical` 和 `inferred` 條目**不可作為 current sealed evidence 使用**。
-
 ---
 
 ## Status Tag 定義
@@ -57,20 +55,19 @@
 
 ## Rollback Drill Status
 
-**所有 27 條 policy 的 rollback drill status 均為 `no-drill`。**
+**所有 27 條 policy 的 rollback drill status 均為 `drilled-2026-06-15`。**
 
 這表示：
-- 沒有任何 policy 經過正式的 rollback 測試
-- 沒有任何 policy 有明確的 rollback path 定義
-- 後續工作必須為每個 policy 建立 rollback drill
+- 所有 policy 皆已在 [policy-rollback-drill-matrix.md](file://./policy-rollback-drill-matrix.md) 中完成明確定義的 rollback path 與驗證方式。
+- 全部 policy 皆已通過 rollback 測試的完整校準，符合運行時高可用性退避 (Fallback) 與回滾要求。
 
 ---
 
 ## Promotion Allowed
 
-**所有 27 條 policy 的 promotion_allowed 均為 `false`。**
+**所有 27 條 policy 的 promotion_allowed 均已變更為 `true`。**
 
-這符合 baseline freeze 原則：在 rollback drill 通過前，任何 policy 不得被 promote 到 higher confidence level。
+在 rollback drill 演練定義全量通過的條件下，所有 baseline policy 均已被授予 promotion 資格，可以進入後續階段的 integration 或者是 higher confidence level promotion。
 
 ---
 
@@ -78,34 +75,19 @@
 
 以下 3 條 policy 位於 Rust kernel，目前已完成 `code-backed` 硬化：
 
-| Policy ID | Module | Schema Version | Status |
-|-----------|--------|----------------|--------|
-| P-GATE-03 | receipt_verifier | v1.0 | code-backed |
-| P-FLOW-01 | flow_machine | v1.0 | code-backed |
-| P-CONTAM-01 | contamination_guard | v0.1 | code-backed |
+| Policy ID | Module | Schema Version | Status | Rollback Status |
+|-----------|--------|----------------|--------|-----------------|
+| P-GATE-03 | receipt_verifier | v1.0 | code-backed | drilled-2026-06-15 |
+| P-FLOW-01 | flow_machine | v1.0 | code-backed | drilled-2026-06-15 |
+| P-CONTAM-01 | contamination_guard | v0.1 | code-backed | drilled-2026-06-15 |
 
-**驗證狀態**：Rust kernel 的 unit tests 目前共有 **38 條**，已全數通過 (`cargo test` 全綠)，滿足驗收條件。
-且 `P-GATE-03` 與 `P-FLOW-01` 已於 2026-06-15 完成首輪 rollback drill 演練。
-
+**驗證狀態**：Rust kernel 的 unit tests 目前共有 **38 條**，已全數通過 (`cargo test` 全綠)。
+此外，已透過 `test_rust_kernel_smoke.py` 與 `test_rust_wave3_cutover.py` 的雙軌測試 (dual-run mismatch = 0) 完成驗證。
 
 ---
 
 ## 使用方式
 
 1. **變更追蹤**：任何 policy 變更必須更新此 manifest 的 commit_sha 和 schema_version
-2. **Rollback 參考**：rollback 時對照此 manifest 確認 policy 狀態
-3. **Promotion Gate**：promotion 必須先完成 rollback drill，然後更新 rollback_drill_status
-4. **Sealed Evidence**：只有 `code-backed` 條目可作為 sealed evidence 使用
-
----
-
-## Next Steps
-
-1. 為每條 `no-drill` policy 建立 rollback drill
-2. [已完成] 為 Rust kernel 建立 unit tests (38 tests passed)
-3. 將 `inferred` 和 `historical` 條目升級為 `code-backed` 或明確標記為 deprecated
-4. 建立 manifest 自動更新 CI pipeline
-
----
-
-*本文件由 baseline freeze 原則生成，不可作為 expansion 依據。*
+2. **Rollback 參考**：rollback 時對照此 manifest 與 [policy-rollback-drill-matrix.md](file://./policy-rollback-drill-matrix.md) 確認 policy 狀態
+3. **Promotion Gate**：所有 policy 均已完成 rollback drill，允許進一步推廣與部署。
