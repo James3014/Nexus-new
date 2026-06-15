@@ -2,81 +2,131 @@ import os
 import json
 import pytest
 from pathlib import Path
-from nexus.bridge.cutover_manager import RustCutoverManager
+from nexus.bridge.rust_kernel import RustKernelAdapter
 
-class MockFSM:
-    def validate_transition(self, current, next_state):
-        # 模擬 Python 端的合法性檢查
-        from nexus.engine.capability_contracts import FlowState
-        if current == FlowState.INTAKE and next_state == FlowState.PLAN:
-            return True
-        return False
+# Python reference implementation (must match Rust exactly)
+LEGAL_TRANSITIONS = {
+    "INTAKE": {"CLARIFY", "OUTLINE", "PLAN"},
+    "CLARIFY": {"OUTLINE", "RESEARCH", "ESCALATE"},
+    "OUTLINE": {"PLAN", "RESEARCH", "REPLAN"},
+    "RESEARCH": {"DESIGN", "OUTLINE", "PLAN"},
+    "DESIGN": {"PLAN", "REPLAN"},
+    "PLAN": {"EXECUTE", "REPLAN", "HUMAN_REVIEW"},
+    "EXECUTE": {"VERIFY", "ESCALATE", "BLOCKED_BUDGET", "BLOCKED_POLICY"},
+    "VERIFY": {"CLOSE", "REPLAN", "ESCALATE"},
+    "CLOSE": set(),  # Terminal
+    "REPLAN": {"PLAN", "ESCALATE", "BLOCKED_BUDGET", "BLOCKED_POLICY"},
+    "ESCALATE": {"HUMAN_REVIEW", "BLOCKED_POLICY", "INTAKE"},
+    "HUMAN_REVIEW": {"PLAN", "EXECUTE", "CLOSE", "BLOCKED_POLICY"},
+    "BLOCKED_BUDGET": {"HUMAN_REVIEW", "ESCALATE"},
+    "BLOCKED_POLICY": {"HUMAN_REVIEW", "ESCALATE"},
+}
+
+ALL_STATES = list(LEGAL_TRANSITIONS.keys())
+
+def python_validate_transition(current: str, next_state: str) -> bool:
+    """Python reference: fail-closed, same as Rust."""
+    if current == next_state:
+        return True
+    return next_state in LEGAL_TRANSITIONS.get(current, set())
+
+BINARY_PATH = Path("/Users/jameschen/Workspace/nexus/nexus-core-rs/target/release/nexus-core-rs")
 
 @pytest.fixture
-def temp_ledger(tmp_path):
-    return tmp_path / "mismatch_ledger.jsonl"
+def adapter():
+    if not BINARY_PATH.exists():
+        pytest.skip("Rust binary not found. Run 'cargo build --release' in nexus-core-rs.")
+    return RustKernelAdapter(BINARY_PATH)
 
-def test_dual_run_matches(temp_ledger):
-    # Arrange: 啟用 Dual-run
-    os.environ["RUST_DUAL_RUN"] = "1"
-    os.environ["USE_RUST_FLOW_ENGINE"] = "0"
-    os.environ["RUST_PRIMARY_ONLY"] = "0"
-    
-    manager = RustCutoverManager(ledger_path=temp_ledger)
-    fsm = MockFSM()
-    
-    # Act: 執行一個兩邊一致的轉移 (INTAKE -> PLAN)
-    result = manager.validate_flow_transition("INTAKE", "PLAN", py_fsm=fsm)
-    
-    # Assert
-    assert result is True
-    assert not temp_ledger.exists() # 無 Mismatch 不應產出檔案
+@pytest.fixture
+def mismatch_ledger(tmp_path):
+    return tmp_path / "rust_mismatch_ledger.jsonl"
 
-def test_dual_run_mismatch_recording(temp_ledger):
-    # Arrange: 啟用 Dual-run，但讓兩邊不一致
-    os.environ["RUST_DUAL_RUN"] = "1"
-    
-    manager = RustCutoverManager(ledger_path=temp_ledger)
-    fsm = MockFSM()
-    
-    # Act: 執行一個兩邊不一致的轉移 (INTAKE -> EXECUTE)
-    # Python 回傳 False, Rust 回傳 False (因為非法轉移)
-    # 我們需要模擬一個 Rust 回傳 True 但 Python 回傳 False 的情況來測試 Mismatch
-    # 這裡我們模擬 INTAKE -> CLARIFY，假設 Rust 判定為 True, Python 也判定為 True，
-    # 為了測試 Mismatch，我們手動觸發一個不匹配的調用
-    
-    # 在當前的 Rust 實作中，INTAKE -> PLAN 是 True
-    # 如果我們讓 Python 回傳 False，就會觸發 Mismatch
-    
-    result = manager.validate_flow_transition("INTAKE", "PLAN", py_fsm=None) # py_fsm=None 會讓 _legacy 回傳 True
-    # 這裡兩邊都回傳 True，匹配。
-    
-    # 模擬 Mismatch: INTAKE -> CLOSE
-    # Rust 回傳 False (非法), Python 回傳 True (模擬)
-    class DivergentFSM:
-        def validate_transition(self, c, n): return True
-        
-    result = manager.validate_flow_transition("INTAKE", "CLOSE", py_fsm=DivergentFSM())
-    
-    # Assert
-    assert result is True # 回傳 Python 結果，因為 USE_RUST_FLOW=0
-    assert temp_ledger.exists()
-    
-    with open(temp_ledger, "r") as f:
-        ledger_data = json.loads(f.read())
-        assert ledger_data["module_name"] == "flow_machine"
-        assert ledger_data["match"] is False
-        assert ledger_data["diff_reason"] == "OUTPUT_VALUE_MISMATCH"
+def test_dual_run_all_transitions(adapter, mismatch_ledger):
+    """Exhaustive dual-run: all 14×14=196 transitions, mismatch rate must be 0."""
+    mismatches = []
 
-def test_primary_only_cutover():
-    # Arrange: 啟用 Primary Only
-    os.environ["RUST_PRIMARY_ONLY"] = "1"
-    os.environ["USE_RUST_FLOW_ENGINE"] = "1"
-    
-    manager = RustCutoverManager()
-    
-    # Act
-    result = manager.validate_flow_transition("INTAKE", "PLAN")
-    
-    # Assert
-    assert result is True # 直接回傳 Rust 結果
+    for current in ALL_STATES:
+        for next_state in ALL_STATES:
+            # Python result
+            py_result = python_validate_transition(current, next_state)
+
+            # Rust result via IPC
+            rust_response = adapter._call_kernel("ValidateTransition", {
+                "current": current,
+                "next": next_state
+            })
+            assert rust_response["success"], f"Rust kernel failed: {rust_response}"
+            rust_result = rust_response["payload"]["is_valid"]
+
+            if py_result != rust_result:
+                mismatches.append({
+                    "module": "flow_machine",
+                    "input": f"{current} -> {next_state}",
+                    "python_output": py_result,
+                    "rust_output": rust_result,
+                    "diff_reason": "OUTPUT_VALUE_MISMATCH"
+                })
+
+    # Write mismatch ledger if any
+    if mismatches:
+        with open(mismatch_ledger, "w") as f:
+            for m in mismatches:
+                f.write(json.dumps(m) + "\n")
+
+    assert len(mismatches) == 0, (
+        f"Dual-run mismatch rate > 0 ({len(mismatches)} mismatches). "
+        f"Ledger: {mismatch_ledger}"
+    )
+
+def test_dual_run_legal_counts_match(adapter):
+    """Verify legal transition counts match Python reference."""
+    for state in ALL_STATES:
+        py_count = len(LEGAL_TRANSITIONS.get(state, set()))
+        # Rust returns legal transitions (excluding self-loop)
+        rust_response = adapter._call_kernel("ValidateTransition", {
+            "current": state,
+            "next": state  # self-loop = always valid
+        })
+        assert rust_response["success"]
+        # Count all valid transitions for this state
+        rust_legal = sum(
+            1 for s in ALL_STATES
+            if s != state and adapter._call_kernel("ValidateTransition", {
+                "current": state, "next": s
+            })["payload"]["is_valid"]
+        )
+        assert rust_legal == py_count, (
+            f"State {state}: Python has {py_count} legal transitions, Rust has {rust_legal}"
+        )
+
+def test_fail_closed_on_unknown_transition(adapter):
+    """Verify fail-closed: any undefined transition returns false."""
+    # INTAKE -> EXECUTE is not in LEGAL_TRANSITIONS
+    result = adapter._call_kernel("ValidateTransition", {
+        "current": "INTAKE", "next": "EXECUTE"
+    })
+    assert result["payload"]["is_valid"] is False
+
+    # CLOSE -> anything should fail (terminal state)
+    for target in ["INTAKE", "PLAN", "EXECUTE", "VERIFY"]:
+        result = adapter._call_kernel("ValidateTransition", {
+            "current": "CLOSE", "next": target
+        })
+        assert result["payload"]["is_valid"] is False
+
+def test_flow_transition_ipc_basic(adapter):
+    """Basic IPC test for flow transitions."""
+    # Valid: INTAKE -> PLAN
+    result = adapter._call_kernel("ValidateTransition", {
+        "current": "INTAKE", "next": "PLAN"
+    })
+    assert result["success"] is True
+    assert result["payload"]["is_valid"] is True
+
+    # Invalid: INTAKE -> EXECUTE
+    result = adapter._call_kernel("ValidateTransition", {
+        "current": "INTAKE", "next": "EXECUTE"
+    })
+    assert result["success"] is True
+    assert result["payload"]["is_valid"] is False

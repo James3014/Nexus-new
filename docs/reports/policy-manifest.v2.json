@@ -1,0 +1,888 @@
+{
+  "manifest_version": "2.0.0",
+  "generated_at": "2026-06-15T00:00:00Z",
+  "commit_sha": "1c9dce6597f3eb52006df8223000d2162624f55d",
+  "baseline_freeze": true,
+  "principle": "lane-based governance, not monolithic lock-down",
+  "lane_model": "policy-lane-model.v1",
+  "schema": {
+    "fields": {
+      "policy_id": "string — unique policy identifier",
+      "phase": "string — Intake|Deliberation|Routing|Pre-Execution|Execution|Verification|Claim|Delivery|Learning|Observation|Context|Settlement|Rust-Kernel",
+      "owner_module": "string — owning module name",
+      "source_file": "string — path to source file",
+      "schema_version": "string — version of the policy implementation",
+      "commit_sha": "string — commit when policy was last verified",
+      "status_tag": "string — code-backed|spec-backed|inferred|historical",
+      "test_entrypoints": "list[string] — test file paths or inline test locations",
+      "receipt_type": "string — receipt type produced by this policy",
+      "rollback_drill_status": "string — no-drill|drilled-{date}",
+      "promotion_allowed": "boolean — whether policy can be promoted",
+      "lane": "string — hard|soft|shadow",
+      "risk_tier": "string — critical|high|medium|low",
+      "authority_impact": "string — routing|evidence|delivery|transition|3b_promotion|tool|none",
+      "claim_impact": "string — claim-gated|internal|none",
+      "cutover_impact": "string — cutover-gated|none",
+      "override_mode": "string — blocked|allowed_with_receipt|allowed",
+      "expiry": "string|null — ISO8601 expiry for overrides",
+      "version_history": "list[VersionRecord] — version history for this policy"
+    }
+  },
+  "policies": [
+    {
+      "policy_id": "P-ROUTE-01",
+      "phase": "Intake",
+      "owner_module": "autonomic_router",
+      "source_file": "nexus/engine/autonomic_router.py",
+      "schema_version": "v4.40",
+      "commit_sha": "1c9dce65",
+      "status_tag": "code-backed",
+      "test_entrypoints": [],
+      "receipt_type": "ExecutionPlan",
+      "rollback_drill_status": "no-drill",
+      "promotion_allowed": false,
+      "lane": "soft",
+      "risk_tier": "low",
+      "authority_impact": "none",
+      "claim_impact": "none",
+      "cutover_impact": "none",
+      "override_mode": "allowed_with_receipt",
+      "expiry": null,
+      "version_history": [
+        {
+          "version": "P-ROUTE-01.4.40.0",
+          "timestamp": "2026-06-15T00:00:00Z",
+          "diff_summary": "Baseline freeze",
+          "lane": "soft"
+        }
+      ]
+    },
+    {
+      "policy_id": "P-ROUTE-02",
+      "phase": "Intake",
+      "owner_module": "hazard_mapper",
+      "source_file": "nexus/engine/autonomic_router.py",
+      "schema_version": "v4.40",
+      "commit_sha": "1c9dce65",
+      "status_tag": "code-backed",
+      "test_entrypoints": [],
+      "receipt_type": "ExecutionPlan",
+      "rollback_drill_status": "no-drill",
+      "promotion_allowed": false,
+      "lane": "soft",
+      "risk_tier": "low",
+      "authority_impact": "none",
+      "claim_impact": "none",
+      "cutover_impact": "none",
+      "override_mode": "allowed_with_receipt",
+      "expiry": null,
+      "version_history": [
+        {
+          "version": "P-ROUTE-02.4.40.0",
+          "timestamp": "2026-06-15T00:00:00Z",
+          "diff_summary": "Baseline freeze",
+          "lane": "soft"
+        }
+      ]
+    },
+    {
+      "policy_id": "P-ROUTE-03",
+      "phase": "Intake",
+      "owner_module": "mfp_guard",
+      "source_file": "nexus/engine/autonomic_router.py",
+      "schema_version": "v4.40",
+      "commit_sha": "1c9dce65",
+      "status_tag": "code-backed",
+      "test_entrypoints": [],
+      "receipt_type": "ExecutionPlan",
+      "rollback_drill_status": "no-drill",
+      "promotion_allowed": false,
+      "lane": "soft",
+      "risk_tier": "low",
+      "authority_impact": "none",
+      "claim_impact": "none",
+      "cutover_impact": "none",
+      "override_mode": "allowed_with_receipt",
+      "expiry": null,
+      "version_history": [
+        {
+          "version": "P-ROUTE-03.4.40.0",
+          "timestamp": "2026-06-15T00:00:00Z",
+          "diff_summary": "Baseline freeze",
+          "lane": "soft"
+        }
+      ]
+    },
+    {
+      "policy_id": "P-ROUTE-04",
+      "phase": "Intake",
+      "owner_module": "gemma_guard",
+      "source_file": "nexus/engine/autonomic_router.py",
+      "schema_version": "v4.40",
+      "commit_sha": "1c9dce65",
+      "status_tag": "code-backed",
+      "test_entrypoints": [],
+      "receipt_type": "ExecutionPlan",
+      "rollback_drill_status": "no-drill",
+      "promotion_allowed": false,
+      "lane": "soft",
+      "risk_tier": "low",
+      "authority_impact": "none",
+      "claim_impact": "none",
+      "cutover_impact": "none",
+      "override_mode": "allowed_with_receipt",
+      "expiry": null,
+      "version_history": [
+        {
+          "version": "P-ROUTE-04.4.40.0",
+          "timestamp": "2026-06-15T00:00:00Z",
+          "diff_summary": "Baseline freeze",
+          "lane": "soft"
+        }
+      ]
+    },
+    {
+      "policy_id": "P-BUDGET-01",
+      "phase": "Deliberation",
+      "owner_module": "budget_governor",
+      "source_file": "nexus/engine/budget_governor.py",
+      "schema_version": "v1.0",
+      "commit_sha": "1c9dce65",
+      "status_tag": "code-backed",
+      "test_entrypoints": [],
+      "receipt_type": "TaskCompactionReceipt",
+      "rollback_drill_status": "no-drill",
+      "promotion_allowed": false,
+      "lane": "soft",
+      "risk_tier": "low",
+      "authority_impact": "none",
+      "claim_impact": "none",
+      "cutover_impact": "none",
+      "override_mode": "allowed_with_receipt",
+      "expiry": null,
+      "version_history": [
+        {
+          "version": "P-BUDGET-01.1.0.0",
+          "timestamp": "2026-06-15T00:00:00Z",
+          "diff_summary": "Baseline freeze",
+          "lane": "soft"
+        }
+      ]
+    },
+    {
+      "policy_id": "P-PLAN-01",
+      "phase": "Deliberation",
+      "owner_module": "capability_planner",
+      "source_file": "nexus/engine/capability_planner.py",
+      "schema_version": "v1.0",
+      "commit_sha": "1c9dce65",
+      "status_tag": "code-backed",
+      "test_entrypoints": [
+        "tests/engine/test_capability_planner.py"
+      ],
+      "receipt_type": "CapabilityPlan",
+      "rollback_drill_status": "no-drill",
+      "promotion_allowed": false,
+      "lane": "soft",
+      "risk_tier": "medium",
+      "authority_impact": "none",
+      "claim_impact": "none",
+      "cutover_impact": "none",
+      "override_mode": "allowed_with_receipt",
+      "expiry": null,
+      "version_history": [
+        {
+          "version": "P-PLAN-01.1.0.0",
+          "timestamp": "2026-06-15T00:00:00Z",
+          "diff_summary": "Baseline freeze",
+          "lane": "soft"
+        }
+      ]
+    },
+    {
+      "policy_id": "P-PLAN-02",
+      "phase": "Deliberation",
+      "owner_module": "capability_planner",
+      "source_file": "nexus/engine/capability_planner.py",
+      "schema_version": "v1.0",
+      "commit_sha": "1c9dce65",
+      "status_tag": "code-backed",
+      "test_entrypoints": [
+        "tests/engine/test_capability_planner.py"
+      ],
+      "receipt_type": "CapabilityPlan",
+      "rollback_drill_status": "no-drill",
+      "promotion_allowed": false,
+      "lane": "soft",
+      "risk_tier": "medium",
+      "authority_impact": "none",
+      "claim_impact": "none",
+      "cutover_impact": "none",
+      "override_mode": "allowed_with_receipt",
+      "expiry": null,
+      "version_history": [
+        {
+          "version": "P-PLAN-02.1.0.0",
+          "timestamp": "2026-06-15T00:00:00Z",
+          "diff_summary": "Baseline freeze",
+          "lane": "soft"
+        }
+      ]
+    },
+    {
+      "policy_id": "P-S2T-01",
+      "phase": "Routing",
+      "owner_module": "s2t_strict",
+      "source_file": "nexus/services/s2t_strict.py",
+      "schema_version": "v2.0",
+      "commit_sha": "1c9dce65",
+      "status_tag": "code-backed",
+      "test_entrypoints": [
+        "tests/gates/test_s2t_claim_gate.py",
+        "tests/gates/test_s2t_rollout_control.py"
+      ],
+      "receipt_type": "S2TStrictDecision",
+      "rollback_drill_status": "drilled-2026-06-14",
+      "promotion_allowed": false,
+      "lane": "hard",
+      "risk_tier": "high",
+      "authority_impact": "routing",
+      "claim_impact": "none",
+      "cutover_impact": "cutover-gated",
+      "override_mode": "blocked",
+      "expiry": null,
+      "version_history": [
+        {
+          "version": "P-S2T-01.2.0.0",
+          "timestamp": "2026-06-15T00:00:00Z",
+          "diff_summary": "Baseline freeze",
+          "lane": "hard"
+        }
+      ]
+    },
+    {
+      "policy_id": "P-S2T-02",
+      "phase": "Routing",
+      "owner_module": "s2t_strict",
+      "source_file": "nexus/services/s2t_strict.py",
+      "schema_version": "v2.0",
+      "commit_sha": "1c9dce65",
+      "status_tag": "code-backed",
+      "test_entrypoints": [
+        "tests/gates/test_s2t_claim_gate.py"
+      ],
+      "receipt_type": "S2TStrictDecision",
+      "rollback_drill_status": "drilled-2026-06-14",
+      "promotion_allowed": false,
+      "lane": "hard",
+      "risk_tier": "high",
+      "authority_impact": "routing",
+      "claim_impact": "none",
+      "cutover_impact": "cutover-gated",
+      "override_mode": "blocked",
+      "expiry": null,
+      "version_history": [
+        {
+          "version": "P-S2T-02.2.0.0",
+          "timestamp": "2026-06-15T00:00:00Z",
+          "diff_summary": "Baseline freeze",
+          "lane": "hard"
+        }
+      ]
+    },
+    {
+      "policy_id": "P-S2T-03",
+      "phase": "Routing",
+      "owner_module": "s2t_3b_advisor",
+      "source_file": "nexus/services/s2t_strict.py",
+      "schema_version": "v2.0",
+      "commit_sha": "1c9dce65",
+      "status_tag": "code-backed",
+      "test_entrypoints": [
+        "tests/gates/test_s2t_claim_gate.py",
+        "tests/gates/test_s2t_rollout_control.py"
+      ],
+      "receipt_type": "S2TStrictDecision",
+      "rollback_drill_status": "drilled-2026-06-14",
+      "promotion_allowed": false,
+      "lane": "hard",
+      "risk_tier": "high",
+      "authority_impact": "3b_promotion",
+      "claim_impact": "none",
+      "cutover_impact": "cutover-gated",
+      "override_mode": "blocked",
+      "expiry": null,
+      "version_history": [
+        {
+          "version": "P-S2T-03.2.0.0",
+          "timestamp": "2026-06-15T00:00:00Z",
+          "diff_summary": "Baseline freeze — 3B remains shadow-only",
+          "lane": "hard"
+        }
+      ]
+    },
+    {
+      "policy_id": "P-COST-01",
+      "phase": "Pre-Execution",
+      "owner_module": "cost_hook",
+      "source_file": "nexus/core/cost_hook.py",
+      "schema_version": "v1.0",
+      "commit_sha": "1c9dce65",
+      "status_tag": "code-backed",
+      "test_entrypoints": [],
+      "receipt_type": "CostPrediction",
+      "rollback_drill_status": "no-drill",
+      "promotion_allowed": false,
+      "lane": "soft",
+      "risk_tier": "low",
+      "authority_impact": "none",
+      "claim_impact": "none",
+      "cutover_impact": "none",
+      "override_mode": "allowed_with_receipt",
+      "expiry": null,
+      "version_history": [
+        {
+          "version": "P-COST-01.1.0.0",
+          "timestamp": "2026-06-15T00:00:00Z",
+          "diff_summary": "Baseline freeze",
+          "lane": "soft"
+        },
+        {
+          "version": "P-COST-01.1.0.override",
+          "timestamp": "2026-06-15T01:23:40.557462+00:00",
+          "diff_summary": "Override applied: Cost model tuning for benchmark",
+          "lane": "soft",
+          "override_id": "OVR-2026-06-15-012340-09838df2"
+        },
+        {
+          "version": "P-COST-01.rollback",
+          "timestamp": "2026-06-15T01:24:56.804301+00:00",
+          "diff_summary": "Rollback from override OVR-2026-06-15-012340-09838df2 to P-COST-01.1.0.0",
+          "lane": "soft",
+          "rollback_from": "OVR-2026-06-15-012340-09838df2",
+          "rollback_to": "P-COST-01.1.0.0"
+        }
+      ]
+    },
+    {
+      "policy_id": "P-GATE-01",
+      "phase": "Execution",
+      "owner_module": "capability_gate",
+      "source_file": "nexus/governance/capability_gate.py",
+      "schema_version": "v1.0",
+      "commit_sha": "1c9dce65",
+      "status_tag": "code-backed",
+      "test_entrypoints": [],
+      "receipt_type": "ToolsJson",
+      "rollback_drill_status": "no-drill",
+      "promotion_allowed": false,
+      "lane": "soft",
+      "risk_tier": "medium",
+      "authority_impact": "tool",
+      "claim_impact": "none",
+      "cutover_impact": "none",
+      "override_mode": "allowed_with_receipt",
+      "expiry": null,
+      "version_history": [
+        {
+          "version": "P-GATE-01.1.0.0",
+          "timestamp": "2026-06-15T00:00:00Z",
+          "diff_summary": "Baseline freeze",
+          "lane": "soft"
+        }
+      ]
+    },
+    {
+      "policy_id": "P-GATE-02",
+      "phase": "Verification",
+      "owner_module": "evaluation_gate",
+      "source_file": "nexus/services/local_heal/evaluation_gate.py",
+      "schema_version": "v1.0",
+      "commit_sha": "1c9dce65",
+      "status_tag": "code-backed",
+      "test_entrypoints": [],
+      "receipt_type": "TestResult",
+      "rollback_drill_status": "no-drill",
+      "promotion_allowed": false,
+      "lane": "shadow",
+      "risk_tier": "low",
+      "authority_impact": "none",
+      "claim_impact": "none",
+      "cutover_impact": "none",
+      "override_mode": "allowed",
+      "expiry": null,
+      "version_history": [
+        {
+          "version": "P-GATE-02.1.0.0",
+          "timestamp": "2026-06-15T00:00:00Z",
+          "diff_summary": "Baseline freeze",
+          "lane": "shadow"
+        }
+      ]
+    },
+    {
+      "policy_id": "P-GATE-03",
+      "phase": "Rust-Kernel",
+      "owner_module": "receipt_verifier",
+      "source_file": "nexus-core-rs/src/receipt_verifier.rs",
+      "schema_version": "v1.0",
+      "commit_sha": "1c9dce65",
+      "status_tag": "code-backed",
+      "test_entrypoints": [
+        "nexus-core-rs/src/receipt_verifier.rs::tests (11 tests)",
+        "tests/integration/test_rust_kernel_smoke.py::test_rust_kernel_receipt_verification"
+      ],
+      "receipt_type": "ReceiptVerificationResult",
+      "rollback_drill_status": "drilled-2026-06-15",
+      "promotion_allowed": false,
+      "lane": "hard",
+      "risk_tier": "critical",
+      "authority_impact": "evidence",
+      "claim_impact": "claim-gated",
+      "cutover_impact": "cutover-gated",
+      "override_mode": "blocked",
+      "expiry": null,
+      "version_history": [
+        {
+          "version": "P-GATE-03.1.0.0",
+          "timestamp": "2026-06-15T00:00:00Z",
+          "diff_summary": "Baseline freeze — hardened with SHA-256 + canonical JSON",
+          "lane": "hard"
+        }
+      ]
+    },
+    {
+      "policy_id": "P-CLAIM-01",
+      "phase": "Claim",
+      "owner_module": "critique_engine",
+      "source_file": "nexus/core/critique_engine.py",
+      "schema_version": "v1.0",
+      "commit_sha": "1c9dce65",
+      "status_tag": "code-backed",
+      "test_entrypoints": [],
+      "receipt_type": "HallucinationNote",
+      "rollback_drill_status": "no-drill",
+      "promotion_allowed": false,
+      "lane": "soft",
+      "risk_tier": "medium",
+      "authority_impact": "none",
+      "claim_impact": "internal",
+      "cutover_impact": "none",
+      "override_mode": "allowed_with_receipt",
+      "expiry": null,
+      "version_history": [
+        {
+          "version": "P-CLAIM-01.1.0.0",
+          "timestamp": "2026-06-15T00:00:00Z",
+          "diff_summary": "Baseline freeze",
+          "lane": "soft"
+        }
+      ]
+    },
+    {
+      "policy_id": "P-CLAIM-02",
+      "phase": "Claim",
+      "owner_module": "hallucination_guard",
+      "source_file": "nexus/governance/hallucination_guard.py",
+      "schema_version": "v1",
+      "commit_sha": "1c9dce65",
+      "status_tag": "code-backed",
+      "test_entrypoints": [
+        "tests/core/test_hallucination_guard.py"
+      ],
+      "receipt_type": "HallucinationAnalysis",
+      "rollback_drill_status": "no-drill",
+      "promotion_allowed": false,
+      "lane": "hard",
+      "risk_tier": "critical",
+      "authority_impact": "none",
+      "claim_impact": "claim-gated",
+      "cutover_impact": "cutover-gated",
+      "override_mode": "blocked",
+      "expiry": null,
+      "version_history": [
+        {
+          "version": "P-CLAIM-02.1.0.0",
+          "timestamp": "2026-06-15T00:00:00Z",
+          "diff_summary": "Baseline freeze",
+          "lane": "hard"
+        }
+      ]
+    },
+    {
+      "policy_id": "P-CLAIM-03",
+      "phase": "Claim",
+      "owner_module": "capability_receipt_policy",
+      "source_file": "nexus/engine/capability_receipt_policy.py",
+      "schema_version": "v1.0",
+      "commit_sha": "1c9dce65",
+      "status_tag": "code-backed",
+      "test_entrypoints": [
+        "tests/engine/test_capability_receipt_policy.py"
+      ],
+      "receipt_type": "CoverageReport",
+      "rollback_drill_status": "no-drill",
+      "promotion_allowed": false,
+      "lane": "hard",
+      "risk_tier": "critical",
+      "authority_impact": "none",
+      "claim_impact": "claim-gated",
+      "cutover_impact": "cutover-gated",
+      "override_mode": "blocked",
+      "expiry": null,
+      "version_history": [
+        {
+          "version": "P-CLAIM-03.1.0.0",
+          "timestamp": "2026-06-15T00:00:00Z",
+          "diff_summary": "Baseline freeze",
+          "lane": "hard"
+        }
+      ]
+    },
+    {
+      "policy_id": "P-DELIVERY-01",
+      "phase": "Delivery",
+      "owner_module": "delivery_gate",
+      "source_file": "nexus/delivery/gate.py",
+      "schema_version": "v1.0",
+      "commit_sha": "1c9dce65",
+      "status_tag": "code-backed",
+      "test_entrypoints": [],
+      "receipt_type": "CompletionResult",
+      "rollback_drill_status": "no-drill",
+      "promotion_allowed": false,
+      "lane": "hard",
+      "risk_tier": "critical",
+      "authority_impact": "delivery",
+      "claim_impact": "claim-gated",
+      "cutover_impact": "cutover-gated",
+      "override_mode": "blocked",
+      "expiry": null,
+      "version_history": [
+        {
+          "version": "P-DELIVERY-01.1.0.0",
+          "timestamp": "2026-06-15T00:00:00Z",
+          "diff_summary": "Baseline freeze",
+          "lane": "hard"
+        }
+      ]
+    },
+    {
+      "policy_id": "P-DELIVERY-02",
+      "phase": "Delivery",
+      "owner_module": "delivery_contract",
+      "source_file": "nexus/delivery/contract.py",
+      "schema_version": "v1.0",
+      "commit_sha": "1c9dce65",
+      "status_tag": "code-backed",
+      "test_entrypoints": [
+        "tests/delivery/test_contract.py"
+      ],
+      "receipt_type": "DeliveryContract",
+      "rollback_drill_status": "no-drill",
+      "promotion_allowed": false,
+      "lane": "hard",
+      "risk_tier": "critical",
+      "authority_impact": "delivery",
+      "claim_impact": "claim-gated",
+      "cutover_impact": "cutover-gated",
+      "override_mode": "blocked",
+      "expiry": null,
+      "version_history": [
+        {
+          "version": "P-DELIVERY-02.1.0.0",
+          "timestamp": "2026-06-15T00:00:00Z",
+          "diff_summary": "Baseline freeze",
+          "lane": "hard"
+        }
+      ]
+    },
+    {
+      "policy_id": "P-LEARN-01",
+      "phase": "Learning",
+      "owner_module": "policy_drift",
+      "source_file": "nexus/core/policy_drift.py",
+      "schema_version": "v1.0",
+      "commit_sha": "1c9dce65",
+      "status_tag": "code-backed",
+      "test_entrypoints": [],
+      "receipt_type": "DriftReport",
+      "rollback_drill_status": "no-drill",
+      "promotion_allowed": false,
+      "lane": "soft",
+      "risk_tier": "medium",
+      "authority_impact": "none",
+      "claim_impact": "none",
+      "cutover_impact": "none",
+      "override_mode": "allowed_with_receipt",
+      "expiry": null,
+      "version_history": [
+        {
+          "version": "P-LEARN-01.1.0.0",
+          "timestamp": "2026-06-15T00:00:00Z",
+          "diff_summary": "Baseline freeze",
+          "lane": "soft"
+        }
+      ]
+    },
+    {
+      "policy_id": "P-LEARN-02",
+      "phase": "Learning",
+      "owner_module": "drift_stop_gate",
+      "source_file": "nexus/governance/application/drift_stop_gate.py",
+      "schema_version": "v1.0",
+      "commit_sha": "1c9dce65",
+      "status_tag": "code-backed",
+      "test_entrypoints": [
+        "tests/unit/governance/test_drift_stop_gate.py"
+      ],
+      "receipt_type": "DriftReport",
+      "rollback_drill_status": "no-drill",
+      "promotion_allowed": false,
+      "lane": "soft",
+      "risk_tier": "medium",
+      "authority_impact": "none",
+      "claim_impact": "none",
+      "cutover_impact": "none",
+      "override_mode": "allowed_with_receipt",
+      "expiry": null,
+      "version_history": [
+        {
+          "version": "P-LEARN-02.1.0.0",
+          "timestamp": "2026-06-15T00:00:00Z",
+          "diff_summary": "Baseline freeze",
+          "lane": "soft"
+        }
+      ]
+    },
+    {
+      "policy_id": "P-AUTO-01",
+      "phase": "Observation",
+      "owner_module": "autonomy_observation",
+      "source_file": "nexus/engine/autonomy_observation.py",
+      "schema_version": "v1.0",
+      "commit_sha": "1c9dce65",
+      "status_tag": "code-backed",
+      "test_entrypoints": [],
+      "receipt_type": "AutonomyObservationReceipt",
+      "rollback_drill_status": "no-drill",
+      "promotion_allowed": false,
+      "lane": "shadow",
+      "risk_tier": "low",
+      "authority_impact": "none",
+      "claim_impact": "none",
+      "cutover_impact": "none",
+      "override_mode": "allowed",
+      "expiry": null,
+      "version_history": [
+        {
+          "version": "P-AUTO-01.1.0.0",
+          "timestamp": "2026-06-15T00:00:00Z",
+          "diff_summary": "Baseline freeze",
+          "lane": "shadow"
+        }
+      ]
+    },
+    {
+      "policy_id": "P-BELIEF-01",
+      "phase": "Context",
+      "owner_module": "belief_engine",
+      "source_file": "nexus/core/belief_engine.py",
+      "schema_version": "v1.0",
+      "commit_sha": "1c9dce65",
+      "status_tag": "code-backed",
+      "test_entrypoints": [
+        "tests/core/test_belief_engine.py"
+      ],
+      "receipt_type": "BeliefUpdate",
+      "rollback_drill_status": "no-drill",
+      "promotion_allowed": false,
+      "lane": "soft",
+      "risk_tier": "low",
+      "authority_impact": "none",
+      "claim_impact": "none",
+      "cutover_impact": "none",
+      "override_mode": "allowed_with_receipt",
+      "expiry": null,
+      "version_history": [
+        {
+          "version": "P-BELIEF-01.1.0.0",
+          "timestamp": "2026-06-15T00:00:00Z",
+          "diff_summary": "Baseline freeze",
+          "lane": "soft"
+        }
+      ]
+    },
+    {
+      "policy_id": "P-CTX-01",
+      "phase": "Context",
+      "owner_module": "context_hub",
+      "source_file": "nexus/core/context_hub.py",
+      "schema_version": "v1.0",
+      "commit_sha": "1c9dce65",
+      "status_tag": "code-backed",
+      "test_entrypoints": [],
+      "receipt_type": "ContextAssemblyContract",
+      "rollback_drill_status": "no-drill",
+      "promotion_allowed": false,
+      "lane": "soft",
+      "risk_tier": "medium",
+      "authority_impact": "none",
+      "claim_impact": "none",
+      "cutover_impact": "none",
+      "override_mode": "allowed_with_receipt",
+      "expiry": null,
+      "version_history": [
+        {
+          "version": "P-CTX-01.1.0.0",
+          "timestamp": "2026-06-15T00:00:00Z",
+          "diff_summary": "Baseline freeze",
+          "lane": "soft"
+        }
+      ]
+    },
+    {
+      "policy_id": "P-SETTLE-01",
+      "phase": "Settlement",
+      "owner_module": "attempt_settlement",
+      "source_file": "nexus/engine/attempt_settlement_service.py",
+      "schema_version": "v1.0",
+      "commit_sha": "1c9dce65",
+      "status_tag": "code-backed",
+      "test_entrypoints": [],
+      "receipt_type": "AutoEvidence",
+      "rollback_drill_status": "no-drill",
+      "promotion_allowed": false,
+      "lane": "soft",
+      "risk_tier": "medium",
+      "authority_impact": "none",
+      "claim_impact": "none",
+      "cutover_impact": "none",
+      "override_mode": "allowed_with_receipt",
+      "expiry": null,
+      "version_history": [
+        {
+          "version": "P-SETTLE-01.1.0.0",
+          "timestamp": "2026-06-15T00:00:00Z",
+          "diff_summary": "Baseline freeze",
+          "lane": "soft"
+        }
+      ]
+    },
+    {
+      "policy_id": "P-FLOW-01",
+      "phase": "Rust-Kernel",
+      "owner_module": "flow_machine",
+      "source_file": "nexus-core-rs/src/flow_machine.rs",
+      "schema_version": "v1.0",
+      "commit_sha": "1c9dce65",
+      "status_tag": "code-backed",
+      "test_entrypoints": [
+        "nexus-core-rs/src/flow_machine.rs::tests (27 tests)",
+        "tests/integration/test_rust_wave3_cutover.py (4 tests, dual-run mismatch=0)"
+      ],
+      "receipt_type": "TransitionValidation",
+      "rollback_drill_status": "drilled-2026-06-15",
+      "promotion_allowed": false,
+      "lane": "hard",
+      "risk_tier": "critical",
+      "authority_impact": "transition",
+      "claim_impact": "none",
+      "cutover_impact": "cutover-gated",
+      "override_mode": "blocked",
+      "expiry": null,
+      "version_history": [
+        {
+          "version": "P-FLOW-01.1.0.0",
+          "timestamp": "2026-06-15T00:00:00Z",
+          "diff_summary": "Baseline freeze — full 14-state matrix, fail-closed",
+          "lane": "hard"
+        }
+      ]
+    },
+    {
+      "policy_id": "P-CONTAM-01",
+      "phase": "Rust-Kernel",
+      "owner_module": "contamination_guard",
+      "source_file": "nexus-core-rs/src/contamination.rs",
+      "schema_version": "v0.1",
+      "commit_sha": "1c9dce65",
+      "status_tag": "code-backed",
+      "test_entrypoints": [
+        "tests/integration/test_rust_kernel_smoke.py::test_rust_kernel_contamination_check"
+      ],
+      "receipt_type": "ContaminationCheckResult",
+      "rollback_drill_status": "no-drill",
+      "promotion_allowed": false,
+      "lane": "hard",
+      "risk_tier": "high",
+      "authority_impact": "none",
+      "claim_impact": "none",
+      "cutover_impact": "cutover-gated",
+      "override_mode": "blocked",
+      "expiry": null,
+      "version_history": [
+        {
+          "version": "P-CONTAM-01.0.1.0",
+          "timestamp": "2026-06-15T00:00:00Z",
+          "diff_summary": "Baseline freeze — moved to hard lane (research contamination is fail-closed core gate)",
+          "lane": "hard"
+        }
+      ]
+    }
+  ],
+  "summary": {
+    "total_policies": 27,
+    "hard_lane": 10,
+    "soft_lane": 15,
+    "shadow_lane": 2,
+    "code_backed": 27,
+    "rollback_drills_passing": 4,
+    "rollback_drills_total": 27,
+    "promotion_allowed_count": 0,
+    "lane_distribution": {
+      "hard": {
+        "count": 10,
+        "policies": [
+          "P-S2T-01",
+          "P-S2T-02",
+          "P-S2T-03",
+          "P-GATE-03",
+          "P-CLAIM-02",
+          "P-CLAIM-03",
+          "P-DELIVERY-01",
+          "P-DELIVERY-02",
+          "P-FLOW-01",
+          "P-CONTAM-01"
+        ]
+      },
+      "soft": {
+        "count": 15,
+        "policies": [
+          "P-ROUTE-01",
+          "P-ROUTE-02",
+          "P-ROUTE-03",
+          "P-ROUTE-04",
+          "P-BUDGET-01",
+          "P-PLAN-01",
+          "P-PLAN-02",
+          "P-COST-01",
+          "P-GATE-01",
+          "P-CLAIM-01",
+          "P-LEARN-01",
+          "P-LEARN-02",
+          "P-BELIEF-01",
+          "P-CTX-01",
+          "P-SETTLE-01"
+        ]
+      },
+      "shadow": {
+        "count": 2,
+        "policies": [
+          "P-GATE-02",
+          "P-AUTO-01"
+        ]
+      }
+    }
+  }
+}

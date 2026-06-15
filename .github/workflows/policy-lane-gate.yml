@@ -1,0 +1,92 @@
+name: Policy Lane Gate CI
+
+on:
+  push:
+    branches: [main, master, 'feature/**']
+    paths:
+      - 'nexus/engine/**'
+      - 'nexus/core/**'
+      - 'nexus/governance/**'
+      - 'nexus/services/**'
+      - 'nexus/delivery/**'
+      - 'nexus-core-rs/src/**'
+      - 'docs/reports/policy-manifest.v2.json'
+  pull_request:
+    branches: [main, master]
+    paths:
+      - 'nexus/engine/**'
+      - 'nexus/core/**'
+      - 'nexus/governance/**'
+      - 'nexus/services/**'
+      - 'nexus/delivery/**'
+      - 'nexus-core-rs/src/**'
+      - 'docs/reports/policy-manifest.v2.json'
+  workflow_dispatch:
+
+jobs:
+  policy-lane-gate:
+    name: Policy Lane Gate Check
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Set up Python 3.12
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install uv
+        run: curl -LsSf https://astral.sh/uv/install.sh | sh
+
+      - name: Install dependencies
+        run: uv sync --frozen --all-groups --all-extras
+        env:
+          UV_SYSTEM_PYTHON: 0
+
+      - name: Detect Changed Policy Files
+        id: files
+        run: |
+          if [ "${{ github.event_name }}" == "pull_request" ]; then
+            FILES=$(git diff --name-only --diff-filter=ACMR origin/main...HEAD)
+          else
+            FILES=$(git diff --name-only --diff-filter=ACMR HEAD~1...HEAD || git ls-files)
+          fi
+          
+          # Filter to policy-governed files
+          POLICY_FILES=$(echo "$FILES" | grep -E '(nexus/engine/|nexus/core/|nexus/governance/|nexus/services/|nexus/delivery/|nexus-core-rs/src/|policy-manifest)' || true)
+          FILES_CLEAN=$(echo $POLICY_FILES | tr '\n' ' ')
+          echo "changed_files=$FILES_CLEAN" >> $GITHUB_OUTPUT
+          echo "Changed policy files: $FILES_CLEAN"
+
+      - name: Run Policy Lane Gate Check
+        if: steps.files.outputs.changed_files != ''
+        run: |
+          echo "Checking policy lane gates for changed files..."
+          VIOLATIONS=0
+          
+          for FILE in ${{ steps.files.outputs.changed_files }}; do
+            echo "Checking: $FILE"
+            # Run the pre-commit checker for each file
+            python scripts/ops/policy_lane_precommit.py --staged-files "$FILE" || VIOLATIONS=$((VIOLATIONS + 1))
+          done
+          
+          if [ $VIOLATIONS -gt 0 ]; then
+            echo "## ❌ Policy Lane Gate Violations" >> $GITHUB_STEP_SUMMARY
+            echo "Found $VIOLATIONS hard lane violations." >> $GITHUB_STEP_SUMMARY
+            exit 1
+          fi
+          
+          echo "## ✅ Policy Lane Gate Passed" >> $GITHUB_STEP_SUMMARY
+
+      - name: Run Lane Gate Tests
+        run: |
+          uv run pytest tests/ops/test_policy_lane_gate.py -v --tb=short
+
+      - name: No Policy Changes
+        if: steps.files.outputs.changed_files == ''
+        run: echo "No policy-governed files changed. Skipping lane gate check."
