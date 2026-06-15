@@ -409,5 +409,52 @@ def test_s2t_strict_gate_pact_telemetry(tmp_path, monkeypatch) -> None:
     assert "pact-task-telemetry" in pact["metadata"]["task_id"]
 
 
+def test_s2t_strict_gate_pact_with_skill_memory_telemetry(tmp_path, monkeypatch) -> None:
+    import json
+    from nexus.learning.skill_memory_index import SkillHistoryRecord
+    
+    monkeypatch.setenv("NEXUS_S2T_PACT_ENABLED", "1")
+    monkeypatch.setenv("NEXUS_S2T_SKILL_MEMORY_ENABLED", "1")
+    monkeypatch.setenv("NEXUS_S2T_3B_ASSISTED_MODE", "observation")
+    monkeypatch.setenv("NEXUS_S2T_3B_ADVISOR_FORCE", "1")
+    
+    mock_record = SkillHistoryRecord(
+        skill_id="A",
+        recent_success_rate=0.85,
+        recent_failure_modes=["syntax_error"],
+        reuse_count=5
+    )
+    
+    monkeypatch.setattr(
+        "nexus.learning.skill_memory_index.SkillMemoryIndex.query_skill_history",
+        lambda self, skill_id, task_context="": mock_record
+    )
+    
+    log_file = tmp_path / "pact_skill_telemetry.jsonl"
+    gate = S2TStrictRuntimeGate(
+        advisor=S2T3BAdvisor(force_simulation=True),
+        evidence_log_path=log_file
+    )
+    
+    decision = gate.evaluate(
+        task_id="pact-skill-task-telemetry",
+        risk_tier="low",
+        candidates=[_candidate("A")],
+        verifier_result="pass",
+    )
+    
+    assert decision.passed is True
+    assert log_file.exists()
+    lines = log_file.read_text().strip().split("\n")
+    assert len(lines) == 1
+    
+    row = json.loads(lines[0])
+    assert "pact_record" in row
+    pact = row["pact_record"]
+    assert pact["metadata"]["skill_hints"] == ["A:85%"]
+    assert pact["metadata"]["memory_hints"] == ["A:failures=syntax_error"]
+
+
+
 
 

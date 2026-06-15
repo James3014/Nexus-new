@@ -35,14 +35,75 @@ class SkillMemoryIndex:
         self._outcome_cache: List[Dict[str, Any]] = []
         self._usage_cache: List[Dict[str, Any]] = []
         self._loaded = False
+        
+        self._outcome_mtime: float = 0.0
+        self._usage_mtime: float = 0.0
+        self._conn: Optional[sqlite3.Connection] = None
+        self._use_sqlite = True
+        
+        try:
+            import sqlite3
+            self._conn = sqlite3.connect(":memory:")
+            self._conn.row_factory = sqlite3.Row
+            cursor = self._conn.cursor()
+            cursor.execute("""
+                CREATE TABLE IF NOT EXISTS outcomes (
+                    skill_id TEXT,
+                    pass INTEGER,
+                    status TEXT,
+                    evidence_refs TEXT
+                )
+            """)
+            cursor.execute("""
+                CREATE TABLE IF NOT EXISTS usages (
+                    skill_id TEXT,
+                    used_at TEXT
+                )
+            """)
+            self._conn.commit()
+        except Exception:
+            self._use_sqlite = False
     
     def _load(self) -> None:
-        """Load all skill memory data."""
-        if self._loaded:
-            return
-        
-        # Load outcome events
+        """Load all skill memory data with mtime checks."""
+        import os
         outcome_path = self.project_root / ".nexus/metrics/skill_outcome_events.jsonl"
+        skills_dir = self.project_root / ".agents/skills"
+        usage_path = skills_dir / ".usage_log.jsonl"
+        
+        current_outcome_mtime = 0.0
+        current_usage_mtime = 0.0
+        
+        try:
+            if outcome_path.exists():
+                current_outcome_mtime = os.path.getmtime(outcome_path)
+            if usage_path.exists():
+                current_usage_mtime = os.path.getmtime(usage_path)
+        except Exception:
+            pass
+            
+        # Check if cache is still valid
+        if self._loaded and current_outcome_mtime == self._outcome_mtime and current_usage_mtime == self._usage_mtime:
+            return
+            
+        # Cache stats
+        self._outcome_mtime = current_outcome_mtime
+        self._usage_mtime = current_usage_mtime
+        
+        # Clear caches
+        self._outcome_cache.clear()
+        self._usage_cache.clear()
+        
+        if self._use_sqlite and self._conn:
+            try:
+                cursor = self._conn.cursor()
+                cursor.execute("DELETE FROM outcomes")
+                cursor.execute("DELETE FROM usages")
+                self._conn.commit()
+            except Exception:
+                self._use_sqlite = False
+                
+        # 1. Load outcome events
         if outcome_path.exists():
             try:
                 with outcome_path.open("r", encoding="utf-8") as f:
@@ -50,15 +111,28 @@ class SkillMemoryIndex:
                         line = line.strip()
                         if line:
                             try:
-                                self._outcome_cache.append(json.loads(line))
-                            except json.JSONDecodeError:
+                                data = json.loads(line)
+                                self._outcome_cache.append(data)
+                                if self._use_sqlite and self._conn:
+                                    cursor = self._conn.cursor()
+                                    evidence_refs_str = json.dumps(data.get("evidence_refs", []))
+                                    cursor.execute(
+                                        "INSERT INTO outcomes (skill_id, pass, status, evidence_refs) VALUES (?, ?, ?, ?)",
+                                        (
+                                            data.get("skill_id"),
+                                            1 if data.get("pass") else 0,
+                                            data.get("status"),
+                                            evidence_refs_str
+                                        )
+                                    )
+                            except (json.JSONDecodeError, Exception):
                                 continue
+                if self._use_sqlite and self._conn:
+                    self._conn.commit()
             except Exception:
                 pass
         
-        # Load usage events
-        skills_dir = self.project_root / ".agents/skills"
-        usage_path = skills_dir / ".usage_log.jsonl"
+        # 2. Load usage events
         if usage_path.exists():
             try:
                 with usage_path.open("r", encoding="utf-8") as f:
@@ -66,9 +140,18 @@ class SkillMemoryIndex:
                         line = line.strip()
                         if line:
                             try:
-                                self._usage_cache.append(json.loads(line))
-                            except json.JSONDecodeError:
+                                data = json.loads(line)
+                                self._usage_cache.append(data)
+                                if self._use_sqlite and self._conn:
+                                    cursor = self._conn.cursor()
+                                    cursor.execute(
+                                        "INSERT INTO usages (skill_id, used_at) VALUES (?, ?)",
+                                        (data.get("skill_id"), data.get("used_at"))
+                                    )
+                            except (json.JSONDecodeError, Exception):
                                 continue
+                if self._use_sqlite and self._conn:
+                    self._conn.commit()
             except Exception:
                 pass
         
@@ -78,39 +161,98 @@ class SkillMemoryIndex:
         """Query history for a specific skill."""
         self._load()
         
-        # Filter outcome events for this skill
+        if self._use_sqlite and self._conn:
+            try:
+                cursor = self._conn.cursor()
+                
+                # Success rate
+                cursor.execute(
+                    "SELECT COUNT(*) as total, SUM(pass) as passed FROM outcomes WHERE skill_id = ?",
+                    (skill_id,)
+                )
+                row = cursor.fetchone()
+                total = row["total"] if row else 0
+                passed = row["passed"] if row and row["passed"] is not None else 0
+                success_rate = passed / total if total > 0 else 0.0
+                
+                # Failure modes
+                cursor.execute(
+                    "SELECT status, COUNT(*) as cnt FROM outcomes WHERE skill_id = ? AND pass = 0 AND status IS NOT NULL GROUP BY status ORDER BY cnt DESC LIMIT 3",
+                    (skill_id,)
+                )
+                failure_modes = [r["status"] for r in cursor.fetchall() if r["status"]]
+                
+                # Reuse count & last used
+                cursor.execute(
+                    "SELECT COUNT(*) as reuse_cnt, MAX(used_at) as last_used FROM usages WHERE skill_id = ?",
+                    (skill_id,)
+                )
+                row = cursor.fetchone()
+                reuse_count = row["reuse_cnt"] if row else 0
+                last_used = row["last_used"] if row and row["last_used"] else ""
+                
+                # Evidence refs
+                cursor.execute(
+                    "SELECT evidence_refs FROM outcomes WHERE skill_id = ? AND pass = 1 AND evidence_refs IS NOT NULL",
+                    (skill_id,)
+                )
+                evidence_refs = []
+                for r in cursor.fetchall():
+                    try:
+                        refs = json.loads(r["evidence_refs"])
+                        if isinstance(refs, list):
+                            evidence_refs.extend(refs)
+                    except Exception:
+                        pass
+                
+                trust_level = self._get_trust_level(skill_id)
+                
+                return SkillHistoryRecord(
+                    skill_id=skill_id,
+                    recent_success_rate=success_rate,
+                    recent_failure_modes=failure_modes,
+                    last_used_at=last_used,
+                    reuse_count=reuse_count,
+                    trust_level=trust_level,
+                    evidence_refs=list(set(evidence_refs))
+                )
+            except Exception:
+                # Fallback to list-based in case of sqlite error
+                pass
+                
+        # List-based fallback logic
         skill_outcomes = [e for e in self._outcome_cache if e.get("skill_id") == skill_id]
-        
-        # Filter usage events for this skill
         skill_usage = [e for e in self._usage_cache if e.get("skill_id") == skill_id]
         
-        # Calculate success rate
         total = len(skill_outcomes)
         passed = sum(1 for e in skill_outcomes if e.get("pass", False))
         success_rate = passed / total if total > 0 else 0.0
         
-        # Extract failure modes
         failure_modes = []
         for e in skill_outcomes:
             if not e.get("pass", False) and e.get("status"):
                 failure_modes.append(e["status"])
-        failure_modes = list(Counter(failure_modes).most_common(3))
+        failure_modes = [f[0] for f in Counter(failure_modes).most_common(3)]
         
-        # Get last used time
         last_used = ""
         if skill_usage:
             last_used = skill_usage[-1].get("used_at", "")
+            
+        evidence_refs = []
+        for e in skill_outcomes:
+            if e.get("pass") and e.get("evidence_refs"):
+                evidence_refs.extend(e["evidence_refs"])
         
-        # Get trust level from frontmatter
         trust_level = self._get_trust_level(skill_id)
         
         return SkillHistoryRecord(
             skill_id=skill_id,
             recent_success_rate=success_rate,
-            recent_failure_modes=[f[0] for f in failure_modes],
+            recent_failure_modes=failure_modes,
             last_used_at=last_used,
             reuse_count=len(skill_usage),
             trust_level=trust_level,
+            evidence_refs=list(set(evidence_refs))
         )
     
     def query_contextual_skill_candidates(
@@ -119,7 +261,6 @@ class SkillMemoryIndex:
         """Find relevant skills based on task context."""
         self._load()
         
-        # Get all unique skill IDs
         all_skills = set()
         for e in self._outcome_cache:
             if e.get("skill_id"):
@@ -128,15 +269,13 @@ class SkillMemoryIndex:
             if e.get("skill_id"):
                 all_skills.add(e["skill_id"])
         
-        # Query each skill and rank by relevance
         candidates = []
         for skill_id in all_skills:
             record = self.query_skill_history(skill_id, task_context)
-            # Simple relevance: success rate * reuse count
+            # Relevance heuristic: success rate * min(usage count, 10)
             record.matched_context_score = record.recent_success_rate * min(record.reuse_count, 10)
             candidates.append(record)
         
-        # Sort by score and return top_k
         candidates.sort(key=lambda x: -x.matched_context_score)
         return candidates[:top_k]
     
@@ -144,16 +283,25 @@ class SkillMemoryIndex:
         """Get failure patterns for a skill."""
         self._load()
         
+        if self._use_sqlite and self._conn:
+            try:
+                cursor = self._conn.cursor()
+                cursor.execute(
+                    "SELECT status, COUNT(*) as cnt FROM outcomes WHERE skill_id = ? AND pass = 0 AND status IS NOT NULL GROUP BY status ORDER BY cnt DESC LIMIT 5",
+                    (skill_id,)
+                )
+                return [r["status"] for r in cursor.fetchall() if r["status"]]
+            except Exception:
+                pass
+                
         skill_outcomes = [e for e in self._outcome_cache if e.get("skill_id") == skill_id]
-        
         failure_patterns = []
         for e in skill_outcomes:
             if not e.get("pass", False):
                 status = e.get("status", "")
                 if status:
                     failure_patterns.append(status)
-        
-        return list(Counter(failure_patterns).most_common(5))
+        return [f[0] for f in Counter(failure_patterns).most_common(5)]
     
     def _get_trust_level(self, skill_id: str) -> str:
         """Get trust level from skill frontmatter."""
@@ -165,7 +313,6 @@ class SkillMemoryIndex:
         
         try:
             content = skill_path.read_text(encoding="utf-8")
-            # Parse frontmatter
             parts = content.split("---", 2)
             if len(parts) >= 3:
                 frontmatter = parts[1]
@@ -174,7 +321,6 @@ class SkillMemoryIndex:
                         return line.split(":", 1)[1].strip()
         except Exception:
             pass
-        
         return "auto-generated"
     
     def build_context_injection(self, skill_id: str, task_context: str = "") -> str:
