@@ -14,36 +14,52 @@ class OracleAdvisor:
     def synthesize_advice(self, shadow_tid: str, intake_data: Dict[str, Any]) -> str:
         log_file = self.shadow_dir / f"{shadow_tid}.json"
         
-        # 準備維度列表顯示
         dims = intake_data.get("found_dimensions", {})
         missing = intake_data.get("missing_dimensions", [])
         
-        dim_summary = "\n".join([f"  - {k}: {v} ✅" for k, v in dims.items()])
-        if missing:
-            dim_summary += "\n" + "\n".join([f"  - {m}: [待定] ❓" for m in missing])
-
-        base_advice = ""
+        action_type = "bypass"
+        affected_scope = []
+        evidence_refs = []
+        next_step = "fallback_rule_selector"
+        confidence = 0.0
+        details = {}
+        
         if log_file.exists():
             try:
                 data = json.loads(log_file.read_text(encoding="utf-8"))
                 res = data.get("result", {})
-                base_advice = f"""
-【預演結論】：{res.get('advice', '計算中...')}
-【未來軌跡】：{res.get('trajectory', '未知路徑')}
-【信心指數】：{res.get('confidence', 0.0):.1%}
-【執行指令】：uv run scripts/engine/nexus_cli.py nexus oracle:apply {shadow_tid}
-"""
-            except: pass
+                details = res
+                confidence = res.get("confidence", 0.0)
+                
+                selected_id = res.get("selected_candidate_id")
+                abstain_reason = res.get("abstain_reason")
+                
+                if abstain_reason:
+                    action_type = "abstain"
+                    next_step = f"fallback_rule_selector: {abstain_reason}"
+                elif selected_id:
+                    action_type = "select_route"
+                    affected_scope = [str(selected_id)]
+                    next_step = f"run_verifier: {res.get('required_verifier', 'pytest')}"
+            except:
+                action_type = "error_fallback"
+                next_step = "fallback_rule_selector: failed_to_parse_shadow_log"
         else:
-            base_advice = "\n【影子狀態】：正在背景預演中，您可以隨時套用。"
+            action_type = "pending_shadow"
+            next_step = "wait_for_shadow_execution"
 
-        return f"""
-🔮 [來自未來的主動領航建議]
-───────────────────────────────────
-【規格猜測 (Speculative Dimensions)】:
-{dim_summary}
-
-{base_advice}
-【領航狀態】：絲滑對接 (Silk-Intake-Active)
-───────────────────────────────────
-"""
+        pact_data = {
+            "action_type": action_type,
+            "affected_scope": affected_scope,
+            "risk_level": "medium",
+            "evidence_refs": evidence_refs,
+            "next_step": next_step,
+            "metadata": {
+                "shadow_tid": shadow_tid,
+                "confidence": confidence,
+                "found_dimensions": dims,
+                "missing_dimensions": missing,
+                "shadow_details": details
+            }
+        }
+        return json.dumps(pact_data, ensure_ascii=False, indent=2)

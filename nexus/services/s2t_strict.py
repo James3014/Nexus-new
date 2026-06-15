@@ -218,6 +218,7 @@ class S2T3BAdvisor:
         import urllib.request
         import json
         import os
+        import re
         
         endpoint = os.getenv("NEXUS_OLLAMA_ENDPOINT", "http://localhost:11434").rstrip("/")
         model_name = os.getenv("NEXUS_S2T_3B_OLLAMA_MODEL", "qwen2.5-s2t-advisor:3b")
@@ -279,6 +280,22 @@ class S2T3BAdvisor:
                 
             parsed = robust_json_parse(output_text)
             if isinstance(parsed, dict) and "selected_candidate_id" in parsed:
+                # 測量 thought/answer token 比例
+                thought_len = 0
+                total_len = len(output_text)
+                thought_match = re.search(r"<thought>(.*?)</thought>", output_text, re.DOTALL)
+                if thought_match:
+                    thought_len = len(thought_match.group(1))
+                thought_ratio = thought_len / total_len if total_len > 0 else 0.0
+
+                parsed["_overhead_stats"] = {
+                    "total_duration_ms": payload.get("total_duration", 0) / 1_000_000.0,
+                    "model_load_time_ms": payload.get("load_duration", 0) / 1_000_000.0,
+                    "ttft_ms": payload.get("prompt_eval_duration", 0) / 1_000_000.0,
+                    "steady_state_tps": (payload.get("eval_count", 0) / (payload.get("eval_duration", 1) / 1_000_000_000.0)) if payload.get("eval_duration") else 0.0,
+                    "eval_count": payload.get("eval_count", 0),
+                    "thought_token_ratio": thought_ratio,
+                }
                 return parsed
             return {"abstain_reason": f"invalid_schema_from_ollama: {output_text}"}
         except Exception as exc:
@@ -288,7 +305,13 @@ class S2T3BAdvisor:
             return self._advise_via_transformers(risk_tier, candidates)
 
     def _advise_via_transformers(self, risk_tier: str, candidates: list[S2TCandidate]) -> dict:
+        import time
+        import re
+        t_start_load = time.perf_counter()
+        is_first_load = not self._is_loaded
         self._lazy_load()
+        load_time_ms = (time.perf_counter() - t_start_load) * 1000.0 if is_first_load else 0.0
+
         if self._use_simulation:
             if not candidates:
                 return {"abstain_reason": "no_candidates"}
@@ -335,8 +358,11 @@ class S2T3BAdvisor:
             model_inputs = self.tokenizer([text], return_tensors="pt").to(self.model.device)
             
             import torch
+            t_start_gen = time.perf_counter()
             with torch.no_grad():
                 generated_ids = self.model.generate(**model_inputs, max_new_tokens=128)
+            gen_time_sec = time.perf_counter() - t_start_gen
+            gen_time_ms = gen_time_sec * 1000.0
             
             generated_ids = [
                 output_ids[len(input_ids):] for input_ids, output_ids in zip(model_inputs.input_ids, generated_ids)
@@ -356,6 +382,24 @@ class S2T3BAdvisor:
 
             if not isinstance(response_json, dict) or "selected_candidate_id" not in response_json:
                 return {"abstain_reason": "invalid_schema"}
+
+            # 測量 thought/answer token 比例 (使用字元數 proxy)
+            thought_len = 0
+            total_len = len(response)
+            thought_match = re.search(r"<thought>(.*?)</thought>", response, re.DOTALL)
+            if thought_match:
+                thought_len = len(thought_match.group(1))
+            thought_ratio = thought_len / total_len if total_len > 0 else 0.0
+
+            generated_len = generated_ids[0].shape[0] if hasattr(generated_ids[0], "shape") else len(generated_ids[0])
+            response_json["_overhead_stats"] = {
+                "total_duration_ms": gen_time_ms + load_time_ms,
+                "model_load_time_ms": load_time_ms,
+                "ttft_ms": gen_time_ms / generated_len if generated_len > 0 else gen_time_ms,
+                "steady_state_tps": generated_len / gen_time_sec if gen_time_sec > 0 else 0.0,
+                "eval_count": generated_len,
+                "thought_token_ratio": thought_ratio,
+            }
             return response_json
         except Exception as e:
             return {"abstain_reason": f"generation_or_parse_failed: {e}"}
@@ -432,9 +476,13 @@ class S2TStrictRuntimeGate:
                 else:
                     run_advisor = True
 
+        overhead_stats = {}
         if run_advisor:
             # 3. 調用 3B 學生模型顧問進行輔助決策
-            res = self.advisor.advise(risk_tier, candidates)
+            res = self.advisor.advise(risk_tier, candidates, task_id=task_id)
+            if isinstance(res, dict) and "_overhead_stats" in res:
+                overhead_stats = res["_overhead_stats"]
+
             if res.get("abstain_reason") is not None:
                 advisor_selected_id = ""
                 advisor_verdict = res["abstain_reason"]
@@ -491,6 +539,17 @@ class S2TStrictRuntimeGate:
             elif assisted_mode == "observation":
                 assisted_decision_applied = False
 
+        # 計算 e2e_latency_delta 與 short_task_penalty
+        total_duration_ms = overhead_stats.get("total_duration_ms", 0.0)
+        e2e_latency_delta_ms = total_duration_ms
+        
+        is_short_task_penalty = (
+            run_advisor 
+            and advisor_selected_id != ""
+            and selection.selected_candidate_id == advisor_selected_id
+            and total_duration_ms > 1500.0
+        )
+
         # 5. 記錄 Per-row Evidence (B0 Monitoring)
         if run_advisor or (task_id and (env_force or (int(hashlib.md5(task_id.encode('utf-8')).hexdigest(), 16) % 100) < canary_rate)):
             trust_mismatch = (verifier_result != "pass")
@@ -508,8 +567,14 @@ class S2TStrictRuntimeGate:
                 "canary_rate": canary_rate,
                 "assisted_decision_applied": assisted_decision_applied,
                 "final_selected_id": final_selected_id,
-                "timestamp_utc": datetime.datetime.now(datetime.timezone.utc).isoformat()
+                "timestamp_utc": datetime.datetime.now(datetime.timezone.utc).isoformat(),
+                "e2e_latency_delta_ms": e2e_latency_delta_ms,
+                "short_task_penalty": is_short_task_penalty,
+                "overhead_stats": overhead_stats
             }
+            if run_advisor and isinstance(res, dict) and "_pact" in res:
+                evidence_row["pact_record"] = res["_pact"]
+                
             try:
                 self.evidence_log_path.parent.mkdir(parents=True, exist_ok=True)
                 with self.evidence_log_path.open("a", encoding="utf-8") as f:

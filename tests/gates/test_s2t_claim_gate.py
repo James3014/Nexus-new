@@ -292,7 +292,7 @@ def test_s2t_strict_gate_advisor_rejects_failed_candidate(tmp_path, monkeypatch)
     
     # 模擬 3B 模型返回選擇 "B" 候選人，而 "B" 是失敗的候選人
     class MockAdvisor(S2T3BAdvisor):
-        def advise(self, risk_tier, candidates):
+        def advise(self, risk_tier, candidates, *args, **kwargs):
             return {
                 "selected_candidate_id": "B",
                 "selection_reason_codes": ["mock_test_fail"],
@@ -334,7 +334,7 @@ def test_s2t_strict_gate_advisor_rejects_empty_evidence_candidate(tmp_path, monk
     monkeypatch.setenv("NEXUS_S2T_3B_ASSISTED_MODE", "observation")
     
     class MockAdvisor(S2T3BAdvisor):
-        def advise(self, risk_tier, candidates):
+        def advise(self, risk_tier, candidates, *args, **kwargs):
             return {
                 "selected_candidate_id": "B",
                 "selection_reason_codes": ["mock_test_empty_evidence"],
@@ -373,6 +373,41 @@ def test_s2t_strict_gate_advisor_rejects_empty_evidence_candidate(tmp_path, monk
     assert decision.selected_candidate_id == "A"
     assert decision.advisor_selected_candidate_id == ""
     assert decision.advisor_outcome_status == "abstained: advisor_semantic_rejected"
+
+
+def test_s2t_strict_gate_pact_telemetry(tmp_path, monkeypatch) -> None:
+    import json
+    monkeypatch.setenv("NEXUS_S2T_PACT_ENABLED", "1")
+    monkeypatch.setenv("NEXUS_S2T_3B_ASSISTED_MODE", "observation")
+    monkeypatch.setenv("NEXUS_S2T_3B_ADVISOR_FORCE", "1")
+    
+    log_file = tmp_path / "pact_telemetry.jsonl"
+    gate = S2TStrictRuntimeGate(
+        advisor=S2T3BAdvisor(force_simulation=True),
+        evidence_log_path=log_file
+    )
+    
+    decision = gate.evaluate(
+        task_id="pact-task-telemetry",
+        risk_tier="low",
+        candidates=[_candidate()],
+        verifier_result="pass",
+    )
+    
+    assert decision.passed is True
+    assert log_file.exists()
+    lines = log_file.read_text().strip().split("\n")
+    assert len(lines) == 1
+    
+    row = json.loads(lines[0])
+    assert "pact_record" in row
+    pact = row["pact_record"]
+    assert pact["action_type"] == "select_route"
+    assert pact["affected_scope"] == ["A"]
+    assert pact["risk_level"] == "low"
+    assert pact["evidence_refs"] == [".nexus/reports/claim_gate.json"]
+    assert "pact-task-telemetry" in pact["metadata"]["task_id"]
+
 
 
 
