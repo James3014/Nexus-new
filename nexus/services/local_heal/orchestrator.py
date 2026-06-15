@@ -99,9 +99,9 @@ class HealOrchestrator:
                     return ctx
 
                 if not res.success:
-                    ledger.end_phase(pt, success=False, error=res.error_reason[:200])
+                    ledger.end_phase(pt, success=False, error=res.failure_reason[:200])
                     ctx.gov.gate_exit = res.exit_layer or "unknown"
-                    ctx.op.failure_reason = res.error_reason
+                    ctx.op.failure_reason = res.failure_reason
                     ctx.op.runner_completed = True
                     return ctx
                 
@@ -142,30 +142,30 @@ class HealOrchestrator:
 
                 if not patch_res.success:
                     err_kind = PatchErrorKind.NO_BLOCKS_FOUND
-                    # 這裡根據 patch_res.error_reason 分類 PatchErrorKind
-                    if "SEARCH_MISMATCH" in patch_res.error_reason: 
+                    # 這裡根據 patch_res.failure_reason 分類 PatchErrorKind
+                    if "SEARCH_MISMATCH" in patch_res.failure_reason: 
                         err_kind = PatchErrorKind.SEARCH_MISMATCH
-                    elif "SYNTAX_ERROR" in patch_res.error_reason: 
+                    elif "SYNTAX_ERROR" in patch_res.failure_reason: 
                         err_kind = PatchErrorKind.SYNTAX_ERROR
-                    elif "MODEL_REFUSAL" in patch_res.error_reason or "REFUSAL_DETECTED" in patch_res.error_reason:
+                    elif "MODEL_REFUSAL" in patch_res.failure_reason or "REFUSAL_DETECTED" in patch_res.failure_reason:
                         err_kind = PatchErrorKind.REFUSAL_DETECTED
-                    elif "MODEL_EMPTY_RESPONSE" in patch_res.error_reason or "EMPTY_RESPONSE" in patch_res.error_reason:
+                    elif "MODEL_EMPTY_RESPONSE" in patch_res.failure_reason or "EMPTY_RESPONSE" in patch_res.failure_reason:
                         err_kind = PatchErrorKind.EMPTY_RESPONSE
-                    elif "NAME_SANITY_ERROR" in patch_res.error_reason:
+                    elif "NAME_SANITY_ERROR" in patch_res.failure_reason:
                         err_kind = PatchErrorKind.NAME_SANITY_ERROR
 
-                    err = PatchError(kind=err_kind, message=patch_res.error_reason)
+                    err = PatchError(kind=err_kind, message=patch_res.failure_reason)
                     
                     # 記錄本次失敗狀態
                     status_name = err_kind.name
-                    if patch_res.error_reason == "MODEL_TIMEOUT":
+                    if patch_res.failure_reason == "MODEL_TIMEOUT":
                         status_name = "MODEL_TIMEOUT"
-                    elif patch_res.error_reason == "MODEL_PROVIDER_ERROR":
+                    elif patch_res.failure_reason == "MODEL_PROVIDER_ERROR":
                         status_name = "MODEL_PROVIDER_ERROR"
-                    elif patch_res.error_reason == "MODEL_REFUSAL" or patch_res.error_reason == "REFUSAL_DETECTED":
+                    elif patch_res.failure_reason == "MODEL_REFUSAL" or patch_res.failure_reason == "REFUSAL_DETECTED":
                         status_name = "MODEL_REFUSAL"
                     
-                    self._record_model_status(ctx, status_name, detail=patch_res.error_reason, phase="patch")
+                    self._record_model_status(ctx, status_name, detail=patch_res.failure_reason, phase="patch")
                     
                     # Phase 4 Upgrade: 尋找最接近的匹配項 (Canonical Copy-Paste)
                     if err_kind == PatchErrorKind.SEARCH_MISMATCH and patch_res.error_metadata.get("failed_search_text"):
@@ -181,17 +181,17 @@ class HealOrchestrator:
 
                     # 優化：如果是特定的模型錯誤，直接使用該錯誤碼
                     model_errors = ["MODEL_TIMEOUT", "MODEL_EMPTY_RESPONSE", "MODEL_PROVIDER_ERROR", "MODEL_REFUSAL"]
-                    if any(me in patch_res.error_reason for me in model_errors):
-                        ctx.op.failure_reason = patch_res.error_reason
+                    if any(me in patch_res.failure_reason for me in model_errors):
+                        ctx.op.failure_reason = patch_res.failure_reason
                     else:
-                        ctx.op.failure_reason = f"{err_kind.name}:{patch_res.error_reason}"
+                        ctx.op.failure_reason = f"{err_kind.name}:{patch_res.failure_reason}"
 
                     # Fail-fast: do not retry infrastructure or extreme timeout errors
-                    if "MODEL_TIMEOUT" in patch_res.error_reason or "MODEL_PROVIDER_ERROR" in patch_res.error_reason:
-                        ledger.end_phase(pt_patch, success=False, error=patch_res.error_reason[:200])
+                    if "MODEL_TIMEOUT" in patch_res.failure_reason or "MODEL_PROVIDER_ERROR" in patch_res.failure_reason:
+                        ledger.end_phase(pt_patch, success=False, error=patch_res.failure_reason[:200])
                         break
 
-                    ledger.end_phase(pt_patch, success=False, error=patch_res.error_reason[:200])
+                    ledger.end_phase(pt_patch, success=False, error=patch_res.failure_reason[:200])
                     ctx = self._handle_retry(ctx, err)
                     continue
                 
@@ -217,10 +217,10 @@ class HealOrchestrator:
                     ctx.gov.gate_exit = "verification"
                     break
                 else:
-                    ledger.end_phase(pt_verify, success=False, error=verify_res.error_reason[:200])
+                    ledger.end_phase(pt_verify, success=False, error=verify_res.failure_reason[:200])
                     ctx.op.final_patch = "" # 驗證失敗需清除補丁
-                    err = PatchError(kind=PatchErrorKind.LOGIC_REGRESSION, message=f"Verification failed: {verify_res.error_reason}")
-                    ctx.op.failure_reason = f"LOGIC_REGRESSION:{verify_res.error_reason}"
+                    err = PatchError(kind=PatchErrorKind.LOGIC_REGRESSION, message=f"Verification failed: {verify_res.failure_reason}")
+                    ctx.op.failure_reason = f"LOGIC_REGRESSION:{verify_res.failure_reason}"
                     ctx = self._handle_retry(ctx, err)
 
 

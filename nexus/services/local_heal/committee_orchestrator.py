@@ -29,7 +29,7 @@ class CommitteeOrchestrator(HealOrchestrator):
         for phase in [self.repro_phase, self.plan_phase, self.loc_phase]:
             res = phase.execute(ctx)
             if not res.success:
-                ctx.op.failure_reason = res.error_reason
+                ctx.op.failure_reason = res.failure_reason
                 return ctx
 
         # Phase 4: Committee Patch Search
@@ -73,7 +73,7 @@ class CommitteeOrchestrator(HealOrchestrator):
             if verify_res.success:
                 ctx.op.solve_eligible = True
             else:
-                ctx.op.failure_reason = f"VERIFIER_REJECTION:{verify_res.error_reason}"
+                ctx.op.failure_reason = f"VERIFIER_REJECTION:{verify_res.failure_reason}"
         else:
             ctx.op.failure_reason = "COMMITTEE_SELECTION_FAILURE"
             

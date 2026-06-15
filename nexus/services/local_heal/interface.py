@@ -2,12 +2,13 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Optional, List, Dict, Tuple
 
-@dataclass
+@dataclass(frozen=True)
 class PhaseResult:
     success: bool
     exit_layer: str = ""
-    error_reason: str = ""
-    error_metadata: dict = field(default_factory=dict)
+    failure_reason: str = ""
+    error_details: Optional[Dict[str, Any]] = None
+    error_metadata: Optional[Dict[str, Any]] = None
 
 @dataclass(frozen=True)
 class ReproductionInput:
@@ -26,6 +27,10 @@ class ReproductionOutput:
     env_denoise: Dict[str, Any] = field(default_factory=dict)
     model_decision: Dict[str, Any] = field(default_factory=dict)
 
+    @property
+    def failure_reason(self) -> str:
+        return self.error_reason
+
 @dataclass(frozen=True)
 class PlanningInput:
     problem_statement: str
@@ -40,6 +45,10 @@ class PlanningOutput:
     model_decision: Dict[str, Any]
     error_reason: str = ""
 
+    @property
+    def failure_reason(self) -> str:
+        return self.error_reason
+
 @dataclass(frozen=True)
 class LocalizationInput:
     problem_statement: str
@@ -53,6 +62,10 @@ class LocalizationOutput:
     localized_files: List[Tuple[str, str]]
     model_decisions: List[Dict[str, Any]]
     error_reason: str = ""
+
+    @property
+    def failure_reason(self) -> str:
+        return self.error_reason
 
 @dataclass(frozen=True)
 class PatchSynthesisInput:
@@ -79,6 +92,10 @@ class PatchSynthesisOutput:
     refusal_detected: bool = False
     empty_response: bool = False
 
+    @property
+    def failure_reason(self) -> str:
+        return self.error_reason
+
 @dataclass(frozen=True)
 class VerificationInput:
     instance_id: str
@@ -95,6 +112,10 @@ class VerificationOutput:
     hidden_verifier_passed: bool
     solve_eligible: bool
     error_reason: str = ""
+
+    @property
+    def failure_reason(self) -> str:
+        return self.error_reason
 
 class IPhase:
     """Interface for a pipeline phase (Reproduction, Planning, etc.)"""

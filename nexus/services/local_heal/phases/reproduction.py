@@ -184,6 +184,6 @@ class ReproductionPhase(IPhase):
             ctx.op.model_decisions.append(output.model_decision)
 
         if not output.success:
-            return PhaseResult(success=False, exit_layer="repro_runner", error_reason=output.error_reason)
+            return PhaseResult(success=False, exit_layer="repro_runner", failure_reason=output.failure_reason)
 
         return PhaseResult(success=True)

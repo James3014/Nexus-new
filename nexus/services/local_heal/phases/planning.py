@@ -50,7 +50,7 @@ class PlanningPhase(IPhase):
 
     def execute(self, ctx: HealContext) -> PhaseResult:
         if not ctx.op.reproduced or not ctx.op.repro_evidence:
-            return PhaseResult(success=False, error_reason="PREREQUISITE_FAILED_REPRO")
+            return PhaseResult(success=False, failure_reason="PREREQUISITE_FAILED_REPRO")
 
         # 1. 決定 reasoning mode (委託 ReasoningRouter)
         reasoning_mode = self.router.route(ctx.op.problem_statement, ctx.op.repo_dir)
@@ -83,9 +83,9 @@ class PlanningPhase(IPhase):
 
         # 4. 寫回狀態
         if not output.success:
-            ctx.op.failure_reason = output.error_reason
-            self._record_model_status(ctx, output.error_reason, detail=output.error_reason, phase="planning")
-            return PhaseResult(success=False, exit_layer="planning", error_reason=output.error_reason)
+            ctx.op.failure_reason = output.failure_reason
+            self._record_model_status(ctx, output.failure_reason, detail=output.failure_reason, phase="planning")
+            return PhaseResult(success=False, exit_layer="planning", failure_reason=output.failure_reason)
 
         ctx.op.plan = output.plan
         return PhaseResult(success=True)

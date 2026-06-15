@@ -27,6 +27,7 @@ dependencies = [
     "opentelemetry-api>=1.15.0",
     "opentelemetry-sdk>=1.15.0",
     "rank-bm25>=0.2.2",
+    "datasets>=5.0.0",
 ]
 requires-python = ">=3.10"
 

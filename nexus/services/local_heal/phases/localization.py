@@ -108,6 +108,6 @@ class LocalizationPhase(IPhase):
         ctx.op.model_decisions.extend(output.model_decisions)
         
         if not output.success:
-            return PhaseResult(success=False, exit_layer="localization", error_reason=output.error_reason)
+            return PhaseResult(success=False, exit_layer="localization", failure_reason=output.failure_reason)
 
         return PhaseResult(success=True)

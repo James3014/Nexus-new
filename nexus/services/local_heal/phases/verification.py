@@ -74,8 +74,8 @@ class VerificationPhase(IPhase):
         ctx.op.solve_eligible = output.solve_eligible
         
         if not output.success:
-            ctx.op.failure_reason = output.error_reason
-            return PhaseResult(success=False, exit_layer="verification", error_reason=output.error_reason)
+            ctx.op.failure_reason = output.failure_reason
+            return PhaseResult(success=False, exit_layer="verification", failure_reason=output.failure_reason)
 
         ctx.op.failure_reason = ""
         return PhaseResult(success=True)
