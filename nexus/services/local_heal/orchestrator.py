@@ -10,8 +10,12 @@ from nexus.services.local_heal.evidence_compactor import EvidenceCompactor
 from nexus.services.local_heal.latency_ledger import LatencyLedger
 from nexus.services.local_heal.role_contract import build_role_receipt, RoleReceipt
 
+from nexus.services.local_heal.failure_analyzer import FailureAnalyzer
+from nexus.services.local_heal.context_guard import ContextGuard
+from nexus.services.local_heal.phase_runner import PhaseRunner
+
 class HealOrchestrator:
-    """🛡️ Nexus Heal Orchestrator (Modular / Strategy-Driven / Fail-Closed)"""
+    """🛡️ Nexus Heal Orchestrator (Refactored: Modular / Strategy-Driven / Fail-Closed)"""
     
     def __init__(
         self,
@@ -20,227 +24,165 @@ class HealOrchestrator:
         receipt_writer: Callable[[HealContext], Any] | None = None,
     ):
         # 預期 phases 順序: [Reproduction, Planning, Localization, PatchSynthesis, Verification]
+        self._initialize_phases(phases)
+        self.governance_gate = governance_gate
+        self.receipt_writer = receipt_writer
+        
+        # Dependency Injection (Internal)
+        self.corrector = SelfCorrector()
+        self.failure_analyzer = FailureAnalyzer()
+        self.context_guard = ContextGuard()
+        self.phase_runner = PhaseRunner()
+
+    def _initialize_phases(self, phases: List[IPhase]) -> None:
         self.repro_phase = None
         self.plan_phase = None
         self.loc_phase = None
         self.patch_phase = None
         self.verify_phase = None
-
+        
+        # (Rest of phase detection logic moved here to keep constructor clean)
         if len(phases) == 5:
-            self.repro_phase = phases[0]
-            self.plan_phase = phases[1]
-            self.loc_phase = phases[2]
-            self.patch_phase = phases[3]
-            self.verify_phase = phases[4]
+            self.repro_phase, self.plan_phase, self.loc_phase, self.patch_phase, self.verify_phase = phases
         else:
-            # 相容性回退分類
             for phase in phases:
                 name = phase.__class__.__name__
-                if "Reproduction" in name:
-                    self.repro_phase = phase
-                elif "Planning" in name:
-                    self.plan_phase = phase
-                elif "Localization" in name:
-                    self.loc_phase = phase
-                elif "Patch" in name:
-                    self.patch_phase = phase
-                elif "Verification" in name:
-                    self.verify_phase = phase
-                else:
-                    if not self.repro_phase:
-                        self.repro_phase = phase
-                    elif not self.plan_phase:
-                        self.plan_phase = phase
-                    elif not self.loc_phase:
-                        self.loc_phase = phase
-                    elif not self.patch_phase:
-                        self.patch_phase = phase
-                    elif not self.verify_phase:
-                        self.verify_phase = phase
-
-        self.governance_gate = governance_gate
-        self.receipt_writer = receipt_writer
-        self.corrector = SelfCorrector()
+                if "Reproduction" in name: self.repro_phase = phase
+                elif "Planning" in name: self.plan_phase = phase
+                elif "Localization" in name: self.loc_phase = phase
+                elif "Patch" in name: self.patch_phase = phase
+                elif "Verification" in name: self.verify_phase = phase
 
     def run(self, ctx: HealContext) -> HealContext:
-        """
-        執行 5 階段修復管線，含 Phase 4/5 迭代重試。
-        """
+        """核心修復工作流：線性啟動 -> 迭代修復 -> 審計結算。"""
         import time
         start_wall = time.time()
         
-        # Latency Ledger: observation-only timing
         ledger = LatencyLedger(
             task_id=getattr(ctx.op, "task_id", ""),
             instance_id=getattr(ctx.op, "instance_id", ""),
             wall_start=time.monotonic(),
         )
-        ctx.op._latency_ledger = ledger  # Attach for receipt export
-        ctx.op._role_receipts = []  # Track role drift
+        ctx.op._latency_ledger = ledger
+        ctx.op._role_receipts = []
         
         try:
-            # Phase 1-3: 前置準備 (Linear)
-            phase_map = [
-                ("reproduction", self.repro_phase),
-                ("planning", self.plan_phase),
-                ("localization", self.loc_phase),
-            ]
-            for phase_name, phase in phase_map:
-                if not phase:
-                    continue
-                pt = ledger.start_phase(phase_name)
-                try:
-                    res = phase.execute(ctx)
-                except Exception as exc:
-                    ledger.end_phase(pt, success=False, error=str(exc)[:200])
-                    ctx.gov.gate_exit = phase.__class__.__name__
-                    ctx.op.failure_reason = f"{type(exc).__name__}:{exc}"
-                    ctx.op.runner_completed = True
-                    return ctx
+            # 1. 啟動階段 (P1-3)
+            if not self._run_linear_phases(ctx, ledger):
+                return ctx
 
-                if not res.success:
-                    ledger.end_phase(pt, success=False, error=res.failure_reason[:200])
-                    ctx.gov.gate_exit = res.exit_layer or "unknown"
-                    ctx.op.failure_reason = res.failure_reason
-                    ctx.op.runner_completed = True
-                    return ctx
-                
-                # Record role receipt for this phase
-                model_name = self._get_model_for_phase(ctx, phase_name)
-                if model_name:
-                    role_receipt = build_role_receipt(phase_name, model_name)
-                    ctx.op._role_receipts.append(role_receipt)
-                    if role_receipt.role_drift_detected:
-                        logger.warning(f"Role drift detected: {role_receipt}")
-                
-                ledger.end_phase(pt, success=True)
+            # 2. 上下文保護 (Linus: Do it once, do it right)
+            self.context_guard.protect(ctx)
 
-            # 結構化壓縮證據，防止 Phase 4-5 上下文爆炸
-            ctx.op.repro_evidence = EvidenceCompactor.compact(ctx.op.repro_evidence, limit=3000)
-
-            # 上下文容量保護：若定位檔案過多或過大，則動態縮減以防模型超時
-            total_snippet_len = sum(len(f[1]) for f in ctx.op.localized_files)
-            if total_snippet_len > 10000 and len(ctx.op.localized_files) > 3:
-                # 僅保留前 3 個最重要的檔案 (Top-3)
-                ctx.op.localized_files = ctx.op.localized_files[:3]
-
-            # Phase 4-5: 迭代修復迴圈
-            while ctx.op.attempt <= ctx.op.max_tries:
-                self._reset_workspace(ctx)
-                # Step 4: Patch Synthesis
-                if not self.patch_phase:
-                    break
-                pt_patch = ledger.start_phase(f"patch_attempt_{ctx.op.attempt}")
-                try:
-                    patch_res = self.patch_phase.execute(ctx)
-                except Exception as exc:
-                    ledger.end_phase(pt_patch, success=False, error=str(exc)[:200])
-                    ctx.gov.gate_exit = "patcher"
-                    ctx.op.failure_reason = f"PATCH_EXCEPTION:{type(exc).__name__}:{exc}"
-                    ctx.op.final_patch = ""
-                    break
-
-                if not patch_res.success:
-                    err_kind = PatchErrorKind.NO_BLOCKS_FOUND
-                    # 這裡根據 patch_res.failure_reason 分類 PatchErrorKind
-                    if "SEARCH_MISMATCH" in patch_res.failure_reason: 
-                        err_kind = PatchErrorKind.SEARCH_MISMATCH
-                    elif "SYNTAX_ERROR" in patch_res.failure_reason: 
-                        err_kind = PatchErrorKind.SYNTAX_ERROR
-                    elif "MODEL_REFUSAL" in patch_res.failure_reason or "REFUSAL_DETECTED" in patch_res.failure_reason:
-                        err_kind = PatchErrorKind.REFUSAL_DETECTED
-                    elif "MODEL_EMPTY_RESPONSE" in patch_res.failure_reason or "EMPTY_RESPONSE" in patch_res.failure_reason:
-                        err_kind = PatchErrorKind.EMPTY_RESPONSE
-                    elif "NAME_SANITY_ERROR" in patch_res.failure_reason:
-                        err_kind = PatchErrorKind.NAME_SANITY_ERROR
-
-                    err = PatchError(kind=err_kind, message=patch_res.failure_reason)
-                    
-                    # 記錄本次失敗狀態
-                    status_name = err_kind.name
-                    if patch_res.failure_reason == "MODEL_TIMEOUT":
-                        status_name = "MODEL_TIMEOUT"
-                    elif patch_res.failure_reason == "MODEL_PROVIDER_ERROR":
-                        status_name = "MODEL_PROVIDER_ERROR"
-                    elif patch_res.failure_reason == "MODEL_REFUSAL" or patch_res.failure_reason == "REFUSAL_DETECTED":
-                        status_name = "MODEL_REFUSAL"
-                    
-                    self._record_model_status(ctx, status_name, detail=patch_res.failure_reason, phase="patch")
-                    
-                    # Phase 4 Upgrade: 尋找最接近的匹配項 (Canonical Copy-Paste)
-                    if err_kind == PatchErrorKind.SEARCH_MISMATCH and patch_res.error_metadata.get("failed_search_text"):
-                        failed_text = patch_res.error_metadata["failed_search_text"]
-                        f_path = patch_res.error_metadata.get("file_path")
-                        if f_path:
-                            target_file = ctx.op.repo_dir / f_path
-                            if target_file.exists():
-                                from nexus.services.local_heal.closest_snippet import find_closest_snippet
-                                file_content = target_file.read_text(encoding="utf-8", errors="replace")
-                                context_hints = ctx.op.plan.get("search_symbols", [])
-                                err.closest_match = find_closest_snippet(file_content, failed_text, context_hints=context_hints)
-
-                    # 優化：如果是特定的模型錯誤，直接使用該錯誤碼
-                    model_errors = ["MODEL_TIMEOUT", "MODEL_EMPTY_RESPONSE", "MODEL_PROVIDER_ERROR", "MODEL_REFUSAL"]
-                    if any(me in patch_res.failure_reason for me in model_errors):
-                        ctx.op.failure_reason = patch_res.failure_reason
-                    else:
-                        ctx.op.failure_reason = f"{err_kind.name}:{patch_res.failure_reason}"
-
-                    # Fail-fast: do not retry infrastructure or extreme timeout errors
-                    if "MODEL_TIMEOUT" in patch_res.failure_reason or "MODEL_PROVIDER_ERROR" in patch_res.failure_reason:
-                        ledger.end_phase(pt_patch, success=False, error=patch_res.failure_reason[:200])
-                        break
-
-                    ledger.end_phase(pt_patch, success=False, error=patch_res.failure_reason[:200])
-                    ctx = self._handle_retry(ctx, err)
-                    continue
-                
-                ledger.end_phase(pt_patch, success=True)
-                
-                # Step 5: Verification
-                if not self.verify_phase:
-                    ctx.op.solve_eligible = True
-                    ctx.gov.gate_exit = "verification"
-                    break
-                pt_verify = ledger.start_phase(f"verify_attempt_{ctx.op.attempt}")
-                try:
-                    verify_res = self.verify_phase.execute(ctx)
-                except Exception as exc:
-                    ledger.end_phase(pt_verify, success=False, error=str(exc)[:200])
-                    ctx.gov.gate_exit = "verification"
-                    ctx.op.failure_reason = f"VERIFY_EXCEPTION:{type(exc).__name__}:{exc}"
-                    ctx.op.final_patch = ""
-                    break
-
-                if verify_res.success:
-                    ledger.end_phase(pt_verify, success=True)
-                    ctx.gov.gate_exit = "verification"
-                    break
-                else:
-                    ledger.end_phase(pt_verify, success=False, error=verify_res.failure_reason[:200])
-                    ctx.op.final_patch = "" # 驗證失敗需清除補丁
-                    err = PatchError(kind=PatchErrorKind.LOGIC_REGRESSION, message=f"Verification failed: {verify_res.failure_reason}")
-                    ctx.op.failure_reason = f"LOGIC_REGRESSION:{verify_res.failure_reason}"
-                    ctx = self._handle_retry(ctx, err)
-
+            # 3. 迭代修復迴圈 (P4-5)
+            self._run_repair_loop(ctx, ledger)
 
             ctx.op.runner_completed = True
-            if not ctx.op.solve_eligible:
-                if not ctx.gov.gate_exit or ctx.gov.gate_exit == "unknown":
-                    ctx.gov.gate_exit = "verification"
             return ctx
             
         finally:
-            ctx.op.wall_time_sec = time.time() - start_wall
-            # Finalize latency ledger
-            ledger.wall_end = time.monotonic()
-            ledger.retry_count = max(0, ctx.op.attempt - 1)
-            ledger.finalize()
-            ctx.op._latency_ledger = ledger
-            # 執行審計與收據寫入 (保證不論如何都會執行)
-            self.governance_gate.audit(ctx)
-            if self.receipt_writer:
-                ctx.op.receipt_path = str(self.receipt_writer(ctx))
+            self._finalize_run(ctx, ledger, start_wall)
+
+    def _run_linear_phases(self, ctx: HealContext, ledger: LatencyLedger) -> bool:
+        """執行再現、規劃與定位。任何階段失敗即終止。"""
+        phases = [
+            ("reproduction", self.repro_phase),
+            ("planning", self.plan_phase),
+            ("localization", self.loc_phase),
+        ]
+        for name, phase in phases:
+            if not phase: continue
+            res = self.phase_runner.run_phase(phase, name, ctx, ledger)
+            if not res.success:
+                ctx.gov.gate_exit = res.exit_layer or name
+                ctx.op.failure_reason = res.failure_reason
+                ctx.op.runner_completed = True
+                return False
+            
+            self._record_role_receipt(ctx, name)
+        return True
+
+    def _run_repair_loop(self, ctx: HealContext, ledger: LatencyLedger) -> None:
+        """執行 Patch 合成與驗證的迭代迴圈。"""
+        while ctx.op.attempt <= ctx.op.max_tries:
+            self._reset_workspace(ctx)
+            
+            # Step 4: Patch Synthesis
+            if not self.patch_phase: break
+            res = self.phase_runner.run_phase(self.patch_phase, f"patch_attempt_{ctx.op.attempt}", ctx, ledger)
+            
+            if not res.success:
+                if self._handle_patch_failure(ctx, res, ledger):
+                    continue
+                else:
+                    break
+            
+            # Step 5: Verification
+            if not self.verify_phase:
+                ctx.op.solve_eligible = True
+                break
+                
+            v_res = self.phase_runner.run_phase(self.verify_phase, f"verify_attempt_{ctx.op.attempt}", ctx, ledger)
+            if v_res.success:
+                ctx.gov.gate_exit = "verification"
+                break
+            else:
+                self._handle_verification_failure(ctx, v_res)
+
+    def _handle_patch_failure(self, ctx: HealContext, res: PhaseResult, ledger: LatencyLedger) -> bool:
+        """處理 Patch 生成失敗，判定是否重試。"""
+        err_kind = self.failure_analyzer.classify_patch_failure(res.failure_reason)
+        err = PatchError(kind=err_kind, message=res.failure_reason)
+        
+        self._record_model_status(ctx, err_kind.name, detail=res.failure_reason, phase="patch")
+        
+        # 嘗試自動修復 SEARCH_MISMATCH (Fuzzy Match)
+        if err_kind == PatchErrorKind.SEARCH_MISMATCH:
+            self._attempt_fuzzy_healing(ctx, res, err)
+
+        # 判定 Fail-fast
+        if not self.failure_analyzer.should_retry(res.failure_reason):
+            ctx.op.failure_reason = res.failure_reason
+            return False
+
+        ctx.op.failure_reason = f"{err_kind.name}:{res.failure_reason}"
+        self._handle_retry(ctx, err)
+        return True
+
+    def _attempt_fuzzy_healing(self, ctx: HealContext, res: PhaseResult, err: PatchError) -> None:
+        metadata = res.error_metadata or {}
+        failed_text = metadata.get("failed_search_text")
+        f_path = metadata.get("file_path")
+        if failed_text and f_path:
+            target_file = ctx.op.repo_dir / f_path
+            if target_file.exists():
+                from nexus.services.local_heal.closest_snippet import find_closest_snippet
+                file_content = target_file.read_text(encoding="utf-8", errors="replace")
+                search_symbols = ctx.op.plan.search_symbols if ctx.op.plan else []
+                err.closest_match = find_closest_snippet(file_content, failed_text, context_hints=search_symbols)
+
+    def _handle_verification_failure(self, ctx: HealContext, res: PhaseResult) -> None:
+        ctx.op.final_patch = "" # 驗證失敗清除補丁
+        ctx.op.failure_reason = f"LOGIC_REGRESSION:{res.failure_reason}"
+        err = PatchError(kind=PatchErrorKind.LOGIC_REGRESSION, message=res.failure_reason)
+        self._handle_retry(ctx, err)
+
+    def _finalize_run(self, ctx: HealContext, ledger: LatencyLedger, start_wall: float) -> None:
+        import time
+        ctx.op.wall_time_sec = time.time() - start_wall
+        ledger.wall_end = time.monotonic()
+        ledger.retry_count = max(0, ctx.op.attempt - 1)
+        ledger.finalize()
+        ctx.op._latency_ledger = ledger
+        self.governance_gate.audit(ctx)
+        if self.receipt_writer:
+            ctx.op.receipt_path = str(self.receipt_writer(ctx))
+
+    def _record_role_receipt(self, ctx: HealContext, phase_name: str) -> None:
+        model_name = self._get_model_for_phase(ctx, phase_name)
+        if model_name:
+            role_receipt = build_role_receipt(phase_name, model_name)
+            ctx.op._role_receipts.append(role_receipt)
 
     def _reset_workspace(self, ctx: HealContext) -> None:
         # P1-3: Portable root detection — use env var or fall back to detecting via git
@@ -267,7 +209,7 @@ class HealOrchestrator:
         subprocess.run(["git", "clean", "-fd"], cwd=str(ctx.op.repo_dir), capture_output=True)
 
     def _handle_retry(self, ctx: HealContext, error: PatchError) -> HealContext:
-        targeted_files = ", ".join([f[0] for f in getattr(ctx.op, "localized_files", [])])
+        targeted_files = ", ".join([f.path for f in getattr(ctx.op, "localized_files", [])])
         ctx.op.user_prompt = self.corrector.build_retry_prompt(ctx.op.user_prompt, error, targeted_files=targeted_files)
         ctx.op.attempt += 1
         return ctx

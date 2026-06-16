@@ -12,11 +12,14 @@ class LocalizationPhase(IPhase):
 
     def run(self, input_data: LocalizationInput) -> LocalizationOutput:
         """Stateless TDD-ready execution logic."""
+        from nexus.services.local_heal.interface import LocalizedFile
+        search_symbols = input_data.plan.search_symbols if input_data.plan else []
+        
         # build_query 相容保護：舊測試 mock 可能沒有此方法
         if hasattr(self.localizer, "build_query"):
             rank_query = self.localizer.build_query(
                 input_data.problem_statement,
-                search_symbols=input_data.plan.get("search_symbols", []),
+                search_symbols=search_symbols,
                 evidence=input_data.repro_evidence
             )
         else:
@@ -26,7 +29,7 @@ class LocalizationPhase(IPhase):
         ranked = self.localizer.rank_files(
             rank_query, 
             input_data.repo_dir, 
-            search_symbols=input_data.plan.get("search_symbols", [])
+            search_symbols=search_symbols
         )
         
         if not ranked:
@@ -41,7 +44,7 @@ class LocalizationPhase(IPhase):
         if hasattr(self.localizer, "build_query"):
             refine_query = self.localizer.build_query(
                 input_data.problem_statement,
-                search_symbols=input_data.plan.get("search_symbols", []),
+                search_symbols=search_symbols,
                 evidence=input_data.repro_evidence
             )
         else:
@@ -50,9 +53,10 @@ class LocalizationPhase(IPhase):
         # 2. 舊版單測 monkeypatch 相容轉發
         if hasattr(self.localizer, "extract_relevant_code"):
             results = self.localizer.extract_relevant_code(ranked, refine_query)
+            loc_files = [LocalizedFile(path=r[0], content=r[1]) for r in results]
             return LocalizationOutput(
                 success=True,
-                localized_files=results,
+                localized_files=loc_files,
                 model_decisions=[]
             )
 
@@ -65,7 +69,11 @@ class LocalizationPhase(IPhase):
         localized_files = []
         model_decisions = []
         for bundle in bundles:
-            localized_files.append((bundle.file_path, bundle.build_context()))
+            localized_files.append(LocalizedFile(
+                path=bundle.file_path, 
+                content=bundle.build_context(),
+                relevance_score=bundle.confidence
+            ))
             model_decisions.append({
                 "phase": "localization",
                 "file": bundle.file_path,
@@ -74,10 +82,17 @@ class LocalizationPhase(IPhase):
                 "confidence": bundle.confidence
             })
 
-        # 4. 預算限制
-        localized_files = self.budget_manager.enforce_hard_limit(localized_files)
+        # 4. 預算限制 (暫時保持舊接口相容，轉換為 tuple 再轉回)
+        # TODO: Update budget_manager to handle LocalizedFile objects
+        loc_tuples = [(f.path, f.content) for f in localized_files]
+        fitted_tuples = self.budget_manager.enforce_hard_limit(loc_tuples)
         
-        if not localized_files:
+        fitted_files = []
+        for path, content in fitted_tuples:
+            # Re-associate with scores if needed
+            fitted_files.append(LocalizedFile(path=path, content=content))
+        
+        if not fitted_files:
             return LocalizationOutput(
                 success=False,
                 localized_files=[],
@@ -87,7 +102,7 @@ class LocalizationPhase(IPhase):
             
         return LocalizationOutput(
             success=True,
-            localized_files=localized_files,
+            localized_files=fitted_files,
             model_decisions=model_decisions
         )
 

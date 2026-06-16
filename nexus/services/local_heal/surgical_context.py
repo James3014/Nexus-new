@@ -1,7 +1,7 @@
 import re
 import difflib
 from pathlib import Path
-from typing import List, Tuple
+from typing import List, Tuple, Any
 
 class SurgicalContextBuilder:
     """手術級上下文切片器 (Surgical Context Slicing) - 依據 Linus 切小與關注點分離原則"""
@@ -29,7 +29,7 @@ class SurgicalContextBuilder:
         source_text: str,
         attempt: int,
         failure_reason: str,
-        plan: dict,
+        plan: Any,
         user_prompt: str = None
     ) -> str:
         source_lines = source_text.splitlines()
@@ -51,7 +51,7 @@ class SurgicalContextBuilder:
 
         # 情況 B: 首輪或未找到 fuzzy 定位點，嘗試從 plan 的 search_symbols 中定位
         if anchor_line_idx == 0 and plan:
-            symbols = plan.get("search_symbols", [])
+            symbols = getattr(plan, "search_symbols", [])
             idx = self._find_symbol_anchor(source_lines, symbols)
             if idx is not None:
                 anchor_line_idx = idx

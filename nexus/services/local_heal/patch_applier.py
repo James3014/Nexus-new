@@ -5,6 +5,7 @@ from dataclasses import dataclass
 from nexus.services.local_heal.protocol import SolidSearchReplaceProtocol, SyntaxGate
 from nexus.services.local_heal.validator import validate_effective_change, validate_name_sanity
 from nexus.services.local_heal.errors import PatchError
+from nexus.services.local_heal.interface import LocalizedFile
 
 @dataclass
 class PatchApplicationResult:
@@ -24,7 +25,7 @@ class PatchApplier:
         self,
         intents: list,
         repo_dir: Path,
-        localized_files: List[Tuple[str, str]]
+        localized_files: List[LocalizedFile]
     ) -> PatchApplicationResult:
         applied_diffs = []
         syntax_gate_passed = True
@@ -52,7 +53,8 @@ class PatchApplier:
             if not match_res.is_valid:
                 # P0-3b: Cross-file SEARCH fallback
                 corrected = False
-                for alt_rel_path, alt_content_unused in localized_files:
+                for loc_file in localized_files:
+                    alt_rel_path = loc_file.path
                     alt_path = repo_dir / alt_rel_path
                     if not alt_path.exists() or alt_path == target_path:
                         continue

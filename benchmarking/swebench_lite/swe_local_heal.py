@@ -638,6 +638,8 @@ def main() -> None:
                 out_file.write(json.dumps(row) + "\n")
                 out_file.flush()
             except Exception as e:
+                import traceback
+                traceback.print_exc()
                 print(f"  💥 CRITICAL EXCEPTION: {e}")
                 row = {
                     "instance_id": task["instance_id"],

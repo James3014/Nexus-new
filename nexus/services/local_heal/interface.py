@@ -39,9 +39,16 @@ class PlanningInput:
     reasoning_mode: str = "INTUITIVE"
 
 @dataclass(frozen=True)
+class RepairPlan:
+    """🛡️ Structured Repair Plan"""
+    search_symbols: List[str]
+    repair_strategy: str
+    violated_invariants: List[str] = field(default_factory=list)
+
+@dataclass(frozen=True)
 class PlanningOutput:
     success: bool
-    plan: Dict[str, Any]
+    plan: Optional[RepairPlan]
     model_decision: Dict[str, Any]
     error_reason: str = ""
 
@@ -54,12 +61,19 @@ class LocalizationInput:
     problem_statement: str
     repro_evidence: str
     repo_dir: Path
-    plan: Dict[str, Any]
+    plan: Optional[RepairPlan]
+
+@dataclass(frozen=True)
+class LocalizedFile:
+    """🛡️ Structured Localized File Snippet"""
+    path: str
+    content: str
+    relevance_score: float = 1.0
 
 @dataclass(frozen=True)
 class LocalizationOutput:
     success: bool
-    localized_files: List[Tuple[str, str]]
+    localized_files: List[LocalizedFile]
     model_decisions: List[Dict[str, Any]]
     error_reason: str = ""
 
@@ -72,8 +86,8 @@ class PatchSynthesisInput:
     instance_id: str
     problem_statement: str
     repro_evidence: str
-    plan: Dict[str, Any]
-    localized_files: List[Tuple[str, str]]
+    plan: Optional[RepairPlan]
+    localized_files: List[LocalizedFile]
     repo_dir: Path
     reasoning_mode: str
     attempt: int

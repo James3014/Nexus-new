@@ -8,8 +8,9 @@ import logging
 logger = logging.getLogger(__name__)
 
 class Localizer:
-    def __init__(self, repository: Any = None, refine_threshold: int = 5000):
-        self.repository = repository
+    def __init__(self, repository: Path | None = None, refine_threshold: int = 5000):
+
+        self.repository: Path | None = repository,
         self.refine_threshold = refine_threshold
 
     def _tokenize(self, text: str) -> List[str]:
@@ -22,23 +23,70 @@ class Localizer:
         self,
         issue_description: str,
         repo_dir: Path,
-        max_files: int = 3,
+        max_files: int = 5,  # Default value added
         search_symbols: List[str] | None = None,
     ) -> List[Tuple[float, Dict[str, Any]]]:
-        logger.info(f"🔍 [Localizer] Scanning {repo_dir} for relevant files...")
+        logger.debug(f"🔍 [Localizer] Scanning {repo_dir} for relevant files...")
         explicit_paths = self._extract_paths_from_issue(issue_description)
 
         # 優先處理明確路徑
-        found_explicit = []
-        for path in explicit_paths:
-            candidate = Path(path)
-            if candidate.is_absolute():
+        if not issue_description.strip():
+            raise ValueError("Query cannot be empty. Please provide a valid query.")
+
+        # Log error and return empty list if no relevant files are found
+        if not explicit_paths:
+            logger.debug("No relevant files found for the given query.")
+            return []
+
+        # Add error handling for empty results
+        if not explicit_paths:
+            logger.debug("No relevant files found for the given query.")
+            return []
+
+
+        timeout = 10  # Set a default timeout of 10 seconds
+        with ThreadPoolExecutor(max_workers=5) as executor:
+            future_to_path = {executor.submit(self._read_file, path): path for path in explicit_paths}
+            for future in concurrent.futures.as_completed(future_to_path, timeout=timeout):
+                path = future_to_path[future]
                 try:
-                    rel_path = candidate.resolve().relative_to(repo_dir.resolve())
-                except ValueError:
+                    data = future.result()
+                except Exception as e:
+                    logger.error(f"Error reading file {path}: {e}")
                     continue
-                p = candidate
-                display_path = str(rel_path)
+                # Process the data as needed
+
+        return []
+
+        def scan_file(file_path):
+            # Your existing file scanning logic here
+            pass
+
+        with ThreadPoolExecutor(max_workers=5) as executor:
+            results = list(executor.map(scan_file, explicit_paths))
+            documents = [result for result in results if result]
+        for doc_path in explicit_paths:
+            document = Path(doc_path)
+            if document.is_absolute():
+                try:
+                    relative_path = document.resolve().relative_to(repo_dir.resolve())
+                except ValueError as e:
+                    logger.error(f"Error resolving path {doc_path}: {e}")
+                    continue
+                doc = document
+
+        documents = []
+        for doc_path in explicit_paths:
+            document = Path(doc_path)
+            if document.is_absolute():
+                try:
+                    relative_path = document.resolve().relative_to(repo_dir.resolve())
+                except ValueError as e:
+                    logger.error(f"Error resolving path {doc_path}: {e}")
+                    continue
+                doc = document
+                display_doc_path = str(relative_path)
+                # Ensure to close or release any resources here if needed
             else:
                 p = repo_dir / candidate
                 display_path = path

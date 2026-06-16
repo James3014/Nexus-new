@@ -17,6 +17,8 @@ class GovernanceContext:
     stop_layer_matched: bool = False
     family_matched: bool = False
 
+from nexus.services.local_heal.interface import RepairPlan, LocalizedFile
+
 @dataclass
 class OperationalContext:
     """⚙️ Nexus Operational State (Artifacts / Evidence)"""
@@ -30,11 +32,11 @@ class OperationalContext:
     reproduced: bool = False
     
     # Phase 2: Planning
-    plan: Dict[str, Any] = field(default_factory=dict)
+    plan: Optional[RepairPlan] = None
     reasoning_mode: str = "INTUITIVE"
     
     # Phase 3: Localization
-    localized_files: List[Tuple[str, str]] = field(default_factory=list)
+    localized_files: List[LocalizedFile] = field(default_factory=list)
     
     # Phase 4: Targeted Edit
     system_prompt: str = ""
@@ -42,6 +44,7 @@ class OperationalContext:
     attempt: int = 1
     max_tries: int = 3
     final_patch: str = ""
+    repair_specification: str = ""  # 🛡️ 規格中心修復：邏輯修復意圖 (Intent-based)
     errors: List[PatchError] = field(default_factory=list)
     model_decisions: List[Dict[str, Any]] = field(default_factory=list)
     

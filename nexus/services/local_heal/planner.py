@@ -104,16 +104,17 @@ class Planner:
         model_name: str | None = None,
         timeout_seconds: int | None = None,
         options: dict[str, Any] | None = None,
-    ) -> dict:
+    ) -> "RepairPlan":
+        from nexus.services.local_heal.interface import RepairPlan
         # P0-5: Always seed with deterministic symbols first (no hallucinations)
         det_symbols = DeterministicSymbolExtractor.extract(problem, evidence)
 
         if not self.llm_client:
-            return {
-                "search_symbols": det_symbols,
-                "repair_strategy": "Deterministic symbol extraction (no LLM).",
-                "violated_invariants": []
-            }
+            return RepairPlan(
+                search_symbols=det_symbols,
+                repair_strategy="Deterministic symbol extraction (no LLM).",
+                violated_invariants=[]
+            )
 
         prompt = f"""You are a software architect. Analyze the bug report and output a compact JSON repair plan.
 Output ONLY valid JSON with:
@@ -137,17 +138,21 @@ JSON Output:
                 # P0-5: Merge deterministic symbols with LLM symbols, dedup
                 llm_syms = parsed.get("search_symbols", [])
                 merged = list(dict.fromkeys(det_symbols + [s for s in llm_syms if isinstance(s, str)]))[:15]
-                parsed["search_symbols"] = merged
-                return parsed
+                return RepairPlan(
+                    search_symbols=merged,
+                    repair_strategy=parsed.get("repair_strategy", "Apply surgical fix."),
+                    violated_invariants=parsed.get("violated_invariants", [])
+                )
+            
             # LLM failed to produce JSON — use deterministic baseline
-            return {
-                "search_symbols": det_symbols,
-                "repair_strategy": response[:500] if response else "Apply fix per issue description.",
-                "violated_invariants": []
-            }
+            return RepairPlan(
+                search_symbols=det_symbols,
+                repair_strategy=response[:500] if response else "Apply fix per issue description.",
+                violated_invariants=[]
+            )
         except Exception:
-            return {
-                "search_symbols": det_symbols,
-                "repair_strategy": "Apply fix per issue description.",
-                "violated_invariants": []
-            }
+            return RepairPlan(
+                search_symbols=det_symbols,
+                repair_strategy="Apply fix per issue description.",
+                violated_invariants=[]
+            )

@@ -2,6 +2,7 @@ from typing import List, Tuple, Dict, Any
 from pathlib import Path
 from nexus.services.local_heal.knowledge_injector import ParserHardeningKnowledgeInjector
 from nexus.services.local_heal.failure_memory import build_failure_context
+from nexus.services.local_heal.interface import LocalizedFile
 
 class PromptBuilder:
     """🛡️ Nexus Prompt Engineering & Contract Management (Linus Principles: Explicit & Reliable)"""
@@ -53,32 +54,28 @@ class PromptBuilder:
     def build_patch_user_prompt(
         problem_statement: str,
         repro_evidence: str,
-        plan: Dict[str, Any],
-        localized_files: List[Tuple[str, str]],
+        plan: Any,
+        localized_files: List[LocalizedFile],
         reasoning_mode: str = "INTUITIVE",
         failure_reason: str = "",
         attempt: int = 1,
         project_root: Path | None = None,
+        max_prompt_tokens: int = 6000,
+        repair_specification: str = "",
     ) -> str:
         # 1. 自動偵測並注入領域知識 (Knowledge Slicing)
         hardening_context = ""
-        for _, content in localized_files:
-            profile = ParserHardeningKnowledgeInjector.detect_profile(problem_statement, content)
+        for loc_file in localized_files:
+            profile = ParserHardeningKnowledgeInjector.detect_profile(problem_statement, loc_file.content)
             if profile:
                 hardening_context += ParserHardeningKnowledgeInjector.get_profile_prompt(profile)
 
-        # 2. Context Compaction
-        files_section = ""
-        choice_set = []
-        for path, content in localized_files:
-            files_section += f"### FILE: {path}\n{content}\n\n"
-            choice_set.append(path)
-
-        choice_str = ", ".join(choice_set)
-
-        strategy = plan.get("repair_strategy", "Apply surgical fix.")
-        invariants = plan.get("violated_invariants", [])
-        invariants_str = "\n".join(f"- {inv}" for inv in invariants) if invariants else "N/A"
+        strategy = getattr(plan, "repair_strategy", "Apply surgical fix.")
+        
+        # 2. Repair Specification (P0 Priority: Logic intent)
+        spec_section = ""
+        if repair_specification:
+            spec_section = f"\n[REPAIR SPECIFICATION (MANDATORY)]\n{repair_specification}\n"
 
         # 3. Retry failure context injection
         retry_section = ""
@@ -88,22 +85,61 @@ class PromptBuilder:
                 f"DO NOT repeat the same mistake. Analyze why it failed and produce a DIFFERENT fix.\n"
             )
 
-        # 4. Failure memory bank (past failures from other tasks)
+        # 3. Failure memory bank
         failure_memory_section = ""
         if project_root:
             failure_context = build_failure_context(project_root)
             if failure_context:
                 failure_memory_section = f"\n{failure_context}\n"
 
-        return (
+        # 5. Context Budgeting & Compaction
+        # Estimate fixed parts (~3 chars per token heuristic)
+        base_prompt = (
             f"{hardening_context}\n"
             f"[TASK]\n{problem_statement}\n\n"
             f"[REPRODUCTION]\n{repro_evidence}\n\n"
+            f"{spec_section}"
             f"[STRATEGY: {reasoning_mode}]\n{strategy}\n"
             f"{retry_section}"
             f"{failure_memory_section}"
-            f"Allowed files: {choice_str}\n"
             f"⚠️ Rules: No placeholders. SEARCH matches source exactly. Modify in-place.\n\n"
+        )
+        
+        base_tokens = len(base_prompt) // 3
+        available_tokens = max_prompt_tokens - base_tokens
+        
+        files_section = ""
+        choice_set = []
+        
+        # Simple token budgeting for files
+        current_files_tokens = 0
+        for loc_file in localized_files:
+            path, content = loc_file.path, loc_file.content
+            choice_set.append(path)
+            file_header = f"### FILE: {path}\n"
+            file_footer = "\n\n"
+            
+            # If single file is huge, truncate it
+            file_tokens = (len(file_header) + len(content) + len(file_footer)) // 3
+            
+            if current_files_tokens + file_tokens > available_tokens:
+                # Truncate content to fit remaining budget
+                remaining_chars = (available_tokens - current_files_tokens) * 3
+                if remaining_chars > 500:
+                    truncated_content = content[:remaining_chars] + "\n... [TRUNCATED DUE TO CONTEXT LIMIT] ..."
+                    files_section += f"{file_header}{truncated_content}{file_footer}"
+                else:
+                    files_section += f"### FILE: {path}\n... [SKIPPED DUE TO CONTEXT LIMIT] ...\n\n"
+                break
+            else:
+                files_section += f"{file_header}{content}{file_footer}"
+                current_files_tokens += file_tokens
+
+        choice_str = ", ".join(choice_set)
+        
+        return (
+            f"{base_prompt}"
+            f"Allowed files: {choice_str}\n"
             f"[SOURCE CONTEXT]\n{files_section}"
             f"Produce SEARCH/REPLACE blocks for: {choice_str}"
         )

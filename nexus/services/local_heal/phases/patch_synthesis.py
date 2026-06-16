@@ -48,9 +48,9 @@ class PatchSynthesisPhase(IPhase):
         # Filter out repro/test scripts — they are not patch targets (created/deleted by verification)
         _PATCH_BLACKLIST = {"reproduce_bug.py", "repro.py", "test_repro.py"}
         patchable_files = [
-            (rel_path, content)
-            for rel_path, content in input_data.localized_files
-            if Path(rel_path).name not in _PATCH_BLACKLIST
+            (loc_file.path, loc_file.content)
+            for loc_file in input_data.localized_files
+            if Path(loc_file.path).name not in _PATCH_BLACKLIST
         ]
         surgical_files = []
         for rel_path, content in patchable_files:
@@ -67,6 +67,7 @@ class PatchSynthesisPhase(IPhase):
                 except Exception:
                     pass
 
+            from nexus.services.local_heal.interface import LocalizedFile
             annotated = self.context_builder.build_annotated_context(
                 repo_dir=input_data.repo_dir,
                 rel_path=rel_path,
@@ -76,7 +77,7 @@ class PatchSynthesisPhase(IPhase):
                 plan=input_data.plan,
                 user_prompt=input_data.user_prompt or user_prompt
             )
-            surgical_files.append((rel_path, annotated))
+            surgical_files.append(LocalizedFile(path=rel_path, content=annotated))
 
         # 2. 模型分流與生成選擇
         patch_decision = LocalModelPolicy.select_model(
@@ -91,8 +92,27 @@ class PatchSynthesisPhase(IPhase):
         )
         model_decisions.append({"phase": "patch", **patch_decision})
 
-        # 3. 準備治理化 Prompt — use interleaved mode if planning was LLM-based
-        use_interleaved = not input_data.plan.get("repair_strategy", "").startswith("FAST_MODE")
+        # 3. [Specification-Centric Repair] 生成修復規格 (若尚未存在)
+        repair_spec = getattr(input_data, "repair_specification", "")
+        if not repair_spec and patch_decision["model"] != "deterministic":
+            spec_decision = LocalModelPolicy.select_model(task_type="swe_repair", phase="planning", context={"mode": "spec_gen"})
+            spec_prompt = f"Based on the problem and localized code, output a concise logical specification of the fix (Intents only, no code blocks):\n\nProblem: {input_data.problem_statement[:1000]}\nPlan: {input_data.plan.repair_strategy if input_data.plan else ''}"
+            try:
+                repair_spec = self.llm_client.generate(
+                    system_prompt="You are a senior engineer. Define the exact logical change needed.",
+                    user_prompt=spec_prompt,
+                    model=spec_decision["model"],
+                    timeout=spec_decision["timeout_seconds"],
+                    options=spec_decision.get("ollama_options")
+                )
+                model_decisions.append({"phase": "repair_spec", **spec_decision, "status": "SUCCESS"})
+            except Exception:
+                repair_spec = "Apply surgical fix as planned."
+
+        # 4. 準備治理化 Prompt — use interleaved mode if planning was LLM-based
+        plan = input_data.plan
+        repair_strat = getattr(plan, "repair_strategy", "")
+        use_interleaved = not repair_strat.startswith("FAST_MODE")
         if not system_prompt:
             system_prompt = PromptBuilder.build_patch_system_prompt(
                 patch_decision["model"], 
@@ -105,6 +125,11 @@ class PatchSynthesisPhase(IPhase):
         if input_data.user_prompt and marker in input_data.user_prompt:
             hud_retry_info = marker + input_data.user_prompt.split(marker)[1]
 
+        # 計算 Prompt Token Budget: 保留至少 2048 給生成
+        ollama_options = patch_decision.get("ollama_options") or {}
+        num_ctx = ollama_options.get("num_ctx", 8192)
+        safe_prompt_budget = max(2048, num_ctx - 2048)
+
         user_prompt = PromptBuilder.build_patch_user_prompt(
             input_data.problem_statement,
             input_data.repro_evidence,
@@ -114,6 +139,8 @@ class PatchSynthesisPhase(IPhase):
             failure_reason=input_data.failure_reason or "",
             attempt=input_data.attempt,
             project_root=input_data.repo_dir,
+            max_prompt_tokens=safe_prompt_budget,
+            repair_specification=repair_spec
         )
         if hud_retry_info:
             user_prompt += hud_retry_info

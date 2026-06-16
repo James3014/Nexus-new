@@ -25,8 +25,8 @@ class SolidSearchReplaceProtocol:
     """
     
     def __init__(self):
-        # 匹配 FILE 表頭
-        self.file_pattern = re.compile(r'^FILE:\s*([^\n]+)', re.MULTILINE)
+        # 匹配 FILE 表頭 (容許前方有些微格式，如 ```python\n)
+        self.file_pattern = re.compile(r'^(?:```\w*\n)?FILE:\s*([^\n]+)', re.MULTILINE)
         # 匹配 SEARCH/REPLACE 區塊
         self.sr_pattern = re.compile(
             r'<<<<<<< SEARCH\s*\n(.*?)\n=======\n(.*?)\n>>>>>>> REPLACE', 

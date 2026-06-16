@@ -19,6 +19,7 @@ class PlanningPhase(IPhase):
 
     def run(self, input_data: PlanningInput) -> PlanningOutput:
         """Stateless TDD-ready execution logic."""
+        from nexus.services.local_heal.interface import RepairPlan
         # 選擇模型與參數
         plan_decision = LocalModelPolicy.select_model(
             task_type="swe_repair", 
@@ -27,7 +28,7 @@ class PlanningPhase(IPhase):
         )
 
         try:
-            plan = self.planner.create_plan(
+            repair_plan = self.planner.create_plan(
                 input_data.problem_statement,
                 input_data.repro_evidence,
                 model_name=plan_decision["model"],
@@ -36,19 +37,20 @@ class PlanningPhase(IPhase):
             )
             return PlanningOutput(
                 success=True,
-                plan=plan,
+                plan=repair_plan,
                 model_decision=plan_decision
             )
         except Exception as exc:
             reason = classify_model_exception(exc)
             return PlanningOutput(
                 success=False,
-                plan={},
+                plan=None,
                 model_decision=plan_decision,
                 error_reason=reason
             )
 
     def execute(self, ctx: HealContext) -> PhaseResult:
+        from nexus.services.local_heal.interface import RepairPlan
         if not ctx.op.reproduced or not ctx.op.repro_evidence:
             return PhaseResult(success=False, failure_reason="PREREQUISITE_FAILED_REPRO")
 
@@ -72,7 +74,11 @@ class PlanningPhase(IPhase):
             det_symbols = DeterministicSymbolExtractor.extract(input_data.problem_statement, input_data.repro_evidence)
             output = PlanningOutput(
                 success=True,
-                plan={"search_symbols": det_symbols, "repair_strategy": "FAST_MODE: Deterministic extraction", "violated_invariants": []},
+                plan=RepairPlan(
+                    search_symbols=det_symbols, 
+                    repair_strategy="FAST_MODE: Deterministic extraction", 
+                    violated_invariants=[]
+                ),
                 model_decision={"phase": "planning", "model": "deterministic", "reasoning_mode": "FAST"}
             )
         else:
