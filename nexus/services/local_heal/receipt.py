@@ -429,6 +429,29 @@ def build_repair_receipt(ctx: Any, *, model_name: str = "nexus-local-heal", run_
             # T1.6: Semantic retry telemetry
             "semantic_retry_telemetry": dict(getattr(ctx, "_semantic_retry_telemetry", {}) or {}),
         },
+
+        # --- S1-prep: StrategyTrace-only (no execution effect) ---
+        "strategy_trace": {
+            "strategy_trace_only": True,
+            "strategy_id": "",
+            "strategy_schema": "",
+            "task_goal": "",
+            "bug_hypothesis": "",
+            "repair_strategy": "",
+            "target_symbols": [],
+            "allowed_paths": [],
+            "forbidden_paths": [],
+            "invariants": [],
+            "abort_conditions": [],
+            "canonical_span_source": "",
+            "target_symbol": "",
+            "target_symbol_confidence": "",
+            "fallback_used": False,
+            "fallback_reason": "",
+            "semantic_retry_mode": "",
+            "model_patch_reward": 0.0,
+            "deterministic_fallback_reward": 0.0,
+        },
         
         # --- Eval Metrics (backward compat) ---
         "eval_metrics": {
