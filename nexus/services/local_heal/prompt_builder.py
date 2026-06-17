@@ -84,6 +84,38 @@ class PromptBuilder:
                 f"\n⚠️ [RETRY CONTEXT] Previous attempt #{attempt-1} FAILED: {failure_reason}\n"
                 f"DO NOT repeat the same mistake. Analyze why it failed and produce a DIFFERENT fix.\n"
             )
+            # T1.2: SEARCH_MISMATCH-specific retry guidance
+            if "SEARCH_MISMATCH" in failure_reason:
+                retry_section += (
+                    "CRITICAL: Your SEARCH block did NOT match the source file.\n"
+                    "RULES:\n"
+                    "1. SEARCH MUST be an EXACT verbatim copy from the source code above.\n"
+                    "2. Copy the EXACT lines including indentation — do NOT reformat.\n"
+                    "3. Do NOT paraphrase, re-indent, or reconstruct from memory.\n"
+                    "4. If unsure, copy a LARGER context window from the source to ensure exact match.\n"
+                )
+            elif "REPLACE_SYNTAX_ERROR" in failure_reason:
+                retry_section += (
+                    "CRITICAL: Your REPLACE block has a syntax error.\n"
+                    "RULES:\n"
+                    "1. Ensure indentation matches the surrounding code exactly.\n"
+                    "2. Do not shift indentation levels.\n"
+                    "3. Keep the same indentation as the SEARCH block you are replacing.\n"
+                )
+            elif "FILE_NOT_FOUND" in failure_reason:
+                retry_section += (
+                    "CRITICAL: The target file path was wrong.\n"
+                    "RULES:\n"
+                    "1. Use ONLY file paths shown in the SOURCE CONTEXT section.\n"
+                    "2. Do NOT invent or guess file paths.\n"
+                )
+            elif "NO_EFFECTIVE_CHANGE" in failure_reason:
+                retry_section += (
+                    "CRITICAL: Your patch did not produce a meaningful change.\n"
+                    "RULES:\n"
+                    "1. The REPLACE block must differ from the SEARCH block in functional code logic.\n"
+                    "2. Do not just reformat or reorder — the code behavior MUST change.\n"
+                )
 
         # 3. Failure memory bank
         failure_memory_section = ""
@@ -143,3 +175,51 @@ class PromptBuilder:
             f"[SOURCE CONTEXT]\n{files_section}"
             f"Produce SEARCH/REPLACE blocks for: {choice_str}"
         )
+
+    @staticmethod
+    def build_verification_guided_retry_prompt(
+        original_user_prompt: str,
+        verification_report: str,
+        canonical_search_span: str,
+        target_file: str,
+        retry_count: int = 1,
+    ) -> str:
+        """T1.5: Build a verification-guided retry prompt.
+
+        Fixes the canonical SEARCH span and asks the LLM to rewrite only REPLACE
+        based on verifier failure output.
+        """
+        header = (
+            "\n\n⚠️ [NEXUS SEMANTIC RETRY — VERIFICATION-GUIDED]\n"
+            f"Retry #{retry_count}: The previous patch was applied but verification FAILED.\n"
+        )
+
+        verifier_section = (
+            f"### VERIFICATION FAILURE REPORT\n"
+            f"```\n{verification_report}\n```\n\n"
+            f"The patch compiled and was applied, but the test still FAILS.\n"
+            f"This means the REPLACE block does not address the root cause.\n\n"
+        )
+
+        search_lock = (
+            f"### CANONICAL SEARCH SPAN (LOCKED — DO NOT MODIFY)\n"
+            f"The following SEARCH block has been verified to match the source file exactly.\n"
+            f"You MUST use this EXACT SEARCH block — do NOT change it.\n"
+            f"```\n{canonical_search_span}\n```\n\n"
+        )
+
+        instruction = (
+            f"### INSTRUCTION\n"
+            f"1. Keep the SEARCH block above EXACTLY as-is.\n"
+            f"2. Analyze the verification failure to understand what the code actually needs.\n"
+            f"3. Write ONLY a new REPLACE block that fixes the root cause.\n"
+            f"4. Output format:\n"
+            f"FILE: {target_file}\n"
+            f"<<<<<<< SEARCH\n"
+            f"<copy the canonical SEARCH span above exactly>\n"
+            f"=======\n"
+            f"<your fix here>\n"
+            f">>>>>>> REPLACE\n"
+        )
+
+        return original_user_prompt + header + verifier_section + search_lock + instruction

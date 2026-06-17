@@ -164,10 +164,218 @@ class HealOrchestrator:
                 err.closest_match = find_closest_snippet(file_content, failed_text, context_hints=search_symbols)
 
     def _handle_verification_failure(self, ctx: HealContext, res: PhaseResult) -> None:
-        ctx.op.final_patch = "" # 驗證失敗清除補丁
+        """Handle verification failure with T1.6 semantic retry on first failure."""
+        evaluation_report = getattr(ctx.op, "evaluation_report", "")
+        failure_class = self._classify_verification_failure(ctx, res.failure_reason)
+
+        # T1.6: Semantic retry eligible on first verification failure
+        semantic_retry_eligible = (
+            ctx.op.attempt == 1
+            and failure_class in ("semantic_wrong", "LOGIC_REGRESSION", "VERIFICATION_FAILED")
+            and evaluation_report
+            and getattr(ctx.op, "final_patch", "")
+        )
+
+        if semantic_retry_eligible:
+            semantic_ok = self._attempt_semantic_retry(ctx, evaluation_report, failure_class)
+            if semantic_ok:
+                # Semantic retry succeeded — skip normal retry loop
+                return
+
+        # Normal path: clear patch and retry
+        ctx.op.final_patch = ""
         ctx.op.failure_reason = f"LOGIC_REGRESSION:{res.failure_reason}"
         err = PatchError(kind=PatchErrorKind.LOGIC_REGRESSION, message=res.failure_reason)
         self._handle_retry(ctx, err)
+
+    def _classify_verification_failure(self, ctx: HealContext, failure_reason: str) -> str:
+        """Classify verification failure into semantic categories."""
+        report = getattr(ctx.op, "evaluation_report", "")
+        if "BUG PRESENT" in report:
+            return "semantic_wrong"
+        if "LOGIC_REGRESSION" in failure_reason:
+            return "LOGIC_REGRESSION"
+        return "VERIFICATION_FAILED"
+
+    def _attempt_semantic_retry(
+        self, ctx: HealContext, evaluation_report: str, failure_class: str
+    ) -> bool:
+        """T1.6: Attempt verification-guided semantic retry.
+
+        Locks the canonical SEARCH span from the last patch, feeds verifier
+        failure into the prompt, and asks the LLM to rewrite only REPLACE.
+        Returns True if retry succeeded (patch applied + verification passed).
+        """
+        import re
+        import json
+        import hashlib
+        from nexus.services.local_heal.prompt_builder import PromptBuilder
+        from nexus.services.local_heal.protocol import SolidSearchReplaceProtocol
+        from nexus.services.local_heal.patcher import Patcher
+        from nexus.services.local_heal.patch_applier import PatchApplier
+        from nexus.services.local_heal.interface import LocalizedFile
+        from nexus.services.local_heal.model_result import classify_model_exception
+        from nexus.engine.local_model_policy import LocalModelPolicy
+        from nexus.services.local_heal.canonical_span import get_canonical_search_span
+
+        # 1. Extract canonical SEARCH span using hybrid strategy
+        final_patch = getattr(ctx.op, "final_patch", "")
+        target_symbol = self._extract_target_symbol(ctx)
+        source_file = self._resolve_target_file(ctx)
+
+        canonical_result = get_canonical_search_span(
+            locked_search="",
+            patch_diff=final_patch,
+            source_file=source_file,
+            target_symbol=target_symbol,
+            failed_search_text="",
+        )
+
+        if not canonical_result:
+            return False
+
+        canonical_search = canonical_result.span
+        canonical_source = canonical_result.source
+
+        # 2. Extract target file from patch
+        target_file_match = re.search(r"^\+\+\+ b/(.+)$", final_patch, re.MULTILINE)
+        if not target_file_match:
+            return False
+        target_file = target_file_match.group(1)
+
+        # 3. Extract verifier failure text
+        verifier_failure = evaluation_report
+
+        # 4. Build semantic retry prompt
+        original_prompt = getattr(ctx.op, "user_prompt", "")
+        semantic_prompt = PromptBuilder.build_verification_guided_retry_prompt(
+            original_user_prompt=original_prompt,
+            verification_report=verifier_failure,
+            canonical_search_span=canonical_search,
+            target_file=target_file,
+            retry_count=1,
+        )
+
+        # 5. Select model for patch (Qwen14B only)
+        patch_decision = LocalModelPolicy.select_model(
+            task_type="swe_repair",
+            phase="patch",
+            context={
+                "reasoning_mode": getattr(ctx.op, "reasoning_mode", "INTUITIVE"),
+                "file_count": 1,
+                "attempt": ctx.op.attempt,
+                "failure_reason": f"SEMANTIC_RETRY:{failure_class}",
+            },
+        )
+        ctx.op.model_decisions.append({"phase": "semantic_retry_patch", **patch_decision})
+
+        # 6. Call LLM
+        from nexus.services.local_heal.llm_client import OllamaLLMClient
+        llm_client = OllamaLLMClient(None)
+        try:
+            response = llm_client.generate(
+                system_prompt=PromptBuilder.build_patch_system_prompt(patch_decision["model"]),
+                user_prompt=semantic_prompt,
+                model=patch_decision["model"],
+                timeout=patch_decision["timeout_seconds"],
+                options=patch_decision.get("ollama_options"),
+            )
+        except Exception as e:
+            reason = classify_model_exception(e)
+            ctx.op.model_decisions[-1]["status"] = reason
+            return False
+
+        if not response:
+            ctx.op.model_decisions[-1]["status"] = "MODEL_EMPTY_RESPONSE"
+            return False
+
+        # 7. Parse SEARCH/REPLACE from response
+        parser = SolidSearchReplaceProtocol()
+        intents_or_error = parser.parse(response)
+        if hasattr(intents_or_error, "kind"):
+            ctx.op.model_decisions[-1]["status"] = intents_or_error.kind.name
+            return False
+
+        # 8. Lock canonical SEARCH span — replace any SEARCH from LLM
+        locked_intents = []
+        for intent in intents_or_error:
+            locked_intent = type(intent)(
+                file_path=intent.file_path,
+                search=canonical_search,
+                replace=intent.replace,
+                operation=intent.operation,
+            )
+            locked_intents.append(locked_intent)
+
+        # 9. Re-apply patch with locked SEARCH
+        patcher = Patcher()
+        patch_applier = PatchApplier(parser, patcher)
+        apply_res = patch_applier.apply_and_validate(
+            intents=locked_intents,
+            repo_dir=ctx.op.repo_dir,
+            localized_files=list(getattr(ctx.op, "localized_files", [])),
+        )
+
+        if not apply_res.success:
+            ctx.op.model_decisions[-1]["status"] = apply_res.error_reason
+            return False
+
+        ctx.op.model_decisions[-1]["status"] = "SUCCESS"
+        ctx.op.final_patch = "\n".join(apply_res.applied_diffs).strip()
+
+        # 10. Re-run verification
+        v_res = self.phase_runner.run_phase(
+            self.verify_phase, f"verify_semantic_retry", ctx, ctx.op._latency_ledger
+        )
+
+        # 11. Write semantic retry telemetry
+        ctx.op._semantic_retry_telemetry = {
+            "semantic_retry_count": 1,
+            "same_span_retry": True,
+            "original_verification_failure": verifier_failure[:500],
+            "observed_behavior": verifier_failure[:300],
+            "behavior_delta_verified": v_res.success,
+            "verifier_result_after_retry": "PASS" if v_res.success else f"FAIL: {getattr(ctx.op, 'evaluation_report', '')[:200]}",
+            "search_locked": True,
+            "replace_rewritten": True,
+            "canonical_search_hash": hashlib.sha256(canonical_search.encode()).hexdigest()[:16],
+            "target_file": target_file,
+            # T1.6a: Attribution fields
+            "semantic_retry_mode": "llm_replace_rewrite",
+            "llm_replace_success": v_res.success,
+            "deterministic_fallback_used": False,
+            "fallback_rule_id": "",
+            "fallback_rule_scope": "",
+            "fallback_rule_reason": "",
+            "model_patch_reward": 1.0 if v_res.success else 0.0,
+            "deterministic_fallback_reward": 0.0,
+        }
+
+        if v_res.success:
+            ctx.gov.gate_exit = "verification"
+            ctx.op.solve_eligible = True
+            return True
+
+        return False
+
+    def _extract_target_symbol(self, ctx: HealContext) -> str:
+        """Extract target symbol from plan or localized files."""
+        plan = getattr(ctx.op, "plan", None)
+        if plan and hasattr(plan, "search_symbols") and plan.search_symbols:
+            return plan.search_symbols[0]
+        return ""
+
+    def _resolve_target_file(self, ctx: HealContext) -> Path | None:
+        """Resolve the target file path from localized files."""
+        localized = getattr(ctx.op, "localized_files", [])
+        if not localized:
+            return None
+        for loc in localized:
+            if hasattr(loc, "path") and loc.path:
+                target = ctx.op.repo_dir / loc.path
+                if target.exists():
+                    return target
+        return None
 
     def _finalize_run(self, ctx: HealContext, ledger: LatencyLedger, start_wall: float) -> None:
         import time

@@ -122,6 +122,19 @@ def _extract_failure_telemetry(ctx: Any, failure_reason: str) -> dict:
                     telemetry["closest_match_similarity"] = err_telemetry.get("closest_match_similarity", 0.0)
                     telemetry["original_search_hash"] = err_telemetry.get("original_search_hash", "")
                     telemetry["canonical_search_hash_from_injection"] = err_telemetry.get("canonical_search_hash", "")
+                # T1.8: Symbol-aware canonical span fallback telemetry
+                ast_found = err_telemetry.get("ast_symbol_found", False)
+                if ast_found:
+                    telemetry["target_symbol"] = err_telemetry.get("target_symbol", "")
+                    telemetry["target_symbol_source"] = err_telemetry.get("target_symbol_source", "")
+                    telemetry["target_symbol_confidence"] = err_telemetry.get("target_symbol_confidence", "low")
+                    telemetry["ast_symbol_found"] = True
+                    telemetry["ast_symbol_span_start"] = err_telemetry.get("ast_symbol_span_start", 0)
+                    telemetry["ast_symbol_span_end"] = err_telemetry.get("ast_symbol_span_end", 0)
+                    telemetry["ast_symbol_span_hash"] = err_telemetry.get("ast_symbol_span_hash", "")
+                    telemetry["fallback_used"] = err_telemetry.get("fallback_used", False)
+                    telemetry["fallback_reason"] = err_telemetry.get("fallback_reason", "")
+                    telemetry["canonical_span_source"] = err_telemetry.get("canonical_span_source", "")
                 break
         # T1.4: Also check for CANONICAL_INJECTION_FAILED in errors
         if "CANONICAL_INJECTION_FAILED" in reason:
@@ -413,6 +426,8 @@ def build_repair_receipt(ctx: Any, *, model_name: str = "nexus-local-heal", run_
             "resolved_span": str(getattr(ctx, "resolved_span", "") or ""),
             # T1.2: Enriched failure telemetry
             "failure_telemetry": _extract_failure_telemetry(ctx, failure_reason),
+            # T1.6: Semantic retry telemetry
+            "semantic_retry_telemetry": dict(getattr(ctx, "_semantic_retry_telemetry", {}) or {}),
         },
         
         # --- Eval Metrics (backward compat) ---
