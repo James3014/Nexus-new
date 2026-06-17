@@ -4,6 +4,7 @@ counted as 14B patch success in training data.
 
 Rules:
 - deterministic_fallback_used=true: model_patch_reward=0.0, cannot enter chosen-pair
+- canonical_span_source=ast_boundary with model_calls=0: ast_fallback_reward=1.0
 - llm_replace_success=true, deterministic_fallback_used=false: model_patch_reward=1.0
 - claim_eligible=false: no public claim
 """
@@ -17,9 +18,12 @@ from typing import Optional
 class S2TExportGuard:
     """Guard for S2T/training export attribution."""
     deterministic_fallback_used: bool = False
-    llm_replace_success: bool = bool
+    llm_replace_success: bool = False
+    canonical_span_source: str = ""
+    model_calls: int = 0
     model_patch_reward: float = 0.0
     deterministic_fallback_reward: float = 0.0
+    ast_fallback_reward: float = 0.0
     claim_eligible: bool = False
     can_enter_chosen_pair: bool = False
     can_enter_tool_demonstration: bool = False
@@ -30,18 +34,28 @@ class S2TExportGuard:
         if self.deterministic_fallback_used:
             self.model_patch_reward = 0.0
             self.deterministic_fallback_reward = 1.0
+            self.ast_fallback_reward = 0.0
             self.can_enter_chosen_pair = False
             self.can_enter_tool_demonstration = True
             self.block_reason = "deterministic_fallback_used"
+        elif self.canonical_span_source == "ast_boundary" and self.model_calls == 0:
+            self.model_patch_reward = 0.0
+            self.deterministic_fallback_reward = 0.0
+            self.ast_fallback_reward = 1.0
+            self.can_enter_chosen_pair = False
+            self.can_enter_tool_demonstration = True
+            self.block_reason = "ast_boundary_deterministic"
         elif self.llm_replace_success and not self.deterministic_fallback_used:
             self.model_patch_reward = 1.0
             self.deterministic_fallback_reward = 0.0
+            self.ast_fallback_reward = 0.0
             self.can_enter_chosen_pair = self.claim_eligible
             self.can_enter_tool_demonstration = True
             self.block_reason = ""
         else:
             self.model_patch_reward = 0.0
             self.deterministic_fallback_reward = 0.0
+            self.ast_fallback_reward = 0.0
             self.can_enter_chosen_pair = False
             self.can_enter_tool_demonstration = False
             self.block_reason = "llm_replace_failed"
@@ -55,8 +69,11 @@ class S2TExportGuard:
         return {
             "deterministic_fallback_used": self.deterministic_fallback_used,
             "llm_replace_success": self.llm_replace_success,
+            "canonical_span_source": self.canonical_span_source,
+            "model_calls": self.model_calls,
             "model_patch_reward": self.model_patch_reward,
             "deterministic_fallback_reward": self.deterministic_fallback_reward,
+            "ast_fallback_reward": self.ast_fallback_reward,
             "claim_eligible": self.claim_eligible,
             "can_enter_chosen_pair": self.can_enter_chosen_pair,
             "can_enter_tool_demonstration": self.can_enter_tool_demonstration,
@@ -66,14 +83,18 @@ class S2TExportGuard:
 
 def evaluate_s2t_export_guard(
     *,
-    deterministic_fallback_used: bool,
-    llm_replace_success: bool,
-    claim_eligible: bool,
+    deterministic_fallback_used: bool = False,
+    llm_replace_success: bool = False,
+    canonical_span_source: str = "",
+    model_calls: int = 0,
+    claim_eligible: bool = False,
 ) -> S2TExportGuard:
     """Convenience function to evaluate S2T export guard."""
     guard = S2TExportGuard(
         deterministic_fallback_used=deterministic_fallback_used,
         llm_replace_success=llm_replace_success,
+        canonical_span_source=canonical_span_source,
+        model_calls=model_calls,
         claim_eligible=claim_eligible,
     )
     guard.evaluate()
