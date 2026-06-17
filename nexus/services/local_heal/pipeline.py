@@ -12,6 +12,7 @@ from nexus.services.local_heal.orchestrator import HealOrchestrator
 from nexus.services.local_heal.committee_orchestrator import CommitteeOrchestrator
 from nexus.services.local_heal.governance_gate import GovernanceGate
 from nexus.services.local_heal.receipt import write_repair_receipt
+from nexus.evidence.abort_receipt import write_abort_receipt
 
 # 導入各個 Phase 實作
 from nexus.services.local_heal.phases.reproduction import ReproductionPhase
@@ -76,6 +77,7 @@ class HealContext:
     violated_invariants: List[str] = field(default_factory=list)
     rewrite_trace: List[str] = field(default_factory=list)
     risk_delta: float = 0.0
+    run_group: str = ""
 
     def to_v2(self) -> HealContextV2:
         op = OperationalContext(
@@ -112,6 +114,7 @@ class HealContext:
             empty_response=self.empty_response,
             reasoning_mode=self.reasoning_mode,
             skip_reproduction=self.skip_reproduction,
+            run_group=self.run_group,
         )
         gov = GovernanceContext(
             expected_stop_layer=self.expected_stop_layer,
@@ -201,13 +204,41 @@ class HealPipeline:
             receipt_writer=write_repair_receipt
         )
         
-        # 執行編排
-        v2_result = orchestrator.run(v2_ctx)
+        # 執行編排 with abort receipt guarantee
+        try:
+            v2_result = orchestrator.run(v2_ctx)
+        except Exception as exc:
+            self._write_abort_receipt_on_exception(ctx, str(exc))
+            raise
         
         # 同步回原 Context (In-place)
         ctx.sync_from_v2(v2_result)
         self._write_trace(f"=== PIPELINE END {ctx.instance_id} solve_eligible={ctx.solve_eligible} ===")
         return ctx
+
+    def _write_abort_receipt_on_exception(self, ctx: HealContext, error_msg: str) -> None:
+        """P0.1b: Write abort receipt when pipeline raises exception."""
+        try:
+            import re
+            safe_id = re.sub(r"[^A-Za-z0-9_.-]+", "__", ctx.instance_id).strip("_") or "unknown"
+            nexus_root = Path(__file__).resolve().parents[3]
+            output_dir = nexus_root / ".nexus/reports/local_heal" / safe_id
+            write_abort_receipt(
+                output_dir=output_dir,
+                task_id=ctx.instance_id,
+                instance_id=ctx.instance_id,
+                failure_class="workspace_provisioning",
+                failure_reason=error_msg[:500],
+                failure_subclass="REPO_NOT_MOUNTED",
+                workspace_path=str(ctx.repo_dir),
+                repo_root=str(ctx.repo_dir),
+                target_path="",
+                path_subclass="",
+                model_calls=0,
+                stop_layer="pipeline_exception",
+            )
+        except Exception:
+            pass
 
     # --- Shim Methods for Testing Compatibility ---
     def _make_reproduction_runner(self, repo_dir: Path) -> ReproductionRunner:

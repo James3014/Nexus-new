@@ -6,6 +6,8 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
+from nexus.evidence.claim_boundary import evaluate_claim_boundary
+
 
 @dataclass(frozen=True)
 class ReportClaimsOptions:
@@ -356,9 +358,21 @@ def verify_claims_core(project_root: Path, options: ReportClaimsOptions, run_git
     )
 
     passed = all(bool(c.get("passed", False)) for c in checks)
+
+    # P0.1b: Inject claim boundary header
+    claim_boundary = evaluate_claim_boundary(
+        simulated=False,
+        claim_eligible=passed,
+        receipt_present=True,
+        model_calls=0,
+        visible_tests_passed=0,
+        hidden_tests_passed=0,
+    )
+
     return {
         "passed": passed,
         "project_root": str(project_root),
         "timestamp_utc": datetime.now(timezone.utc).isoformat(),
         "checks": checks,
+        "claim_boundary": claim_boundary.to_dict(),
     }

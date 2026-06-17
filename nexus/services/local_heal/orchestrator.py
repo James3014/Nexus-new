@@ -9,6 +9,7 @@ from nexus.services.local_heal.errors import PatchError, PatchErrorKind
 from nexus.services.local_heal.evidence_compactor import EvidenceCompactor
 from nexus.services.local_heal.latency_ledger import LatencyLedger
 from nexus.services.local_heal.role_contract import build_role_receipt, RoleReceipt
+from nexus.evidence.abort_receipt import write_abort_receipt
 
 from nexus.services.local_heal.failure_analyzer import FailureAnalyzer
 from nexus.services.local_heal.context_guard import ContextGuard
@@ -97,6 +98,7 @@ class HealOrchestrator:
                 ctx.gov.gate_exit = res.exit_layer or name
                 ctx.op.failure_reason = res.failure_reason
                 ctx.op.runner_completed = True
+                self._write_abort_receipt_on_failure(ctx, name, res.failure_reason)
                 return False
             
             self._record_role_receipt(ctx, name)
@@ -176,7 +178,7 @@ class HealOrchestrator:
         ctx.op._latency_ledger = ledger
         self.governance_gate.audit(ctx)
         if self.receipt_writer:
-            ctx.op.receipt_path = str(self.receipt_writer(ctx))
+            ctx.op.receipt_path = str(self.receipt_writer(ctx, run_group=getattr(ctx.op, "run_group", "")))
 
     def _record_role_receipt(self, ctx: HealContext, phase_name: str) -> None:
         model_name = self._get_model_for_phase(ctx, phase_name)
@@ -209,7 +211,11 @@ class HealOrchestrator:
         subprocess.run(["git", "clean", "-fd"], cwd=str(ctx.op.repo_dir), capture_output=True)
 
     def _handle_retry(self, ctx: HealContext, error: PatchError) -> HealContext:
-        targeted_files = ", ".join([f.path for f in getattr(ctx.op, "localized_files", [])])
+        _PATCH_BLACKLIST = {"reproduce_bug.py", "repro.py", "test_repro.py"}
+        targeted_files = ", ".join([
+            f.path for f in getattr(ctx.op, "localized_files", [])
+            if Path(f.path).name not in _PATCH_BLACKLIST
+        ])
         ctx.op.user_prompt = self.corrector.build_retry_prompt(ctx.op.user_prompt, error, targeted_files=targeted_files)
         ctx.op.attempt += 1
         return ctx
@@ -228,3 +234,47 @@ class HealOrchestrator:
                 if detail:
                     decision["detail"] = detail[:500]
                 return
+
+    def _write_abort_receipt_on_failure(self, ctx: HealContext, phase_name: str, failure_reason: str) -> None:
+        """P0.1b: Write abort receipt when a phase fails."""
+        try:
+            from pathlib import Path
+            nexus_root = Path(__file__).resolve().parents[3]
+            output_dir = nexus_root / ".nexus/reports/local_heal" / _safe_id(ctx.op.instance_id)
+            write_abort_receipt(
+                output_dir=output_dir,
+                task_id=getattr(ctx.op, "task_id", ctx.op.instance_id),
+                instance_id=ctx.op.instance_id,
+                failure_class="workspace_provisioning" if "repro" in phase_name.lower() else "phase_failure",
+                failure_reason=failure_reason,
+                failure_subclass=_map_failure_subclass(failure_reason),
+                workspace_path=str(ctx.op.repo_dir),
+                repo_root=str(ctx.op.repo_dir),
+                target_path="",
+                path_subclass="",
+                model_calls=len(ctx.op.model_decisions),
+                stop_layer=phase_name,
+            )
+        except Exception:
+            pass
+
+
+def _safe_id(instance_id: str) -> str:
+    import re
+    return re.sub(r"[^A-Za-z0-9_.-]+", "__", instance_id).strip("_") or "unknown"
+
+
+def _map_failure_subclass(reason: str) -> str:
+    if "REPO_NOT_MOUNTED" in reason or "repo_root" in reason.lower():
+        return "REPO_NOT_MOUNTED"
+    if "NOT_WRITABLE" in reason or "writable" in reason.lower():
+        return "WORKSPACE_NOT_WRITABLE"
+    if "TARGET_PATH" in reason:
+        return "TARGET_PATH_UNRESOLVED"
+    if "MANIFEST" in reason:
+        return "MANIFEST_MISSING_TARGET"
+    if "REPRO" in reason:
+        return "WRONG_REPRO_PATH"
+    if "STALE" in reason:
+        return "STALE_MODEL_PATH"
+    return "PHASE_FAILURE"
