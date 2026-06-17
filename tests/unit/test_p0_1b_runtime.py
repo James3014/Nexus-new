@@ -271,3 +271,110 @@ def test_rerun_same_task_receipt_paths(tmp_path):
     assert path1 != path2
     assert path1.exists()
     assert path2.exists()
+
+
+# ============================================================
+# 5. P0.1c Runner-Level Abort Receipt Tests
+# ============================================================
+
+def test_runner_abort_receipt_on_workspace_failure(tmp_path):
+    """Runner writes abort receipt when ensure_workspace_state fails."""
+    from nexus.evidence.abort_receipt import write_abort_receipt
+
+    receipt_path = write_abort_receipt(
+        output_dir=tmp_path,
+        task_id="astropy__astropy-12907",
+        instance_id="astropy__astropy-12907",
+        failure_class="workspace_provisioning",
+        failure_reason="WORKSPACE_SAFETY_VIOLATION: Cannot run destructive git",
+        failure_subclass="REPO_NOT_MOUNTED",
+        workspace_path="/workspaces/astropy",
+        model_calls=0,
+        stop_layer="runner",
+    )
+
+    data = json.loads(receipt_path.read_text(encoding="utf-8"))
+    assert data["failure_class"] == "workspace_provisioning"
+    assert data["failure_subclass"] == "REPO_NOT_MOUNTED"
+    assert data["model_calls"] == 0
+    assert data["stop_layer"] == "runner"
+
+
+def test_runner_abort_receipt_on_model_calls_zero(tmp_path):
+    """Runner writes abort receipt with model_calls=0 on early failure."""
+    from nexus.evidence.abort_receipt import write_abort_receipt
+
+    receipt_path = write_abort_receipt(
+        output_dir=tmp_path,
+        task_id="django__django-11099",
+        instance_id="django__django-11099",
+        failure_class="runner_setup_failure",
+        failure_reason="CRITICAL_EXCEPTION:ConnectionError:ollama timeout",
+        failure_subclass="PHASE_FAILURE",
+        workspace_path="/workspaces/django",
+        model_calls=0,
+        stop_layer="runner",
+    )
+
+    data = json.loads(receipt_path.read_text(encoding="utf-8"))
+    assert data["model_calls"] == 0
+    assert data["claim_eligible"] is False
+
+
+def test_runner_abort_receipt_on_target_path_unresolved(tmp_path):
+    """Runner writes abort receipt when target path cannot be resolved."""
+    from nexus.evidence.abort_receipt import write_abort_receipt
+
+    receipt_path = write_abort_receipt(
+        output_dir=tmp_path,
+        task_id="astropy__astropy-14096",
+        instance_id="astropy__astropy-14096",
+        failure_class="workspace_provisioning",
+        failure_reason="TARGET_PATH_UNRESOLVED: astropy/time/core.py not found",
+        failure_subclass="TARGET_PATH_UNRESOLVED",
+        workspace_path="/workspaces/astropy",
+        target_path="astropy/time/core.py",
+        model_calls=0,
+        stop_layer="localization",
+    )
+
+    data = json.loads(receipt_path.read_text(encoding="utf-8"))
+    assert data["failure_subclass"] == "TARGET_PATH_UNRESOLVED"
+    assert data["target_path"] == "astropy/time/core.py"
+
+
+def test_build_summary_header_receipt_coverage(tmp_path):
+    """build_summary_header with receipt coverage fields."""
+    manifest = DedupeManifest(entries=[])
+    receipts = [{"instance_id": "a-1", "solve_eligible": True}]
+    result = aggregate_with_dedupe(receipts, manifest)
+
+    header = build_summary_header(
+        result,
+        report_type="focused_rerun",
+        receipt_present_count=2,
+        receipt_expected_count=2,
+    )
+    cb = header["claim_boundary"]
+    assert cb["receipt_present_count"] == 2
+    assert cb["receipt_expected_count"] == 2
+    assert cb["receipt_present_all"] is True
+    assert cb["receipt_coverage"] == "2/2"
+
+
+def test_build_summary_header_partial_receipt(tmp_path):
+    """build_summary_header with partial receipt blocks claim."""
+    manifest = DedupeManifest(entries=[])
+    receipts = [{"instance_id": "a-1", "solve_eligible": True}]
+    result = aggregate_with_dedupe(receipts, manifest)
+
+    header = build_summary_header(
+        result,
+        report_type="focused_rerun",
+        receipt_present_count=1,
+        receipt_expected_count=2,
+    )
+    cb = header["claim_boundary"]
+    assert cb["receipt_present_all"] is False
+    assert cb["receipt_coverage"] == "1/2"
+    assert cb["public_claim_allowed"] is False

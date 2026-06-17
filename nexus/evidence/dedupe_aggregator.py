@@ -107,26 +107,35 @@ def aggregate_from_manifest_path(
 def build_summary_header(
     result: AggregatedResult,
     report_type: str = "focused_internal_rerun",
+    receipt_present_count: int = 0,
+    receipt_expected_count: int = 0,
 ) -> dict:
     """
-    P0.1b: Build a report header with claim boundary and dedupe summary.
+    P0.1c: Build a report header with claim boundary and dedupe summary.
     
     Every report should have this header to prevent simulated/internal data
     from being used as public claims.
     """
     from nexus.evidence.claim_boundary import evaluate_claim_boundary
 
+    receipt_present_all = (receipt_present_count == receipt_expected_count) and receipt_expected_count > 0
     claim = evaluate_claim_boundary(
         simulated=False,
-        claim_eligible=result.deduped_solved > 0,
-        receipt_present=True,
+        claim_eligible=result.deduped_solved > 0 and receipt_present_all,
+        receipt_present=receipt_present_all,
         model_calls=0,
         visible_tests_passed=result.deduped_solved,
         hidden_tests_passed=0,
     )
 
+    claim_dict = claim.to_dict()
+    claim_dict["receipt_present_count"] = receipt_present_count
+    claim_dict["receipt_expected_count"] = receipt_expected_count
+    claim_dict["receipt_present_all"] = receipt_present_all
+    claim_dict["receipt_coverage"] = f"{receipt_present_count}/{receipt_expected_count}" if receipt_expected_count > 0 else "0/0"
+
     return {
         "report_type": report_type,
-        "claim_boundary": claim.to_dict(),
+        "claim_boundary": claim_dict,
         "dedupe_summary": result.to_dict(),
     }

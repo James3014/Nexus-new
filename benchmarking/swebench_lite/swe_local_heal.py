@@ -15,6 +15,7 @@ from nexus.services.local_heal.task_manifest import (
     local_heal_40_task_manifest,
     local_heal_113_task_manifest,
 )
+from nexus.evidence.abort_receipt import write_abort_receipt
 
 NEXUS_ROOT = Path(__file__).parent.parent.parent.resolve()
 LOCAL_HEAL_ROOT = Path(os.environ.get("NEXUS_LOCAL_HEAL_ROOT_DIR", str(NEXUS_ROOT))).resolve()
@@ -63,6 +64,54 @@ def nexus_local_generate(
 
 
 ollama_generate = nexus_local_generate
+
+
+def _safe_id(instance_id: str) -> str:
+    import re
+    return re.sub(r"[^A-Za-z0-9_.-]+", "__", instance_id).strip("_") or "unknown"
+
+
+def _map_workspace_subclass(reason: str) -> str:
+    if "SAFETY_VIOLATION" in reason:
+        return "REPO_NOT_MOUNTED"
+    if "CLONE_FAILURE" in reason:
+        return "REPO_NOT_MOUNTED"
+    if "CHECKOUT_FAILURE" in reason:
+        return "STALE_MODEL_PATH"
+    if "CLEAN_FAILURE" in reason:
+        return "WORKSPACE_NOT_WRITABLE"
+    return "REPO_NOT_MOUNTED"
+
+
+def _write_runner_abort_receipt(
+    instance_id: str,
+    *,
+    failure_class: str = "runner_setup_failure",
+    failure_reason: str = "",
+    failure_subclass: str = "PHASE_FAILURE",
+    workspace_path: str = "",
+    model_calls: int = 0,
+) -> None:
+    """P0.1c: Write abort receipt from runner level."""
+    try:
+        nexus_root = Path(__file__).resolve().parents[2]
+        output_dir = nexus_root / ".nexus/reports/local_heal" / _safe_id(instance_id)
+        write_abort_receipt(
+            output_dir=output_dir,
+            task_id=instance_id,
+            instance_id=instance_id,
+            failure_class=failure_class,
+            failure_reason=failure_reason,
+            failure_subclass=failure_subclass,
+            workspace_path=workspace_path,
+            repo_root=workspace_path,
+            target_path="",
+            path_subclass="",
+            model_calls=model_calls,
+            stop_layer="runner",
+        )
+    except Exception:
+        pass
 
 
 def build_result_row(task: dict[str, Any], res_ctx: HealContext) -> dict[str, Any]:
@@ -327,6 +376,23 @@ def ensure_workspace_state(task: dict[str, Any]) -> None:
             "flask": "https://github.com/pallets/flask.git",
             "sympy": "https://github.com/sympy/sympy.git",
             "pytest": "https://github.com/pytest-dev/pytest.git",
+            "matplotlib": "https://github.com/matplotlib/matplotlib.git",
+            "scikit-learn": "https://github.com/scikit-learn/scikit-learn.git",
+            "sphinx": "https://github.com/sphinx-doc/sphinx.git",
+            "black": "https://github.com/psf/black.git",
+            "click": "https://github.com/pallets/click.git",
+            "httpie": "https://github.com/httpie/cli.git",
+            "sqlalchemy": "https://github.com/sqlalchemy/sqlalchemy.git",
+            "xarray": "https://github.com/pydata/xarray.git",
+            "marshmallow": "https://github.com/marshmallow-code/marshmallow.git",
+            "pydantic": "https://github.com/pydantic/pydantic.git",
+            "fastapi": "https://github.com/tiangolo/fastapi.git",
+            "scrapy": "https://github.com/scrapy/scrapy.git",
+            "cookiecutter": "https://github.com/cookiecutter/cookiecutter.git",
+            "tensorboard": "https://github.com/tensorflow/tensorboard.git",
+            "transformers": "https://github.com/huggingface/transformers.git",
+            "airflow": "https://github.com/apache/airflow.git",
+            "home-assistant": "https://github.com/home-assistant/core.git",
         }
         repo_key = next((k for k in repo_map if k in task["instance_id"]), None)
         if repo_key:
@@ -548,11 +614,18 @@ def main() -> None:
                 ensure_workspace_state(task)
             except Exception as e:
                 print(f"  💥 WORKSPACE ERROR: {e}")
+                _write_runner_abort_receipt(
+                    task["instance_id"],
+                    failure_class="workspace_provisioning",
+                    failure_reason=str(e)[:500],
+                    failure_subclass=_map_workspace_subclass(str(e)),
+                    workspace_path=task.get("repo_dir", ""),
+                )
                 row = {
                     "instance_id": task["instance_id"],
                     "manifest_task_id": task.get("manifest_task_id", ""),
                     "solve_eligible": False,
-                    "failure_reason": str(e).split(":")[0], # E.g., WORKSPACE_SAFETY_VIOLATION
+                    "failure_reason": str(e).split(":")[0],
                 }
                 out_file.write(json.dumps(row) + "\n")
                 out_file.flush()
@@ -570,6 +643,7 @@ def main() -> None:
             ctx.skip_reproduction = os.environ.get("NEXUS_SKIP_REPRODUCTION") == "1" or os.environ.get("NEXUS_SKIP_REPRODUCTION", "").lower() == "true"
             ctx.python_executable = task.get("python_executable", "")
             ctx.local_mode = task.get("local_mode", False)
+            ctx.run_group = os.environ.get("NEXUS_RUN_GROUP", "")
             if ctx.local_mode:
                 ctx.local_path = Path(task["local_path"])
                 ctx.localized_files = localized_files_for_task(task)
@@ -641,6 +715,14 @@ def main() -> None:
                 import traceback
                 traceback.print_exc()
                 print(f"  💥 CRITICAL EXCEPTION: {e}")
+                _write_runner_abort_receipt(
+                    task["instance_id"],
+                    failure_class="runner_setup_failure",
+                    failure_reason=str(e)[:500],
+                    failure_subclass="PHASE_FAILURE",
+                    workspace_path=task.get("repo_dir", ""),
+                    model_calls=0,
+                )
                 row = {
                     "instance_id": task["instance_id"],
                     "manifest_task_id": task.get("manifest_task_id", ""),
