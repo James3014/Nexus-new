@@ -1,4 +1,4 @@
-"""S1-prep tests: StrategyTrace-only + Attribution Export Guard (expanded)."""
+"""T2.0 tests: S2T Export Guard + StrategyTrace-only."""
 from __future__ import annotations
 
 import json
@@ -44,71 +44,104 @@ def test_receipt_has_strategy_trace_block():
     assert "public_claim_allowed" in st
 
 
-def test_strategy_trace_does_not_affect_execution():
-    """StrategyTrace fields are purely informational."""
-    from nexus.evidence.s2t_export_guard import S2TExportGuard
-    guard = S2TExportGuard(deterministic_fallback_used=False, llm_replace_success=True, claim_eligible=True)
-    guard.evaluate()
-    assert guard.model_patch_reward == 1.0
-    assert guard.can_enter_chosen_pair is True
+# ============================================================
+# 2. S2T Export Guard — Rule 1: model_calls=0
+# ============================================================
+
+def test_model_calls_zero_blocks_model_patch_success():
+    """model_calls=0 → model_patch_reward=0.0, export_as_model_patch_success=false."""
+    guard = evaluate_s2t_export_guard(model_calls=0, llm_replace_success=True, claim_eligible=True)
+    assert guard.model_patch_reward == 0.0
+    assert guard.export_as_model_patch_success is False
+    assert guard.export_as_public_claim is False
+
+
+def test_model_calls_zero_with_llm_success():
+    """model_calls=0 even with llm_replace_success → still blocked."""
+    guard = evaluate_s2t_export_guard(model_calls=0, llm_replace_success=True, claim_eligible=True)
+    assert guard.model_patch_reward == 0.0
+    assert guard.can_enter_chosen_pair is False
 
 
 # ============================================================
-# 2. S2T Export Guard Tests
+# 3. S2T Export Guard — Rule 2: deterministic_fallback
 # ============================================================
 
 def test_deterministic_fallback_blocks_chosen_pair():
     """deterministic_fallback_used=true blocks chosen-pair entry."""
-    guard = evaluate_s2t_export_guard(deterministic_fallback_used=True, llm_replace_success=False, claim_eligible=True)
+    guard = evaluate_s2t_export_guard(deterministic_fallback_used=True, model_calls=5, claim_eligible=True)
     assert guard.model_patch_reward == 0.0
     assert guard.deterministic_fallback_reward == 1.0
     assert guard.can_enter_chosen_pair is False
     assert guard.can_enter_tool_demonstration is True
+    assert guard.export_as_model_patch_success is False
     assert guard.block_reason == "deterministic_fallback_used"
 
+
+# ============================================================
+# 4. S2T Export Guard — Rule 3: ast_boundary + model_calls=0
+# ============================================================
 
 def test_ast_boundary_model_calls_zero():
     """canonical_span_source=ast_boundary with model_calls=0 → ast_fallback_reward=1.0."""
     guard = evaluate_s2t_export_guard(
-        deterministic_fallback_used=False, llm_replace_success=False,
         canonical_span_source="ast_boundary", model_calls=0, claim_eligible=True,
     )
     assert guard.model_patch_reward == 0.0
     assert guard.ast_fallback_reward == 1.0
+    assert guard.export_as_model_patch_success is False
+    assert guard.export_as_canonical_recovery_success is True
     assert guard.can_enter_chosen_pair is False
     assert guard.block_reason == "ast_boundary_deterministic"
 
 
-def test_llm_success_allows_chosen_pair():
-    """llm_replace_success=true allows chosen-pair if claim_eligible."""
-    guard = evaluate_s2t_export_guard(deterministic_fallback_used=False, llm_replace_success=True, claim_eligible=True)
+# ============================================================
+# 5. S2T Export Guard — Rule 4: llm_success + model_calls>0
+# ============================================================
+
+def test_llm_success_model_calls_positive():
+    """llm_replace_success=true + model_calls>0 → model_patch_reward may be 1.0."""
+    guard = evaluate_s2t_export_guard(
+        llm_replace_success=True, model_calls=3, claim_eligible=True,
+    )
     assert guard.model_patch_reward == 1.0
+    assert guard.export_as_model_patch_success is True
     assert guard.can_enter_chosen_pair is True
     assert guard.block_reason == ""
 
 
-def test_claim_not_eligible_blocks_chosen_pair():
-    """claim_eligible=false blocks chosen-pair regardless."""
-    guard = evaluate_s2t_export_guard(deterministic_fallback_used=False, llm_replace_success=True, claim_eligible=False)
+def test_llm_success_claim_not_eligible():
+    """llm_replace_success=true but claim_eligible=false → blocks chosen-pair."""
+    guard = evaluate_s2t_export_guard(
+        llm_replace_success=True, model_calls=3, claim_eligible=False,
+    )
+    assert guard.model_patch_reward == 1.0
     assert guard.can_enter_chosen_pair is False
+    assert guard.export_as_model_patch_success is False
     assert guard.block_reason == "claim_not_eligible"
 
 
-def test_llm_failure_blocks_all():
-    """llm_replace_success=false blocks everything."""
-    guard = evaluate_s2t_export_guard(deterministic_fallback_used=False, llm_replace_success=False, claim_eligible=False)
-    assert guard.model_patch_reward == 0.0
-    assert guard.can_enter_chosen_pair is False
-    assert guard.can_enter_tool_demonstration is False
-    assert guard.block_reason == "llm_replace_failed"
+# ============================================================
+# 6. S2T Export Guard — Rule 6: claim_eligible=false
+# ============================================================
 
+def test_claim_not_eligible_blocks_public_claim():
+    """claim_eligible=false → public_claim_allowed=false."""
+    guard = evaluate_s2t_export_guard(model_calls=5, llm_replace_success=True, claim_eligible=False)
+    assert guard.export_as_public_claim is False
+    assert guard.can_enter_chosen_pair is False
+
+
+# ============================================================
+# 7. S2T Export Guard — Roundtrip
+# ============================================================
 
 def test_export_guard_roundtrip():
-    """Export guard to_dict roundtrip."""
-    guard = evaluate_s2t_export_guard(deterministic_fallback_used=True, llm_replace_success=False, claim_eligible=True)
+    """Export guard to_dict has all fields."""
+    guard = evaluate_s2t_export_guard(deterministic_fallback_used=True, model_calls=5, claim_eligible=True)
     d = guard.to_dict()
-    assert d["deterministic_fallback_used"] is True
-    assert d["model_patch_reward"] == 0.0
-    assert d["can_enter_chosen_pair"] is False
+    assert "export_as_model_patch_success" in d
+    assert "export_as_canonical_recovery_success" in d
+    assert "export_as_public_claim" in d
     assert "ast_fallback_reward" in d
     assert "canonical_span_source" in d
