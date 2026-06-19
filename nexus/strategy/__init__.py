@@ -1,9 +1,13 @@
-"""
-StraTA StrategyEnvelope: Schema-only skeleton for strategy planning.
-Not connected to execution path. Not connected to CampaignGeneral, SurgicalPacker, or prompt_builder.
-"""
-from __future__ import annotations
+"""Nexus Strategy Envelope — trace-only strategy layer."""
 
-from nexus.strategy.strategy_envelope import StrategyEnvelope
+from .strategy_envelope import StrategyEnvelope
+from .strategy_planner import StrategyPlanner
+from .strategy_adherence import StrategyAdherenceChecker
+from .abort_conditions import AbortConditionEvaluator
 
-__all__ = ["StrategyEnvelope"]
+__all__ = [
+    "StrategyEnvelope",
+    "StrategyPlanner",
+    "StrategyAdherenceChecker",
+    "AbortConditionEvaluator",
+]
