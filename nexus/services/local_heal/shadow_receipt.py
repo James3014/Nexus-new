@@ -22,6 +22,18 @@ FORBIDDEN_OUTPUT_PATTERNS = {
     "solve_claim": ["solved", "bug_fixed", "repair_complete"],
     "training_export_decision": ["export_training", "export_dpo", "export_ppo"],
     "public_claim": ["public_benchmark", "solve_rate_claim", "parity_claim"],
+    "diff_like_patch": ["diff --git", "@@ -", "apply this patch"],
+    "search_replace_block": ["<<<<<<< SEARCH", "=======", ">>>>>>> REPLACE", "SEARCH/REPLACE"],
+    "patch_instruction": ["replace this code", "modify the file", "write this patch", "change the implementation"],
+    "routing_recommendation": ["route to 14b", "send this to production", "use this model", "switch router"],
+    "verifier_override_extended": ["ignore verifier", "verifier is wrong", "treat as solved", "skip verifier"],
+    "solve_claim_extended": ["verified solve", "verified repair", "repair complete", "bug fixed", "this is solved"],
+    "training_export_suggestion": ["export for training", "use as dpo", "training data", "fine-tune on"],
+    "public_benchmark_extended": ["swe-bench", "solve rate", "public benchmark", "benchmark score"],
+    "model_parity_claim": ["matches gpt", "接近 gemini", "equivalent to claude", "parity with"],
+    "source_mutation": ["overwrite file", "modify source", "change the file"],
+    "ambiguous_claim": ["capability claim", "performance improvement"],
+    "safe_mention": ["discussed in", "mentioned in", "reference to"],
 }
 
 
