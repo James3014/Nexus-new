@@ -10,6 +10,17 @@ class DjangoMigrationGuard:
     
     @staticmethod
     def evaluate(candidate_id: str, patch: str) -> VerifierVerdict:
+        if not patch or not isinstance(patch, str):
+            return VerifierVerdict(
+                verifier_name="django_migration",
+                candidate_id=candidate_id,
+                passed=False,
+                score=-10.0,
+                failure_tags=[FailureTag(
+                    code="INVALID_PATCH",
+                    description="Patch is empty or not a valid string."
+                )]
+            )
         failure_tags = []
         
         # 1. 偵測危險操作 (Dangerous Operations)
