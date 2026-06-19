@@ -127,7 +127,7 @@ def main():
 
         except Exception as e:
             print(f"❌ [{i + 1}/{total}] Error at {rel_p}: {e}")
-            time.sleep(20)
+            time.sleep(30)
 
     print(f"✨ [結晶完成] 成功結晶: {success_count}/{total} 份檔案。")
 
