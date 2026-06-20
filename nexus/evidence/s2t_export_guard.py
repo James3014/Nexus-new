@@ -148,6 +148,30 @@ class S2TExportGuard:
             if not self.block_reason:
                 self.block_reason = "claim_not_eligible"
 
+        # T4: Compute canonical classification bucket
+        self._classification = self._derive_classification()
+
+    def _derive_classification(self) -> str:
+        """T4: Derive canonical classification bucket from export flags."""
+        if self.export_as_model_patch_success:
+            return "model_patch_success_candidate"
+        if self.export_as_canonical_recovery_success:
+            return "canonical_recovery_success"
+        if self.export_as_tool_demonstration:
+            return "tool_demonstration"
+        if self.export_as_internal_infra_failure:
+            return "internal_infra_failure"
+        if self.verification_failed:
+            return "verification_failure"
+        if self.requires_human_review_before_training:
+            return "human_review_required"
+        return "unclassified"
+
+    @property
+    def classification(self) -> str:
+        """T4: Canonical classification bucket for this evaluation."""
+        return getattr(self, "_classification", "unclassified")
+
     def to_dict(self) -> dict:
         return {
             "deterministic_fallback_used": self.deterministic_fallback_used,
