@@ -11,6 +11,7 @@ from nexus.services.local_heal.prompt_builder import PromptBuilder
 from nexus.services.local_heal.llm_client import ILLMClient, OllamaLLMClient
 from nexus.services.local_heal.surgical_context import SurgicalContextBuilder
 from nexus.services.local_heal.patch_applier import PatchApplier
+from nexus.services.local_heal.micro_verifier import MicroVerifier
 
 class PatchSynthesisPhase(IPhase):
     """Phase 4: Targeted Edit (Solid SEARCH/REPLACE Protocol Implementation) - Refactored according to Clean Code & Linus principles"""
@@ -213,12 +214,45 @@ class PatchSynthesisPhase(IPhase):
         )
 
         model_decisions[-1]["status"] = "SUCCESS" if apply_res.success else apply_res.error_reason
+        
+        # 5.5 Micro-verifier: lightweight check before full verification
+        micro_result = None
+        if apply_res.success and apply_res.applied_diffs:
+            patched_files = []
+            for diff_text in apply_res.applied_diffs:
+                for line in diff_text.splitlines():
+                    if line.startswith("+++ b/"):
+                        patched_files.append(line[6:])
+            if patched_files:
+                micro_result = MicroVerifier.verify(
+                    apply_res.applied_diffs[0],
+                    input_data.repo_dir,
+                    patched_files
+                )
+                if not micro_result.passed:
+                    if micro_result.error_message == "ENV_BLOCKED":
+                        # MicroVerifier is pre-verifier only — env_blocked means
+                        # interpreter unavailable, not patch incorrect.
+                        # Record telemetry but do not block patch application.
+                        model_decisions[-1]["status"] = f"MICRO_VERIFY_{micro_result.error_message}_BYPASSED"
+                        model_decisions[-1]["micro_verify_classifications"] = micro_result.classifications
+                    else:
+                        model_decisions[-1]["status"] = f"MICRO_VERIFY_{micro_result.error_message}"
+                        return PatchSynthesisOutput(
+                            success=False,
+                            final_patch="",
+                            model_decisions=model_decisions,
+                            error_reason=f"MICRO_VERIFY_{micro_result.error_message}:{micro_result.details[:200]}"
+                        )
+        
         return PatchSynthesisOutput(
             success=apply_res.success,
             final_patch="\n".join(apply_res.applied_diffs).strip() if apply_res.success else "",
             model_decisions=model_decisions,
             error_reason=apply_res.error_reason or "",
-            syntax_gate_passed=apply_res.syntax_gate_passed
+            syntax_gate_passed=apply_res.syntax_gate_passed,
+            preflight_telemetry=apply_res.preflight_telemetry,
+            errors=apply_res.errors,
         )
 
     def execute(self, ctx: HealContext) -> PhaseResult:
@@ -244,6 +278,10 @@ class PatchSynthesisPhase(IPhase):
         ctx.op.syntax_gate_passed = output.syntax_gate_passed
         ctx.op.refusal_detected = output.refusal_detected
         ctx.op.empty_response = output.empty_response
+
+        # T1.2: Forward PatchError objects for telemetry extraction
+        if output.errors:
+            ctx.op.errors.extend(output.errors)
 
         if not output.success:
             ctx.op.failure_reason = output.failure_reason
