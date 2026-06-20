@@ -1,17 +1,17 @@
-import datasets
+import json
+import re
 
-print("📦 Loading princeton-nlp/SWE-bench_Verified...")
-dataset = datasets.load_dataset("princeton-nlp/SWE-bench_Verified", split="test")
+log_path = "ollama_calls.log"
+print(f"Reading {log_path}...")
 
-target_ids = ["astropy__astropy-13033", "astropy__astropy-14096", "astropy__astropy-14365"]
+# Let's read the file and find all occurrences of "qwen2.5-coder:14b-instruct-q3_K_M" and print the generated outputs.
+with open(log_path, "r", encoding="utf-8", errors="replace") as f:
+    content = f.read()
 
-for t_id in target_ids:
-    instance = next((row for row in dataset if row["instance_id"] == t_id), None)
-    if instance:
-        print(f"\n==========================================")
-        print(f"Task ID: {instance['instance_id']}")
-        print(f"Problem Statement:\n{instance['problem_statement'][:1000]}")
-        if len(instance['problem_statement']) > 1000:
-            print("...[truncated]...")
-    else:
-        print(f"\n❌ Task {t_id} not found in dataset")
+# Ollama calls are logged in some structured format. Let's search for "REPLACE" or SEARCH/REPLACE blocks.
+# We can find all search/replace blocks or response strings.
+matches = re.findall(r"<<<<<<< SEARCH.*?>>>>>>> REPLACE", content, re.DOTALL)
+print(f"Found {len(matches)} SEARCH/REPLACE blocks in the log.")
+for i, match in enumerate(matches[-5:]):
+    print(f"\n--- MATCH {i+1} ---")
+    print(match)

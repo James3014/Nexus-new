@@ -1,5 +1,5 @@
 
 def parser(v):
-    if v.upper() == "NO":
+    if v == "NO":
         return False
     return True
