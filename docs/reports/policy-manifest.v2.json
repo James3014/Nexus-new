@@ -201,6 +201,13 @@
           "diff_summary": "Override applied: Integration test override",
           "lane": "soft",
           "override_id": "OVR-2026-06-15-102708-270dd06a"
+        },
+        {
+          "version": "P-BUDGET-01.1.0.override",
+          "timestamp": "2026-06-15T12:52:45.183352+00:00",
+          "diff_summary": "Override applied: Integration test override",
+          "lane": "soft",
+          "override_id": "OVR-2026-06-15-125245-30cb6b1c"
         }
       ]
     },
@@ -734,6 +741,21 @@
           "lane": "soft",
           "rollback_from": "OVR-2026-06-15-102708-7f6685b2",
           "rollback_to": "P-LEARN-01.1.0.0"
+        },
+        {
+          "version": "P-LEARN-01.1.0.override",
+          "timestamp": "2026-06-15T12:52:45.338978+00:00",
+          "diff_summary": "Override applied: Rollback test",
+          "lane": "soft",
+          "override_id": "OVR-2026-06-15-125245-c92b59bb"
+        },
+        {
+          "version": "P-LEARN-01.rollback",
+          "timestamp": "2026-06-15T12:52:45.413097+00:00",
+          "diff_summary": "Rollback from override OVR-2026-06-15-125245-c92b59bb to P-LEARN-01.1.0.0",
+          "lane": "soft",
+          "rollback_from": "OVR-2026-06-15-125245-c92b59bb",
+          "rollback_to": "P-LEARN-01.1.0.0"
         }
       ]
     },
@@ -857,6 +879,13 @@
           "diff_summary": "Override applied: Expiry test",
           "lane": "soft",
           "override_id": "OVR-2026-06-15-102711-4bc3a453"
+        },
+        {
+          "version": "P-BELIEF-01.1.0.override",
+          "timestamp": "2026-06-15T12:52:48.033992+00:00",
+          "diff_summary": "Override applied: Expiry test",
+          "lane": "soft",
+          "override_id": "OVR-2026-06-15-125248-1b215fc8"
         }
       ]
     },

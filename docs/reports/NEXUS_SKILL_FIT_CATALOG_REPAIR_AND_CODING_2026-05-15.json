@@ -2,7 +2,7 @@
   "schema": "nexus.skill_fit_catalog.v1",
   "status": "PASS",
   "mode": "live",
-  "matrix_path": "/private/var/folders/ld/b61fwcys3x14s175ld5z1k9m0000gn/T/pytest-of-jameschen/pytest-2/test_matrix_runner_accepts_blo0/matrix.json",
+  "matrix_path": "/private/var/folders/ld/b61fwcys3x14s175ld5z1k9m0000gn/T/pytest-of-jameschen/pytest-89/test_matrix_runner_accepts_blo0/matrix.json",
   "summary": {
     "planned_rows": 1,
     "completed_rows": 1,
