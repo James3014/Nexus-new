@@ -34,7 +34,7 @@ Rewrite plan for `5909374a..d7f296d7` on `feature/bridge-fastmatcher-20260606`.
 
 ## Recommendation
 
-**Squash merge.** Mixed boundaries are not bugs — they're bulk-add consequences during worktree closure. If squash-merged, commit history is moot. Post-hoc packet map preserves traceability.
+If the branch is squash-merged, the mixed boundaries do not affect the merged result. The late commits are operationally usable, but they cross packet boundaries because of bulk-add worktree closure. The post-hoc packet map preserves traceability.
 
 If commit-merge required: accept mixed history. Packet map identifies which subsets correspond to which logical bucket.
 
