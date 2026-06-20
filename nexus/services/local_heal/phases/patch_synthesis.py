@@ -227,7 +227,8 @@ class PatchSynthesisPhase(IPhase):
                 micro_result = MicroVerifier.verify(
                     apply_res.applied_diffs[0],
                     input_data.repo_dir,
-                    patched_files
+                    patched_files,
+                    verifier_env_metadata={"interpreter": input_data.python_executable}
                 )
                 if not micro_result.passed:
                     if micro_result.error_message == "ENV_BLOCKED":
@@ -268,7 +269,8 @@ class PatchSynthesisPhase(IPhase):
             max_tries=ctx.op.max_tries,
             system_prompt=ctx.op.system_prompt,
             user_prompt=ctx.op.user_prompt,
-            failure_reason=ctx.op.failure_reason
+            failure_reason=ctx.op.failure_reason,
+            python_executable=ctx.op.python_executable
         )
 
         output = self.run(input_data)

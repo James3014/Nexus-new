@@ -3,7 +3,8 @@ import logging
 import os
 from pathlib import Path
 from typing import Dict, List, Any, Optional
-from datetime import datetime, UTC
+from datetime import datetime, timezone
+UTC = timezone.utc
 
 logger = logging.getLogger(__name__)
 

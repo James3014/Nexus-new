@@ -8,7 +8,8 @@ from pathlib import Path
 from typing import Dict, List, Optional
 
 import json
-from datetime import datetime, UTC
+from datetime import datetime, timezone
+UTC = timezone.utc
 
 
 class GateSeverity(str, Enum):

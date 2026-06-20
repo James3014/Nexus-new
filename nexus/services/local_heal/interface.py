@@ -95,6 +95,7 @@ class PatchSynthesisInput:
     system_prompt: str = ""
     user_prompt: str = ""
     failure_reason: str = ""
+    python_executable: str = ""
 
 @dataclass(frozen=True)
 class PatchSynthesisOutput:

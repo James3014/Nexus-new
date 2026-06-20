@@ -1,7 +1,8 @@
 import json
 import shutil
 from pathlib import Path
-from datetime import datetime, UTC
+from datetime import datetime, timezone
+UTC = timezone.utc
 
 class WisdomSynthesizer:
     """

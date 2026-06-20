@@ -340,6 +340,7 @@ def test_cross_file_search_fallback(tmp_path):
     )
     llm_client = DummyLLMClient(llm_response)
 
+    import sys
     from nexus.services.local_heal.interface import RepairPlan, PatchSynthesisInput, LocalizedFile
 
     phase = PatchSynthesisPhase(parser=parser, patcher=patcher, llm_client=llm_client)
@@ -356,6 +357,7 @@ def test_cross_file_search_fallback(tmp_path):
         reasoning_mode="INTUITIVE",
         attempt=1,
         max_tries=3,
+        python_executable=sys.executable,
     )
 
     out = phase.run(inp)
