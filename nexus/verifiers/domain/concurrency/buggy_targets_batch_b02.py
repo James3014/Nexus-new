@@ -10,12 +10,10 @@ class BuggyIdempotentExecutor:
         self._lock = threading.Lock()
 
     def execute(self):
-        def check(): return not self.executed
-        def action():
+        if not self.executed:
             time.sleep(0.01) # Race window
             self.call_count += 1
             self.executed = True
-        execute_with_double_checked_lock(self._lock, check, action)
 
 class BuggyTokenBucket:
     """模擬 Rate Limiter Token Bucket 競爭 (超發)"""
