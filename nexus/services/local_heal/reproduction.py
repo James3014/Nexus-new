@@ -194,6 +194,10 @@ class ReproductionRunner:
                 if self.is_environment_failure(output):
                     return False, output if output.strip() else f"Process exited with code {res.returncode}"
                 return True, output if output.strip() else f"Process exited with code {res.returncode}"
+            # Exit code 0: script ran successfully
+            # If there's no error output, the bug might already be fixed
+            if not output.strip():
+                return False, "ALREADY_FIXED: reproduce script exited cleanly (exit code 0), bug may already be resolved"
             return False, output
         except Exception as e:
             return False, str(e)

@@ -1,9 +1,12 @@
 from pathlib import Path
 import re
+import subprocess
 from typing import Any, Dict
 from nexus.services.local_heal.interface import IPhase, PhaseResult, ReproductionInput, ReproductionOutput
 from nexus.services.local_heal.reproduction import ReproductionRunner
 from nexus.services.local_heal.env_denoiser import EnvDenoiser
+from nexus.services.local_heal.env_recipe_registry import EnvRecipeRegistry
+from nexus.services.local_heal.workspace_provision import WorkspaceProvisionChecker
 from nexus.services.local_heal.context import HealContext
 from nexus.engine.local_model_policy import LocalModelPolicy
 from nexus.services.local_heal.model_result import classify_model_exception
@@ -116,7 +119,72 @@ class ReproductionPhase(IPhase):
             # 如果輸入已經有腳本，則執行一次
             success, evidence = self.repro_runner.run_repro(repro_script)
 
-        # 3. 自動環境自癒
+        # 3. Deterministic recipe-based env fix (NEW: S1-A)
+        recipe_registry = EnvRecipeRegistry()
+        recipe_attempts = 0
+        max_recipe_attempts = 2
+        
+        if not success and repro_script and recipe_attempts < max_recipe_attempts:
+            # Extract signals from evidence for recipe matching
+            signals = []
+            evidence_lower = evidence.lower() if evidence else ""
+            for kw in ["ImportError", "ModuleNotFoundError", "numpy", "scipy", 
+                       "setuptools", "gcc", "compilation", "version", "drift",
+                       "sympy", "django", "pytest", "requests",
+                       "collections", "Mapping", "MutableMapping",
+                       "cannot import name", "mpmath"]:
+                if kw.lower() in evidence_lower:
+                    signals.append(kw)
+            
+            recipe = recipe_registry.match(signals)
+            if recipe:
+                recipe_attempts += 1
+                venv_python = str(input_data.repo_dir / ".venv" / "bin" / "python3")
+                pip_python = venv_python if Path(venv_python).exists() else "python3"
+                
+                # Extract package name from evidence
+                missing_pkg = None
+                pkg_match = re.search(r"No module named '(\w+)'", evidence)
+                if pkg_match:
+                    missing_pkg = pkg_match.group(1)
+                
+                for action in recipe.allowed_actions:
+                    if "pip install" in action:
+                        pkg = missing_pkg or action.replace("pip install ", "").strip("'\"")
+                        if pkg and "<" not in pkg:
+                            for py in [pip_python, "python3"]:
+                                try:
+                                    subprocess.run(
+                                        ["uv", "pip", "install", pkg, "--python", py],
+                                        capture_output=True, text=True, timeout=60
+                                    )
+                                except Exception:
+                                    pass
+                    elif "collections" in action.lower() and "shim" in action.lower():
+                        # Collections compatibility shim — inject into repro script
+                        shim = (
+                            "import collections, collections.abc\n"
+                            "collections.Mapping = collections.abc.Mapping\n"
+                            "collections.MutableMapping = collections.abc.MutableMapping\n"
+                        )
+                        repro_script = shim + repro_script
+                    elif "mock" in action.lower():
+                        pass
+                    elif "mock" in action.lower():
+                        pass
+                
+                # Re-try reproduction after recipe fix
+                success, evidence = self.repro_runner.run_repro(repro_script)
+                
+                # Record recipe execution in env_denoise_receipt
+                env_denoise_receipt = {
+                    "recipe_id": recipe.id,
+                    "recipe_actions": recipe.allowed_actions,
+                    "recipe_succeeded": success,
+                    "recipe_attempt": recipe_attempts,
+                }
+        
+        # 4. Legacy env_denoiser auto-heal (existing path)
         if (
             not success
             and repro_script
@@ -142,6 +210,8 @@ class ReproductionPhase(IPhase):
         if not success or not evidence or len(evidence.strip()) < 10:
             if self.repro_runner.is_environment_failure(evidence):
                 reason = "REPRO_ENVIRONMENT_FAILURE"
+            elif not success and evidence and ("ALREADY_FIXED" in evidence or "exit code 0" in evidence.lower()):
+                reason = "ALREADY_FIXED"
             elif not success:
                 reason = "REPRO_NOT_REPRODUCED"
             else:
@@ -165,6 +235,15 @@ class ReproductionPhase(IPhase):
             ctx.op.repro_evidence = ctx.op.problem_statement[:3000]
             ctx.op.reproduced = True
             return PhaseResult(success=True)
+
+        # S3: Workspace provisioning check
+        provision = WorkspaceProvisionChecker.check(ctx.op.repo_dir, ctx.op.instance_id)
+        if not provision.ready:
+            return PhaseResult(
+                success=False,
+                exit_layer="reprorunner",
+                failure_reason=provision.failure_reason or "REPRO_WORKSPACE_MISSING",
+            )
 
         input_data = ReproductionInput(
             instance_id=ctx.op.instance_id,

@@ -8,6 +8,7 @@ from nexus.services.local_heal.model_result import classify_model_exception
 from nexus.services.local_heal.reasoning_router import ReasoningRouter
 from nexus.services.local_heal.llm_client import ILLMClient
 from nexus.services.local_heal.planner import DeterministicSymbolExtractor
+from nexus.engine.local_model_policy import SidecarConfig
 
 class PlanningPhase(IPhase):
     """Phase 2: Planning (戰略規劃)"""
@@ -94,6 +95,39 @@ class PlanningPhase(IPhase):
             return PhaseResult(success=False, exit_layer="planning", failure_reason=output.failure_reason)
 
         ctx.op.plan = output.plan
+
+        # 5. Gemma sidecar (shadow lane, no authority)
+        ctx._sidecar_enabled = SidecarConfig.SIDECAR_ENABLED
+        ctx._sidecar_model = SidecarConfig.SIDECAR_MODEL if SidecarConfig.SIDECAR_ENABLED else ""
+        ctx._sidecar_contributed = False
+        
+        if SidecarConfig.SIDECAR_ENABLED and self.planner.llm_client:
+            try:
+                sidecar_prompt = (
+                    f"Analyze this bug and provide:\n"
+                    f"1. Root cause hypothesis\n"
+                    f"2. Candidate files to modify\n"
+                    f"3. Minimal fix strategy\n\n"
+                    f"Problem: {input_data.problem_statement[:1000]}\n"
+                    f"Repro evidence: {input_data.repro_evidence[:500]}"
+                )
+                sidecar_response = self.planner.llm_client.generate(
+                    system_prompt="You are a diagnostic assistant. Analyze the bug and propose a fix strategy.",
+                    user_prompt=sidecar_prompt,
+                    model=SidecarConfig.SIDECAR_MODEL,
+                    timeout=120,
+                    options=SidecarConfig.get_sidecar_options(),
+                )
+                if sidecar_response:
+                    ctx._sidecar_contributed = True
+                    ctx.op.model_decisions.append({
+                        "phase": "planning_sidecar",
+                        "model": SidecarConfig.SIDECAR_MODEL,
+                        "status": "SUCCESS",
+                        "detail": sidecar_response[:500],
+                    })
+            except Exception:
+                pass  # Sidecar failure is non-blocking
         return PhaseResult(success=True)
 
     def _record_model_status(self, ctx: HealContext, status: str, detail: str = "", *, phase: str | None = None) -> None:
