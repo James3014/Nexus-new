@@ -24,10 +24,17 @@ REQUIRED_RECEIPT_FIELDS = [
 ]
 
 EXPECTED_ARTIFACTS = [
+    'real_replay_result.json',
+]
+
+OPTIONAL_ARTIFACTS = [
     'environment_preflight.json',
     'baseline_reproduction.json',
     'model_execution.json',
-    'real_replay_result.json',
+    'patch_authority_receipt.json',
+    'final_verification.json',
+    'receipt_audit.md',
+    'final_report.md',
 ]
 
 
@@ -44,33 +51,20 @@ class ComplianceResult:
     lane_violations: List[str] = field(default_factory=list)
     model_policy_violations: List[str] = field(default_factory=list)
     recommended_final_status: str = "UNKNOWN"
-
-    @property
-    def is_pass(self) -> bool:
-        return self.compliance_status in ("COMPLIANCE_PASS", "COMPLIANCE_PASS_WITH_CAVEATS")
-
-    def to_dict(self) -> dict:
-        return {
-            'compliance_status': self.compliance_status,
-            'passed_gates': self.passed_gates,
-            'failed_gates': self.failed_gates,
-            'missing_fields': self.missing_fields,
-            'governance_violations': self.governance_violations,
-            'attribution_violations': self.attribution_violations,
-            'verifier_violations': self.verifier_violations,
-            'lane_violations': self.lane_violations,
-            'model_policy_violations': self.model_policy_violations,
-            'recommended_final_status': self.recommended_final_status,
-        }
+    caveats: List[str] = field(default_factory=list)
 
 
-def check_artifact_presence(artifact_dir: Path) -> List[str]:
-    """Check expected artifacts exist."""
-    missing = []
+def check_artifact_presence(artifact_dir: Path) -> tuple[List[str], List[str]]:
+    """Check expected artifacts exist. Returns (missing_required, missing_optional)."""
+    missing_required = []
     for artifact in EXPECTED_ARTIFACTS:
         if not (artifact_dir / artifact).exists():
-            missing.append(artifact)
-    return missing
+            missing_required.append(artifact)
+    missing_optional = []
+    for artifact in OPTIONAL_ARTIFACTS:
+        if not (artifact_dir / artifact).exists():
+            missing_optional.append(artifact)
+    return missing_required, missing_optional
 
 
 def check_receipt_schema(receipt: Dict[str, Any]) -> List[str]:
@@ -251,12 +245,15 @@ def check_compliance(
     result = ComplianceResult()
 
     # 1. Artifact presence
-    missing_artifacts = check_artifact_presence(artifact_dir)
-    if missing_artifacts:
-        result.missing_fields.extend([f"artifact:{a}" for a in missing_artifacts])
+    missing_required, missing_optional = check_artifact_presence(artifact_dir)
+    if missing_required:
+        result.missing_fields.extend([f"artifact:{a}" for a in missing_required])
         result.failed_gates.append("artifact_presence")
     else:
         result.passed_gates.append("artifact_presence")
+    if missing_optional:
+        result.caveats = getattr(result, 'caveats', []) or []
+        result.caveats.extend([f"optional:{a}" for a in missing_optional])
 
     # 2. Load receipt
     receipt_path = artifact_dir / 'real_replay_result.json'

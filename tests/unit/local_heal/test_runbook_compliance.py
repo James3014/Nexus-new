@@ -163,5 +163,5 @@ def test_missing_required_field():
 def test_missing_artifact():
     """Missing artifact should be detected."""
     with __import__('tempfile').TemporaryDirectory() as tmp:
-        missing = check_artifact_presence(Path(tmp))
-        assert 'real_replay_result.json' in missing
+        missing_required, missing_optional = check_artifact_presence(Path(tmp))
+        assert 'real_replay_result.json' in missing_required
