@@ -17,6 +17,21 @@ LocalHeal 已完成多階段編排、7B/14B 分流與治理收口。審計數據
 *   **Task 4E — Prompt Purity Spike**: 在觀測分流下實驗極簡 Aider 提示詞契約。
 *   **Task 4F — Refusal Recovery Spike**: 實驗拒絕感知補償指令。
 
+### 🚩 Milestone 3: Shadow-only Architecture Draft (對應 Phase 6 & 7)
+* [ ] **Task 3.1: 撰寫 Experimental Architecture Gate 草稿**
+  * 在 `nexus/gate/` 建立 `experimental_gate.py` 草稿，實作 **observation-only** 的隔離分流，確保對實驗模型 (如新serve的 1.5B/7B) 的評估絕不變更 authority outcome。
+* [ ] **Task 3.2: 建立 Serving Maturity Checklist**
+  * 定義本地資源開銷（顯存佔用、冷啟動上限、TPS 基線）評估指標。
+
+### 🚩 Milestone 4: Ollama 實體 Shadow Evaluation 整合與驗收
+* [ ] **Task 4.1: 在 `s2t_shadow_eval.py` 補齊 `--use-ollama` 邏輯**
+  * 實作利用 `urllib.request` 與本地 Ollama 的 `/api/chat` 通訊，在真實 3B/1.5B 學生模型上執行 held-out harder tasks 推理。
+* [ ] **Task 4.2: 執行 30+ 筆 Held-out Harder Tasks 評估**
+  * 執行評估並產出 `s2t_shadow_eval_report.json`。
+  * 驗證指標包含：`selector_override_verified_rate`、`trust_mismatch_rate`、`abstain_rate`、`cost_per_verified_task`。
+  * 確保 `student-induced trust mismatch` 數值為 0（否則阻斷 adoptions 晉升）。
+  * 證明在 held-out tasks 上的 `advisor_accuracy` 超過或等於 `baseline_accuracy`。
+
 ### 🚩 Milestone 4: Phase 5 Controlled Canary Governance (治理收斂)
 *   **Task 5A — Canary Execution Contract**: 建立正式的 Canary 執行契約、Runbook 與 Checklist (Completed)。
 *   **Task 5B — Governance Baseline Sealing**: 以前序 Phase 4 Probe 數據作為准入基線，封存治理邊界 (Sealed)。
