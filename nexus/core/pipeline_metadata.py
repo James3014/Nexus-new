@@ -1,4 +1,5 @@
-from typing import Any, Dict, List, Optional, Tuple, TypedDict
+from typing import Any, Dict, List, Optional, Tuple
+from typing_extensions import TypedDict
 
 class PipelineMetadata(TypedDict, total=False):
     # --- Pipeline 執行狀態 ---
