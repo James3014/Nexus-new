@@ -53,6 +53,10 @@ class ComplianceResult:
     recommended_final_status: str = "UNKNOWN"
     caveats: List[str] = field(default_factory=list)
 
+    @property
+    def is_pass(self) -> bool:
+        return self.compliance_status in ("COMPLIANCE_PASS", "COMPLIANCE_PASS_WITH_CAVEATS")
+
 
 def check_artifact_presence(artifact_dir: Path) -> tuple[List[str], List[str]]:
     """Check expected artifacts exist. Returns (missing_required, missing_optional)."""
