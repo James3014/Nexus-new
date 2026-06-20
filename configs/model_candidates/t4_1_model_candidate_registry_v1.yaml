@@ -1,0 +1,223 @@
+# T4.1 Model Candidate Registry v1
+# Frozen 2026-06-18 from T3.x-T4.0 evidence
+# 6 clean internal model_patch_reward=1.0 candidates
+
+registry_id: T4_1_MODEL_CANDIDATE_REGISTRY_V1
+registry_version: 1.0.0
+frozen_date: 2026-06-18
+source_runs: [T3_2, T3_3, T3_5, T3_6, T3_7, T3_8, T3_9, T4_0]
+model_name: qwen2.5-coder:14b-instruct-q3_K_M
+model_runtime: ollama_local
+public_claim_allowed: false
+export_as_public_claim: false
+
+candidates:
+  - candidate_id: MC001
+    instance_id: astropy__astropy-13236
+    project: astropy
+    candidate_status: active_replayable
+    replay_eligible: true
+    replay_block_reason: ""
+    first_success_run: T3_2_REPLACE_ONLY_FORMAT_REFINEMENT
+    last_verified_run: T4_0_SOURCE_ANCHORING_REPAIR
+    model_name: qwen2.5-coder:14b-instruct-q3_K_M
+    model_runtime: ollama_local
+    prompt_contract_id: T3_REPLACE_ONLY_V1
+    model_prompt_hash: "4acd94d595a39569"
+    model_output_hash: "03eb0887fab74698"
+    canonical_span_source: unified_diff
+    canonical_span_hash: ""
+    source_snapshot_hash: d16bfe05a744
+    current_source_hash: d16bfe05a744
+    source_revision_status: source_fresh
+    source_anchor_status: anchored
+    current_replay_anchor_status: anchored
+    model_patch_reward: 1.0
+    verification_result: PASS
+    attribution_clean: true
+    model_generated_search_used: false
+    deterministic_fallback_used: false
+    truth_patch_applied: false
+    manual_patch_applied: false
+    no_op_counted_as_success: false
+    wrapper_or_auto_repair_counted_as_success: false
+    public_claim_allowed: false
+    export_as_public_claim: false
+    export_as_model_patch_success: false
+    requires_human_review_before_training: true
+    notes: "Block deletion pattern. Model outputs PASS. Verified in T3.2, T3.3, T3.6, T3.7, T3.8, T3.9, T4.0."
+
+  - candidate_id: MC002
+    instance_id: sympy__sympy-12419
+    project: sympy
+    candidate_status: historical_clean_candidate
+    replay_eligible: false
+    replay_block_reason: buggy_line_not_in_current_source
+    first_success_run: T3_6_CONTROLLED_4_TASK_MIXED
+    last_verified_run: T3_7_CONTROLLED_6_TASK_EXPANSION
+    model_name: qwen2.5-coder:14b-instruct-q3_K_M
+    model_runtime: ollama_local
+    prompt_contract_id: T3_REPLACE_ONLY_V1
+    model_prompt_hash: "0527a315f86498d1"
+    model_output_hash: ""
+    canonical_span_source: locked_search
+    canonical_span_hash: ""
+    source_snapshot_hash: ""
+    current_source_hash: c807dfe75696
+    source_revision_status: already_patched
+    source_anchor_status: broken
+    current_replay_anchor_status: stale
+    model_patch_reward: 1.0
+    verification_result: PASS
+    attribution_clean: true
+    model_generated_search_used: false
+    deterministic_fallback_used: false
+    truth_patch_applied: false
+    manual_patch_applied: false
+    no_op_counted_as_success: false
+    wrapper_or_auto_repair_counted_as_success: false
+    public_claim_allowed: false
+    export_as_public_claim: false
+    export_as_model_patch_success: false
+    requires_human_review_before_training: true
+    notes: "Sympy single-line replacement. Buggy_line 'if not p:' not in current source. Historical clean candidate."
+
+  - candidate_id: MC003
+    instance_id: sympy__sympy-13647
+    project: sympy
+    candidate_status: historical_clean_candidate
+    replay_eligible: false
+    replay_block_reason: buggy_line_not_in_current_source
+    first_success_run: T3_6_CONTROLLED_4_TASK_MIXED
+    last_verified_run: T3_7_CONTROLLED_6_TASK_EXPANSION
+    model_name: qwen2.5-coder:14b-instruct-q3_K_M
+    model_runtime: ollama_local
+    prompt_contract_id: T3_REPLACE_ONLY_V1
+    model_prompt_hash: "be9bdc382052ad42"
+    model_output_hash: ""
+    canonical_span_source: locked_search
+    canonical_span_hash: ""
+    source_snapshot_hash: ""
+    current_source_hash: c807dfe75696
+    source_revision_status: already_patched
+    source_anchor_status: broken
+    current_replay_anchor_status: stale
+    model_patch_reward: 1.0
+    verification_result: PASS
+    attribution_clean: true
+    model_generated_search_used: false
+    deterministic_fallback_used: false
+    truth_patch_applied: false
+    manual_patch_applied: false
+    no_op_counted_as_success: false
+    wrapper_or_auto_repair_counted_as_success: false
+    public_claim_allowed: false
+    export_as_public_claim: false
+    export_as_model_patch_success: false
+    requires_human_review_before_training: true
+    notes: "Sympy single-line replacement. Buggy_line 'if not expr:' not in current source. Historical clean candidate."
+
+  - candidate_id: MC004
+    instance_id: astropy__astropy-14365
+    project: astropy
+    candidate_status: active_replayable
+    replay_eligible: true
+    replay_block_reason: ""
+    first_success_run: T3_6_CONTROLLED_4_TASK_MIXED
+    last_verified_run: T3_7_CONTROLLED_6_TASK_EXPANSION
+    model_name: qwen2.5-coder:14b-instruct-q3_K_M
+    model_runtime: ollama_local
+    prompt_contract_id: T3_REPLACE_ONLY_V1
+    model_prompt_hash: ""
+    model_output_hash: ""
+    canonical_span_source: any_valid
+    canonical_span_hash: ""
+    source_snapshot_hash: d16bfe05a744
+    current_source_hash: d16bfe05a744
+    source_revision_status: source_fresh
+    source_anchor_status: anchored
+    current_replay_anchor_status: anchored
+    model_patch_reward: 1.0
+    verification_result: PASS
+    attribution_clean: true
+    model_generated_search_used: false
+    deterministic_fallback_used: false
+    truth_patch_applied: false
+    manual_patch_applied: false
+    no_op_counted_as_success: false
+    wrapper_or_auto_repair_counted_as_success: false
+    public_claim_allowed: false
+    export_as_public_claim: false
+    export_as_model_patch_success: false
+    requires_human_review_before_training: true
+    notes: "Float precision fix. value:.16G -> value:.15G. Verified in T3.6, T3.7."
+
+  - candidate_id: MC005
+    instance_id: astropy__astropy-14309
+    project: astropy
+    candidate_status: active_replayable
+    replay_eligible: true
+    replay_block_reason: ""
+    first_success_run: T3_7_CONTROLLED_6_TASK_EXPANSION
+    last_verified_run: T3_7_CONTROLLED_6_TASK_EXPANSION
+    model_name: qwen2.5-coder:14b-instruct-q3_K_M
+    model_runtime: ollama_local
+    prompt_contract_id: T3_REPLACE_ONLY_V1
+    model_prompt_hash: ""
+    model_output_hash: ""
+    canonical_span_source: any_valid
+    canonical_span_hash: ""
+    source_snapshot_hash: d16bfe05a744
+    current_source_hash: d16bfe05a744
+    source_revision_status: source_fresh
+    source_anchor_status: anchored
+    current_replay_anchor_status: anchored
+    model_patch_reward: 1.0
+    verification_result: PASS
+    attribution_clean: true
+    model_generated_search_used: false
+    deterministic_fallback_used: false
+    truth_patch_applied: false
+    manual_patch_applied: false
+    no_op_counted_as_success: false
+    wrapper_or_auto_repair_counted_as_success: false
+    public_claim_allowed: false
+    export_as_public_claim: false
+    export_as_model_patch_success: false
+    requires_human_review_before_training: true
+    notes: "Float precision fix. value:.16G -> value:.15G. Verified in T3.7."
+
+  - candidate_id: MC006
+    instance_id: sympy__sympy-13852
+    project: sympy
+    candidate_status: active_replayable
+    replay_eligible: true
+    replay_block_reason: ""
+    first_success_run: T3_8_NO_OP_GUARD_AND_8_TASK
+    last_verified_run: T4_0_SOURCE_ANCHORING_REPAIR
+    model_name: qwen2.5-coder:14b-instruct-q3_K_M
+    model_runtime: ollama_local
+    prompt_contract_id: T3_REPLACE_ONLY_V1
+    model_prompt_hash: ""
+    model_output_hash: ""
+    canonical_span_source: any_valid
+    canonical_span_hash: ""
+    source_snapshot_hash: c807dfe75696
+    current_source_hash: c807dfe75696
+    source_revision_status: source_fresh
+    source_anchor_status: anchored
+    current_replay_anchor_status: anchored
+    model_patch_reward: 1.0
+    verification_result: PASS
+    attribution_clean: true
+    model_generated_search_used: false
+    deterministic_fallback_used: false
+    truth_patch_applied: false
+    manual_patch_applied: false
+    no_op_counted_as_success: false
+    wrapper_or_auto_repair_counted_as_success: false
+    public_claim_allowed: false
+    export_as_public_claim: false
+    export_as_model_patch_success: false
+    requires_human_review_before_training: true
+    notes: "Import fix. Add I to sympy.core imports. Verified in T3.8, T3.9, T4.0."

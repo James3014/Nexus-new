@@ -1,0 +1,39 @@
+warning: unused variable: `result`
+   --> rust/receipt_verifier/tests/integration.rs:169:9
+    |
+169 |     let result = verify_receipt(
+    |         ^^^^^^ help: if this is intentional, prefix it with an underscore: `_result`
+    |
+    = note: `#[warn(unused_variables)]` (part of `#[warn(unused)]`) on by default
+
+warning: calls to `std::str::from_utf8` with an invalid literal always return an error
+   --> rust/receipt_verifier/tests/integration.rs:170:9
+    |
+168 |     let raw = include_bytes!("../../../schemas/python/fixtures/edge_invalid_utf8.json");
+    |               ------------------------------------------------------------------------- the literal was valid UTF-8 up to the 8 bytes
+169 |     let result = verify_receipt(
+170 |         std::str::from_utf8(raw).unwrap_or(""),
+    |         ^^^^^^^^^^^^^^^^^^^^^^^^
+    |
+    = note: `#[warn(invalid_from_utf8)]` on by default
+
+warning: `receipt-verifier` (test "integration") generated 2 warnings (run `cargo fix --test "integration" -p receipt-verifier` to apply 1 suggestion)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 0.16s
+     Running tests/integration.rs (target/debug/deps/integration-b5ce7265cbbb3944)
+
+running 12 tests
+test test_edge_parse_error_fails ... ok
+test test_edge_invalid_utf8_fails ... ok
+test test_edge_empty_arrays_fails_evidence ... ok
+test test_missing_evidence_fails ... ok
+test test_edge_null_values_parses ... ok
+test test_edge_unicode_parses ... ok
+test test_edge_large_nested_parses ... ok
+test test_edge_numeric_normalization_parses ... ok
+test test_clean_receipt ... ok
+test test_edge_nested_objects_parses ... ok
+test test_schema_mismatch_fails ... ok
+test test_tampered_receipt_fails_hash ... ok
+
+test result: ok. 12 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+

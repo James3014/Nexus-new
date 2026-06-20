@@ -1,0 +1,8 @@
+{
+  "response_status": "not_applicable_invitation_not_sent",
+  "invitation_sent": false,
+  "evaluator_supplied": false,
+  "created": "2026-06-18",
+  "next_follow_up_date": null,
+  "notes": "Cannot track response for unsent invitation"
+}

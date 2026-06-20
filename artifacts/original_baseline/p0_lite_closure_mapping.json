@@ -1,0 +1,14 @@
+{
+  "closure_mapping": [
+    {"instance_id": "astropy__astropy-12907", "original_failure": "SEARCH_MISMATCH", "latest_status": "closed_by_verified_fix", "latest_verification": "PASS", "model_calls": 0, "model_patch_reward": 0.0, "deterministic_fallback_used": true, "closure_confidence": "high", "receipt_present": true},
+    {"instance_id": "astropy__astropy-13236", "original_failure": "REPLACE_SYNTAX_ERROR", "latest_status": "closed_by_verified_fix", "latest_verification": "PASS", "model_calls": 1, "model_patch_reward": 1.0, "deterministic_fallback_used": false, "closure_confidence": "high", "receipt_present": true},
+    {"instance_id": "astropy__astropy-13579", "original_failure": "NO_EFFECTIVE_CHANGE", "latest_status": "closed_by_verified_fix", "latest_verification": "PASS", "model_calls": 0, "model_patch_reward": 0.0, "deterministic_fallback_used": false, "closure_confidence": "high", "receipt_present": true},
+    {"instance_id": "astropy__astropy-14182", "original_failure": "FILE_NOT_FOUND", "latest_status": "closed_by_verified_fix", "latest_verification": "PASS", "model_calls": 1, "model_patch_reward": 0.0, "deterministic_fallback_used": false, "closure_confidence": "high", "receipt_present": true},
+    {"instance_id": "sympy__sympy-12481", "original_failure": "SEARCH_MISMATCH", "latest_status": "closed_by_verified_fix", "latest_verification": "PASS", "model_calls": 0, "model_patch_reward": 0.0, "deterministic_fallback_used": false, "closure_confidence": "high", "receipt_present": true}
+  ],
+  "t5_private_alpha_used_as_closure": false,
+  "model_calls_0_as_model_success": false,
+  "deterministic_fallback_as_model_success": false,
+  "source_stale_as_model_failure": false,
+  "public_claim_allowed": false
+}

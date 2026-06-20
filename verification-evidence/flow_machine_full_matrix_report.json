@@ -1,0 +1,1387 @@
+{
+  "schema": "flow_machine.full_matrix_parity_report.v1",
+  "generated_at": "2026-06-16T23:13:01Z",
+  "execution_time_seconds": 3.705,
+  "summary": {
+    "total_transitions_tested": 196,
+    "python_rust_matches": 196,
+    "mismatches": 0,
+    "rust_unavailable": 0,
+    "parity_rate": 100.0
+  },
+  "mismatch_details": [],
+  "all_results": [
+    {
+      "from": "INTAKE",
+      "to": "INTAKE",
+      "python_result": true,
+      "rust_result": true,
+      "match": "MATCH"
+    },
+    {
+      "from": "INTAKE",
+      "to": "CLARIFY",
+      "python_result": true,
+      "rust_result": true,
+      "match": "MATCH"
+    },
+    {
+      "from": "INTAKE",
+      "to": "OUTLINE",
+      "python_result": true,
+      "rust_result": true,
+      "match": "MATCH"
+    },
+    {
+      "from": "INTAKE",
+      "to": "RESEARCH",
+      "python_result": false,
+      "rust_result": false,
+      "match": "MATCH"
+    },
+    {
+      "from": "INTAKE",
+      "to": "DESIGN",
+      "python_result": false,
+      "rust_result": false,
+      "match": "MATCH"
+    },
+    {
+      "from": "INTAKE",
+      "to": "PLAN",
+      "python_result": true,
+      "rust_result": true,
+      "match": "MATCH"
+    },
+    {
+      "from": "INTAKE",
+      "to": "EXECUTE",
+      "python_result": false,
+      "rust_result": false,
+      "match": "MATCH"
+    },
+    {
+      "from": "INTAKE",
+      "to": "VERIFY",
+      "python_result": false,
+      "rust_result": false,
+      "match": "MATCH"
+    },
+    {
+      "from": "INTAKE",
+      "to": "CLOSE",
+      "python_result": false,
+      "rust_result": false,
+      "match": "MATCH"
+    },
+    {
+      "from": "INTAKE",
+      "to": "REPLAN",
+      "python_result": false,
+      "rust_result": false,
+      "match": "MATCH"
+    },
+    {
+      "from": "INTAKE",
+      "to": "ESCALATE",
+      "python_result": false,
+      "rust_result": false,
+      "match": "MATCH"
+    },
+    {
+      "from": "INTAKE",
+      "to": "HUMAN_REVIEW",
+      "python_result": false,
+      "rust_result": false,
+      "match": "MATCH"
+    },
+    {
+      "from": "INTAKE",
+      "to": "BLOCKED_BUDGET",
+      "python_result": false,
+      "rust_result": false,
+      "match": "MATCH"
+    },
+    {
+      "from": "INTAKE",
+      "to": "BLOCKED_POLICY",
+      "python_result": false,
+      "rust_result": false,
+      "match": "MATCH"
+    },
+    {
+      "from": "CLARIFY",
+      "to": "INTAKE",
+      "python_result": false,
+      "rust_result": false,
+      "match": "MATCH"
+    },
+    {
+      "from": "CLARIFY",
+      "to": "CLARIFY",
+      "python_result": true,
+      "rust_result": true,
+      "match": "MATCH"
+    },
+    {
+      "from": "CLARIFY",
+      "to": "OUTLINE",
+      "python_result": true,
+      "rust_result": true,
+      "match": "MATCH"
+    },
+    {
+      "from": "CLARIFY",
+      "to": "RESEARCH",
+      "python_result": true,
+      "rust_result": true,
+      "match": "MATCH"
+    },
+    {
+      "from": "CLARIFY",
+      "to": "DESIGN",
+      "python_result": false,
+      "rust_result": false,
+      "match": "MATCH"
+    },
+    {
+      "from": "CLARIFY",
+      "to": "PLAN",
+      "python_result": false,
+      "rust_result": false,
+      "match": "MATCH"
+    },
+    {
+      "from": "CLARIFY",
+      "to": "EXECUTE",
+      "python_result": false,
+      "rust_result": false,
+      "match": "MATCH"
+    },
+    {
+      "from": "CLARIFY",
+      "to": "VERIFY",
+      "python_result": false,
+      "rust_result": false,
+      "match": "MATCH"
+    },
+    {
+      "from": "CLARIFY",
+      "to": "CLOSE",
+      "python_result": false,
+      "rust_result": false,
+      "match": "MATCH"
+    },
+    {
+      "from": "CLARIFY",
+      "to": "REPLAN",
+      "python_result": false,
+      "rust_result": false,
+      "match": "MATCH"
+    },
+    {
+      "from": "CLARIFY",
+      "to": "ESCALATE",
+      "python_result": true,
+      "rust_result": true,
+      "match": "MATCH"
+    },
+    {
+      "from": "CLARIFY",
+      "to": "HUMAN_REVIEW",
+      "python_result": false,
+      "rust_result": false,
+      "match": "MATCH"
+    },
+    {
+      "from": "CLARIFY",
+      "to": "BLOCKED_BUDGET",
+      "python_result": false,
+      "rust_result": false,
+      "match": "MATCH"
+    },
+    {
+      "from": "CLARIFY",
+      "to": "BLOCKED_POLICY",
+      "python_result": false,
+      "rust_result": false,
+      "match": "MATCH"
+    },
+    {
+      "from": "OUTLINE",
+      "to": "INTAKE",
+      "python_result": false,
+      "rust_result": false,
+      "match": "MATCH"
+    },
+    {
+      "from": "OUTLINE",
+      "to": "CLARIFY",
+      "python_result": false,
+      "rust_result": false,
+      "match": "MATCH"
+    },
+    {
+      "from": "OUTLINE",
+      "to": "OUTLINE",
+      "python_result": true,
+      "rust_result": true,
+      "match": "MATCH"
+    },
+    {
+      "from": "OUTLINE",
+      "to": "RESEARCH",
+      "python_result": true,
+      "rust_result": true,
+      "match": "MATCH"
+    },
+    {
+      "from": "OUTLINE",
+      "to": "DESIGN",
+      "python_result": false,
+      "rust_result": false,
+      "match": "MATCH"
+    },
+    {
+      "from": "OUTLINE",
+      "to": "PLAN",
+      "python_result": true,
+      "rust_result": true,
+      "match": "MATCH"
+    },
+    {
+      "from": "OUTLINE",
+      "to": "EXECUTE",
+      "python_result": false,
+      "rust_result": false,
+      "match": "MATCH"
+    },
+    {
+      "from": "OUTLINE",
+      "to": "VERIFY",
+      "python_result": false,
+      "rust_result": false,
+      "match": "MATCH"
+    },
+    {
+      "from": "OUTLINE",
+      "to": "CLOSE",
+      "python_result": false,
+      "rust_result": false,
+      "match": "MATCH"
+    },
+    {
+      "from": "OUTLINE",
+      "to": "REPLAN",
+      "python_result": true,
+      "rust_result": true,
+      "match": "MATCH"
+    },
+    {
+      "from": "OUTLINE",
+      "to": "ESCALATE",
+      "python_result": false,
+      "rust_result": false,
+      "match": "MATCH"
+    },
+    {
+      "from": "OUTLINE",
+      "to": "HUMAN_REVIEW",
+      "python_result": false,
+      "rust_result": false,
+      "match": "MATCH"
+    },
+    {
+      "from": "OUTLINE",
+      "to": "BLOCKED_BUDGET",
+      "python_result": false,
+      "rust_result": false,
+      "match": "MATCH"
+    },
+    {
+      "from": "OUTLINE",
+      "to": "BLOCKED_POLICY",
+      "python_result": false,
+      "rust_result": false,
+      "match": "MATCH"
+    },
+    {
+      "from": "RESEARCH",
+      "to": "INTAKE",
+      "python_result": false,
+      "rust_result": false,
+      "match": "MATCH"
+    },
+    {
+      "from": "RESEARCH",
+      "to": "CLARIFY",
+      "python_result": false,
+      "rust_result": false,
+      "match": "MATCH"
+    },
+    {
+      "from": "RESEARCH",
+      "to": "OUTLINE",
+      "python_result": true,
+      "rust_result": true,
+      "match": "MATCH"
+    },
+    {
+      "from": "RESEARCH",
+      "to": "RESEARCH",
+      "python_result": true,
+      "rust_result": true,
+      "match": "MATCH"
+    },
+    {
+      "from": "RESEARCH",
+      "to": "DESIGN",
+      "python_result": true,
+      "rust_result": true,
+      "match": "MATCH"
+    },
+    {
+      "from": "RESEARCH",
+      "to": "PLAN",
+      "python_result": true,
+      "rust_result": true,
+      "match": "MATCH"
+    },
+    {
+      "from": "RESEARCH",
+      "to": "EXECUTE",
+      "python_result": false,
+      "rust_result": false,
+      "match": "MATCH"
+    },
+    {
+      "from": "RESEARCH",
+      "to": "VERIFY",
+      "python_result": false,
+      "rust_result": false,
+      "match": "MATCH"
+    },
+    {
+      "from": "RESEARCH",
+      "to": "CLOSE",
+      "python_result": false,
+      "rust_result": false,
+      "match": "MATCH"
+    },
+    {
+      "from": "RESEARCH",
+      "to": "REPLAN",
+      "python_result": false,
+      "rust_result": false,
+      "match": "MATCH"
+    },
+    {
+      "from": "RESEARCH",
+      "to": "ESCALATE",
+      "python_result": false,
+      "rust_result": false,
+      "match": "MATCH"
+    },
+    {
+      "from": "RESEARCH",
+      "to": "HUMAN_REVIEW",
+      "python_result": false,
+      "rust_result": false,
+      "match": "MATCH"
+    },
+    {
+      "from": "RESEARCH",
+      "to": "BLOCKED_BUDGET",
+      "python_result": false,
+      "rust_result": false,
+      "match": "MATCH"
+    },
+    {
+      "from": "RESEARCH",
+      "to": "BLOCKED_POLICY",
+      "python_result": false,
+      "rust_result": false,
+      "match": "MATCH"
+    },
+    {
+      "from": "DESIGN",
+      "to": "INTAKE",
+      "python_result": false,
+      "rust_result": false,
+      "match": "MATCH"
+    },
+    {
+      "from": "DESIGN",
+      "to": "CLARIFY",
+      "python_result": false,
+      "rust_result": false,
+      "match": "MATCH"
+    },
+    {
+      "from": "DESIGN",
+      "to": "OUTLINE",
+      "python_result": false,
+      "rust_result": false,
+      "match": "MATCH"
+    },
+    {
+      "from": "DESIGN",
+      "to": "RESEARCH",
+      "python_result": false,
+      "rust_result": false,
+      "match": "MATCH"
+    },
+    {
+      "from": "DESIGN",
+      "to": "DESIGN",
+      "python_result": true,
+      "rust_result": true,
+      "match": "MATCH"
+    },
+    {
+      "from": "DESIGN",
+      "to": "PLAN",
+      "python_result": true,
+      "rust_result": true,
+      "match": "MATCH"
+    },
+    {
+      "from": "DESIGN",
+      "to": "EXECUTE",
+      "python_result": false,
+      "rust_result": false,
+      "match": "MATCH"
+    },
+    {
+      "from": "DESIGN",
+      "to": "VERIFY",
+      "python_result": false,
+      "rust_result": false,
+      "match": "MATCH"
+    },
+    {
+      "from": "DESIGN",
+      "to": "CLOSE",
+      "python_result": false,
+      "rust_result": false,
+      "match": "MATCH"
+    },
+    {
+      "from": "DESIGN",
+      "to": "REPLAN",
+      "python_result": true,
+      "rust_result": true,
+      "match": "MATCH"
+    },
+    {
+      "from": "DESIGN",
+      "to": "ESCALATE",
+      "python_result": false,
+      "rust_result": false,
+      "match": "MATCH"
+    },
+    {
+      "from": "DESIGN",
+      "to": "HUMAN_REVIEW",
+      "python_result": false,
+      "rust_result": false,
+      "match": "MATCH"
+    },
+    {
+      "from": "DESIGN",
+      "to": "BLOCKED_BUDGET",
+      "python_result": false,
+      "rust_result": false,
+      "match": "MATCH"
+    },
+    {
+      "from": "DESIGN",
+      "to": "BLOCKED_POLICY",
+      "python_result": false,
+      "rust_result": false,
+      "match": "MATCH"
+    },
+    {
+      "from": "PLAN",
+      "to": "INTAKE",
+      "python_result": false,
+      "rust_result": false,
+      "match": "MATCH"
+    },
+    {
+      "from": "PLAN",
+      "to": "CLARIFY",
+      "python_result": false,
+      "rust_result": false,
+      "match": "MATCH"
+    },
+    {
+      "from": "PLAN",
+      "to": "OUTLINE",
+      "python_result": false,
+      "rust_result": false,
+      "match": "MATCH"
+    },
+    {
+      "from": "PLAN",
+      "to": "RESEARCH",
+      "python_result": false,
+      "rust_result": false,
+      "match": "MATCH"
+    },
+    {
+      "from": "PLAN",
+      "to": "DESIGN",
+      "python_result": false,
+      "rust_result": false,
+      "match": "MATCH"
+    },
+    {
+      "from": "PLAN",
+      "to": "PLAN",
+      "python_result": true,
+      "rust_result": true,
+      "match": "MATCH"
+    },
+    {
+      "from": "PLAN",
+      "to": "EXECUTE",
+      "python_result": true,
+      "rust_result": true,
+      "match": "MATCH"
+    },
+    {
+      "from": "PLAN",
+      "to": "VERIFY",
+      "python_result": false,
+      "rust_result": false,
+      "match": "MATCH"
+    },
+    {
+      "from": "PLAN",
+      "to": "CLOSE",
+      "python_result": false,
+      "rust_result": false,
+      "match": "MATCH"
+    },
+    {
+      "from": "PLAN",
+      "to": "REPLAN",
+      "python_result": true,
+      "rust_result": true,
+      "match": "MATCH"
+    },
+    {
+      "from": "PLAN",
+      "to": "ESCALATE",
+      "python_result": false,
+      "rust_result": false,
+      "match": "MATCH"
+    },
+    {
+      "from": "PLAN",
+      "to": "HUMAN_REVIEW",
+      "python_result": true,
+      "rust_result": true,
+      "match": "MATCH"
+    },
+    {
+      "from": "PLAN",
+      "to": "BLOCKED_BUDGET",
+      "python_result": false,
+      "rust_result": false,
+      "match": "MATCH"
+    },
+    {
+      "from": "PLAN",
+      "to": "BLOCKED_POLICY",
+      "python_result": false,
+      "rust_result": false,
+      "match": "MATCH"
+    },
+    {
+      "from": "EXECUTE",
+      "to": "INTAKE",
+      "python_result": false,
+      "rust_result": false,
+      "match": "MATCH"
+    },
+    {
+      "from": "EXECUTE",
+      "to": "CLARIFY",
+      "python_result": false,
+      "rust_result": false,
+      "match": "MATCH"
+    },
+    {
+      "from": "EXECUTE",
+      "to": "OUTLINE",
+      "python_result": false,
+      "rust_result": false,
+      "match": "MATCH"
+    },
+    {
+      "from": "EXECUTE",
+      "to": "RESEARCH",
+      "python_result": false,
+      "rust_result": false,
+      "match": "MATCH"
+    },
+    {
+      "from": "EXECUTE",
+      "to": "DESIGN",
+      "python_result": false,
+      "rust_result": false,
+      "match": "MATCH"
+    },
+    {
+      "from": "EXECUTE",
+      "to": "PLAN",
+      "python_result": false,
+      "rust_result": false,
+      "match": "MATCH"
+    },
+    {
+      "from": "EXECUTE",
+      "to": "EXECUTE",
+      "python_result": true,
+      "rust_result": true,
+      "match": "MATCH"
+    },
+    {
+      "from": "EXECUTE",
+      "to": "VERIFY",
+      "python_result": true,
+      "rust_result": true,
+      "match": "MATCH"
+    },
+    {
+      "from": "EXECUTE",
+      "to": "CLOSE",
+      "python_result": false,
+      "rust_result": false,
+      "match": "MATCH"
+    },
+    {
+      "from": "EXECUTE",
+      "to": "REPLAN",
+      "python_result": false,
+      "rust_result": false,
+      "match": "MATCH"
+    },
+    {
+      "from": "EXECUTE",
+      "to": "ESCALATE",
+      "python_result": true,
+      "rust_result": true,
+      "match": "MATCH"
+    },
+    {
+      "from": "EXECUTE",
+      "to": "HUMAN_REVIEW",
+      "python_result": false,
+      "rust_result": false,
+      "match": "MATCH"
+    },
+    {
+      "from": "EXECUTE",
+      "to": "BLOCKED_BUDGET",
+      "python_result": true,
+      "rust_result": true,
+      "match": "MATCH"
+    },
+    {
+      "from": "EXECUTE",
+      "to": "BLOCKED_POLICY",
+      "python_result": true,
+      "rust_result": true,
+      "match": "MATCH"
+    },
+    {
+      "from": "VERIFY",
+      "to": "INTAKE",
+      "python_result": false,
+      "rust_result": false,
+      "match": "MATCH"
+    },
+    {
+      "from": "VERIFY",
+      "to": "CLARIFY",
+      "python_result": false,
+      "rust_result": false,
+      "match": "MATCH"
+    },
+    {
+      "from": "VERIFY",
+      "to": "OUTLINE",
+      "python_result": false,
+      "rust_result": false,
+      "match": "MATCH"
+    },
+    {
+      "from": "VERIFY",
+      "to": "RESEARCH",
+      "python_result": false,
+      "rust_result": false,
+      "match": "MATCH"
+    },
+    {
+      "from": "VERIFY",
+      "to": "DESIGN",
+      "python_result": false,
+      "rust_result": false,
+      "match": "MATCH"
+    },
+    {
+      "from": "VERIFY",
+      "to": "PLAN",
+      "python_result": false,
+      "rust_result": false,
+      "match": "MATCH"
+    },
+    {
+      "from": "VERIFY",
+      "to": "EXECUTE",
+      "python_result": false,
+      "rust_result": false,
+      "match": "MATCH"
+    },
+    {
+      "from": "VERIFY",
+      "to": "VERIFY",
+      "python_result": true,
+      "rust_result": true,
+      "match": "MATCH"
+    },
+    {
+      "from": "VERIFY",
+      "to": "CLOSE",
+      "python_result": true,
+      "rust_result": true,
+      "match": "MATCH"
+    },
+    {
+      "from": "VERIFY",
+      "to": "REPLAN",
+      "python_result": true,
+      "rust_result": true,
+      "match": "MATCH"
+    },
+    {
+      "from": "VERIFY",
+      "to": "ESCALATE",
+      "python_result": true,
+      "rust_result": true,
+      "match": "MATCH"
+    },
+    {
+      "from": "VERIFY",
+      "to": "HUMAN_REVIEW",
+      "python_result": false,
+      "rust_result": false,
+      "match": "MATCH"
+    },
+    {
+      "from": "VERIFY",
+      "to": "BLOCKED_BUDGET",
+      "python_result": false,
+      "rust_result": false,
+      "match": "MATCH"
+    },
+    {
+      "from": "VERIFY",
+      "to": "BLOCKED_POLICY",
+      "python_result": false,
+      "rust_result": false,
+      "match": "MATCH"
+    },
+    {
+      "from": "CLOSE",
+      "to": "INTAKE",
+      "python_result": false,
+      "rust_result": false,
+      "match": "MATCH"
+    },
+    {
+      "from": "CLOSE",
+      "to": "CLARIFY",
+      "python_result": false,
+      "rust_result": false,
+      "match": "MATCH"
+    },
+    {
+      "from": "CLOSE",
+      "to": "OUTLINE",
+      "python_result": false,
+      "rust_result": false,
+      "match": "MATCH"
+    },
+    {
+      "from": "CLOSE",
+      "to": "RESEARCH",
+      "python_result": false,
+      "rust_result": false,
+      "match": "MATCH"
+    },
+    {
+      "from": "CLOSE",
+      "to": "DESIGN",
+      "python_result": false,
+      "rust_result": false,
+      "match": "MATCH"
+    },
+    {
+      "from": "CLOSE",
+      "to": "PLAN",
+      "python_result": false,
+      "rust_result": false,
+      "match": "MATCH"
+    },
+    {
+      "from": "CLOSE",
+      "to": "EXECUTE",
+      "python_result": false,
+      "rust_result": false,
+      "match": "MATCH"
+    },
+    {
+      "from": "CLOSE",
+      "to": "VERIFY",
+      "python_result": false,
+      "rust_result": false,
+      "match": "MATCH"
+    },
+    {
+      "from": "CLOSE",
+      "to": "CLOSE",
+      "python_result": true,
+      "rust_result": true,
+      "match": "MATCH"
+    },
+    {
+      "from": "CLOSE",
+      "to": "REPLAN",
+      "python_result": false,
+      "rust_result": false,
+      "match": "MATCH"
+    },
+    {
+      "from": "CLOSE",
+      "to": "ESCALATE",
+      "python_result": false,
+      "rust_result": false,
+      "match": "MATCH"
+    },
+    {
+      "from": "CLOSE",
+      "to": "HUMAN_REVIEW",
+      "python_result": false,
+      "rust_result": false,
+      "match": "MATCH"
+    },
+    {
+      "from": "CLOSE",
+      "to": "BLOCKED_BUDGET",
+      "python_result": false,
+      "rust_result": false,
+      "match": "MATCH"
+    },
+    {
+      "from": "CLOSE",
+      "to": "BLOCKED_POLICY",
+      "python_result": false,
+      "rust_result": false,
+      "match": "MATCH"
+    },
+    {
+      "from": "REPLAN",
+      "to": "INTAKE",
+      "python_result": false,
+      "rust_result": false,
+      "match": "MATCH"
+    },
+    {
+      "from": "REPLAN",
+      "to": "CLARIFY",
+      "python_result": false,
+      "rust_result": false,
+      "match": "MATCH"
+    },
+    {
+      "from": "REPLAN",
+      "to": "OUTLINE",
+      "python_result": false,
+      "rust_result": false,
+      "match": "MATCH"
+    },
+    {
+      "from": "REPLAN",
+      "to": "RESEARCH",
+      "python_result": false,
+      "rust_result": false,
+      "match": "MATCH"
+    },
+    {
+      "from": "REPLAN",
+      "to": "DESIGN",
+      "python_result": false,
+      "rust_result": false,
+      "match": "MATCH"
+    },
+    {
+      "from": "REPLAN",
+      "to": "PLAN",
+      "python_result": true,
+      "rust_result": true,
+      "match": "MATCH"
+    },
+    {
+      "from": "REPLAN",
+      "to": "EXECUTE",
+      "python_result": false,
+      "rust_result": false,
+      "match": "MATCH"
+    },
+    {
+      "from": "REPLAN",
+      "to": "VERIFY",
+      "python_result": false,
+      "rust_result": false,
+      "match": "MATCH"
+    },
+    {
+      "from": "REPLAN",
+      "to": "CLOSE",
+      "python_result": false,
+      "rust_result": false,
+      "match": "MATCH"
+    },
+    {
+      "from": "REPLAN",
+      "to": "REPLAN",
+      "python_result": true,
+      "rust_result": true,
+      "match": "MATCH"
+    },
+    {
+      "from": "REPLAN",
+      "to": "ESCALATE",
+      "python_result": true,
+      "rust_result": true,
+      "match": "MATCH"
+    },
+    {
+      "from": "REPLAN",
+      "to": "HUMAN_REVIEW",
+      "python_result": false,
+      "rust_result": false,
+      "match": "MATCH"
+    },
+    {
+      "from": "REPLAN",
+      "to": "BLOCKED_BUDGET",
+      "python_result": true,
+      "rust_result": true,
+      "match": "MATCH"
+    },
+    {
+      "from": "REPLAN",
+      "to": "BLOCKED_POLICY",
+      "python_result": true,
+      "rust_result": true,
+      "match": "MATCH"
+    },
+    {
+      "from": "ESCALATE",
+      "to": "INTAKE",
+      "python_result": true,
+      "rust_result": true,
+      "match": "MATCH"
+    },
+    {
+      "from": "ESCALATE",
+      "to": "CLARIFY",
+      "python_result": false,
+      "rust_result": false,
+      "match": "MATCH"
+    },
+    {
+      "from": "ESCALATE",
+      "to": "OUTLINE",
+      "python_result": false,
+      "rust_result": false,
+      "match": "MATCH"
+    },
+    {
+      "from": "ESCALATE",
+      "to": "RESEARCH",
+      "python_result": false,
+      "rust_result": false,
+      "match": "MATCH"
+    },
+    {
+      "from": "ESCALATE",
+      "to": "DESIGN",
+      "python_result": false,
+      "rust_result": false,
+      "match": "MATCH"
+    },
+    {
+      "from": "ESCALATE",
+      "to": "PLAN",
+      "python_result": false,
+      "rust_result": false,
+      "match": "MATCH"
+    },
+    {
+      "from": "ESCALATE",
+      "to": "EXECUTE",
+      "python_result": false,
+      "rust_result": false,
+      "match": "MATCH"
+    },
+    {
+      "from": "ESCALATE",
+      "to": "VERIFY",
+      "python_result": false,
+      "rust_result": false,
+      "match": "MATCH"
+    },
+    {
+      "from": "ESCALATE",
+      "to": "CLOSE",
+      "python_result": false,
+      "rust_result": false,
+      "match": "MATCH"
+    },
+    {
+      "from": "ESCALATE",
+      "to": "REPLAN",
+      "python_result": false,
+      "rust_result": false,
+      "match": "MATCH"
+    },
+    {
+      "from": "ESCALATE",
+      "to": "ESCALATE",
+      "python_result": true,
+      "rust_result": true,
+      "match": "MATCH"
+    },
+    {
+      "from": "ESCALATE",
+      "to": "HUMAN_REVIEW",
+      "python_result": true,
+      "rust_result": true,
+      "match": "MATCH"
+    },
+    {
+      "from": "ESCALATE",
+      "to": "BLOCKED_BUDGET",
+      "python_result": false,
+      "rust_result": false,
+      "match": "MATCH"
+    },
+    {
+      "from": "ESCALATE",
+      "to": "BLOCKED_POLICY",
+      "python_result": true,
+      "rust_result": true,
+      "match": "MATCH"
+    },
+    {
+      "from": "HUMAN_REVIEW",
+      "to": "INTAKE",
+      "python_result": false,
+      "rust_result": false,
+      "match": "MATCH"
+    },
+    {
+      "from": "HUMAN_REVIEW",
+      "to": "CLARIFY",
+      "python_result": false,
+      "rust_result": false,
+      "match": "MATCH"
+    },
+    {
+      "from": "HUMAN_REVIEW",
+      "to": "OUTLINE",
+      "python_result": false,
+      "rust_result": false,
+      "match": "MATCH"
+    },
+    {
+      "from": "HUMAN_REVIEW",
+      "to": "RESEARCH",
+      "python_result": false,
+      "rust_result": false,
+      "match": "MATCH"
+    },
+    {
+      "from": "HUMAN_REVIEW",
+      "to": "DESIGN",
+      "python_result": false,
+      "rust_result": false,
+      "match": "MATCH"
+    },
+    {
+      "from": "HUMAN_REVIEW",
+      "to": "PLAN",
+      "python_result": true,
+      "rust_result": true,
+      "match": "MATCH"
+    },
+    {
+      "from": "HUMAN_REVIEW",
+      "to": "EXECUTE",
+      "python_result": true,
+      "rust_result": true,
+      "match": "MATCH"
+    },
+    {
+      "from": "HUMAN_REVIEW",
+      "to": "VERIFY",
+      "python_result": false,
+      "rust_result": false,
+      "match": "MATCH"
+    },
+    {
+      "from": "HUMAN_REVIEW",
+      "to": "CLOSE",
+      "python_result": true,
+      "rust_result": true,
+      "match": "MATCH"
+    },
+    {
+      "from": "HUMAN_REVIEW",
+      "to": "REPLAN",
+      "python_result": false,
+      "rust_result": false,
+      "match": "MATCH"
+    },
+    {
+      "from": "HUMAN_REVIEW",
+      "to": "ESCALATE",
+      "python_result": false,
+      "rust_result": false,
+      "match": "MATCH"
+    },
+    {
+      "from": "HUMAN_REVIEW",
+      "to": "HUMAN_REVIEW",
+      "python_result": true,
+      "rust_result": true,
+      "match": "MATCH"
+    },
+    {
+      "from": "HUMAN_REVIEW",
+      "to": "BLOCKED_BUDGET",
+      "python_result": false,
+      "rust_result": false,
+      "match": "MATCH"
+    },
+    {
+      "from": "HUMAN_REVIEW",
+      "to": "BLOCKED_POLICY",
+      "python_result": true,
+      "rust_result": true,
+      "match": "MATCH"
+    },
+    {
+      "from": "BLOCKED_BUDGET",
+      "to": "INTAKE",
+      "python_result": false,
+      "rust_result": false,
+      "match": "MATCH"
+    },
+    {
+      "from": "BLOCKED_BUDGET",
+      "to": "CLARIFY",
+      "python_result": false,
+      "rust_result": false,
+      "match": "MATCH"
+    },
+    {
+      "from": "BLOCKED_BUDGET",
+      "to": "OUTLINE",
+      "python_result": false,
+      "rust_result": false,
+      "match": "MATCH"
+    },
+    {
+      "from": "BLOCKED_BUDGET",
+      "to": "RESEARCH",
+      "python_result": false,
+      "rust_result": false,
+      "match": "MATCH"
+    },
+    {
+      "from": "BLOCKED_BUDGET",
+      "to": "DESIGN",
+      "python_result": false,
+      "rust_result": false,
+      "match": "MATCH"
+    },
+    {
+      "from": "BLOCKED_BUDGET",
+      "to": "PLAN",
+      "python_result": false,
+      "rust_result": false,
+      "match": "MATCH"
+    },
+    {
+      "from": "BLOCKED_BUDGET",
+      "to": "EXECUTE",
+      "python_result": false,
+      "rust_result": false,
+      "match": "MATCH"
+    },
+    {
+      "from": "BLOCKED_BUDGET",
+      "to": "VERIFY",
+      "python_result": false,
+      "rust_result": false,
+      "match": "MATCH"
+    },
+    {
+      "from": "BLOCKED_BUDGET",
+      "to": "CLOSE",
+      "python_result": false,
+      "rust_result": false,
+      "match": "MATCH"
+    },
+    {
+      "from": "BLOCKED_BUDGET",
+      "to": "REPLAN",
+      "python_result": false,
+      "rust_result": false,
+      "match": "MATCH"
+    },
+    {
+      "from": "BLOCKED_BUDGET",
+      "to": "ESCALATE",
+      "python_result": true,
+      "rust_result": true,
+      "match": "MATCH"
+    },
+    {
+      "from": "BLOCKED_BUDGET",
+      "to": "HUMAN_REVIEW",
+      "python_result": true,
+      "rust_result": true,
+      "match": "MATCH"
+    },
+    {
+      "from": "BLOCKED_BUDGET",
+      "to": "BLOCKED_BUDGET",
+      "python_result": true,
+      "rust_result": true,
+      "match": "MATCH"
+    },
+    {
+      "from": "BLOCKED_BUDGET",
+      "to": "BLOCKED_POLICY",
+      "python_result": false,
+      "rust_result": false,
+      "match": "MATCH"
+    },
+    {
+      "from": "BLOCKED_POLICY",
+      "to": "INTAKE",
+      "python_result": false,
+      "rust_result": false,
+      "match": "MATCH"
+    },
+    {
+      "from": "BLOCKED_POLICY",
+      "to": "CLARIFY",
+      "python_result": false,
+      "rust_result": false,
+      "match": "MATCH"
+    },
+    {
+      "from": "BLOCKED_POLICY",
+      "to": "OUTLINE",
+      "python_result": false,
+      "rust_result": false,
+      "match": "MATCH"
+    },
+    {
+      "from": "BLOCKED_POLICY",
+      "to": "RESEARCH",
+      "python_result": false,
+      "rust_result": false,
+      "match": "MATCH"
+    },
+    {
+      "from": "BLOCKED_POLICY",
+      "to": "DESIGN",
+      "python_result": false,
+      "rust_result": false,
+      "match": "MATCH"
+    },
+    {
+      "from": "BLOCKED_POLICY",
+      "to": "PLAN",
+      "python_result": false,
+      "rust_result": false,
+      "match": "MATCH"
+    },
+    {
+      "from": "BLOCKED_POLICY",
+      "to": "EXECUTE",
+      "python_result": false,
+      "rust_result": false,
+      "match": "MATCH"
+    },
+    {
+      "from": "BLOCKED_POLICY",
+      "to": "VERIFY",
+      "python_result": false,
+      "rust_result": false,
+      "match": "MATCH"
+    },
+    {
+      "from": "BLOCKED_POLICY",
+      "to": "CLOSE",
+      "python_result": false,
+      "rust_result": false,
+      "match": "MATCH"
+    },
+    {
+      "from": "BLOCKED_POLICY",
+      "to": "REPLAN",
+      "python_result": false,
+      "rust_result": false,
+      "match": "MATCH"
+    },
+    {
+      "from": "BLOCKED_POLICY",
+      "to": "ESCALATE",
+      "python_result": true,
+      "rust_result": true,
+      "match": "MATCH"
+    },
+    {
+      "from": "BLOCKED_POLICY",
+      "to": "HUMAN_REVIEW",
+      "python_result": true,
+      "rust_result": true,
+      "match": "MATCH"
+    },
+    {
+      "from": "BLOCKED_POLICY",
+      "to": "BLOCKED_BUDGET",
+      "python_result": false,
+      "rust_result": false,
+      "match": "MATCH"
+    },
+    {
+      "from": "BLOCKED_POLICY",
+      "to": "BLOCKED_POLICY",
+      "python_result": true,
+      "rust_result": true,
+      "match": "MATCH"
+    }
+  ]
+}

@@ -1,0 +1,22 @@
+{
+  "id": "test-numeric-001",
+  "type": "research",
+  "timestamp": "2026-01-01T00:00:00Z",
+  "model": "nexus-3b",
+  "input_hash": "sha256:abc123",
+  "output_hash": "sha256:def456",
+  "evidence": [
+    {
+      "type": "log",
+      "content": "Test with numbers",
+      "hash": "sha256:ev1",
+      "score": 1.0,
+      "count": 0,
+      "negative": -42,
+      "scientific": 10000000000.0,
+      "float_zero": 0.0,
+      "large_int": 9007199254740992
+    }
+  ],
+  "claimed_hash": "PLACEHOLDER_NOT_CANONICAL"
+}

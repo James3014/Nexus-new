@@ -1,0 +1,12 @@
+{
+  "id": "edge-null-values",
+  "type": "research",
+  "timestamp": "2026-01-01T00:00:00Z",
+  "model": "test-model",
+  "input_hash": null,
+  "output_hash": null,
+  "evidence": [
+    {"type": "log", "content": null, "hash": null}
+  ],
+  "claimed_hash": "PLACEHOLDER"
+}

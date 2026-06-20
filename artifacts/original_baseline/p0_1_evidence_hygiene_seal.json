@@ -1,0 +1,18 @@
+{
+  "evidence_hygiene_seal": true,
+  "simulated_false": true,
+  "claim_eligible_false": true,
+  "public_claim_allowed_false": true,
+  "export_as_public_claim_false": true,
+  "model_calls_0_implies_reward_0": true,
+  "deterministic_fallback_not_model_success": true,
+  "ast_fallback_not_model_success": true,
+  "dependency_failure_not_model_failure": true,
+  "source_stale_not_model_failure": true,
+  "already_patched_not_active_success": true,
+  "no_public_benchmark_claim": true,
+  "no_qwen_solve_rate_claim": true,
+  "no_swe_bench_claim": true,
+  "t5_not_used_as_p0_lite_closure": true,
+  "seal_status": "P0_1_EVIDENCE_HYGIENE_SEALED"
+}

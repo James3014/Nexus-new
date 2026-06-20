@@ -1,0 +1,34 @@
+{
+  "clean_receipt.json": {
+    "computed_hash": "72a734cc5f1c92ae6fcd21c09db01bd0f51bbb3296b6ea421f2d36f13afd28d4",
+    "hashmatch": false,
+    "schemamatch": true,
+    "evidencecomplete": true,
+    "claimabilityconfirmed": false,
+    "errorcode": "hash_mismatch"
+  },
+  "missing_evidence.json": {
+    "computed_hash": "0c4a98587353b2e6c84faa7099571f4e730a775fccf8a9c5ecd1c2af3f651e5a",
+    "hashmatch": false,
+    "schemamatch": true,
+    "evidencecomplete": false,
+    "claimabilityconfirmed": false,
+    "errorcode": "hash_mismatch"
+  },
+  "schema_mismatch.json": {
+    "computed_hash": "17fce97e025adfe1cbe7b6b6f1ff09ba5ac5bef4ed694faa0504ce7d15326b88",
+    "hashmatch": false,
+    "schemamatch": false,
+    "evidencecomplete": false,
+    "claimabilityconfirmed": false,
+    "errorcode": "hash_mismatch"
+  },
+  "tampered_receipt.json": {
+    "computed_hash": "9899f450414b692a962bcf6b153af97933db3fdaecc58c897f5ae16aafa1e80f",
+    "hashmatch": false,
+    "schemamatch": true,
+    "evidencecomplete": true,
+    "claimabilityconfirmed": false,
+    "errorcode": "hash_mismatch"
+  }
+}

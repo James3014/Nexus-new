@@ -1,0 +1,221 @@
+# T2.7 15-Task Recovery Baseline Manifest
+baseline_id: T2_7_15_TASK_RECOVERY_BASELINE
+source_run: T2_6_SYMPY_13031_REPRO_CLOSURE
+baseline_type: internal_recovery_baseline
+simulated: false
+claim_eligible: false
+public_claim_allowed: false
+claim_block_reason: internal_baseline_replay
+raw_task_count: 15
+deduped_task_count: 15
+
+tasks:
+  - instance_id: astropy__astropy-12907
+    project: astropy
+    expected_workspace: astropy
+    expected_dependency_profile: astropy-legacy
+    expected_verification_result: PASS
+    expected_model_calls: 0
+    expected_model_patch_reward: 0.0
+    expected_export_as_model_patch_success: false
+    expected_claim_eligible: false
+    expected_public_claim_allowed: false
+    expected_canonical_span_source: ast_boundary
+    recovery_rule_id: AST_SYMBOL_FIX
+    baseline_role: anchor
+
+  - instance_id: astropy__astropy-13236
+    project: astropy
+    expected_workspace: astropy
+    expected_dependency_profile: astropy-legacy
+    expected_verification_result: PASS
+    expected_model_calls: 0
+    expected_model_patch_reward: 0.0
+    expected_export_as_model_patch_success: false
+    expected_claim_eligible: false
+    expected_public_claim_allowed: false
+    expected_canonical_span_source: unified_diff
+    recovery_rule_id: REMOVE_BLOCK
+    baseline_role: anchor
+
+  - instance_id: astropy__astropy-13579
+    project: astropy
+    expected_workspace: astropy
+    expected_dependency_profile: astropy-legacy
+    expected_verification_result: PASS
+    expected_model_calls: 0
+    expected_model_patch_reward: 0.0
+    expected_export_as_model_patch_success: false
+    expected_claim_eligible: false
+    expected_public_claim_allowed: false
+    expected_canonical_span_source: locked_search
+    recovery_rule_id: locked_search_reuse
+    baseline_role: anchor
+
+  - instance_id: astropy__astropy-14182
+    project: astropy
+    expected_workspace: astropy
+    expected_dependency_profile: astropy-legacy
+    expected_verification_result: PASS
+    expected_model_calls: 0
+    expected_model_patch_reward: 0.0
+    expected_export_as_model_patch_success: false
+    expected_claim_eligible: false
+    expected_public_claim_allowed: false
+    expected_canonical_span_source: locked_search
+    recovery_rule_id: locked_search_reuse
+    baseline_role: anchor
+
+  - instance_id: sympy__sympy-12481
+    project: sympy
+    expected_workspace: sympy
+    expected_dependency_profile: sympy-python39
+    expected_verification_result: PASS
+    expected_model_calls: 0
+    expected_model_patch_reward: 0.0
+    expected_export_as_model_patch_success: false
+    expected_claim_eligible: false
+    expected_public_claim_allowed: false
+    expected_canonical_span_source: locked_search
+    recovery_rule_id: locked_search_reuse
+    baseline_role: anchor
+
+  - instance_id: astropy__astropy-13033
+    project: astropy
+    expected_workspace: astropy
+    expected_dependency_profile: astropy-legacy
+    expected_verification_result: PASS
+    expected_model_calls: 0
+    expected_model_patch_reward: 0.0
+    expected_export_as_model_patch_success: false
+    expected_claim_eligible: false
+    expected_public_claim_allowed: false
+    expected_canonical_span_source: any_valid
+    recovery_rule_id: unknown_pending_registry
+    baseline_role: closure
+
+  - instance_id: astropy__astropy-13453
+    project: astropy
+    expected_workspace: astropy
+    expected_dependency_profile: astropy-legacy-with-bs4-lxml
+    expected_verification_result: PASS
+    expected_model_calls: 0
+    expected_model_patch_reward: 0.0
+    expected_export_as_model_patch_success: false
+    expected_claim_eligible: false
+    expected_public_claim_allowed: false
+    expected_canonical_span_source: any_valid
+    recovery_rule_id: astropy_html_dependency_fix
+    baseline_role: closure
+
+  - instance_id: astropy__astropy-13398
+    project: astropy
+    expected_workspace: astropy
+    expected_dependency_profile: astropy-legacy
+    expected_verification_result: PASS
+    expected_model_calls: 0
+    expected_model_patch_reward: 0.0
+    expected_export_as_model_patch_success: false
+    expected_claim_eligible: false
+    expected_public_claim_allowed: false
+    expected_canonical_span_source: any_valid
+    recovery_rule_id: unknown_pending_registry
+    baseline_role: regression
+
+  - instance_id: sympy__sympy-13852
+    project: sympy
+    expected_workspace: sympy
+    expected_dependency_profile: sympy-python39
+    expected_verification_result: PASS
+    expected_model_calls: 0
+    expected_model_patch_reward: 0.0
+    expected_export_as_model_patch_success: false
+    expected_claim_eligible: false
+    expected_public_claim_allowed: false
+    expected_canonical_span_source: any_valid
+    recovery_rule_id: repro_env_noise
+    baseline_role: regression
+
+  - instance_id: sympy__sympy-13877
+    project: sympy
+    expected_workspace: sympy
+    expected_dependency_profile: sympy-python39
+    expected_verification_result: PASS
+    expected_model_calls: 0
+    expected_model_patch_reward: 0.0
+    expected_export_as_model_patch_success: false
+    expected_claim_eligible: false
+    expected_public_claim_allowed: false
+    expected_canonical_span_source: any_valid
+    recovery_rule_id: unknown_pending_registry
+    baseline_role: regression
+
+  - instance_id: astropy__astropy-13977
+    project: astropy
+    expected_workspace: astropy
+    expected_dependency_profile: astropy-legacy
+    expected_verification_result: PASS
+    expected_model_calls: 0
+    expected_model_patch_reward: 0.0
+    expected_export_as_model_patch_success: false
+    expected_claim_eligible: false
+    expected_public_claim_allowed: false
+    expected_canonical_span_source: any_valid
+    recovery_rule_id: unknown_pending_registry
+    baseline_role: new_diagnostic
+
+  - instance_id: sympy__sympy-13031
+    project: sympy
+    expected_workspace: sympy
+    expected_dependency_profile: sympy-python39
+    expected_verification_result: PASS
+    expected_model_calls: 0
+    expected_model_patch_reward: 0.0
+    expected_export_as_model_patch_success: false
+    expected_claim_eligible: false
+    expected_public_claim_allowed: false
+    expected_canonical_span_source: ast_boundary
+    recovery_rule_id: repro_script_fix
+    baseline_role: closure
+
+  - instance_id: astropy__astropy-14096
+    project: astropy
+    expected_workspace: astropy
+    expected_dependency_profile: astropy-legacy
+    expected_verification_result: PASS
+    expected_model_calls: 0
+    expected_model_patch_reward: 0.0
+    expected_export_as_model_patch_success: false
+    expected_claim_eligible: false
+    expected_public_claim_allowed: false
+    expected_canonical_span_source: any_valid
+    recovery_rule_id: unknown_pending_registry
+    baseline_role: new_diagnostic
+
+  - instance_id: sympy__sympy-13480
+    project: sympy
+    expected_workspace: sympy
+    expected_dependency_profile: sympy-python39
+    expected_verification_result: PASS
+    expected_model_calls: 0
+    expected_model_patch_reward: 0.0
+    expected_export_as_model_patch_success: false
+    expected_claim_eligible: false
+    expected_public_claim_allowed: false
+    expected_canonical_span_source: any_valid
+    recovery_rule_id: unknown_pending_registry
+    baseline_role: new_diagnostic
+
+  - instance_id: django__django-11099
+    project: django
+    expected_workspace: django
+    expected_dependency_profile: django-legacy
+    expected_verification_result: PASS
+    expected_model_calls: 0
+    expected_model_patch_reward: 0.0
+    expected_export_as_model_patch_success: false
+    expected_claim_eligible: false
+    expected_public_claim_allowed: false
+    expected_canonical_span_source: any_valid
+    recovery_rule_id: unknown_pending_registry
+    baseline_role: new_diagnostic

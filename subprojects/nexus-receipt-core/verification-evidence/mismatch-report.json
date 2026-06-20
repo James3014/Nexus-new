@@ -1,0 +1,9 @@
+{
+  "report_version": "1.0",
+  "date": "2026-06-16",
+  "commit_sha": "ea78cea5ae8b2b4ac6ae44f9b7e54619855ce448",
+  "fixtures_tested": 12,
+  "mismatches_found": 0,
+  "details": [],
+  "conclusion": "Zero mismatches between Rust verifier and Python canonicalizer across all 12 fixtures. The deterministic verification primitive is stable."
+}

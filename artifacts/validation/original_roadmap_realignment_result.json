@@ -1,0 +1,98 @@
+{
+  "verdict": "GREEN",
+  "total": 18,
+  "passed": 18,
+  "failed": 0,
+  "checks": [
+    {
+      "name": "manifest_exists",
+      "status": "PASS",
+      "detail": ""
+    },
+    {
+      "name": "5_canonical_tasks",
+      "status": "PASS",
+      "detail": "got 5"
+    },
+    {
+      "name": "all_expected_tasks",
+      "status": "PASS",
+      "detail": ""
+    },
+    {
+      "name": "closure_mapping_exists",
+      "status": "PASS",
+      "detail": ""
+    },
+    {
+      "name": "t5_not_used_as_closure",
+      "status": "PASS",
+      "detail": ""
+    },
+    {
+      "name": "model_calls_0_not_success",
+      "status": "PASS",
+      "detail": ""
+    },
+    {
+      "name": "fallback_not_success",
+      "status": "PASS",
+      "detail": ""
+    },
+    {
+      "name": "source_stale_not_failure",
+      "status": "PASS",
+      "detail": ""
+    },
+    {
+      "name": "public_claim_false",
+      "status": "PASS",
+      "detail": ""
+    },
+    {
+      "name": "before_after_table_exists",
+      "status": "PASS",
+      "detail": ""
+    },
+    {
+      "name": "rerun_decision_exists",
+      "status": "PASS",
+      "detail": ""
+    },
+    {
+      "name": "rerun_not_required",
+      "status": "PASS",
+      "detail": ""
+    },
+    {
+      "name": "seal_exists",
+      "status": "PASS",
+      "detail": ""
+    },
+    {
+      "name": "seal_status",
+      "status": "PASS",
+      "detail": ""
+    },
+    {
+      "name": "strata_boundary_exists",
+      "status": "PASS",
+      "detail": ""
+    },
+    {
+      "name": "runtime_boundary_clean",
+      "status": "PASS",
+      "detail": ""
+    },
+    {
+      "name": "no_hard_fail",
+      "status": "PASS",
+      "detail": ""
+    },
+    {
+      "name": "t5_not_p0_lite_closure",
+      "status": "PASS",
+      "detail": ""
+    }
+  ]
+}

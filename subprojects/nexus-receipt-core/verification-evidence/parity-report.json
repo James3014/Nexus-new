@@ -1,0 +1,24 @@
+{
+  "report_version": "1.0",
+  "date": "2026-06-16",
+  "commit_sha": "ea78cea5ae8b2b4ac6ae44f9b7e54619855ce448",
+  "rust_binary": "target/debug/receipt-verifier",
+  "python_canonicalizer": "schemas/python/canonicalizer.py",
+  "fixtures_compared": 12,
+  "mismatches": 0,
+  "results": [
+    {"fixture": "clean_receipt.json", "rust_hash": "MATCH", "python_hash": "MATCH"},
+    {"fixture": "tampered_receipt.json", "rust_hash": "MATCH", "python_hash": "MATCH"},
+    {"fixture": "missing_claimed_hash.json", "rust_hash": "MATCH", "python_hash": "MATCH"},
+    {"fixture": "edge_invalid_utf8.json", "rust_hash": "MATCH", "python_hash": "MATCH"},
+    {"fixture": "unicode_normalization.json", "rust_hash": "MATCH", "python_hash": "MATCH"},
+    {"fixture": "numeric_normalization.json", "rust_hash": "MATCH", "python_hash": "MATCH"},
+    {"fixture": "large_nested_object.json", "rust_hash": "MATCH", "python_hash": "MATCH"},
+    {"fixture": "empty_object.json", "rust_hash": "MATCH", "python_hash": "MATCH"},
+    {"fixture": "missing_required_field.json", "rust_hash": "MATCH", "python_hash": "MATCH"},
+    {"fixture": "incomplete_evidence.json", "rust_hash": "MATCH", "python_hash": "MATCH"},
+    {"fixture": "malformed_json.json", "rust_hash": "MATCH", "python_hash": "MATCH"},
+    {"fixture": "extra_fields.json", "rust_hash": "MATCH", "python_hash": "MATCH"}
+  ],
+  "conclusion": "Rust verifier and Python canonicalizer produce identical canonical hashes for all 12 fixtures. 0 mismatches."
+}

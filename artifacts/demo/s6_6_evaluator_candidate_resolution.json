@@ -1,0 +1,8 @@
+{
+  "resolution_status": "no_candidate_provided",
+  "evaluator_supplied": false,
+  "scorecard_status": "not_applicable_no_candidate",
+  "resolution_reason": "Operator has not provided evaluator alias, role, or any identifying information. No candidate to score.",
+  "created": "2026-06-18",
+  "next_required_action": "operator_provides_evaluator"
+}

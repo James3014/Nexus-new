@@ -1,0 +1,22 @@
+[
+  {
+    "instance_id": "psf__requests-2317",
+    "group": "A",
+    "sidecar_model": "",
+    "solved": true,
+    "wall_time_sec": 43.6,
+    "return_code": 0,
+    "stdout_tail": "📦 Loading princeton-nlp/SWE-bench_Verified...\n\n🚀 Starting REPAIR Loop for 1 tasks...\n\n============================================================\n[1/1] Processing psf__requests-2317 (Profile: python-default)\n  ⚓ Switching to base commit: 091991be0da19de9108dbe5e3752917fea3d7fdc\n  ✅ SUCCESS: Solve eligible!\n\n✅ Predictions saved to: /Users/jameschen/Workspace/nexus/benchmarking/swebench_lite/sequential_fusion_v1_A.jsonl\n",
+    "stderr_tail": "nvalid escape sequence '\\*'\n<unknown>:523: SyntaxWarning: invalid escape sequence '\\*'\n<unknown>:462: SyntaxWarning: invalid escape sequence '\\*'\n<unknown>:472: SyntaxWarning: invalid escape sequence '\\*'\n<unknown>:482: SyntaxWarning: invalid escape sequence '\\*'\n<unknown>:492: SyntaxWarning: invalid escape sequence '\\*'\n<unknown>:503: SyntaxWarning: invalid escape sequence '\\*'\n<unknown>:513: SyntaxWarning: invalid escape sequence '\\*'\n<unknown>:523: SyntaxWarning: invalid escape sequence '\\*'\n"
+  },
+  {
+    "instance_id": "psf__requests-2931",
+    "group": "A",
+    "sidecar_model": "",
+    "solved": true,
+    "wall_time_sec": 72.9,
+    "return_code": 0,
+    "stdout_tail": "📦 Loading princeton-nlp/SWE-bench_Verified...\n\n🚀 Starting REPAIR Loop for 1 tasks...\n\n============================================================\n[1/1] Processing psf__requests-2931 (Profile: python-default)\n  ⚓ Switching to base commit: 5f7a3a74aab1625c2bb65f643197ee885e3da576\n  ✅ SUCCESS: Solve eligible!\n\n✅ Predictions saved to: /Users/jameschen/Workspace/nexus/benchmarking/swebench_lite/sequential_fusion_v1_A.jsonl\n",
+    "stderr_tail": ""
+  }
+]

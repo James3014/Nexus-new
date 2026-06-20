@@ -1,0 +1,149 @@
+# T4.10 Final Model Candidate Registry
+# Frozen 2026-06-18 — 10-task sequence closure
+
+registry_id: T4_10_FINAL_MODEL_CANDIDATE_REGISTRY
+registry_version: 10.0.0
+frozen_date: 2026-06-18
+sequence: T3.0-T4.10
+model_name: qwen2.5-coder:14b-instruct-q3_K_M
+model_runtime: ollama_local
+
+fixture_backed_verified:
+  - candidate_id: MC001
+    instance_id: astropy__astropy-13236
+    project: astropy
+    candidate_status: fixture_backed_verified
+    first_success_run: T3_2
+    last_verified_run: T4_9
+    source_snapshot_hash: d16bfe05a744
+    prompt_contract_id: T3_REPLACE_ONLY_V1
+    indentation_projection_applied: false
+    token_content_changed_by_projection: false
+    fresh_model_patch_reward: 1.0
+    verification_result: PASS
+    attribution_clean: true
+    fixture_ready: true
+    replay_eligible: true
+    public_claim_allowed: false
+    requires_human_review_before_training: true
+    notes: "Block deletion. Model outputs PASS."
+
+  - candidate_id: MC006
+    instance_id: sympy__sympy-13852
+    project: sympy
+    candidate_status: fixture_backed_verified
+    first_success_run: T3_8
+    last_verified_run: T4_9
+    source_snapshot_hash: c807dfe75696
+    prompt_contract_id: T3_REPLACE_ONLY_V1
+    indentation_projection_applied: false
+    token_content_changed_by_projection: false
+    fresh_model_patch_reward: 1.0
+    verification_result: PASS
+    attribution_clean: true
+    fixture_ready: true
+    replay_eligible: true
+    public_claim_allowed: false
+    requires_human_review_before_training: true
+    notes: "Import fix. Add I to sympy.core imports."
+
+  - candidate_id: MC007
+    instance_id: astropy__astropy-12907
+    project: astropy
+    candidate_status: fixture_backed_verified
+    first_success_run: T4_8
+    last_verified_run: T4_9
+    source_snapshot_hash: d16bfe05a744
+    prompt_contract_id: T3_REPLACE_ONLY_V1
+    indentation_projection_applied: true
+    token_content_changed_by_projection: false
+    fresh_model_patch_reward: 1.0
+    verification_result: PASS
+    attribution_clean: true
+    fixture_ready: true
+    replay_eligible: true
+    public_claim_allowed: false
+    requires_human_review_before_training: true
+    notes: "AST boundary fix. Indentation normalized."
+
+  - candidate_id: MC008
+    instance_id: astropy__astropy-14182
+    project: astropy
+    candidate_status: fixture_backed_verified
+    first_success_run: T4_8
+    last_verified_run: T4_9
+    source_snapshot_hash: d16bfe05a744
+    prompt_contract_id: T3_REPLACE_ONLY_V1
+    indentation_projection_applied: true
+    token_content_changed_by_projection: false
+    fresh_model_patch_reward: 1.0
+    verification_result: PASS
+    attribution_clean: true
+    fixture_ready: true
+    replay_eligible: true
+    public_claim_allowed: false
+    requires_human_review_before_training: true
+    notes: "RST parser fix. start_line 3->2. Indentation normalized."
+
+historical_clean_excluded:
+  - candidate_id: MC002
+    instance_id: sympy__sympy-12419
+    project: sympy
+    candidate_status: historical_clean_excluded
+    historical_model_patch_reward: 1.0
+    historical_clean_preserved: true
+    fixture_ready: false
+    replay_eligible: false
+    exclusion_reason: source_stale
+    not_counted_as_model_failure: true
+    public_claim_allowed: false
+    requires_human_review_before_training: true
+
+  - candidate_id: MC003
+    instance_id: sympy__sympy-13647
+    project: sympy
+    candidate_status: historical_clean_excluded
+    historical_model_patch_reward: 1.0
+    historical_clean_preserved: true
+    fixture_ready: false
+    replay_eligible: false
+    exclusion_reason: source_stale
+    not_counted_as_model_failure: true
+    public_claim_allowed: false
+    requires_human_review_before_training: true
+
+  - candidate_id: MC004
+    instance_id: astropy__astropy-14365
+    project: astropy
+    candidate_status: historical_clean_excluded
+    historical_model_patch_reward: 1.0
+    historical_clean_preserved: true
+    fixture_ready: false
+    replay_eligible: false
+    exclusion_reason: source_stale
+    not_counted_as_model_failure: true
+    public_claim_allowed: false
+    requires_human_review_before_training: true
+
+  - candidate_id: MC005
+    instance_id: astropy__astropy-14309
+    project: astropy
+    candidate_status: historical_clean_excluded
+    historical_model_patch_reward: 1.0
+    historical_clean_preserved: true
+    fixture_ready: false
+    replay_eligible: false
+    exclusion_reason: source_stale
+    not_counted_as_model_failure: true
+    public_claim_allowed: false
+    requires_human_review_before_training: true
+
+negative_control:
+  - candidate_id: MC009
+    instance_id: sympy__sympy-11618
+    project: sympy
+    candidate_status: negative_control_no_op
+    model_patch_reward: 0.0
+    no_op_correctly_rejected: true
+    not_model_failure: true
+    useful_for: "negative example, no-op guard validation"

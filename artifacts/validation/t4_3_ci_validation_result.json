@@ -1,0 +1,68 @@
+{
+  "verdict": "GREEN",
+  "total": 12,
+  "passed": 12,
+  "failed": 0,
+  "checks": [
+    {
+      "name": "registry_exists",
+      "status": "PASS",
+      "detail": ""
+    },
+    {
+      "name": "has_20_candidates",
+      "status": "PASS",
+      "detail": ""
+    },
+    {
+      "name": "all_required_fields_present",
+      "status": "PASS",
+      "detail": ""
+    },
+    {
+      "name": "source_stale_not_model_failure",
+      "status": "PASS",
+      "detail": ""
+    },
+    {
+      "name": "model_calls_0_no_reward",
+      "status": "PASS",
+      "detail": ""
+    },
+    {
+      "name": "fallback_no_reward",
+      "status": "PASS",
+      "detail": ""
+    },
+    {
+      "name": "historical_not_active",
+      "status": "PASS",
+      "detail": ""
+    },
+    {
+      "name": "no_public_claim",
+      "status": "PASS",
+      "detail": ""
+    },
+    {
+      "name": "no_export_public",
+      "status": "PASS",
+      "detail": ""
+    },
+    {
+      "name": "manifest_has_replay",
+      "status": "PASS",
+      "detail": ""
+    },
+    {
+      "name": "manifest_has_blocked",
+      "status": "PASS",
+      "detail": ""
+    },
+    {
+      "name": "no_unknown_in_manifest",
+      "status": "PASS",
+      "detail": ""
+    }
+  ]
+}

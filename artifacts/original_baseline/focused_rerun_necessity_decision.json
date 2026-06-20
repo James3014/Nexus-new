@@ -1,0 +1,17 @@
+{
+  "rerun_decision": "NO_RERUN_NEEDED_P0_LITE_CLOSED",
+  "rerun_required": false,
+  "reason": "All 5 P0-lite tasks have receipt-backed closure, before/after table complete, taxonomy superseded by telemetry, no attribution pollution, no missing evidence",
+  "checks": {
+    "all_5_tasks_have_receipts": true,
+    "before_after_table_complete": true,
+    "taxonomy_reclassified_or_superseded": true,
+    "no_attribution_pollution": true,
+    "no_missing_evidence": true,
+    "model_calls_0_not_model_success": true,
+    "deterministic_fallback_not_model_success": true,
+    "source_stale_not_model_failure": true,
+    "public_claim_allowed_false": true,
+    "t5_not_used_as_p0_lite_closure": true
+  }
+}

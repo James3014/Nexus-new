@@ -1,0 +1,12 @@
+{
+  "id": "edge-unicode",
+  "type": "research",
+  "timestamp": "2026-01-01T00:00:00Z",
+  "model": "測試模型🏂",
+  "input_hash": "abc123",
+  "output_hash": "def456",
+  "evidence": [
+    {"type": "log", "content": "日本語テスト / русский / العربية / 繁體中文", "hash": "ev1"}
+  ],
+  "claimed_hash": "PLACEHOLDER"
+}

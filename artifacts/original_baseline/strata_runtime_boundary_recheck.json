@@ -1,0 +1,24 @@
+{
+  "strata_boundary": {
+    "S0_complete": true,
+    "S1_complete": true,
+    "S2_complete": true,
+    "S3_complete": true,
+    "training_path_archived": true,
+    "runtime_boundary_clean": true,
+    "runtime_boundary_risk": "none"
+  },
+  "checks": {
+    "strategy_envelope_exists": true,
+    "strategy_id_in_trace": true,
+    "strategy_adherence_gate_exists": true,
+    "prompt_renderer_shadow_only": true,
+    "diverse_strategy_internal_only": true,
+    "strategy_export_gated_by_human_review": true,
+    "training_offline_sandbox_only": true,
+    "no_s5_checkpoint_runtime_use": true,
+    "no_production_routing_change": true,
+    "no_prompt_injection_without_gate": true
+  },
+  "hard_fail": false
+}

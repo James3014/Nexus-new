@@ -1,0 +1,13 @@
+{
+  "before_after_table": [
+    {"instance_id": "astropy__astropy-12907", "original_failure": "SEARCH_MISMATCH", "latest_failure": "none", "solved": true, "closure_status": "closed_by_verified_fix", "model_calls": 0, "model_patch_reward": 0.0, "receipt_present": true, "claim_eligible": false, "public_claim_allowed": false},
+    {"instance_id": "astropy__astropy-13236", "original_failure": "REPLACE_SYNTAX_ERROR", "latest_failure": "none", "solved": true, "closure_status": "closed_by_verified_fix", "model_calls": 1, "model_patch_reward": 1.0, "receipt_present": true, "claim_eligible": false, "public_claim_allowed": false},
+    {"instance_id": "astropy__astropy-13579", "original_failure": "NO_EFFECTIVE_CHANGE", "latest_failure": "none", "solved": true, "closure_status": "closed_by_verified_fix", "model_calls": 0, "model_patch_reward": 0.0, "receipt_present": true, "claim_eligible": false, "public_claim_allowed": false},
+    {"instance_id": "astropy__astropy-14182", "original_failure": "FILE_NOT_FOUND", "latest_failure": "none", "solved": true, "closure_status": "closed_by_verified_fix", "model_calls": 1, "model_patch_reward": 0.0, "receipt_present": true, "claim_eligible": false, "public_claim_allowed": false},
+    {"instance_id": "sympy__sympy-12481", "original_failure": "SEARCH_MISMATCH", "latest_failure": "none", "solved": true, "closure_status": "closed_by_verified_fix", "model_calls": 0, "model_patch_reward": 0.0, "receipt_present": true, "claim_eligible": false, "public_claim_allowed": false}
+  ],
+  "taxonomy_before": {"SEARCH_MISMATCH": 2, "REPLACE_SYNTAX_ERROR": 1, "NO_EFFECTIVE_CHANGE": 1, "FILE_NOT_FOUND": 1},
+  "taxonomy_after": {"closed_by_verified_fix": 5},
+  "rerun_required": false,
+  "rerun_reason": "NO_RERUN_NEEDED_P0_LITE_CLOSED"
+}

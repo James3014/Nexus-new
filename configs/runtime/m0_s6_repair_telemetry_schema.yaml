@@ -1,0 +1,5 @@
+{
+  "schema_fields": ["run_id", "instance_id", "project", "model_name", "model_tier", "mode", "strategy_family", "strata_advisory_present", "strata_execution_effect", "source_fresh", "canonical_span_source", "patch_protocol", "model_calls", "syntax_gate_passed", "verification_passed", "solved", "failure_class", "retry_count", "model_patch_reward", "deterministic_fallback_reward", "attribution_clean", "public_claim_allowed", "export_as_public_claim"],
+  "mode_enum": ["bare", "nexus"],
+  "hard_invariants": {"public_claim_allowed": false, "export_as_public_claim": false, "strata_execution_effect": false}
+}

@@ -1,0 +1,21 @@
+{
+  "id": "test-clean-001",
+  "type": "research",
+  "timestamp": "2026-01-01T00:00:00Z",
+  "model": "nexus-3b",
+  "input_hash": "sha256:abc123def456",
+  "output_hash": "sha256:789xyz000",
+  "evidence": [
+    {
+      "type": "log",
+      "content": "Model generated output for query: What is 2+2?",
+      "hash": "sha256:evidence_log_001"
+    },
+    {
+      "type": "sanitization",
+      "content": "PII scan passed. No sensitive data detected.",
+      "hash": "sha256:evidence_sanitization_001"
+    }
+  ],
+  "claimed_hash": "5535626934749a769a0b25cfcf2996e40bf134844050e19eb4c938714b420a0f"
+}

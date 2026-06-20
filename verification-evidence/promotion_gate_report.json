@@ -1,0 +1,22 @@
+{
+  "schema": "promotion_gate.report.v1",
+  "generated_at": "2026-06-16T23:13:11Z",
+  "ledger_summary": {
+    "total_entries": 0,
+    "mismatch_entries": 0,
+    "low_entries": 0,
+    "high_entries": 0,
+    "critical_entries": 0
+  },
+  "promotion_conditions": {
+    "zero_high_critical_mismatches": true,
+    "ledger_has_data": false,
+    "met": false
+  },
+  "primary_cutover": {
+    "disabled_by_default": true,
+    "status": "DISABLED"
+  },
+  "overall_status": "NO_DATA",
+  "can_promote": false
+}

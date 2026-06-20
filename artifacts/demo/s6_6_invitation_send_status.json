@@ -1,0 +1,7 @@
+{
+  "invitation_sent": false,
+  "reason": "blocked_pending_operator_selection",
+  "evaluator_supplied": false,
+  "next_required_operator_action": "Provide evaluator alias, role, and relationship context",
+  "created": "2026-06-18"
+}

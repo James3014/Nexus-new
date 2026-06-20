@@ -1,0 +1,40 @@
+{
+  "id": "test-large-nested-001",
+  "type": "research",
+  "timestamp": "2026-01-01T00:00:00Z",
+  "model": "nexus-3b",
+  "input_hash": "sha256:abc123",
+  "output_hash": "sha256:def456",
+  "evidence": [
+    {
+      "type": "log",
+      "content": "Deeply nested structure",
+      "hash": "sha256:ev1",
+      "structure": {
+        "nested": {
+          "nested": {
+            "nested": {
+              "nested": {
+                "nested": {
+                  "nested": {
+                    "nested": {
+                      "nested": {
+                        "nested": {
+                          "nested": {
+                            "leaf": true,
+                            "depth": 10
+                          }
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  ],
+  "claimed_hash": "PLACEHOLDER_NOT_CANONICAL"
+}

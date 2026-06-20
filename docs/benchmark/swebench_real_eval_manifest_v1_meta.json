@@ -1,0 +1,32 @@
+{
+  "schema_version": "1.0",
+  "created_at": "2026-06-16",
+  "description": "Real SWE-bench eval manifest - 80+ deduplicated tasks",
+  "project_buckets": {
+    "airflow": 2,
+    "astropy": 18,
+    "black": 2,
+    "click": 2,
+    "cookiecutter": 1,
+    "django": 7,
+    "fastapi": 2,
+    "flask": 2,
+    "home-assistant": 1,
+    "httpie": 1,
+    "marshmallow": 1,
+    "matplotlib": 4,
+    "pallets": 1,
+    "psf": 8,
+    "pydantic": 1,
+    "pytest": 2,
+    "scikit-learn": 4,
+    "scrapy": 2,
+    "sphinx": 3,
+    "sqlalchemy": 1,
+    "sympy": 14,
+    "tensorboard": 1,
+    "transformers": 1,
+    "xarray": 1
+  },
+  "total_tasks": 82
+}

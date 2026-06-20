@@ -1,0 +1,46 @@
+{
+  "generated_at": "2026-06-16T12:43:55.629254",
+  "fixtures_tested": [
+    "clean_receipt.json",
+    "missing_evidence.json",
+    "schema_mismatch.json",
+    "tampered_receipt.json"
+  ],
+  "all_passed": true,
+  "mismatches": [],
+  "mismatch_count": 0,
+  "python_results": {
+    "clean_receipt.json": {
+      "computed_hash": "5535626934749a769a0b25cfcf2996e40bf134844050e19eb4c938714b420a0f",
+      "hashmatch": true,
+      "schemamatch": true,
+      "evidencecomplete": true,
+      "claimabilityconfirmed": true,
+      "errorcode": null
+    },
+    "missing_evidence.json": {
+      "computed_hash": "184e33b4e57ec74f0877fa1fd25e6e22263bca9659a658a3c043e3a56463416d",
+      "hashmatch": true,
+      "schemamatch": true,
+      "evidencecomplete": false,
+      "claimabilityconfirmed": false,
+      "errorcode": "evidence_incomplete"
+    },
+    "schema_mismatch.json": {
+      "computed_hash": "9da6c597c5876d2b75847ab86848143af099d515b1b9060ac046106a47267dc8",
+      "hashmatch": true,
+      "schemamatch": false,
+      "evidencecomplete": true,
+      "claimabilityconfirmed": false,
+      "errorcode": "schema_mismatch"
+    },
+    "tampered_receipt.json": {
+      "computed_hash": "8c6d4cb6111841cf85c477ac77f59cb56373ef65eaa941c9e31918e7d3e5c9d8",
+      "hashmatch": false,
+      "schemamatch": true,
+      "evidencecomplete": true,
+      "claimabilityconfirmed": false,
+      "errorcode": "hash_mismatch"
+    }
+  }
+}

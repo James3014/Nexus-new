@@ -1,0 +1,14 @@
+{
+  "taxonomy_status": "superseded_by_later_fields",
+  "original_taxonomy": ["VERBATIM_SEARCH_MISMATCH", "WRONG_TARGET_SPAN", "PATCH_SYNTAX_INVALID", "NO_EFFECTIVE_CHANGE_NOOP", "FILE_NOT_FOUND_PATH_RESOLUTION"],
+  "mapping_to_telemetry": {
+    "VERBATIM_SEARCH_MISMATCH": "canonical_span_source + match_gate_passed",
+    "WRONG_TARGET_SPAN": "canonical_span_source + canonical_span_confidence",
+    "PATCH_SYNTAX_INVALID": "syntax_gate_passed + effective_change",
+    "NO_EFFECTIVE_CHANGE_NOOP": "effective_change + effective_change_reason",
+    "FILE_NOT_FOUND_PATH_RESOLUTION": "path_resolution_subclass + target_file_exists"
+  },
+  "taxonomy_complete": true,
+  "telemetry_complete": true,
+  "closure_status": "taxonomy_superseded_by_explicit_telemetry_fields"
+}

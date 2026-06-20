@@ -1,0 +1,89 @@
+# T4.10 Final Replay Fixture Manifest
+
+fixture_version: 10.0.0
+frozen_date: 2026-06-18
+
+fixtures:
+  - candidate_id: MC001
+    instance_id: astropy__astropy-13236
+    fixture_status: ready_verified
+    fixture_ready: true
+    source_snapshot_hash: d16bfe05a744
+    target_file_path: astropy/table/table.py
+    prompt_contract_id: T3_REPLACE_ONLY_V1
+    replay_modes_supported: [A0, R0, M0]
+    last_replay_run: T4_9
+    last_replay_result: PASS
+    public_claim_allowed: false
+
+  - candidate_id: MC006
+    instance_id: sympy__sympy-13852
+    fixture_status: ready_verified
+    fixture_ready: true
+    source_snapshot_hash: c807dfe75696
+    target_file_path: sympy/functions/special/zeta_functions.py
+    prompt_contract_id: T3_REPLACE_ONLY_V1
+    replay_modes_supported: [A0, R0, M0]
+    last_replay_run: T4_9
+    last_replay_result: PASS
+    public_claim_allowed: false
+
+  - candidate_id: MC007
+    instance_id: astropy__astropy-12907
+    fixture_status: ready_verified
+    fixture_ready: true
+    source_snapshot_hash: d16bfe05a744
+    target_file_path: astropy/modeling/separable.py
+    prompt_contract_id: T3_REPLACE_ONLY_V1
+    replay_modes_supported: [A0, R0, M0]
+    last_replay_run: T4_9
+    last_replay_result: PASS
+    public_claim_allowed: false
+
+  - candidate_id: MC008
+    instance_id: astropy__astropy-14182
+    fixture_status: ready_verified
+    fixture_ready: true
+    source_snapshot_hash: d16bfe05a744
+    target_file_path: astropy/io/ascii/rst.py
+    prompt_contract_id: T3_REPLACE_ONLY_V1
+    replay_modes_supported: [A0, R0, M0]
+    last_replay_run: T4_9
+    last_replay_result: PASS
+    public_claim_allowed: false
+
+  - candidate_id: MC002
+    instance_id: sympy__sympy-12419
+    fixture_status: historical_only_no_fixture
+    fixture_ready: false
+    replay_allowed: false
+    exclusion_reason: source_stale
+    historical_clean_preserved: true
+    not_model_failure: true
+
+  - candidate_id: MC003
+    instance_id: sympy__sympy-13647
+    fixture_status: historical_only_no_fixture
+    fixture_ready: false
+    replay_allowed: false
+    exclusion_reason: source_stale
+    historical_clean_preserved: true
+    not_model_failure: true
+
+  - candidate_id: MC004
+    instance_id: astropy__astropy-14365
+    fixture_status: historical_only_no_fixture
+    fixture_ready: false
+    replay_allowed: false
+    exclusion_reason: source_stale
+    historical_clean_preserved: true
+    not_model_failure: true
+
+  - candidate_id: MC005
+    instance_id: astropy__astropy-14309
+    fixture_status: historical_only_no_fixture
+    fixture_ready: false
+    replay_allowed: false
+    exclusion_reason: source_stale
+    historical_clean_preserved: true
+    not_model_failure: true

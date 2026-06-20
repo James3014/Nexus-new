@@ -1,0 +1,4 @@
+{"instance_id": "astropy__astropy-13236", "strategy_id": "strategy_c24a714ba59e", "adherence_status": "pass", "abort_condition_triggered": false, "execution_effect": false, "trace_only": true, "public_claim_allowed": false}
+{"instance_id": "sympy__sympy-13852", "strategy_id": "strategy_b01c77e75171", "adherence_status": "pass", "abort_condition_triggered": false, "execution_effect": false, "trace_only": true, "public_claim_allowed": false}
+{"instance_id": "astropy__astropy-12907", "strategy_id": "strategy_77570c3c25ad", "adherence_status": "pass", "abort_condition_triggered": false, "execution_effect": false, "trace_only": true, "public_claim_allowed": false}
+{"instance_id": "astropy__astropy-14182", "strategy_id": "strategy_feb7a19b5017", "adherence_status": "pass", "abort_condition_triggered": false, "execution_effect": false, "trace_only": true, "public_claim_allowed": false}

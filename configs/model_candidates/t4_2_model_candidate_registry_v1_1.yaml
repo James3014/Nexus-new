@@ -1,0 +1,255 @@
+candidates:
+- attribution_clean: true
+  candidate_id: MC001
+  candidate_status: active_replayable
+  canonical_span_hash: ''
+  canonical_span_source: unified_diff
+  clean_room_replay_eligible: true
+  current_replay_anchor_status: anchored
+  current_source_hash: d16bfe05a744
+  deterministic_fallback_used: false
+  export_as_model_patch_success: false
+  export_as_public_claim: false
+  first_success_run: T3_2_REPLACE_ONLY_FORMAT_REFINEMENT
+  fresh_model_patch_reward: 1.0
+  fresh_qwen_replay_result: PASS
+  instance_id: astropy__astropy-13236
+  last_verified_run: T4_0_SOURCE_ANCHORING_REPAIR
+  manual_patch_applied: false
+  model_generated_search_used: false
+  model_name: qwen2.5-coder:14b-instruct-q3_K_M
+  model_output_hash: 03eb0887fab74698
+  model_patch_reward: 1.0
+  model_prompt_hash: 4acd94d595a39569
+  model_runtime: ollama_local
+  no_op_counted_as_success: false
+  notes: Block deletion pattern. Model outputs PASS. Verified in T3.2, T3.3, T3.6,
+    T3.7, T3.8, T3.9, T4.0.
+  project: astropy
+  prompt_contract_id: T3_REPLACE_ONLY_V1
+  public_claim_allowed: false
+  replay_block_reason: ''
+  replay_eligible: true
+  requires_human_review_before_training: true
+  source_anchor_status: anchored
+  source_revision_status: source_fresh
+  source_snapshot_hash: d16bfe05a744
+  stored_output_replay_result: PASS
+  t4_2_anchor_audit: PASS
+  truth_patch_applied: false
+  verification_result: PASS
+  wrapper_or_auto_repair_counted_as_success: false
+- attribution_clean: true
+  candidate_id: MC002
+  candidate_status: historical_clean_stale_source
+  canonical_span_hash: ''
+  canonical_span_source: locked_search
+  clean_room_replay_eligible: false
+  current_replay_anchor_status: stale
+  current_source_hash: c807dfe75696
+  deterministic_fallback_used: false
+  export_as_model_patch_success: false
+  export_as_public_claim: false
+  first_success_run: T3_6_CONTROLLED_4_TASK_MIXED
+  fresh_model_patch_reward: 0.0
+  fresh_qwen_replay_result: SKIP
+  instance_id: sympy__sympy-12419
+  last_verified_run: T3_7_CONTROLLED_6_TASK_EXPANSION
+  manual_patch_applied: false
+  model_generated_search_used: false
+  model_name: qwen2.5-coder:14b-instruct-q3_K_M
+  model_output_hash: ''
+  model_patch_reward: 1.0
+  model_prompt_hash: 0527a315f86498d1
+  model_runtime: ollama_local
+  no_op_counted_as_success: false
+  notes: Sympy single-line replacement. Buggy_line 'if not p:' not in current source.
+    Historical clean candidate.
+  project: sympy
+  prompt_contract_id: T3_REPLACE_ONLY_V1
+  public_claim_allowed: false
+  replay_block_reason: source_stale
+  replay_eligible: false
+  requires_human_review_before_training: true
+  source_anchor_status: broken
+  source_revision_status: already_patched
+  source_snapshot_hash: ''
+  stored_output_replay_result: SKIP
+  t4_2_anchor_audit: FAIL
+  truth_patch_applied: false
+  verification_result: PASS
+  wrapper_or_auto_repair_counted_as_success: false
+- attribution_clean: true
+  candidate_id: MC003
+  candidate_status: historical_clean_stale_source
+  canonical_span_hash: ''
+  canonical_span_source: locked_search
+  clean_room_replay_eligible: false
+  current_replay_anchor_status: stale
+  current_source_hash: c807dfe75696
+  deterministic_fallback_used: false
+  export_as_model_patch_success: false
+  export_as_public_claim: false
+  first_success_run: T3_6_CONTROLLED_4_TASK_MIXED
+  fresh_model_patch_reward: 0.0
+  fresh_qwen_replay_result: SKIP
+  instance_id: sympy__sympy-13647
+  last_verified_run: T3_7_CONTROLLED_6_TASK_EXPANSION
+  manual_patch_applied: false
+  model_generated_search_used: false
+  model_name: qwen2.5-coder:14b-instruct-q3_K_M
+  model_output_hash: ''
+  model_patch_reward: 1.0
+  model_prompt_hash: be9bdc382052ad42
+  model_runtime: ollama_local
+  no_op_counted_as_success: false
+  notes: Sympy single-line replacement. Buggy_line 'if not expr:' not in current source.
+    Historical clean candidate.
+  project: sympy
+  prompt_contract_id: T3_REPLACE_ONLY_V1
+  public_claim_allowed: false
+  replay_block_reason: source_stale
+  replay_eligible: false
+  requires_human_review_before_training: true
+  source_anchor_status: broken
+  source_revision_status: already_patched
+  source_snapshot_hash: ''
+  stored_output_replay_result: SKIP
+  t4_2_anchor_audit: FAIL
+  truth_patch_applied: false
+  verification_result: PASS
+  wrapper_or_auto_repair_counted_as_success: false
+- attribution_clean: true
+  candidate_id: MC004
+  candidate_status: historical_clean_stale_source
+  canonical_span_hash: ''
+  canonical_span_source: any_valid
+  clean_room_replay_eligible: false
+  current_replay_anchor_status: anchored
+  current_source_hash: d16bfe05a744
+  deterministic_fallback_used: false
+  export_as_model_patch_success: false
+  export_as_public_claim: false
+  first_success_run: T3_6_CONTROLLED_4_TASK_MIXED
+  fresh_model_patch_reward: 0.0
+  fresh_qwen_replay_result: SKIP
+  instance_id: astropy__astropy-14365
+  last_verified_run: T3_7_CONTROLLED_6_TASK_EXPANSION
+  manual_patch_applied: false
+  model_generated_search_used: false
+  model_name: qwen2.5-coder:14b-instruct-q3_K_M
+  model_output_hash: ''
+  model_patch_reward: 1.0
+  model_prompt_hash: ''
+  model_runtime: ollama_local
+  no_op_counted_as_success: false
+  notes: Float precision fix. value:.16G -> value:.15G. Verified in T3.6, T3.7.
+  project: astropy
+  prompt_contract_id: T3_REPLACE_ONLY_V1
+  public_claim_allowed: false
+  replay_block_reason: source_stale
+  replay_eligible: true
+  requires_human_review_before_training: true
+  source_anchor_status: anchored
+  source_revision_status: source_fresh
+  source_snapshot_hash: d16bfe05a744
+  stored_output_replay_result: SKIP
+  t4_2_anchor_audit: FAIL
+  truth_patch_applied: false
+  verification_result: PASS
+  wrapper_or_auto_repair_counted_as_success: false
+- attribution_clean: true
+  candidate_id: MC005
+  candidate_status: historical_clean_stale_source
+  canonical_span_hash: ''
+  canonical_span_source: any_valid
+  clean_room_replay_eligible: false
+  current_replay_anchor_status: anchored
+  current_source_hash: d16bfe05a744
+  deterministic_fallback_used: false
+  export_as_model_patch_success: false
+  export_as_public_claim: false
+  first_success_run: T3_7_CONTROLLED_6_TASK_EXPANSION
+  fresh_model_patch_reward: 0.0
+  fresh_qwen_replay_result: SKIP
+  instance_id: astropy__astropy-14309
+  last_verified_run: T3_7_CONTROLLED_6_TASK_EXPANSION
+  manual_patch_applied: false
+  model_generated_search_used: false
+  model_name: qwen2.5-coder:14b-instruct-q3_K_M
+  model_output_hash: ''
+  model_patch_reward: 1.0
+  model_prompt_hash: ''
+  model_runtime: ollama_local
+  no_op_counted_as_success: false
+  notes: Float precision fix. value:.16G -> value:.15G. Verified in T3.7.
+  project: astropy
+  prompt_contract_id: T3_REPLACE_ONLY_V1
+  public_claim_allowed: false
+  replay_block_reason: source_stale
+  replay_eligible: true
+  requires_human_review_before_training: true
+  source_anchor_status: anchored
+  source_revision_status: source_fresh
+  source_snapshot_hash: d16bfe05a744
+  stored_output_replay_result: SKIP
+  t4_2_anchor_audit: FAIL
+  truth_patch_applied: false
+  verification_result: PASS
+  wrapper_or_auto_repair_counted_as_success: false
+- attribution_clean: true
+  candidate_id: MC006
+  candidate_status: active_replayable
+  canonical_span_hash: ''
+  canonical_span_source: any_valid
+  clean_room_replay_eligible: true
+  current_replay_anchor_status: anchored
+  current_source_hash: c807dfe75696
+  deterministic_fallback_used: false
+  export_as_model_patch_success: false
+  export_as_public_claim: false
+  first_success_run: T3_8_NO_OP_GUARD_AND_8_TASK
+  fresh_model_patch_reward: 1.0
+  fresh_qwen_replay_result: PASS
+  instance_id: sympy__sympy-13852
+  last_verified_run: T4_0_SOURCE_ANCHORING_REPAIR
+  manual_patch_applied: false
+  model_generated_search_used: false
+  model_name: qwen2.5-coder:14b-instruct-q3_K_M
+  model_output_hash: ''
+  model_patch_reward: 1.0
+  model_prompt_hash: ''
+  model_runtime: ollama_local
+  no_op_counted_as_success: false
+  notes: Import fix. Add I to sympy.core imports. Verified in T3.8, T3.9, T4.0.
+  project: sympy
+  prompt_contract_id: T3_REPLACE_ONLY_V1
+  public_claim_allowed: false
+  replay_block_reason: ''
+  replay_eligible: true
+  requires_human_review_before_training: true
+  source_anchor_status: anchored
+  source_revision_status: source_fresh
+  source_snapshot_hash: c807dfe75696
+  stored_output_replay_result: PASS
+  t4_2_anchor_audit: PASS
+  truth_patch_applied: false
+  verification_result: PASS
+  wrapper_or_auto_repair_counted_as_success: false
+export_as_public_claim: false
+frozen_date: 2026-06-18
+model_name: qwen2.5-coder:14b-instruct-q3_K_M
+model_runtime: ollama_local
+public_claim_allowed: false
+registry_id: T4_1_MODEL_CANDIDATE_REGISTRY_V1
+registry_version: 1.1.0
+source_runs:
+- T3_2
+- T3_3
+- T3_5
+- T3_6
+- T3_7
+- T3_8
+- T3_9
+- T4_0
+t4_2_replay_date: '2026-06-18'

@@ -1,0 +1,158 @@
+# T4.2 Clean-Room Replay Eligibility Manifest
+# Only replay_eligible=true candidates
+
+manifest_id: T4_1_T4_2_CLEAN_ROOM_REPLAY_MANIFEST
+manifest_version: 1.0.0
+frozen_date: 2026-06-18
+total_replay_eligible: 12
+total_replay_blocked: 8
+
+replay_candidates:
+  - candidate_id: MC001
+    instance_id: astropy__astropy-13236
+    source_snapshot_hash: d16bfe05a744
+    target_file: astropy/table/table.py
+    replay_mode_allowed: [clean_room_source_reset, stored_model_output_replay, fresh_model_call_replay]
+    workspace_profile: astropy
+    dependency_profile: astropy-legacy
+    expected_patch_shape: block_deletion
+
+  - candidate_id: MC002
+    instance_id: sympy__sympy-13852
+    source_snapshot_hash: c807dfe75696
+    target_file: sympy/functions/special/zeta_functions.py
+    replay_mode_allowed: [clean_room_source_reset, stored_model_output_replay, fresh_model_call_replay]
+    workspace_profile: sympy
+    dependency_profile: sympy-python39
+    expected_patch_shape: single_line_replacement
+
+  - candidate_id: MC003
+    instance_id: astropy__astropy-12907
+    source_snapshot_hash: d16bfe05a744
+    target_file: astropy/modeling/separable.py
+    replay_mode_allowed: [clean_room_source_reset, stored_model_output_replay]
+    workspace_profile: astropy
+    dependency_profile: astropy-legacy
+    expected_patch_shape: single_line_replacement
+
+  - candidate_id: MC004
+    instance_id: astropy__astropy-14182
+    source_snapshot_hash: d16bfe05a744
+    target_file: astropy/io/ascii/rst.py
+    replay_mode_allowed: [clean_room_source_reset, stored_model_output_replay, fresh_model_call_replay]
+    workspace_profile: astropy
+    dependency_profile: astropy-legacy
+    expected_patch_shape: single_line_replacement
+
+  - candidate_id: MC005
+    instance_id: astropy__astropy-13453
+    source_snapshot_hash: d16bfe05a744
+    target_file: astropy/io/ascii/html.py
+    replay_mode_allowed: [clean_room_source_reset, stored_model_output_replay, fresh_model_call_replay]
+    workspace_profile: astropy
+    dependency_profile: astropy-legacy
+    expected_patch_shape: single_line_replacement
+
+  - candidate_id: MC006
+    instance_id: astropy__astropy-13579
+    source_snapshot_hash: d16bfe05a744
+    target_file: astropy/wcs/wcsapi/wrappers/sliced_wcs.py
+    replay_mode_allowed: [clean_room_source_reset, stored_model_output_replay, fresh_model_call_replay]
+    workspace_profile: astropy
+    dependency_profile: astropy-legacy
+    expected_patch_shape: indentation_aware_insertion
+
+  - candidate_id: MC011
+    instance_id: sympy__sympy-13031
+    source_snapshot_hash: c807dfe75696
+    target_file: sympy/matrices/sparse.py
+    replay_mode_allowed: [clean_room_source_reset, stored_model_output_replay]
+    workspace_profile: sympy
+    dependency_profile: sympy-python39
+    expected_patch_shape: multi_line_block_replacement
+
+  - candidate_id: MC012
+    instance_id: sympy__sympy-11618
+    source_snapshot_hash: c807dfe75696
+    target_file: sympy/core/numbers.py
+    replay_mode_allowed: [clean_room_source_reset, stored_model_output_replay, fresh_model_call_replay]
+    workspace_profile: sympy
+    dependency_profile: sympy-python39
+    expected_patch_shape: single_line_replacement
+
+  - candidate_id: MC016
+    instance_id: astropy__astropy-13033
+    source_snapshot_hash: d16bfe05a744
+    target_file: astropy/timeseries/core.py
+    replay_mode_allowed: [clean_room_source_reset, stored_model_output_replay]
+    workspace_profile: astropy
+    dependency_profile: astropy-legacy
+    expected_patch_shape: single_line_replacement
+
+  - candidate_id: MC017
+    instance_id: sympy__sympy-12481
+    source_snapshot_hash: c807dfe75696
+    target_file: sympy/combinatorics/permutations.py
+    replay_mode_allowed: [clean_room_source_reset, stored_model_output_replay]
+    workspace_profile: sympy
+    dependency_profile: sympy-python39
+    expected_patch_shape: single_line_replacement
+
+  - candidate_id: MC018
+    instance_id: sympy__sympy-13877
+    source_snapshot_hash: c807dfe75696
+    target_file: sympy/core/sympify.py
+    replay_mode_allowed: [clean_room_source_reset, stored_model_output_replay]
+    workspace_profile: sympy
+    dependency_profile: sympy-python39
+    expected_patch_shape: single_line_replacement
+
+  - candidate_id: MC019
+    instance_id: sympy__sympy-13480
+    source_snapshot_hash: c807dfe75696
+    target_file: sympy/core/sympify.py
+    replay_mode_allowed: [clean_room_source_reset, stored_model_output_replay]
+    workspace_profile: sympy
+    dependency_profile: sympy-python39
+    expected_patch_shape: single_line_replacement
+
+replay_blocked:
+  - candidate_id: MC007
+    instance_id: sympy__sympy-12419
+    block_reason: source_already_patched
+    historical_clean: true
+
+  - candidate_id: MC008
+    instance_id: sympy__sympy-13647
+    block_reason: source_already_patched
+    historical_clean: true
+
+  - candidate_id: MC009
+    instance_id: astropy__astropy-14365
+    block_reason: source_already_patched
+    historical_clean: true
+
+  - candidate_id: MC010
+    instance_id: astropy__astropy-14309
+    block_reason: source_already_patched
+    historical_clean: true
+
+  - candidate_id: MC013
+    instance_id: astropy__astropy-13398
+    block_reason: source_already_patched
+    historical_clean: true
+
+  - candidate_id: MC014
+    instance_id: astropy__astropy-14096
+    block_reason: source_already_patched
+    historical_clean: true
+
+  - candidate_id: MC015
+    instance_id: astropy__astropy-13977
+    block_reason: source_already_patched
+    historical_clean: true
+
+  - candidate_id: MC020
+    instance_id: django__django-11099
+    block_reason: source_already_patched
+    historical_clean: true

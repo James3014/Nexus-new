@@ -1,0 +1,101 @@
+{
+  "schema": "rollback_drill.report.v1",
+  "generated_at": "2026-06-16T23:13:07Z",
+  "total_test_cases": 13,
+  "python_fallback_count": 0,
+  "mismatches": 0,
+  "results": [
+    {
+      "from": "INTAKE",
+      "to": "CLARIFY",
+      "python_result": true,
+      "rust_result": true,
+      "status": "MATCH"
+    },
+    {
+      "from": "CLARIFY",
+      "to": "OUTLINE",
+      "python_result": true,
+      "rust_result": true,
+      "status": "MATCH"
+    },
+    {
+      "from": "OUTLINE",
+      "to": "RESEARCH",
+      "python_result": true,
+      "rust_result": true,
+      "status": "MATCH"
+    },
+    {
+      "from": "RESEARCH",
+      "to": "DESIGN",
+      "python_result": true,
+      "rust_result": true,
+      "status": "MATCH"
+    },
+    {
+      "from": "DESIGN",
+      "to": "PLAN",
+      "python_result": true,
+      "rust_result": true,
+      "status": "MATCH"
+    },
+    {
+      "from": "PLAN",
+      "to": "EXECUTE",
+      "python_result": true,
+      "rust_result": true,
+      "status": "MATCH"
+    },
+    {
+      "from": "EXECUTE",
+      "to": "VERIFY",
+      "python_result": true,
+      "rust_result": true,
+      "status": "MATCH"
+    },
+    {
+      "from": "VERIFY",
+      "to": "CLOSE",
+      "python_result": true,
+      "rust_result": true,
+      "status": "MATCH"
+    },
+    {
+      "from": "INTAKE",
+      "to": "INTAKE",
+      "python_result": true,
+      "rust_result": true,
+      "status": "MATCH"
+    },
+    {
+      "from": "CLARIFY",
+      "to": "CLARIFY",
+      "python_result": true,
+      "rust_result": true,
+      "status": "MATCH"
+    },
+    {
+      "from": "INTAKE",
+      "to": "EXECUTE",
+      "python_result": false,
+      "rust_result": false,
+      "status": "MATCH"
+    },
+    {
+      "from": "PLAN",
+      "to": "CLARIFY",
+      "python_result": false,
+      "rust_result": false,
+      "status": "MATCH"
+    },
+    {
+      "from": "CLOSE",
+      "to": "INTAKE",
+      "python_result": false,
+      "rust_result": false,
+      "status": "MATCH"
+    }
+  ],
+  "passed": true
+}

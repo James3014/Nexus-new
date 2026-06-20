@@ -1,0 +1,515 @@
+# T4.1 Frozen Model Candidate Registry
+# Frozen 2026-06-18 — Evidence Freeze + Source Revision Hygiene
+
+registry_id: T4_1_FROZEN_MODEL_CANDIDATE_REGISTRY
+registry_version: 1.0.0
+frozen_date: 2026-06-18
+source_runs: [T2_0, T2_1, T2_2, T2_3, T2_4, T2_5, T2_6, T2_8, T2_9, T3_0, T3_1, T3_2, T3_3, T3_5, T3_6, T3_7, T3_8, T3_9, T4_0, T4_1, T4_2, T4_3, T4_4, T4_5, T4_6, T4_7, T4_8, T4_9, T4_10, S0, S1, S1_1, S1_2, S2, S2_1, S2_2, S3, S3_1, S4, S4_1, S4_2, S4_3, S4_4, S4_5, S4_6, S4_7, S4_8, S4_9, S5_0, S5_1, S5_2, S5_3, S5_4, S5_5, S5_6, S5_7]
+total_instance_ids: 20
+public_claim_allowed: false
+export_as_public_claim: false
+
+candidates:
+  # ── Active Replayable (source clean, model_patch_reward=1.0) ──
+
+  - candidate_id: MC001
+    instance_id: astropy__astropy-13236
+    project: astropy
+    first_success_run: T3_2
+    last_observed_run: S5_7
+    target_file: astropy/table/table.py
+    patch_shape: block_deletion
+    model_name: qwen2.5-coder:14b-instruct-q3_K_M
+    model_backend: ollama_local
+    model_calls: 1
+    model_output_captured: true
+    verification_result: PASS
+    model_patch_reward: 1.0
+    deterministic_fallback_used: true
+    ast_fallback_used: false
+    stored_output_replay_used: false
+    public_claim_allowed: false
+    export_as_public_claim: false
+    requires_human_review_before_training: true
+    evidence_tier: active_replayable
+    source_revision_status: source_fresh
+    replay_eligible: true
+    replay_block_reason: ""
+    count_as_model_failure: false
+
+  - candidate_id: MC002
+    instance_id: sympy__sympy-13852
+    project: sympy
+    first_success_run: T3_8
+    last_observed_run: S5_7
+    target_file: sympy/functions/special/zeta_functions.py
+    patch_shape: single_line_replacement
+    model_name: qwen2.5-coder:14b-instruct-q3_K_M
+    model_backend: ollama_local
+    model_calls: 1
+    model_output_captured: true
+    verification_result: PASS
+    model_patch_reward: 1.0
+    deterministic_fallback_used: true
+    ast_fallback_used: false
+    stored_output_replay_used: false
+    public_claim_allowed: false
+    export_as_public_claim: false
+    requires_human_review_before_training: true
+    evidence_tier: active_replayable
+    source_revision_status: source_fresh
+    replay_eligible: true
+    replay_block_reason: ""
+    count_as_model_failure: false
+
+  - candidate_id: MC003
+    instance_id: astropy__astropy-12907
+    project: astropy
+    first_success_run: T4_8
+    last_observed_run: S5_7
+    target_file: astropy/modeling/separable.py
+    patch_shape: single_line_replacement
+    model_name: qwen2.5-coder:14b-instruct-q3_K_M
+    model_backend: ollama_local
+    model_calls: 0
+    model_output_captured: false
+    verification_result: PASS
+    model_patch_reward: 0.0
+    deterministic_fallback_used: true
+    ast_fallback_used: false
+    stored_output_replay_used: false
+    public_claim_allowed: false
+    export_as_public_claim: false
+    requires_human_review_before_training: true
+    evidence_tier: active_replayable
+    source_revision_status: source_fresh
+    replay_eligible: true
+    replay_block_reason: ""
+    count_as_model_failure: false
+
+  - candidate_id: MC004
+    instance_id: astropy__astropy-14182
+    project: astropy
+    first_success_run: T4_8
+    last_observed_run: S5_7
+    target_file: astropy/io/ascii/rst.py
+    patch_shape: single_line_replacement
+    model_name: qwen2.5-coder:14b-instruct-q3_K_M
+    model_backend: ollama_local
+    model_calls: 1
+    model_output_captured: true
+    verification_result: PASS
+    model_patch_reward: 0.0
+    deterministic_fallback_used: false
+    ast_fallback_used: false
+    stored_output_replay_used: false
+    public_claim_allowed: false
+    export_as_public_claim: false
+    requires_human_review_before_training: true
+    evidence_tier: active_replayable
+    source_revision_status: source_fresh
+    replay_eligible: true
+    replay_block_reason: ""
+    count_as_model_failure: false
+
+  - candidate_id: MC005
+    instance_id: astropy__astropy-13453
+    project: astropy
+    first_success_run: T4_10
+    last_observed_run: S5_7
+    target_file: astropy/io/ascii/html.py
+    patch_shape: single_line_replacement
+    model_name: qwen2.5-coder:14b-instruct-q3_K_M
+    model_backend: ollama_local
+    model_calls: 1
+    model_output_captured: true
+    verification_result: PASS
+    model_patch_reward: 1.0
+    deterministic_fallback_used: true
+    ast_fallback_used: false
+    stored_output_replay_used: false
+    public_claim_allowed: false
+    export_as_public_claim: false
+    requires_human_review_before_training: true
+    evidence_tier: active_replayable
+    source_revision_status: source_fresh
+    replay_eligible: true
+    replay_block_reason: ""
+    count_as_model_failure: false
+
+  - candidate_id: MC006
+    instance_id: astropy__astropy-13579
+    project: astropy
+    first_success_run: S4_6
+    last_observed_run: S4_9
+    target_file: astropy/wcs/wcsapi/wrappers/sliced_wcs.py
+    patch_shape: indentation_aware_insertion
+    model_name: qwen2.5-coder:14b-instruct-q3_K_M
+    model_backend: ollama_local
+    model_calls: 1
+    model_output_captured: true
+    verification_result: PASS
+    model_patch_reward: 1.0
+    deterministic_fallback_used: false
+    ast_fallback_used: false
+    stored_output_replay_used: false
+    public_claim_allowed: false
+    export_as_public_claim: false
+    requires_human_review_before_training: true
+    evidence_tier: active_replayable
+    source_revision_status: source_fresh
+    replay_eligible: true
+    replay_block_reason: ""
+    count_as_model_failure: false
+
+  - candidate_id: MC007
+    instance_id: sympy__sympy-12481
+    project: sympy
+    first_success_run: T3_6
+    last_observed_run: T3_7
+    target_file: sympy/polys/polytools.py
+    patch_shape: single_line_replacement
+    model_name: qwen2.5-coder:14b-instruct-q3_K_M
+    model_backend: ollama_local
+    model_calls: 1
+    model_output_captured: true
+    verification_result: PASS
+    model_patch_reward: 1.0
+    deterministic_fallback_used: false
+    ast_fallback_used: false
+    stored_output_replay_used: false
+    public_claim_allowed: false
+    export_as_public_claim: false
+    requires_human_review_before_training: true
+    evidence_tier: historical_clean_source_stale
+    source_revision_status: source_already_patched
+    replay_eligible: false
+    replay_block_reason: buggy_line_not_in_current_source
+    count_as_model_failure: false
+
+  - candidate_id: MC008
+    instance_id: sympy__sympy-13647
+    project: sympy
+    first_success_run: T3_6
+    last_observed_run: T3_7
+    target_file: sympy/simplify/simplify.py
+    patch_shape: single_line_replacement
+    model_name: qwen2.5-coder:14b-instruct-q3_K_M
+    model_backend: ollama_local
+    model_calls: 1
+    model_output_captured: true
+    verification_result: PASS
+    model_patch_reward: 1.0
+    deterministic_fallback_used: false
+    ast_fallback_used: false
+    stored_output_replay_used: false
+    public_claim_allowed: false
+    export_as_public_claim: false
+    requires_human_review_before_training: true
+    evidence_tier: historical_clean_source_stale
+    source_revision_status: source_already_patched
+    replay_eligible: false
+    replay_block_reason: buggy_line_not_in_current_source
+    count_as_model_failure: false
+
+  - candidate_id: MC009
+    instance_id: astropy__astropy-14365
+    project: astropy
+    first_success_run: T3_6
+    last_observed_run: T3_7
+    target_file: astropy/io/fits/card.py
+    patch_shape: single_line_replacement
+    model_name: qwen2.5-coder:14b-instruct-q3_K_M
+    model_backend: ollama_local
+    model_calls: 1
+    model_output_captured: true
+    verification_result: PASS
+    model_patch_reward: 1.0
+    deterministic_fallback_used: false
+    ast_fallback_used: false
+    stored_output_replay_used: false
+    public_claim_allowed: false
+    export_as_public_claim: false
+    requires_human_review_before_training: true
+    evidence_tier: historical_clean_source_stale
+    source_revision_status: source_already_patched
+    replay_eligible: false
+    replay_block_reason: buggy_line_not_in_current_source
+    count_as_model_failure: false
+
+  - candidate_id: MC010
+    instance_id: astropy__astropy-14309
+    project: astropy
+    first_success_run: T3_7
+    last_observed_run: T3_7
+    target_file: astropy/io/fits/card.py
+    patch_shape: single_line_replacement
+    model_name: qwen2.5-coder:14b-instruct-q3_K_M
+    model_backend: ollama_local
+    model_calls: 1
+    model_output_captured: true
+    verification_result: PASS
+    model_patch_reward: 1.0
+    deterministic_fallback_used: false
+    ast_fallback_used: false
+    stored_output_replay_used: false
+    public_claim_allowed: false
+    export_as_public_claim: false
+    requires_human_review_before_training: true
+    evidence_tier: historical_clean_source_stale
+    source_revision_status: source_already_patched
+    replay_eligible: false
+    replay_block_reason: buggy_line_not_in_current_source
+    count_as_model_failure: false
+
+  - candidate_id: MC011
+    instance_id: sympy__sympy-13031
+    project: sympy
+    first_success_run: S4_6
+    last_observed_run: S4_8
+    target_file: sympy/matrices/sparse.py
+    patch_shape: multi_line_block_replacement
+    model_name: qwen2.5-coder:14b-instruct-q3_K_M
+    model_backend: ollama_local
+    model_calls: 1
+    model_output_captured: true
+    verification_result: PASS
+    model_patch_reward: 0.0
+    deterministic_fallback_used: true
+    ast_fallback_used: false
+    stored_output_replay_used: true
+    public_claim_allowed: false
+    export_as_public_claim: false
+    requires_human_review_before_training: true
+    evidence_tier: stored_output_replay_verified
+    source_revision_status: source_fresh
+    replay_eligible: true
+    replay_block_reason: ""
+    count_as_model_failure: false
+
+  - candidate_id: MC012
+    instance_id: sympy__sympy-11618
+    project: sympy
+    first_success_run: S5_6
+    last_observed_run: S5_7
+    target_file: sympy/core/numbers.py
+    patch_shape: single_line_replacement
+    model_name: qwen2.5-coder:14b-instruct-q3_K_M
+    model_backend: ollama_local
+    model_calls: 1
+    model_output_captured: true
+    verification_result: PASS
+    model_patch_reward: 1.0
+    deterministic_fallback_used: false
+    ast_fallback_used: false
+    stored_output_replay_used: false
+    public_claim_allowed: false
+    export_as_public_claim: false
+    requires_human_review_before_training: true
+    evidence_tier: active_replayable
+    source_revision_status: source_fresh
+    replay_eligible: true
+    replay_block_reason: ""
+    count_as_model_failure: false
+
+  # ── Source Stale (historical clean but not replayable) ──
+
+  - candidate_id: MC013
+    instance_id: astropy__astropy-13398
+    project: astropy
+    first_success_run: T2_8
+    last_observed_run: T2_9
+    target_file: astropy/io/fits/card.py
+    patch_shape: single_line_replacement
+    model_name: deterministic
+    model_backend: deterministic
+    model_calls: 0
+    model_output_captured: false
+    verification_result: PASS
+    model_patch_reward: 0.0
+    deterministic_fallback_used: false
+    ast_fallback_used: false
+    stored_output_replay_used: false
+    public_claim_allowed: false
+    export_as_public_claim: false
+    requires_human_review_before_training: true
+    evidence_tier: historical_clean_source_stale
+    source_revision_status: source_already_patched
+    replay_eligible: false
+    replay_block_reason: buggy_line_not_in_current_source
+    count_as_model_failure: false
+
+  - candidate_id: MC014
+    instance_id: astropy__astropy-14096
+    project: astropy
+    first_success_run: T2_8
+    last_observed_run: T2_9
+    target_file: astropy/io/fits/card.py
+    patch_shape: single_line_replacement
+    model_name: deterministic
+    model_backend: deterministic
+    model_calls: 0
+    model_output_captured: false
+    verification_result: PASS
+    model_patch_reward: 0.0
+    deterministic_fallback_used: false
+    ast_fallback_used: false
+    stored_output_replay_used: false
+    public_claim_allowed: false
+    export_as_public_claim: false
+    requires_human_review_before_training: true
+    evidence_tier: historical_clean_source_stale
+    source_revision_status: source_already_patched
+    replay_eligible: false
+    replay_block_reason: buggy_line_not_in_current_source
+    count_as_model_failure: false
+
+  - candidate_id: MC015
+    instance_id: astropy__astropy-13977
+    project: astropy
+    first_success_run: T2_8
+    last_observed_run: T2_9
+    target_file: astropy/modeling/core.py
+    patch_shape: single_line_replacement
+    model_name: deterministic
+    model_backend: deterministic
+    model_calls: 0
+    model_output_captured: false
+    verification_result: PASS
+    model_patch_reward: 0.0
+    deterministic_fallback_used: false
+    ast_fallback_used: false
+    stored_output_replay_used: false
+    public_claim_allowed: false
+    export_as_public_claim: false
+    requires_human_review_before_training: true
+    evidence_tier: historical_clean_source_stale
+    source_revision_status: source_already_patched
+    replay_eligible: false
+    replay_block_reason: buggy_line_not_in_current_source
+    count_as_model_failure: false
+
+  - candidate_id: MC016
+    instance_id: astropy__astropy-13033
+    project: astropy
+    first_success_run: T2_8
+    last_observed_run: T2_9
+    target_file: astropy/timeseries/core.py
+    patch_shape: single_line_replacement
+    model_name: deterministic
+    model_backend: deterministic
+    model_calls: 0
+    model_output_captured: false
+    verification_result: PASS
+    model_patch_reward: 0.0
+    deterministic_fallback_used: false
+    ast_fallback_used: false
+    stored_output_replay_used: false
+    public_claim_allowed: false
+    export_as_public_claim: false
+    requires_human_review_before_training: true
+    evidence_tier: active_replayable
+    source_revision_status: source_fresh
+    replay_eligible: true
+    replay_block_reason: ""
+    count_as_model_failure: false
+
+  - candidate_id: MC017
+    instance_id: sympy__sympy-12481
+    project: sympy
+    first_success_run: T2_8
+    last_observed_run: T2_9
+    target_file: sympy/combinatorics/permutations.py
+    patch_shape: single_line_replacement
+    model_name: deterministic
+    model_backend: deterministic
+    model_calls: 0
+    model_output_captured: false
+    verification_result: PASS
+    model_patch_reward: 0.0
+    deterministic_fallback_used: false
+    ast_fallback_used: false
+    stored_output_replay_used: false
+    public_claim_allowed: false
+    export_as_public_claim: false
+    requires_human_review_before_training: true
+    evidence_tier: active_replayable
+    source_revision_status: source_fresh
+    replay_eligible: true
+    replay_block_reason: ""
+    count_as_model_failure: false
+
+  - candidate_id: MC018
+    instance_id: sympy__sympy-13877
+    project: sympy
+    first_success_run: T2_8
+    last_observed_run: T2_9
+    target_file: sympy/core/sympify.py
+    patch_shape: single_line_replacement
+    model_name: deterministic
+    model_backend: deterministic
+    model_calls: 0
+    model_output_captured: false
+    verification_result: PASS
+    model_patch_reward: 0.0
+    deterministic_fallback_used: false
+    ast_fallback_used: false
+    stored_output_replay_used: false
+    public_claim_allowed: false
+    export_as_public_claim: false
+    requires_human_review_before_training: true
+    evidence_tier: active_replayable
+    source_revision_status: source_fresh
+    replay_eligible: true
+    replay_block_reason: ""
+    count_as_model_failure: false
+
+  - candidate_id: MC019
+    instance_id: sympy__sympy-13480
+    project: sympy
+    first_success_run: T2_8
+    last_observed_run: T2_9
+    target_file: sympy/core/sympify.py
+    patch_shape: single_line_replacement
+    model_name: deterministic
+    model_backend: deterministic
+    model_calls: 0
+    model_output_captured: false
+    verification_result: PASS
+    model_patch_reward: 0.0
+    deterministic_fallback_used: false
+    ast_fallback_used: false
+    stored_output_replay_used: false
+    public_claim_allowed: false
+    export_as_public_claim: false
+    requires_human_review_before_training: true
+    evidence_tier: active_replayable
+    source_revision_status: source_fresh
+    replay_eligible: true
+    replay_block_reason: ""
+    count_as_model_failure: false
+
+  - candidate_id: MC020
+    instance_id: django__django-11099
+    project: django
+    first_success_run: T2_8
+    last_observed_run: T2_9
+    target_file: django/core/handlers/base.py
+    patch_shape: single_line_replacement
+    model_name: deterministic
+    model_backend: deterministic
+    model_calls: 0
+    model_output_captured: false
+    verification_result: PASS
+    model_patch_reward: 0.0
+    deterministic_fallback_used: false
+    ast_fallback_used: false
+    stored_output_replay_used: false
+    public_claim_allowed: false
+    export_as_public_claim: false
+    requires_human_review_before_training: true
+    evidence_tier: historical_clean_source_stale
+    source_revision_status: source_already_patched
+    replay_eligible: false
+    replay_block_reason: buggy_line_not_in_current_source
+    count_as_model_failure: false

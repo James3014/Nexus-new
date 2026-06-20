@@ -1,0 +1,12 @@
+# Cargo.toml for nexus-receipt-core
+
+[workspace]
+members = ["rust/receipt_verifier"]
+resolver = "2"
+
+[workspace.package]
+version = "0.1.0"
+edition = "2021"
+license = "Apache-2.0"
+repository = "https://github.com/nexus-project/nexus-receipt-core"
+description = "Tamper-evident AI execution receipts and claimability verification"

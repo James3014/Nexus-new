@@ -1,0 +1,28 @@
+{
+  "id": "edge-nested-objects",
+  "type": "research",
+  "timestamp": "2026-01-01T00:00:00Z",
+  "model": "test-model",
+  "input_hash": "abc123",
+  "output_hash": "def456",
+  "metadata": {
+    "level1": {
+      "level2": {
+        "level3": "deep"
+      },
+      "z_field": 1,
+      "a_field": 2
+    },
+    "z_outer": true,
+    "a_outer": false
+  },
+  "evidence": [
+    {
+      "type": "structured",
+      "content": {"nested": {"key": "value", "z": 1, "a": 2}},
+      "hash": "ev1",
+      "extra": {"deep": {"z": 1, "a": 2}}
+    }
+  ],
+  "claimed_hash": "PLACEHOLDER"
+}

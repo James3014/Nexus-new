@@ -1,0 +1,19 @@
+{
+  "form_version": "1.0.0",
+  "created": "2026-06-18",
+  "fields": {
+    "evaluator_alias": "",
+    "role_type": "",
+    "relationship_context": "",
+    "technical_depth": "",
+    "confidentiality_trust": "",
+    "public_claim_risk": "",
+    "expected_feedback_value": "",
+    "preferred_contact_channel": "",
+    "scheduling_availability": "",
+    "operator_decision": "pending",
+    "notes": ""
+  },
+  "role_type_enum": ["internal_engineering", "trusted_technical_advisor", "peer_founder_or_senior_engineer", "potential_technical_partner", "product_business_reviewer", "other"],
+  "operator_decision_enum": ["select_for_first_invite", "maybe_later", "do_not_invite", "pending"]
+}

@@ -1,0 +1,1 @@
+{"id": "ÿþinvalid-utf8", "type": "research", "timestamp": "2026-01-01T00:00:00Z", "model": "nexus-3b", "input_hash": "sha256:abc123", "output_hash": "sha256:def456", "evidence": [{"type": "log", "content": "test", "hash": "sha256:ev1"}], "claimed_hash": "placeholder"}

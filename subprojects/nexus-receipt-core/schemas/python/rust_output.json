@@ -1,0 +1,51 @@
+{
+  "generated_at": "2026-06-16",
+  "fixtures_tested": [
+    "clean_receipt.json",
+    "missing_evidence.json",
+    "schema_mismatch.json",
+    "tampered_receipt.json"
+  ],
+  "results": {
+    "clean_receipt.json": {
+      "exit_code": 1,
+      "cli_result": {
+        "hashmatch": false,
+        "schemamatch": true,
+        "evidencecomplete": true,
+        "claimabilityconfirmed": false,
+        "errorcode": "hash_mismatch"
+      }
+    },
+    "missing_evidence.json": {
+      "exit_code": 1,
+      "cli_result": {
+        "hashmatch": false,
+        "schemamatch": true,
+        "evidencecomplete": false,
+        "claimabilityconfirmed": false,
+        "errorcode": "hash_mismatch"
+      }
+    },
+    "schema_mismatch.json": {
+      "exit_code": 1,
+      "cli_result": {
+        "hashmatch": false,
+        "schemamatch": false,
+        "evidencecomplete": true,
+        "claimabilityconfirmed": false,
+        "errorcode": "hash_mismatch"
+      }
+    },
+    "tampered_receipt.json": {
+      "exit_code": 1,
+      "cli_result": {
+        "hashmatch": false,
+        "schemamatch": true,
+        "evidencecomplete": true,
+        "claimabilityconfirmed": false,
+        "errorcode": "hash_mismatch"
+      }
+    }
+  }
+}

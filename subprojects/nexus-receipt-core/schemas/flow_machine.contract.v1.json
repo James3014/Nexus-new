@@ -1,0 +1,123 @@
+{
+  "schema": "flow_machine.contract.v1",
+  "version": "1.0.0",
+  "description": "Authoritative transition matrix for the Nexus FlowStateMachine. Only explicitly listed transitions are allowed. All undefined transitions fail-closed.",
+  "states": [
+    "INTAKE",
+    "CLARIFY",
+    "OUTLINE",
+    "RESEARCH",
+    "DESIGN",
+    "PLAN",
+    "EXECUTE",
+    "VERIFY",
+    "CLOSE",
+    "REPLAN",
+    "ESCALATE",
+    "HUMAN_REVIEW",
+    "BLOCKED_BUDGET",
+    "BLOCKED_POLICY"
+  ],
+  "state_count": 14,
+  "terminal_states": [
+    "CLOSE"
+  ],
+  "self_transition_policy": "always_valid",
+  "transition_rules": {
+    "INTAKE": [
+      "CLARIFY",
+      "OUTLINE",
+      "PLAN"
+    ],
+    "CLARIFY": [
+      "OUTLINE",
+      "RESEARCH",
+      "ESCALATE"
+    ],
+    "OUTLINE": [
+      "PLAN",
+      "RESEARCH",
+      "REPLAN"
+    ],
+    "RESEARCH": [
+      "DESIGN",
+      "OUTLINE",
+      "PLAN"
+    ],
+    "DESIGN": [
+      "PLAN",
+      "REPLAN"
+    ],
+    "PLAN": [
+      "EXECUTE",
+      "REPLAN",
+      "HUMAN_REVIEW"
+    ],
+    "EXECUTE": [
+      "VERIFY",
+      "ESCALATE",
+      "BLOCKED_BUDGET",
+      "BLOCKED_POLICY"
+    ],
+    "VERIFY": [
+      "CLOSE",
+      "REPLAN",
+      "ESCALATE"
+    ],
+    "CLOSE": [],
+    "REPLAN": [
+      "PLAN",
+      "ESCALATE",
+      "BLOCKED_BUDGET",
+      "BLOCKED_POLICY"
+    ],
+    "ESCALATE": [
+      "HUMAN_REVIEW",
+      "BLOCKED_POLICY",
+      "INTAKE"
+    ],
+    "HUMAN_REVIEW": [
+      "PLAN",
+      "EXECUTE",
+      "CLOSE",
+      "BLOCKED_POLICY"
+    ],
+    "BLOCKED_BUDGET": [
+      "HUMAN_REVIEW",
+      "ESCALATE"
+    ],
+    "BLOCKED_POLICY": [
+      "HUMAN_REVIEW",
+      "ESCALATE"
+    ]
+  },
+  "statistics": {
+    "total_transitions": 196,
+    "self_transitions": 14,
+    "defined_transitions": 39,
+    "total_legal": 53,
+    "total_illegal": 143,
+    "per_state": {
+      "INTAKE": 3,
+      "CLARIFY": 3,
+      "OUTLINE": 3,
+      "RESEARCH": 3,
+      "DESIGN": 2,
+      "PLAN": 3,
+      "EXECUTE": 4,
+      "VERIFY": 3,
+      "CLOSE": 0,
+      "REPLAN": 4,
+      "ESCALATE": 3,
+      "HUMAN_REVIEW": 4,
+      "BLOCKED_BUDGET": 2,
+      "BLOCKED_POLICY": 2
+    }
+  },
+  "usage_notes": {
+    "source_of_truth": "This file is the single authoritative source for transition validation.",
+    "derivation": "Rust FlowStateMachine::validate_transition, ::legal_transitions, ::is_terminal MUST be derived from this contract.",
+    "parity_check": "Python and Rust implementations must produce identical results when checked against this matrix.",
+    "modification_policy": "Changes require consensus from both Python and Rust maintainers. Update both implementations simultaneously."
+  }
+}

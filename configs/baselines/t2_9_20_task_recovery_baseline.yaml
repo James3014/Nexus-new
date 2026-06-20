@@ -1,0 +1,338 @@
+# T2.9 20-Task Recovery Baseline Manifest
+# Frozen from T2.8 Attribution-Safe 20-Task Diagnostic (Strong Green)
+baseline_id: T2_9_20_TASK_RECOVERY_BASELINE
+source_run: T2_8_ATTRIBUTION_SAFE_20_TASK_DIAGNOSTIC
+baseline_type: internal_recovery_baseline
+simulated: false
+claim_eligible: false
+public_claim_allowed: false
+claim_block_reason: internal_baseline_replay
+raw_task_count: 20
+deduped_task_count: 20
+anchor_task_count: 20
+expansion_stage: T2_to_T3_gate
+
+tasks:
+  # ── Anchor tasks 15 (from T2.7 baseline) ──
+
+  - instance_id: astropy__astropy-12907
+    project: astropy
+    baseline_role: t2_7_anchor
+    expected_workspace: astropy
+    expected_dependency_profile: astropy-legacy
+    expected_verification_result: PASS
+    expected_model_calls: 0
+    expected_model_patch_reward: 0.0
+    expected_export_as_model_patch_success: false
+    expected_claim_eligible: false
+    expected_public_claim_allowed: false
+    expected_canonical_span_source: ast_boundary
+    recovery_rule_id: AST_SYMBOL_FIX
+    source_failure_class: SOLVED
+    source_run: T2_7_15_TASK_RECOVERY_BASELINE
+
+  - instance_id: astropy__astropy-13236
+    project: astropy
+    baseline_role: t2_7_anchor
+    expected_workspace: astropy
+    expected_dependency_profile: astropy-legacy
+    expected_verification_result: PASS
+    expected_model_calls: 0
+    expected_model_patch_reward: 0.0
+    expected_export_as_model_patch_success: false
+    expected_claim_eligible: false
+    expected_public_claim_allowed: false
+    expected_canonical_span_source: unified_diff
+    recovery_rule_id: REMOVE_BLOCK
+    source_failure_class: SOLVED
+    source_run: T2_7_15_TASK_RECOVERY_BASELINE
+
+  - instance_id: astropy__astropy-13579
+    project: astropy
+    baseline_role: t2_7_anchor
+    expected_workspace: astropy
+    expected_dependency_profile: astropy-legacy
+    expected_verification_result: PASS
+    expected_model_calls: 0
+    expected_model_patch_reward: 0.0
+    expected_export_as_model_patch_success: false
+    expected_claim_eligible: false
+    expected_public_claim_allowed: false
+    expected_canonical_span_source: locked_search
+    recovery_rule_id: locked_search_reuse
+    source_failure_class: SOLVED
+    source_run: T2_7_15_TASK_RECOVERY_BASELINE
+
+  - instance_id: astropy__astropy-14182
+    project: astropy
+    baseline_role: t2_7_anchor
+    expected_workspace: astropy
+    expected_dependency_profile: astropy-legacy
+    expected_verification_result: PASS
+    expected_model_calls: 0
+    expected_model_patch_reward: 0.0
+    expected_export_as_model_patch_success: false
+    expected_claim_eligible: false
+    expected_public_claim_allowed: false
+    expected_canonical_span_source: locked_search
+    recovery_rule_id: locked_search_reuse
+    source_failure_class: SOLVED
+    source_run: T2_7_15_TASK_RECOVERY_BASELINE
+
+  - instance_id: sympy__sympy-12481
+    project: sympy
+    baseline_role: t2_7_anchor
+    expected_workspace: sympy
+    expected_dependency_profile: sympy-python39
+    expected_verification_result: PASS
+    expected_model_calls: 0
+    expected_model_patch_reward: 0.0
+    expected_export_as_model_patch_success: false
+    expected_claim_eligible: false
+    expected_public_claim_allowed: false
+    expected_canonical_span_source: locked_search
+    recovery_rule_id: locked_search_reuse
+    source_failure_class: SOLVED
+    source_run: T2_7_15_TASK_RECOVERY_BASELINE
+
+  - instance_id: astropy__astropy-13033
+    project: astropy
+    baseline_role: t2_7_anchor
+    expected_workspace: astropy
+    expected_dependency_profile: astropy-legacy
+    expected_verification_result: PASS
+    expected_model_calls: 0
+    expected_model_patch_reward: 0.0
+    expected_export_as_model_patch_success: false
+    expected_claim_eligible: false
+    expected_public_claim_allowed: false
+    expected_canonical_span_source: any_valid
+    recovery_rule_id: unknown_pending_registry
+    source_failure_class: SOLVED
+    source_run: T2_7_15_TASK_RECOVERY_BASELINE
+
+  - instance_id: astropy__astropy-13453
+    project: astropy
+    baseline_role: t2_7_anchor
+    expected_workspace: astropy
+    expected_dependency_profile: astropy-legacy-with-bs4-lxml
+    expected_verification_result: PASS
+    expected_model_calls: 0
+    expected_model_patch_reward: 0.0
+    expected_export_as_model_patch_success: false
+    expected_claim_eligible: false
+    expected_public_claim_allowed: false
+    expected_canonical_span_source: any_valid
+    recovery_rule_id: astropy_html_dependency_fix
+    source_failure_class: SOLVED
+    source_run: T2_7_15_TASK_RECOVERY_BASELINE
+
+  - instance_id: astropy__astropy-13398
+    project: astropy
+    baseline_role: t2_7_anchor
+    expected_workspace: astropy
+    expected_dependency_profile: astropy-legacy
+    expected_verification_result: PASS
+    expected_model_calls: 0
+    expected_model_patch_reward: 0.0
+    expected_export_as_model_patch_success: false
+    expected_claim_eligible: false
+    expected_public_claim_allowed: false
+    expected_canonical_span_source: any_valid
+    recovery_rule_id: unknown_pending_registry
+    source_failure_class: SOLVED
+    source_run: T2_7_15_TASK_RECOVERY_BASELINE
+
+  - instance_id: sympy__sympy-13852
+    project: sympy
+    baseline_role: t2_7_anchor
+    expected_workspace: sympy
+    expected_dependency_profile: sympy-python39
+    expected_verification_result: PASS
+    expected_model_calls: 0
+    expected_model_patch_reward: 0.0
+    expected_export_as_model_patch_success: false
+    expected_claim_eligible: false
+    expected_public_claim_allowed: false
+    expected_canonical_span_source: any_valid
+    recovery_rule_id: repro_env_noise
+    source_failure_class: SOLVED
+    source_run: T2_7_15_TASK_RECOVERY_BASELINE
+
+  - instance_id: sympy__sympy-13877
+    project: sympy
+    baseline_role: t2_7_anchor
+    expected_workspace: sympy
+    expected_dependency_profile: sympy-python39
+    expected_verification_result: PASS
+    expected_model_calls: 0
+    expected_model_patch_reward: 0.0
+    expected_export_as_model_patch_success: false
+    expected_claim_eligible: false
+    expected_public_claim_allowed: false
+    expected_canonical_span_source: any_valid
+    recovery_rule_id: unknown_pending_registry
+    source_failure_class: SOLVED
+    source_run: T2_7_15_TASK_RECOVERY_BASELINE
+
+  - instance_id: astropy__astropy-13977
+    project: astropy
+    baseline_role: t2_7_anchor
+    expected_workspace: astropy
+    expected_dependency_profile: astropy-legacy
+    expected_verification_result: PASS
+    expected_model_calls: 0
+    expected_model_patch_reward: 0.0
+    expected_export_as_model_patch_success: false
+    expected_claim_eligible: false
+    expected_public_claim_allowed: false
+    expected_canonical_span_source: any_valid
+    recovery_rule_id: unknown_pending_registry
+    source_failure_class: SOLVED
+    source_run: T2_7_15_TASK_RECOVERY_BASELINE
+
+  - instance_id: sympy__sympy-13031
+    project: sympy
+    baseline_role: t2_7_anchor
+    expected_workspace: sympy
+    expected_dependency_profile: sympy-python39
+    expected_verification_result: PASS
+    expected_model_calls: 0
+    expected_model_patch_reward: 0.0
+    expected_export_as_model_patch_success: false
+    expected_claim_eligible: false
+    expected_public_claim_allowed: false
+    expected_canonical_span_source: ast_boundary
+    recovery_rule_id: repro_script_fix
+    source_failure_class: SOLVED
+    source_run: T2_7_15_TASK_RECOVERY_BASELINE
+
+  - instance_id: astropy__astropy-14096
+    project: astropy
+    baseline_role: t2_7_anchor
+    expected_workspace: astropy
+    expected_dependency_profile: astropy-legacy
+    expected_verification_result: PASS
+    expected_model_calls: 0
+    expected_model_patch_reward: 0.0
+    expected_export_as_model_patch_success: false
+    expected_claim_eligible: false
+    expected_public_claim_allowed: false
+    expected_canonical_span_source: any_valid
+    recovery_rule_id: unknown_pending_registry
+    source_failure_class: SOLVED
+    source_run: T2_7_15_TASK_RECOVERY_BASELINE
+
+  - instance_id: sympy__sympy-13480
+    project: sympy
+    baseline_role: t2_7_anchor
+    expected_workspace: sympy
+    expected_dependency_profile: sympy-python39
+    expected_verification_result: PASS
+    expected_model_calls: 0
+    expected_model_patch_reward: 0.0
+    expected_export_as_model_patch_success: false
+    expected_claim_eligible: false
+    expected_public_claim_allowed: false
+    expected_canonical_span_source: any_valid
+    recovery_rule_id: unknown_pending_registry
+    source_failure_class: SOLVED
+    source_run: T2_7_15_TASK_RECOVERY_BASELINE
+
+  - instance_id: django__django-11099
+    project: django
+    baseline_role: t2_7_anchor
+    expected_workspace: django
+    expected_dependency_profile: django-legacy
+    expected_verification_result: PASS
+    expected_model_calls: 0
+    expected_model_patch_reward: 0.0
+    expected_export_as_model_patch_success: false
+    expected_claim_eligible: false
+    expected_public_claim_allowed: false
+    expected_canonical_span_source: any_valid
+    recovery_rule_id: unknown_pending_registry
+    source_failure_class: SOLVED
+    source_run: T2_7_15_TASK_RECOVERY_BASELINE
+
+  # ── True new tasks 5 (from T2.8 expansion) ──
+
+  - instance_id: astropy__astropy-14365
+    project: astropy
+    baseline_role: t2_8_new
+    expected_workspace: astropy
+    expected_dependency_profile: astropy-legacy
+    expected_verification_result: PASS
+    expected_model_calls: 0
+    expected_model_patch_reward: 0.0
+    expected_export_as_model_patch_success: false
+    expected_claim_eligible: false
+    expected_public_claim_allowed: false
+    expected_canonical_span_source: any_valid
+    recovery_rule_id: unknown_pending_registry
+    source_failure_class: SOLVED
+    source_run: T2_8_ATTRIBUTION_SAFE_20_TASK_DIAGNOSTIC
+
+  - instance_id: sympy__sympy-12419
+    project: sympy
+    baseline_role: t2_8_new
+    expected_workspace: sympy
+    expected_dependency_profile: sympy-python39
+    expected_verification_result: PASS
+    expected_model_calls: 0
+    expected_model_patch_reward: 0.0
+    expected_export_as_model_patch_success: false
+    expected_claim_eligible: false
+    expected_public_claim_allowed: false
+    expected_canonical_span_source: any_valid
+    recovery_rule_id: unknown_pending_registry
+    source_failure_class: patch_mismatch
+    source_run: T2_8_ATTRIBUTION_SAFE_20_TASK_DIAGNOSTIC
+
+  - instance_id: sympy__sympy-13647
+    project: sympy
+    baseline_role: t2_8_new
+    expected_workspace: sympy
+    expected_dependency_profile: sympy-python39
+    expected_verification_result: PASS
+    expected_model_calls: 0
+    expected_model_patch_reward: 0.0
+    expected_export_as_model_patch_success: false
+    expected_claim_eligible: false
+    expected_public_claim_allowed: false
+    expected_canonical_span_source: any_valid
+    recovery_rule_id: unknown_pending_registry
+    source_failure_class: patch_mismatch
+    source_run: T2_8_ATTRIBUTION_SAFE_20_TASK_DIAGNOSTIC
+
+  - instance_id: astropy__astropy-14309
+    project: astropy
+    baseline_role: t2_8_new
+    expected_workspace: astropy
+    expected_dependency_profile: astropy-legacy
+    expected_verification_result: PASS
+    expected_model_calls: 0
+    expected_model_patch_reward: 0.0
+    expected_export_as_model_patch_success: false
+    expected_claim_eligible: false
+    expected_public_claim_allowed: false
+    expected_canonical_span_source: any_valid
+    recovery_rule_id: unknown_pending_registry
+    source_failure_class: env_noise
+    source_run: T2_8_ATTRIBUTION_SAFE_20_TASK_DIAGNOSTIC
+
+  - instance_id: sympy__sympy-11618
+    project: sympy
+    baseline_role: t2_8_new
+    expected_workspace: sympy
+    expected_dependency_profile: sympy-python39
+    expected_verification_result: PASS
+    expected_model_calls: 0
+    expected_model_patch_reward: 0.0
+    expected_export_as_model_patch_success: false
+    expected_claim_eligible: false
+    expected_public_claim_allowed: false
+    expected_canonical_span_source: any_valid
+    recovery_rule_id: unknown_pending_registry
+    source_failure_class: SOLVED
+    source_run: T2_8_ATTRIBUTION_SAFE_20_TASK_DIAGNOSTIC

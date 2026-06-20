@@ -1,0 +1,10 @@
+{
+  "id": "test-missing-evidence-001",
+  "type": "research",
+  "timestamp": "2026-01-01T00:00:00Z",
+  "model": "nexus-3b",
+  "input_hash": "sha256:abc123def456",
+  "output_hash": "sha256:789xyz000",
+  "evidence": [],
+  "claimed_hash": "184e33b4e57ec74f0877fa1fd25e6e22263bca9659a658a3c043e3a56463416d"
+}

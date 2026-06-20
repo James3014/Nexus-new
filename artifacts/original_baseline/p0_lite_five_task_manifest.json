@@ -1,0 +1,10 @@
+{
+  "manifest_id": "P0_LITE_FIVE_TASK_MANIFEST",
+  "canonical_tasks": [
+    {"instance_id": "astropy__astropy-12907", "project": "astropy", "original_failure_class": "SEARCH_MISMATCH", "original_failure_reason": "Patcher found wrong match or no match", "original_stop_layer": "patcher_match_gate"},
+    {"instance_id": "astropy__astropy-13236", "project": "astropy", "original_failure_class": "REPLACE_SYNTAX_ERROR", "original_failure_reason": "Replacement patch had syntax error", "original_stop_layer": "syntax_gate"},
+    {"instance_id": "astropy__astropy-13579", "project": "astropy", "original_failure_class": "NO_EFFECTIVE_CHANGE", "original_failure_reason": "Patch applied but no effective change", "original_stop_layer": "effective_change_guard"},
+    {"instance_id": "astropy__astropy-14182", "project": "astropy", "original_failure_class": "FILE_NOT_FOUND", "original_failure_reason": "Target file path resolution failed", "original_stop_layer": "path_resolution"},
+    {"instance_id": "sympy__sympy-12481", "project": "sympy", "original_failure_class": "SEARCH_MISMATCH", "original_failure_reason": "Patcher found wrong match", "original_stop_layer": "patcher_match_gate"}
+  ]
+}
