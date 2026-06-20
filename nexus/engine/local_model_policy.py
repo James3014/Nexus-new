@@ -21,7 +21,7 @@ class ModelProfile:
             num_ctx = int(os.environ.get("NEXUS_OLLAMA_NUM_CTX", "8192"))
             return {
                 "temperature": temperature,
-                "num_predict": int(os.environ.get("NEXUS_OLLAMA_NUM_PREDICT_PATCH", "1024")),
+                "num_predict": int(os.environ.get("NEXUS_OLLAMA_NUM_PREDICT_PATCH", "3072")),
                 "num_ctx": num_ctx,
             }
         else:
@@ -31,6 +31,34 @@ class ModelProfile:
                 "num_predict": 512,
                 "num_ctx": num_ctx,
             }
+
+
+class SidecarConfig:
+    """
+    Gemma 12B sidecar configuration for planning/diagnosis.
+    Sidecar is shadow-only: no authority, no patch phase.
+    """
+    SIDECAR_MODEL = os.environ.get("NEXUS_SIDECAR_MODEL", "gemma4-coder-12b-q4km")
+    SIDECAR_ENABLED = os.environ.get("NEXUS_SIDECAR_ENABLED", "0") == "1"
+    
+    # Hard boundaries: sidecar CANNOT touch these phases
+    FORBIDDEN_PHASES = {"patch", "claim", "verification"}
+    
+    # Allowed phases: sidecar can assist here
+    ALLOWED_PHASES = {"planning", "diagnosis", "repro_analysis"}
+    
+    @classmethod
+    def is_sidecar_allowed(cls, phase: str) -> bool:
+        return phase in cls.ALLOWED_PHASES and cls.SIDECAR_ENABLED
+    
+    @classmethod
+    def get_sidecar_options(cls, attempt: int = 1) -> dict:
+        temperature = 0.0 if attempt <= 1 else min(0.4, (attempt - 1) * 0.2)
+        return {
+            "temperature": temperature,
+            "num_predict": 1024,
+            "num_ctx": 8192,
+        }
 
 
 class LocalModelPolicy:
