@@ -62,6 +62,10 @@ training/adapters/
 scratch/qwen3b_s2t_adapter.tar.gz
 .nexus/training/adapters/
 
+# Agent workspace / temp files
+.tmp/
+.mimocode/
+
 # Nexus local generated/cache/debug artifacts
 .hypothesis/
 **/target/
