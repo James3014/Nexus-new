@@ -497,6 +497,16 @@ class PatchApplier:
                 preflight_telemetry=preflight_telemetry
             )
 
+        # T3: Authority accumulator — tracks the highest authority across all intents.
+        # Precedence: CROSS_FILE_CORRECTION > CANONICAL_RECOVERY > VERBATIM
+        # Initialized outside loop so multi-intent patches preserve attribution.
+        _authority_precedence = {
+            MatchAuthority.VERBATIM: 0,
+            MatchAuthority.CANONICAL_RECOVERY: 1,
+            MatchAuthority.CROSS_FILE_CORRECTION: 2,
+        }
+        accumulated_authority: MatchAuthority | None = None
+
         for intent in intents:
             target_path = repo_dir / intent.file_path
             
@@ -518,7 +528,7 @@ class PatchApplier:
 
             # A. [MatchGate] 逐字匹配與占位符阻斷
             match_res = self.parser.validate(intent, source_text)
-            authority: MatchAuthority | None = None
+            intent_authority: MatchAuthority | None = None
             if not match_res.is_valid:
                 # T1.2: Capture PatchError for telemetry
                 patch_errors = []
@@ -545,7 +555,7 @@ class PatchApplier:
                         match_res = alt_res
                         corrected = True
                         patch_errors = []
-                        authority = MatchAuthority.CROSS_FILE_CORRECTION
+                        intent_authority = MatchAuthority.CROSS_FILE_CORRECTION
                         break
                 if not corrected:
                     # P0-3b: Same-file fuzzy auto-correction is FORBIDDEN.
@@ -603,18 +613,33 @@ class PatchApplier:
             applied_diffs.append(diff)
 
             # T3: Determine match_authority if not already set (cross-file)
-            if authority is None:
+            if intent_authority is None:
                 if match_authority is not None:
-                    authority = match_authority
+                    intent_authority = match_authority
                 elif match_res.telemetry and match_res.telemetry.get("canonical_span", {}).get("auto_corrected", False):
-                    authority = MatchAuthority.CANONICAL_RECOVERY
+                    intent_authority = MatchAuthority.CANONICAL_RECOVERY
                 else:
-                    authority = MatchAuthority.VERBATIM
+                    intent_authority = MatchAuthority.VERBATIM
+
+            # T3: Accumulate highest authority across all intents
+            if accumulated_authority is None:
+                accumulated_authority = intent_authority
+            elif intent_authority is not None:
+                intent_prec = _authority_precedence.get(intent_authority, -1)
+                accum_prec = _authority_precedence.get(accumulated_authority, -1)
+                if intent_prec > accum_prec:
+                    accumulated_authority = intent_authority
 
         # T3: Fail-closed invariant — FUZZY_CANDIDATE_ONLY must never appear on success=True
-        if authority == MatchAuthority.FUZZY_CANDIDATE_ONLY:
+        if accumulated_authority == MatchAuthority.FUZZY_CANDIDATE_ONLY:
             raise AssertionError(
                 "INVARIANT VIOLATION: FUZZY_CANDIDATE_ONLY cannot be set on success=True"
+            )
+
+        # T3: Success attribution invariant — authority must never be None on success
+        if accumulated_authority is None:
+            raise AssertionError(
+                "INVARIANT VIOLATION: match_authority must not be None on success=True"
             )
 
         return PatchApplicationResult(
@@ -622,7 +647,7 @@ class PatchApplier:
             applied_diffs=applied_diffs,
             syntax_gate_passed=syntax_gate_passed,
             preflight_telemetry=preflight_telemetry,
-            match_authority=authority,
+            match_authority=accumulated_authority,
         )
 
     def _build_file_diff(self, relative_path: str, old_content: str, new_content: str) -> str:

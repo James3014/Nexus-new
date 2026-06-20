@@ -80,6 +80,26 @@ def _failure_class(ctx: Any) -> str:
     return "unknown"
 
 
+def _derive_success_attribution(match_authority: Any) -> str:
+    """T3: Classify success attribution from match_authority.
+
+    Returns a human-readable attribution string for receipts:
+    - 'model_patch_success' — VERBATIM authority (model's SEARCH matched exactly)
+    - 'canonical_recovery_success' — CANONICAL_RECOVERY authority (tool recovered the span)
+    - 'cross_file_recovery_success' — CROSS_FILE_CORRECTION authority (applied to different file)
+    - 'unknown' — authority not set or unrecognized
+    """
+    authority_str = str(getattr(match_authority, "value", match_authority) or "").lower()
+    if authority_str == "verbatim":
+        return "model_patch_success"
+    elif authority_str == "canonical_recovery":
+        return "canonical_recovery_success"
+    elif authority_str == "cross_file_correction":
+        return "cross_file_recovery_success"
+    else:
+        return "unknown"
+
+
 def _extract_failure_telemetry(ctx: Any, failure_reason: str) -> dict:
     """T1.2: Extract enriched telemetry based on failure type."""
     telemetry = {}
@@ -426,6 +446,8 @@ def build_repair_receipt(ctx: Any, *, model_name: str = "nexus-local-heal", run_
             "resolved_span": str(getattr(ctx, "resolved_span", "") or ""),
             # T3: match_authority from PatchApplicationResult
             "match_authority": str(getattr(ctx, "match_authority", "") or ""),
+            # T3: success_attribution — classifies whether success was model-native or tool-recovered
+            "success_attribution": _derive_success_attribution(getattr(ctx, "match_authority", None)),
             # T1.2: Enriched failure telemetry
             "failure_telemetry": _extract_failure_telemetry(ctx, failure_reason),
             # T1.6: Semantic retry telemetry
