@@ -424,7 +424,22 @@ class HealOrchestrator:
             f.path for f in getattr(ctx.op, "localized_files", [])
             if Path(f.path).name not in _PATCH_BLACKLIST
         ])
-        ctx.op.user_prompt = self.corrector.build_retry_prompt(ctx.op.user_prompt, error, targeted_files=targeted_files)
+        
+        sp = None
+        if error.kind == PatchErrorKind.LOGIC_REGRESSION:
+            from nexus.services.local_heal.evidence_compactor import EvidenceCompactor
+            evaluation_report = getattr(ctx.op, "evaluation_report", "") or error.message or ""
+            repro_command = ""
+            if ctx.op.plan and getattr(ctx.op.plan, "verifier_command", ""):
+                repro_command = ctx.op.plan.verifier_command
+            sp = EvidenceCompactor.compact_structured(
+                evidence=evaluation_report,
+                raw_artifact_ref="verification_report.txt",
+                repro_command=repro_command
+            )
+            error.structured_packet = sp
+            
+        ctx.op.user_prompt = self.corrector.build_retry_prompt(ctx.op.user_prompt, error, targeted_files=targeted_files, structured_packet=sp)
         ctx.op.attempt += 1
         return ctx
     

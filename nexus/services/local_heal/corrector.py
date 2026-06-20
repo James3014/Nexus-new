@@ -5,7 +5,7 @@ from nexus.services.local_heal.errors import PatchError, PatchErrorKind
 class SelfCorrector:
     """管理與 LLM 互動的自我糾錯循環 (Self-Correction Loop)，實現 HUDFeedbackRouter 精確分流"""
 
-    def build_retry_prompt(self, original_user_prompt: str, error: Any, targeted_files: str = "") -> str:
+    def build_retry_prompt(self, original_user_prompt: str, error: Any, targeted_files: str = "", structured_packet: Any = None) -> str:
         """
         結合原始 User Prompt 與錯誤類型，分流生成最精確的重試引導 Prompt
         """
@@ -16,6 +16,8 @@ class SelfCorrector:
             else:
                 error = PatchError(kind=PatchErrorKind.SEARCH_MISMATCH, message=error)
 
+        sp = structured_packet or getattr(error, "structured_packet", None)
+
         # Strip any existing HUD warnings to prevent prompt accumulation and bloat
         marker = "\n\n⚠️ [NEXUS BATTLESUIT HUD: CRITICAL WARNING - PREVIOUS ATTEMPT FAILED]"
         if marker in original_user_prompt:
@@ -23,7 +25,20 @@ class SelfCorrector:
 
         header = "\n\n⚠️ [NEXUS BATTLESUIT HUD: CRITICAL WARNING - PREVIOUS ATTEMPT FAILED]\n"
         
-        if error.kind == PatchErrorKind.SYNTAX_ERROR:
+        if error.kind == PatchErrorKind.LOGIC_REGRESSION:
+            packet_text = sp.to_prompt_text() if sp else f"--> {error.message}"
+            retry_instruction = (
+                f"Your previous patch compiled and changed code, but verification FAILED.\n"
+                f"Please analyze the failure details below:\n"
+                f"### STRUCTURED FAILURE DETAILS\n"
+                f"{packet_text}\n\n"
+                f"Please do the following:\n"
+                f"1. Compare the expected and actual outputs in the failure details.\n"
+                f"2. Inspect the failing source span and verifier command.\n"
+                f"3. Make a targeted fix to resolve this failure. Do NOT repeat the same patch.\n"
+                f"Output a valid SEARCH/REPLACE block with the corrected logic."
+            )
+        elif error.kind == PatchErrorKind.SYNTAX_ERROR:
             retry_instruction = (
                 f"Your previous patch caused a syntax compilation error in Python:\n"
                 f"--> {error.message}\n\n"
@@ -117,6 +132,37 @@ class SelfCorrector:
                 f"2. Modify the existing definition in place using one precise SEARCH/REPLACE block.\n"
                 f"3. Keep unrelated imports, classes, functions, and tests unchanged.\n"
                 f"Output the corrected SEARCH/REPLACE block now."
+            )
+        elif error.kind == PatchErrorKind.PATCH_EMPTY:
+            retry_instruction = (
+                f"CRITICAL ERROR: Your previous patch produced ZERO file changes after apply.\n"
+                f"--> {error.message}\n\n"
+                f"Please do the following:\n"
+                f"1. Ensure your REPLACE block contains actual different code from the SEARCH block.\n"
+                f"2. Do NOT output a SEARCH/REPLACE where SEARCH and REPLACE are identical.\n"
+                f"3. Output a SEARCH/REPLACE block that makes a concrete functional change."
+            )
+        elif error.kind == PatchErrorKind.PATCH_FORMAT_INVALID:
+            retry_instruction = (
+                f"CRITICAL ERROR: Your previous response was not in valid SEARCH/REPLACE format.\n"
+                f"--> {error.message}\n\n"
+                f"Required format:\n"
+                f">>>>>>> SEARCH\n"
+                f"exact code from file\n"
+                f"=======\n"
+                f"replacement code\n"
+                f">>>>>>> REPLACE\n\n"
+                f"Output ONLY valid SEARCH/REPLACE blocks. No conversation, no explanations."
+            )
+        elif error.kind == PatchErrorKind.SOURCE_STALE:
+            retry_instruction = (
+                f"CRITICAL ERROR: The source code context provided is outdated — the file has changed since context was captured.\n"
+                f"--> {error.message}\n\n"
+                f"Please do the following:\n"
+                f"1. Read the CURRENT file content from the [SOURCE CONTEXT] section carefully.\n"
+                f"2. Your SEARCH block MUST match the current file state exactly.\n"
+                f"3. Do NOT reference line numbers or code from a previous version.\n"
+                f"Output a corrected SEARCH/REPLACE block matching the current source."
             )
         else:
             retry_instruction = (

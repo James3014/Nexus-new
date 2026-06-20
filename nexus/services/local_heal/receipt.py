@@ -424,6 +424,8 @@ def build_repair_receipt(ctx: Any, *, model_name: str = "nexus-local-heal", run_
             "closest_snippet_present": bool(getattr(ctx, "closest_snippet", "")),
             "closest_snippet_similarity": float(getattr(ctx, "closest_snippet_similarity", 0.0) or 0.0),
             "resolved_span": str(getattr(ctx, "resolved_span", "") or ""),
+            # T3: match_authority from PatchApplicationResult
+            "match_authority": str(getattr(ctx, "match_authority", "") or ""),
             # T1.2: Enriched failure telemetry
             "failure_telemetry": _extract_failure_telemetry(ctx, failure_reason),
             # T1.6: Semantic retry telemetry
@@ -466,7 +468,7 @@ def build_repair_receipt(ctx: Any, *, model_name: str = "nexus-local-heal", run_
             "model_phase_split": model_split,
             "context_bytes_before_after": f"{getattr(ctx, 'initial_ctx_len', 0)}/{getattr(ctx, 'final_ctx_len', 0)}",
             "resolved_span_len": int(getattr(ctx, "resolved_span_len", 0) or 0),
-            "retry_count": int(getattr(ctx, "attempt", 0) or 0),
+            "retry_count": max(0, int(getattr(ctx, "attempt", 0) or 0) - 1),
             "gate_exit": gate_exit,
             "expected_stop_layer": expected_stop,
             "expected_reason_family": expected_family,

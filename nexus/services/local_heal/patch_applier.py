@@ -6,7 +6,7 @@ from typing import List, Tuple
 from dataclasses import dataclass, field
 from nexus.services.local_heal.protocol import SolidSearchReplaceProtocol, SyntaxGate
 from nexus.services.local_heal.validator import validate_effective_change, validate_name_sanity
-from nexus.services.local_heal.errors import PatchError, PatchErrorKind
+from nexus.services.local_heal.errors import PatchError, PatchErrorKind, MatchAuthority
 from nexus.services.local_heal.interface import LocalizedFile
 
 @dataclass
@@ -17,6 +17,7 @@ class PatchApplicationResult:
     syntax_gate_passed: bool = True
     preflight_telemetry: dict = field(default_factory=dict)  # Preflight telemetry
     errors: List = field(default_factory=list)  # T1.2: PatchError objects for telemetry
+    match_authority: MatchAuthority | None = None  # T3: Authority source for applied patch
 
 class PatchApplier:
     """多重關卡修補套用與驗證器 - 依據 Linus 切小與關注點分離原則"""
@@ -144,7 +145,7 @@ class PatchApplier:
                     best_line_score = score
                     best_line_idx = i
 
-        if best_line_idx >= 0 and best_line_score >= 0.6:
+        if best_line_idx >= 0 and best_line_score >= 0.95:
             # Extract context around best line — try to match failed block size
             target_lines = len(failed_lines)
             start = max(0, best_line_idx - target_lines // 2)
@@ -479,7 +480,8 @@ class PatchApplier:
         self,
         intents: list,
         repo_dir: Path,
-        localized_files: List[LocalizedFile]
+        localized_files: List[LocalizedFile],
+        match_authority: MatchAuthority | None = None
     ) -> PatchApplicationResult:
         applied_diffs = []
         syntax_gate_passed = True
@@ -516,6 +518,7 @@ class PatchApplier:
 
             # A. [MatchGate] 逐字匹配與占位符阻斷
             match_res = self.parser.validate(intent, source_text)
+            authority: MatchAuthority | None = None
             if not match_res.is_valid:
                 # T1.2: Capture PatchError for telemetry
                 patch_errors = []
@@ -542,61 +545,24 @@ class PatchApplier:
                         match_res = alt_res
                         corrected = True
                         patch_errors = []
+                        authority = MatchAuthority.CROSS_FILE_CORRECTION
                         break
                 if not corrected:
-                    # T1.4: Try canonical span injection before giving up
-                    failed_search = getattr(match_res.error, "failed_search_text", "") or intent.search
-                    canonical_span, span_telemetry = self._lookup_canonical_search_span(
-                        source_text, failed_search, intent.file_path
+                    # P0-3b: Same-file fuzzy auto-correction is FORBIDDEN.
+                    # Fuzzy candidates (even with similarity >= 0.95) must NOT
+                    # auto-apply patches. Only cross-file canonical authority
+                    # (already handled above in the localized_files loop) is allowed.
+                    # SEARCH_MISMATCH with requires_authority=True is the fail-closed path.
+                    # No authority found — return SEARCH_MISMATCH
+                    if match_res.error:
+                        match_res.error.telemetry = {"canonical_span": canonical_span_telemetry if 'canonical_span_telemetry' in dir() else {}, "requires_authority": True}
+                    return PatchApplicationResult(
+                        success=False,
+                        applied_diffs=applied_diffs,
+                        error_reason=match_res.error.kind.name if match_res.error else "SEARCH_MISMATCH",
+                        preflight_telemetry=preflight_telemetry,
+                        errors=patch_errors,
                     )
-
-                    if canonical_span is not None:
-                        # Found canonical span — replace SEARCH and re-validate
-                        original_search = intent.search
-                        intent = type(intent)(
-                            file_path=intent.file_path,
-                            search=canonical_span,
-                            replace=intent.replace,
-                            operation=intent.operation,
-                        )
-                        revalidate = self.parser.validate(intent, source_text)
-                        if revalidate.is_valid:
-                            # Canonical injection succeeded — re-validate passed
-                            corrected = True
-                            patch_errors = []
-                            # T1.4: Attach span injection telemetry to error for receipt
-                            if match_res.error:
-                                span_telemetry["injection_status"] = "success"
-                                span_telemetry["original_search_hash"] = hashlib.sha256(original_search.encode()).hexdigest()[:16]
-                                span_telemetry["canonical_search_hash"] = hashlib.sha256(canonical_span.encode()).hexdigest()[:16]
-                                match_res.error.telemetry = span_telemetry
-                            match_res = revalidate
-                        else:
-                            # Canonical injection found span but re-validate still failed
-                            patch_errors = []
-                            if revalidate.error:
-                                patch_errors.append(revalidate.error)
-                                span_telemetry["injection_status"] = "revalidate_failed"
-                                revalidate.error.telemetry = span_telemetry
-                            return PatchApplicationResult(
-                                success=False,
-                                applied_diffs=applied_diffs,
-                                error_reason=f"CANONICAL_INJECTION_FAILED:{revalidate.error.kind.name if revalidate.error else 'unknown'}",
-                                preflight_telemetry=preflight_telemetry,
-                                errors=patch_errors,
-                            )
-                    else:
-                        # No canonical span found — return with full telemetry
-                        if match_res.error:
-                            span_telemetry["injection_status"] = "no_canonical_span"
-                            match_res.error.telemetry = span_telemetry
-                        return PatchApplicationResult(
-                            success=False,
-                            applied_diffs=applied_diffs,
-                            error_reason=match_res.error.kind.name,
-                            preflight_telemetry=preflight_telemetry,
-                            errors=patch_errors,
-                        )
 
             # B. [SyntaxGate] 語法編譯檢查 (ast.parse)
             syntax_res = SyntaxGate.check(intent, source_text)
@@ -636,11 +602,27 @@ class PatchApplier:
             diff = self._build_file_diff(intent.file_path, source_text, patched_content)
             applied_diffs.append(diff)
 
+            # T3: Determine match_authority if not already set (cross-file)
+            if authority is None:
+                if match_authority is not None:
+                    authority = match_authority
+                elif match_res.telemetry and match_res.telemetry.get("canonical_span", {}).get("auto_corrected", False):
+                    authority = MatchAuthority.CANONICAL_RECOVERY
+                else:
+                    authority = MatchAuthority.VERBATIM
+
+        # T3: Fail-closed invariant — FUZZY_CANDIDATE_ONLY must never appear on success=True
+        if authority == MatchAuthority.FUZZY_CANDIDATE_ONLY:
+            raise AssertionError(
+                "INVARIANT VIOLATION: FUZZY_CANDIDATE_ONLY cannot be set on success=True"
+            )
+
         return PatchApplicationResult(
             success=True,
             applied_diffs=applied_diffs,
             syntax_gate_passed=syntax_gate_passed,
-            preflight_telemetry=preflight_telemetry
+            preflight_telemetry=preflight_telemetry,
+            match_authority=authority,
         )
 
     def _build_file_diff(self, relative_path: str, old_content: str, new_content: str) -> str:
