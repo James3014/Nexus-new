@@ -168,3 +168,45 @@ tests/gates/test_s2t_delivery_gate.py::test_s2t_delivery_gate_passes_verified_ca
   - Telemetry 日誌中將此流量標記為 `advisor_disabled`、`advisor_parse_schema_verdict="not_run"`。
 * **單元測試**：於 `tests/gates/test_s2t_claim_gate.py` 新增 `test_s2t_advisor_provenance_lock` 與 `test_s2t_advisor_kill_switch`，共 **11 筆測試全數 PASSED**。
 
+---
+
+## 🚀 Post-V6 Capability-First Execution Track (C1 ~ C8) - Sprint 結算與規劃
+*驗證者: Antigravity*
+*日期: 2026-06-20*
+
+本階段核心任務在於評估 **AST sliced context** 在本機 Ollama 模型上的修復成效，並進行 7B vs 14B 的效能與瓶頸差量評估。
+
+### 1. 執行成果 (C1 ~ C6)
+* **C1: 任務挑選**：
+  * 精選 3 個核心任務：`C_13453 (astropy__astropy-13453)`、`C_11618 (sympy__sympy-11618)`、`C_12481 (sympy__sympy-12481)`。
+  * 產物報告：[c1_fresh_harder_task_selection_v0.md](file:///Users/jameschen/Workspace/nexus/docs/reports/c1_fresh_harder_task_selection_v0.md)
+* **C2: 基準重現**：
+  * 對上述 3 個任務成功建立 Reproduction script 並實現 100% 重現（均在修復前以 Exit Code 1 失敗）。
+  * 產物報告：[c2_baseline_reproduction_v0.md](file:///Users/jameschen/Workspace/nexus/docs/reports/c2_baseline_reproduction_v0.md)
+* **C3: AST 切片 context 產生**：
+  * 執行 `SurgicalSlicer` 生成 symbol-level 緊湊 context，將上下文大小減少 80% 以上，並限制於 `max_files=3` 的 context 限制以防 Context 爆炸。
+  * 產物報告：[c3_ast_slicing_metrics_v0.md](file:///Users/jameschen/Workspace/nexus/docs/reports/c3_ast_slicing_metrics_v0.md)
+* **C4: 7B 語言模型修復嘗試**：
+  * Qwen 2.5 Coder 7B 進行 3 次修復嘗試，**全數失敗**。
+  * **失敗主因**：7B 模型極易受到 parametric memory 影響，自行在 patch 中「腦補」出非本機的程式碼（例如在 `Point.distance` 中拼湊 `sum((a - b)**2 for a, b in zip(...))` 等非 target code 內容），導致 `SEARCH_MISMATCH` 阻斷。
+* **C5: 14B 語言模型差量比對**：
+  * 於本機 CPU-only 環境執行 14B 推理時，因硬體資源不足，導致大量 Swap I/O 與作業系統嚴重卡死。
+  * **處置結果**：控制平面 Fail-Closed 機制成功觸發，自治判定為 **ENV_BLOCKED**，並執行 `pkill` 中斷卡死之推理程序，保護本機環境不崩潰。
+  * 產物報告：[c5_14b_comparison_v0.md](file:///Users/jameschen/Workspace/nexus/docs/reports/c5_14b_comparison_v0.md)
+* **C6: 差量評估與瓶頸分析**：
+  * 整理並發布差量評估報告：[c6_delta_evaluation_v0.md](file:///Users/jameschen/Workspace/nexus/docs/reports/c6_delta_evaluation_v0.md)
+  * 確認 7B 對 sliced context 的 search verbatim 遵循度為 0%，而 14B 面臨嚴重的本機執行環境物理限制。
+
+### 2. 治理與經驗回寫 (C7)
+* 將 **14B 本機 CPU 執行 Hang** 之經驗回寫至 [Ops - Learning Closure Matrix.md](file:///Users/jameschen/Workspace/nexus/nexus_wiki_vault/06_Ops/Ops%20-%20Learning%20Closure%20Matrix.md)，限制在無 GPU 加速環境下強行執行 14B+ 大模型的本地推理。
+
+### 3. 下一 Sprint 規劃 (C8)
+1. **強化 7B 模型 search 區塊匹配率**：
+   * 在 Prompt Builder 中引入更強的「禁腦補/精確 verbatim 匹配」指令契約。
+   * 研究 AST Sliced Context 中是否提供更精簡的 line ranges 以減少 7B 的 search 區塊範圍，縮小腦補空間。
+2. **引入 API 代理或模型降級執行**：
+   * 針對 14B 推理，為防 ENV_BLOCKED，實作「可選用 Cloud LLM API（如 Gemini / DeepSeek API）」的 fallback 政策，或者引入 7B / 14B 之間的 9B 模型做本地權衡測試。
+3. **單元測試與環境合規加固**：
+   * 解決並修補 tests/unit/local_heal/ 中剩餘的介面飄移，確保 `StrategyEnvelope` 與 `LocalizedFile` 等類別介面合規。
+
+
