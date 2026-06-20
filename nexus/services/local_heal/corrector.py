@@ -39,15 +39,18 @@ class SelfCorrector:
                 f"Output a valid SEARCH/REPLACE block with the corrected logic."
             )
         elif error.kind == PatchErrorKind.SYNTAX_ERROR:
+            packet_text = sp.to_prompt_text() if sp else f"--> {error.message}"
             retry_instruction = (
                 f"Your previous patch caused a syntax compilation error in Python:\n"
-                f"--> {error.message}\n\n"
+                f"### STRUCTURED FAILURE DETAILS\n"
+                f"{packet_text}\n\n"
                 f"Please do the following:\n"
                 f"1. Carefully inspect your REPLACE block for missing brackets, commas, quotes, or incorrect indentation.\n"
                 f"2. Keep the SEARCH block EXACTLY the same, and only fix the Python syntax inside the REPLACE block.\n"
                 f"Output the fully corrected SEARCH/REPLACE block with perfect Python syntax."
             )
         elif error.kind == PatchErrorKind.SEARCH_MISMATCH:
+            packet_text = sp.to_prompt_text() if sp else ""
             # Phase 4 Upgrade: Authoritative Canonical Copy-Paste
             closest_hint = ""
             if error.closest_match:
@@ -65,9 +68,11 @@ class SelfCorrector:
                     f"The battlesuit could not verify your SEARCH block in the file. Please carefully check the [SOURCE CONTEXT] below in the prompt and ensure your SEARCH block matches the file content character-for-character, including indentation and newlines.\n"
                 )
             
+            structured_section = f"\n### STRUCTURED FAILURE DETAILS\n{packet_text}\n" if packet_text else ""
             retry_instruction = (
                 f"CRITICAL ERROR: Your previous SEARCH block did not match the file content.\n"
-                f"--> {error.message}\n\n"
+                f"--> {error.message}\n"
+                f"{structured_section}\n"
                 f"{closest_hint}"
                 f"Output the corrected SEARCH/REPLACE block now."
             )

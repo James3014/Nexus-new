@@ -100,6 +100,16 @@ def _derive_success_attribution(match_authority: Any) -> str:
         return "unknown"
 
 
+def _has_structured_packet(ctx: Any) -> bool:
+    """T3: Check if structured_packet was available for retry evidence."""
+    errors = getattr(ctx, "errors", []) or []
+    for err in reversed(errors):
+        sp = getattr(err, "structured_packet", None)
+        if sp is not None:
+            return True
+    return False
+
+
 def _extract_failure_telemetry(ctx: Any, failure_reason: str) -> dict:
     """T1.2: Extract enriched telemetry based on failure type."""
     telemetry = {}
@@ -450,6 +460,8 @@ def build_repair_receipt(ctx: Any, *, model_name: str = "nexus-local-heal", run_
             "success_attribution": _derive_success_attribution(getattr(ctx, "match_authority", None)),
             # T1.2: Enriched failure telemetry
             "failure_telemetry": _extract_failure_telemetry(ctx, failure_reason),
+            # T3: structured_packet telemetry — whether structured evidence was used in retry
+            "structured_packet_used": _has_structured_packet(ctx),
             # T1.6: Semantic retry telemetry
             "semantic_retry_telemetry": dict(getattr(ctx, "_semantic_retry_telemetry", {}) or {}),
         },

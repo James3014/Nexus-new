@@ -426,16 +426,21 @@ class HealOrchestrator:
         ])
         
         sp = None
-        if error.kind == PatchErrorKind.LOGIC_REGRESSION:
+        if error.kind in (PatchErrorKind.LOGIC_REGRESSION, PatchErrorKind.SEARCH_MISMATCH, PatchErrorKind.SYNTAX_ERROR):
             from nexus.services.local_heal.evidence_compactor import EvidenceCompactor
             evaluation_report = getattr(ctx.op, "evaluation_report", "") or error.message or ""
             repro_command = ""
             if ctx.op.plan and getattr(ctx.op.plan, "verifier_command", ""):
                 repro_command = ctx.op.plan.verifier_command
+            env_failure_reason = ""
+            env_resolution = getattr(ctx.op, "env_resolution", None)
+            if env_resolution and not getattr(env_resolution, "ready", True):
+                env_failure_reason = getattr(env_resolution, "failure_reason", "") or ""
             sp = EvidenceCompactor.compact_structured(
                 evidence=evaluation_report,
                 raw_artifact_ref="verification_report.txt",
-                repro_command=repro_command
+                repro_command=repro_command,
+                env_failure_reason=env_failure_reason,
             )
             error.structured_packet = sp
             
