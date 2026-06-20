@@ -439,3 +439,160 @@ def test_local_model_policy_routing():
         assert "fallback_to_7b" in decision["reason_code"]
     finally:
         del os.environ["NEXUS_DISABLE_14B_RETRY"]
+
+
+def test_control_plane_search_override(tmp_path):
+    import os
+    from nexus.services.local_heal.protocol import PatchIntent, SolidSearchReplaceProtocol
+    from nexus.services.local_heal.errors import MatchAuthority
+    from nexus.services.local_heal.patcher import Patcher
+    from nexus.services.local_heal.patch_applier import PatchApplier
+    from nexus.services.local_heal.interface import LocalizedFile
+
+    os.environ["NEXUS_PROTOCOL_MODE"] = "control_plane_search_model_replace"
+    try:
+        source_text = "def add(a, b):\n    return a + b\n"
+        math_py = tmp_path / "math.py"
+        math_py.write_text(source_text, encoding="utf-8")
+
+        # 模型的 SEARCH 區塊跟 source 不太一樣 (少了一個空格)，但相似度 >= 0.75
+        intent1 = PatchIntent(
+            file_path="math.py",
+            search="def add(a, b):\n   return a + b",
+            replace="def add(a, b):\n    return a + b + 1"
+        )
+        
+        protocol = SolidSearchReplaceProtocol()
+        res = protocol.validate(intent1, source_text)
+        
+        assert res.is_valid is True
+        assert res.telemetry is not None
+        assert res.telemetry.get("match_authority") == MatchAuthority.CONTROL_PLANE_VERBATIM
+        assert intent1.search == "def add(a, b):\n    return a + b\n"  # 應該被覆寫為 verbatim
+        
+        # 測試 PatchApplier 的整合
+        intent2 = PatchIntent(
+            file_path="math.py",
+            search="def add(a, b):\n   return a + b",
+            replace="def add(a, b):\n    return a + b + 1"
+        )
+        patcher = Patcher()
+        applier = PatchApplier(parser=protocol, patcher=patcher)
+        localized_files = [LocalizedFile(path="math.py", content=source_text)]
+        
+        app_res = applier.apply_and_validate(
+            intents=[intent2],
+            repo_dir=tmp_path,
+            localized_files=localized_files
+        )
+        assert app_res.success is True
+        assert app_res.match_authority == MatchAuthority.CONTROL_PLANE_VERBATIM
+        assert "return a + b + 1" in math_py.read_text()
+        
+    finally:
+        if "NEXUS_PROTOCOL_MODE" in os.environ:
+            del os.environ["NEXUS_PROTOCOL_MODE"]
+
+
+def test_patch_protocol_guard_during_retry(tmp_path):
+    import os
+    from nexus.services.local_heal.phases.patch_synthesis import PatchSynthesisPhase
+    from nexus.services.local_heal.protocol import SolidSearchReplaceProtocol
+    from nexus.services.local_heal.patcher import Patcher
+    from nexus.services.local_heal.interface import LocalizedFile, PatchSynthesisInput
+    from nexus.services.local_heal.errors import MatchAuthority
+
+    os.environ["NEXUS_PROTOCOL_MODE"] = "control_plane_search_model_replace"
+    try:
+        source_text = "def add(a, b):\n    return a + b\n"
+        math_py = tmp_path / "math.py"
+        math_py.write_text(source_text, encoding="utf-8")
+
+        # Mock LLM Client
+        # 模擬模型在 retry 時回傳了「不同」的 SEARCH 區塊，試圖修改 SEARCH 錨點
+        dummy_response = "FILE: math.py\n<<<<<<< SEARCH\ndef add(a, b):\n    # changed search\n=======\ndef add(a, b):\n    return a + b + 2\n>>>>>>> REPLACE"
+        client = DummyLLMClient(response_text=dummy_response)
+
+        phase = PatchSynthesisPhase(
+            parser=SolidSearchReplaceProtocol(),
+            patcher=Patcher(),
+            llm_client=client
+        )
+
+        # 模擬 attempt = 2 且有 last_search_anchors
+        inp = PatchSynthesisInput(
+            instance_id="test-guard",
+            problem_statement="fix math",
+            repro_evidence="failed",
+            plan=None,
+            localized_files=[LocalizedFile(path="math.py", content=source_text)],
+            repo_dir=tmp_path,
+            reasoning_mode="INTUITIVE",
+            attempt=2,
+            max_tries=3,
+            last_search_anchors=["def add(a, b):\n    return a + b\n"]
+        )
+
+        out = phase.run(inp)
+        assert out.success is False
+        assert out.error_reason == "SEARCH_MISMATCH"
+        assert len(out.errors) == 1
+        assert "SEARCH anchor modified during retry" in out.errors[0].message
+        
+    finally:
+        if "NEXUS_PROTOCOL_MODE" in os.environ:
+            del os.environ["NEXUS_PROTOCOL_MODE"]
+
+
+def test_behavior_collapse_guard_during_retry(tmp_path):
+    import os
+    from nexus.services.local_heal.phases.patch_synthesis import PatchSynthesisPhase
+    from nexus.services.local_heal.protocol import SolidSearchReplaceProtocol
+    from nexus.services.local_heal.patcher import Patcher
+    from nexus.services.local_heal.interface import LocalizedFile, PatchSynthesisInput
+    from nexus.services.local_heal.errors import PatchError, PatchErrorKind
+
+    os.environ["NEXUS_PROTOCOL_MODE"] = "control_plane_search_model_replace"
+    try:
+        source_text = "def add(a, b):\n    return a + b\n"
+        math_py = tmp_path / "math.py"
+        math_py.write_text(source_text, encoding="utf-8")
+
+        # Mock LLM Client
+        # 模擬模型在 retry 時回傳了與上一次「完全相同」的 replacement code (即 return a + b + 2)
+        dummy_response = "FILE: math.py\n<<<<<<< SEARCH\ndef add(a, b):\n    return a + b\n=======\ndef add(a, b):\n    return a + b + 2\n>>>>>>> REPLACE"
+        client = DummyLLMClient(response_text=dummy_response)
+
+        phase = PatchSynthesisPhase(
+            parser=SolidSearchReplaceProtocol(),
+            patcher=Patcher(),
+            llm_client=client
+        )
+
+        # 模擬 attempt = 2 且有 last_replacement_texts
+        inp = PatchSynthesisInput(
+            instance_id="test-collapse",
+            problem_statement="fix math",
+            repro_evidence="failed",
+            plan=None,
+            localized_files=[LocalizedFile(path="math.py", content=source_text)],
+            repo_dir=tmp_path,
+            reasoning_mode="INTUITIVE",
+            attempt=2,
+            max_tries=3,
+            last_replacement_texts=["def add(a, b):\n    return a + b + 2"]
+        )
+
+        out = phase.run(inp)
+        # 應該因為 Behavior Collapse 被 Guard 直接阻斷
+        assert out.success is False
+        assert out.error_reason == "BEHAVIOR_COLLAPSE"
+        assert len(out.errors) == 1
+        assert "Behavior collapse" in out.errors[0].message
+        
+    finally:
+        if "NEXUS_PROTOCOL_MODE" in os.environ:
+            del os.environ["NEXUS_PROTOCOL_MODE"]
+
+
+

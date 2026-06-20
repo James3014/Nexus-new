@@ -618,7 +618,9 @@ class PatchApplier:
             if match_authority is not None:
                 intent_authority = match_authority
             elif intent_authority is None:
-                if match_res.telemetry and match_res.telemetry.get("canonical_span", {}).get("auto_corrected", False):
+                if match_res.telemetry and "match_authority" in match_res.telemetry:
+                    intent_authority = match_res.telemetry["match_authority"]
+                elif match_res.telemetry and match_res.telemetry.get("canonical_span", {}).get("auto_corrected", False):
                     intent_authority = MatchAuthority.CANONICAL_RECOVERY
                 else:
                     intent_authority = MatchAuthority.VERBATIM

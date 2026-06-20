@@ -36,6 +36,13 @@ def make_ollama_generate(model_name: str):
             f.write("-" * 40 + "\n")
 
         print(f"  → Invoking local model: {model_name}...", flush=True)
+        
+        # 針對 gemma 12B 等本機大模型施加嚴格的 num_ctx 與 timeout 防護以防 OS Hang
+        is_large_model = "gemma" in model_name.lower() or "12b" in model_name.lower() or "14b" in model_name.lower()
+        ctx_val = 4096 if is_large_model else 32768
+        predict_val = 768 if is_large_model else 8192
+        timeout_val = 300 if is_large_model else timeout
+        
         payload = json.dumps({
             "model": model_name,
             "system": system_prompt,
@@ -43,8 +50,8 @@ def make_ollama_generate(model_name: str):
             "stream": False,
             "options": {
                 "temperature": 0.0,
-                "num_ctx": 32768,
-                "num_predict": 8192,
+                "num_ctx": ctx_val,
+                "num_predict": predict_val,
             }
         }).encode()
 
@@ -55,7 +62,7 @@ def make_ollama_generate(model_name: str):
                 headers={"Content-Type": "application/json"},
                 method="POST",
             )
-            with urllib.request.urlopen(req, timeout=timeout) as resp:
+            with urllib.request.urlopen(req, timeout=timeout_val) as resp:
                 data = json.loads(resp.read())
                 res = data.get("response", "")
                 print(f"  → Response received ({len(res)} chars)", flush=True)
@@ -85,10 +92,10 @@ def main():
 
     model_map = {
         "7b": "qwen2.5-coder:7b",
-        "14b": "qwen2.5-coder:14b-instruct-q3_K_M"
+        "14b": "gemma4-coder-12b-q4km:latest"
     }
     model_name = model_map[args.model]
-    phase_name = "c4_7b" if args.model == "7b" else "c5_14b"
+    phase_name = "c4_7b" if args.model == "7b" else "c5_gemma4_12b"
     
     print(f"==================================================")
     print(f"🏁 Starting Repair Execution for Model: {model_name} ({phase_name})")

@@ -177,7 +177,7 @@ def check_lane_classification(receipt: Dict[str, Any]) -> List[str]:
 
     # Rule: direct patch lane should have verbatim or cross_file authority
     if lane == 'verifier_passed_by_execution' and \
-       authority not in ('verbatim', 'cross_file_correction', None):
+       authority not in ('verbatim', 'cross_file_correction', 'control_plane_verbatim', None):
         violations.append("direct_patch_lane_wrong_authority")
 
     # Rule: canonical recovery lane should have canonical_recovery authority

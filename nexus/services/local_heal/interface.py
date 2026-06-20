@@ -96,6 +96,8 @@ class PatchSynthesisInput:
     user_prompt: str = ""
     failure_reason: str = ""
     python_executable: str = ""
+    last_search_anchors: List[str] = field(default_factory=list)
+    last_replacement_texts: List[str] = field(default_factory=list)
 
 @dataclass(frozen=True)
 class PatchSynthesisOutput:
@@ -108,6 +110,8 @@ class PatchSynthesisOutput:
     empty_response: bool = False
     preflight_telemetry: Dict[str, Any] = field(default_factory=dict)
     errors: List = field(default_factory=list)  # T1.2: Forward PatchError objects for telemetry
+    last_search_anchors: List[str] = field(default_factory=list)
+    last_replacement_texts: List[str] = field(default_factory=list)
 
     @property
     def failure_reason(self) -> str:

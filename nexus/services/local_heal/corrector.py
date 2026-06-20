@@ -176,4 +176,16 @@ class SelfCorrector:
                 f"Please output a corrected and verified SEARCH/REPLACE block now."
             )
 
+        import os
+        protocol_mode = os.getenv("NEXUS_PROTOCOL_MODE", "standard")
+        if protocol_mode == "control_plane_search_model_replace":
+            contract_suffix = (
+                "\n\n⚠️ [NEXUS PROTOCOL CONTRACT]\n"
+                "You are in CONTROL_PLANE_SEARCH_MODEL_REPLACE mode.\n"
+                "1. You MUST reuse the EXACT same SEARCH block as your previous attempt.\n"
+                "2. Do NOT invent, change, or expand the SEARCH block. Any modification to the SEARCH block will be REJECTED by the control plane guard.\n"
+                "3. Adjust ONLY the code inside the REPLACE block to fix the reported errors."
+            )
+            retry_instruction += contract_suffix
+
         return original_user_prompt + header + retry_instruction

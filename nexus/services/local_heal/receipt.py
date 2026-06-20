@@ -96,6 +96,8 @@ def _derive_success_attribution(match_authority: Any) -> str:
         return "canonical_recovery_success"
     elif authority_str == "cross_file_correction":
         return "cross_file_recovery_success"
+    elif authority_str == "control_plane_verbatim":
+        return "model_patch_success_candidate"
     else:
         return "unknown"
 

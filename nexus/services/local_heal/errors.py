@@ -37,6 +37,7 @@ class MatchAuthority(Enum):
     CROSS_FILE_CORRECTION = "cross_file_correction"  # Canonical span from a DIFFERENT localized file
     CANONICAL_RECOVERY = "canonical_recovery"      # Canonical span from line block extraction or AST symbol fallback
     FUZZY_CANDIDATE_ONLY = "fuzzy_candidate_only"  # FAIL-CLOSED: must never appear on success=True
+    CONTROL_PLANE_VERBATIM = "control_plane_verbatim" # Exact SEARCH block provided or overridden by control plane
 
 
 @dataclass

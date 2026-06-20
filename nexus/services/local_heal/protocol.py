@@ -38,13 +38,51 @@ class SolidSearchReplaceProtocol:
         lower_output = raw_output.lower()
         return any(kw in lower_output for kw in refusal_keywords) and "<<<<<<< SEARCH" not in raw_output
 
-    def parse(self, raw_output: str) -> List[PatchIntent] | PatchError:
+    def parse(self, raw_output: str, anchor_text: str = None) -> List[PatchIntent] | PatchError:
         if not raw_output or not raw_output.strip():
             return PatchError(kind=PatchErrorKind.EMPTY_RESPONSE, message="LLM output is empty.")
             
         if self.detect_refusal(raw_output):
             return PatchError(kind=PatchErrorKind.REFUSAL_DETECTED, message="LLM refused fix.")
             
+        import os
+        protocol_mode = os.getenv("NEXUS_PROTOCOL_MODE", "standard")
+
+        if protocol_mode == "anchored_edit" and anchor_text is not None:
+            # 1. 嘗試解析為單純的 REPLACE 區塊，若有的話
+            replace_pattern = re.compile(r'<<<<<<< REPLACE\s*\n(.*?)\n>>>>>>> REPLACE', re.DOTALL)
+            match = replace_pattern.search(raw_output)
+            if match:
+                replacement = match.group(1)
+            else:
+                # 2. 相容舊版簡約的 REPLACE 格式
+                replace_simple = re.compile(r'REPLACE:\s*(?:\n)?(.*?)(?:\nEND\s*|$)', re.DOTALL)
+                match_simple = replace_simple.search(raw_output)
+                if match_simple:
+                    replacement = match_simple.group(1)
+                else:
+                    # 3. 嘗試找標準的 SEARCH/REPLACE 結構中的 REPLACE 部分
+                    standard_match = self.sr_pattern.search(raw_output)
+                    if standard_match:
+                        replacement = standard_match.group(2)
+                    else:
+                        # 4. Fallback: 清理 markdown block，把整段輸出都當成 replacement
+                        replacement = raw_output.strip()
+                        if replacement.startswith("```"):
+                            lines = replacement.splitlines()
+                            if len(lines) >= 2 and lines[-1].startswith("```"):
+                                replacement = "\n".join(lines[1:-1])
+
+            # 提取 FILE 表頭 (若有)
+            file_match = self.file_pattern.search(raw_output)
+            file_path = file_match.group(1).strip() if file_match else "UNKNOWN_PENDING"
+
+            return [PatchIntent(
+                file_path=file_path,
+                search=anchor_text,
+                replace=replacement
+            )]
+
         # 1. 依照 FILE: 切分段落
         file_sections = self.file_pattern.split(raw_output)
         # result looks like: ["junk before", "path1", "content1", "path2", "content2"]
@@ -97,6 +135,45 @@ class SolidSearchReplaceProtocol:
 
     def validate(self, intent: PatchIntent, source_text: str) -> ValidationResult:
         import hashlib
+        import os
+        protocol_mode = os.getenv("NEXUS_PROTOCOL_MODE", "standard")
+
+        if protocol_mode == "anchored_edit":
+            from nexus.services.local_heal.errors import MatchAuthority
+            # 1. 拒絕空 replacement
+            if not intent.replace or not intent.replace.strip():
+                return ValidationResult(is_valid=False, error=PatchError(kind=PatchErrorKind.PATCH_EMPTY, message="Replacement is empty.", file_path=intent.file_path))
+            # 2. 拒絕 out-of-range 或 mismatch
+            if intent.search not in source_text:
+                return ValidationResult(is_valid=False, error=PatchError(kind=PatchErrorKind.SEARCH_MISMATCH, message="Anchor text not found in source.", file_path=intent.file_path))
+            # 3. 確保單一匹配防止多重匹配引發歧義
+            if source_text.count(intent.search) > 1:
+                return ValidationResult(is_valid=False, error=PatchError(kind=PatchErrorKind.NAME_SANITY_ERROR, message="Ambiguous anchor: multiple occurrences in source.", file_path=intent.file_path))
+
+            # 構造 telemetry
+            source_hash = hashlib.sha256(source_text.encode()).hexdigest()[:16]
+            canonical_span_telemetry = {
+                "source_hash": source_hash,
+                "search_length": len(intent.search),
+                "search_in_source_exact": True,
+                "source_length": len(source_text),
+                "model_generated_search": False,
+            }
+            
+            idx = source_text.index(intent.search)
+            canonical_span_telemetry["canonical_line_start"] = source_text[:idx].count("\n") + 1
+            canonical_span_telemetry["canonical_line_end"] = source_text[:idx + len(intent.search)].count("\n") + 1
+
+            return ValidationResult(
+                is_valid=True,
+                telemetry={
+                    "canonical_span": canonical_span_telemetry,
+                    "auto_corrected": False,
+                    "match_authority": MatchAuthority.CONTROL_PLANE_VERBATIM,
+                    "protocol_mode": "anchored_edit"
+                }
+            )
+
         placeholders = ["# ...", "// ...", "... [truncated]", "...", "…"]
         if any(ph in intent.search for ph in placeholders) or any(ph in intent.replace for ph in placeholders):
             return ValidationResult(is_valid=False, error=PatchError(kind=PatchErrorKind.SEARCH_HAS_PLACEHOLDER, message="Placeholders detected."))
@@ -131,7 +208,31 @@ class SolidSearchReplaceProtocol:
         # T1.3B: Enhanced fuzzy fallback - record candidate but do NOT pass gate
         from nexus.services.local_heal.matcher import MatchChain
         match_res = MatchChain().find_match(source_text, intent.search, intent.replace)
+        
+        import os
+        protocol_mode = os.getenv("NEXUS_PROTOCOL_MODE", "standard")
+        
         if match_res is not None and match_res.similarity >= 0.75:
+            if protocol_mode == "control_plane_search_model_replace":
+                from nexus.services.local_heal.errors import MatchAuthority
+                intent.search = match_res.verbatim_text
+                canonical_span_telemetry["auto_corrected"] = True
+                canonical_span_telemetry["correction"] = f"control_plane_override:{match_res.strategy_name}:{match_res.similarity:.3f}"
+                
+                idx = source_text.index(match_res.verbatim_text)
+                canonical_span_telemetry["canonical_line_start"] = source_text[:idx].count("\n") + 1
+                canonical_span_telemetry["canonical_line_end"] = source_text[:idx + len(match_res.verbatim_text)].count("\n") + 1
+                
+                return ValidationResult(
+                    is_valid=True,
+                    telemetry={
+                        "canonical_span": canonical_span_telemetry,
+                        "auto_corrected": True,
+                        "match_authority": MatchAuthority.CONTROL_PLANE_VERBATIM,
+                        "protocol_mode": "control_plane_search_model_replace"
+                    }
+                )
+            
             original_search_hash = hashlib.sha256(intent.search.encode()).hexdigest()[:16]
             canonical_search_hash = hashlib.sha256(match_res.verbatim_text.encode()).hexdigest()[:16]
 

@@ -206,6 +206,59 @@ class PatchSynthesisPhase(IPhase):
                 refusal_detected=(intents_or_error.kind == PatchErrorKind.REFUSAL_DETECTED)
             )
 
+        # S4 Patch Protocol Guard
+        import os
+        protocol_mode = os.getenv("NEXUS_PROTOCOL_MODE", "standard")
+        if (
+            input_data.attempt > 1
+            and protocol_mode == "control_plane_search_model_replace"
+            and hasattr(input_data, "last_search_anchors")
+            and input_data.last_search_anchors
+        ):
+            for intent in intents_or_error:
+                matched_previous = False
+                for prev_search in input_data.last_search_anchors:
+                    if intent.search.strip() == prev_search.strip():
+                        matched_previous = True
+                        break
+                if not matched_previous:
+                    model_decisions[-1]["status"] = "SEARCH_MODIFIED_GUARD_BLOCKED"
+                    return PatchSynthesisOutput(
+                        success=False,
+                        final_patch="",
+                        model_decisions=model_decisions,
+                        error_reason="SEARCH_MISMATCH",
+                        errors=[PatchError(
+                            kind=PatchErrorKind.SEARCH_MISMATCH,
+                            message="SEARCH anchor modified during retry under control_plane_search_model_replace policy",
+                            file_path=intent.file_path,
+                            failed_search_text=intent.search
+                        )]
+                    )
+
+        # P4 Behavior Collapse Guard
+        if (
+            input_data.attempt > 1
+            and hasattr(input_data, "last_replacement_texts")
+            and input_data.last_replacement_texts
+            and not isinstance(intents_or_error, PatchError)
+        ):
+            for intent in intents_or_error:
+                if intent.replace.strip() in [r.strip() for r in input_data.last_replacement_texts]:
+                    model_decisions[-1]["status"] = "BEHAVIOR_COLLAPSE_GUARD_BLOCKED"
+                    return PatchSynthesisOutput(
+                        success=False,
+                        final_patch="",
+                        model_decisions=model_decisions,
+                        error_reason="BEHAVIOR_COLLAPSE",
+                        errors=[PatchError(
+                            kind=PatchErrorKind.LOGIC_REGRESSION,
+                            message="Behavior collapse: LLM output repeated identical candidate in retry.",
+                            file_path=intent.file_path,
+                            failed_search_text=intent.search
+                        )]
+                    )
+
         # 5. 逐一應用補丁並執行嚴格驗證 (透過解耦後的 PatchApplier)
         apply_res = self.patch_applier.apply_and_validate(
             intents=intents_or_error,
@@ -254,6 +307,8 @@ class PatchSynthesisPhase(IPhase):
             syntax_gate_passed=apply_res.syntax_gate_passed,
             preflight_telemetry=apply_res.preflight_telemetry,
             errors=apply_res.errors,
+            last_search_anchors=[intent.search for intent in intents_or_error] if apply_res.success and not isinstance(intents_or_error, PatchError) else [],
+            last_replacement_texts=[intent.replace for intent in intents_or_error] if apply_res.success and not isinstance(intents_or_error, PatchError) else []
         )
 
     def execute(self, ctx: HealContext) -> PhaseResult:
@@ -270,7 +325,9 @@ class PatchSynthesisPhase(IPhase):
             system_prompt=ctx.op.system_prompt,
             user_prompt=ctx.op.user_prompt,
             failure_reason=ctx.op.failure_reason,
-            python_executable=ctx.op.python_executable
+            python_executable=ctx.op.python_executable,
+            last_search_anchors=getattr(ctx.op, "last_search_anchors", []),
+            last_replacement_texts=getattr(ctx.op, "last_replacement_texts", [])
         )
 
         output = self.run(input_data)
@@ -289,4 +346,6 @@ class PatchSynthesisPhase(IPhase):
             ctx.op.failure_reason = output.failure_reason
             return PhaseResult(success=False, exit_layer="patcher", failure_reason=output.failure_reason)
 
+        ctx.op.last_search_anchors = output.last_search_anchors
+        ctx.op.last_replacement_texts = output.last_replacement_texts
         return PhaseResult(success=True)

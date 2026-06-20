@@ -119,3 +119,28 @@ def test_env_failure_classification_propagated():
     )
     
     assert "[ENV_FAILURE] environment_bootstrap_interpreter_mismatch" in prompt
+
+
+def test_retry_prompt_control_plane_contract():
+    import os
+    from nexus.services.local_heal.errors import PatchError, PatchErrorKind
+    from nexus.services.local_heal.corrector import SelfCorrector
+
+    os.environ["NEXUS_PROTOCOL_MODE"] = "control_plane_search_model_replace"
+    try:
+        error = PatchError(kind=PatchErrorKind.LOGIC_REGRESSION, message="AssertionError")
+        corrector = SelfCorrector()
+        
+        prompt = corrector.build_retry_prompt(
+            original_user_prompt="fix test",
+            error=error,
+            targeted_files="test_logic.py"
+        )
+        
+        assert "⚠️ [NEXUS PROTOCOL CONTRACT]" in prompt
+        assert "CONTROL_PLANE_SEARCH_MODEL_REPLACE" in prompt
+        assert "You MUST reuse the EXACT same SEARCH block" in prompt
+    finally:
+        if "NEXUS_PROTOCOL_MODE" in os.environ:
+            del os.environ["NEXUS_PROTOCOL_MODE"]
+
