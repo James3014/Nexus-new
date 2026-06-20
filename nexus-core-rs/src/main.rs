@@ -24,6 +24,12 @@ enum Request {
         current: FlowState,
         next: FlowState,
     },
+    GetLegalTransitions {
+        current: FlowState,
+    },
+    IsTerminal {
+        state: FlowState,
+    },
     AstScan {
         path: String,
         rules: Vec<AstRule>,
@@ -110,6 +116,31 @@ fn main() {
                 Response {
                     success: true,
                     payload: serde_json::to_value(result).unwrap(),
+                    error_message: None,
+                }
+            },
+            Ok(Request::GetLegalTransitions { current }) => {
+                let legal = FlowStateMachine::legal_transitions(current);
+                let terminal = FlowStateMachine::is_terminal(current);
+                Response {
+                    success: true,
+                    payload: serde_json::json!({
+                        "current_state": format!("{:?}", current),
+                        "legal_next_states": legal.iter().map(|s| format!("{:?}", s)).collect::<Vec<_>>(),
+                        "is_terminal": terminal,
+                        "transition_count": legal.len()
+                    }),
+                    error_message: None,
+                }
+            },
+            Ok(Request::IsTerminal { state }) => {
+                let is_term = FlowStateMachine::is_terminal(state);
+                Response {
+                    success: true,
+                    payload: serde_json::json!({
+                        "state": format!("{:?}", state),
+                        "is_terminal": is_term
+                    }),
                     error_message: None,
                 }
             },
