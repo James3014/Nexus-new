@@ -105,6 +105,8 @@ class PatchSynthesisOutput:
     syntax_gate_passed: bool = True
     refusal_detected: bool = False
     empty_response: bool = False
+    preflight_telemetry: Dict[str, Any] = field(default_factory=dict)
+    errors: List = field(default_factory=list)  # T1.2: Forward PatchError objects for telemetry
 
     @property
     def failure_reason(self) -> str:

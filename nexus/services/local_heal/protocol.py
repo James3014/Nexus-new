@@ -2,7 +2,7 @@ from dataclasses import dataclass
 import re
 import ast
 from typing import List, Tuple, Dict, Any
-from nexus.services.local_heal.errors import PatchError, PatchErrorKind
+from nexus.services.local_heal.errors import PatchError, PatchErrorKind, PatchMismatchSubclass
 from nexus.services.local_heal.validator import validate_syntax
 
 @dataclass
@@ -96,27 +96,144 @@ class SolidSearchReplaceProtocol:
         return intents
 
     def validate(self, intent: PatchIntent, source_text: str) -> ValidationResult:
+        import hashlib
         placeholders = ["# ...", "// ...", "... [truncated]", "...", "…"]
         if any(ph in intent.search for ph in placeholders) or any(ph in intent.replace for ph in placeholders):
             return ValidationResult(is_valid=False, error=PatchError(kind=PatchErrorKind.SEARCH_HAS_PLACEHOLDER, message="Placeholders detected."))
 
-        # 逐字匹配
-        if intent.search not in source_text:
-            # 容錯：移除 SEARCH 塊末尾可能多餘的空行再試一次
-            if intent.search.rstrip() in source_text:
-                intent.search = intent.search.rstrip()
-                return ValidationResult(is_valid=True)
-                
-            # P0-1: 整合 MatchChain fuzzy fallback
-            from nexus.services.local_heal.matcher import MatchChain
-            match_res = MatchChain().find_match(source_text, intent.search, intent.replace)
-            if match_res is not None and match_res.similarity >= 0.85:
-                intent.search = match_res.verbatim_text
-                return ValidationResult(is_valid=True, telemetry={"strategy_used": match_res.strategy_name, "similarity": match_res.similarity})
-                
-            return ValidationResult(is_valid=False, error=PatchError(kind=PatchErrorKind.SEARCH_MISMATCH, message=f"SEARCH mismatch in {intent.file_path}"))
+        source_hash = hashlib.sha256(source_text.encode()).hexdigest()[:16]
+        search_stripped = intent.search.strip()
+        search_in_source = search_stripped in source_text
+
+        # T1.2: Record canonical span telemetry
+        canonical_span_telemetry = {
+            "source_hash": source_hash,
+            "search_length": len(search_stripped),
+            "search_in_source_exact": search_in_source,
+            "source_length": len(source_text),
+        }
+
+        if search_in_source:
+            idx = source_text.index(search_stripped)
+            start_line = source_text[:idx].count("\n") + 1
+            end_line = source_text[:idx + len(search_stripped)].count("\n") + 1
+            canonical_span_telemetry["canonical_line_start"] = start_line
+            canonical_span_telemetry["canonical_line_end"] = end_line
+            return ValidationResult(is_valid=True, telemetry={"canonical_span": canonical_span_telemetry, "auto_corrected": False})
+
+        # 容錯：移除 SEARCH 塊末尾可能多餘的空行再試一次
+        if intent.search.rstrip() in source_text:
+            intent.search = intent.search.rstrip()
+            canonical_span_telemetry["auto_corrected"] = True
+            canonical_span_telemetry["correction"] = "trailing_whitespace_strip"
+            return ValidationResult(is_valid=True, telemetry={"canonical_span": canonical_span_telemetry, "auto_corrected": True})
             
-        return ValidationResult(is_valid=True)
+        # T1.3B: Enhanced fuzzy fallback - record candidate but do NOT pass gate
+        from nexus.services.local_heal.matcher import MatchChain
+        match_res = MatchChain().find_match(source_text, intent.search, intent.replace)
+        if match_res is not None and match_res.similarity >= 0.75:
+            original_search_hash = hashlib.sha256(intent.search.encode()).hexdigest()[:16]
+            canonical_search_hash = hashlib.sha256(match_res.verbatim_text.encode()).hexdigest()[:16]
+
+            subclass = self._classify_mismatch_subclass(intent.search, match_res, source_text)
+            canonical_span_telemetry["auto_corrected"] = False
+            canonical_span_telemetry["correction"] = f"fuzzy_candidate:{match_res.strategy_name}:{match_res.similarity:.3f}"
+            canonical_span_telemetry["original_failed_search_hash"] = original_search_hash
+            canonical_span_telemetry["canonical_search_hash"] = canonical_search_hash
+            canonical_span_telemetry["fuzzy_candidate_text"] = match_res.verbatim_text[:500]
+
+            if match_res.verbatim_text in source_text:
+                idx = source_text.index(match_res.verbatim_text)
+                canonical_span_telemetry["candidate_line_start"] = source_text[:idx].count("\n") + 1
+                canonical_span_telemetry["candidate_line_end"] = source_text[:idx + len(match_res.verbatim_text)].count("\n") + 1
+
+            patch_error = PatchError(
+                kind=PatchErrorKind.SEARCH_MISMATCH,
+                message=f"Fuzzy candidate found (similarity={match_res.similarity:.3f}) but not verbatim - requires canonical authority",
+                mismatch_subclass=subclass,
+                file_path=intent.file_path,
+                failed_search_text=intent.search[:500],
+                closest_match=match_res.verbatim_text,
+                telemetry={
+                    "canonical_span": canonical_span_telemetry,
+                    "fuzzy_strategy": match_res.strategy_name,
+                    "fuzzy_similarity": match_res.similarity,
+                    "requires_authority": True,
+                },
+            )
+            return ValidationResult(is_valid=False, error=patch_error, telemetry={
+                "canonical_span": canonical_span_telemetry,
+                "fuzzy_strategy": match_res.strategy_name,
+                "fuzzy_similarity": match_res.similarity,
+            })
+            
+        # Classify mismatch subclass for failed match
+        subclass = self._classify_mismatch_subclass(intent.search, match_res, source_text)
+        canonical_span_telemetry["auto_corrected"] = False
+
+        # T1.2: Enrich telemetry with closest match info
+        closest_telemetry = {}
+        if match_res is not None:
+            closest_telemetry = {
+                "closest_strategy": match_res.strategy_name,
+                "closest_similarity": match_res.similarity,
+                "closest_snippet_length": len(match_res.verbatim_text),
+                "closest_snippet_preview": match_res.verbatim_text[:200],
+            }
+            # T1.3B: Compute resolved_span from closest match
+            if match_res.verbatim_text in source_text:
+                idx = source_text.index(match_res.verbatim_text)
+                start_line = source_text[:idx].count("\n") + 1
+                end_line = source_text[:idx + len(match_res.verbatim_text)].count("\n") + 1
+                closest_telemetry["resolved_span"] = f"L{start_line}-L{end_line}"
+                closest_telemetry["resolved_span_lines"] = end_line - start_line + 1
+
+        # T1.2: Populate PatchError with file_path and failed_search_text
+        validate_telemetry = {
+            "canonical_span": canonical_span_telemetry,
+            "closest_match": closest_telemetry,
+        }
+        patch_error = PatchError(
+            kind=PatchErrorKind.SEARCH_MISMATCH,
+            message=f"SEARCH mismatch in {intent.file_path}",
+            mismatch_subclass=subclass,
+            file_path=intent.file_path,
+            failed_search_text=intent.search[:500],
+            telemetry=validate_telemetry,
+        )
+
+        return ValidationResult(is_valid=False, error=patch_error, telemetry={
+            "canonical_span": canonical_span_telemetry,
+            "closest_match": closest_telemetry,
+        })
+
+    def _classify_mismatch_subclass(self, search_text: str, match_res, source_text: str) -> PatchMismatchSubclass:
+        """Classify the specific type of search mismatch."""
+        if match_res is None:
+            # No match found at all
+            return PatchMismatchSubclass.VERBATIM_SEARCH_MISMATCH
+        
+        strategy = match_res.strategy_name
+        similarity = match_res.similarity
+        
+        # Check if it's a normalization drift (matched after normalization but not verbatim)
+        if strategy in ("NormalizedMatch", "DiffLibFuzzyMatcher"):
+            if similarity < 0.95:
+                return PatchMismatchSubclass.SEARCH_NORMALIZATION_DRIFT
+        
+        # Check if it's a false friend (close but wrong location)
+        if strategy == "DiffLibFuzzyMatcher" and similarity >= 0.85:
+            # Check if the match is in a different function/class scope
+            search_lines = search_text.strip().splitlines()
+            match_lines = match_res.verbatim_text.strip().splitlines()
+            if len(search_lines) > 2 and len(match_lines) > 2:
+                # Simple heuristic: if first/last lines differ significantly, it's a wrong span
+                if search_lines[0].strip() != match_lines[0].strip():
+                    return PatchMismatchSubclass.WRONG_TARGET_SPAN
+            return PatchMismatchSubclass.CLOSEST_SNIPPET_FALSE_FRIEND
+        
+        # Default to verbatim mismatch
+        return PatchMismatchSubclass.VERBATIM_SEARCH_MISMATCH
 
 class SyntaxGate:
     @staticmethod
