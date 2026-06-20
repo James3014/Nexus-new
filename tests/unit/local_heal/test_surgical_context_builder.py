@@ -1,6 +1,7 @@
 import pytest
 from pathlib import Path
 from nexus.services.local_heal.surgical_context import SurgicalContextBuilder
+from nexus.services.local_heal.interface import RepairPlan
 
 def test_surgical_context_no_crop_for_small_file(tmp_path):
     builder = SurgicalContextBuilder(max_context_lines=10, window_size=5)
@@ -23,7 +24,8 @@ def test_surgical_context_no_crop_for_small_file(tmp_path):
 
 def test_surgical_context_crop_by_search_symbols(tmp_path):
     # 檔案有 20 行，大於 max_context_lines=10。
-    # window_size=3，我們搜尋 "target_func"
+    # _dynamic_window(20, 12) = min(30, 20//2) = 10
+    # window_size=3 is overridden by _dynamic_window for small files
     lines = [f"line {i}" for i in range(1, 21)]
     lines[12] = "def target_func():"
     source_text = "\n".join(lines)
@@ -35,22 +37,20 @@ def test_surgical_context_crop_by_search_symbols(tmp_path):
         source_text=source_text,
         attempt=1,
         failure_reason="",
-        plan={"search_symbols": ["target_func"]}
+        plan=RepairPlan(search_symbols=["target_func"], repair_strategy="fix")
     )
     
-    # 12 是第 13 行 (1-indexed)。
-    # 預計 Anchor 是 12。
-    # 區間為 [12 - 3, 12 + 3] -> [9, 15] -> lines 10 to 16.
-    assert "  10 | line 10" in res
+    # anchor at index 12, window=10, range [2, 20] -> lines 3 to 20
+    assert "   3 | line 3" in res
     assert "  13 | def target_func():" in res
-    assert "  16 | line 16" in res
-    assert "line 5" not in res
-    assert "line 18" not in res
+    assert "  20 | line 20" in res
+    assert "   1 | line 1" not in res
     assert "truncated" in res
 
 def test_surgical_context_crop_by_retry_fuzzy_matching(tmp_path):
     # 檔案有 30 行，大於 max_context_lines=10。
-    # 重試 SEARCH_MISMATCH，且 user_prompt 中有之前的 SEARCH 區塊。
+    # _dynamic_window(30, 18) = min(30, 30//2) = 15
+    # window_size=3 is overridden by _dynamic_window for small files
     lines = [f"line {i}" for i in range(1, 31)]
     lines[18] = "    if value == 42:"
     lines[19] = "        return True"
@@ -80,10 +80,9 @@ def test_surgical_context_crop_by_retry_fuzzy_matching(tmp_path):
         user_prompt=user_prompt
     )
     
-    # Anchor 應該定位在 index 18 (第 19 行)。
-    # 區間為 [18 - 3, 18 + 3] -> [15, 21] -> lines 16 to 22
-    assert "  16 | line 16" in res
+    # anchor at index 18, window=15, range [3, 30] -> lines 4 to 30
+    assert "   4 | line 4" in res
     assert "  19 |     if value == 42:" in res
-    assert "  22 | line 22" in res
-    assert "line 10" not in res
-    assert "line 26" not in res
+    assert "  30 | line 30" in res
+    assert "   1 | line 1" not in res
+    assert "truncated" in res

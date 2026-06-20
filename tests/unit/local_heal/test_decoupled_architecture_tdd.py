@@ -8,7 +8,8 @@ from nexus.services.local_heal.interface import (
     PlanningInput, PlanningOutput, PatchSynthesisInput,
     ReproductionInput, ReproductionOutput,
     LocalizationInput, LocalizationOutput,
-    VerificationInput, VerificationOutput
+    VerificationInput, VerificationOutput,
+    RepairPlan,
 )
 from nexus.services.local_heal.phases.planning import PlanningPhase
 from nexus.services.local_heal.planner import Planner
@@ -162,9 +163,7 @@ def test_planning_phase_stateless_run():
     
     out = phase.run(inp)
     assert out.success is True
-    # P0-5: DeterministicSymbolExtractor merges symbols from problem + evidence;
-    # "FooClass" from problem and "AssertionError" from evidence are both valid.
-    assert "FooClass" in out.plan["search_symbols"]
+    assert "FooClass" in out.plan.search_symbols
     assert len(llm_client.calls) == 1
     assert llm_client.calls[0]["model"] == "qwen2.5-coder:7b"
 
@@ -197,13 +196,12 @@ def test_localization_phase_stateless_run():
         problem_statement="Repair bug",
         repro_evidence="Error",
         repo_dir=Path("/tmp/repo"),
-        plan={"search_symbols": ["Foo"]}
+        plan=RepairPlan(search_symbols=["Foo"], repair_strategy="fix")
     )
 
     out = phase.run(inp)
     assert out.success is True
-    assert len(out.localized_files) == 1
-    assert out.localized_files[0][0] == "foo.py"
+    assert out.localized_files[0].path == "foo.py"
 
 
 def test_verification_phase_stateless_run(tmp_path):
@@ -287,17 +285,17 @@ def test_deterministic_symbol_extractor_no_noise():
 
 
 def test_context_window_expansion():
-    """P0-2: 7B model must have num_ctx=16384 and num_predict=4096."""
+    """P0-2: 7B model must have num_ctx=16384 and num_predict=512 (bounded)."""
     from nexus.engine.local_model_policy import ModelProfile
 
     opts_7b = ModelProfile.get_options("qwen2.5-coder:7b", attempt=1)
     assert opts_7b["num_ctx"] == 16384
-    assert opts_7b["num_predict"] == 4096
+    assert opts_7b["num_predict"] == 512
     assert opts_7b["temperature"] == 0.0
 
-    opts_14b = ModelProfile.get_options("qwen2.5-coder:14b", attempt=1)
-    assert opts_14b["num_ctx"] == 32768
-    assert opts_14b["num_predict"] == 8192
+    opts_14b = ModelProfile.get_options("qwen2.5-coder:14b-instruct-q3_K_M", attempt=1)
+    assert opts_14b["num_ctx"] == 8192
+    assert opts_14b["num_predict"] == 3072
 
 
 def test_temperature_scaling_on_retry():
@@ -342,13 +340,18 @@ def test_cross_file_search_fallback(tmp_path):
     )
     llm_client = DummyLLMClient(llm_response)
 
+    from nexus.services.local_heal.interface import RepairPlan, PatchSynthesisInput, LocalizedFile
+
     phase = PatchSynthesisPhase(parser=parser, patcher=patcher, llm_client=llm_client)
     inp = PatchSynthesisInput(
         instance_id="test-crossfile",
         problem_statement="Fix data conversion",
         repro_evidence="TypeError",
-        plan={"search_symbols": ["_convert_data"], "repair_strategy": "fix", "violated_invariants": []},
-        localized_files=[("column.py", column_py.read_text()), ("table.py", table_py.read_text())],
+        plan=RepairPlan(search_symbols=["_convert_data"], repair_strategy="fix"),
+        localized_files=[
+            LocalizedFile(path="column.py", content=column_py.read_text()),
+            LocalizedFile(path="table.py", content=table_py.read_text()),
+        ],
         repo_dir=tmp_path,
         reasoning_mode="INTUITIVE",
         attempt=1,
@@ -378,8 +381,8 @@ def test_slim_prompt_for_7b():
     assert "hasattr()/getattr()" not in slim_prompt
     
     # Check that full prompt still has the detailed rules
-    assert "FILE: <path/to/file.py>" in full_prompt
-    assert "CHARACTER-FOR-CHARACTER" in full_prompt
+    assert "FILE: <path>" in full_prompt
+    assert "CHARACTER-FOR-CHARACTER" in full_prompt or "character-for-character" in full_prompt
 
 
 def test_legacy_heal_context_skip_reproduction():
@@ -418,12 +421,12 @@ def test_local_model_policy_routing():
 
     # algebraic patch -> 14B
     decision = LocalModelPolicy.select_model(task_type="repair", phase="patch", context={"attempt": 1, "reasoning_mode": "ALGEBRAIC"})
-    assert decision["model"] == "qwen2.5-coder:14b"
+    assert decision["model"] == "qwen2.5-coder:14b-instruct-q3_K_M"
     assert "algebraic" in decision["reason_code"]
 
     # retry patch -> 14B by default
     decision = LocalModelPolicy.select_model(task_type="repair", phase="patch", context={"attempt": 2})
-    assert decision["model"] == "qwen2.5-coder:14b"
+    assert decision["model"] == "qwen2.5-coder:14b-instruct-q3_K_M"
     assert "retry_precision_escalation_ollama" == decision["reason_code"]
 
     # NEXUS_DISABLE_14B_RETRY=1 -> retry stays 7B

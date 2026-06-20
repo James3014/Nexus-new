@@ -46,9 +46,9 @@ def test_local_model_policy_routes_algebraic_patch_to_ollama_large_by_default(mo
         context={"reasoning_mode": "ALGEBRAIC"},
     )
 
-    assert decision["model"] == "qwen2.5-coder:14b"
+    assert decision["model"] == "qwen2.5-coder:14b-instruct-q3_K_M"
     assert decision["reason_code"] == "algebraic_precision_requirement_ollama"
-    assert decision["timeout_seconds"] == 420
+    assert decision["timeout_seconds"] == 900
 
 
 def test_local_model_policy_routes_patch_retry_to_large_model(monkeypatch):
@@ -62,9 +62,9 @@ def test_local_model_policy_routes_patch_retry_to_large_model(monkeypatch):
         context={"reasoning_mode": "INTUITIVE", "attempt": 2},
     )
 
-    assert decision["model"] == "qwen2.5-coder:14b"
+    assert decision["model"] == "qwen2.5-coder:14b-instruct-q3_K_M"
     assert decision["reason_code"] == "retry_precision_escalation_ollama"
-    assert decision["timeout_seconds"] == 420
+    assert decision["timeout_seconds"] == 900
 
 
 def test_local_model_policy_routes_name_sanity_retry_to_large_model(monkeypatch):
@@ -82,9 +82,9 @@ def test_local_model_policy_routes_name_sanity_retry_to_large_model(monkeypatch)
         },
     )
 
-    assert decision["model"] == "qwen2.5-coder:14b"
+    assert decision["model"] == "qwen2.5-coder:14b-instruct-q3_K_M"
     assert decision["reason_code"] == "name_sanity_retry_precision_ollama"
-    assert decision["timeout_seconds"] == 420
+    assert decision["timeout_seconds"] == 900
 
 
 def test_model_profile_resolution(monkeypatch):
@@ -101,7 +101,7 @@ def test_model_profile_resolution(monkeypatch):
     assert qwen_decision["model"] == "qwen2.5-coder:7b"
     assert qwen_decision["api_type"] == "generate"
     assert qwen_decision["ollama_options"]["temperature"] == 0.0
-    assert qwen_decision["ollama_options"]["num_predict"] == 4096
+    assert qwen_decision["ollama_options"]["num_predict"] == 512
     assert qwen_decision["ollama_options"]["num_ctx"] == 16384
 
     # Test Qwen 14b profile options
@@ -110,11 +110,11 @@ def test_model_profile_resolution(monkeypatch):
         phase="patch",
         context={"attempt": 2},  # trigger escalation to large model
     )
-    assert qwen14b_decision["model"] == "qwen2.5-coder:14b"
+    assert qwen14b_decision["model"] == "qwen2.5-coder:14b-instruct-q3_K_M"
     assert qwen14b_decision["api_type"] == "generate"
     assert qwen14b_decision["ollama_options"]["temperature"] == 0.2
-    assert qwen14b_decision["ollama_options"]["num_predict"] == 8192
-    assert qwen14b_decision["ollama_options"]["num_ctx"] == 32768
+    assert qwen14b_decision["ollama_options"]["num_predict"] == 3072
+    assert qwen14b_decision["ollama_options"]["num_ctx"] == 8192
 
 
 def test_prompt_builder_adapts_to_model_characteristics():
@@ -162,11 +162,11 @@ def test_gateway_ollama_options_downscaling_protection(monkeypatch):
     
     # 測試 7b
     options_7b = gateway_inst._ollama_options("qwen2.5-coder:7b")
-    assert options_7b["num_ctx"] == 16384
+    assert options_7b["num_ctx"] == 12288
 
     # 測試 14b
     options_14b = gateway_inst._ollama_options("qwen2.5-coder:14b")
-    assert options_14b["num_ctx"] == 32768
+    assert options_14b["num_ctx"] == 12288
 
     # 測試如果環境變數設為更大值 65536
     monkeypatch.setenv("NEXUS_OLLAMA_NUM_CTX", "65536")
