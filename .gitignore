@@ -61,3 +61,14 @@ str(REPO_ROOT)/
 training/adapters/
 scratch/qwen3b_s2t_adapter.tar.gz
 .nexus/training/adapters/
+
+# Nexus local generated/cache/debug artifacts
+.hypothesis/
+**/target/
+*.log
+scratch/*.log
+ollama_calls.log
+run_output*.log
+last_response.txt
+last_patch_call.txt
+last_patch_response.txt
