@@ -21,9 +21,38 @@ class StrategyEnvelope:
     context_budget: int
     created_at: str
     trace_only: bool = True
+    # Legacy compatibility fields (optional, for StrategyPlanner/AdherenceChecker)
+    instance_id: str = ""
+    task_goal: str = ""
+    issue_summary: str = ""
+    bug_hypothesis: str = "unknown"
+    strategy_quality: str = "low"
+    notes: str = ""
+    allowed_paths: list = field(default_factory=list)
+    candidate_files: list = field(default_factory=list)
+    canonical_span_hint: str = ""
+    require_canonical_search_lock: bool = True
+    require_source_snapshot: bool = True
+    require_effective_change: bool = True
+    strategy_source: str = "deterministic_planner"
 
     def to_dict(self) -> dict:
         return asdict(self)
+
+    def validate(self) -> list:
+        """Validate envelope fields. Returns list of error strings (empty = valid)."""
+        errors = []
+        if not self.repair_strategy:
+            errors.append("repair_strategy is required")
+        if not self.strategy_family:
+            errors.append("strategy_family is required")
+        if self.context_budget < 0:
+            errors.append("context_budget must be non-negative")
+        return errors
+
+    def has_execution_effect(self) -> bool:
+        """Trace-only envelopes have no execution effect."""
+        return not self.trace_only
 
 
 class StrategyEnvelopeError(Exception):
