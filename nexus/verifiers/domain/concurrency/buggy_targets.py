@@ -43,16 +43,29 @@ class ResourceTransfer:
         self.val_a = 100
         self.val_b = 100
 
+    def _acquire_locks_in_order(self, lock1, lock2):
+        # Force consistent global lock order: lock_a first, then lock_b
+        locks = [self.lock_a, self.lock_b]
+        locks[0].acquire()
+        locks[1].acquire()
+        return locks
+
     def transfer_a_to_b(self, amount: int):
-        with self.lock_a:
-            time.sleep(0.01) # Force race
-            with self.lock_b:
-                self.val_a -= amount
-                self.val_b += amount
+        locks = self._acquire_locks_in_order(self.lock_a, self.lock_b)
+        try:
+            time.sleep(0.01)
+            self.val_a -= amount
+            self.val_b += amount
+        finally:
+            for lock in reversed(locks):
+                lock.release()
 
     def transfer_b_to_a(self, amount: int):
-        with self.lock_b:
-            time.sleep(0.01) # Force race
-            with self.lock_a:
-                self.val_b -= amount
-                self.val_a += amount
+        locks = self._acquire_locks_in_order(self.lock_b, self.lock_a)
+        try:
+            time.sleep(0.01)
+            self.val_b -= amount
+            self.val_a += amount
+        finally:
+            for lock in reversed(locks):
+                lock.release()
