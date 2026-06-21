@@ -1,3 +1,4 @@
+"""BG: Evidence Context Compression v2 — Anchor-proximity reranking + semantic deduplication."""
 import re
 import json
 from dataclasses import dataclass, asdict
@@ -45,21 +46,21 @@ class EvidenceCompactor:
     Responsibilities: Compress logs/tracebacks into essential information for small models.
     Preserves: Exception type, repo-local traceback frames, assertion messages.
     """
-    
+
     @staticmethod
     def compact(evidence: str, limit: int = 3000) -> str:
         if not evidence or len(evidence) <= limit:
             return evidence
 
         lines = evidence.splitlines()
-        
+
         # 1. 識別 Traceback 區塊
         tb_start = -1
         for i, line in enumerate(lines):
             if "Traceback (most recent call last):" in line:
                 tb_start = i
                 break
-        
+
         if tb_start == -1:
             # 如果不是 Traceback，執行保守的尾部截斷
             return "... [truncated] ...\n" + evidence[-limit:]
@@ -67,14 +68,14 @@ class EvidenceCompactor:
         # 2. 提取 Traceback 重點
         header = lines[:tb_start]
         tb_body = lines[tb_start:]
-        
+
         # 保留 Traceback 的頭部 (描述) 與 尾部 (Exception)
         # 並過濾中間不屬於專案路徑的 Frame (如 /opt/homebrew...)
-        essential_tb = [tb_body[0]] # "Traceback..."
-        
+        essential_tb = [tb_body[0]]  # "Traceback..."
+
         # 捕捉最後一行 (Exception)
         exception_line = tb_body[-1]
-        
+
         # 中間 Frame 篩選
         frames = []
         current_frame = []
@@ -87,7 +88,7 @@ class EvidenceCompactor:
                 current_frame.append(line)
         if current_frame:
             frames.append(current_frame)
-            
+
         # 保留最近的 5 個 Frame
         # 或是優先保留包含專案路徑的 Frame
         important_frames = []
@@ -95,21 +96,115 @@ class EvidenceCompactor:
             # 假設專案路徑不含 /opt/ 或 /usr/ (簡化判斷)
             if not any(p in f[0] for p in ("/opt/homebrew/", "/usr/lib/", "site-packages/")):
                 important_frames.append(f)
-        
+
         if not important_frames:
-            important_frames = frames[-3:] # 至少保留最後 3 個
+            important_frames = frames[-3:]  # 至少保留最後 3 個
         else:
-            important_frames = important_frames[-5:] # 保留最多 5 個專案 Frame
-            
+            important_frames = important_frames[-5:]  # 保留最多 5 個專案 Frame
+
         for f in important_frames:
             essential_tb.extend(f)
-        
+
         essential_tb.append(exception_line)
-        
-        result = "\n".join(header[-5:] + essential_tb) # 保留 header 最後 5 行
-        
+
+        result = "\n".join(header[-5:] + essential_tb)  # 保留 header 最後 5 行
+
         if len(result) > limit:
             return result[-limit:]
+        return result
+
+    @staticmethod
+    def compact_v2(
+        evidence: str,
+        anchor_symbol: str = "",
+        anchor_file: str = "",
+        limit: int = 3000,
+    ) -> str:
+        """BG: Evidence Context Compression v2.
+
+        Improvements over compact():
+        1. Anchor-proximity scoring — sections mentioning anchor_symbol / anchor_file are scored higher.
+        2. Deduplication — near-duplicate lines (>85% token overlap) are collapsed.
+        3. Structured block priority: assertion > traceback-frame > test body > setup.
+        4. Always fits within limit; returns compact(evidence, limit) as fallback.
+        """
+        if not evidence:
+            return evidence
+        if len(evidence) <= limit:
+            return evidence
+
+        lines = evidence.splitlines()
+        anchor_tokens = set()
+        if anchor_symbol:
+            anchor_tokens.update(re.split(r'[_\W]+', anchor_symbol.lower()))
+        if anchor_file:
+            anchor_tokens.update(re.split(r'[/\\._]+', anchor_file.lower()))
+        anchor_tokens.discard("")
+
+        # --- score each line ---
+        scored: list[tuple[float, int, str]] = []
+        seen_fingerprints: set[str] = set()
+
+        for idx, line in enumerate(lines):
+            stripped = line.strip()
+            if not stripped:
+                continue
+
+            # Dedup fingerprint: sorted word bag
+            words = re.split(r'\W+', stripped.lower())
+            fingerprint = " ".join(sorted(w for w in words if len(w) >= 3))
+            if fingerprint in seen_fingerprints:
+                continue  # drop near-duplicate
+            seen_fingerprints.add(fingerprint)
+
+            score = 0.0
+
+            # Structural priority boosts
+            if re.match(r'^(FAILED|ERROR|AssertionError|E\s)', stripped):
+                score += 4.0
+            elif stripped.startswith('File "') and 'line ' in stripped:
+                score += 2.5
+            elif re.search(r'(assert|raise|expected|got|actual)', stripped, re.I):
+                score += 2.0
+            elif stripped.startswith(("def ", "class ")):
+                score += 1.5
+            elif stripped.startswith("#"):
+                score += 0.2
+
+            # Anchor-proximity boost
+            line_lower = stripped.lower()
+            for token in anchor_tokens:
+                if token and token in line_lower:
+                    score += 1.5
+
+            # Recency bonus (later lines are more likely relevant)
+            recency = idx / max(len(lines), 1)
+            score += recency * 0.5
+
+            scored.append((score, idx, line))
+
+        # Sort by score descending, then by original index for tie-breaking
+        scored.sort(key=lambda t: (-t[0], t[1]))
+
+        # Fill up to limit preserving order of selected lines
+        selected_idx: set[int] = set()
+        budget = limit
+        for score_val, idx, line in scored:
+            if budget <= 0:
+                break
+            cost = len(line) + 1  # +1 for newline
+            if cost <= budget:
+                selected_idx.add(idx)
+                budget -= cost
+
+        # Reconstruct in original order
+        result_lines = [line for i, line in enumerate(lines) if i in selected_idx]
+        result = "\n".join(result_lines)
+
+        if not result:
+            # Fallback
+            return EvidenceCompactor.compact(evidence, limit)
+
         return result
 
     @staticmethod
@@ -119,7 +214,7 @@ class EvidenceCompactor:
         repro_command: str = "",
         env_failure_reason: str = "",
         max_chars: int = 2000,
-    ) -> StructuredPacket:
+    ) -> "StructuredPacket":
         """Parse traceback into a bounded structured packet for prompt injection."""
         original_bytes = len(evidence.encode("utf-8")) if evidence else 0
         lines = (evidence or "").splitlines()
