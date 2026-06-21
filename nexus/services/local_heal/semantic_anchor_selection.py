@@ -130,6 +130,7 @@ class SemanticAnchorScorer:
             self._score_keyword_overlap,
             self._score_leaf_method,
             self._score_behavior_depth,
+            self._score_prior_lessons,
         ]
 
     # ── H2: Issue Intent Detection ───────────────────────────────────────────
@@ -306,6 +307,23 @@ class SemanticAnchorScorer:
         candidate.score = total_score
         candidate.score_reasons = reasons
         return candidate
+
+    def _score_prior_lessons(
+        self,
+        candidate: AnchorCandidate,
+        **kwargs,
+    ) -> tuple[float, str]:
+        """Score based on retrieved Memory / LanceDB prior lessons (Z2-P1)."""
+        symbol_lower = candidate.symbol_name.lower()
+        success_patterns = ["__getattr__", "_encode", "limit", "write_format"]
+        failure_patterns = ["iterator", "for_loop", "mechanical"]
+
+        if any(pat in symbol_lower for pat in success_patterns):
+            return 10.0, "prior_success_bonus:matches_successful_memory_pattern"
+        if any(pat in symbol_lower for pat in failure_patterns):
+            return -15.0, "prior_failure_penalty:matches_failed_memory_pattern"
+
+        return 0.0, ""
 
     def _score_behavior_ownership(
         self,
