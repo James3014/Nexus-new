@@ -1,8 +1,8 @@
 # RRL3 — Minimal Runtime Evidence Harness Integration Proof
 
-**Status**: `RRL3_RUNTIME_EVIDENCE_HARNESS_PROVEN_MINIMAL`
+**Status**: `RRL3C_RUNTIME_HOOK_PROOF_CLOSED`
 **Date**: 2026-06-21
-**Commit**: Pending
+**Commit**: `2f176ba0` (hook) + `pending` (proof closure)
 
 ---
 
@@ -17,24 +17,30 @@ EvidenceHarness attached to `HealOrchestrator._finalize_run()`. Produces evidenc
 | Check | Status |
 |-------|--------|
 | Runtime path hooked | YES (`_finalize_run`) |
-| Source file touched | `orchestrator.py` (+3 lines) |
-| evidence_bundle.json produced | YES |
+| Source file touched | `orchestrator.py` |
+| evidence_bundle.json produced | YES (task_id=unknown) |
 | bottleneck_classification.json produced | YES |
 | Missing fields reported | YES |
-| Runtime invariance | PROVEN |
+| Runtime invariance | OBSERVED_NO_CHANGE |
 | Repair behavior changed | NO |
-| Prompt/ranking/verifier changed | NO |
+| Prompt/ranking/verifier/claim changed | NO |
 
 ---
 
-## Smoke Run Result
+## Actual Observed Artifact
 
-| Metric | Value |
-|--------|-------|
-| Task | C_12481 |
-| final_status | SOLVED |
-| primary_bottleneck | none |
-| behavior_change | false |
+| Field | Value |
+|-------|-------|
+| task_id | unknown (instance_id used) |
+| final_status | MODEL_WRONG |
+| patch_produced | false |
+| source | `artifacts/runtime/rrl3_runs/unknown/` |
+
+---
+
+## Proof Level
+
+RRL3C provides **unknown-task finalize hook proof**, not C_12481 runtime proof. The hook is attached and produces artifacts, but task_id propagation needs further work.
 
 ---
 

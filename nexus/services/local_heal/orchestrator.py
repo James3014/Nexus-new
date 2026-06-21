@@ -524,8 +524,10 @@ class HealOrchestrator:
                 output_dir=Path("artifacts/runtime/rrl3_runs")
             )
             op = ctx.op if hasattr(ctx, "op") else ctx
+            # Use instance_id as task_id (OperationalContext has instance_id, not task_id)
+            task_id = str(getattr(op, "instance_id", "unknown"))
             bundle = harness.start_task(
-                task_id=str(getattr(op, "task_id", "unknown")),
+                task_id=task_id,
                 repo=str(getattr(op, "repo_dir", "")),
                 issue_summary=str(getattr(op, "failure_reason", "")),
                 task_class=str(getattr(op, "task_class", "")),
