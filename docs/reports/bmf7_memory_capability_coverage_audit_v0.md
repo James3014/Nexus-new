@@ -2,7 +2,7 @@
 
 **Status**: `BMF7_MCA_CORE_MEMORY_CONNECTED_ONLY`
 **Date**: 2026-06-21
-**Commit**: Pending
+**Commit**: `73984953`
 
 ---
 
