@@ -1,8 +1,8 @@
 # BMF6-DIS — Memory Discriminativeness Validation
 
-**Status**: `BMF6_DIS_MEMORY_NEUTRAL_CONFIRMED`
+**Status**: `BMF6_DIS_MEMORY_NEUTRAL_CONFIRMED_SUMMARY_LEVEL`
 **Date**: 2026-06-21
-**Commit**: Pending
+**Commit**: `7b270a01`
 
 ---
 
@@ -56,6 +56,28 @@ This confirms BMF5 finding on a larger, harder pack. The issue is not task diffi
 - Failure-class-specific retrieval
 - Recency weighting
 - Provenance-based trust scoring
+
+---
+
+## Evidence Limitations
+
+1. **Summary-level artifacts only**: BMF6 produced summary-level validation, not per-task/per-arm run-level artifacts
+2. **Evidence-gap count**: 1 (below target >=2)
+3. **Irrelevant memory arm**: Deferred (not run)
+4. **Run-level artifacts**: Missing before BMF6C
+
+---
+
+## Post-Commit Verification
+
+```
+Current HEAD:     7b270a01
+GitNexus indexed: d56dd8d
+GitNexus status:  stale (clean)
+detect_changes:   No changes detected
+```
+
+BMF6 only added reports/artifacts, not production source. GitNexus stale but clean.
 
 ---
 
