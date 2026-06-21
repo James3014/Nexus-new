@@ -1,8 +1,8 @@
 # BMF11-RSE — Real Shadow Evaluation
 
-**Status**: `BMF11_RSE_SHADOW_EVAL_NEUTRAL`
+**Status**: `BMF11_RSE_SHADOW_EVAL_NEUTRAL_UNIT_FIXTURE`
 **Date**: 2026-06-21
-**Commit**: Pending
+**Commit**: `c3acebe7`
 
 ---
 
@@ -55,6 +55,28 @@
 ## Key Finding
 
 **Proposed ranking is safe and marginally improves relevance on evidence-gap tasks.** The evidence_gap_bonus feature correctly prioritizes FindingsMemory lessons for evidence-gap tasks.
+
+---
+
+## Evidence Limitations
+
+1. **evaluation_type**: unit_fixture (not executable local_heal)
+2. **Executable task pack**: unavailable
+3. **Per-task artifacts**: 5/15 representative tasks only
+4. **Summary covers 15 tasks**: full artifact coverage is partial
+5. **Proposed ranking**: NOT enabled, shadow-only
+6. **Controlled opt-in only**: not default runtime
+
+---
+
+## Post-Commit Verification
+
+```
+Current HEAD:     c3acebe7
+GitNexus indexed: d56dd8d
+GitNexus status:  stale (clean)
+detect_changes:   No changes detected
+```
 
 ---
 
