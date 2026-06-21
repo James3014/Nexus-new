@@ -2,7 +2,7 @@
 
 **Status**: `BMF8_RRD_DESIGN_READY_FOR_SHADOW_MODE`
 **Date**: 2026-06-21
-**Commit**: Pending
+**Commit**: `e99a5d99`
 
 ---
 
