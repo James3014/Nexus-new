@@ -1,8 +1,8 @@
 # RRL1 — Real Repair Loop Bottleneck Audit
 
-**Status**: `RRL1_BOTTLENECK_AUDIT_COMPLETE`
+**Status**: `RRL1_BOTTLENECK_AUDIT_COMPLETE_SUMMARY_LEVEL`
 **Date**: 2026-06-21
-**Commit**: Pending
+**Commit**: `42e571a8`
 
 ---
 
@@ -61,6 +61,28 @@
 
 **Stop**: Memory ranking optimization without better evidence
 **Continue**: Action protocol hardening for cross-file tasks
+
+---
+
+## Evidence Limitations
+
+1. **Summary-level audit**: RRL1 is summary-level bottleneck audit, not full forensic audit
+2. **Per-task artifacts**: Only bottleneck_classification.json exists per task
+3. **Full repair loop artifacts**: Missing (input_summary, route_decision, anchor_selection, etc.)
+4. **Classifications**: Rely partly on prior BJ/BMC/BL benchmark evidence
+5. **Count inconsistency**: Corrected in RRL1C (was 6 solved / 2 failed, corrected to 5 solved / 3 failed)
+6. **Action Protocol v4**: Should not start until cleaner audit available
+
+---
+
+## Post-Commit Verification
+
+```
+Current HEAD:     42e571a8
+GitNexus indexed: d56dd8d
+GitNexus status:  stale (clean)
+detect_changes:   No changes detected
+```
 
 ---
 
