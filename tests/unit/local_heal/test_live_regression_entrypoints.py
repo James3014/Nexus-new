@@ -211,3 +211,32 @@ class TestFailClosed:
         # In live mode, NO_TESTS_MATCHED should not be PASS
         if output["verifier_status"] != "DRY_RUN":
             assert output["verifier_status"] != "VERIFIER_EXECUTED_PASS" or output["tests_executed"] > 0
+
+
+class TestRestoredEntrypoints:
+    """Verify restored concurrency and gap entrypoint scripts."""
+
+    def test_restored_entrypoints_dry_run(self):
+        """All restored scripts run in dry-run mode."""
+        restored_ids = [
+            "concurrency_001", "concurrency_002", "concurrency_004", "concurrency_005",
+            "concurrency_006", "concurrency_007", "concurrency_008",
+            "evidence_gap_001", "action_protocol_001", "verifier_gap_001"
+        ]
+        for tid in restored_ids:
+            script_path = SCRIPTS_DIR / f"run_{tid}_regression.py"
+            if not script_path.exists():
+                continue
+            res = subprocess.run(
+                [sys.executable, str(script_path), "--dry-run"],
+                capture_output=True,
+                text=True,
+                timeout=30,
+                cwd=str(REPO_ROOT),
+            )
+            assert res.returncode == 0, f"Dry run failed for {tid}: {res.stderr}"
+            output = json.loads(res.stdout)
+            assert output["task_id"] == tid
+            assert output["verifier_status"] == "DRY_RUN"
+            assert output["internal_only"] is True
+

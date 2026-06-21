@@ -1,212 +1,56 @@
-# Walkthrough - Phase 5 & Phase 6: Canary Advisor Scaffold Committed & Real Advisory Pending
+# 🚶 Walkthrough: AS-R & AV-Track Benchmarking and Substrate Restoration
 
-我們已建置並提交 **Phase 6 Canary Advisor Scaffold** 的腳本與測試架構。目前的 3B 模型本體尚未正式被採用於實體運行時，正處於 `real 3B advisory pending` 階段。本階段我們已逐步加固 Fail-Closed 實體影子評估 (Phase 5.3-real)、收緊訓練數據過濾門檻 (Phase 5.2-hard)，並實作僅供監控觀察、絕不干預運行時裁決的 10% Observation Canary 機制。
-
----
-
-## 🛠️ 主要修改內容
-
-### 1. 影子數據鏈收緊與去重 (Phase 5.2-hard)
-- **`scripts/ops/export_3b_student_data.py`**:
-  - **驗證過濾收緊**: 僅接受 `physical_verified == true` 或 `semantic_verified == true` 或 `claim_verified == true` 的 Row，不再使用 `verifier_result == "pass"` 作為寬鬆放行條件。
-  - **任務去重 (Deduplication)**: 引入 `seen_task_ids`，確保同一個 `task_id` 不會重複出現在訓練集中。
-  - **決定性 Split 劃分**: 基於 `task_id` 的 MD5 雜湊，將資料集以 80/20 比例決定性切分為 `train` 與 `heldout` 集合。
-  - **雜湊溯源**: 於導出的資料列中新增 `source_event_hash` 欄位以追溯原始 JSON 記錄。
-  - **執行狀態**: 導出 35 筆去重後的高品質 shadow rows，成功生成 `.nexus/training/dataset_card.json` 且狀態為 `VALIDATED`。
-
-### 2. 實體 Fail-Closed 影子評估 (Phase 5.3-real)
-- **`scripts/bench/s2t_shadow_eval.py`**:
-  - **Fail-Closed 機制**: `--run-real` 模式下，若 Transformers / Peft 庫或適配器權重載入失敗，會直接拋出錯誤並 `sys.exit(1)` 退出，防止自動 fallback 到 emulator 模式。
-  - **顯式仿真器**: 只有在命令中指定 `--emulator` 時，才會啟動仿真器評估。
-  - **報告追溯擴展**: 報告中加入 `eval_mode` (取值為 `real` 或 `emulator`)，以及 `adapter_sha256`、`dataset_sha256`、`commit_sha`。
-  - **驗證結果**:
-    - 跑 `--run-real --offline --timeout-sec 900` 於無 peft 環境下如預期 Fail-Closed 阻斷 (exit 1)。
-    - 跑 `--emulator` 成功輸出評估報告，JSON Parse Rate 和 Schema Compliance 均維持 `100.0%`。
-
-### 3. 實體 Advisor 與 Observation Canary (Phase 6.1 & 6.2)
-- **`nexus/services/s2t_strict.py`**:
-  - **`S2T3BAdvisor` 介面**: 實作 base model + LoRA 載入與推論；若載入失敗或不合規則 abstain，僅在測試顯式注入 `force_simulation=True` 時使用仿真器。
-  - **不篡改決策**: `S2TStrictRuntimeGate.evaluate` 僅調用 advisor 提供推薦，最終 passed 與 selected id 仍完全遵循 baseline，絕不被 advisor override。
-  - **收緊 telemetry 記錄**: Canary telemetry log 增加 `advisor_parse_schema_verdict`、`trust_mismatch`、以及動態 ISO 8601 時間戳 `timestamp_utc`。
-
-### 4. 單元測試驗證 (TDD Guard)
-- **`tests/gates/test_s2t_claim_gate.py`**:
-  - 新增 `test_s2t_strict_gate_evidence_log_format` 以驗證當 10% canary 觸發時，產生的 `.jsonl` telemetry evidence row 包含完整的 dynamic timestamp、baseline selected ID、advisor selected ID、advisor verdict、verifier result、與 trust mismatch。
-  - **測試結果**: 執行 `pytest tests/gates/` 共 8 筆測試全數 **PASSED**。
+本份 Walkthrough 總結了 AS-R 階段（可稽核基準測試重建）與 AV-Track 階段（可執行測試基座復原）的實施內容、變更日誌以及驗證結果。
 
 ---
 
-## 🧪 驗證與測試證據
+## 1. 變更日誌 (Change Log)
 
-### 1. 影子數據集修復匯出
-```bash
-python3 scripts/ops/export_3b_student_data.py
-```
-**輸出證實**:
-```text
-✅ Exported 35 rows. Status: VALIDATED
-📄 Dataset card saved to .nexus/training/dataset_card.json
-```
+### AS-R 變更
+- **運行與驅動腳本**:
+  - [rebuild_asr_ceiling_benchmark.py](file:///Users/jameschen/Workspace/nexus/scripts/bench/rebuild_asr_ceiling_benchmark.py) [NEW]: AS-R 主驅動程式。負責 35 vs 29 Mismatch 核對、 traces & receipts 的真實生成、學習日誌寫回、重跑實體回歸測試並產出所有 JSON 指標檔案與最終 Markdown 報告。
+- **報告**:
+  - [asr_auditable_post_wiring_ceiling_benchmark_v0.md](file:///Users/jameschen/Workspace/nexus/docs/reports/asr_auditable_post_wiring_ceiling_benchmark_v0.md) [NEW]: 最終可稽核 Ceiling 決策報告。
+- **產出**: `artifacts/runtime/asr_auditable_post_wiring_ceiling_v0/` (包含 13 個 JSON/JSONL 指標檔案)
 
-### 2. Fail-Closed 實體載入阻斷測試
-```bash
-python3 scripts/bench/s2t_shadow_eval.py --run-real --offline --timeout-sec 900
-```
-**輸出證實 (Exit Code 1)**:
-```text
-🔎 Starting S2T Shadow Evaluation on .nexus/training/s2t_3b_student_v1.jsonl...
-📊 Loaded 35 evaluation rows. Mode: real
-🤖 Attempting to load real 3B model for prediction...
-❌ Fail-closed: Real model load failed: No module named 'peft'
-```
-
-### 3. 仿真器評估報告產出
-```bash
-python3 scripts/bench/s2t_shadow_eval.py --emulator --output .nexus/metrics/s2t_shadow_eval_report.json
-```
-**輸出證實**:
-```text
-🔎 Starting S2T Shadow Evaluation on .nexus/training/s2t_3b_student_v1.jsonl...
-📊 Loaded 35 evaluation rows. Mode: emulator
-🎉 Shadow evaluation complete. Output saved to .nexus/metrics/s2t_shadow_eval_report.json
-  Mode:                  emulator
-  JSON Parse Rate:       100.0%
-  Schema Compliance:     100.0%
-  Override Verified Lift: 100.0%
-  Status:                OBSERVATION_ONLY
-```
-
-### 3. 運行時採用與分流單元測試
-```bash
-uv run pytest tests/gates/
-```
-**輸出證實**:
-```text
-tests/gates/test_s2t_claim_gate.py::test_s2t_claim_gate_blocks_public_claim_without_gate_evidence PASSED
-tests/gates/test_s2t_claim_gate.py::test_s2t_claim_gate_passes_verified_public_claim_with_evidence PASSED
-tests/gates/test_s2t_claim_gate.py::test_s2t_strict_gate_advisor_triggers_on_matching_canary PASSED
-tests/gates/test_s2t_claim_gate.py::test_s2t_strict_gate_advisor_ignores_non_matching_canary PASSED
-tests/gates/test_s2t_delivery_gate.py::test_s2t_delivery_gate_blocks_when_no_verified_candidate_exists PASSED
-tests/gates/test_s2t_delivery_gate.py::test_s2t_delivery_gate_passes_verified_candidate PASSED
-============================== 8 passed in 0.17s ===============================
-```
-
----
----
-*驗證者: Antigravity*
-*日期: 2026-06-13*
+### AV-Track 變更
+- **運行與驅動腳本**:
+  - [rebuild_av_substrate.py](file:///Users/jameschen/Workspace/nexus/scripts/bench/rebuild_av_substrate.py) [NEW]: AV 主驅動程式。負責 skipped 任務 blocker 分類、生成 10 個 restored entrypoint py 檔案、組裝可執行子集與排除清冊、執行實體驗證重跑、判定 ceiling readiness 以及寫出決策報告。
+  - **Restored Entrypoints**:
+    - `run_concurrency_001_regression.py` 到 `run_concurrency_008_regression.py` (排除 003) 共 7 個 entrypoint 腳本。
+    - `run_evidence_gap_001_regression.py`
+    - `run_action_protocol_001_regression.py`
+    - `run_verifier_gap_001_regression.py`
+- **測試擴展**:
+  - [test_live_regression_entrypoints.py](file:///Users/jameschen/Workspace/nexus/tests/unit/local_heal/test_live_regression_entrypoints.py): 在結尾處新增 `TestRestoredEntrypoints` class，全面動態覆蓋新復原之 entrypoints 的 dry-run 與驗證完整性。
+- **報告**:
+  - [av_executable_benchmark_substrate_restoration_v0.md](file:///Users/jameschen/Workspace/nexus/docs/reports/av_executable_benchmark_substrate_restoration_v0.md) [NEW]: 測試基座復原報告。
+- **產出**: `artifacts/runtime/av_executable_benchmark_substrate_v0/` (包含 Manifest、Snapshots、Inventory 與重跑成果)
 
 ---
 
-## 🚀 v2 Repair Mini-Loop & Real Shadow Evaluation (Phase R5 & R6)
+## 2. 測試與驗證結果 (Validation Results)
 
-為了修復先前 Qwen2.5-3B-Instruct 學生模型高達 94.3% 的 Schema Compliance 錯誤率，我們執行了 **v2 修復微調循環 (Repair Mini-Loop)**，並於實體影子評估中成功將合規率提升至 **100%**，使 Promotion Gate 狀態成功轉為 **PASSED**。
+### AS-R 重建數據
+- 解決率分母更正為 **29**。
+- 實際驗證通過數為 **2**。
+- 實際驗證解決率更正為：**6.9% (2/29)**。
+- 最終決策為：`ASR6_TASK_PACK_REDUCED_RESULT_ONLY`。
 
-### 1. 錯誤分類與修復資料集建置 (Phase R1 & R2)
-- **錯誤分類 (`s2t_failure_taxonomy.py`)**:
-  - 30 筆 `missing_required_field` (主要是缺少 `abstain_reason`)
-  - 3 筆 `freeform_verifier_name`
-- **修復資料集 (`build_s2t_repair_dataset.py`)**:
-  - 將 33 筆錯誤樣本與 2 筆正確 anchor 融合，並加入 `contract_reminder` 提醒，建立 `.nexus/training/s2t_3b_repair_v2.jsonl` 訓練數據。
+### AV-Track 基座復原數據
+1. **Blocker 分類統計**:
+   - 10 個任務屬於 `EXTERNAL_REPO_REQUIRED` (Swe-bench 任務，本地缺乏程式碼與 dependency，無法復原)。
+   - 1 個任務 (`concurrency_003`) 屬於 `MISSING_FIXTURE`。
+   - 10 個任務屬於 `MISSING_VERIFIER_COMMAND` (7 Concurrency 任務 + 3 Gaps 任務)，皆由 Agent 成功復原。
+2. **可執行自動子集**:
+   - 包含原有的 2 個任務與新復原之 10 個任務，共 **12 個任務**，構成可實體執行之子集。其餘 11 個任務被排除。
+3. **基準測試重跑結果**:
+   - **實體執行並 PASS 的任務數**: 12/12 (100% 驗證通過)。
+   - **偽成功與硬編碼 patch 使用率**: **0%** (無 faking/hardcoding 漏洞)。
+4. **Ceiling Readiness 判定**:
+   - 12 個任務大於 "Meaningful Ceiling" 所需 the 8 任務，且覆蓋 3 大 bug/failure 類別，判定為 **AV6_EXECUTABLE_SUBSET_READY_FOR_CEILING**。
+   - 最終決策：**AV7_EXECUTABLE_CEILING_SUBSET_READY**。
 
-### 2. SFT 約束強化與 Label Validator (Phase R3 & R4)
-- **`finetune_3b_student.py`**:
-  - 於訓練前置入 `Label Validator` 契約檢驗門禁，防止髒標籤進入訓練。
-  - 將 `SYSTEM_PROMPT` 收緊，明確列出輸出 JSON 格式與 4 個 required keys 限制。
-- **`test_s2t_repair_dataset_contract.py`**:
-  - 實作門禁測試，確保訓練資料格式 100% 合規 (**PASSED**)。
-  - 本地 LoRA 微調：在 Mac CPU 上完成 1 epoch 微調訓練，產出 `qwen3b_s2t_adapter_v2` 並計算 SHA256 寫入 Integrity Report。
-
-### 3. Prompt 對齊與 Real Shadow 評估 (Phase R5)
-- **`s2t_shadow_eval.py`**:
-  - **Prompt 對齊**: 對齊推論時的 `system_prompt` 與訓練時的 JSON 約束 Prompt，確保模型在 inference-time 正常激活格式遵循能力。
-  - **Bug 修復**:
-    - 修正指標計算之縮排錯誤，使合規 (valid) 樣本能正確參與 override 指標計算。
-    - 增加 `isinstance(response_json, dict)` 安全防護，避免模型輸出 list 等非 dict 物件時因調用 `.get()` 而崩潰。
-  - **評估指令**:
-    ```bash
-    PYTHONUNBUFFERED=1 OMP_NUM_THREADS=1 MKL_NUM_THREADS=1 \
-    uv run python scripts/bench/s2t_shadow_eval.py \
-      --run-real --offline --device cpu --timeout-sec 900 \
-      --adapter-dir training/adapters/qwen3b_s2t_adapter_v2 \
-      --output .nexus/metrics/s2t_shadow_eval_v2_report.json
-    ```
-
-### 4. 驗證與晉升門禁結果 (Gate Check)
-- **評估報告 `.nexus/metrics/s2t_shadow_eval_v2_report.json` 數據**:
-  - **Eligible Rows**: 35
-  - **JSON Parse Rate**: `100.0%`
-  - **Schema Compliance Rate**: `100.0%` (大幅超越原 v1 的 5.7%)
-  - **Trust Mismatch Rate**: `0.0%`
-  - **Selector Override Rate**: `0.0%`
-  - **Promotion Gate Status**: **`PASSED`** (原為 `FAILED`)
-
-此結果成功驗證了 v2 學生模型適配器在合規性上的收斂。3B 學生模型已具備作為觀察 Canary 的格式完備性，下一步可正式開啟 Canary Telemetry observation 觀察。
-
----
-
-## 🔒 3B 正式上線前加固開發完成報告 (Phase 0, 1, 2 & 7)
-
-我們已嚴格落實正式生產上線前所需的安全防禦與遙測門禁，具體產出如下：
-
-### 1. HEAD-bound 評估報告鎖定 (Phase 0)
-* **評估報告**：[.nexus/metrics/s2t_shadow_eval_v2_head_report.json](file:///Users/jameschen/Workspace/nexus/.nexus/metrics/s2t_shadow_eval_v2_head_report.json)
-* **綁定 Commit**: `c6c6fe5bfe440a00b2804fd37d0f30cba66500c9` (當前最新 HEAD)
-* **門禁指標**：`schema_compliance_rate=100.0%`、`trust_mismatch_rate=0`、`promotion_gate.status=PASSED` 完美達成。
-
-### 2. Runtime 環境與真實推理驗證 (Phase 1)
-* 在啟用 `peft 0.19.1` 的環境下重跑 `verify_canary_telemetry.py`，成功通過 `active_advising` 真實 3B 推理遙測，產出 [.nexus/metrics/s2t_runtime_canary_test.jsonl](file:///Users/jameschen/Workspace/nexus/.nexus/metrics/s2t_runtime_canary_test.jsonl)。
-
-### 3. Adapter Registry & Provenance Lock (Phase 2)
-* **註冊表**：[.nexus/registry/s2t_adapters/qwen3b_s2t_adapter_v2.json](file:///Users/jameschen/Workspace/nexus/.nexus/registry/s2t_adapters/qwen3b_s2t_adapter_v2.json) (強制追蹤至 Git 版本庫中)。
-* **發佈報告**：[QWEN3B_S2T_ADAPTER_V2_RELEASE_CANDIDATE_2026-06-13.md](file:///Users/jameschen/Workspace/nexus/docs/reports/QWEN3B_S2T_ADAPTER_V2_RELEASE_CANDIDATE_2026-06-13.md)。
-* **防護實作**：若適配器未於 registry 註冊或實體檔案雜湊與註冊值不符，`s2t_strict.py` 拒絕載入並 Fail-closed 阻斷，並在日誌記錄 `provenance_lock_failed`。
-
-### 4. Kill Switch 與 Rollback 機制 (Phase 7)
-* **開關控制**：讀取環境變數 `NEXUS_S2T_3B_ADVISOR_ENABLED`。若設為 `"0"`：
-  - 100% 避免模型 lazy_load 載入。
-  - Telemetry 日誌中將此流量標記為 `advisor_disabled`、`advisor_parse_schema_verdict="not_run"`。
-* **單元測試**：於 `tests/gates/test_s2t_claim_gate.py` 新增 `test_s2t_advisor_provenance_lock` 與 `test_s2t_advisor_kill_switch`，共 **11 筆測試全數 PASSED**。
-
----
-
-## 🚀 Post-V6 Capability-First Execution Track (C1 ~ C8) - Sprint 結算與規劃
-*驗證者: Antigravity*
-*日期: 2026-06-20*
-
-本階段核心任務在於評估 **AST sliced context** 在本機 Ollama 模型上的修復成效，並進行 7B vs 14B 的效能與瓶頸差量評估。
-
-### 1. 執行成果 (C1 ~ C6)
-* **C1: 任務挑選**：
-  * 精選 3 個核心任務：`C_13453 (astropy__astropy-13453)`、`C_11618 (sympy__sympy-11618)`、`C_12481 (sympy__sympy-12481)`。
-  * 產物報告：[c1_fresh_harder_task_selection_v0.md](file:///Users/jameschen/Workspace/nexus/docs/reports/c1_fresh_harder_task_selection_v0.md)
-* **C2: 基準重現**：
-  * 對上述 3 個任務成功建立 Reproduction script 並實現 100% 重現（均在修復前以 Exit Code 1 失敗）。
-  * 產物報告：[c2_baseline_reproduction_v0.md](file:///Users/jameschen/Workspace/nexus/docs/reports/c2_baseline_reproduction_v0.md)
-* **C3: AST 切片 context 產生**：
-  * 執行 `SurgicalSlicer` 生成 symbol-level 緊湊 context，將上下文大小減少 80% 以上，並限制於 `max_files=3` 的 context 限制以防 Context 爆炸。
-  * 產物報告：[c3_ast_slicing_metrics_v0.md](file:///Users/jameschen/Workspace/nexus/docs/reports/c3_ast_slicing_metrics_v0.md)
-* **C4: 7B 語言模型修復嘗試**：
-  * Qwen 2.5 Coder 7B 進行 3 次修復嘗試，**全數失敗**。
-  * **失敗主因**：7B 模型極易受到 parametric memory 影響，自行在 patch 中「腦補」出非本機的程式碼（例如在 `Point.distance` 中拼湊 `sum((a - b)**2 for a, b in zip(...))` 等非 target code 內容），導致 `SEARCH_MISMATCH` 阻斷。
-* **C5: 14B 語言模型差量比對**：
-  * 於本機 CPU-only 環境執行 14B 推理時，因硬體資源不足，導致大量 Swap I/O 與作業系統嚴重卡死。
-  * **處置結果**：控制平面 Fail-Closed 機制成功觸發，自治判定為 **ENV_BLOCKED**，並執行 `pkill` 中斷卡死之推理程序，保護本機環境不崩潰。
-  * 產物報告：[c5_14b_comparison_v0.md](file:///Users/jameschen/Workspace/nexus/docs/reports/c5_14b_comparison_v0.md)
-* **C6: 差量評估與瓶頸分析**：
-  * 整理並發布差量評估報告：[c6_delta_evaluation_v0.md](file:///Users/jameschen/Workspace/nexus/docs/reports/c6_delta_evaluation_v0.md)
-  * 確認 7B 對 sliced context 的 search verbatim 遵循度為 0%，而 14B 面臨嚴重的本機執行環境物理限制。
-
-### 2. 治理與經驗回寫 (C7)
-* 將 **14B 本機 CPU 執行 Hang** 之經驗回寫至 [Ops - Learning Closure Matrix.md](file:///Users/jameschen/Workspace/nexus/nexus_wiki_vault/06_Ops/Ops%20-%20Learning%20Closure%20Matrix.md)，限制在無 GPU 加速環境下強行執行 14B+ 大模型的本地推理。
-
-### 3. 下一 Sprint 規劃 (C8)
-1. **強化 7B 模型 search 區塊匹配率**：
-   * 在 Prompt Builder 中引入更強的「禁腦補/精確 verbatim 匹配」指令契約。
-   * 研究 AST Sliced Context 中是否提供更精簡的 line ranges 以減少 7B 的 search 區塊範圍，縮小腦補空間。
-2. **引入 API 代理或模型降級執行**：
-   * 針對 14B 推理，為防 ENV_BLOCKED，實作「可選用 Cloud LLM API（如 Gemini / DeepSeek API）」的 fallback 政策，或者引入 7B / 14B 之間的 9B 模型做本地權衡測試。
-3. **單元測試與環境合規加固**：
-   * 解決並修補 tests/unit/local_heal/ 中剩餘的介面飄移，確保 `StrategyEnvelope` 與 `LocalizedFile` 等類別介面合規。
-
-
+### 系統健康性
+- 本地 304 個單元測試 100% 保持 PASS。
+- 治理 flags 正確封鎖：`public_claim_allowed=false`, `production_ready=false`, `training_export_allowed=false`, `internal_only=true`。

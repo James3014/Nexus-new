@@ -42,3 +42,28 @@
   - [x] git commit 結算變更，commit msg: "bench(local_heal): rebuild auditable post-wiring ceiling benchmark"
 
 [NEXUS STATUS: SURGICAL_INTEL_INITIATED]
+
+### [P5] AV-Track Milestones
+- [x] Milestone AV1: Commit AS-R and Baseline Snapshot
+  - [x] Git commit AS-R 變更 (已完成)
+  - [x] 產出 asr_baseline_snapshot.json
+- [x] Milestone AV2: Automatic Task Executability Inventory
+  - [x] 實作排查與分類 21 個 skipped automatic 任務的 blocker 原因
+  - [x] 產出 automatic_task_executability_inventory.json
+- [x] Milestone AV3: Restore Safely Restorable Entrypoints
+  - [x] 篩選並實施安全 entrypoints 復原與 Wrapper 修復
+  - [x] 確保每個被復原之 entrypoints 產出規範的 trace/receipt json
+  - [x] 產出 restored_entrypoints.json
+- [x] Milestone AV4: Build Executable Automatic Subset
+  - [x] 篩選並產出 executable_automatic_subset_manifest.json 與 excluded_automatic_tasks.json
+- [x] Milestone AV5: Rerun Regression Health on Executable Subset
+  - [x] 執行全量 unit pytest
+  - [x] 執行被復原的 entrypoints，產出實體驗證成果與總計的 regression_summary.json
+- [x] Milestone AV6: Determine Whether Ceiling Benchmark Can Resume
+  - [x] 根據 meaningful 規則產出 ceiling_readiness_decision.json
+- [x] Milestone AV7: Final Direction Decision
+  - [x] 產出報告 docs/reports/av_executable_benchmark_substrate_restoration_v0.md
+  - [x] 確保 unit tests 保持 PASS
+  - [x] 更新 walkthrough.md
+  - [x] git commit 結算變更，commit msg: "bench(local_heal): restore executable benchmark substrate"
+
