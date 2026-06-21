@@ -47,6 +47,12 @@ class AnchorSelectionResult:
     ambiguity: bool = False
     score_margin: float = 0.0
     top_k: list[AnchorCandidate] = field(default_factory=list)
+    # BMF2-OBS: memory trace observability
+    memory_trace: dict[str, Any] = field(default_factory=dict)
+
+
+# BMF2-OBS: module-level storage for last memory trace (minimal observability hook)
+_last_memory_trace: dict[str, Any] = {}
 
 
 class SemanticAnchorScorer:
@@ -129,6 +135,7 @@ class SemanticAnchorScorer:
         self.memory_adapter = memory_adapter or MemoryRetrievalAdapter(enabled=memory_enabled)
         self.memory_enabled = memory_enabled
         self.scoring_metadata: dict[str, Any] = {}
+        self.last_memory_metadata: dict[str, Any] = {}  # BMF2-OBS
         self._scorers = [
             self._score_behavior_ownership,
             self._score_failing_trace_relevance,
@@ -352,6 +359,9 @@ class SemanticAnchorScorer:
             "metadata": metadata,
         }
         self.scoring_metadata[candidate.anchor_id] = candidate.memory_contribution
+        self.last_memory_metadata = dict(metadata)  # BMF2-OBS: track latest memory trace
+        global _last_memory_trace
+        _last_memory_trace = dict(metadata)  # BMF2-OBS: module-level storage for receipt
         if metadata.get("no_memory_match"):
             return 0.0, "no_memory_match"
         if delta > 0:
@@ -855,4 +865,7 @@ def select_semantic_anchor(
         )
 
     # Select best
-    return selector.select(candidates)
+    result = selector.select(candidates)
+    # BMF2-OBS: attach memory trace to result
+    result.memory_trace = dict(scorer.last_memory_metadata)
+    return result
