@@ -75,6 +75,13 @@
   - [bdc_ceiling_capability_coverage_audit_v0.md](file:///Users/jameschen/Workspace/nexus/docs/reports/bdc_ceiling_capability_coverage_audit_v0.md) [NEW]
 - **產出**: `artifacts/runtime/bdc_ceiling_capability_coverage_audit_v0/`
 
+### BDE-Track 變更
+- **運行與審計腳本**:
+  - [rebuild_bde_audit.py](file:///Users/jameschen/Workspace/nexus/scripts/bench/rebuild_bde_audit.py) [NEW]: BDE-Track 全庫能力發現與路徑相關性審計與評估腳本。
+- **報告**:
+  - [bde_repo_wide_capability_discovery_audit_v0.md](file:///Users/jameschen/Workspace/nexus/docs/reports/bde_repo_wide_capability_discovery_audit_v0.md) [NEW]
+- **產出**: `artifacts/runtime/bde_repo_wide_capability_audit_v0/` (包含 repo capability inventory, bdc coverage diff, route relevance classification, hidden registry scan, missed capability impact on bd failures, pre be decision, corrected capability coverage statement 與 final decision 等 8 個 JSON 檔案)
+
 ---
 
 ## 2. 測試與驗證結果 (Validation Results)
@@ -123,6 +130,18 @@
 3. **最終審計決策**:
    - **最終決策 (verdict)**: `BDC8_FULL_REQUIRED_ARMOR_ACTIVE_PROCEED_BE` 結合 `BDC8_MODEL_SEMANTIC_CEILING_CONFIRMED`。
    - **批准進入 BE 階段**: 批准 targeted 14B 降級與 action protocol 協定優化，無需先行優化防禦。
+
+### BDE-Track 全庫能力發現與路徑相關性審計數據
+1. **能力發現統計**:
+   - **全庫 Canonical 能力數**: 34 個。
+   - **BDC 覆蓋率與差異**: 23 個核心能力完全 active 覆蓋；其餘 11 個能力皆被正確判定為 out-of-scope（例如學術引用治理 `research_and_source_discipline`、外置生產力 `external_productivity`）。
+   - **核心路徑 Blocker 缺失**: 0 個。
+2. **失敗任務影響評估**:
+   - 11 個失敗任務中無任何 P0/P1 能力缺口。
+   - 缺失或未激活外圍能力對失敗任務解決率的影響為 **NONE**。
+3. **最終審計決策**:
+   - **最終決策 (verdict)**: `BDE8_NO_MISSED_REPAIR_RELEVANT_CAPABILITIES_PROCEED_BE` 結合 `BDE8_BD_CEILING_REMAINS_LOCAL_HEAL_FULL_ARMOR`。
+   - **批准進入 BE 階段**: 全量核心防具極限 24/35 獲得證實，批准直接前進至 BE。
 
 ### 系統健康性
 - 本地 343 個單元測試 100% 保持 PASS。
