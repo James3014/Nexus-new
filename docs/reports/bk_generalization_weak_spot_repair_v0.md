@@ -1,6 +1,6 @@
 # BK8 — Generalization Weak Spot Repair Decision
 
-**Status**: `BK8_GENERALIZATION_REPAIRED_TO_90_PLUS`
+**Status**: `BKC_BK_MODEL_REQUIRED_SATURATED` (corrected from BK8_GENERALIZATION_REPAIRED_TO_90_PLUS)
 **Date**: 2026-06-21
 **Commit**: Pending
 
@@ -8,7 +8,7 @@
 
 ## Executive Summary
 
-All 7 BJ failures resolved. BJ overall improved from 80.0% to 88.6%. Model-required rate improved from 86.4% to 100%. HARD rate improved from 50% to 80%.
+All 7 BJ failures resolved. BJ overall improved from 80.0% to 88.6% (not 90+). Model-required rate improved from 86.4% to 100% (saturated). HARD rate improved from 50% to 80%.
 
 ---
 
@@ -42,9 +42,11 @@ All 7 BJ failures resolved. BJ overall improved from 80.0% to 88.6%. Model-requi
 
 ---
 
-## BK8: Final Decision
+## BK8: Final Decision (Corrected)
 
-**BK8_GENERALIZATION_REPAIRED_TO_90_PLUS**
+**BKC_BK_MODEL_REQUIRED_SATURATED**
+
+Original label `BK8_GENERALIZATION_REPAIRED_TO_90_PLUS` was overstated. Overall 88.6% is not 90+. Model-required saturation at 100% is the key achievement.
 
 ---
 
