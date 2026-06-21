@@ -8,7 +8,9 @@
 
 ## Executive Summary
 
-8 real repair tasks audited. 6 solved, 2 failed. Top bottlenecks: action_protocol (cross-file coordination) and evidence_memory (distractor confusion). Memory ranking is NOT the main bottleneck.
+8 real repair tasks audited. **5 solved, 3 non-solved**. Top bottlenecks: action_protocol (cross-file coordination) and evidence_memory (distractor confusion). Memory ranking is NOT the main bottleneck.
+
+> **Note**: RRL1 is classification-only and summary-level. It is not a full repair-loop forensic audit.
 
 ---
 
@@ -31,7 +33,7 @@
 
 | Bottleneck | Count |
 |------------|-------|
-| none (solved) | 6 |
+| none (solved) | 5 |
 | action_protocol | 1 |
 | evidence_memory | 1 |
 | model_generation | 1 |
@@ -60,7 +62,8 @@
 ## Recommendation
 
 **Stop**: Memory ranking optimization without better evidence
-**Continue**: Action protocol hardening for cross-file tasks
+**Action Protocol v4**: **BLOCKED** until a cleaner full-loop audit with per-task artifacts is produced
+**Continue**: Collecting full repair loop evidence for classification-grade audit
 
 ---
 
