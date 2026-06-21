@@ -7,6 +7,8 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
+from nexus.services.local_heal.memory_retrieval_adapter import MemoryRetrievalAdapter
+
 
 @dataclass
 class CodeIntelItem:
@@ -52,6 +54,9 @@ class EvidencePacket:
 class NativeEvidencePacketBuilder:
     """Builds compact evidence packets from existing Nexus capabilities."""
 
+    def __init__(self, memory_adapter: MemoryRetrievalAdapter | None = None) -> None:
+        self.memory_adapter = memory_adapter or MemoryRetrievalAdapter()
+
     def build(
         self,
         *,
@@ -75,7 +80,7 @@ class NativeEvidencePacketBuilder:
         )
 
         # B1-B: Extract bounded memory evidence
-        memory = self._extract_memory(issue_intent, anchor_symbol)
+        memory = self._extract_memory(issue_intent, anchor_symbol, target_file)
 
         # B1-B: Extract prior failure evidence
         prior_failures = self._extract_prior_failures(task_id)
@@ -157,22 +162,25 @@ class NativeEvidencePacketBuilder:
 
         return items[:8]  # Hard bound
 
-    def _extract_memory(self, issue_intent: str, anchor_symbol: str) -> list[MemoryItem]:
-        """Extract bounded memory evidence."""
+    def _extract_memory(self, issue_intent: str, anchor_symbol: str, target_file: str) -> list[MemoryItem]:
+        """Extract bounded memory evidence from Nexus memory."""
         items = []
-        if issue_intent == "output_formatting":
+        query = " ".join(part for part in (issue_intent, anchor_symbol, target_file) if part)
+        try:
+            lessons = self.memory_adapter.retrieve_reranked(
+                query_text=query,
+                anchor_symbol=anchor_symbol,
+                anchor_file=target_file,
+                limit=3,
+            )
+        except Exception:
+            return []
+        for lesson in lessons:
             items.append(MemoryItem(
-                finding_id="mem_output_fmt_001",
-                summary="output_formatting bugs: modify write/render path, not read/parse",
-                relevance_reason="matches issue_intent",
-                provenance="local_memory_heuristic",
-            ))
-        if "write" in anchor_symbol.lower():
-            items.append(MemoryItem(
-                finding_id="mem_write_behavior_001",
-                summary="write methods that own output behavior should be selected over caller iteration",
-                relevance_reason="matches anchor_symbol",
-                provenance="local_memory_heuristic",
+                finding_id=lesson.finding_id,
+                summary=lesson.summary,
+                relevance_reason=f"retrieved_from:{lesson.source}",
+                provenance=lesson.provenance,
             ))
         return items
 

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hashlib
 import json
 import re
 from dataclasses import dataclass
@@ -55,6 +56,137 @@ class LocalJsonlLessonStore:
         return [item for _score, item in rows[:limit]]
 
 
+class FindingsMemoryLessonStore:
+    """Read local-heal lessons from the existing structured FindingsMemoryStore."""
+
+    def __init__(self, project_root: Path | None = None, findings_store: Any | None = None) -> None:
+        self.project_root = project_root or Path(__file__).resolve().parents[3]
+        self.findings_store = findings_store
+        self.last_error: str = ""
+
+    def _store(self) -> Any:
+        if self.findings_store is not None:
+            return self.findings_store
+        from nexus.research.findings_memory import FindingsMemoryStore
+
+        self.findings_store = FindingsMemoryStore(self.project_root)
+        return self.findings_store
+
+    def query(self, *, query_text: str, limit: int) -> list[dict[str, Any]]:
+        self.last_error = ""
+        try:
+            store = self._store()
+            cards = list(store.search(query_text, kind="episodes", scope="both"))
+            if not cards:
+                tokens = [token for token in re.split(r"[_\W]+", query_text.lower()) if len(token) >= 3]
+                seen_ids: set[str] = set()
+                for token in tokens[:8]:
+                    for card in store.search(token, kind="episodes", scope="both"):
+                        card_id = str(getattr(card, "id", ""))
+                        if card_id in seen_ids:
+                            continue
+                        seen_ids.add(card_id)
+                        cards.append(card)
+                        if len(cards) >= limit:
+                            break
+                    if len(cards) >= limit:
+                        break
+        except Exception as exc:
+            self.last_error = exc.__class__.__name__
+            return []
+
+        rows: list[dict[str, Any]] = []
+        for card in cards[:limit]:
+            extra = dict(getattr(card, "extra", {}) or {})
+            evidence_paths = list(getattr(card, "evidence_paths", []) or [])
+            rows.append(
+                {
+                    "lesson_id": extra.get("lesson_id") or getattr(card, "id", ""),
+                    "finding_id": getattr(card, "id", ""),
+                    "task_id": getattr(card, "task_id", "") or extra.get("task_id", ""),
+                    "classification": extra.get("classification") or ",".join(getattr(card, "tags", []) or []),
+                    "summary": getattr(card, "body", "") or getattr(card, "title", ""),
+                    "provenance": evidence_paths[0] if evidence_paths else extra.get("receipt_id", ""),
+                    "relevance_score": 1.0,
+                    "source": "FindingsMemoryStore",
+                }
+            )
+        return rows
+
+
+class MemoryRepositoryLessonStore:
+    """Optional LanceDB/MemoryRepository read path for findings_cards."""
+
+    def __init__(self, project_root: Path | None = None, repository: Any | None = None) -> None:
+        self.project_root = project_root or Path(__file__).resolve().parents[3]
+        self.repository = repository
+        self.last_error: str = ""
+
+    def _repository(self) -> Any:
+        if self.repository is not None:
+            return self.repository
+        from nexus.services.memory_repository import MemoryRepository
+
+        self.repository = MemoryRepository(self.project_root / ".nexus" / "memory_repository")
+        return self.repository
+
+    def query(self, *, query_text: str, limit: int) -> list[dict[str, Any]]:
+        self.last_error = ""
+        try:
+            frame = self._repository().search_fts(
+                "findings_cards",
+                query_text,
+                limit=limit,
+                fallback_columns=["title", "body", "content", "aaak_content"],
+            )
+        except Exception as exc:
+            self.last_error = exc.__class__.__name__
+            return []
+        if getattr(frame, "empty", True):
+            return []
+        return [dict(row) for row in frame.head(limit).to_dict(orient="records")]
+
+
+class NexusCompositeLessonStore:
+    """Composite Nexus memory read path with bounded, fail-open sources."""
+
+    def __init__(self, stores: list[LessonStore] | None = None) -> None:
+        self.stores = stores or [
+            LocalJsonlLessonStore(),
+            FindingsMemoryLessonStore(),
+            MemoryRepositoryLessonStore(),
+        ]
+        self.last_metadata: dict[str, Any] = {}
+
+    def query(self, *, query_text: str, limit: int) -> list[dict[str, Any]]:
+        rows: list[dict[str, Any]] = []
+        sources: list[str] = []
+        source_counts: dict[str, int] = {}
+        source_errors: dict[str, str] = {}
+
+        for store in self.stores:
+            source = store.__class__.__name__
+            try:
+                store_rows = list(store.query(query_text=query_text, limit=limit))
+            except Exception as exc:
+                store_rows = []
+                source_errors[source] = exc.__class__.__name__
+            last_error = str(getattr(store, "last_error", "") or "")
+            if last_error:
+                source_errors[source] = last_error
+            if store_rows:
+                sources.append(source)
+                source_counts[source] = len(store_rows)
+            rows.extend(store_rows)
+
+        self.last_metadata = {
+            "retrieval_sources": sources,
+            "source_counts": source_counts,
+            "source_errors": source_errors,
+        }
+        return rows[:limit]
+
+
 class MemoryRetrievalAdapter:
     """Retrieves provenance-backed local-heal lessons.
 
@@ -63,21 +195,20 @@ class MemoryRetrievalAdapter:
     match records no_memory_match instead of blocking repair.
     """
 
-    # BMF3-OBS: class-level last trace (replaces module global)
-    _last_trace: dict[str, Any] = {}
-
     def __init__(self, store: LessonStore | None = None, *, enabled: bool = True) -> None:
-        self.store = store or LocalJsonlLessonStore()
+        self.store = store or NexusCompositeLessonStore()
         self.enabled = enabled
         self.last_metadata: dict[str, Any] = {}
 
     def retrieve(self, *, query_text: str, limit: int = 5) -> list[RetrievedLesson]:
         self.last_metadata = {
             "enabled": bool(self.enabled),
-            "query_text": query_text,
+            "query_text_hash": hashlib.sha256(query_text.encode()).hexdigest()[:16] if query_text else "",
             "no_memory_match": False,
             "rejected_without_provenance": 0,
             "source": self.store.__class__.__name__,
+            "retrieval_sources": [],
+            "source_errors": {},
         }
         if not self.enabled:
             self.last_metadata["status"] = "disabled"
@@ -92,17 +223,24 @@ class MemoryRetrievalAdapter:
             return []
 
         lessons: list[RetrievedLesson] = []
+        seen: set[tuple[str, str]] = set()
         for row in raw_rows:
             provenance = str(row.get("provenance") or row.get("receipt_id") or row.get("evidence_ref") or "").strip()
             if not provenance:
                 self.last_metadata["rejected_without_provenance"] += 1
                 continue
+            finding_id = str(row.get("lesson_id") or row.get("finding_id") or row.get("id") or row.get("task_id") or "lesson")
+            summary = str(row.get("summary") or row.get("lesson") or row.get("body") or row.get("content") or "")
+            fingerprint = (finding_id, provenance)
+            if fingerprint in seen:
+                continue
+            seen.add(fingerprint)
             classification = str(row.get("classification") or row.get("pattern_type") or "").lower()
             pattern_type = "failure" if any(token in classification for token in ("fail", "unsupported", "gap", "owner")) else "success"
             lessons.append(
                 RetrievedLesson(
-                    finding_id=str(row.get("lesson_id") or row.get("finding_id") or row.get("task_id") or "lesson"),
-                    summary=str(row.get("summary") or row.get("lesson") or ""),
+                    finding_id=finding_id,
+                    summary=summary,
                     relevance_score=float(row.get("relevance_score", 1.0) or 0.0),
                     provenance=provenance,
                     source=str(row.get("source") or self.last_metadata["source"]),
@@ -112,8 +250,13 @@ class MemoryRetrievalAdapter:
         self.last_metadata["accepted"] = len(lessons)
         self.last_metadata["no_memory_match"] = not lessons
         self.last_metadata["status"] = "ok"
-        # BMF3-OBS: store trace on class for receipt access
-        MemoryRetrievalAdapter._last_trace = dict(self.last_metadata)
+        self.last_metadata["selected_ids"] = [lesson.finding_id for lesson in lessons]
+        self.last_metadata["memory_evidence_ids"] = [lesson.finding_id for lesson in lessons]
+        store_metadata = dict(getattr(self.store, "last_metadata", {}) or {})
+        if store_metadata:
+            self.last_metadata["retrieval_sources"] = list(store_metadata.get("retrieval_sources") or [])
+            self.last_metadata["source_errors"] = dict(store_metadata.get("source_errors") or {})
+            self.last_metadata["source_counts"] = dict(store_metadata.get("source_counts") or {})
         return lessons
 
     def retrieve_reranked(
@@ -137,12 +280,11 @@ class MemoryRetrievalAdapter:
         3. Deduplicate by summary fingerprint (>80% word overlap collapsed).
         4. Return top `limit` after re-scoring, pruning summaries to max_chars.
         """
+        # Expand retrieval window for reranking
+        raw_candidates = self.retrieve(query_text=query_text, limit=limit * 3)
         self.last_metadata["rerank_mode"] = True
         self.last_metadata["anchor_symbol"] = anchor_symbol
         self.last_metadata["anchor_file"] = anchor_file
-
-        # Expand retrieval window for reranking
-        raw_candidates = self.retrieve(query_text=query_text, limit=limit * 3)
 
         if not raw_candidates:
             return []
@@ -200,6 +342,6 @@ class MemoryRetrievalAdapter:
             )
 
         self.last_metadata["rerank_accepted"] = len(result)
-        # BMF3-OBS: store trace on class for receipt access
-        MemoryRetrievalAdapter._last_trace = dict(self.last_metadata)
+        self.last_metadata["selected_ids"] = [lesson.finding_id for lesson in result]
+        self.last_metadata["memory_evidence_ids"] = [lesson.finding_id for lesson in result]
         return result

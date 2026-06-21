@@ -339,10 +339,20 @@ class SemanticAnchorScorer:
         )
         lessons = self.memory_adapter.retrieve(query_text=query, limit=5)
         metadata = dict(self.memory_adapter.last_metadata)
-        delta = round(sum(lesson.scoring_delta for lesson in lessons), 4)
+        raw_delta = round(sum(lesson.scoring_delta for lesson in lessons), 4)
+        memory_guard = ""
+        if candidate.candidate_type in {"failing_stack_frame", "traceback_frame"} and raw_delta > 0:
+            delta = 0.0
+            memory_guard = "transport_candidate_positive_memory_suppressed"
+        else:
+            delta = max(-1.0, min(1.0, raw_delta))
+            if delta != raw_delta:
+                memory_guard = "memory_delta_capped"
         candidate.memory_contribution = {
             "enabled": bool(self.memory_enabled),
             "delta": delta,
+            "raw_delta": raw_delta,
+            "memory_guard": memory_guard,
             "lessons": [
                 {
                     "finding_id": lesson.finding_id,
@@ -358,6 +368,8 @@ class SemanticAnchorScorer:
         self.last_memory_metadata = dict(metadata)  # BMF3-OBS: instance-level (not global)
         if metadata.get("no_memory_match"):
             return 0.0, "no_memory_match"
+        if memory_guard == "transport_candidate_positive_memory_suppressed":
+            return 0.0, memory_guard
         if delta > 0:
             return delta, f"memory_success_delta:{delta:.2f}"
         if delta < 0:

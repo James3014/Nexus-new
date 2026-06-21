@@ -5,6 +5,8 @@ import uuid
 from pathlib import Path
 from typing import Any
 
+from nexus.services.local_heal.memory_trace import MemoryTrace
+
 
 INTERNAL_CLASSIFICATIONS = {
     "verifier_pass",
@@ -40,15 +42,96 @@ def classify_learning_outcome(ctx: Any) -> str:
 
 
 class LearningClosureBridge:
-    def __init__(self, path: Path | None = None) -> None:
+    def __init__(
+        self,
+        path: Path | None = None,
+        *,
+        findings_store: Any | None = None,
+        project_root: Path | None = None,
+        enable_findings: bool = True,
+    ) -> None:
         root = Path(__file__).resolve().parents[3]
+        self.project_root = project_root or root
         self.path = path or root / ".nexus/reports/learn/learning_closure.jsonl"
+        self.findings_store = findings_store
+        self.enable_findings = enable_findings
+
+    def _extract_memory_trace(self, ctx: Any) -> dict[str, Any]:
+        for carrier in (ctx, getattr(ctx, "op", None)):
+            if carrier is None:
+                continue
+            trace = getattr(carrier, "_memory_influence_trace", None)
+            if isinstance(trace, MemoryTrace):
+                return trace.to_dict()
+            if isinstance(trace, dict) and trace:
+                return trace
+        return {}
+
+    def _build_findings_body(self, lesson: dict[str, Any], memory_trace: dict[str, Any]) -> str:
+        return "\n".join(
+            [
+                f"Local-heal outcome: {lesson['classification']}",
+                f"Task: {lesson['task_id']}",
+                f"Summary: {lesson['summary']}",
+                f"Receipt: {lesson['receipt_id']}",
+                f"Memory trace status: {memory_trace.get('trace_status', 'TRACE_MISSING')}",
+                f"Memory evidence ids: {', '.join(memory_trace.get('memory_evidence_ids') or [])}",
+            ]
+        )
+
+    def _write_findings_card(self, lesson: dict[str, Any], memory_trace: dict[str, Any]) -> dict[str, Any]:
+        if not self.enable_findings:
+            return {"findings_writeback_status": "disabled"}
+        try:
+            from nexus.research.findings_memory import FindingsCard, FindingsMemoryStore
+
+            store = self.findings_store or FindingsMemoryStore(self.project_root)
+            body = self._build_findings_body(lesson, memory_trace)
+            card = FindingsCard(
+                id=str(lesson["lesson_id"])[:8],
+                kind="episodes",
+                title=f"LocalHeal lesson: {lesson['task_id']}",
+                scope="task",
+                tags=["local_heal", str(lesson["classification"])],
+                stage="learning_closure",
+                confidence="high" if lesson["classification"] == "verifier_pass" else "medium",
+                evidence_paths=[str(lesson["receipt_id"])],
+                retrieval_hints=[
+                    str(lesson["task_id"]),
+                    str(lesson["classification"]),
+                    *[str(item) for item in memory_trace.get("memory_evidence_ids") or []],
+                ],
+                body=body,
+                task_id=str(lesson["task_id"]),
+                extra={
+                    "lesson_id": lesson["lesson_id"],
+                    "classification": lesson["classification"],
+                    "receipt_id": lesson["receipt_id"],
+                    "memory_trace_status": memory_trace.get("trace_status", "TRACE_MISSING"),
+                    "retrieved_memory_ids": list(memory_trace.get("memory_evidence_ids") or []),
+                    "training_export_allowed": False,
+                    "internal_only": True,
+                    "content": body,
+                },
+            )
+            path = store.write(card)
+            return {
+                "findings_writeback_status": "ok",
+                "findings_card_id": card.id,
+                "findings_card_path": path,
+            }
+        except Exception as exc:
+            return {
+                "findings_writeback_status": "failed_non_blocking",
+                "findings_failure_reason": exc.__class__.__name__,
+            }
 
     def write_lesson(self, ctx: Any) -> dict[str, Any]:
         op = ctx.op if hasattr(ctx, "op") else ctx
         classification = classify_learning_outcome(ctx)
         if classification not in INTERNAL_CLASSIFICATIONS:
             classification = "verifier_gap"
+        memory_trace = self._extract_memory_trace(ctx)
         lesson = {
             "lesson_id": f"lh-{uuid.uuid4().hex[:12]}",
             "task_id": str(getattr(op, "instance_id", "") or getattr(op, "task_id", "") or "unknown"),
@@ -58,7 +141,10 @@ class LearningClosureBridge:
             "receipt_id": str(getattr(op, "receipt_path", "") or "receipt:pending"),
             "training_export_allowed": False,
             "internal_only": True,
+            "memory_trace_status": memory_trace.get("trace_status", "TRACE_MISSING"),
+            "retrieved_memory_ids": list(memory_trace.get("memory_evidence_ids") or []),
         }
+        lesson.update(self._write_findings_card(lesson, memory_trace))
         self.path.parent.mkdir(parents=True, exist_ok=True)
         with self.path.open("a", encoding="utf-8") as handle:
             handle.write(json.dumps(lesson, sort_keys=True) + "\n")

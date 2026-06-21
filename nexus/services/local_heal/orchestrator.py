@@ -400,6 +400,7 @@ class HealOrchestrator:
         ledger.retry_count = max(0, ctx.op.attempt - 1)
         ledger.finalize()
         ctx.op._latency_ledger = ledger
+        self._attach_memory_influence_trace(ctx)
         self._run_capability_bridges(ctx)
         self.governance_gate.audit(ctx)
         if self.receipt_writer:
@@ -438,6 +439,62 @@ class HealOrchestrator:
             }
         if errors:
             ctx.op._capability_bridge_error = ";".join(errors)
+
+    def _attach_memory_influence_trace(self, ctx: HealContext) -> None:
+        if getattr(ctx.op, "_memory_influence_trace", None):
+            return
+        try:
+            from nexus.services.local_heal.memory_retrieval_adapter import MemoryRetrievalAdapter
+            from nexus.services.local_heal.memory_trace import build_memory_trace_from_adapter, get_empty_trace
+
+            target_symbol = self._extract_target_symbol(ctx)
+            target_file = self._resolve_target_file(ctx)
+            target_file_text = ""
+            if target_file is not None:
+                try:
+                    target_file_text = str(target_file.relative_to(ctx.op.repo_dir))
+                except ValueError:
+                    target_file_text = target_file.name
+            query = " ".join(
+                part
+                for part in (
+                    str(getattr(ctx.op, "problem_statement", "") or "")[:500],
+                    target_symbol,
+                    target_file_text,
+                )
+                if part
+            )
+            if not query:
+                ctx.op._memory_influence_trace = get_empty_trace()
+                return
+            adapter = MemoryRetrievalAdapter()
+            adapter.retrieve_reranked(
+                query_text=query,
+                anchor_symbol=target_symbol,
+                anchor_file=target_file_text,
+                limit=3,
+            )
+            adapter.last_metadata["evidence_packet_included"] = False
+            adapter.last_metadata["prompt_included"] = False
+            adapter.last_metadata["verifier_status"] = "PASS" if getattr(ctx.op, "solve_eligible", False) else "FAIL"
+            ctx.op._memory_influence_trace = build_memory_trace_from_adapter(adapter.last_metadata)
+        except Exception as exc:
+            try:
+                from nexus.services.local_heal.memory_trace import get_empty_trace
+
+                trace = get_empty_trace()
+                trace.no_memory_match = True
+                trace.verifier_status = "TRACE_ATTACH_FAILED"
+                ctx.op._memory_influence_trace = trace
+            except Exception:
+                ctx.op._memory_influence_trace = {
+                    "available": False,
+                    "trace_status": "TRACE_MISSING",
+                    "no_memory_match": True,
+                    "verifier_status": "TRACE_ATTACH_FAILED",
+                    "internal_only": True,
+                }
+            ctx.op._memory_influence_trace_error = exc.__class__.__name__
 
     def _write_learning_closure(self, ctx: HealContext) -> None:
         try:

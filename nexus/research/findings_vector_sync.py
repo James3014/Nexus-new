@@ -38,6 +38,9 @@ class MemoryRepositoryFindingsVectorSync:
             db_path=resolved_db_path,
             table_name="findings_cards",
         )
+        if not payload.get("content") and payload.get("body"):
+            payload = dict(payload)
+            payload["content"] = payload["body"]
         repo.semantic_dedup_ingest("findings_cards", payload)
         return True
 

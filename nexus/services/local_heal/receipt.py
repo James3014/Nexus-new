@@ -9,22 +9,15 @@ from nexus.services.local_heal.memory_trace import MemoryTrace, get_empty_trace
 
 
 def _extract_memory_trace(ctx: Any) -> dict[str, Any]:
-    """Extract memory trace from ctx. Falls back to adapter class-level trace."""
-    # First, check ctx for explicit trace
-    trace = getattr(ctx, "_memory_influence_trace", None)
-    if isinstance(trace, MemoryTrace):
-        return trace.to_dict()
-    if isinstance(trace, dict) and trace:
-        return trace
-    # BMF3-OBS: fallback to adapter class-level trace (not module global)
-    try:
-        from nexus.services.local_heal.memory_retrieval_adapter import MemoryRetrievalAdapter
-        adapter_trace = MemoryRetrievalAdapter._last_trace
-        if adapter_trace:
-            from nexus.services.local_heal.memory_trace import build_memory_trace_from_adapter
-            return build_memory_trace_from_adapter(adapter_trace).to_dict()
-    except ImportError:
-        pass
+    """Extract only the formal ctx-scoped memory trace."""
+    for carrier in (ctx, getattr(ctx, "op", None)):
+        if carrier is None:
+            continue
+        trace = getattr(carrier, "_memory_influence_trace", None)
+        if isinstance(trace, MemoryTrace):
+            return trace.to_dict()
+        if isinstance(trace, dict) and trace:
+            return trace
     return get_empty_trace().to_dict()
 
 
