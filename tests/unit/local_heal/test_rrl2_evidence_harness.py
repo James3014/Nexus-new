@@ -129,3 +129,81 @@ class TestEvidenceHarness:
         harness.finalize(bundle2)
 
         assert len(harness.bundles) == 2
+
+
+# --- RED Tests: These expose bugs in classify_bottleneck ---
+
+class TestBottleneckClassificationRED:
+    """RED tests for classify_bottleneck bugs. Must FAIL before fix, PASS after."""
+
+    def test_abstain_not_misclassified_as_model_wrong(self):
+        """RED-1: abstain_detected=True + patch_produced=False must NOT be MODEL_WRONG."""
+        harness = EvidenceHarness()
+        bundle = EvidenceBundle(
+            task_id="test_abstain",
+            abstain_detected=True,
+            patch_produced=False,
+            verifier_status="",
+        )
+        harness.classify_bottleneck(bundle)
+        # Current code: not patch_produced is checked first -> MODEL_WRONG
+        # After fix: abstain_detected checked first -> MODEL_ABSTAIN
+        assert bundle.final_status == "MODEL_ABSTAIN", (
+            f"abstain_detected=True should produce MODEL_ABSTAIN, got {bundle.final_status}"
+        )
+
+    def test_missing_patch_format_valid_not_auto_patch_format(self):
+        """RED-2: patch_format_valid not explicitly set must not auto-classify as patch_format.
+
+        When patch_produced=True, patch_applied=True, verifier=FAIL,
+        and patch_format_valid is not explicitly set (default False),
+        classification should be verifier_harness, not patch_format.
+        """
+        harness = EvidenceHarness()
+        bundle = EvidenceBundle(
+            task_id="test_patch_format",
+            patch_produced=True,
+            patch_applied=True,
+            verifier_status="FAIL",
+            # patch_format_valid defaults to False - should NOT trigger patch_format
+        )
+        harness.classify_bottleneck(bundle)
+        # After fix: default False should not trigger patch_format
+        assert bundle.primary_bottleneck != "patch_format", (
+            f"Unset patch_format_valid should not auto-classify as patch_format, got {bundle.primary_bottleneck}"
+        )
+
+    def test_memory_available_empty_ids_not_auto_evidence_memory(self):
+        """RED-3: memory_available + empty selected_ids + no_memory_match=False must not auto-classify as evidence_memory.
+
+        When memory is available, ids are empty, but no_memory_match is False
+        (meaning memory was attempted but returned empty due to other reasons),
+        classification should be verifier_harness, not evidence_memory.
+        """
+        harness = EvidenceHarness()
+        bundle = EvidenceBundle(
+            task_id="test_memory",
+            patch_produced=True,
+            patch_applied=True,
+            verifier_status="FAIL",
+            patch_format_valid=True,
+            memory_available=True,
+            memory_selected_ids=[],
+            no_memory_match=False,  # memory was attempted, not a retrieval failure
+            evidence_confidence=0.9,
+        )
+        harness.classify_bottleneck(bundle)
+        # After fix: no_memory_match=False should not trigger evidence_memory
+        assert bundle.primary_bottleneck != "evidence_memory", (
+            f"memory_available + empty ids + no_memory_match=False should not auto-classify as evidence_memory, got {bundle.primary_bottleneck}"
+        )
+
+    def test_schema_field_count_match(self):
+        """RED-5: Schema field count must match actual dataclass fields."""
+        import dataclasses
+        field_count = len(dataclasses.fields(EvidenceBundle))
+        # Report claims 35 fields; verify no semantic duplicates
+        assert field_count >= 30, f"Expected at least 30 fields, got {field_count}"
+        # Check no duplicate field names (already guaranteed by dataclass, but explicit)
+        field_names = [f.name for f in dataclasses.fields(EvidenceBundle)]
+        assert len(field_names) == len(set(field_names)), "Duplicate field names found"

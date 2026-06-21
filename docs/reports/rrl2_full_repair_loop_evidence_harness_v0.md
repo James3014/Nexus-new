@@ -2,7 +2,7 @@
 
 **Status**: `RRL2_EVIDENCE_HARNESS_READY`
 **Date**: 2026-06-21
-**Commit**: Pending
+**Commit**: `0a779e1f` (harness) + `pending` (bug fix)
 
 ---
 

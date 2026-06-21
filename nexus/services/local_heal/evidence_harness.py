@@ -64,7 +64,7 @@ class EvidenceBundle:
     model_name: str = ""
     output_length_chars: int = 0
     patch_produced: bool = False
-    patch_format_valid: bool = False
+    patch_format_valid: bool | None = None  # None = not set, True = valid, False = invalid
     abstain_detected: bool = False
 
     # Candidate summary
@@ -143,7 +143,16 @@ class EvidenceHarness:
         return bundle
 
     def classify_bottleneck(self, bundle: EvidenceBundle) -> None:
-        """Auto-derive bottleneck classification from bundle state."""
+        """Auto-derive bottleneck classification from bundle state.
+
+        Judgment order (fixed):
+        1. PASS -> SOLVED
+        2. abstain_detected -> MODEL_ABSTAIN (before patch_produced check)
+        3. patch_applied + FAIL -> VERIFIER_FAIL
+        4. !patch_produced -> MODEL_WRONG
+        5. patch_produced + !patch_applied -> PATCH_APPLY_FAIL
+        6. else -> INCONCLUSIVE
+        """
         if bundle.verifier_status == "PASS":
             bundle.final_status = "SOLVED"
             bundle.primary_bottleneck = "none"
@@ -151,16 +160,27 @@ class EvidenceHarness:
             bundle.human_readable_reason = "Repair completed successfully"
             return
 
+        # Check abstain FIRST (before patch_produced)
+        if bundle.abstain_detected:
+            bundle.final_status = "MODEL_ABSTAIN"
+            bundle.primary_bottleneck = "model_generation"
+            bundle.confidence = "MEDIUM"
+            bundle.human_readable_reason = "Model abstained from repair"
+            return
+
         # Classify failure
         if bundle.patch_applied and bundle.verifier_status == "FAIL":
             bundle.final_status = "VERIFIER_FAIL"
-            if not bundle.patch_format_valid:
+            # Only classify patch_format if explicitly marked False (not default)
+            if bundle.patch_format_valid is False:
                 bundle.primary_bottleneck = "patch_format"
-            elif bundle.memory_available and not bundle.memory_selected_ids:
+                bundle.confidence = "MEDIUM"
+            elif bundle.no_memory_match is True and not bundle.memory_selected_ids:
                 bundle.primary_bottleneck = "evidence_memory"
+                bundle.confidence = "MEDIUM"
             else:
                 bundle.primary_bottleneck = "verifier_harness"
-            bundle.confidence = "MEDIUM"
+                bundle.confidence = "LOW"
         elif not bundle.patch_produced:
             bundle.final_status = "MODEL_WRONG"
             bundle.primary_bottleneck = "model_generation"
@@ -169,10 +189,6 @@ class EvidenceHarness:
             bundle.final_status = "PATCH_APPLY_FAIL"
             bundle.primary_bottleneck = "patch_apply"
             bundle.confidence = "HIGH"
-        elif bundle.abstain_detected:
-            bundle.final_status = "MODEL_ABSTAIN"
-            bundle.primary_bottleneck = "model_generation"
-            bundle.confidence = "MEDIUM"
         else:
             bundle.final_status = "INCONCLUSIVE"
             bundle.primary_bottleneck = "unknown"
