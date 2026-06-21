@@ -1,7 +1,9 @@
 """Y2: Controlled Multi-Anchor / Multi-File Action Protocol."""
 from __future__ import annotations
 
+import subprocess
 from dataclasses import dataclass, field
+from pathlib import Path
 from typing import Any, Dict, List, Optional
 from nexus.services.local_heal.protocol import ValidationResult
 from nexus.services.local_heal.errors import PatchError, PatchErrorKind
@@ -89,7 +91,6 @@ class ActionProtocol:
 
         # 4. Check owner approval constraints for TWO_FILE_COORDINATED_EDIT
         if self.protocol_type == "TWO_FILE_COORDINATED_EDIT" and not self.owner_approval_required:
-            # We enforce that coordinated 2-file edits MUST have owner approval flag enabled by default
             return ValidationResult(
                 is_valid=False,
                 error=PatchError(
@@ -99,7 +100,90 @@ class ActionProtocol:
                 )
             )
 
+        # 5. BE-Track: Multi-step local edit checks
+        if self.protocol_type == "MULTI_STEP_LOCAL_EDIT":
+            for action in self.ordered_actions:
+                if not action.anchor_symbol and not action.exact_search_text:
+                    return ValidationResult(
+                        is_valid=False,
+                        error=PatchError(
+                            kind=PatchErrorKind.PATCH_EMPTY,
+                            message="MULTI_STEP_LOCAL_EDIT action missing anchor or search text.",
+                            file_path=action.file_path
+                        )
+                    )
+
+        # 6. BE-Track: Bounded cross-file edit checks
+        if self.protocol_type == "BOUNDED_CROSS_FILE_EDIT":
+            if len(self.files_involved) > 3:
+                return ValidationResult(
+                    is_valid=False,
+                    error=PatchError(
+                        kind=PatchErrorKind.NO_BLOCKS_FOUND,
+                        message="BOUNDED_CROSS_FILE_EDIT involves too many files (>3).",
+                        file_path=""
+                    )
+                )
+            action_files = {a.file_path for a in self.ordered_actions}
+            if action_files - set(self.files_involved):
+                return ValidationResult(
+                    is_valid=False,
+                    error=PatchError(
+                        kind=PatchErrorKind.NO_BLOCKS_FOUND,
+                        message="BOUNDED_CROSS_FILE_EDIT action files exceed files_involved set.",
+                        file_path=""
+                    )
+                )
+
+        # 7. BE-Track: Dependent symbol update checks
+        if self.protocol_type == "DEPENDENT_SYMBOL_UPDATE":
+            if not self.dependency_edges:
+                return ValidationResult(
+                    is_valid=False,
+                    error=PatchError(
+                        kind=PatchErrorKind.NO_BLOCKS_FOUND,
+                        message="DEPENDENT_SYMBOL_UPDATE requires dependency edges.",
+                        file_path=""
+                    )
+                )
+            for action in self.ordered_actions:
+                if not action.evidence_node_id:
+                    return ValidationResult(
+                        is_valid=False,
+                        error=PatchError(
+                            kind=PatchErrorKind.NO_BLOCKS_FOUND,
+                            message="DEPENDENT_SYMBOL_UPDATE actions require evidence_node_id.",
+                            file_path=action.file_path
+                        )
+                    )
+
         return ValidationResult(is_valid=True)
+
+    def apply_transactional(self, project_root: Path, applier_func: Any, verifier_func: Any) -> tuple[bool, str]:
+        """BE-Track: Transactional apply of actions with automatic rollback on failure."""
+        try:
+            for action in self.ordered_actions:
+                success, err = applier_func(action)
+                if not success:
+                    self.rollback(project_root)
+                    return False, f"Action {action.action_id} failed: {err}"
+            
+            verifier_passed, verifier_err = verifier_func()
+            if not verifier_passed:
+                self.rollback(project_root)
+                return False, f"Verifier failed: {verifier_err}"
+                
+            return True, "Success"
+        except Exception as e:
+            self.rollback(project_root)
+            return False, str(e)
+
+    def rollback(self, project_root: Path):
+        """Rollback modifications using git checkout."""
+        if self.rollback_policy == "git_checkout_discard":
+            for f in self.files_involved:
+                if f:
+                    subprocess.run(["git", "checkout", "--", f], cwd=str(project_root), capture_output=True)
 
     def generate_ultra_review_report(self) -> Dict[str, Any]:
         """Runs automated Ultra Review check on this action protocol (Z2-P3)."""
@@ -117,6 +201,10 @@ class ActionProtocol:
             broad_edit_risk = "high"
             owner_approval_boundary = "abstain_out_of_bounds"
             security_risk = "medium"
+        elif self.protocol_type == "BOUNDED_CROSS_FILE_EDIT":
+            regression_risk = "medium"
+            broad_edit_risk = "medium"
+            owner_approval_boundary = "bounded_cross_file"
 
         return {
             "security_risk": security_risk,

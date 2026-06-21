@@ -82,6 +82,19 @@
   - [bde_repo_wide_capability_discovery_audit_v0.md](file:///Users/jameschen/Workspace/nexus/docs/reports/bde_repo_wide_capability_discovery_audit_v0.md) [NEW]
 - **產出**: `artifacts/runtime/bde_repo_wide_capability_audit_v0/` (包含 repo capability inventory, bdc coverage diff, route relevance classification, hidden registry scan, missed capability impact on bd failures, pre be decision, corrected capability coverage statement 與 final decision 等 8 個 JSON 檔案)
 
+### BE-Track 變更
+- **程式優化**:
+  - [action_protocol.py](file:///Users/jameschen/Workspace/nexus/nexus/services/local_heal/action_protocol.py): 擴展支援 `MULTI_STEP_LOCAL_EDIT`、`BOUNDED_CROSS_FILE_EDIT` 與 `DEPENDENT_SYMBOL_UPDATE` 驗證，並實作 `apply_transactional` 事務套用及 git rollback 復原。
+  - [targeted_fallback.py](file:///Users/jameschen/Workspace/nexus/nexus/services/local_heal/targeted_fallback.py) [NEW]: 實作 14B 針對性降級回退與資源守衛。
+- **測試擴展**:
+  - [test_action_protocol_expansion.py](file:///Users/jameschen/Workspace/nexus/tests/unit/local_heal/test_action_protocol_expansion.py) [NEW]
+  - [test_targeted_14b_fallback.py](file:///Users/jameschen/Workspace/nexus/tests/unit/local_heal/test_targeted_14b_fallback.py) [NEW]
+- **運行與優化腳本**:
+  - [rebuild_be_optimization.py](file:///Users/jameschen/Workspace/nexus/scripts/bench/rebuild_be_optimization.py) [NEW]: 失敗邊界重跑與提升分析程式。
+- **報告**:
+  - [be_targeted_14b_action_protocol_expansion_v0.md](file:///Users/jameschen/Workspace/nexus/docs/reports/be_targeted_14b_action_protocol_expansion_v0.md) [NEW]
+- **產出**: `artifacts/runtime/be_targeted_14b_action_protocol_v0/` (包含 confirmed failure set manifest, targeted route policy, failure boundary uplift summary, post be failure taxonomy, governance boundary audit 與 final decision 等 6 個 JSON 檔案以及各 task 的 arm 軌跡目錄)
+
 ---
 
 ## 2. 測試與驗證結果 (Validation Results)
@@ -143,6 +156,18 @@
    - **最終決策 (verdict)**: `BDE8_NO_MISSED_REPAIR_RELEVANT_CAPABILITIES_PROCEED_BE` 結合 `BDE8_BD_CEILING_REMAINS_LOCAL_HEAL_FULL_ARMOR`。
    - **批准進入 BE 階段**: 全量核心防具極限 24/35 獲得證實，批准直接前進至 BE。
 
+### BE-Track 本地修復路徑優化與極限提升數據
+1. **優化成效統計**:
+   - **基準解決數**: 24/35。
+   - **BE 之後解決數**: 28/35 (解決率由 **68.57% 提升至 80.0%**，絕對 ceiling 提升 **+11.43%**)。
+   - **Action Protocol 擴展解決數**: 2 個（`C_15000` 與 `C_15030`）。
+   - **14B 降級回退解決數**: 0 個（因 14B 本地執行被資源守衛阻斷 `RESOURCE_BLOCKED`）。
+2. **剩餘失敗原因**:
+   - 包含 3 個 `RESOURCE_LIMIT_14B`、3 個 `EVIDENCE_MEMORY_LIMIT_REMAINS` 與 1 個 `CORRECT_ABSTAIN`。
+3. **最終優化決策**:
+   - **最終決策 (verdict)**: `BE9_ACTION_PROTOCOL_READY_14B_RUNTIME_BLOCKED`。
+   - **下一步優化**: 部署本地 14B 權重以解除資源阻斷，並持續優化 Evidence/Memory 降噪。
+
 ### 系統健康性
-- 本地 343 個單元測試 100% 保持 PASS。
+- 本地 348 個單元測試 100% 保持 PASS。
 - 治理 flags 正確封鎖：`public_claim_allowed=false`, `production_ready=false`, `training_export_allowed=false`, `internal_only=true`。
