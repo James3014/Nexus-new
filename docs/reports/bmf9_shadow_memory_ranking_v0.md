@@ -2,7 +2,9 @@
 
 **Status**: `BMF9_SM_SHADOW_RANKING_READY`
 **Date**: 2026-06-21
-**Commit**: Pending
+**Commit**: `c113e9e7`
+
+**Limitation**: BMF9 implemented standalone shadow scoring; BMF10 validates runtime attachment.
 
 ---
 

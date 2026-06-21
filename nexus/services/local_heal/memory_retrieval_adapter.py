@@ -287,6 +287,20 @@ class MemoryRetrievalAdapter:
         self.last_metadata["anchor_file"] = anchor_file
 
         if not raw_candidates:
+            # BMF10-RSH: shadow metadata for empty case
+            self.last_metadata["shadow_ranking"] = {
+                "enabled": True,
+                "status": "NO_LESSONS",
+                "scored_count": 0,
+                "rank_changes": 0,
+                "top_current_ids": [],
+                "top_proposed_ids": [],
+                "feature_coverage": 0.0,
+                "runtime_order_changed": False,
+                "prompt_changed": False,
+                "verifier_changed": False,
+                "shadow_only": True,
+            }
             return []
 
         # Build anchor token sets
@@ -344,4 +358,58 @@ class MemoryRetrievalAdapter:
         self.last_metadata["rerank_accepted"] = len(result)
         self.last_metadata["selected_ids"] = [lesson.finding_id for lesson in result]
         self.last_metadata["memory_evidence_ids"] = [lesson.finding_id for lesson in result]
+
+        # BMF10-RSH: shadow ranking telemetry (runtime order UNCHANGED)
+        try:
+            from nexus.services.local_heal.shadow_memory_ranking import shadow_score_lessons
+            lesson_dicts = [
+                {"lesson_id": l.finding_id, "summary": l.summary, "classification": l.pattern_type,
+                 "provenance": l.provenance, "source": l.source, "relevance_score": l.relevance_score}
+                for l in raw_candidates
+            ]
+            shadow = shadow_score_lessons(
+                lesson_dicts,
+                anchor_symbol=anchor_symbol,
+                anchor_file=anchor_file,
+                limit=limit,
+            )
+            self.last_metadata["shadow_ranking"] = {
+                "enabled": True,
+                "status": "COMPLETED",
+                "scored_count": shadow.shadow_scored_count,
+                "rank_changes": shadow.shadow_rank_changes,
+                "top_current_ids": shadow.top_current_ids,
+                "top_proposed_ids": shadow.top_proposed_ids,
+                "feature_coverage": shadow.shadow_feature_coverage,
+                "runtime_order_changed": False,
+                "prompt_changed": False,
+                "verifier_changed": False,
+                "shadow_only": True,
+            }
+        except Exception as exc:
+            self.last_metadata["shadow_ranking"] = {
+                "enabled": True,
+                "status": "FAILED_FAIL_OPEN",
+                "error": exc.__class__.__name__,
+                "runtime_order_changed": False,
+                "prompt_changed": False,
+                "verifier_changed": False,
+                "shadow_only": True,
+            }
+        # Ensure shadow_ranking always present even if no lessons
+        if "shadow_ranking" not in self.last_metadata:
+            self.last_metadata["shadow_ranking"] = {
+                "enabled": True,
+                "status": "NO_LESSONS",
+                "scored_count": 0,
+                "rank_changes": 0,
+                "top_current_ids": [],
+                "top_proposed_ids": [],
+                "feature_coverage": 0.0,
+                "runtime_order_changed": False,
+                "prompt_changed": False,
+                "verifier_changed": False,
+                "shadow_only": True,
+            }
+
         return result

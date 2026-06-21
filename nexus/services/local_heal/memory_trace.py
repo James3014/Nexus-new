@@ -43,6 +43,8 @@ class MemoryTrace:
     influence_status: str = "NOT_MEASURED"
     source_contract: str = "MEMORY_RETRIEVAL_ADAPTER"
     internal_only: bool = True
+    # BMF10-RSH: shadow ranking telemetry
+    shadow_ranking: dict[str, Any] = field(default_factory=dict)
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -68,6 +70,7 @@ class MemoryTrace:
             "influence_status": self.influence_status,
             "source_contract": self.source_contract,
             "internal_only": self.internal_only,
+            "shadow_ranking": dict(self.shadow_ranking),
         }
 
 
@@ -118,6 +121,7 @@ def build_memory_trace_from_adapter(
         findings_card_id=str(adapter_metadata.get("findings_card_id") or ""),
         influence_status="NOT_MEASURED",
         source_contract="MEMORY_RETRIEVAL_ADAPTER",
+        shadow_ranking=dict(adapter_metadata.get("shadow_ranking") or {}),
     )
 
 
