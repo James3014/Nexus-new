@@ -24,7 +24,7 @@ class RoutePlanner:
             selected = 'django_migration'
             rationale = 'Detected Django migration related keywords.'
             confidence = 0.99
-            return RoutingReceipt(task_id, selected, confidence, rationale)
+            return RoutingReceipt(task_id, selected, confidence, rationale, diagnose_overcall=False, diagnose_undercall=False)
 
         for family, keywords in RoutePlanner.TAXONOMY.items():
             for kw in keywords:
@@ -35,10 +35,14 @@ class RoutePlanner:
                     break
             if confidence > 0.5: break
             
+        diagnose_overcall = (confidence < 0.90)
+        diagnose_undercall = (confidence < 0.90)
         return RoutingReceipt(
             task_id=task_id,
             selected_route=selected,
             confidence_score=confidence,
             rationale=rationale,
-            fallback_route='general_repair' if selected != 'general_repair' else None
+            fallback_route='general_repair' if selected != 'general_repair' else None,
+            diagnose_overcall=diagnose_overcall,
+            diagnose_undercall=diagnose_undercall
         )

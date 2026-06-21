@@ -36,6 +36,13 @@ class ContextGuard:
         for i, loc_file in enumerate(files):
             if i >= max_files:
                 break
+            if isinstance(loc_file, tuple) and len(loc_file) >= 2:
+                loc_file = LocalizedFile(path=str(loc_file[0]), content=str(loc_file[1]))
+            
+            # Optimization: Noise filtering for stale or trivial localized contents
+            if not loc_file.content or len(loc_file.content.strip()) < 15:
+                continue
+
             if current_chars + len(loc_file.content) > max_total_chars:
                 if truncated:
                     break

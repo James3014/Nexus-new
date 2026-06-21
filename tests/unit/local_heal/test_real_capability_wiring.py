@@ -232,3 +232,29 @@ def test_repair_receipt_without_claim_delivery_gate_is_not_claim_eligible():
     )
     receipt = build_repair_receipt(ctx)
     assert receipt["claim_eligible"] is False
+
+
+def test_route_planner_diagnostics_confidence():
+    from nexus.research.domain.route_planner import RoutePlanner
+    r1 = RoutePlanner.plan_route("C_12481", "using migrations and db_table")
+    assert r1.confidence_score == 0.99
+    assert r1.diagnose_overcall is False
+    assert r1.diagnose_undercall is False
+
+    r2 = RoutePlanner.plan_route("C_12481", "plain test without keywords")
+    assert r2.confidence_score == 0.5
+    assert r2.diagnose_overcall is True
+    assert r2.diagnose_undercall is True
+
+
+def test_context_guard_noise_filtering():
+    from nexus.services.local_heal.context_guard import ContextGuard, LocalizedFile
+    guard = ContextGuard()
+    files = [
+        LocalizedFile(path="a.py", content="too_short"), # len < 15, should be filtered
+        LocalizedFile(path="b.py", content="class GoodFile:\n    pass\n"), # len >= 15, keep
+    ]
+    res = guard.limit_localized_files(files, max_files=3, max_total_chars=1000)
+    assert len(res) == 1
+    assert res[0].path == "b.py"
+

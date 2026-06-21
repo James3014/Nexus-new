@@ -9,3 +9,5 @@ class RoutingReceipt:
     rationale: str          # 路由理由 (Evidence Chain)
     fallback_route: Optional[str] = None
     manual_override: bool = False
+    diagnose_overcall: bool = False
+    diagnose_undercall: bool = False
