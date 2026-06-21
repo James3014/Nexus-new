@@ -13,6 +13,8 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
+from nexus.services.local_heal.memory_retrieval_adapter import MemoryRetrievalAdapter
+
 
 @dataclass
 class AnchorCandidate:
@@ -29,6 +31,7 @@ class AnchorCandidate:
     risk: str = "low"
     selected: bool = False
     source_text: str = ""  # exact source text of the anchor
+    memory_contribution: dict[str, Any] = field(default_factory=dict)
 
 
 @dataclass
@@ -122,7 +125,10 @@ class SemanticAnchorScorer:
         "append", "extend",
     })
 
-    def __init__(self):
+    def __init__(self, memory_adapter: MemoryRetrievalAdapter | None = None, *, memory_enabled: bool = True):
+        self.memory_adapter = memory_adapter or MemoryRetrievalAdapter(enabled=memory_enabled)
+        self.memory_enabled = memory_enabled
+        self.scoring_metadata: dict[str, Any] = {}
         self._scorers = [
             self._score_behavior_ownership,
             self._score_failing_trace_relevance,
@@ -311,19 +317,48 @@ class SemanticAnchorScorer:
     def _score_prior_lessons(
         self,
         candidate: AnchorCandidate,
+        issue_keywords: list[str] | None = None,
+        failing_keywords: list[str] | None = None,
+        repro_failure_message: str = "",
         **kwargs,
     ) -> tuple[float, str]:
         """Score based on retrieved Memory / LanceDB prior lessons (Z2-P1)."""
-        symbol_lower = candidate.symbol_name.lower()
-        success_patterns = ["__getattr__", "_encode", "limit", "write_format"]
-        failure_patterns = ["iterator", "for_loop", "mechanical"]
-
-        if any(pat in symbol_lower for pat in success_patterns):
-            return 10.0, "prior_success_bonus:matches_successful_memory_pattern"
-        if any(pat in symbol_lower for pat in failure_patterns):
-            return -15.0, "prior_failure_penalty:matches_failed_memory_pattern"
-
-        return 0.0, ""
+        query = " ".join(
+            item
+            for item in [
+                candidate.symbol_name,
+                candidate.candidate_type,
+                " ".join(issue_keywords or []),
+                " ".join(failing_keywords or []),
+                repro_failure_message[:200],
+            ]
+            if item
+        )
+        lessons = self.memory_adapter.retrieve(query_text=query, limit=5)
+        metadata = dict(self.memory_adapter.last_metadata)
+        delta = round(sum(lesson.scoring_delta for lesson in lessons), 4)
+        candidate.memory_contribution = {
+            "enabled": bool(self.memory_enabled),
+            "delta": delta,
+            "lessons": [
+                {
+                    "finding_id": lesson.finding_id,
+                    "pattern_type": lesson.pattern_type,
+                    "provenance": lesson.provenance,
+                    "relevance_score": lesson.relevance_score,
+                }
+                for lesson in lessons
+            ],
+            "metadata": metadata,
+        }
+        self.scoring_metadata[candidate.anchor_id] = candidate.memory_contribution
+        if metadata.get("no_memory_match"):
+            return 0.0, "no_memory_match"
+        if delta > 0:
+            return delta, f"memory_success_delta:{delta:.2f}"
+        if delta < 0:
+            return delta, f"memory_failure_delta:{delta:.2f}"
+        return 0.0, "memory_neutral"
 
     def _score_behavior_ownership(
         self,

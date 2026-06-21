@@ -352,13 +352,15 @@ def build_repair_receipt(ctx: Any, *, model_name: str = "nexus-local-heal", run_
         and actually_solved
         and not failure_present
     )
+    claim_delivery_gate = dict(getattr(ctx, "_claim_delivery_gate", {}) or {})
+    claim_eligible = bool(claim_eligible and claim_delivery_gate.get("claim_gate_passed"))
     
     # Fail-closed overrides
     if simulated:
         claim_eligible = False
     
     # public_benchmark_allowed: same as claim_eligible (alias for backward compat)
-    public_benchmark_allowed = claim_eligible
+    public_benchmark_allowed = False
     
     # --- Execution Audit ---
     observed_stop_layer = gate_exit
@@ -401,6 +403,10 @@ def build_repair_receipt(ctx: Any, *, model_name: str = "nexus-local-heal", run_
         "claim_eligible": claim_eligible,
         "solve_eligible": bool(getattr(ctx, "solve_eligible", False)),
         "public_benchmark_allowed": public_benchmark_allowed,
+        "public_claim_allowed": False,
+        "production_ready": False,
+        "training_export_allowed": False,
+        "internal_only": True,
         
         # --- Execution Audit ---
         "expected_stop_layer": expected_stop,
@@ -466,6 +472,10 @@ def build_repair_receipt(ctx: Any, *, model_name: str = "nexus-local-heal", run_
             "structured_packet_used": _has_structured_packet(ctx),
             # T1.6: Semantic retry telemetry
             "semantic_retry_telemetry": dict(getattr(ctx, "_semantic_retry_telemetry", {}) or {}),
+            "autoreason_advisory": dict(getattr(ctx, "_autoreason_advisory", {}) or {}),
+            "belief_trace": dict(getattr(ctx, "_belief_trace", {}) or {}),
+            "claim_delivery_gate": claim_delivery_gate,
+            "learning_closure": dict(getattr(ctx, "_learning_closure", {}) or {}),
         },
 
         # --- S1-prep: StrategyTrace-only (no execution effect) ---
@@ -495,6 +505,9 @@ def build_repair_receipt(ctx: Any, *, model_name: str = "nexus-local-heal", run_
             "model_calls": model_calls,
             "claim_eligible": claim_eligible,
             "public_claim_allowed": public_benchmark_allowed,
+            "production_ready": False,
+            "training_export_allowed": False,
+            "internal_only": True,
         },
         
         # --- Eval Metrics (backward compat) ---

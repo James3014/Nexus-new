@@ -1,7 +1,7 @@
 from typing import Any, Callable, List
 from pathlib import Path
 import subprocess
-from nexus.services.local_heal.interface import IPhase, PhaseResult
+from nexus.services.local_heal.interface import IPhase, PhaseResult, RepairPlan
 from nexus.services.local_heal.context import HealContext
 from nexus.services.local_heal.governance_gate import GovernanceGate
 from nexus.services.local_heal.corrector import SelfCorrector
@@ -46,6 +46,7 @@ class HealOrchestrator:
         if len(phases) == 5:
             self.repro_phase, self.plan_phase, self.loc_phase, self.patch_phase, self.verify_phase = phases
         else:
+            unmatched = []
             for phase in phases:
                 name = phase.__class__.__name__
                 if "Reproduction" in name: self.repro_phase = phase
@@ -53,6 +54,11 @@ class HealOrchestrator:
                 elif "Localization" in name: self.loc_phase = phase
                 elif "Patch" in name: self.patch_phase = phase
                 elif "Verification" in name: self.verify_phase = phase
+                else: unmatched.append(phase)
+            if unmatched and not any((self.repro_phase, self.plan_phase, self.loc_phase, self.patch_phase, self.verify_phase)):
+                slots = ["repro_phase", "plan_phase", "loc_phase", "patch_phase", "verify_phase"]
+                for slot, phase in zip(slots, unmatched):
+                    setattr(self, slot, phase)
 
     def run(self, ctx: HealContext) -> HealContext:
         """核心修復工作流：線性啟動 -> 迭代修復 -> 審計結算。"""
@@ -73,6 +79,7 @@ class HealOrchestrator:
                 return ctx
 
             # 2. 上下文保護 (Linus: Do it once, do it right)
+            self._normalize_legacy_context(ctx)
             self.context_guard.protect(ctx)
 
             # 3. 迭代修復迴圈 (P4-5)
@@ -83,6 +90,15 @@ class HealOrchestrator:
             
         finally:
             self._finalize_run(ctx, ledger, start_wall)
+
+    def _normalize_legacy_context(self, ctx: HealContext) -> None:
+        plan = ctx.op.plan
+        if isinstance(plan, dict):
+            ctx.op.plan = RepairPlan(
+                search_symbols=list(plan.get("search_symbols", []) or []),
+                repair_strategy=str(plan.get("repair_strategy", "") or ""),
+                violated_invariants=list(plan.get("violated_invariants", []) or []),
+            )
 
     def _run_linear_phases(self, ctx: HealContext, ledger: LatencyLedger) -> bool:
         """執行再現、規劃與定位。任何階段失敗即終止。"""
@@ -384,9 +400,58 @@ class HealOrchestrator:
         ledger.retry_count = max(0, ctx.op.attempt - 1)
         ledger.finalize()
         ctx.op._latency_ledger = ledger
+        self._run_capability_bridges(ctx)
         self.governance_gate.audit(ctx)
         if self.receipt_writer:
-            ctx.op.receipt_path = str(self.receipt_writer(ctx, run_group=getattr(ctx.op, "run_group", "")))
+            try:
+                receipt_path = self.receipt_writer(ctx, run_group=getattr(ctx.op, "run_group", ""))
+            except TypeError:
+                receipt_path = self.receipt_writer(ctx)
+            ctx.op.receipt_path = str(receipt_path)
+            self._write_learning_closure(ctx)
+
+    def _run_capability_bridges(self, ctx: HealContext) -> None:
+        errors = []
+        try:
+            from nexus.services.local_heal.reasoning_advisory_bridge import apply_autoreason_advisory, apply_belief_update
+
+            apply_autoreason_advisory(ctx)
+            apply_belief_update(ctx)
+        except Exception as exc:
+            errors.append(exc.__class__.__name__)
+        try:
+            from nexus.services.local_heal.claim_delivery_gate import validate_context_claim_delivery
+
+            validate_context_claim_delivery(ctx)
+        except Exception as exc:
+            errors.append(exc.__class__.__name__)
+            ctx.op._claim_delivery_gate = {
+                "schema": "nexus.local_heal.claim_delivery_gate.v1",
+                "claim_gate_passed": False,
+                "delivery_gate_passed": False,
+                "failure_reasons": ["capability_bridge_error", exc.__class__.__name__],
+                "evidence_refs": [],
+                "receipt_only_claim_impossible": True,
+                "public_claim_allowed": False,
+                "production_ready": False,
+                "internal_only": True,
+            }
+        if errors:
+            ctx.op._capability_bridge_error = ";".join(errors)
+
+    def _write_learning_closure(self, ctx: HealContext) -> None:
+        try:
+            from nexus.services.local_heal.learning_closure_bridge import write_learning_closure
+
+            write_learning_closure(ctx)
+        except Exception as exc:
+            ctx.op._learning_closure = {
+                "schema": "nexus.local_heal.learning_closure.v1",
+                "writeback_status": "failed_non_blocking",
+                "failure_reason": exc.__class__.__name__,
+                "training_export_allowed": False,
+                "internal_only": True,
+            }
 
     def _record_role_receipt(self, ctx: HealContext, phase_name: str) -> None:
         model_name = self._get_model_for_phase(ctx, phase_name)
