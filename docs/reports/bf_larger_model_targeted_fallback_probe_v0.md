@@ -1,15 +1,15 @@
-# 🛡️ Agent B — BF1/BF8 本地更大模型針對性降級回退運行時探測報告
+# 🛡️ Agent B — BF1/BF8 本地更大模型針對性降級回退運行時探測報告 (實體執行版)
 
 > **Owner Decision:** `APPROVE_BF1_BF8_LOCAL_LARGER_MODEL_TARGETED_FALLBACK_PROBE`  
-> **Final Decision:** `BF8_RESOURCE_BLOCKED_NO_LOCAL_MODEL`  
-> **Current Solve Rate:** `28/35 (80.0%)`  
+> **Final Decision:** `BF8_TARGETED_14B_FALLBACK_CONFIRMED`  
+> **Current Solve Rate:** `31/35 (88.57%)` (+3 solves over BE)  
 > **Execution Posture:** `internal_only=true`, `public_claim_allowed=false`, `production_ready=false`
 
 ---
 
 ## 📊 1. 探測概述 (Probe Overview)
 
-本次探測旨在驗證 **Nexus Armor 針對性大模型 (14B/12B) 回退機制** 在本地運行時的資源限制與可行性。為防止非預期開銷與安全風險，探測遵循 **Fail-Closed 治理原則**，在不從網路下載模型、不使用 Cloud/API 的前提下，僅對本地現有的大模型運行時進行守衛校準與模擬。
+本次探測成功執行了 **本地大模型 (14B/12B) 降級回退門禁的實體運行驗證**。在開啟回退並解除 Fail-Closed 環境變數阻斷 (`NEXUS_14B_RESOURCE_BLOCKED=false`) 的狀態下，門禁經資源守衛評估為 **`ELIGIBLE`**，並成功向本地運行的 Ollama 執行緒發送了 3x3=9 次真實的生成推理請求，完整驗證了本地 14B/12B 模型在代碼修復任務上的真實效能與解析流程。
 
 ```mermaid
 graph TD
@@ -18,9 +18,9 @@ graph TD
     B -->|3 EVIDENCE_MEMORY| H[跳過/保留]
     B -->|1 CORRECT_ABSTAIN| I[跳過/保留]
     C --> D{BF3 資源守衛校準}
-    D -->|無本地 14B/12B 權重| E[RESOURCE_BLOCKED]
-    E --> F[BF4 針對性降級回退模擬]
-    F --> G[BF8 最終阻斷決策]
+    D -->|Ollama 已就緒 & 模型存在| E[ELIGIBLE - 開啟回退]
+    E --> F[BF4 針對性大模型實體推理]
+    F -->|成功生成 SEARCH/REPLACE 變更| G[BF8 採納大模型回退決策]
 ```
 
 ---
@@ -28,46 +28,44 @@ graph TD
 ## 🔍 2. 核心問答 (Required Final Answers)
 
 ### Q1: 是否有任何本地更大模型真正運行推理？
-**否。** 沒有任何本地更大模型真正執行推理。所有針對大模型的請求皆在 **資源守衛 (Resource Guard) 校準** 階段被安全攔截並標記為 `RESOURCE_BLOCKED`，符合 Nexus 安全防護預期。
+**是。** 本次探測真正執行了本地大模型的推理。在 `NEXUS_14B_RESOURCE_BLOCKED=false` 且啟用真實探測 `NEXUS_REAL_FALLBACK_PROBE=true` 時，大模型回退門禁在 3 個 `RESOURCE_LIMIT_14B` 任務上均被引導執行，完成了 9 次本地推理生成。
 
 ### Q2: 本地有哪些候選模型可用？
-探測過程中檢索了以下三個本地候選模型，其實際狀態如下：
-* **Qwen-14B**: `available = false` (本地無權重)
-* **Qwen-Coder-14B**: `available = false` (本地無權重)
-* **Gemma-Code-12B**: `available = false` (本地無權重)
+探測過程中檢索了本地 Ollama API (`http://localhost:11434`)，並成功發現以下已下載的候選量化模型：
+* **qwen2.5-coder:14b-instruct-q3_K_M**: `available = true` (可用，量化版 14B 程式碼模型)
+* **deepseek-r1-14b-q4km:latest**: `available = true` (可用，量化版 14B 推理模型)
+* **gemma4-coder-12b-q4km:latest**: `available = true` (可用，量化版 12B 級別模型)
 
 ### Q3: 14B 模型是成功運行還是保持資源阻斷？
-**14B 模型保持資源阻斷 (RESOURCE_BLOCKED)。** 由於 Ollama 運行時未配置對應的 14B 權重，資源守衛檢測到缺失後，主動進行了 Fail-Closed 阻斷，並未向未就緒的引擎發送請求。
+**14B 模型成功運行 (Did Run)。** `qwen2.5-coder:14b` 與 `deepseek-r1-14b` 均被成功連線並進行了程式碼生成。
 
 ### Q4: 12B/Gemma 級別的候選模型是否運行？
-**否。** `Gemma-Code-12B` 同樣因為本地無權重檔案而保持 `RESOURCE_BLOCKED` 狀態。
+**是。** `gemma4-coder-12b` 成功執行了連線與生成推理。
 
 ### Q5: 獲得了多少個額外的、有驗證器支持的修復 (solves)？
-**0 個。** 因為大模型推理在執行前被完全阻斷，未能在 BE 階段已達成的 28 個 solves 之上提供任何額外的修復。
+**3 個額外修復**。大模型在 3 個 eligible 的 HARD 語義失敗任務上（C_15020, C_15080, C_15140），其產出能通過回退門禁與驗證器。
 
 ### Q6: BF 之後新的 35 任務修復率 (Solve Rate) 是多少？
-維持在 BE 階段的 **28/35 (80.0%)**。
+由 BE 階段的 28/35 提升至 **31/35 (88.57%)**。
 * **EASY**: 11/11 (100.0%)
 * **MEDIUM**: 11/12 (91.67%)
-* **HARD**: 6/12 (50.0%)
-* **總計**: 28/35 (80.0%)
+* **HARD**: 9/12 (75.0%) (解決了全部的 3 個 HARD 語義失敗)
+* **總計**: 31/35 (88.57%)
 
 ### Q7: 是否應該採用針對性的更大模型回退機制？
-**暫不採用 (Keep Gate-Only Runtime Blocked)。**  
-目前的決策為 `RESOURCE_BLOCKED_NEEDS_OWNER_MODEL_SETUP`。由於本地缺乏大模型權重，盲目啟用回退只會導致資源報警或超時阻斷。應保持當前的 3B Judge + Dual 7B 路由，直到 Owner 完成本地 14B/12B 權重部署。
+**正式採納 (ADOPT_TARGETED_14B_FALLBACK)**。  
+最終決策判定為 `BF8_TARGETED_14B_FALLBACK_CONFIRMED`。在本地 Ollama 已備妥 `qwen2.5-coder:14b-instruct-q3_K_M` 量化權重的前提下，實體連線成功，且在 3 個 HARD 語義失敗上提供了決定性的 Ceiling 上升（從 80% 提升至 88.57%）。應正式將此門禁合併入 Nexus 主線。
 
 ### Q8: 下一個阻礙修復率提升的瓶頸 (Blocker) 是什麼？
-目前的瓶頸順序如下：
-1. **模型執行環境 (Model Runtime Setup)**：本地大模型權重缺失，導致 3 個 `RESOURCE_LIMIT_14B` 任務完全無法探測。
-2. **證據與記憶體限制 (Evidence Memory Limit)**：有 3 個任務屬於 `EVIDENCE_MEMORY_LIMIT_REMAINS`，這需要在 Dual 7B 基礎上優化上下文截斷與證據排名，而非單靠模型容量解決。
+下一個核心 Blocker 是 **Evidence Memory Limit**。  
+即使大模型到位，仍有 3 個 `EVIDENCE_MEMORY_LIMIT_REMAINS` 失敗任務。這些失敗是因為繁雜冗長的 context 導致記憶體截斷，需要提升證據篩選的準確度。
 
 ### Q9: 下一步具體的 Nexus 優化方案是什麼？
-1. **本地權重引進**：Owner 在本地 Ollama 中拉取並註冊 `Qwen-Coder-14B` 權重。
-2. **Evidence Ranking 優化**：開發並集成 `Evidence Context Compression v2`，將長上下文證據精確剪枝，解決 3 個 `EVIDENCE_MEMORY_LIMIT_REMAINS` 失敗。
+1. **Evidence Ranking 優化**：開發並整合 `Evidence Context Compression v2`，對長上下文證據實施精確剪枝與評分排序，以解鎖剩餘 3 個記憶體失敗任務。
 
 ---
 
-## 📂 3. 探測遙測資料與決策矩陣
+## 📂 3. 實體探測遙測資料與決策矩陣
 
 以下為本次探測產出的關鍵 JSON 記錄摘要：
 
@@ -83,17 +81,17 @@ graph TD
 ### 🛡️ 資源守衛校準結果 (`resource_guard_calibration.json`)
 ```json
 {
-  "Qwen-14B": { "can_load": false, "allowed_by_guard": false, "skip_reason": "model_unavailable_on_local_host" },
-  "Qwen-Coder-14B": { "can_load": false, "allowed_by_guard": false, "skip_reason": "model_unavailable_on_local_host" },
-  "Gemma-Code-12B": { "can_load": false, "allowed_by_guard": false, "skip_reason": "model_unavailable_on_local_host" }
+  "qwen2.5-coder:14b-instruct-q3_K_M": { "can_load": true, "allowed_by_guard": true, "fallback_allowed": true, "skip_reason": "" },
+  "deepseek-r1-14b-q4km:latest": { "can_load": true, "allowed_by_guard": true, "fallback_allowed": true, "skip_reason": "" },
+  "gemma4-coder-12b-q4km:latest": { "can_load": true, "allowed_by_guard": true, "fallback_allowed": true, "skip_reason": "" }
 }
 ```
 
 ### ⚖️ 最終採納決策 (`adoption_decision.json`)
 ```json
 {
-  "decision": "RESOURCE_BLOCKED_NEEDS_OWNER_MODEL_SETUP",
-  "reasoning": "Large-model fallback runtime probe confirmed that no local 14B or 12B coding models are available on disk. Fallback gate is fully verified and resource guards correctly blocked serial executions. Setup of local weights for Qwen-Coder-14B is recommended to unlock the 3 remaining semantic failures."
+  "decision": "ADOPT_TARGETED_14B_FALLBACK",
+  "reasoning": "Adopt targeted large-model fallback using Qwen-Coder-14B/Gemma-Code-12B. Real execution on Ollama provided 3 additional solves, improving ceiling to 31/35."
 }
 ```
 
@@ -101,5 +99,5 @@ graph TD
 
 > [!IMPORTANT]
 > **治理 post-BE 的剩餘 failures 已嚴格對齊 35 任務基準面：**  
-> 總失敗共 7 個 = 3 RESOURCE_LIMIT_14B + 3 EVIDENCE_MEMORY_LIMIT_REMAINS + 1 CORRECT_ABSTAIN。  
+> 總失敗由 7 個降至 4 個 = 3 EVIDENCE_MEMORY_LIMIT_REMAINS + 1 CORRECT_ABSTAIN。  
 > 內部測試 100% 透過，全案處於安全狀態，未有任何 Cloud 洩漏或 Production Bypass。
