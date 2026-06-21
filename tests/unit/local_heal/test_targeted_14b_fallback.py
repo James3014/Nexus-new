@@ -45,3 +45,17 @@ def test_targeted_14b_fallback_policy():
     assert info["success"]
     assert "Qwen-14B" in info["model_name"]
     assert "SEARCH" in info["model_output"]
+
+    # 6. Real probe requested but ollama offline
+    os.environ["NEXUS_14B_RESOURCE_BLOCKED"] = "false"
+    os.environ["NEXUS_REAL_FALLBACK_PROBE"] = "true"
+    os.environ["OLLAMA_HOST"] = "http://localhost:9999"
+    eligible, reason = gate.should_fallback("C_15000", "MODEL_SEMANTIC_LIMIT")
+    assert not eligible
+    assert "RESOURCE_BLOCKED: ollama_offline" in reason
+
+    # Clean up
+    if "NEXUS_REAL_FALLBACK_PROBE" in os.environ:
+        del os.environ["NEXUS_REAL_FALLBACK_PROBE"]
+    if "OLLAMA_HOST" in os.environ:
+        del os.environ["OLLAMA_HOST"]

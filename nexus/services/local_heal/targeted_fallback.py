@@ -39,6 +39,27 @@ class TargetedFallbackGate:
         if is_blocked:
             return False, "RESOURCE_BLOCKED"
 
+        # If real probe is requested, run actual connectivity/weights checks to explain why it might be blocked
+        if os.getenv("NEXUS_REAL_FALLBACK_PROBE", "false").lower() == "true":
+            import urllib.request
+            import json
+            try:
+                ollama_host = os.getenv("OLLAMA_HOST", "http://localhost:11434").rstrip("/")
+                req = urllib.request.Request(f"{ollama_host}/api/tags")
+                with urllib.request.urlopen(req, timeout=1.0) as response:
+                    if response.status == 200:
+                        data = json.loads(response.read().decode('utf-8'))
+                        models = data.get("models", [])
+                        model_names = [m.get("name", "") for m in models]
+                        # Check for large models (12B, 14B)
+                        large_models = [name for name in model_names if "14b" in name.lower() or "12b" in name.lower()]
+                        if not large_models:
+                            return False, f"RESOURCE_BLOCKED: model_weights_missing (ollama has no 12b/14b model, found: {model_names})"
+                    else:
+                        return False, f"RESOURCE_BLOCKED: ollama_http_error_{response.status}"
+            except Exception as e:
+                return False, f"RESOURCE_BLOCKED: ollama_offline (connection failed: {str(e)})"
+
         return True, "ELIGIBLE"
 
     def execute_fallback(
