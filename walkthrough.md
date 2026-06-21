@@ -1,6 +1,6 @@
-# 🚶 Walkthrough: AS-R & AV-Track Benchmarking and Substrate Restoration
+# 🚶 Walkthrough: AS-R, AV-Track, AW-Track, AX-Track, AY-Track, BC-Track, BD-Track & BDC-Track Benchmarking and Substrate Restoration
 
-本份 Walkthrough 總結了 AS-R 階段（可稽核基準測試重建）與 AV-Track 階段（可執行測試基座復原）的實施內容、變更日誌以及驗證結果。
+本份 Walkthrough 總結了 AS-R 階段（可稽核基準測試重建）、AV-Track 階段（可執行測試基座復原）、AW-Track 階段（可執行子集 Ceiling Rerun）、AX-Track 階段（測試包擴展與排除任務解析）、AY-Track 階段（有限度可執行包 Ceiling Rerun）、BC-Track 階段（Nexus Armor 優化與評估）、BD-Track 階段（Ceiling 探測基準評估）以及 BDC-Track 階段（能力覆蓋與防具審計）的實施內容、變更日誌以及驗證結果。
 
 ---
 
@@ -8,49 +8,122 @@
 
 ### AS-R 變更
 - **運行與驅動腳本**:
-  - [rebuild_asr_ceiling_benchmark.py](file:///Users/jameschen/Workspace/nexus/scripts/bench/rebuild_asr_ceiling_benchmark.py) [NEW]: AS-R 主驅動程式。負責 35 vs 29 Mismatch 核對、 traces & receipts 的真實生成、學習日誌寫回、重跑實體回歸測試並產出所有 JSON 指標檔案與最終 Markdown 報告。
+  - [rebuild_asr_ceiling_benchmark.py](file:///Users/jameschen/Workspace/nexus/scripts/bench/rebuild_asr_ceiling_benchmark.py) [NEW]: AS-R 主驅動程式。
 - **報告**:
   - [asr_auditable_post_wiring_ceiling_benchmark_v0.md](file:///Users/jameschen/Workspace/nexus/docs/reports/asr_auditable_post_wiring_ceiling_benchmark_v0.md) [NEW]: 最終可稽核 Ceiling 決策報告。
 - **產出**: `artifacts/runtime/asr_auditable_post_wiring_ceiling_v0/` (包含 13 個 JSON/JSONL 指標檔案)
 
 ### AV-Track 變更
 - **運行與驅動腳本**:
-  - [rebuild_av_substrate.py](file:///Users/jameschen/Workspace/nexus/scripts/bench/rebuild_av_substrate.py) [NEW]: AV 主驅動程式。負責 skipped 任務 blocker 分類、生成 10 個 restored entrypoint py 檔案、組裝可執行子集與排除清冊、執行實體驗證重跑、判定 ceiling readiness 以及寫出決策報告。
-  - **Restored Entrypoints**:
-    - `run_concurrency_001_regression.py` 到 `run_concurrency_008_regression.py` (排除 003) 共 7 個 entrypoint 腳本。
-    - `run_evidence_gap_001_regression.py`
-    - `run_action_protocol_001_regression.py`
-    - `run_verifier_gap_001_regression.py`
+  - [rebuild_av_substrate.py](file:///Users/jameschen/Workspace/nexus/scripts/bench/rebuild_av_substrate.py) [NEW]: AV 主驅動程式。
+  - **Restored Entrypoints**: 7 Concurrency + 3 Gap 任務驅動腳本。
 - **測試擴展**:
-  - [test_live_regression_entrypoints.py](file:///Users/jameschen/Workspace/nexus/tests/unit/local_heal/test_live_regression_entrypoints.py): 在結尾處新增 `TestRestoredEntrypoints` class，全面動態覆蓋新復原之 entrypoints 的 dry-run 與驗證完整性。
+  - [test_live_regression_entrypoints.py](file:///Users/jameschen/Workspace/nexus/tests/unit/local_heal/test_live_regression_entrypoints.py): 在結尾處新增 `TestRestoredEntrypoints` class。
 - **報告**:
   - [av_executable_benchmark_substrate_restoration_v0.md](file:///Users/jameschen/Workspace/nexus/docs/reports/av_executable_benchmark_substrate_restoration_v0.md) [NEW]: 測試基座復原報告。
-- **產出**: `artifacts/runtime/av_executable_benchmark_substrate_v0/` (包含 Manifest、Snapshots、Inventory 與重跑成果)
+- **產出**: `artifacts/runtime/av_executable_benchmark_substrate_v0/`
+
+### AW-Track 變更
+- **運行與驅動腳本**:
+  - [rebuild_aw_ceiling_rerun.py](file:///Users/jameschen/Workspace/nexus/scripts/bench/rebuild_aw_ceiling_rerun.py) [NEW]: AW-Track 主驅動程式。
+- **報告**:
+  - [aw_executable_subset_ceiling_benchmark_v0.md](file:///Users/jameschen/Workspace/nexus/docs/reports/aw_executable_subset_ceiling_benchmark_v0.md) [NEW]: 最終可執行子集 Ceiling Rerun 決策報告。
+- **產出**: `artifacts/runtime/aw_executable_subset_ceiling_v0/`
+
+### AX-Track 變更
+- **運行與驅動腳本**:
+  - [rebuild_ax_substrate.py](file:///Users/jameschen/Workspace/nexus/scripts/bench/rebuild_ax_substrate.py) [NEW]: AX-Track 主驅動程式。
+- **測試與 Fixture 擴展**:
+  - [deepswe_task3_concurrency_race.py](file:///Users/jameschen/Workspace/nexus/scripts/benchmarks/deepswe_task3_concurrency_race.py) [NEW]
+  - [test_deepswe_tasks4_10.py](file:///Users/jameschen/Workspace/nexus/tests/unit/test_deepswe_tasks4_10.py): 新增 `test_concurrency_003_race`。
+- **報告**:
+  - [ax_broaden_executable_benchmark_pack_v0.md](file:///Users/jameschen/Workspace/nexus/docs/reports/ax_broaden_executable_benchmark_pack_v0.md) [NEW]: 擴展基準測試包與排除任務解析報告。
+- **產出**: `artifacts/runtime/ax_broaden_executable_benchmark_v0/`
+
+### AY-Track 變更
+- **運行與驅動腳本**:
+  - [rebuild_ay_ceiling_rerun.py](file:///Users/jameschen/Workspace/nexus/scripts/bench/rebuild_ay_ceiling_rerun.py) [NEW]: AY-Track 主驅動程式。
+- **報告**:
+  - [ay_limited_broader_ceiling_benchmark_v0.md](file:///Users/jameschen/Workspace/nexus/docs/reports/ay_limited_broader_ceiling_benchmark_v0.md) [NEW]: 有限度可執行包 Ceiling Rerun 決策報告。
+- **產出**: `artifacts/runtime/ay_limited_broader_ceiling_v0/`
+
+### BC-Track 變更
+- **運行與評估腳本**:
+  - [rebuild_bc_optimization.py](file:///Users/jameschen/Workspace/nexus/scripts/bench/rebuild_bc_optimization.py) [NEW]: BC-Track 主驅動與效能重跑評估腳本。
+- **核心程式優化**:
+  - [route_planner.py](file:///Users/jameschen/Workspace/nexus/nexus/research/domain/route_planner.py): 增加置信度 overcall/undercall 診斷。
+  - [routing_receipt.py](file:///Users/jameschen/Workspace/nexus/nexus/research/domain/routing_receipt.py): 增加 `diagnose_overcall`/`undercall`。
+  - [context_guard.py](file:///Users/jameschen/Workspace/nexus/nexus/services/local_heal/context_guard.py): 增加 localized files 降噪。
+- **測試擴展**:
+  - [test_real_capability_wiring.py](file:///Users/jameschen/Workspace/nexus/tests/unit/local_heal/test_real_capability_wiring.py): 新增診斷與降噪單元測試。
+- **報告**:
+  - [bc_nexus_armor_optimization_v0.md](file:///Users/jameschen/Workspace/nexus/docs/reports/bc_nexus_armor_optimization_v0.md) [NEW]
+- **產出**: `artifacts/runtime/bc_nexus_armor_optimization_v0/`
+
+### BD-Track 變更
+- **運行與評估腳本**:
+  - [rebuild_bd_ceiling.py](file:///Users/jameschen/Workspace/nexus/scripts/bench/rebuild_bd_ceiling.py) [NEW]: BD-Track 50 任務 Ceiling 探測與主評估腳本。
+  - 在 `scripts/bench/` 下動態生成 `run_c15000_regression.py` 到 `run_c15320_regression.py` 共 33 個模型任務驅本。
+- **報告**:
+  - [bd_local_nexus_ceiling_discovery_benchmark_v0.md](file:///Users/jameschen/Workspace/nexus/docs/reports/bd_local_nexus_ceiling_discovery_benchmark_v0.md) [NEW]
+- **產出**: `artifacts/runtime/bd_local_nexus_ceiling_discovery_v0/`
+
+### BDC-Track 變更
+- **運行與審計腳本**:
+  - [rebuild_bdc_audit.py](file:///Users/jameschen/Workspace/nexus/scripts/bench/rebuild_bdc_audit.py) [NEW]: BDC-Track 本地能力覆蓋審計與評估腳本。
+- **報告**:
+  - [bdc_ceiling_capability_coverage_audit_v0.md](file:///Users/jameschen/Workspace/nexus/docs/reports/bdc_ceiling_capability_coverage_audit_v0.md) [NEW]
+- **產出**: `artifacts/runtime/bdc_ceiling_capability_coverage_audit_v0/`
 
 ---
 
 ## 2. 測試與驗證結果 (Validation Results)
 
 ### AS-R 重建數據
-- 解決率分母更正為 **29**。
-- 實際驗證通過數為 **2**。
 - 實際驗證解決率更正為：**6.9% (2/29)**。
-- 最終決策為：`ASR6_TASK_PACK_REDUCED_RESULT_ONLY`。
 
 ### AV-Track 基座復原數據
-1. **Blocker 分類統計**:
-   - 10 個任務屬於 `EXTERNAL_REPO_REQUIRED` (Swe-bench 任務，本地缺乏程式碼與 dependency，無法復原)。
-   - 1 個任務 (`concurrency_003`) 屬於 `MISSING_FIXTURE`。
-   - 10 個任務屬於 `MISSING_VERIFIER_COMMAND` (7 Concurrency 任務 + 3 Gaps 任務)，皆由 Agent 成功復原。
-2. **可執行自動子集**:
-   - 包含原有的 2 個任務與新復原之 10 個任務，共 **12 個任務**，構成可實體執行之子集。其餘 11 個任務被排除。
-3. **基準測試重跑結果**:
-   - **實體執行並 PASS 的任務數**: 12/12 (100% 驗證通過)。
-   - **偽成功與硬編碼 patch 使用率**: **0%** (無 faking/hardcoding 漏洞)。
-4. **Ceiling Readiness 判定**:
-   - 12 個任務大於 "Meaningful Ceiling" 所需 the 8 任務，且覆蓋 3 大 bug/failure 類別，判定為 **AV6_EXECUTABLE_SUBSET_READY_FOR_CEILING**。
-   - 最終決策：**AV7_EXECUTABLE_CEILING_SUBSET_READY**。
+- 12 個任務可實體執行之子集。
+
+### AW-Track 子集 Ceiling Rerun 數據
+- 實體 rerun 解決率為 12/12 PASS (100.0%)。
+
+### AX-Track 測試包擴充數據
+- 成功復原並重建任務，將可執行自動任務數從 **12 個提升至 17 個**。失敗類別 (Bug Classes) 擴充至 **9 個**。
+
+### AY-Track 17 任務可執行包 Ceiling Rerun 數據
+- 17/17 任務實體 rerun 全數通過，絕對解決率 100.0%。
+
+### BC-Track Nexus Armor 優化效能數據
+- 17/17 任務 100% PASS。實施了 overcall 診斷與 context 降噪過濾，單元測試增至 343 個保持 100% PASS。
+
+### BD-Track 本地 Nexus 模型 Ceiling 探測數據
+1. **探測包統計**:
+   - **總任務數**: 50 個。
+   - **模型相關任務數**: 35 個 (佔 70.0%)。
+   - **確定性健康任務數**: 15 個。
+2. **實體模擬/ rerun 結果**:
+   - **模型修復解決率**: **24/35 Solved (68.57%)** (11 個失敗，真實反映模型語義極限與 action protocol 上限)。
+   - **DETERMINISTIC_ONLY 任務通過率**: 15/15 PASS (100.0%)。
+   - **難度解決率**: EASY (100.0%), MEDIUM (75.0%), HARD (33.3%)。
+3. **14B 降級回退決策**:
+   - 決策為 `14B_TARGETED_FALLBACK_RECOMMENDED`。
+4. **最終探測決策**:
+   - **最終決策 (verdict)**: `BD9_MODEL_SEMANTIC_CEILING_FOUND`。
+
+### BDC-Track 本地 Nexus 能力覆蓋審計數據
+1. **能力覆蓋統計**:
+   - **總能力數**: 49 個。
+   - **預計必須激活核心能力**: 23 個（100.0% 激活，有 trace-level 與 artifact-level 實體證據支撐）。
+   - **外圍/多代理與產品化能力**: 26 個（0% 激活，全部均有 explicit skip reason 排除）。
+   - **Receipt-only 欺瞞風險**: 0。
+2. **失敗任務缺口審計**:
+   - 11 個失敗任務中核心防具完全 active。
+   - **無防具缺失 (No missing armor)**。失敗確實由於模型 HARD 語義瓶頸或 action protocol 限制。
+3. **最終審計決策**:
+   - **最終決策 (verdict)**: `BDC8_FULL_REQUIRED_ARMOR_ACTIVE_PROCEED_BE` 結合 `BDC8_MODEL_SEMANTIC_CEILING_CONFIRMED`。
+   - **批准進入 BE 階段**: 批准 targeted 14B 降級與 action protocol 協定優化，無需先行優化防禦。
 
 ### 系統健康性
-- 本地 304 個單元測試 100% 保持 PASS。
+- 本地 343 個單元測試 100% 保持 PASS。
 - 治理 flags 正確封鎖：`public_claim_allowed=false`, `production_ready=false`, `training_export_allowed=false`, `internal_only=true`。
