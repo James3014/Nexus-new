@@ -16,6 +16,13 @@ class PatchErrorKind(Enum):
     PATCH_EMPTY = auto()              # Patch apply 後無實際檔案變更
     PATCH_FORMAT_INVALID = auto()     # Patch 格式不合法（非 SEARCH/REPLACE 結構）
     SOURCE_STALE = auto()             # SOURCE_CONTEXT 與實際檔案版本不一致
+    REPLACEMENT_PROSE_CONTAMINATION = auto()   # replacement contains natural language prose
+    REPLACEMENT_MARKDOWN_FENCE = auto()        # replacement wrapped in markdown code fences
+    REPLACEMENT_SYNTAX_INVALID = auto()        # replacement is not syntactically valid
+    REPLACEMENT_SCOPE_VIOLATION = auto()       # replacement spans outside allowed anchor scope
+    ANCHOR_NOT_IN_BASE_SOURCE = auto()         # anchor not found in base_commit source
+    ANCHOR_AMBIGUOUS = auto()                  # anchor matches multiple locations in source
+    SOURCE_HASH_CHANGED_AFTER_CHECKOUT = auto()  # source_hash changed between extraction and apply
 
 
 class PatchMismatchSubclass(Enum):

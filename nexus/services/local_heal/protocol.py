@@ -66,12 +66,27 @@ class SolidSearchReplaceProtocol:
                     if standard_match:
                         replacement = standard_match.group(2)
                     else:
-                        # 4. Fallback: 清理 markdown block，把整段輸出都當成 replacement
-                        replacement = raw_output.strip()
-                        if replacement.startswith("```"):
-                            lines = replacement.splitlines()
-                            if len(lines) >= 2 and lines[-1].startswith("```"):
-                                replacement = "\n".join(lines[1:-1])
+                        # P9: Detect markdown fences BEFORE stripping
+                        raw_stripped = raw_output.strip()
+                        if AnchoredEditReplacementGuard.MARKDOWN_FENCE_PATTERN.match(raw_stripped):
+                            lines = raw_stripped.splitlines()
+                            if len(lines) >= 2 and lines[-1].strip().startswith("```"):
+                                # Reject — markdown fence wrapping is not allowed
+                                return PatchError(
+                                    kind=PatchErrorKind.REPLACEMENT_MARKDOWN_FENCE,
+                                    message="Replacement is wrapped in markdown code fences."
+                                )
+                        # 4. Fallback: treat entire output as replacement
+                        replacement = raw_stripped
+
+            # P9: Strict replacement-only validation
+            is_clean, error_kind, error_msg = AnchoredEditReplacementGuard.validate_replacement(
+                replacement,
+                anchor_text,
+                expected_ast_valid=True,
+            )
+            if not is_clean:
+                return PatchError(kind=error_kind, message=error_msg)
 
             # 提取 FILE 表頭 (若有)
             file_match = self.file_pattern.search(raw_output)
@@ -335,6 +350,93 @@ class SolidSearchReplaceProtocol:
         
         # Default to verbatim mismatch
         return PatchMismatchSubclass.VERBATIM_SEARCH_MISMATCH
+
+class AnchoredEditReplacementGuard:
+    """Strict replacement-only validation for anchored_edit mode.
+
+    Rejects prose contamination, markdown fences, bullet lists, explanation
+    paragraphs, and mixed natural language + code blocks.
+    """
+
+    PROSE_PATTERNS = [
+        re.compile(r'(?i)^#\s*(here\s+is|this\s+is|the\s+fix|the\s+patch|the\s+replacement)'),
+        re.compile(r'(?i)^[-*]\s+(here|this|the|note|see|consider|we|you|the\s+fix)'),
+        re.compile(r'(?i)^>\s*(here|this|the|note|see|consider|we|you)'),
+        re.compile(r'(?i)^(here\s+is\s+the|this\s+replaces|the\s+following|note\s*:|warning\s*:)'),
+        re.compile(r'(?i)^(in\s+summary|in\s+conclusion|to\s+fix|to\s+resolve|the\s+issue)'),
+        re.compile(r'(?i)^(the\s+fix\s+involves|the\s+change|this\s+fix|this\s+patch|this\s+change)'),
+        re.compile(r'(?i)^(we\s+need\s+to|we\s+should|you\s+should|you\s+need\s+to)'),
+        re.compile(r'(?i)^(ensure\s+that|make\s+sure|note\s+that|remember\s+that)'),
+        re.compile(r'(?i)^(this\s+ensures|this\s+prevents|this\s+avoids|this\s+fixes)'),
+    ]
+
+    MARKDOWN_FENCE_PATTERN = re.compile(
+        r'^```[\w]*\n', re.MULTILINE
+    )
+
+    @classmethod
+    def validate_replacement(
+        cls,
+        replacement: str,
+        anchor_text: str,
+        *,
+        expected_ast_valid: bool = True,
+    ) -> tuple[bool, PatchErrorKind | None, str]:
+        """Validate replacement text for anchored_edit mode.
+
+        Returns (is_valid, error_kind, message).
+        """
+        stripped = replacement.strip()
+
+        # 1. Empty replacement
+        if not stripped:
+            return False, PatchErrorKind.REPLACEMENT_EMPTY, "Replacement is empty after stripping."
+
+        # 2. Markdown fence wrapping
+        if cls.MARKDOWN_FENCE_PATTERN.match(stripped):
+            lines = stripped.splitlines()
+            if len(lines) >= 2 and lines[-1].strip().startswith("```"):
+                return False, PatchErrorKind.REPLACEMENT_MARKDOWN_FENCE, (
+                    "Replacement is wrapped in markdown code fences."
+                )
+
+        # 3. Prose contamination — check each line
+        for line in stripped.splitlines():
+            for pattern in cls.PROSE_PATTERNS:
+                if pattern.match(line):
+                    return False, PatchErrorKind.REPLACEMENT_PROSE_CONTAMINATION, (
+                        f"Replacement contains prose: {line.strip()[:80]}"
+                    )
+
+        # 4. Mixed natural language + code: if >30% of non-empty lines start with
+        #    natural language markers, it's prose contamination
+        non_empty_lines = [l for l in stripped.splitlines() if l.strip()]
+        if non_empty_lines:
+            prose_markers = re.compile(
+                r'(?i)^\s*(here|this|the|note|see|consider|we|you|fix|patch|change|add|remove|update|import|def|class|return|if|for|while|try|except|with|raise|assert|print|from)\b'
+            )
+            code_lines = sum(1 for l in non_empty_lines if prose_markers.match(l))
+            # If less than 40% look like code, it's probably prose
+            if code_lines / len(non_empty_lines) < 0.4:
+                return False, PatchErrorKind.REPLACEMENT_PROSE_CONTAMINATION, (
+                    f"Replacement appears to be natural language ({code_lines}/{len(non_empty_lines)} code-like lines)."
+                )
+
+        # 5. AST validity check
+        if expected_ast_valid:
+            try:
+                ast.parse(stripped)
+            except SyntaxError:
+                # Try wrapping in a function to check indented blocks
+                try:
+                    ast.parse(f"def _wrapper():\n" + "\n".join(f"    {l}" for l in stripped.splitlines()))
+                except SyntaxError as e:
+                    return False, PatchErrorKind.REPLACEMENT_SYNTAX_INVALID, (
+                        f"Replacement is not syntactically valid: {e}"
+                    )
+
+        return True, None, ""
+
 
 class SyntaxGate:
     @staticmethod
