@@ -403,6 +403,10 @@ class HealOrchestrator:
         self._attach_memory_influence_trace(ctx)
         self._run_capability_bridges(ctx)
         self.governance_gate.audit(ctx)
+
+        # RRL3: Attach evidence harness (write-only observability)
+        self._attach_evidence_harness(ctx)
+
         if self.receipt_writer:
             try:
                 receipt_path = self.receipt_writer(ctx, run_group=getattr(ctx.op, "run_group", ""))
@@ -509,6 +513,38 @@ class HealOrchestrator:
                 "training_export_allowed": False,
                 "internal_only": True,
             }
+
+    def _attach_evidence_harness(self, ctx: HealContext) -> None:
+        """RRL3: Attach evidence harness (write-only observability)."""
+        try:
+            from nexus.services.local_heal.evidence_harness import EvidenceHarness
+            from pathlib import Path
+
+            harness = EvidenceHarness(
+                output_dir=Path("artifacts/runtime/rrl3_runs")
+            )
+            op = ctx.op if hasattr(ctx, "op") else ctx
+            bundle = harness.start_task(
+                task_id=str(getattr(op, "task_id", "unknown")),
+                repo=str(getattr(op, "repo_dir", "")),
+                issue_summary=str(getattr(op, "failure_reason", "")),
+                task_class=str(getattr(op, "task_class", "")),
+                difficulty=str(getattr(op, "difficulty", "")),
+            )
+            # Fill opportunistic fields from available ctx/op data
+            bundle.patch_produced = bool(getattr(op, "final_patch", ""))
+            bundle.patch_applied = bool(getattr(op, "patch_applied", False))
+            bundle.patch_len = len(str(getattr(op, "final_patch", "")))
+            bundle.verifier_status = "PASS" if getattr(op, "solve_eligible", False) else "FAIL"
+            bundle.route_selected = str(getattr(op, "route_selected", ""))
+            bundle.model_name = str(getattr(op, "model_name", ""))
+            bundle.failure_reason = str(getattr(op, "failure_reason", ""))
+            bundle.claim_eligible = bool(getattr(op, "claim_eligible", False))
+            bundle.gate_passed = bool(getattr(op, "solve_eligible", False))
+            # Finalize (writes artifacts)
+            harness.finalize(bundle)
+        except Exception:
+            pass  # Write-only observability: never fail the repair loop
 
     def _record_role_receipt(self, ctx: HealContext, phase_name: str) -> None:
         model_name = self._get_model_for_phase(ctx, phase_name)
