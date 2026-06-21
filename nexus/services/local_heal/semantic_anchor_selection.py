@@ -47,12 +47,8 @@ class AnchorSelectionResult:
     ambiguity: bool = False
     score_margin: float = 0.0
     top_k: list[AnchorCandidate] = field(default_factory=list)
-    # BMF2-OBS: memory trace observability
+    # BMF3-OBS: ctx-scoped memory trace (replaces BMF2 global shim)
     memory_trace: dict[str, Any] = field(default_factory=dict)
-
-
-# BMF2-OBS: module-level storage for last memory trace (minimal observability hook)
-_last_memory_trace: dict[str, Any] = {}
 
 
 class SemanticAnchorScorer:
@@ -359,9 +355,7 @@ class SemanticAnchorScorer:
             "metadata": metadata,
         }
         self.scoring_metadata[candidate.anchor_id] = candidate.memory_contribution
-        self.last_memory_metadata = dict(metadata)  # BMF2-OBS: track latest memory trace
-        global _last_memory_trace
-        _last_memory_trace = dict(metadata)  # BMF2-OBS: module-level storage for receipt
+        self.last_memory_metadata = dict(metadata)  # BMF3-OBS: instance-level (not global)
         if metadata.get("no_memory_match"):
             return 0.0, "no_memory_match"
         if delta > 0:

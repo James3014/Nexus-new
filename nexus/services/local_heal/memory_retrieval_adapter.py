@@ -63,6 +63,9 @@ class MemoryRetrievalAdapter:
     match records no_memory_match instead of blocking repair.
     """
 
+    # BMF3-OBS: class-level last trace (replaces module global)
+    _last_trace: dict[str, Any] = {}
+
     def __init__(self, store: LessonStore | None = None, *, enabled: bool = True) -> None:
         self.store = store or LocalJsonlLessonStore()
         self.enabled = enabled
@@ -109,6 +112,8 @@ class MemoryRetrievalAdapter:
         self.last_metadata["accepted"] = len(lessons)
         self.last_metadata["no_memory_match"] = not lessons
         self.last_metadata["status"] = "ok"
+        # BMF3-OBS: store trace on class for receipt access
+        MemoryRetrievalAdapter._last_trace = dict(self.last_metadata)
         return lessons
 
     def retrieve_reranked(
@@ -195,4 +200,6 @@ class MemoryRetrievalAdapter:
             )
 
         self.last_metadata["rerank_accepted"] = len(result)
+        # BMF3-OBS: store trace on class for receipt access
+        MemoryRetrievalAdapter._last_trace = dict(self.last_metadata)
         return result
