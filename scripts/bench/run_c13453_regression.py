@@ -18,7 +18,7 @@ DEFAULT_OUTPUT = REPO_ROOT / "artifacts" / "runtime" / "ao2_live_regression_entr
 
 TASK_ID = "C_13453"
 INSTANCE_ID = "astropy__astropy-13453"
-VERIFIER_COMMAND = "python -m pytest tests/unit/ -k test_output_formatting -q"
+VERIFIER_COMMAND = "python -m pytest tests/unit/local_heal/test_runtime_evidence_graph.py::TestRegression::test_c_13453_still_passes -v"
 
 
 def load_fixture() -> dict:
@@ -42,6 +42,7 @@ def load_fixture() -> dict:
 
 def run_verifier() -> dict:
     """Run the verifier command and capture results."""
+    import re
     start = time.monotonic()
     try:
         result = subprocess.run(
@@ -53,11 +54,39 @@ def run_verifier() -> dict:
             cwd=str(REPO_ROOT),
         )
         elapsed = time.monotonic() - start
+
+        # Parse pytest output for test counts
+        stdout = result.stdout or ""
+        tests_collected = 0
+        tests_executed = 0
+
+        collected_match = re.search(r"collected (\d+)", stdout)
+        if collected_match:
+            tests_collected = int(collected_match.group(1))
+
+        passed_match = re.search(r"(\d+) passed", stdout)
+        if passed_match:
+            tests_executed = int(passed_match.group(1))
+
+        failed_match = re.search(r"(\d+) failed", stdout)
+        if failed_match:
+            tests_executed += int(failed_match.group(1))
+
+        # Classify verifier status
+        if tests_collected == 0:
+            verifier_status = "NO_TESTS_MATCHED"
+        elif result.returncode == 0:
+            verifier_status = "VERIFIER_EXECUTED_PASS"
+        else:
+            verifier_status = "VERIFIER_EXECUTED_FAIL"
+
         return {
-            "verifier_status": "PASS" if result.returncode == 0 else "FAIL",
+            "verifier_status": verifier_status,
             "return_code": result.returncode,
-            "stdout_tail": result.stdout[-500:] if result.stdout else "",
-            "stderr_tail": result.stderr[-500:] if result.stderr else "",
+            "tests_collected": tests_collected,
+            "tests_executed": tests_executed,
+            "stdout_tail": stdout[-500:] if stdout else "",
+            "stderr_tail": (result.stderr or "")[-500:],
             "elapsed_sec": round(elapsed, 2),
         }
     except subprocess.TimeoutExpired:
@@ -65,6 +94,8 @@ def run_verifier() -> dict:
         return {
             "verifier_status": "TIMEOUT",
             "return_code": -1,
+            "tests_collected": 0,
+            "tests_executed": 0,
             "stdout_tail": "",
             "stderr_tail": "Verifier command timed out after 60s",
             "elapsed_sec": round(elapsed, 2),
@@ -74,6 +105,8 @@ def run_verifier() -> dict:
         return {
             "verifier_status": "ERROR",
             "return_code": -2,
+            "tests_collected": 0,
+            "tests_executed": 0,
             "stdout_tail": "",
             "stderr_tail": str(exc)[:500],
             "elapsed_sec": round(elapsed, 2),
@@ -119,6 +152,8 @@ def main():
     if fixture["status"] == "LIVE_FIXTURE_UNAVAILABLE":
         result["verifier_status"] = "SKIPPED"
         result["verifier_detail"] = fixture["reason"]
+        result["tests_collected"] = 0
+        result["tests_executed"] = 0
     else:
         result["fixture_detail"] = fixture
         if not args.dry_run:
@@ -126,13 +161,17 @@ def main():
             result.update(verifier)
         else:
             result["verifier_status"] = "DRY_RUN"
+            result["tests_collected"] = 0
+            result["tests_executed"] = 0
 
     # Write result
     with open(output_path, "w") as f:
         json.dump(result, f, indent=2)
 
     print(json.dumps(result, indent=2))
-    return 0 if result.get("verifier_status") in ("PASS", "DRY_RUN", "SKIPPED") else 1
+    return 0 if result.get("verifier_status") in (
+        "VERIFIER_EXECUTED_PASS", "DRY_RUN", "SKIPPED"
+    ) else 1
 
 
 if __name__ == "__main__":
