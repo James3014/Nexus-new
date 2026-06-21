@@ -45,3 +45,11 @@ import scripts.benchmarks.deepswe_task10_ordered_list_race as m10
 
 def test_ordered_list_race():
     m10.test_challenge()
+
+# -------
+
+import scripts.benchmarks.deepswe_task3_concurrency_race as m3
+
+def test_concurrency_003_race():
+    assert m3.test_challenge() is True
+

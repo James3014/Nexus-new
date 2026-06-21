@@ -219,9 +219,10 @@ class TestRestoredEntrypoints:
     def test_restored_entrypoints_dry_run(self):
         """All restored scripts run in dry-run mode."""
         restored_ids = [
-            "concurrency_001", "concurrency_002", "concurrency_004", "concurrency_005",
+            "concurrency_001", "concurrency_002", "concurrency_003", "concurrency_004", "concurrency_005",
             "concurrency_006", "concurrency_007", "concurrency_008",
-            "evidence_gap_001", "action_protocol_001", "verifier_gap_001"
+            "evidence_gap_001", "action_protocol_001", "verifier_gap_001",
+            "anchored_edit_gap_001", "anchored_edit_gap_002", "anchored_edit_gap_003", "anchored_edit_gap_004"
         ]
         for tid in restored_ids:
             script_path = SCRIPTS_DIR / f"run_{tid}_regression.py"
