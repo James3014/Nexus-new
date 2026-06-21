@@ -476,6 +476,19 @@ def build_repair_receipt(ctx: Any, *, model_name: str = "nexus-local-heal", run_
             "belief_trace": dict(getattr(ctx, "_belief_trace", {}) or {}),
             "claim_delivery_gate": claim_delivery_gate,
             "learning_closure": dict(getattr(ctx, "_learning_closure", {}) or {}),
+            # BMF1-OBS: memory trace observability (no behavior change)
+            "memory_influence": dict(getattr(ctx, "_memory_influence_trace", {}) or {
+                "available": False,
+                "trace_status": "TRACE_MISSING",
+                "retrieved_count": 0,
+                "selected_ids": [],
+                "provenance_count": 0,
+                "rerank_mode": None,
+                "anchor_symbol": None,
+                "anchor_file": None,
+                "no_memory_match": None,
+                "influence_status": "NOT_MEASURED",
+            }),
         },
 
         # --- S1-prep: StrategyTrace-only (no execution effect) ---
