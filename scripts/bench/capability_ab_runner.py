@@ -5695,6 +5695,36 @@ def _finalize_with_nexus_row(
             h5["fail_closed_reason"] = h5_fail_closed_reason
             h5["fallback_policy_version"] = h5_fallback_policy_version
 
+        # H5-4: Fallback execution decision dry-run
+        enable_h5_decision = _env_truthy("NEXUS_HYBRID_H5_FALLBACK_DECISION_DRY_RUN")
+        if enable_h5_decision:
+            h5 = finalized["h5_route"]
+            h5_decision = "not_evaluated"
+            h5_decision_reason = ""
+            h5_would_invoke = False
+            h5_fallback_provider = ""
+            h5_fallback_exec_mode = "dry_run"
+            h5_decision_policy = "h5_fallback_decision_v1"
+
+            if h5.get("cloud_fallback_eligible", False):
+                h5_decision = "would_invoke_cloud_fallback"
+                h5_decision_reason = h5.get("cloud_fallback_reason", "")
+                h5_would_invoke = True
+                h5_fallback_provider = h5.get("cloud_provider", "")
+            elif h5.get("cloud_fallback_reason", "") == "local_success_no_fallback":
+                h5_decision = "skip_cloud_fallback"
+                h5_decision_reason = "local_success_no_fallback"
+            elif h5.get("fail_closed_reason", ""):
+                h5_decision = "would_fail_closed"
+                h5_decision_reason = h5["fail_closed_reason"]
+
+            h5["cloud_fallback_decision"] = h5_decision
+            h5["cloud_fallback_decision_reason"] = h5_decision_reason
+            h5["cloud_fallback_would_invoke"] = h5_would_invoke
+            h5["cloud_fallback_provider"] = h5_fallback_provider
+            h5["cloud_fallback_execution_mode"] = h5_fallback_exec_mode
+            h5["fallback_decision_policy_version"] = h5_decision_policy
+
     # Ensure keys are also on the row level for simple flat queries
     finalized["route_mode"] = r_mode
     finalized["trace_only"] = True
@@ -9378,6 +9408,10 @@ def write_evidence_bundle(
         "h5_cloud_fallback_eligible_count": sum(1 for row in with_rows if bool(row.get("h5_route", {}).get("cloud_fallback_eligible", False))),
         "h5_fallback_eligibility_trace_count": sum(1 for row in with_rows if bool(row.get("h5_route", {}).get("fallback_policy_version", ""))),
         "h5_would_fail_closed_count": sum(1 for row in with_rows if bool(row.get("h5_route", {}).get("fail_closed_reason", ""))),
+        "h5_fallback_decision_trace_count": sum(1 for row in with_rows if bool(row.get("h5_route", {}).get("fallback_decision_policy_version", ""))),
+        "h5_cloud_fallback_would_invoke_count": sum(1 for row in with_rows if bool(row.get("h5_route", {}).get("cloud_fallback_would_invoke", False))),
+        "h5_would_fail_closed_decision_count": sum(1 for row in with_rows if str(row.get("h5_route", {}).get("cloud_fallback_decision", "")) == "would_fail_closed"),
+        "h5_skip_cloud_fallback_decision_count": sum(1 for row in with_rows if str(row.get("h5_route", {}).get("cloud_fallback_decision", "")) == "skip_cloud_fallback"),
     }
     payload["external_provider_claim_boundary_contract"] = build_external_provider_claim_boundary_contract(payload)
     payload["public_promotion_readiness_contract"] = build_public_promotion_readiness_contract(payload)

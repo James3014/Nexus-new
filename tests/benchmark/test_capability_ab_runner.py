@@ -14716,3 +14716,364 @@ def test_h5_3_bundle_summary_counters(tmp_path, monkeypatch):
     assert summary["h5_cloud_fallback_invoked_count"] == 0
     assert summary["h5_behavior_changed_count"] == 0
     assert summary["h5_fail_closed_count"] == 0
+
+
+def _h5_flags_set(monkeypatch):
+    monkeypatch.setenv("NEXUS_HYBRID_H5_LOCAL_FIRST_TRACE", "1")
+    monkeypatch.setenv("NEXUS_HYBRID_H5_LOCAL_DRY_RUN_TRACE", "1")
+    monkeypatch.setenv("NEXUS_HYBRID_H5_FALLBACK_ELIGIBILITY_TRACE", "1")
+    monkeypatch.setenv("NEXUS_HYBRID_H5_FALLBACK_DECISION_DRY_RUN", "1")
+
+
+def test_h5_4_fallback_eligible_becomes_would_invoke(tmp_path, monkeypatch):
+    """H5-4 Test 1: fallback eligible becomes would_invoke decision."""
+    from scripts.bench.capability_ab_runner import CapabilityTask, _finalize_with_nexus_row
+
+    task = CapabilityTask(
+        id="test-task-h5-4-invoke",
+        difficulty="easy",
+        task_type="test_repair",
+        task_desc="verify h5-4 would invoke",
+        target_file="target.py",
+        test_file="test_target.py",
+        expected_capabilities=("claim_gate",),
+        success_criteria="tests_pass",
+        repo_kind="nexus_internal",
+        fixture_kind="test_fixture",
+    )
+    _h5_flags_set(monkeypatch)
+
+    row = _finalize_with_nexus_row(
+        {
+            "mode": "with_nexus",
+            "model_calls": 1,
+            "total_tokens": 100,
+            "token_capture_status": "measured",
+            "committee_trace": {
+                "candidate_count": 1,
+                "judge_selection": {"selected_candidate_id": "C_12481#candidate-1"},
+                "committee_receipt": {"selected_candidate_applied": True, "selected_candidate_apply_hash_match": True},
+            },
+            "local_solve_eligible": False,
+            "failure_reason": "VERIFIER_REJECTION:test_failed",
+        },
+        provider="gemini",
+        model_required=True,
+        nexus_required=False,
+        task=task,
+        repo_root=tmp_path,
+    )
+
+    h5 = row["h5_route"]
+    assert h5["cloud_fallback_eligible"] is True
+    assert h5["cloud_fallback_decision"] == "would_invoke_cloud_fallback"
+    assert h5["cloud_fallback_decision_reason"] == "local_verifier_rejected"
+    assert h5["cloud_fallback_would_invoke"] is True
+    assert h5["cloud_fallback_provider"] == "gemini"
+    assert h5["cloud_fallback_execution_mode"] == "dry_run"
+    assert h5["cloud_fallback_invoked"] is False
+    assert h5["cloud_model_invoked"] is False
+    assert h5["final_source"] == "none"
+    assert h5["behavior_changed"] is False
+
+
+def test_h5_4_local_success_becomes_skip_decision(tmp_path, monkeypatch):
+    """H5-4 Test 2: local success becomes skip decision."""
+    from scripts.bench.capability_ab_runner import CapabilityTask, _finalize_with_nexus_row
+
+    task = CapabilityTask(
+        id="test-task-h5-4-skip",
+        difficulty="easy",
+        task_type="test_repair",
+        task_desc="verify h5-4 skip",
+        target_file="target.py",
+        test_file="test_target.py",
+        expected_capabilities=("claim_gate",),
+        success_criteria="tests_pass",
+        repo_kind="nexus_internal",
+        fixture_kind="test_fixture",
+    )
+    _h5_flags_set(monkeypatch)
+
+    row = _finalize_with_nexus_row(
+        {
+            "mode": "with_nexus",
+            "model_calls": 1,
+            "total_tokens": 100,
+            "token_capture_status": "measured",
+            "committee_trace": {
+                "candidate_count": 2,
+                "judge_selection": {"selected_candidate_id": "C_12481#candidate-1"},
+                "committee_receipt": {"selected_candidate_applied": True, "selected_candidate_apply_hash_match": True},
+            },
+            "local_solve_eligible": True,
+        },
+        provider="gemini",
+        model_required=True,
+        nexus_required=False,
+        task=task,
+        repo_root=tmp_path,
+    )
+
+    h5 = row["h5_route"]
+    assert h5["cloud_fallback_decision"] == "skip_cloud_fallback"
+    assert h5["cloud_fallback_decision_reason"] == "local_success_no_fallback"
+    assert h5["cloud_fallback_would_invoke"] is False
+    assert h5["final_source"] == "none"
+
+
+def test_h5_4_hash_mismatch_becomes_fail_closed_decision(tmp_path, monkeypatch):
+    """H5-4 Test 3: hash mismatch becomes would_fail_closed decision."""
+    from scripts.bench.capability_ab_runner import CapabilityTask, _finalize_with_nexus_row
+
+    task = CapabilityTask(
+        id="test-task-h5-4-hash",
+        difficulty="easy",
+        task_type="test_repair",
+        task_desc="verify h5-4 hash fail closed",
+        target_file="target.py",
+        test_file="test_target.py",
+        expected_capabilities=("claim_gate",),
+        success_criteria="tests_pass",
+        repo_kind="nexus_internal",
+        fixture_kind="test_fixture",
+    )
+    _h5_flags_set(monkeypatch)
+
+    row = _finalize_with_nexus_row(
+        {
+            "mode": "with_nexus",
+            "model_calls": 1,
+            "total_tokens": 100,
+            "token_capture_status": "measured",
+            "committee_trace": {
+                "candidate_count": 1,
+                "judge_selection": {"selected_candidate_id": "C_12481#candidate-1"},
+                "committee_receipt": {"selected_candidate_applied": False, "selected_candidate_apply_hash_match": False},
+            },
+            "local_solve_eligible": False,
+            "failure_reason": "COMMITTEE_SELECTED_CANDIDATE_APPLY_HASH_MISMATCH",
+        },
+        provider="gemini",
+        model_required=True,
+        nexus_required=False,
+        task=task,
+        repo_root=tmp_path,
+    )
+
+    h5 = row["h5_route"]
+    assert h5["fail_closed_reason"] == "local_hash_mismatch"
+    assert h5["cloud_fallback_decision"] == "would_fail_closed"
+    assert h5["cloud_fallback_decision_reason"] == "local_hash_mismatch"
+    assert h5["cloud_fallback_would_invoke"] is False
+    assert h5["cloud_fallback_invoked"] is False
+    assert h5["final_source"] == "none"
+    assert h5["behavior_changed"] is False
+
+
+def test_h5_4_cloud_unavailable_becomes_fail_closed_decision(tmp_path, monkeypatch):
+    """H5-4 Test 4: cloud provider unavailable becomes would_fail_closed decision."""
+    from scripts.bench.capability_ab_runner import CapabilityTask, _finalize_with_nexus_row
+
+    task = CapabilityTask(
+        id="test-task-h5-4-nocloud",
+        difficulty="easy",
+        task_type="test_repair",
+        task_desc="verify h5-4 cloud unavailable",
+        target_file="target.py",
+        test_file="test_target.py",
+        expected_capabilities=("claim_gate",),
+        success_criteria="tests_pass",
+        repo_kind="nexus_internal",
+        fixture_kind="test_fixture",
+    )
+    _h5_flags_set(monkeypatch)
+
+    row = _finalize_with_nexus_row(
+        {
+            "mode": "with_nexus",
+            "model_calls": 1,
+            "total_tokens": 100,
+            "token_capture_status": "measured",
+            "committee_trace": {
+                "candidate_count": 1,
+                "judge_selection": {"selected_candidate_id": "C_12481#candidate-1"},
+                "committee_receipt": {"selected_candidate_applied": True, "selected_candidate_apply_hash_match": True},
+            },
+            "local_solve_eligible": False,
+            "failure_reason": "VERIFIER_REJECTION:test_failed",
+        },
+        provider="ollama",
+        model_required=True,
+        nexus_required=False,
+        task=task,
+        repo_root=tmp_path,
+    )
+
+    h5 = row["h5_route"]
+    assert h5["fail_closed_reason"] == "cloud_provider_unavailable"
+    assert h5["cloud_fallback_decision"] == "would_fail_closed"
+    assert h5["cloud_fallback_decision_reason"] == "cloud_provider_unavailable"
+    assert h5["cloud_fallback_would_invoke"] is False
+    assert h5["cloud_fallback_invoked"] is False
+    assert h5["final_source"] == "none"
+
+
+def test_h5_4_flag_disabled_leaves_decision_not_evaluated(tmp_path, monkeypatch):
+    """H5-4 Test 5: H5-4 flag disabled leaves decision not evaluated."""
+    from scripts.bench.capability_ab_runner import CapabilityTask, _finalize_with_nexus_row
+
+    task = CapabilityTask(
+        id="test-task-h5-4-off",
+        difficulty="easy",
+        task_type="test_repair",
+        task_desc="verify h5-4 disabled",
+        target_file="target.py",
+        test_file="test_target.py",
+        expected_capabilities=("claim_gate",),
+        success_criteria="tests_pass",
+        repo_kind="nexus_internal",
+        fixture_kind="test_fixture",
+    )
+    monkeypatch.setenv("NEXUS_HYBRID_H5_LOCAL_FIRST_TRACE", "1")
+    monkeypatch.setenv("NEXUS_HYBRID_H5_LOCAL_DRY_RUN_TRACE", "1")
+    monkeypatch.setenv("NEXUS_HYBRID_H5_FALLBACK_ELIGIBILITY_TRACE", "1")
+    monkeypatch.delenv("NEXUS_HYBRID_H5_FALLBACK_DECISION_DRY_RUN", raising=False)
+
+    row = _finalize_with_nexus_row(
+        {
+            "mode": "with_nexus",
+            "model_calls": 1,
+            "total_tokens": 100,
+            "token_capture_status": "measured",
+            "committee_trace": {
+                "candidate_count": 1,
+                "judge_selection": {"selected_candidate_id": "C_12481#candidate-1"},
+                "committee_receipt": {"selected_candidate_applied": True, "selected_candidate_apply_hash_match": True},
+            },
+            "local_solve_eligible": False,
+            "failure_reason": "VERIFIER_REJECTION:test_failed",
+        },
+        provider="gemini",
+        model_required=True,
+        nexus_required=False,
+        task=task,
+        repo_root=tmp_path,
+    )
+
+    h5 = row["h5_route"]
+    assert "cloud_fallback_decision" not in h5
+    assert h5["cloud_fallback_would_invoke"] is False if "cloud_fallback_would_invoke" in h5 else True
+    assert h5["cloud_fallback_invoked"] is False
+    assert h5["final_source"] == "none"
+
+
+def test_h5_4_bundle_summary_counters(tmp_path, monkeypatch):
+    """H5-4 Test 6: summary counters for decision dry-run."""
+    from scripts.bench.capability_ab_runner import CapabilityTask, _finalize_with_nexus_row, write_evidence_bundle
+
+    task = CapabilityTask(
+        id="test-task-h5-4-summary",
+        difficulty="easy",
+        task_type="test_repair",
+        task_desc="verify h5-4 summary",
+        target_file="target.py",
+        test_file="test_target.py",
+        expected_capabilities=("claim_gate",),
+        success_criteria="tests_pass",
+        repo_kind="nexus_internal",
+        fixture_kind="test_fixture",
+    )
+    _h5_flags_set(monkeypatch)
+    monkeypatch.setattr("scripts.bench.capability_ab_runner._git_commit", lambda x: "dummy-commit")
+
+    row_invoke = _finalize_with_nexus_row(
+        {
+            "mode": "with_nexus",
+            "model_calls": 1,
+            "total_tokens": 100,
+            "token_capture_status": "measured",
+            "committee_trace": {
+                "candidate_count": 1,
+                "judge_selection": {"selected_candidate_id": "C_12481#candidate-1"},
+                "committee_receipt": {"selected_candidate_applied": True, "selected_candidate_apply_hash_match": True},
+            },
+            "local_solve_eligible": False,
+            "failure_reason": "VERIFIER_REJECTION:test_failed",
+        },
+        provider="gemini",
+        model_required=True,
+        nexus_required=False,
+        task=task,
+        repo_root=tmp_path,
+    )
+
+    row_skip = _finalize_with_nexus_row(
+        {
+            "mode": "with_nexus",
+            "model_calls": 1,
+            "total_tokens": 100,
+            "token_capture_status": "measured",
+            "committee_trace": {
+                "candidate_count": 2,
+                "judge_selection": {"selected_candidate_id": "C_12481#candidate-1"},
+                "committee_receipt": {"selected_candidate_applied": True, "selected_candidate_apply_hash_match": True},
+            },
+            "local_solve_eligible": True,
+        },
+        provider="gemini",
+        model_required=True,
+        nexus_required=False,
+        task=task,
+        repo_root=tmp_path,
+    )
+
+    row_fail = _finalize_with_nexus_row(
+        {
+            "mode": "with_nexus",
+            "model_calls": 1,
+            "total_tokens": 100,
+            "token_capture_status": "measured",
+            "committee_trace": {
+                "candidate_count": 1,
+                "judge_selection": {"selected_candidate_id": "C_12481#candidate-1"},
+                "committee_receipt": {"selected_candidate_applied": False, "selected_candidate_apply_hash_match": False},
+            },
+            "local_solve_eligible": False,
+            "failure_reason": "COMMITTEE_SELECTED_CANDIDATE_APPLY_HASH_MISMATCH",
+        },
+        provider="gemini",
+        model_required=True,
+        nexus_required=False,
+        task=task,
+        repo_root=tmp_path,
+    )
+
+    with_path = tmp_path / "with.jsonl"
+    without_path = tmp_path / "without.jsonl"
+    with_path.write_text("[]", encoding="utf-8")
+    without_path.write_text("[]", encoding="utf-8")
+
+    bundle_file = write_evidence_bundle(
+        out_dir=tmp_path,
+        with_path=with_path,
+        without_path=without_path,
+        rows=[row_invoke, row_skip, row_fail],
+        config={
+            "tasks_file": "tasks.json",
+            "tasks_manifest_hash": "manifest_hash",
+            "unique_tasks_requested": 1,
+            "repeat_trials": 1,
+            "timeout_sec": 60,
+        },
+    )
+
+    bundle_data = json.loads(bundle_file.read_text(encoding="utf-8"))
+    summary = bundle_data["hybrid_route_summary"]
+    assert summary["h5_fallback_decision_trace_count"] >= 1
+    assert summary["h5_cloud_fallback_would_invoke_count"] >= 1
+    assert summary["h5_would_fail_closed_decision_count"] >= 1
+    assert summary["h5_skip_cloud_fallback_decision_count"] >= 1
+    assert summary["h5_cloud_fallback_invoked_count"] == 0
+    assert summary["h5_behavior_changed_count"] == 0
+    assert summary["h5_fail_closed_count"] == 0
