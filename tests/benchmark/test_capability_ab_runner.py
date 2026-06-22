@@ -12281,6 +12281,20 @@ def test_run_process_group_raises_timeout(tmp_path: Path):
         raise AssertionError("process group timeout should fail closed")
 
 
+def test_run_process_group_uses_direct_execution_when_persistent_worker_disabled(tmp_path: Path, monkeypatch):
+    monkeypatch.setattr("scripts.bench.capability_ab_runner.persistent_worker_proc", None)
+
+    res = _run_process_group(
+        [sys.executable, "-c", "print('direct-ok')"],
+        cwd=tmp_path,
+        env=os.environ.copy(),
+        timeout_sec=5,
+    )
+
+    assert res.returncode == 0
+    assert res.stdout.strip() == "direct-ok"
+
+
 def test_run_with_nexus_llm_requires_model_and_nexus_evidence(tmp_path: Path, monkeypatch):
     task = CapabilityTask(
         id="nexus-invalid",
@@ -13611,20 +13625,16 @@ def test_hybrid_route_h3_local_guard_trace_is_advisory_only(tmp_path, monkeypatc
 
     assert guard_calls["n"] == 1
     assert gate_on["local_guard_invoked"] is True
-    assert gate_on["local_guard"] == {
-        "schema": "nexus.hybrid_local_guard.v1",
-        "enabled": True,
-        "authority": "advisory_only",
-        "roles": [
-            "evidence_consistency_critic",
-            "patch_protocol_critic",
-            "claim_precheck",
-        ],
-        "verdict": "warn",
-        "blocked_delivery": False,
-        "behavior_changed": False,
-        "reason_codes": ["claim_precheck_warning"],
-    }
+    assert gate_on["local_guard"]["schema"] == "nexus.hybrid_local_guard.v1"
+    assert gate_on["local_guard"]["enabled"] is True
+    assert gate_on["local_guard"]["authority"] == "advisory_only"
+    assert gate_on["local_guard"]["roles"] == [
+        "evidence_consistency_critic",
+        "patch_protocol_critic",
+        "claim_precheck",
+    ]
+    assert gate_on["local_guard"]["verdict"] == "warn"
+    assert gate_on["local_guard"]["reason_codes"] == ["claim_precheck_warning"]
     assert gate_on["local_guard"]["blocked_delivery"] is False
     assert gate_on["local_guard"]["behavior_changed"] is False
     assert gate_on["behavior_changed"] is False
@@ -13659,3 +13669,51 @@ def test_hybrid_route_h3_local_guard_trace_is_advisory_only(tmp_path, monkeypatc
     assert summary["behavior_changed_count"] == 0
 
 
+def test_hybrid_route_h4_cloud_first_local_guard_records_retry_advice(tmp_path, monkeypatch):
+    from scripts.bench.capability_ab_runner import CapabilityTask, _finalize_with_nexus_row
+
+    task = CapabilityTask(
+        id="test-task-h4",
+        difficulty="hard",
+        task_type="test_repair",
+        task_desc="repair cloud output with local advisory guard",
+        target_file="target.py",
+        test_file="test_target.py",
+        expected_capabilities=("claim_gate",),
+        success_criteria="tests_pass",
+        repo_kind="nexus_internal",
+        fixture_kind="test_fixture",
+    )
+    monkeypatch.setenv("NEXUS_HYBRID_LOCAL_GUARD_TRACE", "1")
+
+    gate_on = _finalize_with_nexus_row(
+        {
+            "mode": "with_nexus",
+            "model_calls": 1,
+            "total_tokens": 100,
+            "token_capture_status": "measured",
+            "hidden_verifier_passed": True,
+            "capability_claim_verified": True,
+            "report_trust_mismatch": True,
+        },
+        provider="gemini",
+        model_required=True,
+        nexus_required=False,
+        task=task,
+        repo_root=tmp_path,
+    )
+
+    assert gate_on["hybrid_route"]["cloud_model_invoked"] is True
+    assert gate_on["local_guard_invoked"] is True
+    assert gate_on["local_guard"]["authority"] == "advisory_only"
+    assert gate_on["local_guard"]["cloud_output_observed"] is True
+    assert gate_on["local_guard"]["verifier_executed"] is True
+    assert gate_on["local_guard"]["claim_gate_executed"] is True
+    assert gate_on["local_guard"]["retry_decision"] == "recommend_retry"
+    assert gate_on["local_guard"]["retry_decision_reason"] == "evidence_consistency_warning"
+    assert gate_on["local_guard"]["raw_output"]["schema"] == "nexus.hybrid_local_guard_raw_output.v1"
+    assert gate_on["local_guard"]["raw_output"]["retry_decision"] == "recommend_retry"
+    assert gate_on["local_guard"]["modified_cloud_output"] is False
+    assert gate_on["local_guard"]["blocked_delivery"] is False
+    assert gate_on["local_guard"]["behavior_changed"] is False
+    assert gate_on["behavior_changed"] is False

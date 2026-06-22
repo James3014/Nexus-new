@@ -4058,6 +4058,7 @@ def _run_process_group(
     env: dict[str, str],
     timeout_sec: int,
 ) -> subprocess.CompletedProcess[str]:
+    global persistent_worker_proc
     # Phase 6: Use persistent worker if available
     if persistent_worker_proc is not None:
         import json as _json
@@ -5331,6 +5332,18 @@ def _disabled_hybrid_local_guard_trace(*, enabled: bool = False, reason_codes: l
         "authority": "advisory_only",
         "roles": HYBRID_LOCAL_GUARD_ROLES,
         "verdict": "skipped",
+        "retry_decision": "not_applicable",
+        "retry_decision_reason": "guard_disabled" if not enabled else "guard_skipped",
+        "raw_output": {
+            "schema": "nexus.hybrid_local_guard_raw_output.v1",
+            "verdict": "skipped",
+            "retry_decision": "not_applicable",
+            "reason_codes": list(reason_codes or []),
+        },
+        "cloud_output_observed": False,
+        "verifier_executed": False,
+        "claim_gate_executed": False,
+        "modified_cloud_output": False,
         "blocked_delivery": False,
         "behavior_changed": False,
         "reason_codes": list(reason_codes or []),
@@ -5349,12 +5362,28 @@ def _run_hybrid_local_guard_trace(*, row: dict[str, Any], task: CapabilityTask) 
         reason_codes.append("claim_precheck_warning")
 
     verdict = "warn" if reason_codes else "pass"
+    retry_decision = "recommend_retry" if reason_codes else "no_retry"
+    retry_decision_reason = ",".join(reason_codes) if reason_codes else "advisory_pass"
+    raw_output = {
+        "schema": "nexus.hybrid_local_guard_raw_output.v1",
+        "task_id": task.id,
+        "verdict": verdict,
+        "retry_decision": retry_decision,
+        "reason_codes": reason_codes,
+    }
     return {
         "schema": "nexus.hybrid_local_guard.v1",
         "enabled": True,
         "authority": "advisory_only",
         "roles": HYBRID_LOCAL_GUARD_ROLES,
         "verdict": verdict,
+        "retry_decision": retry_decision,
+        "retry_decision_reason": retry_decision_reason,
+        "raw_output": raw_output,
+        "cloud_output_observed": bool(int(row.get("model_calls", 0) or 0) > 0),
+        "verifier_executed": row.get("hidden_verifier_passed") is not None,
+        "claim_gate_executed": row.get("capability_claim_verified") is not None,
+        "modified_cloud_output": False,
         "blocked_delivery": False,
         "behavior_changed": False,
         "reason_codes": reason_codes,
@@ -5371,6 +5400,19 @@ def _sanitize_hybrid_local_guard_trace(trace: dict[str, Any]) -> dict[str, Any]:
     sanitized["verdict"] = str(sanitized.get("verdict") or "skipped")
     if sanitized["verdict"] not in {"pass", "warn", "fail", "skipped"}:
         sanitized["verdict"] = "warn"
+    sanitized["retry_decision"] = str(sanitized.get("retry_decision") or ("recommend_retry" if sanitized["verdict"] in {"warn", "fail"} else "no_retry"))
+    sanitized["retry_decision_reason"] = str(sanitized.get("retry_decision_reason") or sanitized["verdict"])
+    raw_output = sanitized.get("raw_output")
+    sanitized["raw_output"] = raw_output if isinstance(raw_output, dict) else {
+        "schema": "nexus.hybrid_local_guard_raw_output.v1",
+        "verdict": sanitized["verdict"],
+        "retry_decision": sanitized["retry_decision"],
+        "reason_codes": list(sanitized.get("reason_codes", []) or []),
+    }
+    sanitized["cloud_output_observed"] = bool(sanitized.get("cloud_output_observed", False))
+    sanitized["verifier_executed"] = bool(sanitized.get("verifier_executed", False))
+    sanitized["claim_gate_executed"] = bool(sanitized.get("claim_gate_executed", False))
+    sanitized["modified_cloud_output"] = False
     sanitized["blocked_delivery"] = False
     sanitized["behavior_changed"] = False
     sanitized["reason_codes"] = [str(code) for code in sanitized.get("reason_codes", []) or []]
