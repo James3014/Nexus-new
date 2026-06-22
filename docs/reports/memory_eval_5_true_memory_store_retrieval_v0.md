@@ -37,7 +37,9 @@ MEMORY-EVAL-5 的核心目標是移除 MEMORY-EVAL-4B 的 eval stub 依賴，證
 ---
 
 ## 4. 關鍵限制與邊界 (Constraints & Boundaries)
-- **真實檢索限制**：雖然本任務證明了真實檢索機制能自然撈出 seeding 資料，但這並非真實 production quality 下對未知任務的全面 retrieval 效果證明。
+- **真實檢索限制與宣告**：
+  - 本次運行證明了真實記憶體檢索成功被觸發（`retrieval_observed = true`）。
+  - 本次運行 **未證明** 解題成功率或結果有所提升（`outcome_uplift_observed = false`、`memory_helped_outcome = false`）。
 - **指標禁止與宣告**：
   - `memory_uplift` 宣稱仍為 **disallowed**。
   - `production_ready` = `false`。
