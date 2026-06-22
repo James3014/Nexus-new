@@ -5317,6 +5317,66 @@ def _is_ollama_available() -> bool:
     return False
 
 
+HYBRID_LOCAL_GUARD_ROLES = [
+    "evidence_consistency_critic",
+    "patch_protocol_critic",
+    "claim_precheck",
+]
+
+
+def _disabled_hybrid_local_guard_trace(*, enabled: bool = False, reason_codes: list[str] | None = None) -> dict[str, Any]:
+    return {
+        "schema": "nexus.hybrid_local_guard.v1",
+        "enabled": enabled,
+        "authority": "advisory_only",
+        "roles": HYBRID_LOCAL_GUARD_ROLES,
+        "verdict": "skipped",
+        "blocked_delivery": False,
+        "behavior_changed": False,
+        "reason_codes": list(reason_codes or []),
+    }
+
+
+def _run_hybrid_local_guard_trace(*, row: dict[str, Any], task: CapabilityTask) -> dict[str, Any]:
+    reason_codes: list[str] = []
+    if bool(row.get("report_trust_mismatch", False)):
+        reason_codes.append("evidence_consistency_warning")
+    if bool(row.get("artifact_verification_only", False)):
+        reason_codes.append("patch_protocol_warning")
+    if row.get("capability_claim_verified") is False:
+        reason_codes.append("claim_precheck_warning")
+    if not reason_codes and not str(task.success_criteria or "").strip():
+        reason_codes.append("claim_precheck_warning")
+
+    verdict = "warn" if reason_codes else "pass"
+    return {
+        "schema": "nexus.hybrid_local_guard.v1",
+        "enabled": True,
+        "authority": "advisory_only",
+        "roles": HYBRID_LOCAL_GUARD_ROLES,
+        "verdict": verdict,
+        "blocked_delivery": False,
+        "behavior_changed": False,
+        "reason_codes": reason_codes,
+    }
+
+
+def _sanitize_hybrid_local_guard_trace(trace: dict[str, Any]) -> dict[str, Any]:
+    sanitized = _disabled_hybrid_local_guard_trace(enabled=True)
+    sanitized.update(trace if isinstance(trace, dict) else {})
+    sanitized["schema"] = "nexus.hybrid_local_guard.v1"
+    sanitized["enabled"] = True
+    sanitized["authority"] = "advisory_only"
+    sanitized["roles"] = HYBRID_LOCAL_GUARD_ROLES
+    sanitized["verdict"] = str(sanitized.get("verdict") or "skipped")
+    if sanitized["verdict"] not in {"pass", "warn", "fail", "skipped"}:
+        sanitized["verdict"] = "warn"
+    sanitized["blocked_delivery"] = False
+    sanitized["behavior_changed"] = False
+    sanitized["reason_codes"] = [str(code) for code in sanitized.get("reason_codes", []) or []]
+    return sanitized
+
+
 def _finalize_with_nexus_row(
     row: dict[str, Any],
     *,
@@ -5470,6 +5530,19 @@ def _finalize_with_nexus_row(
         "memory_no_match": memory_no_match,
         "memory_rerank_mode": memory_rerank_mode
     }
+
+    enable_guard_trace = _env_truthy("NEXUS_HYBRID_LOCAL_GUARD_TRACE")
+    local_guard_invoked = False
+    if enable_guard_trace:
+        if cloud_provider_selected and int(finalized.get("model_calls", 0) or 0) > 0:
+            local_guard = _sanitize_hybrid_local_guard_trace(_run_hybrid_local_guard_trace(row=finalized, task=task))
+            local_guard_invoked = True
+        else:
+            local_guard = _disabled_hybrid_local_guard_trace(enabled=True, reason_codes=["cloud_output_missing"])
+    else:
+        local_guard = _disabled_hybrid_local_guard_trace()
+    finalized["local_guard"] = local_guard
+    finalized["local_guard_invoked"] = local_guard_invoked
 
     # Ensure keys are also on the row level for simple flat queries
     finalized["route_mode"] = r_mode
@@ -9127,13 +9200,24 @@ def write_evidence_bundle(
     local_assist_invoked_count = sum(1 for row in with_rows if bool(row.get("hybrid_route", {}).get("local_assist_invoked", False)))
     behavior_changed_count = sum(1 for row in with_rows if bool(row.get("hybrid_route", {}).get("behavior_changed", False)))
     prompt_replaced_count = sum(1 for row in with_rows if bool(row.get("local_assist", {}).get("prompt_replaced", False)))
+    local_guard_rows = [row.get("local_guard", {}) for row in with_rows if isinstance(row.get("local_guard", {}), dict)]
+    local_guard_trace_count = sum(1 for row in with_rows if bool(row.get("local_guard_invoked", False)))
+    local_guard_warn_count = sum(1 for guard in local_guard_rows if str(guard.get("verdict") or "") == "warn")
+    local_guard_fail_count = sum(1 for guard in local_guard_rows if str(guard.get("verdict") or "") == "fail")
+    local_guard_blocked_delivery_count = sum(1 for guard in local_guard_rows if bool(guard.get("blocked_delivery", False)))
+    local_guard_behavior_changed_count = sum(1 for guard in local_guard_rows if bool(guard.get("behavior_changed", False)))
 
     payload["hybrid_route_summary"] = {
         "modes_observed": sorted(list(set(hybrid_modes))),
         "trace_only_count": sum(1 for m in hybrid_modes if "trace_only" in m),
         "local_only_blocked_count": sum(1 for m in hybrid_modes if m == "local_only_blocked"),
         "local_assist_trace_count": local_assist_invoked_count,
+        "local_guard_trace_count": local_guard_trace_count,
+        "local_guard_warn_count": local_guard_warn_count,
+        "local_guard_fail_count": local_guard_fail_count,
+        "local_guard_blocked_delivery_count": local_guard_blocked_delivery_count,
         "behavior_changed_count": behavior_changed_count,
+        "local_guard_behavior_changed_count": local_guard_behavior_changed_count,
         "prompt_replaced_count": prompt_replaced_count,
     }
     payload["external_provider_claim_boundary_contract"] = build_external_provider_claim_boundary_contract(payload)

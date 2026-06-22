@@ -13535,6 +13535,127 @@ def test_hybrid_route_h2_local_assist_trace(tmp_path, monkeypatch):
     assert summary["prompt_replaced_count"] == 0
 
 
+def test_hybrid_route_h3_local_guard_trace_is_advisory_only(tmp_path, monkeypatch):
+    from scripts.bench.capability_ab_runner import CapabilityTask, _finalize_with_nexus_row, write_evidence_bundle
 
+    task = CapabilityTask(
+        id="test-task-h3",
+        difficulty="easy",
+        task_type="test_repair",
+        task_desc="repair a failing assertion without changing delivery gates",
+        target_file="target.py",
+        test_file="test_target.py",
+        expected_capabilities=("claim_gate",),
+        success_criteria="tests_pass",
+        repo_kind="nexus_internal",
+        fixture_kind="test_fixture",
+    )
+
+    guard_calls = {"n": 0}
+
+    def fake_local_guard(*, row, task):
+        guard_calls["n"] += 1
+        return {
+            "schema": "nexus.hybrid_local_guard.v1",
+            "enabled": True,
+            "authority": "advisory_only",
+            "roles": [
+                "evidence_consistency_critic",
+                "patch_protocol_critic",
+                "claim_precheck",
+            ],
+            "verdict": "warn",
+            "blocked_delivery": False,
+            "behavior_changed": False,
+            "reason_codes": ["claim_precheck_warning"],
+        }
+
+    monkeypatch.setattr("scripts.bench.capability_ab_runner._run_hybrid_local_guard_trace", fake_local_guard, raising=False)
+    monkeypatch.setenv("NEXUS_HYBRID_LOCAL_GUARD_TRACE", "0")
+
+    gate_off = _finalize_with_nexus_row(
+        {
+            "mode": "with_nexus",
+            "model_calls": 1,
+            "total_tokens": 100,
+            "token_capture_status": "measured",
+        },
+        provider="gemini",
+        model_required=True,
+        nexus_required=False,
+        task=task,
+        repo_root=tmp_path,
+    )
+
+    assert guard_calls["n"] == 0
+    assert gate_off["local_guard"]["enabled"] is False
+    assert gate_off["local_guard_invoked"] is False
+    assert gate_off["behavior_changed"] is False
+
+    monkeypatch.setenv("NEXUS_HYBRID_LOCAL_GUARD_TRACE", "1")
+
+    gate_on = _finalize_with_nexus_row(
+        {
+            "mode": "with_nexus",
+            "model_calls": 1,
+            "total_tokens": 100,
+            "token_capture_status": "measured",
+            "hidden_verifier_stdout_tail": "FAILED test_target.py - AssertionError",
+        },
+        provider="gemini",
+        model_required=True,
+        nexus_required=False,
+        task=task,
+        repo_root=tmp_path,
+    )
+
+    assert guard_calls["n"] == 1
+    assert gate_on["local_guard_invoked"] is True
+    assert gate_on["local_guard"] == {
+        "schema": "nexus.hybrid_local_guard.v1",
+        "enabled": True,
+        "authority": "advisory_only",
+        "roles": [
+            "evidence_consistency_critic",
+            "patch_protocol_critic",
+            "claim_precheck",
+        ],
+        "verdict": "warn",
+        "blocked_delivery": False,
+        "behavior_changed": False,
+        "reason_codes": ["claim_precheck_warning"],
+    }
+    assert gate_on["local_guard"]["blocked_delivery"] is False
+    assert gate_on["local_guard"]["behavior_changed"] is False
+    assert gate_on["behavior_changed"] is False
+    assert gate_on["local_assist"]["prompt_replaced"] is False
+
+    with_path = tmp_path / "with.jsonl"
+    without_path = tmp_path / "without.jsonl"
+    with_path.write_text("[]", encoding="utf-8")
+    without_path.write_text("[]", encoding="utf-8")
+    monkeypatch.setattr("scripts.bench.capability_ab_runner._git_commit", lambda x: "dummy-commit")
+
+    bundle_file = write_evidence_bundle(
+        out_dir=tmp_path,
+        with_path=with_path,
+        without_path=without_path,
+        rows=[gate_off, gate_on],
+        config={
+            "tasks_file": "tasks.json",
+            "tasks_manifest_hash": "manifest_hash",
+            "unique_tasks_requested": 1,
+            "repeat_trials": 1,
+            "timeout_sec": 60,
+        },
+    )
+
+    bundle_data = json.loads(bundle_file.read_text(encoding="utf-8"))
+    summary = bundle_data["hybrid_route_summary"]
+    assert summary["local_guard_trace_count"] == 1
+    assert summary["local_guard_warn_count"] == 1
+    assert summary["local_guard_fail_count"] == 0
+    assert summary["local_guard_blocked_delivery_count"] == 0
+    assert summary["behavior_changed_count"] == 0
 
 
