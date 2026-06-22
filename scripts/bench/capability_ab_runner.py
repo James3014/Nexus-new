@@ -5587,22 +5587,52 @@ def _finalize_with_nexus_row(
     finalized["local_guard_invoked"] = local_guard_invoked
 
     # H5-1: Local-first cloud-fallback trace-only metadata
+    # H5-2: Dry-run local attempt trace via precomputed committee trace
     enable_h5_trace = _env_truthy("NEXUS_HYBRID_H5_LOCAL_FIRST_TRACE")
+    enable_h5_dry_run = _env_truthy("NEXUS_HYBRID_H5_LOCAL_DRY_RUN_TRACE")
     cloud_provider_value = provider if provider in {"gemini", "codex"} else "none"
     if enable_h5_trace:
+        h5_local_attempted = False
+        h5_local_candidate_count = 0
+        h5_local_selected_candidate_id = ""
+        h5_local_selected_candidate_applied = False
+        h5_local_selected_candidate_hash_match = False
+        h5_local_solve_eligible = False
+        h5_local_failure_reason = ""
+        h5_route_mode = "local_first_cloud_fallback_trace_only"
+
+        if enable_h5_dry_run:
+            local_trace = finalized.get("committee_trace") or finalized.get("local_committee_trace")
+            if local_trace:
+                h5_local_attempted = True
+                h5_route_mode = "local_first_cloud_fallback_local_attempted"
+                h5_local_candidate_count = int(local_trace.get("candidate_count", 0) or 0)
+                judge_sel = local_trace.get("judge_selection", {})
+                h5_local_selected_candidate_id = str(judge_sel.get("selected_candidate_id", "") or "")
+                rc = local_trace.get("committee_receipt", {})
+                h5_local_selected_candidate_applied = bool(rc.get("selected_candidate_applied", False))
+                h5_local_selected_candidate_hash_match = bool(rc.get("selected_candidate_apply_hash_match", False))
+                h5_local_solve_eligible = bool(finalized.get("local_solve_eligible", False))
+                if not h5_local_solve_eligible and rc.get("selected_candidate_apply_hash_match") is False:
+                    h5_local_failure_reason = str(rc.get("failure_reason", "") or "")
+                elif not h5_local_solve_eligible and h5_local_selected_candidate_id:
+                    h5_local_failure_reason = str(finalized.get("failure_reason", "") or "")
+            else:
+                h5_local_failure_reason = "local_trace_missing"
+
         finalized["h5_route"] = {
             "schema": "nexus.hybrid_h5_route.v1",
             "enabled": True,
-            "route_mode": "local_first_cloud_fallback_trace_only",
+            "route_mode": h5_route_mode,
             "authority": "trace_only",
-            "local_attempted": False,
+            "local_attempted": h5_local_attempted,
             "local_route": "committee",
-            "local_candidate_count": 0,
-            "local_selected_candidate_id": "",
-            "local_selected_candidate_applied": False,
-            "local_selected_candidate_hash_match": False,
-            "local_solve_eligible": False,
-            "local_failure_reason": "",
+            "local_candidate_count": h5_local_candidate_count,
+            "local_selected_candidate_id": h5_local_selected_candidate_id,
+            "local_selected_candidate_applied": h5_local_selected_candidate_applied,
+            "local_selected_candidate_hash_match": h5_local_selected_candidate_hash_match,
+            "local_solve_eligible": h5_local_solve_eligible,
+            "local_failure_reason": h5_local_failure_reason,
             "cloud_fallback_allowed": False,
             "cloud_fallback_invoked": False,
             "cloud_provider": cloud_provider_value,

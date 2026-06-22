@@ -14071,3 +14071,267 @@ def test_h5_bundle_summary_counts_trace_rows(tmp_path, monkeypatch):
     assert summary["h5_cloud_fallback_invoked_count"] == 0
     assert summary["h5_local_attempted_count"] == 0
     assert summary["h5_fail_closed_count"] == 0
+
+
+def test_h5_2_dry_run_copies_successful_committee_trace(tmp_path, monkeypatch):
+    """H5-2 Test 1: dry-run copies successful committee trace into h5_route."""
+    from scripts.bench.capability_ab_runner import CapabilityTask, _finalize_with_nexus_row
+
+    task = CapabilityTask(
+        id="test-task-h5-2-ok",
+        difficulty="easy",
+        task_type="test_repair",
+        task_desc="verify h5-2 dry-run copies trace",
+        target_file="target.py",
+        test_file="test_target.py",
+        expected_capabilities=("claim_gate",),
+        success_criteria="tests_pass",
+        repo_kind="nexus_internal",
+        fixture_kind="test_fixture",
+    )
+    monkeypatch.setenv("NEXUS_HYBRID_H5_LOCAL_FIRST_TRACE", "1")
+    monkeypatch.setenv("NEXUS_HYBRID_H5_LOCAL_DRY_RUN_TRACE", "1")
+
+    row = _finalize_with_nexus_row(
+        {
+            "mode": "with_nexus",
+            "model_calls": 1,
+            "total_tokens": 100,
+            "token_capture_status": "measured",
+            "committee_trace": {
+                "candidate_count": 2,
+                "judge_selection": {
+                    "selected_candidate_id": "C_12481#candidate-1",
+                },
+                "committee_receipt": {
+                    "selected_candidate_applied": True,
+                    "selected_candidate_apply_hash_match": True,
+                },
+            },
+            "local_solve_eligible": True,
+        },
+        provider="gemini",
+        model_required=True,
+        nexus_required=False,
+        task=task,
+        repo_root=tmp_path,
+    )
+
+    h5 = row["h5_route"]
+    assert h5["local_attempted"] is True
+    assert h5["local_candidate_count"] == 2
+    assert h5["local_selected_candidate_id"] == "C_12481#candidate-1"
+    assert h5["local_selected_candidate_applied"] is True
+    assert h5["local_selected_candidate_hash_match"] is True
+    assert h5["local_solve_eligible"] is True
+    assert h5["route_mode"] == "local_first_cloud_fallback_local_attempted"
+    assert h5["final_source"] == "none"
+    assert h5["behavior_changed"] is False
+    assert h5["cloud_fallback_invoked"] is False
+
+
+def test_h5_2_dry_run_with_failure_trace(tmp_path, monkeypatch):
+    """H5-2 Test 2: dry-run with failure trace."""
+    from scripts.bench.capability_ab_runner import CapabilityTask, _finalize_with_nexus_row
+
+    task = CapabilityTask(
+        id="test-task-h5-2-fail",
+        difficulty="easy",
+        task_type="test_repair",
+        task_desc="verify h5-2 dry-run failure trace",
+        target_file="target.py",
+        test_file="test_target.py",
+        expected_capabilities=("claim_gate",),
+        success_criteria="tests_pass",
+        repo_kind="nexus_internal",
+        fixture_kind="test_fixture",
+    )
+    monkeypatch.setenv("NEXUS_HYBRID_H5_LOCAL_FIRST_TRACE", "1")
+    monkeypatch.setenv("NEXUS_HYBRID_H5_LOCAL_DRY_RUN_TRACE", "1")
+
+    row = _finalize_with_nexus_row(
+        {
+            "mode": "with_nexus",
+            "model_calls": 1,
+            "total_tokens": 100,
+            "token_capture_status": "measured",
+            "committee_trace": {
+                "candidate_count": 1,
+                "judge_selection": {
+                    "selected_candidate_id": "C_12481#candidate-1",
+                },
+                "committee_receipt": {
+                    "selected_candidate_applied": False,
+                    "selected_candidate_apply_hash_match": False,
+                    "failure_reason": "COMMITTEE_SELECTED_CANDIDATE_APPLY_HASH_MISMATCH",
+                },
+            },
+            "local_solve_eligible": False,
+        },
+        provider="gemini",
+        model_required=True,
+        nexus_required=False,
+        task=task,
+        repo_root=tmp_path,
+    )
+
+    h5 = row["h5_route"]
+    assert h5["local_attempted"] is True
+    assert h5["local_failure_reason"] == "COMMITTEE_SELECTED_CANDIDATE_APPLY_HASH_MISMATCH"
+    assert h5["local_solve_eligible"] is False
+    assert h5["final_source"] == "none"
+    assert h5["cloud_fallback_invoked"] is False
+    assert h5["behavior_changed"] is False
+
+
+def test_h5_2_dry_run_flag_without_trace(tmp_path, monkeypatch):
+    """H5-2 Test 3: dry-run flag without trace sets local_trace_missing."""
+    from scripts.bench.capability_ab_runner import CapabilityTask, _finalize_with_nexus_row
+
+    task = CapabilityTask(
+        id="test-task-h5-2-missing",
+        difficulty="easy",
+        task_type="test_repair",
+        task_desc="verify h5-2 missing trace",
+        target_file="target.py",
+        test_file="test_target.py",
+        expected_capabilities=("claim_gate",),
+        success_criteria="tests_pass",
+        repo_kind="nexus_internal",
+        fixture_kind="test_fixture",
+    )
+    monkeypatch.setenv("NEXUS_HYBRID_H5_LOCAL_FIRST_TRACE", "1")
+    monkeypatch.setenv("NEXUS_HYBRID_H5_LOCAL_DRY_RUN_TRACE", "1")
+
+    row = _finalize_with_nexus_row(
+        {
+            "mode": "with_nexus",
+            "model_calls": 1,
+            "total_tokens": 100,
+            "token_capture_status": "measured",
+        },
+        provider="gemini",
+        model_required=True,
+        nexus_required=False,
+        task=task,
+        repo_root=tmp_path,
+    )
+
+    h5 = row["h5_route"]
+    assert h5["local_attempted"] is False
+    assert h5["local_failure_reason"] == "local_trace_missing"
+    assert h5["final_source"] == "none"
+    assert h5["behavior_changed"] is False
+
+
+def test_h5_2_does_not_execute_local_or_cloud(tmp_path, monkeypatch):
+    """H5-2 Test 4: dry-run does not invoke committee orchestrator or cloud."""
+    from scripts.bench.capability_ab_runner import CapabilityTask, _finalize_with_nexus_row
+
+    task = CapabilityTask(
+        id="test-task-h5-2-noexec",
+        difficulty="easy",
+        task_type="test_repair",
+        task_desc="verify h5-2 no execution",
+        target_file="target.py",
+        test_file="test_target.py",
+        expected_capabilities=("claim_gate",),
+        success_criteria="tests_pass",
+        repo_kind="nexus_internal",
+        fixture_kind="test_fixture",
+    )
+    monkeypatch.setenv("NEXUS_HYBRID_H5_LOCAL_FIRST_TRACE", "1")
+    monkeypatch.setenv("NEXUS_HYBRID_H5_LOCAL_DRY_RUN_TRACE", "1")
+
+    row = _finalize_with_nexus_row(
+        {
+            "mode": "with_nexus",
+            "model_calls": 1,
+            "total_tokens": 100,
+            "token_capture_status": "measured",
+            "committee_trace": {
+                "candidate_count": 2,
+                "judge_selection": {"selected_candidate_id": "C_12481#candidate-1"},
+                "committee_receipt": {"selected_candidate_applied": True, "selected_candidate_apply_hash_match": True},
+            },
+            "local_solve_eligible": True,
+        },
+        provider="gemini",
+        model_required=True,
+        nexus_required=False,
+        task=task,
+        repo_root=tmp_path,
+    )
+
+    h5 = row["h5_route"]
+    assert h5["cloud_fallback_invoked"] is False
+    assert h5["cloud_model_invoked"] is False
+    assert h5["final_source"] == "none"
+    assert h5["cloud_fallback_allowed"] is False
+
+
+def test_h5_2_bundle_summary_counts_local_attempted(tmp_path, monkeypatch):
+    """H5-2 Test 5: bundle summary counts local attempted dry-run."""
+    from scripts.bench.capability_ab_runner import CapabilityTask, _finalize_with_nexus_row, write_evidence_bundle
+
+    task = CapabilityTask(
+        id="test-task-h5-2-bundle",
+        difficulty="easy",
+        task_type="test_repair",
+        task_desc="verify h5-2 bundle summary",
+        target_file="target.py",
+        test_file="test_target.py",
+        expected_capabilities=("claim_gate",),
+        success_criteria="tests_pass",
+        repo_kind="nexus_internal",
+        fixture_kind="test_fixture",
+    )
+    monkeypatch.setenv("NEXUS_HYBRID_H5_LOCAL_FIRST_TRACE", "1")
+    monkeypatch.setenv("NEXUS_HYBRID_H5_LOCAL_DRY_RUN_TRACE", "1")
+    monkeypatch.setattr("scripts.bench.capability_ab_runner._git_commit", lambda x: "dummy-commit")
+
+    row = _finalize_with_nexus_row(
+        {
+            "mode": "with_nexus",
+            "model_calls": 1,
+            "total_tokens": 100,
+            "token_capture_status": "measured",
+            "committee_trace": {
+                "candidate_count": 2,
+                "judge_selection": {"selected_candidate_id": "C_12481#candidate-1"},
+                "committee_receipt": {"selected_candidate_applied": True, "selected_candidate_apply_hash_match": True},
+            },
+            "local_solve_eligible": True,
+        },
+        provider="gemini",
+        model_required=True,
+        nexus_required=False,
+        task=task,
+        repo_root=tmp_path,
+    )
+
+    with_path = tmp_path / "with.jsonl"
+    without_path = tmp_path / "without.jsonl"
+    with_path.write_text("[]", encoding="utf-8")
+    without_path.write_text("[]", encoding="utf-8")
+
+    bundle_file = write_evidence_bundle(
+        out_dir=tmp_path,
+        with_path=with_path,
+        without_path=without_path,
+        rows=[row],
+        config={
+            "tasks_file": "tasks.json",
+            "tasks_manifest_hash": "manifest_hash",
+            "unique_tasks_requested": 1,
+            "repeat_trials": 1,
+            "timeout_sec": 60,
+        },
+    )
+
+    bundle_data = json.loads(bundle_file.read_text(encoding="utf-8"))
+    summary = bundle_data["hybrid_route_summary"]
+    assert summary["h5_local_attempted_count"] >= 1
+    assert summary["h5_behavior_changed_count"] == 0
+    assert summary["h5_cloud_fallback_invoked_count"] == 0
+    assert summary["h5_fail_closed_count"] == 0
