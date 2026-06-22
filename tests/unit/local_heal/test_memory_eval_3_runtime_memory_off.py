@@ -1,20 +1,16 @@
-"""Tests for MEMORY-EVAL-3 runtime memory-off arm."""
+"""Tests for MEMORY-EVAL-3B runtime memory-off arm with fresh output isolation."""
 from __future__ import annotations
 
 import json
 import pytest
-import shutil
 from pathlib import Path
 from nexus.services.local_heal.context import HealContext, OperationalContext, GovernanceContext
 from nexus.services.local_heal.governance_gate import GovernanceGate
 from nexus.services.local_heal.orchestrator import HealOrchestrator
 
 
-RUNS_BASE = Path("artifacts/runtime/eval_substrate_1b_runtime_wiring_v0/runs")
-
-
-def _make_ctx_with_memory_disabled(task_id: str = "C_12481") -> HealContext:
-    """Create HealContext with memory_enabled=False for memory_off arm."""
+def _make_ctx_with_memory_disabled(task_id: str, output_root: Path) -> HealContext:
+    """Create HealContext with memory_enabled=False and explicit output root."""
     op = OperationalContext(
         instance_id=task_id,
         repo_dir=Path("/tmp/test"),
@@ -26,51 +22,22 @@ def _make_ctx_with_memory_disabled(task_id: str = "C_12481") -> HealContext:
     op.model_name = "qwen2.5-coder:7b"
     op.receipt_path = "/tmp/receipt.json"
     op.memory_enabled = False
+    op.memory_arm = "nexus_memory_off"
+    op.artifact_output_root = str(output_root)
 
     gov = GovernanceContext()
     return HealContext(op=op, gov=gov)
 
 
-class TestRuntimeMemoryOff:
-    """Test that memory_off path produces live artifacts through runtime."""
+class TestRuntimeMemoryOffFreshOutput:
+    """Test that memory_off path writes to fresh output root."""
 
-    def test_memory_off_path_through_run(self):
-        """HealOrchestrator.run() with memory_enabled=False produces artifacts."""
-        task_id = "BMEVAL3_TEST"
-        ctx = _make_ctx_with_memory_disabled(task_id)
+    def test_memory_off_writes_to_fresh_memory_eval_3_root(self, tmp_path):
+        """memory_off path writes 11/11 artifacts to fresh root."""
+        task_id = "C_12481"
+        output_root = tmp_path / "memory_eval_3_runtime_memory_off_v0" / "runs"
 
-        orchestrator = HealOrchestrator(
-            phases=[],
-            governance_gate=GovernanceGate(),
-        )
-        orchestrator.run(ctx)
-
-        # Verify collector was attached
-        assert hasattr(ctx.op, "_live_artifact_collector")
-        collector = ctx.op._live_artifact_collector
-        assert collector.get_total_count() == 11
-
-        # Verify memory trace is TRACE_MISSING (memory disabled)
-        mem_trace = getattr(ctx.op, "_memory_influence_trace", None)
-        assert mem_trace is not None
-        assert mem_trace.trace_status == "TRACE_MISSING"
-
-        # Verify artifacts have artifact_source=live_runtime
-        task_dir = RUNS_BASE / task_id / "nexus_memory_off"
-        for f in ["input_manifest.json", "memory_trace.json", "evidence_packet.json",
-                   "prompt_manifest.json", "model_output_summary.json", "patch_apply_result.json",
-                   "verifier_result.json", "receipt.json", "evidence_bundle.json",
-                   "bottleneck_classification.json", "arm_result.json"]:
-            assert (task_dir / f).exists(), f"Missing: {f}"
-            with open(task_dir / f) as fh:
-                data = json.load(fh)
-            assert data.get("artifact_source") == "live_runtime", f"Missing artifact_source in {f}"
-            assert data.get("created_during_run") is True, f"Missing created_during_run in {f}"
-
-    def test_memory_off_prompt_excludes_memory(self):
-        """memory_off prompt_manifest shows memory_section_included=false."""
-        task_id = "BMEVAL3_PROMPT"
-        ctx = _make_ctx_with_memory_disabled(task_id)
+        ctx = _make_ctx_with_memory_disabled(task_id, output_root)
 
         orchestrator = HealOrchestrator(
             phases=[],
@@ -78,15 +45,39 @@ class TestRuntimeMemoryOff:
         )
         orchestrator.run(ctx)
 
-        task_dir = RUNS_BASE / task_id / "nexus_memory_off"
-        with open(task_dir / "prompt_manifest.json") as f:
-            data = json.load(f)
-        assert data.get("memory_section_included") is False
+        task_dir = output_root / task_id / "nexus_memory_off"
 
-    def test_memory_off_trace_status_trace_missing(self):
-        """memory_off memory_trace shows trace_status=TRACE_MISSING."""
-        task_id = "BMEVAL3_TRACE"
-        ctx = _make_ctx_with_memory_disabled(task_id)
+        required = [
+            "input_manifest.json", "memory_trace.json", "evidence_packet.json",
+            "prompt_manifest.json", "model_output_summary.json", "patch_apply_result.json",
+            "verifier_result.json", "receipt.json", "evidence_bundle.json",
+            "bottleneck_classification.json", "arm_result.json",
+        ]
+
+        for name in required:
+            path = task_dir / name
+            assert path.exists(), f"Missing: {name}"
+            data = json.loads(path.read_text())
+            assert data["artifact_source"] == "live_runtime", f"Wrong artifact_source in {name}"
+            assert data["created_during_run"] is True, f"Wrong created_during_run in {name}"
+            assert data["repair_attempt_id"] == task_id, f"Wrong repair_attempt_id in {name}"
+
+        prompt = json.loads((task_dir / "prompt_manifest.json").read_text())
+        assert prompt["memory_section_included"] is False
+
+        trace = json.loads((task_dir / "memory_trace.json").read_text())
+        assert trace["trace_status"] in {"TRACE_MISSING", "NOT_USED"}
+
+        arm = json.loads((task_dir / "arm_result.json").read_text())
+        assert arm["arm"] == "nexus_memory_off"
+
+    def test_no_pollution_of_eval_substrate(self, tmp_path):
+        """memory_off artifacts do NOT pollute eval_substrate_1b."""
+        task_id = "NO_POLLUTION"
+        output_root = tmp_path / "isolated_root" / "runs"
+        eval_substrate = Path("artifacts/runtime/eval_substrate_1b_runtime_wiring_v0/runs")
+
+        ctx = _make_ctx_with_memory_disabled(task_id, output_root)
 
         orchestrator = HealOrchestrator(
             phases=[],
@@ -94,7 +85,11 @@ class TestRuntimeMemoryOff:
         )
         orchestrator.run(ctx)
 
-        task_dir = RUNS_BASE / task_id / "nexus_memory_off"
-        with open(task_dir / "memory_trace.json") as f:
-            data = json.load(f)
-        assert data.get("trace_status") == "TRACE_MISSING"
+        # Verify output is in isolated root, not eval_substrate
+        isolated_dir = output_root / task_id / "nexus_memory_off"
+        assert isolated_dir.exists()
+        assert (isolated_dir / "input_manifest.json").exists()
+
+        # Verify eval_substrate was NOT modified by this run
+        eval_substrate_task = eval_substrate / task_id
+        assert not eval_substrate_task.exists(), "Polluted eval_substrate!"

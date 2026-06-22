@@ -28,6 +28,8 @@ class OperationalContext:
     
     # Memory control (BMF5: memory_enabled flag)
     memory_enabled: bool = True  # Set to False for nexus_memory_off arm
+    memory_arm: str = ""  # Explicit arm: "nexus_memory_on" or "nexus_memory_off"
+    artifact_output_root: str = "artifacts/runtime/eval_substrate_1b_runtime_wiring_v0/runs"  # Configurable output root
 
     # Phase 1: Reproduction
     repro_script: str = ""

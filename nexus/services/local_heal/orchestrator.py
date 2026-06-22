@@ -564,19 +564,25 @@ class HealOrchestrator:
 
             op = ctx.op if hasattr(ctx, "op") else ctx
             task_id = str(getattr(op, "instance_id", "unknown"))
-            # MEMORY-EVAL-3: Check memory_enabled flag for arm determination
+
+            # MEMORY-EVAL-3B: Explicit arm from ctx.op.memory_arm, else trace-based
+            explicit_arm = getattr(op, "memory_arm", "")
             memory_enabled = getattr(op, "memory_enabled", True)
             mem_trace = getattr(op, "_memory_influence_trace", None)
-            # memory_on if memory_enabled AND trace has actual data (not just TRACE_MISSING)
-            if memory_enabled and mem_trace and getattr(mem_trace, "trace_status", "") == "TRACE_AVAILABLE":
+            if explicit_arm in {"nexus_memory_on", "nexus_memory_off"}:
+                arm = explicit_arm
+            elif memory_enabled and mem_trace and getattr(mem_trace, "trace_status", "") == "TRACE_AVAILABLE":
                 arm = "nexus_memory_on"
             else:
                 arm = "nexus_memory_off"
 
+            # MEMORY-EVAL-3B: Configurable output root from ctx.op
+            output_root = Path(getattr(op, "artifact_output_root", "artifacts/runtime/eval_substrate_1b_runtime_wiring_v0/runs"))
+
             collector = LiveArtifactCollector(
                 task_id=task_id,
                 arm=arm,
-                output_dir=Path("artifacts/runtime/eval_substrate_1b_runtime_wiring_v0/runs"),
+                output_dir=output_root,
             )
 
             # Capture from runtime ctx/op fields
