@@ -26,6 +26,9 @@ class OperationalContext:
     repo_dir: Path
     problem_statement: str
     
+    # Memory control (BMF5: memory_enabled flag)
+    memory_enabled: bool = True  # Set to False for nexus_memory_off arm
+
     # Phase 1: Reproduction
     repro_script: str = ""
     repro_evidence: str = ""

@@ -450,6 +450,11 @@ class HealOrchestrator:
     def _attach_memory_influence_trace(self, ctx: HealContext) -> None:
         if getattr(ctx.op, "_memory_influence_trace", None):
             return
+        # MEMORY-EVAL-3: Check memory_enabled flag
+        if not getattr(ctx.op, "memory_enabled", True):
+            from nexus.services.local_heal.memory_trace import get_empty_trace
+            ctx.op._memory_influence_trace = get_empty_trace()
+            return
         try:
             from nexus.services.local_heal.memory_retrieval_adapter import MemoryRetrievalAdapter
             from nexus.services.local_heal.memory_trace import build_memory_trace_from_adapter, get_empty_trace
@@ -559,7 +564,14 @@ class HealOrchestrator:
 
             op = ctx.op if hasattr(ctx, "op") else ctx
             task_id = str(getattr(op, "instance_id", "unknown"))
-            arm = "nexus_memory_on" if getattr(op, "_memory_influence_trace", None) else "nexus_memory_off"
+            # MEMORY-EVAL-3: Check memory_enabled flag for arm determination
+            memory_enabled = getattr(op, "memory_enabled", True)
+            mem_trace = getattr(op, "_memory_influence_trace", None)
+            # memory_on if memory_enabled AND trace has actual data (not just TRACE_MISSING)
+            if memory_enabled and mem_trace and getattr(mem_trace, "trace_status", "") == "TRACE_AVAILABLE":
+                arm = "nexus_memory_on"
+            else:
+                arm = "nexus_memory_off"
 
             collector = LiveArtifactCollector(
                 task_id=task_id,
@@ -588,9 +600,16 @@ class HealOrchestrator:
 
             # Prompt manifest
             prompt_len = len(str(getattr(op, "system_prompt", ""))) + len(str(getattr(op, "user_prompt", "")))
+            # MEMORY-EVAL-3: Check if memory was actually retrieved (not just trace exists)
+            memory_actually_retrieved = (
+                memory_enabled
+                and mem_trace
+                and getattr(mem_trace, "trace_status", "") == "TRACE_AVAILABLE"
+                and getattr(mem_trace, "retrieved_count", 0) > 0
+            )
             collector.capture_prompt_manifest({
                 "prompt_length_chars": prompt_len,
-                "memory_section_included": bool(mem_trace),
+                "memory_section_included": memory_actually_retrieved,
                 "repair_attempt_id": task_id,
             })
 
