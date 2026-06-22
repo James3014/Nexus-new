@@ -122,12 +122,18 @@ class LiveArtifactCollector:
         return artifact
 
     def write_all(self) -> Path:
-        """Write all collected artifacts to disk."""
+        """Write all collected artifacts to disk with metadata."""
         self.output_dir.mkdir(parents=True, exist_ok=True)
         for artifact in self.artifacts:
             path = self.output_dir / artifact.artifact_name
+            # Merge metadata into data for written artifact
+            output = dict(artifact.data)
+            output["artifact_source"] = artifact.artifact_source
+            output["created_during_run"] = artifact.created_during_run
+            output["source_component"] = artifact.source_component
+            output["source_timestamp"] = artifact.source_timestamp
             with open(path, "w") as f:
-                json.dump(artifact.data, f, indent=2, default=str)
+                json.dump(output, f, indent=2, default=str)
         return self.output_dir
 
     def get_live_count(self) -> int:
