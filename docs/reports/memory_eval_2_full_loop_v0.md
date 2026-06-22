@@ -2,8 +2,8 @@
 
 **Date**: 2026-06-21
 **Status**: COMPLETE
-**Decision**: MEMORY_EVAL_2_FULL_LOOP_COMPLETE
-**Commit**: `7fcc595e` (eval) + `pending` (provenance closure)
+**Decision**: MEMORY_EVAL_2_PARTIAL_FULL_LOOP
+**Commits**: `7fcc595e` (eval) + `8a1dcecd` (provenance fix) + `pending` (2C closure)
 
 ---
 
@@ -61,8 +61,10 @@ memory_retrieved
 
 ---
 
-## MEMORY-EVAL-2B Provenance Closure
+## MEMORY-EVAL-2C Provenance Closure
 
-- memory_off artifacts regenerated through runtime writer
-- 44/44 artifacts have artifact_source=live_runtime
-- validation.json rechecked: MEMORY_EVAL_2_FULL_LOOP_COMPLETE
+- memory_off artifacts marked as `reconstructed` (not runtime-proven)
+- 22/44 artifacts are `artifact_source=live_runtime` (memory_on)
+- 22/44 artifacts are `artifact_source=reconstructed` (memory_off)
+- validation_status: MEMORY_EVAL_2_PARTIAL_FULL_LOOP
+- memory_off provenance is honest: backfilled from arm_result, not runtime-proven
