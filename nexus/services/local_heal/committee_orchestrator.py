@@ -80,6 +80,7 @@ class CommitteeOrchestrator(HealOrchestrator):
                         },
                     }
                     break
+                patch_hash = hashlib.sha256(patch_text.encode("utf-8")).hexdigest()[:16] if patch_text else ""
                 candidate_id = f"{ctx.op.instance_id}#candidate-{i + 1}"
                 candidate_snapshot = {
                     "candidate_id": candidate_id,
@@ -88,10 +89,15 @@ class CommitteeOrchestrator(HealOrchestrator):
                     "role": spec["role"],
                     "attempt": i + 1,
                     "raw_label": str(model_decision.get("raw_label", "r:0,d:0,p:3,c:0") or "r:0,d:0,p:3,c:0"),
-                    "patch_sha256": hashlib.sha256(patch_text.encode("utf-8")).hexdigest()[:16] if patch_text else "",
+                    "patch_sha256": patch_hash,
                     "patch_length": len(patch_text),
                     "selected": False,
                     "applied": False,
+                    "isolation_status": "stored",
+                    "isolated_patch_sha256": patch_hash,
+                    "isolated_patch_length": len(patch_text),
+                    "isolation_store": "committee_trace",
+                    "worktree_applied": False,
                     "model_decision": model_decision,
                 }
                 candidate_snapshots.append(candidate_snapshot)

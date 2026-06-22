@@ -282,3 +282,150 @@ def test_committee_candidate_ids_are_deterministic(monkeypatch):
     assert candidates[0]["applied"] is False
     assert candidates[1]["selected"] is False
     assert candidates[1]["applied"] is False
+
+
+def test_committee_candidates_are_isolated(monkeypatch):
+    ctx = _make_ctx()
+    orch = CommitteeOrchestrator.__new__(CommitteeOrchestrator)
+    orch.k = 2
+    orch.repro_phase = _FixedPhase()
+    orch.plan_phase = _FixedPhase()
+    orch.loc_phase = _FixedPhase()
+    orch.patch_phase = _PatchPhase()
+    orch.verify_phase = _FixedPhase(success=True)
+    monkeypatch.setenv("NEXUS_USE_COMMITTEE", "1")
+    monkeypatch.setattr(
+        "nexus.services.local_heal.committee_orchestrator.CommitteeControllerV263",
+        _CommitteeControllerStub,
+    )
+
+    orch.run(ctx)
+    candidates = ctx.op._committee_trace["proposer_candidates"]
+
+    # U3-2: both candidates have isolation_status="stored"
+    for c in candidates:
+        assert c["isolation_status"] == "stored"
+        assert c["isolation_store"] == "committee_trace"
+        assert c["worktree_applied"] is False
+
+    # U3-2: isolated_patch_sha256 equals patch_sha256
+    assert candidates[0]["isolated_patch_sha256"] == candidates[0]["patch_sha256"]
+    assert candidates[1]["isolated_patch_sha256"] == candidates[1]["patch_sha256"]
+
+    # U3-2: isolated_patch_length equals patch_length
+    assert candidates[0]["isolated_patch_length"] == candidates[0]["patch_length"]
+    assert candidates[1]["isolated_patch_length"] == candidates[1]["patch_length"]
+
+
+def test_committee_non_selected_candidate_remains_unapplied(monkeypatch):
+    ctx = _make_ctx()
+    orch = CommitteeOrchestrator.__new__(CommitteeOrchestrator)
+    orch.k = 2
+    orch.repro_phase = _FixedPhase()
+    orch.plan_phase = _FixedPhase()
+    orch.loc_phase = _FixedPhase()
+    orch.patch_phase = _PatchPhase()
+    orch.verify_phase = _FixedPhase(success=True)
+    monkeypatch.setenv("NEXUS_USE_COMMITTEE", "1")
+    monkeypatch.setattr(
+        "nexus.services.local_heal.committee_orchestrator.CommitteeControllerV263",
+        _CommitteeControllerStub,
+    )
+
+    orch.run(ctx)
+    candidates = ctx.op._committee_trace["proposer_candidates"]
+
+    # U3-2: candidate 1 (non-selected) remains applied=false, worktree_applied=false
+    assert candidates[0]["selected"] is False
+    assert candidates[0]["applied"] is False
+    assert candidates[0]["worktree_applied"] is False
+    # U3-2: candidate 2 (selected by judge) also remains applied=false in snapshot
+    # (actual apply happens in U3-3, not U3-2)
+    assert candidates[1]["selected"] is False
+    assert candidates[1]["applied"] is False
+    assert candidates[1]["worktree_applied"] is False
+
+
+def test_committee_isolation_preserved_in_non_last_fail_closed(monkeypatch):
+    ctx = _make_ctx()
+    orch = CommitteeOrchestrator.__new__(CommitteeOrchestrator)
+    orch.k = 2
+    orch.repro_phase = _FixedPhase()
+    orch.plan_phase = _FixedPhase()
+    orch.loc_phase = _FixedPhase()
+    orch.patch_phase = _PatchPhase()
+    orch.verify_phase = _FixedPhase(success=True)
+    monkeypatch.setenv("NEXUS_USE_COMMITTEE", "1")
+    monkeypatch.setattr(
+        "nexus.services.local_heal.committee_orchestrator.CommitteeControllerV263",
+        _FirstCandidateCommitteeControllerStub,
+    )
+
+    orch.run(ctx)
+
+    # U3-2: even in fail-closed path, candidates still have isolation fields
+    candidates = ctx.op._committee_trace["proposer_candidates"]
+    assert len(candidates) == 2
+    for c in candidates:
+        assert c["isolation_status"] == "stored"
+        assert c["isolated_patch_sha256"] == c["patch_sha256"]
+        assert c["isolated_patch_length"] == c["patch_length"]
+        assert c["worktree_applied"] is False
+
+    assert ctx.op.failure_reason == "COMMITTEE_SELECTED_NON_APPLIED_CANDIDATE_UNSUPPORTED"
+
+
+def test_committee_isolation_preserved_in_missing_mapping(monkeypatch):
+    ctx = _make_ctx()
+    orch = CommitteeOrchestrator.__new__(CommitteeOrchestrator)
+    orch.k = 2
+    orch.repro_phase = _FixedPhase()
+    orch.plan_phase = _FixedPhase()
+    orch.loc_phase = _FixedPhase()
+    orch.patch_phase = _PatchPhase()
+    orch.verify_phase = _FixedPhase(success=True)
+    monkeypatch.setenv("NEXUS_USE_COMMITTEE", "1")
+    monkeypatch.setattr(
+        "nexus.services.local_heal.committee_orchestrator.CommitteeControllerV263",
+        _UnrecognizedWinnerCommitteeControllerStub,
+    )
+
+    orch.run(ctx)
+
+    # U3-2: even in missing mapping fail-closed, candidates still have isolation fields
+    candidates = ctx.op._committee_trace["proposer_candidates"]
+    assert len(candidates) == 2
+    for c in candidates:
+        assert c["isolation_status"] == "stored"
+        assert c["isolated_patch_sha256"] == c["patch_sha256"]
+        assert c["isolated_patch_length"] == c["patch_length"]
+
+    assert ctx.op.failure_reason == "COMMITTEE_WINNER_CANDIDATE_MAPPING_MISSING"
+
+
+def test_committee_isolation_fields_persisted_in_receipt(monkeypatch):
+    ctx = _make_ctx()
+    orch = CommitteeOrchestrator.__new__(CommitteeOrchestrator)
+    orch.k = 2
+    orch.repro_phase = _FixedPhase()
+    orch.plan_phase = _FixedPhase()
+    orch.loc_phase = _FixedPhase()
+    orch.patch_phase = _PatchPhase()
+    orch.verify_phase = _FixedPhase(success=True)
+    monkeypatch.setenv("NEXUS_USE_COMMITTEE", "1")
+    monkeypatch.setattr(
+        "nexus.services.local_heal.committee_orchestrator.CommitteeControllerV263",
+        _CommitteeControllerStub,
+    )
+
+    orch.run(ctx)
+    receipt = build_repair_receipt(ctx)
+    candidates = receipt["telemetries"]["committee"]["proposer_candidates"]
+
+    # U3-2: isolation fields persist through receipt
+    for c in candidates:
+        assert c["isolation_status"] == "stored"
+        assert c["isolated_patch_sha256"] == c["patch_sha256"]
+        assert c["isolated_patch_length"] == c["patch_length"]
+        assert c["isolation_store"] == "committee_trace"
+        assert c["worktree_applied"] is False
