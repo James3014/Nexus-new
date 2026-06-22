@@ -5614,8 +5614,10 @@ def _finalize_with_nexus_row(
                 h5_local_selected_candidate_hash_match = bool(rc.get("selected_candidate_apply_hash_match", False))
                 h5_local_solve_eligible = bool(finalized.get("local_solve_eligible", False))
                 if not h5_local_solve_eligible and rc.get("selected_candidate_apply_hash_match") is False:
-                    h5_local_failure_reason = str(rc.get("failure_reason", "") or "")
+                    h5_local_failure_reason = str(rc.get("failure_reason", "") or finalized.get("failure_reason", "") or "")
                 elif not h5_local_solve_eligible and h5_local_selected_candidate_id:
+                    h5_local_failure_reason = str(finalized.get("failure_reason", "") or "")
+                elif not h5_local_solve_eligible:
                     h5_local_failure_reason = str(finalized.get("failure_reason", "") or "")
             else:
                 h5_local_failure_reason = "local_trace_missing"
@@ -5643,6 +5645,55 @@ def _finalize_with_nexus_row(
             "public_claim_allowed": False,
             "production_ready": False,
         }
+
+        # H5-3: Fallback eligibility trace
+        enable_h5_eligibility = _env_truthy("NEXUS_HYBRID_H5_FALLBACK_ELIGIBILITY_TRACE")
+        h5_cloud_fallback_eligible = False
+        h5_cloud_fallback_reason = ""
+        h5_fail_closed_reason = ""
+        h5_fallback_policy_version = "h5_fallback_eligibility_v1"
+
+        if enable_h5_eligibility:
+            h5 = finalized["h5_route"]
+            local_att = h5["local_attempted"]
+            local_ok = h5["local_solve_eligible"]
+            local_hash_ok = h5["local_selected_candidate_hash_match"]
+            local_fail = h5["local_failure_reason"]
+            cloud_ok = cloud_provider_value in {"gemini", "codex"}
+
+            if local_att and local_ok and local_hash_ok:
+                h5_cloud_fallback_reason = "local_success_no_fallback"
+            elif local_att and not local_ok and local_fail.startswith("VERIFIER_REJECTION"):
+                if cloud_ok:
+                    h5_cloud_fallback_eligible = True
+                    h5_cloud_fallback_reason = "local_verifier_rejected"
+                else:
+                    h5_fail_closed_reason = "cloud_provider_unavailable"
+            elif local_fail == "LOCAL_INFRA_UNAVAILABLE":
+                if cloud_ok:
+                    h5_cloud_fallback_eligible = True
+                    h5_cloud_fallback_reason = "local_infra_unavailable"
+                else:
+                    h5_fail_closed_reason = "cloud_provider_unavailable"
+            elif local_fail == "LOCAL_TIMEOUT":
+                if cloud_ok:
+                    h5_cloud_fallback_eligible = True
+                    h5_cloud_fallback_reason = "local_timeout"
+                else:
+                    h5_fail_closed_reason = "cloud_provider_unavailable"
+            elif local_fail == "COMMITTEE_WINNER_CANDIDATE_MAPPING_MISSING":
+                h5_fail_closed_reason = "local_missing_candidate_mapping"
+            elif local_fail == "COMMITTEE_SELECTED_CANDIDATE_ARTIFACT_MISSING":
+                h5_fail_closed_reason = "local_missing_artifact"
+            elif local_fail == "COMMITTEE_SELECTED_CANDIDATE_APPLY_HASH_MISMATCH":
+                h5_fail_closed_reason = "local_hash_mismatch"
+            elif local_fail == "local_trace_missing":
+                h5_fail_closed_reason = "local_trace_missing"
+
+            h5["cloud_fallback_eligible"] = h5_cloud_fallback_eligible
+            h5["cloud_fallback_reason"] = h5_cloud_fallback_reason
+            h5["fail_closed_reason"] = h5_fail_closed_reason
+            h5["fallback_policy_version"] = h5_fallback_policy_version
 
     # Ensure keys are also on the row level for simple flat queries
     finalized["route_mode"] = r_mode
@@ -9324,6 +9375,9 @@ def write_evidence_bundle(
         "h5_cloud_fallback_invoked_count": sum(1 for row in with_rows if bool(row.get("h5_route", {}).get("cloud_fallback_invoked", False))),
         "h5_local_attempted_count": sum(1 for row in with_rows if bool(row.get("h5_route", {}).get("local_attempted", False))),
         "h5_fail_closed_count": sum(1 for row in with_rows if str(row.get("h5_route", {}).get("final_source", "")) == "fail_closed"),
+        "h5_cloud_fallback_eligible_count": sum(1 for row in with_rows if bool(row.get("h5_route", {}).get("cloud_fallback_eligible", False))),
+        "h5_fallback_eligibility_trace_count": sum(1 for row in with_rows if bool(row.get("h5_route", {}).get("fallback_policy_version", ""))),
+        "h5_would_fail_closed_count": sum(1 for row in with_rows if bool(row.get("h5_route", {}).get("fail_closed_reason", ""))),
     }
     payload["external_provider_claim_boundary_contract"] = build_external_provider_claim_boundary_contract(payload)
     payload["public_promotion_readiness_contract"] = build_public_promotion_readiness_contract(payload)
