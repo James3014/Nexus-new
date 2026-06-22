@@ -21,6 +21,17 @@ def _extract_memory_trace(ctx: Any) -> dict[str, Any]:
     return get_empty_trace().to_dict()
 
 
+def _extract_committee_trace(ctx: Any) -> dict[str, Any]:
+    """Extract the opt-in heterogeneous committee trace when present."""
+    for carrier in (ctx, getattr(ctx, "op", None)):
+        if carrier is None:
+            continue
+        trace = getattr(carrier, "_committee_trace", None)
+        if isinstance(trace, dict) and trace:
+            return trace
+    return {}
+
+
 def _nexus_root() -> Path:
     return Path(__file__).resolve().parents[3]
 
@@ -493,6 +504,8 @@ def build_repair_receipt(ctx: Any, *, model_name: str = "nexus-local-heal", run_
             "learning_closure": dict(getattr(ctx, "_learning_closure", {}) or {}),
             # BMF3-OBS: ctx-scoped memory trace contract (no global fallback)
             "memory_influence": _extract_memory_trace(ctx),
+            # U3-HETEROGENEOUS-ROUTE-LIFT: opt-in committee trace
+            "committee": _extract_committee_trace(ctx),
         },
 
         # --- S1-prep: StrategyTrace-only (no execution effect) ---
