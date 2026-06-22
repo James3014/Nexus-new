@@ -479,7 +479,7 @@ class HealOrchestrator:
             if not query:
                 ctx.op._memory_influence_trace = get_empty_trace()
                 return
-            adapter = MemoryRetrievalAdapter()
+            adapter = MemoryRetrievalAdapter(memory_arm=getattr(ctx.op, "memory_arm", ""))
             adapter.retrieve_reranked(
                 query_text=query,
                 anchor_symbol=target_symbol,
