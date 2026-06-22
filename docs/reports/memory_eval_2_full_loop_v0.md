@@ -3,7 +3,7 @@
 **Date**: 2026-06-21
 **Status**: COMPLETE
 **Decision**: MEMORY_EVAL_2_FULL_LOOP_COMPLETE
-**Commit**: Pending
+**Commit**: `7fcc595e` (eval) + `pending` (provenance closure)
 
 ---
 
@@ -56,5 +56,13 @@ memory_retrieved
 |------|-------|
 | public_claim_allowed | false |
 | production_ready | false |
-    "training_export_allowed": false |
+| training_export_allowed | false |
 | internal_only | true |
+
+---
+
+## MEMORY-EVAL-2B Provenance Closure
+
+- memory_off artifacts regenerated through runtime writer
+- 44/44 artifacts have artifact_source=live_runtime
+- validation.json rechecked: MEMORY_EVAL_2_FULL_LOOP_COMPLETE
