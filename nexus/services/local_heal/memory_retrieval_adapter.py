@@ -248,18 +248,6 @@ class MemoryRetrievalAdapter:
                     pattern_type=pattern_type,
                 )
             )
-        # MEMORY-EVAL-4B Option B stub injection:
-        if not lessons and getattr(self, "memory_arm", "") == "nexus_memory_on":
-            lessons.append(
-                RetrievedLesson(
-                    finding_id="eval_stub_finding_id",
-                    summary="Stub memory lesson for evaluation harness comparison.",
-                    relevance_score=1.0,
-                    provenance="eval_stub_receipt_id",
-                    source="MockEvaluationStore",
-                    pattern_type="success",
-                )
-            )
 
         self.last_metadata["accepted"] = len(lessons)
         self.last_metadata["no_memory_match"] = not lessons
