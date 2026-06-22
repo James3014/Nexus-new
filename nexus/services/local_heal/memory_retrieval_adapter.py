@@ -256,6 +256,7 @@ class MemoryRetrievalAdapter:
         self.last_metadata["status"] = "ok"
         self.last_metadata["selected_ids"] = [lesson.finding_id for lesson in lessons]
         self.last_metadata["memory_evidence_ids"] = [lesson.finding_id for lesson in lessons]
+        self.last_metadata["primary_selected_id"] = lessons[0].finding_id if lessons else ""
         store_metadata = dict(getattr(self.store, "last_metadata", {}) or {})
         if store_metadata:
             self.last_metadata["retrieval_sources"] = list(store_metadata.get("retrieval_sources") or [])
@@ -371,6 +372,7 @@ class MemoryRetrievalAdapter:
         self.last_metadata["rerank_accepted"] = len(result)
         self.last_metadata["selected_ids"] = [lesson.finding_id for lesson in result]
         self.last_metadata["memory_evidence_ids"] = [lesson.finding_id for lesson in result]
+        self.last_metadata["primary_selected_id"] = result[0].finding_id if result else ""
 
         # BMF10-RSH: shadow ranking telemetry (runtime order UNCHANGED)
         try:

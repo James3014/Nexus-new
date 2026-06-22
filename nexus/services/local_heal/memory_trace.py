@@ -45,6 +45,7 @@ class MemoryTrace:
     internal_only: bool = True
     # BMF10-RSH: shadow ranking telemetry
     shadow_ranking: dict[str, Any] = field(default_factory=dict)
+    primary_selected_id: str = ""
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -71,6 +72,7 @@ class MemoryTrace:
             "source_contract": self.source_contract,
             "internal_only": self.internal_only,
             "shadow_ranking": dict(self.shadow_ranking),
+            "primary_selected_id": self.primary_selected_id,
         }
 
 
@@ -122,6 +124,7 @@ def build_memory_trace_from_adapter(
         influence_status="NOT_MEASURED",
         source_contract="MEMORY_RETRIEVAL_ADAPTER",
         shadow_ranking=dict(adapter_metadata.get("shadow_ranking") or {}),
+        primary_selected_id=str(adapter_metadata.get("primary_selected_id") or (ids[0] if ids else "")),
     )
 
 
