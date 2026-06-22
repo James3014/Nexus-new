@@ -679,3 +679,135 @@ def test_committee_receipt_persists_reapply_fields(monkeypatch):
     assert candidates[1]["selected"] is True
     assert candidates[1]["applied"] is True
     assert candidates[1]["worktree_applied"] is True
+
+
+def test_committee_candidate_isolation_gate_covers_identity_reapply_hash_and_receipt(monkeypatch):
+    """U3-4 focused gate: identity, isolation, re-apply, hash, receipt persistence."""
+    import nexus.services.local_heal.committee_orchestrator as orch_mod
+
+    def _make_orch(stub_cls, patch_phase=None):
+        orch = CommitteeOrchestrator.__new__(CommitteeOrchestrator)
+        orch.k = 2
+        orch.repro_phase = _FixedPhase()
+        orch.plan_phase = _FixedPhase()
+        orch.loc_phase = _FixedPhase()
+        orch.patch_phase = patch_phase or _PatchPhase()
+        orch.verify_phase = _FixedPhase(success=True)
+        monkeypatch.setenv("NEXUS_USE_COMMITTEE", "1")
+        monkeypatch.setattr(
+            "nexus.services.local_heal.committee_orchestrator.CommitteeControllerV263",
+            stub_cls,
+        )
+        return orch
+
+    def _run(stub_cls, patch_phase=None):
+        ctx = _make_ctx()
+        orch = _make_orch(stub_cls, patch_phase)
+        orch.run(ctx)
+        return ctx
+
+    # === Gate 1: Candidate identity ===
+    ctx = _run(_CommitteeControllerStub)
+    candidates = ctx.op._committee_trace["proposer_candidates"]
+    assert candidates[0]["candidate_id"] == "C_12481#candidate-1"
+    assert candidates[1]["candidate_id"] == "C_12481#candidate-2"
+    assert candidates[0]["candidate_key"] == "C_12481#proposer-1"
+    assert candidates[1]["candidate_key"] == "C_12481#proposer-2"
+
+    # === Gate 2: Candidate isolation ===
+    for c in candidates:
+        assert c["isolation_status"] == "stored"
+        assert c["isolated_patch_sha256"] == c["patch_sha256"]
+        assert c["isolated_patch_length"] == c["patch_length"]
+        assert c["isolation_store"] == "committee_trace"
+
+    # === Gate 3: Candidate 1 selected (non-last re-apply) ===
+    ctx1 = _run(_FirstCandidateCommitteeControllerStub)
+    c1 = ctx1.op._committee_trace["proposer_candidates"]
+    assert ctx1.op.final_patch == "patch-1"
+    assert c1[0]["selected"] is True
+    assert c1[0]["applied"] is True
+    assert c1[0]["worktree_applied"] is True
+    assert c1[1]["selected"] is False
+    assert c1[1]["applied"] is False
+    assert c1[1]["worktree_applied"] is False
+    assert ctx1.op._committee_trace["committee_receipt"]["selected_candidate_reapply_mode"] == "non_last_candidate_reapplied"
+    assert ctx1.op._committee_trace["committee_receipt"]["selected_candidate_apply_hash_match"] is True
+
+    # === Gate 4: Candidate 2 selected (last existing path) ===
+    ctx2 = _run(_CommitteeControllerStub)
+    c2 = ctx2.op._committee_trace["proposer_candidates"]
+    assert ctx2.op.final_patch == "patch-2"
+    assert c2[1]["selected"] is True
+    assert c2[1]["applied"] is True
+    assert c2[1]["worktree_applied"] is True
+    assert c2[0]["selected"] is False
+    assert c2[0]["applied"] is False
+    assert c2[0]["worktree_applied"] is False
+    assert ctx2.op._committee_trace["committee_receipt"]["selected_candidate_reapply_mode"] == "last_candidate_existing_path"
+    assert ctx2.op._committee_trace["committee_receipt"]["selected_candidate_apply_hash_match"] is True
+
+    # === Gate 5: Missing mapping ===
+    ctx_mm = _run(_UnrecognizedWinnerCommitteeControllerStub)
+    assert ctx_mm.op.failure_reason == "COMMITTEE_WINNER_CANDIDATE_MAPPING_MISSING"
+    assert ctx_mm.op._committee_trace["committee_receipt"]["selected_candidate_reapply_mode"] == "missing_mapping"
+    for c in ctx_mm.op._committee_trace["proposer_candidates"]:
+        assert c["selected"] is False
+        assert c["applied"] is False
+        assert c["worktree_applied"] is False
+    assert ctx_mm.op.solve_eligible is False
+    assert ctx_mm.op.final_patch == ""
+
+    # === Gate 6: Missing artifact ===
+    ctx_ma = _run(_CommitteeControllerStub, patch_phase=_EmptyPatchPhase())
+    assert ctx_ma.op.failure_reason == "COMMITTEE_SELECTED_CANDIDATE_ARTIFACT_MISSING"
+    assert ctx_ma.op._committee_trace["committee_receipt"]["selected_candidate_reapply_mode"] == "missing_artifact"
+    assert ctx_ma.op._committee_trace["committee_receipt"]["selected_candidate_apply_hash_match"] is False
+    assert ctx_ma.op.solve_eligible is False
+    assert ctx_ma.op.final_patch == ""
+
+    # === Gate 7: Hash mismatch ===
+    _real_hash_fn = orch_mod._compute_patch_hash
+    _call_count = {"n": 0}
+
+    def _fake_hash(patch_text):
+        _call_count["n"] += 1
+        if _call_count["n"] == 3 and patch_text == "patch-2":
+            return "mismatched_hash"
+        return _real_hash_fn(patch_text)
+
+    monkeypatch.setattr(orch_mod, "_compute_patch_hash", _fake_hash)
+    ctx_hm = _run(_CommitteeControllerStub)
+    monkeypatch.setattr(orch_mod, "_compute_patch_hash", _real_hash_fn)
+    assert ctx_hm.op.failure_reason == "COMMITTEE_SELECTED_CANDIDATE_APPLY_HASH_MISMATCH"
+    assert ctx_hm.op._committee_trace["committee_receipt"]["selected_candidate_reapply_mode"] == "hash_mismatch"
+    assert ctx_hm.op._committee_trace["committee_receipt"]["selected_candidate_apply_hash_match"] is False
+    assert ctx_hm.op.solve_eligible is False
+    assert ctx_hm.op.final_patch == ""
+
+    # === Gate 8: Receipt persistence ===
+    receipt = build_repair_receipt(ctx2)
+    committee = receipt["telemetries"]["committee"]
+    rc = committee["committee_receipt"]
+
+    for c in committee["proposer_candidates"]:
+        assert "candidate_id" in c
+        assert c["isolation_status"] == "stored"
+        assert c["isolated_patch_sha256"] == c["patch_sha256"]
+        assert c["isolated_patch_length"] == c["patch_length"]
+
+    assert committee["proposer_candidates"][0]["selected"] is False
+    assert committee["proposer_candidates"][1]["selected"] is True
+    assert committee["proposer_candidates"][1]["applied"] is True
+    assert committee["proposer_candidates"][1]["worktree_applied"] is True
+
+    assert committee["judge_selection"]["selected_candidate_id"] == "C_12481#candidate-2"
+    assert committee["judge_selection"]["candidate_id_mapping_mode"] == "legacy_winner_id_prefix"
+
+    assert rc["selected_candidate_id"] == "C_12481#candidate-2"
+    assert rc["selected_candidate_apply_supported"] is True
+    assert rc["selected_candidate_applied"] is True
+    assert rc["selected_candidate_patch_sha256"] != ""
+    assert rc["applied_patch_sha256"] != ""
+    assert rc["selected_candidate_apply_hash_match"] is True
+    assert rc["selected_candidate_reapply_mode"] == "last_candidate_existing_path"
