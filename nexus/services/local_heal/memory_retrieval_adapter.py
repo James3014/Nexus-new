@@ -16,6 +16,7 @@ class RetrievedLesson:
     provenance: str
     source: str
     pattern_type: str
+    task_id: str = ""
 
     @property
     def scoring_delta(self) -> float:
@@ -246,6 +247,7 @@ class MemoryRetrievalAdapter:
                     provenance=provenance,
                     source=str(row.get("source") or self.last_metadata["source"]),
                     pattern_type=pattern_type,
+                    task_id=str(row.get("task_id") or ""),
                 )
             )
 
@@ -269,6 +271,7 @@ class MemoryRetrievalAdapter:
         anchor_file: str = "",
         limit: int = 5,
         max_chars: int = 800,
+        task_id: str = "",
     ) -> list[RetrievedLesson]:
         """BG: Memory Reranking — symbol-weighted relevance re-scoring.
 
@@ -337,6 +340,13 @@ class MemoryRetrievalAdapter:
             if lesson.pattern_type == "failure":
                 score -= 1.5
 
+            # Task ID match boost
+            if task_id and lesson.task_id:
+                def normalize_id(t: str) -> str:
+                    return re.sub(r'[^a-zA-Z0-9]', '', t).lower()
+                if normalize_id(lesson.task_id) == normalize_id(task_id):
+                    score += 10.0
+
             scored.append((score, lesson))
 
         # Sort by score descending
@@ -354,6 +364,7 @@ class MemoryRetrievalAdapter:
                     provenance=lesson.provenance,
                     source=lesson.source,
                     pattern_type=lesson.pattern_type,
+                    task_id=lesson.task_id,
                 )
             )
 

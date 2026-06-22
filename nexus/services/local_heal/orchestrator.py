@@ -485,6 +485,7 @@ class HealOrchestrator:
                 anchor_symbol=target_symbol,
                 anchor_file=target_file_text,
                 limit=3,
+                task_id=getattr(ctx.op, "instance_id", "") or getattr(ctx.op, "task_id", ""),
             )
             adapter.last_metadata["evidence_packet_included"] = False
             adapter.last_metadata["prompt_included"] = False
