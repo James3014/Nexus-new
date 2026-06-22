@@ -407,6 +407,9 @@ class HealOrchestrator:
         # RRL3: Attach evidence harness (write-only observability)
         self._attach_evidence_harness(ctx)
 
+        # EVAL-SUBSTRATE-1B: Live full-loop artifact capture
+        self._attach_live_full_loop_artifacts(ctx)
+
         if self.receipt_writer:
             try:
                 receipt_path = self.receipt_writer(ctx, run_group=getattr(ctx.op, "run_group", ""))
@@ -545,6 +548,110 @@ class HealOrchestrator:
             bundle.gate_passed = bool(getattr(op, "solve_eligible", False))
             # Finalize (writes artifacts)
             harness.finalize(bundle)
+        except Exception:
+            pass  # Write-only observability: never fail the repair loop
+
+    def _attach_live_full_loop_artifacts(self, ctx: HealContext) -> None:
+        """EVAL-SUBSTRATE-1B: Live full-loop artifact capture (runtime wiring)."""
+        try:
+            from nexus.services.local_heal.live_artifact_collector import LiveArtifactCollector
+            from pathlib import Path
+
+            op = ctx.op if hasattr(ctx, "op") else ctx
+            task_id = str(getattr(op, "instance_id", "unknown"))
+            arm = "nexus_memory_on" if getattr(op, "_memory_influence_trace", None) else "nexus_memory_off"
+
+            collector = LiveArtifactCollector(
+                task_id=task_id,
+                arm=arm,
+                output_dir=Path("artifacts/runtime/eval_substrate_1b_runtime_wiring_v0/runs"),
+            )
+
+            # Capture from runtime ctx/op fields
+            collector.capture_input_manifest(
+                task_id=task_id,
+                repo=str(getattr(op, "repo_dir", "")),
+                issue_summary=str(getattr(op, "failure_reason", "")),
+                task_class=str(getattr(op, "task_class", "")),
+            )
+
+            # Memory trace from existing trace
+            mem_trace = getattr(op, "_memory_influence_trace", None)
+            if mem_trace and hasattr(mem_trace, "to_dict"):
+                collector.capture_memory_trace(mem_trace.to_dict())
+            else:
+                collector.capture_memory_trace({"available": False, "trace_status": "NOT_USED"})
+
+            # Evidence packet (from native_evidence_packet if available)
+            evidence = getattr(op, "_evidence_packet", None)
+            collector.capture_evidence_packet(evidence if evidence else {"unavailable": True})
+
+            # Prompt manifest
+            prompt_len = len(str(getattr(op, "system_prompt", ""))) + len(str(getattr(op, "user_prompt", "")))
+            collector.capture_prompt_manifest({
+                "prompt_length_chars": prompt_len,
+                "memory_section_included": bool(mem_trace),
+                "repair_attempt_id": task_id,
+            })
+
+            # Model output
+            collector.capture_model_output({
+                "model_name": str(getattr(op, "model_name", "")),
+                "output_length_chars": len(str(getattr(op, "final_patch", ""))),
+                "patch_produced": bool(getattr(op, "final_patch", "")),
+                "repair_attempt_id": task_id,
+            })
+
+            # Patch apply
+            collector.capture_patch_apply({
+                "patch_applied": bool(getattr(op, "patch_applied", False)),
+                "patch_len": len(str(getattr(op, "final_patch", ""))),
+                "repair_attempt_id": task_id,
+            })
+
+            # Verifier result
+            collector.capture_verifier_result({
+                "status": "PASS" if getattr(op, "solve_eligible", False) else "FAIL",
+                "repair_attempt_id": task_id,
+            })
+
+            # Receipt
+            collector.capture_receipt({
+                "receipt_path": str(getattr(op, "receipt_path", "")),
+                "claim_eligible": bool(getattr(op, "claim_eligible", False)),
+                "gate_passed": bool(getattr(op, "solve_eligible", False)),
+                "repair_attempt_id": task_id,
+            })
+
+            # Evidence bundle
+            collector.capture_evidence_bundle({
+                "task_id": task_id,
+                "final_status": "SOLVED" if getattr(op, "solve_eligible", False) else "FAIL",
+                "repair_attempt_id": task_id,
+            })
+
+            # Bottleneck
+            collector.capture_bottleneck({
+                "final_status": "SOLVED" if getattr(op, "solve_eligible", False) else "FAIL",
+                "primary_bottleneck": "none" if getattr(op, "solve_eligible", False) else "unknown",
+                "repair_attempt_id": task_id,
+            })
+
+            # Arm result
+            collector.capture_arm_result({
+                "task_id": task_id,
+                "arm": arm,
+                "solved": bool(getattr(op, "solve_eligible", False)),
+                "verifier_status": "PASS" if getattr(op, "solve_eligible", False) else "FAIL",
+                "repair_attempt_id": task_id,
+            })
+
+            # Write all artifacts
+            collector.write_all()
+
+            # Store collector reference on ctx for test verification
+            ctx.op._live_artifact_collector = collector
+
         except Exception:
             pass  # Write-only observability: never fail the repair loop
 
