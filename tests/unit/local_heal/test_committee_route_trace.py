@@ -280,8 +280,9 @@ def test_committee_candidate_ids_are_deterministic(monkeypatch):
     # U3-1: selected/applied flags present
     assert candidates[0]["selected"] is False
     assert candidates[0]["applied"] is False
-    assert candidates[1]["selected"] is False
-    assert candidates[1]["applied"] is False
+    # U3-3A: candidate 2 is selected by judge (last candidate wins)
+    assert candidates[1]["selected"] is True
+    assert candidates[1]["applied"] is True
 
 
 def test_committee_candidates_are_isolated(monkeypatch):
@@ -306,7 +307,11 @@ def test_committee_candidates_are_isolated(monkeypatch):
     for c in candidates:
         assert c["isolation_status"] == "stored"
         assert c["isolation_store"] == "committee_trace"
-        assert c["worktree_applied"] is False
+
+    # U3-3A: non-selected candidate has worktree_applied=false
+    assert candidates[0]["worktree_applied"] is False
+    # U3-3A: selected candidate has worktree_applied=true
+    assert candidates[1]["worktree_applied"] is True
 
     # U3-2: isolated_patch_sha256 equals patch_sha256
     assert candidates[0]["isolated_patch_sha256"] == candidates[0]["patch_sha256"]
@@ -335,15 +340,14 @@ def test_committee_non_selected_candidate_remains_unapplied(monkeypatch):
     orch.run(ctx)
     candidates = ctx.op._committee_trace["proposer_candidates"]
 
-    # U3-2: candidate 1 (non-selected) remains applied=false, worktree_applied=false
+    # U3-3A: candidate 1 (non-selected) remains all false
     assert candidates[0]["selected"] is False
     assert candidates[0]["applied"] is False
     assert candidates[0]["worktree_applied"] is False
-    # U3-2: candidate 2 (selected by judge) also remains applied=false in snapshot
-    # (actual apply happens in U3-3, not U3-2)
-    assert candidates[1]["selected"] is False
-    assert candidates[1]["applied"] is False
-    assert candidates[1]["worktree_applied"] is False
+    # U3-3A: candidate 2 (selected and applied by judge)
+    assert candidates[1]["selected"] is True
+    assert candidates[1]["applied"] is True
+    assert candidates[1]["worktree_applied"] is True
 
 
 def test_committee_isolation_preserved_in_non_last_fail_closed(monkeypatch):
@@ -363,16 +367,26 @@ def test_committee_isolation_preserved_in_non_last_fail_closed(monkeypatch):
 
     orch.run(ctx)
 
-    # U3-2: even in fail-closed path, candidates still have isolation fields
     candidates = ctx.op._committee_trace["proposer_candidates"]
     assert len(candidates) == 2
+
+    # U3-3A: non-last selected candidate — selected=true but applied=false
+    assert candidates[0]["selected"] is True
+    assert candidates[0]["applied"] is False
+    assert candidates[0]["worktree_applied"] is False
+    # U3-3A: non-selected candidate remains all false
+    assert candidates[1]["selected"] is False
+    assert candidates[1]["applied"] is False
+    assert candidates[1]["worktree_applied"] is False
+
+    # isolation fields still present
     for c in candidates:
         assert c["isolation_status"] == "stored"
         assert c["isolated_patch_sha256"] == c["patch_sha256"]
         assert c["isolated_patch_length"] == c["patch_length"]
-        assert c["worktree_applied"] is False
 
     assert ctx.op.failure_reason == "COMMITTEE_SELECTED_NON_APPLIED_CANDIDATE_UNSUPPORTED"
+    assert ctx.op._committee_trace["committee_receipt"]["selected_candidate_applied"] is False
 
 
 def test_committee_isolation_preserved_in_missing_mapping(monkeypatch):
@@ -392,15 +406,20 @@ def test_committee_isolation_preserved_in_missing_mapping(monkeypatch):
 
     orch.run(ctx)
 
-    # U3-2: even in missing mapping fail-closed, candidates still have isolation fields
     candidates = ctx.op._committee_trace["proposer_candidates"]
     assert len(candidates) == 2
+
+    # U3-3A: missing mapping — all selected=false, applied=false, worktree_applied=false
     for c in candidates:
+        assert c["selected"] is False
+        assert c["applied"] is False
+        assert c["worktree_applied"] is False
         assert c["isolation_status"] == "stored"
         assert c["isolated_patch_sha256"] == c["patch_sha256"]
         assert c["isolated_patch_length"] == c["patch_length"]
 
     assert ctx.op.failure_reason == "COMMITTEE_WINNER_CANDIDATE_MAPPING_MISSING"
+    assert ctx.op._committee_trace["committee_receipt"]["selected_candidate_applied"] is False
 
 
 def test_committee_isolation_fields_persisted_in_receipt(monkeypatch):
@@ -420,7 +439,8 @@ def test_committee_isolation_fields_persisted_in_receipt(monkeypatch):
 
     orch.run(ctx)
     receipt = build_repair_receipt(ctx)
-    candidates = receipt["telemetries"]["committee"]["proposer_candidates"]
+    committee = receipt["telemetries"]["committee"]
+    candidates = committee["proposer_candidates"]
 
     # U3-2: isolation fields persist through receipt
     for c in candidates:
@@ -428,4 +448,14 @@ def test_committee_isolation_fields_persisted_in_receipt(monkeypatch):
         assert c["isolated_patch_sha256"] == c["patch_sha256"]
         assert c["isolated_patch_length"] == c["patch_length"]
         assert c["isolation_store"] == "committee_trace"
-        assert c["worktree_applied"] is False
+
+    # U3-3A: selected candidate applied state persists
+    assert candidates[0]["selected"] is False
+    assert candidates[0]["applied"] is False
+    assert candidates[0]["worktree_applied"] is False
+    assert candidates[1]["selected"] is True
+    assert candidates[1]["applied"] is True
+    assert candidates[1]["worktree_applied"] is True
+
+    # U3-3A: committee_receipt has selected_candidate_applied
+    assert committee["committee_receipt"]["selected_candidate_applied"] is True

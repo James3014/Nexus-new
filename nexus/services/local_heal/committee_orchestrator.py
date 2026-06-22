@@ -214,6 +214,13 @@ class CommitteeOrchestrator(HealOrchestrator):
             },
         }
 
+        # --- Mark selected candidate state on snapshot ---
+        if selected_snapshot and selected_candidate_id:
+            for snap in candidate_snapshots:
+                if snap.get("candidate_id") == selected_candidate_id:
+                    snap["selected"] = True
+                    break
+
         if receipt.winner_id:
             if candidate_id_mapping_mode == "missing":
                 ctx.op.final_patch = ""
@@ -221,6 +228,7 @@ class CommitteeOrchestrator(HealOrchestrator):
                 ctx.op.failure_reason = "COMMITTEE_WINNER_CANDIDATE_MAPPING_MISSING"
                 ctx.op._committee_trace["judge_selection"]["failure_bucket"] = "candidate_mapping_missing"
                 ctx.op._committee_trace["committee_receipt"]["selected_candidate_apply_supported"] = False
+                ctx.op._committee_trace["committee_receipt"]["selected_candidate_applied"] = False
                 return ctx
 
             if attempt_idx != len(proposals) - 1:
@@ -229,8 +237,16 @@ class CommitteeOrchestrator(HealOrchestrator):
                 ctx.op.failure_reason = "COMMITTEE_SELECTED_NON_APPLIED_CANDIDATE_UNSUPPORTED"
                 ctx.op._committee_trace["judge_selection"]["failure_bucket"] = "selected_candidate_not_applied"
                 ctx.op._committee_trace["committee_receipt"]["selected_candidate_apply_supported"] = False
+                ctx.op._committee_trace["committee_receipt"]["selected_candidate_applied"] = False
                 return ctx
             ctx.op._committee_trace["committee_receipt"]["selected_candidate_apply_supported"] = True
+            ctx.op._committee_trace["committee_receipt"]["selected_candidate_applied"] = True
+            # Mark applied state on the selected candidate snapshot
+            for snap in candidate_snapshots:
+                if snap.get("candidate_id") == selected_candidate_id:
+                    snap["applied"] = True
+                    snap["worktree_applied"] = True
+                    break
             ctx.op.final_patch = proposals[attempt_idx]["artifacts"][0]
             logger.info(f"  🏆 Winner Selected: {receipt.winner_id} (candidate_id={selected_candidate_id})")
 
