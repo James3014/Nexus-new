@@ -5776,6 +5776,77 @@ def _finalize_with_nexus_row(
             h5["route_order_shadow_policy_version"] = shadow_policy
             h5["route_order_shadow_behavior_changed"] = False
 
+        # H5-6: Execution gate preflight
+        enable_h5_gate = _env_truthy("NEXUS_HYBRID_H5_EXECUTION_GATE_PREFLIGHT")
+        if enable_h5_gate:
+            h5 = finalized["h5_route"]
+            gate_status = "not_evaluated"
+            gate_reasons = []
+            gate_allows_local_first = False
+            gate_allows_cloud_fallback = False
+            gate_allows_final_source = False
+            gate_allows_behavior = False
+            gate_policy = "h5_execution_gate_preflight_v1"
+
+            shadow_enabled = h5.get("route_order_shadow_enabled", False)
+            shadow_terminal = h5.get("route_order_shadow_terminal_state", "")
+            fb_invoked = h5.get("cloud_fallback_invoked", False)
+            cm_invoked = h5.get("cloud_model_invoked", False)
+            beh_ch = h5.get("behavior_changed", False)
+            blocked = h5.get("blocked_delivery", False)
+            decision = h5.get("cloud_fallback_decision", "")
+            would_invoke = h5.get("cloud_fallback_would_invoke", False)
+            local_att = h5.get("local_attempted", False)
+            local_hash_ok = h5.get("local_selected_candidate_hash_match", False)
+            local_ok = h5.get("local_solve_eligible", False)
+
+            # Check input row for side-effect / governance violations
+            # (h5_route always has safe defaults; violations come from the row)
+            row_final_source = str(finalized.get("final_source", "none") or "none")
+            row_beh_ch = bool(finalized.get("behavior_changed", False))
+            row_pcl = finalized.get("public_claim_allowed", False)
+            row_prd = finalized.get("production_ready", False)
+
+            if fb_invoked or cm_invoked or row_final_source != "none" or row_beh_ch:
+                gate_status = "blocked"
+                gate_reasons.append("unexpected_execution_side_effect")
+            elif row_pcl is not False or row_prd is not False:
+                gate_status = "blocked"
+                gate_reasons.append("governance_boundary_violation")
+            elif not shadow_enabled:
+                gate_status = "blocked"
+                gate_reasons.append("route_order_shadow_missing")
+            elif shadow_terminal == "would_fail_closed":
+                gate_status = "blocked"
+                gate_reasons.append("shadow_would_fail_closed")
+            elif shadow_terminal == "not_evaluated":
+                gate_status = "blocked"
+                gate_reasons.append("shadow_not_evaluated")
+            elif shadow_terminal == "would_use_local_candidate":
+                    if local_att and local_ok and local_hash_ok and row_final_source == "none" and not beh_ch and not blocked:
+                        gate_status = "eligible_dry_run_only"
+                    else:
+                        gate_status = "blocked"
+                        gate_reasons.append("local_candidate_preconditions_not_met")
+            elif shadow_terminal == "would_use_cloud_fallback":
+                if decision == "would_invoke_cloud_fallback" and would_invoke and not fb_invoked and not cm_invoked and row_final_source == "none" and not beh_ch and not blocked:
+                    gate_status = "eligible_dry_run_only"
+                else:
+                    gate_status = "blocked"
+                    gate_reasons.append("cloud_fallback_preconditions_not_met")
+            else:
+                gate_status = "blocked"
+                gate_reasons.append("unknown_shadow_terminal_state")
+
+            h5["execution_gate_evaluated"] = True
+            h5["execution_gate_status"] = gate_status
+            h5["execution_gate_reasons"] = gate_reasons
+            h5["execution_gate_policy_version"] = gate_policy
+            h5["execution_gate_allows_local_first"] = gate_allows_local_first
+            h5["execution_gate_allows_cloud_fallback"] = gate_allows_cloud_fallback
+            h5["execution_gate_allows_final_source_change"] = gate_allows_final_source
+            h5["execution_gate_allows_behavior_change"] = gate_allows_behavior
+
     # Ensure keys are also on the row level for simple flat queries
     finalized["route_mode"] = r_mode
     finalized["trace_only"] = True
@@ -9468,6 +9539,11 @@ def write_evidence_bundle(
         "h5_shadow_would_use_cloud_fallback_count": sum(1 for row in with_rows if str(row.get("h5_route", {}).get("route_order_shadow_terminal_state", "")) == "would_use_cloud_fallback"),
         "h5_shadow_would_fail_closed_count": sum(1 for row in with_rows if str(row.get("h5_route", {}).get("route_order_shadow_terminal_state", "")) == "would_fail_closed"),
         "h5_shadow_behavior_changed_count": sum(1 for row in with_rows if bool(row.get("h5_route", {}).get("route_order_shadow_behavior_changed", False))),
+        "h5_execution_gate_evaluated_count": sum(1 for row in with_rows if bool(row.get("h5_route", {}).get("execution_gate_evaluated", False))),
+        "h5_execution_gate_blocked_count": sum(1 for row in with_rows if str(row.get("h5_route", {}).get("execution_gate_status", "")) == "blocked"),
+        "h5_execution_gate_eligible_dry_run_only_count": sum(1 for row in with_rows if str(row.get("h5_route", {}).get("execution_gate_status", "")) == "eligible_dry_run_only"),
+        "h5_execution_gate_unexpected_side_effect_count": sum(1 for row in with_rows if "unexpected_execution_side_effect" in (row.get("h5_route", {}).get("execution_gate_reasons", []) or [])),
+        "h5_execution_gate_governance_violation_count": sum(1 for row in with_rows if "governance_boundary_violation" in (row.get("h5_route", {}).get("execution_gate_reasons", []) or [])),
     }
     payload["external_provider_claim_boundary_contract"] = build_external_provider_claim_boundary_contract(payload)
     payload["public_promotion_readiness_contract"] = build_public_promotion_readiness_contract(payload)
