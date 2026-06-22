@@ -5725,6 +5725,57 @@ def _finalize_with_nexus_row(
             h5["cloud_fallback_execution_mode"] = h5_fallback_exec_mode
             h5["fallback_decision_policy_version"] = h5_decision_policy
 
+        # H5-5: Route-order shadow simulation
+        enable_h5_shadow = _env_truthy("NEXUS_HYBRID_H5_ROUTE_ORDER_SHADOW")
+        if enable_h5_shadow:
+            h5 = finalized["h5_route"]
+            shadow_seq = []
+            shadow_terminal = "not_evaluated"
+            shadow_reason = ""
+            shadow_policy = "h5_route_order_shadow_v1"
+
+            local_att = h5.get("local_attempted", False)
+            local_ok = h5.get("local_solve_eligible", False)
+            local_hash_ok = h5.get("local_selected_candidate_hash_match", False)
+            local_fail = h5.get("local_failure_reason", "")
+            decision = h5.get("cloud_fallback_decision", "")
+
+            if not local_att and local_fail == "local_trace_missing":
+                shadow_seq = []
+                shadow_terminal = "not_evaluated"
+                shadow_reason = "local_trace_missing"
+            elif local_att and local_ok and local_hash_ok:
+                shadow_seq = ["local_committee"]
+                shadow_terminal = "would_use_local_candidate"
+                shadow_reason = "local_success_hash_matched"
+            elif decision == "would_invoke_cloud_fallback":
+                shadow_seq = ["local_committee", "cloud_fallback"]
+                shadow_terminal = "would_use_cloud_fallback"
+                shadow_reason = h5.get("cloud_fallback_decision_reason", "")
+            elif decision == "would_fail_closed":
+                shadow_seq = ["local_committee"]
+                shadow_terminal = "would_fail_closed"
+                shadow_reason = h5.get("cloud_fallback_decision_reason", "")
+            elif decision == "skip_cloud_fallback":
+                shadow_seq = ["local_committee"]
+                shadow_terminal = "would_use_local_candidate"
+                shadow_reason = "local_success_no_fallback"
+            elif not local_att and local_fail == "local_trace_missing":
+                shadow_seq = []
+                shadow_terminal = "not_evaluated"
+                shadow_reason = "local_trace_missing"
+            else:
+                shadow_seq = []
+                shadow_terminal = "not_evaluated"
+                shadow_reason = "decision_not_available"
+
+            h5["route_order_shadow_enabled"] = True
+            h5["route_order_shadow_sequence"] = shadow_seq
+            h5["route_order_shadow_terminal_state"] = shadow_terminal
+            h5["route_order_shadow_reason"] = shadow_reason
+            h5["route_order_shadow_policy_version"] = shadow_policy
+            h5["route_order_shadow_behavior_changed"] = False
+
     # Ensure keys are also on the row level for simple flat queries
     finalized["route_mode"] = r_mode
     finalized["trace_only"] = True
@@ -9412,6 +9463,11 @@ def write_evidence_bundle(
         "h5_cloud_fallback_would_invoke_count": sum(1 for row in with_rows if bool(row.get("h5_route", {}).get("cloud_fallback_would_invoke", False))),
         "h5_would_fail_closed_decision_count": sum(1 for row in with_rows if str(row.get("h5_route", {}).get("cloud_fallback_decision", "")) == "would_fail_closed"),
         "h5_skip_cloud_fallback_decision_count": sum(1 for row in with_rows if str(row.get("h5_route", {}).get("cloud_fallback_decision", "")) == "skip_cloud_fallback"),
+        "h5_route_order_shadow_count": sum(1 for row in with_rows if bool(row.get("h5_route", {}).get("route_order_shadow_enabled", False))),
+        "h5_shadow_would_use_local_candidate_count": sum(1 for row in with_rows if str(row.get("h5_route", {}).get("route_order_shadow_terminal_state", "")) == "would_use_local_candidate"),
+        "h5_shadow_would_use_cloud_fallback_count": sum(1 for row in with_rows if str(row.get("h5_route", {}).get("route_order_shadow_terminal_state", "")) == "would_use_cloud_fallback"),
+        "h5_shadow_would_fail_closed_count": sum(1 for row in with_rows if str(row.get("h5_route", {}).get("route_order_shadow_terminal_state", "")) == "would_fail_closed"),
+        "h5_shadow_behavior_changed_count": sum(1 for row in with_rows if bool(row.get("h5_route", {}).get("route_order_shadow_behavior_changed", False))),
     }
     payload["external_provider_claim_boundary_contract"] = build_external_provider_claim_boundary_contract(payload)
     payload["public_promotion_readiness_contract"] = build_public_promotion_readiness_contract(payload)
