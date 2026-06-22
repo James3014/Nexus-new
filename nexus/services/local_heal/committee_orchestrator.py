@@ -18,6 +18,11 @@ COMMITTEE_PROPOSER_SPECS = (
 
 logger = logging.getLogger(__name__)
 
+
+def _compute_patch_hash(patch_text: str) -> str:
+    return hashlib.sha256(patch_text.encode("utf-8")).hexdigest()[:16] if patch_text else ""
+
+
 class CommitteeOrchestrator(HealOrchestrator):
     """
     🤝 Nexus Committee Orchestrator (v26)
@@ -80,7 +85,7 @@ class CommitteeOrchestrator(HealOrchestrator):
                         },
                     }
                     break
-                patch_hash = hashlib.sha256(patch_text.encode("utf-8")).hexdigest()[:16] if patch_text else ""
+                patch_hash = _compute_patch_hash(patch_text)
                 candidate_id = f"{ctx.op.instance_id}#candidate-{i + 1}"
                 candidate_snapshot = {
                     "candidate_id": candidate_id,
@@ -229,6 +234,9 @@ class CommitteeOrchestrator(HealOrchestrator):
                 ctx.op._committee_trace["judge_selection"]["failure_bucket"] = "candidate_mapping_missing"
                 ctx.op._committee_trace["committee_receipt"]["selected_candidate_apply_supported"] = False
                 ctx.op._committee_trace["committee_receipt"]["selected_candidate_applied"] = False
+                ctx.op._committee_trace["committee_receipt"]["selected_candidate_patch_sha256"] = ""
+                ctx.op._committee_trace["committee_receipt"]["applied_patch_sha256"] = ""
+                ctx.op._committee_trace["committee_receipt"]["selected_candidate_apply_hash_match"] = False
                 return ctx
 
             if attempt_idx != len(proposals) - 1:
@@ -238,6 +246,10 @@ class CommitteeOrchestrator(HealOrchestrator):
                 ctx.op._committee_trace["judge_selection"]["failure_bucket"] = "selected_candidate_not_applied"
                 ctx.op._committee_trace["committee_receipt"]["selected_candidate_apply_supported"] = False
                 ctx.op._committee_trace["committee_receipt"]["selected_candidate_applied"] = False
+                selected_patch_hash = selected_snapshot.get("isolated_patch_sha256", "")
+                ctx.op._committee_trace["committee_receipt"]["selected_candidate_patch_sha256"] = selected_patch_hash
+                ctx.op._committee_trace["committee_receipt"]["applied_patch_sha256"] = ""
+                ctx.op._committee_trace["committee_receipt"]["selected_candidate_apply_hash_match"] = False
                 return ctx
             ctx.op._committee_trace["committee_receipt"]["selected_candidate_apply_supported"] = True
             ctx.op._committee_trace["committee_receipt"]["selected_candidate_applied"] = True
@@ -248,6 +260,23 @@ class CommitteeOrchestrator(HealOrchestrator):
                     snap["worktree_applied"] = True
                     break
             ctx.op.final_patch = proposals[attempt_idx]["artifacts"][0]
+
+            # --- U3-3B: Hash verification ---
+            selected_patch_hash = selected_snapshot.get("isolated_patch_sha256", "")
+            applied_patch_hash = _compute_patch_hash(str(ctx.op.final_patch or ""))
+            hash_match = bool(selected_patch_hash and applied_patch_hash and selected_patch_hash == applied_patch_hash)
+            ctx.op._committee_trace["committee_receipt"]["selected_candidate_patch_sha256"] = selected_patch_hash
+            ctx.op._committee_trace["committee_receipt"]["applied_patch_sha256"] = applied_patch_hash
+            ctx.op._committee_trace["committee_receipt"]["selected_candidate_apply_hash_match"] = hash_match
+
+            if not hash_match:
+                ctx.op.final_patch = ""
+                ctx.op.solve_eligible = False
+                ctx.op.failure_reason = "COMMITTEE_SELECTED_CANDIDATE_APPLY_HASH_MISMATCH"
+                ctx.op._committee_trace["judge_selection"]["failure_bucket"] = "candidate_apply_hash_mismatch"
+                logger.warning(f"  ❌ Hash mismatch: selected={selected_patch_hash} applied={applied_patch_hash}")
+                return ctx
+
             logger.info(f"  🏆 Winner Selected: {receipt.winner_id} (candidate_id={selected_candidate_id})")
 
             # Phase 5: Final Verification

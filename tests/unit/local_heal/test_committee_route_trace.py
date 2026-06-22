@@ -2,6 +2,8 @@ from __future__ import annotations
 
 from types import SimpleNamespace
 
+import hashlib
+
 from nexus.committee.models import CommitteeReceipt
 from nexus.services.local_heal.committee_orchestrator import CommitteeOrchestrator
 from nexus.services.local_heal.interface import PhaseResult
@@ -144,6 +146,12 @@ def test_committee_orchestrator_records_two_candidate_trace(monkeypatch):
     assert trace["judge_selection"]["selected_attempt"] == 2
     assert trace["committee_receipt"]["selected_candidate_id"] == "C_12481#candidate-2"
     assert trace["committee_receipt"]["confidence"] == 0.93
+    # U3-3B: hash verification fields
+    expected_selected_hash = candidates[1]["isolated_patch_sha256"]
+    expected_applied_hash = hashlib.sha256(b"patch-2").hexdigest()[:16]
+    assert trace["committee_receipt"]["selected_candidate_patch_sha256"] == expected_selected_hash
+    assert trace["committee_receipt"]["applied_patch_sha256"] == expected_applied_hash
+    assert trace["committee_receipt"]["selected_candidate_apply_hash_match"] is True
     assert ctx.op.final_patch == "patch-2"
     assert ctx.op.solve_eligible is True
     assert orch.patch_phase.invoked_models == [
@@ -387,6 +395,10 @@ def test_committee_isolation_preserved_in_non_last_fail_closed(monkeypatch):
 
     assert ctx.op.failure_reason == "COMMITTEE_SELECTED_NON_APPLIED_CANDIDATE_UNSUPPORTED"
     assert ctx.op._committee_trace["committee_receipt"]["selected_candidate_applied"] is False
+    # U3-3B: hash fields present but no apply
+    assert ctx.op._committee_trace["committee_receipt"]["selected_candidate_patch_sha256"] == candidates[0]["isolated_patch_sha256"]
+    assert ctx.op._committee_trace["committee_receipt"]["applied_patch_sha256"] == ""
+    assert ctx.op._committee_trace["committee_receipt"]["selected_candidate_apply_hash_match"] is False
 
 
 def test_committee_isolation_preserved_in_missing_mapping(monkeypatch):
@@ -420,6 +432,10 @@ def test_committee_isolation_preserved_in_missing_mapping(monkeypatch):
 
     assert ctx.op.failure_reason == "COMMITTEE_WINNER_CANDIDATE_MAPPING_MISSING"
     assert ctx.op._committee_trace["committee_receipt"]["selected_candidate_applied"] is False
+    # U3-3B: no hash fields when mapping missing
+    assert ctx.op._committee_trace["committee_receipt"]["selected_candidate_patch_sha256"] == ""
+    assert ctx.op._committee_trace["committee_receipt"]["applied_patch_sha256"] == ""
+    assert ctx.op._committee_trace["committee_receipt"]["selected_candidate_apply_hash_match"] is False
 
 
 def test_committee_isolation_fields_persisted_in_receipt(monkeypatch):
@@ -459,3 +475,64 @@ def test_committee_isolation_fields_persisted_in_receipt(monkeypatch):
 
     # U3-3A: committee_receipt has selected_candidate_applied
     assert committee["committee_receipt"]["selected_candidate_applied"] is True
+
+    # U3-3B: hash fields persist through receipt
+    expected_selected_hash = candidates[1]["isolated_patch_sha256"]
+    expected_applied_hash = hashlib.sha256(b"patch-2").hexdigest()[:16]
+    assert committee["committee_receipt"]["selected_candidate_patch_sha256"] == expected_selected_hash
+    assert committee["committee_receipt"]["applied_patch_sha256"] == expected_applied_hash
+    assert committee["committee_receipt"]["selected_candidate_apply_hash_match"] is True
+
+
+class _HashMismatchPatchPhase:
+    def __init__(self):
+        self.calls = 0
+
+    def execute(self, ctx):
+        self.calls += 1
+        model = "qwen2.5-coder:7b-instruct" if self.calls == 1 else "deepseek-coder:6.7b-instruct"
+        ctx.op.committee_proposer_model = model
+        ctx.op.final_patch = f"patch-{self.calls}"
+        ctx.op.model_decisions.append(
+            {"phase": "patch", "model": model, "raw_label": "r:0,d:0,p:3,c:0", "status": "SUCCESS"}
+        )
+        return PhaseResult(success=True)
+
+
+def test_committee_hash_mismatch_fail_closes(monkeypatch):
+    import nexus.services.local_heal.committee_orchestrator as orch_mod
+
+    ctx = _make_ctx()
+    orch = CommitteeOrchestrator.__new__(CommitteeOrchestrator)
+    orch.k = 2
+    orch.repro_phase = _FixedPhase()
+    orch.plan_phase = _FixedPhase()
+    orch.loc_phase = _FixedPhase()
+    orch.patch_phase = _HashMismatchPatchPhase()
+    orch.verify_phase = _FixedPhase(success=True)
+    monkeypatch.setenv("NEXUS_USE_COMMITTEE", "1")
+    monkeypatch.setattr(
+        "nexus.services.local_heal.committee_orchestrator.CommitteeControllerV263",
+        _CommitteeControllerStub,
+    )
+
+    _real_hash_fn = orch_mod._compute_patch_hash
+    _call_count = {"n": 0}
+
+    def _fake_hash(patch_text):
+        _call_count["n"] += 1
+        if _call_count["n"] == 3 and patch_text == "patch-2":
+            return "mismatched_hash"
+        return _real_hash_fn(patch_text)
+
+    monkeypatch.setattr(orch_mod, "_compute_patch_hash", _fake_hash)
+
+    orch.run(ctx)
+
+    assert ctx.op.solve_eligible is False
+    assert ctx.op.final_patch == ""
+    assert ctx.op.failure_reason == "COMMITTEE_SELECTED_CANDIDATE_APPLY_HASH_MISMATCH"
+    receipt = ctx.op._committee_trace["committee_receipt"]
+    assert receipt["selected_candidate_apply_hash_match"] is False
+    assert receipt["applied_patch_sha256"] == "mismatched_hash"
+    assert receipt["selected_candidate_patch_sha256"] == "33df0cf768d9f425"
