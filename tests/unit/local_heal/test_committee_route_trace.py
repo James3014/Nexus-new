@@ -811,3 +811,64 @@ def test_committee_candidate_isolation_gate_covers_identity_reapply_hash_and_rec
     assert rc["applied_patch_sha256"] != ""
     assert rc["selected_candidate_apply_hash_match"] is True
     assert rc["selected_candidate_reapply_mode"] == "last_candidate_existing_path"
+
+
+def test_committee_tiny_smoke_receipt_contains_candidate_isolation_and_reapply_trace(monkeypatch):
+    """U3-5 tiny smoke: receipt has committee trace with isolation + reapply fields."""
+    ctx = _make_ctx()
+    orch = CommitteeOrchestrator.__new__(CommitteeOrchestrator)
+    orch.k = 2
+    orch.repro_phase = _FixedPhase()
+    orch.plan_phase = _FixedPhase()
+    orch.loc_phase = _FixedPhase()
+    orch.patch_phase = _PatchPhase()
+    orch.verify_phase = _FixedPhase(success=True)
+    monkeypatch.setenv("NEXUS_USE_COMMITTEE", "1")
+    monkeypatch.setattr(
+        "nexus.services.local_heal.committee_orchestrator.CommitteeControllerV263",
+        _CommitteeControllerStub,
+    )
+
+    orch.run(ctx)
+    receipt = build_repair_receipt(ctx)
+
+    # 1-2: Committee route invoked
+    committee = receipt["telemetries"]["committee"]
+    assert committee  # not empty
+
+    # 3-4: schema and enabled
+    assert committee["schema"] == "nexus.local_heal.committee_trace.v1"
+    assert committee["enabled"] is True
+
+    # 5: candidate_count >= 1
+    assert committee["candidate_count"] >= 1
+
+    # 6-7: Each proposer candidate has required fields
+    for c in committee["proposer_candidates"]:
+        assert "candidate_id" in c
+        assert c["isolation_status"] == "stored"
+        assert c["isolated_patch_sha256"] == c["patch_sha256"]
+        assert c["isolated_patch_length"] == c["patch_length"]
+        assert "selected" in c
+        assert "applied" in c
+        assert "worktree_applied" in c
+
+    # 8-9: judge_selection and committee_receipt have selected_candidate_id
+    assert committee["judge_selection"]["selected_candidate_id"]
+    assert committee["committee_receipt"]["selected_candidate_id"]
+
+    # 10-15: committee_receipt fields for successful apply
+    rc = committee["committee_receipt"]
+    assert rc["selected_candidate_apply_supported"] is True
+    assert rc["selected_candidate_applied"] is True
+    assert rc["selected_candidate_patch_sha256"] != ""
+    assert rc["applied_patch_sha256"] != ""
+    assert rc["selected_candidate_apply_hash_match"] is True
+    assert rc["selected_candidate_reapply_mode"] in (
+        "last_candidate_existing_path",
+        "non_last_candidate_reapplied",
+    )
+
+    # 16: internal-only
+    assert receipt["public_claim_allowed"] is False
+    assert receipt["production_ready"] is False
