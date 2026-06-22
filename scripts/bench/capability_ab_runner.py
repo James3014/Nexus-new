@@ -5300,6 +5300,23 @@ def _run_with_nexus_codex(
     return _annotate_with_contract(row, provider="codex", model_required=True, nexus_required=True)
 
 
+from functools import lru_cache
+
+@lru_cache(maxsize=1)
+def _is_ollama_available() -> bool:
+    import os
+    import urllib.request
+    endpoint = os.environ.get("NEXUS_OLLAMA_ENDPOINT", "http://localhost:11434").rstrip("/")
+    try:
+        req = urllib.request.Request(f"{endpoint}/api/tags", method="GET")
+        with urllib.request.urlopen(req, timeout=1.0) as resp:
+            if resp.status == 200:
+                return True
+    except Exception:
+        pass
+    return False
+
+
 def _finalize_with_nexus_row(
     row: dict[str, Any],
     *,
@@ -5323,7 +5340,144 @@ def _finalize_with_nexus_row(
         repo_root=repo_root,
     )
     _apply_data_contract_audit(finalized)
+
+    # Phase H2: Deterministic Local Assist Before Cloud, Trace Mode
+    import os
+    enable_assist_trace = os.environ.get("NEXUS_HYBRID_LOCAL_ASSIST_TRACE", "").strip().lower() in {"1", "true", "yes"}
+    
+    # H1 trace-only: skip live network probe when gate is off
+    if enable_assist_trace:
+        local_avail = _is_ollama_available()
+        local_availability_source = "ollama_api_tags_probe"
+    else:
+        local_avail = False
+        local_availability_source = "not_probed_trace_only"
+    cloud_provider_selected = provider in {"gemini", "codex"}
+    cloud_avail = cloud_provider_selected and not finalized.get("infra_invalid_reason")
+    
+    if provider == "ollama":
+        r_mode = "local_only_blocked"
+    else:
+        r_mode = "cloud_assisted_by_local_trace_only"
+
+    if enable_assist_trace:
+        # 1. 檢索/獲取 raw evidence
+        raw_evidence = (
+            str(finalized.get("hidden_verifier_stdout_tail") or "") + "\n" +
+            str(finalized.get("hidden_verifier_stderr_tail") or "") + "\n" +
+            str(finalized.get("repro_output_tail") or "")
+        ).strip()
+        if not raw_evidence:
+            raw_evidence = str(task.task_desc or "")
+
+        # 2. 呼叫 EvidenceCompactor.compact_v2 進行壓縮
+        from nexus.services.local_heal.evidence_compactor import EvidenceCompactor
+        compacted_text = EvidenceCompactor.compact_v2(
+            evidence=raw_evidence,
+            anchor_symbol="",
+            anchor_file="",
+            limit=3000
+        )
+
+        raw_context_chars = len(raw_evidence)
+        compact_context_chars = len(compacted_text)
+        compression_ratio = round(compact_context_chars / raw_context_chars, 4) if raw_context_chars > 0 else 0.0
+        omitted_bytes = max(0, len(raw_evidence.encode("utf-8")) - len(compacted_text.encode("utf-8")))
+
+        # 3. 呼叫 MemoryRetrievalAdapter.retrieve_reranked 獲取 reranked memory 資訊
+        from nexus.services.local_heal.memory_retrieval_adapter import MemoryRetrievalAdapter
+        query_text = str(task.task_desc or "test").strip()
+        
+        adapter = MemoryRetrievalAdapter(enabled=True)
+        try:
+            lessons = adapter.retrieve_reranked(
+                query_text=query_text,
+                anchor_symbol="",
+                anchor_file="",
+                limit=3,
+                max_chars=800,
+                task_id=task.id
+            )
+        except Exception:
+            lessons = []
+        
+        memory_selected_ids = [l.finding_id for l in lessons]
+        memory_no_match = len(lessons) == 0
+        memory_rerank_mode = bool(adapter.last_metadata.get("rerank_mode", False))
+        sources_observed = adapter.last_metadata.get("retrieval_sources", [])
+        memory_source = "+".join(sources_observed) if sources_observed else "none"
+        local_assist_invoked = True
+        raw_artifact_ref = "hidden_verifier_stdout_tail" if finalized.get("hidden_verifier_stdout_tail") else "task_desc"
+    else:
+        # Gate Off: H1 mode
+        raw_context_chars = 0
+        compact_context_chars = 0
+        compression_ratio = 0.0
+        omitted_bytes = 0
+        memory_selected_ids = []
+        memory_no_match = True
+        memory_rerank_mode = False
+        memory_source = "none"
+        local_assist_invoked = False
+        raw_artifact_ref = ""
+
+    finalized["hybrid_route"] = {
+        "schema": "nexus.hybrid_route_decision.v1",
+        "route_mode": r_mode,
+        "with_model_provider": provider,
+        "cloud_provider": provider if provider in {"gemini", "codex"} else "none",
+        "cloud_provider_selected": cloud_provider_selected,
+        "cloud_available": cloud_avail,
+        "cloud_availability_source": "provider_selected_not_probe",
+        "local_provider": "ollama",
+        "local_available": local_avail,
+        "local_availability_source": local_availability_source,
+        "local_assist_planned": True,
+        "local_assist_roles": [
+            "evidence_compactor",
+            "memory_reranker"
+        ],
+        "fallback_route": "local_only_blocked",
+        "fallback_block_reason": "u3_candidate_isolation_not_ready",
+        "reason_codes": [
+            "cloud_provider_selected" if provider != "ollama" else "local_only_requested",
+            "local_ollama_probe_available" if local_avail else "local_ollama_offline",
+            "compact_context_possible",
+            "u3_local_only_not_yet_executable"
+        ],
+        "authority": "trace_only",
+        "cloud_model_invoked": bool(finalized.get("model_calls", 0) > 0) and provider in {"gemini", "codex"},
+        "local_model_invoked": False,
+        "local_assist_invoked": local_assist_invoked,
+        "trace_only": True,
+        "behavior_changed": False
+    }
+    
+    finalized["local_assist"] = {
+        "schema": "nexus.hybrid_local_assist.v1",
+        "mode": "deterministic_pre_cloud" if local_assist_invoked else "trace_only",
+        "evidence_compactor": "compact_v2",
+        "memory_reranked": True,
+        "raw_context_chars": raw_context_chars,
+        "compact_context_chars": compact_context_chars,
+        "compression_ratio": compression_ratio,
+        "raw_artifact_ref": raw_artifact_ref,
+        "omitted_bytes": omitted_bytes,
+        "prompt_replaced": False,
+        "authority": "trace_only",
+        "memory_selected_ids": memory_selected_ids,
+        "memory_source": memory_source,
+        "memory_no_match": memory_no_match,
+        "memory_rerank_mode": memory_rerank_mode
+    }
+
+    # Ensure keys are also on the row level for simple flat queries
+    finalized["route_mode"] = r_mode
+    finalized["trace_only"] = True
+    finalized["behavior_changed"] = False
+
     return finalized
+
 
 
 def run_with_nexus(
@@ -8967,6 +9121,20 @@ def write_evidence_bundle(
         },
         "public_claim_posture": public_claim_posture,
         "training_eligibility_posture": training_eligibility_posture,
+    }
+    hybrid_modes = [str(row.get("hybrid_route", {}).get("route_mode", "")) for row in with_rows]
+    hybrid_modes = [m for m in hybrid_modes if m]
+    local_assist_invoked_count = sum(1 for row in with_rows if bool(row.get("hybrid_route", {}).get("local_assist_invoked", False)))
+    behavior_changed_count = sum(1 for row in with_rows if bool(row.get("hybrid_route", {}).get("behavior_changed", False)))
+    prompt_replaced_count = sum(1 for row in with_rows if bool(row.get("local_assist", {}).get("prompt_replaced", False)))
+
+    payload["hybrid_route_summary"] = {
+        "modes_observed": sorted(list(set(hybrid_modes))),
+        "trace_only_count": sum(1 for m in hybrid_modes if "trace_only" in m),
+        "local_only_blocked_count": sum(1 for m in hybrid_modes if m == "local_only_blocked"),
+        "local_assist_trace_count": local_assist_invoked_count,
+        "behavior_changed_count": behavior_changed_count,
+        "prompt_replaced_count": prompt_replaced_count,
     }
     payload["external_provider_claim_boundary_contract"] = build_external_provider_claim_boundary_contract(payload)
     payload["public_promotion_readiness_contract"] = build_public_promotion_readiness_contract(payload)

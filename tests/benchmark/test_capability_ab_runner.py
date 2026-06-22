@@ -13364,3 +13364,177 @@ def test_main_rejects_always_on_eval_with_skip_llm_baseline(monkeypatch):
         main()
 
     assert exc.value.code == 2
+
+
+def test_hybrid_route_h2_local_assist_trace(tmp_path, monkeypatch):
+    from scripts.bench.capability_ab_runner import _finalize_with_nexus_row, write_evidence_bundle
+    from scripts.bench.capability_ab_runner import CapabilityTask
+    
+    task = CapabilityTask(
+        id="test-task-1",
+        difficulty="easy",
+        task_type="test_repair",
+        task_desc="test description for task compression",
+        target_file="target.py",
+        test_file="test_target.py",
+        expected_capabilities=["mempalace_gate"],
+        success_criteria="tests_pass",
+        repo_kind="nexus_internal",
+        fixture_kind="test_fixture"
+    )
+
+    # Use a call-counting mock to prove probe is NOT called when gate is off
+    probe_call_count = {"n": 0}
+    def _mock_ollama_probe():
+        probe_call_count["n"] += 1
+        return True
+    monkeypatch.setattr("scripts.bench.capability_ab_runner._is_ollama_available", _mock_ollama_probe)
+    
+    # CASE 1: Gate Off (H1 trace-only)
+    monkeypatch.setenv("NEXUS_HYBRID_LOCAL_ASSIST_TRACE", "0")
+    row_gemini_gate_off = {
+        "mode": "with_nexus", 
+        "model_calls": 1,
+        "total_tokens": 100,
+        "token_capture_status": "measured",
+        "hidden_verifier_stdout_tail": "FAILED test_foo.py - AssertionError: expected 1 got 2"
+    }
+    finalized_gemini_off = _finalize_with_nexus_row(
+        row_gemini_gate_off,
+        provider="gemini",
+        model_required=True,
+        nexus_required=False,
+        task=task,
+        repo_root=tmp_path
+    )
+    
+    hr_gemini_off = finalized_gemini_off["hybrid_route"]
+    assert hr_gemini_off["route_mode"] == "cloud_assisted_by_local_trace_only"
+    assert hr_gemini_off["cloud_provider"] == "gemini"
+    assert hr_gemini_off["cloud_provider_selected"] is True
+    assert hr_gemini_off["cloud_available"] is True
+    assert hr_gemini_off["cloud_availability_source"] == "provider_selected_not_probe"
+    assert hr_gemini_off["local_provider"] == "ollama"
+    assert hr_gemini_off["local_available"] is False  # not probed when gate is off
+    assert hr_gemini_off["cloud_model_invoked"] is True
+    assert hr_gemini_off["local_model_invoked"] is False
+    assert hr_gemini_off["local_assist_invoked"] is False
+    assert hr_gemini_off["trace_only"] is True
+    assert hr_gemini_off["behavior_changed"] is False
+    
+    la_gemini_off = finalized_gemini_off["local_assist"]
+    assert la_gemini_off["mode"] == "trace_only"
+    assert la_gemini_off["prompt_replaced"] is False
+    assert la_gemini_off["raw_context_chars"] == 0
+    assert la_gemini_off["compact_context_chars"] == 0
+    assert la_gemini_off["compression_ratio"] == 0.0
+    assert la_gemini_off["raw_artifact_ref"] == ""
+    assert la_gemini_off["omitted_bytes"] == 0
+    assert la_gemini_off["memory_selected_ids"] == []
+    assert la_gemini_off["memory_source"] == "none"
+    assert la_gemini_off["memory_no_match"] is True
+
+    # Critical: probe must NOT be called when gate is off
+    assert probe_call_count["n"] == 0, "_is_ollama_available must not be called when NEXUS_HYBRID_LOCAL_ASSIST_TRACE=0"
+    assert hr_gemini_off["local_available"] is False
+    assert hr_gemini_off["local_availability_source"] == "not_probed_trace_only"
+
+    # CASE 2: Gate On (H2 deterministic assist trace)
+    monkeypatch.setenv("NEXUS_HYBRID_LOCAL_ASSIST_TRACE", "1")
+    row_gemini_gate_on = {
+        "mode": "with_nexus", 
+        "model_calls": 1,
+        "total_tokens": 100,
+        "token_capture_status": "measured",
+        "hidden_verifier_stdout_tail": "FAILED test_foo.py - AssertionError: expected 1 got 2"
+    }
+    finalized_gemini_on = _finalize_with_nexus_row(
+        row_gemini_gate_on,
+        provider="gemini",
+        model_required=True,
+        nexus_required=False,
+        task=task,
+        repo_root=tmp_path
+    )
+    
+    hr_gemini_on = finalized_gemini_on["hybrid_route"]
+    assert hr_gemini_on["local_assist_invoked"] is True
+    
+    la_gemini_on = finalized_gemini_on["local_assist"]
+    assert la_gemini_on["mode"] == "deterministic_pre_cloud"
+    assert la_gemini_on["prompt_replaced"] is False
+    assert la_gemini_on["raw_context_chars"] > 0
+    assert la_gemini_on["compact_context_chars"] > 0
+    assert la_gemini_on["raw_artifact_ref"] == "hidden_verifier_stdout_tail"
+    # Gate On: adapter actually ran, memory_source reflects real store (or "none" if no match)
+    assert isinstance(la_gemini_on["memory_source"], str)
+    # memory_no_match must be consistent: True iff memory_selected_ids is empty
+    assert la_gemini_on["memory_no_match"] is (len(la_gemini_on["memory_selected_ids"]) == 0)
+
+    # Gate On: probe WAS called
+    assert probe_call_count["n"] >= 1, "_is_ollama_available must be called when NEXUS_HYBRID_LOCAL_ASSIST_TRACE=1"
+    assert hr_gemini_on["local_availability_source"] == "ollama_api_tags_probe"
+
+    # CASE 3: provider=ollama has cloud_provider "none" (gate reset to off for isolation)
+    monkeypatch.delenv("NEXUS_HYBRID_LOCAL_ASSIST_TRACE", raising=False)
+    row_ollama = {"mode": "with_nexus", "model_calls": 0}
+    finalized_ollama = _finalize_with_nexus_row(
+        row_ollama,
+        provider="ollama",
+        model_required=True,
+        nexus_required=False,
+        task=task,
+        repo_root=tmp_path
+    )
+    
+    hr_ollama = finalized_ollama["hybrid_route"]
+    assert hr_ollama["route_mode"] == "local_only_blocked"
+    assert hr_ollama["cloud_provider"] == "none"
+    assert hr_ollama["cloud_provider_selected"] is False
+    assert hr_ollama["cloud_available"] is False
+    assert hr_ollama["local_available"] is False  # gate off: not probed
+    assert hr_ollama["cloud_model_invoked"] is False
+    assert hr_ollama["local_model_invoked"] is False
+    
+    # CASE 4: write_evidence_bundle summary verification
+    rows = [finalized_gemini_off, finalized_gemini_on, finalized_ollama]
+    config = {
+        "tasks_file": "tasks.json",
+        "tasks_manifest_hash": "manifest_hash",
+        "unique_tasks_requested": 1,
+        "repeat_trials": 1,
+        "timeout_sec": 60,
+    }
+    
+    with_path = tmp_path / "with.json"
+    without_path = tmp_path / "without.json"
+    with_path.write_text("[]")
+    without_path.write_text("[]")
+    
+    monkeypatch.setattr("scripts.bench.capability_ab_runner._git_commit", lambda x: "dummy-commit")
+    
+    bundle_file = write_evidence_bundle(
+        out_dir=tmp_path,
+        with_path=with_path,
+        without_path=without_path,
+        rows=rows,
+        config=config
+    )
+    
+    import json
+    bundle_data = json.loads(bundle_file.read_text())
+    
+    assert "hybrid_route_summary" in bundle_data
+    summary = bundle_data["hybrid_route_summary"]
+    assert "cloud_assisted_by_local_trace_only" in summary["modes_observed"]
+    assert "local_only_blocked" in summary["modes_observed"]
+    assert summary["trace_only_count"] == 2
+    assert summary["local_only_blocked_count"] == 1
+    assert summary["local_assist_trace_count"] == 1
+    assert summary["behavior_changed_count"] == 0
+    assert summary["prompt_replaced_count"] == 0
+
+
+
+
+
