@@ -3,7 +3,7 @@
 **Date**: 2026-06-21
 **Status**: COMPLETE
 **Decision**: MEMORY_EVAL_2_PARTIAL_FULL_LOOP
-**Commits**: `7fcc595e` (eval) + `8a1dcecd` (provenance fix) + `pending` (2C closure)
+**Commits**: `7fcc595e` (eval) + `8a1dcecd` (2B) + `ba2b322b` (2C provenance)
 
 ---
 
@@ -18,10 +18,11 @@ Full-loop memory impact evaluation completed on C_12481 and C_13453. Memory ente
 | Check | Status |
 |-------|--------|
 | Full-loop artifacts | 4/4 task-arm pairs, 11/11 each |
-| All live_runtime | YES |
+| live_runtime artifacts | 22/44 (memory_on) |
+| reconstructed artifacts | 22/44 (memory_off) |
 | Shared repair_attempt_id | YES |
 | Verifier consistent | YES |
-| validation_status | MEMORY_EVAL_2_FULL_LOOP_COMPLETE |
+| validation_status | **MEMORY_EVAL_2_PARTIAL_FULL_LOOP** |
 
 ---
 
