@@ -237,31 +237,42 @@ class CommitteeOrchestrator(HealOrchestrator):
                 ctx.op._committee_trace["committee_receipt"]["selected_candidate_patch_sha256"] = ""
                 ctx.op._committee_trace["committee_receipt"]["applied_patch_sha256"] = ""
                 ctx.op._committee_trace["committee_receipt"]["selected_candidate_apply_hash_match"] = False
+                ctx.op._committee_trace["committee_receipt"]["selected_candidate_reapply_mode"] = "missing_mapping"
                 return ctx
 
-            if attempt_idx != len(proposals) - 1:
+            # --- U3-3C: Unified apply for last and non-last candidates ---
+            is_last_candidate = (attempt_idx == len(proposals) - 1)
+            reapply_mode = "last_candidate_existing_path" if is_last_candidate else "non_last_candidate_reapplied"
+
+            selected_patch = proposals[attempt_idx]["artifacts"][0] if attempt_idx >= 0 else ""
+
+            if not selected_patch:
                 ctx.op.final_patch = ""
                 ctx.op.solve_eligible = False
-                ctx.op.failure_reason = "COMMITTEE_SELECTED_NON_APPLIED_CANDIDATE_UNSUPPORTED"
-                ctx.op._committee_trace["judge_selection"]["failure_bucket"] = "selected_candidate_not_applied"
+                ctx.op.failure_reason = "COMMITTEE_SELECTED_CANDIDATE_ARTIFACT_MISSING"
+                ctx.op._committee_trace["judge_selection"]["failure_bucket"] = "selected_candidate_artifact_missing"
                 ctx.op._committee_trace["committee_receipt"]["selected_candidate_apply_supported"] = False
                 ctx.op._committee_trace["committee_receipt"]["selected_candidate_applied"] = False
-                selected_patch_hash = selected_snapshot.get("isolated_patch_sha256", "")
-                ctx.op._committee_trace["committee_receipt"]["selected_candidate_patch_sha256"] = selected_patch_hash
+                ctx.op._committee_trace["committee_receipt"]["selected_candidate_patch_sha256"] = selected_snapshot.get("isolated_patch_sha256", "")
                 ctx.op._committee_trace["committee_receipt"]["applied_patch_sha256"] = ""
                 ctx.op._committee_trace["committee_receipt"]["selected_candidate_apply_hash_match"] = False
+                ctx.op._committee_trace["committee_receipt"]["selected_candidate_reapply_mode"] = "missing_artifact"
                 return ctx
+
             ctx.op._committee_trace["committee_receipt"]["selected_candidate_apply_supported"] = True
             ctx.op._committee_trace["committee_receipt"]["selected_candidate_applied"] = True
+            ctx.op._committee_trace["committee_receipt"]["selected_candidate_reapply_mode"] = reapply_mode
+
             # Mark applied state on the selected candidate snapshot
             for snap in candidate_snapshots:
                 if snap.get("candidate_id") == selected_candidate_id:
                     snap["applied"] = True
                     snap["worktree_applied"] = True
                     break
-            ctx.op.final_patch = proposals[attempt_idx]["artifacts"][0]
 
-            # --- U3-3B: Hash verification ---
+            ctx.op.final_patch = selected_patch
+
+            # --- Hash verification ---
             selected_patch_hash = selected_snapshot.get("isolated_patch_sha256", "")
             applied_patch_hash = _compute_patch_hash(str(ctx.op.final_patch or ""))
             hash_match = bool(selected_patch_hash and applied_patch_hash and selected_patch_hash == applied_patch_hash)
@@ -274,10 +285,11 @@ class CommitteeOrchestrator(HealOrchestrator):
                 ctx.op.solve_eligible = False
                 ctx.op.failure_reason = "COMMITTEE_SELECTED_CANDIDATE_APPLY_HASH_MISMATCH"
                 ctx.op._committee_trace["judge_selection"]["failure_bucket"] = "candidate_apply_hash_mismatch"
+                ctx.op._committee_trace["committee_receipt"]["selected_candidate_reapply_mode"] = "hash_mismatch"
                 logger.warning(f"  ❌ Hash mismatch: selected={selected_patch_hash} applied={applied_patch_hash}")
                 return ctx
 
-            logger.info(f"  🏆 Winner Selected: {receipt.winner_id} (candidate_id={selected_candidate_id})")
+            logger.info(f"  🏆 Winner Selected: {receipt.winner_id} (candidate_id={selected_candidate_id}, mode={reapply_mode})")
 
             # Phase 5: Final Verification
             verify_res = self.verify_phase.execute(ctx)

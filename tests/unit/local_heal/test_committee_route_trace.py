@@ -191,7 +191,7 @@ def test_committee_trace_is_persisted_into_repair_receipt(monkeypatch):
     assert committee["committee_receipt"]["selected_candidate_id"] == "C_12481#candidate-2"
 
 
-def test_committee_route_fails_closed_when_selected_candidate_is_not_applied(monkeypatch):
+def test_committee_non_last_selected_candidate_reapplies(monkeypatch):
     ctx = _make_ctx()
     orch = CommitteeOrchestrator.__new__(CommitteeOrchestrator)
     orch.k = 2
@@ -208,15 +208,24 @@ def test_committee_route_fails_closed_when_selected_candidate_is_not_applied(mon
 
     orch.run(ctx)
 
-    assert ctx.op.solve_eligible is False
-    assert ctx.op.final_patch == ""
-    assert ctx.op.failure_reason == "COMMITTEE_SELECTED_NON_APPLIED_CANDIDATE_UNSUPPORTED"
-    # U3-1: candidate_id resolved even in fail-closed path
+    assert ctx.op.solve_eligible is True
+    assert ctx.op.final_patch == "patch-1"
     assert ctx.op._committee_trace["judge_selection"]["selected_candidate_id"] == "C_12481#candidate-1"
     assert ctx.op._committee_trace["judge_selection"]["candidate_id_mapping_mode"] == "legacy_winner_id_prefix"
-    assert ctx.op._committee_trace["judge_selection"]["selected_model"] == "qwen2.5-coder:7b-instruct"
-    assert ctx.op._committee_trace["committee_receipt"]["selected_candidate_id"] == "C_12481#candidate-1"
-    assert ctx.op._committee_trace["committee_receipt"]["selected_candidate_apply_supported"] is False
+
+    candidates = ctx.op._committee_trace["proposer_candidates"]
+    assert candidates[0]["selected"] is True
+    assert candidates[0]["applied"] is True
+    assert candidates[0]["worktree_applied"] is True
+    assert candidates[1]["selected"] is False
+    assert candidates[1]["applied"] is False
+    assert candidates[1]["worktree_applied"] is False
+
+    receipt = ctx.op._committee_trace["committee_receipt"]
+    assert receipt["selected_candidate_apply_supported"] is True
+    assert receipt["selected_candidate_applied"] is True
+    assert receipt["selected_candidate_reapply_mode"] == "non_last_candidate_reapplied"
+    assert receipt["selected_candidate_apply_hash_match"] is True
 
 
 class _UnrecognizedWinnerCommitteeControllerStub(_CommitteeControllerStub):
@@ -358,7 +367,7 @@ def test_committee_non_selected_candidate_remains_unapplied(monkeypatch):
     assert candidates[1]["worktree_applied"] is True
 
 
-def test_committee_isolation_preserved_in_non_last_fail_closed(monkeypatch):
+def test_committee_isolation_preserved_in_non_last_reapply(monkeypatch):
     ctx = _make_ctx()
     orch = CommitteeOrchestrator.__new__(CommitteeOrchestrator)
     orch.k = 2
@@ -378,27 +387,24 @@ def test_committee_isolation_preserved_in_non_last_fail_closed(monkeypatch):
     candidates = ctx.op._committee_trace["proposer_candidates"]
     assert len(candidates) == 2
 
-    # U3-3A: non-last selected candidate — selected=true but applied=false
+    # U3-3C: non-last selected candidate re-applies successfully
     assert candidates[0]["selected"] is True
-    assert candidates[0]["applied"] is False
-    assert candidates[0]["worktree_applied"] is False
-    # U3-3A: non-selected candidate remains all false
+    assert candidates[0]["applied"] is True
+    assert candidates[0]["worktree_applied"] is True
     assert candidates[1]["selected"] is False
     assert candidates[1]["applied"] is False
     assert candidates[1]["worktree_applied"] is False
 
-    # isolation fields still present
+    # isolation fields preserved
     for c in candidates:
         assert c["isolation_status"] == "stored"
         assert c["isolated_patch_sha256"] == c["patch_sha256"]
         assert c["isolated_patch_length"] == c["patch_length"]
 
-    assert ctx.op.failure_reason == "COMMITTEE_SELECTED_NON_APPLIED_CANDIDATE_UNSUPPORTED"
-    assert ctx.op._committee_trace["committee_receipt"]["selected_candidate_applied"] is False
-    # U3-3B: hash fields present but no apply
-    assert ctx.op._committee_trace["committee_receipt"]["selected_candidate_patch_sha256"] == candidates[0]["isolated_patch_sha256"]
-    assert ctx.op._committee_trace["committee_receipt"]["applied_patch_sha256"] == ""
-    assert ctx.op._committee_trace["committee_receipt"]["selected_candidate_apply_hash_match"] is False
+    assert ctx.op.solve_eligible is True
+    assert ctx.op.final_patch == "patch-1"
+    assert ctx.op._committee_trace["committee_receipt"]["selected_candidate_reapply_mode"] == "non_last_candidate_reapplied"
+    assert ctx.op._committee_trace["committee_receipt"]["selected_candidate_apply_hash_match"] is True
 
 
 def test_committee_isolation_preserved_in_missing_mapping(monkeypatch):
@@ -536,3 +542,140 @@ def test_committee_hash_mismatch_fail_closes(monkeypatch):
     assert receipt["selected_candidate_apply_hash_match"] is False
     assert receipt["applied_patch_sha256"] == "mismatched_hash"
     assert receipt["selected_candidate_patch_sha256"] == "33df0cf768d9f425"
+
+
+class _EmptyPatchPhase:
+    def __init__(self):
+        self.calls = 0
+
+    def execute(self, ctx):
+        self.calls += 1
+        model = "qwen2.5-coder:7b-instruct" if self.calls == 1 else "deepseek-coder:6.7b-instruct"
+        ctx.op.committee_proposer_model = model
+        ctx.op.final_patch = ""
+        ctx.op.model_decisions.append(
+            {"phase": "patch", "model": model, "raw_label": "r:0,d:0,p:0,c:0", "status": "EMPTY"}
+        )
+        return PhaseResult(success=True)
+
+
+def test_committee_missing_artifact_fail_closes(monkeypatch):
+    ctx = _make_ctx()
+    orch = CommitteeOrchestrator.__new__(CommitteeOrchestrator)
+    orch.k = 2
+    orch.repro_phase = _FixedPhase()
+    orch.plan_phase = _FixedPhase()
+    orch.loc_phase = _FixedPhase()
+    orch.patch_phase = _EmptyPatchPhase()
+    orch.verify_phase = _FixedPhase(success=True)
+    monkeypatch.setenv("NEXUS_USE_COMMITTEE", "1")
+    monkeypatch.setattr(
+        "nexus.services.local_heal.committee_orchestrator.CommitteeControllerV263",
+        _CommitteeControllerStub,
+    )
+
+    orch.run(ctx)
+
+    assert ctx.op.solve_eligible is False
+    assert ctx.op.final_patch == ""
+    assert ctx.op.failure_reason == "COMMITTEE_SELECTED_CANDIDATE_ARTIFACT_MISSING"
+    receipt = ctx.op._committee_trace["committee_receipt"]
+    assert receipt["selected_candidate_apply_supported"] is False
+    assert receipt["selected_candidate_applied"] is False
+    assert receipt["selected_candidate_apply_hash_match"] is False
+    assert receipt["selected_candidate_reapply_mode"] == "missing_artifact"
+
+
+def test_committee_hash_mismatch_after_non_last_reapply(monkeypatch):
+    import nexus.services.local_heal.committee_orchestrator as orch_mod
+
+    ctx = _make_ctx()
+    orch = CommitteeOrchestrator.__new__(CommitteeOrchestrator)
+    orch.k = 2
+    orch.repro_phase = _FixedPhase()
+    orch.plan_phase = _FixedPhase()
+    orch.loc_phase = _FixedPhase()
+    orch.patch_phase = _PatchPhase()
+    orch.verify_phase = _FixedPhase(success=True)
+    monkeypatch.setenv("NEXUS_USE_COMMITTEE", "1")
+    monkeypatch.setattr(
+        "nexus.services.local_heal.committee_orchestrator.CommitteeControllerV263",
+        _FirstCandidateCommitteeControllerStub,
+    )
+
+    _real_hash_fn = orch_mod._compute_patch_hash
+    _call_count = {"n": 0}
+
+    def _fake_hash(patch_text):
+        _call_count["n"] += 1
+        if _call_count["n"] == 1 and patch_text == "patch-1":
+            return "mismatched_hash"
+        return _real_hash_fn(patch_text)
+
+    monkeypatch.setattr(orch_mod, "_compute_patch_hash", _fake_hash)
+
+    orch.run(ctx)
+
+    assert ctx.op.solve_eligible is False
+    assert ctx.op.final_patch == ""
+    assert ctx.op.failure_reason == "COMMITTEE_SELECTED_CANDIDATE_APPLY_HASH_MISMATCH"
+    receipt = ctx.op._committee_trace["committee_receipt"]
+    assert receipt["selected_candidate_apply_hash_match"] is False
+    assert receipt["selected_candidate_reapply_mode"] == "hash_mismatch"
+    assert ctx.op._committee_trace["judge_selection"]["selected_candidate_id"] == "C_12481#candidate-1"
+
+
+def test_committee_missing_mapping_includes_reapply_mode(monkeypatch):
+    ctx = _make_ctx()
+    orch = CommitteeOrchestrator.__new__(CommitteeOrchestrator)
+    orch.k = 2
+    orch.repro_phase = _FixedPhase()
+    orch.plan_phase = _FixedPhase()
+    orch.loc_phase = _FixedPhase()
+    orch.patch_phase = _PatchPhase()
+    orch.verify_phase = _FixedPhase(success=True)
+    monkeypatch.setenv("NEXUS_USE_COMMITTEE", "1")
+    monkeypatch.setattr(
+        "nexus.services.local_heal.committee_orchestrator.CommitteeControllerV263",
+        _UnrecognizedWinnerCommitteeControllerStub,
+    )
+
+    orch.run(ctx)
+
+    assert ctx.op.failure_reason == "COMMITTEE_WINNER_CANDIDATE_MAPPING_MISSING"
+    receipt = ctx.op._committee_trace["committee_receipt"]
+    assert receipt["selected_candidate_reapply_mode"] == "missing_mapping"
+    assert receipt["selected_candidate_apply_supported"] is False
+    assert receipt["selected_candidate_apply_hash_match"] is False
+
+
+def test_committee_receipt_persists_reapply_fields(monkeypatch):
+    ctx = _make_ctx()
+    orch = CommitteeOrchestrator.__new__(CommitteeOrchestrator)
+    orch.k = 2
+    orch.repro_phase = _FixedPhase()
+    orch.plan_phase = _FixedPhase()
+    orch.loc_phase = _FixedPhase()
+    orch.patch_phase = _PatchPhase()
+    orch.verify_phase = _FixedPhase(success=True)
+    monkeypatch.setenv("NEXUS_USE_COMMITTEE", "1")
+    monkeypatch.setattr(
+        "nexus.services.local_heal.committee_orchestrator.CommitteeControllerV263",
+        _CommitteeControllerStub,
+    )
+
+    orch.run(ctx)
+    receipt = build_repair_receipt(ctx)
+    committee = receipt["telemetries"]["committee"]
+
+    assert committee["committee_receipt"]["selected_candidate_reapply_mode"] == "last_candidate_existing_path"
+    assert committee["committee_receipt"]["selected_candidate_apply_hash_match"] is True
+    assert committee["committee_receipt"]["selected_candidate_patch_sha256"] != ""
+    assert committee["committee_receipt"]["applied_patch_sha256"] != ""
+
+    candidates = committee["proposer_candidates"]
+    assert candidates[0]["selected"] is False
+    assert candidates[0]["applied"] is False
+    assert candidates[1]["selected"] is True
+    assert candidates[1]["applied"] is True
+    assert candidates[1]["worktree_applied"] is True
