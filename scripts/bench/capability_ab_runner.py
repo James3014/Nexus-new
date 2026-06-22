@@ -5586,6 +5586,34 @@ def _finalize_with_nexus_row(
     finalized["local_guard"] = local_guard
     finalized["local_guard_invoked"] = local_guard_invoked
 
+    # H5-1: Local-first cloud-fallback trace-only metadata
+    enable_h5_trace = _env_truthy("NEXUS_HYBRID_H5_LOCAL_FIRST_TRACE")
+    cloud_provider_value = provider if provider in {"gemini", "codex"} else "none"
+    if enable_h5_trace:
+        finalized["h5_route"] = {
+            "schema": "nexus.hybrid_h5_route.v1",
+            "enabled": True,
+            "route_mode": "local_first_cloud_fallback_trace_only",
+            "authority": "trace_only",
+            "local_attempted": False,
+            "local_route": "committee",
+            "local_candidate_count": 0,
+            "local_selected_candidate_id": "",
+            "local_selected_candidate_applied": False,
+            "local_selected_candidate_hash_match": False,
+            "local_solve_eligible": False,
+            "local_failure_reason": "",
+            "cloud_fallback_allowed": False,
+            "cloud_fallback_invoked": False,
+            "cloud_provider": cloud_provider_value,
+            "cloud_model_invoked": False,
+            "final_source": "none",
+            "behavior_changed": False,
+            "blocked_delivery": False,
+            "public_claim_allowed": False,
+            "production_ready": False,
+        }
+
     # Ensure keys are also on the row level for simple flat queries
     finalized["route_mode"] = r_mode
     finalized["trace_only"] = True
@@ -9261,6 +9289,11 @@ def write_evidence_bundle(
         "behavior_changed_count": behavior_changed_count,
         "local_guard_behavior_changed_count": local_guard_behavior_changed_count,
         "prompt_replaced_count": prompt_replaced_count,
+        "h5_trace_count": sum(1 for row in with_rows if bool(row.get("h5_route", {}).get("enabled", False))),
+        "h5_behavior_changed_count": sum(1 for row in with_rows if bool(row.get("h5_route", {}).get("behavior_changed", False))),
+        "h5_cloud_fallback_invoked_count": sum(1 for row in with_rows if bool(row.get("h5_route", {}).get("cloud_fallback_invoked", False))),
+        "h5_local_attempted_count": sum(1 for row in with_rows if bool(row.get("h5_route", {}).get("local_attempted", False))),
+        "h5_fail_closed_count": sum(1 for row in with_rows if str(row.get("h5_route", {}).get("final_source", "")) == "fail_closed"),
     }
     payload["external_provider_claim_boundary_contract"] = build_external_provider_claim_boundary_contract(payload)
     payload["public_promotion_readiness_contract"] = build_public_promotion_readiness_contract(payload)

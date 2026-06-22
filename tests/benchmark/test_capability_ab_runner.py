@@ -13717,3 +13717,357 @@ def test_hybrid_route_h4_cloud_first_local_guard_records_retry_advice(tmp_path, 
     assert gate_on["local_guard"]["blocked_delivery"] is False
     assert gate_on["local_guard"]["behavior_changed"] is False
     assert gate_on["behavior_changed"] is False
+
+
+def test_hybrid_route_h4_5_cloud_model_e2e_smoke_field_propagation(tmp_path, monkeypatch):
+    """H4.5 E2E smoke: real _run_hybrid_local_guard_trace logic, no monkeypatch.
+
+    Verifies H4 local_guard trace fields propagate through _finalize_with_nexus_row
+    and write_evidence_bundle into the evidence bundle, using the actual guard code path.
+    """
+    from scripts.bench.capability_ab_runner import CapabilityTask, _finalize_with_nexus_row, write_evidence_bundle
+
+    task = CapabilityTask(
+        id="test-task-h4.5",
+        difficulty="hard",
+        task_type="test_repair",
+        task_desc="e2e smoke for cloud-first local guard field propagation",
+        target_file="target.py",
+        test_file="test_target.py",
+        expected_capabilities=("claim_gate",),
+        success_criteria="tests_pass",
+        repo_kind="nexus_internal",
+        fixture_kind="test_fixture",
+    )
+    monkeypatch.setenv("NEXUS_HYBRID_LOCAL_GUARD_TRACE", "1")
+
+    # --- Case 1: cloud model invoked, verdict=pass (no trust mismatch) ---
+    pass_row = _finalize_with_nexus_row(
+        {
+            "mode": "with_nexus",
+            "model_calls": 2,
+            "total_tokens": 500,
+            "token_capture_status": "measured",
+            "hidden_verifier_passed": True,
+            "capability_claim_verified": True,
+            "report_trust_mismatch": False,
+        },
+        provider="gemini",
+        model_required=True,
+        nexus_required=False,
+        task=task,
+        repo_root=tmp_path,
+    )
+
+    assert pass_row["hybrid_route"]["cloud_model_invoked"] is True
+    assert pass_row["local_guard_invoked"] is True
+    assert pass_row["local_guard"]["schema"] == "nexus.hybrid_local_guard.v1"
+    assert pass_row["local_guard"]["enabled"] is True
+    assert pass_row["local_guard"]["authority"] == "advisory_only"
+    assert pass_row["local_guard"]["cloud_output_observed"] is True
+    assert pass_row["local_guard"]["verifier_executed"] is True
+    assert pass_row["local_guard"]["claim_gate_executed"] is True
+    assert pass_row["local_guard"]["verdict"] == "pass"
+    assert pass_row["local_guard"]["retry_decision"] == "no_retry"
+    assert pass_row["local_guard"]["retry_decision_reason"] == "advisory_pass"
+    assert pass_row["local_guard"]["modified_cloud_output"] is False
+    assert pass_row["local_guard"]["blocked_delivery"] is False
+    assert pass_row["local_guard"]["behavior_changed"] is False
+    assert pass_row["behavior_changed"] is False
+    assert pass_row["local_guard"]["raw_output"]["schema"] == "nexus.hybrid_local_guard_raw_output.v1"
+    assert pass_row["local_guard"]["raw_output"]["verdict"] == "pass"
+    assert pass_row["local_guard"]["raw_output"]["retry_decision"] == "no_retry"
+
+    # --- Case 2: cloud model invoked, verdict=warn (trust mismatch) ---
+    warn_row = _finalize_with_nexus_row(
+        {
+            "mode": "with_nexus",
+            "model_calls": 1,
+            "total_tokens": 300,
+            "token_capture_status": "measured",
+            "hidden_verifier_passed": True,
+            "capability_claim_verified": True,
+            "report_trust_mismatch": True,
+        },
+        provider="gemini",
+        model_required=True,
+        nexus_required=False,
+        task=task,
+        repo_root=tmp_path,
+    )
+
+    assert warn_row["hybrid_route"]["cloud_model_invoked"] is True
+    assert warn_row["local_guard_invoked"] is True
+    assert warn_row["local_guard"]["cloud_output_observed"] is True
+    assert warn_row["local_guard"]["verdict"] == "warn"
+    assert warn_row["local_guard"]["retry_decision"] == "recommend_retry"
+    assert warn_row["local_guard"]["retry_decision_reason"] == "evidence_consistency_warning"
+    assert warn_row["local_guard"]["modified_cloud_output"] is False
+    assert warn_row["local_guard"]["blocked_delivery"] is False
+    assert warn_row["local_guard"]["behavior_changed"] is False
+
+    # --- Case 3: env=1 but model_calls=0 → cloud output missing, guard disabled ---
+    missing_row = _finalize_with_nexus_row(
+        {
+            "mode": "with_nexus",
+            "model_calls": 0,
+            "total_tokens": 0,
+            "token_capture_status": "not_applicable",
+        },
+        provider="gemini",
+        model_required=True,
+        nexus_required=False,
+        task=task,
+        repo_root=tmp_path,
+    )
+
+    assert missing_row["local_guard_invoked"] is False
+    assert missing_row["local_guard"]["enabled"] is True
+    assert missing_row["local_guard"]["cloud_output_observed"] is False
+    assert missing_row["local_guard"]["verdict"] == "skipped"
+    assert missing_row["local_guard"]["modified_cloud_output"] is False
+    assert missing_row["local_guard"]["blocked_delivery"] is False
+
+    # --- Case 4: evidence bundle summary aggregation ---
+    with_path = tmp_path / "with.jsonl"
+    without_path = tmp_path / "without.jsonl"
+    with_path.write_text("[]", encoding="utf-8")
+    without_path.write_text("[]", encoding="utf-8")
+    monkeypatch.setattr("scripts.bench.capability_ab_runner._git_commit", lambda x: "dummy-commit")
+
+    bundle_file = write_evidence_bundle(
+        out_dir=tmp_path,
+        with_path=with_path,
+        without_path=without_path,
+        rows=[pass_row, warn_row, missing_row],
+        config={
+            "tasks_file": "tasks.json",
+            "tasks_manifest_hash": "manifest_hash",
+            "unique_tasks_requested": 1,
+            "repeat_trials": 1,
+            "timeout_sec": 60,
+        },
+    )
+
+    bundle_data = json.loads(bundle_file.read_text(encoding="utf-8"))
+    summary = bundle_data["hybrid_route_summary"]
+    assert summary["local_guard_trace_count"] >= 1
+    assert summary["local_guard_warn_count"] >= 1
+    assert summary["local_guard_blocked_delivery_count"] == 0
+    assert summary["behavior_changed_count"] == 0
+    assert summary["local_guard_behavior_changed_count"] == 0
+
+
+def test_h5_disabled_leaves_existing_behavior_unchanged(tmp_path, monkeypatch):
+    """H5-1 Test 1: H5 disabled leaves existing hybrid_route unchanged."""
+    from scripts.bench.capability_ab_runner import CapabilityTask, _finalize_with_nexus_row
+
+    task = CapabilityTask(
+        id="test-task-h5-disabled",
+        difficulty="easy",
+        task_type="test_repair",
+        task_desc="verify h5 disabled does not change behavior",
+        target_file="target.py",
+        test_file="test_target.py",
+        expected_capabilities=("claim_gate",),
+        success_criteria="tests_pass",
+        repo_kind="nexus_internal",
+        fixture_kind="test_fixture",
+    )
+    monkeypatch.delenv("NEXUS_HYBRID_H5_LOCAL_FIRST_TRACE", raising=False)
+
+    row = _finalize_with_nexus_row(
+        {
+            "mode": "with_nexus",
+            "model_calls": 1,
+            "total_tokens": 100,
+            "token_capture_status": "measured",
+        },
+        provider="gemini",
+        model_required=True,
+        nexus_required=False,
+        task=task,
+        repo_root=tmp_path,
+    )
+
+    assert "h5_route" not in row
+    assert row["hybrid_route"]["behavior_changed"] is False
+
+
+def test_h5_trace_flag_attaches_h5_route(tmp_path, monkeypatch):
+    """H5-1 Test 2: H5 trace flag attaches h5_route with correct schema."""
+    from scripts.bench.capability_ab_runner import CapabilityTask, _finalize_with_nexus_row
+
+    task = CapabilityTask(
+        id="test-task-h5-on",
+        difficulty="easy",
+        task_type="test_repair",
+        task_desc="verify h5 trace flag attaches metadata",
+        target_file="target.py",
+        test_file="test_target.py",
+        expected_capabilities=("claim_gate",),
+        success_criteria="tests_pass",
+        repo_kind="nexus_internal",
+        fixture_kind="test_fixture",
+    )
+    monkeypatch.setenv("NEXUS_HYBRID_H5_LOCAL_FIRST_TRACE", "1")
+
+    row = _finalize_with_nexus_row(
+        {
+            "mode": "with_nexus",
+            "model_calls": 1,
+            "total_tokens": 100,
+            "token_capture_status": "measured",
+        },
+        provider="gemini",
+        model_required=True,
+        nexus_required=False,
+        task=task,
+        repo_root=tmp_path,
+    )
+
+    h5 = row["h5_route"]
+    assert h5["enabled"] is True
+    assert h5["schema"] == "nexus.hybrid_h5_route.v1"
+    assert h5["route_mode"] == "local_first_cloud_fallback_trace_only"
+    assert h5["authority"] == "trace_only"
+    assert h5["cloud_provider"] == "gemini"
+
+
+def test_h5_trace_only_does_not_execute_local_or_cloud(tmp_path, monkeypatch):
+    """H5-1 Test 3: H5 trace-only does not execute local or cloud fallback."""
+    from scripts.bench.capability_ab_runner import CapabilityTask, _finalize_with_nexus_row
+
+    task = CapabilityTask(
+        id="test-task-h5-trace",
+        difficulty="easy",
+        task_type="test_repair",
+        task_desc="verify h5 trace does not execute",
+        target_file="target.py",
+        test_file="test_target.py",
+        expected_capabilities=("claim_gate",),
+        success_criteria="tests_pass",
+        repo_kind="nexus_internal",
+        fixture_kind="test_fixture",
+    )
+    monkeypatch.setenv("NEXUS_HYBRID_H5_LOCAL_FIRST_TRACE", "1")
+
+    row = _finalize_with_nexus_row(
+        {
+            "mode": "with_nexus",
+            "model_calls": 1,
+            "total_tokens": 100,
+            "token_capture_status": "measured",
+        },
+        provider="gemini",
+        model_required=True,
+        nexus_required=False,
+        task=task,
+        repo_root=tmp_path,
+    )
+
+    h5 = row["h5_route"]
+    assert h5["local_attempted"] is False
+    assert h5["cloud_fallback_invoked"] is False
+    assert h5["cloud_model_invoked"] is False
+    assert h5["final_source"] == "none"
+    assert h5["behavior_changed"] is False
+    assert h5["blocked_delivery"] is False
+
+
+def test_h5_governance_fields_remain_false(tmp_path, monkeypatch):
+    """H5-1 Test 4: H5 governance fields remain false."""
+    from scripts.bench.capability_ab_runner import CapabilityTask, _finalize_with_nexus_row
+
+    task = CapabilityTask(
+        id="test-task-h5-gov",
+        difficulty="easy",
+        task_type="test_repair",
+        task_desc="verify h5 governance fields",
+        target_file="target.py",
+        test_file="test_target.py",
+        expected_capabilities=("claim_gate",),
+        success_criteria="tests_pass",
+        repo_kind="nexus_internal",
+        fixture_kind="test_fixture",
+    )
+    monkeypatch.setenv("NEXUS_HYBRID_H5_LOCAL_FIRST_TRACE", "1")
+
+    row = _finalize_with_nexus_row(
+        {
+            "mode": "with_nexus",
+            "model_calls": 1,
+            "total_tokens": 100,
+            "token_capture_status": "measured",
+        },
+        provider="gemini",
+        model_required=True,
+        nexus_required=False,
+        task=task,
+        repo_root=tmp_path,
+    )
+
+    h5 = row["h5_route"]
+    assert h5["public_claim_allowed"] is False
+    assert h5["production_ready"] is False
+
+
+def test_h5_bundle_summary_counts_trace_rows(tmp_path, monkeypatch):
+    """H5-1 Test 5: Bundle summary counts H5 trace rows."""
+    from scripts.bench.capability_ab_runner import CapabilityTask, _finalize_with_nexus_row, write_evidence_bundle
+
+    task = CapabilityTask(
+        id="test-task-h5-bundle",
+        difficulty="easy",
+        task_type="test_repair",
+        task_desc="verify h5 bundle summary",
+        target_file="target.py",
+        test_file="test_target.py",
+        expected_capabilities=("claim_gate",),
+        success_criteria="tests_pass",
+        repo_kind="nexus_internal",
+        fixture_kind="test_fixture",
+    )
+    monkeypatch.setenv("NEXUS_HYBRID_H5_LOCAL_FIRST_TRACE", "1")
+    monkeypatch.setattr("scripts.bench.capability_ab_runner._git_commit", lambda x: "dummy-commit")
+
+    row = _finalize_with_nexus_row(
+        {
+            "mode": "with_nexus",
+            "model_calls": 1,
+            "total_tokens": 100,
+            "token_capture_status": "measured",
+        },
+        provider="gemini",
+        model_required=True,
+        nexus_required=False,
+        task=task,
+        repo_root=tmp_path,
+    )
+
+    with_path = tmp_path / "with.jsonl"
+    without_path = tmp_path / "without.jsonl"
+    with_path.write_text("[]", encoding="utf-8")
+    without_path.write_text("[]", encoding="utf-8")
+
+    bundle_file = write_evidence_bundle(
+        out_dir=tmp_path,
+        with_path=with_path,
+        without_path=without_path,
+        rows=[row],
+        config={
+            "tasks_file": "tasks.json",
+            "tasks_manifest_hash": "manifest_hash",
+            "unique_tasks_requested": 1,
+            "repeat_trials": 1,
+            "timeout_sec": 60,
+        },
+    )
+
+    bundle_data = json.loads(bundle_file.read_text(encoding="utf-8"))
+    summary = bundle_data["hybrid_route_summary"]
+    assert summary["h5_trace_count"] >= 1
+    assert summary["h5_behavior_changed_count"] == 0
+    assert summary["h5_cloud_fallback_invoked_count"] == 0
+    assert summary["h5_local_attempted_count"] == 0
+    assert summary["h5_fail_closed_count"] == 0
