@@ -6032,6 +6032,75 @@ def _build_h5_overall_readiness_closure(row: dict[str, Any]) -> dict[str, Any]:
     }
 
 
+def _build_h5_execution_flag_contract(row: dict[str, Any]) -> dict[str, Any]:
+    """Pure helper: builds H5 execution flag contract.
+
+    No side effects. No model calls. No mutation. No execution.
+    """
+    import os as _os
+
+    closure = row.get("h5_overall_readiness_closure")
+    local_shadow = row.get("h5_local_evidence_ingestion_shadow")
+    cloud_shadow = row.get("h5_cloud_evidence_ingestion_shadow")
+
+    flag_env = _os.environ.get("NEXUS_H5_ENABLE_CONTROLLED_EXECUTION", "")
+    flag_present = bool(flag_env)
+    flag_enabled = flag_env.strip() == "1"
+
+    local_ready = bool(local_shadow and local_shadow.get("local_path_ready_shadow_from_external_evidence", False))
+    cloud_ready = bool(cloud_shadow and cloud_shadow.get("cloud_path_ready_shadow_from_external_evidence", False))
+    all_shadow = local_ready and cloud_ready
+    has_closure = bool(closure)
+    closure_blocked = bool(closure and closure.get("closure_status") == "blocked")
+
+    reasons = []
+
+    if not has_closure:
+        reasons.append("missing_overall_readiness_closure")
+    elif not closure_blocked:
+        reasons.append("unexpected_closure_status")
+
+    if not local_ready:
+        reasons.append("local_shadow_evidence_not_ready")
+    if not cloud_ready:
+        reasons.append("cloud_shadow_evidence_not_ready")
+
+    reasons.extend([
+        "quality_non_regression_missing",
+        "full_benchmark_missing",
+        "governance_approval_missing",
+        "promotion_not_ready",
+        "h5_execution_not_implemented",
+    ])
+
+    return {
+        "schema": "nexus.hybrid_h5_execution_flag_contract.v1",
+        "evaluated": True,
+        "execution_flag_name": "NEXUS_H5_ENABLE_CONTROLLED_EXECUTION",
+        "execution_flag_present": flag_present,
+        "execution_flag_enabled": flag_enabled,
+        "execution_allowed": False,
+        "contract_status": "blocked",
+        "contract_reasons": reasons,
+        "local_shadow_ready": local_ready,
+        "cloud_shadow_ready": cloud_ready,
+        "all_shadow_evidence_present": all_shadow,
+        "overall_closure_present": has_closure,
+        "overall_closure_blocked": closure_blocked,
+        "quality_non_regression_ready": False,
+        "full_benchmark_ready": False,
+        "governance_ready": False,
+        "promotion_ready": False,
+        "fail_closed": True,
+        "final_source_change_allowed": False,
+        "final_patch_replacement_allowed": False,
+        "output_mutation_allowed": False,
+        "model_calls_increment_allowed": False,
+        "public_claim_allowed": False,
+        "production_ready": False,
+    }
+
+
 def _finalize_with_nexus_row(
     row: dict[str, Any],
     *,
@@ -6481,6 +6550,9 @@ def _finalize_with_nexus_row(
 
             # H5-23: Overall readiness closure receipt
             finalized["h5_overall_readiness_closure"] = _build_h5_overall_readiness_closure(finalized)
+
+            # H5-25: Execution flag contract
+            finalized["h5_execution_flag_contract"] = _build_h5_execution_flag_contract(finalized)
 
     # Ensure keys are also on the row level for simple flat queries
     finalized["route_mode"] = r_mode
@@ -10222,6 +10294,13 @@ def write_evidence_bundle(
         "h5_overall_readiness_benchmark_missing_count": sum(1 for row in with_rows if "full_benchmark_missing" in (row.get("h5_overall_readiness_closure", {}).get("closure_reasons", []) or [])),
         "h5_overall_readiness_governance_missing_count": sum(1 for row in with_rows if "governance_approval_missing" in (row.get("h5_overall_readiness_closure", {}).get("closure_reasons", []) or [])),
         "h5_overall_readiness_unexpected_side_effect_count": sum(1 for row in with_rows if any(r.startswith("unexpected_") for r in (row.get("h5_overall_readiness_closure", {}).get("closure_reasons", []) or []))),
+        "h5_execution_flag_contract_count": sum(1 for row in with_rows if bool(row.get("h5_execution_flag_contract"))),
+        "h5_execution_flag_present_count": sum(1 for row in with_rows if bool(row.get("h5_execution_flag_contract", {}).get("execution_flag_present", False))),
+        "h5_execution_flag_enabled_count": sum(1 for row in with_rows if bool(row.get("h5_execution_flag_contract", {}).get("execution_flag_enabled", False))),
+        "h5_execution_allowed_count": sum(1 for row in with_rows if bool(row.get("h5_execution_flag_contract", {}).get("execution_allowed", False))),
+        "h5_execution_contract_blocked_count": sum(1 for row in with_rows if str(row.get("h5_execution_flag_contract", {}).get("contract_status", "")) == "blocked"),
+        "h5_execution_contract_fail_closed_count": sum(1 for row in with_rows if bool(row.get("h5_execution_flag_contract", {}).get("fail_closed", False))),
+        "h5_promotion_ready_count": sum(1 for row in with_rows if bool(row.get("h5_execution_flag_contract", {}).get("promotion_ready", False))),
     }
     payload["external_provider_claim_boundary_contract"] = build_external_provider_claim_boundary_contract(payload)
     payload["public_promotion_readiness_contract"] = build_public_promotion_readiness_contract(payload)

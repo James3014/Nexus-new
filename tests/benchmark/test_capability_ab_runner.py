@@ -17601,3 +17601,186 @@ def test_h5_23_bundle_summary_counters(tmp_path, monkeypatch):
     assert summary["h5_execution_ready_count"] == 0
     assert summary["h5_cloud_fallback_invoked_count"] == 0
     assert summary["h5_behavior_changed_count"] == 0
+
+
+def test_h5_25_helper_empty_row_blocks():
+    """H5-25 Test 1: helper with empty row blocks."""
+    from scripts.bench.capability_ab_runner import _build_h5_execution_flag_contract
+
+    contract = _build_h5_execution_flag_contract({})
+    assert contract["contract_status"] == "blocked"
+    assert contract["execution_allowed"] is False
+    assert contract["fail_closed"] is True
+    assert "missing_overall_readiness_closure" in contract["contract_reasons"]
+
+
+def test_h5_25_flag_absent_blocks(monkeypatch):
+    """H5-25 Test 2: flag absent blocks."""
+    from scripts.bench.capability_ab_runner import _build_h5_execution_flag_contract
+
+    monkeypatch.delenv("NEXUS_H5_ENABLE_CONTROLLED_EXECUTION", raising=False)
+    row = {
+        "h5_overall_readiness_closure": {"closure_status": "blocked"},
+        "h5_local_evidence_ingestion_shadow": {"local_path_ready_shadow_from_external_evidence": True},
+        "h5_cloud_evidence_ingestion_shadow": {"cloud_path_ready_shadow_from_external_evidence": True},
+    }
+    contract = _build_h5_execution_flag_contract(row)
+    assert contract["execution_flag_present"] is False
+    assert contract["execution_flag_enabled"] is False
+    assert contract["execution_allowed"] is False
+
+
+def test_h5_25_flag_non1_blocks(monkeypatch):
+    """H5-25 Test 3: flag set to non-1 blocks."""
+    from scripts.bench.capability_ab_runner import _build_h5_execution_flag_contract
+
+    monkeypatch.setenv("NEXUS_H5_ENABLE_CONTROLLED_EXECUTION", "true")
+    row = {
+        "h5_overall_readiness_closure": {"closure_status": "blocked"},
+        "h5_local_evidence_ingestion_shadow": {"local_path_ready_shadow_from_external_evidence": True},
+        "h5_cloud_evidence_ingestion_shadow": {"cloud_path_ready_shadow_from_external_evidence": True},
+    }
+    contract = _build_h5_execution_flag_contract(row)
+    assert contract["execution_flag_present"] is True
+    assert contract["execution_flag_enabled"] is False
+    assert contract["execution_allowed"] is False
+
+
+def test_h5_25_flag_set_to_1_still_blocks(monkeypatch):
+    """H5-25 Test 4: flag set to 1 still blocks in H5-25."""
+    from scripts.bench.capability_ab_runner import _build_h5_execution_flag_contract
+
+    monkeypatch.setenv("NEXUS_H5_ENABLE_CONTROLLED_EXECUTION", "1")
+    row = {
+        "h5_overall_readiness_closure": {"closure_status": "blocked"},
+        "h5_local_evidence_ingestion_shadow": {"local_path_ready_shadow_from_external_evidence": True},
+        "h5_cloud_evidence_ingestion_shadow": {"cloud_path_ready_shadow_from_external_evidence": True},
+    }
+    contract = _build_h5_execution_flag_contract(row)
+    assert contract["execution_flag_enabled"] is True
+    assert contract["execution_allowed"] is False
+    assert "h5_execution_not_implemented" in contract["contract_reasons"]
+    assert "promotion_not_ready" in contract["contract_reasons"]
+
+
+def test_h5_25_finalized_row_attaches_contract(tmp_path, monkeypatch):
+    """H5-25 Test 5: finalized H5 row attaches execution flag contract."""
+    from scripts.bench.capability_ab_runner import CapabilityTask, _finalize_with_nexus_row
+
+    task = CapabilityTask(
+        id="test-task-h5-25-normal", difficulty="easy", task_type="test_repair",
+        task_desc="verify h5-25 contract", target_file="target.py", test_file="test_target.py",
+        expected_capabilities=("claim_gate",), success_criteria="tests_pass",
+        repo_kind="nexus_internal", fixture_kind="test_fixture",
+    )
+    _h5_all_flags_set_with_gate(monkeypatch)
+    monkeypatch.delenv("NEXUS_H5_ENABLE_CONTROLLED_EXECUTION", raising=False)
+
+    row = _finalize_with_nexus_row(
+        {"mode": "with_nexus", "model_calls": 1, "total_tokens": 100,
+         "token_capture_status": "measured",
+         "committee_trace": {"candidate_count": 2, "judge_selection": {"selected_candidate_id": "C_12481#candidate-1"},
+                              "committee_receipt": {"selected_candidate_applied": True, "selected_candidate_apply_hash_match": True}},
+         "local_solve_eligible": True},
+        provider="gemini", model_required=True, nexus_required=False, task=task, repo_root=tmp_path,
+    )
+
+    contract = row["h5_execution_flag_contract"]
+    assert contract["execution_allowed"] is False
+    assert row.get("final_source", "none") == "none"
+    assert row["behavior_changed"] is False
+
+
+def test_h5_25_accepted_shadows_still_blocks(tmp_path, monkeypatch):
+    """H5-25 Test 6: accepted local+cloud shadow still blocks."""
+    from scripts.bench.capability_ab_runner import CapabilityTask, _finalize_with_nexus_row
+
+    task = CapabilityTask(
+        id="test-task-h5-25-accepted", difficulty="easy", task_type="test_repair",
+        task_desc="verify h5-25 accepted", target_file="target.py", test_file="test_target.py",
+        expected_capabilities=("claim_gate",), success_criteria="tests_pass",
+        repo_kind="nexus_internal", fixture_kind="test_fixture",
+    )
+    _h5_all_flags_set_with_gate(monkeypatch)
+    monkeypatch.delenv("NEXUS_H5_ENABLE_CONTROLLED_EXECUTION", raising=False)
+
+    row = _finalize_with_nexus_row(
+        {"mode": "with_nexus", "model_calls": 1, "total_tokens": 100,
+         "token_capture_status": "measured",
+         "committee_trace": {"candidate_count": 2, "judge_selection": {"selected_candidate_id": "C_12481#candidate-1"},
+                              "committee_receipt": {"selected_candidate_applied": True, "selected_candidate_apply_hash_match": True}},
+         "local_solve_eligible": True,
+         "external_local_evidence_ingestion_validation": {
+             "schema": "nexus.h5_local_committee_evidence_ingestion_validation.v1",
+             "validation_status": "accepted", "accepted_for_h5_readiness_shadow": True,
+         },
+         "external_cloud_evidence_ingestion_validation": {
+             "schema": "nexus.h5_cloud_fallback_evidence_ingestion_validation.v1",
+             "validation_status": "accepted", "accepted_for_h5_readiness_shadow": True,
+         }},
+        provider="gemini", model_required=True, nexus_required=False, task=task, repo_root=tmp_path,
+    )
+
+    closure = row["h5_overall_readiness_closure"]
+    contract = row["h5_execution_flag_contract"]
+    assert closure["all_shadow_evidence_present"] is True
+    assert contract["all_shadow_evidence_present"] is True
+    assert contract["execution_allowed"] is False
+    assert contract["fail_closed"] is True
+    assert row.get("final_source", "none") == "none"
+    assert row["behavior_changed"] is False
+
+
+def test_h5_25_bundle_summary_counters(tmp_path, monkeypatch):
+    """H5-25 Test 7: summary counters."""
+    from scripts.bench.capability_ab_runner import CapabilityTask, _finalize_with_nexus_row, write_evidence_bundle
+
+    task = CapabilityTask(
+        id="test-task-h5-25-summary", difficulty="easy", task_type="test_repair",
+        task_desc="verify h5-25 summary", target_file="target.py", test_file="test_target.py",
+        expected_capabilities=("claim_gate",), success_criteria="tests_pass",
+        repo_kind="nexus_internal", fixture_kind="test_fixture",
+    )
+    _h5_all_flags_set_with_gate(monkeypatch)
+    monkeypatch.setattr("scripts.bench.capability_ab_runner._git_commit", lambda x: "dummy-commit")
+
+    row_absent = _finalize_with_nexus_row(
+        {"mode": "with_nexus", "model_calls": 1, "total_tokens": 100,
+         "token_capture_status": "measured",
+         "committee_trace": {"candidate_count": 2, "judge_selection": {"selected_candidate_id": "C_12481#candidate-1"},
+                              "committee_receipt": {"selected_candidate_applied": True, "selected_candidate_apply_hash_match": True}},
+         "local_solve_eligible": True},
+        provider="gemini", model_required=True, nexus_required=False, task=task, repo_root=tmp_path,
+    )
+
+    monkeypatch.setenv("NEXUS_HYBRID_H5_ENABLE_CONTROLLED_EXECUTION", "1")
+    row_enabled = _finalize_with_nexus_row(
+        {"mode": "with_nexus", "model_calls": 1, "total_tokens": 100,
+         "token_capture_status": "measured",
+         "committee_trace": {"candidate_count": 2, "judge_selection": {"selected_candidate_id": "C_12481#candidate-1"},
+                              "committee_receipt": {"selected_candidate_applied": True, "selected_candidate_apply_hash_match": True}},
+         "local_solve_eligible": True},
+        provider="gemini", model_required=True, nexus_required=False, task=task, repo_root=tmp_path,
+    )
+
+    with_path = tmp_path / "with.jsonl"
+    without_path = tmp_path / "without.jsonl"
+    with_path.write_text("[]", encoding="utf-8")
+    without_path.write_text("[]", encoding="utf-8")
+
+    bundle_file = write_evidence_bundle(
+        out_dir=tmp_path, with_path=with_path, without_path=without_path,
+        rows=[row_absent, row_enabled],
+        config={"tasks_file": "tasks.json", "tasks_manifest_hash": "manifest_hash",
+                "unique_tasks_requested": 1, "repeat_trials": 1, "timeout_sec": 60},
+    )
+
+    bundle_data = json.loads(bundle_file.read_text(encoding="utf-8"))
+    summary = bundle_data["hybrid_route_summary"]
+    assert summary["h5_execution_flag_contract_count"] >= 1
+    assert summary["h5_execution_contract_blocked_count"] >= 1
+    assert summary["h5_execution_contract_fail_closed_count"] >= 1
+    assert summary["h5_execution_allowed_count"] == 0
+    assert summary["h5_promotion_ready_count"] == 0
+    assert summary["h5_cloud_fallback_invoked_count"] == 0
+    assert summary["h5_behavior_changed_count"] == 0
