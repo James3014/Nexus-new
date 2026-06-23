@@ -18624,3 +18624,200 @@ def test_h5_30_bundle_summary_counters(tmp_path, monkeypatch):
     assert summary["h5_cloud_fallback_invoked_count"] == 0
     assert summary["h5_actual_final_patch_replaced_count"] == 0
     assert summary["h5_actual_output_mutated_count"] == 0
+
+
+def test_h5_31_empty_row_blocks():
+    """H5-31 Test 1: empty row blocks."""
+    from scripts.bench.capability_ab_runner import _build_h5_local_final_source_controlled_trial_receipt
+
+    receipt = _build_h5_local_final_source_controlled_trial_receipt({})
+    assert receipt["trial_status"] == "blocked"
+    assert receipt["would_allow_final_source_trial"] is False
+    assert receipt["actual_final_source_after"] == "none"
+    assert receipt["actual_final_source_changed"] is False
+
+
+def test_h5_31_flags_missing_blocks():
+    """H5-31 Test 2: all candidates present but flags missing blocks."""
+    from scripts.bench.capability_ab_runner import _build_h5_local_final_source_controlled_trial_receipt
+
+    row = {
+        "h5_controlled_mutation_gate": {"all_required_flags_enabled": False, "safe_to_continue": True, "rollback_required": False, "mutation_allowed": False, "gate_status": "blocked"},
+        "h5_local_candidate_shadow_final_source_promotion": {"shadow_promotion_candidate": True, "shadow_final_source_after_promotion": "local_candidate_shadow_promoted"},
+        "h5_local_candidate_promotion_dry_run": {"would_promote_local_candidate": True},
+        "h5_local_evidence_ingestion_shadow": {"local_path_ready_shadow_from_external_evidence": True},
+        "h5_cloud_evidence_ingestion_shadow": {"cloud_path_ready_shadow_from_external_evidence": True},
+        "h5_overall_readiness_closure": {"all_shadow_evidence_present": True},
+    }
+    receipt = _build_h5_local_final_source_controlled_trial_receipt(row)
+    assert receipt["would_allow_final_source_trial"] is False
+    assert "required_flags_not_enabled" in receipt["trial_reasons"]
+
+
+def test_h5_31_all_flags_evidence_trial_ready_blocked(monkeypatch):
+    """H5-31 Test 3: all flags + all evidence produces trial_ready_blocked but no mutation."""
+    from scripts.bench.capability_ab_runner import _build_h5_local_final_source_controlled_trial_receipt
+
+    for var in ("NEXUS_H5_ENABLE_CONTROLLED_EXECUTION", "NEXUS_H5_ALLOW_LOCAL_FINALIZATION",
+                "NEXUS_H5_ALLOW_FINAL_SOURCE_CHANGE", "NEXUS_H5_ALLOW_FINAL_PATCH_REPLACEMENT",
+                "NEXUS_H5_ALLOW_OUTPUT_MUTATION"):
+        monkeypatch.setenv(var, "1")
+
+    row = {
+        "h5_controlled_mutation_gate": {"all_required_flags_enabled": True, "safe_to_continue": True, "rollback_required": False, "mutation_allowed": False, "gate_status": "blocked"},
+        "h5_local_candidate_shadow_final_source_promotion": {"shadow_promotion_candidate": True, "shadow_final_source_after_promotion": "local_candidate_shadow_promoted"},
+        "h5_local_candidate_promotion_dry_run": {"would_promote_local_candidate": True},
+        "h5_local_evidence_ingestion_shadow": {"local_path_ready_shadow_from_external_evidence": True},
+        "h5_cloud_evidence_ingestion_shadow": {"cloud_path_ready_shadow_from_external_evidence": True},
+        "h5_overall_readiness_closure": {"all_shadow_evidence_present": True},
+        "final_source": "none",
+    }
+    receipt = _build_h5_local_final_source_controlled_trial_receipt(row)
+    assert receipt["would_allow_final_source_trial"] is True
+    assert receipt["trial_status"] == "trial_ready_blocked"
+    assert receipt["trial_final_source_after_promotion"] == "local_candidate_shadow_promoted"
+    assert receipt["actual_final_source_after"] == "none"
+    assert receipt["actual_final_source_changed"] is False
+    assert receipt["final_patch_replacement_allowed"] is False
+    assert receipt["output_mutation_allowed"] is False
+
+
+def test_h5_31_rollback_blocks():
+    """H5-31 Test 4: controlled gate rollback blocks trial."""
+    from scripts.bench.capability_ab_runner import _build_h5_local_final_source_controlled_trial_receipt
+
+    row = {
+        "h5_controlled_mutation_gate": {"all_required_flags_enabled": True, "safe_to_continue": False, "rollback_required": True, "gate_status": "blocked"},
+        "h5_local_candidate_shadow_final_source_promotion": {"shadow_promotion_candidate": True, "shadow_final_source_after_promotion": "local_candidate_shadow_promoted"},
+        "h5_local_candidate_promotion_dry_run": {"would_promote_local_candidate": True},
+        "h5_local_evidence_ingestion_shadow": {"local_path_ready_shadow_from_external_evidence": True},
+        "h5_cloud_evidence_ingestion_shadow": {"cloud_path_ready_shadow_from_external_evidence": True},
+        "h5_overall_readiness_closure": {"all_shadow_evidence_present": True},
+    }
+    receipt = _build_h5_local_final_source_controlled_trial_receipt(row)
+    assert receipt["would_allow_final_source_trial"] is False
+    assert "controlled_mutation_gate_not_safe" in receipt["trial_reasons"]
+
+
+def test_h5_31_unexpected_final_source_detected():
+    """H5-31 Test 5: unexpected actual final_source change detected."""
+    from scripts.bench.capability_ab_runner import _build_h5_local_final_source_controlled_trial_receipt
+
+    row = {"final_source": "local_candidate_shadow_promoted"}
+    receipt = _build_h5_local_final_source_controlled_trial_receipt(row)
+    assert receipt["actual_final_source_changed"] is True
+    assert "unexpected_actual_final_source_change" in receipt["trial_reasons"]
+
+
+def test_h5_31_finalized_row_attaches_receipt(tmp_path, monkeypatch):
+    """H5-31 Test 6: finalized row attaches controlled trial receipt."""
+    from scripts.bench.capability_ab_runner import CapabilityTask, _finalize_with_nexus_row
+
+    task = CapabilityTask(
+        id="test-task-h5-31", difficulty="easy", task_type="test_repair",
+        task_desc="verify h5-31", target_file="target.py", test_file="test_target.py",
+        expected_capabilities=("claim_gate",), success_criteria="tests_pass",
+        repo_kind="nexus_internal", fixture_kind="test_fixture",
+    )
+    _h5_all_flags_set_with_gate(monkeypatch)
+
+    row = _finalize_with_nexus_row(
+        {"mode": "with_nexus", "model_calls": 1, "total_tokens": 100,
+         "token_capture_status": "measured",
+         "committee_trace": {"candidate_count": 2, "judge_selection": {"selected_candidate_id": "C_12481#candidate-1"},
+                              "committee_receipt": {"selected_candidate_applied": True, "selected_candidate_apply_hash_match": True}},
+         "local_solve_eligible": True},
+        provider="gemini", model_required=True, nexus_required=False, task=task, repo_root=tmp_path,
+    )
+
+    receipt = row["h5_local_final_source_controlled_trial_receipt"]
+    assert receipt["actual_final_source_after"] == "none"
+    assert receipt["actual_final_source_changed"] is False
+    assert row.get("final_source", "none") == "none"
+    assert row["behavior_changed"] is False
+
+
+def test_h5_31_all_flags_evidence_no_mutate(tmp_path, monkeypatch):
+    """H5-31 Test 7: all five flags + accepted evidence may become trial_ready but no mutate."""
+    from scripts.bench.capability_ab_runner import CapabilityTask, _finalize_with_nexus_row
+
+    task = CapabilityTask(
+        id="test-task-h5-31-nomut", difficulty="easy", task_type="test_repair",
+        task_desc="verify h5-31 no mutate", target_file="target.py", test_file="test_target.py",
+        expected_capabilities=("claim_gate",), success_criteria="tests_pass",
+        repo_kind="nexus_internal", fixture_kind="test_fixture",
+    )
+    _h5_all_flags_set_with_gate(monkeypatch)
+
+    row = _finalize_with_nexus_row(
+        {"mode": "with_nexus", "model_calls": 1, "total_tokens": 100,
+         "token_capture_status": "measured",
+         "committee_trace": {"candidate_count": 2, "judge_selection": {"selected_candidate_id": "C_12481#candidate-1"},
+                              "committee_receipt": {"selected_candidate_applied": True, "selected_candidate_apply_hash_match": True}},
+         "local_solve_eligible": True,
+         "external_local_evidence_ingestion_validation": {
+             "schema": "nexus.h5_local_committee_evidence_ingestion_validation.v1",
+             "validation_status": "accepted", "accepted_for_h5_readiness_shadow": True,
+         },
+         "external_cloud_evidence_ingestion_validation": {
+             "schema": "nexus.h5_cloud_fallback_evidence_ingestion_validation.v1",
+             "validation_status": "accepted", "accepted_for_h5_readiness_shadow": True,
+         }},
+        provider="gemini", model_required=True, nexus_required=False, task=task, repo_root=tmp_path,
+    )
+
+    receipt = row["h5_local_final_source_controlled_trial_receipt"]
+    assert receipt["actual_final_source_after"] == "none"
+    assert receipt["actual_final_source_changed"] is False
+    assert row.get("final_source", "none") == "none"
+    assert row["behavior_changed"] is False
+    assert row["h5_controlled_mutation_gate"]["mutation_allowed"] is False
+    assert receipt["final_patch_replacement_allowed"] is False
+    assert receipt["output_mutation_allowed"] is False
+
+
+def test_h5_31_bundle_summary_counters(tmp_path, monkeypatch):
+    """H5-31 Test 8: summary counters."""
+    from scripts.bench.capability_ab_runner import CapabilityTask, _finalize_with_nexus_row, write_evidence_bundle
+
+    task = CapabilityTask(
+        id="test-task-h5-31-summary", difficulty="easy", task_type="test_repair",
+        task_desc="verify h5-31 summary", target_file="target.py", test_file="test_target.py",
+        expected_capabilities=("claim_gate",), success_criteria="tests_pass",
+        repo_kind="nexus_internal", fixture_kind="test_fixture",
+    )
+    _h5_all_flags_set_with_gate(monkeypatch)
+    monkeypatch.setattr("scripts.bench.capability_ab_runner._git_commit", lambda x: "dummy-commit")
+
+    row = _finalize_with_nexus_row(
+        {"mode": "with_nexus", "model_calls": 1, "total_tokens": 100,
+         "token_capture_status": "measured",
+         "committee_trace": {"candidate_count": 2, "judge_selection": {"selected_candidate_id": "C_12481#candidate-1"},
+                              "committee_receipt": {"selected_candidate_applied": True, "selected_candidate_apply_hash_match": True}},
+         "local_solve_eligible": True},
+        provider="gemini", model_required=True, nexus_required=False, task=task, repo_root=tmp_path,
+    )
+
+    with_path = tmp_path / "with.jsonl"
+    without_path = tmp_path / "without.jsonl"
+    with_path.write_text("[]", encoding="utf-8")
+    without_path.write_text("[]", encoding="utf-8")
+
+    bundle_file = write_evidence_bundle(
+        out_dir=tmp_path, with_path=with_path, without_path=without_path,
+        rows=[row],
+        config={"tasks_file": "tasks.json", "tasks_manifest_hash": "manifest_hash",
+                "unique_tasks_requested": 1, "repeat_trials": 1, "timeout_sec": 60},
+    )
+
+    bundle_data = json.loads(bundle_file.read_text(encoding="utf-8"))
+    summary = bundle_data["hybrid_route_summary"]
+    assert summary["h5_local_final_source_trial_receipt_count"] >= 1
+    assert summary["h5_local_final_source_trial_actual_change_count"] == 0
+    assert summary["h5_local_final_source_trial_rollback_required_count"] == 0
+    assert summary["h5_controlled_mutation_allowed_count"] == 0
+    assert summary["h5_execution_allowed_count"] == 0
+    assert summary["h5_behavior_changed_count"] == 0
+    assert summary["h5_cloud_fallback_invoked_count"] == 0
+    assert summary["h5_actual_final_patch_replaced_count"] == 0
+    assert summary["h5_actual_output_mutated_count"] == 0

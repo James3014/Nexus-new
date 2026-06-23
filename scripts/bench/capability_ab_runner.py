@@ -6574,6 +6574,104 @@ def _build_h5_controlled_mutation_gate(row: dict[str, Any]) -> dict[str, Any]:
     }
 
 
+def _build_h5_local_final_source_controlled_trial_receipt(row: dict[str, Any]) -> dict[str, Any]:
+    """Pure helper: builds local final_source controlled trial receipt.
+
+    No side effects. No model calls. No mutation. No actual final_source change.
+    """
+    gate = row.get("h5_controlled_mutation_gate")
+    fs_shadow = row.get("h5_local_candidate_shadow_final_source_promotion")
+    promo = row.get("h5_local_candidate_promotion_dry_run")
+    local_shadow = row.get("h5_local_evidence_ingestion_shadow")
+    cloud_shadow = row.get("h5_cloud_evidence_ingestion_shadow")
+    closure = row.get("h5_overall_readiness_closure")
+
+    actual_fs = str(row.get("final_source", "none") or "none")
+    h5_fs = str(row.get("h5_route", {}).get("final_source", "none") or "none")
+    actual_changed = actual_fs != "none" or h5_fs != "none"
+
+    reasons = []
+
+    gate_present = bool(gate)
+    gate_blocked = bool(gate and gate.get("gate_status") == "blocked")
+    all_flags = bool(gate and gate.get("all_required_flags_enabled", False))
+    gate_safe = bool(gate and gate.get("safe_to_continue", True))
+    gate_rollback = bool(gate and gate.get("rollback_required", False))
+    mutation_allowed = bool(gate and gate.get("mutation_allowed", False))
+
+    fs_shadow_candidate = bool(fs_shadow and fs_shadow.get("shadow_promotion_candidate", False))
+    fs_shadow_promoted = str(fs_shadow and fs_shadow.get("shadow_final_source_after_promotion", "") or "")
+    promo_would = bool(promo and promo.get("would_promote_local_candidate", False))
+
+    local_ready = bool(local_shadow and local_shadow.get("local_path_ready_shadow_from_external_evidence", False))
+    cloud_ready = bool(cloud_shadow and cloud_shadow.get("cloud_path_ready_shadow_from_external_evidence", False))
+    all_shadow = bool(closure and closure.get("all_shadow_evidence_present", False))
+
+    would_trial = (
+        gate_present and all_flags and gate_safe and not gate_rollback
+        and fs_shadow_candidate and fs_shadow_promoted == "local_candidate_shadow_promoted"
+        and promo_would and local_ready and cloud_ready and all_shadow
+    )
+
+    if not gate_present:
+        reasons.append("missing_controlled_mutation_gate")
+    if gate and not gate_safe:
+        reasons.append("controlled_mutation_gate_not_safe")
+    if not all_flags:
+        reasons.append("required_flags_not_enabled")
+    if not fs_shadow_candidate:
+        reasons.append("shadow_final_source_candidate_missing")
+    if not local_ready:
+        reasons.append("local_evidence_not_ready")
+    if not cloud_ready:
+        reasons.append("cloud_evidence_not_ready")
+    if not all_shadow:
+        reasons.append("all_shadow_evidence_not_present")
+    if not promo_would:
+        reasons.append("promotion_dry_run_not_ready")
+    if actual_changed:
+        reasons.append("unexpected_actual_final_source_change")
+
+    reasons.extend([
+        "h5_31_trial_only_no_actual_final_source_change",
+        "real_final_source_mutation_not_implemented",
+        "final_patch_replacement_still_blocked",
+        "output_mutation_still_blocked",
+    ])
+
+    trial_fs = "local_candidate_shadow_promoted" if would_trial else "none"
+    trial_status = "trial_ready_blocked" if would_trial else "blocked"
+
+    return {
+        "schema": "nexus.hybrid_h5_local_final_source_controlled_trial_receipt.v1",
+        "evaluated": True,
+        "trial_status": trial_status,
+        "trial_reasons": reasons,
+        "would_allow_final_source_trial": would_trial,
+        "actual_final_source_before": actual_fs,
+        "actual_final_source_after": actual_fs,
+        "actual_final_source_changed": actual_changed,
+        "shadow_final_source_after_promotion": fs_shadow_promoted if fs_shadow_candidate else "none",
+        "trial_final_source_after_promotion": trial_fs,
+        "controlled_mutation_gate_present": gate_present,
+        "controlled_mutation_gate_blocked": gate_blocked,
+        "all_required_flags_enabled": all_flags,
+        "mutation_allowed": mutation_allowed,
+        "safe_to_continue": gate_safe and not gate_rollback,
+        "rollback_required": gate_rollback,
+        "local_evidence_ready": local_ready,
+        "cloud_evidence_ready": cloud_ready,
+        "all_shadow_evidence_present": all_shadow,
+        "promotion_dry_run_would_promote": promo_would,
+        "shadow_final_source_candidate": fs_shadow_candidate,
+        "final_patch_replacement_allowed": False,
+        "output_mutation_allowed": False,
+        "model_calls_increment_allowed": False,
+        "public_claim_allowed": False,
+        "production_ready": False,
+    }
+
+
 def _finalize_with_nexus_row(
     row: dict[str, Any],
     *,
@@ -7043,6 +7141,9 @@ def _finalize_with_nexus_row(
 
             # H5-30: Controlled mutation gate
             finalized["h5_controlled_mutation_gate"] = _build_h5_controlled_mutation_gate(finalized)
+
+            # H5-31: Local final_source controlled trial receipt
+            finalized["h5_local_final_source_controlled_trial_receipt"] = _build_h5_local_final_source_controlled_trial_receipt(finalized)
 
     # Ensure keys are also on the row level for simple flat queries
     finalized["route_mode"] = r_mode
@@ -10825,6 +10926,13 @@ def write_evidence_bundle(
         "h5_controlled_rollback_required_count": sum(1 for row in with_rows if bool(row.get("h5_controlled_mutation_gate", {}).get("rollback_required", False))),
         "h5_controlled_safe_to_continue_count": sum(1 for row in with_rows if bool(row.get("h5_controlled_mutation_gate", {}).get("safe_to_continue", False))),
         "h5_controlled_unexpected_mutation_count": sum(1 for row in with_rows if bool(row.get("h5_controlled_mutation_gate", {}).get("rollback_required", False))),
+        "h5_local_final_source_trial_receipt_count": sum(1 for row in with_rows if bool(row.get("h5_local_final_source_controlled_trial_receipt"))),
+        "h5_local_final_source_trial_ready_count": sum(1 for row in with_rows if bool(row.get("h5_local_final_source_controlled_trial_receipt", {}).get("would_allow_final_source_trial", False))),
+        "h5_local_final_source_trial_blocked_count": sum(1 for row in with_rows if str(row.get("h5_local_final_source_controlled_trial_receipt", {}).get("trial_status", "")) == "blocked"),
+        "h5_local_final_source_trial_actual_change_count": sum(1 for row in with_rows if bool(row.get("h5_local_final_source_controlled_trial_receipt", {}).get("actual_final_source_changed", False))),
+        "h5_local_final_source_trial_flags_enabled_count": sum(1 for row in with_rows if bool(row.get("h5_local_final_source_controlled_trial_receipt", {}).get("all_required_flags_enabled", False))),
+        "h5_local_final_source_trial_safe_count": sum(1 for row in with_rows if bool(row.get("h5_local_final_source_controlled_trial_receipt", {}).get("safe_to_continue", False))),
+        "h5_local_final_source_trial_rollback_required_count": sum(1 for row in with_rows if bool(row.get("h5_local_final_source_controlled_trial_receipt", {}).get("rollback_required", False))),
     }
     payload["external_provider_claim_boundary_contract"] = build_external_provider_claim_boundary_contract(payload)
     payload["public_promotion_readiness_contract"] = build_public_promotion_readiness_contract(payload)
