@@ -5580,6 +5580,80 @@ def _build_h5_local_finalization_shadow_receipt(row: dict[str, Any]) -> dict[str
     return result
 
 
+def _build_h5_cloud_fallback_finalization_shadow_receipt(row: dict[str, Any]) -> dict[str, Any]:
+    """Pure helper: builds cloud fallback finalization shadow receipt.
+
+    No side effects. No model calls. No row mutation.
+    Records what would need to change if cloud fallback became final.
+    """
+    plan = row.get("h5_execution_plan")
+    h5 = row.get("h5_route", {})
+    model_calls_before = int(row.get("model_calls", 0) or 0)
+
+    result = {
+        "schema": "nexus.hybrid_h5_cloud_fallback_finalization_shadow_receipt.v1",
+        "shadow_only": True,
+        "would_finalize_cloud_fallback": False,
+        "planned_final_source": "none",
+        "cloud_provider": "",
+        "cloud_fallback_decision": "",
+        "cloud_fallback_reason": "",
+        "cloud_fallback_would_invoke": False,
+        "cloud_fallback_invoked": False,
+        "cloud_model_invoked": False,
+        "requires_cloud_call": False,
+        "requires_output_replacement": False,
+        "requires_final_source_change": False,
+        "requires_behavior_change": False,
+        "requires_verifier": True,
+        "requires_claim_gate": True,
+        "would_increment_model_calls": False,
+        "model_calls_before": model_calls_before,
+        "model_calls_after_shadow": model_calls_before,
+        "blocked_reason": "",
+        "public_claim_allowed": False,
+        "production_ready": False,
+    }
+
+    if not plan:
+        result["blocked_reason"] = "missing_execution_plan"
+        return result
+
+    if plan.get("execution_mode", "") != "cloud_fallback_plan":
+        result["blocked_reason"] = "not_cloud_fallback_plan"
+        return result
+
+    if not plan.get("execution_allowed", False):
+        result["blocked_reason"] = "execution_not_allowed"
+        return result
+
+    if not h5.get("cloud_fallback_would_invoke", False):
+        result["blocked_reason"] = "cloud_fallback_not_marked_would_invoke"
+        return result
+
+    cloud_prov = str(h5.get("cloud_provider", "") or "")
+    if cloud_prov not in {"gemini", "codex"}:
+        result["blocked_reason"] = "cloud_provider_unavailable"
+        return result
+
+    # True path: would finalize cloud fallback
+    result["would_finalize_cloud_fallback"] = True
+    result["planned_final_source"] = "cloud_fallback"
+    result["cloud_provider"] = cloud_prov
+    result["cloud_fallback_decision"] = str(h5.get("cloud_fallback_decision", "") or "")
+    result["cloud_fallback_reason"] = str(h5.get("cloud_fallback_reason", "") or h5.get("cloud_fallback_decision_reason", "") or "")
+    result["cloud_fallback_would_invoke"] = True
+    result["requires_cloud_call"] = True
+    result["requires_output_replacement"] = True
+    result["requires_final_source_change"] = True
+    result["requires_behavior_change"] = True
+    result["would_increment_model_calls"] = True
+    result["model_calls_after_shadow"] = model_calls_before + 1
+    result["blocked_reason"] = ""
+
+    return result
+
+
 def _finalize_with_nexus_row(
     row: dict[str, Any],
     *,
@@ -6014,6 +6088,9 @@ def _finalize_with_nexus_row(
 
             # H5-10: Local candidate finalization shadow receipt
             finalized["h5_local_finalization_shadow_receipt"] = _build_h5_local_finalization_shadow_receipt(finalized)
+
+            # H5-11: Cloud fallback finalization shadow receipt
+            finalized["h5_cloud_fallback_finalization_shadow_receipt"] = _build_h5_cloud_fallback_finalization_shadow_receipt(finalized)
 
     # Ensure keys are also on the row level for simple flat queries
     finalized["route_mode"] = r_mode
@@ -9723,6 +9800,12 @@ def write_evidence_bundle(
         "h5_local_finalization_blocked_count": sum(1 for row in with_rows if bool(row.get("h5_local_finalization_shadow_receipt")) and not bool(row.get("h5_local_finalization_shadow_receipt", {}).get("would_finalize_local_candidate", False))),
         "h5_local_finalization_missing_plan_count": sum(1 for row in with_rows if str(row.get("h5_local_finalization_shadow_receipt", {}).get("blocked_reason", "")) == "missing_execution_plan"),
         "h5_local_finalization_hash_not_verified_count": sum(1 for row in with_rows if str(row.get("h5_local_finalization_shadow_receipt", {}).get("blocked_reason", "")) == "local_candidate_hash_not_verified"),
+        "h5_cloud_finalization_shadow_count": sum(1 for row in with_rows if bool(row.get("h5_cloud_fallback_finalization_shadow_receipt"))),
+        "h5_cloud_finalization_would_finalize_count": sum(1 for row in with_rows if bool(row.get("h5_cloud_fallback_finalization_shadow_receipt", {}).get("would_finalize_cloud_fallback", False))),
+        "h5_cloud_finalization_blocked_count": sum(1 for row in with_rows if bool(row.get("h5_cloud_fallback_finalization_shadow_receipt")) and not bool(row.get("h5_cloud_fallback_finalization_shadow_receipt", {}).get("would_finalize_cloud_fallback", False))),
+        "h5_cloud_finalization_missing_plan_count": sum(1 for row in with_rows if str(row.get("h5_cloud_fallback_finalization_shadow_receipt", {}).get("blocked_reason", "")) == "missing_execution_plan"),
+        "h5_cloud_finalization_provider_unavailable_count": sum(1 for row in with_rows if str(row.get("h5_cloud_fallback_finalization_shadow_receipt", {}).get("blocked_reason", "")) == "cloud_provider_unavailable"),
+        "h5_cloud_finalization_would_increment_model_calls_count": sum(1 for row in with_rows if bool(row.get("h5_cloud_fallback_finalization_shadow_receipt", {}).get("would_increment_model_calls", False))),
     }
     payload["external_provider_claim_boundary_contract"] = build_external_provider_claim_boundary_contract(payload)
     payload["public_promotion_readiness_contract"] = build_public_promotion_readiness_contract(payload)
