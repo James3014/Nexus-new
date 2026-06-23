@@ -153,6 +153,79 @@ def build_h5_local_committee_smoke_receipt(smoke_result: dict[str, Any]) -> dict
     }
 
 
+def build_h5_local_committee_readiness_bridge(smoke_receipt: dict[str, Any]) -> dict[str, Any]:
+    """Pure adapter: evaluates whether local committee smoke receipt satisfies H5 readiness.
+
+    No side effects. No model calls. No mutation.
+    """
+    if not smoke_receipt:
+        return {
+            "schema": "nexus.h5_local_committee_readiness_bridge.v1",
+            "source_schema": "nexus.h5_local_committee_smoke_receipt.v1",
+            "evaluated": True,
+            "local_committee_e2e_ready_shadow": False,
+            "readiness_status": "blocked",
+            "readiness_reasons": ["missing_smoke_receipt"],
+            "candidate_identity_ready": False,
+            "candidate_application_ready": False,
+            "candidate_hash_ready": False,
+            "candidate_patch_metadata_ready": False,
+            "local_solve_ready": False,
+            "h5_compatible": False,
+            "can_feed_h5_readiness_shadow": False,
+            "final_source_changed": False,
+            "final_patch_replaced": False,
+            "output_mutated": False,
+            "model_calls_incremented": False,
+            "public_claim_allowed": False,
+            "production_ready": False,
+        }
+
+    reasons = []
+    identity_ready = bool(str(smoke_receipt.get("selected_candidate_id", "") or ""))
+    application_ready = bool(smoke_receipt.get("selected_candidate_applied", False))
+    hash_ready = bool(smoke_receipt.get("selected_candidate_hash_match", False))
+    patch_ready = bool(smoke_receipt.get("selected_candidate_patch_sha256", "")) and int(smoke_receipt.get("selected_candidate_patch_length", 0) or 0) > 0
+    solve_ready = bool(smoke_receipt.get("local_solve_eligible", False))
+    h5_compat = bool(smoke_receipt.get("h5_compatible", False))
+
+    status = str(smoke_receipt.get("status", "skipped") or "skipped")
+    dry_run = bool(smoke_receipt.get("dry_run", True))
+
+    if status == "skipped":
+        reasons.append("smoke_skipped")
+    elif dry_run:
+        reasons.append("dry_run_no_real_candidate")
+    elif not h5_compat:
+        reasons.append(str(smoke_receipt.get("h5_local_finalization_blocked_reason", "") or "not_h5_compatible"))
+
+    all_ready = identity_ready and application_ready and hash_ready and patch_ready and solve_ready and h5_compat
+    ready_shadow = all_ready and not reasons
+    readiness_status = "ready_shadow" if ready_shadow else "blocked"
+
+    return {
+        "schema": "nexus.h5_local_committee_readiness_bridge.v1",
+        "source_schema": "nexus.h5_local_committee_smoke_receipt.v1",
+        "evaluated": True,
+        "local_committee_e2e_ready_shadow": ready_shadow,
+        "readiness_status": readiness_status,
+        "readiness_reasons": reasons,
+        "candidate_identity_ready": identity_ready,
+        "candidate_application_ready": application_ready,
+        "candidate_hash_ready": hash_ready,
+        "candidate_patch_metadata_ready": patch_ready,
+        "local_solve_ready": solve_ready,
+        "h5_compatible": h5_compat,
+        "can_feed_h5_readiness_shadow": ready_shadow,
+        "final_source_changed": False,
+        "final_patch_replaced": False,
+        "output_mutated": False,
+        "model_calls_incremented": False,
+        "public_claim_allowed": False,
+        "production_ready": False,
+    }
+
+
 def run_h5_local_committee_e2e_smoke(
     repo_root: Path,
     *,
@@ -170,6 +243,7 @@ def run_h5_local_committee_e2e_smoke(
             evidence={"note": "dry_run mode, no local committee invoked"},
         )
         result["receipt"] = build_h5_local_committee_smoke_receipt(result)
+        result["readiness_bridge"] = build_h5_local_committee_readiness_bridge(result["receipt"])
         return result
 
     available, reason = _detect_local_committee_runtime(repo_root)
@@ -181,6 +255,7 @@ def run_h5_local_committee_e2e_smoke(
             evidence={"runtime_detection": reason},
         )
         result["receipt"] = build_h5_local_committee_smoke_receipt(result)
+        result["readiness_bridge"] = build_h5_local_committee_readiness_bridge(result["receipt"])
         return result
 
     # Runtime available: attempt isolated local committee smoke
@@ -274,6 +349,7 @@ def run_h5_local_committee_e2e_smoke(
             evidence={"committee_trace": committee_trace},
         )
         result["receipt"] = build_h5_local_committee_smoke_receipt(result)
+        result["readiness_bridge"] = build_h5_local_committee_readiness_bridge(result["receipt"])
         return result
 
     except Exception as e:
@@ -284,6 +360,7 @@ def run_h5_local_committee_e2e_smoke(
             evidence={"error": str(e)},
         )
         result["receipt"] = build_h5_local_committee_smoke_receipt(result)
+        result["readiness_bridge"] = build_h5_local_committee_readiness_bridge(result["receipt"])
         return result
 
 

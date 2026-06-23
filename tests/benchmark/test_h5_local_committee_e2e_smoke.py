@@ -224,3 +224,158 @@ def test_h5_15_safety_invariants_remain_false():
             assert receipt["model_calls_incremented"] is False
             assert receipt["public_claim_allowed"] is False
             assert receipt["production_ready"] is False
+
+
+def test_h5_16_dry_run_readiness_bridge_blocks():
+    """H5-16 Test 1: dry-run readiness bridge blocks."""
+    from scripts.bench.h5_local_committee_e2e_smoke import run_h5_local_committee_e2e_smoke
+
+    repo_root = Path(__file__).resolve().parents[2]
+    result = run_h5_local_committee_e2e_smoke(repo_root, dry_run=True)
+
+    bridge = result["readiness_bridge"]
+    assert bridge["readiness_status"] == "blocked"
+    assert "dry_run_no_real_candidate" in bridge["readiness_reasons"]
+    assert bridge["local_committee_e2e_ready_shadow"] is False
+    assert bridge["can_feed_h5_readiness_shadow"] is False
+
+
+def test_h5_16_skipped_smoke_readiness_bridge_blocks(monkeypatch):
+    """H5-16 Test 2: skipped smoke readiness bridge blocks."""
+    from scripts.bench.h5_local_committee_e2e_smoke import run_h5_local_committee_e2e_smoke
+
+    def _fake_detect(repo_root):
+        return False, "local_committee_runtime_unavailable"
+
+    monkeypatch.setattr("scripts.bench.h5_local_committee_e2e_smoke._detect_local_committee_runtime", _fake_detect)
+
+    repo_root = Path(__file__).resolve().parents[2]
+    result = run_h5_local_committee_e2e_smoke(repo_root, dry_run=False)
+
+    bridge = result["readiness_bridge"]
+    assert bridge["readiness_status"] == "blocked"
+    assert "smoke_skipped" in bridge["readiness_reasons"]
+
+
+def test_h5_16_synthetic_complete_receipt_produces_ready_shadow():
+    """H5-16 Test 3: synthetic complete receipt produces ready_shadow."""
+    from scripts.bench.h5_local_committee_e2e_smoke import build_h5_local_committee_readiness_bridge
+
+    receipt = {
+        "status": "pass",
+        "dry_run": False,
+        "h5_compatible": True,
+        "selected_candidate_id": "C_1#candidate-0",
+        "selected_candidate_applied": True,
+        "selected_candidate_hash_match": True,
+        "selected_candidate_patch_sha256": "abc123",
+        "selected_candidate_patch_length": 123,
+        "local_solve_eligible": True,
+    }
+    bridge = build_h5_local_committee_readiness_bridge(receipt)
+    assert bridge["readiness_status"] == "ready_shadow"
+    assert bridge["local_committee_e2e_ready_shadow"] is True
+    assert bridge["can_feed_h5_readiness_shadow"] is True
+    assert bridge["candidate_identity_ready"] is True
+    assert bridge["candidate_application_ready"] is True
+    assert bridge["candidate_hash_ready"] is True
+    assert bridge["candidate_patch_metadata_ready"] is True
+    assert bridge["local_solve_ready"] is True
+
+
+def test_h5_16_missing_candidate_id_blocks_identity_readiness():
+    """H5-16 Test 4: missing candidate id blocks identity readiness."""
+    from scripts.bench.h5_local_committee_e2e_smoke import build_h5_local_committee_readiness_bridge
+
+    receipt = {
+        "status": "pass",
+        "dry_run": False,
+        "h5_compatible": True,
+        "selected_candidate_id": "",
+        "selected_candidate_applied": True,
+        "selected_candidate_hash_match": True,
+        "selected_candidate_patch_sha256": "abc123",
+        "selected_candidate_patch_length": 123,
+        "local_solve_eligible": True,
+    }
+    bridge = build_h5_local_committee_readiness_bridge(receipt)
+    assert bridge["candidate_identity_ready"] is False
+    assert bridge["readiness_status"] == "blocked"
+
+
+def test_h5_16_missing_patch_metadata_blocks_patch_readiness():
+    """H5-16 Test 5: missing patch metadata blocks patch readiness."""
+    from scripts.bench.h5_local_committee_e2e_smoke import build_h5_local_committee_readiness_bridge
+
+    receipt = {
+        "status": "pass",
+        "dry_run": False,
+        "h5_compatible": True,
+        "selected_candidate_id": "C_1#candidate-0",
+        "selected_candidate_applied": True,
+        "selected_candidate_hash_match": True,
+        "selected_candidate_patch_sha256": "",
+        "selected_candidate_patch_length": 0,
+        "local_solve_eligible": True,
+    }
+    bridge = build_h5_local_committee_readiness_bridge(receipt)
+    assert bridge["candidate_patch_metadata_ready"] is False
+    assert bridge["readiness_status"] == "blocked"
+
+
+def test_h5_16_solve_not_eligible_blocks_local_solve_readiness():
+    """H5-16 Test 6: solve not eligible blocks local solve readiness."""
+    from scripts.bench.h5_local_committee_e2e_smoke import build_h5_local_committee_readiness_bridge
+
+    receipt = {
+        "status": "pass",
+        "dry_run": False,
+        "h5_compatible": True,
+        "selected_candidate_id": "C_1#candidate-0",
+        "selected_candidate_applied": True,
+        "selected_candidate_hash_match": True,
+        "selected_candidate_patch_sha256": "abc123",
+        "selected_candidate_patch_length": 123,
+        "local_solve_eligible": False,
+    }
+    bridge = build_h5_local_committee_readiness_bridge(receipt)
+    assert bridge["local_solve_ready"] is False
+    assert bridge["readiness_status"] == "blocked"
+
+
+def test_h5_16_safety_invariants_remain_false():
+    """H5-16 Test 7: safety invariants remain false."""
+    from scripts.bench.h5_local_committee_e2e_smoke import build_h5_local_committee_readiness_bridge
+
+    bridges = [
+        {},
+        {"status": "skipped", "dry_run": True},
+        {"status": "pass", "dry_run": False, "h5_compatible": True, "selected_candidate_id": "C_1#candidate-0",
+         "selected_candidate_applied": True, "selected_candidate_hash_match": True,
+         "selected_candidate_patch_sha256": "abc", "selected_candidate_patch_length": 1,
+         "local_solve_eligible": True},
+    ]
+    for b in bridges:
+        bridge = build_h5_local_committee_readiness_bridge(b)
+        assert bridge["final_source_changed"] is False
+        assert bridge["final_patch_replaced"] is False
+        assert bridge["output_mutated"] is False
+        assert bridge["model_calls_incremented"] is False
+        assert bridge["public_claim_allowed"] is False
+        assert bridge["production_ready"] is False
+
+
+def test_h5_16_cli_dry_run_includes_readiness_bridge():
+    """H5-16 Test 8: CLI dry-run includes readiness_bridge."""
+    script = Path(__file__).resolve().parents[2] / "scripts" / "bench" / "h5_local_committee_e2e_smoke.py"
+    result = subprocess.run(
+        [sys.executable, str(script), "--dry-run"],
+        capture_output=True,
+        text=True,
+        timeout=30,
+    )
+    assert result.returncode == 0
+    data = json.loads(result.stdout)
+    assert "readiness_bridge" in data
+    assert data["readiness_bridge"]["schema"] == "nexus.h5_local_committee_readiness_bridge.v1"
+    assert data["readiness_bridge"]["readiness_status"] == "blocked"
