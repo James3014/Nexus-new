@@ -7953,6 +7953,164 @@ def _rollback_h5_actual_output_if_allowed(row: dict[str, Any], decision: dict[st
     return result
 
 
+def _build_h5_local_candidate_e2e_delivery_smoke_receipt(row: dict[str, Any]) -> dict[str, Any]:
+    """Pure helper: builds local candidate E2E delivery smoke receipt.
+
+    Verifies the full chain: evidence → candidate → final_source → final_patch → output → rollback.
+    """
+    import os as _os
+
+    flag = _os.environ.get("NEXUS_H5_ALLOW_LOCAL_CANDIDATE_E2E_SMOKE", "").strip() == "1"
+
+    selected_id = str(row.get("h5_route", {}).get("local_selected_candidate_id", "") or "")
+    selected_sha256 = str(row.get("h5_route", {}).get("local_selected_candidate_patch_sha256", "") or "")
+    selected_length = int(row.get("h5_route", {}).get("local_selected_candidate_patch_length", 0) or 0)
+    selected_hash_ok = bool(row.get("h5_route", {}).get("local_selected_candidate_hash_match", False))
+
+    local_shadow = row.get("h5_local_evidence_ingestion_shadow", {})
+    local_ready = bool(local_shadow and local_shadow.get("local_path_ready_shadow_from_external_evidence", False))
+
+    cloud_shadow = row.get("h5_cloud_evidence_ingestion_shadow", {})
+    cloud_ready = bool(cloud_shadow and cloud_shadow.get("cloud_path_ready_shadow_from_external_evidence", False))
+
+    fs_apply = row.get("h5_actual_final_source_apply_receipt", {})
+    fs_rb = row.get("h5_actual_final_source_rollback_receipt", {})
+    fp_apply = row.get("h5_actual_final_patch_apply_receipt", {})
+    fp_rb = row.get("h5_actual_final_patch_rollback_receipt", {})
+    out_apply = row.get("h5_actual_output_apply_receipt", {})
+    out_rb = row.get("h5_actual_output_rollback_receipt", {})
+
+    fs_apply_ok = bool(fs_apply.get("actual_apply_executed", False))
+    fs_rb_ok = bool(fs_rb.get("rollback_executed", False))
+    fs_restored = bool(fs_rb.get("actual_final_source_restored", False))
+
+    fp_apply_ok = bool(fp_apply.get("actual_patch_apply_executed", False))
+    fp_rb_ok = bool(fp_rb.get("rollback_executed", False))
+    fp_restored = bool(fp_rb.get("actual_final_patch_restored", False))
+
+    out_apply_ok = bool(out_apply.get("actual_output_apply_executed", False))
+    out_rb_ok = bool(out_rb.get("rollback_executed", False))
+    out_restored = bool(out_rb.get("actual_output_restored", False))
+
+    actual_fs = str(row.get("final_source", "none") or "none")
+    actual_fp = row.get("final_patch")
+    actual_out = row.get("output")
+
+    fp_is_none = actual_fp is None or actual_fp == "none" or (isinstance(actual_fp, str) and actual_fp == "none")
+    out_is_none = actual_out is None or actual_out == "none" or (isinstance(actual_out, str) and actual_out == "none")
+
+    fs_final_ok = actual_fs == "none"
+    fp_final_ok = fp_is_none or (isinstance(actual_fp, dict) and actual_fp.get("content_kind") == "candidate_patch_metadata_only")
+    out_final_ok = out_is_none
+
+    has_all_gates = all(k in row for k in [
+        "h5_actual_final_source_apply_receipt", "h5_actual_final_source_rollback_receipt",
+        "h5_actual_final_patch_apply_receipt", "h5_actual_final_patch_rollback_receipt",
+        "h5_actual_output_apply_receipt", "h5_actual_output_rollback_receipt",
+    ])
+
+    mc_clean = True
+    beh_clean = True
+    cloud_clean = True
+    for receipt in [fs_apply, fs_rb, fp_apply, fp_rb, out_apply, out_rb]:
+        if receipt.get("model_calls_incremented"):
+            mc_clean = False
+        if receipt.get("behavior_changed"):
+            beh_clean = False
+        if receipt.get("cloud_invoked"):
+            cloud_clean = False
+
+    has_candidate = bool(selected_id) and bool(selected_sha256) and selected_length > 0 and selected_hash_ok
+
+    would_allowed = (
+        flag and has_candidate and local_ready
+        and has_all_gates
+    )
+
+    all_chains = (
+        fs_apply_ok and fs_rb_ok and fs_restored
+        and fp_apply_ok and fp_rb_ok and fp_restored
+        and out_apply_ok and out_rb_ok and out_restored
+    )
+
+    would_pass = (
+        would_allowed and all_chains
+        and fs_final_ok and out_final_ok
+        and mc_clean and cloud_clean and beh_clean
+    )
+
+    reasons = []
+    if not flag:
+        reasons.append("e2e_smoke_flag_not_enabled")
+    if not has_candidate:
+        reasons.append("selected_candidate_missing")
+    if not selected_hash_ok:
+        reasons.append("selected_candidate_hash_not_verified")
+    if not local_ready:
+        reasons.append("local_evidence_not_ready")
+    if not fs_apply_ok:
+        reasons.append("missing_final_source_apply")
+    if not fs_rb_ok:
+        reasons.append("missing_final_source_rollback")
+    if not fp_apply_ok:
+        reasons.append("missing_final_patch_apply")
+    if not fp_rb_ok:
+        reasons.append("missing_final_patch_rollback")
+    if not out_apply_ok:
+        reasons.append("missing_output_apply")
+    if not out_rb_ok:
+        reasons.append("missing_output_rollback")
+    if not fs_final_ok or not out_final_ok:
+        reasons.append("unsafe_final_state")
+    if not mc_clean:
+        reasons.append("model_calls_incremented")
+    if not cloud_clean:
+        reasons.append("cloud_invoked")
+    if not beh_clean:
+        reasons.append("behavior_changed_true")
+    reasons.extend([
+        "h5_41_smoke_only_not_full_benchmark", "metadata_delivery_only",
+        "cloud_invocation_blocked", "model_calls_increment_blocked", "production_claim_blocked",
+    ])
+
+    status = "local_candidate_e2e_smoke_pass" if would_pass else ("blocked" if not would_allowed else "local_candidate_e2e_smoke_fail")
+
+    return {
+        "schema": "nexus.hybrid_h5_local_candidate_e2e_delivery_smoke_receipt.v1",
+        "evaluated": True,
+        "smoke_status": status,
+        "smoke_reasons": reasons,
+        "e2e_smoke_allowed": would_allowed,
+        "e2e_smoke_passed": would_pass,
+        "local_candidate_selected": has_candidate,
+        "selected_candidate_id": selected_id,
+        "selected_candidate_patch_sha256": selected_sha256,
+        "selected_candidate_patch_length": selected_length,
+        "selected_candidate_hash_verified": selected_hash_ok,
+        "local_evidence_ready": local_ready,
+        "cloud_evidence_ready": cloud_ready,
+        "cloud_invoked": not cloud_clean,
+        "final_source_apply_executed": fs_apply_ok,
+        "final_source_rollback_executed": fs_rb_ok,
+        "final_source_restored": fs_restored,
+        "final_patch_apply_executed": fp_apply_ok,
+        "final_patch_rollback_executed": fp_rb_ok,
+        "final_patch_restored": fp_restored,
+        "output_apply_executed": out_apply_ok,
+        "output_rollback_executed": out_rb_ok,
+        "output_restored": out_restored,
+        "final_source_final_state": actual_fs,
+        "final_patch_final_state": "none" if fp_is_none else ("metadata_only" if isinstance(actual_fp, dict) else str(type(actual_fp).__name__)),
+        "output_final_state": "none" if out_is_none else ("metadata_only" if isinstance(actual_out, dict) else str(type(actual_out).__name__)),
+        "model_calls_incremented": not mc_clean,
+        "behavior_changed": not beh_clean,
+        "all_mutation_gates_exercised": would_pass,
+        "safe_final_state": would_pass,
+        "production_ready": False,
+        "public_claim_allowed": False,
+    }
+
+
 def _finalize_with_nexus_row(
     row: dict[str, Any],
     *,
@@ -8471,6 +8629,9 @@ def _finalize_with_nexus_row(
             h5_out_rollback_decision = _build_h5_actual_output_rollback_decision(finalized)
             finalized["h5_actual_output_rollback_decision"] = h5_out_rollback_decision
             finalized = _rollback_h5_actual_output_if_allowed(finalized, h5_out_rollback_decision)
+
+            # H5-41: Local candidate E2E delivery smoke
+            finalized["h5_local_candidate_e2e_delivery_smoke_receipt"] = _build_h5_local_candidate_e2e_delivery_smoke_receipt(finalized)
 
     # Ensure keys are also on the row level for simple flat queries
     finalized["route_mode"] = r_mode
@@ -12328,6 +12489,15 @@ def write_evidence_bundle(
         "h5_actual_output_rollback_executed_count": sum(1 for row in with_rows if bool(row.get("h5_actual_output_rollback_receipt", {}).get("rollback_executed", False))),
         "h5_actual_output_restored_count": sum(1 for row in with_rows if bool(row.get("h5_actual_output_rollback_receipt", {}).get("actual_output_restored", False))),
         "h5_actual_output_safe_count": sum(1 for row in with_rows if bool(row.get("h5_actual_output_apply_decision", {}).get("safe_to_continue", False))),
+        "h5_local_candidate_e2e_smoke_receipt_count": sum(1 for row in with_rows if bool(row.get("h5_local_candidate_e2e_delivery_smoke_receipt"))),
+        "h5_local_candidate_e2e_smoke_allowed_count": sum(1 for row in with_rows if bool(row.get("h5_local_candidate_e2e_delivery_smoke_receipt", {}).get("e2e_smoke_allowed", False))),
+        "h5_local_candidate_e2e_smoke_passed_count": sum(1 for row in with_rows if bool(row.get("h5_local_candidate_e2e_delivery_smoke_receipt", {}).get("e2e_smoke_passed", False))),
+        "h5_local_candidate_e2e_smoke_blocked_count": sum(1 for row in with_rows if str(row.get("h5_local_candidate_e2e_delivery_smoke_receipt", {}).get("smoke_status", "")) == "blocked"),
+        "h5_local_candidate_e2e_smoke_safe_final_state_count": sum(1 for row in with_rows if bool(row.get("h5_local_candidate_e2e_delivery_smoke_receipt", {}).get("safe_final_state", False))),
+        "h5_local_candidate_e2e_smoke_all_gates_exercised_count": sum(1 for row in with_rows if bool(row.get("h5_local_candidate_e2e_delivery_smoke_receipt", {}).get("all_mutation_gates_exercised", False))),
+        "h5_local_candidate_e2e_smoke_cloud_invoked_count": sum(1 for row in with_rows if bool(row.get("h5_local_candidate_e2e_delivery_smoke_receipt", {}).get("cloud_invoked", False))),
+        "h5_local_candidate_e2e_smoke_model_calls_incremented_count": sum(1 for row in with_rows if bool(row.get("h5_local_candidate_e2e_delivery_smoke_receipt", {}).get("model_calls_incremented", False))),
+        "h5_local_candidate_e2e_smoke_behavior_changed_count": sum(1 for row in with_rows if bool(row.get("h5_local_candidate_e2e_delivery_smoke_receipt", {}).get("behavior_changed", False))),
     }
     payload["external_provider_claim_boundary_contract"] = build_external_provider_claim_boundary_contract(payload)
     payload["public_promotion_readiness_contract"] = build_public_promotion_readiness_contract(payload)

@@ -20926,3 +20926,171 @@ def test_h5_40_invariants(tmp_path, monkeypatch):
     assert row["model_calls"] == 1
     assert row["behavior_changed"] is False
     assert row.get("cloud_fallback_invoked", False) is False
+
+
+def test_h5_41_empty_row_blocks():
+    """H5-41 T1: empty row blocks."""
+    from scripts.bench.capability_ab_runner import _build_h5_local_candidate_e2e_delivery_smoke_receipt
+    r = _build_h5_local_candidate_e2e_delivery_smoke_receipt({})
+    assert r["smoke_status"] == "blocked"
+    assert r["e2e_smoke_passed"] is False
+
+
+def test_h5_41_flag_missing(monkeypatch):
+    """H5-41 T2: smoke flag missing blocks."""
+    from scripts.bench.capability_ab_runner import _build_h5_local_candidate_e2e_delivery_smoke_receipt
+    monkeypatch.delenv("NEXUS_H5_ALLOW_LOCAL_CANDIDATE_E2E_SMOKE", raising=False)
+    r = _build_h5_local_candidate_e2e_delivery_smoke_receipt({})
+    assert "e2e_smoke_flag_not_enabled" in r["smoke_reasons"]
+
+
+def test_h5_41_candidate_missing():
+    """H5-41 T3: selected candidate missing blocks."""
+    from scripts.bench.capability_ab_runner import _build_h5_local_candidate_e2e_delivery_smoke_receipt
+    r = _build_h5_local_candidate_e2e_delivery_smoke_receipt({"h5_route": {}})
+    assert "selected_candidate_missing" in r["smoke_reasons"]
+
+
+def test_h5_41_hash_not_verified():
+    """H5-41 T4: hash not verified blocks."""
+    from scripts.bench.capability_ab_runner import _build_h5_local_candidate_e2e_delivery_smoke_receipt
+    r = _build_h5_local_candidate_e2e_delivery_smoke_receipt({"h5_route": {"local_selected_candidate_id": "C_1", "local_selected_candidate_patch_sha256": "abc", "local_selected_candidate_patch_length": 100, "local_selected_candidate_hash_match": False}})
+    assert "selected_candidate_hash_not_verified" in r["smoke_reasons"]
+
+
+def test_h5_41_missing_fs_apply():
+    """H5-41 T5: missing final_source apply blocks."""
+    from scripts.bench.capability_ab_runner import _build_h5_local_candidate_e2e_delivery_smoke_receipt
+    r = _build_h5_local_candidate_e2e_delivery_smoke_receipt({"h5_route": {"local_selected_candidate_id": "C_1", "local_selected_candidate_patch_sha256": "abc", "local_selected_candidate_patch_length": 100, "local_selected_candidate_hash_match": True}, "h5_local_evidence_ingestion_shadow": {"local_path_ready_shadow_from_external_evidence": True}})
+    assert "missing_final_source_apply" in r["smoke_reasons"]
+
+
+def test_h5_41_missing_fs_rollback():
+    """H5-41 T6: missing final_source rollback blocks."""
+    from scripts.bench.capability_ab_runner import _build_h5_local_candidate_e2e_delivery_smoke_receipt
+    row = {"h5_route": {"local_selected_candidate_id": "C_1", "local_selected_candidate_patch_sha256": "abc", "local_selected_candidate_patch_length": 100, "local_selected_candidate_hash_match": True}, "h5_local_evidence_ingestion_shadow": {"local_path_ready_shadow_from_external_evidence": True}, "h5_actual_final_source_apply_receipt": {"actual_apply_executed": True}}
+    r = _build_h5_local_candidate_e2e_delivery_smoke_receipt(row)
+    assert "missing_final_source_rollback" in r["smoke_reasons"]
+
+
+def test_h5_41_missing_fp_apply():
+    """H5-41 T7: missing final_patch apply blocks."""
+    from scripts.bench.capability_ab_runner import _build_h5_local_candidate_e2e_delivery_smoke_receipt
+    row = {"h5_route": {"local_selected_candidate_id": "C_1", "local_selected_candidate_patch_sha256": "abc", "local_selected_candidate_patch_length": 100, "local_selected_candidate_hash_match": True}, "h5_local_evidence_ingestion_shadow": {"local_path_ready_shadow_from_external_evidence": True}, "h5_actual_final_source_apply_receipt": {"actual_apply_executed": True}, "h5_actual_final_source_rollback_receipt": {"rollback_executed": True, "actual_final_source_restored": True}}
+    r = _build_h5_local_candidate_e2e_delivery_smoke_receipt(row)
+    assert "missing_final_patch_apply" in r["smoke_reasons"]
+
+
+def test_h5_41_missing_fp_rollback():
+    """H5-41 T8: missing final_patch rollback blocks."""
+    from scripts.bench.capability_ab_runner import _build_h5_local_candidate_e2e_delivery_smoke_receipt
+    row = {"h5_route": {"local_selected_candidate_id": "C_1", "local_selected_candidate_patch_sha256": "abc", "local_selected_candidate_patch_length": 100, "local_selected_candidate_hash_match": True}, "h5_local_evidence_ingestion_shadow": {"local_path_ready_shadow_from_external_evidence": True}, "h5_actual_final_source_apply_receipt": {"actual_apply_executed": True}, "h5_actual_final_source_rollback_receipt": {"rollback_executed": True, "actual_final_source_restored": True}, "h5_actual_final_patch_apply_receipt": {"actual_patch_apply_executed": True}}
+    r = _build_h5_local_candidate_e2e_delivery_smoke_receipt(row)
+    assert "missing_final_patch_rollback" in r["smoke_reasons"]
+
+
+def test_h5_41_missing_out_apply():
+    """H5-41 T9: missing output apply blocks."""
+    from scripts.bench.capability_ab_runner import _build_h5_local_candidate_e2e_delivery_smoke_receipt
+    row = {"h5_route": {"local_selected_candidate_id": "C_1", "local_selected_candidate_patch_sha256": "abc", "local_selected_candidate_patch_length": 100, "local_selected_candidate_hash_match": True}, "h5_local_evidence_ingestion_shadow": {"local_path_ready_shadow_from_external_evidence": True}, "h5_actual_final_source_apply_receipt": {"actual_apply_executed": True}, "h5_actual_final_source_rollback_receipt": {"rollback_executed": True, "actual_final_source_restored": True}, "h5_actual_final_patch_apply_receipt": {"actual_patch_apply_executed": True}, "h5_actual_final_patch_rollback_receipt": {"rollback_executed": True, "actual_final_patch_restored": True}}
+    r = _build_h5_local_candidate_e2e_delivery_smoke_receipt(row)
+    assert "missing_output_apply" in r["smoke_reasons"]
+
+
+def test_h5_41_missing_out_rollback():
+    """H5-41 T10: missing output rollback blocks."""
+    from scripts.bench.capability_ab_runner import _build_h5_local_candidate_e2e_delivery_smoke_receipt
+    row = {"h5_route": {"local_selected_candidate_id": "C_1", "local_selected_candidate_patch_sha256": "abc", "local_selected_candidate_patch_length": 100, "local_selected_candidate_hash_match": True}, "h5_local_evidence_ingestion_shadow": {"local_path_ready_shadow_from_external_evidence": True}, "h5_actual_final_source_apply_receipt": {"actual_apply_executed": True}, "h5_actual_final_source_rollback_receipt": {"rollback_executed": True, "actual_final_source_restored": True}, "h5_actual_final_patch_apply_receipt": {"actual_patch_apply_executed": True}, "h5_actual_final_patch_rollback_receipt": {"rollback_executed": True, "actual_final_patch_restored": True}, "h5_actual_output_apply_receipt": {"actual_output_apply_executed": True}}
+    r = _build_h5_local_candidate_e2e_delivery_smoke_receipt(row)
+    assert "missing_output_rollback" in r["smoke_reasons"]
+
+
+def test_h5_41_full_chain_passes(monkeypatch):
+    """H5-41 T11: full synthetic chain passes E2E smoke."""
+    from scripts.bench.capability_ab_runner import _build_h5_local_candidate_e2e_delivery_smoke_receipt
+    monkeypatch.setenv("NEXUS_H5_ALLOW_LOCAL_CANDIDATE_E2E_SMOKE", "1")
+    row = {
+        "h5_route": {"local_selected_candidate_id": "C_1", "local_selected_candidate_patch_sha256": "abc", "local_selected_candidate_patch_length": 100, "local_selected_candidate_hash_match": True},
+        "h5_local_evidence_ingestion_shadow": {"local_path_ready_shadow_from_external_evidence": True},
+        "h5_actual_final_source_apply_receipt": {"actual_apply_executed": True, "model_calls_incremented": False, "cloud_invoked": False, "behavior_changed": False},
+        "h5_actual_final_source_rollback_receipt": {"rollback_executed": True, "actual_final_source_restored": True, "model_calls_incremented": False, "cloud_invoked": False, "behavior_changed": False},
+        "h5_actual_final_patch_apply_receipt": {"actual_patch_apply_executed": True, "output_mutated": False, "model_calls_incremented": False, "cloud_invoked": False, "behavior_changed": False},
+        "h5_actual_final_patch_rollback_receipt": {"rollback_executed": True, "actual_final_patch_restored": True, "output_mutated": False, "model_calls_incremented": False, "cloud_invoked": False, "behavior_changed": False},
+        "h5_actual_output_apply_receipt": {"actual_output_apply_executed": True, "actual_output_mutated": True, "model_calls_incremented": False, "cloud_invoked": False, "behavior_changed": False, "final_source_changed": False, "final_patch_changed": False},
+        "h5_actual_output_rollback_receipt": {"rollback_executed": True, "actual_output_restored": True, "model_calls_incremented": False, "cloud_invoked": False, "behavior_changed": False, "final_source_changed": False, "final_patch_changed": False},
+        "final_source": "none", "final_patch": "none", "output": "none",
+    }
+    r = _build_h5_local_candidate_e2e_delivery_smoke_receipt(row)
+    assert r["e2e_smoke_passed"] is True
+    assert r["smoke_status"] == "local_candidate_e2e_smoke_pass"
+    assert r["all_mutation_gates_exercised"] is True
+    assert r["safe_final_state"] is True
+
+
+def test_h5_41_finalized_default_env(tmp_path, monkeypatch):
+    """H5-41 T12: finalized default env attaches receipt, blocks."""
+    from scripts.bench.capability_ab_runner import CapabilityTask, _finalize_with_nexus_row
+    task = CapabilityTask(id="t-h5-41", difficulty="easy", task_type="test_repair", task_desc="v", target_file="t.py", test_file="test_t.py", expected_capabilities=("claim_gate",), success_criteria="tests_pass", repo_kind="nexus_internal", fixture_kind="test_fixture")
+    _h5_all_flags_set_with_gate(monkeypatch)
+    row = _finalize_with_nexus_row({"mode": "with_nexus", "model_calls": 1, "total_tokens": 100, "token_capture_status": "measured", "committee_trace": {"candidate_count": 2, "judge_selection": {"selected_candidate_id": "C_1"}, "committee_receipt": {"selected_candidate_applied": True, "selected_candidate_apply_hash_match": True}}, "local_solve_eligible": True}, provider="gemini", model_required=True, nexus_required=False, task=task, repo_root=tmp_path)
+    r = row["h5_local_candidate_e2e_delivery_smoke_receipt"]
+    assert r["smoke_status"] == "blocked"
+    assert r["e2e_smoke_passed"] is False
+    assert r["production_ready"] is False
+
+
+def test_h5_41_finalized_all_flags_evidence(tmp_path, monkeypatch):
+    """H5-41 T13: all flags + evidence may pass or records exact blocker."""
+    from scripts.bench.capability_ab_runner import CapabilityTask, _finalize_with_nexus_row
+    task = CapabilityTask(id="t-h5-41f", difficulty="easy", task_type="test_repair", task_desc="v", target_file="t.py", test_file="test_t.py", expected_capabilities=("claim_gate",), success_criteria="tests_pass", repo_kind="nexus_internal", fixture_kind="test_fixture")
+    _h5_all_flags_set_with_gate(monkeypatch)
+    row = _finalize_with_nexus_row({"mode": "with_nexus", "model_calls": 1, "total_tokens": 100, "token_capture_status": "measured", "committee_trace": {"candidate_count": 2, "judge_selection": {"selected_candidate_id": "C_1"}, "committee_receipt": {"selected_candidate_applied": True, "selected_candidate_apply_hash_match": True}}, "local_solve_eligible": True, "external_local_evidence_ingestion_validation": {"schema": "nexus.h5_local_committee_evidence_ingestion_validation.v1", "validation_status": "accepted", "accepted_for_h5_readiness_shadow": True}, "external_cloud_evidence_ingestion_validation": {"schema": "nexus.h5_cloud_fallback_evidence_ingestion_validation.v1", "validation_status": "accepted", "accepted_for_h5_readiness_shadow": True}}, provider="gemini", model_required=True, nexus_required=False, task=task, repo_root=tmp_path)
+    r = row["h5_local_candidate_e2e_delivery_smoke_receipt"]
+    assert r["production_ready"] is False
+    assert row["behavior_changed"] is False
+
+
+def test_h5_41_summary_counters_default(tmp_path, monkeypatch):
+    """H5-41 T14: summary counters default env."""
+    from scripts.bench.capability_ab_runner import CapabilityTask, _finalize_with_nexus_row, write_evidence_bundle
+    task = CapabilityTask(id="t-h5-41s", difficulty="easy", task_type="test_repair", task_desc="v", target_file="t.py", test_file="test_t.py", expected_capabilities=("claim_gate",), success_criteria="tests_pass", repo_kind="nexus_internal", fixture_kind="test_fixture")
+    _h5_all_flags_set_with_gate(monkeypatch)
+    monkeypatch.setattr("scripts.bench.capability_ab_runner._git_commit", lambda x: "d")
+    row = _finalize_with_nexus_row({"mode": "with_nexus", "model_calls": 1, "total_tokens": 100, "token_capture_status": "measured", "committee_trace": {"candidate_count": 2, "judge_selection": {"selected_candidate_id": "C_1"}, "committee_receipt": {"selected_candidate_applied": True, "selected_candidate_apply_hash_match": True}}, "local_solve_eligible": True}, provider="gemini", model_required=True, nexus_required=False, task=task, repo_root=tmp_path)
+    wp = tmp_path / "w.jsonl"; wp.write_text("[]", encoding="utf-8")
+    wop = tmp_path / "wo.jsonl"; wop.write_text("[]", encoding="utf-8")
+    bf = write_evidence_bundle(out_dir=tmp_path, with_path=wp, without_path=wop, rows=[row], config={"tasks_file": "t.json", "tasks_manifest_hash": "m", "unique_tasks_requested": 1, "repeat_trials": 1, "timeout_sec": 60})
+    summary = json.loads(bf.read_text(encoding="utf-8"))["hybrid_route_summary"]
+    assert summary["h5_local_candidate_e2e_smoke_receipt_count"] >= 1
+    assert summary["h5_local_candidate_e2e_smoke_passed_count"] == 0
+    assert summary["h5_local_candidate_e2e_smoke_cloud_invoked_count"] == 0
+    assert summary["h5_local_candidate_e2e_smoke_behavior_changed_count"] == 0
+
+
+def test_h5_41_summary_counters_all_flags(tmp_path, monkeypatch):
+    """H5-41 T15: summary counters all-flags smoke trial."""
+    from scripts.bench.capability_ab_runner import CapabilityTask, _finalize_with_nexus_row, write_evidence_bundle
+    task = CapabilityTask(id="t-h5-41af", difficulty="easy", task_type="test_repair", task_desc="v", target_file="t.py", test_file="test_t.py", expected_capabilities=("claim_gate",), success_criteria="tests_pass", repo_kind="nexus_internal", fixture_kind="test_fixture")
+    _h5_all_flags_set_with_gate(monkeypatch)
+    monkeypatch.setattr("scripts.bench.capability_ab_runner._git_commit", lambda x: "d")
+    row = _finalize_with_nexus_row({"mode": "with_nexus", "model_calls": 1, "total_tokens": 100, "token_capture_status": "measured", "committee_trace": {"candidate_count": 2, "judge_selection": {"selected_candidate_id": "C_1"}, "committee_receipt": {"selected_candidate_applied": True, "selected_candidate_apply_hash_match": True}}, "local_solve_eligible": True, "external_local_evidence_ingestion_validation": {"schema": "nexus.h5_local_committee_evidence_ingestion_validation.v1", "validation_status": "accepted", "accepted_for_h5_readiness_shadow": True}, "external_cloud_evidence_ingestion_validation": {"schema": "nexus.h5_cloud_fallback_evidence_ingestion_validation.v1", "validation_status": "accepted", "accepted_for_h5_readiness_shadow": True}}, provider="gemini", model_required=True, nexus_required=False, task=task, repo_root=tmp_path)
+    wp = tmp_path / "w.jsonl"; wp.write_text("[]", encoding="utf-8")
+    wop = tmp_path / "wo.jsonl"; wop.write_text("[]", encoding="utf-8")
+    bf = write_evidence_bundle(out_dir=tmp_path, with_path=wp, without_path=wop, rows=[row], config={"tasks_file": "t.json", "tasks_manifest_hash": "m", "unique_tasks_requested": 1, "repeat_trials": 1, "timeout_sec": 60})
+    summary = json.loads(bf.read_text(encoding="utf-8"))["hybrid_route_summary"]
+    assert summary["h5_local_candidate_e2e_smoke_receipt_count"] >= 1
+    assert row["behavior_changed"] is False
+    assert row.get("cloud_fallback_invoked", False) is False
+
+
+def test_h5_41_invariants(tmp_path, monkeypatch):
+    """H5-41 T16: invariants — cloud/behavior/model_calls."""
+    from scripts.bench.capability_ab_runner import CapabilityTask, _finalize_with_nexus_row
+    task = CapabilityTask(id="t-h5-41i", difficulty="easy", task_type="test_repair", task_desc="v", target_file="t.py", test_file="test_t.py", expected_capabilities=("claim_gate",), success_criteria="tests_pass", repo_kind="nexus_internal", fixture_kind="test_fixture")
+    _h5_all_flags_set_with_gate(monkeypatch)
+    row = _finalize_with_nexus_row({"mode": "with_nexus", "model_calls": 1, "total_tokens": 100, "token_capture_status": "measured", "committee_trace": {"candidate_count": 2, "judge_selection": {"selected_candidate_id": "C_1"}, "committee_receipt": {"selected_candidate_applied": True, "selected_candidate_apply_hash_match": True}}, "local_solve_eligible": True}, provider="gemini", model_required=True, nexus_required=False, task=task, repo_root=tmp_path)
+    r = row["h5_local_candidate_e2e_delivery_smoke_receipt"]
+    assert r["cloud_invoked"] is False
+    assert r["behavior_changed"] is False
+    assert r["model_calls_incremented"] is False
+    assert r["production_ready"] is False
