@@ -6768,6 +6768,90 @@ def _build_h5_final_source_apply_preflight_receipt(row: dict[str, Any]) -> dict[
     }
 
 
+def _build_h5_isolated_final_source_mutation_simulation(row: dict[str, Any]) -> dict[str, Any]:
+    """Pure helper: builds isolated final_source mutation simulation receipt.
+
+    No side effects. No model calls. No mutation of actual finalized row.
+    Simulates changing final_source in an isolated copy only.
+    """
+    preflight = row.get("h5_final_source_apply_preflight_receipt")
+    rollback = row.get("h5_local_candidate_rollback_dry_run")
+    gate = row.get("h5_controlled_mutation_gate")
+
+    actual_fs = str(row.get("final_source", "none") or "none")
+    h5_fs = str(row.get("h5_route", {}).get("final_source", "none") or "none")
+    actual_changed = actual_fs != "none" or h5_fs != "none"
+
+    reasons = []
+
+    preflight_present = bool(preflight)
+    preflight_pass = bool(preflight and preflight.get("would_pass_final_source_apply_preflight", False))
+    preflight_shadow = bool(preflight and preflight.get("preflight_status") == "preflight_pass_shadow_only")
+
+    rb_available = bool(rollback and rollback.get("rollback_available", False))
+    rb_required = bool(rollback and rollback.get("rollback_required", False))
+    rb_safe = bool(rollback and rollback.get("safe_to_continue", True))
+
+    gate_safe = bool(gate and gate.get("safe_to_continue", True))
+
+    would_simulate = (
+        preflight_present and preflight_pass and preflight_shadow
+        and actual_fs == "none"
+        and rb_available and not rb_required and rb_safe
+    )
+
+    if not preflight_present:
+        reasons.append("missing_preflight_receipt")
+    if preflight and not preflight_pass:
+        reasons.append("preflight_not_passed")
+    if not rb_available:
+        reasons.append("rollback_not_available")
+    if rb_required:
+        reasons.append("rollback_required")
+    if gate and not gate_safe:
+        reasons.append("controlled_mutation_gate_not_safe")
+    if actual_changed:
+        reasons.append("unexpected_actual_final_source_change")
+
+    reasons.extend([
+        "isolated_simulation_only_no_actual_final_source_change",
+        "real_final_source_apply_not_enabled",
+        "final_patch_replacement_still_blocked",
+        "output_mutation_still_blocked",
+    ])
+
+    isolated_before = "none"
+    isolated_after = "local_candidate_shadow_promoted" if would_simulate else "none"
+    isolated_changed = would_simulate
+
+    return {
+        "schema": "nexus.hybrid_h5_isolated_final_source_mutation_simulation.v1",
+        "evaluated": True,
+        "simulation_status": "isolated_simulation_pass" if would_simulate else "blocked",
+        "simulation_reasons": reasons,
+        "would_simulate_final_source_mutation": would_simulate,
+        "simulation_target_final_source": "local_candidate_shadow_promoted",
+        "actual_final_source_before": actual_fs,
+        "actual_final_source_after": actual_fs,
+        "actual_final_source_changed": actual_changed,
+        "isolated_final_source_before": isolated_before,
+        "isolated_final_source_after": isolated_after,
+        "isolated_final_source_changed": isolated_changed,
+        "preflight_receipt_present": preflight_present,
+        "preflight_pass_shadow_only": preflight_pass,
+        "apply_side_effects_allowed": False,
+        "controlled_mutation_allowed": False,
+        "final_patch_replacement_allowed": False,
+        "output_mutation_allowed": False,
+        "model_calls_increment_allowed": False,
+        "rollback_available": rb_available,
+        "rollback_required": rb_required,
+        "safe_to_continue": not rb_required and not actual_changed,
+        "public_claim_allowed": False,
+        "production_ready": False,
+    }
+
+
 def _finalize_with_nexus_row(
     row: dict[str, Any],
     *,
@@ -7243,6 +7327,9 @@ def _finalize_with_nexus_row(
 
             # H5-32: Final source apply preflight receipt
             finalized["h5_final_source_apply_preflight_receipt"] = _build_h5_final_source_apply_preflight_receipt(finalized)
+
+            # H5-33: Isolated final_source mutation simulation
+            finalized["h5_isolated_final_source_mutation_simulation"] = _build_h5_isolated_final_source_mutation_simulation(finalized)
 
     # Ensure keys are also on the row level for simple flat queries
     finalized["route_mode"] = r_mode
@@ -11039,6 +11126,13 @@ def write_evidence_bundle(
         "h5_final_source_apply_preflight_actual_change_count": sum(1 for row in with_rows if bool(row.get("h5_final_source_apply_preflight_receipt", {}).get("actual_final_source_changed", False))),
         "h5_final_source_apply_preflight_rollback_required_count": sum(1 for row in with_rows if bool(row.get("h5_final_source_apply_preflight_receipt", {}).get("rollback_required", False))),
         "h5_final_source_apply_preflight_safe_count": sum(1 for row in with_rows if bool(row.get("h5_final_source_apply_preflight_receipt", {}).get("safe_to_continue", False))),
+        "h5_isolated_final_source_simulation_count": sum(1 for row in with_rows if bool(row.get("h5_isolated_final_source_mutation_simulation"))),
+        "h5_isolated_final_source_simulation_pass_count": sum(1 for row in with_rows if str(row.get("h5_isolated_final_source_mutation_simulation", {}).get("simulation_status", "")) == "isolated_simulation_pass"),
+        "h5_isolated_final_source_simulation_blocked_count": sum(1 for row in with_rows if str(row.get("h5_isolated_final_source_mutation_simulation", {}).get("simulation_status", "")) == "blocked"),
+        "h5_isolated_final_source_changed_count": sum(1 for row in with_rows if bool(row.get("h5_isolated_final_source_mutation_simulation", {}).get("isolated_final_source_changed", False))),
+        "h5_actual_final_source_changed_count": sum(1 for row in with_rows if bool(row.get("h5_isolated_final_source_mutation_simulation", {}).get("actual_final_source_changed", False))),
+        "h5_isolated_final_source_rollback_required_count": sum(1 for row in with_rows if bool(row.get("h5_isolated_final_source_mutation_simulation", {}).get("rollback_required", False))),
+        "h5_isolated_final_source_safe_count": sum(1 for row in with_rows if bool(row.get("h5_isolated_final_source_mutation_simulation", {}).get("safe_to_continue", False))),
     }
     payload["external_provider_claim_boundary_contract"] = build_external_provider_claim_boundary_contract(payload)
     payload["public_promotion_readiness_contract"] = build_public_promotion_readiness_contract(payload)

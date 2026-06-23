@@ -19045,3 +19045,200 @@ def test_h5_32_bundle_summary_counters(tmp_path, monkeypatch):
     assert summary["h5_cloud_fallback_invoked_count"] == 0
     assert summary["h5_actual_final_patch_replaced_count"] == 0
     assert summary["h5_actual_output_mutated_count"] == 0
+
+
+def test_h5_33_empty_row_blocks():
+    """H5-33 Test 1: empty row blocks."""
+    from scripts.bench.capability_ab_runner import _build_h5_isolated_final_source_mutation_simulation
+
+    sim = _build_h5_isolated_final_source_mutation_simulation({})
+    assert sim["simulation_status"] == "blocked"
+    assert sim["would_simulate_final_source_mutation"] is False
+    assert sim["actual_final_source_after"] == "none"
+    assert sim["actual_final_source_changed"] is False
+
+
+def test_h5_33_preflight_pass_produces_simulation_pass():
+    """H5-33 Test 2: preflight pass shadow-only produces isolated simulation pass."""
+    from scripts.bench.capability_ab_runner import _build_h5_isolated_final_source_mutation_simulation
+
+    row = {
+        "h5_final_source_apply_preflight_receipt": {
+            "would_pass_final_source_apply_preflight": True,
+            "preflight_status": "preflight_pass_shadow_only",
+        },
+        "h5_local_candidate_rollback_dry_run": {"rollback_available": True, "rollback_required": False, "safe_to_continue": True},
+        "final_source": "none",
+    }
+    sim = _build_h5_isolated_final_source_mutation_simulation(row)
+    assert sim["would_simulate_final_source_mutation"] is True
+    assert sim["simulation_status"] == "isolated_simulation_pass"
+    assert sim["isolated_final_source_before"] == "none"
+    assert sim["isolated_final_source_after"] == "local_candidate_shadow_promoted"
+    assert sim["isolated_final_source_changed"] is True
+    assert sim["actual_final_source_after"] == "none"
+    assert sim["actual_final_source_changed"] is False
+
+
+def test_h5_33_preflight_missing_blocks():
+    """H5-33 Test 3: preflight missing blocks."""
+    from scripts.bench.capability_ab_runner import _build_h5_isolated_final_source_mutation_simulation
+
+    sim = _build_h5_isolated_final_source_mutation_simulation({})
+    assert "missing_preflight_receipt" in sim["simulation_reasons"]
+
+
+def test_h5_33_preflight_not_passed_blocks():
+    """H5-33 Test 4: preflight not passed blocks."""
+    from scripts.bench.capability_ab_runner import _build_h5_isolated_final_source_mutation_simulation
+
+    row = {
+        "h5_final_source_apply_preflight_receipt": {
+            "would_pass_final_source_apply_preflight": False,
+            "preflight_status": "blocked",
+        },
+    }
+    sim = _build_h5_isolated_final_source_mutation_simulation(row)
+    assert "preflight_not_passed" in sim["simulation_reasons"]
+
+
+def test_h5_33_rollback_required_blocks():
+    """H5-33 Test 5: rollback required blocks."""
+    from scripts.bench.capability_ab_runner import _build_h5_isolated_final_source_mutation_simulation
+
+    row = {
+        "h5_final_source_apply_preflight_receipt": {
+            "would_pass_final_source_apply_preflight": True,
+            "preflight_status": "preflight_pass_shadow_only",
+        },
+        "h5_local_candidate_rollback_dry_run": {"rollback_available": True, "rollback_required": True, "safe_to_continue": False},
+        "h5_controlled_mutation_gate": {"safe_to_continue": False},
+    }
+    sim = _build_h5_isolated_final_source_mutation_simulation(row)
+    assert "rollback_required" in sim["simulation_reasons"]
+
+
+def test_h5_33_unexpected_final_source_detected():
+    """H5-33 Test 6: unexpected actual final_source change blocks."""
+    from scripts.bench.capability_ab_runner import _build_h5_isolated_final_source_mutation_simulation
+
+    row = {"final_source": "local_candidate_shadow_promoted"}
+    sim = _build_h5_isolated_final_source_mutation_simulation(row)
+    assert sim["actual_final_source_changed"] is True
+    assert sim["would_simulate_final_source_mutation"] is False
+    assert "unexpected_actual_final_source_change" in sim["simulation_reasons"]
+
+
+def test_h5_33_finalized_row_attaches_simulation(tmp_path, monkeypatch):
+    """H5-33 Test 7: finalized row attaches simulation receipt."""
+    from scripts.bench.capability_ab_runner import CapabilityTask, _finalize_with_nexus_row
+
+    task = CapabilityTask(
+        id="test-task-h5-33", difficulty="easy", task_type="test_repair",
+        task_desc="verify h5-33", target_file="target.py", test_file="test_target.py",
+        expected_capabilities=("claim_gate",), success_criteria="tests_pass",
+        repo_kind="nexus_internal", fixture_kind="test_fixture",
+    )
+    _h5_all_flags_set_with_gate(monkeypatch)
+
+    row = _finalize_with_nexus_row(
+        {"mode": "with_nexus", "model_calls": 1, "total_tokens": 100,
+         "token_capture_status": "measured",
+         "committee_trace": {"candidate_count": 2, "judge_selection": {"selected_candidate_id": "C_12481#candidate-1"},
+                              "committee_receipt": {"selected_candidate_applied": True, "selected_candidate_apply_hash_match": True}},
+         "local_solve_eligible": True},
+        provider="gemini", model_required=True, nexus_required=False, task=task, repo_root=tmp_path,
+    )
+
+    sim = row["h5_isolated_final_source_mutation_simulation"]
+    assert sim["actual_final_source_after"] == "none"
+    assert sim["actual_final_source_changed"] is False
+    assert row.get("final_source", "none") == "none"
+    assert row["behavior_changed"] is False
+
+
+def test_h5_33_all_six_flags_no_mutate(tmp_path, monkeypatch):
+    """H5-33 Test 8: all six flags + accepted evidence may simulate but does not mutate."""
+    from scripts.bench.capability_ab_runner import CapabilityTask, _finalize_with_nexus_row
+
+    task = CapabilityTask(
+        id="test-task-h5-33-nomut", difficulty="easy", task_type="test_repair",
+        task_desc="verify h5-33 no mutate", target_file="target.py", test_file="test_target.py",
+        expected_capabilities=("claim_gate",), success_criteria="tests_pass",
+        repo_kind="nexus_internal", fixture_kind="test_fixture",
+    )
+    _h5_all_flags_set_with_gate(monkeypatch)
+
+    row = _finalize_with_nexus_row(
+        {"mode": "with_nexus", "model_calls": 1, "total_tokens": 100,
+         "token_capture_status": "measured",
+         "committee_trace": {"candidate_count": 2, "judge_selection": {"selected_candidate_id": "C_12481#candidate-1"},
+                              "committee_receipt": {"selected_candidate_applied": True, "selected_candidate_apply_hash_match": True}},
+         "local_solve_eligible": True,
+         "external_local_evidence_ingestion_validation": {
+             "schema": "nexus.h5_local_committee_evidence_ingestion_validation.v1",
+             "validation_status": "accepted", "accepted_for_h5_readiness_shadow": True,
+         },
+         "external_cloud_evidence_ingestion_validation": {
+             "schema": "nexus.h5_cloud_fallback_evidence_ingestion_validation.v1",
+             "validation_status": "accepted", "accepted_for_h5_readiness_shadow": True,
+         }},
+        provider="gemini", model_required=True, nexus_required=False, task=task, repo_root=tmp_path,
+    )
+
+    sim = row["h5_isolated_final_source_mutation_simulation"]
+    assert sim["actual_final_source_after"] == "none"
+    assert sim["actual_final_source_changed"] is False
+    assert row.get("final_source", "none") == "none"
+    assert row["behavior_changed"] is False
+    assert sim["controlled_mutation_allowed"] is False
+    assert sim["apply_side_effects_allowed"] is False
+    assert sim["final_patch_replacement_allowed"] is False
+    assert sim["output_mutation_allowed"] is False
+
+
+def test_h5_33_bundle_summary_counters(tmp_path, monkeypatch):
+    """H5-33 Test 9: summary counters."""
+    from scripts.bench.capability_ab_runner import CapabilityTask, _finalize_with_nexus_row, write_evidence_bundle
+
+    task = CapabilityTask(
+        id="test-task-h5-33-summary", difficulty="easy", task_type="test_repair",
+        task_desc="verify h5-33 summary", target_file="target.py", test_file="test_target.py",
+        expected_capabilities=("claim_gate",), success_criteria="tests_pass",
+        repo_kind="nexus_internal", fixture_kind="test_fixture",
+    )
+    _h5_all_flags_set_with_gate(monkeypatch)
+    monkeypatch.setattr("scripts.bench.capability_ab_runner._git_commit", lambda x: "dummy-commit")
+
+    row = _finalize_with_nexus_row(
+        {"mode": "with_nexus", "model_calls": 1, "total_tokens": 100,
+         "token_capture_status": "measured",
+         "committee_trace": {"candidate_count": 2, "judge_selection": {"selected_candidate_id": "C_12481#candidate-1"},
+                              "committee_receipt": {"selected_candidate_applied": True, "selected_candidate_apply_hash_match": True}},
+         "local_solve_eligible": True},
+        provider="gemini", model_required=True, nexus_required=False, task=task, repo_root=tmp_path,
+    )
+
+    with_path = tmp_path / "with.jsonl"
+    without_path = tmp_path / "without.jsonl"
+    with_path.write_text("[]", encoding="utf-8")
+    without_path.write_text("[]", encoding="utf-8")
+
+    bundle_file = write_evidence_bundle(
+        out_dir=tmp_path, with_path=with_path, without_path=without_path,
+        rows=[row],
+        config={"tasks_file": "tasks.json", "tasks_manifest_hash": "manifest_hash",
+                "unique_tasks_requested": 1, "repeat_trials": 1, "timeout_sec": 60},
+    )
+
+    bundle_data = json.loads(bundle_file.read_text(encoding="utf-8"))
+    summary = bundle_data["hybrid_route_summary"]
+    assert summary["h5_isolated_final_source_simulation_count"] >= 1
+    assert summary["h5_actual_final_source_changed_count"] == 0
+    assert summary["h5_isolated_final_source_rollback_required_count"] == 0
+    assert summary["h5_controlled_mutation_allowed_count"] == 0
+    assert summary["h5_execution_allowed_count"] == 0
+    assert summary["h5_behavior_changed_count"] == 0
+    assert summary["h5_cloud_fallback_invoked_count"] == 0
+    assert summary["h5_actual_final_patch_replaced_count"] == 0
+    assert summary["h5_actual_output_mutated_count"] == 0
