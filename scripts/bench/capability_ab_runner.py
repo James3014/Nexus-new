@@ -5665,6 +5665,7 @@ def _build_h5_execution_readiness_preflight(row: dict[str, Any]) -> dict[str, An
     h5 = row.get("h5_route", {})
     local_shadow = row.get("h5_local_finalization_shadow_receipt")
     cloud_shadow = row.get("h5_cloud_fallback_finalization_shadow_receipt")
+    ext_evidence = row.get("h5_local_evidence_ingestion_shadow")
 
     reasons = []
     local_ready = False
@@ -5672,6 +5673,7 @@ def _build_h5_execution_readiness_preflight(row: dict[str, Any]) -> dict[str, An
     has_plan = bool(plan)
     has_local_shadow = bool(local_shadow)
     has_cloud_shadow = bool(cloud_shadow)
+    ext_ready = bool(ext_evidence and ext_evidence.get("local_path_ready_shadow_from_external_evidence", False))
 
     # Check plan existence
     if not has_plan:
@@ -5721,6 +5723,9 @@ def _build_h5_execution_readiness_preflight(row: dict[str, Any]) -> dict[str, An
 
     readiness_status = "blocked"
 
+    if not ext_ready and ext_evidence is not None:
+        reasons.append("local_external_evidence_missing_or_blocked")
+
     return {
         "schema": "nexus.hybrid_h5_execution_readiness_preflight.v1",
         "readiness_evaluated": True,
@@ -5729,6 +5734,7 @@ def _build_h5_execution_readiness_preflight(row: dict[str, Any]) -> dict[str, An
         "readiness_reasons": reasons,
         "local_path_ready_shadow": local_ready,
         "cloud_path_ready_shadow": cloud_ready,
+        "local_external_evidence_ready_shadow": ext_ready,
         "has_execution_plan": has_plan,
         "has_local_finalization_shadow": has_local_shadow,
         "has_cloud_finalization_shadow": has_cloud_shadow,
@@ -5742,6 +5748,102 @@ def _build_h5_execution_readiness_preflight(row: dict[str, Any]) -> dict[str, An
         "requires_claim_gate_validation": True,
         "requires_full_benchmark": True,
         "requires_governance_approval": True,
+        "public_claim_allowed": False,
+        "production_ready": False,
+    }
+
+
+def _build_h5_local_evidence_ingestion_shadow(row: dict[str, Any]) -> dict[str, Any]:
+    """Pure helper: reads optional external local evidence validation from row.
+
+    No side effects. No model calls. No mutation. No local committee invocation.
+    """
+    ext = row.get("external_local_evidence_ingestion_validation")
+    if not ext:
+        return {
+            "schema": "nexus.hybrid_h5_local_evidence_ingestion_shadow.v1",
+            "evaluated": True,
+            "external_evidence_present": False,
+            "external_validation_schema": "",
+            "accepted_for_h5_readiness_shadow": False,
+            "validation_status": "",
+            "validation_reasons": [],
+            "local_evidence_can_feed_readiness": False,
+            "local_evidence_source": "external_prevalidated",
+            "local_path_ready_shadow_from_external_evidence": False,
+            "blocked_reason": "missing_external_local_evidence_validation",
+            "public_claim_allowed": False,
+            "production_ready": False,
+        }
+
+    src_schema = str(ext.get("schema", "") or "")
+    if src_schema != "nexus.h5_local_committee_evidence_ingestion_validation.v1":
+        return {
+            "schema": "nexus.hybrid_h5_local_evidence_ingestion_shadow.v1",
+            "evaluated": True,
+            "external_evidence_present": True,
+            "external_validation_schema": src_schema,
+            "accepted_for_h5_readiness_shadow": False,
+            "validation_status": str(ext.get("validation_status", "") or ""),
+            "validation_reasons": ext.get("validation_reasons", []),
+            "local_evidence_can_feed_readiness": False,
+            "local_evidence_source": "external_prevalidated",
+            "local_path_ready_shadow_from_external_evidence": False,
+            "blocked_reason": "invalid_external_local_evidence_validation_schema",
+            "public_claim_allowed": False,
+            "production_ready": False,
+        }
+
+    v_status = str(ext.get("validation_status", "") or "")
+    accepted_ext = bool(ext.get("accepted_for_h5_readiness_shadow", False))
+
+    if v_status != "accepted":
+        return {
+            "schema": "nexus.hybrid_h5_local_evidence_ingestion_shadow.v1",
+            "evaluated": True,
+            "external_evidence_present": True,
+            "external_validation_schema": src_schema,
+            "accepted_for_h5_readiness_shadow": False,
+            "validation_status": v_status,
+            "validation_reasons": ext.get("validation_reasons", []),
+            "local_evidence_can_feed_readiness": False,
+            "local_evidence_source": "external_prevalidated",
+            "local_path_ready_shadow_from_external_evidence": False,
+            "blocked_reason": "external_local_evidence_not_accepted",
+            "public_claim_allowed": False,
+            "production_ready": False,
+        }
+
+    if not accepted_ext:
+        return {
+            "schema": "nexus.hybrid_h5_local_evidence_ingestion_shadow.v1",
+            "evaluated": True,
+            "external_evidence_present": True,
+            "external_validation_schema": src_schema,
+            "accepted_for_h5_readiness_shadow": False,
+            "validation_status": v_status,
+            "validation_reasons": ext.get("validation_reasons", []),
+            "local_evidence_can_feed_readiness": False,
+            "local_evidence_source": "external_prevalidated",
+            "local_path_ready_shadow_from_external_evidence": False,
+            "blocked_reason": "external_local_evidence_not_accepted_for_readiness",
+            "public_claim_allowed": False,
+            "production_ready": False,
+        }
+
+    # Accepted path
+    return {
+        "schema": "nexus.hybrid_h5_local_evidence_ingestion_shadow.v1",
+        "evaluated": True,
+        "external_evidence_present": True,
+        "external_validation_schema": src_schema,
+        "accepted_for_h5_readiness_shadow": True,
+        "validation_status": v_status,
+        "validation_reasons": [],
+        "local_evidence_can_feed_readiness": True,
+        "local_evidence_source": "external_prevalidated",
+        "local_path_ready_shadow_from_external_evidence": True,
+        "blocked_reason": "",
         "public_claim_allowed": False,
         "production_ready": False,
     }
@@ -6184,6 +6286,9 @@ def _finalize_with_nexus_row(
 
             # H5-11: Cloud fallback finalization shadow receipt
             finalized["h5_cloud_fallback_finalization_shadow_receipt"] = _build_h5_cloud_fallback_finalization_shadow_receipt(finalized)
+
+            # H5-19: Local evidence ingestion shadow attach (before preflight so preflight can read it)
+            finalized["h5_local_evidence_ingestion_shadow"] = _build_h5_local_evidence_ingestion_shadow(finalized)
 
             # H5-12: Execution readiness preflight matrix
             finalized["h5_execution_readiness_preflight"] = _build_h5_execution_readiness_preflight(finalized)
@@ -9911,6 +10016,11 @@ def write_evidence_bundle(
         "h5_readiness_missing_real_cloud_e2e_count": sum(1 for row in with_rows if "real_cloud_fallback_e2e_missing" in (row.get("h5_execution_readiness_preflight", {}).get("readiness_reasons", []) or [])),
         "h5_readiness_missing_full_benchmark_count": sum(1 for row in with_rows if "full_benchmark_missing" in (row.get("h5_execution_readiness_preflight", {}).get("readiness_reasons", []) or [])),
         "h5_readiness_governance_blocked_count": sum(1 for row in with_rows if "governance_approval_missing" in (row.get("h5_execution_readiness_preflight", {}).get("readiness_reasons", []) or [])),
+        "h5_local_evidence_ingestion_shadow_count": sum(1 for row in with_rows if bool(row.get("h5_local_evidence_ingestion_shadow"))),
+        "h5_local_evidence_external_present_count": sum(1 for row in with_rows if bool(row.get("h5_local_evidence_ingestion_shadow", {}).get("external_evidence_present", False))),
+        "h5_local_evidence_accepted_count": sum(1 for row in with_rows if bool(row.get("h5_local_evidence_ingestion_shadow", {}).get("accepted_for_h5_readiness_shadow", False))),
+        "h5_local_evidence_blocked_count": sum(1 for row in with_rows if bool(row.get("h5_local_evidence_ingestion_shadow")) and not bool(row.get("h5_local_evidence_ingestion_shadow", {}).get("accepted_for_h5_readiness_shadow", False))),
+        "h5_local_external_evidence_ready_shadow_count": sum(1 for row in with_rows if bool(row.get("h5_local_evidence_ingestion_shadow", {}).get("local_path_ready_shadow_from_external_evidence", False))),
     }
     payload["external_provider_claim_boundary_contract"] = build_external_provider_claim_boundary_contract(payload)
     payload["public_promotion_readiness_contract"] = build_public_promotion_readiness_contract(payload)

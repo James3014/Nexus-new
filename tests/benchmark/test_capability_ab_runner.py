@@ -17002,3 +17002,248 @@ def test_h5_12_bundle_summary_counters(tmp_path, monkeypatch):
     assert summary["h5_cloud_fallback_invoked_count"] == 0
     assert summary["h5_behavior_changed_count"] == 0
     assert summary["h5_fail_closed_count"] == 0
+
+
+def test_h5_19_helper_missing_external_validation_blocks():
+    """H5-19 Test 1: helper missing external validation blocks."""
+    from scripts.bench.capability_ab_runner import _build_h5_local_evidence_ingestion_shadow
+
+    shadow = _build_h5_local_evidence_ingestion_shadow({})
+    assert shadow["external_evidence_present"] is False
+    assert shadow["accepted_for_h5_readiness_shadow"] is False
+    assert shadow["local_path_ready_shadow_from_external_evidence"] is False
+    assert shadow["blocked_reason"] == "missing_external_local_evidence_validation"
+    assert shadow["public_claim_allowed"] is False
+    assert shadow["production_ready"] is False
+
+
+def test_h5_19_wrong_schema_blocks():
+    """H5-19 Test 2: wrong schema blocks."""
+    from scripts.bench.capability_ab_runner import _build_h5_local_evidence_ingestion_shadow
+
+    row = {"external_local_evidence_ingestion_validation": {"schema": "wrong"}}
+    shadow = _build_h5_local_evidence_ingestion_shadow(row)
+    assert shadow["external_evidence_present"] is True
+    assert shadow["blocked_reason"] == "invalid_external_local_evidence_validation_schema"
+
+
+def test_h5_19_rejected_validation_blocks():
+    """H5-19 Test 3: rejected validation blocks."""
+    from scripts.bench.capability_ab_runner import _build_h5_local_evidence_ingestion_shadow
+
+    row = {"external_local_evidence_ingestion_validation": {
+        "schema": "nexus.h5_local_committee_evidence_ingestion_validation.v1",
+        "validation_status": "rejected",
+        "accepted_for_h5_readiness_shadow": False,
+    }}
+    shadow = _build_h5_local_evidence_ingestion_shadow(row)
+    assert shadow["accepted_for_h5_readiness_shadow"] is False
+    assert shadow["local_evidence_can_feed_readiness"] is False
+    assert shadow["blocked_reason"] == "external_local_evidence_not_accepted"
+
+
+def test_h5_19_accepted_validation_produces_ready_shadow():
+    """H5-19 Test 4: accepted validation produces ready shadow."""
+    from scripts.bench.capability_ab_runner import _build_h5_local_evidence_ingestion_shadow
+
+    row = {"external_local_evidence_ingestion_validation": {
+        "schema": "nexus.h5_local_committee_evidence_ingestion_validation.v1",
+        "validation_status": "accepted",
+        "accepted_for_h5_readiness_shadow": True,
+    }}
+    shadow = _build_h5_local_evidence_ingestion_shadow(row)
+    assert shadow["accepted_for_h5_readiness_shadow"] is True
+    assert shadow["local_evidence_can_feed_readiness"] is True
+    assert shadow["local_path_ready_shadow_from_external_evidence"] is True
+    assert shadow["blocked_reason"] == ""
+
+
+def test_h5_19_normal_finalize_row_attaches_shadow_but_remains_blocked(tmp_path, monkeypatch):
+    """H5-19 Test 5: normal finalized row attaches shadow but remains blocked."""
+    from scripts.bench.capability_ab_runner import CapabilityTask, _finalize_with_nexus_row
+
+    task = CapabilityTask(
+        id="test-task-h5-19-normal",
+        difficulty="easy",
+        task_type="test_repair",
+        task_desc="verify h5-19 shadow attach",
+        target_file="target.py",
+        test_file="test_target.py",
+        expected_capabilities=("claim_gate",),
+        success_criteria="tests_pass",
+        repo_kind="nexus_internal",
+        fixture_kind="test_fixture",
+    )
+    _h5_all_flags_set_with_gate(monkeypatch)
+
+    row = _finalize_with_nexus_row(
+        {
+            "mode": "with_nexus",
+            "model_calls": 1,
+            "total_tokens": 100,
+            "token_capture_status": "measured",
+            "committee_trace": {
+                "candidate_count": 2,
+                "judge_selection": {"selected_candidate_id": "C_12481#candidate-1"},
+                "committee_receipt": {"selected_candidate_applied": True, "selected_candidate_apply_hash_match": True},
+            },
+            "local_solve_eligible": True,
+        },
+        provider="gemini",
+        model_required=True,
+        nexus_required=False,
+        task=task,
+        repo_root=tmp_path,
+    )
+
+    shadow = row["h5_local_evidence_ingestion_shadow"]
+    assert shadow["external_evidence_present"] is False
+    assert row.get("final_source", "none") == "none"
+    assert row["behavior_changed"] is False
+    assert row["h5_execution_readiness_preflight"]["execution_ready"] is False
+
+
+def test_h5_19_finalized_row_with_accepted_external_records_ready_shadow(tmp_path, monkeypatch):
+    """H5-19 Test 6: finalized row with accepted external validation records local external ready shadow."""
+    from scripts.bench.capability_ab_runner import CapabilityTask, _finalize_with_nexus_row
+
+    task = CapabilityTask(
+        id="test-task-h5-19-accepted",
+        difficulty="easy",
+        task_type="test_repair",
+        task_desc="verify h5-19 accepted external",
+        target_file="target.py",
+        test_file="test_target.py",
+        expected_capabilities=("claim_gate",),
+        success_criteria="tests_pass",
+        repo_kind="nexus_internal",
+        fixture_kind="test_fixture",
+    )
+    _h5_all_flags_set_with_gate(monkeypatch)
+
+    row = _finalize_with_nexus_row(
+        {
+            "mode": "with_nexus",
+            "model_calls": 1,
+            "total_tokens": 100,
+            "token_capture_status": "measured",
+            "committee_trace": {
+                "candidate_count": 2,
+                "judge_selection": {"selected_candidate_id": "C_12481#candidate-1"},
+                "committee_receipt": {"selected_candidate_applied": True, "selected_candidate_apply_hash_match": True},
+            },
+            "local_solve_eligible": True,
+            "external_local_evidence_ingestion_validation": {
+                "schema": "nexus.h5_local_committee_evidence_ingestion_validation.v1",
+                "validation_status": "accepted",
+                "accepted_for_h5_readiness_shadow": True,
+            },
+        },
+        provider="gemini",
+        model_required=True,
+        nexus_required=False,
+        task=task,
+        repo_root=tmp_path,
+    )
+
+    shadow = row["h5_local_evidence_ingestion_shadow"]
+    assert shadow["local_path_ready_shadow_from_external_evidence"] is True
+    assert row["h5_execution_readiness_preflight"]["local_external_evidence_ready_shadow"] is True
+    assert row["h5_execution_readiness_preflight"]["execution_ready"] is False
+    assert row.get("final_source", "none") == "none"
+    assert row["behavior_changed"] is False
+
+
+def test_h5_19_bundle_summary_counters(tmp_path, monkeypatch):
+    """H5-19 Test 7: summary counters."""
+    from scripts.bench.capability_ab_runner import CapabilityTask, _finalize_with_nexus_row, write_evidence_bundle
+
+    task = CapabilityTask(
+        id="test-task-h5-19-summary",
+        difficulty="easy",
+        task_type="test_repair",
+        task_desc="verify h5-19 summary",
+        target_file="target.py",
+        test_file="test_target.py",
+        expected_capabilities=("claim_gate",),
+        success_criteria="tests_pass",
+        repo_kind="nexus_internal",
+        fixture_kind="test_fixture",
+    )
+    _h5_all_flags_set_with_gate(monkeypatch)
+    monkeypatch.setattr("scripts.bench.capability_ab_runner._git_commit", lambda x: "dummy-commit")
+
+    row_normal = _finalize_with_nexus_row(
+        {
+            "mode": "with_nexus",
+            "model_calls": 1,
+            "total_tokens": 100,
+            "token_capture_status": "measured",
+            "committee_trace": {
+                "candidate_count": 2,
+                "judge_selection": {"selected_candidate_id": "C_12481#candidate-1"},
+                "committee_receipt": {"selected_candidate_applied": True, "selected_candidate_apply_hash_match": True},
+            },
+            "local_solve_eligible": True,
+        },
+        provider="gemini",
+        model_required=True,
+        nexus_required=False,
+        task=task,
+        repo_root=tmp_path,
+    )
+
+    row_accepted = _finalize_with_nexus_row(
+        {
+            "mode": "with_nexus",
+            "model_calls": 1,
+            "total_tokens": 100,
+            "token_capture_status": "measured",
+            "committee_trace": {
+                "candidate_count": 2,
+                "judge_selection": {"selected_candidate_id": "C_12481#candidate-1"},
+                "committee_receipt": {"selected_candidate_applied": True, "selected_candidate_apply_hash_match": True},
+            },
+            "local_solve_eligible": True,
+            "external_local_evidence_ingestion_validation": {
+                "schema": "nexus.h5_local_committee_evidence_ingestion_validation.v1",
+                "validation_status": "accepted",
+                "accepted_for_h5_readiness_shadow": True,
+            },
+        },
+        provider="gemini",
+        model_required=True,
+        nexus_required=False,
+        task=task,
+        repo_root=tmp_path,
+    )
+
+    with_path = tmp_path / "with.jsonl"
+    without_path = tmp_path / "without.jsonl"
+    with_path.write_text("[]", encoding="utf-8")
+    without_path.write_text("[]", encoding="utf-8")
+
+    bundle_file = write_evidence_bundle(
+        out_dir=tmp_path,
+        with_path=with_path,
+        without_path=without_path,
+        rows=[row_normal, row_accepted],
+        config={
+            "tasks_file": "tasks.json",
+            "tasks_manifest_hash": "manifest_hash",
+            "unique_tasks_requested": 1,
+            "repeat_trials": 1,
+            "timeout_sec": 60,
+        },
+    )
+
+    bundle_data = json.loads(bundle_file.read_text(encoding="utf-8"))
+    summary = bundle_data["hybrid_route_summary"]
+    assert summary["h5_local_evidence_ingestion_shadow_count"] >= 1
+    assert summary["h5_local_evidence_external_present_count"] >= 1
+    assert summary["h5_local_evidence_accepted_count"] >= 1
+    assert summary["h5_local_evidence_blocked_count"] >= 1
+    assert summary["h5_local_external_evidence_ready_shadow_count"] >= 1
+    assert summary["h5_execution_ready_count"] == 0
+    assert summary["h5_cloud_fallback_invoked_count"] == 0
+    assert summary["h5_behavior_changed_count"] == 0
