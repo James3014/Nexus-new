@@ -509,3 +509,142 @@ def test_h5_17_cli_dry_run_includes_evidence_bundle():
     assert "evidence_bundle" in data
     assert data["evidence_bundle"]["schema"] == "nexus.h5_local_committee_smoke_evidence_bundle.v1"
     assert data["evidence_bundle"]["bundle_status"] == "blocked"
+
+
+def test_h5_18_dry_run_bundle_rejected():
+    """H5-18 Test 1: dry-run bundle rejected."""
+    from scripts.bench.h5_local_committee_e2e_smoke import run_h5_local_committee_e2e_smoke
+
+    repo_root = Path(__file__).resolve().parents[2]
+    result = run_h5_local_committee_e2e_smoke(repo_root, dry_run=True)
+
+    val = result["ingestion_validation"]
+    assert val["validation_status"] == "rejected"
+    assert val["accepted_for_h5_readiness_shadow"] is False
+    assert any("bundle_not_pass" in r or "cannot_feed_h5_readiness_shadow" in r for r in val["validation_reasons"])
+
+
+def test_h5_18_skipped_bundle_rejected(monkeypatch):
+    """H5-18 Test 2: skipped bundle rejected."""
+    from scripts.bench.h5_local_committee_e2e_smoke import run_h5_local_committee_e2e_smoke
+
+    def _fake_detect(repo_root):
+        return False, "local_committee_runtime_unavailable"
+
+    monkeypatch.setattr("scripts.bench.h5_local_committee_e2e_smoke._detect_local_committee_runtime", _fake_detect)
+
+    repo_root = Path(__file__).resolve().parents[2]
+    result = run_h5_local_committee_e2e_smoke(repo_root, dry_run=False)
+
+    val = result["ingestion_validation"]
+    assert val["validation_status"] == "rejected"
+    assert val["accepted_for_h5_readiness_shadow"] is False
+
+
+def test_h5_18_synthetic_pass_bundle_accepted():
+    """H5-18 Test 3: synthetic pass bundle accepted."""
+    from scripts.bench.h5_local_committee_e2e_smoke import (
+        build_h5_local_committee_smoke_receipt,
+        build_h5_local_committee_readiness_bridge,
+        build_h5_local_committee_smoke_evidence_bundle,
+        validate_h5_local_committee_evidence_bundle,
+    )
+
+    smoke = {
+        "status": "pass", "dry_run": False, "local_committee_invoked": True,
+        "candidate_count": 1, "selected_candidate_id": "C_1#candidate-0",
+        "selected_candidate_applied": True, "selected_candidate_hash_match": True,
+        "selected_candidate_patch_sha256": "abc123", "selected_candidate_patch_length": 123,
+        "local_solve_eligible": True,
+    }
+    receipt = build_h5_local_committee_smoke_receipt(smoke)
+    bridge = build_h5_local_committee_readiness_bridge(receipt)
+    smoke["receipt"] = receipt
+    smoke["readiness_bridge"] = bridge
+    bundle = build_h5_local_committee_smoke_evidence_bundle(smoke)
+
+    val = validate_h5_local_committee_evidence_bundle(bundle)
+    assert val["validation_status"] == "accepted"
+    assert val["accepted_for_h5_readiness_shadow"] is True
+    assert val["validation_reasons"] == []
+
+
+def test_h5_18_wrong_schema_rejected():
+    """H5-18 Test 4: wrong schema rejected."""
+    from scripts.bench.h5_local_committee_e2e_smoke import validate_h5_local_committee_evidence_bundle
+
+    val = validate_h5_local_committee_evidence_bundle({"schema": "wrong"})
+    assert val["validation_status"] == "rejected"
+    assert "invalid_bundle_schema" in val["validation_reasons"]
+
+
+def test_h5_18_safety_violation_rejected():
+    """H5-18 Test 5: safety invariant violation rejected."""
+    from scripts.bench.h5_local_committee_e2e_smoke import validate_h5_local_committee_evidence_bundle
+
+    bundle = {"schema": "nexus.h5_local_committee_smoke_evidence_bundle.v1",
+              "safety": {"output_mutated": True}}
+    val = validate_h5_local_committee_evidence_bundle(bundle)
+    assert val["validation_status"] == "rejected"
+    assert "safety_invariant_violation" in val["validation_reasons"]
+
+
+def test_h5_18_governance_violation_rejected():
+    """H5-18 Test 6: governance violation rejected."""
+    from scripts.bench.h5_local_committee_e2e_smoke import validate_h5_local_committee_evidence_bundle
+
+    bundle = {"schema": "nexus.h5_local_committee_smoke_evidence_bundle.v1",
+              "governance": {"production_ready": True}}
+    val = validate_h5_local_committee_evidence_bundle(bundle)
+    assert val["validation_status"] == "rejected"
+    assert "governance_boundary_violation" in val["validation_reasons"]
+
+
+def test_h5_18_receipt_not_compatible_rejected():
+    """H5-18 Test 7: receipt not compatible rejected."""
+    from scripts.bench.h5_local_committee_e2e_smoke import validate_h5_local_committee_evidence_bundle
+
+    bundle = {"schema": "nexus.h5_local_committee_smoke_evidence_bundle.v1",
+              "receipt": {"schema": "nexus.h5_local_committee_smoke_receipt.v1", "h5_compatible": False}}
+    val = validate_h5_local_committee_evidence_bundle(bundle)
+    assert val["validation_status"] == "rejected"
+    assert "receipt_not_h5_compatible" in val["validation_reasons"]
+
+
+def test_h5_18_readiness_bridge_not_ready_rejected():
+    """H5-18 Test 8: readiness bridge not ready rejected."""
+    from scripts.bench.h5_local_committee_e2e_smoke import validate_h5_local_committee_evidence_bundle
+
+    bundle = {"schema": "nexus.h5_local_committee_smoke_evidence_bundle.v1",
+              "readiness_bridge": {"schema": "nexus.h5_local_committee_readiness_bridge.v1",
+                                   "readiness_status": "blocked"}}
+    val = validate_h5_local_committee_evidence_bundle(bundle)
+    assert val["validation_status"] == "rejected"
+    assert "readiness_bridge_not_ready" in val["validation_reasons"]
+
+
+def test_h5_18_helper_purity():
+    """H5-18 Test 9: helper purity."""
+    import copy
+    from scripts.bench.h5_local_committee_e2e_smoke import validate_h5_local_committee_evidence_bundle
+
+    bundle = {"schema": "nexus.h5_local_committee_smoke_evidence_bundle.v1"}
+    original = copy.deepcopy(bundle)
+    validate_h5_local_committee_evidence_bundle(bundle)
+    assert bundle == original
+
+
+def test_h5_18_cli_dry_run_includes_ingestion_validation():
+    """H5-18 Test 10: CLI dry-run includes ingestion_validation."""
+    script = Path(__file__).resolve().parents[2] / "scripts" / "bench" / "h5_local_committee_e2e_smoke.py"
+    result = subprocess.run(
+        [sys.executable, str(script), "--dry-run"],
+        capture_output=True,
+        text=True,
+        timeout=30,
+    )
+    assert result.returncode == 0
+    data = json.loads(result.stdout)
+    assert "ingestion_validation" in data
+    assert data["ingestion_validation"]["schema"] == "nexus.h5_local_committee_evidence_ingestion_validation.v1"
+    assert data["ingestion_validation"]["validation_status"] == "rejected"

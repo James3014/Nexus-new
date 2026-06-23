@@ -326,6 +326,144 @@ def _governance_dict() -> dict[str, Any]:
     return {"public_claim_allowed": False, "production_ready": False, "internal_only": True}
 
 
+def validate_h5_local_committee_evidence_bundle(bundle: dict[str, Any]) -> dict[str, Any]:
+    """Pure validator: checks whether an evidence bundle is acceptable for H5 readiness shadow.
+
+    No side effects. No model calls. No mutation. No file writes.
+    """
+    reasons = []
+    safety_ok = True
+    governance_ok = True
+    receipt_ok = True
+    bridge_ok = True
+    identity_ready = False
+    application_ready = False
+    hash_ready = False
+    patch_ready = False
+    solve_ready = False
+
+    if not bundle:
+        return _validation_result(
+            validated=True, accepted=False, status="rejected",
+            reasons=["missing_bundle"],
+            safety_ok=False, governance_ok=False, receipt_ok=False, bridge_ok=False,
+        )
+
+    src_schema = str(bundle.get("schema", "") or "")
+    if src_schema != "nexus.h5_local_committee_smoke_evidence_bundle.v1":
+        return _validation_result(
+            validated=True, accepted=False, status="rejected",
+            reasons=["invalid_bundle_schema"], src_schema=src_schema,
+        )
+
+    b_status = str(bundle.get("bundle_status", "") or "")
+    if b_status != "pass":
+        reasons.append("bundle_not_pass")
+
+    can_feed = bool(bundle.get("can_feed_h5_readiness_shadow", False))
+    if not can_feed:
+        reasons.append("cannot_feed_h5_readiness_shadow")
+
+    # Safety invariants
+    safety = bundle.get("safety", {})
+    for key in ["final_source_changed", "final_patch_replaced", "output_mutated",
+                 "model_calls_incremented", "public_claim_allowed", "production_ready"]:
+        if bool(safety.get(key, False)):
+            safety_ok = False
+            reasons.append("safety_invariant_violation")
+            break
+
+    # Governance
+    gov = bundle.get("governance", {})
+    if bool(gov.get("public_claim_allowed", True)) or bool(gov.get("production_ready", True)) or not bool(gov.get("internal_only", False)):
+        governance_ok = False
+        reasons.append("governance_boundary_violation")
+
+    # Receipt
+    receipt = bundle.get("receipt", {})
+    if (str(receipt.get("schema", "") or "") != "nexus.h5_local_committee_smoke_receipt.v1"
+            or not bool(receipt.get("h5_compatible", False))
+            or not bool(receipt.get("h5_local_finalization_candidate_ready", False))):
+        receipt_ok = False
+        reasons.append("receipt_not_h5_compatible")
+
+    # Readiness bridge
+    bridge = bundle.get("readiness_bridge", {})
+    identity_ready = bool(bridge.get("candidate_identity_ready", False))
+    application_ready = bool(bridge.get("candidate_application_ready", False))
+    hash_ready = bool(bridge.get("candidate_hash_ready", False))
+    patch_ready = bool(bridge.get("candidate_patch_metadata_ready", False))
+    solve_ready = bool(bridge.get("local_solve_ready", False))
+
+    if (str(bridge.get("schema", "") or "") != "nexus.h5_local_committee_readiness_bridge.v1"
+            or str(bridge.get("readiness_status", "") or "") != "ready_shadow"
+            or not bool(bridge.get("local_committee_e2e_ready_shadow", False))
+            or not bool(bridge.get("can_feed_h5_readiness_shadow", False))
+            or not identity_ready or not application_ready or not hash_ready
+            or not patch_ready or not solve_ready):
+        bridge_ok = False
+        reasons.append("readiness_bridge_not_ready")
+
+    accepted = not reasons and safety_ok and governance_ok and receipt_ok and bridge_ok
+
+    return {
+        "schema": "nexus.h5_local_committee_evidence_ingestion_validation.v1",
+        "validated": True,
+        "accepted_for_h5_readiness_shadow": accepted,
+        "validation_status": "accepted" if accepted else "rejected",
+        "validation_reasons": reasons,
+        "source_bundle_schema": src_schema,
+        "bundle_status": b_status,
+        "can_feed_h5_readiness_shadow": can_feed,
+        "safety_invariants_ok": safety_ok,
+        "governance_ok": governance_ok,
+        "receipt_ok": receipt_ok,
+        "readiness_bridge_ok": bridge_ok,
+        "candidate_identity_ready": identity_ready,
+        "candidate_application_ready": application_ready,
+        "candidate_hash_ready": hash_ready,
+        "candidate_patch_metadata_ready": patch_ready,
+        "local_solve_ready": solve_ready,
+        "public_claim_allowed": bool(bundle.get("governance", {}).get("public_claim_allowed", False)),
+        "production_ready": bool(bundle.get("governance", {}).get("production_ready", False)),
+    }
+
+
+def _validation_result(
+    *,
+    validated: bool,
+    accepted: bool,
+    status: str,
+    reasons: list[str],
+    safety_ok: bool = False,
+    governance_ok: bool = False,
+    receipt_ok: bool = False,
+    bridge_ok: bool = False,
+    src_schema: str = "",
+) -> dict[str, Any]:
+    return {
+        "schema": "nexus.h5_local_committee_evidence_ingestion_validation.v1",
+        "validated": validated,
+        "accepted_for_h5_readiness_shadow": accepted,
+        "validation_status": status,
+        "validation_reasons": reasons,
+        "source_bundle_schema": src_schema,
+        "bundle_status": "",
+        "can_feed_h5_readiness_shadow": False,
+        "safety_invariants_ok": safety_ok,
+        "governance_ok": governance_ok,
+        "receipt_ok": receipt_ok,
+        "readiness_bridge_ok": bridge_ok,
+        "candidate_identity_ready": False,
+        "candidate_application_ready": False,
+        "candidate_hash_ready": False,
+        "candidate_patch_metadata_ready": False,
+        "local_solve_ready": False,
+        "public_claim_allowed": False,
+        "production_ready": False,
+    }
+
+
 def run_h5_local_committee_e2e_smoke(
     repo_root: Path,
     *,
@@ -345,6 +483,7 @@ def run_h5_local_committee_e2e_smoke(
         result["receipt"] = build_h5_local_committee_smoke_receipt(result)
         result["readiness_bridge"] = build_h5_local_committee_readiness_bridge(result["receipt"])
         result["evidence_bundle"] = build_h5_local_committee_smoke_evidence_bundle(result)
+        result["ingestion_validation"] = validate_h5_local_committee_evidence_bundle(result["evidence_bundle"])
         return result
 
     available, reason = _detect_local_committee_runtime(repo_root)
@@ -358,6 +497,7 @@ def run_h5_local_committee_e2e_smoke(
         result["receipt"] = build_h5_local_committee_smoke_receipt(result)
         result["readiness_bridge"] = build_h5_local_committee_readiness_bridge(result["receipt"])
         result["evidence_bundle"] = build_h5_local_committee_smoke_evidence_bundle(result)
+        result["ingestion_validation"] = validate_h5_local_committee_evidence_bundle(result["evidence_bundle"])
         return result
 
     # Runtime available: attempt isolated local committee smoke
@@ -453,6 +593,7 @@ def run_h5_local_committee_e2e_smoke(
         result["receipt"] = build_h5_local_committee_smoke_receipt(result)
         result["readiness_bridge"] = build_h5_local_committee_readiness_bridge(result["receipt"])
         result["evidence_bundle"] = build_h5_local_committee_smoke_evidence_bundle(result)
+        result["ingestion_validation"] = validate_h5_local_committee_evidence_bundle(result["evidence_bundle"])
         return result
 
     except Exception as e:
@@ -465,6 +606,7 @@ def run_h5_local_committee_e2e_smoke(
         result["receipt"] = build_h5_local_committee_smoke_receipt(result)
         result["readiness_bridge"] = build_h5_local_committee_readiness_bridge(result["receipt"])
         result["evidence_bundle"] = build_h5_local_committee_smoke_evidence_bundle(result)
+        result["ingestion_validation"] = validate_h5_local_committee_evidence_bundle(result["evidence_bundle"])
         return result
 
 
