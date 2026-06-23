@@ -6335,6 +6335,153 @@ def _build_h5_local_candidate_shadow_final_source_promotion(row: dict[str, Any])
     }
 
 
+def _build_h5_final_patch_replacement_shadow_contract(row: dict[str, Any]) -> dict[str, Any]:
+    """Pure helper: builds final_patch replacement shadow contract.
+
+    No side effects. No model calls. No mutation. No actual final_patch replacement.
+    """
+    shadow_fs_promo = row.get("h5_local_candidate_shadow_final_source_promotion")
+    rollback = row.get("h5_local_candidate_rollback_dry_run")
+
+    reasons = []
+    shadow_patch = False
+
+    actual_fp = bool(row.get("final_patch"))
+    selected_candidate_id = str(row.get("h5_route", {}).get("local_selected_candidate_id", "") or "")
+    selected_patch_sha256 = str(row.get("h5_route", {}).get("local_selected_candidate_patch_sha256", "") or "")
+    selected_patch_length = int(row.get("h5_route", {}).get("local_selected_candidate_patch_length", 0) or 0)
+    selected_hash_verified = bool(row.get("h5_route", {}).get("local_selected_candidate_hash_match", False))
+    rollback_available = bool(rollback and rollback.get("rollback_available", False))
+
+    if not shadow_fs_promo:
+        reasons.append("missing_shadow_final_source_promotion")
+
+    fs_shadow_candidate = bool(shadow_fs_promo and shadow_fs_promo.get("shadow_promotion_candidate", False))
+    fs_shadow_promoted = str(shadow_fs_promo and shadow_fs_promo.get("shadow_final_source_after_promotion", "") or "")
+
+    if shadow_fs_promo and not fs_shadow_candidate:
+        reasons.append("shadow_final_source_not_promoted")
+
+    if not selected_patch_sha256:
+        reasons.append("missing_selected_candidate_patch_sha256")
+    if selected_patch_length <= 0:
+        reasons.append("missing_selected_candidate_patch_length")
+    if not selected_hash_verified:
+        reasons.append("selected_candidate_hash_not_verified")
+    if not rollback_available:
+        reasons.append("rollback_not_available")
+
+    if fs_shadow_candidate and fs_shadow_promoted == "local_candidate_shadow_promoted" and selected_patch_sha256 and selected_patch_length > 0 and selected_hash_verified and rollback_available:
+        shadow_patch = True
+
+    if shadow_patch:
+        shadow_status = "shadow_ready_blocked"
+    else:
+        shadow_status = "blocked"
+
+    reasons.extend([
+        "shadow_only_no_actual_final_patch_replacement",
+        "final_patch_replacement_not_enabled",
+        "promotion_allowed_false",
+        "real_patch_replacement_not_implemented",
+    ])
+
+    return {
+        "schema": "nexus.hybrid_h5_final_patch_replacement_shadow_contract.v1",
+        "evaluated": True,
+        "shadow_patch_candidate": shadow_patch,
+        "shadow_patch_status": shadow_status,
+        "shadow_patch_reasons": reasons,
+        "selected_candidate_id": selected_candidate_id,
+        "selected_candidate_patch_sha256": selected_patch_sha256,
+        "selected_candidate_patch_length": selected_patch_length,
+        "selected_candidate_hash_verified": selected_hash_verified,
+        "actual_final_patch_present_before": actual_fp,
+        "actual_final_patch_present_after": actual_fp,
+        "actual_final_patch_replaced": False,
+        "shadow_final_patch_replacement_would_occur": shadow_patch,
+        "final_patch_replacement_allowed": False,
+        "promotion_allowed": False,
+        "shadow_final_source_after_promotion": fs_shadow_promoted if fs_shadow_candidate else "none",
+        "actual_final_source_after": str(row.get("final_source", "none") or "none"),
+        "rollback_available": rollback_available,
+        "rollback_required": bool(rollback and not rollback.get("safe_to_continue", True)),
+        "public_claim_allowed": False,
+        "production_ready": False,
+    }
+
+
+def _build_h5_output_mutation_guard(row: dict[str, Any]) -> dict[str, Any]:
+    """Pure helper: builds output mutation guard.
+
+    No side effects. No model calls. No mutation. No actual output change.
+    """
+    patch_shadow = row.get("h5_final_patch_replacement_shadow_contract")
+    fs_shadow = row.get("h5_local_candidate_shadow_final_source_promotion")
+    rollback = row.get("h5_local_candidate_rollback_dry_run")
+
+    reasons = []
+    mutation_candidate = False
+
+    actual_output = row.get("output")
+    actual_fs = str(row.get("final_source", "none") or "none")
+    actual_fp = bool(row.get("final_patch"))
+    actual_model_calls = int(row.get("model_calls", 0) or 0)
+
+    actual_fs_changed = actual_fs != "none"
+    actual_fp_replaced = False
+    actual_output_mutated = False
+    actual_model_calls_incremented = actual_model_calls > 0 and bool(row.get("_model_calls_baseline"))
+
+    if not patch_shadow:
+        reasons.append("missing_final_patch_replacement_shadow_contract")
+
+    shadow_patch_candidate = bool(patch_shadow and patch_shadow.get("shadow_patch_candidate", False))
+    shadow_fp_would_occur = bool(patch_shadow and patch_shadow.get("shadow_final_patch_replacement_would_occur", False))
+
+    if patch_shadow and not shadow_patch_candidate:
+        reasons.append("shadow_patch_candidate_false")
+
+    if shadow_patch_candidate and shadow_fp_would_occur:
+        mutation_candidate = True
+
+    if actual_output_mutated:
+        reasons.append("unexpected_actual_output_mutation")
+    if actual_fs_changed:
+        reasons.append("unexpected_actual_final_source_change")
+    if actual_fp_replaced:
+        reasons.append("unexpected_actual_final_patch_replacement")
+    if actual_model_calls_incremented:
+        reasons.append("unexpected_model_calls_increment")
+
+    reasons.extend([
+        "shadow_only_no_output_mutation",
+        "output_mutation_not_enabled",
+        "real_output_mutation_not_implemented",
+    ])
+
+    unexpected = actual_output_mutated or actual_fs_changed or actual_fp_replaced or actual_model_calls_incremented
+
+    return {
+        "schema": "nexus.hybrid_h5_output_mutation_guard.v1",
+        "evaluated": True,
+        "output_mutation_candidate": mutation_candidate,
+        "output_mutation_status": "blocked",
+        "output_mutation_reasons": reasons,
+        "shadow_patch_candidate": shadow_patch_candidate,
+        "shadow_final_patch_replacement_would_occur": shadow_fp_would_occur,
+        "actual_output_mutated": actual_output_mutated,
+        "output_mutation_allowed": False,
+        "actual_final_source_changed": actual_fs_changed,
+        "actual_final_patch_replaced": actual_fp_replaced,
+        "model_calls_incremented": actual_model_calls_incremented,
+        "safe_to_continue": not unexpected,
+        "rollback_required": unexpected,
+        "public_claim_allowed": False,
+        "production_ready": False,
+    }
+
+
 def _finalize_with_nexus_row(
     row: dict[str, Any],
     *,
@@ -6795,6 +6942,12 @@ def _finalize_with_nexus_row(
 
             # H5-28: Shadow final_source promotion contract
             finalized["h5_local_candidate_shadow_final_source_promotion"] = _build_h5_local_candidate_shadow_final_source_promotion(finalized)
+
+            # H5-29: Final patch replacement shadow contract
+            finalized["h5_final_patch_replacement_shadow_contract"] = _build_h5_final_patch_replacement_shadow_contract(finalized)
+
+            # H5-29: Output mutation guard
+            finalized["h5_output_mutation_guard"] = _build_h5_output_mutation_guard(finalized)
 
     # Ensure keys are also on the row level for simple flat queries
     finalized["route_mode"] = r_mode
@@ -10558,6 +10711,15 @@ def write_evidence_bundle(
         "h5_local_shadow_promotion_ready_blocked_count": sum(1 for row in with_rows if str(row.get("h5_local_candidate_shadow_final_source_promotion", {}).get("shadow_promotion_status", "")) == "shadow_ready_blocked"),
         "h5_local_actual_final_source_changed_count": sum(1 for row in with_rows if bool(row.get("h5_local_candidate_shadow_final_source_promotion", {}).get("actual_final_source_changed", False))),
         "h5_local_shadow_final_source_promoted_count": sum(1 for row in with_rows if str(row.get("h5_local_candidate_shadow_final_source_promotion", {}).get("shadow_final_source_after_promotion", "")) == "local_candidate_shadow_promoted"),
+        "h5_final_patch_replacement_shadow_contract_count": sum(1 for row in with_rows if bool(row.get("h5_final_patch_replacement_shadow_contract"))),
+        "h5_final_patch_shadow_candidate_count": sum(1 for row in with_rows if bool(row.get("h5_final_patch_replacement_shadow_contract", {}).get("shadow_patch_candidate", False))),
+        "h5_final_patch_replacement_allowed_count": sum(1 for row in with_rows if bool(row.get("h5_final_patch_replacement_shadow_contract", {}).get("final_patch_replacement_allowed", False))),
+        "h5_actual_final_patch_replaced_count": sum(1 for row in with_rows if bool(row.get("h5_final_patch_replacement_shadow_contract", {}).get("actual_final_patch_replaced", False))),
+        "h5_output_mutation_guard_count": sum(1 for row in with_rows if bool(row.get("h5_output_mutation_guard"))),
+        "h5_output_mutation_candidate_count": sum(1 for row in with_rows if bool(row.get("h5_output_mutation_guard", {}).get("output_mutation_candidate", False))),
+        "h5_output_mutation_allowed_count": sum(1 for row in with_rows if bool(row.get("h5_output_mutation_guard", {}).get("output_mutation_allowed", False))),
+        "h5_actual_output_mutated_count": sum(1 for row in with_rows if bool(row.get("h5_output_mutation_guard", {}).get("actual_output_mutated", False))),
+        "h5_output_mutation_rollback_required_count": sum(1 for row in with_rows if bool(row.get("h5_output_mutation_guard", {}).get("rollback_required", False))),
     }
     payload["external_provider_claim_boundary_contract"] = build_external_provider_claim_boundary_contract(payload)
     payload["public_promotion_readiness_contract"] = build_public_promotion_readiness_contract(payload)
