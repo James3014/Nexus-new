@@ -7311,6 +7311,164 @@ def _build_h5_isolated_final_patch_replacement_simulation(row: dict[str, Any]) -
     }
 
 
+def _build_h5_actual_final_patch_apply_decision(row: dict[str, Any]) -> dict[str, Any]:
+    """Pure helper: builds actual final_patch apply decision."""
+    import os as _os
+
+    preflight = row.get("h5_final_patch_apply_preflight_receipt")
+    simulation = row.get("h5_isolated_final_patch_replacement_simulation")
+    apply_receipt = row.get("h5_actual_final_source_apply_receipt")
+    rollback_receipt = row.get("h5_actual_final_source_rollback_receipt")
+    rollback = row.get("h5_local_candidate_rollback_dry_run")
+    output_guard = row.get("h5_output_mutation_guard")
+
+    actual_fp = bool(row.get("final_patch"))
+
+    flag_exec = _os.environ.get("NEXUS_H5_ENABLE_CONTROLLED_EXECUTION", "").strip() == "1"
+    flag_final = _os.environ.get("NEXUS_H5_ALLOW_LOCAL_FINALIZATION", "").strip() == "1"
+    flag_fs = _os.environ.get("NEXUS_H5_ALLOW_FINAL_SOURCE_CHANGE", "").strip() == "1"
+    flag_fp = _os.environ.get("NEXUS_H5_ALLOW_FINAL_PATCH_REPLACEMENT", "").strip() == "1"
+    flag_out = _os.environ.get("NEXUS_H5_ALLOW_OUTPUT_MUTATION", "").strip() == "1"
+    flag_fs_preflight = _os.environ.get("NEXUS_H5_ALLOW_FINAL_SOURCE_APPLY_PREFLIGHT", "").strip() == "1"
+    flag_fs_apply = _os.environ.get("NEXUS_H5_ALLOW_ACTUAL_FINAL_SOURCE_APPLY", "").strip() == "1"
+    flag_fs_rollback = _os.environ.get("NEXUS_H5_ALLOW_ACTUAL_FINAL_SOURCE_ROLLBACK", "").strip() == "1"
+    flag_fp_preflight = _os.environ.get("NEXUS_H5_ALLOW_FINAL_PATCH_APPLY_PREFLIGHT", "").strip() == "1"
+    flag_fp_apply = _os.environ.get("NEXUS_H5_ALLOW_ACTUAL_FINAL_PATCH_APPLY", "").strip() == "1"
+    all_ten = (flag_exec and flag_final and flag_fs and flag_fp and flag_out
+               and flag_fs_preflight and flag_fs_apply and flag_fs_rollback
+               and flag_fp_preflight and flag_fp_apply)
+
+    pf_pass = bool(preflight and preflight.get("would_pass_final_patch_apply_preflight", False))
+    pf_shadow = str(preflight and preflight.get("preflight_status", "") or "") == "final_patch_preflight_pass_shadow_only"
+    sim_pass = bool(simulation and simulation.get("would_simulate_final_patch_replacement", False))
+    sim_status = str(simulation and simulation.get("simulation_status", "") or "") == "isolated_final_patch_simulation_pass"
+    sim_replaced = bool(simulation and simulation.get("isolated_final_patch_replaced", False))
+
+    selected_sha256 = str(row.get("h5_route", {}).get("local_selected_candidate_patch_sha256", "") or "")
+    selected_length = int(row.get("h5_route", {}).get("local_selected_candidate_patch_length", 0) or 0)
+    selected_id = str(row.get("h5_route", {}).get("local_selected_candidate_id", "") or "")
+    selected_hash_ok = bool(row.get("h5_route", {}).get("local_selected_candidate_hash_match", False))
+
+    cycle_proven = bool(apply_receipt and apply_receipt.get("actual_apply_executed", False) and apply_receipt.get("actual_final_source_changed", False))
+    rb_fs_restored = bool(rollback_receipt and rollback_receipt.get("actual_final_source_restored", False))
+
+    rb_available = bool(rollback and rollback.get("rollback_available", False))
+    rb_required = bool(rollback and rollback.get("rollback_required", False))
+    rb_safe = bool(rollback and rollback.get("safe_to_continue", True))
+
+    out_clean = not bool(output_guard and output_guard.get("actual_output_mutated", False))
+
+    would_apply = (
+        all_ten and pf_pass and pf_shadow
+        and sim_pass and sim_status and sim_replaced
+        and bool(selected_sha256) and selected_length > 0 and selected_hash_ok
+        and cycle_proven and rb_fs_restored
+        and rb_available and not rb_required and rb_safe
+        and out_clean
+    )
+
+    reasons = []
+    if not flag_fp_apply:
+        reasons.append("actual_final_patch_apply_flag_not_enabled")
+    if not all_ten:
+        reasons.append("required_flags_not_all_enabled")
+    if preflight and not pf_pass:
+        reasons.append("final_patch_preflight_not_passed")
+    if simulation and not sim_pass:
+        reasons.append("isolated_final_patch_simulation_not_passed")
+    if not bool(selected_sha256):
+        reasons.append("selected_candidate_patch_hash_missing")
+    if selected_length <= 0:
+        reasons.append("selected_candidate_patch_length_missing")
+    if not selected_hash_ok:
+        reasons.append("selected_candidate_hash_not_verified")
+    if not cycle_proven:
+        reasons.append("final_source_apply_cycle_not_proven")
+    if not rb_fs_restored:
+        reasons.append("final_source_rollback_not_proven")
+    if not rb_available:
+        reasons.append("rollback_not_available")
+    if rb_required:
+        reasons.append("rollback_required")
+    if not rb_safe:
+        reasons.append("rollback_not_safe")
+    if not out_clean:
+        reasons.append("output_mutation_detected")
+    reasons.extend([
+        "final_patch_only_apply_gate", "output_mutation_still_blocked",
+        "model_calls_increment_still_blocked", "cloud_invocation_still_blocked",
+        "behavior_change_still_blocked",
+    ])
+
+    return {
+        "schema": "nexus.hybrid_h5_actual_final_patch_apply_decision.v1",
+        "evaluated": True,
+        "apply_decision": "apply_final_patch_only" if would_apply else "blocked",
+        "apply_reasons": reasons,
+        "actual_patch_apply_allowed": would_apply,
+        "selected_candidate_id": selected_id,
+        "selected_candidate_patch_sha256": selected_sha256,
+        "selected_candidate_patch_length": selected_length,
+        "selected_candidate_hash_verified": selected_hash_ok,
+        "actual_final_patch_present_before": actual_fp,
+        "would_replace_final_patch": would_apply,
+        "all_ten_flags_enabled": all_ten,
+        "preflight_pass_shadow_only": pf_pass and pf_shadow,
+        "isolated_simulation_pass": sim_pass and sim_status,
+        "final_source_apply_cycle_proven": cycle_proven,
+        "final_source_rollback_proven": rb_fs_restored,
+        "rollback_available": rb_available,
+        "rollback_required": rb_required,
+        "safe_to_continue": not rb_required,
+        "output_mutation_allowed": False,
+        "model_calls_increment_allowed": False,
+        "cloud_invocation_allowed": False,
+        "behavior_change_allowed": False,
+        "public_claim_allowed": False,
+        "production_ready": False,
+    }
+
+
+def _apply_h5_actual_final_patch_if_allowed(row: dict[str, Any], decision: dict[str, Any]) -> dict[str, Any]:
+    """Returns a shallow copy of row with final_patch possibly replaced by metadata-only dict."""
+    result = dict(row)
+    actual_before = bool(row.get("final_patch"))
+    allowed = bool(decision.get("actual_patch_apply_allowed", False))
+
+    if allowed:
+        result["final_patch"] = {
+            "source": "local_candidate_shadow_promoted",
+            "selected_candidate_id": str(decision.get("selected_candidate_id", "")),
+            "patch_sha256": str(decision.get("selected_candidate_patch_sha256", "")),
+            "patch_length": int(decision.get("selected_candidate_patch_length", 0)),
+            "content_kind": "candidate_patch_metadata_only",
+        }
+    result["h5_actual_final_patch_apply_receipt"] = {
+        "schema": "nexus.hybrid_h5_actual_final_patch_apply_receipt.v1",
+        "evaluated": True,
+        "actual_patch_apply_executed": allowed,
+        "actual_final_patch_present_before": actual_before,
+        "actual_final_patch_present_after": bool(result.get("final_patch")),
+        "actual_final_patch_replaced": allowed,
+        "apply_decision": str(decision.get("apply_decision", "blocked")),
+        "selected_candidate_id": str(decision.get("selected_candidate_id", "")),
+        "selected_candidate_patch_sha256": str(decision.get("selected_candidate_patch_sha256", "")),
+        "selected_candidate_patch_length": int(decision.get("selected_candidate_patch_length", 0)),
+        "final_patch_metadata_only": True,
+        "output_mutated": False,
+        "model_calls_incremented": False,
+        "cloud_invoked": False,
+        "behavior_changed": False,
+        "final_source_changed": False,
+        "rollback_available": bool(decision.get("rollback_available", False)),
+        "rollback_required": bool(decision.get("rollback_required", False)),
+        "safe_to_continue": bool(decision.get("safe_to_continue", True)),
+        "public_claim_allowed": False,
+        "production_ready": False,
+    }
+    return result
+
+
 def _finalize_with_nexus_row(
     row: dict[str, Any],
     *,
@@ -7805,6 +7963,11 @@ def _finalize_with_nexus_row(
 
             # H5-37: Isolated final_patch replacement simulation
             finalized["h5_isolated_final_patch_replacement_simulation"] = _build_h5_isolated_final_patch_replacement_simulation(finalized)
+
+            # H5-38: Controlled actual final_patch apply gate
+            h5_fp_apply_decision = _build_h5_actual_final_patch_apply_decision(finalized)
+            finalized["h5_actual_final_patch_apply_decision"] = h5_fp_apply_decision
+            finalized = _apply_h5_actual_final_patch_if_allowed(finalized, h5_fp_apply_decision)
 
     # Ensure keys are also on the row level for simple flat queries
     finalized["route_mode"] = r_mode
@@ -11635,6 +11798,13 @@ def write_evidence_bundle(
         "h5_isolated_final_patch_replaced_count": sum(1 for row in with_rows if bool(row.get("h5_isolated_final_patch_replacement_simulation", {}).get("isolated_final_patch_replaced", False))),
         "h5_actual_final_patch_replaced_count_sim": sum(1 for row in with_rows if bool(row.get("h5_isolated_final_patch_replacement_simulation", {}).get("actual_final_patch_replaced", False))),
         "h5_isolated_final_patch_safe_count": sum(1 for row in with_rows if bool(row.get("h5_isolated_final_patch_replacement_simulation", {}).get("safe_to_continue", False))),
+        "h5_actual_final_patch_apply_decision_count": sum(1 for row in with_rows if bool(row.get("h5_actual_final_patch_apply_decision"))),
+        "h5_actual_final_patch_apply_allowed_count": sum(1 for row in with_rows if bool(row.get("h5_actual_final_patch_apply_decision", {}).get("actual_patch_apply_allowed", False))),
+        "h5_actual_final_patch_apply_blocked_count": sum(1 for row in with_rows if str(row.get("h5_actual_final_patch_apply_decision", {}).get("apply_decision", "")) == "blocked"),
+        "h5_actual_final_patch_apply_executed_count": sum(1 for row in with_rows if bool(row.get("h5_actual_final_patch_apply_receipt", {}).get("actual_patch_apply_executed", False))),
+        "h5_actual_final_patch_apply_replaced_count": sum(1 for row in with_rows if bool(row.get("h5_actual_final_patch_apply_receipt", {}).get("actual_final_patch_replaced", False))),
+        "h5_actual_final_patch_apply_all_flags_enabled_count": sum(1 for row in with_rows if bool(row.get("h5_actual_final_patch_apply_decision", {}).get("all_ten_flags_enabled", False))),
+        "h5_actual_final_patch_apply_safe_count": sum(1 for row in with_rows if bool(row.get("h5_actual_final_patch_apply_decision", {}).get("safe_to_continue", False))),
     }
     payload["external_provider_claim_boundary_contract"] = build_external_provider_claim_boundary_contract(payload)
     payload["public_promotion_readiness_contract"] = build_public_promotion_readiness_contract(payload)
