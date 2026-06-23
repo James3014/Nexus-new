@@ -5654,6 +5654,99 @@ def _build_h5_cloud_fallback_finalization_shadow_receipt(row: dict[str, Any]) ->
     return result
 
 
+def _build_h5_execution_readiness_preflight(row: dict[str, Any]) -> dict[str, Any]:
+    """Pure helper: builds H5 execution readiness preflight evaluation.
+
+    No side effects. No model calls. No row mutation.
+    Evaluates whether H5 stack is ready for real execution.
+    Always concludes execution_ready=false in current state.
+    """
+    plan = row.get("h5_execution_plan")
+    h5 = row.get("h5_route", {})
+    local_shadow = row.get("h5_local_finalization_shadow_receipt")
+    cloud_shadow = row.get("h5_cloud_fallback_finalization_shadow_receipt")
+
+    reasons = []
+    local_ready = False
+    cloud_ready = False
+    has_plan = bool(plan)
+    has_local_shadow = bool(local_shadow)
+    has_cloud_shadow = bool(cloud_shadow)
+
+    # Check plan existence
+    if not has_plan:
+        reasons.append("missing_execution_plan")
+
+    # Check shadow receipts
+    if not has_local_shadow:
+        reasons.append("missing_local_finalization_shadow")
+    if not has_cloud_shadow:
+        reasons.append("missing_cloud_finalization_shadow")
+
+    # Check normal row invariants
+    plan_allowed = bool(plan and plan.get("execution_allowed", False))
+    if plan_allowed:
+        reasons.append("unexpected_execution_allowed")
+
+    row_final_src = str(row.get("final_source", "none") or "none")
+    h5_final_src = str(h5.get("final_source", "none") or "none")
+    if row_final_src != "none" or h5_final_src != "none":
+        reasons.append("unexpected_final_source_change")
+
+    row_beh = bool(row.get("behavior_changed", False))
+    h5_beh = bool(h5.get("behavior_changed", False))
+    if row_beh or h5_beh:
+        reasons.append("unexpected_behavior_change")
+
+    h5_fb_invoked = bool(h5.get("cloud_fallback_invoked", False))
+    h5_cm_invoked = bool(h5.get("cloud_model_invoked", False))
+    if h5_fb_invoked or h5_cm_invoked:
+        reasons.append("unexpected_cloud_invocation")
+
+    # Check shadow would-finalize states
+    if local_shadow and local_shadow.get("would_finalize_local_candidate", False):
+        local_ready = True
+    if cloud_shadow and cloud_shadow.get("would_finalize_cloud_fallback", False):
+        cloud_ready = True
+
+    # Always include missing validation gates
+    reasons.extend([
+        "real_local_committee_e2e_missing",
+        "real_cloud_fallback_e2e_missing",
+        "quality_non_regression_missing",
+        "claim_gate_validation_missing",
+        "full_benchmark_missing",
+        "governance_approval_missing",
+    ])
+
+    readiness_status = "blocked"
+
+    return {
+        "schema": "nexus.hybrid_h5_execution_readiness_preflight.v1",
+        "readiness_evaluated": True,
+        "execution_ready": False,
+        "readiness_status": readiness_status,
+        "readiness_reasons": reasons,
+        "local_path_ready_shadow": local_ready,
+        "cloud_path_ready_shadow": cloud_ready,
+        "has_execution_plan": has_plan,
+        "has_local_finalization_shadow": has_local_shadow,
+        "has_cloud_finalization_shadow": has_cloud_shadow,
+        "normal_rows_execution_allowed": plan_allowed,
+        "normal_rows_final_source_changed": (row_final_src != "none" or h5_final_src != "none"),
+        "normal_rows_behavior_changed": (row_beh or h5_beh),
+        "normal_rows_cloud_invoked": (h5_fb_invoked or h5_cm_invoked),
+        "requires_real_local_committee_e2e": True,
+        "requires_real_cloud_fallback_e2e": True,
+        "requires_quality_non_regression": True,
+        "requires_claim_gate_validation": True,
+        "requires_full_benchmark": True,
+        "requires_governance_approval": True,
+        "public_claim_allowed": False,
+        "production_ready": False,
+    }
+
+
 def _finalize_with_nexus_row(
     row: dict[str, Any],
     *,
@@ -6091,6 +6184,9 @@ def _finalize_with_nexus_row(
 
             # H5-11: Cloud fallback finalization shadow receipt
             finalized["h5_cloud_fallback_finalization_shadow_receipt"] = _build_h5_cloud_fallback_finalization_shadow_receipt(finalized)
+
+            # H5-12: Execution readiness preflight matrix
+            finalized["h5_execution_readiness_preflight"] = _build_h5_execution_readiness_preflight(finalized)
 
     # Ensure keys are also on the row level for simple flat queries
     finalized["route_mode"] = r_mode
@@ -9806,6 +9902,15 @@ def write_evidence_bundle(
         "h5_cloud_finalization_missing_plan_count": sum(1 for row in with_rows if str(row.get("h5_cloud_fallback_finalization_shadow_receipt", {}).get("blocked_reason", "")) == "missing_execution_plan"),
         "h5_cloud_finalization_provider_unavailable_count": sum(1 for row in with_rows if str(row.get("h5_cloud_fallback_finalization_shadow_receipt", {}).get("blocked_reason", "")) == "cloud_provider_unavailable"),
         "h5_cloud_finalization_would_increment_model_calls_count": sum(1 for row in with_rows if bool(row.get("h5_cloud_fallback_finalization_shadow_receipt", {}).get("would_increment_model_calls", False))),
+        "h5_execution_readiness_preflight_count": sum(1 for row in with_rows if bool(row.get("h5_execution_readiness_preflight"))),
+        "h5_execution_ready_count": sum(1 for row in with_rows if bool(row.get("h5_execution_readiness_preflight", {}).get("execution_ready", False))),
+        "h5_execution_readiness_blocked_count": sum(1 for row in with_rows if str(row.get("h5_execution_readiness_preflight", {}).get("readiness_status", "")) == "blocked"),
+        "h5_readiness_local_shadow_ready_count": sum(1 for row in with_rows if bool(row.get("h5_execution_readiness_preflight", {}).get("local_path_ready_shadow", False))),
+        "h5_readiness_cloud_shadow_ready_count": sum(1 for row in with_rows if bool(row.get("h5_execution_readiness_preflight", {}).get("cloud_path_ready_shadow", False))),
+        "h5_readiness_missing_real_local_e2e_count": sum(1 for row in with_rows if "real_local_committee_e2e_missing" in (row.get("h5_execution_readiness_preflight", {}).get("readiness_reasons", []) or [])),
+        "h5_readiness_missing_real_cloud_e2e_count": sum(1 for row in with_rows if "real_cloud_fallback_e2e_missing" in (row.get("h5_execution_readiness_preflight", {}).get("readiness_reasons", []) or [])),
+        "h5_readiness_missing_full_benchmark_count": sum(1 for row in with_rows if "full_benchmark_missing" in (row.get("h5_execution_readiness_preflight", {}).get("readiness_reasons", []) or [])),
+        "h5_readiness_governance_blocked_count": sum(1 for row in with_rows if "governance_approval_missing" in (row.get("h5_execution_readiness_preflight", {}).get("readiness_reasons", []) or [])),
     }
     payload["external_provider_claim_boundary_contract"] = build_external_provider_claim_boundary_contract(payload)
     payload["public_promotion_readiness_contract"] = build_public_promotion_readiness_contract(payload)

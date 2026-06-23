@@ -16749,3 +16749,256 @@ def test_h5_11_bundle_summary_counters(tmp_path, monkeypatch):
     assert summary["h5_cloud_fallback_invoked_count"] == 0
     assert summary["h5_behavior_changed_count"] == 0
     assert summary["h5_fail_closed_count"] == 0
+
+
+def test_h5_12_helper_missing_execution_plan_blocks():
+    """H5-12 Test 1: helper missing execution plan blocks."""
+    from scripts.bench.capability_ab_runner import _build_h5_execution_readiness_preflight
+
+    result = _build_h5_execution_readiness_preflight({})
+    assert result["readiness_evaluated"] is True
+    assert result["execution_ready"] is False
+    assert result["readiness_status"] == "blocked"
+    assert "missing_execution_plan" in result["readiness_reasons"]
+    assert result["public_claim_allowed"] is False
+    assert result["production_ready"] is False
+
+
+def test_h5_12_normal_finalize_local_success_remains_not_ready(tmp_path, monkeypatch):
+    """H5-12 Test 2: normal local success row remains not execution ready."""
+    from scripts.bench.capability_ab_runner import CapabilityTask, _finalize_with_nexus_row
+
+    task = CapabilityTask(
+        id="test-task-h5-12-local",
+        difficulty="easy",
+        task_type="test_repair",
+        task_desc="verify h5-12 local readiness",
+        target_file="target.py",
+        test_file="test_target.py",
+        expected_capabilities=("claim_gate",),
+        success_criteria="tests_pass",
+        repo_kind="nexus_internal",
+        fixture_kind="test_fixture",
+    )
+    _h5_all_flags_set_with_gate(monkeypatch)
+
+    row = _finalize_with_nexus_row(
+        {
+            "mode": "with_nexus",
+            "model_calls": 1,
+            "total_tokens": 100,
+            "token_capture_status": "measured",
+            "committee_trace": {
+                "candidate_count": 2,
+                "judge_selection": {"selected_candidate_id": "C_12481#candidate-1"},
+                "committee_receipt": {"selected_candidate_applied": True, "selected_candidate_apply_hash_match": True},
+            },
+            "local_solve_eligible": True,
+        },
+        provider="gemini",
+        model_required=True,
+        nexus_required=False,
+        task=task,
+        repo_root=tmp_path,
+    )
+
+    preflight = row["h5_execution_readiness_preflight"]
+    assert preflight["execution_ready"] is False
+    assert preflight["readiness_status"] == "blocked"
+    assert preflight["normal_rows_execution_allowed"] is False
+    assert preflight["normal_rows_final_source_changed"] is False
+    assert preflight["normal_rows_behavior_changed"] is False
+    assert preflight["normal_rows_cloud_invoked"] is False
+    assert "real_local_committee_e2e_missing" in preflight["readiness_reasons"]
+    assert "quality_non_regression_missing" in preflight["readiness_reasons"]
+    assert "governance_approval_missing" in preflight["readiness_reasons"]
+
+
+def test_h5_12_normal_finalize_cloud_shadow_remains_not_ready(tmp_path, monkeypatch):
+    """H5-12 Test 3: normal cloud fallback shadow row remains not ready."""
+    from scripts.bench.capability_ab_runner import CapabilityTask, _finalize_with_nexus_row
+
+    task = CapabilityTask(
+        id="test-task-h5-12-cloud",
+        difficulty="easy",
+        task_type="test_repair",
+        task_desc="verify h5-12 cloud readiness",
+        target_file="target.py",
+        test_file="test_target.py",
+        expected_capabilities=("claim_gate",),
+        success_criteria="tests_pass",
+        repo_kind="nexus_internal",
+        fixture_kind="test_fixture",
+    )
+    _h5_all_flags_set_with_gate(monkeypatch)
+
+    row = _finalize_with_nexus_row(
+        {
+            "mode": "with_nexus",
+            "model_calls": 1,
+            "total_tokens": 100,
+            "token_capture_status": "measured",
+            "committee_trace": {
+                "candidate_count": 1,
+                "judge_selection": {"selected_candidate_id": "C_12481#candidate-1"},
+                "committee_receipt": {"selected_candidate_applied": True, "selected_candidate_apply_hash_match": True},
+            },
+            "local_solve_eligible": False,
+            "failure_reason": "VERIFIER_REJECTION:test_failed",
+        },
+        provider="gemini",
+        model_required=True,
+        nexus_required=False,
+        task=task,
+        repo_root=tmp_path,
+    )
+
+    preflight = row["h5_execution_readiness_preflight"]
+    assert preflight["execution_ready"] is False
+    assert "real_cloud_fallback_e2e_missing" in preflight["readiness_reasons"]
+    assert "full_benchmark_missing" in preflight["readiness_reasons"]
+
+
+def test_h5_12_synthetic_local_shadow_sets_ready_shadow_but_blocked():
+    """H5-12 Test 4: synthetic local shadow would_finalize sets local_path_ready_shadow but blocked."""
+    from scripts.bench.capability_ab_runner import _build_h5_execution_readiness_preflight
+
+    row = {
+        "h5_execution_plan": {"execution_mode": "local_candidate_plan", "execution_allowed": True},
+        "h5_local_finalization_shadow_receipt": {"would_finalize_local_candidate": True},
+        "h5_cloud_fallback_finalization_shadow_receipt": {},
+    }
+    result = _build_h5_execution_readiness_preflight(row)
+    assert result["local_path_ready_shadow"] is True
+    assert result["execution_ready"] is False
+    assert result["readiness_status"] == "blocked"
+
+
+def test_h5_12_synthetic_cloud_shadow_sets_ready_shadow_but_blocked():
+    """H5-12 Test 5: synthetic cloud shadow would_finalize sets cloud_path_ready_shadow but blocked."""
+    from scripts.bench.capability_ab_runner import _build_h5_execution_readiness_preflight
+
+    row = {
+        "h5_execution_plan": {"execution_mode": "cloud_fallback_plan", "execution_allowed": True},
+        "h5_local_finalization_shadow_receipt": {},
+        "h5_cloud_fallback_finalization_shadow_receipt": {"would_finalize_cloud_fallback": True},
+    }
+    result = _build_h5_execution_readiness_preflight(row)
+    assert result["cloud_path_ready_shadow"] is True
+    assert result["execution_ready"] is False
+    assert result["readiness_status"] == "blocked"
+
+
+def test_h5_12_unexpected_execution_allowed_detected():
+    """H5-12 Test 6: unexpected execution allowed is detected."""
+    from scripts.bench.capability_ab_runner import _build_h5_execution_readiness_preflight
+
+    row = {"h5_execution_plan": {"execution_allowed": True, "execution_mode": "local_candidate_plan"}}
+    result = _build_h5_execution_readiness_preflight(row)
+    assert "unexpected_execution_allowed" in result["readiness_reasons"]
+
+
+def test_h5_12_unexpected_final_source_change_detected():
+    """H5-12 Test 7: unexpected final source change is detected."""
+    from scripts.bench.capability_ab_runner import _build_h5_execution_readiness_preflight
+
+    row = {"h5_execution_plan": {}, "final_source": "local_candidate"}
+    result = _build_h5_execution_readiness_preflight(row)
+    assert "unexpected_final_source_change" in result["readiness_reasons"]
+
+
+def test_h5_12_unexpected_cloud_invocation_detected():
+    """H5-12 Test 8: unexpected cloud invocation is detected."""
+    from scripts.bench.capability_ab_runner import _build_h5_execution_readiness_preflight
+
+    row = {"h5_execution_plan": {}, "h5_route": {"cloud_fallback_invoked": True}}
+    result = _build_h5_execution_readiness_preflight(row)
+    assert "unexpected_cloud_invocation" in result["readiness_reasons"]
+
+
+def test_h5_12_governance_fields_remain_false():
+    """H5-12 Test 9: governance fields remain false."""
+    from scripts.bench.capability_ab_runner import _build_h5_execution_readiness_preflight
+
+    rows = [
+        {},
+        {"h5_execution_plan": {"execution_allowed": True}},
+        {"h5_execution_plan": {}, "h5_route": {"cloud_fallback_invoked": True}},
+    ]
+    for r in rows:
+        result = _build_h5_execution_readiness_preflight(r)
+        assert result["public_claim_allowed"] is False, f"row={r}"
+        assert result["production_ready"] is False, f"row={r}"
+        assert result["execution_ready"] is False, f"row={r}"
+
+
+def test_h5_12_bundle_summary_counters(tmp_path, monkeypatch):
+    """H5-12 Test 10: summary counters include readiness counts."""
+    from scripts.bench.capability_ab_runner import CapabilityTask, _finalize_with_nexus_row, write_evidence_bundle
+
+    task = CapabilityTask(
+        id="test-task-h5-12-summary",
+        difficulty="easy",
+        task_type="test_repair",
+        task_desc="verify h5-12 summary",
+        target_file="target.py",
+        test_file="test_target.py",
+        expected_capabilities=("claim_gate",),
+        success_criteria="tests_pass",
+        repo_kind="nexus_internal",
+        fixture_kind="test_fixture",
+    )
+    _h5_all_flags_set_with_gate(monkeypatch)
+    monkeypatch.setattr("scripts.bench.capability_ab_runner._git_commit", lambda x: "dummy-commit")
+
+    row = _finalize_with_nexus_row(
+        {
+            "mode": "with_nexus",
+            "model_calls": 1,
+            "total_tokens": 100,
+            "token_capture_status": "measured",
+            "committee_trace": {
+                "candidate_count": 2,
+                "judge_selection": {"selected_candidate_id": "C_12481#candidate-1"},
+                "committee_receipt": {"selected_candidate_applied": True, "selected_candidate_apply_hash_match": True},
+            },
+            "local_solve_eligible": True,
+        },
+        provider="gemini",
+        model_required=True,
+        nexus_required=False,
+        task=task,
+        repo_root=tmp_path,
+    )
+
+    with_path = tmp_path / "with.jsonl"
+    without_path = tmp_path / "without.jsonl"
+    with_path.write_text("[]", encoding="utf-8")
+    without_path.write_text("[]", encoding="utf-8")
+
+    bundle_file = write_evidence_bundle(
+        out_dir=tmp_path,
+        with_path=with_path,
+        without_path=without_path,
+        rows=[row],
+        config={
+            "tasks_file": "tasks.json",
+            "tasks_manifest_hash": "manifest_hash",
+            "unique_tasks_requested": 1,
+            "repeat_trials": 1,
+            "timeout_sec": 60,
+        },
+    )
+
+    bundle_data = json.loads(bundle_file.read_text(encoding="utf-8"))
+    summary = bundle_data["hybrid_route_summary"]
+    assert summary["h5_execution_readiness_preflight_count"] >= 1
+    assert summary["h5_execution_ready_count"] == 0
+    assert summary["h5_execution_readiness_blocked_count"] >= 1
+    assert summary["h5_readiness_missing_real_local_e2e_count"] >= 1
+    assert summary["h5_readiness_missing_real_cloud_e2e_count"] >= 1
+    assert summary["h5_readiness_missing_full_benchmark_count"] >= 1
+    assert summary["h5_readiness_governance_blocked_count"] >= 1
+    assert summary["h5_cloud_fallback_invoked_count"] == 0
+    assert summary["h5_behavior_changed_count"] == 0
+    assert summary["h5_fail_closed_count"] == 0
