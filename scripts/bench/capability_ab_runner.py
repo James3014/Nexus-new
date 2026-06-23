@@ -6101,6 +6101,240 @@ def _build_h5_execution_flag_contract(row: dict[str, Any]) -> dict[str, Any]:
     }
 
 
+def _build_h5_local_candidate_promotion_dry_run(row: dict[str, Any]) -> dict[str, Any]:
+    """Pure helper: builds local candidate promotion dry-run receipt.
+
+    No side effects. No model calls. No mutation. No final output change.
+    """
+    import os as _os
+
+    local_shadow = row.get("h5_local_evidence_ingestion_shadow")
+    flag_contract = row.get("h5_execution_flag_contract")
+    closure = row.get("h5_overall_readiness_closure")
+    preflight = row.get("h5_execution_readiness_preflight")
+    ext_local = row.get("external_local_evidence_ingestion_validation")
+    h5 = row.get("h5_route", {})
+
+    reasons = []
+    would_promote = False
+
+    local_accepted = bool(local_shadow and local_shadow.get("local_path_ready_shadow_from_external_evidence", False))
+    all_shadow = bool(closure and closure.get("all_shadow_evidence_present", False))
+    flag_enabled = bool(flag_contract and flag_contract.get("execution_flag_enabled", False))
+    has_metadata = bool(ext_local and ext_local.get("validation_status") == "accepted"
+                        and ext_local.get("accepted_for_h5_readiness_shadow", False))
+
+    if local_accepted and all_shadow and flag_enabled and has_metadata:
+        would_promote = True
+
+    if not local_accepted:
+        reasons.append("local_evidence_not_accepted")
+    if not has_metadata:
+        reasons.append("missing_selected_candidate_metadata")
+    if not flag_enabled:
+        reasons.append("execution_flag_not_enabled")
+    if not all_shadow:
+        reasons.append("overall_shadow_evidence_not_present")
+    if not bool(preflight):
+        reasons.append("readiness_preflight_not_present")
+    if not bool(flag_contract):
+        reasons.append("execution_contract_not_present")
+
+    reasons.extend([
+        "promotion_dry_run_only",
+        "local_finalization_not_enabled",
+        "final_source_change_not_enabled",
+        "final_patch_replacement_not_enabled",
+        "rollback_receipt_not_promoted",
+    ])
+
+    return {
+        "schema": "nexus.hybrid_h5_local_candidate_promotion_dry_run.v1",
+        "evaluated": True,
+        "would_promote_local_candidate": would_promote,
+        "promotion_allowed": False,
+        "promotion_status": "blocked",
+        "promotion_reasons": reasons,
+        "selected_candidate_id": str(h5.get("local_selected_candidate_id", "") or ""),
+        "selected_candidate_patch_sha256": "",
+        "selected_candidate_patch_length": 0,
+        "selected_candidate_hash_verified": bool(h5.get("local_selected_candidate_hash_match", False)),
+        "local_evidence_accepted": local_accepted,
+        "execution_flag_enabled": flag_enabled,
+        "allow_local_finalization_flag_enabled": _os.environ.get("NEXUS_H5_ALLOW_LOCAL_FINALIZATION", "").strip() == "1",
+        "allow_final_source_change_flag_enabled": _os.environ.get("NEXUS_H5_ALLOW_FINAL_SOURCE_CHANGE", "").strip() == "1",
+        "allow_final_patch_replacement_flag_enabled": _os.environ.get("NEXUS_H5_ALLOW_FINAL_PATCH_REPLACEMENT", "").strip() == "1",
+        "final_source_before": "none",
+        "final_source_after_shadow": "none",
+        "final_patch_replacement_would_occur": False,
+        "output_mutation_would_occur": False,
+        "model_calls_increment_would_occur": False,
+        "rollback_required": False,
+        "rollback_receipt_required": True,
+        "public_claim_allowed": False,
+        "production_ready": False,
+    }
+
+
+def _build_h5_local_candidate_rollback_dry_run(row: dict[str, Any]) -> dict[str, Any]:
+    """Pure helper: builds rollback dry-run receipt.
+
+    No side effects. No mutation. No actual rollback.
+    """
+    promo = row.get("h5_local_candidate_promotion_dry_run", {})
+    mutation = bool(promo.get("output_mutation_would_occur", False))
+
+    return {
+        "schema": "nexus.hybrid_h5_local_candidate_rollback_dry_run.v1",
+        "evaluated": True,
+        "rollback_available": True,
+        "rollback_required": mutation,
+        "rollback_status": "not_required" if not mutation else "required",
+        "rollback_reasons": ["unexpected_mutation_detected"] if mutation else [],
+        "pre_promotion_final_source": "none",
+        "post_rollback_final_source_shadow": "none",
+        "pre_promotion_final_patch_present": False,
+        "post_rollback_final_patch_present_shadow": False,
+        "output_restored_shadow": True,
+        "model_calls_restored_shadow": True,
+        "safe_to_continue": not mutation,
+        "public_claim_allowed": False,
+        "production_ready": False,
+    }
+
+
+def _build_h5_local_candidate_promotion_gate_matrix(row: dict[str, Any]) -> dict[str, Any]:
+    """Pure helper: builds promotion gate matrix.
+
+    No side effects. No mutation.
+    """
+    import os as _os
+
+    promo = row.get("h5_local_candidate_promotion_dry_run")
+    rollback = row.get("h5_local_candidate_rollback_dry_run")
+    allow_local = _os.environ.get("NEXUS_H5_ALLOW_LOCAL_FINALIZATION", "").strip() == "1"
+    allow_source = _os.environ.get("NEXUS_H5_ALLOW_FINAL_SOURCE_CHANGE", "").strip() == "1"
+    allow_patch = _os.environ.get("NEXUS_H5_ALLOW_FINAL_PATCH_REPLACEMENT", "").strip() == "1"
+
+    reasons = []
+    if not promo:
+        reasons.append("missing_promotion_dry_run")
+    if not rollback:
+        reasons.append("missing_rollback_dry_run")
+    if not (allow_local and allow_source and allow_patch):
+        reasons.append("future_flags_not_all_enabled")
+
+    reasons.extend([
+        "quality_non_regression_missing",
+        "full_benchmark_missing",
+        "governance_approval_missing",
+        "promotion_dry_run_only",
+        "real_promotion_not_implemented",
+    ])
+
+    return {
+        "schema": "nexus.hybrid_h5_local_candidate_promotion_gate_matrix.v1",
+        "evaluated": True,
+        "promotion_gate_status": "blocked",
+        "promotion_gate_reasons": reasons,
+        "promotion_dry_run_present": bool(promo),
+        "rollback_dry_run_present": bool(rollback),
+        "quality_non_regression_ready": False,
+        "full_benchmark_ready": False,
+        "governance_ready": False,
+        "all_future_flags_enabled": allow_local and allow_source and allow_patch,
+        "promotion_allowed": False,
+        "final_source_change_allowed": False,
+        "final_patch_replacement_allowed": False,
+        "output_mutation_allowed": False,
+        "public_claim_allowed": False,
+        "production_ready": False,
+    }
+
+
+def _build_h5_local_candidate_shadow_final_source_promotion(row: dict[str, Any]) -> dict[str, Any]:
+    """Pure helper: builds shadow final_source promotion contract.
+
+    No side effects. No model calls. No mutation. No actual final_source change.
+    """
+    promo = row.get("h5_local_candidate_promotion_dry_run")
+    rollback = row.get("h5_local_candidate_rollback_dry_run")
+    gate = row.get("h5_local_candidate_promotion_gate_matrix")
+    local_shadow = row.get("h5_local_evidence_ingestion_shadow")
+
+    actual_fs = str(row.get("final_source", "none") or "none")
+    h5_fs = str(row.get("h5_route", {}).get("final_source", "none") or "none")
+    actual_changed = actual_fs != "none" or h5_fs != "none"
+
+    reasons = []
+    shadow_candidate = False
+
+    if not promo:
+        reasons.append("missing_promotion_dry_run")
+    if not rollback:
+        reasons.append("missing_rollback_dry_run")
+    if not gate:
+        reasons.append("missing_promotion_gate_matrix")
+
+    promo_candidate = bool(promo and promo.get("would_promote_local_candidate", False))
+    has_metadata = bool(local_shadow and local_shadow.get("local_path_ready_shadow_from_external_evidence", False))
+    rollback_safe = bool(rollback and rollback.get("safe_to_continue", False))
+
+    if promo_candidate and has_metadata and rollback_safe:
+        shadow_candidate = True
+
+    if shadow_candidate:
+        shadow_status = "shadow_ready_blocked"
+    else:
+        shadow_status = "blocked"
+        if promo_candidate and not rollback_safe:
+            reasons.append("rollback_not_safe")
+        if not promo_candidate:
+            reasons.append("promotion_dry_run_not_candidate")
+
+    reasons.extend([
+        "shadow_only_no_actual_final_source_change",
+        "promotion_gate_blocked",
+        "final_source_change_not_enabled",
+        "real_promotion_not_implemented",
+    ])
+
+    if actual_changed:
+        reasons.append("unexpected_actual_final_source_change")
+
+    shadow_fs = "local_candidate_shadow_promoted" if shadow_candidate else "none"
+    would_set = "local_candidate_shadow_promoted" if shadow_candidate else ""
+
+    return {
+        "schema": "nexus.hybrid_h5_local_candidate_shadow_final_source_promotion.v1",
+        "evaluated": True,
+        "shadow_promotion_candidate": shadow_candidate,
+        "shadow_promotion_status": shadow_status,
+        "shadow_promotion_reasons": reasons,
+        "actual_final_source_before": actual_fs,
+        "actual_final_source_after": actual_fs,
+        "shadow_final_source_after_promotion": shadow_fs,
+        "actual_final_source_changed": actual_changed,
+        "final_source_change_allowed": False,
+        "would_set_final_source_to": would_set,
+        "would_promote_local_candidate": promo_candidate,
+        "promotion_allowed": False,
+        "promotion_gate_blocked": True,
+        "rollback_available": bool(rollback),
+        "rollback_required": bool(rollback and not rollback.get("safe_to_continue", True)),
+        "selected_candidate_id": str(row.get("h5_route", {}).get("local_selected_candidate_id", "") or ""),
+        "selected_candidate_patch_sha256": "",
+        "selected_candidate_hash_verified": bool(row.get("h5_route", {}).get("local_selected_candidate_hash_match", False)),
+        "final_patch_replacement_allowed": False,
+        "final_patch_replacement_would_occur": False,
+        "output_mutation_allowed": False,
+        "output_mutation_would_occur": False,
+        "model_calls_increment_would_occur": False,
+        "public_claim_allowed": False,
+        "production_ready": False,
+    }
+
+
 def _finalize_with_nexus_row(
     row: dict[str, Any],
     *,
@@ -6553,6 +6787,14 @@ def _finalize_with_nexus_row(
 
             # H5-25: Execution flag contract
             finalized["h5_execution_flag_contract"] = _build_h5_execution_flag_contract(finalized)
+
+            # H5-27: Local candidate promotion dry-run chain
+            finalized["h5_local_candidate_promotion_dry_run"] = _build_h5_local_candidate_promotion_dry_run(finalized)
+            finalized["h5_local_candidate_rollback_dry_run"] = _build_h5_local_candidate_rollback_dry_run(finalized)
+            finalized["h5_local_candidate_promotion_gate_matrix"] = _build_h5_local_candidate_promotion_gate_matrix(finalized)
+
+            # H5-28: Shadow final_source promotion contract
+            finalized["h5_local_candidate_shadow_final_source_promotion"] = _build_h5_local_candidate_shadow_final_source_promotion(finalized)
 
     # Ensure keys are also on the row level for simple flat queries
     finalized["route_mode"] = r_mode
@@ -10301,6 +10543,21 @@ def write_evidence_bundle(
         "h5_execution_contract_blocked_count": sum(1 for row in with_rows if str(row.get("h5_execution_flag_contract", {}).get("contract_status", "")) == "blocked"),
         "h5_execution_contract_fail_closed_count": sum(1 for row in with_rows if bool(row.get("h5_execution_flag_contract", {}).get("fail_closed", False))),
         "h5_promotion_ready_count": sum(1 for row in with_rows if bool(row.get("h5_execution_flag_contract", {}).get("promotion_ready", False))),
+        "h5_local_promotion_dry_run_count": sum(1 for row in with_rows if bool(row.get("h5_local_candidate_promotion_dry_run"))),
+        "h5_local_promotion_would_promote_count": sum(1 for row in with_rows if bool(row.get("h5_local_candidate_promotion_dry_run", {}).get("would_promote_local_candidate", False))),
+        "h5_local_promotion_allowed_count": sum(1 for row in with_rows if bool(row.get("h5_local_candidate_promotion_dry_run", {}).get("promotion_allowed", False))),
+        "h5_local_promotion_blocked_count": sum(1 for row in with_rows if bool(row.get("h5_local_candidate_promotion_dry_run")) and not bool(row.get("h5_local_candidate_promotion_dry_run", {}).get("promotion_allowed", False))),
+        "h5_local_rollback_dry_run_count": sum(1 for row in with_rows if bool(row.get("h5_local_candidate_rollback_dry_run"))),
+        "h5_local_rollback_required_count": sum(1 for row in with_rows if bool(row.get("h5_local_candidate_rollback_dry_run", {}).get("rollback_required", False))),
+        "h5_local_promotion_gate_matrix_count": sum(1 for row in with_rows if bool(row.get("h5_local_candidate_promotion_gate_matrix"))),
+        "h5_local_promotion_gate_blocked_count": sum(1 for row in with_rows if str(row.get("h5_local_candidate_promotion_gate_matrix", {}).get("promotion_gate_status", "")) == "blocked"),
+        "h5_local_final_source_change_allowed_count": sum(1 for row in with_rows if bool(row.get("h5_local_candidate_promotion_dry_run", {}).get("allow_final_source_change_flag_enabled", False))),
+        "h5_local_final_patch_replacement_allowed_count": sum(1 for row in with_rows if bool(row.get("h5_local_candidate_promotion_dry_run", {}).get("allow_final_patch_replacement_flag_enabled", False))),
+        "h5_local_shadow_final_source_promotion_count": sum(1 for row in with_rows if bool(row.get("h5_local_candidate_shadow_final_source_promotion"))),
+        "h5_local_shadow_promotion_candidate_count": sum(1 for row in with_rows if bool(row.get("h5_local_candidate_shadow_final_source_promotion", {}).get("shadow_promotion_candidate", False))),
+        "h5_local_shadow_promotion_ready_blocked_count": sum(1 for row in with_rows if str(row.get("h5_local_candidate_shadow_final_source_promotion", {}).get("shadow_promotion_status", "")) == "shadow_ready_blocked"),
+        "h5_local_actual_final_source_changed_count": sum(1 for row in with_rows if bool(row.get("h5_local_candidate_shadow_final_source_promotion", {}).get("actual_final_source_changed", False))),
+        "h5_local_shadow_final_source_promoted_count": sum(1 for row in with_rows if str(row.get("h5_local_candidate_shadow_final_source_promotion", {}).get("shadow_final_source_after_promotion", "")) == "local_candidate_shadow_promoted"),
     }
     payload["external_provider_claim_boundary_contract"] = build_external_provider_claim_boundary_contract(payload)
     payload["public_promotion_readiness_contract"] = build_public_promotion_readiness_contract(payload)

@@ -17784,3 +17784,396 @@ def test_h5_25_bundle_summary_counters(tmp_path, monkeypatch):
     assert summary["h5_promotion_ready_count"] == 0
     assert summary["h5_cloud_fallback_invoked_count"] == 0
     assert summary["h5_behavior_changed_count"] == 0
+
+
+def test_h5_27_empty_row_promotion_dry_run_blocks():
+    """H5-27 Test 1: empty row promotion dry-run blocks."""
+    from scripts.bench.capability_ab_runner import _build_h5_local_candidate_promotion_dry_run
+
+    promo = _build_h5_local_candidate_promotion_dry_run({})
+    assert promo["promotion_allowed"] is False
+    assert promo["promotion_status"] == "blocked"
+    assert any("local_evidence_not_accepted" in r or "execution_contract_not_present" in r for r in promo["promotion_reasons"])
+
+
+def test_h5_27_accepted_shadows_would_promote_but_not_allowed(monkeypatch):
+    """H5-27 Test 2: accepted shadows and flag enabled produces would_promote but not allowed."""
+    from scripts.bench.capability_ab_runner import _build_h5_local_candidate_promotion_dry_run
+
+    monkeypatch.setenv("NEXUS_HYBRID_H5_ENABLE_CONTROLLED_EXECUTION", "1")
+    monkeypatch.delenv("NEXUS_H5_ALLOW_LOCAL_FINALIZATION", raising=False)
+    monkeypatch.delenv("NEXUS_H5_ALLOW_FINAL_SOURCE_CHANGE", raising=False)
+    monkeypatch.delenv("NEXUS_H5_ALLOW_FINAL_PATCH_REPLACEMENT", raising=False)
+
+    row = {
+        "h5_local_evidence_ingestion_shadow": {"local_path_ready_shadow_from_external_evidence": True},
+        "h5_execution_flag_contract": {"execution_flag_enabled": True},
+        "h5_overall_readiness_closure": {"all_shadow_evidence_present": True},
+        "h5_execution_readiness_preflight": {},
+        "external_local_evidence_ingestion_validation": {
+            "schema": "nexus.h5_local_committee_evidence_ingestion_validation.v1",
+            "validation_status": "accepted",
+            "accepted_for_h5_readiness_shadow": True,
+        },
+        "h5_route": {"local_selected_candidate_id": "C_1#candidate-0"},
+    }
+    promo = _build_h5_local_candidate_promotion_dry_run(row)
+    assert promo["would_promote_local_candidate"] is True
+    assert promo["promotion_allowed"] is False
+    assert promo["final_source_after_shadow"] == "none"
+    assert promo["final_patch_replacement_would_occur"] is False
+    assert promo["output_mutation_would_occur"] is False
+
+
+def test_h5_27_all_flags_still_blocks(monkeypatch):
+    """H5-27 Test 3: all future flags enabled still blocks."""
+    from scripts.bench.capability_ab_runner import _build_h5_local_candidate_promotion_dry_run
+
+    monkeypatch.setenv("NEXUS_HYBRID_H5_ENABLE_CONTROLLED_EXECUTION", "1")
+    monkeypatch.setenv("NEXUS_H5_ALLOW_LOCAL_FINALIZATION", "1")
+    monkeypatch.setenv("NEXUS_H5_ALLOW_FINAL_SOURCE_CHANGE", "1")
+    monkeypatch.setenv("NEXUS_H5_ALLOW_FINAL_PATCH_REPLACEMENT", "1")
+
+    row = {
+        "h5_local_evidence_ingestion_shadow": {"local_path_ready_shadow_from_external_evidence": True},
+        "h5_execution_flag_contract": {"execution_flag_enabled": True},
+        "h5_overall_readiness_closure": {"all_shadow_evidence_present": True},
+        "h5_execution_readiness_preflight": {},
+        "external_local_evidence_ingestion_validation": {
+            "schema": "nexus.h5_local_committee_evidence_ingestion_validation.v1",
+            "validation_status": "accepted",
+            "accepted_for_h5_readiness_shadow": True,
+        },
+        "h5_route": {"local_selected_candidate_id": "C_1#candidate-0"},
+    }
+    promo = _build_h5_local_candidate_promotion_dry_run(row)
+    assert promo["would_promote_local_candidate"] is True
+    assert promo["promotion_allowed"] is False
+    assert "promotion_dry_run_only" in promo["promotion_reasons"]
+
+
+def test_h5_27_rollback_not_required_for_no_mutation():
+    """H5-27 Test 4: rollback dry-run not required for no mutation."""
+    from scripts.bench.capability_ab_runner import _build_h5_local_candidate_rollback_dry_run
+
+    row = {"h5_local_candidate_promotion_dry_run": {"output_mutation_would_occur": False}}
+    rb = _build_h5_local_candidate_rollback_dry_run(row)
+    assert rb["rollback_required"] is False
+    assert rb["rollback_status"] == "not_required"
+    assert rb["safe_to_continue"] is True
+
+
+def test_h5_27_rollback_detects_unexpected_mutation():
+    """H5-27 Test 5: rollback dry-run detects unexpected mutation."""
+    from scripts.bench.capability_ab_runner import _build_h5_local_candidate_rollback_dry_run
+
+    row = {"h5_local_candidate_promotion_dry_run": {"output_mutation_would_occur": True}}
+    rb = _build_h5_local_candidate_rollback_dry_run(row)
+    assert rb["rollback_required"] is True
+    assert rb["safe_to_continue"] is False
+
+
+def test_h5_27_promotion_gate_matrix_always_blocks():
+    """H5-27 Test 6: promotion gate matrix always blocks."""
+    from scripts.bench.capability_ab_runner import _build_h5_local_candidate_promotion_gate_matrix
+
+    row = {
+        "h5_local_candidate_promotion_dry_run": {},
+        "h5_local_candidate_rollback_dry_run": {},
+    }
+    gm = _build_h5_local_candidate_promotion_gate_matrix(row)
+    assert gm["promotion_gate_status"] == "blocked"
+    assert gm["promotion_allowed"] is False
+    assert "quality_non_regression_missing" in gm["promotion_gate_reasons"]
+    assert "full_benchmark_missing" in gm["promotion_gate_reasons"]
+    assert "governance_approval_missing" in gm["promotion_gate_reasons"]
+    assert "real_promotion_not_implemented" in gm["promotion_gate_reasons"]
+
+
+def test_h5_27_finalized_row_attaches_all_three(tmp_path, monkeypatch):
+    """H5-27 Test 7: finalized H5 row attaches all three receipts."""
+    from scripts.bench.capability_ab_runner import CapabilityTask, _finalize_with_nexus_row
+
+    task = CapabilityTask(
+        id="test-task-h5-27", difficulty="easy", task_type="test_repair",
+        task_desc="verify h5-27", target_file="target.py", test_file="test_target.py",
+        expected_capabilities=("claim_gate",), success_criteria="tests_pass",
+        repo_kind="nexus_internal", fixture_kind="test_fixture",
+    )
+    _h5_all_flags_set_with_gate(monkeypatch)
+    monkeypatch.delenv("NEXUS_HYBRID_H5_ENABLE_CONTROLLED_EXECUTION", raising=False)
+
+    row = _finalize_with_nexus_row(
+        {"mode": "with_nexus", "model_calls": 1, "total_tokens": 100,
+         "token_capture_status": "measured",
+         "committee_trace": {"candidate_count": 2, "judge_selection": {"selected_candidate_id": "C_12481#candidate-1"},
+                              "committee_receipt": {"selected_candidate_applied": True, "selected_candidate_apply_hash_match": True}},
+         "local_solve_eligible": True},
+        provider="gemini", model_required=True, nexus_required=False, task=task, repo_root=tmp_path,
+    )
+
+    assert "h5_local_candidate_promotion_dry_run" in row
+    assert "h5_local_candidate_rollback_dry_run" in row
+    assert "h5_local_candidate_promotion_gate_matrix" in row
+    assert row.get("final_source", "none") == "none"
+    assert row["behavior_changed"] is False
+
+
+def test_h5_27_all_flags_still_does_not_mutate(tmp_path, monkeypatch):
+    """H5-27 Test 8: all flags enabled still does not mutate."""
+    from scripts.bench.capability_ab_runner import CapabilityTask, _finalize_with_nexus_row
+
+    task = CapabilityTask(
+        id="test-task-h5-27-nomut", difficulty="easy", task_type="test_repair",
+        task_desc="verify h5-27 no mutate", target_file="target.py", test_file="test_target.py",
+        expected_capabilities=("claim_gate",), success_criteria="tests_pass",
+        repo_kind="nexus_internal", fixture_kind="test_fixture",
+    )
+    _h5_all_flags_set_with_gate(monkeypatch)
+
+    row = _finalize_with_nexus_row(
+        {"mode": "with_nexus", "model_calls": 1, "total_tokens": 100,
+         "token_capture_status": "measured",
+         "committee_trace": {"candidate_count": 2, "judge_selection": {"selected_candidate_id": "C_12481#candidate-1"},
+                              "committee_receipt": {"selected_candidate_applied": True, "selected_candidate_apply_hash_match": True}},
+         "local_solve_eligible": True,
+         "external_local_evidence_ingestion_validation": {
+             "schema": "nexus.h5_local_committee_evidence_ingestion_validation.v1",
+             "validation_status": "accepted", "accepted_for_h5_readiness_shadow": True,
+         },
+         "external_cloud_evidence_ingestion_validation": {
+             "schema": "nexus.h5_cloud_fallback_evidence_ingestion_validation.v1",
+             "validation_status": "accepted", "accepted_for_h5_readiness_shadow": True,
+         }},
+        provider="gemini", model_required=True, nexus_required=False, task=task, repo_root=tmp_path,
+    )
+
+    promo = row["h5_local_candidate_promotion_dry_run"]
+    assert promo["promotion_allowed"] is False
+    assert promo["final_source_after_shadow"] == "none"
+    assert promo["final_patch_replacement_would_occur"] is False
+    assert promo["output_mutation_would_occur"] is False
+    assert row.get("final_source", "none") == "none"
+    assert row["behavior_changed"] is False
+
+
+def test_h5_27_bundle_summary_counters(tmp_path, monkeypatch):
+    """H5-27 Test 9: summary counters."""
+    from scripts.bench.capability_ab_runner import CapabilityTask, _finalize_with_nexus_row, write_evidence_bundle
+
+    task = CapabilityTask(
+        id="test-task-h5-27-summary", difficulty="easy", task_type="test_repair",
+        task_desc="verify h5-27 summary", target_file="target.py", test_file="test_target.py",
+        expected_capabilities=("claim_gate",), success_criteria="tests_pass",
+        repo_kind="nexus_internal", fixture_kind="test_fixture",
+    )
+    _h5_all_flags_set_with_gate(monkeypatch)
+    monkeypatch.setattr("scripts.bench.capability_ab_runner._git_commit", lambda x: "dummy-commit")
+
+    row = _finalize_with_nexus_row(
+        {"mode": "with_nexus", "model_calls": 1, "total_tokens": 100,
+         "token_capture_status": "measured",
+         "committee_trace": {"candidate_count": 2, "judge_selection": {"selected_candidate_id": "C_12481#candidate-1"},
+                              "committee_receipt": {"selected_candidate_applied": True, "selected_candidate_apply_hash_match": True}},
+         "local_solve_eligible": True},
+        provider="gemini", model_required=True, nexus_required=False, task=task, repo_root=tmp_path,
+    )
+
+    with_path = tmp_path / "with.jsonl"
+    without_path = tmp_path / "without.jsonl"
+    with_path.write_text("[]", encoding="utf-8")
+    without_path.write_text("[]", encoding="utf-8")
+
+    bundle_file = write_evidence_bundle(
+        out_dir=tmp_path, with_path=with_path, without_path=without_path,
+        rows=[row],
+        config={"tasks_file": "tasks.json", "tasks_manifest_hash": "manifest_hash",
+                "unique_tasks_requested": 1, "repeat_trials": 1, "timeout_sec": 60},
+    )
+
+    bundle_data = json.loads(bundle_file.read_text(encoding="utf-8"))
+    summary = bundle_data["hybrid_route_summary"]
+    assert summary["h5_local_promotion_dry_run_count"] >= 1
+    assert summary["h5_local_promotion_allowed_count"] == 0
+    assert summary["h5_local_promotion_blocked_count"] >= 1
+    assert summary["h5_local_rollback_dry_run_count"] >= 1
+    assert summary["h5_local_rollback_required_count"] == 0
+    assert summary["h5_local_promotion_gate_matrix_count"] >= 1
+    assert summary["h5_local_promotion_gate_blocked_count"] >= 1
+    assert summary["h5_local_final_source_change_allowed_count"] == 0
+    assert summary["h5_local_final_patch_replacement_allowed_count"] == 0
+    assert summary["h5_execution_allowed_count"] == 0
+    assert summary["h5_behavior_changed_count"] == 0
+    assert summary["h5_cloud_fallback_invoked_count"] == 0
+
+
+def test_h5_28_empty_row_blocks():
+    """H5-28 Test 1: empty row blocks."""
+    from scripts.bench.capability_ab_runner import _build_h5_local_candidate_shadow_final_source_promotion
+
+    contract = _build_h5_local_candidate_shadow_final_source_promotion({})
+    assert contract["shadow_promotion_status"] == "blocked"
+    assert contract["actual_final_source_after"] == "none"
+    assert contract["actual_final_source_changed"] is False
+    assert contract["final_source_change_allowed"] is False
+
+
+def test_h5_28_valid_promotion_creates_shadow_but_no_mutation():
+    """H5-28 Test 2: valid promotion dry-run creates shadow but no mutation."""
+    from scripts.bench.capability_ab_runner import _build_h5_local_candidate_shadow_final_source_promotion
+
+    row = {
+        "h5_local_candidate_promotion_dry_run": {"would_promote_local_candidate": True, "output_mutation_would_occur": False},
+        "h5_local_candidate_rollback_dry_run": {"safe_to_continue": True},
+        "h5_local_candidate_promotion_gate_matrix": {"promotion_gate_status": "blocked"},
+        "h5_local_evidence_ingestion_shadow": {"local_path_ready_shadow_from_external_evidence": True},
+        "h5_route": {"local_selected_candidate_id": "C_1#candidate-0", "local_selected_candidate_hash_match": True},
+        "final_source": "none",
+    }
+    contract = _build_h5_local_candidate_shadow_final_source_promotion(row)
+    assert contract["shadow_promotion_candidate"] is True
+    assert contract["shadow_final_source_after_promotion"] == "local_candidate_shadow_promoted"
+    assert contract["would_set_final_source_to"] == "local_candidate_shadow_promoted"
+    assert contract["actual_final_source_after"] == "none"
+    assert contract["actual_final_source_changed"] is False
+    assert contract["final_source_change_allowed"] is False
+    assert contract["promotion_allowed"] is False
+
+
+def test_h5_28_rollback_not_safe_blocks():
+    """H5-28 Test 3: rollback not safe blocks shadow candidate."""
+    from scripts.bench.capability_ab_runner import _build_h5_local_candidate_shadow_final_source_promotion
+
+    row = {
+        "h5_local_candidate_promotion_dry_run": {"would_promote_local_candidate": True},
+        "h5_local_candidate_rollback_dry_run": {"safe_to_continue": False},
+        "h5_local_candidate_promotion_gate_matrix": {"promotion_gate_status": "blocked"},
+        "h5_local_evidence_ingestion_shadow": {"local_path_ready_shadow_from_external_evidence": True},
+        "h5_route": {"local_selected_candidate_id": "C_1#candidate-0"},
+    }
+    contract = _build_h5_local_candidate_shadow_final_source_promotion(row)
+    assert contract["shadow_promotion_candidate"] is False
+    assert "rollback_not_safe" in contract["shadow_promotion_reasons"]
+
+
+def test_h5_28_unexpected_final_source_detected():
+    """H5-28 Test 4: unexpected actual final_source change detected."""
+    from scripts.bench.capability_ab_runner import _build_h5_local_candidate_shadow_final_source_promotion
+
+    row = {"final_source": "local_candidate_shadow_promoted"}
+    contract = _build_h5_local_candidate_shadow_final_source_promotion(row)
+    assert contract["actual_final_source_changed"] is True
+    assert "unexpected_actual_final_source_change" in contract["shadow_promotion_reasons"]
+
+
+def test_h5_28_finalized_row_attaches_shadow_promotion(tmp_path, monkeypatch):
+    """H5-28 Test 5: finalized row attaches shadow final_source promotion."""
+    from scripts.bench.capability_ab_runner import CapabilityTask, _finalize_with_nexus_row
+
+    task = CapabilityTask(
+        id="test-task-h5-28", difficulty="easy", task_type="test_repair",
+        task_desc="verify h5-28", target_file="target.py", test_file="test_target.py",
+        expected_capabilities=("claim_gate",), success_criteria="tests_pass",
+        repo_kind="nexus_internal", fixture_kind="test_fixture",
+    )
+    _h5_all_flags_set_with_gate(monkeypatch)
+
+    row = _finalize_with_nexus_row(
+        {"mode": "with_nexus", "model_calls": 1, "total_tokens": 100,
+         "token_capture_status": "measured",
+         "committee_trace": {"candidate_count": 2, "judge_selection": {"selected_candidate_id": "C_12481#candidate-1"},
+                              "committee_receipt": {"selected_candidate_applied": True, "selected_candidate_apply_hash_match": True}},
+         "local_solve_eligible": True},
+        provider="gemini", model_required=True, nexus_required=False, task=task, repo_root=tmp_path,
+    )
+
+    shadow = row["h5_local_candidate_shadow_final_source_promotion"]
+    assert shadow["actual_final_source_after"] == "none"
+    assert shadow["actual_final_source_changed"] is False
+    assert row.get("final_source", "none") == "none"
+    assert row["behavior_changed"] is False
+
+
+def test_h5_28_all_flags_no_mutate(tmp_path, monkeypatch):
+    """H5-28 Test 6: all flags accepted evidence records shadow but no mutate."""
+    from scripts.bench.capability_ab_runner import CapabilityTask, _finalize_with_nexus_row
+
+    task = CapabilityTask(
+        id="test-task-h5-28-nomut", difficulty="easy", task_type="test_repair",
+        task_desc="verify h5-28 no mutate", target_file="target.py", test_file="test_target.py",
+        expected_capabilities=("claim_gate",), success_criteria="tests_pass",
+        repo_kind="nexus_internal", fixture_kind="test_fixture",
+    )
+    _h5_all_flags_set_with_gate(monkeypatch)
+
+    row = _finalize_with_nexus_row(
+        {"mode": "with_nexus", "model_calls": 1, "total_tokens": 100,
+         "token_capture_status": "measured",
+         "committee_trace": {"candidate_count": 2, "judge_selection": {"selected_candidate_id": "C_12481#candidate-1"},
+                              "committee_receipt": {"selected_candidate_applied": True, "selected_candidate_apply_hash_match": True}},
+         "local_solve_eligible": True,
+         "external_local_evidence_ingestion_validation": {
+             "schema": "nexus.h5_local_committee_evidence_ingestion_validation.v1",
+             "validation_status": "accepted", "accepted_for_h5_readiness_shadow": True,
+         },
+         "external_cloud_evidence_ingestion_validation": {
+             "schema": "nexus.h5_cloud_fallback_evidence_ingestion_validation.v1",
+             "validation_status": "accepted", "accepted_for_h5_readiness_shadow": True,
+         }},
+        provider="gemini", model_required=True, nexus_required=False, task=task, repo_root=tmp_path,
+    )
+
+    shadow = row["h5_local_candidate_shadow_final_source_promotion"]
+    assert shadow["actual_final_source_after"] == "none"
+    assert shadow["actual_final_source_changed"] is False
+    assert row.get("final_source", "none") == "none"
+    assert row["behavior_changed"] is False
+    assert row["h5_local_candidate_promotion_dry_run"]["promotion_allowed"] is False
+
+
+def test_h5_28_bundle_summary_counters(tmp_path, monkeypatch):
+    """H5-28 Test 7: summary counters."""
+    from scripts.bench.capability_ab_runner import CapabilityTask, _finalize_with_nexus_row, write_evidence_bundle
+
+    task = CapabilityTask(
+        id="test-task-h5-28-summary", difficulty="easy", task_type="test_repair",
+        task_desc="verify h5-28 summary", target_file="target.py", test_file="test_target.py",
+        expected_capabilities=("claim_gate",), success_criteria="tests_pass",
+        repo_kind="nexus_internal", fixture_kind="test_fixture",
+    )
+    _h5_all_flags_set_with_gate(monkeypatch)
+    monkeypatch.setattr("scripts.bench.capability_ab_runner._git_commit", lambda x: "dummy-commit")
+
+    row = _finalize_with_nexus_row(
+        {"mode": "with_nexus", "model_calls": 1, "total_tokens": 100,
+         "token_capture_status": "measured",
+         "committee_trace": {"candidate_count": 2, "judge_selection": {"selected_candidate_id": "C_12481#candidate-1"},
+                              "committee_receipt": {"selected_candidate_applied": True, "selected_candidate_apply_hash_match": True}},
+         "local_solve_eligible": True},
+        provider="gemini", model_required=True, nexus_required=False, task=task, repo_root=tmp_path,
+    )
+
+    with_path = tmp_path / "with.jsonl"
+    without_path = tmp_path / "without.jsonl"
+    with_path.write_text("[]", encoding="utf-8")
+    without_path.write_text("[]", encoding="utf-8")
+
+    bundle_file = write_evidence_bundle(
+        out_dir=tmp_path, with_path=with_path, without_path=without_path,
+        rows=[row],
+        config={"tasks_file": "tasks.json", "tasks_manifest_hash": "manifest_hash",
+                "unique_tasks_requested": 1, "repeat_trials": 1, "timeout_sec": 60},
+    )
+
+    bundle_data = json.loads(bundle_file.read_text(encoding="utf-8"))
+    summary = bundle_data["hybrid_route_summary"]
+    assert summary["h5_local_shadow_final_source_promotion_count"] >= 1
+    assert summary["h5_local_actual_final_source_changed_count"] == 0
+    fs_change_flag = os.environ.get("NEXUS_H5_ALLOW_FINAL_SOURCE_CHANGE", "0") == "1"
+    if not fs_change_flag:
+        assert summary["h5_local_final_source_change_allowed_count"] == 0
+    else:
+        assert summary["h5_local_final_source_change_allowed_count"] >= 1
+    assert summary["h5_execution_allowed_count"] == 0
+    assert summary["h5_behavior_changed_count"] == 0
+    assert summary["h5_cloud_fallback_invoked_count"] == 0
