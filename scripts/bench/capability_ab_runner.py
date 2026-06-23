@@ -5666,6 +5666,7 @@ def _build_h5_execution_readiness_preflight(row: dict[str, Any]) -> dict[str, An
     local_shadow = row.get("h5_local_finalization_shadow_receipt")
     cloud_shadow = row.get("h5_cloud_fallback_finalization_shadow_receipt")
     ext_evidence = row.get("h5_local_evidence_ingestion_shadow")
+    cloud_ext_evidence = row.get("h5_cloud_evidence_ingestion_shadow")
 
     reasons = []
     local_ready = False
@@ -5674,6 +5675,7 @@ def _build_h5_execution_readiness_preflight(row: dict[str, Any]) -> dict[str, An
     has_local_shadow = bool(local_shadow)
     has_cloud_shadow = bool(cloud_shadow)
     ext_ready = bool(ext_evidence and ext_evidence.get("local_path_ready_shadow_from_external_evidence", False))
+    cloud_ext_ready = bool(cloud_ext_evidence and cloud_ext_evidence.get("cloud_path_ready_shadow_from_external_evidence", False))
 
     # Check plan existence
     if not has_plan:
@@ -5725,6 +5727,8 @@ def _build_h5_execution_readiness_preflight(row: dict[str, Any]) -> dict[str, An
 
     if not ext_ready and ext_evidence is not None:
         reasons.append("local_external_evidence_missing_or_blocked")
+    if not cloud_ext_ready and cloud_ext_evidence is not None:
+        reasons.append("cloud_external_evidence_missing_or_blocked")
 
     return {
         "schema": "nexus.hybrid_h5_execution_readiness_preflight.v1",
@@ -5735,6 +5739,7 @@ def _build_h5_execution_readiness_preflight(row: dict[str, Any]) -> dict[str, An
         "local_path_ready_shadow": local_ready,
         "cloud_path_ready_shadow": cloud_ready,
         "local_external_evidence_ready_shadow": ext_ready,
+        "cloud_external_evidence_ready_shadow": cloud_ext_ready,
         "has_execution_plan": has_plan,
         "has_local_finalization_shadow": has_local_shadow,
         "has_cloud_finalization_shadow": has_cloud_shadow,
@@ -5843,6 +5848,101 @@ def _build_h5_local_evidence_ingestion_shadow(row: dict[str, Any]) -> dict[str, 
         "local_evidence_can_feed_readiness": True,
         "local_evidence_source": "external_prevalidated",
         "local_path_ready_shadow_from_external_evidence": True,
+        "blocked_reason": "",
+        "public_claim_allowed": False,
+        "production_ready": False,
+    }
+
+
+def _build_h5_cloud_evidence_ingestion_shadow(row: dict[str, Any]) -> dict[str, Any]:
+    """Pure helper: reads optional external cloud evidence validation from row.
+
+    No side effects. No model calls. No mutation. No cloud invocation.
+    """
+    ext = row.get("external_cloud_evidence_ingestion_validation")
+    if not ext:
+        return {
+            "schema": "nexus.hybrid_h5_cloud_evidence_ingestion_shadow.v1",
+            "evaluated": True,
+            "external_evidence_present": False,
+            "external_validation_schema": "",
+            "accepted_for_h5_readiness_shadow": False,
+            "validation_status": "",
+            "validation_reasons": [],
+            "cloud_evidence_can_feed_readiness": False,
+            "cloud_evidence_source": "external_prevalidated",
+            "cloud_path_ready_shadow_from_external_evidence": False,
+            "blocked_reason": "missing_external_cloud_evidence_validation",
+            "public_claim_allowed": False,
+            "production_ready": False,
+        }
+
+    src_schema = str(ext.get("schema", "") or "")
+    if src_schema != "nexus.h5_cloud_fallback_evidence_ingestion_validation.v1":
+        return {
+            "schema": "nexus.hybrid_h5_cloud_evidence_ingestion_shadow.v1",
+            "evaluated": True,
+            "external_evidence_present": True,
+            "external_validation_schema": src_schema,
+            "accepted_for_h5_readiness_shadow": False,
+            "validation_status": str(ext.get("validation_status", "") or ""),
+            "validation_reasons": ext.get("validation_reasons", []),
+            "cloud_evidence_can_feed_readiness": False,
+            "cloud_evidence_source": "external_prevalidated",
+            "cloud_path_ready_shadow_from_external_evidence": False,
+            "blocked_reason": "invalid_external_cloud_evidence_validation_schema",
+            "public_claim_allowed": False,
+            "production_ready": False,
+        }
+
+    v_status = str(ext.get("validation_status", "") or "")
+    accepted_ext = bool(ext.get("accepted_for_h5_readiness_shadow", False))
+
+    if v_status != "accepted":
+        return {
+            "schema": "nexus.hybrid_h5_cloud_evidence_ingestion_shadow.v1",
+            "evaluated": True,
+            "external_evidence_present": True,
+            "external_validation_schema": src_schema,
+            "accepted_for_h5_readiness_shadow": False,
+            "validation_status": v_status,
+            "validation_reasons": ext.get("validation_reasons", []),
+            "cloud_evidence_can_feed_readiness": False,
+            "cloud_evidence_source": "external_prevalidated",
+            "cloud_path_ready_shadow_from_external_evidence": False,
+            "blocked_reason": "external_cloud_evidence_not_accepted",
+            "public_claim_allowed": False,
+            "production_ready": False,
+        }
+
+    if not accepted_ext:
+        return {
+            "schema": "nexus.hybrid_h5_cloud_evidence_ingestion_shadow.v1",
+            "evaluated": True,
+            "external_evidence_present": True,
+            "external_validation_schema": src_schema,
+            "accepted_for_h5_readiness_shadow": False,
+            "validation_status": v_status,
+            "validation_reasons": ext.get("validation_reasons", []),
+            "cloud_evidence_can_feed_readiness": False,
+            "cloud_evidence_source": "external_prevalidated",
+            "cloud_path_ready_shadow_from_external_evidence": False,
+            "blocked_reason": "external_cloud_evidence_not_accepted_for_readiness",
+            "public_claim_allowed": False,
+            "production_ready": False,
+        }
+
+    return {
+        "schema": "nexus.hybrid_h5_cloud_evidence_ingestion_shadow.v1",
+        "evaluated": True,
+        "external_evidence_present": True,
+        "external_validation_schema": src_schema,
+        "accepted_for_h5_readiness_shadow": True,
+        "validation_status": v_status,
+        "validation_reasons": [],
+        "cloud_evidence_can_feed_readiness": True,
+        "cloud_evidence_source": "external_prevalidated",
+        "cloud_path_ready_shadow_from_external_evidence": True,
         "blocked_reason": "",
         "public_claim_allowed": False,
         "production_ready": False,
@@ -6289,6 +6389,9 @@ def _finalize_with_nexus_row(
 
             # H5-19: Local evidence ingestion shadow attach (before preflight so preflight can read it)
             finalized["h5_local_evidence_ingestion_shadow"] = _build_h5_local_evidence_ingestion_shadow(finalized)
+
+            # H5-22: Cloud evidence ingestion shadow attach
+            finalized["h5_cloud_evidence_ingestion_shadow"] = _build_h5_cloud_evidence_ingestion_shadow(finalized)
 
             # H5-12: Execution readiness preflight matrix
             finalized["h5_execution_readiness_preflight"] = _build_h5_execution_readiness_preflight(finalized)
@@ -10021,6 +10124,11 @@ def write_evidence_bundle(
         "h5_local_evidence_accepted_count": sum(1 for row in with_rows if bool(row.get("h5_local_evidence_ingestion_shadow", {}).get("accepted_for_h5_readiness_shadow", False))),
         "h5_local_evidence_blocked_count": sum(1 for row in with_rows if bool(row.get("h5_local_evidence_ingestion_shadow")) and not bool(row.get("h5_local_evidence_ingestion_shadow", {}).get("accepted_for_h5_readiness_shadow", False))),
         "h5_local_external_evidence_ready_shadow_count": sum(1 for row in with_rows if bool(row.get("h5_local_evidence_ingestion_shadow", {}).get("local_path_ready_shadow_from_external_evidence", False))),
+        "h5_cloud_evidence_ingestion_shadow_count": sum(1 for row in with_rows if bool(row.get("h5_cloud_evidence_ingestion_shadow"))),
+        "h5_cloud_evidence_external_present_count": sum(1 for row in with_rows if bool(row.get("h5_cloud_evidence_ingestion_shadow", {}).get("external_evidence_present", False))),
+        "h5_cloud_evidence_accepted_count": sum(1 for row in with_rows if bool(row.get("h5_cloud_evidence_ingestion_shadow", {}).get("accepted_for_h5_readiness_shadow", False))),
+        "h5_cloud_evidence_blocked_count": sum(1 for row in with_rows if bool(row.get("h5_cloud_evidence_ingestion_shadow")) and not bool(row.get("h5_cloud_evidence_ingestion_shadow", {}).get("accepted_for_h5_readiness_shadow", False))),
+        "h5_cloud_external_evidence_ready_shadow_count": sum(1 for row in with_rows if bool(row.get("h5_cloud_evidence_ingestion_shadow", {}).get("cloud_path_ready_shadow_from_external_evidence", False))),
     }
     payload["external_provider_claim_boundary_contract"] = build_external_provider_claim_boundary_contract(payload)
     payload["public_promotion_readiness_contract"] = build_public_promotion_readiness_contract(payload)

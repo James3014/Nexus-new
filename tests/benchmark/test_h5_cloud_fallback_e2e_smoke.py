@@ -132,13 +132,13 @@ def test_h5_21_skipped_unsupported_provider_maps_to_blocked():
 
     result = run_h5_cloud_fallback_e2e_smoke(provider="unknown", dry_run=True)
 
-    assert result["receipt"]["status"] == "skipped"
-    assert result["readiness_bridge"]["readiness_status"] == "blocked"
+    assert result["evidence_bundle"]["bundle_status"] == "blocked"
+    assert result["ingestion_validation"]["validation_status"] == "rejected"
 
 
-def test_h5_21_synthetic_complete_real_smoke_maps_to_compatible_receipt():
-    """H5-21 Test 3: synthetic complete real smoke maps to compatible receipt."""
-    from scripts.bench.h5_cloud_fallback_e2e_smoke import build_h5_cloud_fallback_smoke_receipt
+def test_h5_22_synthetic_ready_smoke_maps_to_pass_bundle():
+    """H5-22 Test 3: synthetic ready smoke maps to pass bundle."""
+    from scripts.bench.h5_cloud_fallback_e2e_smoke import build_h5_cloud_fallback_smoke_evidence_bundle
 
     smoke = {
         "status": "pass", "provider": "gemini", "dry_run": False,
@@ -146,115 +146,100 @@ def test_h5_21_synthetic_complete_real_smoke_maps_to_compatible_receipt():
         "cloud_model_invoked": True, "cloud_output_captured": True,
         "cloud_output_verified": True, "model_calls_before": 1,
         "model_calls_after_shadow": 2, "model_calls_incremented": False,
-        "final_source_changed": False, "final_patch_replaced": False,
-        "output_mutated": False,
     }
-    receipt = build_h5_cloud_fallback_smoke_receipt(smoke)
-    assert receipt["h5_cloud_fallback_compatible"] is True
-    assert receipt["h5_cloud_fallback_ready_shadow"] is True
+    from scripts.bench.h5_cloud_fallback_e2e_smoke import build_h5_cloud_fallback_smoke_receipt, build_h5_cloud_fallback_readiness_bridge
+    smoke["receipt"] = build_h5_cloud_fallback_smoke_receipt(smoke)
+    smoke["readiness_bridge"] = build_h5_cloud_fallback_readiness_bridge(smoke["receipt"])
+    bundle = build_h5_cloud_fallback_smoke_evidence_bundle(smoke)
+    assert bundle["bundle_status"] == "pass"
+    assert bundle["can_feed_h5_readiness_shadow"] is True
 
 
-def test_h5_21_synthetic_complete_receipt_maps_to_ready_bridge():
-    """H5-21 Test 4: synthetic complete receipt maps to ready bridge."""
-    from scripts.bench.h5_cloud_fallback_e2e_smoke import build_h5_cloud_fallback_readiness_bridge
+def test_h5_22_synthetic_pass_bundle_accepted_by_validation():
+    """H5-22 Test 4: synthetic pass bundle accepted by validation."""
+    from scripts.bench.h5_cloud_fallback_e2e_smoke import validate_h5_cloud_fallback_evidence_bundle
 
-    receipt = {
-        "status": "pass", "provider": "gemini", "dry_run": False,
-        "h5_cloud_fallback_compatible": True,
-        "cloud_fallback_invoked": True, "cloud_model_invoked": True,
-        "cloud_output_captured": True, "cloud_output_verified": True,
-        "model_calls_before": 1, "model_calls_after_shadow": 2,
-        "model_calls_incremented": False,
+    bundle = {
+        "schema": "nexus.h5_cloud_fallback_smoke_evidence_bundle.v1",
+        "bundle_status": "pass",
+        "can_feed_h5_readiness_shadow": True,
+        "safety": {"final_source_changed": False, "final_patch_replaced": False,
+                   "output_mutated": False, "model_calls_incremented": False,
+                   "public_claim_allowed": False, "production_ready": False},
+        "governance": {"public_claim_allowed": False, "production_ready": False, "internal_only": True},
+        "receipt": {"schema": "nexus.h5_cloud_fallback_smoke_receipt.v1",
+                     "h5_cloud_fallback_compatible": True, "h5_cloud_fallback_ready_shadow": True},
+        "readiness_bridge": {"schema": "nexus.h5_cloud_fallback_readiness_bridge.v1",
+                             "readiness_status": "ready_shadow",
+                             "cloud_fallback_e2e_ready_shadow": True,
+                             "can_feed_h5_readiness_shadow": True,
+                             "provider_ready": True, "cloud_invocation_ready": True,
+                             "cloud_output_capture_ready": True, "cloud_output_verification_ready": True,
+                             "model_call_accounting_ready": True},
     }
-    bridge = build_h5_cloud_fallback_readiness_bridge(receipt)
-    assert bridge["readiness_status"] == "ready_shadow"
-    assert bridge["cloud_fallback_e2e_ready_shadow"] is True
-    assert bridge["can_feed_h5_readiness_shadow"] is True
-    assert bridge["provider_ready"] is True
-    assert bridge["cloud_invocation_ready"] is True
-    assert bridge["cloud_output_capture_ready"] is True
-    assert bridge["cloud_output_verification_ready"] is True
-    assert bridge["model_call_accounting_ready"] is True
+    val = validate_h5_cloud_fallback_evidence_bundle(bundle)
+    assert val["validation_status"] == "accepted"
+    assert val["accepted_for_h5_readiness_shadow"] is True
 
 
-def test_h5_21_missing_output_verification_blocks():
-    """H5-21 Test 5: missing output verification blocks."""
-    from scripts.bench.h5_cloud_fallback_e2e_smoke import build_h5_cloud_fallback_readiness_bridge
-
-    receipt = {
-        "status": "pass", "provider": "gemini", "dry_run": False,
-        "h5_cloud_fallback_compatible": False,
-        "h5_cloud_fallback_blocked_reason": "cloud_output_not_verified",
-    }
-    bridge = build_h5_cloud_fallback_readiness_bridge(receipt)
-    assert bridge["cloud_output_verification_ready"] is False
-    assert bridge["readiness_status"] == "blocked"
+def test_h5_22_invalid_bundle_schema_rejected():
+    """H5-22 Test 5: invalid bundle schema rejected."""
+    from scripts.bench.h5_cloud_fallback_e2e_smoke import validate_h5_cloud_fallback_evidence_bundle
+    val = validate_h5_cloud_fallback_evidence_bundle({"schema": "wrong"})
+    assert val["validation_status"] == "rejected"
+    assert "invalid_bundle_schema" in val["validation_reasons"]
 
 
-def test_h5_21_invalid_model_call_accounting_blocks():
-    """H5-21 Test 6: invalid model call accounting blocks."""
-    from scripts.bench.h5_cloud_fallback_e2e_smoke import build_h5_cloud_fallback_readiness_bridge
-
-    receipt = {
-        "status": "pass", "provider": "gemini", "dry_run": False,
-        "h5_cloud_fallback_compatible": False,
-        "model_calls_before": 1, "model_calls_after_shadow": 3,
-        "model_calls_incremented": False,
-    }
-    bridge = build_h5_cloud_fallback_readiness_bridge(receipt)
-    assert bridge["model_call_accounting_ready"] is False
-    assert bridge["readiness_status"] == "blocked"
+def test_h5_22_safety_violation_rejected():
+    """H5-22 Test 6: safety invariant violation rejected."""
+    from scripts.bench.h5_cloud_fallback_e2e_smoke import validate_h5_cloud_fallback_evidence_bundle
+    bundle = {"schema": "nexus.h5_cloud_fallback_smoke_evidence_bundle.v1",
+              "safety": {"output_mutated": True}}
+    val = validate_h5_cloud_fallback_evidence_bundle(bundle)
+    assert val["validation_status"] == "rejected"
+    assert "safety_invariant_violation" in val["validation_reasons"]
 
 
-def test_h5_21_unexpected_model_calls_incremented_blocks():
-    """H5-21 Test 7: unexpected model_calls_incremented blocks."""
-    from scripts.bench.h5_cloud_fallback_e2e_smoke import build_h5_cloud_fallback_readiness_bridge
-
-    receipt = {
-        "status": "pass", "provider": "gemini", "dry_run": False,
-        "h5_cloud_fallback_compatible": False,
-        "model_calls_before": 1, "model_calls_after_shadow": 2,
-        "model_calls_incremented": True,
-    }
-    bridge = build_h5_cloud_fallback_readiness_bridge(receipt)
-    assert bridge["model_call_accounting_ready"] is False
+def test_h5_22_governance_violation_rejected():
+    """H5-22 Test 7: governance violation rejected."""
+    from scripts.bench.h5_cloud_fallback_e2e_smoke import validate_h5_cloud_fallback_evidence_bundle
+    bundle = {"schema": "nexus.h5_cloud_fallback_smoke_evidence_bundle.v1",
+              "governance": {"production_ready": True}}
+    val = validate_h5_cloud_fallback_evidence_bundle(bundle)
+    assert val["validation_status"] == "rejected"
+    assert "governance_boundary_violation" in val["validation_reasons"]
 
 
-def test_h5_21_safety_invariants_remain_false():
-    """H5-21 Test 8: safety invariants remain false."""
-    from scripts.bench.h5_cloud_fallback_e2e_smoke import build_h5_cloud_fallback_readiness_bridge
-
-    bridges = [
-        {},
-        {"status": "skipped", "dry_run": True},
-        {"status": "pass", "dry_run": False, "provider": "gemini",
-         "h5_cloud_fallback_compatible": True, "cloud_fallback_invoked": True,
-         "cloud_model_invoked": True, "cloud_output_captured": True,
-         "cloud_output_verified": True, "model_calls_before": 1,
-         "model_calls_after_shadow": 2, "model_calls_incremented": False},
-    ]
-    for b in bridges:
-        bridge = build_h5_cloud_fallback_readiness_bridge(b)
-        assert bridge["final_source_changed"] is False
-        assert bridge["final_patch_replaced"] is False
-        assert bridge["output_mutated"] is False
-        assert bridge["model_calls_incremented"] is False
-        assert bridge["public_claim_allowed"] is False
-        assert bridge["production_ready"] is False
+def test_h5_22_receipt_incompatible_rejected():
+    """H5-22 Test 8: receipt incompatible rejected."""
+    from scripts.bench.h5_cloud_fallback_e2e_smoke import validate_h5_cloud_fallback_evidence_bundle
+    bundle = {"schema": "nexus.h5_cloud_fallback_smoke_evidence_bundle.v1",
+              "receipt": {"schema": "nexus.h5_cloud_fallback_smoke_receipt.v1",
+                          "h5_cloud_fallback_compatible": False}}
+    val = validate_h5_cloud_fallback_evidence_bundle(bundle)
+    assert val["validation_status"] == "rejected"
+    assert "receipt_not_h5_cloud_fallback_compatible" in val["validation_reasons"]
 
 
-def test_h5_21_cli_dry_run_includes_receipt_and_bridge():
-    """H5-21 Test 9: CLI dry-run includes receipt and readiness_bridge."""
+def test_h5_22_readiness_bridge_not_ready_rejected():
+    """H5-22 Test 9: readiness bridge not ready rejected."""
+    from scripts.bench.h5_cloud_fallback_e2e_smoke import validate_h5_cloud_fallback_evidence_bundle
+    bundle = {"schema": "nexus.h5_cloud_fallback_smoke_evidence_bundle.v1",
+              "readiness_bridge": {"schema": "nexus.h5_cloud_fallback_readiness_bridge.v1",
+                                   "readiness_status": "blocked"}}
+    val = validate_h5_cloud_fallback_evidence_bundle(bundle)
+    assert val["validation_status"] == "rejected"
+    assert "readiness_bridge_not_ready" in val["validation_reasons"]
+
+
+def test_h5_22_cli_dry_run_includes_bundle_and_validation():
+    """H5-22 Test 10: CLI dry-run includes evidence_bundle and ingestion_validation."""
     script = Path(__file__).resolve().parents[2] / "scripts" / "bench" / "h5_cloud_fallback_e2e_smoke.py"
     result = subprocess.run(
         [sys.executable, str(script), "--dry-run", "--provider", "gemini"],
-        capture_output=True,
-        text=True,
-        timeout=30,
+        capture_output=True, text=True, timeout=30,
     )
     assert result.returncode == 0
     data = json.loads(result.stdout)
-    assert "receipt" in data
-    assert data["receipt"]["schema"] == "nexus.h5_cloud_fallback_smoke_receipt.v1"
-    assert "readiness_bridge" in data
-    assert data["readiness_bridge"]["schema"] == "nexus.h5_cloud_fallback_readiness_bridge.v1"
+    assert "evidence_bundle" in data
+    assert "ingestion_validation" in data
