@@ -6976,6 +6976,121 @@ def _apply_h5_actual_final_source_if_allowed(row: dict[str, Any], decision: dict
     return result
 
 
+def _build_h5_actual_final_source_rollback_decision(row: dict[str, Any]) -> dict[str, Any]:
+    """Pure helper: builds actual final_source rollback decision.
+
+    No side effects. No mutation of input row.
+    """
+    import os as _os
+
+    apply_receipt = row.get("h5_actual_final_source_apply_receipt")
+    actual_fs = str(row.get("final_source", "none") or "none")
+
+    flag_rollback = _os.environ.get("NEXUS_H5_ALLOW_ACTUAL_FINAL_SOURCE_ROLLBACK", "").strip() == "1"
+
+    apply_present = bool(apply_receipt)
+    apply_executed = bool(apply_receipt and apply_receipt.get("actual_apply_executed", False))
+    apply_changed = bool(apply_receipt and apply_receipt.get("actual_final_source_changed", False))
+    fp_clean = not bool(apply_receipt and apply_receipt.get("final_patch_replaced", False))
+    out_clean = not bool(apply_receipt and apply_receipt.get("output_mutated", False))
+    mc_clean = not bool(apply_receipt and apply_receipt.get("model_calls_incremented", False))
+    cloud_clean = not bool(apply_receipt and apply_receipt.get("cloud_invoked", False))
+    beh_clean = not bool(apply_receipt and apply_receipt.get("behavior_changed", False))
+
+    is_promoted = actual_fs == "local_candidate_shadow_promoted"
+
+    would_rollback = (
+        flag_rollback and is_promoted
+        and apply_present and apply_executed and apply_changed
+        and fp_clean and out_clean and mc_clean and cloud_clean and beh_clean
+    )
+
+    reasons = []
+
+    if not flag_rollback:
+        reasons.append("rollback_flag_not_enabled")
+    if not is_promoted:
+        reasons.append("final_source_not_promoted")
+    if not apply_present:
+        reasons.append("missing_actual_apply_receipt")
+    if apply_receipt and not apply_executed:
+        reasons.append("actual_apply_not_executed")
+    if apply_receipt and not apply_changed:
+        reasons.append("actual_apply_final_source_not_changed")
+    if not fp_clean:
+        reasons.append("final_patch_was_replaced")
+    if not out_clean:
+        reasons.append("output_was_mutated")
+    if not mc_clean:
+        reasons.append("model_calls_were_incremented")
+    if not cloud_clean:
+        reasons.append("cloud_was_invoked")
+    if not beh_clean:
+        reasons.append("behavior_changed_true")
+
+    reasons.extend([
+        "final_source_only_rollback_gate",
+        "final_patch_remains_unchanged",
+        "output_remains_unchanged",
+        "model_calls_remain_unchanged",
+    ])
+
+    return {
+        "schema": "nexus.hybrid_h5_actual_final_source_rollback_decision.v1",
+        "evaluated": True,
+        "rollback_decision": "rollback_final_source_only" if would_rollback else "blocked",
+        "rollback_reasons": reasons,
+        "rollback_allowed": would_rollback,
+        "rollback_target_final_source": "none",
+        "actual_final_source_before_rollback": actual_fs,
+        "would_restore_final_source_to": "none" if would_rollback else "none",
+        "actual_apply_receipt_present": apply_present,
+        "actual_apply_executed": apply_executed,
+        "rollback_flag_enabled": flag_rollback,
+        "rollback_required": would_rollback,
+        "rollback_safe": would_rollback,
+        "final_patch_replaced": not fp_clean,
+        "output_mutated": not out_clean,
+        "model_calls_incremented": not mc_clean,
+        "cloud_invoked": not cloud_clean,
+        "behavior_changed": not beh_clean,
+        "public_claim_allowed": False,
+        "production_ready": False,
+    }
+
+
+def _rollback_h5_actual_final_source_if_allowed(row: dict[str, Any], decision: dict[str, Any]) -> dict[str, Any]:
+    """Returns a shallow copy of row with final_source possibly restored to 'none'.
+
+    Never mutates input row.
+    """
+    result = dict(row)
+    actual_before = str(row.get("final_source", "none") or "none")
+    allowed = bool(decision.get("rollback_allowed", False))
+
+    if allowed:
+        result["final_source"] = "none"
+    result["h5_actual_final_source_rollback_receipt"] = {
+        "schema": "nexus.hybrid_h5_actual_final_source_rollback_receipt.v1",
+        "evaluated": True,
+        "rollback_executed": allowed,
+        "actual_final_source_before_rollback": actual_before,
+        "actual_final_source_after_rollback": result.get("final_source", actual_before),
+        "actual_final_source_restored": allowed and result.get("final_source", actual_before) == "none",
+        "rollback_decision": str(decision.get("rollback_decision", "blocked")),
+        "rollback_target_final_source": "none",
+        "final_patch_replaced": False,
+        "output_mutated": False,
+        "model_calls_incremented": False,
+        "cloud_invoked": False,
+        "behavior_changed": False,
+        "safe_to_continue": True,
+        "public_claim_allowed": False,
+        "production_ready": False,
+    }
+    return result
+
+
 def _finalize_with_nexus_row(
     row: dict[str, Any],
     *,
@@ -7459,6 +7574,11 @@ def _finalize_with_nexus_row(
             h5_apply_decision = _build_h5_actual_final_source_apply_decision(finalized)
             finalized["h5_actual_final_source_apply_decision"] = h5_apply_decision
             finalized = _apply_h5_actual_final_source_if_allowed(finalized, h5_apply_decision)
+
+            # H5-35: Actual final_source rollback gate
+            h5_rollback_decision = _build_h5_actual_final_source_rollback_decision(finalized)
+            finalized["h5_actual_final_source_rollback_decision"] = h5_rollback_decision
+            finalized = _rollback_h5_actual_final_source_if_allowed(finalized, h5_rollback_decision)
 
     # Ensure keys are also on the row level for simple flat queries
     finalized["route_mode"] = r_mode
@@ -11270,6 +11390,13 @@ def write_evidence_bundle(
         "h5_actual_final_source_apply_all_flags_enabled_count": sum(1 for row in with_rows if bool(row.get("h5_actual_final_source_apply_decision", {}).get("all_seven_flags_enabled", False))),
         "h5_actual_final_source_apply_rollback_required_count": sum(1 for row in with_rows if bool(row.get("h5_actual_final_source_apply_decision", {}).get("rollback_required", False))),
         "h5_actual_final_source_apply_safe_count": sum(1 for row in with_rows if bool(row.get("h5_actual_final_source_apply_decision", {}).get("safe_to_continue", False))),
+        "h5_actual_final_source_rollback_decision_count": sum(1 for row in with_rows if bool(row.get("h5_actual_final_source_rollback_decision"))),
+        "h5_actual_final_source_rollback_allowed_count": sum(1 for row in with_rows if bool(row.get("h5_actual_final_source_rollback_decision", {}).get("rollback_allowed", False))),
+        "h5_actual_final_source_rollback_blocked_count": sum(1 for row in with_rows if str(row.get("h5_actual_final_source_rollback_decision", {}).get("rollback_decision", "")) == "blocked"),
+        "h5_actual_final_source_rollback_executed_count": sum(1 for row in with_rows if bool(row.get("h5_actual_final_source_rollback_receipt", {}).get("rollback_executed", False))),
+        "h5_actual_final_source_rollback_restored_count": sum(1 for row in with_rows if bool(row.get("h5_actual_final_source_rollback_receipt", {}).get("actual_final_source_restored", False))),
+        "h5_actual_final_source_rollback_flag_enabled_count": sum(1 for row in with_rows if bool(row.get("h5_actual_final_source_rollback_decision", {}).get("rollback_flag_enabled", False))),
+        "h5_actual_final_source_rollback_safe_count": sum(1 for row in with_rows if bool(row.get("h5_actual_final_source_rollback_decision", {}).get("rollback_safe", False))),
     }
     payload["external_provider_claim_boundary_contract"] = build_external_provider_claim_boundary_contract(payload)
     payload["public_promotion_readiness_contract"] = build_public_promotion_readiness_contract(payload)

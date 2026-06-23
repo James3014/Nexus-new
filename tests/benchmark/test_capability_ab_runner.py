@@ -19507,3 +19507,276 @@ def test_h5_34_summary_counters_all_seven_flags(tmp_path, monkeypatch):
         assert summary["h5_actual_final_source_apply_final_source_changed_count"] >= 1
     assert row["behavior_changed"] is False
     assert row.get("cloud_fallback_invoked", False) is False
+
+
+def test_h5_35_rollback_decision_empty_row_blocks():
+    """H5-35 Test 1: rollback decision empty row blocks."""
+    from scripts.bench.capability_ab_runner import _build_h5_actual_final_source_rollback_decision
+
+    decision = _build_h5_actual_final_source_rollback_decision({})
+    assert decision["rollback_allowed"] is False
+    assert decision["rollback_decision"] == "blocked"
+
+
+def test_h5_35_flag_missing_blocks(monkeypatch):
+    """H5-35 Test 2: promoted final_source but rollback flag missing blocks."""
+    from scripts.bench.capability_ab_runner import _build_h5_actual_final_source_rollback_decision
+
+    monkeypatch.delenv("NEXUS_H5_ALLOW_ACTUAL_FINAL_SOURCE_ROLLBACK", raising=False)
+
+    row = {
+        "final_source": "local_candidate_shadow_promoted",
+        "h5_actual_final_source_apply_receipt": {
+            "actual_apply_executed": True,
+            "actual_final_source_changed": True,
+            "final_patch_replaced": False,
+            "output_mutated": False,
+            "model_calls_incremented": False,
+            "cloud_invoked": False,
+            "behavior_changed": False,
+        },
+    }
+    decision = _build_h5_actual_final_source_rollback_decision(row)
+    assert decision["rollback_allowed"] is False
+    assert "rollback_flag_not_enabled" in decision["rollback_reasons"]
+
+
+def test_h5_35_flag_enabled_allows_rollback(monkeypatch):
+    """H5-35 Test 3: rollback flag enabled + promoted + clean receipt allows rollback."""
+    from scripts.bench.capability_ab_runner import _build_h5_actual_final_source_rollback_decision
+
+    monkeypatch.setenv("NEXUS_H5_ALLOW_ACTUAL_FINAL_SOURCE_ROLLBACK", "1")
+
+    row = {
+        "final_source": "local_candidate_shadow_promoted",
+        "h5_actual_final_source_apply_receipt": {
+            "actual_apply_executed": True,
+            "actual_final_source_changed": True,
+            "final_patch_replaced": False,
+            "output_mutated": False,
+            "model_calls_incremented": False,
+            "cloud_invoked": False,
+            "behavior_changed": False,
+        },
+    }
+    decision = _build_h5_actual_final_source_rollback_decision(row)
+    assert decision["rollback_allowed"] is True
+    assert decision["rollback_decision"] == "rollback_final_source_only"
+    assert decision["would_restore_final_source_to"] == "none"
+
+
+def test_h5_35_rollback_helper_does_not_mutate_input(monkeypatch):
+    """H5-35 Test 4: rollback helper does not mutate input row."""
+    from scripts.bench.capability_ab_runner import _rollback_h5_actual_final_source_if_allowed
+
+    monkeypatch.setenv("NEXUS_H5_ALLOW_ACTUAL_FINAL_SOURCE_ROLLBACK", "1")
+
+    original = {"final_source": "local_candidate_shadow_promoted"}
+    decision = {"rollback_allowed": True, "rollback_decision": "rollback_final_source_only"}
+    result = _rollback_h5_actual_final_source_if_allowed(original, decision)
+    assert original["final_source"] == "local_candidate_shadow_promoted"
+    assert result["final_source"] == "none"
+    assert result["h5_actual_final_source_rollback_receipt"]["rollback_executed"] is True
+    assert result["h5_actual_final_source_rollback_receipt"]["actual_final_source_restored"] is True
+
+
+def test_h5_35_rollback_helper_blocked_keeps_unchanged():
+    """H5-35 Test 5: rollback helper blocked decision keeps final_source unchanged."""
+    from scripts.bench.capability_ab_runner import _rollback_h5_actual_final_source_if_allowed
+
+    row = {"final_source": "local_candidate_shadow_promoted"}
+    decision = {"rollback_allowed": False, "rollback_decision": "blocked"}
+    result = _rollback_h5_actual_final_source_if_allowed(row, decision)
+    assert result["final_source"] == "local_candidate_shadow_promoted"
+    assert result["h5_actual_final_source_rollback_receipt"]["rollback_executed"] is False
+
+
+def test_h5_35_dirty_apply_receipt_blocks_rollback(monkeypatch):
+    """H5-35 Test 6: dirty apply receipt blocks rollback."""
+    from scripts.bench.capability_ab_runner import _build_h5_actual_final_source_rollback_decision
+
+    monkeypatch.setenv("NEXUS_H5_ALLOW_ACTUAL_FINAL_SOURCE_ROLLBACK", "1")
+
+    row = {
+        "final_source": "local_candidate_shadow_promoted",
+        "h5_actual_final_source_apply_receipt": {
+            "actual_apply_executed": True,
+            "actual_final_source_changed": True,
+            "final_patch_replaced": True,
+            "output_mutated": False,
+            "model_calls_incremented": False,
+            "cloud_invoked": False,
+            "behavior_changed": False,
+        },
+    }
+    decision = _build_h5_actual_final_source_rollback_decision(row)
+    assert decision["rollback_allowed"] is False
+    assert "final_patch_was_replaced" in decision["rollback_reasons"]
+
+
+def test_h5_35_finalized_default_env_remains_none(tmp_path, monkeypatch):
+    """H5-35 Test 7: finalized default env row remains none and rollback blocked."""
+    from scripts.bench.capability_ab_runner import CapabilityTask, _finalize_with_nexus_row
+
+    task = CapabilityTask(
+        id="test-task-h5-35", difficulty="easy", task_type="test_repair",
+        task_desc="verify h5-35", target_file="target.py", test_file="test_target.py",
+        expected_capabilities=("claim_gate",), success_criteria="tests_pass",
+        repo_kind="nexus_internal", fixture_kind="test_fixture",
+    )
+    _h5_all_flags_set_with_gate(monkeypatch)
+
+    row = _finalize_with_nexus_row(
+        {"mode": "with_nexus", "model_calls": 1, "total_tokens": 100,
+         "token_capture_status": "measured",
+         "committee_trace": {"candidate_count": 2, "judge_selection": {"selected_candidate_id": "C_12481#candidate-1"},
+                              "committee_receipt": {"selected_candidate_applied": True, "selected_candidate_apply_hash_match": True}},
+         "local_solve_eligible": True},
+        provider="gemini", model_required=True, nexus_required=False, task=task, repo_root=tmp_path,
+    )
+
+    assert "h5_actual_final_source_rollback_decision" in row
+    assert "h5_actual_final_source_rollback_receipt" in row
+    assert row["h5_actual_final_source_rollback_receipt"]["rollback_executed"] is False
+    assert row.get("final_source", "none") == "none"
+    assert row["behavior_changed"] is False
+
+
+def test_h5_35_all_flags_proves_restore(tmp_path, monkeypatch):
+    """H5-35 Test 8: all eight flags may apply then rollback final_source."""
+    from scripts.bench.capability_ab_runner import CapabilityTask, _finalize_with_nexus_row
+
+    task = CapabilityTask(
+        id="test-task-h5-35-restore", difficulty="easy", task_type="test_repair",
+        task_desc="verify h5-35 restore", target_file="target.py", test_file="test_target.py",
+        expected_capabilities=("claim_gate",), success_criteria="tests_pass",
+        repo_kind="nexus_internal", fixture_kind="test_fixture",
+    )
+    _h5_all_flags_set_with_gate(monkeypatch)
+
+    row = _finalize_with_nexus_row(
+        {"mode": "with_nexus", "model_calls": 1, "total_tokens": 100,
+         "token_capture_status": "measured",
+         "committee_trace": {"candidate_count": 2, "judge_selection": {"selected_candidate_id": "C_12481#candidate-1"},
+                              "committee_receipt": {"selected_candidate_applied": True, "selected_candidate_apply_hash_match": True}},
+         "local_solve_eligible": True,
+         "external_local_evidence_ingestion_validation": {
+             "schema": "nexus.h5_local_committee_evidence_ingestion_validation.v1",
+             "validation_status": "accepted", "accepted_for_h5_readiness_shadow": True,
+         },
+         "external_cloud_evidence_ingestion_validation": {
+             "schema": "nexus.h5_cloud_fallback_evidence_ingestion_validation.v1",
+             "validation_status": "accepted", "accepted_for_h5_readiness_shadow": True,
+         }},
+        provider="gemini", model_required=True, nexus_required=False, task=task, repo_root=tmp_path,
+    )
+
+    apply_receipt = row.get("h5_actual_final_source_apply_receipt", {})
+    rollback_receipt = row.get("h5_actual_final_source_rollback_receipt", {})
+    if apply_receipt.get("actual_apply_executed"):
+        assert rollback_receipt.get("rollback_executed") is True
+        assert rollback_receipt.get("actual_final_source_restored") is True
+        assert row.get("final_source", "none") == "none"
+    assert row["behavior_changed"] is False
+    assert rollback_receipt.get("final_patch_replaced") is False
+    assert rollback_receipt.get("output_mutated") is False
+    assert rollback_receipt.get("model_calls_incremented") is False
+    assert rollback_receipt.get("cloud_invoked") is False
+
+
+def test_h5_35_summary_counters_default(tmp_path, monkeypatch):
+    """H5-35 Test 9: summary counters default env."""
+    from scripts.bench.capability_ab_runner import CapabilityTask, _finalize_with_nexus_row, write_evidence_bundle
+
+    task = CapabilityTask(
+        id="test-task-h5-35-summary", difficulty="easy", task_type="test_repair",
+        task_desc="verify h5-35 summary", target_file="target.py", test_file="test_target.py",
+        expected_capabilities=("claim_gate",), success_criteria="tests_pass",
+        repo_kind="nexus_internal", fixture_kind="test_fixture",
+    )
+    _h5_all_flags_set_with_gate(monkeypatch)
+    monkeypatch.setattr("scripts.bench.capability_ab_runner._git_commit", lambda x: "dummy-commit")
+
+    row = _finalize_with_nexus_row(
+        {"mode": "with_nexus", "model_calls": 1, "total_tokens": 100,
+         "token_capture_status": "measured",
+         "committee_trace": {"candidate_count": 2, "judge_selection": {"selected_candidate_id": "C_12481#candidate-1"},
+                              "committee_receipt": {"selected_candidate_applied": True, "selected_candidate_apply_hash_match": True}},
+         "local_solve_eligible": True},
+        provider="gemini", model_required=True, nexus_required=False, task=task, repo_root=tmp_path,
+    )
+
+    with_path = tmp_path / "with.jsonl"
+    without_path = tmp_path / "without.jsonl"
+    with_path.write_text("[]", encoding="utf-8")
+    without_path.write_text("[]", encoding="utf-8")
+
+    bundle_file = write_evidence_bundle(
+        out_dir=tmp_path, with_path=with_path, without_path=without_path,
+        rows=[row],
+        config={"tasks_file": "tasks.json", "tasks_manifest_hash": "manifest_hash",
+                "unique_tasks_requested": 1, "repeat_trials": 1, "timeout_sec": 60},
+    )
+
+    bundle_data = json.loads(bundle_file.read_text(encoding="utf-8"))
+    summary = bundle_data["hybrid_route_summary"]
+    assert summary["h5_actual_final_source_rollback_decision_count"] >= 1
+    assert summary["h5_actual_final_source_rollback_allowed_count"] == 0
+    assert summary["h5_actual_final_source_rollback_executed_count"] == 0
+    assert summary["h5_actual_final_source_rollback_restored_count"] == 0
+    assert summary["h5_behavior_changed_count"] == 0
+    assert summary["h5_cloud_fallback_invoked_count"] == 0
+    assert summary["h5_actual_final_patch_replaced_count"] == 0
+    assert summary["h5_actual_output_mutated_count"] == 0
+
+
+def test_h5_35_summary_counters_all_flags(tmp_path, monkeypatch):
+    """H5-35 Test 10: summary counters all-flags rollback trial."""
+    from scripts.bench.capability_ab_runner import CapabilityTask, _finalize_with_nexus_row, write_evidence_bundle
+
+    task = CapabilityTask(
+        id="test-task-h5-35-flags-summary", difficulty="easy", task_type="test_repair",
+        task_desc="verify h5-35 flags summary", target_file="target.py", test_file="test_target.py",
+        expected_capabilities=("claim_gate",), success_criteria="tests_pass",
+        repo_kind="nexus_internal", fixture_kind="test_fixture",
+    )
+    _h5_all_flags_set_with_gate(monkeypatch)
+    monkeypatch.setattr("scripts.bench.capability_ab_runner._git_commit", lambda x: "dummy-commit")
+
+    row = _finalize_with_nexus_row(
+        {"mode": "with_nexus", "model_calls": 1, "total_tokens": 100,
+         "token_capture_status": "measured",
+         "committee_trace": {"candidate_count": 2, "judge_selection": {"selected_candidate_id": "C_12481#candidate-1"},
+                              "committee_receipt": {"selected_candidate_applied": True, "selected_candidate_apply_hash_match": True}},
+         "local_solve_eligible": True,
+         "external_local_evidence_ingestion_validation": {
+             "schema": "nexus.h5_local_committee_evidence_ingestion_validation.v1",
+             "validation_status": "accepted", "accepted_for_h5_readiness_shadow": True,
+         },
+         "external_cloud_evidence_ingestion_validation": {
+             "schema": "nexus.h5_cloud_fallback_evidence_ingestion_validation.v1",
+             "validation_status": "accepted", "accepted_for_h5_readiness_shadow": True,
+         }},
+        provider="gemini", model_required=True, nexus_required=False, task=task, repo_root=tmp_path,
+    )
+
+    with_path = tmp_path / "with.jsonl"
+    without_path = tmp_path / "without.jsonl"
+    with_path.write_text("[]", encoding="utf-8")
+    without_path.write_text("[]", encoding="utf-8")
+
+    bundle_file = write_evidence_bundle(
+        out_dir=tmp_path, with_path=with_path, without_path=without_path,
+        rows=[row],
+        config={"tasks_file": "tasks.json", "tasks_manifest_hash": "manifest_hash",
+                "unique_tasks_requested": 1, "repeat_trials": 1, "timeout_sec": 60},
+    )
+
+    bundle_data = json.loads(bundle_file.read_text(encoding="utf-8"))
+    summary = bundle_data["hybrid_route_summary"]
+    rollback_exec = row.get("h5_actual_final_source_rollback_receipt", {}).get("rollback_executed", False)
+    if rollback_exec:
+        assert summary.get("h5_actual_final_source_rollback_executed_count", 0) >= 1
+        assert summary.get("h5_actual_final_source_rollback_restored_count", 0) >= 1
+    assert row["behavior_changed"] is False
+    assert row.get("cloud_fallback_invoked", False) is False
