@@ -83,6 +83,76 @@ def _build_smoke_result(
     }
 
 
+def build_h5_local_committee_smoke_receipt(smoke_result: dict[str, Any]) -> dict[str, Any]:
+    """Pure adapter: maps H5-14 smoke result into H5-compatible local committee receipt.
+
+    No side effects. No model calls. No mutation.
+    """
+    status = str(smoke_result.get("status", "skipped") or "skipped")
+    dry_run = bool(smoke_result.get("dry_run", True))
+    invoked = bool(smoke_result.get("local_committee_invoked", False))
+    candidate_count = int(smoke_result.get("candidate_count", 0) or 0)
+    selected_id = str(smoke_result.get("selected_candidate_id", "") or "")
+    selected_applied = bool(smoke_result.get("selected_candidate_applied", False))
+    selected_hash = bool(smoke_result.get("selected_candidate_hash_match", False))
+    patch_sha = str(smoke_result.get("selected_candidate_patch_sha256", "") or "")
+    patch_len = int(smoke_result.get("selected_candidate_patch_length", 0) or 0)
+    solve_ok = bool(smoke_result.get("local_solve_eligible", False))
+
+    runtime_available = invoked and not dry_run
+    h5_compatible = False
+    blocked_reason = ""
+
+    if status == "skipped":
+        runtime_available = False
+        blocked_reason = str(smoke_result.get("skipped_reason", "") or "runtime_unavailable")
+    elif dry_run:
+        runtime_available = False
+        blocked_reason = "dry_run_no_candidate"
+    elif invoked:
+        if candidate_count <= 0:
+            blocked_reason = "no_candidates"
+        elif not selected_id:
+            blocked_reason = "missing_selected_candidate_id"
+        elif not selected_applied:
+            blocked_reason = "selected_candidate_not_applied"
+        elif not selected_hash:
+            blocked_reason = "selected_candidate_hash_not_matched"
+        elif not patch_sha:
+            blocked_reason = "missing_selected_candidate_patch_sha256"
+        elif patch_len <= 0:
+            blocked_reason = "missing_selected_candidate_patch_length"
+        elif not solve_ok:
+            blocked_reason = "local_solve_not_eligible"
+        else:
+            h5_compatible = True
+
+    return {
+        "schema": "nexus.h5_local_committee_smoke_receipt.v1",
+        "source_schema": "nexus.h5_local_committee_e2e_smoke.v1",
+        "status": status,
+        "dry_run": dry_run,
+        "runtime_available": runtime_available,
+        "local_committee_invoked": invoked,
+        "candidate_count": candidate_count,
+        "selected_candidate_id": selected_id,
+        "selected_candidate_applied": selected_applied,
+        "selected_candidate_hash_match": selected_hash,
+        "selected_candidate_patch_sha256": patch_sha,
+        "selected_candidate_patch_length": patch_len,
+        "local_solve_eligible": solve_ok,
+        "h5_local_finalization_candidate_ready": h5_compatible,
+        "h5_local_finalization_blocked_reason": blocked_reason,
+        "h5_compatible": h5_compatible,
+        "final_source_changed": False,
+        "final_patch_replaced": False,
+        "output_mutated": False,
+        "model_calls_incremented": False,
+        "public_claim_allowed": False,
+        "production_ready": False,
+    }
+
+
 def run_h5_local_committee_e2e_smoke(
     repo_root: Path,
     *,
@@ -94,20 +164,24 @@ def run_h5_local_committee_e2e_smoke(
     dry_run=False: attempts real execution only if runtime is available.
     """
     if dry_run:
-        return _build_smoke_result(
+        result = _build_smoke_result(
             status="pass",
             dry_run=True,
             evidence={"note": "dry_run mode, no local committee invoked"},
         )
+        result["receipt"] = build_h5_local_committee_smoke_receipt(result)
+        return result
 
     available, reason = _detect_local_committee_runtime(repo_root)
     if not available:
-        return _build_smoke_result(
+        result = _build_smoke_result(
             status="skipped",
             skipped_reason=reason,
             dry_run=False,
             evidence={"runtime_detection": reason},
         )
+        result["receipt"] = build_h5_local_committee_smoke_receipt(result)
+        return result
 
     # Runtime available: attempt isolated local committee smoke
     try:
@@ -186,7 +260,7 @@ def run_h5_local_committee_e2e_smoke(
                 patch_len = int(c.get("isolated_patch_length", 0) or 0)
                 break
 
-        return _build_smoke_result(
+        result = _build_smoke_result(
             status="pass",
             dry_run=False,
             local_committee_invoked=True,
@@ -199,14 +273,18 @@ def run_h5_local_committee_e2e_smoke(
             local_solve_eligible=solve_ok,
             evidence={"committee_trace": committee_trace},
         )
+        result["receipt"] = build_h5_local_committee_smoke_receipt(result)
+        return result
 
     except Exception as e:
-        return _build_smoke_result(
+        result = _build_smoke_result(
             status="skipped",
             skipped_reason=f"local_committee_execution_error:{e}",
             dry_run=False,
             evidence={"error": str(e)},
         )
+        result["receipt"] = build_h5_local_committee_smoke_receipt(result)
+        return result
 
 
 def main():
@@ -219,6 +297,7 @@ def main():
     dry_run = not args.run_if_available
     repo_root = Path(__file__).resolve().parents[2]
     result = run_h5_local_committee_e2e_smoke(repo_root, dry_run=dry_run)
+    result["receipt"] = build_h5_local_committee_smoke_receipt(result)
     print(json.dumps(result, indent=2, ensure_ascii=False))
 
 
