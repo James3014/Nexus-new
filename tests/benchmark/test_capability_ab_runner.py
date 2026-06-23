@@ -16314,3 +16314,214 @@ def test_h5_9_governance_remains_false_in_every_plan():
         plan = _build_h5_execution_plan(row, provider="gemini")
         assert plan["governance"]["public_claim_allowed"] is False, f"h5={h5_fields}"
         assert plan["governance"]["production_ready"] is False, f"h5={h5_fields}"
+
+
+def test_h5_10_helper_missing_execution_plan_blocks():
+    """H5-10 Test 1: helper missing execution plan blocks."""
+    from scripts.bench.capability_ab_runner import _build_h5_local_finalization_shadow_receipt
+
+    receipt = _build_h5_local_finalization_shadow_receipt({})
+    assert receipt["shadow_only"] is True
+    assert receipt["would_finalize_local_candidate"] is False
+    assert receipt["blocked_reason"] == "missing_execution_plan"
+    assert receipt["public_claim_allowed"] is False
+    assert receipt["production_ready"] is False
+
+
+def test_h5_10_non_local_plan_blocks():
+    """H5-10 Test 2: non-local plan blocks."""
+    from scripts.bench.capability_ab_runner import _build_h5_local_finalization_shadow_receipt
+
+    row = {"h5_execution_plan": {"execution_mode": "cloud_fallback_plan", "execution_allowed": True}}
+    receipt = _build_h5_local_finalization_shadow_receipt(row)
+    assert receipt["would_finalize_local_candidate"] is False
+    assert receipt["blocked_reason"] == "not_local_candidate_plan"
+
+
+def test_h5_10_local_plan_execution_not_allowed_blocks():
+    """H5-10 Test 3: local plan but execution not allowed blocks."""
+    from scripts.bench.capability_ab_runner import _build_h5_local_finalization_shadow_receipt
+
+    row = {"h5_execution_plan": {"execution_mode": "local_candidate_plan", "execution_allowed": False}}
+    receipt = _build_h5_local_finalization_shadow_receipt(row)
+    assert receipt["would_finalize_local_candidate"] is False
+    assert receipt["blocked_reason"] == "execution_not_allowed"
+
+
+def test_h5_10_local_plan_hash_missing_blocks():
+    """H5-10 Test 4: local plan allowed but hash missing blocks."""
+    from scripts.bench.capability_ab_runner import _build_h5_local_finalization_shadow_receipt
+
+    row = {
+        "h5_execution_plan": {"execution_mode": "local_candidate_plan", "execution_allowed": True},
+        "h5_route": {"local_selected_candidate_hash_match": False},
+    }
+    receipt = _build_h5_local_finalization_shadow_receipt(row)
+    assert receipt["would_finalize_local_candidate"] is False
+    assert receipt["blocked_reason"] == "local_candidate_hash_not_verified"
+
+
+def test_h5_10_synthetic_valid_local_plan_produces_would_finalize():
+    """H5-10 Test 5: synthetic valid local plan produces would_finalize shadow."""
+    from scripts.bench.capability_ab_runner import _build_h5_local_finalization_shadow_receipt
+
+    row = {
+        "h5_execution_plan": {"execution_mode": "local_candidate_plan", "execution_allowed": True},
+        "h5_route": {
+            "local_selected_candidate_id": "C_12481#candidate-1",
+            "local_selected_candidate_applied": True,
+            "local_selected_candidate_hash_match": True,
+            "local_solve_eligible": True,
+        },
+        "committee_trace": {
+            "committee_receipt": {
+                "selected_candidate_patch_sha256": "abc123",
+                "selected_candidate_patch_length": 123,
+            },
+        },
+    }
+    receipt = _build_h5_local_finalization_shadow_receipt(row)
+    assert receipt["would_finalize_local_candidate"] is True
+    assert receipt["planned_final_source"] == "local_candidate"
+    assert receipt["candidate_id"] == "C_12481#candidate-1"
+    assert receipt["candidate_hash_match"] is True
+    assert receipt["candidate_patch_sha256"] == "abc123"
+    assert receipt["candidate_patch_length"] == 123
+    assert receipt["requires_output_replacement"] is True
+    assert receipt["requires_final_source_change"] is True
+    assert receipt["requires_behavior_change"] is True
+    assert receipt["public_claim_allowed"] is False
+    assert receipt["production_ready"] is False
+
+
+def test_h5_10_normal_finalize_row_attaches_shadow_but_does_not_finalize(tmp_path, monkeypatch):
+    """H5-10 Test 6: normal row attaches shadow but does not finalize."""
+    from scripts.bench.capability_ab_runner import CapabilityTask, _finalize_with_nexus_row
+
+    task = CapabilityTask(
+        id="test-task-h5-10-attach",
+        difficulty="easy",
+        task_type="test_repair",
+        task_desc="verify h5-10 shadow attachment",
+        target_file="target.py",
+        test_file="test_target.py",
+        expected_capabilities=("claim_gate",),
+        success_criteria="tests_pass",
+        repo_kind="nexus_internal",
+        fixture_kind="test_fixture",
+    )
+    _h5_all_flags_set_with_gate(monkeypatch)
+
+    row = _finalize_with_nexus_row(
+        {
+            "mode": "with_nexus",
+            "model_calls": 1,
+            "total_tokens": 100,
+            "token_capture_status": "measured",
+            "committee_trace": {
+                "candidate_count": 2,
+                "judge_selection": {"selected_candidate_id": "C_12481#candidate-1"},
+                "committee_receipt": {"selected_candidate_applied": True, "selected_candidate_apply_hash_match": True},
+            },
+            "local_solve_eligible": True,
+        },
+        provider="gemini",
+        model_required=True,
+        nexus_required=False,
+        task=task,
+        repo_root=tmp_path,
+    )
+
+    shadow = row["h5_local_finalization_shadow_receipt"]
+    assert shadow["shadow_only"] is True
+    assert shadow["would_finalize_local_candidate"] is False
+    assert row.get("final_source", "none") == "none"
+    assert row["behavior_changed"] is False
+    assert row["h5_route"]["cloud_fallback_invoked"] is False
+
+
+def test_h5_10_helper_purity():
+    """H5-10 Test 7: helper does not mutate input row."""
+    import copy
+    from scripts.bench.capability_ab_runner import _build_h5_local_finalization_shadow_receipt
+
+    row = {
+        "h5_execution_plan": {"execution_mode": "local_candidate_plan", "execution_allowed": True},
+        "h5_route": {
+            "local_selected_candidate_id": "C_12481#candidate-1",
+            "local_selected_candidate_hash_match": True,
+            "local_solve_eligible": True,
+        },
+        "committee_trace": {"committee_receipt": {"selected_candidate_patch_sha256": "abc"}},
+    }
+    original = copy.deepcopy(row)
+    _build_h5_local_finalization_shadow_receipt(row)
+    assert row == original
+
+
+def test_h5_10_bundle_summary_counters(tmp_path, monkeypatch):
+    """H5-10 Test 8: summary counters include shadow receipt counts."""
+    from scripts.bench.capability_ab_runner import CapabilityTask, _finalize_with_nexus_row, write_evidence_bundle
+
+    task = CapabilityTask(
+        id="test-task-h5-10-summary",
+        difficulty="easy",
+        task_type="test_repair",
+        task_desc="verify h5-10 summary",
+        target_file="target.py",
+        test_file="test_target.py",
+        expected_capabilities=("claim_gate",),
+        success_criteria="tests_pass",
+        repo_kind="nexus_internal",
+        fixture_kind="test_fixture",
+    )
+    _h5_all_flags_set_with_gate(monkeypatch)
+    monkeypatch.setattr("scripts.bench.capability_ab_runner._git_commit", lambda x: "dummy-commit")
+
+    row = _finalize_with_nexus_row(
+        {
+            "mode": "with_nexus",
+            "model_calls": 1,
+            "total_tokens": 100,
+            "token_capture_status": "measured",
+            "committee_trace": {
+                "candidate_count": 2,
+                "judge_selection": {"selected_candidate_id": "C_12481#candidate-1"},
+                "committee_receipt": {"selected_candidate_applied": True, "selected_candidate_apply_hash_match": True},
+            },
+            "local_solve_eligible": True,
+        },
+        provider="gemini",
+        model_required=True,
+        nexus_required=False,
+        task=task,
+        repo_root=tmp_path,
+    )
+
+    with_path = tmp_path / "with.jsonl"
+    without_path = tmp_path / "without.jsonl"
+    with_path.write_text("[]", encoding="utf-8")
+    without_path.write_text("[]", encoding="utf-8")
+
+    bundle_file = write_evidence_bundle(
+        out_dir=tmp_path,
+        with_path=with_path,
+        without_path=without_path,
+        rows=[row],
+        config={
+            "tasks_file": "tasks.json",
+            "tasks_manifest_hash": "manifest_hash",
+            "unique_tasks_requested": 1,
+            "repeat_trials": 1,
+            "timeout_sec": 60,
+        },
+    )
+
+    bundle_data = json.loads(bundle_file.read_text(encoding="utf-8"))
+    summary = bundle_data["hybrid_route_summary"]
+    assert summary["h5_local_finalization_shadow_count"] >= 1
+    assert summary["h5_local_finalization_would_finalize_count"] == 0
+    assert summary["h5_local_finalization_blocked_count"] >= 1
+    assert summary["h5_cloud_fallback_invoked_count"] == 0
+    assert summary["h5_behavior_changed_count"] == 0
+    assert summary["h5_fail_closed_count"] == 0

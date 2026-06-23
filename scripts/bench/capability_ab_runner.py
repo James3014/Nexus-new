@@ -5502,6 +5502,84 @@ def _build_h5_execution_plan(row: dict[str, Any], *, provider: str) -> dict[str,
     }
 
 
+def _build_h5_local_finalization_shadow_receipt(row: dict[str, Any]) -> dict[str, Any]:
+    """Pure helper: builds local candidate finalization shadow receipt.
+
+    No side effects. No model calls. No row mutation.
+    Records what would need to change if a local candidate became final.
+    """
+    plan = row.get("h5_execution_plan")
+    h5 = row.get("h5_route", {})
+
+    result = {
+        "schema": "nexus.hybrid_h5_local_finalization_shadow_receipt.v1",
+        "shadow_only": True,
+        "would_finalize_local_candidate": False,
+        "planned_final_source": "none",
+        "candidate_id": "",
+        "candidate_applied": False,
+        "candidate_hash_match": False,
+        "candidate_solve_eligible": False,
+        "candidate_patch_sha256": "",
+        "candidate_patch_length": 0,
+        "requires_output_replacement": False,
+        "requires_final_source_change": False,
+        "requires_behavior_change": False,
+        "requires_verifier": True,
+        "requires_claim_gate": True,
+        "blocked_reason": "",
+        "public_claim_allowed": False,
+        "production_ready": False,
+    }
+
+    if not plan:
+        result["blocked_reason"] = "missing_execution_plan"
+        return result
+
+    if plan.get("execution_mode", "") != "local_candidate_plan":
+        result["blocked_reason"] = "not_local_candidate_plan"
+        return result
+
+    if not plan.get("execution_allowed", False):
+        result["blocked_reason"] = "execution_not_allowed"
+        return result
+
+    hash_ok = bool(h5.get("local_selected_candidate_hash_match", False))
+    if not hash_ok:
+        result["blocked_reason"] = "local_candidate_hash_not_verified"
+        return result
+
+    # True path: would finalize local candidate
+    result["would_finalize_local_candidate"] = True
+    result["planned_final_source"] = "local_candidate"
+    result["candidate_id"] = str(h5.get("local_selected_candidate_id", "") or "")
+    result["candidate_applied"] = bool(h5.get("local_selected_candidate_applied", False))
+    result["candidate_hash_match"] = hash_ok
+    result["candidate_solve_eligible"] = bool(h5.get("local_solve_eligible", False))
+    result["requires_output_replacement"] = True
+    result["requires_final_source_change"] = True
+    result["requires_behavior_change"] = True
+    result["blocked_reason"] = ""
+
+    # Copy patch metadata from committee_trace if available
+    local_trace = row.get("committee_trace") or row.get("local_committee_trace")
+    if local_trace:
+        rc = local_trace.get("committee_receipt", {})
+        result["candidate_patch_sha256"] = str(rc.get("selected_candidate_patch_sha256", "") or "")
+        result["candidate_patch_length"] = int(rc.get("selected_candidate_patch_length", 0) or 0)
+        if not result["candidate_patch_sha256"]:
+            for c in local_trace.get("proposer_candidates", []):
+                if c.get("candidate_id") == result["candidate_id"]:
+                    result["candidate_patch_sha256"] = str(c.get("isolated_patch_sha256", "") or c.get("patch_sha256", "") or "")
+                    result["candidate_patch_length"] = int(c.get("isolated_patch_length", 0) or c.get("patch_length", 0) or 0)
+                    break
+
+    if not result["candidate_patch_sha256"]:
+        result["blocked_reason"] = "local_candidate_patch_metadata_missing"
+
+    return result
+
+
 def _finalize_with_nexus_row(
     row: dict[str, Any],
     *,
@@ -5933,6 +6011,9 @@ def _finalize_with_nexus_row(
         # H5-8: Execution plan builder trace
         if enable_h5_trace and finalized.get("h5_route", {}).get("execution_gate_evaluated", False):
             finalized["h5_execution_plan"] = _build_h5_execution_plan(finalized, provider=provider)
+
+            # H5-10: Local candidate finalization shadow receipt
+            finalized["h5_local_finalization_shadow_receipt"] = _build_h5_local_finalization_shadow_receipt(finalized)
 
     # Ensure keys are also on the row level for simple flat queries
     finalized["route_mode"] = r_mode
@@ -9637,6 +9718,11 @@ def write_evidence_bundle(
         "h5_execution_plan_fail_closed_count": sum(1 for row in with_rows if str(row.get("h5_execution_plan", {}).get("execution_mode", "")) == "fail_closed_plan"),
         "h5_execution_plan_local_candidate_count": sum(1 for row in with_rows if str(row.get("h5_execution_plan", {}).get("execution_mode", "")) == "local_candidate_plan"),
         "h5_execution_plan_cloud_fallback_count": sum(1 for row in with_rows if str(row.get("h5_execution_plan", {}).get("execution_mode", "")) == "cloud_fallback_plan"),
+        "h5_local_finalization_shadow_count": sum(1 for row in with_rows if bool(row.get("h5_local_finalization_shadow_receipt"))),
+        "h5_local_finalization_would_finalize_count": sum(1 for row in with_rows if bool(row.get("h5_local_finalization_shadow_receipt", {}).get("would_finalize_local_candidate", False))),
+        "h5_local_finalization_blocked_count": sum(1 for row in with_rows if bool(row.get("h5_local_finalization_shadow_receipt")) and not bool(row.get("h5_local_finalization_shadow_receipt", {}).get("would_finalize_local_candidate", False))),
+        "h5_local_finalization_missing_plan_count": sum(1 for row in with_rows if str(row.get("h5_local_finalization_shadow_receipt", {}).get("blocked_reason", "")) == "missing_execution_plan"),
+        "h5_local_finalization_hash_not_verified_count": sum(1 for row in with_rows if str(row.get("h5_local_finalization_shadow_receipt", {}).get("blocked_reason", "")) == "local_candidate_hash_not_verified"),
     }
     payload["external_provider_claim_boundary_contract"] = build_external_provider_claim_boundary_contract(payload)
     payload["public_promotion_readiness_contract"] = build_public_promotion_readiness_contract(payload)
