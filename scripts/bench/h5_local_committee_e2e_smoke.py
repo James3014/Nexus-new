@@ -226,6 +226,106 @@ def build_h5_local_committee_readiness_bridge(smoke_receipt: dict[str, Any]) -> 
     }
 
 
+def build_h5_local_committee_smoke_evidence_bundle(smoke_result: dict[str, Any]) -> dict[str, Any]:
+    """Pure adapter: packages smoke result, receipt, readiness bridge into evidence bundle.
+
+    No side effects. No model calls. No mutation.
+    """
+    bundle_status = "pass"
+    blocked_reasons = []
+    can_feed = False
+
+    if not smoke_result:
+        return {
+            "schema": "nexus.h5_local_committee_smoke_evidence_bundle.v1",
+            "source_schema": "nexus.h5_local_committee_e2e_smoke.v1",
+            "bundle_status": "blocked",
+            "can_feed_h5_readiness_shadow": False,
+            "smoke_status": "",
+            "smoke": {},
+            "receipt": {},
+            "readiness_bridge": {},
+            "safety": _safety_dict(),
+            "governance": _governance_dict(),
+            "blocked_reasons": ["missing_smoke_result"],
+        }
+
+    smoke_status = str(smoke_result.get("status", "skipped") or "skipped")
+    receipt = smoke_result.get("receipt")
+    bridge = smoke_result.get("readiness_bridge")
+
+    if not receipt:
+        bundle_status = "blocked"
+        blocked_reasons.append("missing_smoke_receipt")
+    if not bridge:
+        bundle_status = "blocked"
+        blocked_reasons.append("missing_readiness_bridge")
+
+    if smoke_status == "skipped":
+        bundle_status = "skipped"
+        blocked_reasons.append(str(smoke_result.get("skipped_reason", "") or "smoke_skipped"))
+
+    if bridge and bridge.get("readiness_status", "") != "ready_shadow":
+        bundle_status = "blocked"
+        blocked_reasons.extend(bridge.get("readiness_reasons", []))
+
+    if bridge and bridge.get("can_feed_h5_readiness_shadow", False):
+        bundle_status = "pass"
+        can_feed = True
+        blocked_reasons = []
+
+    # Safety invariant override
+    safety = _safety_from_smoke(smoke_result)
+    if any(safety.values()):
+        bundle_status = "blocked"
+        can_feed = False
+        blocked_reasons.append("safety_invariant_violation")
+
+    return {
+        "schema": "nexus.h5_local_committee_smoke_evidence_bundle.v1",
+        "source_schema": "nexus.h5_local_committee_e2e_smoke.v1",
+        "bundle_status": bundle_status,
+        "can_feed_h5_readiness_shadow": can_feed,
+        "smoke_status": smoke_status,
+        "smoke_summary": {
+            "status": smoke_status,
+            "dry_run": bool(smoke_result.get("dry_run", True)),
+            "local_committee_invoked": bool(smoke_result.get("local_committee_invoked", False)),
+        },
+        "receipt": receipt or {},
+        "readiness_bridge": bridge or {},
+        "safety": safety,
+        "governance": _governance_dict(),
+        "blocked_reasons": blocked_reasons,
+    }
+
+
+def _safety_dict() -> dict[str, bool]:
+    return {
+        "final_source_changed": False,
+        "final_patch_replaced": False,
+        "output_mutated": False,
+        "model_calls_incremented": False,
+        "public_claim_allowed": False,
+        "production_ready": False,
+    }
+
+
+def _safety_from_smoke(smoke_result: dict[str, Any]) -> dict[str, bool]:
+    return {
+        "final_source_changed": bool(smoke_result.get("final_source_changed", False)),
+        "final_patch_replaced": bool(smoke_result.get("final_patch_replaced", False)),
+        "output_mutated": bool(smoke_result.get("output_mutated", False)),
+        "model_calls_incremented": bool(smoke_result.get("model_calls_incremented", False)),
+        "public_claim_allowed": bool(smoke_result.get("public_claim_allowed", False)),
+        "production_ready": bool(smoke_result.get("production_ready", False)),
+    }
+
+
+def _governance_dict() -> dict[str, Any]:
+    return {"public_claim_allowed": False, "production_ready": False, "internal_only": True}
+
+
 def run_h5_local_committee_e2e_smoke(
     repo_root: Path,
     *,
@@ -244,6 +344,7 @@ def run_h5_local_committee_e2e_smoke(
         )
         result["receipt"] = build_h5_local_committee_smoke_receipt(result)
         result["readiness_bridge"] = build_h5_local_committee_readiness_bridge(result["receipt"])
+        result["evidence_bundle"] = build_h5_local_committee_smoke_evidence_bundle(result)
         return result
 
     available, reason = _detect_local_committee_runtime(repo_root)
@@ -256,6 +357,7 @@ def run_h5_local_committee_e2e_smoke(
         )
         result["receipt"] = build_h5_local_committee_smoke_receipt(result)
         result["readiness_bridge"] = build_h5_local_committee_readiness_bridge(result["receipt"])
+        result["evidence_bundle"] = build_h5_local_committee_smoke_evidence_bundle(result)
         return result
 
     # Runtime available: attempt isolated local committee smoke
@@ -350,6 +452,7 @@ def run_h5_local_committee_e2e_smoke(
         )
         result["receipt"] = build_h5_local_committee_smoke_receipt(result)
         result["readiness_bridge"] = build_h5_local_committee_readiness_bridge(result["receipt"])
+        result["evidence_bundle"] = build_h5_local_committee_smoke_evidence_bundle(result)
         return result
 
     except Exception as e:
@@ -361,6 +464,7 @@ def run_h5_local_committee_e2e_smoke(
         )
         result["receipt"] = build_h5_local_committee_smoke_receipt(result)
         result["readiness_bridge"] = build_h5_local_committee_readiness_bridge(result["receipt"])
+        result["evidence_bundle"] = build_h5_local_committee_smoke_evidence_bundle(result)
         return result
 
 

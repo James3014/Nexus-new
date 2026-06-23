@@ -379,3 +379,133 @@ def test_h5_16_cli_dry_run_includes_readiness_bridge():
     assert "readiness_bridge" in data
     assert data["readiness_bridge"]["schema"] == "nexus.h5_local_committee_readiness_bridge.v1"
     assert data["readiness_bridge"]["readiness_status"] == "blocked"
+
+
+def test_h5_17_dry_run_output_includes_evidence_bundle():
+    """H5-17 Test 1: dry-run output includes evidence_bundle."""
+    from scripts.bench.h5_local_committee_e2e_smoke import run_h5_local_committee_e2e_smoke
+
+    repo_root = Path(__file__).resolve().parents[2]
+    result = run_h5_local_committee_e2e_smoke(repo_root, dry_run=True)
+
+    bundle = result["evidence_bundle"]
+    assert bundle["schema"] == "nexus.h5_local_committee_smoke_evidence_bundle.v1"
+    assert bundle["bundle_status"] == "blocked"
+    assert bundle["can_feed_h5_readiness_shadow"] is False
+    assert any("dry_run" in r for r in bundle["blocked_reasons"])
+
+
+def test_h5_17_skipped_smoke_maps_to_skipped_bundle(monkeypatch):
+    """H5-17 Test 2: skipped smoke maps to skipped bundle."""
+    from scripts.bench.h5_local_committee_e2e_smoke import run_h5_local_committee_e2e_smoke
+
+    def _fake_detect(repo_root):
+        return False, "local_committee_runtime_unavailable"
+
+    monkeypatch.setattr("scripts.bench.h5_local_committee_e2e_smoke._detect_local_committee_runtime", _fake_detect)
+
+    repo_root = Path(__file__).resolve().parents[2]
+    result = run_h5_local_committee_e2e_smoke(repo_root, dry_run=False)
+
+    bundle = result["evidence_bundle"]
+    assert bundle["bundle_status"] == "blocked"
+    assert bundle["can_feed_h5_readiness_shadow"] is False
+    assert len(bundle["blocked_reasons"]) > 0
+
+
+def test_h5_17_synthetic_ready_shadow_maps_to_pass_bundle():
+    """H5-17 Test 3: synthetic ready shadow maps to pass bundle."""
+    from scripts.bench.h5_local_committee_e2e_smoke import build_h5_local_committee_smoke_evidence_bundle
+
+    smoke = {
+        "status": "pass",
+        "dry_run": False,
+        "local_committee_invoked": True,
+        "candidate_count": 1,
+        "selected_candidate_id": "C_1#candidate-0",
+        "selected_candidate_applied": True,
+        "selected_candidate_hash_match": True,
+        "selected_candidate_patch_sha256": "abc123",
+        "selected_candidate_patch_length": 123,
+        "local_solve_eligible": True,
+    }
+    from scripts.bench.h5_local_committee_e2e_smoke import build_h5_local_committee_smoke_receipt, build_h5_local_committee_readiness_bridge
+    receipt = build_h5_local_committee_smoke_receipt(smoke)
+    bridge = build_h5_local_committee_readiness_bridge(receipt)
+    smoke["receipt"] = receipt
+    smoke["readiness_bridge"] = bridge
+
+    bundle = build_h5_local_committee_smoke_evidence_bundle(smoke)
+    assert bundle["bundle_status"] == "pass"
+    assert bundle["can_feed_h5_readiness_shadow"] is True
+    assert bundle["blocked_reasons"] == []
+
+
+def test_h5_17_missing_receipt_blocks():
+    """H5-17 Test 4: missing receipt blocks."""
+    from scripts.bench.h5_local_committee_e2e_smoke import build_h5_local_committee_smoke_evidence_bundle
+
+    smoke = {"status": "pass", "dry_run": False}
+    bundle = build_h5_local_committee_smoke_evidence_bundle(smoke)
+    assert bundle["bundle_status"] == "blocked"
+    assert "missing_smoke_receipt" in bundle["blocked_reasons"]
+
+
+def test_h5_17_missing_readiness_bridge_blocks():
+    """H5-17 Test 5: missing readiness bridge blocks."""
+    from scripts.bench.h5_local_committee_e2e_smoke import build_h5_local_committee_smoke_evidence_bundle, build_h5_local_committee_smoke_receipt
+
+    smoke = {
+        "status": "pass",
+        "dry_run": False,
+        "local_committee_invoked": True,
+        "candidate_count": 1,
+        "selected_candidate_id": "C_1#candidate-0",
+        "selected_candidate_applied": True,
+        "selected_candidate_hash_match": True,
+        "selected_candidate_patch_sha256": "abc",
+        "selected_candidate_patch_length": 1,
+        "local_solve_eligible": True,
+    }
+    smoke["receipt"] = build_h5_local_committee_smoke_receipt(smoke)
+    bundle = build_h5_local_committee_smoke_evidence_bundle(smoke)
+    assert bundle["bundle_status"] == "blocked"
+    assert "missing_readiness_bridge" in bundle["blocked_reasons"]
+
+
+def test_h5_17_safety_invariant_violation_blocks():
+    """H5-17 Test 6: safety invariant violation blocks."""
+    from scripts.bench.h5_local_committee_e2e_smoke import build_h5_local_committee_smoke_evidence_bundle
+
+    smoke = {"status": "pass", "dry_run": False, "final_source_changed": True}
+    bundle = build_h5_local_committee_smoke_evidence_bundle(smoke)
+    assert bundle["bundle_status"] == "blocked"
+    assert "safety_invariant_violation" in bundle["blocked_reasons"]
+    assert bundle["can_feed_h5_readiness_shadow"] is False
+
+
+def test_h5_17_governance_always_false():
+    """H5-17 Test 7: governance always false."""
+    from scripts.bench.h5_local_committee_e2e_smoke import build_h5_local_committee_smoke_evidence_bundle
+
+    for smoke in [{}, {"status": "skipped", "dry_run": True}, {"status": "pass", "dry_run": True}]:
+        bundle = build_h5_local_committee_smoke_evidence_bundle(smoke)
+        assert bundle["governance"]["public_claim_allowed"] is False
+        assert bundle["governance"]["production_ready"] is False
+        assert bundle["governance"]["internal_only"] is True
+
+
+def test_h5_17_cli_dry_run_includes_evidence_bundle():
+    """H5-17 Test 8: CLI dry-run includes evidence_bundle."""
+    script = Path(__file__).resolve().parents[2] / "scripts" / "bench" / "h5_local_committee_e2e_smoke.py"
+    result = subprocess.run(
+        [sys.executable, str(script), "--dry-run"],
+        capture_output=True,
+        text=True,
+        timeout=30,
+    )
+    assert result.returncode == 0
+    data = json.loads(result.stdout)
+    assert "evidence_bundle" in data
+    assert data["evidence_bundle"]["schema"] == "nexus.h5_local_committee_smoke_evidence_bundle.v1"
+    assert data["evidence_bundle"]["bundle_status"] == "blocked"
