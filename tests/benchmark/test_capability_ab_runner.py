@@ -18821,3 +18821,227 @@ def test_h5_31_bundle_summary_counters(tmp_path, monkeypatch):
     assert summary["h5_cloud_fallback_invoked_count"] == 0
     assert summary["h5_actual_final_patch_replaced_count"] == 0
     assert summary["h5_actual_output_mutated_count"] == 0
+
+
+def test_h5_32_empty_row_blocks():
+    """H5-32 Test 1: empty row blocks."""
+    from scripts.bench.capability_ab_runner import _build_h5_final_source_apply_preflight_receipt
+
+    receipt = _build_h5_final_source_apply_preflight_receipt({})
+    assert receipt["preflight_status"] == "blocked"
+    assert receipt["would_pass_final_source_apply_preflight"] is False
+    assert receipt["actual_final_source_after"] == "none"
+    assert receipt["actual_final_source_changed"] is False
+
+
+def test_h5_32_preflight_flag_missing_blocks(monkeypatch):
+    """H5-32 Test 2: ready trial receipt but apply preflight flag missing blocks."""
+    from scripts.bench.capability_ab_runner import _build_h5_final_source_apply_preflight_receipt
+
+    for var in ("NEXUS_H5_ALLOW_FINAL_SOURCE_APPLY_PREFLIGHT",):
+        monkeypatch.delenv(var, raising=False)
+
+    row = {
+        "h5_local_final_source_controlled_trial_receipt": {
+            "would_allow_final_source_trial": True, "trial_status": "trial_ready_blocked",
+        },
+        "h5_controlled_mutation_gate": {
+            "safe_to_continue": True, "rollback_required": False, "all_required_flags_enabled": True,
+        },
+        "h5_local_candidate_rollback_dry_run": {"rollback_available": True, "safe_to_continue": True},
+        "final_source": "none",
+    }
+    receipt = _build_h5_final_source_apply_preflight_receipt(row)
+    assert receipt["would_pass_final_source_apply_preflight"] is False
+    assert "final_source_apply_preflight_flag_not_enabled" in receipt["preflight_reasons"]
+
+
+def test_h5_32_preflight_flag_enabled_passes_shadow_only(monkeypatch):
+    """H5-32 Test 3: apply preflight flag enabled + ready inputs passes shadow-only."""
+    from scripts.bench.capability_ab_runner import _build_h5_final_source_apply_preflight_receipt
+
+    monkeypatch.setenv("NEXUS_H5_ALLOW_FINAL_SOURCE_APPLY_PREFLIGHT", "1")
+
+    row = {
+        "h5_local_final_source_controlled_trial_receipt": {
+            "would_allow_final_source_trial": True, "trial_status": "trial_ready_blocked",
+        },
+        "h5_controlled_mutation_gate": {
+            "safe_to_continue": True, "rollback_required": False, "all_required_flags_enabled": True,
+        },
+        "h5_local_candidate_rollback_dry_run": {"rollback_available": True, "safe_to_continue": True},
+        "final_source": "none",
+    }
+    receipt = _build_h5_final_source_apply_preflight_receipt(row)
+    assert receipt["would_pass_final_source_apply_preflight"] is True
+    assert receipt["preflight_status"] == "preflight_pass_shadow_only"
+    assert receipt["actual_final_source_after"] == "none"
+    assert receipt["actual_final_source_changed"] is False
+    assert receipt["controlled_mutation_allowed"] is False
+    assert receipt["apply_side_effects_allowed"] is False
+    assert receipt["final_patch_replacement_allowed"] is False
+    assert receipt["output_mutation_allowed"] is False
+
+
+def test_h5_32_rollback_not_available_blocks():
+    """H5-32 Test 4: rollback not available blocks."""
+    from scripts.bench.capability_ab_runner import _build_h5_final_source_apply_preflight_receipt
+
+    row = {
+        "h5_local_final_source_controlled_trial_receipt": {
+            "would_allow_final_source_trial": True, "trial_status": "trial_ready_blocked",
+        },
+        "h5_controlled_mutation_gate": {
+            "safe_to_continue": True, "rollback_required": False, "all_required_flags_enabled": True,
+        },
+        "h5_local_candidate_rollback_dry_run": {"rollback_available": False, "safe_to_continue": True},
+        "final_source": "none",
+    }
+    receipt = _build_h5_final_source_apply_preflight_receipt(row)
+    assert receipt["would_pass_final_source_apply_preflight"] is False
+    assert "rollback_not_available" in receipt["preflight_reasons"]
+
+
+def test_h5_32_rollback_required_blocks():
+    """H5-32 Test 5: rollback required blocks."""
+    from scripts.bench.capability_ab_runner import _build_h5_final_source_apply_preflight_receipt
+
+    row = {
+        "h5_local_final_source_controlled_trial_receipt": {
+            "would_allow_final_source_trial": True, "trial_status": "trial_ready_blocked",
+        },
+        "h5_controlled_mutation_gate": {
+            "safe_to_continue": False, "rollback_required": True, "all_required_flags_enabled": True,
+        },
+        "h5_local_candidate_rollback_dry_run": {"rollback_available": True, "safe_to_continue": True},
+        "final_source": "none",
+    }
+    receipt = _build_h5_final_source_apply_preflight_receipt(row)
+    assert receipt["would_pass_final_source_apply_preflight"] is False
+    assert "rollback_required" in receipt["preflight_reasons"]
+
+
+def test_h5_32_unexpected_final_source_detected():
+    """H5-32 Test 6: unexpected final_source change blocks."""
+    from scripts.bench.capability_ab_runner import _build_h5_final_source_apply_preflight_receipt
+
+    row = {"final_source": "local_candidate_shadow_promoted"}
+    receipt = _build_h5_final_source_apply_preflight_receipt(row)
+    assert receipt["actual_final_source_changed"] is True
+    assert receipt["would_pass_final_source_apply_preflight"] is False
+    assert "unexpected_actual_final_source_change" in receipt["preflight_reasons"]
+
+
+def test_h5_32_finalized_row_attaches_preflight(tmp_path, monkeypatch):
+    """H5-32 Test 7: finalized row attaches preflight receipt."""
+    from scripts.bench.capability_ab_runner import CapabilityTask, _finalize_with_nexus_row
+
+    task = CapabilityTask(
+        id="test-task-h5-32", difficulty="easy", task_type="test_repair",
+        task_desc="verify h5-32", target_file="target.py", test_file="test_target.py",
+        expected_capabilities=("claim_gate",), success_criteria="tests_pass",
+        repo_kind="nexus_internal", fixture_kind="test_fixture",
+    )
+    _h5_all_flags_set_with_gate(monkeypatch)
+
+    row = _finalize_with_nexus_row(
+        {"mode": "with_nexus", "model_calls": 1, "total_tokens": 100,
+         "token_capture_status": "measured",
+         "committee_trace": {"candidate_count": 2, "judge_selection": {"selected_candidate_id": "C_12481#candidate-1"},
+                              "committee_receipt": {"selected_candidate_applied": True, "selected_candidate_apply_hash_match": True}},
+         "local_solve_eligible": True},
+        provider="gemini", model_required=True, nexus_required=False, task=task, repo_root=tmp_path,
+    )
+
+    receipt = row["h5_final_source_apply_preflight_receipt"]
+    assert receipt["actual_final_source_after"] == "none"
+    assert receipt["actual_final_source_changed"] is False
+    assert row.get("final_source", "none") == "none"
+    assert row["behavior_changed"] is False
+
+
+def test_h5_32_all_six_flags_no_mutate(tmp_path, monkeypatch):
+    """H5-32 Test 8: all six flags + accepted evidence may pass shadow-only but no mutate."""
+    from scripts.bench.capability_ab_runner import CapabilityTask, _finalize_with_nexus_row
+
+    task = CapabilityTask(
+        id="test-task-h5-32-nomut", difficulty="easy", task_type="test_repair",
+        task_desc="verify h5-32 no mutate", target_file="target.py", test_file="test_target.py",
+        expected_capabilities=("claim_gate",), success_criteria="tests_pass",
+        repo_kind="nexus_internal", fixture_kind="test_fixture",
+    )
+    _h5_all_flags_set_with_gate(monkeypatch)
+
+    row = _finalize_with_nexus_row(
+        {"mode": "with_nexus", "model_calls": 1, "total_tokens": 100,
+         "token_capture_status": "measured",
+         "committee_trace": {"candidate_count": 2, "judge_selection": {"selected_candidate_id": "C_12481#candidate-1"},
+                              "committee_receipt": {"selected_candidate_applied": True, "selected_candidate_apply_hash_match": True}},
+         "local_solve_eligible": True,
+         "external_local_evidence_ingestion_validation": {
+             "schema": "nexus.h5_local_committee_evidence_ingestion_validation.v1",
+             "validation_status": "accepted", "accepted_for_h5_readiness_shadow": True,
+         },
+         "external_cloud_evidence_ingestion_validation": {
+             "schema": "nexus.h5_cloud_fallback_evidence_ingestion_validation.v1",
+             "validation_status": "accepted", "accepted_for_h5_readiness_shadow": True,
+         }},
+        provider="gemini", model_required=True, nexus_required=False, task=task, repo_root=tmp_path,
+    )
+
+    receipt = row["h5_final_source_apply_preflight_receipt"]
+    assert receipt["actual_final_source_after"] == "none"
+    assert receipt["actual_final_source_changed"] is False
+    assert row.get("final_source", "none") == "none"
+    assert row["behavior_changed"] is False
+    assert receipt["controlled_mutation_allowed"] is False
+    assert receipt["apply_side_effects_allowed"] is False
+    assert receipt["final_patch_replacement_allowed"] is False
+    assert receipt["output_mutation_allowed"] is False
+
+
+def test_h5_32_bundle_summary_counters(tmp_path, monkeypatch):
+    """H5-32 Test 9: summary counters."""
+    from scripts.bench.capability_ab_runner import CapabilityTask, _finalize_with_nexus_row, write_evidence_bundle
+
+    task = CapabilityTask(
+        id="test-task-h5-32-summary", difficulty="easy", task_type="test_repair",
+        task_desc="verify h5-32 summary", target_file="target.py", test_file="test_target.py",
+        expected_capabilities=("claim_gate",), success_criteria="tests_pass",
+        repo_kind="nexus_internal", fixture_kind="test_fixture",
+    )
+    _h5_all_flags_set_with_gate(monkeypatch)
+    monkeypatch.setattr("scripts.bench.capability_ab_runner._git_commit", lambda x: "dummy-commit")
+
+    row = _finalize_with_nexus_row(
+        {"mode": "with_nexus", "model_calls": 1, "total_tokens": 100,
+         "token_capture_status": "measured",
+         "committee_trace": {"candidate_count": 2, "judge_selection": {"selected_candidate_id": "C_12481#candidate-1"},
+                              "committee_receipt": {"selected_candidate_applied": True, "selected_candidate_apply_hash_match": True}},
+         "local_solve_eligible": True},
+        provider="gemini", model_required=True, nexus_required=False, task=task, repo_root=tmp_path,
+    )
+
+    with_path = tmp_path / "with.jsonl"
+    without_path = tmp_path / "without.jsonl"
+    with_path.write_text("[]", encoding="utf-8")
+    without_path.write_text("[]", encoding="utf-8")
+
+    bundle_file = write_evidence_bundle(
+        out_dir=tmp_path, with_path=with_path, without_path=without_path,
+        rows=[row],
+        config={"tasks_file": "tasks.json", "tasks_manifest_hash": "manifest_hash",
+                "unique_tasks_requested": 1, "repeat_trials": 1, "timeout_sec": 60},
+    )
+
+    bundle_data = json.loads(bundle_file.read_text(encoding="utf-8"))
+    summary = bundle_data["hybrid_route_summary"]
+    assert summary["h5_final_source_apply_preflight_receipt_count"] >= 1
+    assert summary["h5_final_source_apply_preflight_actual_change_count"] == 0
+    assert summary["h5_final_source_apply_preflight_rollback_required_count"] == 0
+    assert summary["h5_controlled_mutation_allowed_count"] == 0
+    assert summary["h5_execution_allowed_count"] == 0
+    assert summary["h5_behavior_changed_count"] == 0
+    assert summary["h5_cloud_fallback_invoked_count"] == 0
+    assert summary["h5_actual_final_patch_replaced_count"] == 0
+    assert summary["h5_actual_output_mutated_count"] == 0

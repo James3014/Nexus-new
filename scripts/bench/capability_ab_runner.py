@@ -6672,6 +6672,102 @@ def _build_h5_local_final_source_controlled_trial_receipt(row: dict[str, Any]) -
     }
 
 
+def _build_h5_final_source_apply_preflight_receipt(row: dict[str, Any]) -> dict[str, Any]:
+    """Pure helper: builds final_source apply preflight receipt.
+
+    No side effects. No model calls. No mutation. No actual final_source change.
+    """
+    import os as _os
+
+    trial = row.get("h5_local_final_source_controlled_trial_receipt")
+    gate = row.get("h5_controlled_mutation_gate")
+    rollback = row.get("h5_local_candidate_rollback_dry_run")
+
+    actual_fs = str(row.get("final_source", "none") or "none")
+    h5_fs = str(row.get("h5_route", {}).get("final_source", "none") or "none")
+    actual_changed = actual_fs != "none" or h5_fs != "none"
+
+    flag_preflight = _os.environ.get("NEXUS_H5_ALLOW_FINAL_SOURCE_APPLY_PREFLIGHT", "").strip() == "1"
+
+    reasons = []
+
+    trial_present = bool(trial)
+    trial_ready = bool(trial and trial.get("would_allow_final_source_trial", False))
+    trial_blocked = bool(trial and trial.get("trial_status") == "trial_ready_blocked")
+
+    gate_present = bool(gate)
+    gate_safe = bool(gate and gate.get("safe_to_continue", True))
+    gate_rollback = bool(gate and gate.get("rollback_required", False))
+    all_flags = bool(gate and gate.get("all_required_flags_enabled", False))
+
+    rb_available = bool(rollback and rollback.get("rollback_available", False))
+    rb_safe = bool(rollback and rollback.get("safe_to_continue", True))
+
+    would_pass = (
+        trial_present and trial_ready and trial_blocked
+        and gate_present and gate_safe and not gate_rollback and all_flags
+        and rb_available and rb_safe
+        and flag_preflight
+        and actual_fs == "none"
+    )
+
+    if not trial_present:
+        reasons.append("missing_trial_receipt")
+    if trial and not trial_ready:
+        reasons.append("trial_receipt_not_ready")
+    if not gate_present:
+        reasons.append("missing_controlled_mutation_gate")
+    if gate and not gate_safe:
+        reasons.append("controlled_mutation_gate_not_safe")
+    if not all_flags:
+        reasons.append("required_flags_not_enabled")
+    if not flag_preflight:
+        reasons.append("final_source_apply_preflight_flag_not_enabled")
+    if not rb_available:
+        reasons.append("rollback_not_available")
+    if gate and gate_rollback:
+        reasons.append("rollback_required")
+    if actual_changed:
+        reasons.append("unexpected_actual_final_source_change")
+
+    reasons.extend([
+        "h5_32_preflight_only_no_actual_final_source_change",
+        "real_final_source_apply_not_implemented",
+        "final_patch_replacement_still_blocked",
+        "output_mutation_still_blocked",
+    ])
+
+    preflight_status = "preflight_pass_shadow_only" if would_pass else "blocked"
+
+    return {
+        "schema": "nexus.hybrid_h5_final_source_apply_preflight_receipt.v1",
+        "evaluated": True,
+        "preflight_status": preflight_status,
+        "preflight_reasons": reasons,
+        "would_pass_final_source_apply_preflight": would_pass,
+        "apply_target_final_source": "local_candidate_shadow_promoted",
+        "actual_final_source_before": actual_fs,
+        "actual_final_source_after": actual_fs,
+        "actual_final_source_changed": actual_changed,
+        "trial_receipt_present": trial_present,
+        "trial_receipt_ready": trial_ready,
+        "controlled_mutation_gate_present": gate_present,
+        "controlled_mutation_gate_safe": gate_safe,
+        "controlled_mutation_allowed": False,
+        "all_required_flags_enabled": all_flags,
+        "final_source_change_flag_enabled": bool(gate and gate.get("all_required_flags_enabled", False)),
+        "final_patch_replacement_allowed": False,
+        "output_mutation_allowed": False,
+        "model_calls_increment_allowed": False,
+        "rollback_available": rb_available,
+        "rollback_required": gate_rollback,
+        "safe_to_continue": not gate_rollback and not actual_changed,
+        "apply_side_effects_allowed": False,
+        "public_claim_allowed": False,
+        "production_ready": False,
+    }
+
+
 def _finalize_with_nexus_row(
     row: dict[str, Any],
     *,
@@ -7144,6 +7240,9 @@ def _finalize_with_nexus_row(
 
             # H5-31: Local final_source controlled trial receipt
             finalized["h5_local_final_source_controlled_trial_receipt"] = _build_h5_local_final_source_controlled_trial_receipt(finalized)
+
+            # H5-32: Final source apply preflight receipt
+            finalized["h5_final_source_apply_preflight_receipt"] = _build_h5_final_source_apply_preflight_receipt(finalized)
 
     # Ensure keys are also on the row level for simple flat queries
     finalized["route_mode"] = r_mode
@@ -10933,6 +11032,13 @@ def write_evidence_bundle(
         "h5_local_final_source_trial_flags_enabled_count": sum(1 for row in with_rows if bool(row.get("h5_local_final_source_controlled_trial_receipt", {}).get("all_required_flags_enabled", False))),
         "h5_local_final_source_trial_safe_count": sum(1 for row in with_rows if bool(row.get("h5_local_final_source_controlled_trial_receipt", {}).get("safe_to_continue", False))),
         "h5_local_final_source_trial_rollback_required_count": sum(1 for row in with_rows if bool(row.get("h5_local_final_source_controlled_trial_receipt", {}).get("rollback_required", False))),
+        "h5_final_source_apply_preflight_receipt_count": sum(1 for row in with_rows if bool(row.get("h5_final_source_apply_preflight_receipt"))),
+        "h5_final_source_apply_preflight_pass_shadow_count": sum(1 for row in with_rows if str(row.get("h5_final_source_apply_preflight_receipt", {}).get("preflight_status", "")) == "preflight_pass_shadow_only"),
+        "h5_final_source_apply_preflight_blocked_count": sum(1 for row in with_rows if str(row.get("h5_final_source_apply_preflight_receipt", {}).get("preflight_status", "")) == "blocked"),
+        "h5_final_source_apply_preflight_flag_enabled_count": sum(1 for row in with_rows if bool(row.get("h5_final_source_apply_preflight_receipt", {}).get("all_required_flags_enabled", False))),
+        "h5_final_source_apply_preflight_actual_change_count": sum(1 for row in with_rows if bool(row.get("h5_final_source_apply_preflight_receipt", {}).get("actual_final_source_changed", False))),
+        "h5_final_source_apply_preflight_rollback_required_count": sum(1 for row in with_rows if bool(row.get("h5_final_source_apply_preflight_receipt", {}).get("rollback_required", False))),
+        "h5_final_source_apply_preflight_safe_count": sum(1 for row in with_rows if bool(row.get("h5_final_source_apply_preflight_receipt", {}).get("safe_to_continue", False))),
     }
     payload["external_provider_claim_boundary_contract"] = build_external_provider_claim_boundary_contract(payload)
     payload["public_promotion_readiness_contract"] = build_public_promotion_readiness_contract(payload)
