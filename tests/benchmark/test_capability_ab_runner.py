@@ -17419,3 +17419,185 @@ def test_h5_22_cloud_shadow_bundle_summary_counters(tmp_path, monkeypatch):
     assert summary["h5_execution_ready_count"] == 0
     assert summary["h5_cloud_fallback_invoked_count"] == 0
     assert summary["h5_behavior_changed_count"] == 0
+
+
+def test_h5_23_helper_empty_row_blocks():
+    """H5-23 Test 1: helper with empty row blocks."""
+    from scripts.bench.capability_ab_runner import _build_h5_overall_readiness_closure
+
+    closure = _build_h5_overall_readiness_closure({})
+    assert closure["closure_status"] == "blocked"
+    assert closure["execution_ready"] is False
+    assert "missing_execution_plan" in closure["closure_reasons"]
+    assert "missing_execution_readiness_preflight" in closure["closure_reasons"]
+
+
+def test_h5_23_both_shadows_ready_still_blocks(tmp_path, monkeypatch):
+    """H5-23 Test 2: both shadows ready still blocks."""
+    from scripts.bench.capability_ab_runner import _build_h5_overall_readiness_closure
+
+    row = {
+        "h5_execution_plan": {"execution_mode": "local_candidate_plan"},
+        "h5_execution_readiness_preflight": {"execution_gate_allows_local_first": False},
+        "h5_local_evidence_ingestion_shadow": {"local_path_ready_shadow_from_external_evidence": True},
+        "h5_cloud_evidence_ingestion_shadow": {"cloud_path_ready_shadow_from_external_evidence": True},
+    }
+    closure = _build_h5_overall_readiness_closure(row)
+    assert closure["all_shadow_evidence_present"] is True
+    assert closure["local_shadow_ready"] is True
+    assert closure["cloud_shadow_ready"] is True
+    assert closure["execution_ready"] is False
+    assert closure["closure_status"] == "blocked"
+    assert "quality_non_regression_missing" in closure["closure_reasons"]
+    assert "full_benchmark_missing" in closure["closure_reasons"]
+    assert "governance_approval_missing" in closure["closure_reasons"]
+    assert "execution_flag_not_designed" in closure["closure_reasons"]
+    assert "execution_flag_not_enabled" in closure["closure_reasons"]
+
+
+def test_h5_23_normal_finalized_row_attaches_closure(tmp_path, monkeypatch):
+    """H5-23 Test 3: normal finalized row attaches closure receipt."""
+    from scripts.bench.capability_ab_runner import CapabilityTask, _finalize_with_nexus_row
+
+    task = CapabilityTask(
+        id="test-task-h5-23-normal", difficulty="easy", task_type="test_repair",
+        task_desc="verify h5-23 closure", target_file="target.py", test_file="test_target.py",
+        expected_capabilities=("claim_gate",), success_criteria="tests_pass",
+        repo_kind="nexus_internal", fixture_kind="test_fixture",
+    )
+    _h5_all_flags_set_with_gate(monkeypatch)
+
+    row = _finalize_with_nexus_row(
+        {"mode": "with_nexus", "model_calls": 1, "total_tokens": 100,
+         "token_capture_status": "measured",
+         "committee_trace": {"candidate_count": 2, "judge_selection": {"selected_candidate_id": "C_12481#candidate-1"},
+                              "committee_receipt": {"selected_candidate_applied": True, "selected_candidate_apply_hash_match": True}},
+         "local_solve_eligible": True},
+        provider="gemini", model_required=True, nexus_required=False, task=task, repo_root=tmp_path,
+    )
+
+    closure = row["h5_overall_readiness_closure"]
+    assert closure["closure_status"] == "blocked"
+    assert row.get("final_source", "none") == "none"
+    assert row["behavior_changed"] is False
+
+
+def test_h5_23_accepted_local_cloud_sets_all_shadow_ready_but_blocks(tmp_path, monkeypatch):
+    """H5-23 Test 4: accepted local+cloud sets all_shadow_evidence_present but still blocks."""
+    from scripts.bench.capability_ab_runner import CapabilityTask, _finalize_with_nexus_row
+
+    task = CapabilityTask(
+        id="test-task-h5-23-accepted", difficulty="easy", task_type="test_repair",
+        task_desc="verify h5-23 accepted", target_file="target.py", test_file="test_target.py",
+        expected_capabilities=("claim_gate",), success_criteria="tests_pass",
+        repo_kind="nexus_internal", fixture_kind="test_fixture",
+    )
+    _h5_all_flags_set_with_gate(monkeypatch)
+
+    row = _finalize_with_nexus_row(
+        {"mode": "with_nexus", "model_calls": 1, "total_tokens": 100,
+         "token_capture_status": "measured",
+         "committee_trace": {"candidate_count": 2, "judge_selection": {"selected_candidate_id": "C_12481#candidate-1"},
+                              "committee_receipt": {"selected_candidate_applied": True, "selected_candidate_apply_hash_match": True}},
+         "local_solve_eligible": True,
+         "external_local_evidence_ingestion_validation": {
+             "schema": "nexus.h5_local_committee_evidence_ingestion_validation.v1",
+             "validation_status": "accepted", "accepted_for_h5_readiness_shadow": True,
+         },
+         "external_cloud_evidence_ingestion_validation": {
+             "schema": "nexus.h5_cloud_fallback_evidence_ingestion_validation.v1",
+             "validation_status": "accepted", "accepted_for_h5_readiness_shadow": True,
+         }},
+        provider="gemini", model_required=True, nexus_required=False, task=task, repo_root=tmp_path,
+    )
+
+    closure = row["h5_overall_readiness_closure"]
+    assert closure["all_shadow_evidence_present"] is True
+    assert closure["closure_status"] == "blocked"
+    assert closure["execution_ready"] is False
+    assert row["h5_execution_readiness_preflight"]["execution_ready"] is False
+    assert row.get("final_source", "none") == "none"
+    assert row["behavior_changed"] is False
+
+
+def test_h5_23_unexpected_final_source_detected():
+    """H5-23 Test 5: unexpected final source change detected."""
+    from scripts.bench.capability_ab_runner import _build_h5_overall_readiness_closure
+
+    row = {"h5_execution_plan": {}, "h5_execution_readiness_preflight": {}, "final_source": "cloud_fallback"}
+    closure = _build_h5_overall_readiness_closure(row)
+    assert closure["final_source_changed"] is True
+    assert "unexpected_final_source_change" in closure["closure_reasons"]
+
+
+def test_h5_23_unexpected_cloud_invocation_detected():
+    """H5-23 Test 6: unexpected cloud invocation detected."""
+    from scripts.bench.capability_ab_runner import _build_h5_overall_readiness_closure
+
+    row = {"h5_execution_plan": {}, "h5_execution_readiness_preflight": {}, "h5_route": {"cloud_fallback_invoked": True}}
+    closure = _build_h5_overall_readiness_closure(row)
+    assert closure["cloud_invoked"] is True
+    assert "unexpected_cloud_invocation" in closure["closure_reasons"]
+
+
+def test_h5_23_bundle_summary_counters(tmp_path, monkeypatch):
+    """H5-23 Test 7: summary counters."""
+    from scripts.bench.capability_ab_runner import CapabilityTask, _finalize_with_nexus_row, write_evidence_bundle
+
+    task = CapabilityTask(
+        id="test-task-h5-23-summary", difficulty="easy", task_type="test_repair",
+        task_desc="verify h5-23 summary", target_file="target.py", test_file="test_target.py",
+        expected_capabilities=("claim_gate",), success_criteria="tests_pass",
+        repo_kind="nexus_internal", fixture_kind="test_fixture",
+    )
+    _h5_all_flags_set_with_gate(monkeypatch)
+    monkeypatch.setattr("scripts.bench.capability_ab_runner._git_commit", lambda x: "dummy-commit")
+
+    row_normal = _finalize_with_nexus_row(
+        {"mode": "with_nexus", "model_calls": 1, "total_tokens": 100,
+         "token_capture_status": "measured",
+         "committee_trace": {"candidate_count": 2, "judge_selection": {"selected_candidate_id": "C_12481#candidate-1"},
+                              "committee_receipt": {"selected_candidate_applied": True, "selected_candidate_apply_hash_match": True}},
+         "local_solve_eligible": True},
+        provider="gemini", model_required=True, nexus_required=False, task=task, repo_root=tmp_path,
+    )
+    row_accepted = _finalize_with_nexus_row(
+        {"mode": "with_nexus", "model_calls": 1, "total_tokens": 100,
+         "token_capture_status": "measured",
+         "committee_trace": {"candidate_count": 2, "judge_selection": {"selected_candidate_id": "C_12481#candidate-1"},
+                              "committee_receipt": {"selected_candidate_applied": True, "selected_candidate_apply_hash_match": True}},
+         "local_solve_eligible": True,
+         "external_local_evidence_ingestion_validation": {
+             "schema": "nexus.h5_local_committee_evidence_ingestion_validation.v1",
+             "validation_status": "accepted", "accepted_for_h5_readiness_shadow": True,
+         },
+         "external_cloud_evidence_ingestion_validation": {
+             "schema": "nexus.h5_cloud_fallback_evidence_ingestion_validation.v1",
+             "validation_status": "accepted", "accepted_for_h5_readiness_shadow": True,
+         }},
+        provider="gemini", model_required=True, nexus_required=False, task=task, repo_root=tmp_path,
+    )
+
+    with_path = tmp_path / "with.jsonl"
+    without_path = tmp_path / "without.jsonl"
+    with_path.write_text("[]", encoding="utf-8")
+    without_path.write_text("[]", encoding="utf-8")
+
+    bundle_file = write_evidence_bundle(
+        out_dir=tmp_path, with_path=with_path, without_path=without_path,
+        rows=[row_normal, row_accepted],
+        config={"tasks_file": "tasks.json", "tasks_manifest_hash": "manifest_hash",
+                "unique_tasks_requested": 1, "repeat_trials": 1, "timeout_sec": 60},
+    )
+
+    bundle_data = json.loads(bundle_file.read_text(encoding="utf-8"))
+    summary = bundle_data["hybrid_route_summary"]
+    assert summary["h5_overall_readiness_closure_count"] >= 1
+    assert summary["h5_overall_readiness_all_shadow_evidence_count"] >= 1
+    assert summary["h5_overall_readiness_blocked_count"] >= 1
+    assert summary["h5_overall_readiness_quality_missing_count"] >= 1
+    assert summary["h5_overall_readiness_benchmark_missing_count"] >= 1
+    assert summary["h5_overall_readiness_governance_missing_count"] >= 1
+    assert summary["h5_execution_ready_count"] == 0
+    assert summary["h5_cloud_fallback_invoked_count"] == 0
+    assert summary["h5_behavior_changed_count"] == 0

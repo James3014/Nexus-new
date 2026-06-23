@@ -5949,6 +5949,89 @@ def _build_h5_cloud_evidence_ingestion_shadow(row: dict[str, Any]) -> dict[str, 
     }
 
 
+def _build_h5_overall_readiness_closure(row: dict[str, Any]) -> dict[str, Any]:
+    """Pure helper: summarizes overall H5 readiness closure.
+
+    No side effects. No model calls. No mutation.
+    """
+    plan = row.get("h5_execution_plan")
+    preflight = row.get("h5_execution_readiness_preflight")
+    local_shadow = row.get("h5_local_evidence_ingestion_shadow")
+    cloud_shadow = row.get("h5_cloud_evidence_ingestion_shadow")
+    h5 = row.get("h5_route", {})
+
+    reasons = []
+
+    has_plan = bool(plan)
+    has_preflight = bool(preflight)
+
+    if not has_plan:
+        reasons.append("missing_execution_plan")
+    if not has_preflight:
+        reasons.append("missing_execution_readiness_preflight")
+
+    local_ready = bool(local_shadow and local_shadow.get("local_path_ready_shadow_from_external_evidence", False))
+    cloud_ready = bool(cloud_shadow and cloud_shadow.get("cloud_path_ready_shadow_from_external_evidence", False))
+    all_shadow = local_ready and cloud_ready
+
+    if not local_ready:
+        reasons.append("local_shadow_evidence_not_ready")
+    if not cloud_ready:
+        reasons.append("cloud_shadow_evidence_not_ready")
+
+    # Side-effect checks
+    row_final_src = str(row.get("final_source", "none") or "none")
+    h5_final_src = str(h5.get("final_source", "none") or "none")
+    final_src_changed = row_final_src != "none" or h5_final_src != "none"
+    if final_src_changed:
+        reasons.append("unexpected_final_source_change")
+
+    row_beh = bool(row.get("behavior_changed", False))
+    h5_beh = bool(h5.get("behavior_changed", False))
+    beh_changed = row_beh or h5_beh
+    if beh_changed:
+        reasons.append("unexpected_behavior_change")
+
+    h5_fb = bool(h5.get("cloud_fallback_invoked", False))
+    h5_cm = bool(h5.get("cloud_model_invoked", False))
+    cloud_inv = h5_fb or h5_cm
+    if cloud_inv:
+        reasons.append("unexpected_cloud_invocation")
+
+    # Always include remaining gates
+    reasons.extend([
+        "quality_non_regression_missing",
+        "full_benchmark_missing",
+        "governance_approval_missing",
+        "execution_flag_not_designed",
+        "execution_flag_not_enabled",
+    ])
+
+    return {
+        "schema": "nexus.hybrid_h5_overall_readiness_closure.v1",
+        "evaluated": True,
+        "closure_status": "blocked",
+        "execution_ready": False,
+        "all_shadow_evidence_present": all_shadow,
+        "local_shadow_ready": local_ready,
+        "cloud_shadow_ready": cloud_ready,
+        "execution_plan_present": has_plan,
+        "execution_preflight_present": has_preflight,
+        "execution_gate_allows_execution": bool(preflight and preflight.get("execution_gate_allows_local_first", False) or preflight and preflight.get("execution_gate_allows_cloud_fallback", False)),
+        "quality_non_regression_ready": False,
+        "full_benchmark_ready": False,
+        "governance_ready": False,
+        "final_source_changed": final_src_changed,
+        "behavior_changed": beh_changed,
+        "cloud_invoked": cloud_inv,
+        "model_calls_incremented": False,
+        "closure_reasons": reasons,
+        "next_required_stage": "execution_flag_design_blocked",
+        "public_claim_allowed": False,
+        "production_ready": False,
+    }
+
+
 def _finalize_with_nexus_row(
     row: dict[str, Any],
     *,
@@ -6395,6 +6478,9 @@ def _finalize_with_nexus_row(
 
             # H5-12: Execution readiness preflight matrix
             finalized["h5_execution_readiness_preflight"] = _build_h5_execution_readiness_preflight(finalized)
+
+            # H5-23: Overall readiness closure receipt
+            finalized["h5_overall_readiness_closure"] = _build_h5_overall_readiness_closure(finalized)
 
     # Ensure keys are also on the row level for simple flat queries
     finalized["route_mode"] = r_mode
@@ -10129,6 +10215,13 @@ def write_evidence_bundle(
         "h5_cloud_evidence_accepted_count": sum(1 for row in with_rows if bool(row.get("h5_cloud_evidence_ingestion_shadow", {}).get("accepted_for_h5_readiness_shadow", False))),
         "h5_cloud_evidence_blocked_count": sum(1 for row in with_rows if bool(row.get("h5_cloud_evidence_ingestion_shadow")) and not bool(row.get("h5_cloud_evidence_ingestion_shadow", {}).get("accepted_for_h5_readiness_shadow", False))),
         "h5_cloud_external_evidence_ready_shadow_count": sum(1 for row in with_rows if bool(row.get("h5_cloud_evidence_ingestion_shadow", {}).get("cloud_path_ready_shadow_from_external_evidence", False))),
+        "h5_overall_readiness_closure_count": sum(1 for row in with_rows if bool(row.get("h5_overall_readiness_closure"))),
+        "h5_overall_readiness_all_shadow_evidence_count": sum(1 for row in with_rows if bool(row.get("h5_overall_readiness_closure", {}).get("all_shadow_evidence_present", False))),
+        "h5_overall_readiness_blocked_count": sum(1 for row in with_rows if str(row.get("h5_overall_readiness_closure", {}).get("closure_status", "")) == "blocked"),
+        "h5_overall_readiness_quality_missing_count": sum(1 for row in with_rows if "quality_non_regression_missing" in (row.get("h5_overall_readiness_closure", {}).get("closure_reasons", []) or [])),
+        "h5_overall_readiness_benchmark_missing_count": sum(1 for row in with_rows if "full_benchmark_missing" in (row.get("h5_overall_readiness_closure", {}).get("closure_reasons", []) or [])),
+        "h5_overall_readiness_governance_missing_count": sum(1 for row in with_rows if "governance_approval_missing" in (row.get("h5_overall_readiness_closure", {}).get("closure_reasons", []) or [])),
+        "h5_overall_readiness_unexpected_side_effect_count": sum(1 for row in with_rows if any(r.startswith("unexpected_") for r in (row.get("h5_overall_readiness_closure", {}).get("closure_reasons", []) or []))),
     }
     payload["external_provider_claim_boundary_contract"] = build_external_provider_claim_boundary_contract(payload)
     payload["public_promotion_readiness_contract"] = build_public_promotion_readiness_contract(payload)
