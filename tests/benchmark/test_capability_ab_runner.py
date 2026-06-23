@@ -15880,3 +15880,237 @@ def test_h5_6_bundle_summary_counters(tmp_path, monkeypatch):
     assert summary["h5_cloud_fallback_invoked_count"] == 0
     assert summary["h5_behavior_changed_count"] == 0
     assert summary["h5_fail_closed_count"] == 0
+
+
+def test_h5_8_pure_helper_returns_disabled_without_h5_route():
+    """H5-8 Test 1: pure helper returns disabled without h5_route."""
+    from scripts.bench.capability_ab_runner import _build_h5_execution_plan
+
+    plan = _build_h5_execution_plan({}, provider="gemini")
+    assert plan["execution_allowed"] is False
+    assert plan["execution_mode"] == "disabled"
+    assert plan["planned_final_source"] == "none"
+    assert plan["planned_order"] == []
+    assert plan["governance"]["public_claim_allowed"] is False
+    assert plan["governance"]["production_ready"] is False
+
+
+def test_h5_8_blocked_gate_returns_fail_closed_plan():
+    """H5-8 Test 2: blocked gate returns fail_closed_plan."""
+    from scripts.bench.capability_ab_runner import _build_h5_execution_plan
+
+    row = {"h5_route": {"execution_gate_status": "blocked", "execution_gate_reasons": ["shadow_would_fail_closed"]}}
+    plan = _build_h5_execution_plan(row, provider="gemini")
+    assert plan["execution_allowed"] is False
+    assert plan["execution_mode"] == "fail_closed_plan"
+    assert plan["fail_closed_reason"] == "shadow_would_fail_closed"
+    assert plan["planned_final_source"] == "none"
+
+
+def test_h5_8_eligible_dry_run_only_local_shadow_non_executing():
+    """H5-8 Test 3: eligible dry-run-only local shadow remains non-executing."""
+    from scripts.bench.capability_ab_runner import _build_h5_execution_plan
+
+    row = {"h5_route": {
+        "execution_gate_status": "eligible_dry_run_only",
+        "route_order_shadow_terminal_state": "would_use_local_candidate",
+        "route_order_shadow_sequence": ["local_committee"],
+        "execution_gate_allows_local_first": False,
+    }}
+    plan = _build_h5_execution_plan(row, provider="gemini")
+    assert plan["execution_allowed"] is False
+    assert plan["execution_mode"] == "dry_run_plan_only"
+    assert plan["planned_order"] == ["local_committee"]
+    assert plan["planned_final_source"] == "none"
+    assert plan["requires_local_committee"] is True
+    assert plan["requires_output_replacement"] is False
+
+
+def test_h5_8_eligible_dry_run_only_cloud_shadow_non_executing():
+    """H5-8 Test 4: eligible dry-run-only cloud shadow remains non-executing."""
+    from scripts.bench.capability_ab_runner import _build_h5_execution_plan
+
+    row = {"h5_route": {
+        "execution_gate_status": "eligible_dry_run_only",
+        "route_order_shadow_terminal_state": "would_use_cloud_fallback",
+        "route_order_shadow_sequence": ["local_committee", "cloud_fallback"],
+        "execution_gate_allows_cloud_fallback": False,
+    }}
+    plan = _build_h5_execution_plan(row, provider="gemini")
+    assert plan["execution_allowed"] is False
+    assert plan["execution_mode"] == "dry_run_plan_only"
+    assert plan["planned_order"] == ["local_committee", "cloud_fallback"]
+    assert plan["planned_final_source"] == "none"
+    assert plan["requires_cloud_fallback"] is True
+    assert plan["requires_output_replacement"] is False
+
+
+def test_h5_8_future_local_allow_produces_local_candidate_plan():
+    """H5-8 Test 5: future local allow flag produces local_candidate_plan."""
+    from scripts.bench.capability_ab_runner import _build_h5_execution_plan
+
+    row = {"h5_route": {
+        "execution_gate_status": "eligible_dry_run_only",
+        "route_order_shadow_terminal_state": "would_use_local_candidate",
+        "route_order_shadow_sequence": ["local_committee"],
+        "execution_gate_allows_local_first": True,
+    }}
+    plan = _build_h5_execution_plan(row, provider="gemini")
+    assert plan["execution_allowed"] is True
+    assert plan["execution_mode"] == "local_candidate_plan"
+    assert plan["planned_final_source"] == "local_candidate"
+    assert plan["requires_output_replacement"] is True
+
+
+def test_h5_8_future_cloud_allow_produces_cloud_fallback_plan():
+    """H5-8 Test 6: future cloud allow flag produces cloud_fallback_plan."""
+    from scripts.bench.capability_ab_runner import _build_h5_execution_plan
+
+    row = {"h5_route": {
+        "execution_gate_status": "eligible_dry_run_only",
+        "route_order_shadow_terminal_state": "would_use_cloud_fallback",
+        "route_order_shadow_sequence": ["local_committee", "cloud_fallback"],
+        "execution_gate_allows_cloud_fallback": True,
+    }}
+    plan = _build_h5_execution_plan(row, provider="gemini")
+    assert plan["execution_allowed"] is True
+    assert plan["execution_mode"] == "cloud_fallback_plan"
+    assert plan["planned_final_source"] == "cloud_fallback"
+    assert plan["requires_output_replacement"] is True
+
+
+def test_h5_8_finalize_attaches_plan_without_executing(tmp_path, monkeypatch):
+    """H5-8 Test 7: _finalize_with_nexus_row attaches plan but does not execute."""
+    from scripts.bench.capability_ab_runner import CapabilityTask, _finalize_with_nexus_row
+
+    task = CapabilityTask(
+        id="test-task-h5-8-attach",
+        difficulty="easy",
+        task_type="test_repair",
+        task_desc="verify h5-8 plan attachment",
+        target_file="target.py",
+        test_file="test_target.py",
+        expected_capabilities=("claim_gate",),
+        success_criteria="tests_pass",
+        repo_kind="nexus_internal",
+        fixture_kind="test_fixture",
+    )
+    _h5_all_flags_set_with_gate(monkeypatch)
+
+    row = _finalize_with_nexus_row(
+        {
+            "mode": "with_nexus",
+            "model_calls": 1,
+            "total_tokens": 100,
+            "token_capture_status": "measured",
+            "committee_trace": {
+                "candidate_count": 2,
+                "judge_selection": {"selected_candidate_id": "C_12481#candidate-1"},
+                "committee_receipt": {"selected_candidate_applied": True, "selected_candidate_apply_hash_match": True},
+            },
+            "local_solve_eligible": True,
+        },
+        provider="gemini",
+        model_required=True,
+        nexus_required=False,
+        task=task,
+        repo_root=tmp_path,
+    )
+
+    plan = row["h5_execution_plan"]
+    assert plan["schema"] == "nexus.hybrid_h5_execution_plan.v1"
+    assert plan["execution_allowed"] is False
+    assert plan["execution_mode"] == "dry_run_plan_only"
+    assert row.get("final_source", "none") == "none"
+    assert row["h5_route"]["cloud_fallback_invoked"] is False
+    assert row["behavior_changed"] is False
+
+
+def test_h5_8_bundle_summary_counters(tmp_path, monkeypatch):
+    """H5-8 Test 8: summary counters include execution plan counts."""
+    from scripts.bench.capability_ab_runner import CapabilityTask, _finalize_with_nexus_row, write_evidence_bundle
+
+    task = CapabilityTask(
+        id="test-task-h5-8-summary",
+        difficulty="easy",
+        task_type="test_repair",
+        task_desc="verify h5-8 summary",
+        target_file="target.py",
+        test_file="test_target.py",
+        expected_capabilities=("claim_gate",),
+        success_criteria="tests_pass",
+        repo_kind="nexus_internal",
+        fixture_kind="test_fixture",
+    )
+    _h5_all_flags_set_with_gate(monkeypatch)
+    monkeypatch.setattr("scripts.bench.capability_ab_runner._git_commit", lambda x: "dummy-commit")
+
+    row_eligible = _finalize_with_nexus_row(
+        {
+            "mode": "with_nexus",
+            "model_calls": 1,
+            "total_tokens": 100,
+            "token_capture_status": "measured",
+            "committee_trace": {
+                "candidate_count": 2,
+                "judge_selection": {"selected_candidate_id": "C_12481#candidate-1"},
+                "committee_receipt": {"selected_candidate_applied": True, "selected_candidate_apply_hash_match": True},
+            },
+            "local_solve_eligible": True,
+        },
+        provider="gemini",
+        model_required=True,
+        nexus_required=False,
+        task=task,
+        repo_root=tmp_path,
+    )
+
+    row_blocked = _finalize_with_nexus_row(
+        {
+            "mode": "with_nexus",
+            "model_calls": 1,
+            "total_tokens": 100,
+            "token_capture_status": "measured",
+            "committee_trace": {
+                "candidate_count": 1,
+                "judge_selection": {"selected_candidate_id": "C_12481#candidate-1"},
+                "committee_receipt": {"selected_candidate_applied": False, "selected_candidate_apply_hash_match": False},
+            },
+            "local_solve_eligible": False,
+            "failure_reason": "COMMITTEE_SELECTED_CANDIDATE_APPLY_HASH_MISMATCH",
+        },
+        provider="gemini",
+        model_required=True,
+        nexus_required=False,
+        task=task,
+        repo_root=tmp_path,
+    )
+
+    with_path = tmp_path / "with.jsonl"
+    without_path = tmp_path / "without.jsonl"
+    with_path.write_text("[]", encoding="utf-8")
+    without_path.write_text("[]", encoding="utf-8")
+
+    bundle_file = write_evidence_bundle(
+        out_dir=tmp_path,
+        with_path=with_path,
+        without_path=without_path,
+        rows=[row_eligible, row_blocked],
+        config={
+            "tasks_file": "tasks.json",
+            "tasks_manifest_hash": "manifest_hash",
+            "unique_tasks_requested": 1,
+            "repeat_trials": 1,
+            "timeout_sec": 60,
+        },
+    )
+
+    bundle_data = json.loads(bundle_file.read_text(encoding="utf-8"))
+    summary = bundle_data["hybrid_route_summary"]
+    assert summary["h5_execution_plan_count"] >= 1
+    assert summary["h5_execution_plan_allowed_count"] == 0
+    assert summary["h5_execution_plan_dry_run_only_count"] >= 1
+    assert summary["h5_execution_plan_fail_closed_count"] >= 1
+    assert summary["h5_cloud_fallback_invoked_count"] == 0
+    assert summary["h5_behavior_changed_count"] == 0
+    assert summary["h5_fail_closed_count"] == 0

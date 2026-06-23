@@ -5419,6 +5419,89 @@ def _sanitize_hybrid_local_guard_trace(trace: dict[str, Any]) -> dict[str, Any]:
     return sanitized
 
 
+def _build_h5_execution_plan(row: dict[str, Any], *, provider: str) -> dict[str, Any]:
+    """Pure helper: builds H5 execution plan from h5_route metadata.
+
+    No side effects. No model calls. No row mutation.
+    Returns a plan dict that H5-8 attaches as h5_execution_plan.
+    """
+    h5 = row.get("h5_route", {})
+    if not h5:
+        return {
+            "schema": "nexus.hybrid_h5_execution_plan.v1",
+            "execution_allowed": False,
+            "execution_mode": "disabled",
+            "planned_order": [],
+            "planned_final_source": "none",
+            "requires_local_committee": False,
+            "requires_cloud_fallback": False,
+            "requires_output_replacement": False,
+            "requires_verifier": True,
+            "requires_claim_gate": True,
+            "fail_closed_reason": "",
+            "governance": {"public_claim_allowed": False, "production_ready": False},
+        }
+
+    gate_status = h5.get("execution_gate_status", "not_evaluated")
+    shadow_terminal = h5.get("route_order_shadow_terminal_state", "")
+    shadow_seq = h5.get("route_order_shadow_sequence", [])
+    allows_local = h5.get("execution_gate_allows_local_first", False)
+    allows_cloud = h5.get("execution_gate_allows_cloud_fallback", False)
+
+    execution_allowed = False
+    execution_mode = "disabled"
+    planned_order = []
+    planned_final_source = "none"
+    requires_local = False
+    requires_cloud = False
+    requires_output_replace = False
+    fail_closed_reason = ""
+
+    if gate_status == "blocked":
+        execution_mode = "fail_closed_plan"
+        reasons = h5.get("execution_gate_reasons", [])
+        fail_closed_reason = reasons[0] if reasons else "unknown"
+    elif gate_status == "eligible_dry_run_only":
+        if shadow_terminal == "would_use_local_candidate" and allows_local:
+            execution_allowed = True
+            execution_mode = "local_candidate_plan"
+            planned_order = ["local_committee"]
+            planned_final_source = "local_candidate"
+            requires_local = True
+            requires_output_replace = True
+        elif shadow_terminal == "would_use_cloud_fallback" and allows_cloud:
+            execution_allowed = True
+            execution_mode = "cloud_fallback_plan"
+            planned_order = ["local_committee", "cloud_fallback"]
+            planned_final_source = "cloud_fallback"
+            requires_local = True
+            requires_cloud = True
+            requires_output_replace = True
+        else:
+            execution_mode = "dry_run_plan_only"
+            planned_order = list(shadow_seq)
+            requires_local = "local_committee" in shadow_seq
+            requires_cloud = "cloud_fallback" in shadow_seq
+    elif gate_status not in ("not_evaluated", ""):
+        execution_mode = "fail_closed_plan"
+        fail_closed_reason = "unknown_execution_plan_state"
+
+    return {
+        "schema": "nexus.hybrid_h5_execution_plan.v1",
+        "execution_allowed": execution_allowed,
+        "execution_mode": execution_mode,
+        "planned_order": planned_order,
+        "planned_final_source": planned_final_source,
+        "requires_local_committee": requires_local,
+        "requires_cloud_fallback": requires_cloud,
+        "requires_output_replacement": requires_output_replace,
+        "requires_verifier": True,
+        "requires_claim_gate": True,
+        "fail_closed_reason": fail_closed_reason,
+        "governance": {"public_claim_allowed": False, "production_ready": False},
+    }
+
+
 def _finalize_with_nexus_row(
     row: dict[str, Any],
     *,
@@ -5846,6 +5929,10 @@ def _finalize_with_nexus_row(
             h5["execution_gate_allows_cloud_fallback"] = gate_allows_cloud_fallback
             h5["execution_gate_allows_final_source_change"] = gate_allows_final_source
             h5["execution_gate_allows_behavior_change"] = gate_allows_behavior
+
+        # H5-8: Execution plan builder trace
+        if enable_h5_trace and finalized.get("h5_route", {}).get("execution_gate_evaluated", False):
+            finalized["h5_execution_plan"] = _build_h5_execution_plan(finalized, provider=provider)
 
     # Ensure keys are also on the row level for simple flat queries
     finalized["route_mode"] = r_mode
@@ -9544,6 +9631,12 @@ def write_evidence_bundle(
         "h5_execution_gate_eligible_dry_run_only_count": sum(1 for row in with_rows if str(row.get("h5_route", {}).get("execution_gate_status", "")) == "eligible_dry_run_only"),
         "h5_execution_gate_unexpected_side_effect_count": sum(1 for row in with_rows if "unexpected_execution_side_effect" in (row.get("h5_route", {}).get("execution_gate_reasons", []) or [])),
         "h5_execution_gate_governance_violation_count": sum(1 for row in with_rows if "governance_boundary_violation" in (row.get("h5_route", {}).get("execution_gate_reasons", []) or [])),
+        "h5_execution_plan_count": sum(1 for row in with_rows if bool(row.get("h5_execution_plan"))),
+        "h5_execution_plan_allowed_count": sum(1 for row in with_rows if bool(row.get("h5_execution_plan", {}).get("execution_allowed", False))),
+        "h5_execution_plan_dry_run_only_count": sum(1 for row in with_rows if str(row.get("h5_execution_plan", {}).get("execution_mode", "")) == "dry_run_plan_only"),
+        "h5_execution_plan_fail_closed_count": sum(1 for row in with_rows if str(row.get("h5_execution_plan", {}).get("execution_mode", "")) == "fail_closed_plan"),
+        "h5_execution_plan_local_candidate_count": sum(1 for row in with_rows if str(row.get("h5_execution_plan", {}).get("execution_mode", "")) == "local_candidate_plan"),
+        "h5_execution_plan_cloud_fallback_count": sum(1 for row in with_rows if str(row.get("h5_execution_plan", {}).get("execution_mode", "")) == "cloud_fallback_plan"),
     }
     payload["external_provider_claim_boundary_contract"] = build_external_provider_claim_boundary_contract(payload)
     payload["public_promotion_readiness_contract"] = build_public_promotion_readiness_contract(payload)
