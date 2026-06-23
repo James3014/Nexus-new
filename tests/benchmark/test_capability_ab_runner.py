@@ -18402,3 +18402,225 @@ def test_h5_29_bundle_summary_counters(tmp_path, monkeypatch):
     assert summary["h5_execution_allowed_count"] == 0
     assert summary["h5_behavior_changed_count"] == 0
     assert summary["h5_cloud_fallback_invoked_count"] == 0
+
+
+def test_h5_30_empty_row_gate_blocks():
+    """H5-30 Test 1: empty row controlled mutation gate blocks."""
+    from scripts.bench.capability_ab_runner import _build_h5_controlled_mutation_gate
+
+    gate = _build_h5_controlled_mutation_gate({})
+    assert gate["gate_status"] == "blocked"
+    assert gate["mutation_allowed"] is False
+    assert gate["safe_to_continue"] is True
+    assert gate["rollback_required"] is False
+
+
+def test_h5_30_candidates_present_but_flags_absent_blocks(monkeypatch):
+    """H5-30 Test 2: all candidates present but all flags absent blocks."""
+    from scripts.bench.capability_ab_runner import _build_h5_controlled_mutation_gate
+
+    for var in ("NEXUS_H5_ENABLE_CONTROLLED_EXECUTION", "NEXUS_H5_ALLOW_LOCAL_FINALIZATION",
+                "NEXUS_H5_ALLOW_FINAL_SOURCE_CHANGE", "NEXUS_H5_ALLOW_FINAL_PATCH_REPLACEMENT",
+                "NEXUS_H5_ALLOW_OUTPUT_MUTATION"):
+        monkeypatch.delenv(var, raising=False)
+
+    row = {
+        "h5_local_candidate_shadow_final_source_promotion": {
+            "shadow_promotion_candidate": True,
+            "would_set_final_source_to": "local_candidate_shadow_promoted",
+        },
+        "h5_final_patch_replacement_shadow_contract": {
+            "shadow_patch_candidate": True,
+            "shadow_final_patch_replacement_would_occur": True,
+        },
+        "h5_output_mutation_guard": {
+            "output_mutation_candidate": True,
+            "actual_output_mutated": False,
+            "model_calls_incremented": False,
+        },
+    }
+    gate = _build_h5_controlled_mutation_gate(row)
+    assert gate["final_source_mutation_candidate"] is True
+    assert gate["final_patch_mutation_candidate"] is True
+    assert gate["output_mutation_candidate"] is True
+    assert gate["all_required_flags_enabled"] is False
+    assert gate["mutation_allowed"] is False
+
+
+def test_h5_30_all_five_flags_still_blocks(monkeypatch):
+    """H5-30 Test 3: all five flags enabled still blocks."""
+    from scripts.bench.capability_ab_runner import _build_h5_controlled_mutation_gate
+
+    monkeypatch.setenv("NEXUS_H5_ENABLE_CONTROLLED_EXECUTION", "1")
+    monkeypatch.setenv("NEXUS_H5_ALLOW_LOCAL_FINALIZATION", "1")
+    monkeypatch.setenv("NEXUS_H5_ALLOW_FINAL_SOURCE_CHANGE", "1")
+    monkeypatch.setenv("NEXUS_H5_ALLOW_FINAL_PATCH_REPLACEMENT", "1")
+    monkeypatch.setenv("NEXUS_H5_ALLOW_OUTPUT_MUTATION", "1")
+
+    row = {
+        "h5_local_candidate_shadow_final_source_promotion": {
+            "shadow_promotion_candidate": True,
+            "would_set_final_source_to": "local_candidate_shadow_promoted",
+        },
+        "h5_final_patch_replacement_shadow_contract": {
+            "shadow_patch_candidate": True,
+            "shadow_final_patch_replacement_would_occur": True,
+        },
+        "h5_output_mutation_guard": {
+            "output_mutation_candidate": True,
+            "actual_output_mutated": False,
+        },
+    }
+    gate = _build_h5_controlled_mutation_gate(row)
+    assert gate["all_required_flags_enabled"] is True
+    assert gate["mutation_allowed"] is False
+    assert "h5_30_design_only" in gate["gate_reasons"]
+    assert "real_mutation_not_implemented" in gate["gate_reasons"]
+
+
+def test_h5_30_unexpected_final_source_forces_rollback():
+    """H5-30 Test 4: unexpected final_source change forces rollback."""
+    from scripts.bench.capability_ab_runner import _build_h5_controlled_mutation_gate
+
+    row = {"final_source": "local_candidate_shadow_promoted"}
+    gate = _build_h5_controlled_mutation_gate(row)
+    assert gate["safe_to_continue"] is False
+    assert gate["rollback_required"] is True
+    assert "unexpected_actual_final_source_change" in gate["gate_reasons"]
+
+
+def test_h5_30_unexpected_final_patch_forces_rollback():
+    """H5-30 Test 5: unexpected final_patch replacement forces rollback."""
+    from scripts.bench.capability_ab_runner import _build_h5_controlled_mutation_gate
+
+    row = {
+        "h5_final_patch_replacement_shadow_contract": {"actual_final_patch_replaced": True},
+    }
+    gate = _build_h5_controlled_mutation_gate(row)
+    assert gate["rollback_required"] is True
+    assert "unexpected_actual_final_patch_replacement" in gate["gate_reasons"]
+
+
+def test_h5_30_unexpected_output_mutation_forces_rollback():
+    """H5-30 Test 6: unexpected output mutation forces rollback."""
+    from scripts.bench.capability_ab_runner import _build_h5_controlled_mutation_gate
+
+    row = {
+        "h5_output_mutation_guard": {"actual_output_mutated": True},
+    }
+    gate = _build_h5_controlled_mutation_gate(row)
+    assert gate["rollback_required"] is True
+    assert "unexpected_actual_output_mutation" in gate["gate_reasons"]
+
+
+def test_h5_30_finalized_row_attaches_gate(tmp_path, monkeypatch):
+    """H5-30 Test 7: finalized row attaches controlled mutation gate."""
+    from scripts.bench.capability_ab_runner import CapabilityTask, _finalize_with_nexus_row
+
+    task = CapabilityTask(
+        id="test-task-h5-30", difficulty="easy", task_type="test_repair",
+        task_desc="verify h5-30", target_file="target.py", test_file="test_target.py",
+        expected_capabilities=("claim_gate",), success_criteria="tests_pass",
+        repo_kind="nexus_internal", fixture_kind="test_fixture",
+    )
+    _h5_all_flags_set_with_gate(monkeypatch)
+
+    row = _finalize_with_nexus_row(
+        {"mode": "with_nexus", "model_calls": 1, "total_tokens": 100,
+         "token_capture_status": "measured",
+         "committee_trace": {"candidate_count": 2, "judge_selection": {"selected_candidate_id": "C_12481#candidate-1"},
+                              "committee_receipt": {"selected_candidate_applied": True, "selected_candidate_apply_hash_match": True}},
+         "local_solve_eligible": True},
+        provider="gemini", model_required=True, nexus_required=False, task=task, repo_root=tmp_path,
+    )
+
+    gate = row["h5_controlled_mutation_gate"]
+    assert gate["mutation_allowed"] is False
+    assert gate["gate_status"] == "blocked"
+    assert row.get("final_source", "none") == "none"
+    assert row["behavior_changed"] is False
+
+
+def test_h5_30_all_flags_evidence_no_mutate(tmp_path, monkeypatch):
+    """H5-30 Test 8: all flags + accepted evidence still does not mutate."""
+    from scripts.bench.capability_ab_runner import CapabilityTask, _finalize_with_nexus_row
+
+    task = CapabilityTask(
+        id="test-task-h5-30-nomut", difficulty="easy", task_type="test_repair",
+        task_desc="verify h5-30 no mutate", target_file="target.py", test_file="test_target.py",
+        expected_capabilities=("claim_gate",), success_criteria="tests_pass",
+        repo_kind="nexus_internal", fixture_kind="test_fixture",
+    )
+    _h5_all_flags_set_with_gate(monkeypatch)
+
+    row = _finalize_with_nexus_row(
+        {"mode": "with_nexus", "model_calls": 1, "total_tokens": 100,
+         "token_capture_status": "measured",
+         "committee_trace": {"candidate_count": 2, "judge_selection": {"selected_candidate_id": "C_12481#candidate-1"},
+                              "committee_receipt": {"selected_candidate_applied": True, "selected_candidate_apply_hash_match": True}},
+         "local_solve_eligible": True,
+         "external_local_evidence_ingestion_validation": {
+             "schema": "nexus.h5_local_committee_evidence_ingestion_validation.v1",
+             "validation_status": "accepted", "accepted_for_h5_readiness_shadow": True,
+         },
+         "external_cloud_evidence_ingestion_validation": {
+             "schema": "nexus.h5_cloud_fallback_evidence_ingestion_validation.v1",
+             "validation_status": "accepted", "accepted_for_h5_readiness_shadow": True,
+         }},
+        provider="gemini", model_required=True, nexus_required=False, task=task, repo_root=tmp_path,
+    )
+
+    gate = row["h5_controlled_mutation_gate"]
+    assert gate["mutation_allowed"] is False
+    assert gate["safe_to_continue"] is True
+    assert gate["rollback_required"] is False
+    assert row.get("final_source", "none") == "none"
+    assert row["behavior_changed"] is False
+
+
+def test_h5_30_bundle_summary_counters(tmp_path, monkeypatch):
+    """H5-30 Test 9: summary counters."""
+    from scripts.bench.capability_ab_runner import CapabilityTask, _finalize_with_nexus_row, write_evidence_bundle
+
+    task = CapabilityTask(
+        id="test-task-h5-30-summary", difficulty="easy", task_type="test_repair",
+        task_desc="verify h5-30 summary", target_file="target.py", test_file="test_target.py",
+        expected_capabilities=("claim_gate",), success_criteria="tests_pass",
+        repo_kind="nexus_internal", fixture_kind="test_fixture",
+    )
+    _h5_all_flags_set_with_gate(monkeypatch)
+    monkeypatch.setattr("scripts.bench.capability_ab_runner._git_commit", lambda x: "dummy-commit")
+
+    row = _finalize_with_nexus_row(
+        {"mode": "with_nexus", "model_calls": 1, "total_tokens": 100,
+         "token_capture_status": "measured",
+         "committee_trace": {"candidate_count": 2, "judge_selection": {"selected_candidate_id": "C_12481#candidate-1"},
+                              "committee_receipt": {"selected_candidate_applied": True, "selected_candidate_apply_hash_match": True}},
+         "local_solve_eligible": True},
+        provider="gemini", model_required=True, nexus_required=False, task=task, repo_root=tmp_path,
+    )
+
+    with_path = tmp_path / "with.jsonl"
+    without_path = tmp_path / "without.jsonl"
+    with_path.write_text("[]", encoding="utf-8")
+    without_path.write_text("[]", encoding="utf-8")
+
+    bundle_file = write_evidence_bundle(
+        out_dir=tmp_path, with_path=with_path, without_path=without_path,
+        rows=[row],
+        config={"tasks_file": "tasks.json", "tasks_manifest_hash": "manifest_hash",
+                "unique_tasks_requested": 1, "repeat_trials": 1, "timeout_sec": 60},
+    )
+
+    bundle_data = json.loads(bundle_file.read_text(encoding="utf-8"))
+    summary = bundle_data["hybrid_route_summary"]
+    assert summary["h5_controlled_mutation_gate_count"] >= 1
+    assert summary["h5_controlled_mutation_gate_blocked_count"] >= 1
+    assert summary["h5_controlled_mutation_allowed_count"] == 0
+    assert summary["h5_controlled_rollback_required_count"] == 0
+    assert summary["h5_controlled_unexpected_mutation_count"] == 0
+    assert summary["h5_execution_allowed_count"] == 0
+    assert summary["h5_behavior_changed_count"] == 0
+    assert summary["h5_cloud_fallback_invoked_count"] == 0
+    assert summary["h5_actual_final_patch_replaced_count"] == 0
+    assert summary["h5_actual_output_mutated_count"] == 0

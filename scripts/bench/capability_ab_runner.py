@@ -6482,6 +6482,98 @@ def _build_h5_output_mutation_guard(row: dict[str, Any]) -> dict[str, Any]:
     }
 
 
+def _build_h5_controlled_mutation_gate(row: dict[str, Any]) -> dict[str, Any]:
+    """Pure helper: single controlled mutation gate reading all H5 shadow contracts.
+
+    No side effects. No model calls. No mutation. Gate always blocks in H5-30.
+    """
+    import os as _os
+
+    fs_shadow = row.get("h5_local_candidate_shadow_final_source_promotion")
+    patch_shadow = row.get("h5_final_patch_replacement_shadow_contract")
+    output_guard = row.get("h5_output_mutation_guard")
+    flag_contract = row.get("h5_execution_flag_contract")
+    closure = row.get("h5_overall_readiness_closure")
+    rollback = row.get("h5_local_candidate_rollback_dry_run")
+
+    flag_exec = _os.environ.get("NEXUS_H5_ENABLE_CONTROLLED_EXECUTION", "").strip() == "1"
+    flag_finalization = _os.environ.get("NEXUS_H5_ALLOW_LOCAL_FINALIZATION", "").strip() == "1"
+    flag_fs = _os.environ.get("NEXUS_H5_ALLOW_FINAL_SOURCE_CHANGE", "").strip() == "1"
+    flag_fp = _os.environ.get("NEXUS_H5_ALLOW_FINAL_PATCH_REPLACEMENT", "").strip() == "1"
+    flag_output = _os.environ.get("NEXUS_H5_ALLOW_OUTPUT_MUTATION", "").strip() == "1"
+    all_flags = flag_exec and flag_finalization and flag_fs and flag_fp and flag_output
+
+    reasons = []
+
+    fs_candidate = bool(fs_shadow and fs_shadow.get("shadow_promotion_candidate", False))
+    fs_would_set = str(fs_shadow and fs_shadow.get("would_set_final_source_to", "") or "")
+    fp_candidate = bool(patch_shadow and patch_shadow.get("shadow_patch_candidate", False))
+    fp_would_occur = bool(patch_shadow and patch_shadow.get("shadow_final_patch_replacement_would_occur", False))
+    out_candidate = bool(output_guard and output_guard.get("output_mutation_candidate", False))
+
+    actual_fs = str(row.get("final_source", "none") or "none")
+    actual_fp_replaced = bool(patch_shadow and patch_shadow.get("actual_final_patch_replaced", False))
+    actual_out_mutated = bool(output_guard and output_guard.get("actual_output_mutated", False))
+    actual_model_calls_inc = bool(output_guard and output_guard.get("model_calls_incremented", False))
+
+    actual_fs_changed = actual_fs != "none"
+    any_unexpected = actual_fs_changed or actual_fp_replaced or actual_out_mutated or actual_model_calls_inc
+
+    if not fs_candidate:
+        reasons.append("final_source_mutation_candidate_missing")
+    if not fp_candidate:
+        reasons.append("final_patch_mutation_candidate_missing")
+    if not out_candidate:
+        reasons.append("output_mutation_candidate_missing")
+
+    if actual_fs_changed:
+        reasons.append("unexpected_actual_final_source_change")
+    if actual_fp_replaced:
+        reasons.append("unexpected_actual_final_patch_replacement")
+    if actual_out_mutated:
+        reasons.append("unexpected_actual_output_mutation")
+    if actual_model_calls_inc:
+        reasons.append("unexpected_actual_model_calls_increment")
+
+    reasons.extend([
+        "h5_30_design_only",
+        "quality_non_regression_missing",
+        "full_benchmark_missing",
+        "governance_approval_missing",
+        "real_mutation_not_implemented",
+        "rollback_not_promoted",
+    ])
+
+    return {
+        "schema": "nexus.hybrid_h5_controlled_mutation_gate.v1",
+        "evaluated": True,
+        "gate_status": "blocked",
+        "mutation_allowed": False,
+        "gate_reasons": reasons,
+        "final_source_mutation_candidate": fs_candidate and fs_would_set == "local_candidate_shadow_promoted",
+        "final_patch_mutation_candidate": fp_candidate and fp_would_occur,
+        "output_mutation_candidate": out_candidate,
+        "model_calls_mutation_candidate": False,
+        "final_source_mutation_allowed": False,
+        "final_patch_mutation_allowed": False,
+        "output_mutation_allowed": False,
+        "model_calls_mutation_allowed": False,
+        "rollback_available": bool(rollback),
+        "rollback_required": any_unexpected,
+        "safe_to_continue": not any_unexpected,
+        "quality_non_regression_ready": bool(closure and closure.get("quality_non_regression_missing", True) is False),
+        "full_benchmark_ready": bool(closure and closure.get("full_benchmark_missing", True) is False),
+        "governance_ready": bool(closure and closure.get("governance_approval_missing", True) is False),
+        "all_required_flags_enabled": all_flags,
+        "actual_final_source_changed": actual_fs_changed,
+        "actual_final_patch_replaced": actual_fp_replaced,
+        "actual_output_mutated": actual_out_mutated,
+        "actual_model_calls_incremented": actual_model_calls_inc,
+        "public_claim_allowed": False,
+        "production_ready": False,
+    }
+
+
 def _finalize_with_nexus_row(
     row: dict[str, Any],
     *,
@@ -6948,6 +7040,9 @@ def _finalize_with_nexus_row(
 
             # H5-29: Output mutation guard
             finalized["h5_output_mutation_guard"] = _build_h5_output_mutation_guard(finalized)
+
+            # H5-30: Controlled mutation gate
+            finalized["h5_controlled_mutation_gate"] = _build_h5_controlled_mutation_gate(finalized)
 
     # Ensure keys are also on the row level for simple flat queries
     finalized["route_mode"] = r_mode
@@ -10720,6 +10815,16 @@ def write_evidence_bundle(
         "h5_output_mutation_allowed_count": sum(1 for row in with_rows if bool(row.get("h5_output_mutation_guard", {}).get("output_mutation_allowed", False))),
         "h5_actual_output_mutated_count": sum(1 for row in with_rows if bool(row.get("h5_output_mutation_guard", {}).get("actual_output_mutated", False))),
         "h5_output_mutation_rollback_required_count": sum(1 for row in with_rows if bool(row.get("h5_output_mutation_guard", {}).get("rollback_required", False))),
+        "h5_controlled_mutation_gate_count": sum(1 for row in with_rows if bool(row.get("h5_controlled_mutation_gate"))),
+        "h5_controlled_mutation_gate_blocked_count": sum(1 for row in with_rows if str(row.get("h5_controlled_mutation_gate", {}).get("gate_status", "")) == "blocked"),
+        "h5_controlled_mutation_allowed_count": sum(1 for row in with_rows if bool(row.get("h5_controlled_mutation_gate", {}).get("mutation_allowed", False))),
+        "h5_controlled_mutation_all_flags_enabled_count": sum(1 for row in with_rows if bool(row.get("h5_controlled_mutation_gate", {}).get("all_required_flags_enabled", False))),
+        "h5_controlled_final_source_candidate_count": sum(1 for row in with_rows if bool(row.get("h5_controlled_mutation_gate", {}).get("final_source_mutation_candidate", False))),
+        "h5_controlled_final_patch_candidate_count": sum(1 for row in with_rows if bool(row.get("h5_controlled_mutation_gate", {}).get("final_patch_mutation_candidate", False))),
+        "h5_controlled_output_mutation_candidate_count": sum(1 for row in with_rows if bool(row.get("h5_controlled_mutation_gate", {}).get("output_mutation_candidate", False))),
+        "h5_controlled_rollback_required_count": sum(1 for row in with_rows if bool(row.get("h5_controlled_mutation_gate", {}).get("rollback_required", False))),
+        "h5_controlled_safe_to_continue_count": sum(1 for row in with_rows if bool(row.get("h5_controlled_mutation_gate", {}).get("safe_to_continue", False))),
+        "h5_controlled_unexpected_mutation_count": sum(1 for row in with_rows if bool(row.get("h5_controlled_mutation_gate", {}).get("rollback_required", False))),
     }
     payload["external_provider_claim_boundary_contract"] = build_external_provider_claim_boundary_contract(payload)
     payload["public_promotion_readiness_contract"] = build_public_promotion_readiness_contract(payload)
