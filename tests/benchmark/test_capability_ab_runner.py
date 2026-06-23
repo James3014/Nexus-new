@@ -16114,3 +16114,203 @@ def test_h5_8_bundle_summary_counters(tmp_path, monkeypatch):
     assert summary["h5_cloud_fallback_invoked_count"] == 0
     assert summary["h5_behavior_changed_count"] == 0
     assert summary["h5_fail_closed_count"] == 0
+
+
+def test_h5_9_normal_finalize_rows_never_allow_execution(tmp_path, monkeypatch):
+    """H5-9 Test 1: normal finalize rows never allow execution."""
+    from scripts.bench.capability_ab_runner import CapabilityTask, _finalize_with_nexus_row
+
+    task = CapabilityTask(
+        id="test-task-h5-9-matrix",
+        difficulty="easy",
+        task_type="test_repair",
+        task_desc="verify h5-9 matrix",
+        target_file="target.py",
+        test_file="test_target.py",
+        expected_capabilities=("claim_gate",),
+        success_criteria="tests_pass",
+        repo_kind="nexus_internal",
+        fixture_kind="test_fixture",
+    )
+    _h5_all_flags_set_with_gate(monkeypatch)
+
+    scenarios = [
+        {"local_solve_eligible": True, "committee_trace": {"candidate_count": 2, "judge_selection": {"selected_candidate_id": "C_12481#candidate-1"}, "committee_receipt": {"selected_candidate_applied": True, "selected_candidate_apply_hash_match": True}}},
+        {"local_solve_eligible": False, "failure_reason": "VERIFIER_REJECTION:test", "committee_trace": {"candidate_count": 1, "judge_selection": {"selected_candidate_id": "C_12481#candidate-1"}, "committee_receipt": {"selected_candidate_applied": True, "selected_candidate_apply_hash_match": True}}},
+        {"local_solve_eligible": False, "failure_reason": "COMMITTEE_SELECTED_CANDIDATE_APPLY_HASH_MISMATCH", "committee_trace": {"candidate_count": 1, "judge_selection": {"selected_candidate_id": "C_12481#candidate-1"}, "committee_receipt": {"selected_candidate_applied": False, "selected_candidate_apply_hash_match": False}}},
+        {"local_solve_eligible": False, "failure_reason": "LOCAL_INFRA_UNAVAILABLE", "committee_trace": {"candidate_count": 0, "judge_selection": {}, "committee_receipt": {}}},
+    ]
+
+    for scenario in scenarios:
+        row = _finalize_with_nexus_row(
+            {"mode": "with_nexus", "model_calls": 1, "total_tokens": 100, "token_capture_status": "measured", **scenario},
+            provider="gemini", model_required=True, nexus_required=False, task=task, repo_root=tmp_path,
+        )
+        plan = row["h5_execution_plan"]
+        assert plan["execution_allowed"] is False, f"scenario={scenario}"
+        assert plan["planned_final_source"] == "none", f"scenario={scenario}"
+        assert row.get("final_source", "none") == "none"
+        assert row["behavior_changed"] is False
+        assert row["h5_route"]["cloud_fallback_invoked"] is False
+        assert row["h5_route"]["cloud_model_invoked"] is False
+        assert row["h5_route"]["blocked_delivery"] is False
+        assert row["h5_route"]["public_claim_allowed"] is False
+        assert row["h5_route"]["production_ready"] is False
+
+
+def test_h5_9_blocked_gate_matrix_maps_to_fail_closed_plan():
+    """H5-9 Test 2: blocked gate maps to fail_closed_plan."""
+    from scripts.bench.capability_ab_runner import _build_h5_execution_plan
+
+    reasons = [
+        "route_order_shadow_missing",
+        "shadow_would_fail_closed",
+        "unexpected_execution_side_effect",
+        "governance_boundary_violation",
+    ]
+    for reason in reasons:
+        row = {"h5_route": {"execution_gate_status": "blocked", "execution_gate_reasons": [reason]}}
+        plan = _build_h5_execution_plan(row, provider="gemini")
+        assert plan["execution_allowed"] is False
+        assert plan["execution_mode"] == "fail_closed_plan"
+        assert plan["fail_closed_reason"] == reason
+        assert plan["planned_final_source"] == "none"
+
+
+def test_h5_9_not_evaluated_maps_to_disabled():
+    """H5-9 Test 3: not_evaluated maps to disabled."""
+    from scripts.bench.capability_ab_runner import _build_h5_execution_plan
+
+    row = {"h5_route": {"execution_gate_status": "not_evaluated"}}
+    plan = _build_h5_execution_plan(row, provider="gemini")
+    assert plan["execution_allowed"] is False
+    assert plan["execution_mode"] == "disabled"
+    assert plan["planned_final_source"] == "none"
+
+
+def test_h5_9_eligible_dry_run_local_allows_false_remains_dry_run():
+    """H5-9 Test 4: eligible dry-run local with allows false remains dry_run_plan_only."""
+    from scripts.bench.capability_ab_runner import _build_h5_execution_plan
+
+    row = {"h5_route": {
+        "execution_gate_status": "eligible_dry_run_only",
+        "route_order_shadow_terminal_state": "would_use_local_candidate",
+        "route_order_shadow_sequence": ["local_committee"],
+        "execution_gate_allows_local_first": False,
+    }}
+    plan = _build_h5_execution_plan(row, provider="gemini")
+    assert plan["execution_allowed"] is False
+    assert plan["execution_mode"] == "dry_run_plan_only"
+    assert plan["planned_final_source"] == "none"
+    assert plan["requires_local_committee"] is True
+    assert plan["requires_output_replacement"] is False
+
+
+def test_h5_9_eligible_dry_run_cloud_allows_false_remains_dry_run():
+    """H5-9 Test 5: eligible dry-run cloud with allows false remains dry_run_plan_only."""
+    from scripts.bench.capability_ab_runner import _build_h5_execution_plan
+
+    row = {"h5_route": {
+        "execution_gate_status": "eligible_dry_run_only",
+        "route_order_shadow_terminal_state": "would_use_cloud_fallback",
+        "route_order_shadow_sequence": ["local_committee", "cloud_fallback"],
+        "execution_gate_allows_cloud_fallback": False,
+    }}
+    plan = _build_h5_execution_plan(row, provider="gemini")
+    assert plan["execution_allowed"] is False
+    assert plan["execution_mode"] == "dry_run_plan_only"
+    assert plan["planned_final_source"] == "none"
+    assert plan["requires_cloud_fallback"] is True
+    assert plan["requires_output_replacement"] is False
+
+
+def test_h5_9_synthetic_local_allow_produces_local_candidate_plan():
+    """H5-9 Test 6: synthetic local allow produces local_candidate_plan."""
+    from scripts.bench.capability_ab_runner import _build_h5_execution_plan
+
+    row = {"h5_route": {
+        "execution_gate_status": "eligible_dry_run_only",
+        "route_order_shadow_terminal_state": "would_use_local_candidate",
+        "execution_gate_allows_local_first": True,
+    }}
+    plan = _build_h5_execution_plan(row, provider="gemini")
+    assert plan["execution_allowed"] is True
+    assert plan["execution_mode"] == "local_candidate_plan"
+    assert plan["planned_final_source"] == "local_candidate"
+    assert plan["requires_output_replacement"] is True
+
+
+def test_h5_9_synthetic_cloud_allow_produces_cloud_fallback_plan():
+    """H5-9 Test 7: synthetic cloud allow produces cloud_fallback_plan."""
+    from scripts.bench.capability_ab_runner import _build_h5_execution_plan
+
+    row = {"h5_route": {
+        "execution_gate_status": "eligible_dry_run_only",
+        "route_order_shadow_terminal_state": "would_use_cloud_fallback",
+        "execution_gate_allows_cloud_fallback": True,
+    }}
+    plan = _build_h5_execution_plan(row, provider="gemini")
+    assert plan["execution_allowed"] is True
+    assert plan["execution_mode"] == "cloud_fallback_plan"
+    assert plan["planned_final_source"] == "cloud_fallback"
+    assert plan["requires_cloud_fallback"] is True
+    assert plan["requires_output_replacement"] is True
+
+
+def test_h5_9_both_allows_true_respects_shadow_terminal():
+    """H5-9 Test 8: both allows true respects shadow terminal."""
+    from scripts.bench.capability_ab_runner import _build_h5_execution_plan
+
+    # Case A: shadow local
+    row_a = {"h5_route": {
+        "execution_gate_status": "eligible_dry_run_only",
+        "route_order_shadow_terminal_state": "would_use_local_candidate",
+        "execution_gate_allows_local_first": True,
+        "execution_gate_allows_cloud_fallback": True,
+    }}
+    plan_a = _build_h5_execution_plan(row_a, provider="gemini")
+    assert plan_a["execution_allowed"] is True
+    assert plan_a["execution_mode"] == "local_candidate_plan"
+    assert plan_a["planned_final_source"] == "local_candidate"
+
+    # Case B: shadow cloud
+    row_b = {"h5_route": {
+        "execution_gate_status": "eligible_dry_run_only",
+        "route_order_shadow_terminal_state": "would_use_cloud_fallback",
+        "execution_gate_allows_local_first": True,
+        "execution_gate_allows_cloud_fallback": True,
+    }}
+    plan_b = _build_h5_execution_plan(row_b, provider="gemini")
+    assert plan_b["execution_allowed"] is True
+    assert plan_b["execution_mode"] == "cloud_fallback_plan"
+    assert plan_b["planned_final_source"] == "cloud_fallback"
+
+
+def test_h5_9_unknown_gate_status_fails_closed():
+    """H5-9 Test 9: unknown gate status fails closed."""
+    from scripts.bench.capability_ab_runner import _build_h5_execution_plan
+
+    row = {"h5_route": {"execution_gate_status": "unexpected_new_gate_state"}}
+    plan = _build_h5_execution_plan(row, provider="gemini")
+    assert plan["execution_allowed"] is False
+    assert plan["execution_mode"] == "fail_closed_plan"
+    assert plan["fail_closed_reason"] == "unknown_execution_plan_state"
+
+
+def test_h5_9_governance_remains_false_in_every_plan():
+    """H5-9 Test 10: governance remains false in every plan mode."""
+    from scripts.bench.capability_ab_runner import _build_h5_execution_plan
+
+    modes = [
+        {},
+        {"execution_gate_status": "blocked", "execution_gate_reasons": ["test"]},
+        {"execution_gate_status": "not_evaluated"},
+        {"execution_gate_status": "eligible_dry_run_only", "route_order_shadow_terminal_state": "would_use_local_candidate", "route_order_shadow_sequence": ["local_committee"], "execution_gate_allows_local_first": False},
+        {"execution_gate_status": "eligible_dry_run_only", "route_order_shadow_terminal_state": "would_use_local_candidate", "execution_gate_allows_local_first": True},
+        {"execution_gate_status": "eligible_dry_run_only", "route_order_shadow_terminal_state": "would_use_cloud_fallback", "route_order_shadow_sequence": ["local_committee", "cloud_fallback"], "execution_gate_allows_cloud_fallback": True},
+    ]
+    for h5_fields in modes:
+        row = {"h5_route": h5_fields} if h5_fields else {}
+        plan = _build_h5_execution_plan(row, provider="gemini")
+        assert plan["governance"]["public_claim_allowed"] is False, f"h5={h5_fields}"
+        assert plan["governance"]["production_ready"] is False, f"h5={h5_fields}"
