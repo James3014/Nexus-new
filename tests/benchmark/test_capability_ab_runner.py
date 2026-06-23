@@ -20011,3 +20011,231 @@ def test_h5_36_summary_counters(tmp_path, monkeypatch):
     assert summary["h5_actual_output_mutated_count"] == 0
     assert summary["h5_behavior_changed_count"] == 0
     assert summary["h5_cloud_fallback_invoked_count"] == 0
+
+
+def test_h5_37_empty_row_blocks():
+    """H5-37 Test 1: empty row blocks."""
+    from scripts.bench.capability_ab_runner import _build_h5_isolated_final_patch_replacement_simulation
+
+    sim = _build_h5_isolated_final_patch_replacement_simulation({})
+    assert sim["simulation_status"] == "blocked"
+    assert sim["would_simulate_final_patch_replacement"] is False
+
+
+def test_h5_37_preflight_pass_simulates(monkeypatch):
+    """H5-37 Test 2: preflight pass + verified patch simulates isolated replacement."""
+    from scripts.bench.capability_ab_runner import _build_h5_isolated_final_patch_replacement_simulation
+
+    monkeypatch.setenv("NEXUS_H5_ALLOW_FINAL_PATCH_APPLY_PREFLIGHT", "1")
+
+    row = {
+        "h5_final_patch_apply_preflight_receipt": {
+            "would_pass_final_patch_apply_preflight": True,
+            "preflight_status": "final_patch_preflight_pass_shadow_only",
+            "final_source_apply_cycle_proven": True,
+            "final_source_rollback_proven": True,
+        },
+        "h5_route": {"local_selected_candidate_id": "C_1", "local_selected_candidate_patch_sha256": "abc123", "local_selected_candidate_patch_length": 200, "local_selected_candidate_hash_match": True},
+        "h5_local_candidate_rollback_dry_run": {"rollback_available": True, "rollback_required": False, "safe_to_continue": True},
+        "h5_output_mutation_guard": {"actual_output_mutated": False},
+        "final_patch": "original",
+    }
+    sim = _build_h5_isolated_final_patch_replacement_simulation(row)
+    assert sim["would_simulate_final_patch_replacement"] is True
+    assert sim["simulation_status"] == "isolated_final_patch_simulation_pass"
+    assert sim["isolated_final_patch_replaced"] is True
+    assert sim["isolated_final_patch_sha256"] == "abc123"
+    assert sim["isolated_final_patch_length"] == 200
+    assert sim["actual_final_patch_replaced"] is False
+    assert sim["actual_final_patch_present_after"] == sim["actual_final_patch_present_before"]
+
+
+def test_h5_37_preflight_missing_blocks():
+    """H5-37 Test 3: preflight missing blocks."""
+    from scripts.bench.capability_ab_runner import _build_h5_isolated_final_patch_replacement_simulation
+
+    sim = _build_h5_isolated_final_patch_replacement_simulation({})
+    assert "missing_final_patch_apply_preflight_receipt" in sim["simulation_reasons"]
+
+
+def test_h5_37_preflight_not_passed_blocks():
+    """H5-37 Test 4: preflight not passed blocks."""
+    from scripts.bench.capability_ab_runner import _build_h5_isolated_final_patch_replacement_simulation
+
+    row = {
+        "h5_final_patch_apply_preflight_receipt": {
+            "would_pass_final_patch_apply_preflight": False,
+            "preflight_status": "blocked",
+            "final_source_apply_cycle_proven": False,
+            "final_source_rollback_proven": False,
+        },
+    }
+    sim = _build_h5_isolated_final_patch_replacement_simulation(row)
+    assert "final_patch_preflight_not_passed" in sim["simulation_reasons"]
+
+
+def test_h5_37_missing_patch_hash_blocks(monkeypatch):
+    """H5-37 Test 5: missing patch hash blocks."""
+    from scripts.bench.capability_ab_runner import _build_h5_isolated_final_patch_replacement_simulation
+
+    monkeypatch.setenv("NEXUS_H5_ALLOW_FINAL_PATCH_APPLY_PREFLIGHT", "1")
+
+    row = {
+        "h5_final_patch_apply_preflight_receipt": {
+            "would_pass_final_patch_apply_preflight": True,
+            "preflight_status": "final_patch_preflight_pass_shadow_only",
+            "final_source_apply_cycle_proven": True,
+            "final_source_rollback_proven": True,
+        },
+        "h5_route": {"local_selected_candidate_id": "C_1", "local_selected_candidate_patch_sha256": "", "local_selected_candidate_patch_length": 100, "local_selected_candidate_hash_match": True},
+        "h5_local_candidate_rollback_dry_run": {"rollback_available": True, "rollback_required": False, "safe_to_continue": True},
+        "h5_output_mutation_guard": {"actual_output_mutated": False},
+    }
+    sim = _build_h5_isolated_final_patch_replacement_simulation(row)
+    assert "selected_candidate_patch_hash_missing" in sim["simulation_reasons"]
+
+
+def test_h5_37_unverified_hash_blocks(monkeypatch):
+    """H5-37 Test 6: unverified hash blocks."""
+    from scripts.bench.capability_ab_runner import _build_h5_isolated_final_patch_replacement_simulation
+
+    monkeypatch.setenv("NEXUS_H5_ALLOW_FINAL_PATCH_APPLY_PREFLIGHT", "1")
+
+    row = {
+        "h5_final_patch_apply_preflight_receipt": {
+            "would_pass_final_patch_apply_preflight": True,
+            "preflight_status": "final_patch_preflight_pass_shadow_only",
+            "final_source_apply_cycle_proven": True,
+            "final_source_rollback_proven": True,
+        },
+        "h5_route": {"local_selected_candidate_id": "C_1", "local_selected_candidate_patch_sha256": "abc", "local_selected_candidate_patch_length": 100, "local_selected_candidate_hash_match": False},
+        "h5_local_candidate_rollback_dry_run": {"rollback_available": True, "rollback_required": False, "safe_to_continue": True},
+        "h5_output_mutation_guard": {"actual_output_mutated": False},
+    }
+    sim = _build_h5_isolated_final_patch_replacement_simulation(row)
+    assert "selected_candidate_hash_not_verified" in sim["simulation_reasons"]
+
+
+def test_h5_37_output_mutation_blocks(monkeypatch):
+    """H5-37 Test 7: output mutation detected blocks."""
+    from scripts.bench.capability_ab_runner import _build_h5_isolated_final_patch_replacement_simulation
+
+    monkeypatch.setenv("NEXUS_H5_ALLOW_FINAL_PATCH_APPLY_PREFLIGHT", "1")
+
+    row = {
+        "h5_final_patch_apply_preflight_receipt": {
+            "would_pass_final_patch_apply_preflight": True,
+            "preflight_status": "final_patch_preflight_pass_shadow_only",
+            "final_source_apply_cycle_proven": True,
+            "final_source_rollback_proven": True,
+        },
+        "h5_route": {"local_selected_candidate_id": "C_1", "local_selected_candidate_patch_sha256": "abc", "local_selected_candidate_patch_length": 100, "local_selected_candidate_hash_match": True},
+        "h5_local_candidate_rollback_dry_run": {"rollback_available": True, "rollback_required": False, "safe_to_continue": True},
+        "h5_output_mutation_guard": {"actual_output_mutated": True},
+    }
+    sim = _build_h5_isolated_final_patch_replacement_simulation(row)
+    assert "output_mutation_detected" in sim["simulation_reasons"]
+
+
+def test_h5_37_finalized_default_env(tmp_path, monkeypatch):
+    """H5-37 Test 8: finalized default env row attaches simulation, no replace."""
+    from scripts.bench.capability_ab_runner import CapabilityTask, _finalize_with_nexus_row
+
+    task = CapabilityTask(
+        id="test-task-h5-37", difficulty="easy", task_type="test_repair",
+        task_desc="verify h5-37", target_file="target.py", test_file="test_target.py",
+        expected_capabilities=("claim_gate",), success_criteria="tests_pass",
+        repo_kind="nexus_internal", fixture_kind="test_fixture",
+    )
+    _h5_all_flags_set_with_gate(monkeypatch)
+
+    row = _finalize_with_nexus_row(
+        {"mode": "with_nexus", "model_calls": 1, "total_tokens": 100,
+         "token_capture_status": "measured",
+         "committee_trace": {"candidate_count": 2, "judge_selection": {"selected_candidate_id": "C_12481#candidate-1"},
+                              "committee_receipt": {"selected_candidate_applied": True, "selected_candidate_apply_hash_match": True}},
+         "local_solve_eligible": True},
+        provider="gemini", model_required=True, nexus_required=False, task=task, repo_root=tmp_path,
+    )
+
+    sim = row["h5_isolated_final_patch_replacement_simulation"]
+    assert sim["actual_final_patch_replaced"] is False
+    assert row["behavior_changed"] is False
+
+
+def test_h5_37_all_flags_may_simulate(tmp_path, monkeypatch):
+    """H5-37 Test 9: all flags/evidence may pass simulation but actual final_patch unchanged."""
+    from scripts.bench.capability_ab_runner import CapabilityTask, _finalize_with_nexus_row
+
+    task = CapabilityTask(
+        id="test-task-h5-37-flags", difficulty="easy", task_type="test_repair",
+        task_desc="verify h5-37 flags", target_file="target.py", test_file="test_target.py",
+        expected_capabilities=("claim_gate",), success_criteria="tests_pass",
+        repo_kind="nexus_internal", fixture_kind="test_fixture",
+    )
+    _h5_all_flags_set_with_gate(monkeypatch)
+
+    row = _finalize_with_nexus_row(
+        {"mode": "with_nexus", "model_calls": 1, "total_tokens": 100,
+         "token_capture_status": "measured",
+         "committee_trace": {"candidate_count": 2, "judge_selection": {"selected_candidate_id": "C_12481#candidate-1"},
+                              "committee_receipt": {"selected_candidate_applied": True, "selected_candidate_apply_hash_match": True}},
+         "local_solve_eligible": True,
+         "external_local_evidence_ingestion_validation": {
+             "schema": "nexus.h5_local_committee_evidence_ingestion_validation.v1",
+             "validation_status": "accepted", "accepted_for_h5_readiness_shadow": True,
+         },
+         "external_cloud_evidence_ingestion_validation": {
+             "schema": "nexus.h5_cloud_fallback_evidence_ingestion_validation.v1",
+             "validation_status": "accepted", "accepted_for_h5_readiness_shadow": True,
+         }},
+        provider="gemini", model_required=True, nexus_required=False, task=task, repo_root=tmp_path,
+    )
+
+    sim = row["h5_isolated_final_patch_replacement_simulation"]
+    assert sim["actual_final_patch_replaced"] is False
+    assert row["behavior_changed"] is False
+
+
+def test_h5_37_summary_counters(tmp_path, monkeypatch):
+    """H5-37 Test 10: summary counters show no actual final_patch replacement."""
+    from scripts.bench.capability_ab_runner import CapabilityTask, _finalize_with_nexus_row, write_evidence_bundle
+
+    task = CapabilityTask(
+        id="test-task-h5-37-summary", difficulty="easy", task_type="test_repair",
+        task_desc="verify h5-37 summary", target_file="target.py", test_file="test_target.py",
+        expected_capabilities=("claim_gate",), success_criteria="tests_pass",
+        repo_kind="nexus_internal", fixture_kind="test_fixture",
+    )
+    _h5_all_flags_set_with_gate(monkeypatch)
+    monkeypatch.setattr("scripts.bench.capability_ab_runner._git_commit", lambda x: "dummy-commit")
+
+    row = _finalize_with_nexus_row(
+        {"mode": "with_nexus", "model_calls": 1, "total_tokens": 100,
+         "token_capture_status": "measured",
+         "committee_trace": {"candidate_count": 2, "judge_selection": {"selected_candidate_id": "C_12481#candidate-1"},
+                              "committee_receipt": {"selected_candidate_applied": True, "selected_candidate_apply_hash_match": True}},
+         "local_solve_eligible": True},
+        provider="gemini", model_required=True, nexus_required=False, task=task, repo_root=tmp_path,
+    )
+
+    with_path = tmp_path / "with.jsonl"
+    without_path = tmp_path / "without.jsonl"
+    with_path.write_text("[]", encoding="utf-8")
+    without_path.write_text("[]", encoding="utf-8")
+
+    bundle_file = write_evidence_bundle(
+        out_dir=tmp_path, with_path=with_path, without_path=without_path,
+        rows=[row],
+        config={"tasks_file": "tasks.json", "tasks_manifest_hash": "manifest_hash",
+                "unique_tasks_requested": 1, "repeat_trials": 1, "timeout_sec": 60},
+    )
+
+    bundle_data = json.loads(bundle_file.read_text(encoding="utf-8"))
+    summary = bundle_data["hybrid_route_summary"]
+    assert summary["h5_isolated_final_patch_simulation_count"] >= 1
+    assert summary["h5_isolated_final_patch_replaced_count"] == 0
+    assert summary["h5_actual_final_patch_replaced_count"] == 0
+    assert summary["h5_actual_output_mutated_count"] == 0
+    assert summary["h5_behavior_changed_count"] == 0
+    assert summary["h5_cloud_fallback_invoked_count"] == 0
