@@ -7469,6 +7469,262 @@ def _apply_h5_actual_final_patch_if_allowed(row: dict[str, Any], decision: dict[
     return result
 
 
+def _build_h5_actual_final_patch_rollback_decision(row: dict[str, Any]) -> dict[str, Any]:
+    """Pure helper: builds actual final_patch rollback decision."""
+    import os as _os
+
+    apply_receipt = row.get("h5_actual_final_patch_apply_receipt")
+    actual_fp = row.get("final_patch")
+
+    flag_rollback = _os.environ.get("NEXUS_H5_ALLOW_ACTUAL_FINAL_PATCH_ROLLBACK", "").strip() == "1"
+
+    apply_present = bool(apply_receipt)
+    apply_executed = bool(apply_receipt and apply_receipt.get("actual_patch_apply_executed", False))
+    apply_replaced = bool(apply_receipt and apply_receipt.get("actual_final_patch_replaced", False))
+    fp_clean = not bool(apply_receipt and apply_receipt.get("output_mutated", False))
+    mc_clean = not bool(apply_receipt and apply_receipt.get("model_calls_incremented", False))
+    cloud_clean = not bool(apply_receipt and apply_receipt.get("cloud_invoked", False))
+    beh_clean = not bool(apply_receipt and apply_receipt.get("behavior_changed", False))
+
+    is_metadata = isinstance(actual_fp, dict) and actual_fp.get("content_kind") == "candidate_patch_metadata_only"
+
+    would_rollback = (
+        flag_rollback and is_metadata
+        and apply_present and apply_executed and apply_replaced
+        and fp_clean and mc_clean and cloud_clean and beh_clean
+    )
+
+    reasons = []
+    if not flag_rollback:
+        reasons.append("rollback_flag_not_enabled")
+    if not is_metadata:
+        reasons.append("final_patch_not_metadata_candidate")
+    if not apply_present:
+        reasons.append("missing_actual_patch_apply_receipt")
+    if apply_receipt and not apply_executed:
+        reasons.append("actual_patch_apply_not_executed")
+    if apply_receipt and not apply_replaced:
+        reasons.append("actual_patch_not_replaced")
+    if not fp_clean:
+        reasons.append("output_was_mutated")
+    if not mc_clean:
+        reasons.append("model_calls_were_incremented")
+    if not cloud_clean:
+        reasons.append("cloud_was_invoked")
+    if not beh_clean:
+        reasons.append("behavior_changed_true")
+    reasons.extend([
+        "final_patch_only_rollback_gate", "output_remains_unchanged",
+        "model_calls_remain_unchanged", "cloud_remains_uninvoked",
+    ])
+
+    return {
+        "schema": "nexus.hybrid_h5_actual_final_patch_rollback_decision.v1",
+        "evaluated": True,
+        "rollback_decision": "rollback_final_patch_only" if would_rollback else "blocked",
+        "rollback_reasons": reasons,
+        "rollback_allowed": would_rollback,
+        "rollback_target_final_patch": "none",
+        "actual_final_patch_present_before_rollback": bool(actual_fp),
+        "would_restore_final_patch_to": "none",
+        "actual_patch_apply_receipt_present": apply_present,
+        "actual_patch_apply_executed": apply_executed,
+        "rollback_flag_enabled": flag_rollback,
+        "rollback_required": would_rollback,
+        "rollback_safe": would_rollback,
+        "output_mutated": not fp_clean,
+        "model_calls_incremented": not mc_clean,
+        "cloud_invoked": not cloud_clean,
+        "behavior_changed": not beh_clean,
+        "public_claim_allowed": False,
+        "production_ready": False,
+    }
+
+
+def _rollback_h5_actual_final_patch_if_allowed(row: dict[str, Any], decision: dict[str, Any]) -> dict[str, Any]:
+    """Returns shallow copy of row with final_patch possibly restored."""
+    result = dict(row)
+    actual_before = bool(row.get("final_patch"))
+    allowed = bool(decision.get("rollback_allowed", False))
+
+    if allowed:
+        result["final_patch"] = "none"
+    result["h5_actual_final_patch_rollback_receipt"] = {
+        "schema": "nexus.hybrid_h5_actual_final_patch_rollback_receipt.v1",
+        "evaluated": True,
+        "rollback_executed": allowed,
+        "actual_final_patch_present_before_rollback": actual_before,
+        "actual_final_patch_present_after_rollback": bool(result.get("final_patch")),
+        "actual_final_patch_restored": allowed and result.get("final_patch") == "none",
+        "rollback_decision": str(decision.get("rollback_decision", "blocked")),
+        "rollback_target_final_patch": "none",
+        "output_mutated": False,
+        "model_calls_incremented": False,
+        "cloud_invoked": False,
+        "behavior_changed": False,
+        "safe_to_continue": True,
+        "public_claim_allowed": False,
+        "production_ready": False,
+    }
+    return result
+
+
+def _build_h5_output_apply_preflight_receipt(row: dict[str, Any]) -> dict[str, Any]:
+    """Pure helper: builds output apply preflight receipt."""
+    import os as _os
+
+    fp_rollback = row.get("h5_actual_final_patch_rollback_receipt")
+    fs_apply = row.get("h5_actual_final_source_apply_receipt")
+    fs_rollback = row.get("h5_actual_final_source_rollback_receipt")
+    output_guard = row.get("h5_output_mutation_guard")
+    rollback = row.get("h5_local_candidate_rollback_dry_run")
+
+    flag = _os.environ.get("NEXUS_H5_ALLOW_OUTPUT_APPLY_PREFLIGHT", "").strip() == "1"
+
+    selected_sha256 = str(row.get("h5_route", {}).get("local_selected_candidate_patch_sha256", "") or "")
+    selected_length = int(row.get("h5_route", {}).get("local_selected_candidate_patch_length", 0) or 0)
+    selected_hash_ok = bool(row.get("h5_route", {}).get("local_selected_candidate_hash_match", False))
+
+    fs_cycle = bool(fs_apply and fs_apply.get("actual_apply_executed", False) and fs_apply.get("actual_final_source_changed", False))
+    fs_rollback_ok = bool(fs_rollback and fs_rollback.get("actual_final_source_restored", False))
+    fp_cycle = bool(fp_rollback and fp_rollback.get("rollback_executed", False))
+    out_clean = not bool(output_guard and output_guard.get("actual_output_mutated", False))
+
+    rb_available = bool(rollback and rollback.get("rollback_available", False))
+    rb_required = bool(rollback and rollback.get("rollback_required", False))
+    rb_safe = bool(rollback and rollback.get("safe_to_continue", True))
+
+    would_pass = (
+        flag and fs_cycle and fs_rollback_ok and fp_cycle
+        and bool(selected_sha256) and selected_length > 0 and selected_hash_ok
+        and rb_available and not rb_required and rb_safe and out_clean
+    )
+
+    reasons = []
+    if not flag:
+        reasons.append("output_apply_preflight_flag_not_enabled")
+    if not (fs_cycle and fs_rollback_ok):
+        reasons.append("final_source_cycle_not_proven")
+    if not fp_cycle:
+        reasons.append("final_patch_cycle_not_proven")
+    if not bool(selected_sha256):
+        reasons.append("selected_candidate_patch_hash_missing")
+    if selected_length <= 0:
+        reasons.append("selected_candidate_patch_length_missing")
+    if not selected_hash_ok:
+        reasons.append("selected_candidate_hash_not_verified")
+    if not rb_available:
+        reasons.append("rollback_not_available")
+    if rb_required:
+        reasons.append("rollback_required")
+    if not rb_safe:
+        reasons.append("rollback_not_safe")
+    if not out_clean:
+        reasons.append("output_mutation_detected")
+    reasons.extend([
+        "h5_39_output_preflight_only_no_actual_output_mutation",
+        "model_calls_increment_still_blocked", "cloud_invocation_still_blocked",
+        "behavior_change_still_blocked",
+    ])
+
+    return {
+        "schema": "nexus.hybrid_h5_output_apply_preflight_receipt.v1",
+        "evaluated": True,
+        "preflight_status": "output_preflight_pass_shadow_only" if would_pass else "blocked",
+        "preflight_reasons": reasons,
+        "would_pass_output_apply_preflight": would_pass,
+        "output_apply_preflight_flag_enabled": flag,
+        "actual_output_mutated": False,
+        "output_mutation_allowed": False,
+        "final_source_cycle_proven": fs_cycle and fs_rollback_ok,
+        "final_patch_cycle_proven": fp_cycle,
+        "selected_candidate_patch_sha256": selected_sha256,
+        "selected_candidate_patch_length": selected_length,
+        "selected_candidate_hash_verified": selected_hash_ok,
+        "rollback_available": rb_available,
+        "rollback_required": False,
+        "safe_to_continue": rb_safe,
+        "model_calls_increment_allowed": False,
+        "cloud_invocation_allowed": False,
+        "behavior_change_allowed": False,
+        "public_claim_allowed": False,
+        "production_ready": False,
+    }
+
+
+def _build_h5_isolated_output_mutation_simulation(row: dict[str, Any]) -> dict[str, Any]:
+    """Pure helper: builds isolated output mutation simulation receipt."""
+    import os as _os
+
+    preflight = row.get("h5_output_apply_preflight_receipt")
+    rollback = row.get("h5_local_candidate_rollback_dry_run")
+
+    selected_sha256 = str(row.get("h5_route", {}).get("local_selected_candidate_patch_sha256", "") or "")
+    selected_length = int(row.get("h5_route", {}).get("local_selected_candidate_patch_length", 0) or 0)
+
+    pf_present = bool(preflight)
+    pf_pass = bool(preflight and preflight.get("would_pass_output_apply_preflight", False))
+    pf_shadow = str(preflight and preflight.get("preflight_status", "") or "") == "output_preflight_pass_shadow_only"
+    fs_cycle = bool(preflight and preflight.get("final_source_cycle_proven", False))
+    fp_cycle = bool(preflight and preflight.get("final_patch_cycle_proven", False))
+
+    rb_available = bool(rollback and rollback.get("rollback_available", False))
+    rb_required = bool(rollback and rollback.get("rollback_required", False))
+    rb_safe = bool(rollback and rollback.get("safe_to_continue", True))
+
+    would_sim = (
+        pf_present and pf_pass and pf_shadow
+        and fs_cycle and fp_cycle
+        and rb_available and not rb_required and rb_safe
+    )
+
+    reasons = []
+    if not pf_present:
+        reasons.append("missing_output_apply_preflight_receipt")
+    if preflight and not pf_pass:
+        reasons.append("output_preflight_not_passed")
+    if not fs_cycle:
+        reasons.append("final_source_cycle_not_proven")
+    if not fp_cycle:
+        reasons.append("final_patch_cycle_not_proven")
+    if not rb_available:
+        reasons.append("rollback_not_available")
+    if rb_required:
+        reasons.append("rollback_required")
+    if not rb_safe:
+        reasons.append("rollback_not_safe")
+    reasons.extend([
+        "isolated_output_simulation_only_no_actual_output_mutation",
+        "model_calls_increment_still_blocked", "cloud_invocation_still_blocked",
+        "behavior_change_still_blocked",
+    ])
+
+    return {
+        "schema": "nexus.hybrid_h5_isolated_output_mutation_simulation.v1",
+        "evaluated": True,
+        "simulation_status": "isolated_output_simulation_pass" if would_sim else "blocked",
+        "simulation_reasons": reasons,
+        "would_simulate_output_mutation": would_sim,
+        "actual_output_mutated": False,
+        "isolated_output_mutated": would_sim,
+        "isolated_output_source": "local_candidate_shadow_promoted" if would_sim else "",
+        "isolated_output_patch_sha256": selected_sha256 if would_sim else "",
+        "isolated_output_patch_length": selected_length if would_sim else 0,
+        "output_apply_preflight_present": pf_present,
+        "output_preflight_pass_shadow_only": pf_pass and pf_shadow,
+        "final_source_cycle_proven": fs_cycle,
+        "final_patch_cycle_proven": fp_cycle,
+        "rollback_available": rb_available,
+        "rollback_required": rb_required,
+        "safe_to_continue": not rb_required,
+        "model_calls_incremented": False,
+        "cloud_invoked": False,
+        "behavior_changed": False,
+        "public_claim_allowed": False,
+        "production_ready": False,
+    }
+
+
 def _finalize_with_nexus_row(
     row: dict[str, Any],
     *,
@@ -7968,6 +8224,17 @@ def _finalize_with_nexus_row(
             h5_fp_apply_decision = _build_h5_actual_final_patch_apply_decision(finalized)
             finalized["h5_actual_final_patch_apply_decision"] = h5_fp_apply_decision
             finalized = _apply_h5_actual_final_patch_if_allowed(finalized, h5_fp_apply_decision)
+
+            # H5-39: Part A — actual final_patch rollback gate
+            h5_fp_rollback_decision = _build_h5_actual_final_patch_rollback_decision(finalized)
+            finalized["h5_actual_final_patch_rollback_decision"] = h5_fp_rollback_decision
+            finalized = _rollback_h5_actual_final_patch_if_allowed(finalized, h5_fp_rollback_decision)
+
+            # H5-39: Part B — output apply preflight receipt
+            finalized["h5_output_apply_preflight_receipt"] = _build_h5_output_apply_preflight_receipt(finalized)
+
+            # H5-39: Part C — isolated output mutation simulation
+            finalized["h5_isolated_output_mutation_simulation"] = _build_h5_isolated_output_mutation_simulation(finalized)
 
     # Ensure keys are also on the row level for simple flat queries
     finalized["route_mode"] = r_mode
@@ -11805,6 +12072,17 @@ def write_evidence_bundle(
         "h5_actual_final_patch_apply_replaced_count": sum(1 for row in with_rows if bool(row.get("h5_actual_final_patch_apply_receipt", {}).get("actual_final_patch_replaced", False))),
         "h5_actual_final_patch_apply_all_flags_enabled_count": sum(1 for row in with_rows if bool(row.get("h5_actual_final_patch_apply_decision", {}).get("all_ten_flags_enabled", False))),
         "h5_actual_final_patch_apply_safe_count": sum(1 for row in with_rows if bool(row.get("h5_actual_final_patch_apply_decision", {}).get("safe_to_continue", False))),
+        "h5_actual_final_patch_rollback_decision_count": sum(1 for row in with_rows if bool(row.get("h5_actual_final_patch_rollback_decision"))),
+        "h5_actual_final_patch_rollback_allowed_count": sum(1 for row in with_rows if bool(row.get("h5_actual_final_patch_rollback_decision", {}).get("rollback_allowed", False))),
+        "h5_actual_final_patch_rollback_executed_count": sum(1 for row in with_rows if bool(row.get("h5_actual_final_patch_rollback_receipt", {}).get("rollback_executed", False))),
+        "h5_actual_final_patch_rollback_restored_count": sum(1 for row in with_rows if bool(row.get("h5_actual_final_patch_rollback_receipt", {}).get("actual_final_patch_restored", False))),
+        "h5_output_apply_preflight_receipt_count": sum(1 for row in with_rows if bool(row.get("h5_output_apply_preflight_receipt"))),
+        "h5_output_apply_preflight_pass_shadow_count": sum(1 for row in with_rows if str(row.get("h5_output_apply_preflight_receipt", {}).get("preflight_status", "")) == "output_preflight_pass_shadow_only"),
+        "h5_output_apply_preflight_blocked_count": sum(1 for row in with_rows if str(row.get("h5_output_apply_preflight_receipt", {}).get("preflight_status", "")) == "blocked"),
+        "h5_isolated_output_simulation_count": sum(1 for row in with_rows if bool(row.get("h5_isolated_output_mutation_simulation"))),
+        "h5_isolated_output_simulation_pass_count": sum(1 for row in with_rows if str(row.get("h5_isolated_output_mutation_simulation", {}).get("simulation_status", "")) == "isolated_output_simulation_pass"),
+        "h5_isolated_output_mutated_count": sum(1 for row in with_rows if bool(row.get("h5_isolated_output_mutation_simulation", {}).get("isolated_output_mutated", False))),
+        "h5_actual_output_mutated_count_h5_39": sum(1 for row in with_rows if bool(row.get("h5_isolated_output_mutation_simulation", {}).get("actual_output_mutated", False))),
     }
     payload["external_provider_claim_boundary_contract"] = build_external_provider_claim_boundary_contract(payload)
     payload["public_promotion_readiness_contract"] = build_public_promotion_readiness_contract(payload)

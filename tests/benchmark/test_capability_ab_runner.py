@@ -20518,3 +20518,214 @@ def test_h5_38_summary_counters_all_flags(tmp_path, monkeypatch):
         assert summary["h5_actual_final_patch_apply_replaced_count"] >= 1
     assert row["behavior_changed"] is False
     assert row.get("cloud_fallback_invoked", False) is False
+
+
+def test_h5_39_patch_rollback_empty_blocks():
+    """H5-39 A1: patch rollback decision empty blocks."""
+    from scripts.bench.capability_ab_runner import _build_h5_actual_final_patch_rollback_decision
+    d = _build_h5_actual_final_patch_rollback_decision({})
+    assert d["rollback_allowed"] is False
+    assert d["rollback_decision"] == "blocked"
+
+
+def test_h5_39_patch_rollback_flag_missing(monkeypatch):
+    """H5-39 A2: patch rollback flag missing blocks."""
+    from scripts.bench.capability_ab_runner import _build_h5_actual_final_patch_rollback_decision
+    monkeypatch.delenv("NEXUS_H5_ALLOW_ACTUAL_FINAL_PATCH_ROLLBACK", raising=False)
+    row = {"final_patch": {"content_kind": "candidate_patch_metadata_only"},
+           "h5_actual_final_patch_apply_receipt": {"actual_patch_apply_executed": True, "actual_final_patch_replaced": True, "output_mutated": False, "model_calls_incremented": False, "cloud_invoked": False, "behavior_changed": False}}
+    d = _build_h5_actual_final_patch_rollback_decision(row)
+    assert "rollback_flag_not_enabled" in d["rollback_reasons"]
+
+
+def test_h5_39_patch_rollback_flag_allows(monkeypatch):
+    """H5-39 A3: patch rollback flag enabled + metadata + clean receipt allows."""
+    from scripts.bench.capability_ab_runner import _build_h5_actual_final_patch_rollback_decision
+    monkeypatch.setenv("NEXUS_H5_ALLOW_ACTUAL_FINAL_PATCH_ROLLBACK", "1")
+    row = {"final_patch": {"content_kind": "candidate_patch_metadata_only"},
+           "h5_actual_final_patch_apply_receipt": {"actual_patch_apply_executed": True, "actual_final_patch_replaced": True, "output_mutated": False, "model_calls_incremented": False, "cloud_invoked": False, "behavior_changed": False}}
+    d = _build_h5_actual_final_patch_rollback_decision(row)
+    assert d["rollback_allowed"] is True
+    assert d["rollback_decision"] == "rollback_final_patch_only"
+
+
+def test_h5_39_patch_rollback_helper_no_mutate(monkeypatch):
+    """H5-39 A4: patch rollback helper does not mutate input."""
+    from scripts.bench.capability_ab_runner import _rollback_h5_actual_final_patch_if_allowed
+    monkeypatch.setenv("NEXUS_H5_ALLOW_ACTUAL_FINAL_PATCH_ROLLBACK", "1")
+    original = {"final_patch": {"content_kind": "candidate_patch_metadata_only"}}
+    d = {"rollback_allowed": True, "rollback_decision": "rollback_final_patch_only"}
+    result = _rollback_h5_actual_final_patch_if_allowed(original, d)
+    assert isinstance(original["final_patch"], dict)
+    assert result["final_patch"] == "none"
+    assert result["h5_actual_final_patch_rollback_receipt"]["rollback_executed"] is True
+
+
+def test_h5_39_patch_rollback_restores():
+    """H5-39 A5: patch rollback helper restores final_patch."""
+    from scripts.bench.capability_ab_runner import _rollback_h5_actual_final_patch_if_allowed
+    row = {"final_patch": {"content_kind": "candidate_patch_metadata_only"}}
+    d = {"rollback_allowed": True, "rollback_decision": "rollback_final_patch_only"}
+    result = _rollback_h5_actual_final_patch_if_allowed(row, d)
+    assert result["final_patch"] == "none"
+    assert result["h5_actual_final_patch_rollback_receipt"]["actual_final_patch_restored"] is True
+
+
+def test_h5_39_patch_rollback_dirty_blocks():
+    """H5-39 A6: dirty patch apply receipt blocks rollback."""
+    from scripts.bench.capability_ab_runner import _build_h5_actual_final_patch_rollback_decision
+    row = {"final_patch": {"content_kind": "candidate_patch_metadata_only"},
+           "h5_actual_final_patch_apply_receipt": {"actual_patch_apply_executed": True, "actual_final_patch_replaced": True, "output_mutated": True, "model_calls_incremented": False, "cloud_invoked": False, "behavior_changed": False}}
+    d = _build_h5_actual_final_patch_rollback_decision(row)
+    assert d["rollback_allowed"] is False
+    assert "output_was_mutated" in d["rollback_reasons"]
+
+
+def test_h5_39_output_preflight_empty_blocks():
+    """H5-39 B7: output preflight empty blocks."""
+    from scripts.bench.capability_ab_runner import _build_h5_output_apply_preflight_receipt
+    r = _build_h5_output_apply_preflight_receipt({})
+    assert r["preflight_status"] == "blocked"
+    assert r["would_pass_output_apply_preflight"] is False
+
+
+def test_h5_39_output_preflight_flag_missing(monkeypatch):
+    """H5-39 B8: output preflight flag missing blocks."""
+    from scripts.bench.capability_ab_runner import _build_h5_output_apply_preflight_receipt
+    monkeypatch.delenv("NEXUS_H5_ALLOW_OUTPUT_APPLY_PREFLIGHT", raising=False)
+    row = {"h5_actual_final_source_apply_receipt": {"actual_apply_executed": True, "actual_final_source_changed": True},
+           "h5_actual_final_source_rollback_receipt": {"actual_final_source_restored": True},
+           "h5_actual_final_patch_rollback_receipt": {"rollback_executed": True},
+           "h5_output_mutation_guard": {"actual_output_mutated": False},
+           "h5_local_candidate_rollback_dry_run": {"rollback_available": True, "rollback_required": False, "safe_to_continue": True},
+           "h5_route": {"local_selected_candidate_patch_sha256": "abc", "local_selected_candidate_patch_length": 100, "local_selected_candidate_hash_match": True}}
+    r = _build_h5_output_apply_preflight_receipt(row)
+    assert "output_apply_preflight_flag_not_enabled" in r["preflight_reasons"]
+
+
+def test_h5_39_output_preflight_passes(monkeypatch):
+    """H5-39 B9: output preflight flag enabled + cycles proven passes shadow-only."""
+    from scripts.bench.capability_ab_runner import _build_h5_output_apply_preflight_receipt
+    monkeypatch.setenv("NEXUS_H5_ALLOW_OUTPUT_APPLY_PREFLIGHT", "1")
+    row = {"h5_actual_final_source_apply_receipt": {"actual_apply_executed": True, "actual_final_source_changed": True},
+           "h5_actual_final_source_rollback_receipt": {"actual_final_source_restored": True},
+           "h5_actual_final_patch_rollback_receipt": {"rollback_executed": True},
+           "h5_output_mutation_guard": {"actual_output_mutated": False},
+           "h5_local_candidate_rollback_dry_run": {"rollback_available": True, "rollback_required": False, "safe_to_continue": True},
+           "h5_route": {"local_selected_candidate_patch_sha256": "abc", "local_selected_candidate_patch_length": 100, "local_selected_candidate_hash_match": True}}
+    r = _build_h5_output_apply_preflight_receipt(row)
+    assert r["would_pass_output_apply_preflight"] is True
+    assert r["preflight_status"] == "output_preflight_pass_shadow_only"
+    assert r["output_mutation_allowed"] is False
+
+
+def test_h5_39_output_preflight_blocks_no_patch_cycle(monkeypatch):
+    """H5-39 B10: output preflight blocks on missing patch cycle."""
+    from scripts.bench.capability_ab_runner import _build_h5_output_apply_preflight_receipt
+    monkeypatch.setenv("NEXUS_H5_ALLOW_OUTPUT_APPLY_PREFLIGHT", "1")
+    row = {"h5_actual_final_source_apply_receipt": {"actual_apply_executed": True, "actual_final_source_changed": True},
+           "h5_actual_final_source_rollback_receipt": {"actual_final_source_restored": True},
+           "h5_actual_final_patch_rollback_receipt": {"rollback_executed": False},
+           "h5_output_mutation_guard": {"actual_output_mutated": False},
+           "h5_local_candidate_rollback_dry_run": {"rollback_available": True, "rollback_required": False, "safe_to_continue": True},
+           "h5_route": {"local_selected_candidate_patch_sha256": "abc", "local_selected_candidate_patch_length": 100, "local_selected_candidate_hash_match": True}}
+    r = _build_h5_output_apply_preflight_receipt(row)
+    assert "final_patch_cycle_not_proven" in r["preflight_reasons"]
+
+
+def test_h5_39_output_preflight_blocks_output_mutation(monkeypatch):
+    """H5-39 B11: output preflight blocks on output mutation detected."""
+    from scripts.bench.capability_ab_runner import _build_h5_output_apply_preflight_receipt
+    monkeypatch.setenv("NEXUS_H5_ALLOW_OUTPUT_APPLY_PREFLIGHT", "1")
+    row = {"h5_actual_final_source_apply_receipt": {"actual_apply_executed": True, "actual_final_source_changed": True},
+           "h5_actual_final_source_rollback_receipt": {"actual_final_source_restored": True},
+           "h5_actual_final_patch_rollback_receipt": {"rollback_executed": True},
+           "h5_output_mutation_guard": {"actual_output_mutated": True},
+           "h5_local_candidate_rollback_dry_run": {"rollback_available": True, "rollback_required": False, "safe_to_continue": True},
+           "h5_route": {"local_selected_candidate_patch_sha256": "abc", "local_selected_candidate_patch_length": 100, "local_selected_candidate_hash_match": True}}
+    r = _build_h5_output_apply_preflight_receipt(row)
+    assert "output_mutation_detected" in r["preflight_reasons"]
+
+
+def test_h5_39_isolated_output_empty_blocks():
+    """H5-39 C12: isolated output simulation empty blocks."""
+    from scripts.bench.capability_ab_runner import _build_h5_isolated_output_mutation_simulation
+    s = _build_h5_isolated_output_mutation_simulation({})
+    assert s["simulation_status"] == "blocked"
+    assert s["would_simulate_output_mutation"] is False
+
+
+def test_h5_39_isolated_output_passes(monkeypatch):
+    """H5-39 C13: isolated output sim passes when preflight passes."""
+    from scripts.bench.capability_ab_runner import _build_h5_isolated_output_mutation_simulation
+    monkeypatch.setenv("NEXUS_H5_ALLOW_OUTPUT_APPLY_PREFLIGHT", "1")
+    row = {"h5_output_apply_preflight_receipt": {"would_pass_output_apply_preflight": True, "preflight_status": "output_preflight_pass_shadow_only", "final_source_cycle_proven": True, "final_patch_cycle_proven": True},
+           "h5_local_candidate_rollback_dry_run": {"rollback_available": True, "rollback_required": False, "safe_to_continue": True},
+           "h5_route": {"local_selected_candidate_patch_sha256": "abc", "local_selected_candidate_patch_length": 100}}
+    s = _build_h5_isolated_output_mutation_simulation(row)
+    assert s["would_simulate_output_mutation"] is True
+    assert s["simulation_status"] == "isolated_output_simulation_pass"
+    assert s["isolated_output_mutated"] is True
+    assert s["actual_output_mutated"] is False
+
+
+def test_h5_39_finalized_default_env(tmp_path, monkeypatch):
+    """H5-39 C14: finalized default env row attaches all receipts, output unchanged."""
+    from scripts.bench.capability_ab_runner import CapabilityTask, _finalize_with_nexus_row
+    task = CapabilityTask(id="t-h5-39", difficulty="easy", task_type="test_repair", task_desc="v", target_file="t.py", test_file="test_t.py", expected_capabilities=("claim_gate",), success_criteria="tests_pass", repo_kind="nexus_internal", fixture_kind="test_fixture")
+    _h5_all_flags_set_with_gate(monkeypatch)
+    row = _finalize_with_nexus_row({"mode": "with_nexus", "model_calls": 1, "total_tokens": 100, "token_capture_status": "measured", "committee_trace": {"candidate_count": 2, "judge_selection": {"selected_candidate_id": "C_1"}, "committee_receipt": {"selected_candidate_applied": True, "selected_candidate_apply_hash_match": True}}, "local_solve_eligible": True}, provider="gemini", model_required=True, nexus_required=False, task=task, repo_root=tmp_path)
+    assert "h5_actual_final_patch_rollback_decision" in row
+    assert "h5_actual_final_patch_rollback_receipt" in row
+    assert "h5_output_apply_preflight_receipt" in row
+    assert "h5_isolated_output_mutation_simulation" in row
+    assert row["behavior_changed"] is False
+
+
+def test_h5_39_finalized_all_flags(tmp_path, monkeypatch):
+    """H5-39 C15: all-flags/evidence may patch apply/rollback, output preflight, isolated output sim."""
+    from scripts.bench.capability_ab_runner import CapabilityTask, _finalize_with_nexus_row
+    task = CapabilityTask(id="t-h5-39f", difficulty="easy", task_type="test_repair", task_desc="v", target_file="t.py", test_file="test_t.py", expected_capabilities=("claim_gate",), success_criteria="tests_pass", repo_kind="nexus_internal", fixture_kind="test_fixture")
+    _h5_all_flags_set_with_gate(monkeypatch)
+    row = _finalize_with_nexus_row({"mode": "with_nexus", "model_calls": 1, "total_tokens": 100, "token_capture_status": "measured", "committee_trace": {"candidate_count": 2, "judge_selection": {"selected_candidate_id": "C_1"}, "committee_receipt": {"selected_candidate_applied": True, "selected_candidate_apply_hash_match": True}}, "local_solve_eligible": True, "external_local_evidence_ingestion_validation": {"schema": "nexus.h5_local_committee_evidence_ingestion_validation.v1", "validation_status": "accepted", "accepted_for_h5_readiness_shadow": True}, "external_cloud_evidence_ingestion_validation": {"schema": "nexus.h5_cloud_fallback_evidence_ingestion_validation.v1", "validation_status": "accepted", "accepted_for_h5_readiness_shadow": True}}, provider="gemini", model_required=True, nexus_required=False, task=task, repo_root=tmp_path)
+    assert row["behavior_changed"] is False
+    receipt = row.get("h5_isolated_output_mutation_simulation", {})
+    assert receipt.get("actual_output_mutated") is False
+    assert row.get("cloud_fallback_invoked", False) is False
+
+
+def test_h5_39_summary_counters_default(tmp_path, monkeypatch):
+    """H5-39 C16: summary counters default env."""
+    from scripts.bench.capability_ab_runner import CapabilityTask, _finalize_with_nexus_row, write_evidence_bundle
+    task = CapabilityTask(id="t-h5-39s", difficulty="easy", task_type="test_repair", task_desc="v", target_file="t.py", test_file="test_t.py", expected_capabilities=("claim_gate",), success_criteria="tests_pass", repo_kind="nexus_internal", fixture_kind="test_fixture")
+    _h5_all_flags_set_with_gate(monkeypatch)
+    monkeypatch.setattr("scripts.bench.capability_ab_runner._git_commit", lambda x: "d")
+    row = _finalize_with_nexus_row({"mode": "with_nexus", "model_calls": 1, "total_tokens": 100, "token_capture_status": "measured", "committee_trace": {"candidate_count": 2, "judge_selection": {"selected_candidate_id": "C_1"}, "committee_receipt": {"selected_candidate_applied": True, "selected_candidate_apply_hash_match": True}}, "local_solve_eligible": True}, provider="gemini", model_required=True, nexus_required=False, task=task, repo_root=tmp_path)
+    wp = tmp_path / "w.jsonl"; wp.write_text("[]", encoding="utf-8")
+    wop = tmp_path / "wo.jsonl"; wop.write_text("[]", encoding="utf-8")
+    bf = write_evidence_bundle(out_dir=tmp_path, with_path=wp, without_path=wop, rows=[row], config={"tasks_file": "t.json", "tasks_manifest_hash": "m", "unique_tasks_requested": 1, "repeat_trials": 1, "timeout_sec": 60})
+    summary = json.loads(bf.read_text(encoding="utf-8"))["hybrid_route_summary"]
+    assert summary["h5_actual_final_patch_rollback_decision_count"] >= 1
+    assert summary["h5_output_apply_preflight_receipt_count"] >= 1
+    assert summary["h5_isolated_output_simulation_count"] >= 1
+    assert summary["h5_isolated_output_mutated_count"] == 0
+    assert summary["h5_behavior_changed_count"] == 0
+    assert summary["h5_cloud_fallback_invoked_count"] == 0
+
+
+def test_h5_39_summary_counters_all_flags(tmp_path, monkeypatch):
+    """H5-39 C17: summary counters all-flags trial."""
+    from scripts.bench.capability_ab_runner import CapabilityTask, _finalize_with_nexus_row, write_evidence_bundle
+    task = CapabilityTask(id="t-h5-39af", difficulty="easy", task_type="test_repair", task_desc="v", target_file="t.py", test_file="test_t.py", expected_capabilities=("claim_gate",), success_criteria="tests_pass", repo_kind="nexus_internal", fixture_kind="test_fixture")
+    _h5_all_flags_set_with_gate(monkeypatch)
+    monkeypatch.setattr("scripts.bench.capability_ab_runner._git_commit", lambda x: "d")
+    row = _finalize_with_nexus_row({"mode": "with_nexus", "model_calls": 1, "total_tokens": 100, "token_capture_status": "measured", "committee_trace": {"candidate_count": 2, "judge_selection": {"selected_candidate_id": "C_1"}, "committee_receipt": {"selected_candidate_applied": True, "selected_candidate_apply_hash_match": True}}, "local_solve_eligible": True, "external_local_evidence_ingestion_validation": {"schema": "nexus.h5_local_committee_evidence_ingestion_validation.v1", "validation_status": "accepted", "accepted_for_h5_readiness_shadow": True}, "external_cloud_evidence_ingestion_validation": {"schema": "nexus.h5_cloud_fallback_evidence_ingestion_validation.v1", "validation_status": "accepted", "accepted_for_h5_readiness_shadow": True}}, provider="gemini", model_required=True, nexus_required=False, task=task, repo_root=tmp_path)
+    wp = tmp_path / "w.jsonl"; wp.write_text("[]", encoding="utf-8")
+    wop = tmp_path / "wo.jsonl"; wop.write_text("[]", encoding="utf-8")
+    bf = write_evidence_bundle(out_dir=tmp_path, with_path=wp, without_path=wop, rows=[row], config={"tasks_file": "t.json", "tasks_manifest_hash": "m", "unique_tasks_requested": 1, "repeat_trials": 1, "timeout_sec": 60})
+    summary = json.loads(bf.read_text(encoding="utf-8"))["hybrid_route_summary"]
+    assert summary["h5_actual_final_patch_rollback_decision_count"] >= 1
+    assert summary["h5_output_apply_preflight_receipt_count"] >= 1
+    assert summary["h5_isolated_output_simulation_count"] >= 1
+    assert row["behavior_changed"] is False
+    assert row.get("cloud_fallback_invoked", False) is False
