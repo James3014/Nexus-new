@@ -8111,6 +8111,140 @@ def _build_h5_local_candidate_e2e_delivery_smoke_receipt(row: dict[str, Any]) ->
     }
 
 
+def _build_h5_guarded_local_candidate_benchmark_trial(rows: list[dict[str, Any]]) -> dict[str, Any]:
+    """Pure helper: aggregates H5-41 E2E smoke receipts into a benchmark trial.
+
+    No side effects. Reads smoke receipts from rows.
+    """
+    import os as _os
+    from collections import Counter
+
+    flag = _os.environ.get("NEXUS_H5_ALLOW_GUARDED_LOCAL_CANDIDATE_BENCHMARK_TRIAL", "").strip() == "1"
+
+    row_count = len(rows)
+    has_receipts = any(bool(r.get("h5_local_candidate_e2e_delivery_smoke_receipt")) for r in rows)
+
+    smoke_passed = 0
+    smoke_blocked = 0
+    smoke_safe = 0
+    smoke_gates = 0
+    selected_count = 0
+    hash_verified = 0
+    local_ready_count = 0
+    cloud_invoked = 0
+    mc_incremented = 0
+    beh_changed = 0
+    unsafe_count = 0
+    fail_reasons: Counter = Counter()
+
+    for r in rows:
+        receipt = r.get("h5_local_candidate_e2e_delivery_smoke_receipt")
+        if not receipt:
+            continue
+
+        if receipt.get("e2e_smoke_passed", False):
+            smoke_passed += 1
+        else:
+            smoke_blocked += 1
+            for reason in receipt.get("smoke_reasons", []):
+                fail_reasons[reason] += 1
+
+        if receipt.get("safe_final_state", False):
+            smoke_safe += 1
+        else:
+            unsafe_count += 1
+
+        if receipt.get("all_mutation_gates_exercised", False):
+            smoke_gates += 1
+        if receipt.get("local_candidate_selected", False):
+            selected_count += 1
+        if receipt.get("selected_candidate_hash_verified", False):
+            hash_verified += 1
+        if receipt.get("local_evidence_ready", False):
+            local_ready_count += 1
+        if receipt.get("cloud_invoked", False):
+            cloud_invoked += 1
+        if receipt.get("model_calls_incremented", False):
+            mc_incremented += 1
+        if receipt.get("behavior_changed", False):
+            beh_changed += 1
+
+    trial_allowed = flag and row_count > 0 and has_receipts
+    eligible = smoke_passed + smoke_blocked
+
+    trial_passed = (
+        trial_allowed and smoke_passed >= 1
+        and smoke_safe == smoke_passed
+        and smoke_gates == smoke_passed
+        and cloud_invoked == 0
+        and mc_incremented == 0
+        and beh_changed == 0
+        and unsafe_count == 0
+    )
+
+    reasons = []
+    if not flag:
+        reasons.append("benchmark_trial_flag_not_enabled")
+    if row_count == 0:
+        reasons.append("no_rows")
+    if not has_receipts:
+        reasons.append("missing_e2e_smoke_receipts")
+    if smoke_passed == 0:
+        reasons.append("no_e2e_smoke_passed_rows")
+    if unsafe_count > 0:
+        reasons.append("unsafe_final_state_detected")
+    if cloud_invoked > 0:
+        reasons.append("cloud_invoked_detected")
+    if mc_incremented > 0:
+        reasons.append("model_calls_incremented_detected")
+    if beh_changed > 0:
+        reasons.append("behavior_changed_detected")
+    reasons.extend([
+        "h5_42_guarded_trial_not_full_benchmark",
+        "metadata_delivery_only",
+        "production_claim_blocked",
+        "public_claim_blocked",
+    ])
+
+    pass_rate = smoke_passed / eligible if eligible > 0 else 0.0
+    safe_rate = smoke_safe / eligible if eligible > 0 else 0.0
+    cloud_rate = cloud_invoked / eligible if eligible > 0 else 0.0
+    mc_rate = mc_incremented / eligible if eligible > 0 else 0.0
+    beh_rate = beh_changed / eligible if eligible > 0 else 0.0
+
+    return {
+        "schema": "nexus.hybrid_h5_guarded_local_candidate_benchmark_trial.v1",
+        "evaluated": True,
+        "trial_status": "guarded_local_candidate_benchmark_trial_pass" if trial_passed else ("blocked" if not trial_allowed else "guarded_local_candidate_benchmark_trial_fail"),
+        "trial_reasons": reasons,
+        "trial_allowed": trial_allowed,
+        "trial_passed": trial_passed,
+        "row_count": row_count,
+        "eligible_row_count": eligible,
+        "e2e_smoke_passed_count": smoke_passed,
+        "e2e_smoke_blocked_count": smoke_blocked,
+        "safe_final_state_count": smoke_safe,
+        "all_mutation_gates_exercised_count": smoke_gates,
+        "selected_candidate_count": selected_count,
+        "hash_verified_count": hash_verified,
+        "local_evidence_ready_count": local_ready_count,
+        "cloud_invoked_count": cloud_invoked,
+        "model_calls_incremented_count": mc_incremented,
+        "behavior_changed_count": beh_changed,
+        "unsafe_final_state_count": unsafe_count,
+        "failure_reason_counts": dict(fail_reasons),
+        "pass_rate": pass_rate,
+        "safe_final_state_rate": safe_rate,
+        "cloud_invocation_rate": cloud_rate,
+        "model_calls_increment_rate": mc_rate,
+        "behavior_changed_rate": beh_rate,
+        "quality_non_regression_evaluated": False,
+        "quality_non_regression_passed": False,
+        "production_ready": False,
+        "public_claim_allowed": False,
+    }
+
+
 def _finalize_with_nexus_row(
     row: dict[str, Any],
     *,
@@ -12498,7 +12632,17 @@ def write_evidence_bundle(
         "h5_local_candidate_e2e_smoke_cloud_invoked_count": sum(1 for row in with_rows if bool(row.get("h5_local_candidate_e2e_delivery_smoke_receipt", {}).get("cloud_invoked", False))),
         "h5_local_candidate_e2e_smoke_model_calls_incremented_count": sum(1 for row in with_rows if bool(row.get("h5_local_candidate_e2e_delivery_smoke_receipt", {}).get("model_calls_incremented", False))),
         "h5_local_candidate_e2e_smoke_behavior_changed_count": sum(1 for row in with_rows if bool(row.get("h5_local_candidate_e2e_delivery_smoke_receipt", {}).get("behavior_changed", False))),
+        "h5_guarded_local_candidate_benchmark_trial_present": 1,
+        "h5_guarded_local_candidate_benchmark_trial_allowed": 1 if _build_h5_guarded_local_candidate_benchmark_trial(with_rows).get("trial_allowed") else 0,
+        "h5_guarded_local_candidate_benchmark_trial_passed": 1 if _build_h5_guarded_local_candidate_benchmark_trial(with_rows).get("trial_passed") else 0,
+        "h5_guarded_local_candidate_benchmark_trial_row_count": len(with_rows),
+        "h5_guarded_local_candidate_benchmark_trial_e2e_passed_count": _build_h5_guarded_local_candidate_benchmark_trial(with_rows).get("e2e_smoke_passed_count", 0),
+        "h5_guarded_local_candidate_benchmark_trial_safe_final_state_count": _build_h5_guarded_local_candidate_benchmark_trial(with_rows).get("safe_final_state_count", 0),
+        "h5_guarded_local_candidate_benchmark_trial_cloud_invoked_count": _build_h5_guarded_local_candidate_benchmark_trial(with_rows).get("cloud_invoked_count", 0),
+        "h5_guarded_local_candidate_benchmark_trial_model_calls_incremented_count": _build_h5_guarded_local_candidate_benchmark_trial(with_rows).get("model_calls_incremented_count", 0),
+        "h5_guarded_local_candidate_benchmark_trial_behavior_changed_count": _build_h5_guarded_local_candidate_benchmark_trial(with_rows).get("behavior_changed_count", 0),
     }
+    payload["h5_guarded_local_candidate_benchmark_trial"] = _build_h5_guarded_local_candidate_benchmark_trial(with_rows)
     payload["external_provider_claim_boundary_contract"] = build_external_provider_claim_boundary_contract(payload)
     payload["public_promotion_readiness_contract"] = build_public_promotion_readiness_contract(payload)
     bundle_path.write_text(json.dumps(payload, indent=2, ensure_ascii=False), encoding="utf-8")

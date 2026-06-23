@@ -21094,3 +21094,251 @@ def test_h5_41_invariants(tmp_path, monkeypatch):
     assert r["behavior_changed"] is False
     assert r["model_calls_incremented"] is False
     assert r["production_ready"] is False
+
+
+def test_h5_42_empty_rows_blocks():
+    """H5-42 T1: empty rows blocks."""
+    from scripts.bench.capability_ab_runner import _build_h5_guarded_local_candidate_benchmark_trial
+    t = _build_h5_guarded_local_candidate_benchmark_trial([])
+    assert t["trial_status"] == "blocked"
+    assert t["trial_allowed"] is False
+
+
+def test_h5_42_flag_missing():
+    """H5-42 T2: flag missing blocks."""
+    from scripts.bench.capability_ab_runner import _build_h5_guarded_local_candidate_benchmark_trial
+    import os
+    old = os.environ.get("NEXUS_H5_ALLOW_GUARDED_LOCAL_CANDIDATE_BENCHMARK_TRIAL")
+    os.environ.pop("NEXUS_H5_ALLOW_GUARDED_LOCAL_CANDIDATE_BENCHMARK_TRIAL", None)
+    try:
+        t = _build_h5_guarded_local_candidate_benchmark_trial([{"h5_local_candidate_e2e_delivery_smoke_receipt": {"e2e_smoke_passed": True}}])
+        assert "benchmark_trial_flag_not_enabled" in t["trial_reasons"]
+    finally:
+        if old is not None:
+            os.environ["NEXUS_H5_ALLOW_GUARDED_LOCAL_CANDIDATE_BENCHMARK_TRIAL"] = old
+
+
+def test_h5_42_no_receipts_blocks():
+    """H5-42 T3: rows without E2E smoke receipts block."""
+    from scripts.bench.capability_ab_runner import _build_h5_guarded_local_candidate_benchmark_trial
+    import os
+    old = os.environ.get("NEXUS_H5_ALLOW_GUARDED_LOCAL_CANDIDATE_BENCHMARK_TRIAL")
+    os.environ["NEXUS_H5_ALLOW_GUARDED_LOCAL_CANDIDATE_BENCHMARK_TRIAL"] = "1"
+    try:
+        t = _build_h5_guarded_local_candidate_benchmark_trial([{"mode": "with_nexus"}])
+        assert "missing_e2e_smoke_receipts" in t["trial_reasons"]
+    finally:
+        if old is not None:
+            os.environ["NEXUS_H5_ALLOW_GUARDED_LOCAL_CANDIDATE_BENCHMARK_TRIAL"] = old
+        else:
+            os.environ.pop("NEXUS_H5_ALLOW_GUARDED_LOCAL_CANDIDATE_BENCHMARK_TRIAL", None)
+
+
+def test_h5_42_one_passed_row_passes():
+    """H5-42 T4: one passed E2E row allows and passes trial."""
+    from scripts.bench.capability_ab_runner import _build_h5_guarded_local_candidate_benchmark_trial
+    import os
+    old = os.environ.get("NEXUS_H5_ALLOW_GUARDED_LOCAL_CANDIDATE_BENCHMARK_TRIAL")
+    os.environ["NEXUS_H5_ALLOW_GUARDED_LOCAL_CANDIDATE_BENCHMARK_TRIAL"] = "1"
+    try:
+        receipt = {"e2e_smoke_passed": True, "safe_final_state": True, "all_mutation_gates_exercised": True,
+                    "cloud_invoked": False, "model_calls_incremented": False, "behavior_changed": False,
+                    "smoke_reasons": [], "local_candidate_selected": True, "selected_candidate_hash_verified": True,
+                    "local_evidence_ready": True}
+        t = _build_h5_guarded_local_candidate_benchmark_trial([{"h5_local_candidate_e2e_delivery_smoke_receipt": receipt}])
+        assert t["trial_passed"] is True
+        assert t["trial_status"] == "guarded_local_candidate_benchmark_trial_pass"
+        assert t["e2e_smoke_passed_count"] == 1
+    finally:
+        if old is not None:
+            os.environ["NEXUS_H5_ALLOW_GUARDED_LOCAL_CANDIDATE_BENCHMARK_TRIAL"] = old
+        else:
+            os.environ.pop("NEXUS_H5_ALLOW_GUARDED_LOCAL_CANDIDATE_BENCHMARK_TRIAL", None)
+
+
+def test_h5_42_unsafe_state_fails():
+    """H5-42 T5: unsafe final state fails trial."""
+    from scripts.bench.capability_ab_runner import _build_h5_guarded_local_candidate_benchmark_trial
+    import os
+    old = os.environ.get("NEXUS_H5_ALLOW_GUARDED_LOCAL_CANDIDATE_BENCHMARK_TRIAL")
+    os.environ["NEXUS_H5_ALLOW_GUARDED_LOCAL_CANDIDATE_BENCHMARK_TRIAL"] = "1"
+    try:
+        receipt = {"e2e_smoke_passed": True, "safe_final_state": False, "all_mutation_gates_exercised": True,
+                    "cloud_invoked": False, "model_calls_incremented": False, "behavior_changed": False,
+                    "smoke_reasons": [], "local_candidate_selected": True}
+        t = _build_h5_guarded_local_candidate_benchmark_trial([{"h5_local_candidate_e2e_delivery_smoke_receipt": receipt}])
+        assert t["trial_passed"] is False
+        assert "unsafe_final_state_detected" in t["trial_reasons"]
+    finally:
+        if old is not None:
+            os.environ["NEXUS_H5_ALLOW_GUARDED_LOCAL_CANDIDATE_BENCHMARK_TRIAL"] = old
+        else:
+            os.environ.pop("NEXUS_H5_ALLOW_GUARDED_LOCAL_CANDIDATE_BENCHMARK_TRIAL", None)
+
+
+def test_h5_42_cloud_invoked_fails():
+    """H5-42 T6: cloud_invoked row fails trial."""
+    from scripts.bench.capability_ab_runner import _build_h5_guarded_local_candidate_benchmark_trial
+    import os
+    old = os.environ.get("NEXUS_H5_ALLOW_GUARDED_LOCAL_CANDIDATE_BENCHMARK_TRIAL")
+    os.environ["NEXUS_H5_ALLOW_GUARDED_LOCAL_CANDIDATE_BENCHMARK_TRIAL"] = "1"
+    try:
+        receipt = {"e2e_smoke_passed": True, "safe_final_state": True, "all_mutation_gates_exercised": True,
+                    "cloud_invoked": True, "model_calls_incremented": False, "behavior_changed": False,
+                    "smoke_reasons": [], "local_candidate_selected": True}
+        t = _build_h5_guarded_local_candidate_benchmark_trial([{"h5_local_candidate_e2e_delivery_smoke_receipt": receipt}])
+        assert t["trial_passed"] is False
+        assert "cloud_invoked_detected" in t["trial_reasons"]
+    finally:
+        if old is not None:
+            os.environ["NEXUS_H5_ALLOW_GUARDED_LOCAL_CANDIDATE_BENCHMARK_TRIAL"] = old
+        else:
+            os.environ.pop("NEXUS_H5_ALLOW_GUARDED_LOCAL_CANDIDATE_BENCHMARK_TRIAL", None)
+
+
+def test_h5_42_model_calls_fails():
+    """H5-42 T7: model_calls_incremented row fails."""
+    from scripts.bench.capability_ab_runner import _build_h5_guarded_local_candidate_benchmark_trial
+    import os
+    old = os.environ.get("NEXUS_H5_ALLOW_GUARDED_LOCAL_CANDIDATE_BENCHMARK_TRIAL")
+    os.environ["NEXUS_H5_ALLOW_GUARDED_LOCAL_CANDIDATE_BENCHMARK_TRIAL"] = "1"
+    try:
+        receipt = {"e2e_smoke_passed": True, "safe_final_state": True, "all_mutation_gates_exercised": True,
+                    "cloud_invoked": False, "model_calls_incremented": True, "behavior_changed": False,
+                    "smoke_reasons": [], "local_candidate_selected": True}
+        t = _build_h5_guarded_local_candidate_benchmark_trial([{"h5_local_candidate_e2e_delivery_smoke_receipt": receipt}])
+        assert t["trial_passed"] is False
+        assert "model_calls_incremented_detected" in t["trial_reasons"]
+    finally:
+        if old is not None:
+            os.environ["NEXUS_H5_ALLOW_GUARDED_LOCAL_CANDIDATE_BENCHMARK_TRIAL"] = old
+        else:
+            os.environ.pop("NEXUS_H5_ALLOW_GUARDED_LOCAL_CANDIDATE_BENCHMARK_TRIAL", None)
+
+
+def test_h5_42_behavior_changed_fails():
+    """H5-42 T8: behavior_changed row fails."""
+    from scripts.bench.capability_ab_runner import _build_h5_guarded_local_candidate_benchmark_trial
+    import os
+    old = os.environ.get("NEXUS_H5_ALLOW_GUARDED_LOCAL_CANDIDATE_BENCHMARK_TRIAL")
+    os.environ["NEXUS_H5_ALLOW_GUARDED_LOCAL_CANDIDATE_BENCHMARK_TRIAL"] = "1"
+    try:
+        receipt = {"e2e_smoke_passed": True, "safe_final_state": True, "all_mutation_gates_exercised": True,
+                    "cloud_invoked": False, "model_calls_incremented": False, "behavior_changed": True,
+                    "smoke_reasons": [], "local_candidate_selected": True}
+        t = _build_h5_guarded_local_candidate_benchmark_trial([{"h5_local_candidate_e2e_delivery_smoke_receipt": receipt}])
+        assert t["trial_passed"] is False
+        assert "behavior_changed_detected" in t["trial_reasons"]
+    finally:
+        if old is not None:
+            os.environ["NEXUS_H5_ALLOW_GUARDED_LOCAL_CANDIDATE_BENCHMARK_TRIAL"] = old
+        else:
+            os.environ.pop("NEXUS_H5_ALLOW_GUARDED_LOCAL_CANDIDATE_BENCHMARK_TRIAL", None)
+
+
+def test_h5_42_failure_reason_counts():
+    """H5-42 T9: failure_reason_counts aggregate blocked smoke reasons."""
+    from scripts.bench.capability_ab_runner import _build_h5_guarded_local_candidate_benchmark_trial
+    import os
+    old = os.environ.get("NEXUS_H5_ALLOW_GUARDED_LOCAL_CANDIDATE_BENCHMARK_TRIAL")
+    os.environ["NEXUS_H5_ALLOW_GUARDED_LOCAL_CANDIDATE_BENCHMARK_TRIAL"] = "1"
+    try:
+        receipt = {"e2e_smoke_passed": False, "safe_final_state": False, "smoke_reasons": ["unsafe_final_state", "unsafe_final_state"],
+                    "local_candidate_selected": False}
+        t = _build_h5_guarded_local_candidate_benchmark_trial([{"h5_local_candidate_e2e_delivery_smoke_receipt": receipt}])
+        assert t["failure_reason_counts"].get("unsafe_final_state", 0) == 2
+    finally:
+        if old is not None:
+            os.environ["NEXUS_H5_ALLOW_GUARDED_LOCAL_CANDIDATE_BENCHMARK_TRIAL"] = old
+        else:
+            os.environ.pop("NEXUS_H5_ALLOW_GUARDED_LOCAL_CANDIDATE_BENCHMARK_TRIAL", None)
+
+
+def test_h5_42_summary_integration(tmp_path, monkeypatch):
+    """H5-42 T10: summary integration attaches trial object."""
+    from scripts.bench.capability_ab_runner import CapabilityTask, _finalize_with_nexus_row, write_evidence_bundle
+    task = CapabilityTask(id="t-h5-42", difficulty="easy", task_type="test_repair", task_desc="v", target_file="t.py", test_file="test_t.py", expected_capabilities=("claim_gate",), success_criteria="tests_pass", repo_kind="nexus_internal", fixture_kind="test_fixture")
+    _h5_all_flags_set_with_gate(monkeypatch)
+    monkeypatch.setattr("scripts.bench.capability_ab_runner._git_commit", lambda x: "d")
+    row = _finalize_with_nexus_row({"mode": "with_nexus", "model_calls": 1, "total_tokens": 100, "token_capture_status": "measured", "committee_trace": {"candidate_count": 2, "judge_selection": {"selected_candidate_id": "C_1"}, "committee_receipt": {"selected_candidate_applied": True, "selected_candidate_apply_hash_match": True}}, "local_solve_eligible": True}, provider="gemini", model_required=True, nexus_required=False, task=task, repo_root=tmp_path)
+    wp = tmp_path / "w.jsonl"; wp.write_text("[]", encoding="utf-8")
+    wop = tmp_path / "wo.jsonl"; wop.write_text("[]", encoding="utf-8")
+    bf = write_evidence_bundle(out_dir=tmp_path, with_path=wp, without_path=wop, rows=[row], config={"tasks_file": "t.json", "tasks_manifest_hash": "m", "unique_tasks_requested": 1, "repeat_trials": 1, "timeout_sec": 60})
+    bundle = json.loads(bf.read_text(encoding="utf-8"))
+    assert "h5_guarded_local_candidate_benchmark_trial" in bundle
+    trial = bundle["h5_guarded_local_candidate_benchmark_trial"]
+    assert trial["schema"] == "nexus.hybrid_h5_guarded_local_candidate_benchmark_trial.v1"
+    assert trial["production_ready"] is False
+
+
+def test_h5_42_synthetic_trial_pass():
+    """H5-42 T11: synthetic benchmark rows produce trial pass."""
+    from scripts.bench.capability_ab_runner import _build_h5_guarded_local_candidate_benchmark_trial
+    import os
+    old = os.environ.get("NEXUS_H5_ALLOW_GUARDED_LOCAL_CANDIDATE_BENCHMARK_TRIAL")
+    os.environ["NEXUS_H5_ALLOW_GUARDED_LOCAL_CANDIDATE_BENCHMARK_TRIAL"] = "1"
+    try:
+        receipt = {"e2e_smoke_passed": True, "safe_final_state": True, "all_mutation_gates_exercised": True,
+                    "cloud_invoked": False, "model_calls_incremented": False, "behavior_changed": False,
+                    "smoke_reasons": [], "local_candidate_selected": True, "selected_candidate_hash_verified": True,
+                    "local_evidence_ready": True}
+        rows = [{"h5_local_candidate_e2e_delivery_smoke_receipt": receipt} for _ in range(3)]
+        t = _build_h5_guarded_local_candidate_benchmark_trial(rows)
+        assert t["trial_passed"] is True
+        assert t["row_count"] == 3
+        assert t["e2e_smoke_passed_count"] == 3
+        assert t["pass_rate"] == 1.0
+    finally:
+        if old is not None:
+            os.environ["NEXUS_H5_ALLOW_GUARDED_LOCAL_CANDIDATE_BENCHMARK_TRIAL"] = old
+        else:
+            os.environ.pop("NEXUS_H5_ALLOW_GUARDED_LOCAL_CANDIDATE_BENCHMARK_TRIAL", None)
+
+
+def test_h5_42_default_env_blocked(monkeypatch):
+    """H5-42 T12: default env trial blocked."""
+    from scripts.bench.capability_ab_runner import _build_h5_guarded_local_candidate_benchmark_trial
+    monkeypatch.delenv("NEXUS_H5_ALLOW_GUARDED_LOCAL_CANDIDATE_BENCHMARK_TRIAL", raising=False)
+    t = _build_h5_guarded_local_candidate_benchmark_trial([{"h5_local_candidate_e2e_delivery_smoke_receipt": {"e2e_smoke_passed": True}}])
+    assert t["trial_allowed"] is False
+    assert t["trial_status"] == "blocked"
+
+
+def test_h5_42_production_ready_false():
+    """H5-42 T13: production_ready and public_claim_allowed always false."""
+    from scripts.bench.capability_ab_runner import _build_h5_guarded_local_candidate_benchmark_trial
+    import os
+    old = os.environ.get("NEXUS_H5_ALLOW_GUARDED_LOCAL_CANDIDATE_BENCHMARK_TRIAL")
+    os.environ["NEXUS_H5_ALLOW_GUARDED_LOCAL_CANDIDATE_BENCHMARK_TRIAL"] = "1"
+    try:
+        receipt = {"e2e_smoke_passed": True, "safe_final_state": True, "all_mutation_gates_exercised": True,
+                    "cloud_invoked": False, "model_calls_incremented": False, "behavior_changed": False,
+                    "smoke_reasons": []}
+        t = _build_h5_guarded_local_candidate_benchmark_trial([{"h5_local_candidate_e2e_delivery_smoke_receipt": receipt}])
+        assert t["production_ready"] is False
+        assert t["public_claim_allowed"] is False
+    finally:
+        if old is not None:
+            os.environ["NEXUS_H5_ALLOW_GUARDED_LOCAL_CANDIDATE_BENCHMARK_TRIAL"] = old
+        else:
+            os.environ.pop("NEXUS_H5_ALLOW_GUARDED_LOCAL_CANDIDATE_BENCHMARK_TRIAL", None)
+
+
+def test_h5_42_quality_not_evaluated():
+    """H5-42 T14: quality_non_regression_evaluated=false by default."""
+    from scripts.bench.capability_ab_runner import _build_h5_guarded_local_candidate_benchmark_trial
+    import os
+    old = os.environ.get("NEXUS_H5_ALLOW_GUARDED_LOCAL_CANDIDATE_BENCHMARK_TRIAL")
+    os.environ["NEXUS_H5_ALLOW_GUARDED_LOCAL_CANDIDATE_BENCHMARK_TRIAL"] = "1"
+    try:
+        receipt = {"e2e_smoke_passed": True, "safe_final_state": True, "all_mutation_gates_exercised": True,
+                    "cloud_invoked": False, "model_calls_incremented": False, "behavior_changed": False,
+                    "smoke_reasons": []}
+        t = _build_h5_guarded_local_candidate_benchmark_trial([{"h5_local_candidate_e2e_delivery_smoke_receipt": receipt}])
+        assert t["quality_non_regression_evaluated"] is False
+        assert t["quality_non_regression_passed"] is False
+    finally:
+        if old is not None:
+            os.environ["NEXUS_H5_ALLOW_GUARDED_LOCAL_CANDIDATE_BENCHMARK_TRIAL"] = old
+        else:
+            os.environ.pop("NEXUS_H5_ALLOW_GUARDED_LOCAL_CANDIDATE_BENCHMARK_TRIAL", None)
