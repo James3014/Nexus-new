@@ -8245,6 +8245,119 @@ def _build_h5_guarded_local_candidate_benchmark_trial(rows: list[dict[str, Any]]
     }
 
 
+def _build_h5_quality_non_regression_gate(rows: list[dict[str, Any]], trial: dict[str, Any] | None = None) -> dict[str, Any]:
+    """Pure helper: quality non-regression gate reading guarded trial and rows."""
+    import os as _os
+    from collections import Counter
+
+    flag = _os.environ.get("NEXUS_H5_ALLOW_QUALITY_NON_REGRESSION_GATE", "").strip() == "1"
+
+    if trial is None:
+        trial = _build_h5_guarded_local_candidate_benchmark_trial(rows)
+
+    trial_passed = bool(trial.get("trial_passed", False))
+    row_count = int(trial.get("row_count", 0))
+    eligible = int(trial.get("eligible_row_count", 0))
+    smoke_passed = int(trial.get("e2e_smoke_passed_count", 0))
+    safe_count = int(trial.get("safe_final_state_count", 0))
+    gates_count = int(trial.get("all_mutation_gates_exercised_count", 0))
+    unsafe_count = int(trial.get("unsafe_final_state_count", 0))
+    cloud_count = int(trial.get("cloud_invoked_count", 0))
+    mc_count = int(trial.get("model_calls_incremented_count", 0))
+    beh_count = int(trial.get("behavior_changed_count", 0))
+    pass_rate = float(trial.get("pass_rate", 0.0))
+
+    regression_count = 0
+    regression_reasons: Counter = Counter()
+
+    for r in rows:
+        receipt = r.get("h5_local_candidate_e2e_delivery_smoke_receipt")
+        if not receipt:
+            continue
+        is_regressed = False
+        if not receipt.get("e2e_smoke_passed", False) and receipt.get("smoke_status") != "blocked":
+            is_regressed = True
+            regression_reasons["e2e_smoke_fail"] += 1
+        if receipt.get("safe_final_state") is False and receipt.get("e2e_smoke_allowed", True):
+            is_regressed = True
+            regression_reasons["unsafe_final_state"] += 1
+        if receipt.get("cloud_invoked", False):
+            is_regressed = True
+            regression_reasons["cloud_invoked"] += 1
+        if receipt.get("model_calls_incremented", False):
+            is_regressed = True
+            regression_reasons["model_calls_incremented"] += 1
+        if receipt.get("behavior_changed", False):
+            is_regressed = True
+            regression_reasons["behavior_changed"] += 1
+        if is_regressed:
+            regression_count += 1
+
+    quality_floor = pass_rate > 0 and smoke_passed >= 1
+    safety_floor = unsafe_count == 0 and cloud_count == 0 and mc_count == 0 and beh_count == 0
+    regression_floor = regression_count == 0
+
+    gate_allowed = flag and trial_passed and row_count > 0
+    evaluated = gate_allowed
+    passed = (
+        gate_allowed and smoke_passed >= 1
+        and safe_count == smoke_passed
+        and gates_count == smoke_passed
+        and unsafe_count == 0
+        and cloud_count == 0 and mc_count == 0 and beh_count == 0
+        and regression_count == 0
+        and quality_floor and safety_floor and regression_floor
+    )
+
+    reasons = []
+    if not flag:
+        reasons.append("quality_gate_flag_not_enabled")
+    if not trial_passed:
+        reasons.append("guarded_trial_not_passed")
+    if row_count == 0:
+        reasons.append("no_rows")
+    if not quality_floor:
+        reasons.append("quality_floor_not_met")
+    if not safety_floor:
+        reasons.append("safety_floor_not_met")
+    if not regression_floor:
+        reasons.append("regression_floor_not_met")
+    reasons.extend([
+        "h5_43_quality_gate_not_full_benchmark", "metadata_delivery_only",
+        "production_claim_blocked", "public_claim_blocked",
+    ])
+
+    return {
+        "schema": "nexus.hybrid_h5_quality_non_regression_gate.v1",
+        "evaluated": True,
+        "gate_status": "quality_non_regression_pass" if passed else ("blocked" if not gate_allowed else "quality_non_regression_fail"),
+        "gate_reasons": reasons,
+        "gate_allowed": gate_allowed,
+        "quality_non_regression_evaluated": evaluated,
+        "quality_non_regression_passed": passed,
+        "trial_passed": trial_passed,
+        "row_count": row_count,
+        "eligible_row_count": eligible,
+        "e2e_smoke_passed_count": smoke_passed,
+        "safe_final_state_count": safe_count,
+        "all_mutation_gates_exercised_count": gates_count,
+        "unsafe_final_state_count": unsafe_count,
+        "cloud_invoked_count": cloud_count,
+        "model_calls_incremented_count": mc_count,
+        "behavior_changed_count": beh_count,
+        "pass_rate": pass_rate,
+        "safe_final_state_rate": float(trial.get("safe_final_state_rate", 0.0)),
+        "error_rate": 1.0 - pass_rate if eligible > 0 else 0.0,
+        "regression_count": regression_count,
+        "regression_reason_counts": dict(regression_reasons),
+        "quality_floor_met": quality_floor,
+        "safety_floor_met": safety_floor,
+        "regression_floor_met": regression_floor,
+        "production_ready": False,
+        "public_claim_allowed": False,
+    }
+
+
 def _finalize_with_nexus_row(
     row: dict[str, Any],
     *,
@@ -12641,8 +12754,20 @@ def write_evidence_bundle(
         "h5_guarded_local_candidate_benchmark_trial_cloud_invoked_count": _build_h5_guarded_local_candidate_benchmark_trial(with_rows).get("cloud_invoked_count", 0),
         "h5_guarded_local_candidate_benchmark_trial_model_calls_incremented_count": _build_h5_guarded_local_candidate_benchmark_trial(with_rows).get("model_calls_incremented_count", 0),
         "h5_guarded_local_candidate_benchmark_trial_behavior_changed_count": _build_h5_guarded_local_candidate_benchmark_trial(with_rows).get("behavior_changed_count", 0),
+        "h5_quality_non_regression_gate_present": 1,
+        "h5_quality_non_regression_gate_allowed": 1 if _build_h5_quality_non_regression_gate(with_rows).get("gate_allowed") else 0,
+        "h5_quality_non_regression_gate_evaluated": 1 if _build_h5_quality_non_regression_gate(with_rows).get("quality_non_regression_evaluated") else 0,
+        "h5_quality_non_regression_gate_passed": 1 if _build_h5_quality_non_regression_gate(with_rows).get("quality_non_regression_passed") else 0,
+        "h5_quality_non_regression_gate_failed": 1 if _build_h5_quality_non_regression_gate(with_rows).get("gate_status") == "quality_non_regression_fail" else 0,
+        "h5_quality_non_regression_gate_regression_count": _build_h5_quality_non_regression_gate(with_rows).get("regression_count", 0),
+        "h5_quality_non_regression_gate_quality_floor_met": 1 if _build_h5_quality_non_regression_gate(with_rows).get("quality_floor_met") else 0,
+        "h5_quality_non_regression_gate_safety_floor_met": 1 if _build_h5_quality_non_regression_gate(with_rows).get("safety_floor_met") else 0,
+        "h5_quality_non_regression_gate_regression_floor_met": 1 if _build_h5_quality_non_regression_gate(with_rows).get("regression_floor_met") else 0,
     }
     payload["h5_guarded_local_candidate_benchmark_trial"] = _build_h5_guarded_local_candidate_benchmark_trial(with_rows)
+    payload["h5_quality_non_regression_gate"] = _build_h5_quality_non_regression_gate(with_rows, payload["h5_guarded_local_candidate_benchmark_trial"])
+    payload["h5_guarded_local_candidate_benchmark_trial"]["quality_non_regression_evaluated"] = payload["h5_quality_non_regression_gate"]["quality_non_regression_evaluated"]
+    payload["h5_guarded_local_candidate_benchmark_trial"]["quality_non_regression_passed"] = payload["h5_quality_non_regression_gate"]["quality_non_regression_passed"]
     payload["external_provider_claim_boundary_contract"] = build_external_provider_claim_boundary_contract(payload)
     payload["public_promotion_readiness_contract"] = build_public_promotion_readiness_contract(payload)
     bundle_path.write_text(json.dumps(payload, indent=2, ensure_ascii=False), encoding="utf-8")
