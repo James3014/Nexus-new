@@ -30881,8 +30881,60 @@ def test_h6_11_denial_replay_not_ready_for_h6_12_on_invalid(monkeypatch):
 
 
 def test_h6_11_denial_replay_collect_only():
-    """H6-11 T38: collect-only includes all H6-11 tests."""
+    """H6-11 T36: collect-only includes all H6-11 tests."""
     import subprocess, re
     result = subprocess.run(["python3", "-m", "pytest", "tests/benchmark/test_capability_ab_runner.py", "-k", "h6_11", "--collect-only", "-q"], capture_output=True, text=True, cwd="/Users/jameschen/Workspace/nexus")
     count = len(re.findall(r"test_h6_11_", result.stdout))
-    assert count >= 32, f"Expected >= 32 H6-11 tests, got {count}"
+    assert count >= 36, f"Expected >= 36 H6-11 tests, got {count}"
+
+
+def test_h6_11_denial_replay_missing_preflight_id_and_provider_id(monkeypatch):
+    """H6-11 T32: Missing preflight_id AND provider_id both counted."""
+    from scripts.bench.capability_ab_runner import _build_h6_provider_denial_receipt_replay
+    monkeypatch.setenv("NEXUS_H6_ALLOW_PROVIDER_DENIAL_RECEIPT_REPLAY", "1")
+    bundle = _h6_11_ready_preflight_bundle()
+    row = {"h6_provider_denial_receipt_replay": {"replay_id": "r1", "preflight_id": "", "provider_id": "", "provider_probe_allowed": False, "provider_invocation_allowed": False, "network_allowed": False, "process_spawn_allowed": False, "model_load_allowed": False, "model_call_allowed": False, "model_call_executed": False, "ollama_invoked": False, "cloud_provider_invoked": False, "repo_mutated": False, "behavior_changed": False, "runtime_effect": False, "production_ready": False, "public_claim_allowed": False}}
+    r = _build_h6_provider_denial_receipt_replay([row], bundle)
+    assert r["missing_preflight_id_count"] == 1
+    assert r["missing_provider_id_count"] == 1
+    assert r["denial_replay_invalid_count"] == 1
+
+
+def test_h6_11_denial_replay_all_violations_in_one_row(monkeypatch):
+    """H6-11 T33: All safety violations in one row counted correctly."""
+    from scripts.bench.capability_ab_runner import _build_h6_provider_denial_receipt_replay
+    monkeypatch.setenv("NEXUS_H6_ALLOW_PROVIDER_DENIAL_RECEIPT_REPLAY", "1")
+    bundle = _h6_11_ready_preflight_bundle()
+    row = {"h6_provider_denial_receipt_replay": {"replay_id": "r1", "preflight_id": "p1", "provider_id": "pr1", "provider_probe_allowed": True, "provider_invocation_allowed": True, "network_allowed": True, "process_spawn_allowed": True, "model_load_allowed": True, "model_call_allowed": True, "model_call_executed": True, "ollama_invoked": True, "cloud_provider_invoked": True, "repo_mutated": True, "behavior_changed": True, "runtime_effect": True, "production_ready": True, "public_claim_allowed": True}}
+    r = _build_h6_provider_denial_receipt_replay([row], bundle)
+    assert r["total_violation_count"] == 14
+    assert r["denial_replay_invalid_count"] == 1
+    assert r["denial_replay_valid_count"] == 0
+
+
+def test_h6_11_denial_replay_multiple_invalid_replays(monkeypatch):
+    """H6-11 T34: Multiple invalid replays counted correctly."""
+    from scripts.bench.capability_ab_runner import _build_h6_provider_denial_receipt_replay
+    monkeypatch.setenv("NEXUS_H6_ALLOW_PROVIDER_DENIAL_RECEIPT_REPLAY", "1")
+    bundle = _h6_11_ready_preflight_bundle()
+    rows = [
+        {"h6_provider_denial_receipt_replay": {"replay_id": "", "preflight_id": "p1", "provider_id": "pr1", "provider_probe_allowed": False, "provider_invocation_allowed": False, "network_allowed": False, "process_spawn_allowed": False, "model_load_allowed": False, "model_call_allowed": False, "model_call_executed": False, "ollama_invoked": False, "cloud_provider_invoked": False, "repo_mutated": False, "behavior_changed": False, "runtime_effect": False, "production_ready": False, "public_claim_allowed": False}},
+        {"h6_provider_denial_receipt_replay": {"replay_id": "r2", "preflight_id": "", "provider_id": "pr2", "provider_probe_allowed": False, "provider_invocation_allowed": False, "network_allowed": False, "process_spawn_allowed": False, "model_load_allowed": False, "model_call_allowed": False, "model_call_executed": False, "ollama_invoked": False, "cloud_provider_invoked": False, "repo_mutated": False, "behavior_changed": False, "runtime_effect": False, "production_ready": False, "public_claim_allowed": False}},
+    ]
+    r = _build_h6_provider_denial_receipt_replay(rows, bundle)
+    assert r["denial_replay_count"] == 2
+    assert r["denial_replay_valid_count"] == 0
+    assert r["denial_replay_invalid_count"] == 2
+    assert r["missing_replay_id_count"] == 1
+    assert r["missing_preflight_id_count"] == 1
+
+
+def test_h6_11_denial_replay_source_preflight_not_ready_block(monkeypatch):
+    """H6-11 T35: source_preflight_ready=false blocks replay."""
+    from scripts.bench.capability_ab_runner import _build_h6_provider_denial_receipt_replay
+    monkeypatch.setenv("NEXUS_H6_ALLOW_PROVIDER_DENIAL_RECEIPT_REPLAY", "1")
+    bundle = {"h6_controlled_provider_probe_preflight": {"preflight_ready": False, "denial_receipt_ready": True, "safety_violation_count": 0}}
+    r = _build_h6_provider_denial_receipt_replay([], bundle)
+    assert r["replay_status"] == "blocked"
+    assert r["source_preflight_ready"] is False
+    assert "h6_10_preflight_not_ready" in r["replay_reasons"]

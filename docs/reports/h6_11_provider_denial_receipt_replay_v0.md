@@ -24,10 +24,10 @@ python3 -m pytest tests/benchmark/test_h5_cloud_fallback_e2e_smoke.py -q
 
 | Metric | Value | Threshold | Status |
 |--------|-------|-----------|--------|
-| H6-11 collect-only | 32 | >= 32 | PASS |
-| H6-11 targeted | 32 passed | all green | PASS |
-| H6-10/H6-11 combined | 64 passed | all green | PASS |
-| hybrid_route/local_guard/h5/h6 | 883 passed | all green | PASS |
+| H6-11 collect-only | 36 | >= 36 | PASS |
+| H6-11 targeted | 36 passed | all green | PASS |
+| H6-10/H6-11 combined | 68 passed | all green | PASS |
+| hybrid_route/local_guard/h5/h6 | 887 passed | all green | PASS |
 | H5 local smoke | 38 passed | all green | PASS |
 | H5 cloud smoke | 18 passed | all green | PASS |
 
