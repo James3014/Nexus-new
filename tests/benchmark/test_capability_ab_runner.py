@@ -21771,3 +21771,171 @@ def test_h5_43_default_env_blocked(monkeypatch):
     g = _build_h5_quality_non_regression_gate([], {"trial_passed": True, "row_count": 1})
     assert g["gate_allowed"] is False
     assert g["gate_status"] == "blocked"
+
+
+def test_h5_44_empty_rows_blocks():
+    """H5-44 T1: empty rows block."""
+    from scripts.bench.capability_ab_runner import _build_h5_full_guarded_benchmark_run
+    r = _build_h5_full_guarded_benchmark_run([])
+    assert r["run_status"] == "blocked"
+    assert r["run_allowed"] is False
+
+
+def test_h5_44_flag_missing(monkeypatch):
+    """H5-44 T2: flag missing blocks."""
+    from scripts.bench.capability_ab_runner import _build_h5_full_guarded_benchmark_run
+    monkeypatch.delenv("NEXUS_H5_ALLOW_FULL_GUARDED_BENCHMARK_RUN", raising=False)
+    r = _build_h5_full_guarded_benchmark_run([])
+    assert "full_guarded_benchmark_flag_not_enabled" in r["run_reasons"]
+
+
+def test_h5_44_missing_trial(monkeypatch):
+    """H5-44 T3: missing guarded trial auto-builds from rows."""
+    from scripts.bench.capability_ab_runner import _build_h5_full_guarded_benchmark_run
+    monkeypatch.setenv("NEXUS_H5_ALLOW_FULL_GUARDED_BENCHMARK_RUN", "1")
+    r = _build_h5_full_guarded_benchmark_run([], {"h5_quality_non_regression_gate": {}})
+    assert "no_rows" in r["run_reasons"]
+    assert "guarded_trial_not_passed" in r["run_reasons"]
+
+
+def test_h5_44_missing_gate(monkeypatch):
+    """H5-44 T4: missing quality gate auto-builds."""
+    from scripts.bench.capability_ab_runner import _build_h5_full_guarded_benchmark_run
+    monkeypatch.setenv("NEXUS_H5_ALLOW_FULL_GUARDED_BENCHMARK_RUN", "1")
+    r = _build_h5_full_guarded_benchmark_run([], {"h5_guarded_local_candidate_benchmark_trial": {"trial_passed": True, "row_count": 1, "failure_reason_counts": {}, "pass_rate": 1.0, "safe_final_state_rate": 1.0, "e2e_smoke_passed_count": 1, "safe_final_state_count": 1, "all_mutation_gates_exercised_count": 1, "unsafe_final_state_count": 0, "cloud_invoked_count": 0, "model_calls_incremented_count": 0, "behavior_changed_count": 0}})
+    assert r["guarded_trial_passed"] is True
+
+
+def test_h5_44_trial_not_passed(monkeypatch):
+    """H5-44 T5: guarded trial not passed fails."""
+    from scripts.bench.capability_ab_runner import _build_h5_full_guarded_benchmark_run
+    monkeypatch.setenv("NEXUS_H5_ALLOW_FULL_GUARDED_BENCHMARK_RUN", "1")
+    bundle = {"h5_guarded_local_candidate_benchmark_trial": {"trial_passed": False, "row_count": 1, "failure_reason_counts": {}, "pass_rate": 0.0, "safe_final_state_rate": 0.0, "e2e_smoke_passed_count": 0, "safe_final_state_count": 0, "all_mutation_gates_exercised_count": 0, "unsafe_final_state_count": 0, "cloud_invoked_count": 0, "model_calls_incremented_count": 0, "behavior_changed_count": 0}, "h5_quality_non_regression_gate": {"quality_non_regression_evaluated": False, "quality_non_regression_passed": False, "quality_floor_met": False, "safety_floor_met": True, "regression_floor_met": True, "regression_count": 0, "regression_reason_counts": {}}}
+    r = _build_h5_full_guarded_benchmark_run([], bundle)
+    assert "guarded_trial_not_passed" in r["run_reasons"]
+
+
+def test_h5_44_qnr_not_eval(monkeypatch):
+    """H5-44 T6: quality not evaluated fails."""
+    from scripts.bench.capability_ab_runner import _build_h5_full_guarded_benchmark_run
+    monkeypatch.setenv("NEXUS_H5_ALLOW_FULL_GUARDED_BENCHMARK_RUN", "1")
+    bundle = {"h5_guarded_local_candidate_benchmark_trial": {"trial_passed": True, "row_count": 1, "failure_reason_counts": {}, "pass_rate": 1.0, "safe_final_state_rate": 1.0, "e2e_smoke_passed_count": 1, "safe_final_state_count": 1, "all_mutation_gates_exercised_count": 1, "unsafe_final_state_count": 0, "cloud_invoked_count": 0, "model_calls_incremented_count": 0, "behavior_changed_count": 0}, "h5_quality_non_regression_gate": {"quality_non_regression_evaluated": False, "quality_non_regression_passed": False, "quality_floor_met": True, "safety_floor_met": True, "regression_floor_met": True, "regression_count": 0, "regression_reason_counts": {}}}
+    r = _build_h5_full_guarded_benchmark_run([], bundle)
+    assert "quality_non_regression_not_evaluated" in r["run_reasons"]
+
+
+def test_h5_44_qnr_not_passed(monkeypatch):
+    """H5-44 T7: quality not passed fails."""
+    from scripts.bench.capability_ab_runner import _build_h5_full_guarded_benchmark_run
+    monkeypatch.setenv("NEXUS_H5_ALLOW_FULL_GUARDED_BENCHMARK_RUN", "1")
+    bundle = {"h5_guarded_local_candidate_benchmark_trial": {"trial_passed": True, "row_count": 1, "failure_reason_counts": {}, "pass_rate": 1.0, "safe_final_state_rate": 1.0, "e2e_smoke_passed_count": 1, "safe_final_state_count": 1, "all_mutation_gates_exercised_count": 1, "unsafe_final_state_count": 0, "cloud_invoked_count": 0, "model_calls_incremented_count": 0, "behavior_changed_count": 0}, "h5_quality_non_regression_gate": {"quality_non_regression_evaluated": True, "quality_non_regression_passed": False, "quality_floor_met": True, "safety_floor_met": True, "regression_floor_met": True, "regression_count": 1, "regression_reason_counts": {"e2e_smoke_fail": 1}}}
+    r = _build_h5_full_guarded_benchmark_run([], bundle)
+    assert "quality_non_regression_not_passed" in r["run_reasons"]
+
+
+def test_h5_44_clean_pass(monkeypatch):
+    """H5-44 T8: clean trial + clean gate passes."""
+    from scripts.bench.capability_ab_runner import _build_h5_full_guarded_benchmark_run
+    monkeypatch.setenv("NEXUS_H5_ALLOW_FULL_GUARDED_BENCHMARK_RUN", "1")
+    bundle = {"h5_guarded_local_candidate_benchmark_trial": {"trial_passed": True, "row_count": 1, "failure_reason_counts": {}, "pass_rate": 1.0, "safe_final_state_rate": 1.0, "e2e_smoke_passed_count": 1, "safe_final_state_count": 1, "all_mutation_gates_exercised_count": 1, "unsafe_final_state_count": 0, "cloud_invoked_count": 0, "model_calls_incremented_count": 0, "behavior_changed_count": 0}, "h5_quality_non_regression_gate": {"quality_non_regression_evaluated": True, "quality_non_regression_passed": True, "quality_floor_met": True, "safety_floor_met": True, "regression_floor_met": True, "regression_count": 0, "regression_reason_counts": {}}}
+    r = _build_h5_full_guarded_benchmark_run([], bundle)
+    assert r["run_passed"] is True
+    assert r["full_guarded_benchmark_ready"] is True
+
+
+def test_h5_44_unsafe_fails(monkeypatch):
+    """H5-44 T9: unsafe fails."""
+    from scripts.bench.capability_ab_runner import _build_h5_full_guarded_benchmark_run
+    monkeypatch.setenv("NEXUS_H5_ALLOW_FULL_GUARDED_BENCHMARK_RUN", "1")
+    bundle = {"h5_guarded_local_candidate_benchmark_trial": {"trial_passed": False, "row_count": 1, "failure_reason_counts": {}, "pass_rate": 0.5, "safe_final_state_rate": 0.5, "e2e_smoke_passed_count": 1, "safe_final_state_count": 0, "all_mutation_gates_exercised_count": 1, "unsafe_final_state_count": 1, "cloud_invoked_count": 0, "model_calls_incremented_count": 0, "behavior_changed_count": 0}, "h5_quality_non_regression_gate": {"quality_non_regression_evaluated": True, "quality_non_regression_passed": False, "quality_floor_met": True, "safety_floor_met": False, "regression_floor_met": True, "regression_count": 0, "regression_reason_counts": {}}}
+    r = _build_h5_full_guarded_benchmark_run([], bundle)
+    assert "unsafe_final_state_detected" in r["run_reasons"]
+
+
+def test_h5_44_cloud_fails(monkeypatch):
+    """H5-44 T10: cloud fails."""
+    from scripts.bench.capability_ab_runner import _build_h5_full_guarded_benchmark_run
+    monkeypatch.setenv("NEXUS_H5_ALLOW_FULL_GUARDED_BENCHMARK_RUN", "1")
+    bundle = {"h5_guarded_local_candidate_benchmark_trial": {"trial_passed": False, "row_count": 1, "failure_reason_counts": {}, "pass_rate": 1.0, "safe_final_state_rate": 1.0, "e2e_smoke_passed_count": 1, "safe_final_state_count": 1, "all_mutation_gates_exercised_count": 1, "unsafe_final_state_count": 0, "cloud_invoked_count": 1, "model_calls_incremented_count": 0, "behavior_changed_count": 0}, "h5_quality_non_regression_gate": {"quality_non_regression_evaluated": True, "quality_non_regression_passed": False, "quality_floor_met": True, "safety_floor_met": False, "regression_floor_met": True, "regression_count": 0, "regression_reason_counts": {}}}
+    r = _build_h5_full_guarded_benchmark_run([], bundle)
+    assert "cloud_invoked_detected" in r["run_reasons"]
+
+
+def test_h5_44_mc_fails(monkeypatch):
+    """H5-44 T11: model_calls fails."""
+    from scripts.bench.capability_ab_runner import _build_h5_full_guarded_benchmark_run
+    monkeypatch.setenv("NEXUS_H5_ALLOW_FULL_GUARDED_BENCHMARK_RUN", "1")
+    bundle = {"h5_guarded_local_candidate_benchmark_trial": {"trial_passed": False, "row_count": 1, "failure_reason_counts": {}, "pass_rate": 1.0, "safe_final_state_rate": 1.0, "e2e_smoke_passed_count": 1, "safe_final_state_count": 1, "all_mutation_gates_exercised_count": 1, "unsafe_final_state_count": 0, "cloud_invoked_count": 0, "model_calls_incremented_count": 1, "behavior_changed_count": 0}, "h5_quality_non_regression_gate": {"quality_non_regression_evaluated": True, "quality_non_regression_passed": False, "quality_floor_met": True, "safety_floor_met": False, "regression_floor_met": True, "regression_count": 0, "regression_reason_counts": {}}}
+    r = _build_h5_full_guarded_benchmark_run([], bundle)
+    assert "model_calls_incremented_detected" in r["run_reasons"]
+
+
+def test_h5_44_behavior_fails(monkeypatch):
+    """H5-44 T12: behavior fails."""
+    from scripts.bench.capability_ab_runner import _build_h5_full_guarded_benchmark_run
+    monkeypatch.setenv("NEXUS_H5_ALLOW_FULL_GUARDED_BENCHMARK_RUN", "1")
+    bundle = {"h5_guarded_local_candidate_benchmark_trial": {"trial_passed": False, "row_count": 1, "failure_reason_counts": {}, "pass_rate": 1.0, "safe_final_state_rate": 1.0, "e2e_smoke_passed_count": 1, "safe_final_state_count": 1, "all_mutation_gates_exercised_count": 1, "unsafe_final_state_count": 0, "cloud_invoked_count": 0, "model_calls_incremented_count": 0, "behavior_changed_count": 1}, "h5_quality_non_regression_gate": {"quality_non_regression_evaluated": True, "quality_non_regression_passed": False, "quality_floor_met": True, "safety_floor_met": False, "regression_floor_met": True, "regression_count": 0, "regression_reason_counts": {}}}
+    r = _build_h5_full_guarded_benchmark_run([], bundle)
+    assert "behavior_changed_detected" in r["run_reasons"]
+
+
+def test_h5_44_regression_fails(monkeypatch):
+    """H5-44 T13: regression fails."""
+    from scripts.bench.capability_ab_runner import _build_h5_full_guarded_benchmark_run
+    monkeypatch.setenv("NEXUS_H5_ALLOW_FULL_GUARDED_BENCHMARK_RUN", "1")
+    bundle = {"h5_guarded_local_candidate_benchmark_trial": {"trial_passed": False, "row_count": 1, "failure_reason_counts": {}, "pass_rate": 1.0, "safe_final_state_rate": 1.0, "e2e_smoke_passed_count": 1, "safe_final_state_count": 1, "all_mutation_gates_exercised_count": 1, "unsafe_final_state_count": 0, "cloud_invoked_count": 0, "model_calls_incremented_count": 0, "behavior_changed_count": 0}, "h5_quality_non_regression_gate": {"quality_non_regression_evaluated": True, "quality_non_regression_passed": False, "quality_floor_met": True, "safety_floor_met": True, "regression_floor_met": False, "regression_count": 1, "regression_reason_counts": {"e2e_smoke_fail": 1}}}
+    r = _build_h5_full_guarded_benchmark_run([], bundle)
+    assert "regression_detected" in r["run_reasons"]
+
+
+def test_h5_44_bundle_attaches(tmp_path, monkeypatch):
+    """H5-44 T14: bundle attaches run."""
+    from scripts.bench.capability_ab_runner import CapabilityTask, _finalize_with_nexus_row, write_evidence_bundle
+    task = CapabilityTask(id="t-h5-44", difficulty="easy", task_type="test_repair", task_desc="v", target_file="t.py", test_file="test_t.py", expected_capabilities=("claim_gate",), success_criteria="tests_pass", repo_kind="nexus_internal", fixture_kind="test_fixture")
+    _h5_all_flags_set_with_gate(monkeypatch)
+    monkeypatch.setattr("scripts.bench.capability_ab_runner._git_commit", lambda x: "d")
+    row = _finalize_with_nexus_row({"mode": "with_nexus", "model_calls": 1, "total_tokens": 100, "token_capture_status": "measured", "committee_trace": {"candidate_count": 2, "judge_selection": {"selected_candidate_id": "C_1"}, "committee_receipt": {"selected_candidate_applied": True, "selected_candidate_apply_hash_match": True}}, "local_solve_eligible": True}, provider="gemini", model_required=True, nexus_required=False, task=task, repo_root=tmp_path)
+    wp = tmp_path / "w.jsonl"; wp.write_text("[]", encoding="utf-8")
+    wop = tmp_path / "wo.jsonl"; wop.write_text("[]", encoding="utf-8")
+    bf = write_evidence_bundle(out_dir=tmp_path, with_path=wp, without_path=wop, rows=[row], config={"tasks_file": "t.json", "tasks_manifest_hash": "m", "unique_tasks_requested": 1, "repeat_trials": 1, "timeout_sec": 60})
+    bundle = json.loads(bf.read_text(encoding="utf-8"))
+    assert "h5_full_guarded_benchmark_run" in bundle
+    assert bundle["h5_full_guarded_benchmark_run"]["production_ready"] is False
+
+
+def test_h5_44_pr_false(monkeypatch):
+    """H5-44 T15: production_ready always false."""
+    from scripts.bench.capability_ab_runner import _build_h5_full_guarded_benchmark_run
+    monkeypatch.setenv("NEXUS_H5_ALLOW_FULL_GUARDED_BENCHMARK_RUN", "1")
+    bundle = {"h5_guarded_local_candidate_benchmark_trial": {"trial_passed": True, "row_count": 1, "failure_reason_counts": {}, "pass_rate": 1.0, "safe_final_state_rate": 1.0, "e2e_smoke_passed_count": 1, "safe_final_state_count": 1, "all_mutation_gates_exercised_count": 1, "unsafe_final_state_count": 0, "cloud_invoked_count": 0, "model_calls_incremented_count": 0, "behavior_changed_count": 0}, "h5_quality_non_regression_gate": {"quality_non_regression_evaluated": True, "quality_non_regression_passed": True, "quality_floor_met": True, "safety_floor_met": True, "regression_floor_met": True, "regression_count": 0, "regression_reason_counts": {}}}
+    r = _build_h5_full_guarded_benchmark_run([], bundle)
+    assert r["production_ready"] is False
+    assert r["public_claim_allowed"] is False
+
+
+def test_h5_44_default_blocked(monkeypatch):
+    """H5-44 T16: default env blocked."""
+    from scripts.bench.capability_ab_runner import _build_h5_full_guarded_benchmark_run
+    monkeypatch.delenv("NEXUS_H5_ALLOW_FULL_GUARDED_BENCHMARK_RUN", raising=False)
+    r = _build_h5_full_guarded_benchmark_run([], {"h5_guarded_local_candidate_benchmark_trial": {"trial_passed": True, "row_count": 1}, "h5_quality_non_regression_gate": {"quality_non_regression_evaluated": True, "quality_non_regression_passed": True}})
+    assert r["run_allowed"] is False
+
+
+def test_h5_44_flagged_pass(monkeypatch):
+    """H5-44 T17: flagged synthetic run passes."""
+    from scripts.bench.capability_ab_runner import _build_h5_full_guarded_benchmark_run
+    monkeypatch.setenv("NEXUS_H5_ALLOW_FULL_GUARDED_BENCHMARK_RUN", "1")
+    bundle = {"h5_guarded_local_candidate_benchmark_trial": {"trial_passed": True, "row_count": 3, "failure_reason_counts": {}, "pass_rate": 1.0, "safe_final_state_rate": 1.0, "e2e_smoke_passed_count": 3, "safe_final_state_count": 3, "all_mutation_gates_exercised_count": 3, "unsafe_final_state_count": 0, "cloud_invoked_count": 0, "model_calls_incremented_count": 0, "behavior_changed_count": 0}, "h5_quality_non_regression_gate": {"quality_non_regression_evaluated": True, "quality_non_regression_passed": True, "quality_floor_met": True, "safety_floor_met": True, "regression_floor_met": True, "regression_count": 0, "regression_reason_counts": {}}}
+    r = _build_h5_full_guarded_benchmark_run([], bundle)
+    assert r["run_passed"] is True
+    assert r["full_guarded_benchmark_ready"] is True
+    assert r["row_count"] == 3
+
+
+def test_h5_44_reasons_preserved(monkeypatch):
+    """H5-44 T18: counts preserved."""
+    from scripts.bench.capability_ab_runner import _build_h5_full_guarded_benchmark_run
+    monkeypatch.setenv("NEXUS_H5_ALLOW_FULL_GUARDED_BENCHMARK_RUN", "1")
+    bundle = {"h5_guarded_local_candidate_benchmark_trial": {"trial_passed": True, "row_count": 2, "failure_reason_counts": {"unsafe_final_state": 1}, "pass_rate": 1.0, "safe_final_state_rate": 1.0, "e2e_smoke_passed_count": 2, "safe_final_state_count": 2, "all_mutation_gates_exercised_count": 2, "unsafe_final_state_count": 0, "cloud_invoked_count": 0, "model_calls_incremented_count": 0, "behavior_changed_count": 0}, "h5_quality_non_regression_gate": {"quality_non_regression_evaluated": True, "quality_non_regression_passed": True, "quality_floor_met": True, "safety_floor_met": True, "regression_floor_met": True, "regression_count": 0, "regression_reason_counts": {}}}
+    r = _build_h5_full_guarded_benchmark_run([], bundle)
+    assert r["failure_reason_counts"] == {"unsafe_final_state": 1}

@@ -8358,6 +8358,122 @@ def _build_h5_quality_non_regression_gate(rows: list[dict[str, Any]], trial: dic
     }
 
 
+def _build_h5_full_guarded_benchmark_run(rows: list[dict[str, Any]], bundle: dict[str, Any] | None = None) -> dict[str, Any]:
+    """Pure helper: aggregates trial + quality gate into full guarded benchmark run receipt."""
+    import os as _os
+
+    flag = _os.environ.get("NEXUS_H5_ALLOW_FULL_GUARDED_BENCHMARK_RUN", "").strip() == "1"
+
+    trial = None
+    gate = None
+    if bundle:
+        trial = bundle.get("h5_guarded_local_candidate_benchmark_trial")
+        gate = bundle.get("h5_quality_non_regression_gate")
+
+    if trial is None:
+        trial = _build_h5_guarded_local_candidate_benchmark_trial(rows)
+    if gate is None:
+        gate = _build_h5_quality_non_regression_gate(rows, trial)
+
+    trial_present = bool(trial)
+    trial_passed = bool(trial.get("trial_passed", False))
+    gate_present = bool(gate)
+    qnre = bool(gate.get("quality_non_regression_evaluated", False))
+    qnrp = bool(gate.get("quality_non_regression_passed", False))
+
+    row_count = int(trial.get("row_count", 0))
+    eligible = int(trial.get("eligible_row_count", 0))
+    smoke_passed = int(trial.get("e2e_smoke_passed_count", 0))
+    safe_count = int(trial.get("safe_final_state_count", 0))
+    gates_count = int(trial.get("all_mutation_gates_exercised_count", 0))
+    unsafe_count = int(trial.get("unsafe_final_state_count", 0))
+    cloud_count = int(trial.get("cloud_invoked_count", 0))
+    mc_count = int(trial.get("model_calls_incremented_count", 0))
+    beh_count = int(trial.get("behavior_changed_count", 0))
+    regression_count = int(gate.get("regression_count", 0))
+
+    qf = bool(gate.get("quality_floor_met", False))
+    sf = bool(gate.get("safety_floor_met", False))
+    rf = bool(gate.get("regression_floor_met", False))
+
+    run_allowed = flag and row_count > 0 and trial_present and gate_present
+    run_passed = (
+        run_allowed and trial_passed and qnre and qnrp
+        and smoke_passed >= 1
+        and safe_count == smoke_passed
+        and gates_count == smoke_passed
+        and cloud_count == 0 and mc_count == 0 and beh_count == 0
+        and unsafe_count == 0 and regression_count == 0
+        and qf and sf and rf
+    )
+
+    reasons = []
+    if not flag:
+        reasons.append("full_guarded_benchmark_flag_not_enabled")
+    if row_count == 0:
+        reasons.append("no_rows")
+    if not trial_present:
+        reasons.append("missing_guarded_trial")
+    if not trial_passed:
+        reasons.append("guarded_trial_not_passed")
+    if not gate_present:
+        reasons.append("missing_quality_gate")
+    if not qnre:
+        reasons.append("quality_non_regression_not_evaluated")
+    if not qnrp:
+        reasons.append("quality_non_regression_not_passed")
+    if unsafe_count > 0:
+        reasons.append("unsafe_final_state_detected")
+    if cloud_count > 0:
+        reasons.append("cloud_invoked_detected")
+    if mc_count > 0:
+        reasons.append("model_calls_incremented_detected")
+    if beh_count > 0:
+        reasons.append("behavior_changed_detected")
+    if regression_count > 0:
+        reasons.append("regression_detected")
+    reasons.extend([
+        "h5_44_full_guarded_benchmark_not_production",
+        "metadata_delivery_only",
+        "production_claim_blocked",
+        "public_claim_blocked",
+    ])
+
+    return {
+        "schema": "nexus.hybrid_h5_full_guarded_benchmark_run.v1",
+        "evaluated": True,
+        "run_status": "full_guarded_benchmark_run_pass" if run_passed else ("blocked" if not run_allowed else "full_guarded_benchmark_run_fail"),
+        "run_reasons": reasons,
+        "run_allowed": run_allowed,
+        "run_passed": run_passed,
+        "row_count": row_count,
+        "eligible_row_count": eligible,
+        "guarded_trial_present": trial_present,
+        "guarded_trial_passed": trial_passed,
+        "quality_gate_present": gate_present,
+        "quality_non_regression_evaluated": qnre,
+        "quality_non_regression_passed": qnrp,
+        "e2e_smoke_passed_count": smoke_passed,
+        "safe_final_state_count": safe_count,
+        "all_mutation_gates_exercised_count": gates_count,
+        "cloud_invoked_count": cloud_count,
+        "model_calls_incremented_count": mc_count,
+        "behavior_changed_count": beh_count,
+        "unsafe_final_state_count": unsafe_count,
+        "regression_count": regression_count,
+        "failure_reason_counts": dict(trial.get("failure_reason_counts", {})),
+        "regression_reason_counts": dict(gate.get("regression_reason_counts", {})),
+        "pass_rate": float(trial.get("pass_rate", 0.0)),
+        "safe_final_state_rate": float(trial.get("safe_final_state_rate", 0.0)),
+        "quality_floor_met": qf,
+        "safety_floor_met": sf,
+        "regression_floor_met": rf,
+        "full_guarded_benchmark_ready": run_passed,
+        "production_ready": False,
+        "public_claim_allowed": False,
+    }
+
+
 def _finalize_with_nexus_row(
     row: dict[str, Any],
     *,
@@ -12763,11 +12879,23 @@ def write_evidence_bundle(
         "h5_quality_non_regression_gate_quality_floor_met": 1 if _build_h5_quality_non_regression_gate(with_rows).get("quality_floor_met") else 0,
         "h5_quality_non_regression_gate_safety_floor_met": 1 if _build_h5_quality_non_regression_gate(with_rows).get("safety_floor_met") else 0,
         "h5_quality_non_regression_gate_regression_floor_met": 1 if _build_h5_quality_non_regression_gate(with_rows).get("regression_floor_met") else 0,
+        "h5_full_guarded_benchmark_run_present": 1,
+        "h5_full_guarded_benchmark_run_allowed": 1 if _build_h5_full_guarded_benchmark_run(with_rows).get("run_allowed") else 0,
+        "h5_full_guarded_benchmark_run_passed": 1 if _build_h5_full_guarded_benchmark_run(with_rows).get("run_passed") else 0,
+        "h5_full_guarded_benchmark_run_failed": 1 if _build_h5_full_guarded_benchmark_run(with_rows).get("run_status") == "full_guarded_benchmark_run_fail" else 0,
+        "h5_full_guarded_benchmark_run_ready": 1 if _build_h5_full_guarded_benchmark_run(with_rows).get("full_guarded_benchmark_ready") else 0,
+        "h5_full_guarded_benchmark_run_row_count": _build_h5_full_guarded_benchmark_run(with_rows).get("row_count", 0),
+        "h5_full_guarded_benchmark_run_e2e_passed_count": _build_h5_full_guarded_benchmark_run(with_rows).get("e2e_smoke_passed_count", 0),
+        "h5_full_guarded_benchmark_run_regression_count": _build_h5_full_guarded_benchmark_run(with_rows).get("regression_count", 0),
+        "h5_full_guarded_benchmark_run_cloud_invoked_count": _build_h5_full_guarded_benchmark_run(with_rows).get("cloud_invoked_count", 0),
+        "h5_full_guarded_benchmark_run_model_calls_incremented_count": _build_h5_full_guarded_benchmark_run(with_rows).get("model_calls_incremented_count", 0),
+        "h5_full_guarded_benchmark_run_behavior_changed_count": _build_h5_full_guarded_benchmark_run(with_rows).get("behavior_changed_count", 0),
     }
     payload["h5_guarded_local_candidate_benchmark_trial"] = _build_h5_guarded_local_candidate_benchmark_trial(with_rows)
     payload["h5_quality_non_regression_gate"] = _build_h5_quality_non_regression_gate(with_rows, payload["h5_guarded_local_candidate_benchmark_trial"])
     payload["h5_guarded_local_candidate_benchmark_trial"]["quality_non_regression_evaluated"] = payload["h5_quality_non_regression_gate"]["quality_non_regression_evaluated"]
     payload["h5_guarded_local_candidate_benchmark_trial"]["quality_non_regression_passed"] = payload["h5_quality_non_regression_gate"]["quality_non_regression_passed"]
+    payload["h5_full_guarded_benchmark_run"] = _build_h5_full_guarded_benchmark_run(with_rows, payload)
     payload["external_provider_claim_boundary_contract"] = build_external_provider_claim_boundary_contract(payload)
     payload["public_promotion_readiness_contract"] = build_public_promotion_readiness_contract(payload)
     bundle_path.write_text(json.dumps(payload, indent=2, ensure_ascii=False), encoding="utf-8")
