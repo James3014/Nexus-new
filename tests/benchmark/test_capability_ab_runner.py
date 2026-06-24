@@ -24826,3 +24826,857 @@ def test_h6_1_audit_report_lock():
             if needle in s:
                 bad.append((p.name, needle))
     assert not bad, f"Report lock violations found: {bad}"
+
+
+def test_h6_2_io_schema_empty_rows_block(monkeypatch):
+    """H6-2 T01: Empty rows block IO schema test."""
+    from scripts.bench.capability_ab_runner import _build_h6_adapter_io_schema_test
+    monkeypatch.setenv("NEXUS_H6_ALLOW_ADAPTER_IO_SCHEMA_TEST", "1")
+    shadow = {"dry_run_ready": True, "adapter_dry_run_receipt_ready": True, "ready_for_h6_2_adapter_io_schema_test": True, "safety_violation_count": 0}
+    bundle = {"h6_shadow_local_adapter_dry_run": shadow}
+    r = _build_h6_adapter_io_schema_test([], bundle)
+    assert r["io_schema_status"] == "adapter_io_schema_fail"
+    assert r["input_envelope_count"] == 0
+    assert "no_input_envelopes" in r["io_schema_reasons"]
+
+
+def test_h6_2_io_schema_flag_missing_block(monkeypatch):
+    """H6-2 T02: Flag missing blocks IO schema test."""
+    from scripts.bench.capability_ab_runner import _build_h6_adapter_io_schema_test
+    monkeypatch.delenv("NEXUS_H6_ALLOW_ADAPTER_IO_SCHEMA_TEST", raising=False)
+    shadow = {"dry_run_ready": True, "adapter_dry_run_receipt_ready": True, "ready_for_h6_2_adapter_io_schema_test": True, "safety_violation_count": 0}
+    bundle = {"h6_shadow_local_adapter_dry_run": shadow}
+    r = _build_h6_adapter_io_schema_test([], bundle)
+    assert r["io_schema_status"] == "blocked"
+    assert "adapter_io_schema_flag_not_enabled" in r["io_schema_reasons"]
+
+
+def test_h6_2_io_schema_missing_shadow_block(monkeypatch):
+    """H6-2 T03: Missing H6-1 shadow dry-run blocks IO schema test."""
+    from scripts.bench.capability_ab_runner import _build_h6_adapter_io_schema_test
+    monkeypatch.setenv("NEXUS_H6_ALLOW_ADAPTER_IO_SCHEMA_TEST", "1")
+    r = _build_h6_adapter_io_schema_test([], None)
+    assert r["io_schema_status"] == "blocked"
+    assert "missing_h6_1_shadow_dry_run" in r["io_schema_reasons"]
+
+
+def test_h6_2_io_schema_shadow_not_ready_block(monkeypatch):
+    """H6-2 T04: H6-1 dry-run not ready blocks IO schema test."""
+    from scripts.bench.capability_ab_runner import _build_h6_adapter_io_schema_test
+    monkeypatch.setenv("NEXUS_H6_ALLOW_ADAPTER_IO_SCHEMA_TEST", "1")
+    shadow = {"dry_run_ready": False, "adapter_dry_run_receipt_ready": True, "ready_for_h6_2_adapter_io_schema_test": True, "safety_violation_count": 0}
+    bundle = {"h6_shadow_local_adapter_dry_run": shadow}
+    r = _build_h6_adapter_io_schema_test([], bundle)
+    assert r["io_schema_status"] == "blocked"
+    assert "h6_1_shadow_dry_run_not_ready" in r["io_schema_reasons"]
+
+
+def test_h6_2_io_schema_receipt_not_ready_block(monkeypatch):
+    """H6-2 T05: H6-1 receipt not ready blocks IO schema test."""
+    from scripts.bench.capability_ab_runner import _build_h6_adapter_io_schema_test
+    monkeypatch.setenv("NEXUS_H6_ALLOW_ADAPTER_IO_SCHEMA_TEST", "1")
+    shadow = {"dry_run_ready": True, "adapter_dry_run_receipt_ready": False, "ready_for_h6_2_adapter_io_schema_test": True, "safety_violation_count": 0}
+    bundle = {"h6_shadow_local_adapter_dry_run": shadow}
+    r = _build_h6_adapter_io_schema_test([], bundle)
+    assert r["io_schema_status"] == "blocked"
+    assert "h6_1_receipt_not_ready" in r["io_schema_reasons"]
+
+
+def test_h6_2_io_schema_not_ready_for_h6_2_block(monkeypatch):
+    """H6-2 T06: Not ready_for_h6_2 blocks IO schema test."""
+    from scripts.bench.capability_ab_runner import _build_h6_adapter_io_schema_test
+    monkeypatch.setenv("NEXUS_H6_ALLOW_ADAPTER_IO_SCHEMA_TEST", "1")
+    shadow = {"dry_run_ready": True, "adapter_dry_run_receipt_ready": True, "ready_for_h6_2_adapter_io_schema_test": False, "safety_violation_count": 0}
+    bundle = {"h6_shadow_local_adapter_dry_run": shadow}
+    r = _build_h6_adapter_io_schema_test([], bundle)
+    assert r["io_schema_status"] == "blocked"
+    assert "not_ready_for_h6_2_adapter_io_schema_test" in r["io_schema_reasons"]
+
+
+def test_h6_2_io_schema_shadow_safety_violation_block(monkeypatch):
+    """H6-2 T07: H6-1 safety violation blocks IO schema test."""
+    from scripts.bench.capability_ab_runner import _build_h6_adapter_io_schema_test
+    monkeypatch.setenv("NEXUS_H6_ALLOW_ADAPTER_IO_SCHEMA_TEST", "1")
+    shadow = {"dry_run_ready": True, "adapter_dry_run_receipt_ready": True, "ready_for_h6_2_adapter_io_schema_test": True, "safety_violation_count": 1}
+    bundle = {"h6_shadow_local_adapter_dry_run": shadow}
+    r = _build_h6_adapter_io_schema_test([], bundle)
+    assert r["io_schema_status"] == "blocked"
+    assert "h6_1_safety_violation_detected" in r["io_schema_reasons"]
+
+
+def test_h6_2_io_schema_no_input_envelopes_block(monkeypatch):
+    """H6-2 T08: No input envelopes blocks IO schema test."""
+    from scripts.bench.capability_ab_runner import _build_h6_adapter_io_schema_test
+    monkeypatch.setenv("NEXUS_H6_ALLOW_ADAPTER_IO_SCHEMA_TEST", "1")
+    shadow = {"dry_run_ready": True, "adapter_dry_run_receipt_ready": True, "ready_for_h6_2_adapter_io_schema_test": True, "safety_violation_count": 0}
+    bundle = {"h6_shadow_local_adapter_dry_run": shadow}
+    r = _build_h6_adapter_io_schema_test([], bundle)
+    assert r["io_schema_status"] == "adapter_io_schema_fail"
+    assert "no_input_envelopes" in r["io_schema_reasons"]
+
+
+def test_h6_2_io_schema_no_output_envelopes_block(monkeypatch):
+    """H6-2 T09: No output envelopes blocks IO schema test."""
+    from scripts.bench.capability_ab_runner import _build_h6_adapter_io_schema_test
+    monkeypatch.setenv("NEXUS_H6_ALLOW_ADAPTER_IO_SCHEMA_TEST", "1")
+    shadow = {"dry_run_ready": True, "adapter_dry_run_receipt_ready": True, "ready_for_h6_2_adapter_io_schema_test": True, "safety_violation_count": 0}
+    bundle = {"h6_shadow_local_adapter_dry_run": shadow}
+    rows = [{"h6_adapter_input_envelope": {
+        "schema_version": "nexus.local_adapter.input.v1",
+        "request_id": "io-req-001",
+        "adapter_id": "qwen3b-selector-v0",
+        "model_family": "qwen",
+        "model_size": "3b",
+        "model_name": "qwen2.5-coder:3b",
+        "role": "selector",
+        "route_mode": "shadow_only",
+        "input_ref": "fixture://case-001",
+    }}]
+    r = _build_h6_adapter_io_schema_test(rows, bundle)
+    assert r["io_schema_status"] == "adapter_io_schema_fail"
+    assert "no_output_envelopes" in r["io_schema_reasons"]
+
+
+def test_h6_2_io_schema_no_matched_io_pairs_block(monkeypatch):
+    """H6-2 T10: No matched IO pairs blocks IO schema test."""
+    from scripts.bench.capability_ab_runner import _build_h6_adapter_io_schema_test
+    monkeypatch.setenv("NEXUS_H6_ALLOW_ADAPTER_IO_SCHEMA_TEST", "1")
+    shadow = {"dry_run_ready": True, "adapter_dry_run_receipt_ready": True, "ready_for_h6_2_adapter_io_schema_test": True, "safety_violation_count": 0}
+    bundle = {"h6_shadow_local_adapter_dry_run": shadow}
+    rows = [
+        {"h6_adapter_input_envelope": {
+            "schema_version": "nexus.local_adapter.input.v1",
+            "request_id": "io-req-001",
+            "adapter_id": "qwen3b-selector-v0",
+            "model_family": "qwen",
+            "model_size": "3b",
+            "model_name": "qwen2.5-coder:3b",
+            "role": "selector",
+            "route_mode": "shadow_only",
+            "input_ref": "fixture://case-001",
+        }},
+        {"h6_adapter_output_envelope": {
+            "schema_version": "nexus.local_adapter.output.v1",
+            "request_id": "io-req-002",
+            "adapter_id": "qwen3b-selector-v0",
+            "output_status": "schema_only",
+            "output_ref": "fixture://output-001",
+        }},
+    ]
+    r = _build_h6_adapter_io_schema_test(rows, bundle)
+    assert r["io_schema_status"] == "adapter_io_schema_fail"
+    assert "no_matched_io_pairs" in r["io_schema_reasons"]
+
+
+def test_h6_2_io_schema_valid_qwen_3b_selector(monkeypatch):
+    """H6-2 T11: Valid Qwen 3B selector IO pair passes."""
+    from scripts.bench.capability_ab_runner import _build_h6_adapter_io_schema_test
+    monkeypatch.setenv("NEXUS_H6_ALLOW_ADAPTER_IO_SCHEMA_TEST", "1")
+    shadow = {"dry_run_ready": True, "adapter_dry_run_receipt_ready": True, "ready_for_h6_2_adapter_io_schema_test": True, "safety_violation_count": 0}
+    bundle = {"h6_shadow_local_adapter_dry_run": shadow}
+    rows = [
+        {"h6_adapter_input_envelope": {
+            "schema_version": "nexus.local_adapter.input.v1",
+            "request_id": "io-req-001",
+            "adapter_id": "qwen3b-selector-v0",
+            "model_family": "qwen",
+            "model_size": "3b",
+            "model_name": "qwen2.5-coder:3b",
+            "role": "selector",
+            "route_mode": "shadow_only",
+            "input_ref": "fixture://case-001",
+        }},
+        {"h6_adapter_output_envelope": {
+            "schema_version": "nexus.local_adapter.output.v1",
+            "request_id": "io-req-001",
+            "adapter_id": "qwen3b-selector-v0",
+            "output_status": "schema_only",
+            "output_ref": "fixture://output-001",
+        }},
+    ]
+    r = _build_h6_adapter_io_schema_test(rows, bundle)
+    assert r["io_schema_status"] == "adapter_io_schema_ready"
+    assert r["matched_io_pair_count"] == 1
+    assert r["ready_for_h6_3_shadow_adapter_routing"] is True
+
+
+def test_h6_2_io_schema_valid_qwen_7b_localizer(monkeypatch):
+    """H6-2 T12: Valid Qwen 7B localizer IO pair passes."""
+    from scripts.bench.capability_ab_runner import _build_h6_adapter_io_schema_test
+    monkeypatch.setenv("NEXUS_H6_ALLOW_ADAPTER_IO_SCHEMA_TEST", "1")
+    shadow = {"dry_run_ready": True, "adapter_dry_run_receipt_ready": True, "ready_for_h6_2_adapter_io_schema_test": True, "safety_violation_count": 0}
+    bundle = {"h6_shadow_local_adapter_dry_run": shadow}
+    rows = [
+        {"h6_adapter_input_envelope": {
+            "schema_version": "nexus.local_adapter.input.v1",
+            "request_id": "io-req-002",
+            "adapter_id": "qwen7b-localizer-v0",
+            "model_family": "qwen",
+            "model_size": "7b",
+            "model_name": "qwen2.5-coder:7b",
+            "role": "localizer",
+            "route_mode": "shadow_only",
+            "input_ref": "fixture://case-002",
+        }},
+        {"h6_adapter_output_envelope": {
+            "schema_version": "nexus.local_adapter.output.v1",
+            "request_id": "io-req-002",
+            "adapter_id": "qwen7b-localizer-v0",
+            "output_status": "schema_only",
+            "output_ref": "fixture://output-002",
+        }},
+    ]
+    r = _build_h6_adapter_io_schema_test(rows, bundle)
+    assert r["io_schema_status"] == "adapter_io_schema_ready"
+    assert r["matched_io_pair_count"] == 1
+    assert r["ready_for_h6_3_shadow_adapter_routing"] is True
+
+
+def test_h6_2_io_schema_valid_qwen_14b_patch_synthesizer(monkeypatch):
+    """H6-2 T13: Valid Qwen 14B patch_synthesizer IO pair passes."""
+    from scripts.bench.capability_ab_runner import _build_h6_adapter_io_schema_test
+    monkeypatch.setenv("NEXUS_H6_ALLOW_ADAPTER_IO_SCHEMA_TEST", "1")
+    shadow = {"dry_run_ready": True, "adapter_dry_run_receipt_ready": True, "ready_for_h6_2_adapter_io_schema_test": True, "safety_violation_count": 0}
+    bundle = {"h6_shadow_local_adapter_dry_run": shadow}
+    rows = [
+        {"h6_adapter_input_envelope": {
+            "schema_version": "nexus.local_adapter.input.v1",
+            "request_id": "io-req-003",
+            "adapter_id": "qwen14b-patch-synthesizer-v0",
+            "model_family": "qwen",
+            "model_size": "14b",
+            "model_name": "qwen2.5-coder:14b",
+            "role": "patch_synthesizer",
+            "route_mode": "shadow_only",
+            "input_ref": "fixture://case-003",
+        }},
+        {"h6_adapter_output_envelope": {
+            "schema_version": "nexus.local_adapter.output.v1",
+            "request_id": "io-req-003",
+            "adapter_id": "qwen14b-patch-synthesizer-v0",
+            "output_status": "schema_only",
+            "output_ref": "fixture://output-003",
+        }},
+    ]
+    r = _build_h6_adapter_io_schema_test(rows, bundle)
+    assert r["io_schema_status"] == "adapter_io_schema_ready"
+    assert r["matched_io_pair_count"] == 1
+    assert r["ready_for_h6_3_shadow_adapter_routing"] is True
+
+
+def test_h6_2_io_schema_valid_verifier_assist(monkeypatch):
+    """H6-2 T14: Valid verifier_assist IO pair passes."""
+    from scripts.bench.capability_ab_runner import _build_h6_adapter_io_schema_test
+    monkeypatch.setenv("NEXUS_H6_ALLOW_ADAPTER_IO_SCHEMA_TEST", "1")
+    shadow = {"dry_run_ready": True, "adapter_dry_run_receipt_ready": True, "ready_for_h6_2_adapter_io_schema_test": True, "safety_violation_count": 0}
+    bundle = {"h6_shadow_local_adapter_dry_run": shadow}
+    rows = [
+        {"h6_adapter_input_envelope": {
+            "schema_version": "nexus.local_adapter.input.v1",
+            "request_id": "io-req-004",
+            "adapter_id": "qwen3b-verifier-assist-v0",
+            "model_family": "qwen",
+            "model_size": "3b",
+            "model_name": "qwen2.5-coder:3b",
+            "role": "verifier_assist",
+            "route_mode": "shadow_only",
+            "input_ref": "fixture://case-004",
+        }},
+        {"h6_adapter_output_envelope": {
+            "schema_version": "nexus.local_adapter.output.v1",
+            "request_id": "io-req-004",
+            "adapter_id": "qwen3b-verifier-assist-v0",
+            "output_status": "schema_only",
+            "output_ref": "fixture://output-004",
+        }},
+    ]
+    r = _build_h6_adapter_io_schema_test(rows, bundle)
+    assert r["io_schema_status"] == "adapter_io_schema_ready"
+    assert r["matched_io_pair_count"] == 1
+    assert r["ready_for_h6_3_shadow_adapter_routing"] is True
+
+
+def test_h6_2_io_schema_missing_request_id_invalidates(monkeypatch):
+    """H6-2 T15: Missing request_id invalidates input."""
+    from scripts.bench.capability_ab_runner import _build_h6_adapter_io_schema_test
+    monkeypatch.setenv("NEXUS_H6_ALLOW_ADAPTER_IO_SCHEMA_TEST", "1")
+    shadow = {"dry_run_ready": True, "adapter_dry_run_receipt_ready": True, "ready_for_h6_2_adapter_io_schema_test": True, "safety_violation_count": 0}
+    bundle = {"h6_shadow_local_adapter_dry_run": shadow}
+    rows = [{"h6_adapter_input_envelope": {
+        "schema_version": "nexus.local_adapter.input.v1",
+        "request_id": "",
+        "adapter_id": "qwen3b-selector-v0",
+        "model_family": "qwen",
+        "model_size": "3b",
+        "model_name": "qwen2.5-coder:3b",
+        "role": "selector",
+        "route_mode": "shadow_only",
+        "input_ref": "fixture://case-001",
+    }}]
+    r = _build_h6_adapter_io_schema_test(rows, bundle)
+    assert r["missing_request_id_count"] == 1
+    assert "missing_request_id" in r["io_schema_reasons"]
+
+
+def test_h6_2_io_schema_missing_adapter_id_invalidates(monkeypatch):
+    """H6-2 T16: Missing adapter_id invalidates input."""
+    from scripts.bench.capability_ab_runner import _build_h6_adapter_io_schema_test
+    monkeypatch.setenv("NEXUS_H6_ALLOW_ADAPTER_IO_SCHEMA_TEST", "1")
+    shadow = {"dry_run_ready": True, "adapter_dry_run_receipt_ready": True, "ready_for_h6_2_adapter_io_schema_test": True, "safety_violation_count": 0}
+    bundle = {"h6_shadow_local_adapter_dry_run": shadow}
+    rows = [{"h6_adapter_input_envelope": {
+        "schema_version": "nexus.local_adapter.input.v1",
+        "request_id": "io-req-001",
+        "adapter_id": "",
+        "model_family": "qwen",
+        "model_size": "3b",
+        "model_name": "qwen2.5-coder:3b",
+        "role": "selector",
+        "route_mode": "shadow_only",
+        "input_ref": "fixture://case-001",
+    }}]
+    r = _build_h6_adapter_io_schema_test(rows, bundle)
+    assert r["missing_adapter_id_count"] == 1
+    assert "missing_adapter_id" in r["io_schema_reasons"]
+
+
+def test_h6_2_io_schema_missing_model_name_invalidates(monkeypatch):
+    """H6-2 T17: Missing model_name invalidates input."""
+    from scripts.bench.capability_ab_runner import _build_h6_adapter_io_schema_test
+    monkeypatch.setenv("NEXUS_H6_ALLOW_ADAPTER_IO_SCHEMA_TEST", "1")
+    shadow = {"dry_run_ready": True, "adapter_dry_run_receipt_ready": True, "ready_for_h6_2_adapter_io_schema_test": True, "safety_violation_count": 0}
+    bundle = {"h6_shadow_local_adapter_dry_run": shadow}
+    rows = [{"h6_adapter_input_envelope": {
+        "schema_version": "nexus.local_adapter.input.v1",
+        "request_id": "io-req-001",
+        "adapter_id": "qwen3b-selector-v0",
+        "model_family": "qwen",
+        "model_size": "3b",
+        "model_name": "",
+        "role": "selector",
+        "route_mode": "shadow_only",
+        "input_ref": "fixture://case-001",
+    }}]
+    r = _build_h6_adapter_io_schema_test(rows, bundle)
+    assert r["missing_model_name_count"] == 1
+    assert "missing_model_name" in r["io_schema_reasons"]
+
+
+def test_h6_2_io_schema_missing_role_invalidates(monkeypatch):
+    """H6-2 T18: Missing role invalidates input."""
+    from scripts.bench.capability_ab_runner import _build_h6_adapter_io_schema_test
+    monkeypatch.setenv("NEXUS_H6_ALLOW_ADAPTER_IO_SCHEMA_TEST", "1")
+    shadow = {"dry_run_ready": True, "adapter_dry_run_receipt_ready": True, "ready_for_h6_2_adapter_io_schema_test": True, "safety_violation_count": 0}
+    bundle = {"h6_shadow_local_adapter_dry_run": shadow}
+    rows = [{"h6_adapter_input_envelope": {
+        "schema_version": "nexus.local_adapter.input.v1",
+        "request_id": "io-req-001",
+        "adapter_id": "qwen3b-selector-v0",
+        "model_family": "qwen",
+        "model_size": "3b",
+        "model_name": "qwen2.5-coder:3b",
+        "role": "proposer",
+        "route_mode": "shadow_only",
+        "input_ref": "fixture://case-001",
+    }}]
+    r = _build_h6_adapter_io_schema_test(rows, bundle)
+    assert r["missing_role_count"] == 1
+    assert "missing_role" in r["io_schema_reasons"]
+
+
+def test_h6_2_io_schema_missing_input_ref_invalidates(monkeypatch):
+    """H6-2 T19: Missing input_ref invalidates input."""
+    from scripts.bench.capability_ab_runner import _build_h6_adapter_io_schema_test
+    monkeypatch.setenv("NEXUS_H6_ALLOW_ADAPTER_IO_SCHEMA_TEST", "1")
+    shadow = {"dry_run_ready": True, "adapter_dry_run_receipt_ready": True, "ready_for_h6_2_adapter_io_schema_test": True, "safety_violation_count": 0}
+    bundle = {"h6_shadow_local_adapter_dry_run": shadow}
+    rows = [{"h6_adapter_input_envelope": {
+        "schema_version": "nexus.local_adapter.input.v1",
+        "request_id": "io-req-001",
+        "adapter_id": "qwen3b-selector-v0",
+        "model_family": "qwen",
+        "model_size": "3b",
+        "model_name": "qwen2.5-coder:3b",
+        "role": "selector",
+        "route_mode": "shadow_only",
+        "input_ref": "",
+    }}]
+    r = _build_h6_adapter_io_schema_test(rows, bundle)
+    assert r["missing_input_ref_count"] == 1
+    assert "missing_input_ref" in r["io_schema_reasons"]
+
+
+def test_h6_2_io_schema_missing_output_ref_invalidates(monkeypatch):
+    """H6-2 T20: Missing output_ref invalidates output."""
+    from scripts.bench.capability_ab_runner import _build_h6_adapter_io_schema_test
+    monkeypatch.setenv("NEXUS_H6_ALLOW_ADAPTER_IO_SCHEMA_TEST", "1")
+    shadow = {"dry_run_ready": True, "adapter_dry_run_receipt_ready": True, "ready_for_h6_2_adapter_io_schema_test": True, "safety_violation_count": 0}
+    bundle = {"h6_shadow_local_adapter_dry_run": shadow}
+    rows = [{"h6_adapter_output_envelope": {
+        "schema_version": "nexus.local_adapter.output.v1",
+        "request_id": "io-req-001",
+        "adapter_id": "qwen3b-selector-v0",
+        "output_status": "schema_only",
+        "output_ref": "",
+    }}]
+    r = _build_h6_adapter_io_schema_test(rows, bundle)
+    assert r["missing_output_ref_count"] == 1
+    assert "missing_output_ref" in r["io_schema_reasons"]
+
+
+def test_h6_2_io_schema_invalid_input_schema_version(monkeypatch):
+    """H6-2 T21: Invalid input schema version invalidates input."""
+    from scripts.bench.capability_ab_runner import _build_h6_adapter_io_schema_test
+    monkeypatch.setenv("NEXUS_H6_ALLOW_ADAPTER_IO_SCHEMA_TEST", "1")
+    shadow = {"dry_run_ready": True, "adapter_dry_run_receipt_ready": True, "ready_for_h6_2_adapter_io_schema_test": True, "safety_violation_count": 0}
+    bundle = {"h6_shadow_local_adapter_dry_run": shadow}
+    rows = [{"h6_adapter_input_envelope": {
+        "schema_version": "invalid.version",
+        "request_id": "io-req-001",
+        "adapter_id": "qwen3b-selector-v0",
+        "model_family": "qwen",
+        "model_size": "3b",
+        "model_name": "qwen2.5-coder:3b",
+        "role": "selector",
+        "route_mode": "shadow_only",
+        "input_ref": "fixture://case-001",
+    }}]
+    r = _build_h6_adapter_io_schema_test(rows, bundle)
+    assert r["invalid_schema_version_count"] == 1
+    assert "invalid_schema_version" in r["io_schema_reasons"]
+
+
+def test_h6_2_io_schema_invalid_output_schema_version(monkeypatch):
+    """H6-2 T22: Invalid output schema version invalidates output."""
+    from scripts.bench.capability_ab_runner import _build_h6_adapter_io_schema_test
+    monkeypatch.setenv("NEXUS_H6_ALLOW_ADAPTER_IO_SCHEMA_TEST", "1")
+    shadow = {"dry_run_ready": True, "adapter_dry_run_receipt_ready": True, "ready_for_h6_2_adapter_io_schema_test": True, "safety_violation_count": 0}
+    bundle = {"h6_shadow_local_adapter_dry_run": shadow}
+    rows = [{"h6_adapter_output_envelope": {
+        "schema_version": "invalid.version",
+        "request_id": "io-req-001",
+        "adapter_id": "qwen3b-selector-v0",
+        "output_status": "schema_only",
+        "output_ref": "fixture://output-001",
+    }}]
+    r = _build_h6_adapter_io_schema_test(rows, bundle)
+    assert r["invalid_schema_version_count"] == 1
+    assert "invalid_schema_version" in r["io_schema_reasons"]
+
+
+def test_h6_2_io_schema_invalid_output_status(monkeypatch):
+    """H6-2 T23: Invalid output_status invalidates output."""
+    from scripts.bench.capability_ab_runner import _build_h6_adapter_io_schema_test
+    monkeypatch.setenv("NEXUS_H6_ALLOW_ADAPTER_IO_SCHEMA_TEST", "1")
+    shadow = {"dry_run_ready": True, "adapter_dry_run_receipt_ready": True, "ready_for_h6_2_adapter_io_schema_test": True, "safety_violation_count": 0}
+    bundle = {"h6_shadow_local_adapter_dry_run": shadow}
+    rows = [{"h6_adapter_output_envelope": {
+        "schema_version": "nexus.local_adapter.output.v1",
+        "request_id": "io-req-001",
+        "adapter_id": "qwen3b-selector-v0",
+        "output_status": "production",
+        "output_ref": "fixture://output-001",
+    }}]
+    r = _build_h6_adapter_io_schema_test(rows, bundle)
+    assert r["invalid_output_status_count"] == 1
+    assert "invalid_output_status" in r["io_schema_reasons"]
+
+
+def test_h6_2_io_schema_unmatched_input_counted(monkeypatch):
+    """H6-2 T24: Unmatched valid input counted."""
+    from scripts.bench.capability_ab_runner import _build_h6_adapter_io_schema_test
+    monkeypatch.setenv("NEXUS_H6_ALLOW_ADAPTER_IO_SCHEMA_TEST", "1")
+    shadow = {"dry_run_ready": True, "adapter_dry_run_receipt_ready": True, "ready_for_h6_2_adapter_io_schema_test": True, "safety_violation_count": 0}
+    bundle = {"h6_shadow_local_adapter_dry_run": shadow}
+    rows = [
+        {"h6_adapter_input_envelope": {
+            "schema_version": "nexus.local_adapter.input.v1",
+            "request_id": "io-req-001",
+            "adapter_id": "qwen3b-selector-v0",
+            "model_family": "qwen",
+            "model_size": "3b",
+            "model_name": "qwen2.5-coder:3b",
+            "role": "selector",
+            "route_mode": "shadow_only",
+            "input_ref": "fixture://case-001",
+        }},
+        {"h6_adapter_output_envelope": {
+            "schema_version": "nexus.local_adapter.output.v1",
+            "request_id": "io-req-002",
+            "adapter_id": "qwen3b-selector-v0",
+            "output_status": "schema_only",
+            "output_ref": "fixture://output-001",
+        }},
+    ]
+    r = _build_h6_adapter_io_schema_test(rows, bundle)
+    assert r["unmatched_input_count"] == 1
+    assert r["unmatched_output_count"] == 1
+    assert r["matched_io_pair_count"] == 0
+
+
+def test_h6_2_io_schema_role_io_pair_counts(monkeypatch):
+    """H6-2 T27: Role IO pair counts computed."""
+    from scripts.bench.capability_ab_runner import _build_h6_adapter_io_schema_test
+    monkeypatch.setenv("NEXUS_H6_ALLOW_ADAPTER_IO_SCHEMA_TEST", "1")
+    shadow = {"dry_run_ready": True, "adapter_dry_run_receipt_ready": True, "ready_for_h6_2_adapter_io_schema_test": True, "safety_violation_count": 0}
+    bundle = {"h6_shadow_local_adapter_dry_run": shadow}
+    roles = ["selector", "localizer", "patch_synthesizer", "verifier_assist"]
+    rows = []
+    for i, role in enumerate(roles, 1):
+        rows.extend([
+            {"h6_adapter_input_envelope": {
+                "schema_version": "nexus.local_adapter.input.v1",
+                "request_id": f"io-req-{i:03d}",
+                "adapter_id": f"qwen3b-{role}-v0",
+                "model_family": "qwen",
+                "model_size": "3b",
+                "model_name": "qwen2.5-coder:3b",
+                "role": role,
+                "route_mode": "shadow_only",
+                "input_ref": f"fixture://case-{i:03d}",
+            }},
+            {"h6_adapter_output_envelope": {
+                "schema_version": "nexus.local_adapter.output.v1",
+                "request_id": f"io-req-{i:03d}",
+                "adapter_id": f"qwen3b-{role}-v0",
+                "output_status": "schema_only",
+                "output_ref": f"fixture://output-{i:03d}",
+            }},
+        ])
+    r = _build_h6_adapter_io_schema_test(rows, bundle)
+    assert r["selector_io_pair_count"] == 1
+    assert r["localizer_io_pair_count"] == 1
+    assert r["patch_synthesizer_io_pair_count"] == 1
+    assert r["verifier_assist_io_pair_count"] == 1
+
+
+def test_h6_2_io_schema_qwen_size_io_pair_counts(monkeypatch):
+    """H6-2 T28: Qwen size IO pair counts computed."""
+    from scripts.bench.capability_ab_runner import _build_h6_adapter_io_schema_test
+    monkeypatch.setenv("NEXUS_H6_ALLOW_ADAPTER_IO_SCHEMA_TEST", "1")
+    shadow = {"dry_run_ready": True, "adapter_dry_run_receipt_ready": True, "ready_for_h6_2_adapter_io_schema_test": True, "safety_violation_count": 0}
+    bundle = {"h6_shadow_local_adapter_dry_run": shadow}
+    sizes = ["3b", "7b", "14b"]
+    rows = []
+    for i, size in enumerate(sizes, 1):
+        rows.extend([
+            {"h6_adapter_input_envelope": {
+                "schema_version": "nexus.local_adapter.input.v1",
+                "request_id": f"io-req-{i:03d}",
+                "adapter_id": f"qwen{size}-selector-v0",
+                "model_family": "qwen",
+                "model_size": size,
+                "model_name": f"qwen2.5-coder:{size}",
+                "role": "selector",
+                "route_mode": "shadow_only",
+                "input_ref": f"fixture://case-{i:03d}",
+            }},
+            {"h6_adapter_output_envelope": {
+                "schema_version": "nexus.local_adapter.output.v1",
+                "request_id": f"io-req-{i:03d}",
+                "adapter_id": f"qwen{size}-selector-v0",
+                "output_status": "schema_only",
+                "output_ref": f"fixture://output-{i:03d}",
+            }},
+        ])
+    r = _build_h6_adapter_io_schema_test(rows, bundle)
+    assert r["qwen_3b_io_pair_count"] == 1
+    assert r["qwen_7b_io_pair_count"] == 1
+    assert r["qwen_14b_io_pair_count"] == 1
+
+
+def test_h6_2_io_schema_model_call_blocks(monkeypatch):
+    """H6-2 T29: model_call_executed blocks readiness."""
+    from scripts.bench.capability_ab_runner import _build_h6_adapter_io_schema_test
+    monkeypatch.setenv("NEXUS_H6_ALLOW_ADAPTER_IO_SCHEMA_TEST", "1")
+    shadow = {"dry_run_ready": True, "adapter_dry_run_receipt_ready": True, "ready_for_h6_2_adapter_io_schema_test": True, "safety_violation_count": 0}
+    bundle = {"h6_shadow_local_adapter_dry_run": shadow}
+    rows = [
+        {"h6_adapter_input_envelope": {
+            "schema_version": "nexus.local_adapter.input.v1",
+            "request_id": "io-req-001",
+            "adapter_id": "qwen3b-selector-v0",
+            "model_family": "qwen",
+            "model_size": "3b",
+            "model_name": "qwen2.5-coder:3b",
+            "role": "selector",
+            "route_mode": "shadow_only",
+            "input_ref": "fixture://case-001",
+            "model_call_executed": True,
+        }},
+        {"h6_adapter_output_envelope": {
+            "schema_version": "nexus.local_adapter.output.v1",
+            "request_id": "io-req-001",
+            "adapter_id": "qwen3b-selector-v0",
+            "output_status": "schema_only",
+            "output_ref": "fixture://output-001",
+        }},
+    ]
+    r = _build_h6_adapter_io_schema_test(rows, bundle)
+    assert r["model_call_executed_count"] == 1
+    assert r["safety_violation_count"] >= 1
+    assert "model_call_executed_detected" in r["io_schema_reasons"]
+    assert r["ready_for_h6_3_shadow_adapter_routing"] is False
+
+
+def test_h6_2_io_schema_ollama_blocks(monkeypatch):
+    """H6-2 T30: ollama_invoked blocks readiness."""
+    from scripts.bench.capability_ab_runner import _build_h6_adapter_io_schema_test
+    monkeypatch.setenv("NEXUS_H6_ALLOW_ADAPTER_IO_SCHEMA_TEST", "1")
+    shadow = {"dry_run_ready": True, "adapter_dry_run_receipt_ready": True, "ready_for_h6_2_adapter_io_schema_test": True, "safety_violation_count": 0}
+    bundle = {"h6_shadow_local_adapter_dry_run": shadow}
+    rows = [
+        {"h6_adapter_input_envelope": {
+            "schema_version": "nexus.local_adapter.input.v1",
+            "request_id": "io-req-001",
+            "adapter_id": "qwen3b-selector-v0",
+            "model_family": "qwen",
+            "model_size": "3b",
+            "model_name": "qwen2.5-coder:3b",
+            "role": "selector",
+            "route_mode": "shadow_only",
+            "input_ref": "fixture://case-001",
+            "ollama_invoked": True,
+        }},
+        {"h6_adapter_output_envelope": {
+            "schema_version": "nexus.local_adapter.output.v1",
+            "request_id": "io-req-001",
+            "adapter_id": "qwen3b-selector-v0",
+            "output_status": "schema_only",
+            "output_ref": "fixture://output-001",
+        }},
+    ]
+    r = _build_h6_adapter_io_schema_test(rows, bundle)
+    assert r["ollama_invoked_count"] == 1
+    assert r["safety_violation_count"] >= 1
+    assert "ollama_invoked_detected" in r["io_schema_reasons"]
+    assert r["ready_for_h6_3_shadow_adapter_routing"] is False
+
+
+def test_h6_2_io_schema_cloud_blocks(monkeypatch):
+    """H6-2 T31: cloud_invoked blocks readiness."""
+    from scripts.bench.capability_ab_runner import _build_h6_adapter_io_schema_test
+    monkeypatch.setenv("NEXUS_H6_ALLOW_ADAPTER_IO_SCHEMA_TEST", "1")
+    shadow = {"dry_run_ready": True, "adapter_dry_run_receipt_ready": True, "ready_for_h6_2_adapter_io_schema_test": True, "safety_violation_count": 0}
+    bundle = {"h6_shadow_local_adapter_dry_run": shadow}
+    rows = [
+        {"h6_adapter_input_envelope": {
+            "schema_version": "nexus.local_adapter.input.v1",
+            "request_id": "io-req-001",
+            "adapter_id": "qwen3b-selector-v0",
+            "model_family": "qwen",
+            "model_size": "3b",
+            "model_name": "qwen2.5-coder:3b",
+            "role": "selector",
+            "route_mode": "shadow_only",
+            "input_ref": "fixture://case-001",
+            "cloud_invoked": True,
+        }},
+        {"h6_adapter_output_envelope": {
+            "schema_version": "nexus.local_adapter.output.v1",
+            "request_id": "io-req-001",
+            "adapter_id": "qwen3b-selector-v0",
+            "output_status": "schema_only",
+            "output_ref": "fixture://output-001",
+        }},
+    ]
+    r = _build_h6_adapter_io_schema_test(rows, bundle)
+    assert r["cloud_invoked_count"] == 1
+    assert r["safety_violation_count"] >= 1
+    assert "cloud_invoked_detected" in r["io_schema_reasons"]
+    assert r["ready_for_h6_3_shadow_adapter_routing"] is False
+
+
+def test_h6_2_io_schema_repo_mutated_blocks(monkeypatch):
+    """H6-2 T32: repo_mutated blocks readiness."""
+    from scripts.bench.capability_ab_runner import _build_h6_adapter_io_schema_test
+    monkeypatch.setenv("NEXUS_H6_ALLOW_ADAPTER_IO_SCHEMA_TEST", "1")
+    shadow = {"dry_run_ready": True, "adapter_dry_run_receipt_ready": True, "ready_for_h6_2_adapter_io_schema_test": True, "safety_violation_count": 0}
+    bundle = {"h6_shadow_local_adapter_dry_run": shadow}
+    rows = [
+        {"h6_adapter_input_envelope": {
+            "schema_version": "nexus.local_adapter.input.v1",
+            "request_id": "io-req-001",
+            "adapter_id": "qwen3b-selector-v0",
+            "model_family": "qwen",
+            "model_size": "3b",
+            "model_name": "qwen2.5-coder:3b",
+            "role": "selector",
+            "route_mode": "shadow_only",
+            "input_ref": "fixture://case-001",
+            "repo_mutated": True,
+        }},
+        {"h6_adapter_output_envelope": {
+            "schema_version": "nexus.local_adapter.output.v1",
+            "request_id": "io-req-001",
+            "adapter_id": "qwen3b-selector-v0",
+            "output_status": "schema_only",
+            "output_ref": "fixture://output-001",
+        }},
+    ]
+    r = _build_h6_adapter_io_schema_test(rows, bundle)
+    assert r["repo_mutated_count"] == 1
+    assert r["safety_violation_count"] >= 1
+    assert "repo_mutated_detected" in r["io_schema_reasons"]
+    assert r["ready_for_h6_3_shadow_adapter_routing"] is False
+
+
+def test_h6_2_io_schema_behavior_changed_blocks(monkeypatch):
+    """H6-2 T33: behavior_changed blocks readiness."""
+    from scripts.bench.capability_ab_runner import _build_h6_adapter_io_schema_test
+    monkeypatch.setenv("NEXUS_H6_ALLOW_ADAPTER_IO_SCHEMA_TEST", "1")
+    shadow = {"dry_run_ready": True, "adapter_dry_run_receipt_ready": True, "ready_for_h6_2_adapter_io_schema_test": True, "safety_violation_count": 0}
+    bundle = {"h6_shadow_local_adapter_dry_run": shadow}
+    rows = [
+        {"h6_adapter_input_envelope": {
+            "schema_version": "nexus.local_adapter.input.v1",
+            "request_id": "io-req-001",
+            "adapter_id": "qwen3b-selector-v0",
+            "model_family": "qwen",
+            "model_size": "3b",
+            "model_name": "qwen2.5-coder:3b",
+            "role": "selector",
+            "route_mode": "shadow_only",
+            "input_ref": "fixture://case-001",
+            "behavior_changed": True,
+        }},
+        {"h6_adapter_output_envelope": {
+            "schema_version": "nexus.local_adapter.output.v1",
+            "request_id": "io-req-001",
+            "adapter_id": "qwen3b-selector-v0",
+            "output_status": "schema_only",
+            "output_ref": "fixture://output-001",
+        }},
+    ]
+    r = _build_h6_adapter_io_schema_test(rows, bundle)
+    assert r["behavior_changed_count"] == 1
+    assert r["safety_violation_count"] >= 1
+    assert "behavior_changed_detected" in r["io_schema_reasons"]
+    assert r["ready_for_h6_3_shadow_adapter_routing"] is False
+
+
+def test_h6_2_io_schema_runtime_effect_blocks(monkeypatch):
+    """H6-2 T34: runtime_effect blocks readiness."""
+    from scripts.bench.capability_ab_runner import _build_h6_adapter_io_schema_test
+    monkeypatch.setenv("NEXUS_H6_ALLOW_ADAPTER_IO_SCHEMA_TEST", "1")
+    shadow = {"dry_run_ready": True, "adapter_dry_run_receipt_ready": True, "ready_for_h6_2_adapter_io_schema_test": True, "safety_violation_count": 0}
+    bundle = {"h6_shadow_local_adapter_dry_run": shadow}
+    rows = [
+        {"h6_adapter_input_envelope": {
+            "schema_version": "nexus.local_adapter.input.v1",
+            "request_id": "io-req-001",
+            "adapter_id": "qwen3b-selector-v0",
+            "model_family": "qwen",
+            "model_size": "3b",
+            "model_name": "qwen2.5-coder:3b",
+            "role": "selector",
+            "route_mode": "shadow_only",
+            "input_ref": "fixture://case-001",
+            "runtime_effect": True,
+        }},
+        {"h6_adapter_output_envelope": {
+            "schema_version": "nexus.local_adapter.output.v1",
+            "request_id": "io-req-001",
+            "adapter_id": "qwen3b-selector-v0",
+            "output_status": "schema_only",
+            "output_ref": "fixture://output-001",
+        }},
+    ]
+    r = _build_h6_adapter_io_schema_test(rows, bundle)
+    assert r["runtime_effect_count"] == 1
+    assert r["safety_violation_count"] >= 1
+    assert "runtime_effect_detected" in r["io_schema_reasons"]
+    assert r["ready_for_h6_3_shadow_adapter_routing"] is False
+
+
+def test_h6_2_io_schema_production_ready_false(monkeypatch):
+    """H6-2 T36: production_ready=false and public_claim_allowed=false always."""
+    from scripts.bench.capability_ab_runner import _build_h6_adapter_io_schema_test
+    monkeypatch.setenv("NEXUS_H6_ALLOW_ADAPTER_IO_SCHEMA_TEST", "1")
+    shadow = {"dry_run_ready": True, "adapter_dry_run_receipt_ready": True, "ready_for_h6_2_adapter_io_schema_test": True, "safety_violation_count": 0}
+    bundle = {"h6_shadow_local_adapter_dry_run": shadow}
+    rows = [
+        {"h6_adapter_input_envelope": {
+            "schema_version": "nexus.local_adapter.input.v1",
+            "request_id": "io-req-001",
+            "adapter_id": "qwen3b-selector-v0",
+            "model_family": "qwen",
+            "model_size": "3b",
+            "model_name": "qwen2.5-coder:3b",
+            "role": "selector",
+            "route_mode": "shadow_only",
+            "input_ref": "fixture://case-001",
+        }},
+        {"h6_adapter_output_envelope": {
+            "schema_version": "nexus.local_adapter.output.v1",
+            "request_id": "io-req-001",
+            "adapter_id": "qwen3b-selector-v0",
+            "output_status": "schema_only",
+            "output_ref": "fixture://output-001",
+        }},
+    ]
+    r = _build_h6_adapter_io_schema_test(rows, bundle)
+    assert r["production_ready"] is False
+    assert r["public_claim_allowed"] is False
+    assert "h6_2_adapter_io_schema_test_not_production" in r["io_schema_reasons"]
+    assert "adapter_io_schema_only" in r["io_schema_reasons"]
+    assert "no_model_calls_allowed" in r["io_schema_reasons"]
+    assert "ollama_invocation_blocked" in r["io_schema_reasons"]
+    assert "cloud_invocation_blocked" in r["io_schema_reasons"]
+    assert "repo_mutation_blocked" in r["io_schema_reasons"]
+    assert "runtime_effect_blocked" in r["io_schema_reasons"]
+    assert "production_claim_blocked" in r["io_schema_reasons"]
+    assert "public_claim_blocked" in r["io_schema_reasons"]
+
+
+def test_h6_2_io_schema_default_env_block(monkeypatch):
+    """H6-2 T38: Default env blocks IO schema test."""
+    from scripts.bench.capability_ab_runner import _build_h6_adapter_io_schema_test
+    monkeypatch.delenv("NEXUS_H6_ALLOW_ADAPTER_IO_SCHEMA_TEST", raising=False)
+    r = _build_h6_adapter_io_schema_test([], None)
+    assert r["io_schema_status"] == "blocked"
+    assert r["io_schema_allowed"] is False
+
+
+def test_h6_2_io_schema_collect_only():
+    """H6-2 T39: collect-only includes all H6-2 tests."""
+    import subprocess, re
+    result = subprocess.run(["python3", "-m", "pytest", "tests/benchmark/test_capability_ab_runner.py", "-k", "h6_2", "--collect-only", "-q"], capture_output=True, text=True, cwd="/Users/jameschen/Workspace/nexus")
+    count = len(re.findall(r"test_h6_2_", result.stdout))
+    assert count >= 34, f"Expected >= 34 H6-2 tests, got {count}"
+
+
+def test_h6_2_audit_duplicate_scan():
+    """H6-2 T40: No duplicate H5/H6 test functions."""
+    import ast, collections
+    from pathlib import Path
+    path = "tests/benchmark/test_capability_ab_runner.py"
+    tree = ast.parse(Path(path).read_text(encoding="utf-8", errors="ignore"))
+    loc = collections.defaultdict(list)
+    for n in tree.body:
+        if isinstance(n, ast.FunctionDef):
+            loc[n.name].append(n.lineno)
+    dups = [
+        (name, lines)
+        for name, lines in sorted(loc.items())
+        if (name.startswith("test_h5_") or name.startswith("test_h6_")) and len(lines) > 1
+    ]
+    assert not dups, f"Duplicate test functions found: {dups}"
+
+
+def test_h6_2_audit_report_lock():
+    """H6-2 T41: H5/H6 reports have no production/public claim."""
+    from pathlib import Path
+    bad = []
+    report_paths = sorted(Path("docs/reports").glob("h5_*.md")) + sorted(Path("docs/reports").glob("h6_*.md"))
+    for p in report_paths:
+        s = p.read_text(encoding="utf-8", errors="ignore").lower()
+        for needle in [
+            "production_ready=true",
+            "public_claim_allowed=true",
+            "production ready: true",
+            "public claim allowed: true",
+        ]:
+            if needle in s:
+                bad.append((p.name, needle))
+    assert not bad, f"Report lock violations found: {bad}"

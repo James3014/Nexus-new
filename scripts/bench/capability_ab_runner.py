@@ -9973,6 +9973,312 @@ def _build_h6_shadow_local_adapter_dry_run(rows: list[dict[str, Any]], bundle: d
     }
 
 
+def _build_h6_adapter_io_schema_test(rows: list[dict[str, Any]], bundle: dict[str, Any] | None = None) -> dict[str, Any]:
+    """Pure helper: H6 adapter IO schema test."""
+    import os as _os
+
+    flag = _os.environ.get("NEXUS_H6_ALLOW_ADAPTER_IO_SCHEMA_TEST", "").strip() == "1"
+
+    shadow = None
+    if bundle:
+        shadow = bundle.get("h6_shadow_local_adapter_dry_run")
+
+    shadow_present = bool(shadow)
+    shadow_ready = bool(shadow.get("dry_run_ready", False)) if shadow else False
+    receipt_ready = bool(shadow.get("adapter_dry_run_receipt_ready", False)) if shadow else False
+    ready_io = bool(shadow.get("ready_for_h6_2_adapter_io_schema_test", False)) if shadow else False
+    shadow_safety = int(shadow.get("safety_violation_count", 0)) if shadow else 0
+
+    ALLOWED_ROLES = {"selector", "localizer", "patch_synthesizer", "verifier_assist"}
+    ALLOWED_FAMILIES = {"qwen"}
+    ALLOWED_SIZES = {"3b", "7b", "14b"}
+    ALLOWED_ROUTES = {"local_first", "local_only", "shadow_only"}
+    ALLOWED_INPUT_VERSION = "nexus.local_adapter.input.v1"
+    ALLOWED_OUTPUT_VERSION = "nexus.local_adapter.output.v1"
+    ALLOWED_OUTPUT_STATUSES = {"schema_only", "dry_run_only", "trace_only"}
+
+    inputs = [r.get("h6_adapter_input_envelope") for r in rows if r.get("h6_adapter_input_envelope")]
+    outputs = [r.get("h6_adapter_output_envelope") for r in rows if r.get("h6_adapter_output_envelope")]
+
+    valid_inputs = []
+    invalid_inputs = 0
+    missing_request_id = 0
+    missing_adapter_id = 0
+    missing_model_name = 0
+    missing_role = 0
+    missing_input_ref = 0
+    invalid_schema_version_input = 0
+
+    valid_outputs = []
+    invalid_outputs = 0
+    missing_output_ref = 0
+    invalid_output_status = 0
+    invalid_schema_version_output = 0
+
+    qwen_3b = 0
+    qwen_7b = 0
+    qwen_14b = 0
+    role_selector = 0
+    role_localizer = 0
+    role_ps = 0
+    role_va = 0
+
+    mc_count = 0
+    ol_count = 0
+    cl_count = 0
+    rm_count = 0
+    bh_count = 0
+    re_count = 0
+
+    for inp in inputs:
+        sv = str(inp.get("schema_version", "") or "").strip()
+        rid = str(inp.get("request_id", "") or "").strip()
+        aid = str(inp.get("adapter_id", "") or "").strip()
+        fam = str(inp.get("model_family", "") or "").lower()
+        sz = str(inp.get("model_size", "") or "").lower()
+        mname = str(inp.get("model_name", "") or "").strip()
+        role = str(inp.get("role", "") or "").lower()
+        route = str(inp.get("route_mode", "") or "").lower()
+        iref = str(inp.get("input_ref", "") or "").strip()
+        mc = bool(inp.get("model_call_executed", False))
+        ol = bool(inp.get("ollama_invoked", False))
+        cl = bool(inp.get("cloud_invoked", False))
+        rm = bool(inp.get("repo_mutated", False))
+        bh = bool(inp.get("behavior_changed", False))
+        re = bool(inp.get("runtime_effect", False))
+
+        if mc:
+            mc_count += 1
+        if ol:
+            ol_count += 1
+        if cl:
+            cl_count += 1
+        if rm:
+            rm_count += 1
+        if bh:
+            bh_count += 1
+        if re:
+            re_count += 1
+
+        is_valid = (
+            sv == ALLOWED_INPUT_VERSION and rid and aid and fam in ALLOWED_FAMILIES
+            and sz in ALLOWED_SIZES and mname and role in ALLOWED_ROLES
+            and route in ALLOWED_ROUTES and iref
+            and not mc and not ol and not cl and not rm and not bh and not re
+        )
+
+        if is_valid:
+            valid_inputs.append(inp)
+            if sz == "3b":
+                qwen_3b += 1
+            elif sz == "7b":
+                qwen_7b += 1
+            elif sz == "14b":
+                qwen_14b += 1
+            if role == "selector":
+                role_selector += 1
+            elif role == "localizer":
+                role_localizer += 1
+            elif role == "patch_synthesizer":
+                role_ps += 1
+            elif role == "verifier_assist":
+                role_va += 1
+        else:
+            invalid_inputs += 1
+            if sv != ALLOWED_INPUT_VERSION:
+                invalid_schema_version_input += 1
+            if not rid:
+                missing_request_id += 1
+            if not aid:
+                missing_adapter_id += 1
+            if not mname:
+                missing_model_name += 1
+            if role not in ALLOWED_ROLES:
+                missing_role += 1
+            if not iref:
+                missing_input_ref += 1
+
+    for out in outputs:
+        sv = str(out.get("schema_version", "") or "").strip()
+        rid = str(out.get("request_id", "") or "").strip()
+        aid = str(out.get("adapter_id", "") or "").strip()
+        status = str(out.get("output_status", "") or "").lower()
+        oref = str(out.get("output_ref", "") or "").strip()
+        mc = bool(out.get("model_call_executed", False))
+        ol = bool(out.get("ollama_invoked", False))
+        cl = bool(out.get("cloud_invoked", False))
+        rm = bool(out.get("repo_mutated", False))
+        bh = bool(out.get("behavior_changed", False))
+        re = bool(out.get("runtime_effect", False))
+
+        if mc:
+            mc_count += 1
+        if ol:
+            ol_count += 1
+        if cl:
+            cl_count += 1
+        if rm:
+            rm_count += 1
+        if bh:
+            bh_count += 1
+        if re:
+            re_count += 1
+
+        is_valid = (
+            sv == ALLOWED_OUTPUT_VERSION and rid and aid
+            and status in ALLOWED_OUTPUT_STATUSES and oref
+            and not mc and not ol and not cl and not rm and not bh and not re
+        )
+
+        if is_valid:
+            valid_outputs.append(out)
+        else:
+            invalid_outputs += 1
+            if sv != ALLOWED_OUTPUT_VERSION:
+                invalid_schema_version_output += 1
+            if not oref:
+                missing_output_ref += 1
+            if status not in ALLOWED_OUTPUT_STATUSES:
+                invalid_output_status += 1
+
+    valid_input_rids = {inp.get("request_id") for inp in valid_inputs}
+    valid_output_rids = {out.get("request_id") for out in valid_outputs}
+    matched_rids = valid_input_rids & valid_output_rids
+    matched_io_pair_count = len(matched_rids)
+    unmatched_input_count = len(valid_input_rids - valid_output_rids)
+    unmatched_output_count = len(valid_output_rids - valid_input_rids)
+
+    safety = mc_count + ol_count + cl_count + rm_count + bh_count + re_count
+
+    io_schema_allowed = (
+        flag and shadow_present and shadow_ready
+        and receipt_ready and ready_io and shadow_safety == 0
+    )
+
+    io_schema_ready = (
+        io_schema_allowed and len(valid_inputs) > 0 and len(valid_outputs) > 0
+        and matched_io_pair_count > 0 and safety == 0
+    )
+
+    adapter_io_schema_ready = (
+        io_schema_ready and invalid_inputs == 0 and invalid_outputs == 0
+        and matched_io_pair_count >= 1
+    )
+
+    ready_routing = (
+        adapter_io_schema_ready and mc_count == 0 and ol_count == 0
+        and cl_count == 0 and rm_count == 0 and bh_count == 0 and re_count == 0
+    )
+
+    reasons = []
+    if not flag:
+        reasons.append("adapter_io_schema_flag_not_enabled")
+    if not shadow_present:
+        reasons.append("missing_h6_1_shadow_dry_run")
+    if shadow and not shadow_ready:
+        reasons.append("h6_1_shadow_dry_run_not_ready")
+    if shadow and not receipt_ready:
+        reasons.append("h6_1_receipt_not_ready")
+    if shadow and not ready_io:
+        reasons.append("not_ready_for_h6_2_adapter_io_schema_test")
+    if shadow_safety > 0:
+        reasons.append("h6_1_safety_violation_detected")
+    if not inputs:
+        reasons.append("no_input_envelopes")
+    if not outputs:
+        reasons.append("no_output_envelopes")
+    if inputs and matched_io_pair_count == 0:
+        reasons.append("no_matched_io_pairs")
+    if missing_request_id > 0:
+        reasons.append("missing_request_id")
+    if missing_adapter_id > 0:
+        reasons.append("missing_adapter_id")
+    if missing_model_name > 0:
+        reasons.append("missing_model_name")
+    if missing_role > 0:
+        reasons.append("missing_role")
+    if missing_input_ref > 0:
+        reasons.append("missing_input_ref")
+    if missing_output_ref > 0:
+        reasons.append("missing_output_ref")
+    if invalid_output_status > 0:
+        reasons.append("invalid_output_status")
+    if invalid_schema_version_input > 0 or invalid_schema_version_output > 0:
+        reasons.append("invalid_schema_version")
+    if mc_count > 0:
+        reasons.append("model_call_executed_detected")
+    if ol_count > 0:
+        reasons.append("ollama_invoked_detected")
+    if cl_count > 0:
+        reasons.append("cloud_invoked_detected")
+    if rm_count > 0:
+        reasons.append("repo_mutated_detected")
+    if bh_count > 0:
+        reasons.append("behavior_changed_detected")
+    if re_count > 0:
+        reasons.append("runtime_effect_detected")
+    reasons.extend([
+        "h6_2_adapter_io_schema_test_not_production",
+        "adapter_io_schema_only",
+        "no_model_calls_allowed",
+        "ollama_invocation_blocked",
+        "cloud_invocation_blocked",
+        "repo_mutation_blocked",
+        "runtime_effect_blocked",
+        "production_claim_blocked",
+        "public_claim_blocked",
+    ])
+
+    return {
+        "schema": "nexus.hybrid_h6_adapter_io_schema_test.v1",
+        "evaluated": True,
+        "io_schema_status": "adapter_io_schema_ready" if io_schema_ready else ("adapter_io_schema_fail" if io_schema_allowed else "blocked"),
+        "io_schema_reasons": reasons,
+        "io_schema_allowed": io_schema_allowed,
+        "io_schema_ready": io_schema_ready,
+        "row_count": len(rows),
+        "shadow_dry_run_present": shadow_present,
+        "shadow_dry_run_ready": shadow_ready,
+        "adapter_dry_run_receipt_ready": receipt_ready,
+        "ready_for_h6_2_adapter_io_schema_test": ready_io,
+        "input_envelope_count": len(inputs),
+        "input_envelope_valid_count": len(valid_inputs),
+        "input_envelope_invalid_count": invalid_inputs,
+        "output_envelope_count": len(outputs),
+        "output_envelope_valid_count": len(valid_outputs),
+        "output_envelope_invalid_count": invalid_outputs,
+        "matched_io_pair_count": matched_io_pair_count,
+        "unmatched_input_count": unmatched_input_count,
+        "unmatched_output_count": unmatched_output_count,
+        "qwen_3b_io_pair_count": qwen_3b,
+        "qwen_7b_io_pair_count": qwen_7b,
+        "qwen_14b_io_pair_count": qwen_14b,
+        "selector_io_pair_count": role_selector,
+        "localizer_io_pair_count": role_localizer,
+        "patch_synthesizer_io_pair_count": role_ps,
+        "verifier_assist_io_pair_count": role_va,
+        "missing_request_id_count": missing_request_id,
+        "missing_adapter_id_count": missing_adapter_id,
+        "missing_model_name_count": missing_model_name,
+        "missing_role_count": missing_role,
+        "missing_input_ref_count": missing_input_ref,
+        "missing_output_ref_count": missing_output_ref,
+        "invalid_output_status_count": invalid_output_status,
+        "invalid_schema_version_count": invalid_schema_version_input + invalid_schema_version_output,
+        "model_call_executed_count": mc_count,
+        "ollama_invoked_count": ol_count,
+        "cloud_invoked_count": cl_count,
+        "repo_mutated_count": rm_count,
+        "behavior_changed_count": bh_count,
+        "runtime_effect_count": re_count,
+        "safety_violation_count": safety,
+        "adapter_io_schema_ready": adapter_io_schema_ready,
+        "ready_for_h6_3_shadow_adapter_routing": ready_routing,
+        "production_ready": False,
+        "public_claim_allowed": False,
+    }
+
+
 def _finalize_with_nexus_row(
     row: dict[str, Any],
     *,
@@ -14507,6 +14813,30 @@ def write_evidence_bundle(
         "h6_shadow_local_adapter_repo_mutated_count": _build_h6_shadow_local_adapter_dry_run(with_rows, payload).get("repo_mutated_count", 0),
         "h6_shadow_local_adapter_behavior_changed_count": _build_h6_shadow_local_adapter_dry_run(with_rows, payload).get("behavior_changed_count", 0),
         "h6_shadow_local_adapter_safety_violation_count": _build_h6_shadow_local_adapter_dry_run(with_rows, payload).get("safety_violation_count", 0),
+        "h6_adapter_io_schema_test_present": 1 if _build_h6_adapter_io_schema_test(with_rows, payload).get("evaluated") else 0,
+        "h6_adapter_io_schema_test_allowed": 1 if _build_h6_adapter_io_schema_test(with_rows, payload).get("io_schema_allowed") else 0,
+        "h6_adapter_io_schema_test_ready": 1 if _build_h6_adapter_io_schema_test(with_rows, payload).get("io_schema_ready") else 0,
+        "h6_adapter_io_schema_ready": 1 if _build_h6_adapter_io_schema_test(with_rows, payload).get("adapter_io_schema_ready") else 0,
+        "h6_adapter_io_schema_ready_for_shadow_routing": 1 if _build_h6_adapter_io_schema_test(with_rows, payload).get("ready_for_h6_3_shadow_adapter_routing") else 0,
+        "h6_adapter_io_schema_input_envelope_count": _build_h6_adapter_io_schema_test(with_rows, payload).get("input_envelope_count", 0),
+        "h6_adapter_io_schema_valid_input_envelope_count": _build_h6_adapter_io_schema_test(with_rows, payload).get("input_envelope_valid_count", 0),
+        "h6_adapter_io_schema_invalid_input_envelope_count": _build_h6_adapter_io_schema_test(with_rows, payload).get("input_envelope_invalid_count", 0),
+        "h6_adapter_io_schema_output_envelope_count": _build_h6_adapter_io_schema_test(with_rows, payload).get("output_envelope_count", 0),
+        "h6_adapter_io_schema_valid_output_envelope_count": _build_h6_adapter_io_schema_test(with_rows, payload).get("output_envelope_valid_count", 0),
+        "h6_adapter_io_schema_invalid_output_envelope_count": _build_h6_adapter_io_schema_test(with_rows, payload).get("output_envelope_invalid_count", 0),
+        "h6_adapter_io_schema_matched_io_pair_count": _build_h6_adapter_io_schema_test(with_rows, payload).get("matched_io_pair_count", 0),
+        "h6_adapter_io_schema_unmatched_input_count": _build_h6_adapter_io_schema_test(with_rows, payload).get("unmatched_input_count", 0),
+        "h6_adapter_io_schema_unmatched_output_count": _build_h6_adapter_io_schema_test(with_rows, payload).get("unmatched_output_count", 0),
+        "h6_adapter_io_schema_qwen_3b_io_pair_count": _build_h6_adapter_io_schema_test(with_rows, payload).get("qwen_3b_io_pair_count", 0),
+        "h6_adapter_io_schema_qwen_7b_io_pair_count": _build_h6_adapter_io_schema_test(with_rows, payload).get("qwen_7b_io_pair_count", 0),
+        "h6_adapter_io_schema_qwen_14b_io_pair_count": _build_h6_adapter_io_schema_test(with_rows, payload).get("qwen_14b_io_pair_count", 0),
+        "h6_adapter_io_schema_model_call_executed_count": _build_h6_adapter_io_schema_test(with_rows, payload).get("model_call_executed_count", 0),
+        "h6_adapter_io_schema_ollama_invoked_count": _build_h6_adapter_io_schema_test(with_rows, payload).get("ollama_invoked_count", 0),
+        "h6_adapter_io_schema_cloud_invoked_count": _build_h6_adapter_io_schema_test(with_rows, payload).get("cloud_invoked_count", 0),
+        "h6_adapter_io_schema_repo_mutated_count": _build_h6_adapter_io_schema_test(with_rows, payload).get("repo_mutated_count", 0),
+        "h6_adapter_io_schema_behavior_changed_count": _build_h6_adapter_io_schema_test(with_rows, payload).get("behavior_changed_count", 0),
+        "h6_adapter_io_schema_runtime_effect_count": _build_h6_adapter_io_schema_test(with_rows, payload).get("runtime_effect_count", 0),
+        "h6_adapter_io_schema_safety_violation_count": _build_h6_adapter_io_schema_test(with_rows, payload).get("safety_violation_count", 0),
     }
     payload["h5_guarded_local_candidate_benchmark_trial"] = _build_h5_guarded_local_candidate_benchmark_trial(with_rows)
     payload["h5_quality_non_regression_gate"] = _build_h5_quality_non_regression_gate(with_rows, payload["h5_guarded_local_candidate_benchmark_trial"])
@@ -14522,6 +14852,7 @@ def write_evidence_bundle(
     payload["h5_guarded_larger_benchmark_batch_run"] = _build_h5_guarded_larger_benchmark_batch_run(with_rows, payload)
     payload["h6_local_model_adapter_preflight_contract"] = _build_h6_local_model_adapter_preflight_contract(with_rows, payload)
     payload["h6_shadow_local_adapter_dry_run"] = _build_h6_shadow_local_adapter_dry_run(with_rows, payload)
+    payload["h6_adapter_io_schema_test"] = _build_h6_adapter_io_schema_test(with_rows, payload)
     payload["external_provider_claim_boundary_contract"] = build_external_provider_claim_boundary_contract(payload)
     payload["public_promotion_readiness_contract"] = build_public_promotion_readiness_contract(payload)
     bundle_path.write_text(json.dumps(payload, indent=2, ensure_ascii=False), encoding="utf-8")
