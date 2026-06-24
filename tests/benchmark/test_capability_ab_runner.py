@@ -30938,3 +30938,459 @@ def test_h6_11_denial_replay_source_preflight_not_ready_block(monkeypatch):
     assert r["replay_status"] == "blocked"
     assert r["source_preflight_ready"] is False
     assert "h6_10_preflight_not_ready" in r["replay_reasons"]
+
+
+# ---------------------------------------------------------------------------
+# H6-12 Controlled Local Provider Fixture Contract
+# ---------------------------------------------------------------------------
+
+def _h6_12_valid_fixture_row():
+    return {"h6_controlled_local_provider_fixture": {
+        "fixture_id": "local-qwen-ollama-fixture-001",
+        "provider_family": "ollama",
+        "model_family": "qwen",
+        "model_size": "7b",
+        "endpoint_kind": "none",
+        "endpoint_value_present": False,
+        "local_endpoint_allowed": False,
+        "network_endpoint_allowed": False,
+        "provider_execution_allowed": False,
+        "network_allowed": False,
+        "process_spawn_allowed": False,
+        "model_load_allowed": False,
+        "model_call_allowed": False,
+    }}
+
+
+def _h6_12_ready_denial_bundle():
+    return {"h6_provider_denial_receipt_replay": {
+        "replay_ready": True,
+        "denial_replay_sealed": True,
+        "total_violation_count": 0,
+    }}
+
+
+def test_h6_12_fixture_contract_flag_missing_block(monkeypatch):
+    """H6-12 T01: Flag missing blocks fixture contract."""
+    from scripts.bench.capability_ab_runner import _build_h6_controlled_local_provider_fixture_contract
+    monkeypatch.delenv("NEXUS_H6_ALLOW_CONTROLLED_LOCAL_PROVIDER_FIXTURE_CONTRACT", raising=False)
+    bundle = _h6_12_ready_denial_bundle()
+    r = _build_h6_controlled_local_provider_fixture_contract([], bundle)
+    assert r["fixture_contract_status"] == "blocked"
+    assert "controlled_local_provider_fixture_contract_flag_not_enabled" in r["fixture_contract_reasons"]
+
+
+def test_h6_12_fixture_contract_valid_3b(monkeypatch):
+    """H6-12 T02: Valid 3b fixture passes."""
+    from scripts.bench.capability_ab_runner import _build_h6_controlled_local_provider_fixture_contract
+    monkeypatch.setenv("NEXUS_H6_ALLOW_CONTROLLED_LOCAL_PROVIDER_FIXTURE_CONTRACT", "1")
+    bundle = _h6_12_ready_denial_bundle()
+    row = {"h6_controlled_local_provider_fixture": {"fixture_id": "fx-3b", "provider_family": "ollama", "model_family": "qwen", "model_size": "3b", "endpoint_kind": "none", "endpoint_value_present": False, "local_endpoint_allowed": False, "network_endpoint_allowed": False, "provider_execution_allowed": False, "network_allowed": False, "process_spawn_allowed": False, "model_load_allowed": False, "model_call_allowed": False}}
+    r = _build_h6_controlled_local_provider_fixture_contract([row], bundle)
+    assert r["fixture_contract_status"] == "fixture_contract_ready"
+    assert r["fixture_valid_count"] == 1
+    assert r["ready_for_h6_13_controlled_provider_probe_denylist"] is False
+
+
+def test_h6_12_fixture_contract_valid_7b(monkeypatch):
+    """H6-12 T03: Valid 7b fixture passes."""
+    from scripts.bench.capability_ab_runner import _build_h6_controlled_local_provider_fixture_contract
+    monkeypatch.setenv("NEXUS_H6_ALLOW_CONTROLLED_LOCAL_PROVIDER_FIXTURE_CONTRACT", "1")
+    bundle = _h6_12_ready_denial_bundle()
+    rows = [_h6_12_valid_fixture_row()]
+    r = _build_h6_controlled_local_provider_fixture_contract(rows, bundle)
+    assert r["fixture_contract_status"] == "fixture_contract_ready"
+    assert r["fixture_valid_count"] == 1
+
+
+def test_h6_12_fixture_contract_valid_14b(monkeypatch):
+    """H6-12 T04: Valid 14b fixture passes."""
+    from scripts.bench.capability_ab_runner import _build_h6_controlled_local_provider_fixture_contract
+    monkeypatch.setenv("NEXUS_H6_ALLOW_CONTROLLED_LOCAL_PROVIDER_FIXTURE_CONTRACT", "1")
+    bundle = _h6_12_ready_denial_bundle()
+    row = {"h6_controlled_local_provider_fixture": {"fixture_id": "fx-14b", "provider_family": "ollama", "model_family": "qwen", "model_size": "14b", "endpoint_kind": "none", "endpoint_value_present": False, "local_endpoint_allowed": False, "network_endpoint_allowed": False, "provider_execution_allowed": False, "network_allowed": False, "process_spawn_allowed": False, "model_load_allowed": False, "model_call_allowed": False}}
+    r = _build_h6_controlled_local_provider_fixture_contract([row], bundle)
+    assert r["fixture_contract_status"] == "fixture_contract_ready"
+    assert r["fixture_valid_count"] == 1
+
+
+def test_h6_12_fixture_contract_missing_h6_11_block(monkeypatch):
+    """H6-12 T05: Missing H6-11 bundle blocks fixture contract."""
+    from scripts.bench.capability_ab_runner import _build_h6_controlled_local_provider_fixture_contract
+    monkeypatch.setenv("NEXUS_H6_ALLOW_CONTROLLED_LOCAL_PROVIDER_FIXTURE_CONTRACT", "1")
+    r = _build_h6_controlled_local_provider_fixture_contract([], None)
+    assert r["fixture_contract_status"] == "blocked"
+    assert "missing_h6_11_denial_receipt_replay" in r["fixture_contract_reasons"]
+
+
+def test_h6_12_fixture_contract_h6_11_not_ready_block(monkeypatch):
+    """H6-12 T06: H6-11 denial_replay_ready=false blocks fixture contract."""
+    from scripts.bench.capability_ab_runner import _build_h6_controlled_local_provider_fixture_contract
+    monkeypatch.setenv("NEXUS_H6_ALLOW_CONTROLLED_LOCAL_PROVIDER_FIXTURE_CONTRACT", "1")
+    bundle = {"h6_provider_denial_receipt_replay": {"replay_ready": False, "denial_replay_sealed": False, "total_violation_count": 0}}
+    r = _build_h6_controlled_local_provider_fixture_contract([], bundle)
+    assert r["fixture_contract_status"] == "blocked"
+    assert "h6_11_denial_replay_not_ready" in r["fixture_contract_reasons"]
+
+
+def test_h6_12_fixture_contract_h6_11_provider_probe_allowed_block(monkeypatch):
+    """H6-12 T07: H6-11 provider_probe_allowed=true blocks fixture contract."""
+    from scripts.bench.capability_ab_runner import _build_h6_controlled_local_provider_fixture_contract
+    monkeypatch.setenv("NEXUS_H6_ALLOW_CONTROLLED_LOCAL_PROVIDER_FIXTURE_CONTRACT", "1")
+    bundle = {"h6_provider_denial_receipt_replay": {"replay_ready": True, "denial_replay_sealed": True, "total_violation_count": 1}}
+    r = _build_h6_controlled_local_provider_fixture_contract([], bundle)
+    assert r["fixture_contract_status"] == "blocked"
+    assert "h6_11_safety_violation_detected" in r["fixture_contract_reasons"]
+
+
+def test_h6_12_fixture_contract_h6_11_provider_invocation_allowed_block(monkeypatch):
+    """H6-12 T08: H6-11 safety_violation>0 blocks fixture contract."""
+    from scripts.bench.capability_ab_runner import _build_h6_controlled_local_provider_fixture_contract
+    monkeypatch.setenv("NEXUS_H6_ALLOW_CONTROLLED_LOCAL_PROVIDER_FIXTURE_CONTRACT", "1")
+    bundle = {"h6_provider_denial_receipt_replay": {"replay_ready": True, "denial_replay_sealed": False, "total_violation_count": 0}}
+    r = _build_h6_controlled_local_provider_fixture_contract([], bundle)
+    assert r["fixture_contract_status"] == "blocked"
+    assert "h6_11_denial_replay_not_sealed" in r["fixture_contract_reasons"]
+
+
+def test_h6_12_fixture_contract_missing_fixture_id(monkeypatch):
+    """H6-12 T09: Missing fixture_id invalidates fixture."""
+    from scripts.bench.capability_ab_runner import _build_h6_controlled_local_provider_fixture_contract
+    monkeypatch.setenv("NEXUS_H6_ALLOW_CONTROLLED_LOCAL_PROVIDER_FIXTURE_CONTRACT", "1")
+    bundle = _h6_12_ready_denial_bundle()
+    row = {"h6_controlled_local_provider_fixture": {"fixture_id": "", "provider_family": "ollama", "model_family": "qwen", "model_size": "7b", "endpoint_kind": "none", "endpoint_value_present": False, "local_endpoint_allowed": False, "network_endpoint_allowed": False, "provider_execution_allowed": False, "network_allowed": False, "process_spawn_allowed": False, "model_load_allowed": False, "model_call_allowed": False}}
+    r = _build_h6_controlled_local_provider_fixture_contract([row], bundle)
+    assert r["missing_fixture_id_count"] == 1
+    assert "missing_fixture_id" in r["fixture_contract_reasons"]
+
+
+def test_h6_12_fixture_contract_invalid_provider_family(monkeypatch):
+    """H6-12 T10: Invalid provider_family invalidates fixture."""
+    from scripts.bench.capability_ab_runner import _build_h6_controlled_local_provider_fixture_contract
+    monkeypatch.setenv("NEXUS_H6_ALLOW_CONTROLLED_LOCAL_PROVIDER_FIXTURE_CONTRACT", "1")
+    bundle = _h6_12_ready_denial_bundle()
+    row = {"h6_controlled_local_provider_fixture": {"fixture_id": "fx1", "provider_family": "invalid", "model_family": "qwen", "model_size": "7b", "endpoint_kind": "none", "endpoint_value_present": False, "local_endpoint_allowed": False, "network_endpoint_allowed": False, "provider_execution_allowed": False, "network_allowed": False, "process_spawn_allowed": False, "model_load_allowed": False, "model_call_allowed": False}}
+    r = _build_h6_controlled_local_provider_fixture_contract([row], bundle)
+    assert r["invalid_provider_family_count"] == 1
+    assert "invalid_provider_family" in r["fixture_contract_reasons"]
+
+
+def test_h6_12_fixture_contract_invalid_model_family(monkeypatch):
+    """H6-12 T11: Invalid model_family invalidates fixture."""
+    from scripts.bench.capability_ab_runner import _build_h6_controlled_local_provider_fixture_contract
+    monkeypatch.setenv("NEXUS_H6_ALLOW_CONTROLLED_LOCAL_PROVIDER_FIXTURE_CONTRACT", "1")
+    bundle = _h6_12_ready_denial_bundle()
+    row = {"h6_controlled_local_provider_fixture": {"fixture_id": "fx1", "provider_family": "ollama", "model_family": "llama", "model_size": "7b", "endpoint_kind": "none", "endpoint_value_present": False, "local_endpoint_allowed": False, "network_endpoint_allowed": False, "provider_execution_allowed": False, "network_allowed": False, "process_spawn_allowed": False, "model_load_allowed": False, "model_call_allowed": False}}
+    r = _build_h6_controlled_local_provider_fixture_contract([row], bundle)
+    assert r["invalid_model_family_count"] == 1
+    assert "invalid_model_family" in r["fixture_contract_reasons"]
+
+
+def test_h6_12_fixture_contract_invalid_model_size(monkeypatch):
+    """H6-12 T12: Invalid model_size invalidates fixture."""
+    from scripts.bench.capability_ab_runner import _build_h6_controlled_local_provider_fixture_contract
+    monkeypatch.setenv("NEXUS_H6_ALLOW_CONTROLLED_LOCAL_PROVIDER_FIXTURE_CONTRACT", "1")
+    bundle = _h6_12_ready_denial_bundle()
+    row = {"h6_controlled_local_provider_fixture": {"fixture_id": "fx1", "provider_family": "ollama", "model_family": "qwen", "model_size": "100b", "endpoint_kind": "none", "endpoint_value_present": False, "local_endpoint_allowed": False, "network_endpoint_allowed": False, "provider_execution_allowed": False, "network_allowed": False, "process_spawn_allowed": False, "model_load_allowed": False, "model_call_allowed": False}}
+    r = _build_h6_controlled_local_provider_fixture_contract([row], bundle)
+    assert r["invalid_model_size_count"] == 1
+    assert "invalid_model_size" in r["fixture_contract_reasons"]
+
+
+def test_h6_12_fixture_contract_invalid_endpoint_kind(monkeypatch):
+    """H6-12 T13: Invalid endpoint_kind invalidates fixture."""
+    from scripts.bench.capability_ab_runner import _build_h6_controlled_local_provider_fixture_contract
+    monkeypatch.setenv("NEXUS_H6_ALLOW_CONTROLLED_LOCAL_PROVIDER_FIXTURE_CONTRACT", "1")
+    bundle = _h6_12_ready_denial_bundle()
+    row = {"h6_controlled_local_provider_fixture": {"fixture_id": "fx1", "provider_family": "ollama", "model_family": "qwen", "model_size": "7b", "endpoint_kind": "tcp_port", "endpoint_value_present": False, "local_endpoint_allowed": False, "network_endpoint_allowed": False, "provider_execution_allowed": False, "network_allowed": False, "process_spawn_allowed": False, "model_load_allowed": False, "model_call_allowed": False}}
+    r = _build_h6_controlled_local_provider_fixture_contract([row], bundle)
+    assert r["invalid_endpoint_kind_count"] == 1
+    assert "invalid_endpoint_kind" in r["fixture_contract_reasons"]
+
+
+def test_h6_12_fixture_contract_endpoint_value_present_block(monkeypatch):
+    """H6-12 T14: endpoint_value_present=true invalidates fixture."""
+    from scripts.bench.capability_ab_runner import _build_h6_controlled_local_provider_fixture_contract
+    monkeypatch.setenv("NEXUS_H6_ALLOW_CONTROLLED_LOCAL_PROVIDER_FIXTURE_CONTRACT", "1")
+    bundle = _h6_12_ready_denial_bundle()
+    row = {"h6_controlled_local_provider_fixture": {"fixture_id": "fx1", "provider_family": "ollama", "model_family": "qwen", "model_size": "7b", "endpoint_kind": "none", "endpoint_value_present": True, "local_endpoint_allowed": False, "network_endpoint_allowed": False, "provider_execution_allowed": False, "network_allowed": False, "process_spawn_allowed": False, "model_load_allowed": False, "model_call_allowed": False}}
+    r = _build_h6_controlled_local_provider_fixture_contract([row], bundle)
+    assert r["endpoint_value_present_violation_count"] == 1
+    assert "endpoint_value_present_violation" in r["fixture_contract_reasons"]
+
+
+def test_h6_12_fixture_contract_local_endpoint_allowed_block(monkeypatch):
+    """H6-12 T15: local_endpoint_allowed=true invalidates fixture."""
+    from scripts.bench.capability_ab_runner import _build_h6_controlled_local_provider_fixture_contract
+    monkeypatch.setenv("NEXUS_H6_ALLOW_CONTROLLED_LOCAL_PROVIDER_FIXTURE_CONTRACT", "1")
+    bundle = _h6_12_ready_denial_bundle()
+    row = {"h6_controlled_local_provider_fixture": {"fixture_id": "fx1", "provider_family": "ollama", "model_family": "qwen", "model_size": "7b", "endpoint_kind": "none", "endpoint_value_present": False, "local_endpoint_allowed": True, "network_endpoint_allowed": False, "provider_execution_allowed": False, "network_allowed": False, "process_spawn_allowed": False, "model_load_allowed": False, "model_call_allowed": False}}
+    r = _build_h6_controlled_local_provider_fixture_contract([row], bundle)
+    assert r["local_endpoint_allowed_violation_count"] == 1
+    assert "local_endpoint_allowed_violation" in r["fixture_contract_reasons"]
+
+
+def test_h6_12_fixture_contract_network_endpoint_allowed_block(monkeypatch):
+    """H6-12 T16: network_endpoint_allowed=true invalidates fixture."""
+    from scripts.bench.capability_ab_runner import _build_h6_controlled_local_provider_fixture_contract
+    monkeypatch.setenv("NEXUS_H6_ALLOW_CONTROLLED_LOCAL_PROVIDER_FIXTURE_CONTRACT", "1")
+    bundle = _h6_12_ready_denial_bundle()
+    row = {"h6_controlled_local_provider_fixture": {"fixture_id": "fx1", "provider_family": "ollama", "model_family": "qwen", "model_size": "7b", "endpoint_kind": "none", "endpoint_value_present": False, "local_endpoint_allowed": False, "network_endpoint_allowed": True, "provider_execution_allowed": False, "network_allowed": False, "process_spawn_allowed": False, "model_load_allowed": False, "model_call_allowed": False}}
+    r = _build_h6_controlled_local_provider_fixture_contract([row], bundle)
+    assert r["network_endpoint_allowed_violation_count"] == 1
+    assert "network_endpoint_allowed_violation" in r["fixture_contract_reasons"]
+
+
+def test_h6_12_fixture_contract_provider_execution_allowed_block(monkeypatch):
+    """H6-12 T17: provider_execution_allowed=true invalidates fixture."""
+    from scripts.bench.capability_ab_runner import _build_h6_controlled_local_provider_fixture_contract
+    monkeypatch.setenv("NEXUS_H6_ALLOW_CONTROLLED_LOCAL_PROVIDER_FIXTURE_CONTRACT", "1")
+    bundle = _h6_12_ready_denial_bundle()
+    row = {"h6_controlled_local_provider_fixture": {"fixture_id": "fx1", "provider_family": "ollama", "model_family": "qwen", "model_size": "7b", "endpoint_kind": "none", "endpoint_value_present": False, "local_endpoint_allowed": False, "network_endpoint_allowed": False, "provider_execution_allowed": True, "network_allowed": False, "process_spawn_allowed": False, "model_load_allowed": False, "model_call_allowed": False}}
+    r = _build_h6_controlled_local_provider_fixture_contract([row], bundle)
+    assert r["provider_execution_allowed_violation_count"] == 1
+    assert "provider_execution_allowed_violation" in r["fixture_contract_reasons"]
+
+
+def test_h6_12_fixture_contract_network_allowed_block(monkeypatch):
+    """H6-12 T18: network_allowed=true invalidates fixture."""
+    from scripts.bench.capability_ab_runner import _build_h6_controlled_local_provider_fixture_contract
+    monkeypatch.setenv("NEXUS_H6_ALLOW_CONTROLLED_LOCAL_PROVIDER_FIXTURE_CONTRACT", "1")
+    bundle = _h6_12_ready_denial_bundle()
+    row = {"h6_controlled_local_provider_fixture": {"fixture_id": "fx1", "provider_family": "ollama", "model_family": "qwen", "model_size": "7b", "endpoint_kind": "none", "endpoint_value_present": False, "local_endpoint_allowed": False, "network_endpoint_allowed": False, "provider_execution_allowed": False, "network_allowed": True, "process_spawn_allowed": False, "model_load_allowed": False, "model_call_allowed": False}}
+    r = _build_h6_controlled_local_provider_fixture_contract([row], bundle)
+    assert r["network_blocked_count"] == 1
+    assert "network_not_allowed" in r["fixture_contract_reasons"]
+
+
+def test_h6_12_fixture_contract_process_spawn_allowed_block(monkeypatch):
+    """H6-12 T19: process_spawn_allowed=true invalidates fixture."""
+    from scripts.bench.capability_ab_runner import _build_h6_controlled_local_provider_fixture_contract
+    monkeypatch.setenv("NEXUS_H6_ALLOW_CONTROLLED_LOCAL_PROVIDER_FIXTURE_CONTRACT", "1")
+    bundle = _h6_12_ready_denial_bundle()
+    row = {"h6_controlled_local_provider_fixture": {"fixture_id": "fx1", "provider_family": "ollama", "model_family": "qwen", "model_size": "7b", "endpoint_kind": "none", "endpoint_value_present": False, "local_endpoint_allowed": False, "network_endpoint_allowed": False, "provider_execution_allowed": False, "network_allowed": False, "process_spawn_allowed": True, "model_load_allowed": False, "model_call_allowed": False}}
+    r = _build_h6_controlled_local_provider_fixture_contract([row], bundle)
+    assert r["process_spawn_blocked_count"] == 1
+    assert "process_spawn_not_allowed" in r["fixture_contract_reasons"]
+
+
+def test_h6_12_fixture_contract_model_load_allowed_block(monkeypatch):
+    """H6-12 T20: model_load_allowed=true invalidates fixture."""
+    from scripts.bench.capability_ab_runner import _build_h6_controlled_local_provider_fixture_contract
+    monkeypatch.setenv("NEXUS_H6_ALLOW_CONTROLLED_LOCAL_PROVIDER_FIXTURE_CONTRACT", "1")
+    bundle = _h6_12_ready_denial_bundle()
+    row = {"h6_controlled_local_provider_fixture": {"fixture_id": "fx1", "provider_family": "ollama", "model_family": "qwen", "model_size": "7b", "endpoint_kind": "none", "endpoint_value_present": False, "local_endpoint_allowed": False, "network_endpoint_allowed": False, "provider_execution_allowed": False, "network_allowed": False, "process_spawn_allowed": False, "model_load_allowed": True, "model_call_allowed": False}}
+    r = _build_h6_controlled_local_provider_fixture_contract([row], bundle)
+    assert r["model_load_blocked_count"] == 1
+    assert "model_load_not_allowed" in r["fixture_contract_reasons"]
+
+
+def test_h6_12_fixture_contract_model_call_allowed_block(monkeypatch):
+    """H6-12 T21: model_call_allowed=true invalidates fixture."""
+    from scripts.bench.capability_ab_runner import _build_h6_controlled_local_provider_fixture_contract
+    monkeypatch.setenv("NEXUS_H6_ALLOW_CONTROLLED_LOCAL_PROVIDER_FIXTURE_CONTRACT", "1")
+    bundle = _h6_12_ready_denial_bundle()
+    row = {"h6_controlled_local_provider_fixture": {"fixture_id": "fx1", "provider_family": "ollama", "model_family": "qwen", "model_size": "7b", "endpoint_kind": "none", "endpoint_value_present": False, "local_endpoint_allowed": False, "network_endpoint_allowed": False, "provider_execution_allowed": False, "network_allowed": False, "process_spawn_allowed": False, "model_load_allowed": False, "model_call_allowed": True}}
+    r = _build_h6_controlled_local_provider_fixture_contract([row], bundle)
+    assert r["model_call_blocked_count"] == 1
+    assert "model_call_not_allowed" in r["fixture_contract_reasons"]
+
+
+def test_h6_12_fixture_contract_model_call_executed_block(monkeypatch):
+    """H6-12 T22: model_call_executed=true invalidates fixture."""
+    from scripts.bench.capability_ab_runner import _build_h6_controlled_local_provider_fixture_contract
+    monkeypatch.setenv("NEXUS_H6_ALLOW_CONTROLLED_LOCAL_PROVIDER_FIXTURE_CONTRACT", "1")
+    bundle = _h6_12_ready_denial_bundle()
+    row = {"h6_controlled_local_provider_fixture": {"fixture_id": "fx1", "provider_family": "ollama", "model_family": "qwen", "model_size": "7b", "endpoint_kind": "none", "endpoint_value_present": False, "local_endpoint_allowed": False, "network_endpoint_allowed": False, "provider_execution_allowed": False, "network_allowed": False, "process_spawn_allowed": False, "model_load_allowed": False, "model_call_allowed": False, "model_call_executed": True}}
+    r = _build_h6_controlled_local_provider_fixture_contract([row], bundle)
+    assert r["model_call_executed_count"] == 1
+    assert "model_call_executed_detected" in r["fixture_contract_reasons"]
+
+
+def test_h6_12_fixture_contract_ollama_invoked_block(monkeypatch):
+    """H6-12 T23: ollama_invoked=true invalidates fixture."""
+    from scripts.bench.capability_ab_runner import _build_h6_controlled_local_provider_fixture_contract
+    monkeypatch.setenv("NEXUS_H6_ALLOW_CONTROLLED_LOCAL_PROVIDER_FIXTURE_CONTRACT", "1")
+    bundle = _h6_12_ready_denial_bundle()
+    row = {"h6_controlled_local_provider_fixture": {"fixture_id": "fx1", "provider_family": "ollama", "model_family": "qwen", "model_size": "7b", "endpoint_kind": "none", "endpoint_value_present": False, "local_endpoint_allowed": False, "network_endpoint_allowed": False, "provider_execution_allowed": False, "network_allowed": False, "process_spawn_allowed": False, "model_load_allowed": False, "model_call_allowed": False, "ollama_invoked": True}}
+    r = _build_h6_controlled_local_provider_fixture_contract([row], bundle)
+    assert r["ollama_invoked_count"] == 1
+    assert "ollama_invoked_detected" in r["fixture_contract_reasons"]
+
+
+def test_h6_12_fixture_contract_cloud_provider_invoked_block(monkeypatch):
+    """H6-12 T24: cloud_provider_invoked=true invalidates fixture."""
+    from scripts.bench.capability_ab_runner import _build_h6_controlled_local_provider_fixture_contract
+    monkeypatch.setenv("NEXUS_H6_ALLOW_CONTROLLED_LOCAL_PROVIDER_FIXTURE_CONTRACT", "1")
+    bundle = _h6_12_ready_denial_bundle()
+    row = {"h6_controlled_local_provider_fixture": {"fixture_id": "fx1", "provider_family": "ollama", "model_family": "qwen", "model_size": "7b", "endpoint_kind": "none", "endpoint_value_present": False, "local_endpoint_allowed": False, "network_endpoint_allowed": False, "provider_execution_allowed": False, "network_allowed": False, "process_spawn_allowed": False, "model_load_allowed": False, "model_call_allowed": False, "cloud_provider_invoked": True}}
+    r = _build_h6_controlled_local_provider_fixture_contract([row], bundle)
+    assert r["cloud_provider_invoked_count"] == 1
+    assert "cloud_provider_invoked_detected" in r["fixture_contract_reasons"]
+
+
+def test_h6_12_fixture_contract_production_ready_false(monkeypatch):
+    """H6-12 T25: production_ready is always false."""
+    from scripts.bench.capability_ab_runner import _build_h6_controlled_local_provider_fixture_contract
+    monkeypatch.setenv("NEXUS_H6_ALLOW_CONTROLLED_LOCAL_PROVIDER_FIXTURE_CONTRACT", "1")
+    bundle = _h6_12_ready_denial_bundle()
+    rows = [_h6_12_valid_fixture_row()]
+    r = _build_h6_controlled_local_provider_fixture_contract(rows, bundle)
+    assert r["production_ready"] is False
+    assert r["public_claim_allowed"] is False
+    assert "h6_12_controlled_local_provider_fixture_contract_not_production" in r["fixture_contract_reasons"]
+
+
+def test_h6_12_fixture_contract_public_claim_allowed_false(monkeypatch):
+    """H6-12 T26: public_claim_allowed is always false."""
+    from scripts.bench.capability_ab_runner import _build_h6_controlled_local_provider_fixture_contract
+    monkeypatch.setenv("NEXUS_H6_ALLOW_CONTROLLED_LOCAL_PROVIDER_FIXTURE_CONTRACT", "1")
+    bundle = _h6_12_ready_denial_bundle()
+    rows = [_h6_12_valid_fixture_row()]
+    r = _build_h6_controlled_local_provider_fixture_contract(rows, bundle)
+    assert r["public_claim_allowed"] is False
+
+
+def test_h6_12_fixture_contract_ready_for_h6_13_false(monkeypatch):
+    """H6-12 T27: ready_for_h6_13 is always false."""
+    from scripts.bench.capability_ab_runner import _build_h6_controlled_local_provider_fixture_contract
+    monkeypatch.setenv("NEXUS_H6_ALLOW_CONTROLLED_LOCAL_PROVIDER_FIXTURE_CONTRACT", "1")
+    bundle = _h6_12_ready_denial_bundle()
+    rows = [_h6_12_valid_fixture_row()]
+    r = _build_h6_controlled_local_provider_fixture_contract(rows, bundle)
+    assert r["ready_for_h6_13_controlled_provider_probe_denylist"] is False
+
+
+def test_h6_12_fixture_contract_bundle_summary_counters(monkeypatch):
+    """H6-12 T28: Bundle summary counters for violations."""
+    from scripts.bench.capability_ab_runner import _build_h6_controlled_local_provider_fixture_contract
+    monkeypatch.setenv("NEXUS_H6_ALLOW_CONTROLLED_LOCAL_PROVIDER_FIXTURE_CONTRACT", "1")
+    bundle = _h6_12_ready_denial_bundle()
+    row = {"h6_controlled_local_provider_fixture": {"fixture_id": "fx1", "provider_family": "ollama", "model_family": "qwen", "model_size": "7b", "endpoint_kind": "none", "endpoint_value_present": True, "local_endpoint_allowed": True, "network_endpoint_allowed": True, "provider_execution_allowed": True, "network_allowed": True, "process_spawn_allowed": False, "model_load_allowed": False, "model_call_allowed": False, "model_call_executed": True}}
+    r = _build_h6_controlled_local_provider_fixture_contract([row], bundle)
+    assert r["endpoint_value_present_violation_count"] == 1
+    assert r["local_endpoint_allowed_violation_count"] == 1
+    assert r["network_endpoint_allowed_violation_count"] == 1
+    assert r["provider_execution_allowed_violation_count"] == 1
+    assert r["network_blocked_count"] == 1
+    assert r["model_call_executed_count"] == 1
+    assert r["fixture_invalid_count"] == 1
+
+
+def test_h6_12_fixture_contract_report_status(monkeypatch):
+    """H6-12 T29: Report status and schema fields."""
+    from scripts.bench.capability_ab_runner import _build_h6_controlled_local_provider_fixture_contract
+    monkeypatch.setenv("NEXUS_H6_ALLOW_CONTROLLED_LOCAL_PROVIDER_FIXTURE_CONTRACT", "1")
+    bundle = _h6_12_ready_denial_bundle()
+    rows = [_h6_12_valid_fixture_row()]
+    r = _build_h6_controlled_local_provider_fixture_contract(rows, bundle)
+    assert r["schema"] == "nexus.hybrid_h6_controlled_local_provider_fixture_contract.v1"
+    assert r["evaluated"] is True
+    assert r["source_h6_11_schema"] == "nexus.hybrid_h6_provider_denial_receipt_replay.v1"
+    assert r["source_h6_11_denial_replay_ready"] is True
+    assert r["fixture_contract_status"] == "fixture_contract_ready"
+    assert r["fixture_contract_allowed"] is True
+    assert r["fixture_contract_ready"] is True
+    assert r["fixture_contract_valid"] is True
+    assert r["deny_by_default"] is True
+    assert r["fixture_only"] is True
+
+
+def test_h6_12_fixture_contract_all_safety_false(monkeypatch):
+    """H6-12 T30: All safety fields remain false."""
+    from scripts.bench.capability_ab_runner import _build_h6_controlled_local_provider_fixture_contract
+    monkeypatch.setenv("NEXUS_H6_ALLOW_CONTROLLED_LOCAL_PROVIDER_FIXTURE_CONTRACT", "1")
+    bundle = _h6_12_ready_denial_bundle()
+    rows = [_h6_12_valid_fixture_row()]
+    r = _build_h6_controlled_local_provider_fixture_contract(rows, bundle)
+    assert r["endpoint_value_present"] is False
+    assert r["local_endpoint_allowed"] is False
+    assert r["network_endpoint_allowed"] is False
+    assert r["provider_probe_allowed"] is False
+    assert r["provider_invocation_allowed"] is False
+    assert r["provider_execution_allowed"] is False
+    assert r["network_allowed"] is False
+    assert r["process_spawn_allowed"] is False
+    assert r["model_load_allowed"] is False
+    assert r["model_call_allowed"] is False
+    assert r["model_call_executed"] is False
+    assert r["ollama_invoked"] is False
+    assert r["cloud_provider_invoked"] is False
+    assert r["repo_mutated"] is False
+    assert r["behavior_changed"] is False
+    assert r["runtime_effect"] is False
+    assert r["production_ready"] is False
+    assert r["public_claim_allowed"] is False
+
+
+def test_h6_12_fixture_contract_valid_unix_socket(monkeypatch):
+    """H6-12 T31: Valid unix_socket_placeholder endpoint passes."""
+    from scripts.bench.capability_ab_runner import _build_h6_controlled_local_provider_fixture_contract
+    monkeypatch.setenv("NEXUS_H6_ALLOW_CONTROLLED_LOCAL_PROVIDER_FIXTURE_CONTRACT", "1")
+    bundle = _h6_12_ready_denial_bundle()
+    row = {"h6_controlled_local_provider_fixture": {"fixture_id": "fx-unix", "provider_family": "ollama", "model_family": "qwen", "model_size": "7b", "endpoint_kind": "unix_socket_placeholder", "endpoint_value_present": False, "local_endpoint_allowed": False, "network_endpoint_allowed": False, "provider_execution_allowed": False, "network_allowed": False, "process_spawn_allowed": False, "model_load_allowed": False, "model_call_allowed": False}}
+    r = _build_h6_controlled_local_provider_fixture_contract([row], bundle)
+    assert r["fixture_contract_status"] == "fixture_contract_ready"
+    assert r["fixture_valid_count"] == 1
+
+
+def test_h6_12_fixture_contract_valid_localhost_placeholder(monkeypatch):
+    """H6-12 T32: Valid localhost_placeholder endpoint passes."""
+    from scripts.bench.capability_ab_runner import _build_h6_controlled_local_provider_fixture_contract
+    monkeypatch.setenv("NEXUS_H6_ALLOW_CONTROLLED_LOCAL_PROVIDER_FIXTURE_CONTRACT", "1")
+    bundle = _h6_12_ready_denial_bundle()
+    row = {"h6_controlled_local_provider_fixture": {"fixture_id": "fx-local", "provider_family": "ollama", "model_family": "qwen", "model_size": "7b", "endpoint_kind": "localhost_placeholder", "endpoint_value_present": False, "local_endpoint_allowed": False, "network_endpoint_allowed": False, "provider_execution_allowed": False, "network_allowed": False, "process_spawn_allowed": False, "model_load_allowed": False, "model_call_allowed": False}}
+    r = _build_h6_controlled_local_provider_fixture_contract([row], bundle)
+    assert r["fixture_contract_status"] == "fixture_contract_ready"
+    assert r["fixture_valid_count"] == 1
+
+
+def test_h6_12_fixture_contract_multiple_valid_fixtures(monkeypatch):
+    """H6-12 T33: Multiple valid fixtures counted correctly."""
+    from scripts.bench.capability_ab_runner import _build_h6_controlled_local_provider_fixture_contract
+    monkeypatch.setenv("NEXUS_H6_ALLOW_CONTROLLED_LOCAL_PROVIDER_FIXTURE_CONTRACT", "1")
+    bundle = _h6_12_ready_denial_bundle()
+    rows = [
+        {"h6_controlled_local_provider_fixture": {"fixture_id": "fx-3b", "provider_family": "ollama", "model_family": "qwen", "model_size": "3b", "endpoint_kind": "none", "endpoint_value_present": False, "local_endpoint_allowed": False, "network_endpoint_allowed": False, "provider_execution_allowed": False, "network_allowed": False, "process_spawn_allowed": False, "model_load_allowed": False, "model_call_allowed": False}},
+        {"h6_controlled_local_provider_fixture": {"fixture_id": "fx-7b", "provider_family": "ollama", "model_family": "qwen", "model_size": "7b", "endpoint_kind": "none", "endpoint_value_present": False, "local_endpoint_allowed": False, "network_endpoint_allowed": False, "provider_execution_allowed": False, "network_allowed": False, "process_spawn_allowed": False, "model_load_allowed": False, "model_call_allowed": False}},
+        {"h6_controlled_local_provider_fixture": {"fixture_id": "fx-14b", "provider_family": "ollama", "model_family": "qwen", "model_size": "14b", "endpoint_kind": "none", "endpoint_value_present": False, "local_endpoint_allowed": False, "network_endpoint_allowed": False, "provider_execution_allowed": False, "network_allowed": False, "process_spawn_allowed": False, "model_load_allowed": False, "model_call_allowed": False}},
+    ]
+    r = _build_h6_controlled_local_provider_fixture_contract(rows, bundle)
+    assert r["fixture_count"] == 3
+    assert r["fixture_valid_count"] == 3
+    assert r["fixture_invalid_count"] == 0
+
+
+def test_h6_12_fixture_contract_mix_valid_invalid(monkeypatch):
+    """H6-12 T34: Mix of valid and invalid fixtures."""
+    from scripts.bench.capability_ab_runner import _build_h6_controlled_local_provider_fixture_contract
+    monkeypatch.setenv("NEXUS_H6_ALLOW_CONTROLLED_LOCAL_PROVIDER_FIXTURE_CONTRACT", "1")
+    bundle = _h6_12_ready_denial_bundle()
+    rows = [
+        _h6_12_valid_fixture_row(),
+        {"h6_controlled_local_provider_fixture": {"fixture_id": "", "provider_family": "ollama", "model_family": "qwen", "model_size": "7b", "endpoint_kind": "none", "endpoint_value_present": False, "local_endpoint_allowed": False, "network_endpoint_allowed": False, "provider_execution_allowed": False, "network_allowed": False, "process_spawn_allowed": False, "model_load_allowed": False, "model_call_allowed": False}},
+    ]
+    r = _build_h6_controlled_local_provider_fixture_contract(rows, bundle)
+    assert r["fixture_count"] == 2
+    assert r["fixture_valid_count"] == 1
+    assert r["fixture_invalid_count"] == 1
+    assert r["missing_fixture_id_count"] == 1
+
+
+def test_h6_12_fixture_contract_not_ready_for_h6_13_on_invalid(monkeypatch):
+    """H6-12 T35: Invalid fixture blocks h6_13."""
+    from scripts.bench.capability_ab_runner import _build_h6_controlled_local_provider_fixture_contract
+    monkeypatch.setenv("NEXUS_H6_ALLOW_CONTROLLED_LOCAL_PROVIDER_FIXTURE_CONTRACT", "1")
+    bundle = _h6_12_ready_denial_bundle()
+    row = {"h6_controlled_local_provider_fixture": {"fixture_id": "", "provider_family": "invalid", "model_family": "qwen", "model_size": "7b", "endpoint_kind": "none", "endpoint_value_present": False, "local_endpoint_allowed": False, "network_endpoint_allowed": False, "provider_execution_allowed": False, "network_allowed": False, "process_spawn_allowed": False, "model_load_allowed": False, "model_call_allowed": False}}
+    r = _build_h6_controlled_local_provider_fixture_contract([row], bundle)
+    assert r["ready_for_h6_13_controlled_provider_probe_denylist"] is False
+    assert r["fixture_contract_valid"] is False
+
+
+def test_h6_12_fixture_contract_collect_only():
+    """H6-12 T36: collect-only includes all H6-12 tests."""
+    import subprocess, re
+    result = subprocess.run(["python3", "-m", "pytest", "tests/benchmark/test_capability_ab_runner.py", "-k", "h6_12", "--collect-only", "-q"], capture_output=True, text=True, cwd="/Users/jameschen/Workspace/nexus")
+    count = len(re.findall(r"test_h6_12_", result.stdout))
+    assert count >= 36, f"Expected >= 36 H6-12 tests, got {count}"

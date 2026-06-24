@@ -12623,6 +12623,277 @@ def _build_h6_provider_denial_receipt_replay(rows: list[dict[str, Any]], bundle:
     }
 
 
+def _build_h6_controlled_local_provider_fixture_contract(rows: list[dict[str, Any]], bundle: dict[str, Any] | None = None) -> dict[str, Any]:
+    """Pure helper: H6 controlled local provider fixture contract.
+
+    Defines the static contract for a local provider fixture. All invocation
+    fields remain deny-by-default. This is a schema-only receipt — no provider
+    is loaded, no model is called, no network is opened.
+    """
+    import os as _os
+
+    flag = _os.environ.get("NEXUS_H6_ALLOW_CONTROLLED_LOCAL_PROVIDER_FIXTURE_CONTRACT", "").strip() == "1"
+
+    denial = None
+    if bundle:
+        denial = bundle.get("h6_provider_denial_receipt_replay")
+
+    denial_present = bool(denial)
+    denial_ready = bool(denial.get("replay_ready", False)) if denial else False
+    denial_sealed = bool(denial.get("denial_replay_sealed", False)) if denial else False
+    denial_safety = int(denial.get("total_violation_count", 0)) if denial else 0
+
+    ALLOWED_PROVIDER_FAMILIES = {"ollama"}
+    ALLOWED_MODEL_FAMILIES = {"qwen"}
+    ALLOWED_MODEL_SIZES = {"3b", "7b", "14b"}
+    ALLOWED_ENDPOINT_KINDS = {"none", "unix_socket_placeholder", "localhost_placeholder"}
+
+    fixtures = [r.get("h6_controlled_local_provider_fixture") for r in rows if r.get("h6_controlled_local_provider_fixture")]
+
+    valid_fixtures = []
+    invalid_fixtures = 0
+    missing_fixture_id = 0
+    invalid_provider_family = 0
+    invalid_model_family = 0
+    invalid_model_size = 0
+    invalid_endpoint_kind = 0
+    endpoint_value_present_violation = 0
+    local_endpoint_allowed_violation = 0
+    network_endpoint_allowed_violation = 0
+    provider_execution_allowed_violation = 0
+    network_blocked = 0
+    process_spawn_blocked = 0
+    model_load_blocked = 0
+    model_call_blocked = 0
+
+    mc_count = 0
+    ol_count = 0
+    cl_count = 0
+    rm_count = 0
+    bh_count = 0
+    re_count = 0
+
+    for fx in fixtures:
+        fid = str(fx.get("fixture_id", "") or "").strip()
+        pfam = str(fx.get("provider_family", "") or "").lower()
+        mfam = str(fx.get("model_family", "") or "").lower()
+        sz = str(fx.get("model_size", "") or "").lower()
+        ek = str(fx.get("endpoint_kind", "") or "").lower()
+        evp = bool(fx.get("endpoint_value_present", True))
+        lea = bool(fx.get("local_endpoint_allowed", True))
+        nea = bool(fx.get("network_endpoint_allowed", True))
+        pea = bool(fx.get("provider_execution_allowed", True))
+        na = bool(fx.get("network_allowed", True))
+        ps = bool(fx.get("process_spawn_allowed", True))
+        mla = bool(fx.get("model_load_allowed", True))
+        mca = bool(fx.get("model_call_allowed", True))
+        mc = bool(fx.get("model_call_executed", False))
+        ol = bool(fx.get("ollama_invoked", False))
+        cl = bool(fx.get("cloud_provider_invoked", False))
+        rm = bool(fx.get("repo_mutated", False))
+        bh = bool(fx.get("behavior_changed", False))
+        re = bool(fx.get("runtime_effect", False))
+
+        if mc:
+            mc_count += 1
+        if ol:
+            ol_count += 1
+        if cl:
+            cl_count += 1
+        if rm:
+            rm_count += 1
+        if bh:
+            bh_count += 1
+        if re:
+            re_count += 1
+
+        is_valid = (
+            fid and pfam in ALLOWED_PROVIDER_FAMILIES and mfam in ALLOWED_MODEL_FAMILIES
+            and sz in ALLOWED_MODEL_SIZES and ek in ALLOWED_ENDPOINT_KINDS
+            and not evp and not lea and not nea and not pea
+            and not na and not ps and not mla and not mca
+            and not mc and not ol and not cl and not rm and not bh and not re
+        )
+
+        if is_valid:
+            valid_fixtures.append(fx)
+        else:
+            invalid_fixtures += 1
+            if not fid:
+                missing_fixture_id += 1
+            if pfam not in ALLOWED_PROVIDER_FAMILIES:
+                invalid_provider_family += 1
+            if mfam not in ALLOWED_MODEL_FAMILIES:
+                invalid_model_family += 1
+            if sz not in ALLOWED_MODEL_SIZES:
+                invalid_model_size += 1
+            if ek not in ALLOWED_ENDPOINT_KINDS:
+                invalid_endpoint_kind += 1
+            if evp:
+                endpoint_value_present_violation += 1
+            if lea:
+                local_endpoint_allowed_violation += 1
+            if nea:
+                network_endpoint_allowed_violation += 1
+            if pea:
+                provider_execution_allowed_violation += 1
+            if na:
+                network_blocked += 1
+            if ps:
+                process_spawn_blocked += 1
+            if mla:
+                model_load_blocked += 1
+            if mca:
+                model_call_blocked += 1
+
+    safety = mc_count + ol_count + cl_count + rm_count + bh_count + re_count
+
+    contract_allowed = (
+        flag and denial_present and denial_ready
+        and denial_sealed and denial_safety == 0
+    )
+
+    contract_ready = (
+        contract_allowed and len(valid_fixtures) > 0 and safety == 0
+    )
+
+    contract_valid = (
+        contract_ready and invalid_fixtures == 0
+    )
+
+    reasons = []
+    if not flag:
+        reasons.append("controlled_local_provider_fixture_contract_flag_not_enabled")
+    if not denial_present:
+        reasons.append("missing_h6_11_denial_receipt_replay")
+    if denial and not denial_ready:
+        reasons.append("h6_11_denial_replay_not_ready")
+    if denial and not denial_sealed:
+        reasons.append("h6_11_denial_replay_not_sealed")
+    if denial_safety > 0:
+        reasons.append("h6_11_safety_violation_detected")
+    if not fixtures:
+        reasons.append("no_fixtures")
+    if missing_fixture_id > 0:
+        reasons.append("missing_fixture_id")
+    if invalid_provider_family > 0:
+        reasons.append("invalid_provider_family")
+    if invalid_model_family > 0:
+        reasons.append("invalid_model_family")
+    if invalid_model_size > 0:
+        reasons.append("invalid_model_size")
+    if invalid_endpoint_kind > 0:
+        reasons.append("invalid_endpoint_kind")
+    if endpoint_value_present_violation > 0:
+        reasons.append("endpoint_value_present_violation")
+    if local_endpoint_allowed_violation > 0:
+        reasons.append("local_endpoint_allowed_violation")
+    if network_endpoint_allowed_violation > 0:
+        reasons.append("network_endpoint_allowed_violation")
+    if provider_execution_allowed_violation > 0:
+        reasons.append("provider_execution_allowed_violation")
+    if network_blocked > 0:
+        reasons.append("network_not_allowed")
+    if process_spawn_blocked > 0:
+        reasons.append("process_spawn_not_allowed")
+    if model_load_blocked > 0:
+        reasons.append("model_load_not_allowed")
+    if model_call_blocked > 0:
+        reasons.append("model_call_not_allowed")
+    if mc_count > 0:
+        reasons.append("model_call_executed_detected")
+    if ol_count > 0:
+        reasons.append("ollama_invoked_detected")
+    if cl_count > 0:
+        reasons.append("cloud_provider_invoked_detected")
+    if rm_count > 0:
+        reasons.append("repo_mutated_detected")
+    if bh_count > 0:
+        reasons.append("behavior_changed_detected")
+    if re_count > 0:
+        reasons.append("runtime_effect_detected")
+    reasons.extend([
+        "h6_12_controlled_local_provider_fixture_contract_not_production",
+        "fixture_only",
+        "deny_by_default",
+        "no_provider_probe_allowed",
+        "no_provider_invocation_allowed",
+        "no_provider_execution_allowed",
+        "no_network_allowed",
+        "no_process_spawn_allowed",
+        "no_model_load_allowed",
+        "no_model_call_allowed",
+        "no_model_call_executed",
+        "no_ollama_invocation",
+        "no_cloud_provider_invocation",
+        "no_repo_mutation",
+        "no_behavior_change",
+        "no_runtime_effect",
+        "production_claim_blocked",
+        "public_claim_blocked",
+    ])
+
+    return {
+        "schema": "nexus.hybrid_h6_controlled_local_provider_fixture_contract.v1",
+        "evaluated": True,
+        "source_h6_11_schema": "nexus.hybrid_h6_provider_denial_receipt_replay.v1",
+        "source_h6_11_denial_replay_ready": denial_ready,
+        "fixture_contract_status": "fixture_contract_ready" if contract_ready else ("fixture_contract_fail" if contract_allowed else "blocked"),
+        "fixture_contract_reasons": reasons,
+        "fixture_contract_allowed": contract_allowed,
+        "fixture_contract_ready": contract_ready,
+        "fixture_contract_valid": contract_valid,
+        "row_count": len(rows),
+        "denial_present": denial_present,
+        "denial_ready": denial_ready,
+        "denial_sealed": denial_sealed,
+        "fixture_count": len(fixtures),
+        "fixture_valid_count": len(valid_fixtures),
+        "fixture_invalid_count": invalid_fixtures,
+        "missing_fixture_id_count": missing_fixture_id,
+        "invalid_provider_family_count": invalid_provider_family,
+        "invalid_model_family_count": invalid_model_family,
+        "invalid_model_size_count": invalid_model_size,
+        "invalid_endpoint_kind_count": invalid_endpoint_kind,
+        "endpoint_value_present_violation_count": endpoint_value_present_violation,
+        "local_endpoint_allowed_violation_count": local_endpoint_allowed_violation,
+        "network_endpoint_allowed_violation_count": network_endpoint_allowed_violation,
+        "provider_execution_allowed_violation_count": provider_execution_allowed_violation,
+        "network_blocked_count": network_blocked,
+        "process_spawn_blocked_count": process_spawn_blocked,
+        "model_load_blocked_count": model_load_blocked,
+        "model_call_blocked_count": model_call_blocked,
+        "model_call_executed_count": mc_count,
+        "ollama_invoked_count": ol_count,
+        "cloud_provider_invoked_count": cl_count,
+        "repo_mutated_count": rm_count,
+        "behavior_changed_count": bh_count,
+        "runtime_effect_count": re_count,
+        "safety_violation_count": safety,
+        "endpoint_value_present": False,
+        "local_endpoint_allowed": False,
+        "network_endpoint_allowed": False,
+        "provider_probe_allowed": False,
+        "provider_invocation_allowed": False,
+        "provider_execution_allowed": False,
+        "network_allowed": False,
+        "process_spawn_allowed": False,
+        "model_load_allowed": False,
+        "model_call_allowed": False,
+        "model_call_executed": False,
+        "ollama_invoked": False,
+        "cloud_provider_invoked": False,
+        "repo_mutated": False,
+        "behavior_changed": False,
+        "runtime_effect": False,
+        "deny_by_default": True,
+        "fixture_only": True,
+        "ready_for_h6_13_controlled_provider_probe_denylist": False,
+        "production_ready": False,
+        "public_claim_allowed": False,
+    }
+
+
 def _finalize_with_nexus_row(
     row: dict[str, Any],
     *,
