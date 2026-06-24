@@ -28362,3 +28362,446 @@ def test_h6_6_stub_output_invalid_output_status(monkeypatch):
     r = _build_h6_deterministic_local_adapter_stub_output(rows, bundle)
     assert r["invalid_output_status_count"] == 1
     assert "invalid_output_status" in r["stub_reasons"]
+
+
+def test_h6_7_boundary_preflight_flag_missing_block(monkeypatch):
+    """H6-7 T01: Flag missing blocks boundary preflight."""
+    from scripts.bench.capability_ab_runner import _build_h6_local_provider_boundary_preflight
+    monkeypatch.delenv("NEXUS_H6_ALLOW_LOCAL_PROVIDER_BOUNDARY_PREFLIGHT", raising=False)
+    stub = {"stub_ready": True, "stub_output_receipt_ready": True, "ready_for_h6_7_local_provider_boundary_preflight": True, "safety_violation_count": 0}
+    bundle = {"h6_deterministic_local_adapter_stub_output": stub}
+    r = _build_h6_local_provider_boundary_preflight([], bundle)
+    assert r["boundary_status"] == "blocked"
+    assert "local_provider_boundary_preflight_flag_not_enabled" in r["boundary_reasons"]
+
+
+def test_h6_7_boundary_preflight_missing_stub_block(monkeypatch):
+    """H6-7 T02: Missing H6-6 stub blocks boundary preflight."""
+    from scripts.bench.capability_ab_runner import _build_h6_local_provider_boundary_preflight
+    monkeypatch.setenv("NEXUS_H6_ALLOW_LOCAL_PROVIDER_BOUNDARY_PREFLIGHT", "1")
+    r = _build_h6_local_provider_boundary_preflight([], None)
+    assert r["boundary_status"] == "blocked"
+    assert "missing_h6_6_stub_output" in r["boundary_reasons"]
+
+
+def test_h6_7_boundary_preflight_stub_not_ready_block(monkeypatch):
+    """H6-7 T03: H6-6 stub not ready blocks boundary preflight."""
+    from scripts.bench.capability_ab_runner import _build_h6_local_provider_boundary_preflight
+    monkeypatch.setenv("NEXUS_H6_ALLOW_LOCAL_PROVIDER_BOUNDARY_PREFLIGHT", "1")
+    stub = {"stub_ready": False, "stub_output_receipt_ready": True, "ready_for_h6_7_local_provider_boundary_preflight": True, "safety_violation_count": 0}
+    bundle = {"h6_deterministic_local_adapter_stub_output": stub}
+    r = _build_h6_local_provider_boundary_preflight([], bundle)
+    assert r["boundary_status"] == "blocked"
+    assert "h6_6_stub_not_ready" in r["boundary_reasons"]
+
+
+def test_h6_7_boundary_preflight_no_boundaries_block(monkeypatch):
+    """H6-7 T04: No boundaries blocks."""
+    from scripts.bench.capability_ab_runner import _build_h6_local_provider_boundary_preflight
+    monkeypatch.setenv("NEXUS_H6_ALLOW_LOCAL_PROVIDER_BOUNDARY_PREFLIGHT", "1")
+    stub = {"stub_ready": True, "stub_output_receipt_ready": True, "ready_for_h6_7_local_provider_boundary_preflight": True, "safety_violation_count": 0}
+    bundle = {"h6_deterministic_local_adapter_stub_output": stub}
+    r = _build_h6_local_provider_boundary_preflight([], bundle)
+    assert r["boundary_status"] == "provider_boundary_fail"
+    assert "no_provider_boundaries" in r["boundary_reasons"]
+
+
+def test_h6_7_boundary_preflight_valid_boundary(monkeypatch):
+    """H6-7 T05: Valid boundary passes."""
+    from scripts.bench.capability_ab_runner import _build_h6_local_provider_boundary_preflight
+    monkeypatch.setenv("NEXUS_H6_ALLOW_LOCAL_PROVIDER_BOUNDARY_PREFLIGHT", "1")
+    stub = {"stub_ready": True, "stub_output_receipt_ready": True, "ready_for_h6_7_local_provider_boundary_preflight": True, "safety_violation_count": 0}
+    bundle = {"h6_deterministic_local_adapter_stub_output": stub}
+    rows = [{"h6_local_provider_boundary": {
+        "provider_id": "local-qwen-ollama-boundary-v0",
+        "provider_family": "ollama",
+        "model_family": "qwen",
+        "model_size": "3b",
+        "model_name": "qwen2.5-coder:3b",
+        "provider_mode": "boundary_preflight_only",
+        "network_allowed": False,
+        "process_spawn_allowed": False,
+        "model_call_allowed": False,
+    }}]
+    r = _build_h6_local_provider_boundary_preflight(rows, bundle)
+    assert r["boundary_status"] == "provider_boundary_ready"
+    assert r["provider_boundary_valid_count"] == 1
+    assert r["ready_for_h6_8_local_provider_config_contract"] is True
+
+
+def test_h6_7_boundary_preflight_missing_provider_id(monkeypatch):
+    """H6-7 T06: Missing provider_id invalidates boundary."""
+    from scripts.bench.capability_ab_runner import _build_h6_local_provider_boundary_preflight
+    monkeypatch.setenv("NEXUS_H6_ALLOW_LOCAL_PROVIDER_BOUNDARY_PREFLIGHT", "1")
+    stub = {"stub_ready": True, "stub_output_receipt_ready": True, "ready_for_h6_7_local_provider_boundary_preflight": True, "safety_violation_count": 0}
+    bundle = {"h6_deterministic_local_adapter_stub_output": stub}
+    rows = [{"h6_local_provider_boundary": {
+        "provider_id": "",
+        "provider_family": "ollama",
+        "model_family": "qwen",
+        "model_size": "3b",
+        "model_name": "qwen2.5-coder:3b",
+        "provider_mode": "boundary_preflight_only",
+        "network_allowed": False,
+        "process_spawn_allowed": False,
+        "model_call_allowed": False,
+    }}]
+    r = _build_h6_local_provider_boundary_preflight(rows, bundle)
+    assert r["missing_provider_id_count"] == 1
+    assert "missing_provider_id" in r["boundary_reasons"]
+
+
+def test_h6_7_boundary_preflight_invalid_provider_family(monkeypatch):
+    """H6-7 T07: Invalid provider_family invalidates boundary."""
+    from scripts.bench.capability_ab_runner import _build_h6_local_provider_boundary_preflight
+    monkeypatch.setenv("NEXUS_H6_ALLOW_LOCAL_PROVIDER_BOUNDARY_PREFLIGHT", "1")
+    stub = {"stub_ready": True, "stub_output_receipt_ready": True, "ready_for_h6_7_local_provider_boundary_preflight": True, "safety_violation_count": 0}
+    bundle = {"h6_deterministic_local_adapter_stub_output": stub}
+    rows = [{"h6_local_provider_boundary": {
+        "provider_id": "local-qwen-ollama-boundary-v0",
+        "provider_family": "invalid",
+        "model_family": "qwen",
+        "model_size": "3b",
+        "model_name": "qwen2.5-coder:3b",
+        "provider_mode": "boundary_preflight_only",
+        "network_allowed": False,
+        "process_spawn_allowed": False,
+        "model_call_allowed": False,
+    }}]
+    r = _build_h6_local_provider_boundary_preflight(rows, bundle)
+    assert r["invalid_provider_family_count"] == 1
+    assert "invalid_provider_family" in r["boundary_reasons"]
+
+
+def test_h6_7_boundary_preflight_network_allowed_block(monkeypatch):
+    """H6-7 T08: network_allowed=true invalidates boundary."""
+    from scripts.bench.capability_ab_runner import _build_h6_local_provider_boundary_preflight
+    monkeypatch.setenv("NEXUS_H6_ALLOW_LOCAL_PROVIDER_BOUNDARY_PREFLIGHT", "1")
+    stub = {"stub_ready": True, "stub_output_receipt_ready": True, "ready_for_h6_7_local_provider_boundary_preflight": True, "safety_violation_count": 0}
+    bundle = {"h6_deterministic_local_adapter_stub_output": stub}
+    rows = [{"h6_local_provider_boundary": {
+        "provider_id": "local-qwen-ollama-boundary-v0",
+        "provider_family": "ollama",
+        "model_family": "qwen",
+        "model_size": "3b",
+        "model_name": "qwen2.5-coder:3b",
+        "provider_mode": "boundary_preflight_only",
+        "network_allowed": True,
+        "process_spawn_allowed": False,
+        "model_call_allowed": False,
+    }}]
+    r = _build_h6_local_provider_boundary_preflight(rows, bundle)
+    assert r["network_blocked_count"] == 1
+    assert "network_not_allowed" in r["boundary_reasons"]
+
+
+def test_h6_7_boundary_preflight_production_ready_false(monkeypatch):
+    """H6-7 T09: production_ready=false always."""
+    from scripts.bench.capability_ab_runner import _build_h6_local_provider_boundary_preflight
+    monkeypatch.setenv("NEXUS_H6_ALLOW_LOCAL_PROVIDER_BOUNDARY_PREFLIGHT", "1")
+    stub = {"stub_ready": True, "stub_output_receipt_ready": True, "ready_for_h6_7_local_provider_boundary_preflight": True, "safety_violation_count": 0}
+    bundle = {"h6_deterministic_local_adapter_stub_output": stub}
+    rows = [{"h6_local_provider_boundary": {
+        "provider_id": "local-qwen-ollama-boundary-v0",
+        "provider_family": "ollama",
+        "model_family": "qwen",
+        "model_size": "3b",
+        "model_name": "qwen2.5-coder:3b",
+        "provider_mode": "boundary_preflight_only",
+        "network_allowed": False,
+        "process_spawn_allowed": False,
+        "model_call_allowed": False,
+    }}]
+    r = _build_h6_local_provider_boundary_preflight(rows, bundle)
+    assert r["production_ready"] is False
+    assert r["public_claim_allowed"] is False
+    assert "h6_7_local_provider_boundary_preflight_not_production" in r["boundary_reasons"]
+
+
+def test_h6_7_boundary_preflight_collect_only():
+    """H6-7 T10: collect-only includes all H6-7 tests."""
+    import subprocess, re
+    result = subprocess.run(["python3", "-m", "pytest", "tests/benchmark/test_capability_ab_runner.py", "-k", "h6_7", "--collect-only", "-q"], capture_output=True, text=True, cwd="/Users/jameschen/Workspace/nexus")
+    count = len(re.findall(r"test_h6_7_", result.stdout))
+    assert count >= 10, f"Expected >= 10 H6-7 tests, got {count}"
+
+
+def test_h6_8_config_contract_flag_missing_block(monkeypatch):
+    """H6-8 T01: Flag missing blocks config contract."""
+    from scripts.bench.capability_ab_runner import _build_h6_local_provider_config_contract
+    monkeypatch.delenv("NEXUS_H6_ALLOW_LOCAL_PROVIDER_CONFIG_CONTRACT", raising=False)
+    boundary = {"boundary_ready": True, "provider_contract_ready": True, "ready_for_h6_8_local_provider_config_contract": True, "safety_violation_count": 0}
+    bundle = {"h6_local_provider_boundary_preflight": boundary}
+    r = _build_h6_local_provider_config_contract([], bundle)
+    assert r["config_status"] == "blocked"
+    assert "local_provider_config_contract_flag_not_enabled" in r["config_reasons"]
+
+
+def test_h6_8_config_contract_missing_boundary_block(monkeypatch):
+    """H6-8 T02: Missing H6-7 boundary blocks config contract."""
+    from scripts.bench.capability_ab_runner import _build_h6_local_provider_config_contract
+    monkeypatch.setenv("NEXUS_H6_ALLOW_LOCAL_PROVIDER_CONFIG_CONTRACT", "1")
+    r = _build_h6_local_provider_config_contract([], None)
+    assert r["config_status"] == "blocked"
+    assert "missing_h6_7_boundary_preflight" in r["config_reasons"]
+
+
+def test_h6_8_config_contract_no_configs_block(monkeypatch):
+    """H6-8 T03: No configs blocks."""
+    from scripts.bench.capability_ab_runner import _build_h6_local_provider_config_contract
+    monkeypatch.setenv("NEXUS_H6_ALLOW_LOCAL_PROVIDER_CONFIG_CONTRACT", "1")
+    boundary = {"boundary_ready": True, "provider_contract_ready": True, "ready_for_h6_8_local_provider_config_contract": True, "safety_violation_count": 0}
+    bundle = {"h6_local_provider_boundary_preflight": boundary}
+    r = _build_h6_local_provider_config_contract([], bundle)
+    assert r["config_status"] == "provider_config_fail"
+    assert "no_provider_configs" in r["config_reasons"]
+
+
+def test_h6_8_config_contract_valid_config(monkeypatch):
+    """H6-8 T04: Valid config passes."""
+    from scripts.bench.capability_ab_runner import _build_h6_local_provider_config_contract
+    monkeypatch.setenv("NEXUS_H6_ALLOW_LOCAL_PROVIDER_CONFIG_CONTRACT", "1")
+    boundary = {"boundary_ready": True, "provider_contract_ready": True, "ready_for_h6_8_local_provider_config_contract": True, "safety_violation_count": 0}
+    bundle = {"h6_local_provider_boundary_preflight": boundary}
+    rows = [{"h6_local_provider_config": {
+        "config_id": "local-qwen-config-001",
+        "provider_id": "local-qwen-ollama-boundary-v0",
+        "provider_family": "ollama",
+        "model_family": "qwen",
+        "model_size": "7b",
+        "model_name": "qwen2.5-coder:7b",
+        "config_mode": "schema_only",
+        "network_allowed": False,
+        "process_spawn_allowed": False,
+        "model_load_allowed": False,
+        "model_call_allowed": False,
+    }}]
+    r = _build_h6_local_provider_config_contract(rows, bundle)
+    assert r["config_status"] == "provider_config_ready"
+    assert r["provider_config_valid_count"] == 1
+    assert r["ready_for_h6_9_local_provider_invocation_gate"] is True
+
+
+def test_h6_8_config_contract_missing_config_id(monkeypatch):
+    """H6-8 T05: Missing config_id invalidates config."""
+    from scripts.bench.capability_ab_runner import _build_h6_local_provider_config_contract
+    monkeypatch.setenv("NEXUS_H6_ALLOW_LOCAL_PROVIDER_CONFIG_CONTRACT", "1")
+    boundary = {"boundary_ready": True, "provider_contract_ready": True, "ready_for_h6_8_local_provider_config_contract": True, "safety_violation_count": 0}
+    bundle = {"h6_local_provider_boundary_preflight": boundary}
+    rows = [{"h6_local_provider_config": {
+        "config_id": "",
+        "provider_id": "local-qwen-ollama-boundary-v0",
+        "provider_family": "ollama",
+        "model_family": "qwen",
+        "model_size": "7b",
+        "model_name": "qwen2.5-coder:7b",
+        "config_mode": "schema_only",
+        "network_allowed": False,
+        "process_spawn_allowed": False,
+        "model_load_allowed": False,
+        "model_call_allowed": False,
+    }}]
+    r = _build_h6_local_provider_config_contract(rows, bundle)
+    assert r["missing_config_id_count"] == 1
+    assert "missing_config_id" in r["config_reasons"]
+
+
+def test_h6_8_config_contract_network_allowed_block(monkeypatch):
+    """H6-8 T06: network_allowed=true invalidates config."""
+    from scripts.bench.capability_ab_runner import _build_h6_local_provider_config_contract
+    monkeypatch.setenv("NEXUS_H6_ALLOW_LOCAL_PROVIDER_CONFIG_CONTRACT", "1")
+    boundary = {"boundary_ready": True, "provider_contract_ready": True, "ready_for_h6_8_local_provider_config_contract": True, "safety_violation_count": 0}
+    bundle = {"h6_local_provider_boundary_preflight": boundary}
+    rows = [{"h6_local_provider_config": {
+        "config_id": "local-qwen-config-001",
+        "provider_id": "local-qwen-ollama-boundary-v0",
+        "provider_family": "ollama",
+        "model_family": "qwen",
+        "model_size": "7b",
+        "model_name": "qwen2.5-coder:7b",
+        "config_mode": "schema_only",
+        "network_allowed": True,
+        "process_spawn_allowed": False,
+        "model_load_allowed": False,
+        "model_call_allowed": False,
+    }}]
+    r = _build_h6_local_provider_config_contract(rows, bundle)
+    assert r["network_blocked_count"] == 1
+    assert "network_not_allowed" in r["config_reasons"]
+
+
+def test_h6_8_config_contract_production_ready_false(monkeypatch):
+    """H6-8 T07: production_ready=false always."""
+    from scripts.bench.capability_ab_runner import _build_h6_local_provider_config_contract
+    monkeypatch.setenv("NEXUS_H6_ALLOW_LOCAL_PROVIDER_CONFIG_CONTRACT", "1")
+    boundary = {"boundary_ready": True, "provider_contract_ready": True, "ready_for_h6_8_local_provider_config_contract": True, "safety_violation_count": 0}
+    bundle = {"h6_local_provider_boundary_preflight": boundary}
+    rows = [{"h6_local_provider_config": {
+        "config_id": "local-qwen-config-001",
+        "provider_id": "local-qwen-ollama-boundary-v0",
+        "provider_family": "ollama",
+        "model_family": "qwen",
+        "model_size": "7b",
+        "model_name": "qwen2.5-coder:7b",
+        "config_mode": "schema_only",
+        "network_allowed": False,
+        "process_spawn_allowed": False,
+        "model_load_allowed": False,
+        "model_call_allowed": False,
+    }}]
+    r = _build_h6_local_provider_config_contract(rows, bundle)
+    assert r["production_ready"] is False
+    assert r["public_claim_allowed"] is False
+    assert "h6_8_local_provider_config_contract_not_production" in r["config_reasons"]
+
+
+def test_h6_8_config_contract_collect_only():
+    """H6-8 T08: collect-only includes all H6-8 tests."""
+    import subprocess, re
+    result = subprocess.run(["python3", "-m", "pytest", "tests/benchmark/test_capability_ab_runner.py", "-k", "h6_8", "--collect-only", "-q"], capture_output=True, text=True, cwd="/Users/jameschen/Workspace/nexus")
+    count = len(re.findall(r"test_h6_8_", result.stdout))
+    assert count >= 8, f"Expected >= 8 H6-8 tests, got {count}"
+
+
+def test_h6_9_invocation_gate_flag_missing_block(monkeypatch):
+    """H6-9 T01: Flag missing blocks invocation gate."""
+    from scripts.bench.capability_ab_runner import _build_h6_local_provider_invocation_gate
+    monkeypatch.delenv("NEXUS_H6_ALLOW_LOCAL_PROVIDER_INVOCATION_GATE", raising=False)
+    config = {"config_ready": True, "provider_config_receipt_ready": True, "ready_for_h6_9_local_provider_invocation_gate": True, "safety_violation_count": 0}
+    bundle = {"h6_local_provider_config_contract": config}
+    r = _build_h6_local_provider_invocation_gate([], bundle)
+    assert r["gate_status"] == "blocked"
+    assert "local_provider_invocation_gate_flag_not_enabled" in r["gate_reasons"]
+
+
+def test_h6_9_invocation_gate_missing_config_block(monkeypatch):
+    """H6-9 T02: Missing H6-8 config blocks invocation gate."""
+    from scripts.bench.capability_ab_runner import _build_h6_local_provider_invocation_gate
+    monkeypatch.setenv("NEXUS_H6_ALLOW_LOCAL_PROVIDER_INVOCATION_GATE", "1")
+    r = _build_h6_local_provider_invocation_gate([], None)
+    assert r["gate_status"] == "blocked"
+    assert "missing_h6_8_config_contract" in r["gate_reasons"]
+
+
+def test_h6_9_invocation_gate_no_gates_block(monkeypatch):
+    """H6-9 T03: No gates blocks."""
+    from scripts.bench.capability_ab_runner import _build_h6_local_provider_invocation_gate
+    monkeypatch.setenv("NEXUS_H6_ALLOW_LOCAL_PROVIDER_INVOCATION_GATE", "1")
+    config = {"config_ready": True, "provider_config_receipt_ready": True, "ready_for_h6_9_local_provider_invocation_gate": True, "safety_violation_count": 0}
+    bundle = {"h6_local_provider_config_contract": config}
+    r = _build_h6_local_provider_invocation_gate([], bundle)
+    assert r["gate_status"] == "provider_invocation_gate_fail"
+    assert "no_invocation_gates" in r["gate_reasons"]
+
+
+def test_h6_9_invocation_gate_valid_gate(monkeypatch):
+    """H6-9 T04: Valid gate passes."""
+    from scripts.bench.capability_ab_runner import _build_h6_local_provider_invocation_gate
+    monkeypatch.setenv("NEXUS_H6_ALLOW_LOCAL_PROVIDER_INVOCATION_GATE", "1")
+    config = {"config_ready": True, "provider_config_receipt_ready": True, "ready_for_h6_9_local_provider_invocation_gate": True, "safety_violation_count": 0}
+    bundle = {"h6_local_provider_config_contract": config}
+    rows = [{"h6_local_provider_invocation_gate": {
+        "gate_id": "local-provider-invocation-gate-001",
+        "config_id": "local-qwen-config-001",
+        "provider_id": "local-qwen-ollama-boundary-v0",
+        "provider_family": "ollama",
+        "model_family": "qwen",
+        "model_size": "7b",
+        "model_name": "qwen2.5-coder:7b",
+        "gate_mode": "deny_by_default",
+        "invocation_allowed": False,
+        "network_allowed": False,
+        "process_spawn_allowed": False,
+        "model_load_allowed": False,
+        "model_call_allowed": False,
+    }}]
+    r = _build_h6_local_provider_invocation_gate(rows, bundle)
+    assert r["gate_status"] == "provider_invocation_gate_ready"
+    assert r["invocation_gate_valid_count"] == 1
+    assert r["ready_for_h6_10_controlled_provider_probe_preflight"] is True
+
+
+def test_h6_9_invocation_gate_missing_gate_id(monkeypatch):
+    """H6-9 T05: Missing gate_id invalidates gate."""
+    from scripts.bench.capability_ab_runner import _build_h6_local_provider_invocation_gate
+    monkeypatch.setenv("NEXUS_H6_ALLOW_LOCAL_PROVIDER_INVOCATION_GATE", "1")
+    config = {"config_ready": True, "provider_config_receipt_ready": True, "ready_for_h6_9_local_provider_invocation_gate": True, "safety_violation_count": 0}
+    bundle = {"h6_local_provider_config_contract": config}
+    rows = [{"h6_local_provider_invocation_gate": {
+        "gate_id": "",
+        "config_id": "local-qwen-config-001",
+        "provider_id": "local-qwen-ollama-boundary-v0",
+        "model_family": "qwen",
+        "model_size": "7b",
+        "model_name": "qwen2.5-coder:7b",
+        "gate_mode": "deny_by_default",
+        "invocation_allowed": False,
+        "network_allowed": False,
+        "process_spawn_allowed": False,
+        "model_load_allowed": False,
+        "model_call_allowed": False,
+    }}]
+    r = _build_h6_local_provider_invocation_gate(rows, bundle)
+    assert r["missing_gate_id_count"] == 1
+    assert "missing_gate_id" in r["gate_reasons"]
+
+
+def test_h6_9_invocation_gate_invocation_allowed_block(monkeypatch):
+    """H6-9 T06: invocation_allowed=true invalidates gate."""
+    from scripts.bench.capability_ab_runner import _build_h6_local_provider_invocation_gate
+    monkeypatch.setenv("NEXUS_H6_ALLOW_LOCAL_PROVIDER_INVOCATION_GATE", "1")
+    config = {"config_ready": True, "provider_config_receipt_ready": True, "ready_for_h6_9_local_provider_invocation_gate": True, "safety_violation_count": 0}
+    bundle = {"h6_local_provider_config_contract": config}
+    rows = [{"h6_local_provider_invocation_gate": {
+        "gate_id": "local-provider-invocation-gate-001",
+        "config_id": "local-qwen-config-001",
+        "provider_id": "local-qwen-ollama-boundary-v0",
+        "model_family": "qwen",
+        "model_size": "7b",
+        "model_name": "qwen2.5-coder:7b",
+        "gate_mode": "deny_by_default",
+        "invocation_allowed": True,
+        "network_allowed": False,
+        "process_spawn_allowed": False,
+        "model_load_allowed": False,
+        "model_call_allowed": False,
+    }}]
+    r = _build_h6_local_provider_invocation_gate(rows, bundle)
+    assert r["invocation_allowed_blocked_count"] == 1
+    assert "invocation_allowed_blocked" in r["gate_reasons"]
+
+
+def test_h6_9_invocation_gate_production_ready_false(monkeypatch):
+    """H6-9 T07: production_ready=false always."""
+    from scripts.bench.capability_ab_runner import _build_h6_local_provider_invocation_gate
+    monkeypatch.setenv("NEXUS_H6_ALLOW_LOCAL_PROVIDER_INVOCATION_GATE", "1")
+    config = {"config_ready": True, "provider_config_receipt_ready": True, "ready_for_h6_9_local_provider_invocation_gate": True, "safety_violation_count": 0}
+    bundle = {"h6_local_provider_config_contract": config}
+    rows = [{"h6_local_provider_invocation_gate": {
+        "gate_id": "local-provider-invocation-gate-001",
+        "config_id": "local-qwen-config-001",
+        "provider_id": "local-qwen-ollama-boundary-v0",
+        "model_family": "qwen",
+        "model_size": "7b",
+        "model_name": "qwen2.5-coder:7b",
+        "gate_mode": "deny_by_default",
+        "invocation_allowed": False,
+        "network_allowed": False,
+        "process_spawn_allowed": False,
+        "model_load_allowed": False,
+        "model_call_allowed": False,
+    }}]
+    r = _build_h6_local_provider_invocation_gate(rows, bundle)
+    assert r["production_ready"] is False
+    assert r["public_claim_allowed"] is False
+    assert "h6_9_local_provider_invocation_gate_not_production" in r["gate_reasons"]
+    assert "deny_by_default" in r["gate_reasons"]
+    assert "invocation_denied" in r["gate_reasons"]
+
+
+def test_h6_9_invocation_gate_collect_only():
+    """H6-9 T08: collect-only includes all H6-9 tests."""
+    import subprocess, re
+    result = subprocess.run(["python3", "-m", "pytest", "tests/benchmark/test_capability_ab_runner.py", "-k", "h6_9", "--collect-only", "-q"], capture_output=True, text=True, cwd="/Users/jameschen/Workspace/nexus")
+    count = len(re.findall(r"test_h6_9_", result.stdout))
+    assert count >= 8, f"Expected >= 8 H6-9 tests, got {count}"

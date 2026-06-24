@@ -11351,6 +11351,739 @@ def _build_h6_deterministic_local_adapter_stub_output(rows: list[dict[str, Any]]
     }
 
 
+def _build_h6_local_provider_boundary_preflight(rows: list[dict[str, Any]], bundle: dict[str, Any] | None = None) -> dict[str, Any]:
+    """Pure helper: H6 local provider boundary preflight."""
+    import os as _os
+
+    flag = _os.environ.get("NEXUS_H6_ALLOW_LOCAL_PROVIDER_BOUNDARY_PREFLIGHT", "").strip() == "1"
+
+    stub = None
+    if bundle:
+        stub = bundle.get("h6_deterministic_local_adapter_stub_output")
+
+    stub_present = bool(stub)
+    stub_ready = bool(stub.get("stub_ready", False)) if stub else False
+    stub_receipt_ready = bool(stub.get("stub_output_receipt_ready", False)) if stub else False
+    ready_boundary = bool(stub.get("ready_for_h6_7_local_provider_boundary_preflight", False)) if stub else False
+    stub_safety = int(stub.get("safety_violation_count", 0)) if stub else 0
+
+    ALLOWED_FAMILIES = {"qwen"}
+    ALLOWED_SIZES = {"3b", "7b", "14b"}
+    ALLOWED_PROVIDER_FAMILIES = {"ollama"}
+    ALLOWED_PROVIDER_MODES = {"boundary_preflight_only"}
+
+    boundaries = [r.get("h6_local_provider_boundary") for r in rows if r.get("h6_local_provider_boundary")]
+
+    valid_boundaries = []
+    invalid_boundaries = 0
+    missing_provider_id = 0
+    missing_model_name = 0
+    invalid_provider_family = 0
+    invalid_model_family = 0
+    invalid_model_size = 0
+    invalid_provider_mode = 0
+    network_blocked = 0
+    process_spawn_blocked = 0
+    model_call_blocked = 0
+
+    qwen_3b = 0
+    qwen_7b = 0
+    qwen_14b = 0
+
+    mc_count = 0
+    ol_count = 0
+    cl_count = 0
+    rm_count = 0
+    bh_count = 0
+    re_count = 0
+
+    for b in boundaries:
+        pid = str(b.get("provider_id", "") or "").strip()
+        pfam = str(b.get("provider_family", "") or "").lower()
+        mfam = str(b.get("model_family", "") or "").lower()
+        sz = str(b.get("model_size", "") or "").lower()
+        mname = str(b.get("model_name", "") or "").strip()
+        pmode = str(b.get("provider_mode", "") or "").lower()
+        na = bool(b.get("network_allowed", True))
+        ps = bool(b.get("process_spawn_allowed", True))
+        mca = bool(b.get("model_call_allowed", True))
+        mc = bool(b.get("model_call_executed", False))
+        ol = bool(b.get("ollama_invoked", False))
+        cl = bool(b.get("cloud_invoked", False))
+        rm = bool(b.get("repo_mutated", False))
+        bh = bool(b.get("behavior_changed", False))
+        re = bool(b.get("runtime_effect", False))
+
+        if mc:
+            mc_count += 1
+        if ol:
+            ol_count += 1
+        if cl:
+            cl_count += 1
+        if rm:
+            rm_count += 1
+        if bh:
+            bh_count += 1
+        if re:
+            re_count += 1
+
+        is_valid = (
+            pid and pfam in ALLOWED_PROVIDER_FAMILIES and mfam in ALLOWED_FAMILIES
+            and sz in ALLOWED_SIZES and mname and pmode in ALLOWED_PROVIDER_MODES
+            and not na and not ps and not mca
+            and not mc and not ol and not cl and not rm and not bh and not re
+        )
+
+        if is_valid:
+            valid_boundaries.append(b)
+            if sz == "3b":
+                qwen_3b += 1
+            elif sz == "7b":
+                qwen_7b += 1
+            elif sz == "14b":
+                qwen_14b += 1
+        else:
+            invalid_boundaries += 1
+            if not pid:
+                missing_provider_id += 1
+            if not mname:
+                missing_model_name += 1
+            if pfam not in ALLOWED_PROVIDER_FAMILIES:
+                invalid_provider_family += 1
+            if mfam not in ALLOWED_FAMILIES:
+                invalid_model_family += 1
+            if sz not in ALLOWED_SIZES:
+                invalid_model_size += 1
+            if pmode not in ALLOWED_PROVIDER_MODES:
+                invalid_provider_mode += 1
+            if na:
+                network_blocked += 1
+            if ps:
+                process_spawn_blocked += 1
+            if mca:
+                model_call_blocked += 1
+
+    safety = mc_count + ol_count + cl_count + rm_count + bh_count + re_count
+
+    boundary_allowed = (
+        flag and stub_present and stub_ready
+        and stub_receipt_ready and ready_boundary and stub_safety == 0
+    )
+
+    boundary_ready = (
+        boundary_allowed and len(valid_boundaries) > 0 and safety == 0
+    )
+
+    provider_contract_ready = (
+        boundary_ready and invalid_boundaries == 0
+    )
+
+    ready_config = (
+        provider_contract_ready and mc_count == 0 and ol_count == 0
+        and cl_count == 0 and rm_count == 0 and bh_count == 0 and re_count == 0
+    )
+
+    reasons = []
+    if not flag:
+        reasons.append("local_provider_boundary_preflight_flag_not_enabled")
+    if not stub_present:
+        reasons.append("missing_h6_6_stub_output")
+    if stub and not stub_ready:
+        reasons.append("h6_6_stub_not_ready")
+    if stub and not stub_receipt_ready:
+        reasons.append("h6_6_stub_receipt_not_ready")
+    if stub and not ready_boundary:
+        reasons.append("not_ready_for_h6_7_local_provider_boundary_preflight")
+    if stub_safety > 0:
+        reasons.append("h6_6_safety_violation_detected")
+    if not boundaries:
+        reasons.append("no_provider_boundaries")
+    if missing_provider_id > 0:
+        reasons.append("missing_provider_id")
+    if missing_model_name > 0:
+        reasons.append("missing_model_name")
+    if invalid_provider_family > 0:
+        reasons.append("invalid_provider_family")
+    if invalid_model_family > 0:
+        reasons.append("invalid_model_family")
+    if invalid_model_size > 0:
+        reasons.append("invalid_model_size")
+    if invalid_provider_mode > 0:
+        reasons.append("invalid_provider_mode")
+    if network_blocked > 0:
+        reasons.append("network_not_allowed")
+    if process_spawn_blocked > 0:
+        reasons.append("process_spawn_not_allowed")
+    if model_call_blocked > 0:
+        reasons.append("model_call_not_allowed")
+    if mc_count > 0:
+        reasons.append("model_call_executed_detected")
+    if ol_count > 0:
+        reasons.append("ollama_invoked_detected")
+    if cl_count > 0:
+        reasons.append("cloud_invoked_detected")
+    if rm_count > 0:
+        reasons.append("repo_mutated_detected")
+    if bh_count > 0:
+        reasons.append("behavior_changed_detected")
+    if re_count > 0:
+        reasons.append("runtime_effect_detected")
+    reasons.extend([
+        "h6_7_local_provider_boundary_preflight_not_production",
+        "boundary_preflight_only",
+        "no_model_calls_allowed",
+        "ollama_invocation_blocked",
+        "cloud_invocation_blocked",
+        "repo_mutation_blocked",
+        "runtime_effect_blocked",
+        "production_claim_blocked",
+        "public_claim_blocked",
+    ])
+
+    return {
+        "schema": "nexus.hybrid_h6_local_provider_boundary_preflight.v1",
+        "evaluated": True,
+        "boundary_status": "provider_boundary_ready" if boundary_ready else ("provider_boundary_fail" if boundary_allowed else "blocked"),
+        "boundary_reasons": reasons,
+        "boundary_allowed": boundary_allowed,
+        "boundary_ready": boundary_ready,
+        "row_count": len(rows),
+        "stub_output_present": stub_present,
+        "stub_output_ready": stub_ready,
+        "stub_output_receipt_ready": stub_receipt_ready,
+        "ready_for_h6_7_local_provider_boundary_preflight": ready_boundary,
+        "provider_boundary_count": len(boundaries),
+        "provider_boundary_valid_count": len(valid_boundaries),
+        "provider_boundary_invalid_count": invalid_boundaries,
+        "qwen_3b_boundary_count": qwen_3b,
+        "qwen_7b_boundary_count": qwen_7b,
+        "qwen_14b_boundary_count": qwen_14b,
+        "missing_provider_id_count": missing_provider_id,
+        "missing_model_name_count": missing_model_name,
+        "invalid_provider_family_count": invalid_provider_family,
+        "invalid_model_family_count": invalid_model_family,
+        "invalid_model_size_count": invalid_model_size,
+        "invalid_provider_mode_count": invalid_provider_mode,
+        "network_blocked_count": network_blocked,
+        "process_spawn_blocked_count": process_spawn_blocked,
+        "model_call_blocked_count": model_call_blocked,
+        "model_call_executed_count": mc_count,
+        "ollama_invoked_count": ol_count,
+        "cloud_invoked_count": cl_count,
+        "repo_mutated_count": rm_count,
+        "behavior_changed_count": bh_count,
+        "runtime_effect_count": re_count,
+        "safety_violation_count": safety,
+        "provider_contract_ready": provider_contract_ready,
+        "ready_for_h6_8_local_provider_config_contract": ready_config,
+        "production_ready": False,
+        "public_claim_allowed": False,
+    }
+
+
+def _build_h6_local_provider_config_contract(rows: list[dict[str, Any]], bundle: dict[str, Any] | None = None) -> dict[str, Any]:
+    """Pure helper: H6 local provider config contract."""
+    import os as _os
+
+    flag = _os.environ.get("NEXUS_H6_ALLOW_LOCAL_PROVIDER_CONFIG_CONTRACT", "").strip() == "1"
+
+    boundary = None
+    if bundle:
+        boundary = bundle.get("h6_local_provider_boundary_preflight")
+
+    boundary_present = bool(boundary)
+    boundary_ready = bool(boundary.get("boundary_ready", False)) if boundary else False
+    contract_ready = bool(boundary.get("provider_contract_ready", False)) if boundary else False
+    ready_config = bool(boundary.get("ready_for_h6_8_local_provider_config_contract", False)) if boundary else False
+    boundary_safety = int(boundary.get("safety_violation_count", 0)) if boundary else 0
+
+    ALLOWED_FAMILIES = {"qwen"}
+    ALLOWED_SIZES = {"3b", "7b", "14b"}
+    ALLOWED_PROVIDER_FAMILIES = {"ollama"}
+    ALLOWED_CONFIG_MODES = {"schema_only"}
+
+    configs = [r.get("h6_local_provider_config") for r in rows if r.get("h6_local_provider_config")]
+
+    valid_configs = []
+    invalid_configs = 0
+    missing_config_id = 0
+    missing_provider_id = 0
+    missing_model_name = 0
+    invalid_provider_family = 0
+    invalid_model_family = 0
+    invalid_model_size = 0
+    invalid_config_mode = 0
+    network_blocked = 0
+    process_spawn_blocked = 0
+    model_load_blocked = 0
+    model_call_blocked = 0
+
+    qwen_3b = 0
+    qwen_7b = 0
+    qwen_14b = 0
+
+    mc_count = 0
+    ol_count = 0
+    cl_count = 0
+    rm_count = 0
+    bh_count = 0
+    re_count = 0
+
+    for c in configs:
+        cid = str(c.get("config_id", "") or "").strip()
+        pid = str(c.get("provider_id", "") or "").strip()
+        pfam = str(c.get("provider_family", "") or "").lower()
+        mfam = str(c.get("model_family", "") or "").lower()
+        sz = str(c.get("model_size", "") or "").lower()
+        mname = str(c.get("model_name", "") or "").strip()
+        cmode = str(c.get("config_mode", "") or "").lower()
+        na = bool(c.get("network_allowed", True))
+        ps = bool(c.get("process_spawn_allowed", True))
+        mla = bool(c.get("model_load_allowed", True))
+        mca = bool(c.get("model_call_allowed", True))
+        mc = bool(c.get("model_call_executed", False))
+        ol = bool(c.get("ollama_invoked", False))
+        cl = bool(c.get("cloud_invoked", False))
+        rm = bool(c.get("repo_mutated", False))
+        bh = bool(c.get("behavior_changed", False))
+        re = bool(c.get("runtime_effect", False))
+
+        if mc:
+            mc_count += 1
+        if ol:
+            ol_count += 1
+        if cl:
+            cl_count += 1
+        if rm:
+            rm_count += 1
+        if bh:
+            bh_count += 1
+        if re:
+            re_count += 1
+
+        is_valid = (
+            cid and pid and pfam in ALLOWED_PROVIDER_FAMILIES and mfam in ALLOWED_FAMILIES
+            and sz in ALLOWED_SIZES and mname and cmode in ALLOWED_CONFIG_MODES
+            and not na and not ps and not mla and not mca
+            and not mc and not ol and not cl and not rm and not bh and not re
+        )
+
+        if is_valid:
+            valid_configs.append(c)
+            if sz == "3b":
+                qwen_3b += 1
+            elif sz == "7b":
+                qwen_7b += 1
+            elif sz == "14b":
+                qwen_14b += 1
+        else:
+            invalid_configs += 1
+            if not cid:
+                missing_config_id += 1
+            if not pid:
+                missing_provider_id += 1
+            if not mname:
+                missing_model_name += 1
+            if pfam not in ALLOWED_PROVIDER_FAMILIES:
+                invalid_provider_family += 1
+            if mfam not in ALLOWED_FAMILIES:
+                invalid_model_family += 1
+            if sz not in ALLOWED_SIZES:
+                invalid_model_size += 1
+            if cmode not in ALLOWED_CONFIG_MODES:
+                invalid_config_mode += 1
+            if na:
+                network_blocked += 1
+            if ps:
+                process_spawn_blocked += 1
+            if mla:
+                model_load_blocked += 1
+            if mca:
+                model_call_blocked += 1
+
+    safety = mc_count + ol_count + cl_count + rm_count + bh_count + re_count
+
+    config_allowed = (
+        flag and boundary_present and boundary_ready
+        and contract_ready and ready_config and boundary_safety == 0
+    )
+
+    config_ready = (
+        config_allowed and len(valid_configs) > 0 and safety == 0
+    )
+
+    config_receipt_ready = (
+        config_ready and invalid_configs == 0
+    )
+
+    ready_gate = (
+        config_receipt_ready and mc_count == 0 and ol_count == 0
+        and cl_count == 0 and rm_count == 0 and bh_count == 0 and re_count == 0
+    )
+
+    reasons = []
+    if not flag:
+        reasons.append("local_provider_config_contract_flag_not_enabled")
+    if not boundary_present:
+        reasons.append("missing_h6_7_boundary_preflight")
+    if boundary and not boundary_ready:
+        reasons.append("h6_7_boundary_not_ready")
+    if boundary and not contract_ready:
+        reasons.append("h6_7_contract_not_ready")
+    if boundary and not ready_config:
+        reasons.append("not_ready_for_h6_8_local_provider_config_contract")
+    if boundary_safety > 0:
+        reasons.append("h6_7_safety_violation_detected")
+    if not configs:
+        reasons.append("no_provider_configs")
+    if missing_config_id > 0:
+        reasons.append("missing_config_id")
+    if missing_provider_id > 0:
+        reasons.append("missing_provider_id")
+    if missing_model_name > 0:
+        reasons.append("missing_model_name")
+    if invalid_provider_family > 0:
+        reasons.append("invalid_provider_family")
+    if invalid_model_family > 0:
+        reasons.append("invalid_model_family")
+    if invalid_model_size > 0:
+        reasons.append("invalid_model_size")
+    if invalid_config_mode > 0:
+        reasons.append("invalid_config_mode")
+    if network_blocked > 0:
+        reasons.append("network_not_allowed")
+    if process_spawn_blocked > 0:
+        reasons.append("process_spawn_not_allowed")
+    if model_load_blocked > 0:
+        reasons.append("model_load_not_allowed")
+    if model_call_blocked > 0:
+        reasons.append("model_call_not_allowed")
+    if mc_count > 0:
+        reasons.append("model_call_executed_detected")
+    if ol_count > 0:
+        reasons.append("ollama_invoked_detected")
+    if cl_count > 0:
+        reasons.append("cloud_invoked_detected")
+    if rm_count > 0:
+        reasons.append("repo_mutated_detected")
+    if bh_count > 0:
+        reasons.append("behavior_changed_detected")
+    if re_count > 0:
+        reasons.append("runtime_effect_detected")
+    reasons.extend([
+        "h6_8_local_provider_config_contract_not_production",
+        "schema_only",
+        "no_model_calls_allowed",
+        "ollama_invocation_blocked",
+        "cloud_invocation_blocked",
+        "repo_mutation_blocked",
+        "runtime_effect_blocked",
+        "production_claim_blocked",
+        "public_claim_blocked",
+    ])
+
+    return {
+        "schema": "nexus.hybrid_h6_local_provider_config_contract.v1",
+        "evaluated": True,
+        "config_status": "provider_config_ready" if config_ready else ("provider_config_fail" if config_allowed else "blocked"),
+        "config_reasons": reasons,
+        "config_allowed": config_allowed,
+        "config_ready": config_ready,
+        "row_count": len(rows),
+        "boundary_present": boundary_present,
+        "boundary_ready": boundary_ready,
+        "provider_contract_ready": contract_ready,
+        "ready_for_h6_8_local_provider_config_contract": ready_config,
+        "provider_config_count": len(configs),
+        "provider_config_valid_count": len(valid_configs),
+        "provider_config_invalid_count": invalid_configs,
+        "qwen_3b_config_count": qwen_3b,
+        "qwen_7b_config_count": qwen_7b,
+        "qwen_14b_config_count": qwen_14b,
+        "missing_config_id_count": missing_config_id,
+        "missing_provider_id_count": missing_provider_id,
+        "missing_model_name_count": missing_model_name,
+        "invalid_provider_family_count": invalid_provider_family,
+        "invalid_model_family_count": invalid_model_family,
+        "invalid_model_size_count": invalid_model_size,
+        "invalid_config_mode_count": invalid_config_mode,
+        "network_blocked_count": network_blocked,
+        "process_spawn_blocked_count": process_spawn_blocked,
+        "model_load_blocked_count": model_load_blocked,
+        "model_call_blocked_count": model_call_blocked,
+        "model_call_executed_count": mc_count,
+        "ollama_invoked_count": ol_count,
+        "cloud_invoked_count": cl_count,
+        "repo_mutated_count": rm_count,
+        "behavior_changed_count": bh_count,
+        "runtime_effect_count": re_count,
+        "safety_violation_count": safety,
+        "provider_config_receipt_ready": config_receipt_ready,
+        "ready_for_h6_9_local_provider_invocation_gate": ready_gate,
+        "production_ready": False,
+        "public_claim_allowed": False,
+    }
+
+
+def _build_h6_local_provider_invocation_gate(rows: list[dict[str, Any]], bundle: dict[str, Any] | None = None) -> dict[str, Any]:
+    """Pure helper: H6 local provider invocation gate."""
+    import os as _os
+
+    flag = _os.environ.get("NEXUS_H6_ALLOW_LOCAL_PROVIDER_INVOCATION_GATE", "").strip() == "1"
+
+    config = None
+    if bundle:
+        config = bundle.get("h6_local_provider_config_contract")
+
+    config_present = bool(config)
+    config_ready = bool(config.get("config_ready", False)) if config else False
+    config_receipt_ready = bool(config.get("provider_config_receipt_ready", False)) if config else False
+    ready_gate = bool(config.get("ready_for_h6_9_local_provider_invocation_gate", False)) if config else False
+    config_safety = int(config.get("safety_violation_count", 0)) if config else 0
+
+    ALLOWED_FAMILIES = {"qwen"}
+    ALLOWED_SIZES = {"3b", "7b", "14b"}
+    ALLOWED_PROVIDER_FAMILIES = {"ollama"}
+    ALLOWED_GATE_MODES = {"deny_by_default"}
+
+    gates = [r.get("h6_local_provider_invocation_gate") for r in rows if r.get("h6_local_provider_invocation_gate")]
+
+    valid_gates = []
+    invalid_gates = 0
+    missing_gate_id = 0
+    missing_config_id = 0
+    missing_provider_id = 0
+    missing_model_name = 0
+    invalid_provider_family = 0
+    invalid_model_family = 0
+    invalid_model_size = 0
+    invalid_gate_mode = 0
+    invocation_allowed_blocked = 0
+    network_blocked = 0
+    process_spawn_blocked = 0
+    model_load_blocked = 0
+    model_call_blocked = 0
+
+    qwen_3b = 0
+    qwen_7b = 0
+    qwen_14b = 0
+
+    mc_count = 0
+    ol_count = 0
+    cl_count = 0
+    rm_count = 0
+    bh_count = 0
+    re_count = 0
+
+    for g in gates:
+        gid = str(g.get("gate_id", "") or "").strip()
+        cid = str(g.get("config_id", "") or "").strip()
+        pid = str(g.get("provider_id", "") or "").strip()
+        pfam = str(g.get("provider_family", "") or "").lower()
+        mfam = str(g.get("model_family", "") or "").lower()
+        sz = str(g.get("model_size", "") or "").lower()
+        mname = str(g.get("model_name", "") or "").strip()
+        gmode = str(g.get("gate_mode", "") or "").lower()
+        ia = bool(g.get("invocation_allowed", True))
+        na = bool(g.get("network_allowed", True))
+        ps = bool(g.get("process_spawn_allowed", True))
+        mla = bool(g.get("model_load_allowed", True))
+        mca = bool(g.get("model_call_allowed", True))
+        mc = bool(g.get("model_call_executed", False))
+        ol = bool(g.get("ollama_invoked", False))
+        cl = bool(g.get("cloud_invoked", False))
+        rm = bool(g.get("repo_mutated", False))
+        bh = bool(g.get("behavior_changed", False))
+        re = bool(g.get("runtime_effect", False))
+
+        if mc:
+            mc_count += 1
+        if ol:
+            ol_count += 1
+        if cl:
+            cl_count += 1
+        if rm:
+            rm_count += 1
+        if bh:
+            bh_count += 1
+        if re:
+            re_count += 1
+
+        is_valid = (
+            gid and cid and pid and pfam in ALLOWED_PROVIDER_FAMILIES and mfam in ALLOWED_FAMILIES
+            and sz in ALLOWED_SIZES and mname and gmode in ALLOWED_GATE_MODES
+            and not ia and not na and not ps and not mla and not mca
+            and not mc and not ol and not cl and not rm and not bh and not re
+        )
+
+        if is_valid:
+            valid_gates.append(g)
+            if sz == "3b":
+                qwen_3b += 1
+            elif sz == "7b":
+                qwen_7b += 1
+            elif sz == "14b":
+                qwen_14b += 1
+        else:
+            invalid_gates += 1
+            if not gid:
+                missing_gate_id += 1
+            if not cid:
+                missing_config_id += 1
+            if not pid:
+                missing_provider_id += 1
+            if not mname:
+                missing_model_name += 1
+            if pfam not in ALLOWED_PROVIDER_FAMILIES:
+                invalid_provider_family += 1
+            if mfam not in ALLOWED_FAMILIES:
+                invalid_model_family += 1
+            if sz not in ALLOWED_SIZES:
+                invalid_model_size += 1
+            if gmode not in ALLOWED_GATE_MODES:
+                invalid_gate_mode += 1
+            if ia:
+                invocation_allowed_blocked += 1
+            if na:
+                network_blocked += 1
+            if ps:
+                process_spawn_blocked += 1
+            if mla:
+                model_load_blocked += 1
+            if mca:
+                model_call_blocked += 1
+
+    safety = mc_count + ol_count + cl_count + rm_count + bh_count + re_count
+
+    gate_allowed = (
+        flag and config_present and config_ready
+        and config_receipt_ready and ready_gate and config_safety == 0
+    )
+
+    gate_ready = (
+        gate_allowed and len(valid_gates) > 0 and safety == 0
+    )
+
+    gate_receipt_ready = (
+        gate_ready and invalid_gates == 0
+    )
+
+    ready_probe = (
+        gate_receipt_ready and mc_count == 0 and ol_count == 0
+        and cl_count == 0 and rm_count == 0 and bh_count == 0 and re_count == 0
+    )
+
+    reasons = []
+    if not flag:
+        reasons.append("local_provider_invocation_gate_flag_not_enabled")
+    if not config_present:
+        reasons.append("missing_h6_8_config_contract")
+    if config and not config_ready:
+        reasons.append("h6_8_config_not_ready")
+    if config and not config_receipt_ready:
+        reasons.append("h6_8_config_receipt_not_ready")
+    if config and not ready_gate:
+        reasons.append("not_ready_for_h6_9_local_provider_invocation_gate")
+    if config_safety > 0:
+        reasons.append("h6_8_safety_violation_detected")
+    if not gates:
+        reasons.append("no_invocation_gates")
+    if missing_gate_id > 0:
+        reasons.append("missing_gate_id")
+    if missing_config_id > 0:
+        reasons.append("missing_config_id")
+    if missing_provider_id > 0:
+        reasons.append("missing_provider_id")
+    if missing_model_name > 0:
+        reasons.append("missing_model_name")
+    if invalid_provider_family > 0:
+        reasons.append("invalid_provider_family")
+    if invalid_model_family > 0:
+        reasons.append("invalid_model_family")
+    if invalid_model_size > 0:
+        reasons.append("invalid_model_size")
+    if invalid_gate_mode > 0:
+        reasons.append("invalid_gate_mode")
+    if invocation_allowed_blocked > 0:
+        reasons.append("invocation_allowed_blocked")
+    if network_blocked > 0:
+        reasons.append("network_not_allowed")
+    if process_spawn_blocked > 0:
+        reasons.append("process_spawn_not_allowed")
+    if model_load_blocked > 0:
+        reasons.append("model_load_not_allowed")
+    if model_call_blocked > 0:
+        reasons.append("model_call_not_allowed")
+    if mc_count > 0:
+        reasons.append("model_call_executed_detected")
+    if ol_count > 0:
+        reasons.append("ollama_invoked_detected")
+    if cl_count > 0:
+        reasons.append("cloud_invoked_detected")
+    if rm_count > 0:
+        reasons.append("repo_mutated_detected")
+    if bh_count > 0:
+        reasons.append("behavior_changed_detected")
+    if re_count > 0:
+        reasons.append("runtime_effect_detected")
+    reasons.extend([
+        "h6_9_local_provider_invocation_gate_not_production",
+        "deny_by_default",
+        "invocation_denied",
+        "no_model_calls_allowed",
+        "ollama_invocation_blocked",
+        "cloud_invocation_blocked",
+        "repo_mutation_blocked",
+        "runtime_effect_blocked",
+        "production_claim_blocked",
+        "public_claim_blocked",
+    ])
+
+    return {
+        "schema": "nexus.hybrid_h6_local_provider_invocation_gate.v1",
+        "evaluated": True,
+        "gate_status": "provider_invocation_gate_ready" if gate_ready else ("provider_invocation_gate_fail" if gate_allowed else "blocked"),
+        "gate_reasons": reasons,
+        "gate_allowed": gate_allowed,
+        "gate_ready": gate_ready,
+        "row_count": len(rows),
+        "config_present": config_present,
+        "config_ready": config_ready,
+        "config_receipt_ready": config_receipt_ready,
+        "ready_for_h6_9_local_provider_invocation_gate": ready_gate,
+        "invocation_gate_count": len(gates),
+        "invocation_gate_valid_count": len(valid_gates),
+        "invocation_gate_invalid_count": invalid_gates,
+        "qwen_3b_gate_count": qwen_3b,
+        "qwen_7b_gate_count": qwen_7b,
+        "qwen_14b_gate_count": qwen_14b,
+        "missing_gate_id_count": missing_gate_id,
+        "missing_config_id_count": missing_config_id,
+        "missing_provider_id_count": missing_provider_id,
+        "missing_model_name_count": missing_model_name,
+        "invalid_provider_family_count": invalid_provider_family,
+        "invalid_model_family_count": invalid_model_family,
+        "invalid_model_size_count": invalid_model_size,
+        "invalid_gate_mode_count": invalid_gate_mode,
+        "invocation_allowed_blocked_count": invocation_allowed_blocked,
+        "network_blocked_count": network_blocked,
+        "process_spawn_blocked_count": process_spawn_blocked,
+        "model_load_blocked_count": model_load_blocked,
+        "model_call_blocked_count": model_call_blocked,
+        "model_call_executed_count": mc_count,
+        "ollama_invoked_count": ol_count,
+        "cloud_invoked_count": cl_count,
+        "repo_mutated_count": rm_count,
+        "behavior_changed_count": bh_count,
+        "runtime_effect_count": re_count,
+        "safety_violation_count": safety,
+        "provider_invocation_gate_receipt_ready": gate_receipt_ready,
+        "ready_for_h6_10_controlled_provider_probe_preflight": ready_probe,
+        "production_ready": False,
+        "public_claim_allowed": False,
+    }
+
+
 def _finalize_with_nexus_row(
     row: dict[str, Any],
     *,
@@ -15987,6 +16720,33 @@ def write_evidence_bundle(
         "h6_deterministic_stub_behavior_changed_count": _build_h6_deterministic_local_adapter_stub_output(with_rows, payload).get("behavior_changed_count", 0),
         "h6_deterministic_stub_runtime_effect_count": _build_h6_deterministic_local_adapter_stub_output(with_rows, payload).get("runtime_effect_count", 0),
         "h6_deterministic_stub_safety_violation_count": _build_h6_deterministic_local_adapter_stub_output(with_rows, payload).get("safety_violation_count", 0),
+        "h6_local_provider_boundary_present": 1 if _build_h6_local_provider_boundary_preflight(with_rows, payload).get("evaluated") else 0,
+        "h6_local_provider_boundary_allowed": 1 if _build_h6_local_provider_boundary_preflight(with_rows, payload).get("boundary_allowed") else 0,
+        "h6_local_provider_boundary_ready": 1 if _build_h6_local_provider_boundary_preflight(with_rows, payload).get("boundary_ready") else 0,
+        "h6_local_provider_boundary_contract_ready": 1 if _build_h6_local_provider_boundary_preflight(with_rows, payload).get("provider_contract_ready") else 0,
+        "h6_local_provider_boundary_ready_for_config": 1 if _build_h6_local_provider_boundary_preflight(with_rows, payload).get("ready_for_h6_8_local_provider_config_contract") else 0,
+        "h6_local_provider_boundary_count": _build_h6_local_provider_boundary_preflight(with_rows, payload).get("provider_boundary_count", 0),
+        "h6_local_provider_valid_boundary_count": _build_h6_local_provider_boundary_preflight(with_rows, payload).get("provider_boundary_valid_count", 0),
+        "h6_local_provider_invalid_boundary_count": _build_h6_local_provider_boundary_preflight(with_rows, payload).get("provider_boundary_invalid_count", 0),
+        "h6_local_provider_boundary_safety_violation_count": _build_h6_local_provider_boundary_preflight(with_rows, payload).get("safety_violation_count", 0),
+        "h6_local_provider_config_present": 1 if _build_h6_local_provider_config_contract(with_rows, payload).get("evaluated") else 0,
+        "h6_local_provider_config_allowed": 1 if _build_h6_local_provider_config_contract(with_rows, payload).get("config_allowed") else 0,
+        "h6_local_provider_config_ready": 1 if _build_h6_local_provider_config_contract(with_rows, payload).get("config_ready") else 0,
+        "h6_local_provider_config_receipt_ready": 1 if _build_h6_local_provider_config_contract(with_rows, payload).get("provider_config_receipt_ready") else 0,
+        "h6_local_provider_config_ready_for_invocation_gate": 1 if _build_h6_local_provider_config_contract(with_rows, payload).get("ready_for_h6_9_local_provider_invocation_gate") else 0,
+        "h6_local_provider_config_count": _build_h6_local_provider_config_contract(with_rows, payload).get("provider_config_count", 0),
+        "h6_local_provider_valid_config_count": _build_h6_local_provider_config_contract(with_rows, payload).get("provider_config_valid_count", 0),
+        "h6_local_provider_invalid_config_count": _build_h6_local_provider_config_contract(with_rows, payload).get("provider_config_invalid_count", 0),
+        "h6_local_provider_config_safety_violation_count": _build_h6_local_provider_config_contract(with_rows, payload).get("safety_violation_count", 0),
+        "h6_local_provider_invocation_gate_present": 1 if _build_h6_local_provider_invocation_gate(with_rows, payload).get("evaluated") else 0,
+        "h6_local_provider_invocation_gate_allowed": 1 if _build_h6_local_provider_invocation_gate(with_rows, payload).get("gate_allowed") else 0,
+        "h6_local_provider_invocation_gate_ready": 1 if _build_h6_local_provider_invocation_gate(with_rows, payload).get("gate_ready") else 0,
+        "h6_local_provider_invocation_gate_receipt_ready": 1 if _build_h6_local_provider_invocation_gate(with_rows, payload).get("provider_invocation_gate_receipt_ready") else 0,
+        "h6_local_provider_invocation_gate_ready_for_probe": 1 if _build_h6_local_provider_invocation_gate(with_rows, payload).get("ready_for_h6_10_controlled_provider_probe_preflight") else 0,
+        "h6_local_provider_invocation_gate_count": _build_h6_local_provider_invocation_gate(with_rows, payload).get("invocation_gate_count", 0),
+        "h6_local_provider_valid_invocation_gate_count": _build_h6_local_provider_invocation_gate(with_rows, payload).get("invocation_gate_valid_count", 0),
+        "h6_local_provider_invalid_invocation_gate_count": _build_h6_local_provider_invocation_gate(with_rows, payload).get("invocation_gate_invalid_count", 0),
+        "h6_local_provider_invocation_gate_safety_violation_count": _build_h6_local_provider_invocation_gate(with_rows, payload).get("safety_violation_count", 0),
     }
     payload["h5_guarded_local_candidate_benchmark_trial"] = _build_h5_guarded_local_candidate_benchmark_trial(with_rows)
     payload["h5_quality_non_regression_gate"] = _build_h5_quality_non_regression_gate(with_rows, payload["h5_guarded_local_candidate_benchmark_trial"])
@@ -16007,6 +16767,9 @@ def write_evidence_bundle(
     payload["h6_local_adapter_execution_plan_dry_run"] = _build_h6_local_adapter_execution_plan_dry_run(with_rows, payload)
     payload["h6_shadow_local_adapter_invocation_intent_receipt"] = _build_h6_shadow_local_adapter_invocation_intent_receipt(with_rows, payload)
     payload["h6_deterministic_local_adapter_stub_output"] = _build_h6_deterministic_local_adapter_stub_output(with_rows, payload)
+    payload["h6_local_provider_boundary_preflight"] = _build_h6_local_provider_boundary_preflight(with_rows, payload)
+    payload["h6_local_provider_config_contract"] = _build_h6_local_provider_config_contract(with_rows, payload)
+    payload["h6_local_provider_invocation_gate"] = _build_h6_local_provider_invocation_gate(with_rows, payload)
     payload["external_provider_claim_boundary_contract"] = build_external_provider_claim_boundary_contract(payload)
     payload["public_promotion_readiness_contract"] = build_public_promotion_readiness_contract(payload)
     bundle_path.write_text(json.dumps(payload, indent=2, ensure_ascii=False), encoding="utf-8")
