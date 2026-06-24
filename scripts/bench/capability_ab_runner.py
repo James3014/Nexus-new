@@ -12354,6 +12354,275 @@ def _build_h6_controlled_provider_probe_preflight(rows: list[dict[str, Any]], bu
     }
 
 
+def _build_h6_provider_denial_receipt_replay(rows: list[dict[str, Any]], bundle: dict[str, Any] | None = None) -> dict[str, Any]:
+    """Pure helper: H6 provider denial receipt replay.
+
+    Replays the denial/preflight receipt from H6-10 and confirms that any
+    attempt to open provider, network, process, model load, model call,
+    runtime effect, or production/public claim is deterministically blocked.
+    """
+    import os as _os
+
+    flag = _os.environ.get("NEXUS_H6_ALLOW_PROVIDER_DENIAL_RECEIPT_REPLAY", "").strip() == "1"
+
+    preflight = None
+    if bundle:
+        preflight = bundle.get("h6_controlled_provider_probe_preflight")
+
+    preflight_present = bool(preflight)
+    preflight_ready = bool(preflight.get("preflight_ready", False)) if preflight else False
+    denial_receipt_ready = bool(preflight.get("denial_receipt_ready", False)) if preflight else False
+    preflight_safety = int(preflight.get("safety_violation_count", 0)) if preflight else 0
+
+    replays = [r.get("h6_provider_denial_receipt_replay") for r in rows if r.get("h6_provider_denial_receipt_replay")]
+
+    valid_replays = []
+    invalid_replays = 0
+    missing_replay_id = 0
+    missing_preflight_id = 0
+    missing_provider_id = 0
+    provider_probe_allowed_violation = 0
+    provider_invocation_allowed_violation = 0
+    network_allowed_violation = 0
+    process_spawn_allowed_violation = 0
+    model_load_allowed_violation = 0
+    model_call_allowed_violation = 0
+    model_call_executed_violation = 0
+    ollama_invoked_violation = 0
+    cloud_provider_invoked_violation = 0
+    repo_mutated_violation = 0
+    behavior_changed_violation = 0
+    runtime_effect_violation = 0
+    production_ready_violation = 0
+    public_claim_allowed_violation = 0
+
+    for rp in replays:
+        rid = str(rp.get("replay_id", "") or "").strip()
+        pid = str(rp.get("preflight_id", "") or "").strip()
+        prid = str(rp.get("provider_id", "") or "").strip()
+        ppa = bool(rp.get("provider_probe_allowed", True))
+        pia = bool(rp.get("provider_invocation_allowed", True))
+        na = bool(rp.get("network_allowed", True))
+        ps = bool(rp.get("process_spawn_allowed", True))
+        mla = bool(rp.get("model_load_allowed", True))
+        mca = bool(rp.get("model_call_allowed", True))
+        mc = bool(rp.get("model_call_executed", False))
+        ol = bool(rp.get("ollama_invoked", False))
+        cl = bool(rp.get("cloud_provider_invoked", False))
+        rm = bool(rp.get("repo_mutated", False))
+        bh = bool(rp.get("behavior_changed", False))
+        re = bool(rp.get("runtime_effect", False))
+        pr = bool(rp.get("production_ready", False))
+        pca = bool(rp.get("public_claim_allowed", False))
+
+        is_valid = (
+            rid and pid and prid
+            and not ppa and not pia and not na and not ps and not mla and not mca
+            and not mc and not ol and not cl and not rm and not bh and not re
+            and not pr and not pca
+        )
+
+        if is_valid:
+            valid_replays.append(rp)
+        else:
+            invalid_replays += 1
+            if not rid:
+                missing_replay_id += 1
+            if not pid:
+                missing_preflight_id += 1
+            if not prid:
+                missing_provider_id += 1
+            if ppa:
+                provider_probe_allowed_violation += 1
+            if pia:
+                provider_invocation_allowed_violation += 1
+            if na:
+                network_allowed_violation += 1
+            if ps:
+                process_spawn_allowed_violation += 1
+            if mla:
+                model_load_allowed_violation += 1
+            if mca:
+                model_call_allowed_violation += 1
+            if mc:
+                model_call_executed_violation += 1
+            if ol:
+                ollama_invoked_violation += 1
+            if cl:
+                cloud_provider_invoked_violation += 1
+            if rm:
+                repo_mutated_violation += 1
+            if bh:
+                behavior_changed_violation += 1
+            if re:
+                runtime_effect_violation += 1
+            if pr:
+                production_ready_violation += 1
+            if pca:
+                public_claim_allowed_violation += 1
+
+    total_violations = (
+        provider_probe_allowed_violation + provider_invocation_allowed_violation
+        + network_allowed_violation + process_spawn_allowed_violation
+        + model_load_allowed_violation + model_call_allowed_violation
+        + model_call_executed_violation + ollama_invoked_violation
+        + cloud_provider_invoked_violation + repo_mutated_violation
+        + behavior_changed_violation + runtime_effect_violation
+        + production_ready_violation + public_claim_allowed_violation
+    )
+
+    replay_allowed = (
+        flag and preflight_present and preflight_ready
+        and denial_receipt_ready and preflight_safety == 0
+    )
+
+    replay_ready = (
+        replay_allowed and len(valid_replays) > 0 and total_violations == 0
+    )
+
+    denial_replay_sealed = (
+        replay_ready and invalid_replays == 0
+    )
+
+    reasons = []
+    if not flag:
+        reasons.append("provider_denial_receipt_replay_flag_not_enabled")
+    if not preflight_present:
+        reasons.append("missing_h6_10_controlled_provider_probe_preflight")
+    if preflight and not preflight_ready:
+        reasons.append("h6_10_preflight_not_ready")
+    if preflight and not denial_receipt_ready:
+        reasons.append("h6_10_denial_receipt_not_ready")
+    if preflight_safety > 0:
+        reasons.append("h6_10_safety_violation_detected")
+    if not replays:
+        reasons.append("no_denial_replays")
+    if missing_replay_id > 0:
+        reasons.append("missing_replay_id")
+    if missing_preflight_id > 0:
+        reasons.append("missing_preflight_id")
+    if missing_provider_id > 0:
+        reasons.append("missing_provider_id")
+    if provider_probe_allowed_violation > 0:
+        reasons.append("provider_probe_allowed_violation")
+    if provider_invocation_allowed_violation > 0:
+        reasons.append("provider_invocation_allowed_violation")
+    if network_allowed_violation > 0:
+        reasons.append("network_allowed_violation")
+    if process_spawn_allowed_violation > 0:
+        reasons.append("process_spawn_allowed_violation")
+    if model_load_allowed_violation > 0:
+        reasons.append("model_load_allowed_violation")
+    if model_call_allowed_violation > 0:
+        reasons.append("model_call_allowed_violation")
+    if model_call_executed_violation > 0:
+        reasons.append("model_call_executed_violation")
+    if ollama_invoked_violation > 0:
+        reasons.append("ollama_invoked_violation")
+    if cloud_provider_invoked_violation > 0:
+        reasons.append("cloud_provider_invoked_violation")
+    if repo_mutated_violation > 0:
+        reasons.append("repo_mutated_violation")
+    if behavior_changed_violation > 0:
+        reasons.append("behavior_changed_violation")
+    if runtime_effect_violation > 0:
+        reasons.append("runtime_effect_violation")
+    if production_ready_violation > 0:
+        reasons.append("production_ready_violation")
+    if public_claim_allowed_violation > 0:
+        reasons.append("public_claim_allowed_violation")
+    reasons.extend([
+        "h6_11_provider_denial_receipt_replay_not_production",
+        "denial_receipt_replay_only",
+        "deny_by_default",
+        "no_provider_probe_allowed",
+        "no_provider_invocation_allowed",
+        "no_network_allowed",
+        "no_process_spawn_allowed",
+        "no_model_load_allowed",
+        "no_model_call_allowed",
+        "no_model_call_executed",
+        "no_ollama_invocation",
+        "no_cloud_provider_invocation",
+        "no_repo_mutation",
+        "no_behavior_change",
+        "no_runtime_effect",
+        "production_claim_blocked",
+        "public_claim_blocked",
+    ])
+
+    return {
+        "schema": "nexus.hybrid_h6_provider_denial_receipt_replay.v1",
+        "evaluated": True,
+        "replay_mode": "denial_receipt_replay_only",
+        "source_preflight_schema": "nexus.hybrid_h6_controlled_provider_probe_preflight.v1",
+        "source_preflight_ready": preflight_ready,
+        "source_denial_receipt_ready": denial_receipt_ready,
+        "replay_status": "denial_replay_ready" if replay_ready else ("denial_replay_fail" if replay_allowed else "blocked"),
+        "replay_reasons": reasons,
+        "replay_allowed": replay_allowed,
+        "replay_ready": replay_ready,
+        "row_count": len(rows),
+        "preflight_present": preflight_present,
+        "preflight_ready": preflight_ready,
+        "denial_receipt_ready": denial_receipt_ready,
+        "denial_replay_count": len(replays),
+        "denial_replay_valid_count": len(valid_replays),
+        "denial_replay_invalid_count": invalid_replays,
+        "total_violation_count": total_violations,
+        "missing_replay_id_count": missing_replay_id,
+        "missing_preflight_id_count": missing_preflight_id,
+        "missing_provider_id_count": missing_provider_id,
+        "provider_probe_allowed_violation_count": provider_probe_allowed_violation,
+        "provider_invocation_allowed_violation_count": provider_invocation_allowed_violation,
+        "network_allowed_violation_count": network_allowed_violation,
+        "process_spawn_allowed_violation_count": process_spawn_allowed_violation,
+        "model_load_allowed_violation_count": model_load_allowed_violation,
+        "model_call_allowed_violation_count": model_call_allowed_violation,
+        "model_call_executed_violation_count": model_call_executed_violation,
+        "ollama_invoked_violation_count": ollama_invoked_violation,
+        "cloud_provider_invoked_violation_count": cloud_provider_invoked_violation,
+        "repo_mutated_violation_count": repo_mutated_violation,
+        "behavior_changed_violation_count": behavior_changed_violation,
+        "runtime_effect_violation_count": runtime_effect_violation,
+        "production_ready_violation_count": production_ready_violation,
+        "public_claim_allowed_violation_count": public_claim_allowed_violation,
+        "provider_probe_denied": True,
+        "provider_invocation_denied": True,
+        "network_denied": True,
+        "process_spawn_denied": True,
+        "model_load_denied": True,
+        "model_call_denied": True,
+        "model_execution_denied": True,
+        "ollama_invocation_denied": True,
+        "cloud_provider_invocation_denied": True,
+        "repo_mutation_denied": True,
+        "behavior_change_denied": True,
+        "runtime_effect_denied": True,
+        "production_claim_denied": True,
+        "public_claim_denied": True,
+        "provider_probe_allowed": False,
+        "provider_invocation_allowed": False,
+        "network_allowed": False,
+        "process_spawn_allowed": False,
+        "model_load_allowed": False,
+        "model_call_allowed": False,
+        "model_call_executed": False,
+        "ollama_invoked": False,
+        "cloud_provider_invoked": False,
+        "repo_mutated": False,
+        "behavior_changed": False,
+        "runtime_effect": False,
+        "production_ready": False,
+        "public_claim_allowed": False,
+        "deny_by_default": True,
+        "denial_replay_sealed": denial_replay_sealed,
+        "ready_for_h6_12_controlled_local_provider_fixture": False,
+        "production_ready": False,
+        "public_claim_allowed": False,
+    }
+
+
 def _finalize_with_nexus_row(
     row: dict[str, Any],
     *,

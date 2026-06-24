@@ -30448,3 +30448,441 @@ def test_h6_10_probe_preflight_valid_3b(monkeypatch):
     r = _build_h6_controlled_provider_probe_preflight(rows, bundle)
     assert r["preflight_status"] == "provider_probe_preflight_ready"
     assert r["probe_preflight_valid_count"] == 1
+
+
+# ---------------------------------------------------------------------------
+# H6-11 Provider Denial Receipt Replay
+# ---------------------------------------------------------------------------
+
+def _h6_11_valid_replay_row():
+    return {"h6_provider_denial_receipt_replay": {
+        "replay_id": "denial-replay-001",
+        "preflight_id": "probe-preflight-001",
+        "provider_id": "local-qwen-ollama-boundary-v0",
+        "provider_probe_allowed": False,
+        "provider_invocation_allowed": False,
+        "network_allowed": False,
+        "process_spawn_allowed": False,
+        "model_load_allowed": False,
+        "model_call_allowed": False,
+        "model_call_executed": False,
+        "ollama_invoked": False,
+        "cloud_provider_invoked": False,
+        "repo_mutated": False,
+        "behavior_changed": False,
+        "runtime_effect": False,
+        "production_ready": False,
+        "public_claim_allowed": False,
+    }}
+
+
+def _h6_11_ready_preflight_bundle():
+    return {"h6_controlled_provider_probe_preflight": {
+        "preflight_ready": True,
+        "denial_receipt_ready": True,
+        "safety_violation_count": 0,
+    }}
+
+
+def test_h6_11_denial_replay_flag_missing_block(monkeypatch):
+    """H6-11 T01: Flag missing blocks denial replay."""
+    from scripts.bench.capability_ab_runner import _build_h6_provider_denial_receipt_replay
+    monkeypatch.delenv("NEXUS_H6_ALLOW_PROVIDER_DENIAL_RECEIPT_REPLAY", raising=False)
+    bundle = _h6_11_ready_preflight_bundle()
+    r = _build_h6_provider_denial_receipt_replay([], bundle)
+    assert r["replay_status"] == "blocked"
+    assert "provider_denial_receipt_replay_flag_not_enabled" in r["replay_reasons"]
+
+
+def test_h6_11_denial_replay_valid_replay(monkeypatch):
+    """H6-11 T02: Valid denial replay passes."""
+    from scripts.bench.capability_ab_runner import _build_h6_provider_denial_receipt_replay
+    monkeypatch.setenv("NEXUS_H6_ALLOW_PROVIDER_DENIAL_RECEIPT_REPLAY", "1")
+    bundle = _h6_11_ready_preflight_bundle()
+    rows = [_h6_11_valid_replay_row()]
+    r = _build_h6_provider_denial_receipt_replay(rows, bundle)
+    assert r["replay_status"] == "denial_replay_ready"
+    assert r["denial_replay_valid_count"] == 1
+    assert r["ready_for_h6_12_controlled_local_provider_fixture"] is False
+
+
+def test_h6_11_denial_replay_missing_h6_10_block(monkeypatch):
+    """H6-11 T03: Missing H6-10 bundle blocks replay."""
+    from scripts.bench.capability_ab_runner import _build_h6_provider_denial_receipt_replay
+    monkeypatch.setenv("NEXUS_H6_ALLOW_PROVIDER_DENIAL_RECEIPT_REPLAY", "1")
+    r = _build_h6_provider_denial_receipt_replay([], None)
+    assert r["replay_status"] == "blocked"
+    assert "missing_h6_10_controlled_provider_probe_preflight" in r["replay_reasons"]
+
+
+def test_h6_11_denial_replay_h6_10_not_ready_block(monkeypatch):
+    """H6-11 T04: H6-10 not ready blocks replay."""
+    from scripts.bench.capability_ab_runner import _build_h6_provider_denial_receipt_replay
+    monkeypatch.setenv("NEXUS_H6_ALLOW_PROVIDER_DENIAL_RECEIPT_REPLAY", "1")
+    bundle = {"h6_controlled_provider_probe_preflight": {"preflight_ready": False, "denial_receipt_ready": False, "safety_violation_count": 0}}
+    r = _build_h6_provider_denial_receipt_replay([], bundle)
+    assert r["replay_status"] == "blocked"
+    assert "h6_10_preflight_not_ready" in r["replay_reasons"]
+
+
+def test_h6_11_denial_replay_h6_10_denial_not_ready_block(monkeypatch):
+    """H6-11 T05: H6-10 denial receipt not ready blocks replay."""
+    from scripts.bench.capability_ab_runner import _build_h6_provider_denial_receipt_replay
+    monkeypatch.setenv("NEXUS_H6_ALLOW_PROVIDER_DENIAL_RECEIPT_REPLAY", "1")
+    bundle = {"h6_controlled_provider_probe_preflight": {"preflight_ready": True, "denial_receipt_ready": False, "safety_violation_count": 0}}
+    r = _build_h6_provider_denial_receipt_replay([], bundle)
+    assert r["replay_status"] == "blocked"
+    assert "h6_10_denial_receipt_not_ready" in r["replay_reasons"]
+
+
+def test_h6_11_denial_replay_h6_10_safety_violation_block(monkeypatch):
+    """H6-11 T06: H6-10 safety violation blocks replay."""
+    from scripts.bench.capability_ab_runner import _build_h6_provider_denial_receipt_replay
+    monkeypatch.setenv("NEXUS_H6_ALLOW_PROVIDER_DENIAL_RECEIPT_REPLAY", "1")
+    bundle = {"h6_controlled_provider_probe_preflight": {"preflight_ready": True, "denial_receipt_ready": True, "safety_violation_count": 3}}
+    r = _build_h6_provider_denial_receipt_replay([], bundle)
+    assert r["replay_status"] == "blocked"
+    assert "h6_10_safety_violation_detected" in r["replay_reasons"]
+
+
+def test_h6_11_denial_replay_missing_replay_id(monkeypatch):
+    """H6-11 T07: Missing replay_id invalidates replay."""
+    from scripts.bench.capability_ab_runner import _build_h6_provider_denial_receipt_replay
+    monkeypatch.setenv("NEXUS_H6_ALLOW_PROVIDER_DENIAL_RECEIPT_REPLAY", "1")
+    bundle = _h6_11_ready_preflight_bundle()
+    row = {"h6_provider_denial_receipt_replay": {"replay_id": "", "preflight_id": "p1", "provider_id": "pr1", "provider_probe_allowed": False, "provider_invocation_allowed": False, "network_allowed": False, "process_spawn_allowed": False, "model_load_allowed": False, "model_call_allowed": False, "model_call_executed": False, "ollama_invoked": False, "cloud_provider_invoked": False, "repo_mutated": False, "behavior_changed": False, "runtime_effect": False, "production_ready": False, "public_claim_allowed": False}}
+    r = _build_h6_provider_denial_receipt_replay([row], bundle)
+    assert r["missing_replay_id_count"] == 1
+    assert "missing_replay_id" in r["replay_reasons"]
+
+
+def test_h6_11_denial_replay_missing_preflight_id(monkeypatch):
+    """H6-11 T08: Missing preflight_id invalidates replay."""
+    from scripts.bench.capability_ab_runner import _build_h6_provider_denial_receipt_replay
+    monkeypatch.setenv("NEXUS_H6_ALLOW_PROVIDER_DENIAL_RECEIPT_REPLAY", "1")
+    bundle = _h6_11_ready_preflight_bundle()
+    row = {"h6_provider_denial_receipt_replay": {"replay_id": "r1", "preflight_id": "", "provider_id": "pr1", "provider_probe_allowed": False, "provider_invocation_allowed": False, "network_allowed": False, "process_spawn_allowed": False, "model_load_allowed": False, "model_call_allowed": False, "model_call_executed": False, "ollama_invoked": False, "cloud_provider_invoked": False, "repo_mutated": False, "behavior_changed": False, "runtime_effect": False, "production_ready": False, "public_claim_allowed": False}}
+    r = _build_h6_provider_denial_receipt_replay([row], bundle)
+    assert r["missing_preflight_id_count"] == 1
+    assert "missing_preflight_id" in r["replay_reasons"]
+
+
+def test_h6_11_denial_replay_missing_provider_id(monkeypatch):
+    """H6-11 T09: Missing provider_id invalidates replay."""
+    from scripts.bench.capability_ab_runner import _build_h6_provider_denial_receipt_replay
+    monkeypatch.setenv("NEXUS_H6_ALLOW_PROVIDER_DENIAL_RECEIPT_REPLAY", "1")
+    bundle = _h6_11_ready_preflight_bundle()
+    row = {"h6_provider_denial_receipt_replay": {"replay_id": "r1", "preflight_id": "p1", "provider_id": "", "provider_probe_allowed": False, "provider_invocation_allowed": False, "network_allowed": False, "process_spawn_allowed": False, "model_load_allowed": False, "model_call_allowed": False, "model_call_executed": False, "ollama_invoked": False, "cloud_provider_invoked": False, "repo_mutated": False, "behavior_changed": False, "runtime_effect": False, "production_ready": False, "public_claim_allowed": False}}
+    r = _build_h6_provider_denial_receipt_replay([row], bundle)
+    assert r["missing_provider_id_count"] == 1
+    assert "missing_provider_id" in r["replay_reasons"]
+
+
+def test_h6_11_denial_replay_provider_probe_allowed_denied(monkeypatch):
+    """H6-11 T10: provider_probe_allowed=true is denied."""
+    from scripts.bench.capability_ab_runner import _build_h6_provider_denial_receipt_replay
+    monkeypatch.setenv("NEXUS_H6_ALLOW_PROVIDER_DENIAL_RECEIPT_REPLAY", "1")
+    bundle = _h6_11_ready_preflight_bundle()
+    row = {"h6_provider_denial_receipt_replay": {"replay_id": "r1", "preflight_id": "p1", "provider_id": "pr1", "provider_probe_allowed": True, "provider_invocation_allowed": False, "network_allowed": False, "process_spawn_allowed": False, "model_load_allowed": False, "model_call_allowed": False, "model_call_executed": False, "ollama_invoked": False, "cloud_provider_invoked": False, "repo_mutated": False, "behavior_changed": False, "runtime_effect": False, "production_ready": False, "public_claim_allowed": False}}
+    r = _build_h6_provider_denial_receipt_replay([row], bundle)
+    assert r["provider_probe_allowed"] is False
+    assert r["provider_probe_allowed_violation_count"] == 1
+    assert "provider_probe_allowed_violation" in r["replay_reasons"]
+
+
+def test_h6_11_denial_replay_provider_invocation_allowed_denied(monkeypatch):
+    """H6-11 T11: provider_invocation_allowed=true is denied."""
+    from scripts.bench.capability_ab_runner import _build_h6_provider_denial_receipt_replay
+    monkeypatch.setenv("NEXUS_H6_ALLOW_PROVIDER_DENIAL_RECEIPT_REPLAY", "1")
+    bundle = _h6_11_ready_preflight_bundle()
+    row = {"h6_provider_denial_receipt_replay": {"replay_id": "r1", "preflight_id": "p1", "provider_id": "pr1", "provider_probe_allowed": False, "provider_invocation_allowed": True, "network_allowed": False, "process_spawn_allowed": False, "model_load_allowed": False, "model_call_allowed": False, "model_call_executed": False, "ollama_invoked": False, "cloud_provider_invoked": False, "repo_mutated": False, "behavior_changed": False, "runtime_effect": False, "production_ready": False, "public_claim_allowed": False}}
+    r = _build_h6_provider_denial_receipt_replay([row], bundle)
+    assert r["provider_invocation_allowed"] is False
+    assert r["provider_invocation_allowed_violation_count"] == 1
+    assert "provider_invocation_allowed_violation" in r["replay_reasons"]
+
+
+def test_h6_11_denial_replay_network_allowed_denied(monkeypatch):
+    """H6-11 T12: network_allowed=true is denied."""
+    from scripts.bench.capability_ab_runner import _build_h6_provider_denial_receipt_replay
+    monkeypatch.setenv("NEXUS_H6_ALLOW_PROVIDER_DENIAL_RECEIPT_REPLAY", "1")
+    bundle = _h6_11_ready_preflight_bundle()
+    row = {"h6_provider_denial_receipt_replay": {"replay_id": "r1", "preflight_id": "p1", "provider_id": "pr1", "provider_probe_allowed": False, "provider_invocation_allowed": False, "network_allowed": True, "process_spawn_allowed": False, "model_load_allowed": False, "model_call_allowed": False, "model_call_executed": False, "ollama_invoked": False, "cloud_provider_invoked": False, "repo_mutated": False, "behavior_changed": False, "runtime_effect": False, "production_ready": False, "public_claim_allowed": False}}
+    r = _build_h6_provider_denial_receipt_replay([row], bundle)
+    assert r["network_allowed"] is False
+    assert r["network_allowed_violation_count"] == 1
+    assert "network_allowed_violation" in r["replay_reasons"]
+
+
+def test_h6_11_denial_replay_process_spawn_allowed_denied(monkeypatch):
+    """H6-11 T13: process_spawn_allowed=true is denied."""
+    from scripts.bench.capability_ab_runner import _build_h6_provider_denial_receipt_replay
+    monkeypatch.setenv("NEXUS_H6_ALLOW_PROVIDER_DENIAL_RECEIPT_REPLAY", "1")
+    bundle = _h6_11_ready_preflight_bundle()
+    row = {"h6_provider_denial_receipt_replay": {"replay_id": "r1", "preflight_id": "p1", "provider_id": "pr1", "provider_probe_allowed": False, "provider_invocation_allowed": False, "network_allowed": False, "process_spawn_allowed": True, "model_load_allowed": False, "model_call_allowed": False, "model_call_executed": False, "ollama_invoked": False, "cloud_provider_invoked": False, "repo_mutated": False, "behavior_changed": False, "runtime_effect": False, "production_ready": False, "public_claim_allowed": False}}
+    r = _build_h6_provider_denial_receipt_replay([row], bundle)
+    assert r["process_spawn_allowed"] is False
+    assert r["process_spawn_allowed_violation_count"] == 1
+    assert "process_spawn_allowed_violation" in r["replay_reasons"]
+
+
+def test_h6_11_denial_replay_model_load_allowed_denied(monkeypatch):
+    """H6-11 T14: model_load_allowed=true is denied."""
+    from scripts.bench.capability_ab_runner import _build_h6_provider_denial_receipt_replay
+    monkeypatch.setenv("NEXUS_H6_ALLOW_PROVIDER_DENIAL_RECEIPT_REPLAY", "1")
+    bundle = _h6_11_ready_preflight_bundle()
+    row = {"h6_provider_denial_receipt_replay": {"replay_id": "r1", "preflight_id": "p1", "provider_id": "pr1", "provider_probe_allowed": False, "provider_invocation_allowed": False, "network_allowed": False, "process_spawn_allowed": False, "model_load_allowed": True, "model_call_allowed": False, "model_call_executed": False, "ollama_invoked": False, "cloud_provider_invoked": False, "repo_mutated": False, "behavior_changed": False, "runtime_effect": False, "production_ready": False, "public_claim_allowed": False}}
+    r = _build_h6_provider_denial_receipt_replay([row], bundle)
+    assert r["model_load_allowed"] is False
+    assert r["model_load_allowed_violation_count"] == 1
+    assert "model_load_allowed_violation" in r["replay_reasons"]
+
+
+def test_h6_11_denial_replay_model_call_allowed_denied(monkeypatch):
+    """H6-11 T15: model_call_allowed=true is denied."""
+    from scripts.bench.capability_ab_runner import _build_h6_provider_denial_receipt_replay
+    monkeypatch.setenv("NEXUS_H6_ALLOW_PROVIDER_DENIAL_RECEIPT_REPLAY", "1")
+    bundle = _h6_11_ready_preflight_bundle()
+    row = {"h6_provider_denial_receipt_replay": {"replay_id": "r1", "preflight_id": "p1", "provider_id": "pr1", "provider_probe_allowed": False, "provider_invocation_allowed": False, "network_allowed": False, "process_spawn_allowed": False, "model_load_allowed": False, "model_call_allowed": True, "model_call_executed": False, "ollama_invoked": False, "cloud_provider_invoked": False, "repo_mutated": False, "behavior_changed": False, "runtime_effect": False, "production_ready": False, "public_claim_allowed": False}}
+    r = _build_h6_provider_denial_receipt_replay([row], bundle)
+    assert r["model_call_allowed"] is False
+    assert r["model_call_allowed_violation_count"] == 1
+    assert "model_call_allowed_violation" in r["replay_reasons"]
+
+
+def test_h6_11_denial_replay_model_call_executed_denied(monkeypatch):
+    """H6-11 T16: model_call_executed=true is denied."""
+    from scripts.bench.capability_ab_runner import _build_h6_provider_denial_receipt_replay
+    monkeypatch.setenv("NEXUS_H6_ALLOW_PROVIDER_DENIAL_RECEIPT_REPLAY", "1")
+    bundle = _h6_11_ready_preflight_bundle()
+    row = {"h6_provider_denial_receipt_replay": {"replay_id": "r1", "preflight_id": "p1", "provider_id": "pr1", "provider_probe_allowed": False, "provider_invocation_allowed": False, "network_allowed": False, "process_spawn_allowed": False, "model_load_allowed": False, "model_call_allowed": False, "model_call_executed": True, "ollama_invoked": False, "cloud_provider_invoked": False, "repo_mutated": False, "behavior_changed": False, "runtime_effect": False, "production_ready": False, "public_claim_allowed": False}}
+    r = _build_h6_provider_denial_receipt_replay([row], bundle)
+    assert r["model_call_executed"] is False
+    assert r["model_call_executed_violation_count"] == 1
+    assert "model_call_executed_violation" in r["replay_reasons"]
+
+
+def test_h6_11_denial_replay_ollama_invoked_denied(monkeypatch):
+    """H6-11 T17: ollama_invoked=true is denied."""
+    from scripts.bench.capability_ab_runner import _build_h6_provider_denial_receipt_replay
+    monkeypatch.setenv("NEXUS_H6_ALLOW_PROVIDER_DENIAL_RECEIPT_REPLAY", "1")
+    bundle = _h6_11_ready_preflight_bundle()
+    row = {"h6_provider_denial_receipt_replay": {"replay_id": "r1", "preflight_id": "p1", "provider_id": "pr1", "provider_probe_allowed": False, "provider_invocation_allowed": False, "network_allowed": False, "process_spawn_allowed": False, "model_load_allowed": False, "model_call_allowed": False, "model_call_executed": False, "ollama_invoked": True, "cloud_provider_invoked": False, "repo_mutated": False, "behavior_changed": False, "runtime_effect": False, "production_ready": False, "public_claim_allowed": False}}
+    r = _build_h6_provider_denial_receipt_replay([row], bundle)
+    assert r["ollama_invoked"] is False
+    assert r["ollama_invoked_violation_count"] == 1
+    assert "ollama_invoked_violation" in r["replay_reasons"]
+
+
+def test_h6_11_denial_replay_cloud_provider_invoked_denied(monkeypatch):
+    """H6-11 T18: cloud_provider_invoked=true is denied."""
+    from scripts.bench.capability_ab_runner import _build_h6_provider_denial_receipt_replay
+    monkeypatch.setenv("NEXUS_H6_ALLOW_PROVIDER_DENIAL_RECEIPT_REPLAY", "1")
+    bundle = _h6_11_ready_preflight_bundle()
+    row = {"h6_provider_denial_receipt_replay": {"replay_id": "r1", "preflight_id": "p1", "provider_id": "pr1", "provider_probe_allowed": False, "provider_invocation_allowed": False, "network_allowed": False, "process_spawn_allowed": False, "model_load_allowed": False, "model_call_allowed": False, "model_call_executed": False, "ollama_invoked": False, "cloud_provider_invoked": True, "repo_mutated": False, "behavior_changed": False, "runtime_effect": False, "production_ready": False, "public_claim_allowed": False}}
+    r = _build_h6_provider_denial_receipt_replay([row], bundle)
+    assert r["cloud_provider_invoked"] is False
+    assert r["cloud_provider_invoked_violation_count"] == 1
+    assert "cloud_provider_invoked_violation" in r["replay_reasons"]
+
+
+def test_h6_11_denial_replay_repo_mutated_denied(monkeypatch):
+    """H6-11 T19: repo_mutated=true is denied."""
+    from scripts.bench.capability_ab_runner import _build_h6_provider_denial_receipt_replay
+    monkeypatch.setenv("NEXUS_H6_ALLOW_PROVIDER_DENIAL_RECEIPT_REPLAY", "1")
+    bundle = _h6_11_ready_preflight_bundle()
+    row = {"h6_provider_denial_receipt_replay": {"replay_id": "r1", "preflight_id": "p1", "provider_id": "pr1", "provider_probe_allowed": False, "provider_invocation_allowed": False, "network_allowed": False, "process_spawn_allowed": False, "model_load_allowed": False, "model_call_allowed": False, "model_call_executed": False, "ollama_invoked": False, "cloud_provider_invoked": False, "repo_mutated": True, "behavior_changed": False, "runtime_effect": False, "production_ready": False, "public_claim_allowed": False}}
+    r = _build_h6_provider_denial_receipt_replay([row], bundle)
+    assert r["repo_mutated"] is False
+    assert r["repo_mutated_violation_count"] == 1
+    assert "repo_mutated_violation" in r["replay_reasons"]
+
+
+def test_h6_11_denial_replay_behavior_changed_denied(monkeypatch):
+    """H6-11 T20: behavior_changed=true is denied."""
+    from scripts.bench.capability_ab_runner import _build_h6_provider_denial_receipt_replay
+    monkeypatch.setenv("NEXUS_H6_ALLOW_PROVIDER_DENIAL_RECEIPT_REPLAY", "1")
+    bundle = _h6_11_ready_preflight_bundle()
+    row = {"h6_provider_denial_receipt_replay": {"replay_id": "r1", "preflight_id": "p1", "provider_id": "pr1", "provider_probe_allowed": False, "provider_invocation_allowed": False, "network_allowed": False, "process_spawn_allowed": False, "model_load_allowed": False, "model_call_allowed": False, "model_call_executed": False, "ollama_invoked": False, "cloud_provider_invoked": False, "repo_mutated": False, "behavior_changed": True, "runtime_effect": False, "production_ready": False, "public_claim_allowed": False}}
+    r = _build_h6_provider_denial_receipt_replay([row], bundle)
+    assert r["behavior_changed"] is False
+    assert r["behavior_changed_violation_count"] == 1
+    assert "behavior_changed_violation" in r["replay_reasons"]
+
+
+def test_h6_11_denial_replay_runtime_effect_denied(monkeypatch):
+    """H6-11 T21: runtime_effect=true is denied."""
+    from scripts.bench.capability_ab_runner import _build_h6_provider_denial_receipt_replay
+    monkeypatch.setenv("NEXUS_H6_ALLOW_PROVIDER_DENIAL_RECEIPT_REPLAY", "1")
+    bundle = _h6_11_ready_preflight_bundle()
+    row = {"h6_provider_denial_receipt_replay": {"replay_id": "r1", "preflight_id": "p1", "provider_id": "pr1", "provider_probe_allowed": False, "provider_invocation_allowed": False, "network_allowed": False, "process_spawn_allowed": False, "model_load_allowed": False, "model_call_allowed": False, "model_call_executed": False, "ollama_invoked": False, "cloud_provider_invoked": False, "repo_mutated": False, "behavior_changed": False, "runtime_effect": True, "production_ready": False, "public_claim_allowed": False}}
+    r = _build_h6_provider_denial_receipt_replay([row], bundle)
+    assert r["runtime_effect"] is False
+    assert r["runtime_effect_violation_count"] == 1
+    assert "runtime_effect_violation" in r["replay_reasons"]
+
+
+def test_h6_11_denial_replay_production_ready_false(monkeypatch):
+    """H6-11 T22: production_ready=true is denied."""
+    from scripts.bench.capability_ab_runner import _build_h6_provider_denial_receipt_replay
+    monkeypatch.setenv("NEXUS_H6_ALLOW_PROVIDER_DENIAL_RECEIPT_REPLAY", "1")
+    bundle = _h6_11_ready_preflight_bundle()
+    row = {"h6_provider_denial_receipt_replay": {"replay_id": "r1", "preflight_id": "p1", "provider_id": "pr1", "provider_probe_allowed": False, "provider_invocation_allowed": False, "network_allowed": False, "process_spawn_allowed": False, "model_load_allowed": False, "model_call_allowed": False, "model_call_executed": False, "ollama_invoked": False, "cloud_provider_invoked": False, "repo_mutated": False, "behavior_changed": False, "runtime_effect": False, "production_ready": True, "public_claim_allowed": False}}
+    r = _build_h6_provider_denial_receipt_replay([row], bundle)
+    assert r["production_ready"] is False
+    assert r["production_ready_violation_count"] == 1
+    assert "production_ready_violation" in r["replay_reasons"]
+
+
+def test_h6_11_denial_replay_public_claim_allowed_false(monkeypatch):
+    """H6-11 T23: public_claim_allowed=true is denied."""
+    from scripts.bench.capability_ab_runner import _build_h6_provider_denial_receipt_replay
+    monkeypatch.setenv("NEXUS_H6_ALLOW_PROVIDER_DENIAL_RECEIPT_REPLAY", "1")
+    bundle = _h6_11_ready_preflight_bundle()
+    row = {"h6_provider_denial_receipt_replay": {"replay_id": "r1", "preflight_id": "p1", "provider_id": "pr1", "provider_probe_allowed": False, "provider_invocation_allowed": False, "network_allowed": False, "process_spawn_allowed": False, "model_load_allowed": False, "model_call_allowed": False, "model_call_executed": False, "ollama_invoked": False, "cloud_provider_invoked": False, "repo_mutated": False, "behavior_changed": False, "runtime_effect": False, "production_ready": False, "public_claim_allowed": True}}
+    r = _build_h6_provider_denial_receipt_replay([row], bundle)
+    assert r["public_claim_allowed"] is False
+    assert r["public_claim_allowed_violation_count"] == 1
+    assert "public_claim_allowed_violation" in r["replay_reasons"]
+
+
+def test_h6_11_denial_replay_bundle_summary_counters(monkeypatch):
+    """H6-11 T24: Bundle summary counters for multiple violations."""
+    from scripts.bench.capability_ab_runner import _build_h6_provider_denial_receipt_replay
+    monkeypatch.setenv("NEXUS_H6_ALLOW_PROVIDER_DENIAL_RECEIPT_REPLAY", "1")
+    bundle = _h6_11_ready_preflight_bundle()
+    row = {"h6_provider_denial_receipt_replay": {"replay_id": "r1", "preflight_id": "p1", "provider_id": "pr1", "provider_probe_allowed": True, "provider_invocation_allowed": True, "network_allowed": True, "process_spawn_allowed": False, "model_load_allowed": False, "model_call_allowed": False, "model_call_executed": True, "ollama_invoked": True, "cloud_provider_invoked": False, "repo_mutated": False, "behavior_changed": False, "runtime_effect": True, "production_ready": False, "public_claim_allowed": False}}
+    r = _build_h6_provider_denial_receipt_replay([row], bundle)
+    assert r["provider_probe_allowed_violation_count"] == 1
+    assert r["provider_invocation_allowed_violation_count"] == 1
+    assert r["network_allowed_violation_count"] == 1
+    assert r["model_call_executed_violation_count"] == 1
+    assert r["ollama_invoked_violation_count"] == 1
+    assert r["runtime_effect_violation_count"] == 1
+    assert r["total_violation_count"] == 6
+
+
+def test_h6_11_denial_replay_report_status(monkeypatch):
+    """H6-11 T25: Report status and schema fields."""
+    from scripts.bench.capability_ab_runner import _build_h6_provider_denial_receipt_replay
+    monkeypatch.setenv("NEXUS_H6_ALLOW_PROVIDER_DENIAL_RECEIPT_REPLAY", "1")
+    bundle = _h6_11_ready_preflight_bundle()
+    rows = [_h6_11_valid_replay_row()]
+    r = _build_h6_provider_denial_receipt_replay(rows, bundle)
+    assert r["schema"] == "nexus.hybrid_h6_provider_denial_receipt_replay.v1"
+    assert r["evaluated"] is True
+    assert r["replay_mode"] == "denial_receipt_replay_only"
+    assert r["source_preflight_schema"] == "nexus.hybrid_h6_controlled_provider_probe_preflight.v1"
+    assert r["source_preflight_ready"] is True
+    assert r["source_denial_receipt_ready"] is True
+    assert r["replay_status"] == "denial_replay_ready"
+    assert r["replay_allowed"] is True
+    assert r["replay_ready"] is True
+    assert r["denial_replay_sealed"] is True
+
+
+def test_h6_11_denial_replay_deny_fields_all_true(monkeypatch):
+    """H6-11 T26: All denied fields are true in receipt."""
+    from scripts.bench.capability_ab_runner import _build_h6_provider_denial_receipt_replay
+    monkeypatch.setenv("NEXUS_H6_ALLOW_PROVIDER_DENIAL_RECEIPT_REPLAY", "1")
+    bundle = _h6_11_ready_preflight_bundle()
+    rows = [_h6_11_valid_replay_row()]
+    r = _build_h6_provider_denial_receipt_replay(rows, bundle)
+    assert r["provider_probe_denied"] is True
+    assert r["provider_invocation_denied"] is True
+    assert r["network_denied"] is True
+    assert r["process_spawn_denied"] is True
+    assert r["model_load_denied"] is True
+    assert r["model_call_denied"] is True
+    assert r["model_execution_denied"] is True
+    assert r["ollama_invocation_denied"] is True
+    assert r["cloud_provider_invocation_denied"] is True
+    assert r["repo_mutation_denied"] is True
+    assert r["behavior_change_denied"] is True
+    assert r["runtime_effect_denied"] is True
+    assert r["production_claim_denied"] is True
+    assert r["public_claim_denied"] is True
+
+
+def test_h6_11_denial_replay_all_safety_false(monkeypatch):
+    """H6-11 T27: All safety fields remain false."""
+    from scripts.bench.capability_ab_runner import _build_h6_provider_denial_receipt_replay
+    monkeypatch.setenv("NEXUS_H6_ALLOW_PROVIDER_DENIAL_RECEIPT_REPLAY", "1")
+    bundle = _h6_11_ready_preflight_bundle()
+    rows = [_h6_11_valid_replay_row()]
+    r = _build_h6_provider_denial_receipt_replay(rows, bundle)
+    assert r["provider_probe_allowed"] is False
+    assert r["provider_invocation_allowed"] is False
+    assert r["network_allowed"] is False
+    assert r["process_spawn_allowed"] is False
+    assert r["model_load_allowed"] is False
+    assert r["model_call_allowed"] is False
+    assert r["model_call_executed"] is False
+    assert r["ollama_invoked"] is False
+    assert r["cloud_provider_invoked"] is False
+    assert r["repo_mutated"] is False
+    assert r["behavior_changed"] is False
+    assert r["runtime_effect"] is False
+    assert r["production_ready"] is False
+    assert r["public_claim_allowed"] is False
+    assert r["deny_by_default"] is True
+
+
+def test_h6_11_denial_replay_ready_for_h6_12_false(monkeypatch):
+    """H6-11 T28: ready_for_h6_12 is always false."""
+    from scripts.bench.capability_ab_runner import _build_h6_provider_denial_receipt_replay
+    monkeypatch.setenv("NEXUS_H6_ALLOW_PROVIDER_DENIAL_RECEIPT_REPLAY", "1")
+    bundle = _h6_11_ready_preflight_bundle()
+    rows = [_h6_11_valid_replay_row()]
+    r = _build_h6_provider_denial_receipt_replay(rows, bundle)
+    assert r["ready_for_h6_12_controlled_local_provider_fixture"] is False
+
+
+def test_h6_11_denial_replay_multiple_valid_replays(monkeypatch):
+    """H6-11 T29: Multiple valid replays counted correctly."""
+    from scripts.bench.capability_ab_runner import _build_h6_provider_denial_receipt_replay
+    monkeypatch.setenv("NEXUS_H6_ALLOW_PROVIDER_DENIAL_RECEIPT_REPLAY", "1")
+    bundle = _h6_11_ready_preflight_bundle()
+    rows = [
+        {"h6_provider_denial_receipt_replay": {"replay_id": "r1", "preflight_id": "p1", "provider_id": "pr1", "provider_probe_allowed": False, "provider_invocation_allowed": False, "network_allowed": False, "process_spawn_allowed": False, "model_load_allowed": False, "model_call_allowed": False, "model_call_executed": False, "ollama_invoked": False, "cloud_provider_invoked": False, "repo_mutated": False, "behavior_changed": False, "runtime_effect": False, "production_ready": False, "public_claim_allowed": False}},
+        {"h6_provider_denial_receipt_replay": {"replay_id": "r2", "preflight_id": "p2", "provider_id": "pr2", "provider_probe_allowed": False, "provider_invocation_allowed": False, "network_allowed": False, "process_spawn_allowed": False, "model_load_allowed": False, "model_call_allowed": False, "model_call_executed": False, "ollama_invoked": False, "cloud_provider_invoked": False, "repo_mutated": False, "behavior_changed": False, "runtime_effect": False, "production_ready": False, "public_claim_allowed": False}},
+    ]
+    r = _build_h6_provider_denial_receipt_replay(rows, bundle)
+    assert r["denial_replay_count"] == 2
+    assert r["denial_replay_valid_count"] == 2
+    assert r["denial_replay_invalid_count"] == 0
+
+
+def test_h6_11_denial_replay_mix_valid_invalid(monkeypatch):
+    """H6-11 T30: Mix of valid and invalid replays."""
+    from scripts.bench.capability_ab_runner import _build_h6_provider_denial_receipt_replay
+    monkeypatch.setenv("NEXUS_H6_ALLOW_PROVIDER_DENIAL_RECEIPT_REPLAY", "1")
+    bundle = _h6_11_ready_preflight_bundle()
+    rows = [
+        _h6_11_valid_replay_row(),
+        {"h6_provider_denial_receipt_replay": {"replay_id": "", "preflight_id": "p2", "provider_id": "pr2", "provider_probe_allowed": False, "provider_invocation_allowed": False, "network_allowed": False, "process_spawn_allowed": False, "model_load_allowed": False, "model_call_allowed": False, "model_call_executed": False, "ollama_invoked": False, "cloud_provider_invoked": False, "repo_mutated": False, "behavior_changed": False, "runtime_effect": False, "production_ready": False, "public_claim_allowed": False}},
+    ]
+    r = _build_h6_provider_denial_receipt_replay(rows, bundle)
+    assert r["denial_replay_count"] == 2
+    assert r["denial_replay_valid_count"] == 1
+    assert r["denial_replay_invalid_count"] == 1
+    assert r["missing_replay_id_count"] == 1
+
+
+def test_h6_11_denial_replay_not_ready_for_h6_12_on_invalid(monkeypatch):
+    """H6-11 T31: Invalid replay blocks h6_12."""
+    from scripts.bench.capability_ab_runner import _build_h6_provider_denial_receipt_replay
+    monkeypatch.setenv("NEXUS_H6_ALLOW_PROVIDER_DENIAL_RECEIPT_REPLAY", "1")
+    bundle = _h6_11_ready_preflight_bundle()
+    row = {"h6_provider_denial_receipt_replay": {"replay_id": "", "preflight_id": "", "provider_id": "", "provider_probe_allowed": False, "provider_invocation_allowed": False, "network_allowed": False, "process_spawn_allowed": False, "model_load_allowed": False, "model_call_allowed": False, "model_call_executed": False, "ollama_invoked": False, "cloud_provider_invoked": False, "repo_mutated": False, "behavior_changed": False, "runtime_effect": False, "production_ready": False, "public_claim_allowed": False}}
+    r = _build_h6_provider_denial_receipt_replay([row], bundle)
+    assert r["ready_for_h6_12_controlled_local_provider_fixture"] is False
+    assert r["denial_replay_sealed"] is False
+
+
+def test_h6_11_denial_replay_collect_only():
+    """H6-11 T38: collect-only includes all H6-11 tests."""
+    import subprocess, re
+    result = subprocess.run(["python3", "-m", "pytest", "tests/benchmark/test_capability_ab_runner.py", "-k", "h6_11", "--collect-only", "-q"], capture_output=True, text=True, cwd="/Users/jameschen/Workspace/nexus")
+    count = len(re.findall(r"test_h6_11_", result.stdout))
+    assert count >= 32, f"Expected >= 32 H6-11 tests, got {count}"
