@@ -14487,6 +14487,26 @@ def write_evidence_bundle(
         "h6_local_model_adapter_repo_mutated_count": _build_h6_local_model_adapter_preflight_contract(with_rows, payload).get("repo_mutated_count", 0),
         "h6_local_model_adapter_behavior_changed_count": _build_h6_local_model_adapter_preflight_contract(with_rows, payload).get("behavior_changed_count", 0),
         "h6_local_model_adapter_safety_violation_count": _build_h6_local_model_adapter_preflight_contract(with_rows, payload).get("safety_violation_count", 0),
+        "h6_shadow_local_adapter_dry_run_present": 1 if _build_h6_shadow_local_adapter_dry_run(with_rows, payload).get("evaluated") else 0,
+        "h6_shadow_local_adapter_dry_run_allowed": 1 if _build_h6_shadow_local_adapter_dry_run(with_rows, payload).get("dry_run_allowed") else 0,
+        "h6_shadow_local_adapter_dry_run_ready": 1 if _build_h6_shadow_local_adapter_dry_run(with_rows, payload).get("dry_run_ready") else 0,
+        "h6_shadow_local_adapter_dry_run_receipt_ready": 1 if _build_h6_shadow_local_adapter_dry_run(with_rows, payload).get("adapter_dry_run_receipt_ready") else 0,
+        "h6_shadow_local_adapter_ready_for_io_schema_test": 1 if _build_h6_shadow_local_adapter_dry_run(with_rows, payload).get("ready_for_h6_2_adapter_io_schema_test") else 0,
+        "h6_shadow_local_adapter_request_count": _build_h6_shadow_local_adapter_dry_run(with_rows, payload).get("shadow_request_count", 0),
+        "h6_shadow_local_adapter_valid_request_count": _build_h6_shadow_local_adapter_dry_run(with_rows, payload).get("shadow_request_valid_count", 0),
+        "h6_shadow_local_adapter_invalid_request_count": _build_h6_shadow_local_adapter_dry_run(with_rows, payload).get("shadow_request_invalid_count", 0),
+        "h6_shadow_local_adapter_receipt_count": _build_h6_shadow_local_adapter_dry_run(with_rows, payload).get("shadow_receipt_count", 0),
+        "h6_shadow_local_adapter_valid_receipt_count": _build_h6_shadow_local_adapter_dry_run(with_rows, payload).get("shadow_receipt_valid_count", 0),
+        "h6_shadow_local_adapter_invalid_receipt_count": _build_h6_shadow_local_adapter_dry_run(with_rows, payload).get("shadow_receipt_invalid_count", 0),
+        "h6_shadow_local_adapter_qwen_3b_request_count": _build_h6_shadow_local_adapter_dry_run(with_rows, payload).get("qwen_3b_shadow_request_count", 0),
+        "h6_shadow_local_adapter_qwen_7b_request_count": _build_h6_shadow_local_adapter_dry_run(with_rows, payload).get("qwen_7b_shadow_request_count", 0),
+        "h6_shadow_local_adapter_qwen_14b_request_count": _build_h6_shadow_local_adapter_dry_run(with_rows, payload).get("qwen_14b_shadow_request_count", 0),
+        "h6_shadow_local_adapter_model_call_executed_count": _build_h6_shadow_local_adapter_dry_run(with_rows, payload).get("model_call_executed_count", 0),
+        "h6_shadow_local_adapter_ollama_invoked_count": _build_h6_shadow_local_adapter_dry_run(with_rows, payload).get("ollama_invoked_count", 0),
+        "h6_shadow_local_adapter_cloud_invoked_count": _build_h6_shadow_local_adapter_dry_run(with_rows, payload).get("cloud_invoked_count", 0),
+        "h6_shadow_local_adapter_repo_mutated_count": _build_h6_shadow_local_adapter_dry_run(with_rows, payload).get("repo_mutated_count", 0),
+        "h6_shadow_local_adapter_behavior_changed_count": _build_h6_shadow_local_adapter_dry_run(with_rows, payload).get("behavior_changed_count", 0),
+        "h6_shadow_local_adapter_safety_violation_count": _build_h6_shadow_local_adapter_dry_run(with_rows, payload).get("safety_violation_count", 0),
     }
     payload["h5_guarded_local_candidate_benchmark_trial"] = _build_h5_guarded_local_candidate_benchmark_trial(with_rows)
     payload["h5_quality_non_regression_gate"] = _build_h5_quality_non_regression_gate(with_rows, payload["h5_guarded_local_candidate_benchmark_trial"])
@@ -14501,6 +14521,7 @@ def write_evidence_bundle(
     payload["h5_benchmark_delta_report"] = _build_h5_benchmark_delta_report(with_rows, payload)
     payload["h5_guarded_larger_benchmark_batch_run"] = _build_h5_guarded_larger_benchmark_batch_run(with_rows, payload)
     payload["h6_local_model_adapter_preflight_contract"] = _build_h6_local_model_adapter_preflight_contract(with_rows, payload)
+    payload["h6_shadow_local_adapter_dry_run"] = _build_h6_shadow_local_adapter_dry_run(with_rows, payload)
     payload["external_provider_claim_boundary_contract"] = build_external_provider_claim_boundary_contract(payload)
     payload["public_promotion_readiness_contract"] = build_public_promotion_readiness_contract(payload)
     bundle_path.write_text(json.dumps(payload, indent=2, ensure_ascii=False), encoding="utf-8")
