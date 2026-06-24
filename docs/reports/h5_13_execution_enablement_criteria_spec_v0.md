@@ -132,7 +132,7 @@ final_source may not change until:
 
 | # | Criterion |
 |---|-----------|
-| 1 | production_ready=true |
+| 1 | future criterion: production_ready must be explicitly granted by post-H5 governance; current H5 state remains production_ready=false |
 | 2 | External provider claim boundary passes |
 | 3 | Promotion readiness contract passes |
 | 4 | No simulated-only claims remain |
