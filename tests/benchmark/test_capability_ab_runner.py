@@ -22311,3 +22311,229 @@ def test_h5_45_summary_counters(tmp_path, monkeypatch):
     assert g["production_lock_active"] is True
     assert g["production_ready"] is False
     assert g["public_claim_allowed"] is False
+
+
+def test_h5_47_empty_rows_blocks():
+    """H5-47 T1: empty rows block."""
+    from scripts.bench.capability_ab_runner import _build_h5_real_patch_verifier_score_trial
+    r = _build_h5_real_patch_verifier_score_trial([])
+    assert r["trial_status"] == "blocked"
+    assert r["trial_allowed"] is False
+
+
+def test_h5_47_flag_missing(monkeypatch):
+    """H5-47 T2: flag missing blocks."""
+    from scripts.bench.capability_ab_runner import _build_h5_real_patch_verifier_score_trial
+    monkeypatch.delenv("NEXUS_H5_ALLOW_REAL_PATCH_VERIFIER_SCORE_TRIAL", raising=False)
+    r = _build_h5_real_patch_verifier_score_trial([])
+    assert "score_trial_flag_not_enabled" in r["trial_reasons"]
+
+
+def test_h5_47_missing_harness(monkeypatch):
+    """H5-47 T3: missing harness blocks."""
+    from scripts.bench.capability_ab_runner import _build_h5_real_patch_verifier_score_trial
+    monkeypatch.setenv("NEXUS_H5_ALLOW_REAL_PATCH_VERIFIER_SCORE_TRIAL", "1")
+    r = _build_h5_real_patch_verifier_score_trial([{"mode": "with_nexus"}])
+    assert "missing_real_candidate_harness" in r["trial_reasons"]
+
+
+def test_h5_47_no_verified_artifact(monkeypatch):
+    """H5-47 T4: no verified artifact blocks."""
+    from scripts.bench.capability_ab_runner import _build_h5_real_patch_verifier_score_trial
+    monkeypatch.setenv("NEXUS_H5_ALLOW_REAL_PATCH_VERIFIER_SCORE_TRIAL", "1")
+    row = {"h5_real_local_candidate_execution_harness": {"real_candidate_artifact_verified": False}}
+    r = _build_h5_real_patch_verifier_score_trial([row])
+    assert "no_verified_real_artifact" in r["trial_reasons"]
+
+
+def test_h5_47_verified_no_verifier(monkeypatch):
+    """H5-47 T5: verified artifact but no verifier result."""
+    from scripts.bench.capability_ab_runner import _build_h5_real_patch_verifier_score_trial
+    monkeypatch.setenv("NEXUS_H5_ALLOW_REAL_PATCH_VERIFIER_SCORE_TRIAL", "1")
+    row = {"h5_real_local_candidate_execution_harness": {"real_candidate_artifact_verified": True, "repo_mutated": False, "cloud_invoked": False, "behavior_changed": False}}
+    r = _build_h5_real_patch_verifier_score_trial([row])
+    assert r["trial_status"] == "real_patch_verifier_score_trial_fail"
+    assert r["score_visible"] is False
+
+
+def test_h5_47_verifier_failed_gives_visible_score(monkeypatch):
+    """H5-47 T6: verifier evaluated but failed gives visible score."""
+    from scripts.bench.capability_ab_runner import _build_h5_real_patch_verifier_score_trial
+    monkeypatch.setenv("NEXUS_H5_ALLOW_REAL_PATCH_VERIFIER_SCORE_TRIAL", "1")
+    row = {"h5_real_local_candidate_execution_harness": {"real_candidate_artifact_verified": True, "repo_mutated": False, "cloud_invoked": False, "behavior_changed": False},
+           "h5_real_patch_verifier_result": {"verifier_evaluated": True, "verifier_passed": False, "candidate_solved": False, "quality_passed": False, "failure_reasons": ["test_failed"]}}
+    r = _build_h5_real_patch_verifier_score_trial([row])
+    assert r["score_visible"] is True
+    assert r["trial_status"] == "real_patch_verifier_score_trial_fail"
+    assert r["verifier_failed_count"] == 1
+
+
+def test_h5_47_passes_with_solved(monkeypatch):
+    """H5-47 T7: verifier passed + candidate solved passes."""
+    from scripts.bench.capability_ab_runner import _build_h5_real_patch_verifier_score_trial
+    monkeypatch.setenv("NEXUS_H5_ALLOW_REAL_PATCH_VERIFIER_SCORE_TRIAL", "1")
+    row = {"h5_real_local_candidate_execution_harness": {"real_candidate_artifact_verified": True, "repo_mutated": False, "cloud_invoked": False, "behavior_changed": False},
+           "h5_real_patch_verifier_result": {"verifier_evaluated": True, "verifier_passed": True, "candidate_solved": True, "quality_passed": True, "failure_reasons": []}}
+    r = _build_h5_real_patch_verifier_score_trial([row])
+    assert r["trial_passed"] is True
+    assert r["trial_status"] == "real_patch_verifier_score_trial_pass"
+    assert r["solve_rate"] == 1.0
+
+
+def test_h5_47_solve_rate_computed(monkeypatch):
+    """H5-47 T8: solve_rate computed."""
+    from scripts.bench.capability_ab_runner import _build_h5_real_patch_verifier_score_trial
+    monkeypatch.setenv("NEXUS_H5_ALLOW_REAL_PATCH_VERIFIER_SCORE_TRIAL", "1")
+    rows = []
+    for i in range(4):
+        solved = i < 2
+        rows.append({"h5_real_local_candidate_execution_harness": {"real_candidate_artifact_verified": True, "repo_mutated": False, "cloud_invoked": False, "behavior_changed": False},
+                      "h5_real_patch_verifier_result": {"verifier_evaluated": True, "verifier_passed": solved, "candidate_solved": solved, "quality_passed": solved, "failure_reasons": [] if solved else ["test_failed"]}})
+    r = _build_h5_real_patch_verifier_score_trial(rows)
+    assert r["solve_rate"] == 0.5
+    assert r["verifier_pass_rate"] == 0.5
+
+
+def test_h5_47_verifier_pass_rate(monkeypatch):
+    """H5-47 T9: verifier_pass_rate computed."""
+    from scripts.bench.capability_ab_runner import _build_h5_real_patch_verifier_score_trial
+    monkeypatch.setenv("NEXUS_H5_ALLOW_REAL_PATCH_VERIFIER_SCORE_TRIAL", "1")
+    row = {"h5_real_local_candidate_execution_harness": {"real_candidate_artifact_verified": True, "repo_mutated": False, "cloud_invoked": False, "behavior_changed": False},
+           "h5_real_patch_verifier_result": {"verifier_evaluated": True, "verifier_passed": True, "candidate_solved": True, "quality_passed": True, "failure_reasons": []}}
+    r = _build_h5_real_patch_verifier_score_trial([row])
+    assert r["verifier_pass_rate"] == 1.0
+    assert r["quality_pass_rate"] == 1.0
+
+
+def test_h5_47_fail_reasons_aggregate(monkeypatch):
+    """H5-47 T10: fail_reason_counts aggregate."""
+    from scripts.bench.capability_ab_runner import _build_h5_real_patch_verifier_score_trial
+    monkeypatch.setenv("NEXUS_H5_ALLOW_REAL_PATCH_VERIFIER_SCORE_TRIAL", "1")
+    rows = [
+        {"h5_real_local_candidate_execution_harness": {"real_candidate_artifact_verified": True, "repo_mutated": False, "cloud_invoked": False, "behavior_changed": False},
+         "h5_real_patch_verifier_result": {"verifier_evaluated": True, "verifier_passed": False, "candidate_solved": False, "quality_passed": False, "failure_reasons": ["test_failed", "hash_mismatch"]}},
+        {"h5_real_local_candidate_execution_harness": {"real_candidate_artifact_verified": True, "repo_mutated": False, "cloud_invoked": False, "behavior_changed": False},
+         "h5_real_patch_verifier_result": {"verifier_evaluated": True, "verifier_passed": False, "candidate_solved": False, "quality_passed": False, "failure_reasons": ["test_failed"]}},
+    ]
+    r = _build_h5_real_patch_verifier_score_trial(rows)
+    assert r["fail_reason_counts"]["test_failed"] == 2
+    assert r["fail_reason_counts"]["hash_mismatch"] == 1
+
+
+def test_h5_47_repo_mutated_fails(monkeypatch):
+    """H5-47 T11: repo_mutated fails."""
+    from scripts.bench.capability_ab_runner import _build_h5_real_patch_verifier_score_trial
+    monkeypatch.setenv("NEXUS_H5_ALLOW_REAL_PATCH_VERIFIER_SCORE_TRIAL", "1")
+    row = {"h5_real_local_candidate_execution_harness": {"real_candidate_artifact_verified": True, "repo_mutated": True, "cloud_invoked": False, "behavior_changed": False},
+           "h5_real_patch_verifier_result": {"verifier_evaluated": True, "verifier_passed": True, "candidate_solved": True, "quality_passed": True, "failure_reasons": []}}
+    r = _build_h5_real_patch_verifier_score_trial([row])
+    assert "repo_mutation_detected" in r["trial_reasons"]
+    assert r["repo_mutated_count"] == 1
+
+
+def test_h5_47_cloud_fails(monkeypatch):
+    """H5-47 T12: cloud_invoked fails."""
+    from scripts.bench.capability_ab_runner import _build_h5_real_patch_verifier_score_trial
+    monkeypatch.setenv("NEXUS_H5_ALLOW_REAL_PATCH_VERIFIER_SCORE_TRIAL", "1")
+    row = {"h5_real_local_candidate_execution_harness": {"real_candidate_artifact_verified": True, "repo_mutated": False, "cloud_invoked": True, "behavior_changed": False},
+           "h5_real_patch_verifier_result": {"verifier_evaluated": True, "verifier_passed": True, "candidate_solved": True, "quality_passed": True, "failure_reasons": []}}
+    r = _build_h5_real_patch_verifier_score_trial([row])
+    assert "cloud_invoked_detected" in r["trial_reasons"]
+
+
+def test_h5_47_mc_fails(monkeypatch):
+    """H5-47 T13: model_calls_incremented fails."""
+    from scripts.bench.capability_ab_runner import _build_h5_real_patch_verifier_score_trial
+    monkeypatch.setenv("NEXUS_H5_ALLOW_REAL_PATCH_VERIFIER_SCORE_TRIAL", "1")
+    row = {"h5_real_local_candidate_execution_harness": {"real_candidate_artifact_verified": True, "repo_mutated": False, "cloud_invoked": False, "behavior_changed": True},
+           "h5_real_patch_verifier_result": {"verifier_evaluated": True, "verifier_passed": True, "candidate_solved": True, "quality_passed": True, "failure_reasons": []}}
+    r = _build_h5_real_patch_verifier_score_trial([row])
+    assert "behavior_changed_detected" in r["trial_reasons"]
+
+
+def test_h5_47_behavior_fails(monkeypatch):
+    """H5-47 T14: behavior_changed fails."""
+    from scripts.bench.capability_ab_runner import _build_h5_real_patch_verifier_score_trial
+    monkeypatch.setenv("NEXUS_H5_ALLOW_REAL_PATCH_VERIFIER_SCORE_TRIAL", "1")
+    row = {"h5_real_local_candidate_execution_harness": {"real_candidate_artifact_verified": True, "repo_mutated": False, "cloud_invoked": False, "behavior_changed": True},
+           "h5_real_patch_verifier_result": {"verifier_evaluated": True, "verifier_passed": True, "candidate_solved": True, "quality_passed": True, "failure_reasons": []}}
+    r = _build_h5_real_patch_verifier_score_trial([row])
+    assert r["behavior_changed_count"] == 1
+
+
+def test_h5_47_artifact_mismatch_regression(monkeypatch):
+    """H5-47 T15: artifact mismatch increments regression."""
+    from scripts.bench.capability_ab_runner import _build_h5_real_patch_verifier_score_trial
+    monkeypatch.setenv("NEXUS_H5_ALLOW_REAL_PATCH_VERIFIER_SCORE_TRIAL", "1")
+    row = {"h5_real_local_candidate_execution_harness": {"real_candidate_artifact_verified": False, "real_candidate_artifact_present": True, "repo_mutated": False, "cloud_invoked": False, "behavior_changed": False},
+           "h5_real_patch_verifier_result": {"verifier_evaluated": True, "verifier_passed": True, "candidate_solved": True, "quality_passed": True, "failure_reasons": []}}
+    r = _build_h5_real_patch_verifier_score_trial([row])
+    assert r["real_artifact_mismatch_count"] == 1
+
+
+def test_h5_47_bundle_attaches(tmp_path, monkeypatch):
+    """H5-47 T16: bundle attaches score trial."""
+    from scripts.bench.capability_ab_runner import CapabilityTask, _finalize_with_nexus_row, write_evidence_bundle
+    task = CapabilityTask(id="t-h5-47", difficulty="easy", task_type="test_repair", task_desc="v", target_file="t.py", test_file="test_t.py", expected_capabilities=("claim_gate",), success_criteria="tests_pass", repo_kind="nexus_internal", fixture_kind="test_fixture")
+    _h5_all_flags_set_with_gate(monkeypatch)
+    monkeypatch.setattr("scripts.bench.capability_ab_runner._git_commit", lambda x: "d")
+    row = _finalize_with_nexus_row({"mode": "with_nexus", "model_calls": 1, "total_tokens": 100, "token_capture_status": "measured", "committee_trace": {"candidate_count": 2, "judge_selection": {"selected_candidate_id": "C_1"}, "committee_receipt": {"selected_candidate_applied": True, "selected_candidate_apply_hash_match": True}}, "local_solve_eligible": True}, provider="gemini", model_required=True, nexus_required=False, task=task, repo_root=tmp_path)
+    wp = tmp_path / "w.jsonl"; wp.write_text("[]", encoding="utf-8")
+    wop = tmp_path / "wo.jsonl"; wop.write_text("[]", encoding="utf-8")
+    bf = write_evidence_bundle(out_dir=tmp_path, with_path=wp, without_path=wop, rows=[row], config={"tasks_file": "t.json", "tasks_manifest_hash": "m", "unique_tasks_requested": 1, "repeat_trials": 1, "timeout_sec": 60})
+    bundle = json.loads(bf.read_text(encoding="utf-8"))
+    assert "h5_real_patch_verifier_score_trial" in bundle
+    t = bundle["h5_real_patch_verifier_score_trial"]
+    assert t["schema"] == "nexus.hybrid_h5_real_patch_verifier_score_trial.v1"
+    assert t["production_ready"] is False
+
+
+def test_h5_47_pr_false_always(monkeypatch):
+    """H5-47 T17: production_ready=false and public_claim_allowed=false always."""
+    from scripts.bench.capability_ab_runner import _build_h5_real_patch_verifier_score_trial
+    monkeypatch.setenv("NEXUS_H5_ALLOW_REAL_PATCH_VERIFIER_SCORE_TRIAL", "1")
+    row = {"h5_real_local_candidate_execution_harness": {"real_candidate_artifact_verified": True, "repo_mutated": False, "cloud_invoked": False, "behavior_changed": False},
+           "h5_real_patch_verifier_result": {"verifier_evaluated": True, "verifier_passed": True, "candidate_solved": True, "quality_passed": True, "failure_reasons": []}}
+    r = _build_h5_real_patch_verifier_score_trial([row])
+    assert r["production_ready"] is False
+    assert r["public_claim_allowed"] is False
+
+
+def test_h5_47_score_visible(tmp_path, monkeypatch):
+    """H5-47 T18: summary counters show visible score."""
+    from scripts.bench.capability_ab_runner import CapabilityTask, _finalize_with_nexus_row, write_evidence_bundle
+    task = CapabilityTask(id="t-h5-47s", difficulty="easy", task_type="test_repair", task_desc="v", target_file="t.py", test_file="test_t.py", expected_capabilities=("claim_gate",), success_criteria="tests_pass", repo_kind="nexus_internal", fixture_kind="test_fixture")
+    _h5_all_flags_set_with_gate(monkeypatch)
+    monkeypatch.setattr("scripts.bench.capability_ab_runner._git_commit", lambda x: "d")
+    row = _finalize_with_nexus_row({"mode": "with_nexus", "model_calls": 1, "total_tokens": 100, "token_capture_status": "measured", "committee_trace": {"candidate_count": 2, "judge_selection": {"selected_candidate_id": "C_1"}, "committee_receipt": {"selected_candidate_applied": True, "selected_candidate_apply_hash_match": True}}, "local_solve_eligible": True}, provider="gemini", model_required=True, nexus_required=False, task=task, repo_root=tmp_path)
+    wp = tmp_path / "w.jsonl"; wp.write_text("[]", encoding="utf-8")
+    wop = tmp_path / "wo.jsonl"; wop.write_text("[]", encoding="utf-8")
+    bf = write_evidence_bundle(out_dir=tmp_path, with_path=wp, without_path=wop, rows=[row], config={"tasks_file": "t.json", "tasks_manifest_hash": "m", "unique_tasks_requested": 1, "repeat_trials": 1, "timeout_sec": 60})
+    bundle = json.loads(bf.read_text(encoding="utf-8"))
+    t = bundle["h5_real_patch_verifier_score_trial"]
+    assert t["score_visible"] is False
+    assert t["production_ready"] is False
+
+
+def test_h5_47_default_env_blocked(monkeypatch):
+    """H5-47 T19: default env score trial blocked."""
+    from scripts.bench.capability_ab_runner import _build_h5_real_patch_verifier_score_trial
+    monkeypatch.delenv("NEXUS_H5_ALLOW_REAL_PATCH_VERIFIER_SCORE_TRIAL", raising=False)
+    r = _build_h5_real_patch_verifier_score_trial([])
+    assert r["trial_allowed"] is False
+    assert r["trial_status"] == "blocked"
+
+
+def test_h5_47_flagged_pass(monkeypatch):
+    """H5-47 T20: flagged clean fixture passes score trial."""
+    from scripts.bench.capability_ab_runner import _build_h5_real_patch_verifier_score_trial
+    monkeypatch.setenv("NEXUS_H5_ALLOW_REAL_PATCH_VERIFIER_SCORE_TRIAL", "1")
+    rows = []
+    for i in range(5):
+        rows.append({"h5_real_local_candidate_execution_harness": {"real_candidate_artifact_verified": True, "repo_mutated": False, "cloud_invoked": False, "behavior_changed": False},
+                      "h5_real_patch_verifier_result": {"verifier_evaluated": True, "verifier_passed": True, "candidate_solved": True, "quality_passed": True, "failure_reasons": []}})
+    r = _build_h5_real_patch_verifier_score_trial(rows)
+    assert r["trial_passed"] is True
+    assert r["score_visible"] is True
+    assert r["solve_rate"] == 1.0
+    assert r["verifier_pass_rate"] == 1.0

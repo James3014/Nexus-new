@@ -8708,6 +8708,167 @@ def _build_h5_real_local_candidate_execution_harness(row: dict[str, Any], bundle
     }
 
 
+def _build_h5_real_patch_verifier_score_trial(rows: list[dict[str, Any]], bundle: dict[str, Any] | None = None) -> dict[str, Any]:
+    """Pure helper: real patch verifier score trial aggregation."""
+    import os as _os
+    from collections import Counter
+
+    flag = _os.environ.get("NEXUS_H5_ALLOW_REAL_PATCH_VERIFIER_SCORE_TRIAL", "").strip() == "1"
+
+    harness_present = False
+    verified_count = 0
+    mismatch_count = 0
+    repo_mutated = 0
+    cloud_inv = 0
+    mc_inc = 0
+    beh_count = 0
+    verifier_eval = 0
+    verifier_pass = 0
+    verifier_fail = 0
+    quality_pass = 0
+    solved = 0
+    failed = 0
+    blocked = 0
+    regression_count = 0
+    fail_reasons: Counter = Counter()
+    regression_reasons: Counter = Counter()
+
+    for r in rows:
+        harness = r.get("h5_real_local_candidate_execution_harness")
+        if not harness:
+            continue
+
+        harness_present = True
+
+        art_verified = bool(harness.get("real_candidate_artifact_verified", False))
+        art_mismatch = bool(harness.get("metadata_candidate_matches_real_artifact", False)) is False and bool(harness.get("real_candidate_artifact_present", False))
+
+        if art_verified:
+            verified_count += 1
+        if art_mismatch:
+            mismatch_count += 1
+
+        if bool(harness.get("repo_mutated", False)):
+            repo_mutated += 1
+            regression_count += 1
+            regression_reasons["repo_mutated"] += 1
+        if bool(harness.get("cloud_invoked", False)):
+            cloud_inv += 1
+            regression_count += 1
+            regression_reasons["cloud_invoked"] += 1
+        if bool(harness.get("behavior_changed", False)):
+            beh_count += 1
+            regression_count += 1
+            regression_reasons["behavior_changed"] += 1
+
+        verifier = r.get("h5_real_patch_verifier_result")
+        if verifier:
+            v_evaluated = bool(verifier.get("verifier_evaluated", False))
+            v_passed = bool(verifier.get("verifier_passed", False))
+            v_solved = bool(verifier.get("candidate_solved", False))
+            v_quality = bool(verifier.get("quality_passed", False))
+
+            if v_evaluated:
+                verifier_eval += 1
+            if v_passed:
+                verifier_pass += 1
+            else:
+                verifier_fail += 1
+                for reason in verifier.get("failure_reasons", []):
+                    fail_reasons[reason] += 1
+            if v_solved:
+                solved += 1
+            else:
+                failed += 1
+            if v_quality:
+                quality_pass += 1
+            if v_evaluated and art_verified and not v_passed:
+                regression_count += 1
+                regression_reasons["verifier_failed_after_verified"] += 1
+        else:
+            blocked += 1
+
+    trial_allowed = (
+        flag and harness_present and verified_count > 0
+        and repo_mutated == 0 and cloud_inv == 0
+        and mc_inc == 0 and beh_count == 0
+    )
+
+    trial_passed = (
+        trial_allowed and verifier_eval >= 1
+        and verifier_pass >= 1 and solved >= 1
+        and regression_count == 0
+    )
+
+    solve_rate = solved / verifier_eval if verifier_eval > 0 else 0.0
+    verifier_pass_rate = verifier_pass / verifier_eval if verifier_eval > 0 else 0.0
+    quality_pass_rate = quality_pass / verifier_eval if verifier_eval > 0 else verifier_pass_rate
+
+    reasons = []
+    if not flag:
+        reasons.append("score_trial_flag_not_enabled")
+    if not harness_present:
+        reasons.append("missing_real_candidate_harness")
+    if verified_count == 0:
+        reasons.append("no_verified_real_artifact")
+    if repo_mutated > 0:
+        reasons.append("repo_mutation_detected")
+    if cloud_inv > 0:
+        reasons.append("cloud_invoked_detected")
+    if mc_inc > 0:
+        reasons.append("model_calls_incremented_detected")
+    if beh_count > 0:
+        reasons.append("behavior_changed_detected")
+    if verifier_eval == 0:
+        reasons.append("no_verifier_result")
+    if solved == 0 and verifier_eval > 0:
+        reasons.append("no_candidate_solved")
+    reasons.extend([
+        "h5_47_score_trial_not_production",
+        "repo_mutation_blocked",
+        "cloud_invocation_blocked",
+        "model_calls_increment_blocked",
+        "production_claim_blocked",
+        "public_claim_blocked",
+    ])
+
+    score_visible = verifier_eval > 0
+
+    return {
+        "schema": "nexus.hybrid_h5_real_patch_verifier_score_trial.v1",
+        "evaluated": True,
+        "trial_status": "real_patch_verifier_score_trial_pass" if trial_passed else ("blocked" if not trial_allowed else "real_patch_verifier_score_trial_fail"),
+        "trial_reasons": reasons,
+        "trial_allowed": trial_allowed,
+        "trial_passed": trial_passed,
+        "row_count": len(rows),
+        "eligible_row_count": sum(1 for r in rows if r.get("h5_real_local_candidate_execution_harness")),
+        "real_artifact_present_count": sum(1 for r in rows if r.get("h5_real_local_candidate_execution_harness", {}).get("real_candidate_artifact_present", False)),
+        "real_artifact_verified_count": verified_count,
+        "real_artifact_mismatch_count": mismatch_count,
+        "verifier_evaluated_count": verifier_eval,
+        "verifier_passed_count": verifier_pass,
+        "verifier_failed_count": verifier_fail,
+        "candidate_solved_count": solved,
+        "candidate_failed_count": failed,
+        "candidate_blocked_count": blocked,
+        "solve_rate": solve_rate,
+        "verifier_pass_rate": verifier_pass_rate,
+        "quality_pass_rate": quality_pass_rate,
+        "regression_count": regression_count,
+        "fail_reason_counts": dict(fail_reasons),
+        "regression_reason_counts": dict(regression_reasons),
+        "repo_mutated_count": repo_mutated,
+        "cloud_invoked_count": cloud_inv,
+        "model_calls_incremented_count": mc_inc,
+        "behavior_changed_count": beh_count,
+        "score_visible": score_visible,
+        "score_ready_for_benchmark": trial_passed,
+        "production_ready": False,
+        "public_claim_allowed": False,
+    }
+
+
 def _finalize_with_nexus_row(
     row: dict[str, Any],
     *,
@@ -13140,6 +13301,20 @@ def write_evidence_bundle(
         "h5_real_local_candidate_artifact_mismatch_count": 1 if _build_h5_real_local_candidate_execution_harness(payload.get("h5_route", {}), payload).get("harness_status") == "real_local_candidate_artifact_mismatch" else 0,
         "h5_real_local_candidate_repo_mutated_count": 1 if _build_h5_real_local_candidate_execution_harness(payload.get("h5_route", {}), payload).get("repo_mutated") else 0,
         "h5_real_local_candidate_safe_to_continue_count": 1 if _build_h5_real_local_candidate_execution_harness(payload.get("h5_route", {}), payload).get("safe_to_continue") else 0,
+        "h5_real_patch_score_trial_present": 1 if _build_h5_real_patch_verifier_score_trial(with_rows, payload).get("evaluated") else 0,
+        "h5_real_patch_score_trial_allowed": 1 if _build_h5_real_patch_verifier_score_trial(with_rows, payload).get("trial_allowed") else 0,
+        "h5_real_patch_score_trial_passed": 1 if _build_h5_real_patch_verifier_score_trial(with_rows, payload).get("trial_passed") else 0,
+        "h5_real_patch_score_trial_score_visible": 1 if _build_h5_real_patch_verifier_score_trial(with_rows, payload).get("score_visible") else 0,
+        "h5_real_patch_score_trial_benchmark_ready": 1 if _build_h5_real_patch_verifier_score_trial(with_rows, payload).get("score_ready_for_benchmark") else 0,
+        "h5_real_patch_score_trial_verifier_evaluated_count": _build_h5_real_patch_verifier_score_trial(with_rows, payload).get("verifier_evaluated_count", 0),
+        "h5_real_patch_score_trial_verifier_passed_count": _build_h5_real_patch_verifier_score_trial(with_rows, payload).get("verifier_passed_count", 0),
+        "h5_real_patch_score_trial_candidate_solved_count": _build_h5_real_patch_verifier_score_trial(with_rows, payload).get("candidate_solved_count", 0),
+        "h5_real_patch_score_trial_solve_rate": _build_h5_real_patch_verifier_score_trial(with_rows, payload).get("solve_rate", 0.0),
+        "h5_real_patch_score_trial_regression_count": _build_h5_real_patch_verifier_score_trial(with_rows, payload).get("regression_count", 0),
+        "h5_real_patch_score_trial_repo_mutated_count": _build_h5_real_patch_verifier_score_trial(with_rows, payload).get("repo_mutated_count", 0),
+        "h5_real_patch_score_trial_cloud_invoked_count": _build_h5_real_patch_verifier_score_trial(with_rows, payload).get("cloud_invoked_count", 0),
+        "h5_real_patch_score_trial_model_calls_incremented_count": _build_h5_real_patch_verifier_score_trial(with_rows, payload).get("model_calls_incremented_count", 0),
+        "h5_real_patch_score_trial_behavior_changed_count": _build_h5_real_patch_verifier_score_trial(with_rows, payload).get("behavior_changed_count", 0),
     }
     payload["h5_guarded_local_candidate_benchmark_trial"] = _build_h5_guarded_local_candidate_benchmark_trial(with_rows)
     payload["h5_quality_non_regression_gate"] = _build_h5_quality_non_regression_gate(with_rows, payload["h5_guarded_local_candidate_benchmark_trial"])
@@ -13148,6 +13323,7 @@ def write_evidence_bundle(
     payload["h5_full_guarded_benchmark_run"] = _build_h5_full_guarded_benchmark_run(with_rows, payload)
     payload["h5_governance_closure_public_claim_lock"] = _build_h5_governance_closure_public_claim_lock(payload)
     payload["h5_real_local_candidate_execution_harness"] = _build_h5_real_local_candidate_execution_harness(payload.get("h5_route", {}), payload)
+    payload["h5_real_patch_verifier_score_trial"] = _build_h5_real_patch_verifier_score_trial(with_rows, payload)
     payload["external_provider_claim_boundary_contract"] = build_external_provider_claim_boundary_contract(payload)
     payload["public_promotion_readiness_contract"] = build_public_promotion_readiness_contract(payload)
     bundle_path.write_text(json.dumps(payload, indent=2, ensure_ascii=False), encoding="utf-8")
