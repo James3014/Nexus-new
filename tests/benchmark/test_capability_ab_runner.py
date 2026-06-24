@@ -30053,3 +30053,398 @@ def test_h6_9_invocation_gate_collect_only_final_threshold():
     result = subprocess.run(["python3", "-m", "pytest", "tests/benchmark/test_capability_ab_runner.py", "-k", "h6_9", "--collect-only", "-q"], capture_output=True, text=True, cwd="/Users/jameschen/Workspace/nexus")
     count = len(re.findall(r"test_h6_9_", result.stdout))
     assert count >= 39, f"Expected >= 39 H6-9 tests, got {count}"
+
+
+# ---------------------------------------------------------------------------
+# H6-10 Controlled Provider Probe Preflight
+# ---------------------------------------------------------------------------
+
+def test_h6_10_probe_preflight_flag_missing_block(monkeypatch):
+    """H6-10 T01: Flag missing blocks probe preflight."""
+    from scripts.bench.capability_ab_runner import _build_h6_controlled_provider_probe_preflight
+    monkeypatch.delenv("NEXUS_H6_ALLOW_CONTROLLED_PROVIDER_PROBE_PREFLIGHT", raising=False)
+    gate = {"gate_ready": True, "provider_invocation_gate_receipt_ready": True, "ready_for_h6_10_controlled_provider_probe_preflight": True, "safety_violation_count": 0}
+    bundle = {"h6_local_provider_invocation_gate": gate}
+    r = _build_h6_controlled_provider_probe_preflight([], bundle)
+    assert r["preflight_status"] == "blocked"
+    assert "controlled_provider_probe_preflight_flag_not_enabled" in r["preflight_reasons"]
+
+
+def test_h6_10_probe_preflight_valid_preflight(monkeypatch):
+    """H6-10 T02: Valid preflight passes."""
+    from scripts.bench.capability_ab_runner import _build_h6_controlled_provider_probe_preflight
+    monkeypatch.setenv("NEXUS_H6_ALLOW_CONTROLLED_PROVIDER_PROBE_PREFLIGHT", "1")
+    gate = {"gate_ready": True, "provider_invocation_gate_receipt_ready": True, "ready_for_h6_10_controlled_provider_probe_preflight": True, "safety_violation_count": 0}
+    bundle = {"h6_local_provider_invocation_gate": gate}
+    rows = [{"h6_controlled_provider_probe_preflight": {
+        "preflight_id": "probe-preflight-001",
+        "gate_id": "local-provider-invocation-gate-001",
+        "config_id": "local-qwen-config-001",
+        "provider_id": "local-qwen-ollama-boundary-v0",
+        "provider_family": "ollama",
+        "model_family": "qwen",
+        "model_size": "7b",
+        "model_name": "qwen2.5-coder:7b",
+        "preflight_mode": "preflight_only",
+        "provider_probe_allowed": False,
+        "provider_invocation_allowed": False,
+        "network_allowed": False,
+        "process_spawn_allowed": False,
+        "model_load_allowed": False,
+        "model_call_allowed": False,
+    }}]
+    r = _build_h6_controlled_provider_probe_preflight(rows, bundle)
+    assert r["preflight_status"] == "provider_probe_preflight_ready"
+    assert r["probe_preflight_valid_count"] == 1
+    assert r["ready_for_h6_11_provider_denial_receipt_replay"] is True
+
+
+def test_h6_10_probe_preflight_missing_gate_block(monkeypatch):
+    """H6-10 T03: Missing H6-9 gate blocks probe preflight."""
+    from scripts.bench.capability_ab_runner import _build_h6_controlled_provider_probe_preflight
+    monkeypatch.setenv("NEXUS_H6_ALLOW_CONTROLLED_PROVIDER_PROBE_PREFLIGHT", "1")
+    r = _build_h6_controlled_provider_probe_preflight([], None)
+    assert r["preflight_status"] == "blocked"
+    assert "missing_h6_9_invocation_gate" in r["preflight_reasons"]
+
+
+def test_h6_10_probe_preflight_h6_9_not_ready_block(monkeypatch):
+    """H6-10 T04: H6-9 not ready blocks probe preflight."""
+    from scripts.bench.capability_ab_runner import _build_h6_controlled_provider_probe_preflight
+    monkeypatch.setenv("NEXUS_H6_ALLOW_CONTROLLED_PROVIDER_PROBE_PREFLIGHT", "1")
+    gate = {"gate_ready": False, "provider_invocation_gate_receipt_ready": False, "ready_for_h6_10_controlled_provider_probe_preflight": False, "safety_violation_count": 0}
+    bundle = {"h6_local_provider_invocation_gate": gate}
+    r = _build_h6_controlled_provider_probe_preflight([], bundle)
+    assert r["preflight_status"] == "blocked"
+    assert "h6_9_gate_not_ready" in r["preflight_reasons"]
+
+
+def test_h6_10_probe_preflight_h6_9_safety_violation_block(monkeypatch):
+    """H6-10 T05: H6-9 safety violation blocks probe preflight."""
+    from scripts.bench.capability_ab_runner import _build_h6_controlled_provider_probe_preflight
+    monkeypatch.setenv("NEXUS_H6_ALLOW_CONTROLLED_PROVIDER_PROBE_PREFLIGHT", "1")
+    gate = {"gate_ready": True, "provider_invocation_gate_receipt_ready": True, "ready_for_h6_10_controlled_provider_probe_preflight": True, "safety_violation_count": 4}
+    bundle = {"h6_local_provider_invocation_gate": gate}
+    r = _build_h6_controlled_provider_probe_preflight([], bundle)
+    assert r["preflight_status"] == "blocked"
+    assert "h6_9_safety_violation_detected" in r["preflight_reasons"]
+
+
+def test_h6_10_probe_preflight_provider_probe_allowed_cannot_become_true(monkeypatch):
+    """H6-10 T06: provider_probe_allowed is always false."""
+    from scripts.bench.capability_ab_runner import _build_h6_controlled_provider_probe_preflight
+    monkeypatch.setenv("NEXUS_H6_ALLOW_CONTROLLED_PROVIDER_PROBE_PREFLIGHT", "1")
+    gate = {"gate_ready": True, "provider_invocation_gate_receipt_ready": True, "ready_for_h6_10_controlled_provider_probe_preflight": True, "safety_violation_count": 0}
+    bundle = {"h6_local_provider_invocation_gate": gate}
+    rows = [{"h6_controlled_provider_probe_preflight": {"preflight_id": "p1", "gate_id": "g1", "config_id": "c1", "provider_id": "pr1", "provider_family": "ollama", "model_family": "qwen", "model_size": "7b", "model_name": "qwen2.5-coder:7b", "preflight_mode": "preflight_only", "provider_probe_allowed": True, "provider_invocation_allowed": False, "network_allowed": False, "process_spawn_allowed": False, "model_load_allowed": False, "model_call_allowed": False}}]
+    r = _build_h6_controlled_provider_probe_preflight(rows, bundle)
+    assert r["provider_probe_allowed"] is False
+    assert r["probe_allowed_blocked_count"] == 1
+    assert "provider_probe_allowed_blocked" in r["preflight_reasons"]
+
+
+def test_h6_10_probe_preflight_provider_invocation_allowed_cannot_become_true(monkeypatch):
+    """H6-10 T07: provider_invocation_allowed is always false."""
+    from scripts.bench.capability_ab_runner import _build_h6_controlled_provider_probe_preflight
+    monkeypatch.setenv("NEXUS_H6_ALLOW_CONTROLLED_PROVIDER_PROBE_PREFLIGHT", "1")
+    gate = {"gate_ready": True, "provider_invocation_gate_receipt_ready": True, "ready_for_h6_10_controlled_provider_probe_preflight": True, "safety_violation_count": 0}
+    bundle = {"h6_local_provider_invocation_gate": gate}
+    rows = [{"h6_controlled_provider_probe_preflight": {"preflight_id": "p1", "gate_id": "g1", "config_id": "c1", "provider_id": "pr1", "provider_family": "ollama", "model_family": "qwen", "model_size": "7b", "model_name": "qwen2.5-coder:7b", "preflight_mode": "preflight_only", "provider_probe_allowed": False, "provider_invocation_allowed": True, "network_allowed": False, "process_spawn_allowed": False, "model_load_allowed": False, "model_call_allowed": False}}]
+    r = _build_h6_controlled_provider_probe_preflight(rows, bundle)
+    assert r["provider_invocation_allowed"] is False
+    assert r["invocation_allowed_blocked_count"] == 1
+    assert "provider_invocation_allowed_blocked" in r["preflight_reasons"]
+
+
+def test_h6_10_probe_preflight_network_cannot_become_true(monkeypatch):
+    """H6-10 T08: network_allowed is always false."""
+    from scripts.bench.capability_ab_runner import _build_h6_controlled_provider_probe_preflight
+    monkeypatch.setenv("NEXUS_H6_ALLOW_CONTROLLED_PROVIDER_PROBE_PREFLIGHT", "1")
+    gate = {"gate_ready": True, "provider_invocation_gate_receipt_ready": True, "ready_for_h6_10_controlled_provider_probe_preflight": True, "safety_violation_count": 0}
+    bundle = {"h6_local_provider_invocation_gate": gate}
+    rows = [{"h6_controlled_provider_probe_preflight": {"preflight_id": "p1", "gate_id": "g1", "config_id": "c1", "provider_id": "pr1", "provider_family": "ollama", "model_family": "qwen", "model_size": "7b", "model_name": "qwen2.5-coder:7b", "preflight_mode": "preflight_only", "provider_probe_allowed": False, "provider_invocation_allowed": False, "network_allowed": True, "process_spawn_allowed": False, "model_load_allowed": False, "model_call_allowed": False}}]
+    r = _build_h6_controlled_provider_probe_preflight(rows, bundle)
+    assert r["network_allowed"] is False
+    assert r["network_blocked_count"] == 1
+    assert "network_not_allowed" in r["preflight_reasons"]
+
+
+def test_h6_10_probe_preflight_process_spawn_cannot_become_true(monkeypatch):
+    """H6-10 T09: process_spawn_allowed is always false."""
+    from scripts.bench.capability_ab_runner import _build_h6_controlled_provider_probe_preflight
+    monkeypatch.setenv("NEXUS_H6_ALLOW_CONTROLLED_PROVIDER_PROBE_PREFLIGHT", "1")
+    gate = {"gate_ready": True, "provider_invocation_gate_receipt_ready": True, "ready_for_h6_10_controlled_provider_probe_preflight": True, "safety_violation_count": 0}
+    bundle = {"h6_local_provider_invocation_gate": gate}
+    rows = [{"h6_controlled_provider_probe_preflight": {"preflight_id": "p1", "gate_id": "g1", "config_id": "c1", "provider_id": "pr1", "provider_family": "ollama", "model_family": "qwen", "model_size": "7b", "model_name": "qwen2.5-coder:7b", "preflight_mode": "preflight_only", "provider_probe_allowed": False, "provider_invocation_allowed": False, "network_allowed": False, "process_spawn_allowed": True, "model_load_allowed": False, "model_call_allowed": False}}]
+    r = _build_h6_controlled_provider_probe_preflight(rows, bundle)
+    assert r["process_spawn_allowed"] is False
+    assert r["process_spawn_blocked_count"] == 1
+    assert "process_spawn_not_allowed" in r["preflight_reasons"]
+
+
+def test_h6_10_probe_preflight_model_load_cannot_become_true(monkeypatch):
+    """H6-10 T10: model_load_allowed is always false."""
+    from scripts.bench.capability_ab_runner import _build_h6_controlled_provider_probe_preflight
+    monkeypatch.setenv("NEXUS_H6_ALLOW_CONTROLLED_PROVIDER_PROBE_PREFLIGHT", "1")
+    gate = {"gate_ready": True, "provider_invocation_gate_receipt_ready": True, "ready_for_h6_10_controlled_provider_probe_preflight": True, "safety_violation_count": 0}
+    bundle = {"h6_local_provider_invocation_gate": gate}
+    rows = [{"h6_controlled_provider_probe_preflight": {"preflight_id": "p1", "gate_id": "g1", "config_id": "c1", "provider_id": "pr1", "provider_family": "ollama", "model_family": "qwen", "model_size": "7b", "model_name": "qwen2.5-coder:7b", "preflight_mode": "preflight_only", "provider_probe_allowed": False, "provider_invocation_allowed": False, "network_allowed": False, "process_spawn_allowed": False, "model_load_allowed": True, "model_call_allowed": False}}]
+    r = _build_h6_controlled_provider_probe_preflight(rows, bundle)
+    assert r["model_load_allowed"] is False
+    assert r["model_load_blocked_count"] == 1
+    assert "model_load_not_allowed" in r["preflight_reasons"]
+
+
+def test_h6_10_probe_preflight_model_call_cannot_become_true(monkeypatch):
+    """H6-10 T11: model_call_allowed is always false."""
+    from scripts.bench.capability_ab_runner import _build_h6_controlled_provider_probe_preflight
+    monkeypatch.setenv("NEXUS_H6_ALLOW_CONTROLLED_PROVIDER_PROBE_PREFLIGHT", "1")
+    gate = {"gate_ready": True, "provider_invocation_gate_receipt_ready": True, "ready_for_h6_10_controlled_provider_probe_preflight": True, "safety_violation_count": 0}
+    bundle = {"h6_local_provider_invocation_gate": gate}
+    rows = [{"h6_controlled_provider_probe_preflight": {"preflight_id": "p1", "gate_id": "g1", "config_id": "c1", "provider_id": "pr1", "provider_family": "ollama", "model_family": "qwen", "model_size": "7b", "model_name": "qwen2.5-coder:7b", "preflight_mode": "preflight_only", "provider_probe_allowed": False, "provider_invocation_allowed": False, "network_allowed": False, "process_spawn_allowed": False, "model_load_allowed": False, "model_call_allowed": True}}]
+    r = _build_h6_controlled_provider_probe_preflight(rows, bundle)
+    assert r["model_call_allowed"] is False
+    assert r["model_call_blocked_count"] == 1
+    assert "model_call_not_allowed" in r["preflight_reasons"]
+
+
+def test_h6_10_probe_preflight_model_call_executed_cannot_become_true(monkeypatch):
+    """H6-10 T12: model_call_executed is always false."""
+    from scripts.bench.capability_ab_runner import _build_h6_controlled_provider_probe_preflight
+    monkeypatch.setenv("NEXUS_H6_ALLOW_CONTROLLED_PROVIDER_PROBE_PREFLIGHT", "1")
+    gate = {"gate_ready": True, "provider_invocation_gate_receipt_ready": True, "ready_for_h6_10_controlled_provider_probe_preflight": True, "safety_violation_count": 0}
+    bundle = {"h6_local_provider_invocation_gate": gate}
+    rows = [{"h6_controlled_provider_probe_preflight": {"preflight_id": "p1", "gate_id": "g1", "config_id": "c1", "provider_id": "pr1", "provider_family": "ollama", "model_family": "qwen", "model_size": "7b", "model_name": "qwen2.5-coder:7b", "preflight_mode": "preflight_only", "provider_probe_allowed": False, "provider_invocation_allowed": False, "network_allowed": False, "process_spawn_allowed": False, "model_load_allowed": False, "model_call_allowed": False, "model_call_executed": True}}]
+    r = _build_h6_controlled_provider_probe_preflight(rows, bundle)
+    assert r["model_call_executed"] is False
+    assert r["model_call_executed_count"] == 1
+    assert "model_call_executed_detected" in r["preflight_reasons"]
+
+
+def test_h6_10_probe_preflight_ollama_invoked_cannot_become_true(monkeypatch):
+    """H6-10 T13: ollama_invoked is always false."""
+    from scripts.bench.capability_ab_runner import _build_h6_controlled_provider_probe_preflight
+    monkeypatch.setenv("NEXUS_H6_ALLOW_CONTROLLED_PROVIDER_PROBE_PREFLIGHT", "1")
+    gate = {"gate_ready": True, "provider_invocation_gate_receipt_ready": True, "ready_for_h6_10_controlled_provider_probe_preflight": True, "safety_violation_count": 0}
+    bundle = {"h6_local_provider_invocation_gate": gate}
+    rows = [{"h6_controlled_provider_probe_preflight": {"preflight_id": "p1", "gate_id": "g1", "config_id": "c1", "provider_id": "pr1", "provider_family": "ollama", "model_family": "qwen", "model_size": "7b", "model_name": "qwen2.5-coder:7b", "preflight_mode": "preflight_only", "provider_probe_allowed": False, "provider_invocation_allowed": False, "network_allowed": False, "process_spawn_allowed": False, "model_load_allowed": False, "model_call_allowed": False, "ollama_invoked": True}}]
+    r = _build_h6_controlled_provider_probe_preflight(rows, bundle)
+    assert r["ollama_invoked"] is False
+    assert r["ollama_invoked_count"] == 1
+    assert "ollama_invoked_detected" in r["preflight_reasons"]
+
+
+def test_h6_10_probe_preflight_cloud_provider_invoked_cannot_become_true(monkeypatch):
+    """H6-10 T14: cloud_provider_invoked is always false."""
+    from scripts.bench.capability_ab_runner import _build_h6_controlled_provider_probe_preflight
+    monkeypatch.setenv("NEXUS_H6_ALLOW_CONTROLLED_PROVIDER_PROBE_PREFLIGHT", "1")
+    gate = {"gate_ready": True, "provider_invocation_gate_receipt_ready": True, "ready_for_h6_10_controlled_provider_probe_preflight": True, "safety_violation_count": 0}
+    bundle = {"h6_local_provider_invocation_gate": gate}
+    rows = [{"h6_controlled_provider_probe_preflight": {"preflight_id": "p1", "gate_id": "g1", "config_id": "c1", "provider_id": "pr1", "provider_family": "ollama", "model_family": "qwen", "model_size": "7b", "model_name": "qwen2.5-coder:7b", "preflight_mode": "preflight_only", "provider_probe_allowed": False, "provider_invocation_allowed": False, "network_allowed": False, "process_spawn_allowed": False, "model_load_allowed": False, "model_call_allowed": False, "cloud_provider_invoked": True}}]
+    r = _build_h6_controlled_provider_probe_preflight(rows, bundle)
+    assert r["cloud_provider_invoked"] is False
+    assert r["cloud_provider_invoked_count"] == 1
+    assert "cloud_provider_invoked_detected" in r["preflight_reasons"]
+
+
+def test_h6_10_probe_preflight_runtime_effect_remains_false(monkeypatch):
+    """H6-10 T15: runtime_effect is always false."""
+    from scripts.bench.capability_ab_runner import _build_h6_controlled_provider_probe_preflight
+    monkeypatch.setenv("NEXUS_H6_ALLOW_CONTROLLED_PROVIDER_PROBE_PREFLIGHT", "1")
+    gate = {"gate_ready": True, "provider_invocation_gate_receipt_ready": True, "ready_for_h6_10_controlled_provider_probe_preflight": True, "safety_violation_count": 0}
+    bundle = {"h6_local_provider_invocation_gate": gate}
+    rows = [{"h6_controlled_provider_probe_preflight": {"preflight_id": "p1", "gate_id": "g1", "config_id": "c1", "provider_id": "pr1", "provider_family": "ollama", "model_family": "qwen", "model_size": "7b", "model_name": "qwen2.5-coder:7b", "preflight_mode": "preflight_only", "provider_probe_allowed": False, "provider_invocation_allowed": False, "network_allowed": False, "process_spawn_allowed": False, "model_load_allowed": False, "model_call_allowed": False, "runtime_effect": True}}]
+    r = _build_h6_controlled_provider_probe_preflight(rows, bundle)
+    assert r["runtime_effect"] is False
+    assert r["runtime_effect_count"] == 1
+    assert "runtime_effect_detected" in r["preflight_reasons"]
+
+
+def test_h6_10_probe_preflight_production_ready_false(monkeypatch):
+    """H6-10 T16: production_ready is always false."""
+    from scripts.bench.capability_ab_runner import _build_h6_controlled_provider_probe_preflight
+    monkeypatch.setenv("NEXUS_H6_ALLOW_CONTROLLED_PROVIDER_PROBE_PREFLIGHT", "1")
+    gate = {"gate_ready": True, "provider_invocation_gate_receipt_ready": True, "ready_for_h6_10_controlled_provider_probe_preflight": True, "safety_violation_count": 0}
+    bundle = {"h6_local_provider_invocation_gate": gate}
+    rows = [{"h6_controlled_provider_probe_preflight": {"preflight_id": "p1", "gate_id": "g1", "config_id": "c1", "provider_id": "pr1", "provider_family": "ollama", "model_family": "qwen", "model_size": "7b", "model_name": "qwen2.5-coder:7b", "preflight_mode": "preflight_only", "provider_probe_allowed": False, "provider_invocation_allowed": False, "network_allowed": False, "process_spawn_allowed": False, "model_load_allowed": False, "model_call_allowed": False}}]
+    r = _build_h6_controlled_provider_probe_preflight(rows, bundle)
+    assert r["production_ready"] is False
+    assert r["public_claim_allowed"] is False
+    assert "h6_10_controlled_provider_probe_preflight_not_production" in r["preflight_reasons"]
+
+
+def test_h6_10_probe_preflight_deny_by_default_true(monkeypatch):
+    """H6-10 T17: deny_by_default is always true."""
+    from scripts.bench.capability_ab_runner import _build_h6_controlled_provider_probe_preflight
+    monkeypatch.setenv("NEXUS_H6_ALLOW_CONTROLLED_PROVIDER_PROBE_PREFLIGHT", "1")
+    gate = {"gate_ready": True, "provider_invocation_gate_receipt_ready": True, "ready_for_h6_10_controlled_provider_probe_preflight": True, "safety_violation_count": 0}
+    bundle = {"h6_local_provider_invocation_gate": gate}
+    rows = [{"h6_controlled_provider_probe_preflight": {"preflight_id": "p1", "gate_id": "g1", "config_id": "c1", "provider_id": "pr1", "provider_family": "ollama", "model_family": "qwen", "model_size": "7b", "model_name": "qwen2.5-coder:7b", "preflight_mode": "preflight_only", "provider_probe_allowed": False, "provider_invocation_allowed": False, "network_allowed": False, "process_spawn_allowed": False, "model_load_allowed": False, "model_call_allowed": False}}]
+    r = _build_h6_controlled_provider_probe_preflight(rows, bundle)
+    assert r["deny_by_default"] is True
+    assert "deny_by_default" in r["preflight_reasons"]
+
+
+def test_h6_10_probe_preflight_bundle_summary_counters(monkeypatch):
+    """H6-10 T18: Bundle summary counters for safety fields."""
+    from scripts.bench.capability_ab_runner import _build_h6_controlled_provider_probe_preflight
+    monkeypatch.setenv("NEXUS_H6_ALLOW_CONTROLLED_PROVIDER_PROBE_PREFLIGHT", "1")
+    gate = {"gate_ready": True, "provider_invocation_gate_receipt_ready": True, "ready_for_h6_10_controlled_provider_probe_preflight": True, "safety_violation_count": 0}
+    bundle = {"h6_local_provider_invocation_gate": gate}
+    rows = [
+        {"h6_controlled_provider_probe_preflight": {"preflight_id": "p1", "gate_id": "g1", "config_id": "c1", "provider_id": "pr1", "provider_family": "ollama", "model_family": "qwen", "model_size": "7b", "model_name": "qwen2.5-coder:7b", "preflight_mode": "preflight_only", "provider_probe_allowed": False, "provider_invocation_allowed": False, "network_allowed": False, "process_spawn_allowed": False, "model_load_allowed": False, "model_call_allowed": False, "model_call_executed": True}},
+        {"h6_controlled_provider_probe_preflight": {"preflight_id": "p2", "gate_id": "g2", "config_id": "c2", "provider_id": "pr2", "provider_family": "ollama", "model_family": "qwen", "model_size": "7b", "model_name": "qwen2.5-coder:7b", "preflight_mode": "preflight_only", "provider_probe_allowed": False, "provider_invocation_allowed": False, "network_allowed": False, "process_spawn_allowed": False, "model_load_allowed": False, "model_call_allowed": False, "ollama_invoked": True}},
+    ]
+    r = _build_h6_controlled_provider_probe_preflight(rows, bundle)
+    assert r["model_call_executed_count"] == 1
+    assert r["ollama_invoked_count"] == 1
+    assert r["cloud_provider_invoked_count"] == 0
+    assert r["repo_mutated_count"] == 0
+    assert r["behavior_changed_count"] == 0
+    assert r["runtime_effect_count"] == 0
+    assert r["safety_violation_count"] == 2
+
+
+def test_h6_10_probe_preflight_report_status(monkeypatch):
+    """H6-10 T19: Report status and readiness fields."""
+    from scripts.bench.capability_ab_runner import _build_h6_controlled_provider_probe_preflight
+    monkeypatch.setenv("NEXUS_H6_ALLOW_CONTROLLED_PROVIDER_PROBE_PREFLIGHT", "1")
+    gate = {"gate_ready": True, "provider_invocation_gate_receipt_ready": True, "ready_for_h6_10_controlled_provider_probe_preflight": True, "safety_violation_count": 0}
+    bundle = {"h6_local_provider_invocation_gate": gate}
+    rows = [{"h6_controlled_provider_probe_preflight": {"preflight_id": "p1", "gate_id": "g1", "config_id": "c1", "provider_id": "pr1", "provider_family": "ollama", "model_family": "qwen", "model_size": "7b", "model_name": "qwen2.5-coder:7b", "preflight_mode": "preflight_only", "provider_probe_allowed": False, "provider_invocation_allowed": False, "network_allowed": False, "process_spawn_allowed": False, "model_load_allowed": False, "model_call_allowed": False}}]
+    r = _build_h6_controlled_provider_probe_preflight(rows, bundle)
+    assert r["schema"] == "nexus.hybrid_h6_controlled_provider_probe_preflight.v1"
+    assert r["evaluated"] is True
+    assert r["preflight_status"] == "provider_probe_preflight_ready"
+    assert r["preflight_allowed"] is True
+    assert r["preflight_ready"] is True
+    assert r["denial_receipt_ready"] is True
+    assert r["ready_for_h6_11_provider_denial_receipt_replay"] is True
+
+
+def test_h6_10_probe_preflight_collect_only():
+    """H6-10 T30: collect-only includes all H6-10 tests."""
+    import subprocess, re
+    result = subprocess.run(["python3", "-m", "pytest", "tests/benchmark/test_capability_ab_runner.py", "-k", "h6_10", "--collect-only", "-q"], capture_output=True, text=True, cwd="/Users/jameschen/Workspace/nexus")
+    count = len(re.findall(r"test_h6_10_", result.stdout))
+    assert count >= 30, f"Expected >= 30 H6-10 tests, got {count}"
+
+
+def test_h6_10_probe_preflight_missing_preflight_id(monkeypatch):
+    """H6-10 T21: Missing preflight_id invalidates preflight."""
+    from scripts.bench.capability_ab_runner import _build_h6_controlled_provider_probe_preflight
+    monkeypatch.setenv("NEXUS_H6_ALLOW_CONTROLLED_PROVIDER_PROBE_PREFLIGHT", "1")
+    gate = {"gate_ready": True, "provider_invocation_gate_receipt_ready": True, "ready_for_h6_10_controlled_provider_probe_preflight": True, "safety_violation_count": 0}
+    bundle = {"h6_local_provider_invocation_gate": gate}
+    rows = [{"h6_controlled_provider_probe_preflight": {"preflight_id": "", "gate_id": "g1", "config_id": "c1", "provider_id": "pr1", "provider_family": "ollama", "model_family": "qwen", "model_size": "7b", "model_name": "qwen2.5-coder:7b", "preflight_mode": "preflight_only", "provider_probe_allowed": False, "provider_invocation_allowed": False, "network_allowed": False, "process_spawn_allowed": False, "model_load_allowed": False, "model_call_allowed": False}}]
+    r = _build_h6_controlled_provider_probe_preflight(rows, bundle)
+    assert r["missing_preflight_id_count"] == 1
+    assert "missing_preflight_id" in r["preflight_reasons"]
+
+
+def test_h6_10_probe_preflight_missing_gate_id(monkeypatch):
+    """H6-10 T22: Missing gate_id invalidates preflight."""
+    from scripts.bench.capability_ab_runner import _build_h6_controlled_provider_probe_preflight
+    monkeypatch.setenv("NEXUS_H6_ALLOW_CONTROLLED_PROVIDER_PROBE_PREFLIGHT", "1")
+    gate = {"gate_ready": True, "provider_invocation_gate_receipt_ready": True, "ready_for_h6_10_controlled_provider_probe_preflight": True, "safety_violation_count": 0}
+    bundle = {"h6_local_provider_invocation_gate": gate}
+    rows = [{"h6_controlled_provider_probe_preflight": {"preflight_id": "p1", "gate_id": "", "config_id": "c1", "provider_id": "pr1", "provider_family": "ollama", "model_family": "qwen", "model_size": "7b", "model_name": "qwen2.5-coder:7b", "preflight_mode": "preflight_only", "provider_probe_allowed": False, "provider_invocation_allowed": False, "network_allowed": False, "process_spawn_allowed": False, "model_load_allowed": False, "model_call_allowed": False}}]
+    r = _build_h6_controlled_provider_probe_preflight(rows, bundle)
+    assert r["missing_gate_id_count"] == 1
+    assert "missing_gate_id" in r["preflight_reasons"]
+
+
+def test_h6_10_probe_preflight_missing_config_id(monkeypatch):
+    """H6-10 T23: Missing config_id invalidates preflight."""
+    from scripts.bench.capability_ab_runner import _build_h6_controlled_provider_probe_preflight
+    monkeypatch.setenv("NEXUS_H6_ALLOW_CONTROLLED_PROVIDER_PROBE_PREFLIGHT", "1")
+    gate = {"gate_ready": True, "provider_invocation_gate_receipt_ready": True, "ready_for_h6_10_controlled_provider_probe_preflight": True, "safety_violation_count": 0}
+    bundle = {"h6_local_provider_invocation_gate": gate}
+    rows = [{"h6_controlled_provider_probe_preflight": {"preflight_id": "p1", "gate_id": "g1", "config_id": "", "provider_id": "pr1", "provider_family": "ollama", "model_family": "qwen", "model_size": "7b", "model_name": "qwen2.5-coder:7b", "preflight_mode": "preflight_only", "provider_probe_allowed": False, "provider_invocation_allowed": False, "network_allowed": False, "process_spawn_allowed": False, "model_load_allowed": False, "model_call_allowed": False}}]
+    r = _build_h6_controlled_provider_probe_preflight(rows, bundle)
+    assert r["missing_config_id_count"] == 1
+    assert "missing_config_id" in r["preflight_reasons"]
+
+
+def test_h6_10_probe_preflight_invalid_provider_family(monkeypatch):
+    """H6-10 T24: Invalid provider_family invalidates preflight."""
+    from scripts.bench.capability_ab_runner import _build_h6_controlled_provider_probe_preflight
+    monkeypatch.setenv("NEXUS_H6_ALLOW_CONTROLLED_PROVIDER_PROBE_PREFLIGHT", "1")
+    gate = {"gate_ready": True, "provider_invocation_gate_receipt_ready": True, "ready_for_h6_10_controlled_provider_probe_preflight": True, "safety_violation_count": 0}
+    bundle = {"h6_local_provider_invocation_gate": gate}
+    rows = [{"h6_controlled_provider_probe_preflight": {"preflight_id": "p1", "gate_id": "g1", "config_id": "c1", "provider_id": "pr1", "provider_family": "invalid", "model_family": "qwen", "model_size": "7b", "model_name": "qwen2.5-coder:7b", "preflight_mode": "preflight_only", "provider_probe_allowed": False, "provider_invocation_allowed": False, "network_allowed": False, "process_spawn_allowed": False, "model_load_allowed": False, "model_call_allowed": False}}]
+    r = _build_h6_controlled_provider_probe_preflight(rows, bundle)
+    assert r["invalid_provider_family_count"] == 1
+    assert "invalid_provider_family" in r["preflight_reasons"]
+
+
+def test_h6_10_probe_preflight_invalid_model_family(monkeypatch):
+    """H6-10 T25: Invalid model_family invalidates preflight."""
+    from scripts.bench.capability_ab_runner import _build_h6_controlled_provider_probe_preflight
+    monkeypatch.setenv("NEXUS_H6_ALLOW_CONTROLLED_PROVIDER_PROBE_PREFLIGHT", "1")
+    gate = {"gate_ready": True, "provider_invocation_gate_receipt_ready": True, "ready_for_h6_10_controlled_provider_probe_preflight": True, "safety_violation_count": 0}
+    bundle = {"h6_local_provider_invocation_gate": gate}
+    rows = [{"h6_controlled_provider_probe_preflight": {"preflight_id": "p1", "gate_id": "g1", "config_id": "c1", "provider_id": "pr1", "provider_family": "ollama", "model_family": "llama", "model_size": "7b", "model_name": "llama2:7b", "preflight_mode": "preflight_only", "provider_probe_allowed": False, "provider_invocation_allowed": False, "network_allowed": False, "process_spawn_allowed": False, "model_load_allowed": False, "model_call_allowed": False}}]
+    r = _build_h6_controlled_provider_probe_preflight(rows, bundle)
+    assert r["invalid_model_family_count"] == 1
+    assert "invalid_model_family" in r["preflight_reasons"]
+
+
+def test_h6_10_probe_preflight_invalid_model_size(monkeypatch):
+    """H6-10 T26: Invalid model_size invalidates preflight."""
+    from scripts.bench.capability_ab_runner import _build_h6_controlled_provider_probe_preflight
+    monkeypatch.setenv("NEXUS_H6_ALLOW_CONTROLLED_PROVIDER_PROBE_PREFLIGHT", "1")
+    gate = {"gate_ready": True, "provider_invocation_gate_receipt_ready": True, "ready_for_h6_10_controlled_provider_probe_preflight": True, "safety_violation_count": 0}
+    bundle = {"h6_local_provider_invocation_gate": gate}
+    rows = [{"h6_controlled_provider_probe_preflight": {"preflight_id": "p1", "gate_id": "g1", "config_id": "c1", "provider_id": "pr1", "provider_family": "ollama", "model_family": "qwen", "model_size": "100b", "model_name": "qwen2.5-coder:100b", "preflight_mode": "preflight_only", "provider_probe_allowed": False, "provider_invocation_allowed": False, "network_allowed": False, "process_spawn_allowed": False, "model_load_allowed": False, "model_call_allowed": False}}]
+    r = _build_h6_controlled_provider_probe_preflight(rows, bundle)
+    assert r["invalid_model_size_count"] == 1
+    assert "invalid_model_size" in r["preflight_reasons"]
+
+
+def test_h6_10_probe_preflight_invalid_preflight_mode(monkeypatch):
+    """H6-10 T27: Invalid preflight_mode invalidates preflight."""
+    from scripts.bench.capability_ab_runner import _build_h6_controlled_provider_probe_preflight
+    monkeypatch.setenv("NEXUS_H6_ALLOW_CONTROLLED_PROVIDER_PROBE_PREFLIGHT", "1")
+    gate = {"gate_ready": True, "provider_invocation_gate_receipt_ready": True, "ready_for_h6_10_controlled_provider_probe_preflight": True, "safety_violation_count": 0}
+    bundle = {"h6_local_provider_invocation_gate": gate}
+    rows = [{"h6_controlled_provider_probe_preflight": {"preflight_id": "p1", "gate_id": "g1", "config_id": "c1", "provider_id": "pr1", "provider_family": "ollama", "model_family": "qwen", "model_size": "7b", "model_name": "qwen2.5-coder:7b", "preflight_mode": "live_probe", "provider_probe_allowed": False, "provider_invocation_allowed": False, "network_allowed": False, "process_spawn_allowed": False, "model_load_allowed": False, "model_call_allowed": False}}]
+    r = _build_h6_controlled_provider_probe_preflight(rows, bundle)
+    assert r["invalid_preflight_mode_count"] == 1
+    assert "invalid_preflight_mode" in r["preflight_reasons"]
+
+
+def test_h6_10_probe_preflight_repo_mutated_block(monkeypatch):
+    """H6-10 T28: repo_mutated=true detected in bundle summary."""
+    from scripts.bench.capability_ab_runner import _build_h6_controlled_provider_probe_preflight
+    monkeypatch.setenv("NEXUS_H6_ALLOW_CONTROLLED_PROVIDER_PROBE_PREFLIGHT", "1")
+    gate = {"gate_ready": True, "provider_invocation_gate_receipt_ready": True, "ready_for_h6_10_controlled_provider_probe_preflight": True, "safety_violation_count": 0}
+    bundle = {"h6_local_provider_invocation_gate": gate}
+    rows = [{"h6_controlled_provider_probe_preflight": {"preflight_id": "p1", "gate_id": "g1", "config_id": "c1", "provider_id": "pr1", "provider_family": "ollama", "model_family": "qwen", "model_size": "7b", "model_name": "qwen2.5-coder:7b", "preflight_mode": "preflight_only", "provider_probe_allowed": False, "provider_invocation_allowed": False, "network_allowed": False, "process_spawn_allowed": False, "model_load_allowed": False, "model_call_allowed": False, "repo_mutated": True}}]
+    r = _build_h6_controlled_provider_probe_preflight(rows, bundle)
+    assert r["repo_mutated_count"] == 1
+    assert "repo_mutated_detected" in r["preflight_reasons"]
+
+
+def test_h6_10_probe_preflight_behavior_changed_block(monkeypatch):
+    """H6-10 T29: behavior_changed=true detected in bundle summary."""
+    from scripts.bench.capability_ab_runner import _build_h6_controlled_provider_probe_preflight
+    monkeypatch.setenv("NEXUS_H6_ALLOW_CONTROLLED_PROVIDER_PROBE_PREFLIGHT", "1")
+    gate = {"gate_ready": True, "provider_invocation_gate_receipt_ready": True, "ready_for_h6_10_controlled_provider_probe_preflight": True, "safety_violation_count": 0}
+    bundle = {"h6_local_provider_invocation_gate": gate}
+    rows = [{"h6_controlled_provider_probe_preflight": {"preflight_id": "p1", "gate_id": "g1", "config_id": "c1", "provider_id": "pr1", "provider_family": "ollama", "model_family": "qwen", "model_size": "7b", "model_name": "qwen2.5-coder:7b", "preflight_mode": "preflight_only", "provider_probe_allowed": False, "provider_invocation_allowed": False, "network_allowed": False, "process_spawn_allowed": False, "model_load_allowed": False, "model_call_allowed": False, "behavior_changed": True}}]
+    r = _build_h6_controlled_provider_probe_preflight(rows, bundle)
+    assert r["behavior_changed_count"] == 1
+    assert "behavior_changed_detected" in r["preflight_reasons"]
+
+
+def test_h6_10_probe_preflight_valid_3b(monkeypatch):
+    """H6-10 T31: Valid 3b preflight passes."""
+    from scripts.bench.capability_ab_runner import _build_h6_controlled_provider_probe_preflight
+    monkeypatch.setenv("NEXUS_H6_ALLOW_CONTROLLED_PROVIDER_PROBE_PREFLIGHT", "1")
+    gate = {"gate_ready": True, "provider_invocation_gate_receipt_ready": True, "ready_for_h6_10_controlled_provider_probe_preflight": True, "safety_violation_count": 0}
+    bundle = {"h6_local_provider_invocation_gate": gate}
+    rows = [{"h6_controlled_provider_probe_preflight": {"preflight_id": "p-3b", "gate_id": "g-3b", "config_id": "c-3b", "provider_id": "pr-3b", "provider_family": "ollama", "model_family": "qwen", "model_size": "3b", "model_name": "qwen2.5-coder:3b", "preflight_mode": "preflight_only", "provider_probe_allowed": False, "provider_invocation_allowed": False, "network_allowed": False, "process_spawn_allowed": False, "model_load_allowed": False, "model_call_allowed": False}}]
+    r = _build_h6_controlled_provider_probe_preflight(rows, bundle)
+    assert r["preflight_status"] == "provider_probe_preflight_ready"
+    assert r["probe_preflight_valid_count"] == 1

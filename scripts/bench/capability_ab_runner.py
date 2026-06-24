@@ -12084,6 +12084,276 @@ def _build_h6_local_provider_invocation_gate(rows: list[dict[str, Any]], bundle:
     }
 
 
+def _build_h6_controlled_provider_probe_preflight(rows: list[dict[str, Any]], bundle: dict[str, Any] | None = None) -> dict[str, Any]:
+    """Pure helper: H6 controlled provider probe preflight (deny-by-default).
+
+    This stage confirms that all probe/invocation gates are in deny-by-default
+    state. It never allows provider_probe_allowed, provider_invocation_allowed,
+    model_call_allowed, or model_call_executed to become true.
+    """
+    import os as _os
+
+    flag = _os.environ.get("NEXUS_H6_ALLOW_CONTROLLED_PROVIDER_PROBE_PREFLIGHT", "").strip() == "1"
+
+    gate = None
+    if bundle:
+        gate = bundle.get("h6_local_provider_invocation_gate")
+
+    gate_present = bool(gate)
+    gate_ready = bool(gate.get("gate_ready", False)) if gate else False
+    gate_receipt_ready = bool(gate.get("provider_invocation_gate_receipt_ready", False)) if gate else False
+    ready_probe = bool(gate.get("ready_for_h6_10_controlled_provider_probe_preflight", False)) if gate else False
+    gate_safety = int(gate.get("safety_violation_count", 0)) if gate else 0
+
+    prefights = [r.get("h6_controlled_provider_probe_preflight") for r in rows if r.get("h6_controlled_provider_probe_preflight")]
+
+    valid_preflights = []
+    invalid_preflights = 0
+    missing_preflight_id = 0
+    missing_gate_id = 0
+    missing_config_id = 0
+    missing_provider_id = 0
+    missing_model_name = 0
+    invalid_provider_family = 0
+    invalid_model_family = 0
+    invalid_model_size = 0
+    invalid_preflight_mode = 0
+    probe_allowed_blocked = 0
+    invocation_allowed_blocked = 0
+    network_blocked = 0
+    process_spawn_blocked = 0
+    model_load_blocked = 0
+    model_call_blocked = 0
+
+    mc_count = 0
+    ol_count = 0
+    cl_count = 0
+    rm_count = 0
+    bh_count = 0
+    re_count = 0
+
+    for p in prefights:
+        pid = str(p.get("preflight_id", "") or "").strip()
+        gid = str(p.get("gate_id", "") or "").strip()
+        cid = str(p.get("config_id", "") or "").strip()
+        prid = str(p.get("provider_id", "") or "").strip()
+        pfam = str(p.get("provider_family", "") or "").lower()
+        mfam = str(p.get("model_family", "") or "").lower()
+        sz = str(p.get("model_size", "") or "").lower()
+        mname = str(p.get("model_name", "") or "").strip()
+        pmode = str(p.get("preflight_mode", "") or "").lower()
+        ppa = bool(p.get("provider_probe_allowed", True))
+        pia = bool(p.get("provider_invocation_allowed", True))
+        na = bool(p.get("network_allowed", True))
+        ps = bool(p.get("process_spawn_allowed", True))
+        mla = bool(p.get("model_load_allowed", True))
+        mca = bool(p.get("model_call_allowed", True))
+        mc = bool(p.get("model_call_executed", False))
+        ol = bool(p.get("ollama_invoked", False))
+        cl = bool(p.get("cloud_provider_invoked", False))
+        rm = bool(p.get("repo_mutated", False))
+        bh = bool(p.get("behavior_changed", False))
+        re = bool(p.get("runtime_effect", False))
+
+        if mc:
+            mc_count += 1
+        if ol:
+            ol_count += 1
+        if cl:
+            cl_count += 1
+        if rm:
+            rm_count += 1
+        if bh:
+            bh_count += 1
+        if re:
+            re_count += 1
+
+        is_valid = (
+            pid and gid and cid and prid
+            and pfam in {"ollama"} and mfam in {"qwen"}
+            and sz in {"3b", "7b", "14b"} and mname
+            and pmode in {"preflight_only"}
+            and not ppa and not pia and not na and not ps and not mla and not mca
+            and not mc and not ol and not cl and not rm and not bh and not re
+        )
+
+        if is_valid:
+            valid_preflights.append(p)
+        else:
+            invalid_preflights += 1
+            if not pid:
+                missing_preflight_id += 1
+            if not gid:
+                missing_gate_id += 1
+            if not cid:
+                missing_config_id += 1
+            if not prid:
+                missing_provider_id += 1
+            if not mname:
+                missing_model_name += 1
+            if pfam not in {"ollama"}:
+                invalid_provider_family += 1
+            if mfam not in {"qwen"}:
+                invalid_model_family += 1
+            if sz not in {"3b", "7b", "14b"}:
+                invalid_model_size += 1
+            if pmode not in {"preflight_only"}:
+                invalid_preflight_mode += 1
+            if ppa:
+                probe_allowed_blocked += 1
+            if pia:
+                invocation_allowed_blocked += 1
+            if na:
+                network_blocked += 1
+            if ps:
+                process_spawn_blocked += 1
+            if mla:
+                model_load_blocked += 1
+            if mca:
+                model_call_blocked += 1
+
+    safety = mc_count + ol_count + cl_count + rm_count + bh_count + re_count
+
+    preflight_allowed = (
+        flag and gate_present and gate_ready
+        and gate_receipt_ready and ready_probe and gate_safety == 0
+    )
+
+    preflight_ready = (
+        preflight_allowed and len(valid_preflights) > 0 and safety == 0
+    )
+
+    denial_receipt_ready = (
+        preflight_ready and invalid_preflights == 0
+    )
+
+    reasons = []
+    if not flag:
+        reasons.append("controlled_provider_probe_preflight_flag_not_enabled")
+    if not gate_present:
+        reasons.append("missing_h6_9_invocation_gate")
+    if gate and not gate_ready:
+        reasons.append("h6_9_gate_not_ready")
+    if gate and not gate_receipt_ready:
+        reasons.append("h6_9_gate_receipt_not_ready")
+    if gate and not ready_probe:
+        reasons.append("not_ready_for_h6_10_controlled_provider_probe_preflight")
+    if gate_safety > 0:
+        reasons.append("h6_9_safety_violation_detected")
+    if not prefights:
+        reasons.append("no_probe_preflights")
+    if missing_preflight_id > 0:
+        reasons.append("missing_preflight_id")
+    if missing_gate_id > 0:
+        reasons.append("missing_gate_id")
+    if missing_config_id > 0:
+        reasons.append("missing_config_id")
+    if missing_provider_id > 0:
+        reasons.append("missing_provider_id")
+    if missing_model_name > 0:
+        reasons.append("missing_model_name")
+    if invalid_provider_family > 0:
+        reasons.append("invalid_provider_family")
+    if invalid_model_family > 0:
+        reasons.append("invalid_model_family")
+    if invalid_model_size > 0:
+        reasons.append("invalid_model_size")
+    if invalid_preflight_mode > 0:
+        reasons.append("invalid_preflight_mode")
+    if probe_allowed_blocked > 0:
+        reasons.append("provider_probe_allowed_blocked")
+    if invocation_allowed_blocked > 0:
+        reasons.append("provider_invocation_allowed_blocked")
+    if network_blocked > 0:
+        reasons.append("network_not_allowed")
+    if process_spawn_blocked > 0:
+        reasons.append("process_spawn_not_allowed")
+    if model_load_blocked > 0:
+        reasons.append("model_load_not_allowed")
+    if model_call_blocked > 0:
+        reasons.append("model_call_not_allowed")
+    if mc_count > 0:
+        reasons.append("model_call_executed_detected")
+    if ol_count > 0:
+        reasons.append("ollama_invoked_detected")
+    if cl_count > 0:
+        reasons.append("cloud_provider_invoked_detected")
+    if rm_count > 0:
+        reasons.append("repo_mutated_detected")
+    if bh_count > 0:
+        reasons.append("behavior_changed_detected")
+    if re_count > 0:
+        reasons.append("runtime_effect_detected")
+    reasons.extend([
+        "h6_10_controlled_provider_probe_preflight_not_production",
+        "preflight_only",
+        "deny_by_default",
+        "no_model_calls_allowed",
+        "no_provider_probe_allowed",
+        "no_provider_invocation_allowed",
+        "ollama_invocation_blocked",
+        "cloud_invocation_blocked",
+        "repo_mutation_blocked",
+        "runtime_effect_blocked",
+        "production_claim_blocked",
+        "public_claim_blocked",
+    ])
+
+    return {
+        "schema": "nexus.hybrid_h6_controlled_provider_probe_preflight.v1",
+        "evaluated": True,
+        "preflight_status": "provider_probe_preflight_ready" if preflight_ready else ("provider_probe_preflight_fail" if preflight_allowed else "blocked"),
+        "preflight_reasons": reasons,
+        "preflight_allowed": preflight_allowed,
+        "preflight_ready": preflight_ready,
+        "row_count": len(rows),
+        "gate_present": gate_present,
+        "gate_ready": gate_ready,
+        "gate_receipt_ready": gate_receipt_ready,
+        "ready_for_h6_10_controlled_provider_probe_preflight": ready_probe,
+        "probe_preflight_count": len(prefights),
+        "probe_preflight_valid_count": len(valid_preflights),
+        "probe_preflight_invalid_count": invalid_preflights,
+        "missing_preflight_id_count": missing_preflight_id,
+        "missing_gate_id_count": missing_gate_id,
+        "missing_config_id_count": missing_config_id,
+        "missing_provider_id_count": missing_provider_id,
+        "missing_model_name_count": missing_model_name,
+        "invalid_provider_family_count": invalid_provider_family,
+        "invalid_model_family_count": invalid_model_family,
+        "invalid_model_size_count": invalid_model_size,
+        "invalid_preflight_mode_count": invalid_preflight_mode,
+        "probe_allowed_blocked_count": probe_allowed_blocked,
+        "invocation_allowed_blocked_count": invocation_allowed_blocked,
+        "network_blocked_count": network_blocked,
+        "process_spawn_blocked_count": process_spawn_blocked,
+        "model_load_blocked_count": model_load_blocked,
+        "model_call_blocked_count": model_call_blocked,
+        "model_call_executed_count": mc_count,
+        "ollama_invoked_count": ol_count,
+        "cloud_provider_invoked_count": cl_count,
+        "repo_mutated_count": rm_count,
+        "behavior_changed_count": bh_count,
+        "runtime_effect_count": re_count,
+        "safety_violation_count": safety,
+        "provider_probe_allowed": False,
+        "provider_invocation_allowed": False,
+        "network_allowed": False,
+        "process_spawn_allowed": False,
+        "model_load_allowed": False,
+        "model_call_allowed": False,
+        "model_call_executed": False,
+        "ollama_invoked": False,
+        "cloud_provider_invoked": False,
+        "runtime_effect": False,
+        "deny_by_default": True,
+        "denial_receipt_ready": denial_receipt_ready,
+        "ready_for_h6_11_provider_denial_receipt_replay": denial_receipt_ready,
+        "production_ready": False,
+        "public_claim_allowed": False,
+    }
+
+
 def _finalize_with_nexus_row(
     row: dict[str, Any],
     *,
