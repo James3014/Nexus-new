@@ -10587,6 +10587,250 @@ def _build_h6_shadow_adapter_routing(rows: list[dict[str, Any]], bundle: dict[st
     }
 
 
+def _build_h6_local_adapter_execution_plan_dry_run(rows: list[dict[str, Any]], bundle: dict[str, Any] | None = None) -> dict[str, Any]:
+    """Pure helper: H6 local adapter execution plan dry run."""
+    import os as _os
+
+    flag = _os.environ.get("NEXUS_H6_ALLOW_LOCAL_ADAPTER_EXECUTION_PLAN_DRY_RUN", "").strip() == "1"
+
+    routing = None
+    if bundle:
+        routing = bundle.get("h6_shadow_adapter_routing")
+
+    routing_present = bool(routing)
+    routing_ready = bool(routing.get("routing_ready", False)) if routing else False
+    receipt_ready = bool(routing.get("shadow_adapter_routing_receipt_ready", False)) if routing else False
+    ready_exec = bool(routing.get("ready_for_h6_4_local_adapter_execution_plan_dry_run", False)) if routing else False
+    routing_safety = int(routing.get("safety_violation_count", 0)) if routing else 0
+
+    ALLOWED_ROLES = {"selector", "localizer", "patch_synthesizer", "verifier_assist"}
+    ALLOWED_FAMILIES = {"qwen"}
+    ALLOWED_SIZES = {"3b", "7b", "14b"}
+    ALLOWED_ROUTE_MODES = {"shadow_only", "local_first", "local_only"}
+    ALLOWED_EXECUTION_MODES = {"dry_run_only"}
+
+    plans = [r.get("h6_local_adapter_execution_plan") for r in rows if r.get("h6_local_adapter_execution_plan")]
+
+    valid_plans = []
+    invalid_plans = 0
+    missing_plan_id = 0
+    missing_request_id = 0
+    missing_adapter_id = 0
+    missing_model_name = 0
+    missing_role = 0
+    missing_route_mode = 0
+    invalid_execution_mode = 0
+    executable_blocked = 0
+
+    qwen_3b = 0
+    qwen_7b = 0
+    qwen_14b = 0
+    role_selector = 0
+    role_localizer = 0
+    role_ps = 0
+    role_va = 0
+
+    mc_count = 0
+    ol_count = 0
+    cl_count = 0
+    rm_count = 0
+    bh_count = 0
+    re_count = 0
+
+    for p in plans:
+        pid = str(p.get("plan_id", "") or "").strip()
+        rid = str(p.get("request_id", "") or "").strip()
+        aid = str(p.get("adapter_id", "") or "").strip()
+        fam = str(p.get("model_family", "") or "").lower()
+        sz = str(p.get("model_size", "") or "").lower()
+        mname = str(p.get("model_name", "") or "").strip()
+        role = str(p.get("role", "") or "").lower()
+        route = str(p.get("route_mode", "") or "").lower()
+        exec_mode = str(p.get("execution_mode", "") or "").lower()
+        exe = bool(p.get("executable", True))
+        mc = bool(p.get("model_call_executed", False))
+        ol = bool(p.get("ollama_invoked", False))
+        cl = bool(p.get("cloud_invoked", False))
+        rm = bool(p.get("repo_mutated", False))
+        bh = bool(p.get("behavior_changed", False))
+        re = bool(p.get("runtime_effect", False))
+
+        if mc:
+            mc_count += 1
+        if ol:
+            ol_count += 1
+        if cl:
+            cl_count += 1
+        if rm:
+            rm_count += 1
+        if bh:
+            bh_count += 1
+        if re:
+            re_count += 1
+
+        is_valid = (
+            pid and rid and aid and fam in ALLOWED_FAMILIES and sz in ALLOWED_SIZES
+            and mname and role in ALLOWED_ROLES and route in ALLOWED_ROUTE_MODES
+            and exec_mode in ALLOWED_EXECUTION_MODES and not exe
+            and not mc and not ol and not cl and not rm and not bh and not re
+        )
+
+        if is_valid:
+            valid_plans.append(p)
+            if sz == "3b":
+                qwen_3b += 1
+            elif sz == "7b":
+                qwen_7b += 1
+            elif sz == "14b":
+                qwen_14b += 1
+            if role == "selector":
+                role_selector += 1
+            elif role == "localizer":
+                role_localizer += 1
+            elif role == "patch_synthesizer":
+                role_ps += 1
+            elif role == "verifier_assist":
+                role_va += 1
+        else:
+            invalid_plans += 1
+            if not pid:
+                missing_plan_id += 1
+            if not rid:
+                missing_request_id += 1
+            if not aid:
+                missing_adapter_id += 1
+            if not mname:
+                missing_model_name += 1
+            if role not in ALLOWED_ROLES:
+                missing_role += 1
+            if route not in ALLOWED_ROUTE_MODES:
+                missing_route_mode += 1
+            if exec_mode not in ALLOWED_EXECUTION_MODES:
+                invalid_execution_mode += 1
+            if exe:
+                executable_blocked += 1
+
+    safety = mc_count + ol_count + cl_count + rm_count + bh_count + re_count
+
+    plan_allowed = (
+        flag and routing_present and routing_ready
+        and receipt_ready and ready_exec and routing_safety == 0
+    )
+
+    plan_ready = (
+        plan_allowed and len(valid_plans) > 0 and safety == 0
+    )
+
+    exec_plan_receipt_ready = (
+        plan_ready and invalid_plans == 0
+    )
+
+    ready_intent = (
+        exec_plan_receipt_ready and mc_count == 0 and ol_count == 0
+        and cl_count == 0 and rm_count == 0 and bh_count == 0 and re_count == 0
+    )
+
+    reasons = []
+    if not flag:
+        reasons.append("execution_plan_dry_run_flag_not_enabled")
+    if not routing_present:
+        reasons.append("missing_h6_3_shadow_adapter_routing")
+    if routing and not routing_ready:
+        reasons.append("h6_3_routing_not_ready")
+    if routing and not receipt_ready:
+        reasons.append("h6_3_receipt_not_ready")
+    if routing and not ready_exec:
+        reasons.append("not_ready_for_h6_4_local_adapter_execution_plan_dry_run")
+    if routing_safety > 0:
+        reasons.append("h6_3_safety_violation_detected")
+    if not plans:
+        reasons.append("no_execution_plans")
+    if missing_plan_id > 0:
+        reasons.append("missing_plan_id")
+    if missing_request_id > 0:
+        reasons.append("missing_request_id")
+    if missing_adapter_id > 0:
+        reasons.append("missing_adapter_id")
+    if missing_model_name > 0:
+        reasons.append("missing_model_name")
+    if missing_role > 0:
+        reasons.append("missing_role")
+    if missing_route_mode > 0:
+        reasons.append("missing_route_mode")
+    if invalid_execution_mode > 0:
+        reasons.append("invalid_execution_mode")
+    if executable_blocked > 0:
+        reasons.append("executable_blocked")
+    if mc_count > 0:
+        reasons.append("model_call_executed_detected")
+    if ol_count > 0:
+        reasons.append("ollama_invoked_detected")
+    if cl_count > 0:
+        reasons.append("cloud_invoked_detected")
+    if rm_count > 0:
+        reasons.append("repo_mutated_detected")
+    if bh_count > 0:
+        reasons.append("behavior_changed_detected")
+    if re_count > 0:
+        reasons.append("runtime_effect_detected")
+    reasons.extend([
+        "h6_4_local_adapter_execution_plan_dry_run_not_production",
+        "dry_run_only",
+        "executable_false",
+        "no_model_calls_allowed",
+        "ollama_invocation_blocked",
+        "cloud_invocation_blocked",
+        "repo_mutation_blocked",
+        "runtime_effect_blocked",
+        "production_claim_blocked",
+        "public_claim_blocked",
+    ])
+
+    return {
+        "schema": "nexus.hybrid_h6_local_adapter_execution_plan_dry_run.v1",
+        "evaluated": True,
+        "plan_status": "plan_ready" if plan_ready else ("plan_fail" if plan_allowed else "blocked"),
+        "plan_reasons": reasons,
+        "plan_allowed": plan_allowed,
+        "plan_ready": plan_ready,
+        "row_count": len(rows),
+        "shadow_adapter_routing_present": routing_present,
+        "shadow_adapter_routing_ready": routing_ready,
+        "ready_for_h6_4_local_adapter_execution_plan_dry_run": ready_exec,
+        "execution_plan_count": len(plans),
+        "execution_plan_valid_count": len(valid_plans),
+        "execution_plan_invalid_count": invalid_plans,
+        "qwen_3b_execution_plan_count": qwen_3b,
+        "qwen_7b_execution_plan_count": qwen_7b,
+        "qwen_14b_execution_plan_count": qwen_14b,
+        "selector_execution_plan_count": role_selector,
+        "localizer_execution_plan_count": role_localizer,
+        "patch_synthesizer_execution_plan_count": role_ps,
+        "verifier_assist_execution_plan_count": role_va,
+        "dry_run_only": True,
+        "executable": False,
+        "missing_plan_id_count": missing_plan_id,
+        "missing_request_id_count": missing_request_id,
+        "missing_adapter_id_count": missing_adapter_id,
+        "missing_model_name_count": missing_model_name,
+        "missing_role_count": missing_role,
+        "missing_route_mode_count": missing_route_mode,
+        "invalid_execution_mode_count": invalid_execution_mode,
+        "executable_blocked_count": executable_blocked,
+        "model_call_executed_count": mc_count,
+        "ollama_invoked_count": ol_count,
+        "cloud_invoked_count": cl_count,
+        "repo_mutated_count": rm_count,
+        "behavior_changed_count": bh_count,
+        "runtime_effect_count": re_count,
+        "safety_violation_count": safety,
+        "execution_plan_receipt_ready": exec_plan_receipt_ready,
+        "ready_for_h6_5_shadow_local_adapter_invocation_intent": ready_intent,
+        "production_ready": False,
+        "public_claim_allowed": False,
+    }
+
+
 def _finalize_with_nexus_row(
     row: dict[str, Any],
     *,
@@ -15168,6 +15412,61 @@ def write_evidence_bundle(
         "h6_shadow_adapter_routing_behavior_changed_count": _build_h6_shadow_adapter_routing(with_rows, payload).get("behavior_changed_count", 0),
         "h6_shadow_adapter_routing_runtime_effect_count": _build_h6_shadow_adapter_routing(with_rows, payload).get("runtime_effect_count", 0),
         "h6_shadow_adapter_routing_safety_violation_count": _build_h6_shadow_adapter_routing(with_rows, payload).get("safety_violation_count", 0),
+        "h6_local_adapter_execution_plan_present": 1 if _build_h6_local_adapter_execution_plan_dry_run(with_rows, payload).get("evaluated") else 0,
+        "h6_local_adapter_execution_plan_allowed": 1 if _build_h6_local_adapter_execution_plan_dry_run(with_rows, payload).get("plan_allowed") else 0,
+        "h6_local_adapter_execution_plan_ready": 1 if _build_h6_local_adapter_execution_plan_dry_run(with_rows, payload).get("plan_ready") else 0,
+        "h6_local_adapter_execution_plan_receipt_ready": 1 if _build_h6_local_adapter_execution_plan_dry_run(with_rows, payload).get("execution_plan_receipt_ready") else 0,
+        "h6_local_adapter_execution_plan_ready_for_invocation_intent": 1 if _build_h6_local_adapter_execution_plan_dry_run(with_rows, payload).get("ready_for_h6_5_shadow_local_adapter_invocation_intent") else 0,
+        "h6_local_adapter_execution_plan_count": _build_h6_local_adapter_execution_plan_dry_run(with_rows, payload).get("execution_plan_count", 0),
+        "h6_local_adapter_valid_execution_plan_count": _build_h6_local_adapter_execution_plan_dry_run(with_rows, payload).get("execution_plan_valid_count", 0),
+        "h6_local_adapter_invalid_execution_plan_count": _build_h6_local_adapter_execution_plan_dry_run(with_rows, payload).get("execution_plan_invalid_count", 0),
+        "h6_local_adapter_qwen_3b_execution_plan_count": _build_h6_local_adapter_execution_plan_dry_run(with_rows, payload).get("qwen_3b_execution_plan_count", 0),
+        "h6_local_adapter_qwen_7b_execution_plan_count": _build_h6_local_adapter_execution_plan_dry_run(with_rows, payload).get("qwen_7b_execution_plan_count", 0),
+        "h6_local_adapter_qwen_14b_execution_plan_count": _build_h6_local_adapter_execution_plan_dry_run(with_rows, payload).get("qwen_14b_execution_plan_count", 0),
+        "h6_local_adapter_execution_plan_model_call_executed_count": _build_h6_local_adapter_execution_plan_dry_run(with_rows, payload).get("model_call_executed_count", 0),
+        "h6_local_adapter_execution_plan_ollama_invoked_count": _build_h6_local_adapter_execution_plan_dry_run(with_rows, payload).get("ollama_invoked_count", 0),
+        "h6_local_adapter_execution_plan_cloud_invoked_count": _build_h6_local_adapter_execution_plan_dry_run(with_rows, payload).get("cloud_invoked_count", 0),
+        "h6_local_adapter_execution_plan_repo_mutated_count": _build_h6_local_adapter_execution_plan_dry_run(with_rows, payload).get("repo_mutated_count", 0),
+        "h6_local_adapter_execution_plan_behavior_changed_count": _build_h6_local_adapter_execution_plan_dry_run(with_rows, payload).get("behavior_changed_count", 0),
+        "h6_local_adapter_execution_plan_runtime_effect_count": _build_h6_local_adapter_execution_plan_dry_run(with_rows, payload).get("runtime_effect_count", 0),
+        "h6_local_adapter_execution_plan_safety_violation_count": _build_h6_local_adapter_execution_plan_dry_run(with_rows, payload).get("safety_violation_count", 0),
+        "h6_shadow_invocation_intent_present": 1 if _build_h6_shadow_local_adapter_invocation_intent_receipt(with_rows, payload).get("evaluated") else 0,
+        "h6_shadow_invocation_intent_allowed": 1 if _build_h6_shadow_local_adapter_invocation_intent_receipt(with_rows, payload).get("intent_allowed") else 0,
+        "h6_shadow_invocation_intent_ready": 1 if _build_h6_shadow_local_adapter_invocation_intent_receipt(with_rows, payload).get("intent_ready") else 0,
+        "h6_shadow_invocation_intent_receipt_ready": 1 if _build_h6_shadow_local_adapter_invocation_intent_receipt(with_rows, payload).get("invocation_intent_receipt_ready") else 0,
+        "h6_shadow_invocation_intent_ready_for_stub_output": 1 if _build_h6_shadow_local_adapter_invocation_intent_receipt(with_rows, payload).get("ready_for_h6_6_deterministic_local_adapter_stub_output") else 0,
+        "h6_shadow_invocation_intent_count": _build_h6_shadow_local_adapter_invocation_intent_receipt(with_rows, payload).get("invocation_intent_count", 0),
+        "h6_shadow_invocation_valid_intent_count": _build_h6_shadow_local_adapter_invocation_intent_receipt(with_rows, payload).get("invocation_intent_valid_count", 0),
+        "h6_shadow_invocation_invalid_intent_count": _build_h6_shadow_local_adapter_invocation_intent_receipt(with_rows, payload).get("invocation_intent_invalid_count", 0),
+        "h6_shadow_invocation_intent_receipt_count": _build_h6_shadow_local_adapter_invocation_intent_receipt(with_rows, payload).get("intent_receipt_count", 0),
+        "h6_shadow_invocation_valid_receipt_count": _build_h6_shadow_local_adapter_invocation_intent_receipt(with_rows, payload).get("intent_receipt_valid_count", 0),
+        "h6_shadow_invocation_invalid_receipt_count": _build_h6_shadow_local_adapter_invocation_intent_receipt(with_rows, payload).get("intent_receipt_invalid_count", 0),
+        "h6_shadow_invocation_model_call_intended_count": _build_h6_shadow_local_adapter_invocation_intent_receipt(with_rows, payload).get("model_call_intended_count", 0),
+        "h6_shadow_invocation_model_call_executed_count": _build_h6_shadow_local_adapter_invocation_intent_receipt(with_rows, payload).get("model_call_executed_count", 0),
+        "h6_shadow_invocation_ollama_invoked_count": _build_h6_shadow_local_adapter_invocation_intent_receipt(with_rows, payload).get("ollama_invoked_count", 0),
+        "h6_shadow_invocation_cloud_invoked_count": _build_h6_shadow_local_adapter_invocation_intent_receipt(with_rows, payload).get("cloud_invoked_count", 0),
+        "h6_shadow_invocation_repo_mutated_count": _build_h6_shadow_local_adapter_invocation_intent_receipt(with_rows, payload).get("repo_mutated_count", 0),
+        "h6_shadow_invocation_behavior_changed_count": _build_h6_shadow_local_adapter_invocation_intent_receipt(with_rows, payload).get("behavior_changed_count", 0),
+        "h6_shadow_invocation_runtime_effect_count": _build_h6_shadow_local_adapter_invocation_intent_receipt(with_rows, payload).get("runtime_effect_count", 0),
+        "h6_shadow_invocation_safety_violation_count": _build_h6_shadow_local_adapter_invocation_intent_receipt(with_rows, payload).get("safety_violation_count", 0),
+        "h6_deterministic_stub_output_present": 1 if _build_h6_deterministic_local_adapter_stub_output(with_rows, payload).get("evaluated") else 0,
+        "h6_deterministic_stub_output_allowed": 1 if _build_h6_deterministic_local_adapter_stub_output(with_rows, payload).get("stub_allowed") else 0,
+        "h6_deterministic_stub_output_ready": 1 if _build_h6_deterministic_local_adapter_stub_output(with_rows, payload).get("stub_ready") else 0,
+        "h6_deterministic_stub_output_receipt_ready": 1 if _build_h6_deterministic_local_adapter_stub_output(with_rows, payload).get("stub_output_receipt_ready") else 0,
+        "h6_deterministic_stub_output_ready_for_provider_boundary": 1 if _build_h6_deterministic_local_adapter_stub_output(with_rows, payload).get("ready_for_h6_7_local_provider_boundary_preflight") else 0,
+        "h6_deterministic_stub_output_count": _build_h6_deterministic_local_adapter_stub_output(with_rows, payload).get("stub_output_count", 0),
+        "h6_deterministic_valid_stub_output_count": _build_h6_deterministic_local_adapter_stub_output(with_rows, payload).get("stub_output_valid_count", 0),
+        "h6_deterministic_invalid_stub_output_count": _build_h6_deterministic_local_adapter_stub_output(with_rows, payload).get("stub_output_invalid_count", 0),
+        "h6_deterministic_qwen_3b_stub_output_count": _build_h6_deterministic_local_adapter_stub_output(with_rows, payload).get("qwen_3b_stub_output_count", 0),
+        "h6_deterministic_qwen_7b_stub_output_count": _build_h6_deterministic_local_adapter_stub_output(with_rows, payload).get("qwen_7b_stub_output_count", 0),
+        "h6_deterministic_qwen_14b_stub_output_count": _build_h6_deterministic_local_adapter_stub_output(with_rows, payload).get("qwen_14b_stub_output_count", 0),
+        "h6_deterministic_stub_model_call_executed_count": _build_h6_deterministic_local_adapter_stub_output(with_rows, payload).get("model_call_executed_count", 0),
+        "h6_deterministic_stub_ollama_invoked_count": _build_h6_deterministic_local_adapter_stub_output(with_rows, payload).get("ollama_invoked_count", 0),
+        "h6_deterministic_stub_cloud_invoked_count": _build_h6_deterministic_local_adapter_stub_output(with_rows, payload).get("cloud_invoked_count", 0),
+        "h6_deterministic_stub_repo_mutated_count": _build_h6_deterministic_local_adapter_stub_output(with_rows, payload).get("repo_mutated_count", 0),
+        "h6_deterministic_stub_behavior_changed_count": _build_h6_deterministic_local_adapter_stub_output(with_rows, payload).get("behavior_changed_count", 0),
+        "h6_deterministic_stub_runtime_effect_count": _build_h6_deterministic_local_adapter_stub_output(with_rows, payload).get("runtime_effect_count", 0),
+        "h6_deterministic_stub_safety_violation_count": _build_h6_deterministic_local_adapter_stub_output(with_rows, payload).get("safety_violation_count", 0),
     }
     payload["h5_guarded_local_candidate_benchmark_trial"] = _build_h5_guarded_local_candidate_benchmark_trial(with_rows)
     payload["h5_quality_non_regression_gate"] = _build_h5_quality_non_regression_gate(with_rows, payload["h5_guarded_local_candidate_benchmark_trial"])
@@ -15185,6 +15484,9 @@ def write_evidence_bundle(
     payload["h6_shadow_local_adapter_dry_run"] = _build_h6_shadow_local_adapter_dry_run(with_rows, payload)
     payload["h6_adapter_io_schema_test"] = _build_h6_adapter_io_schema_test(with_rows, payload)
     payload["h6_shadow_adapter_routing"] = _build_h6_shadow_adapter_routing(with_rows, payload)
+    payload["h6_local_adapter_execution_plan_dry_run"] = _build_h6_local_adapter_execution_plan_dry_run(with_rows, payload)
+    payload["h6_shadow_local_adapter_invocation_intent_receipt"] = _build_h6_shadow_local_adapter_invocation_intent_receipt(with_rows, payload)
+    payload["h6_deterministic_local_adapter_stub_output"] = _build_h6_deterministic_local_adapter_stub_output(with_rows, payload)
     payload["external_provider_claim_boundary_contract"] = build_external_provider_claim_boundary_contract(payload)
     payload["public_promotion_readiness_contract"] = build_public_promotion_readiness_contract(payload)
     bundle_path.write_text(json.dumps(payload, indent=2, ensure_ascii=False), encoding="utf-8")
