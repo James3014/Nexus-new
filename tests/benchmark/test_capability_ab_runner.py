@@ -25680,3 +25680,843 @@ def test_h6_2_audit_report_lock():
             if needle in s:
                 bad.append((p.name, needle))
     assert not bad, f"Report lock violations found: {bad}"
+
+
+def test_h6_3_routing_empty_rows_block(monkeypatch):
+    """H6-3 T01: Empty rows block routing."""
+    from scripts.bench.capability_ab_runner import _build_h6_shadow_adapter_routing
+    monkeypatch.setenv("NEXUS_H6_ALLOW_SHADOW_ADAPTER_ROUTING", "1")
+    io_schema = {"io_schema_ready": True, "adapter_io_schema_ready": True, "ready_for_h6_3_shadow_adapter_routing": True, "safety_violation_count": 0}
+    bundle = {"h6_adapter_io_schema_test": io_schema}
+    r = _build_h6_shadow_adapter_routing([], bundle)
+    assert r["routing_status"] == "shadow_adapter_routing_fail"
+    assert r["route_candidate_count"] == 0
+    assert "no_route_candidates" in r["routing_reasons"]
+
+
+def test_h6_3_routing_flag_missing_block(monkeypatch):
+    """H6-3 T02: Flag missing blocks routing."""
+    from scripts.bench.capability_ab_runner import _build_h6_shadow_adapter_routing
+    monkeypatch.delenv("NEXUS_H6_ALLOW_SHADOW_ADAPTER_ROUTING", raising=False)
+    io_schema = {"io_schema_ready": True, "adapter_io_schema_ready": True, "ready_for_h6_3_shadow_adapter_routing": True, "safety_violation_count": 0}
+    bundle = {"h6_adapter_io_schema_test": io_schema}
+    r = _build_h6_shadow_adapter_routing([], bundle)
+    assert r["routing_status"] == "blocked"
+    assert "shadow_adapter_routing_flag_not_enabled" in r["routing_reasons"]
+
+
+def test_h6_3_routing_missing_io_schema_block(monkeypatch):
+    """H6-3 T03: Missing H6-2 IO schema blocks routing."""
+    from scripts.bench.capability_ab_runner import _build_h6_shadow_adapter_routing
+    monkeypatch.setenv("NEXUS_H6_ALLOW_SHADOW_ADAPTER_ROUTING", "1")
+    r = _build_h6_shadow_adapter_routing([], None)
+    assert r["routing_status"] == "blocked"
+    assert "missing_h6_2_adapter_io_schema" in r["routing_reasons"]
+
+
+def test_h6_3_routing_io_schema_not_ready_block(monkeypatch):
+    """H6-3 T04: H6-2 IO schema not ready blocks routing."""
+    from scripts.bench.capability_ab_runner import _build_h6_shadow_adapter_routing
+    monkeypatch.setenv("NEXUS_H6_ALLOW_SHADOW_ADAPTER_ROUTING", "1")
+    io_schema = {"io_schema_ready": False, "adapter_io_schema_ready": True, "ready_for_h6_3_shadow_adapter_routing": True, "safety_violation_count": 0}
+    bundle = {"h6_adapter_io_schema_test": io_schema}
+    r = _build_h6_shadow_adapter_routing([], bundle)
+    assert r["routing_status"] == "blocked"
+    assert "h6_2_io_schema_not_ready" in r["routing_reasons"]
+
+
+def test_h6_3_routing_adapter_io_schema_not_ready_block(monkeypatch):
+    """H6-3 T05: H6-2 adapter IO schema not ready blocks routing."""
+    from scripts.bench.capability_ab_runner import _build_h6_shadow_adapter_routing
+    monkeypatch.setenv("NEXUS_H6_ALLOW_SHADOW_ADAPTER_ROUTING", "1")
+    io_schema = {"io_schema_ready": True, "adapter_io_schema_ready": False, "ready_for_h6_3_shadow_adapter_routing": True, "safety_violation_count": 0}
+    bundle = {"h6_adapter_io_schema_test": io_schema}
+    r = _build_h6_shadow_adapter_routing([], bundle)
+    assert r["routing_status"] == "blocked"
+    assert "h6_2_adapter_io_schema_not_ready" in r["routing_reasons"]
+
+
+def test_h6_3_routing_not_ready_for_h6_3_block(monkeypatch):
+    """H6-3 T06: Not ready_for_h6_3 blocks routing."""
+    from scripts.bench.capability_ab_runner import _build_h6_shadow_adapter_routing
+    monkeypatch.setenv("NEXUS_H6_ALLOW_SHADOW_ADAPTER_ROUTING", "1")
+    io_schema = {"io_schema_ready": True, "adapter_io_schema_ready": True, "ready_for_h6_3_shadow_adapter_routing": False, "safety_violation_count": 0}
+    bundle = {"h6_adapter_io_schema_test": io_schema}
+    r = _build_h6_shadow_adapter_routing([], bundle)
+    assert r["routing_status"] == "blocked"
+    assert "not_ready_for_h6_3_shadow_adapter_routing" in r["routing_reasons"]
+
+
+def test_h6_3_routing_io_safety_violation_block(monkeypatch):
+    """H6-3 T07: H6-2 safety violation blocks routing."""
+    from scripts.bench.capability_ab_runner import _build_h6_shadow_adapter_routing
+    monkeypatch.setenv("NEXUS_H6_ALLOW_SHADOW_ADAPTER_ROUTING", "1")
+    io_schema = {"io_schema_ready": True, "adapter_io_schema_ready": True, "ready_for_h6_3_shadow_adapter_routing": True, "safety_violation_count": 1}
+    bundle = {"h6_adapter_io_schema_test": io_schema}
+    r = _build_h6_shadow_adapter_routing([], bundle)
+    assert r["routing_status"] == "blocked"
+    assert "h6_2_safety_violation_detected" in r["routing_reasons"]
+
+
+def test_h6_3_routing_no_route_candidates_block(monkeypatch):
+    """H6-3 T08: No route candidates blocks routing."""
+    from scripts.bench.capability_ab_runner import _build_h6_shadow_adapter_routing
+    monkeypatch.setenv("NEXUS_H6_ALLOW_SHADOW_ADAPTER_ROUTING", "1")
+    io_schema = {"io_schema_ready": True, "adapter_io_schema_ready": True, "ready_for_h6_3_shadow_adapter_routing": True, "safety_violation_count": 0}
+    bundle = {"h6_adapter_io_schema_test": io_schema}
+    r = _build_h6_shadow_adapter_routing([], bundle)
+    assert r["routing_status"] == "shadow_adapter_routing_fail"
+    assert "no_route_candidates" in r["routing_reasons"]
+
+
+def test_h6_3_routing_no_valid_route_candidates_block(monkeypatch):
+    """H6-3 T09: No valid route candidates blocks routing."""
+    from scripts.bench.capability_ab_runner import _build_h6_shadow_adapter_routing
+    monkeypatch.setenv("NEXUS_H6_ALLOW_SHADOW_ADAPTER_ROUTING", "1")
+    io_schema = {"io_schema_ready": True, "adapter_io_schema_ready": True, "ready_for_h6_3_shadow_adapter_routing": True, "safety_violation_count": 0}
+    bundle = {"h6_adapter_io_schema_test": io_schema}
+    rows = [{"h6_shadow_adapter_route_candidate": {
+        "request_id": "",
+        "adapter_id": "",
+        "model_family": "qwen",
+        "model_size": "3b",
+        "model_name": "qwen2.5-coder:3b",
+        "role": "selector",
+        "route_mode": "shadow_only",
+        "adapter_mode": "shadow_only",
+        "routing_mode": "shadow_route_only",
+    }}]
+    r = _build_h6_shadow_adapter_routing(rows, bundle)
+    assert r["routing_status"] == "shadow_adapter_routing_fail"
+    assert "no_valid_route_candidates" in r["routing_reasons"]
+
+
+def test_h6_3_routing_no_route_receipts_block(monkeypatch):
+    """H6-3 T10: No route receipts blocks routing."""
+    from scripts.bench.capability_ab_runner import _build_h6_shadow_adapter_routing
+    monkeypatch.setenv("NEXUS_H6_ALLOW_SHADOW_ADAPTER_ROUTING", "1")
+    io_schema = {"io_schema_ready": True, "adapter_io_schema_ready": True, "ready_for_h6_3_shadow_adapter_routing": True, "safety_violation_count": 0}
+    bundle = {"h6_adapter_io_schema_test": io_schema}
+    rows = [{"h6_shadow_adapter_route_candidate": {
+        "request_id": "io-req-001",
+        "adapter_id": "qwen3b-selector-v0",
+        "model_family": "qwen",
+        "model_size": "3b",
+        "model_name": "qwen2.5-coder:3b",
+        "role": "selector",
+        "route_mode": "shadow_only",
+        "adapter_mode": "shadow_only",
+        "routing_mode": "shadow_route_only",
+    }}]
+    r = _build_h6_shadow_adapter_routing(rows, bundle)
+    assert r["routing_status"] == "shadow_adapter_routing_fail"
+    assert "no_route_receipts" in r["routing_reasons"]
+
+
+def test_h6_3_routing_no_valid_route_receipts_block(monkeypatch):
+    """H6-3 T11: No valid route receipts blocks routing."""
+    from scripts.bench.capability_ab_runner import _build_h6_shadow_adapter_routing
+    monkeypatch.setenv("NEXUS_H6_ALLOW_SHADOW_ADAPTER_ROUTING", "1")
+    io_schema = {"io_schema_ready": True, "adapter_io_schema_ready": True, "ready_for_h6_3_shadow_adapter_routing": True, "safety_violation_count": 0}
+    bundle = {"h6_adapter_io_schema_test": io_schema}
+    rows = [
+        {"h6_shadow_adapter_route_candidate": {
+            "request_id": "io-req-001",
+            "adapter_id": "qwen3b-selector-v0",
+            "model_family": "qwen",
+            "model_size": "3b",
+            "model_name": "qwen2.5-coder:3b",
+            "role": "selector",
+            "route_mode": "shadow_only",
+            "adapter_mode": "shadow_only",
+            "routing_mode": "shadow_route_only",
+        }},
+        {"h6_shadow_adapter_routing_receipt": {
+            "request_id": "",
+            "adapter_id": "",
+            "routing_status": "shadow_route_selected",
+            "routing_mode": "shadow_route_only",
+        }},
+    ]
+    r = _build_h6_shadow_adapter_routing(rows, bundle)
+    assert r["routing_status"] == "shadow_adapter_routing_fail"
+    assert "no_valid_route_receipts" in r["routing_reasons"]
+
+
+def test_h6_3_routing_no_matched_routes_block(monkeypatch):
+    """H6-3 T12: No matched routes blocks routing."""
+    from scripts.bench.capability_ab_runner import _build_h6_shadow_adapter_routing
+    monkeypatch.setenv("NEXUS_H6_ALLOW_SHADOW_ADAPTER_ROUTING", "1")
+    io_schema = {"io_schema_ready": True, "adapter_io_schema_ready": True, "ready_for_h6_3_shadow_adapter_routing": True, "safety_violation_count": 0}
+    bundle = {"h6_adapter_io_schema_test": io_schema}
+    rows = [
+        {"h6_shadow_adapter_route_candidate": {
+            "request_id": "io-req-001",
+            "adapter_id": "qwen3b-selector-v0",
+            "model_family": "qwen",
+            "model_size": "3b",
+            "model_name": "qwen2.5-coder:3b",
+            "role": "selector",
+            "route_mode": "shadow_only",
+            "adapter_mode": "shadow_only",
+            "routing_mode": "shadow_route_only",
+        }},
+        {"h6_shadow_adapter_routing_receipt": {
+            "request_id": "io-req-002",
+            "adapter_id": "qwen3b-selector-v0",
+            "routing_status": "shadow_route_selected",
+            "routing_mode": "shadow_route_only",
+        }},
+    ]
+    r = _build_h6_shadow_adapter_routing(rows, bundle)
+    assert r["routing_status"] == "shadow_adapter_routing_fail"
+    assert "no_matched_routes" in r["routing_reasons"]
+
+
+def test_h6_3_routing_valid_qwen_3b_selector(monkeypatch):
+    """H6-3 T13: Valid Qwen 3B selector selected route passes."""
+    from scripts.bench.capability_ab_runner import _build_h6_shadow_adapter_routing
+    monkeypatch.setenv("NEXUS_H6_ALLOW_SHADOW_ADAPTER_ROUTING", "1")
+    io_schema = {"io_schema_ready": True, "adapter_io_schema_ready": True, "ready_for_h6_3_shadow_adapter_routing": True, "safety_violation_count": 0}
+    bundle = {"h6_adapter_io_schema_test": io_schema}
+    rows = [
+        {"h6_shadow_adapter_route_candidate": {
+            "request_id": "io-req-001",
+            "adapter_id": "qwen3b-selector-v0",
+            "model_family": "qwen",
+            "model_size": "3b",
+            "model_name": "qwen2.5-coder:3b",
+            "role": "selector",
+            "route_mode": "shadow_only",
+            "adapter_mode": "shadow_only",
+            "routing_mode": "shadow_route_only",
+            "route_selected": True,
+        }},
+        {"h6_shadow_adapter_routing_receipt": {
+            "request_id": "io-req-001",
+            "adapter_id": "qwen3b-selector-v0",
+            "routing_status": "shadow_route_selected",
+            "routing_mode": "shadow_route_only",
+            "route_selected": True,
+        }},
+    ]
+    r = _build_h6_shadow_adapter_routing(rows, bundle)
+    assert r["routing_status"] == "shadow_adapter_routing_ready"
+    assert r["shadow_route_selected_count"] == 1
+    assert r["ready_for_h6_4_local_adapter_execution_plan_dry_run"] is True
+
+
+def test_h6_3_routing_valid_qwen_7b_localizer(monkeypatch):
+    """H6-3 T14: Valid Qwen 7B localizer selected route passes."""
+    from scripts.bench.capability_ab_runner import _build_h6_shadow_adapter_routing
+    monkeypatch.setenv("NEXUS_H6_ALLOW_SHADOW_ADAPTER_ROUTING", "1")
+    io_schema = {"io_schema_ready": True, "adapter_io_schema_ready": True, "ready_for_h6_3_shadow_adapter_routing": True, "safety_violation_count": 0}
+    bundle = {"h6_adapter_io_schema_test": io_schema}
+    rows = [
+        {"h6_shadow_adapter_route_candidate": {
+            "request_id": "io-req-002",
+            "adapter_id": "qwen7b-localizer-v0",
+            "model_family": "qwen",
+            "model_size": "7b",
+            "model_name": "qwen2.5-coder:7b",
+            "role": "localizer",
+            "route_mode": "shadow_only",
+            "adapter_mode": "shadow_only",
+            "routing_mode": "shadow_route_only",
+            "route_selected": True,
+        }},
+        {"h6_shadow_adapter_routing_receipt": {
+            "request_id": "io-req-002",
+            "adapter_id": "qwen7b-localizer-v0",
+            "routing_status": "shadow_route_selected",
+            "routing_mode": "shadow_route_only",
+            "route_selected": True,
+        }},
+    ]
+    r = _build_h6_shadow_adapter_routing(rows, bundle)
+    assert r["routing_status"] == "shadow_adapter_routing_ready"
+    assert r["shadow_route_selected_count"] == 1
+    assert r["ready_for_h6_4_local_adapter_execution_plan_dry_run"] is True
+
+
+def test_h6_3_routing_valid_qwen_14b_patch_synthesizer(monkeypatch):
+    """H6-3 T15: Valid Qwen 14B patch_synthesizer selected route passes."""
+    from scripts.bench.capability_ab_runner import _build_h6_shadow_adapter_routing
+    monkeypatch.setenv("NEXUS_H6_ALLOW_SHADOW_ADAPTER_ROUTING", "1")
+    io_schema = {"io_schema_ready": True, "adapter_io_schema_ready": True, "ready_for_h6_3_shadow_adapter_routing": True, "safety_violation_count": 0}
+    bundle = {"h6_adapter_io_schema_test": io_schema}
+    rows = [
+        {"h6_shadow_adapter_route_candidate": {
+            "request_id": "io-req-003",
+            "adapter_id": "qwen14b-patch-synthesizer-v0",
+            "model_family": "qwen",
+            "model_size": "14b",
+            "model_name": "qwen2.5-coder:14b",
+            "role": "patch_synthesizer",
+            "route_mode": "shadow_only",
+            "adapter_mode": "shadow_only",
+            "routing_mode": "shadow_route_only",
+            "route_selected": True,
+        }},
+        {"h6_shadow_adapter_routing_receipt": {
+            "request_id": "io-req-003",
+            "adapter_id": "qwen14b-patch-synthesizer-v0",
+            "routing_status": "shadow_route_selected",
+            "routing_mode": "shadow_route_only",
+            "route_selected": True,
+        }},
+    ]
+    r = _build_h6_shadow_adapter_routing(rows, bundle)
+    assert r["routing_status"] == "shadow_adapter_routing_ready"
+    assert r["shadow_route_selected_count"] == 1
+    assert r["ready_for_h6_4_local_adapter_execution_plan_dry_run"] is True
+
+
+def test_h6_3_routing_valid_verifier_assist(monkeypatch):
+    """H6-3 T16: Valid verifier_assist selected route passes."""
+    from scripts.bench.capability_ab_runner import _build_h6_shadow_adapter_routing
+    monkeypatch.setenv("NEXUS_H6_ALLOW_SHADOW_ADAPTER_ROUTING", "1")
+    io_schema = {"io_schema_ready": True, "adapter_io_schema_ready": True, "ready_for_h6_3_shadow_adapter_routing": True, "safety_violation_count": 0}
+    bundle = {"h6_adapter_io_schema_test": io_schema}
+    rows = [
+        {"h6_shadow_adapter_route_candidate": {
+            "request_id": "io-req-004",
+            "adapter_id": "qwen3b-verifier-assist-v0",
+            "model_family": "qwen",
+            "model_size": "3b",
+            "model_name": "qwen2.5-coder:3b",
+            "role": "verifier_assist",
+            "route_mode": "shadow_only",
+            "adapter_mode": "shadow_only",
+            "routing_mode": "shadow_route_only",
+            "route_selected": True,
+        }},
+        {"h6_shadow_adapter_routing_receipt": {
+            "request_id": "io-req-004",
+            "adapter_id": "qwen3b-verifier-assist-v0",
+            "routing_status": "shadow_route_selected",
+            "routing_mode": "shadow_route_only",
+            "route_selected": True,
+        }},
+    ]
+    r = _build_h6_shadow_adapter_routing(rows, bundle)
+    assert r["routing_status"] == "shadow_adapter_routing_ready"
+    assert r["shadow_route_selected_count"] == 1
+    assert r["ready_for_h6_4_local_adapter_execution_plan_dry_run"] is True
+
+
+def test_h6_3_routing_valid_blocked_route(monkeypatch):
+    """H6-3 T17: Valid blocked route counts blocked."""
+    from scripts.bench.capability_ab_runner import _build_h6_shadow_adapter_routing
+    monkeypatch.setenv("NEXUS_H6_ALLOW_SHADOW_ADAPTER_ROUTING", "1")
+    io_schema = {"io_schema_ready": True, "adapter_io_schema_ready": True, "ready_for_h6_3_shadow_adapter_routing": True, "safety_violation_count": 0}
+    bundle = {"h6_adapter_io_schema_test": io_schema}
+    rows = [
+        {"h6_shadow_adapter_route_candidate": {
+            "request_id": "io-req-001",
+            "adapter_id": "qwen3b-selector-v0",
+            "model_family": "qwen",
+            "model_size": "3b",
+            "model_name": "qwen2.5-coder:3b",
+            "role": "selector",
+            "route_mode": "shadow_only",
+            "adapter_mode": "shadow_only",
+            "routing_mode": "shadow_route_only",
+            "route_selected": False,
+        }},
+        {"h6_shadow_adapter_routing_receipt": {
+            "request_id": "io-req-001",
+            "adapter_id": "qwen3b-selector-v0",
+            "routing_status": "shadow_route_blocked",
+            "routing_mode": "shadow_route_only",
+            "route_selected": False,
+        }},
+    ]
+    r = _build_h6_shadow_adapter_routing(rows, bundle)
+    assert r["shadow_route_blocked_count"] == 1
+    assert r["shadow_route_selected_count"] == 0
+
+
+def test_h6_3_routing_missing_request_id_invalidates(monkeypatch):
+    """H6-3 T18: Missing request_id invalidates candidate."""
+    from scripts.bench.capability_ab_runner import _build_h6_shadow_adapter_routing
+    monkeypatch.setenv("NEXUS_H6_ALLOW_SHADOW_ADAPTER_ROUTING", "1")
+    io_schema = {"io_schema_ready": True, "adapter_io_schema_ready": True, "ready_for_h6_3_shadow_adapter_routing": True, "safety_violation_count": 0}
+    bundle = {"h6_adapter_io_schema_test": io_schema}
+    rows = [{"h6_shadow_adapter_route_candidate": {
+        "request_id": "",
+        "adapter_id": "qwen3b-selector-v0",
+        "model_family": "qwen",
+        "model_size": "3b",
+        "model_name": "qwen2.5-coder:3b",
+        "role": "selector",
+        "route_mode": "shadow_only",
+        "adapter_mode": "shadow_only",
+        "routing_mode": "shadow_route_only",
+    }}]
+    r = _build_h6_shadow_adapter_routing(rows, bundle)
+    assert r["missing_request_id_count"] == 1
+    assert "missing_request_id" in r["routing_reasons"]
+
+
+def test_h6_3_routing_missing_adapter_id_invalidates(monkeypatch):
+    """H6-3 T19: Missing adapter_id invalidates candidate."""
+    from scripts.bench.capability_ab_runner import _build_h6_shadow_adapter_routing
+    monkeypatch.setenv("NEXUS_H6_ALLOW_SHADOW_ADAPTER_ROUTING", "1")
+    io_schema = {"io_schema_ready": True, "adapter_io_schema_ready": True, "ready_for_h6_3_shadow_adapter_routing": True, "safety_violation_count": 0}
+    bundle = {"h6_adapter_io_schema_test": io_schema}
+    rows = [{"h6_shadow_adapter_route_candidate": {
+        "request_id": "io-req-001",
+        "adapter_id": "",
+        "model_family": "qwen",
+        "model_size": "3b",
+        "model_name": "qwen2.5-coder:3b",
+        "role": "selector",
+        "route_mode": "shadow_only",
+        "adapter_mode": "shadow_only",
+        "routing_mode": "shadow_route_only",
+    }}]
+    r = _build_h6_shadow_adapter_routing(rows, bundle)
+    assert r["missing_adapter_id_count"] == 1
+    assert "missing_adapter_id" in r["routing_reasons"]
+
+
+def test_h6_3_routing_missing_model_name_invalidates(monkeypatch):
+    """H6-3 T20: Missing model_name invalidates candidate."""
+    from scripts.bench.capability_ab_runner import _build_h6_shadow_adapter_routing
+    monkeypatch.setenv("NEXUS_H6_ALLOW_SHADOW_ADAPTER_ROUTING", "1")
+    io_schema = {"io_schema_ready": True, "adapter_io_schema_ready": True, "ready_for_h6_3_shadow_adapter_routing": True, "safety_violation_count": 0}
+    bundle = {"h6_adapter_io_schema_test": io_schema}
+    rows = [{"h6_shadow_adapter_route_candidate": {
+        "request_id": "io-req-001",
+        "adapter_id": "qwen3b-selector-v0",
+        "model_family": "qwen",
+        "model_size": "3b",
+        "model_name": "",
+        "role": "selector",
+        "route_mode": "shadow_only",
+        "adapter_mode": "shadow_only",
+        "routing_mode": "shadow_route_only",
+    }}]
+    r = _build_h6_shadow_adapter_routing(rows, bundle)
+    assert r["missing_model_name_count"] == 1
+    assert "missing_model_name" in r["routing_reasons"]
+
+
+def test_h6_3_routing_missing_role_invalidates(monkeypatch):
+    """H6-3 T21: Missing role invalidates candidate."""
+    from scripts.bench.capability_ab_runner import _build_h6_shadow_adapter_routing
+    monkeypatch.setenv("NEXUS_H6_ALLOW_SHADOW_ADAPTER_ROUTING", "1")
+    io_schema = {"io_schema_ready": True, "adapter_io_schema_ready": True, "ready_for_h6_3_shadow_adapter_routing": True, "safety_violation_count": 0}
+    bundle = {"h6_adapter_io_schema_test": io_schema}
+    rows = [{"h6_shadow_adapter_route_candidate": {
+        "request_id": "io-req-001",
+        "adapter_id": "qwen3b-selector-v0",
+        "model_family": "qwen",
+        "model_size": "3b",
+        "model_name": "qwen2.5-coder:3b",
+        "role": "proposer",
+        "route_mode": "shadow_only",
+        "adapter_mode": "shadow_only",
+        "routing_mode": "shadow_route_only",
+    }}]
+    r = _build_h6_shadow_adapter_routing(rows, bundle)
+    assert r["missing_role_count"] == 1
+    assert "missing_role" in r["routing_reasons"]
+
+
+def test_h6_3_routing_missing_route_mode_invalidates(monkeypatch):
+    """H6-3 T22: Missing route_mode invalidates candidate."""
+    from scripts.bench.capability_ab_runner import _build_h6_shadow_adapter_routing
+    monkeypatch.setenv("NEXUS_H6_ALLOW_SHADOW_ADAPTER_ROUTING", "1")
+    io_schema = {"io_schema_ready": True, "adapter_io_schema_ready": True, "ready_for_h6_3_shadow_adapter_routing": True, "safety_violation_count": 0}
+    bundle = {"h6_adapter_io_schema_test": io_schema}
+    rows = [{"h6_shadow_adapter_route_candidate": {
+        "request_id": "io-req-001",
+        "adapter_id": "qwen3b-selector-v0",
+        "model_family": "qwen",
+        "model_size": "3b",
+        "model_name": "qwen2.5-coder:3b",
+        "role": "selector",
+        "route_mode": "cloud_only",
+        "adapter_mode": "shadow_only",
+        "routing_mode": "shadow_route_only",
+    }}]
+    r = _build_h6_shadow_adapter_routing(rows, bundle)
+    assert r["missing_route_mode_count"] == 1
+    assert "missing_route_mode" in r["routing_reasons"]
+
+
+def test_h6_3_routing_invalid_route_mode(monkeypatch):
+    """H6-3 T23: Invalid route_mode invalidates candidate."""
+    from scripts.bench.capability_ab_runner import _build_h6_shadow_adapter_routing
+    monkeypatch.setenv("NEXUS_H6_ALLOW_SHADOW_ADAPTER_ROUTING", "1")
+    io_schema = {"io_schema_ready": True, "adapter_io_schema_ready": True, "ready_for_h6_3_shadow_adapter_routing": True, "safety_violation_count": 0}
+    bundle = {"h6_adapter_io_schema_test": io_schema}
+    rows = [{"h6_shadow_adapter_route_candidate": {
+        "request_id": "io-req-001",
+        "adapter_id": "qwen3b-selector-v0",
+        "model_family": "qwen",
+        "model_size": "3b",
+        "model_name": "qwen2.5-coder:3b",
+        "role": "selector",
+        "route_mode": "invalid_mode",
+        "adapter_mode": "shadow_only",
+        "routing_mode": "shadow_route_only",
+    }}]
+    r = _build_h6_shadow_adapter_routing(rows, bundle)
+    assert r["missing_route_mode_count"] == 1
+    assert "missing_route_mode" in r["routing_reasons"]
+
+
+def test_h6_3_routing_invalid_adapter_mode(monkeypatch):
+    """H6-3 T24: Invalid adapter_mode invalidates candidate."""
+    from scripts.bench.capability_ab_runner import _build_h6_shadow_adapter_routing
+    monkeypatch.setenv("NEXUS_H6_ALLOW_SHADOW_ADAPTER_ROUTING", "1")
+    io_schema = {"io_schema_ready": True, "adapter_io_schema_ready": True, "ready_for_h6_3_shadow_adapter_routing": True, "safety_violation_count": 0}
+    bundle = {"h6_adapter_io_schema_test": io_schema}
+    rows = [{"h6_shadow_adapter_route_candidate": {
+        "request_id": "io-req-001",
+        "adapter_id": "qwen3b-selector-v0",
+        "model_family": "qwen",
+        "model_size": "3b",
+        "model_name": "qwen2.5-coder:3b",
+        "role": "selector",
+        "route_mode": "shadow_only",
+        "adapter_mode": "production",
+        "routing_mode": "shadow_route_only",
+    }}]
+    r = _build_h6_shadow_adapter_routing(rows, bundle)
+    assert r["invalid_adapter_mode_count"] == 1
+    assert "invalid_adapter_mode" in r["routing_reasons"]
+
+
+def test_h6_3_routing_invalid_routing_receipt(monkeypatch):
+    """H6-3 T25: Invalid routing_status invalidates receipt."""
+    from scripts.bench.capability_ab_runner import _build_h6_shadow_adapter_routing
+    monkeypatch.setenv("NEXUS_H6_ALLOW_SHADOW_ADAPTER_ROUTING", "1")
+    io_schema = {"io_schema_ready": True, "adapter_io_schema_ready": True, "ready_for_h6_3_shadow_adapter_routing": True, "safety_violation_count": 0}
+    bundle = {"h6_adapter_io_schema_test": io_schema}
+    rows = [{"h6_shadow_adapter_routing_receipt": {
+        "request_id": "io-req-001",
+        "adapter_id": "qwen3b-selector-v0",
+        "routing_status": "invalid_status",
+        "routing_mode": "shadow_route_only",
+    }}]
+    r = _build_h6_shadow_adapter_routing(rows, bundle)
+    assert r["invalid_routing_receipt_count"] == 1
+    assert "invalid_routing_receipt" in r["routing_reasons"]
+
+
+def test_h6_3_routing_unmatched_candidate_blocks(monkeypatch):
+    """H6-3 T26: Unmatched candidate blocks readiness."""
+    from scripts.bench.capability_ab_runner import _build_h6_shadow_adapter_routing
+    monkeypatch.setenv("NEXUS_H6_ALLOW_SHADOW_ADAPTER_ROUTING", "1")
+    io_schema = {"io_schema_ready": True, "adapter_io_schema_ready": True, "ready_for_h6_3_shadow_adapter_routing": True, "safety_violation_count": 0}
+    bundle = {"h6_adapter_io_schema_test": io_schema}
+    rows = [
+        {"h6_shadow_adapter_route_candidate": {
+            "request_id": "io-req-001",
+            "adapter_id": "qwen3b-selector-v0",
+            "model_family": "qwen",
+            "model_size": "3b",
+            "model_name": "qwen2.5-coder:3b",
+            "role": "selector",
+            "route_mode": "shadow_only",
+            "adapter_mode": "shadow_only",
+            "routing_mode": "shadow_route_only",
+            "route_selected": True,
+        }},
+        {"h6_shadow_adapter_routing_receipt": {
+            "request_id": "io-req-002",
+            "adapter_id": "qwen3b-selector-v0",
+            "routing_status": "shadow_route_selected",
+            "routing_mode": "shadow_route_only",
+            "route_selected": True,
+        }},
+    ]
+    r = _build_h6_shadow_adapter_routing(rows, bundle)
+    assert r["shadow_route_selected_count"] == 0
+    assert r["ready_for_h6_4_local_adapter_execution_plan_dry_run"] is False
+
+
+def test_h6_3_routing_unmatched_receipt_blocks(monkeypatch):
+    """H6-3 T27: Unmatched receipt blocks readiness."""
+    from scripts.bench.capability_ab_runner import _build_h6_shadow_adapter_routing
+    monkeypatch.setenv("NEXUS_H6_ALLOW_SHADOW_ADAPTER_ROUTING", "1")
+    io_schema = {"io_schema_ready": True, "adapter_io_schema_ready": True, "ready_for_h6_3_shadow_adapter_routing": True, "safety_violation_count": 0}
+    bundle = {"h6_adapter_io_schema_test": io_schema}
+    rows = [
+        {"h6_shadow_adapter_route_candidate": {
+            "request_id": "io-req-002",
+            "adapter_id": "qwen3b-selector-v0",
+            "model_family": "qwen",
+            "model_size": "3b",
+            "model_name": "qwen2.5-coder:3b",
+            "role": "selector",
+            "route_mode": "shadow_only",
+            "adapter_mode": "shadow_only",
+            "routing_mode": "shadow_route_only",
+            "route_selected": True,
+        }},
+        {"h6_shadow_adapter_routing_receipt": {
+            "request_id": "io-req-001",
+            "adapter_id": "qwen3b-selector-v0",
+            "routing_status": "shadow_route_selected",
+            "routing_mode": "shadow_route_only",
+            "route_selected": True,
+        }},
+    ]
+    r = _build_h6_shadow_adapter_routing(rows, bundle)
+    assert r["shadow_route_selected_count"] == 0
+    assert r["ready_for_h6_4_local_adapter_execution_plan_dry_run"] is False
+
+
+def test_h6_3_routing_selected_count_computed(monkeypatch):
+    """H6-3 T28: selected_count computed."""
+    from scripts.bench.capability_ab_runner import _build_h6_shadow_adapter_routing
+    monkeypatch.setenv("NEXUS_H6_ALLOW_SHADOW_ADAPTER_ROUTING", "1")
+    io_schema = {"io_schema_ready": True, "adapter_io_schema_ready": True, "ready_for_h6_3_shadow_adapter_routing": True, "safety_violation_count": 0}
+    bundle = {"h6_adapter_io_schema_test": io_schema}
+    rows = [
+        {"h6_shadow_adapter_route_candidate": {"request_id": "r1", "adapter_id": "a1", "model_family": "qwen", "model_size": "3b", "model_name": "qwen2.5-coder:3b", "role": "selector", "route_mode": "shadow_only", "adapter_mode": "shadow_only", "routing_mode": "shadow_route_only", "route_selected": True}},
+        {"h6_shadow_adapter_routing_receipt": {"request_id": "r1", "adapter_id": "a1", "routing_status": "shadow_route_selected", "routing_mode": "shadow_route_only", "route_selected": True}},
+        {"h6_shadow_adapter_route_candidate": {"request_id": "r2", "adapter_id": "a2", "model_family": "qwen", "model_size": "3b", "model_name": "qwen2.5-coder:3b", "role": "selector", "route_mode": "shadow_only", "adapter_mode": "shadow_only", "routing_mode": "shadow_route_only", "route_selected": True}},
+        {"h6_shadow_adapter_routing_receipt": {"request_id": "r2", "adapter_id": "a2", "routing_status": "shadow_route_selected", "routing_mode": "shadow_route_only", "route_selected": True}},
+    ]
+    r = _build_h6_shadow_adapter_routing(rows, bundle)
+    assert r["shadow_route_selected_count"] == 2
+
+
+def test_h6_3_routing_blocked_count_computed(monkeypatch):
+    """H6-3 T29: blocked_count computed."""
+    from scripts.bench.capability_ab_runner import _build_h6_shadow_adapter_routing
+    monkeypatch.setenv("NEXUS_H6_ALLOW_SHADOW_ADAPTER_ROUTING", "1")
+    io_schema = {"io_schema_ready": True, "adapter_io_schema_ready": True, "ready_for_h6_3_shadow_adapter_routing": True, "safety_violation_count": 0}
+    bundle = {"h6_adapter_io_schema_test": io_schema}
+    rows = [
+        {"h6_shadow_adapter_route_candidate": {"request_id": "r1", "adapter_id": "a1", "model_family": "qwen", "model_size": "3b", "model_name": "qwen2.5-coder:3b", "role": "selector", "route_mode": "shadow_only", "adapter_mode": "shadow_only", "routing_mode": "shadow_route_only", "route_selected": False}},
+        {"h6_shadow_adapter_routing_receipt": {"request_id": "r1", "adapter_id": "a1", "routing_status": "shadow_route_blocked", "routing_mode": "shadow_route_only", "route_selected": False}},
+        {"h6_shadow_adapter_route_candidate": {"request_id": "r2", "adapter_id": "a2", "model_family": "qwen", "model_size": "3b", "model_name": "qwen2.5-coder:3b", "role": "selector", "route_mode": "shadow_only", "adapter_mode": "shadow_only", "routing_mode": "shadow_route_only", "route_selected": False}},
+        {"h6_shadow_adapter_routing_receipt": {"request_id": "r2", "adapter_id": "a2", "routing_status": "shadow_route_blocked", "routing_mode": "shadow_route_only", "route_selected": False}},
+    ]
+    r = _build_h6_shadow_adapter_routing(rows, bundle)
+    assert r["shadow_route_blocked_count"] == 2
+
+
+def test_h6_3_routing_role_route_counts(monkeypatch):
+    """H6-3 T30: Role route counts computed."""
+    from scripts.bench.capability_ab_runner import _build_h6_shadow_adapter_routing
+    monkeypatch.setenv("NEXUS_H6_ALLOW_SHADOW_ADAPTER_ROUTING", "1")
+    io_schema = {"io_schema_ready": True, "adapter_io_schema_ready": True, "ready_for_h6_3_shadow_adapter_routing": True, "safety_violation_count": 0}
+    bundle = {"h6_adapter_io_schema_test": io_schema}
+    roles = ["selector", "localizer", "patch_synthesizer", "verifier_assist"]
+    rows = []
+    for i, role in enumerate(roles, 1):
+        rows.extend([
+            {"h6_shadow_adapter_route_candidate": {"request_id": f"r{i}", "adapter_id": f"a{i}", "model_family": "qwen", "model_size": "3b", "model_name": "qwen2.5-coder:3b", "role": role, "route_mode": "shadow_only", "adapter_mode": "shadow_only", "routing_mode": "shadow_route_only", "route_selected": True}},
+            {"h6_shadow_adapter_routing_receipt": {"request_id": f"r{i}", "adapter_id": f"a{i}", "routing_status": "shadow_route_selected", "routing_mode": "shadow_route_only", "route_selected": True}},
+        ])
+    r = _build_h6_shadow_adapter_routing(rows, bundle)
+    assert r["selector_route_count"] == 1
+    assert r["localizer_route_count"] == 1
+    assert r["patch_synthesizer_route_count"] == 1
+    assert r["verifier_assist_route_count"] == 1
+
+
+def test_h6_3_routing_qwen_size_route_counts(monkeypatch):
+    """H6-3 T31: Qwen size route counts computed."""
+    from scripts.bench.capability_ab_runner import _build_h6_shadow_adapter_routing
+    monkeypatch.setenv("NEXUS_H6_ALLOW_SHADOW_ADAPTER_ROUTING", "1")
+    io_schema = {"io_schema_ready": True, "adapter_io_schema_ready": True, "ready_for_h6_3_shadow_adapter_routing": True, "safety_violation_count": 0}
+    bundle = {"h6_adapter_io_schema_test": io_schema}
+    sizes = ["3b", "7b", "14b"]
+    rows = []
+    for i, size in enumerate(sizes, 1):
+        rows.extend([
+            {"h6_shadow_adapter_route_candidate": {"request_id": f"r{i}", "adapter_id": f"a{i}", "model_family": "qwen", "model_size": size, "model_name": f"qwen2.5-coder:{size}", "role": "selector", "route_mode": "shadow_only", "adapter_mode": "shadow_only", "routing_mode": "shadow_route_only", "route_selected": True}},
+            {"h6_shadow_adapter_routing_receipt": {"request_id": f"r{i}", "adapter_id": f"a{i}", "routing_status": "shadow_route_selected", "routing_mode": "shadow_route_only", "route_selected": True}},
+        ])
+    r = _build_h6_shadow_adapter_routing(rows, bundle)
+    assert r["qwen_3b_route_count"] == 1
+    assert r["qwen_7b_route_count"] == 1
+    assert r["qwen_14b_route_count"] == 1
+
+
+def test_h6_3_routing_model_call_blocks(monkeypatch):
+    """H6-3 T32: model_call_executed blocks readiness."""
+    from scripts.bench.capability_ab_runner import _build_h6_shadow_adapter_routing
+    monkeypatch.setenv("NEXUS_H6_ALLOW_SHADOW_ADAPTER_ROUTING", "1")
+    io_schema = {"io_schema_ready": True, "adapter_io_schema_ready": True, "ready_for_h6_3_shadow_adapter_routing": True, "safety_violation_count": 0}
+    bundle = {"h6_adapter_io_schema_test": io_schema}
+    rows = [
+        {"h6_shadow_adapter_route_candidate": {"request_id": "r1", "adapter_id": "a1", "model_family": "qwen", "model_size": "3b", "model_name": "qwen2.5-coder:3b", "role": "selector", "route_mode": "shadow_only", "adapter_mode": "shadow_only", "routing_mode": "shadow_route_only", "model_call_executed": True}},
+        {"h6_shadow_adapter_routing_receipt": {"request_id": "r1", "adapter_id": "a1", "routing_status": "shadow_route_selected", "routing_mode": "shadow_route_only"}},
+    ]
+    r = _build_h6_shadow_adapter_routing(rows, bundle)
+    assert r["model_call_executed_count"] == 1
+    assert r["safety_violation_count"] >= 1
+    assert "model_call_executed_detected" in r["routing_reasons"]
+    assert r["ready_for_h6_4_local_adapter_execution_plan_dry_run"] is False
+
+
+def test_h6_3_routing_ollama_blocks(monkeypatch):
+    """H6-3 T33: ollama_invoked blocks readiness."""
+    from scripts.bench.capability_ab_runner import _build_h6_shadow_adapter_routing
+    monkeypatch.setenv("NEXUS_H6_ALLOW_SHADOW_ADAPTER_ROUTING", "1")
+    io_schema = {"io_schema_ready": True, "adapter_io_schema_ready": True, "ready_for_h6_3_shadow_adapter_routing": True, "safety_violation_count": 0}
+    bundle = {"h6_adapter_io_schema_test": io_schema}
+    rows = [
+        {"h6_shadow_adapter_route_candidate": {"request_id": "r1", "adapter_id": "a1", "model_family": "qwen", "model_size": "3b", "model_name": "qwen2.5-coder:3b", "role": "selector", "route_mode": "shadow_only", "adapter_mode": "shadow_only", "routing_mode": "shadow_route_only", "ollama_invoked": True}},
+        {"h6_shadow_adapter_routing_receipt": {"request_id": "r1", "adapter_id": "a1", "routing_status": "shadow_route_selected", "routing_mode": "shadow_route_only"}},
+    ]
+    r = _build_h6_shadow_adapter_routing(rows, bundle)
+    assert r["ollama_invoked_count"] == 1
+    assert r["safety_violation_count"] >= 1
+    assert "ollama_invoked_detected" in r["routing_reasons"]
+    assert r["ready_for_h6_4_local_adapter_execution_plan_dry_run"] is False
+
+
+def test_h6_3_routing_cloud_blocks(monkeypatch):
+    """H6-3 T34: cloud_invoked blocks readiness."""
+    from scripts.bench.capability_ab_runner import _build_h6_shadow_adapter_routing
+    monkeypatch.setenv("NEXUS_H6_ALLOW_SHADOW_ADAPTER_ROUTING", "1")
+    io_schema = {"io_schema_ready": True, "adapter_io_schema_ready": True, "ready_for_h6_3_shadow_adapter_routing": True, "safety_violation_count": 0}
+    bundle = {"h6_adapter_io_schema_test": io_schema}
+    rows = [
+        {"h6_shadow_adapter_route_candidate": {"request_id": "r1", "adapter_id": "a1", "model_family": "qwen", "model_size": "3b", "model_name": "qwen2.5-coder:3b", "role": "selector", "route_mode": "shadow_only", "adapter_mode": "shadow_only", "routing_mode": "shadow_route_only", "cloud_invoked": True}},
+        {"h6_shadow_adapter_routing_receipt": {"request_id": "r1", "adapter_id": "a1", "routing_status": "shadow_route_selected", "routing_mode": "shadow_route_only"}},
+    ]
+    r = _build_h6_shadow_adapter_routing(rows, bundle)
+    assert r["cloud_invoked_count"] == 1
+    assert r["safety_violation_count"] >= 1
+    assert "cloud_invoked_detected" in r["routing_reasons"]
+    assert r["ready_for_h6_4_local_adapter_execution_plan_dry_run"] is False
+
+
+def test_h6_3_routing_repo_mutated_blocks(monkeypatch):
+    """H6-3 T35: repo_mutated blocks readiness."""
+    from scripts.bench.capability_ab_runner import _build_h6_shadow_adapter_routing
+    monkeypatch.setenv("NEXUS_H6_ALLOW_SHADOW_ADAPTER_ROUTING", "1")
+    io_schema = {"io_schema_ready": True, "adapter_io_schema_ready": True, "ready_for_h6_3_shadow_adapter_routing": True, "safety_violation_count": 0}
+    bundle = {"h6_adapter_io_schema_test": io_schema}
+    rows = [
+        {"h6_shadow_adapter_route_candidate": {"request_id": "r1", "adapter_id": "a1", "model_family": "qwen", "model_size": "3b", "model_name": "qwen2.5-coder:3b", "role": "selector", "route_mode": "shadow_only", "adapter_mode": "shadow_only", "routing_mode": "shadow_route_only", "repo_mutated": True}},
+        {"h6_shadow_adapter_routing_receipt": {"request_id": "r1", "adapter_id": "a1", "routing_status": "shadow_route_selected", "routing_mode": "shadow_route_only"}},
+    ]
+    r = _build_h6_shadow_adapter_routing(rows, bundle)
+    assert r["repo_mutated_count"] == 1
+    assert r["safety_violation_count"] >= 1
+    assert "repo_mutated_detected" in r["routing_reasons"]
+    assert r["ready_for_h6_4_local_adapter_execution_plan_dry_run"] is False
+
+
+def test_h6_3_routing_behavior_changed_blocks(monkeypatch):
+    """H6-3 T36: behavior_changed blocks readiness."""
+    from scripts.bench.capability_ab_runner import _build_h6_shadow_adapter_routing
+    monkeypatch.setenv("NEXUS_H6_ALLOW_SHADOW_ADAPTER_ROUTING", "1")
+    io_schema = {"io_schema_ready": True, "adapter_io_schema_ready": True, "ready_for_h6_3_shadow_adapter_routing": True, "safety_violation_count": 0}
+    bundle = {"h6_adapter_io_schema_test": io_schema}
+    rows = [
+        {"h6_shadow_adapter_route_candidate": {"request_id": "r1", "adapter_id": "a1", "model_family": "qwen", "model_size": "3b", "model_name": "qwen2.5-coder:3b", "role": "selector", "route_mode": "shadow_only", "adapter_mode": "shadow_only", "routing_mode": "shadow_route_only", "behavior_changed": True}},
+        {"h6_shadow_adapter_routing_receipt": {"request_id": "r1", "adapter_id": "a1", "routing_status": "shadow_route_selected", "routing_mode": "shadow_route_only"}},
+    ]
+    r = _build_h6_shadow_adapter_routing(rows, bundle)
+    assert r["behavior_changed_count"] == 1
+    assert r["safety_violation_count"] >= 1
+    assert "behavior_changed_detected" in r["routing_reasons"]
+    assert r["ready_for_h6_4_local_adapter_execution_plan_dry_run"] is False
+
+
+def test_h6_3_routing_runtime_effect_blocks(monkeypatch):
+    """H6-3 T37: runtime_effect blocks readiness."""
+    from scripts.bench.capability_ab_runner import _build_h6_shadow_adapter_routing
+    monkeypatch.setenv("NEXUS_H6_ALLOW_SHADOW_ADAPTER_ROUTING", "1")
+    io_schema = {"io_schema_ready": True, "adapter_io_schema_ready": True, "ready_for_h6_3_shadow_adapter_routing": True, "safety_violation_count": 0}
+    bundle = {"h6_adapter_io_schema_test": io_schema}
+    rows = [
+        {"h6_shadow_adapter_route_candidate": {"request_id": "r1", "adapter_id": "a1", "model_family": "qwen", "model_size": "3b", "model_name": "qwen2.5-coder:3b", "role": "selector", "route_mode": "shadow_only", "adapter_mode": "shadow_only", "routing_mode": "shadow_route_only", "runtime_effect": True}},
+        {"h6_shadow_adapter_routing_receipt": {"request_id": "r1", "adapter_id": "a1", "routing_status": "shadow_route_selected", "routing_mode": "shadow_route_only"}},
+    ]
+    r = _build_h6_shadow_adapter_routing(rows, bundle)
+    assert r["runtime_effect_count"] == 1
+    assert r["safety_violation_count"] >= 1
+    assert "runtime_effect_detected" in r["routing_reasons"]
+    assert r["ready_for_h6_4_local_adapter_execution_plan_dry_run"] is False
+
+
+def test_h6_3_routing_production_ready_false(monkeypatch):
+    """H6-3 T39: production_ready=false and public_claim_allowed=false always."""
+    from scripts.bench.capability_ab_runner import _build_h6_shadow_adapter_routing
+    monkeypatch.setenv("NEXUS_H6_ALLOW_SHADOW_ADAPTER_ROUTING", "1")
+    io_schema = {"io_schema_ready": True, "adapter_io_schema_ready": True, "ready_for_h6_3_shadow_adapter_routing": True, "safety_violation_count": 0}
+    bundle = {"h6_adapter_io_schema_test": io_schema}
+    rows = [
+        {"h6_shadow_adapter_route_candidate": {"request_id": "r1", "adapter_id": "a1", "model_family": "qwen", "model_size": "3b", "model_name": "qwen2.5-coder:3b", "role": "selector", "route_mode": "shadow_only", "adapter_mode": "shadow_only", "routing_mode": "shadow_route_only", "route_selected": True}},
+        {"h6_shadow_adapter_routing_receipt": {"request_id": "r1", "adapter_id": "a1", "routing_status": "shadow_route_selected", "routing_mode": "shadow_route_only", "route_selected": True}},
+    ]
+    r = _build_h6_shadow_adapter_routing(rows, bundle)
+    assert r["production_ready"] is False
+    assert r["public_claim_allowed"] is False
+    assert "h6_3_shadow_adapter_routing_not_production" in r["routing_reasons"]
+    assert "shadow_adapter_routing_only" in r["routing_reasons"]
+    assert "no_model_calls_allowed" in r["routing_reasons"]
+    assert "ollama_invocation_blocked" in r["routing_reasons"]
+    assert "cloud_invocation_blocked" in r["routing_reasons"]
+    assert "repo_mutation_blocked" in r["routing_reasons"]
+    assert "runtime_effect_blocked" in r["routing_reasons"]
+    assert "production_claim_blocked" in r["routing_reasons"]
+    assert "public_claim_blocked" in r["routing_reasons"]
+
+
+def test_h6_3_routing_default_env_block(monkeypatch):
+    """H6-3 T41: Default env blocks routing."""
+    from scripts.bench.capability_ab_runner import _build_h6_shadow_adapter_routing
+    monkeypatch.delenv("NEXUS_H6_ALLOW_SHADOW_ADAPTER_ROUTING", raising=False)
+    r = _build_h6_shadow_adapter_routing([], None)
+    assert r["routing_status"] == "blocked"
+    assert r["routing_allowed"] is False
+
+
+def test_h6_3_routing_collect_only():
+    """H6-3 T42: collect-only includes all H6-3 tests."""
+    import subprocess, re
+    result = subprocess.run(["python3", "-m", "pytest", "tests/benchmark/test_capability_ab_runner.py", "-k", "h6_3", "--collect-only", "-q"], capture_output=True, text=True, cwd="/Users/jameschen/Workspace/nexus")
+    count = len(re.findall(r"test_h6_3_", result.stdout))
+    assert count >= 36, f"Expected >= 36 H6-3 tests, got {count}"
+
+
+def test_h6_3_audit_duplicate_scan():
+    """H6-3 T43: No duplicate H5/H6 test functions."""
+    import ast, collections
+    from pathlib import Path
+    path = "tests/benchmark/test_capability_ab_runner.py"
+    tree = ast.parse(Path(path).read_text(encoding="utf-8", errors="ignore"))
+    loc = collections.defaultdict(list)
+    for n in tree.body:
+        if isinstance(n, ast.FunctionDef):
+            loc[n.name].append(n.lineno)
+    dups = [
+        (name, lines)
+        for name, lines in sorted(loc.items())
+        if (name.startswith("test_h5_") or name.startswith("test_h6_")) and len(lines) > 1
+    ]
+    assert not dups, f"Duplicate test functions found: {dups}"
+
+
+def test_h6_3_audit_report_lock():
+    """H6-3 T44: H5/H6 reports have no production/public claim."""
+    from pathlib import Path
+    bad = []
+    report_paths = sorted(Path("docs/reports").glob("h5_*.md")) + sorted(Path("docs/reports").glob("h6_*.md"))
+    for p in report_paths:
+        s = p.read_text(encoding="utf-8", errors="ignore").lower()
+        for needle in [
+            "production_ready=true",
+            "public_claim_allowed=true",
+            "production ready: true",
+            "public claim allowed: true",
+        ]:
+            if needle in s:
+                bad.append((p.name, needle))
+    assert not bad, f"Report lock violations found: {bad}"

@@ -10279,6 +10279,314 @@ def _build_h6_adapter_io_schema_test(rows: list[dict[str, Any]], bundle: dict[st
     }
 
 
+def _build_h6_shadow_adapter_routing(rows: list[dict[str, Any]], bundle: dict[str, Any] | None = None) -> dict[str, Any]:
+    """Pure helper: H6 shadow adapter routing."""
+    import os as _os
+
+    flag = _os.environ.get("NEXUS_H6_ALLOW_SHADOW_ADAPTER_ROUTING", "").strip() == "1"
+
+    io_schema = None
+    if bundle:
+        io_schema = bundle.get("h6_adapter_io_schema_test")
+
+    io_schema_present = bool(io_schema)
+    io_schema_ready = bool(io_schema.get("io_schema_ready", False)) if io_schema else False
+    adapter_io_schema_ready = bool(io_schema.get("adapter_io_schema_ready", False)) if io_schema else False
+    ready_routing = bool(io_schema.get("ready_for_h6_3_shadow_adapter_routing", False)) if io_schema else False
+    io_safety = int(io_schema.get("safety_violation_count", 0)) if io_schema else 0
+
+    ALLOWED_ROLES = {"selector", "localizer", "patch_synthesizer", "verifier_assist"}
+    ALLOWED_FAMILIES = {"qwen"}
+    ALLOWED_SIZES = {"3b", "7b", "14b"}
+    ALLOWED_ROUTE_MODES = {"shadow_only", "local_first", "local_only"}
+    ALLOWED_ADAPTER_MODES = {"shadow_only"}
+    ALLOWED_ROUTING_MODES = {"shadow_route_only", "trace_only"}
+    ALLOWED_ROUTING_STATUSES = {"shadow_route_selected", "shadow_route_blocked", "trace_only"}
+
+    candidates = [r.get("h6_shadow_adapter_route_candidate") for r in rows if r.get("h6_shadow_adapter_route_candidate")]
+    receipts = [r.get("h6_shadow_adapter_routing_receipt") for r in rows if r.get("h6_shadow_adapter_routing_receipt")]
+
+    valid_candidates = []
+    invalid_candidates = 0
+    missing_request_id = 0
+    missing_adapter_id = 0
+    missing_model_name = 0
+    missing_role = 0
+    missing_route_mode = 0
+    invalid_route_mode = 0
+    invalid_adapter_mode = 0
+
+    valid_receipts = []
+    invalid_receipts = 0
+    invalid_routing_receipt = 0
+
+    qwen_3b = 0
+    qwen_7b = 0
+    qwen_14b = 0
+    role_selector = 0
+    role_localizer = 0
+    role_ps = 0
+    role_va = 0
+
+    mc_count = 0
+    ol_count = 0
+    cl_count = 0
+    rm_count = 0
+    bh_count = 0
+    re_count = 0
+
+    for c in candidates:
+        rid = str(c.get("request_id", "") or "").strip()
+        aid = str(c.get("adapter_id", "") or "").strip()
+        fam = str(c.get("model_family", "") or "").lower()
+        sz = str(c.get("model_size", "") or "").lower()
+        mname = str(c.get("model_name", "") or "").strip()
+        role = str(c.get("role", "") or "").lower()
+        route = str(c.get("route_mode", "") or "").lower()
+        adapter = str(c.get("adapter_mode", "") or "").lower()
+        routing = str(c.get("routing_mode", "") or "").lower()
+        mc = bool(c.get("model_call_executed", False))
+        ol = bool(c.get("ollama_invoked", False))
+        cl = bool(c.get("cloud_invoked", False))
+        rm = bool(c.get("repo_mutated", False))
+        bh = bool(c.get("behavior_changed", False))
+        re = bool(c.get("runtime_effect", False))
+
+        if mc:
+            mc_count += 1
+        if ol:
+            ol_count += 1
+        if cl:
+            cl_count += 1
+        if rm:
+            rm_count += 1
+        if bh:
+            bh_count += 1
+        if re:
+            re_count += 1
+
+        is_valid = (
+            rid and aid and fam in ALLOWED_FAMILIES and sz in ALLOWED_SIZES
+            and mname and role in ALLOWED_ROLES and route in ALLOWED_ROUTE_MODES
+            and adapter in ALLOWED_ADAPTER_MODES and routing in ALLOWED_ROUTING_MODES
+            and not mc and not ol and not cl and not rm and not bh and not re
+        )
+
+        if is_valid:
+            valid_candidates.append(c)
+            if sz == "3b":
+                qwen_3b += 1
+            elif sz == "7b":
+                qwen_7b += 1
+            elif sz == "14b":
+                qwen_14b += 1
+            if role == "selector":
+                role_selector += 1
+            elif role == "localizer":
+                role_localizer += 1
+            elif role == "patch_synthesizer":
+                role_ps += 1
+            elif role == "verifier_assist":
+                role_va += 1
+        else:
+            invalid_candidates += 1
+            if not rid:
+                missing_request_id += 1
+            if not aid:
+                missing_adapter_id += 1
+            if not mname:
+                missing_model_name += 1
+            if role not in ALLOWED_ROLES:
+                missing_role += 1
+            if route not in ALLOWED_ROUTE_MODES:
+                missing_route_mode += 1
+            if adapter not in ALLOWED_ADAPTER_MODES:
+                invalid_adapter_mode += 1
+
+    for rec in receipts:
+        rid = str(rec.get("request_id", "") or "").strip()
+        aid = str(rec.get("adapter_id", "") or "").strip()
+        status = str(rec.get("routing_status", "") or "").lower()
+        routing = str(rec.get("routing_mode", "") or "").lower()
+        mc = bool(rec.get("model_call_executed", False))
+        ol = bool(rec.get("ollama_invoked", False))
+        cl = bool(rec.get("cloud_invoked", False))
+        rm = bool(rec.get("repo_mutated", False))
+        bh = bool(rec.get("behavior_changed", False))
+        re = bool(rec.get("runtime_effect", False))
+
+        if mc:
+            mc_count += 1
+        if ol:
+            ol_count += 1
+        if cl:
+            cl_count += 1
+        if rm:
+            rm_count += 1
+        if bh:
+            bh_count += 1
+        if re:
+            re_count += 1
+
+        is_valid = (
+            rid and aid and status in ALLOWED_ROUTING_STATUSES
+            and routing in ALLOWED_ROUTING_MODES
+            and not mc and not ol and not cl and not rm and not bh and not re
+        )
+
+        if is_valid:
+            valid_receipts.append(rec)
+        else:
+            invalid_receipts += 1
+            if not rid or not aid or status not in ALLOWED_ROUTING_STATUSES:
+                invalid_routing_receipt += 1
+
+    valid_candidate_rids = {c.get("request_id") for c in valid_candidates}
+    valid_receipt_rids = {rec.get("request_id") for rec in valid_receipts}
+    matched_rids = valid_candidate_rids & valid_receipt_rids
+
+    shadow_selected = 0
+    shadow_blocked = 0
+    for rec in valid_receipts:
+        if rec.get("request_id") in matched_rids:
+            if rec.get("route_selected") or rec.get("routing_status") == "shadow_route_selected":
+                shadow_selected += 1
+            else:
+                shadow_blocked += 1
+
+    safety = mc_count + ol_count + cl_count + rm_count + bh_count + re_count
+
+    routing_allowed = (
+        flag and io_schema_present and io_schema_ready
+        and adapter_io_schema_ready and ready_routing and io_safety == 0
+    )
+
+    routing_ready = (
+        routing_allowed and len(valid_candidates) > 0 and len(valid_receipts) > 0
+        and len(matched_rids) > 0 and safety == 0
+    )
+
+    receipt_ready = (
+        routing_ready and invalid_candidates == 0 and invalid_receipts == 0
+        and shadow_selected >= 1
+    )
+
+    ready_exec = (
+        receipt_ready and mc_count == 0 and ol_count == 0
+        and cl_count == 0 and rm_count == 0 and bh_count == 0 and re_count == 0
+    )
+
+    reasons = []
+    if not flag:
+        reasons.append("shadow_adapter_routing_flag_not_enabled")
+    if not io_schema_present:
+        reasons.append("missing_h6_2_adapter_io_schema")
+    if io_schema and not io_schema_ready:
+        reasons.append("h6_2_io_schema_not_ready")
+    if io_schema and not adapter_io_schema_ready:
+        reasons.append("h6_2_adapter_io_schema_not_ready")
+    if io_schema and not ready_routing:
+        reasons.append("not_ready_for_h6_3_shadow_adapter_routing")
+    if io_safety > 0:
+        reasons.append("h6_2_safety_violation_detected")
+    if not candidates:
+        reasons.append("no_route_candidates")
+    if candidates and len(valid_candidates) == 0:
+        reasons.append("no_valid_route_candidates")
+    if not receipts:
+        reasons.append("no_route_receipts")
+    if receipts and len(valid_receipts) == 0:
+        reasons.append("no_valid_route_receipts")
+    if candidates and receipts and len(matched_rids) == 0:
+        reasons.append("no_matched_routes")
+    if missing_request_id > 0:
+        reasons.append("missing_request_id")
+    if missing_adapter_id > 0:
+        reasons.append("missing_adapter_id")
+    if missing_model_name > 0:
+        reasons.append("missing_model_name")
+    if missing_role > 0:
+        reasons.append("missing_role")
+    if missing_route_mode > 0:
+        reasons.append("missing_route_mode")
+    if invalid_route_mode > 0:
+        reasons.append("invalid_route_mode")
+    if invalid_adapter_mode > 0:
+        reasons.append("invalid_adapter_mode")
+    if invalid_routing_receipt > 0:
+        reasons.append("invalid_routing_receipt")
+    if mc_count > 0:
+        reasons.append("model_call_executed_detected")
+    if ol_count > 0:
+        reasons.append("ollama_invoked_detected")
+    if cl_count > 0:
+        reasons.append("cloud_invoked_detected")
+    if rm_count > 0:
+        reasons.append("repo_mutated_detected")
+    if bh_count > 0:
+        reasons.append("behavior_changed_detected")
+    if re_count > 0:
+        reasons.append("runtime_effect_detected")
+    reasons.extend([
+        "h6_3_shadow_adapter_routing_not_production",
+        "shadow_adapter_routing_only",
+        "no_model_calls_allowed",
+        "ollama_invocation_blocked",
+        "cloud_invocation_blocked",
+        "repo_mutation_blocked",
+        "runtime_effect_blocked",
+        "production_claim_blocked",
+        "public_claim_blocked",
+    ])
+
+    return {
+        "schema": "nexus.hybrid_h6_shadow_adapter_routing.v1",
+        "evaluated": True,
+        "routing_status": "shadow_adapter_routing_ready" if routing_ready else ("shadow_adapter_routing_fail" if routing_allowed else "blocked"),
+        "routing_reasons": reasons,
+        "routing_allowed": routing_allowed,
+        "routing_ready": routing_ready,
+        "row_count": len(rows),
+        "adapter_io_schema_present": io_schema_present,
+        "adapter_io_schema_ready": io_schema_ready,
+        "ready_for_h6_3_shadow_adapter_routing": ready_routing,
+        "route_candidate_count": len(candidates),
+        "route_candidate_valid_count": len(valid_candidates),
+        "route_candidate_invalid_count": invalid_candidates,
+        "route_receipt_count": len(receipts),
+        "route_receipt_valid_count": len(valid_receipts),
+        "route_receipt_invalid_count": invalid_receipts,
+        "shadow_route_selected_count": shadow_selected,
+        "shadow_route_blocked_count": shadow_blocked,
+        "qwen_3b_route_count": qwen_3b,
+        "qwen_7b_route_count": qwen_7b,
+        "qwen_14b_route_count": qwen_14b,
+        "selector_route_count": role_selector,
+        "localizer_route_count": role_localizer,
+        "patch_synthesizer_route_count": role_ps,
+        "verifier_assist_route_count": role_va,
+        "missing_request_id_count": missing_request_id,
+        "missing_adapter_id_count": missing_adapter_id,
+        "missing_model_name_count": missing_model_name,
+        "missing_role_count": missing_role,
+        "missing_route_mode_count": missing_route_mode,
+        "invalid_route_mode_count": invalid_route_mode,
+        "invalid_adapter_mode_count": invalid_adapter_mode,
+        "invalid_routing_receipt_count": invalid_routing_receipt,
+        "model_call_executed_count": mc_count,
+        "ollama_invoked_count": ol_count,
+        "cloud_invoked_count": cl_count,
+        "repo_mutated_count": rm_count,
+        "behavior_changed_count": bh_count,
+        "runtime_effect_count": re_count,
+        "safety_violation_count": safety,
+        "shadow_adapter_routing_receipt_ready": receipt_ready,
+        "ready_for_h6_4_local_adapter_execution_plan_dry_run": ready_exec,
+        "production_ready": False,
+        "public_claim_allowed": False,
+    }
+
+
 def _finalize_with_nexus_row(
     row: dict[str, Any],
     *,
@@ -14837,6 +15145,29 @@ def write_evidence_bundle(
         "h6_adapter_io_schema_behavior_changed_count": _build_h6_adapter_io_schema_test(with_rows, payload).get("behavior_changed_count", 0),
         "h6_adapter_io_schema_runtime_effect_count": _build_h6_adapter_io_schema_test(with_rows, payload).get("runtime_effect_count", 0),
         "h6_adapter_io_schema_safety_violation_count": _build_h6_adapter_io_schema_test(with_rows, payload).get("safety_violation_count", 0),
+        "h6_shadow_adapter_routing_present": 1 if _build_h6_shadow_adapter_routing(with_rows, payload).get("evaluated") else 0,
+        "h6_shadow_adapter_routing_allowed": 1 if _build_h6_shadow_adapter_routing(with_rows, payload).get("routing_allowed") else 0,
+        "h6_shadow_adapter_routing_ready": 1 if _build_h6_shadow_adapter_routing(with_rows, payload).get("routing_ready") else 0,
+        "h6_shadow_adapter_routing_receipt_ready": 1 if _build_h6_shadow_adapter_routing(with_rows, payload).get("shadow_adapter_routing_receipt_ready") else 0,
+        "h6_shadow_adapter_routing_ready_for_execution_plan": 1 if _build_h6_shadow_adapter_routing(with_rows, payload).get("ready_for_h6_4_local_adapter_execution_plan_dry_run") else 0,
+        "h6_shadow_adapter_routing_candidate_count": _build_h6_shadow_adapter_routing(with_rows, payload).get("route_candidate_count", 0),
+        "h6_shadow_adapter_routing_valid_candidate_count": _build_h6_shadow_adapter_routing(with_rows, payload).get("route_candidate_valid_count", 0),
+        "h6_shadow_adapter_routing_invalid_candidate_count": _build_h6_shadow_adapter_routing(with_rows, payload).get("route_candidate_invalid_count", 0),
+        "h6_shadow_adapter_routing_receipt_count": _build_h6_shadow_adapter_routing(with_rows, payload).get("route_receipt_count", 0),
+        "h6_shadow_adapter_routing_valid_receipt_count": _build_h6_shadow_adapter_routing(with_rows, payload).get("route_receipt_valid_count", 0),
+        "h6_shadow_adapter_routing_invalid_receipt_count": _build_h6_shadow_adapter_routing(with_rows, payload).get("route_receipt_invalid_count", 0),
+        "h6_shadow_adapter_routing_selected_count": _build_h6_shadow_adapter_routing(with_rows, payload).get("shadow_route_selected_count", 0),
+        "h6_shadow_adapter_routing_blocked_count": _build_h6_shadow_adapter_routing(with_rows, payload).get("shadow_route_blocked_count", 0),
+        "h6_shadow_adapter_routing_qwen_3b_route_count": _build_h6_shadow_adapter_routing(with_rows, payload).get("qwen_3b_route_count", 0),
+        "h6_shadow_adapter_routing_qwen_7b_route_count": _build_h6_shadow_adapter_routing(with_rows, payload).get("qwen_7b_route_count", 0),
+        "h6_shadow_adapter_routing_qwen_14b_route_count": _build_h6_shadow_adapter_routing(with_rows, payload).get("qwen_14b_route_count", 0),
+        "h6_shadow_adapter_routing_model_call_executed_count": _build_h6_shadow_adapter_routing(with_rows, payload).get("model_call_executed_count", 0),
+        "h6_shadow_adapter_routing_ollama_invoked_count": _build_h6_shadow_adapter_routing(with_rows, payload).get("ollama_invoked_count", 0),
+        "h6_shadow_adapter_routing_cloud_invoked_count": _build_h6_shadow_adapter_routing(with_rows, payload).get("cloud_invoked_count", 0),
+        "h6_shadow_adapter_routing_repo_mutated_count": _build_h6_shadow_adapter_routing(with_rows, payload).get("repo_mutated_count", 0),
+        "h6_shadow_adapter_routing_behavior_changed_count": _build_h6_shadow_adapter_routing(with_rows, payload).get("behavior_changed_count", 0),
+        "h6_shadow_adapter_routing_runtime_effect_count": _build_h6_shadow_adapter_routing(with_rows, payload).get("runtime_effect_count", 0),
+        "h6_shadow_adapter_routing_safety_violation_count": _build_h6_shadow_adapter_routing(with_rows, payload).get("safety_violation_count", 0),
     }
     payload["h5_guarded_local_candidate_benchmark_trial"] = _build_h5_guarded_local_candidate_benchmark_trial(with_rows)
     payload["h5_quality_non_regression_gate"] = _build_h5_quality_non_regression_gate(with_rows, payload["h5_guarded_local_candidate_benchmark_trial"])
@@ -14853,6 +15184,7 @@ def write_evidence_bundle(
     payload["h6_local_model_adapter_preflight_contract"] = _build_h6_local_model_adapter_preflight_contract(with_rows, payload)
     payload["h6_shadow_local_adapter_dry_run"] = _build_h6_shadow_local_adapter_dry_run(with_rows, payload)
     payload["h6_adapter_io_schema_test"] = _build_h6_adapter_io_schema_test(with_rows, payload)
+    payload["h6_shadow_adapter_routing"] = _build_h6_shadow_adapter_routing(with_rows, payload)
     payload["external_provider_claim_boundary_contract"] = build_external_provider_claim_boundary_contract(payload)
     payload["public_promotion_readiness_contract"] = build_public_promotion_readiness_contract(payload)
     bundle_path.write_text(json.dumps(payload, indent=2, ensure_ascii=False), encoding="utf-8")
