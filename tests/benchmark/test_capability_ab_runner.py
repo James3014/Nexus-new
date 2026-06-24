@@ -22513,3 +22513,286 @@ def test_h5_48_safety_violation_count(monkeypatch):
     bundle = {"h5_real_patch_verifier_score_trial": {"score_visible": True, "verifier_evaluated_count": 5, "verifier_passed_count": 5, "verifier_failed_count": 0, "candidate_solved_count": 5, "candidate_failed_count": 0, "solve_rate": 1.0, "verifier_pass_rate": 1.0, "quality_pass_rate": 1.0, "regression_count": 3, "fail_reason_counts": {}, "regression_reason_counts": {}, "repo_mutated_count": 1, "cloud_invoked_count": 1, "model_calls_incremented_count": 0, "behavior_changed_count": 1, "row_count": 5, "eligible_row_count": 5, "real_artifact_verified_count": 5, "score_ready_for_benchmark": False}}
     r = _build_h5_real_patch_benchmark_scoreboard([], bundle)
     assert r["safety_violation_count"] == 3
+
+
+def test_h5_49_empty_rows_blocks():
+    """H5-49 T1: empty rows block."""
+    from scripts.bench.capability_ab_runner import _build_h5_controlled_real_patch_apply_test_trial
+    r = _build_h5_controlled_real_patch_apply_test_trial([])
+    assert r["trial_status"] == "blocked"
+    assert r["trial_allowed"] is False
+
+
+def test_h5_49_flag_missing(monkeypatch):
+    """H5-49 T2: flag missing blocks."""
+    from scripts.bench.capability_ab_runner import _build_h5_controlled_real_patch_apply_test_trial
+    monkeypatch.delenv("NEXUS_H5_ALLOW_CONTROLLED_REAL_PATCH_APPLY_TEST_TRIAL", raising=False)
+    r = _build_h5_controlled_real_patch_apply_test_trial([])
+    assert "apply_test_flag_not_enabled" in r["trial_reasons"]
+
+
+def test_h5_49_missing_scoreboard(monkeypatch):
+    """H5-49 T3: missing scoreboard blocks."""
+    from scripts.bench.capability_ab_runner import _build_h5_controlled_real_patch_apply_test_trial
+    monkeypatch.setenv("NEXUS_H5_ALLOW_CONTROLLED_REAL_PATCH_APPLY_TEST_TRIAL", "1")
+    r = _build_h5_controlled_real_patch_apply_test_trial([], {})
+    assert "missing_scoreboard" in r["trial_reasons"]
+
+
+def test_h5_49_scoreboard_not_ready(monkeypatch):
+    """H5-49 T4: scoreboard not ready blocks."""
+    from scripts.bench.capability_ab_runner import _build_h5_controlled_real_patch_apply_test_trial
+    monkeypatch.setenv("NEXUS_H5_ALLOW_CONTROLLED_REAL_PATCH_APPLY_TEST_TRIAL", "1")
+    bundle = {"h5_real_patch_benchmark_scoreboard": {"scoreboard_ready": False, "ready_for_controlled_apply_trial": False, "safety_violation_count": 0}}
+    r = _build_h5_controlled_real_patch_apply_test_trial([], bundle)
+    assert "scoreboard_not_ready" in r["trial_reasons"]
+
+
+def test_h5_49_not_ready_for_apply(monkeypatch):
+    """H5-49 T5: not ready_for_controlled_apply_trial blocks."""
+    from scripts.bench.capability_ab_runner import _build_h5_controlled_real_patch_apply_test_trial
+    monkeypatch.setenv("NEXUS_H5_ALLOW_CONTROLLED_REAL_PATCH_APPLY_TEST_TRIAL", "1")
+    bundle = {"h5_real_patch_benchmark_scoreboard": {"scoreboard_ready": True, "ready_for_controlled_apply_trial": False, "safety_violation_count": 0}}
+    r = _build_h5_controlled_real_patch_apply_test_trial([], bundle)
+    assert "not_ready_for_controlled_apply_trial" in r["trial_reasons"]
+
+
+def test_h5_49_scoreboard_safety_blocks(monkeypatch):
+    """H5-49 T6: scoreboard safety violation blocks."""
+    from scripts.bench.capability_ab_runner import _build_h5_controlled_real_patch_apply_test_trial
+    monkeypatch.setenv("NEXUS_H5_ALLOW_CONTROLLED_REAL_PATCH_APPLY_TEST_TRIAL", "1")
+    bundle = {"h5_real_patch_benchmark_scoreboard": {"scoreboard_ready": True, "ready_for_controlled_apply_trial": True, "safety_violation_count": 1}}
+    r = _build_h5_controlled_real_patch_apply_test_trial([], bundle)
+    assert "scoreboard_safety_violation_detected" in r["trial_reasons"]
+
+
+def test_h5_49_fixture_missing_counts_blocked(monkeypatch):
+    """H5-49 T7: fixture missing counts blocked."""
+    from scripts.bench.capability_ab_runner import _build_h5_controlled_real_patch_apply_test_trial
+    monkeypatch.setenv("NEXUS_H5_ALLOW_CONTROLLED_REAL_PATCH_APPLY_TEST_TRIAL", "1")
+    bundle = {"h5_real_patch_benchmark_scoreboard": {"scoreboard_ready": True, "ready_for_controlled_apply_trial": True, "safety_violation_count": 0}}
+    r = _build_h5_controlled_real_patch_apply_test_trial([{}], bundle)
+    assert r["patch_apply_blocked_count"] == 1
+
+
+def test_h5_49_apply_not_attempted(monkeypatch):
+    """H5-49 T8: apply_attempted=false counts blocked."""
+    from scripts.bench.capability_ab_runner import _build_h5_controlled_real_patch_apply_test_trial
+    monkeypatch.setenv("NEXUS_H5_ALLOW_CONTROLLED_REAL_PATCH_APPLY_TEST_TRIAL", "1")
+    bundle = {"h5_real_patch_benchmark_scoreboard": {"scoreboard_ready": True, "ready_for_controlled_apply_trial": True, "safety_violation_count": 0}}
+    row = {"h5_controlled_apply_test_result": {"apply_attempted": False, "tests_run": 0}}
+    r = _build_h5_controlled_real_patch_apply_test_trial([row], bundle)
+    assert r["patch_apply_blocked_count"] == 1
+
+
+def test_h5_49_apply_failed(monkeypatch):
+    """H5-49 T9: apply failed fails trial."""
+    from scripts.bench.capability_ab_runner import _build_h5_controlled_real_patch_apply_test_trial
+    monkeypatch.setenv("NEXUS_H5_ALLOW_CONTROLLED_REAL_PATCH_APPLY_TEST_TRIAL", "1")
+    bundle = {"h5_real_patch_benchmark_scoreboard": {"scoreboard_ready": True, "ready_for_controlled_apply_trial": True, "safety_violation_count": 0}}
+    row = {"h5_controlled_apply_test_result": {"apply_attempted": True, "apply_passed": False, "tests_run": 3, "tests_passed": 3, "tests_failed": 0, "failure_reasons": ["patch_conflict"]}}
+    r = _build_h5_controlled_real_patch_apply_test_trial([row], bundle)
+    assert r["trial_status"] == "controlled_real_patch_apply_test_trial_fail"
+    assert r["patch_apply_failed_count"] == 1
+
+
+def test_h5_49_no_tests_run(monkeypatch):
+    """H5-49 T10: tests_run=0 fails trial."""
+    from scripts.bench.capability_ab_runner import _build_h5_controlled_real_patch_apply_test_trial
+    monkeypatch.setenv("NEXUS_H5_ALLOW_CONTROLLED_REAL_PATCH_APPLY_TEST_TRIAL", "1")
+    bundle = {"h5_real_patch_benchmark_scoreboard": {"scoreboard_ready": True, "ready_for_controlled_apply_trial": True, "safety_violation_count": 0}}
+    row = {"h5_controlled_apply_test_result": {"apply_attempted": True, "apply_passed": True, "tests_run": 0, "tests_passed": 0, "tests_failed": 0}}
+    r = _build_h5_controlled_real_patch_apply_test_trial([row], bundle)
+    assert r["trial_status"] == "controlled_real_patch_apply_test_trial_fail"
+    assert "no_tests_run" in r["trial_reasons"]
+
+
+def test_h5_49_tests_failed(monkeypatch):
+    """H5-49 T11: tests_failed>0 fails trial."""
+    from scripts.bench.capability_ab_runner import _build_h5_controlled_real_patch_apply_test_trial
+    monkeypatch.setenv("NEXUS_H5_ALLOW_CONTROLLED_REAL_PATCH_APPLY_TEST_TRIAL", "1")
+    bundle = {"h5_real_patch_benchmark_scoreboard": {"scoreboard_ready": True, "ready_for_controlled_apply_trial": True, "safety_violation_count": 0}}
+    row = {"h5_controlled_apply_test_result": {"apply_attempted": True, "apply_passed": True, "tests_run": 3, "tests_passed": 2, "tests_failed": 1, "test_failure_reasons": ["assertion_error"]}}
+    r = _build_h5_controlled_real_patch_apply_test_trial([row], bundle)
+    assert r["trial_status"] == "controlled_real_patch_apply_test_trial_fail"
+    assert r["tests_failed_count"] == 1
+
+
+def test_h5_49_clean_pass(monkeypatch):
+    """H5-49 T12: clean apply/test fixture passes."""
+    from scripts.bench.capability_ab_runner import _build_h5_controlled_real_patch_apply_test_trial
+    monkeypatch.setenv("NEXUS_H5_ALLOW_CONTROLLED_REAL_PATCH_APPLY_TEST_TRIAL", "1")
+    bundle = {"h5_real_patch_benchmark_scoreboard": {"scoreboard_ready": True, "ready_for_controlled_apply_trial": True, "safety_violation_count": 0}}
+    row = {"h5_controlled_apply_test_result": {"apply_attempted": True, "apply_passed": True, "tests_run": 5, "tests_passed": 5, "tests_failed": 0}}
+    r = _build_h5_controlled_real_patch_apply_test_trial([row], bundle)
+    assert r["trial_passed"] is True
+    assert r["trial_status"] == "controlled_real_patch_apply_test_trial_pass"
+    assert r["apply_pass_rate"] == 1.0
+    assert r["test_pass_rate"] == 1.0
+
+
+def test_h5_49_apply_pass_rate(monkeypatch):
+    """H5-49 T13: apply_pass_rate computed."""
+    from scripts.bench.capability_ab_runner import _build_h5_controlled_real_patch_apply_test_trial
+    monkeypatch.setenv("NEXUS_H5_ALLOW_CONTROLLED_REAL_PATCH_APPLY_TEST_TRIAL", "1")
+    bundle = {"h5_real_patch_benchmark_scoreboard": {"scoreboard_ready": True, "ready_for_controlled_apply_trial": True, "safety_violation_count": 0}}
+    rows = [
+        {"h5_controlled_apply_test_result": {"apply_attempted": True, "apply_passed": True, "tests_run": 3, "tests_passed": 3, "tests_failed": 0}},
+        {"h5_controlled_apply_test_result": {"apply_attempted": True, "apply_passed": False, "tests_run": 0, "tests_passed": 0, "tests_failed": 0, "failure_reasons": ["conflict"]}},
+    ]
+    r = _build_h5_controlled_real_patch_apply_test_trial(rows, bundle)
+    assert r["apply_pass_rate"] == 0.5
+
+
+def test_h5_49_test_pass_rate(monkeypatch):
+    """H5-49 T14: test_pass_rate computed."""
+    from scripts.bench.capability_ab_runner import _build_h5_controlled_real_patch_apply_test_trial
+    monkeypatch.setenv("NEXUS_H5_ALLOW_CONTROLLED_REAL_PATCH_APPLY_TEST_TRIAL", "1")
+    bundle = {"h5_real_patch_benchmark_scoreboard": {"scoreboard_ready": True, "ready_for_controlled_apply_trial": True, "safety_violation_count": 0}}
+    row = {"h5_controlled_apply_test_result": {"apply_attempted": True, "apply_passed": True, "tests_run": 10, "tests_passed": 8, "tests_failed": 2}}
+    r = _build_h5_controlled_real_patch_apply_test_trial([row], bundle)
+    assert r["test_pass_rate"] == 0.8
+
+
+def test_h5_49_fail_reasons_aggregate(monkeypatch):
+    """H5-49 T15: fail_reason_counts aggregate."""
+    from scripts.bench.capability_ab_runner import _build_h5_controlled_real_patch_apply_test_trial
+    monkeypatch.setenv("NEXUS_H5_ALLOW_CONTROLLED_REAL_PATCH_APPLY_TEST_TRIAL", "1")
+    bundle = {"h5_real_patch_benchmark_scoreboard": {"scoreboard_ready": True, "ready_for_controlled_apply_trial": True, "safety_violation_count": 0}}
+    rows = [
+        {"h5_controlled_apply_test_result": {"apply_attempted": True, "apply_passed": False, "failure_reasons": ["conflict"], "tests_run": 0}},
+        {"h5_controlled_apply_test_result": {"apply_attempted": True, "apply_passed": False, "failure_reasons": ["conflict", "hash_mismatch"], "tests_run": 0}},
+    ]
+    r = _build_h5_controlled_real_patch_apply_test_trial(rows, bundle)
+    assert r["fail_reason_counts"]["conflict"] == 2
+    assert r["fail_reason_counts"]["hash_mismatch"] == 1
+
+
+def test_h5_49_test_fail_reasons_aggregate(monkeypatch):
+    """H5-49 T16: test_failure_reason_counts aggregate."""
+    from scripts.bench.capability_ab_runner import _build_h5_controlled_real_patch_apply_test_trial
+    monkeypatch.setenv("NEXUS_H5_ALLOW_CONTROLLED_REAL_PATCH_APPLY_TEST_TRIAL", "1")
+    bundle = {"h5_real_patch_benchmark_scoreboard": {"scoreboard_ready": True, "ready_for_controlled_apply_trial": True, "safety_violation_count": 0}}
+    rows = [
+        {"h5_controlled_apply_test_result": {"apply_attempted": True, "apply_passed": True, "tests_run": 3, "tests_passed": 2, "tests_failed": 1, "test_failure_reasons": ["assertion_error"]}},
+        {"h5_controlled_apply_test_result": {"apply_attempted": True, "apply_passed": True, "tests_run": 2, "tests_passed": 1, "tests_failed": 1, "test_failure_reasons": ["assertion_error", "import_error"]}},
+    ]
+    r = _build_h5_controlled_real_patch_apply_test_trial(rows, bundle)
+    assert r["test_failure_reason_counts"]["assertion_error"] == 2
+    assert r["test_failure_reason_counts"]["import_error"] == 1
+
+
+def test_h5_49_repo_mutated_blocks(monkeypatch):
+    """H5-49 T17: repo_mutated blocks."""
+    from scripts.bench.capability_ab_runner import _build_h5_controlled_real_patch_apply_test_trial
+    monkeypatch.setenv("NEXUS_H5_ALLOW_CONTROLLED_REAL_PATCH_APPLY_TEST_TRIAL", "1")
+    bundle = {"h5_real_patch_benchmark_scoreboard": {"scoreboard_ready": True, "ready_for_controlled_apply_trial": True, "safety_violation_count": 0}}
+    row = {"h5_controlled_apply_test_result": {"apply_attempted": True, "apply_passed": True, "tests_run": 3, "tests_passed": 3, "tests_failed": 0, "repo_mutated": True}}
+    r = _build_h5_controlled_real_patch_apply_test_trial([row], bundle)
+    assert r["repo_mutated_count"] == 1
+    assert r["safety_violation_count"] == 1
+
+
+def test_h5_49_cloud_invoked_blocks(monkeypatch):
+    """H5-49 T18: cloud_invoked blocks."""
+    from scripts.bench.capability_ab_runner import _build_h5_controlled_real_patch_apply_test_trial
+    monkeypatch.setenv("NEXUS_H5_ALLOW_CONTROLLED_REAL_PATCH_APPLY_TEST_TRIAL", "1")
+    bundle = {"h5_real_patch_benchmark_scoreboard": {"scoreboard_ready": True, "ready_for_controlled_apply_trial": True, "safety_violation_count": 0}}
+    row = {"h5_controlled_apply_test_result": {"apply_attempted": True, "apply_passed": True, "tests_run": 3, "tests_passed": 3, "tests_failed": 0, "cloud_invoked": True}}
+    r = _build_h5_controlled_real_patch_apply_test_trial([row], bundle)
+    assert r["cloud_invoked_count"] == 1
+
+
+def test_h5_49_mc_blocks(monkeypatch):
+    """H5-49 T19: model_calls_incremented blocks."""
+    from scripts.bench.capability_ab_runner import _build_h5_controlled_real_patch_apply_test_trial
+    monkeypatch.setenv("NEXUS_H5_ALLOW_CONTROLLED_REAL_PATCH_APPLY_TEST_TRIAL", "1")
+    bundle = {"h5_real_patch_benchmark_scoreboard": {"scoreboard_ready": True, "ready_for_controlled_apply_trial": True, "safety_violation_count": 0}}
+    row = {"h5_controlled_apply_test_result": {"apply_attempted": True, "apply_passed": True, "tests_run": 3, "tests_passed": 3, "tests_failed": 0, "model_calls_incremented": True}}
+    r = _build_h5_controlled_real_patch_apply_test_trial([row], bundle)
+    assert r["model_calls_incremented_count"] == 1
+
+
+def test_h5_49_behavior_blocks(monkeypatch):
+    """H5-49 T20: behavior_changed blocks."""
+    from scripts.bench.capability_ab_runner import _build_h5_controlled_real_patch_apply_test_trial
+    monkeypatch.setenv("NEXUS_H5_ALLOW_CONTROLLED_REAL_PATCH_APPLY_TEST_TRIAL", "1")
+    bundle = {"h5_real_patch_benchmark_scoreboard": {"scoreboard_ready": True, "ready_for_controlled_apply_trial": True, "safety_violation_count": 0}}
+    row = {"h5_controlled_apply_test_result": {"apply_attempted": True, "apply_passed": True, "tests_run": 3, "tests_passed": 3, "tests_failed": 0, "behavior_changed": True}}
+    r = _build_h5_controlled_real_patch_apply_test_trial([row], bundle)
+    assert r["behavior_changed_count"] == 1
+
+
+def test_h5_49_bundle_attaches(tmp_path, monkeypatch):
+    """H5-49 T21: bundle attaches trial."""
+    from scripts.bench.capability_ab_runner import CapabilityTask, _finalize_with_nexus_row, write_evidence_bundle
+    task = CapabilityTask(id="t-h5-49", difficulty="easy", task_type="test_repair", task_desc="v", target_file="t.py", test_file="test_t.py", expected_capabilities=("claim_gate",), success_criteria="tests_pass", repo_kind="nexus_internal", fixture_kind="test_fixture")
+    _h5_all_flags_set_with_gate(monkeypatch)
+    monkeypatch.setattr("scripts.bench.capability_ab_runner._git_commit", lambda x: "d")
+    row = _finalize_with_nexus_row({"mode": "with_nexus", "model_calls": 1, "total_tokens": 100, "token_capture_status": "measured", "committee_trace": {"candidate_count": 2, "judge_selection": {"selected_candidate_id": "C_1"}, "committee_receipt": {"selected_candidate_applied": True, "selected_candidate_apply_hash_match": True}}, "local_solve_eligible": True}, provider="gemini", model_required=True, nexus_required=False, task=task, repo_root=tmp_path)
+    wp = tmp_path / "w.jsonl"; wp.write_text("[]", encoding="utf-8")
+    wop = tmp_path / "wo.jsonl"; wop.write_text("[]", encoding="utf-8")
+    bf = write_evidence_bundle(out_dir=tmp_path, with_path=wp, without_path=wop, rows=[row], config={"tasks_file": "t.json", "tasks_manifest_hash": "m", "unique_tasks_requested": 1, "repeat_trials": 1, "timeout_sec": 60})
+    bundle = json.loads(bf.read_text(encoding="utf-8"))
+    assert "h5_controlled_real_patch_apply_test_trial" in bundle
+    t = bundle["h5_controlled_real_patch_apply_test_trial"]
+    assert t["schema"] == "nexus.hybrid_h5_controlled_real_patch_apply_test_trial.v1"
+    assert t["production_ready"] is False
+
+
+def test_h5_49_pr_false_always(monkeypatch):
+    """H5-49 T22: production_ready=false always."""
+    from scripts.bench.capability_ab_runner import _build_h5_controlled_real_patch_apply_test_trial
+    monkeypatch.setenv("NEXUS_H5_ALLOW_CONTROLLED_REAL_PATCH_APPLY_TEST_TRIAL", "1")
+    bundle = {"h5_real_patch_benchmark_scoreboard": {"scoreboard_ready": True, "ready_for_controlled_apply_trial": True, "safety_violation_count": 0}}
+    row = {"h5_controlled_apply_test_result": {"apply_attempted": True, "apply_passed": True, "tests_run": 3, "tests_passed": 3, "tests_failed": 0}}
+    r = _build_h5_controlled_real_patch_apply_test_trial([row], bundle)
+    assert r["production_ready"] is False
+    assert r["public_claim_allowed"] is False
+
+
+def test_h5_49_default_env_blocked(monkeypatch):
+    """H5-49 T23: default env blocked."""
+    from scripts.bench.capability_ab_runner import _build_h5_controlled_real_patch_apply_test_trial
+    monkeypatch.delenv("NEXUS_H5_ALLOW_CONTROLLED_REAL_PATCH_APPLY_TEST_TRIAL", raising=False)
+    r = _build_h5_controlled_real_patch_apply_test_trial([])
+    assert r["trial_allowed"] is False
+
+
+def test_h5_49_collect_only():
+    """H5-49 T24: collect-only includes all H5-49 tests."""
+    import subprocess, re
+    result = subprocess.run(["python3", "-m", "pytest", "tests/benchmark/test_capability_ab_runner.py", "-k", "h5_49", "--collect-only", "-q"], capture_output=True, text=True, cwd="/Users/jameschen/Workspace/nexus")
+    count = len(re.findall(r"test_h5_49_", result.stdout))
+    assert count >= 24, f"Expected >= 24 H5-49 tests, got {count}"
+
+
+def test_h5_49_summary_counters(tmp_path, monkeypatch):
+    """H5-49 T25: summary counters reflect apply/test result."""
+    from scripts.bench.capability_ab_runner import CapabilityTask, _finalize_with_nexus_row, write_evidence_bundle
+    task = CapabilityTask(id="t-h5-49s", difficulty="easy", task_type="test_repair", task_desc="v", target_file="t.py", test_file="test_t.py", expected_capabilities=("claim_gate",), success_criteria="tests_pass", repo_kind="nexus_internal", fixture_kind="test_fixture")
+    _h5_all_flags_set_with_gate(monkeypatch)
+    monkeypatch.setattr("scripts.bench.capability_ab_runner._git_commit", lambda x: "d")
+    row = _finalize_with_nexus_row({"mode": "with_nexus", "model_calls": 1, "total_tokens": 100, "token_capture_status": "measured", "committee_trace": {"candidate_count": 2, "judge_selection": {"selected_candidate_id": "C_1"}, "committee_receipt": {"selected_candidate_applied": True, "selected_candidate_apply_hash_match": True}}, "local_solve_eligible": True}, provider="gemini", model_required=True, nexus_required=False, task=task, repo_root=tmp_path)
+    wp = tmp_path / "w.jsonl"; wp.write_text("[]", encoding="utf-8")
+    wop = tmp_path / "wo.jsonl"; wop.write_text("[]", encoding="utf-8")
+    bf = write_evidence_bundle(out_dir=tmp_path, with_path=wp, without_path=wop, rows=[row], config={"tasks_file": "t.json", "tasks_manifest_hash": "m", "unique_tasks_requested": 1, "repeat_trials": 1, "timeout_sec": 60})
+    bundle = json.loads(bf.read_text(encoding="utf-8"))
+    t = bundle["h5_controlled_real_patch_apply_test_trial"]
+    assert t["trial_allowed"] is False
+    assert t["production_ready"] is False
+
+
+def test_h5_49_flagged_pass(monkeypatch):
+    """H5-49 T26: flagged clean fixture passes trial."""
+    from scripts.bench.capability_ab_runner import _build_h5_controlled_real_patch_apply_test_trial
+    monkeypatch.setenv("NEXUS_H5_ALLOW_CONTROLLED_REAL_PATCH_APPLY_TEST_TRIAL", "1")
+    bundle = {"h5_real_patch_benchmark_scoreboard": {"scoreboard_ready": True, "ready_for_controlled_apply_trial": True, "safety_violation_count": 0}}
+    row = {"h5_controlled_apply_test_result": {"apply_attempted": True, "apply_passed": True, "tests_run": 10, "tests_passed": 10, "tests_failed": 0}}
+    r = _build_h5_controlled_real_patch_apply_test_trial([row], bundle)
+    assert r["trial_passed"] is True
+    assert r["ready_for_benchmark_delta"] is True
+    assert r["apply_pass_rate"] == 1.0
+    assert r["test_pass_rate"] == 1.0
+    assert r["apply_test_pass_rate"] == 1.0
+    assert r["safety_violation_count"] == 0

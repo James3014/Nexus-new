@@ -8984,6 +8984,183 @@ def _build_h5_real_patch_benchmark_scoreboard(rows: list[dict[str, Any]], bundle
     }
 
 
+def _build_h5_controlled_real_patch_apply_test_trial(rows: list[dict[str, Any]], bundle: dict[str, Any] | None = None) -> dict[str, Any]:
+    """Pure helper: controlled real patch apply/test trial aggregation."""
+    import os as _os
+    from collections import Counter
+
+    flag = _os.environ.get("NEXUS_H5_ALLOW_CONTROLLED_REAL_PATCH_APPLY_TEST_TRIAL", "").strip() == "1"
+
+    scoreboard = None
+    if bundle:
+        scoreboard = bundle.get("h5_real_patch_benchmark_scoreboard")
+
+    sb_present = bool(scoreboard)
+    sb_ready = bool(scoreboard.get("scoreboard_ready", False)) if scoreboard else False
+    ready_apply = bool(scoreboard.get("ready_for_controlled_apply_trial", False)) if scoreboard else False
+    sb_safety = int(scoreboard.get("safety_violation_count", 0)) if scoreboard else 0
+
+    apply_attempted = 0
+    apply_passed = 0
+    apply_failed = 0
+    apply_blocked = 0
+    tests_run = 0
+    tests_passed = 0
+    tests_failed = 0
+    tests_blocked = 0
+    repo_mut = 0
+    cloud_inv = 0
+    mc_inc = 0
+    beh = 0
+    fail_reasons: Counter = Counter()
+    test_fail_reasons: Counter = Counter()
+    regression_reasons: Counter = Counter()
+
+    for r in rows:
+        result = r.get("h5_controlled_apply_test_result")
+        if not result:
+            apply_blocked += 1
+            tests_blocked += 1
+            continue
+
+        attempted = bool(result.get("apply_attempted", False))
+        passed = bool(result.get("apply_passed", False))
+        t_run = int(result.get("tests_run", 0) or 0)
+        t_passed = int(result.get("tests_passed", 0) or 0)
+        t_failed = int(result.get("tests_failed", 0) or 0)
+        rm = bool(result.get("repo_mutated", False))
+        ci = bool(result.get("cloud_invoked", False))
+        mc = bool(result.get("model_calls_incremented", False))
+        bh = bool(result.get("behavior_changed", False))
+
+        if attempted:
+            apply_attempted += 1
+            if passed:
+                apply_passed += 1
+            else:
+                apply_failed += 1
+                for reason in result.get("failure_reasons", []):
+                    fail_reasons[reason] += 1
+        else:
+            apply_blocked += 1
+
+        if t_run > 0:
+            tests_run += t_run
+            tests_passed += t_passed
+            tests_failed += t_failed
+        else:
+            tests_blocked += 1
+
+        for reason in result.get("test_failure_reasons", []):
+            test_fail_reasons[reason] += 1
+
+        if rm:
+            repo_mut += 1
+            regression_reasons["repo_mutated"] += 1
+        if ci:
+            cloud_inv += 1
+            regression_reasons["cloud_invoked"] += 1
+        if mc:
+            mc_inc += 1
+            regression_reasons["model_calls_incremented"] += 1
+        if bh:
+            beh += 1
+            regression_reasons["behavior_changed"] += 1
+
+    safety = repo_mut + cloud_inv + mc_inc + beh
+
+    trial_allowed = (
+        flag and sb_present and sb_ready and ready_apply
+        and sb_safety == 0
+    )
+
+    trial_passed = (
+        trial_allowed and apply_attempted >= 1
+        and apply_passed >= 1 and tests_run >= 1
+        and tests_failed == 0
+        and repo_mut == 0 and cloud_inv == 0
+        and mc_inc == 0 and beh == 0
+    )
+
+    apply_pass_rate = apply_passed / apply_attempted if apply_attempted > 0 else 0.0
+    test_pass_rate = tests_passed / tests_run if tests_run > 0 else 0.0
+    apply_test_pass_rate = apply_passed / apply_attempted if apply_attempted > 0 else 0.0
+
+    reasons = []
+    if not flag:
+        reasons.append("apply_test_flag_not_enabled")
+    if not sb_present:
+        reasons.append("missing_scoreboard")
+    if scoreboard and not sb_ready:
+        reasons.append("scoreboard_not_ready")
+    if scoreboard and not ready_apply:
+        reasons.append("not_ready_for_controlled_apply_trial")
+    if sb_safety > 0:
+        reasons.append("scoreboard_safety_violation_detected")
+    if apply_attempted == 0:
+        reasons.append("no_apply_attempted")
+    if apply_passed == 0 and apply_attempted > 0:
+        reasons.append("no_apply_passed")
+    if tests_run == 0 and apply_attempted > 0:
+        reasons.append("no_tests_run")
+    if tests_failed > 0:
+        reasons.append("tests_failed")
+    if repo_mut > 0:
+        reasons.append("repo_mutation_detected")
+    if cloud_inv > 0:
+        reasons.append("cloud_invoked_detected")
+    if mc_inc > 0:
+        reasons.append("model_calls_incremented_detected")
+    if beh > 0:
+        reasons.append("behavior_changed_detected")
+    reasons.extend([
+        "h5_49_controlled_apply_test_not_production",
+        "isolated_apply_only",
+        "repo_mutation_blocked_outside_isolation",
+        "cloud_invocation_blocked",
+        "model_calls_increment_blocked",
+        "production_claim_blocked",
+        "public_claim_blocked",
+    ])
+
+    return {
+        "schema": "nexus.hybrid_h5_controlled_real_patch_apply_test_trial.v1",
+        "evaluated": True,
+        "trial_status": "controlled_real_patch_apply_test_trial_pass" if trial_passed else ("blocked" if not trial_allowed else "controlled_real_patch_apply_test_trial_fail"),
+        "trial_reasons": reasons,
+        "trial_allowed": trial_allowed,
+        "trial_passed": trial_passed,
+        "row_count": len(rows),
+        "eligible_row_count": sum(1 for r in rows if r.get("h5_controlled_apply_test_result")),
+        "scoreboard_present": sb_present,
+        "scoreboard_ready": sb_ready,
+        "ready_for_controlled_apply_trial": ready_apply,
+        "patch_apply_attempted_count": apply_attempted,
+        "patch_apply_passed_count": apply_passed,
+        "patch_apply_failed_count": apply_failed,
+        "patch_apply_blocked_count": apply_blocked,
+        "tests_run_count": tests_run,
+        "tests_passed_count": tests_passed,
+        "tests_failed_count": tests_failed,
+        "tests_blocked_count": tests_blocked,
+        "apply_pass_rate": apply_pass_rate,
+        "test_pass_rate": test_pass_rate,
+        "apply_test_pass_rate": apply_test_pass_rate,
+        "fail_reason_counts": dict(fail_reasons),
+        "test_failure_reason_counts": dict(test_fail_reasons),
+        "regression_reason_counts": dict(regression_reasons),
+        "isolated_apply_only": True,
+        "repo_mutated_count": repo_mut,
+        "cloud_invoked_count": cloud_inv,
+        "model_calls_incremented_count": mc_inc,
+        "behavior_changed_count": beh,
+        "safety_violation_count": safety,
+        "ready_for_benchmark_delta": trial_passed,
+        "production_ready": False,
+        "public_claim_allowed": False,
+    }
+
+
 def _finalize_with_nexus_row(
     row: dict[str, Any],
     *,
@@ -13441,6 +13618,19 @@ def write_evidence_bundle(
         "h5_real_patch_scoreboard_verifier_pass_rate": _build_h5_real_patch_benchmark_scoreboard(with_rows, payload).get("verifier_pass_rate", 0.0),
         "h5_real_patch_scoreboard_quality_pass_rate": _build_h5_real_patch_benchmark_scoreboard(with_rows, payload).get("quality_pass_rate", 0.0),
         "h5_real_patch_scoreboard_safety_violation_count": _build_h5_real_patch_benchmark_scoreboard(with_rows, payload).get("safety_violation_count", 0),
+        "h5_controlled_apply_test_trial_present": 1 if _build_h5_controlled_real_patch_apply_test_trial(with_rows, payload).get("evaluated") else 0,
+        "h5_controlled_apply_test_trial_allowed": 1 if _build_h5_controlled_real_patch_apply_test_trial(with_rows, payload).get("trial_allowed") else 0,
+        "h5_controlled_apply_test_trial_passed": 1 if _build_h5_controlled_real_patch_apply_test_trial(with_rows, payload).get("trial_passed") else 0,
+        "h5_controlled_apply_test_trial_ready_for_delta": 1 if _build_h5_controlled_real_patch_apply_test_trial(with_rows, payload).get("ready_for_benchmark_delta") else 0,
+        "h5_controlled_apply_test_trial_patch_apply_attempted_count": _build_h5_controlled_real_patch_apply_test_trial(with_rows, payload).get("patch_apply_attempted_count", 0),
+        "h5_controlled_apply_test_trial_patch_apply_passed_count": _build_h5_controlled_real_patch_apply_test_trial(with_rows, payload).get("patch_apply_passed_count", 0),
+        "h5_controlled_apply_test_trial_tests_run_count": _build_h5_controlled_real_patch_apply_test_trial(with_rows, payload).get("tests_run_count", 0),
+        "h5_controlled_apply_test_trial_tests_passed_count": _build_h5_controlled_real_patch_apply_test_trial(with_rows, payload).get("tests_passed_count", 0),
+        "h5_controlled_apply_test_trial_tests_failed_count": _build_h5_controlled_real_patch_apply_test_trial(with_rows, payload).get("tests_failed_count", 0),
+        "h5_controlled_apply_test_trial_apply_pass_rate": _build_h5_controlled_real_patch_apply_test_trial(with_rows, payload).get("apply_pass_rate", 0.0),
+        "h5_controlled_apply_test_trial_test_pass_rate": _build_h5_controlled_real_patch_apply_test_trial(with_rows, payload).get("test_pass_rate", 0.0),
+        "h5_controlled_apply_test_trial_apply_test_pass_rate": _build_h5_controlled_real_patch_apply_test_trial(with_rows, payload).get("apply_test_pass_rate", 0.0),
+        "h5_controlled_apply_test_trial_safety_violation_count": _build_h5_controlled_real_patch_apply_test_trial(with_rows, payload).get("safety_violation_count", 0),
     }
     payload["h5_guarded_local_candidate_benchmark_trial"] = _build_h5_guarded_local_candidate_benchmark_trial(with_rows)
     payload["h5_quality_non_regression_gate"] = _build_h5_quality_non_regression_gate(with_rows, payload["h5_guarded_local_candidate_benchmark_trial"])
@@ -13451,6 +13641,7 @@ def write_evidence_bundle(
     payload["h5_real_local_candidate_execution_harness"] = _build_h5_real_local_candidate_execution_harness(payload.get("h5_route", {}), payload)
     payload["h5_real_patch_verifier_score_trial"] = _build_h5_real_patch_verifier_score_trial(with_rows, payload)
     payload["h5_real_patch_benchmark_scoreboard"] = _build_h5_real_patch_benchmark_scoreboard(with_rows, payload)
+    payload["h5_controlled_real_patch_apply_test_trial"] = _build_h5_controlled_real_patch_apply_test_trial(with_rows, payload)
     payload["external_provider_claim_boundary_contract"] = build_external_provider_claim_boundary_contract(payload)
     payload["public_promotion_readiness_contract"] = build_public_promotion_readiness_contract(payload)
     bundle_path.write_text(json.dumps(payload, indent=2, ensure_ascii=False), encoding="utf-8")
