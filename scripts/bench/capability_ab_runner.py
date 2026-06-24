@@ -9701,6 +9701,278 @@ def _build_h6_local_model_adapter_preflight_contract(rows: list[dict[str, Any]],
     }
 
 
+def _build_h6_shadow_local_adapter_dry_run(rows: list[dict[str, Any]], bundle: dict[str, Any] | None = None) -> dict[str, Any]:
+    """Pure helper: H6 shadow local adapter dry-run receipt."""
+    import os as _os
+
+    flag = _os.environ.get("NEXUS_H6_ALLOW_SHADOW_LOCAL_ADAPTER_DRY_RUN", "").strip() == "1"
+
+    preflight = None
+    if bundle:
+        preflight = bundle.get("h6_local_model_adapter_preflight_contract")
+
+    preflight_present = bool(preflight)
+    preflight_ready = bool(preflight.get("preflight_ready", False)) if preflight else False
+    adapter_contract_ready = bool(preflight.get("adapter_contract_ready", False)) if preflight else False
+    ready_dry = bool(preflight.get("ready_for_h6_1_shadow_local_adapter_dry_run", False)) if preflight else False
+    preflight_safety = int(preflight.get("safety_violation_count", 0)) if preflight else 0
+
+    ALLOWED_ROLES = {"selector", "localizer", "patch_synthesizer", "verifier_assist"}
+    ALLOWED_FAMILIES = {"qwen"}
+    ALLOWED_SIZES = {"3b", "7b", "14b"}
+    ALLOWED_ROUTES = {"local_first", "local_only", "shadow_only"}
+    ALLOWED_SHADOW_MODES = {"dry_run", "trace_only"}
+    ALLOWED_RECEIPT_STATUSES = {"dry_run_only", "trace_only"}
+
+    requests = [r.get("h6_shadow_local_adapter_request") for r in rows if r.get("h6_shadow_local_adapter_request")]
+    receipts = [r.get("h6_shadow_local_adapter_receipt") for r in rows if r.get("h6_shadow_local_adapter_receipt")]
+
+    valid_requests = []
+    invalid_requests = 0
+    missing_adapter_id = 0
+    missing_model_name = 0
+    missing_role = 0
+    missing_route_mode = 0
+    invalid_shadow_mode = 0
+
+    valid_receipts = []
+    invalid_receipts = 0
+    runtime_effect_count = 0
+
+    qwen_3b = 0
+    qwen_7b = 0
+    qwen_14b = 0
+    role_selector = 0
+    role_localizer = 0
+    role_ps = 0
+    role_va = 0
+
+    mc_count = 0
+    ol_count = 0
+    cl_count = 0
+    rm_count = 0
+    bh_count = 0
+
+    for req in requests:
+        aid = str(req.get("adapter_id", "") or "").strip()
+        fam = str(req.get("model_family", "") or "").lower()
+        sz = str(req.get("model_size", "") or "").lower()
+        mname = str(req.get("model_name", "") or "").strip()
+        role = str(req.get("role", "") or "").lower()
+        route = str(req.get("route_mode", "") or "").lower()
+        adapter_mode = str(req.get("adapter_mode", "") or "").lower()
+        shadow_mode = str(req.get("shadow_mode", "") or "").lower()
+        mc = bool(req.get("model_call_executed", False))
+        ol = bool(req.get("ollama_invoked", False))
+        cl = bool(req.get("cloud_invoked", False))
+        rm = bool(req.get("repo_mutated", False))
+        bh = bool(req.get("behavior_changed", False))
+
+        if mc:
+            mc_count += 1
+        if ol:
+            ol_count += 1
+        if cl:
+            cl_count += 1
+        if rm:
+            rm_count += 1
+        if bh:
+            bh_count += 1
+
+        is_valid = (
+            aid and fam in ALLOWED_FAMILIES and sz in ALLOWED_SIZES
+            and mname and role in ALLOWED_ROLES and route in ALLOWED_ROUTES
+            and adapter_mode == "shadow_only" and shadow_mode in ALLOWED_SHADOW_MODES
+            and not mc and not ol and not cl and not rm and not bh
+        )
+
+        if is_valid:
+            valid_requests.append(req)
+            if sz == "3b":
+                qwen_3b += 1
+            elif sz == "7b":
+                qwen_7b += 1
+            elif sz == "14b":
+                qwen_14b += 1
+            if role == "selector":
+                role_selector += 1
+            elif role == "localizer":
+                role_localizer += 1
+            elif role == "patch_synthesizer":
+                role_ps += 1
+            elif role == "verifier_assist":
+                role_va += 1
+        else:
+            invalid_requests += 1
+            if not aid:
+                missing_adapter_id += 1
+            if not mname:
+                missing_model_name += 1
+            if role not in ALLOWED_ROLES:
+                missing_role += 1
+            if route not in ALLOWED_ROUTES:
+                missing_route_mode += 1
+            if shadow_mode not in ALLOWED_SHADOW_MODES:
+                invalid_shadow_mode += 1
+
+    for rec in receipts:
+        rid = str(rec.get("request_id", "") or "").strip()
+        aid = str(rec.get("adapter_id", "") or "").strip()
+        status = str(rec.get("receipt_status", "") or "").lower()
+        re = bool(rec.get("runtime_effect", False))
+        mc = bool(rec.get("model_call_executed", False))
+        ol = bool(rec.get("ollama_invoked", False))
+        cl = bool(rec.get("cloud_invoked", False))
+        rm = bool(rec.get("repo_mutated", False))
+        bh = bool(rec.get("behavior_changed", False))
+
+        if mc:
+            mc_count += 1
+        if ol:
+            ol_count += 1
+        if cl:
+            cl_count += 1
+        if rm:
+            rm_count += 1
+        if bh:
+            bh_count += 1
+        if re:
+            runtime_effect_count += 1
+
+        is_valid = (
+            rid and aid and status in ALLOWED_RECEIPT_STATUSES
+            and not re and not mc and not ol and not cl and not rm and not bh
+        )
+
+        if is_valid:
+            valid_receipts.append(rec)
+        else:
+            invalid_receipts += 1
+
+    safety = mc_count + ol_count + cl_count + rm_count + bh_count + runtime_effect_count
+
+    dry_run_allowed = (
+        flag and preflight_present and preflight_ready
+        and adapter_contract_ready and ready_dry and preflight_safety == 0
+    )
+
+    dry_run_ready = (
+        dry_run_allowed and len(valid_requests) > 0 and len(valid_receipts) > 0
+        and safety == 0
+    )
+
+    adapter_dry_run_receipt_ready = (
+        dry_run_ready and len(valid_requests) >= 1 and len(valid_receipts) >= 1
+        and invalid_requests == 0 and invalid_receipts == 0
+    )
+
+    ready_io = (
+        adapter_dry_run_receipt_ready and mc_count == 0 and ol_count == 0
+        and cl_count == 0 and rm_count == 0 and bh_count == 0
+    )
+
+    reasons = []
+    if not flag:
+        reasons.append("shadow_dry_run_flag_not_enabled")
+    if not preflight_present:
+        reasons.append("missing_h6_0_preflight_contract")
+    if preflight and not preflight_ready:
+        reasons.append("h6_0_preflight_not_ready")
+    if preflight and not adapter_contract_ready:
+        reasons.append("h6_0_adapter_contract_not_ready")
+    if preflight and not ready_dry:
+        reasons.append("not_ready_for_h6_1_shadow_local_adapter_dry_run")
+    if preflight_safety > 0:
+        reasons.append("h6_0_safety_violation_detected")
+    if not requests:
+        reasons.append("no_shadow_requests")
+    if requests and len(valid_requests) == 0:
+        reasons.append("no_valid_shadow_requests")
+    if not receipts:
+        reasons.append("no_shadow_receipts")
+    if receipts and len(valid_receipts) == 0:
+        reasons.append("no_valid_shadow_receipts")
+    if missing_adapter_id > 0:
+        reasons.append("missing_adapter_id")
+    if missing_model_name > 0:
+        reasons.append("missing_model_name")
+    if missing_role > 0:
+        reasons.append("missing_role")
+    if missing_route_mode > 0:
+        reasons.append("missing_route_mode")
+    if invalid_shadow_mode > 0:
+        reasons.append("invalid_shadow_mode")
+    if invalid_receipts > 0:
+        reasons.append("invalid_receipt")
+    if mc_count > 0:
+        reasons.append("model_call_executed_detected")
+    if ol_count > 0:
+        reasons.append("ollama_invoked_detected")
+    if cl_count > 0:
+        reasons.append("cloud_invoked_detected")
+    if rm_count > 0:
+        reasons.append("repo_mutated_detected")
+    if bh_count > 0:
+        reasons.append("behavior_changed_detected")
+    if runtime_effect_count > 0:
+        reasons.append("runtime_effect_detected")
+    reasons.extend([
+        "h6_1_shadow_local_adapter_dry_run_not_production",
+        "shadow_dry_run_only",
+        "no_model_calls_allowed",
+        "ollama_invocation_blocked",
+        "cloud_invocation_blocked",
+        "repo_mutation_blocked",
+        "runtime_effect_blocked",
+        "production_claim_blocked",
+        "public_claim_blocked",
+    ])
+
+    return {
+        "schema": "nexus.hybrid_h6_shadow_local_adapter_dry_run.v1",
+        "evaluated": True,
+        "dry_run_status": "shadow_local_adapter_dry_run_ready" if dry_run_ready else ("shadow_local_adapter_dry_run_fail" if dry_run_allowed else "blocked"),
+        "dry_run_reasons": reasons,
+        "dry_run_allowed": dry_run_allowed,
+        "dry_run_ready": dry_run_ready,
+        "row_count": len(rows),
+        "preflight_present": preflight_present,
+        "preflight_ready": preflight_ready,
+        "adapter_contract_ready": adapter_contract_ready,
+        "ready_for_h6_1_shadow_local_adapter_dry_run": ready_dry,
+        "shadow_request_count": len(requests),
+        "shadow_request_valid_count": len(valid_requests),
+        "shadow_request_invalid_count": invalid_requests,
+        "shadow_receipt_count": len(receipts),
+        "shadow_receipt_valid_count": len(valid_receipts),
+        "shadow_receipt_invalid_count": invalid_receipts,
+        "qwen_3b_shadow_request_count": qwen_3b,
+        "qwen_7b_shadow_request_count": qwen_7b,
+        "qwen_14b_shadow_request_count": qwen_14b,
+        "selector_shadow_request_count": role_selector,
+        "localizer_shadow_request_count": role_localizer,
+        "patch_synthesizer_shadow_request_count": role_ps,
+        "verifier_assist_shadow_request_count": role_va,
+        "missing_adapter_id_count": missing_adapter_id,
+        "missing_model_name_count": missing_model_name,
+        "missing_role_count": missing_role,
+        "missing_route_mode_count": missing_route_mode,
+        "invalid_shadow_mode_count": invalid_shadow_mode,
+        "invalid_receipt_count": invalid_receipts,
+        "model_call_executed_count": mc_count,
+        "ollama_invoked_count": ol_count,
+        "cloud_invoked_count": cl_count,
+        "repo_mutated_count": rm_count,
+        "behavior_changed_count": bh_count,
+        "runtime_effect_count": runtime_effect_count,
+        "safety_violation_count": safety,
+        "adapter_dry_run_receipt_ready": adapter_dry_run_receipt_ready,
+        "ready_for_h6_2_adapter_io_schema_test": ready_io,
+        "production_ready": False,
+        "public_claim_allowed": False,
+    }
+
+
 def _finalize_with_nexus_row(
     row: dict[str, Any],
     *,

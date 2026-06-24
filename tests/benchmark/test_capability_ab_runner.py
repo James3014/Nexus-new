@@ -24108,3 +24108,721 @@ def test_h6_0_adapter_preflight_contract_all_route_modes_valid(monkeypatch):
     r = _build_h6_local_model_adapter_preflight_contract(rows, bundle)
     assert r["adapter_candidate_count"] == 3
     assert r["adapter_candidate_valid_count"] == 3
+
+
+def test_h6_1_shadow_dry_run_empty_rows_block(monkeypatch):
+    """H6-1 T01: Empty rows block dry run."""
+    from scripts.bench.capability_ab_runner import _build_h6_shadow_local_adapter_dry_run
+    monkeypatch.setenv("NEXUS_H6_ALLOW_SHADOW_LOCAL_ADAPTER_DRY_RUN", "1")
+    preflight = {"preflight_ready": True, "adapter_contract_ready": True, "ready_for_h6_1_shadow_local_adapter_dry_run": True, "safety_violation_count": 0}
+    bundle = {"h6_local_model_adapter_preflight_contract": preflight}
+    r = _build_h6_shadow_local_adapter_dry_run([], bundle)
+    assert r["dry_run_status"] == "shadow_local_adapter_dry_run_fail"
+    assert r["shadow_request_count"] == 0
+    assert "no_shadow_requests" in r["dry_run_reasons"]
+
+
+def test_h6_1_shadow_dry_run_flag_missing_block(monkeypatch):
+    """H6-1 T02: Flag missing blocks dry run."""
+    from scripts.bench.capability_ab_runner import _build_h6_shadow_local_adapter_dry_run
+    monkeypatch.delenv("NEXUS_H6_ALLOW_SHADOW_LOCAL_ADAPTER_DRY_RUN", raising=False)
+    preflight = {"preflight_ready": True, "adapter_contract_ready": True, "ready_for_h6_1_shadow_local_adapter_dry_run": True, "safety_violation_count": 0}
+    bundle = {"h6_local_model_adapter_preflight_contract": preflight}
+    r = _build_h6_shadow_local_adapter_dry_run([], bundle)
+    assert r["dry_run_status"] == "blocked"
+    assert "shadow_dry_run_flag_not_enabled" in r["dry_run_reasons"]
+
+
+def test_h6_1_shadow_dry_run_missing_preflight_block(monkeypatch):
+    """H6-1 T03: Missing H6-0 preflight blocks dry run."""
+    from scripts.bench.capability_ab_runner import _build_h6_shadow_local_adapter_dry_run
+    monkeypatch.setenv("NEXUS_H6_ALLOW_SHADOW_LOCAL_ADAPTER_DRY_RUN", "1")
+    r = _build_h6_shadow_local_adapter_dry_run([], None)
+    assert r["dry_run_status"] == "blocked"
+    assert "missing_h6_0_preflight_contract" in r["dry_run_reasons"]
+
+
+def test_h6_1_shadow_dry_run_preflight_not_ready_block(monkeypatch):
+    """H6-1 T04: H6-0 preflight not ready blocks dry run."""
+    from scripts.bench.capability_ab_runner import _build_h6_shadow_local_adapter_dry_run
+    monkeypatch.setenv("NEXUS_H6_ALLOW_SHADOW_LOCAL_ADAPTER_DRY_RUN", "1")
+    preflight = {"preflight_ready": False, "adapter_contract_ready": True, "ready_for_h6_1_shadow_local_adapter_dry_run": True, "safety_violation_count": 0}
+    bundle = {"h6_local_model_adapter_preflight_contract": preflight}
+    r = _build_h6_shadow_local_adapter_dry_run([], bundle)
+    assert r["dry_run_status"] == "blocked"
+    assert "h6_0_preflight_not_ready" in r["dry_run_reasons"]
+
+
+def test_h6_1_shadow_dry_run_adapter_contract_not_ready_block(monkeypatch):
+    """H6-1 T05: H6-0 adapter contract not ready blocks dry run."""
+    from scripts.bench.capability_ab_runner import _build_h6_shadow_local_adapter_dry_run
+    monkeypatch.setenv("NEXUS_H6_ALLOW_SHADOW_LOCAL_ADAPTER_DRY_RUN", "1")
+    preflight = {"preflight_ready": True, "adapter_contract_ready": False, "ready_for_h6_1_shadow_local_adapter_dry_run": True, "safety_violation_count": 0}
+    bundle = {"h6_local_model_adapter_preflight_contract": preflight}
+    r = _build_h6_shadow_local_adapter_dry_run([], bundle)
+    assert r["dry_run_status"] == "blocked"
+    assert "h6_0_adapter_contract_not_ready" in r["dry_run_reasons"]
+
+
+def test_h6_1_shadow_dry_run_not_ready_for_h6_1_block(monkeypatch):
+    """H6-1 T06: Not ready_for_h6_1 blocks dry run."""
+    from scripts.bench.capability_ab_runner import _build_h6_shadow_local_adapter_dry_run
+    monkeypatch.setenv("NEXUS_H6_ALLOW_SHADOW_LOCAL_ADAPTER_DRY_RUN", "1")
+    preflight = {"preflight_ready": True, "adapter_contract_ready": True, "ready_for_h6_1_shadow_local_adapter_dry_run": False, "safety_violation_count": 0}
+    bundle = {"h6_local_model_adapter_preflight_contract": preflight}
+    r = _build_h6_shadow_local_adapter_dry_run([], bundle)
+    assert r["dry_run_status"] == "blocked"
+    assert "not_ready_for_h6_1_shadow_local_adapter_dry_run" in r["dry_run_reasons"]
+
+
+def test_h6_1_shadow_dry_run_preflight_safety_violation_block(monkeypatch):
+    """H6-1 T07: H6-0 safety violation blocks dry run."""
+    from scripts.bench.capability_ab_runner import _build_h6_shadow_local_adapter_dry_run
+    monkeypatch.setenv("NEXUS_H6_ALLOW_SHADOW_LOCAL_ADAPTER_DRY_RUN", "1")
+    preflight = {"preflight_ready": True, "adapter_contract_ready": True, "ready_for_h6_1_shadow_local_adapter_dry_run": True, "safety_violation_count": 1}
+    bundle = {"h6_local_model_adapter_preflight_contract": preflight}
+    r = _build_h6_shadow_local_adapter_dry_run([], bundle)
+    assert r["dry_run_status"] == "blocked"
+    assert "h6_0_safety_violation_detected" in r["dry_run_reasons"]
+
+
+def test_h6_1_shadow_dry_run_no_shadow_requests_block(monkeypatch):
+    """H6-1 T08: No shadow requests blocks dry run."""
+    from scripts.bench.capability_ab_runner import _build_h6_shadow_local_adapter_dry_run
+    monkeypatch.setenv("NEXUS_H6_ALLOW_SHADOW_LOCAL_ADAPTER_DRY_RUN", "1")
+    preflight = {"preflight_ready": True, "adapter_contract_ready": True, "ready_for_h6_1_shadow_local_adapter_dry_run": True, "safety_violation_count": 0}
+    bundle = {"h6_local_model_adapter_preflight_contract": preflight}
+    r = _build_h6_shadow_local_adapter_dry_run([], bundle)
+    assert r["dry_run_status"] == "shadow_local_adapter_dry_run_fail"
+    assert "no_shadow_requests" in r["dry_run_reasons"]
+
+
+def test_h6_1_shadow_dry_run_no_valid_shadow_requests_block(monkeypatch):
+    """H6-1 T09: No valid shadow requests blocks dry run."""
+    from scripts.bench.capability_ab_runner import _build_h6_shadow_local_adapter_dry_run
+    monkeypatch.setenv("NEXUS_H6_ALLOW_SHADOW_LOCAL_ADAPTER_DRY_RUN", "1")
+    preflight = {"preflight_ready": True, "adapter_contract_ready": True, "ready_for_h6_1_shadow_local_adapter_dry_run": True, "safety_violation_count": 0}
+    bundle = {"h6_local_model_adapter_preflight_contract": preflight}
+    rows = [{"h6_shadow_local_adapter_request": {
+        "adapter_id": "",
+        "model_family": "qwen",
+        "model_size": "3b",
+        "model_name": "qwen2.5-coder:3b",
+        "role": "selector",
+        "route_mode": "shadow_only",
+        "adapter_mode": "shadow_only",
+        "shadow_mode": "dry_run",
+    }}]
+    r = _build_h6_shadow_local_adapter_dry_run(rows, bundle)
+    assert r["dry_run_status"] == "shadow_local_adapter_dry_run_fail"
+    assert "no_valid_shadow_requests" in r["dry_run_reasons"]
+
+
+def test_h6_1_shadow_dry_run_no_shadow_receipts_block(monkeypatch):
+    """H6-1 T10: No shadow receipts blocks dry run."""
+    from scripts.bench.capability_ab_runner import _build_h6_shadow_local_adapter_dry_run
+    monkeypatch.setenv("NEXUS_H6_ALLOW_SHADOW_LOCAL_ADAPTER_DRY_RUN", "1")
+    preflight = {"preflight_ready": True, "adapter_contract_ready": True, "ready_for_h6_1_shadow_local_adapter_dry_run": True, "safety_violation_count": 0}
+    bundle = {"h6_local_model_adapter_preflight_contract": preflight}
+    rows = [{"h6_shadow_local_adapter_request": {
+        "adapter_id": "qwen3b-selector-v0",
+        "model_family": "qwen",
+        "model_size": "3b",
+        "model_name": "qwen2.5-coder:3b",
+        "role": "selector",
+        "route_mode": "shadow_only",
+        "adapter_mode": "shadow_only",
+        "shadow_mode": "dry_run",
+    }}]
+    r = _build_h6_shadow_local_adapter_dry_run(rows, bundle)
+    assert r["dry_run_status"] == "shadow_local_adapter_dry_run_fail"
+    assert "no_shadow_receipts" in r["dry_run_reasons"]
+
+
+def test_h6_1_shadow_dry_run_no_valid_shadow_receipts_block(monkeypatch):
+    """H6-1 T11: No valid shadow receipts blocks dry run."""
+    from scripts.bench.capability_ab_runner import _build_h6_shadow_local_adapter_dry_run
+    monkeypatch.setenv("NEXUS_H6_ALLOW_SHADOW_LOCAL_ADAPTER_DRY_RUN", "1")
+    preflight = {"preflight_ready": True, "adapter_contract_ready": True, "ready_for_h6_1_shadow_local_adapter_dry_run": True, "safety_violation_count": 0}
+    bundle = {"h6_local_model_adapter_preflight_contract": preflight}
+    rows = [
+        {"h6_shadow_local_adapter_request": {
+            "adapter_id": "qwen3b-selector-v0",
+            "model_family": "qwen",
+            "model_size": "3b",
+            "model_name": "qwen2.5-coder:3b",
+            "role": "selector",
+            "route_mode": "shadow_only",
+            "adapter_mode": "shadow_only",
+            "shadow_mode": "dry_run",
+        }},
+        {"h6_shadow_local_adapter_receipt": {
+            "request_id": "",
+            "adapter_id": "",
+            "receipt_status": "dry_run_only",
+        }},
+    ]
+    r = _build_h6_shadow_local_adapter_dry_run(rows, bundle)
+    assert r["dry_run_status"] == "shadow_local_adapter_dry_run_fail"
+    assert "no_valid_shadow_receipts" in r["dry_run_reasons"]
+
+
+def test_h6_1_shadow_dry_run_valid_qwen_3b_selector(monkeypatch):
+    """H6-1 T12: Valid Qwen 3B selector shadow request and receipt passes."""
+    from scripts.bench.capability_ab_runner import _build_h6_shadow_local_adapter_dry_run
+    monkeypatch.setenv("NEXUS_H6_ALLOW_SHADOW_LOCAL_ADAPTER_DRY_RUN", "1")
+    preflight = {"preflight_ready": True, "adapter_contract_ready": True, "ready_for_h6_1_shadow_local_adapter_dry_run": True, "safety_violation_count": 0}
+    bundle = {"h6_local_model_adapter_preflight_contract": preflight}
+    rows = [
+        {"h6_shadow_local_adapter_request": {
+            "adapter_id": "qwen3b-selector-v0",
+            "model_family": "qwen",
+            "model_size": "3b",
+            "model_name": "qwen2.5-coder:3b",
+            "role": "selector",
+            "route_mode": "shadow_only",
+            "adapter_mode": "shadow_only",
+            "shadow_mode": "dry_run",
+            "request_id": "shadow-req-001",
+        }},
+        {"h6_shadow_local_adapter_receipt": {
+            "request_id": "shadow-req-001",
+            "adapter_id": "qwen3b-selector-v0",
+            "receipt_status": "dry_run_only",
+            "runtime_effect": False,
+        }},
+    ]
+    r = _build_h6_shadow_local_adapter_dry_run(rows, bundle)
+    assert r["dry_run_status"] == "shadow_local_adapter_dry_run_ready"
+    assert r["shadow_request_valid_count"] == 1
+    assert r["shadow_receipt_valid_count"] == 1
+    assert r["ready_for_h6_2_adapter_io_schema_test"] is True
+
+
+def test_h6_1_shadow_dry_run_valid_qwen_7b_localizer(monkeypatch):
+    """H6-1 T13: Valid Qwen 7B localizer shadow request and receipt passes."""
+    from scripts.bench.capability_ab_runner import _build_h6_shadow_local_adapter_dry_run
+    monkeypatch.setenv("NEXUS_H6_ALLOW_SHADOW_LOCAL_ADAPTER_DRY_RUN", "1")
+    preflight = {"preflight_ready": True, "adapter_contract_ready": True, "ready_for_h6_1_shadow_local_adapter_dry_run": True, "safety_violation_count": 0}
+    bundle = {"h6_local_model_adapter_preflight_contract": preflight}
+    rows = [
+        {"h6_shadow_local_adapter_request": {
+            "adapter_id": "qwen7b-localizer-v0",
+            "model_family": "qwen",
+            "model_size": "7b",
+            "model_name": "qwen2.5-coder:7b",
+            "role": "localizer",
+            "route_mode": "shadow_only",
+            "adapter_mode": "shadow_only",
+            "shadow_mode": "dry_run",
+            "request_id": "shadow-req-002",
+        }},
+        {"h6_shadow_local_adapter_receipt": {
+            "request_id": "shadow-req-002",
+            "adapter_id": "qwen7b-localizer-v0",
+            "receipt_status": "dry_run_only",
+            "runtime_effect": False,
+        }},
+    ]
+    r = _build_h6_shadow_local_adapter_dry_run(rows, bundle)
+    assert r["dry_run_status"] == "shadow_local_adapter_dry_run_ready"
+    assert r["shadow_request_valid_count"] == 1
+    assert r["shadow_receipt_valid_count"] == 1
+    assert r["ready_for_h6_2_adapter_io_schema_test"] is True
+
+
+def test_h6_1_shadow_dry_run_valid_qwen_14b_patch_synthesizer(monkeypatch):
+    """H6-1 T14: Valid Qwen 14B patch_synthesizer shadow request and receipt passes."""
+    from scripts.bench.capability_ab_runner import _build_h6_shadow_local_adapter_dry_run
+    monkeypatch.setenv("NEXUS_H6_ALLOW_SHADOW_LOCAL_ADAPTER_DRY_RUN", "1")
+    preflight = {"preflight_ready": True, "adapter_contract_ready": True, "ready_for_h6_1_shadow_local_adapter_dry_run": True, "safety_violation_count": 0}
+    bundle = {"h6_local_model_adapter_preflight_contract": preflight}
+    rows = [
+        {"h6_shadow_local_adapter_request": {
+            "adapter_id": "qwen14b-patch-synthesizer-v0",
+            "model_family": "qwen",
+            "model_size": "14b",
+            "model_name": "qwen2.5-coder:14b",
+            "role": "patch_synthesizer",
+            "route_mode": "shadow_only",
+            "adapter_mode": "shadow_only",
+            "shadow_mode": "dry_run",
+            "request_id": "shadow-req-003",
+        }},
+        {"h6_shadow_local_adapter_receipt": {
+            "request_id": "shadow-req-003",
+            "adapter_id": "qwen14b-patch-synthesizer-v0",
+            "receipt_status": "dry_run_only",
+            "runtime_effect": False,
+        }},
+    ]
+    r = _build_h6_shadow_local_adapter_dry_run(rows, bundle)
+    assert r["dry_run_status"] == "shadow_local_adapter_dry_run_ready"
+    assert r["shadow_request_valid_count"] == 1
+    assert r["shadow_receipt_valid_count"] == 1
+    assert r["ready_for_h6_2_adapter_io_schema_test"] is True
+
+
+def test_h6_1_shadow_dry_run_valid_verifier_assist(monkeypatch):
+    """H6-1 T15: Valid verifier_assist shadow request and receipt passes."""
+    from scripts.bench.capability_ab_runner import _build_h6_shadow_local_adapter_dry_run
+    monkeypatch.setenv("NEXUS_H6_ALLOW_SHADOW_LOCAL_ADAPTER_DRY_RUN", "1")
+    preflight = {"preflight_ready": True, "adapter_contract_ready": True, "ready_for_h6_1_shadow_local_adapter_dry_run": True, "safety_violation_count": 0}
+    bundle = {"h6_local_model_adapter_preflight_contract": preflight}
+    rows = [
+        {"h6_shadow_local_adapter_request": {
+            "adapter_id": "qwen3b-verifier-assist-v0",
+            "model_family": "qwen",
+            "model_size": "3b",
+            "model_name": "qwen2.5-coder:3b",
+            "role": "verifier_assist",
+            "route_mode": "shadow_only",
+            "adapter_mode": "shadow_only",
+            "shadow_mode": "dry_run",
+            "request_id": "shadow-req-004",
+        }},
+        {"h6_shadow_local_adapter_receipt": {
+            "request_id": "shadow-req-004",
+            "adapter_id": "qwen3b-verifier-assist-v0",
+            "receipt_status": "dry_run_only",
+            "runtime_effect": False,
+        }},
+    ]
+    r = _build_h6_shadow_local_adapter_dry_run(rows, bundle)
+    assert r["dry_run_status"] == "shadow_local_adapter_dry_run_ready"
+    assert r["shadow_request_valid_count"] == 1
+    assert r["shadow_receipt_valid_count"] == 1
+    assert r["ready_for_h6_2_adapter_io_schema_test"] is True
+
+
+def test_h6_1_shadow_dry_run_missing_adapter_id_invalidates(monkeypatch):
+    """H6-1 T16: Missing adapter_id invalidates request."""
+    from scripts.bench.capability_ab_runner import _build_h6_shadow_local_adapter_dry_run
+    monkeypatch.setenv("NEXUS_H6_ALLOW_SHADOW_LOCAL_ADAPTER_DRY_RUN", "1")
+    preflight = {"preflight_ready": True, "adapter_contract_ready": True, "ready_for_h6_1_shadow_local_adapter_dry_run": True, "safety_violation_count": 0}
+    bundle = {"h6_local_model_adapter_preflight_contract": preflight}
+    rows = [{"h6_shadow_local_adapter_request": {
+        "adapter_id": "",
+        "model_family": "qwen",
+        "model_size": "3b",
+        "model_name": "qwen2.5-coder:3b",
+        "role": "selector",
+        "route_mode": "shadow_only",
+        "adapter_mode": "shadow_only",
+        "shadow_mode": "dry_run",
+    }}]
+    r = _build_h6_shadow_local_adapter_dry_run(rows, bundle)
+    assert r["missing_adapter_id_count"] == 1
+    assert "missing_adapter_id" in r["dry_run_reasons"]
+
+
+def test_h6_1_shadow_dry_run_missing_model_name_invalidates(monkeypatch):
+    """H6-1 T17: Missing model_name invalidates request."""
+    from scripts.bench.capability_ab_runner import _build_h6_shadow_local_adapter_dry_run
+    monkeypatch.setenv("NEXUS_H6_ALLOW_SHADOW_LOCAL_ADAPTER_DRY_RUN", "1")
+    preflight = {"preflight_ready": True, "adapter_contract_ready": True, "ready_for_h6_1_shadow_local_adapter_dry_run": True, "safety_violation_count": 0}
+    bundle = {"h6_local_model_adapter_preflight_contract": preflight}
+    rows = [{"h6_shadow_local_adapter_request": {
+        "adapter_id": "qwen3b-selector-v0",
+        "model_family": "qwen",
+        "model_size": "3b",
+        "model_name": "",
+        "role": "selector",
+        "route_mode": "shadow_only",
+        "adapter_mode": "shadow_only",
+        "shadow_mode": "dry_run",
+    }}]
+    r = _build_h6_shadow_local_adapter_dry_run(rows, bundle)
+    assert r["missing_model_name_count"] == 1
+    assert "missing_model_name" in r["dry_run_reasons"]
+
+
+def test_h6_1_shadow_dry_run_missing_role_invalidates(monkeypatch):
+    """H6-1 T18: Missing role invalidates request."""
+    from scripts.bench.capability_ab_runner import _build_h6_shadow_local_adapter_dry_run
+    monkeypatch.setenv("NEXUS_H6_ALLOW_SHADOW_LOCAL_ADAPTER_DRY_RUN", "1")
+    preflight = {"preflight_ready": True, "adapter_contract_ready": True, "ready_for_h6_1_shadow_local_adapter_dry_run": True, "safety_violation_count": 0}
+    bundle = {"h6_local_model_adapter_preflight_contract": preflight}
+    rows = [{"h6_shadow_local_adapter_request": {
+        "adapter_id": "qwen3b-selector-v0",
+        "model_family": "qwen",
+        "model_size": "3b",
+        "model_name": "qwen2.5-coder:3b",
+        "role": "proposer",
+        "route_mode": "shadow_only",
+        "adapter_mode": "shadow_only",
+        "shadow_mode": "dry_run",
+    }}]
+    r = _build_h6_shadow_local_adapter_dry_run(rows, bundle)
+    assert r["missing_role_count"] == 1
+    assert "missing_role" in r["dry_run_reasons"]
+
+
+def test_h6_1_shadow_dry_run_missing_route_mode_invalidates(monkeypatch):
+    """H6-1 T19: Missing route_mode invalidates request."""
+    from scripts.bench.capability_ab_runner import _build_h6_shadow_local_adapter_dry_run
+    monkeypatch.setenv("NEXUS_H6_ALLOW_SHADOW_LOCAL_ADAPTER_DRY_RUN", "1")
+    preflight = {"preflight_ready": True, "adapter_contract_ready": True, "ready_for_h6_1_shadow_local_adapter_dry_run": True, "safety_violation_count": 0}
+    bundle = {"h6_local_model_adapter_preflight_contract": preflight}
+    rows = [{"h6_shadow_local_adapter_request": {
+        "adapter_id": "qwen3b-selector-v0",
+        "model_family": "qwen",
+        "model_size": "3b",
+        "model_name": "qwen2.5-coder:3b",
+        "role": "selector",
+        "route_mode": "cloud_only",
+        "adapter_mode": "shadow_only",
+        "shadow_mode": "dry_run",
+    }}]
+    r = _build_h6_shadow_local_adapter_dry_run(rows, bundle)
+    assert r["missing_route_mode_count"] == 1
+    assert "missing_route_mode" in r["dry_run_reasons"]
+
+
+def test_h6_1_shadow_dry_run_invalid_shadow_mode(monkeypatch):
+    """H6-1 T20: Invalid shadow_mode invalidates request."""
+    from scripts.bench.capability_ab_runner import _build_h6_shadow_local_adapter_dry_run
+    monkeypatch.setenv("NEXUS_H6_ALLOW_SHADOW_LOCAL_ADAPTER_DRY_RUN", "1")
+    preflight = {"preflight_ready": True, "adapter_contract_ready": True, "ready_for_h6_1_shadow_local_adapter_dry_run": True, "safety_violation_count": 0}
+    bundle = {"h6_local_model_adapter_preflight_contract": preflight}
+    rows = [{"h6_shadow_local_adapter_request": {
+        "adapter_id": "qwen3b-selector-v0",
+        "model_family": "qwen",
+        "model_size": "3b",
+        "model_name": "qwen2.5-coder:3b",
+        "role": "selector",
+        "route_mode": "shadow_only",
+        "adapter_mode": "shadow_only",
+        "shadow_mode": "production",
+    }}]
+    r = _build_h6_shadow_local_adapter_dry_run(rows, bundle)
+    assert r["invalid_shadow_mode_count"] == 1
+    assert "invalid_shadow_mode" in r["dry_run_reasons"]
+
+
+def test_h6_1_shadow_dry_run_invalid_receipt_status(monkeypatch):
+    """H6-1 T21: Invalid receipt_status invalidates receipt."""
+    from scripts.bench.capability_ab_runner import _build_h6_shadow_local_adapter_dry_run
+    monkeypatch.setenv("NEXUS_H6_ALLOW_SHADOW_LOCAL_ADAPTER_DRY_RUN", "1")
+    preflight = {"preflight_ready": True, "adapter_contract_ready": True, "ready_for_h6_1_shadow_local_adapter_dry_run": True, "safety_violation_count": 0}
+    bundle = {"h6_local_model_adapter_preflight_contract": preflight}
+    rows = [
+        {"h6_shadow_local_adapter_request": {
+            "adapter_id": "qwen3b-selector-v0",
+            "model_family": "qwen",
+            "model_size": "3b",
+            "model_name": "qwen2.5-coder:3b",
+            "role": "selector",
+            "route_mode": "shadow_only",
+            "adapter_mode": "shadow_only",
+            "shadow_mode": "dry_run",
+        }},
+        {"h6_shadow_local_adapter_receipt": {
+            "request_id": "shadow-req-001",
+            "adapter_id": "qwen3b-selector-v0",
+            "receipt_status": "production",
+            "runtime_effect": False,
+        }},
+    ]
+    r = _build_h6_shadow_local_adapter_dry_run(rows, bundle)
+    assert r["invalid_receipt_count"] == 1
+    assert "invalid_receipt" in r["dry_run_reasons"]
+
+
+def test_h6_1_shadow_dry_run_runtime_effect_blocks(monkeypatch):
+    """H6-1 T22: runtime_effect=true invalidates receipt and blocks readiness."""
+    from scripts.bench.capability_ab_runner import _build_h6_shadow_local_adapter_dry_run
+    monkeypatch.setenv("NEXUS_H6_ALLOW_SHADOW_LOCAL_ADAPTER_DRY_RUN", "1")
+    preflight = {"preflight_ready": True, "adapter_contract_ready": True, "ready_for_h6_1_shadow_local_adapter_dry_run": True, "safety_violation_count": 0}
+    bundle = {"h6_local_model_adapter_preflight_contract": preflight}
+    rows = [
+        {"h6_shadow_local_adapter_request": {
+            "adapter_id": "qwen3b-selector-v0",
+            "model_family": "qwen",
+            "model_size": "3b",
+            "model_name": "qwen2.5-coder:3b",
+            "role": "selector",
+            "route_mode": "shadow_only",
+            "adapter_mode": "shadow_only",
+            "shadow_mode": "dry_run",
+        }},
+        {"h6_shadow_local_adapter_receipt": {
+            "request_id": "shadow-req-001",
+            "adapter_id": "qwen3b-selector-v0",
+            "receipt_status": "dry_run_only",
+            "runtime_effect": True,
+        }},
+    ]
+    r = _build_h6_shadow_local_adapter_dry_run(rows, bundle)
+    assert r["runtime_effect_count"] == 1
+    assert r["safety_violation_count"] == 1
+    assert "runtime_effect_detected" in r["dry_run_reasons"]
+    assert r["ready_for_h6_2_adapter_io_schema_test"] is False
+
+
+def test_h6_1_shadow_dry_run_model_call_blocks(monkeypatch):
+    """H6-1 T23: model_call_executed blocks readiness."""
+    from scripts.bench.capability_ab_runner import _build_h6_shadow_local_adapter_dry_run
+    monkeypatch.setenv("NEXUS_H6_ALLOW_SHADOW_LOCAL_ADAPTER_DRY_RUN", "1")
+    preflight = {"preflight_ready": True, "adapter_contract_ready": True, "ready_for_h6_1_shadow_local_adapter_dry_run": True, "safety_violation_count": 0}
+    bundle = {"h6_local_model_adapter_preflight_contract": preflight}
+    rows = [
+        {"h6_shadow_local_adapter_request": {
+            "adapter_id": "qwen3b-selector-v0",
+            "model_family": "qwen",
+            "model_size": "3b",
+            "model_name": "qwen2.5-coder:3b",
+            "role": "selector",
+            "route_mode": "shadow_only",
+            "adapter_mode": "shadow_only",
+            "shadow_mode": "dry_run",
+            "model_call_executed": True,
+        }},
+        {"h6_shadow_local_adapter_receipt": {
+            "request_id": "shadow-req-001",
+            "adapter_id": "qwen3b-selector-v0",
+            "receipt_status": "dry_run_only",
+        }},
+    ]
+    r = _build_h6_shadow_local_adapter_dry_run(rows, bundle)
+    assert r["model_call_executed_count"] == 1
+    assert r["safety_violation_count"] >= 1
+    assert "model_call_executed_detected" in r["dry_run_reasons"]
+    assert r["ready_for_h6_2_adapter_io_schema_test"] is False
+
+
+def test_h6_1_shadow_dry_run_ollama_blocks(monkeypatch):
+    """H6-1 T24: ollama_invoked blocks readiness."""
+    from scripts.bench.capability_ab_runner import _build_h6_shadow_local_adapter_dry_run
+    monkeypatch.setenv("NEXUS_H6_ALLOW_SHADOW_LOCAL_ADAPTER_DRY_RUN", "1")
+    preflight = {"preflight_ready": True, "adapter_contract_ready": True, "ready_for_h6_1_shadow_local_adapter_dry_run": True, "safety_violation_count": 0}
+    bundle = {"h6_local_model_adapter_preflight_contract": preflight}
+    rows = [
+        {"h6_shadow_local_adapter_request": {
+            "adapter_id": "qwen3b-selector-v0",
+            "model_family": "qwen",
+            "model_size": "3b",
+            "model_name": "qwen2.5-coder:3b",
+            "role": "selector",
+            "route_mode": "shadow_only",
+            "adapter_mode": "shadow_only",
+            "shadow_mode": "dry_run",
+            "ollama_invoked": True,
+        }},
+        {"h6_shadow_local_adapter_receipt": {
+            "request_id": "shadow-req-001",
+            "adapter_id": "qwen3b-selector-v0",
+            "receipt_status": "dry_run_only",
+        }},
+    ]
+    r = _build_h6_shadow_local_adapter_dry_run(rows, bundle)
+    assert r["ollama_invoked_count"] == 1
+    assert r["safety_violation_count"] >= 1
+    assert "ollama_invoked_detected" in r["dry_run_reasons"]
+    assert r["ready_for_h6_2_adapter_io_schema_test"] is False
+
+
+def test_h6_1_shadow_dry_run_cloud_blocks(monkeypatch):
+    """H6-1 T25: cloud_invoked blocks readiness."""
+    from scripts.bench.capability_ab_runner import _build_h6_shadow_local_adapter_dry_run
+    monkeypatch.setenv("NEXUS_H6_ALLOW_SHADOW_LOCAL_ADAPTER_DRY_RUN", "1")
+    preflight = {"preflight_ready": True, "adapter_contract_ready": True, "ready_for_h6_1_shadow_local_adapter_dry_run": True, "safety_violation_count": 0}
+    bundle = {"h6_local_model_adapter_preflight_contract": preflight}
+    rows = [
+        {"h6_shadow_local_adapter_request": {
+            "adapter_id": "qwen3b-selector-v0",
+            "model_family": "qwen",
+            "model_size": "3b",
+            "model_name": "qwen2.5-coder:3b",
+            "role": "selector",
+            "route_mode": "shadow_only",
+            "adapter_mode": "shadow_only",
+            "shadow_mode": "dry_run",
+            "cloud_invoked": True,
+        }},
+        {"h6_shadow_local_adapter_receipt": {
+            "request_id": "shadow-req-001",
+            "adapter_id": "qwen3b-selector-v0",
+            "receipt_status": "dry_run_only",
+        }},
+    ]
+    r = _build_h6_shadow_local_adapter_dry_run(rows, bundle)
+    assert r["cloud_invoked_count"] == 1
+    assert r["safety_violation_count"] >= 1
+    assert "cloud_invoked_detected" in r["dry_run_reasons"]
+    assert r["ready_for_h6_2_adapter_io_schema_test"] is False
+
+
+def test_h6_1_shadow_dry_run_repo_mutated_blocks(monkeypatch):
+    """H6-1 T26: repo_mutated blocks readiness."""
+    from scripts.bench.capability_ab_runner import _build_h6_shadow_local_adapter_dry_run
+    monkeypatch.setenv("NEXUS_H6_ALLOW_SHADOW_LOCAL_ADAPTER_DRY_RUN", "1")
+    preflight = {"preflight_ready": True, "adapter_contract_ready": True, "ready_for_h6_1_shadow_local_adapter_dry_run": True, "safety_violation_count": 0}
+    bundle = {"h6_local_model_adapter_preflight_contract": preflight}
+    rows = [
+        {"h6_shadow_local_adapter_request": {
+            "adapter_id": "qwen3b-selector-v0",
+            "model_family": "qwen",
+            "model_size": "3b",
+            "model_name": "qwen2.5-coder:3b",
+            "role": "selector",
+            "route_mode": "shadow_only",
+            "adapter_mode": "shadow_only",
+            "shadow_mode": "dry_run",
+            "repo_mutated": True,
+        }},
+        {"h6_shadow_local_adapter_receipt": {
+            "request_id": "shadow-req-001",
+            "adapter_id": "qwen3b-selector-v0",
+            "receipt_status": "dry_run_only",
+        }},
+    ]
+    r = _build_h6_shadow_local_adapter_dry_run(rows, bundle)
+    assert r["repo_mutated_count"] == 1
+    assert r["safety_violation_count"] >= 1
+    assert "repo_mutated_detected" in r["dry_run_reasons"]
+    assert r["ready_for_h6_2_adapter_io_schema_test"] is False
+
+
+def test_h6_1_shadow_dry_run_behavior_changed_blocks(monkeypatch):
+    """H6-1 T27: behavior_changed blocks readiness."""
+    from scripts.bench.capability_ab_runner import _build_h6_shadow_local_adapter_dry_run
+    monkeypatch.setenv("NEXUS_H6_ALLOW_SHADOW_LOCAL_ADAPTER_DRY_RUN", "1")
+    preflight = {"preflight_ready": True, "adapter_contract_ready": True, "ready_for_h6_1_shadow_local_adapter_dry_run": True, "safety_violation_count": 0}
+    bundle = {"h6_local_model_adapter_preflight_contract": preflight}
+    rows = [
+        {"h6_shadow_local_adapter_request": {
+            "adapter_id": "qwen3b-selector-v0",
+            "model_family": "qwen",
+            "model_size": "3b",
+            "model_name": "qwen2.5-coder:3b",
+            "role": "selector",
+            "route_mode": "shadow_only",
+            "adapter_mode": "shadow_only",
+            "shadow_mode": "dry_run",
+            "behavior_changed": True,
+        }},
+        {"h6_shadow_local_adapter_receipt": {
+            "request_id": "shadow-req-001",
+            "adapter_id": "qwen3b-selector-v0",
+            "receipt_status": "dry_run_only",
+        }},
+    ]
+    r = _build_h6_shadow_local_adapter_dry_run(rows, bundle)
+    assert r["behavior_changed_count"] == 1
+    assert r["safety_violation_count"] >= 1
+    assert "behavior_changed_detected" in r["dry_run_reasons"]
+    assert r["ready_for_h6_2_adapter_io_schema_test"] is False
+
+
+def test_h6_1_shadow_dry_run_role_counts(monkeypatch):
+    """H6-1 T28: Request role counts computed."""
+    from scripts.bench.capability_ab_runner import _build_h6_shadow_local_adapter_dry_run
+    monkeypatch.setenv("NEXUS_H6_ALLOW_SHADOW_LOCAL_ADAPTER_DRY_RUN", "1")
+    preflight = {"preflight_ready": True, "adapter_contract_ready": True, "ready_for_h6_1_shadow_local_adapter_dry_run": True, "safety_violation_count": 0}
+    bundle = {"h6_local_model_adapter_preflight_contract": preflight}
+    rows = [
+        {"h6_shadow_local_adapter_request": {"adapter_id": "a1", "model_family": "qwen", "model_size": "3b", "model_name": "qwen2.5-coder:3b", "role": "selector", "route_mode": "shadow_only", "adapter_mode": "shadow_only", "shadow_mode": "dry_run"}},
+        {"h6_shadow_local_adapter_request": {"adapter_id": "a2", "model_family": "qwen", "model_size": "3b", "model_name": "qwen2.5-coder:3b", "role": "localizer", "route_mode": "shadow_only", "adapter_mode": "shadow_only", "shadow_mode": "dry_run"}},
+        {"h6_shadow_local_adapter_request": {"adapter_id": "a3", "model_family": "qwen", "model_size": "3b", "model_name": "qwen2.5-coder:3b", "role": "patch_synthesizer", "route_mode": "shadow_only", "adapter_mode": "shadow_only", "shadow_mode": "dry_run"}},
+        {"h6_shadow_local_adapter_request": {"adapter_id": "a4", "model_family": "qwen", "model_size": "3b", "model_name": "qwen2.5-coder:3b", "role": "verifier_assist", "route_mode": "shadow_only", "adapter_mode": "shadow_only", "shadow_mode": "dry_run"}},
+    ]
+    r = _build_h6_shadow_local_adapter_dry_run(rows, bundle)
+    assert r["selector_shadow_request_count"] == 1
+    assert r["localizer_shadow_request_count"] == 1
+    assert r["patch_synthesizer_shadow_request_count"] == 1
+    assert r["verifier_assist_shadow_request_count"] == 1
+
+
+def test_h6_1_shadow_dry_run_qwen_size_counts(monkeypatch):
+    """H6-1 T29: Qwen size request counts computed."""
+    from scripts.bench.capability_ab_runner import _build_h6_shadow_local_adapter_dry_run
+    monkeypatch.setenv("NEXUS_H6_ALLOW_SHADOW_LOCAL_ADAPTER_DRY_RUN", "1")
+    preflight = {"preflight_ready": True, "adapter_contract_ready": True, "ready_for_h6_1_shadow_local_adapter_dry_run": True, "safety_violation_count": 0}
+    bundle = {"h6_local_model_adapter_preflight_contract": preflight}
+    rows = [
+        {"h6_shadow_local_adapter_request": {"adapter_id": "a1", "model_family": "qwen", "model_size": "3b", "model_name": "qwen2.5-coder:3b", "role": "selector", "route_mode": "shadow_only", "adapter_mode": "shadow_only", "shadow_mode": "dry_run"}},
+        {"h6_shadow_local_adapter_request": {"adapter_id": "a2", "model_family": "qwen", "model_size": "7b", "model_name": "qwen2.5-coder:7b", "role": "selector", "route_mode": "shadow_only", "adapter_mode": "shadow_only", "shadow_mode": "dry_run"}},
+        {"h6_shadow_local_adapter_request": {"adapter_id": "a3", "model_family": "qwen", "model_size": "14b", "model_name": "qwen2.5-coder:14b", "role": "selector", "route_mode": "shadow_only", "adapter_mode": "shadow_only", "shadow_mode": "dry_run"}},
+    ]
+    r = _build_h6_shadow_local_adapter_dry_run(rows, bundle)
+    assert r["qwen_3b_shadow_request_count"] == 1
+    assert r["qwen_7b_shadow_request_count"] == 1
+    assert r["qwen_14b_shadow_request_count"] == 1
+
+
+def test_h6_1_shadow_dry_run_production_ready_false(monkeypatch):
+    """H6-1 T31: production_ready=false and public_claim_allowed=false always."""
+    from scripts.bench.capability_ab_runner import _build_h6_shadow_local_adapter_dry_run
+    monkeypatch.setenv("NEXUS_H6_ALLOW_SHADOW_LOCAL_ADAPTER_DRY_RUN", "1")
+    preflight = {"preflight_ready": True, "adapter_contract_ready": True, "ready_for_h6_1_shadow_local_adapter_dry_run": True, "safety_violation_count": 0}
+    bundle = {"h6_local_model_adapter_preflight_contract": preflight}
+    rows = [
+        {"h6_shadow_local_adapter_request": {"adapter_id": "qwen3b-selector-v0", "model_family": "qwen", "model_size": "3b", "model_name": "qwen2.5-coder:3b", "role": "selector", "route_mode": "shadow_only", "adapter_mode": "shadow_only", "shadow_mode": "dry_run"}},
+        {"h6_shadow_local_adapter_receipt": {"request_id": "shadow-req-001", "adapter_id": "qwen3b-selector-v0", "receipt_status": "dry_run_only"}},
+    ]
+    r = _build_h6_shadow_local_adapter_dry_run(rows, bundle)
+    assert r["production_ready"] is False
+    assert r["public_claim_allowed"] is False
+    assert "h6_1_shadow_local_adapter_dry_run_not_production" in r["dry_run_reasons"]
+    assert "shadow_dry_run_only" in r["dry_run_reasons"]
+    assert "no_model_calls_allowed" in r["dry_run_reasons"]
+    assert "ollama_invocation_blocked" in r["dry_run_reasons"]
+    assert "cloud_invocation_blocked" in r["dry_run_reasons"]
+    assert "repo_mutation_blocked" in r["dry_run_reasons"]
+    assert "runtime_effect_blocked" in r["dry_run_reasons"]
+    assert "production_claim_blocked" in r["dry_run_reasons"]
+    assert "public_claim_blocked" in r["dry_run_reasons"]
+
+
+def test_h6_1_shadow_dry_run_default_env_block(monkeypatch):
+    """H6-1 T33: Default env blocks dry run."""
+    from scripts.bench.capability_ab_runner import _build_h6_shadow_local_adapter_dry_run
+    monkeypatch.delenv("NEXUS_H6_ALLOW_SHADOW_LOCAL_ADAPTER_DRY_RUN", raising=False)
+    r = _build_h6_shadow_local_adapter_dry_run([], None)
+    assert r["dry_run_status"] == "blocked"
+    assert r["dry_run_allowed"] is False
+
+
+def test_h6_1_shadow_dry_run_collect_only():
+    """H6-1 T34: collect-only includes all H6-1 tests."""
+    import subprocess, re
+    result = subprocess.run(["python3", "-m", "pytest", "tests/benchmark/test_capability_ab_runner.py", "-k", "h6_1", "--collect-only", "-q"], capture_output=True, text=True, cwd="/Users/jameschen/Workspace/nexus")
+    count = len(re.findall(r"test_h6_1_", result.stdout))
+    assert count >= 34, f"Expected >= 34 H6-1 tests, got {count}"
+
+
+def test_h6_1_audit_duplicate_scan():
+    """H6-1 T35: No duplicate H5/H6 test functions."""
+    import ast, collections
+    from pathlib import Path
+    path = "tests/benchmark/test_capability_ab_runner.py"
+    tree = ast.parse(Path(path).read_text(encoding="utf-8", errors="ignore"))
+    loc = collections.defaultdict(list)
+    for n in tree.body:
+        if isinstance(n, ast.FunctionDef):
+            loc[n.name].append(n.lineno)
+    dups = [
+        (name, lines)
+        for name, lines in sorted(loc.items())
+        if (name.startswith("test_h5_") or name.startswith("test_h6_")) and len(lines) > 1
+    ]
+    assert not dups, f"Duplicate test functions found: {dups}"
+
+
+def test_h6_1_audit_report_lock():
+    """H6-1 T36: H5/H6 reports have no production/public claim."""
+    from pathlib import Path
+    bad = []
+    report_paths = sorted(Path("docs/reports").glob("h5_*.md")) + sorted(Path("docs/reports").glob("h6_*.md"))
+    for p in report_paths:
+        s = p.read_text(encoding="utf-8", errors="ignore").lower()
+        for needle in [
+            "production_ready=true",
+            "public_claim_allowed=true",
+            "production ready: true",
+            "public claim allowed: true",
+        ]:
+            if needle in s:
+                bad.append((p.name, needle))
+    assert not bad, f"Report lock violations found: {bad}"
