@@ -24,20 +24,21 @@ python3 -m pytest tests/benchmark/test_h5_cloud_fallback_e2e_smoke.py -q
 
 | Group | Before | After | Threshold | Status |
 |-------|--------|-------|-----------|--------|
-| H6-7  | 10     | 36    | >= 32     | PASS   |
-| H6-8  | 8      | 39    | >= 32     | PASS   |
-| H6-9  | 8      | 41    | >= 34     | PASS   |
+| H6-7  | 10     | 35    | >= 32     | PASS   |
+| H6-8  | 8      | 35    | >= 32     | PASS   |
+| H6-9  | 8      | 40    | >= 34     | PASS   |
 
 ## Collect-Only Counts
 
-- H6-7 collect-only: 36 (threshold >= 32) ✓
-- H6-8 collect-only: 39 (threshold >= 32) ✓
-- H6-9 collect-only: 41 (threshold >= 34) ✓
+- H6-7 collect-only: 35 (threshold >= 32) ✓
+- H6-8 collect-only: 35 (threshold >= 32) ✓
+- H6-9 collect-only: 40 (threshold >= 34) ✓
 
 ## Test Results
 
-- `h6_7 or h6_8 or h6_9`: 109 passed
-- `hybrid_route or local_guard or h5 or h6`: 813 passed (7 pre-existing audit_duplicate_scan failures unrelated to this repair)
+- duplicate H5/H6 test scan: no duplicate test functions found
+- `h6_7 or h6_8 or h6_9`: 110 passed
+- `hybrid_route or local_guard or h5 or h6`: 821 passed
 - H5 local committee E2E smoke: 38 passed
 - H5 cloud fallback E2E smoke: 18 passed
 

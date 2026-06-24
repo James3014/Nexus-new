@@ -30047,8 +30047,8 @@ def test_h6_9_invocation_gate_bundle_summary_missing_gate_id(monkeypatch):
     assert "missing_gate_id" in r["gate_reasons"]
 
 
-def test_h6_9_invocation_gate_collect_only():
-    """H6-9 T08: collect-only includes all H6-9 tests."""
+def test_h6_9_invocation_gate_collect_only_final_threshold():
+    """H6-9 T40: collect-only remains above final threshold after coverage repair."""
     import subprocess, re
     result = subprocess.run(["python3", "-m", "pytest", "tests/benchmark/test_capability_ab_runner.py", "-k", "h6_9", "--collect-only", "-q"], capture_output=True, text=True, cwd="/Users/jameschen/Workspace/nexus")
     count = len(re.findall(r"test_h6_9_", result.stdout))
