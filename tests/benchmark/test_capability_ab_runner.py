@@ -23060,3 +23060,386 @@ def test_h5_50_negative_delta_regression_reason(monkeypatch):
     r = _build_h5_benchmark_delta_report(rows, bundle)
     assert "benchmark_regression_detected" in r["delta_reasons"]
     assert r["solve_rate_delta"] == -1.0
+
+
+def test_h5_51_empty_rows_blocks():
+    """H5-51 T1: empty rows block."""
+    from scripts.bench.capability_ab_runner import _build_h5_guarded_larger_benchmark_batch_run
+    r = _build_h5_guarded_larger_benchmark_batch_run([])
+    assert r["batch_status"] == "blocked"
+
+
+def test_h5_51_flag_missing(monkeypatch):
+    """H5-51 T2: flag missing blocks."""
+    from scripts.bench.capability_ab_runner import _build_h5_guarded_larger_benchmark_batch_run
+    monkeypatch.delenv("NEXUS_H5_ALLOW_GUARDED_LARGER_BENCHMARK_BATCH_RUN", raising=False)
+    r = _build_h5_guarded_larger_benchmark_batch_run([])
+    assert "batch_run_flag_not_enabled" in r["batch_reasons"]
+
+
+def test_h5_51_missing_delta(monkeypatch):
+    """H5-51 T3: missing H5-50 delta report blocks."""
+    from scripts.bench.capability_ab_runner import _build_h5_guarded_larger_benchmark_batch_run
+    monkeypatch.setenv("NEXUS_H5_ALLOW_GUARDED_LARGER_BENCHMARK_BATCH_RUN", "1")
+    r = _build_h5_guarded_larger_benchmark_batch_run([], {})
+    assert "missing_h5_50_delta_report" in r["batch_reasons"]
+
+
+def test_h5_51_delta_not_ready(monkeypatch):
+    """H5-51 T4: H5-50 delta not ready blocks."""
+    from scripts.bench.capability_ab_runner import _build_h5_guarded_larger_benchmark_batch_run
+    monkeypatch.setenv("NEXUS_H5_ALLOW_GUARDED_LARGER_BENCHMARK_BATCH_RUN", "1")
+    bundle = {"h5_benchmark_delta_report": {"delta_ready": False, "ready_for_larger_benchmark_run": False, "safety_violation_count": 0}}
+    r = _build_h5_guarded_larger_benchmark_batch_run([], bundle)
+    assert "h5_50_delta_not_ready" in r["batch_reasons"]
+
+
+def test_h5_51_not_ready_for_larger(monkeypatch):
+    """H5-51 T5: not ready_for_larger_benchmark_run blocks."""
+    from scripts.bench.capability_ab_runner import _build_h5_guarded_larger_benchmark_batch_run
+    monkeypatch.setenv("NEXUS_H5_ALLOW_GUARDED_LARGER_BENCHMARK_BATCH_RUN", "1")
+    bundle = {"h5_benchmark_delta_report": {"delta_ready": True, "ready_for_larger_benchmark_run": False, "safety_violation_count": 0}}
+    r = _build_h5_guarded_larger_benchmark_batch_run([], bundle)
+    assert "not_ready_for_larger_benchmark_run" in r["batch_reasons"]
+
+
+def test_h5_51_no_paired_rows(monkeypatch):
+    """H5-51 T6: no paired rows blocks."""
+    from scripts.bench.capability_ab_runner import _build_h5_guarded_larger_benchmark_batch_run
+    monkeypatch.setenv("NEXUS_H5_ALLOW_GUARDED_LARGER_BENCHMARK_BATCH_RUN", "1")
+    bundle = {"h5_benchmark_delta_report": {"delta_ready": True, "ready_for_larger_benchmark_run": True, "safety_violation_count": 0}}
+    r = _build_h5_guarded_larger_benchmark_batch_run([{"task_id": "a", "mode": "baseline"}, {"task_id": "b", "mode": "h5"}], bundle)
+    assert "missing_paired_rows" in r["batch_reasons"]
+
+
+def test_h5_51_paired_improvement_passes(monkeypatch):
+    """H5-51 T7: one clean paired improvement produces batch_ready=true."""
+    from scripts.bench.capability_ab_runner import _build_h5_guarded_larger_benchmark_batch_run
+    monkeypatch.setenv("NEXUS_H5_ALLOW_GUARDED_LARGER_BENCHMARK_BATCH_RUN", "1")
+    bundle = {"h5_benchmark_delta_report": {"delta_ready": True, "ready_for_larger_benchmark_run": True, "safety_violation_count": 0}}
+    rows = [
+        {"task_id": "t1", "mode": "baseline", "candidate_solved": False, "patch_apply_passed": False, "tests_run": 1, "tests_passed": 0},
+        {"task_id": "t1", "mode": "h5", "candidate_solved": True, "patch_apply_passed": True, "tests_run": 1, "tests_passed": 1},
+    ]
+    r = _build_h5_guarded_larger_benchmark_batch_run(rows, bundle)
+    assert r["batch_ready"] is True
+    assert r["batch_improvement_count"] == 1
+
+
+def test_h5_51_solve_rate_computed(monkeypatch):
+    """H5-51 T8: paired solve_rate computed."""
+    from scripts.bench.capability_ab_runner import _build_h5_guarded_larger_benchmark_batch_run
+    monkeypatch.setenv("NEXUS_H5_ALLOW_GUARDED_LARGER_BENCHMARK_BATCH_RUN", "1")
+    bundle = {"h5_benchmark_delta_report": {"delta_ready": True, "ready_for_larger_benchmark_run": True, "safety_violation_count": 0}}
+    rows = [
+        {"task_id": "t1", "mode": "baseline", "candidate_solved": False, "tests_run": 1, "tests_passed": 0},
+        {"task_id": "t1", "mode": "h5", "candidate_solved": True, "tests_run": 1, "tests_passed": 1},
+        {"task_id": "t2", "mode": "baseline", "candidate_solved": False, "tests_run": 1, "tests_passed": 0},
+        {"task_id": "t2", "mode": "h5", "candidate_solved": False, "tests_run": 1, "tests_passed": 0},
+    ]
+    r = _build_h5_guarded_larger_benchmark_batch_run(rows, bundle)
+    assert r["batch_solve_rate"] == 0.5
+
+
+def test_h5_51_apply_pass_rate(monkeypatch):
+    """H5-51 T9: paired apply_pass_rate computed."""
+    from scripts.bench.capability_ab_runner import _build_h5_guarded_larger_benchmark_batch_run
+    monkeypatch.setenv("NEXUS_H5_ALLOW_GUARDED_LARGER_BENCHMARK_BATCH_RUN", "1")
+    bundle = {"h5_benchmark_delta_report": {"delta_ready": True, "ready_for_larger_benchmark_run": True, "safety_violation_count": 0}}
+    rows = [
+        {"task_id": "t1", "mode": "baseline", "patch_apply_passed": False, "tests_run": 1, "tests_passed": 0},
+        {"task_id": "t1", "mode": "h5", "patch_apply_passed": True, "tests_run": 1, "tests_passed": 1},
+        {"task_id": "t2", "mode": "baseline", "patch_apply_passed": False, "tests_run": 1, "tests_passed": 0},
+        {"task_id": "t2", "mode": "h5", "patch_apply_passed": True, "tests_run": 1, "tests_passed": 1},
+    ]
+    r = _build_h5_guarded_larger_benchmark_batch_run(rows, bundle)
+    assert r["batch_apply_pass_rate"] == 1.0
+
+
+def test_h5_51_test_pass_rate(monkeypatch):
+    """H5-51 T10: paired test_pass_rate computed."""
+    from scripts.bench.capability_ab_runner import _build_h5_guarded_larger_benchmark_batch_run
+    monkeypatch.setenv("NEXUS_H5_ALLOW_GUARDED_LARGER_BENCHMARK_BATCH_RUN", "1")
+    bundle = {"h5_benchmark_delta_report": {"delta_ready": True, "ready_for_larger_benchmark_run": True, "safety_violation_count": 0}}
+    rows = [
+        {"task_id": "t1", "mode": "baseline", "tests_run": 2, "tests_passed": 0},
+        {"task_id": "t1", "mode": "h5", "tests_run": 2, "tests_passed": 2},
+    ]
+    r = _build_h5_guarded_larger_benchmark_batch_run(rows, bundle)
+    assert r["batch_test_pass_rate"] == 1.0
+
+
+def test_h5_51_apply_test_pass_rate(monkeypatch):
+    """H5-51 T11: paired apply_test_pass_rate computed."""
+    from scripts.bench.capability_ab_runner import _build_h5_guarded_larger_benchmark_batch_run
+    monkeypatch.setenv("NEXUS_H5_ALLOW_GUARDED_LARGER_BENCHMARK_BATCH_RUN", "1")
+    bundle = {"h5_benchmark_delta_report": {"delta_ready": True, "ready_for_larger_benchmark_run": True, "safety_violation_count": 0}}
+    rows = [
+        {"task_id": "t1", "mode": "baseline", "apply_test_passed": False, "tests_run": 1, "tests_passed": 0},
+        {"task_id": "t1", "mode": "h5", "apply_test_passed": True, "tests_run": 1, "tests_passed": 1},
+        {"task_id": "t2", "mode": "baseline", "apply_test_passed": True, "tests_run": 1, "tests_passed": 1},
+        {"task_id": "t2", "mode": "h5", "apply_test_passed": True, "tests_run": 1, "tests_passed": 1},
+    ]
+    r = _build_h5_guarded_larger_benchmark_batch_run(rows, bundle)
+    assert r["batch_improvement_count"] == 1
+    assert r["batch_neutral_count"] == 1
+
+
+def test_h5_51_improvement_count(monkeypatch):
+    """H5-51 T12: improvement_count computed."""
+    from scripts.bench.capability_ab_runner import _build_h5_guarded_larger_benchmark_batch_run
+    monkeypatch.setenv("NEXUS_H5_ALLOW_GUARDED_LARGER_BENCHMARK_BATCH_RUN", "1")
+    bundle = {"h5_benchmark_delta_report": {"delta_ready": True, "ready_for_larger_benchmark_run": True, "safety_violation_count": 0}}
+    rows = [
+        {"task_id": "t1", "mode": "baseline", "candidate_solved": False, "tests_run": 1, "tests_passed": 0},
+        {"task_id": "t1", "mode": "h5", "candidate_solved": True, "tests_run": 1, "tests_passed": 1},
+    ]
+    r = _build_h5_guarded_larger_benchmark_batch_run(rows, bundle)
+    assert r["batch_improvement_count"] == 1
+    assert r["batch_improvement_rate"] == 1.0
+
+
+def test_h5_51_regression_count(monkeypatch):
+    """H5-51 T13: regression_count computed."""
+    from scripts.bench.capability_ab_runner import _build_h5_guarded_larger_benchmark_batch_run
+    monkeypatch.setenv("NEXUS_H5_ALLOW_GUARDED_LARGER_BENCHMARK_BATCH_RUN", "1")
+    bundle = {"h5_benchmark_delta_report": {"delta_ready": True, "ready_for_larger_benchmark_run": True, "safety_violation_count": 0}}
+    rows = [
+        {"task_id": "t1", "mode": "baseline", "candidate_solved": True, "tests_run": 1, "tests_passed": 1},
+        {"task_id": "t1", "mode": "h5", "candidate_solved": False, "tests_run": 1, "tests_passed": 0},
+    ]
+    r = _build_h5_guarded_larger_benchmark_batch_run(rows, bundle)
+    assert r["batch_regression_count"] == 1
+    assert r["batch_regression_rate"] == 1.0
+
+
+def test_h5_51_neutral_count(monkeypatch):
+    """H5-51 T14: neutral_count computed."""
+    from scripts.bench.capability_ab_runner import _build_h5_guarded_larger_benchmark_batch_run
+    monkeypatch.setenv("NEXUS_H5_ALLOW_GUARDED_LARGER_BENCHMARK_BATCH_RUN", "1")
+    bundle = {"h5_benchmark_delta_report": {"delta_ready": True, "ready_for_larger_benchmark_run": True, "safety_violation_count": 0}}
+    rows = [
+        {"task_id": "t1", "mode": "baseline", "candidate_solved": True, "tests_run": 1, "tests_passed": 1},
+        {"task_id": "t1", "mode": "h5", "candidate_solved": True, "tests_run": 1, "tests_passed": 1},
+    ]
+    r = _build_h5_guarded_larger_benchmark_batch_run(rows, bundle)
+    assert r["batch_neutral_count"] == 1
+
+
+def test_h5_51_improvement_rate(monkeypatch):
+    """H5-51 T15: improvement_rate computed."""
+    from scripts.bench.capability_ab_runner import _build_h5_guarded_larger_benchmark_batch_run
+    monkeypatch.setenv("NEXUS_H5_ALLOW_GUARDED_LARGER_BENCHMARK_BATCH_RUN", "1")
+    bundle = {"h5_benchmark_delta_report": {"delta_ready": True, "ready_for_larger_benchmark_run": True, "safety_violation_count": 0}}
+    rows = [
+        {"task_id": "t1", "mode": "baseline", "candidate_solved": False, "tests_run": 1, "tests_passed": 0},
+        {"task_id": "t1", "mode": "h5", "candidate_solved": True, "tests_run": 1, "tests_passed": 1},
+        {"task_id": "t2", "mode": "baseline", "candidate_solved": False, "tests_run": 1, "tests_passed": 0},
+        {"task_id": "t2", "mode": "h5", "candidate_solved": True, "tests_run": 1, "tests_passed": 1},
+    ]
+    r = _build_h5_guarded_larger_benchmark_batch_run(rows, bundle)
+    assert r["batch_improvement_rate"] == 1.0
+    assert r["batch_regression_rate"] == 0.0
+
+
+def test_h5_51_unpaired_ignored(monkeypatch):
+    """H5-51 T16: unpaired rows ignored for paired delta counts."""
+    from scripts.bench.capability_ab_runner import _build_h5_guarded_larger_benchmark_batch_run
+    monkeypatch.setenv("NEXUS_H5_ALLOW_GUARDED_LARGER_BENCHMARK_BATCH_RUN", "1")
+    bundle = {"h5_benchmark_delta_report": {"delta_ready": True, "ready_for_larger_benchmark_run": True, "safety_violation_count": 0}}
+    rows = [
+        {"task_id": "t1", "mode": "baseline", "candidate_solved": False, "tests_run": 1, "tests_passed": 0},
+        {"task_id": "t1", "mode": "h5", "candidate_solved": True, "tests_run": 1, "tests_passed": 1},
+        {"task_id": "t2", "mode": "baseline", "candidate_solved": False, "tests_run": 1, "tests_passed": 0},
+    ]
+    r = _build_h5_guarded_larger_benchmark_batch_run(rows, bundle)
+    assert r["paired_row_count"] == 1
+    assert r["baseline_row_count"] == 2
+    assert r["h5_row_count"] == 1
+    assert r["batch_improvement_count"] == 1
+
+
+def test_h5_51_fail_reasons_aggregate(monkeypatch):
+    """H5-51 T17: fail_reason_counts aggregate."""
+    from scripts.bench.capability_ab_runner import _build_h5_guarded_larger_benchmark_batch_run
+    monkeypatch.setenv("NEXUS_H5_ALLOW_GUARDED_LARGER_BENCHMARK_BATCH_RUN", "1")
+    bundle = {"h5_benchmark_delta_report": {"delta_ready": True, "ready_for_larger_benchmark_run": True, "safety_violation_count": 0}}
+    rows = [
+        {"task_id": "t1", "mode": "baseline", "failure_reasons": ["conflict"], "tests_run": 1, "tests_passed": 0},
+        {"task_id": "t1", "mode": "h5", "failure_reasons": ["conflict", "hash_mismatch"], "tests_run": 1, "tests_passed": 1, "candidate_solved": True},
+        {"task_id": "t2", "mode": "baseline", "tests_run": 1, "tests_passed": 0},
+        {"task_id": "t2", "mode": "h5", "tests_run": 1, "tests_passed": 1, "candidate_solved": True},
+    ]
+    r = _build_h5_guarded_larger_benchmark_batch_run(rows, bundle)
+    assert r["fail_reason_counts"]["conflict"] == 2
+    assert r["fail_reason_counts"]["hash_mismatch"] == 1
+
+
+def test_h5_51_regression_reasons_aggregate(monkeypatch):
+    """H5-51 T18: regression_reason_counts aggregate."""
+    from scripts.bench.capability_ab_runner import _build_h5_guarded_larger_benchmark_batch_run
+    monkeypatch.setenv("NEXUS_H5_ALLOW_GUARDED_LARGER_BENCHMARK_BATCH_RUN", "1")
+    bundle = {"h5_benchmark_delta_report": {"delta_ready": True, "ready_for_larger_benchmark_run": True, "safety_violation_count": 0}}
+    rows = [
+        {"task_id": "t1", "mode": "baseline", "tests_run": 1, "tests_passed": 0},
+        {"task_id": "t1", "mode": "h5", "regression_reasons": ["cloud_invoked"], "tests_run": 1, "tests_passed": 1, "candidate_solved": True},
+    ]
+    r = _build_h5_guarded_larger_benchmark_batch_run(rows, bundle)
+    assert r["regression_reason_counts"]["cloud_invoked"] == 1
+
+
+def test_h5_51_safety_blocks(monkeypatch):
+    """H5-51 T19: safety violation blocks readiness."""
+    from scripts.bench.capability_ab_runner import _build_h5_guarded_larger_benchmark_batch_run
+    monkeypatch.setenv("NEXUS_H5_ALLOW_GUARDED_LARGER_BENCHMARK_BATCH_RUN", "1")
+    bundle = {"h5_benchmark_delta_report": {"delta_ready": True, "ready_for_larger_benchmark_run": True, "safety_violation_count": 0}}
+    rows = [
+        {"task_id": "t1", "mode": "baseline", "tests_run": 1, "tests_passed": 0},
+        {"task_id": "t1", "mode": "h5", "cloud_invoked": True, "tests_run": 1, "tests_passed": 1, "candidate_solved": True},
+    ]
+    r = _build_h5_guarded_larger_benchmark_batch_run(rows, bundle)
+    assert r["batch_ready"] is False
+    assert r["safety_violation_count"] == 1
+
+
+def test_h5_51_repo_mutated_safety(monkeypatch):
+    """H5-51 T20: repo_mutated counts safety."""
+    from scripts.bench.capability_ab_runner import _build_h5_guarded_larger_benchmark_batch_run
+    monkeypatch.setenv("NEXUS_H5_ALLOW_GUARDED_LARGER_BENCHMARK_BATCH_RUN", "1")
+    bundle = {"h5_benchmark_delta_report": {"delta_ready": True, "ready_for_larger_benchmark_run": True, "safety_violation_count": 0}}
+    rows = [
+        {"task_id": "t1", "mode": "baseline", "tests_run": 1, "tests_passed": 0},
+        {"task_id": "t1", "mode": "h5", "repo_mutated": True, "tests_run": 1, "tests_passed": 1, "candidate_solved": True},
+    ]
+    r = _build_h5_guarded_larger_benchmark_batch_run(rows, bundle)
+    assert r["repo_mutated_count"] == 1
+    assert r["safety_violation_count"] == 1
+
+
+def test_h5_51_cloud_safety(monkeypatch):
+    """H5-51 T21: cloud_invoked counts safety."""
+    from scripts.bench.capability_ab_runner import _build_h5_guarded_larger_benchmark_batch_run
+    monkeypatch.setenv("NEXUS_H5_ALLOW_GUARDED_LARGER_BENCHMARK_BATCH_RUN", "1")
+    bundle = {"h5_benchmark_delta_report": {"delta_ready": True, "ready_for_larger_benchmark_run": True, "safety_violation_count": 0}}
+    rows = [
+        {"task_id": "t1", "mode": "baseline", "tests_run": 1, "tests_passed": 0},
+        {"task_id": "t1", "mode": "h5", "cloud_invoked": True, "tests_run": 1, "tests_passed": 1, "candidate_solved": True},
+    ]
+    r = _build_h5_guarded_larger_benchmark_batch_run(rows, bundle)
+    assert r["cloud_invoked_count"] == 1
+
+
+def test_h5_51_mc_safety(monkeypatch):
+    """H5-51 T22: model_calls_incremented counts safety."""
+    from scripts.bench.capability_ab_runner import _build_h5_guarded_larger_benchmark_batch_run
+    monkeypatch.setenv("NEXUS_H5_ALLOW_GUARDED_LARGER_BENCHMARK_BATCH_RUN", "1")
+    bundle = {"h5_benchmark_delta_report": {"delta_ready": True, "ready_for_larger_benchmark_run": True, "safety_violation_count": 0}}
+    rows = [
+        {"task_id": "t1", "mode": "baseline", "tests_run": 1, "tests_passed": 0},
+        {"task_id": "t1", "mode": "h5", "model_calls_incremented": True, "tests_run": 1, "tests_passed": 1, "candidate_solved": True},
+    ]
+    r = _build_h5_guarded_larger_benchmark_batch_run(rows, bundle)
+    assert r["model_calls_incremented_count"] == 1
+
+
+def test_h5_51_behavior_safety(monkeypatch):
+    """H5-51 T23: behavior_changed counts safety."""
+    from scripts.bench.capability_ab_runner import _build_h5_guarded_larger_benchmark_batch_run
+    monkeypatch.setenv("NEXUS_H5_ALLOW_GUARDED_LARGER_BENCHMARK_BATCH_RUN", "1")
+    bundle = {"h5_benchmark_delta_report": {"delta_ready": True, "ready_for_larger_benchmark_run": True, "safety_violation_count": 0}}
+    rows = [
+        {"task_id": "t1", "mode": "baseline", "tests_run": 1, "tests_passed": 0},
+        {"task_id": "t1", "mode": "h5", "behavior_changed": True, "tests_run": 1, "tests_passed": 1, "candidate_solved": True},
+    ]
+    r = _build_h5_guarded_larger_benchmark_batch_run(rows, bundle)
+    assert r["behavior_changed_count"] == 1
+
+
+def test_h5_51_ready_for_h6(monkeypatch):
+    """H5-51 T24: ready_for_h6 true when improvement and no regression."""
+    from scripts.bench.capability_ab_runner import _build_h5_guarded_larger_benchmark_batch_run
+    monkeypatch.setenv("NEXUS_H5_ALLOW_GUARDED_LARGER_BENCHMARK_BATCH_RUN", "1")
+    bundle = {"h5_benchmark_delta_report": {"delta_ready": True, "ready_for_larger_benchmark_run": True, "safety_violation_count": 0}}
+    rows = [
+        {"task_id": "t1", "mode": "baseline", "candidate_solved": False, "tests_run": 1, "tests_passed": 0},
+        {"task_id": "t1", "mode": "h5", "candidate_solved": True, "tests_run": 1, "tests_passed": 1},
+    ]
+    r = _build_h5_guarded_larger_benchmark_batch_run(rows, bundle)
+    assert r["ready_for_h6_local_model_adapter_preflight"] is True
+
+
+def test_h5_51_bundle_attaches(tmp_path, monkeypatch):
+    """H5-51 T25: bundle attaches batch run."""
+    from scripts.bench.capability_ab_runner import CapabilityTask, _finalize_with_nexus_row, write_evidence_bundle
+    task = CapabilityTask(id="t-h5-51", difficulty="easy", task_type="test_repair", task_desc="v", target_file="t.py", test_file="test_t.py", expected_capabilities=("claim_gate",), success_criteria="tests_pass", repo_kind="nexus_internal", fixture_kind="test_fixture")
+    _h5_all_flags_set_with_gate(monkeypatch)
+    monkeypatch.setattr("scripts.bench.capability_ab_runner._git_commit", lambda x: "d")
+    row = _finalize_with_nexus_row({"mode": "with_nexus", "model_calls": 1, "total_tokens": 100, "token_capture_status": "measured", "committee_trace": {"candidate_count": 2, "judge_selection": {"selected_candidate_id": "C_1"}, "committee_receipt": {"selected_candidate_applied": True, "selected_candidate_apply_hash_match": True}}, "local_solve_eligible": True}, provider="gemini", model_required=True, nexus_required=False, task=task, repo_root=tmp_path)
+    wp = tmp_path / "w.jsonl"; wp.write_text("[]", encoding="utf-8")
+    wop = tmp_path / "wo.jsonl"; wop.write_text("[]", encoding="utf-8")
+    bf = write_evidence_bundle(out_dir=tmp_path, with_path=wp, without_path=wop, rows=[row], config={"tasks_file": "t.json", "tasks_manifest_hash": "m", "unique_tasks_requested": 1, "repeat_trials": 1, "timeout_sec": 60})
+    bundle = json.loads(bf.read_text(encoding="utf-8"))
+    assert "h5_guarded_larger_benchmark_batch_run" in bundle
+    assert bundle["h5_guarded_larger_benchmark_batch_run"]["production_ready"] is False
+
+
+def test_h5_51_pr_false_always(monkeypatch):
+    """H5-51 T26: production_ready=false always."""
+    from scripts.bench.capability_ab_runner import _build_h5_guarded_larger_benchmark_batch_run
+    monkeypatch.setenv("NEXUS_H5_ALLOW_GUARDED_LARGER_BENCHMARK_BATCH_RUN", "1")
+    bundle = {"h5_benchmark_delta_report": {"delta_ready": True, "ready_for_larger_benchmark_run": True, "safety_violation_count": 0}}
+    rows = [{"task_id": "t1", "mode": "baseline"}, {"task_id": "t1", "mode": "h5"}]
+    r = _build_h5_guarded_larger_benchmark_batch_run(rows, bundle)
+    assert r["production_ready"] is False
+    assert r["public_claim_allowed"] is False
+
+
+def test_h5_51_summary_counters(tmp_path, monkeypatch):
+    """H5-51 T27: summary counters reflect batch metrics."""
+    from scripts.bench.capability_ab_runner import CapabilityTask, _finalize_with_nexus_row, write_evidence_bundle
+    task = CapabilityTask(id="t-h5-51s", difficulty="easy", task_type="test_repair", task_desc="v", target_file="t.py", test_file="test_t.py", expected_capabilities=("claim_gate",), success_criteria="tests_pass", repo_kind="nexus_internal", fixture_kind="test_fixture")
+    _h5_all_flags_set_with_gate(monkeypatch)
+    monkeypatch.setattr("scripts.bench.capability_ab_runner._git_commit", lambda x: "d")
+    row = _finalize_with_nexus_row({"mode": "with_nexus", "model_calls": 1, "total_tokens": 100, "token_capture_status": "measured", "committee_trace": {"candidate_count": 2, "judge_selection": {"selected_candidate_id": "C_1"}, "committee_receipt": {"selected_candidate_applied": True, "selected_candidate_apply_hash_match": True}}, "local_solve_eligible": True}, provider="gemini", model_required=True, nexus_required=False, task=task, repo_root=tmp_path)
+    wp = tmp_path / "w.jsonl"; wp.write_text("[]", encoding="utf-8")
+    wop = tmp_path / "wo.jsonl"; wop.write_text("[]", encoding="utf-8")
+    bf = write_evidence_bundle(out_dir=tmp_path, with_path=wp, without_path=wop, rows=[row], config={"tasks_file": "t.json", "tasks_manifest_hash": "m", "unique_tasks_requested": 1, "repeat_trials": 1, "timeout_sec": 60})
+    bundle = json.loads(bf.read_text(encoding="utf-8"))
+    assert bundle["h5_guarded_larger_benchmark_batch_run"]["production_ready"] is False
+    assert bundle["h5_guarded_larger_benchmark_batch_run"]["batch_allowed"] is False
+
+
+def test_h5_51_default_env_blocked(monkeypatch):
+    """H5-51 T28: default env blocked."""
+    from scripts.bench.capability_ab_runner import _build_h5_guarded_larger_benchmark_batch_run
+    monkeypatch.delenv("NEXUS_H5_ALLOW_GUARDED_LARGER_BENCHMARK_BATCH_RUN", raising=False)
+    r = _build_h5_guarded_larger_benchmark_batch_run([])
+    assert r["batch_allowed"] is False
+
+
+def test_h5_51_collect_only():
+    """H5-51 T29: collect-only includes all H5-51 tests."""
+    import subprocess, re
+    result = subprocess.run(["python3", "-m", "pytest", "tests/benchmark/test_capability_ab_runner.py", "-k", "h5_51", "--collect-only", "-q"], capture_output=True, text=True, cwd="/Users/jameschen/Workspace/nexus")
+    count = len(re.findall(r"test_h5_51_", result.stdout))
+    assert count >= 26, f"Expected >= 26 H5-51 tests, got {count}"
+
+
+def test_h5_51_flagged_pass(monkeypatch):
+    """H5-51 T30: flagged clean paired fixture passes."""
+    from scripts.bench.capability_ab_runner import _build_h5_guarded_larger_benchmark_batch_run
+    monkeypatch.setenv("NEXUS_H5_ALLOW_GUARDED_LARGER_BENCHMARK_BATCH_RUN", "1")
+    bundle = {"h5_benchmark_delta_report": {"delta_ready": True, "ready_for_larger_benchmark_run": True, "safety_violation_count": 0}}
+    rows = [
+        {"task_id": "t1", "mode": "baseline", "candidate_solved": False, "patch_apply_passed": False, "tests_run": 1, "tests_passed": 0, "apply_test_passed": False},
+        {"task_id": "t1", "mode": "h5", "candidate_solved": True, "patch_apply_passed": True, "tests_run": 1, "tests_passed": 1, "apply_test_passed": True},
+        {"task_id": "t2", "mode": "baseline", "candidate_solved": False, "patch_apply_passed": False, "tests_run": 1, "tests_passed": 0, "apply_test_passed": False},
+        {"task_id": "t2", "mode": "h5", "candidate_solved": True, "patch_apply_passed": True, "tests_run": 1, "tests_passed": 1, "apply_test_passed": True},
+    ]
+    r = _build_h5_guarded_larger_benchmark_batch_run(rows, bundle)
+    assert r["batch_ready"] is True
+    assert r["batch_improvement_count"] == 2
+    assert r["batch_regression_count"] == 0
+    assert r["ready_for_h6_local_model_adapter_preflight"] is True
+    assert r["batch_solve_rate"] == 1.0
+    assert r["batch_improvement_rate"] == 1.0

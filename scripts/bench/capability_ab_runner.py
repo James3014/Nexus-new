@@ -9300,6 +9300,196 @@ def _build_h5_benchmark_delta_report(rows: list[dict[str, Any]], bundle: dict[st
     }
 
 
+def _build_h5_guarded_larger_benchmark_batch_run(rows: list[dict[str, Any]], bundle: dict[str, Any] | None = None) -> dict[str, Any]:
+    """Pure helper: guarded larger benchmark batch run aggregation."""
+    import os as _os
+    from collections import Counter, defaultdict
+
+    flag = _os.environ.get("NEXUS_H5_ALLOW_GUARDED_LARGER_BENCHMARK_BATCH_RUN", "").strip() == "1"
+
+    delta = None
+    if bundle:
+        delta = bundle.get("h5_benchmark_delta_report")
+
+    delta_present = bool(delta)
+    delta_ready = bool(delta.get("delta_ready", False)) if delta else False
+    ready_larger = bool(delta.get("ready_for_larger_benchmark_run", False)) if delta else False
+    delta_safety = int(delta.get("safety_violation_count", 0)) if delta else 0
+
+    by_id: dict[str, dict[str, list]] = defaultdict(lambda: {"baseline": [], "h5": []})
+    for r in rows:
+        tid = str(r.get("task_id", ""))
+        mode = str(r.get("mode", ""))
+        if tid and mode in ("baseline", "h5"):
+            by_id[tid][mode].append(r)
+
+    paired_ids = [tid for tid, modes in by_id.items() if modes["baseline"] and modes["h5"]]
+    paired_count = len(paired_ids)
+
+    bl_count = sum(1 for r in rows if str(r.get("mode", "")) == "baseline")
+    h5_count = sum(1 for r in rows if str(r.get("mode", "")) == "h5")
+
+    batch_solved = 0
+    batch_apply = 0
+    batch_tp = 0
+    batch_tr = 0
+    batch_improve = 0
+    batch_regress = 0
+    batch_neutral = 0
+
+    repo_mut = 0
+    cloud_inv = 0
+    mc_inc = 0
+    beh = 0
+    fail_reasons: Counter = Counter()
+    regression_reasons: Counter = Counter()
+
+    for r in rows:
+        rm = bool(r.get("repo_mutated", False))
+        ci = bool(r.get("cloud_invoked", False))
+        mc = bool(r.get("model_calls_incremented", False))
+        bh = bool(r.get("behavior_changed", False))
+        if rm:
+            repo_mut += 1
+            regression_reasons["repo_mutated"] += 1
+        if ci:
+            cloud_inv += 1
+            regression_reasons["cloud_invoked"] += 1
+        if mc:
+            mc_inc += 1
+            regression_reasons["model_calls_incremented"] += 1
+        if bh:
+            beh += 1
+            regression_reasons["behavior_changed"] += 1
+
+        for reason in r.get("failure_reasons", []):
+            fail_reasons[reason] += 1
+        for reason in r.get("regression_reasons", []):
+            regression_reasons[reason] += 1
+
+        if str(r.get("mode", "")) == "h5":
+            if bool(r.get("candidate_solved", False)):
+                batch_solved += 1
+            if bool(r.get("patch_apply_passed", False)):
+                batch_apply += 1
+            batch_tr += int(r.get("tests_run", 0) or 0)
+            batch_tp += int(r.get("tests_passed", 0) or 0)
+
+    for tid in paired_ids:
+        bl_rows = by_id[tid]["baseline"]
+        h5_r = by_id[tid]["h5"][0]
+        bl = bl_rows[0]
+        bl_solved = bool(bl.get("candidate_solved", False))
+        h5_solved = bool(h5_r.get("candidate_solved", False))
+        bl_apply = bool(bl.get("patch_apply_passed", False))
+        h5_apply = bool(h5_r.get("patch_apply_passed", False))
+        bl_tp = int(bl.get("tests_passed", 0) or 0) > 0
+        h5_tp = int(h5_r.get("tests_passed", 0) or 0) > 0
+        bl_at = bool(bl.get("apply_test_passed", False))
+        h5_at = bool(h5_r.get("apply_test_passed", False))
+
+        improved = h5_solved != bl_solved and h5_solved or h5_apply != bl_apply and h5_apply or h5_tp != bl_tp and h5_tp or h5_at != bl_at and h5_at
+        regressed = (not h5_solved and bl_solved) or (not h5_apply and bl_apply) or (not h5_tp and bl_tp) or (not h5_at and bl_at)
+
+        if improved and not regressed:
+            batch_improve += 1
+        elif regressed:
+            batch_regress += 1
+        else:
+            batch_neutral += 1
+
+    total_h5 = h5_count if h5_count > 0 else 1
+    batch_solve_rate = batch_solved / total_h5
+    batch_apply_rate = batch_apply / total_h5 if total_h5 > 0 else 0.0
+    batch_test_rate = batch_tp / batch_tr if batch_tr > 0 else 0.0
+    batch_at_rate = batch_tp / batch_tr if batch_tr > 0 else 0.0
+    improve_rate = batch_improve / paired_count if paired_count > 0 else 0.0
+    regress_rate = batch_regress / paired_count if paired_count > 0 else 0.0
+
+    safety = repo_mut + cloud_inv + mc_inc + beh
+
+    batch_allowed = (
+        flag and delta_present and delta_ready and ready_larger
+        and delta_safety == 0
+    )
+
+    batch_ready = (
+        batch_allowed and paired_count >= 1 and safety == 0
+    )
+
+    ready_h6 = (
+        batch_ready and batch_improve >= 1
+        and batch_regress == 0 and safety == 0
+    )
+
+    reasons = []
+    if not flag:
+        reasons.append("batch_run_flag_not_enabled")
+    if not delta_present:
+        reasons.append("missing_h5_50_delta_report")
+    if delta and not delta_ready:
+        reasons.append("h5_50_delta_not_ready")
+    if delta and not ready_larger:
+        reasons.append("not_ready_for_larger_benchmark_run")
+    if paired_count == 0:
+        reasons.append("missing_paired_rows")
+    if safety > 0:
+        reasons.append("safety_violation_detected")
+    if batch_regress > 0:
+        reasons.append("batch_regression_detected")
+    reasons.extend([
+        "h5_51_batch_run_not_production",
+        "guarded_batch_internal_only",
+        "repo_mutation_blocked_outside_isolation",
+        "cloud_invocation_blocked",
+        "model_calls_increment_blocked",
+        "production_claim_blocked",
+        "public_claim_blocked",
+    ])
+
+    return {
+        "schema": "nexus.hybrid_h5_guarded_larger_benchmark_batch_run.v1",
+        "evaluated": True,
+        "batch_status": "guarded_larger_benchmark_batch_ready" if batch_ready else ("blocked" if not batch_allowed else "guarded_larger_benchmark_batch_fail"),
+        "batch_reasons": reasons,
+        "batch_allowed": batch_allowed,
+        "batch_ready": batch_ready,
+        "row_count": len(rows),
+        "baseline_row_count": bl_count,
+        "h5_row_count": h5_count,
+        "paired_row_count": paired_count,
+        "benchmark_delta_present": delta_present,
+        "benchmark_delta_ready": delta_ready,
+        "ready_for_larger_benchmark_run": ready_larger,
+        "batch_solved_count": batch_solved,
+        "batch_failed_count": total_h5 - batch_solved,
+        "batch_solve_rate": batch_solve_rate,
+        "batch_apply_passed_count": batch_apply,
+        "batch_apply_failed_count": total_h5 - batch_apply,
+        "batch_apply_pass_rate": batch_apply_rate,
+        "batch_tests_run_count": batch_tr,
+        "batch_tests_passed_count": batch_tp,
+        "batch_tests_failed_count": batch_tr - batch_tp,
+        "batch_test_pass_rate": batch_test_rate,
+        "batch_apply_test_pass_rate": batch_at_rate,
+        "batch_improvement_count": batch_improve,
+        "batch_regression_count": batch_regress,
+        "batch_neutral_count": batch_neutral,
+        "batch_improvement_rate": improve_rate,
+        "batch_regression_rate": regress_rate,
+        "fail_reason_counts": dict(fail_reasons),
+        "regression_reason_counts": dict(regression_reasons),
+        "repo_mutated_count": repo_mut,
+        "cloud_invoked_count": cloud_inv,
+        "model_calls_incremented_count": mc_inc,
+        "behavior_changed_count": beh,
+        "safety_violation_count": safety,
+        "ready_for_h6_local_model_adapter_preflight": ready_h6,
+        "production_ready": False,
+        "public_claim_allowed": False,
+    }
+
+
 def _finalize_with_nexus_row(
     row: dict[str, Any],
     *,
@@ -13783,6 +13973,20 @@ def write_evidence_bundle(
         "h5_benchmark_delta_report_test_pass_rate_delta": _build_h5_benchmark_delta_report(with_rows, payload).get("test_pass_rate_delta", 0.0),
         "h5_benchmark_delta_report_apply_test_pass_rate_delta": _build_h5_benchmark_delta_report(with_rows, payload).get("apply_test_pass_rate_delta", 0.0),
         "h5_benchmark_delta_report_safety_violation_count": _build_h5_benchmark_delta_report(with_rows, payload).get("safety_violation_count", 0),
+        "h5_guarded_batch_run_present": 1 if _build_h5_guarded_larger_benchmark_batch_run(with_rows, payload).get("evaluated") else 0,
+        "h5_guarded_batch_run_allowed": 1 if _build_h5_guarded_larger_benchmark_batch_run(with_rows, payload).get("batch_allowed") else 0,
+        "h5_guarded_batch_run_ready": 1 if _build_h5_guarded_larger_benchmark_batch_run(with_rows, payload).get("batch_ready") else 0,
+        "h5_guarded_batch_run_ready_for_h6": 1 if _build_h5_guarded_larger_benchmark_batch_run(with_rows, payload).get("ready_for_h6_local_model_adapter_preflight") else 0,
+        "h5_guarded_batch_run_paired_row_count": _build_h5_guarded_larger_benchmark_batch_run(with_rows, payload).get("paired_row_count", 0),
+        "h5_guarded_batch_run_batch_solve_rate": _build_h5_guarded_larger_benchmark_batch_run(with_rows, payload).get("batch_solve_rate", 0.0),
+        "h5_guarded_batch_run_apply_pass_rate": _build_h5_guarded_larger_benchmark_batch_run(with_rows, payload).get("batch_apply_pass_rate", 0.0),
+        "h5_guarded_batch_run_test_pass_rate": _build_h5_guarded_larger_benchmark_batch_run(with_rows, payload).get("batch_test_pass_rate", 0.0),
+        "h5_guarded_batch_run_apply_test_pass_rate": _build_h5_guarded_larger_benchmark_batch_run(with_rows, payload).get("batch_apply_test_pass_rate", 0.0),
+        "h5_guarded_batch_run_improvement_count": _build_h5_guarded_larger_benchmark_batch_run(with_rows, payload).get("batch_improvement_count", 0),
+        "h5_guarded_batch_run_regression_count": _build_h5_guarded_larger_benchmark_batch_run(with_rows, payload).get("batch_regression_count", 0),
+        "h5_guarded_batch_run_improvement_rate": _build_h5_guarded_larger_benchmark_batch_run(with_rows, payload).get("batch_improvement_rate", 0.0),
+        "h5_guarded_batch_run_regression_rate": _build_h5_guarded_larger_benchmark_batch_run(with_rows, payload).get("batch_regression_rate", 0.0),
+        "h5_guarded_batch_run_safety_violation_count": _build_h5_guarded_larger_benchmark_batch_run(with_rows, payload).get("safety_violation_count", 0),
     }
     payload["h5_guarded_local_candidate_benchmark_trial"] = _build_h5_guarded_local_candidate_benchmark_trial(with_rows)
     payload["h5_quality_non_regression_gate"] = _build_h5_quality_non_regression_gate(with_rows, payload["h5_guarded_local_candidate_benchmark_trial"])
@@ -13795,6 +13999,7 @@ def write_evidence_bundle(
     payload["h5_real_patch_benchmark_scoreboard"] = _build_h5_real_patch_benchmark_scoreboard(with_rows, payload)
     payload["h5_controlled_real_patch_apply_test_trial"] = _build_h5_controlled_real_patch_apply_test_trial(with_rows, payload)
     payload["h5_benchmark_delta_report"] = _build_h5_benchmark_delta_report(with_rows, payload)
+    payload["h5_guarded_larger_benchmark_batch_run"] = _build_h5_guarded_larger_benchmark_batch_run(with_rows, payload)
     payload["external_provider_claim_boundary_contract"] = build_external_provider_claim_boundary_contract(payload)
     payload["public_promotion_readiness_contract"] = build_public_promotion_readiness_contract(payload)
     bundle_path.write_text(json.dumps(payload, indent=2, ensure_ascii=False), encoding="utf-8")
