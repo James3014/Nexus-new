@@ -8474,6 +8474,104 @@ def _build_h5_full_guarded_benchmark_run(rows: list[dict[str, Any]], bundle: dic
     }
 
 
+def _build_h5_governance_closure_public_claim_lock(bundle: dict[str, Any] | None = None) -> dict[str, Any]:
+    """Pure helper: governance closure receipt with public claim lock."""
+    import os as _os
+
+    flag = _os.environ.get("NEXUS_H5_ALLOW_GOVERNANCE_CLOSURE", "").strip() == "1"
+
+    if bundle is None:
+        bundle = {}
+
+    run = bundle.get("h5_full_guarded_benchmark_run")
+    gate = bundle.get("h5_quality_non_regression_gate")
+    trial = bundle.get("h5_guarded_local_candidate_benchmark_trial")
+    smoke_row = bundle.get("h5_local_candidate_e2e_delivery_smoke_receipt")
+
+    run_present = bool(run)
+    run_passed = bool(run.get("run_passed", False)) if run else False
+    run_ready = bool(run.get("full_guarded_benchmark_ready", False)) if run else False
+    smoke_passed_count = int(run.get("e2e_smoke_passed_count", 0)) if run else 0
+    safe_count = int(run.get("safe_final_state_count", 0)) if run else 0
+    regression = int(run.get("regression_count", 0)) if run else 0
+    cloud = int(run.get("cloud_invoked_count", 0)) if run else 0
+    mc = int(run.get("model_calls_incremented_count", 0)) if run else 0
+    beh = int(run.get("behavior_changed_count", 0)) if run else 0
+
+    qnr_present = bool(gate)
+    qnr_passed = bool(gate.get("quality_non_regression_passed", False)) if gate else False
+    trial_present = bool(trial)
+    trial_passed = bool(trial.get("trial_passed", False)) if trial else False
+    e2e_present = bool(smoke_row)
+
+    closure_allowed = (
+        flag and run_present and run_passed and run_ready
+        and qnr_passed and trial_passed
+    )
+
+    alpha_ready = (
+        closure_allowed
+        and regression == 0 and cloud == 0 and mc == 0 and beh == 0
+        and safe_count >= 1 and smoke_passed_count >= 1
+    )
+
+    governance_complete = alpha_ready
+
+    reasons = []
+    if not flag:
+        reasons.append("governance_closure_flag_not_enabled")
+    if not run_present:
+        reasons.append("missing_full_guarded_benchmark_run")
+    if run and not run_passed:
+        reasons.append("full_guarded_benchmark_not_passed")
+    if not qnr_passed:
+        reasons.append("quality_non_regression_not_passed")
+    if not trial_passed:
+        reasons.append("guarded_trial_not_passed")
+    if regression > 0:
+        reasons.append("regression_detected")
+    if cloud > 0:
+        reasons.append("cloud_invoked_detected")
+    if mc > 0:
+        reasons.append("model_calls_incremented_detected")
+    if beh > 0:
+        reasons.append("behavior_changed_detected")
+    if safe_count < 1 or smoke_passed_count < 1:
+        reasons.append("missing_e2e_smoke_pass")
+    reasons.extend([
+        "internal_alpha_only", "production_claim_blocked",
+        "public_claim_blocked", "metadata_delivery_only",
+    ])
+
+    return {
+        "schema": "nexus.hybrid_h5_governance_closure_public_claim_lock.v1",
+        "evaluated": True,
+        "closure_status": "h5_internal_alpha_ready_public_claim_locked" if governance_complete else ("blocked" if not closure_allowed else "h5_governance_closure_fail"),
+        "closure_reasons": reasons,
+        "closure_allowed": closure_allowed,
+        "internal_alpha_ready": alpha_ready,
+        "full_guarded_benchmark_present": run_present,
+        "full_guarded_benchmark_passed": run_passed,
+        "full_guarded_benchmark_ready": run_ready,
+        "quality_non_regression_present": qnr_present,
+        "quality_non_regression_passed": qnr_passed,
+        "guarded_trial_present": trial_present,
+        "guarded_trial_passed": trial_passed,
+        "e2e_smoke_present": e2e_present,
+        "e2e_smoke_passed_count": smoke_passed_count,
+        "safe_final_state_count": safe_count,
+        "regression_count": regression,
+        "cloud_invoked_count": cloud,
+        "model_calls_incremented_count": mc,
+        "behavior_changed_count": beh,
+        "production_ready": False,
+        "public_claim_allowed": False,
+        "public_claim_lock_active": True,
+        "production_lock_active": True,
+        "governance_closure_complete": governance_complete,
+    }
+
+
 def _finalize_with_nexus_row(
     row: dict[str, Any],
     *,
@@ -12890,12 +12988,21 @@ def write_evidence_bundle(
         "h5_full_guarded_benchmark_run_cloud_invoked_count": _build_h5_full_guarded_benchmark_run(with_rows).get("cloud_invoked_count", 0),
         "h5_full_guarded_benchmark_run_model_calls_incremented_count": _build_h5_full_guarded_benchmark_run(with_rows).get("model_calls_incremented_count", 0),
         "h5_full_guarded_benchmark_run_behavior_changed_count": _build_h5_full_guarded_benchmark_run(with_rows).get("behavior_changed_count", 0),
+        "h5_governance_closure_present": 1,
+        "h5_governance_closure_allowed": 1 if _build_h5_governance_closure_public_claim_lock(payload).get("closure_allowed") else 0,
+        "h5_governance_closure_complete": 1 if _build_h5_governance_closure_public_claim_lock(payload).get("governance_closure_complete") else 0,
+        "h5_internal_alpha_ready": 1 if _build_h5_governance_closure_public_claim_lock(payload).get("internal_alpha_ready") else 0,
+        "h5_public_claim_lock_active": 1 if _build_h5_governance_closure_public_claim_lock(payload).get("public_claim_lock_active") else 0,
+        "h5_production_lock_active": 1 if _build_h5_governance_closure_public_claim_lock(payload).get("production_lock_active") else 0,
+        "h5_public_claim_allowed_count": 1 if _build_h5_governance_closure_public_claim_lock(payload).get("public_claim_allowed") else 0,
+        "h5_production_ready_count": 1 if _build_h5_governance_closure_public_claim_lock(payload).get("production_ready") else 0,
     }
     payload["h5_guarded_local_candidate_benchmark_trial"] = _build_h5_guarded_local_candidate_benchmark_trial(with_rows)
     payload["h5_quality_non_regression_gate"] = _build_h5_quality_non_regression_gate(with_rows, payload["h5_guarded_local_candidate_benchmark_trial"])
     payload["h5_guarded_local_candidate_benchmark_trial"]["quality_non_regression_evaluated"] = payload["h5_quality_non_regression_gate"]["quality_non_regression_evaluated"]
     payload["h5_guarded_local_candidate_benchmark_trial"]["quality_non_regression_passed"] = payload["h5_quality_non_regression_gate"]["quality_non_regression_passed"]
     payload["h5_full_guarded_benchmark_run"] = _build_h5_full_guarded_benchmark_run(with_rows, payload)
+    payload["h5_governance_closure_public_claim_lock"] = _build_h5_governance_closure_public_claim_lock(payload)
     payload["external_provider_claim_boundary_contract"] = build_external_provider_claim_boundary_contract(payload)
     payload["public_promotion_readiness_contract"] = build_public_promotion_readiness_contract(payload)
     bundle_path.write_text(json.dumps(payload, indent=2, ensure_ascii=False), encoding="utf-8")

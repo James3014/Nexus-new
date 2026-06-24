@@ -21939,3 +21939,191 @@ def test_h5_44_reasons_preserved(monkeypatch):
     bundle = {"h5_guarded_local_candidate_benchmark_trial": {"trial_passed": True, "row_count": 2, "failure_reason_counts": {"unsafe_final_state": 1}, "pass_rate": 1.0, "safe_final_state_rate": 1.0, "e2e_smoke_passed_count": 2, "safe_final_state_count": 2, "all_mutation_gates_exercised_count": 2, "unsafe_final_state_count": 0, "cloud_invoked_count": 0, "model_calls_incremented_count": 0, "behavior_changed_count": 0}, "h5_quality_non_regression_gate": {"quality_non_regression_evaluated": True, "quality_non_regression_passed": True, "quality_floor_met": True, "safety_floor_met": True, "regression_floor_met": True, "regression_count": 0, "regression_reason_counts": {}}}
     r = _build_h5_full_guarded_benchmark_run([], bundle)
     assert r["failure_reason_counts"] == {"unsafe_final_state": 1}
+
+
+def test_h5_45_missing_bundle():
+    """H5-45 T1: missing bundle blocks."""
+    from scripts.bench.capability_ab_runner import _build_h5_governance_closure_public_claim_lock
+    r = _build_h5_governance_closure_public_claim_lock(None)
+    assert r["closure_status"] == "blocked"
+    assert r["closure_allowed"] is False
+
+
+def test_h5_45_flag_missing():
+    """H5-45 T2: flag missing blocks."""
+    from scripts.bench.capability_ab_runner import _build_h5_governance_closure_public_claim_lock
+    import os
+    os.environ.pop("NEXUS_H5_ALLOW_GOVERNANCE_CLOSURE", None)
+    r = _build_h5_governance_closure_public_claim_lock({})
+    assert "governance_closure_flag_not_enabled" in r["closure_reasons"]
+
+
+def test_h5_45_missing_benchmark_run(monkeypatch):
+    """H5-45 T3: missing full guarded benchmark blocks."""
+    from scripts.bench.capability_ab_runner import _build_h5_governance_closure_public_claim_lock
+    monkeypatch.setenv("NEXUS_H5_ALLOW_GOVERNANCE_CLOSURE", "1")
+    r = _build_h5_governance_closure_public_claim_lock({})
+    assert "missing_full_guarded_benchmark_run" in r["closure_reasons"]
+
+
+def test_h5_45_benchmark_not_passed(monkeypatch):
+    """H5-45 T4: full guarded benchmark not passed blocks."""
+    from scripts.bench.capability_ab_runner import _build_h5_governance_closure_public_claim_lock
+    monkeypatch.setenv("NEXUS_H5_ALLOW_GOVERNANCE_CLOSURE", "1")
+    bundle = {"h5_full_guarded_benchmark_run": {"run_passed": False, "full_guarded_benchmark_ready": False, "e2e_smoke_passed_count": 0, "safe_final_state_count": 0, "regression_count": 0, "cloud_invoked_count": 0, "model_calls_incremented_count": 0, "behavior_changed_count": 0},
+              "h5_quality_non_regression_gate": {"quality_non_regression_passed": True},
+              "h5_guarded_local_candidate_benchmark_trial": {"trial_passed": True}}
+    r = _build_h5_governance_closure_public_claim_lock(bundle)
+    assert "full_guarded_benchmark_not_passed" in r["closure_reasons"]
+
+
+def test_h5_45_qnr_not_passed(monkeypatch):
+    """H5-45 T5: quality gate not passed blocks."""
+    from scripts.bench.capability_ab_runner import _build_h5_governance_closure_public_claim_lock
+    monkeypatch.setenv("NEXUS_H5_ALLOW_GOVERNANCE_CLOSURE", "1")
+    bundle = {"h5_full_guarded_benchmark_run": {"run_passed": True, "full_guarded_benchmark_ready": True, "e2e_smoke_passed_count": 1, "safe_final_state_count": 1, "regression_count": 0, "cloud_invoked_count": 0, "model_calls_incremented_count": 0, "behavior_changed_count": 0},
+              "h5_quality_non_regression_gate": {"quality_non_regression_passed": False},
+              "h5_guarded_local_candidate_benchmark_trial": {"trial_passed": True}}
+    r = _build_h5_governance_closure_public_claim_lock(bundle)
+    assert "quality_non_regression_not_passed" in r["closure_reasons"]
+
+
+def test_h5_45_trial_not_passed(monkeypatch):
+    """H5-45 T6: guarded trial not passed blocks."""
+    from scripts.bench.capability_ab_runner import _build_h5_governance_closure_public_claim_lock
+    monkeypatch.setenv("NEXUS_H5_ALLOW_GOVERNANCE_CLOSURE", "1")
+    bundle = {"h5_full_guarded_benchmark_run": {"run_passed": True, "full_guarded_benchmark_ready": True, "e2e_smoke_passed_count": 1, "safe_final_state_count": 1, "regression_count": 0, "cloud_invoked_count": 0, "model_calls_incremented_count": 0, "behavior_changed_count": 0},
+              "h5_quality_non_regression_gate": {"quality_non_regression_passed": True},
+              "h5_guarded_local_candidate_benchmark_trial": {"trial_passed": False}}
+    r = _build_h5_governance_closure_public_claim_lock(bundle)
+    assert "guarded_trial_not_passed" in r["closure_reasons"]
+
+
+def test_h5_45_clean_closure_passes(monkeypatch):
+    """H5-45 T7: clean bundle passes internal alpha closure."""
+    from scripts.bench.capability_ab_runner import _build_h5_governance_closure_public_claim_lock
+    monkeypatch.setenv("NEXUS_H5_ALLOW_GOVERNANCE_CLOSURE", "1")
+    bundle = {"h5_full_guarded_benchmark_run": {"run_passed": True, "full_guarded_benchmark_ready": True, "e2e_smoke_passed_count": 3, "safe_final_state_count": 3, "regression_count": 0, "cloud_invoked_count": 0, "model_calls_incremented_count": 0, "behavior_changed_count": 0},
+              "h5_quality_non_regression_gate": {"quality_non_regression_passed": True},
+              "h5_guarded_local_candidate_benchmark_trial": {"trial_passed": True}}
+    r = _build_h5_governance_closure_public_claim_lock(bundle)
+    assert r["internal_alpha_ready"] is True
+    assert r["governance_closure_complete"] is True
+    assert r["closure_status"] == "h5_internal_alpha_ready_public_claim_locked"
+
+
+def test_h5_45_regression_blocks(monkeypatch):
+    """H5-45 T8: regression blocks."""
+    from scripts.bench.capability_ab_runner import _build_h5_governance_closure_public_claim_lock
+    monkeypatch.setenv("NEXUS_H5_ALLOW_GOVERNANCE_CLOSURE", "1")
+    bundle = {"h5_full_guarded_benchmark_run": {"run_passed": True, "full_guarded_benchmark_ready": True, "e2e_smoke_passed_count": 1, "safe_final_state_count": 1, "regression_count": 1, "cloud_invoked_count": 0, "model_calls_incremented_count": 0, "behavior_changed_count": 0},
+              "h5_quality_non_regression_gate": {"quality_non_regression_passed": True},
+              "h5_guarded_local_candidate_benchmark_trial": {"trial_passed": True}}
+    r = _build_h5_governance_closure_public_claim_lock(bundle)
+    assert r["internal_alpha_ready"] is False
+    assert "regression_detected" in r["closure_reasons"]
+
+
+def test_h5_45_cloud_blocks(monkeypatch):
+    """H5-45 T9: cloud_invoked blocks."""
+    from scripts.bench.capability_ab_runner import _build_h5_governance_closure_public_claim_lock
+    monkeypatch.setenv("NEXUS_H5_ALLOW_GOVERNANCE_CLOSURE", "1")
+    bundle = {"h5_full_guarded_benchmark_run": {"run_passed": True, "full_guarded_benchmark_ready": True, "e2e_smoke_passed_count": 1, "safe_final_state_count": 1, "regression_count": 0, "cloud_invoked_count": 1, "model_calls_incremented_count": 0, "behavior_changed_count": 0},
+              "h5_quality_non_regression_gate": {"quality_non_regression_passed": True},
+              "h5_guarded_local_candidate_benchmark_trial": {"trial_passed": True}}
+    r = _build_h5_governance_closure_public_claim_lock(bundle)
+    assert "cloud_invoked_detected" in r["closure_reasons"]
+
+
+def test_h5_45_mc_blocks(monkeypatch):
+    """H5-45 T10: model_calls blocks."""
+    from scripts.bench.capability_ab_runner import _build_h5_governance_closure_public_claim_lock
+    monkeypatch.setenv("NEXUS_H5_ALLOW_GOVERNANCE_CLOSURE", "1")
+    bundle = {"h5_full_guarded_benchmark_run": {"run_passed": True, "full_guarded_benchmark_ready": True, "e2e_smoke_passed_count": 1, "safe_final_state_count": 1, "regression_count": 0, "cloud_invoked_count": 0, "model_calls_incremented_count": 1, "behavior_changed_count": 0},
+              "h5_quality_non_regression_gate": {"quality_non_regression_passed": True},
+              "h5_guarded_local_candidate_benchmark_trial": {"trial_passed": True}}
+    r = _build_h5_governance_closure_public_claim_lock(bundle)
+    assert "model_calls_incremented_detected" in r["closure_reasons"]
+
+
+def test_h5_45_behavior_blocks(monkeypatch):
+    """H5-45 T11: behavior_changed blocks."""
+    from scripts.bench.capability_ab_runner import _build_h5_governance_closure_public_claim_lock
+    monkeypatch.setenv("NEXUS_H5_ALLOW_GOVERNANCE_CLOSURE", "1")
+    bundle = {"h5_full_guarded_benchmark_run": {"run_passed": True, "full_guarded_benchmark_ready": True, "e2e_smoke_passed_count": 1, "safe_final_state_count": 1, "regression_count": 0, "cloud_invoked_count": 0, "model_calls_incremented_count": 0, "behavior_changed_count": 1},
+              "h5_quality_non_regression_gate": {"quality_non_regression_passed": True},
+              "h5_guarded_local_candidate_benchmark_trial": {"trial_passed": True}}
+    r = _build_h5_governance_closure_public_claim_lock(bundle)
+    assert "behavior_changed_detected" in r["closure_reasons"]
+
+
+def test_h5_45_no_smoke_blocks(monkeypatch):
+    """H5-45 T12: missing e2e smoke pass blocks."""
+    from scripts.bench.capability_ab_runner import _build_h5_governance_closure_public_claim_lock
+    monkeypatch.setenv("NEXUS_H5_ALLOW_GOVERNANCE_CLOSURE", "1")
+    bundle = {"h5_full_guarded_benchmark_run": {"run_passed": True, "full_guarded_benchmark_ready": True, "e2e_smoke_passed_count": 0, "safe_final_state_count": 0, "regression_count": 0, "cloud_invoked_count": 0, "model_calls_incremented_count": 0, "behavior_changed_count": 0},
+              "h5_quality_non_regression_gate": {"quality_non_regression_passed": True},
+              "h5_guarded_local_candidate_benchmark_trial": {"trial_passed": True}}
+    r = _build_h5_governance_closure_public_claim_lock(bundle)
+    assert "missing_e2e_smoke_pass" in r["closure_reasons"]
+
+
+def test_h5_45_bundle_attaches(tmp_path, monkeypatch):
+    """H5-45 T13: evidence bundle attaches governance closure."""
+    from scripts.bench.capability_ab_runner import CapabilityTask, _finalize_with_nexus_row, write_evidence_bundle
+    task = CapabilityTask(id="t-h5-45", difficulty="easy", task_type="test_repair", task_desc="v", target_file="t.py", test_file="test_t.py", expected_capabilities=("claim_gate",), success_criteria="tests_pass", repo_kind="nexus_internal", fixture_kind="test_fixture")
+    _h5_all_flags_set_with_gate(monkeypatch)
+    monkeypatch.setattr("scripts.bench.capability_ab_runner._git_commit", lambda x: "d")
+    row = _finalize_with_nexus_row({"mode": "with_nexus", "model_calls": 1, "total_tokens": 100, "token_capture_status": "measured", "committee_trace": {"candidate_count": 2, "judge_selection": {"selected_candidate_id": "C_1"}, "committee_receipt": {"selected_candidate_applied": True, "selected_candidate_apply_hash_match": True}}, "local_solve_eligible": True}, provider="gemini", model_required=True, nexus_required=False, task=task, repo_root=tmp_path)
+    wp = tmp_path / "w.jsonl"; wp.write_text("[]", encoding="utf-8")
+    wop = tmp_path / "wo.jsonl"; wop.write_text("[]", encoding="utf-8")
+    bf = write_evidence_bundle(out_dir=tmp_path, with_path=wp, without_path=wop, rows=[row], config={"tasks_file": "t.json", "tasks_manifest_hash": "m", "unique_tasks_requested": 1, "repeat_trials": 1, "timeout_sec": 60})
+    bundle = json.loads(bf.read_text(encoding="utf-8"))
+    assert "h5_governance_closure_public_claim_lock" in bundle
+    g = bundle["h5_governance_closure_public_claim_lock"]
+    assert g["schema"] == "nexus.hybrid_h5_governance_closure_public_claim_lock.v1"
+    assert g["production_ready"] is False
+    assert g["public_claim_allowed"] is False
+
+
+def test_h5_45_pr_false_always(monkeypatch):
+    """H5-45 T14: production_ready and public_claim always false."""
+    from scripts.bench.capability_ab_runner import _build_h5_governance_closure_public_claim_lock
+    monkeypatch.setenv("NEXUS_H5_ALLOW_GOVERNANCE_CLOSURE", "1")
+    bundle = {"h5_full_guarded_benchmark_run": {"run_passed": True, "full_guarded_benchmark_ready": True, "e2e_smoke_passed_count": 1, "safe_final_state_count": 1, "regression_count": 0, "cloud_invoked_count": 0, "model_calls_incremented_count": 0, "behavior_changed_count": 0},
+              "h5_quality_non_regression_gate": {"quality_non_regression_passed": True},
+              "h5_guarded_local_candidate_benchmark_trial": {"trial_passed": True}}
+    r = _build_h5_governance_closure_public_claim_lock(bundle)
+    assert r["production_ready"] is False
+    assert r["public_claim_allowed"] is False
+
+
+def test_h5_45_locks_always(monkeypatch):
+    """H5-45 T15: locks always active."""
+    from scripts.bench.capability_ab_runner import _build_h5_governance_closure_public_claim_lock
+    monkeypatch.setenv("NEXUS_H5_ALLOW_GOVERNANCE_CLOSURE", "1")
+    bundle = {"h5_full_guarded_benchmark_run": {"run_passed": True, "full_guarded_benchmark_ready": True, "e2e_smoke_passed_count": 1, "safe_final_state_count": 1, "regression_count": 0, "cloud_invoked_count": 0, "model_calls_incremented_count": 0, "behavior_changed_count": 0},
+              "h5_quality_non_regression_gate": {"quality_non_regression_passed": True},
+              "h5_guarded_local_candidate_benchmark_trial": {"trial_passed": True}}
+    r = _build_h5_governance_closure_public_claim_lock(bundle)
+    assert r["public_claim_lock_active"] is True
+    assert r["production_lock_active"] is True
+
+
+def test_h5_45_summary_counters(tmp_path, monkeypatch):
+    """H5-45 T16: summary counters reflect lock state."""
+    from scripts.bench.capability_ab_runner import CapabilityTask, _finalize_with_nexus_row, write_evidence_bundle
+    task = CapabilityTask(id="t-h5-45s", difficulty="easy", task_type="test_repair", task_desc="v", target_file="t.py", test_file="test_t.py", expected_capabilities=("claim_gate",), success_criteria="tests_pass", repo_kind="nexus_internal", fixture_kind="test_fixture")
+    _h5_all_flags_set_with_gate(monkeypatch)
+    monkeypatch.setattr("scripts.bench.capability_ab_runner._git_commit", lambda x: "d")
+    row = _finalize_with_nexus_row({"mode": "with_nexus", "model_calls": 1, "total_tokens": 100, "token_capture_status": "measured", "committee_trace": {"candidate_count": 2, "judge_selection": {"selected_candidate_id": "C_1"}, "committee_receipt": {"selected_candidate_applied": True, "selected_candidate_apply_hash_match": True}}, "local_solve_eligible": True}, provider="gemini", model_required=True, nexus_required=False, task=task, repo_root=tmp_path)
+    wp = tmp_path / "w.jsonl"; wp.write_text("[]", encoding="utf-8")
+    wop = tmp_path / "wo.jsonl"; wop.write_text("[]", encoding="utf-8")
+    bf = write_evidence_bundle(out_dir=tmp_path, with_path=wp, without_path=wop, rows=[row], config={"tasks_file": "t.json", "tasks_manifest_hash": "m", "unique_tasks_requested": 1, "repeat_trials": 1, "timeout_sec": 60})
+    bundle = json.loads(bf.read_text(encoding="utf-8"))
+    assert "h5_governance_closure_public_claim_lock" in bundle
+    g = bundle["h5_governance_closure_public_claim_lock"]
+    assert g["public_claim_lock_active"] is True
+    assert g["production_lock_active"] is True
+    assert g["production_ready"] is False
+    assert g["public_claim_allowed"] is False
