@@ -22796,3 +22796,267 @@ def test_h5_49_flagged_pass(monkeypatch):
     assert r["test_pass_rate"] == 1.0
     assert r["apply_test_pass_rate"] == 1.0
     assert r["safety_violation_count"] == 0
+
+
+def test_h5_50_empty_rows_blocks():
+    """H5-50 T1: empty rows block."""
+    from scripts.bench.capability_ab_runner import _build_h5_benchmark_delta_report
+    r = _build_h5_benchmark_delta_report([])
+    assert r["delta_status"] == "blocked"
+    assert r["delta_allowed"] is False
+
+
+def test_h5_50_flag_missing(monkeypatch):
+    """H5-50 T2: flag missing blocks."""
+    from scripts.bench.capability_ab_runner import _build_h5_benchmark_delta_report
+    monkeypatch.delenv("NEXUS_H5_ALLOW_BENCHMARK_DELTA_REPORT", raising=False)
+    r = _build_h5_benchmark_delta_report([])
+    assert "delta_report_flag_not_enabled" in r["delta_reasons"]
+
+
+def test_h5_50_missing_trial(monkeypatch):
+    """H5-50 T3: missing H5-49 trial blocks."""
+    from scripts.bench.capability_ab_runner import _build_h5_benchmark_delta_report
+    monkeypatch.setenv("NEXUS_H5_ALLOW_BENCHMARK_DELTA_REPORT", "1")
+    r = _build_h5_benchmark_delta_report([], {})
+    assert "missing_h5_49_apply_test_trial" in r["delta_reasons"]
+
+
+def test_h5_50_trial_not_passed(monkeypatch):
+    """H5-50 T4: H5-49 trial not passed blocks."""
+    from scripts.bench.capability_ab_runner import _build_h5_benchmark_delta_report
+    monkeypatch.setenv("NEXUS_H5_ALLOW_BENCHMARK_DELTA_REPORT", "1")
+    bundle = {"h5_controlled_real_patch_apply_test_trial": {"trial_passed": False, "ready_for_benchmark_delta": False, "safety_violation_count": 0}}
+    r = _build_h5_benchmark_delta_report([], bundle)
+    assert "h5_49_trial_not_passed" in r["delta_reasons"]
+
+
+def test_h5_50_not_ready_for_delta(monkeypatch):
+    """H5-50 T5: not ready_for_benchmark_delta blocks."""
+    from scripts.bench.capability_ab_runner import _build_h5_benchmark_delta_report
+    monkeypatch.setenv("NEXUS_H5_ALLOW_BENCHMARK_DELTA_REPORT", "1")
+    bundle = {"h5_controlled_real_patch_apply_test_trial": {"trial_passed": True, "ready_for_benchmark_delta": False, "safety_violation_count": 0}}
+    r = _build_h5_benchmark_delta_report([], bundle)
+    assert "not_ready_for_benchmark_delta" in r["delta_reasons"]
+
+
+def test_h5_50_missing_baseline(monkeypatch):
+    """H5-50 T6: missing baseline rows blocks."""
+    from scripts.bench.capability_ab_runner import _build_h5_benchmark_delta_report
+    monkeypatch.setenv("NEXUS_H5_ALLOW_BENCHMARK_DELTA_REPORT", "1")
+    bundle = {"h5_controlled_real_patch_apply_test_trial": {"trial_passed": True, "ready_for_benchmark_delta": True, "safety_violation_count": 0}}
+    r = _build_h5_benchmark_delta_report([{"mode": "h5"}], bundle)
+    assert "missing_baseline_rows" in r["delta_reasons"]
+
+
+def test_h5_50_missing_h5_rows(monkeypatch):
+    """H5-50 T7: missing H5 rows blocks."""
+    from scripts.bench.capability_ab_runner import _build_h5_benchmark_delta_report
+    monkeypatch.setenv("NEXUS_H5_ALLOW_BENCHMARK_DELTA_REPORT", "1")
+    bundle = {"h5_controlled_real_patch_apply_test_trial": {"trial_passed": True, "ready_for_benchmark_delta": True, "safety_violation_count": 0}}
+    r = _build_h5_benchmark_delta_report([{"mode": "baseline"}], bundle)
+    assert "missing_h5_rows" in r["delta_reasons"]
+
+
+def test_h5_50_clean_delta_ready(monkeypatch):
+    """H5-50 T8: clean baseline/H5 fixture produces delta_ready=true."""
+    from scripts.bench.capability_ab_runner import _build_h5_benchmark_delta_report
+    monkeypatch.setenv("NEXUS_H5_ALLOW_BENCHMARK_DELTA_REPORT", "1")
+    bundle = {"h5_controlled_real_patch_apply_test_trial": {"trial_passed": True, "ready_for_benchmark_delta": True, "safety_violation_count": 0}}
+    rows = [{"mode": "baseline", "candidate_solved": False}, {"mode": "h5", "candidate_solved": True}]
+    r = _build_h5_benchmark_delta_report(rows, bundle)
+    assert r["delta_ready"] is True
+    assert r["delta_status"] == "benchmark_delta_report_ready"
+
+
+def test_h5_50_solve_rate_delta(monkeypatch):
+    """H5-50 T9: solve_rate_delta computed."""
+    from scripts.bench.capability_ab_runner import _build_h5_benchmark_delta_report
+    monkeypatch.setenv("NEXUS_H5_ALLOW_BENCHMARK_DELTA_REPORT", "1")
+    bundle = {"h5_controlled_real_patch_apply_test_trial": {"trial_passed": True, "ready_for_benchmark_delta": True, "safety_violation_count": 0}}
+    rows = [{"mode": "baseline", "candidate_solved": False}, {"mode": "h5", "candidate_solved": True}]
+    r = _build_h5_benchmark_delta_report(rows, bundle)
+    assert r["baseline_solve_rate"] == 0.0
+    assert r["h5_solve_rate"] == 1.0
+    assert r["solve_rate_delta"] == 1.0
+
+
+def test_h5_50_apply_pass_rate_delta(monkeypatch):
+    """H5-50 T10: apply_pass_rate_delta computed."""
+    from scripts.bench.capability_ab_runner import _build_h5_benchmark_delta_report
+    monkeypatch.setenv("NEXUS_H5_ALLOW_BENCHMARK_DELTA_REPORT", "1")
+    bundle = {"h5_controlled_real_patch_apply_test_trial": {"trial_passed": True, "ready_for_benchmark_delta": True, "safety_violation_count": 0}}
+    rows = [{"mode": "baseline", "patch_apply_passed": False}, {"mode": "h5", "patch_apply_passed": True}]
+    r = _build_h5_benchmark_delta_report(rows, bundle)
+    assert r["apply_pass_rate_delta"] == 1.0
+
+
+def test_h5_50_test_pass_rate_delta(monkeypatch):
+    """H5-50 T11: test_pass_rate_delta computed."""
+    from scripts.bench.capability_ab_runner import _build_h5_benchmark_delta_report
+    monkeypatch.setenv("NEXUS_H5_ALLOW_BENCHMARK_DELTA_REPORT", "1")
+    bundle = {"h5_controlled_real_patch_apply_test_trial": {"trial_passed": True, "ready_for_benchmark_delta": True, "safety_violation_count": 0}}
+    rows = [{"mode": "baseline", "tests_run": 1, "tests_passed": 0}, {"mode": "h5", "tests_run": 1, "tests_passed": 1}]
+    r = _build_h5_benchmark_delta_report(rows, bundle)
+    assert r["test_pass_rate_delta"] == 1.0
+
+
+def test_h5_50_apply_test_pass_rate_delta(monkeypatch):
+    """H5-50 T12: apply_test_pass_rate_delta computed."""
+    from scripts.bench.capability_ab_runner import _build_h5_benchmark_delta_report
+    monkeypatch.setenv("NEXUS_H5_ALLOW_BENCHMARK_DELTA_REPORT", "1")
+    bundle = {"h5_controlled_real_patch_apply_test_trial": {"trial_passed": True, "ready_for_benchmark_delta": True, "safety_violation_count": 0}}
+    rows = [{"mode": "baseline", "apply_test_passed": False}, {"mode": "h5", "apply_test_passed": True}]
+    r = _build_h5_benchmark_delta_report(rows, bundle)
+    assert r["apply_test_pass_rate_delta"] == 1.0
+
+
+def test_h5_50_improvement_detected(monkeypatch):
+    """H5-50 T13: improvement_detected true when H5 improves."""
+    from scripts.bench.capability_ab_runner import _build_h5_benchmark_delta_report
+    monkeypatch.setenv("NEXUS_H5_ALLOW_BENCHMARK_DELTA_REPORT", "1")
+    bundle = {"h5_controlled_real_patch_apply_test_trial": {"trial_passed": True, "ready_for_benchmark_delta": True, "safety_violation_count": 0}}
+    rows = [{"mode": "baseline", "candidate_solved": False}, {"mode": "h5", "candidate_solved": True}]
+    r = _build_h5_benchmark_delta_report(rows, bundle)
+    assert r["improvement_detected"] is True
+
+
+def test_h5_50_regression_detected(monkeypatch):
+    """H5-50 T14: regression_detected true when H5 regresses."""
+    from scripts.bench.capability_ab_runner import _build_h5_benchmark_delta_report
+    monkeypatch.setenv("NEXUS_H5_ALLOW_BENCHMARK_DELTA_REPORT", "1")
+    bundle = {"h5_controlled_real_patch_apply_test_trial": {"trial_passed": True, "ready_for_benchmark_delta": True, "safety_violation_count": 0}}
+    rows = [{"mode": "baseline", "candidate_solved": True}, {"mode": "h5", "candidate_solved": False}]
+    r = _build_h5_benchmark_delta_report(rows, bundle)
+    assert r["regression_detected"] is True
+
+
+def test_h5_50_neutral_delta(monkeypatch):
+    """H5-50 T15: neutral_delta true when equal."""
+    from scripts.bench.capability_ab_runner import _build_h5_benchmark_delta_report
+    monkeypatch.setenv("NEXUS_H5_ALLOW_BENCHMARK_DELTA_REPORT", "1")
+    bundle = {"h5_controlled_real_patch_apply_test_trial": {"trial_passed": True, "ready_for_benchmark_delta": True, "safety_violation_count": 0}}
+    rows = [{"mode": "baseline", "candidate_solved": True}, {"mode": "h5", "candidate_solved": True}]
+    r = _build_h5_benchmark_delta_report(rows, bundle)
+    assert r["neutral_delta"] is True
+    assert r["solve_rate_delta"] == 0.0
+
+
+def test_h5_50_safety_blocks(monkeypatch):
+    """H5-50 T16: safety violation blocks readiness."""
+    from scripts.bench.capability_ab_runner import _build_h5_benchmark_delta_report
+    monkeypatch.setenv("NEXUS_H5_ALLOW_BENCHMARK_DELTA_REPORT", "1")
+    bundle = {"h5_controlled_real_patch_apply_test_trial": {"trial_passed": True, "ready_for_benchmark_delta": True, "safety_violation_count": 0}}
+    rows = [{"mode": "baseline"}, {"mode": "h5", "cloud_invoked": True}]
+    r = _build_h5_benchmark_delta_report(rows, bundle)
+    assert r["delta_ready"] is False
+    assert r["safety_violation_count"] == 1
+
+
+def test_h5_50_ready_for_larger(monkeypatch):
+    """H5-50 T17: ready_for_larger_benchmark_run true when improvement."""
+    from scripts.bench.capability_ab_runner import _build_h5_benchmark_delta_report
+    monkeypatch.setenv("NEXUS_H5_ALLOW_BENCHMARK_DELTA_REPORT", "1")
+    bundle = {"h5_controlled_real_patch_apply_test_trial": {"trial_passed": True, "ready_for_benchmark_delta": True, "safety_violation_count": 0}}
+    rows = [{"mode": "baseline", "candidate_solved": False}, {"mode": "h5", "candidate_solved": True}]
+    r = _build_h5_benchmark_delta_report(rows, bundle)
+    assert r["ready_for_larger_benchmark_run"] is True
+
+
+def test_h5_50_not_ready_when_regression(monkeypatch):
+    """H5-50 T18: ready_for_larger false when regression."""
+    from scripts.bench.capability_ab_runner import _build_h5_benchmark_delta_report
+    monkeypatch.setenv("NEXUS_H5_ALLOW_BENCHMARK_DELTA_REPORT", "1")
+    bundle = {"h5_controlled_real_patch_apply_test_trial": {"trial_passed": True, "ready_for_benchmark_delta": True, "safety_violation_count": 0}}
+    rows = [{"mode": "baseline", "candidate_solved": True}, {"mode": "h5", "candidate_solved": False}]
+    r = _build_h5_benchmark_delta_report(rows, bundle)
+    assert r["ready_for_larger_benchmark_run"] is False
+
+
+def test_h5_50_bundle_attaches(tmp_path, monkeypatch):
+    """H5-50 T19: bundle attaches delta report."""
+    from scripts.bench.capability_ab_runner import CapabilityTask, _finalize_with_nexus_row, write_evidence_bundle
+    task = CapabilityTask(id="t-h5-50", difficulty="easy", task_type="test_repair", task_desc="v", target_file="t.py", test_file="test_t.py", expected_capabilities=("claim_gate",), success_criteria="tests_pass", repo_kind="nexus_internal", fixture_kind="test_fixture")
+    _h5_all_flags_set_with_gate(monkeypatch)
+    monkeypatch.setattr("scripts.bench.capability_ab_runner._git_commit", lambda x: "d")
+    row = _finalize_with_nexus_row({"mode": "with_nexus", "model_calls": 1, "total_tokens": 100, "token_capture_status": "measured", "committee_trace": {"candidate_count": 2, "judge_selection": {"selected_candidate_id": "C_1"}, "committee_receipt": {"selected_candidate_applied": True, "selected_candidate_apply_hash_match": True}}, "local_solve_eligible": True}, provider="gemini", model_required=True, nexus_required=False, task=task, repo_root=tmp_path)
+    wp = tmp_path / "w.jsonl"; wp.write_text("[]", encoding="utf-8")
+    wop = tmp_path / "wo.jsonl"; wop.write_text("[]", encoding="utf-8")
+    bf = write_evidence_bundle(out_dir=tmp_path, with_path=wp, without_path=wop, rows=[row], config={"tasks_file": "t.json", "tasks_manifest_hash": "m", "unique_tasks_requested": 1, "repeat_trials": 1, "timeout_sec": 60})
+    bundle = json.loads(bf.read_text(encoding="utf-8"))
+    assert "h5_benchmark_delta_report" in bundle
+    assert bundle["h5_benchmark_delta_report"]["production_ready"] is False
+
+
+def test_h5_50_pr_false_always(monkeypatch):
+    """H5-50 T20: production_ready=false always."""
+    from scripts.bench.capability_ab_runner import _build_h5_benchmark_delta_report
+    monkeypatch.setenv("NEXUS_H5_ALLOW_BENCHMARK_DELTA_REPORT", "1")
+    bundle = {"h5_controlled_real_patch_apply_test_trial": {"trial_passed": True, "ready_for_benchmark_delta": True, "safety_violation_count": 0}}
+    rows = [{"mode": "baseline"}, {"mode": "h5"}]
+    r = _build_h5_benchmark_delta_report(rows, bundle)
+    assert r["production_ready"] is False
+    assert r["public_claim_allowed"] is False
+
+
+def test_h5_50_summary_counters(tmp_path, monkeypatch):
+    """H5-50 T21: summary counters reflect delta metrics."""
+    from scripts.bench.capability_ab_runner import CapabilityTask, _finalize_with_nexus_row, write_evidence_bundle
+    task = CapabilityTask(id="t-h5-50s", difficulty="easy", task_type="test_repair", task_desc="v", target_file="t.py", test_file="test_t.py", expected_capabilities=("claim_gate",), success_criteria="tests_pass", repo_kind="nexus_internal", fixture_kind="test_fixture")
+    _h5_all_flags_set_with_gate(monkeypatch)
+    monkeypatch.setattr("scripts.bench.capability_ab_runner._git_commit", lambda x: "d")
+    row = _finalize_with_nexus_row({"mode": "with_nexus", "model_calls": 1, "total_tokens": 100, "token_capture_status": "measured", "committee_trace": {"candidate_count": 2, "judge_selection": {"selected_candidate_id": "C_1"}, "committee_receipt": {"selected_candidate_applied": True, "selected_candidate_apply_hash_match": True}}, "local_solve_eligible": True}, provider="gemini", model_required=True, nexus_required=False, task=task, repo_root=tmp_path)
+    wp = tmp_path / "w.jsonl"; wp.write_text("[]", encoding="utf-8")
+    wop = tmp_path / "wo.jsonl"; wop.write_text("[]", encoding="utf-8")
+    bf = write_evidence_bundle(out_dir=tmp_path, with_path=wp, without_path=wop, rows=[row], config={"tasks_file": "t.json", "tasks_manifest_hash": "m", "unique_tasks_requested": 1, "repeat_trials": 1, "timeout_sec": 60})
+    bundle = json.loads(bf.read_text(encoding="utf-8"))
+    assert bundle["h5_benchmark_delta_report"]["production_ready"] is False
+    assert bundle["h5_benchmark_delta_report"]["delta_allowed"] is False
+
+
+def test_h5_50_default_env_blocked(monkeypatch):
+    """H5-50 T22: default env blocked."""
+    from scripts.bench.capability_ab_runner import _build_h5_benchmark_delta_report
+    monkeypatch.delenv("NEXUS_H5_ALLOW_BENCHMARK_DELTA_REPORT", raising=False)
+    r = _build_h5_benchmark_delta_report([])
+    assert r["delta_allowed"] is False
+
+
+def test_h5_50_collect_only():
+    """H5-50 T23: collect-only includes all H5-50 tests."""
+    import subprocess, re
+    result = subprocess.run(["python3", "-m", "pytest", "tests/benchmark/test_capability_ab_runner.py", "-k", "h5_50", "--collect-only", "-q"], capture_output=True, text=True, cwd="/Users/jameschen/Workspace/nexus")
+    count = len(re.findall(r"test_h5_50_", result.stdout))
+    assert count >= 24, f"Expected >= 24 H5-50 tests, got {count}"
+
+
+def test_h5_50_mixed_rows(monkeypatch):
+    """H5-50 T24: handles mixed baseline/H5 rows."""
+    from scripts.bench.capability_ab_runner import _build_h5_benchmark_delta_report
+    monkeypatch.setenv("NEXUS_H5_ALLOW_BENCHMARK_DELTA_REPORT", "1")
+    bundle = {"h5_controlled_real_patch_apply_test_trial": {"trial_passed": True, "ready_for_benchmark_delta": True, "safety_violation_count": 0}}
+    rows = [{"mode": "baseline"}, {"mode": "h5"}, {"mode": "h5"}]
+    r = _build_h5_benchmark_delta_report(rows, bundle)
+    assert r["baseline_row_count"] == 1
+    assert r["h5_row_count"] == 2
+
+
+def test_h5_50_side_effect_safety(monkeypatch):
+    """H5-50 T25: model_calls/cloud/behavior side-effects count as safety."""
+    from scripts.bench.capability_ab_runner import _build_h5_benchmark_delta_report
+    monkeypatch.setenv("NEXUS_H5_ALLOW_BENCHMARK_DELTA_REPORT", "1")
+    bundle = {"h5_controlled_real_patch_apply_test_trial": {"trial_passed": True, "ready_for_benchmark_delta": True, "safety_violation_count": 0}}
+    rows = [{"mode": "baseline"}, {"mode": "h5", "repo_mutated": True, "cloud_invoked": True, "model_calls_incremented": True, "behavior_changed": True}]
+    r = _build_h5_benchmark_delta_report(rows, bundle)
+    assert r["safety_violation_count"] == 4
+
+
+def test_h5_50_negative_delta_regression_reason(monkeypatch):
+    """H5-50 T26: negative delta adds regression reason."""
+    from scripts.bench.capability_ab_runner import _build_h5_benchmark_delta_report
+    monkeypatch.setenv("NEXUS_H5_ALLOW_BENCHMARK_DELTA_REPORT", "1")
+    bundle = {"h5_controlled_real_patch_apply_test_trial": {"trial_passed": True, "ready_for_benchmark_delta": True, "safety_violation_count": 0}}
+    rows = [{"mode": "baseline", "candidate_solved": True}, {"mode": "h5", "candidate_solved": False}]
+    r = _build_h5_benchmark_delta_report(rows, bundle)
+    assert "benchmark_regression_detected" in r["delta_reasons"]
+    assert r["solve_rate_delta"] == -1.0

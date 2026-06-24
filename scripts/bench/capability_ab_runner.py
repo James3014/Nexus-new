@@ -9161,6 +9161,145 @@ def _build_h5_controlled_real_patch_apply_test_trial(rows: list[dict[str, Any]],
     }
 
 
+def _build_h5_benchmark_delta_report(rows: list[dict[str, Any]], bundle: dict[str, Any] | None = None) -> dict[str, Any]:
+    """Pure helper: benchmark delta report comparing baseline vs H5 metrics."""
+    import os as _os
+
+    flag = _os.environ.get("NEXUS_H5_ALLOW_BENCHMARK_DELTA_REPORT", "").strip() == "1"
+
+    apply_trial = None
+    if bundle:
+        apply_trial = bundle.get("h5_controlled_real_patch_apply_test_trial")
+
+    trial_present = bool(apply_trial)
+    trial_passed = bool(apply_trial.get("trial_passed", False)) if apply_trial else False
+    ready_delta = bool(apply_trial.get("ready_for_benchmark_delta", False)) if apply_trial else False
+    trial_safety = int(apply_trial.get("safety_violation_count", 0)) if apply_trial else 0
+
+    baseline_rows = [r for r in rows if str(r.get("mode", "")) == "baseline"]
+    h5_rows = [r for r in rows if str(r.get("mode", "")) == "h5"]
+
+    bl_count = len(baseline_rows)
+    h5_count = len(h5_rows)
+
+    bl_solved = sum(1 for r in baseline_rows if bool(r.get("candidate_solved", False)))
+    h5_solved = sum(1 for r in h5_rows if bool(r.get("candidate_solved", False)))
+    bl_solve_rate = bl_solved / bl_count if bl_count > 0 else 0.0
+    h5_solve_rate = h5_solved / h5_count if h5_count > 0 else 0.0
+    solve_delta = h5_solve_rate - bl_solve_rate
+
+    bl_apply = sum(1 for r in baseline_rows if bool(r.get("patch_apply_passed", False)))
+    h5_apply = sum(1 for r in h5_rows if bool(r.get("patch_apply_passed", False)))
+    bl_apply_rate = bl_apply / bl_count if bl_count > 0 else 0.0
+    h5_apply_rate = h5_apply / h5_count if h5_count > 0 else 0.0
+    apply_delta = h5_apply_rate - bl_apply_rate
+
+    bl_tp = sum(1 for r in baseline_rows if bool(r.get("tests_passed", 0)))
+    h5_tp = sum(1 for r in h5_rows if bool(r.get("tests_passed", 0)))
+    bl_tr = sum(int(r.get("tests_run", 0) or 0) for r in baseline_rows)
+    h5_tr = sum(int(r.get("tests_run", 0) or 0) for r in h5_rows)
+    bl_test_rate = bl_tp / bl_tr if bl_tr > 0 else 0.0
+    h5_test_rate = h5_tp / h5_tr if h5_tr > 0 else 0.0
+    test_delta = h5_test_rate - bl_test_rate
+
+    bl_atp = sum(1 for r in baseline_rows if bool(r.get("apply_test_passed", False)))
+    h5_atp = sum(1 for r in h5_rows if bool(r.get("apply_test_passed", False)))
+    bl_atp_rate = bl_atp / bl_count if bl_count > 0 else 0.0
+    h5_atp_rate = h5_atp / h5_count if h5_count > 0 else 0.0
+    atp_delta = h5_atp_rate - bl_atp_rate
+
+    improvement = solve_delta > 0 or apply_delta > 0 or test_delta > 0 or atp_delta > 0
+    regression = solve_delta < 0 or apply_delta < 0 or test_delta < 0 or atp_delta < 0
+    neutral = not improvement and not regression
+
+    repo_mut = sum(1 for r in rows if bool(r.get("repo_mutated", False)))
+    cloud_inv = sum(1 for r in rows if bool(r.get("cloud_invoked", False)))
+    mc_inc = sum(1 for r in rows if bool(r.get("model_calls_incremented", False)))
+    beh = sum(1 for r in rows if bool(r.get("behavior_changed", False)))
+    safety = repo_mut + cloud_inv + mc_inc + beh
+
+    delta_allowed = (
+        flag and trial_present and trial_passed
+        and ready_delta and trial_safety == 0
+    )
+
+    delta_ready = (
+        delta_allowed and bl_count > 0 and h5_count > 0 and safety == 0
+    )
+
+    ready_larger = (
+        delta_ready and improvement and not regression and safety == 0
+    )
+
+    reasons = []
+    if not flag:
+        reasons.append("delta_report_flag_not_enabled")
+    if not trial_present:
+        reasons.append("missing_h5_49_apply_test_trial")
+    if apply_trial and not trial_passed:
+        reasons.append("h5_49_trial_not_passed")
+    if apply_trial and not ready_delta:
+        reasons.append("not_ready_for_benchmark_delta")
+    if bl_count == 0:
+        reasons.append("missing_baseline_rows")
+    if h5_count == 0:
+        reasons.append("missing_h5_rows")
+    if safety > 0:
+        reasons.append("safety_violation_detected")
+    if regression:
+        reasons.append("benchmark_regression_detected")
+    reasons.extend([
+        "h5_50_delta_report_not_production",
+        "benchmark_delta_internal_only",
+        "repo_mutation_blocked_outside_isolation",
+        "cloud_invocation_blocked",
+        "model_calls_increment_blocked",
+        "production_claim_blocked",
+        "public_claim_blocked",
+    ])
+
+    return {
+        "schema": "nexus.hybrid_h5_benchmark_delta_report.v1",
+        "evaluated": True,
+        "delta_status": "benchmark_delta_report_ready" if delta_ready else ("blocked" if not delta_allowed else "benchmark_delta_report_fail"),
+        "delta_reasons": reasons,
+        "delta_allowed": delta_allowed,
+        "delta_ready": delta_ready,
+        "row_count": len(rows),
+        "baseline_row_count": bl_count,
+        "h5_row_count": h5_count,
+        "baseline_solved_count": bl_solved,
+        "h5_solved_count": h5_solved,
+        "baseline_solve_rate": bl_solve_rate,
+        "h5_solve_rate": h5_solve_rate,
+        "solve_rate_delta": solve_delta,
+        "baseline_apply_passed_count": bl_apply,
+        "h5_apply_passed_count": h5_apply,
+        "baseline_apply_pass_rate": bl_apply_rate,
+        "h5_apply_pass_rate": h5_apply_rate,
+        "apply_pass_rate_delta": apply_delta,
+        "baseline_test_passed_count": bl_tp,
+        "h5_test_passed_count": h5_tp,
+        "baseline_test_pass_rate": bl_test_rate,
+        "h5_test_pass_rate": h5_test_rate,
+        "test_pass_rate_delta": test_delta,
+        "baseline_apply_test_pass_rate": bl_atp_rate,
+        "h5_apply_test_pass_rate": h5_atp_rate,
+        "apply_test_pass_rate_delta": atp_delta,
+        "improvement_detected": improvement,
+        "regression_detected": regression,
+        "neutral_delta": neutral,
+        "safety_violation_count": safety,
+        "repo_mutated_count": repo_mut,
+        "cloud_invoked_count": cloud_inv,
+        "model_calls_incremented_count": mc_inc,
+        "behavior_changed_count": beh,
+        "ready_for_larger_benchmark_run": ready_larger,
+        "production_ready": False,
+        "public_claim_allowed": False,
+    }
+
+
 def _finalize_with_nexus_row(
     row: dict[str, Any],
     *,
@@ -13631,6 +13770,19 @@ def write_evidence_bundle(
         "h5_controlled_apply_test_trial_test_pass_rate": _build_h5_controlled_real_patch_apply_test_trial(with_rows, payload).get("test_pass_rate", 0.0),
         "h5_controlled_apply_test_trial_apply_test_pass_rate": _build_h5_controlled_real_patch_apply_test_trial(with_rows, payload).get("apply_test_pass_rate", 0.0),
         "h5_controlled_apply_test_trial_safety_violation_count": _build_h5_controlled_real_patch_apply_test_trial(with_rows, payload).get("safety_violation_count", 0),
+        "h5_benchmark_delta_report_present": 1 if _build_h5_benchmark_delta_report(with_rows, payload).get("evaluated") else 0,
+        "h5_benchmark_delta_report_allowed": 1 if _build_h5_benchmark_delta_report(with_rows, payload).get("delta_allowed") else 0,
+        "h5_benchmark_delta_report_ready": 1 if _build_h5_benchmark_delta_report(with_rows, payload).get("delta_ready") else 0,
+        "h5_benchmark_delta_report_improvement_detected": 1 if _build_h5_benchmark_delta_report(with_rows, payload).get("improvement_detected") else 0,
+        "h5_benchmark_delta_report_regression_detected": 1 if _build_h5_benchmark_delta_report(with_rows, payload).get("regression_detected") else 0,
+        "h5_benchmark_delta_report_ready_for_larger_benchmark": 1 if _build_h5_benchmark_delta_report(with_rows, payload).get("ready_for_larger_benchmark_run") else 0,
+        "h5_benchmark_delta_report_baseline_solve_rate": _build_h5_benchmark_delta_report(with_rows, payload).get("baseline_solve_rate", 0.0),
+        "h5_benchmark_delta_report_h5_solve_rate": _build_h5_benchmark_delta_report(with_rows, payload).get("h5_solve_rate", 0.0),
+        "h5_benchmark_delta_report_solve_rate_delta": _build_h5_benchmark_delta_report(with_rows, payload).get("solve_rate_delta", 0.0),
+        "h5_benchmark_delta_report_apply_pass_rate_delta": _build_h5_benchmark_delta_report(with_rows, payload).get("apply_pass_rate_delta", 0.0),
+        "h5_benchmark_delta_report_test_pass_rate_delta": _build_h5_benchmark_delta_report(with_rows, payload).get("test_pass_rate_delta", 0.0),
+        "h5_benchmark_delta_report_apply_test_pass_rate_delta": _build_h5_benchmark_delta_report(with_rows, payload).get("apply_test_pass_rate_delta", 0.0),
+        "h5_benchmark_delta_report_safety_violation_count": _build_h5_benchmark_delta_report(with_rows, payload).get("safety_violation_count", 0),
     }
     payload["h5_guarded_local_candidate_benchmark_trial"] = _build_h5_guarded_local_candidate_benchmark_trial(with_rows)
     payload["h5_quality_non_regression_gate"] = _build_h5_quality_non_regression_gate(with_rows, payload["h5_guarded_local_candidate_benchmark_trial"])
@@ -13642,6 +13794,7 @@ def write_evidence_bundle(
     payload["h5_real_patch_verifier_score_trial"] = _build_h5_real_patch_verifier_score_trial(with_rows, payload)
     payload["h5_real_patch_benchmark_scoreboard"] = _build_h5_real_patch_benchmark_scoreboard(with_rows, payload)
     payload["h5_controlled_real_patch_apply_test_trial"] = _build_h5_controlled_real_patch_apply_test_trial(with_rows, payload)
+    payload["h5_benchmark_delta_report"] = _build_h5_benchmark_delta_report(with_rows, payload)
     payload["external_provider_claim_boundary_contract"] = build_external_provider_claim_boundary_contract(payload)
     payload["public_promotion_readiness_contract"] = build_public_promotion_readiness_contract(payload)
     bundle_path.write_text(json.dumps(payload, indent=2, ensure_ascii=False), encoding="utf-8")
