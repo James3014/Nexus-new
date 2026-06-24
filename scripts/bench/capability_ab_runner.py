@@ -10831,6 +10831,526 @@ def _build_h6_local_adapter_execution_plan_dry_run(rows: list[dict[str, Any]], b
     }
 
 
+def _build_h6_shadow_local_adapter_invocation_intent_receipt(rows: list[dict[str, Any]], bundle: dict[str, Any] | None = None) -> dict[str, Any]:
+    """Pure helper: H6 shadow local adapter invocation intent receipt."""
+    import os as _os
+
+    flag = _os.environ.get("NEXUS_H6_ALLOW_SHADOW_LOCAL_ADAPTER_INVOCATION_INTENT", "").strip() == "1"
+
+    plan = None
+    if bundle:
+        plan = bundle.get("h6_local_adapter_execution_plan_dry_run")
+
+    plan_present = bool(plan)
+    plan_ready = bool(plan.get("plan_ready", False)) if plan else False
+    plan_receipt_ready = bool(plan.get("execution_plan_receipt_ready", False)) if plan else False
+    ready_intent = bool(plan.get("ready_for_h6_5_shadow_local_adapter_invocation_intent", False)) if plan else False
+    plan_safety = int(plan.get("safety_violation_count", 0)) if plan else 0
+
+    ALLOWED_ROLES = {"selector", "localizer", "patch_synthesizer", "verifier_assist"}
+    ALLOWED_FAMILIES = {"qwen"}
+    ALLOWED_SIZES = {"3b", "7b", "14b"}
+    ALLOWED_INTENT_MODES = {"shadow_intent_only"}
+    ALLOWED_RECEIPT_STATUSES = {"intent_recorded"}
+
+    intents = [r.get("h6_shadow_local_adapter_invocation_intent") for r in rows if r.get("h6_shadow_local_adapter_invocation_intent")]
+    receipts = [r.get("h6_shadow_local_adapter_invocation_intent_receipt") for r in rows if r.get("h6_shadow_local_adapter_invocation_intent_receipt")]
+
+    valid_intents = []
+    invalid_intents = 0
+    missing_intent_id = 0
+    missing_plan_id = 0
+    missing_request_id = 0
+    missing_adapter_id = 0
+    missing_model_name = 0
+    missing_role = 0
+    invalid_intent_mode = 0
+
+    valid_receipts = []
+    invalid_receipts = 0
+    invalid_intent_receipt = 0
+
+    mc_intended = 0
+    mc_count = 0
+    ol_count = 0
+    cl_count = 0
+    rm_count = 0
+    bh_count = 0
+    re_count = 0
+
+    for inp in intents:
+        iid = str(inp.get("intent_id", "") or "").strip()
+        pid = str(inp.get("plan_id", "") or "").strip()
+        rid = str(inp.get("request_id", "") or "").strip()
+        aid = str(inp.get("adapter_id", "") or "").strip()
+        fam = str(inp.get("model_family", "") or "").lower()
+        sz = str(inp.get("model_size", "") or "").lower()
+        mname = str(inp.get("model_name", "") or "").strip()
+        role = str(inp.get("role", "") or "").lower()
+        imode = str(inp.get("intent_mode", "") or "").lower()
+        mci = bool(inp.get("model_call_intended", False))
+        mc = bool(inp.get("model_call_executed", False))
+        ol = bool(inp.get("ollama_invoked", False))
+        cl = bool(inp.get("cloud_invoked", False))
+        rm = bool(inp.get("repo_mutated", False))
+        bh = bool(inp.get("behavior_changed", False))
+        re = bool(inp.get("runtime_effect", False))
+
+        if mci:
+            mc_intended += 1
+        if mc:
+            mc_count += 1
+        if ol:
+            ol_count += 1
+        if cl:
+            cl_count += 1
+        if rm:
+            rm_count += 1
+        if bh:
+            bh_count += 1
+        if re:
+            re_count += 1
+
+        is_valid = (
+            iid and pid and rid and aid and fam in ALLOWED_FAMILIES
+            and sz in ALLOWED_SIZES and mname and role in ALLOWED_ROLES
+            and imode in ALLOWED_INTENT_MODES and mci
+            and not mc and not ol and not cl and not rm and not bh and not re
+        )
+
+        if is_valid:
+            valid_intents.append(inp)
+        else:
+            invalid_intents += 1
+            if not iid:
+                missing_intent_id += 1
+            if not pid:
+                missing_plan_id += 1
+            if not rid:
+                missing_request_id += 1
+            if not aid:
+                missing_adapter_id += 1
+            if not mname:
+                missing_model_name += 1
+            if role not in ALLOWED_ROLES:
+                missing_role += 1
+            if imode not in ALLOWED_INTENT_MODES:
+                invalid_intent_mode += 1
+
+    for rec in receipts:
+        iid = str(rec.get("intent_id", "") or "").strip()
+        pid = str(rec.get("plan_id", "") or "").strip()
+        rid = str(rec.get("request_id", "") or "").strip()
+        aid = str(rec.get("adapter_id", "") or "").strip()
+        status = str(rec.get("receipt_status", "") or "").lower()
+        mci = bool(rec.get("model_call_intended", False))
+        mc = bool(rec.get("model_call_executed", False))
+        ol = bool(rec.get("ollama_invoked", False))
+        cl = bool(rec.get("cloud_invoked", False))
+        rm = bool(rec.get("repo_mutated", False))
+        bh = bool(rec.get("behavior_changed", False))
+        re = bool(rec.get("runtime_effect", False))
+
+        if mc:
+            mc_count += 1
+        if ol:
+            ol_count += 1
+        if cl:
+            cl_count += 1
+        if rm:
+            rm_count += 1
+        if bh:
+            bh_count += 1
+        if re:
+            re_count += 1
+
+        is_valid = (
+            iid and pid and rid and aid and status in ALLOWED_RECEIPT_STATUSES
+            and mci
+            and not mc and not ol and not cl and not rm and not bh and not re
+        )
+
+        if is_valid:
+            valid_receipts.append(rec)
+        else:
+            invalid_receipts += 1
+            if not iid or not pid or not rid or not aid or status not in ALLOWED_RECEIPT_STATUSES:
+                invalid_intent_receipt += 1
+
+    valid_intent_iids = {inp.get("intent_id") for inp in valid_intents}
+    valid_receipt_iids = {rec.get("intent_id") for rec in valid_receipts}
+    matched_iids = valid_intent_iids & valid_receipt_iids
+
+    safety = mc_count + ol_count + cl_count + rm_count + bh_count + re_count
+
+    intent_allowed = (
+        flag and plan_present and plan_ready
+        and plan_receipt_ready and ready_intent and plan_safety == 0
+    )
+
+    intent_ready = (
+        intent_allowed and len(valid_intents) > 0 and len(valid_receipts) > 0
+        and len(matched_iids) > 0 and safety == 0
+    )
+
+    invocation_intent_receipt_ready = (
+        intent_ready and invalid_intents == 0 and invalid_receipts == 0
+    )
+
+    ready_stub = (
+        invocation_intent_receipt_ready and mc_count == 0 and ol_count == 0
+        and cl_count == 0 and rm_count == 0 and bh_count == 0 and re_count == 0
+    )
+
+    reasons = []
+    if not flag:
+        reasons.append("invocation_intent_flag_not_enabled")
+    if not plan_present:
+        reasons.append("missing_h6_4_execution_plan")
+    if plan and not plan_ready:
+        reasons.append("h6_4_plan_not_ready")
+    if plan and not plan_receipt_ready:
+        reasons.append("h6_4_plan_receipt_not_ready")
+    if plan and not ready_intent:
+        reasons.append("not_ready_for_h6_5_shadow_local_adapter_invocation_intent")
+    if plan_safety > 0:
+        reasons.append("h6_4_safety_violation_detected")
+    if not intents:
+        reasons.append("no_invocation_intents")
+    if not receipts:
+        reasons.append("no_intent_receipts")
+    if intents and receipts and len(matched_iids) == 0:
+        reasons.append("no_matched_intents")
+    if missing_intent_id > 0:
+        reasons.append("missing_intent_id")
+    if missing_plan_id > 0:
+        reasons.append("missing_plan_id")
+    if missing_request_id > 0:
+        reasons.append("missing_request_id")
+    if missing_adapter_id > 0:
+        reasons.append("missing_adapter_id")
+    if missing_model_name > 0:
+        reasons.append("missing_model_name")
+    if missing_role > 0:
+        reasons.append("missing_role")
+    if invalid_intent_mode > 0:
+        reasons.append("invalid_intent_mode")
+    if invalid_intent_receipt > 0:
+        reasons.append("invalid_intent_receipt")
+    if mc_count > 0:
+        reasons.append("model_call_executed_detected")
+    if ol_count > 0:
+        reasons.append("ollama_invoked_detected")
+    if cl_count > 0:
+        reasons.append("cloud_invoked_detected")
+    if rm_count > 0:
+        reasons.append("repo_mutated_detected")
+    if bh_count > 0:
+        reasons.append("behavior_changed_detected")
+    if re_count > 0:
+        reasons.append("runtime_effect_detected")
+    reasons.extend([
+        "h6_5_shadow_local_adapter_invocation_intent_not_production",
+        "shadow_intent_only",
+        "no_model_calls_allowed",
+        "ollama_invocation_blocked",
+        "cloud_invocation_blocked",
+        "repo_mutation_blocked",
+        "runtime_effect_blocked",
+        "production_claim_blocked",
+        "public_claim_blocked",
+    ])
+
+    return {
+        "schema": "nexus.hybrid_h6_shadow_local_adapter_invocation_intent_receipt.v1",
+        "evaluated": True,
+        "intent_status": "intent_ready" if intent_ready else ("intent_fail" if intent_allowed else "blocked"),
+        "intent_reasons": reasons,
+        "intent_allowed": intent_allowed,
+        "intent_ready": intent_ready,
+        "row_count": len(rows),
+        "execution_plan_present": plan_present,
+        "execution_plan_ready": plan_ready,
+        "execution_plan_receipt_ready": plan_receipt_ready,
+        "ready_for_h6_5_shadow_local_adapter_invocation_intent": ready_intent,
+        "invocation_intent_count": len(intents),
+        "invocation_intent_valid_count": len(valid_intents),
+        "invocation_intent_invalid_count": invalid_intents,
+        "intent_receipt_count": len(receipts),
+        "intent_receipt_valid_count": len(valid_receipts),
+        "intent_receipt_invalid_count": invalid_receipts,
+        "missing_intent_id_count": missing_intent_id,
+        "missing_plan_id_count": missing_plan_id,
+        "missing_request_id_count": missing_request_id,
+        "missing_adapter_id_count": missing_adapter_id,
+        "missing_model_name_count": missing_model_name,
+        "missing_role_count": missing_role,
+        "invalid_intent_mode_count": invalid_intent_mode,
+        "invalid_intent_receipt_count": invalid_intent_receipt,
+        "model_call_intended_count": mc_intended,
+        "model_call_executed_count": mc_count,
+        "ollama_invoked_count": ol_count,
+        "cloud_invoked_count": cl_count,
+        "repo_mutated_count": rm_count,
+        "behavior_changed_count": bh_count,
+        "runtime_effect_count": re_count,
+        "safety_violation_count": safety,
+        "invocation_intent_receipt_ready": invocation_intent_receipt_ready,
+        "ready_for_h6_6_deterministic_local_adapter_stub_output": ready_stub,
+        "production_ready": False,
+        "public_claim_allowed": False,
+    }
+
+
+def _build_h6_deterministic_local_adapter_stub_output(rows: list[dict[str, Any]], bundle: dict[str, Any] | None = None) -> dict[str, Any]:
+    """Pure helper: H6 deterministic local adapter stub output."""
+    import os as _os
+
+    flag = _os.environ.get("NEXUS_H6_ALLOW_DETERMINISTIC_LOCAL_ADAPTER_STUB_OUTPUT", "").strip() == "1"
+
+    intent = None
+    if bundle:
+        intent = bundle.get("h6_shadow_local_adapter_invocation_intent_receipt")
+
+    intent_present = bool(intent)
+    intent_ready = bool(intent.get("intent_ready", False)) if intent else False
+    intent_receipt_ready = bool(intent.get("invocation_intent_receipt_ready", False)) if intent else False
+    ready_stub = bool(intent.get("ready_for_h6_6_deterministic_local_adapter_stub_output", False)) if intent else False
+    intent_safety = int(intent.get("safety_violation_count", 0)) if intent else 0
+
+    ALLOWED_ROLES = {"selector", "localizer", "patch_synthesizer", "verifier_assist"}
+    ALLOWED_FAMILIES = {"qwen"}
+    ALLOWED_SIZES = {"3b", "7b", "14b"}
+    ALLOWED_OUTPUT_STATUSES = {"deterministic_stub_only"}
+
+    stubs = [r.get("h6_deterministic_local_adapter_stub_output") for r in rows if r.get("h6_deterministic_local_adapter_stub_output")]
+
+    valid_stubs = []
+    invalid_stubs = 0
+    missing_stub_id = 0
+    missing_intent_id = 0
+    missing_request_id = 0
+    missing_adapter_id = 0
+    missing_model_name = 0
+    missing_role = 0
+    missing_output_ref = 0
+    missing_receipt_ref = 0
+    invalid_output_status = 0
+
+    qwen_3b = 0
+    qwen_7b = 0
+    qwen_14b = 0
+    role_selector = 0
+    role_localizer = 0
+    role_ps = 0
+    role_va = 0
+
+    mc_count = 0
+    ol_count = 0
+    cl_count = 0
+    rm_count = 0
+    bh_count = 0
+    re_count = 0
+
+    for s in stubs:
+        sid = str(s.get("stub_id", "") or "").strip()
+        iid = str(s.get("intent_id", "") or "").strip()
+        rid = str(s.get("request_id", "") or "").strip()
+        aid = str(s.get("adapter_id", "") or "").strip()
+        fam = str(s.get("model_family", "") or "").lower()
+        sz = str(s.get("model_size", "") or "").lower()
+        mname = str(s.get("model_name", "") or "").strip()
+        role = str(s.get("role", "") or "").lower()
+        ostatus = str(s.get("output_status", "") or "").lower()
+        oref = str(s.get("output_ref", "") or "").strip()
+        rref = str(s.get("receipt_ref", "") or "").strip()
+        mc = bool(s.get("model_call_executed", False))
+        ol = bool(s.get("ollama_invoked", False))
+        cl = bool(s.get("cloud_invoked", False))
+        rm = bool(s.get("repo_mutated", False))
+        bh = bool(s.get("behavior_changed", False))
+        re = bool(s.get("runtime_effect", False))
+
+        if mc:
+            mc_count += 1
+        if ol:
+            ol_count += 1
+        if cl:
+            cl_count += 1
+        if rm:
+            rm_count += 1
+        if bh:
+            bh_count += 1
+        if re:
+            re_count += 1
+
+        is_valid = (
+            sid and iid and rid and aid and fam in ALLOWED_FAMILIES
+            and sz in ALLOWED_SIZES and mname and role in ALLOWED_ROLES
+            and ostatus in ALLOWED_OUTPUT_STATUSES and oref and rref
+            and not mc and not ol and not cl and not rm and not bh and not re
+        )
+
+        if is_valid:
+            valid_stubs.append(s)
+            if sz == "3b":
+                qwen_3b += 1
+            elif sz == "7b":
+                qwen_7b += 1
+            elif sz == "14b":
+                qwen_14b += 1
+            if role == "selector":
+                role_selector += 1
+            elif role == "localizer":
+                role_localizer += 1
+            elif role == "patch_synthesizer":
+                role_ps += 1
+            elif role == "verifier_assist":
+                role_va += 1
+        else:
+            invalid_stubs += 1
+            if not sid:
+                missing_stub_id += 1
+            if not iid:
+                missing_intent_id += 1
+            if not rid:
+                missing_request_id += 1
+            if not aid:
+                missing_adapter_id += 1
+            if not mname:
+                missing_model_name += 1
+            if role not in ALLOWED_ROLES:
+                missing_role += 1
+            if not oref:
+                missing_output_ref += 1
+            if not rref:
+                missing_receipt_ref += 1
+            if ostatus not in ALLOWED_OUTPUT_STATUSES:
+                invalid_output_status += 1
+
+    safety = mc_count + ol_count + cl_count + rm_count + bh_count + re_count
+
+    stub_allowed = (
+        flag and intent_present and intent_ready
+        and intent_receipt_ready and ready_stub and intent_safety == 0
+    )
+
+    stub_ready = (
+        stub_allowed and len(valid_stubs) > 0 and safety == 0
+    )
+
+    stub_output_receipt_ready = (
+        stub_ready and invalid_stubs == 0
+    )
+
+    ready_boundary = (
+        stub_output_receipt_ready and mc_count == 0 and ol_count == 0
+        and cl_count == 0 and rm_count == 0 and bh_count == 0 and re_count == 0
+    )
+
+    reasons = []
+    if not flag:
+        reasons.append("deterministic_stub_output_flag_not_enabled")
+    if not intent_present:
+        reasons.append("missing_h6_5_invocation_intent")
+    if intent and not intent_ready:
+        reasons.append("h6_5_intent_not_ready")
+    if intent and not intent_receipt_ready:
+        reasons.append("h6_5_intent_receipt_not_ready")
+    if intent and not ready_stub:
+        reasons.append("not_ready_for_h6_6_deterministic_local_adapter_stub_output")
+    if intent_safety > 0:
+        reasons.append("h6_5_safety_violation_detected")
+    if not stubs:
+        reasons.append("no_stub_outputs")
+    if missing_stub_id > 0:
+        reasons.append("missing_stub_id")
+    if missing_intent_id > 0:
+        reasons.append("missing_intent_id")
+    if missing_request_id > 0:
+        reasons.append("missing_request_id")
+    if missing_adapter_id > 0:
+        reasons.append("missing_adapter_id")
+    if missing_model_name > 0:
+        reasons.append("missing_model_name")
+    if missing_role > 0:
+        reasons.append("missing_role")
+    if missing_output_ref > 0:
+        reasons.append("missing_output_ref")
+    if missing_receipt_ref > 0:
+        reasons.append("missing_receipt_ref")
+    if invalid_output_status > 0:
+        reasons.append("invalid_output_status")
+    if mc_count > 0:
+        reasons.append("model_call_executed_detected")
+    if ol_count > 0:
+        reasons.append("ollama_invoked_detected")
+    if cl_count > 0:
+        reasons.append("cloud_invoked_detected")
+    if rm_count > 0:
+        reasons.append("repo_mutated_detected")
+    if bh_count > 0:
+        reasons.append("behavior_changed_detected")
+    if re_count > 0:
+        reasons.append("runtime_effect_detected")
+    reasons.extend([
+        "h6_6_deterministic_local_adapter_stub_output_not_production",
+        "deterministic_stub_only",
+        "no_model_calls_allowed",
+        "ollama_invocation_blocked",
+        "cloud_invocation_blocked",
+        "repo_mutation_blocked",
+        "runtime_effect_blocked",
+        "production_claim_blocked",
+        "public_claim_blocked",
+    ])
+
+    return {
+        "schema": "nexus.hybrid_h6_deterministic_local_adapter_stub_output.v1",
+        "evaluated": True,
+        "stub_status": "stub_ready" if stub_ready else ("stub_fail" if stub_allowed else "blocked"),
+        "stub_reasons": reasons,
+        "stub_allowed": stub_allowed,
+        "stub_ready": stub_ready,
+        "row_count": len(rows),
+        "invocation_intent_present": intent_present,
+        "invocation_intent_ready": intent_ready,
+        "invocation_intent_receipt_ready": intent_receipt_ready,
+        "ready_for_h6_6_deterministic_local_adapter_stub_output": ready_stub,
+        "stub_output_count": len(stubs),
+        "stub_output_valid_count": len(valid_stubs),
+        "stub_output_invalid_count": invalid_stubs,
+        "missing_stub_id_count": missing_stub_id,
+        "missing_intent_id_count": missing_intent_id,
+        "missing_request_id_count": missing_request_id,
+        "missing_adapter_id_count": missing_adapter_id,
+        "missing_model_name_count": missing_model_name,
+        "missing_role_count": missing_role,
+        "missing_output_ref_count": missing_output_ref,
+        "missing_receipt_ref_count": missing_receipt_ref,
+        "invalid_output_status_count": invalid_output_status,
+        "qwen_3b_stub_output_count": qwen_3b,
+        "qwen_7b_stub_output_count": qwen_7b,
+        "qwen_14b_stub_output_count": qwen_14b,
+        "selector_stub_output_count": role_selector,
+        "localizer_stub_output_count": role_localizer,
+        "patch_synthesizer_stub_output_count": role_ps,
+        "verifier_assist_stub_output_count": role_va,
+        "deterministic_stub_only": True,
+        "model_call_executed_count": mc_count,
+        "ollama_invoked_count": ol_count,
+        "cloud_invoked_count": cl_count,
+        "repo_mutated_count": rm_count,
+        "behavior_changed_count": bh_count,
+        "runtime_effect_count": re_count,
+        "safety_violation_count": safety,
+        "stub_output_receipt_ready": stub_output_receipt_ready,
+        "ready_for_h6_7_local_provider_boundary_preflight": ready_boundary,
+        "production_ready": False,
+        "public_claim_allowed": False,
+    }
+
+
 def _finalize_with_nexus_row(
     row: dict[str, Any],
     *,
