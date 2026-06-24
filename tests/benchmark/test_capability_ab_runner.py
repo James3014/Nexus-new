@@ -23443,3 +23443,668 @@ def test_h5_51_flagged_pass(monkeypatch):
     assert r["ready_for_h6_local_model_adapter_preflight"] is True
     assert r["batch_solve_rate"] == 1.0
     assert r["batch_improvement_rate"] == 1.0
+
+
+def test_h6_0_adapter_preflight_contract_no_candidates(monkeypatch):
+    """H6-0 T01: No adapter candidates returns fail with reasons."""
+    from scripts.bench.capability_ab_runner import _build_h6_local_model_adapter_preflight_contract
+    monkeypatch.setenv("NEXUS_H6_ALLOW_LOCAL_MODEL_ADAPTER_PREFLIGHT", "1")
+    batch = {"batch_ready": True, "ready_for_h6_local_model_adapter_preflight": True, "safety_violation_count": 0}
+    bundle = {"h5_guarded_larger_benchmark_batch_run": batch}
+    r = _build_h6_local_model_adapter_preflight_contract([], bundle)
+    assert r["preflight_status"] == "local_model_adapter_preflight_fail"
+    assert r["adapter_candidate_count"] == 0
+    assert r["ready_for_h6_1_shadow_local_adapter_dry_run"] is False
+    assert r["production_ready"] is False
+    assert r["public_claim_allowed"] is False
+    assert "no_adapter_candidates" in r["preflight_reasons"]
+
+
+def test_h6_0_adapter_preflight_contract_valid_candidate(monkeypatch):
+    """H6-0 T02: Valid adapter candidate passes preflight."""
+    from scripts.bench.capability_ab_runner import _build_h6_local_model_adapter_preflight_contract
+    monkeypatch.setenv("NEXUS_H6_ALLOW_LOCAL_MODEL_ADAPTER_PREFLIGHT", "1")
+    batch = {"batch_ready": True, "ready_for_h6_local_model_adapter_preflight": True, "safety_violation_count": 0}
+    bundle = {"h5_guarded_larger_benchmark_batch_run": batch}
+    rows = [{"h6_local_model_adapter_candidate": {
+        "required_fields_present": True,
+        "model_family": "qwen",
+        "model_size": "3b",
+        "role": "selector",
+        "route_mode": "local_first",
+        "adapter_mode": "preflight_only",
+        "model_call_executed": False,
+        "ollama_invoked": False,
+        "cloud_invoked": False,
+        "repo_mutated": False,
+        "behavior_changed": False,
+    }}]
+    r = _build_h6_local_model_adapter_preflight_contract(rows, bundle)
+    assert r["preflight_status"] == "local_model_adapter_preflight_ready"
+    assert r["adapter_candidate_count"] == 1
+    assert r["adapter_candidate_valid_count"] == 1
+    assert r["ready_for_h6_1_shadow_local_adapter_dry_run"] is True
+    assert r["production_ready"] is False
+    assert r["public_claim_allowed"] is False
+
+
+def test_h6_0_adapter_preflight_contract_invalid_family(monkeypatch):
+    """H6-0 T03: Invalid model family fails preflight."""
+    from scripts.bench.capability_ab_runner import _build_h6_local_model_adapter_preflight_contract
+    monkeypatch.setenv("NEXUS_H6_ALLOW_LOCAL_MODEL_ADAPTER_PREFLIGHT", "1")
+    batch = {"batch_ready": True, "ready_for_h6_local_model_adapter_preflight": True, "safety_violation_count": 0}
+    bundle = {"h5_guarded_larger_benchmark_batch_run": batch}
+    rows = [{"h6_local_model_adapter_candidate": {
+        "required_fields_present": True,
+        "model_family": "llama",
+        "model_size": "3b",
+        "role": "selector",
+        "route_mode": "local_first",
+        "adapter_mode": "preflight_only",
+        "model_call_executed": False,
+        "ollama_invoked": False,
+        "cloud_invoked": False,
+        "repo_mutated": False,
+        "behavior_changed": False,
+    }}]
+    r = _build_h6_local_model_adapter_preflight_contract(rows, bundle)
+    assert r["preflight_status"] == "local_model_adapter_preflight_fail"
+    assert r["adapter_candidate_invalid_count"] == 1
+    assert r["invalid_model_family_count"] == 1
+    assert "invalid_model_family" in r["preflight_reasons"]
+
+
+def test_h6_0_adapter_preflight_contract_model_call_detected(monkeypatch):
+    """H6-0 T04: Model call detected fails preflight."""
+    from scripts.bench.capability_ab_runner import _build_h6_local_model_adapter_preflight_contract
+    monkeypatch.setenv("NEXUS_H6_ALLOW_LOCAL_MODEL_ADAPTER_PREFLIGHT", "1")
+    batch = {"batch_ready": True, "ready_for_h6_local_model_adapter_preflight": True, "safety_violation_count": 0}
+    bundle = {"h5_guarded_larger_benchmark_batch_run": batch}
+    rows = [{"h6_local_model_adapter_candidate": {
+        "required_fields_present": True,
+        "model_family": "qwen",
+        "model_size": "7b",
+        "role": "localizer",
+        "route_mode": "local_first",
+        "adapter_mode": "preflight_only",
+        "model_call_executed": True,
+        "ollama_invoked": False,
+        "cloud_invoked": False,
+        "repo_mutated": False,
+        "behavior_changed": False,
+    }}]
+    r = _build_h6_local_model_adapter_preflight_contract(rows, bundle)
+    assert r["preflight_status"] == "local_model_adapter_preflight_fail"
+    assert r["model_call_executed_count"] == 1
+    assert r["safety_violation_count"] == 1
+    assert "model_call_executed_detected" in r["preflight_reasons"]
+
+
+def test_h6_0_adapter_preflight_contract_ollama_invoked(monkeypatch):
+    """H6-0 T05: Ollama invocation detected fails preflight."""
+    from scripts.bench.capability_ab_runner import _build_h6_local_model_adapter_preflight_contract
+    monkeypatch.setenv("NEXUS_H6_ALLOW_LOCAL_MODEL_ADAPTER_PREFLIGHT", "1")
+    batch = {"batch_ready": True, "ready_for_h6_local_model_adapter_preflight": True, "safety_violation_count": 0}
+    bundle = {"h5_guarded_larger_benchmark_batch_run": batch}
+    rows = [{"h6_local_model_adapter_candidate": {
+        "required_fields_present": True,
+        "model_family": "qwen",
+        "model_size": "14b",
+        "role": "patch_synthesizer",
+        "route_mode": "local_first",
+        "adapter_mode": "preflight_only",
+        "model_call_executed": False,
+        "ollama_invoked": True,
+        "cloud_invoked": False,
+        "repo_mutated": False,
+        "behavior_changed": False,
+    }}]
+    r = _build_h6_local_model_adapter_preflight_contract(rows, bundle)
+    assert r["preflight_status"] == "local_model_adapter_preflight_fail"
+    assert r["ollama_invoked_count"] == 1
+    assert r["safety_violation_count"] == 1
+    assert "ollama_invoked_detected" in r["preflight_reasons"]
+
+
+def test_h6_0_adapter_preflight_contract_flag_not_set(monkeypatch):
+    """H6-0 T06: Flag not set blocks preflight."""
+    from scripts.bench.capability_ab_runner import _build_h6_local_model_adapter_preflight_contract
+    monkeypatch.delenv("NEXUS_H6_ALLOW_LOCAL_MODEL_ADAPTER_PREFLIGHT", raising=False)
+    batch = {"batch_ready": True, "ready_for_h6_local_model_adapter_preflight": True, "safety_violation_count": 0}
+    bundle = {"h5_guarded_larger_benchmark_batch_run": batch}
+    r = _build_h6_local_model_adapter_preflight_contract([], bundle)
+    assert r["preflight_status"] == "blocked"
+    assert "preflight_flag_not_enabled" in r["preflight_reasons"]
+
+
+def test_h6_0_adapter_preflight_contract_batch_not_ready(monkeypatch):
+    """H6-0 T07: Batch not ready blocks preflight."""
+    from scripts.bench.capability_ab_runner import _build_h6_local_model_adapter_preflight_contract
+    monkeypatch.setenv("NEXUS_H6_ALLOW_LOCAL_MODEL_ADAPTER_PREFLIGHT", "1")
+    batch = {"batch_ready": False, "ready_for_h6_local_model_adapter_preflight": False, "safety_violation_count": 0}
+    bundle = {"h5_guarded_larger_benchmark_batch_run": batch}
+    r = _build_h6_local_model_adapter_preflight_contract([], bundle)
+    assert r["preflight_status"] == "blocked"
+    assert "h5_51_batch_not_ready" in r["preflight_reasons"]
+
+
+def test_h6_0_adapter_preflight_contract_safety_violation(monkeypatch):
+    """H6-0 T08: Safety violation in batch blocks preflight."""
+    from scripts.bench.capability_ab_runner import _build_h6_local_model_adapter_preflight_contract
+    monkeypatch.setenv("NEXUS_H6_ALLOW_LOCAL_MODEL_ADAPTER_PREFLIGHT", "1")
+    batch = {"batch_ready": True, "ready_for_h6_local_model_adapter_preflight": True, "safety_violation_count": 1}
+    bundle = {"h5_guarded_larger_benchmark_batch_run": batch}
+    r = _build_h6_local_model_adapter_preflight_contract([], bundle)
+    assert r["preflight_status"] == "blocked"
+    assert "h5_51_safety_violation_detected" in r["preflight_reasons"]
+
+
+def test_h6_0_adapter_preflight_contract_all_roles_valid(monkeypatch):
+    """H6-0 T09: All valid roles counted correctly."""
+    from scripts.bench.capability_ab_runner import _build_h6_local_model_adapter_preflight_contract
+    monkeypatch.setenv("NEXUS_H6_ALLOW_LOCAL_MODEL_ADAPTER_PREFLIGHT", "1")
+    batch = {"batch_ready": True, "ready_for_h6_local_model_adapter_preflight": True, "safety_violation_count": 0}
+    bundle = {"h5_guarded_larger_benchmark_batch_run": batch}
+    roles = ["selector", "localizer", "patch_synthesizer", "verifier_assist"]
+    rows = [{"h6_local_model_adapter_candidate": {
+        "required_fields_present": True,
+        "model_family": "qwen",
+        "model_size": "3b",
+        "role": role,
+        "route_mode": "local_first",
+        "adapter_mode": "preflight_only",
+        "model_call_executed": False,
+        "ollama_invoked": False,
+        "cloud_invoked": False,
+        "repo_mutated": False,
+        "behavior_changed": False,
+    }} for role in roles]
+    r = _build_h6_local_model_adapter_preflight_contract(rows, bundle)
+    assert r["adapter_candidate_count"] == 4
+    assert r["adapter_candidate_valid_count"] == 4
+    assert r["selector_candidate_count"] == 1
+    assert r["localizer_candidate_count"] == 1
+    assert r["patch_synthesizer_candidate_count"] == 1
+    assert r["verifier_assist_candidate_count"] == 1
+
+
+def test_h6_0_adapter_preflight_contract_all_sizes_valid(monkeypatch):
+    """H6-0 T10: All valid sizes counted correctly."""
+    from scripts.bench.capability_ab_runner import _build_h6_local_model_adapter_preflight_contract
+    monkeypatch.setenv("NEXUS_H6_ALLOW_LOCAL_MODEL_ADAPTER_PREFLIGHT", "1")
+    batch = {"batch_ready": True, "ready_for_h6_local_model_adapter_preflight": True, "safety_violation_count": 0}
+    bundle = {"h5_guarded_larger_benchmark_batch_run": batch}
+    sizes = ["3b", "7b", "14b"]
+    rows = [{"h6_local_model_adapter_candidate": {
+        "required_fields_present": True,
+        "model_family": "qwen",
+        "model_size": size,
+        "role": "selector",
+        "route_mode": "local_first",
+        "adapter_mode": "preflight_only",
+        "model_call_executed": False,
+        "ollama_invoked": False,
+        "cloud_invoked": False,
+        "repo_mutated": False,
+        "behavior_changed": False,
+    }} for size in sizes]
+    r = _build_h6_local_model_adapter_preflight_contract(rows, bundle)
+    assert r["adapter_candidate_count"] == 3
+    assert r["adapter_candidate_valid_count"] == 3
+    assert r["qwen_3b_candidate_count"] == 1
+    assert r["qwen_7b_candidate_count"] == 1
+    assert r["qwen_14b_candidate_count"] == 1
+
+
+def test_h6_0_adapter_preflight_contract_unsafe_route(monkeypatch):
+    """H6-0 T11: Unsafe route mode fails preflight."""
+    from scripts.bench.capability_ab_runner import _build_h6_local_model_adapter_preflight_contract
+    monkeypatch.setenv("NEXUS_H6_ALLOW_LOCAL_MODEL_ADAPTER_PREFLIGHT", "1")
+    batch = {"batch_ready": True, "ready_for_h6_local_model_adapter_preflight": True, "safety_violation_count": 0}
+    bundle = {"h5_guarded_larger_benchmark_batch_run": batch}
+    rows = [{"h6_local_model_adapter_candidate": {
+        "required_fields_present": True,
+        "model_family": "qwen",
+        "model_size": "3b",
+        "role": "selector",
+        "route_mode": "cloud_only",
+        "adapter_mode": "preflight_only",
+        "model_call_executed": False,
+        "ollama_invoked": False,
+        "cloud_invoked": False,
+        "repo_mutated": False,
+        "behavior_changed": False,
+    }}]
+    r = _build_h6_local_model_adapter_preflight_contract(rows, bundle)
+    assert r["preflight_status"] == "local_model_adapter_preflight_fail"
+    assert r["unsafe_route_count"] == 1
+    assert "unsafe_route_mode" in r["preflight_reasons"]
+
+
+def test_h6_0_adapter_preflight_contract_invalid_role(monkeypatch):
+    """H6-0 T12: Invalid role fails preflight."""
+    from scripts.bench.capability_ab_runner import _build_h6_local_model_adapter_preflight_contract
+    monkeypatch.setenv("NEXUS_H6_ALLOW_LOCAL_MODEL_ADAPTER_PREFLIGHT", "1")
+    batch = {"batch_ready": True, "ready_for_h6_local_model_adapter_preflight": True, "safety_violation_count": 0}
+    bundle = {"h5_guarded_larger_benchmark_batch_run": batch}
+    rows = [{"h6_local_model_adapter_candidate": {
+        "required_fields_present": True,
+        "model_family": "qwen",
+        "model_size": "3b",
+        "role": "proposer",
+        "route_mode": "local_first",
+        "adapter_mode": "preflight_only",
+        "model_call_executed": False,
+        "ollama_invoked": False,
+        "cloud_invoked": False,
+        "repo_mutated": False,
+        "behavior_changed": False,
+    }}]
+    r = _build_h6_local_model_adapter_preflight_contract(rows, bundle)
+    assert r["preflight_status"] == "local_model_adapter_preflight_fail"
+    assert r["invalid_role_count"] == 1
+    assert "invalid_role" in r["preflight_reasons"]
+
+
+def test_h6_0_adapter_preflight_contract_missing_fields(monkeypatch):
+    """H6-0 T13: Missing required fields fails preflight."""
+    from scripts.bench.capability_ab_runner import _build_h6_local_model_adapter_preflight_contract
+    monkeypatch.setenv("NEXUS_H6_ALLOW_LOCAL_MODEL_ADAPTER_PREFLIGHT", "1")
+    batch = {"batch_ready": True, "ready_for_h6_local_model_adapter_preflight": True, "safety_violation_count": 0}
+    bundle = {"h5_guarded_larger_benchmark_batch_run": batch}
+    rows = [{"h6_local_model_adapter_candidate": {
+        "required_fields_present": False,
+        "model_family": "qwen",
+        "model_size": "3b",
+        "role": "selector",
+        "route_mode": "local_first",
+        "adapter_mode": "preflight_only",
+        "model_call_executed": False,
+        "ollama_invoked": False,
+        "cloud_invoked": False,
+        "repo_mutated": False,
+        "behavior_changed": False,
+    }}]
+    r = _build_h6_local_model_adapter_preflight_contract(rows, bundle)
+    assert r["preflight_status"] == "local_model_adapter_preflight_fail"
+    assert r["missing_required_field_count"] == 1
+    assert "missing_required_fields" in r["preflight_reasons"]
+
+
+def test_h6_0_adapter_preflight_contract_invalid_size(monkeypatch):
+    """H6-0 T14: Invalid model size fails preflight."""
+    from scripts.bench.capability_ab_runner import _build_h6_local_model_adapter_preflight_contract
+    monkeypatch.setenv("NEXUS_H6_ALLOW_LOCAL_MODEL_ADAPTER_PREFLIGHT", "1")
+    batch = {"batch_ready": True, "ready_for_h6_local_model_adapter_preflight": True, "safety_violation_count": 0}
+    bundle = {"h5_guarded_larger_benchmark_batch_run": batch}
+    rows = [{"h6_local_model_adapter_candidate": {
+        "required_fields_present": True,
+        "model_family": "qwen",
+        "model_size": "1b",
+        "role": "selector",
+        "route_mode": "local_first",
+        "adapter_mode": "preflight_only",
+        "model_call_executed": False,
+        "ollama_invoked": False,
+        "cloud_invoked": False,
+        "repo_mutated": False,
+        "behavior_changed": False,
+    }}]
+    r = _build_h6_local_model_adapter_preflight_contract(rows, bundle)
+    assert r["preflight_status"] == "local_model_adapter_preflight_fail"
+    assert r["invalid_model_size_count"] == 1
+    assert "invalid_model_size" in r["preflight_reasons"]
+
+
+def test_h6_0_adapter_preflight_contract_cloud_invoked(monkeypatch):
+    """H6-0 T15: Cloud invocation detected fails preflight."""
+    from scripts.bench.capability_ab_runner import _build_h6_local_model_adapter_preflight_contract
+    monkeypatch.setenv("NEXUS_H6_ALLOW_LOCAL_MODEL_ADAPTER_PREFLIGHT", "1")
+    batch = {"batch_ready": True, "ready_for_h6_local_model_adapter_preflight": True, "safety_violation_count": 0}
+    bundle = {"h5_guarded_larger_benchmark_batch_run": batch}
+    rows = [{"h6_local_model_adapter_candidate": {
+        "required_fields_present": True,
+        "model_family": "qwen",
+        "model_size": "3b",
+        "role": "selector",
+        "route_mode": "local_first",
+        "adapter_mode": "preflight_only",
+        "model_call_executed": False,
+        "ollama_invoked": False,
+        "cloud_invoked": True,
+        "repo_mutated": False,
+        "behavior_changed": False,
+    }}]
+    r = _build_h6_local_model_adapter_preflight_contract(rows, bundle)
+    assert r["preflight_status"] == "local_model_adapter_preflight_fail"
+    assert r["cloud_invoked_count"] == 1
+    assert r["safety_violation_count"] == 1
+    assert "cloud_invoked_detected" in r["preflight_reasons"]
+
+
+def test_h6_0_adapter_preflight_contract_repo_mutated(monkeypatch):
+    """H6-0 T16: Repo mutation detected fails preflight."""
+    from scripts.bench.capability_ab_runner import _build_h6_local_model_adapter_preflight_contract
+    monkeypatch.setenv("NEXUS_H6_ALLOW_LOCAL_MODEL_ADAPTER_PREFLIGHT", "1")
+    batch = {"batch_ready": True, "ready_for_h6_local_model_adapter_preflight": True, "safety_violation_count": 0}
+    bundle = {"h5_guarded_larger_benchmark_batch_run": batch}
+    rows = [{"h6_local_model_adapter_candidate": {
+        "required_fields_present": True,
+        "model_family": "qwen",
+        "model_size": "3b",
+        "role": "selector",
+        "route_mode": "local_first",
+        "adapter_mode": "preflight_only",
+        "model_call_executed": False,
+        "ollama_invoked": False,
+        "cloud_invoked": False,
+        "repo_mutated": True,
+        "behavior_changed": False,
+    }}]
+    r = _build_h6_local_model_adapter_preflight_contract(rows, bundle)
+    assert r["preflight_status"] == "local_model_adapter_preflight_fail"
+    assert r["repo_mutated_count"] == 1
+    assert r["safety_violation_count"] == 1
+    assert "repo_mutated_detected" in r["preflight_reasons"]
+
+
+def test_h6_0_adapter_preflight_contract_behavior_changed(monkeypatch):
+    """H6-0 T17: Behavior change detected fails preflight."""
+    from scripts.bench.capability_ab_runner import _build_h6_local_model_adapter_preflight_contract
+    monkeypatch.setenv("NEXUS_H6_ALLOW_LOCAL_MODEL_ADAPTER_PREFLIGHT", "1")
+    batch = {"batch_ready": True, "ready_for_h6_local_model_adapter_preflight": True, "safety_violation_count": 0}
+    bundle = {"h5_guarded_larger_benchmark_batch_run": batch}
+    rows = [{"h6_local_model_adapter_candidate": {
+        "required_fields_present": True,
+        "model_family": "qwen",
+        "model_size": "3b",
+        "role": "selector",
+        "route_mode": "local_first",
+        "adapter_mode": "preflight_only",
+        "model_call_executed": False,
+        "ollama_invoked": False,
+        "cloud_invoked": False,
+        "repo_mutated": False,
+        "behavior_changed": True,
+    }}]
+    r = _build_h6_local_model_adapter_preflight_contract(rows, bundle)
+    assert r["preflight_status"] == "local_model_adapter_preflight_fail"
+    assert r["behavior_changed_count"] == 1
+    assert r["safety_violation_count"] == 1
+    assert "behavior_changed_detected" in r["preflight_reasons"]
+
+
+def test_h6_0_adapter_preflight_contract_multiple_violations(monkeypatch):
+    """H6-0 T18: Multiple safety violations aggregate correctly."""
+    from scripts.bench.capability_ab_runner import _build_h6_local_model_adapter_preflight_contract
+    monkeypatch.setenv("NEXUS_H6_ALLOW_LOCAL_MODEL_ADAPTER_PREFLIGHT", "1")
+    batch = {"batch_ready": True, "ready_for_h6_local_model_adapter_preflight": True, "safety_violation_count": 0}
+    bundle = {"h5_guarded_larger_benchmark_batch_run": batch}
+    rows = [{"h6_local_model_adapter_candidate": {
+        "required_fields_present": True,
+        "model_family": "qwen",
+        "model_size": "3b",
+        "role": "selector",
+        "route_mode": "local_first",
+        "adapter_mode": "preflight_only",
+        "model_call_executed": True,
+        "ollama_invoked": True,
+        "cloud_invoked": True,
+        "repo_mutated": True,
+        "behavior_changed": True,
+    }}]
+    r = _build_h6_local_model_adapter_preflight_contract(rows, bundle)
+    assert r["safety_violation_count"] == 5
+    assert r["model_call_executed_count"] == 1
+    assert r["ollama_invoked_count"] == 1
+    assert r["cloud_invoked_count"] == 1
+    assert r["repo_mutated_count"] == 1
+    assert r["behavior_changed_count"] == 1
+
+
+def test_h6_0_adapter_preflight_contract_mixed_valid_invalid(monkeypatch):
+    """H6-0 T19: Mixed valid and invalid candidates counted correctly."""
+    from scripts.bench.capability_ab_runner import _build_h6_local_model_adapter_preflight_contract
+    monkeypatch.setenv("NEXUS_H6_ALLOW_LOCAL_MODEL_ADAPTER_PREFLIGHT", "1")
+    batch = {"batch_ready": True, "ready_for_h6_local_model_adapter_preflight": True, "safety_violation_count": 0}
+    bundle = {"h5_guarded_larger_benchmark_batch_run": batch}
+    rows = [
+        {"h6_local_model_adapter_candidate": {
+            "required_fields_present": True,
+            "model_family": "qwen",
+            "model_size": "3b",
+            "role": "selector",
+            "route_mode": "local_first",
+            "adapter_mode": "preflight_only",
+            "model_call_executed": False,
+            "ollama_invoked": False,
+            "cloud_invoked": False,
+            "repo_mutated": False,
+            "behavior_changed": False,
+        }},
+        {"h6_local_model_adapter_candidate": {
+            "required_fields_present": True,
+            "model_family": "llama",
+            "model_size": "3b",
+            "role": "selector",
+            "route_mode": "local_first",
+            "adapter_mode": "preflight_only",
+            "model_call_executed": False,
+            "ollama_invoked": False,
+            "cloud_invoked": False,
+            "repo_mutated": False,
+            "behavior_changed": False,
+        }},
+    ]
+    r = _build_h6_local_model_adapter_preflight_contract(rows, bundle)
+    assert r["adapter_candidate_count"] == 2
+    assert r["adapter_candidate_valid_count"] == 1
+    assert r["adapter_candidate_invalid_count"] == 1
+    assert r["invalid_model_family_count"] == 1
+
+
+def test_h6_0_adapter_preflight_contract_production_ready_false(monkeypatch):
+    """H6-0 T20: production_ready always False in preflight."""
+    from scripts.bench.capability_ab_runner import _build_h6_local_model_adapter_preflight_contract
+    monkeypatch.setenv("NEXUS_H6_ALLOW_LOCAL_MODEL_ADAPTER_PREFLIGHT", "1")
+    batch = {"batch_ready": True, "ready_for_h6_local_model_adapter_preflight": True, "safety_violation_count": 0}
+    bundle = {"h5_guarded_larger_benchmark_batch_run": batch}
+    rows = [{"h6_local_model_adapter_candidate": {
+        "required_fields_present": True,
+        "model_family": "qwen",
+        "model_size": "3b",
+        "role": "selector",
+        "route_mode": "local_first",
+        "adapter_mode": "preflight_only",
+        "model_call_executed": False,
+        "ollama_invoked": False,
+        "cloud_invoked": False,
+        "repo_mutated": False,
+        "behavior_changed": False,
+    }}]
+    r = _build_h6_local_model_adapter_preflight_contract(rows, bundle)
+    assert r["production_ready"] is False
+    assert r["public_claim_allowed"] is False
+    assert "h6_0_local_model_adapter_preflight_not_production" in r["preflight_reasons"]
+    assert "preflight_contract_only" in r["preflight_reasons"]
+    assert "no_model_calls_allowed" in r["preflight_reasons"]
+    assert "ollama_invocation_blocked" in r["preflight_reasons"]
+    assert "cloud_invocation_blocked" in r["preflight_reasons"]
+    assert "repo_mutation_blocked" in r["preflight_reasons"]
+    assert "production_claim_blocked" in r["preflight_reasons"]
+    assert "public_claim_blocked" in r["preflight_reasons"]
+
+
+def test_h6_0_adapter_preflight_contract_schema(monkeypatch):
+    """H6-0 T21: Schema field correct."""
+    from scripts.bench.capability_ab_runner import _build_h6_local_model_adapter_preflight_contract
+    monkeypatch.setenv("NEXUS_H6_ALLOW_LOCAL_MODEL_ADAPTER_PREFLIGHT", "1")
+    batch = {"batch_ready": True, "ready_for_h6_local_model_adapter_preflight": True, "safety_violation_count": 0}
+    bundle = {"h5_guarded_larger_benchmark_batch_run": batch}
+    r = _build_h6_local_model_adapter_preflight_contract([], bundle)
+    assert r["schema"] == "nexus.hybrid_h6_local_model_adapter_preflight_contract.v1"
+    assert r["evaluated"] is True
+
+
+def test_h6_0_adapter_preflight_contract_invalid_adapter_mode(monkeypatch):
+    """H6-0 T22: Invalid adapter mode fails preflight."""
+    from scripts.bench.capability_ab_runner import _build_h6_local_model_adapter_preflight_contract
+    monkeypatch.setenv("NEXUS_H6_ALLOW_LOCAL_MODEL_ADAPTER_PREFLIGHT", "1")
+    batch = {"batch_ready": True, "ready_for_h6_local_model_adapter_preflight": True, "safety_violation_count": 0}
+    bundle = {"h5_guarded_larger_benchmark_batch_run": batch}
+    rows = [{"h6_local_model_adapter_candidate": {
+        "required_fields_present": True,
+        "model_family": "qwen",
+        "model_size": "3b",
+        "role": "selector",
+        "route_mode": "local_first",
+        "adapter_mode": "production",
+        "model_call_executed": False,
+        "ollama_invoked": False,
+        "cloud_invoked": False,
+        "repo_mutated": False,
+        "behavior_changed": False,
+    }}]
+    r = _build_h6_local_model_adapter_preflight_contract(rows, bundle)
+    assert r["preflight_status"] == "local_model_adapter_preflight_fail"
+    assert r["adapter_candidate_invalid_count"] == 1
+
+
+def test_h6_0_adapter_preflight_contract_no_bundle(monkeypatch):
+    """H6-0 T23: No bundle blocks preflight."""
+    from scripts.bench.capability_ab_runner import _build_h6_local_model_adapter_preflight_contract
+    monkeypatch.setenv("NEXUS_H6_ALLOW_LOCAL_MODEL_ADAPTER_PREFLIGHT", "1")
+    r = _build_h6_local_model_adapter_preflight_contract([], None)
+    assert r["preflight_status"] == "blocked"
+    assert "missing_h5_51_guarded_batch" in r["preflight_reasons"]
+
+
+def test_h6_0_adapter_preflight_contract_batch_missing_ready_flag(monkeypatch):
+    """H6-0 T24: Batch missing ready_for_h6 flag blocks preflight."""
+    from scripts.bench.capability_ab_runner import _build_h6_local_model_adapter_preflight_contract
+    monkeypatch.setenv("NEXUS_H6_ALLOW_LOCAL_MODEL_ADAPTER_PREFLIGHT", "1")
+    batch = {"batch_ready": True, "safety_violation_count": 0}
+    bundle = {"h5_guarded_larger_benchmark_batch_run": batch}
+    r = _build_h6_local_model_adapter_preflight_contract([], bundle)
+    assert r["preflight_status"] == "blocked"
+    assert "not_ready_for_h6_local_model_adapter_preflight" in r["preflight_reasons"]
+
+
+def test_h6_0_adapter_preflight_contract_invalid_route_mode(monkeypatch):
+    """H6-0 T25: Invalid route mode fails preflight."""
+    from scripts.bench.capability_ab_runner import _build_h6_local_model_adapter_preflight_contract
+    monkeypatch.setenv("NEXUS_H6_ALLOW_LOCAL_MODEL_ADAPTER_PREFLIGHT", "1")
+    batch = {"batch_ready": True, "ready_for_h6_local_model_adapter_preflight": True, "safety_violation_count": 0}
+    bundle = {"h5_guarded_larger_benchmark_batch_run": batch}
+    rows = [{"h6_local_model_adapter_candidate": {
+        "required_fields_present": True,
+        "model_family": "qwen",
+        "model_size": "3b",
+        "role": "selector",
+        "route_mode": "invalid_mode",
+        "adapter_mode": "preflight_only",
+        "model_call_executed": False,
+        "ollama_invoked": False,
+        "cloud_invoked": False,
+        "repo_mutated": False,
+        "behavior_changed": False,
+    }}]
+    r = _build_h6_local_model_adapter_preflight_contract(rows, bundle)
+    assert r["preflight_status"] == "local_model_adapter_preflight_fail"
+    assert r["unsafe_route_count"] == 1
+
+
+def test_h6_0_adapter_preflight_contract_collect_only():
+    """H6-0 T26: collect-only includes all H6-0 tests."""
+    import subprocess, re
+    result = subprocess.run(["python3", "-m", "pytest", "tests/benchmark/test_capability_ab_runner.py", "-k", "h6_0", "--collect-only", "-q"], capture_output=True, text=True, cwd="/Users/jameschen/Workspace/nexus")
+    count = len(re.findall(r"test_h6_0_", result.stdout))
+    assert count >= 26, f"Expected >= 26 H6-0 tests, got {count}"
+
+
+def test_h6_0_audit_duplicate_scan():
+    """H6-0 T27: No duplicate H5/H6 test functions."""
+    import ast, collections
+    from pathlib import Path
+    path = 'tests/benchmark/test_capability_ab_runner.py'
+    tree = ast.parse(Path(path).read_text(encoding='utf-8', errors='ignore'))
+    loc = collections.defaultdict(list)
+    for n in tree.body:
+        if isinstance(n, ast.FunctionDef):
+            loc[n.name].append(n.lineno)
+    dups = [
+        (name, lines)
+        for name, lines in sorted(loc.items())
+        if (name.startswith("test_h5_") or name.startswith("test_h6_")) and len(lines) > 1
+    ]
+    assert not dups, f"Duplicate test functions found: {dups}"
+
+
+def test_h6_0_audit_report_lock():
+    """H6-0 T28: H5/H6 reports have no production/public claim."""
+    from pathlib import Path
+    bad = []
+    report_paths = sorted(Path("docs/reports").glob("h5_*.md")) + sorted(Path("docs/reports").glob("h6_*.md"))
+    for p in report_paths:
+        s = p.read_text(encoding='utf-8', errors='ignore').lower()
+        for needle in [
+            'production_ready=true',
+            'public_claim_allowed=true',
+            'production ready: true',
+            'public claim allowed: true',
+        ]:
+            if needle in s:
+                bad.append((p.name, needle))
+    assert not bad, f"Report lock violations found: {bad}"
+
+
+def test_h6_0_adapter_preflight_contract_multiple_valid_candidates(monkeypatch):
+    """H6-0 T29: Multiple valid candidates all pass."""
+    from scripts.bench.capability_ab_runner import _build_h6_local_model_adapter_preflight_contract
+    monkeypatch.setenv("NEXUS_H6_ALLOW_LOCAL_MODEL_ADAPTER_PREFLIGHT", "1")
+    batch = {"batch_ready": True, "ready_for_h6_local_model_adapter_preflight": True, "safety_violation_count": 0}
+    bundle = {"h5_guarded_larger_benchmark_batch_run": batch}
+    rows = [{"h6_local_model_adapter_candidate": {
+        "required_fields_present": True,
+        "model_family": "qwen",
+        "model_size": size,
+        "role": role,
+        "route_mode": "local_first",
+        "adapter_mode": "preflight_only",
+        "model_call_executed": False,
+        "ollama_invoked": False,
+        "cloud_invoked": False,
+        "repo_mutated": False,
+        "behavior_changed": False,
+    }} for size in ["3b", "7b", "14b"] for role in ["selector", "localizer", "patch_synthesizer", "verifier_assist"]]
+    r = _build_h6_local_model_adapter_preflight_contract(rows, bundle)
+    assert r["adapter_candidate_count"] == 12
+    assert r["adapter_candidate_valid_count"] == 12
+    assert r["qwen_3b_candidate_count"] == 4
+    assert r["qwen_7b_candidate_count"] == 4
+    assert r["qwen_14b_candidate_count"] == 4
+
+
+def test_h6_0_adapter_preflight_contract_all_route_modes_valid(monkeypatch):
+    """H6-0 T30: All valid route modes counted correctly."""
+    from scripts.bench.capability_ab_runner import _build_h6_local_model_adapter_preflight_contract
+    monkeypatch.setenv("NEXUS_H6_ALLOW_LOCAL_MODEL_ADAPTER_PREFLIGHT", "1")
+    batch = {"batch_ready": True, "ready_for_h6_local_model_adapter_preflight": True, "safety_violation_count": 0}
+    bundle = {"h5_guarded_larger_benchmark_batch_run": batch}
+    routes = ["local_first", "local_only", "shadow_only"]
+    rows = [{"h6_local_model_adapter_candidate": {
+        "required_fields_present": True,
+        "model_family": "qwen",
+        "model_size": "3b",
+        "role": "selector",
+        "route_mode": route,
+        "adapter_mode": "preflight_only",
+        "model_call_executed": False,
+        "ollama_invoked": False,
+        "cloud_invoked": False,
+        "repo_mutated": False,
+        "behavior_changed": False,
+    }} for route in routes]
+    r = _build_h6_local_model_adapter_preflight_contract(rows, bundle)
+    assert r["adapter_candidate_count"] == 3
+    assert r["adapter_candidate_valid_count"] == 3

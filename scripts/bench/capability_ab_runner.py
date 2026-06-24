@@ -9490,6 +9490,217 @@ def _build_h5_guarded_larger_benchmark_batch_run(rows: list[dict[str, Any]], bun
     }
 
 
+def _build_h6_local_model_adapter_preflight_contract(rows: list[dict[str, Any]], bundle: dict[str, Any] | None = None) -> dict[str, Any]:
+    """Pure helper: H6 local model adapter preflight contract."""
+    import os as _os
+
+    flag = _os.environ.get("NEXUS_H6_ALLOW_LOCAL_MODEL_ADAPTER_PREFLIGHT", "").strip() == "1"
+
+    batch = None
+    if bundle:
+        batch = bundle.get("h5_guarded_larger_benchmark_batch_run")
+
+    batch_present = bool(batch)
+    batch_ready = bool(batch.get("batch_ready", False)) if batch else False
+    ready_h6 = bool(batch.get("ready_for_h6_local_model_adapter_preflight", False)) if batch else False
+    batch_safety = int(batch.get("safety_violation_count", 0)) if batch else 0
+
+    ALLOWED_ROLES = {"selector", "localizer", "patch_synthesizer", "verifier_assist"}
+    ALLOWED_FAMILIES = {"qwen"}
+    ALLOWED_SIZES = {"3b", "7b", "14b"}
+    ALLOWED_ROUTES = {"local_first", "local_only", "shadow_only"}
+    ALLOWED_ADAPTER_MODES = {"preflight_only", "shadow_only"}
+
+    candidates = [r.get("h6_local_model_adapter_candidate") for r in rows if r.get("h6_local_model_adapter_candidate")]
+    valid_candidates = []
+    invalid_count = 0
+    missing_field = 0
+    invalid_family = 0
+    invalid_size = 0
+    invalid_role = 0
+    unsafe_route = 0
+    mc_count = 0
+    ollama_count = 0
+    cloud_count = 0
+    repo_mut = 0
+    beh = 0
+
+    qwen_3b = 0
+    qwen_7b = 0
+    qwen_14b = 0
+    role_selector = 0
+    role_localizer = 0
+    role_ps = 0
+    role_va = 0
+
+    for c in candidates:
+        mc = bool(c.get("model_call_executed", False))
+        ol = bool(c.get("ollama_invoked", False))
+        cl = bool(c.get("cloud_invoked", False))
+        rm = bool(c.get("repo_mutated", False))
+        bh = bool(c.get("behavior_changed", False))
+        required = bool(c.get("required_fields_present", False))
+        fam = str(c.get("model_family", "") or "").lower()
+        sz = str(c.get("model_size", "") or "").lower()
+        role = str(c.get("role", "") or "").lower()
+        route = str(c.get("route_mode", "") or "").lower()
+        adapter_mode = str(c.get("adapter_mode", "") or "").lower()
+
+        if mc:
+            mc_count += 1
+        if ol:
+            ollama_count += 1
+        if cl:
+            cloud_count += 1
+        if rm:
+            repo_mut += 1
+        if bh:
+            beh += 1
+
+        is_valid = (
+            required and fam in ALLOWED_FAMILIES and sz in ALLOWED_SIZES
+            and role in ALLOWED_ROLES and route in ALLOWED_ROUTES
+            and adapter_mode in ALLOWED_ADAPTER_MODES
+            and not mc and not ol and not cl and not rm and not bh
+        )
+
+        if is_valid:
+            valid_candidates.append(c)
+            if sz == "3b":
+                qwen_3b += 1
+            elif sz == "7b":
+                qwen_7b += 1
+            elif sz == "14b":
+                qwen_14b += 1
+            if role == "selector":
+                role_selector += 1
+            elif role == "localizer":
+                role_localizer += 1
+            elif role == "patch_synthesizer":
+                role_ps += 1
+            elif role == "verifier_assist":
+                role_va += 1
+        else:
+            invalid_count += 1
+            if not required:
+                missing_field += 1
+            if fam not in ALLOWED_FAMILIES:
+                invalid_family += 1
+            if sz not in ALLOWED_SIZES:
+                invalid_size += 1
+            if role not in ALLOWED_ROLES:
+                invalid_role += 1
+            if route not in ALLOWED_ROUTES:
+                unsafe_route += 1
+
+    safety = mc_count + ollama_count + cloud_count + repo_mut + beh
+
+    preflight_allowed = (
+        flag and batch_present and batch_ready and ready_h6 and batch_safety == 0
+    )
+
+    preflight_ready = (
+        preflight_allowed and len(valid_candidates) > 0 and safety == 0
+    )
+
+    contract_ready = (
+        preflight_ready and len(valid_candidates) > 0 and invalid_count == 0
+    )
+
+    ready_dry = (
+        contract_ready
+        and mc_count == 0 and ollama_count == 0
+        and cloud_count == 0 and repo_mut == 0 and beh == 0
+    )
+
+    reasons = []
+    if not flag:
+        reasons.append("preflight_flag_not_enabled")
+    if not batch_present:
+        reasons.append("missing_h5_51_guarded_batch")
+    if batch and not batch_ready:
+        reasons.append("h5_51_batch_not_ready")
+    if batch and not ready_h6:
+        reasons.append("not_ready_for_h6_local_model_adapter_preflight")
+    if batch_safety > 0:
+        reasons.append("h5_51_safety_violation_detected")
+    if not candidates:
+        reasons.append("no_adapter_candidates")
+    if candidates and len(valid_candidates) == 0:
+        reasons.append("no_valid_adapter_candidates")
+    if missing_field > 0:
+        reasons.append("missing_required_fields")
+    if invalid_family > 0:
+        reasons.append("invalid_model_family")
+    if invalid_size > 0:
+        reasons.append("invalid_model_size")
+    if invalid_role > 0:
+        reasons.append("invalid_role")
+    if unsafe_route > 0:
+        reasons.append("unsafe_route_mode")
+    if mc_count > 0:
+        reasons.append("model_call_executed_detected")
+    if ollama_count > 0:
+        reasons.append("ollama_invoked_detected")
+    if cloud_count > 0:
+        reasons.append("cloud_invoked_detected")
+    if repo_mut > 0:
+        reasons.append("repo_mutated_detected")
+    if beh > 0:
+        reasons.append("behavior_changed_detected")
+    reasons.extend([
+        "h6_0_local_model_adapter_preflight_not_production",
+        "preflight_contract_only",
+        "no_model_calls_allowed",
+        "ollama_invocation_blocked",
+        "cloud_invocation_blocked",
+        "repo_mutation_blocked",
+        "production_claim_blocked",
+        "public_claim_blocked",
+    ])
+
+    return {
+        "schema": "nexus.hybrid_h6_local_model_adapter_preflight_contract.v1",
+        "evaluated": True,
+        "preflight_status": "local_model_adapter_preflight_ready" if preflight_ready else ("blocked" if not preflight_allowed else "local_model_adapter_preflight_fail"),
+        "preflight_reasons": reasons,
+        "preflight_allowed": preflight_allowed,
+        "preflight_ready": preflight_ready,
+        "row_count": len(rows),
+        "h5_guarded_batch_present": batch_present,
+        "h5_guarded_batch_ready": batch_ready,
+        "ready_for_h6_local_model_adapter_preflight": ready_h6,
+        "adapter_candidate_count": len(candidates),
+        "adapter_candidate_valid_count": len(valid_candidates),
+        "adapter_candidate_invalid_count": invalid_count,
+        "allowed_model_roles": ["selector", "localizer", "patch_synthesizer", "verifier_assist"],
+        "allowed_model_families": ["qwen"],
+        "allowed_model_sizes": ["3b", "7b", "14b"],
+        "qwen_3b_candidate_count": qwen_3b,
+        "qwen_7b_candidate_count": qwen_7b,
+        "qwen_14b_candidate_count": qwen_14b,
+        "selector_candidate_count": role_selector,
+        "localizer_candidate_count": role_localizer,
+        "patch_synthesizer_candidate_count": role_ps,
+        "verifier_assist_candidate_count": role_va,
+        "missing_required_field_count": missing_field,
+        "invalid_role_count": invalid_role,
+        "invalid_model_family_count": invalid_family,
+        "invalid_model_size_count": invalid_size,
+        "unsafe_route_count": unsafe_route,
+        "model_call_executed_count": mc_count,
+        "ollama_invoked_count": ollama_count,
+        "cloud_invoked_count": cloud_count,
+        "repo_mutated_count": repo_mut,
+        "behavior_changed_count": beh,
+        "safety_violation_count": safety,
+        "adapter_contract_ready": contract_ready,
+        "ready_for_h6_1_shadow_local_adapter_dry_run": ready_dry,
+        "production_ready": False,
+        "public_claim_allowed": False,
+    }
+
+
 def _finalize_with_nexus_row(
     row: dict[str, Any],
     *,
@@ -13987,6 +14198,23 @@ def write_evidence_bundle(
         "h5_guarded_batch_run_improvement_rate": _build_h5_guarded_larger_benchmark_batch_run(with_rows, payload).get("batch_improvement_rate", 0.0),
         "h5_guarded_batch_run_regression_rate": _build_h5_guarded_larger_benchmark_batch_run(with_rows, payload).get("batch_regression_rate", 0.0),
         "h5_guarded_batch_run_safety_violation_count": _build_h5_guarded_larger_benchmark_batch_run(with_rows, payload).get("safety_violation_count", 0),
+        "h6_local_model_adapter_preflight_present": 1 if _build_h6_local_model_adapter_preflight_contract(with_rows, payload).get("evaluated") else 0,
+        "h6_local_model_adapter_preflight_allowed": 1 if _build_h6_local_model_adapter_preflight_contract(with_rows, payload).get("preflight_allowed") else 0,
+        "h6_local_model_adapter_preflight_ready": 1 if _build_h6_local_model_adapter_preflight_contract(with_rows, payload).get("preflight_ready") else 0,
+        "h6_local_model_adapter_contract_ready": 1 if _build_h6_local_model_adapter_preflight_contract(with_rows, payload).get("adapter_contract_ready") else 0,
+        "h6_local_model_adapter_ready_for_shadow_dry_run": 1 if _build_h6_local_model_adapter_preflight_contract(with_rows, payload).get("ready_for_h6_1_shadow_local_adapter_dry_run") else 0,
+        "h6_local_model_adapter_candidate_count": _build_h6_local_model_adapter_preflight_contract(with_rows, payload).get("adapter_candidate_count", 0),
+        "h6_local_model_adapter_valid_candidate_count": _build_h6_local_model_adapter_preflight_contract(with_rows, payload).get("adapter_candidate_valid_count", 0),
+        "h6_local_model_adapter_invalid_candidate_count": _build_h6_local_model_adapter_preflight_contract(with_rows, payload).get("adapter_candidate_invalid_count", 0),
+        "h6_local_model_adapter_qwen_3b_candidate_count": _build_h6_local_model_adapter_preflight_contract(with_rows, payload).get("qwen_3b_candidate_count", 0),
+        "h6_local_model_adapter_qwen_7b_candidate_count": _build_h6_local_model_adapter_preflight_contract(with_rows, payload).get("qwen_7b_candidate_count", 0),
+        "h6_local_model_adapter_qwen_14b_candidate_count": _build_h6_local_model_adapter_preflight_contract(with_rows, payload).get("qwen_14b_candidate_count", 0),
+        "h6_local_model_adapter_model_call_executed_count": _build_h6_local_model_adapter_preflight_contract(with_rows, payload).get("model_call_executed_count", 0),
+        "h6_local_model_adapter_ollama_invoked_count": _build_h6_local_model_adapter_preflight_contract(with_rows, payload).get("ollama_invoked_count", 0),
+        "h6_local_model_adapter_cloud_invoked_count": _build_h6_local_model_adapter_preflight_contract(with_rows, payload).get("cloud_invoked_count", 0),
+        "h6_local_model_adapter_repo_mutated_count": _build_h6_local_model_adapter_preflight_contract(with_rows, payload).get("repo_mutated_count", 0),
+        "h6_local_model_adapter_behavior_changed_count": _build_h6_local_model_adapter_preflight_contract(with_rows, payload).get("behavior_changed_count", 0),
+        "h6_local_model_adapter_safety_violation_count": _build_h6_local_model_adapter_preflight_contract(with_rows, payload).get("safety_violation_count", 0),
     }
     payload["h5_guarded_local_candidate_benchmark_trial"] = _build_h5_guarded_local_candidate_benchmark_trial(with_rows)
     payload["h5_quality_non_regression_gate"] = _build_h5_quality_non_regression_gate(with_rows, payload["h5_guarded_local_candidate_benchmark_trial"])
@@ -14000,6 +14228,7 @@ def write_evidence_bundle(
     payload["h5_controlled_real_patch_apply_test_trial"] = _build_h5_controlled_real_patch_apply_test_trial(with_rows, payload)
     payload["h5_benchmark_delta_report"] = _build_h5_benchmark_delta_report(with_rows, payload)
     payload["h5_guarded_larger_benchmark_batch_run"] = _build_h5_guarded_larger_benchmark_batch_run(with_rows, payload)
+    payload["h6_local_model_adapter_preflight_contract"] = _build_h6_local_model_adapter_preflight_contract(with_rows, payload)
     payload["external_provider_claim_boundary_contract"] = build_external_provider_claim_boundary_contract(payload)
     payload["public_promotion_readiness_contract"] = build_public_promotion_readiness_contract(payload)
     bundle_path.write_text(json.dumps(payload, indent=2, ensure_ascii=False), encoding="utf-8")
