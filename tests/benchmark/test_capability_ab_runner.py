@@ -21747,6 +21747,190 @@ def test_h5_43_production_ready_false():
             os.environ.pop("NEXUS_H5_ALLOW_QUALITY_NON_REGRESSION_GATE", None)
 
 
+def test_h5_46_empty_row_blocks():
+    """H5-46 T1: empty row blocks."""
+    from scripts.bench.capability_ab_runner import _build_h5_real_local_candidate_execution_harness
+    r = _build_h5_real_local_candidate_execution_harness({})
+    assert r["harness_status"] == "blocked"
+    assert r["harness_allowed"] is False
+
+
+def test_h5_46_flag_missing(monkeypatch):
+    """H5-46 T2: flag missing blocks."""
+    from scripts.bench.capability_ab_runner import _build_h5_real_local_candidate_execution_harness
+    monkeypatch.delenv("NEXUS_H5_ALLOW_REAL_LOCAL_CANDIDATE_EXECUTION_HARNESS", raising=False)
+    r = _build_h5_real_local_candidate_execution_harness({})
+    assert "real_candidate_harness_flag_not_enabled" in r["harness_reasons"]
+
+
+def test_h5_46_missing_gov_closure(monkeypatch):
+    """H5-46 T3: missing governance closure blocks."""
+    from scripts.bench.capability_ab_runner import _build_h5_real_local_candidate_execution_harness
+    monkeypatch.setenv("NEXUS_H5_ALLOW_REAL_LOCAL_CANDIDATE_EXECUTION_HARNESS", "1")
+    r = _build_h5_real_local_candidate_execution_harness({})
+    assert "missing_governance_closure" in r["harness_reasons"]
+
+
+def test_h5_46_alpha_not_ready(monkeypatch):
+    """H5-46 T4: internal_alpha_ready=false blocks."""
+    from scripts.bench.capability_ab_runner import _build_h5_real_local_candidate_execution_harness
+    monkeypatch.setenv("NEXUS_H5_ALLOW_REAL_LOCAL_CANDIDATE_EXECUTION_HARNESS", "1")
+    row = {"h5_governance_closure_public_claim_lock": {"internal_alpha_ready": False, "public_claim_lock_active": True, "production_lock_active": True},
+           "h5_route": {"local_selected_candidate_id": "C_1", "local_selected_candidate_patch_sha256": "abc", "local_selected_candidate_patch_length": 100, "local_selected_candidate_hash_match": True}}
+    r = _build_h5_real_local_candidate_execution_harness(row)
+    assert "internal_alpha_not_ready" in r["harness_reasons"]
+
+
+def test_h5_46_candidate_missing(monkeypatch):
+    """H5-46 T5: selected candidate missing blocks."""
+    from scripts.bench.capability_ab_runner import _build_h5_real_local_candidate_execution_harness
+    monkeypatch.setenv("NEXUS_H5_ALLOW_REAL_LOCAL_CANDIDATE_EXECUTION_HARNESS", "1")
+    row = {"h5_governance_closure_public_claim_lock": {"internal_alpha_ready": True, "public_claim_lock_active": True, "production_lock_active": True},
+           "h5_route": {}}
+    r = _build_h5_real_local_candidate_execution_harness(row)
+    assert "selected_candidate_missing" in r["harness_reasons"]
+
+
+def test_h5_46_hash_not_verified(monkeypatch):
+    """H5-46 T6: selected candidate hash not verified blocks."""
+    from scripts.bench.capability_ab_runner import _build_h5_real_local_candidate_execution_harness
+    monkeypatch.setenv("NEXUS_H5_ALLOW_REAL_LOCAL_CANDIDATE_EXECUTION_HARNESS", "1")
+    row = {"h5_governance_closure_public_claim_lock": {"internal_alpha_ready": True, "public_claim_lock_active": True, "production_lock_active": True},
+           "h5_route": {"local_selected_candidate_id": "C_1", "local_selected_candidate_patch_sha256": "abc", "local_selected_candidate_patch_length": 100, "local_selected_candidate_hash_match": False}}
+    r = _build_h5_real_local_candidate_execution_harness(row)
+    assert "selected_candidate_hash_not_verified" in r["harness_reasons"]
+
+
+def test_h5_46_artifact_missing(monkeypatch):
+    """H5-46 T7: real artifact missing blocks."""
+    from scripts.bench.capability_ab_runner import _build_h5_real_local_candidate_execution_harness
+    monkeypatch.setenv("NEXUS_H5_ALLOW_REAL_LOCAL_CANDIDATE_EXECUTION_HARNESS", "1")
+    row = {"h5_governance_closure_public_claim_lock": {"internal_alpha_ready": True, "public_claim_lock_active": True, "production_lock_active": True},
+           "h5_route": {"local_selected_candidate_id": "C_1", "local_selected_candidate_patch_sha256": "abc", "local_selected_candidate_patch_length": 100, "local_selected_candidate_hash_match": True}}
+    r = _build_h5_real_local_candidate_execution_harness(row)
+    assert "real_candidate_artifact_missing" in r["harness_reasons"]
+
+
+def test_h5_46_artifact_hash_missing(monkeypatch):
+    """H5-46 T8: artifact hash missing blocks."""
+    from scripts.bench.capability_ab_runner import _build_h5_real_local_candidate_execution_harness
+    monkeypatch.setenv("NEXUS_H5_ALLOW_REAL_LOCAL_CANDIDATE_EXECUTION_HARNESS", "1")
+    row = {"h5_governance_closure_public_claim_lock": {"internal_alpha_ready": True, "public_claim_lock_active": True, "production_lock_active": True},
+           "h5_route": {"local_selected_candidate_id": "C_1", "local_selected_candidate_patch_sha256": "abc", "local_selected_candidate_patch_length": 100, "local_selected_candidate_hash_match": True},
+           "h5_real_local_candidate_artifact": {"patch_sha256": "", "patch_length": 100, "content_kind": "candidate_patch_metadata_only"}}
+    r = _build_h5_real_local_candidate_execution_harness(row)
+    assert "real_candidate_artifact_hash_missing" in r["harness_reasons"]
+
+
+def test_h5_46_artifact_length_missing(monkeypatch):
+    """H5-46 T9: artifact length missing blocks."""
+    from scripts.bench.capability_ab_runner import _build_h5_real_local_candidate_execution_harness
+    monkeypatch.setenv("NEXUS_H5_ALLOW_REAL_LOCAL_CANDIDATE_EXECUTION_HARNESS", "1")
+    row = {"h5_governance_closure_public_claim_lock": {"internal_alpha_ready": True, "public_claim_lock_active": True, "production_lock_active": True},
+           "h5_route": {"local_selected_candidate_id": "C_1", "local_selected_candidate_patch_sha256": "abc", "local_selected_candidate_patch_length": 100, "local_selected_candidate_hash_match": True},
+           "h5_real_local_candidate_artifact": {"patch_sha256": "abc", "patch_length": 0, "content_kind": "candidate_patch_metadata_only"}}
+    r = _build_h5_real_local_candidate_execution_harness(row)
+    assert "real_candidate_artifact_length_missing" in r["harness_reasons"]
+
+
+def test_h5_46_artifact_hash_mismatch(monkeypatch):
+    """H5-46 T10: artifact hash mismatch fails."""
+    from scripts.bench.capability_ab_runner import _build_h5_real_local_candidate_execution_harness
+    monkeypatch.setenv("NEXUS_H5_ALLOW_REAL_LOCAL_CANDIDATE_EXECUTION_HARNESS", "1")
+    row = {"h5_governance_closure_public_claim_lock": {"internal_alpha_ready": True, "public_claim_lock_active": True, "production_lock_active": True},
+           "h5_route": {"local_selected_candidate_id": "C_1", "local_selected_candidate_patch_sha256": "abc", "local_selected_candidate_patch_length": 100, "local_selected_candidate_hash_match": True},
+           "h5_real_local_candidate_artifact": {"patch_sha256": "xyz", "patch_length": 100, "content_kind": "candidate_patch_metadata_only"}}
+    r = _build_h5_real_local_candidate_execution_harness(row)
+    assert r["harness_status"] == "real_local_candidate_artifact_mismatch"
+    assert "real_candidate_artifact_hash_mismatch" in r["harness_reasons"]
+
+
+def test_h5_46_artifact_length_mismatch(monkeypatch):
+    """H5-46 T11: artifact length mismatch fails."""
+    from scripts.bench.capability_ab_runner import _build_h5_real_local_candidate_execution_harness
+    monkeypatch.setenv("NEXUS_H5_ALLOW_REAL_LOCAL_CANDIDATE_EXECUTION_HARNESS", "1")
+    row = {"h5_governance_closure_public_claim_lock": {"internal_alpha_ready": True, "public_claim_lock_active": True, "production_lock_active": True},
+           "h5_route": {"local_selected_candidate_id": "C_1", "local_selected_candidate_patch_sha256": "abc", "local_selected_candidate_patch_length": 100, "local_selected_candidate_hash_match": True},
+           "h5_real_local_candidate_artifact": {"patch_sha256": "abc", "patch_length": 200, "content_kind": "candidate_patch_metadata_only"}}
+    r = _build_h5_real_local_candidate_execution_harness(row)
+    assert r["harness_status"] == "real_local_candidate_artifact_mismatch"
+
+
+def test_h5_46_clean_pass(monkeypatch):
+    """H5-46 T12: clean internal alpha + matching real artifact passes."""
+    from scripts.bench.capability_ab_runner import _build_h5_real_local_candidate_execution_harness
+    monkeypatch.setenv("NEXUS_H5_ALLOW_REAL_LOCAL_CANDIDATE_EXECUTION_HARNESS", "1")
+    row = {"h5_governance_closure_public_claim_lock": {"internal_alpha_ready": True, "public_claim_lock_active": True, "production_lock_active": True},
+           "h5_route": {"local_selected_candidate_id": "C_1", "local_selected_candidate_patch_sha256": "abc", "local_selected_candidate_patch_length": 100, "local_selected_candidate_hash_match": True},
+           "h5_real_local_candidate_artifact": {"patch_sha256": "abc", "patch_length": 100, "content_kind": "candidate_patch_metadata_only"}}
+    r = _build_h5_real_local_candidate_execution_harness(row)
+    assert r["harness_status"] == "real_local_candidate_artifact_verified"
+    assert r["real_candidate_artifact_verified"] is True
+    assert r["metadata_candidate_matches_real_artifact"] is True
+    assert r["safe_to_continue"] is True
+
+
+def test_h5_46_repo_mutated_fails(monkeypatch):
+    """H5-46 T13: repo_mutated=true fails."""
+    from scripts.bench.capability_ab_runner import _build_h5_real_local_candidate_execution_harness
+    monkeypatch.setenv("NEXUS_H5_ALLOW_REAL_LOCAL_CANDIDATE_EXECUTION_HARNESS", "1")
+    row = {"h5_governance_closure_public_claim_lock": {"internal_alpha_ready": True, "public_claim_lock_active": True, "production_lock_active": True},
+           "h5_route": {"local_selected_candidate_id": "C_1", "local_selected_candidate_patch_sha256": "abc", "local_selected_candidate_patch_length": 100, "local_selected_candidate_hash_match": True},
+           "h5_real_local_candidate_artifact": {"patch_sha256": "abc", "patch_length": 100, "content_kind": "candidate_patch_metadata_only"},
+           "repo_mutated": True}
+    r = _build_h5_real_local_candidate_execution_harness(row)
+    assert r["safe_to_continue"] is False
+    assert "repo_mutation_detected" in r["harness_reasons"]
+
+
+def test_h5_46_side_effects_fail(monkeypatch):
+    """H5-46 T14: cloud/model_calls/behavior side effects fail."""
+    from scripts.bench.capability_ab_runner import _build_h5_real_local_candidate_execution_harness
+    monkeypatch.setenv("NEXUS_H5_ALLOW_REAL_LOCAL_CANDIDATE_EXECUTION_HARNESS", "1")
+    row = {"h5_governance_closure_public_claim_lock": {"internal_alpha_ready": True, "public_claim_lock_active": True, "production_lock_active": True},
+           "h5_route": {"local_selected_candidate_id": "C_1", "local_selected_candidate_patch_sha256": "abc", "local_selected_candidate_patch_length": 100, "local_selected_candidate_hash_match": True},
+           "h5_real_local_candidate_artifact": {"patch_sha256": "abc", "patch_length": 100, "content_kind": "candidate_patch_metadata_only"},
+           "cloud_fallback_invoked": True}
+    r = _build_h5_real_local_candidate_execution_harness(row)
+    assert r["safe_to_continue"] is False
+    assert "cloud_invoked_detected" in r["harness_reasons"]
+
+
+def test_h5_46_default_env_blocked(monkeypatch):
+    """H5-46 T15: default env blocked."""
+    from scripts.bench.capability_ab_runner import _build_h5_real_local_candidate_execution_harness
+    monkeypatch.delenv("NEXUS_H5_ALLOW_REAL_LOCAL_CANDIDATE_EXECUTION_HARNESS", raising=False)
+    r = _build_h5_real_local_candidate_execution_harness({})
+    assert r["harness_allowed"] is False
+    assert r["harness_status"] == "blocked"
+
+
+def test_h5_46_flagged_fixture_passes(monkeypatch):
+    """H5-46 T16: flagged clean fixture passes."""
+    from scripts.bench.capability_ab_runner import _build_h5_real_local_candidate_execution_harness
+    monkeypatch.setenv("NEXUS_H5_ALLOW_REAL_LOCAL_CANDIDATE_EXECUTION_HARNESS", "1")
+    row = {"h5_governance_closure_public_claim_lock": {"internal_alpha_ready": True, "public_claim_lock_active": True, "production_lock_active": True},
+           "h5_route": {"local_selected_candidate_id": "C_1", "local_selected_candidate_patch_sha256": "abc", "local_selected_candidate_patch_length": 100, "local_selected_candidate_hash_match": True},
+           "h5_real_local_candidate_artifact": {"patch_sha256": "abc", "patch_length": 100, "content_kind": "real_candidate_patch"}}
+    r = _build_h5_real_local_candidate_execution_harness(row)
+    assert r["harness_status"] == "real_local_candidate_artifact_verified"
+    assert r["repo_mutation_allowed"] is False
+    assert r["repo_mutated"] is False
+    assert r["cloud_invoked"] is False
+
+
+def test_h5_46_pr_false_always(monkeypatch):
+    """H5-46 T17: production_ready and public_claim always false."""
+    from scripts.bench.capability_ab_runner import _build_h5_real_local_candidate_execution_harness
+    monkeypatch.setenv("NEXUS_H5_ALLOW_REAL_LOCAL_CANDIDATE_EXECUTION_HARNESS", "1")
+    row = {"h5_governance_closure_public_claim_lock": {"internal_alpha_ready": True, "public_claim_lock_active": True, "production_lock_active": True},
+           "h5_route": {"local_selected_candidate_id": "C_1", "local_selected_candidate_patch_sha256": "abc", "local_selected_candidate_patch_length": 100, "local_selected_candidate_hash_match": True},
+           "h5_real_local_candidate_artifact": {"patch_sha256": "abc", "patch_length": 100, "content_kind": "real_candidate_patch"}}
+    r = _build_h5_real_local_candidate_execution_harness(row)
+    assert r["production_ready"] is False
+    assert r["public_claim_allowed"] is False
+
+
 def test_h5_43_trial_fields_update(tmp_path, monkeypatch):
     """H5-43 T15: quality_non_regression_evaluated/pass update guarded trial."""
     from scripts.bench.capability_ab_runner import CapabilityTask, _finalize_with_nexus_row, write_evidence_bundle

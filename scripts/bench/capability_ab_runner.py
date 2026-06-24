@@ -8572,6 +8572,142 @@ def _build_h5_governance_closure_public_claim_lock(bundle: dict[str, Any] | None
     }
 
 
+def _build_h5_real_local_candidate_execution_harness(row: dict[str, Any], bundle: dict[str, Any] | None = None) -> dict[str, Any]:
+    """Pure helper: real local candidate execution harness receipt."""
+    import os as _os
+
+    flag = _os.environ.get("NEXUS_H5_ALLOW_REAL_LOCAL_CANDIDATE_EXECUTION_HARNESS", "").strip() == "1"
+
+    gov = row.get("h5_governance_closure_public_claim_lock")
+    if gov is None and bundle:
+        gov = bundle.get("h5_governance_closure_public_claim_lock")
+
+    gov_present = bool(gov)
+    alpha_ready = bool(gov.get("internal_alpha_ready", False)) if gov else False
+    pub_lock = bool(gov.get("public_claim_lock_active", True)) if gov else True
+    prod_lock = bool(gov.get("production_lock_active", True)) if gov else True
+
+    selected_id = str(row.get("h5_route", {}).get("local_selected_candidate_id", "") or "")
+    selected_sha256 = str(row.get("h5_route", {}).get("local_selected_candidate_patch_sha256", "") or "")
+    selected_length = int(row.get("h5_route", {}).get("local_selected_candidate_patch_length", 0) or 0)
+    selected_hash_ok = bool(row.get("h5_route", {}).get("local_selected_candidate_hash_match", False))
+
+    has_candidate = bool(selected_id) and selected_hash_ok
+
+    artifact = row.get("h5_real_local_candidate_artifact")
+    if artifact is None and bundle:
+        artifact = bundle.get("h5_real_local_candidate_artifact")
+
+    art_present = bool(artifact)
+    art_sha256 = ""
+    art_length = 0
+    art_kind = "none"
+    art_hash_ok = False
+
+    if artifact and isinstance(artifact, dict):
+        art_sha256 = str(artifact.get("patch_sha256", "") or "")
+        art_length = int(artifact.get("patch_length", 0) or 0)
+        art_kind = str(artifact.get("content_kind", "none") or "none")
+        if art_sha256 and art_length > 0:
+            if bool(artifact.get("artifact_hash_match", False)):
+                art_hash_ok = True
+            elif art_sha256 == selected_sha256:
+                art_hash_ok = True
+
+    meta_match = art_sha256 == selected_sha256 and art_length == selected_length if art_sha256 else False
+
+    repo_mutated = bool(row.get("repo_mutated", False))
+    cloud_inv = bool(row.get("cloud_fallback_invoked", False))
+    mc_inc = bool(row.get("model_calls", 0)) and row.get("model_calls", 0) != 0
+    beh = bool(row.get("behavior_changed", False))
+
+    would_allow = (
+        flag and gov_present and alpha_ready
+        and pub_lock and prod_lock
+        and has_candidate and selected_hash_ok
+    )
+
+    artifact_ok = art_present and art_hash_ok and art_length > 0
+
+    reasons = []
+    if not flag:
+        reasons.append("real_candidate_harness_flag_not_enabled")
+    if not gov_present:
+        reasons.append("missing_governance_closure")
+    if gov and not alpha_ready:
+        reasons.append("internal_alpha_not_ready")
+    if not pub_lock:
+        reasons.append("public_claim_lock_missing")
+    if not prod_lock:
+        reasons.append("production_lock_missing")
+    if not has_candidate:
+        reasons.append("selected_candidate_missing")
+    if not selected_hash_ok:
+        reasons.append("selected_candidate_hash_not_verified")
+    if not art_present:
+        reasons.append("real_candidate_artifact_missing")
+    if art_present and not bool(art_sha256):
+        reasons.append("real_candidate_artifact_hash_missing")
+    if art_present and art_length <= 0:
+        reasons.append("real_candidate_artifact_length_missing")
+    if art_present and art_sha256 and not art_hash_ok:
+        reasons.append("real_candidate_artifact_hash_mismatch")
+    if art_present and selected_sha256 and art_sha256 and selected_length != art_length:
+        reasons.append("real_candidate_artifact_length_mismatch")
+    if repo_mutated:
+        reasons.append("repo_mutation_detected")
+    if cloud_inv:
+        reasons.append("cloud_invoked_detected")
+    if beh:
+        reasons.append("behavior_changed_detected")
+    reasons.extend([
+        "isolated_real_candidate_artifact_only",
+        "repo_mutation_blocked",
+        "cloud_invocation_blocked",
+        "model_calls_increment_blocked",
+        "production_claim_blocked",
+        "public_claim_blocked",
+    ])
+
+    if would_allow and artifact_ok and meta_match:
+        harness_status = "real_local_candidate_artifact_verified"
+    elif would_allow and art_present and not meta_match:
+        harness_status = "real_local_candidate_artifact_mismatch"
+    else:
+        harness_status = "blocked"
+
+    safe = would_allow and artifact_ok and meta_match and not repo_mutated and not cloud_inv and not beh
+
+    return {
+        "schema": "nexus.hybrid_h5_real_local_candidate_execution_harness.v1",
+        "evaluated": True,
+        "harness_status": harness_status,
+        "harness_reasons": reasons,
+        "harness_allowed": would_allow,
+        "real_candidate_artifact_present": art_present,
+        "real_candidate_artifact_verified": artifact_ok and meta_match,
+        "real_candidate_patch_sha256": art_sha256,
+        "real_candidate_patch_length": art_length,
+        "real_candidate_patch_kind": art_kind,
+        "real_candidate_source": "local_candidate_isolated_artifact",
+        "selected_candidate_id": selected_id,
+        "selected_candidate_hash_verified": selected_hash_ok,
+        "metadata_candidate_matches_real_artifact": meta_match,
+        "isolated_execution_only": True,
+        "repo_mutation_allowed": False,
+        "repo_mutated": repo_mutated,
+        "model_calls_incremented": False,
+        "cloud_invoked": cloud_inv,
+        "behavior_changed": beh,
+        "rollback_available": True,
+        "safe_to_continue": safe,
+        "internal_alpha_ready_required": True,
+        "internal_alpha_ready": alpha_ready,
+        "production_ready": False,
+        "public_claim_allowed": False,
+    }
+
+
 def _finalize_with_nexus_row(
     row: dict[str, Any],
     *,
@@ -12996,6 +13132,14 @@ def write_evidence_bundle(
         "h5_production_lock_active": 1 if _build_h5_governance_closure_public_claim_lock(payload).get("production_lock_active") else 0,
         "h5_public_claim_allowed_count": 1 if _build_h5_governance_closure_public_claim_lock(payload).get("public_claim_allowed") else 0,
         "h5_production_ready_count": 1 if _build_h5_governance_closure_public_claim_lock(payload).get("production_ready") else 0,
+        "h5_real_local_candidate_execution_harness_count": 1 if _build_h5_real_local_candidate_execution_harness(payload.get("h5_route", {}), payload).get("harness_status") != "blocked" or _build_h5_real_local_candidate_execution_harness(payload.get("h5_route", {}), payload).get("evaluated") else 0,
+        "h5_real_local_candidate_execution_harness_allowed_count": 1 if _build_h5_real_local_candidate_execution_harness(payload.get("h5_route", {}), payload).get("harness_allowed") else 0,
+        "h5_real_local_candidate_artifact_present_count": 1 if _build_h5_real_local_candidate_execution_harness(payload.get("h5_route", {}), payload).get("real_candidate_artifact_present") else 0,
+        "h5_real_local_candidate_artifact_verified_count": 1 if _build_h5_real_local_candidate_execution_harness(payload.get("h5_route", {}), payload).get("real_candidate_artifact_verified") else 0,
+        "h5_real_local_candidate_artifact_match_count": 1 if _build_h5_real_local_candidate_execution_harness(payload.get("h5_route", {}), payload).get("metadata_candidate_matches_real_artifact") else 0,
+        "h5_real_local_candidate_artifact_mismatch_count": 1 if _build_h5_real_local_candidate_execution_harness(payload.get("h5_route", {}), payload).get("harness_status") == "real_local_candidate_artifact_mismatch" else 0,
+        "h5_real_local_candidate_repo_mutated_count": 1 if _build_h5_real_local_candidate_execution_harness(payload.get("h5_route", {}), payload).get("repo_mutated") else 0,
+        "h5_real_local_candidate_safe_to_continue_count": 1 if _build_h5_real_local_candidate_execution_harness(payload.get("h5_route", {}), payload).get("safe_to_continue") else 0,
     }
     payload["h5_guarded_local_candidate_benchmark_trial"] = _build_h5_guarded_local_candidate_benchmark_trial(with_rows)
     payload["h5_quality_non_regression_gate"] = _build_h5_quality_non_regression_gate(with_rows, payload["h5_guarded_local_candidate_benchmark_trial"])
@@ -13003,6 +13147,7 @@ def write_evidence_bundle(
     payload["h5_guarded_local_candidate_benchmark_trial"]["quality_non_regression_passed"] = payload["h5_quality_non_regression_gate"]["quality_non_regression_passed"]
     payload["h5_full_guarded_benchmark_run"] = _build_h5_full_guarded_benchmark_run(with_rows, payload)
     payload["h5_governance_closure_public_claim_lock"] = _build_h5_governance_closure_public_claim_lock(payload)
+    payload["h5_real_local_candidate_execution_harness"] = _build_h5_real_local_candidate_execution_harness(payload.get("h5_route", {}), payload)
     payload["external_provider_claim_boundary_contract"] = build_external_provider_claim_boundary_contract(payload)
     payload["public_promotion_readiness_contract"] = build_public_promotion_readiness_contract(payload)
     bundle_path.write_text(json.dumps(payload, indent=2, ensure_ascii=False), encoding="utf-8")
