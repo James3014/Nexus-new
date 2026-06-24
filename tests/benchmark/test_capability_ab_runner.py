@@ -27731,3 +27731,634 @@ def test_h6_6_audit_report_lock():
             if needle in s:
                 bad.append((p.name, needle))
     assert not bad, f"Report lock violations found: {bad}"
+
+
+def test_h6_4_execution_plan_role_counts(monkeypatch):
+    """H6-4 T24: All role counts computed."""
+    from scripts.bench.capability_ab_runner import _build_h6_local_adapter_execution_plan_dry_run
+    monkeypatch.setenv("NEXUS_H6_ALLOW_LOCAL_ADAPTER_EXECUTION_PLAN_DRY_RUN", "1")
+    routing = {"routing_ready": True, "shadow_adapter_routing_receipt_ready": True, "ready_for_h6_4_local_adapter_execution_plan_dry_run": True, "safety_violation_count": 0}
+    bundle = {"h6_shadow_adapter_routing": routing}
+    roles = ["selector", "localizer", "patch_synthesizer", "verifier_assist"]
+    rows = []
+    for i, role in enumerate(roles, 1):
+        rows.append({"h6_local_adapter_execution_plan": {
+            "plan_id": f"plan-{i:03d}",
+            "request_id": f"io-req-{i:03d}",
+            "adapter_id": f"qwen3b-{role}-v0",
+            "model_family": "qwen",
+            "model_size": "3b",
+            "model_name": "qwen2.5-coder:3b",
+            "role": role,
+            "route_mode": "shadow_only",
+            "adapter_mode": "shadow_only",
+            "execution_mode": "dry_run_only",
+            "executable": False,
+        }})
+    r = _build_h6_local_adapter_execution_plan_dry_run(rows, bundle)
+    assert r["selector_execution_plan_count"] == 1
+    assert r["localizer_execution_plan_count"] == 1
+    assert r["patch_synthesizer_execution_plan_count"] == 1
+    assert r["verifier_assist_execution_plan_count"] == 1
+
+
+def test_h6_4_execution_plan_missing_request_id(monkeypatch):
+    """H6-4 T25: Missing request_id invalidates plan."""
+    from scripts.bench.capability_ab_runner import _build_h6_local_adapter_execution_plan_dry_run
+    monkeypatch.setenv("NEXUS_H6_ALLOW_LOCAL_ADAPTER_EXECUTION_PLAN_DRY_RUN", "1")
+    routing = {"routing_ready": True, "shadow_adapter_routing_receipt_ready": True, "ready_for_h6_4_local_adapter_execution_plan_dry_run": True, "safety_violation_count": 0}
+    bundle = {"h6_shadow_adapter_routing": routing}
+    rows = [{"h6_local_adapter_execution_plan": {
+        "plan_id": "plan-001",
+        "request_id": "",
+        "adapter_id": "qwen3b-selector-v0",
+        "model_family": "qwen",
+        "model_size": "3b",
+        "model_name": "qwen2.5-coder:3b",
+        "role": "selector",
+        "route_mode": "shadow_only",
+        "adapter_mode": "shadow_only",
+        "execution_mode": "dry_run_only",
+        "executable": False,
+    }}]
+    r = _build_h6_local_adapter_execution_plan_dry_run(rows, bundle)
+    assert r["missing_request_id_count"] == 1
+    assert "missing_request_id" in r["plan_reasons"]
+
+
+def test_h6_4_execution_plan_missing_adapter_id(monkeypatch):
+    """H6-4 T26: Missing adapter_id invalidates plan."""
+    from scripts.bench.capability_ab_runner import _build_h6_local_adapter_execution_plan_dry_run
+    monkeypatch.setenv("NEXUS_H6_ALLOW_LOCAL_ADAPTER_EXECUTION_PLAN_DRY_RUN", "1")
+    routing = {"routing_ready": True, "shadow_adapter_routing_receipt_ready": True, "ready_for_h6_4_local_adapter_execution_plan_dry_run": True, "safety_violation_count": 0}
+    bundle = {"h6_shadow_adapter_routing": routing}
+    rows = [{"h6_local_adapter_execution_plan": {
+        "plan_id": "plan-001",
+        "request_id": "io-req-001",
+        "adapter_id": "",
+        "model_family": "qwen",
+        "model_size": "3b",
+        "model_name": "qwen2.5-coder:3b",
+        "role": "selector",
+        "route_mode": "shadow_only",
+        "adapter_mode": "shadow_only",
+        "execution_mode": "dry_run_only",
+        "executable": False,
+    }}]
+    r = _build_h6_local_adapter_execution_plan_dry_run(rows, bundle)
+    assert r["missing_adapter_id_count"] == 1
+    assert "missing_adapter_id" in r["plan_reasons"]
+
+
+def test_h6_4_execution_plan_missing_model_name(monkeypatch):
+    """H6-4 T27: Missing model_name invalidates plan."""
+    from scripts.bench.capability_ab_runner import _build_h6_local_adapter_execution_plan_dry_run
+    monkeypatch.setenv("NEXUS_H6_ALLOW_LOCAL_ADAPTER_EXECUTION_PLAN_DRY_RUN", "1")
+    routing = {"routing_ready": True, "shadow_adapter_routing_receipt_ready": True, "ready_for_h6_4_local_adapter_execution_plan_dry_run": True, "safety_violation_count": 0}
+    bundle = {"h6_shadow_adapter_routing": routing}
+    rows = [{"h6_local_adapter_execution_plan": {
+        "plan_id": "plan-001",
+        "request_id": "io-req-001",
+        "adapter_id": "qwen3b-selector-v0",
+        "model_family": "qwen",
+        "model_size": "3b",
+        "model_name": "",
+        "role": "selector",
+        "route_mode": "shadow_only",
+        "adapter_mode": "shadow_only",
+        "execution_mode": "dry_run_only",
+        "executable": False,
+    }}]
+    r = _build_h6_local_adapter_execution_plan_dry_run(rows, bundle)
+    assert r["missing_model_name_count"] == 1
+    assert "missing_model_name" in r["plan_reasons"]
+
+
+def test_h6_4_execution_plan_missing_role(monkeypatch):
+    """H6-4 T28: Missing role invalidates plan."""
+    from scripts.bench.capability_ab_runner import _build_h6_local_adapter_execution_plan_dry_run
+    monkeypatch.setenv("NEXUS_H6_ALLOW_LOCAL_ADAPTER_EXECUTION_PLAN_DRY_RUN", "1")
+    routing = {"routing_ready": True, "shadow_adapter_routing_receipt_ready": True, "ready_for_h6_4_local_adapter_execution_plan_dry_run": True, "safety_violation_count": 0}
+    bundle = {"h6_shadow_adapter_routing": routing}
+    rows = [{"h6_local_adapter_execution_plan": {
+        "plan_id": "plan-001",
+        "request_id": "io-req-001",
+        "adapter_id": "qwen3b-selector-v0",
+        "model_family": "qwen",
+        "model_size": "3b",
+        "model_name": "qwen2.5-coder:3b",
+        "role": "proposer",
+        "route_mode": "shadow_only",
+        "adapter_mode": "shadow_only",
+        "execution_mode": "dry_run_only",
+        "executable": False,
+    }}]
+    r = _build_h6_local_adapter_execution_plan_dry_run(rows, bundle)
+    assert r["missing_role_count"] == 1
+    assert "missing_role" in r["plan_reasons"]
+
+
+def test_h6_4_execution_plan_missing_route_mode(monkeypatch):
+    """H6-4 T29: Missing route_mode invalidates plan."""
+    from scripts.bench.capability_ab_runner import _build_h6_local_adapter_execution_plan_dry_run
+    monkeypatch.setenv("NEXUS_H6_ALLOW_LOCAL_ADAPTER_EXECUTION_PLAN_DRY_RUN", "1")
+    routing = {"routing_ready": True, "shadow_adapter_routing_receipt_ready": True, "ready_for_h6_4_local_adapter_execution_plan_dry_run": True, "safety_violation_count": 0}
+    bundle = {"h6_shadow_adapter_routing": routing}
+    rows = [{"h6_local_adapter_execution_plan": {
+        "plan_id": "plan-001",
+        "request_id": "io-req-001",
+        "adapter_id": "qwen3b-selector-v0",
+        "model_family": "qwen",
+        "model_size": "3b",
+        "model_name": "qwen2.5-coder:3b",
+        "role": "selector",
+        "route_mode": "cloud_only",
+        "adapter_mode": "shadow_only",
+        "execution_mode": "dry_run_only",
+        "executable": False,
+    }}]
+    r = _build_h6_local_adapter_execution_plan_dry_run(rows, bundle)
+    assert r["missing_route_mode_count"] == 1
+    assert "missing_route_mode" in r["plan_reasons"]
+
+
+def test_h6_4_execution_plan_invalid_execution_mode(monkeypatch):
+    """H6-4 T30: Invalid execution_mode invalidates plan."""
+    from scripts.bench.capability_ab_runner import _build_h6_local_adapter_execution_plan_dry_run
+    monkeypatch.setenv("NEXUS_H6_ALLOW_LOCAL_ADAPTER_EXECUTION_PLAN_DRY_RUN", "1")
+    routing = {"routing_ready": True, "shadow_adapter_routing_receipt_ready": True, "ready_for_h6_4_local_adapter_execution_plan_dry_run": True, "safety_violation_count": 0}
+    bundle = {"h6_shadow_adapter_routing": routing}
+    rows = [{"h6_local_adapter_execution_plan": {
+        "plan_id": "plan-001",
+        "request_id": "io-req-001",
+        "adapter_id": "qwen3b-selector-v0",
+        "model_family": "qwen",
+        "model_size": "3b",
+        "model_name": "qwen2.5-coder:3b",
+        "role": "selector",
+        "route_mode": "shadow_only",
+        "adapter_mode": "shadow_only",
+        "execution_mode": "production",
+        "executable": False,
+    }}]
+    r = _build_h6_local_adapter_execution_plan_dry_run(rows, bundle)
+    assert r["invalid_execution_mode_count"] == 1
+    assert "invalid_execution_mode" in r["plan_reasons"]
+
+
+def test_h6_5_invocation_intent_no_receipts_block(monkeypatch):
+    """H6-5 T19: No receipts blocks."""
+    from scripts.bench.capability_ab_runner import _build_h6_shadow_local_adapter_invocation_intent_receipt
+    monkeypatch.setenv("NEXUS_H6_ALLOW_SHADOW_LOCAL_ADAPTER_INVOCATION_INTENT", "1")
+    plan = {"plan_ready": True, "execution_plan_receipt_ready": True, "ready_for_h6_5_shadow_local_adapter_invocation_intent": True, "safety_violation_count": 0}
+    bundle = {"h6_local_adapter_execution_plan_dry_run": plan}
+    rows = [{"h6_shadow_local_adapter_invocation_intent": {
+        "intent_id": "intent-001",
+        "plan_id": "exec-plan-001",
+        "request_id": "io-req-001",
+        "adapter_id": "qwen3b-selector-v0",
+        "model_family": "qwen",
+        "model_size": "3b",
+        "model_name": "qwen2.5-coder:3b",
+        "role": "selector",
+        "intent_mode": "shadow_intent_only",
+        "model_call_intended": True,
+    }}]
+    r = _build_h6_shadow_local_adapter_invocation_intent_receipt(rows, bundle)
+    assert r["intent_status"] == "intent_fail"
+    assert "no_intent_receipts" in r["intent_reasons"]
+
+
+def test_h6_5_invocation_intent_unmatched_intent_receipt_block(monkeypatch):
+    """H6-5 T20: Unmatched intent/receipt blocks."""
+    from scripts.bench.capability_ab_runner import _build_h6_shadow_local_adapter_invocation_intent_receipt
+    monkeypatch.setenv("NEXUS_H6_ALLOW_SHADOW_LOCAL_ADAPTER_INVOCATION_INTENT", "1")
+    plan = {"plan_ready": True, "execution_plan_receipt_ready": True, "ready_for_h6_5_shadow_local_adapter_invocation_intent": True, "safety_violation_count": 0}
+    bundle = {"h6_local_adapter_execution_plan_dry_run": plan}
+    rows = [
+        {"h6_shadow_local_adapter_invocation_intent": {
+            "intent_id": "intent-001",
+            "plan_id": "exec-plan-001",
+            "request_id": "io-req-001",
+            "adapter_id": "qwen3b-selector-v0",
+            "model_family": "qwen",
+            "model_size": "3b",
+            "model_name": "qwen2.5-coder:3b",
+            "role": "selector",
+            "intent_mode": "shadow_intent_only",
+            "model_call_intended": True,
+        }},
+        {"h6_shadow_local_adapter_invocation_intent_receipt": {
+            "intent_id": "intent-002",
+            "plan_id": "exec-plan-001",
+            "request_id": "io-req-001",
+            "adapter_id": "qwen3b-selector-v0",
+            "receipt_status": "intent_recorded",
+            "model_call_intended": True,
+        }},
+    ]
+    r = _build_h6_shadow_local_adapter_invocation_intent_receipt(rows, bundle)
+    assert r["intent_status"] == "intent_fail"
+    assert "no_matched_intents" in r["intent_reasons"]
+
+
+def test_h6_5_invocation_intent_missing_plan_id(monkeypatch):
+    """H6-5 T21: Missing plan_id invalidates intent."""
+    from scripts.bench.capability_ab_runner import _build_h6_shadow_local_adapter_invocation_intent_receipt
+    monkeypatch.setenv("NEXUS_H6_ALLOW_SHADOW_LOCAL_ADAPTER_INVOCATION_INTENT", "1")
+    plan = {"plan_ready": True, "execution_plan_receipt_ready": True, "ready_for_h6_5_shadow_local_adapter_invocation_intent": True, "safety_violation_count": 0}
+    bundle = {"h6_local_adapter_execution_plan_dry_run": plan}
+    rows = [{"h6_shadow_local_adapter_invocation_intent": {
+        "intent_id": "intent-001",
+        "plan_id": "",
+        "request_id": "io-req-001",
+        "adapter_id": "qwen3b-selector-v0",
+        "model_family": "qwen",
+        "model_size": "3b",
+        "model_name": "qwen2.5-coder:3b",
+        "role": "selector",
+        "intent_mode": "shadow_intent_only",
+        "model_call_intended": True,
+    }}]
+    r = _build_h6_shadow_local_adapter_invocation_intent_receipt(rows, bundle)
+    assert r["missing_plan_id_count"] == 1
+    assert "missing_plan_id" in r["intent_reasons"]
+
+
+def test_h6_5_invocation_intent_missing_request_id(monkeypatch):
+    """H6-5 T22: Missing request_id invalidates intent."""
+    from scripts.bench.capability_ab_runner import _build_h6_shadow_local_adapter_invocation_intent_receipt
+    monkeypatch.setenv("NEXUS_H6_ALLOW_SHADOW_LOCAL_ADAPTER_INVOCATION_INTENT", "1")
+    plan = {"plan_ready": True, "execution_plan_receipt_ready": True, "ready_for_h6_5_shadow_local_adapter_invocation_intent": True, "safety_violation_count": 0}
+    bundle = {"h6_local_adapter_execution_plan_dry_run": plan}
+    rows = [{"h6_shadow_local_adapter_invocation_intent": {
+        "intent_id": "intent-001",
+        "plan_id": "exec-plan-001",
+        "request_id": "",
+        "adapter_id": "qwen3b-selector-v0",
+        "model_family": "qwen",
+        "model_size": "3b",
+        "model_name": "qwen2.5-coder:3b",
+        "role": "selector",
+        "intent_mode": "shadow_intent_only",
+        "model_call_intended": True,
+    }}]
+    r = _build_h6_shadow_local_adapter_invocation_intent_receipt(rows, bundle)
+    assert r["missing_request_id_count"] == 1
+    assert "missing_request_id" in r["intent_reasons"]
+
+
+def test_h6_5_invocation_intent_missing_adapter_id(monkeypatch):
+    """H6-5 T23: Missing adapter_id invalidates intent."""
+    from scripts.bench.capability_ab_runner import _build_h6_shadow_local_adapter_invocation_intent_receipt
+    monkeypatch.setenv("NEXUS_H6_ALLOW_SHADOW_LOCAL_ADAPTER_INVOCATION_INTENT", "1")
+    plan = {"plan_ready": True, "execution_plan_receipt_ready": True, "ready_for_h6_5_shadow_local_adapter_invocation_intent": True, "safety_violation_count": 0}
+    bundle = {"h6_local_adapter_execution_plan_dry_run": plan}
+    rows = [{"h6_shadow_local_adapter_invocation_intent": {
+        "intent_id": "intent-001",
+        "plan_id": "exec-plan-001",
+        "request_id": "io-req-001",
+        "adapter_id": "",
+        "model_family": "qwen",
+        "model_size": "3b",
+        "model_name": "qwen2.5-coder:3b",
+        "role": "selector",
+        "intent_mode": "shadow_intent_only",
+        "model_call_intended": True,
+    }}]
+    r = _build_h6_shadow_local_adapter_invocation_intent_receipt(rows, bundle)
+    assert r["missing_adapter_id_count"] == 1
+    assert "missing_adapter_id" in r["intent_reasons"]
+
+
+def test_h6_5_invocation_intent_missing_model_name(monkeypatch):
+    """H6-5 T24: Missing model_name invalidates intent."""
+    from scripts.bench.capability_ab_runner import _build_h6_shadow_local_adapter_invocation_intent_receipt
+    monkeypatch.setenv("NEXUS_H6_ALLOW_SHADOW_LOCAL_ADAPTER_INVOCATION_INTENT", "1")
+    plan = {"plan_ready": True, "execution_plan_receipt_ready": True, "ready_for_h6_5_shadow_local_adapter_invocation_intent": True, "safety_violation_count": 0}
+    bundle = {"h6_local_adapter_execution_plan_dry_run": plan}
+    rows = [{"h6_shadow_local_adapter_invocation_intent": {
+        "intent_id": "intent-001",
+        "plan_id": "exec-plan-001",
+        "request_id": "io-req-001",
+        "adapter_id": "qwen3b-selector-v0",
+        "model_family": "qwen",
+        "model_size": "3b",
+        "model_name": "",
+        "role": "selector",
+        "intent_mode": "shadow_intent_only",
+        "model_call_intended": True,
+    }}]
+    r = _build_h6_shadow_local_adapter_invocation_intent_receipt(rows, bundle)
+    assert r["missing_model_name_count"] == 1
+    assert "missing_model_name" in r["intent_reasons"]
+
+
+def test_h6_5_invocation_intent_missing_role(monkeypatch):
+    """H6-5 T25: Missing role invalidates intent."""
+    from scripts.bench.capability_ab_runner import _build_h6_shadow_local_adapter_invocation_intent_receipt
+    monkeypatch.setenv("NEXUS_H6_ALLOW_SHADOW_LOCAL_ADAPTER_INVOCATION_INTENT", "1")
+    plan = {"plan_ready": True, "execution_plan_receipt_ready": True, "ready_for_h6_5_shadow_local_adapter_invocation_intent": True, "safety_violation_count": 0}
+    bundle = {"h6_local_adapter_execution_plan_dry_run": plan}
+    rows = [{"h6_shadow_local_adapter_invocation_intent": {
+        "intent_id": "intent-001",
+        "plan_id": "exec-plan-001",
+        "request_id": "io-req-001",
+        "adapter_id": "qwen3b-selector-v0",
+        "model_family": "qwen",
+        "model_size": "3b",
+        "model_name": "qwen2.5-coder:3b",
+        "role": "proposer",
+        "intent_mode": "shadow_intent_only",
+        "model_call_intended": True,
+    }}]
+    r = _build_h6_shadow_local_adapter_invocation_intent_receipt(rows, bundle)
+    assert r["missing_role_count"] == 1
+    assert "missing_role" in r["intent_reasons"]
+
+
+def test_h6_5_invocation_intent_invalid_intent_mode(monkeypatch):
+    """H6-5 T26: Invalid intent_mode invalidates intent."""
+    from scripts.bench.capability_ab_runner import _build_h6_shadow_local_adapter_invocation_intent_receipt
+    monkeypatch.setenv("NEXUS_H6_ALLOW_SHADOW_LOCAL_ADAPTER_INVOCATION_INTENT", "1")
+    plan = {"plan_ready": True, "execution_plan_receipt_ready": True, "ready_for_h6_5_shadow_local_adapter_invocation_intent": True, "safety_violation_count": 0}
+    bundle = {"h6_local_adapter_execution_plan_dry_run": plan}
+    rows = [{"h6_shadow_local_adapter_invocation_intent": {
+        "intent_id": "intent-001",
+        "plan_id": "exec-plan-001",
+        "request_id": "io-req-001",
+        "adapter_id": "qwen3b-selector-v0",
+        "model_family": "qwen",
+        "model_size": "3b",
+        "model_name": "qwen2.5-coder:3b",
+        "role": "selector",
+        "intent_mode": "production",
+        "model_call_intended": True,
+    }}]
+    r = _build_h6_shadow_local_adapter_invocation_intent_receipt(rows, bundle)
+    assert r["invalid_intent_mode_count"] == 1
+    assert "invalid_intent_mode" in r["intent_reasons"]
+
+
+def test_h6_5_invocation_intent_invalid_receipt_status(monkeypatch):
+    """H6-5 T27: Invalid receipt_status invalidates receipt."""
+    from scripts.bench.capability_ab_runner import _build_h6_shadow_local_adapter_invocation_intent_receipt
+    monkeypatch.setenv("NEXUS_H6_ALLOW_SHADOW_LOCAL_ADAPTER_INVOCATION_INTENT", "1")
+    plan = {"plan_ready": True, "execution_plan_receipt_ready": True, "ready_for_h6_5_shadow_local_adapter_invocation_intent": True, "safety_violation_count": 0}
+    bundle = {"h6_local_adapter_execution_plan_dry_run": plan}
+    rows = [{"h6_shadow_local_adapter_invocation_intent_receipt": {
+        "intent_id": "intent-001",
+        "plan_id": "exec-plan-001",
+        "request_id": "io-req-001",
+        "adapter_id": "qwen3b-selector-v0",
+        "receipt_status": "production",
+        "model_call_intended": True,
+    }}]
+    r = _build_h6_shadow_local_adapter_invocation_intent_receipt(rows, bundle)
+    assert r["invalid_intent_receipt_count"] == 1
+    assert "invalid_intent_receipt" in r["intent_reasons"]
+
+
+def test_h6_5_invocation_intent_model_call_intended_counted(monkeypatch):
+    """H6-5 T28: model_call_intended counted but model_call_executed false."""
+    from scripts.bench.capability_ab_runner import _build_h6_shadow_local_adapter_invocation_intent_receipt
+    monkeypatch.setenv("NEXUS_H6_ALLOW_SHADOW_LOCAL_ADAPTER_INVOCATION_INTENT", "1")
+    plan = {"plan_ready": True, "execution_plan_receipt_ready": True, "ready_for_h6_5_shadow_local_adapter_invocation_intent": True, "safety_violation_count": 0}
+    bundle = {"h6_local_adapter_execution_plan_dry_run": plan}
+    rows = [{"h6_shadow_local_adapter_invocation_intent": {
+        "intent_id": "intent-001",
+        "plan_id": "exec-plan-001",
+        "request_id": "io-req-001",
+        "adapter_id": "qwen3b-selector-v0",
+        "model_family": "qwen",
+        "model_size": "3b",
+        "model_name": "qwen2.5-coder:3b",
+        "role": "selector",
+        "intent_mode": "shadow_intent_only",
+        "model_call_intended": True,
+        "model_call_executed": False,
+    }}]
+    r = _build_h6_shadow_local_adapter_invocation_intent_receipt(rows, bundle)
+    assert r["model_call_intended_count"] == 1
+    assert r["model_call_executed_count"] == 0
+
+
+def test_h6_6_stub_output_role_counts(monkeypatch):
+    """H6-6 T23: All role counts computed."""
+    from scripts.bench.capability_ab_runner import _build_h6_deterministic_local_adapter_stub_output
+    monkeypatch.setenv("NEXUS_H6_ALLOW_DETERMINISTIC_LOCAL_ADAPTER_STUB_OUTPUT", "1")
+    intent = {"intent_ready": True, "invocation_intent_receipt_ready": True, "ready_for_h6_6_deterministic_local_adapter_stub_output": True, "safety_violation_count": 0}
+    bundle = {"h6_shadow_local_adapter_invocation_intent_receipt": intent}
+    roles = ["selector", "localizer", "patch_synthesizer", "verifier_assist"]
+    rows = []
+    for i, role in enumerate(roles, 1):
+        rows.append({"h6_deterministic_local_adapter_stub_output": {
+            "stub_id": f"stub-{i:03d}",
+            "intent_id": f"intent-{i:03d}",
+            "request_id": f"io-req-{i:03d}",
+            "adapter_id": f"qwen3b-{role}-v0",
+            "model_family": "qwen",
+            "model_size": "3b",
+            "model_name": "qwen2.5-coder:3b",
+            "role": role,
+            "output_status": "deterministic_stub_only",
+            "output_ref": f"fixture://stub-output-{i:03d}",
+            "receipt_ref": f"fixture://stub-receipt-{i:03d}",
+        }})
+    r = _build_h6_deterministic_local_adapter_stub_output(rows, bundle)
+    assert r["selector_stub_output_count"] == 1
+    assert r["localizer_stub_output_count"] == 1
+    assert r["patch_synthesizer_stub_output_count"] == 1
+    assert r["verifier_assist_stub_output_count"] == 1
+
+
+def test_h6_6_stub_output_missing_intent_id(monkeypatch):
+    """H6-6 T24: Missing intent_id invalidates stub."""
+    from scripts.bench.capability_ab_runner import _build_h6_deterministic_local_adapter_stub_output
+    monkeypatch.setenv("NEXUS_H6_ALLOW_DETERMINISTIC_LOCAL_ADAPTER_STUB_OUTPUT", "1")
+    intent = {"intent_ready": True, "invocation_intent_receipt_ready": True, "ready_for_h6_6_deterministic_local_adapter_stub_output": True, "safety_violation_count": 0}
+    bundle = {"h6_shadow_local_adapter_invocation_intent_receipt": intent}
+    rows = [{"h6_deterministic_local_adapter_stub_output": {
+        "stub_id": "stub-001",
+        "intent_id": "",
+        "request_id": "io-req-001",
+        "adapter_id": "qwen3b-selector-v0",
+        "model_family": "qwen",
+        "model_size": "3b",
+        "model_name": "qwen2.5-coder:3b",
+        "role": "selector",
+        "output_status": "deterministic_stub_only",
+        "output_ref": "fixture://stub-output-001",
+        "receipt_ref": "fixture://stub-receipt-001",
+    }}]
+    r = _build_h6_deterministic_local_adapter_stub_output(rows, bundle)
+    assert r["missing_intent_id_count"] == 1
+    assert "missing_intent_id" in r["stub_reasons"]
+
+
+def test_h6_6_stub_output_missing_request_id(monkeypatch):
+    """H6-6 T25: Missing request_id invalidates stub."""
+    from scripts.bench.capability_ab_runner import _build_h6_deterministic_local_adapter_stub_output
+    monkeypatch.setenv("NEXUS_H6_ALLOW_DETERMINISTIC_LOCAL_ADAPTER_STUB_OUTPUT", "1")
+    intent = {"intent_ready": True, "invocation_intent_receipt_ready": True, "ready_for_h6_6_deterministic_local_adapter_stub_output": True, "safety_violation_count": 0}
+    bundle = {"h6_shadow_local_adapter_invocation_intent_receipt": intent}
+    rows = [{"h6_deterministic_local_adapter_stub_output": {
+        "stub_id": "stub-001",
+        "intent_id": "intent-001",
+        "request_id": "",
+        "adapter_id": "qwen3b-selector-v0",
+        "model_family": "qwen",
+        "model_size": "3b",
+        "model_name": "qwen2.5-coder:3b",
+        "role": "selector",
+        "output_status": "deterministic_stub_only",
+        "output_ref": "fixture://stub-output-001",
+        "receipt_ref": "fixture://stub-receipt-001",
+    }}]
+    r = _build_h6_deterministic_local_adapter_stub_output(rows, bundle)
+    assert r["missing_request_id_count"] == 1
+    assert "missing_request_id" in r["stub_reasons"]
+
+
+def test_h6_6_stub_output_missing_adapter_id(monkeypatch):
+    """H6-6 T26: Missing adapter_id invalidates stub."""
+    from scripts.bench.capability_ab_runner import _build_h6_deterministic_local_adapter_stub_output
+    monkeypatch.setenv("NEXUS_H6_ALLOW_DETERMINISTIC_LOCAL_ADAPTER_STUB_OUTPUT", "1")
+    intent = {"intent_ready": True, "invocation_intent_receipt_ready": True, "ready_for_h6_6_deterministic_local_adapter_stub_output": True, "safety_violation_count": 0}
+    bundle = {"h6_shadow_local_adapter_invocation_intent_receipt": intent}
+    rows = [{"h6_deterministic_local_adapter_stub_output": {
+        "stub_id": "stub-001",
+        "intent_id": "intent-001",
+        "request_id": "io-req-001",
+        "adapter_id": "",
+        "model_family": "qwen",
+        "model_size": "3b",
+        "model_name": "qwen2.5-coder:3b",
+        "role": "selector",
+        "output_status": "deterministic_stub_only",
+        "output_ref": "fixture://stub-output-001",
+        "receipt_ref": "fixture://stub-receipt-001",
+    }}]
+    r = _build_h6_deterministic_local_adapter_stub_output(rows, bundle)
+    assert r["missing_adapter_id_count"] == 1
+    assert "missing_adapter_id" in r["stub_reasons"]
+
+
+def test_h6_6_stub_output_missing_model_name(monkeypatch):
+    """H6-6 T27: Missing model_name invalidates stub."""
+    from scripts.bench.capability_ab_runner import _build_h6_deterministic_local_adapter_stub_output
+    monkeypatch.setenv("NEXUS_H6_ALLOW_DETERMINISTIC_LOCAL_ADAPTER_STUB_OUTPUT", "1")
+    intent = {"intent_ready": True, "invocation_intent_receipt_ready": True, "ready_for_h6_6_deterministic_local_adapter_stub_output": True, "safety_violation_count": 0}
+    bundle = {"h6_shadow_local_adapter_invocation_intent_receipt": intent}
+    rows = [{"h6_deterministic_local_adapter_stub_output": {
+        "stub_id": "stub-001",
+        "intent_id": "intent-001",
+        "request_id": "io-req-001",
+        "adapter_id": "qwen3b-selector-v0",
+        "model_family": "qwen",
+        "model_size": "3b",
+        "model_name": "",
+        "role": "selector",
+        "output_status": "deterministic_stub_only",
+        "output_ref": "fixture://stub-output-001",
+        "receipt_ref": "fixture://stub-receipt-001",
+    }}]
+    r = _build_h6_deterministic_local_adapter_stub_output(rows, bundle)
+    assert r["missing_model_name_count"] == 1
+    assert "missing_model_name" in r["stub_reasons"]
+
+
+def test_h6_6_stub_output_missing_role(monkeypatch):
+    """H6-6 T28: Missing role invalidates stub."""
+    from scripts.bench.capability_ab_runner import _build_h6_deterministic_local_adapter_stub_output
+    monkeypatch.setenv("NEXUS_H6_ALLOW_DETERMINISTIC_LOCAL_ADAPTER_STUB_OUTPUT", "1")
+    intent = {"intent_ready": True, "invocation_intent_receipt_ready": True, "ready_for_h6_6_deterministic_local_adapter_stub_output": True, "safety_violation_count": 0}
+    bundle = {"h6_shadow_local_adapter_invocation_intent_receipt": intent}
+    rows = [{"h6_deterministic_local_adapter_stub_output": {
+        "stub_id": "stub-001",
+        "intent_id": "intent-001",
+        "request_id": "io-req-001",
+        "adapter_id": "qwen3b-selector-v0",
+        "model_family": "qwen",
+        "model_size": "3b",
+        "model_name": "qwen2.5-coder:3b",
+        "role": "proposer",
+        "output_status": "deterministic_stub_only",
+        "output_ref": "fixture://stub-output-001",
+        "receipt_ref": "fixture://stub-receipt-001",
+    }}]
+    r = _build_h6_deterministic_local_adapter_stub_output(rows, bundle)
+    assert r["missing_role_count"] == 1
+    assert "missing_role" in r["stub_reasons"]
+
+
+def test_h6_6_stub_output_missing_output_ref(monkeypatch):
+    """H6-6 T29: Missing output_ref invalidates stub."""
+    from scripts.bench.capability_ab_runner import _build_h6_deterministic_local_adapter_stub_output
+    monkeypatch.setenv("NEXUS_H6_ALLOW_DETERMINISTIC_LOCAL_ADAPTER_STUB_OUTPUT", "1")
+    intent = {"intent_ready": True, "invocation_intent_receipt_ready": True, "ready_for_h6_6_deterministic_local_adapter_stub_output": True, "safety_violation_count": 0}
+    bundle = {"h6_shadow_local_adapter_invocation_intent_receipt": intent}
+    rows = [{"h6_deterministic_local_adapter_stub_output": {
+        "stub_id": "stub-001",
+        "intent_id": "intent-001",
+        "request_id": "io-req-001",
+        "adapter_id": "qwen3b-selector-v0",
+        "model_family": "qwen",
+        "model_size": "3b",
+        "model_name": "qwen2.5-coder:3b",
+        "role": "selector",
+        "output_status": "deterministic_stub_only",
+        "output_ref": "",
+        "receipt_ref": "fixture://stub-receipt-001",
+    }}]
+    r = _build_h6_deterministic_local_adapter_stub_output(rows, bundle)
+    assert r["missing_output_ref_count"] == 1
+    assert "missing_output_ref" in r["stub_reasons"]
+
+
+def test_h6_6_stub_output_missing_receipt_ref(monkeypatch):
+    """H6-6 T30: Missing receipt_ref invalidates stub."""
+    from scripts.bench.capability_ab_runner import _build_h6_deterministic_local_adapter_stub_output
+    monkeypatch.setenv("NEXUS_H6_ALLOW_DETERMINISTIC_LOCAL_ADAPTER_STUB_OUTPUT", "1")
+    intent = {"intent_ready": True, "invocation_intent_receipt_ready": True, "ready_for_h6_6_deterministic_local_adapter_stub_output": True, "safety_violation_count": 0}
+    bundle = {"h6_shadow_local_adapter_invocation_intent_receipt": intent}
+    rows = [{"h6_deterministic_local_adapter_stub_output": {
+        "stub_id": "stub-001",
+        "intent_id": "intent-001",
+        "request_id": "io-req-001",
+        "adapter_id": "qwen3b-selector-v0",
+        "model_family": "qwen",
+        "model_size": "3b",
+        "model_name": "qwen2.5-coder:3b",
+        "role": "selector",
+        "output_status": "deterministic_stub_only",
+        "output_ref": "fixture://stub-output-001",
+        "receipt_ref": "",
+    }}]
+    r = _build_h6_deterministic_local_adapter_stub_output(rows, bundle)
+    assert r["missing_receipt_ref_count"] == 1
+    assert "missing_receipt_ref" in r["stub_reasons"]
+
+
+def test_h6_6_stub_output_invalid_output_status(monkeypatch):
+    """H6-6 T31: Invalid output_status invalidates stub."""
+    from scripts.bench.capability_ab_runner import _build_h6_deterministic_local_adapter_stub_output
+    monkeypatch.setenv("NEXUS_H6_ALLOW_DETERMINISTIC_LOCAL_ADAPTER_STUB_OUTPUT", "1")
+    intent = {"intent_ready": True, "invocation_intent_receipt_ready": True, "ready_for_h6_6_deterministic_local_adapter_stub_output": True, "safety_violation_count": 0}
+    bundle = {"h6_shadow_local_adapter_invocation_intent_receipt": intent}
+    rows = [{"h6_deterministic_local_adapter_stub_output": {
+        "stub_id": "stub-001",
+        "intent_id": "intent-001",
+        "request_id": "io-req-001",
+        "adapter_id": "qwen3b-selector-v0",
+        "model_family": "qwen",
+        "model_size": "3b",
+        "model_name": "qwen2.5-coder:3b",
+        "role": "selector",
+        "output_status": "production",
+        "output_ref": "fixture://stub-output-001",
+        "receipt_ref": "fixture://stub-receipt-001",
+    }}]
+    r = _build_h6_deterministic_local_adapter_stub_output(rows, bundle)
+    assert r["invalid_output_status_count"] == 1
+    assert "invalid_output_status" in r["stub_reasons"]
