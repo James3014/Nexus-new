@@ -8869,6 +8869,121 @@ def _build_h5_real_patch_verifier_score_trial(rows: list[dict[str, Any]], bundle
     }
 
 
+def _build_h5_real_patch_benchmark_scoreboard(rows: list[dict[str, Any]], bundle: dict[str, Any] | None = None) -> dict[str, Any]:
+    """Pure helper: real patch benchmark scoreboard aggregating H5-47 score trial."""
+    import os as _os
+    from collections import Counter
+
+    flag = _os.environ.get("NEXUS_H5_ALLOW_REAL_PATCH_BENCHMARK_SCOREBOARD", "").strip() == "1"
+
+    score_trial = None
+    if bundle:
+        score_trial = bundle.get("h5_real_patch_verifier_score_trial")
+
+    trial_present = bool(score_trial)
+    score_visible = bool(score_trial.get("score_visible", False)) if score_trial else False
+    v_eval = int(score_trial.get("verifier_evaluated_count", 0)) if score_trial else 0
+    v_pass = int(score_trial.get("verifier_passed_count", 0)) if score_trial else 0
+    v_fail = int(score_trial.get("verifier_failed_count", 0)) if score_trial else 0
+    solved = int(score_trial.get("candidate_solved_count", 0)) if score_trial else 0
+    failed = int(score_trial.get("candidate_failed_count", 0)) if score_trial else 0
+    solve_r = float(score_trial.get("solve_rate", 0.0)) if score_trial else 0.0
+    v_pass_r = float(score_trial.get("verifier_pass_rate", 0.0)) if score_trial else 0.0
+    q_pass_r = float(score_trial.get("quality_pass_rate", 0.0)) if score_trial else 0.0
+    regression_count = int(score_trial.get("regression_count", 0)) if score_trial else 0
+    fail_rc = dict(score_trial.get("fail_reason_counts", {})) if score_trial else {}
+    reg_rc = dict(score_trial.get("regression_reason_counts", {})) if score_trial else {}
+    repo_mut = int(score_trial.get("repo_mutated_count", 0)) if score_trial else 0
+    cloud_inv = int(score_trial.get("cloud_invoked_count", 0)) if score_trial else 0
+    mc_inc = int(score_trial.get("model_calls_incremented_count", 0)) if score_trial else 0
+    beh = int(score_trial.get("behavior_changed_count", 0)) if score_trial else 0
+
+    row_count = int(score_trial.get("row_count", 0)) if score_trial else 0
+    eligible = int(score_trial.get("eligible_row_count", 0)) if score_trial else 0
+    verified = int(score_trial.get("real_artifact_verified_count", 0)) if score_trial else 0
+
+    top_fail = sorted(fail_rc.items(), key=lambda x: (-x[1], x[0]))
+    top_reg = sorted(reg_rc.items(), key=lambda x: (-x[1], x[0]))
+
+    safety = repo_mut + cloud_inv + mc_inc + beh
+
+    scoreboard_allowed = (
+        flag and trial_present and score_visible and v_eval > 0
+    )
+
+    scoreboard_ready = (
+        scoreboard_allowed and score_visible and v_eval > 0
+        and repo_mut == 0 and cloud_inv == 0 and mc_inc == 0 and beh == 0
+    )
+
+    ready_apply = (
+        scoreboard_ready and solved >= 1
+        and solve_r > 0 and v_pass_r > 0
+        and safety == 0
+    )
+
+    reasons = []
+    if not flag:
+        reasons.append("scoreboard_flag_not_enabled")
+    if not trial_present:
+        reasons.append("missing_h5_47_score_trial")
+    if not score_visible:
+        reasons.append("score_not_visible")
+    if v_eval == 0:
+        reasons.append("no_verifier_evaluated_rows")
+    if repo_mut > 0:
+        reasons.append("repo_mutation_detected")
+    if cloud_inv > 0:
+        reasons.append("cloud_invoked_detected")
+    if mc_inc > 0:
+        reasons.append("model_calls_incremented_detected")
+    if beh > 0:
+        reasons.append("behavior_changed_detected")
+    reasons.extend([
+        "h5_48_scoreboard_not_production",
+        "scoreboard_only",
+        "repo_mutation_blocked",
+        "cloud_invocation_blocked",
+        "model_calls_increment_blocked",
+        "production_claim_blocked",
+        "public_claim_blocked",
+    ])
+
+    return {
+        "schema": "nexus.hybrid_h5_real_patch_benchmark_scoreboard.v1",
+        "evaluated": True,
+        "scoreboard_status": "real_patch_benchmark_scoreboard_ready" if scoreboard_ready else ("blocked" if not scoreboard_allowed else "real_patch_benchmark_scoreboard_fail"),
+        "scoreboard_reasons": reasons,
+        "scoreboard_allowed": scoreboard_allowed,
+        "scoreboard_ready": scoreboard_ready,
+        "row_count": row_count,
+        "eligible_row_count": eligible,
+        "real_artifact_verified_count": verified,
+        "verifier_evaluated_count": v_eval,
+        "verifier_passed_count": v_pass,
+        "verifier_failed_count": v_fail,
+        "candidate_solved_count": solved,
+        "candidate_failed_count": failed,
+        "solve_rate": solve_r,
+        "verifier_pass_rate": v_pass_r,
+        "quality_pass_rate": q_pass_r,
+        "score_visible": score_visible,
+        "score_ready_for_benchmark": bool(score_trial.get("score_ready_for_benchmark", False)) if score_trial else False,
+        "top_fail_reasons": top_fail[:5],
+        "top_regression_reasons": top_reg[:5],
+        "fail_reason_counts": fail_rc,
+        "regression_reason_counts": reg_rc,
+        "repo_mutated_count": repo_mut,
+        "cloud_invoked_count": cloud_inv,
+        "model_calls_incremented_count": mc_inc,
+        "behavior_changed_count": beh,
+        "safety_violation_count": safety,
+        "ready_for_controlled_apply_trial": ready_apply,
+        "production_ready": False,
+        "public_claim_allowed": False,
+    }
+
+
 def _finalize_with_nexus_row(
     row: dict[str, Any],
     *,
@@ -13315,6 +13430,17 @@ def write_evidence_bundle(
         "h5_real_patch_score_trial_cloud_invoked_count": _build_h5_real_patch_verifier_score_trial(with_rows, payload).get("cloud_invoked_count", 0),
         "h5_real_patch_score_trial_model_calls_incremented_count": _build_h5_real_patch_verifier_score_trial(with_rows, payload).get("model_calls_incremented_count", 0),
         "h5_real_patch_score_trial_behavior_changed_count": _build_h5_real_patch_verifier_score_trial(with_rows, payload).get("behavior_changed_count", 0),
+        "h5_real_patch_scoreboard_present": 1 if _build_h5_real_patch_benchmark_scoreboard(with_rows, payload).get("evaluated") else 0,
+        "h5_real_patch_scoreboard_allowed": 1 if _build_h5_real_patch_benchmark_scoreboard(with_rows, payload).get("scoreboard_allowed") else 0,
+        "h5_real_patch_scoreboard_ready": 1 if _build_h5_real_patch_benchmark_scoreboard(with_rows, payload).get("scoreboard_ready") else 0,
+        "h5_real_patch_scoreboard_ready_for_apply_trial": 1 if _build_h5_real_patch_benchmark_scoreboard(with_rows, payload).get("ready_for_controlled_apply_trial") else 0,
+        "h5_real_patch_scoreboard_row_count": _build_h5_real_patch_benchmark_scoreboard(with_rows, payload).get("row_count", 0),
+        "h5_real_patch_scoreboard_verifier_evaluated_count": _build_h5_real_patch_benchmark_scoreboard(with_rows, payload).get("verifier_evaluated_count", 0),
+        "h5_real_patch_scoreboard_candidate_solved_count": _build_h5_real_patch_benchmark_scoreboard(with_rows, payload).get("candidate_solved_count", 0),
+        "h5_real_patch_scoreboard_solve_rate": _build_h5_real_patch_benchmark_scoreboard(with_rows, payload).get("solve_rate", 0.0),
+        "h5_real_patch_scoreboard_verifier_pass_rate": _build_h5_real_patch_benchmark_scoreboard(with_rows, payload).get("verifier_pass_rate", 0.0),
+        "h5_real_patch_scoreboard_quality_pass_rate": _build_h5_real_patch_benchmark_scoreboard(with_rows, payload).get("quality_pass_rate", 0.0),
+        "h5_real_patch_scoreboard_safety_violation_count": _build_h5_real_patch_benchmark_scoreboard(with_rows, payload).get("safety_violation_count", 0),
     }
     payload["h5_guarded_local_candidate_benchmark_trial"] = _build_h5_guarded_local_candidate_benchmark_trial(with_rows)
     payload["h5_quality_non_regression_gate"] = _build_h5_quality_non_regression_gate(with_rows, payload["h5_guarded_local_candidate_benchmark_trial"])
@@ -13324,6 +13450,7 @@ def write_evidence_bundle(
     payload["h5_governance_closure_public_claim_lock"] = _build_h5_governance_closure_public_claim_lock(payload)
     payload["h5_real_local_candidate_execution_harness"] = _build_h5_real_local_candidate_execution_harness(payload.get("h5_route", {}), payload)
     payload["h5_real_patch_verifier_score_trial"] = _build_h5_real_patch_verifier_score_trial(with_rows, payload)
+    payload["h5_real_patch_benchmark_scoreboard"] = _build_h5_real_patch_benchmark_scoreboard(with_rows, payload)
     payload["external_provider_claim_boundary_contract"] = build_external_provider_claim_boundary_contract(payload)
     payload["public_promotion_readiness_contract"] = build_public_promotion_readiness_contract(payload)
     bundle_path.write_text(json.dumps(payload, indent=2, ensure_ascii=False), encoding="utf-8")

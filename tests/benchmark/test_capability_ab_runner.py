@@ -22537,3 +22537,213 @@ def test_h5_47_flagged_pass(monkeypatch):
     assert r["score_visible"] is True
     assert r["solve_rate"] == 1.0
     assert r["verifier_pass_rate"] == 1.0
+
+
+def test_h5_48_empty_rows_blocks():
+    """H5-48 T1: empty rows block."""
+    from scripts.bench.capability_ab_runner import _build_h5_real_patch_benchmark_scoreboard
+    r = _build_h5_real_patch_benchmark_scoreboard([])
+    assert r["scoreboard_status"] == "blocked"
+    assert r["scoreboard_allowed"] is False
+
+
+def test_h5_48_flag_missing(monkeypatch):
+    """H5-48 T2: flag missing blocks."""
+    from scripts.bench.capability_ab_runner import _build_h5_real_patch_benchmark_scoreboard
+    monkeypatch.delenv("NEXUS_H5_ALLOW_REAL_PATCH_BENCHMARK_SCOREBOARD", raising=False)
+    r = _build_h5_real_patch_benchmark_scoreboard([])
+    assert "scoreboard_flag_not_enabled" in r["scoreboard_reasons"]
+
+
+def test_h5_48_missing_trial(monkeypatch):
+    """H5-48 T3: missing H5-47 score trial blocks."""
+    from scripts.bench.capability_ab_runner import _build_h5_real_patch_benchmark_scoreboard
+    monkeypatch.setenv("NEXUS_H5_ALLOW_REAL_PATCH_BENCHMARK_SCOREBOARD", "1")
+    r = _build_h5_real_patch_benchmark_scoreboard([], {})
+    assert "missing_h5_47_score_trial" in r["scoreboard_reasons"]
+
+
+def test_h5_48_score_not_visible(monkeypatch):
+    """H5-48 T4: score_visible=false blocks."""
+    from scripts.bench.capability_ab_runner import _build_h5_real_patch_benchmark_scoreboard
+    monkeypatch.setenv("NEXUS_H5_ALLOW_REAL_PATCH_BENCHMARK_SCOREBOARD", "1")
+    bundle = {"h5_real_patch_verifier_score_trial": {"score_visible": False, "verifier_evaluated_count": 0, "verifier_passed_count": 0, "verifier_failed_count": 0, "candidate_solved_count": 0, "candidate_failed_count": 0, "solve_rate": 0.0, "verifier_pass_rate": 0.0, "quality_pass_rate": 0.0, "regression_count": 0, "fail_reason_counts": {}, "regression_reason_counts": {}, "repo_mutated_count": 0, "cloud_invoked_count": 0, "model_calls_incremented_count": 0, "behavior_changed_count": 0, "row_count": 0, "eligible_row_count": 0, "real_artifact_verified_count": 0, "score_ready_for_benchmark": False}}
+    r = _build_h5_real_patch_benchmark_scoreboard([], bundle)
+    assert "score_not_visible" in r["scoreboard_reasons"]
+
+
+def test_h5_48_no_verifier(monkeypatch):
+    """H5-48 T5: no verifier evaluated rows blocks."""
+    from scripts.bench.capability_ab_runner import _build_h5_real_patch_benchmark_scoreboard
+    monkeypatch.setenv("NEXUS_H5_ALLOW_REAL_PATCH_BENCHMARK_SCOREBOARD", "1")
+    bundle = {"h5_real_patch_verifier_score_trial": {"score_visible": True, "verifier_evaluated_count": 0, "verifier_passed_count": 0, "verifier_failed_count": 0, "candidate_solved_count": 0, "candidate_failed_count": 0, "solve_rate": 0.0, "verifier_pass_rate": 0.0, "quality_pass_rate": 0.0, "regression_count": 0, "fail_reason_counts": {}, "regression_reason_counts": {}, "repo_mutated_count": 0, "cloud_invoked_count": 0, "model_calls_incremented_count": 0, "behavior_changed_count": 0, "row_count": 5, "eligible_row_count": 5, "real_artifact_verified_count": 5, "score_ready_for_benchmark": False}}
+    r = _build_h5_real_patch_benchmark_scoreboard([], bundle)
+    assert "no_verifier_evaluated_rows" in r["scoreboard_reasons"]
+
+
+def test_h5_48_clean_ready(monkeypatch):
+    """H5-48 T6: clean H5-47 score trial produces scoreboard_ready=true."""
+    from scripts.bench.capability_ab_runner import _build_h5_real_patch_benchmark_scoreboard
+    monkeypatch.setenv("NEXUS_H5_ALLOW_REAL_PATCH_BENCHMARK_SCOREBOARD", "1")
+    bundle = {"h5_real_patch_verifier_score_trial": {
+        "score_visible": True, "verifier_evaluated_count": 5, "verifier_passed_count": 5,
+        "verifier_failed_count": 0, "candidate_solved_count": 5, "candidate_failed_count": 0,
+        "solve_rate": 1.0, "verifier_pass_rate": 1.0, "quality_pass_rate": 1.0,
+        "regression_count": 0, "fail_reason_counts": {}, "regression_reason_counts": {},
+        "repo_mutated_count": 0, "cloud_invoked_count": 0, "model_calls_incremented_count": 0,
+        "behavior_changed_count": 0, "row_count": 5, "eligible_row_count": 5,
+        "real_artifact_verified_count": 5, "score_ready_for_benchmark": True}}
+    r = _build_h5_real_patch_benchmark_scoreboard([], bundle)
+    assert r["scoreboard_ready"] is True
+    assert r["scoreboard_status"] == "real_patch_benchmark_scoreboard_ready"
+
+
+def test_h5_48_solve_rate_copied(monkeypatch):
+    """H5-48 T7: solve_rate copied."""
+    from scripts.bench.capability_ab_runner import _build_h5_real_patch_benchmark_scoreboard
+    monkeypatch.setenv("NEXUS_H5_ALLOW_REAL_PATCH_BENCHMARK_SCOREBOARD", "1")
+    bundle = {"h5_real_patch_verifier_score_trial": {"score_visible": True, "verifier_evaluated_count": 10, "verifier_passed_count": 8, "verifier_failed_count": 2, "candidate_solved_count": 7, "candidate_failed_count": 3, "solve_rate": 0.7, "verifier_pass_rate": 0.8, "quality_pass_rate": 0.8, "regression_count": 0, "fail_reason_counts": {}, "regression_reason_counts": {}, "repo_mutated_count": 0, "cloud_invoked_count": 0, "model_calls_incremented_count": 0, "behavior_changed_count": 0, "row_count": 10, "eligible_row_count": 10, "real_artifact_verified_count": 10, "score_ready_for_benchmark": False}}
+    r = _build_h5_real_patch_benchmark_scoreboard([], bundle)
+    assert r["solve_rate"] == 0.7
+    assert r["verifier_pass_rate"] == 0.8
+    assert r["quality_pass_rate"] == 0.8
+
+
+def test_h5_48_top_fail_reasons(monkeypatch):
+    """H5-48 T8: top_fail_reasons sorted."""
+    from scripts.bench.capability_ab_runner import _build_h5_real_patch_benchmark_scoreboard
+    monkeypatch.setenv("NEXUS_H5_ALLOW_REAL_PATCH_BENCHMARK_SCOREBOARD", "1")
+    bundle = {"h5_real_patch_verifier_score_trial": {"score_visible": True, "verifier_evaluated_count": 10, "verifier_passed_count": 3, "verifier_failed_count": 7, "candidate_solved_count": 2, "candidate_failed_count": 8, "solve_rate": 0.2, "verifier_pass_rate": 0.3, "quality_pass_rate": 0.3, "regression_count": 0, "fail_reason_counts": {"test_failed": 5, "hash_mismatch": 2}, "regression_reason_counts": {}, "repo_mutated_count": 0, "cloud_invoked_count": 0, "model_calls_incremented_count": 0, "behavior_changed_count": 0, "row_count": 10, "eligible_row_count": 10, "real_artifact_verified_count": 10, "score_ready_for_benchmark": False}}
+    r = _build_h5_real_patch_benchmark_scoreboard([], bundle)
+    assert r["top_fail_reasons"][0] == ("test_failed", 5)
+    assert r["top_fail_reasons"][1] == ("hash_mismatch", 2)
+
+
+def test_h5_48_top_reg_reasons(monkeypatch):
+    """H5-48 T9: top_regression_reasons sorted."""
+    from scripts.bench.capability_ab_runner import _build_h5_real_patch_benchmark_scoreboard
+    monkeypatch.setenv("NEXUS_H5_ALLOW_REAL_PATCH_BENCHMARK_SCOREBOARD", "1")
+    bundle = {"h5_real_patch_verifier_score_trial": {"score_visible": True, "verifier_evaluated_count": 5, "verifier_passed_count": 5, "verifier_failed_count": 0, "candidate_solved_count": 5, "candidate_failed_count": 0, "solve_rate": 1.0, "verifier_pass_rate": 1.0, "quality_pass_rate": 1.0, "regression_count": 3, "fail_reason_counts": {}, "regression_reason_counts": {"cloud_invoked": 2, "repo_mutated": 1}, "repo_mutated_count": 1, "cloud_invoked_count": 2, "model_calls_incremented_count": 0, "behavior_changed_count": 0, "row_count": 5, "eligible_row_count": 5, "real_artifact_verified_count": 5, "score_ready_for_benchmark": False}}
+    r = _build_h5_real_patch_benchmark_scoreboard([], bundle)
+    assert r["top_regression_reasons"][0] == ("cloud_invoked", 2)
+
+
+def test_h5_48_repo_mutated_blocks(monkeypatch):
+    """H5-48 T10: repo_mutated blocks readiness."""
+    from scripts.bench.capability_ab_runner import _build_h5_real_patch_benchmark_scoreboard
+    monkeypatch.setenv("NEXUS_H5_ALLOW_REAL_PATCH_BENCHMARK_SCOREBOARD", "1")
+    bundle = {"h5_real_patch_verifier_score_trial": {"score_visible": True, "verifier_evaluated_count": 5, "verifier_passed_count": 5, "verifier_failed_count": 0, "candidate_solved_count": 5, "candidate_failed_count": 0, "solve_rate": 1.0, "verifier_pass_rate": 1.0, "quality_pass_rate": 1.0, "regression_count": 1, "fail_reason_counts": {}, "regression_reason_counts": {"repo_mutated": 1}, "repo_mutated_count": 1, "cloud_invoked_count": 0, "model_calls_incremented_count": 0, "behavior_changed_count": 0, "row_count": 5, "eligible_row_count": 5, "real_artifact_verified_count": 5, "score_ready_for_benchmark": False}}
+    r = _build_h5_real_patch_benchmark_scoreboard([], bundle)
+    assert r["scoreboard_ready"] is False
+    assert r["safety_violation_count"] == 1
+
+
+def test_h5_48_cloud_blocks(monkeypatch):
+    """H5-48 T11: cloud_invoked blocks."""
+    from scripts.bench.capability_ab_runner import _build_h5_real_patch_benchmark_scoreboard
+    monkeypatch.setenv("NEXUS_H5_ALLOW_REAL_PATCH_BENCHMARK_SCOREBOARD", "1")
+    bundle = {"h5_real_patch_verifier_score_trial": {"score_visible": True, "verifier_evaluated_count": 5, "verifier_passed_count": 5, "verifier_failed_count": 0, "candidate_solved_count": 5, "candidate_failed_count": 0, "solve_rate": 1.0, "verifier_pass_rate": 1.0, "quality_pass_rate": 1.0, "regression_count": 1, "fail_reason_counts": {}, "regression_reason_counts": {"cloud_invoked": 1}, "repo_mutated_count": 0, "cloud_invoked_count": 1, "model_calls_incremented_count": 0, "behavior_changed_count": 0, "row_count": 5, "eligible_row_count": 5, "real_artifact_verified_count": 5, "score_ready_for_benchmark": False}}
+    r = _build_h5_real_patch_benchmark_scoreboard([], bundle)
+    assert r["scoreboard_ready"] is False
+
+
+def test_h5_48_mc_blocks(monkeypatch):
+    """H5-48 T12: model_calls blocks."""
+    from scripts.bench.capability_ab_runner import _build_h5_real_patch_benchmark_scoreboard
+    monkeypatch.setenv("NEXUS_H5_ALLOW_REAL_PATCH_BENCHMARK_SCOREBOARD", "1")
+    bundle = {"h5_real_patch_verifier_score_trial": {"score_visible": True, "verifier_evaluated_count": 5, "verifier_passed_count": 5, "verifier_failed_count": 0, "candidate_solved_count": 5, "candidate_failed_count": 0, "solve_rate": 1.0, "verifier_pass_rate": 1.0, "quality_pass_rate": 1.0, "regression_count": 1, "fail_reason_counts": {}, "regression_reason_counts": {"model_calls_incremented": 1}, "repo_mutated_count": 0, "cloud_invoked_count": 0, "model_calls_incremented_count": 1, "behavior_changed_count": 0, "row_count": 5, "eligible_row_count": 5, "real_artifact_verified_count": 5, "score_ready_for_benchmark": False}}
+    r = _build_h5_real_patch_benchmark_scoreboard([], bundle)
+    assert r["scoreboard_ready"] is False
+
+
+def test_h5_48_behavior_blocks(monkeypatch):
+    """H5-48 T13: behavior_changed blocks."""
+    from scripts.bench.capability_ab_runner import _build_h5_real_patch_benchmark_scoreboard
+    monkeypatch.setenv("NEXUS_H5_ALLOW_REAL_PATCH_BENCHMARK_SCOREBOARD", "1")
+    bundle = {"h5_real_patch_verifier_score_trial": {"score_visible": True, "verifier_evaluated_count": 5, "verifier_passed_count": 5, "verifier_failed_count": 0, "candidate_solved_count": 5, "candidate_failed_count": 0, "solve_rate": 1.0, "verifier_pass_rate": 1.0, "quality_pass_rate": 1.0, "regression_count": 1, "fail_reason_counts": {}, "regression_reason_counts": {"behavior_changed": 1}, "repo_mutated_count": 0, "cloud_invoked_count": 0, "model_calls_incremented_count": 0, "behavior_changed_count": 1, "row_count": 5, "eligible_row_count": 5, "real_artifact_verified_count": 5, "score_ready_for_benchmark": False}}
+    r = _build_h5_real_patch_benchmark_scoreboard([], bundle)
+    assert r["scoreboard_ready"] is False
+
+
+def test_h5_48_ready_for_apply_trial(monkeypatch):
+    """H5-48 T14: ready_for_controlled_apply_trial true when conditions met."""
+    from scripts.bench.capability_ab_runner import _build_h5_real_patch_benchmark_scoreboard
+    monkeypatch.setenv("NEXUS_H5_ALLOW_REAL_PATCH_BENCHMARK_SCOREBOARD", "1")
+    bundle = {"h5_real_patch_verifier_score_trial": {"score_visible": True, "verifier_evaluated_count": 5, "verifier_passed_count": 5, "verifier_failed_count": 0, "candidate_solved_count": 5, "candidate_failed_count": 0, "solve_rate": 1.0, "verifier_pass_rate": 1.0, "quality_pass_rate": 1.0, "regression_count": 0, "fail_reason_counts": {}, "regression_reason_counts": {}, "repo_mutated_count": 0, "cloud_invoked_count": 0, "model_calls_incremented_count": 0, "behavior_changed_count": 0, "row_count": 5, "eligible_row_count": 5, "real_artifact_verified_count": 5, "score_ready_for_benchmark": True}}
+    r = _build_h5_real_patch_benchmark_scoreboard([], bundle)
+    assert r["ready_for_controlled_apply_trial"] is True
+    assert r["scoreboard_ready"] is True
+
+
+def test_h5_48_bundle_attaches(tmp_path, monkeypatch):
+    """H5-48 T15: bundle attaches scoreboard."""
+    from scripts.bench.capability_ab_runner import CapabilityTask, _finalize_with_nexus_row, write_evidence_bundle
+    task = CapabilityTask(id="t-h5-48", difficulty="easy", task_type="test_repair", task_desc="v", target_file="t.py", test_file="test_t.py", expected_capabilities=("claim_gate",), success_criteria="tests_pass", repo_kind="nexus_internal", fixture_kind="test_fixture")
+    _h5_all_flags_set_with_gate(monkeypatch)
+    monkeypatch.setattr("scripts.bench.capability_ab_runner._git_commit", lambda x: "d")
+    row = _finalize_with_nexus_row({"mode": "with_nexus", "model_calls": 1, "total_tokens": 100, "token_capture_status": "measured", "committee_trace": {"candidate_count": 2, "judge_selection": {"selected_candidate_id": "C_1"}, "committee_receipt": {"selected_candidate_applied": True, "selected_candidate_apply_hash_match": True}}, "local_solve_eligible": True}, provider="gemini", model_required=True, nexus_required=False, task=task, repo_root=tmp_path)
+    wp = tmp_path / "w.jsonl"; wp.write_text("[]", encoding="utf-8")
+    wop = tmp_path / "wo.jsonl"; wop.write_text("[]", encoding="utf-8")
+    bf = write_evidence_bundle(out_dir=tmp_path, with_path=wp, without_path=wop, rows=[row], config={"tasks_file": "t.json", "tasks_manifest_hash": "m", "unique_tasks_requested": 1, "repeat_trials": 1, "timeout_sec": 60})
+    bundle = json.loads(bf.read_text(encoding="utf-8"))
+    assert "h5_real_patch_benchmark_scoreboard" in bundle
+    sb = bundle["h5_real_patch_benchmark_scoreboard"]
+    assert sb["schema"] == "nexus.hybrid_h5_real_patch_benchmark_scoreboard.v1"
+    assert sb["production_ready"] is False
+
+
+def test_h5_48_pr_false_always(monkeypatch):
+    """H5-48 T16: production_ready=false always."""
+    from scripts.bench.capability_ab_runner import _build_h5_real_patch_benchmark_scoreboard
+    monkeypatch.setenv("NEXUS_H5_ALLOW_REAL_PATCH_BENCHMARK_SCOREBOARD", "1")
+    bundle = {"h5_real_patch_verifier_score_trial": {"score_visible": True, "verifier_evaluated_count": 5, "verifier_passed_count": 5, "verifier_failed_count": 0, "candidate_solved_count": 5, "candidate_failed_count": 0, "solve_rate": 1.0, "verifier_pass_rate": 1.0, "quality_pass_rate": 1.0, "regression_count": 0, "fail_reason_counts": {}, "regression_reason_counts": {}, "repo_mutated_count": 0, "cloud_invoked_count": 0, "model_calls_incremented_count": 0, "behavior_changed_count": 0, "row_count": 5, "eligible_row_count": 5, "real_artifact_verified_count": 5, "score_ready_for_benchmark": True}}
+    r = _build_h5_real_patch_benchmark_scoreboard([], bundle)
+    assert r["production_ready"] is False
+    assert r["public_claim_allowed"] is False
+
+
+def test_h5_48_score_visible_counter(tmp_path, monkeypatch):
+    """H5-48 T17: summary counters show visible scoreboard."""
+    from scripts.bench.capability_ab_runner import CapabilityTask, _finalize_with_nexus_row, write_evidence_bundle
+    task = CapabilityTask(id="t-h5-48s", difficulty="easy", task_type="test_repair", task_desc="v", target_file="t.py", test_file="test_t.py", expected_capabilities=("claim_gate",), success_criteria="tests_pass", repo_kind="nexus_internal", fixture_kind="test_fixture")
+    _h5_all_flags_set_with_gate(monkeypatch)
+    monkeypatch.setattr("scripts.bench.capability_ab_runner._git_commit", lambda x: "d")
+    row = _finalize_with_nexus_row({"mode": "with_nexus", "model_calls": 1, "total_tokens": 100, "token_capture_status": "measured", "committee_trace": {"candidate_count": 2, "judge_selection": {"selected_candidate_id": "C_1"}, "committee_receipt": {"selected_candidate_applied": True, "selected_candidate_apply_hash_match": True}}, "local_solve_eligible": True}, provider="gemini", model_required=True, nexus_required=False, task=task, repo_root=tmp_path)
+    wp = tmp_path / "w.jsonl"; wp.write_text("[]", encoding="utf-8")
+    wop = tmp_path / "wo.jsonl"; wop.write_text("[]", encoding="utf-8")
+    bf = write_evidence_bundle(out_dir=tmp_path, with_path=wp, without_path=wop, rows=[row], config={"tasks_file": "t.json", "tasks_manifest_hash": "m", "unique_tasks_requested": 1, "repeat_trials": 1, "timeout_sec": 60})
+    bundle = json.loads(bf.read_text(encoding="utf-8"))
+    sb = bundle["h5_real_patch_benchmark_scoreboard"]
+    assert sb["score_visible"] is False
+    assert sb["production_ready"] is False
+
+
+def test_h5_48_default_env_blocked(monkeypatch):
+    """H5-48 T18: default env scoreboard blocked."""
+    from scripts.bench.capability_ab_runner import _build_h5_real_patch_benchmark_scoreboard
+    monkeypatch.delenv("NEXUS_H5_ALLOW_REAL_PATCH_BENCHMARK_SCOREBOARD", raising=False)
+    bundle = {"h5_real_patch_verifier_score_trial": {"score_visible": True, "verifier_evaluated_count": 5, "verifier_passed_count": 5, "verifier_failed_count": 0, "candidate_solved_count": 5, "candidate_failed_count": 0, "solve_rate": 1.0, "verifier_pass_rate": 1.0, "quality_pass_rate": 1.0, "regression_count": 0, "fail_reason_counts": {}, "regression_reason_counts": {}, "repo_mutated_count": 0, "cloud_invoked_count": 0, "model_calls_incremented_count": 0, "behavior_changed_count": 0, "row_count": 5, "eligible_row_count": 5, "real_artifact_verified_count": 5, "score_ready_for_benchmark": True}}
+    r = _build_h5_real_patch_benchmark_scoreboard([], bundle)
+    assert r["scoreboard_allowed"] is False
+
+
+def test_h5_48_flagged_scoreboard_passes(monkeypatch):
+    """H5-48 T19: flagged clean scoreboard passes."""
+    from scripts.bench.capability_ab_runner import _build_h5_real_patch_benchmark_scoreboard
+    monkeypatch.setenv("NEXUS_H5_ALLOW_REAL_PATCH_BENCHMARK_SCOREBOARD", "1")
+    bundle = {"h5_real_patch_verifier_score_trial": {"score_visible": True, "verifier_evaluated_count": 10, "verifier_passed_count": 8, "verifier_failed_count": 2, "candidate_solved_count": 7, "candidate_failed_count": 3, "solve_rate": 0.7, "verifier_pass_rate": 0.8, "quality_pass_rate": 0.8, "regression_count": 0, "fail_reason_counts": {}, "regression_reason_counts": {}, "repo_mutated_count": 0, "cloud_invoked_count": 0, "model_calls_incremented_count": 0, "behavior_changed_count": 0, "row_count": 10, "eligible_row_count": 10, "real_artifact_verified_count": 10, "score_ready_for_benchmark": True}}
+    r = _build_h5_real_patch_benchmark_scoreboard([], bundle)
+    assert r["scoreboard_ready"] is True
+    assert r["solve_rate"] == 0.7
+    assert r["verifier_pass_rate"] == 0.8
+    assert r["ready_for_controlled_apply_trial"] is True
+    assert r["safety_violation_count"] == 0
+
+
+def test_h5_48_safety_violation_count(monkeypatch):
+    """H5-48 T20: safety_violation_count aggregated."""
+    from scripts.bench.capability_ab_runner import _build_h5_real_patch_benchmark_scoreboard
+    monkeypatch.setenv("NEXUS_H5_ALLOW_REAL_PATCH_BENCHMARK_SCOREBOARD", "1")
+    bundle = {"h5_real_patch_verifier_score_trial": {"score_visible": True, "verifier_evaluated_count": 5, "verifier_passed_count": 5, "verifier_failed_count": 0, "candidate_solved_count": 5, "candidate_failed_count": 0, "solve_rate": 1.0, "verifier_pass_rate": 1.0, "quality_pass_rate": 1.0, "regression_count": 3, "fail_reason_counts": {}, "regression_reason_counts": {}, "repo_mutated_count": 1, "cloud_invoked_count": 1, "model_calls_incremented_count": 0, "behavior_changed_count": 1, "row_count": 5, "eligible_row_count": 5, "real_artifact_verified_count": 5, "score_ready_for_benchmark": False}}
+    r = _build_h5_real_patch_benchmark_scoreboard([], bundle)
+    assert r["safety_violation_count"] == 3
