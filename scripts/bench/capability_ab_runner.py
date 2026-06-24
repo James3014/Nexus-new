@@ -12894,6 +12894,341 @@ def _build_h6_controlled_local_provider_fixture_contract(rows: list[dict[str, An
     }
 
 
+def _build_h6_controlled_provider_probe_denylist(rows: list[dict[str, Any]], bundle: dict[str, Any] | None = None) -> dict[str, Any]:
+    """Pure helper: H6 controlled provider probe denylist.
+
+    Defines a denylist for provider probe, endpoint resolution, process spawn,
+    network access, model load, model call, and runtime effect. All invocation
+    fields remain deny-by-default. This is a denylist-only receipt.
+    """
+    import os as _os
+
+    flag = _os.environ.get("NEXUS_H6_ALLOW_CONTROLLED_PROVIDER_PROBE_DENYLIST", "").strip() == "1"
+
+    fixture = None
+    if bundle:
+        fixture = bundle.get("h6_controlled_local_provider_fixture_contract")
+
+    fixture_present = bool(fixture)
+    fixture_ready = bool(fixture.get("fixture_contract_ready", False)) if fixture else False
+    fixture_valid = bool(fixture.get("fixture_contract_valid", False)) if fixture else False
+    fixture_only = bool(fixture.get("fixture_only", False)) if fixture else False
+    fixture_safety = int(fixture.get("safety_violation_count", 0)) if fixture else 0
+    fixture_ppa = bool(fixture.get("provider_probe_allowed", True)) if fixture else True
+    fixture_pia = bool(fixture.get("provider_invocation_allowed", True)) if fixture else True
+    fixture_pea = bool(fixture.get("provider_execution_allowed", True)) if fixture else True
+    fixture_lea = bool(fixture.get("local_endpoint_allowed", True)) if fixture else True
+    fixture_nea = bool(fixture.get("network_endpoint_allowed", True)) if fixture else True
+    fixture_na = bool(fixture.get("network_allowed", True)) if fixture else True
+    fixture_ps = bool(fixture.get("process_spawn_allowed", True)) if fixture else True
+    fixture_mla = bool(fixture.get("model_load_allowed", True)) if fixture else True
+    fixture_mca = bool(fixture.get("model_call_allowed", True)) if fixture else True
+    fixture_mc = bool(fixture.get("model_call_executed", False)) if fixture else False
+    fixture_ol = bool(fixture.get("ollama_invoked", False)) if fixture else False
+    fixture_cl = bool(fixture.get("cloud_provider_invoked", False)) if fixture else False
+    fixture_re = bool(fixture.get("runtime_effect", False)) if fixture else False
+
+    ALLOWED_PROVIDER_FAMILIES = {"ollama"}
+    ALLOWED_MODEL_FAMILIES = {"qwen"}
+    ALLOWED_MODEL_SIZES = {"3b", "7b", "14b"}
+    ALLOWED_ENDPOINT_KINDS = {"none", "unix_socket_placeholder", "localhost_placeholder"}
+
+    denylists = [r.get("h6_controlled_provider_probe_denylist") for r in rows if r.get("h6_controlled_provider_probe_denylist")]
+
+    valid_denylists = []
+    invalid_denylists = 0
+    missing_denylist_id = 0
+    missing_provider_family = 0
+    invalid_provider_family = 0
+    invalid_model_family = 0
+    invalid_model_size = 0
+    invalid_endpoint_kind = 0
+    endpoint_resolution_allowed_violation = 0
+    local_endpoint_allowed_violation = 0
+    network_endpoint_allowed_violation = 0
+    provider_probe_allowed_violation = 0
+    provider_invocation_allowed_violation = 0
+    provider_execution_allowed_violation = 0
+    model_load_allowed_violation = 0
+    model_call_allowed_violation = 0
+    model_call_executed_violation = 0
+
+    mc_count = 0
+    ol_count = 0
+    cl_count = 0
+    rm_count = 0
+    bh_count = 0
+    re_count = 0
+
+    for dl in denylists:
+        did = str(dl.get("denylist_id", "") or "").strip()
+        pfam = str(dl.get("provider_family", "") or "").lower()
+        mfam = str(dl.get("model_family", "") or "").lower()
+        sz = str(dl.get("model_size", "") or "").lower()
+        ek = str(dl.get("endpoint_kind", "") or "").lower()
+        era = bool(dl.get("endpoint_resolution_allowed", True))
+        lea = bool(dl.get("local_endpoint_allowed", True))
+        nea = bool(dl.get("network_endpoint_allowed", True))
+        ppa = bool(dl.get("provider_probe_allowed", True))
+        pia = bool(dl.get("provider_invocation_allowed", True))
+        pea = bool(dl.get("provider_execution_allowed", True))
+        mla = bool(dl.get("model_load_allowed", True))
+        mca = bool(dl.get("model_call_allowed", True))
+        mc = bool(dl.get("model_call_executed", False))
+        ol = bool(dl.get("ollama_invoked", False))
+        cl = bool(dl.get("cloud_provider_invoked", False))
+        rm = bool(dl.get("repo_mutated", False))
+        bh = bool(dl.get("behavior_changed", False))
+        re = bool(dl.get("runtime_effect", False))
+
+        if mc:
+            mc_count += 1
+        if ol:
+            ol_count += 1
+        if cl:
+            cl_count += 1
+        if rm:
+            rm_count += 1
+        if bh:
+            bh_count += 1
+        if re:
+            re_count += 1
+
+        is_valid = (
+            did and pfam in ALLOWED_PROVIDER_FAMILIES and mfam in ALLOWED_MODEL_FAMILIES
+            and sz in ALLOWED_MODEL_SIZES and ek in ALLOWED_ENDPOINT_KINDS
+            and not era and not lea and not nea
+            and not ppa and not pia and not pea
+            and not mla and not mca and not mc
+            and not ol and not cl and not rm and not bh and not re
+        )
+
+        if is_valid:
+            valid_denylists.append(dl)
+        else:
+            invalid_denylists += 1
+            if not did:
+                missing_denylist_id += 1
+            if not pfam:
+                missing_provider_family += 1
+            if pfam not in ALLOWED_PROVIDER_FAMILIES:
+                invalid_provider_family += 1
+            if mfam not in ALLOWED_MODEL_FAMILIES:
+                invalid_model_family += 1
+            if sz not in ALLOWED_MODEL_SIZES:
+                invalid_model_size += 1
+            if ek not in ALLOWED_ENDPOINT_KINDS:
+                invalid_endpoint_kind += 1
+            if era:
+                endpoint_resolution_allowed_violation += 1
+            if lea:
+                local_endpoint_allowed_violation += 1
+            if nea:
+                network_endpoint_allowed_violation += 1
+            if ppa:
+                provider_probe_allowed_violation += 1
+            if pia:
+                provider_invocation_allowed_violation += 1
+            if pea:
+                provider_execution_allowed_violation += 1
+            if mla:
+                model_load_allowed_violation += 1
+            if mca:
+                model_call_allowed_violation += 1
+            if mc:
+                model_call_executed_violation += 1
+
+    safety = mc_count + ol_count + cl_count + rm_count + bh_count + re_count
+
+    fixture_safety_ok = (
+        not fixture_ppa and not fixture_pia and not fixture_pea
+        and not fixture_lea and not fixture_nea and not fixture_na
+        and not fixture_ps and not fixture_mla and not fixture_mca
+        and not fixture_mc and not fixture_ol and not fixture_cl
+        and not fixture_re
+    )
+
+    denylist_allowed = (
+        flag and fixture_present and fixture_ready
+        and fixture_valid and fixture_only and fixture_safety == 0
+        and fixture_safety_ok
+    )
+
+    denylist_ready = (
+        denylist_allowed and len(valid_denylists) > 0 and safety == 0
+    )
+
+    denylist_valid = (
+        denylist_ready and invalid_denylists == 0
+    )
+
+    reasons = []
+    if not flag:
+        reasons.append("controlled_provider_probe_denylist_flag_not_enabled")
+    if not fixture_present:
+        reasons.append("missing_h6_12_fixture_contract")
+    if fixture and not fixture_ready:
+        reasons.append("h6_12_fixture_contract_not_ready")
+    if fixture and not fixture_valid:
+        reasons.append("h6_12_fixture_contract_not_valid")
+    if fixture and not fixture_only:
+        reasons.append("h6_12_not_fixture_only")
+    if fixture_safety > 0:
+        reasons.append("h6_12_safety_violation_detected")
+    if fixture and not fixture_safety_ok:
+        reasons.append("h6_12_fixture_has_allowed_fields")
+    if not denylists:
+        reasons.append("no_denylists")
+    if missing_denylist_id > 0:
+        reasons.append("missing_denylist_id")
+    if missing_provider_family > 0:
+        reasons.append("missing_provider_family")
+    if invalid_provider_family > 0:
+        reasons.append("invalid_provider_family")
+    if invalid_model_family > 0:
+        reasons.append("invalid_model_family")
+    if invalid_model_size > 0:
+        reasons.append("invalid_model_size")
+    if invalid_endpoint_kind > 0:
+        reasons.append("invalid_endpoint_kind")
+    if endpoint_resolution_allowed_violation > 0:
+        reasons.append("endpoint_resolution_allowed_violation")
+    if local_endpoint_allowed_violation > 0:
+        reasons.append("local_endpoint_allowed_violation")
+    if network_endpoint_allowed_violation > 0:
+        reasons.append("network_endpoint_allowed_violation")
+    if provider_probe_allowed_violation > 0:
+        reasons.append("provider_probe_allowed_violation")
+    if provider_invocation_allowed_violation > 0:
+        reasons.append("provider_invocation_allowed_violation")
+    if provider_execution_allowed_violation > 0:
+        reasons.append("provider_execution_allowed_violation")
+    if model_load_allowed_violation > 0:
+        reasons.append("model_load_allowed_violation")
+    if model_call_allowed_violation > 0:
+        reasons.append("model_call_allowed_violation")
+    if model_call_executed_violation > 0:
+        reasons.append("model_call_executed_violation")
+    if mc_count > 0:
+        reasons.append("model_call_executed_detected")
+    if ol_count > 0:
+        reasons.append("ollama_invoked_detected")
+    if cl_count > 0:
+        reasons.append("cloud_provider_invoked_detected")
+    if rm_count > 0:
+        reasons.append("repo_mutated_detected")
+    if bh_count > 0:
+        reasons.append("behavior_changed_detected")
+    if re_count > 0:
+        reasons.append("runtime_effect_detected")
+    reasons.extend([
+        "h6_13_controlled_provider_probe_denylist_not_production",
+        "denylist_only",
+        "deny_by_default",
+        "no_provider_probe_allowed",
+        "no_provider_invocation_allowed",
+        "no_provider_execution_allowed",
+        "no_endpoint_resolution_allowed",
+        "no_network_allowed",
+        "no_process_spawn_allowed",
+        "no_model_load_allowed",
+        "no_model_call_allowed",
+        "no_model_call_executed",
+        "no_ollama_invocation",
+        "no_cloud_provider_invocation",
+        "no_repo_mutation",
+        "no_behavior_change",
+        "no_runtime_effect",
+        "production_claim_blocked",
+        "public_claim_blocked",
+    ])
+
+    return {
+        "schema": "nexus.hybrid_h6_controlled_provider_probe_denylist.v1",
+        "evaluated": True,
+        "source_h6_12_schema": "nexus.hybrid_h6_controlled_local_provider_fixture_contract.v1",
+        "source_fixture_contract_ready": fixture_ready,
+        "source_fixture_contract_valid": fixture_valid,
+        "source_fixture_only": fixture_only,
+        "denylist_status": "denylist_ready" if denylist_ready else ("denylist_fail" if denylist_allowed else "blocked"),
+        "denylist_reasons": reasons,
+        "denylist_allowed": denylist_allowed,
+        "denylist_ready": denylist_ready,
+        "denylist_valid": denylist_valid,
+        "row_count": len(rows),
+        "fixture_present": fixture_present,
+        "fixture_ready": fixture_ready,
+        "fixture_valid": fixture_valid,
+        "fixture_only": fixture_only,
+        "denylist_count": len(denylists),
+        "denylist_valid_count": len(valid_denylists),
+        "denylist_invalid_count": invalid_denylists,
+        "missing_denylist_id_count": missing_denylist_id,
+        "missing_provider_family_count": missing_provider_family,
+        "invalid_provider_family_count": invalid_provider_family,
+        "invalid_model_family_count": invalid_model_family,
+        "invalid_model_size_count": invalid_model_size,
+        "invalid_endpoint_kind_count": invalid_endpoint_kind,
+        "endpoint_resolution_allowed_violation_count": endpoint_resolution_allowed_violation,
+        "local_endpoint_allowed_violation_count": local_endpoint_allowed_violation,
+        "network_endpoint_allowed_violation_count": network_endpoint_allowed_violation,
+        "provider_probe_allowed_violation_count": provider_probe_allowed_violation,
+        "provider_invocation_allowed_violation_count": provider_invocation_allowed_violation,
+        "provider_execution_allowed_violation_count": provider_execution_allowed_violation,
+        "model_load_allowed_violation_count": model_load_allowed_violation,
+        "model_call_allowed_violation_count": model_call_allowed_violation,
+        "model_call_executed_violation_count": model_call_executed_violation,
+        "model_call_executed_count": mc_count,
+        "ollama_invoked_count": ol_count,
+        "cloud_provider_invoked_count": cl_count,
+        "repo_mutated_count": rm_count,
+        "behavior_changed_count": bh_count,
+        "runtime_effect_count": re_count,
+        "safety_violation_count": safety,
+        "probe_denylist_mode": "denylist_only",
+        "provider_probe_denied": True,
+        "provider_invocation_denied": True,
+        "provider_execution_denied": True,
+        "endpoint_resolution_denied": True,
+        "local_endpoint_denied": True,
+        "network_endpoint_denied": True,
+        "network_denied": True,
+        "process_spawn_denied": True,
+        "model_load_denied": True,
+        "model_call_denied": True,
+        "model_execution_denied": True,
+        "ollama_invocation_denied": True,
+        "cloud_provider_invocation_denied": True,
+        "repo_mutation_denied": True,
+        "behavior_change_denied": True,
+        "runtime_effect_denied": True,
+        "production_claim_denied": True,
+        "public_claim_denied": True,
+        "provider_probe_allowed": False,
+        "provider_invocation_allowed": False,
+        "provider_execution_allowed": False,
+        "endpoint_resolution_allowed": False,
+        "local_endpoint_allowed": False,
+        "network_endpoint_allowed": False,
+        "network_allowed": False,
+        "process_spawn_allowed": False,
+        "model_load_allowed": False,
+        "model_call_allowed": False,
+        "model_call_executed": False,
+        "ollama_invoked": False,
+        "cloud_provider_invoked": False,
+        "repo_mutated": False,
+        "behavior_changed": False,
+        "runtime_effect": False,
+        "deny_by_default": True,
+        "fixture_only": True,
+        "denylist_only": True,
+        "ready_for_h6_14_controlled_probe_preflight_replay": False,
+        "production_ready": False,
+        "public_claim_allowed": False,
+    }
+
+
 def _finalize_with_nexus_row(
     row: dict[str, Any],
     *,

@@ -31394,3 +31394,551 @@ def test_h6_12_fixture_contract_collect_only():
     result = subprocess.run(["python3", "-m", "pytest", "tests/benchmark/test_capability_ab_runner.py", "-k", "h6_12", "--collect-only", "-q"], capture_output=True, text=True, cwd="/Users/jameschen/Workspace/nexus")
     count = len(re.findall(r"test_h6_12_", result.stdout))
     assert count >= 36, f"Expected >= 36 H6-12 tests, got {count}"
+
+
+# ---------------------------------------------------------------------------
+# H6-13 Controlled Provider Probe Denylist
+# ---------------------------------------------------------------------------
+
+def _h6_13_valid_denylist_row():
+    return {"h6_controlled_provider_probe_denylist": {
+        "denylist_id": "probe-denylist-001",
+        "provider_family": "ollama",
+        "model_family": "qwen",
+        "model_size": "7b",
+        "endpoint_kind": "none",
+        "endpoint_resolution_allowed": False,
+        "local_endpoint_allowed": False,
+        "network_endpoint_allowed": False,
+        "provider_probe_allowed": False,
+        "provider_invocation_allowed": False,
+        "provider_execution_allowed": False,
+        "model_load_allowed": False,
+        "model_call_allowed": False,
+        "model_call_executed": False,
+    }}
+
+
+def _h6_13_ready_fixture_bundle():
+    return {"h6_controlled_local_provider_fixture_contract": {
+        "fixture_contract_ready": True,
+        "fixture_contract_valid": True,
+        "fixture_only": True,
+        "safety_violation_count": 0,
+        "provider_probe_allowed": False,
+        "provider_invocation_allowed": False,
+        "provider_execution_allowed": False,
+        "local_endpoint_allowed": False,
+        "network_endpoint_allowed": False,
+        "network_allowed": False,
+        "process_spawn_allowed": False,
+        "model_load_allowed": False,
+        "model_call_allowed": False,
+        "model_call_executed": False,
+        "ollama_invoked": False,
+        "cloud_provider_invoked": False,
+        "runtime_effect": False,
+    }}
+
+
+def test_h6_13_provider_probe_denylist_flag_missing_block(monkeypatch):
+    """H6-13 T01: Flag missing blocks denylist."""
+    from scripts.bench.capability_ab_runner import _build_h6_controlled_provider_probe_denylist
+    monkeypatch.delenv("NEXUS_H6_ALLOW_CONTROLLED_PROVIDER_PROBE_DENYLIST", raising=False)
+    bundle = _h6_13_ready_fixture_bundle()
+    r = _build_h6_controlled_provider_probe_denylist([], bundle)
+    assert r["denylist_status"] == "blocked"
+    assert "controlled_provider_probe_denylist_flag_not_enabled" in r["denylist_reasons"]
+
+
+def test_h6_13_provider_probe_denylist_valid_3b(monkeypatch):
+    """H6-13 T02: Valid 3b denylist passes."""
+    from scripts.bench.capability_ab_runner import _build_h6_controlled_provider_probe_denylist
+    monkeypatch.setenv("NEXUS_H6_ALLOW_CONTROLLED_PROVIDER_PROBE_DENYLIST", "1")
+    bundle = _h6_13_ready_fixture_bundle()
+    row = {"h6_controlled_provider_probe_denylist": {"denylist_id": "dl-3b", "provider_family": "ollama", "model_family": "qwen", "model_size": "3b", "endpoint_kind": "none", "endpoint_resolution_allowed": False, "local_endpoint_allowed": False, "network_endpoint_allowed": False, "provider_probe_allowed": False, "provider_invocation_allowed": False, "provider_execution_allowed": False, "model_load_allowed": False, "model_call_allowed": False, "model_call_executed": False}}
+    r = _build_h6_controlled_provider_probe_denylist([row], bundle)
+    assert r["denylist_status"] == "denylist_ready"
+    assert r["denylist_valid_count"] == 1
+    assert r["ready_for_h6_14_controlled_probe_preflight_replay"] is False
+
+
+def test_h6_13_provider_probe_denylist_valid_7b(monkeypatch):
+    """H6-13 T03: Valid 7b denylist passes."""
+    from scripts.bench.capability_ab_runner import _build_h6_controlled_provider_probe_denylist
+    monkeypatch.setenv("NEXUS_H6_ALLOW_CONTROLLED_PROVIDER_PROBE_DENYLIST", "1")
+    bundle = _h6_13_ready_fixture_bundle()
+    rows = [_h6_13_valid_denylist_row()]
+    r = _build_h6_controlled_provider_probe_denylist(rows, bundle)
+    assert r["denylist_status"] == "denylist_ready"
+    assert r["denylist_valid_count"] == 1
+
+
+def test_h6_13_provider_probe_denylist_valid_14b(monkeypatch):
+    """H6-13 T04: Valid 14b denylist passes."""
+    from scripts.bench.capability_ab_runner import _build_h6_controlled_provider_probe_denylist
+    monkeypatch.setenv("NEXUS_H6_ALLOW_CONTROLLED_PROVIDER_PROBE_DENYLIST", "1")
+    bundle = _h6_13_ready_fixture_bundle()
+    row = {"h6_controlled_provider_probe_denylist": {"denylist_id": "dl-14b", "provider_family": "ollama", "model_family": "qwen", "model_size": "14b", "endpoint_kind": "none", "endpoint_resolution_allowed": False, "local_endpoint_allowed": False, "network_endpoint_allowed": False, "provider_probe_allowed": False, "provider_invocation_allowed": False, "provider_execution_allowed": False, "model_load_allowed": False, "model_call_allowed": False, "model_call_executed": False}}
+    r = _build_h6_controlled_provider_probe_denylist([row], bundle)
+    assert r["denylist_status"] == "denylist_ready"
+    assert r["denylist_valid_count"] == 1
+
+
+def test_h6_13_provider_probe_denylist_missing_h6_12_block(monkeypatch):
+    """H6-13 T05: Missing H6-12 bundle blocks denylist."""
+    from scripts.bench.capability_ab_runner import _build_h6_controlled_provider_probe_denylist
+    monkeypatch.setenv("NEXUS_H6_ALLOW_CONTROLLED_PROVIDER_PROBE_DENYLIST", "1")
+    r = _build_h6_controlled_provider_probe_denylist([], None)
+    assert r["denylist_status"] == "blocked"
+    assert "missing_h6_12_fixture_contract" in r["denylist_reasons"]
+
+
+def test_h6_13_provider_probe_denylist_h6_12_not_ready_block(monkeypatch):
+    """H6-13 T06: H6-12 fixture_contract_ready=false blocks denylist."""
+    from scripts.bench.capability_ab_runner import _build_h6_controlled_provider_probe_denylist
+    monkeypatch.setenv("NEXUS_H6_ALLOW_CONTROLLED_PROVIDER_PROBE_DENYLIST", "1")
+    bundle = {"h6_controlled_local_provider_fixture_contract": {"fixture_contract_ready": False, "fixture_contract_valid": False, "fixture_only": True, "safety_violation_count": 0, "provider_probe_allowed": False, "provider_invocation_allowed": False, "provider_execution_allowed": False, "local_endpoint_allowed": False, "network_endpoint_allowed": False, "network_allowed": False, "process_spawn_allowed": False, "model_load_allowed": False, "model_call_allowed": False, "model_call_executed": False, "ollama_invoked": False, "cloud_provider_invoked": False, "runtime_effect": False}}
+    r = _build_h6_controlled_provider_probe_denylist([], bundle)
+    assert r["denylist_status"] == "blocked"
+    assert "h6_12_fixture_contract_not_ready" in r["denylist_reasons"]
+
+
+def test_h6_13_provider_probe_denylist_h6_12_invalid_contract_block(monkeypatch):
+    """H6-13 T07: H6-12 fixture_contract_valid=false blocks denylist."""
+    from scripts.bench.capability_ab_runner import _build_h6_controlled_provider_probe_denylist
+    monkeypatch.setenv("NEXUS_H6_ALLOW_CONTROLLED_PROVIDER_PROBE_DENYLIST", "1")
+    bundle = {"h6_controlled_local_provider_fixture_contract": {"fixture_contract_ready": True, "fixture_contract_valid": False, "fixture_only": True, "safety_violation_count": 0, "provider_probe_allowed": False, "provider_invocation_allowed": False, "provider_execution_allowed": False, "local_endpoint_allowed": False, "network_endpoint_allowed": False, "network_allowed": False, "process_spawn_allowed": False, "model_load_allowed": False, "model_call_allowed": False, "model_call_executed": False, "ollama_invoked": False, "cloud_provider_invoked": False, "runtime_effect": False}}
+    r = _build_h6_controlled_provider_probe_denylist([], bundle)
+    assert r["denylist_status"] == "blocked"
+    assert "h6_12_fixture_contract_not_valid" in r["denylist_reasons"]
+
+
+def test_h6_13_provider_probe_denylist_h6_12_not_fixture_only_block(monkeypatch):
+    """H6-13 T08: H6-12 fixture_only=false blocks denylist."""
+    from scripts.bench.capability_ab_runner import _build_h6_controlled_provider_probe_denylist
+    monkeypatch.setenv("NEXUS_H6_ALLOW_CONTROLLED_PROVIDER_PROBE_DENYLIST", "1")
+    bundle = {"h6_controlled_local_provider_fixture_contract": {"fixture_contract_ready": True, "fixture_contract_valid": True, "fixture_only": False, "safety_violation_count": 0, "provider_probe_allowed": False, "provider_invocation_allowed": False, "provider_execution_allowed": False, "local_endpoint_allowed": False, "network_endpoint_allowed": False, "network_allowed": False, "process_spawn_allowed": False, "model_load_allowed": False, "model_call_allowed": False, "model_call_executed": False, "ollama_invoked": False, "cloud_provider_invoked": False, "runtime_effect": False}}
+    r = _build_h6_controlled_provider_probe_denylist([], bundle)
+    assert r["denylist_status"] == "blocked"
+    assert "h6_12_not_fixture_only" in r["denylist_reasons"]
+
+
+def test_h6_13_provider_probe_denylist_h6_12_provider_probe_allowed_block(monkeypatch):
+    """H6-13 T09: H6-12 provider_probe_allowed=true blocks denylist."""
+    from scripts.bench.capability_ab_runner import _build_h6_controlled_provider_probe_denylist
+    monkeypatch.setenv("NEXUS_H6_ALLOW_CONTROLLED_PROVIDER_PROBE_DENYLIST", "1")
+    bundle = {"h6_controlled_local_provider_fixture_contract": {"fixture_contract_ready": True, "fixture_contract_valid": True, "fixture_only": True, "safety_violation_count": 0, "provider_probe_allowed": True, "provider_invocation_allowed": False, "provider_execution_allowed": False, "local_endpoint_allowed": False, "network_endpoint_allowed": False, "network_allowed": False, "process_spawn_allowed": False, "model_load_allowed": False, "model_call_allowed": False, "model_call_executed": False, "ollama_invoked": False, "cloud_provider_invoked": False, "runtime_effect": False}}
+    r = _build_h6_controlled_provider_probe_denylist([], bundle)
+    assert r["denylist_status"] == "blocked"
+    assert "h6_12_fixture_has_allowed_fields" in r["denylist_reasons"]
+
+
+def test_h6_13_provider_probe_denylist_h6_12_provider_invocation_allowed_block(monkeypatch):
+    """H6-13 T10: H6-12 provider_invocation_allowed=true blocks denylist."""
+    from scripts.bench.capability_ab_runner import _build_h6_controlled_provider_probe_denylist
+    monkeypatch.setenv("NEXUS_H6_ALLOW_CONTROLLED_PROVIDER_PROBE_DENYLIST", "1")
+    bundle = {"h6_controlled_local_provider_fixture_contract": {"fixture_contract_ready": True, "fixture_contract_valid": True, "fixture_only": True, "safety_violation_count": 0, "provider_probe_allowed": False, "provider_invocation_allowed": True, "provider_execution_allowed": False, "local_endpoint_allowed": False, "network_endpoint_allowed": False, "network_allowed": False, "process_spawn_allowed": False, "model_load_allowed": False, "model_call_allowed": False, "model_call_executed": False, "ollama_invoked": False, "cloud_provider_invoked": False, "runtime_effect": False}}
+    r = _build_h6_controlled_provider_probe_denylist([], bundle)
+    assert r["denylist_status"] == "blocked"
+    assert "h6_12_fixture_has_allowed_fields" in r["denylist_reasons"]
+
+
+def test_h6_13_provider_probe_denylist_h6_12_provider_execution_allowed_block(monkeypatch):
+    """H6-13 T11: H6-12 provider_execution_allowed=true blocks denylist."""
+    from scripts.bench.capability_ab_runner import _build_h6_controlled_provider_probe_denylist
+    monkeypatch.setenv("NEXUS_H6_ALLOW_CONTROLLED_PROVIDER_PROBE_DENYLIST", "1")
+    bundle = {"h6_controlled_local_provider_fixture_contract": {"fixture_contract_ready": True, "fixture_contract_valid": True, "fixture_only": True, "safety_violation_count": 0, "provider_probe_allowed": False, "provider_invocation_allowed": False, "provider_execution_allowed": True, "local_endpoint_allowed": False, "network_endpoint_allowed": False, "network_allowed": False, "process_spawn_allowed": False, "model_load_allowed": False, "model_call_allowed": False, "model_call_executed": False, "ollama_invoked": False, "cloud_provider_invoked": False, "runtime_effect": False}}
+    r = _build_h6_controlled_provider_probe_denylist([], bundle)
+    assert r["denylist_status"] == "blocked"
+    assert "h6_12_fixture_has_allowed_fields" in r["denylist_reasons"]
+
+
+def test_h6_13_provider_probe_denylist_h6_12_local_endpoint_allowed_block(monkeypatch):
+    """H6-13 T12: H6-12 local_endpoint_allowed=true blocks denylist."""
+    from scripts.bench.capability_ab_runner import _build_h6_controlled_provider_probe_denylist
+    monkeypatch.setenv("NEXUS_H6_ALLOW_CONTROLLED_PROVIDER_PROBE_DENYLIST", "1")
+    bundle = {"h6_controlled_local_provider_fixture_contract": {"fixture_contract_ready": True, "fixture_contract_valid": True, "fixture_only": True, "safety_violation_count": 0, "provider_probe_allowed": False, "provider_invocation_allowed": False, "provider_execution_allowed": False, "local_endpoint_allowed": True, "network_endpoint_allowed": False, "network_allowed": False, "process_spawn_allowed": False, "model_load_allowed": False, "model_call_allowed": False, "model_call_executed": False, "ollama_invoked": False, "cloud_provider_invoked": False, "runtime_effect": False}}
+    r = _build_h6_controlled_provider_probe_denylist([], bundle)
+    assert r["denylist_status"] == "blocked"
+    assert "h6_12_fixture_has_allowed_fields" in r["denylist_reasons"]
+
+
+def test_h6_13_provider_probe_denylist_h6_12_network_endpoint_allowed_block(monkeypatch):
+    """H6-13 T13: H6-12 network_endpoint_allowed=true blocks denylist."""
+    from scripts.bench.capability_ab_runner import _build_h6_controlled_provider_probe_denylist
+    monkeypatch.setenv("NEXUS_H6_ALLOW_CONTROLLED_PROVIDER_PROBE_DENYLIST", "1")
+    bundle = {"h6_controlled_local_provider_fixture_contract": {"fixture_contract_ready": True, "fixture_contract_valid": True, "fixture_only": True, "safety_violation_count": 0, "provider_probe_allowed": False, "provider_invocation_allowed": False, "provider_execution_allowed": False, "local_endpoint_allowed": False, "network_endpoint_allowed": True, "network_allowed": False, "process_spawn_allowed": False, "model_load_allowed": False, "model_call_allowed": False, "model_call_executed": False, "ollama_invoked": False, "cloud_provider_invoked": False, "runtime_effect": False}}
+    r = _build_h6_controlled_provider_probe_denylist([], bundle)
+    assert r["denylist_status"] == "blocked"
+    assert "h6_12_fixture_has_allowed_fields" in r["denylist_reasons"]
+
+
+def test_h6_13_provider_probe_denylist_h6_12_network_allowed_block(monkeypatch):
+    """H6-13 T14: H6-12 network_allowed=true blocks denylist."""
+    from scripts.bench.capability_ab_runner import _build_h6_controlled_provider_probe_denylist
+    monkeypatch.setenv("NEXUS_H6_ALLOW_CONTROLLED_PROVIDER_PROBE_DENYLIST", "1")
+    bundle = {"h6_controlled_local_provider_fixture_contract": {"fixture_contract_ready": True, "fixture_contract_valid": True, "fixture_only": True, "safety_violation_count": 0, "provider_probe_allowed": False, "provider_invocation_allowed": False, "provider_execution_allowed": False, "local_endpoint_allowed": False, "network_endpoint_allowed": False, "network_allowed": True, "process_spawn_allowed": False, "model_load_allowed": False, "model_call_allowed": False, "model_call_executed": False, "ollama_invoked": False, "cloud_provider_invoked": False, "runtime_effect": False}}
+    r = _build_h6_controlled_provider_probe_denylist([], bundle)
+    assert r["denylist_status"] == "blocked"
+    assert "h6_12_fixture_has_allowed_fields" in r["denylist_reasons"]
+
+
+def test_h6_13_provider_probe_denylist_h6_12_process_spawn_allowed_block(monkeypatch):
+    """H6-13 T15: H6-12 process_spawn_allowed=true blocks denylist."""
+    from scripts.bench.capability_ab_runner import _build_h6_controlled_provider_probe_denylist
+    monkeypatch.setenv("NEXUS_H6_ALLOW_CONTROLLED_PROVIDER_PROBE_DENYLIST", "1")
+    bundle = {"h6_controlled_local_provider_fixture_contract": {"fixture_contract_ready": True, "fixture_contract_valid": True, "fixture_only": True, "safety_violation_count": 0, "provider_probe_allowed": False, "provider_invocation_allowed": False, "provider_execution_allowed": False, "local_endpoint_allowed": False, "network_endpoint_allowed": False, "network_allowed": False, "process_spawn_allowed": True, "model_load_allowed": False, "model_call_allowed": False, "model_call_executed": False, "ollama_invoked": False, "cloud_provider_invoked": False, "runtime_effect": False}}
+    r = _build_h6_controlled_provider_probe_denylist([], bundle)
+    assert r["denylist_status"] == "blocked"
+    assert "h6_12_fixture_has_allowed_fields" in r["denylist_reasons"]
+
+
+def test_h6_13_provider_probe_denylist_h6_12_model_load_allowed_block(monkeypatch):
+    """H6-13 T16: H6-12 model_load_allowed=true blocks denylist."""
+    from scripts.bench.capability_ab_runner import _build_h6_controlled_provider_probe_denylist
+    monkeypatch.setenv("NEXUS_H6_ALLOW_CONTROLLED_PROVIDER_PROBE_DENYLIST", "1")
+    bundle = {"h6_controlled_local_provider_fixture_contract": {"fixture_contract_ready": True, "fixture_contract_valid": True, "fixture_only": True, "safety_violation_count": 0, "provider_probe_allowed": False, "provider_invocation_allowed": False, "provider_execution_allowed": False, "local_endpoint_allowed": False, "network_endpoint_allowed": False, "network_allowed": False, "process_spawn_allowed": False, "model_load_allowed": True, "model_call_allowed": False, "model_call_executed": False, "ollama_invoked": False, "cloud_provider_invoked": False, "runtime_effect": False}}
+    r = _build_h6_controlled_provider_probe_denylist([], bundle)
+    assert r["denylist_status"] == "blocked"
+    assert "h6_12_fixture_has_allowed_fields" in r["denylist_reasons"]
+
+
+def test_h6_13_provider_probe_denylist_h6_12_model_call_allowed_block(monkeypatch):
+    """H6-13 T17: H6-12 model_call_allowed=true blocks denylist."""
+    from scripts.bench.capability_ab_runner import _build_h6_controlled_provider_probe_denylist
+    monkeypatch.setenv("NEXUS_H6_ALLOW_CONTROLLED_PROVIDER_PROBE_DENYLIST", "1")
+    bundle = {"h6_controlled_local_provider_fixture_contract": {"fixture_contract_ready": True, "fixture_contract_valid": True, "fixture_only": True, "safety_violation_count": 0, "provider_probe_allowed": False, "provider_invocation_allowed": False, "provider_execution_allowed": False, "local_endpoint_allowed": False, "network_endpoint_allowed": False, "network_allowed": False, "process_spawn_allowed": False, "model_load_allowed": False, "model_call_allowed": True, "model_call_executed": False, "ollama_invoked": False, "cloud_provider_invoked": False, "runtime_effect": False}}
+    r = _build_h6_controlled_provider_probe_denylist([], bundle)
+    assert r["denylist_status"] == "blocked"
+    assert "h6_12_fixture_has_allowed_fields" in r["denylist_reasons"]
+
+
+def test_h6_13_provider_probe_denylist_h6_12_model_call_executed_block(monkeypatch):
+    """H6-13 T18: H6-12 model_call_executed=true blocks denylist."""
+    from scripts.bench.capability_ab_runner import _build_h6_controlled_provider_probe_denylist
+    monkeypatch.setenv("NEXUS_H6_ALLOW_CONTROLLED_PROVIDER_PROBE_DENYLIST", "1")
+    bundle = {"h6_controlled_local_provider_fixture_contract": {"fixture_contract_ready": True, "fixture_contract_valid": True, "fixture_only": True, "safety_violation_count": 0, "provider_probe_allowed": False, "provider_invocation_allowed": False, "provider_execution_allowed": False, "local_endpoint_allowed": False, "network_endpoint_allowed": False, "network_allowed": False, "process_spawn_allowed": False, "model_load_allowed": False, "model_call_allowed": False, "model_call_executed": True, "ollama_invoked": False, "cloud_provider_invoked": False, "runtime_effect": False}}
+    r = _build_h6_controlled_provider_probe_denylist([], bundle)
+    assert r["denylist_status"] == "blocked"
+    assert "h6_12_fixture_has_allowed_fields" in r["denylist_reasons"]
+
+
+def test_h6_13_provider_probe_denylist_h6_12_ollama_invoked_block(monkeypatch):
+    """H6-13 T19: H6-12 ollama_invoked=true blocks denylist."""
+    from scripts.bench.capability_ab_runner import _build_h6_controlled_provider_probe_denylist
+    monkeypatch.setenv("NEXUS_H6_ALLOW_CONTROLLED_PROVIDER_PROBE_DENYLIST", "1")
+    bundle = {"h6_controlled_local_provider_fixture_contract": {"fixture_contract_ready": True, "fixture_contract_valid": True, "fixture_only": True, "safety_violation_count": 0, "provider_probe_allowed": False, "provider_invocation_allowed": False, "provider_execution_allowed": False, "local_endpoint_allowed": False, "network_endpoint_allowed": False, "network_allowed": False, "process_spawn_allowed": False, "model_load_allowed": False, "model_call_allowed": False, "model_call_executed": False, "ollama_invoked": True, "cloud_provider_invoked": False, "runtime_effect": False}}
+    r = _build_h6_controlled_provider_probe_denylist([], bundle)
+    assert r["denylist_status"] == "blocked"
+    assert "h6_12_fixture_has_allowed_fields" in r["denylist_reasons"]
+
+
+def test_h6_13_provider_probe_denylist_h6_12_cloud_provider_invoked_block(monkeypatch):
+    """H6-13 T20: H6-12 cloud_provider_invoked=true blocks denylist."""
+    from scripts.bench.capability_ab_runner import _build_h6_controlled_provider_probe_denylist
+    monkeypatch.setenv("NEXUS_H6_ALLOW_CONTROLLED_PROVIDER_PROBE_DENYLIST", "1")
+    bundle = {"h6_controlled_local_provider_fixture_contract": {"fixture_contract_ready": True, "fixture_contract_valid": True, "fixture_only": True, "safety_violation_count": 0, "provider_probe_allowed": False, "provider_invocation_allowed": False, "provider_execution_allowed": False, "local_endpoint_allowed": False, "network_endpoint_allowed": False, "network_allowed": False, "process_spawn_allowed": False, "model_load_allowed": False, "model_call_allowed": False, "model_call_executed": False, "ollama_invoked": False, "cloud_provider_invoked": True, "runtime_effect": False}}
+    r = _build_h6_controlled_provider_probe_denylist([], bundle)
+    assert r["denylist_status"] == "blocked"
+    assert "h6_12_fixture_has_allowed_fields" in r["denylist_reasons"]
+
+
+def test_h6_13_provider_probe_denylist_h6_12_runtime_effect_block(monkeypatch):
+    """H6-13 T21: H6-12 runtime_effect=true blocks denylist."""
+    from scripts.bench.capability_ab_runner import _build_h6_controlled_provider_probe_denylist
+    monkeypatch.setenv("NEXUS_H6_ALLOW_CONTROLLED_PROVIDER_PROBE_DENYLIST", "1")
+    bundle = {"h6_controlled_local_provider_fixture_contract": {"fixture_contract_ready": True, "fixture_contract_valid": True, "fixture_only": True, "safety_violation_count": 0, "provider_probe_allowed": False, "provider_invocation_allowed": False, "provider_execution_allowed": False, "local_endpoint_allowed": False, "network_endpoint_allowed": False, "network_allowed": False, "process_spawn_allowed": False, "model_load_allowed": False, "model_call_allowed": False, "model_call_executed": False, "ollama_invoked": False, "cloud_provider_invoked": False, "runtime_effect": True}}
+    r = _build_h6_controlled_provider_probe_denylist([], bundle)
+    assert r["denylist_status"] == "blocked"
+    assert "h6_12_fixture_has_allowed_fields" in r["denylist_reasons"]
+
+
+def test_h6_13_provider_probe_denylist_missing_denylist_id(monkeypatch):
+    """H6-13 T22: Missing denylist_id invalidates denylist."""
+    from scripts.bench.capability_ab_runner import _build_h6_controlled_provider_probe_denylist
+    monkeypatch.setenv("NEXUS_H6_ALLOW_CONTROLLED_PROVIDER_PROBE_DENYLIST", "1")
+    bundle = _h6_13_ready_fixture_bundle()
+    row = {"h6_controlled_provider_probe_denylist": {"denylist_id": "", "provider_family": "ollama", "model_family": "qwen", "model_size": "7b", "endpoint_kind": "none", "endpoint_resolution_allowed": False, "local_endpoint_allowed": False, "network_endpoint_allowed": False, "provider_probe_allowed": False, "provider_invocation_allowed": False, "provider_execution_allowed": False, "model_load_allowed": False, "model_call_allowed": False, "model_call_executed": False}}
+    r = _build_h6_controlled_provider_probe_denylist([row], bundle)
+    assert r["missing_denylist_id_count"] == 1
+    assert "missing_denylist_id" in r["denylist_reasons"]
+
+
+def test_h6_13_provider_probe_denylist_invalid_provider_family(monkeypatch):
+    """H6-13 T23: Invalid provider_family invalidates denylist."""
+    from scripts.bench.capability_ab_runner import _build_h6_controlled_provider_probe_denylist
+    monkeypatch.setenv("NEXUS_H6_ALLOW_CONTROLLED_PROVIDER_PROBE_DENYLIST", "1")
+    bundle = _h6_13_ready_fixture_bundle()
+    row = {"h6_controlled_provider_probe_denylist": {"denylist_id": "dl1", "provider_family": "invalid", "model_family": "qwen", "model_size": "7b", "endpoint_kind": "none", "endpoint_resolution_allowed": False, "local_endpoint_allowed": False, "network_endpoint_allowed": False, "provider_probe_allowed": False, "provider_invocation_allowed": False, "provider_execution_allowed": False, "model_load_allowed": False, "model_call_allowed": False, "model_call_executed": False}}
+    r = _build_h6_controlled_provider_probe_denylist([row], bundle)
+    assert r["invalid_provider_family_count"] == 1
+    assert "invalid_provider_family" in r["denylist_reasons"]
+
+
+def test_h6_13_provider_probe_denylist_invalid_model_family(monkeypatch):
+    """H6-13 T24: Invalid model_family invalidates denylist."""
+    from scripts.bench.capability_ab_runner import _build_h6_controlled_provider_probe_denylist
+    monkeypatch.setenv("NEXUS_H6_ALLOW_CONTROLLED_PROVIDER_PROBE_DENYLIST", "1")
+    bundle = _h6_13_ready_fixture_bundle()
+    row = {"h6_controlled_provider_probe_denylist": {"denylist_id": "dl1", "provider_family": "ollama", "model_family": "llama", "model_size": "7b", "endpoint_kind": "none", "endpoint_resolution_allowed": False, "local_endpoint_allowed": False, "network_endpoint_allowed": False, "provider_probe_allowed": False, "provider_invocation_allowed": False, "provider_execution_allowed": False, "model_load_allowed": False, "model_call_allowed": False, "model_call_executed": False}}
+    r = _build_h6_controlled_provider_probe_denylist([row], bundle)
+    assert r["invalid_model_family_count"] == 1
+    assert "invalid_model_family" in r["denylist_reasons"]
+
+
+def test_h6_13_provider_probe_denylist_invalid_model_size(monkeypatch):
+    """H6-13 T25: Invalid model_size invalidates denylist."""
+    from scripts.bench.capability_ab_runner import _build_h6_controlled_provider_probe_denylist
+    monkeypatch.setenv("NEXUS_H6_ALLOW_CONTROLLED_PROVIDER_PROBE_DENYLIST", "1")
+    bundle = _h6_13_ready_fixture_bundle()
+    row = {"h6_controlled_provider_probe_denylist": {"denylist_id": "dl1", "provider_family": "ollama", "model_family": "qwen", "model_size": "100b", "endpoint_kind": "none", "endpoint_resolution_allowed": False, "local_endpoint_allowed": False, "network_endpoint_allowed": False, "provider_probe_allowed": False, "provider_invocation_allowed": False, "provider_execution_allowed": False, "model_load_allowed": False, "model_call_allowed": False, "model_call_executed": False}}
+    r = _build_h6_controlled_provider_probe_denylist([row], bundle)
+    assert r["invalid_model_size_count"] == 1
+    assert "invalid_model_size" in r["denylist_reasons"]
+
+
+def test_h6_13_provider_probe_denylist_invalid_endpoint_kind(monkeypatch):
+    """H6-13 T26: Invalid endpoint_kind invalidates denylist."""
+    from scripts.bench.capability_ab_runner import _build_h6_controlled_provider_probe_denylist
+    monkeypatch.setenv("NEXUS_H6_ALLOW_CONTROLLED_PROVIDER_PROBE_DENYLIST", "1")
+    bundle = _h6_13_ready_fixture_bundle()
+    row = {"h6_controlled_provider_probe_denylist": {"denylist_id": "dl1", "provider_family": "ollama", "model_family": "qwen", "model_size": "7b", "endpoint_kind": "tcp_port", "endpoint_resolution_allowed": False, "local_endpoint_allowed": False, "network_endpoint_allowed": False, "provider_probe_allowed": False, "provider_invocation_allowed": False, "provider_execution_allowed": False, "model_load_allowed": False, "model_call_allowed": False, "model_call_executed": False}}
+    r = _build_h6_controlled_provider_probe_denylist([row], bundle)
+    assert r["invalid_endpoint_kind_count"] == 1
+    assert "invalid_endpoint_kind" in r["denylist_reasons"]
+
+
+def test_h6_13_provider_probe_denylist_endpoint_resolution_allowed_block(monkeypatch):
+    """H6-13 T27: endpoint_resolution_allowed=true invalidates denylist."""
+    from scripts.bench.capability_ab_runner import _build_h6_controlled_provider_probe_denylist
+    monkeypatch.setenv("NEXUS_H6_ALLOW_CONTROLLED_PROVIDER_PROBE_DENYLIST", "1")
+    bundle = _h6_13_ready_fixture_bundle()
+    row = {"h6_controlled_provider_probe_denylist": {"denylist_id": "dl1", "provider_family": "ollama", "model_family": "qwen", "model_size": "7b", "endpoint_kind": "none", "endpoint_resolution_allowed": True, "local_endpoint_allowed": False, "network_endpoint_allowed": False, "provider_probe_allowed": False, "provider_invocation_allowed": False, "provider_execution_allowed": False, "model_load_allowed": False, "model_call_allowed": False, "model_call_executed": False}}
+    r = _build_h6_controlled_provider_probe_denylist([row], bundle)
+    assert r["endpoint_resolution_allowed_violation_count"] == 1
+    assert "endpoint_resolution_allowed_violation" in r["denylist_reasons"]
+
+
+def test_h6_13_provider_probe_denylist_local_endpoint_allowed_block(monkeypatch):
+    """H6-13 T28: local_endpoint_allowed=true invalidates denylist."""
+    from scripts.bench.capability_ab_runner import _build_h6_controlled_provider_probe_denylist
+    monkeypatch.setenv("NEXUS_H6_ALLOW_CONTROLLED_PROVIDER_PROBE_DENYLIST", "1")
+    bundle = _h6_13_ready_fixture_bundle()
+    row = {"h6_controlled_provider_probe_denylist": {"denylist_id": "dl1", "provider_family": "ollama", "model_family": "qwen", "model_size": "7b", "endpoint_kind": "none", "endpoint_resolution_allowed": False, "local_endpoint_allowed": True, "network_endpoint_allowed": False, "provider_probe_allowed": False, "provider_invocation_allowed": False, "provider_execution_allowed": False, "model_load_allowed": False, "model_call_allowed": False, "model_call_executed": False}}
+    r = _build_h6_controlled_provider_probe_denylist([row], bundle)
+    assert r["local_endpoint_allowed_violation_count"] == 1
+    assert "local_endpoint_allowed_violation" in r["denylist_reasons"]
+
+
+def test_h6_13_provider_probe_denylist_network_endpoint_allowed_block(monkeypatch):
+    """H6-13 T29: network_endpoint_allowed=true invalidates denylist."""
+    from scripts.bench.capability_ab_runner import _build_h6_controlled_provider_probe_denylist
+    monkeypatch.setenv("NEXUS_H6_ALLOW_CONTROLLED_PROVIDER_PROBE_DENYLIST", "1")
+    bundle = _h6_13_ready_fixture_bundle()
+    row = {"h6_controlled_provider_probe_denylist": {"denylist_id": "dl1", "provider_family": "ollama", "model_family": "qwen", "model_size": "7b", "endpoint_kind": "none", "endpoint_resolution_allowed": False, "local_endpoint_allowed": False, "network_endpoint_allowed": True, "provider_probe_allowed": False, "provider_invocation_allowed": False, "provider_execution_allowed": False, "model_load_allowed": False, "model_call_allowed": False, "model_call_executed": False}}
+    r = _build_h6_controlled_provider_probe_denylist([row], bundle)
+    assert r["network_endpoint_allowed_violation_count"] == 1
+    assert "network_endpoint_allowed_violation" in r["denylist_reasons"]
+
+
+def test_h6_13_provider_probe_denylist_provider_probe_allowed_block(monkeypatch):
+    """H6-13 T30: provider_probe_allowed=true invalidates denylist."""
+    from scripts.bench.capability_ab_runner import _build_h6_controlled_provider_probe_denylist
+    monkeypatch.setenv("NEXUS_H6_ALLOW_CONTROLLED_PROVIDER_PROBE_DENYLIST", "1")
+    bundle = _h6_13_ready_fixture_bundle()
+    row = {"h6_controlled_provider_probe_denylist": {"denylist_id": "dl1", "provider_family": "ollama", "model_family": "qwen", "model_size": "7b", "endpoint_kind": "none", "endpoint_resolution_allowed": False, "local_endpoint_allowed": False, "network_endpoint_allowed": False, "provider_probe_allowed": True, "provider_invocation_allowed": False, "provider_execution_allowed": False, "model_load_allowed": False, "model_call_allowed": False, "model_call_executed": False}}
+    r = _build_h6_controlled_provider_probe_denylist([row], bundle)
+    assert r["provider_probe_allowed_violation_count"] == 1
+    assert "provider_probe_allowed_violation" in r["denylist_reasons"]
+
+
+def test_h6_13_provider_probe_denylist_provider_invocation_allowed_block(monkeypatch):
+    """H6-13 T31: provider_invocation_allowed=true invalidates denylist."""
+    from scripts.bench.capability_ab_runner import _build_h6_controlled_provider_probe_denylist
+    monkeypatch.setenv("NEXUS_H6_ALLOW_CONTROLLED_PROVIDER_PROBE_DENYLIST", "1")
+    bundle = _h6_13_ready_fixture_bundle()
+    row = {"h6_controlled_provider_probe_denylist": {"denylist_id": "dl1", "provider_family": "ollama", "model_family": "qwen", "model_size": "7b", "endpoint_kind": "none", "endpoint_resolution_allowed": False, "local_endpoint_allowed": False, "network_endpoint_allowed": False, "provider_probe_allowed": False, "provider_invocation_allowed": True, "provider_execution_allowed": False, "model_load_allowed": False, "model_call_allowed": False, "model_call_executed": False}}
+    r = _build_h6_controlled_provider_probe_denylist([row], bundle)
+    assert r["provider_invocation_allowed_violation_count"] == 1
+    assert "provider_invocation_allowed_violation" in r["denylist_reasons"]
+
+
+def test_h6_13_provider_probe_denylist_provider_execution_allowed_block(monkeypatch):
+    """H6-13 T32: provider_execution_allowed=true invalidates denylist."""
+    from scripts.bench.capability_ab_runner import _build_h6_controlled_provider_probe_denylist
+    monkeypatch.setenv("NEXUS_H6_ALLOW_CONTROLLED_PROVIDER_PROBE_DENYLIST", "1")
+    bundle = _h6_13_ready_fixture_bundle()
+    row = {"h6_controlled_provider_probe_denylist": {"denylist_id": "dl1", "provider_family": "ollama", "model_family": "qwen", "model_size": "7b", "endpoint_kind": "none", "endpoint_resolution_allowed": False, "local_endpoint_allowed": False, "network_endpoint_allowed": False, "provider_probe_allowed": False, "provider_invocation_allowed": False, "provider_execution_allowed": True, "model_load_allowed": False, "model_call_allowed": False, "model_call_executed": False}}
+    r = _build_h6_controlled_provider_probe_denylist([row], bundle)
+    assert r["provider_execution_allowed_violation_count"] == 1
+    assert "provider_execution_allowed_violation" in r["denylist_reasons"]
+
+
+def test_h6_13_provider_probe_denylist_model_load_allowed_block(monkeypatch):
+    """H6-13 T33: model_load_allowed=true invalidates denylist."""
+    from scripts.bench.capability_ab_runner import _build_h6_controlled_provider_probe_denylist
+    monkeypatch.setenv("NEXUS_H6_ALLOW_CONTROLLED_PROVIDER_PROBE_DENYLIST", "1")
+    bundle = _h6_13_ready_fixture_bundle()
+    row = {"h6_controlled_provider_probe_denylist": {"denylist_id": "dl1", "provider_family": "ollama", "model_family": "qwen", "model_size": "7b", "endpoint_kind": "none", "endpoint_resolution_allowed": False, "local_endpoint_allowed": False, "network_endpoint_allowed": False, "provider_probe_allowed": False, "provider_invocation_allowed": False, "provider_execution_allowed": False, "model_load_allowed": True, "model_call_allowed": False, "model_call_executed": False}}
+    r = _build_h6_controlled_provider_probe_denylist([row], bundle)
+    assert r["model_load_allowed_violation_count"] == 1
+    assert "model_load_allowed_violation" in r["denylist_reasons"]
+
+
+def test_h6_13_provider_probe_denylist_model_call_allowed_block(monkeypatch):
+    """H6-13 T34: model_call_allowed=true invalidates denylist."""
+    from scripts.bench.capability_ab_runner import _build_h6_controlled_provider_probe_denylist
+    monkeypatch.setenv("NEXUS_H6_ALLOW_CONTROLLED_PROVIDER_PROBE_DENYLIST", "1")
+    bundle = _h6_13_ready_fixture_bundle()
+    row = {"h6_controlled_provider_probe_denylist": {"denylist_id": "dl1", "provider_family": "ollama", "model_family": "qwen", "model_size": "7b", "endpoint_kind": "none", "endpoint_resolution_allowed": False, "local_endpoint_allowed": False, "network_endpoint_allowed": False, "provider_probe_allowed": False, "provider_invocation_allowed": False, "provider_execution_allowed": False, "model_load_allowed": False, "model_call_allowed": True, "model_call_executed": False}}
+    r = _build_h6_controlled_provider_probe_denylist([row], bundle)
+    assert r["model_call_allowed_violation_count"] == 1
+    assert "model_call_allowed_violation" in r["denylist_reasons"]
+
+
+def test_h6_13_provider_probe_denylist_model_call_executed_block(monkeypatch):
+    """H6-13 T35: model_call_executed=true invalidates denylist."""
+    from scripts.bench.capability_ab_runner import _build_h6_controlled_provider_probe_denylist
+    monkeypatch.setenv("NEXUS_H6_ALLOW_CONTROLLED_PROVIDER_PROBE_DENYLIST", "1")
+    bundle = _h6_13_ready_fixture_bundle()
+    row = {"h6_controlled_provider_probe_denylist": {"denylist_id": "dl1", "provider_family": "ollama", "model_family": "qwen", "model_size": "7b", "endpoint_kind": "none", "endpoint_resolution_allowed": False, "local_endpoint_allowed": False, "network_endpoint_allowed": False, "provider_probe_allowed": False, "provider_invocation_allowed": False, "provider_execution_allowed": False, "model_load_allowed": False, "model_call_allowed": False, "model_call_executed": True}}
+    r = _build_h6_controlled_provider_probe_denylist([row], bundle)
+    assert r["model_call_executed_violation_count"] == 1
+    assert "model_call_executed_violation" in r["denylist_reasons"]
+
+
+def test_h6_13_provider_probe_denylist_production_ready_false(monkeypatch):
+    """H6-13 T36: production_ready is always false."""
+    from scripts.bench.capability_ab_runner import _build_h6_controlled_provider_probe_denylist
+    monkeypatch.setenv("NEXUS_H6_ALLOW_CONTROLLED_PROVIDER_PROBE_DENYLIST", "1")
+    bundle = _h6_13_ready_fixture_bundle()
+    rows = [_h6_13_valid_denylist_row()]
+    r = _build_h6_controlled_provider_probe_denylist(rows, bundle)
+    assert r["production_ready"] is False
+    assert r["public_claim_allowed"] is False
+    assert "h6_13_controlled_provider_probe_denylist_not_production" in r["denylist_reasons"]
+
+
+def test_h6_13_provider_probe_denylist_public_claim_allowed_false(monkeypatch):
+    """H6-13 T37: public_claim_allowed is always false."""
+    from scripts.bench.capability_ab_runner import _build_h6_controlled_provider_probe_denylist
+    monkeypatch.setenv("NEXUS_H6_ALLOW_CONTROLLED_PROVIDER_PROBE_DENYLIST", "1")
+    bundle = _h6_13_ready_fixture_bundle()
+    rows = [_h6_13_valid_denylist_row()]
+    r = _build_h6_controlled_provider_probe_denylist(rows, bundle)
+    assert r["public_claim_allowed"] is False
+
+
+def test_h6_13_provider_probe_denylist_ready_for_h6_14_false(monkeypatch):
+    """H6-13 T38: ready_for_h6_14 is always false."""
+    from scripts.bench.capability_ab_runner import _build_h6_controlled_provider_probe_denylist
+    monkeypatch.setenv("NEXUS_H6_ALLOW_CONTROLLED_PROVIDER_PROBE_DENYLIST", "1")
+    bundle = _h6_13_ready_fixture_bundle()
+    rows = [_h6_13_valid_denylist_row()]
+    r = _build_h6_controlled_provider_probe_denylist(rows, bundle)
+    assert r["ready_for_h6_14_controlled_probe_preflight_replay"] is False
+
+
+def test_h6_13_provider_probe_denylist_bundle_summary_counters(monkeypatch):
+    """H6-13 T39: Bundle summary counters for violations."""
+    from scripts.bench.capability_ab_runner import _build_h6_controlled_provider_probe_denylist
+    monkeypatch.setenv("NEXUS_H6_ALLOW_CONTROLLED_PROVIDER_PROBE_DENYLIST", "1")
+    bundle = _h6_13_ready_fixture_bundle()
+    row = {"h6_controlled_provider_probe_denylist": {"denylist_id": "dl1", "provider_family": "ollama", "model_family": "qwen", "model_size": "7b", "endpoint_kind": "none", "endpoint_resolution_allowed": True, "local_endpoint_allowed": True, "network_endpoint_allowed": True, "provider_probe_allowed": True, "provider_invocation_allowed": True, "provider_execution_allowed": True, "model_load_allowed": True, "model_call_allowed": True, "model_call_executed": True}}
+    r = _build_h6_controlled_provider_probe_denylist([row], bundle)
+    assert r["endpoint_resolution_allowed_violation_count"] == 1
+    assert r["local_endpoint_allowed_violation_count"] == 1
+    assert r["network_endpoint_allowed_violation_count"] == 1
+    assert r["provider_probe_allowed_violation_count"] == 1
+    assert r["provider_invocation_allowed_violation_count"] == 1
+    assert r["provider_execution_allowed_violation_count"] == 1
+    assert r["model_load_allowed_violation_count"] == 1
+    assert r["model_call_allowed_violation_count"] == 1
+    assert r["model_call_executed_violation_count"] == 1
+    assert r["denylist_invalid_count"] == 1
+
+
+def test_h6_13_provider_probe_denylist_report_status(monkeypatch):
+    """H6-13 T40: Report status and schema fields."""
+    from scripts.bench.capability_ab_runner import _build_h6_controlled_provider_probe_denylist
+    monkeypatch.setenv("NEXUS_H6_ALLOW_CONTROLLED_PROVIDER_PROBE_DENYLIST", "1")
+    bundle = _h6_13_ready_fixture_bundle()
+    rows = [_h6_13_valid_denylist_row()]
+    r = _build_h6_controlled_provider_probe_denylist(rows, bundle)
+    assert r["schema"] == "nexus.hybrid_h6_controlled_provider_probe_denylist.v1"
+    assert r["evaluated"] is True
+    assert r["source_h6_12_schema"] == "nexus.hybrid_h6_controlled_local_provider_fixture_contract.v1"
+    assert r["source_fixture_contract_ready"] is True
+    assert r["source_fixture_contract_valid"] is True
+    assert r["source_fixture_only"] is True
+    assert r["denylist_status"] == "denylist_ready"
+    assert r["denylist_allowed"] is True
+    assert r["denylist_ready"] is True
+    assert r["denylist_valid"] is True
+    assert r["probe_denylist_mode"] == "denylist_only"
+    assert r["deny_by_default"] is True
+    assert r["fixture_only"] is True
+    assert r["denylist_only"] is True
+
+
+def test_h6_13_provider_probe_denylist_all_deny_fields_true(monkeypatch):
+    """H6-13 T41: All deny fields are true in receipt."""
+    from scripts.bench.capability_ab_runner import _build_h6_controlled_provider_probe_denylist
+    monkeypatch.setenv("NEXUS_H6_ALLOW_CONTROLLED_PROVIDER_PROBE_DENYLIST", "1")
+    bundle = _h6_13_ready_fixture_bundle()
+    rows = [_h6_13_valid_denylist_row()]
+    r = _build_h6_controlled_provider_probe_denylist(rows, bundle)
+    assert r["provider_probe_denied"] is True
+    assert r["provider_invocation_denied"] is True
+    assert r["provider_execution_denied"] is True
+    assert r["endpoint_resolution_denied"] is True
+    assert r["local_endpoint_denied"] is True
+    assert r["network_endpoint_denied"] is True
+    assert r["network_denied"] is True
+    assert r["process_spawn_denied"] is True
+    assert r["model_load_denied"] is True
+    assert r["model_call_denied"] is True
+    assert r["model_execution_denied"] is True
+    assert r["ollama_invocation_denied"] is True
+    assert r["cloud_provider_invocation_denied"] is True
+    assert r["repo_mutation_denied"] is True
+    assert r["behavior_change_denied"] is True
+    assert r["runtime_effect_denied"] is True
+    assert r["production_claim_denied"] is True
+    assert r["public_claim_denied"] is True
+
+
+def test_h6_13_provider_probe_denylist_all_safety_false(monkeypatch):
+    """H6-13 T42: All safety fields remain false."""
+    from scripts.bench.capability_ab_runner import _build_h6_controlled_provider_probe_denylist
+    monkeypatch.setenv("NEXUS_H6_ALLOW_CONTROLLED_PROVIDER_PROBE_DENYLIST", "1")
+    bundle = _h6_13_ready_fixture_bundle()
+    rows = [_h6_13_valid_denylist_row()]
+    r = _build_h6_controlled_provider_probe_denylist(rows, bundle)
+    assert r["provider_probe_allowed"] is False
+    assert r["provider_invocation_allowed"] is False
+    assert r["provider_execution_allowed"] is False
+    assert r["endpoint_resolution_allowed"] is False
+    assert r["local_endpoint_allowed"] is False
+    assert r["network_endpoint_allowed"] is False
+    assert r["network_allowed"] is False
+    assert r["process_spawn_allowed"] is False
+    assert r["model_load_allowed"] is False
+    assert r["model_call_allowed"] is False
+    assert r["model_call_executed"] is False
+    assert r["ollama_invoked"] is False
+    assert r["cloud_provider_invoked"] is False
+    assert r["repo_mutated"] is False
+    assert r["behavior_changed"] is False
+    assert r["runtime_effect"] is False
+    assert r["production_ready"] is False
+    assert r["public_claim_allowed"] is False
+
+
+def test_h6_13_provider_probe_denylist_collect_only():
+    """H6-13 T43: collect-only includes all H6-13 tests."""
+    import subprocess, re
+    result = subprocess.run(["python3", "-m", "pytest", "tests/benchmark/test_capability_ab_runner.py", "-k", "h6_13", "--collect-only", "-q"], capture_output=True, text=True, cwd="/Users/jameschen/Workspace/nexus")
+    count = len(re.findall(r"test_h6_13_", result.stdout))
+    assert count >= 40, f"Expected >= 40 H6-13 tests, got {count}"
