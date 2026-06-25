@@ -8206,11 +8206,7 @@ def _build_h5_guarded_local_candidate_benchmark_trial(rows: list[dict[str, Any]]
         "public_claim_blocked",
     ])
 
-    pass_rate = smoke_passed / eligible if eligible > 0 else 0.0
-    safe_rate = smoke_safe / eligible if eligible > 0 else 0.0
-    cloud_rate = cloud_invoked / eligible if eligible > 0 else 0.0
-    mc_rate = mc_incremented / eligible if eligible > 0 else 0.0
-    beh_rate = beh_changed / eligible if eligible > 0 else 0.0
+    replay_blocked = replay_allowed and blocked_count > 0 and blocked_count == total_replays
 
     return {
         "schema": "nexus.hybrid_h5_guarded_local_candidate_benchmark_trial.v1",
@@ -13226,6 +13222,205 @@ def _build_h6_controlled_provider_probe_denylist(rows: list[dict[str, Any]], bun
         "ready_for_h6_14_controlled_probe_preflight_replay": False,
         "production_ready": False,
         "public_claim_allowed": False,
+    }
+
+
+def _build_h6_controlled_probe_preflight_replay(rows: list[dict[str, Any]], bundle: dict[str, Any] | None = None) -> dict[str, Any]:
+    """Pure helper: H6 controlled probe preflight replay.
+
+    Replays controlled provider probe preflight scenarios against the H6-13
+    denylist. All provider/network/model/process paths are confirmed blocked
+    at preflight stage. This is a dry-run replay receipt only.
+    """
+    import os as _os
+
+    flag = _os.environ.get("NEXUS_H6_ALLOW_CONTROLLED_PROBE_PREFLIGHT_REPLAY", "").strip() == "1"
+
+    denylist = None
+    if bundle:
+        denylist = bundle.get("h6_controlled_provider_probe_denylist")
+
+    denylist_present = bool(denylist)
+    denylist_ready = bool(denylist.get("denylist_ready", False)) if denylist else False
+    denylist_valid = bool(denylist.get("denylist_valid", False)) if denylist else False
+    denylist_safety = int(denylist.get("safety_violation_count", 0)) if denylist else 0
+    denylist_ppa = bool(denylist.get("provider_probe_allowed", True)) if denylist else True
+    denylist_pia = bool(denylist.get("provider_invocation_allowed", True)) if denylist else True
+    denylist_pea = bool(denylist.get("provider_execution_allowed", True)) if denylist else True
+    denylist_era = bool(denylist.get("endpoint_resolution_allowed", True)) if denylist else True
+    denylist_lea = bool(denylist.get("local_endpoint_allowed", True)) if denylist else True
+    denylist_nea = bool(denylist.get("network_endpoint_allowed", True)) if denylist else True
+    denylist_na = bool(denylist.get("network_allowed", True)) if denylist else True
+    denylist_ps = bool(denylist.get("process_spawn_allowed", True)) if denylist else True
+    denylist_mla = bool(denylist.get("model_load_allowed", True)) if denylist else True
+    denylist_mca = bool(denylist.get("model_call_allowed", True)) if denylist else True
+    denylist_mc = bool(denylist.get("model_call_executed", False)) if denylist else False
+
+    BLOCKED_PROVIDER_FAMILIES = {"qwen", "ollama", "gemini", "codex", "cloud"}
+    BLOCKED_ENDPOINT_KINDS = {"local_http", "unix_socket", "remote_https"}
+    BLOCKED_MODEL_SIZES = {"3b", "7b", "14b"}
+
+    replays = [r.get("h6_controlled_probe_preflight_replay") for r in rows if r.get("h6_controlled_probe_preflight_replay")]
+
+    blocked_replays = []
+    blocked_count = 0
+    total_replays = len(replays)
+
+    denylist_safety_ok = (
+        not denylist_ppa and not denylist_pia and not denylist_pea
+        and not denylist_era and not denylist_lea and not denylist_nea
+        and not denylist_na and not denylist_ps and not denylist_mla
+        and not denylist_mca and not denylist_mc
+    )
+
+    replay_allowed = (
+        flag and denylist_present and denylist_ready
+        and denylist_valid and denylist_safety == 0
+        and denylist_safety_ok
+    )
+
+    for rp in replays:
+        pfam = str(rp.get("provider_family", "") or "").lower()
+        mfam = str(rp.get("model_family", "") or "").lower()
+        sz = str(rp.get("model_size", "") or "").lower()
+        ek = str(rp.get("endpoint_kind", "") or "").lower()
+        ppa = bool(rp.get("provider_probe_allowed", False))
+        pia = bool(rp.get("provider_invocation_allowed", False))
+        pea = bool(rp.get("provider_execution_allowed", False))
+        era = bool(rp.get("endpoint_resolution_allowed", False))
+        lea = bool(rp.get("local_endpoint_allowed", False))
+        nea = bool(rp.get("network_endpoint_allowed", False))
+        na = bool(rp.get("network_allowed", False))
+        ps = bool(rp.get("process_spawn_allowed", False))
+        mla = bool(rp.get("model_load_allowed", False))
+        mca = bool(rp.get("model_call_allowed", False))
+        mc = bool(rp.get("model_call_executed", False))
+        pr = bool(rp.get("production_ready", False))
+        pca = bool(rp.get("public_claim_allowed", False))
+        re_flag = bool(rp.get("runtime_effect", False))
+
+        is_blocked = True
+        blocked_reasons = []
+
+        if pfam in BLOCKED_PROVIDER_FAMILIES:
+            blocked_reasons.append(f"provider_family_{pfam}_blocked")
+        if mfam and mfam != "qwen":
+            blocked_reasons.append(f"model_family_{mfam}_blocked")
+        if ek in BLOCKED_ENDPOINT_KINDS:
+            blocked_reasons.append(f"endpoint_kind_{ek}_blocked")
+        if sz in BLOCKED_MODEL_SIZES:
+            blocked_reasons.append(f"model_size_{sz}_blocked")
+        if ppa:
+            blocked_reasons.append("provider_probe_allowed_blocked")
+        if pia:
+            blocked_reasons.append("provider_invocation_allowed_blocked")
+        if pea:
+            blocked_reasons.append("provider_execution_allowed_blocked")
+        if era:
+            blocked_reasons.append("endpoint_resolution_allowed_blocked")
+        if lea:
+            blocked_reasons.append("local_endpoint_allowed_blocked")
+        if nea:
+            blocked_reasons.append("network_endpoint_allowed_blocked")
+        if na:
+            blocked_reasons.append("network_allowed_blocked")
+        if ps:
+            blocked_reasons.append("process_spawn_allowed_blocked")
+        if mla:
+            blocked_reasons.append("model_load_allowed_blocked")
+        if mca:
+            blocked_reasons.append("model_call_allowed_blocked")
+        if mc:
+            blocked_reasons.append("model_call_executed_blocked")
+        if pr:
+            blocked_reasons.append("production_ready_blocked")
+        if pca:
+            blocked_reasons.append("public_claim_allowed_blocked")
+        if re_flag:
+            blocked_reasons.append("runtime_effect_blocked")
+
+        if not blocked_reasons:
+            blocked_reasons.append("denylist_match_blocked")
+
+        blocked_replays.append({
+            "provider_family": pfam,
+            "model_family": mfam,
+            "model_size": sz,
+            "endpoint_kind": ek,
+            "blocked": True,
+            "blocked_reasons": blocked_reasons,
+        })
+        blocked_count += 1
+
+    reasons = []
+    if not flag:
+        reasons.append("controlled_probe_preflight_replay_flag_not_enabled")
+    if not denylist_present:
+        reasons.append("missing_h6_13_denylist")
+    if denylist and not denylist_ready:
+        reasons.append("h6_13_denylist_not_ready")
+    if denylist and not denylist_valid:
+        reasons.append("h6_13_denylist_not_valid")
+    if denylist_safety > 0:
+        reasons.append("h6_13_safety_violation_detected")
+    if denylist and not denylist_safety_ok:
+        reasons.append("h6_13_denylist_has_allowed_fields")
+    if not replays:
+        reasons.append("no_replays")
+    reasons.extend([
+        "h6_14_controlled_probe_preflight_replay_not_production",
+        "preflight_replay_only",
+        "denylist_applied",
+        "blocked_before_execution",
+        "no_provider_probe_allowed",
+        "no_provider_invocation_allowed",
+        "no_provider_execution_allowed",
+        "no_endpoint_resolution_allowed",
+        "no_network_allowed",
+        "no_process_spawn_allowed",
+        "no_model_load_allowed",
+        "no_model_call_allowed",
+        "no_model_call_executed",
+        "no_runtime_effect",
+        "production_claim_blocked",
+        "public_claim_blocked",
+    ])
+
+    replay_blocked = replay_allowed and blocked_count > 0 and blocked_count == total_replays
+
+    return {
+        "schema": "nexus.hybrid_h6_controlled_probe_preflight_replay.v1",
+        "status": "blocked" if not replay_allowed else ("all_replays_blocked" if replay_blocked else "replay_evaluated"),
+        "h6_stage": "h6_14",
+        "source_h6_13_denylist_id": str(denylist.get("denylist_id", "")) if denylist else "",
+        "preflight_replay_id": f"preflight-replay-{total_replays}",
+        "preflight_replay_only": True,
+        "denylist_applied": replay_allowed,
+        "denylist_match": replay_allowed,
+        "blocked_before_execution": True,
+        "blocked_reason": "; ".join(reasons[:3]) if reasons else "denylist_match",
+        "replay_allowed": replay_allowed,
+        "replay_blocked": replay_blocked,
+        "row_count": len(rows),
+        "total_replay_count": total_replays,
+        "blocked_replay_count": blocked_count,
+        "blocked_replays": blocked_replays,
+        "provider_probe_allowed": False,
+        "provider_invocation_allowed": False,
+        "provider_execution_allowed": False,
+        "endpoint_resolution_allowed": False,
+        "local_endpoint_allowed": False,
+        "network_endpoint_allowed": False,
+        "network_allowed": False,
+        "process_spawn_allowed": False,
+        "model_load_allowed": False,
+        "model_call_allowed": False,
+        "model_call_executed": False,
+        "runtime_effect": False,
+        "production_ready": False,
+        "public_claim_allowed": False,
+        "ready_for_h6_15": False,
+        "reasons": reasons,
     }
 
 

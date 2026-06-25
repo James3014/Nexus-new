@@ -31390,8 +31390,8 @@ def test_h6_12_fixture_contract_not_ready_for_h6_13_on_invalid(monkeypatch):
 
 def test_h6_12_fixture_contract_collect_only():
     """H6-12 T36: collect-only includes all H6-12 tests."""
-    import subprocess, re
-    result = subprocess.run(["python3", "-m", "pytest", "tests/benchmark/test_capability_ab_runner.py", "-k", "h6_12", "--collect-only", "-q"], capture_output=True, text=True, cwd="/Users/jameschen/Workspace/nexus")
+    import subprocess, re, sys
+    result = subprocess.run([sys.executable, "-m", "pytest", "tests/benchmark/test_capability_ab_runner.py", "-k", "h6_12", "--collect-only", "-q"], capture_output=True, text=True, cwd="/Users/jameschen/Workspace/nexus")
     count = len(re.findall(r"test_h6_12_", result.stdout))
     assert count >= 36, f"Expected >= 36 H6-12 tests, got {count}"
 
@@ -31938,7 +31938,483 @@ def test_h6_13_provider_probe_denylist_all_safety_false(monkeypatch):
 
 def test_h6_13_provider_probe_denylist_collect_only():
     """H6-13 T43: collect-only includes all H6-13 tests."""
-    import subprocess, re
-    result = subprocess.run(["python3", "-m", "pytest", "tests/benchmark/test_capability_ab_runner.py", "-k", "h6_13", "--collect-only", "-q"], capture_output=True, text=True, cwd="/Users/jameschen/Workspace/nexus")
+    import subprocess, re, sys
+    result = subprocess.run([sys.executable, "-m", "pytest", "tests/benchmark/test_capability_ab_runner.py", "-k", "h6_13", "--collect-only", "-q"], capture_output=True, text=True, cwd="/Users/jameschen/Workspace/nexus")
     count = len(re.findall(r"test_h6_13_", result.stdout))
     assert count >= 40, f"Expected >= 40 H6-13 tests, got {count}"
+
+
+# ---------------------------------------------------------------------------
+# H6-14 Controlled Probe Preflight Replay
+# ---------------------------------------------------------------------------
+
+def _h6_14_valid_replay_row():
+    return {"h6_controlled_probe_preflight_replay": {
+        "provider_family": "ollama",
+        "model_family": "qwen",
+        "model_size": "7b",
+        "endpoint_kind": "none",
+    }}
+
+
+def _h6_14_ready_denylist_bundle():
+    return {"h6_controlled_provider_probe_denylist": {
+        "denylist_id": "probe-denylist-001",
+        "denylist_ready": True,
+        "denylist_valid": True,
+        "safety_violation_count": 0,
+        "provider_probe_allowed": False,
+        "provider_invocation_allowed": False,
+        "provider_execution_allowed": False,
+        "endpoint_resolution_allowed": False,
+        "local_endpoint_allowed": False,
+        "network_endpoint_allowed": False,
+        "network_allowed": False,
+        "process_spawn_allowed": False,
+        "model_load_allowed": False,
+        "model_call_allowed": False,
+        "model_call_executed": False,
+    }}
+
+
+def test_h6_14_controlled_probe_preflight_replay_flag_missing_block(monkeypatch):
+    """H6-14 T01: Flag missing blocks replay."""
+    from scripts.bench.capability_ab_runner import _build_h6_controlled_probe_preflight_replay
+    monkeypatch.delenv("NEXUS_H6_ALLOW_CONTROLLED_PROBE_PREFLIGHT_REPLAY", raising=False)
+    bundle = _h6_14_ready_denylist_bundle()
+    r = _build_h6_controlled_probe_preflight_replay([], bundle)
+    assert r["status"] == "blocked"
+    assert "controlled_probe_preflight_replay_flag_not_enabled" in r["reasons"]
+
+
+def test_h6_14_controlled_probe_preflight_replay_missing_h6_13_block(monkeypatch):
+    """H6-14 T02: Missing H6-13 denylist blocks replay."""
+    from scripts.bench.capability_ab_runner import _build_h6_controlled_probe_preflight_replay
+    monkeypatch.setenv("NEXUS_H6_ALLOW_CONTROLLED_PROBE_PREFLIGHT_REPLAY", "1")
+    r = _build_h6_controlled_probe_preflight_replay([], None)
+    assert r["status"] == "blocked"
+    assert "missing_h6_13_denylist" in r["reasons"]
+
+
+def test_h6_14_controlled_probe_preflight_replay_h6_13_not_ready_block(monkeypatch):
+    """H6-14 T03: H6-13 denylist not ready blocks replay."""
+    from scripts.bench.capability_ab_runner import _build_h6_controlled_probe_preflight_replay
+    monkeypatch.setenv("NEXUS_H6_ALLOW_CONTROLLED_PROBE_PREFLIGHT_REPLAY", "1")
+    bundle = {"h6_controlled_provider_probe_denylist": {"denylist_ready": False, "denylist_valid": False, "safety_violation_count": 0, "provider_probe_allowed": False, "provider_invocation_allowed": False, "provider_execution_allowed": False, "endpoint_resolution_allowed": False, "local_endpoint_allowed": False, "network_endpoint_allowed": False, "network_allowed": False, "process_spawn_allowed": False, "model_load_allowed": False, "model_call_allowed": False, "model_call_executed": False}}
+    r = _build_h6_controlled_probe_preflight_replay([], bundle)
+    assert r["status"] == "blocked"
+    assert "h6_13_denylist_not_ready" in r["reasons"]
+
+
+def test_h6_14_controlled_probe_preflight_replay_h6_13_not_valid_block(monkeypatch):
+    """H6-14 T04: H6-13 denylist not valid blocks replay."""
+    from scripts.bench.capability_ab_runner import _build_h6_controlled_probe_preflight_replay
+    monkeypatch.setenv("NEXUS_H6_ALLOW_CONTROLLED_PROBE_PREFLIGHT_REPLAY", "1")
+    bundle = {"h6_controlled_provider_probe_denylist": {"denylist_ready": True, "denylist_valid": False, "safety_violation_count": 0, "provider_probe_allowed": False, "provider_invocation_allowed": False, "provider_execution_allowed": False, "endpoint_resolution_allowed": False, "local_endpoint_allowed": False, "network_endpoint_allowed": False, "network_allowed": False, "process_spawn_allowed": False, "model_load_allowed": False, "model_call_allowed": False, "model_call_executed": False}}
+    r = _build_h6_controlled_probe_preflight_replay([], bundle)
+    assert r["status"] == "blocked"
+    assert "h6_13_denylist_not_valid" in r["reasons"]
+
+
+def test_h6_14_controlled_probe_preflight_replay_h6_13_provider_probe_allowed_block(monkeypatch):
+    """H6-14 T05: H6-13 provider_probe_allowed=true blocks replay."""
+    from scripts.bench.capability_ab_runner import _build_h6_controlled_probe_preflight_replay
+    monkeypatch.setenv("NEXUS_H6_ALLOW_CONTROLLED_PROBE_PREFLIGHT_REPLAY", "1")
+    bundle = {"h6_controlled_provider_probe_denylist": {"denylist_ready": True, "denylist_valid": True, "safety_violation_count": 0, "provider_probe_allowed": True, "provider_invocation_allowed": False, "provider_execution_allowed": False, "endpoint_resolution_allowed": False, "local_endpoint_allowed": False, "network_endpoint_allowed": False, "network_allowed": False, "process_spawn_allowed": False, "model_load_allowed": False, "model_call_allowed": False, "model_call_executed": False}}
+    r = _build_h6_controlled_probe_preflight_replay([], bundle)
+    assert r["status"] == "blocked"
+    assert "h6_13_denylist_has_allowed_fields" in r["reasons"]
+
+
+def test_h6_14_controlled_probe_preflight_replay_h6_13_provider_invocation_allowed_block(monkeypatch):
+    """H6-14 T06: H6-13 provider_invocation_allowed=true blocks replay."""
+    from scripts.bench.capability_ab_runner import _build_h6_controlled_probe_preflight_replay
+    monkeypatch.setenv("NEXUS_H6_ALLOW_CONTROLLED_PROBE_PREFLIGHT_REPLAY", "1")
+    bundle = {"h6_controlled_provider_probe_denylist": {"denylist_ready": True, "denylist_valid": True, "safety_violation_count": 0, "provider_probe_allowed": False, "provider_invocation_allowed": True, "provider_execution_allowed": False, "endpoint_resolution_allowed": False, "local_endpoint_allowed": False, "network_endpoint_allowed": False, "network_allowed": False, "process_spawn_allowed": False, "model_load_allowed": False, "model_call_allowed": False, "model_call_executed": False}}
+    r = _build_h6_controlled_probe_preflight_replay([], bundle)
+    assert r["status"] == "blocked"
+    assert "h6_13_denylist_has_allowed_fields" in r["reasons"]
+
+
+def test_h6_14_controlled_probe_preflight_replay_h6_13_provider_execution_allowed_block(monkeypatch):
+    """H6-14 T07: H6-13 provider_execution_allowed=true blocks replay."""
+    from scripts.bench.capability_ab_runner import _build_h6_controlled_probe_preflight_replay
+    monkeypatch.setenv("NEXUS_H6_ALLOW_CONTROLLED_PROBE_PREFLIGHT_REPLAY", "1")
+    bundle = {"h6_controlled_provider_probe_denylist": {"denylist_ready": True, "denylist_valid": True, "safety_violation_count": 0, "provider_probe_allowed": False, "provider_invocation_allowed": False, "provider_execution_allowed": True, "endpoint_resolution_allowed": False, "local_endpoint_allowed": False, "network_endpoint_allowed": False, "network_allowed": False, "process_spawn_allowed": False, "model_load_allowed": False, "model_call_allowed": False, "model_call_executed": False}}
+    r = _build_h6_controlled_probe_preflight_replay([], bundle)
+    assert r["status"] == "blocked"
+    assert "h6_13_denylist_has_allowed_fields" in r["reasons"]
+
+
+def test_h6_14_controlled_probe_preflight_replay_h6_13_endpoint_resolution_allowed_block(monkeypatch):
+    """H6-14 T08: H6-13 endpoint_resolution_allowed=true blocks replay."""
+    from scripts.bench.capability_ab_runner import _build_h6_controlled_probe_preflight_replay
+    monkeypatch.setenv("NEXUS_H6_ALLOW_CONTROLLED_PROBE_PREFLIGHT_REPLAY", "1")
+    bundle = {"h6_controlled_provider_probe_denylist": {"denylist_ready": True, "denylist_valid": True, "safety_violation_count": 0, "provider_probe_allowed": False, "provider_invocation_allowed": False, "provider_execution_allowed": False, "endpoint_resolution_allowed": True, "local_endpoint_allowed": False, "network_endpoint_allowed": False, "network_allowed": False, "process_spawn_allowed": False, "model_load_allowed": False, "model_call_allowed": False, "model_call_executed": False}}
+    r = _build_h6_controlled_probe_preflight_replay([], bundle)
+    assert r["status"] == "blocked"
+    assert "h6_13_denylist_has_allowed_fields" in r["reasons"]
+
+
+def test_h6_14_controlled_probe_preflight_replay_h6_13_local_endpoint_allowed_block(monkeypatch):
+    """H6-14 T09: H6-13 local_endpoint_allowed=true blocks replay."""
+    from scripts.bench.capability_ab_runner import _build_h6_controlled_probe_preflight_replay
+    monkeypatch.setenv("NEXUS_H6_ALLOW_CONTROLLED_PROBE_PREFLIGHT_REPLAY", "1")
+    bundle = {"h6_controlled_provider_probe_denylist": {"denylist_ready": True, "denylist_valid": True, "safety_violation_count": 0, "provider_probe_allowed": False, "provider_invocation_allowed": False, "provider_execution_allowed": False, "endpoint_resolution_allowed": False, "local_endpoint_allowed": True, "network_endpoint_allowed": False, "network_allowed": False, "process_spawn_allowed": False, "model_load_allowed": False, "model_call_allowed": False, "model_call_executed": False}}
+    r = _build_h6_controlled_probe_preflight_replay([], bundle)
+    assert r["status"] == "blocked"
+    assert "h6_13_denylist_has_allowed_fields" in r["reasons"]
+
+
+def test_h6_14_controlled_probe_preflight_replay_h6_13_network_endpoint_allowed_block(monkeypatch):
+    """H6-14 T10: H6-13 network_endpoint_allowed=true blocks replay."""
+    from scripts.bench.capability_ab_runner import _build_h6_controlled_probe_preflight_replay
+    monkeypatch.setenv("NEXUS_H6_ALLOW_CONTROLLED_PROBE_PREFLIGHT_REPLAY", "1")
+    bundle = {"h6_controlled_provider_probe_denylist": {"denylist_ready": True, "denylist_valid": True, "safety_violation_count": 0, "provider_probe_allowed": False, "provider_invocation_allowed": False, "provider_execution_allowed": False, "endpoint_resolution_allowed": False, "local_endpoint_allowed": False, "network_endpoint_allowed": True, "network_allowed": False, "process_spawn_allowed": False, "model_load_allowed": False, "model_call_allowed": False, "model_call_executed": False}}
+    r = _build_h6_controlled_probe_preflight_replay([], bundle)
+    assert r["status"] == "blocked"
+    assert "h6_13_denylist_has_allowed_fields" in r["reasons"]
+
+
+def test_h6_14_controlled_probe_preflight_replay_h6_13_network_allowed_block(monkeypatch):
+    """H6-14 T11: H6-13 network_allowed=true blocks replay."""
+    from scripts.bench.capability_ab_runner import _build_h6_controlled_probe_preflight_replay
+    monkeypatch.setenv("NEXUS_H6_ALLOW_CONTROLLED_PROBE_PREFLIGHT_REPLAY", "1")
+    bundle = {"h6_controlled_provider_probe_denylist": {"denylist_ready": True, "denylist_valid": True, "safety_violation_count": 0, "provider_probe_allowed": False, "provider_invocation_allowed": False, "provider_execution_allowed": False, "endpoint_resolution_allowed": False, "local_endpoint_allowed": False, "network_endpoint_allowed": False, "network_allowed": True, "process_spawn_allowed": False, "model_load_allowed": False, "model_call_allowed": False, "model_call_executed": False}}
+    r = _build_h6_controlled_probe_preflight_replay([], bundle)
+    assert r["status"] == "blocked"
+    assert "h6_13_denylist_has_allowed_fields" in r["reasons"]
+
+
+def test_h6_14_controlled_probe_preflight_replay_h6_13_process_spawn_allowed_block(monkeypatch):
+    """H6-14 T12: H6-13 process_spawn_allowed=true blocks replay."""
+    from scripts.bench.capability_ab_runner import _build_h6_controlled_probe_preflight_replay
+    monkeypatch.setenv("NEXUS_H6_ALLOW_CONTROLLED_PROBE_PREFLIGHT_REPLAY", "1")
+    bundle = {"h6_controlled_provider_probe_denylist": {"denylist_ready": True, "denylist_valid": True, "safety_violation_count": 0, "provider_probe_allowed": False, "provider_invocation_allowed": False, "provider_execution_allowed": False, "endpoint_resolution_allowed": False, "local_endpoint_allowed": False, "network_endpoint_allowed": False, "network_allowed": False, "process_spawn_allowed": True, "model_load_allowed": False, "model_call_allowed": False, "model_call_executed": False}}
+    r = _build_h6_controlled_probe_preflight_replay([], bundle)
+    assert r["status"] == "blocked"
+    assert "h6_13_denylist_has_allowed_fields" in r["reasons"]
+
+
+def test_h6_14_controlled_probe_preflight_replay_h6_13_model_load_allowed_block(monkeypatch):
+    """H6-14 T13: H6-13 model_load_allowed=true blocks replay."""
+    from scripts.bench.capability_ab_runner import _build_h6_controlled_probe_preflight_replay
+    monkeypatch.setenv("NEXUS_H6_ALLOW_CONTROLLED_PROBE_PREFLIGHT_REPLAY", "1")
+    bundle = {"h6_controlled_provider_probe_denylist": {"denylist_ready": True, "denylist_valid": True, "safety_violation_count": 0, "provider_probe_allowed": False, "provider_invocation_allowed": False, "provider_execution_allowed": False, "endpoint_resolution_allowed": False, "local_endpoint_allowed": False, "network_endpoint_allowed": False, "network_allowed": False, "process_spawn_allowed": False, "model_load_allowed": True, "model_call_allowed": False, "model_call_executed": False}}
+    r = _build_h6_controlled_probe_preflight_replay([], bundle)
+    assert r["status"] == "blocked"
+    assert "h6_13_denylist_has_allowed_fields" in r["reasons"]
+
+
+def test_h6_14_controlled_probe_preflight_replay_h6_13_model_call_allowed_block(monkeypatch):
+    """H6-14 T14: H6-13 model_call_allowed=true blocks replay."""
+    from scripts.bench.capability_ab_runner import _build_h6_controlled_probe_preflight_replay
+    monkeypatch.setenv("NEXUS_H6_ALLOW_CONTROLLED_PROBE_PREFLIGHT_REPLAY", "1")
+    bundle = {"h6_controlled_provider_probe_denylist": {"denylist_ready": True, "denylist_valid": True, "safety_violation_count": 0, "provider_probe_allowed": False, "provider_invocation_allowed": False, "provider_execution_allowed": False, "endpoint_resolution_allowed": False, "local_endpoint_allowed": False, "network_endpoint_allowed": False, "network_allowed": False, "process_spawn_allowed": False, "model_load_allowed": False, "model_call_allowed": True, "model_call_executed": False}}
+    r = _build_h6_controlled_probe_preflight_replay([], bundle)
+    assert r["status"] == "blocked"
+    assert "h6_13_denylist_has_allowed_fields" in r["reasons"]
+
+
+def test_h6_14_controlled_probe_preflight_replay_h6_13_model_call_executed_block(monkeypatch):
+    """H6-14 T15: H6-13 model_call_executed=true blocks replay."""
+    from scripts.bench.capability_ab_runner import _build_h6_controlled_probe_preflight_replay
+    monkeypatch.setenv("NEXUS_H6_ALLOW_CONTROLLED_PROBE_PREFLIGHT_REPLAY", "1")
+    bundle = {"h6_controlled_provider_probe_denylist": {"denylist_ready": True, "denylist_valid": True, "safety_violation_count": 0, "provider_probe_allowed": False, "provider_invocation_allowed": False, "provider_execution_allowed": False, "endpoint_resolution_allowed": False, "local_endpoint_allowed": False, "network_endpoint_allowed": False, "network_allowed": False, "process_spawn_allowed": False, "model_load_allowed": False, "model_call_allowed": False, "model_call_executed": True}}
+    r = _build_h6_controlled_probe_preflight_replay([], bundle)
+    assert r["status"] == "blocked"
+    assert "h6_13_denylist_has_allowed_fields" in r["reasons"]
+
+
+def test_h6_14_controlled_probe_preflight_replay_provider_family_qwen_block(monkeypatch):
+    """H6-14 T16: provider_family=qwen replay blocked."""
+    from scripts.bench.capability_ab_runner import _build_h6_controlled_probe_preflight_replay
+    monkeypatch.setenv("NEXUS_H6_ALLOW_CONTROLLED_PROBE_PREFLIGHT_REPLAY", "1")
+    bundle = _h6_14_ready_denylist_bundle()
+    row = {"h6_controlled_probe_preflight_replay": {"provider_family": "qwen", "model_family": "qwen", "model_size": "7b", "endpoint_kind": "none"}}
+    r = _build_h6_controlled_probe_preflight_replay([row], bundle)
+    assert r["blocked_replay_count"] == 1
+    assert any("provider_family_qwen_blocked" in br["blocked_reasons"] for br in r["blocked_replays"])
+
+
+def test_h6_14_controlled_probe_preflight_replay_provider_family_ollama_block(monkeypatch):
+    """H6-14 T17: provider_family=ollama replay blocked."""
+    from scripts.bench.capability_ab_runner import _build_h6_controlled_probe_preflight_replay
+    monkeypatch.setenv("NEXUS_H6_ALLOW_CONTROLLED_PROBE_PREFLIGHT_REPLAY", "1")
+    bundle = _h6_14_ready_denylist_bundle()
+    rows = [_h6_14_valid_replay_row()]
+    r = _build_h6_controlled_probe_preflight_replay(rows, bundle)
+    assert r["blocked_replay_count"] == 1
+    assert any("provider_family_ollama_blocked" in br["blocked_reasons"] for br in r["blocked_replays"])
+
+
+def test_h6_14_controlled_probe_preflight_replay_provider_family_gemini_block(monkeypatch):
+    """H6-14 T18: provider_family=gemini replay blocked."""
+    from scripts.bench.capability_ab_runner import _build_h6_controlled_probe_preflight_replay
+    monkeypatch.setenv("NEXUS_H6_ALLOW_CONTROLLED_PROBE_PREFLIGHT_REPLAY", "1")
+    bundle = _h6_14_ready_denylist_bundle()
+    row = {"h6_controlled_probe_preflight_replay": {"provider_family": "gemini", "model_family": "qwen", "model_size": "7b", "endpoint_kind": "none"}}
+    r = _build_h6_controlled_probe_preflight_replay([row], bundle)
+    assert r["blocked_replay_count"] == 1
+    assert any("provider_family_gemini_blocked" in br["blocked_reasons"] for br in r["blocked_replays"])
+
+
+def test_h6_14_controlled_probe_preflight_replay_provider_family_codex_block(monkeypatch):
+    """H6-14 T19: provider_family=codex replay blocked."""
+    from scripts.bench.capability_ab_runner import _build_h6_controlled_probe_preflight_replay
+    monkeypatch.setenv("NEXUS_H6_ALLOW_CONTROLLED_PROBE_PREFLIGHT_REPLAY", "1")
+    bundle = _h6_14_ready_denylist_bundle()
+    row = {"h6_controlled_probe_preflight_replay": {"provider_family": "codex", "model_family": "qwen", "model_size": "7b", "endpoint_kind": "none"}}
+    r = _build_h6_controlled_probe_preflight_replay([row], bundle)
+    assert r["blocked_replay_count"] == 1
+    assert any("provider_family_codex_blocked" in br["blocked_reasons"] for br in r["blocked_replays"])
+
+
+def test_h6_14_controlled_probe_preflight_replay_provider_family_cloud_block(monkeypatch):
+    """H6-14 T20: provider_family=cloud replay blocked."""
+    from scripts.bench.capability_ab_runner import _build_h6_controlled_probe_preflight_replay
+    monkeypatch.setenv("NEXUS_H6_ALLOW_CONTROLLED_PROBE_PREFLIGHT_REPLAY", "1")
+    bundle = _h6_14_ready_denylist_bundle()
+    row = {"h6_controlled_probe_preflight_replay": {"provider_family": "cloud", "model_family": "qwen", "model_size": "7b", "endpoint_kind": "none"}}
+    r = _build_h6_controlled_probe_preflight_replay([row], bundle)
+    assert r["blocked_replay_count"] == 1
+    assert any("provider_family_cloud_blocked" in br["blocked_reasons"] for br in r["blocked_replays"])
+
+
+def test_h6_14_controlled_probe_preflight_replay_endpoint_kind_local_http_block(monkeypatch):
+    """H6-14 T21: endpoint_kind=local_http replay blocked."""
+    from scripts.bench.capability_ab_runner import _build_h6_controlled_probe_preflight_replay
+    monkeypatch.setenv("NEXUS_H6_ALLOW_CONTROLLED_PROBE_PREFLIGHT_REPLAY", "1")
+    bundle = _h6_14_ready_denylist_bundle()
+    row = {"h6_controlled_probe_preflight_replay": {"provider_family": "ollama", "model_family": "qwen", "model_size": "7b", "endpoint_kind": "local_http"}}
+    r = _build_h6_controlled_probe_preflight_replay([row], bundle)
+    assert r["blocked_replay_count"] == 1
+    assert any("endpoint_kind_local_http_blocked" in br["blocked_reasons"] for br in r["blocked_replays"])
+
+
+def test_h6_14_controlled_probe_preflight_replay_endpoint_kind_unix_socket_block(monkeypatch):
+    """H6-14 T22: endpoint_kind=unix_socket replay blocked."""
+    from scripts.bench.capability_ab_runner import _build_h6_controlled_probe_preflight_replay
+    monkeypatch.setenv("NEXUS_H6_ALLOW_CONTROLLED_PROBE_PREFLIGHT_REPLAY", "1")
+    bundle = _h6_14_ready_denylist_bundle()
+    row = {"h6_controlled_probe_preflight_replay": {"provider_family": "ollama", "model_family": "qwen", "model_size": "7b", "endpoint_kind": "unix_socket"}}
+    r = _build_h6_controlled_probe_preflight_replay([row], bundle)
+    assert r["blocked_replay_count"] == 1
+    assert any("endpoint_kind_unix_socket_blocked" in br["blocked_reasons"] for br in r["blocked_replays"])
+
+
+def test_h6_14_controlled_probe_preflight_replay_endpoint_kind_remote_https_block(monkeypatch):
+    """H6-14 T23: endpoint_kind=remote_https replay blocked."""
+    from scripts.bench.capability_ab_runner import _build_h6_controlled_probe_preflight_replay
+    monkeypatch.setenv("NEXUS_H6_ALLOW_CONTROLLED_PROBE_PREFLIGHT_REPLAY", "1")
+    bundle = _h6_14_ready_denylist_bundle()
+    row = {"h6_controlled_probe_preflight_replay": {"provider_family": "ollama", "model_family": "qwen", "model_size": "7b", "endpoint_kind": "remote_https"}}
+    r = _build_h6_controlled_probe_preflight_replay([row], bundle)
+    assert r["blocked_replay_count"] == 1
+    assert any("endpoint_kind_remote_https_blocked" in br["blocked_reasons"] for br in r["blocked_replays"])
+
+
+def test_h6_14_controlled_probe_preflight_replay_model_size_3b_block(monkeypatch):
+    """H6-14 T24: model_size=3b replay blocked."""
+    from scripts.bench.capability_ab_runner import _build_h6_controlled_probe_preflight_replay
+    monkeypatch.setenv("NEXUS_H6_ALLOW_CONTROLLED_PROBE_PREFLIGHT_REPLAY", "1")
+    bundle = _h6_14_ready_denylist_bundle()
+    row = {"h6_controlled_probe_preflight_replay": {"provider_family": "ollama", "model_family": "qwen", "model_size": "3b", "endpoint_kind": "none"}}
+    r = _build_h6_controlled_probe_preflight_replay([row], bundle)
+    assert r["blocked_replay_count"] == 1
+    assert any("model_size_3b_blocked" in br["blocked_reasons"] for br in r["blocked_replays"])
+
+
+def test_h6_14_controlled_probe_preflight_replay_model_size_7b_block(monkeypatch):
+    """H6-14 T25: model_size=7b replay blocked."""
+    from scripts.bench.capability_ab_runner import _build_h6_controlled_probe_preflight_replay
+    monkeypatch.setenv("NEXUS_H6_ALLOW_CONTROLLED_PROBE_PREFLIGHT_REPLAY", "1")
+    bundle = _h6_14_ready_denylist_bundle()
+    row = {"h6_controlled_probe_preflight_replay": {"provider_family": "ollama", "model_family": "qwen", "model_size": "7b", "endpoint_kind": "none"}}
+    r = _build_h6_controlled_probe_preflight_replay([row], bundle)
+    assert r["blocked_replay_count"] == 1
+    assert any("model_size_7b_blocked" in br["blocked_reasons"] for br in r["blocked_replays"])
+
+
+def test_h6_14_controlled_probe_preflight_replay_model_size_14b_block(monkeypatch):
+    """H6-14 T26: model_size=14b replay blocked."""
+    from scripts.bench.capability_ab_runner import _build_h6_controlled_probe_preflight_replay
+    monkeypatch.setenv("NEXUS_H6_ALLOW_CONTROLLED_PROBE_PREFLIGHT_REPLAY", "1")
+    bundle = _h6_14_ready_denylist_bundle()
+    row = {"h6_controlled_probe_preflight_replay": {"provider_family": "ollama", "model_family": "qwen", "model_size": "14b", "endpoint_kind": "none"}}
+    r = _build_h6_controlled_probe_preflight_replay([row], bundle)
+    assert r["blocked_replay_count"] == 1
+    assert any("model_size_14b_blocked" in br["blocked_reasons"] for br in r["blocked_replays"])
+
+
+def test_h6_14_controlled_probe_preflight_replay_production_ready_false(monkeypatch):
+    """H6-14 T27: production_ready=false always."""
+    from scripts.bench.capability_ab_runner import _build_h6_controlled_probe_preflight_replay
+    monkeypatch.setenv("NEXUS_H6_ALLOW_CONTROLLED_PROBE_PREFLIGHT_REPLAY", "1")
+    bundle = _h6_14_ready_denylist_bundle()
+    rows = [_h6_14_valid_replay_row()]
+    r = _build_h6_controlled_probe_preflight_replay(rows, bundle)
+    assert r["production_ready"] is False
+    assert r["public_claim_allowed"] is False
+
+
+def test_h6_14_controlled_probe_preflight_replay_public_claim_allowed_false(monkeypatch):
+    """H6-14 T28: public_claim_allowed=false always."""
+    from scripts.bench.capability_ab_runner import _build_h6_controlled_probe_preflight_replay
+    monkeypatch.setenv("NEXUS_H6_ALLOW_CONTROLLED_PROBE_PREFLIGHT_REPLAY", "1")
+    bundle = _h6_14_ready_denylist_bundle()
+    rows = [_h6_14_valid_replay_row()]
+    r = _build_h6_controlled_probe_preflight_replay(rows, bundle)
+    assert r["public_claim_allowed"] is False
+
+
+def test_h6_14_controlled_probe_preflight_replay_runtime_effect_false(monkeypatch):
+    """H6-14 T29: runtime_effect=false always."""
+    from scripts.bench.capability_ab_runner import _build_h6_controlled_probe_preflight_replay
+    monkeypatch.setenv("NEXUS_H6_ALLOW_CONTROLLED_PROBE_PREFLIGHT_REPLAY", "1")
+    bundle = _h6_14_ready_denylist_bundle()
+    rows = [_h6_14_valid_replay_row()]
+    r = _build_h6_controlled_probe_preflight_replay(rows, bundle)
+    assert r["runtime_effect"] is False
+
+
+def test_h6_14_controlled_probe_preflight_replay_ready_for_h6_15_false(monkeypatch):
+    """H6-14 T30: ready_for_h6_15=false always."""
+    from scripts.bench.capability_ab_runner import _build_h6_controlled_probe_preflight_replay
+    monkeypatch.setenv("NEXUS_H6_ALLOW_CONTROLLED_PROBE_PREFLIGHT_REPLAY", "1")
+    bundle = _h6_14_ready_denylist_bundle()
+    rows = [_h6_14_valid_replay_row()]
+    r = _build_h6_controlled_probe_preflight_replay(rows, bundle)
+    assert r["ready_for_h6_15"] is False
+
+
+def test_h6_14_controlled_probe_preflight_replay_bundle_summary_counts(monkeypatch):
+    """H6-14 T31: Bundle summary counts blocked replays."""
+    from scripts.bench.capability_ab_runner import _build_h6_controlled_probe_preflight_replay
+    monkeypatch.setenv("NEXUS_H6_ALLOW_CONTROLLED_PROBE_PREFLIGHT_REPLAY", "1")
+    bundle = _h6_14_ready_denylist_bundle()
+    rows = [
+        {"h6_controlled_probe_preflight_replay": {"provider_family": "ollama", "model_family": "qwen", "model_size": "7b", "endpoint_kind": "none"}},
+        {"h6_controlled_probe_preflight_replay": {"provider_family": "qwen", "model_family": "qwen", "model_size": "3b", "endpoint_kind": "none"}},
+        {"h6_controlled_probe_preflight_replay": {"provider_family": "gemini", "model_family": "qwen", "model_size": "7b", "endpoint_kind": "local_http"}},
+    ]
+    r = _build_h6_controlled_probe_preflight_replay(rows, bundle)
+    assert r["total_replay_count"] == 3
+    assert r["blocked_replay_count"] == 3
+    assert r["blocked_before_execution"] is True
+
+
+def test_h6_14_controlled_probe_preflight_replay_report_status(monkeypatch):
+    """H6-14 T32: Report status records no provider/model/network/process execution."""
+    from scripts.bench.capability_ab_runner import _build_h6_controlled_probe_preflight_replay
+    monkeypatch.setenv("NEXUS_H6_ALLOW_CONTROLLED_PROBE_PREFLIGHT_REPLAY", "1")
+    bundle = _h6_14_ready_denylist_bundle()
+    rows = [_h6_14_valid_replay_row()]
+    r = _build_h6_controlled_probe_preflight_replay(rows, bundle)
+    assert r["schema"] == "nexus.hybrid_h6_controlled_probe_preflight_replay.v1"
+    assert r["h6_stage"] == "h6_14"
+    assert r["preflight_replay_only"] is True
+    assert r["denylist_applied"] is True
+    assert r["denylist_match"] is True
+    assert r["blocked_before_execution"] is True
+    assert r["provider_probe_allowed"] is False
+    assert r["provider_invocation_allowed"] is False
+    assert r["provider_execution_allowed"] is False
+    assert r["endpoint_resolution_allowed"] is False
+    assert r["local_endpoint_allowed"] is False
+    assert r["network_endpoint_allowed"] is False
+    assert r["network_allowed"] is False
+    assert r["process_spawn_allowed"] is False
+    assert r["model_load_allowed"] is False
+    assert r["model_call_allowed"] is False
+    assert r["model_call_executed"] is False
+
+
+def test_h6_14_controlled_probe_preflight_replay_collect_only():
+    """H6-14 T38: collect-only includes all H6-14 tests."""
+    import subprocess, re, sys
+    result = subprocess.run([sys.executable, "-m", "pytest", "tests/benchmark/test_capability_ab_runner.py", "-k", "h6_14", "--collect-only", "-q"], capture_output=True, text=True, cwd="/Users/jameschen/Workspace/nexus")
+    count = len(re.findall(r"test_h6_14_", result.stdout))
+    assert count >= 40, f"Expected >= 40 H6-14 tests, got {count}"
+
+
+def test_h6_14_controlled_probe_preflight_replay_endpoint_kind_none_block(monkeypatch):
+    """H6-14 T34c: endpoint_kind=none replay blocked (provider_family match)."""
+    from scripts.bench.capability_ab_runner import _build_h6_controlled_probe_preflight_replay
+    monkeypatch.setenv("NEXUS_H6_ALLOW_CONTROLLED_PROBE_PREFLIGHT_REPLAY", "1")
+    bundle = _h6_14_ready_denylist_bundle()
+    row = {"h6_controlled_probe_preflight_replay": {"provider_family": "ollama", "model_family": "qwen", "model_size": "7b", "endpoint_kind": "none"}}
+    r = _build_h6_controlled_probe_preflight_replay([row], bundle)
+    assert r["blocked_replay_count"] == 1
+    assert r["blocked_replays"][0]["blocked"] is True
+
+
+def test_h6_14_controlled_probe_preflight_replay_h6_13_safety_violation_block(monkeypatch):
+    """H6-14 T34b: H6-13 safety_violation>0 blocks replay."""
+    from scripts.bench.capability_ab_runner import _build_h6_controlled_probe_preflight_replay
+    monkeypatch.setenv("NEXUS_H6_ALLOW_CONTROLLED_PROBE_PREFLIGHT_REPLAY", "1")
+    bundle = {"h6_controlled_provider_probe_denylist": {"denylist_ready": True, "denylist_valid": True, "safety_violation_count": 5, "provider_probe_allowed": False, "provider_invocation_allowed": False, "provider_execution_allowed": False, "endpoint_resolution_allowed": False, "local_endpoint_allowed": False, "network_endpoint_allowed": False, "network_allowed": False, "process_spawn_allowed": False, "model_load_allowed": False, "model_call_allowed": False, "model_call_executed": False}}
+    r = _build_h6_controlled_probe_preflight_replay([], bundle)
+    assert r["status"] == "blocked"
+    assert "h6_13_safety_violation_detected" in r["reasons"]
+
+
+def test_h6_14_controlled_probe_preflight_replay_no_replays_block(monkeypatch):
+    """H6-14 T34: No replays blocks evaluated status."""
+    from scripts.bench.capability_ab_runner import _build_h6_controlled_probe_preflight_replay
+    monkeypatch.setenv("NEXUS_H6_ALLOW_CONTROLLED_PROBE_PREFLIGHT_REPLAY", "1")
+    bundle = _h6_14_ready_denylist_bundle()
+    r = _build_h6_controlled_probe_preflight_replay([], bundle)
+    assert r["total_replay_count"] == 0
+    assert "no_replays" in r["reasons"]
+
+
+def test_h6_14_controlled_probe_preflight_replay_denylist_match_blocked(monkeypatch):
+    """H6-14 T35: Valid denylist match results in blocked."""
+    from scripts.bench.capability_ab_runner import _build_h6_controlled_probe_preflight_replay
+    monkeypatch.setenv("NEXUS_H6_ALLOW_CONTROLLED_PROBE_PREFLIGHT_REPLAY", "1")
+    bundle = _h6_14_ready_denylist_bundle()
+    row = {"h6_controlled_probe_preflight_replay": {"provider_family": "ollama", "model_family": "qwen", "model_size": "7b", "endpoint_kind": "none"}}
+    r = _build_h6_controlled_probe_preflight_replay([row], bundle)
+    assert r["blocked_replay_count"] == 1
+    assert r["blocked_replays"][0]["blocked"] is True
+    assert len(r["blocked_replays"][0]["blocked_reasons"]) > 0
+
+
+def test_h6_14_controlled_probe_preflight_replay_multiple_replays_all_blocked(monkeypatch):
+    """H6-14 T36: Multiple replays all blocked correctly."""
+    from scripts.bench.capability_ab_runner import _build_h6_controlled_probe_preflight_replay
+    monkeypatch.setenv("NEXUS_H6_ALLOW_CONTROLLED_PROBE_PREFLIGHT_REPLAY", "1")
+    bundle = _h6_14_ready_denylist_bundle()
+    rows = [
+        {"h6_controlled_probe_preflight_replay": {"provider_family": "ollama", "model_family": "qwen", "model_size": "3b", "endpoint_kind": "none"}},
+        {"h6_controlled_probe_preflight_replay": {"provider_family": "qwen", "model_family": "qwen", "model_size": "7b", "endpoint_kind": "unix_socket"}},
+        {"h6_controlled_probe_preflight_replay": {"provider_family": "gemini", "model_family": "qwen", "model_size": "14b", "endpoint_kind": "remote_https"}},
+    ]
+    r = _build_h6_controlled_probe_preflight_replay(rows, bundle)
+    assert r["total_replay_count"] == 3
+    assert r["blocked_replay_count"] == 3
+    for br in r["blocked_replays"]:
+        assert br["blocked"] is True
+
+
+def test_h6_14_controlled_probe_preflight_replay_invalid_model_family_block(monkeypatch):
+    """H6-14 T37: model_family not qwen replay blocked."""
+    from scripts.bench.capability_ab_runner import _build_h6_controlled_probe_preflight_replay
+    monkeypatch.setenv("NEXUS_H6_ALLOW_CONTROLLED_PROBE_PREFLIGHT_REPLAY", "1")
+    bundle = _h6_14_ready_denylist_bundle()
+    row = {"h6_controlled_probe_preflight_replay": {"provider_family": "ollama", "model_family": "llama", "model_size": "7b", "endpoint_kind": "none"}}
+    r = _build_h6_controlled_probe_preflight_replay([row], bundle)
+    assert r["blocked_replay_count"] == 1
+    assert any("model_family_llama_blocked" in br["blocked_reasons"] for br in r["blocked_replays"])
+
+
+def test_h6_14_controlled_probe_preflight_replay_empty_provider_family_block(monkeypatch):
+    """H6-14 T38: Empty provider_family default blocked."""
+    from scripts.bench.capability_ab_runner import _build_h6_controlled_probe_preflight_replay
+    monkeypatch.setenv("NEXUS_H6_ALLOW_CONTROLLED_PROBE_PREFLIGHT_REPLAY", "1")
+    bundle = _h6_14_ready_denylist_bundle()
+    row = {"h6_controlled_probe_preflight_replay": {"provider_family": "", "model_family": "qwen", "model_size": "none", "endpoint_kind": "none"}}
+    r = _build_h6_controlled_probe_preflight_replay([row], bundle)
+    assert r["blocked_replay_count"] == 1
+    assert any("denylist_match_blocked" in br["blocked_reasons"] for br in r["blocked_replays"])
