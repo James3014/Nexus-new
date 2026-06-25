@@ -52,6 +52,9 @@ events_sourced.jsonl
 str(REPO_ROOT)/
 <MagicMock name='mock.run_dir.__truediv__()' id='*'>
 
+# Native build artifacts
+*.so
+*.dylib
 
 # Added by cargo
 
