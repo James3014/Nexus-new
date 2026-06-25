@@ -19769,6 +19769,7 @@ def _build_h6_provider_boundary_closure_seal(
     import os
 
     # Hard-wire all execution prohibitions — closure seal never relaxes these.
+    provider_invoked = False
     provider_probe_allowed = False
     provider_invocation_allowed = False
     provider_execution_allowed = False
@@ -19850,6 +19851,7 @@ def _build_h6_provider_boundary_closure_seal(
         "blocked_provider_families": blocked_provider_families,
         "forbidden_env_active": forbidden_env_active,
         "block_reason": block_reason,
+        "provider_invoked": provider_invoked,
         "provider_probe_allowed": provider_probe_allowed,
         "provider_invocation_allowed": provider_invocation_allowed,
         "provider_execution_allowed": provider_execution_allowed,

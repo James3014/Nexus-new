@@ -32513,6 +32513,13 @@ def test_h6_15_provider_boundary_closure_seal_null_rows(monkeypatch):
     assert r["status"] == "SEAL_BLOCKED_NULL_ROWS"
 
 
+def test_h6_15_provider_boundary_closure_seal_provider_invoked_false():
+    """H6-15: provider_invoked=False always."""
+    from scripts.bench.capability_ab_runner import _build_h6_provider_boundary_closure_seal
+    r = _build_h6_provider_boundary_closure_seal(_h6_15_default_rows())
+    assert r["provider_invoked"] is False
+
+
 def test_h6_15_provider_boundary_closure_seal_provider_probe_allowed_false():
     """H6-15 T10: provider_probe_allowed=False always."""
     from scripts.bench.capability_ab_runner import _build_h6_provider_boundary_closure_seal

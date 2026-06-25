@@ -7,8 +7,16 @@
 - **no network call**
 - **no model load**
 - **no model call**
-- **runtime_effect=false**
+- **provider_invoked=false**
+- **provider_probe_allowed=false**
+- **provider_invocation_allowed=false**
+- **provider_execution_allowed=false**
 - **model_call_executed=false**
+- **model_call_allowed=false**
+- **model_load_allowed=false**
+- **network_allowed=false**
+- **process_spawn_allowed=false**
+- **runtime_effect=false**
 - **production_ready=false**
 - **public_claim_allowed=false**
 - **ready_for_h7=false**
@@ -53,11 +61,27 @@ H6-15 Provider Boundary Closure Seal is the terminal governance gate for the H6 
 - `tests/benchmark/test_capability_ab_runner.py` — Added 43 H6-15 test cases
 - `docs/reports/h6_15_provider_boundary_closure_seal_v0.md` — This report
 
+## Broad benchmark failure classification
+
+- **broad benchmark command**: `pytest tests/benchmark/ -k "hybrid_route or local_guard or h5 or h6"`
+- **observed failure count from latest run**: `94 failed`
+- **first failing test if known**: `tests/benchmark/test_capability_ab_runner.py::test_hybrid_route_h2_local_assist_trace`
+- **classification**: `pre-existing / unrelated (Not BROAD_BENCHMARK_FAILURE_UNCLASSIFIED as baseline comparison matches H6-14 HEAD exactly)`
+- **evidence used**: Running same suite on H6-14 HEAD (`ab0c34ff122d332e77ba38b94c06faf3f80c2ef5`) results in identical 94 failures.
+- **action needed**: None.
+
+## Global collect-only dependency classification
+
+- Targeted H6-15 file-level collect/pass is clean.
+- Global collect-only is not clean due dependency/import errors.
+- Observed missing dependencies may vary by environment, e.g. opentelemetry.sdk / jsonschema / rank_bm25.
+- This is not used as clean closure evidence unless dependency environment is normalized.
+
 ## Residual Debt → H7 Pre-requisites
 
 - H7 planning artifact (`docs/reports/h7_capability_routing_consolidation_plan_v0.md`) is **untracked, planning-only**, and is explicitly NOT part of any H6-15 commit. It must not be interpreted as H7 having started.
 - H7 must independently verify that `ready_for_h7` can be set to `True` only after a separate governance gate, not inherited from H6-15.
-- Exact assertion fields (beyond `is False` checks) for `provider_probe_allowed`, `provider_invocation_allowed`, etc., should be tightened in H7 to include specific denial receipts with `denial_id` fields.
+- H6-15 seals exact false assertions. H7 may add denial_id-level receipt precision, but H7 must not supply missing H6 boundary assertions.
 
 ## Seal Receipt
 
@@ -69,6 +93,7 @@ H6-15 Provider Boundary Closure Seal is the terminal governance gate for the H6 
   "seal_granted": true,
   "seal_id": "h6-15-closure-seal",
   "total_sealed_phases": 8,
+  "provider_invoked": false,
   "provider_probe_allowed": false,
   "provider_invocation_allowed": false,
   "provider_execution_allowed": false,
