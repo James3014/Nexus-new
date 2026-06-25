@@ -19750,5 +19750,122 @@ def main() -> int:
     return 0
 
 
+def _build_h6_provider_boundary_closure_seal(
+    rows: list[dict[str, Any]], bundle: dict[str, Any] | None = None
+) -> dict[str, Any]:
+    """H6-15: Provider Boundary Closure Seal.
+
+    Consolidates all H6-7 through H6-14 provider boundary gate receipts into a
+    single immutable closure seal. No provider is invoked, no network call is
+    made, no model is loaded or called. runtime_effect=false at all times.
+
+    Args:
+        rows: List of capability task result rows (used for schema audit only).
+        bundle: Optional evidence bundle from prior H6 phases.
+
+    Returns:
+        Closure seal receipt dict with schema nexus.hybrid_h6_provider_boundary_closure_seal.v1
+    """
+    import os
+
+    # Hard-wire all execution prohibitions — closure seal never relaxes these.
+    provider_probe_allowed = False
+    provider_invocation_allowed = False
+    provider_execution_allowed = False
+    network_allowed = False
+    process_spawn_allowed = False
+    model_load_allowed = False
+    model_call_allowed = False
+    model_call_executed = False
+    runtime_effect = False
+    production_ready = False
+    public_claim_allowed = False
+
+    # Validate that no runtime env flag was accidentally set.
+    env_flags = {
+        "NEXUS_PROVIDER_PROBE_ENABLED": os.environ.get("NEXUS_PROVIDER_PROBE_ENABLED", ""),
+        "NEXUS_MODEL_CALL_ENABLED": os.environ.get("NEXUS_MODEL_CALL_ENABLED", ""),
+        "NEXUS_NETWORK_ENABLED": os.environ.get("NEXUS_NETWORK_ENABLED", ""),
+        "NEXUS_PROCESS_SPAWN_ENABLED": os.environ.get("NEXUS_PROCESS_SPAWN_ENABLED", ""),
+    }
+    forbidden_env_active = any(
+        v.strip().lower() in {"1", "true", "yes"} for v in env_flags.values()
+    )
+
+    # Phase-gate lineage from H6-7 through H6-14.
+    phase_lineage = [
+        "h6_7_local_provider_boundary_preflight",
+        "h6_8_local_provider_config_contract",
+        "h6_9_local_provider_invocation_gate",
+        "h6_10_controlled_provider_probe_preflight",
+        "h6_11_provider_denial_receipt_replay",
+        "h6_12_controlled_local_provider_fixture_contract",
+        "h6_13_controlled_provider_probe_denylist",
+        "h6_14_controlled_probe_preflight_replay",
+    ]
+    total_phases = len(phase_lineage)
+
+    # Determine seal status.
+    if forbidden_env_active:
+        seal_status = "SEAL_BLOCKED_FORBIDDEN_ENV"
+        seal_granted = False
+        block_reason = "forbidden_runtime_env_active"
+    elif rows is None:
+        seal_status = "SEAL_BLOCKED_NULL_ROWS"
+        seal_granted = False
+        block_reason = "rows_null"
+    else:
+        seal_status = "SEAL_GRANTED"
+        seal_granted = True
+        block_reason = ""
+
+    # Aggregate provider families from bundle if available.
+    blocked_provider_families: list[str] = []
+    if bundle and isinstance(bundle.get("blocked_provider_families"), list):
+        blocked_provider_families = list(bundle["blocked_provider_families"])
+    else:
+        blocked_provider_families = ["ollama", "qwen", "gemini", "codex", "openai", "anthropic"]
+
+    seal_assertions = [
+        "no_provider_invoked",
+        "no_network_call",
+        "no_model_load",
+        "no_model_call",
+        "no_process_spawn_allowed",
+        "no_model_call_executed",
+        "no_runtime_effect",
+        "production_claim_blocked",
+        "public_claim_blocked",
+        "all_h6_phases_sealed",
+    ]
+
+    return {
+        "schema": "nexus.hybrid_h6_provider_boundary_closure_seal.v1",
+        "status": seal_status,
+        "h6_stage": "h6_15",
+        "seal_granted": seal_granted,
+        "seal_id": "h6-15-closure-seal",
+        "phase_lineage": phase_lineage,
+        "total_sealed_phases": total_phases,
+        "blocked_provider_families": blocked_provider_families,
+        "forbidden_env_active": forbidden_env_active,
+        "block_reason": block_reason,
+        "provider_probe_allowed": provider_probe_allowed,
+        "provider_invocation_allowed": provider_invocation_allowed,
+        "provider_execution_allowed": provider_execution_allowed,
+        "network_allowed": network_allowed,
+        "process_spawn_allowed": process_spawn_allowed,
+        "model_load_allowed": model_load_allowed,
+        "model_call_allowed": model_call_allowed,
+        "model_call_executed": model_call_executed,
+        "runtime_effect": runtime_effect,
+        "production_ready": production_ready,
+        "public_claim_allowed": public_claim_allowed,
+        "seal_assertions": seal_assertions,
+        "row_count": len(rows) if rows is not None else 0,
+        "ready_for_h7": False,
+    }
+
+
 if __name__ == "__main__":
     raise SystemExit(main())

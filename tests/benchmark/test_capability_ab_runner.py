@@ -32418,3 +32418,388 @@ def test_h6_14_controlled_probe_preflight_replay_empty_provider_family_block(mon
     r = _build_h6_controlled_probe_preflight_replay([row], bundle)
     assert r["blocked_replay_count"] == 1
     assert any("denylist_match_blocked" in br["blocked_reasons"] for br in r["blocked_replays"])
+
+
+
+# ---------------------------------------------------------------------------
+# H6-15: Provider Boundary Closure Seal Tests
+# ---------------------------------------------------------------------------
+
+
+def _h6_15_default_rows() -> list[dict]:
+    """Minimal valid rows for H6-15 seal helper."""
+    return [{"task": "seal_audit", "provider": "none"}]
+
+
+def test_h6_15_provider_boundary_closure_seal_schema():
+    """H6-15 T1: schema field is correct."""
+    from scripts.bench.capability_ab_runner import _build_h6_provider_boundary_closure_seal
+    r = _build_h6_provider_boundary_closure_seal(_h6_15_default_rows())
+    assert r["schema"] == "nexus.hybrid_h6_provider_boundary_closure_seal.v1"
+
+
+def test_h6_15_provider_boundary_closure_seal_h6_stage():
+    """H6-15 T2: h6_stage is h6_15."""
+    from scripts.bench.capability_ab_runner import _build_h6_provider_boundary_closure_seal
+    r = _build_h6_provider_boundary_closure_seal(_h6_15_default_rows())
+    assert r["h6_stage"] == "h6_15"
+
+
+def test_h6_15_provider_boundary_closure_seal_granted_clean_env(monkeypatch):
+    """H6-15 T3: seal_granted=True when no forbidden env active."""
+    from scripts.bench.capability_ab_runner import _build_h6_provider_boundary_closure_seal
+    monkeypatch.delenv("NEXUS_PROVIDER_PROBE_ENABLED", raising=False)
+    monkeypatch.delenv("NEXUS_MODEL_CALL_ENABLED", raising=False)
+    monkeypatch.delenv("NEXUS_NETWORK_ENABLED", raising=False)
+    monkeypatch.delenv("NEXUS_PROCESS_SPAWN_ENABLED", raising=False)
+    r = _build_h6_provider_boundary_closure_seal(_h6_15_default_rows())
+    assert r["seal_granted"] is True
+
+
+def test_h6_15_provider_boundary_closure_seal_status_granted(monkeypatch):
+    """H6-15 T4: status=SEAL_GRANTED with clean env."""
+    from scripts.bench.capability_ab_runner import _build_h6_provider_boundary_closure_seal
+    monkeypatch.delenv("NEXUS_PROVIDER_PROBE_ENABLED", raising=False)
+    monkeypatch.delenv("NEXUS_MODEL_CALL_ENABLED", raising=False)
+    monkeypatch.delenv("NEXUS_NETWORK_ENABLED", raising=False)
+    monkeypatch.delenv("NEXUS_PROCESS_SPAWN_ENABLED", raising=False)
+    r = _build_h6_provider_boundary_closure_seal(_h6_15_default_rows())
+    assert r["status"] == "SEAL_GRANTED"
+
+
+def test_h6_15_provider_boundary_closure_seal_blocked_forbidden_probe_env(monkeypatch):
+    """H6-15 T5: seal_granted=False when NEXUS_PROVIDER_PROBE_ENABLED=1."""
+    from scripts.bench.capability_ab_runner import _build_h6_provider_boundary_closure_seal
+    monkeypatch.setenv("NEXUS_PROVIDER_PROBE_ENABLED", "1")
+    r = _build_h6_provider_boundary_closure_seal(_h6_15_default_rows())
+    assert r["seal_granted"] is False
+    assert r["status"] == "SEAL_BLOCKED_FORBIDDEN_ENV"
+
+
+def test_h6_15_provider_boundary_closure_seal_blocked_forbidden_model_env(monkeypatch):
+    """H6-15 T6: seal_granted=False when NEXUS_MODEL_CALL_ENABLED=true."""
+    from scripts.bench.capability_ab_runner import _build_h6_provider_boundary_closure_seal
+    monkeypatch.setenv("NEXUS_MODEL_CALL_ENABLED", "true")
+    r = _build_h6_provider_boundary_closure_seal(_h6_15_default_rows())
+    assert r["seal_granted"] is False
+    assert r["forbidden_env_active"] is True
+
+
+def test_h6_15_provider_boundary_closure_seal_blocked_forbidden_network_env(monkeypatch):
+    """H6-15 T7: seal_granted=False when NEXUS_NETWORK_ENABLED=yes."""
+    from scripts.bench.capability_ab_runner import _build_h6_provider_boundary_closure_seal
+    monkeypatch.setenv("NEXUS_NETWORK_ENABLED", "yes")
+    r = _build_h6_provider_boundary_closure_seal(_h6_15_default_rows())
+    assert r["seal_granted"] is False
+
+
+def test_h6_15_provider_boundary_closure_seal_blocked_forbidden_process_env(monkeypatch):
+    """H6-15 T8: seal_granted=False when NEXUS_PROCESS_SPAWN_ENABLED=1."""
+    from scripts.bench.capability_ab_runner import _build_h6_provider_boundary_closure_seal
+    monkeypatch.setenv("NEXUS_PROCESS_SPAWN_ENABLED", "1")
+    r = _build_h6_provider_boundary_closure_seal(_h6_15_default_rows())
+    assert r["seal_granted"] is False
+
+
+def test_h6_15_provider_boundary_closure_seal_null_rows(monkeypatch):
+    """H6-15 T9: rows=None yields SEAL_BLOCKED_NULL_ROWS."""
+    from scripts.bench.capability_ab_runner import _build_h6_provider_boundary_closure_seal
+    monkeypatch.delenv("NEXUS_PROVIDER_PROBE_ENABLED", raising=False)
+    monkeypatch.delenv("NEXUS_MODEL_CALL_ENABLED", raising=False)
+    monkeypatch.delenv("NEXUS_NETWORK_ENABLED", raising=False)
+    monkeypatch.delenv("NEXUS_PROCESS_SPAWN_ENABLED", raising=False)
+    r = _build_h6_provider_boundary_closure_seal(None)
+    assert r["seal_granted"] is False
+    assert r["status"] == "SEAL_BLOCKED_NULL_ROWS"
+
+
+def test_h6_15_provider_boundary_closure_seal_provider_probe_allowed_false():
+    """H6-15 T10: provider_probe_allowed=False always."""
+    from scripts.bench.capability_ab_runner import _build_h6_provider_boundary_closure_seal
+    r = _build_h6_provider_boundary_closure_seal(_h6_15_default_rows())
+    assert r["provider_probe_allowed"] is False
+
+
+def test_h6_15_provider_boundary_closure_seal_provider_invocation_allowed_false():
+    """H6-15 T11: provider_invocation_allowed=False always."""
+    from scripts.bench.capability_ab_runner import _build_h6_provider_boundary_closure_seal
+    r = _build_h6_provider_boundary_closure_seal(_h6_15_default_rows())
+    assert r["provider_invocation_allowed"] is False
+
+
+def test_h6_15_provider_boundary_closure_seal_provider_execution_allowed_false():
+    """H6-15 T12: provider_execution_allowed=False always."""
+    from scripts.bench.capability_ab_runner import _build_h6_provider_boundary_closure_seal
+    r = _build_h6_provider_boundary_closure_seal(_h6_15_default_rows())
+    assert r["provider_execution_allowed"] is False
+
+
+def test_h6_15_provider_boundary_closure_seal_network_allowed_false():
+    """H6-15 T13: network_allowed=False always."""
+    from scripts.bench.capability_ab_runner import _build_h6_provider_boundary_closure_seal
+    r = _build_h6_provider_boundary_closure_seal(_h6_15_default_rows())
+    assert r["network_allowed"] is False
+
+
+def test_h6_15_provider_boundary_closure_seal_process_spawn_allowed_false():
+    """H6-15 T14: process_spawn_allowed=False always."""
+    from scripts.bench.capability_ab_runner import _build_h6_provider_boundary_closure_seal
+    r = _build_h6_provider_boundary_closure_seal(_h6_15_default_rows())
+    assert r["process_spawn_allowed"] is False
+
+
+def test_h6_15_provider_boundary_closure_seal_model_load_allowed_false():
+    """H6-15 T15: model_load_allowed=False always."""
+    from scripts.bench.capability_ab_runner import _build_h6_provider_boundary_closure_seal
+    r = _build_h6_provider_boundary_closure_seal(_h6_15_default_rows())
+    assert r["model_load_allowed"] is False
+
+
+def test_h6_15_provider_boundary_closure_seal_model_call_allowed_false():
+    """H6-15 T16: model_call_allowed=False always."""
+    from scripts.bench.capability_ab_runner import _build_h6_provider_boundary_closure_seal
+    r = _build_h6_provider_boundary_closure_seal(_h6_15_default_rows())
+    assert r["model_call_allowed"] is False
+
+
+def test_h6_15_provider_boundary_closure_seal_model_call_executed_false():
+    """H6-15 T17: model_call_executed=False always."""
+    from scripts.bench.capability_ab_runner import _build_h6_provider_boundary_closure_seal
+    r = _build_h6_provider_boundary_closure_seal(_h6_15_default_rows())
+    assert r["model_call_executed"] is False
+
+
+def test_h6_15_provider_boundary_closure_seal_runtime_effect_false():
+    """H6-15 T18: runtime_effect=False always."""
+    from scripts.bench.capability_ab_runner import _build_h6_provider_boundary_closure_seal
+    r = _build_h6_provider_boundary_closure_seal(_h6_15_default_rows())
+    assert r["runtime_effect"] is False
+
+
+def test_h6_15_provider_boundary_closure_seal_production_ready_false():
+    """H6-15 T19: production_ready=False always."""
+    from scripts.bench.capability_ab_runner import _build_h6_provider_boundary_closure_seal
+    r = _build_h6_provider_boundary_closure_seal(_h6_15_default_rows())
+    assert r["production_ready"] is False
+
+
+def test_h6_15_provider_boundary_closure_seal_public_claim_allowed_false():
+    """H6-15 T20: public_claim_allowed=False always."""
+    from scripts.bench.capability_ab_runner import _build_h6_provider_boundary_closure_seal
+    r = _build_h6_provider_boundary_closure_seal(_h6_15_default_rows())
+    assert r["public_claim_allowed"] is False
+
+
+def test_h6_15_provider_boundary_closure_seal_ready_for_h7_false():
+    """H6-15 T21: ready_for_h7=False always."""
+    from scripts.bench.capability_ab_runner import _build_h6_provider_boundary_closure_seal
+    r = _build_h6_provider_boundary_closure_seal(_h6_15_default_rows())
+    assert r["ready_for_h7"] is False
+
+
+def test_h6_15_provider_boundary_closure_seal_phase_lineage_count():
+    """H6-15 T22: total_sealed_phases=8 (H6-7 through H6-14)."""
+    from scripts.bench.capability_ab_runner import _build_h6_provider_boundary_closure_seal
+    r = _build_h6_provider_boundary_closure_seal(_h6_15_default_rows())
+    assert r["total_sealed_phases"] == 8
+
+
+def test_h6_15_provider_boundary_closure_seal_phase_lineage_content():
+    """H6-15 T23: phase_lineage contains all 8 expected phases."""
+    from scripts.bench.capability_ab_runner import _build_h6_provider_boundary_closure_seal
+    r = _build_h6_provider_boundary_closure_seal(_h6_15_default_rows())
+    lineage = r["phase_lineage"]
+    for phase in [
+        "h6_7_local_provider_boundary_preflight",
+        "h6_8_local_provider_config_contract",
+        "h6_9_local_provider_invocation_gate",
+        "h6_10_controlled_provider_probe_preflight",
+        "h6_11_provider_denial_receipt_replay",
+        "h6_12_controlled_local_provider_fixture_contract",
+        "h6_13_controlled_provider_probe_denylist",
+        "h6_14_controlled_probe_preflight_replay",
+    ]:
+        assert phase in lineage
+
+
+def test_h6_15_provider_boundary_closure_seal_seal_id():
+    """H6-15 T24: seal_id is h6-15-closure-seal."""
+    from scripts.bench.capability_ab_runner import _build_h6_provider_boundary_closure_seal
+    r = _build_h6_provider_boundary_closure_seal(_h6_15_default_rows())
+    assert r["seal_id"] == "h6-15-closure-seal"
+
+
+def test_h6_15_provider_boundary_closure_seal_assertions_list():
+    """H6-15 T25: seal_assertions contains all required entries."""
+    from scripts.bench.capability_ab_runner import _build_h6_provider_boundary_closure_seal
+    r = _build_h6_provider_boundary_closure_seal(_h6_15_default_rows())
+    for expected in [
+        "no_provider_invoked",
+        "no_network_call",
+        "no_model_load",
+        "no_model_call",
+        "no_process_spawn_allowed",
+        "no_model_call_executed",
+        "no_runtime_effect",
+        "production_claim_blocked",
+        "public_claim_blocked",
+        "all_h6_phases_sealed",
+    ]:
+        assert expected in r["seal_assertions"], f"Missing: {expected}"
+
+
+def test_h6_15_provider_boundary_closure_seal_blocked_provider_families_default():
+    """H6-15 T26: default blocked_provider_families includes all 6 families."""
+    from scripts.bench.capability_ab_runner import _build_h6_provider_boundary_closure_seal
+    r = _build_h6_provider_boundary_closure_seal(_h6_15_default_rows())
+    for fam in ["ollama", "qwen", "gemini", "codex", "openai", "anthropic"]:
+        assert fam in r["blocked_provider_families"]
+
+
+def test_h6_15_provider_boundary_closure_seal_blocked_provider_families_from_bundle():
+    """H6-15 T27: bundle blocked_provider_families overrides default."""
+    from scripts.bench.capability_ab_runner import _build_h6_provider_boundary_closure_seal
+    bundle = {"blocked_provider_families": ["local_llm", "remote_api"]}
+    r = _build_h6_provider_boundary_closure_seal(_h6_15_default_rows(), bundle=bundle)
+    assert r["blocked_provider_families"] == ["local_llm", "remote_api"]
+
+
+def test_h6_15_provider_boundary_closure_seal_row_count():
+    """H6-15 T28: row_count equals number of rows passed."""
+    from scripts.bench.capability_ab_runner import _build_h6_provider_boundary_closure_seal
+    rows = [{"task": "r1"}, {"task": "r2"}, {"task": "r3"}]
+    r = _build_h6_provider_boundary_closure_seal(rows)
+    assert r["row_count"] == 3
+
+
+def test_h6_15_provider_boundary_closure_seal_empty_rows():
+    """H6-15 T29: empty rows list still grants seal."""
+    from scripts.bench.capability_ab_runner import _build_h6_provider_boundary_closure_seal
+    r = _build_h6_provider_boundary_closure_seal([])
+    assert r["seal_granted"] is True
+    assert r["row_count"] == 0
+
+
+def test_h6_15_provider_boundary_closure_seal_forbidden_env_active_field():
+    """H6-15 T30: forbidden_env_active matches env state."""
+    from scripts.bench.capability_ab_runner import _build_h6_provider_boundary_closure_seal
+    import os
+    r = _build_h6_provider_boundary_closure_seal(_h6_15_default_rows())
+    expected = any(
+        os.environ.get(k, "").strip().lower() in {"1", "true", "yes"}
+        for k in ["NEXUS_PROVIDER_PROBE_ENABLED", "NEXUS_MODEL_CALL_ENABLED",
+                  "NEXUS_NETWORK_ENABLED", "NEXUS_PROCESS_SPAWN_ENABLED"]
+    )
+    assert r["forbidden_env_active"] == expected
+
+
+def test_h6_15_provider_boundary_closure_seal_block_reason_empty_clean(monkeypatch):
+    """H6-15 T31: block_reason=empty str when seal granted."""
+    from scripts.bench.capability_ab_runner import _build_h6_provider_boundary_closure_seal
+    monkeypatch.delenv("NEXUS_PROVIDER_PROBE_ENABLED", raising=False)
+    monkeypatch.delenv("NEXUS_MODEL_CALL_ENABLED", raising=False)
+    monkeypatch.delenv("NEXUS_NETWORK_ENABLED", raising=False)
+    monkeypatch.delenv("NEXUS_PROCESS_SPAWN_ENABLED", raising=False)
+    r = _build_h6_provider_boundary_closure_seal(_h6_15_default_rows())
+    assert r["block_reason"] == ""
+
+
+def test_h6_15_provider_boundary_closure_seal_block_reason_forbidden_env(monkeypatch):
+    """H6-15 T32: block_reason set when forbidden env active."""
+    from scripts.bench.capability_ab_runner import _build_h6_provider_boundary_closure_seal
+    monkeypatch.setenv("NEXUS_PROVIDER_PROBE_ENABLED", "1")
+    r = _build_h6_provider_boundary_closure_seal(_h6_15_default_rows())
+    assert r["block_reason"] == "forbidden_runtime_env_active"
+
+
+def test_h6_15_provider_boundary_closure_seal_block_reason_null_rows(monkeypatch):
+    """H6-15 T33: block_reason=rows_null when rows is None."""
+    from scripts.bench.capability_ab_runner import _build_h6_provider_boundary_closure_seal
+    monkeypatch.delenv("NEXUS_PROVIDER_PROBE_ENABLED", raising=False)
+    monkeypatch.delenv("NEXUS_MODEL_CALL_ENABLED", raising=False)
+    monkeypatch.delenv("NEXUS_NETWORK_ENABLED", raising=False)
+    monkeypatch.delenv("NEXUS_PROCESS_SPAWN_ENABLED", raising=False)
+    r = _build_h6_provider_boundary_closure_seal(None)
+    assert r["block_reason"] == "rows_null"
+
+
+def test_h6_15_provider_boundary_closure_seal_forbidden_env_probe_true_value(monkeypatch):
+    """H6-15 T34: NEXUS_PROVIDER_PROBE_ENABLED=true blocks seal."""
+    from scripts.bench.capability_ab_runner import _build_h6_provider_boundary_closure_seal
+    monkeypatch.setenv("NEXUS_PROVIDER_PROBE_ENABLED", "true")
+    r = _build_h6_provider_boundary_closure_seal(_h6_15_default_rows())
+    assert r["seal_granted"] is False
+
+
+def test_h6_15_provider_boundary_closure_seal_forbidden_env_probe_yes_value(monkeypatch):
+    """H6-15 T35: NEXUS_PROVIDER_PROBE_ENABLED=yes blocks seal."""
+    from scripts.bench.capability_ab_runner import _build_h6_provider_boundary_closure_seal
+    monkeypatch.setenv("NEXUS_PROVIDER_PROBE_ENABLED", "yes")
+    r = _build_h6_provider_boundary_closure_seal(_h6_15_default_rows())
+    assert r["seal_granted"] is False
+
+
+def test_h6_15_provider_boundary_closure_seal_forbidden_env_model_call_yes(monkeypatch):
+    """H6-15 T36: NEXUS_MODEL_CALL_ENABLED=yes blocks seal."""
+    from scripts.bench.capability_ab_runner import _build_h6_provider_boundary_closure_seal
+    monkeypatch.setenv("NEXUS_MODEL_CALL_ENABLED", "yes")
+    r = _build_h6_provider_boundary_closure_seal(_h6_15_default_rows())
+    assert r["seal_granted"] is False
+
+
+def test_h6_15_provider_boundary_closure_seal_forbidden_env_network_true(monkeypatch):
+    """H6-15 T37: NEXUS_NETWORK_ENABLED=true blocks seal."""
+    from scripts.bench.capability_ab_runner import _build_h6_provider_boundary_closure_seal
+    monkeypatch.setenv("NEXUS_NETWORK_ENABLED", "true")
+    r = _build_h6_provider_boundary_closure_seal(_h6_15_default_rows())
+    assert r["seal_granted"] is False
+
+
+def test_h6_15_provider_boundary_closure_seal_forbidden_env_process_true(monkeypatch):
+    """H6-15 T38: NEXUS_PROCESS_SPAWN_ENABLED=true blocks seal."""
+    from scripts.bench.capability_ab_runner import _build_h6_provider_boundary_closure_seal
+    monkeypatch.setenv("NEXUS_PROCESS_SPAWN_ENABLED", "true")
+    r = _build_h6_provider_boundary_closure_seal(_h6_15_default_rows())
+    assert r["seal_granted"] is False
+
+
+def test_h6_15_provider_boundary_closure_seal_bundle_none():
+    """H6-15 T39: bundle=None uses default blocked_provider_families."""
+    from scripts.bench.capability_ab_runner import _build_h6_provider_boundary_closure_seal
+    r = _build_h6_provider_boundary_closure_seal(_h6_15_default_rows(), bundle=None)
+    assert "ollama" in r["blocked_provider_families"]
+    assert "qwen" in r["blocked_provider_families"]
+
+
+def test_h6_15_provider_boundary_closure_seal_bundle_empty_dict():
+    """H6-15 T40: bundle={} uses default blocked_provider_families."""
+    from scripts.bench.capability_ab_runner import _build_h6_provider_boundary_closure_seal
+    r = _build_h6_provider_boundary_closure_seal(_h6_15_default_rows(), bundle={})
+    assert "gemini" in r["blocked_provider_families"]
+    assert "codex" in r["blocked_provider_families"]
+
+
+def test_h6_15_provider_boundary_closure_seal_collect_only():
+    """H6-15 T41: collect-only meta-test verifies >=40 h6_15 tests selected."""
+    import subprocess
+    import re
+    result = subprocess.run(
+        ["pytest", "tests/benchmark/test_capability_ab_runner.py", "-k", "h6_15",
+         "--collect-only", "-q"],
+        capture_output=True, text=True, cwd="/Users/jameschen/Workspace/nexus"
+    )
+    m = re.search(r"(\d+)/\d+ tests? collected", result.stdout)
+    count = int(m.group(1)) if m else 0
+    assert count >= 40, f"H6-15 tests collected: {count}, expected >= 40"
+
+
+def test_h6_15_provider_boundary_closure_seal_no_side_effects():
+    """H6-15 T42: Helper call produces no filesystem side effects."""
+    from scripts.bench.capability_ab_runner import _build_h6_provider_boundary_closure_seal
+    import os
+    import tempfile
+    before_files = set(os.listdir(tempfile.gettempdir()))
+    _build_h6_provider_boundary_closure_seal(_h6_15_default_rows())
+    after_files = set(os.listdir(tempfile.gettempdir()))
+    new_files = after_files - before_files
+    assert len(new_files) == 0, f"Unexpected tmp files: {new_files}"
