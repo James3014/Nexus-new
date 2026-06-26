@@ -220,8 +220,8 @@ class ContextHub:
             "contract_version": "1.5.2",
             "memory_reminders": self._inject_memory_reminders("D"),
         }
-        pack["recommended_skills"] = self.knowledge_injector.recommend_skills(summary, hotspots[:5])
-        pack["wisdom_prior"] = self.knowledge_injector.inject_wisdom_prior(summary, hotspots[:5])
+        pack["recommended_skills"] = self.knowledge_injector.recommend_skills(summary, hotspots[:5]) if self.knowledge_injector else []
+        pack["wisdom_prior"] = self.knowledge_injector.inject_wisdom_prior(summary, hotspots[:5]) if self.knowledge_injector else ""
         
         # [NEW: D-2] Inject Claims Diag Pack
         try:
@@ -533,8 +533,8 @@ class ContextHub:
             "worktree_uuid": state.metadata.get("worktree_uuid", "main-branch"),
             "memory_reminders": self._inject_memory_reminders("R"),
         }
-        pack["recommended_skills"] = self.knowledge_injector.recommend_skills(diagnosis.summary, diagnosis.hotspots)
-        pack["wisdom_prior"] = self.knowledge_injector.inject_wisdom_prior(diagnosis.summary, diagnosis.hotspots)
+        pack["recommended_skills"] = self.knowledge_injector.recommend_skills(diagnosis.summary, diagnosis.hotspots) if self.knowledge_injector else []
+        pack["wisdom_prior"] = self.knowledge_injector.inject_wisdom_prior(diagnosis.summary, diagnosis.hotspots) if self.knowledge_injector else ""
         return pack
 
 

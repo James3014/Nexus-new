@@ -29,6 +29,9 @@ class ARCCycle:
 
     def _run_with_router(self, query: str) -> dict:
         """使用配置層執行的 PXDRAC 流程。"""
+        if not self.router:
+            return {"status": "ERROR", "mode": "SkillAware", "error": "Router not available"}
+        
         findings = {}
         current_stage = "P" # 從 Scout 開始
         stages_executed = []
