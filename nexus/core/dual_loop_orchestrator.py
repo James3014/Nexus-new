@@ -70,7 +70,7 @@ class DualLoopOrchestrator:
         physical_task = asyncio.create_task(self.physical_audit(executor_input))
         
         results = await asyncio.gather(brain_task, physical_task)
-        return self.consensus_merge(results, task_id)
+        return self.consensus_merge(list(results), task_id)
 
     async def physical_audit(self, executor_input: Any) -> Dict[str, Any]:
         """🛡️ Physical Auditor: 執行 X-Ray 與美學硬化檢查 (v23 Extreme Enabled)"""
@@ -85,16 +85,12 @@ class DualLoopOrchestrator:
         logger.info(f"🛡️ [Physical-Audit] Running sensors (Veto Count: {veto_count})...")
         
         # 1. 實體對接 X-Ray 觀察者
-        observer = XRayObserver([self.project_root])
+        observer = XRayObserver([str(self.project_root)])
         # 僅掃描與任務相關的潛在路徑 (模擬邏輯)
         report = observer.scan(recursive=False)
         
         # 2. 實體對接美學引擎 (CritiqueEngine)
-        try:
-            engine = CritiqueEngine(Path(self.project_root) / ".nexus-soul.md")
-        except TypeError:
-            # Backward-compatible path for constructors that do not accept args.
-            engine = CritiqueEngine()
+        engine = CritiqueEngine()
         # 模擬對當前異動檔案進行美學檢查
         aesthetic_result = {"status": "PASS", "critique_score": 95}
         
