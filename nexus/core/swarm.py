@@ -16,7 +16,7 @@ class NexusSwarmOrchestrator:
     🐝 Nexus Swarm Orchestrator (v24.8 Master Loop)
     管理多角色 Agent 協作流：Scout -> Analyzer -> Consensus -> Coder -> Tester -> Audit
     """
-    def __init__(self, engine: Any, task: str, model: str = None, allocation: Optional[Any] = None):
+    def __init__(self, engine: Any, task: str, model: Optional[str] = None, allocation: Optional[Any] = None):
         self.engine = engine
         self.task = task
         self.model = model
@@ -95,13 +95,15 @@ class NexusSwarmOrchestrator:
     def _observe_quiet_moment(self, event: Dict[str, Any]) -> Dict[str, Any]:
         observer = getattr(self.engine, "swarm_observer", None)
         if callable(observer):
-            return dict(observer(event) or {})
+            result = observer(event)
+            return dict(result) if result else {"status": "observed", "production_writes_allowed": False}
         return {"status": "observed", "production_writes_allowed": False}
 
     def _rollback_quiet_moment(self, event: Dict[str, Any]) -> Dict[str, Any]:
         rollback = getattr(self.engine, "swarm_rollback", None)
         if callable(rollback):
-            return dict(rollback(event) or {})
+            result = rollback(event)
+            return dict(result) if result else {"status": "armed", "production_writes_allowed": False}
         return {"status": "armed", "production_writes_allowed": False}
 
     def _scout(self) -> str:
