@@ -1,0 +1,46 @@
+name: Nexus Scoped Typecheck (observation)
+
+on:
+  push:
+    branches: [main, master, 'feature/**']
+  pull_request:
+    branches: [main, master]
+  workflow_dispatch:
+
+jobs:
+  typecheck:
+    name: Pyright Observation (nexus/core)
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    continue-on-error: true
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python 3.12
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install uv
+        run: curl -LsSf https://astral.sh/uv/install.sh | sh
+
+      - name: Install dependencies
+        run: |
+          uv sync --frozen --all-groups --all-extras
+        env:
+          UV_SYSTEM_PYTHON: 0
+
+      - name: Run Pyright (nexus/core only)
+        id: pyright
+        continue-on-error: true
+        run: |
+          uv run pyright nexus/core; echo "exit_code=$?" >> $GITHUB_OUTPUT
+
+      - name: Report Result
+        if: always()
+        run: |
+          echo "## Pyright Observation (nexus/core)" >> $GITHUB_STEP_SUMMARY
+          echo "Exit code: ${{ steps.pyright.outputs.exit_code }}" >> $GITHUB_STEP_SUMMARY
+          echo "This is an observation-only scan. Failures do not block CI." >> $GITHUB_STEP_SUMMARY
