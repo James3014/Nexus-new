@@ -1,4 +1,4 @@
-name: Nexus Scoped Security Scan (observation)
+name: Nexus Scoped Security Scan (nexus/core blocking)
 
 on:
   push:
@@ -9,10 +9,9 @@ on:
 
 jobs:
   bandit:
-    name: Bandit Observation (nexus/core)
+    name: Bandit Scan (nexus/core blocking)
     runs-on: ubuntu-latest
     timeout-minutes: 10
-    continue-on-error: true
 
     steps:
       - name: Checkout repository
@@ -34,13 +33,12 @@ jobs:
 
       - name: Run Bandit (nexus/core only, medium+ severity, medium+ confidence)
         id: bandit
-        continue-on-error: true
         run: |
           uv run bandit -r nexus/core -ll -ii; echo "exit_code=$?" >> $GITHUB_OUTPUT
 
       - name: Report Result
         if: always()
         run: |
-          echo "## Bandit Observation (nexus/core)" >> $GITHUB_STEP_SUMMARY
+          echo "## Bandit Scan (nexus/core blocking)" >> $GITHUB_STEP_SUMMARY
           echo "Exit code: ${{ steps.bandit.outputs.exit_code }}" >> $GITHUB_STEP_SUMMARY
-          echo "This is an observation-only scan. Failures do not block CI." >> $GITHUB_STEP_SUMMARY
+          echo "This scan blocks CI if medium+ findings are detected in nexus/core." >> $GITHUB_STEP_SUMMARY

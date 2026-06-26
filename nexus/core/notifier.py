@@ -1,6 +1,7 @@
 import subprocess
 import logging
 import os
+import shlex
 
 logger = logging.getLogger(__name__)
 
@@ -37,9 +38,9 @@ class NexusNotifier:
         """🔊 Nexus 全域語音告警 (符合 Nexus 戰甲規範)"""
         # 使用 nohup 並導向 /dev/null 以免阻塞
         # 遵循全域規則：nohup say "..." > /dev/null 2>&1 &
-        cmd = f'nohup say "{text}" > /dev/null 2>&1 &'
+        cmd = f'nohup say {shlex.quote(text)} > /dev/null 2>&1 &'
         try:
-            os.system(cmd)
+            subprocess.Popen(cmd, shell=True)  # nosec B602
         except Exception as e:
             logger.error(f"❌ [Notifier:Voice] Failed to trigger voice alert: {e}")
 

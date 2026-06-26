@@ -2,7 +2,9 @@ from pathlib import Path
 #!/usr/bin/env python3
 import argparse
 import json
+import os
 import sys
+import tempfile
 
 
 def load_handoff(path):
@@ -52,7 +54,7 @@ def main():
     )
     parser.add_argument(
         "--input",
-        default=os.getenv("NEXUS_HANDOFF_FILE", "/tmp/codex_next_action.json"),
+        default=os.getenv("NEXUS_HANDOFF_FILE", os.path.join(tempfile.gettempdir(), "codex_next_action.json")),
         help="Path to codex next action JSON sidecar.",
     )
     parser.add_argument(
@@ -65,7 +67,7 @@ def main():
     input_path = Path(args.input)
     if not input_path.exists():
         print(
-            f"ERROR: handoff file not found: {input_path}. Run codex-loop first to generate {os.getenv('NEXUS_HANDOFF_FILE', '/tmp/codex_next_action.json')}.",
+            f"ERROR: handoff file not found: {input_path}. Run codex-loop first to generate {os.getenv('NEXUS_HANDOFF_FILE', os.path.join(tempfile.gettempdir(), 'codex_next_action.json'))}.",
             file=sys.stderr,
         )
         return 2

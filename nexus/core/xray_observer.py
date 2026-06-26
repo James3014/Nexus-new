@@ -61,7 +61,7 @@ class XRayObserver:
             import hashlib
             
             store = FindingsMemoryStore(".")
-            card_id = hashlib.md5(f"refactor_{source_id}".encode()).hexdigest()[:8]
+            card_id = hashlib.md5(f"refactor_{source_id}".encode(), usedforsecurity=False).hexdigest()[:8]
             
             card = FindingsCard(
                 id=card_id,

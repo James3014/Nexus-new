@@ -83,7 +83,7 @@ class DroneToolBox:
 
     def bash_exec(self, command: str) -> Dict[str, Any]:
         try:
-            res = subprocess.run(command, shell=True, cwd=self.sandbox_dir, capture_output=True, text=True, timeout=30)
+            res = subprocess.run(command, shell=True, cwd=self.sandbox_dir, capture_output=True, text=True, timeout=30)  # nosec B602
             return {"exit_code": res.returncode, "stdout": res.stdout, "stderr": res.stderr}
         except Exception as e:
             return {"exit_code": -1, "stderr": str(e)}

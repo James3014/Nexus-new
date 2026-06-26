@@ -64,13 +64,19 @@ class VectorRAG:
 
     def _get_embedding(self, text: str) -> List[float]:
         try:
+            endpoint = NexusGlobalConfig.OLLAMA_ENDPOINT
+            from urllib.parse import urlparse
+            parsed = urlparse(endpoint)
+            if parsed.scheme not in ("http", "https"):
+                logger.error(f"🔮 [VectorRAG] Ollama endpoint scheme not allowed: {parsed.scheme}")
+                return []
             req = urllib.request.Request(
-                f"{NexusGlobalConfig.OLLAMA_ENDPOINT}/api/embeddings",
+                f"{endpoint}/api/embeddings",
                 data=json.dumps({"model": NexusGlobalConfig.OLLAMA_EMBED_MODEL, "prompt": text}).encode("utf-8"),
                 headers={"Content-Type": "application/json"},
                 method="POST"
             )
-            with urllib.request.urlopen(req, timeout=5.0) as response:
+            with urllib.request.urlopen(req, timeout=5.0) as response:  # nosec B310 - scheme validated above (http/https only)
                 result = json.loads(response.read())
                 return result.get("embedding", [])
         except Exception as e:

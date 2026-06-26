@@ -222,7 +222,7 @@ class CampaignGeneral:
             # Fallback: 使用動態安全 DAG (根據意圖長度與雜湊產生差異)
             fallback_used = True
             import hashlib
-            intent_hash = int(hashlib.md5(macro_intent.encode()).hexdigest(), 16)
+            intent_hash = int(hashlib.md5(macro_intent.encode(), usedforsecurity=False).hexdigest(), 16)
             node_count = 2 if len(macro_intent) < fallback_threshold else 2 + (intent_hash % 2) 
             reason = f"Heuristic fallback with node count ({node_count}) based on learned threshold"
             

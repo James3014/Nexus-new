@@ -69,7 +69,7 @@ class DualGateVerifier:
             
         # P3:流式產出可重放證據 Artifact
         try:
-            intent_hash = hashlib.md5(f"{intent}_{path}".encode("utf-8")).hexdigest()[:12]
+            intent_hash = hashlib.md5(f"{intent}_{path}".encode("utf-8"), usedforsecurity=False).hexdigest()[:12]
             reports_dir = path.parent.parent / ".nexus" / "reports"
             if not reports_dir.exists():
                 # Fallback to local .nexus/reports relative to workspace
