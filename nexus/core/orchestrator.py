@@ -84,6 +84,10 @@ class NexusOrchestrator:
             lessons = self.commander.get_crystal_lessons(relevance=0.8) if self.commander else []
             context_brief = "\n".join([f"💎 Lesson: {l}" for l in lessons[:3]])
 
+            if not self.llm:
+                logger.error("❌ [Orchestrator] LLM not available")
+                return False
+
             data, raw = self.llm.ask_with_template(
                 task=f"{self.task}\n{context_brief}"
             )

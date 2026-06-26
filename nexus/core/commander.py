@@ -43,7 +43,7 @@ class Commander:
         state: Optional[NexusState] = None,
     ):
         """🧬 狀態自動機切換門檻"""
-        state = state or self.state_io.load_global_state()
+        state = state or self.state_io.load_global_state() if self.state_io else NexusState()
         from nexus.core.crystal_analyzer import TraumaEngine
 
         logger.info(
@@ -57,7 +57,8 @@ class Commander:
             # 這裡需要傳入任務描述，假設從 state 或 manifest 取得
             descr = state.metadata.get("task_description", "")
             pm.apply_policy_to_state(state, descr)
-            self.state_io.save_global_state(state)
+            if self.state_io:
+                self.state_io.save_global_state(state)
 
         # 🧪 C 階段: 創傷捕捉 + 記憶與學習 v2 (Episode 紀錄)
         if state.current_phase == "C" or status == "completed":
@@ -81,7 +82,8 @@ class Commander:
         # Benchmarks must remain deterministic and must not trigger nested auto-repair task runners.
         if not state.metadata.get("benchmark_run"):
             self.self_heal_service.run_cycle(state)
-            self.state_io.save_global_state(state)
+            if self.state_io:
+                self.state_io.save_global_state(state)
 
         # 🛡️ 狀態轉移矩陣 (符合 02_TARGET_ARCHITECTURE)
         if state.current_phase == "P":
@@ -151,20 +153,22 @@ class Commander:
         
         if res["status"] == "COMPLETED":
             state.current_phase = "C" # 轉導至結晶化 (C)
-            self.state_io.save_global_state(state)
+            if self.state_io:
+                self.state_io.save_global_state(state)
             return "SUCCESS"
         return "STALL"
 
     def handle_nexus_command(self, args: dict):
         """🧬 Nexus v7: 映射 CLI 命令至 NexusState"""
-        state = self.state_io.load_global_state()
+        state = self.state_io.load_global_state() if self.state_io else NexusState()
         state.current_phase = "P"
         state.task_id = args.get("task", "")
         # 加入 v7 特有元數據
         state.metadata["v7_triggered"] = True
         state.metadata["command"] = args.get("command")
 
-        self.state_io.save_global_state(state)
+        if self.state_io:
+            self.state_io.save_global_state(state)
         return self.next_step()
 
     def crystallize(self, state):
