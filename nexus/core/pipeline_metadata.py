@@ -86,3 +86,44 @@ class PipelineMetadata(TypedDict, total=False):
     # --- Context & Chat (Phase 10) ---
     chat_history: List[Dict[str, Any]]
     conversation: Dict[str, Any]
+
+    # --- Learning Pipeline ---
+    learning_action: str
+    learning_decision_event_emitted: bool
+    learning_decision_event_error: str
+    learning_frozen: bool
+    learning_freeze_reasons: List[str]
+    learning_ingest_status: str
+    episode_count: int
+    pattern_reuse_rate: float
+    lesson_quality: float
+    next_run_hit_rate: float
+    min_evolution_steps: int
+    trajectory_step_count: int
+    low_step_filtered: bool
+
+    # --- Curiosity ---
+    curiosity_score: float
+    curiosity_novelty: float
+    curiosity_failure_penalty: float
+    curiosity_feedback_reward: float
+
+    # --- Memory Health ---
+    memory_lock_wait_last_ms: float
+    memory_lock_wait_p95_ms: float
+    memory_health_current: float
+    negative_transfer_rate: float
+
+    # --- Metabolizer ---
+    metabolizer_status: str
+    metabolizer_result: Dict[str, Any]
+
+    # --- Policy ---
+    intent: str
+    phase_failures: Dict[str, Any]
+    aos_score: float
+
+    # --- Snapshot ---
+    read_files_cache: List[str]
+    pending_tasks: List[str]
+    failed_attempts: List[str]
