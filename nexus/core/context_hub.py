@@ -113,6 +113,9 @@ class ContextHub:
         receipt_summary = self._receipt_summary(state)
         receipt_gap_reason = self._receipt_gap_reason(state, receipt_summary)
         
+        # Narrow state to NexusState for _determine_audit_level
+        audit_state = state if isinstance(state, NexusState) else state
+        
         # 🧪 [Wisdom Layer] 動態判斷是否需要 NAS 自動調優
         complexity_score = context.get("complexity_score", 0.0)
         autotune_needed = complexity_score > 0.7 or any(kw in task_id.lower() for kw in ["0-day", "blackhole", "critical", "hardest"])
@@ -121,7 +124,7 @@ class ContextHub:
             "external_needed": self._determine_external_needed(task_id, context),
             "mode": task_type, 
             "priority": "high" if autotune_needed else "normal",
-            "audit_level": self._determine_audit_level(task_type, state),
+            "audit_level": self._determine_audit_level(task_type, audit_state),
             "nas_autotune_needed": autotune_needed,
             "receipt_summary": receipt_summary,
         }
@@ -405,7 +408,8 @@ class ContextHub:
         from nexus.core.context_compactor import ContextCompactor
         compactor = ContextCompactor(self.project_root)
         confidence = (bayesian_params or {}).get("confidence", 0.5)
-        structured_summary = compactor.compact(state.to_dict() if hasattr(state, "to_dict") else vars(state), confidence=confidence)
+        state_dict = state.to_dict() if hasattr(state, "to_dict") and callable(getattr(state, "to_dict", None)) else vars(state)
+        structured_summary = compactor.compact(state_dict, confidence=confidence)
 
         # 🧪 [Entropy Prediction] (AOS-131.5)
         # Estimate tokens using a more accurate heuristic for code-heavy contexts
@@ -456,7 +460,7 @@ class ContextHub:
     def assemble_feature_pack(self, plan: Optional[Dict] = None) -> Dict[str, Any]:
         """🧬 Phase 1: 為新功能建置組裝上下文 (含 TOON 壓縮)。"""
         state = self.state_io.load_global_state()
-        memory = self.memory_service.aggregate_memory()
+        memory = self.memory_service.aggregate_memory() if self.memory_service else {}
         
         # 🧪 TOON 語義壓縮生效
         toon_view = ToonRenderer.render(state)
