@@ -43,7 +43,7 @@ class Commander:
         state: Optional[NexusState] = None,
     ):
         """🧬 狀態自動機切換門檻"""
-        state = state or self.state_io.load_global_state() if self.state_io else NexusState()
+        state = state or (self.state_io.load_global_state() if self.state_io else NexusState(task_id="unknown"))
         from nexus.core.crystal_analyzer import TraumaEngine
 
         logger.info(
@@ -53,7 +53,7 @@ class Commander:
         # 🎯 P 階段: Policy 檢索與注入 (Week 2 M2)
         if state.current_phase == "P":
             from nexus.core.policy_manager import PolicyManager
-            pm = PolicyManager(self.project_root)
+            pm = PolicyManager(str(self.project_root))
             # 這裡需要傳入任務描述，假設從 state 或 manifest 取得
             descr = state.metadata.get("task_description", "")
             pm.apply_policy_to_state(state, descr)
@@ -63,7 +63,7 @@ class Commander:
         # 🧪 C 階段: 創傷捕捉 + 記憶與學習 v2 (Episode 紀錄)
         if state.current_phase == "C" or status == "completed":
             from nexus.core.policy_manager import PolicyManager
-            pm = PolicyManager(self.project_root)
+            pm = PolicyManager(str(self.project_root))
             
             TraumaEngine.process_failures(state)
             pm.record_episode(state) # 🔄 M1: record_episode
@@ -160,7 +160,7 @@ class Commander:
 
     def handle_nexus_command(self, args: dict):
         """🧬 Nexus v7: 映射 CLI 命令至 NexusState"""
-        state = self.state_io.load_global_state() if self.state_io else NexusState()
+        state = self.state_io.load_global_state() if self.state_io else NexusState(task_id=args.get("task", "unknown"))
         state.current_phase = "P"
         state.task_id = args.get("task", "")
         # 加入 v7 特有元數據

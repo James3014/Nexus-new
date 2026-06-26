@@ -127,3 +127,7 @@ class PipelineMetadata(TypedDict, total=False):
     read_files_cache: List[str]
     pending_tasks: List[str]
     failed_attempts: List[str]
+
+    # --- v7 Command ---
+    v7_triggered: bool
+    command: str
