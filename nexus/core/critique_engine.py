@@ -1,6 +1,6 @@
 import re
 import logging
-from typing import Dict
+from typing import Dict, Optional
 from nexus.governance.hallucination_guard import HallucinationGuard
 
 logger = logging.getLogger(__name__)
@@ -66,7 +66,7 @@ class CritiqueEngine:
         "industrial-grade", "100%", "bit-perfect"
     ]
 
-    def detect_overclaim(self, response_text: str, evidence_bundle: dict = None):
+    def detect_overclaim(self, response_text: str, evidence_bundle: Optional[dict] = None):
         """🔍 掃描輸出中的過度承諾。"""
         if not response_text: return True
         

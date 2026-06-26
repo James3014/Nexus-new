@@ -68,15 +68,17 @@ class UnifiedRegistry:
         )
 
     def find_best_skill(self, task_desc: str, task_type: str = "unknown") -> Optional[SkillFrontmatter]:
-        """綜合查詢最佳技能"""
-        tokens = set(task_desc.lower().split())
-        results = self.registry.search(tokens, task_type=task_type, max_results=1)
+        """根據任務描述找到最匹配的技能。"""
+        # 簡化邏輯：從 registry 查詢
+        results = self.registry.search(task_desc, task_type=task_type)
         if results:
             # 這裡需要將 dict 轉回 SkillFrontmatter，但 registry 回傳的是 dict
             # 我們可以用 registry 的 get_by_task_id，它會回傳 dict，
             # 然後在 exchange 中有 _row_to_skill 邏輯。
             # 直接從 registry 獲取 row
-            return self.registry.get_by_task_id(results[0]["task_id"])
+            result = self.registry.get_by_task_id(results[0]["task_id"])
+            if result is not None:
+                return SkillFrontmatter(**result) if isinstance(result, dict) else result
         return None
 
     def refresh(self):

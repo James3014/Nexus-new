@@ -1,6 +1,7 @@
 from typing import Any, Dict, List, Optional, Set, Tuple
 import ast
 import os
+from pathlib import Path
 from dataclasses import dataclass, field
 
 @dataclass
@@ -60,7 +61,7 @@ class XRayObserver:
             from datetime import datetime
             import hashlib
             
-            store = FindingsMemoryStore(".")
+            store = FindingsMemoryStore(Path("."))
             card_id = hashlib.md5(f"refactor_{source_id}".encode(), usedforsecurity=False).hexdigest()[:8]
             
             card = FindingsCard(
@@ -69,7 +70,7 @@ class XRayObserver:
                 title=f"Technical Debt: {source_id}",
                 task_id="auto-refactor-xray",
                 body=f"Root Cause: Module {source_id} exceeds coupling threshold with {count} crossings.\nCorrective Action: Apply Dependency Inversion or Facade pattern to decouple {source_id}.",
-                confidence=1.0, # Mathematical certainty
+                confidence="1.0", # Mathematical certainty
                 tags=["ARCHITECTURE", "REFACTORING_REQUIRED"],
                 evidence_paths=[],
                 updated_at=datetime.utcnow().isoformat()
