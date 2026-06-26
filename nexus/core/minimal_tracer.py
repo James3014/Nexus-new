@@ -1,5 +1,5 @@
 from pathlib import Path
-from typing import Any, Dict, Generator, List, Optional, Tuple
+from typing import Any, Dict, Generator, List, Optional, Tuple, TYPE_CHECKING
 """
 nexus/core/minimal_tracer.py
 ─────────────────────────────
@@ -21,14 +21,20 @@ from datetime import datetime, timezone
 logger = logging.getLogger(__name__)
 
 # Try to import opentelemetry; fall back to JSONL if unavailable
+_OTEL_AVAILABLE = False
+_trace: Any = None
+_TracerProvider: Any = None
+_SimpleSpanProcessor: Any = None
+_InMemorySpanExporter: Any = None
+
 try:
-    from opentelemetry import trace
-    from opentelemetry.sdk.trace import TracerProvider
-    from opentelemetry.sdk.trace.export import SimpleSpanProcessor
-    from opentelemetry.sdk.trace.export.in_memory_span_exporter import InMemorySpanExporter
+    from opentelemetry import trace as _trace
+    from opentelemetry.sdk.trace import TracerProvider as _TracerProvider
+    from opentelemetry.sdk.trace.export import SimpleSpanProcessor as _SimpleSpanProcessor
+    from opentelemetry.sdk.trace.export.in_memory_span_exporter import InMemorySpanExporter as _InMemorySpanExporter
     _OTEL_AVAILABLE = True
 except ImportError:
-    _OTEL_AVAILABLE = False
+    pass
 
 class NexusMinimalTracer:
     """
@@ -40,12 +46,13 @@ class NexusMinimalTracer:
         self.jsonl_path = project_root / ".nexustracelog.jsonl"
         self._tracer = None
 
-        if _OTEL_AVAILABLE:
-            provider = TracerProvider()
-            self._exporter = InMemorySpanExporter()
-            provider.add_span_processor(SimpleSpanProcessor(self._exporter))
-            trace.set_tracer_provider(provider)
-            self._tracer = trace.get_tracer("nexus.core.minimal_tracer")
+        if _OTEL_AVAILABLE and _TracerProvider is not None:
+            provider = _TracerProvider()
+            self._exporter = _InMemorySpanExporter() if _InMemorySpanExporter else None
+            if self._exporter and _SimpleSpanProcessor:
+                provider.add_span_processor(_SimpleSpanProcessor(self._exporter))
+            _trace.set_tracer_provider(provider)
+            self._tracer = _trace.get_tracer("nexus.core.minimal_tracer")
             logger.debug("NexusMinimalTracer: OTel SDK active.")
         else:
             logger.debug("NexusMinimalTracer: OTel SDK unavailable, using JSONL fallback.")
