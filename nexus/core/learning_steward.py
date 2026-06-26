@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, replace
-from typing import Any, Dict, List
+from typing import Any, Dict, List, Mapping
 
 from .learning_evidence import LearningEvidence
 from .state_contracts import NexusState

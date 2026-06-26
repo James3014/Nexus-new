@@ -70,7 +70,8 @@ class UnifiedRegistry:
     def find_best_skill(self, task_desc: str, task_type: str = "unknown") -> Optional[SkillFrontmatter]:
         """根據任務描述找到最匹配的技能。"""
         # 簡化邏輯：從 registry 查詢
-        results = self.registry.search(task_desc, task_type=task_type)
+        query_tokens = set(task_desc.lower().split())
+        results = self.registry.search(query_tokens, task_type=task_type)
         if results:
             # 這裡需要將 dict 轉回 SkillFrontmatter，但 registry 回傳的是 dict
             # 我們可以用 registry 的 get_by_task_id，它會回傳 dict，

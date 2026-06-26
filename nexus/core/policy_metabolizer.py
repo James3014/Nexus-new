@@ -153,7 +153,7 @@ class PolicyMetabolizer:
         score = (self.decay_time_lambda * age_days) + (self.decay_semantic_lambda * semantic_drift)
         confidence = record.get("confidence")
         try:
-            confidence_f = float(confidence)
+            confidence_f = float(confidence) if confidence is not None else 0.0
             score += max(0.0, (0.4 - confidence_f) * 50.0)
         except (TypeError, ValueError) as e:
             logger.warning("policy metabolize confidence parse failed: %s", e)
