@@ -3,7 +3,7 @@ import logging
 import hashlib
 import os
 from datetime import datetime, timezone
-from typing import Dict, Any, List
+from typing import Dict, Any, List, Optional
 from pathlib import Path
 
 logger = logging.getLogger(__name__)
@@ -223,7 +223,8 @@ class SkillsRouter:
     @staticmethod
     def _row_tenant_id(row: Dict[str, Any]) -> str:
         metadata = row.get("metadata") if isinstance(row.get("metadata"), dict) else {}
-        return str(row.get("tenant_id") or row.get("tenant") or metadata.get("tenant_id") or metadata.get("tenant") or "")
+        tenant_id = row.get("tenant_id") or row.get("tenant") or metadata.get("tenant_id") or metadata.get("tenant")
+        return str(tenant_id) if tenant_id else ""
 
     @classmethod
     def _filter_tenant_rows(cls, rows: List[Dict[str, Any]], tenant_id: str) -> List[Dict[str, Any]]:
@@ -449,7 +450,7 @@ class SkillsRouter:
             }
         ]
 
-    def generate_receipt_lite(self, capability: str, selection_source: str, metrics: dict, provenance: str = None, row_id: str = None, hidden_verifier_passed: bool = False) -> Dict[str, Any]:
+    def generate_receipt_lite(self, capability: str, selection_source: str, metrics: dict, provenance: Optional[str] = None, row_id: Optional[str] = None, hidden_verifier_passed: bool = False) -> Dict[str, Any]:
         """🛡️ Task 5B: 新增 receipt-lite builder，要求 source provenance、row identity、與 hidden-verifier / route evidence 同時存在才可產生 receipt-lite。"""
         if not provenance:
             raise ValueError("Receipt-lite requires an explicit 'provenance' source.")
