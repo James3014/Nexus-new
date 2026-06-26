@@ -114,7 +114,7 @@ class ContextHub:
         receipt_gap_reason = self._receipt_gap_reason(state, receipt_summary)
         
         # Narrow state to NexusState for _determine_audit_level
-        audit_state = state if isinstance(state, NexusState) else state
+        audit_state = state if isinstance(state, NexusState) else NexusState(task_id="unknown")
         
         # 🧪 [Wisdom Layer] 動態判斷是否需要 NAS 自動調優
         complexity_score = context.get("complexity_score", 0.0)
@@ -365,7 +365,7 @@ class ContextHub:
         *,
         state_view: StateView | NexusState | None = None,
         extra_sources: List[Dict[str, Any]] | None = None,
-    ) -> list[ContextBudgetSource | Dict[str, Any]]:
+    ) -> list[Any]:
         state = state_view or self.state_io.load_global_state()
         l0 = self._get_l0_rules()
         l1 = self._get_l1_index()
@@ -386,7 +386,7 @@ class ContextHub:
         """
         # 🧪 [v24.2] 優先從政策讀取全局元參數
         from nexus.core.policy_loader import PolicyLoader
-        policy = PolicyLoader.load(self.project_root)
+        policy = PolicyLoader.load(str(self.project_root))
         
         nas_aggression = (bayesian_params or {}).get("nas_aggression")
         if nas_aggression is None:
