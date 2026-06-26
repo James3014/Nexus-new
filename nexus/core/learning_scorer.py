@@ -1,5 +1,5 @@
 from __future__ import annotations
-from typing import Any, Dict, List, Mapping, MutableMapping, Optional, Protocol, Tuple
+from typing import Any, Dict, List, Optional, Protocol, Tuple
 
 
 from .learning_evidence import LearningEvidence
@@ -54,7 +54,7 @@ class LearningScorer:
         )
 
     @classmethod
-    def _update_success_window(cls, metadata: MutableMapping[str, Any], success: bool) -> List[int]:
+    def _update_success_window(cls, metadata: Dict[str, Any], success: bool) -> List[int]:
         raw = metadata.get("learning_success_window")
         window: List[int] = []
         if isinstance(raw, list):

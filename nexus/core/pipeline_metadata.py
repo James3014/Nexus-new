@@ -112,6 +112,7 @@ class PipelineMetadata(TypedDict, total=False):
     memory_lock_wait_last_ms: float
     memory_lock_wait_p95_ms: float
     memory_health_current: float
+    memory_health_baseline: float
     negative_transfer_rate: float
 
     # --- Metabolizer ---
