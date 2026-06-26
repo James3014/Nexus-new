@@ -55,7 +55,9 @@ class RetrievalMemoryAdapter:
         }
 
     def read(self, *, query: str, limit: int = 10) -> dict[str, Any]:
-        rows = list(self.store.search(query))[: max(0, int(limit))]
+        search_result = self.store.search(query)
+        rows = list(search_result) if search_result else []
+        rows = rows[: max(0, int(limit))]
         return {
             "schema": "nexus.retrieval_memory_read.v1",
             "status": "PASS",

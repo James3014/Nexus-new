@@ -165,7 +165,7 @@ class Commander:
         state.task_id = args.get("task", "")
         # 加入 v7 特有元數據
         state.metadata["v7_triggered"] = True
-        state.metadata["command"] = args.get("command")
+        state.metadata["command"] = args.get("command") or ""
 
         if self.state_io:
             self.state_io.save_global_state(state)

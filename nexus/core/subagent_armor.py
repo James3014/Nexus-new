@@ -62,6 +62,8 @@ class SubAgentArmor:
 
     def can_write(self, filepath: str) -> bool:
         """核驗修改目標是否在 Handoff 規定的 Scope 內"""
+        if not self.worktree:
+            return False
         rel_path = str(Path(filepath).relative_to(self.worktree)) if Path(filepath).is_absolute() else filepath
         return rel_path in self.scope
 
