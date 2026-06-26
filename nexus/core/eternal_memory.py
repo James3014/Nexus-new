@@ -35,17 +35,25 @@ class EternalMemory:
         if not self.wallet_path.exists():
             self.logger.error(f"⚠️ [Eternal] Wallet not found at {self.wallet_path}. Failing closed.")
             self.wallet = None
+        elif arweave is None:
+            self.logger.error("⚠️ [Eternal] arweave package not installed. Failing closed.")
+            self.wallet = None
         else:
             self.wallet = arweave.Wallet(self.wallet_path)
             
         # 2. 初始化加密層 (使用持久化金鑰)
         key_path = self.project_root / ".nexus" / "eternal_key.key"
-        if not key_path.exists():
-            self.key = Fernet.generate_key()
-            with open(key_path, "wb") as f: f.write(self.key)
+        if Fernet is None:
+            self.logger.error("⚠️ [Eternal] cryptography package not installed. Failing closed.")
+            self.key = b""
+            self.cipher = None
         else:
-            with open(key_path, "rb") as f: self.key = f.read()
-        self.cipher = Fernet(self.key)
+            if not key_path.exists():
+                self.key = Fernet.generate_key()
+                with open(key_path, "wb") as f: f.write(self.key)
+            else:
+                with open(key_path, "rb") as f: self.key = f.read()
+            self.cipher = Fernet(self.key)
 
     def _get_sync_state(self):
         if self.sync_state_path.exists():
@@ -81,7 +89,7 @@ class EternalMemory:
             encrypted_data = self.cipher.encrypt(payload.encode())
             
             # 2. 執行 Arweave 上傳 (Fail closed if no wallet)
-            if self.wallet:
+            if self.wallet and arweave is not None:
                 tx = arweave.Transaction(self.wallet, data=encrypted_data.decode())
                 tx.sign()
                 # tx.submit() # 實際提交
