@@ -55,10 +55,11 @@ class VectorRAG:
         self.model = None
         self.enabled = lancedb is not None
 
-        if self.enabled:
+        if self.enabled and lancedb is not None:
             self.db = lancedb.connect(str(self.db_path))
             logger.info("🔮 [VectorRAG] Connecting to local LanceDB and using Ollama embeddings...")
         else:
+            self.db = None
             self._ensure_fallback_file()
             logger.warning("⚠️ [VectorRAG] Running in JSON fallback mode; LanceDB unavailable.")
 
@@ -123,15 +124,16 @@ class VectorRAG:
         for i in range(len(embeddings)):
             if not embeddings[i]: embeddings[i] = [0.0]*768
 
-        df["vector"] = embeddings.tolist()
+        df["vector"] = embeddings
 
-        if self.table_name in self.db.list_tables():
+        if self.db and self.table_name in list(self.db.list_tables()):
             table = self.db.open_table(self.table_name)
             table.add(df)
-        else:
+        elif self.db:
             self.db.create_table(self.table_name, data=df)
 
-        logger.info(f"✅ [VectorRAG] Index Updated. Total items: {len(self.db.open_table(self.table_name))}")
+        if self.db:
+            logger.info(f"✅ [VectorRAG] Index Updated. Total items: {len(self.db.open_table(self.table_name))}")
 
     def _fallback_score(self, row: Dict[str, Any], query: str) -> int:
         haystack = " ".join(
@@ -157,7 +159,7 @@ class VectorRAG:
             logger.info(f"🔍 [VectorRAG] Fallback query returned {len(results)} matches for: {task_query[:30]}...")
             return results
 
-        if self.table_name not in self.db.list_tables():
+        if self.table_name not in list(self.db.list_tables()):
             return []
 
         table = self.db.open_table(self.table_name)
