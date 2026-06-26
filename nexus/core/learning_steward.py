@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, replace
-from typing import Any, List
+from typing import Any, Dict, List, Mapping, MutableMapping
 
 from .learning_evidence import LearningEvidence
 from .state_contracts import NexusState
@@ -163,7 +163,7 @@ class LearningSteward:
             export_ready=export_ready,
         )
 
-    def _profile_for(self, metadata: dict) -> GovernanceProfile:
+    def _profile_for(self, metadata: MutableMapping[str, Any]) -> GovernanceProfile:
         raw = metadata.get("governance_profile")
         if not isinstance(raw, dict):
             metadata["governance_profile_source"] = "default"
@@ -196,7 +196,7 @@ class LearningSteward:
         return round((coverage_ratio * 70.0) + (hit_density * 30.0), 2)
 
     @staticmethod
-    def _failure_history(metadata: dict) -> float:
+    def _failure_history(metadata: Mapping[str, Any]) -> float:
         raw = metadata.get("learning_success_window")
         if not isinstance(raw, list) or not raw:
             return 0.0
@@ -243,7 +243,7 @@ class LearningSteward:
             return obj.get(key, default)
         return getattr(obj, key, default)
 
-    def _evaluate_canary(self, metadata: dict, profile: GovernanceProfile) -> List[str]:
+    def _evaluate_canary(self, metadata: MutableMapping[str, Any], profile: GovernanceProfile) -> List[str]:
         baseline = float(metadata.get("memory_health_baseline", profile.memory_health_baseline))
         current = float(metadata.get("memory_health_current", baseline))
         if baseline <= 0:
