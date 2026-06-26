@@ -86,6 +86,10 @@ class EternalMemory:
             for kf in knowledge_files:
                 with open(kf, "r") as f: payload += f.read()
             
+            if self.cipher is None:
+                self.logger.error("❌ [Eternal] Cipher not available (cryptography not installed)")
+                return None
+            
             encrypted_data = self.cipher.encrypt(payload.encode())
             
             # 2. 執行 Arweave 上傳 (Fail closed if no wallet)

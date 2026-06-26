@@ -1,11 +1,16 @@
 import json
 import asyncio
-from typing import Dict, Any, Optional
+from typing import Dict, Any, Optional, TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from playwright.async_api import Page
 
 try:
-    from playwright.async_api import Page
+    from playwright.async_api import Page as _Page
+    _PLAYWRIGHT_AVAILABLE = True
 except ImportError:
-    Page = Any  # type: ignore[misc,assignment]
+    _PLAYWRIGHT_AVAILABLE = False
+    _Page = Any
 
 class WebActionExecutor:
     """
@@ -13,7 +18,7 @@ class WebActionExecutor:
     It also handles evidence collection (screenshots) for each step.
     """
 
-    def __init__(self, page: Page, report_dir: str = ".nexus/reports/screenshots"):
+    def __init__(self, page: Any, report_dir: str = ".nexus/reports/screenshots"):
         self.page = page
         self.report_dir = report_dir
         import os
