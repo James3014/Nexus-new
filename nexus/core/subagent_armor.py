@@ -37,7 +37,10 @@ class SubAgentArmor:
                 )
 
         # 2. 物理隔離核驗 (Worktree Isolation)
-        self.worktree = Path(os.getenv("NEXUS_WORKTREE"))
+        worktree_str = os.getenv("NEXUS_WORKTREE")
+        if not worktree_str:
+            raise ValueError("NEXUS_WORKTREE environment variable not set")
+        self.worktree = Path(worktree_str)
         main_workspace = Path(state_root).resolve()
         
         if self.worktree.resolve() == main_workspace:

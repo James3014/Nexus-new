@@ -10,7 +10,7 @@ class KnowledgeInjector:
         self.mem_palace = mem_palace
         self.wisdom_vault = wisdom_vault
 
-    def recommend_skills(self, task_desc: str, target_files: List[str] = None) -> List[Dict]:
+    def recommend_skills(self, task_desc: str, target_files: Optional[List[str]] = None) -> List[Dict]:
         """向 SkillRegistry 檢索高勝率技能"""
         if not self.skill_registry:
             return []
