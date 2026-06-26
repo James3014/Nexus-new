@@ -24,7 +24,7 @@ class SkillsRouter:
         return highest_idx
 
     """🔀 Nexus v26.0 General Contractor Hardened Router."""
-    def __init__(self, project_root: str, run_dir: str = None, mem_palace: Any = None, **kwargs):
+    def __init__(self, project_root: str, run_dir: Optional[str] = None, mem_palace: Any = None, **kwargs):
         self.project_root = project_root
         self.run_dir = run_dir or project_root
         self.mem_palace = mem_palace
@@ -40,7 +40,7 @@ class SkillsRouter:
         self.governance_hardened_mode = kwargs.get("governance_hardened_mode", "default")
         self.enable_shadow_prefilter = kwargs.get("enable_shadow_prefilter", False)
 
-    def decide_route(self, capability: str, risk_level: str, bare_sufficiency: str, hidden_verifier_passed: bool, code_payload: str = None) -> dict[str, Any]:
+    def decide_route(self, capability: str, risk_level: str, bare_sufficiency: str, hidden_verifier_passed: bool, code_payload: Optional[str] = None) -> dict[str, Any]:
         """🛡️ 實作政策層次決策，產出具有 reason codes 的 route policy evidence"""
         reason_codes = ["expected_capability_protection"]
         
@@ -124,11 +124,13 @@ class SkillsRouter:
             # 讀取當前 belief 信心狀態
             confidence = 1.0
             if hasattr(self.p_loop, "confidence"):
-                confidence = float(self.p_loop.confidence)
+                confidence = float(getattr(self.p_loop, "confidence", 1.0))
             elif isinstance(self.p_loop, dict) and "confidence" in self.p_loop:
                 confidence = float(self.p_loop["confidence"])
-            elif hasattr(self.p_loop, "current_belief") and hasattr(self.p_loop.current_belief, "confidence"):
-                confidence = float(self.p_loop.current_belief.confidence)
+            elif hasattr(self.p_loop, "current_belief"):
+                current_belief = getattr(self.p_loop, "current_belief", None)
+                if current_belief and hasattr(current_belief, "confidence"):
+                    confidence = float(getattr(current_belief, "confidence", 1.0))
 
             from nexus.core.lite_route_oracle import should_use_lite_route
             lane_name = context.get("lane") or context.get("lane_name")
@@ -296,9 +298,11 @@ class SkillsRouter:
             learning_log.parent.mkdir(parents=True, exist_ok=True)
             with open(learning_log, "a", encoding="utf-8") as handle:
                 for cap_receipt in receipts:
+                    plan_id = getattr(plan, "plan_id", None) if not isinstance(plan, dict) else plan.get("plan_id")
+                    task_id = getattr(plan, "task_id", None) if not isinstance(plan, dict) else plan.get("task_id")
                     row = {
-                        "plan_id": plan.plan_id,
-                        "task_id": plan.task_id,
+                        "plan_id": plan_id,
+                        "task_id": task_id,
                         "capability_name": cap_receipt.capability_name,
                         "gate_passed": cap_receipt.gate_passed,
                         "outcome": cap_receipt.outcome,
