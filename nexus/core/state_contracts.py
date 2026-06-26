@@ -216,7 +216,7 @@ class NexusState(BaseModel, NexusStateLegacyMixin):
     autonomic_weights: NexusWeights = Field(default_factory=NexusWeights)
     policy_hit_ids: List[str] = Field(default_factory=list)
     policy_applied: bool = False
-    metadata: PipelineMetadata = Field(default_factory=dict)
+    metadata: PipelineMetadata = Field(default_factory=PipelineMetadata)
     
     # ----------------------------------------------------
 
@@ -247,7 +247,9 @@ class NexusState(BaseModel, NexusStateLegacyMixin):
         if "conversation" not in self.metadata:
             self.init_conversation("pending", "Unknown Goal")
         
-        self.metadata["conversation"].update(updates)
+        conversation = self.metadata.get("conversation")
+        if conversation:
+            conversation.update(updates)
 
     def response_mode(self) -> str:
         """獲取當前響應模式"""

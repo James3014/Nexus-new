@@ -87,7 +87,7 @@ class StateIO:
         
         # Composio P4: 物理回溯觸發
         failure_count = state.metadata.get("phase_failures", 0)
-        if failure_count >= 3:
+        if isinstance(failure_count, int) and failure_count >= 3:
             logger.warning(f"🚨 [Backtracking] Phase failures >= 3. Rolling back to stable checkpoint...")
             # 實體真值應執行 git_reset(checkpoint_prev)
             state.metadata["phase_failures"] = 0 # 重置
