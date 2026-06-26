@@ -52,5 +52,5 @@ class Prefetcher:
     def get_file_list(self) -> List[str]:
         return self.file_tree
 
-    def get_from_cache(self, rel_path: str) -> str:
+    def get_from_cache(self, rel_path: str) -> Optional[str]:
         return self.hot_cache.get(rel_path)

@@ -152,7 +152,7 @@ class TacticalDrone(DroneProtocol):
                 
         return resp
 
-    def sense_think_act(self, task_intent: str, tools: List[Any] = None) -> Dict[str, Any]:
+    def sense_think_act(self, task_intent: str, tools: Optional[List[Any]] = None) -> Dict[str, Any]:
         """[A] 契約對齊：實施 Sprint 強化邏輯。"""
         logger.info(f"🐝 [Drone:{self.drone_id}] Starting cycle (Hardened-Logic v0.9.22)")
         start_time = time.time()
