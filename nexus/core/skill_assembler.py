@@ -12,6 +12,11 @@ import time
 from pathlib import Path
 from typing import Dict, List, Any, Optional
 
+try:
+    import yaml
+except ImportError:
+    yaml = None
+
 logger = logging.getLogger("nexus.assembler")
 
 class SkillAssembler:
@@ -86,7 +91,7 @@ metadata:
         
         skill_dir = self.internal_skills_path / skill_name
         failure_reason = None
-        report_data = {
+        report_data: Dict[str, Any] = {
             "parser_pass": False, 
             "contract_pass": False, 
             "ast_pass": False, 
@@ -102,7 +107,10 @@ metadata:
                 content = (skill_dir / "SKILL.md").read_text(encoding="utf-8")
                 
                 # 1. YAML Parser 檢查
+                frontmatter = None
                 try:
+                    if yaml is None:
+                        raise ImportError("PyYAML not installed")
                     if not content.startswith("---"):
                         raise ValueError("Missing frontmatter markers")
                     parts = content.split("---")

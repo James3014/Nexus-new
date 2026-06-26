@@ -1,7 +1,11 @@
 import json
 import asyncio
 from typing import Dict, Any, Optional
-from playwright.async_api import Page
+
+try:
+    from playwright.async_api import Page
+except ImportError:
+    Page = Any  # type: ignore[misc,assignment]
 
 class WebActionExecutor:
     """

@@ -1,26 +1,19 @@
-from pathlib import Path
 #!/usr/bin/env python3
-import os
-import logging
-from nexus.core.gate_evaluator import AcceptancePolicy
-
-logger = logging.getLogger(__name__)
-
-class PolicyLoader:
-    """
-    📂 政策載入器 (PolicyLoader)
-    負責從 .nexus/governance_policy.yaml 物理載入治理門檻內容性能及性能。
-    落實指揮官「保守外部化」原則內容性能。內容及性能。內容性能。性能分析。
-    """
-    
 import os
 import logging
 import copy
 from pathlib import Path
 from typing import Dict, Any, Optional, Set
+
+try:
+    import yaml
+except ImportError:
+    yaml = None
+
 from nexus.core.gate_evaluator import AcceptancePolicy
 
 logger = logging.getLogger(__name__)
+
 
 class PolicyLoader:
     """
@@ -75,7 +68,8 @@ class PolicyLoader:
             return AcceptancePolicy.default()
             
         try:
-            import yaml
+            if yaml is None:
+                raise ImportError("PyYAML not installed")
             with path.open("r", encoding="utf-8") as f:
                 raw_data = yaml.safe_load(f) or {}
                 
@@ -91,10 +85,6 @@ class PolicyLoader:
             
             return AcceptancePolicy.from_dict(merged_payload)
                 
-        except (ImportError, yaml.YAMLError) as e:
+        except (ImportError, Exception) as e:
             logger.error("⚙️ [PolicyLoader] YAML Terminal Parse Error: %s", e)
             return AcceptancePolicy.default()
-        except Exception as e:
-            logger.error("❌ [PolicyLoader] Unexpected execution fault: %s", e, exc_info=True)
-            return AcceptancePolicy.default()
-

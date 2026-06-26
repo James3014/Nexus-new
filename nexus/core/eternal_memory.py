@@ -3,8 +3,17 @@ from pathlib import Path
 import json
 import os
 import asyncio
-from cryptography.fernet import Fernet
-import arweave
+import time
+
+try:
+    from cryptography.fernet import Fernet
+except ImportError:
+    Fernet = None
+
+try:
+    import arweave
+except ImportError:
+    arweave = None
 
 class EternalMemory:
     """
