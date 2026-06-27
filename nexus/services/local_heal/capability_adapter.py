@@ -120,11 +120,29 @@ class LocalHealCapabilityAdapter:
                     os.environ, controls, "candidate_generate_fn"
                 )
                 
+                target_file = controls["target_file"]
+                target_symbol = controls["target_symbol"]
+                locked_search = controls["locked_search"]
+                verifier_cmd = controls.get("verifier_command", [])
+                
+                explicit_prompt = (
+                    f"You are generating a unified diff to solve a coding task.\n"
+                    f"Problem: {request.problem_statement}\n"
+                    f"Target File: {target_file}\n"
+                    f"Target Symbol: {target_symbol}\n"
+                    f"Locked Search Span (you must only modify this code block):\n"
+                    f"```\n{locked_search}\n```\n\n"
+                    f"Expected Verifier Goal/Verification: {verifier_cmd}\n\n"
+                    f"Return only a standard unified diff wrapped in fenced ```diff block.\n"
+                    f"Do not include any prose, explanation, or extra commentary.\n"
+                    f"Make sure the hunk headers (e.g. @@ -L,C +L,C @@) match and only modify code within the locked search span.\n"
+                )
+                
                 prov_req = LocalModelCandidateRequest(
                     task_id=request.task_id,
                     problem_statement=request.problem_statement,
                     evidence_refs=request.evidence_refs,
-                    prompt="suggest candidate change",
+                    prompt=explicit_prompt,
                 )
                 prov_resp = LocalModelCandidateAdapter.run(prov_req, provider=provider)
                 

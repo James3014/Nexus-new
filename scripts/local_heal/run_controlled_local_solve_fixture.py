@@ -26,7 +26,7 @@ def main() -> int:
     parser.add_argument("--locked-search", required=True)
     parser.add_argument("--problem-statement", default="fix code")
     parser.add_argument("--verifier-command-json", default="[]")
-    parser.add_argument("--model-output-file", required=True)
+    parser.add_argument("--model-output-file", required=False)
     parser.add_argument("--provider-mode", choices=["injected", "ollama"], default="injected")
     parser.add_argument("--output-json", required=True)
     parser.add_argument("--evidence-ref", action="append")
@@ -34,11 +34,16 @@ def main() -> int:
     
     args = parser.parse_args()
     
-    try:
-        model_output = Path(args.model_output_file).read_text(encoding="utf-8")
-    except Exception as e:
-        print(f"Error reading model output file: {e}")
-        return 1
+    model_output = ""
+    if args.provider_mode == "injected":
+        if not args.model_output_file:
+            print("Error: --model-output-file is required for injected provider mode")
+            return 1
+        try:
+            model_output = Path(args.model_output_file).read_text(encoding="utf-8")
+        except Exception as e:
+            print(f"Error reading model output file: {e}")
+            return 1
         
     try:
         verifier_cmd = json.loads(args.verifier_command_json)
