@@ -1180,34 +1180,98 @@ class LocalHealReceiptAdapter:
     name = "local_heal"
 
     def build(self, *, claim_verified: bool, payload: dict[str, Any]) -> CapabilityReceipt:
-        # 提取證據路徑
-        refs = [
-            payload.get("repro_log_path"),
-            payload.get("patch_diff_path"),
-            payload.get("verification_report_path"),
-        ]
-        refs = [str(r) for r in refs if r]
+        hr = payload.get("hybrid_route")
         
-        invoked = bool(payload.get("invoked") or refs)
-        gate_passed = bool(payload.get("solve_eligible") and payload.get("verification_passed"))
-        
-        telemetries = {
-            "reasoning_mode": payload.get("reasoning_mode", "INTUITIVE"),
-            "similarity": payload.get("patch_similarity", 0.0),
-            "is_auto_corrected": payload.get("is_auto_corrected", False),
-            "resolved_span": payload.get("resolved_span"),
-        }
-        
-        return merge_capability_receipt(
-            name=self.name,
-            selected=True,
-            invoked=invoked,
-            evidence_refs=refs,
-            gate_passed=gate_passed,
-            outcome_contributed=bool(gate_passed and claim_verified),
-            executor_id="local_heal_battlesuit",
-            telemetries=telemetries,
-        )
+        if hr is not None:
+            from nexus.contracts.hybrid_route import validate_hybrid_route_decision, RouteMode, HYBRID_ROUTE_DECISION_SCHEMA
+            
+            hr_dict = dict(hr if isinstance(hr, dict) else hr.to_dict())
+            if "schema" not in hr_dict:
+                hr_dict["schema"] = HYBRID_ROUTE_DECISION_SCHEMA
+                
+            blockers = validate_hybrid_route_decision(hr_dict)
+            
+            def get_val(key, default=None):
+                return hr_dict.get(key, default)
+                
+            route_mode = get_val("route_mode")
+            fallback_block_reason = get_val("fallback_block_reason")
+            evidence_refs = get_val("evidence_refs", [])
+            local_model_called = get_val("local_model_called", False)
+            
+            refs = [str(r) for r in evidence_refs if r]
+            
+            if blockers:
+                invoked = bool(payload.get("invoked") or local_model_called or refs)
+                gate_passed = False
+                failure_reason = ";".join(blockers)
+            else:
+                if route_mode == RouteMode.LOCAL_ONLY_EXECUTED:
+                    invoked = True
+                    gate_passed = True
+                    failure_reason = ""
+                elif route_mode == RouteMode.LOCAL_ONLY_BLOCKED:
+                    invoked = bool(local_model_called or payload.get("invoked") or refs)
+                    gate_passed = False
+                    failure_reason = fallback_block_reason or "local_only_blocked"
+                else:
+                    invoked = bool(local_model_called or payload.get("invoked") or refs)
+                    gate_passed = False
+                    failure_reason = fallback_block_reason or ""
+                    
+            telemetries = {
+                "reasoning_mode": payload.get("reasoning_mode", "INTUITIVE"),
+                "similarity": payload.get("patch_similarity", 0.0),
+                "is_auto_corrected": payload.get("is_auto_corrected", False),
+                "resolved_span": payload.get("resolved_span"),
+                "hybrid_route_mode": str(route_mode),
+                "hybrid_route_authority": str(get_val("authority")),
+                "hybrid_route_verifier_result": str(get_val("verifier_result")),
+                "hybrid_route_fallback_block_reason": str(fallback_block_reason),
+            }
+            
+            outcome_contributed = bool(gate_passed and claim_verified)
+            
+            return merge_capability_receipt(
+                name=self.name,
+                selected=True,
+                invoked=invoked,
+                evidence_refs=refs,
+                gate_passed=gate_passed,
+                outcome_contributed=outcome_contributed,
+                executor_id="local_heal_battlesuit",
+                failure_reason=failure_reason,
+                telemetries=telemetries,
+            )
+            
+        else:
+            refs = [
+                payload.get("repro_log_path"),
+                payload.get("patch_diff_path"),
+                payload.get("verification_report_path"),
+            ]
+            refs = [str(r) for r in refs if r]
+            
+            invoked = bool(payload.get("invoked") or refs)
+            gate_passed = bool(payload.get("solve_eligible") and payload.get("verification_passed"))
+            
+            telemetries = {
+                "reasoning_mode": payload.get("reasoning_mode", "INTUITIVE"),
+                "similarity": payload.get("patch_similarity", 0.0),
+                "is_auto_corrected": payload.get("is_auto_corrected", False),
+                "resolved_span": payload.get("resolved_span"),
+            }
+            
+            return merge_capability_receipt(
+                name=self.name,
+                selected=True,
+                invoked=invoked,
+                evidence_refs=refs,
+                gate_passed=gate_passed,
+                outcome_contributed=bool(gate_passed and claim_verified),
+                executor_id="local_heal_battlesuit",
+                telemetries=telemetries,
+            )
 
 
 RECEIPT_ADAPTERS: dict[str, CapabilityReceiptAdapter] = {
