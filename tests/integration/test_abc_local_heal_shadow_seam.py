@@ -1,5 +1,8 @@
 from __future__ import annotations
 
+import os
+from unittest import mock
+
 from nexus.engine.capability_contracts import CapabilityPlan
 from nexus.engine.capability_executor_controls import build_execution_plan
 from nexus.engine.capability_receipt_adapters import LocalHealReceiptAdapter
@@ -69,3 +72,49 @@ def test_abc_local_heal_shadow_seam() -> None:
     assert hr.adapter_output_is_route_truth is False
     assert hr.route_truth_source == "CapabilityPlanner"
     assert hr.behavior_changed is False
+
+
+def test_abc_local_heal_advisory_seam() -> None:
+    with mock.patch.dict(os.environ, {"NEXUS_LOCAL_MODEL_ADVISORY_ENABLE": "1"}):
+        plan = CapabilityPlan(
+            schema_version="nexus_capability_plan_v1",
+            selected_capabilities=["local_heal"],
+            required_capabilities=["local_heal"],
+            optional_capabilities=[],
+            conditional_capabilities=[],
+            pending_capabilities=[],
+            forbidden_capabilities=[],
+            constraints=[],
+            decision_trace=[],
+            replan_trace=[],
+            score=95.0,
+        )
+        
+        exe_plan = build_execution_plan(plan)
+        controls = exe_plan.executor_controls
+        
+        request = LocalHealCapabilityRequest(
+            task_id="task-e2e-advisory",
+            problem_statement="refactor test seam",
+            evidence_refs=("ref-e2e-1",),
+            executor_controls=controls,
+        )
+        response = LocalHealCapabilityAdapter.run(request)
+        
+        hr = response.hybrid_route
+        assert response.invoked is True
+        assert hr.route_mode.value == "cloud_first_local_guard_advisory"
+        assert hr.authority.value == "advisory_only"
+        assert hr.behavior_changed is False
+        assert hr.adapter_output_is_route_truth is False
+        assert response.capability_payload["gate_passed"] is False
+        
+        adapter = LocalHealReceiptAdapter()
+        receipt = adapter.build(claim_verified=False, payload=response.capability_payload)
+        
+        assert receipt.name == "local_heal"
+        assert receipt.selected is True
+        assert receipt.invoked is True
+        assert receipt.gate_passed is False
+        assert receipt.outcome_contributed is False
+        assert receipt.public_claim_safe is False

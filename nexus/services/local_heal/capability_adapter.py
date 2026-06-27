@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+import hashlib
 import os
 from typing import Any, Mapping
 
@@ -14,6 +15,10 @@ from nexus.contracts.hybrid_route import (
 )
 from nexus.services.local_heal.hybrid_route_bridge import capability_payload_from_hybrid_route
 from nexus.services.local_heal.capability_runtime_policy import build_local_heal_runtime_policy
+from nexus.services.local_heal.local_model_advisory_adapter import (
+    LocalModelAdvisoryAdapter,
+    LocalModelAdvisoryRequest,
+)
 
 
 @dataclass(frozen=True)
@@ -42,7 +47,44 @@ class LocalHealCapabilityAdapter:
         
         policy = build_local_heal_runtime_policy(os.environ, controls)
         
-        if not enable_local_heal or (local_heal_mode == "disabled" and not policy.enable_pipeline):
+        advisory_enabled = os.environ.get("NEXUS_LOCAL_MODEL_ADVISORY_ENABLE") == "1"
+        
+        if advisory_enabled:
+            advis_req = LocalModelAdvisoryRequest(
+                task_id=request.task_id,
+                problem_statement=request.problem_statement,
+                evidence_refs=request.evidence_refs,
+            )
+            advis_resp = LocalModelAdvisoryAdapter.run(advis_req)
+            
+            text_hash = hashlib.sha256(advis_resp.advisory_text.encode("utf-8")).hexdigest()
+            text_preview = advis_resp.advisory_text[:100]
+            
+            advis_metadata = {
+                "advisory_invoked": advis_resp.advisory_invoked,
+                "local_model_called": advis_resp.local_model_called,
+                "advisory_blockers": list(advis_resp.advisory_blockers),
+                "advisory_text_hash": text_hash,
+                "advisory_text_preview": text_preview,
+            }
+            
+            payload = build_hybrid_route_decision(
+                route_mode=RouteMode.CLOUD_FIRST_LOCAL_GUARD_ADVISORY,
+                public_claim_allowed=False,
+                production_ready=False,
+                adapter_output_is_route_truth=False,
+                route_truth_source="CapabilityPlanner",
+                behavior_changed=False,
+                authority=Authority.ADVISORY_ONLY,
+                local_model_called=advis_resp.local_model_called,
+                verifier_result=VerifierResult.NOT_RUN,
+                evidence_refs=request.evidence_refs,
+                metadata=advis_metadata,
+            )
+            decision = hybrid_route_decision_from_payload(payload)
+            invoked = True
+            
+        elif not enable_local_heal or (local_heal_mode == "disabled" and not policy.enable_pipeline):
             payload = build_hybrid_route_decision(
                 route_mode=RouteMode.CLOUD_ASSISTED_BY_LOCAL_TRACE_ONLY,
                 public_claim_allowed=False,

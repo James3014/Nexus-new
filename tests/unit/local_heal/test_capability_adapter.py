@@ -66,17 +66,34 @@ def test_capability_adapter_shadow_only_missing_evidence() -> None:
 
 
 def test_capability_adapter_pipeline_enabled_by_env_but_mutation_blocked() -> None:
-    # 模擬環境變數中有開啟 pipeline，但因 policy 中 mutation_allowed=False，依然要 Fail-closed 且 blocked
     with mock.patch.dict(os.environ, {"NEXUS_LOCAL_HEAL_CAPABILITY_ADAPTER_ENABLE_PIPELINE": "1"}):
         request = LocalHealCapabilityRequest(
             task_id="t4",
             problem_statement="fix syntax",
             evidence_refs=("ref1",),
-            executor_controls={"enable_local_heal": True, "local_heal_mode": "disabled"},  # 雖然 mode 是 disabled
+            executor_controls={"enable_local_heal": True, "local_heal_mode": "disabled"},
         )
         response = LocalHealCapabilityAdapter.run(request)
-        assert response.invoked is True  # 因為 pipeline 被開啟了
+        assert response.invoked is True
         assert response.hybrid_route.route_mode == RouteMode.LOCAL_ONLY_BLOCKED
         assert "mutation_not_allowed" in response.hybrid_route.fallback_block_reason
         assert "shadow_only_no_runtime" not in response.hybrid_route.fallback_block_reason
         assert response.capability_payload["gate_passed"] is False
+
+
+def test_capability_adapter_advisory_enabled_by_env() -> None:
+    with mock.patch.dict(os.environ, {"NEXUS_LOCAL_MODEL_ADVISORY_ENABLE": "1"}):
+        request = LocalHealCapabilityRequest(
+            task_id="t5",
+            problem_statement="fix test suite",
+            evidence_refs=("ref1",),
+            executor_controls={"enable_local_heal": False, "local_heal_mode": "disabled"},
+        )
+        response = LocalHealCapabilityAdapter.run(request)
+        assert response.invoked is True
+        assert response.hybrid_route.route_mode == RouteMode.CLOUD_FIRST_LOCAL_GUARD_ADVISORY
+        assert response.hybrid_route.authority == Authority.ADVISORY_ONLY
+        assert response.hybrid_route.behavior_changed is False
+        assert response.hybrid_route.adapter_output_is_route_truth is False
+        assert response.capability_payload["gate_passed"] is False
+        assert response.hybrid_route.route_mode != RouteMode.LOCAL_ONLY_EXECUTED
