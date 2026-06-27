@@ -33,6 +33,10 @@ from nexus.services.local_heal.local_guard_fail_closed import (
     LocalGuardInput,
     run_local_guard_fail_closed,
 )
+from nexus.services.local_heal.isolated_local_solve_loop import (
+    IsolatedLocalSolveRequest,
+    run_isolated_local_solve_loop,
+)
 
 
 @dataclass(frozen=True)
@@ -86,8 +90,67 @@ class LocalHealCapabilityAdapter:
         advisory_enabled = os.environ.get("NEXUS_LOCAL_MODEL_ADVISORY_ENABLE") == "1"
         candidate_enabled = os.environ.get("NEXUS_LOCAL_MODEL_CANDIDATE_ENABLE") == "1"
         call_allowed = os.environ.get("NEXUS_LOCAL_MODEL_CALL_ALLOWED") == "1"
+        isolated_solve_enabled = os.environ.get("NEXUS_LOCAL_SOLVE_ISOLATED_ENABLE") == "1"
         
-        if candidate_enabled:
+        if candidate_enabled and isolated_solve_enabled:
+            required_keys = ["source_root", "target_file", "target_symbol", "locked_search", "verifier_command", "work_dir"]
+            missing_controls = [k for k in required_keys if controls.get(k) is None]
+            if not request.evidence_refs:
+                missing_controls.append("evidence_refs")
+                
+            if missing_controls:
+                payload = build_hybrid_route_decision(
+                    route_mode=RouteMode.LOCAL_ONLY_BLOCKED,
+                    public_claim_allowed=False,
+                    production_ready=False,
+                    adapter_output_is_route_truth=False,
+                    route_truth_source="CapabilityPlanner",
+                    behavior_changed=False,
+                    authority=Authority.TRACE_ONLY,
+                    local_model_called=False,
+                    verifier_result=VerifierResult.NOT_RUN,
+                    evidence_refs=request.evidence_refs,
+                    fallback_block_reason="missing_required_control",
+                )
+                decision = hybrid_route_decision_from_payload(payload)
+                invoked = False
+                capability_payload = capability_payload_from_hybrid_route(decision)
+            else:
+                provider = build_local_model_provider_from_env(
+                    os.environ, controls, "candidate_generate_fn"
+                )
+                
+                prov_req = LocalModelCandidateRequest(
+                    task_id=request.task_id,
+                    problem_statement=request.problem_statement,
+                    evidence_refs=request.evidence_refs,
+                    prompt="suggest candidate change",
+                )
+                prov_resp = LocalModelCandidateAdapter.run(prov_req, provider=provider)
+                
+                solve_req = IsolatedLocalSolveRequest(
+                    task_id=request.task_id,
+                    source_root=controls["source_root"],
+                    problem_statement=request.problem_statement,
+                    evidence_refs=request.evidence_refs,
+                    model_output=prov_resp.candidate_text,
+                    verifier_command=tuple(controls["verifier_command"]),
+                    work_dir=controls["work_dir"],
+                    local_model_called=prov_resp.local_model_called,
+                    mutation_allowed=(os.environ.get("NEXUS_LOCAL_SOLVE_MUTATION_ALLOWED") == "1"),
+                    verifier_allowed=(os.environ.get("NEXUS_LOCAL_SOLVE_VERIFIER_ALLOWED") == "1"),
+                    target_file=controls["target_file"],
+                    target_symbol=controls["target_symbol"],
+                    locked_search=controls["locked_search"],
+                )
+                solve_resp = run_isolated_local_solve_loop(solve_req)
+                
+                decision = solve_resp.hybrid_route
+                capability_payload = solve_resp.capability_payload
+                payload = decision.to_dict()
+                invoked = True
+                
+        elif candidate_enabled:
             cand_blockers = []
             if not call_allowed:
                 cand_blockers.append("model_call_not_allowed")
@@ -138,6 +201,7 @@ class LocalHealCapabilityAdapter:
             )
             decision = hybrid_route_decision_from_payload(payload)
             invoked = True
+            capability_payload = capability_payload_from_hybrid_route(decision)
             
         elif advisory_enabled:
             advis_blockers = []
@@ -188,6 +252,7 @@ class LocalHealCapabilityAdapter:
             )
             decision = hybrid_route_decision_from_payload(payload)
             invoked = True
+            capability_payload = capability_payload_from_hybrid_route(decision)
             
         elif not enable_local_heal or (local_heal_mode == "disabled" and not policy.enable_pipeline):
             payload = build_hybrid_route_decision(
@@ -204,6 +269,7 @@ class LocalHealCapabilityAdapter:
             )
             decision = hybrid_route_decision_from_payload(payload)
             invoked = False
+            capability_payload = capability_payload_from_hybrid_route(decision)
             
         elif enable_local_heal and (local_heal_mode == "shadow_only" or policy.enable_pipeline):
             blockers = []
@@ -233,6 +299,7 @@ class LocalHealCapabilityAdapter:
             )
             decision = hybrid_route_decision_from_payload(payload)
             invoked = True
+            capability_payload = capability_payload_from_hybrid_route(decision)
             
         else:
             payload = build_hybrid_route_decision(
@@ -250,6 +317,7 @@ class LocalHealCapabilityAdapter:
             )
             decision = hybrid_route_decision_from_payload(payload)
             invoked = False
+            capability_payload = capability_payload_from_hybrid_route(decision)
             
         if os.environ.get("NEXUS_LOCAL_GUARD_FAIL_CLOSED_ENABLE") == "1":
             vr_val = payload.get("verifier_result")
@@ -291,8 +359,8 @@ class LocalHealCapabilityAdapter:
                     metadata=payload.get("metadata", {}),
                 )
                 decision = hybrid_route_decision_from_payload(payload)
+                capability_payload = capability_payload_from_hybrid_route(decision)
                 
-        capability_payload = capability_payload_from_hybrid_route(decision)
         capability_payload["adapter_invoked"] = invoked
         
         return LocalHealCapabilityResponse(

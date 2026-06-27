@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import os
+import tempfile
+import shutil
 from unittest import mock
 
 from nexus.contracts.hybrid_route import RouteMode, Authority, VerifierResult
@@ -169,3 +171,80 @@ def test_build_local_model_provider_from_env() -> None:
     }
     prov3 = build_local_model_provider_from_env(env3, {}, "candidate_generate_fn")
     assert isinstance(prov3, OllamaLocalModelProvider)
+
+
+def test_capability_adapter_isolated_solve_missing_control() -> None:
+    with mock.patch.dict(os.environ, {
+        "NEXUS_LOCAL_MODEL_CANDIDATE_ENABLE": "1",
+        "NEXUS_LOCAL_SOLVE_ISOLATED_ENABLE": "1",
+    }):
+        request = LocalHealCapabilityRequest(
+            task_id="t8",
+            problem_statement="fix code",
+            evidence_refs=("ref1",),
+            executor_controls={},
+        )
+        response = LocalHealCapabilityAdapter.run(request)
+        assert response.invoked is False
+        assert response.hybrid_route.route_mode == RouteMode.LOCAL_ONLY_BLOCKED
+        assert "missing_required_control" in response.hybrid_route.fallback_block_reason
+        assert response.capability_payload["gate_passed"] is False
+
+
+def test_capability_adapter_isolated_solve_success() -> None:
+    with mock.patch.dict(os.environ, {
+        "NEXUS_LOCAL_MODEL_CANDIDATE_ENABLE": "1",
+        "NEXUS_LOCAL_MODEL_CALL_ALLOWED": "1",
+        "NEXUS_LOCAL_SOLVE_ISOLATED_ENABLE": "1",
+        "NEXUS_LOCAL_SOLVE_MUTATION_ALLOWED": "1",
+        "NEXUS_LOCAL_SOLVE_VERIFIER_ALLOWED": "1",
+    }):
+        with tempfile.TemporaryDirectory() as src_root:
+            test_file = "f.py"
+            src_path = os.path.join(src_root, test_file)
+            with open(src_path, "w", encoding="utf-8") as f:
+                f.write("print('hello')\n")
+                
+            diff = """--- a/f.py
++++ b/f.py
+@@ -1 +1 @@
+-print('hello')
++print('world')
+"""
+            
+            def mock_gen(req) -> str:
+                return f"```diff\n{diff}```"
+                
+            request = LocalHealCapabilityRequest(
+                task_id="t9",
+                problem_statement="fix code",
+                evidence_refs=("ref1",),
+                executor_controls={
+                    "source_root": src_root,
+                    "target_file": test_file,
+                    "target_symbol": "print",
+                    "locked_search": "print('hello')",
+                    "verifier_command": ["python3", "-c", "import os; assert os.path.exists('f.py')"],
+                    "work_dir": "",
+                    "candidate_generate_fn": mock_gen,
+                },
+            )
+            
+            response = LocalHealCapabilityAdapter.run(request)
+            assert response.invoked is True
+            assert response.hybrid_route.route_mode == RouteMode.LOCAL_ONLY_EXECUTED
+            assert response.hybrid_route.local_model_called is True
+            assert response.hybrid_route.verifier_result == VerifierResult.PASS
+            assert response.capability_payload["gate_passed"] is True
+            assert response.hybrid_route.public_claim_allowed is False
+            assert response.hybrid_route.production_ready is False
+            
+            # Telemetry metadata check
+            metadata = response.capability_payload["metadata"]
+            assert metadata["canonical_span_source"] == "locked_search"
+            assert metadata["fallback_used"] is False
+            assert metadata["target_symbol"] == "print"
+            assert metadata["verifier_status"] == "pass"
+            
+            if os.path.exists(response.hybrid_route.metadata.get("workspace_path", "")):
+                shutil.rmtree(response.hybrid_route.metadata.get("workspace_path", ""))
