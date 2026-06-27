@@ -19,6 +19,7 @@ from nexus.services.local_heal.local_model_provider import (
     LocalModelProvider,
     InertLocalModelProvider,
     InjectedLocalModelProvider,
+    OllamaLocalModelProvider,
 )
 from nexus.services.local_heal.local_model_advisory_adapter import (
     LocalModelAdvisoryAdapter,
@@ -51,6 +52,28 @@ class LocalHealCapabilityResponse:
     capability_payload: dict[str, Any]
 
 
+def build_local_model_provider_from_env(
+    env: Mapping[str, str],
+    controls: Mapping[str, Any],
+    injected_fn_key: str,
+) -> LocalModelProvider:
+    call_allowed = env.get("NEXUS_LOCAL_MODEL_CALL_ALLOWED") == "1"
+    if not call_allowed:
+        return InertLocalModelProvider()
+        
+    injected_fn = controls.get(injected_fn_key)
+    if injected_fn is not None:
+        return InjectedLocalModelProvider(injected_fn)
+        
+    provider_type = env.get("NEXUS_LOCAL_MODEL_PROVIDER", "").lower()
+    model_name = env.get("NEXUS_LOCAL_MODEL_NAME", "").strip()
+    
+    if provider_type == "ollama" and model_name:
+        return OllamaLocalModelProvider()
+        
+    return InertLocalModelProvider()
+
+
 class LocalHealCapabilityAdapter:
     @staticmethod
     def run(request: LocalHealCapabilityRequest) -> LocalHealCapabilityResponse:
@@ -66,16 +89,13 @@ class LocalHealCapabilityAdapter:
         
         if candidate_enabled:
             cand_blockers = []
-            if call_allowed:
-                generate_fn = controls.get("candidate_generate_fn")
-                if generate_fn is not None:
-                    provider = InjectedLocalModelProvider(generate_fn)
-                else:
-                    provider = InertLocalModelProvider()
-            else:
-                provider = InertLocalModelProvider()
+            if not call_allowed:
                 cand_blockers.append("model_call_not_allowed")
                 
+            provider = build_local_model_provider_from_env(
+                os.environ, controls, "candidate_generate_fn"
+            )
+            
             cand_req = LocalModelCandidateRequest(
                 task_id=request.task_id,
                 problem_statement=request.problem_statement,
@@ -93,6 +113,9 @@ class LocalHealCapabilityAdapter:
                 "selected_candidate_hash": cand_resp.selected_candidate_hash,
                 "applied_patch_hash": cand_resp.applied_patch_hash,
                 "verifier_result": cand_resp.verifier_result,
+                "provider_invoked": cand_resp.candidate_invoked,
+                "provider_error": cand_resp.blockers[2] if len(cand_resp.blockers) > 2 else "",
+                "model_name": os.environ.get("NEXUS_LOCAL_MODEL_NAME", ""),
             }
             
             payload = build_hybrid_route_decision(
@@ -118,16 +141,13 @@ class LocalHealCapabilityAdapter:
             
         elif advisory_enabled:
             advis_blockers = []
-            if call_allowed:
-                generate_fn = controls.get("advisory_generate_fn")
-                if generate_fn is not None:
-                    provider = InjectedLocalModelProvider(generate_fn)
-                else:
-                    provider = InertLocalModelProvider()
-            else:
-                provider = InertLocalModelProvider()
+            if not call_allowed:
                 advis_blockers.append("model_call_not_allowed")
                 
+            provider = build_local_model_provider_from_env(
+                os.environ, controls, "advisory_generate_fn"
+            )
+            
             advis_req = LocalModelAdvisoryRequest(
                 task_id=request.task_id,
                 problem_statement=request.problem_statement,
@@ -147,6 +167,9 @@ class LocalHealCapabilityAdapter:
                 "advisory_blockers": list(advis_resp.advisory_blockers),
                 "advisory_text_hash": text_hash,
                 "advisory_text_preview": text_preview,
+                "provider_invoked": advis_resp.advisory_invoked,
+                "provider_error": all_blockers[0] if all_blockers else "",
+                "model_name": os.environ.get("NEXUS_LOCAL_MODEL_NAME", ""),
             }
             
             payload = build_hybrid_route_decision(

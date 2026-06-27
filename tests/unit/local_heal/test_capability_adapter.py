@@ -7,6 +7,12 @@ from nexus.contracts.hybrid_route import RouteMode, Authority, VerifierResult
 from nexus.services.local_heal.capability_adapter import (
     LocalHealCapabilityAdapter,
     LocalHealCapabilityRequest,
+    build_local_model_provider_from_env,
+)
+from nexus.services.local_heal.local_model_provider import (
+    InertLocalModelProvider,
+    InjectedLocalModelProvider,
+    OllamaLocalModelProvider,
 )
 
 
@@ -144,3 +150,22 @@ def test_capability_adapter_candidate_enabled_with_call() -> None:
         assert "missing_applied_patch_hash" in response.hybrid_route.fallback_block_reason
         assert "selected_reapply_not_proven" in response.hybrid_route.fallback_block_reason
         assert response.capability_payload["gate_passed"] is False
+
+
+def test_build_local_model_provider_from_env() -> None:
+    env1 = {"NEXUS_LOCAL_MODEL_CALL_ALLOWED": "0"}
+    prov1 = build_local_model_provider_from_env(env1, {}, "candidate_generate_fn")
+    assert isinstance(prov1, InertLocalModelProvider)
+    
+    env2 = {"NEXUS_LOCAL_MODEL_CALL_ALLOWED": "1"}
+    controls2 = {"candidate_generate_fn": lambda req: "output"}
+    prov2 = build_local_model_provider_from_env(env2, controls2, "candidate_generate_fn")
+    assert isinstance(prov2, InjectedLocalModelProvider)
+    
+    env3 = {
+        "NEXUS_LOCAL_MODEL_CALL_ALLOWED": "1",
+        "NEXUS_LOCAL_MODEL_PROVIDER": "ollama",
+        "NEXUS_LOCAL_MODEL_NAME": "qwen",
+    }
+    prov3 = build_local_model_provider_from_env(env3, {}, "candidate_generate_fn")
+    assert isinstance(prov3, OllamaLocalModelProvider)

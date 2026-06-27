@@ -1,11 +1,16 @@
 from __future__ import annotations
 
+import os
+from unittest import mock
+import urllib.error
+
 import pytest
 
 from nexus.services.local_heal.local_model_provider import (
     LocalModelProviderRequest,
     InertLocalModelProvider,
     InjectedLocalModelProvider,
+    OllamaLocalModelProvider,
 )
 
 
@@ -56,3 +61,46 @@ def test_injected_local_model_provider_exception() -> None:
     assert resp.provider_invoked is True
     assert resp.model_called is False
     assert "simulated crash" in resp.error
+
+
+def test_ollama_local_model_provider_not_configured() -> None:
+    with mock.patch.dict(os.environ, {}, clear=True):
+        provider = OllamaLocalModelProvider()
+        req = LocalModelProviderRequest(task_id="t5", prompt="test", evidence_refs=())
+        resp = provider.generate(req)
+        assert resp.model_called is False
+        assert resp.error == "provider_not_configured"
+
+
+def test_ollama_local_model_provider_missing_model_name() -> None:
+    with mock.patch.dict(os.environ, {
+        "NEXUS_LOCAL_MODEL_CALL_ALLOWED": "1",
+        "NEXUS_LOCAL_MODEL_PROVIDER": "ollama",
+        "NEXUS_LOCAL_MODEL_NAME": "",
+    }):
+        provider = OllamaLocalModelProvider()
+        req = LocalModelProviderRequest(task_id="t6", prompt="test", evidence_refs=())
+        resp = provider.generate(req)
+        assert resp.model_called is False
+        assert resp.error == "model_name_missing"
+
+
+def test_ollama_local_model_provider_success() -> None:
+    with mock.patch.dict(os.environ, {
+        "NEXUS_LOCAL_MODEL_CALL_ALLOWED": "1",
+        "NEXUS_LOCAL_MODEL_PROVIDER": "ollama",
+        "NEXUS_LOCAL_MODEL_NAME": "qwen2.5-coder:7b",
+    }):
+        provider = OllamaLocalModelProvider()
+        req = LocalModelProviderRequest(task_id="t7", prompt="test code", evidence_refs=())
+        
+        mock_response = mock.MagicMock()
+        mock_response.read.return_value = b'{"response": "suggested patch code"}'
+        mock_response.__enter__.return_value = mock_response
+        
+        with mock.patch("urllib.request.urlopen", return_value=mock_response):
+            resp = provider.generate(req)
+            assert resp.provider_invoked is True
+            assert resp.model_called is True
+            assert resp.model_name == "qwen2.5-coder:7b"
+            assert resp.output_text == "suggested patch code"
