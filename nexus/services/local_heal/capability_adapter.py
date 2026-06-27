@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+import os
 from typing import Any, Mapping
 
 from nexus.contracts.hybrid_route import (
@@ -12,6 +13,7 @@ from nexus.contracts.hybrid_route import (
     hybrid_route_decision_from_payload,
 )
 from nexus.services.local_heal.hybrid_route_bridge import capability_payload_from_hybrid_route
+from nexus.services.local_heal.capability_runtime_policy import build_local_heal_runtime_policy
 
 
 @dataclass(frozen=True)
@@ -38,7 +40,9 @@ class LocalHealCapabilityAdapter:
         enable_local_heal = bool(controls.get("enable_local_heal", False))
         local_heal_mode = controls.get("local_heal_mode", "disabled")
         
-        if not enable_local_heal or local_heal_mode == "disabled":
+        policy = build_local_heal_runtime_policy(os.environ, controls)
+        
+        if not enable_local_heal or (local_heal_mode == "disabled" and not policy.enable_pipeline):
             payload = build_hybrid_route_decision(
                 route_mode=RouteMode.CLOUD_ASSISTED_BY_LOCAL_TRACE_ONLY,
                 public_claim_allowed=False,
@@ -54,11 +58,17 @@ class LocalHealCapabilityAdapter:
             decision = hybrid_route_decision_from_payload(payload)
             invoked = False
             
-        elif enable_local_heal and local_heal_mode == "shadow_only":
-            blockers = ["shadow_only_no_runtime"]
+        elif enable_local_heal and (local_heal_mode == "shadow_only" or policy.enable_pipeline):
+            blockers = []
             if not request.evidence_refs:
                 blockers.append("missing_evidence_refs")
             
+            if local_heal_mode == "shadow_only":
+                blockers.append("shadow_only_no_runtime")
+                
+            if not policy.mutation_allowed:
+                blockers.append("mutation_not_allowed")
+                
             fallback_block_reason = ";".join(sorted(blockers))
             
             payload = build_hybrid_route_decision(

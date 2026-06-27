@@ -48,9 +48,9 @@ def test_abc_local_heal_shadow_seam() -> None:
     assert response.invoked is True
     assert hr.route_mode.value == "local_only_blocked"
     assert hr.authority.value == "trace_only"
-    assert hr.fallback_block_reason == "shadow_only_no_runtime"
+    assert "shadow_only_no_runtime" in hr.fallback_block_reason
+    assert "mutation_not_allowed" in hr.fallback_block_reason
     
-    # 規格要求 assert 點
     assert response.capability_payload["adapter_invoked"] is True
     assert response.capability_payload["invoked"] is False
     assert response.hybrid_route.local_model_called is False
