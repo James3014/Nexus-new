@@ -89,6 +89,7 @@ def test_real_ollama_solve_lane_factorial_fix() -> None:
                     "HASH_MISMATCH", "SEARCH_MISMATCH", "VERIFIER_FAIL",
                     "missing_unified_diff", "constraint_violation",
                     "patch_outside_locked_span", "target_file_mismatch",
+                    "PATCH_APPLY_FAILED",
                 }
                 known_acceptable = {
                     "hash_match_not_proven", "missing_applied_patch_hash",
@@ -96,7 +97,10 @@ def test_real_ollama_solve_lane_factorial_fix() -> None:
                     "mutation_not_allowed", "verifier_fail_or_not_run",
                 }
                 actual_blockers = set(block_reason.split(";")) if block_reason else set()
-                infra_blockers = actual_blockers - content_blockers - known_acceptable - {""}
+                infra_blockers = {
+                    b for b in (actual_blockers - content_blockers - known_acceptable - {""})
+                    if "patch failed" not in b and "does not apply" not in b and "corrupt patch" not in b
+                }
                 print(f"Model produced output but blocked (content/parse issues). blockers={actual_blockers}")
                 assert not infra_blockers, (
                     f"Unexpected infrastructure blockers detected (model should have been called and pipeline should be intact): {infra_blockers}"

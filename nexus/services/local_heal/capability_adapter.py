@@ -135,6 +135,9 @@ class LocalHealCapabilityAdapter:
                     f"Expected Verifier Goal/Verification: {verifier_cmd}\n\n"
                     f"Return only a standard unified diff wrapped in fenced ```diff block.\n"
                     f"Do not include any prose, explanation, or extra commentary.\n"
+                    f"You MUST use standard header naming with a/ and b/ prefix. Example:\n"
+                    f"--- a/{target_file}\n"
+                    f"+++ b/{target_file}\n"
                     f"Make sure the hunk headers (e.g. @@ -L,C +L,C @@) match and only modify code within the locked search span.\n"
                 )
                 

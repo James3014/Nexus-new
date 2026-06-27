@@ -252,3 +252,52 @@ def test_fixture_missing_evidence_blocked() -> None:
             assert "missing_required_control" in res["fallback_block_reason"]
             assert res["public_claim_allowed"] is False
             assert res["production_ready"] is False
+
+
+def test_fixture_diff_normalization_success() -> None:
+    with tempfile.TemporaryDirectory() as src_root:
+        test_file = "f.py"
+        src_path = os.path.join(src_root, test_file)
+        with open(src_path, "w", encoding="utf-8") as f:
+            f.write("print('hello')\n")
+            
+        diff = """--- old_f.py
++++ new_f.py
+@@ -1 +1 @@
+-print('hello')
++print('world')
+"""
+        with tempfile.TemporaryDirectory() as temp_dir:
+            model_out_path = os.path.join(temp_dir, "model.diff")
+            with open(model_out_path, "w", encoding="utf-8") as f:
+                f.write(f"```diff\n{diff}```")
+                
+            output_json = os.path.join(temp_dir, "output.json")
+            verifier_cmd = ["python3", "-c", "import pathlib; assert pathlib.Path('f.py').read_text() == 'print(\\'world\\')\\n'"]
+            
+            argv = [
+                "run_controlled_local_solve_fixture.py",
+                "--task-id", "t_fix_norm",
+                "--source-root", src_root,
+                "--target-file", test_file,
+                "--target-symbol", "print",
+                "--locked-search", "print('hello')",
+                "--verifier-command-json", json.dumps(verifier_cmd),
+                "--model-output-file", model_out_path,
+                "--provider-mode", "injected",
+                "--output-json", output_json,
+            ]
+            
+            with mock.patch("sys.argv", argv):
+                exit_code = main()
+                
+            assert exit_code == 0
+            with open(output_json, "r", encoding="utf-8") as f:
+                res = json.load(f)
+                
+            assert res["route_mode"] == "local_only_executed"
+            assert res["gate_passed"] is True
+            assert res["metadata"]["normalized"] is True
+            assert res["metadata"]["original_target_file"] == "new_f.py"
+            assert res["metadata"]["normalized_target_file"] == "f.py"
+            assert "filename_mismatch" in res["metadata"]["normalization_reason"]

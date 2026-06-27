@@ -80,6 +80,20 @@ def is_patch_outside_span(unified_diff: str, span_start: int, span_end: int) -> 
 def run_isolated_local_solve_loop(request: IsolatedLocalSolveRequest) -> IsolatedLocalSolveResponse:
     envelope = parse_local_model_patch_envelope(request.task_id, request.model_output)
     
+    from nexus.services.local_heal.diff_normalizer import normalize_diff_header
+    normalized_diff, normalizer_receipt = normalize_diff_header(envelope.unified_diff, request.target_file)
+    
+    if normalizer_receipt.normalized:
+        import hashlib
+        from dataclasses import replace
+        new_hash = hashlib.sha256(normalized_diff.encode("utf-8")).hexdigest()
+        envelope = replace(
+            envelope,
+            target_file=request.target_file,
+            unified_diff=normalized_diff,
+            candidate_hash=new_hash,
+        )
+        
     anchor = build_local_model_source_anchor(
         source_root=request.source_root,
         target_file=request.target_file,
@@ -222,6 +236,11 @@ def run_isolated_local_solve_loop(request: IsolatedLocalSolveRequest) -> Isolate
         "applied_patch_hash": apply_receipt.applied_patch_hash,
         "applied_patch_hash_source": apply_receipt.applied_patch_hash_source,
         "verifier_status": verifier_receipt.verifier_status,
+        "original_target_file": normalizer_receipt.original_target_file,
+        "normalized_target_file": normalizer_receipt.normalized_target_file,
+        "normalization_reason": normalizer_receipt.normalization_reason,
+        "normalized_by_rule": normalizer_receipt.normalized_by_rule,
+        "normalized": normalizer_receipt.normalized,
     })
     capability_payload["metadata"] = metadata
     

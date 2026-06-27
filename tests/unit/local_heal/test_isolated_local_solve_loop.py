@@ -146,8 +146,9 @@ def test_isolated_local_solve_loop_target_file_mismatch() -> None:
     )
     resp = run_isolated_local_solve_loop(req)
     assert resp.hybrid_route.route_mode == RouteMode.LOCAL_ONLY_BLOCKED
-    assert "target_file_mismatch" in resp.hybrid_route.fallback_block_reason
-    assert "SEARCH_MISMATCH" in resp.hybrid_route.fallback_block_reason
+    assert "PATCH_APPLY_FAILED" in resp.hybrid_route.fallback_block_reason
+    assert resp.capability_payload["metadata"]["normalized"] is True
+    assert resp.capability_payload["metadata"]["original_target_file"] == "wrong_file.py"
 
 
 def test_isolated_local_solve_loop_outside_locked_span() -> None:
