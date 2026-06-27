@@ -72,6 +72,7 @@ def test_smoke_runner_mocked_success() -> None:
                         "--source-root", src_root,
                         "--target-file", test_file,
                         "--verifier-command", "python3 -c 'print(1)'",
+                        "--locked-search", "print('hello')\n",
                     ]
                     with patch("sys.argv", argv):
                         code = main()

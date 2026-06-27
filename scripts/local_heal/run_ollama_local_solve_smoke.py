@@ -24,6 +24,8 @@ def main() -> int:
     parser.add_argument("--target-file", default="main.py")
     parser.add_argument("--verifier-command", default="python3 -c 'print(1)'")
     parser.add_argument("--work-dir", default="")
+    parser.add_argument("--target-symbol", default="")
+    parser.add_argument("--locked-search", default="")
     args = parser.parse_args()
     
     smoke_enable = os.environ.get("NEXUS_LOCAL_SOLVE_SMOKE_ENABLE") == "1"
@@ -78,6 +80,16 @@ def main() -> int:
         
     verifier_cmd = tuple(args.verifier_command.split())
     
+    locked_search = args.locked_search
+    if not locked_search:
+        target_path = os.path.join(args.source_root, args.target_file)
+        if os.path.exists(target_path):
+            try:
+                with open(target_path, "r", encoding="utf-8") as f:
+                    locked_search = f.read()
+            except Exception:
+                pass
+
     request = IsolatedLocalSolveRequest(
         task_id=args.task_id,
         source_root=args.source_root,
@@ -89,6 +101,9 @@ def main() -> int:
         local_model_called=True,
         mutation_allowed=True,
         verifier_allowed=True,
+        target_file=args.target_file,
+        target_symbol=args.target_symbol,
+        locked_search=locked_search,
     )
     
     response = run_isolated_local_solve_loop(request)

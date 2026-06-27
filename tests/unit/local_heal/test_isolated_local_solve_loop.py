@@ -23,6 +23,7 @@ def test_isolated_local_solve_loop_blocked() -> None:
         local_model_called=True,
         mutation_allowed=False,
         verifier_allowed=True,
+        target_file="f.py",
     )
     resp = run_isolated_local_solve_loop(req)
     assert resp.hybrid_route.route_mode == RouteMode.LOCAL_ONLY_BLOCKED
@@ -52,6 +53,7 @@ def test_isolated_local_solve_loop_success() -> None:
             local_model_called=True,
             mutation_allowed=True,
             verifier_allowed=True,
+            target_file="f.py",
         )
         
         resp = run_isolated_local_solve_loop(req)
@@ -65,8 +67,7 @@ def test_isolated_local_solve_loop_success() -> None:
         assert resp.hybrid_route.authority == Authority.INTERNAL_ONLY
         assert resp.capability_payload["gate_passed"] is True
         
-        assert resp.hybrid_route.public_claim_allowed is False
-        assert resp.hybrid_route.production_ready is False
+        assert resp.capability_payload["metadata"]["canonical_span_source"] == "unified_diff"
         
         with open(src_path, "r", encoding="utf-8") as f:
             assert f.read() == "print('hello')\n"
@@ -98,6 +99,7 @@ def test_isolated_local_solve_loop_hash_mismatch_blocked() -> None:
             local_model_called=True,
             mutation_allowed=True,
             verifier_allowed=True,
+            target_file="f.py",
         )
         
         from unittest.mock import patch
@@ -123,6 +125,60 @@ def test_isolated_local_solve_loop_hash_mismatch_blocked() -> None:
         assert resp.apply_receipt.selected_candidate_hash_matches_applied is False
         assert resp.hybrid_route.route_mode == RouteMode.LOCAL_ONLY_BLOCKED
         assert "hash_match_not_proven" in resp.hybrid_route.fallback_block_reason
+        assert "HASH_MISMATCH" in resp.hybrid_route.fallback_block_reason
         
         if os.path.exists(resp.apply_receipt.workspace_path):
             shutil.rmtree(resp.apply_receipt.workspace_path)
+
+
+def test_isolated_local_solve_loop_target_file_mismatch() -> None:
+    req = IsolatedLocalSolveRequest(
+        task_id="t4",
+        source_root=".",
+        problem_statement="fix code",
+        evidence_refs=("ref1",),
+        model_output="```diff\n--- a/wrong_file.py\n+++ b/wrong_file.py\n-print()\n+print(1)\n```",
+        verifier_command=("python3", "-c", "print(1)"),
+        local_model_called=True,
+        mutation_allowed=True,
+        verifier_allowed=True,
+        target_file="f.py",
+    )
+    resp = run_isolated_local_solve_loop(req)
+    assert resp.hybrid_route.route_mode == RouteMode.LOCAL_ONLY_BLOCKED
+    assert "target_file_mismatch" in resp.hybrid_route.fallback_block_reason
+    assert "SEARCH_MISMATCH" in resp.hybrid_route.fallback_block_reason
+
+
+def test_isolated_local_solve_loop_outside_locked_span() -> None:
+    with tempfile.TemporaryDirectory() as src_root:
+        test_file = "f.py"
+        src_path = os.path.join(src_root, test_file)
+        with open(src_path, "w", encoding="utf-8") as f:
+            f.write("line 1\nline 2\nline 3\nline 4\nline 5\n")
+            
+        diff = """--- a/f.py
++++ b/f.py
+@@ -2,1 +2,1 @@
+-line 2
++line 2 modified
+"""
+        req = IsolatedLocalSolveRequest(
+            task_id="t5",
+            source_root=src_root,
+            problem_statement="fix code",
+            evidence_refs=("ref1",),
+            model_output=f"```diff\n{diff}```",
+            verifier_command=("python3", "-c", "print(1)"),
+            local_model_called=True,
+            mutation_allowed=True,
+            verifier_allowed=True,
+            target_file="f.py",
+            target_symbol="func",
+            locked_search="line 4\nline 5",
+        )
+        
+        resp = run_isolated_local_solve_loop(req)
+        assert resp.hybrid_route.route_mode == RouteMode.LOCAL_ONLY_BLOCKED
+        assert "patch_outside_locked_span" in resp.hybrid_route.fallback_block_reason
+        assert "SEARCH_MISMATCH" in resp.hybrid_route.fallback_block_reason

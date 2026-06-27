@@ -36,6 +36,7 @@ def test_isolated_local_solve_loop_seam_violations() -> None:
             local_model_called=True,
             mutation_allowed=True,
             verifier_allowed=False,
+            target_file="f.py",
         )
         resp1 = run_isolated_local_solve_loop(req1)
         assert resp1.hybrid_route.route_mode == RouteMode.LOCAL_ONLY_BLOCKED
@@ -53,6 +54,7 @@ def test_isolated_local_solve_loop_seam_violations() -> None:
             local_model_called=True,
             mutation_allowed=True,
             verifier_allowed=True,
+            target_file="f.py",
         )
         resp2 = run_isolated_local_solve_loop(req2)
         assert resp2.hybrid_route.route_mode == RouteMode.LOCAL_ONLY_BLOCKED
@@ -70,6 +72,7 @@ def test_isolated_local_solve_loop_seam_violations() -> None:
             local_model_called=True,
             mutation_allowed=True,
             verifier_allowed=True,
+            target_file="f.py",
         )
         resp3 = run_isolated_local_solve_loop(req3)
         assert resp3.hybrid_route.route_mode == RouteMode.LOCAL_ONLY_BLOCKED
@@ -88,6 +91,7 @@ def test_isolated_local_solve_loop_seam_violations() -> None:
             local_model_called=True,
             mutation_allowed=True,
             verifier_allowed=True,
+            target_file="f.py",
         )
         resp4 = run_isolated_local_solve_loop(req4)
         assert resp4.hybrid_route.route_mode == RouteMode.LOCAL_ONLY_BLOCKED
