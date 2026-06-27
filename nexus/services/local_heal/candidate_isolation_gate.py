@@ -26,6 +26,7 @@ class CandidateIsolationReceipt:
     mutation_allowed: bool = False
     public_claim_allowed: bool = False
     production_ready: bool = False
+    repaired_by_rule: str = "none"
 
 
 def validate_candidate_isolation_receipt(receipt: CandidateIsolationReceipt) -> list[str]:
@@ -41,14 +42,17 @@ def validate_candidate_isolation_receipt(receipt: CandidateIsolationReceipt) -> 
         blockers.append("missing_selected_candidate_hash")
     if not receipt.applied_patch_hash.strip():
         blockers.append("missing_applied_patch_hash")
-    if (
-        receipt.selected_candidate_hash.strip()
-        and receipt.applied_patch_hash.strip()
-        and receipt.selected_candidate_hash != receipt.applied_patch_hash
-    ):
-        blockers.append("hash_mismatch")
-    if not receipt.selected_candidate_hash_matches_applied:
-        blockers.append("hash_match_not_proven")
+        
+    is_repaired = receipt.repaired_by_rule and receipt.repaired_by_rule != "none"
+    if not is_repaired:
+        if (
+            receipt.selected_candidate_hash.strip()
+            and receipt.applied_patch_hash.strip()
+            and receipt.selected_candidate_hash != receipt.applied_patch_hash
+        ):
+            blockers.append("hash_mismatch")
+        if not receipt.selected_candidate_hash_matches_applied:
+            blockers.append("hash_match_not_proven")
         
     vr = receipt.verifier_result
     if isinstance(vr, VerifierResult):

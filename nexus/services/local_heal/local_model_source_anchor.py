@@ -52,12 +52,14 @@ def build_local_model_source_anchor(
         try:
             content = source_file_path.read_text(encoding="utf-8")
             lines = content.splitlines()
-            span_lines = res.span.strip().splitlines()
-            for i in range(len(lines) - len(span_lines) + 1):
-                if lines[i:i+len(span_lines)] == span_lines:
-                    start_line = i + 1
-                    end_line = i + len(span_lines)
-                    break
+            span_lines = [sl.strip() for sl in res.span.strip().splitlines() if sl.strip()]
+            if span_lines:
+                for i in range(len(lines) - len(span_lines) + 1):
+                    file_sub = [lines[i+j].strip() for j in range(len(span_lines))]
+                    if file_sub == span_lines:
+                        start_line = i + 1
+                        end_line = i + len(span_lines)
+                        break
         except Exception:
             pass
             

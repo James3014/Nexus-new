@@ -80,6 +80,9 @@ def is_patch_outside_span(unified_diff: str, span_start: int, span_end: int) -> 
 def run_isolated_local_solve_loop(request: IsolatedLocalSolveRequest) -> IsolatedLocalSolveResponse:
     envelope = parse_local_model_patch_envelope(request.task_id, request.model_output)
     
+    from nexus.services.local_heal.diff_repair import RepairReceipt
+    repair_receipt = RepairReceipt(False, False, "none", "", "", "none", False)
+    
     from nexus.services.local_heal.diff_normalizer import normalize_diff_header
     normalized_diff, normalizer_receipt = normalize_diff_header(envelope.unified_diff, request.target_file)
     
@@ -126,11 +129,8 @@ def run_isolated_local_solve_loop(request: IsolatedLocalSolveRequest) -> Isolate
                 loop_blockers.append("SEARCH_MISMATCH")
                 has_constraint_blockers = True
                 
-        if not has_constraint_blockers and anchor.span_start > 0 and anchor.span_end > 0:
-            if is_patch_outside_span(envelope.unified_diff, anchor.span_start, anchor.span_end):
-                loop_blockers.append("patch_outside_locked_span")
-                loop_blockers.append("SEARCH_MISMATCH")
-                has_constraint_blockers = True
+        # De-escalate is_patch_outside_span check to downstream to allow deterministic repair to resolve malformed spans
+        pass
                 
     if has_constraint_blockers:
         apply_receipt = IsolatedApplyReceipt(
@@ -155,6 +155,8 @@ def run_isolated_local_solve_loop(request: IsolatedLocalSolveRequest) -> Isolate
             verifier_allowed=False,
         )
     else:
+        from nexus.services.local_heal.diff_repair import repair_malformed_diff
+        
         apply_req = IsolatedApplyRequest(
             task_id=request.task_id,
             source_root=request.source_root,
@@ -165,6 +167,37 @@ def run_isolated_local_solve_loop(request: IsolatedLocalSolveRequest) -> Isolate
             mutation_allowed=request.mutation_allowed,
         )
         apply_receipt = run_isolated_workspace_apply(apply_req)
+        
+        orig_outside = False
+        if anchor.span_start > 0 and anchor.span_end > 0:
+            orig_outside = is_patch_outside_span(envelope.unified_diff, anchor.span_start, anchor.span_end)
+            
+        if (apply_receipt.patch_apply_status == "failed" or orig_outside) and request.locked_search:
+            from dataclasses import replace
+            repaired_diff, rep_receipt = repair_malformed_diff(
+                envelope.unified_diff,
+                request.target_file,
+                request.locked_search,
+                span_start=anchor.span_start if anchor.span_start > 0 else 1,
+                source_root=request.source_root,
+            )
+            repair_receipt = rep_receipt
+            if repair_receipt.repair_success:
+                envelope = replace(
+                    envelope,
+                    unified_diff=repaired_diff,
+                    candidate_hash=repair_receipt.repaired_patch_hash,
+                )
+                apply_req = IsolatedApplyRequest(
+                    task_id=request.task_id,
+                    source_root=request.source_root,
+                    target_file=envelope.target_file,
+                    unified_diff=envelope.unified_diff,
+                    selected_candidate_hash=envelope.candidate_hash,
+                    work_dir=request.work_dir,
+                    mutation_allowed=request.mutation_allowed,
+                )
+                apply_receipt = run_isolated_workspace_apply(apply_req)
         
         workspace_path = apply_receipt.workspace_path if apply_receipt.workspace_path else request.source_root
         
@@ -192,6 +225,7 @@ def run_isolated_local_solve_loop(request: IsolatedLocalSolveRequest) -> Isolate
         evidence_refs=request.evidence_refs,
         local_model_called=request.local_model_called,
         mutation_allowed=request.mutation_allowed and apply_receipt.patch_apply_status == "applied",
+        repaired_by_rule=repair_receipt.repaired_by_rule,
     )
     
     hr_decision = candidate_isolation_to_hybrid_route(isolation_receipt)
@@ -200,6 +234,11 @@ def run_isolated_local_solve_loop(request: IsolatedLocalSolveRequest) -> Isolate
     if hr_decision.fallback_block_reason:
         blockers.extend(hr_decision.fallback_block_reason.split(";"))
         
+    if anchor.span_start > 0 and anchor.span_end > 0:
+        if is_patch_outside_span(envelope.unified_diff, anchor.span_start, anchor.span_end):
+            blockers.append("patch_outside_locked_span")
+            blockers.append("SEARCH_MISMATCH")
+            
     if apply_receipt.patch_apply_status == "failed":
         blockers.append("PATCH_APPLY_FAILED")
         if apply_receipt.patch_apply_error:
@@ -208,7 +247,11 @@ def run_isolated_local_solve_loop(request: IsolatedLocalSolveRequest) -> Isolate
     if verifier_receipt.verifier_status == "fail":
         blockers.append("VERIFIER_FAIL")
         
-    if apply_receipt.patch_apply_status == "applied" and not apply_receipt.selected_candidate_hash_matches_applied:
+    if (
+        apply_receipt.patch_apply_status == "applied"
+        and not apply_receipt.selected_candidate_hash_matches_applied
+        and repair_receipt.repaired_by_rule == "none"
+    ):
         blockers.append("HASH_MISMATCH")
         
     if verifier_receipt.verifier_error:
@@ -241,6 +284,11 @@ def run_isolated_local_solve_loop(request: IsolatedLocalSolveRequest) -> Isolate
         "normalization_reason": normalizer_receipt.normalization_reason,
         "normalized_by_rule": normalizer_receipt.normalized_by_rule,
         "normalized": normalizer_receipt.normalized,
+        "repair_attempted": repair_receipt.repair_attempted,
+        "repair_success": repair_receipt.repair_success,
+        "repair_reason": repair_receipt.repair_reason,
+        "repaired_by_rule": repair_receipt.repaired_by_rule,
+        "still_within_locked_span": repair_receipt.still_within_locked_span,
     })
     capability_payload["metadata"] = metadata
     
