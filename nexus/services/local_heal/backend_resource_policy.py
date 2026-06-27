@@ -60,6 +60,14 @@ DEFAULT_POLICIES: dict[str, ModelPolicy] = {
         timeout_seconds=300,
         result_classification="local_success",
     ),
+    "deepseek-coder:6.7b-instruct": ModelPolicy(
+        model_name="deepseek-coder:6.7b-instruct",
+        model_tier=ModelTier.LOCAL_7B,
+        resource_policy=ResourcePolicy.ALLOWED,
+        timeout_seconds=300,
+        result_classification="local_success",
+        notes="6.7B local model — allowed for explicit secondary-proposer/manual route use",
+    ),
     "gemma4-coder-12b-q4km:latest": ModelPolicy(
         model_name="gemma4-coder-12b-q4km:latest",
         model_tier=ModelTier.LOCAL_12B,

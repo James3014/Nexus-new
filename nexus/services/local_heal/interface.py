@@ -98,6 +98,7 @@ class PatchSynthesisInput:
     python_executable: str = ""
     last_search_anchors: List[str] = field(default_factory=list)
     last_replacement_texts: List[str] = field(default_factory=list)
+    committee_model_override: str = ""
 
 @dataclass(frozen=True)
 class PatchSynthesisOutput:

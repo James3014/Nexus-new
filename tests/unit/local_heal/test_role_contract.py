@@ -2,6 +2,7 @@ import pytest
 from nexus.services.local_heal.role_contract import (
     ModelRole,
     PHASE_ROLE_CONTRACT,
+    ROLE_CONTRACT,
     RoleReceipt,
     build_role_receipt,
     check_role_drift,
@@ -62,6 +63,18 @@ def test_unknown_phase_has_no_contract():
     assert drift is None
 
 
+def test_manual_route_roles_are_contracted():
+    assert ROLE_CONTRACT["judge"] == ModelRole.JUDGE
+    assert ROLE_CONTRACT["proposer"] == ModelRole.PROPOSER
+    assert ROLE_CONTRACT["secondary_proposer"] == ModelRole.SECONDARY_PROPOSER
+
+
+def test_manual_route_roles_match_legacy_models():
+    assert check_role_drift("judge", "qwen2.5:3b") is None
+    assert check_role_drift("proposer", "qwen2.5-coder:7b") is None
+    assert check_role_drift("secondary_proposer", "deepseek-coder:6.7b-instruct") is None
+
+
 def test_unknown_model_skips_drift_check():
     drift = check_role_drift("patch", "some-unknown-model")
     assert drift is None
@@ -104,6 +117,34 @@ def test_build_role_receipt_detects_drift():
     assert receipt.role_drift_detected is True
     assert receipt.selected_model_role == "patcher"
     assert receipt.invoked_model_role == "selector"
+
+
+def test_build_role_receipt_supports_manual_route_roles():
+    judge_receipt = build_role_receipt(
+        phase="judge",
+        model_name="qwen2.5:3b",
+        reason_code="manual_route_judge",
+    )
+    proposer_receipt = build_role_receipt(
+        phase="proposer",
+        model_name="qwen2.5-coder:7b",
+        reason_code="manual_route_proposer",
+    )
+    secondary_receipt = build_role_receipt(
+        phase="secondary_proposer",
+        model_name="deepseek-coder:6.7b-instruct",
+        reason_code="manual_route_secondary_proposer",
+    )
+
+    assert judge_receipt.role_drift_detected is False
+    assert judge_receipt.selected_model_role == "judge"
+    assert judge_receipt.invoked_model_role == "judge"
+    assert proposer_receipt.role_drift_detected is False
+    assert proposer_receipt.selected_model_role == "proposer"
+    assert proposer_receipt.invoked_model_role == "proposer"
+    assert secondary_receipt.role_drift_detected is False
+    assert secondary_receipt.selected_model_role == "secondary_proposer"
+    assert secondary_receipt.invoked_model_role == "secondary_proposer"
 
 
 def test_3b_output_cannot_be_patch_success():

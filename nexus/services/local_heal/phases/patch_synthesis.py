@@ -91,6 +91,22 @@ class PatchSynthesisPhase(IPhase):
                 "failure_reason": input_data.failure_reason,
             },
         )
+        if input_data.committee_model_override:
+            patch_decision = {
+                **patch_decision,
+                "model": input_data.committee_model_override,
+                "reason_code": "committee_explicit_proposer_override",
+                "ollama_options": LocalModelPolicy.select_model(
+                    task_type="swe_repair",
+                    phase="patch",
+                    context={
+                        "reasoning_mode": input_data.reasoning_mode,
+                        "file_count": len(input_data.localized_files) or 1,
+                        "attempt": input_data.attempt,
+                        "failure_reason": input_data.failure_reason,
+                    },
+                ).get("ollama_options"),
+            }
         model_decisions.append({"phase": "patch", **patch_decision})
 
         # 3. [Specification-Centric Repair] 生成修復規格 (若尚未存在)
@@ -327,7 +343,8 @@ class PatchSynthesisPhase(IPhase):
             failure_reason=ctx.op.failure_reason,
             python_executable=ctx.op.python_executable,
             last_search_anchors=getattr(ctx.op, "last_search_anchors", []),
-            last_replacement_texts=getattr(ctx.op, "last_replacement_texts", [])
+            last_replacement_texts=getattr(ctx.op, "last_replacement_texts", []),
+            committee_model_override=str(getattr(ctx.op, "committee_proposer_model", "") or ""),
         )
 
         output = self.run(input_data)

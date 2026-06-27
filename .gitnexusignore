@@ -1,2 +1,88 @@
 scratch/
 scratch/**/*
+artifacts/
+artifacts/**/*
+
+# Python cache
+__pycache__/
+__pycache__/**/*
+
+# Nexus runtime state (1.6GB)
+.nexus/
+.nexus/**/*
+
+# Training data & adapters
+training/
+training/**/*
+
+# Compiled binaries & generated output
+nexus_swarm/
+nexus_swarm/**/*
+packages/
+packages/**/*
+Autoresearch_runtime/
+Autoresearch_runtime/**/*
+
+# Static evidence & reports
+nexus_evidence_pack_20260407/
+nexus_evidence_pack_20260407/**/*
+nexus_sota_records/
+nexus_sota_records/**/*
+nexus_github_pr_vault/
+nexus_github_pr_vault/**/*
+verification-evidence/
+verification-evidence/**/*
+perf_regression_pack_v22.5/
+perf_regression_pack_v22.5/**/*
+phase_metrics/
+phase_metrics/**/*
+pilot_delivery_bundle/
+pilot_delivery_bundle/**/*
+reports/
+reports/**/*
+results/
+results/**/*
+benchmarking/
+benchmarking/**/*
+
+# Package metadata & node_modules
+muse_nexus.egg-info/
+muse_nexus.egg-info/**/*
+nexus-deck/
+nexus-deck/**/*
+
+# Empty directories
+nexus-mempalace/
+nexus-rust-v16/
+SWE-bench/
+notebooklm-py-audit/
+
+# Old/deprecated
+legacy/
+legacy/**/*
+archives/
+archives/**/*
+nexus-swarm-v22-prod/
+nexus-swarm-v22-prod/**/*
+
+# External patches & test data
+patches/
+patches/**/*
+cases/
+cases/**/*
+repro/
+repro/**/*
+run_test/
+run_test/**/*
+self_test_zone/
+self_test_zone/**/*
+trials/
+trials/**/*
+
+# Static docs & configs
+nexus_agent_brain_hub/
+nexus_agent_brain_hub/**/*
+compliance/
+compliance/**/*
+astropy/
+astropy/**/*
