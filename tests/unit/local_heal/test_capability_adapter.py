@@ -97,3 +97,25 @@ def test_capability_adapter_advisory_enabled_by_env() -> None:
         assert response.hybrid_route.adapter_output_is_route_truth is False
         assert response.capability_payload["gate_passed"] is False
         assert response.hybrid_route.route_mode != RouteMode.LOCAL_ONLY_EXECUTED
+
+
+def test_capability_adapter_fail_closed_guard_blocked() -> None:
+    with mock.patch.dict(os.environ, {"NEXUS_LOCAL_GUARD_FAIL_CLOSED_ENABLE": "1"}):
+        request = LocalHealCapabilityRequest(
+            task_id="t6",
+            problem_statement="fix test suite",
+            evidence_refs=("ref1",),
+            executor_controls={
+                "enable_local_heal": True,
+                "local_heal_mode": "shadow_only",
+                "verifier_result": "fail",
+            },
+        )
+        response = LocalHealCapabilityAdapter.run(request)
+        assert response.invoked is True
+        assert response.hybrid_route.route_mode == RouteMode.CLOUD_FIRST_LOCAL_GUARD_FAIL_CLOSED
+        assert response.hybrid_route.authority == Authority.FAIL_CLOSED
+        assert response.capability_payload["gate_passed"] is False
+        assert "verifier_fail" in response.hybrid_route.fallback_block_reason
+        assert response.hybrid_route.public_claim_allowed is False
+        assert response.hybrid_route.production_ready is False

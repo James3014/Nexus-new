@@ -118,3 +118,49 @@ def test_abc_local_heal_advisory_seam() -> None:
         assert receipt.gate_passed is False
         assert receipt.outcome_contributed is False
         assert receipt.public_claim_safe is False
+
+
+def test_abc_local_heal_fail_closed_seam() -> None:
+    with mock.patch.dict(os.environ, {"NEXUS_LOCAL_GUARD_FAIL_CLOSED_ENABLE": "1"}):
+        plan = CapabilityPlan(
+            schema_version="nexus_capability_plan_v1",
+            selected_capabilities=["local_heal"],
+            required_capabilities=["local_heal"],
+            optional_capabilities=[],
+            conditional_capabilities=[],
+            pending_capabilities=[],
+            forbidden_capabilities=[],
+            constraints=[],
+            decision_trace=[],
+            replan_trace=[],
+            score=95.0,
+        )
+        
+        exe_plan = build_execution_plan(plan)
+        controls = dict(exe_plan.executor_controls)
+        controls["verifier_result"] = "fail"
+        
+        request = LocalHealCapabilityRequest(
+            task_id="task-e2e-fail-closed",
+            problem_statement="fix test seam",
+            evidence_refs=("ref-e2e-1",),
+            executor_controls=controls,
+        )
+        response = LocalHealCapabilityAdapter.run(request)
+        
+        hr = response.hybrid_route
+        assert response.invoked is True
+        assert hr.route_mode.value == "cloud_first_local_guard_fail_closed"
+        assert hr.authority.value == "fail_closed"
+        assert "verifier_fail" in hr.fallback_block_reason
+        assert response.capability_payload["gate_passed"] is False
+        
+        adapter = LocalHealReceiptAdapter()
+        receipt = adapter.build(claim_verified=False, payload=response.capability_payload)
+        
+        assert receipt.name == "local_heal"
+        assert receipt.selected is True
+        assert receipt.invoked is True
+        assert receipt.gate_passed is False
+        assert receipt.outcome_contributed is False
+        assert receipt.public_claim_safe is False

@@ -19,6 +19,10 @@ from nexus.services.local_heal.local_model_advisory_adapter import (
     LocalModelAdvisoryAdapter,
     LocalModelAdvisoryRequest,
 )
+from nexus.services.local_heal.local_guard_fail_closed import (
+    LocalGuardInput,
+    run_local_guard_fail_closed,
+)
 
 
 @dataclass(frozen=True)
@@ -146,6 +150,47 @@ class LocalHealCapabilityAdapter:
             decision = hybrid_route_decision_from_payload(payload)
             invoked = False
             
+        if os.environ.get("NEXUS_LOCAL_GUARD_FAIL_CLOSED_ENABLE") == "1":
+            vr_val = payload.get("verifier_result")
+            vr_str = vr_val.value if hasattr(vr_val, "value") else str(vr_val) if vr_val else "not_run"
+            
+            vr_str_in = controls.get("verifier_result", vr_str)
+            sel_hash_in = controls.get("selected_candidate_hash", payload.get("selected_candidate_hash", ""))
+            app_hash_in = controls.get("applied_patch_hash", payload.get("applied_patch_hash", ""))
+            rts_in = controls.get("route_truth_source", payload.get("route_truth_source", "CapabilityPlanner"))
+            
+            guard_input = LocalGuardInput(
+                task_id=request.task_id,
+                route_payload=payload,
+                evidence_refs=payload.get("evidence_refs", ()),
+                verifier_result=vr_str_in,
+                selected_candidate_hash=sel_hash_in,
+                applied_patch_hash=app_hash_in,
+                route_truth_source=rts_in,
+            )
+            
+            decision_guard = run_local_guard_fail_closed(guard_input)
+            if decision_guard.guard_blocked:
+                old_blockers = [b for b in payload.get("fallback_block_reason", "").split(";") if b]
+                all_blockers = sorted(set(list(decision_guard.blockers) + old_blockers))
+                fallback_block_reason = ";".join(all_blockers)
+                
+                payload = build_hybrid_route_decision(
+                    route_mode=RouteMode.CLOUD_FIRST_LOCAL_GUARD_FAIL_CLOSED,
+                    public_claim_allowed=False,
+                    production_ready=False,
+                    adapter_output_is_route_truth=False,
+                    route_truth_source="CapabilityPlanner",
+                    behavior_changed=False,
+                    authority=Authority.FAIL_CLOSED,
+                    local_model_called=payload.get("local_model_called", False),
+                    verifier_result=vr_val,
+                    evidence_refs=payload.get("evidence_refs", ()),
+                    fallback_block_reason=fallback_block_reason,
+                    metadata=payload.get("metadata", {}),
+                )
+                decision = hybrid_route_decision_from_payload(payload)
+                
         capability_payload = capability_payload_from_hybrid_route(decision)
         capability_payload["adapter_invoked"] = invoked
         
