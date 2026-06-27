@@ -15,9 +15,18 @@ from nexus.contracts.hybrid_route import (
 )
 from nexus.services.local_heal.hybrid_route_bridge import capability_payload_from_hybrid_route
 from nexus.services.local_heal.capability_runtime_policy import build_local_heal_runtime_policy
+from nexus.services.local_heal.local_model_provider import (
+    LocalModelProvider,
+    InertLocalModelProvider,
+    InjectedLocalModelProvider,
+)
 from nexus.services.local_heal.local_model_advisory_adapter import (
     LocalModelAdvisoryAdapter,
     LocalModelAdvisoryRequest,
+)
+from nexus.services.local_heal.local_model_candidate_adapter import (
+    LocalModelCandidateAdapter,
+    LocalModelCandidateRequest,
 )
 from nexus.services.local_heal.local_guard_fail_closed import (
     LocalGuardInput,
@@ -52,17 +61,85 @@ class LocalHealCapabilityAdapter:
         policy = build_local_heal_runtime_policy(os.environ, controls)
         
         advisory_enabled = os.environ.get("NEXUS_LOCAL_MODEL_ADVISORY_ENABLE") == "1"
+        candidate_enabled = os.environ.get("NEXUS_LOCAL_MODEL_CANDIDATE_ENABLE") == "1"
+        call_allowed = os.environ.get("NEXUS_LOCAL_MODEL_CALL_ALLOWED") == "1"
         
-        if advisory_enabled:
+        if candidate_enabled:
+            cand_blockers = []
+            if call_allowed:
+                generate_fn = controls.get("candidate_generate_fn")
+                if generate_fn is not None:
+                    provider = InjectedLocalModelProvider(generate_fn)
+                else:
+                    provider = InertLocalModelProvider()
+            else:
+                provider = InertLocalModelProvider()
+                cand_blockers.append("model_call_not_allowed")
+                
+            cand_req = LocalModelCandidateRequest(
+                task_id=request.task_id,
+                problem_statement=request.problem_statement,
+                evidence_refs=request.evidence_refs,
+                prompt="suggest candidate change",
+            )
+            cand_resp = LocalModelCandidateAdapter.run(cand_req, provider=provider)
+            
+            all_blockers = sorted(set(list(cand_resp.blockers) + cand_blockers))
+            fallback_block_reason = ";".join(all_blockers)
+            
+            cand_metadata = {
+                "candidate_id": cand_resp.candidate_id,
+                "candidate_output_isolated": cand_resp.candidate_output_isolated,
+                "selected_candidate_hash": cand_resp.selected_candidate_hash,
+                "applied_patch_hash": cand_resp.applied_patch_hash,
+                "verifier_result": cand_resp.verifier_result,
+            }
+            
+            payload = build_hybrid_route_decision(
+                route_mode=RouteMode.LOCAL_ONLY_BLOCKED,
+                public_claim_allowed=False,
+                production_ready=False,
+                adapter_output_is_route_truth=False,
+                route_truth_source="CapabilityPlanner",
+                behavior_changed=False,
+                authority=Authority.TRACE_ONLY,
+                local_model_called=cand_resp.local_model_called,
+                candidate_output_isolated=cand_resp.candidate_output_isolated,
+                selected_candidate_hash=cand_resp.selected_candidate_hash,
+                applied_patch_hash=cand_resp.applied_patch_hash,
+                selected_candidate_hash_matches_applied=cand_resp.selected_candidate_hash_matches_applied,
+                verifier_result=VerifierResult.NOT_RUN,
+                evidence_refs=request.evidence_refs,
+                fallback_block_reason=fallback_block_reason,
+                metadata=cand_metadata,
+            )
+            decision = hybrid_route_decision_from_payload(payload)
+            invoked = True
+            
+        elif advisory_enabled:
+            advis_blockers = []
+            if call_allowed:
+                generate_fn = controls.get("advisory_generate_fn")
+                if generate_fn is not None:
+                    provider = InjectedLocalModelProvider(generate_fn)
+                else:
+                    provider = InertLocalModelProvider()
+            else:
+                provider = InertLocalModelProvider()
+                advis_blockers.append("model_call_not_allowed")
+                
             advis_req = LocalModelAdvisoryRequest(
                 task_id=request.task_id,
                 problem_statement=request.problem_statement,
                 evidence_refs=request.evidence_refs,
             )
-            advis_resp = LocalModelAdvisoryAdapter.run(advis_req)
+            advis_resp = LocalModelAdvisoryAdapter.run(advis_req, provider=provider)
             
             text_hash = hashlib.sha256(advis_resp.advisory_text.encode("utf-8")).hexdigest()
             text_preview = advis_resp.advisory_text[:100]
+            
+            all_blockers = sorted(set(list(advis_resp.advisory_blockers) + advis_blockers))
+            fallback_block_reason = ";".join(all_blockers)
             
             advis_metadata = {
                 "advisory_invoked": advis_resp.advisory_invoked,
@@ -83,6 +160,7 @@ class LocalHealCapabilityAdapter:
                 local_model_called=advis_resp.local_model_called,
                 verifier_result=VerifierResult.NOT_RUN,
                 evidence_refs=request.evidence_refs,
+                fallback_block_reason=fallback_block_reason,
                 metadata=advis_metadata,
             )
             decision = hybrid_route_decision_from_payload(payload)

@@ -4,6 +4,7 @@ from nexus.services.local_heal.local_model_advisory_adapter import (
     LocalModelAdvisoryAdapter,
     LocalModelAdvisoryRequest,
 )
+from nexus.services.local_heal.local_model_provider import InjectedLocalModelProvider
 
 
 def test_advisory_adapter_default() -> None:
@@ -45,3 +46,20 @@ def test_advisory_adapter_injected() -> None:
     assert response.behavior_changed is False
     assert response.public_claim_allowed is False
     assert response.production_ready is False
+
+
+def test_advisory_adapter_with_provider() -> None:
+    def mock_gen(req) -> str:
+        return "advisory from provider"
+        
+    provider = InjectedLocalModelProvider(mock_gen)
+    request = LocalModelAdvisoryRequest(
+        task_id="t3",
+        problem_statement="refactor test seam",
+        evidence_refs=("ref1",),
+    )
+    response = LocalModelAdvisoryAdapter.run(request, provider=provider)
+    assert response.advisory_invoked is True
+    assert response.local_model_called is True
+    assert response.advisory_text == "advisory from provider"
+    assert not response.advisory_blockers

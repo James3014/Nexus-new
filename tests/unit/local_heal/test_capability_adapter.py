@@ -119,3 +119,28 @@ def test_capability_adapter_fail_closed_guard_blocked() -> None:
         assert "verifier_fail" in response.hybrid_route.fallback_block_reason
         assert response.hybrid_route.public_claim_allowed is False
         assert response.hybrid_route.production_ready is False
+
+
+def test_capability_adapter_candidate_enabled_with_call() -> None:
+    with mock.patch.dict(os.environ, {
+        "NEXUS_LOCAL_MODEL_CANDIDATE_ENABLE": "1",
+        "NEXUS_LOCAL_MODEL_CALL_ALLOWED": "1",
+    }):
+        def mock_gen(req) -> str:
+            return "proposed change text"
+            
+        request = LocalHealCapabilityRequest(
+            task_id="t7",
+            problem_statement="fix candidate wiring",
+            evidence_refs=("ref1",),
+            executor_controls={
+                "candidate_generate_fn": mock_gen,
+            },
+        )
+        response = LocalHealCapabilityAdapter.run(request)
+        assert response.invoked is True
+        assert response.hybrid_route.route_mode == RouteMode.LOCAL_ONLY_BLOCKED
+        assert response.hybrid_route.local_model_called is True
+        assert "missing_applied_patch_hash" in response.hybrid_route.fallback_block_reason
+        assert "selected_reapply_not_proven" in response.hybrid_route.fallback_block_reason
+        assert response.capability_payload["gate_passed"] is False
