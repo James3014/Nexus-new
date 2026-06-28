@@ -1,8 +1,0 @@
-{
-  "exclude": [
-    "nexus/core/eternal_memory.py",
-    "nexus/core/web_action_executor.py"
-  ],
-  "reportMissingImports": true,
-  "reportMissingTypeStubs": false
-}
