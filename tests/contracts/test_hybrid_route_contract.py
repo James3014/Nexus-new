@@ -101,3 +101,136 @@ def test_advisory_guard_cannot_block_delivery_yet() -> None:
         behavior_changed=False,
     )
     assert decision.route_mode == RouteMode.CLOUD_FIRST_LOCAL_GUARD_ADVISORY
+
+
+def test_public_claim_allowed_true_fails() -> None:
+    with pytest.raises(ValueError, match="public_claim_allowed_must_be_false"):
+        build_hybrid_route_decision(public_claim_allowed=True)
+
+
+def test_route_truth_source_invalid_fails() -> None:
+    with pytest.raises(ValueError, match="invalid_route_truth_source"):
+        build_hybrid_route_decision(route_truth_source="InvalidSource")
+
+
+def test_trace_only_rejects_behavior_changed_true() -> None:
+    with pytest.raises(ValueError, match="trace_only_requires_behavior_unchanged"):
+        build_hybrid_route_decision(
+            route_mode=RouteMode.CLOUD_ASSISTED_BY_LOCAL_TRACE_ONLY,
+            behavior_changed=True,
+        )
+
+
+def test_advisory_only_rejects_behavior_changed_true() -> None:
+    with pytest.raises(ValueError, match="advisory_requires_behavior_unchanged"):
+        build_hybrid_route_decision(
+            route_mode=RouteMode.CLOUD_FIRST_LOCAL_GUARD_ADVISORY,
+            behavior_changed=True,
+            authority=Authority.ADVISORY_ONLY,
+        )
+
+
+def test_trace_only_rejects_non_trace_authority() -> None:
+    with pytest.raises(ValueError, match="trace_only_requires_trace_only_authority"):
+        build_hybrid_route_decision(
+            route_mode=RouteMode.CLOUD_ASSISTED_BY_LOCAL_TRACE_ONLY,
+            authority=Authority.ADVISORY_ONLY,
+        )
+
+
+def test_advisory_only_rejects_non_advisory_authority() -> None:
+    with pytest.raises(ValueError, match="advisory_requires_advisory_only_authority"):
+        build_hybrid_route_decision(
+            route_mode=RouteMode.CLOUD_FIRST_LOCAL_GUARD_ADVISORY,
+            authority=Authority.TRACE_ONLY,
+        )
+
+
+def test_local_only_executed_rejects_hash_mismatch() -> None:
+    with pytest.raises(ValueError, match="local_only_executed_requires_hash_match"):
+        build_hybrid_route_decision(
+            route_mode=RouteMode.LOCAL_ONLY_EXECUTED,
+            local_model_called=True,
+            verifier_result=VerifierResult.PASS,
+            evidence_refs=("ref1",),
+            candidate_output_isolated=True,
+            selected_candidate_hash="hash1",
+            applied_patch_hash="hash2",
+            selected_candidate_hash_matches_applied=False,
+        )
+
+
+def test_local_only_executed_missing_fields_fails() -> None:
+    # 1. missing local_model_called (False)
+    with pytest.raises(ValueError, match="local_only_executed_requires_local_model_called"):
+        build_hybrid_route_decision(
+            route_mode=RouteMode.LOCAL_ONLY_EXECUTED,
+            local_model_called=False,
+            verifier_result=VerifierResult.PASS,
+            evidence_refs=("ref1",),
+            candidate_output_isolated=True,
+            selected_candidate_hash="hash1",
+            applied_patch_hash="hash1",
+            selected_candidate_hash_matches_applied=True,
+        )
+    # 2. missing verifier pass
+    with pytest.raises(ValueError, match="local_only_executed_requires_verifier_pass"):
+        build_hybrid_route_decision(
+            route_mode=RouteMode.LOCAL_ONLY_EXECUTED,
+            local_model_called=True,
+            verifier_result=VerifierResult.NOT_RUN,
+            evidence_refs=("ref1",),
+            candidate_output_isolated=True,
+            selected_candidate_hash="hash1",
+            applied_patch_hash="hash1",
+            selected_candidate_hash_matches_applied=True,
+        )
+    # 3. missing evidence_refs
+    with pytest.raises(ValueError, match="local_only_executed_requires_evidence_refs"):
+        build_hybrid_route_decision(
+            route_mode=RouteMode.LOCAL_ONLY_EXECUTED,
+            local_model_called=True,
+            verifier_result=VerifierResult.PASS,
+            evidence_refs=(),
+            candidate_output_isolated=True,
+            selected_candidate_hash="hash1",
+            applied_patch_hash="hash1",
+            selected_candidate_hash_matches_applied=True,
+        )
+    # 4. missing candidate_output_isolated (False)
+    with pytest.raises(ValueError, match="local_only_executed_requires_candidate_output_isolated"):
+        build_hybrid_route_decision(
+            route_mode=RouteMode.LOCAL_ONLY_EXECUTED,
+            local_model_called=True,
+            verifier_result=VerifierResult.PASS,
+            evidence_refs=("ref1",),
+            candidate_output_isolated=False,
+            selected_candidate_hash="hash1",
+            applied_patch_hash="hash1",
+            selected_candidate_hash_matches_applied=True,
+        )
+    # 5. missing selected_candidate_hash
+    with pytest.raises(ValueError, match="local_only_executed_requires_selected_candidate_hash"):
+        build_hybrid_route_decision(
+            route_mode=RouteMode.LOCAL_ONLY_EXECUTED,
+            local_model_called=True,
+            verifier_result=VerifierResult.PASS,
+            evidence_refs=("ref1",),
+            candidate_output_isolated=True,
+            selected_candidate_hash="",
+            applied_patch_hash="hash1",
+            selected_candidate_hash_matches_applied=True,
+        )
+    # 6. missing applied_patch_hash
+    with pytest.raises(ValueError, match="local_only_executed_requires_applied_patch_hash"):
+        build_hybrid_route_decision(
+            route_mode=RouteMode.LOCAL_ONLY_EXECUTED,
+            local_model_called=True,
+            verifier_result=VerifierResult.PASS,
+            evidence_refs=("ref1",),
+            candidate_output_isolated=True,
+            selected_candidate_hash="hash1",
+            applied_patch_hash="",
+            selected_candidate_hash_matches_applied=True,
+        )
+
