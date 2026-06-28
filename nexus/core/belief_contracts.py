@@ -23,6 +23,12 @@ class BeliefGate(Protocol):
     def process_audit_outcome(self, outcome: AuditOutcome) -> dict[str, Any]:
         ...
 
+    def assess_confidence(self, task_id: str, assumption: str = "") -> float:
+        ...
+
+    def update_belief(self, task_id: str, assumption: str, confidence: float, evidence_id: str) -> None:
+        ...
+
 
 @dataclass(frozen=True)
 class HealingArtifact:
