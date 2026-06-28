@@ -32810,3 +32810,121 @@ def test_h6_15_provider_boundary_closure_seal_no_side_effects():
     after_files = set(os.listdir(tempfile.gettempdir()))
     new_files = after_files - before_files
     assert len(new_files) == 0, f"Unexpected tmp files: {new_files}"
+
+
+def test_local_model_adapter_disabled_by_default(tmp_path, monkeypatch):
+    from scripts.bench.capability_ab_runner import CapabilityTask, _finalize_with_nexus_row
+    
+    monkeypatch.delenv("NEXUS_WITH_LOCAL_MODEL_ADAPTER", raising=False)
+    
+    task = CapabilityTask(
+        id="test-task-p4-disabled", difficulty="easy", task_type="test_repair",
+        task_desc="verify p4 disabled", target_file="target.py", test_file="test_target.py",
+        expected_capabilities=("claim_gate",), success_criteria="tests_pass",
+        repo_kind="nexus_internal", fixture_kind="test_fixture",
+    )
+    
+    row = _finalize_with_nexus_row(
+        {"mode": "with_nexus", "model_calls": 0, "total_tokens": 0},
+        provider="gemini", model_required=True, nexus_required=False, task=task, repo_root=tmp_path,
+    )
+    
+    adapter_row = row.get("local_model_adapter")
+    assert adapter_row is not None
+    assert adapter_row["enabled"] is False
+    assert adapter_row["adapter_invoked"] is False
+    assert adapter_row["fallback_block_reason"] == "disabled"
+    assert "disabled" in adapter_row["blockers"]
+
+
+def test_local_model_adapter_env_enabled_no_model_call_records_blocker(tmp_path, monkeypatch):
+    from scripts.bench.capability_ab_runner import CapabilityTask, _finalize_with_nexus_row
+    
+    monkeypatch.setenv("NEXUS_WITH_LOCAL_MODEL_ADAPTER", "1")
+    monkeypatch.delenv("NEXUS_LOCAL_MODEL_CALL_ALLOWED", raising=False)
+    monkeypatch.setenv("NEXUS_LOCAL_MODEL_CANDIDATE_ENABLE", "1")
+    monkeypatch.setenv("NEXUS_LOCAL_SOLVE_ISOLATED_ENABLE", "1")
+    
+    task = CapabilityTask(
+        id="test-task-p4-blocked", difficulty="easy", task_type="test_repair",
+        task_desc="verify p4 blocked", target_file="target.py", test_file="test_target.py",
+        expected_capabilities=("claim_gate",), success_criteria="tests_pass",
+        repo_kind="nexus_internal", fixture_kind="test_fixture",
+    )
+    
+    row = _finalize_with_nexus_row(
+        {"mode": "with_nexus", "model_calls": 0, "total_tokens": 0},
+        provider="gemini", model_required=True, nexus_required=False, task=task, repo_root=tmp_path,
+    )
+    
+    adapter_row = row.get("local_model_adapter")
+    assert adapter_row is not None
+    assert adapter_row["enabled"] is True
+    assert "missing_required_control" in adapter_row["blockers"]
+    assert adapter_row["adapter_invoked"] is False
+
+
+def test_local_model_adapter_does_not_change_route_truth(tmp_path, monkeypatch):
+    from scripts.bench.capability_ab_runner import CapabilityTask, _finalize_with_nexus_row
+    
+    monkeypatch.setenv("NEXUS_WITH_LOCAL_MODEL_ADAPTER", "1")
+    
+    task = CapabilityTask(
+        id="test-task-p4-truth", difficulty="easy", task_type="test_repair",
+        task_desc="verify p4 route truth", target_file="target.py", test_file="test_target.py",
+        expected_capabilities=("claim_gate",), success_criteria="tests_pass",
+        repo_kind="nexus_internal", fixture_kind="test_fixture",
+    )
+    
+    row = _finalize_with_nexus_row(
+        {"mode": "with_nexus", "model_calls": 0, "total_tokens": 0},
+        provider="gemini", model_required=True, nexus_required=False, task=task, repo_root=tmp_path,
+    )
+    
+    adapter_row = row.get("local_model_adapter")
+    assert adapter_row["route_truth_source"] == "CapabilityPlanner"
+    assert adapter_row["adapter_output_is_route_truth"] is False
+
+
+def test_local_model_adapter_keeps_public_and_production_false(tmp_path, monkeypatch):
+    from scripts.bench.capability_ab_runner import CapabilityTask, _finalize_with_nexus_row
+    
+    monkeypatch.setenv("NEXUS_WITH_LOCAL_MODEL_ADAPTER", "1")
+    
+    task = CapabilityTask(
+        id="test-task-p4-locks", difficulty="easy", task_type="test_repair",
+        task_desc="verify p4 locks", target_file="target.py", test_file="test_target.py",
+        expected_capabilities=("claim_gate",), success_criteria="tests_pass",
+        repo_kind="nexus_internal", fixture_kind="test_fixture",
+    )
+    
+    row = _finalize_with_nexus_row(
+        {"mode": "with_nexus", "model_calls": 0, "total_tokens": 0},
+        provider="gemini", model_required=True, nexus_required=False, task=task, repo_root=tmp_path,
+    )
+    
+    adapter_row = row.get("local_model_adapter")
+    assert adapter_row["public_claim_allowed"] is False
+    assert adapter_row["production_ready"] is False
+
+
+def test_local_model_adapter_keeps_behavior_changed_false(tmp_path, monkeypatch):
+    from scripts.bench.capability_ab_runner import CapabilityTask, _finalize_with_nexus_row
+    
+    monkeypatch.setenv("NEXUS_WITH_LOCAL_MODEL_ADAPTER", "1")
+    
+    task = CapabilityTask(
+        id="test-task-p4-behavior", difficulty="easy", task_type="test_repair",
+        task_desc="verify p4 behavior changed false", target_file="target.py", test_file="test_target.py",
+        expected_capabilities=("claim_gate",), success_criteria="tests_pass",
+        repo_kind="nexus_internal", fixture_kind="test_fixture",
+    )
+    
+    row = _finalize_with_nexus_row(
+        {"mode": "with_nexus", "model_calls": 0, "total_tokens": 0},
+        provider="gemini", model_required=True, nexus_required=False, task=task, repo_root=tmp_path,
+    )
+    
+    adapter_row = row.get("local_model_adapter")
+    assert adapter_row["behavior_changed"] is False
+

@@ -13427,6 +13427,59 @@ def _build_h6_controlled_probe_preflight_replay(rows: list[dict[str, Any]], bund
         "ready_for_h6_15": False,
         "reasons": reasons,
     }
+def _disabled_local_model_adapter_row(reason: str = "disabled") -> dict[str, Any]:
+    return {
+        "schema": "nexus.local_model_adapter_row.v1",
+        "enabled": False,
+        "adapter_invoked": False,
+        "route_mode": "cloud_assisted_by_local_trace_only",
+        "authority": "trace_only",
+        "route_truth_source": "CapabilityPlanner",
+        "adapter_output_is_route_truth": False,
+        "public_claim_allowed": False,
+        "production_ready": False,
+        "behavior_changed": False,
+        "local_model_called": False,
+        "candidate_output_isolated": True,
+        "selected_candidate_hash": "",
+        "applied_patch_hash": "",
+        "selected_candidate_hash_matches_applied": False,
+        "verifier_result": "not_run",
+        "evidence_refs": [],
+        "fallback_block_reason": reason,
+        "blockers": [reason] if reason else [],
+        "metadata": {},
+    }
+
+
+def _map_local_model_adapter_response_to_row(resp) -> dict[str, Any]:
+    route = resp.hybrid_route.to_dict()
+    reason = str(route.get("fallback_block_reason", "") or "")
+    blockers = list(route.get("blockers", []) or [])
+    if reason and reason not in blockers:
+        blockers.append(reason)
+    return {
+        "schema": "nexus.local_model_adapter_row.v1",
+        "enabled": True,
+        "adapter_invoked": bool(resp.invoked),
+        "route_mode": route.get("route_mode", "cloud_assisted_by_local_trace_only"),
+        "authority": route.get("authority", "trace_only"),
+        "route_truth_source": route.get("route_truth_source", "CapabilityPlanner"),
+        "adapter_output_is_route_truth": bool(route.get("adapter_output_is_route_truth", False)),
+        "public_claim_allowed": bool(route.get("public_claim_allowed", False)),
+        "production_ready": bool(route.get("production_ready", False)),
+        "behavior_changed": bool(route.get("behavior_changed", False)),
+        "local_model_called": bool(route.get("local_model_called", False)),
+        "candidate_output_isolated": bool(route.get("candidate_output_isolated", True)),
+        "selected_candidate_hash": str(route.get("selected_candidate_hash", "") or ""),
+        "applied_patch_hash": str(route.get("applied_patch_hash", "") or ""),
+        "selected_candidate_hash_matches_applied": bool(route.get("selected_candidate_hash_matches_applied", False)),
+        "verifier_result": str(route.get("verifier_result", "not_run") or "not_run"),
+        "evidence_refs": list(route.get("evidence_refs", []) or []),
+        "fallback_block_reason": reason,
+        "blockers": blockers,
+        "metadata": dict(route.get("metadata", {}) or {}),
+    }
 
 
 def _finalize_with_nexus_row(
@@ -13955,6 +14008,55 @@ def _finalize_with_nexus_row(
     finalized["route_mode"] = r_mode
     finalized["trace_only"] = True
     finalized["behavior_changed"] = False
+
+    # P4: Local Model Adapter Integration Seam
+    import os
+    enable_adapter = os.environ.get("NEXUS_WITH_LOCAL_MODEL_ADAPTER", "").strip().lower() in {"1", "true", "yes"}
+    if enable_adapter:
+        try:
+            # Lazy imports
+            from nexus.services.local_heal.capability_adapter import LocalHealCapabilityAdapter, LocalHealCapabilityRequest
+            
+            # Check context
+            if not task or not getattr(task, "task_desc", ""):
+                finalized["local_model_adapter"] = _disabled_local_model_adapter_row(reason="missing_adapter_context")
+            else:
+                # Build controls dict
+                controls = {
+                    "enable_local_heal": True,
+                    "local_heal_mode": os.environ.get("NEXUS_LOCAL_HEAL_MODE", "advisory"),
+                    "source_root": str(repo_root),
+                    "target_file": getattr(task, "target_file", None) or None,
+                    "target_symbol": finalized.get("target_symbol") or None,
+                    "locked_search": finalized.get("locked_search") or None,
+                    "verifier_command": (
+                        finalized.get("verifier_command") or 
+                        ([f"uv run pytest {getattr(task, 'test_file', '')}"] if getattr(task, "test_file", "") else None)
+                    ),
+                    "work_dir": str(repo_root),
+                }
+                
+                # Only pass permissions if explicitly enabled in env
+                if os.environ.get("NEXUS_LOCAL_SOLVE_MUTATION_ALLOWED") == "1":
+                    controls["mutation_allowed"] = True
+                if os.environ.get("NEXUS_LOCAL_SOLVE_VERIFIER_ALLOWED") == "1":
+                    controls["verifier_allowed"] = True
+                    
+                evidence_refs = tuple(finalized.get("evidence_refs", []) or [])
+                req = LocalHealCapabilityRequest(
+                    task_id=getattr(task, "id", "unknown_task"),
+                    problem_statement=getattr(task, "task_desc", ""),
+                    evidence_refs=evidence_refs,
+                    executor_controls=controls,
+                    dry_run=True
+                )
+                
+                resp = LocalHealCapabilityAdapter.run(req)
+                finalized["local_model_adapter"] = _map_local_model_adapter_response_to_row(resp)
+        except Exception as e:
+            finalized["local_model_adapter"] = _disabled_local_model_adapter_row(reason=f"adapter_execution_error: {str(e)}")
+    else:
+        finalized["local_model_adapter"] = _disabled_local_model_adapter_row(reason="disabled")
 
     return finalized
 
