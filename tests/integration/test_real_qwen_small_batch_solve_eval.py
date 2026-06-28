@@ -57,3 +57,15 @@ def test_real_qwen_small_batch_solve_eval_pipeline() -> None:
         assert "repair_success" in item
         assert isinstance(item["repair_attempted"], bool)
         assert isinstance(item["repair_success"], bool)
+        
+        # 斷言 retry 屬性正確儲存且符合類型規範
+        assert "attempt_count" in item
+        assert "retry_attempted" in item
+        assert "retry_reason" in item
+        assert "retry_success" in item
+        assert "final_failure_class" in item
+        assert isinstance(item["attempt_count"], int)
+        assert isinstance(item["retry_attempted"], bool)
+        assert isinstance(item["retry_success"], bool)
+        assert isinstance(item["retry_reason"], str)
+        assert isinstance(item["final_failure_class"], str)

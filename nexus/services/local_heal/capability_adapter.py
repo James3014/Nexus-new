@@ -166,6 +166,84 @@ class LocalHealCapabilityAdapter:
                 )
                 solve_resp = run_isolated_local_solve_loop(solve_req)
                 
+                fallback_block_reason = solve_resp.hybrid_route.fallback_block_reason or ""
+                verifier_status = solve_resp.capability_payload["metadata"].get("verifier_status", "not_run")
+                reasons_set = set(fallback_block_reason.split(";")) if fallback_block_reason else set()
+                
+                should_retry = False
+                retry_reason = "none"
+                
+                if "VERIFIER_FAIL" in reasons_set or verifier_status == "fail":
+                    should_retry = True
+                    retry_reason = "VERIFIER_FAIL"
+                elif "SEARCH_MISMATCH" in reasons_set and "patch_outside_locked_span" not in reasons_set:
+                    should_retry = True
+                    retry_reason = "SEARCH_MISMATCH"
+                    
+                if should_retry and controls.get("locked_search"):
+                    from nexus.services.local_heal.failure_feedback_builder import build_failure_feedback
+                    stdout_tail = solve_resp.verifier_receipt.stdout_tail if solve_resp.verifier_receipt else ""
+                    stderr_tail = solve_resp.verifier_receipt.stderr_tail if solve_resp.verifier_receipt else ""
+                    
+                    feedback_prompt = build_failure_feedback(
+                        task_id=request.task_id,
+                        failure_class=retry_reason,
+                        target_file=target_file,
+                        target_symbol=target_symbol,
+                        locked_search=locked_search,
+                        previous_block_reason=fallback_block_reason,
+                        verifier_status=verifier_status,
+                        stdout_tail=stdout_tail,
+                        stderr_tail=stderr_tail,
+                    )
+                    
+                    retry_req = LocalModelCandidateRequest(
+                        task_id=request.task_id,
+                        problem_statement=request.problem_statement,
+                        evidence_refs=request.evidence_refs,
+                        prompt=feedback_prompt,
+                    )
+                    retry_resp = LocalModelCandidateAdapter.run(retry_req, provider=provider)
+                    
+                    solve_req_2 = IsolatedLocalSolveRequest(
+                        task_id=request.task_id,
+                        source_root=controls["source_root"],
+                        problem_statement=request.problem_statement,
+                        evidence_refs=request.evidence_refs,
+                        model_output=retry_resp.candidate_text,
+                        verifier_command=tuple(controls["verifier_command"]),
+                        work_dir=controls["work_dir"],
+                        local_model_called=retry_resp.local_model_called,
+                        mutation_allowed=(os.environ.get("NEXUS_LOCAL_SOLVE_MUTATION_ALLOWED") == "1"),
+                        verifier_allowed=(os.environ.get("NEXUS_LOCAL_SOLVE_VERIFIER_ALLOWED") == "1"),
+                        target_file=controls["target_file"],
+                        target_symbol=controls["target_symbol"],
+                        locked_search=controls["locked_search"],
+                    )
+                    solve_resp_2 = run_isolated_local_solve_loop(solve_req_2)
+                    
+                    gate_passed = solve_resp_2.capability_payload.get("gate_passed", False)
+                    verifier_status_2 = solve_resp_2.capability_payload["metadata"].get("verifier_status", "not_run")
+                    retry_success = (gate_passed is True and verifier_status_2 == "pass")
+                    
+                    solve_resp = solve_resp_2
+                    attempt_count = 2
+                    retry_attempted = True
+                else:
+                    attempt_count = 1
+                    retry_attempted = False
+                    retry_success = False
+                    
+                metadata = dict(solve_resp.capability_payload.get("metadata", {}))
+                metadata.update({
+                    "attempt_count": attempt_count,
+                    "retry_attempted": retry_attempted,
+                    "retry_reason": retry_reason,
+                    "retry_success": retry_success,
+                    "final_failure_class": solve_resp.hybrid_route.fallback_block_reason if solve_resp.hybrid_route.fallback_block_reason else "none",
+                })
+                solve_resp.capability_payload["metadata"] = metadata
+                
                 decision = solve_resp.hybrid_route
                 capability_payload = solve_resp.capability_payload
                 payload = decision.to_dict()
