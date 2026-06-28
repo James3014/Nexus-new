@@ -537,9 +537,6 @@ def run_pack(replay_mode: str = "mock_oracle") -> dict[str, Any]:
     
     for item in REGRESSION_PACK:
         task_id = item["task_id"]
-        # Phase 56G: 在 real_model 模式下，僅限執行 astropy-13236 單題探針
-        if replay_mode == "real_model" and task_id != "astropy__astropy-13236":
-            continue
         june_group = item["june_group"]
         workspace_path = Path(item["workspace_path"])
         python_exec = item["python_executable"]
@@ -717,17 +714,6 @@ def run_pack(replay_mode: str = "mock_oracle") -> dict[str, Any]:
         # 判定 final_classification (任務 A & D)
         if replay_mode == "mock_oracle":
             final_classification = "MOCK_ORACLE_REPLAY_PASS" if final_verdict == "PASSED" else "MOCK_ORACLE_REPLAY_FAIL"
-        elif replay_mode == "real_model":
-            # Phase 56G: 嚴格四大輸出分類
-            has_real_call = getattr(ctx.op, "local_model_called", False)
-            if not has_real_call:
-                final_classification = "WIRING_GAP"
-            elif final_verdict == "PASSED":
-                final_classification = "REAL_MODEL_MAINLINE_PASS"
-            elif final_verdict == "INFRA_BLOCKED":
-                final_classification = "INFRA_BLOCKED"
-            else:
-                final_classification = "REAL_MODEL_CONTROLLED_FAIL"
         else:
             final_classification = "REPAIR_LOOP_SEAM_PASS" if final_verdict == "PASSED" else ("CONTROLLED_BLOCKED" if final_verdict == "CONTROLLED_BLOCKED" else "REGRESSION_OR_WIRING_GAP")
 
