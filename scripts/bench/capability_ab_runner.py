@@ -13458,6 +13458,40 @@ def _map_local_model_adapter_response_to_row(resp) -> dict[str, Any]:
     blockers = list(route.get("blockers", []) or [])
     if reason and reason not in blockers:
         blockers.append(reason)
+
+    unsafe = (
+        bool(route.get("public_claim_allowed", False)) or
+        bool(route.get("production_ready", False)) or
+        bool(route.get("behavior_changed", False)) or
+        bool(route.get("adapter_output_is_route_truth", False)) or
+        route.get("route_truth_source", "CapabilityPlanner") != "CapabilityPlanner"
+    )
+
+    if unsafe:
+        return {
+            "schema": "nexus.local_model_adapter_row.v1",
+            "enabled": True,
+            "adapter_invoked": bool(resp.invoked),
+            "route_mode": "local_only_blocked",
+            "authority": "trace_only",
+            "route_truth_source": "CapabilityPlanner",
+            "adapter_output_is_route_truth": False,
+            "public_claim_allowed": False,
+            "production_ready": False,
+            "behavior_changed": False,
+            "local_model_called": False,
+            "candidate_output_isolated": False,
+            "selected_candidate_hash": "",
+            "applied_patch_hash": "",
+            "selected_candidate_hash_matches_applied": False,
+            "verifier_result": "not_run",
+            "evidence_refs": list(route.get("evidence_refs", []) or []),
+            "fallback_block_reason": "adapter_contract_violation",
+            "blockers": ["adapter_contract_violation"],
+            "adapter_contract_violation": True,
+            "metadata": {"unsafe_payload": route},
+        }
+
     return {
         "schema": "nexus.local_model_adapter_row.v1",
         "enabled": True,
@@ -14021,10 +14055,15 @@ def _finalize_with_nexus_row(
             if not task or not getattr(task, "task_desc", ""):
                 finalized["local_model_adapter"] = _disabled_local_model_adapter_row(reason="missing_adapter_context")
             else:
+                advisory_enabled = os.environ.get("NEXUS_LOCAL_MODEL_ADVISORY_ENABLE") == "1"
+                candidate_enabled = os.environ.get("NEXUS_LOCAL_MODEL_CANDIDATE_ENABLE") == "1"
+                enable_local_heal = advisory_enabled or candidate_enabled
+                local_heal_mode = "advisory" if advisory_enabled else ("candidate" if candidate_enabled else "disabled")
+
                 # Build controls dict
                 controls = {
-                    "enable_local_heal": True,
-                    "local_heal_mode": os.environ.get("NEXUS_LOCAL_HEAL_MODE", "advisory"),
+                    "enable_local_heal": enable_local_heal,
+                    "local_heal_mode": local_heal_mode,
                     "source_root": str(repo_root),
                     "target_file": getattr(task, "target_file", None) or None,
                     "target_symbol": finalized.get("target_symbol") or None,
@@ -14034,6 +14073,7 @@ def _finalize_with_nexus_row(
                         ([f"uv run pytest {getattr(task, 'test_file', '')}"] if getattr(task, "test_file", "") else None)
                     ),
                     "work_dir": str(repo_root),
+                    "route_truth_source": "CapabilityPlanner",
                 }
                 
                 # Only pass permissions if explicitly enabled in env
@@ -14043,18 +14083,75 @@ def _finalize_with_nexus_row(
                     controls["verifier_allowed"] = True
                     
                 evidence_refs = tuple(finalized.get("evidence_refs", []) or [])
+
+                # Validate required controls before attempting candidate/isolated solve
+                if local_heal_mode == "candidate":
+                    required_keys = ["target_file", "target_symbol", "locked_search", "verifier_command"]
+                    missing_keys = [k for k in required_keys if not controls.get(k)]
+                    if not evidence_refs:
+                        missing_keys.append("evidence_refs")
+
+                    if missing_keys:
+                        finalized["local_model_adapter"] = {
+                            "schema": "nexus.local_model_adapter_row.v1",
+                            "enabled": True,
+                            "adapter_invoked": False,
+                            "route_mode": "local_only_blocked",
+                            "authority": "trace_only",
+                            "route_truth_source": "CapabilityPlanner",
+                            "adapter_output_is_route_truth": False,
+                            "public_claim_allowed": False,
+                            "production_ready": False,
+                            "behavior_changed": False,
+                            "local_model_called": False,
+                            "candidate_output_isolated": False,
+                            "selected_candidate_hash": "",
+                            "applied_patch_hash": "",
+                            "selected_candidate_hash_matches_applied": False,
+                            "verifier_result": "not_run",
+                            "evidence_refs": list(evidence_refs),
+                            "fallback_block_reason": "missing_required_control",
+                            "blockers": ["missing_required_control"],
+                            "adapter_missing_control": True,
+                            "metadata": {"missing_controls": missing_keys}
+                        }
+                        return finalized
+
+                dry_run_val = os.environ.get("NEXUS_LOCAL_MODEL_DRY_RUN", "1").strip().lower() in {"1", "true", "yes"}
                 req = LocalHealCapabilityRequest(
                     task_id=getattr(task, "id", "unknown_task"),
                     problem_statement=getattr(task, "task_desc", ""),
                     evidence_refs=evidence_refs,
                     executor_controls=controls,
-                    dry_run=True
+                    dry_run=dry_run_val
                 )
                 
                 resp = LocalHealCapabilityAdapter.run(req)
                 finalized["local_model_adapter"] = _map_local_model_adapter_response_to_row(resp)
         except Exception as e:
-            finalized["local_model_adapter"] = _disabled_local_model_adapter_row(reason=f"adapter_execution_error: {str(e)}")
+            finalized["local_model_adapter"] = {
+                "schema": "nexus.local_model_adapter_row.v1",
+                "enabled": True,
+                "adapter_invoked": False,
+                "route_mode": "local_only_blocked",
+                "authority": "trace_only",
+                "route_truth_source": "CapabilityPlanner",
+                "adapter_output_is_route_truth": False,
+                "public_claim_allowed": False,
+                "production_ready": False,
+                "behavior_changed": False,
+                "local_model_called": False,
+                "candidate_output_isolated": False,
+                "selected_candidate_hash": "",
+                "applied_patch_hash": "",
+                "selected_candidate_hash_matches_applied": False,
+                "verifier_result": "not_run",
+                "evidence_refs": [],
+                "fallback_block_reason": "adapter_execution_error",
+                "blockers": ["adapter_execution_error"],
+                "adapter_error": True,
+                "metadata": {"adapter_error": str(e)},
+            }
     else:
         finalized["local_model_adapter"] = _disabled_local_model_adapter_row(reason="disabled")
 
@@ -18245,6 +18342,11 @@ def write_evidence_bundle(
         "behavior_changed_count": sum(1 for r in adapter_rows if bool(r.get("behavior_changed", False))),
         "public_claim_allowed_count": sum(1 for r in adapter_rows if bool(r.get("public_claim_allowed", False))),
         "production_ready_count": sum(1 for r in adapter_rows if bool(r.get("production_ready", False))),
+        "adapter_error_count": sum(1 for r in adapter_rows if bool(r.get("adapter_error", False))),
+        "adapter_missing_control_count": sum(1 for r in adapter_rows if bool(r.get("adapter_missing_control", False))),
+        "adapter_contract_violation_count": sum(1 for r in adapter_rows if bool(r.get("adapter_contract_violation", False))),
+        "adapter_dry_run_count": sum(1 for r in adapter_rows if bool(r.get("metadata", {}).get("dry_run", False))),
+        "adapter_blocked_count": sum(1 for r in adapter_rows if r.get("route_mode") == "local_only_blocked"),
     }
 
     bundle_path.write_text(json.dumps(payload, indent=2, ensure_ascii=False), encoding="utf-8")

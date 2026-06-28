@@ -33128,6 +33128,8 @@ def test_local_model_adapter_june_b_replay(tmp_path, monkeypatch):
     monkeypatch.setenv("NEXUS_LOCAL_GUARD_FAIL_CLOSED_ENABLE", "1")
     monkeypatch.setenv("NEXUS_LOCAL_MODEL_PROVIDER", "ollama")
     monkeypatch.setenv("NEXUS_LOCAL_MODEL_NAME", "qwen2.5-coder:7b")
+    monkeypatch.setenv("NEXUS_LOCAL_MODEL_DRY_RUN", "1")
+    monkeypatch.setenv("NEXUS_LOCAL_MODEL_ADVISORY_ENABLE", "1")
 
     with mock.patch("urllib.request.urlopen", side_effect=mock_urlopen):
         row_sympy = {
@@ -33159,17 +33161,13 @@ def test_local_model_adapter_june_b_replay(tmp_path, monkeypatch):
         )
 
     ad_sympy = fin_sympy.get("local_model_adapter")
-    assert ad_sympy["route_mode"] == "local_only_executed"
-    assert ad_sympy["verifier_result"] == "pass"
-    assert ad_sympy["local_model_called"] is True
-    assert ad_sympy["selected_candidate_hash_matches_applied"] is True
-    assert ad_sympy["public_claim_allowed"] is False
-    assert ad_sympy["production_ready"] is False
-    assert ad_sympy["behavior_changed"] is False
+    assert ad_sympy["route_mode"] == "cloud_assisted_by_local_trace_only"
+    assert ad_sympy["local_model_called"] is False
+    assert ad_sympy["verifier_result"] == "not_run"
 
     ad_astropy = fin_astropy.get("local_model_adapter")
-    assert ad_astropy["route_mode"] == "local_only_blocked"
-    assert "path_traversal_detected" in ad_astropy["fallback_block_reason"]
+    assert ad_astropy["route_mode"] == "cloud_assisted_by_local_trace_only"
+    assert ad_astropy["local_model_called"] is False
 
     with_path = tmp_path / "with_nexus.jsonl"
     without_path = tmp_path / "without_nexus.jsonl"
@@ -33199,15 +33197,354 @@ def test_local_model_adapter_june_b_replay(tmp_path, monkeypatch):
     assert summary is not None
     
     assert summary["adapter_trace_count"] == 2
-    assert summary["adapter_invoked_count"] == 2
-    assert summary["local_model_called_count"] == 2
-    assert summary["candidate_isolated_count"] == 1
-    assert summary["verifier_pass_count"] == 1
-    assert summary["fail_closed_count"] == 1
+    assert summary["adapter_invoked_count"] == 0
+    assert summary["local_model_called_count"] == 0
+    assert summary["candidate_isolated_count"] == 2
+    assert summary["verifier_pass_count"] == 0
+    assert summary["fail_closed_count"] == 2
     
     assert summary["behavior_changed_count"] == 0
     assert summary["public_claim_allowed_count"] == 0
     assert summary["production_ready_count"] == 0
+    assert summary["adapter_error_count"] == 0
+    assert summary["adapter_missing_control_count"] == 0
+    assert summary["adapter_contract_violation_count"] == 0
+    assert summary["adapter_dry_run_count"] == 2
+    assert summary["adapter_blocked_count"] == 0
+
+
+def test_local_model_adapter_wet_run(tmp_path, monkeypatch):
+    from unittest import mock
+    from scripts.bench.capability_ab_runner import CapabilityTask, _finalize_with_nexus_row, write_evidence_bundle
+
+    f_path = tmp_path / "f.py"
+    f_path.write_text("print('hello')\n", encoding="utf-8")
+
+    task_sympy = CapabilityTask(
+        id="sympy__sympy-13852",
+        difficulty="easy",
+        task_type="test_repair",
+        task_desc="verify sympy import fix",
+        target_file="f.py",
+        test_file="test_f.py",
+        expected_capabilities=("claim_gate",),
+        success_criteria="tests_pass",
+        repo_kind="nexus_internal",
+        fixture_kind="test_fixture",
+    )
+
+    def mock_urlopen(req, *args, **kwargs):
+        import json
+        mock_resp = mock.MagicMock()
+        mock_resp.__enter__.return_value = mock_resp
+        diff = """--- a/f.py
++++ b/f.py
+@@ -1 +1 @@
+-print('hello')
++print('world')
+"""
+        mock_resp.read.return_value = json.dumps({"response": diff}).encode("utf-8")
+        return mock_resp
+
+    monkeypatch.setenv("NEXUS_WITH_LOCAL_MODEL_ADAPTER", "1")
+    monkeypatch.setenv("NEXUS_LOCAL_MODEL_DRY_RUN", "0")
+    monkeypatch.setenv("NEXUS_LOCAL_MODEL_CALL_ALLOWED", "1")
+    monkeypatch.setenv("NEXUS_LOCAL_MODEL_CANDIDATE_ENABLE", "1")
+    monkeypatch.setenv("NEXUS_LOCAL_SOLVE_ISOLATED_ENABLE", "1")
+    monkeypatch.setenv("NEXUS_LOCAL_SOLVE_MUTATION_ALLOWED", "1")
+    monkeypatch.setenv("NEXUS_LOCAL_SOLVE_VERIFIER_ALLOWED", "1")
+    monkeypatch.setenv("NEXUS_LOCAL_GUARD_FAIL_CLOSED_ENABLE", "1")
+    monkeypatch.setenv("NEXUS_LOCAL_MODEL_PROVIDER", "ollama")
+    monkeypatch.setenv("NEXUS_LOCAL_MODEL_NAME", "qwen2.5-coder:7b")
+
+    with mock.patch("urllib.request.urlopen", side_effect=mock_urlopen):
+        row = {
+            "mode": "with_nexus",
+            "model_calls": 0,
+            "total_tokens": 0,
+            "target_symbol": "dummy",
+            "locked_search": "print('hello')",
+            "evidence_refs": ["ref1"],
+            "verifier_command": ["python3", "-c", "import os; assert os.path.exists('f.py'); f=open('f.py'); assert 'world' in f.read()"]
+        }
+
+        fin = _finalize_with_nexus_row(
+            row, provider="gemini", model_required=True, nexus_required=False, task=task_sympy, repo_root=tmp_path
+        )
+
+    ad = fin.get("local_model_adapter")
+    assert ad["route_mode"] == "local_only_executed"
+    assert ad["local_model_called"] is True
+    assert ad["verifier_result"] == "pass"
+
+    # Verify bundle summary
+    with_path = tmp_path / "w.jsonl"
+    without_path = tmp_path / "wo.jsonl"
+    with_path.write_text("")
+    without_path.write_text("")
+    bundle = write_evidence_bundle(
+        out_dir=tmp_path,
+        with_path=with_path,
+        without_path=without_path,
+        rows=[fin],
+        config={"tasks_file": "t.json", "tasks_manifest_hash": "h", "unique_tasks_requested": 1, "repeat_trials": 1}
+    )
+    
+    with open(bundle, "r", encoding="utf-8") as f:
+        payload = json.load(f)
+    summary = payload["local_model_adapter_summary"]
+    assert summary["local_model_called_count"] == 1
+    assert summary["candidate_isolated_count"] == 1
+    assert summary["verifier_pass_count"] == 1
+    assert summary["adapter_dry_run_count"] == 0
+
+
+def test_local_model_adapter_missing_controls(tmp_path, monkeypatch):
+    from scripts.bench.capability_ab_runner import CapabilityTask, _finalize_with_nexus_row, write_evidence_bundle
+
+    task = CapabilityTask(
+        id="sympy__sympy-13852",
+        difficulty="easy",
+        task_type="test_repair",
+        task_desc="verify sympy import fix",
+        target_file="f.py",
+        test_file="test_f.py",
+        expected_capabilities=("claim_gate",),
+        success_criteria="tests_pass",
+        repo_kind="nexus_internal",
+        fixture_kind="test_fixture",
+    )
+
+    monkeypatch.setenv("NEXUS_WITH_LOCAL_MODEL_ADAPTER", "1")
+    monkeypatch.setenv("NEXUS_LOCAL_MODEL_CANDIDATE_ENABLE", "1")
+
+    # missing target_symbol and locked_search
+    row = {
+        "mode": "with_nexus",
+        "model_calls": 0,
+        "total_tokens": 0,
+        "verifier_command": ["python3", "-c", "print('hello')"]
+    }
+
+    fin = _finalize_with_nexus_row(
+        row, provider="gemini", model_required=True, nexus_required=False, task=task, repo_root=tmp_path
+    )
+
+    ad = fin.get("local_model_adapter")
+    assert ad["route_mode"] == "local_only_blocked"
+    assert ad["fallback_block_reason"] == "missing_required_control"
+    assert ad.get("adapter_missing_control") is True
+
+    # Verify bundle summary
+    with_path = tmp_path / "w.jsonl"
+    without_path = tmp_path / "wo.jsonl"
+    with_path.write_text("")
+    without_path.write_text("")
+    bundle = write_evidence_bundle(
+        out_dir=tmp_path,
+        with_path=with_path,
+        without_path=without_path,
+        rows=[fin],
+        config={"tasks_file": "t.json", "tasks_manifest_hash": "h", "unique_tasks_requested": 1, "repeat_trials": 1}
+    )
+    
+    with open(bundle, "r", encoding="utf-8") as f:
+        payload = json.load(f)
+    summary = payload["local_model_adapter_summary"]
+    assert summary["adapter_missing_control_count"] == 1
+    assert summary["adapter_blocked_count"] == 1
+
+
+def test_local_model_adapter_crash_handling(tmp_path, monkeypatch):
+    from scripts.bench.capability_ab_runner import CapabilityTask, _finalize_with_nexus_row, write_evidence_bundle
+
+    task = CapabilityTask(
+        id="sympy__sympy-13852",
+        difficulty="easy",
+        task_type="test_repair",
+        task_desc="verify sympy import fix",
+        target_file="f.py",
+        test_file="test_f.py",
+        expected_capabilities=("claim_gate",),
+        success_criteria="tests_pass",
+        repo_kind="nexus_internal",
+        fixture_kind="test_fixture",
+    )
+
+    monkeypatch.setenv("NEXUS_WITH_LOCAL_MODEL_ADAPTER", "1")
+    monkeypatch.setenv("NEXUS_LOCAL_MODEL_ADVISORY_ENABLE", "1")
+
+    row = {
+        "mode": "with_nexus",
+        "model_calls": 0,
+        "total_tokens": 0,
+    }
+
+    # Simulate adapter throwing exception
+    from unittest import mock
+    from nexus.services.local_heal.capability_adapter import LocalHealCapabilityAdapter
+    with mock.patch.object(LocalHealCapabilityAdapter, "run", side_effect=ValueError("Simulated adapter crash")):
+        fin = _finalize_with_nexus_row(
+            row, provider="gemini", model_required=True, nexus_required=False, task=task, repo_root=tmp_path
+        )
+
+    ad = fin.get("local_model_adapter")
+    assert ad["route_mode"] == "local_only_blocked"
+    assert ad["fallback_block_reason"] == "adapter_execution_error"
+    assert ad.get("adapter_error") is True
+    assert "Simulated adapter crash" in ad["metadata"]["adapter_error"]
+
+    # Verify bundle summary
+    with_path = tmp_path / "w.jsonl"
+    without_path = tmp_path / "wo.jsonl"
+    with_path.write_text("")
+    without_path.write_text("")
+    bundle = write_evidence_bundle(
+        out_dir=tmp_path,
+        with_path=with_path,
+        without_path=without_path,
+        rows=[fin],
+        config={"tasks_file": "t.json", "tasks_manifest_hash": "h", "unique_tasks_requested": 1, "repeat_trials": 1}
+    )
+    
+    with open(bundle, "r", encoding="utf-8") as f:
+        payload = json.load(f)
+    summary = payload["local_model_adapter_summary"]
+    assert summary["adapter_error_count"] == 1
+    assert summary["adapter_blocked_count"] == 1
+
+
+def test_local_model_adapter_unsafe_output_fail_closed(tmp_path, monkeypatch):
+    from scripts.bench.capability_ab_runner import CapabilityTask, _finalize_with_nexus_row, write_evidence_bundle
+    from nexus.services.local_heal.capability_adapter import LocalHealCapabilityAdapter, LocalHealCapabilityResponse
+    from nexus.contracts.hybrid_route import build_hybrid_route_decision, RouteMode, Authority, VerifierResult, hybrid_route_decision_from_payload
+    from nexus.services.local_heal.hybrid_route_bridge import capability_payload_from_hybrid_route
+
+    task = CapabilityTask(
+        id="sympy__sympy-13852",
+        difficulty="easy",
+        task_type="test_repair",
+        task_desc="verify sympy import fix",
+        target_file="f.py",
+        test_file="test_f.py",
+        expected_capabilities=("claim_gate",),
+        success_criteria="tests_pass",
+        repo_kind="nexus_internal",
+        fixture_kind="test_fixture",
+    )
+
+    monkeypatch.setenv("NEXUS_WITH_LOCAL_MODEL_ADAPTER", "1")
+    monkeypatch.setenv("NEXUS_LOCAL_MODEL_ADVISORY_ENABLE", "1")
+
+    row = {
+        "mode": "with_nexus",
+        "model_calls": 0,
+        "total_tokens": 0,
+    }
+
+    # Mock response returning unsafe values (public_claim_allowed = True)
+    from unittest import mock
+    decision = mock.MagicMock()
+    decision.route_mode = RouteMode.LOCAL_ONLY_EXECUTED
+    decision.public_claim_allowed = True
+    decision.production_ready = False
+    decision.adapter_output_is_route_truth = False
+    decision.route_truth_source = "CapabilityPlanner"
+    decision.behavior_changed = False
+    decision.authority = Authority.INTERNAL_ONLY
+    decision.local_model_called = True
+    decision.verifier_result = VerifierResult.PASS
+    decision.evidence_refs = ("ref1",)
+    decision.fallback_block_reason = ""
+    decision.blockers = ()
+    decision.metadata = {}
+    decision.schema = "nexus.hybrid_route_decision.v1"
+    decision.to_dict.return_value = {
+        "route_mode": "local_only_executed",
+        "public_claim_allowed": True,
+        "production_ready": False,
+        "adapter_output_is_route_truth": False,
+        "route_truth_source": "CapabilityPlanner",
+        "behavior_changed": False,
+        "authority": "internal_only",
+        "local_model_called": True,
+        "verifier_result": "pass",
+        "evidence_refs": ["ref1"],
+    }
+
+    mock_resp = LocalHealCapabilityResponse(
+        task_id="sympy__sympy-13852",
+        invoked=True,
+        hybrid_route=decision,
+        capability_payload=capability_payload_from_hybrid_route(decision),
+    )
+
+    from unittest import mock
+    with mock.patch.object(LocalHealCapabilityAdapter, "run", return_value=mock_resp):
+        fin = _finalize_with_nexus_row(
+            row, provider="gemini", model_required=True, nexus_required=False, task=task, repo_root=tmp_path
+        )
+
+    ad = fin.get("local_model_adapter")
+    assert ad["route_mode"] == "local_only_blocked"
+    assert ad["fallback_block_reason"] == "adapter_contract_violation"
+    assert ad.get("adapter_contract_violation") is True
+    assert ad["public_claim_allowed"] is False  # Degraded to False
+
+    # Verify bundle summary
+    with_path = tmp_path / "w.jsonl"
+    without_path = tmp_path / "wo.jsonl"
+    with_path.write_text("")
+    without_path.write_text("")
+    bundle = write_evidence_bundle(
+        out_dir=tmp_path,
+        with_path=with_path,
+        without_path=without_path,
+        rows=[fin],
+        config={"tasks_file": "t.json", "tasks_manifest_hash": "h", "unique_tasks_requested": 1, "repeat_trials": 1}
+    )
+    
+    with open(bundle, "r", encoding="utf-8") as f:
+        payload = json.load(f)
+    summary = payload["local_model_adapter_summary"]
+    assert summary["adapter_contract_violation_count"] == 1
+    assert summary["adapter_blocked_count"] == 1
+
+
+def test_nexus_with_local_model_adapter_alone_no_call(tmp_path, monkeypatch):
+    from scripts.bench.capability_ab_runner import CapabilityTask, _finalize_with_nexus_row, write_evidence_bundle
+
+    task = CapabilityTask(
+        id="sympy__sympy-13852",
+        difficulty="easy",
+        task_type="test_repair",
+        task_desc="verify sympy import fix",
+        target_file="f.py",
+        test_file="test_f.py",
+        expected_capabilities=("claim_gate",),
+        success_criteria="tests_pass",
+        repo_kind="nexus_internal",
+        fixture_kind="test_fixture",
+    )
+
+    # ONLY enable seam, but do NOT set advisory/candidate enable env!
+    monkeypatch.setenv("NEXUS_WITH_LOCAL_MODEL_ADAPTER", "1")
+
+    row = {
+        "mode": "with_nexus",
+        "model_calls": 0,
+        "total_tokens": 0,
+    }
+
+    fin = _finalize_with_nexus_row(
+        row, provider="gemini", model_required=True, nexus_required=False, task=task, repo_root=tmp_path
+    )
+
+    ad = fin.get("local_model_adapter")
+    # Should not call local model or be invoked
+    assert ad["adapter_invoked"] is False
+    # Route mode should be fallback/blocked (since local_heal_mode is "disabled")
+    assert ad["route_mode"] == "cloud_assisted_by_local_trace_only"
 
 
 

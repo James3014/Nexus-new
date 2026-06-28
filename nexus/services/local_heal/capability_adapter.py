@@ -81,6 +81,34 @@ def build_local_model_provider_from_env(
 class LocalHealCapabilityAdapter:
     @staticmethod
     def run(request: LocalHealCapabilityRequest) -> LocalHealCapabilityResponse:
+        if request.dry_run:
+            from nexus.contracts.hybrid_route import RouteMode, Authority, VerifierResult
+            payload = build_hybrid_route_decision(
+                route_mode=RouteMode.CLOUD_ASSISTED_BY_LOCAL_TRACE_ONLY,
+                public_claim_allowed=False,
+                production_ready=False,
+                adapter_output_is_route_truth=False,
+                route_truth_source="CapabilityPlanner",
+                behavior_changed=False,
+                authority=Authority.TRACE_ONLY,
+                local_model_called=False,
+                verifier_result=VerifierResult.NOT_RUN,
+                evidence_refs=request.evidence_refs,
+                fallback_block_reason="dry_run",
+                metadata={"dry_run": True},
+            )
+            decision = hybrid_route_decision_from_payload(payload)
+            capability_payload = capability_payload_from_hybrid_route(decision)
+            capability_payload["adapter_invoked"] = False
+            capability_payload["dry_run_invoked"] = False
+            capability_payload["metadata"] = {"dry_run": True}
+            return LocalHealCapabilityResponse(
+                task_id=request.task_id,
+                invoked=False,
+                hybrid_route=decision,
+                capability_payload=capability_payload,
+            )
+
         controls = request.executor_controls
         enable_local_heal = bool(controls.get("enable_local_heal", False))
         local_heal_mode = controls.get("local_heal_mode", "disabled")
