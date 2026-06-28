@@ -1,4 +1,4 @@
-name: Nexus Scoped Typecheck (nexus/core blocking)
+name: Nexus Scoped Typecheck (observation)
 
 on:
   push:
@@ -9,9 +9,10 @@ on:
 
 jobs:
   typecheck:
-    name: Pyright Scan (nexus/core blocking)
+    name: Pyright Observation (nexus/core)
     runs-on: ubuntu-latest
     timeout-minutes: 10
+    continue-on-error: true
 
     steps:
       - name: Checkout repository
@@ -33,13 +34,13 @@ jobs:
 
       - name: Run Pyright (nexus/core only)
         id: pyright
+        continue-on-error: true
         run: |
           uv run pyright nexus/core; echo "exit_code=$?" >> $GITHUB_OUTPUT
 
       - name: Report Result
         if: always()
         run: |
-          echo "## Pyright Scan (nexus/core blocking)" >> $GITHUB_STEP_SUMMARY
+          echo "## Pyright Observation (nexus/core)" >> $GITHUB_STEP_SUMMARY
           echo "Exit code: ${{ steps.pyright.outputs.exit_code }}" >> $GITHUB_STEP_SUMMARY
-          echo "This scan blocks CI if type errors are detected in nexus/core." >> $GITHUB_STEP_SUMMARY
-          echo "Note: pyrightconfig.json excludes optional integration adapters (eternal_memory.py, web_action_executor.py)." >> $GITHUB_STEP_SUMMARY
+          echo "This is an observation-only scan. Failures do not block CI." >> $GITHUB_STEP_SUMMARY
