@@ -18219,6 +18219,34 @@ def write_evidence_bundle(
     payload["h6_local_provider_invocation_gate"] = _build_h6_local_provider_invocation_gate(with_rows, payload)
     payload["external_provider_claim_boundary_contract"] = build_external_provider_claim_boundary_contract(payload)
     payload["public_promotion_readiness_contract"] = build_public_promotion_readiness_contract(payload)
+    
+    adapter_rows = [row.get("local_model_adapter", {}) for row in with_rows if isinstance(row.get("local_model_adapter"), dict)]
+    
+    def is_fail_closed(ad_row) -> bool:
+        mode = ad_row.get("route_mode", "")
+        reason = ad_row.get("fallback_block_reason", "")
+        blockers = ad_row.get("blockers", []) or []
+        if mode in ("local_only_blocked", "fail_closed"):
+            return True
+        if reason:
+            return True
+        if blockers:
+            return True
+        return False
+
+    payload["local_model_adapter_summary"] = {
+        "adapter_trace_count": sum(1 for r in adapter_rows if bool(r.get("enabled", False))),
+        "adapter_invoked_count": sum(1 for r in adapter_rows if bool(r.get("adapter_invoked", False))),
+        "local_model_called_count": sum(1 for r in adapter_rows if bool(r.get("local_model_called", False))),
+        "candidate_isolated_count": sum(1 for r in adapter_rows if bool(r.get("enabled", False)) and bool(r.get("candidate_output_isolated", False))),
+        "hash_match_count": sum(1 for r in adapter_rows if bool(r.get("selected_candidate_hash_matches_applied", False))),
+        "verifier_pass_count": sum(1 for r in adapter_rows if str(r.get("verifier_result", "")).strip().lower() == "pass"),
+        "fail_closed_count": sum(1 for r in adapter_rows if is_fail_closed(r)),
+        "behavior_changed_count": sum(1 for r in adapter_rows if bool(r.get("behavior_changed", False))),
+        "public_claim_allowed_count": sum(1 for r in adapter_rows if bool(r.get("public_claim_allowed", False))),
+        "production_ready_count": sum(1 for r in adapter_rows if bool(r.get("production_ready", False))),
+    }
+
     bundle_path.write_text(json.dumps(payload, indent=2, ensure_ascii=False), encoding="utf-8")
     return bundle_path
 

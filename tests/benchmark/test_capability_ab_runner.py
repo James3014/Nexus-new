@@ -32928,3 +32928,122 @@ def test_local_model_adapter_keeps_behavior_changed_false(tmp_path, monkeypatch)
     adapter_row = row.get("local_model_adapter")
     assert adapter_row["behavior_changed"] is False
 
+
+def test_local_model_adapter_evidence_bundle(tmp_path):
+    from scripts.bench.capability_ab_runner import write_evidence_bundle
+    
+    with_path = tmp_path / "with_nexus.jsonl"
+    without_path = tmp_path / "without_nexus.jsonl"
+    with_path.write_text("")
+    without_path.write_text("")
+    
+    rows = [
+        {
+            "mode": "with_nexus",
+            "run_eligible": True,
+            "local_model_adapter": {
+                "enabled": True,
+                "adapter_invoked": False,
+                "local_model_called": False,
+                "candidate_output_isolated": True,
+                "selected_candidate_hash_matches_applied": False,
+                "verifier_result": "not_run",
+                "route_mode": "local_only_blocked",
+                "fallback_block_reason": "missing_required_control",
+                "blockers": ["missing_required_control"],
+                "behavior_changed": False,
+                "public_claim_allowed": False,
+                "production_ready": False,
+            }
+        },
+        {
+            "mode": "with_nexus",
+            "run_eligible": True,
+            "local_model_adapter": {
+                "enabled": True,
+                "adapter_invoked": True,
+                "local_model_called": True,
+                "candidate_output_isolated": True,
+                "selected_candidate_hash_matches_applied": True,
+                "verifier_result": "pass",
+                "route_mode": "local_only_executed",
+                "fallback_block_reason": "",
+                "blockers": [],
+                "behavior_changed": False,
+                "public_claim_allowed": False,
+                "production_ready": False,
+            }
+        },
+        {
+            "mode": "with_nexus",
+            "run_eligible": True,
+            "local_model_adapter": {
+                "enabled": False,
+                "adapter_invoked": False,
+                "local_model_called": False,
+                "candidate_output_isolated": False,
+                "selected_candidate_hash_matches_applied": False,
+                "verifier_result": "not_run",
+                "route_mode": "cloud_assisted_by_local_trace_only",
+                "fallback_block_reason": "disabled",
+                "blockers": [],
+                "behavior_changed": False,
+                "public_claim_allowed": False,
+                "production_ready": False,
+            }
+        },
+        {
+            "mode": "without_nexus",
+            "run_eligible": True,
+            "local_model_adapter": {
+                "enabled": True,
+                "adapter_invoked": True,
+                "local_model_called": True,
+                "candidate_output_isolated": True,
+                "selected_candidate_hash_matches_applied": True,
+                "verifier_result": "pass",
+                "route_mode": "local_only_executed",
+                "fallback_block_reason": "",
+                "blockers": [],
+                "behavior_changed": False,
+                "public_claim_allowed": False,
+                "production_ready": False,
+            }
+        }
+    ]
+    
+    config = {
+        "tasks_file": "tasks.json",
+        "tasks_manifest_hash": "dummy_hash",
+        "unique_tasks_requested": 1,
+        "repeat_trials": 1,
+    }
+    
+    bundle_file = write_evidence_bundle(
+        out_dir=tmp_path,
+        with_path=with_path,
+        without_path=without_path,
+        rows=rows,
+        config=config,
+    )
+    
+    import json
+    with open(bundle_file, "r", encoding="utf-8") as f:
+        payload = json.load(f)
+        
+    summary = payload.get("local_model_adapter_summary")
+    assert summary is not None
+    
+    assert summary["adapter_trace_count"] == 2
+    assert summary["adapter_invoked_count"] == 1
+    assert summary["local_model_called_count"] == 1
+    assert summary["candidate_isolated_count"] == 2
+    assert summary["hash_match_count"] == 1
+    assert summary["verifier_pass_count"] == 1
+    assert summary["fail_closed_count"] == 2
+    
+    assert summary["behavior_changed_count"] == 0
+    assert summary["public_claim_allowed_count"] == 0
+    assert summary["production_ready_count"] == 0
+
+
