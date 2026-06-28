@@ -117,7 +117,8 @@ def run_isolated_local_solve_loop(request: IsolatedLocalSolveRequest) -> Isolate
         has_constraint_blockers = True
         
     if envelope.parser_status == "pass":
-        normalized = os.path.normpath(envelope.target_file)
+        orig_file = normalizer_receipt.original_target_file if getattr(normalizer_receipt, "normalized", False) else envelope.target_file
+        normalized = os.path.normpath(orig_file or "")
         if normalized.startswith("/") or normalized.startswith("..") or ".." in normalized.split(os.sep):
             loop_blockers.append("path_traversal_detected")
             loop_blockers.append("SEARCH_MISMATCH")
