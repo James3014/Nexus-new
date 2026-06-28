@@ -96,14 +96,18 @@ class NexusSwarmOrchestrator:
         observer = getattr(self.engine, "swarm_observer", None)
         if callable(observer):
             result = observer(event)
-            return dict(result) if result else {"status": "observed", "production_writes_allowed": False}
+            if isinstance(result, dict):
+                return result
+            return {"status": "observed", "production_writes_allowed": False}
         return {"status": "observed", "production_writes_allowed": False}
 
     def _rollback_quiet_moment(self, event: Dict[str, Any]) -> Dict[str, Any]:
         rollback = getattr(self.engine, "swarm_rollback", None)
         if callable(rollback):
             result = rollback(event)
-            return dict(result) if result else {"status": "armed", "production_writes_allowed": False}
+            if isinstance(result, dict):
+                return result
+            return {"status": "armed", "production_writes_allowed": False}
         return {"status": "armed", "production_writes_allowed": False}
 
     def _scout(self) -> str:
@@ -197,7 +201,7 @@ class NexusSwarmOrchestrator:
         return repair_result.get("status", "FAIL")
 
 class FederatedSwarmOrchestrator(NexusSwarmOrchestrator):
-    def __init__(self, engine: Any, task: str, model: str = None):
+    def __init__(self, engine: Any, task: str, model: Optional[str] = None):
         super().__init__(engine, task, model)
         self.node_registry = None
         if self.tls_enabled and self.tls_provider:
@@ -228,6 +232,8 @@ class FederatedSwarmOrchestrator(NexusSwarmOrchestrator):
 
     def _dispatch_remote(self, node: Any, payload: Dict[str, Any]) -> Optional[Dict[str, Any]]:
         logger.info(f"🚀 [Federation] Dispatching task to remote node {node.node_id} ({node.host}:{node.port})")
+        if not self.tls_provider:
+            return None
         context = self.tls_provider.get_client_context()
         try:
             with socket.create_connection((node.host, node.port), timeout=300) as sock:
@@ -339,7 +345,7 @@ class PeerSwarmOrchestrator(NexusSwarmOrchestrator):
 
 class SwarmFactory:
     @staticmethod
-    def create_swarm(engine, task, model=None):
+    def create_swarm(engine, task, model: Optional[str] = None):
         mode = os.environ.get("NEXUS_SWARM_MODE", "sequential")
         if mode == "p2p":
             return PeerSwarmOrchestrator(engine, task, model)
