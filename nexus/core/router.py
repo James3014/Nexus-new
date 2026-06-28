@@ -223,7 +223,9 @@ class SkillsRouter:
     @staticmethod
     def _row_tenant_id(row: Dict[str, Any]) -> str:
         metadata = row.get("metadata") if isinstance(row.get("metadata"), dict) else {}
-        tenant_id = row.get("tenant_id") or row.get("tenant") or metadata.get("tenant_id") or metadata.get("tenant")
+        tenant_id = row.get("tenant_id") or row.get("tenant")
+        if not tenant_id and isinstance(metadata, dict):
+            tenant_id = metadata.get("tenant_id") or metadata.get("tenant")
         return str(tenant_id) if tenant_id else ""
 
     @classmethod
@@ -291,7 +293,10 @@ class SkillsRouter:
             logger.warning("🛡️ [SkillsRouter] Capability Selector BLOCKED execution.")
             return []
 
-        receipts = controller.execute_plan(plan)
+        if not isinstance(plan, dict):
+            receipts = controller.execute_plan(plan)
+        else:
+            receipts = []
 
         # 5. [P26] OutcomeMemory 學習寫回
         try:
