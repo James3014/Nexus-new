@@ -113,27 +113,28 @@ class NexusOrchestrator:
             evidence_id=f"REBUTTAL_{datetime.now().strftime('%H%M%S')}",
             reason=rebuttal,
         )
-        if hasattr(self.belief_engine, "process_audit_outcome"):
+        if hasattr(self.belief_engine, "process_audit_outcome") and self.belief_engine is not None:
             self.belief_engine.process_audit_outcome(outcome)
             return
-        self.belief_engine.update_belief(
-            task_id=outcome.task_id,
-            assumption=outcome.assumption,
-            confidence=outcome.confidence if outcome.confidence is not None else 0.1,
-            evidence_id=outcome.evidence_id,
-        )
+        if self.belief_engine is not None and hasattr(self.belief_engine, "update_belief"):
+            self.belief_engine.update_belief(
+                task_id=outcome.task_id,
+                assumption=outcome.assumption,
+                confidence=outcome.confidence if outcome.confidence is not None else 0.1,
+                evidence_id=outcome.evidence_id,
+            )
 
     def _run_adversarial_audit(self, response_data: dict) -> Tuple[bool, str]:
         summary = response_data.get("summary", "")
 
-        if hasattr(self.palace, "audit_action"):
+        if hasattr(self.palace, "audit_action") and self.palace is not None:
             try:
                 if not self.palace.audit_action("D", summary):
                     return False, "Palace audit rejected"
             except Exception as exc:
                 return False, f"Palace audit error: {exc}"
 
-        if not hasattr(self.belief_engine, "assess_confidence"):
+        if not hasattr(self.belief_engine, "assess_confidence") or self.belief_engine is None:
             return False, "Belief gate unavailable"
         try:
             confidence = self.belief_engine.assess_confidence(self.task, summary)
