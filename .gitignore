@@ -79,3 +79,8 @@ run_output*.log
 last_response.txt
 last_patch_call.txt
 last_patch_response.txt
+
+
+# Nexus Evaluation Artifacts (Exclude from code commits)
+artifacts/runtime/
+artifacts/external_sources/

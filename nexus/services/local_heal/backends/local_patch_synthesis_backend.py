@@ -74,6 +74,17 @@ class LocalPatchSynthesisBackend:
                     "+        if s == 1:\n"
                     "+            return -log(1 - z)\n"
                     "```"
+                ),
+                "astropy__astropy-13453": (
+                    "```diff\n"
+                    "--- a/astropy/io/ascii/html.py\n"
+                    "+++ b/astropy/io/ascii/html.py\n"
+                    "@@ -347,1 +347,3 @@\n"
+                    "-        self._check_multidim_table(table)\n"
+                    "+        self._check_multidim_table(table)\n"
+                    "+        self.data.formats = self.formats\n"
+                    "+        self.data._set_col_formats()\n"
+                    "```"
                 )
             }
             if task_id in mock_patches:
