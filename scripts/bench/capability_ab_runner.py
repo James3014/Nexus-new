@@ -8171,6 +8171,11 @@ def _build_h5_guarded_local_candidate_benchmark_trial(rows: list[dict[str, Any]]
 
     trial_allowed = flag and row_count > 0 and has_receipts
     eligible = smoke_passed + smoke_blocked
+    pass_rate = smoke_passed / eligible if eligible > 0 else 0.0
+    safe_rate = smoke_safe / eligible if eligible > 0 else 0.0
+    cloud_rate = cloud_invoked / eligible if eligible > 0 else 0.0
+    mc_rate = mc_incremented / eligible if eligible > 0 else 0.0
+    beh_rate = beh_changed / eligible if eligible > 0 else 0.0
 
     trial_passed = (
         trial_allowed and smoke_passed >= 1
@@ -8206,7 +8211,7 @@ def _build_h5_guarded_local_candidate_benchmark_trial(rows: list[dict[str, Any]]
         "public_claim_blocked",
     ])
 
-    replay_blocked = replay_allowed and blocked_count > 0 and blocked_count == total_replays
+    # replay_blocked = replay_allowed and blocked_count > 0 and blocked_count == total_replays
 
     return {
         "schema": "nexus.hybrid_h5_guarded_local_candidate_benchmark_trial.v1",
