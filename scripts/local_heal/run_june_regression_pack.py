@@ -252,7 +252,14 @@ except Exception as e:
 ]
 
 class FakePhase(IPhase):
+    def __init__(self, name: str):
+        self.name = name
+
     def execute(self, ctx: HealContext) -> PhaseResult:
+        if hasattr(ctx.op, "phase_trace") and self.name in ctx.op.phase_trace:
+            ctx.op.phase_trace[self.name]["ran"] = True
+            ctx.op.phase_trace[self.name]["success"] = True
+            ctx.op.phase_trace[self.name]["receipt_present"] = True
         return PhaseResult(success=True)
 
 class RealVerifyPhase(IPhase):
@@ -263,6 +270,9 @@ class RealVerifyPhase(IPhase):
         self.task_id = task_id
 
     def execute(self, ctx: HealContext) -> PhaseResult:
+        if hasattr(ctx.op, "phase_trace") and "verification" in ctx.op.phase_trace:
+            ctx.op.phase_trace["verification"]["ran"] = True
+
         repro_script = ctx.op.repo_dir / "reproduce_bug.py"
         repro_script.write_text(self.repro_code, encoding="utf-8")
 
@@ -432,6 +442,11 @@ class RealVerifyPhase(IPhase):
                 "applied_diff_present": bool(oracle_patch_text),
             }
 
+            receipt_exists = hasattr(ctx.op, "verifier_receipt")
+            if hasattr(ctx.op, "phase_trace") and "verification" in ctx.op.phase_trace:
+                ctx.op.phase_trace["verification"]["success"] = passed
+                ctx.op.phase_trace["verification"]["receipt_present"] = receipt_exists
+
             if passed and (apply_success or self.replay_mode == "mock_oracle"):
                 return PhaseResult(success=True)
             elif is_verifier_error:
@@ -537,6 +552,9 @@ def run_pack(replay_mode: str = "mock_oracle") -> dict[str, Any]:
     
     for item in REGRESSION_PACK:
         task_id = item["task_id"]
+        # Phase 56G: 在 real_model 模式下，僅限執行 astropy-13236 單題探針
+        if replay_mode == "real_model" and task_id != "astropy__astropy-13236":
+            continue
         june_group = item["june_group"]
         workspace_path = Path(item["workspace_path"])
         python_exec = item["python_executable"]
@@ -658,6 +676,13 @@ def run_pack(replay_mode: str = "mock_oracle") -> dict[str, Any]:
             solve_eligible=False,
             wall_time_sec=0.0,
             receipt_path="",
+            phase_trace={
+                "reproduction": {"name": "reproduction", "class_name": "FakePhase", "is_fake": True, "ran": False, "success": False, "receipt_present": False},
+                "planning": {"name": "planning", "class_name": "FakePhase", "is_fake": True, "ran": False, "success": False, "receipt_present": False},
+                "localization": {"name": "localization", "class_name": "FakePhase", "is_fake": True, "ran": False, "success": False, "receipt_present": False},
+                "patch_synthesis": {"name": "patch_synthesis", "class_name": "FakePhase", "is_fake": True, "ran": False, "success": False, "receipt_present": False},
+                "verification": {"name": "verification", "class_name": "RealVerifyPhase", "is_fake": False, "ran": False, "success": False, "receipt_present": False},
+            }
         )
         gov = SimpleNamespace(
             gate_exit="",
@@ -670,7 +695,13 @@ def run_pack(replay_mode: str = "mock_oracle") -> dict[str, Any]:
         ctx = HealContext(op=op, gov=gov)
         
         orchestrator = HealOrchestrator(
-            phases=[FakePhase(), FakePhase(), FakePhase(), FakePhase(), RealVerifyPhase(item["repro_code"], item["target_file"], replay_mode=replay_mode, task_id=task_id)],
+            phases=[
+                FakePhase("reproduction"),
+                FakePhase("planning"),
+                FakePhase("localization"),
+                FakePhase("patch_synthesis"),
+                RealVerifyPhase(item["repro_code"], item["target_file"], replay_mode=replay_mode, task_id=task_id)
+            ],
             governance_gate=GovernanceGate()
         )
         
@@ -699,6 +730,26 @@ def run_pack(replay_mode: str = "mock_oracle") -> dict[str, Any]:
         if hasattr(ctx.op, "verifier_receipt"):
             print(f"  DEBUG Verifier stdout: {repr(ctx.op.verifier_receipt.stdout_tail[:300])}")
             
+        # 動態計算 phase_trace 狀態 (任務 B)
+        trace = getattr(ctx.op, "phase_trace", {})
+        
+        def get_phase_ran_non_fake(name):
+            p = trace.get(name, {})
+            return p.get("ran", False) and not p.get("is_fake", True)
+            
+        used_reproduction_phase = get_phase_ran_non_fake("reproduction")
+        used_planning_phase = get_phase_ran_non_fake("planning")
+        used_localization_phase = get_phase_ran_non_fake("localization")
+        used_patch_synthesis_phase = get_phase_ran_non_fake("patch_synthesis")
+        used_verification_phase = get_phase_ran_non_fake("verification")
+        
+        used_full_phase_sequence = True
+        for name in ["reproduction", "planning", "localization", "patch_synthesis", "verification"]:
+            p = trace.get(name, {})
+            if not (p.get("ran", False) and not p.get("is_fake", True) and p.get("receipt_present", False)):
+                used_full_phase_sequence = False
+                break
+
         # 判定 final_verdict
         if verifier_status == "pass":
             final_verdict = "PASSED"
@@ -714,6 +765,35 @@ def run_pack(replay_mode: str = "mock_oracle") -> dict[str, Any]:
         # 判定 final_classification (任務 A & D)
         if replay_mode == "mock_oracle":
             final_classification = "MOCK_ORACLE_REPLAY_PASS" if final_verdict == "PASSED" else "MOCK_ORACLE_REPLAY_FAIL"
+        elif replay_mode == "real_model":
+            # 任務 C: 嚴格 real_model 分類
+            has_fake = any(p.get("is_fake", True) for p in trace.values())
+            
+            if final_verdict == "INFRA_BLOCKED":
+                final_classification = "INFRA_BLOCKED"
+            elif has_fake:
+                final_classification = "SEAM_SMOKE_ONLY"
+            else:
+                has_real_call = getattr(ctx.op, "local_model_called", False)
+                apply_ok = patch_applied_ev.get("apply_receipt_status") == "applied"
+                matches_ok = patch_applied_ev.get("selected_candidate_hash_matches_applied") is True
+                hash_diff = patch_applied_ev.get("patched_file_hash_before") != patch_applied_ev.get("patched_file_hash_after")
+                verifier_ran = patch_applied_ev.get("verifier_ran_after_apply") is True
+                
+                cond_pass = (
+                    has_real_call
+                    and apply_ok
+                    and matches_ok
+                    and hash_diff
+                    and verifier_ran
+                    and verifier_status == "pass"
+                )
+                if cond_pass:
+                    final_classification = "REAL_MODEL_MAINLINE_PASS"
+                elif has_real_call:
+                    final_classification = "REAL_MODEL_CONTROLLED_FAIL"
+                else:
+                    final_classification = "WIRING_GAP"
         else:
             final_classification = "REPAIR_LOOP_SEAM_PASS" if final_verdict == "PASSED" else ("CONTROLLED_BLOCKED" if final_verdict == "CONTROLLED_BLOCKED" else "REGRESSION_OR_WIRING_GAP")
 
@@ -738,6 +818,8 @@ def run_pack(replay_mode: str = "mock_oracle") -> dict[str, Any]:
             res_pip_available = True
             res_uv_available = bool(shutil.which("uv"))
 
+
+
         res_item = {
             "task_id": task_id,
             "june_group": june_group,
@@ -751,12 +833,13 @@ def run_pack(replay_mode: str = "mock_oracle") -> dict[str, Any]:
             "receipt_coverage": 1.0 if verifier_status == "pass" else 0.0,
             "used_heal_orchestrator_run": True,
             "used_internal_repair_loop": True,
-            "used_full_phase_sequence": True,
-            "used_reproduction_phase": True,
-            "used_planning_phase": True,
-            "used_localization_phase": True,
-            "used_patch_synthesis_phase": True,
-            "used_verification_phase": True,
+            "used_full_phase_sequence": used_full_phase_sequence,
+            "used_reproduction_phase": used_reproduction_phase,
+            "used_planning_phase": used_planning_phase,
+            "used_localization_phase": used_localization_phase,
+            "used_patch_synthesis_phase": used_patch_synthesis_phase,
+            "used_verification_phase": used_verification_phase,
+            "phase_trace": trace,
             "used_qwen_backend_seam": final_verdict != "INFRA_BLOCKED",
             "used_granular_localizer": used_granular_localizer,
             "used_isolated_solve_loop": False,
