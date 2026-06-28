@@ -33047,3 +33047,167 @@ def test_local_model_adapter_evidence_bundle(tmp_path):
     assert summary["production_ready_count"] == 0
 
 
+def test_local_model_adapter_june_b_replay(tmp_path, monkeypatch):
+    from unittest import mock
+    from scripts.bench.capability_ab_runner import CapabilityTask, _finalize_with_nexus_row, write_evidence_bundle
+
+    f_path = tmp_path / "f.py"
+    f_path.write_text("print('hello')\n", encoding="utf-8")
+    
+    astropy_path = tmp_path / "dummy_astropy.py"
+    astropy_path.write_text("print('hello astropy')\n", encoding="utf-8")
+
+    task_sympy = CapabilityTask(
+        id="sympy__sympy-13852",
+        difficulty="easy",
+        task_type="test_repair",
+        task_desc="verify sympy import fix",
+        target_file="f.py",
+        test_file="test_f.py",
+        expected_capabilities=("claim_gate",),
+        success_criteria="tests_pass",
+        repo_kind="nexus_internal",
+        fixture_kind="test_fixture",
+    )
+
+    task_astropy = CapabilityTask(
+        id="astropy__astropy-12907",
+        difficulty="easy",
+        task_type="test_repair",
+        task_desc="verify path traversal block",
+        target_file="dummy_astropy.py",
+        test_file="test_astropy.py",
+        expected_capabilities=("claim_gate",),
+        success_criteria="tests_pass",
+        repo_kind="nexus_internal",
+        fixture_kind="test_fixture",
+    )
+
+    import urllib.request
+    original_urlopen = urllib.request.urlopen
+
+    def mock_urlopen(req, *args, **kwargs):
+        import json
+        data_bytes = req.data if hasattr(req, "data") else b""
+        try:
+            payload = json.loads(data_bytes.decode("utf-8"))
+            prompt = payload.get("prompt", "")
+        except Exception:
+            prompt = ""
+
+        mock_resp = mock.MagicMock()
+        mock_resp.__enter__.return_value = mock_resp
+
+        if "sympy" in prompt:
+            diff = """--- a/f.py
++++ b/f.py
+@@ -1 +1 @@
+-print('hello')
++print('world')
+"""
+            mock_resp.read.return_value = json.dumps({"response": diff}).encode("utf-8")
+        elif "astropy" in prompt:
+            diff = """--- a/../outside.py
++++ b/../outside.py
+@@ -1 +1 @@
+-1
++2
+"""
+            mock_resp.read.return_value = json.dumps({"response": diff}).encode("utf-8")
+        else:
+            mock_resp.read.return_value = b'{"response": ""}'
+
+        return mock_resp
+
+    monkeypatch.setenv("NEXUS_WITH_LOCAL_MODEL_ADAPTER", "1")
+    monkeypatch.setenv("NEXUS_LOCAL_MODEL_CALL_ALLOWED", "1")
+    monkeypatch.setenv("NEXUS_LOCAL_MODEL_CANDIDATE_ENABLE", "1")
+    monkeypatch.setenv("NEXUS_LOCAL_SOLVE_ISOLATED_ENABLE", "1")
+    monkeypatch.setenv("NEXUS_LOCAL_SOLVE_MUTATION_ALLOWED", "1")
+    monkeypatch.setenv("NEXUS_LOCAL_SOLVE_VERIFIER_ALLOWED", "1")
+    monkeypatch.setenv("NEXUS_LOCAL_GUARD_FAIL_CLOSED_ENABLE", "1")
+    monkeypatch.setenv("NEXUS_LOCAL_MODEL_PROVIDER", "ollama")
+    monkeypatch.setenv("NEXUS_LOCAL_MODEL_NAME", "qwen2.5-coder:7b")
+
+    with mock.patch("urllib.request.urlopen", side_effect=mock_urlopen):
+        row_sympy = {
+            "mode": "with_nexus",
+            "model_calls": 0,
+            "total_tokens": 0,
+            "target_symbol": "dummy",
+            "locked_search": "print('hello')",
+            "evidence_refs": ["ref1"],
+            "verifier_command": ["python3", "-c", "import os; assert os.path.exists('f.py'); f=open('f.py'); assert 'world' in f.read()"]
+        }
+        
+        row_astropy = {
+            "mode": "with_nexus",
+            "model_calls": 0,
+            "total_tokens": 0,
+            "target_symbol": "dummy",
+            "locked_search": "print('hello astropy')",
+            "evidence_refs": ["ref1"],
+            "verifier_command": ["python3", "-c", "print('always pass')"]
+        }
+
+        fin_sympy = _finalize_with_nexus_row(
+            row_sympy, provider="gemini", model_required=True, nexus_required=False, task=task_sympy, repo_root=tmp_path
+        )
+        
+        fin_astropy = _finalize_with_nexus_row(
+            row_astropy, provider="gemini", model_required=True, nexus_required=False, task=task_astropy, repo_root=tmp_path
+        )
+
+    ad_sympy = fin_sympy.get("local_model_adapter")
+    assert ad_sympy["route_mode"] == "local_only_executed"
+    assert ad_sympy["verifier_result"] == "pass"
+    assert ad_sympy["local_model_called"] is True
+    assert ad_sympy["selected_candidate_hash_matches_applied"] is True
+    assert ad_sympy["public_claim_allowed"] is False
+    assert ad_sympy["production_ready"] is False
+    assert ad_sympy["behavior_changed"] is False
+
+    ad_astropy = fin_astropy.get("local_model_adapter")
+    assert ad_astropy["route_mode"] == "local_only_blocked"
+    assert "path_traversal_detected" in ad_astropy["fallback_block_reason"]
+
+    with_path = tmp_path / "with_nexus.jsonl"
+    without_path = tmp_path / "without_nexus.jsonl"
+    with_path.write_text("")
+    without_path.write_text("")
+
+    config = {
+        "tasks_file": "tasks.json",
+        "tasks_manifest_hash": "dummy_hash",
+        "unique_tasks_requested": 2,
+        "repeat_trials": 1,
+    }
+
+    bundle_file = write_evidence_bundle(
+        out_dir=tmp_path,
+        with_path=with_path,
+        without_path=without_path,
+        rows=[fin_sympy, fin_astropy],
+        config=config,
+    )
+
+    import json
+    with open(bundle_file, "r", encoding="utf-8") as f:
+        payload = json.load(f)
+
+    summary = payload.get("local_model_adapter_summary")
+    assert summary is not None
+    
+    assert summary["adapter_trace_count"] == 2
+    assert summary["adapter_invoked_count"] == 2
+    assert summary["local_model_called_count"] == 2
+    assert summary["candidate_isolated_count"] == 1
+    assert summary["verifier_pass_count"] == 1
+    assert summary["fail_closed_count"] == 1
+    
+    assert summary["behavior_changed_count"] == 0
+    assert summary["public_claim_allowed_count"] == 0
+    assert summary["production_ready_count"] == 0
+
+
+
