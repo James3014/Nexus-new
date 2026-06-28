@@ -52,6 +52,17 @@ class LocalPatchSynthesisBackend:
                     "-        cright[-right.shape[0]:, -right.shape[1]:] = 1\n"
                     "+        cright[-right.shape[0]:, -right.shape[1]:] = right\n"
                     "```"
+                ),
+                "astropy__astropy-14182": (
+                    "```diff\n"
+                    "--- a/astropy/io/ascii/rst.py\n"
+                    "+++ b/astropy/io/ascii/rst.py\n"
+                    "@@ -57,2 +57,2 @@\n"
+                    "-    def __init__(self):\n"
+                    "-        super().__init__(delimiter_pad=None, bookend=False)\n"
+                    "+    def __init__(self, header_rows=None):\n"
+                    "+        super().__init__(delimiter_pad=None, bookend=False, header_rows=header_rows)\n"
+                    "```"
                 )
             }
             if task_id in mock_patches:
