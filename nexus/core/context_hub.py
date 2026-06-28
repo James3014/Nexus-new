@@ -408,7 +408,7 @@ class ContextHub:
         from nexus.core.context_compactor import ContextCompactor
         compactor = ContextCompactor(self.project_root)
         confidence = (bayesian_params or {}).get("confidence", 0.5)
-        state_dict = state.to_dict() if hasattr(state, "to_dict") and callable(getattr(state, "to_dict", None)) else vars(state)
+        state_dict = vars(state)
         structured_summary = compactor.compact(state_dict, confidence=confidence)
 
         # 🧪 [Entropy Prediction] (AOS-131.5)
@@ -421,7 +421,7 @@ class ContextHub:
 
         if estimated_total > threshold:
             logger.info(f"✂️ [ContextHub:TOON-2.0] Predicted {estimated_total:.0f} tokens exceed {threshold:.0f}. Compacting...")
-            compact_history = prune_dialogue(history, aggression=nas_aggression)
+            compact_history = prune_dialogue(history)
             context_parts = [
                 l0, l1,
                 "--- STRUCTURED CONTEXT (L5-Addressable) ---",
