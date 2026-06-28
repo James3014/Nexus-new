@@ -273,13 +273,38 @@ class FederatedSwarmOrchestrator(NexusSwarmOrchestrator):
                 phase, node.node_id, self._ALLOWED_REMOTE_PHASES,
             )
             return None
-        return super()._dispatch_remote(node, payload)
+        # Execute remote dispatch via mTLS
+        logger.info(f"🚀 [Federation] Dispatching task to remote node {node.node_id} ({node.host}:{node.port})")
+        if not self.tls_provider:
+            return None
+        context = self.tls_provider.get_client_context()
+        try:
+            with socket.create_connection((node.host, node.port), timeout=300) as sock:
+                with context.wrap_socket(sock, server_hostname=node.host) as ssock:
+                    f = ssock.makefile("rwb")
+                    req = {
+                        "action": "execute_phase",
+                        "payload": payload
+                    }
+                    f.write((json.dumps(req) + "\n").encode("utf-8"))
+                    f.flush()
+                    
+                    resp_line = f.readline().decode("utf-8")
+                    if not resp_line:
+                        return None
+                    resp = json.loads(resp_line)
+                    if resp.get("status") == "ok":
+                        return resp.get("result")
+                    return None
+        except Exception as e:
+            logger.warning(f"❌ [Federation] Remote dispatch failed: {e}")
+            return None
 
     def _repair(self, plan: str) -> Dict[str, Any]:
         # "repair" is a write-path phase — ALWAYS run locally.
         # Do NOT attempt remote dispatch; fall straight through to local execution.
         logger.info("🏠 [Federation] repair phase is write-path — executing locally (policy enforced).")
-        return super(NexusSwarmOrchestrator, self)._repair(plan)
+        return super()._repair(plan)
 
     def _verify(self, repair_result: Dict[str, Any]) -> str:
         """Attempt federated verify before falling back to local."""
@@ -307,6 +332,7 @@ class PeerSwarmOrchestrator(NexusSwarmOrchestrator):
         self.sse_url = "http://localhost:8080/nexus-sync/poc"
         base_root = Path(getattr(self.engine, "project_root", Path.cwd()))
         self.manifest_path = base_root / ".nexus" / "swarm" / "manifest.json"
+        self.history: List[str] = []
         
     def broadcast_decision(self, decision_type: str, data: Dict):
         """🛡️ 廣播決策 (Shared Decisions)"""
