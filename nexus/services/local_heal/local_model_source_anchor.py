@@ -30,6 +30,26 @@ def build_local_model_source_anchor(
     
     source_file_path = Path(source_root) / target_file
     
+    localizer_attempted = False
+    localizer_success = False
+    localizer_error = ""
+    localizer_source = "none"
+    
+    # 任務 C: 若無 mock locked_search 傳入，動態使用 GranularMethodLocalizer AST/BM25 定位
+    if not locked_search and source_file_path.exists():
+        localizer_attempted = True
+        try:
+            from nexus.services.local_heal.granular_localizer import GranularMethodLocalizer
+            localizer = GranularMethodLocalizer()
+            content = source_file_path.read_text(encoding="utf-8")
+            bundle = localizer.localize(target_file, content, target_symbol)
+            if bundle.primary_snippet:
+                locked_search = bundle.primary_snippet
+                localizer_success = True
+                localizer_source = bundle.fallback_mode or "granular_method"
+        except Exception as e:
+            localizer_error = str(e)
+            
     res = get_canonical_search_span(
         locked_search=locked_search,
         patch_diff=patch_diff,
@@ -73,6 +93,10 @@ def build_local_model_source_anchor(
         "canonical_span_source": res.source,
         "fallback_used": fallback,
         "span_hash": span_hash,
+        "localizer_fallback_attempted": localizer_attempted,
+        "localizer_fallback_success": localizer_success,
+        "localizer_fallback_error": localizer_error,
+        "localizer_fallback_source": localizer_source,
     })
     
     return LocalModelSourceAnchor(

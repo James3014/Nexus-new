@@ -122,12 +122,54 @@ class HealOrchestrator:
 
     def _run_repair_loop(self, ctx: HealContext, ledger: LatencyLedger) -> None:
         """執行 Patch 合成與驗證的迭代迴圈。"""
+        import os
         while ctx.op.attempt <= ctx.op.max_tries:
             self._reset_workspace(ctx)
             
             # Step 4: Patch Synthesis
             if not self.patch_phase: break
-            res = self.phase_runner.run_phase(self.patch_phase, f"patch_attempt_{ctx.op.attempt}", ctx, ledger)
+            
+            # Seam 整合：若使用 local_qwen_backend
+            if getattr(ctx.op, "use_local_qwen_backend", False) or os.environ.get("NEXUS_LOCAL_QWEN_BACKEND") == "1":
+                from nexus.services.local_heal.backends.local_patch_synthesis_backend import LocalPatchSynthesisBackend
+                backend = LocalPatchSynthesisBackend()
+                
+                previous_feedback = None
+                if ctx.op.attempt > 1:
+                    from nexus.services.local_heal.failure_feedback_builder import build_failure_feedback
+                    stdout_tail = getattr(ctx.op, "last_stdout_tail", "")
+                    stderr_tail = getattr(ctx.op, "last_stderr_tail", "")
+                    previous_feedback = build_failure_feedback(
+                        task_id=getattr(ctx.op, "task_id", "t_unknown"),
+                        failure_class=getattr(ctx.op, "last_failure_class", "VERIFIER_FAIL"),
+                        target_file=ctx.op.localized_files[0].path if ctx.op.localized_files else "f.py",
+                        target_symbol=ctx.op.plan.search_symbols[0] if ctx.op.plan and ctx.op.plan.search_symbols else "func",
+                        locked_search=getattr(ctx.op, "locked_search", ""),
+                        previous_block_reason=ctx.op.failure_reason or "VERIFIER_FAIL",
+                        verifier_status="fail",
+                        stdout_tail=stdout_tail,
+                        stderr_tail=stderr_tail,
+                    )
+                    
+                target_file = ctx.op.localized_files[0].path if ctx.op.localized_files else "f.py"
+                target_symbol = ctx.op.plan.search_symbols[0] if ctx.op.plan and ctx.op.plan.search_symbols else "func"
+                
+                resp = backend.generate_patch(
+                    task_id=getattr(ctx.op, "task_id", "t_unknown"),
+                    problem_statement=ctx.op.problem_statement,
+                    target_file=target_file,
+                    target_symbol=target_symbol,
+                    locked_search=getattr(ctx.op, "locked_search", ""),
+                    verifier_command=tuple(ctx.op.verifier_command) if hasattr(ctx.op, "verifier_command") else (),
+                    attempt=ctx.op.attempt,
+                    previous_feedback=previous_feedback,
+                )
+                
+                ctx.op.final_patch = resp["candidate_text"]
+                ctx.op.local_model_called = resp["local_model_called"]
+                res = PhaseResult(success=True)
+            else:
+                res = self.phase_runner.run_phase(self.patch_phase, f"patch_attempt_{ctx.op.attempt}", ctx, ledger)
             
             if not res.success:
                 if self._handle_patch_failure(ctx, res, ledger):
@@ -145,6 +187,12 @@ class HealOrchestrator:
                 ctx.gov.gate_exit = "verification"
                 break
             else:
+                if getattr(ctx.op, "use_local_qwen_backend", False) or os.environ.get("NEXUS_LOCAL_QWEN_BACKEND") == "1":
+                    receipt = getattr(ctx.op, "verifier_receipt", None)
+                    if receipt:
+                        ctx.op.last_stdout_tail = getattr(receipt, "stdout_tail", "")
+                        ctx.op.last_stderr_tail = getattr(receipt, "stderr_tail", "")
+                    ctx.op.last_failure_class = "VERIFIER_FAIL"
                 self._handle_verification_failure(ctx, v_res)
 
     def _handle_patch_failure(self, ctx: HealContext, res: PhaseResult, ledger: LatencyLedger) -> bool:
