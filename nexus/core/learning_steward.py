@@ -163,7 +163,7 @@ class LearningSteward:
             export_ready=export_ready,
         )
 
-    def _profile_for(self, metadata: Dict[str, Any]) -> GovernanceProfile:
+    def _profile_for(self, metadata: Any) -> GovernanceProfile:
         raw = metadata.get("governance_profile")
         if not isinstance(raw, dict):
             metadata["governance_profile_source"] = "default"
@@ -243,7 +243,7 @@ class LearningSteward:
             return obj.get(key, default)
         return getattr(obj, key, default)
 
-    def _evaluate_canary(self, metadata: Dict[str, Any], profile: GovernanceProfile) -> List[str]:
+    def _evaluate_canary(self, metadata: Any, profile: GovernanceProfile) -> List[str]:
         baseline = float(metadata.get("memory_health_baseline", profile.memory_health_baseline))
         current = float(metadata.get("memory_health_current", baseline))
         if baseline <= 0:

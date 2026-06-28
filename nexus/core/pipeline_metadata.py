@@ -121,7 +121,7 @@ class PipelineMetadata(TypedDict, total=False):
 
     # --- Policy ---
     intent: str
-    phase_failures: Dict[str, Any]
+    phase_failures: int
     aos_score: float
 
     # --- Snapshot ---

@@ -54,7 +54,7 @@ class LearningScorer:
         )
 
     @classmethod
-    def _update_success_window(cls, metadata: Dict[str, Any], success: bool) -> List[int]:
+    def _update_success_window(cls, metadata: Any, success: bool) -> List[int]:
         raw = metadata.get("learning_success_window")
         window: List[int] = []
         if isinstance(raw, list):
