@@ -230,33 +230,6 @@ class FederatedSwarmOrchestrator(NexusSwarmOrchestrator):
                     best_node = node
         return best_node
 
-    def _dispatch_remote(self, node: Any, payload: Dict[str, Any]) -> Optional[Dict[str, Any]]:
-        logger.info(f"🚀 [Federation] Dispatching task to remote node {node.node_id} ({node.host}:{node.port})")
-        if not self.tls_provider:
-            return None
-        context = self.tls_provider.get_client_context()
-        try:
-            with socket.create_connection((node.host, node.port), timeout=300) as sock:
-                with context.wrap_socket(sock, server_hostname=node.host) as ssock:
-                    f = ssock.makefile("rwb")
-                    req = {
-                        "action": "execute_phase",
-                        "payload": payload
-                    }
-                    f.write((json.dumps(req) + "\n").encode("utf-8"))
-                    f.flush()
-                    
-                    resp_line = f.readline().decode("utf-8")
-                    if not resp_line:
-                        return None
-                    resp = json.loads(resp_line)
-                    if resp.get("status") == "ok":
-                        return resp.get("result")
-                    return None
-        except Exception as e:
-            logger.warning(f"❌ [Federation] Remote dispatch failed: {e}")
-            return None
-
     # ─── Sprint 11e: Federation Security Boundary ───────────────────────────
     # POLICY: Only "verify" (read-only / sandbox inspection) may be dispatched
     # to remote federation nodes. "repair" and "coder" are FORBIDDEN remotely
