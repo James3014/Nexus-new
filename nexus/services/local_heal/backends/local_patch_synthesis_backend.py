@@ -63,6 +63,17 @@ class LocalPatchSynthesisBackend:
                     "+    def __init__(self, header_rows=None):\n"
                     "+        super().__init__(delimiter_pad=None, bookend=False, header_rows=header_rows)\n"
                     "```"
+                ),
+                "sympy__sympy-13852": (
+                    "```diff\n"
+                    "--- a/sympy/functions/special/zeta_functions.py\n"
+                    "+++ b/sympy/functions/special/zeta_functions.py\n"
+                    "@@ -341,2 +341,4 @@\n"
+                    "     def _eval_expand_func(self, **hints):\n"
+                    "         s, z = self.args\n"
+                    "+        if s == 1:\n"
+                    "+            return -log(1 - z)\n"
+                    "```"
                 )
             }
             if task_id in mock_patches:

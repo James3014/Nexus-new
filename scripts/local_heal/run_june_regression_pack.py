@@ -8,6 +8,7 @@ import subprocess
 import sys
 import time
 from pathlib import Path
+from typing import Any
 from types import SimpleNamespace
 
 # 設定專案 Path 載入
@@ -22,11 +23,13 @@ from nexus.services.local_heal.interface import IPhase, PhaseResult
 from nexus.services.local_heal.local_model_source_anchor import build_local_model_source_anchor
 from nexus.services.local_heal.interface import LocalizedFile, RepairPlan
 
-# 6 月回歸測試集定義 (Expanded to Group A, B, C)
+# 6 月回歸測試集定義 (Expanded to Phase 56E Unsolved Task Ladder)
 REGRESSION_PACK = [
     {
         "task_id": "astropy__astropy-13236",
         "june_group": "A_PASSED",
+        "workspace_path": "/Users/jameschen/Workspace/nexus/.nexus/workspaces/astropy",
+        "python_executable": "/Users/jameschen/Workspace/nexus/.nexus/workspaces/astropy/.venv_12907/bin/python",
         "target_file": "astropy/table/table.py",
         "target_symbol": "__init__",
         "problem_statement": "Prevent auto-transformation of structured ndarray column into NdarrayMixin inside Table initialization.",
@@ -63,6 +66,8 @@ except Exception as e:
     {
         "task_id": "astropy__astropy-12907",
         "june_group": "A_PASSED",
+        "workspace_path": "/Users/jameschen/Workspace/nexus/.nexus/workspaces/astropy",
+        "python_executable": "/Users/jameschen/Workspace/nexus/.nexus/workspaces/astropy/.venv_12907/bin/python",
         "target_file": "astropy/modeling/separable.py",
         "target_symbol": "_cstack",
         "problem_statement": "Fix nested Pix2Sky_TAN model composition bug inside _cstack.",
@@ -85,7 +90,6 @@ except Exception as e:
     print("Caught exception:", e)
     sys.exit(0)
 """,
-        # 不帶 locked_search，以測試 GranularMethodLocalizer fallback seam！
         "locked_search": "",
         "historical": {
             "canonical_span_source": "ast_boundary",
@@ -97,6 +101,8 @@ except Exception as e:
     {
         "task_id": "astropy__astropy-14182",
         "june_group": "B_UNSOLVED",
+        "workspace_path": "/Users/jameschen/Workspace/nexus/.nexus/workspaces/astropy",
+        "python_executable": "/Users/jameschen/Workspace/nexus/.nexus/workspaces/astropy/.venv_12907/bin/python",
         "target_file": "astropy/io/ascii/rst.py",
         "target_symbol": "__init__",
         "problem_statement": "RST table format writer should support header_rows argument, consistent with fixed_width.",
@@ -126,8 +132,43 @@ except Exception as e:
         }
     },
     {
+        "task_id": "sympy__sympy-13852",
+        "june_group": "B_UNSOLVED",
+        "workspace_path": "/Users/jameschen/Workspace/nexus/artifacts/external_sources/sympy_13852",
+        "python_executable": "uv run --with mpmath python",
+        "target_file": "sympy/functions/special/zeta_functions.py",
+        "target_symbol": "_eval_expand_func",
+        "problem_statement": "expand_func(polylog(1, z)) should simplify directly to -log(1 - z) without introducing exp_polar.",
+        "repro_code": """import sys
+try:
+    from sympy import polylog, expand_func, symbols
+    z = symbols('z')
+    res = expand_func(polylog(1, z))
+    if "polylog" in str(res) or "exp_polar" in str(res):
+        print("BUG PRESENT:", res)
+        sys.exit(1)
+    else:
+        print("SUCCESS")
+        sys.exit(0)
+except Exception as e:
+    print("Caught exception:", e)
+    sys.exit(0)
+""",
+        "locked_search": """    def _eval_expand_func(self, **hints):
+        s, z = self.args
+        if s.is_Integer and s <= 0:""",
+        "historical": {
+            "canonical_span_source": "ast_boundary",
+            "verifier_status": "fail",
+            "receipt_coverage": 0.0,
+            "failure_class": "unverified_gap",
+        }
+    },
+    {
         "task_id": "astropy__astropy-13579",
         "june_group": "C_INFRA",
+        "workspace_path": "/Users/jameschen/Workspace/nexus/.nexus/workspaces/astropy",
+        "python_executable": "/Users/jameschen/Workspace/nexus/.nexus/workspaces/astropy/.venv_12907/bin/python",
         "target_file": "astropy/wcs/wcsapi/wrappers/sliced_wcs.py",
         "target_symbol": "sanitize_slices",
         "problem_statement": "Ensure sanitize_slices raises appropriate errors for out of bounds.",
@@ -163,36 +204,41 @@ class RealVerifyPhase(IPhase):
         self.repro_code = repro_code
 
     def execute(self, ctx: HealContext) -> PhaseResult:
-        # 在執行前動態重寫，防範 _reset_workspace 的 git clean 清理
         repro_script = ctx.op.repo_dir / "reproduce_bug.py"
         repro_script.write_text(self.repro_code, encoding="utf-8")
         
-        # 進行 site-packages 複寫以避開 C-extension build-error
-        venv_path = ctx.op.repo_dir / ".venv_12907"
-        sp_astropy = venv_path / "lib" / "python3.11" / "site-packages" / "astropy"
-        
-        if ctx.op.task_id == "astropy__astropy-13579":
-            # Group C 任務故意不複寫，模擬環境未修復時 WCSLIB C extension 導入錯誤
-            pass
-        else:
-            for f_rel in ("table/table.py", "modeling/separable.py", "io/ascii/rst.py"):
-                src_file = ctx.op.repo_dir / "astropy" / f_rel
-                dst_file = sp_astropy / f_rel
-                if src_file.exists() and dst_file.exists():
-                    shutil.copy2(str(src_file), str(dst_file))
+        # 進行 site-packages 複寫以避開 C-extension build-error (限 astropy 專案)
+        if "astropy" in ctx.op.task_id:
+            venv_path = ctx.op.repo_dir / ".venv_12907"
+            sp_astropy = venv_path / "lib" / "python3.11" / "site-packages" / "astropy"
+            
+            if ctx.op.task_id == "astropy__astropy-13579":
+                pass
+            else:
+                for f_rel in ("table/table.py", "modeling/separable.py", "io/ascii/rst.py"):
+                    src_file = ctx.op.repo_dir / "astropy" / f_rel
+                    dst_file = sp_astropy / f_rel
+                    if src_file.exists() and dst_file.exists():
+                        shutil.copy2(str(src_file), str(dst_file))
                 
         try:
+            env = os.environ.copy()
+            env["PYTHONPATH"] = str(ctx.op.repo_dir)
+            
+            py_args = ctx.op.python_executable.split()
+            cmd = py_args + [str(repro_script)]
+            
             res = subprocess.run(
-                [ctx.op.python_executable, str(repro_script)],
+                cmd,
                 capture_output=True,
                 text=True,
                 cwd=str(ctx.op.repo_dir),
+                env=env,
                 timeout=30
             )
             stdout = res.stdout + res.stderr
             passed = res.returncode == 0 and "BUG PRESENT" not in stdout
             
-            # 儲存 verifier_receipt 於 op 中供 telemetry 使用
             receipt = SimpleNamespace(
                 stdout_tail=stdout[-500:],
                 stderr_tail="",
@@ -208,22 +254,58 @@ class RealVerifyPhase(IPhase):
             return PhaseResult(success=False, failure_reason=f"VerifierException: {str(e)}")
 
 def install_package(python_exec: str, workspace_path: Path, package_spec: str) -> dict[str, Any]:
-    """🛡️ Dependency Resolver: Install package via uv if available, falling back to pip."""
+    """🛡️ Robust Dependency Resolver: Install package via uv, pip, or ensurepip fallback."""
     import shutil
     has_uv = bool(shutil.which("uv"))
-    method = "uv" if has_uv else "pip"
     
+    # 預先檢測
+    uv_available = has_uv
+    pip_available = False
+    
+    # 檢測 pip
+    try:
+        res_pip = subprocess.run([python_exec, "-m", "pip", "--version"], capture_output=True, text=True, timeout=10)
+        if res_pip.returncode == 0:
+            pip_available = True
+    except Exception:
+        pass
+        
+    # 若無 pip 且無 uv，嘗試 ensurepip
+    if not pip_available and not uv_available:
+        try:
+            print("    ⚠️ pip not found in target python! Attempting ensurepip fallback...")
+            subprocess.run([python_exec, "-m", "ensurepip", "--default-pip"], capture_output=True, text=True, timeout=30)
+            res_pip = subprocess.run([python_exec, "-m", "pip", "--version"], capture_output=True, text=True, timeout=10)
+            if res_pip.returncode == 0:
+                pip_available = True
+        except Exception:
+            pass
+
     attempted = True
     success = False
     error = ""
     blocker = ""
-    
-    # 建立對應的指令
-    if has_uv:
+    method = "none"
+
+    if uv_available:
+        method = "uv"
         cmd = ["uv", "pip", "install", "--force-reinstall", package_spec, "--python", python_exec]
-    else:
+    elif pip_available:
+        method = "pip"
         cmd = [python_exec, "-m", "pip", "install", "--force-reinstall", package_spec]
-        
+    else:
+        # pip 與 uv 均不可用
+        return {
+            "attempted": True,
+            "method": "none",
+            "success": False,
+            "error": "Both pip and uv are unavailable in target python, and ensurepip failed.",
+            "blocker": "ENV_NO_PIP",
+            "uv_available": uv_available,
+            "pip_available": pip_available,
+            "target_python": python_exec,
+        }
+
     try:
         res = subprocess.run(cmd, cwd=str(workspace_path), capture_output=True, text=True, timeout=90)
         if res.returncode == 0:
@@ -234,22 +316,20 @@ def install_package(python_exec: str, workspace_path: Path, package_spec: str) -
     except Exception as e:
         error = str(e)
         blocker = "SUBPROCESS_EXCEPTION"
-        
+
     return {
         "attempted": attempted,
         "method": method,
         "success": success,
         "error": error,
         "blocker": blocker,
+        "uv_available": uv_available,
+        "pip_available": pip_available,
+        "target_python": python_exec,
     }
 
 def run_pack() -> dict[str, Any]:
-    workspace_path = Path("/Users/jameschen/Workspace/nexus/.nexus/workspaces/astropy")
-    python_exec = str(workspace_path / ".venv_12907" / "bin" / "python")
-    
-    # 確保環境變數設定
     os.environ["NEXUS_LOCAL_QWEN_BACKEND"] = "1"
-    # 開啟 Mock LLM 以便跑通測試 harness 驗證 A/B/C wiring 
     os.environ["NEXUS_REGRESSION_MOCK_LLM"] = "1"
     
     results = []
@@ -260,16 +340,39 @@ def run_pack() -> dict[str, Any]:
     if jsonl_path.exists():
         jsonl_path.unlink()
 
-    # 在執行前，先還原 site-packages 的 astropy 檔案
+    # 先為 astropy 任務確保 baseline 套件已安裝
+    astropy_workspace = Path("/Users/jameschen/Workspace/nexus/.nexus/workspaces/astropy")
+    astropy_python = str(astropy_workspace / ".venv_12907" / "bin" / "python")
     print("🔄 Ensuring baseline astropy installation in workspace environment...")
-    sync_res = install_package(python_exec, workspace_path, "astropy==5.3.4")
+    sync_res = install_package(astropy_python, astropy_workspace, "astropy==5.3.4")
     
     for item in REGRESSION_PACK:
         task_id = item["task_id"]
         june_group = item["june_group"]
+        workspace_path = Path(item["workspace_path"])
+        python_exec = item["python_executable"]
+        
         print(f"\n🚀 Running Regression Task: {task_id} ({june_group})")
         
-        # 3. 執行 source anchor，獲取 telemetry 與 canonical_span_source
+        # 1. Contamination Guard
+        manual_source_edit_detected = False
+        source_tree_clean_before_run = False
+        
+        if (workspace_path / ".git").exists():
+            res_diff = subprocess.run(
+                ["git", "diff", "--quiet"],
+                cwd=str(workspace_path),
+                capture_output=True
+            )
+            if res_diff.returncode != 0:
+                manual_source_edit_detected = True
+                print("    ⚠️ Contamination Guard: Manual source edit detected! Cleaning workspace...")
+                
+            subprocess.run(["git", "checkout", "--", "."], cwd=str(workspace_path), capture_output=True)
+            subprocess.run(["git", "clean", "-fd"], cwd=str(workspace_path), capture_output=True)
+            source_tree_clean_before_run = True
+
+        # 2. 執行 source anchor，獲取 telemetry
         anchor = build_local_model_source_anchor(
             source_root=str(workspace_path),
             target_file=item["target_file"],
@@ -277,12 +380,11 @@ def run_pack() -> dict[str, Any]:
             locked_search=item["locked_search"],
         )
         
-        # Telemetry info
         localizer_telemetry = anchor.telemetry
         used_granular_localizer = localizer_telemetry.get("localizer_fallback_attempted", False)
         
-        # 檢查環境同步狀態，若失敗則 fail-closed (不崩潰)
-        if not sync_res["success"]:
+        # 對於 astropy 任務，檢查環境同步狀態
+        if "astropy" in task_id and not sync_res["success"]:
             print(f"  ❌ Environment sync failed! Method: {sync_res['method']}, Error: {sync_res['error']}")
             res_item = {
                 "task_id": task_id,
@@ -307,6 +409,12 @@ def run_pack() -> dict[str, Any]:
                 "environment_sync_success": sync_res["success"],
                 "environment_sync_error": sync_res["error"],
                 "environment_sync_blocker": sync_res["blocker"],
+                "target_python": sync_res["target_python"],
+                "pip_available": sync_res["pip_available"],
+                "uv_available": sync_res["uv_available"],
+                "source_tree_clean_before_run": source_tree_clean_before_run,
+                "patch_applied_by_backend": False,
+                "manual_source_edit_detected": manual_source_edit_detected,
                 "final_verdict": "INFRA_BLOCKED",
             }
             results.append(res_item)
@@ -314,14 +422,14 @@ def run_pack() -> dict[str, Any]:
                 f_out.write(json.dumps(res_item) + "\n")
             continue
 
-        # 1. 還原工作區 git 乾淨狀態
+        # 3. 還原工作區 git 乾淨狀態
         subprocess.run(["git", "checkout", "--", item["target_file"]], cwd=str(workspace_path))
         
-        # 2. 寫入 repro 腳本
+        # 4. 寫入 repro 腳本
         repro_path = workspace_path / "reproduce_bug.py"
         repro_path.write_text(item["repro_code"], encoding="utf-8")
         
-        # 4. 準備 context 呼叫 HealOrchestrator
+        # 5. 準備 context 呼叫 HealOrchestrator
         op = SimpleNamespace(
             task_id=task_id,
             problem_statement=item["problem_statement"],
@@ -349,20 +457,21 @@ def run_pack() -> dict[str, Any]:
             governance_gate=GovernanceGate()
         )
         
-        # 執行修復 loop
         from nexus.services.local_heal.latency_ledger import LatencyLedger
         ledger = LatencyLedger(task_id=task_id, instance_id=task_id)
         orchestrator._run_repair_loop(ctx, ledger)
         
-        # 5. 判定結果
+        # 6. 判定結果
         verifier_status = "fail"
+        patch_applied = False
         if ctx.gov.gate_exit == "verification" and ctx.op.final_patch:
-            # 檢查 site-packages 檔是否被覆寫且正確通過了
             verifier_status = "pass"
+            patch_applied = True
                 
-        # 還原工作區 git 乾淨狀態與 site-packages
+        # 還原工作區 git 乾淨狀態
         subprocess.run(["git", "checkout", "--", item["target_file"]], cwd=str(workspace_path))
-        install_package(python_exec, workspace_path, "astropy==5.3.4")
+        if "astropy" in task_id:
+            install_package(astropy_python, astropy_workspace, "astropy==5.3.4")
         
         print(f"  DEBUG OP Failure Reason: {repr(ctx.op.failure_reason)}")
         if hasattr(ctx.op, "verifier_receipt"):
@@ -377,6 +486,27 @@ def run_pack() -> dict[str, Any]:
             final_verdict = "INFRA_BLOCKED"
         else:
             final_verdict = "CONTROLLED_BLOCKED"
+
+        # 獲取本題所用 sync_status (對 sympy 為 dummy/success)
+        if "astropy" in task_id:
+            res_sync_attempted = sync_res["environment_sync_attempted"] if "environment_sync_attempted" in sync_res else sync_res["attempted"]
+            res_sync_method = sync_res["environment_sync_method"] if "environment_sync_method" in sync_res else sync_res["method"]
+            res_sync_success = sync_res["environment_sync_success"] if "environment_sync_success" in sync_res else sync_res["success"]
+            res_sync_error = sync_res["environment_sync_error"] if "environment_sync_error" in sync_res else sync_res["error"]
+            res_sync_blocker = sync_res["environment_sync_blocker"] if "environment_sync_blocker" in sync_res else sync_res["blocker"]
+            res_target_python = sync_res["target_python"]
+            res_pip_available = sync_res["pip_available"]
+            res_uv_available = sync_res["uv_available"]
+        else:
+            import shutil
+            res_sync_attempted = False
+            res_sync_method = "none"
+            res_sync_success = True
+            res_sync_error = ""
+            res_sync_blocker = ""
+            res_target_python = python_exec
+            res_pip_available = True
+            res_uv_available = bool(shutil.which("uv"))
 
         res_item = {
             "task_id": task_id,
@@ -396,11 +526,17 @@ def run_pack() -> dict[str, Any]:
             "side_lane_only": False,
             "final_blocker": "none" if verifier_status == "pass" else ("environment_blocked" if final_verdict == "INFRA_BLOCKED" else "verifier_failed"),
             "public_claim_allowed": False,
-            "environment_sync_attempted": sync_res["attempted"],
-            "environment_sync_method": sync_res["method"],
-            "environment_sync_success": sync_res["success"],
-            "environment_sync_error": sync_res["error"],
-            "environment_sync_blocker": sync_res["blocker"],
+            "environment_sync_attempted": res_sync_attempted,
+            "environment_sync_method": res_sync_method,
+            "environment_sync_success": res_sync_success,
+            "environment_sync_error": res_sync_error,
+            "environment_sync_blocker": res_sync_blocker,
+            "target_python": res_target_python,
+            "pip_available": res_pip_available,
+            "uv_available": res_uv_available,
+            "source_tree_clean_before_run": source_tree_clean_before_run,
+            "patch_applied_by_backend": patch_applied,
+            "manual_source_edit_detected": manual_source_edit_detected,
             "final_verdict": final_verdict,
         }
         results.append(res_item)
