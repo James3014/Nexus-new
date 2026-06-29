@@ -156,19 +156,85 @@ class LocalModelExecutor:
                 memory_context += f"Lesson {idx}: {content}\n"
             memory_context += "====================================\n"
 
-        # 5. Handle Execution Topology Branching
+        # 5. Source Anchor Context
+        target_file = request.target_file
+        target_symbol = request.route_context.get("target_symbol") or ""
+        locked_search = request.route_context.get("locked_search") or ""
+        
+        source_anchor_hash = ""
+        source_anchor_present = False
+        source_anchor_source = "none"
+        
+        if locked_search.strip():
+            source_anchor_hash = hashlib.sha256(locked_search.encode("utf-8")).hexdigest()
+            source_anchor_present = True
+            source_anchor_source = "locked_search"
+        elif target_file and target_symbol:
+            try:
+                from nexus.services.local_heal.local_model_source_anchor import build_local_model_source_anchor
+                anchor = build_local_model_source_anchor(
+                    source_root=request.repo_root,
+                    target_file=target_file,
+                    target_symbol=target_symbol,
+                    locked_search="",
+                )
+                if anchor.span_hash:
+                    source_anchor_hash = anchor.span_hash
+                    source_anchor_present = True
+                    source_anchor_source = anchor.canonical_span_source or "ast_boundary"
+            except Exception:
+                source_anchor_present = False
+                source_anchor_source = "localizer_failed"
+        
+        # 6. Failure Feedback Context
+        failure_feedback_present = False
+        failure_feedback_text = ""
+        route_ctx = request.route_context if isinstance(request.route_context, dict) else {}
+        previous_failure = (
+            route_ctx.get("previous_failure")
+            or route_ctx.get("failure_reason")
+            or route_ctx.get("verifier_failure")
+            or route_ctx.get("verifier_output")
+            or ""
+        )
+        if previous_failure and str(previous_failure).strip():
+            try:
+                from nexus.services.local_heal.failure_feedback_builder import build_failure_feedback
+                failure_feedback_text = build_failure_feedback(
+                    task_id=request.task_id,
+                    failure_class=str(route_ctx.get("failure_class", "unknown")),
+                    target_file=target_file,
+                    target_symbol=target_symbol,
+                    locked_search=locked_search,
+                    previous_block_reason=str(previous_failure),
+                    verifier_status=str(route_ctx.get("verifier_status", "fail")),
+                    stdout_tail=str(route_ctx.get("stdout_tail", "")),
+                    stderr_tail=str(route_ctx.get("stderr_tail", "")),
+                )
+                failure_feedback_present = True
+            except Exception:
+                failure_feedback_present = False
+        
+        # 7. Handle Execution Topology Branching
         if execution_topology == "local_committee_only":
             protocol_mode = os.environ.get("NEXUS_PROTOCOL_MODE", "anchored_edit")
-            target_symbol = request.route_context.get("target_symbol") or ""
-            locked_search = request.route_context.get("locked_search") or ""
+            
+            # Build enhanced problem statement with source anchor + failure feedback
+            enhanced_problem = request.problem_statement
+            if source_anchor_present:
+                enhanced_problem += f"\n\nSource Anchor (target: {target_file}:{target_symbol}, hash: {source_anchor_hash[:16]}...)"
+            if locked_search:
+                enhanced_problem += f"\nLocked Search Span:\n```\n{locked_search}\n```"
+            if failure_feedback_present and failure_feedback_text:
+                enhanced_problem += f"\n\n{failure_feedback_text}"
+            enhanced_problem += memory_context
             
             from nexus.services.local_heal.local_committee_candidate_provider import LocalCommitteeCandidateProvider
             from nexus.services.local_heal.candidate_decision_adapter import CandidateDecisionAdapter
             
-            # Generate committee candidates with memory context appended to problem statement
             candidates = LocalCommitteeCandidateProvider.generate_committee_candidates(
                 task_id=request.task_id,
-                problem_statement=request.problem_statement + memory_context,
+                problem_statement=enhanced_problem,
                 target_file=request.target_file,
                 target_symbol=target_symbol,
                 locked_search=locked_search,
@@ -218,6 +284,13 @@ class LocalModelExecutor:
                     "final_authority": decision.final_authority,
                     "selected_capabilities_used": list(selected_caps),
                     "protocol_normalization": patch_meta,
+                    "source_anchor_present": source_anchor_present,
+                    "source_anchor_source": source_anchor_source,
+                    "source_anchor_hash": source_anchor_hash[:16] if source_anchor_hash else "",
+                    "target_file": target_file,
+                    "target_symbol": target_symbol,
+                    "locked_search_present": bool(locked_search.strip()),
+                    "failure_feedback_present": failure_feedback_present,
                 },
                 provider=provider_name,
                 model_name=selected_model,
@@ -226,17 +299,21 @@ class LocalModelExecutor:
                 evidence_refs=decision.decision_evidence_refs or request.evidence_refs,
             )
 
-        # 6. Generate Candidate Patch for single_local_model
+        # 8. Generate Candidate Patch for single_local_model
         protocol_mode = os.environ.get("NEXUS_PROTOCOL_MODE", "standard")
         
+        # Build failure feedback context for prompt
+        failure_context = ""
+        if failure_feedback_present and failure_feedback_text:
+            failure_context = f"\n\n{failure_feedback_text}"
+        
         if protocol_mode == "anchored_edit":
-            locked_search = request.route_context.get("locked_search") or ""
-            target_symbol = request.route_context.get("target_symbol") or ""
             explicit_prompt = (
                 f"You are generating a replacement code block to solve a coding task.\n"
-                f"Problem: {request.problem_statement}{memory_context}\n"
-                f"Target File: {request.target_file}\n"
+                f"Problem: {request.problem_statement}{memory_context}{failure_context}\n"
+                f"Target File: {target_file}\n"
                 f"Target Symbol: {target_symbol}\n"
+                f"Source Anchor Hash: {source_anchor_hash[:16] if source_anchor_hash else 'none'}\n"
                 f"Locked Search Span that will be replaced:\n"
                 f"```\n{locked_search}\n```\n\n"
                 f"Provide the replacement code inside a REPLACE block exactly like this:\n"
@@ -246,10 +323,6 @@ class LocalModelExecutor:
                 f"Do not include any other text, explanation, markdown formatting, or markdown code fences outside the REPLACE block.\n"
             )
         else:
-            # Construct explicit prompt to output standard unified diff
-            # Include locked_search context so the model generates an applicable patch
-            locked_search = request.route_context.get("locked_search") or ""
-            target_symbol = request.route_context.get("target_symbol") or ""
 
             # Read surrounding context from the actual file
             source_context = ""
@@ -282,9 +355,10 @@ class LocalModelExecutor:
 
             explicit_prompt = (
                 f"You are generating a unified diff to fix a bug in {request.target_file}.\n"
-                f"Problem: {request.problem_statement}{memory_context}\n"
+                f"Problem: {request.problem_statement}{memory_context}{failure_context}\n"
                 f"Target File: {request.target_file}\n"
                 f"Target Symbol: {target_symbol}\n"
+                f"Source Anchor Hash: {source_anchor_hash[:16] if source_anchor_hash else 'none'}\n"
                 f"{context_block}"
                 f"{source_context}\n"
                 f"IMPORTANT RULES:\n"
@@ -326,6 +400,14 @@ class LocalModelExecutor:
                 "protocol_mode": protocol_mode,
                 "execution_topology": execution_topology,
                 "protocol_normalization": patch_meta,
+                "source_anchor_present": source_anchor_present,
+                "source_anchor_source": source_anchor_source,
+                "source_anchor_hash": source_anchor_hash[:16] if source_anchor_hash else "",
+                "target_file": target_file,
+                "target_symbol": target_symbol,
+                "locked_search_present": bool(locked_search.strip()),
+                "failure_feedback_present": failure_feedback_present,
+                "final_authority": "NexusVerifier",
             },
             provider=provider_name,
             model_name=prov_resp.model_name or prov_req.model_name,
