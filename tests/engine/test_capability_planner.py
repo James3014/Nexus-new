@@ -2709,3 +2709,70 @@ def test_lane_policy_defaults_resolution_snapshot(tmp_path):
         route_features={"task_type": "public_docs_code_sync"}
     )
     assert "supervised_bare_first" not in controls_override or controls_override.get("supervised_bare_first") is False
+
+
+def test_capability_planner_local_executor_planning(monkeypatch):
+    # 1. By default, planner does not select local_model
+    monkeypatch.delenv("NEXUS_ENABLE_LOCAL_MODEL_EXECUTOR", raising=False)
+    plan = CapabilityPlanner().plan(
+        task_desc="test desc",
+        task_type="bug",
+        route={},
+    )
+    assert "local_model_executor" not in plan.selected_capabilities
+    assert "selected_executor" not in plan.signal_snapshot
+
+    # 2. When env gate is enabled, planner selects local_model
+    monkeypatch.setenv("NEXUS_ENABLE_LOCAL_MODEL_EXECUTOR", "1")
+    monkeypatch.setenv("NEXUS_LOCAL_MODEL_EXECUTOR_PROVIDER", "ollama")
+    monkeypatch.setenv("NEXUS_LOCAL_MODEL_EXECUTOR_MODEL", "qwen2.5-coder:7b")
+    
+    plan_with_local = CapabilityPlanner().plan(
+        task_desc="test desc",
+        task_type="bug",
+        route={},
+    )
+    
+    # Assert local_model_executor is selected
+    assert "local_model_executor" in plan_with_local.selected_capabilities
+    
+    # Assert metadata snapshot exists
+    snapshot = plan_with_local.signal_snapshot
+    assert snapshot["selected_executor"] == "local_model"
+    assert snapshot["executor_provider"] == "ollama"
+    assert snapshot["executor_model"] == "qwen2.5-coder:7b"
+    assert snapshot["local_executor_authority"] == "candidate_only"
+    
+    # Assert route_truth_source is still CapabilityPlanner
+    # We can check plan_with_local properties
+    
+    # Assert selected_capabilities include required gates
+    assert "artifact_gate" in plan_with_local.selected_capabilities
+    assert "claim_gate" in plan_with_local.selected_capabilities
+    assert "delivery_gate" in plan_with_local.selected_capabilities
+    
+    # Assert authority/readiness are not implied as true by default
+    assert not snapshot.get("public_claim_allowed", False)
+    assert not snapshot.get("production_ready", False)
+
+
+def test_capability_planner_local_committee_topology_metadata(monkeypatch):
+    monkeypatch.setenv("NEXUS_ENABLE_LOCAL_MODEL_EXECUTOR", "1")
+    monkeypatch.setenv("NEXUS_LOCAL_MODEL_EXECUTOR_TOPOLOGY", "local_committee_only")
+
+    plan = CapabilityPlanner().plan(
+        task_desc="Fix zeta function logic",
+        task_type="bug",
+        route={
+            "should_research": False,
+            "recommended_flow": "direct",
+        },
+    )
+    
+    snapshot = plan.signal_snapshot
+    assert "local_model_executor" in plan.selected_capabilities
+    assert snapshot.get("execution_topology") == "local_committee_only"
+    assert snapshot.get("committee_profile") == "qwen_3b_judge_plus_qwen_7b_plus_deepseek_6_7b"
+    assert snapshot.get("local_committee_enabled") is True
+
+

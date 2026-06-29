@@ -1274,9 +1274,51 @@ class LocalHealReceiptAdapter:
             )
 
 
+class LocalModelExecutorReceiptAdapter:
+    name = "local_model_executor"
+
+    def build(self, *, claim_verified: bool, payload: dict[str, Any]) -> CapabilityReceipt:
+        rc = payload.get("local_executor_receipt")
+        if rc is not None:
+            # If dict, reconstruct CapabilityReceipt
+            if isinstance(rc, dict):
+                return CapabilityReceipt(
+                    name=rc.get("name", self.name),
+                    selected=bool(rc.get("selected", True)),
+                    invoked=bool(rc.get("invoked", False)),
+                    evidence_present=bool(rc.get("evidence_present", False)),
+                    gate_passed=bool(rc.get("gate_passed", False)),
+                    outcome_contributed=bool(rc.get("outcome_contributed", False)),
+                    selection_source=rc.get("selection_source", "planner"),
+                    executor_id=rc.get("executor_id", self.name),
+                    evidence_refs=tuple(rc.get("evidence_refs", [])),
+                    failure_reason=rc.get("failure_reason", ""),
+                    telemetries=rc.get("telemetries", {}),
+                )
+            return rc
+            
+        refs = _as_refs(payload.get("evidence_refs"))
+        invoked = bool(payload.get("local_model_called") or refs)
+        gate_passed = bool(payload.get("local_model_executor_summary", {}).get("delivery_gate_count") == 1)
+        return merge_capability_receipt(
+            name=self.name,
+            selected=True,
+            invoked=invoked,
+            evidence_refs=refs,
+            gate_passed=gate_passed,
+            outcome_contributed=False,
+            selection_source="CapabilityPlanner",
+            executor_id="local_model_executor",
+            telemetries={
+                "candidate_hash": payload.get("candidate_hash", ""),
+            }
+        )
+
+
 RECEIPT_ADAPTERS: dict[str, CapabilityReceiptAdapter] = {
     adapter.name: adapter
     for adapter in (
+        LocalModelExecutorReceiptAdapter(),
         LocalHealReceiptAdapter(),
         CodeIntelReceiptAdapter(),
         AutoreasonReceiptAdapter(),

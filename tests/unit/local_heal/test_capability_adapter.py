@@ -4,6 +4,7 @@ import os
 import tempfile
 import shutil
 from unittest import mock
+import pytest
 
 from nexus.contracts.hybrid_route import RouteMode, Authority, VerifierResult
 from nexus.services.local_heal.capability_adapter import (
@@ -18,6 +19,7 @@ from nexus.services.local_heal.local_model_provider import (
 )
 
 
+@pytest.mark.legacy
 def test_capability_adapter_disabled() -> None:
     request = LocalHealCapabilityRequest(
         task_id="t1",
@@ -37,6 +39,7 @@ def test_capability_adapter_disabled() -> None:
     assert response.capability_payload["gate_passed"] is False
 
 
+@pytest.mark.legacy
 def test_capability_adapter_shadow_only_with_evidence() -> None:
     request = LocalHealCapabilityRequest(
         task_id="t2",
@@ -58,6 +61,7 @@ def test_capability_adapter_shadow_only_with_evidence() -> None:
     assert response.capability_payload["gate_passed"] is False
 
 
+@pytest.mark.legacy
 def test_capability_adapter_shadow_only_missing_evidence() -> None:
     request = LocalHealCapabilityRequest(
         task_id="t3",
@@ -75,6 +79,7 @@ def test_capability_adapter_shadow_only_missing_evidence() -> None:
     assert response.capability_payload["gate_passed"] is False
 
 
+@pytest.mark.legacy
 def test_capability_adapter_pipeline_enabled_by_env_but_mutation_blocked() -> None:
     with mock.patch.dict(os.environ, {"NEXUS_LOCAL_HEAL_CAPABILITY_ADAPTER_ENABLE_PIPELINE": "1"}):
         request = LocalHealCapabilityRequest(
@@ -92,6 +97,7 @@ def test_capability_adapter_pipeline_enabled_by_env_but_mutation_blocked() -> No
         assert response.capability_payload["gate_passed"] is False
 
 
+@pytest.mark.legacy
 def test_capability_adapter_advisory_enabled_by_env() -> None:
     with mock.patch.dict(os.environ, {"NEXUS_LOCAL_MODEL_ADVISORY_ENABLE": "1"}):
         request = LocalHealCapabilityRequest(
@@ -111,6 +117,7 @@ def test_capability_adapter_advisory_enabled_by_env() -> None:
         assert response.hybrid_route.route_mode != RouteMode.LOCAL_ONLY_EXECUTED
 
 
+@pytest.mark.legacy
 def test_capability_adapter_fail_closed_guard_blocked() -> None:
     with mock.patch.dict(os.environ, {"NEXUS_LOCAL_GUARD_FAIL_CLOSED_ENABLE": "1"}):
         request = LocalHealCapabilityRequest(
@@ -134,6 +141,7 @@ def test_capability_adapter_fail_closed_guard_blocked() -> None:
         assert response.hybrid_route.production_ready is False
 
 
+@pytest.mark.legacy
 def test_capability_adapter_candidate_enabled_with_call() -> None:
     with mock.patch.dict(os.environ, {
         "NEXUS_LOCAL_MODEL_CANDIDATE_ENABLE": "1",
@@ -148,6 +156,12 @@ def test_capability_adapter_candidate_enabled_with_call() -> None:
             evidence_refs=("ref1",),
             executor_controls={
                 "candidate_generate_fn": mock_gen,
+                "source_root": "src",
+                "target_file": "f.py",
+                "target_symbol": "sym",
+                "locked_search": "search",
+                "verifier_command": ["cmd"],
+                "work_dir": "work",
             },
             dry_run=False,
         )
@@ -160,6 +174,7 @@ def test_capability_adapter_candidate_enabled_with_call() -> None:
         assert response.capability_payload["gate_passed"] is False
 
 
+@pytest.mark.legacy
 def test_build_local_model_provider_from_env() -> None:
     env1 = {"NEXUS_LOCAL_MODEL_CALL_ALLOWED": "0"}
     prov1 = build_local_model_provider_from_env(env1, {}, "candidate_generate_fn")
@@ -179,6 +194,7 @@ def test_build_local_model_provider_from_env() -> None:
     assert isinstance(prov3, OllamaLocalModelProvider)
 
 
+@pytest.mark.legacy
 def test_capability_adapter_isolated_solve_missing_control() -> None:
     with mock.patch.dict(os.environ, {
         "NEXUS_LOCAL_MODEL_CANDIDATE_ENABLE": "1",
@@ -198,6 +214,7 @@ def test_capability_adapter_isolated_solve_missing_control() -> None:
         assert response.capability_payload["gate_passed"] is False
 
 
+@pytest.mark.legacy
 def test_capability_adapter_isolated_solve_success() -> None:
     with mock.patch.dict(os.environ, {
         "NEXUS_LOCAL_MODEL_CANDIDATE_ENABLE": "1",
@@ -258,6 +275,7 @@ def test_capability_adapter_isolated_solve_success() -> None:
                 shutil.rmtree(response.hybrid_route.metadata.get("workspace_path", ""))
 
 
+@pytest.mark.legacy
 def test_capability_adapter_dry_run_default() -> None:
     # 預設 dry_run=True
     request = LocalHealCapabilityRequest(

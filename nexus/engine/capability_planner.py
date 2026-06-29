@@ -630,6 +630,18 @@ def default_capability_nodes() -> dict[str, CapabilityNode]:
             risk_reduction=5,
             evidence_outputs=("claim_verdict",),
         ),
+        CapabilityNode(
+            "local_model_executor",
+            ("P", "D", "R", "A", "C"),
+            default_state="optional",
+            category="execution",
+            maturity="production",
+            dependencies=("artifact_gate", "claim_gate", "delivery_gate"),
+            cost=2,
+            benefit=3,
+            risk_reduction=2,
+            evidence_outputs=("local_model_called", "candidate_hash", "reasoning_summary"),
+        ),
     ]
     return {node.name: node for node in nodes}
 
@@ -754,6 +766,11 @@ class CapabilityPlanner:
             route_oracle_expected_capabilities=getattr(signals, "route_oracle_expected_capabilities", ()) or (),
         )
 
+        # Phase 2: local model executor planning policy
+        import os
+        if os.environ.get("NEXUS_ENABLE_LOCAL_MODEL_EXECUTOR") == "1":
+            enable("local_model_executor", "env_gate_enabled")
+
         selected = [name for name, state in states.items() if state in {"required", "conditional"}]
         pending = [name for name in selected if name in PENDING_EXECUTOR_CAPABILITIES]
         total_cost = sum(self.nodes[name].cost for name in selected)
@@ -856,6 +873,21 @@ class CapabilityPlanner:
         signal_snapshot["harness_preflight_sensor"] = harness_preflight_sensor
         if semantic_failure_sensor:
             signal_snapshot["semantic_failure_sensor"] = semantic_failure_sensor
+
+        if states.get("local_model_executor") in {"required", "conditional"}:
+            signal_snapshot["selected_executor"] = "local_model"
+            signal_snapshot["executor_provider"] = os.environ.get("NEXUS_LOCAL_MODEL_EXECUTOR_PROVIDER", "ollama")
+            signal_snapshot["executor_model"] = os.environ.get("NEXUS_LOCAL_MODEL_EXECUTOR_MODEL", "qwen2.5-coder:7b")
+            signal_snapshot["local_executor_authority"] = "candidate_only"
+            
+            # N2.8 topology metadata additions
+            topology = os.environ.get("NEXUS_LOCAL_MODEL_EXECUTOR_TOPOLOGY", "single_local_model")
+            signal_snapshot["execution_topology"] = topology
+            if topology == "local_committee_only":
+                signal_snapshot["committee_profile"] = "qwen_3b_judge_plus_qwen_7b_plus_deepseek_6_7b"
+                signal_snapshot["local_committee_enabled"] = True
+            else:
+                signal_snapshot["local_committee_enabled"] = False
 
         return CapabilityPlan(
             schema_version="nexus_capability_plan_v1",

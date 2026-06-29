@@ -92,7 +92,7 @@ class OllamaLocalModelProvider(LocalModelProvider):
                 error="provider_not_configured",
             )
             
-        model_name = os.environ.get("NEXUS_LOCAL_MODEL_NAME", "").strip()
+        model_name = request.model_name or os.environ.get("NEXUS_LOCAL_MODEL_NAME", "").strip()
         if not model_name:
             return LocalModelProviderResponse(
                 provider_invoked=True,

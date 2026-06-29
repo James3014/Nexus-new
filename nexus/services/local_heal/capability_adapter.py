@@ -81,6 +81,44 @@ def build_local_model_provider_from_env(
 class LocalHealCapabilityAdapter:
     @staticmethod
     def run(request: LocalHealCapabilityRequest) -> LocalHealCapabilityResponse:
+        controls = request.executor_controls
+        enable_local_heal = bool(controls.get("enable_local_heal", False))
+        local_heal_mode = controls.get("local_heal_mode", "disabled")
+        
+        # Required controls and blockers checks first
+        candidate_enabled = os.environ.get("NEXUS_LOCAL_MODEL_CANDIDATE_ENABLE") == "1"
+        
+        if candidate_enabled:
+            required_keys = ["source_root", "target_file", "target_symbol", "locked_search", "verifier_command", "work_dir"]
+            missing_controls = [k for k in required_keys if controls.get(k) is None]
+            if not request.evidence_refs:
+                missing_controls.append("evidence_refs")
+                
+            if missing_controls:
+                payload = build_hybrid_route_decision(
+                    route_mode=RouteMode.LOCAL_ONLY_BLOCKED,
+                    public_claim_allowed=False,
+                    production_ready=False,
+                    adapter_output_is_route_truth=False,
+                    route_truth_source="CapabilityPlanner",
+                    behavior_changed=False,
+                    authority=Authority.TRACE_ONLY,
+                    local_model_called=False,
+                    verifier_result=VerifierResult.NOT_RUN,
+                    evidence_refs=request.evidence_refs,
+                    fallback_block_reason="missing_required_control",
+                )
+                decision = hybrid_route_decision_from_payload(payload)
+                invoked = False
+                capability_payload = capability_payload_from_hybrid_route(decision)
+                capability_payload["adapter_invoked"] = False
+                return LocalHealCapabilityResponse(
+                    task_id=request.task_id,
+                    invoked=False,
+                    hybrid_route=decision,
+                    capability_payload=capability_payload,
+                )
+
         if request.dry_run:
             payload = build_hybrid_route_decision(
                 route_mode=RouteMode.CLOUD_ASSISTED_BY_LOCAL_TRACE_ONLY,
@@ -107,8 +145,6 @@ class LocalHealCapabilityAdapter:
                 hybrid_route=decision,
                 capability_payload=capability_payload,
             )
-
-        controls = request.executor_controls
         enable_local_heal = bool(controls.get("enable_local_heal", False))
         local_heal_mode = controls.get("local_heal_mode", "disabled")
         

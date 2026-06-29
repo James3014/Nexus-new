@@ -62,7 +62,8 @@ class CommitteeOrchestrator(HealOrchestrator):
             res = self.patch_phase.execute(ctx)
             if res.success:
                 patch_text = str(getattr(ctx.op, "final_patch", "") or "")
-                model_decision = deepcopy(ctx.op.model_decisions[-1]) if getattr(ctx.op, "model_decisions", None) else {}
+                patch_decisions = [d for d in getattr(ctx.op, "model_decisions", []) if d.get("phase") == "patch"]
+                model_decision = deepcopy(patch_decisions[-1]) if patch_decisions else {}
                 invoked_model = str(model_decision.get("model", "") or "")
                 if invoked_model != spec["model"]:
                     ctx.op.failure_reason = "COMMITTEE_PROPOSER_MODEL_MISMATCH"

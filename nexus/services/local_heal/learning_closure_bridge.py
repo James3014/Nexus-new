@@ -6,6 +6,7 @@ from pathlib import Path
 from typing import Any
 
 from nexus.services.local_heal.memory_trace import MemoryTrace
+from nexus.services.local_heal.candidate_envelope import CandidateEnvelope
 
 
 INTERNAL_CLASSIFICATIONS = {
@@ -149,6 +150,64 @@ class LearningClosureBridge:
         with self.path.open("a", encoding="utf-8") as handle:
             handle.write(json.dumps(lesson, sort_keys=True) + "\n")
         return lesson
+
+    def write_envelope_lesson(
+        self,
+        ctx: Any,
+        envelope: CandidateEnvelope,
+        selected: bool,
+        selected_by: str,
+        verifier_result: str,
+    ) -> dict[str, Any]:
+        op = ctx.op if hasattr(ctx, "op") else ctx
+        
+        failure_class = "none"
+        if not selected:
+            failure_class = "not_selected"
+        elif verifier_result != "pass":
+            failure_class = "verifier_fail" if verifier_result == "fail" else "blocked"
+            
+        lesson = {
+            "lesson_id": f"lh-cand-{uuid.uuid4().hex[:12]}",
+            "task_id": str(getattr(op, "instance_id", "") or getattr(op, "task_id", "") or "unknown"),
+            "candidate_id": envelope.candidate_id,
+            "model": envelope.model,
+            "role": envelope.role,
+            "selected": selected,
+            "selected_by": selected_by,
+            "verifier_result": verifier_result if selected else "not_run",
+            "failure_class": failure_class,
+            "risk_flags": list(envelope.risk_flags),
+            "future_weight_delta": 1.0 if (selected and verifier_result == "pass") else -0.5 if (selected and verifier_result == "fail") else 0.0,
+            "training_export_allowed": False,
+            "internal_only": True,
+        }
+        
+        self.path.parent.mkdir(parents=True, exist_ok=True)
+        with self.path.open("a", encoding="utf-8") as handle:
+            handle.write(json.dumps(lesson, sort_keys=True) + "\n")
+        return lesson
+
+
+def write_candidate_learning_closures(
+    ctx: Any,
+    envelopes: list[CandidateEnvelope],
+    selected_id: str,
+    selected_by: str,
+    verifier_result: str,
+    bridge: LearningClosureBridge | None = None,
+) -> list[dict[str, Any]]:
+    bridge = bridge or LearningClosureBridge()
+    lessons = []
+    for env in envelopes:
+        selected = (env.candidate_id == selected_id)
+        sel_by_val = selected_by if selected else "none"
+        try:
+            lesson = bridge.write_envelope_lesson(ctx, env, selected, sel_by_val, verifier_result)
+            lessons.append(lesson)
+        except Exception:
+            pass
+    return lessons
 
 
 def write_learning_closure(ctx: Any, bridge: LearningClosureBridge | None = None) -> dict[str, Any]:
