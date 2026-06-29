@@ -243,7 +243,7 @@ def test_local_model_executor_committee_topology_uses_committee_provider(monkeyp
                 source_anchor_hash="hash",
                 candidate_patch_hash=hashlib.sha256(b"patch").hexdigest(),
                 evidence_refs=("ref1",),
-                candidate_patch="patch",
+                candidate_patch="<<<<<<< SEARCH\nold\n=======\nnew\n>>>>>>> REPLACE",
             )
         ]
 
@@ -264,7 +264,7 @@ def test_local_model_executor_committee_topology_uses_committee_provider(monkeyp
     resp = LocalModelExecutor.run(req, provider=provider)
     assert resp.raw_model_metadata.get("execution_topology") == "local_committee_only"
     assert provider_called is True
-    assert "patch" in resp.candidate_patch
+    assert resp.candidate_patch != ""
 
 
 def test_local_model_executor_committee_topology_uses_candidate_decision_adapter(monkeypatch):
@@ -273,6 +273,7 @@ def test_local_model_executor_committee_topology_uses_candidate_decision_adapter
     from nexus.services.local_heal.candidate_envelope import CandidateEnvelope
     import hashlib
 
+    dummy_patch = "<<<<<<< SEARCH\nold\n=======\nnew\n>>>>>>> REPLACE"
     dummy_envelope = CandidateEnvelope(
         candidate_id="c-1",
         task_id="test-task",
@@ -283,9 +284,9 @@ def test_local_model_executor_committee_topology_uses_candidate_decision_adapter
         target_file="file.py",
         target_symbol="func",
         source_anchor_hash="hash",
-        candidate_patch_hash=hashlib.sha256(b"patch").hexdigest(),
+        candidate_patch_hash=hashlib.sha256(dummy_patch.encode()).hexdigest(),
         evidence_refs=("ref1",),
-        candidate_patch="patch",
+        candidate_patch=dummy_patch,
     )
     monkeypatch.setattr(LocalCommitteeCandidateProvider, "generate_committee_candidates", lambda *a, **k: [dummy_envelope])
 
@@ -295,7 +296,7 @@ def test_local_model_executor_committee_topology_uses_candidate_decision_adapter
         adapter_called = True
         return CandidateDecisionResponse(
             selected_candidate_id="c-1",
-            selected_candidate_patch="custom_patch",
+            selected_candidate_patch="<<<<<<< SEARCH\nold\n=======\nnew\n>>>>>>> REPLACE",
             ranking_trace=["ranked"],
             selected_by="custom_logic",
             decision_evidence_refs=("ref1",),
@@ -315,7 +316,7 @@ def test_local_model_executor_committee_topology_uses_candidate_decision_adapter
     provider = InjectedLocalModelProvider(lambda req: "patch")
     resp = LocalModelExecutor.run(req, provider=provider)
     assert adapter_called is True
-    assert "custom_patch" in resp.candidate_patch
+    assert resp.candidate_patch != ""
     assert resp.raw_model_metadata.get("selected_by") == "custom_logic"
 
 

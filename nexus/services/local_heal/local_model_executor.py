@@ -186,9 +186,10 @@ class LocalModelExecutor:
             local_model_called = any(not c.abstained for c in candidates)
             
             selected_patch = decision.selected_candidate_patch
+            patch_meta = {}
             if selected_patch.strip():
-                selected_patch = _convert_to_unified_diff(request, locked_search, selected_patch)
-                selected_hash = hashlib.sha256(selected_patch.encode("utf-8")).hexdigest()
+                selected_patch, patch_meta = _normalize_candidate_patch(request, locked_search, selected_patch)
+                selected_hash = hashlib.sha256(selected_patch.encode("utf-8")).hexdigest() if selected_patch.strip() else empty_hash
             else:
                 selected_hash = empty_hash
                 
@@ -216,6 +217,7 @@ class LocalModelExecutor:
                     "selected_by": decision.selected_by,
                     "final_authority": decision.final_authority,
                     "selected_capabilities_used": list(selected_caps),
+                    "protocol_normalization": patch_meta,
                 },
                 provider=provider_name,
                 model_name=selected_model,
@@ -303,9 +305,10 @@ class LocalModelExecutor:
         prov_resp = provider.generate(prov_req)
         
         candidate_patch = prov_resp.output_text
+        patch_meta = {}
         if candidate_patch.strip():
-            candidate_patch = _convert_to_unified_diff(request, locked_search, candidate_patch)
-            candidate_hash = hashlib.sha256(candidate_patch.encode("utf-8")).hexdigest()
+            candidate_patch, patch_meta = _normalize_candidate_patch(request, locked_search, candidate_patch)
+            candidate_hash = hashlib.sha256(candidate_patch.encode("utf-8")).hexdigest() if candidate_patch.strip() else empty_hash
         else:
             candidate_hash = empty_hash
             
@@ -322,6 +325,7 @@ class LocalModelExecutor:
                 "error": prov_resp.error,
                 "protocol_mode": protocol_mode,
                 "execution_topology": execution_topology,
+                "protocol_normalization": patch_meta,
             },
             provider=provider_name,
             model_name=prov_resp.model_name or prov_req.model_name,
@@ -331,26 +335,63 @@ class LocalModelExecutor:
         )
 
 
-def _convert_to_unified_diff(request: LocalModelExecutorRequest, locked_search: str, candidate_patch: str) -> str:
+def _normalize_candidate_patch(
+    request: LocalModelExecutorRequest,
+    locked_search: str,
+    candidate_patch: str,
+) -> tuple[str, dict]:
+    """Normalize candidate_patch to standard unified diff using SolidSearchReplaceProtocol.
+    
+    Returns:
+        (normalized_patch, metadata) where metadata contains protocol_parse_failed if error.
+    """
     if not candidate_patch.strip():
-        return ""
-        
-    # 如果已經是 standard unified diff 格式，且沒有 REPLACE 標記，則直接返回
+        return "", {"protocol_parse_failed": True, "error": "empty_patch"}
+    
+    # 1. Already standard unified diff — pass through
     if "--- a/" in candidate_patch and "+++ b/" in candidate_patch and "<<<<<<< REPLACE" not in candidate_patch:
-        return candidate_patch
-
-    # 1. 提取 replacement 內容
-    clean_patch = candidate_patch.strip()
-    if "<<<<<<< REPLACE" in clean_patch:
-        try:
-            parts = clean_patch.split("<<<<<<< REPLACE")
-            if len(parts) > 1:
-                inner = parts[1].split(">>>>>>> REPLACE")[0]
-                clean_patch = inner.strip("\r\n")
-        except Exception:
-            pass
-
-    # 2. 尋找 _anchor_line
+        return candidate_patch, {"protocol_used": "passthrough", "normalized": False}
+    
+    # 2. Use SolidSearchReplaceProtocol to parse REPLACE block
+    from nexus.services.local_heal.protocol import SolidSearchReplaceProtocol, PatchError
+    
+    protocol = SolidSearchReplaceProtocol()
+    anchor_text = locked_search if locked_search.strip() else None
+    
+    # Temporarily set protocol_mode to anchored_edit for parsing
+    import os
+    old_mode = os.environ.get("NEXUS_PROTOCOL_MODE")
+    os.environ["NEXUS_PROTOCOL_MODE"] = "anchored_edit"
+    try:
+        result = protocol.parse(candidate_patch, anchor_text=anchor_text)
+    finally:
+        if old_mode is None:
+            os.environ.pop("NEXUS_PROTOCOL_MODE", None)
+        else:
+            os.environ["NEXUS_PROTOCOL_MODE"] = old_mode
+    
+    # 3. Handle parse error — fail closed
+    if isinstance(result, PatchError):
+        return "", {
+            "protocol_parse_failed": True,
+            "error_kind": result.kind.name if hasattr(result.kind, "name") else str(result.kind),
+            "error_message": result.message,
+        }
+    
+    # 4. Got PatchIntent(s) — extract replacement from first intent
+    if not result:
+        return "", {"protocol_parse_failed": True, "error": "no_intents"}
+    
+    intent = result[0]
+    replacement = intent.replace
+    
+    if not replacement.strip():
+        return "", {"protocol_parse_failed": True, "error": "empty_replacement"}
+    
+    # 5. Generate unified diff from locked_search → replacement
+    import difflib
+    import re as _re
+    
     _anchor_line = 1
     if locked_search.strip():
         try:
@@ -365,21 +406,16 @@ def _convert_to_unified_diff(request: LocalModelExecutorRequest, locked_search: 
                         break
         except Exception:
             pass
-
-    # 3. 使用 difflib 生成 unified diff
-    import difflib
-    import re
     
     locked_lines = locked_search.splitlines(keepends=True)
-    clean_lines = clean_patch.splitlines(keepends=True)
+    replace_lines = replacement.splitlines(keepends=True)
     
-    # 確保結尾有換行符
     locked_lines = [l if l.endswith("\n") else l + "\n" for l in locked_lines]
-    clean_lines = [l if l.endswith("\n") else l + "\n" for l in clean_lines]
+    replace_lines = [l if l.endswith("\n") else l + "\n" for l in replace_lines]
     
     diff_gen = difflib.unified_diff(
         locked_lines,
-        clean_lines,
+        replace_lines,
         fromfile=f"a/{request.target_file}",
         tofile=f"b/{request.target_file}",
         lineterm="\n"
@@ -388,19 +424,17 @@ def _convert_to_unified_diff(request: LocalModelExecutorRequest, locked_search: 
     adjusted_lines = []
     for line in diff_gen:
         if line.startswith("@@"):
-            match = re.match(r"@@ -(\d+),(\d+) \+(\d+),(\d+) @@(.*)", line)
-            if match:
-                old_start = int(match.group(1))
-                old_len = int(match.group(2))
-                new_start = int(match.group(3))
-                new_len = int(match.group(4))
-                extra = match.group(5)
-                
-                # 依據 _anchor_line 偏移
+            m = _re.match(r"@@ -(\d+),(\d+) \+(\d+),(\d+) @@(.*)", line)
+            if m:
+                old_start = int(m.group(1))
+                old_len = int(m.group(2))
+                new_start = int(m.group(3))
+                new_len = int(m.group(4))
+                extra = m.group(5)
                 adj_old = _anchor_line + old_start - 1
                 adj_new = _anchor_line + new_start - 1
-                
                 line = f"@@ -{adj_old},{old_len} +{adj_new},{new_len} @@{extra}\n"
         adjusted_lines.append(line)
-        
-    return "".join(adjusted_lines)
+    
+    normalized = "".join(adjusted_lines)
+    return normalized, {"protocol_used": "solid_search_replace", "normalized": True}
