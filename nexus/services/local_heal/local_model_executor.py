@@ -177,7 +177,10 @@ class LocalModelExecutor:
                 protocol_mode=protocol_mode,
             )
             
-            decision = CandidateDecisionAdapter.select_candidate(candidates)
+            decision = CandidateDecisionAdapter.select_candidate(
+                candidates,
+                selected_capabilities=selected_caps,
+            )
             
             # Local model is called if at least one candidate wasn't blocked/abstained
             local_model_called = any(not c.abstained for c in candidates)
@@ -212,6 +215,7 @@ class LocalModelExecutor:
                     "selected_candidate_id": decision.selected_candidate_id,
                     "selected_by": decision.selected_by,
                     "final_authority": decision.final_authority,
+                    "selected_capabilities_used": list(selected_caps),
                 },
                 provider=provider_name,
                 model_name=selected_model,

@@ -15,7 +15,10 @@ class CandidateDecisionResponse:
 
 class CandidateDecisionAdapter:
     @staticmethod
-    def select_candidate(candidates: list[CandidateEnvelope]) -> CandidateDecisionResponse:
+    def select_candidate(
+        candidates: list[CandidateEnvelope],
+        selected_capabilities: tuple[str, ...] = (),
+    ) -> CandidateDecisionResponse:
         # Validate that all active candidates have evidence_refs
         for c in candidates:
             if not c.evidence_refs:
@@ -29,8 +32,8 @@ class CandidateDecisionAdapter:
         
         ranking_trace = []
         
-        # 1. DDTree Pruning Layer
-        enable_ddtree = os.environ.get("NEXUS_ENABLE_DDTREE") == "1"
+        # 1. DDTree Pruning Layer — deterministic flag, no DDTree runtime call
+        enable_ddtree = os.environ.get("NEXUS_ENABLE_DDTREE") == "1" or "ddtree" in selected_capabilities
         if enable_ddtree:
             pruned = []
             for c in active_candidates:
@@ -42,8 +45,8 @@ class CandidateDecisionAdapter:
                     pruned.append(c)
             active_candidates = pruned
 
-        # 2. Autoreason Ranking Layer
-        enable_autoreason = os.environ.get("NEXUS_ENABLE_AUTOREASON") == "1"
+        # 2. Autoreason Ranking Layer — deterministic flag, no AutoreasonService call
+        enable_autoreason = os.environ.get("NEXUS_ENABLE_AUTOREASON") == "1" or "autoreason" in selected_capabilities
         if enable_autoreason:
             def get_score(c):
                 if c.role == "external_primary":
