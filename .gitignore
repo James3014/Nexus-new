@@ -48,6 +48,10 @@ nexus-desk/
 # Local test/runtime noise
 events_sourced.jsonl
 .nexus-swarm-*/
+nexus_swarm/*.db
+*.db
+*.sqlite
+*.sqlite3
 知識庫/99_Inbox/*全文提取.md
 str(REPO_ROOT)/
 <MagicMock name='mock.run_dir.__truediv__()' id='*'>
