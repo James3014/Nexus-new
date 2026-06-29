@@ -73,7 +73,8 @@ def build_local_model_source_anchor(
         try:
             content = source_file_path.read_text(encoding="utf-8")
             lines = content.splitlines()
-            span_lines = [sl.strip() for sl in res.span.strip().splitlines() if sl.strip()]
+            span_text = res.span if isinstance(res.span, str) else str(res.span)
+            span_lines = [sl.strip() for sl in span_text.strip().splitlines() if sl.strip()]
             if span_lines:
                 for i in range(len(lines) - len(span_lines) + 1):
                     file_sub = [lines[i+j].strip() for j in range(len(span_lines))]
@@ -85,7 +86,8 @@ def build_local_model_source_anchor(
             pass
             
     fallback = (res.source in ("ast_boundary", "traceback_window"))
-    span_hash = hashlib.sha256(res.span.strip().encode("utf-8")).hexdigest()
+    span_text = res.span if isinstance(res.span, str) else str(res.span)
+    span_hash = hashlib.sha256(span_text.strip().encode("utf-8")).hexdigest()
     
     # If locked_search was filled by localizer (not explicit), override source to avoid
     # pretending the localizer snippet is an explicit locked_search.

@@ -412,3 +412,143 @@ def test_finalize_with_nexus_row_signal_snapshot_triggers_committee(monkeypatch,
     assert receipt is not None
     assert receipt["name"] == "local_model_executor"
 
+
+def test_finalize_with_nexus_row_local_model_full_armor_smoke(monkeypatch, tmp_path):
+    """Full armor smoke: topology + selected_capabilities + anchored_edit + source_anchor + failure_feedback + receipt.
+    
+    This is the definitive integration test proving local model can use Nexus mainline capabilities
+    without new routes, without HealPipeline, without CommitteeOrchestrator.
+    """
+    from nexus.services.local_heal.local_committee_candidate_provider import LocalCommitteeCandidateProvider
+    from nexus.services.local_heal.candidate_envelope import CandidateEnvelope
+    from nexus.services.local_heal.isolated_local_solve_loop import (
+        IsolatedLocalSolveResponse, IsolatedApplyReceipt, IsolatedVerifierReceipt, CandidateIsolationReceipt,
+    )
+    from nexus.contracts.hybrid_route import HybridRouteDecision, RouteMode, VerifierResult, Authority
+
+    # 1. Enable executor
+    monkeypatch.setenv("NEXUS_ENABLE_LOCAL_MODEL_EXECUTOR", "1")
+    monkeypatch.setenv("NEXUS_LOCAL_MODEL_EXECUTOR_DRY_RUN", "0")
+    monkeypatch.setenv("NEXUS_LOCAL_MODEL_CALL_ALLOWED", "1")
+    monkeypatch.setenv("NEXUS_PROTOCOL_MODE", "anchored_edit")
+
+    # 2. Create target file
+    resolved_path = tmp_path.resolve()
+    target_dir = resolved_path / "pkg"
+    target_dir.mkdir(parents=True, exist_ok=True)
+    target_file_path = target_dir / "mod.py"
+    target_file_path.write_text("def func():\n    pass\n", encoding="utf-8")
+
+    # 3. Mock committee provider — return anchored_edit REPLACE block
+    committee_called = False
+    def mock_generate_committee(*args, **kwargs):
+        nonlocal committee_called
+        committee_called = True
+        return [
+            CandidateEnvelope(
+                candidate_id="smoke-judge",
+                task_id="smoke", source="local", model="qwen2.5:3b",
+                role="judge", patch_protocol="none",
+                target_file="pkg/mod.py", target_symbol="func",
+                source_anchor_hash="ahash", candidate_patch_hash=hashlib.sha256(b"").hexdigest(),
+                evidence_refs=("ref1",), candidate_patch="",
+            ),
+            CandidateEnvelope(
+                candidate_id="smoke-primary",
+                task_id="smoke", source="local", model="qwen2.5-coder:7b",
+                role="primary_proposer", patch_protocol="anchored_edit",
+                target_file="pkg/mod.py", target_symbol="func",
+                source_anchor_hash="ahash",
+                candidate_patch_hash=hashlib.sha256(b"patch").hexdigest(),
+                evidence_refs=("ref1",),
+                candidate_patch="<<<<<<< REPLACE\ndef func():\n    return 1\n>>>>>>> REPLACE",
+            ),
+        ]
+    monkeypatch.setattr(LocalCommitteeCandidateProvider, "generate_committee_candidates", mock_generate_committee)
+
+    # 4. Mock isolated solve
+    mock_solve_response = IsolatedLocalSolveResponse(
+        patch_envelope=type("E", (), {"candidate_hash": "hash123", "unified_diff": "diff"})(),
+        apply_receipt=IsolatedApplyReceipt(
+            task_id="smoke", workspace_path="", target_file="pkg/mod.py",
+            patch_apply_status="applied", patch_apply_error="",
+            selected_candidate_hash="hash123", applied_patch_hash="hash123",
+            selected_candidate_hash_matches_applied=True, candidate_output_isolated=True,
+            mutation_allowed=False,
+        ),
+        verifier_receipt=IsolatedVerifierReceipt(
+            task_id="smoke", verifier_status="pass", exit_code=0,
+            stdout_tail="", stderr_tail="", verifier_error="",
+            verifier_allowed=True,
+        ),
+        candidate_isolation_receipt=CandidateIsolationReceipt(
+            candidate_id="smoke-primary", selected_candidate_hash="hash123",
+            applied_patch_hash="hash123", selected_candidate_hash_matches_applied=True,
+            candidate_output_isolated=True, verifier_result=VerifierResult.PASS,
+            evidence_refs=("ref1",), local_model_called=True,
+            mutation_allowed=False, repaired_by_rule="none",
+        ),
+        hybrid_route=HybridRouteDecision(
+            route_mode=RouteMode.LOCAL_ONLY_EXECUTED,
+            public_claim_allowed=False, production_ready=False,
+            adapter_output_is_route_truth=False, route_truth_source="CapabilityPlanner",
+            behavior_changed=False, authority=Authority.INTERNAL_ONLY,
+            cloud_model_called=False, local_model_called=True,
+            candidate_output_isolated=True, selected_candidate_hash="hash123",
+            applied_patch_hash="hash123", selected_candidate_hash_matches_applied=True,
+            verifier_result=VerifierResult.PASS, evidence_refs=("ref1",),
+        ),
+        capability_payload={"gate_passed": True, "metadata": {"verifier_status": "pass"}},
+    )
+    from nexus.services.local_heal import isolated_local_solve_loop
+    monkeypatch.setattr(isolated_local_solve_loop, "run_isolated_local_solve_loop", lambda req: mock_solve_response)
+
+    # 5. Build row with ALL required fields
+    task = CapabilityTask(
+        id="smoke-full-armor",
+        task_desc="full armor smoke test",
+        task_type="bug", success_criteria="passes",
+        difficulty="easy", category="test",
+        expected_capabilities=["local_model_executor", "ddtree", "autoreason", "artifact_gate", "claim_gate", "delivery_gate"],
+        target_file="pkg/mod.py", test_file="pkg/test_mod.py",
+    )
+
+    row = {
+        "capability_plan_selected": ["local_model_executor", "ddtree", "autoreason", "artifact_gate", "claim_gate", "delivery_gate"],
+        "evidence_refs": ["smoke-ref-1"],
+        "verifier_command": ["echo", "ok"],
+        "target_symbol": "func",
+        "locked_search": "def func():\n    pass",
+        "candidate_generate_fn": lambda req: "mock",
+        "signal_snapshot": {"execution_topology": "local_committee_only"},
+        "previous_failure": "VERIFIER_FAIL: previous attempt failed",
+        "failure_class": "VERIFIER_FAIL",
+        "verifier_status": "fail",
+    }
+
+    # 6. Call _finalize_with_nexus_row
+    finalized = _finalize_with_nexus_row(
+        row, provider="ollama", model_required=True, nexus_required=True,
+        task=task, repo_root=resolved_path,
+    )
+
+    # 7. Assert planner topology
+    assert finalized.get("local_executor_planned") is True
+
+    # 8. Assert committee branch triggered
+    assert committee_called is True
+
+    # 9. Assert receipt
+    receipt = finalized.get("local_executor_receipt")
+    assert receipt is not None
+    assert receipt["name"] == "local_model_executor"
+    assert any(rc.get("name") == "local_model_executor" for rc in finalized.get("capability_receipts", []))
+
+    # 10. Assert metadata observability
+    meta = finalized.get("local_model_executor_summary", {})
+    assert meta.get("planner_selected_count") == 1
+
+    # 11. Assert receipt gate and source
+    assert receipt["gate_passed"] is True
+    assert receipt["selection_source"] == "CapabilityPlanner"
+

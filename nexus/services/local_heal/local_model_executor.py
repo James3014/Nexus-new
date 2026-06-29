@@ -165,8 +165,9 @@ class LocalModelExecutor:
         source_anchor_present = False
         source_anchor_source = "none"
         
-        if locked_search.strip():
-            source_anchor_hash = hashlib.sha256(locked_search.encode("utf-8")).hexdigest()
+        if locked_search and str(locked_search).strip():
+            locked_text = locked_search if isinstance(locked_search, str) else str(locked_search)
+            source_anchor_hash = hashlib.sha256(locked_text.encode("utf-8")).hexdigest()
             source_anchor_present = True
             source_anchor_source = "locked_search"
         elif target_file and target_symbol:
@@ -427,6 +428,10 @@ def _normalize_candidate_patch(
     Returns:
         (normalized_patch, metadata) where metadata contains protocol_parse_failed if error.
     """
+    # Defensive: ensure strings, not bytes
+    locked_search = locked_search if isinstance(locked_search, str) else str(locked_search) if locked_search else ""
+    candidate_patch = candidate_patch if isinstance(candidate_patch, str) else str(candidate_patch) if candidate_patch else ""
+    
     if not candidate_patch.strip():
         return "", {"protocol_parse_failed": True, "error": "empty_patch"}
     
@@ -475,13 +480,13 @@ def _normalize_candidate_patch(
     import re as _re
     
     _anchor_line = 1
-    if locked_search.strip():
+    if locked_search and str(locked_search).strip():
         try:
             from pathlib import Path as _Path
             _fp = _Path(request.repo_root) / request.target_file if request.repo_root else _Path(request.target_file)
             if _fp.exists():
                 _lines = _fp.read_text(encoding="utf-8").splitlines()
-                _search_first = locked_search.strip().splitlines()[0].strip()
+                _search_first = str(locked_search).strip().splitlines()[0].strip()
                 for _i, _l in enumerate(_lines, 1):
                     if _search_first in _l:
                         _anchor_line = _i
@@ -489,8 +494,8 @@ def _normalize_candidate_patch(
         except Exception:
             pass
     
-    locked_lines = locked_search.splitlines(keepends=True)
-    replace_lines = replacement.splitlines(keepends=True)
+    locked_lines = str(locked_search).splitlines(keepends=True)
+    replace_lines = str(replacement).splitlines(keepends=True)
     
     locked_lines = [l if l.endswith("\n") else l + "\n" for l in locked_lines]
     replace_lines = [l if l.endswith("\n") else l + "\n" for l in replace_lines]
