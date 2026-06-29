@@ -12,6 +12,9 @@ COPY nexus-swarm/api/proto/swarm_pb2_grpc.py .
 # 🛡️ Certs will be mounted via K8s Secret or copied here for local test
 # COPY nexus-swarm/certs/ca.crt nexus-swarm/certs/node.crt nexus-swarm/certs/node.key ./certs/
 
+RUN useradd -m -s /bin/bash nexus && chown -R nexus:nexus /app
+USER nexus
+
 EXPOSE 0
 HEALTHCHECK --interval=30s --timeout=3s CMD python3 -c "import grpc; print('grpc ok')" || exit 1
 

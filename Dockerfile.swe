@@ -23,6 +23,9 @@ RUN pip install --no-cache-dir \
 RUN SITE_DIR=$(python3 -m site --user-site) && mkdir -p $SITE_DIR && \
     echo "import mpmath; mpmath.mp.dps=25; mpmath.mp.pretty=False; print('🚀 Precision Armor Active: DPS=25')" > $SITE_DIR/sitecustomize.py
 
+RUN useradd -m -s /bin/bash nexus
 ENV PYTHONPATH="/workspace:${PYTHONPATH}"
 WORKDIR /workspace
+RUN chown -R nexus:nexus /workspace
+USER nexus
 CMD ["bash"]
