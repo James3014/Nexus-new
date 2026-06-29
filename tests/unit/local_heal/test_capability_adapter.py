@@ -43,6 +43,7 @@ def test_capability_adapter_shadow_only_with_evidence() -> None:
         problem_statement="fix syntax",
         evidence_refs=("ref1",),
         executor_controls={"enable_local_heal": True, "local_heal_mode": "shadow_only"},
+        dry_run=False,
     )
     response = LocalHealCapabilityAdapter.run(request)
     assert response.invoked is True
@@ -63,6 +64,7 @@ def test_capability_adapter_shadow_only_missing_evidence() -> None:
         problem_statement="fix syntax",
         evidence_refs=(),
         executor_controls={"enable_local_heal": True, "local_heal_mode": "shadow_only"},
+        dry_run=False,
     )
     response = LocalHealCapabilityAdapter.run(request)
     assert response.invoked is True
@@ -80,6 +82,7 @@ def test_capability_adapter_pipeline_enabled_by_env_but_mutation_blocked() -> No
             problem_statement="fix syntax",
             evidence_refs=("ref1",),
             executor_controls={"enable_local_heal": True, "local_heal_mode": "disabled"},
+            dry_run=False,
         )
         response = LocalHealCapabilityAdapter.run(request)
         assert response.invoked is True
@@ -96,6 +99,7 @@ def test_capability_adapter_advisory_enabled_by_env() -> None:
             problem_statement="fix test suite",
             evidence_refs=("ref1",),
             executor_controls={"enable_local_heal": False, "local_heal_mode": "disabled"},
+            dry_run=False,
         )
         response = LocalHealCapabilityAdapter.run(request)
         assert response.invoked is True
@@ -118,6 +122,7 @@ def test_capability_adapter_fail_closed_guard_blocked() -> None:
                 "local_heal_mode": "shadow_only",
                 "verifier_result": "fail",
             },
+            dry_run=False,
         )
         response = LocalHealCapabilityAdapter.run(request)
         assert response.invoked is True
@@ -144,6 +149,7 @@ def test_capability_adapter_candidate_enabled_with_call() -> None:
             executor_controls={
                 "candidate_generate_fn": mock_gen,
             },
+            dry_run=False,
         )
         response = LocalHealCapabilityAdapter.run(request)
         assert response.invoked is True
@@ -183,6 +189,7 @@ def test_capability_adapter_isolated_solve_missing_control() -> None:
             problem_statement="fix code",
             evidence_refs=("ref1",),
             executor_controls={},
+            dry_run=False,
         )
         response = LocalHealCapabilityAdapter.run(request)
         assert response.invoked is False
@@ -228,6 +235,7 @@ def test_capability_adapter_isolated_solve_success() -> None:
                     "work_dir": "",
                     "candidate_generate_fn": mock_gen,
                 },
+                dry_run=False,
             )
             
             response = LocalHealCapabilityAdapter.run(request)
@@ -248,3 +256,22 @@ def test_capability_adapter_isolated_solve_success() -> None:
             
             if os.path.exists(response.hybrid_route.metadata.get("workspace_path", "")):
                 shutil.rmtree(response.hybrid_route.metadata.get("workspace_path", ""))
+
+
+def test_capability_adapter_dry_run_default() -> None:
+    # 預設 dry_run=True
+    request = LocalHealCapabilityRequest(
+        task_id="t_dry",
+        problem_statement="fix code",
+        evidence_refs=("ref1",),
+        executor_controls={
+            "enable_local_heal": True,
+            "local_heal_mode": "candidate",
+        },
+    )
+    response = LocalHealCapabilityAdapter.run(request)
+    assert response.invoked is False
+    assert response.hybrid_route.route_mode == RouteMode.CLOUD_ASSISTED_BY_LOCAL_TRACE_ONLY
+    assert response.hybrid_route.local_model_called is False
+    assert response.hybrid_route.fallback_block_reason == "dry_run"
+    assert response.hybrid_route.metadata.get("dry_run") is True

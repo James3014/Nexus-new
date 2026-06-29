@@ -50,6 +50,7 @@ def test_abc_local_heal_full_isolated_solve_seam() -> None:
                     "work_dir": "",
                     "candidate_generate_fn": mock_gen,
                 },
+                dry_run=False,
             )
             
             response = LocalHealCapabilityAdapter.run(request)
@@ -114,6 +115,7 @@ def test_abc_local_heal_full_isolated_solve_with_fail_closed_guard_enabled() -> 
                     "work_dir": "",
                     "candidate_generate_fn": mock_gen,
                 },
+                dry_run=False,
             )
             
             response = LocalHealCapabilityAdapter.run(request)

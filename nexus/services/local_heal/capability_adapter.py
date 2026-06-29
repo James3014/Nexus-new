@@ -82,7 +82,6 @@ class LocalHealCapabilityAdapter:
     @staticmethod
     def run(request: LocalHealCapabilityRequest) -> LocalHealCapabilityResponse:
         if request.dry_run:
-            from nexus.contracts.hybrid_route import RouteMode, Authority, VerifierResult
             payload = build_hybrid_route_decision(
                 route_mode=RouteMode.CLOUD_ASSISTED_BY_LOCAL_TRACE_ONLY,
                 public_claim_allowed=False,
