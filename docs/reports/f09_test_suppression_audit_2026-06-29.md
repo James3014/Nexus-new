@@ -6,20 +6,21 @@
 
 ## Summary
 
-Inventory of 16 test suppressions across 8 files.
+Inventory of 16 test suppressions across 7 tracked files (1 untracked file excluded).
 
 ## Suppressions by File
 
-| File | Count | Type |
-|---|---|---|
-| `tests/integration/test_rust_kernel_smoke.py` | 6 | Rust binary guard |
-| `tests/unit/test_env_resolver_imports.py` | 2 | Environment guard |
-| `tests/engine/test_sandbox_elastic_profile.py` | 2 | macOS guard |
-| `tests/engine/test_sandbox_actions.py` | 2 | Platform guard |
-| `tests/benchmark/test_local_model_executor_planner_path.py` | 2 | Ollama guard |
-| `tests/integration/test_rust_wave3_cutover.py` | 1 | Rust binary guard |
-| `tests/integration/test_real_ollama_solve_lane.py` | 1 | Ollama guard |
-| `tests/integration/test_real_qwen_small_batch_solve_eval.py` | 1 | Ollama guard |
+| File | Count | Type | Tracked? |
+|---|---|---|---|
+| `tests/integration/test_rust_kernel_smoke.py` | 6 | Rust binary guard | Yes |
+| `tests/unit/test_env_resolver_imports.py` | 2 | Environment guard | Yes |
+| `tests/engine/test_sandbox_elastic_profile.py` | 2 | macOS guard | Yes |
+| `tests/engine/test_sandbox_actions.py` | 2 | Platform guard | Yes |
+| `tests/integration/test_rust_wave3_cutover.py` | 1 | Rust binary guard | Yes |
+| `tests/integration/test_real_ollama_solve_lane.py` | 1 | Ollama guard | Yes |
+| `tests/integration/test_real_qwen_small_batch_solve_eval.py` | 1 | Ollama guard | Yes |
+
+Note: `tests/benchmark/test_local_model_executor_planner_path.py` (2 suppressions) is untracked and excluded from this audit scope.
 
 ## Classification
 
@@ -46,3 +47,4 @@ rg -c '@pytest\.mark\.skip|@pytest\.mark\.skipif|@pytest\.mark\.xfail|pytest\.sk
 - Audit only, no test changes
 - All suppressions are legitimate
 - No stale/dead tests found
+- Untracked file excluded from count
