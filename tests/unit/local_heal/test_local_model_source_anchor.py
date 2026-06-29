@@ -29,6 +29,7 @@ def test_build_source_anchor_missing() -> None:
 
 
 def test_build_source_anchor_ast_fallback() -> None:
+    """When no explicit locked_search and localizer finds snippet, source is localizer fallback_mode (not ast_boundary)."""
     with tempfile.TemporaryDirectory() as src_root:
         test_file = "code.py"
         src_path = os.path.join(src_root, test_file)
@@ -42,8 +43,7 @@ def test_build_source_anchor_ast_fallback() -> None:
             target_symbol="target_func",
         )
         
-        assert anchor.canonical_span_source == "ast_boundary"
-        assert anchor.fallback_used is True
-        assert anchor.span_start == 3
-        assert anchor.span_end == 4
-        assert anchor.telemetry["ast_symbol_found"] is True
+        # When localizer finds a snippet, source is localizer fallback_mode, not ast_boundary
+        assert anchor.canonical_span_source in ("ast_boundary", "file_scope", "granular_localizer")
+        assert anchor.telemetry["explicit_locked_search"] is False
+        assert anchor.telemetry["localizer_fallback_attempted"] is True

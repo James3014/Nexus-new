@@ -30,13 +30,14 @@ def build_local_model_source_anchor(
     
     source_file_path = Path(source_root) / target_file
     
+    explicit_locked_search = bool(locked_search.strip())
     localizer_attempted = False
     localizer_success = False
     localizer_error = ""
     localizer_source = "none"
     
-    # 任務 C: 若無 mock locked_search 傳入，動態使用 GranularMethodLocalizer AST/BM25 定位
-    if not locked_search and source_file_path.exists():
+    # 若無 explicit locked_search，嘗試 GranularMethodLocalizer 作為最後 fallback
+    if not explicit_locked_search and source_file_path.exists():
         localizer_attempted = True
         try:
             from nexus.services.local_heal.granular_localizer import GranularMethodLocalizer
@@ -86,13 +87,21 @@ def build_local_model_source_anchor(
     fallback = (res.source in ("ast_boundary", "traceback_window"))
     span_hash = hashlib.sha256(res.span.strip().encode("utf-8")).hexdigest()
     
+    # If locked_search was filled by localizer (not explicit), override source to avoid
+    # pretending the localizer snippet is an explicit locked_search.
+    if not explicit_locked_search and localizer_success:
+        effective_source = localizer_source or "granular_localizer"
+    else:
+        effective_source = res.source
+    
     telemetry = dict(res.telemetry)
     telemetry.update({
         "target_symbol": target_symbol,
         "ast_symbol_found": (res.source == "ast_boundary"),
-        "canonical_span_source": res.source,
+        "canonical_span_source": effective_source,
         "fallback_used": fallback,
         "span_hash": span_hash,
+        "explicit_locked_search": explicit_locked_search,
         "localizer_fallback_attempted": localizer_attempted,
         "localizer_fallback_success": localizer_success,
         "localizer_fallback_error": localizer_error,
@@ -102,7 +111,7 @@ def build_local_model_source_anchor(
     return LocalModelSourceAnchor(
         target_file=target_file,
         target_symbol=target_symbol,
-        canonical_span_source=res.source,
+        canonical_span_source=effective_source,
         span_start=start_line,
         span_end=end_line,
         span_hash=span_hash,
