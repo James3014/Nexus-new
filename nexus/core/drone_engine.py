@@ -68,7 +68,7 @@ class LocalBonsaiBrain:
                 text = res.json().get("content", "").strip()
                 try:
                     return json.loads(text)
-                except:
+                except (json.JSONDecodeError, ValueError):
                     # [Hardening] 更安全的 JSON Repair
                     if not text.startswith("{"): return {"action": "FAIL", "reasoning": "Malformed output"}
                     if not text.endswith("}"): text += '"}' if text.endswith('"') else '" }'

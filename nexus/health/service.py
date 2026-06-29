@@ -250,7 +250,7 @@ class SelfHealService:
                 state.metadata["claims_fault_hits"] = [
                     c["claim"] for c in claims_lessons["citations"]
                 ]
-        except Exception:
+        except (KeyError, TypeError, ValueError):
             pass
 
     def _record_fault_lesson(self, state: NexusState, result: SelfHealCycleResult) -> None:
