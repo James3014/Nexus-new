@@ -354,7 +354,119 @@ class LocalModelExecutor:
                 evidence_refs=decision.decision_evidence_refs or request.evidence_refs,
             )
 
-        # 8. Generate Candidate Patch for single_local_model
+        # 8. LocalHeal Pipeline topology
+        if execution_topology == "localheal_pipeline":
+            from nexus.services.local_heal.local_model_capability_executors import (
+                LocalHealPipelineCapabilityExecutor,
+                DDTreeLocalExecutor,
+                AutoreasonLocalExecutor,
+                ArtifactGateLocalExecutor,
+                ClaimGateLocalExecutor,
+                DeliveryGateLocalExecutor,
+            )
+
+            # Execute repair_loop (localheal pipeline bridge)
+            repair_exec = LocalHealPipelineCapabilityExecutor().execute(cap_ctx)
+
+            # Execute ddtree/autoreason/gates for this topology
+            ddtree_exec = DDTreeLocalExecutor().execute(cap_ctx)
+            autoreason_exec = AutoreasonLocalExecutor().execute(cap_ctx)
+            artifact_exec = ArtifactGateLocalExecutor().execute(cap_ctx)
+            claim_exec = ClaimGateLocalExecutor().execute(cap_ctx)
+            delivery_exec = DeliveryGateLocalExecutor().execute(cap_ctx)
+
+            raw_meta = {
+                "execution_topology": "localheal_pipeline",
+                "selected_capabilities_used": list(selected_caps),
+                "protocol_mode": "anchored_edit",
+                "source_anchor_present": source_anchor_present,
+                "source_anchor_source": source_anchor_source,
+                "source_anchor_hash": source_anchor_hash[:16] if source_anchor_hash else "",
+                "target_file": target_file,
+                "target_symbol": target_symbol,
+                "locked_search_present": bool(locked_search.strip()),
+                "failure_feedback_present": failure_feedback_present,
+                "final_authority": "NexusVerifier",
+                "ddtree_invoked": ddtree_exec.invoked,
+                "autoreason_invoked": autoreason_exec.invoked,
+                "artifact_gate_invoked": artifact_exec.invoked,
+                "claim_gate_invoked": claim_exec.invoked,
+                "delivery_gate_invoked": delivery_exec.invoked,
+                "localheal_pipeline_invoked": repair_exec.telemetries.get("localheal_pipeline_invoked", False),
+                "committee_orchestrator_invoked": repair_exec.telemetries.get("committee_orchestrator_invoked", False),
+                "solid_search_replace_protocol_available": repair_exec.telemetries.get("solid_search_replace_protocol_available", False),
+                "granular_localizer_available": repair_exec.telemetries.get("granular_localizer_available", False),
+                "failure_feedback_builder_available": repair_exec.telemetries.get("failure_feedback_builder_available", False),
+                "evaluation_gate_available": repair_exec.telemetries.get("evaluation_gate_available", False),
+                "semantic_retry_available": repair_exec.telemetries.get("semantic_retry_available", False),
+            }
+            armor_ok, armor_miss = validate_local_model_armor_metadata(raw_meta)
+            raw_meta["armor_receipt_complete"] = armor_ok
+            raw_meta["armor_receipt_missing_fields"] = armor_miss
+
+            # Use single_local_model provider path for candidate generation
+            protocol_mode = os.environ.get("NEXUS_PROTOCOL_MODE", "anchored_edit")
+            failure_context = ""
+            if failure_feedback_present and failure_feedback_text:
+                failure_context = f"\n\n{failure_feedback_text}"
+
+            if protocol_mode == "anchored_edit":
+                explicit_prompt = (
+                    f"You are generating a replacement code block to solve a coding task.\n"
+                    f"Problem: {request.problem_statement}{memory_context}{failure_context}\n"
+                    f"Target File: {target_file}\n"
+                    f"Target Symbol: {target_symbol}\n"
+                    f"Source Anchor Hash: {source_anchor_hash[:16] if source_anchor_hash else 'none'}\n"
+                    f"Locked Search Span that will be replaced:\n"
+                    f"```\n{locked_search}\n```\n\n"
+                    f"Provide the replacement code inside a REPLACE block exactly like this:\n"
+                    f"<<<<<<< REPLACE\n"
+                    f"[replacement code goes here]\n"
+                    f">>>>>>> REPLACE\n\n"
+                    f"Do not include any other text outside the REPLACE block.\n"
+                )
+            else:
+                explicit_prompt = (
+                    f"You are generating a unified diff to fix a bug in {target_file}.\n"
+                    f"Problem: {request.problem_statement}{memory_context}{failure_context}\n"
+                    f"Target File: {target_file}\n"
+                    f"Target Symbol: {target_symbol}\n"
+                    f"Return ONLY the diff. No prose.\n"
+                )
+
+            prov_req = LocalModelProviderRequest(
+                task_id=request.task_id,
+                prompt=explicit_prompt,
+                evidence_refs=request.evidence_refs,
+                model_name=request.model_name or os.environ.get("NEXUS_LOCAL_MODEL_NAME", "qwen2.5-coder:7b"),
+            )
+            prov_resp = provider.generate(prov_req)
+
+            candidate_patch = prov_resp.output_text
+            patch_meta = {}
+            if candidate_patch.strip():
+                candidate_patch, patch_meta = _normalize_candidate_patch(request, locked_search, candidate_patch)
+                candidate_hash = hashlib.sha256(candidate_patch.encode("utf-8")).hexdigest() if candidate_patch.strip() else empty_hash
+            else:
+                candidate_hash = empty_hash
+
+            provider_name = "ollama" if isinstance(provider, OllamaLocalModelProvider) else "injected"
+
+            return LocalModelExecutorResponse(
+                invoked=prov_resp.provider_invoked,
+                local_model_called=prov_resp.model_called,
+                candidate_patch=candidate_patch,
+                candidate_hash=candidate_hash,
+                reasoning_summary="success" if not prov_resp.error else "failed",
+                raw_model_metadata=raw_meta,
+                provider=provider_name,
+                model_name=prov_resp.model_name or prov_req.model_name,
+                error=prov_resp.error,
+                timeout=prov_resp.timed_out,
+                evidence_refs=request.evidence_refs,
+            )
+
+        # 9. Generate Candidate Patch for single_local_model
         protocol_mode = os.environ.get("NEXUS_PROTOCOL_MODE", "standard")
         
         # Build failure feedback context for prompt
