@@ -25,6 +25,7 @@ class LocalModelCapabilityContext:
     candidate_pool: list[Any] = field(default_factory=list)
     route_context: dict[str, Any] = field(default_factory=dict)
     local_model_metadata: dict[str, Any] = field(default_factory=dict)
+    provider: Any = None
 
 
 @dataclass
@@ -60,6 +61,7 @@ def build_capability_context_from_request(
     request: Any,
     raw_meta: dict[str, Any],
     candidates: list[Any] | None = None,
+    provider: Any = None,
 ) -> LocalModelCapabilityContext:
     """Build capability context from LocalModelExecutorRequest and metadata."""
     return LocalModelCapabilityContext(
@@ -81,4 +83,5 @@ def build_capability_context_from_request(
         candidate_pool=candidates or [],
         route_context=getattr(request, "route_context", {}),
         local_model_metadata=raw_meta,
+        provider=provider,
     )

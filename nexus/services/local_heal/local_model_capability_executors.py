@@ -322,13 +322,27 @@ class LocalHealPipelineCapabilityExecutor:
                 invoked_modules.append("failure_feedback_builder")
                 path_a_failure_reason = "feedback_builder_error"
 
-        # 4. HealPipeline actual instantiation (thin wrapper for now)
+        # 4. HealPipeline actual instantiation with real provider
         if modules.get("heal_pipeline"):
             try:
                 from nexus.services.local_heal.pipeline import HealPipeline
-                def _noop_generate(req):
-                    return ""
-                pipeline = HealPipeline(ollama_generate_fn=_noop_generate)
+                real_provider = ctx.provider
+                if real_provider is not None:
+                    def _provider_generate(req):
+                        from nexus.services.local_heal.local_model_provider import LocalModelProviderRequest
+                        prov_req = LocalModelProviderRequest(
+                            task_id=ctx.task_id,
+                            prompt=getattr(req, "prompt", "") or str(req),
+                            evidence_refs=ctx.evidence_refs,
+                            model_name=getattr(req, "model_name", ""),
+                        )
+                        prov_resp = real_provider.generate(prov_req)
+                        return prov_resp.output_text or ""
+                    pipeline = HealPipeline(ollama_generate_fn=_provider_generate)
+                else:
+                    def _noop_generate(req):
+                        return ""
+                    pipeline = HealPipeline(ollama_generate_fn=_noop_generate)
                 invoked_modules.append("heal_pipeline")
                 path_a_actual_execution = True
             except Exception:

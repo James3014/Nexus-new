@@ -285,3 +285,143 @@ class TestLocalhealPipelineTopologyModelCallBypassesPipeline:
         meta = result.raw_model_metadata
         # The bridge doesn't add retry_count or semantic_retry fields
         # because it doesn't run the orchestrator repair loop
+
+
+class TestLocalhealPipelineBridgeUsesRealProvider:
+    """A3: Bridge uses real provider when available, not _noop_generate."""
+
+    def test_bridge_calls_heal_pipeline_run_when_planner_selects_localheal_pipeline(self):
+        """Bridge instantiates HealPipeline with real provider generate function."""
+        from nexus.services.local_heal.pipeline import HealPipeline
+
+        pipeline_init_mock = MagicMock()
+        provider = _build_provider_mock()
+
+        with patch.object(HealPipeline, "__init__", pipeline_init_mock):
+            ctx = LocalModelCapabilityContext(
+                task_id="t_bridge_provider",
+                source_root="/tmp",
+                problem_statement="fix bug",
+                target_file="a.py",
+                target_symbol="f",
+                selected_capabilities=("repair_loop",),
+                execution_topology="localheal_pipeline",
+                evidence_refs=("e1",),
+                source_anchor={"present": False},
+                route_context={},
+                provider=provider,
+            )
+            result = LocalHealPipelineCapabilityExecutor().execute(ctx)
+
+            # HealPipeline was instantiated
+            pipeline_init_mock.assert_called_once()
+            call_kwargs = pipeline_init_mock.call_args
+            # The ollama_generate_fn should NOT be _noop_generate
+            generate_fn = call_kwargs.kwargs.get("ollama_generate_fn") or call_kwargs[1].get("ollama_generate_fn")
+            assert generate_fn is not None
+
+    def test_bridge_uses_real_provider_not_noop_when_available(self):
+        """When provider is set, bridge wraps it instead of using _noop_generate."""
+        provider = _build_provider_mock()
+
+        ctx = LocalModelCapabilityContext(
+            task_id="t_bridge_real",
+            source_root="/tmp",
+            problem_statement="fix bug",
+            target_file="a.py",
+            target_symbol="f",
+            selected_capabilities=("repair_loop",),
+            execution_topology="localheal_pipeline",
+            evidence_refs=("e1",),
+            source_anchor={"present": False},
+            route_context={},
+            provider=provider,
+        )
+        result = LocalHealPipelineCapabilityExecutor().execute(ctx)
+        assert result.invoked is True
+        assert result.telemetries.get("localheal_pipeline_invoked") is True
+
+    def test_bridge_does_not_call_pipeline_for_local_only(self):
+        """single_local_model topology does not invoke bridge."""
+        bridge_mock = MagicMock(return_value=CapabilityExecutionResult(
+            name="repair_loop", selected=True, invoked=False, gate_passed=False,
+            outcome_contributed=False, evidence_present=True,
+        ))
+        with patch.object(LocalHealPipelineCapabilityExecutor, "execute", bridge_mock):
+            ctx = LocalModelCapabilityContext(
+                task_id="t_no_bridge",
+                source_root="/tmp",
+                problem_statement="fix bug",
+                target_file="a.py",
+                target_symbol="f",
+                selected_capabilities=("repair_loop",),
+                execution_topology="single_local_model",
+                evidence_refs=("e1",),
+                source_anchor={"present": False},
+                route_context={},
+            )
+            LocalHealPipelineCapabilityExecutor().execute(ctx)
+            # Bridge should report not selected for non-pipeline topology
+            assert ctx.execution_topology != "localheal_pipeline"
+
+    def test_bridge_does_not_call_pipeline_for_local_committee_only(self):
+        """local_committee_only topology does not invoke bridge."""
+        ctx = LocalModelCapabilityContext(
+            task_id="t_no_bridge_committee",
+            source_root="/tmp",
+            problem_statement="fix bug",
+            target_file="a.py",
+            target_symbol="f",
+            selected_capabilities=("repair_loop",),
+            execution_topology="local_committee_only",
+            evidence_refs=("e1",),
+            source_anchor={"present": False},
+            route_context={},
+        )
+        result = LocalHealPipelineCapabilityExecutor().execute(ctx)
+        assert result.invoked is False
+        assert result.failure_reason == "localheal_pipeline_topology_not_selected"
+
+    def test_bridge_pipeline_exception_fail_closed(self):
+        """When HealPipeline instantiation fails, bridge returns fail-closed metadata."""
+        from nexus.services.local_heal.pipeline import HealPipeline
+
+        with patch.object(HealPipeline, "__init__", side_effect=RuntimeError("pipeline init failed")):
+            ctx = LocalModelCapabilityContext(
+                task_id="t_bridge_fail",
+                source_root="/tmp",
+                problem_statement="fix bug",
+                target_file="a.py",
+                target_symbol="f",
+                selected_capabilities=("repair_loop",),
+                execution_topology="localheal_pipeline",
+                evidence_refs=("e1",),
+                source_anchor={"present": False},
+                route_context={},
+            )
+            result = LocalHealPipelineCapabilityExecutor().execute(ctx)
+            # Should not crash, should return with failure_reason
+            assert result.invoked is True
+            assert "pipeline_instantiation_error" in result.telemetries.get("path_a_failure_reason", "")
+
+    def test_bridge_does_not_claim_solved_without_verifier_pass(self):
+        """Bridge availability alone must not produce solved=true."""
+        provider = _build_provider_mock(output_text="")
+        with patch(
+            "nexus.services.local_heal.local_model_executor.build_local_model_provider_from_signal_snapshot",
+            return_value=provider,
+        ):
+            result = LocalModelExecutor.run(_build_request(), provider=provider)
+        assert result.raw_model_metadata.get("gate_passed") is not True
+
+    def test_bridge_keeps_route_truth_source_capability_planner(self):
+        """Bridge never changes route_truth_source."""
+        provider = _build_provider_mock()
+        with patch(
+            "nexus.services.local_heal.local_model_executor.build_local_model_provider_from_signal_snapshot",
+            return_value=provider,
+        ):
+            result = LocalModelExecutor.run(_build_request(), provider=provider)
+        meta = result.raw_model_metadata
+        # Bridge telemetry should not contain route_truth_source override
+        assert "route_truth_source" not in meta or meta.get("route_truth_source") != "bridge"

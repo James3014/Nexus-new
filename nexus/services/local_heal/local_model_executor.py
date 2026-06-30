@@ -298,6 +298,7 @@ class LocalModelExecutor:
             candidate_pool=[],
             route_context=request.route_context,
             local_model_metadata={},
+            provider=provider,
         )
 
         # 8. Handle Execution Topology Branching
