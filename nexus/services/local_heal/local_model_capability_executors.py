@@ -494,12 +494,18 @@ class LocalHealPipelineCapabilityExecutor:
             final_patch = getattr(pipeline_result_ctx, "final_patch", "") or ""
             evaluation_report = getattr(pipeline_result_ctx, "evaluation_report", "") or ""
             skipped_repro = getattr(pipeline_result_ctx, "skip_reproduction", False)
+            failure_reason = getattr(pipeline_result_ctx, "failure_reason", "") or ""
 
             reproduction_reached = bool(repro_evidence) or skipped_repro
             planning_reached = plan is not None and (isinstance(plan, dict) and plan.get("search_symbols")) or (hasattr(plan, "search_symbols") and plan.search_symbols)
             localization_reached = bool(localized_files)
-            patch_synthesis_reached = bool(final_patch)
+            # C2: patch_synthesis_reached if plan exists and localized_files exist (patch synthesis was attempted)
+            patch_synthesis_reached = planning_reached and localization_reached
             verification_reached = bool(evaluation_report)
+
+            # If patch synthesis was attempted but failed, record the failure
+            if patch_synthesis_reached and not final_patch and failure_reason:
+                phase_reached = "patch_synthesis_failed"
 
             # Determine phase_reached (last completed phase)
             if verification_reached:
