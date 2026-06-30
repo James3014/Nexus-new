@@ -13,6 +13,7 @@ from nexus.services.local_heal.local_model_provider import (
     InjectedLocalModelProvider,
 )
 from nexus.services.local_heal.capability_adapter import build_local_model_provider_from_env
+from nexus.services.local_heal.local_model_armor_receipt_gate import validate_local_model_armor_metadata
 
 
 @dataclass(frozen=True)
@@ -271,28 +272,33 @@ class LocalModelExecutor:
             if not selected_model:
                 selected_model = "committee"
                 
+            raw_meta = {
+                "execution_topology": "local_committee_only",
+                "committee_candidate_count": len(candidates),
+                "selected_candidate_id": decision.selected_candidate_id,
+                "selected_by": decision.selected_by,
+                "final_authority": decision.final_authority,
+                "selected_capabilities_used": list(selected_caps),
+                "protocol_normalization": patch_meta,
+                "source_anchor_present": source_anchor_present,
+                "source_anchor_source": source_anchor_source,
+                "source_anchor_hash": source_anchor_hash[:16] if source_anchor_hash else "",
+                "target_file": target_file,
+                "target_symbol": target_symbol,
+                "locked_search_present": bool(locked_search.strip()),
+                "failure_feedback_present": failure_feedback_present,
+                "protocol_mode": "anchored_edit",
+            }
+            armor_ok, armor_miss = validate_local_model_armor_metadata(raw_meta)
+            raw_meta["armor_receipt_complete"] = armor_ok
+            raw_meta["armor_receipt_missing_fields"] = armor_miss
             return LocalModelExecutorResponse(
                 invoked=True,
                 local_model_called=local_model_called,
                 candidate_patch=selected_patch,
                 candidate_hash=selected_hash,
                 reasoning_summary=f"selected_by_{decision.selected_by}",
-                raw_model_metadata={
-                    "execution_topology": "local_committee_only",
-                    "committee_candidate_count": len(candidates),
-                    "selected_candidate_id": decision.selected_candidate_id,
-                    "selected_by": decision.selected_by,
-                    "final_authority": decision.final_authority,
-                    "selected_capabilities_used": list(selected_caps),
-                    "protocol_normalization": patch_meta,
-                    "source_anchor_present": source_anchor_present,
-                    "source_anchor_source": source_anchor_source,
-                    "source_anchor_hash": source_anchor_hash[:16] if source_anchor_hash else "",
-                    "target_file": target_file,
-                    "target_symbol": target_symbol,
-                    "locked_search_present": bool(locked_search.strip()),
-                    "failure_feedback_present": failure_feedback_present,
-                },
+                raw_model_metadata=raw_meta,
                 provider=provider_name,
                 model_name=selected_model,
                 error="",
@@ -389,27 +395,31 @@ class LocalModelExecutor:
             
         provider_name = "ollama" if isinstance(provider, OllamaLocalModelProvider) else "injected"
         
+        raw_meta = {
+            "output_truncated": prov_resp.output_truncated,
+            "error": prov_resp.error,
+            "protocol_mode": protocol_mode,
+            "execution_topology": execution_topology,
+            "protocol_normalization": patch_meta,
+            "source_anchor_present": source_anchor_present,
+            "source_anchor_source": source_anchor_source,
+            "source_anchor_hash": source_anchor_hash[:16] if source_anchor_hash else "",
+            "target_file": target_file,
+            "target_symbol": target_symbol,
+            "locked_search_present": bool(locked_search.strip()),
+            "failure_feedback_present": failure_feedback_present,
+            "final_authority": "NexusVerifier",
+        }
+        armor_ok, armor_miss = validate_local_model_armor_metadata(raw_meta)
+        raw_meta["armor_receipt_complete"] = armor_ok
+        raw_meta["armor_receipt_missing_fields"] = armor_miss
         return LocalModelExecutorResponse(
             invoked=prov_resp.provider_invoked,
             local_model_called=prov_resp.model_called,
             candidate_patch=candidate_patch,
             candidate_hash=candidate_hash,
             reasoning_summary="success" if not prov_resp.error else "failed",
-            raw_model_metadata={
-                "output_truncated": prov_resp.output_truncated,
-                "error": prov_resp.error,
-                "protocol_mode": protocol_mode,
-                "execution_topology": execution_topology,
-                "protocol_normalization": patch_meta,
-                "source_anchor_present": source_anchor_present,
-                "source_anchor_source": source_anchor_source,
-                "source_anchor_hash": source_anchor_hash[:16] if source_anchor_hash else "",
-                "target_file": target_file,
-                "target_symbol": target_symbol,
-                "locked_search_present": bool(locked_search.strip()),
-                "failure_feedback_present": failure_feedback_present,
-                "final_authority": "NexusVerifier",
-            },
+            raw_model_metadata=raw_meta,
             provider=provider_name,
             model_name=prov_resp.model_name or prov_req.model_name,
             error=prov_resp.error,
