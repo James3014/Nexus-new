@@ -218,7 +218,25 @@ class LocalModelExecutor:
             except Exception:
                 failure_feedback_present = False
         
-        # 7. Handle Execution Topology Branching
+        # 7. Build capability context (shared across all topologies)
+        cap_ctx = LocalModelCapabilityContext(
+            task_id=request.task_id,
+            source_root=request.repo_root,
+            problem_statement=request.problem_statement,
+            target_file=target_file,
+            target_symbol=target_symbol,
+            selected_capabilities=selected_caps,
+            execution_topology=execution_topology,
+            evidence_refs=request.evidence_refs,
+            source_anchor={"present": source_anchor_present, "source": source_anchor_source, "hash": source_anchor_hash},
+            failure_feedback=failure_feedback_text,
+            verifier_command=tuple(request.route_context.get("verifier_command", []) or []),
+            candidate_pool=[],
+            route_context=request.route_context,
+            local_model_metadata={},
+        )
+
+        # 8. Handle Execution Topology Branching
         if execution_topology == "local_committee_only":
             protocol_mode = os.environ.get("NEXUS_PROTOCOL_MODE", "anchored_edit")
             
@@ -246,23 +264,9 @@ class LocalModelExecutor:
                 protocol_mode=protocol_mode,
             )
             
-            # Build context for capability executors
-            cap_ctx = LocalModelCapabilityContext(
-                task_id=request.task_id,
-                source_root=request.repo_root,
-                problem_statement=enhanced_problem,
-                target_file=target_file,
-                target_symbol=target_symbol,
-                selected_capabilities=selected_caps,
-                execution_topology=execution_topology,
-                evidence_refs=request.evidence_refs,
-                source_anchor={"present": source_anchor_present, "source": source_anchor_source, "hash": source_anchor_hash},
-                failure_feedback=failure_feedback_text,
-                verifier_command=tuple(request.route_context.get("verifier_command", []) or []),
-                candidate_pool=candidates,
-                route_context=request.route_context,
-                local_model_metadata={},
-            )
+            # Update cap_ctx with candidates for this topology
+            cap_ctx.candidate_pool = candidates
+            cap_ctx.problem_statement = enhanced_problem
 
             decision = CandidateDecisionAdapter.select_candidate(
                 candidates,
@@ -399,6 +403,11 @@ class LocalModelExecutor:
                 "failure_feedback_builder_available": repair_exec.telemetries.get("failure_feedback_builder_available", False),
                 "evaluation_gate_available": repair_exec.telemetries.get("evaluation_gate_available", False),
                 "semantic_retry_available": repair_exec.telemetries.get("semantic_retry_available", False),
+                "gate_results": {
+                    "artifact_gate": artifact_exec.to_receipt_dict(),
+                    "claim_gate": claim_exec.to_receipt_dict(),
+                    "delivery_gate": delivery_exec.to_receipt_dict(),
+                },
             }
             armor_ok, armor_miss = validate_local_model_armor_metadata(raw_meta)
             raw_meta["armor_receipt_complete"] = armor_ok

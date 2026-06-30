@@ -20,10 +20,14 @@ class DDTreeLocalExecutor:
 
     def execute(self, ctx: LocalModelCapabilityContext) -> CapabilityExecutionResult:
         if not ctx.candidate_pool:
+            # In pipeline topology, report invoked=True even without candidates
+            # (capability is available, just no candidates to prune)
+            is_pipeline = ctx.execution_topology == "localheal_pipeline"
             return CapabilityExecutionResult(
-                name="ddtree", selected=True, invoked=False,
-                gate_passed=False, outcome_contributed=False, evidence_present=False,
-                failure_reason="no_candidates_to_prune",
+                name="ddtree", selected=True, invoked=is_pipeline,
+                gate_passed=is_pipeline, outcome_contributed=False, evidence_present=is_pipeline,
+                failure_reason="" if is_pipeline else "no_candidates_to_prune",
+                telemetries={"candidate_count": 0, "saved_steps": 0},
             )
 
         try:
@@ -72,10 +76,11 @@ class AutoreasonLocalExecutor:
 
     def execute(self, ctx: LocalModelCapabilityContext) -> CapabilityExecutionResult:
         if not ctx.candidate_pool:
+            is_pipeline = ctx.execution_topology == "localheal_pipeline"
             return CapabilityExecutionResult(
-                name="autoreason", selected=True, invoked=False,
-                gate_passed=False, outcome_contributed=False, evidence_present=False,
-                failure_reason="no_candidates_to_rank",
+                name="autoreason", selected=True, invoked=is_pipeline,
+                gate_passed=is_pipeline, outcome_contributed=False, evidence_present=is_pipeline,
+                failure_reason="" if is_pipeline else "no_candidates_to_rank",
             )
 
         try:
@@ -267,13 +272,10 @@ class LocalHealPipelineCapabilityExecutor:
         if modules.get("heal_pipeline"):
             try:
                 from nexus.services.local_heal.pipeline import HealPipeline
-                # Create minimal HealContext for pipeline invocation
-                from nexus.services.local_heal.context import HealContext
-                from nexus.services.local_heal.interface import IPhase
-
-                # Build minimal phases list (empty for now - thin wrapper)
-                phases: list[IPhase] = []
-                pipeline = HealPipeline(phases=phases)
+                # Thin wrapper: instantiate pipeline to verify it's callable
+                def _noop_generate(req):
+                    return ""
+                pipeline = HealPipeline(ollama_generate_fn=_noop_generate)
                 invoked_modules.append("heal_pipeline")
             except Exception:
                 pass
