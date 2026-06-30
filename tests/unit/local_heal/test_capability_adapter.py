@@ -350,3 +350,161 @@ def test_capability_adapter_dry_run_default() -> None:
     assert response.hybrid_route.local_model_called is False
     assert response.hybrid_route.fallback_block_reason == "dry_run"
     assert response.hybrid_route.metadata.get("dry_run") is True
+
+
+def test_capability_adapter_missing_signal_snapshot_fail_closed() -> None:
+    request = LocalHealCapabilityRequest(
+        task_id="t_qs1",
+        problem_statement="fix code",
+        evidence_refs=("ref1",),
+        executor_controls={
+            "enable_local_heal": True,
+            "local_heal_mode": "candidate",
+        },
+        dry_run=False,
+    )
+    response = LocalHealCapabilityAdapter.run(request)
+    assert response.invoked is False
+    assert response.hybrid_route.route_mode == RouteMode.LOCAL_ONLY_BLOCKED
+    assert response.hybrid_route.authority == Authority.FAIL_CLOSED
+    assert response.hybrid_route.route_truth_source == "CapabilityPlanner"
+    assert response.hybrid_route.adapter_output_is_route_truth is False
+    assert response.hybrid_route.local_model_called is False
+    assert response.hybrid_route.verifier_result == VerifierResult.NOT_RUN
+
+
+def test_capability_adapter_route_truth_source_is_frozen() -> None:
+    request = LocalHealCapabilityRequest(
+        task_id="t_qs2",
+        problem_statement="fix code",
+        evidence_refs=("ref1",),
+        executor_controls={
+            "enable_local_heal": True,
+            "local_heal_mode": "candidate",
+            "route_truth_source": "AdversarySource",
+            "route_context": {
+                "signal_snapshot": {
+                    "candidate_enabled": True,
+                    "model_call_allowed": True,
+                }
+            }
+        },
+        dry_run=False,
+    )
+    with mock.patch("nexus.services.local_heal.capability_adapter.build_local_heal_runtime_policy") as mock_policy:
+        from nexus.services.local_heal.capability_runtime_policy import LocalHealRuntimePolicy
+        mock_policy.return_value = LocalHealRuntimePolicy(
+            enable_pipeline=True,
+            mutation_allowed=True,
+            public_claim_allowed=False,
+            production_ready=False,
+            model_call_allowed=True,
+            provider_call_allowed=True,
+            network_allowed=False,
+            dry_run=False,
+        )
+        response = LocalHealCapabilityAdapter.run(request)
+        assert response.hybrid_route.route_truth_source == "CapabilityPlanner"
+        assert response.hybrid_route.adapter_output_is_route_truth is False
+
+
+def test_capability_adapter_output_is_never_route_truth() -> None:
+    request = LocalHealCapabilityRequest(
+        task_id="t_qs3",
+        problem_statement="fix code",
+        evidence_refs=("ref1",),
+        executor_controls={
+            "enable_local_heal": True,
+            "local_heal_mode": "candidate",
+            "route_context": {
+                "signal_snapshot": {
+                    "candidate_enabled": True,
+                    "model_call_allowed": True,
+                }
+            }
+        },
+        dry_run=False,
+    )
+    with mock.patch("nexus.services.local_heal.capability_adapter.build_local_heal_runtime_policy") as mock_policy:
+        from nexus.services.local_heal.capability_runtime_policy import LocalHealRuntimePolicy
+        mock_policy.return_value = LocalHealRuntimePolicy(
+            enable_pipeline=True,
+            mutation_allowed=True,
+            public_claim_allowed=False,
+            production_ready=False,
+            model_call_allowed=True,
+            provider_call_allowed=True,
+            network_allowed=False,
+            dry_run=False,
+        )
+        response = LocalHealCapabilityAdapter.run(request)
+        assert response.hybrid_route.adapter_output_is_route_truth is False
+        assert response.hybrid_route.public_claim_allowed is False
+        assert response.hybrid_route.production_ready is False
+        assert response.hybrid_route.behavior_changed is False
+
+
+def test_capability_adapter_env_flag_does_not_create_route_authority() -> None:
+    with mock.patch.dict(os.environ, {
+        "NEXUS_WITH_LOCAL_MODEL_ADAPTER": "1",
+        "NEXUS_LOCAL_MODEL_CALL_ALLOWED": "1",
+        "NEXUS_LOCAL_MODEL_CANDIDATE_ENABLE": "1",
+        "NEXUS_LOCAL_SOLVE_ISOLATED_ENABLE": "1",
+    }):
+        request = LocalHealCapabilityRequest(
+            task_id="t_qs4",
+            problem_statement="fix code",
+            evidence_refs=("ref1",),
+            executor_controls={
+                "enable_local_heal": True,
+                "local_heal_mode": "candidate",
+                "route_context": {
+                    "signal_snapshot": {
+                        "candidate_enabled": True,
+                        "model_call_allowed": True,
+                    }
+                }
+            },
+            dry_run=False,
+        )
+        with mock.patch("nexus.services.local_heal.capability_adapter.build_local_heal_runtime_policy") as mock_policy:
+            from nexus.services.local_heal.capability_runtime_policy import LocalHealRuntimePolicy
+            mock_policy.return_value = LocalHealRuntimePolicy(
+                enable_pipeline=True,
+                mutation_allowed=True,
+                public_claim_allowed=False,
+                production_ready=False,
+                model_call_allowed=True,
+                provider_call_allowed=True,
+                network_allowed=False,
+                dry_run=False,
+            )
+            response = LocalHealCapabilityAdapter.run(request)
+            assert response.hybrid_route.route_truth_source == "CapabilityPlanner"
+            assert response.hybrid_route.adapter_output_is_route_truth is False
+            assert response.hybrid_route.public_claim_allowed is False
+            assert response.hybrid_route.production_ready is False
+
+
+def test_capability_adapter_cannot_synthesize_signal_snapshot_from_env() -> None:
+    with mock.patch.dict(os.environ, {
+        "NEXUS_LOCAL_MODEL_CALL_ALLOWED": "1",
+        "NEXUS_LOCAL_MODEL_CANDIDATE_ENABLE": "1",
+        "NEXUS_LOCAL_SOLVE_ISOLATED_ENABLE": "1",
+    }):
+        request = LocalHealCapabilityRequest(
+            task_id="t_qs5",
+            problem_statement="fix code",
+            evidence_refs=("ref1",),
+            executor_controls={
+                "enable_local_heal": True,
+                "local_heal_mode": "candidate",
+                "route_context": {}
+            },
+            dry_run=False,
+        )
+        response = LocalHealCapabilityAdapter.run(request)
+        assert response.hybrid_route.route_mode == RouteMode.LOCAL_ONLY_BLOCKED
+        assert response.hybrid_route.authority == Authority.FAIL_CLOSED
+        assert response.hybrid_route.route_truth_source == "CapabilityPlanner"
+        assert response.hybrid_route.adapter_output_is_route_truth is False
