@@ -14,6 +14,7 @@ from nexus.services.local_heal.local_model_provider import (
 )
 from nexus.services.local_heal.capability_adapter import build_local_model_provider_from_env
 from nexus.services.local_heal.local_model_armor_receipt_gate import validate_local_model_armor_metadata
+from nexus.services.local_heal.local_model_capability_context import LocalModelCapabilityContext, CapabilityExecutionResult
 
 
 @dataclass(frozen=True)
@@ -245,9 +246,28 @@ class LocalModelExecutor:
                 protocol_mode=protocol_mode,
             )
             
+            # Build context for capability executors
+            cap_ctx = LocalModelCapabilityContext(
+                task_id=request.task_id,
+                source_root=request.repo_root,
+                problem_statement=enhanced_problem,
+                target_file=target_file,
+                target_symbol=target_symbol,
+                selected_capabilities=selected_caps,
+                execution_topology=execution_topology,
+                evidence_refs=request.evidence_refs,
+                source_anchor={"present": source_anchor_present, "source": source_anchor_source, "hash": source_anchor_hash},
+                failure_feedback=failure_feedback_text,
+                verifier_command=tuple(request.route_context.get("verifier_command", []) or []),
+                candidate_pool=candidates,
+                route_context=request.route_context,
+                local_model_metadata={},
+            )
+
             decision = CandidateDecisionAdapter.select_candidate(
                 candidates,
                 selected_capabilities=selected_caps,
+                ctx=cap_ctx,
             )
             
             # Local model is called if at least one candidate wasn't blocked/abstained
@@ -272,6 +292,23 @@ class LocalModelExecutor:
             if not selected_model:
                 selected_model = "committee"
                 
+            # Run gate executors for selected gate capabilities
+            gate_results: dict[str, CapabilityExecutionResult] = {}
+            for gate_name in ("artifact_gate", "claim_gate", "delivery_gate"):
+                if gate_name in selected_caps:
+                    from nexus.services.local_heal.local_model_capability_executors import (
+                        ArtifactGateLocalExecutor, ClaimGateLocalExecutor, DeliveryGateLocalExecutor,
+                    )
+                    gate_executors = {
+                        "artifact_gate": ArtifactGateLocalExecutor,
+                        "claim_gate": ClaimGateLocalExecutor,
+                        "delivery_gate": DeliveryGateLocalExecutor,
+                    }
+                    gate_results[gate_name] = gate_executors[gate_name]().execute(cap_ctx)
+
+            ddtree_invoked = decision.ddtree_result.invoked if decision.ddtree_result else False
+            autoreason_invoked = decision.autoreason_result.invoked if decision.autoreason_result else False
+
             raw_meta = {
                 "execution_topology": "local_committee_only",
                 "committee_candidate_count": len(candidates),
@@ -288,6 +325,17 @@ class LocalModelExecutor:
                 "locked_search_present": bool(locked_search.strip()),
                 "failure_feedback_present": failure_feedback_present,
                 "protocol_mode": "anchored_edit",
+                "ddtree_invoked": ddtree_invoked,
+                "autoreason_invoked": autoreason_invoked,
+                "ddtree_result": decision.ddtree_result.to_receipt_dict() if decision.ddtree_result else None,
+                "autoreason_result": decision.autoreason_result.to_receipt_dict() if decision.autoreason_result else None,
+                "artifact_gate_invoked": gate_results.get("artifact_gate", CapabilityExecutionResult(name="artifact_gate", selected=False, invoked=False, gate_passed=False, outcome_contributed=False, evidence_present=False)).invoked,
+                "claim_gate_invoked": gate_results.get("claim_gate", CapabilityExecutionResult(name="claim_gate", selected=False, invoked=False, gate_passed=False, outcome_contributed=False, evidence_present=False)).invoked,
+                "delivery_gate_invoked": gate_results.get("delivery_gate", CapabilityExecutionResult(name="delivery_gate", selected=False, invoked=False, gate_passed=False, outcome_contributed=False, evidence_present=False)).invoked,
+                "artifact_gate_passed": gate_results.get("artifact_gate", CapabilityExecutionResult(name="artifact_gate", selected=False, invoked=False, gate_passed=False, outcome_contributed=False, evidence_present=False)).gate_passed,
+                "claim_gate_passed": gate_results.get("claim_gate", CapabilityExecutionResult(name="claim_gate", selected=False, invoked=False, gate_passed=False, outcome_contributed=False, evidence_present=False)).gate_passed,
+                "delivery_gate_passed": gate_results.get("delivery_gate", CapabilityExecutionResult(name="delivery_gate", selected=False, invoked=False, gate_passed=False, outcome_contributed=False, evidence_present=False)).gate_passed,
+                "gate_results": {k: v.to_receipt_dict() for k, v in gate_results.items()},
             }
             armor_ok, armor_miss = validate_local_model_armor_metadata(raw_meta)
             raw_meta["armor_receipt_complete"] = armor_ok

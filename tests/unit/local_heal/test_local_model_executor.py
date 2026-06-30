@@ -291,7 +291,7 @@ def test_local_model_executor_committee_topology_uses_candidate_decision_adapter
     monkeypatch.setattr(LocalCommitteeCandidateProvider, "generate_committee_candidates", lambda *a, **k: [dummy_envelope])
 
     adapter_called = False
-    def mock_select_candidate(candidates, selected_capabilities=()):
+    def mock_select_candidate(candidates, selected_capabilities=(), ctx=None):
         nonlocal adapter_called
         adapter_called = True
         return CandidateDecisionResponse(
