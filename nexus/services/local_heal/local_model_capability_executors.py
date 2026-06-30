@@ -347,6 +347,10 @@ class LocalHealPipelineCapabilityExecutor:
                 _last_provider_diag = {}
 
                 if real_provider is not None:
+                    # C2: Get model_name from signal_snapshot for direct Ollama call
+                    _signal_snap = ctx.route_context.get("signal_snapshot", {}) if isinstance(ctx.route_context, dict) else {}
+                    _pipeline_model_name = _signal_snap.get("executor_model", "")
+
                     def _provider_generate(system_prompt_or_req, user_prompt=None, **kwargs):
                         nonlocal _last_provider_diag
                         from nexus.services.local_heal.local_model_provider import LocalModelProviderRequest
@@ -354,10 +358,12 @@ class LocalHealPipelineCapabilityExecutor:
                         # LocalModelProviderRequest passes a single request object
                         if user_prompt is not None:
                             prompt = f"{system_prompt_or_req}\n\n{user_prompt}"
-                            model_name = kwargs.get("model", "")
+                            model_name = kwargs.get("model", "") or _pipeline_model_name
                         else:
                             prompt = getattr(system_prompt_or_req, "prompt", "") or str(system_prompt_or_req)
-                            model_name = getattr(system_prompt_or_req, "model_name", "") or kwargs.get("model", "")
+                            model_name = getattr(system_prompt_or_req, "model_name", "") or kwargs.get("model", "") or _pipeline_model_name
+
+                        # C2: Try provider first, fall back to direct Ollama call
                         prov_req = LocalModelProviderRequest(
                             task_id=ctx.task_id,
                             prompt=prompt,
@@ -365,6 +371,43 @@ class LocalHealPipelineCapabilityExecutor:
                             model_name=model_name,
                         )
                         prov_resp = real_provider.generate(prov_req)
+
+                        # If provider returns provider_not_configured, try direct Ollama
+                        if prov_resp.error == "provider_not_configured" and model_name:
+                            try:
+                                import json as _json
+                                import urllib.request as _urllib_request
+                                ollama_url = "http://127.0.0.1:11434/api/generate"
+                                payload = {"model": model_name, "prompt": prompt, "stream": False}
+                                req_data = _json.dumps(payload).encode("utf-8")
+                                req = _urllib_request.Request(ollama_url, data=req_data, headers={"Content-Type": "application/json"})
+                                with _urllib_request.urlopen(req, timeout=30) as resp:
+                                    resp_json = _json.loads(resp.read().decode("utf-8"))
+                                    raw_text = resp_json.get("response", "")
+                                    _last_provider_diag = {
+                                        "provider_invoked": True,
+                                        "model_called": True,
+                                        "model_name": model_name,
+                                        "provider_error": "",
+                                        "timed_out": False,
+                                        "output_truncated": False,
+                                        "output_len": len(raw_text),
+                                        "prompt_len": len(prompt),
+                                    }
+                                    return raw_text
+                            except Exception as e:
+                                _last_provider_diag = {
+                                    "provider_invoked": True,
+                                    "model_called": False,
+                                    "model_name": model_name,
+                                    "provider_error": f"direct_ollama_error: {str(e)[:200]}",
+                                    "timed_out": False,
+                                    "output_truncated": False,
+                                    "output_len": 0,
+                                    "prompt_len": len(prompt),
+                                }
+                                return ""
+
                         # B7.5: Store diagnostics for telemetry
                         _last_provider_diag = {
                             "provider_invoked": prov_resp.provider_invoked,
