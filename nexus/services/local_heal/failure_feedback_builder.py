@@ -25,6 +25,28 @@ def build_failure_feedback(
     elif clean_stdout:
         log_section += f"Stdout tail:\n```\n{clean_stdout}\n```\n"
         
+    if failure_class == "REPLACEMENT_MARKDOWN_FENCE":
+        feedback = (
+            f"Your previous output was rejected because it contained markdown fences.\n"
+            f"Task ID: {task_id}\n"
+            f"Failure Class: {failure_class}\n"
+            f"Previous Block Reason: {previous_block_reason}\n\n"
+            f"CRITICAL OUTPUT RULES:\n"
+            f"- Do NOT use markdown fences (```).\n"
+            f"- Do NOT output ```python or ```diff.\n"
+            f"- Output ONLY the replacement code inside the required REPLACE block.\n"
+            f"- No prose, no explanation, no commentary.\n\n"
+            f"Target File: {target_file}\n"
+            f"Target Symbol: {target_symbol}\n"
+            f"Locked Search Span (you MUST only modify code within this block):\n"
+            f"```\n{locked_search}\n```\n\n"
+            f"Output format:\n"
+            f"<<<<<<< REPLACE\n"
+            f"[your replacement code here]\n"
+            f">>>>>>> REPLACE\n"
+        )
+        return feedback
+
     feedback = (
         f"Your previous unified diff failed verification.\n"
         f"Task ID: {task_id}\n"
