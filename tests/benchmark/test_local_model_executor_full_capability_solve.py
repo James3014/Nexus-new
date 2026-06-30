@@ -88,7 +88,18 @@ def test_deterministic_full_capability_solve(monkeypatch, tmp_path):
         "evidence_refs": ["full-cap-ref"], "verifier_command": ["echo", "ok"],
         "target_symbol": "func", "locked_search": "def func():\n    pass",
         "candidate_generate_fn": lambda req: "mock",
-        "signal_snapshot": {"execution_topology": "localheal_pipeline"},
+        "signal_snapshot": {
+            "execution_topology": "localheal_pipeline",
+            "protocol_mode": "anchored_edit",
+            "model_call_allowed": True,
+            "executor_provider": "ollama",
+            "executor_model": "qwen2.5-coder:7b",
+            "judge_model": "qwen2.5:3b",
+            "proposer_specs": [
+                {"model": "qwen2.5-coder:7b", "role": "primary"},
+                {"model": "deepseek-coder:6.7b-instruct", "role": "secondary"},
+            ]
+        },
     }
 
     finalized = _finalize_with_nexus_row(
@@ -222,7 +233,18 @@ def test_real_local_model_full_capability_solve(monkeypatch, tmp_path):
         "evidence_refs": ["real-full-cap-ref"], "verifier_command": ["python3", str(resolved_path / "verify.py")],
         "target_symbol": "double", "locked_search": "def double(x):\n    return x * 2",
         "candidate_generate_fn": lambda req: "mock",
-        "signal_snapshot": {"execution_topology": "localheal_pipeline"},
+        "signal_snapshot": {
+            "execution_topology": "localheal_pipeline",
+            "protocol_mode": "anchored_edit",
+            "model_call_allowed": True,
+            "executor_provider": "ollama",
+            "executor_model": "qwen2.5-coder:7b",
+            "judge_model": "qwen2.5:3b",
+            "proposer_specs": [
+                {"model": "qwen2.5-coder:7b", "role": "primary"},
+                {"model": "deepseek-coder:6.7b-instruct", "role": "secondary"},
+            ]
+        },
     }
 
     finalized = _finalize_with_nexus_row(

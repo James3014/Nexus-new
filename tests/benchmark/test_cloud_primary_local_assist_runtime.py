@@ -18,7 +18,13 @@ def test_cloud_primary_local_assist_deterministic():
         dry_run=True,
         execution_topology="local_committee_only",
         route_context={
-            "signal_snapshot": {"execution_topology": "local_committee_only"},
+            "signal_snapshot": {
+                "execution_topology": "local_committee_only",
+                "protocol_mode": "anchored_edit",
+                "model_call_allowed": True,
+                "executor_provider": "ollama",
+                "executor_model": "qwen2.5-coder:7b"
+            },
             "cloud_available": True,
         },
     )
@@ -41,7 +47,13 @@ def test_cloud_unavailable_falls_to_local():
         dry_run=True,
         execution_topology="local_committee_only",
         route_context={
-            "signal_snapshot": {"execution_topology": "local_committee_only"},
+            "signal_snapshot": {
+                "execution_topology": "local_committee_only",
+                "protocol_mode": "anchored_edit",
+                "model_call_allowed": True,
+                "executor_provider": "ollama",
+                "executor_model": "qwen2.5-coder:7b"
+            },
             "cloud_available": False,
         },
     )

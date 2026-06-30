@@ -115,7 +115,18 @@ def test_focused_real_issue_solve_astropy_13236(monkeypatch, tmp_path):
         "target_symbol": "__init__",
         "locked_search": "if hasattr(data, 'dtype') and len(getattr(data, 'dtype', [])) > 1:\n            self._data = data.view(type('NdarrayMixin', (), {'__array__': lambda self: self._data})())",
         "candidate_generate_fn": lambda req: "mock",
-        "signal_snapshot": {"execution_topology": "local_committee_only"},
+        "signal_snapshot": {
+            "execution_topology": "local_committee_only",
+            "protocol_mode": "anchored_edit",
+            "model_call_allowed": True,
+            "executor_provider": "ollama",
+            "executor_model": "qwen2.5-coder:7b",
+            "judge_model": "qwen2.5:3b",
+            "proposer_specs": [
+                {"model": "qwen2.5-coder:7b", "role": "primary"},
+                {"model": "deepseek-coder:6.7b-instruct", "role": "secondary"},
+            ]
+        },
     }
 
     finalized = _finalize_with_nexus_row(

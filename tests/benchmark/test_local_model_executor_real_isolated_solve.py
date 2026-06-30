@@ -134,7 +134,18 @@ def test_two_task_real_isolated_solve_local_model_armor(monkeypatch, tmp_path):
             "target_symbol": target_symbol,
             "locked_search": locked_search,
             "candidate_generate_fn": lambda req: "mock",
-            "signal_snapshot": {"execution_topology": "local_committee_only"},
+            "signal_snapshot": {
+                "execution_topology": "local_committee_only",
+                "protocol_mode": "anchored_edit",
+                "model_call_allowed": True,
+                "executor_provider": "ollama",
+                "executor_model": "qwen2.5-coder:7b",
+                "judge_model": "qwen2.5:3b",
+                "proposer_specs": [
+                    {"model": "qwen2.5-coder:7b", "role": "primary"},
+                    {"model": "deepseek-coder:6.7b-instruct", "role": "secondary"},
+                ]
+            },
         }
 
         finalized = _finalize_with_nexus_row(

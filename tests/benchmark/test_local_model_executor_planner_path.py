@@ -66,6 +66,13 @@ def test_local_model_executor_planner_path(monkeypatch, tmp_path):
         "verifier_command": ["echo", "mock_verifier_pass"],
         "target_symbol": "eval",
         "locked_search": "if a is S.One:",
+        "signal_snapshot": {
+            "execution_topology": "local_only",
+            "protocol_mode": "anchored_edit",
+            "model_call_allowed": True,
+            "executor_provider": "ollama",
+            "executor_model": "qwen2.5-coder:7b"
+        }
     }
     
     # 4. Invoke finalize seam (mainline收斂點)
@@ -162,6 +169,13 @@ def test_local_model_executor_real_provider_smoke(monkeypatch, tmp_path):
         "verifier_command": ["echo", "mock_verifier_pass"],
         "target_symbol": "eval",
         "locked_search": "if a is S.One:",
+        "signal_snapshot": {
+            "execution_topology": "local_only",
+            "protocol_mode": "anchored_edit",
+            "model_call_allowed": True,
+            "executor_provider": "ollama",
+            "executor_model": "qwen2.5-coder:7b"
+        }
     }
     
     # 4. Invoke finalize seam
@@ -259,6 +273,13 @@ def test_local_model_executor_concurrency_real_solve(monkeypatch):
                 "            self.call_count += 1\n"
                 "            self.executed = True"
             ),
+            "signal_snapshot": {
+                "execution_topology": "local_only",
+                "protocol_mode": "anchored_edit",
+                "model_call_allowed": True,
+                "executor_provider": "ollama",
+                "executor_model": "qwen2.5-coder:7b"
+            }
         }
         
         finalized = _finalize_with_nexus_row(
@@ -384,7 +405,18 @@ def test_finalize_with_nexus_row_signal_snapshot_triggers_committee(monkeypatch,
         "target_symbol": "x",
         "locked_search": "x = 1",
         "candidate_generate_fn": mock_provider_gen,
-        "signal_snapshot": {"execution_topology": "local_committee_only"},
+        "signal_snapshot": {
+            "execution_topology": "local_committee_only",
+            "protocol_mode": "anchored_edit",
+            "model_call_allowed": True,
+            "executor_provider": "ollama",
+            "executor_model": "qwen2.5-coder:7b",
+            "judge_model": "qwen2.5:3b",
+            "proposer_specs": [
+                {"model": "qwen2.5-coder:7b", "role": "primary"},
+                {"model": "deepseek-coder:6.7b-instruct", "role": "secondary"},
+            ]
+        },
     }
 
     # 6. Call _finalize_with_nexus_row
@@ -520,7 +552,18 @@ def test_finalize_with_nexus_row_local_model_full_armor_smoke(monkeypatch, tmp_p
         "target_symbol": "func",
         "locked_search": "def func():\n    pass",
         "candidate_generate_fn": lambda req: "mock",
-        "signal_snapshot": {"execution_topology": "local_committee_only"},
+        "signal_snapshot": {
+            "execution_topology": "local_committee_only",
+            "protocol_mode": "anchored_edit",
+            "model_call_allowed": True,
+            "executor_provider": "ollama",
+            "executor_model": "qwen2.5-coder:7b",
+            "judge_model": "qwen2.5:3b",
+            "proposer_specs": [
+                {"model": "qwen2.5-coder:7b", "role": "primary"},
+                {"model": "deepseek-coder:6.7b-instruct", "role": "secondary"},
+            ]
+        },
         "previous_failure": "VERIFIER_FAIL: previous attempt failed",
         "failure_class": "VERIFIER_FAIL",
         "verifier_status": "fail",
