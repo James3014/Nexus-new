@@ -322,10 +322,17 @@ class LocalHealPipelineCapabilityExecutor:
                 invoked_modules.append("failure_feedback_builder")
                 path_a_failure_reason = "feedback_builder_error"
 
-        # 4. HealPipeline actual instantiation with real provider
+        # 4. HealPipeline instantiation + actual run
+        pipeline_run_called = False
+        pipeline_run_success = False
+        pipeline_result_ctx = None
+        orchestrator_run_reachable = False
+
         if modules.get("heal_pipeline"):
             try:
-                from nexus.services.local_heal.pipeline import HealPipeline
+                from nexus.services.local_heal.pipeline import HealPipeline, HealContext as LegacyHealContext
+                from pathlib import Path as _Path
+
                 real_provider = ctx.provider
                 if real_provider is not None:
                     def _provider_generate(req):
@@ -344,7 +351,28 @@ class LocalHealPipelineCapabilityExecutor:
                         return ""
                     pipeline = HealPipeline(ollama_generate_fn=_noop_generate)
                 invoked_modules.append("heal_pipeline")
-                path_a_actual_execution = True
+
+                # Build HealContext from capability context
+                heal_ctx = LegacyHealContext(
+                    instance_id=ctx.task_id,
+                    repo_dir=_Path(ctx.source_root),
+                    problem_statement=ctx.problem_statement,
+                    route_context=ctx.route_context,
+                    python_executable="",
+                    max_tries=3,
+                )
+
+                # Call pipeline.run()
+                pipeline_run_called = True
+                try:
+                    pipeline_result_ctx = pipeline.run(heal_ctx)
+                    pipeline_run_success = True
+                    path_a_actual_execution = True
+                    orchestrator_run_reachable = True
+                except Exception as run_exc:
+                    path_a_failure_reason = f"pipeline_run_error: {str(run_exc)[:200]}"
+                    path_a_actual_execution = False
+
             except Exception:
                 path_a_failure_reason = "pipeline_instantiation_error"
 
@@ -358,6 +386,15 @@ class LocalHealPipelineCapabilityExecutor:
 
         actual_execution = path_a_actual_execution and len(invoked_modules) >= 2
 
+        # Extract pipeline result if available
+        pipeline_final_patch = ""
+        pipeline_solve_eligible = False
+        pipeline_failure_reason = ""
+        if pipeline_result_ctx is not None:
+            pipeline_final_patch = getattr(pipeline_result_ctx, "final_patch", "") or ""
+            pipeline_solve_eligible = getattr(pipeline_result_ctx, "solve_eligible", False)
+            pipeline_failure_reason = getattr(pipeline_result_ctx, "failure_reason", "") or ""
+
         return CapabilityExecutionResult(
             name="repair_loop", selected=True, invoked=True,
             gate_passed=actual_execution, outcome_contributed=actual_execution,
@@ -366,9 +403,12 @@ class LocalHealPipelineCapabilityExecutor:
             telemetries={
                 "localheal_pipeline_available": modules.get("heal_pipeline", False),
                 "localheal_pipeline_instantiated": "heal_pipeline" in invoked_modules,
+                "localheal_pipeline_run_called": pipeline_run_called,
+                "localheal_pipeline_run_success": pipeline_run_success,
                 "localheal_pipeline_invoked": "heal_pipeline" in invoked_modules,
                 "localheal_pipeline_actual_execution": actual_execution,
                 "localheal_pipeline_availability_only": not actual_execution,
+                "orchestrator_run_reachable": orchestrator_run_reachable,
                 "committee_orchestrator_available": modules.get("committee_orchestrator", False),
                 "committee_orchestrator_invoked": "committee_orchestrator" in invoked_modules,
                 "solid_search_replace_protocol_available": modules.get("solid_search_replace_protocol", False),
@@ -384,5 +424,8 @@ class LocalHealPipelineCapabilityExecutor:
                 "invoked_modules": invoked_modules,
                 "path_a_actual_execution": actual_execution,
                 "path_a_failure_reason": path_a_failure_reason,
+                "pipeline_final_patch": pipeline_final_patch,
+                "pipeline_solve_eligible": pipeline_solve_eligible,
+                "pipeline_failure_reason": pipeline_failure_reason,
             },
         )

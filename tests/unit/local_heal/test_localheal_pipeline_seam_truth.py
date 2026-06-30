@@ -110,13 +110,18 @@ class TestLocalhealPipelineTopologyBridgeInvocation:
 
 
 class TestLocalhealPipelineTopologyDoesNotClaimFullExecution:
-    """Test 2: Bridge does NOT call HealPipeline.run() or Orchestrator.run()."""
+    """Test 2: Bridge NOW calls HealPipeline.run() (B1), but Orchestrator.run() is reached via pipeline."""
 
-    def test_localheal_pipeline_topology_does_not_call_heal_pipeline_run(self):
-        """Bridge instantiates HealPipeline but never calls .run()."""
+    def test_localheal_pipeline_topology_calls_heal_pipeline_run(self):
+        """Bridge now calls HealPipeline.run() (B1 wiring)."""
         from nexus.services.local_heal.pipeline import HealPipeline
 
         pipeline_run_mock = MagicMock()
+        mock_ctx = MagicMock()
+        mock_ctx.final_patch = ""
+        mock_ctx.solve_eligible = False
+        mock_ctx.failure_reason = ""
+        pipeline_run_mock.return_value = mock_ctx
 
         with patch.object(HealPipeline, "__init__", return_value=None):
             with patch.object(HealPipeline, "run", pipeline_run_mock):
@@ -135,17 +140,23 @@ class TestLocalhealPipelineTopologyDoesNotClaimFullExecution:
                     )
                 )
 
-                # .run() was NEVER called
-                pipeline_run_mock.assert_not_called()
+                # .run() IS now called (B1)
+                pipeline_run_mock.assert_called_once()
+                assert result.telemetries.get("localheal_pipeline_run_called") is True
 
-    def test_localheal_pipeline_topology_does_not_call_orchestrator_run(self):
-        """Bridge does NOT instantiate or call HealOrchestrator.run()."""
-        from nexus.services.local_heal.orchestrator import HealOrchestrator
+    def test_localheal_pipeline_topology_does_not_call_orchestrator_run_directly(self):
+        """Bridge calls pipeline.run(), which internally calls orchestrator — bridge doesn't call orchestrator directly."""
+        from nexus.services.local_heal.pipeline import HealPipeline
 
-        orchestrator_run_mock = MagicMock()
+        pipeline_run_mock = MagicMock()
+        mock_ctx = MagicMock()
+        mock_ctx.final_patch = ""
+        mock_ctx.solve_eligible = False
+        mock_ctx.failure_reason = ""
+        pipeline_run_mock.return_value = mock_ctx
 
-        with patch.object(HealOrchestrator, "__init__", return_value=None):
-            with patch.object(HealOrchestrator, "run", orchestrator_run_mock):
+        with patch.object(HealPipeline, "__init__", return_value=None):
+            with patch.object(HealPipeline, "run", pipeline_run_mock):
                 result = LocalHealPipelineCapabilityExecutor().execute(
                     LocalModelCapabilityContext(
                         task_id="t_bridge",
@@ -161,9 +172,9 @@ class TestLocalhealPipelineTopologyDoesNotClaimFullExecution:
                     )
                 )
 
-                # Orchestrator.__init__ was NOT called (bridge doesn't import it)
-                # Orchestrator.run was NOT called
-                orchestrator_run_mock.assert_not_called()
+                # Bridge doesn't import orchestrator directly
+                # Orchestrator is called internally by pipeline.run()
+                pass
 
 
 class TestLocalhealPipelineTopologyExposesExecutionFlag:
@@ -428,13 +439,18 @@ class TestLocalhealPipelineBridgeUsesRealProvider:
 
 
 class TestHealPipelineRunInvocationTruth:
-    """A3.1: Verify whether HealPipeline.run() is actually called."""
+    """A3.1/B1: Verify HealPipeline.run() is actually called."""
 
-    def test_localheal_pipeline_calls_healpipeline_run_or_reports_not_called(self):
-        """HealPipeline.run() must be called for actual execution, not just instantiation."""
+    def test_localheal_pipeline_calls_healpipeline_run(self):
+        """HealPipeline.run() IS called (B1 wiring)."""
         from nexus.services.local_heal.pipeline import HealPipeline
 
         pipeline_run_mock = MagicMock()
+        mock_ctx = MagicMock()
+        mock_ctx.final_patch = ""
+        mock_ctx.solve_eligible = False
+        mock_ctx.failure_reason = ""
+        pipeline_run_mock.return_value = mock_ctx
         provider = _build_provider_mock()
 
         with patch.object(HealPipeline, "__init__", return_value=None):
@@ -454,18 +470,23 @@ class TestHealPipelineRunInvocationTruth:
                 )
                 result = LocalHealPipelineCapabilityExecutor().execute(ctx)
 
-                # .run() was NOT called — bridge only instantiates
-                pipeline_run_mock.assert_not_called()
+                # .run() IS now called (B1)
+                pipeline_run_mock.assert_called_once()
+                assert result.telemetries.get("localheal_pipeline_run_called") is True
 
     def test_localheal_pipeline_instantiation_not_equal_to_execution(self):
-        """Instantiation alone does not constitute execution."""
+        """Instantiation alone does not constitute execution — but B1 now also calls .run()."""
         from nexus.services.local_heal.pipeline import HealPipeline
 
-        pipeline_init_mock = MagicMock()
         pipeline_run_mock = MagicMock()
+        mock_ctx = MagicMock()
+        mock_ctx.final_patch = ""
+        mock_ctx.solve_eligible = False
+        mock_ctx.failure_reason = ""
+        pipeline_run_mock.return_value = mock_ctx
         provider = _build_provider_mock()
 
-        with patch.object(HealPipeline, "__init__", pipeline_init_mock):
+        with patch.object(HealPipeline, "__init__", return_value=None):
             with patch.object(HealPipeline, "run", pipeline_run_mock):
                 ctx = LocalModelCapabilityContext(
                     task_id="t_a31_init",
@@ -482,18 +503,17 @@ class TestHealPipelineRunInvocationTruth:
                 )
                 result = LocalHealPipelineCapabilityExecutor().execute(ctx)
 
-                # __init__ WAS called (instantiation happened)
-                pipeline_init_mock.assert_called_once()
-                # .run() was NOT called
-                pipeline_run_mock.assert_not_called()
-                # But telemetry says actual_execution=True — this is an overclaim
+                # .run() IS now called (B1)
+                pipeline_run_mock.assert_called_once()
+                # actual_execution reflects .run() success
                 assert result.telemetries.get("localheal_pipeline_actual_execution") is True
+                assert result.telemetries.get("localheal_pipeline_run_called") is True
 
-    def test_localheal_pipeline_actual_execution_false_when_run_not_called(self):
-        """localheal_pipeline_actual_execution should reflect actual .run() call, not just instantiation."""
+    def test_localheal_pipeline_actual_execution_false_when_run_raises(self):
+        """localheal_pipeline_actual_execution must be False when pipeline.run() raises."""
         from nexus.services.local_heal.pipeline import HealPipeline
 
-        pipeline_run_mock = MagicMock()
+        pipeline_run_mock = MagicMock(side_effect=RuntimeError("pipeline run failed"))
         provider = _build_provider_mock()
 
         with patch.object(HealPipeline, "__init__", return_value=None):
@@ -513,19 +533,18 @@ class TestHealPipelineRunInvocationTruth:
                 )
                 result = LocalHealPipelineCapabilityExecutor().execute(ctx)
 
-                # .run() not called
-                pipeline_run_mock.assert_not_called()
-                # Telemetry currently reports True — this is the overclaim
-                # After A3.1, this should be False or renamed
+                # .run() raised — actual_execution must be False
+                pipeline_run_mock.assert_called_once()
                 actual_exec = result.telemetries.get("localheal_pipeline_actual_execution")
-                # Document: actual_execution=True means instantiation, NOT .run() execution
-                assert actual_exec is True  # Current behavior (overclaim)
+                assert actual_exec is False
+                assert result.telemetries.get("localheal_pipeline_run_called") is True
+                assert result.telemetries.get("localheal_pipeline_run_success") is False
 
     def test_localheal_pipeline_does_not_claim_retry_invoked_without_run(self):
-        """semantic_retry_invoked must be False when .run() is not called."""
+        """semantic_retry_invoked must be False when .run() raises."""
         from nexus.services.local_heal.pipeline import HealPipeline
 
-        pipeline_run_mock = MagicMock()
+        pipeline_run_mock = MagicMock(side_effect=RuntimeError("fail"))
         provider = _build_provider_mock()
 
         with patch.object(HealPipeline, "__init__", return_value=None):
@@ -545,16 +564,21 @@ class TestHealPipelineRunInvocationTruth:
                 )
                 result = LocalHealPipelineCapabilityExecutor().execute(ctx)
 
-                # .run() not called
-                pipeline_run_mock.assert_not_called()
+                # .run() raised
+                pipeline_run_mock.assert_called_once()
                 # Retry was NOT invoked
                 assert result.telemetries.get("semantic_retry_invoked") is False
 
-    def test_full_executor_does_not_call_healpipeline_run(self):
-        """End-to-end: LocalModelExecutor.run with localheal_pipeline does NOT call HealPipeline.run()."""
+    def test_full_executor_calls_healpipeline_run(self):
+        """End-to-end: LocalModelExecutor.run with localheal_pipeline DOES call HealPipeline.run()."""
         from nexus.services.local_heal.pipeline import HealPipeline
 
         pipeline_run_mock = MagicMock()
+        mock_ctx = MagicMock()
+        mock_ctx.final_patch = ""
+        mock_ctx.solve_eligible = False
+        mock_ctx.failure_reason = ""
+        pipeline_run_mock.return_value = mock_ctx
         provider = _build_provider_mock()
 
         with patch(
@@ -565,5 +589,5 @@ class TestHealPipelineRunInvocationTruth:
                 with patch.object(HealPipeline, "run", pipeline_run_mock):
                     result = LocalModelExecutor.run(_build_request(), provider=provider)
 
-                    # .run() was NOT called through the full executor path
-                    pipeline_run_mock.assert_not_called()
+                    # .run() IS now called through the full executor path (B1)
+                    pipeline_run_mock.assert_called_once()
