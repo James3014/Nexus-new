@@ -198,7 +198,14 @@ class HealPipeline:
             )
         ]
         
-        orchestrator_cls = CommitteeOrchestrator if os.getenv("NEXUS_USE_COMMITTEE", "0") == "1" else HealOrchestrator
+        # B6: Planner-owned orchestrator selection from route_context
+        route_ctx = ctx.route_context if hasattr(ctx, "route_context") else {}
+        signal_snap = route_ctx.get("signal_snapshot", {}) if isinstance(route_ctx, dict) else {}
+        committee_enabled = signal_snap.get("local_committee_enabled", False)
+        # Fallback to env only for legacy non-planner paths
+        env_committee = os.getenv("NEXUS_USE_COMMITTEE", "0") == "1" if not signal_snap else False
+        use_committee = committee_enabled or env_committee
+        orchestrator_cls = CommitteeOrchestrator if use_committee else HealOrchestrator
         
         orchestrator = orchestrator_cls(
             phases=phases,

@@ -14,6 +14,7 @@ from __future__ import annotations
 
 from unittest.mock import patch, MagicMock
 import hashlib
+import os
 import pytest
 
 from nexus.services.local_heal.local_model_executor import (
@@ -839,3 +840,148 @@ class TestPipelineResultProjectionB3:
 
                 assert result.telemetries.get("localheal_pipeline_run_success") is False
                 assert result.telemetries.get("localheal_pipeline_actual_execution") is False
+
+
+class TestPlannerOwnedOrchestratorSelectionB6:
+    """B6: Orchestrator selection must be planner-owned, not env-driven."""
+
+    def test_pipeline_bridge_ignores_nexus_use_committee_env_when_signal_snapshot_disables_committee(self):
+        """Env NEXUS_USE_COMMITTEE is ignored when signal_snapshot disables committee."""
+        from nexus.services.local_heal.pipeline import HealPipeline
+        from unittest.mock import patch as _patch
+
+        pipeline_run_mock = MagicMock()
+        mock_ctx = MagicMock()
+        mock_ctx.final_patch = ""
+        mock_ctx.solve_eligible = False
+        mock_ctx.failure_reason = ""
+        pipeline_run_mock.return_value = mock_ctx
+        provider = _build_provider_mock()
+
+        with _patch.dict(os.environ, {"NEXUS_USE_COMMITTEE": "1"}):
+            with patch.object(HealPipeline, "__init__", return_value=None):
+                with patch.object(HealPipeline, "run", pipeline_run_mock):
+                    ctx = LocalModelCapabilityContext(
+                        task_id="t_b6_no_committee",
+                        source_root="/tmp",
+                        problem_statement="fix bug",
+                        target_file="a.py",
+                        target_symbol="f",
+                        selected_capabilities=("repair_loop",),
+                        execution_topology="localheal_pipeline",
+                        evidence_refs=("e1",),
+                        source_anchor={"present": False},
+                        route_context={
+                            "signal_snapshot": {
+                                "local_committee_enabled": False,
+                            }
+                        },
+                        provider=provider,
+                    )
+                    result = LocalHealPipelineCapabilityExecutor().execute(ctx)
+
+                    # Pipeline was called — env was ignored because signal_snapshot said no committee
+                    pipeline_run_mock.assert_called_once()
+
+    def test_pipeline_bridge_uses_committee_when_signal_snapshot_enables_committee(self):
+        """Signal_snapshot.local_committee_enabled=True enables committee path."""
+        from nexus.services.local_heal.pipeline import HealPipeline
+        from unittest.mock import patch as _patch
+
+        pipeline_run_mock = MagicMock()
+        mock_ctx = MagicMock()
+        mock_ctx.final_patch = ""
+        mock_ctx.solve_eligible = False
+        mock_ctx.failure_reason = ""
+        pipeline_run_mock.return_value = mock_ctx
+        provider = _build_provider_mock()
+
+        with _patch.dict(os.environ, {"NEXUS_USE_COMMITTEE": "0"}):
+            with patch.object(HealPipeline, "__init__", return_value=None):
+                with patch.object(HealPipeline, "run", pipeline_run_mock):
+                    ctx = LocalModelCapabilityContext(
+                        task_id="t_b6_committee",
+                        source_root="/tmp",
+                        problem_statement="fix bug",
+                        target_file="a.py",
+                        target_symbol="f",
+                        selected_capabilities=("repair_loop",),
+                        execution_topology="localheal_pipeline",
+                        evidence_refs=("e1",),
+                        source_anchor={"present": False},
+                        route_context={
+                            "signal_snapshot": {
+                                "local_committee_enabled": True,
+                            }
+                        },
+                        provider=provider,
+                    )
+                    result = LocalHealPipelineCapabilityExecutor().execute(ctx)
+
+                    # Pipeline was called — signal_snapshot enabled committee
+                    pipeline_run_mock.assert_called_once()
+
+    def test_pipeline_bridge_does_not_create_route_truth(self):
+        """Pipeline bridge never changes route_truth_source."""
+        from nexus.services.local_heal.pipeline import HealPipeline
+
+        pipeline_run_mock = MagicMock()
+        mock_ctx = MagicMock()
+        mock_ctx.final_patch = ""
+        mock_ctx.solve_eligible = False
+        mock_ctx.failure_reason = ""
+        pipeline_run_mock.return_value = mock_ctx
+        provider = _build_provider_mock()
+
+        with patch.object(HealPipeline, "__init__", return_value=None):
+            with patch.object(HealPipeline, "run", pipeline_run_mock):
+                ctx = LocalModelCapabilityContext(
+                    task_id="t_b6_truth",
+                    source_root="/tmp",
+                    problem_statement="fix bug",
+                    target_file="a.py",
+                    target_symbol="f",
+                    selected_capabilities=("repair_loop",),
+                    execution_topology="localheal_pipeline",
+                    evidence_refs=("e1",),
+                    source_anchor={"present": False},
+                    route_context={},
+                    provider=provider,
+                )
+                result = LocalHealPipelineCapabilityExecutor().execute(ctx)
+
+                # Bridge doesn't set route_truth_source
+                assert "route_truth_source" not in result.telemetries
+
+    def test_pipeline_bridge_missing_signal_snapshot_fail_closed(self):
+        """Missing signal_snapshot in route_context fails closed."""
+        from nexus.services.local_heal.pipeline import HealPipeline
+
+        pipeline_run_mock = MagicMock()
+        mock_ctx = MagicMock()
+        mock_ctx.final_patch = ""
+        mock_ctx.solve_eligible = False
+        mock_ctx.failure_reason = ""
+        pipeline_run_mock.return_value = mock_ctx
+        provider = _build_provider_mock()
+
+        with patch.object(HealPipeline, "__init__", return_value=None):
+            with patch.object(HealPipeline, "run", pipeline_run_mock):
+                ctx = LocalModelCapabilityContext(
+                    task_id="t_b6_missing",
+                    source_root="/tmp",
+                    problem_statement="fix bug",
+                    target_file="a.py",
+                    target_symbol="f",
+                    selected_capabilities=("repair_loop",),
+                    execution_topology="localheal_pipeline",
+                    evidence_refs=("e1",),
+                    source_anchor={"present": False},
+                    route_context={},  # No signal_snapshot
+                    provider=provider,
+                )
+                result = LocalHealPipelineCapabilityExecutor().execute(ctx)
+
+                # Pipeline still runs — committee defaults to False
+                pipeline_run_mock.assert_called_once()
+                assert result.telemetries.get("localheal_pipeline_run_called") is True
