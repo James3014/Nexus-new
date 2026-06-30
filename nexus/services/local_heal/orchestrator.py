@@ -200,6 +200,9 @@ class HealOrchestrator:
         err_kind = self.failure_analyzer.classify_patch_failure(res.failure_reason)
         err = PatchError(kind=err_kind, message=res.failure_reason)
         
+        # B4: Set last_failure_class for retry feedback
+        ctx.op.last_failure_class = err_kind.name
+        
         self._record_model_status(ctx, err_kind.name, detail=res.failure_reason, phase="patch")
         
         # 嘗試自動修復 SEARCH_MISMATCH (Fuzzy Match)

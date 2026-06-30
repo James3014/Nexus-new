@@ -18,6 +18,8 @@ class FailureAnalyzer:
             return PatchErrorKind.EMPTY_RESPONSE
         if "NAME_SANITY_ERROR" in reason:
             return PatchErrorKind.NAME_SANITY_ERROR
+        if "REPLACEMENT_MARKDOWN_FENCE" in reason:
+            return PatchErrorKind.REPLACEMENT_MARKDOWN_FENCE
         
         return PatchErrorKind.NO_BLOCKS_FOUND
 

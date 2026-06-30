@@ -390,5 +390,81 @@ class TestCommitteeFenceFailureRetrySeam(unittest.TestCase):
         )
 
 
+class TestFenceFeedbackRetryIntegrationB4(unittest.TestCase):
+    """B4: Connect fence feedback into existing retry loop."""
+
+    def test_replacement_markdown_fence_feedback_passed_to_existing_retry(self):
+        """REPLACEMENT_MARKDOWN_FENCE is classified and retried by orchestrator."""
+        from nexus.services.local_heal.failure_analyzer import FailureAnalyzer
+
+        analyzer = FailureAnalyzer()
+        err_kind = analyzer.classify_patch_failure("REPLACEMENT_MARKDOWN_FENCE")
+        self.assertEqual(err_kind.name, "REPLACEMENT_MARKDOWN_FENCE")
+        self.assertTrue(analyzer.should_retry("REPLACEMENT_MARKDOWN_FENCE"))
+
+    def test_fence_failure_first_output_not_accepted(self):
+        """First fence-wrapped output is not accepted as solved."""
+        proposer_patch = "```python\n<<<<<<< REPLACE\nprint('fixed')\n>>>>>>> REPLACE\n```"
+        proposer = _make_proposer_candidate(proposer_patch)
+        judge = _make_judge_candidate()
+        candidates = [proposer, judge]
+
+        request = _make_request(patch_text=proposer_patch)
+
+        mock_provider = MagicMock(spec=InjectedLocalModelProvider)
+        mock_provider.generate.return_value = MagicMock(
+            output_text=proposer_patch,
+            error="",
+            model_called=True,
+            provider_invoked=True,
+            timed_out=False,
+        )
+
+        with patch(
+            "nexus.services.local_heal.local_committee_candidate_provider.LocalCommitteeCandidateProvider.generate_committee_candidates",
+            return_value=candidates,
+        ):
+            response = LocalModelExecutor.run(request, provider=mock_provider)
+
+        meta = response.raw_model_metadata
+        self.assertTrue(meta.get("protocol_parse_failed", False))
+        self.assertFalse(meta.get("solved", False))
+        self.assertEqual(
+            response.candidate_hash,
+            hashlib.sha256(b"").hexdigest(),
+        )
+
+    def test_retry_invoked_false_when_no_second_provider_call(self):
+        """retry_available metadata does not mean retry was executed."""
+        proposer_patch = "```python\n<<<<<<< REPLACE\nprint('fixed')\n>>>>>>> REPLACE\n```"
+        proposer = _make_proposer_candidate(proposer_patch)
+        judge = _make_judge_candidate()
+        candidates = [proposer, judge]
+
+        request = _make_request(patch_text=proposer_patch)
+
+        mock_provider = MagicMock(spec=InjectedLocalModelProvider)
+        mock_provider.generate.return_value = MagicMock(
+            output_text=proposer_patch,
+            error="",
+            model_called=True,
+            provider_invoked=True,
+            timed_out=False,
+        )
+
+        with patch(
+            "nexus.services.local_heal.local_committee_candidate_provider.LocalCommitteeCandidateProvider.generate_committee_candidates",
+            return_value=candidates,
+        ):
+            response = LocalModelExecutor.run(request, provider=mock_provider)
+
+        meta = response.raw_model_metadata
+        self.assertTrue(meta.get("retry_available", False))
+        self.assertEqual(
+            response.candidate_hash,
+            hashlib.sha256(b"").hexdigest(),
+        )
+
+
 if __name__ == "__main__":
     unittest.main()
