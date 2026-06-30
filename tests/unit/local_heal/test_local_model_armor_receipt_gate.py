@@ -137,3 +137,57 @@ def test_causality_external_only_ignored():
     m["selected_capabilities_used"] = ["swarm_multi_agent", "drone"]
     ok, issues = validate_capability_causality(m)
     assert ok is True
+
+
+# --- C9.3 Path A causality tests ---
+
+def test_path_a_availability_only_fails_causality():
+    m = _good_metadata()
+    m["execution_topology"] = "localheal_pipeline"
+    m["localheal_pipeline_actual_execution"] = False
+    m["localheal_pipeline_availability_only"] = True
+    ok, issues = validate_capability_causality(m)
+    assert ok is False
+    assert "localheal_pipeline_availability_only" in issues
+
+
+def test_path_a_no_actual_execution_fails_causality():
+    m = _good_metadata()
+    m["execution_topology"] = "localheal_pipeline"
+    m["localheal_pipeline_actual_execution"] = False
+    m["localheal_pipeline_availability_only"] = False
+    ok, issues = validate_capability_causality(m)
+    assert ok is False
+    assert "path_a_actual_execution_missing" in issues
+
+
+def test_path_a_actual_execution_passes_causality():
+    m = _good_metadata()
+    m["selected_capabilities_used"] = ["ddtree", "autoreason", "repair_loop"]
+    m["execution_topology"] = "localheal_pipeline"
+    m["localheal_pipeline_actual_execution"] = True
+    m["localheal_pipeline_availability_only"] = False
+    m["ddtree_result"] = {"invoked": True}
+    m["autoreason_result"] = {"invoked": True}
+    ok, issues = validate_capability_causality(m)
+    assert ok is True
+
+
+def test_repair_loop_selected_requires_actual_execution():
+    m = _good_metadata()
+    m["selected_capabilities_used"] = ["repair_loop"]
+    m["localheal_pipeline_actual_execution"] = False
+    m["localheal_pipeline_availability_only"] = True
+    ok, issues = validate_capability_causality(m)
+    assert ok is False
+    assert "localheal_pipeline_availability_only" in issues
+
+
+def test_local_committee_only_does_not_require_path_a():
+    m = _good_metadata()
+    m["execution_topology"] = "local_committee_only"
+    m["selected_capabilities_used"] = ["ddtree", "autoreason"]
+    m["ddtree_result"] = {"invoked": True}
+    m["autoreason_result"] = {"invoked": True}
+    ok, issues = validate_capability_causality(m)
+    assert ok is True

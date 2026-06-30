@@ -113,7 +113,25 @@ def validate_capability_causality(
         elif cap in ("memory",):
             # Metadata only - expected
             pass
+        elif cap == "repair_loop":
+            # Path A causality: must have actual execution, not just availability
+            actual_exec = metadata.get("localheal_pipeline_actual_execution", False)
+            avail_only = metadata.get("localheal_pipeline_availability_only", False)
+            if avail_only:
+                issues.append("localheal_pipeline_availability_only")
+            elif not actual_exec:
+                issues.append("path_a_actual_execution_missing")
         else:
             issues.append(f"{cap}_selected_but_causality_unknown")
+
+    # Path A causality: if localheal_pipeline topology, must have actual execution
+    topo = metadata.get("execution_topology", "")
+    if topo == "localheal_pipeline":
+        actual_exec = metadata.get("localheal_pipeline_actual_execution", False)
+        avail_only = metadata.get("localheal_pipeline_availability_only", False)
+        if avail_only:
+            issues.append("localheal_pipeline_availability_only")
+        elif not actual_exec:
+            issues.append("path_a_actual_execution_missing")
 
     return (len(issues) == 0, issues)
