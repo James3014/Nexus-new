@@ -365,7 +365,27 @@ def run_benchmark():
                 "diff_repair_success": diff_repair_success,
                 "same_span_retry_count": same_span_retry_count,
                 "failure_feedback_used": failure_feedback_used,
-                "execution_path_modules": execution_path_modules
+                "execution_path_modules": execution_path_modules,
+                
+                # B7.7: Pipeline/provider telemetry from adapter metadata
+                "phase_reached": adapter_meta.get("phase_reached", ""),
+                "patch_synthesis_reached": adapter_meta.get("patch_synthesis_reached", False),
+                "patch_synthesis_provider_error": adapter_meta.get("patch_synthesis_provider_error", ""),
+                "patch_synthesis_model_called": adapter_meta.get("patch_synthesis_model_called", False),
+                "patch_synthesis_output_len": adapter_meta.get("patch_synthesis_output_len", 0),
+                "patch_synthesis_prompt_len": adapter_meta.get("patch_synthesis_prompt_len", 0),
+                "patch_synthesis_model_name": adapter_meta.get("patch_synthesis_model_name", ""),
+                "pipeline_failure_reason": adapter_meta.get("pipeline_failure_reason", ""),
+                "pipeline_final_patch_len": len(str(adapter_meta.get("pipeline_final_patch", ""))),
+                "pipeline_run_called": adapter_meta.get("localheal_pipeline_run_called", False),
+                "pipeline_run_success": adapter_meta.get("localheal_pipeline_run_success", False),
+                "orchestrator_run_reachable": adapter_meta.get("orchestrator_run_reachable", False),
+                "provider_error": adapter_meta.get("provider_error", ""),
+                "provider_invoked": adapter_meta.get("provider_invoked", False),
+                "model_name_used": adapter_meta.get("model_name_used", ""),
+                "output_len": adapter_meta.get("output_len", 0),
+                "prompt_len": adapter_meta.get("prompt_len", 0),
+                "timed_out": adapter_meta.get("timed_out", False),
             }
 
             print(f"Outcome: {'SOLVED' if is_solved else 'FAILED'}")
