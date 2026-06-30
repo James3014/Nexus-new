@@ -435,12 +435,40 @@ class LocalHealPipelineCapabilityExecutor:
             pipeline_solve_eligible = getattr(pipeline_result_ctx, "solve_eligible", False)
             pipeline_failure_reason = getattr(pipeline_result_ctx, "failure_reason", "") or ""
 
-        # B7.5: Phase progression telemetry
-        phase_reached = "reproduction"
+        # C1: Phase progression telemetry from pipeline result context
+        phase_reached = ""
         patch_synthesis_reached = False
-        if pipeline_run_success:
-            phase_reached = "patch_synthesis"
-            patch_synthesis_reached = True
+        reproduction_reached = False
+        planning_reached = False
+        localization_reached = False
+        verification_reached = False
+
+        if pipeline_result_ctx is not None:
+            # Extract phase progression from context fields
+            repro_evidence = getattr(pipeline_result_ctx, "repro_evidence", "") or ""
+            plan = getattr(pipeline_result_ctx, "plan", None)
+            localized_files = getattr(pipeline_result_ctx, "localized_files", [])
+            final_patch = getattr(pipeline_result_ctx, "final_patch", "") or ""
+            evaluation_report = getattr(pipeline_result_ctx, "evaluation_report", "") or ""
+            skipped_repro = getattr(pipeline_result_ctx, "skip_reproduction", False)
+
+            reproduction_reached = bool(repro_evidence) or skipped_repro
+            planning_reached = plan is not None and (isinstance(plan, dict) and plan.get("search_symbols")) or (hasattr(plan, "search_symbols") and plan.search_symbols)
+            localization_reached = bool(localized_files)
+            patch_synthesis_reached = bool(final_patch)
+            verification_reached = bool(evaluation_report)
+
+            # Determine phase_reached (last completed phase)
+            if verification_reached:
+                phase_reached = "verification"
+            elif patch_synthesis_reached:
+                phase_reached = "patch_synthesis"
+            elif localization_reached:
+                phase_reached = "localization"
+            elif planning_reached:
+                phase_reached = "planning"
+            elif reproduction_reached:
+                phase_reached = "reproduction"
 
         return CapabilityExecutionResult(
             name="repair_loop", selected=True, invoked=True,
@@ -449,7 +477,14 @@ class LocalHealPipelineCapabilityExecutor:
             failure_reason="" if actual_execution else f"path_a_execution_missing: {path_a_failure_reason}",
             telemetries={
                 "phase_reached": phase_reached,
+                "phases_completed": [p for p in ["reproduction", "planning", "localization", "patch_synthesis", "verification"] if {"reproduction": reproduction_reached, "planning": planning_reached, "localization": localization_reached, "patch_synthesis": patch_synthesis_reached, "verification": verification_reached}.get(p)],
+                "phase_failed": phase_reached if pipeline_result_ctx and getattr(pipeline_result_ctx, "failure_reason", "") else "",
+                "phase_failure_reason": getattr(pipeline_result_ctx, "failure_reason", "") if pipeline_result_ctx else "",
+                "reproduction_reached": reproduction_reached,
+                "planning_reached": planning_reached,
+                "localization_reached": localization_reached,
                 "patch_synthesis_reached": patch_synthesis_reached,
+                "verification_reached": verification_reached,
                 "patch_synthesis_provider_error": _last_provider_diag.get("provider_error", ""),
                 "patch_synthesis_model_called": _last_provider_diag.get("model_called", False),
                 "patch_synthesis_output_len": _last_provider_diag.get("output_len", 0),
