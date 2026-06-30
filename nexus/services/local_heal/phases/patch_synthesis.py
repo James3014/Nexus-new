@@ -190,9 +190,9 @@ class PatchSynthesisPhase(IPhase):
                 error_reason=reason
             )
 
-        # C5D: Record output excerpt and length
-        model_decisions[-1]["output_len"] = len(response)
-        model_decisions[-1]["output_excerpt"] = response[:500]
+        # C5D: Record output excerpt and length IMMEDIATELY after LLM call
+        model_decisions[-1]["output_len"] = len(response) if response else 0
+        model_decisions[-1]["output_excerpt"] = (response or "")[:500]
 
         if not response:
             model_decisions[-1]["status"] = "MODEL_EMPTY_RESPONSE"
