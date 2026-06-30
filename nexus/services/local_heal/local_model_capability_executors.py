@@ -245,6 +245,11 @@ class LocalHealPipelineCapabilityExecutor:
         except ImportError:
             modules["evaluation_gate"] = False
 
+        # B7.3: Extract repro_script from route_context (used by both paths)
+        route_ctx_for_repro = ctx.route_context if hasattr(ctx, "route_context") else {}
+        repro_script = route_ctx_for_repro.get("repro_script", "") if isinstance(route_ctx_for_repro, dict) else ""
+        skip_repro = not bool(repro_script)
+
         # Check if localheal_pipeline topology is requested
         is_pipeline_topology = ctx.execution_topology == "localheal_pipeline"
 
@@ -256,6 +261,10 @@ class LocalHealPipelineCapabilityExecutor:
                 evidence_present=True,
                 failure_reason="localheal_pipeline_topology_not_selected",
                 telemetries={
+                    "reproduction_contract_source": "route_context" if repro_script else "skip_reproduction",
+                    "skip_reproduction": skip_repro,
+                    "repro_script_present": bool(repro_script),
+                    "repro_evidence_source": "repro_script" if repro_script else "problem_statement",
                     "localheal_pipeline_available": modules.get("heal_pipeline", False),
                     "committee_orchestrator_available": modules.get("committee_orchestrator", False),
                     "solid_search_replace_protocol_available": modules.get("solid_search_replace_protocol", False),
@@ -361,6 +370,11 @@ class LocalHealPipelineCapabilityExecutor:
                 invoked_modules.append("heal_pipeline")
 
                 # Build HealContext from capability context
+                # B7.3: Check for repro_script in route_context, otherwise skip_reproduction
+                route_ctx = ctx.route_context if hasattr(ctx, "route_context") else {}
+                repro_script = route_ctx.get("repro_script", "") if isinstance(route_ctx, dict) else ""
+                skip_repro = not bool(repro_script)
+
                 heal_ctx = LegacyHealContext(
                     instance_id=ctx.task_id,
                     repo_dir=_Path(ctx.source_root),
@@ -368,6 +382,8 @@ class LocalHealPipelineCapabilityExecutor:
                     route_context=ctx.route_context,
                     python_executable="",
                     max_tries=3,
+                    skip_reproduction=skip_repro,
+                    repro_script=repro_script,
                 )
 
                 # Call pipeline.run()
