@@ -78,6 +78,7 @@ class HealContext:
     rewrite_trace: List[str] = field(default_factory=list)
     risk_delta: float = 0.0
     run_group: str = ""
+    route_context: Dict[str, Any] = field(default_factory=dict)
 
     def to_v2(self) -> HealContextV2:
         op = OperationalContext(
@@ -115,6 +116,7 @@ class HealContext:
             reasoning_mode=self.reasoning_mode,
             skip_reproduction=self.skip_reproduction,
             run_group=self.run_group,
+            route_context=self.route_context,
         )
         gov = GovernanceContext(
             expected_stop_layer=self.expected_stop_layer,

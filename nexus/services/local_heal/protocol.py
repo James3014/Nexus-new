@@ -38,15 +38,16 @@ class SolidSearchReplaceProtocol:
         lower_output = raw_output.lower()
         return any(kw in lower_output for kw in refusal_keywords) and "<<<<<<< SEARCH" not in raw_output
 
-    def parse(self, raw_output: str, anchor_text: str = None) -> List[PatchIntent] | PatchError:
+    def parse(self, raw_output: str, anchor_text: str = None, protocol_mode: str | None = None) -> List[PatchIntent] | PatchError:
         if not raw_output or not raw_output.strip():
             return PatchError(kind=PatchErrorKind.EMPTY_RESPONSE, message="LLM output is empty.")
             
         if self.detect_refusal(raw_output):
             return PatchError(kind=PatchErrorKind.REFUSAL_DETECTED, message="LLM refused fix.")
             
-        import os
-        protocol_mode = os.getenv("NEXUS_PROTOCOL_MODE", "standard")
+        if protocol_mode is None:
+            import os
+            protocol_mode = os.getenv("NEXUS_PROTOCOL_MODE", "standard")
 
         if protocol_mode == "anchored_edit" and anchor_text is not None:
             # 1. 嘗試解析為單純的 REPLACE 區塊，若有的話

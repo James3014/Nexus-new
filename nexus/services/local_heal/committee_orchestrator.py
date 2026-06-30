@@ -11,6 +11,7 @@ from nexus.committee.controller import CommitteeControllerV263
 
 COMMITTEE_ROUTE_SCHEMA = "nexus.local_heal.committee_trace.v1"
 COMMITTEE_ROUTE_POLICY = "qwen_3b_judge_plus_qwen_7b_plus_deepseek_6_7b"
+# DEPRECATED: Legacy test fixture constant. Do not use in runtime decision paths.
 COMMITTEE_PROPOSER_SPECS = (
     {"model": "qwen2.5-coder:7b-instruct", "role": "primary"},
     {"model": "deepseek-coder:6.7b-instruct", "role": "secondary"},
@@ -31,12 +32,22 @@ class CommitteeOrchestrator(HealOrchestrator):
     """
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
-        self.k = len(COMMITTEE_PROPOSER_SPECS)
+        self.k = None
 
     def run(self, ctx: HealContext) -> HealContext:
-        if os.getenv("NEXUS_USE_COMMITTEE", "0") != "1":
+        route_ctx = ctx.op.route_context if hasattr(ctx.op, "route_context") else {}
+        signal_snapshot = route_ctx.get("signal_snapshot", {}) if isinstance(route_ctx, dict) else {}
+        
+        use_committee = bool(signal_snapshot.get("local_committee_enabled", False) or signal_snapshot.get("use_committee", False))
+        if not use_committee:
             return super().run(ctx)
 
+        proposer_specs = signal_snapshot.get("proposer_specs")
+        if proposer_specs is None:
+            raise ValueError("Missing proposer_specs in signal_snapshot for local_committee_only")
+        proposer_specs = list(proposer_specs)
+            
+        self.k = len(proposer_specs)
         logger.info(f"--- [COMMITTEE MODE ACTIVE] k={self.k} ---")
         
         # Phase 1-3: Linear Execution
@@ -50,7 +61,6 @@ class CommitteeOrchestrator(HealOrchestrator):
         committee = CommitteeControllerV263(ctx.op.instance_id)
         committee.enabled = True # 強制啟用
 
-        proposer_specs = list(COMMITTEE_PROPOSER_SPECS[: self.k])
         proposals = []
         candidate_snapshots = []
         previous_committee_model = getattr(ctx.op, "committee_proposer_model", None)

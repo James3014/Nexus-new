@@ -14,6 +14,48 @@ from nexus.services.local_heal.local_model_provider import (
     InjectedLocalModelProvider,
     LocalModelProviderRequest,
 )
+def make_test_request(
+    task_id: str,
+    problem_statement: str = "test",
+    repo_root: str = "/workspace",
+    target_file: str = "file.py",
+    selected_capabilities: tuple[str, ...] = ("local_model_executor",),
+    evidence_refs: tuple[str, ...] = (),
+    dry_run: bool = False,
+    execution_topology: str = "single_local_model",
+    route_context: dict | None = None,
+) -> LocalModelExecutorRequest:
+    if route_context is None:
+        route_context = {
+            "signal_snapshot": {
+                "execution_topology": execution_topology,
+                "model_call_allowed": True,
+                "selected_executor": "local_model",
+                "executor_model": "qwen2.5-coder:7b",
+                "protocol_mode": "anchored_edit"
+            }
+        }
+    else:
+        route_context = dict(route_context)
+        if "signal_snapshot" in route_context and isinstance(route_context["signal_snapshot"], dict):
+            snap = dict(route_context["signal_snapshot"])
+            snap.setdefault("execution_topology", execution_topology)
+            snap.setdefault("model_call_allowed", True)
+            snap.setdefault("selected_executor", "local_model")
+            snap.setdefault("executor_model", "qwen2.5-coder:7b")
+            snap.setdefault("protocol_mode", "anchored_edit")
+            route_context["signal_snapshot"] = snap
+    return LocalModelExecutorRequest(
+        task_id=task_id,
+        problem_statement=problem_statement,
+        repo_root=repo_root,
+        target_file=target_file,
+        selected_capabilities=selected_capabilities,
+        evidence_refs=evidence_refs,
+        dry_run=dry_run,
+        route_context=route_context,
+    )
+
 
 
 def test_dry_run_does_not_call_provider():
@@ -25,13 +67,9 @@ def test_dry_run_does_not_call_provider():
         return "mock patch"
 
     provider = InjectedLocalModelProvider(mock_gen)
-    req = LocalModelExecutorRequest(
+    req = make_test_request(
         task_id="test-1",
         problem_statement="dry run test",
-        repo_root="/workspace",
-        target_file="file.py",
-        selected_capabilities=("local_model_executor",),
-        evidence_refs=(),
         dry_run=True,
     )
     resp = LocalModelExecutor.run(req, provider=provider)
@@ -44,14 +82,9 @@ def test_dry_run_does_not_call_provider():
 
 def test_provider_unavailable_returns_blocked_response():
     provider = InertLocalModelProvider()
-    req = LocalModelExecutorRequest(
+    req = make_test_request(
         task_id="test-2",
         problem_statement="unavailable test",
-        repo_root="/workspace",
-        target_file="file.py",
-        selected_capabilities=("local_model_executor",),
-        evidence_refs=(),
-        dry_run=False,
     )
     resp = LocalModelExecutor.run(req, provider=provider)
     assert resp.invoked is True
@@ -65,14 +98,9 @@ def test_response_has_no_public_prod_authority():
         return "mock diff"
 
     provider = InjectedLocalModelProvider(mock_gen)
-    req = LocalModelExecutorRequest(
+    req = make_test_request(
         task_id="test-3",
         problem_statement="authority test",
-        repo_root="/workspace",
-        target_file="file.py",
-        selected_capabilities=("local_model_executor",),
-        evidence_refs=(),
-        dry_run=False,
     )
     resp = LocalModelExecutor.run(req, provider=provider)
     # Check that public_claim or production_ready is NOT in any fields
@@ -90,14 +118,9 @@ def test_candidate_hash_deterministic():
         return patch
 
     provider = InjectedLocalModelProvider(mock_gen)
-    req = LocalModelExecutorRequest(
+    req = make_test_request(
         task_id="test-4",
         problem_statement="hash test",
-        repo_root="/workspace",
-        target_file="file.py",
-        selected_capabilities=("local_model_executor",),
-        evidence_refs=(),
-        dry_run=False,
     )
     resp = LocalModelExecutor.run(req, provider=provider)
     assert resp.candidate_patch == patch
@@ -114,15 +137,17 @@ def test_local_model_executor_uses_anchored_edit_prompt_when_protocol_mode_enabl
         return "<<<<<<< REPLACE\nprint('world')\n>>>>>>> REPLACE"
 
     provider = InjectedLocalModelProvider(mock_gen)
-    req = LocalModelExecutorRequest(
+    req = make_test_request(
         task_id="test-anchored",
         problem_statement="fix hello",
-        repo_root="/workspace",
-        target_file="file.py",
-        selected_capabilities=("local_model_executor",),
-        evidence_refs=(),
-        dry_run=False,
-        route_context={"locked_search": "print('hello')", "target_symbol": "print"},
+        route_context={
+            "locked_search": "print('hello')",
+            "target_symbol": "print",
+            "signal_snapshot": {
+                "execution_topology": "single_local_model",
+                "protocol_mode": "anchored_edit"
+            }
+        },
     )
     resp = LocalModelExecutor.run(req, provider=provider)
     assert "REPLACE" in captured_prompt
@@ -142,14 +167,15 @@ def test_local_model_executor_unified_diff_prompt_only_when_compat_mode(monkeypa
         return "diff patch"
 
     provider = InjectedLocalModelProvider(mock_gen)
-    req = LocalModelExecutorRequest(
+    req = make_test_request(
         task_id="test-diff",
         problem_statement="fix hello",
-        repo_root="/workspace",
-        target_file="file.py",
-        selected_capabilities=("local_model_executor",),
-        evidence_refs=(),
-        dry_run=False,
+        route_context={
+            "signal_snapshot": {
+                "execution_topology": "single_local_model",
+                "protocol_mode": "unified_diff"
+            }
+        }
     )
     resp = LocalModelExecutor.run(req, provider=provider)
     assert "unified diff" in captured_prompt.lower()
@@ -161,15 +187,9 @@ def test_topology_single_local_model_preserves_behavior() -> None:
         return "some patch"
 
     provider = InjectedLocalModelProvider(mock_gen)
-    req = LocalModelExecutorRequest(
+    req = make_test_request(
         task_id="test-top-single",
         problem_statement="topology test",
-        repo_root="/workspace",
-        target_file="file.py",
-        selected_capabilities=("local_model_executor",),
-        evidence_refs=(),
-        dry_run=False,
-        execution_topology="single_local_model",
     )
     resp = LocalModelExecutor.run(req, provider=provider)
     assert resp.raw_model_metadata.get("execution_topology") == "single_local_model"
@@ -182,16 +202,17 @@ def test_topology_local_committee_via_signal_snapshot(monkeypatch) -> None:
         return "some patch"
 
     provider = InjectedLocalModelProvider(mock_gen)
-    req = LocalModelExecutorRequest(
+    req = make_test_request(
         task_id="test-top-committee",
         problem_statement="topology test",
-        repo_root="/workspace",
-        target_file="file.py",
-        selected_capabilities=("local_model_executor",),
         evidence_refs=("ref-dummy",),
-        dry_run=False,
         route_context={
-            "signal_snapshot": {"execution_topology": "local_committee_only"},
+            "signal_snapshot": {
+                "execution_topology": "local_committee_only",
+                "local_committee_enabled": True,
+                "proposer_specs": [{"model": "qwen2.5-coder:7b", "role": "primary"}],
+                "judge_model": "qwen2.5:3b"
+            }
         },
     )
     resp = LocalModelExecutor.run(req, provider=provider)
@@ -206,15 +227,9 @@ def test_local_model_executor_single_topology_uses_single_provider_path(monkeypa
         return "single patch"
 
     provider = InjectedLocalModelProvider(mock_gen)
-    req = LocalModelExecutorRequest(
+    req = make_test_request(
         task_id="test-single-topo",
         problem_statement="test",
-        repo_root="/workspace",
-        target_file="file.py",
-        selected_capabilities=("local_model_executor",),
-        evidence_refs=(),
-        dry_run=False,
-        execution_topology="single_local_model",
     )
     resp = LocalModelExecutor.run(req, provider=provider)
     assert resp.raw_model_metadata.get("execution_topology") == "single_local_model"
@@ -249,15 +264,17 @@ def test_local_model_executor_committee_topology_uses_committee_provider(monkeyp
 
     monkeypatch.setattr(LocalCommitteeCandidateProvider, "generate_committee_candidates", mock_generate_committee_candidates)
 
-    req = LocalModelExecutorRequest(
+    req = make_test_request(
         task_id="test-task",
         problem_statement="test",
-        repo_root="/workspace",
-        target_file="file.py",
-        selected_capabilities=("local_model_executor",),
         evidence_refs=("ref1",),
-        dry_run=False,
-        execution_topology="local_committee_only",
+        route_context={
+            "signal_snapshot": {
+                "execution_topology": "local_committee_only",
+                "proposer_specs": [{"model": "qwen2.5-coder:7b", "role": "primary"}],
+                "judge_model": "qwen2.5:3b"
+            }
+        }
     )
     
     provider = InjectedLocalModelProvider(lambda req: "patch")
@@ -303,15 +320,17 @@ def test_local_model_executor_committee_topology_uses_candidate_decision_adapter
         )
     monkeypatch.setattr(CandidateDecisionAdapter, "select_candidate", mock_select_candidate)
 
-    req = LocalModelExecutorRequest(
+    req = make_test_request(
         task_id="test-task",
         problem_statement="test",
-        repo_root="/workspace",
-        target_file="file.py",
-        selected_capabilities=("local_model_executor",),
         evidence_refs=("ref1",),
-        dry_run=False,
-        execution_topology="local_committee_only",
+        route_context={
+            "signal_snapshot": {
+                "execution_topology": "local_committee_only",
+                "proposer_specs": [{"model": "qwen2.5-coder:7b", "role": "primary"}],
+                "judge_model": "qwen2.5:3b"
+            }
+        }
     )
     provider = InjectedLocalModelProvider(lambda req: "patch")
     resp = LocalModelExecutor.run(req, provider=provider)
@@ -384,7 +403,10 @@ def test_resolve_topology_signal_snapshot_takes_priority():
         evidence_refs=(),
         execution_topology="single_local_model",
         route_context={
-            "signal_snapshot": {"execution_topology": "local_committee_only"},
+            "signal_snapshot": {
+                "execution_topology": "local_committee_only",
+                "protocol_mode": "anchored_edit"
+            },
             "execution_topology": "single_local_model",
         },
     )
@@ -402,14 +424,17 @@ def test_resolve_topology_signal_snapshot_over_request_field():
         evidence_refs=(),
         execution_topology="single_local_model",
         route_context={
-            "signal_snapshot": {"execution_topology": "local_committee_only"},
+            "signal_snapshot": {
+                "execution_topology": "local_committee_only",
+                "protocol_mode": "anchored_edit"
+            },
         },
     )
     assert _resolve_execution_topology(req) == "local_committee_only"
 
 
 def test_resolve_topology_route_context_top_level_fallback():
-    """route_context top-level execution_topology is fallback when no signal_snapshot."""
+    """route_context top-level execution_topology fails closed (raises ValueError) when no signal_snapshot."""
     req = LocalModelExecutorRequest(
         task_id="t3",
         problem_statement="test",
@@ -422,11 +447,12 @@ def test_resolve_topology_route_context_top_level_fallback():
             "execution_topology": "local_committee_only",
         },
     )
-    assert _resolve_execution_topology(req) == "local_committee_only"
+    with pytest.raises(ValueError, match="Missing signal_snapshot in route_context"):
+        _resolve_execution_topology(req)
 
 
 def test_resolve_topology_request_field_fallback():
-    """request.execution_topology is fallback when route_context has no topology."""
+    """request.execution_topology fails closed (raises ValueError) when route_context has no topology."""
     req = LocalModelExecutorRequest(
         task_id="t4",
         problem_statement="test",
@@ -437,11 +463,12 @@ def test_resolve_topology_request_field_fallback():
         execution_topology="local_committee_only",
         route_context={},
     )
-    assert _resolve_execution_topology(req) == "local_committee_only"
+    with pytest.raises(ValueError, match="Missing signal_snapshot in route_context"):
+        _resolve_execution_topology(req)
 
 
 def test_resolve_topology_no_topology_defaults_to_single():
-    """No topology anywhere defaults to single_local_model."""
+    """No topology anywhere fails closed (raises ValueError)."""
     req = LocalModelExecutorRequest(
         task_id="t5",
         problem_statement="test",
@@ -452,11 +479,12 @@ def test_resolve_topology_no_topology_defaults_to_single():
         execution_topology="",
         route_context={},
     )
-    assert _resolve_execution_topology(req) == "single_local_model"
+    with pytest.raises(ValueError, match="Missing signal_snapshot in route_context"):
+        _resolve_execution_topology(req)
 
 
 def test_resolve_topology_env_var_not_used():
-    """NEXUS_LOCAL_MODEL_EXECUTOR_TOPOLOGY env is NOT used by _resolve_execution_topology."""
+    """Missing signal_snapshot raises ValueError even with env vars present."""
     import os
     os.environ["NEXUS_LOCAL_MODEL_EXECUTOR_TOPOLOGY"] = "local_committee_only"
     try:
@@ -470,9 +498,8 @@ def test_resolve_topology_env_var_not_used():
             execution_topology="",
             route_context={},
         )
-        result = _resolve_execution_topology(req)
-        # Env var should NOT be the source — falls back to default
-        assert result == "single_local_model"
+        with pytest.raises(ValueError, match="Missing signal_snapshot in route_context"):
+            _resolve_execution_topology(req)
     finally:
         del os.environ["NEXUS_LOCAL_MODEL_EXECUTOR_TOPOLOGY"]
 
@@ -506,18 +533,17 @@ def test_executor_run_uses_planner_topology_from_signal_snapshot(monkeypatch):
 
     monkeypatch.setattr(LocalCommitteeCandidateProvider, "generate_committee_candidates", mock_generate_committee_candidates)
 
-    req = LocalModelExecutorRequest(
+    req = make_test_request(
         task_id="test-signal-snapshot",
         problem_statement="test",
-        repo_root="/workspace",
-        target_file="file.py",
-        selected_capabilities=("local_model_executor",),
         evidence_refs=("ref1",),
-        dry_run=False,
-        execution_topology="single_local_model",
         route_context={
-            "signal_snapshot": {"execution_topology": "local_committee_only"},
-        },
+            "signal_snapshot": {
+                "execution_topology": "local_committee_only",
+                "proposer_specs": [{"model": "qwen2.5-coder:7b", "role": "primary"}],
+                "judge_model": "qwen2.5:3b"
+            }
+        }
     )
     provider = InjectedLocalModelProvider(lambda req: "patch")
     resp = LocalModelExecutor.run(req, provider=provider)

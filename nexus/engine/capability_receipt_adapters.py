@@ -1311,6 +1311,11 @@ class LocalModelExecutorReceiptAdapter:
             executor_id="local_model_executor",
             telemetries={
                 "candidate_hash": payload.get("candidate_hash", ""),
+                **{
+                    k: payload.get(k) for k in (
+                        "compaction", "memory_rerank", "preflight", "cheap_judge", "isolation", "verifier", "learning_closure"
+                    ) if payload.get(k) is not None
+                }
             }
         )
 

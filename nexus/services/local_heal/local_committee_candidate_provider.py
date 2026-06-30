@@ -23,14 +23,31 @@ class LocalCommitteeCandidateProvider:
         locked_search: str,
         evidence_refs: tuple[str, ...],
         provider: LocalModelProvider,
-        protocol_mode: str = "anchored_edit",
+        protocol_mode: str,
+        route_context: dict[str, Any] | None = None,
     ) -> list[CandidateEnvelope]:
         # 1. Define committee members, roles and protocols.
+        signal_snapshot = route_context.get("signal_snapshot", {}) if isinstance(route_context, dict) else {}
+        proposer_specs = signal_snapshot.get("proposer_specs")
+        if proposer_specs is None:
+            raise ValueError("Missing proposer_specs in signal_snapshot for local_committee topology")
+            
+        judge_model = signal_snapshot.get("judge_model")
+        if not judge_model:
+            raise ValueError("Missing judge_model in signal_snapshot for local_committee topology")
+            
         committee_models = [
-            ("qwen2.5:3b", "judge", "none"),
-            ("qwen2.5-coder:7b", "primary_proposer", protocol_mode),
-            ("deepseek-coder:6.7b-instruct", "secondary_proposer", protocol_mode),
+            (judge_model, "judge", "none")
         ]
+        for spec in proposer_specs:
+            role = spec.get("role")
+            if not role:
+                raise ValueError("Missing proposer spec role in signal_snapshot")
+            model_name = spec.get("model")
+            if not model_name:
+                raise ValueError("Missing proposer spec model in signal_snapshot")
+            role_name = f"{role}_proposer"
+            committee_models.append((model_name, role_name, protocol_mode))
         
         envelopes = []
         anchor_hash = hashlib.sha256(locked_search.encode("utf-8")).hexdigest() if locked_search else ""

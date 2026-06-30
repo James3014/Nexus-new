@@ -93,6 +93,16 @@ def _make_ctx():
             failure_reason="",
             solve_eligible=False,
             runner_completed=False,
+            route_context={
+                "signal_snapshot": {
+                    "local_committee_enabled": True,
+                    "proposer_specs": [
+                        {"model": "qwen2.5-coder:7b-instruct", "role": "primary"},
+                        {"model": "deepseek-coder:6.7b-instruct", "role": "secondary"}
+                    ],
+                    "judge_model": "qwen2.5:3b"
+                }
+            }
         )
     )
 

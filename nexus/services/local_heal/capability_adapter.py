@@ -1,3 +1,5 @@
+# WARNING: This module is legacy deprecated. Do NOT use it for route/planner authority decisions.
+# All production routes flow strictly via CapabilityPlanner -> signal_snapshot -> downstream executors.
 from __future__ import annotations
 
 from dataclasses import dataclass
@@ -56,12 +58,12 @@ class LocalHealCapabilityResponse:
     capability_payload: dict[str, Any]
 
 
-def build_local_model_provider_from_env(
-    env: Mapping[str, str],
+def build_local_model_provider(
+    signal_snapshot: Mapping[str, Any],
     controls: Mapping[str, Any],
     injected_fn_key: str,
 ) -> LocalModelProvider:
-    call_allowed = env.get("NEXUS_LOCAL_MODEL_CALL_ALLOWED") == "1"
+    call_allowed = bool(signal_snapshot.get("model_call_allowed", False))
     if not call_allowed:
         return InertLocalModelProvider()
         
@@ -69,8 +71,8 @@ def build_local_model_provider_from_env(
     if injected_fn is not None:
         return InjectedLocalModelProvider(injected_fn)
         
-    provider_type = env.get("NEXUS_LOCAL_MODEL_PROVIDER", "").lower()
-    model_name = env.get("NEXUS_LOCAL_MODEL_NAME", "").strip()
+    provider_type = signal_snapshot.get("executor_provider", "").lower()
+    model_name = signal_snapshot.get("executor_model", "").strip()
     
     if provider_type == "ollama" and model_name:
         return OllamaLocalModelProvider()
@@ -82,11 +84,41 @@ class LocalHealCapabilityAdapter:
     @staticmethod
     def run(request: LocalHealCapabilityRequest) -> LocalHealCapabilityResponse:
         controls = request.executor_controls
+        
+        # 1. Strictly fail closed if planner output is missing
+        route_ctx = controls.get("route_context", {}) if hasattr(controls, "get") else {}
+        signal_snapshot = route_ctx.get("signal_snapshot") if hasattr(route_ctx, "get") else None
+        
+        if not hasattr(signal_snapshot, "get") or not signal_snapshot:
+            payload = build_hybrid_route_decision(
+                route_mode=RouteMode.LOCAL_ONLY_BLOCKED,
+                public_claim_allowed=False,
+                production_ready=False,
+                adapter_output_is_route_truth=False,
+                route_truth_source="CapabilityPlanner",
+                behavior_changed=False,
+                authority=Authority.FAIL_CLOSED,
+                local_model_called=False,
+                verifier_result=VerifierResult.NOT_RUN,
+                evidence_refs=request.evidence_refs,
+                fallback_block_reason="missing_signal_snapshot",
+                metadata={"error": "Missing signal_snapshot in route_context"},
+            )
+            decision = hybrid_route_decision_from_payload(payload)
+            capability_payload = capability_payload_from_hybrid_route(decision)
+            capability_payload["adapter_invoked"] = False
+            return LocalHealCapabilityResponse(
+                task_id=request.task_id,
+                invoked=False,
+                hybrid_route=decision,
+                capability_payload=capability_payload,
+            )
+            
         enable_local_heal = bool(controls.get("enable_local_heal", False))
         local_heal_mode = controls.get("local_heal_mode", "disabled")
         
         # Required controls and blockers checks first
-        candidate_enabled = os.environ.get("NEXUS_LOCAL_MODEL_CANDIDATE_ENABLE") == "1"
+        candidate_enabled = bool(signal_snapshot.get("candidate_enabled", False))
         
         if candidate_enabled:
             required_keys = ["source_root", "target_file", "target_symbol", "locked_search", "verifier_command", "work_dir"]
@@ -145,15 +177,13 @@ class LocalHealCapabilityAdapter:
                 hybrid_route=decision,
                 capability_payload=capability_payload,
             )
-        enable_local_heal = bool(controls.get("enable_local_heal", False))
-        local_heal_mode = controls.get("local_heal_mode", "disabled")
+            
+        policy = build_local_heal_runtime_policy(route_ctx, controls)
         
-        policy = build_local_heal_runtime_policy(os.environ, controls)
-        
-        advisory_enabled = os.environ.get("NEXUS_LOCAL_MODEL_ADVISORY_ENABLE") == "1"
-        candidate_enabled = os.environ.get("NEXUS_LOCAL_MODEL_CANDIDATE_ENABLE") == "1"
-        call_allowed = os.environ.get("NEXUS_LOCAL_MODEL_CALL_ALLOWED") == "1"
-        isolated_solve_enabled = os.environ.get("NEXUS_LOCAL_SOLVE_ISOLATED_ENABLE") == "1"
+        advisory_enabled = bool(signal_snapshot.get("advisory_enabled", False))
+        candidate_enabled = bool(signal_snapshot.get("candidate_enabled", False))
+        call_allowed = bool(signal_snapshot.get("model_call_allowed", False))
+        isolated_solve_enabled = bool(signal_snapshot.get("isolated_solve_enabled", False))
         
         if candidate_enabled and isolated_solve_enabled:
             required_keys = ["source_root", "target_file", "target_symbol", "locked_search", "verifier_command", "work_dir"]
@@ -179,8 +209,8 @@ class LocalHealCapabilityAdapter:
                 invoked = False
                 capability_payload = capability_payload_from_hybrid_route(decision)
             else:
-                provider = build_local_model_provider_from_env(
-                    os.environ, controls, "candidate_generate_fn"
+                provider = build_local_model_provider(
+                    signal_snapshot, controls, "candidate_generate_fn"
                 )
                 
                 target_file = controls["target_file"]
@@ -221,8 +251,8 @@ class LocalHealCapabilityAdapter:
                     verifier_command=tuple(controls["verifier_command"]),
                     work_dir=controls["work_dir"],
                     local_model_called=prov_resp.local_model_called,
-                    mutation_allowed=(os.environ.get("NEXUS_LOCAL_SOLVE_MUTATION_ALLOWED") == "1"),
-                    verifier_allowed=(os.environ.get("NEXUS_LOCAL_SOLVE_VERIFIER_ALLOWED") == "1"),
+                    mutation_allowed=bool(signal_snapshot.get("mutation_allowed", False)),
+                    verifier_allowed=bool(signal_snapshot.get("verifier_allowed", False)),
                     target_file=controls["target_file"],
                     target_symbol=controls["target_symbol"],
                     locked_search=controls["locked_search"],
@@ -277,8 +307,8 @@ class LocalHealCapabilityAdapter:
                         verifier_command=tuple(controls["verifier_command"]),
                         work_dir=controls["work_dir"],
                         local_model_called=retry_resp.local_model_called,
-                        mutation_allowed=(os.environ.get("NEXUS_LOCAL_SOLVE_MUTATION_ALLOWED") == "1"),
-                        verifier_allowed=(os.environ.get("NEXUS_LOCAL_SOLVE_VERIFIER_ALLOWED") == "1"),
+                        mutation_allowed=bool(signal_snapshot.get("mutation_allowed", False)),
+                        verifier_allowed=bool(signal_snapshot.get("verifier_allowed", False)),
                         target_file=controls["target_file"],
                         target_symbol=controls["target_symbol"],
                         locked_search=controls["locked_search"],
@@ -317,8 +347,8 @@ class LocalHealCapabilityAdapter:
             if not call_allowed:
                 cand_blockers.append("model_call_not_allowed")
                 
-            provider = build_local_model_provider_from_env(
-                os.environ, controls, "candidate_generate_fn"
+            provider = build_local_model_provider(
+                signal_snapshot, controls, "candidate_generate_fn"
             )
             
             cand_req = LocalModelCandidateRequest(
@@ -340,7 +370,7 @@ class LocalHealCapabilityAdapter:
                 "verifier_result": cand_resp.verifier_result,
                 "provider_invoked": cand_resp.candidate_invoked,
                 "provider_error": cand_resp.blockers[2] if len(cand_resp.blockers) > 2 else "",
-                "model_name": os.environ.get("NEXUS_LOCAL_MODEL_NAME", ""),
+                "model_name": signal_snapshot.get("executor_model", ""),
             }
             
             payload = build_hybrid_route_decision(
@@ -370,8 +400,8 @@ class LocalHealCapabilityAdapter:
             if not call_allowed:
                 advis_blockers.append("model_call_not_allowed")
                 
-            provider = build_local_model_provider_from_env(
-                os.environ, controls, "advisory_generate_fn"
+            provider = build_local_model_provider(
+                signal_snapshot, controls, "advisory_generate_fn"
             )
             
             advis_req = LocalModelAdvisoryRequest(
@@ -395,7 +425,7 @@ class LocalHealCapabilityAdapter:
                 "advisory_text_preview": text_preview,
                 "provider_invoked": advis_resp.advisory_invoked,
                 "provider_error": all_blockers[0] if all_blockers else "",
-                "model_name": os.environ.get("NEXUS_LOCAL_MODEL_NAME", ""),
+                "model_name": str(signal_snapshot.get("executor_model", "")),
             }
             
             payload = build_hybrid_route_decision(
@@ -481,15 +511,14 @@ class LocalHealCapabilityAdapter:
             invoked = False
             capability_payload = capability_payload_from_hybrid_route(decision)
             
-        if os.environ.get("NEXUS_LOCAL_GUARD_FAIL_CLOSED_ENABLE") == "1":
+        fail_closed_enabled = bool(signal_snapshot.get("fail_closed_enabled", False)) if signal_snapshot else False
+        if fail_closed_enabled:
             vr_val = payload.get("verifier_result")
             vr_str = vr_val.value if hasattr(vr_val, "value") else str(vr_val) if vr_val else "not_run"
             
             vr_str_in = controls.get("verifier_result", vr_str)
             sel_hash_in = controls.get("selected_candidate_hash", payload.get("selected_candidate_hash", ""))
             app_hash_in = controls.get("applied_patch_hash", payload.get("applied_patch_hash", ""))
-            rts_in = controls.get("route_truth_source", payload.get("route_truth_source", "CapabilityPlanner"))
-            
             guard_input = LocalGuardInput(
                 task_id=request.task_id,
                 route_payload=payload,
@@ -497,7 +526,7 @@ class LocalHealCapabilityAdapter:
                 verifier_result=vr_str_in,
                 selected_candidate_hash=sel_hash_in,
                 applied_patch_hash=app_hash_in,
-                route_truth_source=rts_in,
+                route_truth_source="CapabilityPlanner",
             )
             
             decision_guard = run_local_guard_fail_closed(guard_input)

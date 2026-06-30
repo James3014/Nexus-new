@@ -12,7 +12,6 @@ from nexus.services.local_heal.local_model_provider import (
     OllamaLocalModelProvider,
     InjectedLocalModelProvider,
 )
-from nexus.services.local_heal.capability_adapter import build_local_model_provider_from_env
 from nexus.services.local_heal.local_model_armor_receipt_gate import validate_local_model_armor_metadata
 from nexus.services.local_heal.local_model_capability_context import LocalModelCapabilityContext, CapabilityExecutionResult
 
@@ -50,33 +49,68 @@ class LocalModelExecutorResponse:
 
 
 def _resolve_execution_topology(request: LocalModelExecutorRequest) -> str:
-    """Resolve execution topology with planner-owned signal_snapshot as first priority.
+    """Resolve execution topology strictly from planner-owned signal_snapshot.
     
     Resolution order:
     1. request.route_context["signal_snapshot"]["execution_topology"] (planner-owned)
-    2. request.route_context["execution_topology"] (top-level fallback)
-    3. request.execution_topology (request field)
-    4. "single_local_model" (hardcoded default)
+    No fallbacks allowed. Missing or empty => raises ValueError.
     """
     route_ctx = request.route_context if isinstance(request.route_context, dict) else {}
-    
     signal_snapshot = route_ctx.get("signal_snapshot")
     if not isinstance(signal_snapshot, dict):
-        signal_snapshot = {}
+        raise ValueError("Missing signal_snapshot in route_context")
     
     topology = signal_snapshot.get("execution_topology")
-    if topology:
-        return str(topology)
+    if not topology:
+        raise ValueError("Missing execution_topology in signal_snapshot")
+        
+    if "protocol_mode" not in signal_snapshot:
+        raise ValueError("Missing protocol_mode in signal_snapshot")
+        
+    if topology != "local_committee_only":
+        if "executor_model" not in signal_snapshot:
+            raise ValueError("Missing executor_model in signal_snapshot")
     
-    topology = route_ctx.get("execution_topology")
-    if topology:
-        return str(topology)
+    return str(topology)
+
+
+def build_local_model_provider_from_signal_snapshot(
+    route_context: Mapping[str, Any],
+    injected_fn_key: str,
+) -> LocalModelProvider:
+    """Factory to instantiate provider specified strictly by planner contract signal_snapshot.
     
-    topology = request.execution_topology
-    if topology:
-        return str(topology)
+    No route selection or fallback allowed. Missing required fields fails closed.
+    """
+    signal_snapshot = route_context.get("signal_snapshot", {}) if isinstance(route_context, dict) else {}
+    if not isinstance(signal_snapshot, dict):
+        return InertLocalModelProvider()
+        
+    if "model_call_allowed" not in signal_snapshot:
+        raise ValueError("Missing model_call_allowed in signal_snapshot")
+    call_allowed = bool(signal_snapshot["model_call_allowed"])
+        
+    if not call_allowed:
+        return InertLocalModelProvider()
+        
+    injected_fn = route_context.get(injected_fn_key)
+    if injected_fn is not None:
+        return InjectedLocalModelProvider(injected_fn)
+        
+    provider_type = signal_snapshot.get("executor_provider")
+    model_name = signal_snapshot.get("executor_model")
     
-    return "single_local_model"
+    if not provider_type or not model_name:
+        raise ValueError("Missing executor_provider or executor_model in signal_snapshot")
+        
+    provider_type = provider_type.lower()
+    model_name = model_name.strip()
+    
+    if provider_type == "ollama" and model_name:
+        return OllamaLocalModelProvider()
+        
+    return InertLocalModelProvider()
+
 
 
 class LocalModelExecutor:
@@ -84,7 +118,22 @@ class LocalModelExecutor:
     def run(request: LocalModelExecutorRequest, *, provider: LocalModelProvider | None = None) -> LocalModelExecutorResponse:
         empty_hash = hashlib.sha256(b"").hexdigest()
         
-        execution_topology = _resolve_execution_topology(request)
+        try:
+            execution_topology = _resolve_execution_topology(request)
+        except ValueError as e:
+            return LocalModelExecutorResponse(
+                invoked=False,
+                local_model_called=False,
+                candidate_patch="",
+                candidate_hash=empty_hash,
+                reasoning_summary="fail_closed_missing_topology",
+                raw_model_metadata={"error": str(e)},
+                provider="none",
+                model_name="",
+                error=str(e),
+                timeout=False,
+                evidence_refs=request.evidence_refs,
+            )
         
         # 1. Handle Dry Run
         if request.dry_run:
@@ -104,11 +153,25 @@ class LocalModelExecutor:
 
         # 2. Build Provider
         if provider is None:
-            provider = build_local_model_provider_from_env(
-                os.environ,
-                request.route_context,
-                "candidate_generate_fn"
-            )
+            try:
+                provider = build_local_model_provider_from_signal_snapshot(
+                    request.route_context,
+                    "candidate_generate_fn"
+                )
+            except ValueError as e:
+                return LocalModelExecutorResponse(
+                    invoked=False,
+                    local_model_called=False,
+                    candidate_patch="",
+                    candidate_hash=empty_hash,
+                    reasoning_summary="fail_closed_missing_provider_or_model",
+                    raw_model_metadata={"error": str(e)},
+                    provider="none",
+                    model_name="",
+                    error=str(e),
+                    timeout=False,
+                    evidence_refs=request.evidence_refs,
+                )
 
         # 3. Check Provider Availability
         if isinstance(provider, InertLocalModelProvider):
@@ -238,7 +301,8 @@ class LocalModelExecutor:
 
         # 8. Handle Execution Topology Branching
         if execution_topology == "local_committee_only":
-            protocol_mode = os.environ.get("NEXUS_PROTOCOL_MODE", "anchored_edit")
+            signal_snapshot = request.route_context.get("signal_snapshot", {}) if isinstance(request.route_context, dict) else {}
+            protocol_mode = signal_snapshot["protocol_mode"]
             
             # Build enhanced problem statement with source anchor + failure feedback
             enhanced_problem = request.problem_statement
@@ -262,6 +326,7 @@ class LocalModelExecutor:
                 evidence_refs=request.evidence_refs,
                 provider=provider,
                 protocol_mode=protocol_mode,
+                route_context=request.route_context,
             )
             
             # Update cap_ctx with candidates for this topology
@@ -419,7 +484,8 @@ class LocalModelExecutor:
             raw_meta["armor_receipt_missing_fields"] = armor_miss
 
             # Use single_local_model provider path for candidate generation
-            protocol_mode = os.environ.get("NEXUS_PROTOCOL_MODE", "anchored_edit")
+            signal_snapshot = request.route_context.get("signal_snapshot", {}) if isinstance(request.route_context, dict) else {}
+            protocol_mode = signal_snapshot["protocol_mode"]
             failure_context = ""
             if failure_feedback_present and failure_feedback_text:
                 failure_context = f"\n\n{failure_feedback_text}"
@@ -448,11 +514,12 @@ class LocalModelExecutor:
                     f"Return ONLY the diff. No prose.\n"
                 )
 
+            model_name = signal_snapshot["executor_model"]
             prov_req = LocalModelProviderRequest(
                 task_id=request.task_id,
                 prompt=explicit_prompt,
                 evidence_refs=request.evidence_refs,
-                model_name=request.model_name or os.environ.get("NEXUS_LOCAL_MODEL_NAME", "qwen2.5-coder:7b"),
+                model_name=model_name,
             )
             prov_resp = provider.generate(prov_req)
 
@@ -481,7 +548,8 @@ class LocalModelExecutor:
             )
 
         # 9. Generate Candidate Patch for single_local_model
-        protocol_mode = os.environ.get("NEXUS_PROTOCOL_MODE", "standard")
+        signal_snapshot = request.route_context.get("signal_snapshot", {}) if isinstance(request.route_context, dict) else {}
+        protocol_mode = signal_snapshot["protocol_mode"]
         
         # Build failure feedback context for prompt
         failure_context = ""
@@ -549,12 +617,12 @@ class LocalModelExecutor:
                 f"4. Return ONLY the diff wrapped in a ```diff fenced block. No prose, no explanation.\n"
             )
 
-        
+        model_name = signal_snapshot["executor_model"]
         prov_req = LocalModelProviderRequest(
             task_id=request.task_id,
             prompt=explicit_prompt,
             evidence_refs=request.evidence_refs,
-            model_name=request.model_name or os.environ.get("NEXUS_LOCAL_MODEL_NAME", "qwen2.5-coder:7b"),
+            model_name=model_name,
         )
         
         prov_resp = provider.generate(prov_req)
@@ -629,17 +697,7 @@ def _normalize_candidate_patch(
     protocol = SolidSearchReplaceProtocol()
     anchor_text = locked_search if locked_search.strip() else None
     
-    # Temporarily set protocol_mode to anchored_edit for parsing
-    import os
-    old_mode = os.environ.get("NEXUS_PROTOCOL_MODE")
-    os.environ["NEXUS_PROTOCOL_MODE"] = "anchored_edit"
-    try:
-        result = protocol.parse(candidate_patch, anchor_text=anchor_text)
-    finally:
-        if old_mode is None:
-            os.environ.pop("NEXUS_PROTOCOL_MODE", None)
-        else:
-            os.environ["NEXUS_PROTOCOL_MODE"] = old_mode
+    result = protocol.parse(candidate_patch, anchor_text=anchor_text, protocol_mode="anchored_edit")
     
     # 3. Handle parse error — fail closed
     if isinstance(result, PatchError):

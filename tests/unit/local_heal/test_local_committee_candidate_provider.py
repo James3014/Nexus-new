@@ -24,6 +24,15 @@ def test_generate_committee_candidates_success() -> None:
         return ""
 
     provider = InjectedLocalModelProvider(mock_gen)
+    route_context = {
+        "signal_snapshot": {
+            "proposer_specs": [
+                {"model": "qwen2.5-coder:7b", "role": "primary"},
+                {"model": "deepseek-coder:6.7b-instruct", "role": "secondary"},
+            ],
+            "judge_model": "qwen2.5:3b",
+        }
+    }
     envelopes = LocalCommitteeCandidateProvider.generate_committee_candidates(
         task_id="task-123",
         problem_statement="fix hello",
@@ -33,6 +42,7 @@ def test_generate_committee_candidates_success() -> None:
         evidence_refs=("ref-1",),
         provider=provider,
         protocol_mode="anchored_edit",
+        route_context=route_context,
     )
 
     assert len(envelopes) == 3
@@ -71,6 +81,15 @@ def test_generate_committee_candidates_resource_blocked() -> None:
             return "output"
 
         provider = InjectedLocalModelProvider(mock_gen)
+        route_context = {
+            "signal_snapshot": {
+                "proposer_specs": [
+                    {"model": "qwen2.5-coder:7b", "role": "primary"},
+                    {"model": "deepseek-coder:6.7b-instruct", "role": "secondary"},
+                ],
+                "judge_model": "qwen2.5:3b",
+            }
+        }
         envelopes = LocalCommitteeCandidateProvider.generate_committee_candidates(
             task_id="task-123",
             problem_statement="fix hello",
@@ -80,6 +99,7 @@ def test_generate_committee_candidates_resource_blocked() -> None:
             evidence_refs=("ref-1",),
             provider=provider,
             protocol_mode="anchored_edit",
+            route_context=route_context,
         )
 
         assert len(envelopes) == 3

@@ -4,7 +4,7 @@ from nexus.services.local_heal.capability_runtime_policy import build_local_heal
 
 
 def test_build_runtime_policy_disabled_by_default() -> None:
-    policy = build_local_heal_runtime_policy(env={}, executor_controls={})
+    policy = build_local_heal_runtime_policy(route_context={}, executor_controls={})
     assert policy.enable_pipeline is False
     assert policy.mutation_allowed is False
     assert policy.public_claim_allowed is False
@@ -16,8 +16,13 @@ def test_build_runtime_policy_disabled_by_default() -> None:
 
 
 def test_build_runtime_policy_enabled_by_env() -> None:
-    env = {"NEXUS_LOCAL_HEAL_CAPABILITY_ADAPTER_ENABLE_PIPELINE": "1"}
-    policy = build_local_heal_runtime_policy(env=env, executor_controls={})
+    route_context = {
+        "signal_snapshot": {
+            "enable_pipeline": True,
+            "mutation_allowed": True,
+        }
+    }
+    policy = build_local_heal_runtime_policy(route_context=route_context, executor_controls={})
     assert policy.enable_pipeline is True
-    assert policy.mutation_allowed is False
+    assert policy.mutation_allowed is True
     assert policy.public_claim_allowed is False
