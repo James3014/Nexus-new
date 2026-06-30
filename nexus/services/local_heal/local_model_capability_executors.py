@@ -335,13 +335,21 @@ class LocalHealPipelineCapabilityExecutor:
 
                 real_provider = ctx.provider
                 if real_provider is not None:
-                    def _provider_generate(req):
+                    def _provider_generate(system_prompt_or_req, user_prompt=None, **kwargs):
                         from nexus.services.local_heal.local_model_provider import LocalModelProviderRequest
+                        # OllamaLLMClient passes (system_prompt, user_prompt) as two strings
+                        # LocalModelProviderRequest passes a single request object
+                        if user_prompt is not None:
+                            prompt = f"{system_prompt_or_req}\n\n{user_prompt}"
+                            model_name = kwargs.get("model", "")
+                        else:
+                            prompt = getattr(system_prompt_or_req, "prompt", "") or str(system_prompt_or_req)
+                            model_name = getattr(system_prompt_or_req, "model_name", "") or kwargs.get("model", "")
                         prov_req = LocalModelProviderRequest(
                             task_id=ctx.task_id,
-                            prompt=getattr(req, "prompt", "") or str(req),
+                            prompt=prompt,
                             evidence_refs=ctx.evidence_refs,
-                            model_name=getattr(req, "model_name", ""),
+                            model_name=model_name,
                         )
                         prov_resp = real_provider.generate(prov_req)
                         return prov_resp.output_text or ""

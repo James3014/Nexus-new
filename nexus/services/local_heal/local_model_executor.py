@@ -378,13 +378,19 @@ class LocalModelExecutor:
                             from nexus.services.local_heal.pipeline import HealPipeline, HealContext as LegacyHealContext
                             from pathlib import Path as _Path
 
-                            def _provider_generate(req):
+                            def _provider_generate(system_prompt_or_req, user_prompt=None, **kwargs):
                                 from nexus.services.local_heal.local_model_provider import LocalModelProviderRequest
+                                if user_prompt is not None:
+                                    prompt = f"{fence_feedback}\n\n{system_prompt_or_req}\n\n{user_prompt}"
+                                    model_name = kwargs.get("model", "")
+                                else:
+                                    prompt = f"{fence_feedback}\n\n{getattr(system_prompt_or_req, 'prompt', '') or str(system_prompt_or_req)}"
+                                    model_name = getattr(system_prompt_or_req, "model_name", "") or kwargs.get("model", "")
                                 prov_req = LocalModelProviderRequest(
                                     task_id=request.task_id,
-                                    prompt=f"{fence_feedback}\n\nProblem: {request.problem_statement}",
+                                    prompt=prompt,
                                     evidence_refs=request.evidence_refs,
-                                    model_name=getattr(req, "model_name", ""),
+                                    model_name=model_name,
                                 )
                                 prov_resp = provider.generate(prov_req)
                                 return prov_resp.output_text or ""
