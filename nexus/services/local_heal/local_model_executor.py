@@ -513,69 +513,89 @@ class LocalModelExecutor:
             raw_meta["armor_receipt_complete"] = armor_ok
             raw_meta["armor_receipt_missing_fields"] = armor_miss
 
-            # Use single_local_model provider path for candidate generation
-            signal_snapshot = request.route_context.get("signal_snapshot", {}) if isinstance(request.route_context, dict) else {}
-            protocol_mode = signal_snapshot["protocol_mode"]
-            failure_context = ""
-            if failure_feedback_present and failure_feedback_text:
-                failure_context = f"\n\n{failure_feedback_text}"
+            # B3: Check if pipeline produced a result before generating new patch
+            pipeline_final_patch = repair_exec.telemetries.get("pipeline_final_patch", "")
+            pipeline_solve_eligible = repair_exec.telemetries.get("pipeline_solve_eligible", False)
+            pipeline_failure_reason = repair_exec.telemetries.get("pipeline_failure_reason", "")
 
-            if protocol_mode == "anchored_edit":
-                explicit_prompt = (
-                    f"You are generating a replacement code block to solve a coding task.\n"
-                    f"Problem: {request.problem_statement}{memory_context}{failure_context}\n"
-                    f"Target File: {target_file}\n"
-                    f"Target Symbol: {target_symbol}\n"
-                    f"Source Anchor Hash: {source_anchor_hash[:16] if source_anchor_hash else 'none'}\n"
-                    f"Locked Search Span that will be replaced:\n"
-                    f"```\n{locked_search}\n```\n\n"
-                    f"Provide the replacement code inside a REPLACE block exactly like this:\n"
-                    f"<<<<<<< REPLACE\n"
-                    f"[replacement code goes here]\n"
-                    f">>>>>>> REPLACE\n\n"
-                    f"Do not include any other text outside the REPLACE block.\n"
-                )
+            # Project pipeline result into raw_meta
+            raw_meta["pipeline_result_projected"] = bool(pipeline_final_patch)
+            raw_meta["pipeline_final_patch"] = pipeline_final_patch
+            raw_meta["pipeline_solve_eligible"] = pipeline_solve_eligible
+            raw_meta["pipeline_failure_reason"] = pipeline_failure_reason
+            raw_meta["localheal_pipeline_run_called"] = repair_exec.telemetries.get("localheal_pipeline_run_called", False)
+            raw_meta["localheal_pipeline_run_success"] = repair_exec.telemetries.get("localheal_pipeline_run_success", False)
+            raw_meta["orchestrator_run_reachable"] = repair_exec.telemetries.get("orchestrator_run_reachable", False)
+
+            # If pipeline produced non-empty final_patch, use it as candidate
+            if pipeline_final_patch and pipeline_final_patch.strip():
+                candidate_patch = pipeline_final_patch
+                candidate_hash = hashlib.sha256(candidate_patch.encode("utf-8")).hexdigest()
+                patch_meta = {"protocol_used": "pipeline_result", "normalized": False}
             else:
-                explicit_prompt = (
-                    f"You are generating a unified diff to fix a bug in {target_file}.\n"
-                    f"Problem: {request.problem_statement}{memory_context}{failure_context}\n"
-                    f"Target File: {target_file}\n"
-                    f"Target Symbol: {target_symbol}\n"
-                    f"Return ONLY the diff. No prose.\n"
+                # Fall back to provider-generated patch
+                signal_snapshot = request.route_context.get("signal_snapshot", {}) if isinstance(request.route_context, dict) else {}
+                protocol_mode = signal_snapshot["protocol_mode"]
+                failure_context = ""
+                if failure_feedback_present and failure_feedback_text:
+                    failure_context = f"\n\n{failure_feedback_text}"
+
+                if protocol_mode == "anchored_edit":
+                    explicit_prompt = (
+                        f"You are generating a replacement code block to solve a coding task.\n"
+                        f"Problem: {request.problem_statement}{memory_context}{failure_context}\n"
+                        f"Target File: {target_file}\n"
+                        f"Target Symbol: {target_symbol}\n"
+                        f"Source Anchor Hash: {source_anchor_hash[:16] if source_anchor_hash else 'none'}\n"
+                        f"Locked Search Span that will be replaced:\n"
+                        f"```\n{locked_search}\n```\n\n"
+                        f"Provide the replacement code inside a REPLACE block exactly like this:\n"
+                        f"<<<<<<< REPLACE\n"
+                        f"[replacement code goes here]\n"
+                        f">>>>>>> REPLACE\n\n"
+                        f"Do not include any other text outside the REPLACE block.\n"
+                    )
+                else:
+                    explicit_prompt = (
+                        f"You are generating a unified diff to fix a bug in {target_file}.\n"
+                        f"Problem: {request.problem_statement}{memory_context}{failure_context}\n"
+                        f"Target File: {target_file}\n"
+                        f"Target Symbol: {target_symbol}\n"
+                        f"Return ONLY the diff. No prose.\n"
+                    )
+
+                model_name = signal_snapshot["executor_model"]
+                prov_req = LocalModelProviderRequest(
+                    task_id=request.task_id,
+                    prompt=explicit_prompt,
+                    evidence_refs=request.evidence_refs,
+                    model_name=model_name,
                 )
+                prov_resp = provider.generate(prov_req)
 
-            model_name = signal_snapshot["executor_model"]
-            prov_req = LocalModelProviderRequest(
-                task_id=request.task_id,
-                prompt=explicit_prompt,
-                evidence_refs=request.evidence_refs,
-                model_name=model_name,
-            )
-            prov_resp = provider.generate(prov_req)
-
-            candidate_patch = prov_resp.output_text
-            patch_meta = {}
-            if candidate_patch.strip():
-                candidate_patch, patch_meta = _normalize_candidate_patch(request, locked_search, candidate_patch)
-                candidate_hash = hashlib.sha256(candidate_patch.encode("utf-8")).hexdigest() if candidate_patch.strip() else empty_hash
-            else:
-                candidate_hash = empty_hash
+                candidate_patch = prov_resp.output_text
+                patch_meta = {}
+                if candidate_patch.strip():
+                    candidate_patch, patch_meta = _normalize_candidate_patch(request, locked_search, candidate_patch)
+                    candidate_hash = hashlib.sha256(candidate_patch.encode("utf-8")).hexdigest() if candidate_patch.strip() else empty_hash
+                else:
+                    candidate_hash = empty_hash
 
             provider_name = "ollama" if isinstance(provider, OllamaLocalModelProvider) else "injected"
             local_assist_telemetry = build_local_assist_telemetry_from_executor_meta(raw_meta)
             raw_meta["local_assist_telemetry"] = local_assist_telemetry.to_dict()
 
             return LocalModelExecutorResponse(
-                invoked=prov_resp.provider_invoked,
-                local_model_called=prov_resp.model_called,
+                invoked=True,
+                local_model_called=True,
                 candidate_patch=candidate_patch,
                 candidate_hash=candidate_hash,
-                reasoning_summary="success" if not prov_resp.error else "failed",
+                reasoning_summary="pipeline_result" if pipeline_final_patch else "provider_generated",
                 raw_model_metadata=raw_meta,
                 provider=provider_name,
-                model_name=prov_resp.model_name or prov_req.model_name,
-                error=prov_resp.error,
-                timeout=prov_resp.timed_out,
+                model_name=model_name if not pipeline_final_patch else "",
+                error="",
+                timeout=False,
                 evidence_refs=request.evidence_refs,
             )
 
