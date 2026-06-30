@@ -8,7 +8,7 @@ import sys
 
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "../..")))
 
-from nexus.services.local_heal.capability_adapter import build_local_model_provider_from_env
+from nexus.services.local_heal.capability_adapter import build_local_model_provider
 from nexus.services.local_heal.local_model_provider import LocalModelProviderRequest
 from nexus.services.local_heal.isolated_local_solve_loop import (
     IsolatedLocalSolveRequest,
@@ -49,7 +49,12 @@ def main() -> int:
         print(json.dumps(res, indent=2))
         return 0
         
-    provider_inst = build_local_model_provider_from_env(os.environ, {}, "")
+    signal_snapshot = {
+        "model_call_allowed": True,
+        "executor_provider": provider,
+        "executor_model": model_name,
+    }
+    provider_inst = build_local_model_provider(signal_snapshot, {}, "")
     prompt = f"Problem: {args.problem_statement}\nTarget file: {args.target_file}\nPlease output a unified diff."
     
     req_obj = LocalModelProviderRequest(

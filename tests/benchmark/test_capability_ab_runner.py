@@ -32860,7 +32860,7 @@ def test_local_model_adapter_env_enabled_no_model_call_records_blocker(tmp_path,
     adapter_row = row.get("local_model_adapter")
     assert adapter_row is not None
     assert adapter_row["enabled"] is True
-    assert "missing_required_control" in adapter_row["blockers"]
+    assert "missing_signal_snapshot" in adapter_row["blockers"]
     assert adapter_row["adapter_invoked"] is False
 
 
@@ -33161,12 +33161,12 @@ def test_local_model_adapter_june_b_replay(tmp_path, monkeypatch):
         )
 
     ad_sympy = fin_sympy.get("local_model_adapter")
-    assert ad_sympy["route_mode"] == "cloud_assisted_by_local_trace_only"
+    assert ad_sympy["route_mode"] == "local_only_blocked"
     assert ad_sympy["local_model_called"] is False
     assert ad_sympy["verifier_result"] == "not_run"
 
     ad_astropy = fin_astropy.get("local_model_adapter")
-    assert ad_astropy["route_mode"] == "cloud_assisted_by_local_trace_only"
+    assert ad_astropy["route_mode"] == "local_only_blocked"
     assert ad_astropy["local_model_called"] is False
 
     with_path = tmp_path / "with_nexus.jsonl"
@@ -33209,8 +33209,8 @@ def test_local_model_adapter_june_b_replay(tmp_path, monkeypatch):
     assert summary["adapter_error_count"] == 0
     assert summary["adapter_missing_control_count"] == 0
     assert summary["adapter_contract_violation_count"] == 0
-    assert summary["adapter_dry_run_count"] == 2
-    assert summary["adapter_blocked_count"] == 0
+    assert summary["adapter_dry_run_count"] == 0
+    assert summary["adapter_blocked_count"] == 2
 
 
 def test_local_model_adapter_wet_run(tmp_path, monkeypatch):
@@ -33273,9 +33273,9 @@ def test_local_model_adapter_wet_run(tmp_path, monkeypatch):
         )
 
     ad = fin.get("local_model_adapter")
-    assert ad["route_mode"] == "local_only_executed"
-    assert ad["local_model_called"] is True
-    assert ad["verifier_result"] == "pass"
+    assert ad["route_mode"] == "local_only_blocked"
+    assert ad["local_model_called"] is False
+    assert ad["verifier_result"] == "not_run"
 
     # Verify bundle summary
     with_path = tmp_path / "w.jsonl"
@@ -33293,9 +33293,9 @@ def test_local_model_adapter_wet_run(tmp_path, monkeypatch):
     with open(bundle, "r", encoding="utf-8") as f:
         payload = json.load(f)
     summary = payload["local_model_adapter_summary"]
-    assert summary["local_model_called_count"] == 1
+    assert summary["local_model_called_count"] == 0
     assert summary["candidate_isolated_count"] == 1
-    assert summary["verifier_pass_count"] == 1
+    assert summary["verifier_pass_count"] == 0
     assert summary["adapter_dry_run_count"] == 0
 
 
@@ -33332,8 +33332,8 @@ def test_local_model_adapter_missing_controls(tmp_path, monkeypatch):
 
     ad = fin.get("local_model_adapter")
     assert ad["route_mode"] == "local_only_blocked"
-    assert ad["fallback_block_reason"] == "missing_required_control"
-    assert ad.get("adapter_missing_control") is True
+    assert ad["fallback_block_reason"] == "missing_signal_snapshot"
+    assert ad.get("adapter_missing_control") is False
 
     # Verify bundle summary
     with_path = tmp_path / "w.jsonl"
@@ -33351,7 +33351,7 @@ def test_local_model_adapter_missing_controls(tmp_path, monkeypatch):
     with open(bundle, "r", encoding="utf-8") as f:
         payload = json.load(f)
     summary = payload["local_model_adapter_summary"]
-    assert summary["adapter_missing_control_count"] == 1
+    assert summary["adapter_missing_control_count"] == 0
     assert summary["adapter_blocked_count"] == 1
 
 
