@@ -354,9 +354,10 @@ class LocalModelExecutor:
             else:
                 selected_hash = empty_hash
 
-            # A5: Wire parse failure into retry/feedback seam
+            # A5/B5: Wire parse failure into retry/feedback seam
             protocol_parse_failed = patch_meta.get("protocol_parse_failed", False)
             error_kind = patch_meta.get("error_kind", "")
+            pipeline_retry_delegated = False
             if protocol_parse_failed:
                 try:
                     from nexus.services.local_heal.failure_feedback_builder import build_failure_feedback
@@ -370,6 +371,41 @@ class LocalModelExecutor:
                         verifier_status="fail",
                     )
                     retry_available = True
+
+                    # B5: Delegate retry to pipeline/orchestrator
+                    if error_kind == "REPLACEMENT_MARKDOWN_FENCE" and provider is not None:
+                        try:
+                            from nexus.services.local_heal.pipeline import HealPipeline, HealContext as LegacyHealContext
+                            from pathlib import Path as _Path
+
+                            def _provider_generate(req):
+                                from nexus.services.local_heal.local_model_provider import LocalModelProviderRequest
+                                prov_req = LocalModelProviderRequest(
+                                    task_id=request.task_id,
+                                    prompt=f"{fence_feedback}\n\nProblem: {request.problem_statement}",
+                                    evidence_refs=request.evidence_refs,
+                                    model_name=getattr(req, "model_name", ""),
+                                )
+                                prov_resp = provider.generate(prov_req)
+                                return prov_resp.output_text or ""
+
+                            pipeline = HealPipeline(ollama_generate_fn=_provider_generate)
+                            heal_ctx = LegacyHealContext(
+                                instance_id=request.task_id,
+                                repo_dir=_Path(request.repo_root),
+                                problem_statement=f"{fence_feedback}\n\n{request.problem_statement}",
+                                route_context=request.route_context,
+                                python_executable="",
+                                max_tries=2,
+                            )
+                            result_ctx = pipeline.run(heal_ctx)
+                            if getattr(result_ctx, "final_patch", ""):
+                                selected_patch = result_ctx.final_patch
+                                selected_hash = hashlib.sha256(selected_patch.encode("utf-8")).hexdigest()
+                                pipeline_retry_delegated = True
+                        except Exception:
+                            pipeline_retry_delegated = False
+
                 except Exception:
                     retry_available = False
                     retry_not_invoked_reason = "feedback_builder_unavailable"
@@ -433,6 +469,7 @@ class LocalModelExecutor:
                 "protocol_parse_error_kind": error_kind,
                 "retry_available": retry_available,
                 "retry_not_invoked_reason": retry_not_invoked_reason,
+                "pipeline_retry_delegated": pipeline_retry_delegated,
             }
             armor_ok, armor_miss = validate_local_model_armor_metadata(raw_meta)
             raw_meta["armor_receipt_complete"] = armor_ok
