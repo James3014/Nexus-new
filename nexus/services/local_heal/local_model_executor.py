@@ -397,6 +397,9 @@ class LocalModelExecutor:
                 "claim_gate_invoked": claim_exec.invoked,
                 "delivery_gate_invoked": delivery_exec.invoked,
                 "localheal_pipeline_invoked": repair_exec.telemetries.get("localheal_pipeline_invoked", False),
+                "localheal_pipeline_actual_execution": repair_exec.telemetries.get("localheal_pipeline_actual_execution", False),
+                "localheal_pipeline_availability_only": repair_exec.telemetries.get("localheal_pipeline_availability_only", False),
+                "localheal_pipeline_instantiated": repair_exec.telemetries.get("localheal_pipeline_instantiated", False),
                 "committee_orchestrator_invoked": repair_exec.telemetries.get("committee_orchestrator_invoked", False),
                 "solid_search_replace_protocol_available": repair_exec.telemetries.get("solid_search_replace_protocol_available", False),
                 "granular_localizer_available": repair_exec.telemetries.get("granular_localizer_available", False),
@@ -409,6 +412,8 @@ class LocalModelExecutor:
                     "delivery_gate": delivery_exec.to_receipt_dict(),
                 },
             }
+            raw_meta["ddtree_result"] = ddtree_exec.to_receipt_dict()
+            raw_meta["autoreason_result"] = autoreason_exec.to_receipt_dict()
             armor_ok, armor_miss = validate_local_model_armor_metadata(raw_meta)
             raw_meta["armor_receipt_complete"] = armor_ok
             raw_meta["armor_receipt_missing_fields"] = armor_miss

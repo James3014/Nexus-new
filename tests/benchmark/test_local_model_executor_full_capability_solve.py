@@ -116,9 +116,12 @@ def test_deterministic_full_capability_solve(monkeypatch, tmp_path):
     assert adapter_meta.get("claim_gate_invoked") is True, "claim_gate not invoked"
     assert adapter_meta.get("delivery_gate_invoked") is True, "delivery_gate not invoked"
     assert adapter_meta.get("localheal_pipeline_invoked") is True, "localheal_pipeline not invoked"
+    # C9.4R: Path A actual execution assertions
+    assert adapter_meta.get("localheal_pipeline_actual_execution") is True, "localheal_pipeline_actual_execution not True"
+    assert adapter_meta.get("localheal_pipeline_availability_only") is False, "localheal_pipeline_availability_only should be False"
+    assert adapter_meta.get("localheal_pipeline_instantiated") is True, "localheal_pipeline_instantiated not True"
 
     # Verify execution results via adapter metadata
-    # ddtree/autoreason results are in adapter metadata via runner copy
     assert adapter_meta.get("ddtree_invoked") is True
     assert adapter_meta.get("autoreason_invoked") is True
 
@@ -132,6 +135,11 @@ def test_deterministic_full_capability_solve(monkeypatch, tmp_path):
 
     # Verify topology
     assert adapter_meta.get("execution_topology") == "localheal_pipeline"
+
+    # C9.4R: Verify causality and receipt coverage
+    from nexus.services.local_heal.local_model_armor_receipt_gate import validate_capability_causality
+    causality_ok, causality_issues = validate_capability_causality(adapter_meta)
+    assert causality_ok is True, f"causality failed: {causality_issues}"
 
     # Verify capability receipts exist
     receipts = finalized.get("capability_receipts", [])
