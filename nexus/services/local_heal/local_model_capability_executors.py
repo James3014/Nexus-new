@@ -350,6 +350,10 @@ class LocalHealPipelineCapabilityExecutor:
                     # C2: Get model_name from signal_snapshot for direct Ollama call
                     _signal_snap = ctx.route_context.get("signal_snapshot", {}) if isinstance(ctx.route_context, dict) else {}
                     _pipeline_model_name = _signal_snap.get("executor_model", "")
+                    # C2: Map model name aliases (qwen2.5-coder:7b -> qwen2.5-coder:7b-instruct)
+                    _MODEL_ALIASES = {"qwen2.5-coder:7b": "qwen2.5-coder:7b-instruct"}
+                    if _pipeline_model_name in _MODEL_ALIASES:
+                        _pipeline_model_name = _MODEL_ALIASES[_pipeline_model_name]
 
                     def _provider_generate(system_prompt_or_req, user_prompt=None, **kwargs):
                         nonlocal _last_provider_diag
