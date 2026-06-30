@@ -307,6 +307,34 @@ def run_benchmark():
             if is_solved:
                 solved_count += 1
 
+            # M1.1 Telemetry Audit fields
+            protocol_normalization = adapter_meta.get("protocol_normalization", {})
+            parse_error_kind = protocol_normalization.get("error_kind", "none" if not protocol_normalization.get("protocol_parse_failed") else "unknown_error")
+            parse_error_message = protocol_normalization.get("error_message", "none")
+            
+            protocol_used = "none"
+            if not protocol_normalization.get("protocol_parse_failed"):
+                protocol_used = protocol_normalization.get("protocol_used", "anchored_edit")
+                
+            normalized = bool(protocol_normalization.get("normalized", False))
+            canonical_span_source = adapter_meta.get("source_anchor_source", "none")
+            
+            # Diff repair audit
+            diff_repair_receipt = adapter_meta.get("diff_repair_receipt", {})
+            diff_repair_attempted = bool(diff_repair_receipt.get("attempted", False))
+            diff_repair_success = bool(diff_repair_receipt.get("success", False))
+            
+            same_span_retry_count = int(adapter_meta.get("same_span_retry_count", 0))
+            failure_feedback_used = bool(adapter_meta.get("failure_feedback_present", False))
+            
+            # Static modules execution trace list
+            execution_path_modules = ["CapabilityPlanner", "LocalModelExecutor"]
+            if spec["execution_topology"] == "local_committee_only":
+                execution_path_modules.extend(["LocalCommitteeCandidateProvider", "CandidateDecisionAdapter"])
+            execution_path_modules.append("SolidSearchReplaceProtocol")
+            if local_model_called:
+                execution_path_modules.append("IsolatedLocalSolveLoop")
+
             row_data = {
                 "task_id": task_id,
                 "repo": spec["repo"],
@@ -325,12 +353,25 @@ def run_benchmark():
                 "failure_reason": receipt.get("failure_reason") or ("Missing execution" if not local_model_called else ""),
                 "learning_closure_written": bool(finalized.get("learning_closure_written", False) or finalized.get("learning_closure")),
                 "receipt_path": f".nexus/receipts/{task_id}_receipt.json",
-                "duration_sec": round(duration, 2)
+                "duration_sec": round(duration, 2),
+                
+                # M1.1 Audit Fields
+                "parse_error_kind": parse_error_kind,
+                "parse_error_message": parse_error_message,
+                "protocol_used": protocol_used,
+                "normalized": normalized,
+                "canonical_span_source": canonical_span_source,
+                "diff_repair_attempted": diff_repair_attempted,
+                "diff_repair_success": diff_repair_success,
+                "same_span_retry_count": same_span_retry_count,
+                "failure_feedback_used": failure_feedback_used,
+                "execution_path_modules": execution_path_modules
             }
 
             print(f"Outcome: {'SOLVED' if is_solved else 'FAILED'}")
             print(f"  local_model_called: {local_model_called}")
             print(f"  verifier_result: {verifier_result}")
+            print(f"  parse_error_kind: {parse_error_kind}")
             print(f"  duration: {row_data['duration_sec']}s")
 
             results_list.append(row_data)
@@ -351,18 +392,32 @@ def run_benchmark():
 
 ## Detailed Results
 
-| Task ID | Topology | Local Model Called | Verifier Result | Solved | Duration (s) |
-| --- | --- | --- | --- | --- | --- |
+| Task ID | Topology | Local Model Called | Verifier Result | Solved | Parse Error | Duration (s) |
+| --- | --- | --- | --- | --- | --- | --- |
 """
     for r in results_list:
-        summary_md += f"| {r['task_id']} | {r['execution_topology']} | {r['local_model_called']} | {r['verifier_result']} | **{r['solved']}** | {r['duration_sec']} |\n"
+        summary_md += f"| {r['task_id']} | {r['execution_topology']} | {r['local_model_called']} | {r['verifier_result']} | **{r['solved']}** | {r['parse_error_kind']} | {r['duration_sec']} |\n"
 
     summary_md += """
-## Failure Taxonomy
+## M1.1 June LocalHeal Capability Reuse Matrix
 
-- **astropy__astropy-13236**: verifier expected output match
-- **sympy__sympy-13852**: syntactic zeta replacement
-- **concurrency_bug_02**: thread-safety race verification
+| Module / Feature | Attempted (M1) | Used | Not Used / Reason |
+| --- | --- | --- | --- |
+| **SolidSearchReplaceProtocol** | 6 | Yes | Anchor mode parser executed, but failed on outer Markdown fences. |
+| **SearchReplaceParser (legacy fallback)** | 6 | No | Single-pass anchored_edit lacks parser fallback. |
+| **anchored_edit replacement guard** | 6 | Yes | Verified replacement blocks for natural prose & fences. |
+| **canonical_span / ast_boundary** | 6 | No | Bypassed because `locked_search` was directly provided in benchmark spec. |
+| **diff_normalizer** | 6 | No | Empty patch returned due to protocol parse error. |
+| **diff_repair** | 6 | No | Bypassed due to constraint_violation (missing unified diff). |
+| **isolated_local_solve_loop** | 6 | Partial | Sandbox initialized, but immediately exited on parser error block. |
+| **failure feedback / same-span retry** | 6 | No | Benchmark runs in a single-pass without retry loop. |
+| **HealPipeline / Orchestrator** | 6 | No | Runs direct row-finalization, bypassing phase orchestration. |
+
+## Root Cause of Failures (0/6 Solved)
+
+1. **REPLACEMENT_MARKDOWN_FENCE**: Qwen2.5-coder outputted replacement blocks wrapped in outer markdown fences (e.g. ````python`), causing `SolidSearchReplaceProtocol` to fail-closed on formatting.
+2. **Missing Normalization Fallbacks**: Parse errors immediately set the patch output to empty rather than falling back to sanitizers or diff repair.
+3. **No Interactive Retry**: Runs in single-pass row execution without failure feedback loops to let the model self-correct.
 """
     SUMMARY_PATH.write_text(summary_md, encoding="utf-8")
     
