@@ -550,3 +550,99 @@ def test_executor_run_uses_planner_topology_from_signal_snapshot(monkeypatch):
     assert resp.raw_model_metadata.get("execution_topology") == "local_committee_only"
     assert provider_called is True
 
+
+def test_local_assist_receipt_sections_attach_to_existing_local_model_executor_receipt() -> None:
+    req = make_test_request(
+        task_id="test-telemetry-attach",
+        problem_statement="test",
+        evidence_refs=("ref1",),
+        route_context={
+            "signal_snapshot": {
+                "execution_topology": "single_local_model",
+                "protocol_mode": "anchored_edit",
+                "executor_model": "qwen2.5-coder:7b",
+                "executor_provider": "ollama",
+                "model_call_allowed": True,
+            }
+        }
+    )
+    provider = InjectedLocalModelProvider(lambda req: "patch")
+    resp = LocalModelExecutor.run(req, provider=provider)
+    telemetry = resp.raw_model_metadata.get("local_assist_telemetry")
+    assert telemetry is not None
+    assert isinstance(telemetry, dict)
+    assert "compaction" in telemetry
+    assert "memory_rerank" in telemetry
+    assert "preflight" in telemetry
+    assert "cheap_judge" in telemetry
+    assert "isolation" in telemetry
+    assert "verifier" in telemetry
+    assert "learning_closure" in telemetry
+
+
+def test_local_assist_receipt_sections_do_not_create_new_capability_names() -> None:
+    from nexus.services.local_heal.local_assist_receipts import LocalAssistTelemetryCollection
+    telemetry = LocalAssistTelemetryCollection()
+    d = telemetry.to_dict()
+    assert "name" not in d
+    assert "capability" not in d
+    assert "route_mode" not in d
+    assert "authority" not in d
+
+
+def test_receipt_wiring_does_not_change_gate_passed() -> None:
+    req = make_test_request(
+        task_id="test-telemetry-gate",
+        problem_statement="test",
+        evidence_refs=("ref1",),
+        route_context={
+            "signal_snapshot": {
+                "execution_topology": "single_local_model",
+                "protocol_mode": "anchored_edit",
+                "executor_model": "qwen2.5-coder:7b",
+                "executor_provider": "ollama",
+                "model_call_allowed": True,
+            }
+        }
+    )
+    provider = InjectedLocalModelProvider(lambda req: "patch")
+    resp = LocalModelExecutor.run(req, provider=provider)
+    telemetry = resp.raw_model_metadata.get("local_assist_telemetry")
+    assert telemetry is not None
+    assert resp.raw_model_metadata.get("gate_passed") is not True
+
+
+def test_receipt_wiring_does_not_change_solved_outcome() -> None:
+    req = make_test_request(
+        task_id="test-telemetry-solved",
+        problem_statement="test",
+        evidence_refs=("ref1",),
+        route_context={
+            "signal_snapshot": {
+                "execution_topology": "single_local_model",
+                "protocol_mode": "anchored_edit",
+                "executor_model": "qwen2.5-coder:7b",
+                "executor_provider": "ollama",
+                "model_call_allowed": True,
+            }
+        }
+    )
+    provider = InjectedLocalModelProvider(lambda req: "patch")
+    resp = LocalModelExecutor.run(req, provider=provider)
+    telemetry = resp.raw_model_metadata.get("local_assist_telemetry")
+    assert telemetry is not None
+    assert resp.raw_model_metadata.get("solved") is not True
+
+
+def test_receipt_wiring_missing_sections_safe() -> None:
+    from nexus.services.local_heal.local_assist_receipts import build_local_assist_telemetry_from_executor_meta
+    telemetry = build_local_assist_telemetry_from_executor_meta({})
+    d = telemetry.to_dict()
+    assert d["compaction"] is None
+    assert d["memory_rerank"] is None
+    assert d["preflight"] is None
+    assert d["cheap_judge"] is None
+    assert d["isolation"] is None
+    assert d["verifier"] is None
+    assert d["learning_closure"] is None
+

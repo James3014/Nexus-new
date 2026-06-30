@@ -14,6 +14,7 @@ from nexus.services.local_heal.local_model_provider import (
 )
 from nexus.services.local_heal.local_model_armor_receipt_gate import validate_local_model_armor_metadata
 from nexus.services.local_heal.local_model_capability_context import LocalModelCapabilityContext, CapabilityExecutionResult
+from nexus.services.local_heal.local_assist_receipts import build_local_assist_telemetry_from_executor_meta
 
 
 @dataclass(frozen=True)
@@ -409,6 +410,8 @@ class LocalModelExecutor:
             armor_ok, armor_miss = validate_local_model_armor_metadata(raw_meta)
             raw_meta["armor_receipt_complete"] = armor_ok
             raw_meta["armor_receipt_missing_fields"] = armor_miss
+            local_assist_telemetry = build_local_assist_telemetry_from_executor_meta(raw_meta)
+            raw_meta["local_assist_telemetry"] = local_assist_telemetry.to_dict()
             return LocalModelExecutorResponse(
                 invoked=True,
                 local_model_called=local_model_called,
@@ -532,6 +535,8 @@ class LocalModelExecutor:
                 candidate_hash = empty_hash
 
             provider_name = "ollama" if isinstance(provider, OllamaLocalModelProvider) else "injected"
+            local_assist_telemetry = build_local_assist_telemetry_from_executor_meta(raw_meta)
+            raw_meta["local_assist_telemetry"] = local_assist_telemetry.to_dict()
 
             return LocalModelExecutorResponse(
                 invoked=prov_resp.provider_invoked,
@@ -655,6 +660,8 @@ class LocalModelExecutor:
         armor_ok, armor_miss = validate_local_model_armor_metadata(raw_meta)
         raw_meta["armor_receipt_complete"] = armor_ok
         raw_meta["armor_receipt_missing_fields"] = armor_miss
+        local_assist_telemetry = build_local_assist_telemetry_from_executor_meta(raw_meta)
+        raw_meta["local_assist_telemetry"] = local_assist_telemetry.to_dict()
         return LocalModelExecutorResponse(
             invoked=prov_resp.provider_invoked,
             local_model_called=prov_resp.model_called,

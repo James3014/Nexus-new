@@ -71,3 +71,79 @@ class LocalAssistTelemetryCollection:
             "verifier": asdict(self.verifier) if self.verifier else None,
             "learning_closure": asdict(self.learning_closure) if self.learning_closure else None,
         }
+
+
+def build_local_assist_telemetry_from_executor_meta(
+    raw_meta: Dict[str, Any],
+) -> LocalAssistTelemetryCollection:
+    """Extract assist telemetry from existing executor raw_model_metadata.
+    
+    This is observational only — it does not change execution behavior,
+    solved outcome, or gate results.
+    """
+    compaction = None
+    if raw_meta.get("compaction_ratio") is not None:
+        compaction = LocalEvidenceCompactionSection(
+            compaction_ratio=float(raw_meta.get("compaction_ratio", 0.0)),
+            original_size=int(raw_meta.get("raw_context_chars", 0)),
+            compacted_size=int(raw_meta.get("compact_context_chars", 0)),
+            evidence_keys_processed=list(raw_meta.get("evidence_keys_processed", [])),
+        )
+
+    memory_rerank = None
+    if raw_meta.get("memory_lessons_count") is not None:
+        memory_rerank = LocalMemoryRerankSection(
+            lessons_count=int(raw_meta.get("memory_lessons_count", 0)),
+            reranked_keys=list(raw_meta.get("memory_reranked_keys", [])),
+            top_lesson_influence_score=float(raw_meta.get("memory_top_lesson_score", 0.0)),
+        )
+
+    preflight = None
+    if raw_meta.get("preflight_passed") is not None:
+        preflight = LocalPatchPreflightSection(
+            preflight_passed=bool(raw_meta.get("preflight_passed", False)),
+            syntax_valid=bool(raw_meta.get("syntax_valid", True)),
+            compilation_error=raw_meta.get("compilation_error"),
+        )
+
+    cheap_judge = None
+    if raw_meta.get("judge_model") is not None:
+        cheap_judge = LocalCheapJudgeSection(
+            judge_model=str(raw_meta.get("judge_model", "")),
+            winner_confidence=float(raw_meta.get("judge_winner_confidence", 0.0)),
+            abstained=bool(raw_meta.get("judge_abstained", False)),
+        )
+
+    isolation = None
+    if raw_meta.get("candidate_id") is not None:
+        isolation = CandidateIsolationSection(
+            candidate_id=str(raw_meta.get("candidate_id", "")),
+            isolated_path=str(raw_meta.get("isolated_path", "")),
+            sandbox_used=bool(raw_meta.get("sandbox_used", True)),
+        )
+
+    verifier = None
+    if raw_meta.get("verifier_status") is not None:
+        verifier = VerifierSection(
+            verifier_passed=raw_meta.get("verifier_status") == "pass",
+            verifier_duration_sec=float(raw_meta.get("verifier_duration_sec", 0.0)),
+            test_failures_count=int(raw_meta.get("test_failures_count", 0)),
+        )
+
+    learning_closure = None
+    if raw_meta.get("learning_closure_written") is not None:
+        learning_closure = LearningClosureSection(
+            closure_written=bool(raw_meta.get("learning_closure_written", False)),
+            learning_closure_path=str(raw_meta.get("learning_closure_path", "")),
+            lessons_learned=list(raw_meta.get("lessons_learned", [])),
+        )
+
+    return LocalAssistTelemetryCollection(
+        compaction=compaction,
+        memory_rerank=memory_rerank,
+        preflight=preflight,
+        cheap_judge=cheap_judge,
+        isolation=isolation,
+        verifier=verifier,
+        learning_closure=learning_closure,
+    )
