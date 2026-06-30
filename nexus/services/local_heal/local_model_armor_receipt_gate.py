@@ -1,7 +1,7 @@
-"""N3.11: Local model armor receipt completeness gate.
+"""C6: Local model armor receipt completeness gate with causality coverage.
 
 Validates that LocalModelExecutorResponse.raw_model_metadata contains
-all required fields for a complete armor receipt. Missing fields -> incomplete.
+all required fields and that every selected capability has a causality status.
 """
 from __future__ import annotations
 
@@ -71,3 +71,49 @@ def validate_local_model_armor_metadata(
             missing.append("source_anchor_missing_reason_absent")
 
     return (len(missing) == 0, missing)
+
+
+def validate_capability_causality(
+    metadata: Mapping[str, Any],
+) -> tuple[bool, list[str]]:
+    """Validate that every selected capability has a causality status.
+
+    Returns:
+        (is_complete, issues) where issues lists failed checks.
+    """
+    issues: list[str] = []
+    selected = metadata.get("selected_capabilities_used", [])
+    if not selected:
+        return (True, [])
+
+    # Check each selected capability has execution result
+    gate_results = metadata.get("gate_results", {})
+    ddtree_result = metadata.get("ddtree_result")
+    autoreason_result = metadata.get("autoreason_result")
+
+    for cap in selected:
+        if cap == "local_model_executor":
+            # Always present if we're in this path
+            continue
+        elif cap == "ddtree":
+            if not ddtree_result or not ddtree_result.get("invoked"):
+                issues.append(f"ddtree_selected_but_not_invoked")
+        elif cap == "autoreason":
+            if not autoreason_result or not autoreason_result.get("invoked"):
+                issues.append(f"autoreason_selected_but_not_invoked")
+        elif cap in ("artifact_gate", "claim_gate", "delivery_gate"):
+            gate = gate_results.get(cap)
+            if not gate or not gate.get("invoked"):
+                issues.append(f"{cap}_selected_but_not_invoked")
+        elif cap in ("swarm_multi_agent", "drone", "ultra_review", "hyper_sprint",
+                       "nightshift", "codeintel", "lancedb", "belief", "mempalace",
+                       "research", "ui_validator", "external_productivity"):
+            # External only - expected
+            pass
+        elif cap in ("memory",):
+            # Metadata only - expected
+            pass
+        else:
+            issues.append(f"{cap}_selected_but_causality_unknown")
+
+    return (len(issues) == 0, issues)

@@ -1,6 +1,9 @@
 from __future__ import annotations
 
-from nexus.services.local_heal.local_model_armor_receipt_gate import validate_local_model_armor_metadata
+from nexus.services.local_heal.local_model_armor_receipt_gate import (
+    validate_local_model_armor_metadata,
+    validate_capability_causality,
+)
 
 
 def _good_metadata():
@@ -83,4 +86,54 @@ def test_source_anchor_false_with_reason_passes():
     m["source_anchor_present"] = False
     m["source_anchor_missing"] = True
     ok, missing = validate_local_model_armor_metadata(m)
+    assert ok is True
+
+
+# --- Causality tests ---
+
+def test_causality_empty_selected_passes():
+    ok, issues = validate_capability_causality({})
+    assert ok is True
+
+
+def test_causality_ddtree_selected_not_invoked_fails():
+    m = _good_metadata()
+    m["selected_capabilities_used"] = ["ddtree", "autoreason"]
+    m["ddtree_result"] = {"invoked": False, "failure_reason": "no_candidates"}
+    m["autoreason_result"] = {"invoked": True}
+    ok, issues = validate_capability_causality(m)
+    assert ok is False
+    assert "ddtree_selected_but_not_invoked" in issues
+
+
+def test_causality_ddtree_selected_invoked_passes():
+    m = _good_metadata()
+    m["selected_capabilities_used"] = ["ddtree"]
+    m["ddtree_result"] = {"invoked": True, "gate_passed": True}
+    ok, issues = validate_capability_causality(m)
+    assert ok is True
+
+
+def test_causality_autoreason_selected_not_invoked_fails():
+    m = _good_metadata()
+    m["selected_capabilities_used"] = ["autoreason"]
+    m["autoreason_result"] = {"invoked": False}
+    ok, issues = validate_capability_causality(m)
+    assert ok is False
+    assert "autoreason_selected_but_not_invoked" in issues
+
+
+def test_causality_gate_selected_not_invoked_fails():
+    m = _good_metadata()
+    m["selected_capabilities_used"] = ["artifact_gate"]
+    m["gate_results"] = {"artifact_gate": {"invoked": False}}
+    ok, issues = validate_capability_causality(m)
+    assert ok is False
+    assert "artifact_gate_selected_but_not_invoked" in issues
+
+
+def test_causality_external_only_ignored():
+    m = _good_metadata()
+    m["selected_capabilities_used"] = ["swarm_multi_agent", "drone"]
+    ok, issues = validate_capability_causality(m)
     assert ok is True
