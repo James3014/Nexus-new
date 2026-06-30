@@ -190,6 +190,10 @@ class PatchSynthesisPhase(IPhase):
                 error_reason=reason
             )
 
+        # C5D: Record output excerpt and length
+        model_decisions[-1]["output_len"] = len(response)
+        model_decisions[-1]["output_excerpt"] = response[:500]
+
         if not response:
             model_decisions[-1]["status"] = "MODEL_EMPTY_RESPONSE"
             return PatchSynthesisOutput(

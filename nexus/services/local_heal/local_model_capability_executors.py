@@ -482,13 +482,18 @@ class LocalHealPipelineCapabilityExecutor:
             pipeline_solve_eligible = getattr(pipeline_result_ctx, "solve_eligible", False)
             pipeline_failure_reason = getattr(pipeline_result_ctx, "failure_reason", "") or ""
 
-        # C1: Phase progression telemetry from pipeline result context
+        # C1/C5D: Phase progression + attempt telemetry from pipeline result context
         phase_reached = ""
         patch_synthesis_reached = False
         reproduction_reached = False
         planning_reached = False
         localization_reached = False
         verification_reached = False
+        patch_attempt_count = 0
+        patch_attempt_errors = []
+        patch_attempt_output_lens = []
+        patch_attempt_file_paths = []
+        patch_attempt_output_excerpt = ""
 
         if pipeline_result_ctx is not None:
             # Extract phase progression from context fields
@@ -499,19 +504,17 @@ class LocalHealPipelineCapabilityExecutor:
             evaluation_report = getattr(pipeline_result_ctx, "evaluation_report", "") or ""
             skipped_repro = getattr(pipeline_result_ctx, "skip_reproduction", False)
             failure_reason = getattr(pipeline_result_ctx, "failure_reason", "") or ""
+            model_decisions = getattr(pipeline_result_ctx, "model_decisions", []) or []
 
             reproduction_reached = bool(repro_evidence) or skipped_repro
             planning_reached = plan is not None and (isinstance(plan, dict) and plan.get("search_symbols")) or (hasattr(plan, "search_symbols") and plan.search_symbols)
             localization_reached = bool(localized_files)
-            # C2: patch_synthesis_reached if plan exists and localized_files exist (patch synthesis was attempted)
             patch_synthesis_reached = planning_reached and localization_reached
             verification_reached = bool(evaluation_report)
 
-            # If patch synthesis was attempted but failed, record the failure
             if patch_synthesis_reached and not final_patch and failure_reason:
                 phase_reached = "patch_synthesis_failed"
 
-            # Determine phase_reached (last completed phase)
             if verification_reached:
                 phase_reached = "verification"
             elif patch_synthesis_reached:
@@ -522,6 +525,18 @@ class LocalHealPipelineCapabilityExecutor:
                 phase_reached = "planning"
             elif reproduction_reached:
                 phase_reached = "reproduction"
+
+            # C5D: Extract patch attempt telemetry from model_decisions
+            patch_decisions = [d for d in model_decisions if d.get("phase") == "patch"]
+            patch_attempt_count = len(patch_decisions)
+            for d in patch_decisions:
+                patch_attempt_errors.append(d.get("status", ""))
+                patch_attempt_output_lens.append(d.get("output_len", 0))
+                patch_attempt_file_paths.append(d.get("file_path", ""))
+            # Last attempt output excerpt (safe truncation)
+            if patch_decisions:
+                last_output = patch_decisions[-1].get("output_excerpt", "")[:500]
+                patch_attempt_output_excerpt = last_output
 
         return CapabilityExecutionResult(
             name="repair_loop", selected=True, invoked=True,
@@ -538,6 +553,12 @@ class LocalHealPipelineCapabilityExecutor:
                 "localization_reached": localization_reached,
                 "patch_synthesis_reached": patch_synthesis_reached,
                 "verification_reached": verification_reached,
+                # C5D: Patch attempt trace
+                "patch_attempt_count": patch_attempt_count,
+                "patch_attempt_errors": patch_attempt_errors,
+                "patch_attempt_output_lens": patch_attempt_output_lens,
+                "patch_attempt_file_paths": patch_attempt_file_paths,
+                "patch_attempt_output_excerpt": patch_attempt_output_excerpt,
                 "patch_synthesis_provider_error": _last_provider_diag.get("provider_error", ""),
                 "patch_synthesis_model_called": _last_provider_diag.get("model_called", False),
                 "patch_synthesis_output_len": _last_provider_diag.get("output_len", 0),
