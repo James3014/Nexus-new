@@ -346,11 +346,33 @@ class LocalModelExecutor:
             
             selected_patch = decision.selected_candidate_patch
             patch_meta = {}
+            retry_available = False
+            retry_not_invoked_reason = ""
             if selected_patch.strip():
                 selected_patch, patch_meta = _normalize_candidate_patch(request, locked_search, selected_patch)
                 selected_hash = hashlib.sha256(selected_patch.encode("utf-8")).hexdigest() if selected_patch.strip() else empty_hash
             else:
                 selected_hash = empty_hash
+
+            # A5: Wire parse failure into retry/feedback seam
+            protocol_parse_failed = patch_meta.get("protocol_parse_failed", False)
+            error_kind = patch_meta.get("error_kind", "")
+            if protocol_parse_failed:
+                try:
+                    from nexus.services.local_heal.failure_feedback_builder import build_failure_feedback
+                    fence_feedback = build_failure_feedback(
+                        task_id=request.task_id,
+                        failure_class=error_kind or "PROTOCOL_PARSE_FAILED",
+                        target_file=request.target_file,
+                        target_symbol=target_symbol,
+                        locked_search=locked_search,
+                        previous_block_reason=error_kind or "protocol_parse_failed",
+                        verifier_status="fail",
+                    )
+                    retry_available = True
+                except Exception:
+                    retry_available = False
+                    retry_not_invoked_reason = "feedback_builder_unavailable"
                 
             provider_name = "ollama" if isinstance(provider, OllamaLocalModelProvider) else "injected"
             
@@ -407,6 +429,10 @@ class LocalModelExecutor:
                 "claim_gate_passed": gate_results.get("claim_gate", CapabilityExecutionResult(name="claim_gate", selected=False, invoked=False, gate_passed=False, outcome_contributed=False, evidence_present=False)).gate_passed,
                 "delivery_gate_passed": gate_results.get("delivery_gate", CapabilityExecutionResult(name="delivery_gate", selected=False, invoked=False, gate_passed=False, outcome_contributed=False, evidence_present=False)).gate_passed,
                 "gate_results": {k: v.to_receipt_dict() for k, v in gate_results.items()},
+                "protocol_parse_failed": protocol_parse_failed,
+                "protocol_parse_error_kind": error_kind,
+                "retry_available": retry_available,
+                "retry_not_invoked_reason": retry_not_invoked_reason,
             }
             armor_ok, armor_miss = validate_local_model_armor_metadata(raw_meta)
             raw_meta["armor_receipt_complete"] = armor_ok

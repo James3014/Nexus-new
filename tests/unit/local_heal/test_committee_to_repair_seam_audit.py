@@ -238,6 +238,156 @@ class TestCommitteeToRepairSeamAudit(unittest.TestCase):
         )
 
 
+class TestCommitteeFenceFailureRetrySeam(unittest.TestCase):
+    """A5: Committee parse failure feeds existing retry/feedback metadata."""
+
+    def test_committee_fence_parse_failure_builds_failure_feedback_metadata(self):
+        """REPLACEMENT_MARKDOWN_FENCE parse failure builds retry metadata."""
+        proposer_patch = "```python\n<<<<<<< REPLACE\nprint('fixed')\n>>>>>>> REPLACE\n```"
+        proposer = _make_proposer_candidate(proposer_patch)
+        judge = _make_judge_candidate()
+        candidates = [proposer, judge]
+
+        request = _make_request(patch_text=proposer_patch)
+
+        mock_provider = MagicMock(spec=InjectedLocalModelProvider)
+        mock_provider.generate.return_value = MagicMock(
+            output_text=proposer_patch,
+            error="",
+            model_called=True,
+            provider_invoked=True,
+            timed_out=False,
+        )
+
+        with patch(
+            "nexus.services.local_heal.local_committee_candidate_provider.LocalCommitteeCandidateProvider.generate_committee_candidates",
+            return_value=candidates,
+        ):
+            response = LocalModelExecutor.run(request, provider=mock_provider)
+
+        meta = response.raw_model_metadata
+        self.assertTrue(meta.get("protocol_parse_failed", False))
+        self.assertIn(meta.get("protocol_parse_error_kind", ""), ("REPLACEMENT_MARKDOWN_FENCE", "NO_BLOCKS_FOUND"))
+        self.assertTrue(meta.get("retry_available", False))
+
+    def test_committee_fence_parse_failure_does_not_mark_solved_before_retry(self):
+        """Parse failure does not set solved=true even with retry available."""
+        proposer_patch = "```python\n<<<<<<< REPLACE\nprint('fixed')\n>>>>>>> REPLACE\n```"
+        proposer = _make_proposer_candidate(proposer_patch)
+        judge = _make_judge_candidate()
+        candidates = [proposer, judge]
+
+        request = _make_request(patch_text=proposer_patch)
+
+        mock_provider = MagicMock(spec=InjectedLocalModelProvider)
+        mock_provider.generate.return_value = MagicMock(
+            output_text=proposer_patch,
+            error="",
+            model_called=True,
+            provider_invoked=True,
+            timed_out=False,
+        )
+
+        with patch(
+            "nexus.services.local_heal.local_committee_candidate_provider.LocalCommitteeCandidateProvider.generate_committee_candidates",
+            return_value=candidates,
+        ):
+            response = LocalModelExecutor.run(request, provider=mock_provider)
+
+        meta = response.raw_model_metadata
+        self.assertFalse(meta.get("solved", False))
+        self.assertEqual(
+            response.candidate_hash,
+            hashlib.sha256(b"").hexdigest(),
+        )
+
+    def test_committee_fence_parse_failure_does_not_apply_mutation_before_retry(self):
+        """Parse failure does not apply mutation — candidate_patch remains empty."""
+        proposer_patch = "```python\n<<<<<<< REPLACE\nprint('fixed')\n>>>>>>> REPLACE\n```"
+        proposer = _make_proposer_candidate(proposer_patch)
+        judge = _make_judge_candidate()
+        candidates = [proposer, judge]
+
+        request = _make_request(patch_text=proposer_patch)
+
+        mock_provider = MagicMock(spec=InjectedLocalModelProvider)
+        mock_provider.generate.return_value = MagicMock(
+            output_text=proposer_patch,
+            error="",
+            model_called=True,
+            provider_invoked=True,
+            timed_out=False,
+        )
+
+        with patch(
+            "nexus.services.local_heal.local_committee_candidate_provider.LocalCommitteeCandidateProvider.generate_committee_candidates",
+            return_value=candidates,
+        ):
+            response = LocalModelExecutor.run(request, provider=mock_provider)
+
+        self.assertEqual(response.candidate_patch, "")
+
+    def test_committee_non_fence_parse_failure_existing_behavior_unchanged(self):
+        """Non-fence parse failures retain existing fail-closed behavior."""
+        proposer_patch = "invalid patch no headers"
+        proposer = _make_proposer_candidate(proposer_patch)
+        judge = _make_judge_candidate()
+        candidates = [proposer, judge]
+
+        request = _make_request(patch_text=proposer_patch)
+
+        mock_provider = MagicMock(spec=InjectedLocalModelProvider)
+        mock_provider.generate.return_value = MagicMock(
+            output_text=proposer_patch,
+            error="",
+            model_called=True,
+            provider_invoked=True,
+            timed_out=False,
+        )
+
+        with patch(
+            "nexus.services.local_heal.local_committee_candidate_provider.LocalCommitteeCandidateProvider.generate_committee_candidates",
+            return_value=candidates,
+        ):
+            response = LocalModelExecutor.run(request, provider=mock_provider)
+
+        meta = response.raw_model_metadata
+        self.assertTrue(meta.get("protocol_parse_failed", False))
+        self.assertEqual(
+            response.candidate_hash,
+            hashlib.sha256(b"").hexdigest(),
+        )
+
+    def test_committee_retry_exhaustion_empty_hash_no_solved(self):
+        """Retry exhaustion returns empty hash and solved=false."""
+        proposer_patch = "```python\n<<<<<<< REPLACE\nprint('fixed')\n>>>>>>> REPLACE\n```"
+        proposer = _make_proposer_candidate(proposer_patch)
+        judge = _make_judge_candidate()
+        candidates = [proposer, judge]
+
+        request = _make_request(patch_text=proposer_patch)
+
+        mock_provider = MagicMock(spec=InjectedLocalModelProvider)
+        mock_provider.generate.return_value = MagicMock(
+            output_text=proposer_patch,
+            error="",
+            model_called=True,
+            provider_invoked=True,
+            timed_out=False,
+        )
+
+        with patch(
+            "nexus.services.local_heal.local_committee_candidate_provider.LocalCommitteeCandidateProvider.generate_committee_candidates",
+            return_value=candidates,
+        ):
+            response = LocalModelExecutor.run(request, provider=mock_provider)
+
+        meta = response.raw_model_metadata
+        self.assertFalse(meta.get("solved", False))
+        self.assertEqual(
+            response.candidate_hash,
+            hashlib.sha256(b"").hexdigest(),
+        )
 
 
 if __name__ == "__main__":
