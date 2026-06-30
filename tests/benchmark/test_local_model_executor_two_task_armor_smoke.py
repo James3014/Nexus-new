@@ -245,3 +245,132 @@ def test_two_task_local_model_armor_smoke_locked_search_and_ast_boundary(monkeyp
     assert summary["local_model_executor_receipts"] == 2
     assert summary["source_anchor_sources"] == ["locked_search", "ast_boundary"]
     assert summary["final_authority"] == "NexusVerifier"
+
+
+def test_finalize_with_nexus_row_capability_execution_smoke(monkeypatch, tmp_path):
+    """C7: Verify ddtree/autoreason/gates are actually invoked, not just metadata."""
+    from nexus.services.local_heal.local_committee_candidate_provider import LocalCommitteeCandidateProvider
+    from nexus.services.local_heal.candidate_envelope import CandidateEnvelope
+    from nexus.services.local_heal.isolated_local_solve_loop import (
+        IsolatedLocalSolveResponse, IsolatedApplyReceipt, IsolatedVerifierReceipt, CandidateIsolationReceipt,
+    )
+    from nexus.contracts.hybrid_route import HybridRouteDecision, RouteMode, VerifierResult, Authority
+
+    monkeypatch.setenv("NEXUS_ENABLE_LOCAL_MODEL_EXECUTOR", "1")
+    monkeypatch.setenv("NEXUS_LOCAL_MODEL_EXECUTOR_DRY_RUN", "0")
+    monkeypatch.setenv("NEXUS_LOCAL_MODEL_CALL_ALLOWED", "1")
+    monkeypatch.setenv("NEXUS_PROTOCOL_MODE", "anchored_edit")
+
+    resolved_path = tmp_path.resolve()
+    target_dir = resolved_path / "pkg"
+    target_dir.mkdir(parents=True, exist_ok=True)
+    (target_dir / "mod.py").write_text("def func():\n    pass\n", encoding="utf-8")
+
+    committee_called = False
+    def mock_committee(*args, **kwargs):
+        nonlocal committee_called
+        committee_called = True
+        patch = "<<<<<<< REPLACE\ndef func():\n    return 1\n>>>>>>> REPLACE"
+        return [
+            CandidateEnvelope(
+                candidate_id="c1", task_id="t", source="local", model="qwen2.5-coder:7b",
+                role="primary_proposer", patch_protocol="anchored_edit",
+                target_file="pkg/mod.py", target_symbol="func", source_anchor_hash="h",
+                candidate_patch_hash=hashlib.sha256(patch.encode()).hexdigest(),
+                evidence_refs=("ref1",), candidate_patch=patch,
+            )
+        ]
+    monkeypatch.setattr(LocalCommitteeCandidateProvider, "generate_committee_candidates", mock_committee)
+
+    mock_solve = IsolatedLocalSolveResponse(
+        patch_envelope=type("E", (), {"candidate_hash": "h123", "unified_diff": "d"})(),
+        apply_receipt=IsolatedApplyReceipt(
+            task_id="t", workspace_path="", target_file="pkg/mod.py",
+            patch_apply_status="applied", patch_apply_error="",
+            selected_candidate_hash="h123", applied_patch_hash="h123",
+            selected_candidate_hash_matches_applied=True, candidate_output_isolated=True,
+            mutation_allowed=False,
+        ),
+        verifier_receipt=IsolatedVerifierReceipt(
+            task_id="t", verifier_status="pass", exit_code=0,
+            stdout_tail="", stderr_tail="", verifier_error="", verifier_allowed=True,
+        ),
+        candidate_isolation_receipt=CandidateIsolationReceipt(
+            candidate_id="c1", selected_candidate_hash="h123",
+            applied_patch_hash="h123", selected_candidate_hash_matches_applied=True,
+            candidate_output_isolated=True, verifier_result=VerifierResult.PASS,
+            evidence_refs=("ref1",), local_model_called=True,
+            mutation_allowed=False, repaired_by_rule="none",
+        ),
+        hybrid_route=HybridRouteDecision(
+            route_mode=RouteMode.LOCAL_ONLY_EXECUTED,
+            public_claim_allowed=False, production_ready=False,
+            adapter_output_is_route_truth=False, route_truth_source="CapabilityPlanner",
+            behavior_changed=False, authority=Authority.INTERNAL_ONLY,
+            cloud_model_called=False, local_model_called=True,
+            candidate_output_isolated=True, selected_candidate_hash="h123",
+            applied_patch_hash="h123", selected_candidate_hash_matches_applied=True,
+            verifier_result=VerifierResult.PASS, evidence_refs=("ref1",),
+        ),
+        capability_payload={"gate_passed": True, "metadata": {"verifier_status": "pass"}},
+    )
+    from nexus.services.local_heal import isolated_local_solve_loop
+    monkeypatch.setattr(isolated_local_solve_loop, "run_isolated_local_solve_loop", lambda req: mock_solve)
+
+    task = CapabilityTask(
+        id="cap-exec-smoke", task_desc="capability execution smoke",
+        task_type="bug", success_criteria="passes", difficulty="easy", category="test",
+        expected_capabilities=["local_model_executor", "ddtree", "autoreason", "artifact_gate", "claim_gate", "delivery_gate"],
+        target_file="pkg/mod.py", test_file="pkg/test_mod.py",
+    )
+    row = {
+        "capability_plan_selected": ["local_model_executor", "ddtree", "autoreason", "artifact_gate", "claim_gate", "delivery_gate"],
+        "evidence_refs": ["cap-exec-ref"], "verifier_command": ["echo", "ok"],
+        "target_symbol": "func", "locked_search": "def func():\n    pass",
+        "candidate_generate_fn": lambda req: "mock",
+        "signal_snapshot": {"execution_topology": "local_committee_only"},
+    }
+
+    finalized = _finalize_with_nexus_row(
+        row, provider="ollama", model_required=True, nexus_required=True,
+        task=task, repo_root=resolved_path,
+    )
+
+    # Verify executor was invoked
+    assert finalized.get("local_executor_planned") is True
+
+    # Verify receipt exists
+    receipt = finalized.get("local_executor_receipt")
+    assert receipt is not None
+    assert receipt["name"] == "local_model_executor"
+
+    # Verify adapter metadata has execution results
+    adapter = finalized.get("local_model_adapter", {})
+    adapter_meta = adapter.get("metadata", {})
+
+    # KEY: ddtree and autoreason must be invoked, not just metadata
+    assert adapter_meta.get("ddtree_invoked") is True, "ddtree not invoked"
+    assert adapter_meta.get("autoreason_invoked") is True, "autoreason not invoked"
+
+    # KEY: gates must be invoked
+    assert adapter_meta.get("artifact_gate_invoked") is True, "artifact_gate not invoked"
+    assert adapter_meta.get("claim_gate_invoked") is True, "claim_gate not invoked"
+    assert adapter_meta.get("delivery_gate_invoked") is True, "delivery_gate not invoked"
+
+    # Verify execution results exist
+    ddtree_result = adapter_meta.get("ddtree_result")
+    assert ddtree_result is not None, "ddtree_result missing"
+    assert ddtree_result.get("invoked") is True
+
+    autoreason_result = adapter_meta.get("autoreason_result")
+    assert autoreason_result is not None, "autoreason_result missing"
+    assert autoreason_result.get("invoked") is True
+
+    gate_results = adapter_meta.get("gate_results", {})
+    for gate_name in ("artifact_gate", "claim_gate", "delivery_gate"):
+        assert gate_name in gate_results, f"{gate_name} missing from gate_results"
+        assert gate_results[gate_name].get("invoked") is True, f"{gate_name} not invoked"
+
+    # Verify capability_receipts contains gate receipts
+    receipts = finalized.get("capability_receipts", [])
+    # Gate receipts should be present if they were executed

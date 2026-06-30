@@ -14202,6 +14202,8 @@ def _finalize_with_nexus_row(
                 "metadata": {
                     "executor_model": exec_resp.model_name,
                     "executor_provider": exec_resp.provider,
+                    **{k: v for k, v in (exec_resp.raw_model_metadata or {}).items()
+                       if k not in ("executor_model", "executor_provider")},
                 }
             }
         except Exception as e:
