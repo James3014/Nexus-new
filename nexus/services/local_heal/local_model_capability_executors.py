@@ -384,7 +384,8 @@ class LocalHealPipelineCapabilityExecutor:
         if modules.get("evaluation_gate"):
             invoked_modules.append("evaluation_gate")
 
-        actual_execution = path_a_actual_execution and len(invoked_modules) >= 2
+        # B2: actual_execution requires pipeline.run() success, not just instantiation
+        actual_execution = pipeline_run_success and len(invoked_modules) >= 2
 
         # Extract pipeline result if available
         pipeline_final_patch = ""

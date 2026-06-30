@@ -591,3 +591,125 @@ class TestHealPipelineRunInvocationTruth:
 
                     # .run() IS now called through the full executor path (B1)
                     pipeline_run_mock.assert_called_once()
+
+
+class TestPipelineTelemetrySemanticsB2:
+    """B2: Telemetry semantics must be truthful."""
+
+    def test_pipeline_instantiated_does_not_mean_actual_execution(self):
+        """Instantiation alone does not set actual_execution=True."""
+        from nexus.services.local_heal.pipeline import HealPipeline
+
+        pipeline_run_mock = MagicMock(side_effect=RuntimeError("run failed"))
+        provider = _build_provider_mock()
+
+        with patch.object(HealPipeline, "__init__", return_value=None):
+            with patch.object(HealPipeline, "run", pipeline_run_mock):
+                ctx = LocalModelCapabilityContext(
+                    task_id="t_b2_init",
+                    source_root="/tmp",
+                    problem_statement="fix bug",
+                    target_file="a.py",
+                    target_symbol="f",
+                    selected_capabilities=("repair_loop",),
+                    execution_topology="localheal_pipeline",
+                    evidence_refs=("e1",),
+                    source_anchor={"present": False},
+                    route_context={},
+                    provider=provider,
+                )
+                result = LocalHealPipelineCapabilityExecutor().execute(ctx)
+
+                assert result.telemetries.get("localheal_pipeline_instantiated") is True
+                assert result.telemetries.get("localheal_pipeline_actual_execution") is False
+
+    def test_pipeline_run_called_does_not_mean_run_success(self):
+        """run_called=True does not imply run_success=True."""
+        from nexus.services.local_heal.pipeline import HealPipeline
+
+        pipeline_run_mock = MagicMock(side_effect=RuntimeError("run failed"))
+        provider = _build_provider_mock()
+
+        with patch.object(HealPipeline, "__init__", return_value=None):
+            with patch.object(HealPipeline, "run", pipeline_run_mock):
+                ctx = LocalModelCapabilityContext(
+                    task_id="t_b2_run",
+                    source_root="/tmp",
+                    problem_statement="fix bug",
+                    target_file="a.py",
+                    target_symbol="f",
+                    selected_capabilities=("repair_loop",),
+                    execution_topology="localheal_pipeline",
+                    evidence_refs=("e1",),
+                    source_anchor={"present": False},
+                    route_context={},
+                    provider=provider,
+                )
+                result = LocalHealPipelineCapabilityExecutor().execute(ctx)
+
+                assert result.telemetries.get("localheal_pipeline_run_called") is True
+                assert result.telemetries.get("localheal_pipeline_run_success") is False
+
+    def test_pipeline_actual_execution_requires_run_success(self):
+        """actual_execution=True only when run_success=True."""
+        from nexus.services.local_heal.pipeline import HealPipeline
+
+        pipeline_run_mock = MagicMock()
+        mock_ctx = MagicMock()
+        mock_ctx.final_patch = "patch"
+        mock_ctx.solve_eligible = True
+        mock_ctx.failure_reason = ""
+        pipeline_run_mock.return_value = mock_ctx
+        provider = _build_provider_mock()
+
+        with patch.object(HealPipeline, "__init__", return_value=None):
+            with patch.object(HealPipeline, "run", pipeline_run_mock):
+                ctx = LocalModelCapabilityContext(
+                    task_id="t_b2_exec",
+                    source_root="/tmp",
+                    problem_statement="fix bug",
+                    target_file="a.py",
+                    target_symbol="f",
+                    selected_capabilities=("repair_loop",),
+                    execution_topology="localheal_pipeline",
+                    evidence_refs=("e1",),
+                    source_anchor={"present": False},
+                    route_context={},
+                    provider=provider,
+                )
+                result = LocalHealPipelineCapabilityExecutor().execute(ctx)
+
+                assert result.telemetries.get("localheal_pipeline_run_success") is True
+                assert result.telemetries.get("localheal_pipeline_actual_execution") is True
+
+    def test_semantic_retry_invoked_requires_orchestrator_telemetry(self):
+        """semantic_retry_invoked must come from orchestrator, not retry_available."""
+        from nexus.services.local_heal.pipeline import HealPipeline
+
+        pipeline_run_mock = MagicMock()
+        mock_ctx = MagicMock()
+        mock_ctx.final_patch = ""
+        mock_ctx.solve_eligible = False
+        mock_ctx.failure_reason = ""
+        pipeline_run_mock.return_value = mock_ctx
+        provider = _build_provider_mock()
+
+        with patch.object(HealPipeline, "__init__", return_value=None):
+            with patch.object(HealPipeline, "run", pipeline_run_mock):
+                ctx = LocalModelCapabilityContext(
+                    task_id="t_b2_retry",
+                    source_root="/tmp",
+                    problem_statement="fix bug",
+                    target_file="a.py",
+                    target_symbol="f",
+                    selected_capabilities=("repair_loop",),
+                    execution_topology="localheal_pipeline",
+                    evidence_refs=("e1",),
+                    source_anchor={"present": False},
+                    route_context={},
+                    provider=provider,
+                )
+                result = LocalHealPipelineCapabilityExecutor().execute(ctx)
+
+                # semantic_retry_invoked is False by default — only set by orchestrator telemetry
+                assert result.telemetries.get("semantic_retry_invoked") is False
