@@ -343,8 +343,12 @@ class LocalHealPipelineCapabilityExecutor:
                 from pathlib import Path as _Path
 
                 real_provider = ctx.provider
+                # B7.5: Provider diagnostics storage
+                _last_provider_diag = {}
+
                 if real_provider is not None:
                     def _provider_generate(system_prompt_or_req, user_prompt=None, **kwargs):
+                        nonlocal _last_provider_diag
                         from nexus.services.local_heal.local_model_provider import LocalModelProviderRequest
                         # OllamaLLMClient passes (system_prompt, user_prompt) as two strings
                         # LocalModelProviderRequest passes a single request object
@@ -361,6 +365,17 @@ class LocalHealPipelineCapabilityExecutor:
                             model_name=model_name,
                         )
                         prov_resp = real_provider.generate(prov_req)
+                        # B7.5: Store diagnostics for telemetry
+                        _last_provider_diag = {
+                            "provider_invoked": prov_resp.provider_invoked,
+                            "model_called": prov_resp.model_called,
+                            "model_name": prov_resp.model_name or model_name,
+                            "provider_error": prov_resp.error or "",
+                            "timed_out": prov_resp.timed_out,
+                            "output_truncated": prov_resp.output_truncated,
+                            "output_len": len(prov_resp.output_text),
+                            "prompt_len": len(prompt),
+                        }
                         return prov_resp.output_text or ""
                     pipeline = HealPipeline(ollama_generate_fn=_provider_generate)
                 else:
@@ -420,12 +435,34 @@ class LocalHealPipelineCapabilityExecutor:
             pipeline_solve_eligible = getattr(pipeline_result_ctx, "solve_eligible", False)
             pipeline_failure_reason = getattr(pipeline_result_ctx, "failure_reason", "") or ""
 
+        # B7.5: Phase progression telemetry
+        phase_reached = "reproduction"
+        patch_synthesis_reached = False
+        if pipeline_run_success:
+            phase_reached = "patch_synthesis"
+            patch_synthesis_reached = True
+
         return CapabilityExecutionResult(
             name="repair_loop", selected=True, invoked=True,
             gate_passed=actual_execution, outcome_contributed=actual_execution,
             evidence_present=True,
             failure_reason="" if actual_execution else f"path_a_execution_missing: {path_a_failure_reason}",
             telemetries={
+                "phase_reached": phase_reached,
+                "patch_synthesis_reached": patch_synthesis_reached,
+                "patch_synthesis_provider_error": _last_provider_diag.get("provider_error", ""),
+                "patch_synthesis_model_called": _last_provider_diag.get("model_called", False),
+                "patch_synthesis_output_len": _last_provider_diag.get("output_len", 0),
+                "patch_synthesis_prompt_len": _last_provider_diag.get("prompt_len", 0),
+                "patch_synthesis_model_name": _last_provider_diag.get("model_name", ""),
+                "provider_error": _last_provider_diag.get("provider_error", ""),
+                "provider_invoked": _last_provider_diag.get("provider_invoked", False),
+                "model_called": _last_provider_diag.get("model_called", False),
+                "model_name_used": _last_provider_diag.get("model_name", ""),
+                "timed_out": _last_provider_diag.get("timed_out", False),
+                "output_truncated": _last_provider_diag.get("output_truncated", False),
+                "output_len": _last_provider_diag.get("output_len", 0),
+                "prompt_len": _last_provider_diag.get("prompt_len", 0),
                 "localheal_pipeline_available": modules.get("heal_pipeline", False),
                 "localheal_pipeline_instantiated": "heal_pipeline" in invoked_modules,
                 "localheal_pipeline_run_called": pipeline_run_called,
