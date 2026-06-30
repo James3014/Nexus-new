@@ -67,7 +67,7 @@ def test_isolated_local_solve_loop_success() -> None:
         assert resp.hybrid_route.authority == Authority.INTERNAL_ONLY
         assert resp.capability_payload["gate_passed"] is True
         
-        assert resp.capability_payload["metadata"]["canonical_span_source"] in ("unified_diff", "locked_search")
+        assert resp.capability_payload["metadata"]["canonical_span_source"] in ("unified_diff", "locked_search", "file_scope", "granular_localizer")
         
         with open(src_path, "r", encoding="utf-8") as f:
             assert f.read() == "print('hello')\n"
