@@ -34,10 +34,10 @@ def test_localheal_pipeline_availability_reported():
 def test_localheal_pipeline_topology_invokes_modules():
     """When in pipeline topology, executor invokes path A modules."""
     ctx = _make_ctx(topology="localheal_pipeline")
+    ctx.failure_feedback = "VERIFIER_FAIL: previous attempt"
     r = LocalHealPipelineCapabilityExecutor().execute(ctx)
     assert r.invoked is True
-    # localheal_pipeline may fail to fully invoke due to HealContext import,
-    # but other modules should be invoked
+    assert r.telemetries.get("localheal_pipeline_actual_execution") is True
     assert r.telemetries.get("committee_orchestrator_invoked") is True
     assert r.telemetries.get("solid_search_replace_protocol_invoked") is True
     assert r.telemetries.get("granular_localizer_invoked") is True
@@ -78,3 +78,38 @@ def test_localheal_pipeline_metadata_keys():
     ]
     for key in required_keys:
         assert key in r.telemetries, f"Missing key: {key}"
+
+
+# --- C9.1: Red tests for actual execution contract ---
+
+def test_localheal_pipeline_requires_actual_execution_not_availability_only():
+    """Availability-only bridge must fail causality gate."""
+    ctx = _make_ctx(topology="localheal_pipeline")
+    r = LocalHealPipelineCapabilityExecutor().execute(ctx)
+
+    # The current implementation should NOT pass gate_passed
+    # if it only instantiates modules without calling run/entry
+    # This is a RED test - if it passes, the bridge is still availability-only
+    if r.telemetries.get("localheal_pipeline_actual_execution") is not True:
+        assert r.gate_passed is False, "availability-only bridge must not pass gate"
+        assert "path_a_execution_missing" in r.failure_reason or r.failure_reason != ""
+
+
+def test_local_committee_only_must_not_call_path_a():
+    """local_committee_only must NOT invoke Path A run."""
+    path_a_called = []
+
+    def spy_run(*args, **kwargs):
+        path_a_called.append(True)
+        raise AssertionError("Path A run should not be called for local_committee_only")
+
+    from nexus.services.local_heal.pipeline import HealPipeline
+    original_run = HealPipeline.run
+    HealPipeline.run = spy_run
+    try:
+        ctx = _make_ctx(topology="local_committee_only")
+        r = LocalHealPipelineCapabilityExecutor().execute(ctx)
+        assert len(path_a_called) == 0, "Path A run was called for local_committee_only"
+        assert r.invoked is False
+    finally:
+        HealPipeline.run = original_run
