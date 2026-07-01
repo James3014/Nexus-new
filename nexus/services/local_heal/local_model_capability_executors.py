@@ -557,6 +557,7 @@ class LocalHealPipelineCapabilityExecutor:
         verifier_command_source = ""
         bare_python_rejected = False
         micro_verify_failure_reason = ""
+        search_mismatch = False
 
         if pipeline_result_ctx is not None:
             # Extract C7 classification
@@ -580,6 +581,13 @@ class LocalHealPipelineCapabilityExecutor:
             verifier_command_source = getattr(pipeline_result_ctx, "verifier_command_source", "")
             bare_python_rejected = getattr(pipeline_result_ctx, "bare_python_rejected", False)
             micro_verify_failure_reason = getattr(pipeline_result_ctx, "micro_verify_failure_reason", "")
+
+            # C12: Post-apply SEARCH_MISMATCH classification override
+            # model_decisions are lost through PhaseResult, so we classify here
+            # using pipeline_failure_reason which IS propagated.
+            if "SEARCH_MISMATCH" in pipeline_failure_reason:
+                output_class = "SEARCH_REPLACE_SEARCH_MISMATCH"
+                search_mismatch = True
 
         return CapabilityExecutionResult(
             name="repair_loop", selected=True, invoked=True,
@@ -657,5 +665,7 @@ class LocalHealPipelineCapabilityExecutor:
                 "verifier_command_source": verifier_command_source,
                 "bare_python_rejected": bare_python_rejected,
                 "micro_verify_failure_reason": micro_verify_failure_reason,
+                # C12: Search mismatch classification
+                "search_mismatch": search_mismatch,
             },
         )
