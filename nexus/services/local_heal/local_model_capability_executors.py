@@ -590,25 +590,26 @@ class LocalHealPipelineCapabilityExecutor:
             bare_python_rejected = getattr(pipeline_result_ctx, "bare_python_rejected", False)
             micro_verify_failure_reason = getattr(pipeline_result_ctx, "micro_verify_failure_reason", "")
 
-            # C12: Post-apply SEARCH_MISMATCH classification override
+            # C12/C13: Post-apply classification override
             # model_decisions are lost through PhaseResult, so we classify here
             # using pipeline_failure_reason which IS propagated.
-            if "SEARCH_MISMATCH" in pipeline_failure_reason:
-                output_class = "SEARCH_REPLACE_SEARCH_MISMATCH"
-                search_mismatch = True
+            # Classification is now unified in the C13 block below.
 
             # C13: No-block output classification refinement
             # When output exists but C7 classification is UNKNOWN (lost through PhaseResult),
             # infer from pipeline_failure_reason and output characteristics.
             if output_class == "UNKNOWN" and patch_synthesis_output_len > 0:
-                if "NO_BLOCKS_FOUND" in pipeline_failure_reason:
-                    output_class = "CODE_WITHOUT_SEARCH_REPLACE"
-                elif "REFUSAL" in pipeline_failure_reason or "REFUSAL_DETECTED" in pipeline_failure_reason:
-                    output_class = "REFUSAL"
+                if "SEARCH_MISMATCH" in pipeline_failure_reason:
+                    output_class = "SEARCH_REPLACE_SEARCH_MISMATCH"
+                    search_mismatch = True
                 elif "REPLACEMENT_MARKDOWN_FENCE" in pipeline_failure_reason:
                     output_class = "FENCED_SEARCH_REPLACE"
+                elif "REFUSAL" in pipeline_failure_reason or "REFUSAL_DETECTED" in pipeline_failure_reason:
+                    output_class = "REFUSAL"
                 elif "UNIFIED_DIFF" in pipeline_failure_reason:
                     output_class = "UNIFIED_DIFF"
+                elif "NO_BLOCKS_FOUND" in pipeline_failure_reason or "NO_EFFECTIVE_CHANGE" in pipeline_failure_reason:
+                    output_class = "CODE_WITHOUT_SEARCH_REPLACE"
                 else:
                     output_class = "NATURAL_LANGUAGE"
 
