@@ -125,12 +125,17 @@ class HealContext:
         return HealContextV2(op=op, gov=gov)
 
     def sync_from_v2(self, v2: HealContextV2) -> None:
-        """將 V2 Context 的狀態同步回目前實例 (In-place)"""
+        """將 V2 Context 的狀態同步回目前實例 (In-place)
+
+        NOTE: We sync ALL attrs from v2.op (including dynamically-set ones like
+        C8 micro_verify_context_present) regardless of whether legacy HealContext
+        originally declared them, so telemetry survives the V2→legacy round-trip.
+        """
         for attr, value in v2.op.__dict__.items():
-            if hasattr(self, attr):
-                setattr(self, attr, value)
+            setattr(self, attr, value)  # unconditional — carry dynamic attrs too
         self.expected_stop_layer = v2.gov.expected_stop_layer
         self.expected_reason_family = v2.gov.expected_reason_family
+
 
     @staticmethod
     def from_v2(v2: HealContextV2) -> HealContext:

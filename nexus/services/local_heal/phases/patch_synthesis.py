@@ -194,6 +194,68 @@ class PatchSynthesisPhase(IPhase):
         model_decisions[-1]["output_len"] = len(response) if response else 0
         model_decisions[-1]["output_excerpt"] = (response or "")[:500]
 
+        # C7: Output Classification
+        output_len = len(response) if response else 0
+        import hashlib
+        output_hash = hashlib.sha256(response.encode("utf-8")).hexdigest() if response else ""
+        output_excerpt = (response or "")[:500]
+
+        contains_search = "<<<<<<< SEARCH" in (response or "")
+        contains_replace = ">>>>>>> REPLACE" in (response or "")
+        contains_fence = "```" in (response or "")
+        contains_diff = ("--- a/" in (response or "") and "+++ b/" in (response or ""))
+
+        # Determine output_class
+        output_class = "UNKNOWN"
+        if not response or not response.strip():
+            output_class = "EMPTY"
+        elif "LLM refused fix" in response or "cannot fulfill" in response.lower() or "sorry" in response.lower():
+            output_class = "REFUSAL"
+        elif contains_search and contains_replace:
+            if contains_fence:
+                output_class = "FENCED_SEARCH_REPLACE"
+            else:
+                output_class = "VALID_SEARCH_REPLACE"
+        elif contains_diff:
+            output_class = "UNIFIED_DIFF"
+        elif contains_search or contains_replace:
+            output_class = "MALFORMED_SEARCH_REPLACE"
+        elif not contains_search and not contains_replace and not contains_diff:
+            output_class = "NATURAL_LANGUAGE"
+
+        # Parser check (run parser to get potential errors)
+        parser_error_kind = "none"
+        parser_error_message = "none"
+        if response:
+            intents_or_error = self.parser.parse(response)
+            if isinstance(intents_or_error, PatchError):
+                parser_error_kind = intents_or_error.kind.name if hasattr(intents_or_error.kind, "name") else str(intents_or_error.kind)
+                parser_error_message = intents_or_error.message
+
+        # Record these in the current model decision
+        model_decisions[-1]["output_hash"] = output_hash
+        model_decisions[-1]["output_class"] = output_class
+        model_decisions[-1]["parser_error_kind"] = parser_error_kind
+        model_decisions[-1]["parser_error_message"] = parser_error_message
+        model_decisions[-1]["contains_search_marker"] = contains_search
+        model_decisions[-1]["contains_replace_marker"] = contains_replace
+        model_decisions[-1]["contains_markdown_fence"] = contains_fence
+        model_decisions[-1]["contains_unified_diff_header"] = contains_diff
+        model_decisions[-1]["contains_natural_language_only"] = (output_class == "NATURAL_LANGUAGE")
+
+        output_classification_telemetry = {
+            "output_hash": output_hash,
+            "output_class": output_class,
+            "output_excerpt_first_500": output_excerpt,
+            "parser_error_kind": parser_error_kind,
+            "parser_error_message": parser_error_message,
+            "contains_search_marker": contains_search,
+            "contains_replace_marker": contains_replace,
+            "contains_markdown_fence": contains_fence,
+            "contains_unified_diff_header": contains_diff,
+            "contains_natural_language_only": output_class == "NATURAL_LANGUAGE",
+        }
+
         if not response:
             model_decisions[-1]["status"] = "MODEL_EMPTY_RESPONSE"
             return PatchSynthesisOutput(
@@ -288,8 +350,7 @@ class PatchSynthesisPhase(IPhase):
 
         model_decisions[-1]["status"] = "SUCCESS" if apply_res.success else apply_res.error_reason
         
-        # 5.5 Micro-verifier: lightweight check before full verification
-        micro_result = None
+        # Keep micro verification behavior unchanged during C7 recovery.
         if apply_res.success and apply_res.applied_diffs:
             patched_files = []
             for diff_text in apply_res.applied_diffs:
@@ -307,17 +368,21 @@ class PatchSynthesisPhase(IPhase):
                     if micro_result.error_message == "ENV_BLOCKED":
                         # MicroVerifier is pre-verifier only — env_blocked means
                         # interpreter unavailable, not patch incorrect.
-                        # Record telemetry but do not block patch application.
                         model_decisions[-1]["status"] = f"MICRO_VERIFY_{micro_result.error_message}_BYPASSED"
                         model_decisions[-1]["micro_verify_classifications"] = micro_result.classifications
                     else:
                         model_decisions[-1]["status"] = f"MICRO_VERIFY_{micro_result.error_message}"
+                        preflight_telemetry = dict(apply_res.preflight_telemetry)
+                        preflight_telemetry.update(output_classification_telemetry)
                         return PatchSynthesisOutput(
                             success=False,
                             final_patch="",
                             model_decisions=model_decisions,
-                            error_reason=f"MICRO_VERIFY_{micro_result.error_message}:{micro_result.details[:200]}"
+                            error_reason=f"MICRO_VERIFY_{micro_result.error_message}:{micro_result.details[:200]}",
+                            preflight_telemetry=preflight_telemetry
                         )
+        preflight_telemetry = dict(apply_res.preflight_telemetry)
+        preflight_telemetry.update(output_classification_telemetry)
         
         return PatchSynthesisOutput(
             success=apply_res.success,
@@ -325,7 +390,7 @@ class PatchSynthesisPhase(IPhase):
             model_decisions=model_decisions,
             error_reason=apply_res.error_reason or "",
             syntax_gate_passed=apply_res.syntax_gate_passed,
-            preflight_telemetry=apply_res.preflight_telemetry,
+            preflight_telemetry=preflight_telemetry,
             errors=apply_res.errors,
             last_search_anchors=[intent.search for intent in intents_or_error] if apply_res.success and not isinstance(intents_or_error, PatchError) else [],
             last_replacement_texts=[intent.replace for intent in intents_or_error] if apply_res.success and not isinstance(intents_or_error, PatchError) else []
@@ -350,6 +415,7 @@ class PatchSynthesisPhase(IPhase):
             last_replacement_texts=getattr(ctx.op, "last_replacement_texts", []),
             committee_model_override=str(getattr(ctx.op, "committee_proposer_model", "") or ""),
         )
+        object.__setattr__(input_data, "route_context", getattr(ctx.op, "route_context", {}))
 
         output = self.run(input_data)
 

@@ -15,6 +15,18 @@ from nexus.services.local_heal.local_model_provider import (
 from nexus.services.local_heal.local_model_armor_receipt_gate import validate_local_model_armor_metadata
 from nexus.services.local_heal.local_model_capability_context import LocalModelCapabilityContext, CapabilityExecutionResult
 from nexus.services.local_heal.local_assist_receipts import build_local_assist_telemetry_from_executor_meta
+from nexus.services.local_heal.candidate_isolation_gate import (
+    CandidateIsolationReceipt,
+    candidate_isolation_to_hybrid_route,
+)
+from nexus.services.local_heal.isolated_workspace_apply import (
+    IsolatedApplyRequest,
+    run_isolated_workspace_apply,
+)
+from nexus.services.local_heal.isolated_verifier import (
+    IsolatedVerifierRequest,
+    run_isolated_verifier,
+)
 
 
 @dataclass(frozen=True)
@@ -522,6 +534,86 @@ class LocalModelExecutor:
             claim_exec = ClaimGateLocalExecutor().execute(cap_ctx)
             delivery_exec = DeliveryGateLocalExecutor().execute(cap_ctx)
 
+            # B3: Check if pipeline produced a result
+            pipeline_final_patch = repair_exec.telemetries.get("pipeline_final_patch", "")
+            pipeline_solve_eligible = repair_exec.telemetries.get("pipeline_solve_eligible", False)
+            pipeline_failure_reason = repair_exec.telemetries.get("pipeline_failure_reason", "")
+            signal_snapshot = request.route_context.get("signal_snapshot", {}) if isinstance(request.route_context, dict) else {}
+            mutation_allowed = bool(signal_snapshot.get("mutation_allowed", False))
+            verifier_allowed = bool(signal_snapshot.get("verifier_allowed", False))
+            verifier_command = tuple(request.route_context.get("verifier_command", []) or [])
+
+            pipeline_final_patch_len = len(pipeline_final_patch) if pipeline_final_patch else 0
+            pipeline_result_projected = False
+            candidate_isolation_attempted = False
+            candidate_isolated = False
+            selected_candidate_hash = ""
+            applied_patch_hash = ""
+            hash_match = False
+            candidate_patch = ""
+            candidate_hash = empty_hash
+            patch_meta = {}
+            isolated_apply_status = ""
+            isolated_apply_error = ""
+            applied_patch_hash_source = ""
+            isolated_verifier_status = "not_run"
+            isolated_verifier_error = ""
+            hybrid_route = None
+            candidate_hash_empty = (candidate_hash == empty_hash)
+
+            if pipeline_final_patch and pipeline_final_patch.strip():
+                candidate_patch = pipeline_final_patch
+                candidate_hash = hashlib.sha256(candidate_patch.encode("utf-8")).hexdigest()
+                patch_meta = {"protocol_used": "pipeline_result", "normalized": False}
+                pipeline_result_projected = True
+                candidate_isolation_attempted = True
+
+                apply_receipt = run_isolated_workspace_apply(
+                    IsolatedApplyRequest(
+                        task_id=request.task_id,
+                        source_root=request.repo_root,
+                        target_file=target_file,
+                        unified_diff=candidate_patch,
+                        selected_candidate_hash=candidate_hash,
+                        mutation_allowed=mutation_allowed,
+                    )
+                )
+                isolated_apply_status = apply_receipt.patch_apply_status
+                isolated_apply_error = apply_receipt.patch_apply_error
+                candidate_isolated = apply_receipt.candidate_output_isolated
+                selected_candidate_hash = candidate_hash
+                applied_patch_hash = apply_receipt.applied_patch_hash
+                applied_patch_hash_source = apply_receipt.applied_patch_hash_source
+                hash_match = apply_receipt.selected_candidate_hash_matches_applied
+
+                verifier_receipt = run_isolated_verifier(
+                    IsolatedVerifierRequest(
+                        task_id=request.task_id,
+                        workspace_path=apply_receipt.workspace_path or request.repo_root,
+                        verifier_command=verifier_command,
+                        verifier_allowed=verifier_allowed,
+                    )
+                )
+                isolated_verifier_status = verifier_receipt.verifier_status
+                isolated_verifier_error = verifier_receipt.verifier_error
+
+                isolation_receipt = CandidateIsolationReceipt(
+                    candidate_id=f"{request.task_id}#pipeline-candidate",
+                    selected_candidate_hash=selected_candidate_hash,
+                    applied_patch_hash=applied_patch_hash,
+                    selected_candidate_hash_matches_applied=hash_match,
+                    candidate_output_isolated=candidate_isolated,
+                    verifier_result=isolated_verifier_status,
+                    evidence_refs=request.evidence_refs,
+                    local_model_called=bool(
+                        repair_exec.telemetries.get("model_called", False)
+                        or repair_exec.telemetries.get("patch_synthesis_model_called", False)
+                    ),
+                    mutation_allowed=mutation_allowed and isolated_apply_status == "applied",
+                )
+                hybrid_route = candidate_isolation_to_hybrid_route(isolation_receipt)
+                candidate_hash_empty = (candidate_hash == empty_hash)
+
             raw_meta = {
                 "execution_topology": "localheal_pipeline",
                 "selected_capabilities_used": list(selected_caps),
@@ -545,99 +637,62 @@ class LocalModelExecutor:
                     "claim_gate": claim_exec.to_receipt_dict(),
                     "delivery_gate": delivery_exec.to_receipt_dict(),
                 },
+                "pipeline_result_projected": pipeline_result_projected,
+                "pipeline_final_patch": pipeline_final_patch,
+                "pipeline_final_patch_len": pipeline_final_patch_len,
+                "pipeline_solve_eligible": pipeline_solve_eligible,
+                "pipeline_failure_reason": pipeline_failure_reason,
+                "localheal_pipeline_run_called": repair_exec.telemetries.get("localheal_pipeline_run_called", False),
+                "localheal_pipeline_run_success": repair_exec.telemetries.get("localheal_pipeline_run_success", False),
+                "orchestrator_run_reachable": repair_exec.telemetries.get("orchestrator_run_reachable", False),
+                "candidate_hash_empty": candidate_hash_empty,
+                "candidate_isolation_attempted": candidate_isolation_attempted,
+                "candidate_isolated": candidate_isolated,
+                "selected_candidate_hash": selected_candidate_hash,
+                "applied_patch_hash": applied_patch_hash,
+                "hash_match": hash_match,
+                "isolated_apply_status": isolated_apply_status,
+                "isolated_apply_error": isolated_apply_error,
+                "applied_patch_hash_source": applied_patch_hash_source,
+                "isolated_verifier_status": isolated_verifier_status,
+                "isolated_verifier_error": isolated_verifier_error,
+                "mutation_allowed": mutation_allowed,
+                "verifier_allowed": verifier_allowed,
             }
+            if hybrid_route is not None:
+                raw_meta["hybrid_route"] = hybrid_route.to_dict()
+                raw_meta["route_mode"] = hybrid_route.route_mode.value
+                raw_meta["authority"] = hybrid_route.authority.value
             raw_meta["ddtree_result"] = ddtree_exec.to_receipt_dict()
             raw_meta["autoreason_result"] = autoreason_exec.to_receipt_dict()
             armor_ok, armor_miss = validate_local_model_armor_metadata(raw_meta)
             raw_meta["armor_receipt_complete"] = armor_ok
             raw_meta["armor_receipt_missing_fields"] = armor_miss
 
-            # B3: Check if pipeline produced a result before generating new patch
-            pipeline_final_patch = repair_exec.telemetries.get("pipeline_final_patch", "")
-            pipeline_solve_eligible = repair_exec.telemetries.get("pipeline_solve_eligible", False)
-            pipeline_failure_reason = repair_exec.telemetries.get("pipeline_failure_reason", "")
-
-            # Project pipeline result into raw_meta
-            raw_meta["pipeline_result_projected"] = bool(pipeline_final_patch)
-            raw_meta["pipeline_final_patch"] = pipeline_final_patch
-            raw_meta["pipeline_solve_eligible"] = pipeline_solve_eligible
-            raw_meta["pipeline_failure_reason"] = pipeline_failure_reason
-            raw_meta["localheal_pipeline_run_called"] = repair_exec.telemetries.get("localheal_pipeline_run_called", False)
-            raw_meta["localheal_pipeline_run_success"] = repair_exec.telemetries.get("localheal_pipeline_run_success", False)
-            raw_meta["orchestrator_run_reachable"] = repair_exec.telemetries.get("orchestrator_run_reachable", False)
-
-            # If pipeline produced non-empty final_patch, use it as candidate
-            if pipeline_final_patch and pipeline_final_patch.strip():
-                candidate_patch = pipeline_final_patch
-                candidate_hash = hashlib.sha256(candidate_patch.encode("utf-8")).hexdigest()
-                patch_meta = {"protocol_used": "pipeline_result", "normalized": False}
-            else:
-                # Fall back to provider-generated patch
-                signal_snapshot = request.route_context.get("signal_snapshot", {}) if isinstance(request.route_context, dict) else {}
-                protocol_mode = signal_snapshot["protocol_mode"]
-                failure_context = ""
-                if failure_feedback_present and failure_feedback_text:
-                    failure_context = f"\n\n{failure_feedback_text}"
-
-                if protocol_mode == "anchored_edit":
-                    explicit_prompt = (
-                        f"You are generating a replacement code block to solve a coding task.\n"
-                        f"Problem: {request.problem_statement}{memory_context}{failure_context}\n"
-                        f"Target File: {target_file}\n"
-                        f"Target Symbol: {target_symbol}\n"
-                        f"Source Anchor Hash: {source_anchor_hash[:16] if source_anchor_hash else 'none'}\n"
-                        f"Locked Search Span that will be replaced:\n"
-                        f"```\n{locked_search}\n```\n\n"
-                        f"Provide the replacement code inside a REPLACE block exactly like this:\n"
-                        f"<<<<<<< REPLACE\n"
-                        f"[replacement code goes here]\n"
-                        f">>>>>>> REPLACE\n\n"
-                        f"Do not include any other text outside the REPLACE block.\n"
-                    )
-                else:
-                    explicit_prompt = (
-                        f"You are generating a unified diff to fix a bug in {target_file}.\n"
-                        f"Problem: {request.problem_statement}{memory_context}{failure_context}\n"
-                        f"Target File: {target_file}\n"
-                        f"Target Symbol: {target_symbol}\n"
-                        f"Return ONLY the diff. No prose.\n"
-                    )
-
-                model_name = signal_snapshot["executor_model"]
-                prov_req = LocalModelProviderRequest(
-                    task_id=request.task_id,
-                    prompt=explicit_prompt,
-                    evidence_refs=request.evidence_refs,
-                    model_name=model_name,
-                    timeout_sec=provider_timeout_sec,
-                )
-                prov_resp = provider.generate(prov_req)
-
-                candidate_patch = prov_resp.output_text
-                patch_meta = {}
-                if candidate_patch.strip():
-                    candidate_patch, patch_meta = _normalize_candidate_patch(request, locked_search, candidate_patch)
-                    candidate_hash = hashlib.sha256(candidate_patch.encode("utf-8")).hexdigest() if candidate_patch.strip() else empty_hash
-                else:
-                    candidate_hash = empty_hash
-
             provider_name = "ollama" if isinstance(provider, OllamaLocalModelProvider) else "injected"
             local_assist_telemetry = build_local_assist_telemetry_from_executor_meta(raw_meta)
             raw_meta["local_assist_telemetry"] = local_assist_telemetry.to_dict()
+
+            raw_meta["solved"] = bool(
+                pipeline_solve_eligible
+                and hybrid_route is not None
+                and hybrid_route.route_mode.value == "local_only_executed"
+            )
 
             return LocalModelExecutorResponse(
                 invoked=True,
                 local_model_called=True,
                 candidate_patch=candidate_patch,
                 candidate_hash=candidate_hash,
-                reasoning_summary="pipeline_result" if pipeline_final_patch else "provider_generated",
+                reasoning_summary="pipeline_result" if pipeline_result_projected else "pipeline_failed_empty",
                 raw_model_metadata=raw_meta,
                 provider=provider_name,
-                model_name=model_name if not pipeline_final_patch else "",
+                model_name=repair_exec.telemetries.get("patch_synthesis_model_name", ""),
                 error="",
                 timeout=False,
                 evidence_refs=request.evidence_refs,
             )
+
 
         # 9. Generate Candidate Patch for single_local_model
         signal_snapshot = request.route_context.get("signal_snapshot", {}) if isinstance(request.route_context, dict) else {}

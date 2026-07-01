@@ -541,6 +541,46 @@ class LocalHealPipelineCapabilityExecutor:
                 last_output = patch_decisions[-1].get("output_excerpt", "")[:500]
                 patch_attempt_output_excerpt = last_output
 
+        # C7/C8: Default values
+        output_hash = ""
+        output_class = "UNKNOWN"
+        parser_error_kind = "none"
+        parser_error_message = "none"
+        contains_search_marker = False
+        contains_replace_marker = False
+        contains_markdown_fence = False
+        contains_unified_diff_header = False
+        contains_natural_language_only = False
+
+        micro_verify_context_present = False
+        verifier_command_present = False
+        verifier_command_source = ""
+        bare_python_rejected = False
+        micro_verify_failure_reason = ""
+
+        if pipeline_result_ctx is not None:
+            # Extract C7 classification
+            patch_decisions = [d for d in model_decisions if d.get("phase") == "patch"]
+            if patch_decisions:
+                last_d = patch_decisions[-1]
+                output_hash = last_d.get("output_hash", "")
+                output_class = last_d.get("output_class", "UNKNOWN")
+                parser_error_kind = last_d.get("parser_error_kind", "none")
+                parser_error_message = last_d.get("parser_error_message", "none")
+                contains_search_marker = last_d.get("contains_search_marker", False)
+                contains_replace_marker = last_d.get("contains_replace_marker", False)
+                contains_markdown_fence = last_d.get("contains_markdown_fence", False)
+                contains_unified_diff_header = last_d.get("contains_unified_diff_header", False)
+                contains_natural_language_only = last_d.get("contains_natural_language_only", False)
+
+            # Extract C8 verifier context — pipeline_result_ctx is legacy HealContext
+            # (no .op); attrs were sync'd back by sync_from_v2, so read directly.
+            micro_verify_context_present = getattr(pipeline_result_ctx, "micro_verify_context_present", False)
+            verifier_command_present = getattr(pipeline_result_ctx, "verifier_command_present", False)
+            verifier_command_source = getattr(pipeline_result_ctx, "verifier_command_source", "")
+            bare_python_rejected = getattr(pipeline_result_ctx, "bare_python_rejected", False)
+            micro_verify_failure_reason = getattr(pipeline_result_ctx, "micro_verify_failure_reason", "")
+
         return CapabilityExecutionResult(
             name="repair_loop", selected=True, invoked=True,
             gate_passed=actual_execution, outcome_contributed=actual_execution,
@@ -601,5 +641,21 @@ class LocalHealPipelineCapabilityExecutor:
                 "pipeline_final_patch": pipeline_final_patch,
                 "pipeline_solve_eligible": pipeline_solve_eligible,
                 "pipeline_failure_reason": pipeline_failure_reason,
+                # C7: Output Classification
+                "output_hash": output_hash,
+                "output_class": output_class,
+                "parser_error_kind": parser_error_kind,
+                "parser_error_message": parser_error_message,
+                "contains_search_marker": contains_search_marker,
+                "contains_replace_marker": contains_replace_marker,
+                "contains_markdown_fence": contains_markdown_fence,
+                "contains_unified_diff_header": contains_unified_diff_header,
+                "contains_natural_language_only": contains_natural_language_only,
+                # C8: Micro Verifier Context
+                "micro_verify_context_present": micro_verify_context_present,
+                "verifier_command_present": verifier_command_present,
+                "verifier_command_source": verifier_command_source,
+                "bare_python_rejected": bare_python_rejected,
+                "micro_verify_failure_reason": micro_verify_failure_reason,
             },
         )

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import hashlib
 import pytest
+from pathlib import Path
 
 from nexus.services.local_heal.local_model_executor import (
     LocalModelExecutor,
@@ -210,7 +211,10 @@ def test_topology_local_committee_via_signal_snapshot(monkeypatch) -> None:
             "signal_snapshot": {
                 "execution_topology": "local_committee_only",
                 "local_committee_enabled": True,
-                "proposer_specs": [{"model": "qwen2.5-coder:7b", "role": "primary"}],
+                "proposer_specs": [
+                    {"model": "qwen2.5-coder:7b", "role": "primary"},
+                    {"model": "deepseek-coder:6.7b-instruct", "role": "secondary"},
+                ],
                 "judge_model": "qwen2.5:3b"
             }
         },
@@ -271,7 +275,10 @@ def test_local_model_executor_committee_topology_uses_committee_provider(monkeyp
         route_context={
             "signal_snapshot": {
                 "execution_topology": "local_committee_only",
-                "proposer_specs": [{"model": "qwen2.5-coder:7b", "role": "primary"}],
+                "proposer_specs": [
+                    {"model": "qwen2.5-coder:7b", "role": "primary"},
+                    {"model": "deepseek-coder:6.7b-instruct", "role": "secondary"},
+                ],
                 "judge_model": "qwen2.5:3b"
             }
         }
@@ -327,7 +334,10 @@ def test_local_model_executor_committee_topology_uses_candidate_decision_adapter
         route_context={
             "signal_snapshot": {
                 "execution_topology": "local_committee_only",
-                "proposer_specs": [{"model": "qwen2.5-coder:7b", "role": "primary"}],
+                "proposer_specs": [
+                    {"model": "qwen2.5-coder:7b", "role": "primary"},
+                    {"model": "deepseek-coder:6.7b-instruct", "role": "secondary"},
+                ],
                 "judge_model": "qwen2.5:3b"
             }
         }
@@ -540,7 +550,10 @@ def test_executor_run_uses_planner_topology_from_signal_snapshot(monkeypatch):
         route_context={
             "signal_snapshot": {
                 "execution_topology": "local_committee_only",
-                "proposer_specs": [{"model": "qwen2.5-coder:7b", "role": "primary"}],
+                "proposer_specs": [
+                    {"model": "qwen2.5-coder:7b", "role": "primary"},
+                    {"model": "deepseek-coder:6.7b-instruct", "role": "secondary"},
+                ],
                 "judge_model": "qwen2.5:3b"
             }
         }
@@ -775,3 +788,534 @@ def test_c6_output_with_no_error_not_classified_as_timeout() -> None:
     assert resp.timeout is False
     assert resp.error == ""
 
+
+# ---------------------------------------------------------------------------
+# C7: Output Classification Tests
+# ---------------------------------------------------------------------------
+
+def test_patch_synthesis_records_output_classification() -> None:
+    from nexus.services.local_heal.phases.patch_synthesis import PatchSynthesisPhase
+    from nexus.services.local_heal.protocol import SolidSearchReplaceProtocol
+    from nexus.services.local_heal.patcher import Patcher
+    from nexus.services.local_heal.interface import PatchSynthesisInput, LocalizedFile
+    from unittest.mock import patch, MagicMock
+    from nexus.services.local_heal.micro_verifier import MicroVerifyResult
+
+    parser = SolidSearchReplaceProtocol()
+    patcher = Patcher()
+
+    class MockLLM:
+        def generate(self, **kwargs):
+            return "Some explanation\n<<<<<<< SEARCH\nold\n=======\nnew\n>>>>>>> REPLACE\n"
+
+    phase = PatchSynthesisPhase(parser, patcher, llm_client=MockLLM())
+    inp = PatchSynthesisInput(
+        instance_id="test",
+        problem_statement="test",
+        repro_evidence="test",
+        plan=None,
+        localized_files=[LocalizedFile(path="file.py", content="old\n")],
+        repo_dir=Path("/tmp"),
+        reasoning_mode="INTUITIVE",
+        attempt=1,
+        max_tries=1,
+    )
+
+    # Mock apply + micro verifier so we can assert C7 telemetry without changing runtime control.
+    from nexus.services.local_heal.patch_applier import PatchApplicationResult
+    mock_apply = MagicMock(return_value=PatchApplicationResult(
+        success=True,
+        applied_diffs=["+++ b/file.py\nnew\n"],
+        error_reason="",
+    ))
+    with patch.object(phase.patch_applier, "apply_and_validate", mock_apply), \
+         patch("nexus.services.local_heal.micro_verifier.MicroVerifier.verify") as mock_v:
+        mock_v.return_value = MicroVerifyResult(
+            passed=True, syntax_ok=True, import_ok=True, task_scoped=False
+        )
+        output = phase.run(inp)
+        assert output.success is True
+
+        preflight = output.preflight_telemetry
+        assert preflight.get("output_class") == "VALID_SEARCH_REPLACE"
+        assert preflight.get("contains_search_marker") is True
+        assert preflight.get("contains_replace_marker") is True
+        assert preflight.get("contains_markdown_fence") is False
+        assert preflight.get("contains_unified_diff_header") is False
+        assert preflight.get("contains_natural_language_only") is False
+
+
+def test_m1_row_exposes_output_excerpt_and_class() -> None:
+    """C7: output_class and contains_markdown_fence are visible in raw_meta via mocked telemetries."""
+    from unittest.mock import patch
+    from nexus.services.local_heal.local_model_capability_executors import CapabilityExecutionResult
+
+    req = make_test_request("c7-telemetry", execution_topology="localheal_pipeline")
+    fenced_output = "```\n<<<<<<< SEARCH\nold\n=======\nnew\n>>>>>>> REPLACE\n```"
+
+    with patch(
+        "nexus.services.local_heal.local_model_capability_executors.LocalHealPipelineCapabilityExecutor.execute"
+    ) as mock_exec:
+        mock_exec.return_value = CapabilityExecutionResult(
+            name="repair_loop", selected=True, invoked=True,
+            gate_passed=False, outcome_contributed=False,
+            evidence_present=True, failure_reason="FENCED_OUTPUT_STOP_GATE",
+            telemetries={
+                "pipeline_final_patch": "",
+                "pipeline_solve_eligible": False,
+                "pipeline_failure_reason": "FENCED_OUTPUT_STOP_GATE",
+                "output_class": "FENCED_SEARCH_REPLACE",
+                "contains_markdown_fence": True,
+                "output_excerpt_first_500": fenced_output[:500],
+            }
+        )
+        resp = LocalModelExecutor.run(req, provider=InjectedLocalModelProvider(lambda _: fenced_output))
+        meta = resp.raw_model_metadata
+
+        assert meta.get("output_class") == "FENCED_SEARCH_REPLACE"
+        assert meta.get("contains_markdown_fence") is True
+        assert meta.get("output_excerpt_first_500") == fenced_output[:500]
+        assert resp.candidate_patch == ""  # pipeline_final_patch empty → no fallback
+
+
+def test_output_excerpt_is_bounded() -> None:
+    # Excerpt should be bounded to 500 characters
+    long_response = "A" * 1000
+    req = make_test_request("c7-excerpt-bound", execution_topology="localheal_pipeline")
+    provider = InjectedLocalModelProvider(lambda _: long_response)
+    resp = LocalModelExecutor.run(req, provider=provider)
+    meta = resp.raw_model_metadata
+    
+    assert len(meta.get("output_excerpt_first_500", "")) <= 500
+
+
+def test_output_classification_does_not_mark_solved() -> None:
+    req = make_test_request("c7-solved-check", execution_topology="localheal_pipeline")
+    provider = InjectedLocalModelProvider(lambda _: "Some natural language only")
+    resp = LocalModelExecutor.run(req, provider=provider)
+    meta = resp.raw_model_metadata
+    
+    assert meta.get("solved") is not True
+
+
+def test_fence_output_classification_does_not_strip_fences() -> None:
+    """C7: fenced output is classified as FENCED_SEARCH_REPLACE and stops candidate projection."""
+    from unittest.mock import patch
+    from nexus.services.local_heal.local_model_capability_executors import CapabilityExecutionResult
+
+    req = make_test_request("c7-fenced", execution_topology="localheal_pipeline")
+    fenced_output = "```\n<<<<<<< SEARCH\nold\n=======\nnew\n>>>>>>> REPLACE\n```"
+
+    with patch(
+        "nexus.services.local_heal.local_model_capability_executors.LocalHealPipelineCapabilityExecutor.execute"
+    ) as mock_exec:
+        mock_exec.return_value = CapabilityExecutionResult(
+            name="repair_loop", selected=True, invoked=True,
+            gate_passed=False, outcome_contributed=False,
+            evidence_present=True, failure_reason="FENCED_OUTPUT_STOP_GATE",
+            telemetries={
+                "pipeline_final_patch": "",
+                "pipeline_solve_eligible": False,
+                "pipeline_failure_reason": "FENCED_OUTPUT_STOP_GATE",
+                "output_class": "FENCED_SEARCH_REPLACE",
+                "contains_markdown_fence": True,
+            }
+        )
+        resp = LocalModelExecutor.run(req, provider=InjectedLocalModelProvider(lambda _: fenced_output))
+        assert resp.raw_model_metadata.get("output_class") == "FENCED_SEARCH_REPLACE"
+        assert resp.candidate_patch == ""  # C9: no fallback, empty stays empty
+
+
+# ---------------------------------------------------------------------------
+# C8: Recovery quarantine tests
+# ---------------------------------------------------------------------------
+
+def test_verifier_command_is_quarantined_during_c7_recovery() -> None:
+    from nexus.services.local_heal.phases.patch_synthesis import PatchSynthesisPhase
+    from nexus.services.local_heal.protocol import SolidSearchReplaceProtocol
+    from nexus.services.local_heal.patcher import Patcher
+    from nexus.services.local_heal.interface import PatchSynthesisInput, LocalizedFile
+    from unittest.mock import patch, MagicMock
+    from nexus.services.local_heal.micro_verifier import MicroVerifyResult
+    from nexus.services.local_heal.patch_applier import PatchApplicationResult
+
+    parser = SolidSearchReplaceProtocol()
+    patcher = Patcher()
+
+    class MockLLM:
+        def generate(self, **kwargs):
+            return "<<<<<<< SEARCH\nold\n=======\nnew\n>>>>>>> REPLACE\n"
+
+    phase = PatchSynthesisPhase(parser, patcher, llm_client=MockLLM())
+
+    inp = PatchSynthesisInput(
+        instance_id="test",
+        problem_statement="test",
+        repro_evidence="test",
+        plan=None,
+        localized_files=[LocalizedFile(path="file.py", content="old\n")],
+        repo_dir=Path("/tmp"),
+        reasoning_mode="INTUITIVE",
+        attempt=1,
+        max_tries=1,
+    )
+    object.__setattr__(inp, "route_context", {
+        "verifier_command": ["python3", "verify.py"]
+    })
+
+    mock_apply = MagicMock(return_value=PatchApplicationResult(
+        success=True,
+        applied_diffs=["+++ b/file.py\nnew\n"],
+        error_reason="",
+    ))
+    with patch.object(phase.patch_applier, "apply_and_validate", mock_apply), \
+         patch("nexus.services.local_heal.micro_verifier.MicroVerifier.verify") as mock_v:
+        mock_v.return_value = MicroVerifyResult(
+            passed=True, syntax_ok=True, import_ok=True, task_scoped=True
+        )
+        output = phase.run(inp)
+        assert output.success is True
+        assert output.preflight_telemetry.get("micro_verify_context_present") is None
+        assert output.preflight_telemetry.get("verifier_command_present") is None
+
+
+
+def test_missing_verifier_command_does_not_change_patch_synthesis_control_flow() -> None:
+    from nexus.services.local_heal.phases.patch_synthesis import PatchSynthesisPhase
+    from nexus.services.local_heal.protocol import SolidSearchReplaceProtocol
+    from nexus.services.local_heal.patcher import Patcher
+    from nexus.services.local_heal.interface import PatchSynthesisInput, LocalizedFile
+    from unittest.mock import patch, MagicMock
+    from nexus.services.local_heal.micro_verifier import MicroVerifyResult
+
+    parser = SolidSearchReplaceProtocol()
+    patcher = Patcher()
+
+    class MockLLM:
+        def generate(self, **kwargs):
+            return "<<<<<<< SEARCH\nold\n=======\nnew\n>>>>>>> REPLACE\n"
+
+    phase = PatchSynthesisPhase(parser, patcher, llm_client=MockLLM())
+    inp = PatchSynthesisInput(
+        instance_id="test",
+        problem_statement="test",
+        repro_evidence="test",
+        plan=None,
+        localized_files=[LocalizedFile(path="file.py", content="old\n")],
+        repo_dir=Path("/tmp"),
+        reasoning_mode="INTUITIVE",
+        attempt=1,
+        max_tries=1,
+    )
+    from nexus.services.local_heal.patch_applier import PatchApplicationResult
+    mock_apply = MagicMock(return_value=PatchApplicationResult(
+        success=True,
+        applied_diffs=["+++ b/file.py\nnew\n"],
+        error_reason="",
+    ))
+    with patch.object(phase.patch_applier, "apply_and_validate", mock_apply), \
+         patch("nexus.services.local_heal.micro_verifier.MicroVerifier.verify") as mock_v:
+        mock_v.return_value = MicroVerifyResult(
+            passed=True, syntax_ok=True, import_ok=True, task_scoped=False
+        )
+        output = phase.run(inp)
+        assert output.success is True
+        assert output.preflight_telemetry.get("bare_python_rejected") is None
+
+
+def test_micro_verify_context_fields_remain_unset_during_recovery() -> None:
+    req = make_test_request("c8-context-present", execution_topology="localheal_pipeline")
+    req.route_context["verifier_command"] = ["python3", "verify.py"]
+    
+    provider = InjectedLocalModelProvider(lambda _: "<<<<<<< SEARCH\nold\n=======\nnew\n>>>>>>> REPLACE\n")
+    
+    from unittest.mock import patch
+    from nexus.services.local_heal.micro_verifier import MicroVerifyResult
+    with patch("nexus.services.local_heal.micro_verifier.MicroVerifier.verify") as mock_v:
+        mock_v.return_value = MicroVerifyResult(
+            passed=True, syntax_ok=True, import_ok=True, task_scoped=True
+        )
+        resp = LocalModelExecutor.run(req, provider=provider)
+        meta = resp.raw_model_metadata
+        assert meta.get("micro_verify_context_present") is False
+        assert meta.get("verifier_command_present") is False
+
+
+def test_micro_verify_context_fields_default_false_in_executor_projection() -> None:
+    from unittest.mock import patch
+    from nexus.services.local_heal.local_model_capability_executors import CapabilityExecutionResult
+
+    req = make_test_request("c8-defaults", execution_topology="localheal_pipeline")
+
+    with patch(
+        "nexus.services.local_heal.local_model_capability_executors.LocalHealPipelineCapabilityExecutor.execute"
+    ) as mock_exec:
+        mock_exec.return_value = CapabilityExecutionResult(
+            name="repair_loop", selected=True, invoked=True,
+            gate_passed=False, outcome_contributed=False,
+            evidence_present=True, failure_reason="MICRO_VERIFY_CONTEXT_MISSING",
+            telemetries={
+                "pipeline_final_patch": "",
+                "pipeline_solve_eligible": False,
+                "pipeline_failure_reason": "MICRO_VERIFY_CONTEXT_MISSING",
+            }
+        )
+        resp = LocalModelExecutor.run(req, provider=InjectedLocalModelProvider(lambda _: ""))
+        meta = resp.raw_model_metadata
+
+        assert resp.candidate_patch == ""
+        assert meta.get("micro_verify_failure_reason") is None
+
+
+def test_micro_verify_context_does_not_mark_solved_without_verifier_pass() -> None:
+    req = make_test_request("c8-no-solved", execution_topology="localheal_pipeline")
+    req.route_context["verifier_command"] = ["python3", "verify.py"]
+    
+    provider = InjectedLocalModelProvider(lambda _: "<<<<<<< SEARCH\nold\n=======\nnew\n>>>>>>> REPLACE\n")
+    
+    from unittest.mock import patch
+    from nexus.services.local_heal.micro_verifier import MicroVerifyResult
+    with patch("nexus.services.local_heal.micro_verifier.MicroVerifier.verify") as mock_v:
+        mock_v.return_value = MicroVerifyResult(
+            passed=False, syntax_ok=True, error_message="TEST_FAILURE", task_scoped=True
+        )
+        resp = LocalModelExecutor.run(req, provider=provider)
+        meta = resp.raw_model_metadata
+        assert meta.get("solved") is not True
+
+
+# ---------------------------------------------------------------------------
+# C9: Candidate projection and isolation
+# ---------------------------------------------------------------------------
+
+def test_non_empty_pipeline_patch_projects_candidate() -> None:
+    req = make_test_request(
+        "c9-projection",
+        evidence_refs=("ref1",),
+        execution_topology="localheal_pipeline",
+        route_context={
+            "verifier_command": ["python3", "-c", "print(1)"],
+            "signal_snapshot": {
+                "execution_topology": "localheal_pipeline",
+                "executor_model": "qwen2.5-coder:7b",
+                "protocol_mode": "anchored_edit",
+                "mutation_allowed": True,
+                "verifier_allowed": True,
+            },
+        },
+    )
+    
+    from unittest.mock import patch
+    with patch("nexus.services.local_heal.local_model_capability_executors.LocalHealPipelineCapabilityExecutor.execute") as mock_exec:
+        from nexus.services.local_heal.local_model_capability_executors import CapabilityExecutionResult
+        from nexus.services.local_heal.isolated_workspace_apply import IsolatedApplyReceipt
+        from nexus.services.local_heal.isolated_verifier import IsolatedVerifierReceipt
+        diff_text = "--- a/file.py\n+++ b/file.py\n@@ -1 +1 @@\n-old\n+new\n"
+        diff_hash = hashlib.sha256(diff_text.encode("utf-8")).hexdigest()
+        mock_exec.return_value = CapabilityExecutionResult(
+            name="repair_loop", selected=True, invoked=True,
+            gate_passed=True, outcome_contributed=True,
+            evidence_present=True, failure_reason="",
+            telemetries={
+                "pipeline_final_patch": diff_text,
+                "pipeline_solve_eligible": True,
+                "pipeline_failure_reason": "",
+                "model_called": True,
+            }
+        )
+        with patch("nexus.services.local_heal.local_model_executor.run_isolated_workspace_apply") as mock_apply, \
+             patch("nexus.services.local_heal.local_model_executor.run_isolated_verifier") as mock_verify:
+            mock_apply.return_value = IsolatedApplyReceipt(
+                    task_id="c9-projection",
+                    workspace_path="/tmp/ws",
+                    target_file="file.py",
+                    patch_apply_status="applied",
+                    patch_apply_error="",
+                    selected_candidate_hash=diff_hash,
+                    applied_patch_hash=diff_hash,
+                    selected_candidate_hash_matches_applied=True,
+                    candidate_output_isolated=True,
+                    mutation_allowed=True,
+                applied_patch_hash_source="git_diff",
+            )
+            mock_verify.return_value = IsolatedVerifierReceipt(
+                task_id="c9-projection",
+                verifier_status="pass",
+                exit_code=0,
+                stdout_tail="",
+                stderr_tail="",
+                verifier_error="",
+                verifier_allowed=True,
+            )
+            resp = LocalModelExecutor.run(req, provider=InjectedLocalModelProvider(lambda _: ""))
+        meta = resp.raw_model_metadata
+        
+        assert meta.get("pipeline_result_projected") is True
+        assert resp.candidate_patch == "--- a/file.py\n+++ b/file.py\n@@ -1 +1 @@\n-old\n+new\n"
+        assert meta.get("candidate_hash_empty") is False
+        assert meta.get("candidate_isolation_attempted") is True
+        assert meta.get("candidate_isolated") is True
+        assert meta.get("hash_match") is True
+        assert meta.get("isolated_verifier_status") == "pass"
+        assert meta.get("solved") is True
+
+
+def test_empty_pipeline_patch_does_not_project_candidate() -> None:
+    req = make_test_request("c9-no-projection", execution_topology="localheal_pipeline")
+    
+    from unittest.mock import patch
+    with patch("nexus.services.local_heal.local_model_capability_executors.LocalHealPipelineCapabilityExecutor.execute") as mock_exec:
+        from nexus.services.local_heal.local_model_capability_executors import CapabilityExecutionResult
+        mock_exec.return_value = CapabilityExecutionResult(
+            name="repair_loop", selected=True, invoked=True,
+            gate_passed=True, outcome_contributed=True,
+            evidence_present=True, failure_reason="",
+            telemetries={
+                "pipeline_final_patch": "",
+                "pipeline_solve_eligible": False,
+                "pipeline_failure_reason": "some error",
+            }
+        )
+        resp = LocalModelExecutor.run(req, provider=InjectedLocalModelProvider(lambda _: ""))
+        meta = resp.raw_model_metadata
+        
+        assert meta.get("pipeline_result_projected") is False
+        assert resp.candidate_patch == ""
+        assert meta.get("candidate_hash_empty") is True
+
+
+def test_pipeline_patch_enters_isolation() -> None:
+    req = make_test_request(
+        "c9-isolation",
+        evidence_refs=("ref1",),
+        execution_topology="localheal_pipeline",
+        route_context={
+            "verifier_command": ["python3", "-c", "print(1)"],
+            "signal_snapshot": {
+                "execution_topology": "localheal_pipeline",
+                "executor_model": "qwen2.5-coder:7b",
+                "protocol_mode": "anchored_edit",
+                "mutation_allowed": True,
+                "verifier_allowed": True,
+            },
+        },
+    )
+    
+    from unittest.mock import patch
+    with patch("nexus.services.local_heal.local_model_capability_executors.LocalHealPipelineCapabilityExecutor.execute") as mock_exec:
+        from nexus.services.local_heal.local_model_capability_executors import CapabilityExecutionResult
+        from nexus.services.local_heal.isolated_workspace_apply import IsolatedApplyReceipt
+        from nexus.services.local_heal.isolated_verifier import IsolatedVerifierReceipt
+        mock_exec.return_value = CapabilityExecutionResult(
+            name="repair_loop", selected=True, invoked=True,
+            gate_passed=True, outcome_contributed=True,
+            evidence_present=True, failure_reason="",
+            telemetries={
+                "pipeline_final_patch": "--- a/file.py\n+++ b/file.py\n@@ -1 +1 @@\n-old\n+new\n",
+                "pipeline_solve_eligible": True,
+                "pipeline_failure_reason": "",
+                "model_called": True,
+            }
+        )
+        with patch("nexus.services.local_heal.local_model_executor.run_isolated_workspace_apply") as mock_apply, \
+             patch("nexus.services.local_heal.local_model_executor.run_isolated_verifier") as mock_verify:
+            mock_apply.return_value = IsolatedApplyReceipt(
+                task_id="c9-isolation",
+                workspace_path="/tmp/ws",
+                target_file="file.py",
+                patch_apply_status="applied",
+                patch_apply_error="",
+                selected_candidate_hash="candidate-hash",
+                applied_patch_hash="candidate-hash",
+                selected_candidate_hash_matches_applied=True,
+                candidate_output_isolated=True,
+                mutation_allowed=True,
+                applied_patch_hash_source="git_diff",
+            )
+            mock_verify.return_value = IsolatedVerifierReceipt(
+                task_id="c9-isolation",
+                verifier_status="pass",
+                exit_code=0,
+                stdout_tail="",
+                stderr_tail="",
+                verifier_error="",
+                verifier_allowed=True,
+            )
+            resp = LocalModelExecutor.run(req, provider=InjectedLocalModelProvider(lambda _: ""))
+        meta = resp.raw_model_metadata
+        
+        assert meta.get("candidate_isolation_attempted") is True
+        assert meta.get("candidate_isolated") is True
+
+
+def test_candidate_hash_empty_blocks_solved() -> None:
+    req = make_test_request("c9-hash-empty-blocks", execution_topology="localheal_pipeline")
+    resp = LocalModelExecutor.run(req, provider=InjectedLocalModelProvider(lambda _: ""))
+    meta = resp.raw_model_metadata
+    
+    assert meta.get("candidate_hash_empty") is True
+    assert meta.get("solved") is not True
+
+
+def test_hash_match_required_for_solved() -> None:
+    req = make_test_request(
+        "c9-hash-match",
+        evidence_refs=("ref1",),
+        execution_topology="localheal_pipeline",
+        route_context={
+            "verifier_command": ["python3", "-c", "print(1)"],
+            "signal_snapshot": {
+                "execution_topology": "localheal_pipeline",
+                "executor_model": "qwen2.5-coder:7b",
+                "protocol_mode": "anchored_edit",
+                "mutation_allowed": True,
+                "verifier_allowed": True,
+            },
+        },
+    )
+    
+    from unittest.mock import patch
+    with patch("nexus.services.local_heal.local_model_capability_executors.LocalHealPipelineCapabilityExecutor.execute") as mock_exec:
+        from nexus.services.local_heal.local_model_capability_executors import CapabilityExecutionResult
+        from nexus.services.local_heal.isolated_workspace_apply import IsolatedApplyReceipt
+        from nexus.services.local_heal.isolated_verifier import IsolatedVerifierReceipt
+        mock_exec.return_value = CapabilityExecutionResult(
+            name="repair_loop", selected=True, invoked=True,
+            gate_passed=True, outcome_contributed=True,
+            evidence_present=True, failure_reason="",
+            telemetries={
+                "pipeline_final_patch": "--- a/file.py\n+++ b/file.py\n@@ -1 +1 @@\n-old\n+new\n",
+                "pipeline_solve_eligible": True,
+                "pipeline_failure_reason": "",
+                "model_called": True,
+            }
+        )
+        with patch("nexus.services.local_heal.local_model_executor.run_isolated_workspace_apply") as mock_apply, \
+             patch("nexus.services.local_heal.local_model_executor.run_isolated_verifier") as mock_verify:
+            mock_apply.return_value = IsolatedApplyReceipt(
+                task_id="c9-hash-match",
+                workspace_path="/tmp/ws",
+                target_file="file.py",
+                patch_apply_status="applied",
+                patch_apply_error="",
+                selected_candidate_hash="candidate-hash",
+                applied_patch_hash="different-hash",
+                selected_candidate_hash_matches_applied=False,
+                candidate_output_isolated=True,
+                mutation_allowed=True,
+                applied_patch_hash_source="git_diff",
+            )
+            mock_verify.return_value = IsolatedVerifierReceipt(
+                task_id="c9-hash-match",
+                verifier_status="pass",
+                exit_code=0,
+                stdout_tail="",
+                stderr_tail="",
+                verifier_error="",
+                verifier_allowed=True,
+            )
+            resp = LocalModelExecutor.run(req, provider=InjectedLocalModelProvider(lambda _: ""))
+        meta = resp.raw_model_metadata
+        
+        assert meta.get("hash_match") is False
+        assert meta.get("solved") is not True
