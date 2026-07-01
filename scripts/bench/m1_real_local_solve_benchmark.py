@@ -331,6 +331,13 @@ def run_benchmark():
             execution_path_modules = ["CapabilityPlanner", "LocalModelExecutor"]
             if spec["execution_topology"] == "local_committee_only":
                 execution_path_modules.extend(["LocalCommitteeCandidateProvider", "CandidateDecisionAdapter"])
+            elif spec["execution_topology"] == "localheal_pipeline":
+                execution_path_modules.extend([
+                    "LocalHealPipelineCapabilityExecutor",
+                    "HealPipeline",
+                    "HealOrchestrator",
+                    "PatchSynthesis",
+                ])
             execution_path_modules.append("SolidSearchReplaceProtocol")
             if local_model_called:
                 execution_path_modules.append("IsolatedLocalSolveLoop")
@@ -431,13 +438,14 @@ def run_benchmark():
 | **diff_repair** | 6 | No | Bypassed due to constraint_violation (missing unified diff). |
 | **isolated_local_solve_loop** | 6 | Partial | Sandbox initialized, but immediately exited on parser error block. |
 | **failure feedback / same-span retry** | 6 | No | Benchmark runs in a single-pass without retry loop. |
-| **HealPipeline / Orchestrator** | 6 | No | Runs direct row-finalization, bypassing phase orchestration. |
+| **HealPipeline / Orchestrator** | 6 | Yes (localheal_pipeline) | Used by localheal_pipeline topology via LocalHealPipelineCapabilityExecutor bridge; local_committee_only bypasses. |
 
 ## Root Cause of Failures (0/6 Solved)
 
 1. **REPLACEMENT_MARKDOWN_FENCE**: Qwen2.5-coder outputted replacement blocks wrapped in outer markdown fences (e.g. ````python`), causing `SolidSearchReplaceProtocol` to fail-closed on formatting.
 2. **Missing Normalization Fallbacks**: Parse errors immediately set the patch output to empty rather than falling back to sanitizers or diff repair.
 3. **No Interactive Retry**: Runs in single-pass row execution without failure feedback loops to let the model self-correct.
+4. **Provider Timeout (localheal_pipeline)**: For toy-math-solve, the provider timed out (`ollama_internal_error: timed out`) at patch_synthesis phase — model was never called, output_len=0, pipeline_failure_reason=EMPTY_RESPONSE:MODEL_EMPTY_RESPONSE. This is a provider/config/runtime problem, not a prompt or parser problem.
 """
     SUMMARY_PATH.write_text(summary_md, encoding="utf-8")
     
