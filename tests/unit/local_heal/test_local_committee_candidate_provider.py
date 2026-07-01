@@ -110,3 +110,54 @@ def test_generate_committee_candidates_resource_blocked() -> None:
 
     finally:
         DEFAULT_POLICIES["deepseek-coder:6.7b-instruct"] = original_policy
+
+
+def test_generate_committee_candidates_rejects_single_proposer_spec() -> None:
+    provider = InjectedLocalModelProvider(lambda req: "output")
+    route_context = {
+        "signal_snapshot": {
+            "proposer_specs": [
+                {"model": "qwen2.5-coder:7b", "role": "primary"},
+            ],
+            "judge_model": "qwen2.5:3b",
+        }
+    }
+
+    with pytest.raises(ValueError, match="at least two proposer_specs"):
+        LocalCommitteeCandidateProvider.generate_committee_candidates(
+            task_id="task-123",
+            problem_statement="fix hello",
+            target_file="app.py",
+            target_symbol="run",
+            locked_search="print('hello')",
+            evidence_refs=("ref-1",),
+            provider=provider,
+            protocol_mode="anchored_edit",
+            route_context=route_context,
+        )
+
+
+def test_generate_committee_candidates_rejects_judge_model_reused_as_proposer() -> None:
+    provider = InjectedLocalModelProvider(lambda req: "output")
+    route_context = {
+        "signal_snapshot": {
+            "proposer_specs": [
+                {"model": "qwen2.5:3b", "role": "primary"},
+                {"model": "deepseek-coder:6.7b-instruct", "role": "secondary"},
+            ],
+            "judge_model": "qwen2.5:3b",
+        }
+    }
+
+    with pytest.raises(ValueError, match="judge_model must not also appear in proposer_specs"):
+        LocalCommitteeCandidateProvider.generate_committee_candidates(
+            task_id="task-123",
+            problem_statement="fix hello",
+            target_file="app.py",
+            target_symbol="run",
+            locked_search="print('hello')",
+            evidence_refs=("ref-1",),
+            provider=provider,
+            protocol_mode="anchored_edit",
+            route_context=route_context,
+        )

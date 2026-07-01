@@ -3,6 +3,7 @@ from __future__ import annotations
 from types import SimpleNamespace
 
 import hashlib
+import pytest
 
 from nexus.committee.models import CommitteeReceipt
 from nexus.services.local_heal.committee_orchestrator import CommitteeOrchestrator
@@ -169,6 +170,27 @@ def test_committee_orchestrator_records_two_candidate_trace(monkeypatch):
         "deepseek-coder:6.7b-instruct",
     ]
     assert not hasattr(ctx.op, "committee_proposer_model")
+
+
+def test_committee_orchestrator_rejects_single_proposer_spec(monkeypatch):
+    ctx = _make_ctx()
+    ctx.op.route_context["signal_snapshot"]["proposer_specs"] = [
+        {"model": "qwen2.5-coder:7b-instruct", "role": "primary"}
+    ]
+    orch = CommitteeOrchestrator.__new__(CommitteeOrchestrator)
+    orch.k = 1
+    orch.repro_phase = _FixedPhase()
+    orch.plan_phase = _FixedPhase()
+    orch.loc_phase = _FixedPhase()
+    orch.patch_phase = _PatchPhase()
+    orch.verify_phase = _FixedPhase(success=True)
+    monkeypatch.setattr(
+        "nexus.services.local_heal.committee_orchestrator.CommitteeControllerV263",
+        _CommitteeControllerStub,
+    )
+
+    with pytest.raises(ValueError, match="at least two proposer_specs"):
+        orch.run(ctx)
 
 
 def test_committee_trace_is_persisted_into_repair_receipt(monkeypatch):

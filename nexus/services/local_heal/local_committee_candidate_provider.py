@@ -35,10 +35,11 @@ class LocalCommitteeCandidateProvider:
         judge_model = signal_snapshot.get("judge_model")
         if not judge_model:
             raise ValueError("Missing judge_model in signal_snapshot for local_committee topology")
-            
-        committee_models = [
-            (judge_model, "judge", "none")
-        ]
+        proposer_specs = list(proposer_specs)
+        if len(proposer_specs) < 2:
+            raise ValueError("local_committee topology requires at least two proposer_specs")
+
+        seen_models: set[str] = set()
         for spec in proposer_specs:
             role = spec.get("role")
             if not role:
@@ -46,6 +47,18 @@ class LocalCommitteeCandidateProvider:
             model_name = spec.get("model")
             if not model_name:
                 raise ValueError("Missing proposer spec model in signal_snapshot")
+            if model_name == judge_model:
+                raise ValueError("judge_model must not also appear in proposer_specs")
+            if model_name in seen_models:
+                raise ValueError("Duplicate proposer model in signal_snapshot")
+            seen_models.add(model_name)
+            
+        committee_models = [
+            (judge_model, "judge", "none")
+        ]
+        for spec in proposer_specs:
+            role = spec["role"]
+            model_name = spec["model"]
             role_name = f"{role}_proposer"
             committee_models.append((model_name, role_name, protocol_mode))
         

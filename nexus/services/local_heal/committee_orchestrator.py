@@ -45,7 +45,25 @@ class CommitteeOrchestrator(HealOrchestrator):
         proposer_specs = signal_snapshot.get("proposer_specs")
         if proposer_specs is None:
             raise ValueError("Missing proposer_specs in signal_snapshot for local_committee_only")
+        judge_model = signal_snapshot.get("judge_model")
+        if not judge_model:
+            raise ValueError("Missing judge_model in signal_snapshot for local_committee_only")
         proposer_specs = list(proposer_specs)
+        if len(proposer_specs) < 2:
+            raise ValueError("local_committee_only requires at least two proposer_specs")
+        seen_models = set()
+        for spec in proposer_specs:
+            model_name = spec.get("model")
+            role_name = spec.get("role")
+            if not model_name:
+                raise ValueError("Missing proposer spec model in signal_snapshot for local_committee_only")
+            if not role_name:
+                raise ValueError("Missing proposer spec role in signal_snapshot for local_committee_only")
+            if model_name == judge_model:
+                raise ValueError("judge_model must not also appear in proposer_specs")
+            if model_name in seen_models:
+                raise ValueError("Duplicate proposer model in signal_snapshot")
+            seen_models.add(model_name)
             
         self.k = len(proposer_specs)
         logger.info(f"--- [COMMITTEE MODE ACTIVE] k={self.k} ---")
