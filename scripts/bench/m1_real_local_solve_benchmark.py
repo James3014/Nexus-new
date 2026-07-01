@@ -395,6 +395,7 @@ def run_benchmark():
                 "actual_provider_invoked": adapter_meta.get("actual_provider_invoked", False),
                 "actual_model_called": adapter_meta.get("actual_model_called", False),
                 "no_model_call_reason": adapter_meta.get("no_model_call_reason", ""),
+                "no_patch_reason": adapter_meta.get("no_patch_reason", ""),
                 "provider_error": adapter_meta.get("provider_error", ""),
                 "provider_invoked": adapter_meta.get("provider_invoked", False),
                 "model_name_used": adapter_meta.get("model_name_used", ""),

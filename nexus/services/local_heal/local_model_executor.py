@@ -703,6 +703,7 @@ class LocalModelExecutor:
                 else:
                     no_reason = "protocol_adherence_failure"
             raw_meta["no_model_call_reason"] = no_reason
+            raw_meta["no_patch_reason"] = no_reason
 
             return LocalModelExecutorResponse(
                 invoked=True,
