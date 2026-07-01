@@ -388,6 +388,13 @@ def run_benchmark():
                 "pipeline_run_called": adapter_meta.get("localheal_pipeline_run_called", False),
                 "pipeline_run_success": adapter_meta.get("localheal_pipeline_run_success", False),
                 "orchestrator_run_reachable": adapter_meta.get("orchestrator_run_reachable", False),
+                # C14: Downstream receipt truth
+                "executor_shell_reached": adapter_meta.get("executor_shell_reached", False),
+                "actual_model_output_len": adapter_meta.get("actual_model_output_len", 0),
+                "actual_model_name_used": adapter_meta.get("actual_model_name_used", ""),
+                "actual_provider_invoked": adapter_meta.get("actual_provider_invoked", False),
+                "actual_model_called": adapter_meta.get("actual_model_called", False),
+                "no_model_call_reason": adapter_meta.get("no_model_call_reason", ""),
                 "provider_error": adapter_meta.get("provider_error", ""),
                 "provider_invoked": adapter_meta.get("provider_invoked", False),
                 "model_name_used": adapter_meta.get("model_name_used", ""),

@@ -679,6 +679,31 @@ class LocalModelExecutor:
                 and hybrid_route.route_mode.value == "local_only_executed"
             )
 
+            # C14: Downstream receipt truth — distinguish execution shell from model output
+            raw_meta["executor_shell_reached"] = True
+            raw_meta["actual_model_output_len"] = repair_exec.telemetries.get("patch_synthesis_output_len", 0)
+            raw_meta["actual_model_name_used"] = repair_exec.telemetries.get("patch_synthesis_model_name", "")
+            raw_meta["actual_provider_invoked"] = repair_exec.telemetries.get("provider_invoked", False)
+            raw_meta["actual_model_called"] = repair_exec.telemetries.get("patch_synthesis_model_called", False)
+            # Why model call didn't produce patch (if applicable)
+            no_reason = ""
+            if not pipeline_final_patch:
+                if not raw_meta["actual_model_called"]:
+                    no_reason = "model_not_called"
+                elif raw_meta["actual_model_output_len"] == 0:
+                    no_reason = "model_empty_output"
+                elif "SEARCH_MISMATCH" in pipeline_failure_reason:
+                    no_reason = "search_mismatch"
+                elif "NO_BLOCKS_FOUND" in pipeline_failure_reason:
+                    no_reason = "no_blocks_found"
+                elif "REFUSAL" in pipeline_failure_reason:
+                    no_reason = "model_refusal"
+                elif "REPLACEMENT_MARKDOWN_FENCE" in pipeline_failure_reason:
+                    no_reason = "fenced_output"
+                else:
+                    no_reason = "protocol_adherence_failure"
+            raw_meta["no_model_call_reason"] = no_reason
+
             return LocalModelExecutorResponse(
                 invoked=True,
                 local_model_called=True,
