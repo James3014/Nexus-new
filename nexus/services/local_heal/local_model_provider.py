@@ -3,6 +3,8 @@ from __future__ import annotations
 from dataclasses import dataclass
 import json
 import os
+import socket
+import time
 from typing import Any, Callable
 import urllib.request
 import urllib.error
@@ -14,7 +16,7 @@ class LocalModelProviderRequest:
     prompt: str
     evidence_refs: tuple[str, ...]
     model_name: str = ""
-    timeout_sec: float = 30.0
+    timeout_sec: float = 120.0
     max_output_chars: int = 4000
 
 
@@ -31,6 +33,10 @@ class LocalModelProviderResponse:
     production_ready: bool = False
     adapter_output_is_route_truth: bool = False
     behavior_changed: bool = False
+    # C6 timeout telemetry
+    requested_timeout_sec: float = 0.0
+    elapsed_sec: float = 0.0
+    effective_timeout_sec: float = 0.0
 
 
 class LocalModelProvider:
@@ -46,6 +52,8 @@ class InertLocalModelProvider(LocalModelProvider):
             model_name="",
             output_text="",
             error="provider_not_configured",
+            requested_timeout_sec=request.timeout_sec,
+            effective_timeout_sec=request.timeout_sec,
         )
 
 
@@ -54,8 +62,10 @@ class InjectedLocalModelProvider(LocalModelProvider):
         self._generate_fn = generate_fn
 
     def generate(self, request: LocalModelProviderRequest) -> LocalModelProviderResponse:
+        t0 = time.monotonic()
         try:
             raw_text = self._generate_fn(request)
+            elapsed = time.monotonic() - t0
             truncated = False
             if len(raw_text) > request.max_output_chars:
                 raw_text = raw_text[:request.max_output_chars]
@@ -67,14 +77,21 @@ class InjectedLocalModelProvider(LocalModelProvider):
                 model_name=request.model_name,
                 output_text=raw_text,
                 output_truncated=truncated,
+                requested_timeout_sec=request.timeout_sec,
+                elapsed_sec=round(elapsed, 3),
+                effective_timeout_sec=request.timeout_sec,
             )
         except Exception as e:
+            elapsed = time.monotonic() - t0
             return LocalModelProviderResponse(
                 provider_invoked=True,
                 model_called=False,
                 model_name=request.model_name,
                 output_text="",
                 error=f"injected_provider_error: {str(e)}",
+                requested_timeout_sec=request.timeout_sec,
+                elapsed_sec=round(elapsed, 3),
+                effective_timeout_sec=request.timeout_sec,
             )
 
 
@@ -90,6 +107,8 @@ class OllamaLocalModelProvider(LocalModelProvider):
                 model_name="",
                 output_text="",
                 error="provider_not_configured",
+                requested_timeout_sec=request.timeout_sec,
+                effective_timeout_sec=request.timeout_sec,
             )
             
         model_name = request.model_name or os.environ.get("NEXUS_LOCAL_MODEL_NAME", "").strip()
@@ -100,6 +119,8 @@ class OllamaLocalModelProvider(LocalModelProvider):
                 model_name="",
                 output_text="",
                 error="model_name_missing",
+                requested_timeout_sec=request.timeout_sec,
+                effective_timeout_sec=request.timeout_sec,
             )
             
         url = os.environ.get("NEXUS_OLLAMA_URL", "http://127.0.0.1:11434/api/generate").strip()
@@ -110,6 +131,7 @@ class OllamaLocalModelProvider(LocalModelProvider):
             "stream": False
         }
         
+        t0 = time.monotonic()
         try:
             req_data = json.dumps(payload).encode("utf-8")
             req = urllib.request.Request(
@@ -122,6 +144,7 @@ class OllamaLocalModelProvider(LocalModelProvider):
                 resp_data = resp.read().decode("utf-8")
                 resp_json = json.loads(resp_data)
                 raw_text = resp_json.get("response", "")
+                elapsed = time.monotonic() - t0
                 
                 truncated = False
                 if len(raw_text) > request.max_output_chars:
@@ -134,28 +157,85 @@ class OllamaLocalModelProvider(LocalModelProvider):
                     model_name=model_name,
                     output_text=raw_text,
                     output_truncated=truncated,
+                    requested_timeout_sec=request.timeout_sec,
+                    elapsed_sec=round(elapsed, 3),
+                    effective_timeout_sec=request.timeout_sec,
                 )
+        except (socket.timeout, TimeoutError) as e:
+            elapsed = time.monotonic() - t0
+            return LocalModelProviderResponse(
+                provider_invoked=True,
+                model_called=False,
+                model_name=model_name,
+                output_text="",
+                error=f"ollama_timeout: timed out after {elapsed:.1f}s (limit={request.timeout_sec}s)",
+                timed_out=True,
+                requested_timeout_sec=request.timeout_sec,
+                elapsed_sec=round(elapsed, 3),
+                effective_timeout_sec=request.timeout_sec,
+            )
         except urllib.error.HTTPError as e:
+            elapsed = time.monotonic() - t0
             return LocalModelProviderResponse(
                 provider_invoked=True,
                 model_called=False,
                 model_name=model_name,
                 output_text="",
                 error=f"ollama_http_error_{e.code}: {e.reason}",
+                requested_timeout_sec=request.timeout_sec,
+                elapsed_sec=round(elapsed, 3),
+                effective_timeout_sec=request.timeout_sec,
             )
         except urllib.error.URLError as e:
+            elapsed = time.monotonic() - t0
+            # urllib wraps socket.timeout inside URLError.reason
+            is_timeout = isinstance(e.reason, socket.timeout) or isinstance(e.reason, TimeoutError)
+            if is_timeout:
+                return LocalModelProviderResponse(
+                    provider_invoked=True,
+                    model_called=False,
+                    model_name=model_name,
+                    output_text="",
+                    error=f"ollama_timeout: timed out after {elapsed:.1f}s (limit={request.timeout_sec}s)",
+                    timed_out=True,
+                    requested_timeout_sec=request.timeout_sec,
+                    elapsed_sec=round(elapsed, 3),
+                    effective_timeout_sec=request.timeout_sec,
+                )
             return LocalModelProviderResponse(
                 provider_invoked=True,
                 model_called=False,
                 model_name=model_name,
                 output_text="",
                 error=f"ollama_url_error: {str(e.reason)}",
+                requested_timeout_sec=request.timeout_sec,
+                elapsed_sec=round(elapsed, 3),
+                effective_timeout_sec=request.timeout_sec,
             )
         except Exception as e:
+            elapsed = time.monotonic() - t0
+            # Final safety net: detect timeout buried in generic exception
+            err_str = str(e).lower()
+            is_timeout = "timed out" in err_str or "timeout" in err_str
+            if is_timeout:
+                return LocalModelProviderResponse(
+                    provider_invoked=True,
+                    model_called=False,
+                    model_name=model_name,
+                    output_text="",
+                    error=f"ollama_timeout: {str(e)}",
+                    timed_out=True,
+                    requested_timeout_sec=request.timeout_sec,
+                    elapsed_sec=round(elapsed, 3),
+                    effective_timeout_sec=request.timeout_sec,
+                )
             return LocalModelProviderResponse(
                 provider_invoked=True,
                 model_called=False,
                 model_name=model_name,
                 output_text="",
                 error=f"ollama_internal_error: {str(e)}",
+                requested_timeout_sec=request.timeout_sec,
+                elapsed_sec=round(elapsed, 3),
+                effective_timeout_sec=request.timeout_sec,
             )

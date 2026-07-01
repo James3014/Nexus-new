@@ -646,3 +646,132 @@ def test_receipt_wiring_missing_sections_safe() -> None:
     assert d["verifier"] is None
     assert d["learning_closure"] is None
 
+
+# ---------------------------------------------------------------------------
+# C6: Provider Timeout Telemetry Tests
+# ---------------------------------------------------------------------------
+
+def test_c6_timeout_sec_forwarded_from_signal_snapshot() -> None:
+    """provider_timeout_sec in signal_snapshot must be forwarded to LocalModelProviderRequest."""
+    captured: list[LocalModelProviderRequest] = []
+
+    def capture_fn(req: LocalModelProviderRequest) -> str:
+        captured.append(req)
+        return "patch content"
+
+    req = make_test_request(
+        "c6-timeout-forward",
+        route_context={
+            "signal_snapshot": {
+                "execution_topology": "single_local_model",
+                "model_call_allowed": True,
+                "selected_executor": "local_model",
+                "executor_provider": "ollama",
+                "executor_model": "qwen2.5-coder:7b",
+                "protocol_mode": "anchored_edit",
+                "provider_timeout_sec": 90,
+            }
+        }
+    )
+    provider = InjectedLocalModelProvider(capture_fn)
+    LocalModelExecutor.run(req, provider=provider)
+    assert len(captured) == 1
+    assert captured[0].timeout_sec == 90.0, (
+        f"Expected timeout_sec=90.0, got {captured[0].timeout_sec}"
+    )
+
+
+def test_c6_default_timeout_sec_is_120() -> None:
+    """When provider_timeout_sec is absent, default must be 120.0 (not 30.0)."""
+    captured: list[LocalModelProviderRequest] = []
+
+    def capture_fn(req: LocalModelProviderRequest) -> str:
+        captured.append(req)
+        return ""
+
+    req = make_test_request(
+        "c6-default-timeout",
+        route_context={
+            "signal_snapshot": {
+                "execution_topology": "single_local_model",
+                "model_call_allowed": True,
+                "selected_executor": "local_model",
+                "executor_provider": "ollama",
+                "executor_model": "qwen2.5-coder:7b",
+                "protocol_mode": "anchored_edit",
+                # provider_timeout_sec intentionally absent
+            }
+        }
+    )
+    provider = InjectedLocalModelProvider(capture_fn)
+    LocalModelExecutor.run(req, provider=provider)
+    assert len(captured) == 1
+    assert captured[0].timeout_sec == 120.0, (
+        f"Expected default timeout_sec=120.0, got {captured[0].timeout_sec}"
+    )
+
+
+def test_c6_timeout_does_not_produce_solved() -> None:
+    """A provider that times out (model_called=False) must never produce solved=True."""
+    from nexus.services.local_heal.local_model_provider import (
+        LocalModelProviderResponse,
+        LocalModelProvider as _LMP,
+    )
+
+    class TimeoutProvider(_LMP):
+        def generate(self, request):
+            return LocalModelProviderResponse(
+                provider_invoked=True,
+                model_called=False,
+                model_name=request.model_name,
+                output_text="",
+                error="ollama_timeout: timed out after 30.0s (limit=30.0s)",
+                timed_out=True,
+                requested_timeout_sec=request.timeout_sec,
+                elapsed_sec=30.1,
+                effective_timeout_sec=request.timeout_sec,
+            )
+
+    req = make_test_request("c6-no-solve-on-timeout")
+    resp = LocalModelExecutor.run(req, provider=TimeoutProvider())
+    assert not resp.local_model_called
+    assert resp.timeout is True
+    assert resp.candidate_patch == ""
+    meta = resp.raw_model_metadata
+    assert meta.get("solved") is not True
+
+
+def test_c6_timed_out_true_when_provider_sets_timed_out() -> None:
+    """LocalModelExecutorResponse.timeout must be True when provider.timed_out=True."""
+    from nexus.services.local_heal.local_model_provider import LocalModelProviderResponse, LocalModelProvider as _LMP
+
+    class AlwaysTimeoutProvider(_LMP):
+        def generate(self, request):
+            return LocalModelProviderResponse(
+                provider_invoked=True,
+                model_called=False,
+                model_name="test-model",
+                output_text="",
+                error="ollama_timeout: timed out after 120.0s (limit=120.0s)",
+                timed_out=True,
+                requested_timeout_sec=120.0,
+                elapsed_sec=120.1,
+                effective_timeout_sec=120.0,
+            )
+
+    req = make_test_request("c6-timeout-flag")
+    resp = LocalModelExecutor.run(req, provider=AlwaysTimeoutProvider())
+    assert resp.timeout is True
+    assert resp.local_model_called is False
+    assert resp.error != ""
+
+
+def test_c6_output_with_no_error_not_classified_as_timeout() -> None:
+    """A provider that returns output_len>0 with empty error must NOT be classified as timeout."""
+    req = make_test_request("c6-real-output")
+    provider = InjectedLocalModelProvider(lambda _: "<<<<<<< REPLACE\nfixed\n>>>>>>> REPLACE\n")
+    resp = LocalModelExecutor.run(req, provider=provider)
+    assert resp.local_model_called is True
+    assert resp.timeout is False
+    assert resp.error == ""
+

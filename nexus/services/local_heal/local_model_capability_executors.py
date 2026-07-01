@@ -350,6 +350,8 @@ class LocalHealPipelineCapabilityExecutor:
                     # C2: Get model_name from signal_snapshot for direct Ollama call
                     _signal_snap = ctx.route_context.get("signal_snapshot", {}) if isinstance(ctx.route_context, dict) else {}
                     _pipeline_model_name = _signal_snap.get("executor_model", "")
+                    # C6: Read provider_timeout_sec for forwarding to provider requests
+                    _provider_timeout_sec: float = float(_signal_snap.get("provider_timeout_sec", 120.0))
                     # C2: Map model name aliases (qwen2.5-coder:7b -> qwen2.5-coder:7b-instruct)
                     _MODEL_ALIASES = {"qwen2.5-coder:7b": "qwen2.5-coder:7b-instruct"}
                     if _pipeline_model_name in _MODEL_ALIASES:
@@ -373,6 +375,7 @@ class LocalHealPipelineCapabilityExecutor:
                             prompt=prompt,
                             evidence_refs=ctx.evidence_refs,
                             model_name=model_name,
+                            timeout_sec=_provider_timeout_sec,
                         )
                         prov_resp = real_provider.generate(prov_req)
 
@@ -385,7 +388,7 @@ class LocalHealPipelineCapabilityExecutor:
                                 payload = {"model": model_name, "prompt": prompt, "stream": False}
                                 req_data = _json.dumps(payload).encode("utf-8")
                                 req = _urllib_request.Request(ollama_url, data=req_data, headers={"Content-Type": "application/json"})
-                                with _urllib_request.urlopen(req, timeout=30) as resp:
+                                with _urllib_request.urlopen(req, timeout=_provider_timeout_sec) as resp:
                                     resp_json = _json.loads(resp.read().decode("utf-8"))
                                     raw_text = resp_json.get("response", "")
                                     _last_provider_diag = {

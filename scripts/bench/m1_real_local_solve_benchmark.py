@@ -245,6 +245,7 @@ def run_benchmark():
                     "model_call_allowed": True,
                     "executor_provider": "ollama",
                     "executor_model": "qwen2.5-coder:7b",
+                    "provider_timeout_sec": 120,
                     "judge_model": "qwen2.5:3b",
                     "proposer_specs": [
                         {"model": "qwen2.5-coder:7b", "role": "primary"},

@@ -282,6 +282,10 @@ class LocalModelExecutor:
             except Exception:
                 failure_feedback_present = False
         
+        # C6: Read provider_timeout_sec from signal_snapshot (planner-owned)
+        _signal_snap_early = request.route_context.get("signal_snapshot", {}) if isinstance(request.route_context, dict) else {}
+        provider_timeout_sec: float = float(_signal_snap_early.get("provider_timeout_sec", 120.0))
+
         # 7. Build capability context (shared across all topologies)
         cap_ctx = LocalModelCapabilityContext(
             task_id=request.task_id,
@@ -391,6 +395,7 @@ class LocalModelExecutor:
                                     prompt=prompt,
                                     evidence_refs=request.evidence_refs,
                                     model_name=model_name,
+                                    timeout_sec=provider_timeout_sec,
                                 )
                                 prov_resp = provider.generate(prov_req)
                                 return prov_resp.output_text or ""
@@ -604,6 +609,7 @@ class LocalModelExecutor:
                     prompt=explicit_prompt,
                     evidence_refs=request.evidence_refs,
                     model_name=model_name,
+                    timeout_sec=provider_timeout_sec,
                 )
                 prov_resp = provider.generate(prov_req)
 
@@ -709,6 +715,7 @@ class LocalModelExecutor:
             prompt=explicit_prompt,
             evidence_refs=request.evidence_refs,
             model_name=model_name,
+            timeout_sec=provider_timeout_sec,
         )
         
         prov_resp = provider.generate(prov_req)
@@ -726,6 +733,10 @@ class LocalModelExecutor:
         raw_meta = {
             "output_truncated": prov_resp.output_truncated,
             "error": prov_resp.error,
+            "timed_out": prov_resp.timed_out,
+            "requested_timeout_sec": prov_resp.requested_timeout_sec,
+            "effective_timeout_sec": prov_resp.effective_timeout_sec,
+            "elapsed_sec": prov_resp.elapsed_sec,
             "protocol_mode": protocol_mode,
             "execution_topology": execution_topology,
             "protocol_normalization": patch_meta,
