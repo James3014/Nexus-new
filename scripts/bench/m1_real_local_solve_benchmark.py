@@ -394,6 +394,19 @@ def run_benchmark():
                 "output_len": adapter_meta.get("output_len", 0),
                 "prompt_len": adapter_meta.get("prompt_len", 0),
                 "timed_out": adapter_meta.get("timed_out", False),
+                # C7: Output Classification fields
+                "output_class": adapter_meta.get("output_class"),
+                "output_hash": adapter_meta.get("output_hash", ""),
+                "output_excerpt_first_500": adapter_meta.get("output_excerpt_first_500", ""),
+                "contains_search_marker": adapter_meta.get("contains_search_marker", False),
+                "contains_replace_marker": adapter_meta.get("contains_replace_marker", False),
+                "contains_markdown_fence": adapter_meta.get("contains_markdown_fence", False),
+                "contains_unified_diff_header": adapter_meta.get("contains_unified_diff_header", False),
+                "contains_natural_language_only": adapter_meta.get("contains_natural_language_only", False),
+                # C8: Micro Verifier Context
+                "micro_verify_context_present": adapter_meta.get("micro_verify_context_present", False),
+                "verifier_command_present": adapter_meta.get("verifier_command_present", False),
+                "bare_python_rejected": adapter_meta.get("bare_python_rejected", False),
             }
 
             print(f"Outcome: {'SOLVED' if is_solved else 'FAILED'}")

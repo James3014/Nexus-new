@@ -32,8 +32,17 @@ class PromptBuilder:
         if is_7b:
             return (
                 "Output ONLY SEARCH/REPLACE blocks. No explanations.\n\n"
-                "FILE: <path>\n<<<<<<< SEARCH\n<original>\n=======\n<fixed>\n>>>>>>> REPLACE\n\n"
-                "Rules: SEARCH must match exactly. No placeholders. Write full code."
+                "VALID OUTPUT FORMAT:\n"
+                "FILE: src/utils.py\n"
+                "<<<<<<< SEARCH\n    return os.path.join(a, b)\n=======\n"
+                "    return os.path.join(a, b) if a and b else ''\n>>>>>>> REPLACE\n\n"
+                "FORBIDDEN OUTPUT (will be rejected):\n"
+                "- Markdown code fences (```) around SEARCH/REPLACE\n"
+                "- Unified diff format (--- a/ or +++ b/)\n"
+                "- Explanations, prose, or text before/after blocks\n"
+                "- Missing SEARCH or REPLACE markers\n"
+                "- Multiple SEARCH/REPLACE blocks (output exactly one)\n\n"
+                "Rules: SEARCH must match source exactly. No placeholders. Write full code."
                 + reasoning_section
                 + few_shot
             )
@@ -115,6 +124,36 @@ class PromptBuilder:
                     "RULES:\n"
                     "1. The REPLACE block must differ from the SEARCH block in functional code logic.\n"
                     "2. Do not just reformat or reorder — the code behavior MUST change.\n"
+                )
+            elif "NO_BLOCKS_FOUND" in failure_reason:
+                retry_section += (
+                    "CRITICAL: Your output contained NO SEARCH/REPLACE blocks.\n"
+                    "RULES:\n"
+                    "1. Output ONLY SEARCH/REPLACE blocks.\n"
+                    "2. Do NOT output explanations, prose, or markdown.\n"
+                    "3. Use EXACTLY this format:\n"
+                    "<<<<<<< SEARCH\n<verbatim original code>\n=======\n<fixed code>\n>>>>>>> REPLACE\n"
+                )
+            elif "REPLACEMENT_MARKDOWN_FENCE" in failure_reason:
+                retry_section += (
+                    "CRITICAL: Your output was wrapped in markdown code fences.\n"
+                    "RULES:\n"
+                    "1. Do NOT use ``` or any markdown fences.\n"
+                    "2. Output the SEARCH/REPLACE blocks directly, no wrapping.\n"
+                )
+            elif "UNIFIED_DIFF_OUTPUT" in failure_reason:
+                retry_section += (
+                    "CRITICAL: Your output used unified diff format.\n"
+                    "RULES:\n"
+                    "1. Do NOT use --- a/ or +++ b/ format.\n"
+                    "2. Use SEARCH/REPLACE blocks only.\n"
+                )
+            elif "NATURAL_LANGUAGE_OUTPUT" in failure_reason:
+                retry_section += (
+                    "CRITICAL: Your output was natural language, not SEARCH/REPLACE blocks.\n"
+                    "RULES:\n"
+                    "1. Do NOT explain the fix — just output the SEARCH/REPLACE block.\n"
+                    "2. Output ONLY the code change in SEARCH/REPLACE format.\n"
                 )
 
         # 3. Failure memory bank
