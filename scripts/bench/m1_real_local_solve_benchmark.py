@@ -407,6 +407,12 @@ def run_benchmark():
                 "search_mismatch": adapter_meta.get("search_mismatch", False),
                 "search_block_len": adapter_meta.get("search_block_len", 0),
                 "locked_search_len": adapter_meta.get("locked_search_len", 0),
+                # C13: Protocol retry telemetry
+                "protocol_retry_attempted": adapter_meta.get("protocol_retry_attempted", False),
+                "protocol_retry_reason": adapter_meta.get("protocol_retry_reason", ""),
+                "protocol_retry_count": adapter_meta.get("protocol_retry_count", 0),
+                "first_output_class": adapter_meta.get("first_output_class", ""),
+                "second_output_class": adapter_meta.get("second_output_class", ""),
                 # C8: Micro Verifier Context
                 "micro_verify_context_present": adapter_meta.get("micro_verify_context_present", False),
                 "verifier_command_present": adapter_meta.get("verifier_command_present", False),

@@ -497,6 +497,7 @@ class LocalHealPipelineCapabilityExecutor:
         patch_attempt_output_lens = []
         patch_attempt_file_paths = []
         patch_attempt_output_excerpt = ""
+        patch_synthesis_output_len = 0
 
         if pipeline_result_ctx is not None:
             # Extract phase progression from context fields
@@ -558,6 +559,13 @@ class LocalHealPipelineCapabilityExecutor:
         bare_python_rejected = False
         micro_verify_failure_reason = ""
         search_mismatch = False
+        protocol_retry_attempted = False
+        protocol_retry_reason = ""
+        protocol_retry_count = 0
+        first_output_class = ""
+        second_output_class = ""
+        first_pipeline_failure_reason = ""
+        second_pipeline_failure_reason = ""
 
         if pipeline_result_ctx is not None:
             # Extract C7 classification
@@ -588,6 +596,37 @@ class LocalHealPipelineCapabilityExecutor:
             if "SEARCH_MISMATCH" in pipeline_failure_reason:
                 output_class = "SEARCH_REPLACE_SEARCH_MISMATCH"
                 search_mismatch = True
+
+            # C13: No-block output classification refinement
+            # When output exists but C7 classification is UNKNOWN (lost through PhaseResult),
+            # infer from pipeline_failure_reason and output characteristics.
+            if output_class == "UNKNOWN" and patch_synthesis_output_len > 0:
+                if "NO_BLOCKS_FOUND" in pipeline_failure_reason:
+                    output_class = "CODE_WITHOUT_SEARCH_REPLACE"
+                elif "REFUSAL" in pipeline_failure_reason or "REFUSAL_DETECTED" in pipeline_failure_reason:
+                    output_class = "REFUSAL"
+                elif "REPLACEMENT_MARKDOWN_FENCE" in pipeline_failure_reason:
+                    output_class = "FENCED_SEARCH_REPLACE"
+                elif "UNIFIED_DIFF" in pipeline_failure_reason:
+                    output_class = "UNIFIED_DIFF"
+                else:
+                    output_class = "NATURAL_LANGUAGE"
+
+            # C13: Protocol retry telemetry from model_decisions
+            patch_decisions_all = [d for d in model_decisions if d.get("phase") == "patch"]
+            protocol_retry_count = max(0, len(patch_decisions_all) - 1)
+            if protocol_retry_count > 0:
+                protocol_retry_attempted = True
+                first_d = patch_decisions_all[0] if patch_decisions_all else {}
+                second_d = patch_decisions_all[-1] if patch_decisions_all else {}
+                first_output_class = first_d.get("output_class", "UNKNOWN")
+                second_output_class = second_d.get("output_class", "UNKNOWN")
+                first_pipeline_failure_reason = first_d.get("status", "")
+                second_pipeline_failure_reason = second_d.get("status", "")
+                protocol_retry_reason = first_pipeline_failure_reason
+                # Check if retry improved output
+                if second_output_class in ("VALID_SEARCH_REPLACE", "SEARCH_REPLACE_SEARCH_MISMATCH") and first_output_class not in ("VALID_SEARCH_REPLACE",):
+                    pass  # improved
 
         return CapabilityExecutionResult(
             name="repair_loop", selected=True, invoked=True,
@@ -667,5 +706,13 @@ class LocalHealPipelineCapabilityExecutor:
                 "micro_verify_failure_reason": micro_verify_failure_reason,
                 # C12: Search mismatch classification
                 "search_mismatch": search_mismatch,
+                # C13: Protocol retry telemetry
+                "protocol_retry_attempted": protocol_retry_attempted,
+                "protocol_retry_reason": protocol_retry_reason,
+                "protocol_retry_count": protocol_retry_count,
+                "first_output_class": first_output_class,
+                "second_output_class": second_output_class,
+                "first_pipeline_failure_reason": first_pipeline_failure_reason,
+                "second_pipeline_failure_reason": second_pipeline_failure_reason,
             },
         )
