@@ -403,6 +403,10 @@ def run_benchmark():
                 "contains_markdown_fence": adapter_meta.get("contains_markdown_fence", False),
                 "contains_unified_diff_header": adapter_meta.get("contains_unified_diff_header", False),
                 "contains_natural_language_only": adapter_meta.get("contains_natural_language_only", False),
+                # C12: Search mismatch telemetry
+                "search_mismatch": adapter_meta.get("search_mismatch", False),
+                "search_block_len": adapter_meta.get("search_block_len", 0),
+                "locked_search_len": adapter_meta.get("locked_search_len", 0),
                 # C8: Micro Verifier Context
                 "micro_verify_context_present": adapter_meta.get("micro_verify_context_present", False),
                 "verifier_command_present": adapter_meta.get("verifier_command_present", False),

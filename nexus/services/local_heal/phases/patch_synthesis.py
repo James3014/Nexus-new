@@ -349,6 +349,30 @@ class PatchSynthesisPhase(IPhase):
         )
 
         model_decisions[-1]["status"] = "SUCCESS" if apply_res.success else apply_res.error_reason
+
+        # C12: Post-apply output classification update for SEARCH_MISMATCH
+        search_mismatch = False
+        search_block_len = 0
+        locked_search_len = 0
+        if not apply_res.success and apply_res.errors:
+            for err in apply_res.errors:
+                if hasattr(err, "kind") and err.kind == PatchErrorKind.SEARCH_MISMATCH:
+                    search_mismatch = True
+                    if hasattr(err, "failed_search_text") and err.failed_search_text:
+                        search_block_len = len(err.failed_search_text)
+                    break
+        if search_mismatch:
+            output_class = "SEARCH_REPLACE_SEARCH_MISMATCH"
+            model_decisions[-1]["output_class"] = output_class
+            model_decisions[-1]["search_mismatch"] = True
+            model_decisions[-1]["search_block_len"] = search_block_len
+            locked_search_text = getattr(input_data, "route_context", {}).get("locked_search", "") if hasattr(input_data, "route_context") else ""
+            locked_search_len = len(locked_search_text) if locked_search_text else 0
+            model_decisions[-1]["locked_search_len"] = locked_search_len
+            output_classification_telemetry["output_class"] = output_class
+            output_classification_telemetry["search_mismatch"] = True
+            output_classification_telemetry["search_block_len"] = search_block_len
+            output_classification_telemetry["locked_search_len"] = locked_search_len
         
         # Keep micro verification behavior unchanged during C7 recovery.
         if apply_res.success and apply_res.applied_diffs:

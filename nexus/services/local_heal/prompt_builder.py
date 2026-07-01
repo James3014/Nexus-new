@@ -32,6 +32,12 @@ class PromptBuilder:
         if is_7b:
             return (
                 "Output ONLY SEARCH/REPLACE blocks. No explanations.\n\n"
+                "SOURCE ANCHORING RULES (CRITICAL):\n"
+                "- SEARCH must be copied EXACTLY from the CURRENT SOURCE / LOCKED SEARCH below.\n"
+                "- Do NOT paraphrase, reformat, or reconstruct SEARCH from memory.\n"
+                "- Do NOT change whitespace, indentation, or line breaks in SEARCH.\n"
+                "- Do NOT include line numbers unless they are part of the source.\n"
+                "- REPLACE may change logic. SEARCH may NOT change anything.\n\n"
                 "VALID OUTPUT FORMAT:\n"
                 "FILE: src/utils.py\n"
                 "<<<<<<< SEARCH\n    return os.path.join(a, b)\n=======\n"
@@ -41,14 +47,21 @@ class PromptBuilder:
                 "- Unified diff format (--- a/ or +++ b/)\n"
                 "- Explanations, prose, or text before/after blocks\n"
                 "- Missing SEARCH or REPLACE markers\n"
-                "- Multiple SEARCH/REPLACE blocks (output exactly one)\n\n"
-                "Rules: SEARCH must match source exactly. No placeholders. Write full code."
+                "- Multiple SEARCH/REPLACE blocks (output exactly one)\n"
+                "- SEARCH that differs from the provided source (will cause SEARCH_MISMATCH)\n\n"
+                "Rules: SEARCH must match source character-for-character. No placeholders. Write full code."
                 + reasoning_section
                 + few_shot
             )
 
         return (
             "Output ONLY SEARCH/REPLACE blocks — no explanations.\n\n"
+            "SOURCE ANCHORING RULES (CRITICAL):\n"
+            "- SEARCH must be copied EXACTLY from the CURRENT SOURCE / LOCKED SEARCH below.\n"
+            "- Do NOT paraphrase, reformat, or reconstruct SEARCH from memory.\n"
+            "- Do NOT change whitespace, indentation, or line breaks in SEARCH.\n"
+            "- Do NOT include line numbers unless they are part of the source.\n"
+            "- REPLACE may change logic. SEARCH may NOT change anything.\n\n"
             "FILE: <path>\n<<<<<<< SEARCH\n<verbatim original>\n=======\n<fixed>\n>>>>>>> REPLACE\n\n"
             "Rules:\n"
             "1. SEARCH matches source character-for-character.\n"
