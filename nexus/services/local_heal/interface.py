@@ -126,6 +126,7 @@ class VerificationInput:
     final_patch: str
     repro_script: str
     python_executable: str
+    verifier_command: Tuple[str, ...] = field(default_factory=tuple)
 
 @dataclass(frozen=True)
 class VerificationOutput:

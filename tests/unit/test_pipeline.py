@@ -628,3 +628,40 @@ def test_pipeline_uses_env_resolved_python_for_visible_verification(tmp_path, mo
 
     assert res_ctx.solve_eligible is True
     assert visible_cmds == [["/opt/python3.9", "reproduce_bug.py"]]
+
+
+def test_verification_phase_prefers_route_context_verifier_command(tmp_path, monkeypatch):
+    visible_cmds = []
+    from nexus.services.local_heal.context import HealContext as HealContextV2, OperationalContext, GovernanceContext
+    from nexus.services.local_heal.phases.verification import VerificationPhase
+    from nexus.services.local_heal.evaluation_gate import EvaluationGate
+
+    def fake_run_visible_tests(self, test_cmds):
+        visible_cmds.extend(test_cmds)
+        return [TestResult(test_id=" ".join(test_cmds[0]), passed=True, output="ok")]
+
+    monkeypatch.setattr(
+        "nexus.services.local_heal.evaluation_gate.EvaluationGate.run_visible_tests",
+        fake_run_visible_tests,
+    )
+
+    phase = VerificationPhase(eval_gate=EvaluationGate(tmp_path))
+    ctx = HealContextV2(
+        op=OperationalContext(
+            instance_id="mock_route_verifier_command",
+            repo_dir=tmp_path,
+            problem_statement="verify patched file",
+            final_patch="diff --git a/hello.py b/hello.py",
+            repro_script="",
+            python_executable="/opt/python3.9",
+            route_context={"verifier_command": ["python3", "verify_hello.py"]},
+        ),
+        gov=GovernanceContext(),
+    )
+    result = phase.execute(ctx)
+
+    assert result.success is True
+    assert visible_cmds == [["/opt/python3.9", "verify_hello.py"]]
+    assert ctx.op.solve_eligible is True
+    assert ctx.op.verifier_command_present is True
+    assert ctx.op.verifier_command_source == "route_context"

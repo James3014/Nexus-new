@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import pytest
 
+from scripts.bench.m1_real_local_solve_benchmark import build_task_specs, select_task_specs
+
 
 M1_TELEMETRY_FIELDS = [
     "parse_error_kind",
@@ -13,6 +15,11 @@ M1_TELEMETRY_FIELDS = [
     "diff_repair_success",
     "same_span_retry_count",
     "failure_feedback_used",
+    "semantic_retry_invoked",
+    "semantic_retry_count",
+    "same_span_retry",
+    "structured_retry_packet_available",
+    "failure_feedback_builder_invoked",
     "execution_path_modules",
 ]
 
@@ -47,6 +54,11 @@ def _make_base_row(**overrides) -> dict:
         "diff_repair_success": False,
         "same_span_retry_count": 0,
         "failure_feedback_used": False,
+        "semantic_retry_invoked": False,
+        "semantic_retry_count": 0,
+        "same_span_retry": False,
+        "structured_retry_packet_available": False,
+        "failure_feedback_builder_invoked": False,
         "execution_path_modules": [
             "CapabilityPlanner",
             "LocalModelExecutor",
@@ -73,10 +85,26 @@ def _evaluate_solved(row: dict) -> bool:
 # Test 1: all 10 wiring telemetry fields present
 # ------------------------------------------------------------------
 def test_m1_rows_include_wiring_telemetry():
-    """Every M1 row must carry all 10 observational telemetry fields."""
+    """Every M1 row must carry the shared observational telemetry fields."""
     row = _make_base_row()
     for field in M1_TELEMETRY_FIELDS:
         assert field in row, f"Missing telemetry field: {field}"
+
+
+def test_m1_shared_retry_truth_fields_are_observational():
+    base = _make_base_row()
+    solved_a = _evaluate_solved(base)
+
+    modified = _make_base_row(
+        semantic_retry_invoked=True,
+        semantic_retry_count=1,
+        same_span_retry=True,
+        structured_retry_packet_available=True,
+        failure_feedback_builder_invoked=True,
+    )
+    solved_b = _evaluate_solved(modified)
+
+    assert solved_a is solved_b
 
 
 # ------------------------------------------------------------------
@@ -125,3 +153,15 @@ def test_m1_execution_path_modules_are_observational():
     assert solved_a is solved_b, (
         "execution_path_modules should be observational and not affect solved outcome"
     )
+
+
+def test_select_task_specs_filters_to_requested_task_ids():
+    specs = build_task_specs()
+    filtered = select_task_specs(specs, ["toy-math-solve", "task-a-real"])
+    assert [spec["task_id"] for spec in filtered] == ["toy-math-solve", "task-a-real"]
+
+
+def test_select_task_specs_rejects_unknown_task_id():
+    specs = build_task_specs()
+    with pytest.raises(ValueError, match="Unknown task_id"):
+        select_task_specs(specs, ["not-a-real-task"])

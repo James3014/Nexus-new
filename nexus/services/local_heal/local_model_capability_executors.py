@@ -13,6 +13,13 @@ from nexus.services.local_heal.local_model_capability_context import (
 )
 
 
+def _has_structured_packet(errors: list[Any] | None) -> bool:
+    for err in errors or []:
+        if getattr(err, "structured_packet", None) is not None:
+            return True
+    return False
+
+
 class DDTreeLocalExecutor:
     """C3: DDTree executor for local model candidate pruning."""
     name = "ddtree"
@@ -437,15 +444,25 @@ class LocalHealPipelineCapabilityExecutor:
                 # Build HealContext from capability context
                 # B7.3: Check for repro_script in route_context, otherwise skip_reproduction
                 route_ctx = ctx.route_context if hasattr(ctx, "route_context") else {}
+                if isinstance(route_ctx, dict):
+                    route_ctx = dict(route_ctx)
+                else:
+                    route_ctx = {}
+                route_ctx.setdefault("target_file", ctx.target_file)
+                route_ctx.setdefault("target_symbol", ctx.target_symbol)
                 repro_script = route_ctx.get("repro_script", "") if isinstance(route_ctx, dict) else ""
                 skip_repro = not bool(repro_script)
+
+                python_executable = ""
+                if isinstance(route_ctx, dict):
+                    python_executable = str(route_ctx.get("python_executable", "") or "")
 
                 heal_ctx = LegacyHealContext(
                     instance_id=ctx.task_id,
                     repo_dir=_Path(ctx.source_root),
                     problem_statement=ctx.problem_statement,
-                    route_context=ctx.route_context,
-                    python_executable="",
+                    route_context=route_ctx,
+                    python_executable=python_executable,
                     max_tries=3,
                     skip_reproduction=skip_repro,
                     repro_script=repro_script,
@@ -566,6 +583,10 @@ class LocalHealPipelineCapabilityExecutor:
         second_output_class = ""
         first_pipeline_failure_reason = ""
         second_pipeline_failure_reason = ""
+        semantic_retry_invoked = False
+        semantic_retry_count = 0
+        same_span_retry = False
+        structured_retry_packet_available = False
 
         if pipeline_result_ctx is not None:
             # Extract C7 classification
@@ -629,6 +650,12 @@ class LocalHealPipelineCapabilityExecutor:
                 if second_output_class in ("VALID_SEARCH_REPLACE", "SEARCH_REPLACE_SEARCH_MISMATCH") and first_output_class not in ("VALID_SEARCH_REPLACE",):
                     pass  # improved
 
+            semantic_retry_telemetry = dict(getattr(pipeline_result_ctx, "_semantic_retry_telemetry", {}) or {})
+            semantic_retry_count = int(semantic_retry_telemetry.get("semantic_retry_count", 0) or 0)
+            same_span_retry = bool(semantic_retry_telemetry.get("same_span_retry", False))
+            semantic_retry_invoked = semantic_retry_count > 0 or same_span_retry
+            structured_retry_packet_available = _has_structured_packet(getattr(pipeline_result_ctx, "errors", []) or [])
+
         return CapabilityExecutionResult(
             name="repair_loop", selected=True, invoked=True,
             gate_passed=actual_execution, outcome_contributed=actual_execution,
@@ -682,7 +709,10 @@ class LocalHealPipelineCapabilityExecutor:
                 "evaluation_gate_available": modules.get("evaluation_gate", False),
                 "evaluation_gate_invoked": "evaluation_gate" in invoked_modules,
                 "semantic_retry_available": True,
-                "semantic_retry_invoked": False,
+                "semantic_retry_invoked": semantic_retry_invoked,
+                "semantic_retry_count": semantic_retry_count,
+                "same_span_retry": same_span_retry,
+                "structured_retry_packet_available": structured_retry_packet_available,
                 "invoked_modules": invoked_modules,
                 "path_a_actual_execution": actual_execution,
                 "path_a_failure_reason": path_a_failure_reason,

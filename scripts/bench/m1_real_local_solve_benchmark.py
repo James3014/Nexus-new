@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+import argparse
 import os
 import sys
 import time
@@ -30,28 +31,8 @@ def check_ollama_availability() -> bool:
         return False
 
 
-def run_benchmark():
-    print("=== M1 Real Local Solve Benchmark Runner ===")
-    if not check_ollama_availability():
-        print("Error: Ollama is not running. Please start Ollama before running this benchmark.")
-        sys.exit(1)
-
-    # Force enable execution instead of dry-run
-    os.environ["NEXUS_LOCAL_MODEL_EXECUTOR_DRY_RUN"] = "0"
-    os.environ["NEXUS_LOCAL_SOLVE_MUTATION_ALLOWED"] = "1"
-    os.environ["NEXUS_LOCAL_SOLVE_VERIFIER_ALLOWED"] = "1"
-    os.environ["NEXUS_WITH_LOCAL_MODEL_ADAPTER"] = "1"
-    os.environ["NEXUS_RUN_REAL_ISSUE_TESTS"] = "1"
-    os.environ["NEXUS_RUN_REAL_LOCAL_MODEL_TESTS"] = "1"
-    os.environ["NEXUS_LOCAL_MODEL_CALL_ALLOWED"] = "1"
-    os.environ["NEXUS_LOCAL_MODEL_PROVIDER"] = "ollama"
-
-    # 1. Clear previous outputs
-    if JSONL_PATH.exists():
-        JSONL_PATH.unlink()
-
-    # 2. Define 6 benchmark tasks
-    tasks_specs = [
+def build_task_specs() -> list[dict]:
+    return [
         {
             "task_id": "astropy__astropy-13236",
             "repo": "astropy/astropy",
@@ -198,6 +179,41 @@ def run_benchmark():
         }
     ]
 
+
+def select_task_specs(task_specs: list[dict], selected_task_ids: list[str] | None) -> list[dict]:
+    if not selected_task_ids:
+        return task_specs
+    selected = set(selected_task_ids)
+    filtered = [spec for spec in task_specs if spec["task_id"] in selected]
+    missing = selected.difference(spec["task_id"] for spec in filtered)
+    if missing:
+        raise ValueError(f"Unknown task_id(s): {', '.join(sorted(missing))}")
+    return filtered
+
+
+def run_benchmark(selected_task_ids: list[str] | None = None):
+    print("=== M1 Real Local Solve Benchmark Runner ===")
+    if not check_ollama_availability():
+        print("Error: Ollama is not running. Please start Ollama before running this benchmark.")
+        sys.exit(1)
+
+    # Force enable execution instead of dry-run
+    os.environ["NEXUS_LOCAL_MODEL_EXECUTOR_DRY_RUN"] = "0"
+    os.environ["NEXUS_LOCAL_SOLVE_MUTATION_ALLOWED"] = "1"
+    os.environ["NEXUS_LOCAL_SOLVE_VERIFIER_ALLOWED"] = "1"
+    os.environ["NEXUS_WITH_LOCAL_MODEL_ADAPTER"] = "1"
+    os.environ["NEXUS_RUN_REAL_ISSUE_TESTS"] = "1"
+    os.environ["NEXUS_RUN_REAL_LOCAL_MODEL_TESTS"] = "1"
+    os.environ["NEXUS_LOCAL_MODEL_CALL_ALLOWED"] = "1"
+    os.environ["NEXUS_LOCAL_MODEL_PROVIDER"] = "ollama"
+
+    # 1. Clear previous outputs
+    if JSONL_PATH.exists():
+        JSONL_PATH.unlink()
+
+    # 2. Define benchmark tasks
+    tasks_specs = select_task_specs(build_task_specs(), selected_task_ids)
+
     attempted = 0
     solved_count = 0
     results_list = []
@@ -244,14 +260,17 @@ def run_benchmark():
                     "protocol_mode": "anchored_edit",
                     "model_call_allowed": True,
                     "executor_provider": "ollama",
-                    "executor_model": "qwen2.5-coder:7b",
+                    "executor_model": "qwen2.5-coder:7b-instruct",
                     "provider_timeout_sec": 120,
-                    "judge_model": "qwen2.5:3b",
+                    "mutation_allowed": True,
+                    "verifier_allowed": True,
+                    "judge_model": "qwen2.5-s2t-advisor:3b",
                     "proposer_specs": [
-                        {"model": "qwen2.5-coder:7b", "role": "primary"},
+                        {"model": "qwen2.5-coder:7b-instruct", "role": "primary"},
                         {"model": "deepseek-coder:6.7b-instruct", "role": "secondary"},
                     ]
-                }
+                },
+                "python_executable": sys.executable,
             }
 
             # 4. Invoke under Downstream Enforcement
@@ -327,6 +346,11 @@ def run_benchmark():
             
             same_span_retry_count = int(adapter_meta.get("same_span_retry_count", 0))
             failure_feedback_used = bool(adapter_meta.get("failure_feedback_present", False))
+            semantic_retry_invoked = bool(adapter_meta.get("semantic_retry_invoked", False))
+            semantic_retry_count = int(adapter_meta.get("semantic_retry_count", 0))
+            same_span_retry = bool(adapter_meta.get("same_span_retry", False))
+            structured_retry_packet_available = bool(adapter_meta.get("structured_retry_packet_available", False))
+            failure_feedback_builder_invoked = bool(adapter_meta.get("failure_feedback_builder_invoked", False))
             
             # Static modules execution trace list
             execution_path_modules = ["CapabilityPlanner", "LocalModelExecutor"]
@@ -373,6 +397,11 @@ def run_benchmark():
                 "diff_repair_success": diff_repair_success,
                 "same_span_retry_count": same_span_retry_count,
                 "failure_feedback_used": failure_feedback_used,
+                "semantic_retry_invoked": semantic_retry_invoked,
+                "semantic_retry_count": semantic_retry_count,
+                "same_span_retry": same_span_retry,
+                "structured_retry_packet_available": structured_retry_packet_available,
+                "failure_feedback_builder_invoked": failure_feedback_builder_invoked,
                 "execution_path_modules": execution_path_modules,
                 
                 # B7.7: Pipeline/provider telemetry from adapter metadata
@@ -441,6 +470,25 @@ def run_benchmark():
 
     # 6. Generate Markdown Summary
     solved_rate = (solved_count / attempted) * 100 if attempted > 0 else 0.0
+    retry_packet_count = sum(1 for r in results_list if r.get("structured_retry_packet_available"))
+    semantic_retry_count = sum(1 for r in results_list if r.get("semantic_retry_invoked"))
+    protocol_retry_count = sum(1 for r in results_list if r.get("protocol_retry_attempted"))
+
+    parse_error_counts: dict[str, int] = {}
+    no_patch_reason_counts: dict[str, int] = {}
+    for row in results_list:
+        parse_error = str(row.get("parse_error_kind", "") or "none")
+        parse_error_counts[parse_error] = parse_error_counts.get(parse_error, 0) + 1
+        no_patch_reason = str(row.get("no_patch_reason", "") or "none")
+        no_patch_reason_counts[no_patch_reason] = no_patch_reason_counts.get(no_patch_reason, 0) + 1
+
+    def _format_count_lines(counts: dict[str, int]) -> str:
+        if not counts:
+            return "- none\n"
+        lines = []
+        for key, value in sorted(counts.items(), key=lambda item: (-item[1], item[0])):
+            lines.append(f"- `{key}`: {value}")
+        return "\n".join(lines) + "\n"
     
     summary_md = f"""# M1 Real Local Solve Benchmark Summary
 
@@ -451,33 +499,34 @@ def run_benchmark():
 
 ## Detailed Results
 
-| Task ID | Topology | Local Model Called | Verifier Result | Solved | Parse Error | Duration (s) |
-| --- | --- | --- | --- | --- | --- | --- |
+| Task ID | Topology | Local Model Called | Verifier Result | Solved | Retry Packet | Semantic Retry | Parse Error | Duration (s) |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- |
 """
     for r in results_list:
-        summary_md += f"| {r['task_id']} | {r['execution_topology']} | {r['local_model_called']} | {r['verifier_result']} | **{r['solved']}** | {r['parse_error_kind']} | {r['duration_sec']} |\n"
+        summary_md += (
+            f"| {r['task_id']} | {r['execution_topology']} | {r['local_model_called']} | "
+            f"{r['verifier_result']} | **{r['solved']}** | {r['structured_retry_packet_available']} | "
+            f"{r['semantic_retry_invoked']} | {r['parse_error_kind']} | {r['duration_sec']} |\n"
+        )
 
-    summary_md += """
-## M1.1 June LocalHeal Capability Reuse Matrix
+    summary_md += f"""
+## Observed Shared Recovery Truth
 
-| Module / Feature | Attempted (M1) | Used | Not Used / Reason |
-| --- | --- | --- | --- |
-| **SolidSearchReplaceProtocol** | 6 | Yes | Anchor mode parser executed, but failed on outer Markdown fences. |
-| **SearchReplaceParser (legacy fallback)** | 6 | No | Single-pass anchored_edit lacks parser fallback. |
-| **anchored_edit replacement guard** | 6 | Yes | Verified replacement blocks for natural prose & fences. |
-| **canonical_span / ast_boundary** | 6 | No | Bypassed because `locked_search` was directly provided in benchmark spec. |
-| **diff_normalizer** | 6 | No | Empty patch returned due to protocol parse error. |
-| **diff_repair** | 6 | No | Bypassed due to constraint_violation (missing unified diff). |
-| **isolated_local_solve_loop** | 6 | Partial | Sandbox initialized, but immediately exited on parser error block. |
-| **failure feedback / same-span retry** | 6 | No | Benchmark runs in a single-pass without retry loop. |
-| **HealPipeline / Orchestrator** | 6 | Yes (localheal_pipeline) | Used by localheal_pipeline topology via LocalHealPipelineCapabilityExecutor bridge; local_committee_only bypasses. |
+- **Rows with structured retry packet available**: {retry_packet_count}/{attempted}
+- **Rows with semantic retry invoked**: {semantic_retry_count}/{attempted}
+- **Rows with protocol retry attempted**: {protocol_retry_count}/{attempted}
 
-## Root Cause of Failures (0/6 Solved)
+## Observed Parse Errors
 
-1. **REPLACEMENT_MARKDOWN_FENCE**: Qwen2.5-coder outputted replacement blocks wrapped in outer markdown fences (e.g. ````python`), causing `SolidSearchReplaceProtocol` to fail-closed on formatting.
-2. **Missing Normalization Fallbacks**: Parse errors immediately set the patch output to empty rather than falling back to sanitizers or diff repair.
-3. **No Interactive Retry**: Runs in single-pass row execution without failure feedback loops to let the model self-correct.
-4. **Provider Timeout (localheal_pipeline)**: For toy-math-solve, the provider timed out (`ollama_internal_error: timed out`) at patch_synthesis phase — model was never called, output_len=0, pipeline_failure_reason=EMPTY_RESPONSE:MODEL_EMPTY_RESPONSE. This is a provider/config/runtime problem, not a prompt or parser problem.
+{_format_count_lines(parse_error_counts)}
+## Observed No-Patch Reasons
+
+{_format_count_lines(no_patch_reason_counts)}
+## Notes
+
+- This summary reflects the current run only.
+- Route authority remains `CapabilityPlanner`; these fields are downstream execution truth only.
+- `Retry Packet` and `Semantic Retry` columns are observational and do not affect solved status.
 """
     SUMMARY_PATH.write_text(summary_md, encoding="utf-8")
     
@@ -486,5 +535,17 @@ def run_benchmark():
     print(f"Summary markdown written to: {SUMMARY_PATH}")
 
 
+def parse_args() -> argparse.Namespace:
+    parser = argparse.ArgumentParser(description="Run the M1 real local solve benchmark.")
+    parser.add_argument(
+        "--task-id",
+        action="append",
+        dest="task_ids",
+        help="Run only the specified task_id. Repeat to select multiple tasks.",
+    )
+    return parser.parse_args()
+
+
 if __name__ == "__main__":
-    run_benchmark()
+    args = parse_args()
+    run_benchmark(selected_task_ids=args.task_ids)
