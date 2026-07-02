@@ -225,3 +225,29 @@ def test_orchestrator_syntax_error_retry_uses_patch_failure_structured_packet(tm
     assert "[REPRO] pytest tests/test_math.py" in ctx.op.user_prompt
     assert "[SOURCE]" in ctx.op.user_prompt
     assert "Keep the SEARCH block EXACTLY the same" in ctx.op.user_prompt
+
+
+def test_orchestrator_verification_failure_preserves_pre_verification_patch(tmp_path: Path):
+    ctx = HealContext(
+        op=OperationalContext(
+            instance_id="orchestrator-verification-preserve",
+            repo_dir=tmp_path,
+            problem_statement="fix logic",
+            user_prompt="Fix the failing behavior",
+            final_patch="--- a/math.py\n+++ b/math.py\n@@\n-return 0\n+return 1\n",
+        ),
+        gov=GovernanceContext(),
+    )
+    ctx.op.attempt = 2
+
+    res = PhaseResult(
+        success=False,
+        failure_reason="VERIFICATION_FAILED",
+    )
+
+    orchestrator = HealOrchestrator(phases=[], governance_gate=GovernanceGate())
+    orchestrator._handle_verification_failure(ctx, res)
+
+    assert ctx.op.final_patch == ""
+    assert ctx.op.failure_reason == "LOGIC_REGRESSION:VERIFICATION_FAILED"
+    assert ctx.op.pre_verification_final_patch.startswith("--- a/math.py")

@@ -499,6 +499,10 @@ class LocalHealPipelineCapabilityExecutor:
         pipeline_failure_reason = ""
         if pipeline_result_ctx is not None:
             pipeline_final_patch = getattr(pipeline_result_ctx, "final_patch", "") or ""
+            if not pipeline_final_patch:
+                preserved_patch = getattr(pipeline_result_ctx, "pre_verification_final_patch", "")
+                if isinstance(preserved_patch, str):
+                    pipeline_final_patch = preserved_patch
             pipeline_solve_eligible = getattr(pipeline_result_ctx, "solve_eligible", False)
             pipeline_failure_reason = getattr(pipeline_result_ctx, "failure_reason", "") or ""
 

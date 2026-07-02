@@ -249,6 +249,11 @@ class HealOrchestrator:
                 # Semantic retry succeeded — skip normal retry loop
                 return
 
+        # Preserve the last generated patch for downstream truth/isolation before
+        # the retry path clears final_patch.
+        if getattr(ctx.op, "final_patch", ""):
+            ctx.op.pre_verification_final_patch = ctx.op.final_patch
+
         # Normal path: clear patch and retry
         ctx.op.final_patch = ""
         ctx.op.failure_reason = f"LOGIC_REGRESSION:{res.failure_reason}"

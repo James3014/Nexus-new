@@ -923,6 +923,40 @@ class TestPipelineResultProjectionB3:
                 assert result.telemetries.get("pipeline_final_patch") == ""
                 assert result.telemetries.get("pipeline_solve_eligible") is False
 
+    def test_pipeline_verification_failure_uses_preserved_pre_verification_patch(self):
+        """Verification-failed pipeline should preserve candidate truth for downstream isolation."""
+        from nexus.services.local_heal.pipeline import HealPipeline
+
+        pipeline_run_mock = MagicMock()
+        mock_ctx = MagicMock()
+        mock_ctx.final_patch = ""
+        mock_ctx.pre_verification_final_patch = "--- a/a.py\n+++ b/a.py\n@@ -1 +1 @@\n-old\n+new\n"
+        mock_ctx.solve_eligible = False
+        mock_ctx.failure_reason = "LOGIC_REGRESSION:VERIFICATION_FAILED"
+        pipeline_run_mock.return_value = mock_ctx
+        provider = _build_provider_mock()
+
+        with patch.object(HealPipeline, "__init__", return_value=None):
+            with patch.object(HealPipeline, "run", pipeline_run_mock):
+                ctx = LocalModelCapabilityContext(
+                    task_id="t_b3_preserved_patch",
+                    source_root="/tmp",
+                    problem_statement="fix bug",
+                    target_file="a.py",
+                    target_symbol="f",
+                    selected_capabilities=("repair_loop",),
+                    execution_topology="localheal_pipeline",
+                    evidence_refs=("e1",),
+                    source_anchor={"present": False},
+                    route_context={},
+                    provider=provider,
+                )
+                result = LocalHealPipelineCapabilityExecutor().execute(ctx)
+
+                assert result.telemetries.get("pipeline_final_patch").startswith("--- a/a.py")
+                assert result.telemetries.get("pipeline_solve_eligible") is False
+                assert result.telemetries.get("pipeline_failure_reason") == "LOGIC_REGRESSION:VERIFICATION_FAILED"
+
     def test_pipeline_result_failure_reason_projected(self):
         """Pipeline failure_reason is projected into telemetry."""
         from nexus.services.local_heal.pipeline import HealPipeline
