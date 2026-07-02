@@ -768,12 +768,36 @@ class HealOrchestrator:
         error: PatchError,
         res: PhaseResult,
     ):
-        if error.kind != PatchErrorKind.SEARCH_MISMATCH:
-            return None
-
         from nexus.services.local_heal.evidence_compactor import StructuredPacket
 
         metadata = dict(res.error_metadata or {})
+        if error.kind == PatchErrorKind.SYNTAX_ERROR:
+            repro_command = ""
+            if ctx.op.plan and getattr(ctx.op.plan, "verifier_command", ""):
+                repro_command = str(ctx.op.plan.verifier_command)
+            syntax_error_msg = str(metadata.get("syntax_error_msg", "") or error.message or "")[:200]
+            syntax_error_line = 0
+            raw_line = metadata.get("syntax_error_line", 0)
+            try:
+                syntax_error_line = int(raw_line or 0)
+            except (TypeError, ValueError):
+                syntax_error_line = 0
+            relevant_source_span = str(metadata.get("failed_search_text", "") or "")[:500]
+            return StructuredPacket(
+                exception_type=error.kind.name,
+                exception_message=syntax_error_msg,
+                top_failing_file=str(metadata.get("file_path", "") or error.file_path or ""),
+                top_failing_line=syntax_error_line,
+                repro_command=repro_command,
+                relevant_source_span=relevant_source_span,
+                env_failure_reason="",
+                omitted_bytes=0,
+                raw_artifact_ref="patch_synthesis.syntax_error",
+            )
+
+        if error.kind != PatchErrorKind.SEARCH_MISMATCH:
+            return None
+
         canonical = dict(metadata.get("canonical_span", {}) or {})
         closest_info = dict(metadata.get("closest_match_info", {}) or {})
         relevant_source_span = (

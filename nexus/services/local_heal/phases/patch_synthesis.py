@@ -478,6 +478,29 @@ class PatchSynthesisPhase(IPhase):
         }
         for err in reversed(output.errors or []):
             kind = getattr(getattr(err, "kind", None), "name", "")
+            if kind == "SYNTAX_ERROR":
+                err_telemetry = dict(getattr(err, "telemetry", None) or {})
+                preflight_checks = list(err_telemetry.get("preflight_checks", []) or [])
+                syntax_check = next(
+                    (
+                        check
+                        for check in reversed(preflight_checks)
+                        if check.get("check") == "replace_syntax" and check.get("passed") is False
+                    ),
+                    {},
+                )
+                metadata.update(
+                    {
+                        "file_path": getattr(err, "file_path", "") or "",
+                        "failed_search_text": getattr(err, "failed_search_text", "") or "",
+                        "syntax_error_message": str(getattr(err, "message", "") or ""),
+                        "syntax_error_line": syntax_check.get("syntax_error_line", 0),
+                        "syntax_error_offset": syntax_check.get("syntax_error_offset", 0),
+                        "syntax_error_msg": syntax_check.get("syntax_error_msg", ""),
+                        "indentation_base": syntax_check.get("indentation_base", ""),
+                    }
+                )
+                break
             if kind != "SEARCH_MISMATCH":
                 continue
 

@@ -490,11 +490,26 @@ class PatchApplier:
         # Run preflight check first
         passed, error_reason, preflight_telemetry = self.preflight_check(intents, repo_dir)
         if not passed:
+            patch_errors = []
+            if error_reason.startswith("REPLACE_SYNTAX_ERROR:"):
+                message = error_reason.split(":", 1)[1] if ":" in error_reason else error_reason
+                file_path = intents[0].file_path if intents else ""
+                failed_search = intents[0].search if intents else ""
+                patch_errors.append(
+                    PatchError(
+                        kind=PatchErrorKind.SYNTAX_ERROR,
+                        message=message,
+                        file_path=file_path,
+                        failed_search_text=failed_search,
+                        telemetry=dict(preflight_telemetry or {}),
+                    )
+                )
             return PatchApplicationResult(
                 success=False,
                 applied_diffs=applied_diffs,
                 error_reason=error_reason,
-                preflight_telemetry=preflight_telemetry
+                preflight_telemetry=preflight_telemetry,
+                errors=patch_errors,
             )
 
         # T3: Authority accumulator — tracks the highest authority across all intents.

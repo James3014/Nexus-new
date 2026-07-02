@@ -558,6 +558,8 @@ class LocalHealPipelineCapabilityExecutor:
             if patch_decisions:
                 last_output = patch_decisions[-1].get("output_excerpt", "")[:500]
                 patch_attempt_output_excerpt = last_output
+                if patch_synthesis_output_len <= 0:
+                    patch_synthesis_output_len = int(patch_decisions[-1].get("output_len", 0) or 0)
 
         # C7/C8: Default values
         output_hash = ""
@@ -623,6 +625,10 @@ class LocalHealPipelineCapabilityExecutor:
                 if "SEARCH_MISMATCH" in pipeline_failure_reason:
                     output_class = "SEARCH_REPLACE_SEARCH_MISMATCH"
                     search_mismatch = True
+                elif "REPLACE_SYNTAX_ERROR" in pipeline_failure_reason or "SYNTAX_ERROR" in pipeline_failure_reason:
+                    output_class = "SEARCH_REPLACE_SYNTAX_ERROR"
+                    parser_error_kind = "SYNTAX_ERROR"
+                    parser_error_message = pipeline_failure_reason
                 elif "REPLACEMENT_MARKDOWN_FENCE" in pipeline_failure_reason:
                     output_class = "FENCED_SEARCH_REPLACE"
                 elif "REFUSAL" in pipeline_failure_reason or "REFUSAL_DETECTED" in pipeline_failure_reason:

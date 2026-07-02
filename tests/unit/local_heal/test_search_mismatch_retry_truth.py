@@ -124,3 +124,104 @@ def test_orchestrator_search_mismatch_retry_uses_patch_failure_structured_packet
     assert "[REPRO] pytest tests/test_math.py" in ctx.op.user_prompt
     assert "[SOURCE]" in ctx.op.user_prompt
     assert "return a - b" in ctx.op.user_prompt
+
+
+def test_patch_synthesis_execute_forwards_syntax_error_metadata(tmp_path: Path):
+    phase = PatchSynthesisPhase(
+        parser=SolidSearchReplaceProtocol(),
+        patcher=Patcher(),
+        llm_client=DummyLLMClient(""),
+    )
+
+    syntax_error = PatchError(
+        kind=PatchErrorKind.SYNTAX_ERROR,
+        message="expected an indented block after 'if' statement on line 5",
+        file_path="math.py",
+        failed_search_text="if value:\n    return value\n",
+        telemetry={
+            "preflight_checks": [
+                {
+                    "check": "replace_syntax",
+                    "passed": False,
+                    "syntax_error_line": 6,
+                    "syntax_error_offset": 5,
+                    "syntax_error_msg": "expected an indented block after 'if' statement",
+                    "indentation_base": "'    '",
+                }
+            ]
+        },
+    )
+
+    output = PatchSynthesisOutput(
+        success=False,
+        final_patch="",
+        model_decisions=[],
+        error_reason="REPLACE_SYNTAX_ERROR:expected an indented block after 'if' statement on line 5",
+        errors=[syntax_error],
+        preflight_telemetry={"output_class": "VALID_SEARCH_REPLACE"},
+    )
+
+    ctx = HealContext(
+        op=OperationalContext(
+            instance_id="test-syntax-metadata",
+            repo_dir=tmp_path,
+            problem_statement="fix syntax",
+            localized_files=[LocalizedFile(path="math.py", content="if value:\n    return value\n")],
+        ),
+        gov=GovernanceContext(),
+    )
+
+    phase.run = lambda input_data: output
+    result = phase.execute(ctx)
+
+    assert result.success is False
+    assert result.error_metadata is not None
+    assert result.error_metadata["file_path"] == "math.py"
+    assert result.error_metadata["syntax_error_line"] == 6
+    assert result.error_metadata["syntax_error_offset"] == 5
+    assert "indented block" in result.error_metadata["syntax_error_msg"]
+    assert result.error_metadata["failed_search_text"].startswith("if value:")
+
+
+def test_orchestrator_syntax_error_retry_uses_patch_failure_structured_packet(tmp_path: Path):
+    ctx = HealContext(
+        op=OperationalContext(
+            instance_id="orchestrator-syntax-mismatch",
+            repo_dir=tmp_path,
+            problem_statement="fix syntax",
+            user_prompt="Fix the indentation bug",
+            localized_files=[LocalizedFile(path="math.py", content="if value:\n    return value\n")],
+        ),
+        gov=GovernanceContext(),
+    )
+    ctx.op.plan = SimpleNamespace(
+        search_symbols=["value"],
+        verifier_command="pytest tests/test_math.py",
+    )
+
+    res = PhaseResult(
+        success=False,
+        failure_reason="REPLACE_SYNTAX_ERROR:expected an indented block after 'if' statement on line 5",
+        error_metadata={
+            "file_path": "math.py",
+            "failed_search_text": "if value:\n    return value\n",
+            "syntax_error_line": 6,
+            "syntax_error_offset": 5,
+            "syntax_error_msg": "expected an indented block after 'if' statement",
+        },
+    )
+
+    orchestrator = HealOrchestrator(phases=[], governance_gate=GovernanceGate())
+    should_retry = orchestrator._handle_patch_failure(
+        ctx,
+        res,
+        LatencyLedger(task_id="t_syntax_packet", instance_id="orchestrator-syntax-mismatch"),
+    )
+
+    assert should_retry is True
+    assert ctx.op.attempt == 2
+    assert "STRUCTURED FAILURE DETAILS" in ctx.op.user_prompt
+    assert "[LOCATION] math.py:6" in ctx.op.user_prompt
+    assert "[REPRO] pytest tests/test_math.py" in ctx.op.user_prompt
+    assert "[SOURCE]" in ctx.op.user_prompt
+    assert "Keep the SEARCH block EXACTLY the same" in ctx.op.user_prompt

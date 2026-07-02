@@ -954,6 +954,54 @@ class TestPipelineResultProjectionB3:
 
                 assert result.telemetries.get("pipeline_failure_reason") == "verifier_rejected"
 
+    def test_pipeline_syntax_error_is_classified_without_provider_diag(self):
+        """Syntax failure with patch output should stay syntax-classified, not natural-language downgraded."""
+        from nexus.services.local_heal.pipeline import HealPipeline
+
+        pipeline_run_mock = MagicMock()
+        mock_ctx = MagicMock()
+        mock_ctx.final_patch = ""
+        mock_ctx.solve_eligible = False
+        mock_ctx.failure_reason = "SYNTAX_ERROR:REPLACE_SYNTAX_ERROR:expected an indented block"
+        mock_ctx.repro_evidence = "AssertionError"
+        mock_ctx.plan = {"search_symbols": ["f"]}
+        mock_ctx.localized_files = [MagicMock(path="a.py", content="if value:\n    return value\n")]
+        mock_ctx.evaluation_report = ""
+        mock_ctx.skip_reproduction = False
+        mock_ctx.model_decisions = [
+            {
+                "phase": "patch",
+                "status": "SYNTAX_ERROR",
+                "output_len": 213,
+                "output_class": "UNKNOWN",
+                "parser_error_kind": "none",
+                "parser_error_message": "none",
+                "output_excerpt": "FILE: a.py\n<<<<<<< SEARCH\n...",
+            }
+        ]
+        pipeline_run_mock.return_value = mock_ctx
+        provider = _build_provider_mock()
+
+        with patch.object(HealPipeline, "__init__", return_value=None):
+            with patch.object(HealPipeline, "run", pipeline_run_mock):
+                ctx = LocalModelCapabilityContext(
+                    task_id="t_b3_syntax",
+                    source_root="/tmp",
+                    problem_statement="fix bug",
+                    target_file="a.py",
+                    target_symbol="f",
+                    selected_capabilities=("repair_loop",),
+                    execution_topology="localheal_pipeline",
+                    evidence_refs=("e1",),
+                    source_anchor={"present": False},
+                    route_context={},
+                    provider=provider,
+                )
+                result = LocalHealPipelineCapabilityExecutor().execute(ctx)
+
+                assert result.telemetries.get("output_class") == "SEARCH_REPLACE_SYNTAX_ERROR"
+                assert result.telemetries.get("parser_error_kind") == "SYNTAX_ERROR"
+
     def test_pipeline_exception_does_not_mark_solved(self):
         """Pipeline exception remains fail-closed."""
         from nexus.services.local_heal.pipeline import HealPipeline
