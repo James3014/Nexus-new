@@ -110,8 +110,17 @@ class LocalizationPhase(IPhase):
         if ctx.op.localized_files:
             return PhaseResult(success=True)
 
+        route_ctx = ctx.op.route_context if isinstance(ctx.op.route_context, dict) else {}
+        target_file_hint = str(route_ctx.get("target_file", "") or "").strip()
+        target_symbol_hint = str(route_ctx.get("target_symbol", "") or "").strip()
+        problem_statement = ctx.op.problem_statement
+        if target_file_hint and target_file_hint not in problem_statement:
+            problem_statement = f"{problem_statement}\nTarget file: {target_file_hint}"
+        if target_symbol_hint and target_symbol_hint not in problem_statement:
+            problem_statement = f"{problem_statement}\nTarget symbol: {target_symbol_hint}"
+
         input_data = LocalizationInput(
-            problem_statement=ctx.op.problem_statement,
+            problem_statement=problem_statement,
             repro_evidence=ctx.op.repro_evidence,
             repo_dir=ctx.op.repo_dir,
             plan=ctx.op.plan

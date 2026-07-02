@@ -204,6 +204,68 @@ def test_localization_phase_stateless_run():
     assert out.localized_files[0].path == "foo.py"
 
 
+def test_planning_phase_execute_prioritizes_route_context_target_symbol():
+    from nexus.services.local_heal.context import HealContext, OperationalContext, GovernanceContext
+
+    llm_client = DummyLLMClient('{"search_symbols":["solve"],"repair_strategy":"Fix solve.","violated_invariants":[]}')
+    planner = Planner(llm_client=llm_client)
+    phase = PlanningPhase(planner=planner)
+
+    ctx = HealContext(
+        op=OperationalContext(
+            instance_id="plan-target-symbol",
+            repo_dir=Path("/tmp/repo"),
+            problem_statement="Fix toy math bug",
+            repro_evidence="AssertionError",
+            reproduced=True,
+            route_context={"target_symbol": "double"},
+        ),
+        gov=GovernanceContext(),
+    )
+
+    result = phase.execute(ctx)
+
+    assert result.success is True
+    assert ctx.op.plan.search_symbols[0] == "double"
+    assert "solve" in ctx.op.plan.search_symbols
+
+
+def test_localization_phase_execute_injects_target_file_hint():
+    from nexus.services.local_heal.context import HealContext, OperationalContext, GovernanceContext
+    from nexus.services.local_heal.interface import RepairPlan
+
+    class RecordingLocalizer(StubLocalizer):
+        def __init__(self):
+            self.queries = []
+
+        def rank_files(self, query: str, repo_dir: Path, search_symbols: List[str] = None):
+            self.queries.append(query)
+            return super().rank_files(query, repo_dir, search_symbols)
+
+    localizer = RecordingLocalizer()
+    budget_mgr = StubBudgetManager()
+    phase = LocalizationPhase(localizer=localizer, budget_manager=budget_mgr)
+
+    ctx = HealContext(
+        op=OperationalContext(
+            instance_id="loc-target-file",
+            repo_dir=Path("/tmp/repo"),
+            problem_statement="Fix toy math bug",
+            repro_evidence="AssertionError",
+            plan=RepairPlan(search_symbols=["double"], repair_strategy="fix"),
+            route_context={"target_file": "toy/math_util.py", "target_symbol": "double"},
+        ),
+        gov=GovernanceContext(),
+    )
+
+    result = phase.execute(ctx)
+
+    assert result.success is True
+    assert localizer.queries
+    assert "toy/math_util.py" in localizer.queries[0]
+    assert "double" in localizer.queries[0]
+
+
 def test_verification_phase_stateless_run(tmp_path):
     eval_gate = StubEvaluationGate(passed=True)
     phase = VerificationPhase(eval_gate=eval_gate, hidden_required=True)
@@ -593,6 +655,3 @@ def test_behavior_collapse_guard_during_retry(tmp_path):
     finally:
         if "NEXUS_PROTOCOL_MODE" in os.environ:
             del os.environ["NEXUS_PROTOCOL_MODE"]
-
-
-

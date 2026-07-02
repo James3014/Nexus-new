@@ -1,6 +1,6 @@
 import os
 from typing import Any, Dict
-from nexus.services.local_heal.interface import IPhase, PhaseResult, PlanningInput, PlanningOutput
+from nexus.services.local_heal.interface import IPhase, PhaseResult, PlanningInput, PlanningOutput, RepairPlan
 from nexus.services.local_heal.planner import Planner
 from nexus.services.local_heal.context import HealContext
 from nexus.engine.local_model_policy import LocalModelPolicy
@@ -20,7 +20,6 @@ class PlanningPhase(IPhase):
 
     def run(self, input_data: PlanningInput) -> PlanningOutput:
         """Stateless TDD-ready execution logic."""
-        from nexus.services.local_heal.interface import RepairPlan
         # 選擇模型與參數
         plan_decision = LocalModelPolicy.select_model(
             task_type="swe_repair", 
@@ -51,7 +50,6 @@ class PlanningPhase(IPhase):
             )
 
     def execute(self, ctx: HealContext) -> PhaseResult:
-        from nexus.services.local_heal.interface import RepairPlan
         if not ctx.op.reproduced or not ctx.op.repro_evidence:
             return PhaseResult(success=False, failure_reason="PREREQUISITE_FAILED_REPRO")
 
@@ -94,7 +92,7 @@ class PlanningPhase(IPhase):
             self._record_model_status(ctx, output.failure_reason, detail=output.failure_reason, phase="planning")
             return PhaseResult(success=False, exit_layer="planning", failure_reason=output.failure_reason)
 
-        ctx.op.plan = output.plan
+        ctx.op.plan = self._apply_route_hints(ctx, output.plan)
 
         # 5. Gemma sidecar (shadow lane, no authority)
         ctx._sidecar_enabled = SidecarConfig.SIDECAR_ENABLED
@@ -129,6 +127,21 @@ class PlanningPhase(IPhase):
             except Exception:
                 pass  # Sidecar failure is non-blocking
         return PhaseResult(success=True)
+
+    @staticmethod
+    def _apply_route_hints(ctx: HealContext, plan: RepairPlan) -> RepairPlan:
+        route_ctx = ctx.op.route_context if isinstance(ctx.op.route_context, dict) else {}
+        target_symbol = str(route_ctx.get("target_symbol", "") or "").strip()
+        if not target_symbol:
+            return plan
+
+        existing = [s for s in (plan.search_symbols or []) if isinstance(s, str) and s.strip()]
+        merged = [target_symbol] + [s for s in existing if s != target_symbol]
+        return RepairPlan(
+            search_symbols=merged,
+            repair_strategy=plan.repair_strategy,
+            violated_invariants=plan.violated_invariants,
+        )
 
     def _record_model_status(self, ctx: HealContext, status: str, detail: str = "", *, phase: str | None = None) -> None:
         for decision in reversed(ctx.op.model_decisions):
