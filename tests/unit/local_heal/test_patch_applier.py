@@ -230,6 +230,11 @@ def test_high_similarity_fuzzy_candidate_fail_closed(tmp_path):
     )
     assert res.success is False
     assert res.error_reason == "SEARCH_MISMATCH"
+    assert len(res.errors) == 1
+    err = res.errors[0]
+    assert err.telemetry.get("requires_authority") is True
+    assert err.telemetry.get("canonical_span", {}).get("canonical_search_hash", "") != ""
+    assert err.failed_search_text.startswith("def my_func")
 
 
 def test_fuzzy_candidate_only_never_success(tmp_path):
@@ -305,4 +310,3 @@ def test_cross_file_correction_requires_authority(tmp_path):
     )
     assert res.success is True
     assert res.match_authority == MatchAuthority.CROSS_FILE_CORRECTION
-

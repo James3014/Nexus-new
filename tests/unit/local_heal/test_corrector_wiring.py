@@ -144,3 +144,49 @@ def test_retry_prompt_control_plane_contract():
         if "NEXUS_PROTOCOL_MODE" in os.environ:
             del os.environ["NEXUS_PROTOCOL_MODE"]
 
+
+def test_retry_prompt_handles_replacement_prose_contamination():
+    error = PatchError(
+        kind=PatchErrorKind.REPLACEMENT_PROSE_CONTAMINATION,
+        message="Replacement appears to be natural language.",
+    )
+    corrector = SelfCorrector()
+
+    prompt = corrector.build_retry_prompt(
+        original_user_prompt="fix the function",
+        error=error,
+        targeted_files="file.py",
+    )
+
+    assert "contained prose or commentary" in prompt
+    assert "Output ONLY one SEARCH/REPLACE block" in prompt
+    assert "Do NOT include explanations" in prompt
+    assert "file.py" in prompt
+
+
+def test_search_mismatch_retry_prompt_uses_structured_packet():
+    sp = StructuredPacket(
+        exception_type="SEARCH_MISMATCH",
+        exception_message="SEARCH_MISMATCH",
+        top_failing_file="pkg/math.py",
+        top_failing_line=12,
+        repro_command="pytest tests/test_math.py",
+        relevant_source_span="def double(x):\n    return x * 2",
+        env_failure_reason="",
+        omitted_bytes=0,
+        raw_artifact_ref="patch_synthesis.search_mismatch",
+    )
+    error = PatchError(kind=PatchErrorKind.SEARCH_MISMATCH, message="SEARCH mismatch in pkg/math.py")
+    corrector = SelfCorrector()
+
+    prompt = corrector.build_retry_prompt(
+        original_user_prompt="fix the function",
+        error=error,
+        targeted_files="pkg/math.py",
+        structured_packet=sp,
+    )
+
+    assert "STRUCTURED FAILURE DETAILS" in prompt
+    assert "[LOCATION] pkg/math.py:12" in prompt
+    assert "[REPRO] pytest tests/test_math.py" in prompt
+    assert "[SOURCE]" in prompt

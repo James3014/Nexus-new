@@ -215,7 +215,7 @@ class HealOrchestrator:
             return False
 
         ctx.op.failure_reason = f"{err_kind.name}:{res.failure_reason}"
-        self._handle_retry(ctx, err)
+        self._handle_retry(ctx, err, res=res)
         return True
 
     def _attempt_fuzzy_healing(self, ctx: HealContext, res: PhaseResult, err: PatchError) -> None:
@@ -762,7 +762,53 @@ class HealOrchestrator:
         subprocess.run(["git", "checkout", "--", "."], cwd=str(ctx.op.repo_dir), capture_output=True)
         subprocess.run(["git", "clean", "-fd"], cwd=str(ctx.op.repo_dir), capture_output=True)
 
-    def _handle_retry(self, ctx: HealContext, error: PatchError) -> HealContext:
+    def _build_patch_failure_structured_packet(
+        self,
+        ctx: HealContext,
+        error: PatchError,
+        res: PhaseResult,
+    ):
+        if error.kind != PatchErrorKind.SEARCH_MISMATCH:
+            return None
+
+        from nexus.services.local_heal.evidence_compactor import StructuredPacket
+
+        metadata = dict(res.error_metadata or {})
+        canonical = dict(metadata.get("canonical_span", {}) or {})
+        closest_info = dict(metadata.get("closest_match_info", {}) or {})
+        relevant_source_span = (
+            str(error.closest_match or "")
+            or str(closest_info.get("resolved_span", "") or "")
+            or str(metadata.get("failed_search_text", "") or "")
+        )[:500]
+
+        top_failing_line = 0
+        for key in ("canonical_line_start", "start_line", "canonical_span_start_line"):
+            raw_value = canonical.get(key, metadata.get(key, 0))
+            if raw_value:
+                try:
+                    top_failing_line = int(raw_value)
+                    break
+                except (TypeError, ValueError):
+                    pass
+
+        repro_command = ""
+        if ctx.op.plan and getattr(ctx.op.plan, "verifier_command", ""):
+            repro_command = str(ctx.op.plan.verifier_command)
+
+        return StructuredPacket(
+            exception_type=error.kind.name,
+            exception_message=str(error.message or "")[:200],
+            top_failing_file=str(metadata.get("file_path", "") or error.file_path or ""),
+            top_failing_line=top_failing_line,
+            repro_command=repro_command,
+            relevant_source_span=relevant_source_span,
+            env_failure_reason="",
+            omitted_bytes=0,
+            raw_artifact_ref="patch_synthesis.search_mismatch",
+        )
+
+    def _handle_retry(self, ctx: HealContext, error: PatchError, res: PhaseResult | None = None) -> HealContext:
         _PATCH_BLACKLIST = {"reproduce_bug.py", "repro.py", "test_repro.py"}
         targeted_files = ", ".join([
             f.path for f in getattr(ctx.op, "localized_files", [])
@@ -772,20 +818,23 @@ class HealOrchestrator:
         sp = None
         if error.kind in (PatchErrorKind.LOGIC_REGRESSION, PatchErrorKind.SEARCH_MISMATCH, PatchErrorKind.SYNTAX_ERROR):
             from nexus.services.local_heal.evidence_compactor import EvidenceCompactor
-            evaluation_report = getattr(ctx.op, "evaluation_report", "") or error.message or ""
-            repro_command = ""
-            if ctx.op.plan and getattr(ctx.op.plan, "verifier_command", ""):
-                repro_command = ctx.op.plan.verifier_command
-            env_failure_reason = ""
-            env_resolution = getattr(ctx.op, "env_resolution", None)
-            if env_resolution and not getattr(env_resolution, "ready", True):
-                env_failure_reason = getattr(env_resolution, "failure_reason", "") or ""
-            sp = EvidenceCompactor.compact_structured(
-                evidence=evaluation_report,
-                raw_artifact_ref="verification_report.txt",
-                repro_command=repro_command,
-                env_failure_reason=env_failure_reason,
-            )
+            if res is not None:
+                sp = self._build_patch_failure_structured_packet(ctx, error, res)
+            if sp is None:
+                evaluation_report = getattr(ctx.op, "evaluation_report", "") or error.message or ""
+                repro_command = ""
+                if ctx.op.plan and getattr(ctx.op.plan, "verifier_command", ""):
+                    repro_command = ctx.op.plan.verifier_command
+                env_failure_reason = ""
+                env_resolution = getattr(ctx.op, "env_resolution", None)
+                if env_resolution and not getattr(env_resolution, "ready", True):
+                    env_failure_reason = getattr(env_resolution, "failure_reason", "") or ""
+                sp = EvidenceCompactor.compact_structured(
+                    evidence=evaluation_report,
+                    raw_artifact_ref="verification_report.txt",
+                    repro_command=repro_command,
+                    env_failure_reason=env_failure_reason,
+                )
             error.structured_packet = sp
             
         ctx.op.user_prompt = self.corrector.build_retry_prompt(ctx.op.user_prompt, error, targeted_files=targeted_files, structured_packet=sp)

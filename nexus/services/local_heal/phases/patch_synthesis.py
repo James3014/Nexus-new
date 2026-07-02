@@ -129,7 +129,11 @@ class PatchSynthesisPhase(IPhase):
         # 4. 準備治理化 Prompt — use interleaved mode if planning was LLM-based
         plan = input_data.plan
         repair_strat = getattr(plan, "repair_strategy", "")
-        use_interleaved = not repair_strat.startswith("FAST_MODE")
+        use_interleaved = (
+            not repair_strat.startswith("FAST_MODE")
+            and input_data.attempt <= 1
+            and not (input_data.failure_reason or "").strip()
+        )
         if not system_prompt:
             system_prompt = PromptBuilder.build_patch_system_prompt(
                 patch_decision["model"], 
@@ -455,8 +459,43 @@ class PatchSynthesisPhase(IPhase):
 
         if not output.success:
             ctx.op.failure_reason = output.failure_reason
-            return PhaseResult(success=False, exit_layer="patcher", failure_reason=output.failure_reason)
+            return PhaseResult(
+                success=False,
+                exit_layer="patcher",
+                failure_reason=output.failure_reason,
+                error_metadata=self._build_error_metadata(output),
+            )
 
         ctx.op.last_search_anchors = output.last_search_anchors
         ctx.op.last_replacement_texts = output.last_replacement_texts
         return PhaseResult(success=True)
+
+    @staticmethod
+    def _build_error_metadata(output: PatchSynthesisOutput) -> dict:
+        metadata = {
+            "error_reason": output.failure_reason,
+            "preflight_telemetry": dict(output.preflight_telemetry or {}),
+        }
+        for err in reversed(output.errors or []):
+            kind = getattr(getattr(err, "kind", None), "name", "")
+            if kind != "SEARCH_MISMATCH":
+                continue
+
+            err_telemetry = dict(getattr(err, "telemetry", None) or {})
+            canonical = dict(err_telemetry.get("canonical_span", {}) or {})
+            closest = dict(err_telemetry.get("closest_match", {}) or {})
+
+            metadata.update(
+                {
+                    "file_path": getattr(err, "file_path", "") or "",
+                    "failed_search_text": getattr(err, "failed_search_text", "") or "",
+                    "closest_match": getattr(err, "closest_match", "") or "",
+                    "canonical_span": canonical,
+                    "closest_match_info": closest,
+                    "requires_authority": bool(err_telemetry.get("requires_authority", False)),
+                    "canonical_span_source": canonical.get("correction", "") or err_telemetry.get("canonical_span_source", ""),
+                    "auto_corrected_search": bool(canonical.get("auto_corrected", False)),
+                }
+            )
+            break
+        return metadata

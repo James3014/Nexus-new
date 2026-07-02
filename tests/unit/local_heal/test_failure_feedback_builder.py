@@ -57,6 +57,23 @@ def test_failure_feedback_other_classes_unchanged() -> None:
     assert "Do NOT use markdown fences" not in feedback
 
 
+def test_failure_feedback_includes_replacement_only_instruction_for_prose_contamination() -> None:
+    feedback = build_failure_feedback(
+        task_id="t_prose",
+        failure_class="REPLACEMENT_PROSE_CONTAMINATION",
+        target_file="f.py",
+        target_symbol="func",
+        locked_search="print(1)",
+        previous_block_reason="REPLACEMENT_PROSE_CONTAMINATION",
+        verifier_status="fail",
+    )
+    assert "contained prose or commentary" in feedback
+    assert "Do NOT include explanations" in feedback
+    assert "Do NOT include markdown fences" in feedback
+    assert "<<<<<<< REPLACE" in feedback
+    assert ">>>>>>> REPLACE" in feedback
+
+
 def test_failure_feedback_does_not_suggest_stripping_or_accepting_fences() -> None:
     feedback = build_failure_feedback(
         task_id="t_no_strip",

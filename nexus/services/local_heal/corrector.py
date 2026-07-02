@@ -147,6 +147,19 @@ class SelfCorrector:
                 f"2. Do NOT output a SEARCH/REPLACE where SEARCH and REPLACE are identical.\n"
                 f"3. Output a SEARCH/REPLACE block that makes a concrete functional change."
             )
+        elif error.kind == PatchErrorKind.REPLACEMENT_PROSE_CONTAMINATION:
+            file_hint = f"Focus ONLY on modifying the following files: {targeted_files}\n" if targeted_files else ""
+            retry_instruction = (
+                f"CRITICAL ERROR: Your previous output contained prose or commentary instead of pure replacement code.\n"
+                f"--> {error.message}\n\n"
+                f"{file_hint}"
+                f"Rules:\n"
+                f"1. Output ONLY one SEARCH/REPLACE block.\n"
+                f"2. Do NOT include explanations, headings, bullet points, or commentary.\n"
+                f"3. Do NOT wrap the block in markdown fences.\n"
+                f"4. The REPLACE section must contain only code.\n"
+                f"Output the corrected SEARCH/REPLACE block now."
+            )
         elif error.kind == PatchErrorKind.PATCH_FORMAT_INVALID:
             retry_instruction = (
                 f"CRITICAL ERROR: Your previous response was not in valid SEARCH/REPLACE format.\n"

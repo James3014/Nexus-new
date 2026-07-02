@@ -153,6 +153,15 @@ class PromptBuilder:
                     "1. Do NOT use ``` or any markdown fences.\n"
                     "2. Output the SEARCH/REPLACE blocks directly, no wrapping.\n"
                 )
+            elif "REPLACEMENT_PROSE_CONTAMINATION" in failure_reason:
+                retry_section += (
+                    "CRITICAL: Your previous output included prose or commentary instead of pure code.\n"
+                    "RULES:\n"
+                    "1. Output ONLY one SEARCH/REPLACE block.\n"
+                    "2. Do NOT include explanations, headings, bullets, or commentary.\n"
+                    "3. Do NOT describe the fix before or after the block.\n"
+                    "4. The REPLACE block must contain only code.\n"
+                )
             elif "UNIFIED_DIFF_OUTPUT" in failure_reason:
                 retry_section += (
                     "CRITICAL: Your output used unified diff format.\n"

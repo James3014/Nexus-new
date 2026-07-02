@@ -565,7 +565,9 @@ class PatchApplier:
                     # SEARCH_MISMATCH with requires_authority=True is the fail-closed path.
                     # No authority found — return SEARCH_MISMATCH
                     if match_res.error:
-                        match_res.error.telemetry = {"canonical_span": canonical_span_telemetry if 'canonical_span_telemetry' in dir() else {}, "requires_authority": True}
+                        existing_telemetry = dict(getattr(match_res.error, "telemetry", None) or {})
+                        existing_telemetry["requires_authority"] = True
+                        match_res.error.telemetry = existing_telemetry
                     return PatchApplicationResult(
                         success=False,
                         applied_diffs=applied_diffs,
