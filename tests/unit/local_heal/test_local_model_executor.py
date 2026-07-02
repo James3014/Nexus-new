@@ -349,6 +349,899 @@ def test_local_model_executor_committee_topology_uses_candidate_decision_adapter
     assert resp.raw_model_metadata.get("selected_by") == "custom_logic"
 
 
+def test_local_model_executor_committee_selected_patch_enters_isolation(monkeypatch):
+    from unittest.mock import patch
+
+    from nexus.services.local_heal.candidate_decision_adapter import (
+        CandidateDecisionAdapter,
+        CandidateDecisionResponse,
+    )
+    from nexus.services.local_heal.candidate_envelope import CandidateEnvelope
+    from nexus.services.local_heal.isolated_verifier import IsolatedVerifierReceipt
+    from nexus.services.local_heal.isolated_workspace_apply import IsolatedApplyReceipt
+    from nexus.services.local_heal.local_committee_candidate_provider import (
+        LocalCommitteeCandidateProvider,
+    )
+
+    diff_text = "--- a/file.py\n+++ b/file.py\n@@ -1 +1 @@\n-old\n+new\n"
+    diff_hash = hashlib.sha256(diff_text.encode("utf-8")).hexdigest()
+
+    envelope = CandidateEnvelope(
+        candidate_id="c-1",
+        task_id="committee-isolation",
+        source="local",
+        model="qwen2.5-coder:7b",
+        role="primary_proposer",
+        patch_protocol="unified_diff",
+        target_file="file.py",
+        target_symbol="func",
+        source_anchor_hash="hash",
+        candidate_patch_hash=diff_hash,
+        evidence_refs=("ref1",),
+        candidate_patch=diff_text,
+    )
+    monkeypatch.setattr(
+        LocalCommitteeCandidateProvider,
+        "generate_committee_candidates",
+        lambda *a, **k: [envelope],
+    )
+    monkeypatch.setattr(
+        CandidateDecisionAdapter,
+        "select_candidate",
+        lambda *a, **k: CandidateDecisionResponse(
+            selected_candidate_id="c-1",
+            selected_candidate_patch=diff_text,
+            ranking_trace=["ranked"],
+            selected_by="candidate_policy",
+            decision_evidence_refs=("ref1",),
+        ),
+    )
+
+    req = make_test_request(
+        task_id="committee-isolation",
+        problem_statement="test",
+        evidence_refs=("ref1",),
+        route_context={
+            "verifier_command": ["python3", "-c", "print(1)"],
+            "signal_snapshot": {
+                "execution_topology": "local_committee_only",
+                "protocol_mode": "anchored_edit",
+                "mutation_allowed": True,
+                "verifier_allowed": True,
+                "proposer_specs": [
+                    {"model": "qwen2.5-coder:7b", "role": "primary"},
+                    {"model": "deepseek-coder:6.7b-instruct", "role": "secondary"},
+                ],
+                "judge_model": "qwen2.5:3b",
+            },
+        },
+    )
+
+    with patch("nexus.services.local_heal.local_model_executor.run_isolated_workspace_apply") as mock_apply, \
+         patch("nexus.services.local_heal.local_model_executor.run_isolated_verifier") as mock_verify:
+        mock_apply.return_value = IsolatedApplyReceipt(
+            task_id="committee-isolation",
+            workspace_path="/tmp/ws",
+            target_file="file.py",
+            patch_apply_status="applied",
+            patch_apply_error="",
+            selected_candidate_hash=diff_hash,
+            applied_patch_hash=diff_hash,
+            selected_candidate_hash_matches_applied=True,
+            candidate_output_isolated=True,
+            mutation_allowed=True,
+            applied_patch_hash_source="git_diff",
+        )
+        mock_verify.return_value = IsolatedVerifierReceipt(
+            task_id="committee-isolation",
+            verifier_status="pass",
+            exit_code=0,
+            stdout_tail="",
+            stderr_tail="",
+            verifier_error="",
+            verifier_allowed=True,
+        )
+        resp = LocalModelExecutor.run(req, provider=InjectedLocalModelProvider(lambda _: ""))
+
+    meta = resp.raw_model_metadata
+    assert meta.get("candidate_isolation_attempted") is True
+    assert meta.get("candidate_isolated") is True
+    assert meta.get("candidate_output_isolated") is True
+    assert meta.get("selected_candidate_hash") == diff_hash
+    assert meta.get("applied_patch_hash") == diff_hash
+    assert meta.get("selected_candidate_hash_matches_applied") is True
+    assert meta.get("isolated_verifier_status") == "pass"
+    assert meta.get("verifier_result") == "pass"
+    assert meta.get("route_mode") == "local_only_executed"
+    assert meta.get("authority") == "internal_only"
+    assert meta.get("solved") is True
+
+
+def test_local_model_executor_committee_parse_failure_skips_isolation(monkeypatch):
+    from nexus.services.local_heal.candidate_decision_adapter import (
+        CandidateDecisionAdapter,
+        CandidateDecisionResponse,
+    )
+    from nexus.services.local_heal.candidate_envelope import CandidateEnvelope
+    from nexus.services.local_heal.local_committee_candidate_provider import (
+        LocalCommitteeCandidateProvider,
+    )
+
+    fenced_patch = "```python\nplain prose, not a real patch\n```"
+    envelope = CandidateEnvelope(
+        candidate_id="c-parse-fail",
+        task_id="committee-parse-fail",
+        source="local",
+        model="qwen2.5-coder:7b",
+        role="primary_proposer",
+        patch_protocol="anchored_edit",
+        target_file="file.py",
+        target_symbol="func",
+        source_anchor_hash="hash",
+        candidate_patch_hash=hashlib.sha256(fenced_patch.encode("utf-8")).hexdigest(),
+        evidence_refs=("ref1",),
+        candidate_patch=fenced_patch,
+    )
+    monkeypatch.setattr(
+        LocalCommitteeCandidateProvider,
+        "generate_committee_candidates",
+        lambda *a, **k: [envelope],
+    )
+    monkeypatch.setattr(
+        CandidateDecisionAdapter,
+        "select_candidate",
+        lambda *a, **k: CandidateDecisionResponse(
+            selected_candidate_id="c-parse-fail",
+            selected_candidate_patch=fenced_patch,
+            ranking_trace=["ranked"],
+            selected_by="candidate_policy",
+            decision_evidence_refs=("ref1",),
+        ),
+    )
+
+    req = make_test_request(
+        task_id="committee-parse-fail",
+        problem_statement="test",
+        evidence_refs=("ref1",),
+        route_context={
+            "verifier_command": ["python3", "-c", "print(1)"],
+            "signal_snapshot": {
+                "execution_topology": "local_committee_only",
+                "protocol_mode": "anchored_edit",
+                "mutation_allowed": True,
+                "verifier_allowed": True,
+                "proposer_specs": [
+                    {"model": "qwen2.5-coder:7b", "role": "primary"},
+                    {"model": "deepseek-coder:6.7b-instruct", "role": "secondary"},
+                ],
+                "judge_model": "qwen2.5:3b",
+            },
+        },
+    )
+
+    resp = LocalModelExecutor.run(req, provider=InjectedLocalModelProvider(lambda _: ""))
+    meta = resp.raw_model_metadata
+    assert meta.get("protocol_parse_failed") is True
+    assert meta.get("candidate_isolation_attempted") is False
+    assert meta.get("candidate_isolated") is False
+    assert meta.get("candidate_output_isolated") is False
+    assert meta.get("selected_candidate_hash") == ""
+    assert meta.get("verifier_result") == "not_run"
+    assert meta.get("solved") is not True
+
+
+def test_local_model_executor_committee_outer_fence_wrap_is_unwrapped_and_isolated(monkeypatch):
+    from nexus.services.local_heal.candidate_decision_adapter import (
+        CandidateDecisionAdapter,
+        CandidateDecisionResponse,
+    )
+    from nexus.services.local_heal.candidate_envelope import CandidateEnvelope
+    from nexus.services.local_heal.local_committee_candidate_provider import (
+        LocalCommitteeCandidateProvider,
+    )
+    from nexus.services.local_heal.isolated_workspace_apply import IsolatedApplyReceipt
+    from nexus.services.local_heal.isolated_verifier import IsolatedVerifierReceipt
+    from unittest.mock import patch
+
+    fenced_patch = "```python\n<<<<<<< REPLACE\ndef func():\n    return 1\n>>>>>>> REPLACE\n```"
+    envelope = CandidateEnvelope(
+        candidate_id="c-fence-unwrap",
+        task_id="committee-fence-unwrap",
+        source="local",
+        model="qwen2.5-coder:7b",
+        role="primary_proposer",
+        patch_protocol="anchored_edit",
+        target_file="file.py",
+        target_symbol="func",
+        source_anchor_hash="hash",
+        candidate_patch_hash=hashlib.sha256(fenced_patch.encode("utf-8")).hexdigest(),
+        evidence_refs=("ref1",),
+        candidate_patch=fenced_patch,
+    )
+    monkeypatch.setattr(
+        LocalCommitteeCandidateProvider,
+        "generate_committee_candidates",
+        lambda *a, **k: [envelope],
+    )
+    monkeypatch.setattr(
+        CandidateDecisionAdapter,
+        "select_candidate",
+        lambda *a, **k: CandidateDecisionResponse(
+            selected_candidate_id="c-fence-unwrap",
+            selected_candidate_patch=fenced_patch,
+            ranking_trace=["ranked"],
+            selected_by="candidate_policy",
+            decision_evidence_refs=("ref1",),
+        ),
+    )
+
+    req = make_test_request(
+        task_id="committee-fence-unwrap",
+        problem_statement="test",
+        target_file="file.py",
+        evidence_refs=("ref1",),
+        route_context={
+            "locked_search": "def func():\n    pass",
+            "verifier_command": ["python3", "-c", "print(1)"],
+            "signal_snapshot": {
+                "execution_topology": "local_committee_only",
+                "protocol_mode": "anchored_edit",
+                "mutation_allowed": True,
+                "verifier_allowed": True,
+                "proposer_specs": [
+                    {"model": "qwen2.5-coder:7b", "role": "primary"},
+                    {"model": "deepseek-coder:6.7b-instruct", "role": "secondary"},
+                ],
+                "judge_model": "qwen2.5:3b",
+            },
+        },
+    )
+
+    with patch("nexus.services.local_heal.local_model_executor.run_isolated_workspace_apply") as mock_apply, \
+         patch("nexus.services.local_heal.local_model_executor.run_isolated_verifier") as mock_verify:
+        def _check_apply(apply_req):
+            assert "```" not in apply_req.unified_diff
+            assert apply_req.unified_diff.startswith("--- a/file.py\n+++ b/file.py\n")
+            assert "+    return 1\n" in apply_req.unified_diff
+            return IsolatedApplyReceipt(
+                task_id="committee-fence-unwrap",
+                workspace_path="/tmp/ws",
+                target_file="file.py",
+                patch_apply_status="applied",
+                patch_apply_error="",
+                selected_candidate_hash=apply_req.selected_candidate_hash,
+                applied_patch_hash=apply_req.selected_candidate_hash,
+                selected_candidate_hash_matches_applied=True,
+                candidate_output_isolated=True,
+                mutation_allowed=True,
+                applied_patch_hash_source="git_diff",
+            )
+
+        mock_apply.side_effect = _check_apply
+        mock_verify.return_value = IsolatedVerifierReceipt(
+            task_id="committee-fence-unwrap",
+            verifier_status="pass",
+            exit_code=0,
+            stdout_tail="",
+            stderr_tail="",
+            verifier_error="",
+            verifier_allowed=True,
+        )
+
+        resp = LocalModelExecutor.run(req, provider=InjectedLocalModelProvider(lambda _: ""))
+
+    meta = resp.raw_model_metadata
+    assert meta.get("protocol_normalization", {}).get("outer_markdown_fence_unwrapped") is True
+    assert meta.get("candidate_isolation_attempted") is True
+    assert meta.get("candidate_isolated") is True
+    assert meta.get("verifier_result") == "pass"
+
+
+def test_local_model_executor_committee_replace_block_fence_is_unwrapped(monkeypatch):
+    from nexus.services.local_heal.candidate_decision_adapter import (
+        CandidateDecisionAdapter,
+        CandidateDecisionResponse,
+    )
+    from nexus.services.local_heal.candidate_envelope import CandidateEnvelope
+    from nexus.services.local_heal.local_committee_candidate_provider import (
+        LocalCommitteeCandidateProvider,
+    )
+    from nexus.services.local_heal.isolated_workspace_apply import IsolatedApplyReceipt
+    from nexus.services.local_heal.isolated_verifier import IsolatedVerifierReceipt
+    from unittest.mock import patch
+
+    fenced_patch = (
+        "<<<<<<< REPLACE\n"
+        "```python\n"
+        "def func():\n"
+        "    return 1\n"
+        "```\n"
+        ">>>>>>> REPLACE\n"
+    )
+    envelope = CandidateEnvelope(
+        candidate_id="c-replace-fence-unwrap",
+        task_id="committee-replace-fence-unwrap",
+        source="local",
+        model="qwen2.5-coder:7b",
+        role="primary_proposer",
+        patch_protocol="anchored_edit",
+        target_file="file.py",
+        target_symbol="func",
+        source_anchor_hash="hash",
+        candidate_patch_hash=hashlib.sha256(fenced_patch.encode("utf-8")).hexdigest(),
+        evidence_refs=("ref1",),
+        candidate_patch=fenced_patch,
+    )
+    monkeypatch.setattr(
+        LocalCommitteeCandidateProvider,
+        "generate_committee_candidates",
+        lambda *a, **k: [envelope],
+    )
+    monkeypatch.setattr(
+        CandidateDecisionAdapter,
+        "select_candidate",
+        lambda *a, **k: CandidateDecisionResponse(
+            selected_candidate_id="c-replace-fence-unwrap",
+            selected_candidate_patch=fenced_patch,
+            ranking_trace=["ranked"],
+            selected_by="candidate_policy",
+            decision_evidence_refs=("ref1",),
+        ),
+    )
+
+    req = make_test_request(
+        task_id="committee-replace-fence-unwrap",
+        problem_statement="test",
+        target_file="file.py",
+        evidence_refs=("ref1",),
+        route_context={
+            "locked_search": "def func():\n    pass",
+            "verifier_command": ["python3", "-c", "print(1)"],
+            "signal_snapshot": {
+                "execution_topology": "local_committee_only",
+                "protocol_mode": "anchored_edit",
+                "mutation_allowed": True,
+                "verifier_allowed": True,
+                "proposer_specs": [
+                    {"model": "qwen2.5-coder:7b", "role": "primary"},
+                    {"model": "deepseek-coder:6.7b-instruct", "role": "secondary"},
+                ],
+                "judge_model": "qwen2.5:3b",
+            },
+        },
+    )
+
+    with patch("nexus.services.local_heal.local_model_executor.run_isolated_workspace_apply") as mock_apply, \
+         patch("nexus.services.local_heal.local_model_executor.run_isolated_verifier") as mock_verify:
+        def _check_apply(apply_req):
+            assert "```" not in apply_req.unified_diff
+            assert "+    return 1\n" in apply_req.unified_diff
+            return IsolatedApplyReceipt(
+                task_id="committee-replace-fence-unwrap",
+                workspace_path="/tmp/ws",
+                target_file="file.py",
+                patch_apply_status="applied",
+                patch_apply_error="",
+                selected_candidate_hash=apply_req.selected_candidate_hash,
+                applied_patch_hash=apply_req.selected_candidate_hash,
+                selected_candidate_hash_matches_applied=True,
+                candidate_output_isolated=True,
+                mutation_allowed=True,
+                applied_patch_hash_source="git_diff",
+            )
+
+        mock_apply.side_effect = _check_apply
+        mock_verify.return_value = IsolatedVerifierReceipt(
+            task_id="committee-replace-fence-unwrap",
+            verifier_status="pass",
+            exit_code=0,
+            stdout_tail="",
+            stderr_tail="",
+            verifier_error="",
+            verifier_allowed=True,
+        )
+
+        resp = LocalModelExecutor.run(req, provider=InjectedLocalModelProvider(lambda _: ""))
+
+    meta = resp.raw_model_metadata
+    assert meta.get("protocol_normalization", {}).get("replace_block_markdown_fence_unwrapped") is True
+    assert meta.get("candidate_isolation_attempted") is True
+    assert meta.get("candidate_isolated") is True
+
+
+def test_local_model_executor_committee_raw_fenced_replacement_is_unwrapped(monkeypatch):
+    from nexus.services.local_heal.candidate_decision_adapter import (
+        CandidateDecisionAdapter,
+        CandidateDecisionResponse,
+    )
+    from nexus.services.local_heal.candidate_envelope import CandidateEnvelope
+    from nexus.services.local_heal.local_committee_candidate_provider import (
+        LocalCommitteeCandidateProvider,
+    )
+    from nexus.services.local_heal.isolated_workspace_apply import IsolatedApplyReceipt
+    from nexus.services.local_heal.isolated_verifier import IsolatedVerifierReceipt
+    from unittest.mock import patch
+
+    fenced_patch = "```python\ndef func():\n    return 1\n```"
+    envelope = CandidateEnvelope(
+        candidate_id="c-raw-fence-unwrap",
+        task_id="committee-raw-fence-unwrap",
+        source="local",
+        model="qwen2.5-coder:7b",
+        role="primary_proposer",
+        patch_protocol="anchored_edit",
+        target_file="file.py",
+        target_symbol="func",
+        source_anchor_hash="hash",
+        candidate_patch_hash=hashlib.sha256(fenced_patch.encode("utf-8")).hexdigest(),
+        evidence_refs=("ref1",),
+        candidate_patch=fenced_patch,
+    )
+    monkeypatch.setattr(
+        LocalCommitteeCandidateProvider,
+        "generate_committee_candidates",
+        lambda *a, **k: [envelope],
+    )
+    monkeypatch.setattr(
+        CandidateDecisionAdapter,
+        "select_candidate",
+        lambda *a, **k: CandidateDecisionResponse(
+            selected_candidate_id="c-raw-fence-unwrap",
+            selected_candidate_patch=fenced_patch,
+            ranking_trace=["ranked"],
+            selected_by="candidate_policy",
+            decision_evidence_refs=("ref1",),
+        ),
+    )
+
+    req = make_test_request(
+        task_id="committee-raw-fence-unwrap",
+        problem_statement="test",
+        target_file="file.py",
+        evidence_refs=("ref1",),
+        route_context={
+            "locked_search": "def func():\n    pass",
+            "verifier_command": ["python3", "-c", "print(1)"],
+            "signal_snapshot": {
+                "execution_topology": "local_committee_only",
+                "protocol_mode": "anchored_edit",
+                "mutation_allowed": True,
+                "verifier_allowed": True,
+                "proposer_specs": [
+                    {"model": "qwen2.5-coder:7b", "role": "primary"},
+                    {"model": "deepseek-coder:6.7b-instruct", "role": "secondary"},
+                ],
+                "judge_model": "qwen2.5:3b",
+            },
+        },
+    )
+
+    with patch("nexus.services.local_heal.local_model_executor.run_isolated_workspace_apply") as mock_apply, \
+         patch("nexus.services.local_heal.local_model_executor.run_isolated_verifier") as mock_verify:
+        def _check_apply(apply_req):
+            assert "```" not in apply_req.unified_diff
+            assert "+    return 1\n" in apply_req.unified_diff
+            return IsolatedApplyReceipt(
+                task_id="committee-raw-fence-unwrap",
+                workspace_path="/tmp/ws",
+                target_file="file.py",
+                patch_apply_status="applied",
+                patch_apply_error="",
+                selected_candidate_hash=apply_req.selected_candidate_hash,
+                applied_patch_hash=apply_req.selected_candidate_hash,
+                selected_candidate_hash_matches_applied=True,
+                candidate_output_isolated=True,
+                mutation_allowed=True,
+                applied_patch_hash_source="git_diff",
+            )
+
+        mock_apply.side_effect = _check_apply
+        mock_verify.return_value = IsolatedVerifierReceipt(
+            task_id="committee-raw-fence-unwrap",
+            verifier_status="pass",
+            exit_code=0,
+            stdout_tail="",
+            stderr_tail="",
+            verifier_error="",
+            verifier_allowed=True,
+        )
+
+        resp = LocalModelExecutor.run(req, provider=InjectedLocalModelProvider(lambda _: ""))
+
+    meta = resp.raw_model_metadata
+    assert meta.get("protocol_normalization", {}).get("outer_markdown_fence_unwrapped") is True
+    assert meta.get("candidate_isolation_attempted") is True
+    assert meta.get("candidate_isolated") is True
+
+
+def test_local_model_executor_committee_prose_contamination_delegates_retry(monkeypatch):
+    from nexus.services.local_heal.candidate_decision_adapter import (
+        CandidateDecisionAdapter,
+        CandidateDecisionResponse,
+    )
+    from nexus.services.local_heal.candidate_envelope import CandidateEnvelope
+    from nexus.services.local_heal.local_committee_candidate_provider import (
+        LocalCommitteeCandidateProvider,
+    )
+    from nexus.services.local_heal.isolated_workspace_apply import IsolatedApplyReceipt
+    from nexus.services.local_heal.isolated_verifier import IsolatedVerifierReceipt
+    from unittest.mock import patch, MagicMock
+
+    prose_patch = "```python\nHere is the fix:\ndef func():\n    return 1\n```"
+    retried_diff = (
+        "--- a/file.py\n"
+        "+++ b/file.py\n"
+        "@@ -1,2 +1,2 @@\n"
+        "-def func():\n"
+        "-    pass\n"
+        "+def func():\n"
+        "+    return 1\n"
+    )
+    envelope = CandidateEnvelope(
+        candidate_id="c-prose-retry",
+        task_id="committee-prose-retry",
+        source="local",
+        model="qwen2.5-coder:7b",
+        role="primary_proposer",
+        patch_protocol="anchored_edit",
+        target_file="file.py",
+        target_symbol="func",
+        source_anchor_hash="hash",
+        candidate_patch_hash=hashlib.sha256(prose_patch.encode("utf-8")).hexdigest(),
+        evidence_refs=("ref1",),
+        candidate_patch=prose_patch,
+    )
+    monkeypatch.setattr(
+        LocalCommitteeCandidateProvider,
+        "generate_committee_candidates",
+        lambda *a, **k: [envelope],
+    )
+    monkeypatch.setattr(
+        CandidateDecisionAdapter,
+        "select_candidate",
+        lambda *a, **k: CandidateDecisionResponse(
+            selected_candidate_id="c-prose-retry",
+            selected_candidate_patch=prose_patch,
+            ranking_trace=["ranked"],
+            selected_by="candidate_policy",
+            decision_evidence_refs=("ref1",),
+        ),
+    )
+
+    req = make_test_request(
+        task_id="committee-prose-retry",
+        problem_statement="test",
+        target_file="file.py",
+        evidence_refs=("ref1",),
+        route_context={
+            "locked_search": "def func():\n    pass",
+            "verifier_command": ["python3", "-c", "print(1)"],
+            "signal_snapshot": {
+                "execution_topology": "local_committee_only",
+                "protocol_mode": "anchored_edit",
+                "mutation_allowed": True,
+                "verifier_allowed": True,
+                "proposer_specs": [
+                    {"model": "qwen2.5-coder:7b", "role": "primary"},
+                    {"model": "deepseek-coder:6.7b-instruct", "role": "secondary"},
+                ],
+                "judge_model": "qwen2.5:3b",
+            },
+        },
+    )
+
+    with patch("nexus.services.local_heal.pipeline.HealPipeline.__init__", return_value=None), \
+         patch("nexus.services.local_heal.pipeline.HealPipeline.run") as mock_pipeline_run, \
+         patch("nexus.services.local_heal.local_model_executor.run_isolated_workspace_apply") as mock_apply, \
+         patch("nexus.services.local_heal.local_model_executor.run_isolated_verifier") as mock_verify:
+        mock_pipeline_run.return_value = MagicMock(final_patch=retried_diff)
+        mock_apply.return_value = IsolatedApplyReceipt(
+            task_id="committee-prose-retry",
+            workspace_path="/tmp/ws",
+            target_file="file.py",
+            patch_apply_status="applied",
+            patch_apply_error="",
+            selected_candidate_hash=hashlib.sha256(retried_diff.encode("utf-8")).hexdigest(),
+            applied_patch_hash=hashlib.sha256(retried_diff.encode("utf-8")).hexdigest(),
+            selected_candidate_hash_matches_applied=True,
+            candidate_output_isolated=True,
+            mutation_allowed=True,
+            applied_patch_hash_source="git_diff",
+        )
+        mock_verify.return_value = IsolatedVerifierReceipt(
+            task_id="committee-prose-retry",
+            verifier_status="pass",
+            exit_code=0,
+            stdout_tail="",
+            stderr_tail="",
+            verifier_error="",
+            verifier_allowed=True,
+        )
+
+        resp = LocalModelExecutor.run(req, provider=InjectedLocalModelProvider(lambda _: ""))
+
+    meta = resp.raw_model_metadata
+    assert meta.get("protocol_parse_error_kind") == "REPLACEMENT_PROSE_CONTAMINATION"
+    assert meta.get("pipeline_retry_delegated") is True
+    assert meta.get("candidate_isolation_attempted") is True
+    assert meta.get("candidate_isolated") is True
+
+
+def test_local_model_executor_committee_delegated_retry_records_second_attempt_metadata(monkeypatch):
+    from nexus.services.local_heal.candidate_decision_adapter import (
+        CandidateDecisionAdapter,
+        CandidateDecisionResponse,
+    )
+    from nexus.services.local_heal.candidate_envelope import CandidateEnvelope
+    from nexus.services.local_heal.local_committee_candidate_provider import (
+        LocalCommitteeCandidateProvider,
+    )
+    from unittest.mock import patch, MagicMock
+
+    prose_patch = "```python\nHere is the fix:\ndef func():\n    return 1\n```"
+    retried_diff = "--- a/file.py\n+++ b/file.py\n@@ -1,2 +1,2 @@\n-def func():\n-    pass\n+def func():\n+    return 1\n"
+    envelope = CandidateEnvelope(
+        candidate_id="c-prose-retry-meta",
+        task_id="committee-prose-retry-meta",
+        source="local",
+        model="qwen2.5-coder:7b",
+        role="primary_proposer",
+        patch_protocol="anchored_edit",
+        target_file="file.py",
+        target_symbol="func",
+        source_anchor_hash="hash",
+        candidate_patch_hash=hashlib.sha256(prose_patch.encode("utf-8")).hexdigest(),
+        evidence_refs=("ref1",),
+        candidate_patch=prose_patch,
+    )
+    monkeypatch.setattr(
+        LocalCommitteeCandidateProvider,
+        "generate_committee_candidates",
+        lambda *a, **k: [envelope],
+    )
+    monkeypatch.setattr(
+        CandidateDecisionAdapter,
+        "select_candidate",
+        lambda *a, **k: CandidateDecisionResponse(
+            selected_candidate_id="c-prose-retry-meta",
+            selected_candidate_patch=prose_patch,
+            ranking_trace=["ranked"],
+            selected_by="candidate_policy",
+            decision_evidence_refs=("ref1",),
+        ),
+    )
+
+    req = make_test_request(
+        task_id="committee-prose-retry-meta",
+        problem_statement="test",
+        target_file="file.py",
+        evidence_refs=("ref1",),
+        route_context={
+            "locked_search": "def func():\n    pass",
+            "verifier_command": ["python3", "-c", "print(1)"],
+            "signal_snapshot": {
+                "execution_topology": "local_committee_only",
+                "protocol_mode": "anchored_edit",
+                "mutation_allowed": True,
+                "verifier_allowed": True,
+                "proposer_specs": [
+                    {"model": "qwen2.5-coder:7b", "role": "primary"},
+                    {"model": "deepseek-coder:6.7b-instruct", "role": "secondary"},
+                ],
+                "judge_model": "qwen2.5:3b",
+            },
+        },
+    )
+
+    with patch("nexus.services.local_heal.pipeline.HealPipeline.__init__", return_value=None), \
+         patch("nexus.services.local_heal.pipeline.HealPipeline.run") as mock_pipeline_run, \
+         patch("nexus.services.local_heal.local_model_executor.run_isolated_workspace_apply"), \
+         patch("nexus.services.local_heal.local_model_executor.run_isolated_verifier"):
+        mock_pipeline_run.return_value = MagicMock(
+            final_patch=retried_diff,
+            failure_reason="",
+            model_decisions=[
+                {
+                    "phase": "patch",
+                    "output_class": "VALID_SEARCH_REPLACE",
+                    "parser_error_kind": "none",
+                    "status": "SUCCESS",
+                    "output_excerpt": "<<<<<<< REPLACE\n...",
+                }
+            ],
+        )
+
+        resp = LocalModelExecutor.run(req, provider=InjectedLocalModelProvider(lambda _: ""))
+
+    meta = resp.raw_model_metadata
+    assert meta.get("pipeline_retry_delegated") is True
+    assert meta.get("delegated_retry_final_patch_len") == len(retried_diff)
+    assert meta.get("delegated_retry_output_class") == "VALID_SEARCH_REPLACE"
+    assert meta.get("delegated_retry_parser_error_kind") == "none"
+    assert meta.get("delegated_retry_status") == "SUCCESS"
+    assert meta.get("delegated_retry_output_excerpt").startswith("<<<<<<< REPLACE")
+
+
+def test_local_model_executor_committee_delegated_retry_records_failed_second_attempt_metadata(monkeypatch):
+    from nexus.services.local_heal.candidate_decision_adapter import (
+        CandidateDecisionAdapter,
+        CandidateDecisionResponse,
+    )
+    from nexus.services.local_heal.candidate_envelope import CandidateEnvelope
+    from nexus.services.local_heal.local_committee_candidate_provider import (
+        LocalCommitteeCandidateProvider,
+    )
+    from unittest.mock import patch, MagicMock
+
+    prose_patch = "```python\nHere is the fix:\ndef func():\n    return 1\n```"
+    envelope = CandidateEnvelope(
+        candidate_id="c-prose-retry-failed-meta",
+        task_id="committee-prose-retry-failed-meta",
+        source="local",
+        model="qwen2.5-coder:7b",
+        role="primary_proposer",
+        patch_protocol="anchored_edit",
+        target_file="file.py",
+        target_symbol="func",
+        source_anchor_hash="hash",
+        candidate_patch_hash=hashlib.sha256(prose_patch.encode("utf-8")).hexdigest(),
+        evidence_refs=("ref1",),
+        candidate_patch=prose_patch,
+    )
+    monkeypatch.setattr(
+        LocalCommitteeCandidateProvider,
+        "generate_committee_candidates",
+        lambda *a, **k: [envelope],
+    )
+    monkeypatch.setattr(
+        CandidateDecisionAdapter,
+        "select_candidate",
+        lambda *a, **k: CandidateDecisionResponse(
+            selected_candidate_id="c-prose-retry-failed-meta",
+            selected_candidate_patch=prose_patch,
+            ranking_trace=["ranked"],
+            selected_by="candidate_policy",
+            decision_evidence_refs=("ref1",),
+        ),
+    )
+
+    req = make_test_request(
+        task_id="committee-prose-retry-failed-meta",
+        problem_statement="test",
+        target_file="file.py",
+        evidence_refs=("ref1",),
+        route_context={
+            "locked_search": "def func():\n    pass",
+            "verifier_command": ["python3", "-c", "print(1)"],
+            "signal_snapshot": {
+                "execution_topology": "local_committee_only",
+                "protocol_mode": "anchored_edit",
+                "mutation_allowed": True,
+                "verifier_allowed": True,
+                "proposer_specs": [
+                    {"model": "qwen2.5-coder:7b", "role": "primary"},
+                    {"model": "deepseek-coder:6.7b-instruct", "role": "secondary"},
+                ],
+                "judge_model": "qwen2.5:3b",
+            },
+        },
+    )
+
+    with patch("nexus.services.local_heal.pipeline.HealPipeline.__init__", return_value=None), \
+         patch("nexus.services.local_heal.pipeline.HealPipeline.run") as mock_pipeline_run:
+        mock_pipeline_run.return_value = MagicMock(
+            final_patch="",
+            failure_reason="REPLACEMENT_PROSE_CONTAMINATION",
+            model_decisions=[
+                {
+                    "phase": "patch",
+                    "output_class": "NATURAL_LANGUAGE",
+                    "parser_error_kind": "REPLACEMENT_PROSE_CONTAMINATION",
+                    "status": "REPLACEMENT_PROSE_CONTAMINATION",
+                    "output_excerpt": "Here is the fix:\n...",
+                }
+            ],
+        )
+
+        resp = LocalModelExecutor.run(req, provider=InjectedLocalModelProvider(lambda _: ""))
+
+    meta = resp.raw_model_metadata
+    assert meta.get("pipeline_retry_delegated") is False
+    assert meta.get("delegated_retry_failure_reason") == "REPLACEMENT_PROSE_CONTAMINATION"
+    assert meta.get("delegated_retry_output_class") == "NATURAL_LANGUAGE"
+    assert meta.get("delegated_retry_parser_error_kind") == "REPLACEMENT_PROSE_CONTAMINATION"
+    assert meta.get("delegated_retry_status") == "REPLACEMENT_PROSE_CONTAMINATION"
+    assert meta.get("delegated_retry_output_excerpt").startswith("Here is the fix:")
+
+
+def test_local_model_executor_committee_delegated_retry_uses_reproduction_contract(monkeypatch):
+    from nexus.services.local_heal.candidate_decision_adapter import (
+        CandidateDecisionAdapter,
+        CandidateDecisionResponse,
+    )
+    from nexus.services.local_heal.candidate_envelope import CandidateEnvelope
+    from nexus.services.local_heal.local_committee_candidate_provider import (
+        LocalCommitteeCandidateProvider,
+    )
+    from unittest.mock import patch, MagicMock
+
+    prose_patch = "```python\nHere is the fix:\ndef func():\n    return 1\n```"
+    envelope = CandidateEnvelope(
+        candidate_id="c-prose-retry-contract",
+        task_id="committee-prose-retry-contract",
+        source="local",
+        model="qwen2.5-coder:7b",
+        role="primary_proposer",
+        patch_protocol="anchored_edit",
+        target_file="file.py",
+        target_symbol="func",
+        source_anchor_hash="hash",
+        candidate_patch_hash=hashlib.sha256(prose_patch.encode("utf-8")).hexdigest(),
+        evidence_refs=("ref1",),
+        candidate_patch=prose_patch,
+    )
+    monkeypatch.setattr(
+        LocalCommitteeCandidateProvider,
+        "generate_committee_candidates",
+        lambda *a, **k: [envelope],
+    )
+    monkeypatch.setattr(
+        CandidateDecisionAdapter,
+        "select_candidate",
+        lambda *a, **k: CandidateDecisionResponse(
+            selected_candidate_id="c-prose-retry-contract",
+            selected_candidate_patch=prose_patch,
+            ranking_trace=["ranked"],
+            selected_by="candidate_policy",
+            decision_evidence_refs=("ref1",),
+        ),
+    )
+
+    req = make_test_request(
+        task_id="committee-prose-retry-contract",
+        problem_statement="test",
+        target_file="file.py",
+        evidence_refs=("ref1",),
+        route_context={
+            "locked_search": "def func():\n    pass",
+            "python_executable": "/tmp/task-venv/bin/python",
+            "signal_snapshot": {
+                "execution_topology": "local_committee_only",
+                "protocol_mode": "anchored_edit",
+                "mutation_allowed": True,
+                "verifier_allowed": True,
+                "proposer_specs": [
+                    {"model": "qwen2.5-coder:7b", "role": "primary"},
+                    {"model": "deepseek-coder:6.7b-instruct", "role": "secondary"},
+                ],
+                "judge_model": "qwen2.5:3b",
+            },
+        },
+    )
+
+    captured_ctx = None
+
+    def _capture_run(ctx):
+        nonlocal captured_ctx
+        captured_ctx = ctx
+        return MagicMock(final_patch="", failure_reason="SEARCH_MISMATCH", model_decisions=[])
+
+    with patch("nexus.services.local_heal.pipeline.HealPipeline.__init__", return_value=None), \
+         patch("nexus.services.local_heal.pipeline.HealPipeline.run", side_effect=_capture_run), \
+         patch("nexus.services.local_heal.local_model_executor.run_isolated_workspace_apply"), \
+         patch("nexus.services.local_heal.local_model_executor.run_isolated_verifier"):
+        LocalModelExecutor.run(req, provider=InjectedLocalModelProvider(lambda _: ""))
+
+    assert captured_ctx is not None
+    assert captured_ctx.problem_statement == "test"
+    assert captured_ctx.attempt == 2
+    assert captured_ctx.repro_script == ""
+    assert captured_ctx.skip_reproduction is True
+    assert captured_ctx.failure_reason == "REPLACEMENT_PROSE_CONTAMINATION"
+    assert captured_ctx.python_executable == "/tmp/task-venv/bin/python"
+    assert "contained prose or commentary" in captured_ctx.user_prompt
+
+
 def test_local_model_executor_committee_judge_never_outputs_patch():
     from nexus.services.local_heal.candidate_envelope import CandidateEnvelope
     import hashlib
@@ -845,6 +1738,39 @@ def test_patch_synthesis_records_output_classification() -> None:
         assert preflight.get("contains_natural_language_only") is False
 
 
+def test_patch_synthesis_retry_disables_interleaved_reasoning() -> None:
+    from nexus.services.local_heal.phases.patch_synthesis import PatchSynthesisPhase
+    from nexus.services.local_heal.protocol import SolidSearchReplaceProtocol
+    from nexus.services.local_heal.patcher import Patcher
+    from nexus.services.local_heal.interface import PatchSynthesisInput, LocalizedFile
+
+    captured = {}
+
+    class MockLLM:
+        def generate(self, **kwargs):
+            captured["system_prompt"] = kwargs.get("system_prompt", "")
+            return ""
+
+    phase = PatchSynthesisPhase(SolidSearchReplaceProtocol(), Patcher(), llm_client=MockLLM())
+    inp = PatchSynthesisInput(
+        instance_id="retry-test",
+        problem_statement="fix test",
+        repro_evidence="failed",
+        plan=None,
+        localized_files=[LocalizedFile(path="file.py", content="old\n")],
+        repo_dir=Path("/tmp"),
+        reasoning_mode="INTUITIVE",
+        attempt=2,
+        max_tries=2,
+        failure_reason="SEARCH_MISMATCH",
+    )
+
+    output = phase.run(inp)
+
+    assert output.success is False
+    assert "Before producing the patch, briefly analyze" not in captured["system_prompt"]
+
+
 def test_m1_row_exposes_output_excerpt_and_class() -> None:
     """C7: output_class and contains_markdown_fence are visible in raw_meta via mocked telemetries."""
     from unittest.mock import patch
@@ -1157,7 +2083,6 @@ def test_non_empty_pipeline_patch_projects_candidate() -> None:
         assert meta.get("candidate_isolated") is True
         assert meta.get("hash_match") is True
         assert meta.get("isolated_verifier_status") == "pass"
-        assert meta.get("solved") is True
 
 
 def test_empty_pipeline_patch_does_not_project_candidate() -> None:

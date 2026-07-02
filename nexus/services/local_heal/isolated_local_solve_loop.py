@@ -225,7 +225,7 @@ def run_isolated_local_solve_loop(request: IsolatedLocalSolveRequest) -> Isolate
         verifier_result=vr_mapped,
         evidence_refs=request.evidence_refs,
         local_model_called=request.local_model_called,
-        mutation_allowed=request.mutation_allowed and apply_receipt.patch_apply_status == "applied",
+        mutation_allowed=request.mutation_allowed,
         repaired_by_rule=repair_receipt.repaired_by_rule,
     )
     
