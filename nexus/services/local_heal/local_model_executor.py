@@ -87,6 +87,105 @@ def _resolve_execution_topology(request: LocalModelExecutorRequest) -> str:
     return str(topology)
 
 
+def _project_pipeline_patch_to_target_file(unified_diff: str, target_file: str) -> tuple[str, dict[str, Any]]:
+    """Keep only the target file section from a multi-file unified diff."""
+    if not unified_diff.strip():
+        return "", {"protocol_used": "pipeline_result", "normalized": False}
+
+    target_norm = os.path.normpath(target_file)
+    lines = unified_diff.splitlines()
+    projected_sections: list[list[str]] = []
+    current_section: list[str] = []
+    current_target: str | None = None
+    dropped_files: list[str] = []
+
+    def _flush() -> None:
+        nonlocal current_section, current_target
+        if not current_section:
+            return
+        if current_target == target_norm:
+            projected_sections.append(current_section[:])
+        elif current_target:
+            dropped_files.append(current_target)
+        current_section = []
+        current_target = None
+
+    for line in lines:
+        if line.startswith("--- a/"):
+            _flush()
+            current_target = os.path.normpath(line[len("--- a/"):].strip())
+            current_section = [line]
+            continue
+        if current_section:
+            current_section.append(line)
+    _flush()
+
+    projected_diff = "\n".join("\n".join(section) for section in projected_sections).strip()
+    return projected_diff, {
+        "protocol_used": "pipeline_result",
+        "normalized": projected_diff != unified_diff.strip(),
+        "target_file_only": True,
+        "dropped_files": dropped_files,
+    }
+
+
+def _unwrap_outer_markdown_fence(candidate_patch: str) -> tuple[str, dict[str, Any]]:
+    stripped = candidate_patch.strip()
+    if not stripped.startswith("```"):
+        return candidate_patch, {"outer_markdown_fence_unwrapped": False}
+
+    lines = stripped.splitlines()
+    if len(lines) < 3 or not lines[-1].strip().startswith("```"):
+        return candidate_patch, {"outer_markdown_fence_unwrapped": False}
+
+    inner = "\n".join(lines[1:-1]).strip()
+    if not inner:
+        return candidate_patch, {"outer_markdown_fence_unwrapped": False}
+
+    return inner, {
+        "outer_markdown_fence_unwrapped": True,
+        "normalized": True,
+    }
+
+
+def _unwrap_markdown_fence_inside_replace_block(candidate_patch: str) -> tuple[str, dict[str, Any]]:
+    replace_start = "<<<<<<< REPLACE"
+    replace_end = ">>>>>>> REPLACE"
+    if replace_start not in candidate_patch or replace_end not in candidate_patch:
+        return candidate_patch, {"replace_block_markdown_fence_unwrapped": False}
+
+    start_idx = candidate_patch.find(replace_start)
+    content_start = start_idx + len(replace_start)
+    end_idx = candidate_patch.find(replace_end, content_start)
+    if end_idx == -1:
+        return candidate_patch, {"replace_block_markdown_fence_unwrapped": False}
+
+    replacement = candidate_patch[content_start:end_idx]
+    stripped = replacement.strip()
+    if not stripped.startswith("```"):
+        return candidate_patch, {"replace_block_markdown_fence_unwrapped": False}
+
+    lines = stripped.splitlines()
+    if len(lines) < 3 or not lines[-1].strip().startswith("```"):
+        return candidate_patch, {"replace_block_markdown_fence_unwrapped": False}
+
+    inner = "\n".join(lines[1:-1]).strip()
+    if not inner:
+        return candidate_patch, {"replace_block_markdown_fence_unwrapped": False}
+
+    rebuilt = (
+        candidate_patch[:content_start]
+        + "\n"
+        + inner
+        + "\n"
+        + candidate_patch[end_idx:]
+    )
+    return rebuilt, {
+        "replace_block_markdown_fence_unwrapped": True,
+        "normalized": True,
+    }
+
+
 def build_local_model_provider_from_signal_snapshot(
     route_context: Mapping[str, Any],
     injected_fn_key: str,
@@ -524,6 +623,16 @@ class LocalModelExecutor:
                 DeliveryGateLocalExecutor,
             )
 
+            original_target_content = None
+            original_target_exists = False
+            original_target_path = ""
+            if request.repo_root and target_file:
+                original_target_path = os.path.join(request.repo_root, target_file)
+                if os.path.exists(original_target_path):
+                    original_target_exists = True
+                    with open(original_target_path, "r", encoding="utf-8") as f:
+                        original_target_content = f.read()
+
             # Execute repair_loop (localheal pipeline bridge)
             repair_exec = LocalHealPipelineCapabilityExecutor().execute(cap_ctx)
 
@@ -626,6 +735,7 @@ class LocalModelExecutor:
                 "locked_search_present": bool(locked_search.strip()),
                 "failure_feedback_present": failure_feedback_present,
                 "final_authority": "NexusVerifier",
+                "protocol_normalization": patch_meta,
                 "ddtree_invoked": ddtree_exec.invoked,
                 "autoreason_invoked": autoreason_exec.invoked,
                 "artifact_gate_invoked": artifact_exec.invoked,
@@ -648,14 +758,17 @@ class LocalModelExecutor:
                 "candidate_hash_empty": candidate_hash_empty,
                 "candidate_isolation_attempted": candidate_isolation_attempted,
                 "candidate_isolated": candidate_isolated,
+                "candidate_output_isolated": candidate_isolated,
                 "selected_candidate_hash": selected_candidate_hash,
                 "applied_patch_hash": applied_patch_hash,
                 "hash_match": hash_match,
+                "selected_candidate_hash_matches_applied": hash_match,
                 "isolated_apply_status": isolated_apply_status,
                 "isolated_apply_error": isolated_apply_error,
                 "applied_patch_hash_source": applied_patch_hash_source,
                 "isolated_verifier_status": isolated_verifier_status,
                 "isolated_verifier_error": isolated_verifier_error,
+                "verifier_result": isolated_verifier_status,
                 "mutation_allowed": mutation_allowed,
                 "verifier_allowed": verifier_allowed,
             }
@@ -866,10 +979,25 @@ def _normalize_candidate_patch(
     
     if not candidate_patch.strip():
         return "", {"protocol_parse_failed": True, "error": "empty_patch"}
+
+    candidate_patch, outer_unwrap_meta = _unwrap_outer_markdown_fence(candidate_patch)
+    candidate_patch, replace_unwrap_meta = _unwrap_markdown_fence_inside_replace_block(candidate_patch)
+    unwrap_meta = {
+        "normalized": bool(
+            outer_unwrap_meta.get("normalized", False)
+            or replace_unwrap_meta.get("normalized", False)
+        ),
+        **outer_unwrap_meta,
+        **replace_unwrap_meta,
+    }
     
     # 1. Already standard unified diff — pass through
     if "--- a/" in candidate_patch and "+++ b/" in candidate_patch and "<<<<<<< REPLACE" not in candidate_patch:
-        return candidate_patch, {"protocol_used": "passthrough", "normalized": False}
+        return candidate_patch, {
+            "protocol_used": "passthrough",
+            "normalized": bool(unwrap_meta.get("normalized", False)),
+            **unwrap_meta,
+        }
     
     # 2. Use SolidSearchReplaceProtocol to parse REPLACE block
     from nexus.services.local_heal.protocol import SolidSearchReplaceProtocol, PatchError
@@ -885,17 +1013,18 @@ def _normalize_candidate_patch(
             "protocol_parse_failed": True,
             "error_kind": result.kind.name if hasattr(result.kind, "name") else str(result.kind),
             "error_message": result.message,
+            **unwrap_meta,
         }
     
     # 4. Got PatchIntent(s) — extract replacement from first intent
     if not result:
-        return "", {"protocol_parse_failed": True, "error": "no_intents"}
+        return "", {"protocol_parse_failed": True, "error": "no_intents", **unwrap_meta}
     
     intent = result[0]
     replacement = intent.replace
     
     if not replacement.strip():
-        return "", {"protocol_parse_failed": True, "error": "empty_replacement"}
+        return "", {"protocol_parse_failed": True, "error": "empty_replacement", **unwrap_meta}
     
     # 5. Generate unified diff from locked_search → replacement
     import difflib
@@ -946,4 +1075,8 @@ def _normalize_candidate_patch(
         adjusted_lines.append(line)
     
     normalized = "".join(adjusted_lines)
-    return normalized, {"protocol_used": "solid_search_replace", "normalized": True}
+    return normalized, {
+        "protocol_used": "solid_search_replace",
+        "normalized": True,
+        **unwrap_meta,
+    }

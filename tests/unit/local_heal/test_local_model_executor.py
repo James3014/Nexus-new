@@ -1151,7 +1151,7 @@ def test_non_empty_pipeline_patch_projects_candidate() -> None:
         meta = resp.raw_model_metadata
         
         assert meta.get("pipeline_result_projected") is True
-        assert resp.candidate_patch == "--- a/file.py\n+++ b/file.py\n@@ -1 +1 @@\n-old\n+new\n"
+        assert resp.candidate_patch == "--- a/file.py\n+++ b/file.py\n@@ -1 +1 @@\n-old\n+new"
         assert meta.get("candidate_hash_empty") is False
         assert meta.get("candidate_isolation_attempted") is True
         assert meta.get("candidate_isolated") is True
@@ -1319,3 +1319,193 @@ def test_hash_match_required_for_solved() -> None:
         
         assert meta.get("hash_match") is False
         assert meta.get("solved") is not True
+
+
+def test_pipeline_projection_restores_original_target_before_isolated_apply(tmp_path) -> None:
+    target_rel = "toy/math_util.py"
+    target_path = tmp_path / "toy" / "math_util.py"
+    target_path.parent.mkdir(parents=True, exist_ok=True)
+    original_text = "def double(x):\n    return x * 2\n"
+    target_path.write_text(original_text, encoding="utf-8")
+
+    req = make_test_request(
+        "c9-restore-before-apply",
+        repo_root=str(tmp_path),
+        target_file=target_rel,
+        evidence_refs=("ref1",),
+        execution_topology="localheal_pipeline",
+        route_context={
+            "verifier_command": ["python3", "-c", "print(1)"],
+            "signal_snapshot": {
+                "execution_topology": "localheal_pipeline",
+                "executor_model": "qwen2.5-coder:7b",
+                "protocol_mode": "anchored_edit",
+                "mutation_allowed": True,
+                "verifier_allowed": True,
+            },
+        },
+    )
+
+    diff_text = "--- a/toy/math_util.py\n+++ b/toy/math_util.py\n@@ -1,2 +1,2 @@\n-def double(x):\n-    return x * 2\n+def double(x):\n+    return x * 3\n"
+
+    from unittest.mock import patch
+    with patch("nexus.services.local_heal.local_model_capability_executors.LocalHealPipelineCapabilityExecutor.execute") as mock_exec:
+        from nexus.services.local_heal.local_model_capability_executors import CapabilityExecutionResult
+        from nexus.services.local_heal.isolated_workspace_apply import IsolatedApplyReceipt
+        from nexus.services.local_heal.isolated_verifier import IsolatedVerifierReceipt
+
+        def _mutating_execute(_ctx):
+            target_path.write_text("def mutated():\n    return 999\n", encoding="utf-8")
+            return CapabilityExecutionResult(
+                name="repair_loop",
+                selected=True,
+                invoked=True,
+                gate_passed=True,
+                outcome_contributed=True,
+                evidence_present=True,
+                failure_reason="",
+                telemetries={
+                    "pipeline_final_patch": diff_text,
+                    "pipeline_solve_eligible": True,
+                    "pipeline_failure_reason": "",
+                    "model_called": True,
+                },
+            )
+
+        mock_exec.side_effect = _mutating_execute
+
+        def _check_apply(apply_req):
+            assert target_path.read_text(encoding="utf-8") == original_text
+            return IsolatedApplyReceipt(
+                task_id="c9-restore-before-apply",
+                workspace_path="/tmp/ws",
+                target_file=target_rel,
+                patch_apply_status="applied",
+                patch_apply_error="",
+                selected_candidate_hash=hashlib.sha256(diff_text.encode("utf-8")).hexdigest(),
+                applied_patch_hash=hashlib.sha256(diff_text.encode("utf-8")).hexdigest(),
+                selected_candidate_hash_matches_applied=True,
+                candidate_output_isolated=True,
+                mutation_allowed=True,
+                applied_patch_hash_source="git_diff",
+            )
+
+        with patch("nexus.services.local_heal.local_model_executor.run_isolated_workspace_apply", side_effect=_check_apply), \
+             patch("nexus.services.local_heal.local_model_executor.run_isolated_verifier") as mock_verify:
+            mock_verify.return_value = IsolatedVerifierReceipt(
+                task_id="c9-restore-before-apply",
+                verifier_status="pass",
+                exit_code=0,
+                stdout_tail="",
+                stderr_tail="",
+                verifier_error="",
+                verifier_allowed=True,
+            )
+            resp = LocalModelExecutor.run(req, provider=InjectedLocalModelProvider(lambda _: ""))
+
+    meta = resp.raw_model_metadata
+    assert meta.get("candidate_isolated") is True
+    assert meta.get("hash_match") is True
+    assert meta.get("isolated_verifier_status") == "pass"
+
+
+def test_pipeline_projection_drops_non_target_file_diffs_before_isolated_apply() -> None:
+    req = make_test_request(
+        "c9-target-only-projection",
+        evidence_refs=("ref1",),
+        execution_topology="localheal_pipeline",
+        target_file="toy/math_util.py",
+        route_context={
+            "verifier_command": ["python3", "-c", "print(1)"],
+            "signal_snapshot": {
+                "execution_topology": "localheal_pipeline",
+                "executor_model": "qwen2.5-coder:7b",
+                "protocol_mode": "anchored_edit",
+                "mutation_allowed": True,
+                "verifier_allowed": True,
+            },
+        },
+    )
+
+    full_diff = (
+        "--- a/verify_math.py\n"
+        "+++ b/verify_math.py\n"
+        "@@ -1 +1 @@\n"
+        "-print('old')\n"
+        "+print('new')\n"
+        "--- a/toy/math_util.py\n"
+        "+++ b/toy/math_util.py\n"
+        "@@ -1,2 +1,2 @@\n"
+        "-def double(x):\n"
+        "-    return x * 2\n"
+        "+def double(x):\n"
+        "+    return x * 3\n"
+    )
+    target_only_diff = (
+        "--- a/toy/math_util.py\n"
+        "+++ b/toy/math_util.py\n"
+        "@@ -1,2 +1,2 @@\n"
+        "-def double(x):\n"
+        "-    return x * 2\n"
+        "+def double(x):\n"
+        "+    return x * 3\n"
+    )
+    target_hash = hashlib.sha256(target_only_diff.rstrip("\n").encode("utf-8")).hexdigest()
+
+    from unittest.mock import patch
+    with patch("nexus.services.local_heal.local_model_capability_executors.LocalHealPipelineCapabilityExecutor.execute") as mock_exec:
+        from nexus.services.local_heal.local_model_capability_executors import CapabilityExecutionResult
+        from nexus.services.local_heal.isolated_workspace_apply import IsolatedApplyReceipt
+        from nexus.services.local_heal.isolated_verifier import IsolatedVerifierReceipt
+
+        mock_exec.return_value = CapabilityExecutionResult(
+            name="repair_loop",
+            selected=True,
+            invoked=True,
+            gate_passed=True,
+            outcome_contributed=True,
+            evidence_present=True,
+            failure_reason="",
+            telemetries={
+                "pipeline_final_patch": full_diff,
+                "pipeline_solve_eligible": True,
+                "pipeline_failure_reason": "",
+                "model_called": True,
+            },
+        )
+
+        def _check_apply(apply_req):
+            assert apply_req.unified_diff == target_only_diff.rstrip("\n")
+            assert apply_req.selected_candidate_hash == target_hash
+            return IsolatedApplyReceipt(
+                task_id="c9-target-only-projection",
+                workspace_path="/tmp/ws",
+                target_file="toy/math_util.py",
+                patch_apply_status="applied",
+                patch_apply_error="",
+                selected_candidate_hash=target_hash,
+                applied_patch_hash=target_hash,
+                selected_candidate_hash_matches_applied=True,
+                candidate_output_isolated=True,
+                mutation_allowed=True,
+                applied_patch_hash_source="git_diff",
+            )
+
+        with patch("nexus.services.local_heal.local_model_executor.run_isolated_workspace_apply", side_effect=_check_apply), \
+             patch("nexus.services.local_heal.local_model_executor.run_isolated_verifier") as mock_verify:
+            mock_verify.return_value = IsolatedVerifierReceipt(
+                task_id="c9-target-only-projection",
+                verifier_status="pass",
+                exit_code=0,
+                stdout_tail="",
+                stderr_tail="",
+                verifier_error="",
+                verifier_allowed=True,
+            )
+            resp = LocalModelExecutor.run(req, provider=InjectedLocalModelProvider(lambda _: ""))
+
+    meta = resp.raw_model_metadata
+    assert resp.candidate_patch == target_only_diff.rstrip("\n")
+    assert meta.get("protocol_normalization", {}).get("normalized") is True
+    assert meta.get("protocol_normalization", {}).get("dropped_files") == ["verify_math.py"]
+    assert meta.get("candidate_isolated") is True
