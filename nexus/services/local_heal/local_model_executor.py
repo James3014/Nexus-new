@@ -1663,6 +1663,10 @@ class LocalModelExecutor:
                     from nexus.services.local_heal.errors import PatchError, PatchErrorKind
                     from pathlib import Path as _Path
 
+                    _dr_route_ctx = request.route_context if isinstance(request.route_context, dict) else {}
+                    _dr_signal = _dr_route_ctx.get("signal_snapshot", {}) if isinstance(_dr_route_ctx, dict) else {}
+                    _dr_requested_model = str(_dr_signal.get("executor_model", "") or "") if isinstance(_dr_signal, dict) else ""
+
                     def _provider_generate(system_prompt_or_req, user_prompt=None, model=None, timeout=None, options=None, api_type=None, **kwargs):
                         nonlocal delegated_retry_provider_called
                         nonlocal delegated_retry_provider_prompt_len, delegated_retry_provider_prompt_hash
@@ -1684,7 +1688,13 @@ class LocalModelExecutor:
                         _MODEL_ALIASES = {"qwen2.5-coder:7b": "qwen2.5-coder:7b-instruct"}
                         if model_name in _MODEL_ALIASES:
                             model_name = _MODEL_ALIASES[model_name]
-                        
+
+                        if _dr_requested_model and model_name != _dr_requested_model:
+                            _dr_resolved = _dr_requested_model
+                            if _dr_resolved in _MODEL_ALIASES:
+                                _dr_resolved = _MODEL_ALIASES[_dr_resolved]
+                            model_name = _dr_resolved
+
                         delegated_retry_provider_called = True
                         delegated_retry_provider_prompt_len = len(prompt) if prompt else 0
                         delegated_retry_provider_prompt_hash = hashlib.sha256(prompt.encode("utf-8")).hexdigest()[:16] if prompt else ""

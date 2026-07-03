@@ -5380,3 +5380,307 @@ def test_c15_3t_delegated_retry_stage_not_invoked_when_not_eligible(tmp_path) ->
         f"Expected delegated_retry_stage='not_invoked', got {meta.get('delegated_retry_stage')}"
     assert meta.get("delegated_retry_provider_called") is False, \
         f"Expected delegated_retry_provider_called=False, got {meta.get('delegated_retry_provider_called')}"
+
+
+# ── C15-5B: Delegated retry model resolution tests ──────────────────
+
+def test_delegated_retry_uses_signal_snapshot_executor_model(tmp_path) -> None:
+    """Delegated retry must use signal_snapshot executor_model when present."""
+    target_rel = "toy/math_util.py"
+    target_path = tmp_path / "toy" / "math_util.py"
+    target_path.parent.mkdir(parents=True, exist_ok=True)
+    target_path.write_text("def double(x):\n    return x * 2\n", encoding="utf-8")
+
+    req = make_test_request(
+        "c15-5b-model-override",
+        repo_root=str(tmp_path),
+        target_file=target_rel,
+        execution_topology="localheal_pipeline",
+        route_context={
+            "locked_search": "def double(x):\n    return x * 2",
+            "verifier_command": ["python3", "-c", "exit(1)"],
+            "signal_snapshot": {
+                "execution_topology": "localheal_pipeline",
+                "executor_model": "qwen2.5-coder:14b-instruct-q3_K_M",
+                "protocol_mode": "anchored_edit",
+                "mutation_allowed": True,
+                "verifier_allowed": True,
+            },
+        },
+    )
+
+    from unittest.mock import patch, MagicMock
+    provider_calls = []
+
+    def mock_provider_generate(prov_req):
+        provider_calls.append(prov_req)
+        mock_resp = MagicMock()
+        mock_resp.output_text = ""
+        mock_resp.error = ""
+        return mock_resp
+
+    mock_provider = MagicMock()
+    mock_provider.generate.side_effect = mock_provider_generate
+
+    valid_diff = (
+        "--- a/toy/math_util.py\n"
+        "+++ b/toy/math_util.py\n"
+        "@@ -1,2 +1,2 @@\n"
+        " def double(x):\n"
+        "-    return x * 2\n"
+        "+    return x * 3\n"
+    )
+
+    with patch("nexus.services.local_heal.local_model_capability_executors.LocalHealPipelineCapabilityExecutor.execute") as mock_exec, \
+         patch("nexus.services.local_heal.local_model_executor.run_isolated_workspace_apply") as mock_apply, \
+         patch("nexus.services.local_heal.local_model_executor.run_isolated_verifier") as mock_verify:
+        from nexus.services.local_heal.local_model_capability_executors import CapabilityExecutionResult
+        from nexus.services.local_heal.isolated_workspace_apply import IsolatedApplyReceipt
+        from nexus.services.local_heal.isolated_verifier import IsolatedVerifierReceipt
+        import hashlib as _hashlib
+
+        patch_hash = _hashlib.sha256(valid_diff.rstrip("\n").encode()).hexdigest()
+
+        mock_exec.return_value = CapabilityExecutionResult(
+            name="repair_loop", selected=True, invoked=True,
+            gate_passed=True, outcome_contributed=True,
+            evidence_present=True, failure_reason="",
+            telemetries={
+                "pipeline_final_patch": valid_diff,
+                "pipeline_solve_eligible": True,
+                "pipeline_failure_reason": "",
+                "model_called": True,
+                "patch_synthesis_model_called": True,
+                "patch_synthesis_output_len": len(valid_diff),
+            }
+        )
+        mock_apply.return_value = IsolatedApplyReceipt(
+            task_id="c15-5b-model-override",
+            workspace_path="/tmp/ws",
+            target_file=target_rel,
+            patch_apply_status="applied",
+            patch_apply_error="",
+            selected_candidate_hash=patch_hash,
+            applied_patch_hash=patch_hash,
+            selected_candidate_hash_matches_applied=True,
+            candidate_output_isolated=True,
+            mutation_allowed=True,
+            applied_patch_hash_source="git_diff",
+        )
+        mock_verify.return_value = IsolatedVerifierReceipt(
+            task_id="c15-5b-model-override",
+            verifier_status="fail",
+            exit_code=1,
+            stdout_tail="FAIL",
+            stderr_tail="",
+            verifier_error="",
+            verifier_allowed=True,
+        )
+
+        resp = LocalModelExecutor.run(req, provider=mock_provider)
+
+    meta = resp.raw_model_metadata
+    assert meta.get("pipeline_retry_delegated") is True
+    assert meta.get("delegated_retry_provider_called") is True
+    assert meta.get("delegated_retry_provider_model_name") == "qwen2.5-coder:14b-instruct-q3_K_M", \
+        f"Expected delegated model to be 14B, got {meta.get('delegated_retry_provider_model_name')}"
+
+
+def test_delegated_retry_falls_back_to_pipeline_model_without_override(tmp_path) -> None:
+    """Delegated retry falls back to nested pipeline model when no executor_model in signal_snapshot."""
+    target_rel = "toy/math_util.py"
+    target_path = tmp_path / "toy" / "math_util.py"
+    target_path.parent.mkdir(parents=True, exist_ok=True)
+    target_path.write_text("def double(x):\n    return x * 2\n", encoding="utf-8")
+
+    req = make_test_request(
+        "c15-5b-no-override",
+        repo_root=str(tmp_path),
+        target_file=target_rel,
+        execution_topology="localheal_pipeline",
+        route_context={
+            "locked_search": "def double(x):\n    return x * 2",
+            "verifier_command": ["python3", "-c", "exit(1)"],
+            "signal_snapshot": {
+                "execution_topology": "localheal_pipeline",
+                "executor_model": "",
+                "protocol_mode": "anchored_edit",
+                "mutation_allowed": True,
+                "verifier_allowed": True,
+            },
+        },
+    )
+
+    from unittest.mock import patch, MagicMock
+
+    def mock_provider_generate(prov_req):
+        mock_resp = MagicMock()
+        mock_resp.output_text = ""
+        mock_resp.error = ""
+        return mock_resp
+
+    mock_provider = MagicMock()
+    mock_provider.generate.side_effect = mock_provider_generate
+
+    valid_diff = (
+        "--- a/toy/math_util.py\n"
+        "+++ b/toy/math_util.py\n"
+        "@@ -1,2 +1,2 @@\n"
+        " def double(x):\n"
+        "-    return x * 2\n"
+        "+    return x * 3\n"
+    )
+
+    with patch("nexus.services.local_heal.local_model_capability_executors.LocalHealPipelineCapabilityExecutor.execute") as mock_exec, \
+         patch("nexus.services.local_heal.local_model_executor.run_isolated_workspace_apply") as mock_apply, \
+         patch("nexus.services.local_heal.local_model_executor.run_isolated_verifier") as mock_verify:
+        from nexus.services.local_heal.local_model_capability_executors import CapabilityExecutionResult
+        from nexus.services.local_heal.isolated_workspace_apply import IsolatedApplyReceipt
+        from nexus.services.local_heal.isolated_verifier import IsolatedVerifierReceipt
+        import hashlib as _hashlib
+
+        patch_hash = _hashlib.sha256(valid_diff.rstrip("\n").encode()).hexdigest()
+
+        mock_exec.return_value = CapabilityExecutionResult(
+            name="repair_loop", selected=True, invoked=True,
+            gate_passed=True, outcome_contributed=True,
+            evidence_present=True, failure_reason="",
+            telemetries={
+                "pipeline_final_patch": valid_diff,
+                "pipeline_solve_eligible": True,
+                "pipeline_failure_reason": "",
+                "model_called": True,
+                "patch_synthesis_model_called": True,
+                "patch_synthesis_output_len": len(valid_diff),
+            }
+        )
+        mock_apply.return_value = IsolatedApplyReceipt(
+            task_id="c15-5b-no-override",
+            workspace_path="/tmp/ws",
+            target_file=target_rel,
+            patch_apply_status="applied",
+            patch_apply_error="",
+            selected_candidate_hash=patch_hash,
+            applied_patch_hash=patch_hash,
+            selected_candidate_hash_matches_applied=True,
+            candidate_output_isolated=True,
+            mutation_allowed=True,
+            applied_patch_hash_source="git_diff",
+        )
+        mock_verify.return_value = IsolatedVerifierReceipt(
+            task_id="c15-5b-no-override",
+            verifier_status="fail",
+            exit_code=1,
+            stdout_tail="FAIL",
+            stderr_tail="",
+            verifier_error="",
+            verifier_allowed=True,
+        )
+
+        resp = LocalModelExecutor.run(req, provider=mock_provider)
+
+    meta = resp.raw_model_metadata
+    assert meta.get("pipeline_retry_delegated") is True
+    assert meta.get("delegated_retry_provider_called") is True
+    assert meta.get("delegated_retry_provider_model_name") == "qwen2.5-coder:7b-instruct", \
+        f"Expected fallback to 7B, got {meta.get('delegated_retry_provider_model_name')}"
+
+
+def test_delegated_retry_records_actual_provider_model_name(tmp_path) -> None:
+    """Delegated retry telemetry must record the actual model used."""
+    target_rel = "toy/math_util.py"
+    target_path = tmp_path / "toy" / "math_util.py"
+    target_path.parent.mkdir(parents=True, exist_ok=True)
+    target_path.write_text("def double(x):\n    return x * 2\n", encoding="utf-8")
+
+    req = make_test_request(
+        "c15-5b-telemetry-model",
+        repo_root=str(tmp_path),
+        target_file=target_rel,
+        execution_topology="localheal_pipeline",
+        route_context={
+            "locked_search": "def double(x):\n    return x * 2",
+            "verifier_command": ["python3", "-c", "exit(1)"],
+            "signal_snapshot": {
+                "execution_topology": "localheal_pipeline",
+                "executor_model": "deepseek-coder:6.7b-instruct",
+                "protocol_mode": "anchored_edit",
+                "mutation_allowed": True,
+                "verifier_allowed": True,
+            },
+        },
+    )
+
+    from unittest.mock import patch, MagicMock
+
+    def mock_provider_generate(prov_req):
+        mock_resp = MagicMock()
+        mock_resp.output_text = ""
+        mock_resp.error = ""
+        return mock_resp
+
+    mock_provider = MagicMock()
+    mock_provider.generate.side_effect = mock_provider_generate
+
+    valid_diff = (
+        "--- a/toy/math_util.py\n"
+        "+++ b/toy/math_util.py\n"
+        "@@ -1,2 +1,2 @@\n"
+        " def double(x):\n"
+        "-    return x * 2\n"
+        "+    return x * 3\n"
+    )
+
+    with patch("nexus.services.local_heal.local_model_capability_executors.LocalHealPipelineCapabilityExecutor.execute") as mock_exec, \
+         patch("nexus.services.local_heal.local_model_executor.run_isolated_workspace_apply") as mock_apply, \
+         patch("nexus.services.local_heal.local_model_executor.run_isolated_verifier") as mock_verify:
+        from nexus.services.local_heal.local_model_capability_executors import CapabilityExecutionResult
+        from nexus.services.local_heal.isolated_workspace_apply import IsolatedApplyReceipt
+        from nexus.services.local_heal.isolated_verifier import IsolatedVerifierReceipt
+        import hashlib as _hashlib
+
+        patch_hash = _hashlib.sha256(valid_diff.rstrip("\n").encode()).hexdigest()
+
+        mock_exec.return_value = CapabilityExecutionResult(
+            name="repair_loop", selected=True, invoked=True,
+            gate_passed=True, outcome_contributed=True,
+            evidence_present=True, failure_reason="",
+            telemetries={
+                "pipeline_final_patch": valid_diff,
+                "pipeline_solve_eligible": True,
+                "pipeline_failure_reason": "",
+                "model_called": True,
+                "patch_synthesis_model_called": True,
+                "patch_synthesis_output_len": len(valid_diff),
+            }
+        )
+        mock_apply.return_value = IsolatedApplyReceipt(
+            task_id="c15-5b-telemetry-model",
+            workspace_path="/tmp/ws",
+            target_file=target_rel,
+            patch_apply_status="applied",
+            patch_apply_error="",
+            selected_candidate_hash=patch_hash,
+            applied_patch_hash=patch_hash,
+            selected_candidate_hash_matches_applied=True,
+            candidate_output_isolated=True,
+            mutation_allowed=True,
+            applied_patch_hash_source="git_diff",
+        )
+        mock_verify.return_value = IsolatedVerifierReceipt(
+            task_id="c15-5b-telemetry-model",
+            verifier_status="fail",
+            exit_code=1,
+            stdout_tail="FAIL",
+            stderr_tail="",
+            verifier_error="",
+            verifier_allowed=True,
+        )
+
+        resp = LocalModelExecutor.run(req, provider=mock_provider)
+
+    meta = resp.raw_model_metadata
+    assert meta.get("delegated_retry_provider_model_name") == "deepseek-coder:6.7b-instruct"
+    assert meta.get("delegated_retry_provider_called") is True
+    assert "RouteMode" not in meta
+    assert "execution_topology_override" not in meta
