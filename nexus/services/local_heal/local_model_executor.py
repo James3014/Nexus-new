@@ -294,7 +294,16 @@ def compute_failure_class(
     if output_len == 0:
         return "empty_response", ""
 
-    # Priority 3: pipeline failure reasons (deterministic from existing telemetry)
+    # Priority 3: terminal patch lifecycle states must override earlier pipeline
+    # parsing failures once a real candidate has been projected/applied.
+    if patch_lifecycle_state == "isolation_attempted_apply_failed":
+        return "patch_apply_failed", ""
+    if patch_lifecycle_state == "isolation_applied_hash_mismatch":
+        return "hash_mismatch", ""
+    if patch_lifecycle_state == "isolation_applied_hash_match_verifier_failed":
+        return "verification_failed", ""
+
+    # Priority 4: pipeline failure reasons (deterministic from existing telemetry)
     upper_reason = _reason.upper()
     upper_parse = (parse_error_kind or "").upper()
 
@@ -305,21 +314,13 @@ def compute_failure_class(
     if "REPLACE_SYNTAX_ERROR" in upper_reason or "SYNTAX_ERROR" in upper_reason:
         return "replace_syntax_error", ""
 
-    # Priority 4: fenced output
+    # Priority 5: fenced output
     if "REPLACEMENT_MARKDOWN_FENCE" in upper_parse or contains_markdown_fence:
         return "fenced_output", ""
 
-    # Priority 5: refusal
+    # Priority 6: refusal
     if "REFUSAL" in upper_parse or "REFUSAL" in upper_reason:
         return "refusal", ""
-
-    # Priority 6: patch lifecycle states
-    if patch_lifecycle_state == "isolation_attempted_apply_failed":
-        return "patch_apply_failed", ""
-    if patch_lifecycle_state == "isolation_applied_hash_mismatch":
-        return "hash_mismatch", ""
-    if patch_lifecycle_state == "isolation_applied_hash_match_verifier_failed":
-        return "verification_failed", ""
 
     # Priority 7: verifier passed
     if verifier_result == "pass" and solved:
@@ -384,7 +385,12 @@ def compute_verifier_failure_evidence(
         else:
             failure_kind = "unknown_verifier_failure"
 
-        evidence_available = bool(stdout_excerpt or stderr_excerpt or verifier_error)
+        evidence_available = bool(
+            stdout_excerpt
+            or stderr_excerpt
+            or verifier_error
+            or (exit_code is not None and exit_code != 0)
+        )
 
     retry_ready = (
         failure_class in ("verification_failed", "semantic_wrong_patch")

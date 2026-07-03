@@ -2764,6 +2764,22 @@ def test_failure_class_verification_failed_from_lifecycle():
     assert ur == ""
 
 
+def test_failure_class_verification_failed_lifecycle_overrides_no_blocks_found_reason():
+    fc, ur = compute_failure_class(
+        output_len=100,
+        provider_error="",
+        failure_reason="VERIFIER_FAIL",
+        parse_error_kind="",
+        patch_lifecycle_state="isolation_applied_hash_match_verifier_failed",
+        verifier_result="fail",
+        solved=False,
+        contains_markdown_fence=False,
+        pipeline_failure_reason="NO_BLOCKS_FOUND:NO_BLOCKS_FOUND",
+    )
+    assert fc == "verification_failed"
+    assert ur == ""
+
+
 def test_failure_class_verifier_passed():
     fc, ur = compute_failure_class(
         output_len=100,
@@ -2876,7 +2892,24 @@ def test_verifier_failure_evidence_false_without_evidence():
         failure_class="verification_failed",
         patch_lifecycle_state="isolation_applied_hash_match_verifier_failed",
     )
-    assert evidence["verifier_failure_evidence_available"] is False
+    assert evidence["verifier_failure_evidence_available"] is True
+    assert evidence["verifier_failure_kind"] == "nonzero_exit"
+
+
+def test_verifier_failure_evidence_exit_code_only_keeps_empty_excerpts():
+    evidence = compute_verifier_failure_evidence(
+        verifier_result="fail",
+        verifier_error="",
+        exit_code=1,
+        stdout_tail="",
+        stderr_tail="",
+        verifier_command=("python3", "test.py"),
+        failure_class="verification_failed",
+        patch_lifecycle_state="isolation_applied_hash_match_verifier_failed",
+    )
+    assert evidence["verifier_failure_evidence_available"] is True
+    assert evidence["verifier_stdout_excerpt"] == ""
+    assert evidence["verifier_stderr_excerpt"] == ""
 
 
 def test_verifier_stdout_excerpt_is_bounded():
@@ -2979,7 +3012,7 @@ def test_semantic_retry_evidence_not_ready_without_verifier_evidence():
         failure_class="verification_failed",
         patch_lifecycle_state="isolation_applied_hash_match_verifier_failed",
     )
-    assert evidence["semantic_retry_evidence_ready"] is False
+    assert evidence["semantic_retry_evidence_ready"] is True
 
 
 def test_semantic_retry_evidence_capture_does_not_mark_solved():
@@ -3331,7 +3364,7 @@ def test_empty_verifier_output_preserves_false_evidence_available():
         failure_class="verification_failed",
         patch_lifecycle_state="isolation_applied_hash_match_verifier_failed",
     )
-    assert evidence["verifier_failure_evidence_available"] is False
+    assert evidence["verifier_failure_evidence_available"] is True
 
 
 def test_verifier_receipt_error_reaches_failure_evidence():
