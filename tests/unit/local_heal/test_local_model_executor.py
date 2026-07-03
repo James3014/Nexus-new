@@ -4960,6 +4960,7 @@ def test_c15_3t_delegated_retry_stage_first_patch_empty(tmp_path) -> None:
         provider_calls.append(prov_req)
         mock_resp = MagicMock()
         mock_resp.output_text = ""  # empty response
+        mock_resp.error = ""
         return mock_resp
 
     mock_provider = MagicMock()
@@ -5046,7 +5047,7 @@ def test_c15_3t_delegated_retry_stage_first_patch_empty(tmp_path) -> None:
     # C15-3U observability assertions
     assert meta.get("delegated_retry_provider_prompt_len", 0) > 0
     assert meta.get("delegated_retry_provider_prompt_hash", "") != ""
-    assert meta.get("delegated_retry_provider_model_name") == "qwen2.5-coder:7b"
+    assert meta.get("delegated_retry_provider_model_name") == "qwen2.5-coder:7b-instruct"
     assert meta.get("delegated_retry_provider_response_is_none") is False
     assert meta.get("delegated_retry_provider_response_empty") is True
     assert meta.get("delegated_retry_provider_response_len") == 0
@@ -5085,6 +5086,7 @@ def test_c15_3t_delegated_retry_first_patch_empty_not_mislabeled_semantic_retry(
     mock_provider = MagicMock()
     mock_resp = MagicMock()
     mock_resp.output_text = ""
+    mock_resp.error = ""
     mock_provider.generate.return_value = mock_resp
 
     valid_diff = (
@@ -5196,6 +5198,7 @@ def test_c15_3t_delegated_retry_provider_called_flag_present_in_meta(tmp_path) -
     mock_provider = MagicMock()
     mock_resp = MagicMock()
     mock_resp.output_text = ""
+    mock_resp.error = ""
     mock_provider.generate.return_value = mock_resp
 
     valid_diff = (

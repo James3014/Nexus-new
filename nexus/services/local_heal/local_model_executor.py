@@ -973,6 +973,9 @@ class LocalModelExecutor:
                                 else:
                                     prompt = getattr(system_prompt_or_req, "prompt", "") or str(system_prompt_or_req)
                                     model_name = getattr(system_prompt_or_req, "model_name", "") or model or kwargs.get("model", "")
+                                _MODEL_ALIASES = {"qwen2.5-coder:7b": "qwen2.5-coder:7b-instruct"}
+                                if model_name in _MODEL_ALIASES:
+                                    model_name = _MODEL_ALIASES[model_name]
                                 prov_req = LocalModelProviderRequest(
                                     task_id=request.task_id,
                                     prompt=prompt,
@@ -1678,6 +1681,10 @@ class LocalModelExecutor:
                             prompt = getattr(system_prompt_or_req, "prompt", "") or str(system_prompt_or_req)
                             model_name = getattr(system_prompt_or_req, "model_name", "") or model or kwargs.get("model", "")
                         
+                        _MODEL_ALIASES = {"qwen2.5-coder:7b": "qwen2.5-coder:7b-instruct"}
+                        if model_name in _MODEL_ALIASES:
+                            model_name = _MODEL_ALIASES[model_name]
+                        
                         delegated_retry_provider_called = True
                         delegated_retry_provider_prompt_len = len(prompt) if prompt else 0
                         delegated_retry_provider_prompt_hash = hashlib.sha256(prompt.encode("utf-8")).hexdigest()[:16] if prompt else ""
@@ -1698,6 +1705,8 @@ class LocalModelExecutor:
                                 delegated_retry_provider_response_empty = not output_text
                                 delegated_retry_provider_response_len = len(output_text)
                                 delegated_retry_provider_response_type = type(prov_resp).__name__
+                                if prov_resp.error:
+                                    delegated_retry_provider_call_error = prov_resp.error
                             else:
                                 output_text = ""
                                 delegated_retry_provider_response_empty = True
